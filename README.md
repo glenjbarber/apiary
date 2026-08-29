@@ -48,7 +48,8 @@ Ephemeral state is what raft actually replicates across the cluster.
 ## Repository layout
 
 - `cmd/` — entry points for each binary (raftd, managerd, frontend)
-- `api/` — protobuf schema definitions, external and internal
+- `api/` — protobuf schema definitions: `api/internalpb` (internal raft
+  socket protocol) and `api/rpc` (external RPC API)
 - `internal/` — core logic: bhyve, jails, ZFS, HAST, cluster state, raft,
   the REST shim, and the management daemon itself
 - `web/` — HTML templates and static assets for the frontend

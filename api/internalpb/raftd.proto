@@ -2,7 +2,7 @@ syntax = "proto3";
 
 package apiary.internal.v1;
 
-option go_package = "github.com/glenjbarber/apiary/api/internal;internalpb";
+option go_package = "github.com/glenjbarber/apiary/api/internalpb;internalpb";
 
 // RaftInternal is the internal protocol spoken over the Unix domain socket
 // between managerd and raftd. It is deliberately minimal for v1: Apply

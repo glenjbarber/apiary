@@ -2,7 +2,7 @@
 // versions:
 // - protoc-gen-go-grpc v1.6.2
 // - protoc             (unknown)
-// source: api/internal/raftd.proto
+// source: api/internalpb/raftd.proto
 
 package internalpb
 
@@ -175,5 +175,5 @@ var RaftInternal_ServiceDesc = grpc.ServiceDesc{
 		},
 	},
 	Streams:  []grpc.StreamDesc{},
-	Metadata: "api/internal/raftd.proto",
+	Metadata: "api/internalpb/raftd.proto",
 }
