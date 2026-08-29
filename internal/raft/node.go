@@ -40,6 +40,7 @@ type Node struct {
 	raft   *raft.Raft
 	fsm    *FSM
 	config Config
+	store  *raftboltdb.BoltStore
 }
 
 // New constructs a Node backed by BoltDB log/stable stores and a file
@@ -85,7 +86,7 @@ func New(cfg Config) (*Node, error) {
 		return nil, fmt.Errorf("raft: creating raft instance: %w", err)
 	}
 
-	return &Node{raft: r, fsm: fsm, config: cfg}, nil
+	return &Node{raft: r, fsm: fsm, config: cfg, store: boltStore}, nil
 }
 
 // HasExistingState reports whether cfg.DataDir already contains raft state
@@ -172,7 +173,12 @@ func (n *Node) Status() Status {
 	}
 }
 
-// Shutdown gracefully stops the raft instance.
+// Shutdown gracefully stops the raft instance and releases its underlying
+// BoltDB store, so the data directory can be safely reopened afterward
+// (e.g. by a subsequent Node against the same DataDir).
 func (n *Node) Shutdown() error {
-	return n.raft.Shutdown().Error()
+	if err := n.raft.Shutdown().Error(); err != nil {
+		return err
+	}
+	return n.store.Close()
 }
