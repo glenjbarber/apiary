@@ -10,9 +10,46 @@ agent rather than a bolted-on external dependency.
 
 ## Status
 
-Early development.
-Architecture and API contracts are being settled before implementation
-work begins in earnest.
+Past the design-only stage: every layer of the architecture below
+exists and works end-to-end, from raft consensus up through a
+browser-facing UI, with real VM provisioning happening automatically
+underneath it. See [`docs/adr/`](docs/adr/) for the reasoning behind
+each design decision, in order.
+
+**Implemented and tested:**
+
+- **`raftd`** — a real raft agent (HashiCorp's raft library, BoltDB-backed
+  storage) supporting single-node bootstrap, joining an existing cluster,
+  and removing a member, all over its own internal protocol.
+- **`managerd`** — dials `raftd` and exposes an external gRPC API
+  (`CreateVM`/`UpdateVM`/`DeleteVM`/`GetVM`/`ListVMs`/`Status`), and runs
+  a periodic reconciliation loop that automatically provisions local ZFS
+  storage for VMs assigned to its node.
+- **`frontend`** — a server-rendered HTMX web UI for managing VMs; no
+  client-side JavaScript framework, single self-contained binary.
+- **`internal/zfs`, `internal/jail`, `internal/bhyve`** — dataset,
+  jail, and VM lifecycle management, each tested against real FreeBSD
+  hosts (VMs for `zfs`/`jail`, real bare-metal hardware for `bhyve`,
+  since it needs genuine hardware-assisted virtualization).
+- **`internal/hast`** — storage replication config/lifecycle management.
+  Cross-node replication itself is currently blocked by an upstream
+  FreeBSD `hastd` bug; we diagnosed it, found it was
+  [already reported](https://bugs.freebsd.org/bugzilla/show_bug.cgi?id=292322)
+  with a fix ([D57511](https://reviews.freebsd.org/D57511)) awaiting
+  review, and independently confirmed the fix works. See
+  [ADR-0008](docs/adr/0008-hast-config-and-lifecycle.md) for the full
+  trail.
+- **`internal/restshim`** — a REST/JSON translation of the external gRPC
+  API, for non-browser clients. Built and tested, not yet wired into its
+  own running binary.
+
+**Not yet implemented:**
+
+- Real cross-node HAST replication in normal operation (see above —
+  waiting on the upstream fix to merge, not something fixable here)
+- Node scheduling: nothing decides which cluster node a VM should run on
+  beyond whatever a caller sets directly, and `MigrateVM` doesn't exist
+- Authentication/authorization on any layer
 
 ## Architecture
 
@@ -47,13 +84,27 @@ Ephemeral state is what raft actually replicates across the cluster.
 
 ## Repository layout
 
-- `cmd/` — entry points for each binary (raftd, managerd, frontend)
+- `cmd/` — entry points for each binary (`raftd`, `managerd`, `frontend`)
 - `api/` — protobuf schema definitions: `api/internalpb` (internal raft
   socket protocol) and `api/rpc` (external RPC API)
-- `internal/` — core logic: bhyve, jails, ZFS, HAST, cluster state, raft,
-  the REST shim, and the management daemon itself
-- `web/` — HTML templates and static assets for the frontend
-- `docs/adr/` — architecture decision records
+- `internal/` — core logic: `bhyve`, `jail`, `zfs`, `hast`, `cluster`,
+  `raft`, `manager`, `restshim`, `frontend`
+- `web/` — HTML templates and static assets for the frontend, embedded
+  into the `frontend` binary at build time
+- `docs/adr/` — architecture decision records; start here for why things
+  are built the way they are
+
+## Building and testing
+
+Standard Go tooling: `go build ./...`, `go vet ./...`, `go test ./...`.
+Packages that shell out to FreeBSD-only tools (`internal/zfs`,
+`internal/jail`, `internal/hast`, `internal/bhyve`) skip their
+integration tests cleanly on a non-FreeBSD dev machine; cross-compile
+(`GOOS=freebsd GOARCH=amd64 go test -c ./internal/<pkg>`) and run the
+resulting binary on a FreeBSD host to exercise them for real.
+
+Proto changes require [`buf`](https://buf.build) (`buf generate`);
+generated `.go` files are committed, so this isn't needed just to build.
 
 ## License
 
