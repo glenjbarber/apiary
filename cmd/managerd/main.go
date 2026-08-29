@@ -17,6 +17,7 @@ import (
 	"google.golang.org/grpc"
 
 	rpcpb "github.com/glenjbarber/apiary/api/rpc"
+	"github.com/glenjbarber/apiary/internal/bhyve"
 	"github.com/glenjbarber/apiary/internal/cluster"
 	"github.com/glenjbarber/apiary/internal/manager"
 	"github.com/glenjbarber/apiary/internal/zfs"
@@ -34,6 +35,9 @@ func run() error {
 	nodeID := flag.String("node-id", "", "identity reported by managerd in Status responses (defaults to hostname)")
 	zfsBase := flag.String("zfs-base", "zroot/apiary", "base ZFS dataset under which this node's VM storage is provisioned")
 	reconcileInterval := flag.Duration("reconcile-interval", 30*time.Second, "how often to reconcile local VM storage against raftd's VM list")
+	bhyvePrefix := flag.String("bhyve-prefix", "apiary-", "name prefix for bhyve VMs this node creates")
+	bhyveBootROM := flag.String("bhyve-bootrom", "", "UEFI boot ROM path for bhyve VMs; leave empty to disable bhyve provisioning on this node (e.g. nodes without hardware-assisted virtualization)")
+	diskSizeMB := flag.Uint64("disk-size-mb", 0, "size of each VM's boot disk image in MB (0 uses the reconciler's own default)")
 	flag.Parse()
 
 	id := *nodeID
@@ -88,6 +92,15 @@ func run() error {
 		Raft:        raftClient,
 		ZFS:         zfs.New(*zfsBase),
 		LocalNodeID: raftNodeID,
+		BootROM:     *bhyveBootROM,
+		DiskSizeMB:  *diskSizeMB,
+	}
+	// Bhyve is left nil when no boot ROM is configured, so nodes without
+	// hardware-assisted virtualization (the common case today - see
+	// ADR-0015) keep doing safe dataset-only reconciliation instead of
+	// failing every tick trying to call bhyve(8).
+	if *bhyveBootROM != "" {
+		reconciler.Bhyve = bhyve.New(*bhyvePrefix)
 	}
 	go runReconcileLoop(ctx, reconciler, *reconcileInterval)
 
