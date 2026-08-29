@@ -2,9 +2,10 @@
 
 ## Status
 
-Accepted, with one open issue (see below) — as of 2026-08-29, diagnosed
-down to a likely upstream `hastd` protocol-level deadlock, not this
-project's environment; not yet fixed or worked around.
+Accepted, with one open issue (see below) — as of 2026-08-29, identified
+as a known, already-diagnosed upstream FreeBSD bug with a patch pending
+review (not this project's environment, and not something to independently
+file); not yet fixed/merged upstream or worked around here.
 
 ## Context
 
@@ -158,12 +159,40 @@ network already shown to move real data correctly (`nc` test) with no
 firewall, MTU, offload, or MAC-collision explanation available. This
 now looks like a genuine, reproducible bug or protocol-level deadlock in
 `hastd` itself, present across the currently-supported/CURRENT branches
-— not an artifact of this project's environment. Worth reporting
-upstream (bugzilla.freebsd.org) given the strength of the evidence
-gathered here, if pursuing a fix further; further diagnosis from here
-would need `hastd`'s own source (to find exactly which function each
-`sbwait`-blocked thread is parked in) rather than external
-black-box tooling.
+— not an artifact of this project's environment.
+
+**Update 2026-08-29 (final) — this is a known upstream bug, already
+diagnosed, with a patch pending review.** Before filing a new report,
+searching bugs.freebsd.org (Base System / component `bin`) for existing
+`hastd` reports turned up
+[bug 292322](https://bugs.freebsd.org/bugzilla/show_bug.cgi?id=292322)
+("Hastd failing to g_attach device on FreeBSD 15.0") — an exact match:
+same `Unable to receive header ... Operation timed out.` message, same
+`g_dev_taste ... failed to g_attach, error=6` kernel log line we also
+observed. A community member (Martin Vidovic) root-caused it precisely:
+`hastd`'s connection-migration path hands a connected socket from the
+parent to its worker over an `AF_UNIX` socketpair, sending the protocol
+name via `send(2)` and the descriptor separately via `sendmsg(2)` with
+`SCM_RIGHTS`; the receiving `recv(2)` uses `MSG_WAITALL` sized for the
+maximum protocol-name length, so on FreeBSD 15+ it blocks waiting for
+that full size instead of returning once the (shorter) actual message
+arrives — the primary's worker never receives its connection, and so
+never sends the HAST header at all. This exactly matches our own
+`sbwait`/`truss` findings above.
+
+A patch is up for review: [D57511](https://reviews.freebsd.org/D57511)
+("hastd: fix fd passing over socketpair"), sending the protocol name and
+descriptor together via a single `sendmsg`/`recvmsg` call. Status as of
+2026-08-29: *Needs Review* — a reviewer (`glebius`) confirmed "the fix
+looks correct" but asked for a refactor before landing it; not yet
+merged. We added a comment to bug 292322 confirming independent
+reproduction, including that it still reproduces on 16.0-CURRENT (the
+existing report and patch are scoped to "FreeBSD 15"), which is new
+information for whoever picks up the fix.
+
+Given a matching report and an already-correct pending patch exist,
+filing a new bug would just be noise — the right move is watching
+292322/D57511 for the patch to land, not further independent diagnosis.
 
 **This package's own tests do not depend on resolving it**: they verify
 config rendering, `hastctl create`/`role`/`status` execution, and this
@@ -188,12 +217,13 @@ promise of HAST) remains blocked on this open issue.
   (a real future use of this package) can't yet be claimed to work
   end-to-end — only the control-plane half (`internal/zfs` +
   `internal/hast`'s CLI-driving mechanics) is verified.
-- **Project-level risk worth flagging**: CLAUDE.md's architecture names
+- **Project-level risk, now bounded**: CLAUDE.md's architecture names
   HAST as the storage-replication mechanism (ADR-0001's physical/
-  ephemeral split assumes it works). If this turns out to be a genuine,
-  currently-unfixed upstream `hastd` bug rather than something
-  environment-specific, that's a real risk to the "storage replicated
-  node-to-node via HAST" architectural decision, not just a test
-  inconvenience — worth deciding whether to pursue an upstream fix,
-  find a workaround, or reconsider the replication mechanism if this
-  doesn't resolve.
+  ephemeral split assumes it works). This was a real risk to that
+  decision while the cause was unknown; now that it's a known upstream
+  bug with an already-correct patch (D57511) awaiting a minor refactor
+  before merge, the risk is bounded to "when does the patch land," not
+  "is HAST fundamentally broken." Revisit `internal/hast`'s replication
+  testing once D57511 merges and is available on a test system (either
+  wait for a release/snapshot that includes it, or build `hastd` from a
+  patched source tree sooner if unblocking this matters before then).
