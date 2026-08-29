@@ -30,7 +30,7 @@
       <th>ID</th><th>Name</th><th>vCPUs</th><th>Memory (MB)</th><th>Node</th><th>State</th><th></th>
     </tr>
   </thead>
-  <tbody id="vm-rows">
+  <tbody id="vm-rows" hx-get="/vms" hx-trigger="every 3s" hx-swap="innerHTML">
     {{template "vm_rows" .}}
   </tbody>
 </table>

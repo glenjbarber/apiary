@@ -87,6 +87,28 @@ func TestServer_Index(t *testing.T) {
 	}
 }
 
+func TestServer_ListVMs_ReturnsRowsFragmentOnly(t *testing.T) {
+	client := &fakeClient{listResp: &rpcpb.ListVMsResponse{
+		Vms: []*rpcpb.VMDefinition{{Id: "vm-1", Name: "web-1", Phase: rpcpb.VMPhase_VM_PHASE_CREATING}},
+	}}
+	s := newTestServer(t, client)
+
+	req := httptest.NewRequest(http.MethodGet, "/vms", nil)
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, "vm-1") || !strings.Contains(body, "creating") {
+		t.Errorf("response missing expected VM row, got: %s", body)
+	}
+	if strings.Contains(body, "<html") || strings.Contains(body, "Create VM") {
+		t.Errorf("response should be just the rows fragment, not the full page, got: %s", body)
+	}
+}
+
 func TestServer_Index_ShowsPendingPhaseForUnreconciledVM(t *testing.T) {
 	client := &fakeClient{listResp: &rpcpb.ListVMsResponse{
 		Vms: []*rpcpb.VMDefinition{{Id: "vm-1", Name: "web-1"}}, // Phase left unset

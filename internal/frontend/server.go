@@ -51,6 +51,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 func (s *Server) routes() {
 	s.mux.Handle("GET /static/", http.FileServerFS(web.FS))
 	s.mux.HandleFunc("GET /{$}", s.handleIndex)
+	s.mux.HandleFunc("GET /vms", s.handleListVMs)
 	s.mux.HandleFunc("POST /vms", s.handleCreateVM)
 	s.mux.HandleFunc("DELETE /vms/{id}", s.handleDeleteVM)
 }
@@ -98,6 +99,15 @@ func (s *Server) knownNodes(r *http.Request) ([]string, error) {
 		return nil, err
 	}
 	return resp.GetKnownNodeIds(), nil
+}
+
+// handleListVMs serves just the vm_rows fragment, for HTMX polling
+// (hx-trigger="every ...") to pick up reconciliation progress - e.g. a
+// VM's State column moving from "pending" to "creating" to "ready" -
+// without a full page reload.
+func (s *Server) handleListVMs(w http.ResponseWriter, r *http.Request) {
+	vms, errMsg := s.currentVMs(r)
+	s.render(w, "vm_rows", pageData{Error: errMsg, VMs: vms})
 }
 
 func (s *Server) handleCreateVM(w http.ResponseWriter, r *http.Request) {
