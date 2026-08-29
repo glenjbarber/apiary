@@ -226,6 +226,22 @@ binary — `internal/hast`'s replication testing can then move from "not
 possible" to "possible with a source build" to eventually "just works
 out of the box."
 
+**Update 2026-08-29 (closing) — all three project VMs are now patched,
+and the original failing pair works.** Glen patched `freebsd-apiary` and
+`freebsd-apiary2` as well (all three VMs now run a `hastd` built from a
+source tree with D57511 applied). Rerunning the *exact* pairing from the
+original bug discovery — `freebsd-apiary` and `freebsd-apiary2`, the two
+VMs the "degraded" symptom was first found on — reached `status:
+complete` on both sides. This closes the loop completely: the specific
+scenario that started this entire investigation is now fixed, not just
+a different pairing.
+
+This does **not** change the "Decision" below: our own three VMs having
+a manually built `hastd` doesn't make the fix a reliable foundation for
+anyone else running Apiary on a stock FreeBSD install. The guardrail
+stays until D57511 merges upstream and is available via a normal
+release — what's changed is confidence, not the deployment story.
+
 ## Consequences
 
 - Anyone revisiting HAST should start from the open issue above rather
