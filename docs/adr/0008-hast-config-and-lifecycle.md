@@ -2,7 +2,8 @@
 
 ## Status
 
-Accepted, with one open issue (see below)
+Accepted, with one open issue (see below, updated 2026-08-29 with a
+finding that narrows it significantly)
 
 ## Context
 
@@ -64,8 +65,8 @@ parsing failure.
 
 ## Open issue: cross-node replication does not reach "complete"
 
-Setting up a real two-node resource between `apiary-vm` (10.50.0.11) and
-`apiary-vm2` (10.50.0.12) — matching `hast.conf` on both, `hastctl
+Setting up a real two-node resource between `freebsd-apiary` (10.50.0.11) and
+`freebsd-apiary2` (10.50.0.12) — matching `hast.conf` on both, `hastctl
 create` on both, `secondary` role on one then `primary` on the other —
 consistently leaves the primary's status as **degraded**, with
 `hastd`'s own syslog repeating:
@@ -92,10 +93,31 @@ Ruled out while debugging:
 Both nodes' `hastd` processes do show sockets connecting to each other
 at the OS level (visible in `sockstat`), but the HAST-level protocol
 handshake never completes — `hastd` on one side reports it never
-received the expected protocol header from the peer. This looks like
-either a `hastd`/FreeBSD 15.1 issue or something specific to this
-project's particular VM networking setup that hasn't been identified
-yet. It has **not** been root-caused.
+received the expected protocol header from the peer. It has **not**
+been root-caused.
+
+**Update 2026-08-29 — ruled out a 15.1-specific `hastd` regression.**
+A third VM, `freebsd-apiary3`, was upgraded from 15.1-RELEASE to
+16.0-CURRENT via `pkg`/pkgbase (a real, verified pkgbase major-version
+upgrade — bootstrap the target branch's signing key via `pkg add -f`
+on a `FreeBSD-pkg-bootstrap` package, then `pkg upgrade -r
+FreeBSD-base` inside a boot environment for safe rollback). Pairing
+`freebsd-apiary3` (16.0-CURRENT) with `freebsd-apiary` (15.1-RELEASE)
+as a HAST resource reproduced **the exact same failure**: primary
+stuck at `degraded`, identical `Unable to receive header ... Operation
+timed out.` log line. Since the bug reproduces with one side running a
+completely different, much newer `hastd` build, it is **not** a
+FreeBSD-15.1-specific `hastd` regression. That leaves something about
+this project's specific virtualization/network environment as the far
+more likely cause — MAC address collisions between the cloned VMs were
+also checked and ruled out (`freebsd-apiary`/`freebsd-apiary2`/
+`freebsd-apiary3` all have distinct MACs).
+
+Next step, not yet attempted: a packet capture (`tcpdump`) on both
+sides during a `role primary` attempt, to see what's actually
+transmitted (or not) at the point `hastd` claims it never received a
+header — this would distinguish "nothing was ever sent" from "something
+was sent but arrived corrupted/truncated."
 
 **This package's own tests do not depend on resolving it**: they verify
 config rendering, `hastctl create`/`role`/`status` execution, and this
