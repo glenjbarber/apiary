@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"os"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
@@ -38,6 +39,24 @@ func run() error {
 		return fmt.Errorf("creating frontend server: %w", err)
 	}
 
+	// Credentials come from the environment, not flags, so they don't
+	// show up in `ps` output. Both or neither must be set - a single one
+	// set is almost certainly a typo, not an intentional "half enabled"
+	// state, so it's treated as a startup error rather than silently
+	// disabling auth.
+	user := os.Getenv("APIARY_UI_USER")
+	pass := os.Getenv("APIARY_UI_PASSWORD")
+	if (user == "") != (pass == "") {
+		return fmt.Errorf("both APIARY_UI_USER and APIARY_UI_PASSWORD must be set together (or neither, to disable auth)")
+	}
+	var handler http.Handler = srv
+	if user != "" {
+		handler = frontend.BasicAuth(user, pass, handler)
+		log.Printf("frontend: HTTP Basic Auth enabled (user=%s)", user)
+	} else {
+		log.Printf("frontend: no auth configured (set APIARY_UI_USER/APIARY_UI_PASSWORD to enable HTTP Basic Auth)")
+	}
+
 	log.Printf("frontend: listening on %s (manager-addr=%s)", *httpAddr, *managerAddr)
-	return http.ListenAndServe(*httpAddr, srv)
+	return http.ListenAndServe(*httpAddr, handler)
 }
