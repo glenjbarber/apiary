@@ -1,0 +1,84 @@
+syntax = "proto3";
+
+package apiary.internal.v1;
+
+option go_package = "github.com/glenjbarber/apiary/api/internalpb;internalpb";
+
+// This file defines the real ephemeral-state schema that Apply's payload
+// now carries, replacing the opaque bytes used while the raft/protocol
+// stack itself was being proven out. Per CLAUDE.md, ephemeral state is
+// small, JSON-shaped facts — VM definitions and node ownership — as
+// opposed to physical state (ZFS datasets, HAST-replicated bytes), which
+// never goes through raft.
+
+// VMState is the desired run state of a VM, as recorded in ephemeral
+// state. It does not reflect bhyve's actual runtime state (no bhyve
+// backend exists yet) - it is what the backend should converge toward
+// once one exists.
+enum VMState {
+  VM_STATE_UNSPECIFIED = 0;
+  VM_STATE_STOPPED = 1;
+  VM_STATE_RUNNING = 2;
+}
+
+// VMDefinition is a VM's ephemeral definition: its identity, resource
+// shape, which node owns it, and its desired state. It intentionally
+// excludes physical data (disk image bytes, ZFS dataset contents) - those
+// stay local per node, replicated by HAST, not by raft.
+message VMDefinition {
+  string id = 1;
+  string name = 2;
+  uint32 vcpus = 3;
+  uint64 memory_mb = 4;
+
+  // node_id is the node ownership assignment: which cluster member is
+  // responsible for running this VM.
+  string node_id = 5;
+
+  VMState desired_state = 6;
+}
+
+// Command is the typed payload carried in ApplyRequest.payload (replacing
+// v1's opaque bytes). Exactly one op should be set.
+message Command {
+  oneof op {
+    CreateVM create_vm = 1;
+    UpdateVM update_vm = 2;
+    DeleteVM delete_vm = 3;
+  }
+}
+
+// CreateVM adds a new VM definition. It fails (via CommandResult.error) if
+// a VM with the same id already exists.
+message CreateVM {
+  VMDefinition vm = 1;
+}
+
+// UpdateVM replaces an existing VM definition. It fails if no VM with the
+// given id exists.
+message UpdateVM {
+  VMDefinition vm = 1;
+}
+
+// DeleteVM removes a VM definition. It fails if no VM with the given id
+// exists.
+message DeleteVM {
+  string id = 1;
+}
+
+// CommandResult is the FSM's response to Apply, echoed back through
+// ApplyResponse. error is set (and vm left unset) if the command was
+// rejected at the application level (e.g. duplicate/missing id) - this is
+// distinct from raft-level failures (not leader, timeout), which are
+// reported as a normal RPC error instead.
+message CommandResult {
+  VMDefinition vm = 1;
+  string error = 2;
+}
+
+// FSMSnapshotState is the full ephemeral state persisted by
+// raft.FSM.Snapshot/Restore.
+message FSMSnapshotState {
+  uint64 last_index = 1;
+  map<string, VMDefinition> vms = 2;
+}

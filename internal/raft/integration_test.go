@@ -10,6 +10,7 @@ import (
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/protobuf/proto"
 
 	internalpb "github.com/glenjbarber/apiary/api/internalpb"
 )
@@ -78,15 +79,21 @@ func TestIntegration_ApplyAndStatusOverUDS(t *testing.T) {
 		t.Fatalf("Status().IsLeader = false, want true")
 	}
 
-	applyResp, err := client.Apply(ctx, &internalpb.ApplyRequest{Payload: []byte("over-the-wire")})
+	applyResp, err := client.Apply(ctx, &internalpb.ApplyRequest{
+		Payload: mustMarshalCommand(t, createVMCmd("vm-1", "over-the-wire")),
+	})
 	if err != nil {
 		t.Fatalf("Apply() error: %v", err)
 	}
 	if applyResp.GetError() != "" {
 		t.Fatalf("Apply() returned error: %s", applyResp.GetError())
 	}
-	if string(applyResp.GetResult()) != "over-the-wire" {
-		t.Fatalf("Apply() result = %q, want %q", applyResp.GetResult(), "over-the-wire")
+	var vm internalpb.VMDefinition
+	if err := proto.Unmarshal(applyResp.GetResult(), &vm); err != nil {
+		t.Fatalf("unmarshaling Apply() result: %v", err)
+	}
+	if vm.GetName() != "over-the-wire" {
+		t.Fatalf("Apply() result VM name = %q, want %q", vm.GetName(), "over-the-wire")
 	}
 
 	statusResp, err = client.Status(ctx, &internalpb.StatusRequest{})

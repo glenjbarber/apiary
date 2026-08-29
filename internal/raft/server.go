@@ -3,7 +3,10 @@ package raft
 import (
 	"context"
 	"errors"
+	"fmt"
 	"time"
+
+	"google.golang.org/protobuf/proto"
 
 	internalpb "github.com/glenjbarber/apiary/api/internalpb"
 )
@@ -42,7 +45,19 @@ func (s *Server) Apply(_ context.Context, req *internalpb.ApplyRequest) (*intern
 		return resp, nil
 	}
 
-	return &internalpb.ApplyResponse{Result: result.Payload}, nil
+	// result.Error is an application-level rejection (e.g. duplicate or
+	// missing VM id) - the raft-level Apply still succeeded (err == nil
+	// above), so it's reported the same way as a not-leader error: as an
+	// ApplyResponse field, not a gRPC error.
+	if result.Error != "" {
+		return &internalpb.ApplyResponse{Error: result.Error}, nil
+	}
+
+	resultBytes, err := proto.Marshal(result.VM)
+	if err != nil {
+		return &internalpb.ApplyResponse{Error: fmt.Sprintf("encoding result: %v", err)}, nil
+	}
+	return &internalpb.ApplyResponse{Result: resultBytes}, nil
 }
 
 // Status implements internalpb.RaftInternalServer.

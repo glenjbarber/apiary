@@ -87,12 +87,15 @@ func TestNode_ApplyAndRestart(t *testing.T) {
 	}
 	eventually(t, 5*time.Second, func() bool { return node.Status().IsLeader })
 
-	result, err := node.Apply([]byte("persist-me"), 5*time.Second)
+	result, err := node.Apply(mustMarshalCommand(t, createVMCmd("vm-1", "persist-me")), 5*time.Second)
 	if err != nil {
 		t.Fatalf("Apply() error: %v", err)
 	}
-	if string(result.Payload) != "persist-me" {
-		t.Fatalf("Apply() result payload = %q, want %q", result.Payload, "persist-me")
+	if result.Error != "" {
+		t.Fatalf("Apply() result error = %q, want empty", result.Error)
+	}
+	if result.VM.GetName() != "persist-me" {
+		t.Fatalf("Apply() result VM name = %q, want %q", result.VM.GetName(), "persist-me")
 	}
 
 	if err := node.Shutdown(); err != nil {

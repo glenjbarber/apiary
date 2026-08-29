@@ -54,7 +54,7 @@ func TestMultiNode_AddVoterFormsCluster(t *testing.T) {
 	})
 
 	// A command applied on the leader should replicate to both followers.
-	if _, err := leader.Apply([]byte("replicate-me"), 5*time.Second); err != nil {
+	if _, err := leader.Apply(mustMarshalCommand(t, createVMCmd("vm-1", "replicate-me")), 5*time.Second); err != nil {
 		t.Fatalf("Apply() error: %v", err)
 	}
 	eventually(t, 5*time.Second, func() bool { return nodeB.Status().AppliedIndex > 0 })
