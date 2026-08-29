@@ -24,9 +24,16 @@ each design decision, in order.
 - **`managerd`** — dials `raftd` and exposes an external gRPC API
   (`CreateVM`/`UpdateVM`/`DeleteVM`/`GetVM`/`ListVMs`/`Status`), and runs
   a periodic reconciliation loop that automatically provisions local ZFS
-  storage for VMs assigned to its node.
+  storage for VMs assigned to its node — and, on nodes with hardware-
+  assisted virtualization, a real running bhyve VM backed by that
+  storage. Deleting a VM tears both back down for real (a soft-delete
+  tombstone, reconciled by the owning node) rather than just removing
+  the record.
 - **`frontend`** — a server-rendered HTMX web UI for managing VMs; no
-  client-side JavaScript framework, single self-contained binary.
+  client-side JavaScript framework, single self-contained binary. The
+  create form picks a target node from the live cluster membership, and
+  the VM table's State column reflects the reconciler's actual progress
+  (`creating`/`ready`/`deleting`/`error`), not just what was requested.
 - **`internal/zfs`, `internal/jail`, `internal/bhyve`** — dataset,
   jail, and VM lifecycle management, each tested against real FreeBSD
   hosts (VMs for `zfs`/`jail`, real bare-metal hardware for `bhyve`,
@@ -49,6 +56,7 @@ each design decision, in order.
   waiting on the upstream fix to merge, not something fixable here)
 - Node scheduling: nothing decides which cluster node a VM should run on
   beyond whatever a caller sets directly, and `MigrateVM` doesn't exist
+- bhyve VM networking — VMs boot with a disk but no NIC
 - Authentication/authorization on any layer
 
 ## Architecture
