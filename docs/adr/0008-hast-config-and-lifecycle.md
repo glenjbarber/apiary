@@ -2,10 +2,12 @@
 
 ## Status
 
-Accepted, with one open issue (see below) — as of 2026-08-29, identified
-as a known, already-diagnosed upstream FreeBSD bug with a patch pending
-review (not this project's environment, and not something to independently
-file); not yet fixed/merged upstream or worked around here.
+Accepted. As of 2026-08-29, the replication issue is a known, diagnosed
+upstream FreeBSD bug (not this project's environment), and its fix
+([D57511](https://reviews.freebsd.org/D57511)) has been independently
+built and confirmed to actually work (real data replication verified,
+not just status). Not yet merged/released upstream — patched nodes
+currently require a manual source build.
 
 ## Context
 
@@ -194,14 +196,35 @@ Given a matching report and an already-correct pending patch exist,
 filing a new bug would just be noise — the right move is watching
 292322/D57511 for the patch to land, not further independent diagnosis.
 
-**This package's own tests do not depend on resolving it**: they verify
-config rendering, `hastctl create`/`role`/`status` execution, and this
-package's output parsing — the actual scope of what `internal/hast` is
-responsible for — using a resource pointed at the real peer VM, and only
-assert the primary role was set successfully and `Status()` parsed
-whatever `hastd` reported (accepting "degraded" as a valid, parseable
-outcome). Actually verifying data replication end-to-end (the deeper
-promise of HAST) remains blocked on this open issue.
+**Update 2026-08-29 (final) — the patch is confirmed to fix the issue.**
+Glen built `hastd` from a source tree with D57511 applied and installed
+it on `freebsd-apiary3`. Pairing it as primary against `freebsd-apiary`
+(stock, unpatched) as secondary — otherwise the exact same test as
+above — reached **`status: complete`** on both sides, matching the
+patch's own test plan criteria exactly. A real write through
+`/dev/hast/patchtest` confirmed actual data replication, not just a
+status flag: the resource's `dirty` counter went `0 → 2.0MB → 0`,
+showing the extent was marked dirty, replicated, and cleared normally.
+This is real, working replication, not merely an absence of the
+degraded symptom.
+
+Only the primary side (`freebsd-apiary3`) needed the patch — consistent
+with Martin's diagnosis that the bug is entirely in the primary's own
+connection-migration path; the secondary's role never touches the buggy
+code. This means once D57511 merges upstream, only nodes acting as a
+resource's primary strictly need the fix, though patching all nodes is
+still the right long-term move since any node can become primary.
+
+**This package's own tests were verified as still correct once the fix
+is available**: the assumption that `hastctl create`/`role`/`status`'s
+CLI-driving mechanics are separable from `hastd`'s own wire-level
+behavior held up — nothing in `internal/hast` needed to change to work
+against a patched `hastd`. The dual-node provisioning guardrail (see
+"Decision" section below) should be revisited once the patch is merged
+and available via a normal package/release rather than a manually built
+binary — `internal/hast`'s replication testing can then move from "not
+possible" to "possible with a source build" to eventually "just works
+out of the box."
 
 ## Consequences
 
@@ -244,3 +267,11 @@ added to the package) since its own tests already exercise it safely
 without depending on real replication succeeding — the guardrail belongs
 at the call site that will eventually decide *whether* to provision a
 replica, not inside this package.
+
+**Update 2026-08-29**: the fix is confirmed working (see above), but
+this guardrail stays in place until D57511 actually merges and is
+available through a normal package/release rather than a manually built
+`hastd` binary on one specific VM (`freebsd-apiary3`). Real dual-node
+provisioning depends on every node in the cluster reliably having a
+working `hastd`, not on one hand-built binary happening to work in a
+test.
