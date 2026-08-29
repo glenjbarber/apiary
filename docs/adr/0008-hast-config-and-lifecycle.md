@@ -227,3 +227,20 @@ promise of HAST) remains blocked on this open issue.
   testing once D57511 merges and is available on a test system (either
   wait for a release/snapshot that includes it, or build `hastd` from a
   patched source tree sooner if unblocking this matters before then).
+
+## Decision: keep the shim, disable dual-node provisioning for now
+
+Nothing outside this package's own tests calls `internal/hast` yet — no
+provisioning flow wires it into `CreateVM` or anything else — so there is
+no dual-node code path to disable today. This is a forward-looking
+guardrail for when that changes: when VM/dataset provisioning is built
+out (`internal/zfs` + eventually `internal/bhyve`), it should provision
+**single-node storage only** — do not have that flow call
+`internal/hast` to actually configure a live two-node resource pairing
+(`WriteConfig` + `CreateResource` + `SetRole` against a real second
+node) until D57511 has merged and been verified fixed here. `Manager`'s
+API itself is left as-is (no artificial single-node-only restriction
+added to the package) since its own tests already exercise it safely
+without depending on real replication succeeding — the guardrail belongs
+at the call site that will eventually decide *whether* to provision a
+replica, not inside this package.
