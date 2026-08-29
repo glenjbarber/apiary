@@ -113,4 +113,9 @@ message StatusResponse {
   uint64 raft_last_log_index = 7;
   uint64 raft_applied_index = 8;
   string raft_state = 9;
+
+  // known_node_ids lists the IDs of raft cluster members, as known to
+  // this node's raftd. Useful for clients (e.g. the web UI) that need to
+  // offer a choice of nodes without a separate scheduling component.
+  repeated string known_node_ids = 10;
 }

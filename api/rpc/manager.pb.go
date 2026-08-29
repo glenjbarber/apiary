@@ -755,8 +755,12 @@ type StatusResponse struct {
 	RaftLastLogIndex uint64 `protobuf:"varint,7,opt,name=raft_last_log_index,json=raftLastLogIndex,proto3" json:"raft_last_log_index,omitempty"`
 	RaftAppliedIndex uint64 `protobuf:"varint,8,opt,name=raft_applied_index,json=raftAppliedIndex,proto3" json:"raft_applied_index,omitempty"`
 	RaftState        string `protobuf:"bytes,9,opt,name=raft_state,json=raftState,proto3" json:"raft_state,omitempty"`
-	unknownFields    protoimpl.UnknownFields
-	sizeCache        protoimpl.SizeCache
+	// known_node_ids lists the IDs of raft cluster members, as known to
+	// this node's raftd. Useful for clients (e.g. the web UI) that need to
+	// offer a choice of nodes without a separate scheduling component.
+	KnownNodeIds  []string `protobuf:"bytes,10,rep,name=known_node_ids,json=knownNodeIds,proto3" json:"known_node_ids,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *StatusResponse) Reset() {
@@ -852,6 +856,13 @@ func (x *StatusResponse) GetRaftState() string {
 	return ""
 }
 
+func (x *StatusResponse) GetKnownNodeIds() []string {
+	if x != nil {
+		return x.KnownNodeIds
+	}
+	return nil
+}
+
 var File_api_rpc_manager_proto protoreflect.FileDescriptor
 
 const file_api_rpc_manager_proto_rawDesc = "" +
@@ -905,7 +916,7 @@ const file_api_rpc_manager_proto_rawDesc = "" +
 	"\x05error\x18\x02 \x01(\tR\x05error\x12\x1f\n" +
 	"\vleader_hint\x18\x03 \x01(\tR\n" +
 	"leaderHint\"\x0f\n" +
-	"\rStatusRequest\"\xe8\x02\n" +
+	"\rStatusRequest\"\x8e\x03\n" +
 	"\x0eStatusResponse\x12&\n" +
 	"\x0fmanager_node_id\x18\x01 \x01(\tR\rmanagerNodeId\x12%\n" +
 	"\x0eraft_reachable\x18\x02 \x01(\bR\rraftReachable\x12\x1d\n" +
@@ -918,7 +929,9 @@ const file_api_rpc_manager_proto_rawDesc = "" +
 	"\x13raft_last_log_index\x18\a \x01(\x04R\x10raftLastLogIndex\x12,\n" +
 	"\x12raft_applied_index\x18\b \x01(\x04R\x10raftAppliedIndex\x12\x1d\n" +
 	"\n" +
-	"raft_state\x18\t \x01(\tR\traftState*O\n" +
+	"raft_state\x18\t \x01(\tR\traftState\x12$\n" +
+	"\x0eknown_node_ids\x18\n" +
+	" \x03(\tR\fknownNodeIds*O\n" +
 	"\aVMState\x12\x18\n" +
 	"\x14VM_STATE_UNSPECIFIED\x10\x00\x12\x14\n" +
 	"\x10VM_STATE_STOPPED\x10\x01\x12\x14\n" +

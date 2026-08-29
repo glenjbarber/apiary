@@ -5,6 +5,15 @@
   <label>Name <input type="text" name="name"></label>
   <label>vCPUs <input type="number" name="vcpus" value="1" min="1"></label>
   <label>Memory (MB) <input type="number" name="memory_mb" value="512" min="1"></label>
+  <label>Node ID
+    {{if .Nodes}}
+    <select name="node_id">
+      {{range .Nodes}}<option value="{{.}}">{{.}}</option>{{end}}
+    </select>
+    {{else}}
+    <input type="text" name="node_id">
+    {{end}}
+  </label>
   <label>Desired state
     <select name="desired_state">
       <option value="stopped">stopped</option>

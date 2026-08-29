@@ -51,6 +51,9 @@ func (s *Server) Status(ctx context.Context, _ *rpcpb.StatusRequest) (*rpcpb.Sta
 	resp.RaftLastLogIndex = raftStatus.GetLastLogIndex()
 	resp.RaftAppliedIndex = raftStatus.GetAppliedIndex()
 	resp.RaftState = raftStatus.GetRaftState()
+	for _, server := range raftStatus.GetServers() {
+		resp.KnownNodeIds = append(resp.KnownNodeIds, server.GetId())
+	}
 	return resp, nil
 }
 

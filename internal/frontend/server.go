@@ -17,6 +17,11 @@ import (
 type pageData struct {
 	Error string
 	VMs   []vmView
+
+	// Nodes lists known raft cluster member IDs, for the create-VM form's
+	// node picker. Only populated for the full index render - vm_rows
+	// doesn't include the create form, so it doesn't need this.
+	Nodes []string
 }
 
 // Server renders the HTMX web UI, backed by a rpcpb.ManagerServiceClient.
@@ -76,7 +81,23 @@ func (s *Server) currentVMs(r *http.Request) ([]vmView, string) {
 
 func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 	vms, errMsg := s.currentVMs(r)
-	s.render(w, "layout", pageData{Error: errMsg, VMs: vms})
+	nodes, err := s.knownNodes(r)
+	if err != nil && errMsg == "" {
+		errMsg = err.Error()
+	}
+	s.render(w, "layout", pageData{Error: errMsg, VMs: vms, Nodes: nodes})
+}
+
+// knownNodes fetches the current raft cluster membership via Status, for
+// the create-VM form's node picker. A failure here doesn't prevent the
+// page from rendering - the picker just falls back to a free-text
+// default (see index.html).
+func (s *Server) knownNodes(r *http.Request) ([]string, error) {
+	resp, err := s.client.Status(r.Context(), &rpcpb.StatusRequest{})
+	if err != nil {
+		return nil, err
+	}
+	return resp.GetKnownNodeIds(), nil
 }
 
 func (s *Server) handleCreateVM(w http.ResponseWriter, r *http.Request) {
@@ -94,6 +115,7 @@ func (s *Server) handleCreateVM(w http.ResponseWriter, r *http.Request) {
 			Name:         r.FormValue("name"),
 			Vcpus:        uint32(vcpus),
 			MemoryMb:     memoryMB,
+			NodeId:       r.FormValue("node_id"),
 			DesiredState: stateToRPC(r.FormValue("desired_state")),
 		},
 	})
