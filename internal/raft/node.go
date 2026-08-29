@@ -32,6 +32,14 @@ type Status struct {
 	LastLogIndex uint64
 	AppliedIndex uint64
 	RaftState    string
+	Servers      []ServerInfo
+}
+
+// ServerInfo describes one member of the cluster configuration.
+type ServerInfo struct {
+	ID       string
+	Address  string
+	Suffrage string
 }
 
 // Node wraps a *raft.Raft instance, its FSM, and the storage/transport it
@@ -139,10 +147,7 @@ func (n *Node) Bootstrap() error {
 // be committed and applied. It only succeeds when this node is the leader.
 func (n *Node) Apply(payload []byte, timeout time.Duration) (*FSMApplyResult, error) {
 	future := n.raft.Apply(payload, timeout)
-	if err := future.Error(); err != nil {
-		if errors.Is(err, raft.ErrNotLeader) || errors.Is(err, raft.ErrLeadershipLost) {
-			return nil, ErrNotLeader
-		}
+	if err := translateMembershipErr(future.Error()); err != nil {
 		return nil, err
 	}
 
@@ -163,6 +168,18 @@ func (n *Node) LeaderHint() string {
 // Status returns a snapshot of this node's current raft state.
 func (n *Node) Status() Status {
 	_, leaderID := n.raft.LeaderWithID()
+
+	var servers []ServerInfo
+	if cfgFuture := n.raft.GetConfiguration(); cfgFuture.Error() == nil {
+		for _, s := range cfgFuture.Configuration().Servers {
+			servers = append(servers, ServerInfo{
+				ID:       string(s.ID),
+				Address:  string(s.Address),
+				Suffrage: suffrageString(s.Suffrage),
+			})
+		}
+	}
+
 	return Status{
 		IsLeader:     n.raft.State() == raft.Leader,
 		LeaderID:     string(leaderID),
@@ -170,7 +187,46 @@ func (n *Node) Status() Status {
 		LastLogIndex: n.raft.LastIndex(),
 		AppliedIndex: n.fsm.AppliedIndex(),
 		RaftState:    n.raft.State().String(),
+		Servers:      servers,
 	}
+}
+
+func suffrageString(s raft.ServerSuffrage) string {
+	switch s {
+	case raft.Voter:
+		return "Voter"
+	case raft.Nonvoter:
+		return "Nonvoter"
+	case raft.Staging:
+		return "Staging"
+	default:
+		return "Unknown"
+	}
+}
+
+// AddVoter adds a new voting server to the cluster. It only succeeds when
+// this node is the current leader. prevIndex, if non-zero, guards against
+// concurrent configuration changes (see raft.Raft.AddVoter).
+func (n *Node) AddVoter(id, address string, prevIndex uint64, timeout time.Duration) error {
+	future := n.raft.AddVoter(raft.ServerID(id), raft.ServerAddress(address), prevIndex, timeout)
+	return translateMembershipErr(future.Error())
+}
+
+// RemoveServer removes a server from the cluster, whether voter or
+// non-voter. It only succeeds when this node is the current leader.
+func (n *Node) RemoveServer(id string, prevIndex uint64, timeout time.Duration) error {
+	future := n.raft.RemoveServer(raft.ServerID(id), prevIndex, timeout)
+	return translateMembershipErr(future.Error())
+}
+
+func translateMembershipErr(err error) error {
+	if err == nil {
+		return nil
+	}
+	if errors.Is(err, raft.ErrNotLeader) || errors.Is(err, raft.ErrLeadershipLost) {
+		return ErrNotLeader
+	}
+	return err
 }
 
 // Shutdown gracefully stops the raft instance and releases its underlying

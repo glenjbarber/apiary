@@ -5,10 +5,9 @@ package apiary.internal.v1;
 option go_package = "github.com/glenjbarber/apiary/api/internalpb;internalpb";
 
 // RaftInternal is the internal protocol spoken over the Unix domain socket
-// between managerd and raftd. It is deliberately minimal for v1: Apply
-// carries an opaque, FSM-defined payload rather than a typed ephemeral-state
-// schema, and there is no membership-management RPC yet since only
-// single-node bootstrap is supported so far.
+// between managerd and raftd. Apply carries an opaque, FSM-defined payload
+// rather than a typed ephemeral-state schema, since the real ephemeral
+// state types (VM defs, node ownership) haven't been designed yet.
 service RaftInternal {
   // Apply submits a command to the raft log. It only succeeds against the
   // current leader; a non-leader node returns an error and, if known, a
@@ -17,6 +16,15 @@ service RaftInternal {
 
   // Status reports this node's current raft state.
   rpc Status(StatusRequest) returns (StatusResponse);
+
+  // AddVoter adds a new voting server to the cluster. It only succeeds
+  // against the current leader. The new server must already be running
+  // and reachable at address before this is called.
+  rpc AddVoter(AddVoterRequest) returns (AddVoterResponse);
+
+  // RemoveServer removes a server (voter or otherwise) from the cluster.
+  // It only succeeds against the current leader.
+  rpc RemoveServer(RemoveServerRequest) returns (RemoveServerResponse);
 }
 
 message ApplyRequest {
@@ -53,4 +61,44 @@ message StatusResponse {
 
   // raft_state is one of "Leader", "Follower", "Candidate", or "Shutdown".
   string raft_state = 6;
+
+  // servers lists the current cluster configuration, as known to this
+  // node. Useful for verifying membership changes took effect.
+  repeated ServerInfo servers = 7;
+}
+
+message ServerInfo {
+  string id = 1;
+  string address = 2;
+
+  // suffrage is one of "Voter", "Nonvoter", or "Staging".
+  string suffrage = 3;
+}
+
+message AddVoterRequest {
+  string id = 1;
+  string address = 2;
+
+  // prev_index, if non-zero, only applies this change if the cluster
+  // configuration's log index still matches it (a CAS-style guard against
+  // concurrent membership changes). 0 skips the check.
+  uint64 prev_index = 3;
+
+  uint32 timeout_ms = 4;
+}
+
+message AddVoterResponse {
+  string error = 1;
+  string leader_hint = 2;
+}
+
+message RemoveServerRequest {
+  string id = 1;
+  uint64 prev_index = 2;
+  uint32 timeout_ms = 3;
+}
+
+message RemoveServerResponse {
+  string error = 1;
+  string leader_hint = 2;
 }

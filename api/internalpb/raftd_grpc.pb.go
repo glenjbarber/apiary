@@ -19,8 +19,10 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	RaftInternal_Apply_FullMethodName  = "/apiary.internal.v1.RaftInternal/Apply"
-	RaftInternal_Status_FullMethodName = "/apiary.internal.v1.RaftInternal/Status"
+	RaftInternal_Apply_FullMethodName        = "/apiary.internal.v1.RaftInternal/Apply"
+	RaftInternal_Status_FullMethodName       = "/apiary.internal.v1.RaftInternal/Status"
+	RaftInternal_AddVoter_FullMethodName     = "/apiary.internal.v1.RaftInternal/AddVoter"
+	RaftInternal_RemoveServer_FullMethodName = "/apiary.internal.v1.RaftInternal/RemoveServer"
 )
 
 // RaftInternalClient is the client API for RaftInternal service.
@@ -28,10 +30,9 @@ const (
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 //
 // RaftInternal is the internal protocol spoken over the Unix domain socket
-// between managerd and raftd. It is deliberately minimal for v1: Apply
-// carries an opaque, FSM-defined payload rather than a typed ephemeral-state
-// schema, and there is no membership-management RPC yet since only
-// single-node bootstrap is supported so far.
+// between managerd and raftd. Apply carries an opaque, FSM-defined payload
+// rather than a typed ephemeral-state schema, since the real ephemeral
+// state types (VM defs, node ownership) haven't been designed yet.
 type RaftInternalClient interface {
 	// Apply submits a command to the raft log. It only succeeds against the
 	// current leader; a non-leader node returns an error and, if known, a
@@ -39,6 +40,13 @@ type RaftInternalClient interface {
 	Apply(ctx context.Context, in *ApplyRequest, opts ...grpc.CallOption) (*ApplyResponse, error)
 	// Status reports this node's current raft state.
 	Status(ctx context.Context, in *StatusRequest, opts ...grpc.CallOption) (*StatusResponse, error)
+	// AddVoter adds a new voting server to the cluster. It only succeeds
+	// against the current leader. The new server must already be running
+	// and reachable at address before this is called.
+	AddVoter(ctx context.Context, in *AddVoterRequest, opts ...grpc.CallOption) (*AddVoterResponse, error)
+	// RemoveServer removes a server (voter or otherwise) from the cluster.
+	// It only succeeds against the current leader.
+	RemoveServer(ctx context.Context, in *RemoveServerRequest, opts ...grpc.CallOption) (*RemoveServerResponse, error)
 }
 
 type raftInternalClient struct {
@@ -69,15 +77,34 @@ func (c *raftInternalClient) Status(ctx context.Context, in *StatusRequest, opts
 	return out, nil
 }
 
+func (c *raftInternalClient) AddVoter(ctx context.Context, in *AddVoterRequest, opts ...grpc.CallOption) (*AddVoterResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(AddVoterResponse)
+	err := c.cc.Invoke(ctx, RaftInternal_AddVoter_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *raftInternalClient) RemoveServer(ctx context.Context, in *RemoveServerRequest, opts ...grpc.CallOption) (*RemoveServerResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(RemoveServerResponse)
+	err := c.cc.Invoke(ctx, RaftInternal_RemoveServer_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // RaftInternalServer is the server API for RaftInternal service.
 // All implementations must embed UnimplementedRaftInternalServer
 // for forward compatibility.
 //
 // RaftInternal is the internal protocol spoken over the Unix domain socket
-// between managerd and raftd. It is deliberately minimal for v1: Apply
-// carries an opaque, FSM-defined payload rather than a typed ephemeral-state
-// schema, and there is no membership-management RPC yet since only
-// single-node bootstrap is supported so far.
+// between managerd and raftd. Apply carries an opaque, FSM-defined payload
+// rather than a typed ephemeral-state schema, since the real ephemeral
+// state types (VM defs, node ownership) haven't been designed yet.
 type RaftInternalServer interface {
 	// Apply submits a command to the raft log. It only succeeds against the
 	// current leader; a non-leader node returns an error and, if known, a
@@ -85,6 +112,13 @@ type RaftInternalServer interface {
 	Apply(context.Context, *ApplyRequest) (*ApplyResponse, error)
 	// Status reports this node's current raft state.
 	Status(context.Context, *StatusRequest) (*StatusResponse, error)
+	// AddVoter adds a new voting server to the cluster. It only succeeds
+	// against the current leader. The new server must already be running
+	// and reachable at address before this is called.
+	AddVoter(context.Context, *AddVoterRequest) (*AddVoterResponse, error)
+	// RemoveServer removes a server (voter or otherwise) from the cluster.
+	// It only succeeds against the current leader.
+	RemoveServer(context.Context, *RemoveServerRequest) (*RemoveServerResponse, error)
 	mustEmbedUnimplementedRaftInternalServer()
 }
 
@@ -100,6 +134,12 @@ func (UnimplementedRaftInternalServer) Apply(context.Context, *ApplyRequest) (*A
 }
 func (UnimplementedRaftInternalServer) Status(context.Context, *StatusRequest) (*StatusResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method Status not implemented")
+}
+func (UnimplementedRaftInternalServer) AddVoter(context.Context, *AddVoterRequest) (*AddVoterResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method AddVoter not implemented")
+}
+func (UnimplementedRaftInternalServer) RemoveServer(context.Context, *RemoveServerRequest) (*RemoveServerResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method RemoveServer not implemented")
 }
 func (UnimplementedRaftInternalServer) mustEmbedUnimplementedRaftInternalServer() {}
 func (UnimplementedRaftInternalServer) testEmbeddedByValue()                      {}
@@ -158,6 +198,42 @@ func _RaftInternal_Status_Handler(srv interface{}, ctx context.Context, dec func
 	return interceptor(ctx, in, info, handler)
 }
 
+func _RaftInternal_AddVoter_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(AddVoterRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(RaftInternalServer).AddVoter(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: RaftInternal_AddVoter_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(RaftInternalServer).AddVoter(ctx, req.(*AddVoterRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _RaftInternal_RemoveServer_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(RemoveServerRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(RaftInternalServer).RemoveServer(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: RaftInternal_RemoveServer_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(RaftInternalServer).RemoveServer(ctx, req.(*RemoveServerRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // RaftInternal_ServiceDesc is the grpc.ServiceDesc for RaftInternal service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -172,6 +248,14 @@ var RaftInternal_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "Status",
 			Handler:    _RaftInternal_Status_Handler,
+		},
+		{
+			MethodName: "AddVoter",
+			Handler:    _RaftInternal_AddVoter_Handler,
+		},
+		{
+			MethodName: "RemoveServer",
+			Handler:    _RaftInternal_RemoveServer_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

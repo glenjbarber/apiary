@@ -186,7 +186,10 @@ type StatusResponse struct {
 	LastLogIndex uint64                 `protobuf:"varint,4,opt,name=last_log_index,json=lastLogIndex,proto3" json:"last_log_index,omitempty"`
 	AppliedIndex uint64                 `protobuf:"varint,5,opt,name=applied_index,json=appliedIndex,proto3" json:"applied_index,omitempty"`
 	// raft_state is one of "Leader", "Follower", "Candidate", or "Shutdown".
-	RaftState     string `protobuf:"bytes,6,opt,name=raft_state,json=raftState,proto3" json:"raft_state,omitempty"`
+	RaftState string `protobuf:"bytes,6,opt,name=raft_state,json=raftState,proto3" json:"raft_state,omitempty"`
+	// servers lists the current cluster configuration, as known to this
+	// node. Useful for verifying membership changes took effect.
+	Servers       []*ServerInfo `protobuf:"bytes,7,rep,name=servers,proto3" json:"servers,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -263,6 +266,309 @@ func (x *StatusResponse) GetRaftState() string {
 	return ""
 }
 
+func (x *StatusResponse) GetServers() []*ServerInfo {
+	if x != nil {
+		return x.Servers
+	}
+	return nil
+}
+
+type ServerInfo struct {
+	state   protoimpl.MessageState `protogen:"open.v1"`
+	Id      string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	Address string                 `protobuf:"bytes,2,opt,name=address,proto3" json:"address,omitempty"`
+	// suffrage is one of "Voter", "Nonvoter", or "Staging".
+	Suffrage      string `protobuf:"bytes,3,opt,name=suffrage,proto3" json:"suffrage,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ServerInfo) Reset() {
+	*x = ServerInfo{}
+	mi := &file_api_internalpb_raftd_proto_msgTypes[4]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ServerInfo) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ServerInfo) ProtoMessage() {}
+
+func (x *ServerInfo) ProtoReflect() protoreflect.Message {
+	mi := &file_api_internalpb_raftd_proto_msgTypes[4]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ServerInfo.ProtoReflect.Descriptor instead.
+func (*ServerInfo) Descriptor() ([]byte, []int) {
+	return file_api_internalpb_raftd_proto_rawDescGZIP(), []int{4}
+}
+
+func (x *ServerInfo) GetId() string {
+	if x != nil {
+		return x.Id
+	}
+	return ""
+}
+
+func (x *ServerInfo) GetAddress() string {
+	if x != nil {
+		return x.Address
+	}
+	return ""
+}
+
+func (x *ServerInfo) GetSuffrage() string {
+	if x != nil {
+		return x.Suffrage
+	}
+	return ""
+}
+
+type AddVoterRequest struct {
+	state   protoimpl.MessageState `protogen:"open.v1"`
+	Id      string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	Address string                 `protobuf:"bytes,2,opt,name=address,proto3" json:"address,omitempty"`
+	// prev_index, if non-zero, only applies this change if the cluster
+	// configuration's log index still matches it (a CAS-style guard against
+	// concurrent membership changes). 0 skips the check.
+	PrevIndex     uint64 `protobuf:"varint,3,opt,name=prev_index,json=prevIndex,proto3" json:"prev_index,omitempty"`
+	TimeoutMs     uint32 `protobuf:"varint,4,opt,name=timeout_ms,json=timeoutMs,proto3" json:"timeout_ms,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AddVoterRequest) Reset() {
+	*x = AddVoterRequest{}
+	mi := &file_api_internalpb_raftd_proto_msgTypes[5]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AddVoterRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AddVoterRequest) ProtoMessage() {}
+
+func (x *AddVoterRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_api_internalpb_raftd_proto_msgTypes[5]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AddVoterRequest.ProtoReflect.Descriptor instead.
+func (*AddVoterRequest) Descriptor() ([]byte, []int) {
+	return file_api_internalpb_raftd_proto_rawDescGZIP(), []int{5}
+}
+
+func (x *AddVoterRequest) GetId() string {
+	if x != nil {
+		return x.Id
+	}
+	return ""
+}
+
+func (x *AddVoterRequest) GetAddress() string {
+	if x != nil {
+		return x.Address
+	}
+	return ""
+}
+
+func (x *AddVoterRequest) GetPrevIndex() uint64 {
+	if x != nil {
+		return x.PrevIndex
+	}
+	return 0
+}
+
+func (x *AddVoterRequest) GetTimeoutMs() uint32 {
+	if x != nil {
+		return x.TimeoutMs
+	}
+	return 0
+}
+
+type AddVoterResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Error         string                 `protobuf:"bytes,1,opt,name=error,proto3" json:"error,omitempty"`
+	LeaderHint    string                 `protobuf:"bytes,2,opt,name=leader_hint,json=leaderHint,proto3" json:"leader_hint,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AddVoterResponse) Reset() {
+	*x = AddVoterResponse{}
+	mi := &file_api_internalpb_raftd_proto_msgTypes[6]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AddVoterResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AddVoterResponse) ProtoMessage() {}
+
+func (x *AddVoterResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_api_internalpb_raftd_proto_msgTypes[6]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AddVoterResponse.ProtoReflect.Descriptor instead.
+func (*AddVoterResponse) Descriptor() ([]byte, []int) {
+	return file_api_internalpb_raftd_proto_rawDescGZIP(), []int{6}
+}
+
+func (x *AddVoterResponse) GetError() string {
+	if x != nil {
+		return x.Error
+	}
+	return ""
+}
+
+func (x *AddVoterResponse) GetLeaderHint() string {
+	if x != nil {
+		return x.LeaderHint
+	}
+	return ""
+}
+
+type RemoveServerRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	PrevIndex     uint64                 `protobuf:"varint,2,opt,name=prev_index,json=prevIndex,proto3" json:"prev_index,omitempty"`
+	TimeoutMs     uint32                 `protobuf:"varint,3,opt,name=timeout_ms,json=timeoutMs,proto3" json:"timeout_ms,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RemoveServerRequest) Reset() {
+	*x = RemoveServerRequest{}
+	mi := &file_api_internalpb_raftd_proto_msgTypes[7]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RemoveServerRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RemoveServerRequest) ProtoMessage() {}
+
+func (x *RemoveServerRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_api_internalpb_raftd_proto_msgTypes[7]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RemoveServerRequest.ProtoReflect.Descriptor instead.
+func (*RemoveServerRequest) Descriptor() ([]byte, []int) {
+	return file_api_internalpb_raftd_proto_rawDescGZIP(), []int{7}
+}
+
+func (x *RemoveServerRequest) GetId() string {
+	if x != nil {
+		return x.Id
+	}
+	return ""
+}
+
+func (x *RemoveServerRequest) GetPrevIndex() uint64 {
+	if x != nil {
+		return x.PrevIndex
+	}
+	return 0
+}
+
+func (x *RemoveServerRequest) GetTimeoutMs() uint32 {
+	if x != nil {
+		return x.TimeoutMs
+	}
+	return 0
+}
+
+type RemoveServerResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Error         string                 `protobuf:"bytes,1,opt,name=error,proto3" json:"error,omitempty"`
+	LeaderHint    string                 `protobuf:"bytes,2,opt,name=leader_hint,json=leaderHint,proto3" json:"leader_hint,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RemoveServerResponse) Reset() {
+	*x = RemoveServerResponse{}
+	mi := &file_api_internalpb_raftd_proto_msgTypes[8]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RemoveServerResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RemoveServerResponse) ProtoMessage() {}
+
+func (x *RemoveServerResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_api_internalpb_raftd_proto_msgTypes[8]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RemoveServerResponse.ProtoReflect.Descriptor instead.
+func (*RemoveServerResponse) Descriptor() ([]byte, []int) {
+	return file_api_internalpb_raftd_proto_rawDescGZIP(), []int{8}
+}
+
+func (x *RemoveServerResponse) GetError() string {
+	if x != nil {
+		return x.Error
+	}
+	return ""
+}
+
+func (x *RemoveServerResponse) GetLeaderHint() string {
+	if x != nil {
+		return x.LeaderHint
+	}
+	return ""
+}
+
 var File_api_internalpb_raftd_proto protoreflect.FileDescriptor
 
 const file_api_internalpb_raftd_proto_rawDesc = "" +
@@ -277,7 +583,7 @@ const file_api_internalpb_raftd_proto_rawDesc = "" +
 	"\x05error\x18\x02 \x01(\tR\x05error\x12\x1f\n" +
 	"\vleader_hint\x18\x03 \x01(\tR\n" +
 	"leaderHint\"\x0f\n" +
-	"\rStatusRequest\"\xcd\x01\n" +
+	"\rStatusRequest\"\x87\x02\n" +
 	"\x0eStatusResponse\x12\x1b\n" +
 	"\tis_leader\x18\x01 \x01(\bR\bisLeader\x12\x1b\n" +
 	"\tleader_id\x18\x02 \x01(\tR\bleaderId\x12\x17\n" +
@@ -285,10 +591,39 @@ const file_api_internalpb_raftd_proto_rawDesc = "" +
 	"\x0elast_log_index\x18\x04 \x01(\x04R\flastLogIndex\x12#\n" +
 	"\rapplied_index\x18\x05 \x01(\x04R\fappliedIndex\x12\x1d\n" +
 	"\n" +
-	"raft_state\x18\x06 \x01(\tR\traftState2\xad\x01\n" +
+	"raft_state\x18\x06 \x01(\tR\traftState\x128\n" +
+	"\aservers\x18\a \x03(\v2\x1e.apiary.internal.v1.ServerInfoR\aservers\"R\n" +
+	"\n" +
+	"ServerInfo\x12\x0e\n" +
+	"\x02id\x18\x01 \x01(\tR\x02id\x12\x18\n" +
+	"\aaddress\x18\x02 \x01(\tR\aaddress\x12\x1a\n" +
+	"\bsuffrage\x18\x03 \x01(\tR\bsuffrage\"y\n" +
+	"\x0fAddVoterRequest\x12\x0e\n" +
+	"\x02id\x18\x01 \x01(\tR\x02id\x12\x18\n" +
+	"\aaddress\x18\x02 \x01(\tR\aaddress\x12\x1d\n" +
+	"\n" +
+	"prev_index\x18\x03 \x01(\x04R\tprevIndex\x12\x1d\n" +
+	"\n" +
+	"timeout_ms\x18\x04 \x01(\rR\ttimeoutMs\"I\n" +
+	"\x10AddVoterResponse\x12\x14\n" +
+	"\x05error\x18\x01 \x01(\tR\x05error\x12\x1f\n" +
+	"\vleader_hint\x18\x02 \x01(\tR\n" +
+	"leaderHint\"c\n" +
+	"\x13RemoveServerRequest\x12\x0e\n" +
+	"\x02id\x18\x01 \x01(\tR\x02id\x12\x1d\n" +
+	"\n" +
+	"prev_index\x18\x02 \x01(\x04R\tprevIndex\x12\x1d\n" +
+	"\n" +
+	"timeout_ms\x18\x03 \x01(\rR\ttimeoutMs\"M\n" +
+	"\x14RemoveServerResponse\x12\x14\n" +
+	"\x05error\x18\x01 \x01(\tR\x05error\x12\x1f\n" +
+	"\vleader_hint\x18\x02 \x01(\tR\n" +
+	"leaderHint2\xe7\x02\n" +
 	"\fRaftInternal\x12L\n" +
 	"\x05Apply\x12 .apiary.internal.v1.ApplyRequest\x1a!.apiary.internal.v1.ApplyResponse\x12O\n" +
-	"\x06Status\x12!.apiary.internal.v1.StatusRequest\x1a\".apiary.internal.v1.StatusResponseB9Z7github.com/glenjbarber/apiary/api/internalpb;internalpbb\x06proto3"
+	"\x06Status\x12!.apiary.internal.v1.StatusRequest\x1a\".apiary.internal.v1.StatusResponse\x12U\n" +
+	"\bAddVoter\x12#.apiary.internal.v1.AddVoterRequest\x1a$.apiary.internal.v1.AddVoterResponse\x12a\n" +
+	"\fRemoveServer\x12'.apiary.internal.v1.RemoveServerRequest\x1a(.apiary.internal.v1.RemoveServerResponseB9Z7github.com/glenjbarber/apiary/api/internalpb;internalpbb\x06proto3"
 
 var (
 	file_api_internalpb_raftd_proto_rawDescOnce sync.Once
@@ -302,23 +637,33 @@ func file_api_internalpb_raftd_proto_rawDescGZIP() []byte {
 	return file_api_internalpb_raftd_proto_rawDescData
 }
 
-var file_api_internalpb_raftd_proto_msgTypes = make([]protoimpl.MessageInfo, 4)
+var file_api_internalpb_raftd_proto_msgTypes = make([]protoimpl.MessageInfo, 9)
 var file_api_internalpb_raftd_proto_goTypes = []any{
-	(*ApplyRequest)(nil),   // 0: apiary.internal.v1.ApplyRequest
-	(*ApplyResponse)(nil),  // 1: apiary.internal.v1.ApplyResponse
-	(*StatusRequest)(nil),  // 2: apiary.internal.v1.StatusRequest
-	(*StatusResponse)(nil), // 3: apiary.internal.v1.StatusResponse
+	(*ApplyRequest)(nil),         // 0: apiary.internal.v1.ApplyRequest
+	(*ApplyResponse)(nil),        // 1: apiary.internal.v1.ApplyResponse
+	(*StatusRequest)(nil),        // 2: apiary.internal.v1.StatusRequest
+	(*StatusResponse)(nil),       // 3: apiary.internal.v1.StatusResponse
+	(*ServerInfo)(nil),           // 4: apiary.internal.v1.ServerInfo
+	(*AddVoterRequest)(nil),      // 5: apiary.internal.v1.AddVoterRequest
+	(*AddVoterResponse)(nil),     // 6: apiary.internal.v1.AddVoterResponse
+	(*RemoveServerRequest)(nil),  // 7: apiary.internal.v1.RemoveServerRequest
+	(*RemoveServerResponse)(nil), // 8: apiary.internal.v1.RemoveServerResponse
 }
 var file_api_internalpb_raftd_proto_depIdxs = []int32{
-	0, // 0: apiary.internal.v1.RaftInternal.Apply:input_type -> apiary.internal.v1.ApplyRequest
-	2, // 1: apiary.internal.v1.RaftInternal.Status:input_type -> apiary.internal.v1.StatusRequest
-	1, // 2: apiary.internal.v1.RaftInternal.Apply:output_type -> apiary.internal.v1.ApplyResponse
-	3, // 3: apiary.internal.v1.RaftInternal.Status:output_type -> apiary.internal.v1.StatusResponse
-	2, // [2:4] is the sub-list for method output_type
-	0, // [0:2] is the sub-list for method input_type
-	0, // [0:0] is the sub-list for extension type_name
-	0, // [0:0] is the sub-list for extension extendee
-	0, // [0:0] is the sub-list for field type_name
+	4, // 0: apiary.internal.v1.StatusResponse.servers:type_name -> apiary.internal.v1.ServerInfo
+	0, // 1: apiary.internal.v1.RaftInternal.Apply:input_type -> apiary.internal.v1.ApplyRequest
+	2, // 2: apiary.internal.v1.RaftInternal.Status:input_type -> apiary.internal.v1.StatusRequest
+	5, // 3: apiary.internal.v1.RaftInternal.AddVoter:input_type -> apiary.internal.v1.AddVoterRequest
+	7, // 4: apiary.internal.v1.RaftInternal.RemoveServer:input_type -> apiary.internal.v1.RemoveServerRequest
+	1, // 5: apiary.internal.v1.RaftInternal.Apply:output_type -> apiary.internal.v1.ApplyResponse
+	3, // 6: apiary.internal.v1.RaftInternal.Status:output_type -> apiary.internal.v1.StatusResponse
+	6, // 7: apiary.internal.v1.RaftInternal.AddVoter:output_type -> apiary.internal.v1.AddVoterResponse
+	8, // 8: apiary.internal.v1.RaftInternal.RemoveServer:output_type -> apiary.internal.v1.RemoveServerResponse
+	5, // [5:9] is the sub-list for method output_type
+	1, // [1:5] is the sub-list for method input_type
+	1, // [1:1] is the sub-list for extension type_name
+	1, // [1:1] is the sub-list for extension extendee
+	0, // [0:1] is the sub-list for field type_name
 }
 
 func init() { file_api_internalpb_raftd_proto_init() }
@@ -332,7 +677,7 @@ func file_api_internalpb_raftd_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_api_internalpb_raftd_proto_rawDesc), len(file_api_internalpb_raftd_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   4,
+			NumMessages:   9,
 			NumExtensions: 0,
 			NumServices:   1,
 		},
