@@ -5,6 +5,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"log"
@@ -13,8 +14,10 @@ import (
 	"os/signal"
 	"path/filepath"
 	"syscall"
+	"time"
 
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
 
 	internalpb "github.com/glenjbarber/apiary/api/internalpb"
 	raftnode "github.com/glenjbarber/apiary/internal/raft"
@@ -33,6 +36,7 @@ func run() error {
 	socketPath := flag.String("socket", "/var/run/apiary/raftd.sock", "Unix domain socket path for the internal RaftInternal protocol")
 	nodeID := flag.String("node-id", "", "unique ID for this raft node (defaults to hostname)")
 	bindAddr := flag.String("raft-bind", raftnode.DefaultBindAddr, "loopback TCP address for the raft transport")
+	joinSocket := flag.String("join", "", "internal socket path of an existing cluster member to join through (leave empty to bootstrap a new single-node cluster)")
 	flag.Parse()
 
 	cfg := raftnode.Config{
@@ -50,14 +54,23 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("creating raft node: %w", err)
 	}
+	// New resolves defaults (e.g. NodeID from hostname) that cfg above may
+	// not reflect; read the resolved value back for logging/joining.
+	resolvedNodeID := node.Status().NodeID
 
-	if !hadState {
+	switch {
+	case hadState:
+		log.Printf("raftd: resuming existing raft state")
+	case *joinSocket != "":
+		if err := joinCluster(*joinSocket, resolvedNodeID, *bindAddr); err != nil {
+			return fmt.Errorf("joining cluster via %s: %w", *joinSocket, err)
+		}
+		log.Printf("raftd: joined existing cluster via %s", *joinSocket)
+	default:
 		if err := node.Bootstrap(); err != nil {
 			return fmt.Errorf("bootstrapping single-node cluster: %w", err)
 		}
 		log.Printf("raftd: bootstrapped new single-node cluster")
-	} else {
-		log.Printf("raftd: resuming existing raft state")
 	}
 
 	lis, err := listenUnix(*socketPath)
@@ -74,7 +87,7 @@ func run() error {
 	}()
 
 	log.Printf("raftd: listening on %s (node-id=%s, raft-bind=%s, data-dir=%s)",
-		*socketPath, cfg.NodeID, *bindAddr, *dataDir)
+		*socketPath, resolvedNodeID, *bindAddr, *dataDir)
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -94,6 +107,39 @@ func run() error {
 	}
 	_ = os.Remove(*socketPath)
 
+	return nil
+}
+
+// joinCluster asks the existing cluster member listening on joinSocket to
+// add this node (nodeID at raftBindAddr) as a voter. The target must
+// already be reachable, and must be (or forward to) the current leader.
+func joinCluster(joinSocket, nodeID, raftBindAddr string) error {
+	conn, err := grpc.NewClient(
+		"unix://"+joinSocket,
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+	)
+	if err != nil {
+		return fmt.Errorf("dialing %s: %w", joinSocket, err)
+	}
+	defer conn.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	client := internalpb.NewRaftInternalClient(conn)
+	resp, err := client.AddVoter(ctx, &internalpb.AddVoterRequest{
+		Id:      nodeID,
+		Address: raftBindAddr,
+	})
+	if err != nil {
+		return err
+	}
+	if resp.GetError() != "" {
+		if resp.GetLeaderHint() != "" {
+			return fmt.Errorf("%s (leader hint: %s)", resp.GetError(), resp.GetLeaderHint())
+		}
+		return errors.New(resp.GetError())
+	}
 	return nil
 }
 
