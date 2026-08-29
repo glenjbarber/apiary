@@ -1,0 +1,56 @@
+syntax = "proto3";
+
+package apiary.internal.v1;
+
+option go_package = "github.com/glenjbarber/apiary/api/internal;internalpb";
+
+// RaftInternal is the internal protocol spoken over the Unix domain socket
+// between managerd and raftd. It is deliberately minimal for v1: Apply
+// carries an opaque, FSM-defined payload rather than a typed ephemeral-state
+// schema, and there is no membership-management RPC yet since only
+// single-node bootstrap is supported so far.
+service RaftInternal {
+  // Apply submits a command to the raft log. It only succeeds against the
+  // current leader; a non-leader node returns an error and, if known, a
+  // hint pointing at the current leader.
+  rpc Apply(ApplyRequest) returns (ApplyResponse);
+
+  // Status reports this node's current raft state.
+  rpc Status(StatusRequest) returns (StatusResponse);
+}
+
+message ApplyRequest {
+  // payload is an opaque, FSM-defined command. Its encoding is not
+  // interpreted by raftd itself.
+  bytes payload = 1;
+
+  // timeout_ms bounds how long to wait for the command to be committed and
+  // applied. A value of 0 selects raftd's default timeout.
+  uint32 timeout_ms = 2;
+}
+
+message ApplyResponse {
+  // result is the opaque value returned by the FSM's Apply method.
+  bytes result = 1;
+
+  // error is set (non-empty) if the apply failed, including when this node
+  // is not the current leader.
+  string error = 2;
+
+  // leader_hint is a best-effort address of the current leader, populated
+  // when error indicates this node is not the leader.
+  string leader_hint = 3;
+}
+
+message StatusRequest {}
+
+message StatusResponse {
+  bool is_leader = 1;
+  string leader_id = 2;
+  string node_id = 3;
+  uint64 last_log_index = 4;
+  uint64 applied_index = 5;
+
+  // raft_state is one of "Leader", "Follower", "Candidate", or "Shutdown".
+  string raft_state = 6;
+}
