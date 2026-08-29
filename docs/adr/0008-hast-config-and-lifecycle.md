@@ -2,8 +2,9 @@
 
 ## Status
 
-Accepted, with one open issue (see below, updated 2026-08-29 with a
-finding that narrows it significantly)
+Accepted, with one open issue (see below) — as of 2026-08-29, diagnosed
+down to a likely upstream `hastd` protocol-level deadlock, not this
+project's environment; not yet fixed or worked around.
 
 ## Context
 
@@ -113,11 +114,56 @@ more likely cause — MAC address collisions between the cloned VMs were
 also checked and ruled out (`freebsd-apiary`/`freebsd-apiary2`/
 `freebsd-apiary3` all have distinct MACs).
 
-Next step, not yet attempted: a packet capture (`tcpdump`) on both
-sides during a `role primary` attempt, to see what's actually
-transmitted (or not) at the point `hastd` claims it never received a
-header — this would distinguish "nothing was ever sent" from "something
-was sent but arrived corrupted/truncated."
+**Update 2026-08-29 (continued) — packet capture and syscall trace point
+to a protocol-level deadlock inside `hastd` itself, not the network.**
+
+A `tcpdump` capture on both `freebsd-apiary` and `freebsd-apiary2`
+during a fresh `role secondary` / `role primary` sequence shows the
+*complete* exchange for the entire ~20-second window before the
+connection is torn down:
+
+1. SYN (primary → secondary)
+2. SYN-ACK (secondary → primary)
+3. ACK (primary → secondary) — three-way handshake completes cleanly
+4. **~20 seconds of complete silence — zero data packets in either
+   direction**
+5. FIN (secondary → primary), ACK (primary → secondary) — secondary's
+   `hastd` closes the idle connection once its read timeout expires
+
+So the TCP layer is entirely healthy — this rules out corruption/offload
+issues definitively (already suspected ruled out via the earlier plain
+`nc` data-transfer test, now confirmed directly on the connection that
+actually fails). Neither side ever transmits a single byte of the HAST
+protocol handshake after the connection opens.
+
+Restarting the primary's `hastd` with `-d -d -F` (verbose foreground
+debug) and re-triggering `role primary` confirms this at the process
+level: the debug log shows privilege drop into the capsicum+jail
+sandbox, then nothing else for the resource's networking — no
+"connecting", no "connected", no error, just periodic unrelated
+housekeeping log lines, even while `sockstat` shows the connection to
+the peer sitting open. `procstat -t` on the worker process
+(`hastd: <resource> (primary)`) shows 8 kernel threads; two of them are
+blocked in **`sbwait`** (kernel socket-buffer wait) with no forward
+progress. `truss -H` confirms no thread makes any `connect`/`send`/`recv`
+syscall during a multi-second trace window — only unrelated periodic
+`clock_gettime`/logging activity.
+
+Taken together: the connection opens, and then both sides' worker
+threads appear to sit waiting to *receive* something before either one
+sends anything — a mutual wait with no timeout-driven retry until the
+outer per-connection timeout eventually fires and tears it down. This
+reproduces identically on FreeBSD 15.1-RELEASE and 16.0-CURRENT, on a
+network already shown to move real data correctly (`nc` test) with no
+firewall, MTU, offload, or MAC-collision explanation available. This
+now looks like a genuine, reproducible bug or protocol-level deadlock in
+`hastd` itself, present across the currently-supported/CURRENT branches
+— not an artifact of this project's environment. Worth reporting
+upstream (bugzilla.freebsd.org) given the strength of the evidence
+gathered here, if pursuing a fix further; further diagnosis from here
+would need `hastd`'s own source (to find exactly which function each
+`sbwait`-blocked thread is parked in) rather than external
+black-box tooling.
 
 **This package's own tests do not depend on resolving it**: they verify
 config rendering, `hastctl create`/`role`/`status` execution, and this
@@ -142,3 +188,12 @@ promise of HAST) remains blocked on this open issue.
   (a real future use of this package) can't yet be claimed to work
   end-to-end — only the control-plane half (`internal/zfs` +
   `internal/hast`'s CLI-driving mechanics) is verified.
+- **Project-level risk worth flagging**: CLAUDE.md's architecture names
+  HAST as the storage-replication mechanism (ADR-0001's physical/
+  ephemeral split assumes it works). If this turns out to be a genuine,
+  currently-unfixed upstream `hastd` bug rather than something
+  environment-specific, that's a real risk to the "storage replicated
+  node-to-node via HAST" architectural decision, not just a test
+  inconvenience — worth deciding whether to pursue an upstream fix,
+  find a workaround, or reconsider the replication mechanism if this
+  doesn't resolve.
