@@ -30,6 +30,23 @@ enum VMState {
   VM_STATE_UNSPECIFIED = 0;
   VM_STATE_STOPPED = 1;
   VM_STATE_RUNNING = 2;
+
+  // VM_STATE_DELETING means the VM has been requested for deletion and
+  // its owning node's reconciler is (or will be) tearing down its real
+  // resources - see ADR-0016. The record disappears from ListVMs once
+  // that completes.
+  VM_STATE_DELETING = 3;
+}
+
+// VMPhase mirrors api/internalpb's VMPhase: the reconciler's own observed
+// progress toward a VM's desired state, as opposed to desired_state
+// (which is only ever what a caller asked for).
+enum VMPhase {
+  VM_PHASE_UNSPECIFIED = 0;
+  VM_PHASE_CREATING = 1;
+  VM_PHASE_READY = 2;
+  VM_PHASE_DELETING = 3;
+  VM_PHASE_ERROR = 4;
 }
 
 message VMDefinition {
@@ -39,6 +56,8 @@ message VMDefinition {
   uint64 memory_mb = 4;
   string node_id = 5;
   VMState desired_state = 6;
+  VMPhase phase = 7;
+  string phase_error = 8;
 }
 
 message CreateVMRequest {

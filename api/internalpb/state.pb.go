@@ -31,6 +31,13 @@ const (
 	VMState_VM_STATE_UNSPECIFIED VMState = 0
 	VMState_VM_STATE_STOPPED     VMState = 1
 	VMState_VM_STATE_RUNNING     VMState = 2
+	// VM_STATE_DELETING is a soft-delete tombstone: DeleteVM sets this
+	// instead of removing the record outright (unless the VM was never
+	// assigned to a node, in which case there's nothing physical to tear
+	// down and it's removed immediately). The owning node's reconciler
+	// notices this, tears down its real dataset/bhyve VM, then submits
+	// PurgeVM to remove the record for good - see ADR-0016.
+	VMState_VM_STATE_DELETING VMState = 3
 )
 
 // Enum value maps for VMState.
@@ -39,11 +46,13 @@ var (
 		0: "VM_STATE_UNSPECIFIED",
 		1: "VM_STATE_STOPPED",
 		2: "VM_STATE_RUNNING",
+		3: "VM_STATE_DELETING",
 	}
 	VMState_value = map[string]int32{
 		"VM_STATE_UNSPECIFIED": 0,
 		"VM_STATE_STOPPED":     1,
 		"VM_STATE_RUNNING":     2,
+		"VM_STATE_DELETING":    3,
 	}
 )
 
@@ -74,6 +83,65 @@ func (VMState) EnumDescriptor() ([]byte, []int) {
 	return file_api_internalpb_state_proto_rawDescGZIP(), []int{0}
 }
 
+// VMPhase is the reconciler's own observed progress toward a VM's
+// desired state - distinct from desired_state, which is only ever what
+// a caller asked for. Written back by the owning node's reconciler via
+// UpdateVMPhase, never by CreateVM/UpdateVM directly.
+type VMPhase int32
+
+const (
+	VMPhase_VM_PHASE_UNSPECIFIED VMPhase = 0 // not yet reconciled by any node
+	VMPhase_VM_PHASE_CREATING    VMPhase = 1
+	VMPhase_VM_PHASE_READY       VMPhase = 2
+	VMPhase_VM_PHASE_DELETING    VMPhase = 3
+	VMPhase_VM_PHASE_ERROR       VMPhase = 4
+)
+
+// Enum value maps for VMPhase.
+var (
+	VMPhase_name = map[int32]string{
+		0: "VM_PHASE_UNSPECIFIED",
+		1: "VM_PHASE_CREATING",
+		2: "VM_PHASE_READY",
+		3: "VM_PHASE_DELETING",
+		4: "VM_PHASE_ERROR",
+	}
+	VMPhase_value = map[string]int32{
+		"VM_PHASE_UNSPECIFIED": 0,
+		"VM_PHASE_CREATING":    1,
+		"VM_PHASE_READY":       2,
+		"VM_PHASE_DELETING":    3,
+		"VM_PHASE_ERROR":       4,
+	}
+)
+
+func (x VMPhase) Enum() *VMPhase {
+	p := new(VMPhase)
+	*p = x
+	return p
+}
+
+func (x VMPhase) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (VMPhase) Descriptor() protoreflect.EnumDescriptor {
+	return file_api_internalpb_state_proto_enumTypes[1].Descriptor()
+}
+
+func (VMPhase) Type() protoreflect.EnumType {
+	return &file_api_internalpb_state_proto_enumTypes[1]
+}
+
+func (x VMPhase) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use VMPhase.Descriptor instead.
+func (VMPhase) EnumDescriptor() ([]byte, []int) {
+	return file_api_internalpb_state_proto_rawDescGZIP(), []int{1}
+}
+
 // VMDefinition is a VM's ephemeral definition: its identity, resource
 // shape, which node owns it, and its desired state. It intentionally
 // excludes physical data (disk image bytes, ZFS dataset contents) - those
@@ -86,8 +154,12 @@ type VMDefinition struct {
 	MemoryMb uint64                 `protobuf:"varint,4,opt,name=memory_mb,json=memoryMb,proto3" json:"memory_mb,omitempty"`
 	// node_id is the node ownership assignment: which cluster member is
 	// responsible for running this VM.
-	NodeId        string  `protobuf:"bytes,5,opt,name=node_id,json=nodeId,proto3" json:"node_id,omitempty"`
-	DesiredState  VMState `protobuf:"varint,6,opt,name=desired_state,json=desiredState,proto3,enum=apiary.internal.v1.VMState" json:"desired_state,omitempty"`
+	NodeId       string  `protobuf:"bytes,5,opt,name=node_id,json=nodeId,proto3" json:"node_id,omitempty"`
+	DesiredState VMState `protobuf:"varint,6,opt,name=desired_state,json=desiredState,proto3,enum=apiary.internal.v1.VMState" json:"desired_state,omitempty"`
+	Phase        VMPhase `protobuf:"varint,7,opt,name=phase,proto3,enum=apiary.internal.v1.VMPhase" json:"phase,omitempty"`
+	// phase_error holds the last reconcile error's message when phase ==
+	// VM_PHASE_ERROR; empty otherwise.
+	PhaseError    string `protobuf:"bytes,8,opt,name=phase_error,json=phaseError,proto3" json:"phase_error,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -164,6 +236,20 @@ func (x *VMDefinition) GetDesiredState() VMState {
 	return VMState_VM_STATE_UNSPECIFIED
 }
 
+func (x *VMDefinition) GetPhase() VMPhase {
+	if x != nil {
+		return x.Phase
+	}
+	return VMPhase_VM_PHASE_UNSPECIFIED
+}
+
+func (x *VMDefinition) GetPhaseError() string {
+	if x != nil {
+		return x.PhaseError
+	}
+	return ""
+}
+
 // Command is the typed payload carried in ApplyRequest.payload (replacing
 // v1's opaque bytes). Exactly one op should be set.
 type Command struct {
@@ -173,6 +259,8 @@ type Command struct {
 	//	*Command_CreateVm
 	//	*Command_UpdateVm
 	//	*Command_DeleteVm
+	//	*Command_UpdateVmPhase
+	//	*Command_PurgeVm
 	Op            isCommand_Op `protobuf_oneof:"op"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -242,6 +330,24 @@ func (x *Command) GetDeleteVm() *DeleteVM {
 	return nil
 }
 
+func (x *Command) GetUpdateVmPhase() *UpdateVMPhase {
+	if x != nil {
+		if x, ok := x.Op.(*Command_UpdateVmPhase); ok {
+			return x.UpdateVmPhase
+		}
+	}
+	return nil
+}
+
+func (x *Command) GetPurgeVm() *PurgeVM {
+	if x != nil {
+		if x, ok := x.Op.(*Command_PurgeVm); ok {
+			return x.PurgeVm
+		}
+	}
+	return nil
+}
+
 type isCommand_Op interface {
 	isCommand_Op()
 }
@@ -258,11 +364,25 @@ type Command_DeleteVm struct {
 	DeleteVm *DeleteVM `protobuf:"bytes,3,opt,name=delete_vm,json=deleteVm,proto3,oneof"`
 }
 
+type Command_UpdateVmPhase struct {
+	// UpdateVMPhase and PurgeVM are submitted by a node's own reconciler,
+	// never by an external caller - see ADR-0016.
+	UpdateVmPhase *UpdateVMPhase `protobuf:"bytes,4,opt,name=update_vm_phase,json=updateVmPhase,proto3,oneof"`
+}
+
+type Command_PurgeVm struct {
+	PurgeVm *PurgeVM `protobuf:"bytes,5,opt,name=purge_vm,json=purgeVm,proto3,oneof"`
+}
+
 func (*Command_CreateVm) isCommand_Op() {}
 
 func (*Command_UpdateVm) isCommand_Op() {}
 
 func (*Command_DeleteVm) isCommand_Op() {}
+
+func (*Command_UpdateVmPhase) isCommand_Op() {}
+
+func (*Command_PurgeVm) isCommand_Op() {}
 
 // CreateVM adds a new VM definition. It fails (via CommandResult.error) if
 // a VM with the same id already exists.
@@ -356,8 +476,8 @@ func (x *UpdateVM) GetVm() *VMDefinition {
 	return nil
 }
 
-// DeleteVM removes a VM definition. It fails if no VM with the given id
-// exists.
+// DeleteVM marks a VM definition for deletion (see VM_STATE_DELETING). It
+// fails if no VM with the given id exists.
 type DeleteVM struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
@@ -402,6 +522,119 @@ func (x *DeleteVM) GetId() string {
 	return ""
 }
 
+// UpdateVMPhase records reconciliation progress against an existing VM
+// definition. Unlike UpdateVM, it never touches desired_state - only the
+// observed phase. It's a no-op error (not applied) if the VM no longer
+// exists, which can happen if it was purged out from under a stale
+// reconcile attempt.
+type UpdateVMPhase struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	Phase         VMPhase                `protobuf:"varint,2,opt,name=phase,proto3,enum=apiary.internal.v1.VMPhase" json:"phase,omitempty"`
+	PhaseError    string                 `protobuf:"bytes,3,opt,name=phase_error,json=phaseError,proto3" json:"phase_error,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *UpdateVMPhase) Reset() {
+	*x = UpdateVMPhase{}
+	mi := &file_api_internalpb_state_proto_msgTypes[5]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *UpdateVMPhase) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*UpdateVMPhase) ProtoMessage() {}
+
+func (x *UpdateVMPhase) ProtoReflect() protoreflect.Message {
+	mi := &file_api_internalpb_state_proto_msgTypes[5]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use UpdateVMPhase.ProtoReflect.Descriptor instead.
+func (*UpdateVMPhase) Descriptor() ([]byte, []int) {
+	return file_api_internalpb_state_proto_rawDescGZIP(), []int{5}
+}
+
+func (x *UpdateVMPhase) GetId() string {
+	if x != nil {
+		return x.Id
+	}
+	return ""
+}
+
+func (x *UpdateVMPhase) GetPhase() VMPhase {
+	if x != nil {
+		return x.Phase
+	}
+	return VMPhase_VM_PHASE_UNSPECIFIED
+}
+
+func (x *UpdateVMPhase) GetPhaseError() string {
+	if x != nil {
+		return x.PhaseError
+	}
+	return ""
+}
+
+// PurgeVM removes a VM definition outright, regardless of its current
+// phase. Submitted only by the owning node's reconciler, after it has
+// confirmed the VM's real local resources are torn down. Idempotent: not
+// an error if the id is already gone.
+type PurgeVM struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *PurgeVM) Reset() {
+	*x = PurgeVM{}
+	mi := &file_api_internalpb_state_proto_msgTypes[6]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *PurgeVM) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*PurgeVM) ProtoMessage() {}
+
+func (x *PurgeVM) ProtoReflect() protoreflect.Message {
+	mi := &file_api_internalpb_state_proto_msgTypes[6]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use PurgeVM.ProtoReflect.Descriptor instead.
+func (*PurgeVM) Descriptor() ([]byte, []int) {
+	return file_api_internalpb_state_proto_rawDescGZIP(), []int{6}
+}
+
+func (x *PurgeVM) GetId() string {
+	if x != nil {
+		return x.Id
+	}
+	return ""
+}
+
 // CommandResult is the FSM's response to Apply, echoed back through
 // ApplyResponse. error is set (and vm left unset) if the command was
 // rejected at the application level (e.g. duplicate/missing id) - this is
@@ -417,7 +650,7 @@ type CommandResult struct {
 
 func (x *CommandResult) Reset() {
 	*x = CommandResult{}
-	mi := &file_api_internalpb_state_proto_msgTypes[5]
+	mi := &file_api_internalpb_state_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -429,7 +662,7 @@ func (x *CommandResult) String() string {
 func (*CommandResult) ProtoMessage() {}
 
 func (x *CommandResult) ProtoReflect() protoreflect.Message {
-	mi := &file_api_internalpb_state_proto_msgTypes[5]
+	mi := &file_api_internalpb_state_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -442,7 +675,7 @@ func (x *CommandResult) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CommandResult.ProtoReflect.Descriptor instead.
 func (*CommandResult) Descriptor() ([]byte, []int) {
-	return file_api_internalpb_state_proto_rawDescGZIP(), []int{5}
+	return file_api_internalpb_state_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *CommandResult) GetVm() *VMDefinition {
@@ -471,7 +704,7 @@ type FSMSnapshotState struct {
 
 func (x *FSMSnapshotState) Reset() {
 	*x = FSMSnapshotState{}
-	mi := &file_api_internalpb_state_proto_msgTypes[6]
+	mi := &file_api_internalpb_state_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -483,7 +716,7 @@ func (x *FSMSnapshotState) String() string {
 func (*FSMSnapshotState) ProtoMessage() {}
 
 func (x *FSMSnapshotState) ProtoReflect() protoreflect.Message {
-	mi := &file_api_internalpb_state_proto_msgTypes[6]
+	mi := &file_api_internalpb_state_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -496,7 +729,7 @@ func (x *FSMSnapshotState) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FSMSnapshotState.ProtoReflect.Descriptor instead.
 func (*FSMSnapshotState) Descriptor() ([]byte, []int) {
-	return file_api_internalpb_state_proto_rawDescGZIP(), []int{6}
+	return file_api_internalpb_state_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *FSMSnapshotState) GetLastIndex() uint64 {
@@ -517,24 +750,36 @@ var File_api_internalpb_state_proto protoreflect.FileDescriptor
 
 const file_api_internalpb_state_proto_rawDesc = "" +
 	"\n" +
-	"\x1aapi/internalpb/state.proto\x12\x12apiary.internal.v1\"\xc0\x01\n" +
+	"\x1aapi/internalpb/state.proto\x12\x12apiary.internal.v1\"\x94\x02\n" +
 	"\fVMDefinition\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x14\n" +
 	"\x05vcpus\x18\x03 \x01(\rR\x05vcpus\x12\x1b\n" +
 	"\tmemory_mb\x18\x04 \x01(\x04R\bmemoryMb\x12\x17\n" +
 	"\anode_id\x18\x05 \x01(\tR\x06nodeId\x12@\n" +
-	"\rdesired_state\x18\x06 \x01(\x0e2\x1b.apiary.internal.v1.VMStateR\fdesiredState\"\xc6\x01\n" +
+	"\rdesired_state\x18\x06 \x01(\x0e2\x1b.apiary.internal.v1.VMStateR\fdesiredState\x121\n" +
+	"\x05phase\x18\a \x01(\x0e2\x1b.apiary.internal.v1.VMPhaseR\x05phase\x12\x1f\n" +
+	"\vphase_error\x18\b \x01(\tR\n" +
+	"phaseError\"\xcd\x02\n" +
 	"\aCommand\x12;\n" +
 	"\tcreate_vm\x18\x01 \x01(\v2\x1c.apiary.internal.v1.CreateVMH\x00R\bcreateVm\x12;\n" +
 	"\tupdate_vm\x18\x02 \x01(\v2\x1c.apiary.internal.v1.UpdateVMH\x00R\bupdateVm\x12;\n" +
-	"\tdelete_vm\x18\x03 \x01(\v2\x1c.apiary.internal.v1.DeleteVMH\x00R\bdeleteVmB\x04\n" +
+	"\tdelete_vm\x18\x03 \x01(\v2\x1c.apiary.internal.v1.DeleteVMH\x00R\bdeleteVm\x12K\n" +
+	"\x0fupdate_vm_phase\x18\x04 \x01(\v2!.apiary.internal.v1.UpdateVMPhaseH\x00R\rupdateVmPhase\x128\n" +
+	"\bpurge_vm\x18\x05 \x01(\v2\x1b.apiary.internal.v1.PurgeVMH\x00R\apurgeVmB\x04\n" +
 	"\x02op\"<\n" +
 	"\bCreateVM\x120\n" +
 	"\x02vm\x18\x01 \x01(\v2 .apiary.internal.v1.VMDefinitionR\x02vm\"<\n" +
 	"\bUpdateVM\x120\n" +
 	"\x02vm\x18\x01 \x01(\v2 .apiary.internal.v1.VMDefinitionR\x02vm\"\x1a\n" +
 	"\bDeleteVM\x12\x0e\n" +
+	"\x02id\x18\x01 \x01(\tR\x02id\"s\n" +
+	"\rUpdateVMPhase\x12\x0e\n" +
+	"\x02id\x18\x01 \x01(\tR\x02id\x121\n" +
+	"\x05phase\x18\x02 \x01(\x0e2\x1b.apiary.internal.v1.VMPhaseR\x05phase\x12\x1f\n" +
+	"\vphase_error\x18\x03 \x01(\tR\n" +
+	"phaseError\"\x19\n" +
+	"\aPurgeVM\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\"W\n" +
 	"\rCommandResult\x120\n" +
 	"\x02vm\x18\x01 \x01(\v2 .apiary.internal.v1.VMDefinitionR\x02vm\x12\x14\n" +
@@ -545,11 +790,18 @@ const file_api_internalpb_state_proto_rawDesc = "" +
 	"\x03vms\x18\x02 \x03(\v2-.apiary.internal.v1.FSMSnapshotState.VmsEntryR\x03vms\x1aX\n" +
 	"\bVmsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x126\n" +
-	"\x05value\x18\x02 \x01(\v2 .apiary.internal.v1.VMDefinitionR\x05value:\x028\x01*O\n" +
+	"\x05value\x18\x02 \x01(\v2 .apiary.internal.v1.VMDefinitionR\x05value:\x028\x01*f\n" +
 	"\aVMState\x12\x18\n" +
 	"\x14VM_STATE_UNSPECIFIED\x10\x00\x12\x14\n" +
 	"\x10VM_STATE_STOPPED\x10\x01\x12\x14\n" +
-	"\x10VM_STATE_RUNNING\x10\x02B9Z7github.com/glenjbarber/apiary/api/internalpb;internalpbb\x06proto3"
+	"\x10VM_STATE_RUNNING\x10\x02\x12\x15\n" +
+	"\x11VM_STATE_DELETING\x10\x03*y\n" +
+	"\aVMPhase\x12\x18\n" +
+	"\x14VM_PHASE_UNSPECIFIED\x10\x00\x12\x15\n" +
+	"\x11VM_PHASE_CREATING\x10\x01\x12\x12\n" +
+	"\x0eVM_PHASE_READY\x10\x02\x12\x15\n" +
+	"\x11VM_PHASE_DELETING\x10\x03\x12\x12\n" +
+	"\x0eVM_PHASE_ERROR\x10\x04B9Z7github.com/glenjbarber/apiary/api/internalpb;internalpbb\x06proto3"
 
 var (
 	file_api_internalpb_state_proto_rawDescOnce sync.Once
@@ -563,34 +815,41 @@ func file_api_internalpb_state_proto_rawDescGZIP() []byte {
 	return file_api_internalpb_state_proto_rawDescData
 }
 
-var file_api_internalpb_state_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_api_internalpb_state_proto_msgTypes = make([]protoimpl.MessageInfo, 8)
+var file_api_internalpb_state_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
+var file_api_internalpb_state_proto_msgTypes = make([]protoimpl.MessageInfo, 10)
 var file_api_internalpb_state_proto_goTypes = []any{
 	(VMState)(0),             // 0: apiary.internal.v1.VMState
-	(*VMDefinition)(nil),     // 1: apiary.internal.v1.VMDefinition
-	(*Command)(nil),          // 2: apiary.internal.v1.Command
-	(*CreateVM)(nil),         // 3: apiary.internal.v1.CreateVM
-	(*UpdateVM)(nil),         // 4: apiary.internal.v1.UpdateVM
-	(*DeleteVM)(nil),         // 5: apiary.internal.v1.DeleteVM
-	(*CommandResult)(nil),    // 6: apiary.internal.v1.CommandResult
-	(*FSMSnapshotState)(nil), // 7: apiary.internal.v1.FSMSnapshotState
-	nil,                      // 8: apiary.internal.v1.FSMSnapshotState.VmsEntry
+	(VMPhase)(0),             // 1: apiary.internal.v1.VMPhase
+	(*VMDefinition)(nil),     // 2: apiary.internal.v1.VMDefinition
+	(*Command)(nil),          // 3: apiary.internal.v1.Command
+	(*CreateVM)(nil),         // 4: apiary.internal.v1.CreateVM
+	(*UpdateVM)(nil),         // 5: apiary.internal.v1.UpdateVM
+	(*DeleteVM)(nil),         // 6: apiary.internal.v1.DeleteVM
+	(*UpdateVMPhase)(nil),    // 7: apiary.internal.v1.UpdateVMPhase
+	(*PurgeVM)(nil),          // 8: apiary.internal.v1.PurgeVM
+	(*CommandResult)(nil),    // 9: apiary.internal.v1.CommandResult
+	(*FSMSnapshotState)(nil), // 10: apiary.internal.v1.FSMSnapshotState
+	nil,                      // 11: apiary.internal.v1.FSMSnapshotState.VmsEntry
 }
 var file_api_internalpb_state_proto_depIdxs = []int32{
-	0, // 0: apiary.internal.v1.VMDefinition.desired_state:type_name -> apiary.internal.v1.VMState
-	3, // 1: apiary.internal.v1.Command.create_vm:type_name -> apiary.internal.v1.CreateVM
-	4, // 2: apiary.internal.v1.Command.update_vm:type_name -> apiary.internal.v1.UpdateVM
-	5, // 3: apiary.internal.v1.Command.delete_vm:type_name -> apiary.internal.v1.DeleteVM
-	1, // 4: apiary.internal.v1.CreateVM.vm:type_name -> apiary.internal.v1.VMDefinition
-	1, // 5: apiary.internal.v1.UpdateVM.vm:type_name -> apiary.internal.v1.VMDefinition
-	1, // 6: apiary.internal.v1.CommandResult.vm:type_name -> apiary.internal.v1.VMDefinition
-	8, // 7: apiary.internal.v1.FSMSnapshotState.vms:type_name -> apiary.internal.v1.FSMSnapshotState.VmsEntry
-	1, // 8: apiary.internal.v1.FSMSnapshotState.VmsEntry.value:type_name -> apiary.internal.v1.VMDefinition
-	9, // [9:9] is the sub-list for method output_type
-	9, // [9:9] is the sub-list for method input_type
-	9, // [9:9] is the sub-list for extension type_name
-	9, // [9:9] is the sub-list for extension extendee
-	0, // [0:9] is the sub-list for field type_name
+	0,  // 0: apiary.internal.v1.VMDefinition.desired_state:type_name -> apiary.internal.v1.VMState
+	1,  // 1: apiary.internal.v1.VMDefinition.phase:type_name -> apiary.internal.v1.VMPhase
+	4,  // 2: apiary.internal.v1.Command.create_vm:type_name -> apiary.internal.v1.CreateVM
+	5,  // 3: apiary.internal.v1.Command.update_vm:type_name -> apiary.internal.v1.UpdateVM
+	6,  // 4: apiary.internal.v1.Command.delete_vm:type_name -> apiary.internal.v1.DeleteVM
+	7,  // 5: apiary.internal.v1.Command.update_vm_phase:type_name -> apiary.internal.v1.UpdateVMPhase
+	8,  // 6: apiary.internal.v1.Command.purge_vm:type_name -> apiary.internal.v1.PurgeVM
+	2,  // 7: apiary.internal.v1.CreateVM.vm:type_name -> apiary.internal.v1.VMDefinition
+	2,  // 8: apiary.internal.v1.UpdateVM.vm:type_name -> apiary.internal.v1.VMDefinition
+	1,  // 9: apiary.internal.v1.UpdateVMPhase.phase:type_name -> apiary.internal.v1.VMPhase
+	2,  // 10: apiary.internal.v1.CommandResult.vm:type_name -> apiary.internal.v1.VMDefinition
+	11, // 11: apiary.internal.v1.FSMSnapshotState.vms:type_name -> apiary.internal.v1.FSMSnapshotState.VmsEntry
+	2,  // 12: apiary.internal.v1.FSMSnapshotState.VmsEntry.value:type_name -> apiary.internal.v1.VMDefinition
+	13, // [13:13] is the sub-list for method output_type
+	13, // [13:13] is the sub-list for method input_type
+	13, // [13:13] is the sub-list for extension type_name
+	13, // [13:13] is the sub-list for extension extendee
+	0,  // [0:13] is the sub-list for field type_name
 }
 
 func init() { file_api_internalpb_state_proto_init() }
@@ -602,14 +861,16 @@ func file_api_internalpb_state_proto_init() {
 		(*Command_CreateVm)(nil),
 		(*Command_UpdateVm)(nil),
 		(*Command_DeleteVm)(nil),
+		(*Command_UpdateVmPhase)(nil),
+		(*Command_PurgeVm)(nil),
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_api_internalpb_state_proto_rawDesc), len(file_api_internalpb_state_proto_rawDesc)),
-			NumEnums:      1,
-			NumMessages:   8,
+			NumEnums:      2,
+			NumMessages:   10,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

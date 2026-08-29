@@ -100,6 +100,94 @@ func TestFSM_Apply_DeleteVM(t *testing.T) {
 	}
 }
 
+func TestFSM_Apply_DeleteVM_AssignedVMIsSoftDeleted(t *testing.T) {
+	fsm := NewFSM()
+	fsm.Apply(&raft.Log{Index: 1, Data: mustMarshalCommand(t, &internalpb.Command{
+		Op: &internalpb.Command_CreateVm{CreateVm: &internalpb.CreateVM{
+			Vm: &internalpb.VMDefinition{Id: "vm-1", NodeId: "node-a"},
+		}},
+	})})
+
+	deleteCmd := &internalpb.Command{
+		Op: &internalpb.Command_DeleteVm{DeleteVm: &internalpb.DeleteVM{Id: "vm-1"}},
+	}
+	result := fsm.Apply(&raft.Log{Index: 2, Data: mustMarshalCommand(t, deleteCmd)})
+
+	applyResult := result.(*FSMApplyResult)
+	if applyResult.Error != "" {
+		t.Fatalf("Error = %q, want empty", applyResult.Error)
+	}
+	vm, ok := fsm.VM("vm-1")
+	if !ok {
+		t.Fatalf("VM(vm-1) not found, want it to still exist as a tombstone")
+	}
+	if vm.GetDesiredState() != internalpb.VMState_VM_STATE_DELETING {
+		t.Errorf("DesiredState = %v, want VM_STATE_DELETING", vm.GetDesiredState())
+	}
+}
+
+func TestFSM_Apply_UpdateVMPhase(t *testing.T) {
+	fsm := NewFSM()
+	fsm.Apply(&raft.Log{Index: 1, Data: mustMarshalCommand(t, createVMCmd("vm-1", "web-1"))})
+
+	cmd := &internalpb.Command{
+		Op: &internalpb.Command_UpdateVmPhase{UpdateVmPhase: &internalpb.UpdateVMPhase{
+			Id: "vm-1", Phase: internalpb.VMPhase_VM_PHASE_READY,
+		}},
+	}
+	result := fsm.Apply(&raft.Log{Index: 2, Data: mustMarshalCommand(t, cmd)})
+
+	applyResult := result.(*FSMApplyResult)
+	if applyResult.Error != "" {
+		t.Fatalf("Error = %q, want empty", applyResult.Error)
+	}
+	vm, _ := fsm.VM("vm-1")
+	if vm.GetPhase() != internalpb.VMPhase_VM_PHASE_READY {
+		t.Errorf("Phase = %v, want VM_PHASE_READY", vm.GetPhase())
+	}
+}
+
+func TestFSM_Apply_UpdateVMPhase_MissingIDIsError(t *testing.T) {
+	fsm := NewFSM()
+
+	cmd := &internalpb.Command{
+		Op: &internalpb.Command_UpdateVmPhase{UpdateVmPhase: &internalpb.UpdateVMPhase{
+			Id: "vm-1", Phase: internalpb.VMPhase_VM_PHASE_READY,
+		}},
+	}
+	result := fsm.Apply(&raft.Log{Index: 1, Data: mustMarshalCommand(t, cmd)})
+
+	if result.(*FSMApplyResult).Error == "" {
+		t.Fatalf("Error = empty, want a missing-id rejection")
+	}
+}
+
+func TestFSM_Apply_PurgeVM(t *testing.T) {
+	fsm := NewFSM()
+	fsm.Apply(&raft.Log{Index: 1, Data: mustMarshalCommand(t, createVMCmd("vm-1", "web-1"))})
+
+	cmd := &internalpb.Command{Op: &internalpb.Command_PurgeVm{PurgeVm: &internalpb.PurgeVM{Id: "vm-1"}}}
+	result := fsm.Apply(&raft.Log{Index: 2, Data: mustMarshalCommand(t, cmd)})
+
+	if result.(*FSMApplyResult).Error != "" {
+		t.Fatalf("Error = %q, want empty", result.(*FSMApplyResult).Error)
+	}
+	if _, ok := fsm.VM("vm-1"); ok {
+		t.Errorf("VM(vm-1) still present after PurgeVM")
+	}
+}
+
+func TestFSM_Apply_PurgeVM_IdempotentWhenAlreadyGone(t *testing.T) {
+	fsm := NewFSM()
+
+	cmd := &internalpb.Command{Op: &internalpb.Command_PurgeVm{PurgeVm: &internalpb.PurgeVM{Id: "vm-1"}}}
+	result := fsm.Apply(&raft.Log{Index: 1, Data: mustMarshalCommand(t, cmd)})
+
+	if result.(*FSMApplyResult).Error != "" {
+		t.Errorf("Error = %q, want empty (purging an already-gone id is not an error)", result.(*FSMApplyResult).Error)
+	}
+}
+
 func TestFSM_Apply_InvalidPayload(t *testing.T) {
 	fsm := NewFSM()
 

@@ -31,6 +31,11 @@ const (
 	VMState_VM_STATE_UNSPECIFIED VMState = 0
 	VMState_VM_STATE_STOPPED     VMState = 1
 	VMState_VM_STATE_RUNNING     VMState = 2
+	// VM_STATE_DELETING means the VM has been requested for deletion and
+	// its owning node's reconciler is (or will be) tearing down its real
+	// resources - see ADR-0016. The record disappears from ListVMs once
+	// that completes.
+	VMState_VM_STATE_DELETING VMState = 3
 )
 
 // Enum value maps for VMState.
@@ -39,11 +44,13 @@ var (
 		0: "VM_STATE_UNSPECIFIED",
 		1: "VM_STATE_STOPPED",
 		2: "VM_STATE_RUNNING",
+		3: "VM_STATE_DELETING",
 	}
 	VMState_value = map[string]int32{
 		"VM_STATE_UNSPECIFIED": 0,
 		"VM_STATE_STOPPED":     1,
 		"VM_STATE_RUNNING":     2,
+		"VM_STATE_DELETING":    3,
 	}
 )
 
@@ -74,6 +81,64 @@ func (VMState) EnumDescriptor() ([]byte, []int) {
 	return file_api_rpc_manager_proto_rawDescGZIP(), []int{0}
 }
 
+// VMPhase mirrors api/internalpb's VMPhase: the reconciler's own observed
+// progress toward a VM's desired state, as opposed to desired_state
+// (which is only ever what a caller asked for).
+type VMPhase int32
+
+const (
+	VMPhase_VM_PHASE_UNSPECIFIED VMPhase = 0
+	VMPhase_VM_PHASE_CREATING    VMPhase = 1
+	VMPhase_VM_PHASE_READY       VMPhase = 2
+	VMPhase_VM_PHASE_DELETING    VMPhase = 3
+	VMPhase_VM_PHASE_ERROR       VMPhase = 4
+)
+
+// Enum value maps for VMPhase.
+var (
+	VMPhase_name = map[int32]string{
+		0: "VM_PHASE_UNSPECIFIED",
+		1: "VM_PHASE_CREATING",
+		2: "VM_PHASE_READY",
+		3: "VM_PHASE_DELETING",
+		4: "VM_PHASE_ERROR",
+	}
+	VMPhase_value = map[string]int32{
+		"VM_PHASE_UNSPECIFIED": 0,
+		"VM_PHASE_CREATING":    1,
+		"VM_PHASE_READY":       2,
+		"VM_PHASE_DELETING":    3,
+		"VM_PHASE_ERROR":       4,
+	}
+)
+
+func (x VMPhase) Enum() *VMPhase {
+	p := new(VMPhase)
+	*p = x
+	return p
+}
+
+func (x VMPhase) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (VMPhase) Descriptor() protoreflect.EnumDescriptor {
+	return file_api_rpc_manager_proto_enumTypes[1].Descriptor()
+}
+
+func (VMPhase) Type() protoreflect.EnumType {
+	return &file_api_rpc_manager_proto_enumTypes[1]
+}
+
+func (x VMPhase) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use VMPhase.Descriptor instead.
+func (VMPhase) EnumDescriptor() ([]byte, []int) {
+	return file_api_rpc_manager_proto_rawDescGZIP(), []int{1}
+}
+
 type VMDefinition struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
@@ -82,6 +147,8 @@ type VMDefinition struct {
 	MemoryMb      uint64                 `protobuf:"varint,4,opt,name=memory_mb,json=memoryMb,proto3" json:"memory_mb,omitempty"`
 	NodeId        string                 `protobuf:"bytes,5,opt,name=node_id,json=nodeId,proto3" json:"node_id,omitempty"`
 	DesiredState  VMState                `protobuf:"varint,6,opt,name=desired_state,json=desiredState,proto3,enum=apiary.rpc.v1.VMState" json:"desired_state,omitempty"`
+	Phase         VMPhase                `protobuf:"varint,7,opt,name=phase,proto3,enum=apiary.rpc.v1.VMPhase" json:"phase,omitempty"`
+	PhaseError    string                 `protobuf:"bytes,8,opt,name=phase_error,json=phaseError,proto3" json:"phase_error,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -156,6 +223,20 @@ func (x *VMDefinition) GetDesiredState() VMState {
 		return x.DesiredState
 	}
 	return VMState_VM_STATE_UNSPECIFIED
+}
+
+func (x *VMDefinition) GetPhase() VMPhase {
+	if x != nil {
+		return x.Phase
+	}
+	return VMPhase_VM_PHASE_UNSPECIFIED
+}
+
+func (x *VMDefinition) GetPhaseError() string {
+	if x != nil {
+		return x.PhaseError
+	}
+	return ""
 }
 
 type CreateVMRequest struct {
@@ -867,14 +948,17 @@ var File_api_rpc_manager_proto protoreflect.FileDescriptor
 
 const file_api_rpc_manager_proto_rawDesc = "" +
 	"\n" +
-	"\x15api/rpc/manager.proto\x12\rapiary.rpc.v1\"\xbb\x01\n" +
+	"\x15api/rpc/manager.proto\x12\rapiary.rpc.v1\"\x8a\x02\n" +
 	"\fVMDefinition\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x14\n" +
 	"\x05vcpus\x18\x03 \x01(\rR\x05vcpus\x12\x1b\n" +
 	"\tmemory_mb\x18\x04 \x01(\x04R\bmemoryMb\x12\x17\n" +
 	"\anode_id\x18\x05 \x01(\tR\x06nodeId\x12;\n" +
-	"\rdesired_state\x18\x06 \x01(\x0e2\x16.apiary.rpc.v1.VMStateR\fdesiredState\"]\n" +
+	"\rdesired_state\x18\x06 \x01(\x0e2\x16.apiary.rpc.v1.VMStateR\fdesiredState\x12,\n" +
+	"\x05phase\x18\a \x01(\x0e2\x16.apiary.rpc.v1.VMPhaseR\x05phase\x12\x1f\n" +
+	"\vphase_error\x18\b \x01(\tR\n" +
+	"phaseError\"]\n" +
 	"\x0fCreateVMRequest\x12+\n" +
 	"\x02vm\x18\x01 \x01(\v2\x1b.apiary.rpc.v1.VMDefinitionR\x02vm\x12\x1d\n" +
 	"\n" +
@@ -931,11 +1015,18 @@ const file_api_rpc_manager_proto_rawDesc = "" +
 	"\n" +
 	"raft_state\x18\t \x01(\tR\traftState\x12$\n" +
 	"\x0eknown_node_ids\x18\n" +
-	" \x03(\tR\fknownNodeIds*O\n" +
+	" \x03(\tR\fknownNodeIds*f\n" +
 	"\aVMState\x12\x18\n" +
 	"\x14VM_STATE_UNSPECIFIED\x10\x00\x12\x14\n" +
 	"\x10VM_STATE_STOPPED\x10\x01\x12\x14\n" +
-	"\x10VM_STATE_RUNNING\x10\x022\xcc\x03\n" +
+	"\x10VM_STATE_RUNNING\x10\x02\x12\x15\n" +
+	"\x11VM_STATE_DELETING\x10\x03*y\n" +
+	"\aVMPhase\x12\x18\n" +
+	"\x14VM_PHASE_UNSPECIFIED\x10\x00\x12\x15\n" +
+	"\x11VM_PHASE_CREATING\x10\x01\x12\x12\n" +
+	"\x0eVM_PHASE_READY\x10\x02\x12\x15\n" +
+	"\x11VM_PHASE_DELETING\x10\x03\x12\x12\n" +
+	"\x0eVM_PHASE_ERROR\x10\x042\xcc\x03\n" +
 	"\x0eManagerService\x12E\n" +
 	"\x06Status\x12\x1c.apiary.rpc.v1.StatusRequest\x1a\x1d.apiary.rpc.v1.StatusResponse\x12K\n" +
 	"\bCreateVM\x12\x1e.apiary.rpc.v1.CreateVMRequest\x1a\x1f.apiary.rpc.v1.CreateVMResponse\x12K\n" +
@@ -956,50 +1047,52 @@ func file_api_rpc_manager_proto_rawDescGZIP() []byte {
 	return file_api_rpc_manager_proto_rawDescData
 }
 
-var file_api_rpc_manager_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
+var file_api_rpc_manager_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
 var file_api_rpc_manager_proto_msgTypes = make([]protoimpl.MessageInfo, 13)
 var file_api_rpc_manager_proto_goTypes = []any{
 	(VMState)(0),             // 0: apiary.rpc.v1.VMState
-	(*VMDefinition)(nil),     // 1: apiary.rpc.v1.VMDefinition
-	(*CreateVMRequest)(nil),  // 2: apiary.rpc.v1.CreateVMRequest
-	(*CreateVMResponse)(nil), // 3: apiary.rpc.v1.CreateVMResponse
-	(*UpdateVMRequest)(nil),  // 4: apiary.rpc.v1.UpdateVMRequest
-	(*UpdateVMResponse)(nil), // 5: apiary.rpc.v1.UpdateVMResponse
-	(*DeleteVMRequest)(nil),  // 6: apiary.rpc.v1.DeleteVMRequest
-	(*DeleteVMResponse)(nil), // 7: apiary.rpc.v1.DeleteVMResponse
-	(*GetVMRequest)(nil),     // 8: apiary.rpc.v1.GetVMRequest
-	(*GetVMResponse)(nil),    // 9: apiary.rpc.v1.GetVMResponse
-	(*ListVMsRequest)(nil),   // 10: apiary.rpc.v1.ListVMsRequest
-	(*ListVMsResponse)(nil),  // 11: apiary.rpc.v1.ListVMsResponse
-	(*StatusRequest)(nil),    // 12: apiary.rpc.v1.StatusRequest
-	(*StatusResponse)(nil),   // 13: apiary.rpc.v1.StatusResponse
+	(VMPhase)(0),             // 1: apiary.rpc.v1.VMPhase
+	(*VMDefinition)(nil),     // 2: apiary.rpc.v1.VMDefinition
+	(*CreateVMRequest)(nil),  // 3: apiary.rpc.v1.CreateVMRequest
+	(*CreateVMResponse)(nil), // 4: apiary.rpc.v1.CreateVMResponse
+	(*UpdateVMRequest)(nil),  // 5: apiary.rpc.v1.UpdateVMRequest
+	(*UpdateVMResponse)(nil), // 6: apiary.rpc.v1.UpdateVMResponse
+	(*DeleteVMRequest)(nil),  // 7: apiary.rpc.v1.DeleteVMRequest
+	(*DeleteVMResponse)(nil), // 8: apiary.rpc.v1.DeleteVMResponse
+	(*GetVMRequest)(nil),     // 9: apiary.rpc.v1.GetVMRequest
+	(*GetVMResponse)(nil),    // 10: apiary.rpc.v1.GetVMResponse
+	(*ListVMsRequest)(nil),   // 11: apiary.rpc.v1.ListVMsRequest
+	(*ListVMsResponse)(nil),  // 12: apiary.rpc.v1.ListVMsResponse
+	(*StatusRequest)(nil),    // 13: apiary.rpc.v1.StatusRequest
+	(*StatusResponse)(nil),   // 14: apiary.rpc.v1.StatusResponse
 }
 var file_api_rpc_manager_proto_depIdxs = []int32{
 	0,  // 0: apiary.rpc.v1.VMDefinition.desired_state:type_name -> apiary.rpc.v1.VMState
-	1,  // 1: apiary.rpc.v1.CreateVMRequest.vm:type_name -> apiary.rpc.v1.VMDefinition
-	1,  // 2: apiary.rpc.v1.CreateVMResponse.vm:type_name -> apiary.rpc.v1.VMDefinition
-	1,  // 3: apiary.rpc.v1.UpdateVMRequest.vm:type_name -> apiary.rpc.v1.VMDefinition
-	1,  // 4: apiary.rpc.v1.UpdateVMResponse.vm:type_name -> apiary.rpc.v1.VMDefinition
-	1,  // 5: apiary.rpc.v1.DeleteVMResponse.vm:type_name -> apiary.rpc.v1.VMDefinition
-	1,  // 6: apiary.rpc.v1.GetVMResponse.vm:type_name -> apiary.rpc.v1.VMDefinition
-	1,  // 7: apiary.rpc.v1.ListVMsResponse.vms:type_name -> apiary.rpc.v1.VMDefinition
-	12, // 8: apiary.rpc.v1.ManagerService.Status:input_type -> apiary.rpc.v1.StatusRequest
-	2,  // 9: apiary.rpc.v1.ManagerService.CreateVM:input_type -> apiary.rpc.v1.CreateVMRequest
-	4,  // 10: apiary.rpc.v1.ManagerService.UpdateVM:input_type -> apiary.rpc.v1.UpdateVMRequest
-	6,  // 11: apiary.rpc.v1.ManagerService.DeleteVM:input_type -> apiary.rpc.v1.DeleteVMRequest
-	8,  // 12: apiary.rpc.v1.ManagerService.GetVM:input_type -> apiary.rpc.v1.GetVMRequest
-	10, // 13: apiary.rpc.v1.ManagerService.ListVMs:input_type -> apiary.rpc.v1.ListVMsRequest
-	13, // 14: apiary.rpc.v1.ManagerService.Status:output_type -> apiary.rpc.v1.StatusResponse
-	3,  // 15: apiary.rpc.v1.ManagerService.CreateVM:output_type -> apiary.rpc.v1.CreateVMResponse
-	5,  // 16: apiary.rpc.v1.ManagerService.UpdateVM:output_type -> apiary.rpc.v1.UpdateVMResponse
-	7,  // 17: apiary.rpc.v1.ManagerService.DeleteVM:output_type -> apiary.rpc.v1.DeleteVMResponse
-	9,  // 18: apiary.rpc.v1.ManagerService.GetVM:output_type -> apiary.rpc.v1.GetVMResponse
-	11, // 19: apiary.rpc.v1.ManagerService.ListVMs:output_type -> apiary.rpc.v1.ListVMsResponse
-	14, // [14:20] is the sub-list for method output_type
-	8,  // [8:14] is the sub-list for method input_type
-	8,  // [8:8] is the sub-list for extension type_name
-	8,  // [8:8] is the sub-list for extension extendee
-	0,  // [0:8] is the sub-list for field type_name
+	1,  // 1: apiary.rpc.v1.VMDefinition.phase:type_name -> apiary.rpc.v1.VMPhase
+	2,  // 2: apiary.rpc.v1.CreateVMRequest.vm:type_name -> apiary.rpc.v1.VMDefinition
+	2,  // 3: apiary.rpc.v1.CreateVMResponse.vm:type_name -> apiary.rpc.v1.VMDefinition
+	2,  // 4: apiary.rpc.v1.UpdateVMRequest.vm:type_name -> apiary.rpc.v1.VMDefinition
+	2,  // 5: apiary.rpc.v1.UpdateVMResponse.vm:type_name -> apiary.rpc.v1.VMDefinition
+	2,  // 6: apiary.rpc.v1.DeleteVMResponse.vm:type_name -> apiary.rpc.v1.VMDefinition
+	2,  // 7: apiary.rpc.v1.GetVMResponse.vm:type_name -> apiary.rpc.v1.VMDefinition
+	2,  // 8: apiary.rpc.v1.ListVMsResponse.vms:type_name -> apiary.rpc.v1.VMDefinition
+	13, // 9: apiary.rpc.v1.ManagerService.Status:input_type -> apiary.rpc.v1.StatusRequest
+	3,  // 10: apiary.rpc.v1.ManagerService.CreateVM:input_type -> apiary.rpc.v1.CreateVMRequest
+	5,  // 11: apiary.rpc.v1.ManagerService.UpdateVM:input_type -> apiary.rpc.v1.UpdateVMRequest
+	7,  // 12: apiary.rpc.v1.ManagerService.DeleteVM:input_type -> apiary.rpc.v1.DeleteVMRequest
+	9,  // 13: apiary.rpc.v1.ManagerService.GetVM:input_type -> apiary.rpc.v1.GetVMRequest
+	11, // 14: apiary.rpc.v1.ManagerService.ListVMs:input_type -> apiary.rpc.v1.ListVMsRequest
+	14, // 15: apiary.rpc.v1.ManagerService.Status:output_type -> apiary.rpc.v1.StatusResponse
+	4,  // 16: apiary.rpc.v1.ManagerService.CreateVM:output_type -> apiary.rpc.v1.CreateVMResponse
+	6,  // 17: apiary.rpc.v1.ManagerService.UpdateVM:output_type -> apiary.rpc.v1.UpdateVMResponse
+	8,  // 18: apiary.rpc.v1.ManagerService.DeleteVM:output_type -> apiary.rpc.v1.DeleteVMResponse
+	10, // 19: apiary.rpc.v1.ManagerService.GetVM:output_type -> apiary.rpc.v1.GetVMResponse
+	12, // 20: apiary.rpc.v1.ManagerService.ListVMs:output_type -> apiary.rpc.v1.ListVMsResponse
+	15, // [15:21] is the sub-list for method output_type
+	9,  // [9:15] is the sub-list for method input_type
+	9,  // [9:9] is the sub-list for extension type_name
+	9,  // [9:9] is the sub-list for extension extendee
+	0,  // [0:9] is the sub-list for field type_name
 }
 
 func init() { file_api_rpc_manager_proto_init() }
@@ -1012,7 +1105,7 @@ func file_api_rpc_manager_proto_init() {
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_api_rpc_manager_proto_rawDesc), len(file_api_rpc_manager_proto_rawDesc)),
-			NumEnums:      1,
+			NumEnums:      2,
 			NumMessages:   13,
 			NumExtensions: 0,
 			NumServices:   1,

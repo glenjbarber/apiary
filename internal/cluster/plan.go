@@ -19,13 +19,26 @@ package cluster
 import "sort"
 
 // VMPlacement is the information the reconciler needs about a VM to
-// provision it locally: which node it's assigned to, and the resource
-// shape to provision with.
+// provision (or tear down) it locally: which node it's assigned to, the
+// resource shape to provision with, and its current tombstone/phase
+// state. Deliberately plain Go types rather than internalpb's, keeping
+// this package's core logic independent of the wire schema's evolution -
+// reconciler.go does the translation.
 type VMPlacement struct {
 	ID       string
 	NodeID   string
 	Vcpus    uint32
 	MemoryMB uint64
+
+	// Deleting is true once the VM has been soft-deleted (see
+	// api/internalpb's VM_STATE_DELETING) - ensureVM tears its resources
+	// down instead of provisioning them.
+	Deleting bool
+
+	// Phase is the last phase this reconciler itself recorded for this
+	// VM ("", "creating", "ready", "deleting", "error") - read back so a
+	// tick doesn't redundantly re-submit a phase update it already made.
+	Phase string
 }
 
 // Plan returns the VMs assigned to localNodeID, sorted by ID for
@@ -36,13 +49,14 @@ type VMPlacement struct {
 // convergence-per-resource is simpler and safer than trying to track
 // per-resource-type existence in one combined pass.
 //
-// This deliberately never computes anything to *remove*. A VM
-// disappearing from the list - whether deleted, reassigned, or the
+// This deliberately never *infers* anything to remove from a VM's
+// absence. A VM disappearing from the list - whether reassigned, or the
 // fetch simply failed - is not safely distinguishable from "tear this
 // down" without more care than a first slice should assume (grace
-// periods, confirming the removal is intentional). Cleanup of
-// datasets/VMs for VMs no longer assigned here is a deliberate future
-// decision, not an accidental default.
+// periods, confirming the removal is intentional). Teardown only ever
+// happens for a VM that is still present and explicitly marked Deleting
+// (see ADR-0016) - an unambiguous, caller-originated signal, not an
+// absence Plan would have to guess about.
 func Plan(desired []VMPlacement, localNodeID string) []VMPlacement {
 	var assigned []VMPlacement
 	for _, vm := range desired {

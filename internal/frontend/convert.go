@@ -18,6 +18,14 @@ type vmView struct {
 	MemoryMB     uint64
 	NodeID       string
 	DesiredState string
+
+	// Phase is the reconciler's own observed progress ("pending",
+	// "creating", "ready", "deleting", "error") - this is what the VM
+	// table's State column shows, since desired_state alone (what a
+	// caller asked for) never reflected whether that had actually
+	// happened yet.
+	Phase      string
+	PhaseError string
 }
 
 func stateToRPC(s string) rpcpb.VMState {
@@ -37,8 +45,29 @@ func stateFromRPC(s rpcpb.VMState) string {
 		return "running"
 	case rpcpb.VMState_VM_STATE_STOPPED:
 		return "stopped"
+	case rpcpb.VMState_VM_STATE_DELETING:
+		return "deleting"
 	default:
 		return ""
+	}
+}
+
+// phaseFromRPC renders VM_PHASE_UNSPECIFIED as "pending" - a VM that's
+// never been reconciled by any node yet (no node picked it up, or it
+// hasn't ticked since creation) is meaningfully different from one the
+// reconciler is actively working on.
+func phaseFromRPC(p rpcpb.VMPhase) string {
+	switch p {
+	case rpcpb.VMPhase_VM_PHASE_CREATING:
+		return "creating"
+	case rpcpb.VMPhase_VM_PHASE_READY:
+		return "ready"
+	case rpcpb.VMPhase_VM_PHASE_DELETING:
+		return "deleting"
+	case rpcpb.VMPhase_VM_PHASE_ERROR:
+		return "error"
+	default:
+		return "pending"
 	}
 }
 
@@ -53,5 +82,7 @@ func fromRPCVM(d *rpcpb.VMDefinition) vmView {
 		MemoryMB:     d.GetMemoryMb(),
 		NodeID:       d.GetNodeId(),
 		DesiredState: stateFromRPC(d.GetDesiredState()),
+		Phase:        phaseFromRPC(d.GetPhase()),
+		PhaseError:   d.GetPhaseError(),
 	}
 }

@@ -19,6 +19,26 @@ enum VMState {
   VM_STATE_UNSPECIFIED = 0;
   VM_STATE_STOPPED = 1;
   VM_STATE_RUNNING = 2;
+
+  // VM_STATE_DELETING is a soft-delete tombstone: DeleteVM sets this
+  // instead of removing the record outright (unless the VM was never
+  // assigned to a node, in which case there's nothing physical to tear
+  // down and it's removed immediately). The owning node's reconciler
+  // notices this, tears down its real dataset/bhyve VM, then submits
+  // PurgeVM to remove the record for good - see ADR-0016.
+  VM_STATE_DELETING = 3;
+}
+
+// VMPhase is the reconciler's own observed progress toward a VM's
+// desired state - distinct from desired_state, which is only ever what
+// a caller asked for. Written back by the owning node's reconciler via
+// UpdateVMPhase, never by CreateVM/UpdateVM directly.
+enum VMPhase {
+  VM_PHASE_UNSPECIFIED = 0; // not yet reconciled by any node
+  VM_PHASE_CREATING = 1;
+  VM_PHASE_READY = 2;
+  VM_PHASE_DELETING = 3;
+  VM_PHASE_ERROR = 4;
 }
 
 // VMDefinition is a VM's ephemeral definition: its identity, resource
@@ -36,6 +56,12 @@ message VMDefinition {
   string node_id = 5;
 
   VMState desired_state = 6;
+
+  VMPhase phase = 7;
+
+  // phase_error holds the last reconcile error's message when phase ==
+  // VM_PHASE_ERROR; empty otherwise.
+  string phase_error = 8;
 }
 
 // Command is the typed payload carried in ApplyRequest.payload (replacing
@@ -45,6 +71,11 @@ message Command {
     CreateVM create_vm = 1;
     UpdateVM update_vm = 2;
     DeleteVM delete_vm = 3;
+
+    // UpdateVMPhase and PurgeVM are submitted by a node's own reconciler,
+    // never by an external caller - see ADR-0016.
+    UpdateVMPhase update_vm_phase = 4;
+    PurgeVM purge_vm = 5;
   }
 }
 
@@ -60,9 +91,28 @@ message UpdateVM {
   VMDefinition vm = 1;
 }
 
-// DeleteVM removes a VM definition. It fails if no VM with the given id
-// exists.
+// DeleteVM marks a VM definition for deletion (see VM_STATE_DELETING). It
+// fails if no VM with the given id exists.
 message DeleteVM {
+  string id = 1;
+}
+
+// UpdateVMPhase records reconciliation progress against an existing VM
+// definition. Unlike UpdateVM, it never touches desired_state - only the
+// observed phase. It's a no-op error (not applied) if the VM no longer
+// exists, which can happen if it was purged out from under a stale
+// reconcile attempt.
+message UpdateVMPhase {
+  string id = 1;
+  VMPhase phase = 2;
+  string phase_error = 3;
+}
+
+// PurgeVM removes a VM definition outright, regardless of its current
+// phase. Submitted only by the owning node's reconciler, after it has
+// confirmed the VM's real local resources are torn down. Idempotent: not
+// an error if the id is already gone.
+message PurgeVM {
   string id = 1;
 }
 

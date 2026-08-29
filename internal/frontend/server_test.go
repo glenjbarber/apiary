@@ -67,7 +67,7 @@ func newTestServer(t *testing.T, client *fakeClient) *Server {
 
 func TestServer_Index(t *testing.T) {
 	client := &fakeClient{listResp: &rpcpb.ListVMsResponse{
-		Vms: []*rpcpb.VMDefinition{{Id: "vm-1", Name: "web-1", DesiredState: rpcpb.VMState_VM_STATE_RUNNING}},
+		Vms: []*rpcpb.VMDefinition{{Id: "vm-1", Name: "web-1", Phase: rpcpb.VMPhase_VM_PHASE_READY}},
 	}}
 	s := newTestServer(t, client)
 
@@ -82,8 +82,23 @@ func TestServer_Index(t *testing.T) {
 	if !strings.Contains(body, "vm-1") || !strings.Contains(body, "web-1") {
 		t.Errorf("index page missing expected VM data, got: %s", body)
 	}
-	if !strings.Contains(body, "running") {
-		t.Errorf("index page missing desired_state, got: %s", body)
+	if !strings.Contains(body, "ready") {
+		t.Errorf("index page missing observed phase, got: %s", body)
+	}
+}
+
+func TestServer_Index_ShowsPendingPhaseForUnreconciledVM(t *testing.T) {
+	client := &fakeClient{listResp: &rpcpb.ListVMsResponse{
+		Vms: []*rpcpb.VMDefinition{{Id: "vm-1", Name: "web-1"}}, // Phase left unset
+	}}
+	s := newTestServer(t, client)
+
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, req)
+
+	if !strings.Contains(rec.Body.String(), "pending") {
+		t.Errorf("index page should show 'pending' for a VM with no observed phase yet, got: %s", rec.Body.String())
 	}
 }
 

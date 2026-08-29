@@ -4,26 +4,71 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
+
+	"google.golang.org/protobuf/proto"
 
 	internalpb "github.com/glenjbarber/apiary/api/internalpb"
 	"github.com/glenjbarber/apiary/internal/bhyve"
 )
 
-type fakeVMLister struct {
+// fakeRaftClient is a fake raftClient: ListVMs returns a fixed response,
+// and Apply records every command submitted (phase updates, purges) so
+// tests can assert on the reconciler's own status-reporting behavior.
+type fakeRaftClient struct {
 	resp *internalpb.ListVMsResponse
 	err  error
+
+	applied  []*internalpb.Command
+	applyErr error
 }
 
-func (f *fakeVMLister) ListVMs(context.Context) (*internalpb.ListVMsResponse, error) {
+func (f *fakeRaftClient) ListVMs(context.Context) (*internalpb.ListVMsResponse, error) {
 	return f.resp, f.err
 }
 
+func (f *fakeRaftClient) Apply(_ context.Context, payload []byte, _ time.Duration) (*internalpb.ApplyResponse, error) {
+	if f.applyErr != nil {
+		return nil, f.applyErr
+	}
+	var cmd internalpb.Command
+	if err := proto.Unmarshal(payload, &cmd); err != nil {
+		return nil, err
+	}
+	f.applied = append(f.applied, &cmd)
+	return &internalpb.ApplyResponse{}, nil
+}
+
+// phaseUpdatesFor returns every phase this fake recorded being applied
+// to id, in submission order.
+func (f *fakeRaftClient) phaseUpdatesFor(id string) []internalpb.VMPhase {
+	var phases []internalpb.VMPhase
+	for _, cmd := range f.applied {
+		if upd := cmd.GetUpdateVmPhase(); upd != nil && upd.GetId() == id {
+			phases = append(phases, upd.GetPhase())
+		}
+	}
+	return phases
+}
+
+func (f *fakeRaftClient) purgedIDs() []string {
+	var ids []string
+	for _, cmd := range f.applied {
+		if p := cmd.GetPurgeVm(); p != nil {
+			ids = append(ids, p.GetId())
+		}
+	}
+	return ids
+}
+
 type fakeDatasetManager struct {
-	existing map[string]bool
-	created  []string
+	existing  map[string]bool
+	created   []string
+	destroyed []string
 
 	existsErr     error
 	createErr     error
+	destroyErr    error
 	getPropErr    error
 	mountpointFor map[string]string
 }
@@ -48,6 +93,15 @@ func (f *fakeDatasetManager) CreateDataset(_ context.Context, name string) error
 	return nil
 }
 
+func (f *fakeDatasetManager) DestroyDataset(_ context.Context, name string) error {
+	if f.destroyErr != nil {
+		return f.destroyErr
+	}
+	f.destroyed = append(f.destroyed, name)
+	delete(f.existing, name)
+	return nil
+}
+
 func (f *fakeDatasetManager) GetProperty(_ context.Context, name, _ string) (string, error) {
 	if f.getPropErr != nil {
 		return "", f.getPropErr
@@ -56,11 +110,13 @@ func (f *fakeDatasetManager) GetProperty(_ context.Context, name, _ string) (str
 }
 
 type fakeVMManager struct {
-	running   map[string]bool
-	created   []string
-	lastCfg   map[string]bhyve.Config
-	existsErr error
-	createErr error
+	running    map[string]bool
+	created    []string
+	destroyed  []string
+	lastCfg    map[string]bhyve.Config
+	existsErr  error
+	createErr  error
+	destroyErr error
 }
 
 func newFakeVMManager() *fakeVMManager {
@@ -84,8 +140,17 @@ func (f *fakeVMManager) CreateVM(_ context.Context, name string, cfg bhyve.Confi
 	return nil
 }
 
+func (f *fakeVMManager) DestroyVM(_ context.Context, name string) error {
+	if f.destroyErr != nil {
+		return f.destroyErr
+	}
+	f.destroyed = append(f.destroyed, name)
+	delete(f.running, name)
+	return nil
+}
+
 func TestReconciler_RunOnce_CreatesMissingDatasets(t *testing.T) {
-	raft := &fakeVMLister{resp: &internalpb.ListVMsResponse{
+	raft := &fakeRaftClient{resp: &internalpb.ListVMsResponse{
 		Vms: []*internalpb.VMDefinition{
 			{Id: "vm-1", NodeId: "node-a"},
 			{Id: "vm-2", NodeId: "node-b"},
@@ -104,7 +169,7 @@ func TestReconciler_RunOnce_CreatesMissingDatasets(t *testing.T) {
 }
 
 func TestReconciler_RunOnce_SkipsExistingDataset(t *testing.T) {
-	raft := &fakeVMLister{resp: &internalpb.ListVMsResponse{
+	raft := &fakeRaftClient{resp: &internalpb.ListVMsResponse{
 		Vms: []*internalpb.VMDefinition{{Id: "vm-1", NodeId: "node-a"}},
 	}}
 	zfs := newFakeDatasetManager()
@@ -120,7 +185,7 @@ func TestReconciler_RunOnce_SkipsExistingDataset(t *testing.T) {
 }
 
 func TestReconciler_RunOnce_FailsWithoutProvisioningOnListVMsError(t *testing.T) {
-	raft := &fakeVMLister{err: errors.New("raftd unreachable")}
+	raft := &fakeRaftClient{err: errors.New("raftd unreachable")}
 	zfs := newFakeDatasetManager()
 
 	r := &Reconciler{Raft: raft, ZFS: zfs, LocalNodeID: "node-a"}
@@ -136,7 +201,7 @@ func TestReconciler_RunOnce_FailsWithoutProvisioningOnApplicationError(t *testin
 	// A non-leader raftd returns a normal response with .Error set, not a
 	// transport error - RunOnce must treat that the same as a hard
 	// failure, not an empty VM list.
-	raft := &fakeVMLister{resp: &internalpb.ListVMsResponse{Error: "not the leader"}}
+	raft := &fakeRaftClient{resp: &internalpb.ListVMsResponse{Error: "not the leader"}}
 	zfs := newFakeDatasetManager()
 
 	r := &Reconciler{Raft: raft, ZFS: zfs, LocalNodeID: "node-a"}
@@ -149,7 +214,7 @@ func TestReconciler_RunOnce_FailsWithoutProvisioningOnApplicationError(t *testin
 }
 
 func TestReconciler_RunOnce_PropagatesCreateDatasetError(t *testing.T) {
-	raft := &fakeVMLister{resp: &internalpb.ListVMsResponse{
+	raft := &fakeRaftClient{resp: &internalpb.ListVMsResponse{
 		Vms: []*internalpb.VMDefinition{{Id: "vm-1", NodeId: "node-a"}},
 	}}
 	zfs := newFakeDatasetManager()
@@ -162,7 +227,7 @@ func TestReconciler_RunOnce_PropagatesCreateDatasetError(t *testing.T) {
 }
 
 func TestReconciler_RunOnce_WithoutBhyveOnlyProvisionsDataset(t *testing.T) {
-	raft := &fakeVMLister{resp: &internalpb.ListVMsResponse{
+	raft := &fakeRaftClient{resp: &internalpb.ListVMsResponse{
 		Vms: []*internalpb.VMDefinition{{Id: "vm-1", NodeId: "node-a"}},
 	}}
 	zfs := newFakeDatasetManager()
@@ -177,7 +242,7 @@ func TestReconciler_RunOnce_WithoutBhyveOnlyProvisionsDataset(t *testing.T) {
 }
 
 func TestReconciler_RunOnce_CreatesBhyveVMWithResourcesFromVMDefinition(t *testing.T) {
-	raft := &fakeVMLister{resp: &internalpb.ListVMsResponse{
+	raft := &fakeRaftClient{resp: &internalpb.ListVMsResponse{
 		Vms: []*internalpb.VMDefinition{{Id: "vm-1", NodeId: "node-a", Vcpus: 4, MemoryMb: 2048}},
 	}}
 	zfs := newFakeDatasetManager()
@@ -205,7 +270,7 @@ func TestReconciler_RunOnce_CreatesBhyveVMWithResourcesFromVMDefinition(t *testi
 }
 
 func TestReconciler_RunOnce_UsesDefaultResourcesWhenUnset(t *testing.T) {
-	raft := &fakeVMLister{resp: &internalpb.ListVMsResponse{
+	raft := &fakeRaftClient{resp: &internalpb.ListVMsResponse{
 		Vms: []*internalpb.VMDefinition{{Id: "vm-1", NodeId: "node-a"}}, // no Vcpus/MemoryMb
 	}}
 	zfs := newFakeDatasetManager()
@@ -224,7 +289,7 @@ func TestReconciler_RunOnce_UsesDefaultResourcesWhenUnset(t *testing.T) {
 }
 
 func TestReconciler_RunOnce_SkipsBhyveVMAlreadyRunning(t *testing.T) {
-	raft := &fakeVMLister{resp: &internalpb.ListVMsResponse{
+	raft := &fakeRaftClient{resp: &internalpb.ListVMsResponse{
 		Vms: []*internalpb.VMDefinition{{Id: "vm-1", NodeId: "node-a"}},
 	}}
 	zfs := newFakeDatasetManager()
@@ -238,5 +303,142 @@ func TestReconciler_RunOnce_SkipsBhyveVMAlreadyRunning(t *testing.T) {
 	}
 	if len(vms.created) != 0 {
 		t.Errorf("created = %v, want nothing (VM already running)", vms.created)
+	}
+}
+
+func TestReconciler_RunOnce_ReportsCreatingThenReadyPhase(t *testing.T) {
+	raft := &fakeRaftClient{resp: &internalpb.ListVMsResponse{
+		Vms: []*internalpb.VMDefinition{{Id: "vm-1", NodeId: "node-a"}},
+	}}
+	zfs := newFakeDatasetManager()
+
+	r := &Reconciler{Raft: raft, ZFS: zfs, LocalNodeID: "node-a"}
+	if err := r.RunOnce(context.Background()); err != nil {
+		t.Fatalf("RunOnce() error: %v", err)
+	}
+
+	got := raft.phaseUpdatesFor("vm-1")
+	want := []internalpb.VMPhase{internalpb.VMPhase_VM_PHASE_CREATING, internalpb.VMPhase_VM_PHASE_READY}
+	if len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
+		t.Errorf("phase updates = %v, want %v", got, want)
+	}
+}
+
+func TestReconciler_RunOnce_SkipsRedundantPhaseUpdateWhenAlreadyReady(t *testing.T) {
+	raft := &fakeRaftClient{resp: &internalpb.ListVMsResponse{
+		Vms: []*internalpb.VMDefinition{{Id: "vm-1", NodeId: "node-a", Phase: internalpb.VMPhase_VM_PHASE_READY}},
+	}}
+	zfs := newFakeDatasetManager()
+	zfs.existing["vm-1"] = true
+
+	r := &Reconciler{Raft: raft, ZFS: zfs, LocalNodeID: "node-a"}
+	if err := r.RunOnce(context.Background()); err != nil {
+		t.Fatalf("RunOnce() error: %v", err)
+	}
+
+	if got := raft.phaseUpdatesFor("vm-1"); len(got) != 0 {
+		t.Errorf("phase updates = %v, want none (already ready, dataset already exists)", got)
+	}
+}
+
+func TestReconciler_RunOnce_ReportsErrorPhaseOnFailure(t *testing.T) {
+	raft := &fakeRaftClient{resp: &internalpb.ListVMsResponse{
+		Vms: []*internalpb.VMDefinition{{Id: "vm-1", NodeId: "node-a"}},
+	}}
+	zfs := newFakeDatasetManager()
+	zfs.createErr = errors.New("disk full")
+
+	r := &Reconciler{Raft: raft, ZFS: zfs, LocalNodeID: "node-a"}
+	if err := r.RunOnce(context.Background()); err == nil {
+		t.Fatalf("RunOnce() = nil error, want the underlying CreateDataset error surfaced")
+	}
+
+	got := raft.phaseUpdatesFor("vm-1")
+	if len(got) != 2 || got[0] != internalpb.VMPhase_VM_PHASE_CREATING || got[1] != internalpb.VMPhase_VM_PHASE_ERROR {
+		t.Errorf("phase updates = %v, want [CREATING, ERROR]", got)
+	}
+}
+
+func TestReconciler_RunOnce_DeletingVMTearsDownDatasetAndPurges(t *testing.T) {
+	raft := &fakeRaftClient{resp: &internalpb.ListVMsResponse{
+		Vms: []*internalpb.VMDefinition{{Id: "vm-1", NodeId: "node-a", DesiredState: internalpb.VMState_VM_STATE_DELETING}},
+	}}
+	zfs := newFakeDatasetManager()
+	zfs.existing["vm-1"] = true
+
+	r := &Reconciler{Raft: raft, ZFS: zfs, LocalNodeID: "node-a"}
+	if err := r.RunOnce(context.Background()); err != nil {
+		t.Fatalf("RunOnce() error: %v", err)
+	}
+
+	if len(zfs.destroyed) != 1 || zfs.destroyed[0] != "vm-1" {
+		t.Errorf("destroyed = %v, want [vm-1]", zfs.destroyed)
+	}
+	if got := raft.purgedIDs(); len(got) != 1 || got[0] != "vm-1" {
+		t.Errorf("purgedIDs = %v, want [vm-1]", got)
+	}
+}
+
+func TestReconciler_RunOnce_DeletingVMTearsDownBhyveVMFirst(t *testing.T) {
+	raft := &fakeRaftClient{resp: &internalpb.ListVMsResponse{
+		Vms: []*internalpb.VMDefinition{{Id: "vm-1", NodeId: "node-a", DesiredState: internalpb.VMState_VM_STATE_DELETING}},
+	}}
+	zfs := newFakeDatasetManager()
+	zfs.existing["vm-1"] = true
+	vms := newFakeVMManager()
+	vms.running["vm-1"] = true
+
+	r := &Reconciler{Raft: raft, ZFS: zfs, Bhyve: vms, LocalNodeID: "node-a", BootROM: "/fw/UEFI.fd"}
+	if err := r.RunOnce(context.Background()); err != nil {
+		t.Fatalf("RunOnce() error: %v", err)
+	}
+
+	if len(vms.destroyed) != 1 || vms.destroyed[0] != "vm-1" {
+		t.Errorf("bhyve destroyed = %v, want [vm-1]", vms.destroyed)
+	}
+	if len(zfs.destroyed) != 1 || zfs.destroyed[0] != "vm-1" {
+		t.Errorf("dataset destroyed = %v, want [vm-1]", zfs.destroyed)
+	}
+	if got := raft.purgedIDs(); len(got) != 1 || got[0] != "vm-1" {
+		t.Errorf("purgedIDs = %v, want [vm-1]", got)
+	}
+}
+
+func TestReconciler_RunOnce_DeletingVMWithNoResourcesStillPurges(t *testing.T) {
+	// A VM that was tombstoned before it was ever actually reconciled
+	// (no dataset, no bhyve VM) must still converge - teardown is a
+	// no-op for resources that don't exist, but the purge still happens.
+	raft := &fakeRaftClient{resp: &internalpb.ListVMsResponse{
+		Vms: []*internalpb.VMDefinition{{Id: "vm-1", NodeId: "node-a", DesiredState: internalpb.VMState_VM_STATE_DELETING}},
+	}}
+	zfs := newFakeDatasetManager()
+
+	r := &Reconciler{Raft: raft, ZFS: zfs, LocalNodeID: "node-a"}
+	if err := r.RunOnce(context.Background()); err != nil {
+		t.Fatalf("RunOnce() error: %v", err)
+	}
+
+	if len(zfs.destroyed) != 0 {
+		t.Errorf("destroyed = %v, want none (nothing existed)", zfs.destroyed)
+	}
+	if got := raft.purgedIDs(); len(got) != 1 || got[0] != "vm-1" {
+		t.Errorf("purgedIDs = %v, want [vm-1]", got)
+	}
+}
+
+func TestReconciler_RunOnce_DeletingVMPropagatesTeardownError(t *testing.T) {
+	raft := &fakeRaftClient{resp: &internalpb.ListVMsResponse{
+		Vms: []*internalpb.VMDefinition{{Id: "vm-1", NodeId: "node-a", DesiredState: internalpb.VMState_VM_STATE_DELETING}},
+	}}
+	zfs := newFakeDatasetManager()
+	zfs.existing["vm-1"] = true
+	zfs.destroyErr = errors.New("dataset busy")
+
+	r := &Reconciler{Raft: raft, ZFS: zfs, LocalNodeID: "node-a"}
+	if err := r.RunOnce(context.Background()); err == nil {
+		t.Fatalf("RunOnce() = nil error, want the underlying DestroyDataset error surfaced")
+	}
+	if got := raft.purgedIDs(); len(got) != 0 {
+		t.Errorf("purgedIDs = %v, want none (teardown failed, must not purge)", got)
 	}
 }

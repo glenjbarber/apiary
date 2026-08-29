@@ -63,6 +63,10 @@ func (f *FSM) Apply(log *raft.Log) interface{} {
 		return f.applyUpdateVM(log.Index, op.UpdateVm.GetVm())
 	case *internalpb.Command_DeleteVm:
 		return f.applyDeleteVM(log.Index, op.DeleteVm.GetId())
+	case *internalpb.Command_UpdateVmPhase:
+		return f.applyUpdateVMPhase(log.Index, op.UpdateVmPhase)
+	case *internalpb.Command_PurgeVm:
+		return f.applyPurgeVM(log.Index, op.PurgeVm.GetId())
 	default:
 		return &FSMApplyResult{Index: log.Index, Error: "command has no op set"}
 	}
@@ -87,11 +91,51 @@ func (f *FSM) applyUpdateVM(index uint64, vm *internalpb.VMDefinition) *FSMApply
 	return &FSMApplyResult{Index: index, VM: vm}
 }
 
+// applyDeleteVM marks vm for deletion rather than removing it outright,
+// unless it was never assigned to a node - with no node_id, no
+// reconciler will ever pick it up to tear down real resources (there are
+// none) or to purge the tombstone, so removing it immediately is both
+// safe and necessary. Otherwise it's soft-deleted (VM_STATE_DELETING);
+// the owning node's reconciler tears down its real resources and then
+// submits PurgeVM to finish the job. Deleting an already-deleting VM is
+// not an error - it's the same request landing twice.
 func (f *FSM) applyDeleteVM(index uint64, id string) *FSMApplyResult {
 	vm, exists := f.vms[id]
 	if !exists {
 		return &FSMApplyResult{Index: index, Error: fmt.Sprintf("DeleteVM: id %q does not exist", id)}
 	}
+	if vm.GetNodeId() == "" {
+		delete(f.vms, id)
+		return &FSMApplyResult{Index: index, VM: vm}
+	}
+	updated := proto.Clone(vm).(*internalpb.VMDefinition)
+	updated.DesiredState = internalpb.VMState_VM_STATE_DELETING
+	f.vms[id] = updated
+	return &FSMApplyResult{Index: index, VM: updated}
+}
+
+// applyUpdateVMPhase records reconciliation progress against an existing
+// VM. It never touches desired_state. A missing id is reported as an
+// error but is not a bug - it can happen if a stale reconcile attempt's
+// phase update loses a race against that same VM being purged.
+func (f *FSM) applyUpdateVMPhase(index uint64, upd *internalpb.UpdateVMPhase) *FSMApplyResult {
+	vm, exists := f.vms[upd.GetId()]
+	if !exists {
+		return &FSMApplyResult{Index: index, Error: fmt.Sprintf("UpdateVMPhase: id %q does not exist", upd.GetId())}
+	}
+	updated := proto.Clone(vm).(*internalpb.VMDefinition)
+	updated.Phase = upd.GetPhase()
+	updated.PhaseError = upd.GetPhaseError()
+	f.vms[upd.GetId()] = updated
+	return &FSMApplyResult{Index: index, VM: updated}
+}
+
+// applyPurgeVM removes a VM definition outright. Idempotent: purging an
+// id that's already gone is not an error, since the reconciler that
+// submits this may retry after a partial failure (e.g. it purged
+// successfully but never saw the response).
+func (f *FSM) applyPurgeVM(index uint64, id string) *FSMApplyResult {
+	vm := f.vms[id]
 	delete(f.vms, id)
 	return &FSMApplyResult{Index: index, VM: vm}
 }

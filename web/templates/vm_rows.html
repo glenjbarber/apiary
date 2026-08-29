@@ -7,7 +7,7 @@
   <td>{{.VCPUs}}</td>
   <td>{{.MemoryMB}}</td>
   <td>{{.NodeID}}</td>
-  <td>{{.DesiredState}}</td>
+  <td{{if eq .Phase "error"}} title="{{.PhaseError}}"{{end}}>{{.Phase}}</td>
   <td>
     <button hx-delete="/vms/{{.ID}}" hx-target="#vm-rows" hx-swap="innerHTML" hx-confirm="Delete {{.ID}}?">Delete</button>
   </td>
