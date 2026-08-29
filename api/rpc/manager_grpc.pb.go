@@ -19,19 +19,25 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	ManagerService_Status_FullMethodName = "/apiary.rpc.v1.ManagerService/Status"
+	ManagerService_Status_FullMethodName   = "/apiary.rpc.v1.ManagerService/Status"
+	ManagerService_CreateVM_FullMethodName = "/apiary.rpc.v1.ManagerService/CreateVM"
+	ManagerService_UpdateVM_FullMethodName = "/apiary.rpc.v1.ManagerService/UpdateVM"
+	ManagerService_DeleteVM_FullMethodName = "/apiary.rpc.v1.ManagerService/DeleteVM"
 )
 
 // ManagerServiceClient is the client API for ManagerService service.
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 //
-// ManagerService is the external RPC API exposed by managerd. It is
-// deliberately diagnostic-only for v1: there is no bhyve/jail/zfs backend
-// yet, so operations like CreateVM or MigrateVM have nothing real to do.
-// Status proves the full external-client -> managerd -> raftd chain works.
+// ManagerService is the external RPC API exposed by managerd.
+// CreateVM/UpdateVM/DeleteVM record ephemeral VM definitions via raftd -
+// there is still no bhyve/jail/zfs backend, so nothing actually runs a VM
+// yet, but the definitions are real, replicated, and persisted.
 type ManagerServiceClient interface {
 	Status(ctx context.Context, in *StatusRequest, opts ...grpc.CallOption) (*StatusResponse, error)
+	CreateVM(ctx context.Context, in *CreateVMRequest, opts ...grpc.CallOption) (*CreateVMResponse, error)
+	UpdateVM(ctx context.Context, in *UpdateVMRequest, opts ...grpc.CallOption) (*UpdateVMResponse, error)
+	DeleteVM(ctx context.Context, in *DeleteVMRequest, opts ...grpc.CallOption) (*DeleteVMResponse, error)
 }
 
 type managerServiceClient struct {
@@ -52,16 +58,49 @@ func (c *managerServiceClient) Status(ctx context.Context, in *StatusRequest, op
 	return out, nil
 }
 
+func (c *managerServiceClient) CreateVM(ctx context.Context, in *CreateVMRequest, opts ...grpc.CallOption) (*CreateVMResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(CreateVMResponse)
+	err := c.cc.Invoke(ctx, ManagerService_CreateVM_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *managerServiceClient) UpdateVM(ctx context.Context, in *UpdateVMRequest, opts ...grpc.CallOption) (*UpdateVMResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(UpdateVMResponse)
+	err := c.cc.Invoke(ctx, ManagerService_UpdateVM_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *managerServiceClient) DeleteVM(ctx context.Context, in *DeleteVMRequest, opts ...grpc.CallOption) (*DeleteVMResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(DeleteVMResponse)
+	err := c.cc.Invoke(ctx, ManagerService_DeleteVM_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // ManagerServiceServer is the server API for ManagerService service.
 // All implementations must embed UnimplementedManagerServiceServer
 // for forward compatibility.
 //
-// ManagerService is the external RPC API exposed by managerd. It is
-// deliberately diagnostic-only for v1: there is no bhyve/jail/zfs backend
-// yet, so operations like CreateVM or MigrateVM have nothing real to do.
-// Status proves the full external-client -> managerd -> raftd chain works.
+// ManagerService is the external RPC API exposed by managerd.
+// CreateVM/UpdateVM/DeleteVM record ephemeral VM definitions via raftd -
+// there is still no bhyve/jail/zfs backend, so nothing actually runs a VM
+// yet, but the definitions are real, replicated, and persisted.
 type ManagerServiceServer interface {
 	Status(context.Context, *StatusRequest) (*StatusResponse, error)
+	CreateVM(context.Context, *CreateVMRequest) (*CreateVMResponse, error)
+	UpdateVM(context.Context, *UpdateVMRequest) (*UpdateVMResponse, error)
+	DeleteVM(context.Context, *DeleteVMRequest) (*DeleteVMResponse, error)
 	mustEmbedUnimplementedManagerServiceServer()
 }
 
@@ -74,6 +113,15 @@ type UnimplementedManagerServiceServer struct{}
 
 func (UnimplementedManagerServiceServer) Status(context.Context, *StatusRequest) (*StatusResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method Status not implemented")
+}
+func (UnimplementedManagerServiceServer) CreateVM(context.Context, *CreateVMRequest) (*CreateVMResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method CreateVM not implemented")
+}
+func (UnimplementedManagerServiceServer) UpdateVM(context.Context, *UpdateVMRequest) (*UpdateVMResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method UpdateVM not implemented")
+}
+func (UnimplementedManagerServiceServer) DeleteVM(context.Context, *DeleteVMRequest) (*DeleteVMResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method DeleteVM not implemented")
 }
 func (UnimplementedManagerServiceServer) mustEmbedUnimplementedManagerServiceServer() {}
 func (UnimplementedManagerServiceServer) testEmbeddedByValue()                        {}
@@ -114,6 +162,60 @@ func _ManagerService_Status_Handler(srv interface{}, ctx context.Context, dec fu
 	return interceptor(ctx, in, info, handler)
 }
 
+func _ManagerService_CreateVM_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(CreateVMRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ManagerServiceServer).CreateVM(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ManagerService_CreateVM_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ManagerServiceServer).CreateVM(ctx, req.(*CreateVMRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ManagerService_UpdateVM_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(UpdateVMRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ManagerServiceServer).UpdateVM(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ManagerService_UpdateVM_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ManagerServiceServer).UpdateVM(ctx, req.(*UpdateVMRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ManagerService_DeleteVM_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(DeleteVMRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ManagerServiceServer).DeleteVM(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ManagerService_DeleteVM_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ManagerServiceServer).DeleteVM(ctx, req.(*DeleteVMRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // ManagerService_ServiceDesc is the grpc.ServiceDesc for ManagerService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -124,6 +226,18 @@ var ManagerService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "Status",
 			Handler:    _ManagerService_Status_Handler,
+		},
+		{
+			MethodName: "CreateVM",
+			Handler:    _ManagerService_CreateVM_Handler,
+		},
+		{
+			MethodName: "UpdateVM",
+			Handler:    _ManagerService_UpdateVM_Handler,
+		},
+		{
+			MethodName: "DeleteVM",
+			Handler:    _ManagerService_DeleteVM_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

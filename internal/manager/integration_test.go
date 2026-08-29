@@ -174,3 +174,71 @@ func TestIntegration_StatusReportsUnreachableRaftd(t *testing.T) {
 		t.Errorf("RaftError is empty, want a populated error message")
 	}
 }
+
+func TestIntegration_CreateUpdateDeleteVM(t *testing.T) {
+	raftdSocket := newRaftdUDSSocket(t)
+	client := newManagerdRPCClient(t, raftdSocket)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	createResp, err := client.CreateVM(ctx, &rpcpb.CreateVMRequest{
+		Vm: &rpcpb.VMDefinition{Id: "vm-1", Name: "web-1", Vcpus: 2, MemoryMb: 1024},
+	})
+	if err != nil {
+		t.Fatalf("CreateVM() error: %v", err)
+	}
+	if createResp.GetError() != "" {
+		t.Fatalf("CreateVM() returned error: %s", createResp.GetError())
+	}
+	if createResp.GetVm().GetName() != "web-1" {
+		t.Errorf("CreateVM() vm.Name = %q, want %q", createResp.GetVm().GetName(), "web-1")
+	}
+
+	// Creating the same id again must be rejected.
+	dupResp, err := client.CreateVM(ctx, &rpcpb.CreateVMRequest{
+		Vm: &rpcpb.VMDefinition{Id: "vm-1", Name: "web-1-dup"},
+	})
+	if err != nil {
+		t.Fatalf("CreateVM() (dup) error: %v", err)
+	}
+	if dupResp.GetError() == "" {
+		t.Fatalf("CreateVM() (dup) error = empty, want a duplicate-id rejection")
+	}
+
+	updateResp, err := client.UpdateVM(ctx, &rpcpb.UpdateVMRequest{
+		Vm: &rpcpb.VMDefinition{Id: "vm-1", Name: "web-1-renamed", Vcpus: 4, MemoryMb: 2048, DesiredState: rpcpb.VMState_VM_STATE_RUNNING},
+	})
+	if err != nil {
+		t.Fatalf("UpdateVM() error: %v", err)
+	}
+	if updateResp.GetError() != "" {
+		t.Fatalf("UpdateVM() returned error: %s", updateResp.GetError())
+	}
+	if updateResp.GetVm().GetName() != "web-1-renamed" || updateResp.GetVm().GetVcpus() != 4 {
+		t.Errorf("UpdateVM() vm = %+v, want name=web-1-renamed vcpus=4", updateResp.GetVm())
+	}
+	if updateResp.GetVm().GetDesiredState() != rpcpb.VMState_VM_STATE_RUNNING {
+		t.Errorf("UpdateVM() vm.DesiredState = %v, want RUNNING", updateResp.GetVm().GetDesiredState())
+	}
+
+	deleteResp, err := client.DeleteVM(ctx, &rpcpb.DeleteVMRequest{Id: "vm-1"})
+	if err != nil {
+		t.Fatalf("DeleteVM() error: %v", err)
+	}
+	if deleteResp.GetError() != "" {
+		t.Fatalf("DeleteVM() returned error: %s", deleteResp.GetError())
+	}
+	if deleteResp.GetVm().GetName() != "web-1-renamed" {
+		t.Errorf("DeleteVM() echoed vm.Name = %q, want the deleted definition's name", deleteResp.GetVm().GetName())
+	}
+
+	// Deleting again must fail: it no longer exists.
+	redeleteResp, err := client.DeleteVM(ctx, &rpcpb.DeleteVMRequest{Id: "vm-1"})
+	if err != nil {
+		t.Fatalf("DeleteVM() (2nd) error: %v", err)
+	}
+	if redeleteResp.GetError() == "" {
+		t.Fatalf("DeleteVM() (2nd) error = empty, want a missing-id rejection")
+	}
+}

@@ -4,12 +4,69 @@ package apiary.rpc.v1;
 
 option go_package = "github.com/glenjbarber/apiary/api/rpc;rpcpb";
 
-// ManagerService is the external RPC API exposed by managerd. It is
-// deliberately diagnostic-only for v1: there is no bhyve/jail/zfs backend
-// yet, so operations like CreateVM or MigrateVM have nothing real to do.
-// Status proves the full external-client -> managerd -> raftd chain works.
+// ManagerService is the external RPC API exposed by managerd.
+// CreateVM/UpdateVM/DeleteVM record ephemeral VM definitions via raftd -
+// there is still no bhyve/jail/zfs backend, so nothing actually runs a VM
+// yet, but the definitions are real, replicated, and persisted.
 service ManagerService {
   rpc Status(StatusRequest) returns (StatusResponse);
+
+  rpc CreateVM(CreateVMRequest) returns (CreateVMResponse);
+  rpc UpdateVM(UpdateVMRequest) returns (UpdateVMResponse);
+  rpc DeleteVM(DeleteVMRequest) returns (DeleteVMResponse);
+}
+
+// VMState mirrors api/internalpb's VMState. Kept as a separate type
+// (rather than reusing the internal package's) so the external schema
+// doesn't couple to the internal protocol's evolution - the same
+// reasoning ADR-0002 applied to StatusResponse.
+enum VMState {
+  VM_STATE_UNSPECIFIED = 0;
+  VM_STATE_STOPPED = 1;
+  VM_STATE_RUNNING = 2;
+}
+
+message VMDefinition {
+  string id = 1;
+  string name = 2;
+  uint32 vcpus = 3;
+  uint64 memory_mb = 4;
+  string node_id = 5;
+  VMState desired_state = 6;
+}
+
+message CreateVMRequest {
+  VMDefinition vm = 1;
+  uint32 timeout_ms = 2;
+}
+
+message CreateVMResponse {
+  VMDefinition vm = 1;
+  string error = 2;
+  string leader_hint = 3;
+}
+
+message UpdateVMRequest {
+  VMDefinition vm = 1;
+  uint32 timeout_ms = 2;
+}
+
+message UpdateVMResponse {
+  VMDefinition vm = 1;
+  string error = 2;
+  string leader_hint = 3;
+}
+
+message DeleteVMRequest {
+  string id = 1;
+  uint32 timeout_ms = 2;
+}
+
+message DeleteVMResponse {
+  // vm is the definition that was deleted, echoed back for confirmation.
+  VMDefinition vm = 1;
+  string error = 2;
+  string leader_hint = 3;
 }
 
 message StatusRequest {}
