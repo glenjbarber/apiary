@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -14,6 +15,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	internalpb "github.com/glenjbarber/apiary/api/internalpb"
+	"github.com/glenjbarber/apiary/internal/bhyve"
 	"github.com/glenjbarber/apiary/internal/manager"
 	raftnode "github.com/glenjbarber/apiary/internal/raft"
 	"github.com/glenjbarber/apiary/internal/zfs"
@@ -106,6 +108,153 @@ func TestIntegration_ReconcilerProvisionsRealDataset(t *testing.T) {
 	}
 	if exists {
 		t.Errorf("DatasetExists(vm-other) = true, want false (assigned to a different node)")
+	}
+}
+
+// This test exercises the full stack including bhyve: a real raft.Node,
+// a real zfs.Manager, and a real bhyve.Manager, proving Reconciler
+// provisions a dataset, a disk image inside it, and a running bhyve VM -
+// all from one RunOnce call. Requires a host with both zfs(8) and
+// hardware-assisted virtualization (see internal/bhyve's own
+// integration test doc comment for the exact requirements); skips
+// cleanly if either is unavailable. Set APIARY_ZFS_TEST_POOL and
+// APIARY_BHYVE_TEST_BOOTROM to override defaults, same as the
+// respective packages' own tests.
+func TestIntegration_ReconcilerProvisionsRealBhyveVM(t *testing.T) {
+	if _, err := exec.LookPath("zfs"); err != nil {
+		t.Skip("zfs not available on this host")
+	}
+	if _, err := exec.LookPath("bhyve"); err != nil {
+		t.Skip("bhyve not available on this host")
+	}
+	if out, err := exec.Command("kldstat").CombinedOutput(); err != nil || !strings.Contains(string(out), "vmm.ko") {
+		t.Skip("vmm(4) not loaded (kldload vmm)")
+	}
+	bootrom := os.Getenv("APIARY_BHYVE_TEST_BOOTROM")
+	if bootrom == "" {
+		bootrom = "/usr/local/share/uefi-firmware/BHYVE_UEFI.fd"
+	}
+	if _, err := os.Stat(bootrom); err != nil {
+		t.Skipf("boot ROM %s not present", bootrom)
+	}
+
+	pool := os.Getenv("APIARY_ZFS_TEST_POOL")
+	if pool == "" {
+		pool = "apiarytest"
+	}
+	base := fmt.Sprintf("%s/it-cluster-bhyve-%d", pool, time.Now().UnixNano())
+	ctx := context.Background()
+	if err := exec.CommandContext(ctx, "zfs", "create", "-p", base).Run(); err != nil {
+		t.Fatalf("creating test base dataset %s: %v", base, err)
+	}
+	t.Cleanup(func() {
+		exec.Command("zfs", "destroy", "-r", base).Run()
+	})
+
+	nodeCfg := raftnode.Config{NodeID: "node-a", DataDir: t.TempDir(), BindAddr: freeLoopbackAddr(t)}
+	node, err := raftnode.New(nodeCfg)
+	if err != nil {
+		t.Fatalf("raftnode.New() error: %v", err)
+	}
+	t.Cleanup(func() { node.Shutdown() })
+	if err := node.Bootstrap(); err != nil {
+		t.Fatalf("Bootstrap() error: %v", err)
+	}
+	eventually(t, 5*time.Second, func() bool { return node.Status().IsLeader })
+
+	socketDir, err := os.MkdirTemp("", "cluster-test-bhyve-uds")
+	if err != nil {
+		t.Fatalf("MkdirTemp() error: %v", err)
+	}
+	t.Cleanup(func() { os.RemoveAll(socketDir) })
+	socketPath := filepath.Join(socketDir, "raftd.sock")
+
+	lis, err := net.Listen("unix", socketPath)
+	if err != nil {
+		t.Fatalf("Listen(unix) error: %v", err)
+	}
+	grpcServer := grpc.NewServer()
+	internalpb.RegisterRaftInternalServer(grpcServer, raftnode.NewServer(node))
+	go grpcServer.Serve(lis)
+	t.Cleanup(grpcServer.GracefulStop)
+
+	raftClient, err := manager.Dial(socketPath)
+	if err != nil {
+		t.Fatalf("manager.Dial() error: %v", err)
+	}
+	t.Cleanup(func() { raftClient.Close() })
+
+	mustApplyCreateVMWithResources(t, node, "vm-real", "node-a", 2, 256)
+
+	zfsManager := zfs.New(base)
+	bhyvePrefix := fmt.Sprintf("apiary-it-%d-", time.Now().UnixNano())
+	bhyveManager := bhyve.New(bhyvePrefix)
+	bhyveManager.RunDir = t.TempDir()
+	t.Cleanup(func() { bhyveManager.DestroyVM(context.Background(), "vm-real") })
+
+	r := &Reconciler{
+		Raft:        raftClient,
+		ZFS:         zfsManager,
+		Bhyve:       bhyveManager,
+		LocalNodeID: "node-a",
+		BootROM:     bootrom,
+		DiskSizeMB:  64,
+	}
+	if err := r.RunOnce(ctx); err != nil {
+		t.Fatalf("RunOnce() error: %v", err)
+	}
+
+	exists, err := zfsManager.DatasetExists(ctx, "vm-real")
+	if err != nil {
+		t.Fatalf("DatasetExists() error: %v", err)
+	}
+	if !exists {
+		t.Fatalf("DatasetExists() = false, want true")
+	}
+
+	mountpoint, err := zfsManager.GetProperty(ctx, "vm-real", "mountpoint")
+	if err != nil {
+		t.Fatalf("GetProperty(mountpoint) error: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(mountpoint, diskImageName)); err != nil {
+		t.Errorf("disk image not created at %s: %v", filepath.Join(mountpoint, diskImageName), err)
+	}
+
+	var running bool
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		running, err = bhyveManager.VMExists(ctx, "vm-real")
+		if err != nil {
+			t.Fatalf("VMExists() error: %v", err)
+		}
+		if running {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if !running {
+		t.Fatalf("VMExists() = false after RunOnce, want the bhyve VM to be running")
+	}
+}
+
+// mustApplyCreateVMWithResources is mustApplyCreateVM plus explicit
+// vcpus/memory, for tests that need to verify those are threaded
+// through to bhyve.
+func mustApplyCreateVMWithResources(t *testing.T, node *raftnode.Node, id, nodeID string, vcpus uint32, memoryMB uint64) {
+	t.Helper()
+	cmd := &internalpb.Command{
+		Op: &internalpb.Command_CreateVm{
+			CreateVm: &internalpb.CreateVM{Vm: &internalpb.VMDefinition{
+				Id: id, NodeId: nodeID, Vcpus: vcpus, MemoryMb: memoryMB,
+			}},
+		},
+	}
+	data, err := proto.Marshal(cmd)
+	if err != nil {
+		t.Fatalf("marshaling CreateVM command: %v", err)
+	}
+	if _, err := node.Apply(data, 5*time.Second); err != nil {
+		t.Fatalf("Apply(CreateVM %s) error: %v", id, err)
 	}
 }
 

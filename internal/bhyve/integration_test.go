@@ -133,6 +133,43 @@ func TestIntegration_ListVMsOnlyReturnsOwnPrefix(t *testing.T) {
 	}
 }
 
+func TestIntegration_VMWithDisk(t *testing.T) {
+	m, cfg := testManager(t)
+	ctx := context.Background()
+
+	diskPath := t.TempDir() + "/disk.img"
+	f, err := os.Create(diskPath)
+	if err != nil {
+		t.Fatalf("creating disk image: %v", err)
+	}
+	if err := f.Truncate(64 * 1024 * 1024); err != nil {
+		t.Fatalf("truncating disk image: %v", err)
+	}
+	f.Close()
+
+	cfg.DiskPath = diskPath
+	if err := m.CreateVM(ctx, "vm-disk", cfg); err != nil {
+		t.Fatalf("CreateVM() with disk error: %v", err)
+	}
+	t.Cleanup(func() { m.DestroyVM(context.Background(), "vm-disk") })
+
+	deadline := time.Now().Add(5 * time.Second)
+	var exists bool
+	for time.Now().Before(deadline) {
+		exists, err = m.VMExists(ctx, "vm-disk")
+		if err != nil {
+			t.Fatalf("VMExists() error: %v", err)
+		}
+		if exists {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if !exists {
+		t.Fatalf("VMExists() = false after creation with a disk attached (timed out waiting)")
+	}
+}
+
 func TestQualifiedName_RejectsInvalidCharacters(t *testing.T) {
 	m := New("apiary-")
 	for _, name := range []string{"", "has space", "has.dot", "has/slash", "has\"quote"} {

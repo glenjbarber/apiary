@@ -12,11 +12,10 @@ import (
 // DefaultRunDir is where pidfiles for detached bhyve processes are kept.
 const DefaultRunDir = "/var/run/apiary/bhyve"
 
-// Config describes a VM to create. There is no disk or network
-// configuration yet - v1 proves the create/destroy/list lifecycle using
-// just a boot ROM, the same "prove the primitive first" scope
-// internal/zfs and internal/jail used. Disk (via internal/zfs-backed
-// datasets) and networking are separate future slices.
+// Config describes a VM to create. There is still no network
+// configuration - that's a separate future slice (per-VM IP allocation
+// is ephemeral-state-shaped work, not purely local jail/VM config, per
+// ADR-0010's consequences).
 type Config struct {
 	CPUs     int
 	MemoryMB uint64
@@ -24,6 +23,11 @@ type Config struct {
 	// BootROM is the path to a UEFI firmware image (e.g.
 	// /usr/local/share/uefi-firmware/BHYVE_UEFI.fd).
 	BootROM string
+
+	// DiskPath, if set, is a raw disk image or block device attached as
+	// the VM's boot disk (AHCI). Left empty, the VM boots with no disk
+	// at all - useful for lifecycle testing, not for running anything.
+	DiskPath string
 }
 
 // Manager creates, destroys, and lists bhyve VMs, all named with a
@@ -90,17 +94,24 @@ func (m *Manager) CreateVM(ctx context.Context, name string, cfg Config) error {
 		return fmt.Errorf("bhyve: creating run dir: %w", err)
 	}
 
-	_, err = runCmd(ctx, "daemon",
+	args := []string{
 		"-f",
 		"-p", m.pidfile(qname),
 		"bhyve",
 		"-c", strconv.Itoa(cfg.CPUs),
 		"-m", fmt.Sprintf("%dM", cfg.MemoryMB),
 		"-s", "0,hostbridge",
+	}
+	if cfg.DiskPath != "" {
+		args = append(args, "-s", "4,ahci-hd,"+cfg.DiskPath)
+	}
+	args = append(args,
 		"-s", "31,lpc",
 		"-l", "bootrom,"+cfg.BootROM,
 		qname,
 	)
+
+	_, err = runCmd(ctx, "daemon", args...)
 	return err
 }
 
