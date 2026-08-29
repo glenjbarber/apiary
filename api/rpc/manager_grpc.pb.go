@@ -23,6 +23,8 @@ const (
 	ManagerService_CreateVM_FullMethodName = "/apiary.rpc.v1.ManagerService/CreateVM"
 	ManagerService_UpdateVM_FullMethodName = "/apiary.rpc.v1.ManagerService/UpdateVM"
 	ManagerService_DeleteVM_FullMethodName = "/apiary.rpc.v1.ManagerService/DeleteVM"
+	ManagerService_GetVM_FullMethodName    = "/apiary.rpc.v1.ManagerService/GetVM"
+	ManagerService_ListVMs_FullMethodName  = "/apiary.rpc.v1.ManagerService/ListVMs"
 )
 
 // ManagerServiceClient is the client API for ManagerService service.
@@ -38,6 +40,11 @@ type ManagerServiceClient interface {
 	CreateVM(ctx context.Context, in *CreateVMRequest, opts ...grpc.CallOption) (*CreateVMResponse, error)
 	UpdateVM(ctx context.Context, in *UpdateVMRequest, opts ...grpc.CallOption) (*UpdateVMResponse, error)
 	DeleteVM(ctx context.Context, in *DeleteVMRequest, opts ...grpc.CallOption) (*DeleteVMResponse, error)
+	// GetVM and ListVMs only succeed against the current leader - see
+	// api/internalpb/raftd.proto's GetVM/ListVMs doc comments for why v1's
+	// read consistency model is deliberately as simple as its write model.
+	GetVM(ctx context.Context, in *GetVMRequest, opts ...grpc.CallOption) (*GetVMResponse, error)
+	ListVMs(ctx context.Context, in *ListVMsRequest, opts ...grpc.CallOption) (*ListVMsResponse, error)
 }
 
 type managerServiceClient struct {
@@ -88,6 +95,26 @@ func (c *managerServiceClient) DeleteVM(ctx context.Context, in *DeleteVMRequest
 	return out, nil
 }
 
+func (c *managerServiceClient) GetVM(ctx context.Context, in *GetVMRequest, opts ...grpc.CallOption) (*GetVMResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetVMResponse)
+	err := c.cc.Invoke(ctx, ManagerService_GetVM_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *managerServiceClient) ListVMs(ctx context.Context, in *ListVMsRequest, opts ...grpc.CallOption) (*ListVMsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListVMsResponse)
+	err := c.cc.Invoke(ctx, ManagerService_ListVMs_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // ManagerServiceServer is the server API for ManagerService service.
 // All implementations must embed UnimplementedManagerServiceServer
 // for forward compatibility.
@@ -101,6 +128,11 @@ type ManagerServiceServer interface {
 	CreateVM(context.Context, *CreateVMRequest) (*CreateVMResponse, error)
 	UpdateVM(context.Context, *UpdateVMRequest) (*UpdateVMResponse, error)
 	DeleteVM(context.Context, *DeleteVMRequest) (*DeleteVMResponse, error)
+	// GetVM and ListVMs only succeed against the current leader - see
+	// api/internalpb/raftd.proto's GetVM/ListVMs doc comments for why v1's
+	// read consistency model is deliberately as simple as its write model.
+	GetVM(context.Context, *GetVMRequest) (*GetVMResponse, error)
+	ListVMs(context.Context, *ListVMsRequest) (*ListVMsResponse, error)
 	mustEmbedUnimplementedManagerServiceServer()
 }
 
@@ -122,6 +154,12 @@ func (UnimplementedManagerServiceServer) UpdateVM(context.Context, *UpdateVMRequ
 }
 func (UnimplementedManagerServiceServer) DeleteVM(context.Context, *DeleteVMRequest) (*DeleteVMResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method DeleteVM not implemented")
+}
+func (UnimplementedManagerServiceServer) GetVM(context.Context, *GetVMRequest) (*GetVMResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetVM not implemented")
+}
+func (UnimplementedManagerServiceServer) ListVMs(context.Context, *ListVMsRequest) (*ListVMsResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ListVMs not implemented")
 }
 func (UnimplementedManagerServiceServer) mustEmbedUnimplementedManagerServiceServer() {}
 func (UnimplementedManagerServiceServer) testEmbeddedByValue()                        {}
@@ -216,6 +254,42 @@ func _ManagerService_DeleteVM_Handler(srv interface{}, ctx context.Context, dec 
 	return interceptor(ctx, in, info, handler)
 }
 
+func _ManagerService_GetVM_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetVMRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ManagerServiceServer).GetVM(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ManagerService_GetVM_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ManagerServiceServer).GetVM(ctx, req.(*GetVMRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ManagerService_ListVMs_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListVMsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ManagerServiceServer).ListVMs(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ManagerService_ListVMs_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ManagerServiceServer).ListVMs(ctx, req.(*ListVMsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // ManagerService_ServiceDesc is the grpc.ServiceDesc for ManagerService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -238,6 +312,14 @@ var ManagerService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "DeleteVM",
 			Handler:    _ManagerService_DeleteVM_Handler,
+		},
+		{
+			MethodName: "GetVM",
+			Handler:    _ManagerService_GetVM_Handler,
+		},
+		{
+			MethodName: "ListVMs",
+			Handler:    _ManagerService_ListVMs_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

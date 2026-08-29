@@ -113,3 +113,32 @@ func (s *Server) DeleteVM(ctx context.Context, req *rpcpb.DeleteVMRequest) (*rpc
 	vm, appErr, leaderHint := s.applyCommand(ctx, cmd, req.GetTimeoutMs())
 	return &rpcpb.DeleteVMResponse{Vm: fromInternalVM(vm), Error: appErr, LeaderHint: leaderHint}, nil
 }
+
+// GetVM implements rpcpb.ManagerServiceServer.
+func (s *Server) GetVM(ctx context.Context, req *rpcpb.GetVMRequest) (*rpcpb.GetVMResponse, error) {
+	resp, err := s.raft.GetVM(ctx, req.GetId())
+	if err != nil {
+		return &rpcpb.GetVMResponse{Error: err.Error()}, nil
+	}
+	if resp.GetError() != "" {
+		return &rpcpb.GetVMResponse{Error: resp.GetError(), LeaderHint: resp.GetLeaderHint()}, nil
+	}
+	return &rpcpb.GetVMResponse{Vm: fromInternalVM(resp.GetVm()), Found: resp.GetFound()}, nil
+}
+
+// ListVMs implements rpcpb.ManagerServiceServer.
+func (s *Server) ListVMs(ctx context.Context, _ *rpcpb.ListVMsRequest) (*rpcpb.ListVMsResponse, error) {
+	resp, err := s.raft.ListVMs(ctx)
+	if err != nil {
+		return &rpcpb.ListVMsResponse{Error: err.Error()}, nil
+	}
+	if resp.GetError() != "" {
+		return &rpcpb.ListVMsResponse{Error: resp.GetError(), LeaderHint: resp.GetLeaderHint()}, nil
+	}
+
+	vms := make([]*rpcpb.VMDefinition, 0, len(resp.GetVms()))
+	for _, vm := range resp.GetVms() {
+		vms = append(vms, fromInternalVM(vm))
+	}
+	return &rpcpb.ListVMsResponse{Vms: vms}, nil
+}

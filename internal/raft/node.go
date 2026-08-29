@@ -10,6 +10,8 @@ import (
 
 	"github.com/hashicorp/raft"
 	raftboltdb "github.com/hashicorp/raft-boltdb/v2"
+
+	internalpb "github.com/glenjbarber/apiary/api/internalpb"
 )
 
 // boltFileName is the single BoltDB file used for both the raft log store
@@ -217,6 +219,26 @@ func (n *Node) AddVoter(id, address string, prevIndex uint64, timeout time.Durat
 func (n *Node) RemoveServer(id string, prevIndex uint64, timeout time.Duration) error {
 	future := n.raft.RemoveServer(raft.ServerID(id), prevIndex, timeout)
 	return translateMembershipErr(future.Error())
+}
+
+// GetVM reads a single VM definition. It only succeeds when this node is
+// the current leader, matching Apply's write consistency model - v1
+// deliberately does not serve reads from potentially-lagging followers.
+func (n *Node) GetVM(id string) (vm *internalpb.VMDefinition, found bool, err error) {
+	if n.raft.State() != raft.Leader {
+		return nil, false, ErrNotLeader
+	}
+	vm, found = n.fsm.VM(id)
+	return vm, found, nil
+}
+
+// ListVMs reads all VM definitions, subject to the same leader-only
+// requirement as GetVM.
+func (n *Node) ListVMs() ([]*internalpb.VMDefinition, error) {
+	if n.raft.State() != raft.Leader {
+		return nil, ErrNotLeader
+	}
+	return n.fsm.ListVMs(), nil
 }
 
 func translateMembershipErr(err error) error {

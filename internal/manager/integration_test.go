@@ -242,3 +242,52 @@ func TestIntegration_CreateUpdateDeleteVM(t *testing.T) {
 		t.Fatalf("DeleteVM() (2nd) error = empty, want a missing-id rejection")
 	}
 }
+
+func TestIntegration_GetVMAndListVMs(t *testing.T) {
+	raftdSocket := newRaftdUDSSocket(t)
+	client := newManagerdRPCClient(t, raftdSocket)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	getBeforeResp, err := client.GetVM(ctx, &rpcpb.GetVMRequest{Id: "vm-1"})
+	if err != nil {
+		t.Fatalf("GetVM() (before create) error: %v", err)
+	}
+	if getBeforeResp.GetFound() {
+		t.Fatalf("GetVM() (before create) Found = true, want false")
+	}
+
+	if _, err := client.CreateVM(ctx, &rpcpb.CreateVMRequest{
+		Vm: &rpcpb.VMDefinition{Id: "vm-1", Name: "web-1", Vcpus: 2, MemoryMb: 1024},
+	}); err != nil {
+		t.Fatalf("CreateVM() error: %v", err)
+	}
+	if _, err := client.CreateVM(ctx, &rpcpb.CreateVMRequest{
+		Vm: &rpcpb.VMDefinition{Id: "vm-2", Name: "web-2", Vcpus: 1, MemoryMb: 512},
+	}); err != nil {
+		t.Fatalf("CreateVM() (2nd) error: %v", err)
+	}
+
+	getResp, err := client.GetVM(ctx, &rpcpb.GetVMRequest{Id: "vm-1"})
+	if err != nil {
+		t.Fatalf("GetVM() error: %v", err)
+	}
+	if getResp.GetError() != "" {
+		t.Fatalf("GetVM() returned error: %s", getResp.GetError())
+	}
+	if !getResp.GetFound() || getResp.GetVm().GetName() != "web-1" {
+		t.Errorf("GetVM(vm-1) = (found=%v, vm=%+v), want found web-1", getResp.GetFound(), getResp.GetVm())
+	}
+
+	listResp, err := client.ListVMs(ctx, &rpcpb.ListVMsRequest{})
+	if err != nil {
+		t.Fatalf("ListVMs() error: %v", err)
+	}
+	if listResp.GetError() != "" {
+		t.Fatalf("ListVMs() returned error: %s", listResp.GetError())
+	}
+	if len(listResp.GetVms()) != 2 {
+		t.Fatalf("ListVMs() returned %d VMs, want 2", len(listResp.GetVms()))
+	}
+}

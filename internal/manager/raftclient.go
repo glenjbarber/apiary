@@ -48,6 +48,16 @@ func (c *RaftClient) Apply(ctx context.Context, payload []byte, timeout time.Dur
 	})
 }
 
+// GetVM reads a single VM definition from raftd.
+func (c *RaftClient) GetVM(ctx context.Context, id string) (*internalpb.GetVMResponse, error) {
+	return c.client.GetVM(ctx, &internalpb.GetVMRequest{Id: id})
+}
+
+// ListVMs reads all VM definitions from raftd.
+func (c *RaftClient) ListVMs(ctx context.Context) (*internalpb.ListVMsResponse, error) {
+	return c.client.ListVMs(ctx, &internalpb.ListVMsRequest{})
+}
+
 // Close closes the underlying connection to raftd.
 func (c *RaftClient) Close() error {
 	return c.conn.Close()

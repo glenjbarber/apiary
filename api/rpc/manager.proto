@@ -14,6 +14,12 @@ service ManagerService {
   rpc CreateVM(CreateVMRequest) returns (CreateVMResponse);
   rpc UpdateVM(UpdateVMRequest) returns (UpdateVMResponse);
   rpc DeleteVM(DeleteVMRequest) returns (DeleteVMResponse);
+
+  // GetVM and ListVMs only succeed against the current leader - see
+  // api/internalpb/raftd.proto's GetVM/ListVMs doc comments for why v1's
+  // read consistency model is deliberately as simple as its write model.
+  rpc GetVM(GetVMRequest) returns (GetVMResponse);
+  rpc ListVMs(ListVMsRequest) returns (ListVMsResponse);
 }
 
 // VMState mirrors api/internalpb's VMState. Kept as a separate type
@@ -65,6 +71,25 @@ message DeleteVMRequest {
 message DeleteVMResponse {
   // vm is the definition that was deleted, echoed back for confirmation.
   VMDefinition vm = 1;
+  string error = 2;
+  string leader_hint = 3;
+}
+
+message GetVMRequest {
+  string id = 1;
+}
+
+message GetVMResponse {
+  VMDefinition vm = 1;
+  bool found = 2;
+  string error = 3;
+  string leader_hint = 4;
+}
+
+message ListVMsRequest {}
+
+message ListVMsResponse {
+  repeated VMDefinition vms = 1;
   string error = 2;
   string leader_hint = 3;
 }

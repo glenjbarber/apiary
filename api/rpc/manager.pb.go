@@ -495,6 +495,214 @@ func (x *DeleteVMResponse) GetLeaderHint() string {
 	return ""
 }
 
+type GetVMRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetVMRequest) Reset() {
+	*x = GetVMRequest{}
+	mi := &file_api_rpc_manager_proto_msgTypes[7]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetVMRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetVMRequest) ProtoMessage() {}
+
+func (x *GetVMRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_api_rpc_manager_proto_msgTypes[7]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetVMRequest.ProtoReflect.Descriptor instead.
+func (*GetVMRequest) Descriptor() ([]byte, []int) {
+	return file_api_rpc_manager_proto_rawDescGZIP(), []int{7}
+}
+
+func (x *GetVMRequest) GetId() string {
+	if x != nil {
+		return x.Id
+	}
+	return ""
+}
+
+type GetVMResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Vm            *VMDefinition          `protobuf:"bytes,1,opt,name=vm,proto3" json:"vm,omitempty"`
+	Found         bool                   `protobuf:"varint,2,opt,name=found,proto3" json:"found,omitempty"`
+	Error         string                 `protobuf:"bytes,3,opt,name=error,proto3" json:"error,omitempty"`
+	LeaderHint    string                 `protobuf:"bytes,4,opt,name=leader_hint,json=leaderHint,proto3" json:"leader_hint,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetVMResponse) Reset() {
+	*x = GetVMResponse{}
+	mi := &file_api_rpc_manager_proto_msgTypes[8]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetVMResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetVMResponse) ProtoMessage() {}
+
+func (x *GetVMResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_api_rpc_manager_proto_msgTypes[8]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetVMResponse.ProtoReflect.Descriptor instead.
+func (*GetVMResponse) Descriptor() ([]byte, []int) {
+	return file_api_rpc_manager_proto_rawDescGZIP(), []int{8}
+}
+
+func (x *GetVMResponse) GetVm() *VMDefinition {
+	if x != nil {
+		return x.Vm
+	}
+	return nil
+}
+
+func (x *GetVMResponse) GetFound() bool {
+	if x != nil {
+		return x.Found
+	}
+	return false
+}
+
+func (x *GetVMResponse) GetError() string {
+	if x != nil {
+		return x.Error
+	}
+	return ""
+}
+
+func (x *GetVMResponse) GetLeaderHint() string {
+	if x != nil {
+		return x.LeaderHint
+	}
+	return ""
+}
+
+type ListVMsRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListVMsRequest) Reset() {
+	*x = ListVMsRequest{}
+	mi := &file_api_rpc_manager_proto_msgTypes[9]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListVMsRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListVMsRequest) ProtoMessage() {}
+
+func (x *ListVMsRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_api_rpc_manager_proto_msgTypes[9]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListVMsRequest.ProtoReflect.Descriptor instead.
+func (*ListVMsRequest) Descriptor() ([]byte, []int) {
+	return file_api_rpc_manager_proto_rawDescGZIP(), []int{9}
+}
+
+type ListVMsResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Vms           []*VMDefinition        `protobuf:"bytes,1,rep,name=vms,proto3" json:"vms,omitempty"`
+	Error         string                 `protobuf:"bytes,2,opt,name=error,proto3" json:"error,omitempty"`
+	LeaderHint    string                 `protobuf:"bytes,3,opt,name=leader_hint,json=leaderHint,proto3" json:"leader_hint,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListVMsResponse) Reset() {
+	*x = ListVMsResponse{}
+	mi := &file_api_rpc_manager_proto_msgTypes[10]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListVMsResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListVMsResponse) ProtoMessage() {}
+
+func (x *ListVMsResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_api_rpc_manager_proto_msgTypes[10]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListVMsResponse.ProtoReflect.Descriptor instead.
+func (*ListVMsResponse) Descriptor() ([]byte, []int) {
+	return file_api_rpc_manager_proto_rawDescGZIP(), []int{10}
+}
+
+func (x *ListVMsResponse) GetVms() []*VMDefinition {
+	if x != nil {
+		return x.Vms
+	}
+	return nil
+}
+
+func (x *ListVMsResponse) GetError() string {
+	if x != nil {
+		return x.Error
+	}
+	return ""
+}
+
+func (x *ListVMsResponse) GetLeaderHint() string {
+	if x != nil {
+		return x.LeaderHint
+	}
+	return ""
+}
+
 type StatusRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	unknownFields protoimpl.UnknownFields
@@ -503,7 +711,7 @@ type StatusRequest struct {
 
 func (x *StatusRequest) Reset() {
 	*x = StatusRequest{}
-	mi := &file_api_rpc_manager_proto_msgTypes[7]
+	mi := &file_api_rpc_manager_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -515,7 +723,7 @@ func (x *StatusRequest) String() string {
 func (*StatusRequest) ProtoMessage() {}
 
 func (x *StatusRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_api_rpc_manager_proto_msgTypes[7]
+	mi := &file_api_rpc_manager_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -528,7 +736,7 @@ func (x *StatusRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StatusRequest.ProtoReflect.Descriptor instead.
 func (*StatusRequest) Descriptor() ([]byte, []int) {
-	return file_api_rpc_manager_proto_rawDescGZIP(), []int{7}
+	return file_api_rpc_manager_proto_rawDescGZIP(), []int{11}
 }
 
 type StatusResponse struct {
@@ -553,7 +761,7 @@ type StatusResponse struct {
 
 func (x *StatusResponse) Reset() {
 	*x = StatusResponse{}
-	mi := &file_api_rpc_manager_proto_msgTypes[8]
+	mi := &file_api_rpc_manager_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -565,7 +773,7 @@ func (x *StatusResponse) String() string {
 func (*StatusResponse) ProtoMessage() {}
 
 func (x *StatusResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_api_rpc_manager_proto_msgTypes[8]
+	mi := &file_api_rpc_manager_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -578,7 +786,7 @@ func (x *StatusResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StatusResponse.ProtoReflect.Descriptor instead.
 func (*StatusResponse) Descriptor() ([]byte, []int) {
-	return file_api_rpc_manager_proto_rawDescGZIP(), []int{8}
+	return file_api_rpc_manager_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *StatusResponse) GetManagerNodeId() string {
@@ -682,6 +890,20 @@ const file_api_rpc_manager_proto_rawDesc = "" +
 	"\x02vm\x18\x01 \x01(\v2\x1b.apiary.rpc.v1.VMDefinitionR\x02vm\x12\x14\n" +
 	"\x05error\x18\x02 \x01(\tR\x05error\x12\x1f\n" +
 	"\vleader_hint\x18\x03 \x01(\tR\n" +
+	"leaderHint\"\x1e\n" +
+	"\fGetVMRequest\x12\x0e\n" +
+	"\x02id\x18\x01 \x01(\tR\x02id\"\x89\x01\n" +
+	"\rGetVMResponse\x12+\n" +
+	"\x02vm\x18\x01 \x01(\v2\x1b.apiary.rpc.v1.VMDefinitionR\x02vm\x12\x14\n" +
+	"\x05found\x18\x02 \x01(\bR\x05found\x12\x14\n" +
+	"\x05error\x18\x03 \x01(\tR\x05error\x12\x1f\n" +
+	"\vleader_hint\x18\x04 \x01(\tR\n" +
+	"leaderHint\"\x10\n" +
+	"\x0eListVMsRequest\"w\n" +
+	"\x0fListVMsResponse\x12-\n" +
+	"\x03vms\x18\x01 \x03(\v2\x1b.apiary.rpc.v1.VMDefinitionR\x03vms\x12\x14\n" +
+	"\x05error\x18\x02 \x01(\tR\x05error\x12\x1f\n" +
+	"\vleader_hint\x18\x03 \x01(\tR\n" +
 	"leaderHint\"\x0f\n" +
 	"\rStatusRequest\"\xe8\x02\n" +
 	"\x0eStatusResponse\x12&\n" +
@@ -700,12 +922,14 @@ const file_api_rpc_manager_proto_rawDesc = "" +
 	"\aVMState\x12\x18\n" +
 	"\x14VM_STATE_UNSPECIFIED\x10\x00\x12\x14\n" +
 	"\x10VM_STATE_STOPPED\x10\x01\x12\x14\n" +
-	"\x10VM_STATE_RUNNING\x10\x022\xbe\x02\n" +
+	"\x10VM_STATE_RUNNING\x10\x022\xcc\x03\n" +
 	"\x0eManagerService\x12E\n" +
 	"\x06Status\x12\x1c.apiary.rpc.v1.StatusRequest\x1a\x1d.apiary.rpc.v1.StatusResponse\x12K\n" +
 	"\bCreateVM\x12\x1e.apiary.rpc.v1.CreateVMRequest\x1a\x1f.apiary.rpc.v1.CreateVMResponse\x12K\n" +
 	"\bUpdateVM\x12\x1e.apiary.rpc.v1.UpdateVMRequest\x1a\x1f.apiary.rpc.v1.UpdateVMResponse\x12K\n" +
-	"\bDeleteVM\x12\x1e.apiary.rpc.v1.DeleteVMRequest\x1a\x1f.apiary.rpc.v1.DeleteVMResponseB-Z+github.com/glenjbarber/apiary/api/rpc;rpcpbb\x06proto3"
+	"\bDeleteVM\x12\x1e.apiary.rpc.v1.DeleteVMRequest\x1a\x1f.apiary.rpc.v1.DeleteVMResponse\x12B\n" +
+	"\x05GetVM\x12\x1b.apiary.rpc.v1.GetVMRequest\x1a\x1c.apiary.rpc.v1.GetVMResponse\x12H\n" +
+	"\aListVMs\x12\x1d.apiary.rpc.v1.ListVMsRequest\x1a\x1e.apiary.rpc.v1.ListVMsResponseB-Z+github.com/glenjbarber/apiary/api/rpc;rpcpbb\x06proto3"
 
 var (
 	file_api_rpc_manager_proto_rawDescOnce sync.Once
@@ -720,7 +944,7 @@ func file_api_rpc_manager_proto_rawDescGZIP() []byte {
 }
 
 var file_api_rpc_manager_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_api_rpc_manager_proto_msgTypes = make([]protoimpl.MessageInfo, 9)
+var file_api_rpc_manager_proto_msgTypes = make([]protoimpl.MessageInfo, 13)
 var file_api_rpc_manager_proto_goTypes = []any{
 	(VMState)(0),             // 0: apiary.rpc.v1.VMState
 	(*VMDefinition)(nil),     // 1: apiary.rpc.v1.VMDefinition
@@ -730,8 +954,12 @@ var file_api_rpc_manager_proto_goTypes = []any{
 	(*UpdateVMResponse)(nil), // 5: apiary.rpc.v1.UpdateVMResponse
 	(*DeleteVMRequest)(nil),  // 6: apiary.rpc.v1.DeleteVMRequest
 	(*DeleteVMResponse)(nil), // 7: apiary.rpc.v1.DeleteVMResponse
-	(*StatusRequest)(nil),    // 8: apiary.rpc.v1.StatusRequest
-	(*StatusResponse)(nil),   // 9: apiary.rpc.v1.StatusResponse
+	(*GetVMRequest)(nil),     // 8: apiary.rpc.v1.GetVMRequest
+	(*GetVMResponse)(nil),    // 9: apiary.rpc.v1.GetVMResponse
+	(*ListVMsRequest)(nil),   // 10: apiary.rpc.v1.ListVMsRequest
+	(*ListVMsResponse)(nil),  // 11: apiary.rpc.v1.ListVMsResponse
+	(*StatusRequest)(nil),    // 12: apiary.rpc.v1.StatusRequest
+	(*StatusResponse)(nil),   // 13: apiary.rpc.v1.StatusResponse
 }
 var file_api_rpc_manager_proto_depIdxs = []int32{
 	0,  // 0: apiary.rpc.v1.VMDefinition.desired_state:type_name -> apiary.rpc.v1.VMState
@@ -740,19 +968,25 @@ var file_api_rpc_manager_proto_depIdxs = []int32{
 	1,  // 3: apiary.rpc.v1.UpdateVMRequest.vm:type_name -> apiary.rpc.v1.VMDefinition
 	1,  // 4: apiary.rpc.v1.UpdateVMResponse.vm:type_name -> apiary.rpc.v1.VMDefinition
 	1,  // 5: apiary.rpc.v1.DeleteVMResponse.vm:type_name -> apiary.rpc.v1.VMDefinition
-	8,  // 6: apiary.rpc.v1.ManagerService.Status:input_type -> apiary.rpc.v1.StatusRequest
-	2,  // 7: apiary.rpc.v1.ManagerService.CreateVM:input_type -> apiary.rpc.v1.CreateVMRequest
-	4,  // 8: apiary.rpc.v1.ManagerService.UpdateVM:input_type -> apiary.rpc.v1.UpdateVMRequest
-	6,  // 9: apiary.rpc.v1.ManagerService.DeleteVM:input_type -> apiary.rpc.v1.DeleteVMRequest
-	9,  // 10: apiary.rpc.v1.ManagerService.Status:output_type -> apiary.rpc.v1.StatusResponse
-	3,  // 11: apiary.rpc.v1.ManagerService.CreateVM:output_type -> apiary.rpc.v1.CreateVMResponse
-	5,  // 12: apiary.rpc.v1.ManagerService.UpdateVM:output_type -> apiary.rpc.v1.UpdateVMResponse
-	7,  // 13: apiary.rpc.v1.ManagerService.DeleteVM:output_type -> apiary.rpc.v1.DeleteVMResponse
-	10, // [10:14] is the sub-list for method output_type
-	6,  // [6:10] is the sub-list for method input_type
-	6,  // [6:6] is the sub-list for extension type_name
-	6,  // [6:6] is the sub-list for extension extendee
-	0,  // [0:6] is the sub-list for field type_name
+	1,  // 6: apiary.rpc.v1.GetVMResponse.vm:type_name -> apiary.rpc.v1.VMDefinition
+	1,  // 7: apiary.rpc.v1.ListVMsResponse.vms:type_name -> apiary.rpc.v1.VMDefinition
+	12, // 8: apiary.rpc.v1.ManagerService.Status:input_type -> apiary.rpc.v1.StatusRequest
+	2,  // 9: apiary.rpc.v1.ManagerService.CreateVM:input_type -> apiary.rpc.v1.CreateVMRequest
+	4,  // 10: apiary.rpc.v1.ManagerService.UpdateVM:input_type -> apiary.rpc.v1.UpdateVMRequest
+	6,  // 11: apiary.rpc.v1.ManagerService.DeleteVM:input_type -> apiary.rpc.v1.DeleteVMRequest
+	8,  // 12: apiary.rpc.v1.ManagerService.GetVM:input_type -> apiary.rpc.v1.GetVMRequest
+	10, // 13: apiary.rpc.v1.ManagerService.ListVMs:input_type -> apiary.rpc.v1.ListVMsRequest
+	13, // 14: apiary.rpc.v1.ManagerService.Status:output_type -> apiary.rpc.v1.StatusResponse
+	3,  // 15: apiary.rpc.v1.ManagerService.CreateVM:output_type -> apiary.rpc.v1.CreateVMResponse
+	5,  // 16: apiary.rpc.v1.ManagerService.UpdateVM:output_type -> apiary.rpc.v1.UpdateVMResponse
+	7,  // 17: apiary.rpc.v1.ManagerService.DeleteVM:output_type -> apiary.rpc.v1.DeleteVMResponse
+	9,  // 18: apiary.rpc.v1.ManagerService.GetVM:output_type -> apiary.rpc.v1.GetVMResponse
+	11, // 19: apiary.rpc.v1.ManagerService.ListVMs:output_type -> apiary.rpc.v1.ListVMsResponse
+	14, // [14:20] is the sub-list for method output_type
+	8,  // [8:14] is the sub-list for method input_type
+	8,  // [8:8] is the sub-list for extension type_name
+	8,  // [8:8] is the sub-list for extension extendee
+	0,  // [0:8] is the sub-list for field type_name
 }
 
 func init() { file_api_rpc_manager_proto_init() }
@@ -766,7 +1000,7 @@ func file_api_rpc_manager_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_api_rpc_manager_proto_rawDesc), len(file_api_rpc_manager_proto_rawDesc)),
 			NumEnums:      1,
-			NumMessages:   9,
+			NumMessages:   13,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

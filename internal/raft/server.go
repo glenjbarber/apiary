@@ -119,3 +119,29 @@ func (s *Server) RemoveServer(_ context.Context, req *internalpb.RemoveServerReq
 	}
 	return &internalpb.RemoveServerResponse{}, nil
 }
+
+// GetVM implements internalpb.RaftInternalServer.
+func (s *Server) GetVM(_ context.Context, req *internalpb.GetVMRequest) (*internalpb.GetVMResponse, error) {
+	vm, found, err := s.node.GetVM(req.GetId())
+	if err != nil {
+		resp := &internalpb.GetVMResponse{Error: err.Error()}
+		if errors.Is(err, ErrNotLeader) {
+			resp.LeaderHint = s.node.LeaderHint()
+		}
+		return resp, nil
+	}
+	return &internalpb.GetVMResponse{Vm: vm, Found: found}, nil
+}
+
+// ListVMs implements internalpb.RaftInternalServer.
+func (s *Server) ListVMs(_ context.Context, _ *internalpb.ListVMsRequest) (*internalpb.ListVMsResponse, error) {
+	vms, err := s.node.ListVMs()
+	if err != nil {
+		resp := &internalpb.ListVMsResponse{Error: err.Error()}
+		if errors.Is(err, ErrNotLeader) {
+			resp.LeaderHint = s.node.LeaderHint()
+		}
+		return resp, nil
+	}
+	return &internalpb.ListVMsResponse{Vms: vms}, nil
+}

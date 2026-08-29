@@ -569,11 +569,222 @@ func (x *RemoveServerResponse) GetLeaderHint() string {
 	return ""
 }
 
+type GetVMRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetVMRequest) Reset() {
+	*x = GetVMRequest{}
+	mi := &file_api_internalpb_raftd_proto_msgTypes[9]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetVMRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetVMRequest) ProtoMessage() {}
+
+func (x *GetVMRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_api_internalpb_raftd_proto_msgTypes[9]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetVMRequest.ProtoReflect.Descriptor instead.
+func (*GetVMRequest) Descriptor() ([]byte, []int) {
+	return file_api_internalpb_raftd_proto_rawDescGZIP(), []int{9}
+}
+
+func (x *GetVMRequest) GetId() string {
+	if x != nil {
+		return x.Id
+	}
+	return ""
+}
+
+type GetVMResponse struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	Vm    *VMDefinition          `protobuf:"bytes,1,opt,name=vm,proto3" json:"vm,omitempty"`
+	// found is false if no VM with the given id exists (distinct from
+	// error, which indicates the read itself couldn't be served, e.g. this
+	// node isn't the leader).
+	Found         bool   `protobuf:"varint,2,opt,name=found,proto3" json:"found,omitempty"`
+	Error         string `protobuf:"bytes,3,opt,name=error,proto3" json:"error,omitempty"`
+	LeaderHint    string `protobuf:"bytes,4,opt,name=leader_hint,json=leaderHint,proto3" json:"leader_hint,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetVMResponse) Reset() {
+	*x = GetVMResponse{}
+	mi := &file_api_internalpb_raftd_proto_msgTypes[10]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetVMResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetVMResponse) ProtoMessage() {}
+
+func (x *GetVMResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_api_internalpb_raftd_proto_msgTypes[10]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetVMResponse.ProtoReflect.Descriptor instead.
+func (*GetVMResponse) Descriptor() ([]byte, []int) {
+	return file_api_internalpb_raftd_proto_rawDescGZIP(), []int{10}
+}
+
+func (x *GetVMResponse) GetVm() *VMDefinition {
+	if x != nil {
+		return x.Vm
+	}
+	return nil
+}
+
+func (x *GetVMResponse) GetFound() bool {
+	if x != nil {
+		return x.Found
+	}
+	return false
+}
+
+func (x *GetVMResponse) GetError() string {
+	if x != nil {
+		return x.Error
+	}
+	return ""
+}
+
+func (x *GetVMResponse) GetLeaderHint() string {
+	if x != nil {
+		return x.LeaderHint
+	}
+	return ""
+}
+
+type ListVMsRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListVMsRequest) Reset() {
+	*x = ListVMsRequest{}
+	mi := &file_api_internalpb_raftd_proto_msgTypes[11]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListVMsRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListVMsRequest) ProtoMessage() {}
+
+func (x *ListVMsRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_api_internalpb_raftd_proto_msgTypes[11]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListVMsRequest.ProtoReflect.Descriptor instead.
+func (*ListVMsRequest) Descriptor() ([]byte, []int) {
+	return file_api_internalpb_raftd_proto_rawDescGZIP(), []int{11}
+}
+
+type ListVMsResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Vms           []*VMDefinition        `protobuf:"bytes,1,rep,name=vms,proto3" json:"vms,omitempty"`
+	Error         string                 `protobuf:"bytes,2,opt,name=error,proto3" json:"error,omitempty"`
+	LeaderHint    string                 `protobuf:"bytes,3,opt,name=leader_hint,json=leaderHint,proto3" json:"leader_hint,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListVMsResponse) Reset() {
+	*x = ListVMsResponse{}
+	mi := &file_api_internalpb_raftd_proto_msgTypes[12]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListVMsResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListVMsResponse) ProtoMessage() {}
+
+func (x *ListVMsResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_api_internalpb_raftd_proto_msgTypes[12]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListVMsResponse.ProtoReflect.Descriptor instead.
+func (*ListVMsResponse) Descriptor() ([]byte, []int) {
+	return file_api_internalpb_raftd_proto_rawDescGZIP(), []int{12}
+}
+
+func (x *ListVMsResponse) GetVms() []*VMDefinition {
+	if x != nil {
+		return x.Vms
+	}
+	return nil
+}
+
+func (x *ListVMsResponse) GetError() string {
+	if x != nil {
+		return x.Error
+	}
+	return ""
+}
+
+func (x *ListVMsResponse) GetLeaderHint() string {
+	if x != nil {
+		return x.LeaderHint
+	}
+	return ""
+}
+
 var File_api_internalpb_raftd_proto protoreflect.FileDescriptor
 
 const file_api_internalpb_raftd_proto_rawDesc = "" +
 	"\n" +
-	"\x1aapi/internalpb/raftd.proto\x12\x12apiary.internal.v1\"G\n" +
+	"\x1aapi/internalpb/raftd.proto\x12\x12apiary.internal.v1\x1a\x1aapi/internalpb/state.proto\"G\n" +
 	"\fApplyRequest\x12\x18\n" +
 	"\apayload\x18\x01 \x01(\fR\apayload\x12\x1d\n" +
 	"\n" +
@@ -618,12 +829,28 @@ const file_api_internalpb_raftd_proto_rawDesc = "" +
 	"\x14RemoveServerResponse\x12\x14\n" +
 	"\x05error\x18\x01 \x01(\tR\x05error\x12\x1f\n" +
 	"\vleader_hint\x18\x02 \x01(\tR\n" +
-	"leaderHint2\xe7\x02\n" +
+	"leaderHint\"\x1e\n" +
+	"\fGetVMRequest\x12\x0e\n" +
+	"\x02id\x18\x01 \x01(\tR\x02id\"\x8e\x01\n" +
+	"\rGetVMResponse\x120\n" +
+	"\x02vm\x18\x01 \x01(\v2 .apiary.internal.v1.VMDefinitionR\x02vm\x12\x14\n" +
+	"\x05found\x18\x02 \x01(\bR\x05found\x12\x14\n" +
+	"\x05error\x18\x03 \x01(\tR\x05error\x12\x1f\n" +
+	"\vleader_hint\x18\x04 \x01(\tR\n" +
+	"leaderHint\"\x10\n" +
+	"\x0eListVMsRequest\"|\n" +
+	"\x0fListVMsResponse\x122\n" +
+	"\x03vms\x18\x01 \x03(\v2 .apiary.internal.v1.VMDefinitionR\x03vms\x12\x14\n" +
+	"\x05error\x18\x02 \x01(\tR\x05error\x12\x1f\n" +
+	"\vleader_hint\x18\x03 \x01(\tR\n" +
+	"leaderHint2\x89\x04\n" +
 	"\fRaftInternal\x12L\n" +
 	"\x05Apply\x12 .apiary.internal.v1.ApplyRequest\x1a!.apiary.internal.v1.ApplyResponse\x12O\n" +
 	"\x06Status\x12!.apiary.internal.v1.StatusRequest\x1a\".apiary.internal.v1.StatusResponse\x12U\n" +
 	"\bAddVoter\x12#.apiary.internal.v1.AddVoterRequest\x1a$.apiary.internal.v1.AddVoterResponse\x12a\n" +
-	"\fRemoveServer\x12'.apiary.internal.v1.RemoveServerRequest\x1a(.apiary.internal.v1.RemoveServerResponseB9Z7github.com/glenjbarber/apiary/api/internalpb;internalpbb\x06proto3"
+	"\fRemoveServer\x12'.apiary.internal.v1.RemoveServerRequest\x1a(.apiary.internal.v1.RemoveServerResponse\x12L\n" +
+	"\x05GetVM\x12 .apiary.internal.v1.GetVMRequest\x1a!.apiary.internal.v1.GetVMResponse\x12R\n" +
+	"\aListVMs\x12\".apiary.internal.v1.ListVMsRequest\x1a#.apiary.internal.v1.ListVMsResponseB9Z7github.com/glenjbarber/apiary/api/internalpb;internalpbb\x06proto3"
 
 var (
 	file_api_internalpb_raftd_proto_rawDescOnce sync.Once
@@ -637,7 +864,7 @@ func file_api_internalpb_raftd_proto_rawDescGZIP() []byte {
 	return file_api_internalpb_raftd_proto_rawDescData
 }
 
-var file_api_internalpb_raftd_proto_msgTypes = make([]protoimpl.MessageInfo, 9)
+var file_api_internalpb_raftd_proto_msgTypes = make([]protoimpl.MessageInfo, 13)
 var file_api_internalpb_raftd_proto_goTypes = []any{
 	(*ApplyRequest)(nil),         // 0: apiary.internal.v1.ApplyRequest
 	(*ApplyResponse)(nil),        // 1: apiary.internal.v1.ApplyResponse
@@ -648,22 +875,33 @@ var file_api_internalpb_raftd_proto_goTypes = []any{
 	(*AddVoterResponse)(nil),     // 6: apiary.internal.v1.AddVoterResponse
 	(*RemoveServerRequest)(nil),  // 7: apiary.internal.v1.RemoveServerRequest
 	(*RemoveServerResponse)(nil), // 8: apiary.internal.v1.RemoveServerResponse
+	(*GetVMRequest)(nil),         // 9: apiary.internal.v1.GetVMRequest
+	(*GetVMResponse)(nil),        // 10: apiary.internal.v1.GetVMResponse
+	(*ListVMsRequest)(nil),       // 11: apiary.internal.v1.ListVMsRequest
+	(*ListVMsResponse)(nil),      // 12: apiary.internal.v1.ListVMsResponse
+	(*VMDefinition)(nil),         // 13: apiary.internal.v1.VMDefinition
 }
 var file_api_internalpb_raftd_proto_depIdxs = []int32{
-	4, // 0: apiary.internal.v1.StatusResponse.servers:type_name -> apiary.internal.v1.ServerInfo
-	0, // 1: apiary.internal.v1.RaftInternal.Apply:input_type -> apiary.internal.v1.ApplyRequest
-	2, // 2: apiary.internal.v1.RaftInternal.Status:input_type -> apiary.internal.v1.StatusRequest
-	5, // 3: apiary.internal.v1.RaftInternal.AddVoter:input_type -> apiary.internal.v1.AddVoterRequest
-	7, // 4: apiary.internal.v1.RaftInternal.RemoveServer:input_type -> apiary.internal.v1.RemoveServerRequest
-	1, // 5: apiary.internal.v1.RaftInternal.Apply:output_type -> apiary.internal.v1.ApplyResponse
-	3, // 6: apiary.internal.v1.RaftInternal.Status:output_type -> apiary.internal.v1.StatusResponse
-	6, // 7: apiary.internal.v1.RaftInternal.AddVoter:output_type -> apiary.internal.v1.AddVoterResponse
-	8, // 8: apiary.internal.v1.RaftInternal.RemoveServer:output_type -> apiary.internal.v1.RemoveServerResponse
-	5, // [5:9] is the sub-list for method output_type
-	1, // [1:5] is the sub-list for method input_type
-	1, // [1:1] is the sub-list for extension type_name
-	1, // [1:1] is the sub-list for extension extendee
-	0, // [0:1] is the sub-list for field type_name
+	4,  // 0: apiary.internal.v1.StatusResponse.servers:type_name -> apiary.internal.v1.ServerInfo
+	13, // 1: apiary.internal.v1.GetVMResponse.vm:type_name -> apiary.internal.v1.VMDefinition
+	13, // 2: apiary.internal.v1.ListVMsResponse.vms:type_name -> apiary.internal.v1.VMDefinition
+	0,  // 3: apiary.internal.v1.RaftInternal.Apply:input_type -> apiary.internal.v1.ApplyRequest
+	2,  // 4: apiary.internal.v1.RaftInternal.Status:input_type -> apiary.internal.v1.StatusRequest
+	5,  // 5: apiary.internal.v1.RaftInternal.AddVoter:input_type -> apiary.internal.v1.AddVoterRequest
+	7,  // 6: apiary.internal.v1.RaftInternal.RemoveServer:input_type -> apiary.internal.v1.RemoveServerRequest
+	9,  // 7: apiary.internal.v1.RaftInternal.GetVM:input_type -> apiary.internal.v1.GetVMRequest
+	11, // 8: apiary.internal.v1.RaftInternal.ListVMs:input_type -> apiary.internal.v1.ListVMsRequest
+	1,  // 9: apiary.internal.v1.RaftInternal.Apply:output_type -> apiary.internal.v1.ApplyResponse
+	3,  // 10: apiary.internal.v1.RaftInternal.Status:output_type -> apiary.internal.v1.StatusResponse
+	6,  // 11: apiary.internal.v1.RaftInternal.AddVoter:output_type -> apiary.internal.v1.AddVoterResponse
+	8,  // 12: apiary.internal.v1.RaftInternal.RemoveServer:output_type -> apiary.internal.v1.RemoveServerResponse
+	10, // 13: apiary.internal.v1.RaftInternal.GetVM:output_type -> apiary.internal.v1.GetVMResponse
+	12, // 14: apiary.internal.v1.RaftInternal.ListVMs:output_type -> apiary.internal.v1.ListVMsResponse
+	9,  // [9:15] is the sub-list for method output_type
+	3,  // [3:9] is the sub-list for method input_type
+	3,  // [3:3] is the sub-list for extension type_name
+	3,  // [3:3] is the sub-list for extension extendee
+	0,  // [0:3] is the sub-list for field type_name
 }
 
 func init() { file_api_internalpb_raftd_proto_init() }
@@ -671,13 +909,14 @@ func file_api_internalpb_raftd_proto_init() {
 	if File_api_internalpb_raftd_proto != nil {
 		return
 	}
+	file_api_internalpb_state_proto_init()
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_api_internalpb_raftd_proto_rawDesc), len(file_api_internalpb_raftd_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   9,
+			NumMessages:   13,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

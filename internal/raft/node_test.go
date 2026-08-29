@@ -1,6 +1,7 @@
 package raft
 
 import (
+	"errors"
 	"net"
 	"testing"
 	"time"
@@ -129,4 +130,54 @@ func TestNode_ApplyAndRestart(t *testing.T) {
 	// machine, so it can briefly lag behind the leader-state flip above;
 	// poll rather than asserting immediately.
 	eventually(t, 5*time.Second, func() bool { return node2.Status().AppliedIndex > 0 })
+}
+
+func TestNode_GetVMAndListVMs(t *testing.T) {
+	cfg := Config{
+		NodeID:   "node-1",
+		DataDir:  t.TempDir(),
+		BindAddr: freeLoopbackAddr(t),
+	}
+	node, err := New(cfg)
+	if err != nil {
+		t.Fatalf("New() error: %v", err)
+	}
+	t.Cleanup(func() { node.Shutdown() })
+
+	// Before this node is leader, reads must be refused just like Apply.
+	if _, _, err := node.GetVM("vm-1"); !errors.Is(err, ErrNotLeader) {
+		t.Errorf("GetVM() before leadership: err = %v, want ErrNotLeader", err)
+	}
+	if _, err := node.ListVMs(); !errors.Is(err, ErrNotLeader) {
+		t.Errorf("ListVMs() before leadership: err = %v, want ErrNotLeader", err)
+	}
+
+	if err := node.Bootstrap(); err != nil {
+		t.Fatalf("Bootstrap() error: %v", err)
+	}
+	eventually(t, 5*time.Second, func() bool { return node.Status().IsLeader })
+
+	if _, found, err := node.GetVM("vm-1"); err != nil || found {
+		t.Errorf("GetVM(vm-1) before create = (found=%v, err=%v), want (false, nil)", found, err)
+	}
+
+	if _, err := node.Apply(mustMarshalCommand(t, createVMCmd("vm-1", "web-1")), 5*time.Second); err != nil {
+		t.Fatalf("Apply() error: %v", err)
+	}
+
+	vm, found, err := node.GetVM("vm-1")
+	if err != nil {
+		t.Fatalf("GetVM() error: %v", err)
+	}
+	if !found || vm.GetName() != "web-1" {
+		t.Errorf("GetVM(vm-1) = (%+v, %v), want web-1 present", vm, found)
+	}
+
+	vms, err := node.ListVMs()
+	if err != nil {
+		t.Fatalf("ListVMs() error: %v", err)
+	}
+	if len(vms) != 1 || vms[0].GetName() != "web-1" {
+		t.Errorf("ListVMs() = %v, want [web-1]", vms)
+	}
 }

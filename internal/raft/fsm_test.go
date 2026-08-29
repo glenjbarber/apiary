@@ -141,3 +141,23 @@ func TestFSM_SnapshotRestore(t *testing.T) {
 		t.Errorf("restored VM(vm-2) = (%+v, %v), want web-2 present", vm, ok)
 	}
 }
+
+func TestFSM_ListVMs(t *testing.T) {
+	fsm := NewFSM()
+
+	if got := fsm.ListVMs(); len(got) != 0 {
+		t.Errorf("ListVMs() on empty FSM = %v, want empty", got)
+	}
+
+	fsm.Apply(&raft.Log{Index: 1, Data: mustMarshalCommand(t, createVMCmd("vm-1", "web-1"))})
+	fsm.Apply(&raft.Log{Index: 2, Data: mustMarshalCommand(t, createVMCmd("vm-2", "web-2"))})
+
+	got := fsm.ListVMs()
+	if len(got) != 2 {
+		t.Fatalf("ListVMs() returned %d entries, want 2", len(got))
+	}
+	names := map[string]bool{got[0].GetName(): true, got[1].GetName(): true}
+	if !names["web-1"] || !names["web-2"] {
+		t.Errorf("ListVMs() names = %v, want web-1 and web-2", names)
+	}
+}

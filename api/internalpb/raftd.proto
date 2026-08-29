@@ -2,6 +2,8 @@ syntax = "proto3";
 
 package apiary.internal.v1;
 
+import "api/internalpb/state.proto";
+
 option go_package = "github.com/glenjbarber/apiary/api/internalpb;internalpb";
 
 // RaftInternal is the internal protocol spoken over the Unix domain socket
@@ -25,6 +27,17 @@ service RaftInternal {
   // RemoveServer removes a server (voter or otherwise) from the cluster.
   // It only succeeds against the current leader.
   rpc RemoveServer(RemoveServerRequest) returns (RemoveServerResponse);
+
+  // GetVM reads a single VM definition from this node's FSM state. Like
+  // Apply, it only succeeds against the current leader - v1's read
+  // consistency model is deliberately the same as its write model: the
+  // leader is the sole source of truth, avoiding the complexity of
+  // serving reads from potentially-lagging followers.
+  rpc GetVM(GetVMRequest) returns (GetVMResponse);
+
+  // ListVMs reads all VM definitions from this node's FSM state, subject
+  // to the same leader-only requirement as GetVM.
+  rpc ListVMs(ListVMsRequest) returns (ListVMsResponse);
 }
 
 message ApplyRequest {
@@ -101,4 +114,28 @@ message RemoveServerRequest {
 message RemoveServerResponse {
   string error = 1;
   string leader_hint = 2;
+}
+
+message GetVMRequest {
+  string id = 1;
+}
+
+message GetVMResponse {
+  VMDefinition vm = 1;
+
+  // found is false if no VM with the given id exists (distinct from
+  // error, which indicates the read itself couldn't be served, e.g. this
+  // node isn't the leader).
+  bool found = 2;
+
+  string error = 3;
+  string leader_hint = 4;
+}
+
+message ListVMsRequest {}
+
+message ListVMsResponse {
+  repeated VMDefinition vms = 1;
+  string error = 2;
+  string leader_hint = 3;
 }

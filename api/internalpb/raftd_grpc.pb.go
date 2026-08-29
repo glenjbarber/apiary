@@ -23,6 +23,8 @@ const (
 	RaftInternal_Status_FullMethodName       = "/apiary.internal.v1.RaftInternal/Status"
 	RaftInternal_AddVoter_FullMethodName     = "/apiary.internal.v1.RaftInternal/AddVoter"
 	RaftInternal_RemoveServer_FullMethodName = "/apiary.internal.v1.RaftInternal/RemoveServer"
+	RaftInternal_GetVM_FullMethodName        = "/apiary.internal.v1.RaftInternal/GetVM"
+	RaftInternal_ListVMs_FullMethodName      = "/apiary.internal.v1.RaftInternal/ListVMs"
 )
 
 // RaftInternalClient is the client API for RaftInternal service.
@@ -47,6 +49,15 @@ type RaftInternalClient interface {
 	// RemoveServer removes a server (voter or otherwise) from the cluster.
 	// It only succeeds against the current leader.
 	RemoveServer(ctx context.Context, in *RemoveServerRequest, opts ...grpc.CallOption) (*RemoveServerResponse, error)
+	// GetVM reads a single VM definition from this node's FSM state. Like
+	// Apply, it only succeeds against the current leader - v1's read
+	// consistency model is deliberately the same as its write model: the
+	// leader is the sole source of truth, avoiding the complexity of
+	// serving reads from potentially-lagging followers.
+	GetVM(ctx context.Context, in *GetVMRequest, opts ...grpc.CallOption) (*GetVMResponse, error)
+	// ListVMs reads all VM definitions from this node's FSM state, subject
+	// to the same leader-only requirement as GetVM.
+	ListVMs(ctx context.Context, in *ListVMsRequest, opts ...grpc.CallOption) (*ListVMsResponse, error)
 }
 
 type raftInternalClient struct {
@@ -97,6 +108,26 @@ func (c *raftInternalClient) RemoveServer(ctx context.Context, in *RemoveServerR
 	return out, nil
 }
 
+func (c *raftInternalClient) GetVM(ctx context.Context, in *GetVMRequest, opts ...grpc.CallOption) (*GetVMResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetVMResponse)
+	err := c.cc.Invoke(ctx, RaftInternal_GetVM_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *raftInternalClient) ListVMs(ctx context.Context, in *ListVMsRequest, opts ...grpc.CallOption) (*ListVMsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListVMsResponse)
+	err := c.cc.Invoke(ctx, RaftInternal_ListVMs_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // RaftInternalServer is the server API for RaftInternal service.
 // All implementations must embed UnimplementedRaftInternalServer
 // for forward compatibility.
@@ -119,6 +150,15 @@ type RaftInternalServer interface {
 	// RemoveServer removes a server (voter or otherwise) from the cluster.
 	// It only succeeds against the current leader.
 	RemoveServer(context.Context, *RemoveServerRequest) (*RemoveServerResponse, error)
+	// GetVM reads a single VM definition from this node's FSM state. Like
+	// Apply, it only succeeds against the current leader - v1's read
+	// consistency model is deliberately the same as its write model: the
+	// leader is the sole source of truth, avoiding the complexity of
+	// serving reads from potentially-lagging followers.
+	GetVM(context.Context, *GetVMRequest) (*GetVMResponse, error)
+	// ListVMs reads all VM definitions from this node's FSM state, subject
+	// to the same leader-only requirement as GetVM.
+	ListVMs(context.Context, *ListVMsRequest) (*ListVMsResponse, error)
 	mustEmbedUnimplementedRaftInternalServer()
 }
 
@@ -140,6 +180,12 @@ func (UnimplementedRaftInternalServer) AddVoter(context.Context, *AddVoterReques
 }
 func (UnimplementedRaftInternalServer) RemoveServer(context.Context, *RemoveServerRequest) (*RemoveServerResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method RemoveServer not implemented")
+}
+func (UnimplementedRaftInternalServer) GetVM(context.Context, *GetVMRequest) (*GetVMResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetVM not implemented")
+}
+func (UnimplementedRaftInternalServer) ListVMs(context.Context, *ListVMsRequest) (*ListVMsResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ListVMs not implemented")
 }
 func (UnimplementedRaftInternalServer) mustEmbedUnimplementedRaftInternalServer() {}
 func (UnimplementedRaftInternalServer) testEmbeddedByValue()                      {}
@@ -234,6 +280,42 @@ func _RaftInternal_RemoveServer_Handler(srv interface{}, ctx context.Context, de
 	return interceptor(ctx, in, info, handler)
 }
 
+func _RaftInternal_GetVM_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetVMRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(RaftInternalServer).GetVM(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: RaftInternal_GetVM_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(RaftInternalServer).GetVM(ctx, req.(*GetVMRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _RaftInternal_ListVMs_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListVMsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(RaftInternalServer).ListVMs(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: RaftInternal_ListVMs_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(RaftInternalServer).ListVMs(ctx, req.(*ListVMsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // RaftInternal_ServiceDesc is the grpc.ServiceDesc for RaftInternal service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -256,6 +338,14 @@ var RaftInternal_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "RemoveServer",
 			Handler:    _RaftInternal_RemoveServer_Handler,
+		},
+		{
+			MethodName: "GetVM",
+			Handler:    _RaftInternal_GetVM_Handler,
+		},
+		{
+			MethodName: "ListVMs",
+			Handler:    _RaftInternal_ListVMs_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

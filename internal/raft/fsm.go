@@ -111,6 +111,17 @@ func (f *FSM) VM(id string) (*internalpb.VMDefinition, bool) {
 	return vm, ok
 }
 
+// ListVMs returns every current VM definition.
+func (f *FSM) ListVMs() []*internalpb.VMDefinition {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	vms := make([]*internalpb.VMDefinition, 0, len(f.vms))
+	for _, vm := range f.vms {
+		vms = append(vms, vm)
+	}
+	return vms
+}
+
 // Snapshot implements raft.FSM.
 func (f *FSM) Snapshot() (raft.FSMSnapshot, error) {
 	f.mu.Lock()
