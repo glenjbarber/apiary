@@ -1,0 +1,28 @@
+{{define "content"}}
+<h2>Create VM</h2>
+<form class="create-vm" hx-post="/vms" hx-target="#vm-rows" hx-swap="innerHTML">
+  <label>ID <input type="text" name="id" required></label>
+  <label>Name <input type="text" name="name"></label>
+  <label>vCPUs <input type="number" name="vcpus" value="1" min="1"></label>
+  <label>Memory (MB) <input type="number" name="memory_mb" value="512" min="1"></label>
+  <label>Desired state
+    <select name="desired_state">
+      <option value="stopped">stopped</option>
+      <option value="running">running</option>
+    </select>
+  </label>
+  <button type="submit">Create</button>
+</form>
+
+<h2>VMs</h2>
+<table>
+  <thead>
+    <tr>
+      <th>ID</th><th>Name</th><th>vCPUs</th><th>Memory (MB)</th><th>Node</th><th>State</th><th></th>
+    </tr>
+  </thead>
+  <tbody id="vm-rows">
+    {{template "vm_rows" .}}
+  </tbody>
+</table>
+{{end}}

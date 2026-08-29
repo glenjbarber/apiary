@@ -1,0 +1,18 @@
+{{define "vm_rows"}}
+{{if .Error}}<tr><td colspan="7" class="error">{{.Error}}</td></tr>{{end}}
+{{range .VMs}}
+<tr>
+  <td>{{.ID}}</td>
+  <td>{{.Name}}</td>
+  <td>{{.VCPUs}}</td>
+  <td>{{.MemoryMB}}</td>
+  <td>{{.NodeID}}</td>
+  <td>{{.DesiredState}}</td>
+  <td>
+    <button hx-delete="/vms/{{.ID}}" hx-target="#vm-rows" hx-swap="innerHTML" hx-confirm="Delete {{.ID}}?">Delete</button>
+  </td>
+</tr>
+{{else}}
+  {{if not .Error}}<tr><td colspan="7"><em>No VMs</em></td></tr>{{end}}
+{{end}}
+{{end}}
