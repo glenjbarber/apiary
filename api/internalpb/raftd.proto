@@ -38,6 +38,14 @@ service RaftInternal {
   // ListVMs reads all VM definitions from this node's FSM state, subject
   // to the same leader-only requirement as GetVM.
   rpc ListVMs(ListVMsRequest) returns (ListVMsResponse);
+
+  // GetNetwork/ListNetworks mirror GetVM/ListVMs exactly, for
+  // NetworkDefinitions instead of VMDefinitions - same leader-only read
+  // model, same reasoning. CreateNetwork/DeleteNetwork need no dedicated
+  // RPC: they're submitted as Command variants through the existing
+  // Apply, exactly like CreateVM/DeleteVM already are.
+  rpc GetNetwork(GetNetworkRequest) returns (GetNetworkResponse);
+  rpc ListNetworks(ListNetworksRequest) returns (ListNetworksResponse);
 }
 
 message ApplyRequest {
@@ -136,6 +144,25 @@ message ListVMsRequest {}
 
 message ListVMsResponse {
   repeated VMDefinition vms = 1;
+  string error = 2;
+  string leader_hint = 3;
+}
+
+message GetNetworkRequest {
+  string id = 1;
+}
+
+message GetNetworkResponse {
+  NetworkDefinition network = 1;
+  bool found = 2;
+  string error = 3;
+  string leader_hint = 4;
+}
+
+message ListNetworksRequest {}
+
+message ListNetworksResponse {
+  repeated NetworkDefinition networks = 1;
   string error = 2;
   string leader_hint = 3;
 }

@@ -25,6 +25,8 @@ const (
 	RaftInternal_RemoveServer_FullMethodName = "/apiary.internal.v1.RaftInternal/RemoveServer"
 	RaftInternal_GetVM_FullMethodName        = "/apiary.internal.v1.RaftInternal/GetVM"
 	RaftInternal_ListVMs_FullMethodName      = "/apiary.internal.v1.RaftInternal/ListVMs"
+	RaftInternal_GetNetwork_FullMethodName   = "/apiary.internal.v1.RaftInternal/GetNetwork"
+	RaftInternal_ListNetworks_FullMethodName = "/apiary.internal.v1.RaftInternal/ListNetworks"
 )
 
 // RaftInternalClient is the client API for RaftInternal service.
@@ -58,6 +60,13 @@ type RaftInternalClient interface {
 	// ListVMs reads all VM definitions from this node's FSM state, subject
 	// to the same leader-only requirement as GetVM.
 	ListVMs(ctx context.Context, in *ListVMsRequest, opts ...grpc.CallOption) (*ListVMsResponse, error)
+	// GetNetwork/ListNetworks mirror GetVM/ListVMs exactly, for
+	// NetworkDefinitions instead of VMDefinitions - same leader-only read
+	// model, same reasoning. CreateNetwork/DeleteNetwork need no dedicated
+	// RPC: they're submitted as Command variants through the existing
+	// Apply, exactly like CreateVM/DeleteVM already are.
+	GetNetwork(ctx context.Context, in *GetNetworkRequest, opts ...grpc.CallOption) (*GetNetworkResponse, error)
+	ListNetworks(ctx context.Context, in *ListNetworksRequest, opts ...grpc.CallOption) (*ListNetworksResponse, error)
 }
 
 type raftInternalClient struct {
@@ -128,6 +137,26 @@ func (c *raftInternalClient) ListVMs(ctx context.Context, in *ListVMsRequest, op
 	return out, nil
 }
 
+func (c *raftInternalClient) GetNetwork(ctx context.Context, in *GetNetworkRequest, opts ...grpc.CallOption) (*GetNetworkResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetNetworkResponse)
+	err := c.cc.Invoke(ctx, RaftInternal_GetNetwork_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *raftInternalClient) ListNetworks(ctx context.Context, in *ListNetworksRequest, opts ...grpc.CallOption) (*ListNetworksResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListNetworksResponse)
+	err := c.cc.Invoke(ctx, RaftInternal_ListNetworks_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // RaftInternalServer is the server API for RaftInternal service.
 // All implementations must embed UnimplementedRaftInternalServer
 // for forward compatibility.
@@ -159,6 +188,13 @@ type RaftInternalServer interface {
 	// ListVMs reads all VM definitions from this node's FSM state, subject
 	// to the same leader-only requirement as GetVM.
 	ListVMs(context.Context, *ListVMsRequest) (*ListVMsResponse, error)
+	// GetNetwork/ListNetworks mirror GetVM/ListVMs exactly, for
+	// NetworkDefinitions instead of VMDefinitions - same leader-only read
+	// model, same reasoning. CreateNetwork/DeleteNetwork need no dedicated
+	// RPC: they're submitted as Command variants through the existing
+	// Apply, exactly like CreateVM/DeleteVM already are.
+	GetNetwork(context.Context, *GetNetworkRequest) (*GetNetworkResponse, error)
+	ListNetworks(context.Context, *ListNetworksRequest) (*ListNetworksResponse, error)
 	mustEmbedUnimplementedRaftInternalServer()
 }
 
@@ -186,6 +222,12 @@ func (UnimplementedRaftInternalServer) GetVM(context.Context, *GetVMRequest) (*G
 }
 func (UnimplementedRaftInternalServer) ListVMs(context.Context, *ListVMsRequest) (*ListVMsResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ListVMs not implemented")
+}
+func (UnimplementedRaftInternalServer) GetNetwork(context.Context, *GetNetworkRequest) (*GetNetworkResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetNetwork not implemented")
+}
+func (UnimplementedRaftInternalServer) ListNetworks(context.Context, *ListNetworksRequest) (*ListNetworksResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ListNetworks not implemented")
 }
 func (UnimplementedRaftInternalServer) mustEmbedUnimplementedRaftInternalServer() {}
 func (UnimplementedRaftInternalServer) testEmbeddedByValue()                      {}
@@ -316,6 +358,42 @@ func _RaftInternal_ListVMs_Handler(srv interface{}, ctx context.Context, dec fun
 	return interceptor(ctx, in, info, handler)
 }
 
+func _RaftInternal_GetNetwork_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetNetworkRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(RaftInternalServer).GetNetwork(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: RaftInternal_GetNetwork_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(RaftInternalServer).GetNetwork(ctx, req.(*GetNetworkRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _RaftInternal_ListNetworks_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListNetworksRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(RaftInternalServer).ListNetworks(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: RaftInternal_ListNetworks_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(RaftInternalServer).ListNetworks(ctx, req.(*ListNetworksRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // RaftInternal_ServiceDesc is the grpc.ServiceDesc for RaftInternal service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -346,6 +424,14 @@ var RaftInternal_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ListVMs",
 			Handler:    _RaftInternal_ListVMs_Handler,
+		},
+		{
+			MethodName: "GetNetwork",
+			Handler:    _RaftInternal_GetNetwork_Handler,
+		},
+		{
+			MethodName: "ListNetworks",
+			Handler:    _RaftInternal_ListNetworks_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

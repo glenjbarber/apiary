@@ -53,7 +53,14 @@ func (s *Server) Apply(_ context.Context, req *internalpb.ApplyRequest) (*intern
 		return &internalpb.ApplyResponse{Error: result.Error}, nil
 	}
 
-	resultBytes, err := proto.Marshal(result.VM)
+	// Exactly one of VM/Network is set on a successful apply, depending on
+	// which kind of command was applied (see FSMApplyResult's doc
+	// comment) - marshal whichever one it is.
+	var payload proto.Message = result.VM
+	if result.Network != nil {
+		payload = result.Network
+	}
+	resultBytes, err := proto.Marshal(payload)
 	if err != nil {
 		return &internalpb.ApplyResponse{Error: fmt.Sprintf("encoding result: %v", err)}, nil
 	}
@@ -144,4 +151,30 @@ func (s *Server) ListVMs(_ context.Context, _ *internalpb.ListVMsRequest) (*inte
 		return resp, nil
 	}
 	return &internalpb.ListVMsResponse{Vms: vms}, nil
+}
+
+// GetNetwork implements internalpb.RaftInternalServer.
+func (s *Server) GetNetwork(_ context.Context, req *internalpb.GetNetworkRequest) (*internalpb.GetNetworkResponse, error) {
+	network, found, err := s.node.GetNetwork(req.GetId())
+	if err != nil {
+		resp := &internalpb.GetNetworkResponse{Error: err.Error()}
+		if errors.Is(err, ErrNotLeader) {
+			resp.LeaderHint = s.node.LeaderHint()
+		}
+		return resp, nil
+	}
+	return &internalpb.GetNetworkResponse{Network: network, Found: found}, nil
+}
+
+// ListNetworks implements internalpb.RaftInternalServer.
+func (s *Server) ListNetworks(_ context.Context, _ *internalpb.ListNetworksRequest) (*internalpb.ListNetworksResponse, error) {
+	networks, err := s.node.ListNetworks()
+	if err != nil {
+		resp := &internalpb.ListNetworksResponse{Error: err.Error()}
+		if errors.Is(err, ErrNotLeader) {
+			resp.LeaderHint = s.node.LeaderHint()
+		}
+		return resp, nil
+	}
+	return &internalpb.ListNetworksResponse{Networks: networks}, nil
 }

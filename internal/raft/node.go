@@ -241,6 +241,23 @@ func (n *Node) ListVMs() ([]*internalpb.VMDefinition, error) {
 	return n.fsm.ListVMs(), nil
 }
 
+// GetNetwork/ListNetworks mirror GetVM/ListVMs exactly, for
+// NetworkDefinitions instead.
+func (n *Node) GetNetwork(id string) (network *internalpb.NetworkDefinition, found bool, err error) {
+	if n.raft.State() != raft.Leader {
+		return nil, false, ErrNotLeader
+	}
+	network, found = n.fsm.Network(id)
+	return network, found, nil
+}
+
+func (n *Node) ListNetworks() ([]*internalpb.NetworkDefinition, error) {
+	if n.raft.State() != raft.Leader {
+		return nil, ErrNotLeader
+	}
+	return n.fsm.ListNetworks(), nil
+}
+
 func translateMembershipErr(err error) error {
 	if err == nil {
 		return nil

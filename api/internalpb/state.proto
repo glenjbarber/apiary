@@ -68,6 +68,72 @@ message VMDefinition {
   // resolves it to a local path through internal/isostore and attaches
   // it as a CD-ROM device - see ADR-0017.
   string iso_name = 9;
+
+  // network_id, if set, names a NetworkDefinition this VM's NIC belongs
+  // to. Empty means the flat single-bridge behavior from before network
+  // management existed (Reconciler's own node-wide Bridge field) -
+  // unchanged for backward compatibility. See ADR-0022.
+  string network_id = 10;
+
+  // ip_address/mac_address are assigned by the FSM itself when
+  // CreateVM runs (see applyCreateVM) if network_id is set - never by
+  // the caller, and never mutated afterward. Both are deterministic
+  // given the already-committed raft log, so every replica computes the
+  // same values without needing a separate allocation round-trip.
+  string ip_address = 11;
+  string mac_address = 12;
+
+  // firewall_rules is a simple allow/block list applied to this VM's
+  // traffic via a per-VM pf(8) anchor (internal/pf). No rules means
+  // today's de facto behavior (everything allowed) - rules are opt-in
+  // restrictions, so an existing VM with none is unaffected.
+  repeated FirewallRule firewall_rules = 13;
+}
+
+// FirewallRule is one pf(8) rule applied to a VM's per-VM anchor. See
+// internal/pf.RenderRules for how these compile to actual pf syntax.
+message FirewallRule {
+  // direction is "in" or "out".
+  string direction = 1;
+  // action is "pass" or "block".
+  string action = 2;
+  // protocol is "tcp", "udp", "icmp", or "" (any).
+  string protocol = 3;
+  // port_range is a single port ("22"), a range ("8000-9000"), or ""
+  // (any) - meaningless when protocol is "icmp" or "".
+  string port_range = 4;
+}
+
+// NetworkDefinition is a named, cluster-wide L2 segment: a VLAN ID (0 =
+// untagged) plus a subnet. Like VMDefinition, this is a small
+// coordination fact replicated through raft - every node must agree on
+// which VLAN ID and subnet a network name refers to, so two nodes never
+// double-assign an IP or a VLAN tag. Creating the actual vlan(4)/
+// bridge(4) interfaces this implies is physical, per-node work done by
+// internal/cluster's Reconciler (internal/vlan), not stored here. See
+// ADR-0022.
+message NetworkDefinition {
+  string id = 1;
+  string name = 2;
+
+  // vlan_id is 0 for an untagged network (VMs share the uplink's own
+  // L2 segment directly) or a real 802.1Q VLAN tag otherwise.
+  uint32 vlan_id = 3;
+
+  // subnet is a CIDR (e.g. "10.60.0.0/24"). The FSM allocates VM IPs
+  // from this range (see VMDefinition.ip_address); the reconciler
+  // assigns the range's first host address (".1") to the bridge
+  // interface itself as the gateway.
+  string subnet = 4;
+
+  // bridge_name, if set, overrides the bridge name the reconciler uses
+  // for this network on every node (default, when empty: a short hash
+  // of id - see internal/cluster.networkBridgeName; FreeBSD interface
+  // names are capped at 15 usable characters, so id can't be embedded
+  // directly). There's no reason to need this in practice - present
+  // mainly so a name collision with something outside Apiary's own
+  // management has an escape hatch.
+  string bridge_name = 5;
 }
 
 // Command is the typed payload carried in ApplyRequest.payload (replacing
@@ -82,7 +148,28 @@ message Command {
     // never by an external caller - see ADR-0016.
     UpdateVMPhase update_vm_phase = 4;
     PurgeVM purge_vm = 5;
+
+    CreateNetwork create_network = 6;
+    DeleteNetwork delete_network = 7;
   }
+}
+
+// CreateNetwork adds a new NetworkDefinition. It fails if a network with
+// the same id already exists.
+message CreateNetwork {
+  NetworkDefinition network = 1;
+}
+
+// DeleteNetwork removes a NetworkDefinition outright - no soft-delete
+// tombstone, unlike DeleteVM, since a network has no physical resources
+// of its own to reconcile away first (the vlan/bridge interfaces it
+// implies are recreated/destroyed per-node as a side effect of VMs
+// coming and going, not owned by the network record itself). Fails if
+// the network doesn't exist, or if any VM still references it via
+// network_id - no cascade/orphan-reclaim, matching the same caution
+// already accepted for VM deletion (ADR-0016).
+message DeleteNetwork {
+  string id = 1;
 }
 
 // CreateVM adds a new VM definition. It fails (via CommandResult.error) if
@@ -137,4 +224,5 @@ message CommandResult {
 message FSMSnapshotState {
   uint64 last_index = 1;
   map<string, VMDefinition> vms = 2;
+  map<string, NetworkDefinition> networks = 3;
 }

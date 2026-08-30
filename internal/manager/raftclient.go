@@ -58,6 +58,16 @@ func (c *RaftClient) ListVMs(ctx context.Context) (*internalpb.ListVMsResponse, 
 	return c.client.ListVMs(ctx, &internalpb.ListVMsRequest{})
 }
 
+// GetNetwork reads a single network definition from raftd.
+func (c *RaftClient) GetNetwork(ctx context.Context, id string) (*internalpb.GetNetworkResponse, error) {
+	return c.client.GetNetwork(ctx, &internalpb.GetNetworkRequest{Id: id})
+}
+
+// ListNetworks reads all network definitions from raftd.
+func (c *RaftClient) ListNetworks(ctx context.Context) (*internalpb.ListNetworksResponse, error) {
+	return c.client.ListNetworks(ctx, &internalpb.ListNetworksRequest{})
+}
+
 // Close closes the underlying connection to raftd.
 func (c *RaftClient) Close() error {
 	return c.conn.Close()

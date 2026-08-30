@@ -164,7 +164,24 @@ type VMDefinition struct {
 	// ManagerService.UploadISO) on the assigned node. The reconciler
 	// resolves it to a local path through internal/isostore and attaches
 	// it as a CD-ROM device - see ADR-0017.
-	IsoName       string `protobuf:"bytes,9,opt,name=iso_name,json=isoName,proto3" json:"iso_name,omitempty"`
+	IsoName string `protobuf:"bytes,9,opt,name=iso_name,json=isoName,proto3" json:"iso_name,omitempty"`
+	// network_id, if set, names a NetworkDefinition this VM's NIC belongs
+	// to. Empty means the flat single-bridge behavior from before network
+	// management existed (Reconciler's own node-wide Bridge field) -
+	// unchanged for backward compatibility. See ADR-0022.
+	NetworkId string `protobuf:"bytes,10,opt,name=network_id,json=networkId,proto3" json:"network_id,omitempty"`
+	// ip_address/mac_address are assigned by the FSM itself when
+	// CreateVM runs (see applyCreateVM) if network_id is set - never by
+	// the caller, and never mutated afterward. Both are deterministic
+	// given the already-committed raft log, so every replica computes the
+	// same values without needing a separate allocation round-trip.
+	IpAddress  string `protobuf:"bytes,11,opt,name=ip_address,json=ipAddress,proto3" json:"ip_address,omitempty"`
+	MacAddress string `protobuf:"bytes,12,opt,name=mac_address,json=macAddress,proto3" json:"mac_address,omitempty"`
+	// firewall_rules is a simple allow/block list applied to this VM's
+	// traffic via a per-VM pf(8) anchor (internal/pf). No rules means
+	// today's de facto behavior (everything allowed) - rules are opt-in
+	// restrictions, so an existing VM with none is unaffected.
+	FirewallRules []*FirewallRule `protobuf:"bytes,13,rep,name=firewall_rules,json=firewallRules,proto3" json:"firewall_rules,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -262,6 +279,206 @@ func (x *VMDefinition) GetIsoName() string {
 	return ""
 }
 
+func (x *VMDefinition) GetNetworkId() string {
+	if x != nil {
+		return x.NetworkId
+	}
+	return ""
+}
+
+func (x *VMDefinition) GetIpAddress() string {
+	if x != nil {
+		return x.IpAddress
+	}
+	return ""
+}
+
+func (x *VMDefinition) GetMacAddress() string {
+	if x != nil {
+		return x.MacAddress
+	}
+	return ""
+}
+
+func (x *VMDefinition) GetFirewallRules() []*FirewallRule {
+	if x != nil {
+		return x.FirewallRules
+	}
+	return nil
+}
+
+// FirewallRule is one pf(8) rule applied to a VM's per-VM anchor. See
+// internal/pf.RenderRules for how these compile to actual pf syntax.
+type FirewallRule struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// direction is "in" or "out".
+	Direction string `protobuf:"bytes,1,opt,name=direction,proto3" json:"direction,omitempty"`
+	// action is "pass" or "block".
+	Action string `protobuf:"bytes,2,opt,name=action,proto3" json:"action,omitempty"`
+	// protocol is "tcp", "udp", "icmp", or "" (any).
+	Protocol string `protobuf:"bytes,3,opt,name=protocol,proto3" json:"protocol,omitempty"`
+	// port_range is a single port ("22"), a range ("8000-9000"), or ""
+	// (any) - meaningless when protocol is "icmp" or "".
+	PortRange     string `protobuf:"bytes,4,opt,name=port_range,json=portRange,proto3" json:"port_range,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *FirewallRule) Reset() {
+	*x = FirewallRule{}
+	mi := &file_api_internalpb_state_proto_msgTypes[1]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *FirewallRule) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*FirewallRule) ProtoMessage() {}
+
+func (x *FirewallRule) ProtoReflect() protoreflect.Message {
+	mi := &file_api_internalpb_state_proto_msgTypes[1]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use FirewallRule.ProtoReflect.Descriptor instead.
+func (*FirewallRule) Descriptor() ([]byte, []int) {
+	return file_api_internalpb_state_proto_rawDescGZIP(), []int{1}
+}
+
+func (x *FirewallRule) GetDirection() string {
+	if x != nil {
+		return x.Direction
+	}
+	return ""
+}
+
+func (x *FirewallRule) GetAction() string {
+	if x != nil {
+		return x.Action
+	}
+	return ""
+}
+
+func (x *FirewallRule) GetProtocol() string {
+	if x != nil {
+		return x.Protocol
+	}
+	return ""
+}
+
+func (x *FirewallRule) GetPortRange() string {
+	if x != nil {
+		return x.PortRange
+	}
+	return ""
+}
+
+// NetworkDefinition is a named, cluster-wide L2 segment: a VLAN ID (0 =
+// untagged) plus a subnet. Like VMDefinition, this is a small
+// coordination fact replicated through raft - every node must agree on
+// which VLAN ID and subnet a network name refers to, so two nodes never
+// double-assign an IP or a VLAN tag. Creating the actual vlan(4)/
+// bridge(4) interfaces this implies is physical, per-node work done by
+// internal/cluster's Reconciler (internal/vlan), not stored here. See
+// ADR-0022.
+type NetworkDefinition struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	Id    string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	Name  string                 `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
+	// vlan_id is 0 for an untagged network (VMs share the uplink's own
+	// L2 segment directly) or a real 802.1Q VLAN tag otherwise.
+	VlanId uint32 `protobuf:"varint,3,opt,name=vlan_id,json=vlanId,proto3" json:"vlan_id,omitempty"`
+	// subnet is a CIDR (e.g. "10.60.0.0/24"). The FSM allocates VM IPs
+	// from this range (see VMDefinition.ip_address); the reconciler
+	// assigns the range's first host address (".1") to the bridge
+	// interface itself as the gateway.
+	Subnet string `protobuf:"bytes,4,opt,name=subnet,proto3" json:"subnet,omitempty"`
+	// bridge_name, if set, overrides the bridge name the reconciler uses
+	// for this network on every node (default, when empty: a short hash
+	// of id - see internal/cluster.networkBridgeName; FreeBSD interface
+	// names are capped at 15 usable characters, so id can't be embedded
+	// directly). There's no reason to need this in practice - present
+	// mainly so a name collision with something outside Apiary's own
+	// management has an escape hatch.
+	BridgeName    string `protobuf:"bytes,5,opt,name=bridge_name,json=bridgeName,proto3" json:"bridge_name,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *NetworkDefinition) Reset() {
+	*x = NetworkDefinition{}
+	mi := &file_api_internalpb_state_proto_msgTypes[2]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *NetworkDefinition) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*NetworkDefinition) ProtoMessage() {}
+
+func (x *NetworkDefinition) ProtoReflect() protoreflect.Message {
+	mi := &file_api_internalpb_state_proto_msgTypes[2]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use NetworkDefinition.ProtoReflect.Descriptor instead.
+func (*NetworkDefinition) Descriptor() ([]byte, []int) {
+	return file_api_internalpb_state_proto_rawDescGZIP(), []int{2}
+}
+
+func (x *NetworkDefinition) GetId() string {
+	if x != nil {
+		return x.Id
+	}
+	return ""
+}
+
+func (x *NetworkDefinition) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *NetworkDefinition) GetVlanId() uint32 {
+	if x != nil {
+		return x.VlanId
+	}
+	return 0
+}
+
+func (x *NetworkDefinition) GetSubnet() string {
+	if x != nil {
+		return x.Subnet
+	}
+	return ""
+}
+
+func (x *NetworkDefinition) GetBridgeName() string {
+	if x != nil {
+		return x.BridgeName
+	}
+	return ""
+}
+
 // Command is the typed payload carried in ApplyRequest.payload (replacing
 // v1's opaque bytes). Exactly one op should be set.
 type Command struct {
@@ -273,6 +490,8 @@ type Command struct {
 	//	*Command_DeleteVm
 	//	*Command_UpdateVmPhase
 	//	*Command_PurgeVm
+	//	*Command_CreateNetwork
+	//	*Command_DeleteNetwork
 	Op            isCommand_Op `protobuf_oneof:"op"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -280,7 +499,7 @@ type Command struct {
 
 func (x *Command) Reset() {
 	*x = Command{}
-	mi := &file_api_internalpb_state_proto_msgTypes[1]
+	mi := &file_api_internalpb_state_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -292,7 +511,7 @@ func (x *Command) String() string {
 func (*Command) ProtoMessage() {}
 
 func (x *Command) ProtoReflect() protoreflect.Message {
-	mi := &file_api_internalpb_state_proto_msgTypes[1]
+	mi := &file_api_internalpb_state_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -305,7 +524,7 @@ func (x *Command) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Command.ProtoReflect.Descriptor instead.
 func (*Command) Descriptor() ([]byte, []int) {
-	return file_api_internalpb_state_proto_rawDescGZIP(), []int{1}
+	return file_api_internalpb_state_proto_rawDescGZIP(), []int{3}
 }
 
 func (x *Command) GetOp() isCommand_Op {
@@ -360,6 +579,24 @@ func (x *Command) GetPurgeVm() *PurgeVM {
 	return nil
 }
 
+func (x *Command) GetCreateNetwork() *CreateNetwork {
+	if x != nil {
+		if x, ok := x.Op.(*Command_CreateNetwork); ok {
+			return x.CreateNetwork
+		}
+	}
+	return nil
+}
+
+func (x *Command) GetDeleteNetwork() *DeleteNetwork {
+	if x != nil {
+		if x, ok := x.Op.(*Command_DeleteNetwork); ok {
+			return x.DeleteNetwork
+		}
+	}
+	return nil
+}
+
 type isCommand_Op interface {
 	isCommand_Op()
 }
@@ -386,6 +623,14 @@ type Command_PurgeVm struct {
 	PurgeVm *PurgeVM `protobuf:"bytes,5,opt,name=purge_vm,json=purgeVm,proto3,oneof"`
 }
 
+type Command_CreateNetwork struct {
+	CreateNetwork *CreateNetwork `protobuf:"bytes,6,opt,name=create_network,json=createNetwork,proto3,oneof"`
+}
+
+type Command_DeleteNetwork struct {
+	DeleteNetwork *DeleteNetwork `protobuf:"bytes,7,opt,name=delete_network,json=deleteNetwork,proto3,oneof"`
+}
+
 func (*Command_CreateVm) isCommand_Op() {}
 
 func (*Command_UpdateVm) isCommand_Op() {}
@@ -395,6 +640,108 @@ func (*Command_DeleteVm) isCommand_Op() {}
 func (*Command_UpdateVmPhase) isCommand_Op() {}
 
 func (*Command_PurgeVm) isCommand_Op() {}
+
+func (*Command_CreateNetwork) isCommand_Op() {}
+
+func (*Command_DeleteNetwork) isCommand_Op() {}
+
+// CreateNetwork adds a new NetworkDefinition. It fails if a network with
+// the same id already exists.
+type CreateNetwork struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Network       *NetworkDefinition     `protobuf:"bytes,1,opt,name=network,proto3" json:"network,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *CreateNetwork) Reset() {
+	*x = CreateNetwork{}
+	mi := &file_api_internalpb_state_proto_msgTypes[4]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CreateNetwork) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CreateNetwork) ProtoMessage() {}
+
+func (x *CreateNetwork) ProtoReflect() protoreflect.Message {
+	mi := &file_api_internalpb_state_proto_msgTypes[4]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CreateNetwork.ProtoReflect.Descriptor instead.
+func (*CreateNetwork) Descriptor() ([]byte, []int) {
+	return file_api_internalpb_state_proto_rawDescGZIP(), []int{4}
+}
+
+func (x *CreateNetwork) GetNetwork() *NetworkDefinition {
+	if x != nil {
+		return x.Network
+	}
+	return nil
+}
+
+// DeleteNetwork removes a NetworkDefinition outright - no soft-delete
+// tombstone, unlike DeleteVM, since a network has no physical resources
+// of its own to reconcile away first (the vlan/bridge interfaces it
+// implies are recreated/destroyed per-node as a side effect of VMs
+// coming and going, not owned by the network record itself). Fails if
+// the network doesn't exist, or if any VM still references it via
+// network_id - no cascade/orphan-reclaim, matching the same caution
+// already accepted for VM deletion (ADR-0016).
+type DeleteNetwork struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *DeleteNetwork) Reset() {
+	*x = DeleteNetwork{}
+	mi := &file_api_internalpb_state_proto_msgTypes[5]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DeleteNetwork) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DeleteNetwork) ProtoMessage() {}
+
+func (x *DeleteNetwork) ProtoReflect() protoreflect.Message {
+	mi := &file_api_internalpb_state_proto_msgTypes[5]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DeleteNetwork.ProtoReflect.Descriptor instead.
+func (*DeleteNetwork) Descriptor() ([]byte, []int) {
+	return file_api_internalpb_state_proto_rawDescGZIP(), []int{5}
+}
+
+func (x *DeleteNetwork) GetId() string {
+	if x != nil {
+		return x.Id
+	}
+	return ""
+}
 
 // CreateVM adds a new VM definition. It fails (via CommandResult.error) if
 // a VM with the same id already exists.
@@ -407,7 +754,7 @@ type CreateVM struct {
 
 func (x *CreateVM) Reset() {
 	*x = CreateVM{}
-	mi := &file_api_internalpb_state_proto_msgTypes[2]
+	mi := &file_api_internalpb_state_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -419,7 +766,7 @@ func (x *CreateVM) String() string {
 func (*CreateVM) ProtoMessage() {}
 
 func (x *CreateVM) ProtoReflect() protoreflect.Message {
-	mi := &file_api_internalpb_state_proto_msgTypes[2]
+	mi := &file_api_internalpb_state_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -432,7 +779,7 @@ func (x *CreateVM) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CreateVM.ProtoReflect.Descriptor instead.
 func (*CreateVM) Descriptor() ([]byte, []int) {
-	return file_api_internalpb_state_proto_rawDescGZIP(), []int{2}
+	return file_api_internalpb_state_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *CreateVM) GetVm() *VMDefinition {
@@ -453,7 +800,7 @@ type UpdateVM struct {
 
 func (x *UpdateVM) Reset() {
 	*x = UpdateVM{}
-	mi := &file_api_internalpb_state_proto_msgTypes[3]
+	mi := &file_api_internalpb_state_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -465,7 +812,7 @@ func (x *UpdateVM) String() string {
 func (*UpdateVM) ProtoMessage() {}
 
 func (x *UpdateVM) ProtoReflect() protoreflect.Message {
-	mi := &file_api_internalpb_state_proto_msgTypes[3]
+	mi := &file_api_internalpb_state_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -478,7 +825,7 @@ func (x *UpdateVM) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UpdateVM.ProtoReflect.Descriptor instead.
 func (*UpdateVM) Descriptor() ([]byte, []int) {
-	return file_api_internalpb_state_proto_rawDescGZIP(), []int{3}
+	return file_api_internalpb_state_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *UpdateVM) GetVm() *VMDefinition {
@@ -499,7 +846,7 @@ type DeleteVM struct {
 
 func (x *DeleteVM) Reset() {
 	*x = DeleteVM{}
-	mi := &file_api_internalpb_state_proto_msgTypes[4]
+	mi := &file_api_internalpb_state_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -511,7 +858,7 @@ func (x *DeleteVM) String() string {
 func (*DeleteVM) ProtoMessage() {}
 
 func (x *DeleteVM) ProtoReflect() protoreflect.Message {
-	mi := &file_api_internalpb_state_proto_msgTypes[4]
+	mi := &file_api_internalpb_state_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -524,7 +871,7 @@ func (x *DeleteVM) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeleteVM.ProtoReflect.Descriptor instead.
 func (*DeleteVM) Descriptor() ([]byte, []int) {
-	return file_api_internalpb_state_proto_rawDescGZIP(), []int{4}
+	return file_api_internalpb_state_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *DeleteVM) GetId() string {
@@ -550,7 +897,7 @@ type UpdateVMPhase struct {
 
 func (x *UpdateVMPhase) Reset() {
 	*x = UpdateVMPhase{}
-	mi := &file_api_internalpb_state_proto_msgTypes[5]
+	mi := &file_api_internalpb_state_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -562,7 +909,7 @@ func (x *UpdateVMPhase) String() string {
 func (*UpdateVMPhase) ProtoMessage() {}
 
 func (x *UpdateVMPhase) ProtoReflect() protoreflect.Message {
-	mi := &file_api_internalpb_state_proto_msgTypes[5]
+	mi := &file_api_internalpb_state_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -575,7 +922,7 @@ func (x *UpdateVMPhase) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UpdateVMPhase.ProtoReflect.Descriptor instead.
 func (*UpdateVMPhase) Descriptor() ([]byte, []int) {
-	return file_api_internalpb_state_proto_rawDescGZIP(), []int{5}
+	return file_api_internalpb_state_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *UpdateVMPhase) GetId() string {
@@ -612,7 +959,7 @@ type PurgeVM struct {
 
 func (x *PurgeVM) Reset() {
 	*x = PurgeVM{}
-	mi := &file_api_internalpb_state_proto_msgTypes[6]
+	mi := &file_api_internalpb_state_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -624,7 +971,7 @@ func (x *PurgeVM) String() string {
 func (*PurgeVM) ProtoMessage() {}
 
 func (x *PurgeVM) ProtoReflect() protoreflect.Message {
-	mi := &file_api_internalpb_state_proto_msgTypes[6]
+	mi := &file_api_internalpb_state_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -637,7 +984,7 @@ func (x *PurgeVM) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PurgeVM.ProtoReflect.Descriptor instead.
 func (*PurgeVM) Descriptor() ([]byte, []int) {
-	return file_api_internalpb_state_proto_rawDescGZIP(), []int{6}
+	return file_api_internalpb_state_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *PurgeVM) GetId() string {
@@ -662,7 +1009,7 @@ type CommandResult struct {
 
 func (x *CommandResult) Reset() {
 	*x = CommandResult{}
-	mi := &file_api_internalpb_state_proto_msgTypes[7]
+	mi := &file_api_internalpb_state_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -674,7 +1021,7 @@ func (x *CommandResult) String() string {
 func (*CommandResult) ProtoMessage() {}
 
 func (x *CommandResult) ProtoReflect() protoreflect.Message {
-	mi := &file_api_internalpb_state_proto_msgTypes[7]
+	mi := &file_api_internalpb_state_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -687,7 +1034,7 @@ func (x *CommandResult) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CommandResult.ProtoReflect.Descriptor instead.
 func (*CommandResult) Descriptor() ([]byte, []int) {
-	return file_api_internalpb_state_proto_rawDescGZIP(), []int{7}
+	return file_api_internalpb_state_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *CommandResult) GetVm() *VMDefinition {
@@ -707,16 +1054,17 @@ func (x *CommandResult) GetError() string {
 // FSMSnapshotState is the full ephemeral state persisted by
 // raft.FSM.Snapshot/Restore.
 type FSMSnapshotState struct {
-	state         protoimpl.MessageState   `protogen:"open.v1"`
-	LastIndex     uint64                   `protobuf:"varint,1,opt,name=last_index,json=lastIndex,proto3" json:"last_index,omitempty"`
-	Vms           map[string]*VMDefinition `protobuf:"bytes,2,rep,name=vms,proto3" json:"vms,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	state         protoimpl.MessageState        `protogen:"open.v1"`
+	LastIndex     uint64                        `protobuf:"varint,1,opt,name=last_index,json=lastIndex,proto3" json:"last_index,omitempty"`
+	Vms           map[string]*VMDefinition      `protobuf:"bytes,2,rep,name=vms,proto3" json:"vms,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	Networks      map[string]*NetworkDefinition `protobuf:"bytes,3,rep,name=networks,proto3" json:"networks,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *FSMSnapshotState) Reset() {
 	*x = FSMSnapshotState{}
-	mi := &file_api_internalpb_state_proto_msgTypes[8]
+	mi := &file_api_internalpb_state_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -728,7 +1076,7 @@ func (x *FSMSnapshotState) String() string {
 func (*FSMSnapshotState) ProtoMessage() {}
 
 func (x *FSMSnapshotState) ProtoReflect() protoreflect.Message {
-	mi := &file_api_internalpb_state_proto_msgTypes[8]
+	mi := &file_api_internalpb_state_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -741,7 +1089,7 @@ func (x *FSMSnapshotState) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FSMSnapshotState.ProtoReflect.Descriptor instead.
 func (*FSMSnapshotState) Descriptor() ([]byte, []int) {
-	return file_api_internalpb_state_proto_rawDescGZIP(), []int{8}
+	return file_api_internalpb_state_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *FSMSnapshotState) GetLastIndex() uint64 {
@@ -758,11 +1106,18 @@ func (x *FSMSnapshotState) GetVms() map[string]*VMDefinition {
 	return nil
 }
 
+func (x *FSMSnapshotState) GetNetworks() map[string]*NetworkDefinition {
+	if x != nil {
+		return x.Networks
+	}
+	return nil
+}
+
 var File_api_internalpb_state_proto protoreflect.FileDescriptor
 
 const file_api_internalpb_state_proto_rawDesc = "" +
 	"\n" +
-	"\x1aapi/internalpb/state.proto\x12\x12apiary.internal.v1\"\xaf\x02\n" +
+	"\x1aapi/internalpb/state.proto\x12\x12apiary.internal.v1\"\xd7\x03\n" +
 	"\fVMDefinition\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x14\n" +
@@ -773,14 +1128,41 @@ const file_api_internalpb_state_proto_rawDesc = "" +
 	"\x05phase\x18\a \x01(\x0e2\x1b.apiary.internal.v1.VMPhaseR\x05phase\x12\x1f\n" +
 	"\vphase_error\x18\b \x01(\tR\n" +
 	"phaseError\x12\x19\n" +
-	"\biso_name\x18\t \x01(\tR\aisoName\"\xcd\x02\n" +
+	"\biso_name\x18\t \x01(\tR\aisoName\x12\x1d\n" +
+	"\n" +
+	"network_id\x18\n" +
+	" \x01(\tR\tnetworkId\x12\x1d\n" +
+	"\n" +
+	"ip_address\x18\v \x01(\tR\tipAddress\x12\x1f\n" +
+	"\vmac_address\x18\f \x01(\tR\n" +
+	"macAddress\x12G\n" +
+	"\x0efirewall_rules\x18\r \x03(\v2 .apiary.internal.v1.FirewallRuleR\rfirewallRules\"\x7f\n" +
+	"\fFirewallRule\x12\x1c\n" +
+	"\tdirection\x18\x01 \x01(\tR\tdirection\x12\x16\n" +
+	"\x06action\x18\x02 \x01(\tR\x06action\x12\x1a\n" +
+	"\bprotocol\x18\x03 \x01(\tR\bprotocol\x12\x1d\n" +
+	"\n" +
+	"port_range\x18\x04 \x01(\tR\tportRange\"\x89\x01\n" +
+	"\x11NetworkDefinition\x12\x0e\n" +
+	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
+	"\x04name\x18\x02 \x01(\tR\x04name\x12\x17\n" +
+	"\avlan_id\x18\x03 \x01(\rR\x06vlanId\x12\x16\n" +
+	"\x06subnet\x18\x04 \x01(\tR\x06subnet\x12\x1f\n" +
+	"\vbridge_name\x18\x05 \x01(\tR\n" +
+	"bridgeName\"\xe5\x03\n" +
 	"\aCommand\x12;\n" +
 	"\tcreate_vm\x18\x01 \x01(\v2\x1c.apiary.internal.v1.CreateVMH\x00R\bcreateVm\x12;\n" +
 	"\tupdate_vm\x18\x02 \x01(\v2\x1c.apiary.internal.v1.UpdateVMH\x00R\bupdateVm\x12;\n" +
 	"\tdelete_vm\x18\x03 \x01(\v2\x1c.apiary.internal.v1.DeleteVMH\x00R\bdeleteVm\x12K\n" +
 	"\x0fupdate_vm_phase\x18\x04 \x01(\v2!.apiary.internal.v1.UpdateVMPhaseH\x00R\rupdateVmPhase\x128\n" +
-	"\bpurge_vm\x18\x05 \x01(\v2\x1b.apiary.internal.v1.PurgeVMH\x00R\apurgeVmB\x04\n" +
-	"\x02op\"<\n" +
+	"\bpurge_vm\x18\x05 \x01(\v2\x1b.apiary.internal.v1.PurgeVMH\x00R\apurgeVm\x12J\n" +
+	"\x0ecreate_network\x18\x06 \x01(\v2!.apiary.internal.v1.CreateNetworkH\x00R\rcreateNetwork\x12J\n" +
+	"\x0edelete_network\x18\a \x01(\v2!.apiary.internal.v1.DeleteNetworkH\x00R\rdeleteNetworkB\x04\n" +
+	"\x02op\"P\n" +
+	"\rCreateNetwork\x12?\n" +
+	"\anetwork\x18\x01 \x01(\v2%.apiary.internal.v1.NetworkDefinitionR\anetwork\"\x1f\n" +
+	"\rDeleteNetwork\x12\x0e\n" +
+	"\x02id\x18\x01 \x01(\tR\x02id\"<\n" +
 	"\bCreateVM\x120\n" +
 	"\x02vm\x18\x01 \x01(\v2 .apiary.internal.v1.VMDefinitionR\x02vm\"<\n" +
 	"\bUpdateVM\x120\n" +
@@ -796,14 +1178,18 @@ const file_api_internalpb_state_proto_rawDesc = "" +
 	"\x02id\x18\x01 \x01(\tR\x02id\"W\n" +
 	"\rCommandResult\x120\n" +
 	"\x02vm\x18\x01 \x01(\v2 .apiary.internal.v1.VMDefinitionR\x02vm\x12\x14\n" +
-	"\x05error\x18\x02 \x01(\tR\x05error\"\xcc\x01\n" +
+	"\x05error\x18\x02 \x01(\tR\x05error\"\x80\x03\n" +
 	"\x10FSMSnapshotState\x12\x1d\n" +
 	"\n" +
 	"last_index\x18\x01 \x01(\x04R\tlastIndex\x12?\n" +
-	"\x03vms\x18\x02 \x03(\v2-.apiary.internal.v1.FSMSnapshotState.VmsEntryR\x03vms\x1aX\n" +
+	"\x03vms\x18\x02 \x03(\v2-.apiary.internal.v1.FSMSnapshotState.VmsEntryR\x03vms\x12N\n" +
+	"\bnetworks\x18\x03 \x03(\v22.apiary.internal.v1.FSMSnapshotState.NetworksEntryR\bnetworks\x1aX\n" +
 	"\bVmsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x126\n" +
-	"\x05value\x18\x02 \x01(\v2 .apiary.internal.v1.VMDefinitionR\x05value:\x028\x01*f\n" +
+	"\x05value\x18\x02 \x01(\v2 .apiary.internal.v1.VMDefinitionR\x05value:\x028\x01\x1ab\n" +
+	"\rNetworksEntry\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x12;\n" +
+	"\x05value\x18\x02 \x01(\v2%.apiary.internal.v1.NetworkDefinitionR\x05value:\x028\x01*f\n" +
 	"\aVMState\x12\x18\n" +
 	"\x14VM_STATE_UNSPECIFIED\x10\x00\x12\x14\n" +
 	"\x10VM_STATE_STOPPED\x10\x01\x12\x14\n" +
@@ -829,40 +1215,51 @@ func file_api_internalpb_state_proto_rawDescGZIP() []byte {
 }
 
 var file_api_internalpb_state_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
-var file_api_internalpb_state_proto_msgTypes = make([]protoimpl.MessageInfo, 10)
+var file_api_internalpb_state_proto_msgTypes = make([]protoimpl.MessageInfo, 15)
 var file_api_internalpb_state_proto_goTypes = []any{
-	(VMState)(0),             // 0: apiary.internal.v1.VMState
-	(VMPhase)(0),             // 1: apiary.internal.v1.VMPhase
-	(*VMDefinition)(nil),     // 2: apiary.internal.v1.VMDefinition
-	(*Command)(nil),          // 3: apiary.internal.v1.Command
-	(*CreateVM)(nil),         // 4: apiary.internal.v1.CreateVM
-	(*UpdateVM)(nil),         // 5: apiary.internal.v1.UpdateVM
-	(*DeleteVM)(nil),         // 6: apiary.internal.v1.DeleteVM
-	(*UpdateVMPhase)(nil),    // 7: apiary.internal.v1.UpdateVMPhase
-	(*PurgeVM)(nil),          // 8: apiary.internal.v1.PurgeVM
-	(*CommandResult)(nil),    // 9: apiary.internal.v1.CommandResult
-	(*FSMSnapshotState)(nil), // 10: apiary.internal.v1.FSMSnapshotState
-	nil,                      // 11: apiary.internal.v1.FSMSnapshotState.VmsEntry
+	(VMState)(0),              // 0: apiary.internal.v1.VMState
+	(VMPhase)(0),              // 1: apiary.internal.v1.VMPhase
+	(*VMDefinition)(nil),      // 2: apiary.internal.v1.VMDefinition
+	(*FirewallRule)(nil),      // 3: apiary.internal.v1.FirewallRule
+	(*NetworkDefinition)(nil), // 4: apiary.internal.v1.NetworkDefinition
+	(*Command)(nil),           // 5: apiary.internal.v1.Command
+	(*CreateNetwork)(nil),     // 6: apiary.internal.v1.CreateNetwork
+	(*DeleteNetwork)(nil),     // 7: apiary.internal.v1.DeleteNetwork
+	(*CreateVM)(nil),          // 8: apiary.internal.v1.CreateVM
+	(*UpdateVM)(nil),          // 9: apiary.internal.v1.UpdateVM
+	(*DeleteVM)(nil),          // 10: apiary.internal.v1.DeleteVM
+	(*UpdateVMPhase)(nil),     // 11: apiary.internal.v1.UpdateVMPhase
+	(*PurgeVM)(nil),           // 12: apiary.internal.v1.PurgeVM
+	(*CommandResult)(nil),     // 13: apiary.internal.v1.CommandResult
+	(*FSMSnapshotState)(nil),  // 14: apiary.internal.v1.FSMSnapshotState
+	nil,                       // 15: apiary.internal.v1.FSMSnapshotState.VmsEntry
+	nil,                       // 16: apiary.internal.v1.FSMSnapshotState.NetworksEntry
 }
 var file_api_internalpb_state_proto_depIdxs = []int32{
 	0,  // 0: apiary.internal.v1.VMDefinition.desired_state:type_name -> apiary.internal.v1.VMState
 	1,  // 1: apiary.internal.v1.VMDefinition.phase:type_name -> apiary.internal.v1.VMPhase
-	4,  // 2: apiary.internal.v1.Command.create_vm:type_name -> apiary.internal.v1.CreateVM
-	5,  // 3: apiary.internal.v1.Command.update_vm:type_name -> apiary.internal.v1.UpdateVM
-	6,  // 4: apiary.internal.v1.Command.delete_vm:type_name -> apiary.internal.v1.DeleteVM
-	7,  // 5: apiary.internal.v1.Command.update_vm_phase:type_name -> apiary.internal.v1.UpdateVMPhase
-	8,  // 6: apiary.internal.v1.Command.purge_vm:type_name -> apiary.internal.v1.PurgeVM
-	2,  // 7: apiary.internal.v1.CreateVM.vm:type_name -> apiary.internal.v1.VMDefinition
-	2,  // 8: apiary.internal.v1.UpdateVM.vm:type_name -> apiary.internal.v1.VMDefinition
-	1,  // 9: apiary.internal.v1.UpdateVMPhase.phase:type_name -> apiary.internal.v1.VMPhase
-	2,  // 10: apiary.internal.v1.CommandResult.vm:type_name -> apiary.internal.v1.VMDefinition
-	11, // 11: apiary.internal.v1.FSMSnapshotState.vms:type_name -> apiary.internal.v1.FSMSnapshotState.VmsEntry
-	2,  // 12: apiary.internal.v1.FSMSnapshotState.VmsEntry.value:type_name -> apiary.internal.v1.VMDefinition
-	13, // [13:13] is the sub-list for method output_type
-	13, // [13:13] is the sub-list for method input_type
-	13, // [13:13] is the sub-list for extension type_name
-	13, // [13:13] is the sub-list for extension extendee
-	0,  // [0:13] is the sub-list for field type_name
+	3,  // 2: apiary.internal.v1.VMDefinition.firewall_rules:type_name -> apiary.internal.v1.FirewallRule
+	8,  // 3: apiary.internal.v1.Command.create_vm:type_name -> apiary.internal.v1.CreateVM
+	9,  // 4: apiary.internal.v1.Command.update_vm:type_name -> apiary.internal.v1.UpdateVM
+	10, // 5: apiary.internal.v1.Command.delete_vm:type_name -> apiary.internal.v1.DeleteVM
+	11, // 6: apiary.internal.v1.Command.update_vm_phase:type_name -> apiary.internal.v1.UpdateVMPhase
+	12, // 7: apiary.internal.v1.Command.purge_vm:type_name -> apiary.internal.v1.PurgeVM
+	6,  // 8: apiary.internal.v1.Command.create_network:type_name -> apiary.internal.v1.CreateNetwork
+	7,  // 9: apiary.internal.v1.Command.delete_network:type_name -> apiary.internal.v1.DeleteNetwork
+	4,  // 10: apiary.internal.v1.CreateNetwork.network:type_name -> apiary.internal.v1.NetworkDefinition
+	2,  // 11: apiary.internal.v1.CreateVM.vm:type_name -> apiary.internal.v1.VMDefinition
+	2,  // 12: apiary.internal.v1.UpdateVM.vm:type_name -> apiary.internal.v1.VMDefinition
+	1,  // 13: apiary.internal.v1.UpdateVMPhase.phase:type_name -> apiary.internal.v1.VMPhase
+	2,  // 14: apiary.internal.v1.CommandResult.vm:type_name -> apiary.internal.v1.VMDefinition
+	15, // 15: apiary.internal.v1.FSMSnapshotState.vms:type_name -> apiary.internal.v1.FSMSnapshotState.VmsEntry
+	16, // 16: apiary.internal.v1.FSMSnapshotState.networks:type_name -> apiary.internal.v1.FSMSnapshotState.NetworksEntry
+	2,  // 17: apiary.internal.v1.FSMSnapshotState.VmsEntry.value:type_name -> apiary.internal.v1.VMDefinition
+	4,  // 18: apiary.internal.v1.FSMSnapshotState.NetworksEntry.value:type_name -> apiary.internal.v1.NetworkDefinition
+	19, // [19:19] is the sub-list for method output_type
+	19, // [19:19] is the sub-list for method input_type
+	19, // [19:19] is the sub-list for extension type_name
+	19, // [19:19] is the sub-list for extension extendee
+	0,  // [0:19] is the sub-list for field type_name
 }
 
 func init() { file_api_internalpb_state_proto_init() }
@@ -870,12 +1267,14 @@ func file_api_internalpb_state_proto_init() {
 	if File_api_internalpb_state_proto != nil {
 		return
 	}
-	file_api_internalpb_state_proto_msgTypes[1].OneofWrappers = []any{
+	file_api_internalpb_state_proto_msgTypes[3].OneofWrappers = []any{
 		(*Command_CreateVm)(nil),
 		(*Command_UpdateVm)(nil),
 		(*Command_DeleteVm)(nil),
 		(*Command_UpdateVmPhase)(nil),
 		(*Command_PurgeVm)(nil),
+		(*Command_CreateNetwork)(nil),
+		(*Command_DeleteNetwork)(nil),
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
@@ -883,7 +1282,7 @@ func file_api_internalpb_state_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_api_internalpb_state_proto_rawDesc), len(file_api_internalpb_state_proto_rawDesc)),
 			NumEnums:      2,
-			NumMessages:   10,
+			NumMessages:   15,
 			NumExtensions: 0,
 			NumServices:   0,
 		},
