@@ -170,6 +170,59 @@ func TestIntegration_VMWithDisk(t *testing.T) {
 	}
 }
 
+func TestIntegration_VMWithNetwork(t *testing.T) {
+	m, cfg := testManager(t)
+	ctx := context.Background()
+
+	// Self-contained rather than depending on the host already having a
+	// bridge configured: create a throwaway one for the duration of this
+	// test, the same way TestIntegration_VMWithDisk creates its own
+	// throwaway disk image rather than requiring one to pre-exist.
+	bridge, err := runCmd(ctx, "ifconfig", "bridge", "create")
+	if err != nil {
+		t.Fatalf("creating test bridge: %v", err)
+	}
+	t.Cleanup(func() { runCmd(context.Background(), "ifconfig", bridge, "destroy") })
+
+	cfg.Bridge = bridge
+	if err := m.CreateVM(ctx, "vm-net", cfg); err != nil {
+		t.Fatalf("CreateVM() with network error: %v", err)
+	}
+	t.Cleanup(func() { m.DestroyVM(context.Background(), "vm-net") })
+
+	deadline := time.Now().Add(5 * time.Second)
+	var exists bool
+	for time.Now().Before(deadline) {
+		exists, err = m.VMExists(ctx, "vm-net")
+		if err != nil {
+			t.Fatalf("VMExists() error: %v", err)
+		}
+		if exists {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if !exists {
+		t.Fatalf("VMExists() = false after creation with a NIC attached (timed out waiting)")
+	}
+
+	// The tap device should now be a member of the bridge.
+	out, err := runCmd(ctx, "ifconfig", bridge)
+	if err != nil {
+		t.Fatalf("ifconfig %s error: %v", bridge, err)
+	}
+	if !strings.Contains(out, "tap") {
+		t.Errorf("bridge %s members = %q, want a tap device listed", bridge, out)
+	}
+
+	if err := m.DestroyVM(ctx, "vm-net"); err != nil {
+		t.Fatalf("DestroyVM() error: %v", err)
+	}
+	if _, err := os.Stat(m.tapfile(m.Prefix + "vm-net")); !os.IsNotExist(err) {
+		t.Errorf("tapfile still present after DestroyVM(), stat err = %v", err)
+	}
+}
+
 func TestQualifiedName_RejectsInvalidCharacters(t *testing.T) {
 	m := New("apiary-")
 	for _, name := range []string{"", "has space", "has.dot", "has/slash", "has\"quote"} {
