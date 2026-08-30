@@ -1926,8 +1926,11 @@ type NetIfaceStats struct {
 	Name  string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
 	// rx_bytes/tx_bytes are cumulative counters since boot, not a rate -
 	// see internal/hoststats.NetIface's doc comment (ADR-0018).
-	RxBytes       uint64 `protobuf:"varint,2,opt,name=rx_bytes,json=rxBytes,proto3" json:"rx_bytes,omitempty"`
-	TxBytes       uint64 `protobuf:"varint,3,opt,name=tx_bytes,json=txBytes,proto3" json:"tx_bytes,omitempty"`
+	RxBytes uint64 `protobuf:"varint,2,opt,name=rx_bytes,json=rxBytes,proto3" json:"rx_bytes,omitempty"`
+	TxBytes uint64 `protobuf:"varint,3,opt,name=tx_bytes,json=txBytes,proto3" json:"tx_bytes,omitempty"`
+	// up is this interface's real current state (ifconfig's own UP
+	// flag) - see ADR-0022.
+	Up            bool `protobuf:"varint,4,opt,name=up,proto3" json:"up,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1981,6 +1984,13 @@ func (x *NetIfaceStats) GetTxBytes() uint64 {
 		return x.TxBytes
 	}
 	return 0
+}
+
+func (x *NetIfaceStats) GetUp() bool {
+	if x != nil {
+		return x.Up
+	}
+	return false
 }
 
 // PFStats summarizes pf(8)'s current status, from `pfctl -s info` -
@@ -2747,11 +2757,12 @@ const file_api_rpc_manager_proto_rawDesc = "" +
 	"\x05model\x18\x02 \x01(\tR\x05model\x12\x16\n" +
 	"\x06serial\x18\x03 \x01(\tR\x06serial\x12\x18\n" +
 	"\ahealthy\x18\x04 \x01(\bR\ahealthy\x12\x14\n" +
-	"\x05error\x18\x05 \x01(\tR\x05error\"Y\n" +
+	"\x05error\x18\x05 \x01(\tR\x05error\"i\n" +
 	"\rNetIfaceStats\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x19\n" +
 	"\brx_bytes\x18\x02 \x01(\x04R\arxBytes\x12\x19\n" +
-	"\btx_bytes\x18\x03 \x01(\x04R\atxBytes\"d\n" +
+	"\btx_bytes\x18\x03 \x01(\x04R\atxBytes\x12\x0e\n" +
+	"\x02up\x18\x04 \x01(\bR\x02up\"d\n" +
 	"\aPFStats\x12\x18\n" +
 	"\aenabled\x18\x01 \x01(\bR\aenabled\x12%\n" +
 	"\x0ecurrent_states\x18\x02 \x01(\x04R\rcurrentStates\x12\x18\n" +

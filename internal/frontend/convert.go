@@ -229,6 +229,7 @@ type netIfaceView struct {
 	Name string
 	Rx   string
 	Tx   string
+	Up   bool
 }
 
 // formatBytes renders n as a human-readable size (e.g. "2.72 TB"),
@@ -276,7 +277,7 @@ func fromRPCStats(resp *rpcpb.HostStatsResponse) statsView {
 
 	net := make([]netIfaceView, 0, len(resp.GetNet()))
 	for _, n := range resp.GetNet() {
-		net = append(net, netIfaceView{Name: n.GetName(), Rx: formatBytes(n.GetRxBytes()), Tx: formatBytes(n.GetTxBytes())})
+		net = append(net, netIfaceView{Name: n.GetName(), Rx: formatBytes(n.GetRxBytes()), Tx: formatBytes(n.GetTxBytes()), Up: n.GetUp()})
 	}
 
 	pf := resp.GetPf()

@@ -66,6 +66,13 @@ type NetIface struct {
 	Name    string
 	RxBytes uint64
 	TxBytes uint64
+
+	// Up is this interface's real current state (ifconfig's own UP
+	// flag) - added alongside ADR-0022's network management work, whose
+	// Networks page colors a *virtual* bridge's up/down status; this
+	// does the same for every physical interface (e.g. the uplink NIC
+	// itself), which that page never listed at all.
+	Up bool
 }
 
 // PFInfo is a summary of pf(8)'s current status and counters, from
@@ -371,7 +378,38 @@ func gatherNet(ctx context.Context) ([]NetIface, error) {
 	if err != nil {
 		return nil, err
 	}
-	return parseNetstat(out), nil
+	ifaces := parseNetstat(out)
+	// Up state comes from a separate `ifconfig <name>` per interface -
+	// netstat's own byte-counter rows carry no flags. Best-effort per
+	// interface, like every other per-item gather in this file: a
+	// failure to determine one interface's up/down state (e.g. it
+	// vanished between the two commands) just leaves Up false rather
+	// than failing network stats entirely.
+	for i := range ifaces {
+		if out, err := runCmd(ctx, "ifconfig", ifaces[i].Name); err == nil {
+			ifaces[i].Up = parseIfconfigUp(out)
+		}
+	}
+	return ifaces, nil
+}
+
+// parseIfconfigUp reports whether the interface is up, from the first
+// line of `ifconfig <name>`'s output, e.g.
+// "re0: flags=8863<UP,BROADCAST,RUNNING,SIMPLEX,MULTICAST> ..." -
+// checking for an exact "UP" flag inside the <...> list.
+func parseIfconfigUp(out string) bool {
+	line, _, _ := strings.Cut(out, "\n")
+	start := strings.Index(line, "<")
+	end := strings.Index(line, ">")
+	if start == -1 || end == -1 || end < start {
+		return false
+	}
+	for _, flag := range strings.Split(line[start+1:end], ",") {
+		if flag == "UP" {
+			return true
+		}
+	}
+	return false
 }
 
 // parseNetstat parses `netstat -ibn`'s per-interface link-layer row

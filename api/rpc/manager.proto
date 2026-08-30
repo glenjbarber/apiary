@@ -310,6 +310,10 @@ message NetIfaceStats {
   // see internal/hoststats.NetIface's doc comment (ADR-0018).
   uint64 rx_bytes = 2;
   uint64 tx_bytes = 3;
+
+  // up is this interface's real current state (ifconfig's own UP
+  // flag) - see ADR-0022.
+  bool up = 4;
 }
 
 // PFStats summarizes pf(8)'s current status, from `pfctl -s info` -

@@ -206,7 +206,7 @@ func TestServer_StatsPage_IsDefaultLandingPage(t *testing.T) {
 		Mem:    &rpcpb.MemStats{TotalBytes: 1000, FreeBytes: 400},
 		Pools:  []*rpcpb.PoolStats{{Name: "zroot", Health: "ONLINE", CapacityPct: 5}},
 		Disks:  []*rpcpb.DiskStats{{Name: "ada0", Healthy: true}},
-		Net:    []*rpcpb.NetIfaceStats{{Name: "re0", RxBytes: 100, TxBytes: 200}},
+		Net:    []*rpcpb.NetIfaceStats{{Name: "re0", RxBytes: 100, TxBytes: 200, Up: true}},
 		Pf:     &rpcpb.PFStats{Enabled: true, CurrentStates: 3, Matches: 42},
 	}}
 	s := newTestServer(t, client)
@@ -223,6 +223,9 @@ func TestServer_StatsPage_IsDefaultLandingPage(t *testing.T) {
 		if !strings.Contains(body, want) {
 			t.Errorf("stats page missing %q, got: %s", want, body)
 		}
+	}
+	if !strings.Contains(body, `<span class="success">up</span>`) {
+		t.Errorf("stats page missing green 'up' status for re0, got: %s", body)
 	}
 	if !strings.Contains(body, "42 rule match") {
 		t.Errorf("stats page missing pf match count, got: %s", body)
@@ -248,6 +251,21 @@ func TestServer_StatsPage_DiskQueryFailureShownWithoutFalseHealthClaim(t *testin
 	}
 	if !strings.Contains(body, "unknown") {
 		t.Errorf("stats page missing 'unknown' health for a disk query failure, got: %s", body)
+	}
+}
+
+func TestServer_StatsPage_ColorsDownInterfaceRed(t *testing.T) {
+	client := &fakeClient{hostStatsResp: &rpcpb.HostStatsResponse{
+		Net: []*rpcpb.NetIfaceStats{{Name: "tap0", Up: false}},
+	}}
+	s := newTestServer(t, client)
+
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, req)
+
+	if !strings.Contains(rec.Body.String(), `<span class="error">down</span>`) {
+		t.Errorf("stats page missing red 'down' status for tap0, got: %s", rec.Body.String())
 	}
 }
 

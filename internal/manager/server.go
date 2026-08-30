@@ -357,7 +357,7 @@ func (s *Server) HostStats(ctx context.Context, _ *rpcpb.HostStatsRequest) (*rpc
 
 	net := make([]*rpcpb.NetIfaceStats, 0, len(snap.Net))
 	for _, n := range snap.Net {
-		net = append(net, &rpcpb.NetIfaceStats{Name: n.Name, RxBytes: n.RxBytes, TxBytes: n.TxBytes})
+		net = append(net, &rpcpb.NetIfaceStats{Name: n.Name, RxBytes: n.RxBytes, TxBytes: n.TxBytes, Up: n.Up})
 	}
 
 	return &rpcpb.HostStatsResponse{

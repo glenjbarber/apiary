@@ -144,6 +144,35 @@ Counters
   memory                                 0
 `
 
+func TestParseIfconfigUp(t *testing.T) {
+	cases := []struct {
+		name string
+		out  string
+		want bool
+	}{
+		{
+			name: "up interface",
+			out:  "re0: flags=8863<UP,BROADCAST,RUNNING,SIMPLEX,MULTICAST> metric 0 mtu 1500\n\tether 10:bf:48:85:a3:d4\n",
+			want: true,
+		},
+		{
+			name: "down interface",
+			out:  "re0: flags=8802<BROADCAST,SIMPLEX,MULTICAST> metric 0 mtu 1500\n\tether 10:bf:48:85:a3:d4\n",
+			want: false,
+		},
+		{
+			name: "malformed output has no flags",
+			out:  "not ifconfig output at all\n",
+			want: false,
+		},
+	}
+	for _, c := range cases {
+		if got := parseIfconfigUp(c.out); got != c.want {
+			t.Errorf("%s: parseIfconfigUp() = %v, want %v", c.name, got, c.want)
+		}
+	}
+}
+
 func TestParsePFInfo(t *testing.T) {
 	info := parsePFInfo(realPFInfoOutput)
 	if !info.Enabled {
