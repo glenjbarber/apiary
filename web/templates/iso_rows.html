@@ -1,0 +1,15 @@
+{{define "iso_rows"}}
+{{if .Error}}<tr><td colspan="4" class="error">{{.Error}}</td></tr>{{end}}
+{{range .ISOs}}
+<tr>
+  <td>{{.Name}}</td>
+  <td>{{.SizeBytes}}</td>
+  <td><code>{{.SHA256}}</code></td>
+  <td>
+    <button hx-delete="/isos/{{.Name}}" hx-target="#iso-rows" hx-swap="innerHTML" hx-confirm="Delete {{.Name}}?">Delete</button>
+  </td>
+</tr>
+{{else}}
+  {{if not .Error}}<tr><td colspan="4"><em>No images</em></td></tr>{{end}}
+{{end}}
+{{end}}

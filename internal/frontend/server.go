@@ -3,8 +3,11 @@ package frontend
 import (
 	"fmt"
 	"html/template"
+	"io"
+	"mime/multipart"
 	"net/http"
 	"strconv"
+	"strings"
 
 	rpcpb "github.com/glenjbarber/apiary/api/rpc"
 	"github.com/glenjbarber/apiary/web"
@@ -30,6 +33,10 @@ type pageData struct {
 	// index.html) so live refreshes don't reset it back to the default.
 	SortBy  string
 	SortDir string
+
+	// ISOs lists stored installer images, for both the Images section's
+	// table and the create-VM form's ISO picker.
+	ISOs []isoView
 }
 
 // parseSort reads sort/dir query parameters, defaulting to ascending by
@@ -84,6 +91,9 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /vms", s.handleListVMs)
 	s.mux.HandleFunc("POST /vms", s.handleCreateVM)
 	s.mux.HandleFunc("DELETE /vms/{id}", s.handleDeleteVM)
+	s.mux.HandleFunc("GET /isos", s.handleListISOs)
+	s.mux.HandleFunc("POST /isos", s.handleUploadISO)
+	s.mux.HandleFunc("DELETE /isos/{name}", s.handleDeleteISO)
 }
 
 // currentVMs fetches the current VM list, sorted by sortBy/dir (see
@@ -121,7 +131,29 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 	if err != nil && errMsg == "" {
 		errMsg = err.Error()
 	}
-	s.render(w, "layout", pageData{Error: errMsg, VMs: vms, Nodes: nodes, SortBy: sortBy, SortDir: dir})
+	isos, isoErr := s.currentISOs(r)
+	if isoErr != "" && errMsg == "" {
+		errMsg = isoErr
+	}
+	s.render(w, "layout", pageData{Error: errMsg, VMs: vms, Nodes: nodes, SortBy: sortBy, SortDir: dir, ISOs: isos})
+}
+
+// currentISOs fetches the current list of stored installer images,
+// returning an empty slice (not an error) if the fetch fails - the same
+// fail-soft convention currentVMs follows.
+func (s *Server) currentISOs(r *http.Request) ([]isoView, string) {
+	resp, err := s.client.ListISOs(r.Context(), &rpcpb.ListISOsRequest{})
+	if err != nil {
+		return nil, err.Error()
+	}
+	if resp.GetError() != "" {
+		return nil, resp.GetError()
+	}
+	isos := make([]isoView, 0, len(resp.GetIsos()))
+	for _, i := range resp.GetIsos() {
+		isos = append(isos, fromRPCISO(i))
+	}
+	return isos, ""
 }
 
 // knownNodes fetches the current raft cluster membership via Status, for
@@ -163,6 +195,7 @@ func (s *Server) handleCreateVM(w http.ResponseWriter, r *http.Request) {
 			MemoryMb:     memoryMB,
 			NodeId:       r.FormValue("node_id"),
 			DesiredState: stateToRPC(r.FormValue("desired_state")),
+			IsoName:      r.FormValue("iso_name"),
 		},
 	})
 	if err != nil {
@@ -234,6 +267,145 @@ func (s *Server) renderRowsWithError(w http.ResponseWriter, r *http.Request, msg
 		msg = msg + "; additionally failed to refresh list: " + fetchErr
 	}
 	s.render(w, "vm_rows", pageData{Error: msg, VMs: vms})
+}
+
+// handleListISOs serves just the iso_rows fragment, for refreshing the
+// Images table after an upload or delete without a full page reload -
+// same pattern as handleListVMs/vm_rows.
+func (s *Server) handleListISOs(w http.ResponseWriter, r *http.Request) {
+	isos, errMsg := s.currentISOs(r)
+	s.render(w, "iso_rows", pageData{Error: errMsg, ISOs: isos})
+}
+
+// handleUploadISO streams a multipart file upload directly into
+// managerd's UploadISO RPC, chunk by chunk, without ever buffering the
+// whole file in this process - an installer image can be several
+// gigabytes. This requires the form's hash field to be encoded before
+// its file field (see index.html's field order), since MultipartReader
+// processes parts strictly in the order the client sent them - by the
+// time the file part arrives, the hash needed for its Metadata message
+// must already be known.
+func (s *Server) handleUploadISO(w http.ResponseWriter, r *http.Request) {
+	mr, err := r.MultipartReader()
+	if err != nil {
+		s.renderISORowsAndFormError(w, r, "invalid upload: "+err.Error())
+		return
+	}
+
+	var expectedHash string
+	var result *rpcpb.UploadISOResponse
+	var uploadErr error
+
+	for {
+		part, err := mr.NextPart()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			uploadErr = fmt.Errorf("reading upload: %w", err)
+			break
+		}
+
+		switch part.FormName() {
+		case "expected_sha256":
+			data, _ := io.ReadAll(part)
+			expectedHash = strings.TrimSpace(string(data))
+		case "file":
+			result, uploadErr = s.uploadISOStream(r, part, expectedHash)
+		}
+		part.Close()
+		if uploadErr != nil {
+			break
+		}
+	}
+
+	switch {
+	case uploadErr != nil:
+		// fall through to the error render below
+	case result == nil:
+		uploadErr = fmt.Errorf("no file provided")
+	case result.GetError() != "":
+		uploadErr = fmt.Errorf("%s", result.GetError())
+	}
+	if uploadErr != nil {
+		s.renderISORowsAndFormError(w, r, uploadErr.Error())
+		return
+	}
+	s.renderISORowsAndFormError(w, r, "")
+}
+
+// uploadISOStream opens managerd's UploadISO client stream, sends the
+// required Metadata message (the file's own name, plus expectedHash
+// gathered from an earlier form field), then relays part's bytes as a
+// sequence of Chunk messages.
+func (s *Server) uploadISOStream(r *http.Request, part *multipart.Part, expectedHash string) (*rpcpb.UploadISOResponse, error) {
+	stream, err := s.client.UploadISO(r.Context())
+	if err != nil {
+		return nil, fmt.Errorf("opening upload stream: %w", err)
+	}
+	if err := stream.Send(&rpcpb.UploadISORequest{
+		Data: &rpcpb.UploadISORequest_Metadata{
+			Metadata: &rpcpb.ISOUploadMetadata{Name: part.FileName(), ExpectedSha256: expectedHash},
+		},
+	}); err != nil {
+		return nil, fmt.Errorf("sending upload metadata: %w", err)
+	}
+
+	buf := make([]byte, 256*1024)
+	for {
+		n, rerr := part.Read(buf)
+		if n > 0 {
+			chunk := make([]byte, n)
+			copy(chunk, buf[:n])
+			if serr := stream.Send(&rpcpb.UploadISORequest{Data: &rpcpb.UploadISORequest_Chunk{Chunk: chunk}}); serr != nil {
+				return nil, fmt.Errorf("sending upload data: %w", serr)
+			}
+		}
+		if rerr == io.EOF {
+			break
+		}
+		if rerr != nil {
+			return nil, fmt.Errorf("reading upload data: %w", rerr)
+		}
+	}
+	return stream.CloseAndRecv()
+}
+
+// renderISORowsAndFormError mirrors renderVMRowsAndFormError: refreshes
+// the Images table and reports an upload/delete-specific error (if any)
+// via an out-of-band swap into index.html's #iso-error slot, rather
+// than inline in the images table.
+func (s *Server) renderISORowsAndFormError(w http.ResponseWriter, r *http.Request, formErr string) {
+	isos, fetchErr := s.currentISOs(r)
+	if fetchErr != "" {
+		if formErr == "" {
+			formErr = fetchErr
+		} else {
+			formErr += "; additionally failed to refresh list: " + fetchErr
+		}
+	}
+
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	if err := s.tmpl.ExecuteTemplate(w, "iso_rows", pageData{ISOs: isos}); err != nil {
+		http.Error(w, "template error: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if err := s.tmpl.ExecuteTemplate(w, "iso_error", formErr); err != nil {
+		http.Error(w, "template error: "+err.Error(), http.StatusInternalServerError)
+	}
+}
+
+func (s *Server) handleDeleteISO(w http.ResponseWriter, r *http.Request) {
+	resp, err := s.client.DeleteISO(r.Context(), &rpcpb.DeleteISORequest{Name: r.PathValue("name")})
+	if err != nil {
+		s.renderISORowsAndFormError(w, r, err.Error())
+		return
+	}
+	if resp.GetError() != "" {
+		s.renderISORowsAndFormError(w, r, resp.GetError())
+		return
+	}
+	s.renderISORowsAndFormError(w, r, "")
 }
 
 func (s *Server) render(w http.ResponseWriter, name string, data pageData) {

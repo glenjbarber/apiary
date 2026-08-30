@@ -31,6 +31,21 @@ type vmView struct {
 	// happened yet.
 	Phase      string
 	PhaseError string
+
+	// ISOName is the installer image (if any) this VM was created with -
+	// empty means it booted from its disk alone.
+	ISOName string
+}
+
+// isoView is the template-facing shape for a stored installer image.
+type isoView struct {
+	Name      string
+	SizeBytes uint64
+	SHA256    string
+}
+
+func fromRPCISO(i *rpcpb.ISOInfo) isoView {
+	return isoView{Name: i.GetName(), SizeBytes: i.GetSizeBytes(), SHA256: i.GetSha256()}
 }
 
 func stateToRPC(s string) rpcpb.VMState {
@@ -121,5 +136,6 @@ func fromRPCVM(d *rpcpb.VMDefinition) vmView {
 		DesiredState: stateFromRPC(d.GetDesiredState()),
 		Phase:        phaseFromRPC(d.GetPhase()),
 		PhaseError:   d.GetPhaseError(),
+		ISOName:      d.GetIsoName(),
 	}
 }

@@ -1,4 +1,23 @@
 {{define "content"}}
+<h2>Images</h2>
+<form class="upload-iso" hx-post="/isos" hx-target="#iso-rows" hx-swap="innerHTML" hx-encoding="multipart/form-data">
+  <label>Expected SHA-256
+    <input type="text" name="expected_sha256" required pattern="[0-9a-fA-F]{64}" title="64 hex characters" size="64">
+  </label>
+  <label>File <input type="file" name="file" required></label>
+  <button type="submit">Upload</button>
+</form>
+<div id="iso-error" class="error"></div>
+
+<table>
+  <thead>
+    <tr><th>Name</th><th>Size (bytes)</th><th>SHA-256</th><th></th></tr>
+  </thead>
+  <tbody id="iso-rows">
+    {{template "iso_rows" .}}
+  </tbody>
+</table>
+
 <h2>Create VM</h2>
 <form class="create-vm" hx-post="/vms" hx-target="#vm-rows" hx-swap="innerHTML">
   <label>ID <input type="text" name="id" required></label>
@@ -18,6 +37,12 @@
     <select name="desired_state">
       <option value="stopped">stopped</option>
       <option value="running">running</option>
+    </select>
+  </label>
+  <label>ISO
+    <select name="iso_name">
+      <option value="">(none)</option>
+      {{range .ISOs}}<option value="{{.Name}}">{{.Name}}</option>{{end}}
     </select>
   </label>
   <button type="submit">Create</button>
@@ -42,3 +67,5 @@
 {{end}}
 
 {{define "create_error"}}<div id="create-error" class="error" hx-swap-oob="true">{{.}}</div>{{end}}
+
+{{define "iso_error"}}<div id="iso-error" class="error" hx-swap-oob="true">{{.}}</div>{{end}}

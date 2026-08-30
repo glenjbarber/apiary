@@ -1,8 +1,9 @@
 package frontend
 
 import (
+	"bytes"
 	"context"
-	"fmt"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -27,6 +28,32 @@ type fakeClient struct {
 
 	lastCreateReq *rpcpb.CreateVMRequest
 	lastDeleteReq *rpcpb.DeleteVMRequest
+
+	listISOsResp     *rpcpb.ListISOsResponse
+	deleteISOResp    *rpcpb.DeleteISOResponse
+	lastDeleteISOReq *rpcpb.DeleteISORequest
+
+	uploadStream *fakeUploadClientStream
+	uploadErr    error
+}
+
+// fakeUploadClientStream is a fake grpc.ClientStreamingClient for
+// UploadISO - it records every message the handler sends and returns a
+// canned final response, without any real gRPC connection.
+type fakeUploadClientStream struct {
+	grpc.ClientStream
+	sent []*rpcpb.UploadISORequest
+	resp *rpcpb.UploadISOResponse
+	err  error
+}
+
+func (f *fakeUploadClientStream) Send(req *rpcpb.UploadISORequest) error {
+	f.sent = append(f.sent, req)
+	return nil
+}
+
+func (f *fakeUploadClientStream) CloseAndRecv() (*rpcpb.UploadISOResponse, error) {
+	return f.resp, f.err
 }
 
 func (f *fakeClient) Status(context.Context, *rpcpb.StatusRequest, ...grpc.CallOption) (*rpcpb.StatusResponse, error) {
@@ -52,14 +79,27 @@ func (f *fakeClient) GetVM(context.Context, *rpcpb.GetVMRequest, ...grpc.CallOpt
 }
 
 func (f *fakeClient) UploadISO(context.Context, ...grpc.CallOption) (grpc.ClientStreamingClient[rpcpb.UploadISORequest, rpcpb.UploadISOResponse], error) {
-	return nil, fmt.Errorf("fakeClient: UploadISO not implemented")
+	if f.uploadErr != nil {
+		return nil, f.uploadErr
+	}
+	if f.uploadStream == nil {
+		f.uploadStream = &fakeUploadClientStream{resp: &rpcpb.UploadISOResponse{}}
+	}
+	return f.uploadStream, nil
 }
 
 func (f *fakeClient) ListISOs(context.Context, *rpcpb.ListISOsRequest, ...grpc.CallOption) (*rpcpb.ListISOsResponse, error) {
+	if f.listISOsResp != nil {
+		return f.listISOsResp, nil
+	}
 	return &rpcpb.ListISOsResponse{}, nil
 }
 
-func (f *fakeClient) DeleteISO(context.Context, *rpcpb.DeleteISORequest, ...grpc.CallOption) (*rpcpb.DeleteISOResponse, error) {
+func (f *fakeClient) DeleteISO(_ context.Context, in *rpcpb.DeleteISORequest, _ ...grpc.CallOption) (*rpcpb.DeleteISOResponse, error) {
+	f.lastDeleteISOReq = in
+	if f.deleteISOResp != nil {
+		return f.deleteISOResp, nil
+	}
 	return &rpcpb.DeleteISOResponse{}, nil
 }
 
@@ -287,6 +327,117 @@ func TestServer_DeleteVM(t *testing.T) {
 	}
 	if !strings.Contains(rec.Body.String(), "No VMs") {
 		t.Errorf("response should show empty list after delete, got: %s", rec.Body.String())
+	}
+}
+
+func TestServer_ListISOs_ShowsStoredImages(t *testing.T) {
+	client := &fakeClient{listISOsResp: &rpcpb.ListISOsResponse{
+		Isos: []*rpcpb.ISOInfo{{Name: "debian.iso", SizeBytes: 12345, Sha256: "abc123"}},
+	}}
+	s := newTestServer(t, client)
+
+	req := httptest.NewRequest(http.MethodGet, "/isos", nil)
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, req)
+
+	body := rec.Body.String()
+	if !strings.Contains(body, "debian.iso") || !strings.Contains(body, "abc123") {
+		t.Errorf("response missing expected ISO data, got: %s", body)
+	}
+}
+
+// buildUploadRequest constructs a multipart/form-data POST /isos request
+// with expected_sha256 encoded before file - the order handleUploadISO
+// requires, since it streams parts as they arrive rather than buffering
+// the whole form first.
+func buildUploadRequest(t *testing.T, hash, filename, contents string) *http.Request {
+	t.Helper()
+	var buf bytes.Buffer
+	mw := multipart.NewWriter(&buf)
+	if err := mw.WriteField("expected_sha256", hash); err != nil {
+		t.Fatalf("WriteField: %v", err)
+	}
+	fw, err := mw.CreateFormFile("file", filename)
+	if err != nil {
+		t.Fatalf("CreateFormFile: %v", err)
+	}
+	if _, err := fw.Write([]byte(contents)); err != nil {
+		t.Fatalf("writing file part: %v", err)
+	}
+	if err := mw.Close(); err != nil {
+		t.Fatalf("closing multipart writer: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/isos", &buf)
+	req.Header.Set("Content-Type", mw.FormDataContentType())
+	return req
+}
+
+func TestServer_UploadISO_StreamsMetadataThenChunksInOrder(t *testing.T) {
+	client := &fakeClient{uploadStream: &fakeUploadClientStream{
+		resp: &rpcpb.UploadISOResponse{Name: "test.iso", SizeBytes: 4, Sha256: "deadbeef"},
+	}}
+	s := newTestServer(t, client)
+
+	req := buildUploadRequest(t, "deadbeef", "test.iso", "data")
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, req)
+
+	sent := client.uploadStream.sent
+	if len(sent) < 2 {
+		t.Fatalf("stream got %d messages, want at least metadata + 1 chunk", len(sent))
+	}
+	meta := sent[0].GetMetadata()
+	if meta == nil {
+		t.Fatalf("first message = %+v, want metadata", sent[0])
+	}
+	if meta.GetName() != "test.iso" || meta.GetExpectedSha256() != "deadbeef" {
+		t.Errorf("metadata = %+v, want name=test.iso hash=deadbeef", meta)
+	}
+	var gotData []byte
+	for _, m := range sent[1:] {
+		gotData = append(gotData, m.GetChunk()...)
+	}
+	if string(gotData) != "data" {
+		t.Errorf("chunk data = %q, want %q", gotData, "data")
+	}
+	if !strings.Contains(rec.Body.String(), `id="iso-error" class="error" hx-swap-oob="true"></div>`) {
+		t.Errorf("expected an empty iso-error oob swap on success, got: %s", rec.Body.String())
+	}
+}
+
+func TestServer_UploadISO_HashMismatchShowsErrorNotInline(t *testing.T) {
+	client := &fakeClient{uploadStream: &fakeUploadClientStream{
+		resp: &rpcpb.UploadISOResponse{Error: `sha256 mismatch: got aaa, want bbb`},
+	}}
+	s := newTestServer(t, client)
+
+	req := buildUploadRequest(t, "bbb", "test.iso", "data")
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, req)
+
+	body := rec.Body.String()
+	if !strings.Contains(body, "sha256 mismatch") {
+		t.Errorf("response missing hash-mismatch error, got: %s", body)
+	}
+	if !strings.Contains(body, `id="iso-error"`) {
+		t.Errorf("error should be an out-of-band swap into #iso-error, got: %s", body)
+	}
+}
+
+func TestServer_DeleteISO(t *testing.T) {
+	client := &fakeClient{listISOsResp: &rpcpb.ListISOsResponse{}}
+	s := newTestServer(t, client)
+
+	req := httptest.NewRequest(http.MethodDelete, "/isos/old.iso", nil)
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	if client.lastDeleteISOReq.GetName() != "old.iso" {
+		t.Errorf("forwarded name = %q, want old.iso", client.lastDeleteISOReq.GetName())
 	}
 }
 
