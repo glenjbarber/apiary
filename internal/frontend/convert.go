@@ -5,7 +5,12 @@
 // ManagerService client, never talking to raftd directly.
 package frontend
 
-import rpcpb "github.com/glenjbarber/apiary/api/rpc"
+import (
+	"sort"
+	"strings"
+
+	rpcpb "github.com/glenjbarber/apiary/api/rpc"
+)
 
 // vmView is the template-facing shape for a VM. Kept as its own type
 // (rather than exposing api/rpc's generated struct to templates
@@ -69,6 +74,38 @@ func phaseFromRPC(p rpcpb.VMPhase) string {
 	default:
 		return "pending"
 	}
+}
+
+// sortVMs sorts vms in place by sortBy ("id", "node", or "state" -
+// state meaning Phase, the real-time column; anything else falls back
+// to "id"), case-insensitively, ascending unless dir is "desc". Ties
+// within the requested key fall back to ID, so the order stays stable
+// and predictable across repeated calls (e.g. every polling tick)
+// rather than shuffling equal-Phase rows relative to each other.
+func sortVMs(vms []vmView, sortBy, dir string) {
+	key := func(v vmView) string {
+		switch sortBy {
+		case "node":
+			return strings.ToLower(v.NodeID)
+		case "state":
+			return strings.ToLower(v.Phase)
+		default:
+			return strings.ToLower(v.ID)
+		}
+	}
+	sort.SliceStable(vms, func(i, j int) bool {
+		a, b := key(vms[i]), key(vms[j])
+		if a != b {
+			if dir == "desc" {
+				return a > b
+			}
+			return a < b
+		}
+		if dir == "desc" {
+			return strings.ToLower(vms[i].ID) > strings.ToLower(vms[j].ID)
+		}
+		return strings.ToLower(vms[i].ID) < strings.ToLower(vms[j].ID)
+	})
 }
 
 func fromRPCVM(d *rpcpb.VMDefinition) vmView {

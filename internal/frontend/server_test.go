@@ -109,6 +109,46 @@ func TestServer_ListVMs_ReturnsRowsFragmentOnly(t *testing.T) {
 	}
 }
 
+func TestServer_ListVMs_DefaultsToSortedByID(t *testing.T) {
+	// ListVMs's own order is unspecified - the response here is
+	// deliberately not alphabetical, to prove the handler sorts rather
+	// than passing the fetch order straight through.
+	client := &fakeClient{listResp: &rpcpb.ListVMsResponse{
+		Vms: []*rpcpb.VMDefinition{
+			{Id: "web-2"}, {Id: "api-1"}, {Id: "db-3"},
+		},
+	}}
+	s := newTestServer(t, client)
+
+	req := httptest.NewRequest(http.MethodGet, "/vms", nil)
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, req)
+
+	body := rec.Body.String()
+	if i, j, k := strings.Index(body, "api-1"), strings.Index(body, "db-3"), strings.Index(body, "web-2"); !(i < j && j < k) {
+		t.Errorf("rows not in default alphabetical order by ID, got: %s", body)
+	}
+}
+
+func TestServer_ListVMs_SortByNodeDescending(t *testing.T) {
+	client := &fakeClient{listResp: &rpcpb.ListVMsResponse{
+		Vms: []*rpcpb.VMDefinition{
+			{Id: "vm-1", NodeId: "node-a"},
+			{Id: "vm-2", NodeId: "node-b"},
+		},
+	}}
+	s := newTestServer(t, client)
+
+	req := httptest.NewRequest(http.MethodGet, "/vms?sort=node&dir=desc", nil)
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, req)
+
+	body := rec.Body.String()
+	if i, j := strings.Index(body, "vm-2"), strings.Index(body, "vm-1"); !(i < j) {
+		t.Errorf("rows not sorted by node descending, got: %s", body)
+	}
+}
+
 func TestServer_Index_ShowsPendingPhaseForUnreconciledVM(t *testing.T) {
 	client := &fakeClient{listResp: &rpcpb.ListVMsResponse{
 		Vms: []*rpcpb.VMDefinition{{Id: "vm-1", Name: "web-1"}}, // Phase left unset

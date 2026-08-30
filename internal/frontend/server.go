@@ -22,6 +22,36 @@ type pageData struct {
 	// node picker. Only populated for the full index render - vm_rows
 	// doesn't include the create form, so it doesn't need this.
 	Nodes []string
+
+	// SortBy/SortDir are the sort currently applied to VMs ("id", "node",
+	// or "state"; "asc" or "desc") - only used by the full index render,
+	// to link each column header to toggle its own sort and to carry the
+	// current sort forward into the polling tbody's own hx-get URL (see
+	// index.html) so live refreshes don't reset it back to the default.
+	SortBy  string
+	SortDir string
+}
+
+// parseSort reads sort/dir query parameters, defaulting to ascending by
+// ID - which used to be the *only* order (ListVMs's underlying map
+// iteration is unordered), hence "keep it sorted alphabetically by
+// default" being a real, user-visible bug fix, not just an added
+// convenience. Any unrecognized sort value falls back to "id" rather
+// than erroring - a stale or hand-edited URL parameter shouldn't break
+// the page.
+func parseSort(r *http.Request) (sortBy, dir string) {
+	switch r.URL.Query().Get("sort") {
+	case "node", "state":
+		sortBy = r.URL.Query().Get("sort")
+	default:
+		sortBy = "id"
+	}
+	if r.URL.Query().Get("dir") == "desc" {
+		dir = "desc"
+	} else {
+		dir = "asc"
+	}
+	return sortBy, dir
 }
 
 // Server renders the HTMX web UI, backed by a rpcpb.ManagerServiceClient.
@@ -56,11 +86,14 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("DELETE /vms/{id}", s.handleDeleteVM)
 }
 
-// currentVMs fetches the current VM list, returning an empty slice (not
-// an error) if the fetch fails - callers fold the failure into the page
-// as an error message instead, since a fetch failure shouldn't crash a
-// human-facing page render.
-func (s *Server) currentVMs(r *http.Request) ([]vmView, string) {
+// currentVMs fetches the current VM list, sorted by sortBy/dir (see
+// parseSort), returning an empty slice (not an error) if the fetch
+// fails - callers fold the failure into the page as an error message
+// instead, since a fetch failure shouldn't crash a human-facing page
+// render. ListVMs's own order is unspecified (backed by a Go map on the
+// FSM side), so sorting here - never leaving the caller's raw order -
+// is what actually makes the table's order stable and predictable.
+func (s *Server) currentVMs(r *http.Request, sortBy, dir string) ([]vmView, string) {
 	resp, err := s.client.ListVMs(r.Context(), &rpcpb.ListVMsRequest{})
 	if err != nil {
 		return nil, err.Error()
@@ -77,16 +110,18 @@ func (s *Server) currentVMs(r *http.Request) ([]vmView, string) {
 	for _, d := range resp.GetVms() {
 		vms = append(vms, fromRPCVM(d))
 	}
+	sortVMs(vms, sortBy, dir)
 	return vms, ""
 }
 
 func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
-	vms, errMsg := s.currentVMs(r)
+	sortBy, dir := parseSort(r)
+	vms, errMsg := s.currentVMs(r, sortBy, dir)
 	nodes, err := s.knownNodes(r)
 	if err != nil && errMsg == "" {
 		errMsg = err.Error()
 	}
-	s.render(w, "layout", pageData{Error: errMsg, VMs: vms, Nodes: nodes})
+	s.render(w, "layout", pageData{Error: errMsg, VMs: vms, Nodes: nodes, SortBy: sortBy, SortDir: dir})
 }
 
 // knownNodes fetches the current raft cluster membership via Status, for
@@ -106,7 +141,8 @@ func (s *Server) knownNodes(r *http.Request) ([]string, error) {
 // VM's State column moving from "pending" to "creating" to "ready" -
 // without a full page reload.
 func (s *Server) handleListVMs(w http.ResponseWriter, r *http.Request) {
-	vms, errMsg := s.currentVMs(r)
+	sortBy, dir := parseSort(r)
+	vms, errMsg := s.currentVMs(r, sortBy, dir)
 	s.render(w, "vm_rows", pageData{Error: errMsg, VMs: vms})
 }
 
@@ -138,7 +174,8 @@ func (s *Server) handleCreateVM(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	vms, errMsg := s.currentVMs(r)
+	sortBy, dir := parseSort(r)
+	vms, errMsg := s.currentVMs(r, sortBy, dir)
 	s.render(w, "vm_rows", pageData{Error: errMsg, VMs: vms})
 }
 
@@ -153,7 +190,8 @@ func (s *Server) handleDeleteVM(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	vms, errMsg := s.currentVMs(r)
+	sortBy, dir := parseSort(r)
+	vms, errMsg := s.currentVMs(r, sortBy, dir)
 	s.render(w, "vm_rows", pageData{Error: errMsg, VMs: vms})
 }
 
@@ -161,7 +199,8 @@ func (s *Server) handleDeleteVM(w http.ResponseWriter, r *http.Request) {
 // renders it alongside msg, so a failed action still shows the real
 // state rather than leaving the UI out of sync.
 func (s *Server) renderRowsWithError(w http.ResponseWriter, r *http.Request, msg string) {
-	vms, fetchErr := s.currentVMs(r)
+	sortBy, dir := parseSort(r)
+	vms, fetchErr := s.currentVMs(r, sortBy, dir)
 	if fetchErr != "" {
 		msg = msg + "; additionally failed to refresh list: " + fetchErr
 	}
