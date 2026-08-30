@@ -77,6 +77,15 @@ each design decision, in order.
   login form, an in-memory session cookie (24-hour TTL, `HttpOnly` +
   `SameSite=Lax`), and open-redirect protection on the return path. See
   [ADR-0019](docs/adr/0019-session-based-login.md).
+- **Network management** — VLAN/bridge management, real DHCP-backed IP
+  allocation, and per-VM firewall rules (`/networks` in the web UI). A
+  VM's IP/MAC are assigned deterministically inside the replicated raft
+  log itself, so every node computes the same collision-free result
+  independently. `internal/dhcpd` renders and reloads a real `dnsmasq`
+  config; `internal/pf` loads each VM's rules into its own `pf(8)`
+  anchor. Requires `dnsmasq` installed and `pf` enabled with an
+  `anchor "apiary/*"` stanza as one-time host setup. See
+  [ADR-0022](docs/adr/0022-network-management.md).
 
 **Not yet implemented:**
 
@@ -84,16 +93,28 @@ each design decision, in order.
   waiting on the upstream fix to merge, not something fixable here)
 - Node scheduling: nothing decides which cluster node a VM should run on
   beyond whatever a caller sets directly, and `MigrateVM` doesn't exist
-- Multi-node console access: the noVNC console only works when the web
-  UI and the VM's owning node are the same machine (see ADR-0020) — no
-  VNC credentials/encryption either, relying entirely on the login gate
-  in front of it
+- Multi-node console/network access: the noVNC console and the Networks
+  page's bridge status both only work when the web UI and the VM/
+  network's owning node are the same machine (see ADR-0020/ADR-0022) —
+  no VNC credentials/encryption either, relying entirely on the login
+  gate in front of it
+- Network management is v1-scoped: `internal/dhcpd` only supports
+  `/24`-or-smaller subnets, and firewall rules are a flat allow/block
+  list with no priority/ordering beyond `pf`'s own rule evaluation
 - Importing VMs from other hypervisors (e.g. Proxmox): no disk-format
   conversion, and Apiary is UEFI-only. Linux containers have no path at
   all — jails share the host FreeBSD kernel
 - Authentication: the web UI has an optional shared-password login gate
   (off by default, see above); `raftd`, `managerd`, and `restshim` have
   none, and there are no user accounts or roles anywhere
+- **Tabled for now** (evaluated, deliberately deferred):
+  - **Terraform support** — needs real API-key auth (none exists yet)
+    plus a small custom provider against `internal/restshim`'s API
+  - **Kubernetes support** — not an Apiary gap specifically; no one runs
+    `kubelet` natively on FreeBSD (it assumes Linux cgroups/overlayfs).
+    The viable path is Linux VMs under bhyve running normal Kubernetes
+    nodes, the same approach Proxmox itself uses — achievable by hand
+    today, but no Cluster-API-style automation exists yet
 
 ## Architecture
 
@@ -132,7 +153,8 @@ Ephemeral state is what raft actually replicates across the cluster.
 - `api/` — protobuf schema definitions: `api/internalpb` (internal raft
   socket protocol) and `api/rpc` (external RPC API)
 - `internal/` — core logic: `bhyve`, `jail`, `zfs`, `hast`, `cluster`,
-  `raft`, `manager`, `restshim`, `frontend`, `isostore`, `hoststats`
+  `raft`, `manager`, `restshim`, `frontend`, `isostore`, `hoststats`,
+  `vlan`, `dhcpd`, `pf`
 - `web/` — HTML templates and static assets for the frontend, embedded
   into the `frontend` binary at build time
 - `docs/adr/` — architecture decision records; start here for why things
