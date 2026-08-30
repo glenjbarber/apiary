@@ -78,6 +78,10 @@ func (f *fakeClient) DeleteISO(context.Context, *rpcpb.DeleteISORequest, ...grpc
 	return &rpcpb.DeleteISOResponse{}, nil
 }
 
+func (f *fakeClient) HostStats(context.Context, *rpcpb.HostStatsRequest, ...grpc.CallOption) (*rpcpb.HostStatsResponse, error) {
+	return &rpcpb.HostStatsResponse{}, nil
+}
+
 var _ rpcpb.ManagerServiceClient = (*fakeClient)(nil)
 
 func doRequest(t *testing.T, s *Server, method, path string, body interface{}) *httptest.ResponseRecorder {

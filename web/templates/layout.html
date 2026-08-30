@@ -45,7 +45,8 @@
 
 {{define "nav"}}
 <nav>
-  <a href="/"{{if eq .ActivePage "vms"}} class="active"{{end}}>VMs</a>
+  <a href="/"{{if eq .ActivePage "stats"}} class="active"{{end}}>Stats</a>
+  <a href="/vms"{{if eq .ActivePage "vms"}} class="active"{{end}}>VMs</a>
   <a href="/images"{{if eq .ActivePage "images"}} class="active"{{end}}>Images</a>
   <a href="/vms/new"{{if eq .ActivePage "new_vm"}} class="active"{{end}}>New VM</a>
 </nav>

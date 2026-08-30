@@ -34,7 +34,7 @@ type pageData struct {
 	// or "state"; "asc" or "desc") - only used by the full index render,
 	// to link each column header to toggle its own sort and to carry the
 	// current sort forward into the polling tbody's own hx-get URL (see
-	// index.html) so live refreshes don't reset it back to the default.
+	// vms.html) so live refreshes don't reset it back to the default.
 	SortBy  string
 	SortDir string
 
@@ -58,6 +58,9 @@ type pageData struct {
 	// upload's only other visible change is one more row appearing at
 	// the bottom of a table the user may not be looking at.
 	ISOFormSuccess string
+
+	// Stats is this node's host stats snapshot, for the Stats page.
+	Stats statsView
 }
 
 // parseSort reads sort/dir query parameters, defaulting to ascending by
@@ -108,10 +111,11 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) routes() {
 	s.mux.Handle("GET /static/", http.FileServerFS(web.FS))
-	s.mux.HandleFunc("GET /{$}", s.handleVMsPage)
+	s.mux.HandleFunc("GET /{$}", s.handleStatsPage)
+	s.mux.HandleFunc("GET /vms", s.handleVMsPage)
+	s.mux.HandleFunc("GET /vms/rows", s.handleListVMs)
 	s.mux.HandleFunc("GET /images", s.handleImagesPage)
 	s.mux.HandleFunc("GET /vms/new", s.handleNewVMPage)
-	s.mux.HandleFunc("GET /vms", s.handleListVMs)
 	s.mux.HandleFunc("POST /vms", s.handleCreateVM)
 	s.mux.HandleFunc("DELETE /vms/{id}", s.handleDeleteVM)
 	s.mux.HandleFunc("GET /isos", s.handleListISOs)
@@ -147,7 +151,29 @@ func (s *Server) currentVMs(r *http.Request, sortBy, dir string) ([]vmView, stri
 	return vms, ""
 }
 
-// handleVMsPage serves the VMs list page ("/").
+// handleStatsPage serves the host stats page - the default landing
+// page ("/"), ahead of VMs/Images/New VM, since a node's own health is
+// what an operator most likely wants to see first.
+func (s *Server) handleStatsPage(w http.ResponseWriter, r *http.Request) {
+	stats, errMsg := s.currentStats(r)
+	s.render(w, "stats_page", pageData{Error: errMsg, Stats: stats, ActivePage: "stats"})
+}
+
+// currentStats fetches a HostStats snapshot, returning a zero-value
+// statsView (not an error) if the fetch fails entirely - the same
+// fail-soft convention currentVMs/currentISOs follow. A partial
+// failure (one subsystem down) is instead carried in statsView.Errors,
+// since hoststats.Gather already reports best-effort per subsystem
+// rather than failing outright (see internal/hoststats.Snapshot).
+func (s *Server) currentStats(r *http.Request) (statsView, string) {
+	resp, err := s.client.HostStats(r.Context(), &rpcpb.HostStatsRequest{})
+	if err != nil {
+		return statsView{}, err.Error()
+	}
+	return fromRPCStats(resp), ""
+}
+
+// handleVMsPage serves the VMs list page ("/vms").
 func (s *Server) handleVMsPage(w http.ResponseWriter, r *http.Request) {
 	sortBy, dir := parseSort(r)
 	vms, errMsg := s.currentVMs(r, sortBy, dir)
@@ -193,7 +219,7 @@ func (s *Server) currentISOs(r *http.Request) ([]isoView, string) {
 // knownNodes fetches the current raft cluster membership via Status, for
 // the create-VM form's node picker. A failure here doesn't prevent the
 // page from rendering - the picker just falls back to a free-text
-// default (see index.html).
+// default (see new_vm.html).
 func (s *Server) knownNodes(r *http.Request) ([]string, error) {
 	resp, err := s.client.Status(r.Context(), &rpcpb.StatusRequest{})
 	if err != nil {
@@ -248,7 +274,7 @@ func (s *Server) handleCreateVM(w http.ResponseWriter, r *http.Request) {
 		s.renderCreateError(w, resp.GetError())
 		return
 	}
-	w.Header().Set("HX-Redirect", "/")
+	w.Header().Set("HX-Redirect", "/vms")
 }
 
 // renderCreateError writes formErr as the create form's #create-error
@@ -299,7 +325,7 @@ func (s *Server) handleListISOs(w http.ResponseWriter, r *http.Request) {
 // managerd's UploadISO RPC, chunk by chunk, without ever buffering the
 // whole file in this process - an installer image can be several
 // gigabytes. This requires the form's hash field to be encoded before
-// its file field (see index.html's field order), since MultipartReader
+// its file field (see images.html's field order), since MultipartReader
 // processes parts strictly in the order the client sent them - by the
 // time the file part arrives, the hash needed for its Metadata message
 // must already be known.

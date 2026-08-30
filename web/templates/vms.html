@@ -9,14 +9,14 @@
   <table>
     <thead>
       <tr>
-        <th><a href="/?sort=id&dir={{if and (eq .SortBy "id") (eq .SortDir "asc")}}desc{{else}}asc{{end}}">ID{{if eq .SortBy "id"}} {{if eq .SortDir "asc"}}&#9650;{{else}}&#9660;{{end}}{{end}}</a></th>
+        <th><a href="/vms?sort=id&dir={{if and (eq .SortBy "id") (eq .SortDir "asc")}}desc{{else}}asc{{end}}">ID{{if eq .SortBy "id"}} {{if eq .SortDir "asc"}}&#9650;{{else}}&#9660;{{end}}{{end}}</a></th>
         <th>Name</th><th>vCPUs</th><th>Memory (MB)</th>
-        <th><a href="/?sort=node&dir={{if and (eq .SortBy "node") (eq .SortDir "asc")}}desc{{else}}asc{{end}}">Node{{if eq .SortBy "node"}} {{if eq .SortDir "asc"}}&#9650;{{else}}&#9660;{{end}}{{end}}</a></th>
-        <th><a href="/?sort=state&dir={{if and (eq .SortBy "state") (eq .SortDir "asc")}}desc{{else}}asc{{end}}">State{{if eq .SortBy "state"}} {{if eq .SortDir "asc"}}&#9650;{{else}}&#9660;{{end}}{{end}}</a></th>
+        <th><a href="/vms?sort=node&dir={{if and (eq .SortBy "node") (eq .SortDir "asc")}}desc{{else}}asc{{end}}">Node{{if eq .SortBy "node"}} {{if eq .SortDir "asc"}}&#9650;{{else}}&#9660;{{end}}{{end}}</a></th>
+        <th><a href="/vms?sort=state&dir={{if and (eq .SortBy "state") (eq .SortDir "asc")}}desc{{else}}asc{{end}}">State{{if eq .SortBy "state"}} {{if eq .SortDir "asc"}}&#9650;{{else}}&#9660;{{end}}{{end}}</a></th>
         <th></th>
       </tr>
     </thead>
-    <tbody id="vm-rows" hx-get="/vms?sort={{.SortBy}}&dir={{.SortDir}}" hx-trigger="every 3s" hx-swap="innerHTML">
+    <tbody id="vm-rows" hx-get="/vms/rows?sort={{.SortBy}}&dir={{.SortDir}}" hx-trigger="every 3s" hx-swap="innerHTML">
       {{template "vm_rows" .}}
     </tbody>
   </table>

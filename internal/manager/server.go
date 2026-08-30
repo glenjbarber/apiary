@@ -10,6 +10,7 @@ import (
 
 	internalpb "github.com/glenjbarber/apiary/api/internalpb"
 	rpcpb "github.com/glenjbarber/apiary/api/rpc"
+	"github.com/glenjbarber/apiary/internal/hoststats"
 	"github.com/glenjbarber/apiary/internal/isostore"
 )
 
@@ -33,6 +34,11 @@ type Server struct {
 	raft   *RaftClient
 	nodeID string
 	isos   isoManager
+
+	// statsGather defaults to hoststats.Gather in NewServer; overridable
+	// in tests so HostStats's RPC-translation logic can be exercised
+	// without shelling out to real system commands.
+	statsGather func(context.Context) *hoststats.Snapshot
 }
 
 var _ rpcpb.ManagerServiceServer = (*Server)(nil)
@@ -41,7 +47,7 @@ var _ rpcpb.ManagerServiceServer = (*Server)(nil)
 // reach raftd, reporting nodeID as its own identity, and isos to store
 // installer images locally on this node.
 func NewServer(raft *RaftClient, nodeID string, isos isoManager) *Server {
-	return &Server{raft: raft, nodeID: nodeID, isos: isos}
+	return &Server{raft: raft, nodeID: nodeID, isos: isos, statsGather: hoststats.Gather}
 }
 
 // Status implements rpcpb.ManagerServiceServer. If raftd is unreachable,
@@ -217,6 +223,46 @@ func (s *Server) DeleteISO(_ context.Context, req *rpcpb.DeleteISORequest) (*rpc
 		return &rpcpb.DeleteISOResponse{Error: err.Error()}, nil
 	}
 	return &rpcpb.DeleteISOResponse{}, nil
+}
+
+// HostStats implements rpcpb.ManagerServiceServer. Every subsystem in
+// the underlying hoststats.Snapshot is gathered best-effort - a
+// failure in one (recorded in Errors) never blanks out the rest.
+func (s *Server) HostStats(ctx context.Context, _ *rpcpb.HostStatsRequest) (*rpcpb.HostStatsResponse, error) {
+	snap := s.statsGather(ctx)
+
+	pools := make([]*rpcpb.PoolStats, 0, len(snap.Pools))
+	for _, p := range snap.Pools {
+		pools = append(pools, &rpcpb.PoolStats{
+			Name: p.Name, SizeBytes: p.SizeBytes, AllocBytes: p.AllocBytes,
+			FreeBytes: p.FreeBytes, CapacityPct: p.CapacityPct, Health: p.Health,
+		})
+	}
+
+	disks := make([]*rpcpb.DiskStats, 0, len(snap.Disks))
+	for _, d := range snap.Disks {
+		disks = append(disks, &rpcpb.DiskStats{
+			Name: d.Name, Model: d.Model, Serial: d.Serial, Healthy: d.Healthy, Error: d.Error,
+		})
+	}
+
+	net := make([]*rpcpb.NetIfaceStats, 0, len(snap.Net))
+	for _, n := range snap.Net {
+		net = append(net, &rpcpb.NetIfaceStats{Name: n.Name, RxBytes: n.RxBytes, TxBytes: n.TxBytes})
+	}
+
+	return &rpcpb.HostStatsResponse{
+		NodeId: s.nodeID,
+		Cpu: &rpcpb.CPUStats{
+			Cores: int32(snap.CPU.Cores), LoadAvg_1: snap.CPU.LoadAvg1,
+			LoadAvg_5: snap.CPU.LoadAvg5, LoadAvg_15: snap.CPU.LoadAvg15,
+		},
+		Mem:    &rpcpb.MemStats{TotalBytes: snap.Mem.TotalBytes, FreeBytes: snap.Mem.FreeBytes},
+		Pools:  pools,
+		Disks:  disks,
+		Net:    net,
+		Errors: snap.Errors,
+	}, nil
 }
 
 // ListVMs implements rpcpb.ManagerServiceServer.

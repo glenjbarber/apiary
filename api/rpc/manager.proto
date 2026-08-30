@@ -31,6 +31,12 @@ service ManagerService {
   rpc UploadISO(stream UploadISORequest) returns (UploadISOResponse);
   rpc ListISOs(ListISOsRequest) returns (ListISOsResponse);
   rpc DeleteISO(DeleteISORequest) returns (DeleteISOResponse);
+
+  // HostStats reports a point-in-time snapshot of *this* node's own
+  // resource usage and hardware health - physical, per-node data like
+  // ISOs above, gathered locally by managerd (see internal/hoststats),
+  // never routed through raft.
+  rpc HostStats(HostStatsRequest) returns (HostStatsResponse);
 }
 
 // VMState mirrors api/internalpb's VMState. Kept as a separate type
@@ -204,4 +210,61 @@ message DeleteISORequest {
 
 message DeleteISOResponse {
   string error = 1;
+}
+
+message HostStatsRequest {}
+
+message CPUStats {
+  int32 cores = 1;
+  double load_avg_1 = 2;
+  double load_avg_5 = 3;
+  double load_avg_15 = 4;
+}
+
+message MemStats {
+  uint64 total_bytes = 1;
+  uint64 free_bytes = 2;
+}
+
+message PoolStats {
+  string name = 1;
+  uint64 size_bytes = 2;
+  uint64 alloc_bytes = 3;
+  uint64 free_bytes = 4;
+  uint32 capacity_pct = 5;
+  string health = 6;
+}
+
+message DiskStats {
+  string name = 1;
+  string model = 2;
+  string serial = 3;
+  bool healthy = 4;
+
+  // error is set if the SMART query for this disk failed - healthy is
+  // meaningless in that case, not a false "known bad" signal.
+  string error = 5;
+}
+
+message NetIfaceStats {
+  string name = 1;
+
+  // rx_bytes/tx_bytes are cumulative counters since boot, not a rate -
+  // see internal/hoststats.NetIface's doc comment (ADR-0018).
+  uint64 rx_bytes = 2;
+  uint64 tx_bytes = 3;
+}
+
+message HostStatsResponse {
+  string node_id = 1;
+  CPUStats cpu = 2;
+  MemStats mem = 3;
+  repeated PoolStats pools = 4;
+  repeated DiskStats disks = 5;
+  repeated NetIfaceStats net = 6;
+
+  // errors lists any subsystem that failed to report (see
+  // hoststats.Snapshot.Errors) - the rest of the response is still
+  // populated on a best-effort basis.
+  repeated string errors = 7;
 }

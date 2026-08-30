@@ -9,6 +9,7 @@ import (
 	"google.golang.org/grpc"
 
 	rpcpb "github.com/glenjbarber/apiary/api/rpc"
+	"github.com/glenjbarber/apiary/internal/hoststats"
 	"github.com/glenjbarber/apiary/internal/isostore"
 )
 
@@ -178,5 +179,45 @@ func TestServer_DeleteISO(t *testing.T) {
 	}
 	if isos.deletedName != "old.iso" {
 		t.Errorf("deletedName = %q, want old.iso", isos.deletedName)
+	}
+}
+
+func TestServer_HostStats(t *testing.T) {
+	s := NewServer(nil, "node-1", &fakeISOManager{})
+	s.statsGather = func(context.Context) *hoststats.Snapshot {
+		return &hoststats.Snapshot{
+			CPU:    hoststats.CPUInfo{Cores: 4, LoadAvg1: 1.5},
+			Mem:    hoststats.MemInfo{TotalBytes: 1000, FreeBytes: 200},
+			Pools:  []hoststats.PoolInfo{{Name: "zroot", SizeBytes: 500, Health: "ONLINE"}},
+			Disks:  []hoststats.DiskInfo{{Name: "ada0", Healthy: true}},
+			Net:    []hoststats.NetIface{{Name: "re0", RxBytes: 10, TxBytes: 20}},
+			Errors: []string{"disks: partial failure"},
+		}
+	}
+
+	resp, err := s.HostStats(context.Background(), &rpcpb.HostStatsRequest{})
+	if err != nil {
+		t.Fatalf("HostStats() error: %v", err)
+	}
+	if resp.GetNodeId() != "node-1" {
+		t.Errorf("NodeId = %q, want node-1", resp.GetNodeId())
+	}
+	if resp.GetCpu().GetCores() != 4 || resp.GetCpu().GetLoadAvg_1() != 1.5 {
+		t.Errorf("Cpu = %+v, want Cores=4 LoadAvg_1=1.5", resp.GetCpu())
+	}
+	if resp.GetMem().GetTotalBytes() != 1000 || resp.GetMem().GetFreeBytes() != 200 {
+		t.Errorf("Mem = %+v, want TotalBytes=1000 FreeBytes=200", resp.GetMem())
+	}
+	if len(resp.GetPools()) != 1 || resp.GetPools()[0].GetName() != "zroot" {
+		t.Errorf("Pools = %+v, want [zroot]", resp.GetPools())
+	}
+	if len(resp.GetDisks()) != 1 || !resp.GetDisks()[0].GetHealthy() {
+		t.Errorf("Disks = %+v, want [ada0 healthy]", resp.GetDisks())
+	}
+	if len(resp.GetNet()) != 1 || resp.GetNet()[0].GetRxBytes() != 10 {
+		t.Errorf("Net = %+v, want [re0 rx=10]", resp.GetNet())
+	}
+	if len(resp.GetErrors()) != 1 || resp.GetErrors()[0] != "disks: partial failure" {
+		t.Errorf("Errors = %v, want [disks: partial failure]", resp.GetErrors())
 	}
 }

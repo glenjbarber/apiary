@@ -6,6 +6,7 @@
 package frontend
 
 import (
+	"fmt"
 	"sort"
 	"strings"
 
@@ -137,5 +138,114 @@ func fromRPCVM(d *rpcpb.VMDefinition) vmView {
 		Phase:        phaseFromRPC(d.GetPhase()),
 		PhaseError:   d.GetPhaseError(),
 		ISOName:      d.GetIsoName(),
+	}
+}
+
+// statsView is the template-facing shape for a HostStats snapshot -
+// bytes are pre-formatted (FormattedBytes) as human-readable strings
+// (e.g. "2.72 TB") since templates can't do that arithmetic themselves.
+type statsView struct {
+	NodeID string
+
+	Cores     int32
+	LoadAvg1  float64
+	LoadAvg5  float64
+	LoadAvg15 float64
+
+	MemTotal   string
+	MemFree    string
+	MemUsedPct float64
+
+	Pools []poolView
+	Disks []diskView
+	Net   []netIfaceView
+
+	Errors []string
+}
+
+type poolView struct {
+	Name        string
+	Size        string
+	Alloc       string
+	Free        string
+	CapacityPct uint32
+	Health      string
+}
+
+type diskView struct {
+	Name    string
+	Model   string
+	Serial  string
+	Healthy bool
+	Error   string
+}
+
+type netIfaceView struct {
+	Name string
+	Rx   string
+	Tx   string
+}
+
+// formatBytes renders n as a human-readable size (e.g. "2.72 TB"),
+// using 1024-based (IEC) units - matching how zfs/zpool already report
+// sizes elsewhere in this project.
+func formatBytes(n uint64) string {
+	const unit = 1024
+	if n < unit {
+		return fmt.Sprintf("%d B", n)
+	}
+	div, exp := uint64(unit), 0
+	for m := n / unit; m >= unit; m /= unit {
+		div *= unit
+		exp++
+	}
+	units := []string{"KB", "MB", "GB", "TB", "PB"}
+	return fmt.Sprintf("%.2f %s", float64(n)/float64(div), units[exp])
+}
+
+func fromRPCStats(resp *rpcpb.HostStatsResponse) statsView {
+	cpu := resp.GetCpu()
+	mem := resp.GetMem()
+
+	var usedPct float64
+	if mem.GetTotalBytes() > 0 {
+		used := mem.GetTotalBytes() - mem.GetFreeBytes()
+		usedPct = float64(used) / float64(mem.GetTotalBytes()) * 100
+	}
+
+	pools := make([]poolView, 0, len(resp.GetPools()))
+	for _, p := range resp.GetPools() {
+		pools = append(pools, poolView{
+			Name: p.GetName(), Size: formatBytes(p.GetSizeBytes()), Alloc: formatBytes(p.GetAllocBytes()),
+			Free: formatBytes(p.GetFreeBytes()), CapacityPct: p.GetCapacityPct(), Health: p.GetHealth(),
+		})
+	}
+
+	disks := make([]diskView, 0, len(resp.GetDisks()))
+	for _, d := range resp.GetDisks() {
+		disks = append(disks, diskView{
+			Name: d.GetName(), Model: d.GetModel(), Serial: d.GetSerial(),
+			Healthy: d.GetHealthy(), Error: d.GetError(),
+		})
+	}
+
+	net := make([]netIfaceView, 0, len(resp.GetNet()))
+	for _, n := range resp.GetNet() {
+		net = append(net, netIfaceView{Name: n.GetName(), Rx: formatBytes(n.GetRxBytes()), Tx: formatBytes(n.GetTxBytes())})
+	}
+
+	return statsView{
+		NodeID:     resp.GetNodeId(),
+		Cores:      cpu.GetCores(),
+		LoadAvg1:   cpu.GetLoadAvg_1(),
+		LoadAvg5:   cpu.GetLoadAvg_5(),
+		LoadAvg15:  cpu.GetLoadAvg_15(),
+		MemTotal:   formatBytes(mem.GetTotalBytes()),
+		MemFree:    formatBytes(mem.GetFreeBytes()),
+		MemUsedPct: usedPct,
+		Pools:      pools,
+		Disks:      disks,
+		Net:        net,
+		Errors:     resp.GetErrors(),
 	}
 }

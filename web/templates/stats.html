@@ -1,0 +1,84 @@
+{{define "stats_page"}}
+<!DOCTYPE html>
+<html lang="en">
+{{template "head" .}}
+<body>
+  <h1>Apiary</h1>
+  {{template "nav" .}}
+  <h2>Host Stats{{if .Stats.NodeID}} - {{.Stats.NodeID}}{{end}}</h2>
+  {{if .Error}}<div class="error">{{.Error}}</div>{{end}}
+  {{range .Stats.Errors}}<div class="error">{{.}}</div>{{end}}
+
+  <h3>CPU</h3>
+  <p>{{.Stats.Cores}} cores &mdash; load average: {{printf "%.2f" .Stats.LoadAvg1}} (1m), {{printf "%.2f" .Stats.LoadAvg5}} (5m), {{printf "%.2f" .Stats.LoadAvg15}} (15m)</p>
+
+  <h3>Memory</h3>
+  <p>{{.Stats.MemFree}} free of {{.Stats.MemTotal}} ({{printf "%.1f" .Stats.MemUsedPct}}% used)</p>
+
+  <h3>ZFS Pools</h3>
+  <table>
+    <thead>
+      <tr><th>Name</th><th>Size</th><th>Allocated</th><th>Free</th><th>Capacity</th><th>Health</th></tr>
+    </thead>
+    <tbody>
+      {{range .Stats.Pools}}
+      <tr>
+        <td>{{.Name}}</td>
+        <td>{{.Size}}</td>
+        <td>{{.Alloc}}</td>
+        <td>{{.Free}}</td>
+        <td>{{.CapacityPct}}%</td>
+        <td{{if ne .Health "ONLINE"}} class="error"{{end}}>{{.Health}}</td>
+      </tr>
+      {{else}}
+      <tr><td colspan="6"><em>No pools</em></td></tr>
+      {{end}}
+    </tbody>
+  </table>
+
+  <h3>Disks</h3>
+  <table>
+    <thead>
+      <tr><th>Name</th><th>Model</th><th>Serial</th><th>Health</th></tr>
+    </thead>
+    <tbody>
+      {{range .Stats.Disks}}
+      <tr>
+        <td>{{.Name}}</td>
+        <td>{{.Model}}</td>
+        <td>{{.Serial}}</td>
+        {{if .Error}}
+        <td title="{{.Error}}">unknown</td>
+        {{else if .Healthy}}
+        <td class="success">healthy</td>
+        {{else}}
+        <td class="error">FAILING</td>
+        {{end}}
+      </tr>
+      {{else}}
+      <tr><td colspan="4"><em>No disks</em></td></tr>
+      {{end}}
+    </tbody>
+  </table>
+
+  <h3>Network</h3>
+  <table>
+    <thead>
+      <tr><th>Interface</th><th>Received</th><th>Transmitted</th></tr>
+    </thead>
+    <tbody>
+      {{range .Stats.Net}}
+      <tr>
+        <td>{{.Name}}</td>
+        <td>{{.Rx}}</td>
+        <td>{{.Tx}}</td>
+      </tr>
+      {{else}}
+      <tr><td colspan="3"><em>No interfaces</em></td></tr>
+      {{end}}
+    </tbody>
+  </table>
+  <p><em>Network figures are cumulative counters since boot, not a live rate.</em></p>
+</body>
+</html>
+{{end}}

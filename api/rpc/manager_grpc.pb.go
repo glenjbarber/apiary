@@ -28,6 +28,7 @@ const (
 	ManagerService_UploadISO_FullMethodName = "/apiary.rpc.v1.ManagerService/UploadISO"
 	ManagerService_ListISOs_FullMethodName  = "/apiary.rpc.v1.ManagerService/ListISOs"
 	ManagerService_DeleteISO_FullMethodName = "/apiary.rpc.v1.ManagerService/DeleteISO"
+	ManagerService_HostStats_FullMethodName = "/apiary.rpc.v1.ManagerService/HostStats"
 )
 
 // ManagerServiceClient is the client API for ManagerService service.
@@ -58,6 +59,11 @@ type ManagerServiceClient interface {
 	UploadISO(ctx context.Context, opts ...grpc.CallOption) (grpc.ClientStreamingClient[UploadISORequest, UploadISOResponse], error)
 	ListISOs(ctx context.Context, in *ListISOsRequest, opts ...grpc.CallOption) (*ListISOsResponse, error)
 	DeleteISO(ctx context.Context, in *DeleteISORequest, opts ...grpc.CallOption) (*DeleteISOResponse, error)
+	// HostStats reports a point-in-time snapshot of *this* node's own
+	// resource usage and hardware health - physical, per-node data like
+	// ISOs above, gathered locally by managerd (see internal/hoststats),
+	// never routed through raft.
+	HostStats(ctx context.Context, in *HostStatsRequest, opts ...grpc.CallOption) (*HostStatsResponse, error)
 }
 
 type managerServiceClient struct {
@@ -161,6 +167,16 @@ func (c *managerServiceClient) DeleteISO(ctx context.Context, in *DeleteISOReque
 	return out, nil
 }
 
+func (c *managerServiceClient) HostStats(ctx context.Context, in *HostStatsRequest, opts ...grpc.CallOption) (*HostStatsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(HostStatsResponse)
+	err := c.cc.Invoke(ctx, ManagerService_HostStats_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // ManagerServiceServer is the server API for ManagerService service.
 // All implementations must embed UnimplementedManagerServiceServer
 // for forward compatibility.
@@ -189,6 +205,11 @@ type ManagerServiceServer interface {
 	UploadISO(grpc.ClientStreamingServer[UploadISORequest, UploadISOResponse]) error
 	ListISOs(context.Context, *ListISOsRequest) (*ListISOsResponse, error)
 	DeleteISO(context.Context, *DeleteISORequest) (*DeleteISOResponse, error)
+	// HostStats reports a point-in-time snapshot of *this* node's own
+	// resource usage and hardware health - physical, per-node data like
+	// ISOs above, gathered locally by managerd (see internal/hoststats),
+	// never routed through raft.
+	HostStats(context.Context, *HostStatsRequest) (*HostStatsResponse, error)
 	mustEmbedUnimplementedManagerServiceServer()
 }
 
@@ -225,6 +246,9 @@ func (UnimplementedManagerServiceServer) ListISOs(context.Context, *ListISOsRequ
 }
 func (UnimplementedManagerServiceServer) DeleteISO(context.Context, *DeleteISORequest) (*DeleteISOResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method DeleteISO not implemented")
+}
+func (UnimplementedManagerServiceServer) HostStats(context.Context, *HostStatsRequest) (*HostStatsResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method HostStats not implemented")
 }
 func (UnimplementedManagerServiceServer) mustEmbedUnimplementedManagerServiceServer() {}
 func (UnimplementedManagerServiceServer) testEmbeddedByValue()                        {}
@@ -398,6 +422,24 @@ func _ManagerService_DeleteISO_Handler(srv interface{}, ctx context.Context, dec
 	return interceptor(ctx, in, info, handler)
 }
 
+func _ManagerService_HostStats_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(HostStatsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ManagerServiceServer).HostStats(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ManagerService_HostStats_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ManagerServiceServer).HostStats(ctx, req.(*HostStatsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // ManagerService_ServiceDesc is the grpc.ServiceDesc for ManagerService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -436,6 +478,10 @@ var ManagerService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "DeleteISO",
 			Handler:    _ManagerService_DeleteISO_Handler,
+		},
+		{
+			MethodName: "HostStats",
+			Handler:    _ManagerService_HostStats_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{

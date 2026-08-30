@@ -33,6 +33,8 @@ type fakeClient struct {
 	deleteISOResp    *rpcpb.DeleteISOResponse
 	lastDeleteISOReq *rpcpb.DeleteISORequest
 
+	hostStatsResp *rpcpb.HostStatsResponse
+
 	uploadStream *fakeUploadClientStream
 	uploadErr    error
 }
@@ -103,6 +105,13 @@ func (f *fakeClient) DeleteISO(_ context.Context, in *rpcpb.DeleteISORequest, _ 
 	return &rpcpb.DeleteISOResponse{}, nil
 }
 
+func (f *fakeClient) HostStats(context.Context, *rpcpb.HostStatsRequest, ...grpc.CallOption) (*rpcpb.HostStatsResponse, error) {
+	if f.hostStatsResp != nil {
+		return f.hostStatsResp, nil
+	}
+	return &rpcpb.HostStatsResponse{}, nil
+}
+
 func (f *fakeClient) ListVMs(context.Context, *rpcpb.ListVMsRequest, ...grpc.CallOption) (*rpcpb.ListVMsResponse, error) {
 	return f.listResp, f.listErr
 }
@@ -118,9 +127,39 @@ func newTestServer(t *testing.T, client *fakeClient) *Server {
 	return s
 }
 
-func TestServer_Index(t *testing.T) {
+func TestServer_VMsPage(t *testing.T) {
 	client := &fakeClient{listResp: &rpcpb.ListVMsResponse{
 		Vms: []*rpcpb.VMDefinition{{Id: "vm-1", Name: "web-1", Phase: rpcpb.VMPhase_VM_PHASE_READY}},
+	}}
+	s := newTestServer(t, client)
+
+	req := httptest.NewRequest(http.MethodGet, "/vms", nil)
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, "vm-1") || !strings.Contains(body, "web-1") {
+		t.Errorf("VMs page missing expected VM data, got: %s", body)
+	}
+	if !strings.Contains(body, "ready") {
+		t.Errorf("VMs page missing observed phase, got: %s", body)
+	}
+	if !strings.Contains(body, `class="active"`) {
+		t.Errorf("VMs page nav should mark its own link active, got: %s", body)
+	}
+}
+
+func TestServer_StatsPage_IsDefaultLandingPage(t *testing.T) {
+	client := &fakeClient{hostStatsResp: &rpcpb.HostStatsResponse{
+		NodeId: "apiarium",
+		Cpu:    &rpcpb.CPUStats{Cores: 8, LoadAvg_1: 1.23},
+		Mem:    &rpcpb.MemStats{TotalBytes: 1000, FreeBytes: 400},
+		Pools:  []*rpcpb.PoolStats{{Name: "zroot", Health: "ONLINE", CapacityPct: 5}},
+		Disks:  []*rpcpb.DiskStats{{Name: "ada0", Healthy: true}},
+		Net:    []*rpcpb.NetIfaceStats{{Name: "re0", RxBytes: 100, TxBytes: 200}},
 	}}
 	s := newTestServer(t, client)
 
@@ -132,14 +171,32 @@ func TestServer_Index(t *testing.T) {
 		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
 	}
 	body := rec.Body.String()
-	if !strings.Contains(body, "vm-1") || !strings.Contains(body, "web-1") {
-		t.Errorf("index page missing expected VM data, got: %s", body)
+	for _, want := range []string{"apiarium", "8 cores", "zroot", "ONLINE", "ada0", "healthy", "re0"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("stats page missing %q, got: %s", want, body)
+		}
 	}
-	if !strings.Contains(body, "ready") {
-		t.Errorf("index page missing observed phase, got: %s", body)
+	if !strings.Contains(body, `<a href="/" class="active">Stats</a>`) {
+		t.Errorf("stats page nav should mark Stats active, got: %s", body)
 	}
-	if !strings.Contains(body, `class="active"`) {
-		t.Errorf("VMs page nav should mark its own link active, got: %s", body)
+}
+
+func TestServer_StatsPage_DiskQueryFailureShownWithoutFalseHealthClaim(t *testing.T) {
+	client := &fakeClient{hostStatsResp: &rpcpb.HostStatsResponse{
+		Disks: []*rpcpb.DiskStats{{Name: "ada1", Error: "smart: permission denied"}},
+	}}
+	s := newTestServer(t, client)
+
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, req)
+
+	body := rec.Body.String()
+	if strings.Contains(body, "healthy") || strings.Contains(body, "FAILING") {
+		t.Errorf("a disk with a query error should show neither healthy nor failing, got: %s", body)
+	}
+	if !strings.Contains(body, "unknown") {
+		t.Errorf("stats page missing 'unknown' health for a disk query failure, got: %s", body)
 	}
 }
 
@@ -191,7 +248,7 @@ func TestServer_ListVMs_ReturnsRowsFragmentOnly(t *testing.T) {
 	}}
 	s := newTestServer(t, client)
 
-	req := httptest.NewRequest(http.MethodGet, "/vms", nil)
+	req := httptest.NewRequest(http.MethodGet, "/vms/rows", nil)
 	rec := httptest.NewRecorder()
 	s.ServeHTTP(rec, req)
 
@@ -218,7 +275,7 @@ func TestServer_ListVMs_DefaultsToSortedByID(t *testing.T) {
 	}}
 	s := newTestServer(t, client)
 
-	req := httptest.NewRequest(http.MethodGet, "/vms", nil)
+	req := httptest.NewRequest(http.MethodGet, "/vms/rows", nil)
 	rec := httptest.NewRecorder()
 	s.ServeHTTP(rec, req)
 
@@ -237,7 +294,7 @@ func TestServer_ListVMs_SortByNodeDescending(t *testing.T) {
 	}}
 	s := newTestServer(t, client)
 
-	req := httptest.NewRequest(http.MethodGet, "/vms?sort=node&dir=desc", nil)
+	req := httptest.NewRequest(http.MethodGet, "/vms/rows?sort=node&dir=desc", nil)
 	rec := httptest.NewRecorder()
 	s.ServeHTTP(rec, req)
 
@@ -247,26 +304,26 @@ func TestServer_ListVMs_SortByNodeDescending(t *testing.T) {
 	}
 }
 
-func TestServer_Index_ShowsPendingPhaseForUnreconciledVM(t *testing.T) {
+func TestServer_VMsPage_ShowsPendingPhaseForUnreconciledVM(t *testing.T) {
 	client := &fakeClient{listResp: &rpcpb.ListVMsResponse{
 		Vms: []*rpcpb.VMDefinition{{Id: "vm-1", Name: "web-1"}}, // Phase left unset
 	}}
 	s := newTestServer(t, client)
 
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req := httptest.NewRequest(http.MethodGet, "/vms", nil)
 	rec := httptest.NewRecorder()
 	s.ServeHTTP(rec, req)
 
 	if !strings.Contains(rec.Body.String(), "pending") {
-		t.Errorf("index page should show 'pending' for a VM with no observed phase yet, got: %s", rec.Body.String())
+		t.Errorf("VMs page should show 'pending' for a VM with no observed phase yet, got: %s", rec.Body.String())
 	}
 }
 
-func TestServer_Index_ListError(t *testing.T) {
+func TestServer_VMsPage_ListError(t *testing.T) {
 	client := &fakeClient{listResp: &rpcpb.ListVMsResponse{Error: "raftd unreachable"}}
 	s := newTestServer(t, client)
 
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req := httptest.NewRequest(http.MethodGet, "/vms", nil)
 	rec := httptest.NewRecorder()
 	s.ServeHTTP(rec, req)
 
@@ -274,7 +331,7 @@ func TestServer_Index_ListError(t *testing.T) {
 		t.Fatalf("status = %d, want 200 (errors render inline, not as HTTP failures)", rec.Code)
 	}
 	if !strings.Contains(rec.Body.String(), "raftd unreachable") {
-		t.Errorf("index page missing error message, got: %s", rec.Body.String())
+		t.Errorf("VMs page missing error message, got: %s", rec.Body.String())
 	}
 }
 
@@ -302,8 +359,8 @@ func TestServer_CreateVM(t *testing.T) {
 	// On its own page now (see new_vm.html) with no VM table to refresh -
 	// success is reported via HX-Redirect to the VMs page, not a
 	// re-rendered fragment.
-	if got := rec.Header().Get("HX-Redirect"); got != "/" {
-		t.Errorf("HX-Redirect = %q, want /", got)
+	if got := rec.Header().Get("HX-Redirect"); got != "/vms" {
+		t.Errorf("HX-Redirect = %q, want /vms", got)
 	}
 }
 

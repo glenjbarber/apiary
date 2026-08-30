@@ -1402,6 +1402,481 @@ func (x *DeleteISOResponse) GetError() string {
 	return ""
 }
 
+type HostStatsRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *HostStatsRequest) Reset() {
+	*x = HostStatsRequest{}
+	mi := &file_api_rpc_manager_proto_msgTypes[21]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *HostStatsRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*HostStatsRequest) ProtoMessage() {}
+
+func (x *HostStatsRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_api_rpc_manager_proto_msgTypes[21]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use HostStatsRequest.ProtoReflect.Descriptor instead.
+func (*HostStatsRequest) Descriptor() ([]byte, []int) {
+	return file_api_rpc_manager_proto_rawDescGZIP(), []int{21}
+}
+
+type CPUStats struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Cores         int32                  `protobuf:"varint,1,opt,name=cores,proto3" json:"cores,omitempty"`
+	LoadAvg_1     float64                `protobuf:"fixed64,2,opt,name=load_avg_1,json=loadAvg1,proto3" json:"load_avg_1,omitempty"`
+	LoadAvg_5     float64                `protobuf:"fixed64,3,opt,name=load_avg_5,json=loadAvg5,proto3" json:"load_avg_5,omitempty"`
+	LoadAvg_15    float64                `protobuf:"fixed64,4,opt,name=load_avg_15,json=loadAvg15,proto3" json:"load_avg_15,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *CPUStats) Reset() {
+	*x = CPUStats{}
+	mi := &file_api_rpc_manager_proto_msgTypes[22]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CPUStats) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CPUStats) ProtoMessage() {}
+
+func (x *CPUStats) ProtoReflect() protoreflect.Message {
+	mi := &file_api_rpc_manager_proto_msgTypes[22]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CPUStats.ProtoReflect.Descriptor instead.
+func (*CPUStats) Descriptor() ([]byte, []int) {
+	return file_api_rpc_manager_proto_rawDescGZIP(), []int{22}
+}
+
+func (x *CPUStats) GetCores() int32 {
+	if x != nil {
+		return x.Cores
+	}
+	return 0
+}
+
+func (x *CPUStats) GetLoadAvg_1() float64 {
+	if x != nil {
+		return x.LoadAvg_1
+	}
+	return 0
+}
+
+func (x *CPUStats) GetLoadAvg_5() float64 {
+	if x != nil {
+		return x.LoadAvg_5
+	}
+	return 0
+}
+
+func (x *CPUStats) GetLoadAvg_15() float64 {
+	if x != nil {
+		return x.LoadAvg_15
+	}
+	return 0
+}
+
+type MemStats struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	TotalBytes    uint64                 `protobuf:"varint,1,opt,name=total_bytes,json=totalBytes,proto3" json:"total_bytes,omitempty"`
+	FreeBytes     uint64                 `protobuf:"varint,2,opt,name=free_bytes,json=freeBytes,proto3" json:"free_bytes,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *MemStats) Reset() {
+	*x = MemStats{}
+	mi := &file_api_rpc_manager_proto_msgTypes[23]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *MemStats) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*MemStats) ProtoMessage() {}
+
+func (x *MemStats) ProtoReflect() protoreflect.Message {
+	mi := &file_api_rpc_manager_proto_msgTypes[23]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use MemStats.ProtoReflect.Descriptor instead.
+func (*MemStats) Descriptor() ([]byte, []int) {
+	return file_api_rpc_manager_proto_rawDescGZIP(), []int{23}
+}
+
+func (x *MemStats) GetTotalBytes() uint64 {
+	if x != nil {
+		return x.TotalBytes
+	}
+	return 0
+}
+
+func (x *MemStats) GetFreeBytes() uint64 {
+	if x != nil {
+		return x.FreeBytes
+	}
+	return 0
+}
+
+type PoolStats struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	SizeBytes     uint64                 `protobuf:"varint,2,opt,name=size_bytes,json=sizeBytes,proto3" json:"size_bytes,omitempty"`
+	AllocBytes    uint64                 `protobuf:"varint,3,opt,name=alloc_bytes,json=allocBytes,proto3" json:"alloc_bytes,omitempty"`
+	FreeBytes     uint64                 `protobuf:"varint,4,opt,name=free_bytes,json=freeBytes,proto3" json:"free_bytes,omitempty"`
+	CapacityPct   uint32                 `protobuf:"varint,5,opt,name=capacity_pct,json=capacityPct,proto3" json:"capacity_pct,omitempty"`
+	Health        string                 `protobuf:"bytes,6,opt,name=health,proto3" json:"health,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *PoolStats) Reset() {
+	*x = PoolStats{}
+	mi := &file_api_rpc_manager_proto_msgTypes[24]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *PoolStats) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*PoolStats) ProtoMessage() {}
+
+func (x *PoolStats) ProtoReflect() protoreflect.Message {
+	mi := &file_api_rpc_manager_proto_msgTypes[24]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use PoolStats.ProtoReflect.Descriptor instead.
+func (*PoolStats) Descriptor() ([]byte, []int) {
+	return file_api_rpc_manager_proto_rawDescGZIP(), []int{24}
+}
+
+func (x *PoolStats) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *PoolStats) GetSizeBytes() uint64 {
+	if x != nil {
+		return x.SizeBytes
+	}
+	return 0
+}
+
+func (x *PoolStats) GetAllocBytes() uint64 {
+	if x != nil {
+		return x.AllocBytes
+	}
+	return 0
+}
+
+func (x *PoolStats) GetFreeBytes() uint64 {
+	if x != nil {
+		return x.FreeBytes
+	}
+	return 0
+}
+
+func (x *PoolStats) GetCapacityPct() uint32 {
+	if x != nil {
+		return x.CapacityPct
+	}
+	return 0
+}
+
+func (x *PoolStats) GetHealth() string {
+	if x != nil {
+		return x.Health
+	}
+	return ""
+}
+
+type DiskStats struct {
+	state   protoimpl.MessageState `protogen:"open.v1"`
+	Name    string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	Model   string                 `protobuf:"bytes,2,opt,name=model,proto3" json:"model,omitempty"`
+	Serial  string                 `protobuf:"bytes,3,opt,name=serial,proto3" json:"serial,omitempty"`
+	Healthy bool                   `protobuf:"varint,4,opt,name=healthy,proto3" json:"healthy,omitempty"`
+	// error is set if the SMART query for this disk failed - healthy is
+	// meaningless in that case, not a false "known bad" signal.
+	Error         string `protobuf:"bytes,5,opt,name=error,proto3" json:"error,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *DiskStats) Reset() {
+	*x = DiskStats{}
+	mi := &file_api_rpc_manager_proto_msgTypes[25]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DiskStats) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DiskStats) ProtoMessage() {}
+
+func (x *DiskStats) ProtoReflect() protoreflect.Message {
+	mi := &file_api_rpc_manager_proto_msgTypes[25]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DiskStats.ProtoReflect.Descriptor instead.
+func (*DiskStats) Descriptor() ([]byte, []int) {
+	return file_api_rpc_manager_proto_rawDescGZIP(), []int{25}
+}
+
+func (x *DiskStats) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *DiskStats) GetModel() string {
+	if x != nil {
+		return x.Model
+	}
+	return ""
+}
+
+func (x *DiskStats) GetSerial() string {
+	if x != nil {
+		return x.Serial
+	}
+	return ""
+}
+
+func (x *DiskStats) GetHealthy() bool {
+	if x != nil {
+		return x.Healthy
+	}
+	return false
+}
+
+func (x *DiskStats) GetError() string {
+	if x != nil {
+		return x.Error
+	}
+	return ""
+}
+
+type NetIfaceStats struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	Name  string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	// rx_bytes/tx_bytes are cumulative counters since boot, not a rate -
+	// see internal/hoststats.NetIface's doc comment (ADR-0018).
+	RxBytes       uint64 `protobuf:"varint,2,opt,name=rx_bytes,json=rxBytes,proto3" json:"rx_bytes,omitempty"`
+	TxBytes       uint64 `protobuf:"varint,3,opt,name=tx_bytes,json=txBytes,proto3" json:"tx_bytes,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *NetIfaceStats) Reset() {
+	*x = NetIfaceStats{}
+	mi := &file_api_rpc_manager_proto_msgTypes[26]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *NetIfaceStats) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*NetIfaceStats) ProtoMessage() {}
+
+func (x *NetIfaceStats) ProtoReflect() protoreflect.Message {
+	mi := &file_api_rpc_manager_proto_msgTypes[26]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use NetIfaceStats.ProtoReflect.Descriptor instead.
+func (*NetIfaceStats) Descriptor() ([]byte, []int) {
+	return file_api_rpc_manager_proto_rawDescGZIP(), []int{26}
+}
+
+func (x *NetIfaceStats) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *NetIfaceStats) GetRxBytes() uint64 {
+	if x != nil {
+		return x.RxBytes
+	}
+	return 0
+}
+
+func (x *NetIfaceStats) GetTxBytes() uint64 {
+	if x != nil {
+		return x.TxBytes
+	}
+	return 0
+}
+
+type HostStatsResponse struct {
+	state  protoimpl.MessageState `protogen:"open.v1"`
+	NodeId string                 `protobuf:"bytes,1,opt,name=node_id,json=nodeId,proto3" json:"node_id,omitempty"`
+	Cpu    *CPUStats              `protobuf:"bytes,2,opt,name=cpu,proto3" json:"cpu,omitempty"`
+	Mem    *MemStats              `protobuf:"bytes,3,opt,name=mem,proto3" json:"mem,omitempty"`
+	Pools  []*PoolStats           `protobuf:"bytes,4,rep,name=pools,proto3" json:"pools,omitempty"`
+	Disks  []*DiskStats           `protobuf:"bytes,5,rep,name=disks,proto3" json:"disks,omitempty"`
+	Net    []*NetIfaceStats       `protobuf:"bytes,6,rep,name=net,proto3" json:"net,omitempty"`
+	// errors lists any subsystem that failed to report (see
+	// hoststats.Snapshot.Errors) - the rest of the response is still
+	// populated on a best-effort basis.
+	Errors        []string `protobuf:"bytes,7,rep,name=errors,proto3" json:"errors,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *HostStatsResponse) Reset() {
+	*x = HostStatsResponse{}
+	mi := &file_api_rpc_manager_proto_msgTypes[27]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *HostStatsResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*HostStatsResponse) ProtoMessage() {}
+
+func (x *HostStatsResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_api_rpc_manager_proto_msgTypes[27]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use HostStatsResponse.ProtoReflect.Descriptor instead.
+func (*HostStatsResponse) Descriptor() ([]byte, []int) {
+	return file_api_rpc_manager_proto_rawDescGZIP(), []int{27}
+}
+
+func (x *HostStatsResponse) GetNodeId() string {
+	if x != nil {
+		return x.NodeId
+	}
+	return ""
+}
+
+func (x *HostStatsResponse) GetCpu() *CPUStats {
+	if x != nil {
+		return x.Cpu
+	}
+	return nil
+}
+
+func (x *HostStatsResponse) GetMem() *MemStats {
+	if x != nil {
+		return x.Mem
+	}
+	return nil
+}
+
+func (x *HostStatsResponse) GetPools() []*PoolStats {
+	if x != nil {
+		return x.Pools
+	}
+	return nil
+}
+
+func (x *HostStatsResponse) GetDisks() []*DiskStats {
+	if x != nil {
+		return x.Disks
+	}
+	return nil
+}
+
+func (x *HostStatsResponse) GetNet() []*NetIfaceStats {
+	if x != nil {
+		return x.Net
+	}
+	return nil
+}
+
+func (x *HostStatsResponse) GetErrors() []string {
+	if x != nil {
+		return x.Errors
+	}
+	return nil
+}
+
 var File_api_rpc_manager_proto protoreflect.FileDescriptor
 
 const file_api_rpc_manager_proto_rawDesc = "" +
@@ -1500,7 +1975,48 @@ const file_api_rpc_manager_proto_rawDesc = "" +
 	"\x10DeleteISORequest\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\")\n" +
 	"\x11DeleteISOResponse\x12\x14\n" +
-	"\x05error\x18\x01 \x01(\tR\x05error*f\n" +
+	"\x05error\x18\x01 \x01(\tR\x05error\"\x12\n" +
+	"\x10HostStatsRequest\"|\n" +
+	"\bCPUStats\x12\x14\n" +
+	"\x05cores\x18\x01 \x01(\x05R\x05cores\x12\x1c\n" +
+	"\n" +
+	"load_avg_1\x18\x02 \x01(\x01R\bloadAvg1\x12\x1c\n" +
+	"\n" +
+	"load_avg_5\x18\x03 \x01(\x01R\bloadAvg5\x12\x1e\n" +
+	"\vload_avg_15\x18\x04 \x01(\x01R\tloadAvg15\"J\n" +
+	"\bMemStats\x12\x1f\n" +
+	"\vtotal_bytes\x18\x01 \x01(\x04R\n" +
+	"totalBytes\x12\x1d\n" +
+	"\n" +
+	"free_bytes\x18\x02 \x01(\x04R\tfreeBytes\"\xb9\x01\n" +
+	"\tPoolStats\x12\x12\n" +
+	"\x04name\x18\x01 \x01(\tR\x04name\x12\x1d\n" +
+	"\n" +
+	"size_bytes\x18\x02 \x01(\x04R\tsizeBytes\x12\x1f\n" +
+	"\valloc_bytes\x18\x03 \x01(\x04R\n" +
+	"allocBytes\x12\x1d\n" +
+	"\n" +
+	"free_bytes\x18\x04 \x01(\x04R\tfreeBytes\x12!\n" +
+	"\fcapacity_pct\x18\x05 \x01(\rR\vcapacityPct\x12\x16\n" +
+	"\x06health\x18\x06 \x01(\tR\x06health\"}\n" +
+	"\tDiskStats\x12\x12\n" +
+	"\x04name\x18\x01 \x01(\tR\x04name\x12\x14\n" +
+	"\x05model\x18\x02 \x01(\tR\x05model\x12\x16\n" +
+	"\x06serial\x18\x03 \x01(\tR\x06serial\x12\x18\n" +
+	"\ahealthy\x18\x04 \x01(\bR\ahealthy\x12\x14\n" +
+	"\x05error\x18\x05 \x01(\tR\x05error\"Y\n" +
+	"\rNetIfaceStats\x12\x12\n" +
+	"\x04name\x18\x01 \x01(\tR\x04name\x12\x19\n" +
+	"\brx_bytes\x18\x02 \x01(\x04R\arxBytes\x12\x19\n" +
+	"\btx_bytes\x18\x03 \x01(\x04R\atxBytes\"\xaa\x02\n" +
+	"\x11HostStatsResponse\x12\x17\n" +
+	"\anode_id\x18\x01 \x01(\tR\x06nodeId\x12)\n" +
+	"\x03cpu\x18\x02 \x01(\v2\x17.apiary.rpc.v1.CPUStatsR\x03cpu\x12)\n" +
+	"\x03mem\x18\x03 \x01(\v2\x17.apiary.rpc.v1.MemStatsR\x03mem\x12.\n" +
+	"\x05pools\x18\x04 \x03(\v2\x18.apiary.rpc.v1.PoolStatsR\x05pools\x12.\n" +
+	"\x05disks\x18\x05 \x03(\v2\x18.apiary.rpc.v1.DiskStatsR\x05disks\x12.\n" +
+	"\x03net\x18\x06 \x03(\v2\x1c.apiary.rpc.v1.NetIfaceStatsR\x03net\x12\x16\n" +
+	"\x06errors\x18\a \x03(\tR\x06errors*f\n" +
 	"\aVMState\x12\x18\n" +
 	"\x14VM_STATE_UNSPECIFIED\x10\x00\x12\x14\n" +
 	"\x10VM_STATE_STOPPED\x10\x01\x12\x14\n" +
@@ -1511,7 +2027,7 @@ const file_api_rpc_manager_proto_rawDesc = "" +
 	"\x11VM_PHASE_CREATING\x10\x01\x12\x12\n" +
 	"\x0eVM_PHASE_READY\x10\x02\x12\x15\n" +
 	"\x11VM_PHASE_DELETING\x10\x03\x12\x12\n" +
-	"\x0eVM_PHASE_ERROR\x10\x042\xbb\x05\n" +
+	"\x0eVM_PHASE_ERROR\x10\x042\x8b\x06\n" +
 	"\x0eManagerService\x12E\n" +
 	"\x06Status\x12\x1c.apiary.rpc.v1.StatusRequest\x1a\x1d.apiary.rpc.v1.StatusResponse\x12K\n" +
 	"\bCreateVM\x12\x1e.apiary.rpc.v1.CreateVMRequest\x1a\x1f.apiary.rpc.v1.CreateVMResponse\x12K\n" +
@@ -1521,7 +2037,8 @@ const file_api_rpc_manager_proto_rawDesc = "" +
 	"\aListVMs\x12\x1d.apiary.rpc.v1.ListVMsRequest\x1a\x1e.apiary.rpc.v1.ListVMsResponse\x12P\n" +
 	"\tUploadISO\x12\x1f.apiary.rpc.v1.UploadISORequest\x1a .apiary.rpc.v1.UploadISOResponse(\x01\x12K\n" +
 	"\bListISOs\x12\x1e.apiary.rpc.v1.ListISOsRequest\x1a\x1f.apiary.rpc.v1.ListISOsResponse\x12N\n" +
-	"\tDeleteISO\x12\x1f.apiary.rpc.v1.DeleteISORequest\x1a .apiary.rpc.v1.DeleteISOResponseB-Z+github.com/glenjbarber/apiary/api/rpc;rpcpbb\x06proto3"
+	"\tDeleteISO\x12\x1f.apiary.rpc.v1.DeleteISORequest\x1a .apiary.rpc.v1.DeleteISOResponse\x12N\n" +
+	"\tHostStats\x12\x1f.apiary.rpc.v1.HostStatsRequest\x1a .apiary.rpc.v1.HostStatsResponseB-Z+github.com/glenjbarber/apiary/api/rpc;rpcpbb\x06proto3"
 
 var (
 	file_api_rpc_manager_proto_rawDescOnce sync.Once
@@ -1536,7 +2053,7 @@ func file_api_rpc_manager_proto_rawDescGZIP() []byte {
 }
 
 var file_api_rpc_manager_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
-var file_api_rpc_manager_proto_msgTypes = make([]protoimpl.MessageInfo, 21)
+var file_api_rpc_manager_proto_msgTypes = make([]protoimpl.MessageInfo, 28)
 var file_api_rpc_manager_proto_goTypes = []any{
 	(VMState)(0),              // 0: apiary.rpc.v1.VMState
 	(VMPhase)(0),              // 1: apiary.rpc.v1.VMPhase
@@ -1561,6 +2078,13 @@ var file_api_rpc_manager_proto_goTypes = []any{
 	(*ListISOsResponse)(nil),  // 20: apiary.rpc.v1.ListISOsResponse
 	(*DeleteISORequest)(nil),  // 21: apiary.rpc.v1.DeleteISORequest
 	(*DeleteISOResponse)(nil), // 22: apiary.rpc.v1.DeleteISOResponse
+	(*HostStatsRequest)(nil),  // 23: apiary.rpc.v1.HostStatsRequest
+	(*CPUStats)(nil),          // 24: apiary.rpc.v1.CPUStats
+	(*MemStats)(nil),          // 25: apiary.rpc.v1.MemStats
+	(*PoolStats)(nil),         // 26: apiary.rpc.v1.PoolStats
+	(*DiskStats)(nil),         // 27: apiary.rpc.v1.DiskStats
+	(*NetIfaceStats)(nil),     // 28: apiary.rpc.v1.NetIfaceStats
+	(*HostStatsResponse)(nil), // 29: apiary.rpc.v1.HostStatsResponse
 }
 var file_api_rpc_manager_proto_depIdxs = []int32{
 	0,  // 0: apiary.rpc.v1.VMDefinition.desired_state:type_name -> apiary.rpc.v1.VMState
@@ -1574,29 +2098,36 @@ var file_api_rpc_manager_proto_depIdxs = []int32{
 	2,  // 8: apiary.rpc.v1.ListVMsResponse.vms:type_name -> apiary.rpc.v1.VMDefinition
 	16, // 9: apiary.rpc.v1.UploadISORequest.metadata:type_name -> apiary.rpc.v1.ISOUploadMetadata
 	19, // 10: apiary.rpc.v1.ListISOsResponse.isos:type_name -> apiary.rpc.v1.ISOInfo
-	13, // 11: apiary.rpc.v1.ManagerService.Status:input_type -> apiary.rpc.v1.StatusRequest
-	3,  // 12: apiary.rpc.v1.ManagerService.CreateVM:input_type -> apiary.rpc.v1.CreateVMRequest
-	5,  // 13: apiary.rpc.v1.ManagerService.UpdateVM:input_type -> apiary.rpc.v1.UpdateVMRequest
-	7,  // 14: apiary.rpc.v1.ManagerService.DeleteVM:input_type -> apiary.rpc.v1.DeleteVMRequest
-	9,  // 15: apiary.rpc.v1.ManagerService.GetVM:input_type -> apiary.rpc.v1.GetVMRequest
-	11, // 16: apiary.rpc.v1.ManagerService.ListVMs:input_type -> apiary.rpc.v1.ListVMsRequest
-	15, // 17: apiary.rpc.v1.ManagerService.UploadISO:input_type -> apiary.rpc.v1.UploadISORequest
-	18, // 18: apiary.rpc.v1.ManagerService.ListISOs:input_type -> apiary.rpc.v1.ListISOsRequest
-	21, // 19: apiary.rpc.v1.ManagerService.DeleteISO:input_type -> apiary.rpc.v1.DeleteISORequest
-	14, // 20: apiary.rpc.v1.ManagerService.Status:output_type -> apiary.rpc.v1.StatusResponse
-	4,  // 21: apiary.rpc.v1.ManagerService.CreateVM:output_type -> apiary.rpc.v1.CreateVMResponse
-	6,  // 22: apiary.rpc.v1.ManagerService.UpdateVM:output_type -> apiary.rpc.v1.UpdateVMResponse
-	8,  // 23: apiary.rpc.v1.ManagerService.DeleteVM:output_type -> apiary.rpc.v1.DeleteVMResponse
-	10, // 24: apiary.rpc.v1.ManagerService.GetVM:output_type -> apiary.rpc.v1.GetVMResponse
-	12, // 25: apiary.rpc.v1.ManagerService.ListVMs:output_type -> apiary.rpc.v1.ListVMsResponse
-	17, // 26: apiary.rpc.v1.ManagerService.UploadISO:output_type -> apiary.rpc.v1.UploadISOResponse
-	20, // 27: apiary.rpc.v1.ManagerService.ListISOs:output_type -> apiary.rpc.v1.ListISOsResponse
-	22, // 28: apiary.rpc.v1.ManagerService.DeleteISO:output_type -> apiary.rpc.v1.DeleteISOResponse
-	20, // [20:29] is the sub-list for method output_type
-	11, // [11:20] is the sub-list for method input_type
-	11, // [11:11] is the sub-list for extension type_name
-	11, // [11:11] is the sub-list for extension extendee
-	0,  // [0:11] is the sub-list for field type_name
+	24, // 11: apiary.rpc.v1.HostStatsResponse.cpu:type_name -> apiary.rpc.v1.CPUStats
+	25, // 12: apiary.rpc.v1.HostStatsResponse.mem:type_name -> apiary.rpc.v1.MemStats
+	26, // 13: apiary.rpc.v1.HostStatsResponse.pools:type_name -> apiary.rpc.v1.PoolStats
+	27, // 14: apiary.rpc.v1.HostStatsResponse.disks:type_name -> apiary.rpc.v1.DiskStats
+	28, // 15: apiary.rpc.v1.HostStatsResponse.net:type_name -> apiary.rpc.v1.NetIfaceStats
+	13, // 16: apiary.rpc.v1.ManagerService.Status:input_type -> apiary.rpc.v1.StatusRequest
+	3,  // 17: apiary.rpc.v1.ManagerService.CreateVM:input_type -> apiary.rpc.v1.CreateVMRequest
+	5,  // 18: apiary.rpc.v1.ManagerService.UpdateVM:input_type -> apiary.rpc.v1.UpdateVMRequest
+	7,  // 19: apiary.rpc.v1.ManagerService.DeleteVM:input_type -> apiary.rpc.v1.DeleteVMRequest
+	9,  // 20: apiary.rpc.v1.ManagerService.GetVM:input_type -> apiary.rpc.v1.GetVMRequest
+	11, // 21: apiary.rpc.v1.ManagerService.ListVMs:input_type -> apiary.rpc.v1.ListVMsRequest
+	15, // 22: apiary.rpc.v1.ManagerService.UploadISO:input_type -> apiary.rpc.v1.UploadISORequest
+	18, // 23: apiary.rpc.v1.ManagerService.ListISOs:input_type -> apiary.rpc.v1.ListISOsRequest
+	21, // 24: apiary.rpc.v1.ManagerService.DeleteISO:input_type -> apiary.rpc.v1.DeleteISORequest
+	23, // 25: apiary.rpc.v1.ManagerService.HostStats:input_type -> apiary.rpc.v1.HostStatsRequest
+	14, // 26: apiary.rpc.v1.ManagerService.Status:output_type -> apiary.rpc.v1.StatusResponse
+	4,  // 27: apiary.rpc.v1.ManagerService.CreateVM:output_type -> apiary.rpc.v1.CreateVMResponse
+	6,  // 28: apiary.rpc.v1.ManagerService.UpdateVM:output_type -> apiary.rpc.v1.UpdateVMResponse
+	8,  // 29: apiary.rpc.v1.ManagerService.DeleteVM:output_type -> apiary.rpc.v1.DeleteVMResponse
+	10, // 30: apiary.rpc.v1.ManagerService.GetVM:output_type -> apiary.rpc.v1.GetVMResponse
+	12, // 31: apiary.rpc.v1.ManagerService.ListVMs:output_type -> apiary.rpc.v1.ListVMsResponse
+	17, // 32: apiary.rpc.v1.ManagerService.UploadISO:output_type -> apiary.rpc.v1.UploadISOResponse
+	20, // 33: apiary.rpc.v1.ManagerService.ListISOs:output_type -> apiary.rpc.v1.ListISOsResponse
+	22, // 34: apiary.rpc.v1.ManagerService.DeleteISO:output_type -> apiary.rpc.v1.DeleteISOResponse
+	29, // 35: apiary.rpc.v1.ManagerService.HostStats:output_type -> apiary.rpc.v1.HostStatsResponse
+	26, // [26:36] is the sub-list for method output_type
+	16, // [16:26] is the sub-list for method input_type
+	16, // [16:16] is the sub-list for extension type_name
+	16, // [16:16] is the sub-list for extension extendee
+	0,  // [0:16] is the sub-list for field type_name
 }
 
 func init() { file_api_rpc_manager_proto_init() }
@@ -1614,7 +2145,7 @@ func file_api_rpc_manager_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_api_rpc_manager_proto_rawDesc), len(file_api_rpc_manager_proto_rawDesc)),
 			NumEnums:      2,
-			NumMessages:   21,
+			NumMessages:   28,
 			NumExtensions: 0,
 			NumServices:   1,
 		},
