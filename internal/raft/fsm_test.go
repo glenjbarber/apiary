@@ -465,3 +465,125 @@ func TestFSM_SnapshotRestore_Networks(t *testing.T) {
 		t.Errorf("restored Network(net-1) = (%+v, %v), want present with subnet 10.60.0.0/24", network, ok)
 	}
 }
+
+func createAPIKeyCmd(id, name, hashedKey string) *internalpb.Command {
+	return &internalpb.Command{
+		Op: &internalpb.Command_CreateApiKey{
+			CreateApiKey: &internalpb.CreateAPIKey{Key: &internalpb.ApiKey{Id: id, Name: name, HashedKey: hashedKey, CreatedUnix: 1000}},
+		},
+	}
+}
+
+func TestFSM_Apply_CreateAPIKey(t *testing.T) {
+	fsm := NewFSM()
+
+	result := fsm.Apply(&raft.Log{Index: 1, Data: mustMarshalCommand(t, createAPIKeyCmd("key-1", "terraform", "deadbeef"))})
+
+	applyResult := result.(*FSMApplyResult)
+	if applyResult.Error != "" {
+		t.Fatalf("Error = %q, want empty", applyResult.Error)
+	}
+	if applyResult.ApiKey.GetId() != "key-1" || applyResult.ApiKey.GetHashedKey() != "deadbeef" {
+		t.Errorf("ApiKey = %+v, want id=key-1 hashed_key=deadbeef", applyResult.ApiKey)
+	}
+	if !fsm.AuthEnabled() {
+		t.Errorf("AuthEnabled() = false, want true after a successful create")
+	}
+	id, valid := fsm.ValidateHash("deadbeef")
+	if !valid || id != "key-1" {
+		t.Errorf("ValidateHash(deadbeef) = (%q, %v), want (key-1, true)", id, valid)
+	}
+}
+
+func TestFSM_Apply_CreateAPIKeyDuplicateRejected(t *testing.T) {
+	fsm := NewFSM()
+	fsm.Apply(&raft.Log{Index: 1, Data: mustMarshalCommand(t, createAPIKeyCmd("key-1", "a", "hash-a"))})
+
+	result := fsm.Apply(&raft.Log{Index: 2, Data: mustMarshalCommand(t, createAPIKeyCmd("key-1", "b", "hash-b"))})
+
+	if result.(*FSMApplyResult).Error == "" {
+		t.Fatalf("Error = empty, want a duplicate-id rejection")
+	}
+}
+
+func TestFSM_Apply_RevokeAPIKey(t *testing.T) {
+	fsm := NewFSM()
+	fsm.Apply(&raft.Log{Index: 1, Data: mustMarshalCommand(t, createAPIKeyCmd("key-1", "terraform", "deadbeef"))})
+
+	revokeCmd := &internalpb.Command{Op: &internalpb.Command_RevokeApiKey{RevokeApiKey: &internalpb.RevokeAPIKey{Id: "key-1"}}}
+	result := fsm.Apply(&raft.Log{Index: 2, Data: mustMarshalCommand(t, revokeCmd)})
+
+	if result.(*FSMApplyResult).Error != "" {
+		t.Fatalf("Error = %q, want empty", result.(*FSMApplyResult).Error)
+	}
+	if _, valid := fsm.ValidateHash("deadbeef"); valid {
+		t.Errorf("ValidateHash(deadbeef) = valid after revocation, want invalid")
+	}
+	if !fsm.AuthEnabled() {
+		t.Errorf("AuthEnabled() = false after revoking the only key, want true (auth must stay locked down, not reopen)")
+	}
+}
+
+func TestFSM_Apply_RevokeAPIKeyMissingIsError(t *testing.T) {
+	fsm := NewFSM()
+
+	revokeCmd := &internalpb.Command{Op: &internalpb.Command_RevokeApiKey{RevokeApiKey: &internalpb.RevokeAPIKey{Id: "missing"}}}
+	result := fsm.Apply(&raft.Log{Index: 1, Data: mustMarshalCommand(t, revokeCmd)})
+
+	if result.(*FSMApplyResult).Error == "" {
+		t.Fatalf("Error = empty, want a not-found rejection")
+	}
+}
+
+func TestFSM_AuthEnabled_FalseWhenEmpty(t *testing.T) {
+	fsm := NewFSM()
+	if fsm.AuthEnabled() {
+		t.Errorf("AuthEnabled() = true on an empty FSM, want false")
+	}
+}
+
+func TestFSM_ValidateHash_UnknownHashIsInvalid(t *testing.T) {
+	fsm := NewFSM()
+	fsm.Apply(&raft.Log{Index: 1, Data: mustMarshalCommand(t, createAPIKeyCmd("key-1", "terraform", "deadbeef"))})
+
+	if _, valid := fsm.ValidateHash("wrong-hash"); valid {
+		t.Errorf("ValidateHash(wrong-hash) = valid, want invalid")
+	}
+}
+
+func TestFSM_ListAPIKeys_SortedByID(t *testing.T) {
+	fsm := NewFSM()
+	fsm.Apply(&raft.Log{Index: 1, Data: mustMarshalCommand(t, createAPIKeyCmd("key-b", "b", "hash-b"))})
+	fsm.Apply(&raft.Log{Index: 2, Data: mustMarshalCommand(t, createAPIKeyCmd("key-a", "a", "hash-a"))})
+
+	got := fsm.ListAPIKeys()
+	if len(got) != 2 || got[0].GetId() != "key-a" || got[1].GetId() != "key-b" {
+		t.Errorf("ListAPIKeys() = %v, want [key-a, key-b] sorted", got)
+	}
+}
+
+func TestFSM_SnapshotRestore_APIKeys(t *testing.T) {
+	fsm := NewFSM()
+	fsm.Apply(&raft.Log{Index: 1, Data: mustMarshalCommand(t, createAPIKeyCmd("key-1", "terraform", "deadbeef"))})
+
+	snap, err := fsm.Snapshot()
+	if err != nil {
+		t.Fatalf("Snapshot() error: %v", err)
+	}
+	sink := &fakeSnapshotSink{}
+	if err := snap.(*fsmSnapshot).Persist(sink); err != nil {
+		t.Fatalf("Persist() error: %v", err)
+	}
+
+	restored := NewFSM()
+	if err := restored.Restore(io.NopCloser(bytes.NewReader(sink.Bytes()))); err != nil {
+		t.Fatalf("Restore() error: %v", err)
+	}
+
+	if id, valid := restored.ValidateHash("deadbeef"); !valid || id != "key-1" {
+		t.Errorf("restored ValidateHash(deadbeef) = (%q, %v), want (key-1, true)", id, valid)
+	}
+	if !restored.AuthEnabled() {
+		t.Errorf("restored AuthEnabled() = false, want true (auth_enabled must survive snapshot/restore)")
+	}
+}

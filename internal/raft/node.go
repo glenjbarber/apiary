@@ -258,6 +258,36 @@ func (n *Node) ListNetworks() ([]*internalpb.NetworkDefinition, error) {
 	return n.fsm.ListNetworks(), nil
 }
 
+// ValidateAPIKeyHash checks hash against this node's own FSM state and
+// reports whether API-key auth has ever been enabled at all (see
+// FSM.AuthEnabled - permanent once set, never reverts even if every
+// key is later revoked) - deliberately with NO leadership check,
+// unlike every other read method in this file. Raft already replicates
+// FSM state (including API keys) onto every node, follower or leader,
+// as they replay the log; several managerd RPCs need to keep
+// authenticating callers even on a non-leader node (HostStats,
+// GetVMConsole, and UploadISO are all local, per-node operations that
+// don't otherwise depend on raft leadership at all), so key validation
+// can't require the leader the way GetNetwork/ListNetworks do. The
+// tradeoff is a lookup against a possibly-just-slightly-stale local
+// copy during the brief replication window right after a
+// create/revoke - acceptable, and documented in ADR-0023.
+func (n *Node) ValidateAPIKeyHash(hash string) (id string, valid, authEnabled bool) {
+	id, valid = n.fsm.ValidateHash(hash)
+	authEnabled = n.fsm.AuthEnabled()
+	return id, valid, authEnabled
+}
+
+// ListAPIKeys is a normal leader-only read (mirrors ListNetworks),
+// used only for the admin-facing key list - never for per-request
+// authentication, which goes through ValidateAPIKeyHash instead.
+func (n *Node) ListAPIKeys() ([]*internalpb.ApiKey, error) {
+	if n.raft.State() != raft.Leader {
+		return nil, ErrNotLeader
+	}
+	return n.fsm.ListAPIKeys(), nil
+}
+
 func translateMembershipErr(err error) error {
 	if err == nil {
 		return nil

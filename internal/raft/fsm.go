@@ -26,20 +26,29 @@ type FSMApplyResult struct {
 	Index   uint64
 	VM      *internalpb.VMDefinition
 	Network *internalpb.NetworkDefinition
+	ApiKey  *internalpb.ApiKey
 	Error   string
 }
 
 // FSM applies typed Command messages (see api/internalpb/state.proto)
-// against an in-memory map of VM definitions, keyed by ID, plus a
-// similarly keyed map of network definitions. This is the real
-// ephemeral-state schema: cluster membership itself is handled by
-// raft's own configuration mechanism (AddVoter/RemoveServer), not by the
-// FSM.
+// against an in-memory map of VM definitions, keyed by ID, plus
+// similarly keyed maps of network definitions and API keys. This is
+// the real ephemeral-state schema: cluster membership itself is
+// handled by raft's own configuration mechanism (AddVoter/
+// RemoveServer), not by the FSM.
 type FSM struct {
 	mu        sync.Mutex
 	lastIndex uint64
 	vms       map[string]*internalpb.VMDefinition
 	networks  map[string]*internalpb.NetworkDefinition
+	apiKeys   map[string]*internalpb.ApiKey
+
+	// authEnabled is set permanently, forever, the first time any
+	// CreateAPIKey command ever succeeds - it never reverts to false
+	// even if every key is later revoked. See AuthEnabled's own doc
+	// comment for why this must be a separate, one-way flag rather than
+	// just checking len(apiKeys) > 0.
+	authEnabled bool
 }
 
 var _ raft.FSM = (*FSM)(nil)
@@ -49,6 +58,7 @@ func NewFSM() *FSM {
 	return &FSM{
 		vms:      make(map[string]*internalpb.VMDefinition),
 		networks: make(map[string]*internalpb.NetworkDefinition),
+		apiKeys:  make(map[string]*internalpb.ApiKey),
 	}
 }
 
@@ -82,6 +92,10 @@ func (f *FSM) Apply(log *raft.Log) interface{} {
 		return f.applyCreateNetwork(log.Index, op.CreateNetwork.GetNetwork())
 	case *internalpb.Command_DeleteNetwork:
 		return f.applyDeleteNetwork(log.Index, op.DeleteNetwork.GetId())
+	case *internalpb.Command_CreateApiKey:
+		return f.applyCreateAPIKey(log.Index, op.CreateApiKey.GetKey())
+	case *internalpb.Command_RevokeApiKey:
+		return f.applyRevokeAPIKey(log.Index, op.RevokeApiKey.GetId())
 	default:
 		return &FSMApplyResult{Index: log.Index, Error: "command has no op set"}
 	}
@@ -284,6 +298,78 @@ func (f *FSM) ListNetworks() []*internalpb.NetworkDefinition {
 	return networks
 }
 
+// applyCreateAPIKey adds a new ApiKey. managerd's CreateAPIKey RPC
+// handler is what actually generates the raw key and computes
+// key.HashedKey before submitting this - the FSM only stores what it's
+// given, the same as every other Create* command.
+func (f *FSM) applyCreateAPIKey(index uint64, key *internalpb.ApiKey) *FSMApplyResult {
+	if key.GetId() == "" {
+		return &FSMApplyResult{Index: index, Error: "CreateAPIKey: id must be set"}
+	}
+	if _, exists := f.apiKeys[key.GetId()]; exists {
+		return &FSMApplyResult{Index: index, Error: fmt.Sprintf("CreateAPIKey: id %q already exists", key.GetId())}
+	}
+	f.apiKeys[key.GetId()] = key
+	f.authEnabled = true
+	return &FSMApplyResult{Index: index, ApiKey: key}
+}
+
+// applyRevokeAPIKey removes an ApiKey outright - no soft-delete
+// tombstone, the same reasoning as applyDeleteNetwork (a key has no
+// physical resource to reconcile away first).
+func (f *FSM) applyRevokeAPIKey(index uint64, id string) *FSMApplyResult {
+	key, exists := f.apiKeys[id]
+	if !exists {
+		return &FSMApplyResult{Index: index, Error: fmt.Sprintf("RevokeAPIKey: id %q does not exist", id)}
+	}
+	delete(f.apiKeys, id)
+	return &FSMApplyResult{Index: index, ApiKey: key}
+}
+
+// ValidateHash reports whether hash matches a currently valid (not
+// revoked) API key's HashedKey, and that key's id if so. Unlike VM/
+// Network/ListAPIKeys reads, callers of this (via Node.
+// ValidateAPIKeyHash) do NOT require raft leadership - see that
+// method's doc comment for why.
+func (f *FSM) ValidateHash(hash string) (id string, ok bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for _, k := range f.apiKeys {
+		if k.GetHashedKey() == hash {
+			return k.GetId(), true
+		}
+	}
+	return "", false
+}
+
+// AuthEnabled reports whether API-key auth has ever been turned on -
+// true forever from the moment the first CreateAPIKey command ever
+// succeeds, even if every key is later revoked. This is deliberately
+// NOT len(apiKeys) > 0: revoking the last remaining key must lock the
+// cluster down (require a new key be created via some other already-
+// authenticated path, or a raft snapshot restore), not silently reopen
+// it - see ADR-0023 and its "no way back to open" consequence. Same
+// no-leadership-required reasoning as ValidateHash.
+func (f *FSM) AuthEnabled() bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.authEnabled
+}
+
+// ListAPIKeys returns every current API key, sorted by id for stable
+// ordering - used only for the admin-facing list view (via the
+// leader-only Node.ListAPIKeys), never for per-request authentication.
+func (f *FSM) ListAPIKeys() []*internalpb.ApiKey {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	keys := make([]*internalpb.ApiKey, 0, len(f.apiKeys))
+	for _, k := range f.apiKeys {
+		keys = append(keys, k)
+	}
+	sort.Slice(keys, func(i, j int) bool { return keys[i].GetId() < keys[j].GetId() })
+	return keys
+}
+
 // AppliedIndex returns the index of the most recently applied log entry.
 func (f *FSM) AppliedIndex() uint64 {
 	f.mu.Lock()
@@ -316,15 +402,20 @@ func (f *FSM) Snapshot() (raft.FSMSnapshot, error) {
 	defer f.mu.Unlock()
 
 	state := &internalpb.FSMSnapshotState{
-		LastIndex: f.lastIndex,
-		Vms:       make(map[string]*internalpb.VMDefinition, len(f.vms)),
-		Networks:  make(map[string]*internalpb.NetworkDefinition, len(f.networks)),
+		LastIndex:   f.lastIndex,
+		Vms:         make(map[string]*internalpb.VMDefinition, len(f.vms)),
+		Networks:    make(map[string]*internalpb.NetworkDefinition, len(f.networks)),
+		ApiKeys:     make(map[string]*internalpb.ApiKey, len(f.apiKeys)),
+		AuthEnabled: f.authEnabled,
 	}
 	for id, vm := range f.vms {
 		state.Vms[id] = vm
 	}
 	for id, network := range f.networks {
 		state.Networks[id] = network
+	}
+	for id, key := range f.apiKeys {
+		state.ApiKeys[id] = key
 	}
 	return &fsmSnapshot{state: state}, nil
 }
@@ -353,6 +444,11 @@ func (f *FSM) Restore(rc io.ReadCloser) error {
 	if f.networks == nil {
 		f.networks = make(map[string]*internalpb.NetworkDefinition)
 	}
+	f.apiKeys = state.GetApiKeys()
+	if f.apiKeys == nil {
+		f.apiKeys = make(map[string]*internalpb.ApiKey)
+	}
+	f.authEnabled = state.GetAuthEnabled()
 	f.mu.Unlock()
 	return nil
 }

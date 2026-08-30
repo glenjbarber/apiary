@@ -60,6 +60,9 @@ func (s *Server) Apply(_ context.Context, req *internalpb.ApplyRequest) (*intern
 	if result.Network != nil {
 		payload = result.Network
 	}
+	if result.ApiKey != nil {
+		payload = result.ApiKey
+	}
 	resultBytes, err := proto.Marshal(payload)
 	if err != nil {
 		return &internalpb.ApplyResponse{Error: fmt.Sprintf("encoding result: %v", err)}, nil
@@ -177,4 +180,25 @@ func (s *Server) ListNetworks(_ context.Context, _ *internalpb.ListNetworksReque
 		return resp, nil
 	}
 	return &internalpb.ListNetworksResponse{Networks: networks}, nil
+}
+
+// ValidateAPIKeyHash implements internalpb.RaftInternalServer. Unlike
+// every other read RPC here, this never returns ErrNotLeader - see
+// Node.ValidateAPIKeyHash's doc comment for why.
+func (s *Server) ValidateAPIKeyHash(_ context.Context, req *internalpb.ValidateAPIKeyHashRequest) (*internalpb.ValidateAPIKeyHashResponse, error) {
+	id, valid, authEnabled := s.node.ValidateAPIKeyHash(req.GetHashedKey())
+	return &internalpb.ValidateAPIKeyHashResponse{Valid: valid, KeyId: id, AuthEnabled: authEnabled}, nil
+}
+
+// ListAPIKeys implements internalpb.RaftInternalServer.
+func (s *Server) ListAPIKeys(_ context.Context, _ *internalpb.ListAPIKeysRequest) (*internalpb.ListAPIKeysResponse, error) {
+	keys, err := s.node.ListAPIKeys()
+	if err != nil {
+		resp := &internalpb.ListAPIKeysResponse{Error: err.Error()}
+		if errors.Is(err, ErrNotLeader) {
+			resp.LeaderHint = s.node.LeaderHint()
+		}
+		return resp, nil
+	}
+	return &internalpb.ListAPIKeysResponse{Keys: keys}, nil
 }
