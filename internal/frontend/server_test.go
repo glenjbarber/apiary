@@ -120,7 +120,12 @@ var _ rpcpb.ManagerServiceClient = (*fakeClient)(nil)
 
 func newTestServer(t *testing.T, client *fakeClient) *Server {
 	t.Helper()
-	s, err := NewServer(client)
+	return newTestServerWithAuth(t, client, "", "")
+}
+
+func newTestServerWithAuth(t *testing.T, client *fakeClient, user, pass string) *Server {
+	t.Helper()
+	s, err := NewServer(client, user, pass)
 	if err != nil {
 		t.Fatalf("NewServer() error: %v", err)
 	}
@@ -536,5 +541,203 @@ func TestServer_StaticAssets(t *testing.T) {
 	}
 	if rec.Body.Len() == 0 {
 		t.Errorf("htmx.min.js served empty body")
+	}
+}
+
+func TestServer_NoAuthConfigured_AllPagesReachableWithoutLogin(t *testing.T) {
+	s := newTestServer(t, &fakeClient{})
+
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (no login configured, no gate)", rec.Code)
+	}
+}
+
+func TestServer_LoginPage_RedirectsToHomeWhenAuthDisabled(t *testing.T) {
+	s := newTestServer(t, &fakeClient{})
+
+	req := httptest.NewRequest(http.MethodGet, "/login", nil)
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusFound || rec.Header().Get("Location") != "/" {
+		t.Errorf("GET /login with auth disabled = %d %q, want 302 to /", rec.Code, rec.Header().Get("Location"))
+	}
+}
+
+func TestServer_AuthEnabled_UnauthenticatedRequestRedirectsToLogin(t *testing.T) {
+	s := newTestServerWithAuth(t, &fakeClient{}, "admin", "secret")
+
+	req := httptest.NewRequest(http.MethodGet, "/vms", nil)
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusFound {
+		t.Fatalf("status = %d, want 302 to /login", rec.Code)
+	}
+	loc := rec.Header().Get("Location")
+	if !strings.HasPrefix(loc, "/login") {
+		t.Errorf("Location = %q, want a redirect to /login", loc)
+	}
+	if !strings.Contains(loc, url.QueryEscape("/vms")) {
+		t.Errorf("Location = %q, want it to carry the original path as next", loc)
+	}
+}
+
+func TestServer_AuthEnabled_HTMXRequestGetsHXRedirectNotBare302(t *testing.T) {
+	s := newTestServerWithAuth(t, &fakeClient{}, "admin", "secret")
+
+	req := httptest.NewRequest(http.MethodGet, "/vms/rows", nil)
+	req.Header.Set("HX-Request", "true")
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Errorf("status = %d, want 200 (HX-Redirect handles navigation, not a 302 status)", rec.Code)
+	}
+	if got := rec.Header().Get("HX-Redirect"); !strings.HasPrefix(got, "/login") {
+		t.Errorf("HX-Redirect = %q, want a redirect to /login", got)
+	}
+}
+
+func TestServer_Login_WrongCredentialsShowsErrorNoSession(t *testing.T) {
+	s := newTestServerWithAuth(t, &fakeClient{}, "admin", "secret")
+
+	form := url.Values{"username": {"admin"}, "password": {"wrong"}}
+	req := httptest.NewRequest(http.MethodPost, "/login", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (re-render with error, not a redirect)", rec.Code)
+	}
+	if !strings.Contains(rec.Body.String(), "invalid username or password") {
+		t.Errorf("response missing login error, got: %s", rec.Body.String())
+	}
+	for _, c := range rec.Result().Cookies() {
+		if c.Name == sessionCookieName {
+			t.Errorf("a session cookie should not be set on a failed login")
+		}
+	}
+}
+
+func TestServer_Login_CorrectCredentialsGrantsSessionAndRedirects(t *testing.T) {
+	s := newTestServerWithAuth(t, &fakeClient{}, "admin", "secret")
+
+	form := url.Values{"username": {"admin"}, "password": {"secret"}}
+	req := httptest.NewRequest(http.MethodPost, "/login", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusFound || rec.Header().Get("Location") != "/" {
+		t.Fatalf("status/location = %d %q, want 302 to /", rec.Code, rec.Header().Get("Location"))
+	}
+	var token string
+	for _, c := range rec.Result().Cookies() {
+		if c.Name == sessionCookieName {
+			token = c.Value
+		}
+	}
+	if token == "" {
+		t.Fatalf("no session cookie set on successful login")
+	}
+
+	// The session should now actually work for a subsequent request.
+	req2 := httptest.NewRequest(http.MethodGet, "/vms", nil)
+	req2.AddCookie(&http.Cookie{Name: sessionCookieName, Value: token})
+	rec2 := httptest.NewRecorder()
+	s.ServeHTTP(rec2, req2)
+	if rec2.Code != http.StatusOK {
+		t.Errorf("authenticated request status = %d, want 200", rec2.Code)
+	}
+}
+
+func TestServer_Login_RedirectsToSafeNextURL(t *testing.T) {
+	s := newTestServerWithAuth(t, &fakeClient{}, "admin", "secret")
+
+	form := url.Values{"username": {"admin"}, "password": {"secret"}, "next": {"/images"}}
+	req := httptest.NewRequest(http.MethodPost, "/login", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, req)
+
+	if got := rec.Header().Get("Location"); got != "/images" {
+		t.Errorf("Location = %q, want /images (the requested next page)", got)
+	}
+}
+
+func TestServer_Login_RejectsOpenRedirectNextURL(t *testing.T) {
+	s := newTestServerWithAuth(t, &fakeClient{}, "admin", "secret")
+
+	for _, next := range []string{"//evil.com", "https://evil.com", "http://evil.com/x"} {
+		form := url.Values{"username": {"admin"}, "password": {"secret"}, "next": {next}}
+		req := httptest.NewRequest(http.MethodPost, "/login", strings.NewReader(form.Encode()))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		rec := httptest.NewRecorder()
+		s.ServeHTTP(rec, req)
+
+		if got := rec.Header().Get("Location"); got != "/" {
+			t.Errorf("next=%q: Location = %q, want / (unsafe next rejected)", next, got)
+		}
+	}
+}
+
+func TestServer_Logout_InvalidatesSession(t *testing.T) {
+	s := newTestServerWithAuth(t, &fakeClient{}, "admin", "secret")
+	token, err := s.sessions.Create()
+	if err != nil {
+		t.Fatalf("sessions.Create() error: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/logout", nil)
+	req.AddCookie(&http.Cookie{Name: sessionCookieName, Value: token})
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusFound || rec.Header().Get("Location") != "/login" {
+		t.Fatalf("status/location = %d %q, want 302 to /login", rec.Code, rec.Header().Get("Location"))
+	}
+	if s.sessions.Valid(token) {
+		t.Errorf("session should be invalidated after logout")
+	}
+
+	// The old token must no longer grant access.
+	req2 := httptest.NewRequest(http.MethodGet, "/vms", nil)
+	req2.AddCookie(&http.Cookie{Name: sessionCookieName, Value: token})
+	rec2 := httptest.NewRecorder()
+	s.ServeHTTP(rec2, req2)
+	if rec2.Code != http.StatusFound {
+		t.Errorf("status after logout = %d, want 302 back to login", rec2.Code)
+	}
+}
+
+func TestServer_AuthEnabled_NavShowsLogoutLink(t *testing.T) {
+	s := newTestServerWithAuth(t, &fakeClient{}, "admin", "secret")
+	token, _ := s.sessions.Create()
+
+	req := httptest.NewRequest(http.MethodGet, "/vms", nil)
+	req.AddCookie(&http.Cookie{Name: sessionCookieName, Value: token})
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, req)
+
+	if !strings.Contains(rec.Body.String(), `action="/logout"`) {
+		t.Errorf("nav should show a logout control when auth is enabled, got: %s", rec.Body.String())
+	}
+}
+
+func TestServer_AuthDisabled_NavHasNoLogoutLink(t *testing.T) {
+	s := newTestServer(t, &fakeClient{})
+
+	req := httptest.NewRequest(http.MethodGet, "/vms", nil)
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, req)
+
+	if strings.Contains(rec.Body.String(), `action="/logout"`) {
+		t.Errorf("nav should not show a logout control when auth is disabled, got: %s", rec.Body.String())
 	}
 }

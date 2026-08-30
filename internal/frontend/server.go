@@ -1,13 +1,16 @@
 package frontend
 
 import (
+	"crypto/subtle"
 	"fmt"
 	"html/template"
 	"io"
 	"mime/multipart"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
+	"time"
 
 	rpcpb "github.com/glenjbarber/apiary/api/rpc"
 	"github.com/glenjbarber/apiary/web"
@@ -61,6 +64,17 @@ type pageData struct {
 
 	// Stats is this node's host stats snapshot, for the Stats page.
 	Stats statsView
+
+	// AuthEnabled reports whether login is required at all, so the nav
+	// partial only shows a "Log out" link when there's actually a
+	// session to log out of.
+	AuthEnabled bool
+
+	// LoginError and NextURL are only used by the login page: a failed
+	// attempt's message, and the originally-requested path to return to
+	// after a successful login (see isSafeRedirectPath).
+	LoginError string
+	NextURL    string
 }
 
 // parseSort reads sort/dir query parameters, defaulting to ascending by
@@ -90,27 +104,89 @@ type Server struct {
 	client rpcpb.ManagerServiceClient
 	tmpl   *template.Template
 	mux    *http.ServeMux
+
+	// authUser/authPass gate every route except /login and /static/ when
+	// non-empty (both empty disables login entirely - the default,
+	// matching this project's current single-developer/local-network
+	// stage). sessions tracks logged-in sessions; see session.go.
+	authUser string
+	authPass string
+	sessions *sessionStore
 }
 
 // NewServer parses the embedded templates and returns a Server that
-// answers requests using client.
-func NewServer(client rpcpb.ManagerServiceClient) (*Server, error) {
+// answers requests using client. authUser/authPass enable a login page
+// gating the whole UI when both are non-empty; pass "", "" to disable
+// login entirely.
+func NewServer(client rpcpb.ManagerServiceClient, authUser, authPass string) (*Server, error) {
 	tmpl, err := template.ParseFS(web.FS, "templates/*.html")
 	if err != nil {
 		return nil, fmt.Errorf("frontend: parsing templates: %w", err)
 	}
 
-	s := &Server{client: client, tmpl: tmpl, mux: http.NewServeMux()}
+	s := &Server{
+		client:   client,
+		tmpl:     tmpl,
+		mux:      http.NewServeMux(),
+		authUser: authUser,
+		authPass: authPass,
+		sessions: newSessionStore(),
+	}
 	s.routes()
 	return s, nil
 }
 
+// ServeHTTP gates every request behind a valid session when login is
+// enabled, except /login itself and /static/ assets (the login page
+// needs its own CSS, and obviously can't require a session to reach).
+// An htmx request that hits this gate gets HX-Redirect rather than a
+// bare 302, matching the pattern already used for the create-VM form's
+// own success redirect - a plain Location header on an XHR/fetch
+// response doesn't reliably drive the *browser's* navigation the way a
+// real page load does.
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if s.authUser != "" && r.URL.Path != "/login" && !strings.HasPrefix(r.URL.Path, "/static/") {
+		if !s.hasValidSession(r) {
+			s.redirectToLogin(w, r)
+			return
+		}
+	}
 	s.mux.ServeHTTP(w, r)
+}
+
+func (s *Server) hasValidSession(r *http.Request) bool {
+	c, err := r.Cookie(sessionCookieName)
+	if err != nil {
+		return false
+	}
+	return s.sessions.Valid(c.Value)
+}
+
+func (s *Server) redirectToLogin(w http.ResponseWriter, r *http.Request) {
+	next := "/login"
+	if isSafeRedirectPath(r.URL.RequestURI()) {
+		next = "/login?next=" + url.QueryEscape(r.URL.RequestURI())
+	}
+	if r.Header.Get("HX-Request") == "true" {
+		w.Header().Set("HX-Redirect", next)
+		return
+	}
+	http.Redirect(w, r, next, http.StatusFound)
+}
+
+// isSafeRedirectPath rejects anything that isn't an in-app relative
+// path - in particular a protocol-relative "//evil.com" or an absolute
+// "https://evil.com" URL, either of which would turn the login form's
+// own "next" parameter into an open redirect.
+func isSafeRedirectPath(p string) bool {
+	return strings.HasPrefix(p, "/") && !strings.HasPrefix(p, "//") && !strings.Contains(p, "://")
 }
 
 func (s *Server) routes() {
 	s.mux.Handle("GET /static/", http.FileServerFS(web.FS))
+	s.mux.HandleFunc("GET /login", s.handleLoginPage)
+	s.mux.HandleFunc("POST /login", s.handleLogin)
+	s.mux.HandleFunc("POST /logout", s.handleLogout)
 	s.mux.HandleFunc("GET /{$}", s.handleStatsPage)
 	s.mux.HandleFunc("GET /vms", s.handleVMsPage)
 	s.mux.HandleFunc("GET /vms/rows", s.handleListVMs)
@@ -121,6 +197,66 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /isos", s.handleListISOs)
 	s.mux.HandleFunc("POST /isos", s.handleUploadISO)
 	s.mux.HandleFunc("DELETE /isos/{name}", s.handleDeleteISO)
+}
+
+// handleLoginPage serves the login form. If login isn't enabled at all,
+// there's nothing to log into - redirect straight to the normal
+// landing page rather than showing a form that can't do anything.
+func (s *Server) handleLoginPage(w http.ResponseWriter, r *http.Request) {
+	if s.authUser == "" {
+		http.Redirect(w, r, "/", http.StatusFound)
+		return
+	}
+	s.render(w, "login_page", pageData{NextURL: r.URL.Query().Get("next")})
+}
+
+// handleLogin checks the submitted credentials with a constant-time
+// comparison (avoiding a timing side-channel on either field), and on
+// success starts a session and redirects to NextURL if it's a safe
+// in-app path, or "/" otherwise.
+func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
+	if err := r.ParseForm(); err != nil {
+		s.render(w, "login_page", pageData{LoginError: "invalid form: " + err.Error()})
+		return
+	}
+	user := r.FormValue("username")
+	pass := r.FormValue("password")
+	next := r.FormValue("next")
+
+	userOK := subtle.ConstantTimeCompare([]byte(user), []byte(s.authUser)) == 1
+	passOK := subtle.ConstantTimeCompare([]byte(pass), []byte(s.authPass)) == 1
+	if !userOK || !passOK {
+		s.render(w, "login_page", pageData{LoginError: "invalid username or password", NextURL: next})
+		return
+	}
+
+	token, err := s.sessions.Create()
+	if err != nil {
+		s.render(w, "login_page", pageData{LoginError: "could not start a session: " + err.Error(), NextURL: next})
+		return
+	}
+	http.SetCookie(w, &http.Cookie{
+		Name:     sessionCookieName,
+		Value:    token,
+		Path:     "/",
+		HttpOnly: true,
+		SameSite: http.SameSiteLaxMode,
+		Expires:  time.Now().Add(sessionTTL),
+	})
+
+	dest := "/"
+	if next != "" && isSafeRedirectPath(next) {
+		dest = next
+	}
+	http.Redirect(w, r, dest, http.StatusFound)
+}
+
+func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
+	if c, err := r.Cookie(sessionCookieName); err == nil {
+		s.sessions.Delete(c.Value)
+	}
+	http.SetCookie(w, &http.Cookie{Name: sessionCookieName, Value: "", Path: "/", MaxAge: -1})
+	http.Redirect(w, r, "/login", http.StatusFound)
 }
 
 // currentVMs fetches the current VM list, sorted by sortBy/dir (see
@@ -156,7 +292,7 @@ func (s *Server) currentVMs(r *http.Request, sortBy, dir string) ([]vmView, stri
 // what an operator most likely wants to see first.
 func (s *Server) handleStatsPage(w http.ResponseWriter, r *http.Request) {
 	stats, errMsg := s.currentStats(r)
-	s.render(w, "stats_page", pageData{Error: errMsg, Stats: stats, ActivePage: "stats"})
+	s.render(w, "stats_page", pageData{Error: errMsg, Stats: stats, ActivePage: "stats", AuthEnabled: s.authUser != ""})
 }
 
 // currentStats fetches a HostStats snapshot, returning a zero-value
@@ -177,13 +313,13 @@ func (s *Server) currentStats(r *http.Request) (statsView, string) {
 func (s *Server) handleVMsPage(w http.ResponseWriter, r *http.Request) {
 	sortBy, dir := parseSort(r)
 	vms, errMsg := s.currentVMs(r, sortBy, dir)
-	s.render(w, "vms_page", pageData{Error: errMsg, VMs: vms, SortBy: sortBy, SortDir: dir, ActivePage: "vms"})
+	s.render(w, "vms_page", pageData{Error: errMsg, VMs: vms, SortBy: sortBy, SortDir: dir, ActivePage: "vms", AuthEnabled: s.authUser != ""})
 }
 
 // handleImagesPage serves the Images (ISO upload/list) page ("/images").
 func (s *Server) handleImagesPage(w http.ResponseWriter, r *http.Request) {
 	isos, errMsg := s.currentISOs(r)
-	s.render(w, "images_page", pageData{ISOs: isos, ISOFormError: errMsg, ActivePage: "images"})
+	s.render(w, "images_page", pageData{ISOs: isos, ISOFormError: errMsg, ActivePage: "images", AuthEnabled: s.authUser != ""})
 }
 
 // handleNewVMPage serves the create-VM form page ("/vms/new"). A failed
@@ -195,7 +331,7 @@ func (s *Server) handleImagesPage(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleNewVMPage(w http.ResponseWriter, r *http.Request) {
 	nodes, _ := s.knownNodes(r)
 	isos, _ := s.currentISOs(r)
-	s.render(w, "new_vm_page", pageData{Nodes: nodes, ISOs: isos, ActivePage: "new_vm"})
+	s.render(w, "new_vm_page", pageData{Nodes: nodes, ISOs: isos, ActivePage: "new_vm", AuthEnabled: s.authUser != ""})
 }
 
 // currentISOs fetches the current list of stored installer images,

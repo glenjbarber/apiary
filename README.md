@@ -62,6 +62,11 @@ each design decision, in order.
 - **`internal/restshim`** — a REST/JSON translation of the external gRPC
   API, for non-browser clients. Built and tested, not yet wired into its
   own running binary.
+- **Session-based login** — an optional gate on the web UI
+  (`APIARY_UI_USER`/`APIARY_UI_PASSWORD`, off by default): a real HTML
+  login form, an in-memory session cookie (24-hour TTL, `HttpOnly` +
+  `SameSite=Lax`), and open-redirect protection on the return path. See
+  [ADR-0019](docs/adr/0019-session-based-login.md).
 
 **Not yet implemented:**
 
@@ -75,10 +80,9 @@ each design decision, in order.
 - Importing VMs from other hypervisors (e.g. Proxmox): no disk-format
   conversion, and Apiary is UEFI-only. Linux containers have no path at
   all — jails share the host FreeBSD kernel
-- Authentication: the web UI has an optional shared-password gate
-  (HTTP Basic Auth, off by default); `raftd`, `managerd`, and
-  `restshim` have none, and there are no user accounts or roles
-  anywhere
+- Authentication: the web UI has an optional shared-password login gate
+  (off by default, see above); `raftd`, `managerd`, and `restshim` have
+  none, and there are no user accounts or roles anywhere
 
 ## Architecture
 

@@ -34,29 +34,27 @@ func run() error {
 	}
 	defer conn.Close()
 
-	srv, err := frontend.NewServer(rpcpb.NewManagerServiceClient(conn))
-	if err != nil {
-		return fmt.Errorf("creating frontend server: %w", err)
-	}
-
 	// Credentials come from the environment, not flags, so they don't
 	// show up in `ps` output. Both or neither must be set - a single one
 	// set is almost certainly a typo, not an intentional "half enabled"
 	// state, so it's treated as a startup error rather than silently
-	// disabling auth.
+	// disabling login.
 	user := os.Getenv("APIARY_UI_USER")
 	pass := os.Getenv("APIARY_UI_PASSWORD")
 	if (user == "") != (pass == "") {
-		return fmt.Errorf("both APIARY_UI_USER and APIARY_UI_PASSWORD must be set together (or neither, to disable auth)")
+		return fmt.Errorf("both APIARY_UI_USER and APIARY_UI_PASSWORD must be set together (or neither, to disable login)")
 	}
-	var handler http.Handler = srv
+
+	srv, err := frontend.NewServer(rpcpb.NewManagerServiceClient(conn), user, pass)
+	if err != nil {
+		return fmt.Errorf("creating frontend server: %w", err)
+	}
 	if user != "" {
-		handler = frontend.BasicAuth(user, pass, handler)
-		log.Printf("frontend: HTTP Basic Auth enabled (user=%s)", user)
+		log.Printf("frontend: login enabled (user=%s)", user)
 	} else {
-		log.Printf("frontend: no auth configured (set APIARY_UI_USER/APIARY_UI_PASSWORD to enable HTTP Basic Auth)")
+		log.Printf("frontend: no login configured (set APIARY_UI_USER/APIARY_UI_PASSWORD to require one)")
 	}
 
 	log.Printf("frontend: listening on %s (manager-addr=%s)", *httpAddr, *managerAddr)
-	return http.ListenAndServe(*httpAddr, handler)
+	return http.ListenAndServe(*httpAddr, srv)
 }

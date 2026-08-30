@@ -49,5 +49,10 @@
   <a href="/vms"{{if eq .ActivePage "vms"}} class="active"{{end}}>VMs</a>
   <a href="/images"{{if eq .ActivePage "images"}} class="active"{{end}}>Images</a>
   <a href="/vms/new"{{if eq .ActivePage "new_vm"}} class="active"{{end}}>New VM</a>
+  {{if .AuthEnabled}}
+  <form method="post" action="/logout" style="display: inline;">
+    <button type="submit" style="background: none; border: none; color: #333; text-decoration: underline; cursor: pointer; padding: 0; font: inherit;">Log out</button>
+  </form>
+  {{end}}
 </nav>
 {{end}}
