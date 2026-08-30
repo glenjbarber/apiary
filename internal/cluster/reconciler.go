@@ -2,15 +2,19 @@ package cluster
 
 import (
 	"context"
+	"crypto/sha256"
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"time"
 
 	"google.golang.org/protobuf/proto"
 
 	internalpb "github.com/glenjbarber/apiary/api/internalpb"
 	"github.com/glenjbarber/apiary/internal/bhyve"
+	"github.com/glenjbarber/apiary/internal/dhcpd"
+	"github.com/glenjbarber/apiary/internal/pf"
 )
 
 // diskImageName is the file created inside each VM's dataset to back its
@@ -50,6 +54,9 @@ const (
 type raftClient interface {
 	ListVMs(ctx context.Context) (*internalpb.ListVMsResponse, error)
 	Apply(ctx context.Context, payload []byte, timeout time.Duration) (*internalpb.ApplyResponse, error)
+
+	// ListNetworks is only called when VLAN is set - see ensureNetwork.
+	ListNetworks(ctx context.Context) (*internalpb.ListNetworksResponse, error)
 }
 
 // datasetManager is the subset of *zfs.Manager the reconciler needs, for
@@ -79,6 +86,28 @@ type isoResolver interface {
 	// from anything else, most notably a FreeBSD memstick image (attach
 	// via ahci-hd instead) - see bhyve.Config.InstallDiskPath.
 	IsISO9660(name string) (bool, error)
+}
+
+// vlanManager is the subset of *vlan.Manager the reconciler needs, for
+// the same reason as raftClient. *vlan.Manager satisfies this today.
+type vlanManager interface {
+	EnsureVLAN(ctx context.Context, vlanID uint32) (string, error)
+	EnsureBridge(ctx context.Context, name string) error
+	EnsureMember(ctx context.Context, bridge, iface string) error
+	EnsureBridgeAddress(ctx context.Context, bridge, subnet string) error
+}
+
+// dhcpManager is the subset of *dhcpd.Manager the reconciler needs, for
+// the same reason as raftClient. *dhcpd.Manager satisfies this today.
+type dhcpManager interface {
+	WriteAndReload(ctx context.Context, scopes []dhcpd.NetworkScope) error
+}
+
+// pfManager is the subset of *pf.Manager the reconciler needs, for the
+// same reason as raftClient. *pf.Manager satisfies this today.
+type pfManager interface {
+	Apply(ctx context.Context, anchor string, rules []pf.Rule) error
+	Flush(ctx context.Context, anchor string) error
 }
 
 // Reconciler provisions local ZFS storage - and, if Bhyve is set, a
@@ -118,6 +147,26 @@ type Reconciler struct {
 	// ISOName) means no CD-ROM is attached, the same opt-in pattern as
 	// Bhyve/Bridge above.
 	ISOs isoResolver
+
+	// VLAN, DHCP, and PF are optional (nil-able, same opt-in pattern as
+	// Bhyve/ISOs above): together they realize a VM's NetworkID/
+	// FirewallRules. VLAN provisions the vlan/bridge interfaces a
+	// NetworkDefinition implies; DHCP serves real leases for VMs'
+	// FSM-assigned IPs; PF loads a VM's FirewallRules into its own
+	// pf(8) anchor. A VM naming a network on a node with VLAN unset (or
+	// a network that can't be resolved) fails reconciliation with a
+	// clear error, the same way an unresolvable ISO already does. See
+	// ADR-0022.
+	VLAN vlanManager
+	DHCP dhcpManager
+	PF   pfManager
+
+	// lastDHCPConfig is the last dnsmasq config body actually written,
+	// so reconcileDHCP only calls DHCP.WriteAndReload (which restarts
+	// the dnsmasq service - see internal/dhcpd's own doc comment on why
+	// that isn't a lighter-weight reload) when something has actually
+	// changed, not every tick.
+	lastDHCPConfig string
 }
 
 // RunOnce fetches the current VM list and, for each VM assigned to
@@ -140,24 +189,77 @@ func (r *Reconciler) RunOnce(ctx context.Context) error {
 
 	desired := make([]VMPlacement, 0, len(resp.GetVms()))
 	for _, vm := range resp.GetVms() {
+		rules := make([]FirewallRule, 0, len(vm.GetFirewallRules()))
+		for _, rule := range vm.GetFirewallRules() {
+			rules = append(rules, FirewallRule{
+				Direction: rule.GetDirection(),
+				Action:    rule.GetAction(),
+				Protocol:  rule.GetProtocol(),
+				PortRange: rule.GetPortRange(),
+			})
+		}
 		desired = append(desired, VMPlacement{
-			ID:       vm.GetId(),
-			NodeID:   vm.GetNodeId(),
-			Vcpus:    vm.GetVcpus(),
-			MemoryMB: vm.GetMemoryMb(),
-			Deleting: vm.GetDesiredState() == internalpb.VMState_VM_STATE_DELETING,
-			Phase:    phaseToString(vm.GetPhase()),
-			ISOName:  vm.GetIsoName(),
+			ID:            vm.GetId(),
+			NodeID:        vm.GetNodeId(),
+			Vcpus:         vm.GetVcpus(),
+			MemoryMB:      vm.GetMemoryMb(),
+			Deleting:      vm.GetDesiredState() == internalpb.VMState_VM_STATE_DELETING,
+			Phase:         phaseToString(vm.GetPhase()),
+			ISOName:       vm.GetIsoName(),
+			NetworkID:     vm.GetNetworkId(),
+			IPAddress:     vm.GetIpAddress(),
+			MACAddress:    vm.GetMacAddress(),
+			FirewallRules: rules,
 		})
 	}
 
+	// Networks are only fetched (and network reconciliation only
+	// attempted) when VLAN is configured on this node - a node with no
+	// VLAN support can't provision the vlan/bridge interfaces a network
+	// implies anyway, so there's nothing useful this lookup could do
+	// there (see ensureVM's own error for a VM naming a network in that
+	// case).
+	var networks map[string]*internalpb.NetworkDefinition
+	if r.VLAN != nil {
+		networks, err = r.fetchNetworks(ctx)
+		if err != nil {
+			return fmt.Errorf("cluster: listing networks: %w", err)
+		}
+	}
+
+	planned := Plan(desired, r.LocalNodeID)
+
 	var firstErr error
-	for _, vm := range Plan(desired, r.LocalNodeID) {
-		if err := r.reconcileVM(ctx, vm); err != nil && firstErr == nil {
+	for _, vm := range planned {
+		if err := r.reconcileVM(ctx, vm, networks); err != nil && firstErr == nil {
 			firstErr = fmt.Errorf("cluster: reconciling VM %s: %w", vm.ID, err)
 		}
 	}
+
+	if r.DHCP != nil {
+		if err := r.reconcileDHCP(ctx, planned, networks); err != nil && firstErr == nil {
+			firstErr = fmt.Errorf("cluster: reconciling DHCP: %w", err)
+		}
+	}
+
 	return firstErr
+}
+
+// fetchNetworks reads every current network definition from raft,
+// keyed by id for ensureVM/reconcileDHCP's lookups.
+func (r *Reconciler) fetchNetworks(ctx context.Context) (map[string]*internalpb.NetworkDefinition, error) {
+	resp, err := r.Raft.ListNetworks(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if resp.GetError() != "" {
+		return nil, fmt.Errorf("%s", resp.GetError())
+	}
+	networks := make(map[string]*internalpb.NetworkDefinition, len(resp.GetNetworks()))
+	for _, n := range resp.GetNetworks() {
+		networks[n.GetId()] = n
+	}
+	return networks, nil
 }
 
 // reconcileVM dispatches to teardownVM or ensureVM depending on vm's
@@ -167,7 +269,7 @@ func (r *Reconciler) RunOnce(ctx context.Context) error {
 // if it doesn't. These are best-effort writes - see applyPhase - so a
 // phase-update failure never masks or replaces the underlying
 // provisioning error.
-func (r *Reconciler) reconcileVM(ctx context.Context, vm VMPlacement) error {
+func (r *Reconciler) reconcileVM(ctx context.Context, vm VMPlacement, networks map[string]*internalpb.NetworkDefinition) error {
 	if vm.Deleting {
 		return r.teardownVM(ctx, vm)
 	}
@@ -175,7 +277,7 @@ func (r *Reconciler) reconcileVM(ctx context.Context, vm VMPlacement) error {
 	if vm.Phase != PhaseReady && vm.Phase != PhaseCreating {
 		r.applyPhase(ctx, vm.ID, PhaseCreating, "")
 	}
-	if err := r.ensureVM(ctx, vm); err != nil {
+	if err := r.ensureVM(ctx, vm, networks); err != nil {
 		r.applyPhase(ctx, vm.ID, PhaseError, err.Error())
 		return err
 	}
@@ -216,6 +318,12 @@ func (r *Reconciler) teardownVM(ctx context.Context, vm VMPlacement) error {
 	if exists {
 		if err := r.ZFS.DestroyDataset(ctx, vm.ID); err != nil {
 			return fmt.Errorf("destroying dataset: %w", err)
+		}
+	}
+
+	if r.PF != nil {
+		if err := r.PF.Flush(ctx, vmAnchor(vm.ID)); err != nil {
+			return fmt.Errorf("flushing firewall rules: %w", err)
 		}
 	}
 
@@ -285,7 +393,7 @@ func phaseFromString(p string) internalpb.VMPhase {
 
 // ensureVM ensures vm's dataset exists, then - if Bhyve is configured -
 // that its disk image and bhyve VM exist too.
-func (r *Reconciler) ensureVM(ctx context.Context, vm VMPlacement) error {
+func (r *Reconciler) ensureVM(ctx context.Context, vm VMPlacement, networks map[string]*internalpb.NetworkDefinition) error {
 	exists, err := r.ZFS.DatasetExists(ctx, vm.ID)
 	if err != nil {
 		return fmt.Errorf("checking dataset: %w", err)
@@ -305,6 +413,15 @@ func (r *Reconciler) ensureVM(ctx context.Context, vm VMPlacement) error {
 		return fmt.Errorf("checking bhyve VM: %w", err)
 	}
 	if running {
+		// The VM's own device config (disk/network/MAC) is fixed at
+		// launch and can't be changed here, but firewall rules aren't a
+		// bhyve device - they can (and should) be kept in sync on every
+		// tick even for an already-running VM.
+		if r.PF != nil {
+			if err := r.PF.Apply(ctx, vmAnchor(vm.ID), toPFRules(vm.FirewallRules)); err != nil {
+				return fmt.Errorf("applying firewall rules: %w", err)
+			}
+		}
 		return nil
 	}
 
@@ -354,12 +471,31 @@ func (r *Reconciler) ensureVM(ctx context.Context, vm VMPlacement) error {
 		}
 	}
 
+	bridge := r.Bridge
+	var macAddress string
+	if vm.NetworkID != "" {
+		if r.VLAN == nil {
+			return fmt.Errorf("VM names network %q but no VLAN support is configured on this node", vm.NetworkID)
+		}
+		network, ok := networks[vm.NetworkID]
+		if !ok {
+			return fmt.Errorf("network %q not found", vm.NetworkID)
+		}
+		networkBridge, err := r.ensureNetwork(ctx, network)
+		if err != nil {
+			return fmt.Errorf("provisioning network %q: %w", vm.NetworkID, err)
+		}
+		bridge = networkBridge
+		macAddress = vm.MACAddress
+	}
+
 	if err := r.Bhyve.CreateVM(ctx, vm.ID, bhyve.Config{
 		CPUs:            cpus,
 		MemoryMB:        memoryMB,
 		BootROM:         r.BootROM,
 		DiskPath:        diskPath,
-		Bridge:          r.Bridge,
+		Bridge:          bridge,
+		MACAddress:      macAddress,
 		ISOPath:         isoPath,
 		InstallDiskPath: installDiskPath,
 		// Always on when Bhyve provisioning itself is enabled - a node
@@ -370,6 +506,108 @@ func (r *Reconciler) ensureVM(ctx context.Context, vm VMPlacement) error {
 	}); err != nil {
 		return fmt.Errorf("creating bhyve VM: %w", err)
 	}
+
+	if r.PF != nil {
+		if err := r.PF.Apply(ctx, vmAnchor(vm.ID), toPFRules(vm.FirewallRules)); err != nil {
+			return fmt.Errorf("applying firewall rules: %w", err)
+		}
+	}
+	return nil
+}
+
+// ensureNetwork provisions the vlan(4)/bridge(4) interfaces network
+// implies on this node (idempotent, called every tick like every other
+// existence check in this file) and returns the bridge name to attach
+// the VM's tap to.
+func (r *Reconciler) ensureNetwork(ctx context.Context, network *internalpb.NetworkDefinition) (string, error) {
+	iface, err := r.VLAN.EnsureVLAN(ctx, network.GetVlanId())
+	if err != nil {
+		return "", fmt.Errorf("ensuring vlan interface: %w", err)
+	}
+	bridge := networkBridgeName(network)
+	if err := r.VLAN.EnsureBridge(ctx, bridge); err != nil {
+		return "", fmt.Errorf("ensuring bridge: %w", err)
+	}
+	if err := r.VLAN.EnsureMember(ctx, bridge, iface); err != nil {
+		return "", fmt.Errorf("adding %s to bridge: %w", iface, err)
+	}
+	if err := r.VLAN.EnsureBridgeAddress(ctx, bridge, network.GetSubnet()); err != nil {
+		return "", fmt.Errorf("assigning gateway address: %w", err)
+	}
+	return bridge, nil
+}
+
+// networkBridgeName returns network's configured bridge name, or a
+// derived default if unset - see NetworkDefinition's own doc comment on
+// BridgeName. The derived name is a short hash of the network's id, not
+// "apiary-net-<id>" directly: FreeBSD interface names are capped at
+// IF_NAMESIZE (16 bytes including the trailing NUL, so 15 usable
+// characters) - confirmed live ("apiary-net-net-1", 16 characters,
+// failed with "ioctl SIOCSIFNAME: File name too long") - and a
+// network id of arbitrary caller-chosen length can't be embedded
+// directly and still fit.
+func networkBridgeName(network *internalpb.NetworkDefinition) string {
+	if network.GetBridgeName() != "" {
+		return network.GetBridgeName()
+	}
+	sum := sha256.Sum256([]byte(network.GetId()))
+	return fmt.Sprintf("apnet-%x", sum[:4]) // "apnet-" (6) + 8 hex chars = 14
+}
+
+// vmAnchor returns the pf(8) anchor name for a VM's own firewall rules.
+func vmAnchor(id string) string {
+	return "apiary/vm-" + id
+}
+
+// toPFRules converts VMPlacement's plain FirewallRule slice into
+// internal/pf's own Rule type.
+func toPFRules(rules []FirewallRule) []pf.Rule {
+	out := make([]pf.Rule, len(rules))
+	for i, r := range rules {
+		out[i] = pf.Rule{Direction: r.Direction, Action: r.Action, Protocol: r.Protocol, PortRange: r.PortRange}
+	}
+	return out
+}
+
+// reconcileDHCP aggregates every local, non-deleting VM's network
+// assignment into per-network dnsmasq scopes and reloads DHCP if the
+// result actually changed since the last tick (see Reconciler's
+// lastDHCPConfig doc comment on why that check exists).
+func (r *Reconciler) reconcileDHCP(ctx context.Context, planned []VMPlacement, networks map[string]*internalpb.NetworkDefinition) error {
+	scopeByNetwork := make(map[string]*dhcpd.NetworkScope)
+	for _, vm := range planned {
+		if vm.Deleting || vm.NetworkID == "" || vm.IPAddress == "" {
+			continue
+		}
+		network, ok := networks[vm.NetworkID]
+		if !ok {
+			continue // ensureVM already surfaces this as a per-VM error
+		}
+		scope, ok := scopeByNetwork[vm.NetworkID]
+		if !ok {
+			scope = &dhcpd.NetworkScope{Bridge: networkBridgeName(network), Subnet: network.GetSubnet()}
+			scopeByNetwork[vm.NetworkID] = scope
+		}
+		scope.Leases = append(scope.Leases, dhcpd.Lease{MAC: vm.MACAddress, IP: vm.IPAddress, Hostname: vm.ID})
+	}
+
+	scopes := make([]dhcpd.NetworkScope, 0, len(scopeByNetwork))
+	for _, s := range scopeByNetwork {
+		scopes = append(scopes, *s)
+	}
+	sort.Slice(scopes, func(i, j int) bool { return scopes[i].Bridge < scopes[j].Bridge })
+
+	rendered, err := dhcpd.RenderConfig(scopes)
+	if err != nil {
+		return fmt.Errorf("rendering dnsmasq config: %w", err)
+	}
+	if rendered == r.lastDHCPConfig {
+		return nil
+	}
+	if err := r.DHCP.WriteAndReload(ctx, scopes); err != nil {
+		return err
+	}
+	r.lastDHCPConfig = rendered
 	return nil
 }
 

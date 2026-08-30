@@ -43,6 +43,27 @@ type VMPlacement struct {
 	// ISOName, if set, names an image the reconciler should resolve
 	// (via Reconciler.ISOs) to a local path and attach as a CD-ROM.
 	ISOName string
+
+	// NetworkID, if set, names a NetworkDefinition this VM's NIC
+	// belongs to - the reconciler ensures the network's vlan/bridge
+	// exist locally and attaches the VM to that bridge instead of
+	// Reconciler's own node-wide Bridge. IPAddress/MACAddress are
+	// assigned by the FSM (never computed here) when NetworkID is set;
+	// FirewallRules is a simple allow/block list applied via a per-VM
+	// pf(8) anchor. See ADR-0022.
+	NetworkID     string
+	IPAddress     string
+	MACAddress    string
+	FirewallRules []FirewallRule
+}
+
+// FirewallRule mirrors api/internalpb's FirewallRule, kept as a plain
+// Go type for the same reason as the rest of VMPlacement's fields.
+type FirewallRule struct {
+	Direction string
+	Action    string
+	Protocol  string
+	PortRange string
 }
 
 // Plan returns the VMs assigned to localNodeID, sorted by ID for

@@ -3,6 +3,7 @@ package cluster
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -10,6 +11,8 @@ import (
 
 	internalpb "github.com/glenjbarber/apiary/api/internalpb"
 	"github.com/glenjbarber/apiary/internal/bhyve"
+	"github.com/glenjbarber/apiary/internal/dhcpd"
+	"github.com/glenjbarber/apiary/internal/pf"
 )
 
 // fakeRaftClient is a fake raftClient: ListVMs returns a fixed response,
@@ -19,12 +22,22 @@ type fakeRaftClient struct {
 	resp *internalpb.ListVMsResponse
 	err  error
 
+	networksResp *internalpb.ListNetworksResponse
+	networksErr  error
+
 	applied  []*internalpb.Command
 	applyErr error
 }
 
 func (f *fakeRaftClient) ListVMs(context.Context) (*internalpb.ListVMsResponse, error) {
 	return f.resp, f.err
+}
+
+func (f *fakeRaftClient) ListNetworks(context.Context) (*internalpb.ListNetworksResponse, error) {
+	if f.networksResp != nil || f.networksErr != nil {
+		return f.networksResp, f.networksErr
+	}
+	return &internalpb.ListNetworksResponse{}, nil
 }
 
 func (f *fakeRaftClient) Apply(_ context.Context, payload []byte, _ time.Duration) (*internalpb.ApplyResponse, error) {
@@ -569,5 +582,300 @@ func TestReconciler_RunOnce_ISONamedButNoStoreConfiguredIsError(t *testing.T) {
 	r := &Reconciler{Raft: raft, ZFS: zfs, Bhyve: vms, LocalNodeID: "node-a", BootROM: "/fw/UEFI.fd"} // ISOs left nil
 	if err := r.RunOnce(context.Background()); err == nil {
 		t.Fatalf("RunOnce() = nil error, want an error since no ISO store is configured")
+	}
+}
+
+// --- Network/DHCP/firewall fakes ---
+
+type fakeVLANManager struct {
+	ensuredVLANs   []uint32
+	ensuredBridges []string
+	members        map[string][]string // bridge -> ifaces added
+	addresses      map[string]string   // bridge -> subnet
+	vlanErr        error
+	bridgeErr      error
+	memberErr      error
+	addressErr     error
+}
+
+func newFakeVLANManager() *fakeVLANManager {
+	return &fakeVLANManager{members: map[string][]string{}, addresses: map[string]string{}}
+}
+
+func (f *fakeVLANManager) EnsureVLAN(_ context.Context, vlanID uint32) (string, error) {
+	if f.vlanErr != nil {
+		return "", f.vlanErr
+	}
+	f.ensuredVLANs = append(f.ensuredVLANs, vlanID)
+	if vlanID == 0 {
+		return "uplink0", nil
+	}
+	return fmt.Sprintf("vlan%d", vlanID), nil
+}
+
+func (f *fakeVLANManager) EnsureBridge(_ context.Context, name string) error {
+	if f.bridgeErr != nil {
+		return f.bridgeErr
+	}
+	f.ensuredBridges = append(f.ensuredBridges, name)
+	return nil
+}
+
+func (f *fakeVLANManager) EnsureMember(_ context.Context, bridge, iface string) error {
+	if f.memberErr != nil {
+		return f.memberErr
+	}
+	f.members[bridge] = append(f.members[bridge], iface)
+	return nil
+}
+
+func (f *fakeVLANManager) EnsureBridgeAddress(_ context.Context, bridge, subnet string) error {
+	if f.addressErr != nil {
+		return f.addressErr
+	}
+	f.addresses[bridge] = subnet
+	return nil
+}
+
+type fakeDHCPManager struct {
+	lastScopes []dhcpd.NetworkScope
+	calls      int
+	err        error
+}
+
+func (f *fakeDHCPManager) WriteAndReload(_ context.Context, scopes []dhcpd.NetworkScope) error {
+	if f.err != nil {
+		return f.err
+	}
+	f.lastScopes = scopes
+	f.calls++
+	return nil
+}
+
+type fakePFManager struct {
+	applied  map[string][]pf.Rule
+	flushed  []string
+	applyErr error
+	flushErr error
+}
+
+func newFakePFManager() *fakePFManager {
+	return &fakePFManager{applied: map[string][]pf.Rule{}}
+}
+
+func (f *fakePFManager) Apply(_ context.Context, anchor string, rules []pf.Rule) error {
+	if f.applyErr != nil {
+		return f.applyErr
+	}
+	f.applied[anchor] = rules
+	return nil
+}
+
+func (f *fakePFManager) Flush(_ context.Context, anchor string) error {
+	if f.flushErr != nil {
+		return f.flushErr
+	}
+	f.flushed = append(f.flushed, anchor)
+	return nil
+}
+
+func TestReconciler_RunOnce_CreatesVMOnNetworkWithAssignedIPAndMAC(t *testing.T) {
+	raft := &fakeRaftClient{
+		resp: &internalpb.ListVMsResponse{Vms: []*internalpb.VMDefinition{{
+			Id: "vm-1", NodeId: "node-a", NetworkId: "net-1", IpAddress: "10.60.0.2", MacAddress: "02:aa:bb:cc:dd:ee",
+		}}},
+		networksResp: &internalpb.ListNetworksResponse{Networks: []*internalpb.NetworkDefinition{
+			{Id: "net-1", VlanId: 100, Subnet: "10.60.0.0/24"},
+		}},
+	}
+	zfs := newFakeDatasetManager()
+	zfs.mountpointFor["vm-1"] = t.TempDir()
+	vms := newFakeVMManager()
+	vlan := newFakeVLANManager()
+
+	r := &Reconciler{Raft: raft, ZFS: zfs, Bhyve: vms, VLAN: vlan, LocalNodeID: "node-a", BootROM: "/fw/UEFI.fd"}
+	if err := r.RunOnce(context.Background()); err != nil {
+		t.Fatalf("RunOnce() error: %v", err)
+	}
+
+	wantBridge := networkBridgeName(&internalpb.NetworkDefinition{Id: "net-1"})
+	if len(wantBridge) > 15 {
+		t.Fatalf("test setup bug: derived bridge name %q exceeds FreeBSD's 15-char interface name limit", wantBridge)
+	}
+
+	cfg := vms.lastCfg["vm-1"]
+	if cfg.Bridge != wantBridge {
+		t.Errorf("cfg.Bridge = %q, want %q (derived from network id)", cfg.Bridge, wantBridge)
+	}
+	if cfg.MACAddress != "02:aa:bb:cc:dd:ee" {
+		t.Errorf("cfg.MACAddress = %q, want 02:aa:bb:cc:dd:ee", cfg.MACAddress)
+	}
+	if len(vlan.ensuredVLANs) != 1 || vlan.ensuredVLANs[0] != 100 {
+		t.Errorf("ensuredVLANs = %v, want [100]", vlan.ensuredVLANs)
+	}
+	if vlan.addresses[wantBridge] != "10.60.0.0/24" {
+		t.Errorf("bridge address = %q, want 10.60.0.0/24 assigned", vlan.addresses[wantBridge])
+	}
+	if members := vlan.members[wantBridge]; len(members) != 1 || members[0] != "vlan100" {
+		t.Errorf("bridge members = %v, want [vlan100]", members)
+	}
+}
+
+func TestNetworkBridgeName_FitsFreeBSDInterfaceNameLimit(t *testing.T) {
+	// FreeBSD interface names are capped at IF_NAMESIZE (16 bytes
+	// including the trailing NUL - 15 usable characters). A network id
+	// of any length a caller might choose must still produce a bridge
+	// name that fits, since the id itself isn't under this package's
+	// control.
+	for _, id := range []string{"a", "net-1", "a-very-long-network-identifier-chosen-by-a-user"} {
+		name := networkBridgeName(&internalpb.NetworkDefinition{Id: id})
+		if len(name) > 15 {
+			t.Errorf("networkBridgeName(id=%q) = %q (%d chars), want <= 15", id, name, len(name))
+		}
+	}
+}
+
+func TestNetworkBridgeName_PrefersExplicitOverride(t *testing.T) {
+	name := networkBridgeName(&internalpb.NetworkDefinition{Id: "net-1", BridgeName: "custom0"})
+	if name != "custom0" {
+		t.Errorf("networkBridgeName() = %q, want the explicit override custom0", name)
+	}
+}
+
+func TestReconciler_RunOnce_VMOnUnknownNetworkFailsBeforeCreate(t *testing.T) {
+	raft := &fakeRaftClient{
+		resp:         &internalpb.ListVMsResponse{Vms: []*internalpb.VMDefinition{{Id: "vm-1", NodeId: "node-a", NetworkId: "missing"}}},
+		networksResp: &internalpb.ListNetworksResponse{},
+	}
+	zfs := newFakeDatasetManager()
+	zfs.mountpointFor["vm-1"] = t.TempDir()
+	vms := newFakeVMManager()
+	vlan := newFakeVLANManager()
+
+	r := &Reconciler{Raft: raft, ZFS: zfs, Bhyve: vms, VLAN: vlan, LocalNodeID: "node-a", BootROM: "/fw/UEFI.fd"}
+	if err := r.RunOnce(context.Background()); err == nil {
+		t.Fatalf("RunOnce() = nil error, want a network-not-found error")
+	}
+	if len(vms.created) != 0 {
+		t.Errorf("created = %v, want none", vms.created)
+	}
+}
+
+func TestReconciler_RunOnce_VMOnNetworkWithoutVLANConfiguredIsError(t *testing.T) {
+	raft := &fakeRaftClient{resp: &internalpb.ListVMsResponse{
+		Vms: []*internalpb.VMDefinition{{Id: "vm-1", NodeId: "node-a", NetworkId: "net-1"}},
+	}}
+	zfs := newFakeDatasetManager()
+	zfs.mountpointFor["vm-1"] = t.TempDir()
+	vms := newFakeVMManager()
+
+	r := &Reconciler{Raft: raft, ZFS: zfs, Bhyve: vms, LocalNodeID: "node-a", BootROM: "/fw/UEFI.fd"} // VLAN left nil
+	if err := r.RunOnce(context.Background()); err == nil {
+		t.Fatalf("RunOnce() = nil error, want an error since no VLAN support is configured")
+	}
+	if len(vms.created) != 0 {
+		t.Errorf("created = %v, want none", vms.created)
+	}
+}
+
+func TestReconciler_RunOnce_AppliesFirewallRulesOnCreate(t *testing.T) {
+	raft := &fakeRaftClient{resp: &internalpb.ListVMsResponse{Vms: []*internalpb.VMDefinition{{
+		Id: "vm-1", NodeId: "node-a",
+		FirewallRules: []*internalpb.FirewallRule{{Direction: "in", Action: "block", Protocol: "tcp", PortRange: "22"}},
+	}}}}
+	zfs := newFakeDatasetManager()
+	zfs.mountpointFor["vm-1"] = t.TempDir()
+	vms := newFakeVMManager()
+	pfMgr := newFakePFManager()
+
+	r := &Reconciler{Raft: raft, ZFS: zfs, Bhyve: vms, PF: pfMgr, LocalNodeID: "node-a", BootROM: "/fw/UEFI.fd"}
+	if err := r.RunOnce(context.Background()); err != nil {
+		t.Fatalf("RunOnce() error: %v", err)
+	}
+
+	rules := pfMgr.applied["apiary/vm-vm-1"]
+	if len(rules) != 1 || rules[0].PortRange != "22" {
+		t.Errorf("pf rules applied to apiary/vm-vm-1 = %v, want one rule with PortRange=22", rules)
+	}
+}
+
+func TestReconciler_RunOnce_ReappliesFirewallRulesForAlreadyRunningVM(t *testing.T) {
+	raft := &fakeRaftClient{resp: &internalpb.ListVMsResponse{Vms: []*internalpb.VMDefinition{{
+		Id: "vm-1", NodeId: "node-a", Phase: internalpb.VMPhase_VM_PHASE_READY,
+		FirewallRules: []*internalpb.FirewallRule{{Direction: "out", Action: "pass", Protocol: "udp", PortRange: "53"}},
+	}}}}
+	zfs := newFakeDatasetManager()
+	zfs.mountpointFor["vm-1"] = t.TempDir()
+	vms := newFakeVMManager()
+	vms.running["vm-1"] = true // already running
+	pfMgr := newFakePFManager()
+
+	r := &Reconciler{Raft: raft, ZFS: zfs, Bhyve: vms, PF: pfMgr, LocalNodeID: "node-a", BootROM: "/fw/UEFI.fd"}
+	if err := r.RunOnce(context.Background()); err != nil {
+		t.Fatalf("RunOnce() error: %v", err)
+	}
+	if len(vms.created) != 0 {
+		t.Errorf("created = %v, want none (VM already running)", vms.created)
+	}
+	if rules := pfMgr.applied["apiary/vm-vm-1"]; len(rules) != 1 {
+		t.Errorf("pf rules applied to apiary/vm-vm-1 = %v, want one rule even though the VM was already running", rules)
+	}
+}
+
+func TestReconciler_RunOnce_FlushesFirewallOnTeardown(t *testing.T) {
+	raft := &fakeRaftClient{resp: &internalpb.ListVMsResponse{Vms: []*internalpb.VMDefinition{{
+		Id: "vm-1", NodeId: "node-a", DesiredState: internalpb.VMState_VM_STATE_DELETING,
+	}}}}
+	zfs := newFakeDatasetManager()
+	zfs.existing["vm-1"] = true
+	vms := newFakeVMManager()
+	pfMgr := newFakePFManager()
+
+	r := &Reconciler{Raft: raft, ZFS: zfs, Bhyve: vms, PF: pfMgr, LocalNodeID: "node-a", BootROM: "/fw/UEFI.fd"}
+	if err := r.RunOnce(context.Background()); err != nil {
+		t.Fatalf("RunOnce() error: %v", err)
+	}
+	if len(pfMgr.flushed) != 1 || pfMgr.flushed[0] != "apiary/vm-vm-1" {
+		t.Errorf("flushed = %v, want [apiary/vm-vm-1]", pfMgr.flushed)
+	}
+}
+
+func TestReconciler_RunOnce_ReconcilesDHCPLeasesForNetworkedVMs(t *testing.T) {
+	raft := &fakeRaftClient{
+		resp: &internalpb.ListVMsResponse{Vms: []*internalpb.VMDefinition{{
+			Id: "vm-1", NodeId: "node-a", NetworkId: "net-1", IpAddress: "10.60.0.2", MacAddress: "02:aa:bb:cc:dd:ee",
+		}}},
+		networksResp: &internalpb.ListNetworksResponse{Networks: []*internalpb.NetworkDefinition{
+			{Id: "net-1", Subnet: "10.60.0.0/24"},
+		}},
+	}
+	zfs := newFakeDatasetManager()
+	zfs.mountpointFor["vm-1"] = t.TempDir()
+	vms := newFakeVMManager()
+	vlan := newFakeVLANManager()
+	dhcp := &fakeDHCPManager{}
+
+	r := &Reconciler{Raft: raft, ZFS: zfs, Bhyve: vms, VLAN: vlan, DHCP: dhcp, LocalNodeID: "node-a", BootROM: "/fw/UEFI.fd"}
+	if err := r.RunOnce(context.Background()); err != nil {
+		t.Fatalf("RunOnce() error: %v", err)
+	}
+
+	if dhcp.calls != 1 {
+		t.Fatalf("dhcp.calls = %d, want 1", dhcp.calls)
+	}
+	if len(dhcp.lastScopes) != 1 || len(dhcp.lastScopes[0].Leases) != 1 {
+		t.Fatalf("lastScopes = %+v, want one scope with one lease", dhcp.lastScopes)
+	}
+	lease := dhcp.lastScopes[0].Leases[0]
+	if lease.IP != "10.60.0.2" || lease.MAC != "02:aa:bb:cc:dd:ee" {
+		t.Errorf("lease = %+v, want IP=10.60.0.2 MAC=02:aa:bb:cc:dd:ee", lease)
+	}
+
+	// A second tick with nothing changed must not restart dnsmasq again.
+	if err := r.RunOnce(context.Background()); err != nil {
+		t.Fatalf("RunOnce() (2nd tick) error: %v", err)
+	}
+	if dhcp.calls != 1 {
+		t.Errorf("dhcp.calls after unchanged 2nd tick = %d, want still 1", dhcp.calls)
 	}
 }
