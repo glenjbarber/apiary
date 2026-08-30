@@ -22,6 +22,7 @@
   </label>
   <button type="submit">Create</button>
 </form>
+<div id="create-error" class="error"></div>
 
 <h2>VMs</h2>
 <table>
@@ -39,3 +40,5 @@
   </tbody>
 </table>
 {{end}}
+
+{{define "create_error"}}<div id="create-error" class="error" hx-swap-oob="true">{{.}}</div>{{end}}

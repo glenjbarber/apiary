@@ -148,7 +148,7 @@ func (s *Server) handleListVMs(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleCreateVM(w http.ResponseWriter, r *http.Request) {
 	if err := r.ParseForm(); err != nil {
-		s.renderRowsWithError(w, r, "invalid form: "+err.Error())
+		s.renderVMRowsAndFormError(w, r, "invalid form: "+err.Error())
 		return
 	}
 
@@ -166,17 +166,46 @@ func (s *Server) handleCreateVM(w http.ResponseWriter, r *http.Request) {
 		},
 	})
 	if err != nil {
-		s.renderRowsWithError(w, r, err.Error())
+		s.renderVMRowsAndFormError(w, r, err.Error())
 		return
 	}
 	if resp.GetError() != "" {
-		s.renderRowsWithError(w, r, resp.GetError())
+		s.renderVMRowsAndFormError(w, r, resp.GetError())
 		return
 	}
 
+	// Empty formErr on success clears any stale error left over from a
+	// previous failed attempt, rather than leaving it displayed forever.
+	s.renderVMRowsAndFormError(w, r, "")
+}
+
+// renderVMRowsAndFormError refreshes the VM table and reports a
+// create-form-specific error (if any) as a separate out-of-band swap
+// into index.html's #create-error slot, rather than inline in the VMs
+// table (vm_rows's own {{if .Error}} row is for errors *about* the
+// list itself - e.g. a failed fetch - not about a create attempt that
+// never touched the list at all). HTMX processes the hx-swap-oob
+// element in the response independently of the request's hx-target, so
+// one response can update both the table and the form's error slot.
+func (s *Server) renderVMRowsAndFormError(w http.ResponseWriter, r *http.Request, formErr string) {
 	sortBy, dir := parseSort(r)
-	vms, errMsg := s.currentVMs(r, sortBy, dir)
-	s.render(w, "vm_rows", pageData{Error: errMsg, VMs: vms})
+	vms, fetchErr := s.currentVMs(r, sortBy, dir)
+	if fetchErr != "" {
+		if formErr == "" {
+			formErr = fetchErr
+		} else {
+			formErr += "; additionally failed to refresh list: " + fetchErr
+		}
+	}
+
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	if err := s.tmpl.ExecuteTemplate(w, "vm_rows", pageData{VMs: vms}); err != nil {
+		http.Error(w, "template error: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if err := s.tmpl.ExecuteTemplate(w, "create_error", formErr); err != nil {
+		http.Error(w, "template error: "+err.Error(), http.StatusInternalServerError)
+	}
 }
 
 func (s *Server) handleDeleteVM(w http.ResponseWriter, r *http.Request) {
