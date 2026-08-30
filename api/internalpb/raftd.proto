@@ -46,6 +46,24 @@ service RaftInternal {
   // Apply, exactly like CreateVM/DeleteVM already are.
   rpc GetNetwork(GetNetworkRequest) returns (GetNetworkResponse);
   rpc ListNetworks(ListNetworksRequest) returns (ListNetworksResponse);
+
+  // ValidateAPIKeyHash checks a hashed API key against this node's own
+  // FSM state (ADR-0023) - deliberately NOT leader-only, unlike every
+  // other read RPC in this service. Raft already replicates FSM state
+  // (including api_keys) onto every node, follower or leader, as they
+  // replay the log; several managerd RPCs need to keep authenticating
+  // callers even on a non-leader node (HostStats, GetVMConsole,
+  // UploadISO are all local, per-node operations that don't otherwise
+  // depend on raft leadership at all), so this can't require the
+  // leader the way GetNetwork/ListNetworks do. hashed_key may be
+  // empty - a caller checking only auth_enabled (used by managerd's
+  // "auth never turned on yet = fully open" bootstrap check).
+  rpc ValidateAPIKeyHash(ValidateAPIKeyHashRequest) returns (ValidateAPIKeyHashResponse);
+
+  // ListAPIKeys is a normal leader-only read (mirrors ListNetworks),
+  // used only for the admin-facing key list - never for per-request
+  // authentication, which goes through ValidateAPIKeyHash instead.
+  rpc ListAPIKeys(ListAPIKeysRequest) returns (ListAPIKeysResponse);
 }
 
 message ApplyRequest {
@@ -163,6 +181,36 @@ message ListNetworksRequest {}
 
 message ListNetworksResponse {
   repeated NetworkDefinition networks = 1;
+  string error = 2;
+  string leader_hint = 3;
+}
+
+message ValidateAPIKeyHashRequest {
+  // hashed_key may be empty - see the RPC's own doc comment.
+  string hashed_key = 1;
+}
+
+message ValidateAPIKeyHashResponse {
+  bool valid = 1;
+  string key_id = 2;
+
+  // auth_enabled reflects FSMSnapshotState.auth_enabled: true forever
+  // once the first API key was ever created, even if every key is
+  // later revoked - this is what makes revoking the last key lock the
+  // cluster down rather than silently reopening it. See ADR-0023.
+  bool auth_enabled = 3;
+
+  // error is set only for a real failure reading FSM state - never
+  // used to report "invalid key" or "auth not enabled yet", both of
+  // which are ordinary, expected outcomes carried in valid/
+  // auth_enabled above.
+  string error = 4;
+}
+
+message ListAPIKeysRequest {}
+
+message ListAPIKeysResponse {
+  repeated ApiKey keys = 1;
   string error = 2;
   string leader_hint = 3;
 }

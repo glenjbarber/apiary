@@ -988,6 +988,223 @@ func (x *ListNetworksResponse) GetLeaderHint() string {
 	return ""
 }
 
+type ValidateAPIKeyHashRequest struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// hashed_key may be empty - see the RPC's own doc comment.
+	HashedKey     string `protobuf:"bytes,1,opt,name=hashed_key,json=hashedKey,proto3" json:"hashed_key,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ValidateAPIKeyHashRequest) Reset() {
+	*x = ValidateAPIKeyHashRequest{}
+	mi := &file_api_internalpb_raftd_proto_msgTypes[17]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ValidateAPIKeyHashRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ValidateAPIKeyHashRequest) ProtoMessage() {}
+
+func (x *ValidateAPIKeyHashRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_api_internalpb_raftd_proto_msgTypes[17]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ValidateAPIKeyHashRequest.ProtoReflect.Descriptor instead.
+func (*ValidateAPIKeyHashRequest) Descriptor() ([]byte, []int) {
+	return file_api_internalpb_raftd_proto_rawDescGZIP(), []int{17}
+}
+
+func (x *ValidateAPIKeyHashRequest) GetHashedKey() string {
+	if x != nil {
+		return x.HashedKey
+	}
+	return ""
+}
+
+type ValidateAPIKeyHashResponse struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	Valid bool                   `protobuf:"varint,1,opt,name=valid,proto3" json:"valid,omitempty"`
+	KeyId string                 `protobuf:"bytes,2,opt,name=key_id,json=keyId,proto3" json:"key_id,omitempty"`
+	// auth_enabled reflects FSMSnapshotState.auth_enabled: true forever
+	// once the first API key was ever created, even if every key is
+	// later revoked - this is what makes revoking the last key lock the
+	// cluster down rather than silently reopening it. See ADR-0023.
+	AuthEnabled bool `protobuf:"varint,3,opt,name=auth_enabled,json=authEnabled,proto3" json:"auth_enabled,omitempty"`
+	// error is set only for a real failure reading FSM state - never
+	// used to report "invalid key" or "auth not enabled yet", both of
+	// which are ordinary, expected outcomes carried in valid/
+	// auth_enabled above.
+	Error         string `protobuf:"bytes,4,opt,name=error,proto3" json:"error,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ValidateAPIKeyHashResponse) Reset() {
+	*x = ValidateAPIKeyHashResponse{}
+	mi := &file_api_internalpb_raftd_proto_msgTypes[18]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ValidateAPIKeyHashResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ValidateAPIKeyHashResponse) ProtoMessage() {}
+
+func (x *ValidateAPIKeyHashResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_api_internalpb_raftd_proto_msgTypes[18]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ValidateAPIKeyHashResponse.ProtoReflect.Descriptor instead.
+func (*ValidateAPIKeyHashResponse) Descriptor() ([]byte, []int) {
+	return file_api_internalpb_raftd_proto_rawDescGZIP(), []int{18}
+}
+
+func (x *ValidateAPIKeyHashResponse) GetValid() bool {
+	if x != nil {
+		return x.Valid
+	}
+	return false
+}
+
+func (x *ValidateAPIKeyHashResponse) GetKeyId() string {
+	if x != nil {
+		return x.KeyId
+	}
+	return ""
+}
+
+func (x *ValidateAPIKeyHashResponse) GetAuthEnabled() bool {
+	if x != nil {
+		return x.AuthEnabled
+	}
+	return false
+}
+
+func (x *ValidateAPIKeyHashResponse) GetError() string {
+	if x != nil {
+		return x.Error
+	}
+	return ""
+}
+
+type ListAPIKeysRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListAPIKeysRequest) Reset() {
+	*x = ListAPIKeysRequest{}
+	mi := &file_api_internalpb_raftd_proto_msgTypes[19]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListAPIKeysRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListAPIKeysRequest) ProtoMessage() {}
+
+func (x *ListAPIKeysRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_api_internalpb_raftd_proto_msgTypes[19]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListAPIKeysRequest.ProtoReflect.Descriptor instead.
+func (*ListAPIKeysRequest) Descriptor() ([]byte, []int) {
+	return file_api_internalpb_raftd_proto_rawDescGZIP(), []int{19}
+}
+
+type ListAPIKeysResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Keys          []*ApiKey              `protobuf:"bytes,1,rep,name=keys,proto3" json:"keys,omitempty"`
+	Error         string                 `protobuf:"bytes,2,opt,name=error,proto3" json:"error,omitempty"`
+	LeaderHint    string                 `protobuf:"bytes,3,opt,name=leader_hint,json=leaderHint,proto3" json:"leader_hint,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListAPIKeysResponse) Reset() {
+	*x = ListAPIKeysResponse{}
+	mi := &file_api_internalpb_raftd_proto_msgTypes[20]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListAPIKeysResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListAPIKeysResponse) ProtoMessage() {}
+
+func (x *ListAPIKeysResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_api_internalpb_raftd_proto_msgTypes[20]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListAPIKeysResponse.ProtoReflect.Descriptor instead.
+func (*ListAPIKeysResponse) Descriptor() ([]byte, []int) {
+	return file_api_internalpb_raftd_proto_rawDescGZIP(), []int{20}
+}
+
+func (x *ListAPIKeysResponse) GetKeys() []*ApiKey {
+	if x != nil {
+		return x.Keys
+	}
+	return nil
+}
+
+func (x *ListAPIKeysResponse) GetError() string {
+	if x != nil {
+		return x.Error
+	}
+	return ""
+}
+
+func (x *ListAPIKeysResponse) GetLeaderHint() string {
+	if x != nil {
+		return x.LeaderHint
+	}
+	return ""
+}
+
 var File_api_internalpb_raftd_proto protoreflect.FileDescriptor
 
 const file_api_internalpb_raftd_proto_rawDesc = "" +
@@ -1065,7 +1282,21 @@ const file_api_internalpb_raftd_proto_rawDesc = "" +
 	"\bnetworks\x18\x01 \x03(\v2%.apiary.internal.v1.NetworkDefinitionR\bnetworks\x12\x14\n" +
 	"\x05error\x18\x02 \x01(\tR\x05error\x12\x1f\n" +
 	"\vleader_hint\x18\x03 \x01(\tR\n" +
-	"leaderHint2\xc9\x05\n" +
+	"leaderHint\":\n" +
+	"\x19ValidateAPIKeyHashRequest\x12\x1d\n" +
+	"\n" +
+	"hashed_key\x18\x01 \x01(\tR\thashedKey\"\x82\x01\n" +
+	"\x1aValidateAPIKeyHashResponse\x12\x14\n" +
+	"\x05valid\x18\x01 \x01(\bR\x05valid\x12\x15\n" +
+	"\x06key_id\x18\x02 \x01(\tR\x05keyId\x12!\n" +
+	"\fauth_enabled\x18\x03 \x01(\bR\vauthEnabled\x12\x14\n" +
+	"\x05error\x18\x04 \x01(\tR\x05error\"\x14\n" +
+	"\x12ListAPIKeysRequest\"|\n" +
+	"\x13ListAPIKeysResponse\x12.\n" +
+	"\x04keys\x18\x01 \x03(\v2\x1a.apiary.internal.v1.ApiKeyR\x04keys\x12\x14\n" +
+	"\x05error\x18\x02 \x01(\tR\x05error\x12\x1f\n" +
+	"\vleader_hint\x18\x03 \x01(\tR\n" +
+	"leaderHint2\x9e\a\n" +
 	"\fRaftInternal\x12L\n" +
 	"\x05Apply\x12 .apiary.internal.v1.ApplyRequest\x1a!.apiary.internal.v1.ApplyResponse\x12O\n" +
 	"\x06Status\x12!.apiary.internal.v1.StatusRequest\x1a\".apiary.internal.v1.StatusResponse\x12U\n" +
@@ -1075,7 +1306,9 @@ const file_api_internalpb_raftd_proto_rawDesc = "" +
 	"\aListVMs\x12\".apiary.internal.v1.ListVMsRequest\x1a#.apiary.internal.v1.ListVMsResponse\x12[\n" +
 	"\n" +
 	"GetNetwork\x12%.apiary.internal.v1.GetNetworkRequest\x1a&.apiary.internal.v1.GetNetworkResponse\x12a\n" +
-	"\fListNetworks\x12'.apiary.internal.v1.ListNetworksRequest\x1a(.apiary.internal.v1.ListNetworksResponseB9Z7github.com/glenjbarber/apiary/api/internalpb;internalpbb\x06proto3"
+	"\fListNetworks\x12'.apiary.internal.v1.ListNetworksRequest\x1a(.apiary.internal.v1.ListNetworksResponse\x12s\n" +
+	"\x12ValidateAPIKeyHash\x12-.apiary.internal.v1.ValidateAPIKeyHashRequest\x1a..apiary.internal.v1.ValidateAPIKeyHashResponse\x12^\n" +
+	"\vListAPIKeys\x12&.apiary.internal.v1.ListAPIKeysRequest\x1a'.apiary.internal.v1.ListAPIKeysResponseB9Z7github.com/glenjbarber/apiary/api/internalpb;internalpbb\x06proto3"
 
 var (
 	file_api_internalpb_raftd_proto_rawDescOnce sync.Once
@@ -1089,55 +1322,65 @@ func file_api_internalpb_raftd_proto_rawDescGZIP() []byte {
 	return file_api_internalpb_raftd_proto_rawDescData
 }
 
-var file_api_internalpb_raftd_proto_msgTypes = make([]protoimpl.MessageInfo, 17)
+var file_api_internalpb_raftd_proto_msgTypes = make([]protoimpl.MessageInfo, 21)
 var file_api_internalpb_raftd_proto_goTypes = []any{
-	(*ApplyRequest)(nil),         // 0: apiary.internal.v1.ApplyRequest
-	(*ApplyResponse)(nil),        // 1: apiary.internal.v1.ApplyResponse
-	(*StatusRequest)(nil),        // 2: apiary.internal.v1.StatusRequest
-	(*StatusResponse)(nil),       // 3: apiary.internal.v1.StatusResponse
-	(*ServerInfo)(nil),           // 4: apiary.internal.v1.ServerInfo
-	(*AddVoterRequest)(nil),      // 5: apiary.internal.v1.AddVoterRequest
-	(*AddVoterResponse)(nil),     // 6: apiary.internal.v1.AddVoterResponse
-	(*RemoveServerRequest)(nil),  // 7: apiary.internal.v1.RemoveServerRequest
-	(*RemoveServerResponse)(nil), // 8: apiary.internal.v1.RemoveServerResponse
-	(*GetVMRequest)(nil),         // 9: apiary.internal.v1.GetVMRequest
-	(*GetVMResponse)(nil),        // 10: apiary.internal.v1.GetVMResponse
-	(*ListVMsRequest)(nil),       // 11: apiary.internal.v1.ListVMsRequest
-	(*ListVMsResponse)(nil),      // 12: apiary.internal.v1.ListVMsResponse
-	(*GetNetworkRequest)(nil),    // 13: apiary.internal.v1.GetNetworkRequest
-	(*GetNetworkResponse)(nil),   // 14: apiary.internal.v1.GetNetworkResponse
-	(*ListNetworksRequest)(nil),  // 15: apiary.internal.v1.ListNetworksRequest
-	(*ListNetworksResponse)(nil), // 16: apiary.internal.v1.ListNetworksResponse
-	(*VMDefinition)(nil),         // 17: apiary.internal.v1.VMDefinition
-	(*NetworkDefinition)(nil),    // 18: apiary.internal.v1.NetworkDefinition
+	(*ApplyRequest)(nil),               // 0: apiary.internal.v1.ApplyRequest
+	(*ApplyResponse)(nil),              // 1: apiary.internal.v1.ApplyResponse
+	(*StatusRequest)(nil),              // 2: apiary.internal.v1.StatusRequest
+	(*StatusResponse)(nil),             // 3: apiary.internal.v1.StatusResponse
+	(*ServerInfo)(nil),                 // 4: apiary.internal.v1.ServerInfo
+	(*AddVoterRequest)(nil),            // 5: apiary.internal.v1.AddVoterRequest
+	(*AddVoterResponse)(nil),           // 6: apiary.internal.v1.AddVoterResponse
+	(*RemoveServerRequest)(nil),        // 7: apiary.internal.v1.RemoveServerRequest
+	(*RemoveServerResponse)(nil),       // 8: apiary.internal.v1.RemoveServerResponse
+	(*GetVMRequest)(nil),               // 9: apiary.internal.v1.GetVMRequest
+	(*GetVMResponse)(nil),              // 10: apiary.internal.v1.GetVMResponse
+	(*ListVMsRequest)(nil),             // 11: apiary.internal.v1.ListVMsRequest
+	(*ListVMsResponse)(nil),            // 12: apiary.internal.v1.ListVMsResponse
+	(*GetNetworkRequest)(nil),          // 13: apiary.internal.v1.GetNetworkRequest
+	(*GetNetworkResponse)(nil),         // 14: apiary.internal.v1.GetNetworkResponse
+	(*ListNetworksRequest)(nil),        // 15: apiary.internal.v1.ListNetworksRequest
+	(*ListNetworksResponse)(nil),       // 16: apiary.internal.v1.ListNetworksResponse
+	(*ValidateAPIKeyHashRequest)(nil),  // 17: apiary.internal.v1.ValidateAPIKeyHashRequest
+	(*ValidateAPIKeyHashResponse)(nil), // 18: apiary.internal.v1.ValidateAPIKeyHashResponse
+	(*ListAPIKeysRequest)(nil),         // 19: apiary.internal.v1.ListAPIKeysRequest
+	(*ListAPIKeysResponse)(nil),        // 20: apiary.internal.v1.ListAPIKeysResponse
+	(*VMDefinition)(nil),               // 21: apiary.internal.v1.VMDefinition
+	(*NetworkDefinition)(nil),          // 22: apiary.internal.v1.NetworkDefinition
+	(*ApiKey)(nil),                     // 23: apiary.internal.v1.ApiKey
 }
 var file_api_internalpb_raftd_proto_depIdxs = []int32{
 	4,  // 0: apiary.internal.v1.StatusResponse.servers:type_name -> apiary.internal.v1.ServerInfo
-	17, // 1: apiary.internal.v1.GetVMResponse.vm:type_name -> apiary.internal.v1.VMDefinition
-	17, // 2: apiary.internal.v1.ListVMsResponse.vms:type_name -> apiary.internal.v1.VMDefinition
-	18, // 3: apiary.internal.v1.GetNetworkResponse.network:type_name -> apiary.internal.v1.NetworkDefinition
-	18, // 4: apiary.internal.v1.ListNetworksResponse.networks:type_name -> apiary.internal.v1.NetworkDefinition
-	0,  // 5: apiary.internal.v1.RaftInternal.Apply:input_type -> apiary.internal.v1.ApplyRequest
-	2,  // 6: apiary.internal.v1.RaftInternal.Status:input_type -> apiary.internal.v1.StatusRequest
-	5,  // 7: apiary.internal.v1.RaftInternal.AddVoter:input_type -> apiary.internal.v1.AddVoterRequest
-	7,  // 8: apiary.internal.v1.RaftInternal.RemoveServer:input_type -> apiary.internal.v1.RemoveServerRequest
-	9,  // 9: apiary.internal.v1.RaftInternal.GetVM:input_type -> apiary.internal.v1.GetVMRequest
-	11, // 10: apiary.internal.v1.RaftInternal.ListVMs:input_type -> apiary.internal.v1.ListVMsRequest
-	13, // 11: apiary.internal.v1.RaftInternal.GetNetwork:input_type -> apiary.internal.v1.GetNetworkRequest
-	15, // 12: apiary.internal.v1.RaftInternal.ListNetworks:input_type -> apiary.internal.v1.ListNetworksRequest
-	1,  // 13: apiary.internal.v1.RaftInternal.Apply:output_type -> apiary.internal.v1.ApplyResponse
-	3,  // 14: apiary.internal.v1.RaftInternal.Status:output_type -> apiary.internal.v1.StatusResponse
-	6,  // 15: apiary.internal.v1.RaftInternal.AddVoter:output_type -> apiary.internal.v1.AddVoterResponse
-	8,  // 16: apiary.internal.v1.RaftInternal.RemoveServer:output_type -> apiary.internal.v1.RemoveServerResponse
-	10, // 17: apiary.internal.v1.RaftInternal.GetVM:output_type -> apiary.internal.v1.GetVMResponse
-	12, // 18: apiary.internal.v1.RaftInternal.ListVMs:output_type -> apiary.internal.v1.ListVMsResponse
-	14, // 19: apiary.internal.v1.RaftInternal.GetNetwork:output_type -> apiary.internal.v1.GetNetworkResponse
-	16, // 20: apiary.internal.v1.RaftInternal.ListNetworks:output_type -> apiary.internal.v1.ListNetworksResponse
-	13, // [13:21] is the sub-list for method output_type
-	5,  // [5:13] is the sub-list for method input_type
-	5,  // [5:5] is the sub-list for extension type_name
-	5,  // [5:5] is the sub-list for extension extendee
-	0,  // [0:5] is the sub-list for field type_name
+	21, // 1: apiary.internal.v1.GetVMResponse.vm:type_name -> apiary.internal.v1.VMDefinition
+	21, // 2: apiary.internal.v1.ListVMsResponse.vms:type_name -> apiary.internal.v1.VMDefinition
+	22, // 3: apiary.internal.v1.GetNetworkResponse.network:type_name -> apiary.internal.v1.NetworkDefinition
+	22, // 4: apiary.internal.v1.ListNetworksResponse.networks:type_name -> apiary.internal.v1.NetworkDefinition
+	23, // 5: apiary.internal.v1.ListAPIKeysResponse.keys:type_name -> apiary.internal.v1.ApiKey
+	0,  // 6: apiary.internal.v1.RaftInternal.Apply:input_type -> apiary.internal.v1.ApplyRequest
+	2,  // 7: apiary.internal.v1.RaftInternal.Status:input_type -> apiary.internal.v1.StatusRequest
+	5,  // 8: apiary.internal.v1.RaftInternal.AddVoter:input_type -> apiary.internal.v1.AddVoterRequest
+	7,  // 9: apiary.internal.v1.RaftInternal.RemoveServer:input_type -> apiary.internal.v1.RemoveServerRequest
+	9,  // 10: apiary.internal.v1.RaftInternal.GetVM:input_type -> apiary.internal.v1.GetVMRequest
+	11, // 11: apiary.internal.v1.RaftInternal.ListVMs:input_type -> apiary.internal.v1.ListVMsRequest
+	13, // 12: apiary.internal.v1.RaftInternal.GetNetwork:input_type -> apiary.internal.v1.GetNetworkRequest
+	15, // 13: apiary.internal.v1.RaftInternal.ListNetworks:input_type -> apiary.internal.v1.ListNetworksRequest
+	17, // 14: apiary.internal.v1.RaftInternal.ValidateAPIKeyHash:input_type -> apiary.internal.v1.ValidateAPIKeyHashRequest
+	19, // 15: apiary.internal.v1.RaftInternal.ListAPIKeys:input_type -> apiary.internal.v1.ListAPIKeysRequest
+	1,  // 16: apiary.internal.v1.RaftInternal.Apply:output_type -> apiary.internal.v1.ApplyResponse
+	3,  // 17: apiary.internal.v1.RaftInternal.Status:output_type -> apiary.internal.v1.StatusResponse
+	6,  // 18: apiary.internal.v1.RaftInternal.AddVoter:output_type -> apiary.internal.v1.AddVoterResponse
+	8,  // 19: apiary.internal.v1.RaftInternal.RemoveServer:output_type -> apiary.internal.v1.RemoveServerResponse
+	10, // 20: apiary.internal.v1.RaftInternal.GetVM:output_type -> apiary.internal.v1.GetVMResponse
+	12, // 21: apiary.internal.v1.RaftInternal.ListVMs:output_type -> apiary.internal.v1.ListVMsResponse
+	14, // 22: apiary.internal.v1.RaftInternal.GetNetwork:output_type -> apiary.internal.v1.GetNetworkResponse
+	16, // 23: apiary.internal.v1.RaftInternal.ListNetworks:output_type -> apiary.internal.v1.ListNetworksResponse
+	18, // 24: apiary.internal.v1.RaftInternal.ValidateAPIKeyHash:output_type -> apiary.internal.v1.ValidateAPIKeyHashResponse
+	20, // 25: apiary.internal.v1.RaftInternal.ListAPIKeys:output_type -> apiary.internal.v1.ListAPIKeysResponse
+	16, // [16:26] is the sub-list for method output_type
+	6,  // [6:16] is the sub-list for method input_type
+	6,  // [6:6] is the sub-list for extension type_name
+	6,  // [6:6] is the sub-list for extension extendee
+	0,  // [0:6] is the sub-list for field type_name
 }
 
 func init() { file_api_internalpb_raftd_proto_init() }
@@ -1152,7 +1395,7 @@ func file_api_internalpb_raftd_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_api_internalpb_raftd_proto_rawDesc), len(file_api_internalpb_raftd_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   17,
+			NumMessages:   21,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

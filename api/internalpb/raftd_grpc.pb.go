@@ -19,14 +19,16 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	RaftInternal_Apply_FullMethodName        = "/apiary.internal.v1.RaftInternal/Apply"
-	RaftInternal_Status_FullMethodName       = "/apiary.internal.v1.RaftInternal/Status"
-	RaftInternal_AddVoter_FullMethodName     = "/apiary.internal.v1.RaftInternal/AddVoter"
-	RaftInternal_RemoveServer_FullMethodName = "/apiary.internal.v1.RaftInternal/RemoveServer"
-	RaftInternal_GetVM_FullMethodName        = "/apiary.internal.v1.RaftInternal/GetVM"
-	RaftInternal_ListVMs_FullMethodName      = "/apiary.internal.v1.RaftInternal/ListVMs"
-	RaftInternal_GetNetwork_FullMethodName   = "/apiary.internal.v1.RaftInternal/GetNetwork"
-	RaftInternal_ListNetworks_FullMethodName = "/apiary.internal.v1.RaftInternal/ListNetworks"
+	RaftInternal_Apply_FullMethodName              = "/apiary.internal.v1.RaftInternal/Apply"
+	RaftInternal_Status_FullMethodName             = "/apiary.internal.v1.RaftInternal/Status"
+	RaftInternal_AddVoter_FullMethodName           = "/apiary.internal.v1.RaftInternal/AddVoter"
+	RaftInternal_RemoveServer_FullMethodName       = "/apiary.internal.v1.RaftInternal/RemoveServer"
+	RaftInternal_GetVM_FullMethodName              = "/apiary.internal.v1.RaftInternal/GetVM"
+	RaftInternal_ListVMs_FullMethodName            = "/apiary.internal.v1.RaftInternal/ListVMs"
+	RaftInternal_GetNetwork_FullMethodName         = "/apiary.internal.v1.RaftInternal/GetNetwork"
+	RaftInternal_ListNetworks_FullMethodName       = "/apiary.internal.v1.RaftInternal/ListNetworks"
+	RaftInternal_ValidateAPIKeyHash_FullMethodName = "/apiary.internal.v1.RaftInternal/ValidateAPIKeyHash"
+	RaftInternal_ListAPIKeys_FullMethodName        = "/apiary.internal.v1.RaftInternal/ListAPIKeys"
 )
 
 // RaftInternalClient is the client API for RaftInternal service.
@@ -67,6 +69,22 @@ type RaftInternalClient interface {
 	// Apply, exactly like CreateVM/DeleteVM already are.
 	GetNetwork(ctx context.Context, in *GetNetworkRequest, opts ...grpc.CallOption) (*GetNetworkResponse, error)
 	ListNetworks(ctx context.Context, in *ListNetworksRequest, opts ...grpc.CallOption) (*ListNetworksResponse, error)
+	// ValidateAPIKeyHash checks a hashed API key against this node's own
+	// FSM state (ADR-0023) - deliberately NOT leader-only, unlike every
+	// other read RPC in this service. Raft already replicates FSM state
+	// (including api_keys) onto every node, follower or leader, as they
+	// replay the log; several managerd RPCs need to keep authenticating
+	// callers even on a non-leader node (HostStats, GetVMConsole,
+	// UploadISO are all local, per-node operations that don't otherwise
+	// depend on raft leadership at all), so this can't require the
+	// leader the way GetNetwork/ListNetworks do. hashed_key may be
+	// empty - a caller checking only auth_enabled (used by managerd's
+	// "auth never turned on yet = fully open" bootstrap check).
+	ValidateAPIKeyHash(ctx context.Context, in *ValidateAPIKeyHashRequest, opts ...grpc.CallOption) (*ValidateAPIKeyHashResponse, error)
+	// ListAPIKeys is a normal leader-only read (mirrors ListNetworks),
+	// used only for the admin-facing key list - never for per-request
+	// authentication, which goes through ValidateAPIKeyHash instead.
+	ListAPIKeys(ctx context.Context, in *ListAPIKeysRequest, opts ...grpc.CallOption) (*ListAPIKeysResponse, error)
 }
 
 type raftInternalClient struct {
@@ -157,6 +175,26 @@ func (c *raftInternalClient) ListNetworks(ctx context.Context, in *ListNetworksR
 	return out, nil
 }
 
+func (c *raftInternalClient) ValidateAPIKeyHash(ctx context.Context, in *ValidateAPIKeyHashRequest, opts ...grpc.CallOption) (*ValidateAPIKeyHashResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ValidateAPIKeyHashResponse)
+	err := c.cc.Invoke(ctx, RaftInternal_ValidateAPIKeyHash_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *raftInternalClient) ListAPIKeys(ctx context.Context, in *ListAPIKeysRequest, opts ...grpc.CallOption) (*ListAPIKeysResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListAPIKeysResponse)
+	err := c.cc.Invoke(ctx, RaftInternal_ListAPIKeys_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // RaftInternalServer is the server API for RaftInternal service.
 // All implementations must embed UnimplementedRaftInternalServer
 // for forward compatibility.
@@ -195,6 +233,22 @@ type RaftInternalServer interface {
 	// Apply, exactly like CreateVM/DeleteVM already are.
 	GetNetwork(context.Context, *GetNetworkRequest) (*GetNetworkResponse, error)
 	ListNetworks(context.Context, *ListNetworksRequest) (*ListNetworksResponse, error)
+	// ValidateAPIKeyHash checks a hashed API key against this node's own
+	// FSM state (ADR-0023) - deliberately NOT leader-only, unlike every
+	// other read RPC in this service. Raft already replicates FSM state
+	// (including api_keys) onto every node, follower or leader, as they
+	// replay the log; several managerd RPCs need to keep authenticating
+	// callers even on a non-leader node (HostStats, GetVMConsole,
+	// UploadISO are all local, per-node operations that don't otherwise
+	// depend on raft leadership at all), so this can't require the
+	// leader the way GetNetwork/ListNetworks do. hashed_key may be
+	// empty - a caller checking only auth_enabled (used by managerd's
+	// "auth never turned on yet = fully open" bootstrap check).
+	ValidateAPIKeyHash(context.Context, *ValidateAPIKeyHashRequest) (*ValidateAPIKeyHashResponse, error)
+	// ListAPIKeys is a normal leader-only read (mirrors ListNetworks),
+	// used only for the admin-facing key list - never for per-request
+	// authentication, which goes through ValidateAPIKeyHash instead.
+	ListAPIKeys(context.Context, *ListAPIKeysRequest) (*ListAPIKeysResponse, error)
 	mustEmbedUnimplementedRaftInternalServer()
 }
 
@@ -228,6 +282,12 @@ func (UnimplementedRaftInternalServer) GetNetwork(context.Context, *GetNetworkRe
 }
 func (UnimplementedRaftInternalServer) ListNetworks(context.Context, *ListNetworksRequest) (*ListNetworksResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ListNetworks not implemented")
+}
+func (UnimplementedRaftInternalServer) ValidateAPIKeyHash(context.Context, *ValidateAPIKeyHashRequest) (*ValidateAPIKeyHashResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ValidateAPIKeyHash not implemented")
+}
+func (UnimplementedRaftInternalServer) ListAPIKeys(context.Context, *ListAPIKeysRequest) (*ListAPIKeysResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ListAPIKeys not implemented")
 }
 func (UnimplementedRaftInternalServer) mustEmbedUnimplementedRaftInternalServer() {}
 func (UnimplementedRaftInternalServer) testEmbeddedByValue()                      {}
@@ -394,6 +454,42 @@ func _RaftInternal_ListNetworks_Handler(srv interface{}, ctx context.Context, de
 	return interceptor(ctx, in, info, handler)
 }
 
+func _RaftInternal_ValidateAPIKeyHash_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ValidateAPIKeyHashRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(RaftInternalServer).ValidateAPIKeyHash(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: RaftInternal_ValidateAPIKeyHash_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(RaftInternalServer).ValidateAPIKeyHash(ctx, req.(*ValidateAPIKeyHashRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _RaftInternal_ListAPIKeys_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListAPIKeysRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(RaftInternalServer).ListAPIKeys(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: RaftInternal_ListAPIKeys_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(RaftInternalServer).ListAPIKeys(ctx, req.(*ListAPIKeysRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // RaftInternal_ServiceDesc is the grpc.ServiceDesc for RaftInternal service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -432,6 +528,14 @@ var RaftInternal_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ListNetworks",
 			Handler:    _RaftInternal_ListNetworks_Handler,
+		},
+		{
+			MethodName: "ValidateAPIKeyHash",
+			Handler:    _RaftInternal_ValidateAPIKeyHash_Handler,
+		},
+		{
+			MethodName: "ListAPIKeys",
+			Handler:    _RaftInternal_ListAPIKeys_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

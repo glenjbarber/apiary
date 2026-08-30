@@ -53,6 +53,17 @@ service ManagerService {
   rpc CreateNetwork(CreateNetworkRequest) returns (CreateNetworkResponse);
   rpc ListNetworks(ListNetworksRequest) returns (ListNetworksResponse);
   rpc DeleteNetwork(DeleteNetworkRequest) returns (DeleteNetworkResponse);
+
+  // CreateAPIKey/ListAPIKeys/RevokeAPIKey manage credentials for this
+  // service's own RPC surface (ADR-0023). CreateAPIKey is the only
+  // place a raw key is ever returned - it cannot be retrieved again
+  // after this response. Once at least one key exists, every RPC on
+  // this service (including these three) requires a valid one; before
+  // that, everything remains open, matching this project's behavior
+  // today.
+  rpc CreateAPIKey(CreateAPIKeyRequest) returns (CreateAPIKeyResponse);
+  rpc ListAPIKeys(ListAPIKeysRequest) returns (ListAPIKeysResponse);
+  rpc RevokeAPIKey(RevokeAPIKeyRequest) returns (RevokeAPIKeyResponse);
 }
 
 // VMState mirrors api/internalpb's VMState. Kept as a separate type
@@ -399,4 +410,48 @@ message DeleteNetworkResponse {
   NetworkDefinition network = 1;
   string error = 2;
   string leader_hint = 3;
+}
+
+// APIKeyInfo is a key's metadata only - it never carries the raw key
+// or its hash, so a hash can never leak back out over this API even
+// by accident (see ADR-0023).
+message APIKeyInfo {
+  string id = 1;
+  string name = 2;
+  int64 created_unix = 3;
+}
+
+message CreateAPIKeyRequest {
+  string name = 1;
+  uint32 timeout_ms = 2;
+}
+
+message CreateAPIKeyResponse {
+  APIKeyInfo key = 1;
+
+  // raw_key is the actual credential, shown exactly once - it is
+  // never stored anywhere (only its hash is) and can never be
+  // retrieved again after this response.
+  string raw_key = 2;
+
+  string error = 3;
+  string leader_hint = 4;
+}
+
+message ListAPIKeysRequest {}
+
+message ListAPIKeysResponse {
+  repeated APIKeyInfo keys = 1;
+  string error = 2;
+  string leader_hint = 3;
+}
+
+message RevokeAPIKeyRequest {
+  string id = 1;
+  uint32 timeout_ms = 2;
+}
+
+message RevokeAPIKeyResponse {
+  string error = 1;
+  string leader_hint = 2;
 }

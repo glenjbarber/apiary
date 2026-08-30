@@ -151,7 +151,35 @@ message Command {
 
     CreateNetwork create_network = 6;
     DeleteNetwork delete_network = 7;
+
+    CreateAPIKey create_api_key = 8;
+    RevokeAPIKey revoke_api_key = 9;
   }
+}
+
+// ApiKey is a cluster-wide credential for ManagerService's external
+// gRPC API (ADR-0023). Only hashed_key (a SHA-256 hex digest) is ever
+// stored or replicated - the raw key is generated once by managerd's
+// CreateAPIKey RPC handler and returned to the caller exactly once; it
+// is never recoverable from ephemeral state again after that.
+message ApiKey {
+  string id = 1;
+  string name = 2;
+  string hashed_key = 3;
+  int64 created_unix = 4;
+}
+
+// CreateAPIKey adds a new ApiKey. It fails if an id collision occurs
+// (vanishingly unlikely - managerd generates the id itself).
+message CreateAPIKey {
+  ApiKey key = 1;
+}
+
+// RevokeAPIKey removes an ApiKey outright - no soft-delete tombstone,
+// the same reasoning as DeleteNetwork (a key has no physical resource
+// to reconcile away first). Fails if the id doesn't exist.
+message RevokeAPIKey {
+  string id = 1;
 }
 
 // CreateNetwork adds a new NetworkDefinition. It fails if a network with
@@ -225,4 +253,13 @@ message FSMSnapshotState {
   uint64 last_index = 1;
   map<string, VMDefinition> vms = 2;
   map<string, NetworkDefinition> networks = 3;
+  map<string, ApiKey> api_keys = 4;
+
+  // auth_enabled is set permanently, forever, the first time any
+  // CreateAPIKey command ever succeeds - unlike api_keys' own size,
+  // it never reverts to false even if every key is later revoked.
+  // managerd's auth check gates on this, not on api_keys being
+  // non-empty: revoking the last key must lock the cluster down, not
+  // silently reopen it (see ADR-0023).
+  bool auth_enabled = 5;
 }
