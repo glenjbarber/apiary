@@ -19,17 +19,20 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	ManagerService_Status_FullMethodName       = "/apiary.rpc.v1.ManagerService/Status"
-	ManagerService_CreateVM_FullMethodName     = "/apiary.rpc.v1.ManagerService/CreateVM"
-	ManagerService_UpdateVM_FullMethodName     = "/apiary.rpc.v1.ManagerService/UpdateVM"
-	ManagerService_DeleteVM_FullMethodName     = "/apiary.rpc.v1.ManagerService/DeleteVM"
-	ManagerService_GetVM_FullMethodName        = "/apiary.rpc.v1.ManagerService/GetVM"
-	ManagerService_ListVMs_FullMethodName      = "/apiary.rpc.v1.ManagerService/ListVMs"
-	ManagerService_UploadISO_FullMethodName    = "/apiary.rpc.v1.ManagerService/UploadISO"
-	ManagerService_ListISOs_FullMethodName     = "/apiary.rpc.v1.ManagerService/ListISOs"
-	ManagerService_DeleteISO_FullMethodName    = "/apiary.rpc.v1.ManagerService/DeleteISO"
-	ManagerService_HostStats_FullMethodName    = "/apiary.rpc.v1.ManagerService/HostStats"
-	ManagerService_GetVMConsole_FullMethodName = "/apiary.rpc.v1.ManagerService/GetVMConsole"
+	ManagerService_Status_FullMethodName        = "/apiary.rpc.v1.ManagerService/Status"
+	ManagerService_CreateVM_FullMethodName      = "/apiary.rpc.v1.ManagerService/CreateVM"
+	ManagerService_UpdateVM_FullMethodName      = "/apiary.rpc.v1.ManagerService/UpdateVM"
+	ManagerService_DeleteVM_FullMethodName      = "/apiary.rpc.v1.ManagerService/DeleteVM"
+	ManagerService_GetVM_FullMethodName         = "/apiary.rpc.v1.ManagerService/GetVM"
+	ManagerService_ListVMs_FullMethodName       = "/apiary.rpc.v1.ManagerService/ListVMs"
+	ManagerService_UploadISO_FullMethodName     = "/apiary.rpc.v1.ManagerService/UploadISO"
+	ManagerService_ListISOs_FullMethodName      = "/apiary.rpc.v1.ManagerService/ListISOs"
+	ManagerService_DeleteISO_FullMethodName     = "/apiary.rpc.v1.ManagerService/DeleteISO"
+	ManagerService_HostStats_FullMethodName     = "/apiary.rpc.v1.ManagerService/HostStats"
+	ManagerService_GetVMConsole_FullMethodName  = "/apiary.rpc.v1.ManagerService/GetVMConsole"
+	ManagerService_CreateNetwork_FullMethodName = "/apiary.rpc.v1.ManagerService/CreateNetwork"
+	ManagerService_ListNetworks_FullMethodName  = "/apiary.rpc.v1.ManagerService/ListNetworks"
+	ManagerService_DeleteNetwork_FullMethodName = "/apiary.rpc.v1.ManagerService/DeleteNetwork"
 )
 
 // ManagerServiceClient is the client API for ManagerService service.
@@ -71,6 +74,14 @@ type ManagerServiceClient interface {
 	// GetVMConsoleResponse's doc comment for the v1 limitation that
 	// follows from that.
 	GetVMConsole(ctx context.Context, in *GetVMConsoleRequest, opts ...grpc.CallOption) (*GetVMConsoleResponse, error)
+	// CreateNetwork/ListNetworks/DeleteNetwork manage NetworkDefinitions -
+	// VLAN/subnet/bridge segments a VM can attach to (see ADR-0022).
+	// CreateNetwork/DeleteNetwork just submit a Command through raft
+	// (like CreateVM/DeleteVM); ListNetworks reads current state, subject
+	// to the same leader-only requirement as ListVMs.
+	CreateNetwork(ctx context.Context, in *CreateNetworkRequest, opts ...grpc.CallOption) (*CreateNetworkResponse, error)
+	ListNetworks(ctx context.Context, in *ListNetworksRequest, opts ...grpc.CallOption) (*ListNetworksResponse, error)
+	DeleteNetwork(ctx context.Context, in *DeleteNetworkRequest, opts ...grpc.CallOption) (*DeleteNetworkResponse, error)
 }
 
 type managerServiceClient struct {
@@ -194,6 +205,36 @@ func (c *managerServiceClient) GetVMConsole(ctx context.Context, in *GetVMConsol
 	return out, nil
 }
 
+func (c *managerServiceClient) CreateNetwork(ctx context.Context, in *CreateNetworkRequest, opts ...grpc.CallOption) (*CreateNetworkResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(CreateNetworkResponse)
+	err := c.cc.Invoke(ctx, ManagerService_CreateNetwork_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *managerServiceClient) ListNetworks(ctx context.Context, in *ListNetworksRequest, opts ...grpc.CallOption) (*ListNetworksResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListNetworksResponse)
+	err := c.cc.Invoke(ctx, ManagerService_ListNetworks_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *managerServiceClient) DeleteNetwork(ctx context.Context, in *DeleteNetworkRequest, opts ...grpc.CallOption) (*DeleteNetworkResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(DeleteNetworkResponse)
+	err := c.cc.Invoke(ctx, ManagerService_DeleteNetwork_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // ManagerServiceServer is the server API for ManagerService service.
 // All implementations must embed UnimplementedManagerServiceServer
 // for forward compatibility.
@@ -233,6 +274,14 @@ type ManagerServiceServer interface {
 	// GetVMConsoleResponse's doc comment for the v1 limitation that
 	// follows from that.
 	GetVMConsole(context.Context, *GetVMConsoleRequest) (*GetVMConsoleResponse, error)
+	// CreateNetwork/ListNetworks/DeleteNetwork manage NetworkDefinitions -
+	// VLAN/subnet/bridge segments a VM can attach to (see ADR-0022).
+	// CreateNetwork/DeleteNetwork just submit a Command through raft
+	// (like CreateVM/DeleteVM); ListNetworks reads current state, subject
+	// to the same leader-only requirement as ListVMs.
+	CreateNetwork(context.Context, *CreateNetworkRequest) (*CreateNetworkResponse, error)
+	ListNetworks(context.Context, *ListNetworksRequest) (*ListNetworksResponse, error)
+	DeleteNetwork(context.Context, *DeleteNetworkRequest) (*DeleteNetworkResponse, error)
 	mustEmbedUnimplementedManagerServiceServer()
 }
 
@@ -275,6 +324,15 @@ func (UnimplementedManagerServiceServer) HostStats(context.Context, *HostStatsRe
 }
 func (UnimplementedManagerServiceServer) GetVMConsole(context.Context, *GetVMConsoleRequest) (*GetVMConsoleResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetVMConsole not implemented")
+}
+func (UnimplementedManagerServiceServer) CreateNetwork(context.Context, *CreateNetworkRequest) (*CreateNetworkResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method CreateNetwork not implemented")
+}
+func (UnimplementedManagerServiceServer) ListNetworks(context.Context, *ListNetworksRequest) (*ListNetworksResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ListNetworks not implemented")
+}
+func (UnimplementedManagerServiceServer) DeleteNetwork(context.Context, *DeleteNetworkRequest) (*DeleteNetworkResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method DeleteNetwork not implemented")
 }
 func (UnimplementedManagerServiceServer) mustEmbedUnimplementedManagerServiceServer() {}
 func (UnimplementedManagerServiceServer) testEmbeddedByValue()                        {}
@@ -484,6 +542,60 @@ func _ManagerService_GetVMConsole_Handler(srv interface{}, ctx context.Context, 
 	return interceptor(ctx, in, info, handler)
 }
 
+func _ManagerService_CreateNetwork_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(CreateNetworkRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ManagerServiceServer).CreateNetwork(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ManagerService_CreateNetwork_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ManagerServiceServer).CreateNetwork(ctx, req.(*CreateNetworkRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ManagerService_ListNetworks_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListNetworksRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ManagerServiceServer).ListNetworks(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ManagerService_ListNetworks_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ManagerServiceServer).ListNetworks(ctx, req.(*ListNetworksRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ManagerService_DeleteNetwork_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(DeleteNetworkRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ManagerServiceServer).DeleteNetwork(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ManagerService_DeleteNetwork_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ManagerServiceServer).DeleteNetwork(ctx, req.(*DeleteNetworkRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // ManagerService_ServiceDesc is the grpc.ServiceDesc for ManagerService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -530,6 +642,18 @@ var ManagerService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "GetVMConsole",
 			Handler:    _ManagerService_GetVMConsole_Handler,
+		},
+		{
+			MethodName: "CreateNetwork",
+			Handler:    _ManagerService_CreateNetwork_Handler,
+		},
+		{
+			MethodName: "ListNetworks",
+			Handler:    _ManagerService_ListNetworks_Handler,
+		},
+		{
+			MethodName: "DeleteNetwork",
+			Handler:    _ManagerService_DeleteNetwork_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{

@@ -44,6 +44,15 @@ service ManagerService {
   // GetVMConsoleResponse's doc comment for the v1 limitation that
   // follows from that.
   rpc GetVMConsole(GetVMConsoleRequest) returns (GetVMConsoleResponse);
+
+  // CreateNetwork/ListNetworks/DeleteNetwork manage NetworkDefinitions -
+  // VLAN/subnet/bridge segments a VM can attach to (see ADR-0022).
+  // CreateNetwork/DeleteNetwork just submit a Command through raft
+  // (like CreateVM/DeleteVM); ListNetworks reads current state, subject
+  // to the same leader-only requirement as ListVMs.
+  rpc CreateNetwork(CreateNetworkRequest) returns (CreateNetworkResponse);
+  rpc ListNetworks(ListNetworksRequest) returns (ListNetworksResponse);
+  rpc DeleteNetwork(DeleteNetworkRequest) returns (DeleteNetworkResponse);
 }
 
 // VMState mirrors api/internalpb's VMState. Kept as a separate type
@@ -88,6 +97,47 @@ message VMDefinition {
   // attaches it as a CD-ROM device. Empty means no installer image
   // (the VM's disk is used as-is).
   string iso_name = 9;
+
+  // network_id, if set, names a network (see NetworkDefinition below)
+  // this VM's NIC belongs to. Empty means the flat single-bridge
+  // behavior from before network management existed. See ADR-0022.
+  string network_id = 10;
+
+  // ip_address/mac_address are assigned automatically when network_id
+  // is set (never by the caller) - read-only, reported back for
+  // display. Both empty when network_id is empty.
+  string ip_address = 11;
+  string mac_address = 12;
+
+  // firewall_rules is a simple allow/block list applied to this VM's
+  // traffic via a per-VM pf(8) anchor. No rules means everything
+  // allowed (today's de facto behavior, unaffected for existing VMs).
+  repeated FirewallRule firewall_rules = 13;
+}
+
+// FirewallRule mirrors api/internalpb's FirewallRule.
+message FirewallRule {
+  string direction = 1;  // "in" or "out"
+  string action = 2;     // "pass" or "block"
+  string protocol = 3;   // "tcp", "udp", "icmp", or "" (any)
+  string port_range = 4; // "22", "8000-9000", or "" (any)
+}
+
+// NetworkDefinition mirrors api/internalpb's NetworkDefinition - a
+// named, cluster-wide L2 segment VMs can attach to. See ADR-0022.
+message NetworkDefinition {
+  string id = 1;
+  string name = 2;
+  uint32 vlan_id = 3;     // 0 = untagged
+  string subnet = 4;      // CIDR, e.g. "10.60.0.0/24"
+  string bridge_name = 5; // optional override; derived if empty
+
+  // bridge_status is physical, per-node state ("up", "down", or
+  // "unknown" if this node has no VLAN support configured or the
+  // bridge doesn't exist here yet) - populated only by ListNetworks,
+  // never stored and never meaningful on Create/Delete requests or
+  // responses.
+  string bridge_status = 6;
 }
 
 message CreateVMRequest {
@@ -262,6 +312,15 @@ message NetIfaceStats {
   uint64 tx_bytes = 3;
 }
 
+// PFStats summarizes pf(8)'s current status, from `pfctl -s info` -
+// confirming the firewall (ADR-0022's per-VM rules) is actually enabled
+// and seeing traffic.
+message PFStats {
+  bool enabled = 1;
+  uint64 current_states = 2;
+  uint64 matches = 3;
+}
+
 message HostStatsResponse {
   string node_id = 1;
   CPUStats cpu = 2;
@@ -274,6 +333,8 @@ message HostStatsResponse {
   // hoststats.Snapshot.Errors) - the rest of the response is still
   // populated on a best-effort basis.
   repeated string errors = 7;
+
+  PFStats pf = 8;
 }
 
 message GetVMConsoleRequest {
@@ -304,4 +365,34 @@ message GetVMConsoleResponse {
   bool available = 3;
 
   string error = 4;
+}
+
+message CreateNetworkRequest {
+  NetworkDefinition network = 1;
+  uint32 timeout_ms = 2;
+}
+
+message CreateNetworkResponse {
+  NetworkDefinition network = 1;
+  string error = 2;
+  string leader_hint = 3;
+}
+
+message ListNetworksRequest {}
+
+message ListNetworksResponse {
+  repeated NetworkDefinition networks = 1;
+  string error = 2;
+  string leader_hint = 3;
+}
+
+message DeleteNetworkRequest {
+  string id = 1;
+  uint32 timeout_ms = 2;
+}
+
+message DeleteNetworkResponse {
+  NetworkDefinition network = 1;
+  string error = 2;
+  string leader_hint = 3;
 }

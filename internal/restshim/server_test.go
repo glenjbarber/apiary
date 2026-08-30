@@ -86,6 +86,18 @@ func (f *fakeClient) GetVMConsole(context.Context, *rpcpb.GetVMConsoleRequest, .
 	return &rpcpb.GetVMConsoleResponse{}, nil
 }
 
+func (f *fakeClient) CreateNetwork(context.Context, *rpcpb.CreateNetworkRequest, ...grpc.CallOption) (*rpcpb.CreateNetworkResponse, error) {
+	return &rpcpb.CreateNetworkResponse{}, nil
+}
+
+func (f *fakeClient) ListNetworks(context.Context, *rpcpb.ListNetworksRequest, ...grpc.CallOption) (*rpcpb.ListNetworksResponse, error) {
+	return &rpcpb.ListNetworksResponse{}, nil
+}
+
+func (f *fakeClient) DeleteNetwork(context.Context, *rpcpb.DeleteNetworkRequest, ...grpc.CallOption) (*rpcpb.DeleteNetworkResponse, error) {
+	return &rpcpb.DeleteNetworkResponse{}, nil
+}
+
 var _ rpcpb.ManagerServiceClient = (*fakeClient)(nil)
 
 func doRequest(t *testing.T, s *Server, method, path string, body interface{}) *httptest.ResponseRecorder {

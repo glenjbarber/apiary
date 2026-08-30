@@ -26,10 +26,17 @@ type isoManager interface {
 	Delete(name string) error
 }
 
-// vncLookup is the subset of *bhyve.Manager the server needs for
+// VNCLookup is the subset of *bhyve.Manager the server needs for
 // GetVMConsole, defined locally for the same reason as isoManager.
-type vncLookup interface {
+type VNCLookup interface {
 	VNCPort(name string) (port int, ok bool, err error)
+}
+
+// VLANStatus is the subset of *vlan.Manager the server needs for
+// ListNetworks's per-node bridge status, defined locally for the same
+// reason as isoManager.
+type VLANStatus interface {
+	InterfaceStatus(ctx context.Context, name string) (exists, up bool, err error)
 }
 
 // Server implements the generated ManagerServiceServer interface, the
@@ -44,7 +51,12 @@ type Server struct {
 	// vnc is nil on a node with no bhyve provisioning configured (see
 	// cmd/managerd's own nil-able Reconciler.Bhyve) - GetVMConsole
 	// reports Available=false rather than panicking in that case.
-	vnc vncLookup
+	vnc VNCLookup
+
+	// vlan is nil on a node with no VLAN support configured (see
+	// cmd/managerd's own nil-able Reconciler.VLAN) - ListNetworks
+	// reports "unknown" bridge status rather than panicking in that case.
+	vlan VLANStatus
 
 	// statsGather defaults to hoststats.Gather in NewServer; overridable
 	// in tests so HostStats's RPC-translation logic can be exercised
@@ -56,10 +68,11 @@ var _ rpcpb.ManagerServiceServer = (*Server)(nil)
 
 // NewServer returns a Server that answers external RPCs using raft to
 // reach raftd, reporting nodeID as its own identity, isos to store
-// installer images locally on this node, and vnc (nil-able) to look up a
-// running VM's VNC console port.
-func NewServer(raft *RaftClient, nodeID string, isos isoManager, vnc vncLookup) *Server {
-	return &Server{raft: raft, nodeID: nodeID, isos: isos, vnc: vnc, statsGather: hoststats.Gather}
+// installer images locally on this node, vnc (nil-able) to look up a
+// running VM's VNC console port, and vlanMgr (nil-able) to report a
+// network's bridge status on this node.
+func NewServer(raft *RaftClient, nodeID string, isos isoManager, vnc VNCLookup, vlanMgr VLANStatus) *Server {
+	return &Server{raft: raft, nodeID: nodeID, isos: isos, vnc: vnc, vlan: vlanMgr, statsGather: hoststats.Gather}
 }
 
 // Status implements rpcpb.ManagerServiceServer. If raftd is unreachable,
@@ -120,6 +133,90 @@ func (s *Server) applyCommand(ctx context.Context, cmd *internalpb.Command, time
 		return nil, err.Error(), ""
 	}
 	return vm, "", ""
+}
+
+// applyNetworkCommand mirrors applyCommand, for commands whose result is
+// a NetworkDefinition instead of a VMDefinition (CreateNetwork/
+// DeleteNetwork) - see internal/raft's FSMApplyResult, which likewise
+// carries exactly one of VM/Network depending on the command applied.
+func (s *Server) applyNetworkCommand(ctx context.Context, cmd *internalpb.Command, timeoutMs uint32) (network *internalpb.NetworkDefinition, appErr, leaderHint string) {
+	timeout := defaultApplyTimeout
+	if timeoutMs > 0 {
+		timeout = time.Duration(timeoutMs) * time.Millisecond
+	}
+
+	payload, err := proto.Marshal(cmd)
+	if err != nil {
+		return nil, err.Error(), ""
+	}
+
+	resp, err := s.raft.Apply(ctx, payload, timeout)
+	if err != nil {
+		return nil, err.Error(), ""
+	}
+	if resp.GetError() != "" {
+		return nil, resp.GetError(), resp.GetLeaderHint()
+	}
+
+	network = &internalpb.NetworkDefinition{}
+	if err := proto.Unmarshal(resp.GetResult(), network); err != nil {
+		return nil, err.Error(), ""
+	}
+	return network, "", ""
+}
+
+// CreateNetwork implements rpcpb.ManagerServiceServer.
+func (s *Server) CreateNetwork(ctx context.Context, req *rpcpb.CreateNetworkRequest) (*rpcpb.CreateNetworkResponse, error) {
+	cmd := &internalpb.Command{
+		Op: &internalpb.Command_CreateNetwork{CreateNetwork: &internalpb.CreateNetwork{Network: toInternalNetwork(req.GetNetwork())}},
+	}
+	network, appErr, leaderHint := s.applyNetworkCommand(ctx, cmd, req.GetTimeoutMs())
+	return &rpcpb.CreateNetworkResponse{Network: fromInternalNetwork(network), Error: appErr, LeaderHint: leaderHint}, nil
+}
+
+// DeleteNetwork implements rpcpb.ManagerServiceServer.
+func (s *Server) DeleteNetwork(ctx context.Context, req *rpcpb.DeleteNetworkRequest) (*rpcpb.DeleteNetworkResponse, error) {
+	cmd := &internalpb.Command{
+		Op: &internalpb.Command_DeleteNetwork{DeleteNetwork: &internalpb.DeleteNetwork{Id: req.GetId()}},
+	}
+	network, appErr, leaderHint := s.applyNetworkCommand(ctx, cmd, req.GetTimeoutMs())
+	return &rpcpb.DeleteNetworkResponse{Network: fromInternalNetwork(network), Error: appErr, LeaderHint: leaderHint}, nil
+}
+
+// ListNetworks implements rpcpb.ManagerServiceServer.
+func (s *Server) ListNetworks(ctx context.Context, _ *rpcpb.ListNetworksRequest) (*rpcpb.ListNetworksResponse, error) {
+	resp, err := s.raft.ListNetworks(ctx)
+	if err != nil {
+		return &rpcpb.ListNetworksResponse{Error: err.Error()}, nil
+	}
+	if resp.GetError() != "" {
+		return &rpcpb.ListNetworksResponse{Error: resp.GetError(), LeaderHint: resp.GetLeaderHint()}, nil
+	}
+	networks := make([]*rpcpb.NetworkDefinition, 0, len(resp.GetNetworks()))
+	for _, n := range resp.GetNetworks() {
+		rn := fromInternalNetwork(n)
+		rn.BridgeStatus = s.bridgeStatus(ctx, n)
+		networks = append(networks, rn)
+	}
+	return &rpcpb.ListNetworksResponse{Networks: networks}, nil
+}
+
+// bridgeStatus reports network's bridge interface status on this node -
+// "up", "down", or "unknown" if this node has no VLAN support
+// configured, or the bridge doesn't exist here yet (e.g. no VM on this
+// network has been reconciled on this node).
+func (s *Server) bridgeStatus(ctx context.Context, n *internalpb.NetworkDefinition) string {
+	if s.vlan == nil {
+		return "unknown"
+	}
+	exists, up, err := s.vlan.InterfaceStatus(ctx, resolveBridgeName(n))
+	if err != nil || !exists {
+		return "unknown"
+	}
+	if up {
+		return "up"
+	}
+	return "down"
 }
 
 // CreateVM implements rpcpb.ManagerServiceServer.
@@ -269,10 +366,13 @@ func (s *Server) HostStats(ctx context.Context, _ *rpcpb.HostStatsRequest) (*rpc
 			Cores: int32(snap.CPU.Cores), LoadAvg_1: snap.CPU.LoadAvg1,
 			LoadAvg_5: snap.CPU.LoadAvg5, LoadAvg_15: snap.CPU.LoadAvg15,
 		},
-		Mem:    &rpcpb.MemStats{TotalBytes: snap.Mem.TotalBytes, FreeBytes: snap.Mem.FreeBytes},
-		Pools:  pools,
-		Disks:  disks,
-		Net:    net,
+		Mem:   &rpcpb.MemStats{TotalBytes: snap.Mem.TotalBytes, FreeBytes: snap.Mem.FreeBytes},
+		Pools: pools,
+		Disks: disks,
+		Net:   net,
+		Pf: &rpcpb.PFStats{
+			Enabled: snap.PF.Enabled, CurrentStates: snap.PF.CurrentStates, Matches: snap.PF.Matches,
+		},
 		Errors: snap.Errors,
 	}, nil
 }

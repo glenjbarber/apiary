@@ -68,6 +68,23 @@ type NetIface struct {
 	TxBytes uint64
 }
 
+// PFInfo is a summary of pf(8)'s current status and counters, from
+// `pfctl -s info` - confirming the firewall is actually enabled and
+// doing something, for the host stats page (ADR-0022's network
+// management work is what first gave this project a reason to run pf
+// at all).
+type PFInfo struct {
+	Enabled bool
+
+	// CurrentStates is pf's live state table size ("current entries").
+	CurrentStates uint64
+
+	// Matches is the cumulative count of packets that matched any rule
+	// since pf was last enabled - a simple "is traffic actually hitting
+	// pf" signal, not broken down by rule/anchor.
+	Matches uint64
+}
+
 // Snapshot is a point-in-time view of the local host. Errors records
 // any subsystem that failed to report - the rest of the snapshot is
 // still populated on a best-effort basis (e.g. a host with no ZFS
@@ -79,6 +96,7 @@ type Snapshot struct {
 	Pools  []PoolInfo
 	Disks  []DiskInfo
 	Net    []NetIface
+	PF     PFInfo
 	Errors []string
 }
 
@@ -124,7 +142,47 @@ func Gather(ctx context.Context) *Snapshot {
 		s.Net = net
 	}
 
+	if pf, err := gatherPF(ctx); err != nil {
+		s.Errors = append(s.Errors, "pf: "+err.Error())
+	} else {
+		s.PF = *pf
+	}
+
 	return s
+}
+
+// gatherPF shells out to `pfctl -s info` - an error here (pfctl
+// missing, or pf not permitted to query, e.g. no root) is a real
+// failure, distinct from pf simply being disabled (which still
+// succeeds, just reports PFInfo.Enabled == false).
+func gatherPF(ctx context.Context) (*PFInfo, error) {
+	out, err := runCmd(ctx, "pfctl", "-s", "info")
+	if err != nil {
+		return nil, err
+	}
+	return parsePFInfo(out), nil
+}
+
+// parsePFInfo extracts the fields hoststats cares about from `pfctl -s
+// info`'s output - a "Status: Enabled/Disabled ..." header line, a
+// "State Table" section with a "current entries <n>" line, and a
+// "Counters" section with a "match <n>" line. Every other line/counter
+// is ignored; this isn't meant to be a full pf(8) stats dump.
+func parsePFInfo(out string) *PFInfo {
+	info := &PFInfo{}
+	for _, line := range strings.Split(out, "\n") {
+		trimmed := strings.TrimSpace(line)
+		fields := strings.Fields(trimmed)
+		switch {
+		case strings.HasPrefix(trimmed, "Status:"):
+			info.Enabled = len(fields) >= 2 && fields[1] == "Enabled"
+		case strings.HasPrefix(trimmed, "current entries") && len(fields) >= 3:
+			info.CurrentStates, _ = strconv.ParseUint(fields[2], 10, 64)
+		case strings.HasPrefix(trimmed, "match") && len(fields) >= 2:
+			info.Matches, _ = strconv.ParseUint(fields[1], 10, 64)
+		}
+	}
+	return info
 }
 
 func gatherCPU(ctx context.Context) (*CPUInfo, error) {

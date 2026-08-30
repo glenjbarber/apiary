@@ -87,7 +87,7 @@ func chunkMsg(data string) *rpcpb.UploadISORequest {
 
 func TestServer_UploadISO_StreamsChunksIntoStore(t *testing.T) {
 	isos := &fakeISOManager{}
-	s := NewServer(nil, "node-1", isos, nil)
+	s := NewServer(nil, "node-1", isos, nil, nil)
 
 	stream := &fakeUploadStream{reqs: []*rpcpb.UploadISORequest{
 		metadataMsg("test.iso", "deadbeef"),
@@ -113,7 +113,7 @@ func TestServer_UploadISO_StreamsChunksIntoStore(t *testing.T) {
 }
 
 func TestServer_UploadISO_MissingMetadataFirstIsError(t *testing.T) {
-	s := NewServer(nil, "node-1", &fakeISOManager{}, nil)
+	s := NewServer(nil, "node-1", &fakeISOManager{}, nil, nil)
 	stream := &fakeUploadStream{reqs: []*rpcpb.UploadISORequest{chunkMsg("oops")}}
 
 	if err := s.UploadISO(stream); err == nil {
@@ -123,7 +123,7 @@ func TestServer_UploadISO_MissingMetadataFirstIsError(t *testing.T) {
 
 func TestServer_UploadISO_SaveErrorReportedInResponse(t *testing.T) {
 	isos := &fakeISOManager{saveErr: errors.New("sha256 mismatch")}
-	s := NewServer(nil, "node-1", isos, nil)
+	s := NewServer(nil, "node-1", isos, nil, nil)
 	stream := &fakeUploadStream{reqs: []*rpcpb.UploadISORequest{
 		metadataMsg("test.iso", "wronghash"),
 		chunkMsg("data"),
@@ -142,7 +142,7 @@ func TestServer_ListISOs(t *testing.T) {
 		{Name: "a.iso", SizeBytes: 100, SHA256: "aaa"},
 		{Name: "b.iso", SizeBytes: 200, SHA256: "bbb"},
 	}}
-	s := NewServer(nil, "node-1", isos, nil)
+	s := NewServer(nil, "node-1", isos, nil, nil)
 
 	resp, err := s.ListISOs(context.Background(), &rpcpb.ListISOsRequest{})
 	if err != nil {
@@ -155,7 +155,7 @@ func TestServer_ListISOs(t *testing.T) {
 
 func TestServer_ListISOs_ErrorSurfacedInResponse(t *testing.T) {
 	isos := &fakeISOManager{listErr: errors.New("disk error")}
-	s := NewServer(nil, "node-1", isos, nil)
+	s := NewServer(nil, "node-1", isos, nil, nil)
 
 	resp, err := s.ListISOs(context.Background(), &rpcpb.ListISOsRequest{})
 	if err != nil {
@@ -168,7 +168,7 @@ func TestServer_ListISOs_ErrorSurfacedInResponse(t *testing.T) {
 
 func TestServer_DeleteISO(t *testing.T) {
 	isos := &fakeISOManager{}
-	s := NewServer(nil, "node-1", isos, nil)
+	s := NewServer(nil, "node-1", isos, nil, nil)
 
 	resp, err := s.DeleteISO(context.Background(), &rpcpb.DeleteISORequest{Name: "old.iso"})
 	if err != nil {
@@ -183,7 +183,7 @@ func TestServer_DeleteISO(t *testing.T) {
 }
 
 func TestServer_HostStats(t *testing.T) {
-	s := NewServer(nil, "node-1", &fakeISOManager{}, nil)
+	s := NewServer(nil, "node-1", &fakeISOManager{}, nil, nil)
 	s.statsGather = func(context.Context) *hoststats.Snapshot {
 		return &hoststats.Snapshot{
 			CPU:    hoststats.CPUInfo{Cores: 4, LoadAvg1: 1.5},

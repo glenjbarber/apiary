@@ -97,7 +97,7 @@ func newManagerdRPCClient(t *testing.T, raftdSocket string) rpcpb.ManagerService
 	return newManagerdRPCClientWithVNC(t, raftdSocket, "manager-1", nil)
 }
 
-// fakeVNCLookup is a fake vncLookup for GetVMConsole tests, without any
+// fakeVNCLookup is a fake VNCLookup for GetVMConsole tests, without any
 // real bhyve.Manager/RunDir involved.
 type fakeVNCLookup struct {
 	ports map[string]int
@@ -115,7 +115,31 @@ func (f *fakeVNCLookup) VNCPort(name string) (int, bool, error) {
 // newManagerdRPCClientWithVNC is newManagerdRPCClient, but lets a test
 // supply nodeID and vnc explicitly - needed for GetVMConsole, which
 // checks a VM's node_id against the serving Server's own nodeID.
-func newManagerdRPCClientWithVNC(t *testing.T, raftdSocket, nodeID string, vnc vncLookup) rpcpb.ManagerServiceClient {
+func newManagerdRPCClientWithVNC(t *testing.T, raftdSocket, nodeID string, vnc VNCLookup) rpcpb.ManagerServiceClient {
+	t.Helper()
+	return newManagerdRPCClientFull(t, raftdSocket, nodeID, vnc, nil)
+}
+
+// fakeVLANStatus is a fake VLANStatus for ListNetworks bridge-status
+// tests, without any real vlan.Manager/ifconfig involved.
+type fakeVLANStatus struct {
+	// up maps a bridge name to its up/down state. A name absent from
+	// this map is treated as not existing on this node yet.
+	up  map[string]bool
+	err error
+}
+
+func (f *fakeVLANStatus) InterfaceStatus(_ context.Context, name string) (exists, up bool, err error) {
+	if f.err != nil {
+		return false, false, f.err
+	}
+	up, exists = f.up[name]
+	return exists, up, nil
+}
+
+// newManagerdRPCClientFull is newManagerdRPCClient, but lets a test
+// supply nodeID, vnc, and vlanMgr explicitly.
+func newManagerdRPCClientFull(t *testing.T, raftdSocket, nodeID string, vnc VNCLookup, vlanMgr VLANStatus) rpcpb.ManagerServiceClient {
 	t.Helper()
 
 	raftClient, err := Dial(raftdSocket)
@@ -130,7 +154,7 @@ func newManagerdRPCClientWithVNC(t *testing.T, raftdSocket, nodeID string, vnc v
 	}
 
 	grpcServer := grpc.NewServer()
-	rpcpb.RegisterManagerServiceServer(grpcServer, NewServer(raftClient, nodeID, isostore.New(t.TempDir()), vnc))
+	rpcpb.RegisterManagerServiceServer(grpcServer, NewServer(raftClient, nodeID, isostore.New(t.TempDir()), vnc, vlanMgr))
 	go grpcServer.Serve(lis)
 	t.Cleanup(grpcServer.GracefulStop)
 
@@ -425,5 +449,165 @@ func TestIntegration_GetVMConsole_UnknownVM(t *testing.T) {
 	}
 	if resp.GetError() == "" {
 		t.Fatalf("GetVMConsole() returned no error, want a not-found error")
+	}
+}
+
+func TestIntegration_CreateListDeleteNetwork(t *testing.T) {
+	raftdSocket := newRaftdUDSSocket(t)
+	client := newManagerdRPCClient(t, raftdSocket)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	createResp, err := client.CreateNetwork(ctx, &rpcpb.CreateNetworkRequest{
+		Network: &rpcpb.NetworkDefinition{Id: "net-1", Name: "prod", VlanId: 100, Subnet: "10.60.0.0/24"},
+	})
+	if err != nil {
+		t.Fatalf("CreateNetwork() error: %v", err)
+	}
+	if createResp.GetError() != "" {
+		t.Fatalf("CreateNetwork() returned error: %s", createResp.GetError())
+	}
+	if createResp.GetNetwork().GetId() != "net-1" {
+		t.Errorf("CreateNetwork() network = %+v, want id=net-1", createResp.GetNetwork())
+	}
+
+	listResp, err := client.ListNetworks(ctx, &rpcpb.ListNetworksRequest{})
+	if err != nil {
+		t.Fatalf("ListNetworks() error: %v", err)
+	}
+	if len(listResp.GetNetworks()) != 1 || listResp.GetNetworks()[0].GetId() != "net-1" {
+		t.Fatalf("ListNetworks() = %+v, want one network net-1", listResp.GetNetworks())
+	}
+
+	deleteResp, err := client.DeleteNetwork(ctx, &rpcpb.DeleteNetworkRequest{Id: "net-1"})
+	if err != nil {
+		t.Fatalf("DeleteNetwork() error: %v", err)
+	}
+	if deleteResp.GetError() != "" {
+		t.Fatalf("DeleteNetwork() returned error: %s", deleteResp.GetError())
+	}
+
+	listResp2, err := client.ListNetworks(ctx, &rpcpb.ListNetworksRequest{})
+	if err != nil {
+		t.Fatalf("ListNetworks() (after delete) error: %v", err)
+	}
+	if len(listResp2.GetNetworks()) != 0 {
+		t.Errorf("ListNetworks() (after delete) = %+v, want none", listResp2.GetNetworks())
+	}
+}
+
+func TestIntegration_DeleteNetworkStillReferencedByVMIsRejected(t *testing.T) {
+	raftdSocket := newRaftdUDSSocket(t)
+	client := newManagerdRPCClient(t, raftdSocket)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if _, err := client.CreateNetwork(ctx, &rpcpb.CreateNetworkRequest{
+		Network: &rpcpb.NetworkDefinition{Id: "net-1", Name: "prod", Subnet: "10.60.0.0/24"},
+	}); err != nil {
+		t.Fatalf("CreateNetwork() error: %v", err)
+	}
+	if _, err := client.CreateVM(ctx, &rpcpb.CreateVMRequest{
+		Vm: &rpcpb.VMDefinition{Id: "vm-1", NetworkId: "net-1"},
+	}); err != nil {
+		t.Fatalf("CreateVM() error: %v", err)
+	}
+
+	deleteResp, err := client.DeleteNetwork(ctx, &rpcpb.DeleteNetworkRequest{Id: "net-1"})
+	if err != nil {
+		t.Fatalf("DeleteNetwork() error: %v", err)
+	}
+	if deleteResp.GetError() == "" {
+		t.Fatalf("DeleteNetwork() returned no error, want a still-referenced rejection")
+	}
+}
+
+func TestIntegration_CreateVMOnNetworkGetsIPAndMACThroughFullStack(t *testing.T) {
+	raftdSocket := newRaftdUDSSocket(t)
+	client := newManagerdRPCClient(t, raftdSocket)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if _, err := client.CreateNetwork(ctx, &rpcpb.CreateNetworkRequest{
+		Network: &rpcpb.NetworkDefinition{Id: "net-1", Name: "prod", Subnet: "10.60.0.0/24"},
+	}); err != nil {
+		t.Fatalf("CreateNetwork() error: %v", err)
+	}
+
+	createResp, err := client.CreateVM(ctx, &rpcpb.CreateVMRequest{
+		Vm: &rpcpb.VMDefinition{Id: "vm-1", NetworkId: "net-1"},
+	})
+	if err != nil {
+		t.Fatalf("CreateVM() error: %v", err)
+	}
+	if createResp.GetError() != "" {
+		t.Fatalf("CreateVM() returned error: %s", createResp.GetError())
+	}
+	if createResp.GetVm().GetIpAddress() != "10.60.0.2" {
+		t.Errorf("CreateVM() vm.IpAddress = %q, want 10.60.0.2", createResp.GetVm().GetIpAddress())
+	}
+	if createResp.GetVm().GetMacAddress() == "" {
+		t.Errorf("CreateVM() vm.MacAddress = empty, want a derived address")
+	}
+}
+
+func TestIntegration_ListNetworks_BridgeStatusUnknownWithoutVLAN(t *testing.T) {
+	raftdSocket := newRaftdUDSSocket(t)
+	client := newManagerdRPCClient(t, raftdSocket) // no VLANStatus configured
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if _, err := client.CreateNetwork(ctx, &rpcpb.CreateNetworkRequest{
+		Network: &rpcpb.NetworkDefinition{Id: "net-1", Subnet: "10.60.0.0/24"},
+	}); err != nil {
+		t.Fatalf("CreateNetwork() error: %v", err)
+	}
+
+	listResp, err := client.ListNetworks(ctx, &rpcpb.ListNetworksRequest{})
+	if err != nil {
+		t.Fatalf("ListNetworks() error: %v", err)
+	}
+	if got := listResp.GetNetworks()[0].GetBridgeStatus(); got != "unknown" {
+		t.Errorf("BridgeStatus = %q, want unknown (no VLAN support configured on this node)", got)
+	}
+}
+
+func TestIntegration_ListNetworks_BridgeStatusUpOrDown(t *testing.T) {
+	raftdSocket := newRaftdUDSSocket(t)
+	bridge := resolveBridgeName(&internalpb.NetworkDefinition{Id: "net-1"})
+	vlan := &fakeVLANStatus{up: map[string]bool{bridge: true}}
+	client := newManagerdRPCClientFull(t, raftdSocket, "node-a", nil, vlan)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if _, err := client.CreateNetwork(ctx, &rpcpb.CreateNetworkRequest{
+		Network: &rpcpb.NetworkDefinition{Id: "net-1", Subnet: "10.60.0.0/24"},
+	}); err != nil {
+		t.Fatalf("CreateNetwork() error: %v", err)
+	}
+	if _, err := client.CreateNetwork(ctx, &rpcpb.CreateNetworkRequest{
+		Network: &rpcpb.NetworkDefinition{Id: "net-2", Subnet: "10.61.0.0/24"},
+	}); err != nil {
+		t.Fatalf("CreateNetwork() (net-2) error: %v", err)
+	}
+
+	listResp, err := client.ListNetworks(ctx, &rpcpb.ListNetworksRequest{})
+	if err != nil {
+		t.Fatalf("ListNetworks() error: %v", err)
+	}
+	statuses := map[string]string{}
+	for _, n := range listResp.GetNetworks() {
+		statuses[n.GetId()] = n.GetBridgeStatus()
+	}
+	if statuses["net-1"] != "up" {
+		t.Errorf("net-1 BridgeStatus = %q, want up", statuses["net-1"])
+	}
+	if statuses["net-2"] != "unknown" {
+		t.Errorf("net-2 BridgeStatus = %q, want unknown (bridge doesn't exist on this node)", statuses["net-2"])
 	}
 }

@@ -126,3 +126,51 @@ func TestParseNetstat_IgnoresNonLinkRows(t *testing.T) {
 		t.Errorf("parseNetstat() = %+v, want no interfaces from a non-link row", ifaces)
 	}
 }
+
+// This is real `pfctl -s info` output captured from apiarium.
+const realPFInfoOutput = `Status: Enabled for 0 days 00:00:00           Debug: Urgent
+
+State Table                          Total             Rate
+  current entries                        3
+  searches                              19
+  inserts                                3
+  removals                               0
+Counters
+  match                                 42
+  bad-offset                             0
+  fragment                               0
+  short                                  0
+  normalize                              0
+  memory                                 0
+`
+
+func TestParsePFInfo(t *testing.T) {
+	info := parsePFInfo(realPFInfoOutput)
+	if !info.Enabled {
+		t.Errorf("Enabled = false, want true")
+	}
+	if info.CurrentStates != 3 {
+		t.Errorf("CurrentStates = %d, want 3", info.CurrentStates)
+	}
+	if info.Matches != 42 {
+		t.Errorf("Matches = %d, want 42", info.Matches)
+	}
+}
+
+func TestParsePFInfo_Disabled(t *testing.T) {
+	out := "Status: Disabled\n"
+	info := parsePFInfo(out)
+	if info.Enabled {
+		t.Errorf("Enabled = true, want false for a disabled pf")
+	}
+	if info.CurrentStates != 0 || info.Matches != 0 {
+		t.Errorf("info = %+v, want zero counters when disabled/absent", info)
+	}
+}
+
+func TestParsePFInfo_EmptyInput(t *testing.T) {
+	info := parsePFInfo("")
+	if info.Enabled || info.CurrentStates != 0 || info.Matches != 0 {
+		t.Errorf("parsePFInfo(\"\") = %+v, want zero value", info)
+	}
+}

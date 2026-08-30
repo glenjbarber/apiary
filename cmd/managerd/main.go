@@ -19,8 +19,11 @@ import (
 	rpcpb "github.com/glenjbarber/apiary/api/rpc"
 	"github.com/glenjbarber/apiary/internal/bhyve"
 	"github.com/glenjbarber/apiary/internal/cluster"
+	"github.com/glenjbarber/apiary/internal/dhcpd"
 	"github.com/glenjbarber/apiary/internal/isostore"
 	"github.com/glenjbarber/apiary/internal/manager"
+	"github.com/glenjbarber/apiary/internal/pf"
+	"github.com/glenjbarber/apiary/internal/vlan"
 	"github.com/glenjbarber/apiary/internal/zfs"
 )
 
@@ -41,6 +44,7 @@ func run() error {
 	bhyveBridge := flag.String("bhyve-bridge", "", "existing bridge(4) interface to attach bhyve VMs' tap devices to; leave empty to disable VM networking on this node")
 	diskSizeMB := flag.Uint64("disk-size-mb", 0, "size of each VM's boot disk image in MB (0 uses the reconciler's own default)")
 	isoDir := flag.String("iso-dir", "/var/db/apiary/isos", "directory where uploaded installer images are stored on this node")
+	vlanUplink := flag.String("vlan-uplink", "", "physical interface VLAN-tagged networks attach to (e.g. \"re0\", \"em0\" - differs per node); leave empty to disable network management (VLANs/DHCP/firewall) on this node")
 	flag.Parse()
 
 	id := *nodeID
@@ -98,24 +102,48 @@ func run() error {
 	// matters here: a boxed nil pointer would panic the first time
 	// GetVMConsole called a method on it.
 	var bhyveMgr *bhyve.Manager
+	var vlanMgr *vlan.Manager
 	if *bhyveBootROM != "" {
 		bhyveMgr = bhyve.New(*bhyvePrefix)
 		reconciler.Bhyve = bhyveMgr
+
+		// VLAN/DHCP/PF only make sense alongside real bhyve provisioning
+		// (a dataset-only node has no VM NICs to attach anywhere), and
+		// VLAN specifically needs a real uplink interface to tag onto -
+		// leave all three nil (network management disabled on this
+		// node) if either prerequisite is missing, the same opt-in
+		// pattern as Bhyve/ISOs above.
+		if *vlanUplink != "" {
+			vlanMgr = &vlan.Manager{Uplink: *vlanUplink}
+			reconciler.VLAN = vlanMgr
+			reconciler.DHCP = &dhcpd.Manager{}
+			reconciler.PF = &pf.Manager{}
+		}
+	}
+
+	// Passing literal nils into NewServer below (rather than nil
+	// *bhyve.Manager/*vlan.Manager values boxed into non-nil vncLookup/
+	// vlanStatus interface values) matters here: a boxed nil pointer
+	// would panic the first time GetVMConsole/ListNetworks called a
+	// method on it.
+	var vncArg manager.VNCLookup
+	var vlanArg manager.VLANStatus
+	if bhyveMgr != nil {
+		vncArg = bhyveMgr
+	}
+	if vlanMgr != nil {
+		vlanArg = vlanMgr
 	}
 
 	grpcServer := grpc.NewServer()
-	if bhyveMgr != nil {
-		rpcpb.RegisterManagerServiceServer(grpcServer, manager.NewServer(raftClient, id, isos, bhyveMgr))
-	} else {
-		rpcpb.RegisterManagerServiceServer(grpcServer, manager.NewServer(raftClient, id, isos, nil))
-	}
+	rpcpb.RegisterManagerServiceServer(grpcServer, manager.NewServer(raftClient, id, isos, vncArg, vlanArg))
 
 	serveErrCh := make(chan error, 1)
 	go func() {
 		serveErrCh <- grpcServer.Serve(lis)
 	}()
 
-	log.Printf("managerd: listening on %s (node-id=%s, raftd-socket=%s)", *rpcAddr, id, *raftdSocket)
+	log.Printf("managerd: listening on %s (node-id=%s, raftd-socket=%s, vlan-uplink=%s)", *rpcAddr, id, *raftdSocket, *vlanUplink)
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
