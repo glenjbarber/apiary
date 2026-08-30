@@ -1,0 +1,54 @@
+{{define "apikeys_page"}}
+<!DOCTYPE html>
+<html lang="en">
+{{template "head" .}}
+<body>
+  <h1>Apiary</h1>
+  {{template "nav" .}}
+  <h2>API Keys</h2>
+  <p>
+    Keys authenticate calls to managerd's external API. Creating the
+    <strong>first</strong> key here turns on API-key authentication for
+    every node in the cluster, permanently - once enabled it cannot be
+    turned back off (short of restoring an older raft snapshot), even
+    if every key is later revoked.
+  </p>
+  <form class="create-vm" hx-post="/apikeys" hx-target="#apikey-panel" hx-swap="innerHTML">
+    <label>Name <input type="text" name="name" required></label>
+    <button type="submit">Create key</button>
+  </form>
+  <div id="apikey-panel">
+    {{template "apikey_panel" .}}
+  </div>
+</body>
+</html>
+{{end}}
+
+{{define "apikey_panel"}}
+<div id="apikey-error" class="error">{{.APIKeyFormError}}</div>
+{{if .APIKeyRawValue}}
+<div class="success">
+  <p><strong>Key "{{.APIKeyRawName}}" created. Copy it now - it will not be shown again:</strong></p>
+  <p><code>{{.APIKeyRawValue}}</code></p>
+</div>
+{{end}}
+<table>
+  <thead>
+    <tr><th>ID</th><th>Name</th><th>Created</th><th></th></tr>
+  </thead>
+  <tbody id="apikey-rows">
+    {{range .APIKeys}}
+    <tr>
+      <td>{{.ID}}</td>
+      <td>{{.Name}}</td>
+      <td>{{.Created}}</td>
+      <td>
+        <button hx-delete="/apikeys/{{.ID}}" hx-target="#apikey-panel" hx-swap="innerHTML" hx-confirm="Revoke key {{.Name}}? This cannot be undone.">Revoke</button>
+      </td>
+    </tr>
+    {{else}}
+    <tr><td colspan="4"><em>{{if .APIKeyFormError}}Unable to load keys{{else}}No API keys - the cluster is fully unauthenticated{{end}}</em></td></tr>
+    {{end}}
+  </tbody>
+</table>
+{{end}}

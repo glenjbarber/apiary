@@ -90,6 +90,23 @@ type pageData struct {
 	// NetworkFormError reports a create/delete-specific error for the
 	// Networks page, rendered the same way ISOFormError is for Images.
 	NetworkFormError string
+
+	// APIKeys lists existing API keys (metadata only) for the API Keys
+	// page's table (ADR-0023).
+	APIKeys []apiKeyView
+
+	// APIKeyFormError reports a create/revoke-specific error, rendered
+	// the same way NetworkFormError/ISOFormError are for their pages.
+	APIKeyFormError string
+
+	// APIKeyRawName/APIKeyRawValue hold a just-created key's name and
+	// one-time raw value, so the panel can show it exactly once with an
+	// explicit "you will not see this again" warning - the same
+	// one-shot-reveal pattern ISOFormSuccess uses for uploads, just for
+	// a secret instead of a filename. Both empty on every render except
+	// the one immediately following a successful create.
+	APIKeyRawName  string
+	APIKeyRawValue string
 }
 
 // parseSort reads sort/dir query parameters, defaulting to ascending by
@@ -217,6 +234,9 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /networks", s.handleNetworksPage)
 	s.mux.HandleFunc("POST /networks", s.handleCreateNetwork)
 	s.mux.HandleFunc("DELETE /networks/{id}", s.handleDeleteNetwork)
+	s.mux.HandleFunc("GET /apikeys", s.handleAPIKeysPage)
+	s.mux.HandleFunc("POST /apikeys", s.handleCreateAPIKey)
+	s.mux.HandleFunc("DELETE /apikeys/{id}", s.handleRevokeAPIKey)
 }
 
 // handleLoginPage serves the login form. If login isn't enabled at all,
@@ -731,6 +751,80 @@ func (s *Server) renderNetworkPanelResult(w http.ResponseWriter, r *http.Request
 		}
 	}
 	s.render(w, "network_panel", pageData{NetworkFormError: formErr, Networks: networks})
+}
+
+// currentAPIKeys fetches the current list of API keys (metadata only),
+// the same fail-soft convention currentNetworks/currentISOs follow.
+func (s *Server) currentAPIKeys(r *http.Request) ([]apiKeyView, string) {
+	resp, err := s.client.ListAPIKeys(r.Context(), &rpcpb.ListAPIKeysRequest{})
+	if err != nil {
+		return nil, err.Error()
+	}
+	if resp.GetError() != "" {
+		return nil, resp.GetError()
+	}
+	keys := make([]apiKeyView, 0, len(resp.GetKeys()))
+	for _, k := range resp.GetKeys() {
+		keys = append(keys, fromRPCAPIKey(k))
+	}
+	return keys, ""
+}
+
+func (s *Server) handleAPIKeysPage(w http.ResponseWriter, r *http.Request) {
+	keys, errMsg := s.currentAPIKeys(r)
+	s.render(w, "apikeys_page", pageData{APIKeys: keys, APIKeyFormError: errMsg, ActivePage: "apikeys", AuthEnabled: s.authUser != ""})
+}
+
+// handleCreateAPIKey follows the same combined-panel pattern as
+// handleCreateNetwork: refresh the whole #apikey-panel (error slot +
+// table together). On success, the raw key is shown exactly once via
+// APIKeyRawName/APIKeyRawValue - it is never retrievable again after
+// this one render (see ADR-0023).
+func (s *Server) handleCreateAPIKey(w http.ResponseWriter, r *http.Request) {
+	if err := r.ParseForm(); err != nil {
+		s.renderAPIKeyPanelResult(w, r, "invalid form: "+err.Error(), "", "")
+		return
+	}
+
+	name := r.FormValue("name")
+	resp, err := s.client.CreateAPIKey(r.Context(), &rpcpb.CreateAPIKeyRequest{Name: name})
+	if err != nil {
+		s.renderAPIKeyPanelResult(w, r, err.Error(), "", "")
+		return
+	}
+	if resp.GetError() != "" {
+		s.renderAPIKeyPanelResult(w, r, resp.GetError(), "", "")
+		return
+	}
+	s.renderAPIKeyPanelResult(w, r, "", resp.GetKey().GetName(), resp.GetRawKey())
+}
+
+func (s *Server) handleRevokeAPIKey(w http.ResponseWriter, r *http.Request) {
+	resp, err := s.client.RevokeAPIKey(r.Context(), &rpcpb.RevokeAPIKeyRequest{Id: r.PathValue("id")})
+	if err != nil {
+		s.renderAPIKeyPanelResult(w, r, err.Error(), "", "")
+		return
+	}
+	if resp.GetError() != "" {
+		s.renderAPIKeyPanelResult(w, r, resp.GetError(), "", "")
+		return
+	}
+	s.renderAPIKeyPanelResult(w, r, "", "", "")
+}
+
+// renderAPIKeyPanelResult refreshes the whole #apikey-panel (error slot
+// + table + one-time raw-key reveal together), mirroring
+// renderNetworkPanelResult's combined-target pattern.
+func (s *Server) renderAPIKeyPanelResult(w http.ResponseWriter, r *http.Request, formErr, rawName, rawValue string) {
+	keys, fetchErr := s.currentAPIKeys(r)
+	if fetchErr != "" {
+		if formErr == "" {
+			formErr = fetchErr
+		} else {
+			formErr += "; additionally failed to refresh list: " + fetchErr
+		}
+	}
+	s.render(w, "apikey_panel", pageData{APIKeyFormError: formErr, APIKeys: keys, APIKeyRawName: rawName, APIKeyRawValue: rawValue})
 }
 
 func (s *Server) render(w http.ResponseWriter, name string, data pageData) {

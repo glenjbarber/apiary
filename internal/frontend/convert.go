@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 
 	rpcpb "github.com/glenjbarber/apiary/api/rpc"
 )
@@ -69,6 +70,24 @@ func fromRPCNetwork(n *rpcpb.NetworkDefinition) networkView {
 		Subnet:       n.GetSubnet(),
 		BridgeName:   n.GetBridgeName(),
 		BridgeStatus: n.GetBridgeStatus(),
+	}
+}
+
+// apiKeyView is the template-facing shape for an APIKeyInfo - metadata
+// only, never the raw key or its hash (see ADR-0023). Created is
+// pre-formatted here (rather than in the template, which has no time
+// helpers registered) from the RPC's raw Unix timestamp.
+type apiKeyView struct {
+	ID      string
+	Name    string
+	Created string
+}
+
+func fromRPCAPIKey(k *rpcpb.APIKeyInfo) apiKeyView {
+	return apiKeyView{
+		ID:      k.GetId(),
+		Name:    k.GetName(),
+		Created: time.Unix(k.GetCreatedUnix(), 0).Format("2006-01-02 15:04:05"),
 	}
 }
 

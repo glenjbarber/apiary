@@ -44,6 +44,12 @@ type fakeClient struct {
 	lastCreateNetworkReq *rpcpb.CreateNetworkRequest
 	lastDeleteNetworkReq *rpcpb.DeleteNetworkRequest
 
+	listAPIKeysResp     *rpcpb.ListAPIKeysResponse
+	createAPIKeyResp    *rpcpb.CreateAPIKeyResponse
+	revokeAPIKeyResp    *rpcpb.RevokeAPIKeyResponse
+	lastCreateAPIKeyReq *rpcpb.CreateAPIKeyRequest
+	lastRevokeAPIKeyReq *rpcpb.RevokeAPIKeyRequest
+
 	uploadStream *fakeUploadClientStream
 	uploadErr    error
 }
@@ -156,6 +162,29 @@ func (f *fakeClient) DeleteNetwork(_ context.Context, in *rpcpb.DeleteNetworkReq
 		return f.deleteNetworkResp, nil
 	}
 	return &rpcpb.DeleteNetworkResponse{}, nil
+}
+
+func (f *fakeClient) ListAPIKeys(context.Context, *rpcpb.ListAPIKeysRequest, ...grpc.CallOption) (*rpcpb.ListAPIKeysResponse, error) {
+	if f.listAPIKeysResp != nil {
+		return f.listAPIKeysResp, nil
+	}
+	return &rpcpb.ListAPIKeysResponse{}, nil
+}
+
+func (f *fakeClient) CreateAPIKey(_ context.Context, in *rpcpb.CreateAPIKeyRequest, _ ...grpc.CallOption) (*rpcpb.CreateAPIKeyResponse, error) {
+	f.lastCreateAPIKeyReq = in
+	if f.createAPIKeyResp != nil {
+		return f.createAPIKeyResp, nil
+	}
+	return &rpcpb.CreateAPIKeyResponse{}, nil
+}
+
+func (f *fakeClient) RevokeAPIKey(_ context.Context, in *rpcpb.RevokeAPIKeyRequest, _ ...grpc.CallOption) (*rpcpb.RevokeAPIKeyResponse, error) {
+	f.lastRevokeAPIKeyReq = in
+	if f.revokeAPIKeyResp != nil {
+		return f.revokeAPIKeyResp, nil
+	}
+	return &rpcpb.RevokeAPIKeyResponse{}, nil
 }
 
 var _ rpcpb.ManagerServiceClient = (*fakeClient)(nil)
@@ -627,6 +656,123 @@ func TestServer_DeleteNetwork_ErrorShowsInPanel(t *testing.T) {
 	s.ServeHTTP(rec, req)
 
 	if !strings.Contains(rec.Body.String(), "still referenced") {
+		t.Errorf("response missing error message, got: %s", rec.Body.String())
+	}
+}
+
+func TestServer_APIKeysPage(t *testing.T) {
+	client := &fakeClient{listAPIKeysResp: &rpcpb.ListAPIKeysResponse{
+		Keys: []*rpcpb.APIKeyInfo{{Id: "key-1", Name: "terraform", CreatedUnix: 1700000000}},
+	}}
+	s := newTestServer(t, client)
+
+	req := httptest.NewRequest(http.MethodGet, "/apikeys", nil)
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, "key-1") || !strings.Contains(body, "terraform") {
+		t.Errorf("apikeys page missing expected key row, got: %s", body)
+	}
+}
+
+func TestServer_APIKeysPage_ListError(t *testing.T) {
+	client := &fakeClient{listAPIKeysResp: &rpcpb.ListAPIKeysResponse{Error: "raftd unreachable"}}
+	s := newTestServer(t, client)
+
+	req := httptest.NewRequest(http.MethodGet, "/apikeys", nil)
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, req)
+
+	if !strings.Contains(rec.Body.String(), "raftd unreachable") {
+		t.Errorf("apikeys page missing error message, got: %s", rec.Body.String())
+	}
+}
+
+func TestServer_CreateAPIKey_ShowsRawKeyOnce(t *testing.T) {
+	client := &fakeClient{
+		createAPIKeyResp: &rpcpb.CreateAPIKeyResponse{
+			Key:    &rpcpb.APIKeyInfo{Id: "key-1", Name: "terraform"},
+			RawKey: "apk_supersecretvalue",
+		},
+	}
+	s := newTestServer(t, client)
+
+	form := url.Values{"name": {"terraform"}}
+	req := httptest.NewRequest(http.MethodPost, "/apikeys", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	if client.lastCreateAPIKeyReq.GetName() != "terraform" {
+		t.Errorf("forwarded name = %q, want terraform", client.lastCreateAPIKeyReq.GetName())
+	}
+	if !strings.Contains(rec.Body.String(), "apk_supersecretvalue") {
+		t.Errorf("create response missing the one-time raw key, got: %s", rec.Body.String())
+	}
+}
+
+func TestServer_CreateAPIKey_ErrorShowsInPanel(t *testing.T) {
+	client := &fakeClient{createAPIKeyResp: &rpcpb.CreateAPIKeyResponse{Error: "generating API key: boom"}}
+	s := newTestServer(t, client)
+
+	form := url.Values{"name": {"terraform"}}
+	req := httptest.NewRequest(http.MethodPost, "/apikeys", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, req)
+
+	if !strings.Contains(rec.Body.String(), "boom") {
+		t.Errorf("response missing error message, got: %s", rec.Body.String())
+	}
+}
+
+func TestServer_APIKeysPage_ListNeverShowsRawKeyAgain(t *testing.T) {
+	client := &fakeClient{listAPIKeysResp: &rpcpb.ListAPIKeysResponse{
+		Keys: []*rpcpb.APIKeyInfo{{Id: "key-1", Name: "terraform", CreatedUnix: 1700000000}},
+	}}
+	s := newTestServer(t, client)
+
+	req := httptest.NewRequest(http.MethodGet, "/apikeys", nil)
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, req)
+
+	if strings.Contains(rec.Body.String(), "apk_") {
+		t.Errorf("apikeys list render leaked raw key material, got: %s", rec.Body.String())
+	}
+}
+
+func TestServer_RevokeAPIKey(t *testing.T) {
+	client := &fakeClient{revokeAPIKeyResp: &rpcpb.RevokeAPIKeyResponse{}}
+	s := newTestServer(t, client)
+
+	req := httptest.NewRequest(http.MethodDelete, "/apikeys/key-1", nil)
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	if client.lastRevokeAPIKeyReq.GetId() != "key-1" {
+		t.Errorf("forwarded revoke id = %q, want key-1", client.lastRevokeAPIKeyReq.GetId())
+	}
+}
+
+func TestServer_RevokeAPIKey_ErrorShowsInPanel(t *testing.T) {
+	client := &fakeClient{revokeAPIKeyResp: &rpcpb.RevokeAPIKeyResponse{Error: `id "key-1" does not exist`}}
+	s := newTestServer(t, client)
+
+	req := httptest.NewRequest(http.MethodDelete, "/apikeys/key-1", nil)
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, req)
+
+	if !strings.Contains(rec.Body.String(), "does not exist") {
 		t.Errorf("response missing error message, got: %s", rec.Body.String())
 	}
 }
