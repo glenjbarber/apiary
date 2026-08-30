@@ -19,12 +19,15 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	ManagerService_Status_FullMethodName   = "/apiary.rpc.v1.ManagerService/Status"
-	ManagerService_CreateVM_FullMethodName = "/apiary.rpc.v1.ManagerService/CreateVM"
-	ManagerService_UpdateVM_FullMethodName = "/apiary.rpc.v1.ManagerService/UpdateVM"
-	ManagerService_DeleteVM_FullMethodName = "/apiary.rpc.v1.ManagerService/DeleteVM"
-	ManagerService_GetVM_FullMethodName    = "/apiary.rpc.v1.ManagerService/GetVM"
-	ManagerService_ListVMs_FullMethodName  = "/apiary.rpc.v1.ManagerService/ListVMs"
+	ManagerService_Status_FullMethodName    = "/apiary.rpc.v1.ManagerService/Status"
+	ManagerService_CreateVM_FullMethodName  = "/apiary.rpc.v1.ManagerService/CreateVM"
+	ManagerService_UpdateVM_FullMethodName  = "/apiary.rpc.v1.ManagerService/UpdateVM"
+	ManagerService_DeleteVM_FullMethodName  = "/apiary.rpc.v1.ManagerService/DeleteVM"
+	ManagerService_GetVM_FullMethodName     = "/apiary.rpc.v1.ManagerService/GetVM"
+	ManagerService_ListVMs_FullMethodName   = "/apiary.rpc.v1.ManagerService/ListVMs"
+	ManagerService_UploadISO_FullMethodName = "/apiary.rpc.v1.ManagerService/UploadISO"
+	ManagerService_ListISOs_FullMethodName  = "/apiary.rpc.v1.ManagerService/ListISOs"
+	ManagerService_DeleteISO_FullMethodName = "/apiary.rpc.v1.ManagerService/DeleteISO"
 )
 
 // ManagerServiceClient is the client API for ManagerService service.
@@ -45,6 +48,16 @@ type ManagerServiceClient interface {
 	// read consistency model is deliberately as simple as its write model.
 	GetVM(ctx context.Context, in *GetVMRequest, opts ...grpc.CallOption) (*GetVMResponse, error)
 	ListVMs(ctx context.Context, in *ListVMsRequest, opts ...grpc.CallOption) (*ListVMsResponse, error)
+	// UploadISO, ListISOs, and DeleteISO manage installer images stored
+	// locally on *this* managerd's own node - unlike VM definitions,
+	// these are physical data (see CLAUDE.md's physical/ephemeral
+	// distinction) and are never replicated through raft. UploadISO is
+	// client-streaming so a large image doesn't have to fit in one
+	// message; see ADR-0017 for why verification happens server-side
+	// rather than trusting a client-computed hash.
+	UploadISO(ctx context.Context, opts ...grpc.CallOption) (grpc.ClientStreamingClient[UploadISORequest, UploadISOResponse], error)
+	ListISOs(ctx context.Context, in *ListISOsRequest, opts ...grpc.CallOption) (*ListISOsResponse, error)
+	DeleteISO(ctx context.Context, in *DeleteISORequest, opts ...grpc.CallOption) (*DeleteISOResponse, error)
 }
 
 type managerServiceClient struct {
@@ -115,6 +128,39 @@ func (c *managerServiceClient) ListVMs(ctx context.Context, in *ListVMsRequest, 
 	return out, nil
 }
 
+func (c *managerServiceClient) UploadISO(ctx context.Context, opts ...grpc.CallOption) (grpc.ClientStreamingClient[UploadISORequest, UploadISOResponse], error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	stream, err := c.cc.NewStream(ctx, &ManagerService_ServiceDesc.Streams[0], ManagerService_UploadISO_FullMethodName, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &grpc.GenericClientStream[UploadISORequest, UploadISOResponse]{ClientStream: stream}
+	return x, nil
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type ManagerService_UploadISOClient = grpc.ClientStreamingClient[UploadISORequest, UploadISOResponse]
+
+func (c *managerServiceClient) ListISOs(ctx context.Context, in *ListISOsRequest, opts ...grpc.CallOption) (*ListISOsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListISOsResponse)
+	err := c.cc.Invoke(ctx, ManagerService_ListISOs_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *managerServiceClient) DeleteISO(ctx context.Context, in *DeleteISORequest, opts ...grpc.CallOption) (*DeleteISOResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(DeleteISOResponse)
+	err := c.cc.Invoke(ctx, ManagerService_DeleteISO_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // ManagerServiceServer is the server API for ManagerService service.
 // All implementations must embed UnimplementedManagerServiceServer
 // for forward compatibility.
@@ -133,6 +179,16 @@ type ManagerServiceServer interface {
 	// read consistency model is deliberately as simple as its write model.
 	GetVM(context.Context, *GetVMRequest) (*GetVMResponse, error)
 	ListVMs(context.Context, *ListVMsRequest) (*ListVMsResponse, error)
+	// UploadISO, ListISOs, and DeleteISO manage installer images stored
+	// locally on *this* managerd's own node - unlike VM definitions,
+	// these are physical data (see CLAUDE.md's physical/ephemeral
+	// distinction) and are never replicated through raft. UploadISO is
+	// client-streaming so a large image doesn't have to fit in one
+	// message; see ADR-0017 for why verification happens server-side
+	// rather than trusting a client-computed hash.
+	UploadISO(grpc.ClientStreamingServer[UploadISORequest, UploadISOResponse]) error
+	ListISOs(context.Context, *ListISOsRequest) (*ListISOsResponse, error)
+	DeleteISO(context.Context, *DeleteISORequest) (*DeleteISOResponse, error)
 	mustEmbedUnimplementedManagerServiceServer()
 }
 
@@ -160,6 +216,15 @@ func (UnimplementedManagerServiceServer) GetVM(context.Context, *GetVMRequest) (
 }
 func (UnimplementedManagerServiceServer) ListVMs(context.Context, *ListVMsRequest) (*ListVMsResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ListVMs not implemented")
+}
+func (UnimplementedManagerServiceServer) UploadISO(grpc.ClientStreamingServer[UploadISORequest, UploadISOResponse]) error {
+	return status.Error(codes.Unimplemented, "method UploadISO not implemented")
+}
+func (UnimplementedManagerServiceServer) ListISOs(context.Context, *ListISOsRequest) (*ListISOsResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ListISOs not implemented")
+}
+func (UnimplementedManagerServiceServer) DeleteISO(context.Context, *DeleteISORequest) (*DeleteISOResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method DeleteISO not implemented")
 }
 func (UnimplementedManagerServiceServer) mustEmbedUnimplementedManagerServiceServer() {}
 func (UnimplementedManagerServiceServer) testEmbeddedByValue()                        {}
@@ -290,6 +355,49 @@ func _ManagerService_ListVMs_Handler(srv interface{}, ctx context.Context, dec f
 	return interceptor(ctx, in, info, handler)
 }
 
+func _ManagerService_UploadISO_Handler(srv interface{}, stream grpc.ServerStream) error {
+	return srv.(ManagerServiceServer).UploadISO(&grpc.GenericServerStream[UploadISORequest, UploadISOResponse]{ServerStream: stream})
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type ManagerService_UploadISOServer = grpc.ClientStreamingServer[UploadISORequest, UploadISOResponse]
+
+func _ManagerService_ListISOs_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListISOsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ManagerServiceServer).ListISOs(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ManagerService_ListISOs_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ManagerServiceServer).ListISOs(ctx, req.(*ListISOsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ManagerService_DeleteISO_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(DeleteISORequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ManagerServiceServer).DeleteISO(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ManagerService_DeleteISO_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ManagerServiceServer).DeleteISO(ctx, req.(*DeleteISORequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // ManagerService_ServiceDesc is the grpc.ServiceDesc for ManagerService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -321,7 +429,21 @@ var ManagerService_ServiceDesc = grpc.ServiceDesc{
 			MethodName: "ListVMs",
 			Handler:    _ManagerService_ListVMs_Handler,
 		},
+		{
+			MethodName: "ListISOs",
+			Handler:    _ManagerService_ListISOs_Handler,
+		},
+		{
+			MethodName: "DeleteISO",
+			Handler:    _ManagerService_DeleteISO_Handler,
+		},
 	},
-	Streams:  []grpc.StreamDesc{},
+	Streams: []grpc.StreamDesc{
+		{
+			StreamName:    "UploadISO",
+			Handler:       _ManagerService_UploadISO_Handler,
+			ClientStreams: true,
+		},
+	},
 	Metadata: "api/rpc/manager.proto",
 }

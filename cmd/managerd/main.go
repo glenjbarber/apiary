@@ -19,6 +19,7 @@ import (
 	rpcpb "github.com/glenjbarber/apiary/api/rpc"
 	"github.com/glenjbarber/apiary/internal/bhyve"
 	"github.com/glenjbarber/apiary/internal/cluster"
+	"github.com/glenjbarber/apiary/internal/isostore"
 	"github.com/glenjbarber/apiary/internal/manager"
 	"github.com/glenjbarber/apiary/internal/zfs"
 )
@@ -37,7 +38,9 @@ func run() error {
 	reconcileInterval := flag.Duration("reconcile-interval", 30*time.Second, "how often to reconcile local VM storage against raftd's VM list")
 	bhyvePrefix := flag.String("bhyve-prefix", "apiary-", "name prefix for bhyve VMs this node creates")
 	bhyveBootROM := flag.String("bhyve-bootrom", "", "UEFI boot ROM path for bhyve VMs; leave empty to disable bhyve provisioning on this node (e.g. nodes without hardware-assisted virtualization)")
+	bhyveBridge := flag.String("bhyve-bridge", "", "existing bridge(4) interface to attach bhyve VMs' tap devices to; leave empty to disable VM networking on this node")
 	diskSizeMB := flag.Uint64("disk-size-mb", 0, "size of each VM's boot disk image in MB (0 uses the reconciler's own default)")
+	isoDir := flag.String("iso-dir", "/var/db/apiary/isos", "directory where uploaded installer images are stored on this node")
 	flag.Parse()
 
 	id := *nodeID
@@ -75,8 +78,10 @@ func run() error {
 		return fmt.Errorf("listening on %s: %w", *rpcAddr, err)
 	}
 
+	isos := isostore.New(*isoDir)
+
 	grpcServer := grpc.NewServer()
-	rpcpb.RegisterManagerServiceServer(grpcServer, manager.NewServer(raftClient, id))
+	rpcpb.RegisterManagerServiceServer(grpcServer, manager.NewServer(raftClient, id, isos))
 
 	serveErrCh := make(chan error, 1)
 	go func() {
@@ -94,6 +99,8 @@ func run() error {
 		LocalNodeID: raftNodeID,
 		BootROM:     *bhyveBootROM,
 		DiskSizeMB:  *diskSizeMB,
+		Bridge:      *bhyveBridge,
+		ISOs:        isos,
 	}
 	// Bhyve is left nil when no boot ROM is configured, so nodes without
 	// hardware-assisted virtualization (the common case today - see

@@ -13,6 +13,7 @@ import (
 
 	internalpb "github.com/glenjbarber/apiary/api/internalpb"
 	rpcpb "github.com/glenjbarber/apiary/api/rpc"
+	"github.com/glenjbarber/apiary/internal/isostore"
 	raftnode "github.com/glenjbarber/apiary/internal/raft"
 )
 
@@ -106,7 +107,7 @@ func newManagerdRPCClient(t *testing.T, raftdSocket string) rpcpb.ManagerService
 	}
 
 	grpcServer := grpc.NewServer()
-	rpcpb.RegisterManagerServiceServer(grpcServer, NewServer(raftClient, "manager-1"))
+	rpcpb.RegisterManagerServiceServer(grpcServer, NewServer(raftClient, "manager-1", isostore.New(t.TempDir())))
 	go grpcServer.Serve(lis)
 	t.Cleanup(grpcServer.GracefulStop)
 

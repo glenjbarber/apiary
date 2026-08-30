@@ -159,7 +159,12 @@ type VMDefinition struct {
 	Phase        VMPhase `protobuf:"varint,7,opt,name=phase,proto3,enum=apiary.internal.v1.VMPhase" json:"phase,omitempty"`
 	// phase_error holds the last reconcile error's message when phase ==
 	// VM_PHASE_ERROR; empty otherwise.
-	PhaseError    string `protobuf:"bytes,8,opt,name=phase_error,json=phaseError,proto3" json:"phase_error,omitempty"`
+	PhaseError string `protobuf:"bytes,8,opt,name=phase_error,json=phaseError,proto3" json:"phase_error,omitempty"`
+	// iso_name, if set, names an image already uploaded (via
+	// ManagerService.UploadISO) on the assigned node. The reconciler
+	// resolves it to a local path through internal/isostore and attaches
+	// it as a CD-ROM device - see ADR-0017.
+	IsoName       string `protobuf:"bytes,9,opt,name=iso_name,json=isoName,proto3" json:"iso_name,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -246,6 +251,13 @@ func (x *VMDefinition) GetPhase() VMPhase {
 func (x *VMDefinition) GetPhaseError() string {
 	if x != nil {
 		return x.PhaseError
+	}
+	return ""
+}
+
+func (x *VMDefinition) GetIsoName() string {
+	if x != nil {
+		return x.IsoName
 	}
 	return ""
 }
@@ -750,7 +762,7 @@ var File_api_internalpb_state_proto protoreflect.FileDescriptor
 
 const file_api_internalpb_state_proto_rawDesc = "" +
 	"\n" +
-	"\x1aapi/internalpb/state.proto\x12\x12apiary.internal.v1\"\x94\x02\n" +
+	"\x1aapi/internalpb/state.proto\x12\x12apiary.internal.v1\"\xaf\x02\n" +
 	"\fVMDefinition\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x14\n" +
@@ -760,7 +772,8 @@ const file_api_internalpb_state_proto_rawDesc = "" +
 	"\rdesired_state\x18\x06 \x01(\x0e2\x1b.apiary.internal.v1.VMStateR\fdesiredState\x121\n" +
 	"\x05phase\x18\a \x01(\x0e2\x1b.apiary.internal.v1.VMPhaseR\x05phase\x12\x1f\n" +
 	"\vphase_error\x18\b \x01(\tR\n" +
-	"phaseError\"\xcd\x02\n" +
+	"phaseError\x12\x19\n" +
+	"\biso_name\x18\t \x01(\tR\aisoName\"\xcd\x02\n" +
 	"\aCommand\x12;\n" +
 	"\tcreate_vm\x18\x01 \x01(\v2\x1c.apiary.internal.v1.CreateVMH\x00R\bcreateVm\x12;\n" +
 	"\tupdate_vm\x18\x02 \x01(\v2\x1c.apiary.internal.v1.UpdateVMH\x00R\bupdateVm\x12;\n" +

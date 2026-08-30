@@ -18,6 +18,7 @@ func toInternalVM(vm *rpcpb.VMDefinition) *internalpb.VMDefinition {
 		MemoryMb:     vm.GetMemoryMb(),
 		NodeId:       vm.GetNodeId(),
 		DesiredState: internalpb.VMState(vm.GetDesiredState()),
+		IsoName:      vm.GetIsoName(),
 		// Phase/PhaseError are the reconciler's own observed state, never
 		// set by an external caller - CreateVM/UpdateVM requests never
 		// carry them through.
@@ -39,5 +40,6 @@ func fromInternalVM(vm *internalpb.VMDefinition) *rpcpb.VMDefinition {
 		DesiredState: rpcpb.VMState(vm.GetDesiredState()),
 		Phase:        rpcpb.VMPhase(vm.GetPhase()),
 		PhaseError:   vm.GetPhaseError(),
+		IsoName:      vm.GetIsoName(),
 	}
 }

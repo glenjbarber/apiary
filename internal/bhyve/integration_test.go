@@ -170,6 +170,43 @@ func TestIntegration_VMWithDisk(t *testing.T) {
 	}
 }
 
+func TestIntegration_VMWithISO(t *testing.T) {
+	m, cfg := testManager(t)
+	ctx := context.Background()
+
+	// A real ISO 9660 image isn't needed to prove bhyve accepts the
+	// device - a plain file is enough to exercise CreateVM's -s
+	// N,ahci-cd,<path> wiring, the same way TestIntegration_VMWithDisk
+	// doesn't format its throwaway disk image either.
+	isoPath := t.TempDir() + "/install.iso"
+	if err := os.WriteFile(isoPath, make([]byte, 2048), 0o644); err != nil {
+		t.Fatalf("creating fake ISO: %v", err)
+	}
+
+	cfg.ISOPath = isoPath
+	if err := m.CreateVM(ctx, "vm-iso", cfg); err != nil {
+		t.Fatalf("CreateVM() with ISO error: %v", err)
+	}
+	t.Cleanup(func() { m.DestroyVM(context.Background(), "vm-iso") })
+
+	deadline := time.Now().Add(5 * time.Second)
+	var exists bool
+	var err error
+	for time.Now().Before(deadline) {
+		exists, err = m.VMExists(ctx, "vm-iso")
+		if err != nil {
+			t.Fatalf("VMExists() error: %v", err)
+		}
+		if exists {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if !exists {
+		t.Fatalf("VMExists() = false after creation with an ISO attached (timed out waiting)")
+	}
+}
+
 func TestIntegration_VMWithNetwork(t *testing.T) {
 	m, cfg := testManager(t)
 	ctx := context.Background()

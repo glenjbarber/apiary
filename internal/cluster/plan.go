@@ -39,6 +39,10 @@ type VMPlacement struct {
 	// VM ("", "creating", "ready", "deleting", "error") - read back so a
 	// tick doesn't redundantly re-submit a phase update it already made.
 	Phase string
+
+	// ISOName, if set, names an image the reconciler should resolve
+	// (via Reconciler.ISOs) to a local path and attach as a CD-ROM.
+	ISOName string
 }
 
 // Plan returns the VMs assigned to localNodeID, sorted by ID for

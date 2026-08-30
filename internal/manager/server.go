@@ -2,16 +2,28 @@ package manager
 
 import (
 	"context"
+	"fmt"
+	"io"
 	"time"
 
 	"google.golang.org/protobuf/proto"
 
 	internalpb "github.com/glenjbarber/apiary/api/internalpb"
 	rpcpb "github.com/glenjbarber/apiary/api/rpc"
+	"github.com/glenjbarber/apiary/internal/isostore"
 )
 
 // defaultApplyTimeout is used when a request doesn't specify one.
 const defaultApplyTimeout = 10 * time.Second
+
+// isoManager is the subset of *isostore.Manager the server needs,
+// defined locally so tests can supply a fake - the same reasoning
+// internal/cluster's own local interfaces follow.
+type isoManager interface {
+	Save(name string, r io.Reader, expectedSHA256 string) (*isostore.Info, error)
+	List() ([]isostore.Info, error)
+	Delete(name string) error
+}
 
 // Server implements the generated ManagerServiceServer interface, the
 // server side of managerd's external RPC API.
@@ -20,14 +32,16 @@ type Server struct {
 
 	raft   *RaftClient
 	nodeID string
+	isos   isoManager
 }
 
 var _ rpcpb.ManagerServiceServer = (*Server)(nil)
 
 // NewServer returns a Server that answers external RPCs using raft to
-// reach raftd, reporting nodeID as its own identity.
-func NewServer(raft *RaftClient, nodeID string) *Server {
-	return &Server{raft: raft, nodeID: nodeID}
+// reach raftd, reporting nodeID as its own identity, and isos to store
+// installer images locally on this node.
+func NewServer(raft *RaftClient, nodeID string, isos isoManager) *Server {
+	return &Server{raft: raft, nodeID: nodeID, isos: isos}
 }
 
 // Status implements rpcpb.ManagerServiceServer. If raftd is unreachable,
@@ -127,6 +141,82 @@ func (s *Server) GetVM(ctx context.Context, req *rpcpb.GetVMRequest) (*rpcpb.Get
 		return &rpcpb.GetVMResponse{Error: resp.GetError(), LeaderHint: resp.GetLeaderHint()}, nil
 	}
 	return &rpcpb.GetVMResponse{Vm: fromInternalVM(resp.GetVm()), Found: resp.GetFound()}, nil
+}
+
+// UploadISO implements rpcpb.ManagerServiceServer. The client's first
+// message must carry metadata (name + expected hash); every message
+// after that carries a chunk of the file's bytes. Chunks are piped
+// directly into isostore.Save as they arrive - the whole upload is
+// never buffered in memory, and Save's own hash verification runs
+// concurrently with receiving the stream rather than after it.
+func (s *Server) UploadISO(stream rpcpb.ManagerService_UploadISOServer) error {
+	first, err := stream.Recv()
+	if err != nil {
+		return fmt.Errorf("manager: UploadISO: receiving metadata: %w", err)
+	}
+	meta := first.GetMetadata()
+	if meta == nil {
+		return fmt.Errorf("manager: UploadISO: first message must be metadata")
+	}
+
+	pr, pw := io.Pipe()
+	type result struct {
+		info *isostore.Info
+		err  error
+	}
+	saveDone := make(chan result, 1)
+	go func() {
+		info, err := s.isos.Save(meta.GetName(), pr, meta.GetExpectedSha256())
+		pr.CloseWithError(err)
+		saveDone <- result{info, err}
+	}()
+
+	for {
+		req, err := stream.Recv()
+		if err == io.EOF {
+			pw.Close()
+			break
+		}
+		if err != nil {
+			pw.CloseWithError(err)
+			<-saveDone
+			return fmt.Errorf("manager: UploadISO: receiving chunk: %w", err)
+		}
+		if _, err := pw.Write(req.GetChunk()); err != nil {
+			break // Save's goroutine already failed; its error is reported below
+		}
+	}
+
+	res := <-saveDone
+	if res.err != nil {
+		return stream.SendAndClose(&rpcpb.UploadISOResponse{Error: res.err.Error()})
+	}
+	return stream.SendAndClose(&rpcpb.UploadISOResponse{
+		Name:      res.info.Name,
+		SizeBytes: uint64(res.info.SizeBytes),
+		Sha256:    res.info.SHA256,
+	})
+}
+
+// ListISOs implements rpcpb.ManagerServiceServer.
+func (s *Server) ListISOs(_ context.Context, _ *rpcpb.ListISOsRequest) (*rpcpb.ListISOsResponse, error) {
+	infos, err := s.isos.List()
+	if err != nil {
+		return &rpcpb.ListISOsResponse{Error: err.Error()}, nil
+	}
+	isos := make([]*rpcpb.ISOInfo, 0, len(infos))
+	for _, info := range infos {
+		isos = append(isos, &rpcpb.ISOInfo{Name: info.Name, SizeBytes: uint64(info.SizeBytes), Sha256: info.SHA256})
+	}
+	return &rpcpb.ListISOsResponse{Isos: isos}, nil
+}
+
+// DeleteISO implements rpcpb.ManagerServiceServer.
+func (s *Server) DeleteISO(_ context.Context, req *rpcpb.DeleteISORequest) (*rpcpb.DeleteISOResponse, error) {
+	if err := s.isos.Delete(req.GetName()); err != nil {
+		return &rpcpb.DeleteISOResponse{Error: err.Error()}, nil
+	}
+	return &rpcpb.DeleteISOResponse{}, nil
 }
 
 // ListVMs implements rpcpb.ManagerServiceServer.

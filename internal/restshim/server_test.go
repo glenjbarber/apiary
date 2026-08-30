@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -63,6 +64,18 @@ func (f *fakeClient) GetVM(_ context.Context, in *rpcpb.GetVMRequest, _ ...grpc.
 
 func (f *fakeClient) ListVMs(context.Context, *rpcpb.ListVMsRequest, ...grpc.CallOption) (*rpcpb.ListVMsResponse, error) {
 	return f.listResp, nil
+}
+
+func (f *fakeClient) UploadISO(context.Context, ...grpc.CallOption) (grpc.ClientStreamingClient[rpcpb.UploadISORequest, rpcpb.UploadISOResponse], error) {
+	return nil, fmt.Errorf("fakeClient: UploadISO not implemented")
+}
+
+func (f *fakeClient) ListISOs(context.Context, *rpcpb.ListISOsRequest, ...grpc.CallOption) (*rpcpb.ListISOsResponse, error) {
+	return &rpcpb.ListISOsResponse{}, nil
+}
+
+func (f *fakeClient) DeleteISO(context.Context, *rpcpb.DeleteISORequest, ...grpc.CallOption) (*rpcpb.DeleteISOResponse, error) {
+	return &rpcpb.DeleteISOResponse{}, nil
 }
 
 var _ rpcpb.ManagerServiceClient = (*fakeClient)(nil)

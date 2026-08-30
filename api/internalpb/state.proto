@@ -62,6 +62,12 @@ message VMDefinition {
   // phase_error holds the last reconcile error's message when phase ==
   // VM_PHASE_ERROR; empty otherwise.
   string phase_error = 8;
+
+  // iso_name, if set, names an image already uploaded (via
+  // ManagerService.UploadISO) on the assigned node. The reconciler
+  // resolves it to a local path through internal/isostore and attaches
+  // it as a CD-ROM device - see ADR-0017.
+  string iso_name = 9;
 }
 
 // Command is the typed payload carried in ApplyRequest.payload (replacing

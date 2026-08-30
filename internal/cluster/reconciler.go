@@ -69,6 +69,13 @@ type vmManager interface {
 	DestroyVM(ctx context.Context, name string) error
 }
 
+// isoResolver is the subset of *isostore.Manager the reconciler needs,
+// for the same reason as raftClient. *isostore.Manager satisfies this
+// today.
+type isoResolver interface {
+	Path(name string) (string, bool, error)
+}
+
 // Reconciler provisions local ZFS storage - and, if Bhyve is set, a
 // running bhyve VM backed by that storage - for VMs assigned to this
 // node, based on VMDefinition.node_id in raft's ephemeral state. It also
@@ -95,6 +102,17 @@ type Reconciler struct {
 	// DiskSizeMB sizes the sparse disk image created for each VM's boot
 	// disk. Defaults to 10240 (10GiB) if zero.
 	DiskSizeMB uint64
+
+	// Bridge, if set, is passed through to every VM Bhyve creates,
+	// attaching it to this existing bridge(4) interface. Empty disables
+	// networking - see internal/bhyve's own Config.Bridge doc comment.
+	Bridge string
+
+	// ISOs resolves a VM's ISOName to a local file path, for VMs that
+	// name an installer image to boot from. Optional: nil (or an unset
+	// ISOName) means no CD-ROM is attached, the same opt-in pattern as
+	// Bhyve/Bridge above.
+	ISOs isoResolver
 }
 
 // RunOnce fetches the current VM list and, for each VM assigned to
@@ -124,6 +142,7 @@ func (r *Reconciler) RunOnce(ctx context.Context) error {
 			MemoryMB: vm.GetMemoryMb(),
 			Deleting: vm.GetDesiredState() == internalpb.VMState_VM_STATE_DELETING,
 			Phase:    phaseToString(vm.GetPhase()),
+			ISOName:  vm.GetIsoName(),
 		})
 	}
 
@@ -303,11 +322,28 @@ func (r *Reconciler) ensureVM(ctx context.Context, vm VMPlacement) error {
 		memoryMB = defaultMemoryMB
 	}
 
+	var isoPath string
+	if vm.ISOName != "" {
+		if r.ISOs == nil {
+			return fmt.Errorf("VM names ISO %q but no ISO store is configured on this node", vm.ISOName)
+		}
+		path, ok, err := r.ISOs.Path(vm.ISOName)
+		if err != nil {
+			return fmt.Errorf("resolving ISO %q: %w", vm.ISOName, err)
+		}
+		if !ok {
+			return fmt.Errorf("ISO %q not found", vm.ISOName)
+		}
+		isoPath = path
+	}
+
 	if err := r.Bhyve.CreateVM(ctx, vm.ID, bhyve.Config{
 		CPUs:     cpus,
 		MemoryMB: memoryMB,
 		BootROM:  r.BootROM,
 		DiskPath: diskPath,
+		Bridge:   r.Bridge,
+		ISOPath:  isoPath,
 	}); err != nil {
 		return fmt.Errorf("creating bhyve VM: %w", err)
 	}

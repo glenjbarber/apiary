@@ -140,15 +140,20 @@ func (VMPhase) EnumDescriptor() ([]byte, []int) {
 }
 
 type VMDefinition struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
-	Name          string                 `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
-	Vcpus         uint32                 `protobuf:"varint,3,opt,name=vcpus,proto3" json:"vcpus,omitempty"`
-	MemoryMb      uint64                 `protobuf:"varint,4,opt,name=memory_mb,json=memoryMb,proto3" json:"memory_mb,omitempty"`
-	NodeId        string                 `protobuf:"bytes,5,opt,name=node_id,json=nodeId,proto3" json:"node_id,omitempty"`
-	DesiredState  VMState                `protobuf:"varint,6,opt,name=desired_state,json=desiredState,proto3,enum=apiary.rpc.v1.VMState" json:"desired_state,omitempty"`
-	Phase         VMPhase                `protobuf:"varint,7,opt,name=phase,proto3,enum=apiary.rpc.v1.VMPhase" json:"phase,omitempty"`
-	PhaseError    string                 `protobuf:"bytes,8,opt,name=phase_error,json=phaseError,proto3" json:"phase_error,omitempty"`
+	state        protoimpl.MessageState `protogen:"open.v1"`
+	Id           string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	Name         string                 `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
+	Vcpus        uint32                 `protobuf:"varint,3,opt,name=vcpus,proto3" json:"vcpus,omitempty"`
+	MemoryMb     uint64                 `protobuf:"varint,4,opt,name=memory_mb,json=memoryMb,proto3" json:"memory_mb,omitempty"`
+	NodeId       string                 `protobuf:"bytes,5,opt,name=node_id,json=nodeId,proto3" json:"node_id,omitempty"`
+	DesiredState VMState                `protobuf:"varint,6,opt,name=desired_state,json=desiredState,proto3,enum=apiary.rpc.v1.VMState" json:"desired_state,omitempty"`
+	Phase        VMPhase                `protobuf:"varint,7,opt,name=phase,proto3,enum=apiary.rpc.v1.VMPhase" json:"phase,omitempty"`
+	PhaseError   string                 `protobuf:"bytes,8,opt,name=phase_error,json=phaseError,proto3" json:"phase_error,omitempty"`
+	// iso_name, if set, names an image already uploaded via UploadISO on
+	// the assigned node - the reconciler resolves it to a local path and
+	// attaches it as a CD-ROM device. Empty means no installer image
+	// (the VM's disk is used as-is).
+	IsoName       string `protobuf:"bytes,9,opt,name=iso_name,json=isoName,proto3" json:"iso_name,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -235,6 +240,13 @@ func (x *VMDefinition) GetPhase() VMPhase {
 func (x *VMDefinition) GetPhaseError() string {
 	if x != nil {
 		return x.PhaseError
+	}
+	return ""
+}
+
+func (x *VMDefinition) GetIsoName() string {
+	if x != nil {
+		return x.IsoName
 	}
 	return ""
 }
@@ -944,11 +956,457 @@ func (x *StatusResponse) GetKnownNodeIds() []string {
 	return nil
 }
 
+// UploadISORequest is one message in the UploadISO client stream.
+// Exactly one metadata message must come first, followed by one or
+// more chunk messages carrying the file's bytes in order.
+type UploadISORequest struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Types that are valid to be assigned to Data:
+	//
+	//	*UploadISORequest_Metadata
+	//	*UploadISORequest_Chunk
+	Data          isUploadISORequest_Data `protobuf_oneof:"data"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *UploadISORequest) Reset() {
+	*x = UploadISORequest{}
+	mi := &file_api_rpc_manager_proto_msgTypes[13]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *UploadISORequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*UploadISORequest) ProtoMessage() {}
+
+func (x *UploadISORequest) ProtoReflect() protoreflect.Message {
+	mi := &file_api_rpc_manager_proto_msgTypes[13]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use UploadISORequest.ProtoReflect.Descriptor instead.
+func (*UploadISORequest) Descriptor() ([]byte, []int) {
+	return file_api_rpc_manager_proto_rawDescGZIP(), []int{13}
+}
+
+func (x *UploadISORequest) GetData() isUploadISORequest_Data {
+	if x != nil {
+		return x.Data
+	}
+	return nil
+}
+
+func (x *UploadISORequest) GetMetadata() *ISOUploadMetadata {
+	if x != nil {
+		if x, ok := x.Data.(*UploadISORequest_Metadata); ok {
+			return x.Metadata
+		}
+	}
+	return nil
+}
+
+func (x *UploadISORequest) GetChunk() []byte {
+	if x != nil {
+		if x, ok := x.Data.(*UploadISORequest_Chunk); ok {
+			return x.Chunk
+		}
+	}
+	return nil
+}
+
+type isUploadISORequest_Data interface {
+	isUploadISORequest_Data()
+}
+
+type UploadISORequest_Metadata struct {
+	Metadata *ISOUploadMetadata `protobuf:"bytes,1,opt,name=metadata,proto3,oneof"`
+}
+
+type UploadISORequest_Chunk struct {
+	Chunk []byte `protobuf:"bytes,2,opt,name=chunk,proto3,oneof"`
+}
+
+func (*UploadISORequest_Metadata) isUploadISORequest_Data() {}
+
+func (*UploadISORequest_Chunk) isUploadISORequest_Data() {}
+
+type ISOUploadMetadata struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	Name  string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	// expected_sha256 is required (see ADR-0017) - an upload with no hash
+	// to verify against is exactly the failure mode this API exists to
+	// prevent.
+	ExpectedSha256 string `protobuf:"bytes,2,opt,name=expected_sha256,json=expectedSha256,proto3" json:"expected_sha256,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
+}
+
+func (x *ISOUploadMetadata) Reset() {
+	*x = ISOUploadMetadata{}
+	mi := &file_api_rpc_manager_proto_msgTypes[14]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ISOUploadMetadata) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ISOUploadMetadata) ProtoMessage() {}
+
+func (x *ISOUploadMetadata) ProtoReflect() protoreflect.Message {
+	mi := &file_api_rpc_manager_proto_msgTypes[14]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ISOUploadMetadata.ProtoReflect.Descriptor instead.
+func (*ISOUploadMetadata) Descriptor() ([]byte, []int) {
+	return file_api_rpc_manager_proto_rawDescGZIP(), []int{14}
+}
+
+func (x *ISOUploadMetadata) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *ISOUploadMetadata) GetExpectedSha256() string {
+	if x != nil {
+		return x.ExpectedSha256
+	}
+	return ""
+}
+
+type UploadISOResponse struct {
+	state     protoimpl.MessageState `protogen:"open.v1"`
+	Name      string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	SizeBytes uint64                 `protobuf:"varint,2,opt,name=size_bytes,json=sizeBytes,proto3" json:"size_bytes,omitempty"`
+	Sha256    string                 `protobuf:"bytes,3,opt,name=sha256,proto3" json:"sha256,omitempty"`
+	// error is set (with name/size_bytes/sha256 left at zero values) if
+	// the upload was rejected - most commonly a hash mismatch.
+	Error         string `protobuf:"bytes,4,opt,name=error,proto3" json:"error,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *UploadISOResponse) Reset() {
+	*x = UploadISOResponse{}
+	mi := &file_api_rpc_manager_proto_msgTypes[15]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *UploadISOResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*UploadISOResponse) ProtoMessage() {}
+
+func (x *UploadISOResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_api_rpc_manager_proto_msgTypes[15]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use UploadISOResponse.ProtoReflect.Descriptor instead.
+func (*UploadISOResponse) Descriptor() ([]byte, []int) {
+	return file_api_rpc_manager_proto_rawDescGZIP(), []int{15}
+}
+
+func (x *UploadISOResponse) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *UploadISOResponse) GetSizeBytes() uint64 {
+	if x != nil {
+		return x.SizeBytes
+	}
+	return 0
+}
+
+func (x *UploadISOResponse) GetSha256() string {
+	if x != nil {
+		return x.Sha256
+	}
+	return ""
+}
+
+func (x *UploadISOResponse) GetError() string {
+	if x != nil {
+		return x.Error
+	}
+	return ""
+}
+
+type ListISOsRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListISOsRequest) Reset() {
+	*x = ListISOsRequest{}
+	mi := &file_api_rpc_manager_proto_msgTypes[16]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListISOsRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListISOsRequest) ProtoMessage() {}
+
+func (x *ListISOsRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_api_rpc_manager_proto_msgTypes[16]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListISOsRequest.ProtoReflect.Descriptor instead.
+func (*ListISOsRequest) Descriptor() ([]byte, []int) {
+	return file_api_rpc_manager_proto_rawDescGZIP(), []int{16}
+}
+
+type ISOInfo struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	SizeBytes     uint64                 `protobuf:"varint,2,opt,name=size_bytes,json=sizeBytes,proto3" json:"size_bytes,omitempty"`
+	Sha256        string                 `protobuf:"bytes,3,opt,name=sha256,proto3" json:"sha256,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ISOInfo) Reset() {
+	*x = ISOInfo{}
+	mi := &file_api_rpc_manager_proto_msgTypes[17]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ISOInfo) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ISOInfo) ProtoMessage() {}
+
+func (x *ISOInfo) ProtoReflect() protoreflect.Message {
+	mi := &file_api_rpc_manager_proto_msgTypes[17]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ISOInfo.ProtoReflect.Descriptor instead.
+func (*ISOInfo) Descriptor() ([]byte, []int) {
+	return file_api_rpc_manager_proto_rawDescGZIP(), []int{17}
+}
+
+func (x *ISOInfo) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *ISOInfo) GetSizeBytes() uint64 {
+	if x != nil {
+		return x.SizeBytes
+	}
+	return 0
+}
+
+func (x *ISOInfo) GetSha256() string {
+	if x != nil {
+		return x.Sha256
+	}
+	return ""
+}
+
+type ListISOsResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Isos          []*ISOInfo             `protobuf:"bytes,1,rep,name=isos,proto3" json:"isos,omitempty"`
+	Error         string                 `protobuf:"bytes,2,opt,name=error,proto3" json:"error,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListISOsResponse) Reset() {
+	*x = ListISOsResponse{}
+	mi := &file_api_rpc_manager_proto_msgTypes[18]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListISOsResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListISOsResponse) ProtoMessage() {}
+
+func (x *ListISOsResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_api_rpc_manager_proto_msgTypes[18]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListISOsResponse.ProtoReflect.Descriptor instead.
+func (*ListISOsResponse) Descriptor() ([]byte, []int) {
+	return file_api_rpc_manager_proto_rawDescGZIP(), []int{18}
+}
+
+func (x *ListISOsResponse) GetIsos() []*ISOInfo {
+	if x != nil {
+		return x.Isos
+	}
+	return nil
+}
+
+func (x *ListISOsResponse) GetError() string {
+	if x != nil {
+		return x.Error
+	}
+	return ""
+}
+
+type DeleteISORequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *DeleteISORequest) Reset() {
+	*x = DeleteISORequest{}
+	mi := &file_api_rpc_manager_proto_msgTypes[19]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DeleteISORequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DeleteISORequest) ProtoMessage() {}
+
+func (x *DeleteISORequest) ProtoReflect() protoreflect.Message {
+	mi := &file_api_rpc_manager_proto_msgTypes[19]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DeleteISORequest.ProtoReflect.Descriptor instead.
+func (*DeleteISORequest) Descriptor() ([]byte, []int) {
+	return file_api_rpc_manager_proto_rawDescGZIP(), []int{19}
+}
+
+func (x *DeleteISORequest) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+type DeleteISOResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Error         string                 `protobuf:"bytes,1,opt,name=error,proto3" json:"error,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *DeleteISOResponse) Reset() {
+	*x = DeleteISOResponse{}
+	mi := &file_api_rpc_manager_proto_msgTypes[20]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DeleteISOResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DeleteISOResponse) ProtoMessage() {}
+
+func (x *DeleteISOResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_api_rpc_manager_proto_msgTypes[20]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DeleteISOResponse.ProtoReflect.Descriptor instead.
+func (*DeleteISOResponse) Descriptor() ([]byte, []int) {
+	return file_api_rpc_manager_proto_rawDescGZIP(), []int{20}
+}
+
+func (x *DeleteISOResponse) GetError() string {
+	if x != nil {
+		return x.Error
+	}
+	return ""
+}
+
 var File_api_rpc_manager_proto protoreflect.FileDescriptor
 
 const file_api_rpc_manager_proto_rawDesc = "" +
 	"\n" +
-	"\x15api/rpc/manager.proto\x12\rapiary.rpc.v1\"\x8a\x02\n" +
+	"\x15api/rpc/manager.proto\x12\rapiary.rpc.v1\"\xa5\x02\n" +
 	"\fVMDefinition\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x14\n" +
@@ -958,7 +1416,8 @@ const file_api_rpc_manager_proto_rawDesc = "" +
 	"\rdesired_state\x18\x06 \x01(\x0e2\x16.apiary.rpc.v1.VMStateR\fdesiredState\x12,\n" +
 	"\x05phase\x18\a \x01(\x0e2\x16.apiary.rpc.v1.VMPhaseR\x05phase\x12\x1f\n" +
 	"\vphase_error\x18\b \x01(\tR\n" +
-	"phaseError\"]\n" +
+	"phaseError\x12\x19\n" +
+	"\biso_name\x18\t \x01(\tR\aisoName\"]\n" +
 	"\x0fCreateVMRequest\x12+\n" +
 	"\x02vm\x18\x01 \x01(\v2\x1b.apiary.rpc.v1.VMDefinitionR\x02vm\x12\x1d\n" +
 	"\n" +
@@ -1015,7 +1474,33 @@ const file_api_rpc_manager_proto_rawDesc = "" +
 	"\n" +
 	"raft_state\x18\t \x01(\tR\traftState\x12$\n" +
 	"\x0eknown_node_ids\x18\n" +
-	" \x03(\tR\fknownNodeIds*f\n" +
+	" \x03(\tR\fknownNodeIds\"r\n" +
+	"\x10UploadISORequest\x12>\n" +
+	"\bmetadata\x18\x01 \x01(\v2 .apiary.rpc.v1.ISOUploadMetadataH\x00R\bmetadata\x12\x16\n" +
+	"\x05chunk\x18\x02 \x01(\fH\x00R\x05chunkB\x06\n" +
+	"\x04data\"P\n" +
+	"\x11ISOUploadMetadata\x12\x12\n" +
+	"\x04name\x18\x01 \x01(\tR\x04name\x12'\n" +
+	"\x0fexpected_sha256\x18\x02 \x01(\tR\x0eexpectedSha256\"t\n" +
+	"\x11UploadISOResponse\x12\x12\n" +
+	"\x04name\x18\x01 \x01(\tR\x04name\x12\x1d\n" +
+	"\n" +
+	"size_bytes\x18\x02 \x01(\x04R\tsizeBytes\x12\x16\n" +
+	"\x06sha256\x18\x03 \x01(\tR\x06sha256\x12\x14\n" +
+	"\x05error\x18\x04 \x01(\tR\x05error\"\x11\n" +
+	"\x0fListISOsRequest\"T\n" +
+	"\aISOInfo\x12\x12\n" +
+	"\x04name\x18\x01 \x01(\tR\x04name\x12\x1d\n" +
+	"\n" +
+	"size_bytes\x18\x02 \x01(\x04R\tsizeBytes\x12\x16\n" +
+	"\x06sha256\x18\x03 \x01(\tR\x06sha256\"T\n" +
+	"\x10ListISOsResponse\x12*\n" +
+	"\x04isos\x18\x01 \x03(\v2\x16.apiary.rpc.v1.ISOInfoR\x04isos\x12\x14\n" +
+	"\x05error\x18\x02 \x01(\tR\x05error\"&\n" +
+	"\x10DeleteISORequest\x12\x12\n" +
+	"\x04name\x18\x01 \x01(\tR\x04name\")\n" +
+	"\x11DeleteISOResponse\x12\x14\n" +
+	"\x05error\x18\x01 \x01(\tR\x05error*f\n" +
 	"\aVMState\x12\x18\n" +
 	"\x14VM_STATE_UNSPECIFIED\x10\x00\x12\x14\n" +
 	"\x10VM_STATE_STOPPED\x10\x01\x12\x14\n" +
@@ -1026,14 +1511,17 @@ const file_api_rpc_manager_proto_rawDesc = "" +
 	"\x11VM_PHASE_CREATING\x10\x01\x12\x12\n" +
 	"\x0eVM_PHASE_READY\x10\x02\x12\x15\n" +
 	"\x11VM_PHASE_DELETING\x10\x03\x12\x12\n" +
-	"\x0eVM_PHASE_ERROR\x10\x042\xcc\x03\n" +
+	"\x0eVM_PHASE_ERROR\x10\x042\xbb\x05\n" +
 	"\x0eManagerService\x12E\n" +
 	"\x06Status\x12\x1c.apiary.rpc.v1.StatusRequest\x1a\x1d.apiary.rpc.v1.StatusResponse\x12K\n" +
 	"\bCreateVM\x12\x1e.apiary.rpc.v1.CreateVMRequest\x1a\x1f.apiary.rpc.v1.CreateVMResponse\x12K\n" +
 	"\bUpdateVM\x12\x1e.apiary.rpc.v1.UpdateVMRequest\x1a\x1f.apiary.rpc.v1.UpdateVMResponse\x12K\n" +
 	"\bDeleteVM\x12\x1e.apiary.rpc.v1.DeleteVMRequest\x1a\x1f.apiary.rpc.v1.DeleteVMResponse\x12B\n" +
 	"\x05GetVM\x12\x1b.apiary.rpc.v1.GetVMRequest\x1a\x1c.apiary.rpc.v1.GetVMResponse\x12H\n" +
-	"\aListVMs\x12\x1d.apiary.rpc.v1.ListVMsRequest\x1a\x1e.apiary.rpc.v1.ListVMsResponseB-Z+github.com/glenjbarber/apiary/api/rpc;rpcpbb\x06proto3"
+	"\aListVMs\x12\x1d.apiary.rpc.v1.ListVMsRequest\x1a\x1e.apiary.rpc.v1.ListVMsResponse\x12P\n" +
+	"\tUploadISO\x12\x1f.apiary.rpc.v1.UploadISORequest\x1a .apiary.rpc.v1.UploadISOResponse(\x01\x12K\n" +
+	"\bListISOs\x12\x1e.apiary.rpc.v1.ListISOsRequest\x1a\x1f.apiary.rpc.v1.ListISOsResponse\x12N\n" +
+	"\tDeleteISO\x12\x1f.apiary.rpc.v1.DeleteISORequest\x1a .apiary.rpc.v1.DeleteISOResponseB-Z+github.com/glenjbarber/apiary/api/rpc;rpcpbb\x06proto3"
 
 var (
 	file_api_rpc_manager_proto_rawDescOnce sync.Once
@@ -1048,23 +1536,31 @@ func file_api_rpc_manager_proto_rawDescGZIP() []byte {
 }
 
 var file_api_rpc_manager_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
-var file_api_rpc_manager_proto_msgTypes = make([]protoimpl.MessageInfo, 13)
+var file_api_rpc_manager_proto_msgTypes = make([]protoimpl.MessageInfo, 21)
 var file_api_rpc_manager_proto_goTypes = []any{
-	(VMState)(0),             // 0: apiary.rpc.v1.VMState
-	(VMPhase)(0),             // 1: apiary.rpc.v1.VMPhase
-	(*VMDefinition)(nil),     // 2: apiary.rpc.v1.VMDefinition
-	(*CreateVMRequest)(nil),  // 3: apiary.rpc.v1.CreateVMRequest
-	(*CreateVMResponse)(nil), // 4: apiary.rpc.v1.CreateVMResponse
-	(*UpdateVMRequest)(nil),  // 5: apiary.rpc.v1.UpdateVMRequest
-	(*UpdateVMResponse)(nil), // 6: apiary.rpc.v1.UpdateVMResponse
-	(*DeleteVMRequest)(nil),  // 7: apiary.rpc.v1.DeleteVMRequest
-	(*DeleteVMResponse)(nil), // 8: apiary.rpc.v1.DeleteVMResponse
-	(*GetVMRequest)(nil),     // 9: apiary.rpc.v1.GetVMRequest
-	(*GetVMResponse)(nil),    // 10: apiary.rpc.v1.GetVMResponse
-	(*ListVMsRequest)(nil),   // 11: apiary.rpc.v1.ListVMsRequest
-	(*ListVMsResponse)(nil),  // 12: apiary.rpc.v1.ListVMsResponse
-	(*StatusRequest)(nil),    // 13: apiary.rpc.v1.StatusRequest
-	(*StatusResponse)(nil),   // 14: apiary.rpc.v1.StatusResponse
+	(VMState)(0),              // 0: apiary.rpc.v1.VMState
+	(VMPhase)(0),              // 1: apiary.rpc.v1.VMPhase
+	(*VMDefinition)(nil),      // 2: apiary.rpc.v1.VMDefinition
+	(*CreateVMRequest)(nil),   // 3: apiary.rpc.v1.CreateVMRequest
+	(*CreateVMResponse)(nil),  // 4: apiary.rpc.v1.CreateVMResponse
+	(*UpdateVMRequest)(nil),   // 5: apiary.rpc.v1.UpdateVMRequest
+	(*UpdateVMResponse)(nil),  // 6: apiary.rpc.v1.UpdateVMResponse
+	(*DeleteVMRequest)(nil),   // 7: apiary.rpc.v1.DeleteVMRequest
+	(*DeleteVMResponse)(nil),  // 8: apiary.rpc.v1.DeleteVMResponse
+	(*GetVMRequest)(nil),      // 9: apiary.rpc.v1.GetVMRequest
+	(*GetVMResponse)(nil),     // 10: apiary.rpc.v1.GetVMResponse
+	(*ListVMsRequest)(nil),    // 11: apiary.rpc.v1.ListVMsRequest
+	(*ListVMsResponse)(nil),   // 12: apiary.rpc.v1.ListVMsResponse
+	(*StatusRequest)(nil),     // 13: apiary.rpc.v1.StatusRequest
+	(*StatusResponse)(nil),    // 14: apiary.rpc.v1.StatusResponse
+	(*UploadISORequest)(nil),  // 15: apiary.rpc.v1.UploadISORequest
+	(*ISOUploadMetadata)(nil), // 16: apiary.rpc.v1.ISOUploadMetadata
+	(*UploadISOResponse)(nil), // 17: apiary.rpc.v1.UploadISOResponse
+	(*ListISOsRequest)(nil),   // 18: apiary.rpc.v1.ListISOsRequest
+	(*ISOInfo)(nil),           // 19: apiary.rpc.v1.ISOInfo
+	(*ListISOsResponse)(nil),  // 20: apiary.rpc.v1.ListISOsResponse
+	(*DeleteISORequest)(nil),  // 21: apiary.rpc.v1.DeleteISORequest
+	(*DeleteISOResponse)(nil), // 22: apiary.rpc.v1.DeleteISOResponse
 }
 var file_api_rpc_manager_proto_depIdxs = []int32{
 	0,  // 0: apiary.rpc.v1.VMDefinition.desired_state:type_name -> apiary.rpc.v1.VMState
@@ -1076,23 +1572,31 @@ var file_api_rpc_manager_proto_depIdxs = []int32{
 	2,  // 6: apiary.rpc.v1.DeleteVMResponse.vm:type_name -> apiary.rpc.v1.VMDefinition
 	2,  // 7: apiary.rpc.v1.GetVMResponse.vm:type_name -> apiary.rpc.v1.VMDefinition
 	2,  // 8: apiary.rpc.v1.ListVMsResponse.vms:type_name -> apiary.rpc.v1.VMDefinition
-	13, // 9: apiary.rpc.v1.ManagerService.Status:input_type -> apiary.rpc.v1.StatusRequest
-	3,  // 10: apiary.rpc.v1.ManagerService.CreateVM:input_type -> apiary.rpc.v1.CreateVMRequest
-	5,  // 11: apiary.rpc.v1.ManagerService.UpdateVM:input_type -> apiary.rpc.v1.UpdateVMRequest
-	7,  // 12: apiary.rpc.v1.ManagerService.DeleteVM:input_type -> apiary.rpc.v1.DeleteVMRequest
-	9,  // 13: apiary.rpc.v1.ManagerService.GetVM:input_type -> apiary.rpc.v1.GetVMRequest
-	11, // 14: apiary.rpc.v1.ManagerService.ListVMs:input_type -> apiary.rpc.v1.ListVMsRequest
-	14, // 15: apiary.rpc.v1.ManagerService.Status:output_type -> apiary.rpc.v1.StatusResponse
-	4,  // 16: apiary.rpc.v1.ManagerService.CreateVM:output_type -> apiary.rpc.v1.CreateVMResponse
-	6,  // 17: apiary.rpc.v1.ManagerService.UpdateVM:output_type -> apiary.rpc.v1.UpdateVMResponse
-	8,  // 18: apiary.rpc.v1.ManagerService.DeleteVM:output_type -> apiary.rpc.v1.DeleteVMResponse
-	10, // 19: apiary.rpc.v1.ManagerService.GetVM:output_type -> apiary.rpc.v1.GetVMResponse
-	12, // 20: apiary.rpc.v1.ManagerService.ListVMs:output_type -> apiary.rpc.v1.ListVMsResponse
-	15, // [15:21] is the sub-list for method output_type
-	9,  // [9:15] is the sub-list for method input_type
-	9,  // [9:9] is the sub-list for extension type_name
-	9,  // [9:9] is the sub-list for extension extendee
-	0,  // [0:9] is the sub-list for field type_name
+	16, // 9: apiary.rpc.v1.UploadISORequest.metadata:type_name -> apiary.rpc.v1.ISOUploadMetadata
+	19, // 10: apiary.rpc.v1.ListISOsResponse.isos:type_name -> apiary.rpc.v1.ISOInfo
+	13, // 11: apiary.rpc.v1.ManagerService.Status:input_type -> apiary.rpc.v1.StatusRequest
+	3,  // 12: apiary.rpc.v1.ManagerService.CreateVM:input_type -> apiary.rpc.v1.CreateVMRequest
+	5,  // 13: apiary.rpc.v1.ManagerService.UpdateVM:input_type -> apiary.rpc.v1.UpdateVMRequest
+	7,  // 14: apiary.rpc.v1.ManagerService.DeleteVM:input_type -> apiary.rpc.v1.DeleteVMRequest
+	9,  // 15: apiary.rpc.v1.ManagerService.GetVM:input_type -> apiary.rpc.v1.GetVMRequest
+	11, // 16: apiary.rpc.v1.ManagerService.ListVMs:input_type -> apiary.rpc.v1.ListVMsRequest
+	15, // 17: apiary.rpc.v1.ManagerService.UploadISO:input_type -> apiary.rpc.v1.UploadISORequest
+	18, // 18: apiary.rpc.v1.ManagerService.ListISOs:input_type -> apiary.rpc.v1.ListISOsRequest
+	21, // 19: apiary.rpc.v1.ManagerService.DeleteISO:input_type -> apiary.rpc.v1.DeleteISORequest
+	14, // 20: apiary.rpc.v1.ManagerService.Status:output_type -> apiary.rpc.v1.StatusResponse
+	4,  // 21: apiary.rpc.v1.ManagerService.CreateVM:output_type -> apiary.rpc.v1.CreateVMResponse
+	6,  // 22: apiary.rpc.v1.ManagerService.UpdateVM:output_type -> apiary.rpc.v1.UpdateVMResponse
+	8,  // 23: apiary.rpc.v1.ManagerService.DeleteVM:output_type -> apiary.rpc.v1.DeleteVMResponse
+	10, // 24: apiary.rpc.v1.ManagerService.GetVM:output_type -> apiary.rpc.v1.GetVMResponse
+	12, // 25: apiary.rpc.v1.ManagerService.ListVMs:output_type -> apiary.rpc.v1.ListVMsResponse
+	17, // 26: apiary.rpc.v1.ManagerService.UploadISO:output_type -> apiary.rpc.v1.UploadISOResponse
+	20, // 27: apiary.rpc.v1.ManagerService.ListISOs:output_type -> apiary.rpc.v1.ListISOsResponse
+	22, // 28: apiary.rpc.v1.ManagerService.DeleteISO:output_type -> apiary.rpc.v1.DeleteISOResponse
+	20, // [20:29] is the sub-list for method output_type
+	11, // [11:20] is the sub-list for method input_type
+	11, // [11:11] is the sub-list for extension type_name
+	11, // [11:11] is the sub-list for extension extendee
+	0,  // [0:11] is the sub-list for field type_name
 }
 
 func init() { file_api_rpc_manager_proto_init() }
@@ -1100,13 +1604,17 @@ func file_api_rpc_manager_proto_init() {
 	if File_api_rpc_manager_proto != nil {
 		return
 	}
+	file_api_rpc_manager_proto_msgTypes[13].OneofWrappers = []any{
+		(*UploadISORequest_Metadata)(nil),
+		(*UploadISORequest_Chunk)(nil),
+	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_api_rpc_manager_proto_rawDesc), len(file_api_rpc_manager_proto_rawDesc)),
 			NumEnums:      2,
-			NumMessages:   13,
+			NumMessages:   21,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

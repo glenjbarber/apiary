@@ -2,6 +2,7 @@ package frontend
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -48,6 +49,18 @@ func (f *fakeClient) DeleteVM(_ context.Context, in *rpcpb.DeleteVMRequest, _ ..
 
 func (f *fakeClient) GetVM(context.Context, *rpcpb.GetVMRequest, ...grpc.CallOption) (*rpcpb.GetVMResponse, error) {
 	return &rpcpb.GetVMResponse{}, nil
+}
+
+func (f *fakeClient) UploadISO(context.Context, ...grpc.CallOption) (grpc.ClientStreamingClient[rpcpb.UploadISORequest, rpcpb.UploadISOResponse], error) {
+	return nil, fmt.Errorf("fakeClient: UploadISO not implemented")
+}
+
+func (f *fakeClient) ListISOs(context.Context, *rpcpb.ListISOsRequest, ...grpc.CallOption) (*rpcpb.ListISOsResponse, error) {
+	return &rpcpb.ListISOsResponse{}, nil
+}
+
+func (f *fakeClient) DeleteISO(context.Context, *rpcpb.DeleteISORequest, ...grpc.CallOption) (*rpcpb.DeleteISOResponse, error) {
+	return &rpcpb.DeleteISOResponse{}, nil
 }
 
 func (f *fakeClient) ListVMs(context.Context, *rpcpb.ListVMsRequest, ...grpc.CallOption) (*rpcpb.ListVMsResponse, error) {

@@ -30,6 +30,12 @@ type Config struct {
 	// at all - useful for lifecycle testing, not for running anything.
 	DiskPath string
 
+	// ISOPath, if set, is attached read-only as a CD-ROM (AHCI) device -
+	// an installer image to boot from. See internal/isostore for how
+	// uploaded images are stored and verified; this field just takes
+	// whatever local path the caller resolved from there.
+	ISOPath string
+
 	// Bridge, if set, is the name of an existing bridge(4) interface
 	// (e.g. "bridge0", already configured with whatever uplink member
 	// the host needs - Apiary doesn't create or own the bridge itself,
@@ -135,6 +141,9 @@ func (m *Manager) CreateVM(ctx context.Context, name string, cfg Config) error {
 	}
 	if tapName != "" {
 		args = append(args, "-s", "5,virtio-net,"+tapName)
+	}
+	if cfg.ISOPath != "" {
+		args = append(args, "-s", "6,ahci-cd,"+cfg.ISOPath)
 	}
 	args = append(args,
 		"-s", "31,lpc",

@@ -442,3 +442,71 @@ func TestReconciler_RunOnce_DeletingVMPropagatesTeardownError(t *testing.T) {
 		t.Errorf("purgedIDs = %v, want none (teardown failed, must not purge)", got)
 	}
 }
+
+type fakeISOResolver struct {
+	paths   map[string]string
+	pathErr error
+}
+
+func (f *fakeISOResolver) Path(name string) (string, bool, error) {
+	if f.pathErr != nil {
+		return "", false, f.pathErr
+	}
+	path, ok := f.paths[name]
+	return path, ok, nil
+}
+
+func TestReconciler_RunOnce_AttachesResolvedISOAndBridge(t *testing.T) {
+	raft := &fakeRaftClient{resp: &internalpb.ListVMsResponse{
+		Vms: []*internalpb.VMDefinition{{Id: "vm-1", NodeId: "node-a", IsoName: "debian.iso"}},
+	}}
+	zfs := newFakeDatasetManager()
+	zfs.mountpointFor["vm-1"] = t.TempDir()
+	vms := newFakeVMManager()
+	isos := &fakeISOResolver{paths: map[string]string{"debian.iso": "/isos/debian.iso"}}
+
+	r := &Reconciler{Raft: raft, ZFS: zfs, Bhyve: vms, ISOs: isos, Bridge: "bridge0", LocalNodeID: "node-a", BootROM: "/fw/UEFI.fd"}
+	if err := r.RunOnce(context.Background()); err != nil {
+		t.Fatalf("RunOnce() error: %v", err)
+	}
+
+	cfg := vms.lastCfg["vm-1"]
+	if cfg.ISOPath != "/isos/debian.iso" {
+		t.Errorf("CreateVM() cfg.ISOPath = %q, want /isos/debian.iso", cfg.ISOPath)
+	}
+	if cfg.Bridge != "bridge0" {
+		t.Errorf("CreateVM() cfg.Bridge = %q, want bridge0", cfg.Bridge)
+	}
+}
+
+func TestReconciler_RunOnce_UnresolvableISOFailsWithoutCreatingVM(t *testing.T) {
+	raft := &fakeRaftClient{resp: &internalpb.ListVMsResponse{
+		Vms: []*internalpb.VMDefinition{{Id: "vm-1", NodeId: "node-a", IsoName: "missing.iso"}},
+	}}
+	zfs := newFakeDatasetManager()
+	zfs.mountpointFor["vm-1"] = t.TempDir()
+	vms := newFakeVMManager()
+	isos := &fakeISOResolver{paths: map[string]string{}}
+
+	r := &Reconciler{Raft: raft, ZFS: zfs, Bhyve: vms, ISOs: isos, LocalNodeID: "node-a", BootROM: "/fw/UEFI.fd"}
+	if err := r.RunOnce(context.Background()); err == nil {
+		t.Fatalf("RunOnce() = nil error, want a not-found error for the unresolvable ISO")
+	}
+	if len(vms.created) != 0 {
+		t.Errorf("created = %v, want none (ISO resolution should fail before CreateVM)", vms.created)
+	}
+}
+
+func TestReconciler_RunOnce_ISONamedButNoStoreConfiguredIsError(t *testing.T) {
+	raft := &fakeRaftClient{resp: &internalpb.ListVMsResponse{
+		Vms: []*internalpb.VMDefinition{{Id: "vm-1", NodeId: "node-a", IsoName: "debian.iso"}},
+	}}
+	zfs := newFakeDatasetManager()
+	zfs.mountpointFor["vm-1"] = t.TempDir()
+	vms := newFakeVMManager()
+
+	r := &Reconciler{Raft: raft, ZFS: zfs, Bhyve: vms, LocalNodeID: "node-a", BootROM: "/fw/UEFI.fd"} // ISOs left nil
+	if err := r.RunOnce(context.Background()); err == nil {
+		t.Fatalf("RunOnce() = nil error, want an error since no ISO store is configured")
+	}
+}

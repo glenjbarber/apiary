@@ -20,6 +20,17 @@ service ManagerService {
   // read consistency model is deliberately as simple as its write model.
   rpc GetVM(GetVMRequest) returns (GetVMResponse);
   rpc ListVMs(ListVMsRequest) returns (ListVMsResponse);
+
+  // UploadISO, ListISOs, and DeleteISO manage installer images stored
+  // locally on *this* managerd's own node - unlike VM definitions,
+  // these are physical data (see CLAUDE.md's physical/ephemeral
+  // distinction) and are never replicated through raft. UploadISO is
+  // client-streaming so a large image doesn't have to fit in one
+  // message; see ADR-0017 for why verification happens server-side
+  // rather than trusting a client-computed hash.
+  rpc UploadISO(stream UploadISORequest) returns (UploadISOResponse);
+  rpc ListISOs(ListISOsRequest) returns (ListISOsResponse);
+  rpc DeleteISO(DeleteISORequest) returns (DeleteISOResponse);
 }
 
 // VMState mirrors api/internalpb's VMState. Kept as a separate type
@@ -58,6 +69,12 @@ message VMDefinition {
   VMState desired_state = 6;
   VMPhase phase = 7;
   string phase_error = 8;
+
+  // iso_name, if set, names an image already uploaded via UploadISO on
+  // the assigned node - the reconciler resolves it to a local path and
+  // attaches it as a CD-ROM device. Empty means no installer image
+  // (the VM's disk is used as-is).
+  string iso_name = 9;
 }
 
 message CreateVMRequest {
@@ -137,4 +154,54 @@ message StatusResponse {
   // this node's raftd. Useful for clients (e.g. the web UI) that need to
   // offer a choice of nodes without a separate scheduling component.
   repeated string known_node_ids = 10;
+}
+
+// UploadISORequest is one message in the UploadISO client stream.
+// Exactly one metadata message must come first, followed by one or
+// more chunk messages carrying the file's bytes in order.
+message UploadISORequest {
+  oneof data {
+    ISOUploadMetadata metadata = 1;
+    bytes chunk = 2;
+  }
+}
+
+message ISOUploadMetadata {
+  string name = 1;
+
+  // expected_sha256 is required (see ADR-0017) - an upload with no hash
+  // to verify against is exactly the failure mode this API exists to
+  // prevent.
+  string expected_sha256 = 2;
+}
+
+message UploadISOResponse {
+  string name = 1;
+  uint64 size_bytes = 2;
+  string sha256 = 3;
+
+  // error is set (with name/size_bytes/sha256 left at zero values) if
+  // the upload was rejected - most commonly a hash mismatch.
+  string error = 4;
+}
+
+message ListISOsRequest {}
+
+message ISOInfo {
+  string name = 1;
+  uint64 size_bytes = 2;
+  string sha256 = 3;
+}
+
+message ListISOsResponse {
+  repeated ISOInfo isos = 1;
+  string error = 2;
+}
+
+message DeleteISORequest {
+  string name = 1;
+}
+
+message DeleteISOResponse {
+  string error = 1;
 }
