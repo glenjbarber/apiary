@@ -401,8 +401,11 @@ func TestServer_UploadISO_StreamsMetadataThenChunksInOrder(t *testing.T) {
 	if string(gotData) != "data" {
 		t.Errorf("chunk data = %q, want %q", gotData, "data")
 	}
-	if !strings.Contains(rec.Body.String(), `id="iso-error" class="error" hx-swap-oob="true"></div>`) {
-		t.Errorf("expected an empty iso-error oob swap on success, got: %s", rec.Body.String())
+	if !strings.Contains(rec.Body.String(), `id="iso-error" class="error"></div>`) {
+		t.Errorf("expected an empty iso-error div on success, got: %s", rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "Uploaded test.iso successfully") {
+		t.Errorf("expected an explicit success confirmation, got: %s", rec.Body.String())
 	}
 }
 
@@ -421,7 +424,10 @@ func TestServer_UploadISO_HashMismatchShowsErrorNotInline(t *testing.T) {
 		t.Errorf("response missing hash-mismatch error, got: %s", body)
 	}
 	if !strings.Contains(body, `id="iso-error"`) {
-		t.Errorf("error should be an out-of-band swap into #iso-error, got: %s", body)
+		t.Errorf("error should render inside #iso-error, got: %s", body)
+	}
+	if strings.Contains(body, "Uploaded") {
+		t.Errorf("a failed upload should not show a success confirmation, got: %s", body)
 	}
 }
 

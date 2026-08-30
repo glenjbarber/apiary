@@ -37,6 +37,23 @@ type pageData struct {
 	// ISOs lists stored installer images, for both the Images section's
 	// table and the create-VM form's ISO picker.
 	ISOs []isoView
+
+	// ISOFormError reports an upload/delete-specific error for the
+	// Images section. Rendered inside the same #iso-panel target the
+	// upload form's own hx-target points at - not via an out-of-band
+	// swap, unlike #create-error's, because htmx's hx-encoding
+	// "multipart/form-data" doesn't reliably apply hx-swap-oob elements
+	// found in the response (confirmed: the exact same oob markup works
+	// for the non-multipart create-VM form but silently no-ops here).
+	// Empty on the normal index render.
+	ISOFormError string
+
+	// ISOFormSuccess reports a just-completed upload's name, so the
+	// Images panel shows an explicit confirmation rather than success
+	// being indistinguishable from "nothing happened yet" - a large
+	// upload's only other visible change is one more row appearing at
+	// the bottom of a table the user may not be looking at.
+	ISOFormSuccess string
 }
 
 // parseSort reads sort/dir query parameters, defaulting to ascending by
@@ -288,7 +305,7 @@ func (s *Server) handleListISOs(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleUploadISO(w http.ResponseWriter, r *http.Request) {
 	mr, err := r.MultipartReader()
 	if err != nil {
-		s.renderISORowsAndFormError(w, r, "invalid upload: "+err.Error())
+		s.renderISOPanelResult(w, r, "invalid upload: "+err.Error(), "")
 		return
 	}
 
@@ -328,10 +345,10 @@ func (s *Server) handleUploadISO(w http.ResponseWriter, r *http.Request) {
 		uploadErr = fmt.Errorf("%s", result.GetError())
 	}
 	if uploadErr != nil {
-		s.renderISORowsAndFormError(w, r, uploadErr.Error())
+		s.renderISOPanelResult(w, r, uploadErr.Error(), "")
 		return
 	}
-	s.renderISORowsAndFormError(w, r, "")
+	s.renderISOPanelResult(w, r, "", result.GetName())
 }
 
 // uploadISOStream opens managerd's UploadISO client stream, sends the
@@ -371,11 +388,23 @@ func (s *Server) uploadISOStream(r *http.Request, part *multipart.Part, expected
 	return stream.CloseAndRecv()
 }
 
-// renderISORowsAndFormError mirrors renderVMRowsAndFormError: refreshes
-// the Images table and reports an upload/delete-specific error (if any)
-// via an out-of-band swap into index.html's #iso-error slot, rather
-// than inline in the images table.
-func (s *Server) renderISORowsAndFormError(w http.ResponseWriter, r *http.Request, formErr string) {
+// renderISOPanelResult refreshes the whole #iso-panel (error/success
+// slot + images table together) as one target, rather than the out-of-
+// band-swap pattern used elsewhere (renderVMRowsAndFormError/
+// #create-error). That pattern doesn't work here: htmx's hx-encoding
+// "multipart/form-data" doesn't reliably apply hx-swap-oob elements
+// found in the response - confirmed directly, since the identical oob
+// markup works fine for the non-multipart create-VM form. Targeting one
+// combined element sidesteps the issue entirely instead of depending on
+// an htmx behavior that doesn't hold for this request type.
+//
+// formErr and successName are mutually exclusive - callers pass exactly
+// one non-empty. successName exists because a successful upload's only
+// other visible change is one more row appearing in a table the user
+// may not be scrolled to; without an explicit confirmation, "it
+// finished with no error" and "it silently didn't happen" look
+// identical.
+func (s *Server) renderISOPanelResult(w http.ResponseWriter, r *http.Request, formErr, successName string) {
 	isos, fetchErr := s.currentISOs(r)
 	if fetchErr != "" {
 		if formErr == "" {
@@ -384,28 +413,24 @@ func (s *Server) renderISORowsAndFormError(w http.ResponseWriter, r *http.Reques
 			formErr += "; additionally failed to refresh list: " + fetchErr
 		}
 	}
-
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	if err := s.tmpl.ExecuteTemplate(w, "iso_rows", pageData{ISOs: isos}); err != nil {
-		http.Error(w, "template error: "+err.Error(), http.StatusInternalServerError)
-		return
+	var success string
+	if formErr == "" && successName != "" {
+		success = fmt.Sprintf("Uploaded %s successfully.", successName)
 	}
-	if err := s.tmpl.ExecuteTemplate(w, "iso_error", formErr); err != nil {
-		http.Error(w, "template error: "+err.Error(), http.StatusInternalServerError)
-	}
+	s.render(w, "iso_panel", pageData{ISOFormError: formErr, ISOFormSuccess: success, ISOs: isos})
 }
 
 func (s *Server) handleDeleteISO(w http.ResponseWriter, r *http.Request) {
 	resp, err := s.client.DeleteISO(r.Context(), &rpcpb.DeleteISORequest{Name: r.PathValue("name")})
 	if err != nil {
-		s.renderISORowsAndFormError(w, r, err.Error())
+		s.renderISOPanelResult(w, r, err.Error(), "")
 		return
 	}
 	if resp.GetError() != "" {
-		s.renderISORowsAndFormError(w, r, resp.GetError())
+		s.renderISOPanelResult(w, r, resp.GetError(), "")
 		return
 	}
-	s.renderISORowsAndFormError(w, r, "")
+	s.renderISOPanelResult(w, r, "", "")
 }
 
 func (s *Server) render(w http.ResponseWriter, name string, data pageData) {

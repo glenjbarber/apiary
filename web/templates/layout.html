@@ -12,10 +12,32 @@
     form.create-vm, form.upload-iso { display: flex; gap: 0.75rem; align-items: end; flex-wrap: wrap; }
     form.create-vm label, form.upload-iso label { display: flex; flex-direction: column; font-size: 0.85rem; }
     .error { color: #b00020; }
-    /* Fixed height so an appearing/disappearing error doesn't shift
-       the table below it up and down. */
-    #create-error, #iso-error { min-height: 1.25em; margin-top: 0.5rem; }
+    .success { color: #1b5e20; }
+    /* Fixed height so an appearing/disappearing message doesn't shift
+       the table below it up and down; padding/background/border only
+       kick in once there's actual text, via :not(:empty), so the
+       reserved space stays a plain sliver when there's nothing to show. */
+    #create-error, #iso-error, #iso-success {
+      min-height: 1.25em; margin-top: 0.5rem; font-size: 0.9em;
+      word-break: break-word;
+    }
+    #create-error:not(:empty), #iso-error:not(:empty) {
+      background: #fdecea; border: 1px solid #f5c6c0; border-radius: 4px;
+      padding: 0.5rem 0.75rem;
+    }
+    #iso-success:not(:empty) {
+      background: #eaf7ec; border: 1px solid #c2e6c6; border-radius: 4px;
+      padding: 0.5rem 0.75rem;
+    }
     code { font-size: 0.8em; word-break: break-all; }
+    .upload-progress { display: flex; align-items: center; gap: 0.5rem; margin-top: 0.5rem; }
+    .upload-progress progress { flex: 1; max-width: 20rem; height: 1rem; }
+    .upload-progress span { font-size: 0.85em; min-width: 3em; }
+    /* Must come after .upload-progress so it wins on equal specificity -
+       otherwise the class rule's own "display: flex" would override the
+       browser's default [hidden] handling and the bar would never
+       actually hide between uploads. */
+    .upload-progress[hidden] { display: none; }
   </style>
 </head>
 <body>
