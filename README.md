@@ -86,6 +86,15 @@ each design decision, in order.
   anchor. Requires `dnsmasq` installed and `pf` enabled with an
   `anchor "apiary/*"` stanza as one-time host setup. See
   [ADR-0022](docs/adr/0022-network-management.md).
+- **API-key authentication** — `managerd`'s external API can require a
+  bearer API key on every call (`/apikeys` in the web UI to create/list/
+  revoke; off by default, until the first key is created). Keys are
+  replicated cluster-wide like other ephemeral state, only ever stored
+  as a SHA-256 hash, and the raw value is shown exactly once on
+  creation. Enabling it is a one-way door: revoking every key locks the
+  cluster down rather than reopening it, with no way back short of
+  restoring an older raft snapshot. See
+  [ADR-0023](docs/adr/0023-api-key-authentication.md).
 
 **Not yet implemented:**
 
@@ -104,12 +113,16 @@ each design decision, in order.
 - Importing VMs from other hypervisors (e.g. Proxmox): no disk-format
   conversion, and Apiary is UEFI-only. Linux containers have no path at
   all — jails share the host FreeBSD kernel
-- Authentication: the web UI has an optional shared-password login gate
-  (off by default, see above); `raftd`, `managerd`, and `restshim` have
-  none, and there are no user accounts or roles anywhere
+- Authentication: the web UI has its own optional shared-password login
+  gate, and `managerd`'s external API has its own separate optional
+  API-key gate (both off by default, see above); `raftd`'s internal
+  socket and `restshim` have none, and there are no user accounts or
+  roles anywhere (one flat set of API keys, no scoping)
 - **Tabled for now** (evaluated, deliberately deferred):
-  - **Terraform support** — needs real API-key auth (none exists yet)
-    plus a small custom provider against `internal/restshim`'s API
+  - **Terraform support** — `managerd` now has real API-key auth, but
+    still needs a small custom provider against `internal/restshim`'s
+    API, plus wiring a caller's key through `restshim` (itself still not
+    running as its own binary)
   - **Kubernetes support** — not an Apiary gap specifically; no one runs
     `kubelet` natively on FreeBSD (it assumes Linux cgroups/overlayfs).
     The viable path is Linux VMs under bhyve running normal Kubernetes
