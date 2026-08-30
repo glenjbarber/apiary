@@ -59,6 +59,14 @@ type Config struct {
 	// DiskPath.
 	Bridge string
 
+	// MACAddress, if set, is assigned to the virtio-net device (bhyve's
+	// "mac=<addr>" sub-option) instead of bhyve's own default/random
+	// assignment. Set by internal/cluster's Reconciler from a VM's
+	// ephemeral-state-assigned MAC (internal/raft's deriveMAC) when it's
+	// on a NetworkDefinition - see ADR-0022. Meaningless without Bridge
+	// also set (there's no NIC to assign it to otherwise).
+	MACAddress string
+
 	// EnableVNC, if true, attaches a VNC framebuffer device (fbuf) plus a
 	// USB tablet (for absolute mouse positioning - relative mouse motion
 	// over VNC is nearly unusable) so the VM's graphical console can be
@@ -242,7 +250,11 @@ func (m *Manager) CreateVM(ctx context.Context, name string, cfg Config) error {
 		args = append(args, "-s", "4,ahci-hd,"+cfg.DiskPath)
 	}
 	if tapName != "" {
-		args = append(args, "-s", "5,virtio-net,"+tapName)
+		netArg := "5,virtio-net," + tapName
+		if cfg.MACAddress != "" {
+			netArg += ",mac=" + cfg.MACAddress
+		}
+		args = append(args, "-s", netArg)
 	}
 	if cfg.ISOPath != "" {
 		args = append(args, "-s", "6,ahci-cd,"+cfg.ISOPath)
