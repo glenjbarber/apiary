@@ -1877,6 +1877,129 @@ func (x *HostStatsResponse) GetErrors() []string {
 	return nil
 }
 
+type GetVMConsoleRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetVMConsoleRequest) Reset() {
+	*x = GetVMConsoleRequest{}
+	mi := &file_api_rpc_manager_proto_msgTypes[28]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetVMConsoleRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetVMConsoleRequest) ProtoMessage() {}
+
+func (x *GetVMConsoleRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_api_rpc_manager_proto_msgTypes[28]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetVMConsoleRequest.ProtoReflect.Descriptor instead.
+func (*GetVMConsoleRequest) Descriptor() ([]byte, []int) {
+	return file_api_rpc_manager_proto_rawDescGZIP(), []int{28}
+}
+
+func (x *GetVMConsoleRequest) GetId() string {
+	if x != nil {
+		return x.Id
+	}
+	return ""
+}
+
+type GetVMConsoleResponse struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// host/port identify the VNC TCP listener to connect to -
+	// internal/frontend proxies its noVNC WebSocket console through this,
+	// never exposing it directly to the browser. host is the owning node's
+	// ID, which this v1 assumes is a resolvable hostname (true for every
+	// node in this project today, since node IDs default to os.Hostname())
+	// - a real multi-node deployment with non-resolvable node IDs would
+	// need real node-address discovery, which doesn't exist yet (the same
+	// gap already noted for node scheduling).
+	Host string `protobuf:"bytes,1,opt,name=host,proto3" json:"host,omitempty"`
+	Port uint32 `protobuf:"varint,2,opt,name=port,proto3" json:"port,omitempty"`
+	// available is false (with host/port left at zero values) if the VM
+	// isn't running with VNC on this node - not yet reconciled, running on
+	// a different node, or created before VNC support existed.
+	Available     bool   `protobuf:"varint,3,opt,name=available,proto3" json:"available,omitempty"`
+	Error         string `protobuf:"bytes,4,opt,name=error,proto3" json:"error,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetVMConsoleResponse) Reset() {
+	*x = GetVMConsoleResponse{}
+	mi := &file_api_rpc_manager_proto_msgTypes[29]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetVMConsoleResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetVMConsoleResponse) ProtoMessage() {}
+
+func (x *GetVMConsoleResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_api_rpc_manager_proto_msgTypes[29]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetVMConsoleResponse.ProtoReflect.Descriptor instead.
+func (*GetVMConsoleResponse) Descriptor() ([]byte, []int) {
+	return file_api_rpc_manager_proto_rawDescGZIP(), []int{29}
+}
+
+func (x *GetVMConsoleResponse) GetHost() string {
+	if x != nil {
+		return x.Host
+	}
+	return ""
+}
+
+func (x *GetVMConsoleResponse) GetPort() uint32 {
+	if x != nil {
+		return x.Port
+	}
+	return 0
+}
+
+func (x *GetVMConsoleResponse) GetAvailable() bool {
+	if x != nil {
+		return x.Available
+	}
+	return false
+}
+
+func (x *GetVMConsoleResponse) GetError() string {
+	if x != nil {
+		return x.Error
+	}
+	return ""
+}
+
 var File_api_rpc_manager_proto protoreflect.FileDescriptor
 
 const file_api_rpc_manager_proto_rawDesc = "" +
@@ -2016,7 +2139,14 @@ const file_api_rpc_manager_proto_rawDesc = "" +
 	"\x05pools\x18\x04 \x03(\v2\x18.apiary.rpc.v1.PoolStatsR\x05pools\x12.\n" +
 	"\x05disks\x18\x05 \x03(\v2\x18.apiary.rpc.v1.DiskStatsR\x05disks\x12.\n" +
 	"\x03net\x18\x06 \x03(\v2\x1c.apiary.rpc.v1.NetIfaceStatsR\x03net\x12\x16\n" +
-	"\x06errors\x18\a \x03(\tR\x06errors*f\n" +
+	"\x06errors\x18\a \x03(\tR\x06errors\"%\n" +
+	"\x13GetVMConsoleRequest\x12\x0e\n" +
+	"\x02id\x18\x01 \x01(\tR\x02id\"r\n" +
+	"\x14GetVMConsoleResponse\x12\x12\n" +
+	"\x04host\x18\x01 \x01(\tR\x04host\x12\x12\n" +
+	"\x04port\x18\x02 \x01(\rR\x04port\x12\x1c\n" +
+	"\tavailable\x18\x03 \x01(\bR\tavailable\x12\x14\n" +
+	"\x05error\x18\x04 \x01(\tR\x05error*f\n" +
 	"\aVMState\x12\x18\n" +
 	"\x14VM_STATE_UNSPECIFIED\x10\x00\x12\x14\n" +
 	"\x10VM_STATE_STOPPED\x10\x01\x12\x14\n" +
@@ -2027,7 +2157,7 @@ const file_api_rpc_manager_proto_rawDesc = "" +
 	"\x11VM_PHASE_CREATING\x10\x01\x12\x12\n" +
 	"\x0eVM_PHASE_READY\x10\x02\x12\x15\n" +
 	"\x11VM_PHASE_DELETING\x10\x03\x12\x12\n" +
-	"\x0eVM_PHASE_ERROR\x10\x042\x8b\x06\n" +
+	"\x0eVM_PHASE_ERROR\x10\x042\xe4\x06\n" +
 	"\x0eManagerService\x12E\n" +
 	"\x06Status\x12\x1c.apiary.rpc.v1.StatusRequest\x1a\x1d.apiary.rpc.v1.StatusResponse\x12K\n" +
 	"\bCreateVM\x12\x1e.apiary.rpc.v1.CreateVMRequest\x1a\x1f.apiary.rpc.v1.CreateVMResponse\x12K\n" +
@@ -2038,7 +2168,8 @@ const file_api_rpc_manager_proto_rawDesc = "" +
 	"\tUploadISO\x12\x1f.apiary.rpc.v1.UploadISORequest\x1a .apiary.rpc.v1.UploadISOResponse(\x01\x12K\n" +
 	"\bListISOs\x12\x1e.apiary.rpc.v1.ListISOsRequest\x1a\x1f.apiary.rpc.v1.ListISOsResponse\x12N\n" +
 	"\tDeleteISO\x12\x1f.apiary.rpc.v1.DeleteISORequest\x1a .apiary.rpc.v1.DeleteISOResponse\x12N\n" +
-	"\tHostStats\x12\x1f.apiary.rpc.v1.HostStatsRequest\x1a .apiary.rpc.v1.HostStatsResponseB-Z+github.com/glenjbarber/apiary/api/rpc;rpcpbb\x06proto3"
+	"\tHostStats\x12\x1f.apiary.rpc.v1.HostStatsRequest\x1a .apiary.rpc.v1.HostStatsResponse\x12W\n" +
+	"\fGetVMConsole\x12\".apiary.rpc.v1.GetVMConsoleRequest\x1a#.apiary.rpc.v1.GetVMConsoleResponseB-Z+github.com/glenjbarber/apiary/api/rpc;rpcpbb\x06proto3"
 
 var (
 	file_api_rpc_manager_proto_rawDescOnce sync.Once
@@ -2053,38 +2184,40 @@ func file_api_rpc_manager_proto_rawDescGZIP() []byte {
 }
 
 var file_api_rpc_manager_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
-var file_api_rpc_manager_proto_msgTypes = make([]protoimpl.MessageInfo, 28)
+var file_api_rpc_manager_proto_msgTypes = make([]protoimpl.MessageInfo, 30)
 var file_api_rpc_manager_proto_goTypes = []any{
-	(VMState)(0),              // 0: apiary.rpc.v1.VMState
-	(VMPhase)(0),              // 1: apiary.rpc.v1.VMPhase
-	(*VMDefinition)(nil),      // 2: apiary.rpc.v1.VMDefinition
-	(*CreateVMRequest)(nil),   // 3: apiary.rpc.v1.CreateVMRequest
-	(*CreateVMResponse)(nil),  // 4: apiary.rpc.v1.CreateVMResponse
-	(*UpdateVMRequest)(nil),   // 5: apiary.rpc.v1.UpdateVMRequest
-	(*UpdateVMResponse)(nil),  // 6: apiary.rpc.v1.UpdateVMResponse
-	(*DeleteVMRequest)(nil),   // 7: apiary.rpc.v1.DeleteVMRequest
-	(*DeleteVMResponse)(nil),  // 8: apiary.rpc.v1.DeleteVMResponse
-	(*GetVMRequest)(nil),      // 9: apiary.rpc.v1.GetVMRequest
-	(*GetVMResponse)(nil),     // 10: apiary.rpc.v1.GetVMResponse
-	(*ListVMsRequest)(nil),    // 11: apiary.rpc.v1.ListVMsRequest
-	(*ListVMsResponse)(nil),   // 12: apiary.rpc.v1.ListVMsResponse
-	(*StatusRequest)(nil),     // 13: apiary.rpc.v1.StatusRequest
-	(*StatusResponse)(nil),    // 14: apiary.rpc.v1.StatusResponse
-	(*UploadISORequest)(nil),  // 15: apiary.rpc.v1.UploadISORequest
-	(*ISOUploadMetadata)(nil), // 16: apiary.rpc.v1.ISOUploadMetadata
-	(*UploadISOResponse)(nil), // 17: apiary.rpc.v1.UploadISOResponse
-	(*ListISOsRequest)(nil),   // 18: apiary.rpc.v1.ListISOsRequest
-	(*ISOInfo)(nil),           // 19: apiary.rpc.v1.ISOInfo
-	(*ListISOsResponse)(nil),  // 20: apiary.rpc.v1.ListISOsResponse
-	(*DeleteISORequest)(nil),  // 21: apiary.rpc.v1.DeleteISORequest
-	(*DeleteISOResponse)(nil), // 22: apiary.rpc.v1.DeleteISOResponse
-	(*HostStatsRequest)(nil),  // 23: apiary.rpc.v1.HostStatsRequest
-	(*CPUStats)(nil),          // 24: apiary.rpc.v1.CPUStats
-	(*MemStats)(nil),          // 25: apiary.rpc.v1.MemStats
-	(*PoolStats)(nil),         // 26: apiary.rpc.v1.PoolStats
-	(*DiskStats)(nil),         // 27: apiary.rpc.v1.DiskStats
-	(*NetIfaceStats)(nil),     // 28: apiary.rpc.v1.NetIfaceStats
-	(*HostStatsResponse)(nil), // 29: apiary.rpc.v1.HostStatsResponse
+	(VMState)(0),                 // 0: apiary.rpc.v1.VMState
+	(VMPhase)(0),                 // 1: apiary.rpc.v1.VMPhase
+	(*VMDefinition)(nil),         // 2: apiary.rpc.v1.VMDefinition
+	(*CreateVMRequest)(nil),      // 3: apiary.rpc.v1.CreateVMRequest
+	(*CreateVMResponse)(nil),     // 4: apiary.rpc.v1.CreateVMResponse
+	(*UpdateVMRequest)(nil),      // 5: apiary.rpc.v1.UpdateVMRequest
+	(*UpdateVMResponse)(nil),     // 6: apiary.rpc.v1.UpdateVMResponse
+	(*DeleteVMRequest)(nil),      // 7: apiary.rpc.v1.DeleteVMRequest
+	(*DeleteVMResponse)(nil),     // 8: apiary.rpc.v1.DeleteVMResponse
+	(*GetVMRequest)(nil),         // 9: apiary.rpc.v1.GetVMRequest
+	(*GetVMResponse)(nil),        // 10: apiary.rpc.v1.GetVMResponse
+	(*ListVMsRequest)(nil),       // 11: apiary.rpc.v1.ListVMsRequest
+	(*ListVMsResponse)(nil),      // 12: apiary.rpc.v1.ListVMsResponse
+	(*StatusRequest)(nil),        // 13: apiary.rpc.v1.StatusRequest
+	(*StatusResponse)(nil),       // 14: apiary.rpc.v1.StatusResponse
+	(*UploadISORequest)(nil),     // 15: apiary.rpc.v1.UploadISORequest
+	(*ISOUploadMetadata)(nil),    // 16: apiary.rpc.v1.ISOUploadMetadata
+	(*UploadISOResponse)(nil),    // 17: apiary.rpc.v1.UploadISOResponse
+	(*ListISOsRequest)(nil),      // 18: apiary.rpc.v1.ListISOsRequest
+	(*ISOInfo)(nil),              // 19: apiary.rpc.v1.ISOInfo
+	(*ListISOsResponse)(nil),     // 20: apiary.rpc.v1.ListISOsResponse
+	(*DeleteISORequest)(nil),     // 21: apiary.rpc.v1.DeleteISORequest
+	(*DeleteISOResponse)(nil),    // 22: apiary.rpc.v1.DeleteISOResponse
+	(*HostStatsRequest)(nil),     // 23: apiary.rpc.v1.HostStatsRequest
+	(*CPUStats)(nil),             // 24: apiary.rpc.v1.CPUStats
+	(*MemStats)(nil),             // 25: apiary.rpc.v1.MemStats
+	(*PoolStats)(nil),            // 26: apiary.rpc.v1.PoolStats
+	(*DiskStats)(nil),            // 27: apiary.rpc.v1.DiskStats
+	(*NetIfaceStats)(nil),        // 28: apiary.rpc.v1.NetIfaceStats
+	(*HostStatsResponse)(nil),    // 29: apiary.rpc.v1.HostStatsResponse
+	(*GetVMConsoleRequest)(nil),  // 30: apiary.rpc.v1.GetVMConsoleRequest
+	(*GetVMConsoleResponse)(nil), // 31: apiary.rpc.v1.GetVMConsoleResponse
 }
 var file_api_rpc_manager_proto_depIdxs = []int32{
 	0,  // 0: apiary.rpc.v1.VMDefinition.desired_state:type_name -> apiary.rpc.v1.VMState
@@ -2113,18 +2246,20 @@ var file_api_rpc_manager_proto_depIdxs = []int32{
 	18, // 23: apiary.rpc.v1.ManagerService.ListISOs:input_type -> apiary.rpc.v1.ListISOsRequest
 	21, // 24: apiary.rpc.v1.ManagerService.DeleteISO:input_type -> apiary.rpc.v1.DeleteISORequest
 	23, // 25: apiary.rpc.v1.ManagerService.HostStats:input_type -> apiary.rpc.v1.HostStatsRequest
-	14, // 26: apiary.rpc.v1.ManagerService.Status:output_type -> apiary.rpc.v1.StatusResponse
-	4,  // 27: apiary.rpc.v1.ManagerService.CreateVM:output_type -> apiary.rpc.v1.CreateVMResponse
-	6,  // 28: apiary.rpc.v1.ManagerService.UpdateVM:output_type -> apiary.rpc.v1.UpdateVMResponse
-	8,  // 29: apiary.rpc.v1.ManagerService.DeleteVM:output_type -> apiary.rpc.v1.DeleteVMResponse
-	10, // 30: apiary.rpc.v1.ManagerService.GetVM:output_type -> apiary.rpc.v1.GetVMResponse
-	12, // 31: apiary.rpc.v1.ManagerService.ListVMs:output_type -> apiary.rpc.v1.ListVMsResponse
-	17, // 32: apiary.rpc.v1.ManagerService.UploadISO:output_type -> apiary.rpc.v1.UploadISOResponse
-	20, // 33: apiary.rpc.v1.ManagerService.ListISOs:output_type -> apiary.rpc.v1.ListISOsResponse
-	22, // 34: apiary.rpc.v1.ManagerService.DeleteISO:output_type -> apiary.rpc.v1.DeleteISOResponse
-	29, // 35: apiary.rpc.v1.ManagerService.HostStats:output_type -> apiary.rpc.v1.HostStatsResponse
-	26, // [26:36] is the sub-list for method output_type
-	16, // [16:26] is the sub-list for method input_type
+	30, // 26: apiary.rpc.v1.ManagerService.GetVMConsole:input_type -> apiary.rpc.v1.GetVMConsoleRequest
+	14, // 27: apiary.rpc.v1.ManagerService.Status:output_type -> apiary.rpc.v1.StatusResponse
+	4,  // 28: apiary.rpc.v1.ManagerService.CreateVM:output_type -> apiary.rpc.v1.CreateVMResponse
+	6,  // 29: apiary.rpc.v1.ManagerService.UpdateVM:output_type -> apiary.rpc.v1.UpdateVMResponse
+	8,  // 30: apiary.rpc.v1.ManagerService.DeleteVM:output_type -> apiary.rpc.v1.DeleteVMResponse
+	10, // 31: apiary.rpc.v1.ManagerService.GetVM:output_type -> apiary.rpc.v1.GetVMResponse
+	12, // 32: apiary.rpc.v1.ManagerService.ListVMs:output_type -> apiary.rpc.v1.ListVMsResponse
+	17, // 33: apiary.rpc.v1.ManagerService.UploadISO:output_type -> apiary.rpc.v1.UploadISOResponse
+	20, // 34: apiary.rpc.v1.ManagerService.ListISOs:output_type -> apiary.rpc.v1.ListISOsResponse
+	22, // 35: apiary.rpc.v1.ManagerService.DeleteISO:output_type -> apiary.rpc.v1.DeleteISOResponse
+	29, // 36: apiary.rpc.v1.ManagerService.HostStats:output_type -> apiary.rpc.v1.HostStatsResponse
+	31, // 37: apiary.rpc.v1.ManagerService.GetVMConsole:output_type -> apiary.rpc.v1.GetVMConsoleResponse
+	27, // [27:38] is the sub-list for method output_type
+	16, // [16:27] is the sub-list for method input_type
 	16, // [16:16] is the sub-list for extension type_name
 	16, // [16:16] is the sub-list for extension extendee
 	0,  // [0:16] is the sub-list for field type_name
@@ -2145,7 +2280,7 @@ func file_api_rpc_manager_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_api_rpc_manager_proto_rawDesc), len(file_api_rpc_manager_proto_rawDesc)),
 			NumEnums:      2,
-			NumMessages:   28,
+			NumMessages:   30,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

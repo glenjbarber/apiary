@@ -146,3 +146,63 @@ func TestPath_UnknownNameReturnsFalseNotError(t *testing.T) {
 		t.Errorf("Path() = exists, want false for a name never saved")
 	}
 }
+
+// writeRawFile writes data directly into m's store directory, bypassing
+// Save's hash verification - used to build fixture files at exact byte
+// offsets for the IsISO9660 sniff tests.
+func writeRawFile(t *testing.T, m *Manager, name string, data []byte) {
+	t.Helper()
+	if err := os.MkdirAll(m.Dir, 0o755); err != nil {
+		t.Fatalf("MkdirAll() error: %v", err)
+	}
+	if err := os.WriteFile(m.path(name), data, 0o644); err != nil {
+		t.Fatalf("WriteFile() error: %v", err)
+	}
+}
+
+func TestIsISO9660_RecognizesGenuineISO(t *testing.T) {
+	m := New(t.TempDir())
+	data := make([]byte, iso9660SniffOffset+len(iso9660Magic)+10)
+	copy(data[iso9660SniffOffset:], iso9660Magic)
+	writeRawFile(t, m, "real.iso", data)
+
+	ok, err := m.IsISO9660("real.iso")
+	if err != nil {
+		t.Fatalf("IsISO9660() error: %v", err)
+	}
+	if !ok {
+		t.Errorf("IsISO9660() = false, want true for a file with the CD001 signature at the right offset")
+	}
+}
+
+func TestIsISO9660_RejectsMemstickStyleRawDisk(t *testing.T) {
+	m := New(t.TempDir())
+	// A raw disk image has no reason to contain "CD001" at the ISO9660
+	// sniff offset - simulate one with arbitrary non-matching bytes.
+	data := make([]byte, iso9660SniffOffset+len(iso9660Magic)+10)
+	for i := range data {
+		data[i] = 0xAB
+	}
+	writeRawFile(t, m, "freebsd-memstick.img", data)
+
+	ok, err := m.IsISO9660("freebsd-memstick.img")
+	if err != nil {
+		t.Fatalf("IsISO9660() error: %v", err)
+	}
+	if ok {
+		t.Errorf("IsISO9660() = true, want false for a raw disk image with no ISO9660 signature")
+	}
+}
+
+func TestIsISO9660_ShortFileIsNotISO9660(t *testing.T) {
+	m := New(t.TempDir())
+	writeRawFile(t, m, "tiny.img", []byte("too short to contain any ISO9660 descriptor"))
+
+	ok, err := m.IsISO9660("tiny.img")
+	if err != nil {
+		t.Fatalf("IsISO9660() error: %v", err)
+	}
+	if ok {
+		t.Errorf("IsISO9660() = true, want false for a file shorter than the sniff offset")
+	}
+}

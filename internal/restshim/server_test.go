@@ -82,6 +82,10 @@ func (f *fakeClient) HostStats(context.Context, *rpcpb.HostStatsRequest, ...grpc
 	return &rpcpb.HostStatsResponse{}, nil
 }
 
+func (f *fakeClient) GetVMConsole(context.Context, *rpcpb.GetVMConsoleRequest, ...grpc.CallOption) (*rpcpb.GetVMConsoleResponse, error) {
+	return &rpcpb.GetVMConsoleResponse{}, nil
+}
+
 var _ rpcpb.ManagerServiceClient = (*fakeClient)(nil)
 
 func doRequest(t *testing.T, s *Server, method, path string, body interface{}) *httptest.ResponseRecorder {

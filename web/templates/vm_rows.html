@@ -9,6 +9,7 @@
   <td>{{.NodeID}}</td>
   <td{{if eq .Phase "error"}} title="{{.PhaseError}}"{{end}}>{{.Phase}}</td>
   <td>
+    <a href="/vms/{{.ID}}/console">Console</a>
     <button hx-delete="/vms/{{.ID}}" hx-target="#vm-rows" hx-swap="innerHTML" hx-confirm="Delete {{.ID}}?">Delete</button>
   </td>
 </tr>

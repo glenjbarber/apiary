@@ -74,6 +74,11 @@ type vmManager interface {
 // today.
 type isoResolver interface {
 	Path(name string) (string, bool, error)
+
+	// IsISO9660 distinguishes real ISO9660 media (attach via ahci-cd)
+	// from anything else, most notably a FreeBSD memstick image (attach
+	// via ahci-hd instead) - see bhyve.Config.InstallDiskPath.
+	IsISO9660(name string) (bool, error)
 }
 
 // Reconciler provisions local ZFS storage - and, if Bhyve is set, a
@@ -322,7 +327,7 @@ func (r *Reconciler) ensureVM(ctx context.Context, vm VMPlacement) error {
 		memoryMB = defaultMemoryMB
 	}
 
-	var isoPath string
+	var isoPath, installDiskPath string
 	if vm.ISOName != "" {
 		if r.ISOs == nil {
 			return fmt.Errorf("VM names ISO %q but no ISO store is configured on this node", vm.ISOName)
@@ -334,16 +339,34 @@ func (r *Reconciler) ensureVM(ctx context.Context, vm VMPlacement) error {
 		if !ok {
 			return fmt.Errorf("ISO %q not found", vm.ISOName)
 		}
-		isoPath = path
+		isGenuineISO, err := r.ISOs.IsISO9660(vm.ISOName)
+		if err != nil {
+			return fmt.Errorf("checking image format of %q: %w", vm.ISOName, err)
+		}
+		if isGenuineISO {
+			isoPath = path
+		} else {
+			// Not a real ISO9660 filesystem - most likely a FreeBSD
+			// memstick image, which is a raw bootable disk. Attaching it
+			// via ahci-cd (like a real ISO) leaves firmware with no
+			// ISO9660 filesystem to find, so it never boots.
+			installDiskPath = path
+		}
 	}
 
 	if err := r.Bhyve.CreateVM(ctx, vm.ID, bhyve.Config{
-		CPUs:     cpus,
-		MemoryMB: memoryMB,
-		BootROM:  r.BootROM,
-		DiskPath: diskPath,
-		Bridge:   r.Bridge,
-		ISOPath:  isoPath,
+		CPUs:            cpus,
+		MemoryMB:        memoryMB,
+		BootROM:         r.BootROM,
+		DiskPath:        diskPath,
+		Bridge:          r.Bridge,
+		ISOPath:         isoPath,
+		InstallDiskPath: installDiskPath,
+		// Always on when Bhyve provisioning itself is enabled - a node
+		// that can run bhyve VMs at all should always let their console
+		// be viewed; there's no scenario where the tradeoff runs the
+		// other way, so this isn't a separate opt-in flag.
+		EnableVNC: true,
 	}); err != nil {
 		return fmt.Errorf("creating bhyve VM: %w", err)
 	}

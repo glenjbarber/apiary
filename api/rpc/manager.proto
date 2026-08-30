@@ -37,6 +37,13 @@ service ManagerService {
   // ISOs above, gathered locally by managerd (see internal/hoststats),
   // never routed through raft.
   rpc HostStats(HostStatsRequest) returns (HostStatsResponse);
+
+  // GetVMConsole reports how to reach a running VM's VNC framebuffer,
+  // for the web UI's noVNC-based console page (ADR-0020). Like HostStats,
+  // this only answers for a VM actually running on *this* node - see
+  // GetVMConsoleResponse's doc comment for the v1 limitation that
+  // follows from that.
+  rpc GetVMConsole(GetVMConsoleRequest) returns (GetVMConsoleResponse);
 }
 
 // VMState mirrors api/internalpb's VMState. Kept as a separate type
@@ -267,4 +274,34 @@ message HostStatsResponse {
   // hoststats.Snapshot.Errors) - the rest of the response is still
   // populated on a best-effort basis.
   repeated string errors = 7;
+}
+
+message GetVMConsoleRequest {
+  string id = 1;
+}
+
+message GetVMConsoleResponse {
+  // host/port identify the VNC TCP listener to connect to -
+  // internal/frontend proxies its noVNC WebSocket console through this,
+  // never exposing it directly to the browser. host is always "127.0.0.1"
+  // (never the node's own hostname/ID): GetVMConsole only ever answers
+  // for a VM confirmed to be running on *this* node, and the caller
+  // (internal/frontend) is only ever expected to run alongside that same
+  // managerd - matching how -manager-addr already defaults to
+  // 127.0.0.1:17700. A node's own hostname isn't guaranteed to resolve
+  // from itself (confirmed live on apiarium), so loopback avoids a DNS
+  // dependency this has no other reason to require. A real multi-node
+  // deployment, where the frontend querying GetVMConsole isn't
+  // necessarily colocated with the VM's owning node, would need real
+  // node-address discovery, which doesn't exist yet (the same gap
+  // already noted for node scheduling).
+  string host = 1;
+  uint32 port = 2;
+
+  // available is false (with host/port left at zero values) if the VM
+  // isn't running with VNC on this node - not yet reconciled, running on
+  // a different node, or created before VNC support existed.
+  bool available = 3;
+
+  string error = 4;
 }

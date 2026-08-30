@@ -35,6 +35,9 @@ type fakeClient struct {
 
 	hostStatsResp *rpcpb.HostStatsResponse
 
+	getVMConsoleResp *rpcpb.GetVMConsoleResponse
+	getVMConsoleErr  error
+
 	uploadStream *fakeUploadClientStream
 	uploadErr    error
 }
@@ -114,6 +117,16 @@ func (f *fakeClient) HostStats(context.Context, *rpcpb.HostStatsRequest, ...grpc
 
 func (f *fakeClient) ListVMs(context.Context, *rpcpb.ListVMsRequest, ...grpc.CallOption) (*rpcpb.ListVMsResponse, error) {
 	return f.listResp, f.listErr
+}
+
+func (f *fakeClient) GetVMConsole(context.Context, *rpcpb.GetVMConsoleRequest, ...grpc.CallOption) (*rpcpb.GetVMConsoleResponse, error) {
+	if f.getVMConsoleErr != nil {
+		return nil, f.getVMConsoleErr
+	}
+	if f.getVMConsoleResp != nil {
+		return f.getVMConsoleResp, nil
+	}
+	return &rpcpb.GetVMConsoleResponse{}, nil
 }
 
 var _ rpcpb.ManagerServiceClient = (*fakeClient)(nil)

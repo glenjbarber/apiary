@@ -94,6 +94,29 @@ func newRaftdUDSSocket(t *testing.T) string {
 // a real ManagerService client connected to it.
 func newManagerdRPCClient(t *testing.T, raftdSocket string) rpcpb.ManagerServiceClient {
 	t.Helper()
+	return newManagerdRPCClientWithVNC(t, raftdSocket, "manager-1", nil)
+}
+
+// fakeVNCLookup is a fake vncLookup for GetVMConsole tests, without any
+// real bhyve.Manager/RunDir involved.
+type fakeVNCLookup struct {
+	ports map[string]int
+	err   error
+}
+
+func (f *fakeVNCLookup) VNCPort(name string) (int, bool, error) {
+	if f.err != nil {
+		return 0, false, f.err
+	}
+	port, ok := f.ports[name]
+	return port, ok, nil
+}
+
+// newManagerdRPCClientWithVNC is newManagerdRPCClient, but lets a test
+// supply nodeID and vnc explicitly - needed for GetVMConsole, which
+// checks a VM's node_id against the serving Server's own nodeID.
+func newManagerdRPCClientWithVNC(t *testing.T, raftdSocket, nodeID string, vnc vncLookup) rpcpb.ManagerServiceClient {
+	t.Helper()
 
 	raftClient, err := Dial(raftdSocket)
 	if err != nil {
@@ -107,7 +130,7 @@ func newManagerdRPCClient(t *testing.T, raftdSocket string) rpcpb.ManagerService
 	}
 
 	grpcServer := grpc.NewServer()
-	rpcpb.RegisterManagerServiceServer(grpcServer, NewServer(raftClient, "manager-1", isostore.New(t.TempDir())))
+	rpcpb.RegisterManagerServiceServer(grpcServer, NewServer(raftClient, nodeID, isostore.New(t.TempDir()), vnc))
 	go grpcServer.Serve(lis)
 	t.Cleanup(grpcServer.GracefulStop)
 
@@ -290,5 +313,117 @@ func TestIntegration_GetVMAndListVMs(t *testing.T) {
 	}
 	if len(listResp.GetVms()) != 2 {
 		t.Fatalf("ListVMs() returned %d VMs, want 2", len(listResp.GetVms()))
+	}
+}
+
+func TestIntegration_GetVMConsole_RunningLocallyWithVNC(t *testing.T) {
+	raftdSocket := newRaftdUDSSocket(t)
+	vnc := &fakeVNCLookup{ports: map[string]int{"vm-1": 5901}}
+	client := newManagerdRPCClientWithVNC(t, raftdSocket, "node-a", vnc)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if _, err := client.CreateVM(ctx, &rpcpb.CreateVMRequest{
+		Vm: &rpcpb.VMDefinition{Id: "vm-1", Name: "web-1", NodeId: "node-a"},
+	}); err != nil {
+		t.Fatalf("CreateVM() error: %v", err)
+	}
+
+	resp, err := client.GetVMConsole(ctx, &rpcpb.GetVMConsoleRequest{Id: "vm-1"})
+	if err != nil {
+		t.Fatalf("GetVMConsole() error: %v", err)
+	}
+	if resp.GetError() != "" {
+		t.Fatalf("GetVMConsole() returned error: %s", resp.GetError())
+	}
+	if !resp.GetAvailable() || resp.GetHost() != "127.0.0.1" || resp.GetPort() != 5901 {
+		t.Errorf("GetVMConsole() = %+v, want available on 127.0.0.1:5901", resp)
+	}
+}
+
+func TestIntegration_GetVMConsole_NotYetProvisioned(t *testing.T) {
+	raftdSocket := newRaftdUDSSocket(t)
+	vnc := &fakeVNCLookup{ports: map[string]int{}}
+	client := newManagerdRPCClientWithVNC(t, raftdSocket, "node-a", vnc)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if _, err := client.CreateVM(ctx, &rpcpb.CreateVMRequest{
+		Vm: &rpcpb.VMDefinition{Id: "vm-1", Name: "web-1", NodeId: "node-a"},
+	}); err != nil {
+		t.Fatalf("CreateVM() error: %v", err)
+	}
+
+	resp, err := client.GetVMConsole(ctx, &rpcpb.GetVMConsoleRequest{Id: "vm-1"})
+	if err != nil {
+		t.Fatalf("GetVMConsole() error: %v", err)
+	}
+	if resp.GetError() != "" {
+		t.Fatalf("GetVMConsole() returned error: %s", resp.GetError())
+	}
+	if resp.GetAvailable() {
+		t.Errorf("GetVMConsole() = %+v, want Available=false (no VNC port recorded yet)", resp)
+	}
+}
+
+func TestIntegration_GetVMConsole_WrongNodeReportsHint(t *testing.T) {
+	raftdSocket := newRaftdUDSSocket(t)
+	client := newManagerdRPCClientWithVNC(t, raftdSocket, "node-a", &fakeVNCLookup{})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if _, err := client.CreateVM(ctx, &rpcpb.CreateVMRequest{
+		Vm: &rpcpb.VMDefinition{Id: "vm-1", Name: "web-1", NodeId: "node-b"},
+	}); err != nil {
+		t.Fatalf("CreateVM() error: %v", err)
+	}
+
+	resp, err := client.GetVMConsole(ctx, &rpcpb.GetVMConsoleRequest{Id: "vm-1"})
+	if err != nil {
+		t.Fatalf("GetVMConsole() error: %v", err)
+	}
+	if resp.GetError() == "" {
+		t.Fatalf("GetVMConsole() returned no error, want a hint that vm-1 is on node-b, not node-a")
+	}
+}
+
+func TestIntegration_GetVMConsole_NoVNCConfigured(t *testing.T) {
+	raftdSocket := newRaftdUDSSocket(t)
+	client := newManagerdRPCClientWithVNC(t, raftdSocket, "node-a", nil)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if _, err := client.CreateVM(ctx, &rpcpb.CreateVMRequest{
+		Vm: &rpcpb.VMDefinition{Id: "vm-1", Name: "web-1", NodeId: "node-a"},
+	}); err != nil {
+		t.Fatalf("CreateVM() error: %v", err)
+	}
+
+	resp, err := client.GetVMConsole(ctx, &rpcpb.GetVMConsoleRequest{Id: "vm-1"})
+	if err != nil {
+		t.Fatalf("GetVMConsole() error: %v", err)
+	}
+	if resp.GetError() == "" {
+		t.Fatalf("GetVMConsole() returned no error, want one reporting no VNC support on this node")
+	}
+}
+
+func TestIntegration_GetVMConsole_UnknownVM(t *testing.T) {
+	raftdSocket := newRaftdUDSSocket(t)
+	client := newManagerdRPCClientWithVNC(t, raftdSocket, "node-a", &fakeVNCLookup{})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	resp, err := client.GetVMConsole(ctx, &rpcpb.GetVMConsoleRequest{Id: "does-not-exist"})
+	if err != nil {
+		t.Fatalf("GetVMConsole() error: %v", err)
+	}
+	if resp.GetError() == "" {
+		t.Fatalf("GetVMConsole() returned no error, want a not-found error")
 	}
 }

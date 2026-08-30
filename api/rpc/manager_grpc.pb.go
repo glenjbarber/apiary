@@ -19,16 +19,17 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	ManagerService_Status_FullMethodName    = "/apiary.rpc.v1.ManagerService/Status"
-	ManagerService_CreateVM_FullMethodName  = "/apiary.rpc.v1.ManagerService/CreateVM"
-	ManagerService_UpdateVM_FullMethodName  = "/apiary.rpc.v1.ManagerService/UpdateVM"
-	ManagerService_DeleteVM_FullMethodName  = "/apiary.rpc.v1.ManagerService/DeleteVM"
-	ManagerService_GetVM_FullMethodName     = "/apiary.rpc.v1.ManagerService/GetVM"
-	ManagerService_ListVMs_FullMethodName   = "/apiary.rpc.v1.ManagerService/ListVMs"
-	ManagerService_UploadISO_FullMethodName = "/apiary.rpc.v1.ManagerService/UploadISO"
-	ManagerService_ListISOs_FullMethodName  = "/apiary.rpc.v1.ManagerService/ListISOs"
-	ManagerService_DeleteISO_FullMethodName = "/apiary.rpc.v1.ManagerService/DeleteISO"
-	ManagerService_HostStats_FullMethodName = "/apiary.rpc.v1.ManagerService/HostStats"
+	ManagerService_Status_FullMethodName       = "/apiary.rpc.v1.ManagerService/Status"
+	ManagerService_CreateVM_FullMethodName     = "/apiary.rpc.v1.ManagerService/CreateVM"
+	ManagerService_UpdateVM_FullMethodName     = "/apiary.rpc.v1.ManagerService/UpdateVM"
+	ManagerService_DeleteVM_FullMethodName     = "/apiary.rpc.v1.ManagerService/DeleteVM"
+	ManagerService_GetVM_FullMethodName        = "/apiary.rpc.v1.ManagerService/GetVM"
+	ManagerService_ListVMs_FullMethodName      = "/apiary.rpc.v1.ManagerService/ListVMs"
+	ManagerService_UploadISO_FullMethodName    = "/apiary.rpc.v1.ManagerService/UploadISO"
+	ManagerService_ListISOs_FullMethodName     = "/apiary.rpc.v1.ManagerService/ListISOs"
+	ManagerService_DeleteISO_FullMethodName    = "/apiary.rpc.v1.ManagerService/DeleteISO"
+	ManagerService_HostStats_FullMethodName    = "/apiary.rpc.v1.ManagerService/HostStats"
+	ManagerService_GetVMConsole_FullMethodName = "/apiary.rpc.v1.ManagerService/GetVMConsole"
 )
 
 // ManagerServiceClient is the client API for ManagerService service.
@@ -64,6 +65,12 @@ type ManagerServiceClient interface {
 	// ISOs above, gathered locally by managerd (see internal/hoststats),
 	// never routed through raft.
 	HostStats(ctx context.Context, in *HostStatsRequest, opts ...grpc.CallOption) (*HostStatsResponse, error)
+	// GetVMConsole reports how to reach a running VM's VNC framebuffer,
+	// for the web UI's noVNC-based console page (ADR-0020). Like HostStats,
+	// this only answers for a VM actually running on *this* node - see
+	// GetVMConsoleResponse's doc comment for the v1 limitation that
+	// follows from that.
+	GetVMConsole(ctx context.Context, in *GetVMConsoleRequest, opts ...grpc.CallOption) (*GetVMConsoleResponse, error)
 }
 
 type managerServiceClient struct {
@@ -177,6 +184,16 @@ func (c *managerServiceClient) HostStats(ctx context.Context, in *HostStatsReque
 	return out, nil
 }
 
+func (c *managerServiceClient) GetVMConsole(ctx context.Context, in *GetVMConsoleRequest, opts ...grpc.CallOption) (*GetVMConsoleResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetVMConsoleResponse)
+	err := c.cc.Invoke(ctx, ManagerService_GetVMConsole_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // ManagerServiceServer is the server API for ManagerService service.
 // All implementations must embed UnimplementedManagerServiceServer
 // for forward compatibility.
@@ -210,6 +227,12 @@ type ManagerServiceServer interface {
 	// ISOs above, gathered locally by managerd (see internal/hoststats),
 	// never routed through raft.
 	HostStats(context.Context, *HostStatsRequest) (*HostStatsResponse, error)
+	// GetVMConsole reports how to reach a running VM's VNC framebuffer,
+	// for the web UI's noVNC-based console page (ADR-0020). Like HostStats,
+	// this only answers for a VM actually running on *this* node - see
+	// GetVMConsoleResponse's doc comment for the v1 limitation that
+	// follows from that.
+	GetVMConsole(context.Context, *GetVMConsoleRequest) (*GetVMConsoleResponse, error)
 	mustEmbedUnimplementedManagerServiceServer()
 }
 
@@ -249,6 +272,9 @@ func (UnimplementedManagerServiceServer) DeleteISO(context.Context, *DeleteISORe
 }
 func (UnimplementedManagerServiceServer) HostStats(context.Context, *HostStatsRequest) (*HostStatsResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method HostStats not implemented")
+}
+func (UnimplementedManagerServiceServer) GetVMConsole(context.Context, *GetVMConsoleRequest) (*GetVMConsoleResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetVMConsole not implemented")
 }
 func (UnimplementedManagerServiceServer) mustEmbedUnimplementedManagerServiceServer() {}
 func (UnimplementedManagerServiceServer) testEmbeddedByValue()                        {}
@@ -440,6 +466,24 @@ func _ManagerService_HostStats_Handler(srv interface{}, ctx context.Context, dec
 	return interceptor(ctx, in, info, handler)
 }
 
+func _ManagerService_GetVMConsole_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetVMConsoleRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ManagerServiceServer).GetVMConsole(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ManagerService_GetVMConsole_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ManagerServiceServer).GetVMConsole(ctx, req.(*GetVMConsoleRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // ManagerService_ServiceDesc is the grpc.ServiceDesc for ManagerService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -482,6 +526,10 @@ var ManagerService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "HostStats",
 			Handler:    _ManagerService_HostStats_Handler,
+		},
+		{
+			MethodName: "GetVMConsole",
+			Handler:    _ManagerService_GetVMConsole_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{

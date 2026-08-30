@@ -75,6 +75,13 @@ type pageData struct {
 	// after a successful login (see isSafeRedirectPath).
 	LoginError string
 	NextURL    string
+
+	// ConsoleVMID/ConsoleVMName/ConsoleWSPath/ConsoleError are only used
+	// by the console page (console.go) - see its own doc comments.
+	ConsoleVMID   string
+	ConsoleVMName string
+	ConsoleWSPath string
+	ConsoleError  string
 }
 
 // parseSort reads sort/dir query parameters, defaulting to ascending by
@@ -197,6 +204,8 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /isos", s.handleListISOs)
 	s.mux.HandleFunc("POST /isos", s.handleUploadISO)
 	s.mux.HandleFunc("DELETE /isos/{name}", s.handleDeleteISO)
+	s.mux.HandleFunc("GET /vms/{id}/console", s.handleConsolePage)
+	s.mux.HandleFunc("GET /vms/{id}/console/ws", s.handleConsoleWS)
 }
 
 // handleLoginPage serves the login form. If login isn't enabled at all,

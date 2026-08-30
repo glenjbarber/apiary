@@ -1,0 +1,36 @@
+{{define "console_page"}}
+<!DOCTYPE html>
+<html lang="en">
+{{template "head" .}}
+<body>
+  {{template "nav" .}}
+  <h1>Console: {{if .ConsoleVMName}}{{.ConsoleVMName}} ({{.ConsoleVMID}}){{else}}{{.ConsoleVMID}}{{end}}</h1>
+  {{if .ConsoleError}}
+    <div class="error">{{.ConsoleError}}</div>
+  {{else}}
+    <div id="console-status">Connecting&hellip;</div>
+    <div id="novnc-screen" style="width: 100%; max-width: 1024px; height: 768px; margin-top: 0.5rem; border: 1px solid #ccc;"></div>
+    <script type="module">
+      import RFB from '/static/novnc/core/rfb.js';
+
+      const status = document.getElementById('console-status');
+      const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+      const url = proto + '//' + location.host + '{{.ConsoleWSPath}}';
+
+      const rfb = new RFB(document.getElementById('novnc-screen'), url);
+      rfb.scaleViewport = true;
+      rfb.addEventListener('connect', () => { status.textContent = 'Connected'; });
+      rfb.addEventListener('disconnect', (e) => {
+        status.textContent = (e.detail && e.detail.clean) ? 'Disconnected' : 'Disconnected unexpectedly';
+      });
+      rfb.addEventListener('credentialsrequired', () => {
+        status.textContent = 'This VM requires VNC credentials, which the console page does not support yet';
+      });
+      rfb.addEventListener('securityfailure', (e) => {
+        status.textContent = 'Security negotiation failed: ' + (e.detail && e.detail.reason);
+      });
+    </script>
+  {{end}}
+</body>
+</html>
+{{end}}

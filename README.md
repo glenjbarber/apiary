@@ -40,13 +40,23 @@ each design decision, in order.
   jail, and VM lifecycle management, each tested against real FreeBSD
   hosts (VMs for `zfs`/`jail`, real bare-metal hardware for `bhyve`,
   since it needs genuine hardware-assisted virtualization). bhyve VMs
-  get a disk, a NIC (a per-VM `tap` device on a host bridge), and
-  optionally an installer ISO attached as a CD-ROM.
+  get a disk, a NIC (a per-VM `tap` device on a host bridge), a VNC
+  framebuffer for the console (below), and optionally installer media
+  attached as either a CD-ROM or a second disk depending on what it
+  actually is (below).
+- **noVNC-based VM console** — every VM gets a real, interactive
+  browser console (`/vms/{id}/console`), proxied over WebSocket straight
+  to bhyve's own VNC framebuffer with no separate `websockify` process.
+  See [ADR-0020](docs/adr/0020-novnc-console.md).
 - **`internal/isostore`** — installer images uploaded through the web
   UI, verified against a pasted SHA-256 as they stream to disk and
   refused outright on a mismatch, so an unverified image never lands in
-  the store. See
-  [ADR-0017](docs/adr/0017-iso-upload-and-hash-verification.md).
+  the store. Whether an image is genuine ISO9660 or a raw bootable disk
+  (e.g. a FreeBSD memstick image) is sniffed from the file itself, not
+  trusted from its name, and attached to the right kind of device
+  accordingly — an image misattached as a CD-ROM never boots. See
+  [ADR-0017](docs/adr/0017-iso-upload-and-hash-verification.md) and
+  [ADR-0021](docs/adr/0021-iso9660-sniffing-for-memstick-images.md).
 - **`internal/hoststats`** — CPU load, memory, ZFS pool capacity and
   health, per-disk SMART status (via FreeBSD's own `smart(8)`), and
   network interface counters, surfaced on the UI's default page. See
@@ -74,9 +84,10 @@ each design decision, in order.
   waiting on the upstream fix to merge, not something fixable here)
 - Node scheduling: nothing decides which cluster node a VM should run on
   beyond whatever a caller sets directly, and `MigrateVM` doesn't exist
-- A console for a running VM — you can boot one from an installer ISO,
-  but there's no way to see or interact with it yet (noVNC is the
-  planned next step)
+- Multi-node console access: the noVNC console only works when the web
+  UI and the VM's owning node are the same machine (see ADR-0020) — no
+  VNC credentials/encryption either, relying entirely on the login gate
+  in front of it
 - Importing VMs from other hypervisors (e.g. Proxmox): no disk-format
   conversion, and Apiary is UEFI-only. Linux containers have no path at
   all — jails share the host FreeBSD kernel

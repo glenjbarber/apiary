@@ -150,6 +150,46 @@ func sha256Equal(a, b string) bool {
 	return true
 }
 
+// iso9660SniffOffset/iso9660Magic locate the "Standard Identifier" field
+// of an ISO9660 Primary Volume Descriptor: sector 16 (2048 bytes each),
+// plus 1 byte for the descriptor's own type field. This is the same
+// check file(1)/libmagic use to recognize ISO9660 media.
+const (
+	iso9660SniffOffset = 16*2048 + 1
+	iso9660Magic       = "CD001"
+)
+
+// IsISO9660 reports whether the stored image named name is a genuine
+// ISO9660 filesystem, as opposed to some other kind of disk image -
+// most notably a FreeBSD "memstick" image, which is a raw bootable
+// MBR/GPT+UFS disk meant to be dd'd to a USB stick, not a CD-ROM
+// filesystem at all. internal/cluster's Reconciler uses this to decide
+// whether to attach a VM's install media via ahci-cd or ahci-hd -
+// attaching a memstick image as a CD-ROM leaves firmware with no
+// ISO9660 filesystem to find, so it never boots (confirmed live: a real
+// VM attached this way sat at a blank screen indefinitely).
+func (m *Manager) IsISO9660(name string) (bool, error) {
+	if err := validateName(name); err != nil {
+		return false, err
+	}
+	return isISO9660(m.path(name))
+}
+
+func isISO9660(path string) (bool, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return false, err
+	}
+	defer f.Close()
+
+	buf := make([]byte, len(iso9660Magic))
+	n, err := f.ReadAt(buf, iso9660SniffOffset)
+	if err != nil && err != io.EOF {
+		return false, err
+	}
+	return n == len(iso9660Magic) && string(buf) == iso9660Magic, nil
+}
+
 // Path returns the local filesystem path for name, and whether it
 // exists - used by the reconciler to resolve a VM's iso_name into a
 // path bhyve can boot from.

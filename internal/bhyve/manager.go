@@ -33,8 +33,21 @@ type Config struct {
 	// ISOPath, if set, is attached read-only as a CD-ROM (AHCI) device -
 	// an installer image to boot from. See internal/isostore for how
 	// uploaded images are stored and verified; this field just takes
-	// whatever local path the caller resolved from there.
+	// whatever local path the caller resolved from there. Only for
+	// genuine ISO9660 media - see InstallDiskPath for anything else.
 	ISOPath string
+
+	// InstallDiskPath, if set, attaches a second AHCI disk (distinct from
+	// DiskPath, the VM's own persistent boot disk) for install media
+	// that isn't a real ISO9660 filesystem - most notably a FreeBSD
+	// "memstick" image, which is a raw bootable disk image, not a CD.
+	// Attaching one via ISOPath instead leaves firmware with no ISO9660
+	// filesystem to find, so it never boots. The caller (internal/
+	// cluster's Reconciler) decides between this and ISOPath by sniffing
+	// the actual file (internal/isostore.Manager.IsISO9660) - ISOPath and
+	// InstallDiskPath are mutually exclusive in practice, though nothing
+	// here enforces that.
+	InstallDiskPath string
 
 	// Bridge, if set, is the name of an existing bridge(4) interface
 	// (e.g. "bridge0", already configured with whatever uplink member
@@ -45,7 +58,26 @@ type Config struct {
 	// the VM boots with no NIC at all - the same opt-in pattern as
 	// DiskPath.
 	Bridge string
+
+	// EnableVNC, if true, attaches a VNC framebuffer device (fbuf) plus a
+	// USB tablet (for absolute mouse positioning - relative mouse motion
+	// over VNC is nearly unusable) so the VM's graphical console can be
+	// viewed remotely - see internal/frontend's noVNC-based console page
+	// (ADR-0020). CreateVM allocates a free local TCP port itself
+	// (there's no ephemeral-state field for this - see VNCPort's doc
+	// comment for why) and persists it the same way createTap persists a
+	// VM's tap device name, for a later VNCPort lookup.
+	EnableVNC bool
 }
+
+// vncBasePort/vncPortRange bound the local TCP ports CreateVM will assign
+// for VNC framebuffers. 100 concurrent VM consoles is far more than this
+// project runs today; a real deployment needing more would need a wider
+// range or a smarter allocator.
+const (
+	vncBasePort  = 5900
+	vncPortRange = 100
+)
 
 // Manager creates, destroys, and lists bhyve VMs, all named with a
 // configured Prefix - bhyve VM names have no hierarchical namespace
@@ -98,6 +130,65 @@ func (m *Manager) tapfile(qname string) string {
 	return filepath.Join(m.runDir(), qname+".tap")
 }
 
+// vncfile records the local TCP port CreateVM chose for qname's VNC
+// framebuffer, the same way tapfile records its tap device name - there
+// is no way to recover the port from the running vmm context alone, and
+// a separate process (e.g. managerd's RPC server answering
+// GetVMConsole) needs to look it up without re-deriving it.
+func (m *Manager) vncfile(qname string) string {
+	return filepath.Join(m.runDir(), qname+".vnc")
+}
+
+// allocateVNCPort picks the lowest port in [vncBasePort, vncBasePort+
+// vncPortRange) not already recorded in a *.vnc file under RunDir.
+func (m *Manager) allocateVNCPort() (int, error) {
+	used := make(map[int]bool)
+	entries, err := os.ReadDir(m.runDir())
+	if err != nil && !os.IsNotExist(err) {
+		return 0, fmt.Errorf("bhyve: scanning run dir for VNC ports: %w", err)
+	}
+	for _, e := range entries {
+		if !strings.HasSuffix(e.Name(), ".vnc") {
+			continue
+		}
+		data, err := os.ReadFile(filepath.Join(m.runDir(), e.Name()))
+		if err != nil {
+			continue
+		}
+		if port, err := strconv.Atoi(strings.TrimSpace(string(data))); err == nil {
+			used[port] = true
+		}
+	}
+	for port := vncBasePort; port < vncBasePort+vncPortRange; port++ {
+		if !used[port] {
+			return port, nil
+		}
+	}
+	return 0, fmt.Errorf("bhyve: no free VNC port in [%d, %d)", vncBasePort, vncBasePort+vncPortRange)
+}
+
+// VNCPort returns the local TCP port name's VNC framebuffer is listening
+// on, as recorded by CreateVM. ok is false (with err nil) if name has no
+// recorded VNC port - not created with EnableVNC, or not created at all.
+func (m *Manager) VNCPort(name string) (port int, ok bool, err error) {
+	qname, err := m.qualifiedName(name)
+	if err != nil {
+		return 0, false, err
+	}
+	data, err := os.ReadFile(m.vncfile(qname))
+	if os.IsNotExist(err) {
+		return 0, false, nil
+	}
+	if err != nil {
+		return 0, false, err
+	}
+	port, err = strconv.Atoi(strings.TrimSpace(string(data)))
+	if err != nil {
+		return 0, false, fmt.Errorf("bhyve: parsing recorded VNC port for %s: %w", qname, err)
+	}
+	return port, true, nil
+}
+
 // CreateVM starts a new VM, detached from this process via daemon(8) so
 // it keeps running independently of whatever started it (the same way a
 // real hypervisor manager must not take its VMs down if it restarts).
@@ -128,6 +219,17 @@ func (m *Manager) CreateVM(ctx context.Context, name string, cfg Config) error {
 		}
 	}
 
+	var vncPort int
+	if cfg.EnableVNC {
+		vncPort, err = m.allocateVNCPort()
+		if err != nil {
+			if tapName != "" {
+				m.destroyTap(ctx, qname, tapName)
+			}
+			return err
+		}
+	}
+
 	args := []string{
 		"-f",
 		"-p", m.pidfile(qname),
@@ -145,6 +247,15 @@ func (m *Manager) CreateVM(ctx context.Context, name string, cfg Config) error {
 	if cfg.ISOPath != "" {
 		args = append(args, "-s", "6,ahci-cd,"+cfg.ISOPath)
 	}
+	if cfg.InstallDiskPath != "" {
+		args = append(args, "-s", "7,ahci-hd,"+cfg.InstallDiskPath)
+	}
+	if cfg.EnableVNC {
+		args = append(args,
+			"-s", fmt.Sprintf("29,fbuf,tcp=0.0.0.0:%d,w=1024,h=768", vncPort),
+			"-s", "30,xhci,tablet",
+		)
+	}
 	args = append(args,
 		"-s", "31,lpc",
 		"-l", "bootrom,"+cfg.BootROM,
@@ -156,6 +267,16 @@ func (m *Manager) CreateVM(ctx context.Context, name string, cfg Config) error {
 			m.destroyTap(ctx, qname, tapName)
 		}
 		return err
+	}
+
+	if cfg.EnableVNC {
+		if err := os.WriteFile(m.vncfile(qname), []byte(strconv.Itoa(vncPort)), 0o644); err != nil {
+			// The VM is already running at this point - a failure to
+			// record its VNC port just means the console won't be
+			// discoverable until this is fixed, not a reason to tear the
+			// VM back down.
+			return fmt.Errorf("bhyve: VM created but recording VNC port failed: %w", err)
+		}
 	}
 	return nil
 }
@@ -223,6 +344,7 @@ func (m *Manager) DestroyVM(ctx context.Context, name string) error {
 	}
 
 	m.destroyTap(ctx, qname, "")
+	os.Remove(m.vncfile(qname))
 	return nil
 }
 

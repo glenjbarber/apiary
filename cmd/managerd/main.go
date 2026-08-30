@@ -80,8 +80,35 @@ func run() error {
 
 	isos := isostore.New(*isoDir)
 
+	reconciler := &cluster.Reconciler{
+		Raft:        raftClient,
+		ZFS:         zfs.New(*zfsBase),
+		LocalNodeID: raftNodeID,
+		BootROM:     *bhyveBootROM,
+		DiskSizeMB:  *diskSizeMB,
+		Bridge:      *bhyveBridge,
+		ISOs:        isos,
+	}
+	// reconciler.Bhyve/bhyveMgr are left nil when no boot ROM is
+	// configured, so nodes without hardware-assisted virtualization (the
+	// common case today - see ADR-0015) keep doing safe dataset-only
+	// reconciliation instead of failing every tick trying to call
+	// bhyve(8). Passing a literal nil into NewServer below (rather than a
+	// nil *bhyve.Manager boxed into a non-nil vncLookup interface value)
+	// matters here: a boxed nil pointer would panic the first time
+	// GetVMConsole called a method on it.
+	var bhyveMgr *bhyve.Manager
+	if *bhyveBootROM != "" {
+		bhyveMgr = bhyve.New(*bhyvePrefix)
+		reconciler.Bhyve = bhyveMgr
+	}
+
 	grpcServer := grpc.NewServer()
-	rpcpb.RegisterManagerServiceServer(grpcServer, manager.NewServer(raftClient, id, isos))
+	if bhyveMgr != nil {
+		rpcpb.RegisterManagerServiceServer(grpcServer, manager.NewServer(raftClient, id, isos, bhyveMgr))
+	} else {
+		rpcpb.RegisterManagerServiceServer(grpcServer, manager.NewServer(raftClient, id, isos, nil))
+	}
 
 	serveErrCh := make(chan error, 1)
 	go func() {
@@ -93,22 +120,6 @@ func run() error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	reconciler := &cluster.Reconciler{
-		Raft:        raftClient,
-		ZFS:         zfs.New(*zfsBase),
-		LocalNodeID: raftNodeID,
-		BootROM:     *bhyveBootROM,
-		DiskSizeMB:  *diskSizeMB,
-		Bridge:      *bhyveBridge,
-		ISOs:        isos,
-	}
-	// Bhyve is left nil when no boot ROM is configured, so nodes without
-	// hardware-assisted virtualization (the common case today - see
-	// ADR-0015) keep doing safe dataset-only reconciliation instead of
-	// failing every tick trying to call bhyve(8).
-	if *bhyveBootROM != "" {
-		reconciler.Bhyve = bhyve.New(*bhyvePrefix)
-	}
 	go runReconcileLoop(ctx, reconciler, *reconcileInterval)
 
 	select {

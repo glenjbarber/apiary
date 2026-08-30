@@ -26,6 +26,12 @@ type isoManager interface {
 	Delete(name string) error
 }
 
+// vncLookup is the subset of *bhyve.Manager the server needs for
+// GetVMConsole, defined locally for the same reason as isoManager.
+type vncLookup interface {
+	VNCPort(name string) (port int, ok bool, err error)
+}
+
 // Server implements the generated ManagerServiceServer interface, the
 // server side of managerd's external RPC API.
 type Server struct {
@@ -34,6 +40,11 @@ type Server struct {
 	raft   *RaftClient
 	nodeID string
 	isos   isoManager
+
+	// vnc is nil on a node with no bhyve provisioning configured (see
+	// cmd/managerd's own nil-able Reconciler.Bhyve) - GetVMConsole
+	// reports Available=false rather than panicking in that case.
+	vnc vncLookup
 
 	// statsGather defaults to hoststats.Gather in NewServer; overridable
 	// in tests so HostStats's RPC-translation logic can be exercised
@@ -44,10 +55,11 @@ type Server struct {
 var _ rpcpb.ManagerServiceServer = (*Server)(nil)
 
 // NewServer returns a Server that answers external RPCs using raft to
-// reach raftd, reporting nodeID as its own identity, and isos to store
-// installer images locally on this node.
-func NewServer(raft *RaftClient, nodeID string, isos isoManager) *Server {
-	return &Server{raft: raft, nodeID: nodeID, isos: isos, statsGather: hoststats.Gather}
+// reach raftd, reporting nodeID as its own identity, isos to store
+// installer images locally on this node, and vnc (nil-able) to look up a
+// running VM's VNC console port.
+func NewServer(raft *RaftClient, nodeID string, isos isoManager, vnc vncLookup) *Server {
+	return &Server{raft: raft, nodeID: nodeID, isos: isos, vnc: vnc, statsGather: hoststats.Gather}
 }
 
 // Status implements rpcpb.ManagerServiceServer. If raftd is unreachable,
@@ -263,6 +275,48 @@ func (s *Server) HostStats(ctx context.Context, _ *rpcpb.HostStatsRequest) (*rpc
 		Net:    net,
 		Errors: snap.Errors,
 	}, nil
+}
+
+// GetVMConsole implements rpcpb.ManagerServiceServer. It only ever
+// answers for a VM actually running on this node - see
+// GetVMConsoleResponse's doc comment (api/rpc/manager.proto) for the
+// resulting v1 limitation on a true multi-node deployment.
+func (s *Server) GetVMConsole(ctx context.Context, req *rpcpb.GetVMConsoleRequest) (*rpcpb.GetVMConsoleResponse, error) {
+	resp, err := s.raft.GetVM(ctx, req.GetId())
+	if err != nil {
+		return &rpcpb.GetVMConsoleResponse{Error: err.Error()}, nil
+	}
+	if resp.GetError() != "" {
+		return &rpcpb.GetVMConsoleResponse{Error: resp.GetError()}, nil
+	}
+	if !resp.GetFound() {
+		return &rpcpb.GetVMConsoleResponse{Error: fmt.Sprintf("VM %q not found", req.GetId())}, nil
+	}
+	vm := resp.GetVm()
+	if vm.GetNodeId() != s.nodeID {
+		return &rpcpb.GetVMConsoleResponse{
+			Error: fmt.Sprintf("VM %q is assigned to node %q; query that node's managerd directly for its console", req.GetId(), vm.GetNodeId()),
+		}, nil
+	}
+	if s.vnc == nil {
+		return &rpcpb.GetVMConsoleResponse{Error: "this node has no VNC-capable bhyve support configured"}, nil
+	}
+	port, ok, err := s.vnc.VNCPort(req.GetId())
+	if err != nil {
+		return &rpcpb.GetVMConsoleResponse{Error: err.Error()}, nil
+	}
+	if !ok {
+		return &rpcpb.GetVMConsoleResponse{Available: false}, nil
+	}
+	// Host is loopback, not s.nodeID: GetVMConsole only ever answers for a
+	// VM already confirmed to be on *this* node (the check above), and
+	// the caller dialing it (internal/frontend's console proxy) is only
+	// ever expected to be running on that same node too - see
+	// GetVMConsoleResponse's doc comment. A node's own hostname isn't
+	// guaranteed to resolve from itself (confirmed live: apiarium's own
+	// managerd couldn't resolve "apiarium"), so loopback avoids a DNS
+	// dependency this project has no other reason to require.
+	return &rpcpb.GetVMConsoleResponse{Host: "127.0.0.1", Port: uint32(port), Available: true}, nil
 }
 
 // ListVMs implements rpcpb.ManagerServiceServer.

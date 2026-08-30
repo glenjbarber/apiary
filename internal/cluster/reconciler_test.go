@@ -446,6 +446,13 @@ func TestReconciler_RunOnce_DeletingVMPropagatesTeardownError(t *testing.T) {
 type fakeISOResolver struct {
 	paths   map[string]string
 	pathErr error
+
+	// rawDisk marks names that are NOT genuine ISO9660 media (e.g. a
+	// memstick image) - IsISO9660 returns false for these. Defaults to
+	// treating every name as real ISO9660, matching every pre-existing
+	// test's expectations.
+	rawDisk map[string]bool
+	isoErr  error
 }
 
 func (f *fakeISOResolver) Path(name string) (string, bool, error) {
@@ -454,6 +461,13 @@ func (f *fakeISOResolver) Path(name string) (string, bool, error) {
 	}
 	path, ok := f.paths[name]
 	return path, ok, nil
+}
+
+func (f *fakeISOResolver) IsISO9660(name string) (bool, error) {
+	if f.isoErr != nil {
+		return false, f.isoErr
+	}
+	return !f.rawDisk[name], nil
 }
 
 func TestReconciler_RunOnce_AttachesResolvedISOAndBridge(t *testing.T) {
@@ -476,6 +490,53 @@ func TestReconciler_RunOnce_AttachesResolvedISOAndBridge(t *testing.T) {
 	}
 	if cfg.Bridge != "bridge0" {
 		t.Errorf("CreateVM() cfg.Bridge = %q, want bridge0", cfg.Bridge)
+	}
+}
+
+func TestReconciler_RunOnce_MemstickImageAttachedAsDiskNotCD(t *testing.T) {
+	raft := &fakeRaftClient{resp: &internalpb.ListVMsResponse{
+		Vms: []*internalpb.VMDefinition{{Id: "vm-1", NodeId: "node-a", IsoName: "freebsd-memstick.img"}},
+	}}
+	zfs := newFakeDatasetManager()
+	zfs.mountpointFor["vm-1"] = t.TempDir()
+	vms := newFakeVMManager()
+	isos := &fakeISOResolver{
+		paths:   map[string]string{"freebsd-memstick.img": "/isos/freebsd-memstick.img"},
+		rawDisk: map[string]bool{"freebsd-memstick.img": true},
+	}
+
+	r := &Reconciler{Raft: raft, ZFS: zfs, Bhyve: vms, ISOs: isos, LocalNodeID: "node-a", BootROM: "/fw/UEFI.fd"}
+	if err := r.RunOnce(context.Background()); err != nil {
+		t.Fatalf("RunOnce() error: %v", err)
+	}
+
+	cfg := vms.lastCfg["vm-1"]
+	if cfg.InstallDiskPath != "/isos/freebsd-memstick.img" {
+		t.Errorf("CreateVM() cfg.InstallDiskPath = %q, want /isos/freebsd-memstick.img", cfg.InstallDiskPath)
+	}
+	if cfg.ISOPath != "" {
+		t.Errorf("CreateVM() cfg.ISOPath = %q, want empty - a memstick image must not go on ahci-cd", cfg.ISOPath)
+	}
+}
+
+func TestReconciler_RunOnce_ImageFormatCheckFailureAbortsBeforeCreate(t *testing.T) {
+	raft := &fakeRaftClient{resp: &internalpb.ListVMsResponse{
+		Vms: []*internalpb.VMDefinition{{Id: "vm-1", NodeId: "node-a", IsoName: "debian.iso"}},
+	}}
+	zfs := newFakeDatasetManager()
+	zfs.mountpointFor["vm-1"] = t.TempDir()
+	vms := newFakeVMManager()
+	isos := &fakeISOResolver{
+		paths:  map[string]string{"debian.iso": "/isos/debian.iso"},
+		isoErr: errors.New("read error"),
+	}
+
+	r := &Reconciler{Raft: raft, ZFS: zfs, Bhyve: vms, ISOs: isos, LocalNodeID: "node-a", BootROM: "/fw/UEFI.fd"}
+	if err := r.RunOnce(context.Background()); err == nil {
+		t.Fatalf("RunOnce() = nil error, want the image-format check failure surfaced")
+	}
+	if len(vms.created) != 0 {
+		t.Errorf("created = %v, want none (format check should fail before CreateVM)", vms.created)
 	}
 }
 
