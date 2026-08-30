@@ -201,6 +201,88 @@ func (s *Server) ListNetworks(ctx context.Context, _ *rpcpb.ListNetworksRequest)
 	return &rpcpb.ListNetworksResponse{Networks: networks}, nil
 }
 
+// applyAPIKeyCommand mirrors applyNetworkCommand, for commands whose
+// result is an ApiKey instead of a NetworkDefinition (CreateAPIKey/
+// RevokeAPIKey).
+func (s *Server) applyAPIKeyCommand(ctx context.Context, cmd *internalpb.Command, timeoutMs uint32) (key *internalpb.ApiKey, appErr, leaderHint string) {
+	timeout := defaultApplyTimeout
+	if timeoutMs > 0 {
+		timeout = time.Duration(timeoutMs) * time.Millisecond
+	}
+
+	payload, err := proto.Marshal(cmd)
+	if err != nil {
+		return nil, err.Error(), ""
+	}
+
+	resp, err := s.raft.Apply(ctx, payload, timeout)
+	if err != nil {
+		return nil, err.Error(), ""
+	}
+	if resp.GetError() != "" {
+		return nil, resp.GetError(), resp.GetLeaderHint()
+	}
+
+	key = &internalpb.ApiKey{}
+	if err := proto.Unmarshal(resp.GetResult(), key); err != nil {
+		return nil, err.Error(), ""
+	}
+	return key, "", ""
+}
+
+// CreateAPIKey implements rpcpb.ManagerServiceServer. This is the only
+// place a raw key ever exists outside a caller's own hands - it's
+// generated here, hashed before being submitted through raft, and
+// returned in the response exactly once; the hash is all that's ever
+// stored (see ADR-0023).
+func (s *Server) CreateAPIKey(ctx context.Context, req *rpcpb.CreateAPIKeyRequest) (*rpcpb.CreateAPIKeyResponse, error) {
+	raw, hashed, err := generateAPIKey()
+	if err != nil {
+		return &rpcpb.CreateAPIKeyResponse{Error: fmt.Sprintf("generating API key: %v", err)}, nil
+	}
+
+	id, err := generateAPIKeyID()
+	if err != nil {
+		return &rpcpb.CreateAPIKeyResponse{Error: fmt.Sprintf("generating API key id: %v", err)}, nil
+	}
+
+	cmd := &internalpb.Command{
+		Op: &internalpb.Command_CreateApiKey{CreateApiKey: &internalpb.CreateAPIKey{Key: &internalpb.ApiKey{
+			Id: id, Name: req.GetName(), HashedKey: hashed, CreatedUnix: time.Now().Unix(),
+		}}},
+	}
+	key, appErr, leaderHint := s.applyAPIKeyCommand(ctx, cmd, req.GetTimeoutMs())
+	if appErr != "" {
+		return &rpcpb.CreateAPIKeyResponse{Error: appErr, LeaderHint: leaderHint}, nil
+	}
+	return &rpcpb.CreateAPIKeyResponse{Key: fromInternalAPIKey(key), RawKey: raw}, nil
+}
+
+// RevokeAPIKey implements rpcpb.ManagerServiceServer.
+func (s *Server) RevokeAPIKey(ctx context.Context, req *rpcpb.RevokeAPIKeyRequest) (*rpcpb.RevokeAPIKeyResponse, error) {
+	cmd := &internalpb.Command{
+		Op: &internalpb.Command_RevokeApiKey{RevokeApiKey: &internalpb.RevokeAPIKey{Id: req.GetId()}},
+	}
+	_, appErr, leaderHint := s.applyAPIKeyCommand(ctx, cmd, req.GetTimeoutMs())
+	return &rpcpb.RevokeAPIKeyResponse{Error: appErr, LeaderHint: leaderHint}, nil
+}
+
+// ListAPIKeys implements rpcpb.ManagerServiceServer.
+func (s *Server) ListAPIKeys(ctx context.Context, _ *rpcpb.ListAPIKeysRequest) (*rpcpb.ListAPIKeysResponse, error) {
+	resp, err := s.raft.ListAPIKeys(ctx)
+	if err != nil {
+		return &rpcpb.ListAPIKeysResponse{Error: err.Error()}, nil
+	}
+	if resp.GetError() != "" {
+		return &rpcpb.ListAPIKeysResponse{Error: resp.GetError(), LeaderHint: resp.GetLeaderHint()}, nil
+	}
+	keys := make([]*rpcpb.APIKeyInfo, 0, len(resp.GetKeys()))
+	for _, k := range resp.GetKeys() {
+		keys = append(keys, fromInternalAPIKey(k))
+	}
+	return &rpcpb.ListAPIKeysResponse{Keys: keys}, nil
+}
+
 // bridgeStatus reports network's bridge interface status on this node -
 // "up", "down", or "unknown" if this node has no VLAN support
 // configured, or the bridge doesn't exist here yet (e.g. no VM on this

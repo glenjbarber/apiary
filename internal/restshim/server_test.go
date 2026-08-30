@@ -98,6 +98,18 @@ func (f *fakeClient) DeleteNetwork(context.Context, *rpcpb.DeleteNetworkRequest,
 	return &rpcpb.DeleteNetworkResponse{}, nil
 }
 
+func (f *fakeClient) CreateAPIKey(context.Context, *rpcpb.CreateAPIKeyRequest, ...grpc.CallOption) (*rpcpb.CreateAPIKeyResponse, error) {
+	return &rpcpb.CreateAPIKeyResponse{}, nil
+}
+
+func (f *fakeClient) ListAPIKeys(context.Context, *rpcpb.ListAPIKeysRequest, ...grpc.CallOption) (*rpcpb.ListAPIKeysResponse, error) {
+	return &rpcpb.ListAPIKeysResponse{}, nil
+}
+
+func (f *fakeClient) RevokeAPIKey(context.Context, *rpcpb.RevokeAPIKeyRequest, ...grpc.CallOption) (*rpcpb.RevokeAPIKeyResponse, error) {
+	return &rpcpb.RevokeAPIKeyResponse{}, nil
+}
+
 var _ rpcpb.ManagerServiceClient = (*fakeClient)(nil)
 
 func doRequest(t *testing.T, s *Server, method, path string, body interface{}) *httptest.ResponseRecorder {

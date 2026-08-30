@@ -135,8 +135,16 @@ func run() error {
 		vlanArg = vlanMgr
 	}
 
-	grpcServer := grpc.NewServer()
-	rpcpb.RegisterManagerServiceServer(grpcServer, manager.NewServer(raftClient, id, isos, vncArg, vlanArg))
+	srv := manager.NewServer(raftClient, id, isos, vncArg, vlanArg)
+	// Every RPC (including UploadISO's stream) is gated by srv's own
+	// API-key check - see ADR-0023. Auth stays fully open until the
+	// first key is created (CreateAPIKey itself included), so this is
+	// non-breaking for any deployment that hasn't created a key yet.
+	grpcServer := grpc.NewServer(
+		grpc.UnaryInterceptor(srv.AuthUnaryInterceptor),
+		grpc.StreamInterceptor(srv.AuthStreamInterceptor),
+	)
+	rpcpb.RegisterManagerServiceServer(grpcServer, srv)
 
 	serveErrCh := make(chan error, 1)
 	go func() {

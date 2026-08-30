@@ -10,6 +10,7 @@ import (
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/metadata"
 
 	internalpb "github.com/glenjbarber/apiary/api/internalpb"
 	rpcpb "github.com/glenjbarber/apiary/api/rpc"
@@ -153,8 +154,16 @@ func newManagerdRPCClientFull(t *testing.T, raftdSocket, nodeID string, vnc VNCL
 		t.Fatalf("Listen(tcp) error: %v", err)
 	}
 
-	grpcServer := grpc.NewServer()
-	rpcpb.RegisterManagerServiceServer(grpcServer, NewServer(raftClient, nodeID, isostore.New(t.TempDir()), vnc, vlanMgr))
+	srv := NewServer(raftClient, nodeID, isostore.New(t.TempDir()), vnc, vlanMgr)
+	// Wired unconditionally, mirroring cmd/managerd/main.go exactly - this
+	// is a no-op for every pre-existing test here (none of them ever
+	// create an API key, so checkAuth's "zero keys = open" branch always
+	// applies) and is what the ADR-0023 auth tests below rely on.
+	grpcServer := grpc.NewServer(
+		grpc.UnaryInterceptor(srv.AuthUnaryInterceptor),
+		grpc.StreamInterceptor(srv.AuthStreamInterceptor),
+	)
+	rpcpb.RegisterManagerServiceServer(grpcServer, srv)
 	go grpcServer.Serve(lis)
 	t.Cleanup(grpcServer.GracefulStop)
 
@@ -609,5 +618,122 @@ func TestIntegration_ListNetworks_BridgeStatusUpOrDown(t *testing.T) {
 	}
 	if statuses["net-2"] != "unknown" {
 		t.Errorf("net-2 BridgeStatus = %q, want unknown (bridge doesn't exist on this node)", statuses["net-2"])
+	}
+}
+
+func TestIntegration_ZeroAPIKeys_EverythingIsUnauthenticated(t *testing.T) {
+	raftdSocket := newRaftdUDSSocket(t)
+	client := newManagerdRPCClient(t, raftdSocket)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	// No Authorization metadata attached anywhere in this test - every
+	// call should still succeed, since no API key exists yet.
+	if _, err := client.ListVMs(ctx, &rpcpb.ListVMsRequest{}); err != nil {
+		t.Errorf("ListVMs() error = %v, want nil with zero API keys", err)
+	}
+	if _, err := client.Status(ctx, &rpcpb.StatusRequest{}); err != nil {
+		t.Errorf("Status() error = %v, want nil with zero API keys", err)
+	}
+}
+
+func TestIntegration_CreateAPIKey_RawKeyWorksThenIsRejectedIfWrong(t *testing.T) {
+	raftdSocket := newRaftdUDSSocket(t)
+	client := newManagerdRPCClient(t, raftdSocket)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	createResp, err := client.CreateAPIKey(ctx, &rpcpb.CreateAPIKeyRequest{Name: "terraform"})
+	if err != nil {
+		t.Fatalf("CreateAPIKey() error: %v", err)
+	}
+	if createResp.GetError() != "" {
+		t.Fatalf("CreateAPIKey() returned error: %s", createResp.GetError())
+	}
+	if createResp.GetRawKey() == "" {
+		t.Fatalf("CreateAPIKey() RawKey is empty, want a real generated key")
+	}
+	if createResp.GetKey().GetName() != "terraform" {
+		t.Errorf("CreateAPIKey() key.Name = %q, want terraform", createResp.GetKey().GetName())
+	}
+
+	// Now that a key exists, an unauthenticated call must be rejected...
+	if _, err := client.ListVMs(ctx, &rpcpb.ListVMsRequest{}); err == nil {
+		t.Fatalf("ListVMs() with no Authorization metadata = nil error, want Unauthenticated now that a key exists")
+	}
+
+	// ...a wrong key must be rejected...
+	wrongCtx := metadata.NewOutgoingContext(ctx, metadata.Pairs("authorization", "Bearer apk_wrong"))
+	if _, err := client.ListVMs(wrongCtx, &rpcpb.ListVMsRequest{}); err == nil {
+		t.Fatalf("ListVMs() with a wrong key = nil error, want Unauthenticated")
+	}
+
+	// ...but the real, just-issued raw key must work.
+	goodCtx := metadata.NewOutgoingContext(ctx, metadata.Pairs("authorization", "Bearer "+createResp.GetRawKey()))
+	if _, err := client.ListVMs(goodCtx, &rpcpb.ListVMsRequest{}); err != nil {
+		t.Errorf("ListVMs() with the real key error = %v, want nil", err)
+	}
+}
+
+func TestIntegration_RevokeAPIKey_StopsWorkingImmediately(t *testing.T) {
+	raftdSocket := newRaftdUDSSocket(t)
+	client := newManagerdRPCClient(t, raftdSocket)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	createResp, err := client.CreateAPIKey(ctx, &rpcpb.CreateAPIKeyRequest{Name: "ci"})
+	if err != nil {
+		t.Fatalf("CreateAPIKey() error: %v", err)
+	}
+	authedCtx := metadata.NewOutgoingContext(ctx, metadata.Pairs("authorization", "Bearer "+createResp.GetRawKey()))
+
+	if _, err := client.ListVMs(authedCtx, &rpcpb.ListVMsRequest{}); err != nil {
+		t.Fatalf("ListVMs() before revoke error = %v, want nil", err)
+	}
+
+	// RevokeAPIKey itself needs a valid key too, once one exists.
+	revokeResp, err := client.RevokeAPIKey(authedCtx, &rpcpb.RevokeAPIKeyRequest{Id: createResp.GetKey().GetId()})
+	if err != nil {
+		t.Fatalf("RevokeAPIKey() error: %v", err)
+	}
+	if revokeResp.GetError() != "" {
+		t.Fatalf("RevokeAPIKey() returned error: %s", revokeResp.GetError())
+	}
+
+	if _, err := client.ListVMs(authedCtx, &rpcpb.ListVMsRequest{}); err == nil {
+		t.Fatalf("ListVMs() with the now-revoked key = nil error, want Unauthenticated")
+	}
+}
+
+func TestIntegration_ListAPIKeys_NeverReturnsKeyMaterial(t *testing.T) {
+	raftdSocket := newRaftdUDSSocket(t)
+	client := newManagerdRPCClient(t, raftdSocket)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	createResp, err := client.CreateAPIKey(ctx, &rpcpb.CreateAPIKeyRequest{Name: "terraform"})
+	if err != nil {
+		t.Fatalf("CreateAPIKey() error: %v", err)
+	}
+	authedCtx := metadata.NewOutgoingContext(ctx, metadata.Pairs("authorization", "Bearer "+createResp.GetRawKey()))
+
+	listResp, err := client.ListAPIKeys(authedCtx, &rpcpb.ListAPIKeysRequest{})
+	if err != nil {
+		t.Fatalf("ListAPIKeys() error: %v", err)
+	}
+	if len(listResp.GetKeys()) != 1 || listResp.GetKeys()[0].GetName() != "terraform" {
+		t.Fatalf("ListAPIKeys() = %+v, want one key named terraform", listResp.GetKeys())
+	}
+	// APIKeyInfo has no field for the raw key or its hash at all, but
+	// double-check the actual raw key value doesn't show up anywhere in
+	// the response by accident (e.g. via a future field added carelessly).
+	for _, k := range listResp.GetKeys() {
+		if k.String() == createResp.GetRawKey() {
+			t.Fatalf("ListAPIKeys() leaked the raw key value")
+		}
 	}
 }

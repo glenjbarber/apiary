@@ -68,6 +68,18 @@ func (c *RaftClient) ListNetworks(ctx context.Context) (*internalpb.ListNetworks
 	return c.client.ListNetworks(ctx, &internalpb.ListNetworksRequest{})
 }
 
+// ValidateAPIKeyHash checks hashedKey (may be empty) against raftd's
+// own FSM state - see ADR-0023 for why this is deliberately not
+// leader-restricted, unlike every other read above.
+func (c *RaftClient) ValidateAPIKeyHash(ctx context.Context, hashedKey string) (*internalpb.ValidateAPIKeyHashResponse, error) {
+	return c.client.ValidateAPIKeyHash(ctx, &internalpb.ValidateAPIKeyHashRequest{HashedKey: hashedKey})
+}
+
+// ListAPIKeys reads all API keys from raftd (leader-only).
+func (c *RaftClient) ListAPIKeys(ctx context.Context) (*internalpb.ListAPIKeysResponse, error) {
+	return c.client.ListAPIKeys(ctx, &internalpb.ListAPIKeysRequest{})
+}
+
 // Close closes the underlying connection to raftd.
 func (c *RaftClient) Close() error {
 	return c.conn.Close()

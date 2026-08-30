@@ -113,3 +113,19 @@ func fromInternalNetwork(n *internalpb.NetworkDefinition) *rpcpb.NetworkDefiniti
 		BridgeName: n.GetBridgeName(),
 	}
 }
+
+// fromInternalAPIKey converts an internal ApiKey to the external,
+// metadata-only APIKeyInfo type - HashedKey is deliberately never
+// copied across this boundary (see APIKeyInfo's own doc comment), so a
+// key's hash can never leak back out over ManagerService even if a
+// future caller of this function forgets to strip it.
+func fromInternalAPIKey(k *internalpb.ApiKey) *rpcpb.APIKeyInfo {
+	if k == nil {
+		return nil
+	}
+	return &rpcpb.APIKeyInfo{
+		Id:          k.GetId(),
+		Name:        k.GetName(),
+		CreatedUnix: k.GetCreatedUnix(),
+	}
+}
