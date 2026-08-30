@@ -1,12 +1,13 @@
-{{define "layout"}}
-<!DOCTYPE html>
-<html lang="en">
+{{define "head"}}
 <head>
   <meta charset="utf-8">
   <title>Apiary</title>
   <script src="/static/htmx.min.js"></script>
   <style>
     body { font-family: sans-serif; max-width: 960px; margin: 2rem auto; padding: 0 1rem; }
+    nav { margin-bottom: 1.5rem; }
+    nav a { margin-right: 1rem; text-decoration: none; color: #333; }
+    nav a.active { font-weight: bold; text-decoration: underline; }
     table { border-collapse: collapse; width: 100%; margin-top: 1rem; }
     th, td { text-align: left; padding: 0.5rem; border-bottom: 1px solid #ddd; }
     form.create-vm, form.upload-iso { display: flex; gap: 0.75rem; align-items: end; flex-wrap: wrap; }
@@ -40,9 +41,12 @@
     .upload-progress[hidden] { display: none; }
   </style>
 </head>
-<body>
-  <h1>Apiary</h1>
-  {{template "content" .}}
-</body>
-</html>
+{{end}}
+
+{{define "nav"}}
+<nav>
+  <a href="/"{{if eq .ActivePage "vms"}} class="active"{{end}}>VMs</a>
+  <a href="/images"{{if eq .ActivePage "images"}} class="active"{{end}}>Images</a>
+  <a href="/vms/new"{{if eq .ActivePage "new_vm"}} class="active"{{end}}>New VM</a>
+</nav>
 {{end}}

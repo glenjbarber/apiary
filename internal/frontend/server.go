@@ -13,17 +13,21 @@ import (
 	"github.com/glenjbarber/apiary/web"
 )
 
-// pageData is passed to both the full index page and the vm_rows
-// fragment - Error is empty on the normal path; VMs is always the
-// current list, even when an action failed, so the UI never shows a
-// stale table alongside an error.
+// pageData is passed to every full-page and fragment render - Error is
+// empty on the normal path; VMs is always the current list, even when
+// an action failed, so the UI never shows a stale table alongside an
+// error.
 type pageData struct {
 	Error string
 	VMs   []vmView
 
+	// ActivePage names the current page ("vms", "images", or "new_vm"),
+	// for the shared nav partial to bold/underline the matching link.
+	// Empty for fragment renders, which don't include the nav.
+	ActivePage string
+
 	// Nodes lists known raft cluster member IDs, for the create-VM form's
-	// node picker. Only populated for the full index render - vm_rows
-	// doesn't include the create form, so it doesn't need this.
+	// node picker. Only populated for the New VM page.
 	Nodes []string
 
 	// SortBy/SortDir are the sort currently applied to VMs ("id", "node",
@@ -104,7 +108,9 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) routes() {
 	s.mux.Handle("GET /static/", http.FileServerFS(web.FS))
-	s.mux.HandleFunc("GET /{$}", s.handleIndex)
+	s.mux.HandleFunc("GET /{$}", s.handleVMsPage)
+	s.mux.HandleFunc("GET /images", s.handleImagesPage)
+	s.mux.HandleFunc("GET /vms/new", s.handleNewVMPage)
 	s.mux.HandleFunc("GET /vms", s.handleListVMs)
 	s.mux.HandleFunc("POST /vms", s.handleCreateVM)
 	s.mux.HandleFunc("DELETE /vms/{id}", s.handleDeleteVM)
@@ -141,18 +147,29 @@ func (s *Server) currentVMs(r *http.Request, sortBy, dir string) ([]vmView, stri
 	return vms, ""
 }
 
-func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
+// handleVMsPage serves the VMs list page ("/").
+func (s *Server) handleVMsPage(w http.ResponseWriter, r *http.Request) {
 	sortBy, dir := parseSort(r)
 	vms, errMsg := s.currentVMs(r, sortBy, dir)
-	nodes, err := s.knownNodes(r)
-	if err != nil && errMsg == "" {
-		errMsg = err.Error()
-	}
-	isos, isoErr := s.currentISOs(r)
-	if isoErr != "" && errMsg == "" {
-		errMsg = isoErr
-	}
-	s.render(w, "layout", pageData{Error: errMsg, VMs: vms, Nodes: nodes, SortBy: sortBy, SortDir: dir, ISOs: isos})
+	s.render(w, "vms_page", pageData{Error: errMsg, VMs: vms, SortBy: sortBy, SortDir: dir, ActivePage: "vms"})
+}
+
+// handleImagesPage serves the Images (ISO upload/list) page ("/images").
+func (s *Server) handleImagesPage(w http.ResponseWriter, r *http.Request) {
+	isos, errMsg := s.currentISOs(r)
+	s.render(w, "images_page", pageData{ISOs: isos, ISOFormError: errMsg, ActivePage: "images"})
+}
+
+// handleNewVMPage serves the create-VM form page ("/vms/new"). A failed
+// Nodes/ISOs fetch isn't surfaced as an error here - the node picker
+// already falls back to a free-text input when Nodes is empty (see
+// new_vm.html), and an empty ISO picker just means "(none)" is the only
+// option, both harmless degraded states rather than failures worth a
+// banner.
+func (s *Server) handleNewVMPage(w http.ResponseWriter, r *http.Request) {
+	nodes, _ := s.knownNodes(r)
+	isos, _ := s.currentISOs(r)
+	s.render(w, "new_vm_page", pageData{Nodes: nodes, ISOs: isos, ActivePage: "new_vm"})
 }
 
 // currentISOs fetches the current list of stored installer images,
@@ -195,9 +212,17 @@ func (s *Server) handleListVMs(w http.ResponseWriter, r *http.Request) {
 	s.render(w, "vm_rows", pageData{Error: errMsg, VMs: vms})
 }
 
+// handleCreateVM lives on its own page (/vms/new, see new_vm.html) now
+// that VMs/Images/New VM are separate pages - there's no VM table on
+// this page to refresh, so a validation/application error just renders
+// directly into the form's own #create-error target. On success, an
+// HX-Redirect tells htmx to navigate the browser to the VMs page
+// outright, where the new VM shows up (starting at "pending", per
+// ADR-0016's reconciliation phase) via that page's own normal render -
+// simpler and more honest than trying to fake a VMs-table view here.
 func (s *Server) handleCreateVM(w http.ResponseWriter, r *http.Request) {
 	if err := r.ParseForm(); err != nil {
-		s.renderVMRowsAndFormError(w, r, "invalid form: "+err.Error())
+		s.renderCreateError(w, "invalid form: "+err.Error())
 		return
 	}
 
@@ -216,46 +241,22 @@ func (s *Server) handleCreateVM(w http.ResponseWriter, r *http.Request) {
 		},
 	})
 	if err != nil {
-		s.renderVMRowsAndFormError(w, r, err.Error())
+		s.renderCreateError(w, err.Error())
 		return
 	}
 	if resp.GetError() != "" {
-		s.renderVMRowsAndFormError(w, r, resp.GetError())
+		s.renderCreateError(w, resp.GetError())
 		return
 	}
-
-	// Empty formErr on success clears any stale error left over from a
-	// previous failed attempt, rather than leaving it displayed forever.
-	s.renderVMRowsAndFormError(w, r, "")
+	w.Header().Set("HX-Redirect", "/")
 }
 
-// renderVMRowsAndFormError refreshes the VM table and reports a
-// create-form-specific error (if any) as a separate out-of-band swap
-// into index.html's #create-error slot, rather than inline in the VMs
-// table (vm_rows's own {{if .Error}} row is for errors *about* the
-// list itself - e.g. a failed fetch - not about a create attempt that
-// never touched the list at all). HTMX processes the hx-swap-oob
-// element in the response independently of the request's hx-target, so
-// one response can update both the table and the form's error slot.
-func (s *Server) renderVMRowsAndFormError(w http.ResponseWriter, r *http.Request, formErr string) {
-	sortBy, dir := parseSort(r)
-	vms, fetchErr := s.currentVMs(r, sortBy, dir)
-	if fetchErr != "" {
-		if formErr == "" {
-			formErr = fetchErr
-		} else {
-			formErr += "; additionally failed to refresh list: " + fetchErr
-		}
-	}
-
+// renderCreateError writes formErr as the create form's #create-error
+// contents (its hx-target points directly at that div - no oob swap,
+// no separate table to refresh alongside it).
+func (s *Server) renderCreateError(w http.ResponseWriter, formErr string) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	if err := s.tmpl.ExecuteTemplate(w, "vm_rows", pageData{VMs: vms}); err != nil {
-		http.Error(w, "template error: "+err.Error(), http.StatusInternalServerError)
-		return
-	}
-	if err := s.tmpl.ExecuteTemplate(w, "create_error", formErr); err != nil {
-		http.Error(w, "template error: "+err.Error(), http.StatusInternalServerError)
-	}
+	fmt.Fprint(w, template.HTMLEscapeString(formErr))
 }
 
 func (s *Server) handleDeleteVM(w http.ResponseWriter, r *http.Request) {

@@ -1,0 +1,60 @@
+{{define "images_page"}}
+<!DOCTYPE html>
+<html lang="en">
+{{template "head" .}}
+<body>
+  <h1>Apiary</h1>
+  {{template "nav" .}}
+  <h2>Images</h2>
+  <form id="iso-upload-form" class="upload-iso" hx-post="/isos" hx-target="#iso-panel" hx-swap="innerHTML" hx-encoding="multipart/form-data">
+    <label>Expected SHA-256
+      <input type="text" name="expected_sha256" required pattern="[0-9a-fA-F]{64}" title="64 hex characters" size="64">
+    </label>
+    <label>File <input type="file" name="file" required></label>
+    <button type="submit">Upload</button>
+  </form>
+  <div id="iso-upload-progress" class="upload-progress" hidden>
+    <progress id="iso-upload-bar" value="0" max="100"></progress>
+    <span id="iso-upload-pct">0%</span>
+  </div>
+  <script>
+  (function() {
+    var form = document.getElementById('iso-upload-form');
+    var wrap = document.getElementById('iso-upload-progress');
+    var bar = document.getElementById('iso-upload-bar');
+    var pct = document.getElementById('iso-upload-pct');
+    form.addEventListener('htmx:beforeRequest', function() {
+      bar.value = 0;
+      pct.textContent = '0%';
+      wrap.hidden = false;
+    });
+    form.addEventListener('htmx:xhr:progress', function(evt) {
+      if (!evt.detail.lengthComputable) return;
+      var percent = Math.round((evt.detail.loaded / evt.detail.total) * 100);
+      bar.value = percent;
+      pct.textContent = percent + '%';
+    });
+    form.addEventListener('htmx:afterRequest', function() {
+      wrap.hidden = true;
+    });
+  })();
+  </script>
+  <div id="iso-panel">
+    {{template "iso_panel" .}}
+  </div>
+</body>
+</html>
+{{end}}
+
+{{define "iso_panel"}}
+<div id="iso-error" class="error">{{.ISOFormError}}</div>
+<div id="iso-success" class="success">{{.ISOFormSuccess}}</div>
+<table>
+  <thead>
+    <tr><th>Name</th><th>Size (bytes)</th><th>SHA-256</th><th></th></tr>
+  </thead>
+  <tbody id="iso-rows">
+    {{template "iso_rows" .}}
+  </tbody>
+</table>
+{{end}}

@@ -138,6 +138,51 @@ func TestServer_Index(t *testing.T) {
 	if !strings.Contains(body, "ready") {
 		t.Errorf("index page missing observed phase, got: %s", body)
 	}
+	if !strings.Contains(body, `class="active"`) {
+		t.Errorf("VMs page nav should mark its own link active, got: %s", body)
+	}
+}
+
+func TestServer_ImagesPage(t *testing.T) {
+	client := &fakeClient{listISOsResp: &rpcpb.ListISOsResponse{
+		Isos: []*rpcpb.ISOInfo{{Name: "debian.iso", SizeBytes: 100, Sha256: "abc"}},
+	}}
+	s := newTestServer(t, client)
+
+	req := httptest.NewRequest(http.MethodGet, "/images", nil)
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, "debian.iso") {
+		t.Errorf("images page missing stored ISO, got: %s", body)
+	}
+	if !strings.Contains(body, `id="iso-upload-form"`) {
+		t.Errorf("images page missing upload form, got: %s", body)
+	}
+}
+
+func TestServer_NewVMPage(t *testing.T) {
+	client := &fakeClient{}
+	s := newTestServer(t, client)
+
+	req := httptest.NewRequest(http.MethodGet, "/vms/new", nil)
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, `class="create-vm"`) {
+		t.Errorf("new VM page missing create form, got: %s", body)
+	}
+	if !strings.Contains(body, `id="create-error"`) {
+		t.Errorf("new VM page missing error slot, got: %s", body)
+	}
 }
 
 func TestServer_ListVMs_ReturnsRowsFragmentOnly(t *testing.T) {
@@ -236,7 +281,6 @@ func TestServer_Index_ListError(t *testing.T) {
 func TestServer_CreateVM(t *testing.T) {
 	client := &fakeClient{
 		createResp: &rpcpb.CreateVMResponse{Vm: &rpcpb.VMDefinition{Id: "vm-1"}},
-		listResp:   &rpcpb.ListVMsResponse{Vms: []*rpcpb.VMDefinition{{Id: "vm-1", Name: "web-1"}}},
 	}
 	s := newTestServer(t, client)
 
@@ -255,15 +299,17 @@ func TestServer_CreateVM(t *testing.T) {
 	if client.lastCreateReq.GetVm().GetVcpus() != 2 {
 		t.Errorf("forwarded vm.Vcpus = %d, want 2", client.lastCreateReq.GetVm().GetVcpus())
 	}
-	if !strings.Contains(rec.Body.String(), "vm-1") {
-		t.Errorf("response fragment missing created VM, got: %s", rec.Body.String())
+	// On its own page now (see new_vm.html) with no VM table to refresh -
+	// success is reported via HX-Redirect to the VMs page, not a
+	// re-rendered fragment.
+	if got := rec.Header().Get("HX-Redirect"); got != "/" {
+		t.Errorf("HX-Redirect = %q, want /", got)
 	}
 }
 
-func TestServer_CreateVM_ErrorStillShowsCurrentList(t *testing.T) {
+func TestServer_CreateVM_ErrorRendersDirectlyNoRedirect(t *testing.T) {
 	client := &fakeClient{
 		createResp: &rpcpb.CreateVMResponse{Error: `id "vm-1" already exists`},
-		listResp:   &rpcpb.ListVMsResponse{Vms: []*rpcpb.VMDefinition{{Id: "vm-1", Name: "existing"}}},
 	}
 	s := newTestServer(t, client)
 
@@ -277,34 +323,8 @@ func TestServer_CreateVM_ErrorStillShowsCurrentList(t *testing.T) {
 	if !strings.Contains(body, "already exists") {
 		t.Errorf("response missing error message, got: %s", body)
 	}
-	if !strings.Contains(body, "existing") {
-		t.Errorf("response missing the existing (unchanged) VM list, got: %s", body)
-	}
-	if !strings.Contains(body, `id="create-error"`) {
-		t.Errorf("error should be an out-of-band swap into #create-error, not inline in the VMs table, got: %s", body)
-	}
-	beforeOOB := body[:strings.Index(body, `id="create-error"`)]
-	if strings.Contains(beforeOOB, "already exists") {
-		t.Errorf("error message should only appear in the create-error oob swap, not earlier in the table markup, got: %s", body)
-	}
-}
-
-func TestServer_CreateVM_SuccessClearsAnyPriorFormError(t *testing.T) {
-	client := &fakeClient{
-		createResp: &rpcpb.CreateVMResponse{Vm: &rpcpb.VMDefinition{Id: "vm-1"}},
-		listResp:   &rpcpb.ListVMsResponse{Vms: []*rpcpb.VMDefinition{{Id: "vm-1"}}},
-	}
-	s := newTestServer(t, client)
-
-	form := url.Values{"id": {"vm-1"}}
-	req := httptest.NewRequest(http.MethodPost, "/vms", strings.NewReader(form.Encode()))
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	rec := httptest.NewRecorder()
-	s.ServeHTTP(rec, req)
-
-	body := rec.Body.String()
-	if !strings.Contains(body, `id="create-error" class="error" hx-swap-oob="true"></div>`) {
-		t.Errorf("expected an empty create-error oob swap to clear any stale error, got: %s", body)
+	if got := rec.Header().Get("HX-Redirect"); got != "" {
+		t.Errorf("HX-Redirect = %q, want none on error", got)
 	}
 }
 
