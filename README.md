@@ -29,15 +29,28 @@ each design decision, in order.
   storage. Deleting a VM tears both back down for real (a soft-delete
   tombstone, reconciled by the owning node) rather than just removing
   the record.
-- **`frontend`** — a server-rendered HTMX web UI for managing VMs; no
-  client-side JavaScript framework, single self-contained binary. The
-  create form picks a target node from the live cluster membership, and
-  the VM table's State column reflects the reconciler's actual progress
-  (`creating`/`ready`/`deleting`/`error`), not just what was requested.
+- **`frontend`** — a server-rendered HTMX web UI; no client-side
+  JavaScript framework, single self-contained binary. Four pages: host
+  stats (the default view), the VM list, installer images, and a
+  create-VM form. The create form picks a target node from the live
+  cluster membership, and the VM table's State column reflects the
+  reconciler's actual progress (`creating`/`ready`/`deleting`/`error`),
+  not just what was requested, live-updating without a page reload.
 - **`internal/zfs`, `internal/jail`, `internal/bhyve`** — dataset,
   jail, and VM lifecycle management, each tested against real FreeBSD
   hosts (VMs for `zfs`/`jail`, real bare-metal hardware for `bhyve`,
-  since it needs genuine hardware-assisted virtualization).
+  since it needs genuine hardware-assisted virtualization). bhyve VMs
+  get a disk, a NIC (a per-VM `tap` device on a host bridge), and
+  optionally an installer ISO attached as a CD-ROM.
+- **`internal/isostore`** — installer images uploaded through the web
+  UI, verified against a pasted SHA-256 as they stream to disk and
+  refused outright on a mismatch, so an unverified image never lands in
+  the store. See
+  [ADR-0017](docs/adr/0017-iso-upload-and-hash-verification.md).
+- **`internal/hoststats`** — CPU load, memory, ZFS pool capacity and
+  health, per-disk SMART status (via FreeBSD's own `smart(8)`), and
+  network interface counters, surfaced on the UI's default page. See
+  [ADR-0018](docs/adr/0018-host-stats-and-multipage-ui.md).
 - **`internal/hast`** — storage replication config/lifecycle management.
   Cross-node replication itself is currently blocked by an upstream
   FreeBSD `hastd` bug; we diagnosed it, found it was
@@ -56,8 +69,16 @@ each design decision, in order.
   waiting on the upstream fix to merge, not something fixable here)
 - Node scheduling: nothing decides which cluster node a VM should run on
   beyond whatever a caller sets directly, and `MigrateVM` doesn't exist
-- bhyve VM networking — VMs boot with a disk but no NIC
-- Authentication/authorization on any layer
+- A console for a running VM — you can boot one from an installer ISO,
+  but there's no way to see or interact with it yet (noVNC is the
+  planned next step)
+- Importing VMs from other hypervisors (e.g. Proxmox): no disk-format
+  conversion, and Apiary is UEFI-only. Linux containers have no path at
+  all — jails share the host FreeBSD kernel
+- Authentication: the web UI has an optional shared-password gate
+  (HTTP Basic Auth, off by default); `raftd`, `managerd`, and
+  `restshim` have none, and there are no user accounts or roles
+  anywhere
 
 ## Architecture
 
@@ -96,7 +117,7 @@ Ephemeral state is what raft actually replicates across the cluster.
 - `api/` — protobuf schema definitions: `api/internalpb` (internal raft
   socket protocol) and `api/rpc` (external RPC API)
 - `internal/` — core logic: `bhyve`, `jail`, `zfs`, `hast`, `cluster`,
-  `raft`, `manager`, `restshim`, `frontend`
+  `raft`, `manager`, `restshim`, `frontend`, `isostore`, `hoststats`
 - `web/` — HTML templates and static assets for the frontend, embedded
   into the `frontend` binary at build time
 - `docs/adr/` — architecture decision records; start here for why things
