@@ -1,0 +1,56 @@
+{{define "networks_page"}}
+<!DOCTYPE html>
+<html lang="en">
+{{template "head" .}}
+<body>
+  <h1>Apiary</h1>
+  {{template "nav" .}}
+  <h2>Networks</h2>
+  <form class="create-vm" hx-post="/networks" hx-target="#network-panel" hx-swap="innerHTML">
+    <label>ID <input type="text" name="id" required></label>
+    <label>Name <input type="text" name="name"></label>
+    <label>VLAN ID <input type="number" name="vlan_id" value="0" min="0" max="4094"></label>
+    <label>Subnet (CIDR) <input type="text" name="subnet" placeholder="10.60.0.0/24" required></label>
+    <button type="submit">Create</button>
+  </form>
+  <div id="network-panel">
+    {{template "network_panel" .}}
+  </div>
+</body>
+</html>
+{{end}}
+
+{{define "network_panel"}}
+<div id="network-error" class="error">{{.NetworkFormError}}</div>
+<table>
+  <thead>
+    <tr><th>ID</th><th>Name</th><th>VLAN</th><th>Subnet</th><th>Bridge</th><th>Status</th><th></th></tr>
+  </thead>
+  <tbody id="network-rows">
+    {{template "network_rows" .}}
+  </tbody>
+</table>
+{{end}}
+
+{{define "network_rows"}}
+{{range .Networks}}
+<tr>
+  <td>{{.ID}}</td>
+  <td>{{.Name}}</td>
+  <td>{{if .VLANID}}{{.VLANID}}{{else}}(untagged){{end}}</td>
+  <td>{{.Subnet}}</td>
+  <td>{{if .BridgeName}}{{.BridgeName}}{{else}}<em>(auto-generated)</em>{{end}}</td>
+  <td>
+    {{if eq .BridgeStatus "up"}}<span class="success">up</span>
+    {{else if eq .BridgeStatus "down"}}<span class="error">down</span>
+    {{else}}<em>unknown</em>
+    {{end}}
+  </td>
+  <td>
+    <button hx-delete="/networks/{{.ID}}" hx-target="#network-panel" hx-swap="innerHTML" hx-confirm="Delete network {{.ID}}?">Delete</button>
+  </td>
+</tr>
+{{else}}
+<tr><td colspan="7"><em>No networks</em></td></tr>
+{{end}}
+{{end}}

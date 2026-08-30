@@ -82,6 +82,14 @@ type pageData struct {
 	ConsoleVMName string
 	ConsoleWSPath string
 	ConsoleError  string
+
+	// Networks lists known networks (ADR-0022): for the Networks page's
+	// own table, and for the create-VM form's network picker.
+	Networks []networkView
+
+	// NetworkFormError reports a create/delete-specific error for the
+	// Networks page, rendered the same way ISOFormError is for Images.
+	NetworkFormError string
 }
 
 // parseSort reads sort/dir query parameters, defaulting to ascending by
@@ -206,6 +214,9 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("DELETE /isos/{name}", s.handleDeleteISO)
 	s.mux.HandleFunc("GET /vms/{id}/console", s.handleConsolePage)
 	s.mux.HandleFunc("GET /vms/{id}/console/ws", s.handleConsoleWS)
+	s.mux.HandleFunc("GET /networks", s.handleNetworksPage)
+	s.mux.HandleFunc("POST /networks", s.handleCreateNetwork)
+	s.mux.HandleFunc("DELETE /networks/{id}", s.handleDeleteNetwork)
 }
 
 // handleLoginPage serves the login form. If login isn't enabled at all,
@@ -332,15 +343,34 @@ func (s *Server) handleImagesPage(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleNewVMPage serves the create-VM form page ("/vms/new"). A failed
-// Nodes/ISOs fetch isn't surfaced as an error here - the node picker
-// already falls back to a free-text input when Nodes is empty (see
-// new_vm.html), and an empty ISO picker just means "(none)" is the only
-// option, both harmless degraded states rather than failures worth a
-// banner.
+// Nodes/ISOs/Networks fetch isn't surfaced as an error here - the node
+// picker already falls back to a free-text input when Nodes is empty
+// (see new_vm.html), and an empty ISO/network picker just means
+// "(none)" is the only option, both harmless degraded states rather
+// than failures worth a banner.
 func (s *Server) handleNewVMPage(w http.ResponseWriter, r *http.Request) {
 	nodes, _ := s.knownNodes(r)
 	isos, _ := s.currentISOs(r)
-	s.render(w, "new_vm_page", pageData{Nodes: nodes, ISOs: isos, ActivePage: "new_vm", AuthEnabled: s.authUser != ""})
+	networks, _ := s.currentNetworks(r)
+	s.render(w, "new_vm_page", pageData{Nodes: nodes, ISOs: isos, Networks: networks, ActivePage: "new_vm", AuthEnabled: s.authUser != ""})
+}
+
+// currentNetworks fetches the current list of networks, returning an
+// empty slice (not an error) if the fetch fails - the same fail-soft
+// convention currentVMs/currentISOs follow.
+func (s *Server) currentNetworks(r *http.Request) ([]networkView, string) {
+	resp, err := s.client.ListNetworks(r.Context(), &rpcpb.ListNetworksRequest{})
+	if err != nil {
+		return nil, err.Error()
+	}
+	if resp.GetError() != "" {
+		return nil, resp.GetError()
+	}
+	networks := make([]networkView, 0, len(resp.GetNetworks()))
+	for _, n := range resp.GetNetworks() {
+		networks = append(networks, fromRPCNetwork(n))
+	}
+	return networks, ""
 }
 
 // currentISOs fetches the current list of stored installer images,
@@ -402,13 +432,15 @@ func (s *Server) handleCreateVM(w http.ResponseWriter, r *http.Request) {
 
 	resp, err := s.client.CreateVM(r.Context(), &rpcpb.CreateVMRequest{
 		Vm: &rpcpb.VMDefinition{
-			Id:           r.FormValue("id"),
-			Name:         r.FormValue("name"),
-			Vcpus:        uint32(vcpus),
-			MemoryMb:     memoryMB,
-			NodeId:       r.FormValue("node_id"),
-			DesiredState: stateToRPC(r.FormValue("desired_state")),
-			IsoName:      r.FormValue("iso_name"),
+			Id:            r.FormValue("id"),
+			Name:          r.FormValue("name"),
+			Vcpus:         uint32(vcpus),
+			MemoryMb:      memoryMB,
+			NodeId:        r.FormValue("node_id"),
+			DesiredState:  stateToRPC(r.FormValue("desired_state")),
+			IsoName:       r.FormValue("iso_name"),
+			NetworkId:     r.FormValue("network_id"),
+			FirewallRules: parseFirewallRuleRows(r),
 		},
 	})
 	if err != nil {
@@ -428,6 +460,38 @@ func (s *Server) handleCreateVM(w http.ResponseWriter, r *http.Request) {
 func (s *Server) renderCreateError(w http.ResponseWriter, formErr string) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	fmt.Fprint(w, template.HTMLEscapeString(formErr))
+}
+
+// parseFirewallRuleRows reads the create-VM form's repeating firewall-
+// rule inputs (new_vm.html's client-side "add rule" rows, all sharing
+// the same field names so they arrive as parallel slices) into
+// FirewallRule messages. A row is skipped if its direction is empty -
+// the template always renders one blank starter row, and an unused row
+// shouldn't turn into an empty/invalid rule.
+func parseFirewallRuleRows(r *http.Request) []*rpcpb.FirewallRule {
+	directions := r.PostForm["fw_direction"]
+	actions := r.PostForm["fw_action"]
+	protocols := r.PostForm["fw_protocol"]
+	ports := r.PostForm["fw_port"]
+
+	var rules []*rpcpb.FirewallRule
+	for i, direction := range directions {
+		if direction == "" {
+			continue
+		}
+		rule := &rpcpb.FirewallRule{Direction: direction}
+		if i < len(actions) {
+			rule.Action = actions[i]
+		}
+		if i < len(protocols) {
+			rule.Protocol = protocols[i]
+		}
+		if i < len(ports) {
+			rule.PortRange = ports[i]
+		}
+		rules = append(rules, rule)
+	}
+	return rules
 }
 
 func (s *Server) handleDeleteVM(w http.ResponseWriter, r *http.Request) {
@@ -603,6 +667,70 @@ func (s *Server) handleDeleteISO(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.renderISOPanelResult(w, r, "", "")
+}
+
+// handleNetworksPage serves the Networks list/create page ("/networks").
+func (s *Server) handleNetworksPage(w http.ResponseWriter, r *http.Request) {
+	networks, errMsg := s.currentNetworks(r)
+	s.render(w, "networks_page", pageData{Networks: networks, NetworkFormError: errMsg, ActivePage: "networks", AuthEnabled: s.authUser != ""})
+}
+
+// handleCreateNetwork follows the same combined-panel pattern as
+// handleUploadISO/renderISOPanelResult: refresh the whole #network-panel
+// (error slot + table together) rather than a separate error target.
+func (s *Server) handleCreateNetwork(w http.ResponseWriter, r *http.Request) {
+	if err := r.ParseForm(); err != nil {
+		s.renderNetworkPanelResult(w, r, "invalid form: "+err.Error())
+		return
+	}
+
+	vlanID, _ := strconv.ParseUint(r.FormValue("vlan_id"), 10, 32)
+
+	resp, err := s.client.CreateNetwork(r.Context(), &rpcpb.CreateNetworkRequest{
+		Network: &rpcpb.NetworkDefinition{
+			Id:     r.FormValue("id"),
+			Name:   r.FormValue("name"),
+			VlanId: uint32(vlanID),
+			Subnet: r.FormValue("subnet"),
+		},
+	})
+	if err != nil {
+		s.renderNetworkPanelResult(w, r, err.Error())
+		return
+	}
+	if resp.GetError() != "" {
+		s.renderNetworkPanelResult(w, r, resp.GetError())
+		return
+	}
+	s.renderNetworkPanelResult(w, r, "")
+}
+
+func (s *Server) handleDeleteNetwork(w http.ResponseWriter, r *http.Request) {
+	resp, err := s.client.DeleteNetwork(r.Context(), &rpcpb.DeleteNetworkRequest{Id: r.PathValue("id")})
+	if err != nil {
+		s.renderNetworkPanelResult(w, r, err.Error())
+		return
+	}
+	if resp.GetError() != "" {
+		s.renderNetworkPanelResult(w, r, resp.GetError())
+		return
+	}
+	s.renderNetworkPanelResult(w, r, "")
+}
+
+// renderNetworkPanelResult refreshes the whole #network-panel (error
+// slot + table together), the same combined-target pattern
+// renderISOPanelResult uses for Images.
+func (s *Server) renderNetworkPanelResult(w http.ResponseWriter, r *http.Request, formErr string) {
+	networks, fetchErr := s.currentNetworks(r)
+	if fetchErr != "" {
+		if formErr == "" {
+			formErr = fetchErr
+		} else {
+			formErr += "; additionally failed to refresh list: " + fetchErr
+		}
+	}
+	s.render(w, "network_panel", pageData{NetworkFormError: formErr, Networks: networks})
 }
 
 func (s *Server) render(w http.ResponseWriter, name string, data pageData) {

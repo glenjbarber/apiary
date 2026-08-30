@@ -38,6 +38,12 @@ type fakeClient struct {
 	getVMConsoleResp *rpcpb.GetVMConsoleResponse
 	getVMConsoleErr  error
 
+	listNetworksResp     *rpcpb.ListNetworksResponse
+	createNetworkResp    *rpcpb.CreateNetworkResponse
+	deleteNetworkResp    *rpcpb.DeleteNetworkResponse
+	lastCreateNetworkReq *rpcpb.CreateNetworkRequest
+	lastDeleteNetworkReq *rpcpb.DeleteNetworkRequest
+
 	uploadStream *fakeUploadClientStream
 	uploadErr    error
 }
@@ -129,6 +135,29 @@ func (f *fakeClient) GetVMConsole(context.Context, *rpcpb.GetVMConsoleRequest, .
 	return &rpcpb.GetVMConsoleResponse{}, nil
 }
 
+func (f *fakeClient) ListNetworks(context.Context, *rpcpb.ListNetworksRequest, ...grpc.CallOption) (*rpcpb.ListNetworksResponse, error) {
+	if f.listNetworksResp != nil {
+		return f.listNetworksResp, nil
+	}
+	return &rpcpb.ListNetworksResponse{}, nil
+}
+
+func (f *fakeClient) CreateNetwork(_ context.Context, in *rpcpb.CreateNetworkRequest, _ ...grpc.CallOption) (*rpcpb.CreateNetworkResponse, error) {
+	f.lastCreateNetworkReq = in
+	if f.createNetworkResp != nil {
+		return f.createNetworkResp, nil
+	}
+	return &rpcpb.CreateNetworkResponse{}, nil
+}
+
+func (f *fakeClient) DeleteNetwork(_ context.Context, in *rpcpb.DeleteNetworkRequest, _ ...grpc.CallOption) (*rpcpb.DeleteNetworkResponse, error) {
+	f.lastDeleteNetworkReq = in
+	if f.deleteNetworkResp != nil {
+		return f.deleteNetworkResp, nil
+	}
+	return &rpcpb.DeleteNetworkResponse{}, nil
+}
+
 var _ rpcpb.ManagerServiceClient = (*fakeClient)(nil)
 
 func newTestServer(t *testing.T, client *fakeClient) *Server {
@@ -178,6 +207,7 @@ func TestServer_StatsPage_IsDefaultLandingPage(t *testing.T) {
 		Pools:  []*rpcpb.PoolStats{{Name: "zroot", Health: "ONLINE", CapacityPct: 5}},
 		Disks:  []*rpcpb.DiskStats{{Name: "ada0", Healthy: true}},
 		Net:    []*rpcpb.NetIfaceStats{{Name: "re0", RxBytes: 100, TxBytes: 200}},
+		Pf:     &rpcpb.PFStats{Enabled: true, CurrentStates: 3, Matches: 42},
 	}}
 	s := newTestServer(t, client)
 
@@ -193,6 +223,9 @@ func TestServer_StatsPage_IsDefaultLandingPage(t *testing.T) {
 		if !strings.Contains(body, want) {
 			t.Errorf("stats page missing %q, got: %s", want, body)
 		}
+	}
+	if !strings.Contains(body, "42 rule match") {
+		t.Errorf("stats page missing pf match count, got: %s", body)
 	}
 	if !strings.Contains(body, `<a href="/" class="active">Stats</a>`) {
 		t.Errorf("stats page nav should mark Stats active, got: %s", body)
@@ -400,6 +433,183 @@ func TestServer_CreateVM_ErrorRendersDirectlyNoRedirect(t *testing.T) {
 	}
 	if got := rec.Header().Get("HX-Redirect"); got != "" {
 		t.Errorf("HX-Redirect = %q, want none on error", got)
+	}
+}
+
+func TestServer_CreateVM_WithNetworkAndFirewallRules(t *testing.T) {
+	client := &fakeClient{
+		createResp: &rpcpb.CreateVMResponse{Vm: &rpcpb.VMDefinition{Id: "vm-1", NetworkId: "net-1", IpAddress: "10.60.0.2"}},
+	}
+	s := newTestServer(t, client)
+
+	form := url.Values{
+		"id":           {"vm-1"},
+		"network_id":   {"net-1"},
+		"fw_direction": {"in", ""},
+		"fw_action":    {"block", "pass"},
+		"fw_protocol":  {"tcp", ""},
+		"fw_port":      {"22", ""},
+	}
+	req := httptest.NewRequest(http.MethodPost, "/vms", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	vm := client.lastCreateReq.GetVm()
+	if vm.GetNetworkId() != "net-1" {
+		t.Errorf("forwarded vm.NetworkId = %q, want net-1", vm.GetNetworkId())
+	}
+	if len(vm.GetFirewallRules()) != 1 {
+		t.Fatalf("forwarded vm.FirewallRules = %v, want exactly one (the blank second row skipped)", vm.GetFirewallRules())
+	}
+	rule := vm.GetFirewallRules()[0]
+	if rule.GetDirection() != "in" || rule.GetAction() != "block" || rule.GetProtocol() != "tcp" || rule.GetPortRange() != "22" {
+		t.Errorf("forwarded rule = %+v, want direction=in action=block protocol=tcp port=22", rule)
+	}
+}
+
+func TestServer_NewVMPage_ShowsNetworksAndFirewallRuleForm(t *testing.T) {
+	client := &fakeClient{listNetworksResp: &rpcpb.ListNetworksResponse{
+		Networks: []*rpcpb.NetworkDefinition{{Id: "net-1", Name: "prod", Subnet: "10.60.0.0/24"}},
+	}}
+	s := newTestServer(t, client)
+
+	req := httptest.NewRequest(http.MethodGet, "/vms/new", nil)
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, req)
+
+	body := rec.Body.String()
+	if !strings.Contains(body, "net-1") {
+		t.Errorf("new VM page missing the known network in its picker, got: %s", body)
+	}
+	if !strings.Contains(body, `id="firewall-rule-rows"`) {
+		t.Errorf("new VM page missing the firewall rules table, got: %s", body)
+	}
+}
+
+func TestServer_NetworksPage(t *testing.T) {
+	client := &fakeClient{listNetworksResp: &rpcpb.ListNetworksResponse{
+		Networks: []*rpcpb.NetworkDefinition{{Id: "net-1", Name: "prod", VlanId: 100, Subnet: "10.60.0.0/24"}},
+	}}
+	s := newTestServer(t, client)
+
+	req := httptest.NewRequest(http.MethodGet, "/networks", nil)
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, "net-1") || !strings.Contains(body, "10.60.0.0/24") || !strings.Contains(body, "100") {
+		t.Errorf("networks page missing expected network row, got: %s", body)
+	}
+}
+
+func TestServer_NetworksPage_ColorsBridgeStatus(t *testing.T) {
+	client := &fakeClient{listNetworksResp: &rpcpb.ListNetworksResponse{
+		Networks: []*rpcpb.NetworkDefinition{
+			{Id: "net-up", Subnet: "10.60.0.0/24", BridgeStatus: "up"},
+			{Id: "net-down", Subnet: "10.61.0.0/24", BridgeStatus: "down"},
+			{Id: "net-unknown", Subnet: "10.62.0.0/24", BridgeStatus: "unknown"},
+		},
+	}}
+	s := newTestServer(t, client)
+
+	req := httptest.NewRequest(http.MethodGet, "/networks", nil)
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, req)
+
+	body := rec.Body.String()
+	if !strings.Contains(body, `<span class="success">up</span>`) {
+		t.Errorf("networks page missing green 'up' status, got: %s", body)
+	}
+	if !strings.Contains(body, `<span class="error">down</span>`) {
+		t.Errorf("networks page missing red 'down' status, got: %s", body)
+	}
+	if !strings.Contains(body, "<em>unknown</em>") {
+		t.Errorf("networks page missing 'unknown' status, got: %s", body)
+	}
+}
+
+func TestServer_NetworksPage_ListError(t *testing.T) {
+	client := &fakeClient{listNetworksResp: &rpcpb.ListNetworksResponse{Error: "raftd unreachable"}}
+	s := newTestServer(t, client)
+
+	req := httptest.NewRequest(http.MethodGet, "/networks", nil)
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, req)
+
+	if !strings.Contains(rec.Body.String(), "raftd unreachable") {
+		t.Errorf("networks page missing error message, got: %s", rec.Body.String())
+	}
+}
+
+func TestServer_CreateNetwork(t *testing.T) {
+	client := &fakeClient{
+		createNetworkResp: &rpcpb.CreateNetworkResponse{Network: &rpcpb.NetworkDefinition{Id: "net-1"}},
+	}
+	s := newTestServer(t, client)
+
+	form := url.Values{"id": {"net-1"}, "name": {"prod"}, "vlan_id": {"100"}, "subnet": {"10.60.0.0/24"}}
+	req := httptest.NewRequest(http.MethodPost, "/networks", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	req2 := client.lastCreateNetworkReq.GetNetwork()
+	if req2.GetId() != "net-1" || req2.GetVlanId() != 100 || req2.GetSubnet() != "10.60.0.0/24" {
+		t.Errorf("forwarded network = %+v, want id=net-1 vlan_id=100 subnet=10.60.0.0/24", req2)
+	}
+}
+
+func TestServer_CreateNetwork_ErrorShowsInPanel(t *testing.T) {
+	client := &fakeClient{createNetworkResp: &rpcpb.CreateNetworkResponse{Error: `id "net-1" already exists`}}
+	s := newTestServer(t, client)
+
+	form := url.Values{"id": {"net-1"}, "subnet": {"10.60.0.0/24"}}
+	req := httptest.NewRequest(http.MethodPost, "/networks", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, req)
+
+	if !strings.Contains(rec.Body.String(), "already exists") {
+		t.Errorf("response missing error message, got: %s", rec.Body.String())
+	}
+}
+
+func TestServer_DeleteNetwork(t *testing.T) {
+	client := &fakeClient{deleteNetworkResp: &rpcpb.DeleteNetworkResponse{Network: &rpcpb.NetworkDefinition{Id: "net-1"}}}
+	s := newTestServer(t, client)
+
+	req := httptest.NewRequest(http.MethodDelete, "/networks/net-1", nil)
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	if client.lastDeleteNetworkReq.GetId() != "net-1" {
+		t.Errorf("forwarded delete id = %q, want net-1", client.lastDeleteNetworkReq.GetId())
+	}
+}
+
+func TestServer_DeleteNetwork_ErrorShowsInPanel(t *testing.T) {
+	client := &fakeClient{deleteNetworkResp: &rpcpb.DeleteNetworkResponse{Error: "still referenced by VM vm-1"}}
+	s := newTestServer(t, client)
+
+	req := httptest.NewRequest(http.MethodDelete, "/networks/net-1", nil)
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, req)
+
+	if !strings.Contains(rec.Body.String(), "still referenced") {
+		t.Errorf("response missing error message, got: %s", rec.Body.String())
 	}
 }
 

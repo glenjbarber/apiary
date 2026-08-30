@@ -32,9 +32,39 @@
         {{range .ISOs}}<option value="{{.Name}}">{{.Name}}</option>{{end}}
       </select>
     </label>
+    <label>Network
+      <select name="network_id">
+        <option value="">(none)</option>
+        {{range .Networks}}<option value="{{.ID}}">{{.Name}} ({{.Subnet}})</option>{{end}}
+      </select>
+    </label>
+    <div style="flex-basis: 100%;">
+      <div>Firewall rules (optional - no rules means everything allowed)</div>
+      <table id="firewall-rules">
+        <thead><tr><th>Direction</th><th>Action</th><th>Protocol</th><th>Port/range</th><th></th></tr></thead>
+        <tbody id="firewall-rule-rows"></tbody>
+      </table>
+      <button type="button" id="add-firewall-rule">Add rule</button>
+    </div>
     <button type="submit">Create</button>
   </form>
   <div id="create-error" class="error"></div>
+  <script>
+  (function() {
+    var rows = document.getElementById('firewall-rule-rows');
+    document.getElementById('add-firewall-rule').addEventListener('click', function() {
+      var tr = document.createElement('tr');
+      tr.innerHTML =
+        '<td><select name="fw_direction"><option value="">(unused)</option><option value="in">in</option><option value="out">out</option></select></td>' +
+        '<td><select name="fw_action"><option value="pass">pass</option><option value="block">block</option></select></td>' +
+        '<td><select name="fw_protocol"><option value="">any</option><option value="tcp">tcp</option><option value="udp">udp</option><option value="icmp">icmp</option></select></td>' +
+        '<td><input type="text" name="fw_port" placeholder="22 or 8000-9000"></td>' +
+        '<td><button type="button" class="remove-firewall-rule">Remove</button></td>';
+      tr.querySelector('.remove-firewall-rule').addEventListener('click', function() { rows.removeChild(tr); });
+      rows.appendChild(tr);
+    });
+  })();
+  </script>
 </body>
 </html>
 {{end}}

@@ -36,6 +36,40 @@ type vmView struct {
 	// ISOName is the installer image (if any) this VM was created with -
 	// empty means it booted from its disk alone.
 	ISOName string
+
+	// NetworkID/IPAddress/MACAddress are set when this VM is attached
+	// to a NetworkDefinition (ADR-0022) - IPAddress/MACAddress are
+	// assigned automatically, never entered by a caller. All three are
+	// empty for a VM using the flat single-bridge behavior from before
+	// network management existed.
+	NetworkID  string
+	IPAddress  string
+	MACAddress string
+}
+
+// networkView is the template-facing shape for a NetworkDefinition.
+type networkView struct {
+	ID         string
+	Name       string
+	VLANID     uint32
+	Subnet     string
+	BridgeName string
+
+	// BridgeStatus is "up", "down", or "unknown" (this node has no VLAN
+	// support configured, or the bridge doesn't exist here yet) -
+	// physical, per-node state from ListNetworks, never set on create.
+	BridgeStatus string
+}
+
+func fromRPCNetwork(n *rpcpb.NetworkDefinition) networkView {
+	return networkView{
+		ID:           n.GetId(),
+		Name:         n.GetName(),
+		VLANID:       n.GetVlanId(),
+		Subnet:       n.GetSubnet(),
+		BridgeName:   n.GetBridgeName(),
+		BridgeStatus: n.GetBridgeStatus(),
+	}
 }
 
 // isoView is the template-facing shape for a stored installer image.
@@ -138,6 +172,9 @@ func fromRPCVM(d *rpcpb.VMDefinition) vmView {
 		Phase:        phaseFromRPC(d.GetPhase()),
 		PhaseError:   d.GetPhaseError(),
 		ISOName:      d.GetIsoName(),
+		NetworkID:    d.GetNetworkId(),
+		IPAddress:    d.GetIpAddress(),
+		MACAddress:   d.GetMacAddress(),
 	}
 }
 
@@ -159,8 +196,16 @@ type statsView struct {
 	Pools []poolView
 	Disks []diskView
 	Net   []netIfaceView
+	PF    pfView
 
 	Errors []string
+}
+
+// pfView is the template-facing shape for pf(8)'s summary stats.
+type pfView struct {
+	Enabled       bool
+	CurrentStates uint64
+	Matches       uint64
 }
 
 type poolView struct {
@@ -234,6 +279,8 @@ func fromRPCStats(resp *rpcpb.HostStatsResponse) statsView {
 		net = append(net, netIfaceView{Name: n.GetName(), Rx: formatBytes(n.GetRxBytes()), Tx: formatBytes(n.GetTxBytes())})
 	}
 
+	pf := resp.GetPf()
+
 	return statsView{
 		NodeID:     resp.GetNodeId(),
 		Cores:      cpu.GetCores(),
@@ -246,6 +293,9 @@ func fromRPCStats(resp *rpcpb.HostStatsResponse) statsView {
 		Pools:      pools,
 		Disks:      disks,
 		Net:        net,
-		Errors:     resp.GetErrors(),
+		PF: pfView{
+			Enabled: pf.GetEnabled(), CurrentStates: pf.GetCurrentStates(), Matches: pf.GetMatches(),
+		},
+		Errors: resp.GetErrors(),
 	}
 }

@@ -79,6 +79,13 @@
     </tbody>
   </table>
   <p><em>Network figures are cumulative counters since boot, not a live rate.</em></p>
+
+  <h3>Firewall (pf)</h3>
+  <p>
+    {{if .Stats.PF.Enabled}}<span class="success">enabled</span>{{else}}<span class="error">disabled</span>{{end}}
+    &mdash; {{.Stats.PF.CurrentStates}} active state{{if ne .Stats.PF.CurrentStates 1}}s{{end}},
+    {{.Stats.PF.Matches}} rule match{{if ne .Stats.PF.Matches 1}}es{{end}} total
+  </p>
 </body>
 </html>
 {{end}}

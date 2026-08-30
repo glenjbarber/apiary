@@ -13,6 +13,7 @@
         <th>Name</th><th>vCPUs</th><th>Memory (MB)</th>
         <th><a href="/vms?sort=node&dir={{if and (eq .SortBy "node") (eq .SortDir "asc")}}desc{{else}}asc{{end}}">Node{{if eq .SortBy "node"}} {{if eq .SortDir "asc"}}&#9650;{{else}}&#9660;{{end}}{{end}}</a></th>
         <th><a href="/vms?sort=state&dir={{if and (eq .SortBy "state") (eq .SortDir "asc")}}desc{{else}}asc{{end}}">State{{if eq .SortBy "state"}} {{if eq .SortDir "asc"}}&#9650;{{else}}&#9660;{{end}}{{end}}</a></th>
+        <th>IP</th>
         <th></th>
       </tr>
     </thead>
