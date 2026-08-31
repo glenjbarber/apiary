@@ -243,6 +243,13 @@ message ApiKey {
   string name = 2;
   string hashed_key = 3;
   int64 created_unix = 4;
+
+  // role is one of "admin"/"operator"/"viewer" (ADR-0030) - gates
+  // which RPCs a caller presenting this key may invoke, once auth is
+  // enabled. An empty/unrecognized value is normalized to "viewer"
+  // (least privilege) by applyCreateAPIKey - never treated as "no
+  // restriction".
+  string role = 5;
 }
 
 // CreateAPIKey adds a new ApiKey. It fails if an id collision occurs

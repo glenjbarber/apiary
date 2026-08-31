@@ -489,7 +489,7 @@ func TestFSM_Apply_CreateAPIKey(t *testing.T) {
 	if !fsm.AuthEnabled() {
 		t.Errorf("AuthEnabled() = false, want true after a successful create")
 	}
-	id, valid := fsm.ValidateHash("deadbeef")
+	id, _, valid := fsm.ValidateHash("deadbeef")
 	if !valid || id != "key-1" {
 		t.Errorf("ValidateHash(deadbeef) = (%q, %v), want (key-1, true)", id, valid)
 	}
@@ -516,7 +516,7 @@ func TestFSM_Apply_RevokeAPIKey(t *testing.T) {
 	if result.(*FSMApplyResult).Error != "" {
 		t.Fatalf("Error = %q, want empty", result.(*FSMApplyResult).Error)
 	}
-	if _, valid := fsm.ValidateHash("deadbeef"); valid {
+	if _, _, valid := fsm.ValidateHash("deadbeef"); valid {
 		t.Errorf("ValidateHash(deadbeef) = valid after revocation, want invalid")
 	}
 	if !fsm.AuthEnabled() {
@@ -546,7 +546,7 @@ func TestFSM_ValidateHash_UnknownHashIsInvalid(t *testing.T) {
 	fsm := NewFSM()
 	fsm.Apply(&raft.Log{Index: 1, Data: mustMarshalCommand(t, createAPIKeyCmd("key-1", "terraform", "deadbeef"))})
 
-	if _, valid := fsm.ValidateHash("wrong-hash"); valid {
+	if _, _, valid := fsm.ValidateHash("wrong-hash"); valid {
 		t.Errorf("ValidateHash(wrong-hash) = valid, want invalid")
 	}
 }
@@ -580,7 +580,7 @@ func TestFSM_SnapshotRestore_APIKeys(t *testing.T) {
 		t.Fatalf("Restore() error: %v", err)
 	}
 
-	if id, valid := restored.ValidateHash("deadbeef"); !valid || id != "key-1" {
+	if id, _, valid := restored.ValidateHash("deadbeef"); !valid || id != "key-1" {
 		t.Errorf("restored ValidateHash(deadbeef) = (%q, %v), want (key-1, true)", id, valid)
 	}
 	if !restored.AuthEnabled() {

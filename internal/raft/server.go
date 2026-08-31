@@ -231,8 +231,8 @@ func (s *Server) ListJailsLocal(_ context.Context, _ *internalpb.ListJailsReques
 // every other read RPC here, this never returns ErrNotLeader - see
 // Node.ValidateAPIKeyHash's doc comment for why.
 func (s *Server) ValidateAPIKeyHash(_ context.Context, req *internalpb.ValidateAPIKeyHashRequest) (*internalpb.ValidateAPIKeyHashResponse, error) {
-	id, valid, authEnabled := s.node.ValidateAPIKeyHash(req.GetHashedKey())
-	return &internalpb.ValidateAPIKeyHashResponse{Valid: valid, KeyId: id, AuthEnabled: authEnabled}, nil
+	id, role, valid, authEnabled := s.node.ValidateAPIKeyHash(req.GetHashedKey())
+	return &internalpb.ValidateAPIKeyHashResponse{Valid: valid, KeyId: id, AuthEnabled: authEnabled, Role: role}, nil
 }
 
 // ListAPIKeys implements internalpb.RaftInternalServer.

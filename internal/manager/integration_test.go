@@ -9,8 +9,10 @@ import (
 	"time"
 
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/metadata"
+	"google.golang.org/grpc/status"
 
 	internalpb "github.com/glenjbarber/apiary/api/internalpb"
 	rpcpb "github.com/glenjbarber/apiary/api/rpc"
@@ -747,7 +749,9 @@ func TestIntegration_RevokeAPIKey_StopsWorkingImmediately(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	createResp, err := client.CreateAPIKey(ctx, &rpcpb.CreateAPIKeyRequest{Name: "ci"})
+	// Role: "admin" - RevokeAPIKey below requires it (ADR-0030); the
+	// default (unset) role is Viewer, which couldn't revoke a key at all.
+	createResp, err := client.CreateAPIKey(ctx, &rpcpb.CreateAPIKeyRequest{Name: "ci", Role: "admin"})
 	if err != nil {
 		t.Fatalf("CreateAPIKey() error: %v", err)
 	}
@@ -778,7 +782,8 @@ func TestIntegration_ListAPIKeys_NeverReturnsKeyMaterial(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	createResp, err := client.CreateAPIKey(ctx, &rpcpb.CreateAPIKeyRequest{Name: "terraform"})
+	// Role: "admin" - ListAPIKeys below requires it (ADR-0030).
+	createResp, err := client.CreateAPIKey(ctx, &rpcpb.CreateAPIKeyRequest{Name: "terraform", Role: "admin"})
 	if err != nil {
 		t.Fatalf("CreateAPIKey() error: %v", err)
 	}
@@ -1221,5 +1226,64 @@ func TestIntegration_ReportJailPhaseAndTeardownComplete(t *testing.T) {
 	}
 	if getResp, err := client.GetJail(ctx, &rpcpb.GetJailRequest{Id: "jail-1"}); err != nil || getResp.GetFound() {
 		t.Fatalf("GetJail() after ReportJailTeardownComplete = (found=%v, err=%v), want the record gone", getResp.GetFound(), err)
+	}
+}
+
+func TestIntegration_ViewerRoleCannotCreateVM(t *testing.T) {
+	raftdSocket := newRaftdUDSSocket(t)
+	client := newManagerdRPCClient(t, raftdSocket)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	// Default (unset) role normalizes to "viewer" - see
+	// internal/raft.normalizeRole.
+	createResp, err := client.CreateAPIKey(ctx, &rpcpb.CreateAPIKeyRequest{Name: "readonly"})
+	if err != nil {
+		t.Fatalf("CreateAPIKey() error: %v", err)
+	}
+	if createResp.GetKey().GetRole() != "viewer" {
+		t.Fatalf("CreateAPIKey() key.Role = %q, want viewer (the default)", createResp.GetKey().GetRole())
+	}
+	viewerCtx := metadata.NewOutgoingContext(ctx, metadata.Pairs("authorization", "Bearer "+createResp.GetRawKey()))
+
+	// A Viewer-role key can read...
+	if _, err := client.ListVMs(viewerCtx, &rpcpb.ListVMsRequest{}); err != nil {
+		t.Fatalf("ListVMs() with a viewer key error = %v, want nil", err)
+	}
+
+	// ...but not write.
+	_, err = client.CreateVM(viewerCtx, &rpcpb.CreateVMRequest{Vm: &rpcpb.VMDefinition{Id: "vm-1"}})
+	if err == nil {
+		t.Fatalf("CreateVM() with a viewer key = nil error, want PermissionDenied")
+	}
+	if status.Code(err) != codes.PermissionDenied {
+		t.Errorf("CreateVM() with a viewer key code = %v, want PermissionDenied", status.Code(err))
+	}
+}
+
+func TestIntegration_OperatorRoleCanCreateVMButNotAPIKeys(t *testing.T) {
+	raftdSocket := newRaftdUDSSocket(t)
+	client := newManagerdRPCClient(t, raftdSocket)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	createResp, err := client.CreateAPIKey(ctx, &rpcpb.CreateAPIKeyRequest{Name: "ops", Role: "operator"})
+	if err != nil {
+		t.Fatalf("CreateAPIKey() error: %v", err)
+	}
+	opCtx := metadata.NewOutgoingContext(ctx, metadata.Pairs("authorization", "Bearer "+createResp.GetRawKey()))
+
+	if _, err := client.CreateVM(opCtx, &rpcpb.CreateVMRequest{Vm: &rpcpb.VMDefinition{Id: "vm-1"}}); err != nil {
+		t.Fatalf("CreateVM() with an operator key error = %v, want nil", err)
+	}
+
+	_, err = client.CreateAPIKey(opCtx, &rpcpb.CreateAPIKeyRequest{Name: "escalate"})
+	if err == nil {
+		t.Fatalf("CreateAPIKey() with an operator key = nil error, want PermissionDenied")
+	}
+	if status.Code(err) != codes.PermissionDenied {
+		t.Errorf("CreateAPIKey() with an operator key code = %v, want PermissionDenied", status.Code(err))
 	}
 }

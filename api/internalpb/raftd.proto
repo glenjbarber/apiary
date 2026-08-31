@@ -257,6 +257,10 @@ message ValidateAPIKeyHashResponse {
   // which are ordinary, expected outcomes carried in valid/
   // auth_enabled above.
   string error = 4;
+
+  // role is the matched key's role ("admin"/"operator"/"viewer",
+  // ADR-0030) - meaningless (empty) when valid is false.
+  string role = 5;
 }
 
 message ListAPIKeysRequest {}

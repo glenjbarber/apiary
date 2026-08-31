@@ -248,7 +248,7 @@ func (s *Server) CreateAPIKey(ctx context.Context, req *rpcpb.CreateAPIKeyReques
 
 	cmd := &internalpb.Command{
 		Op: &internalpb.Command_CreateApiKey{CreateApiKey: &internalpb.CreateAPIKey{Key: &internalpb.ApiKey{
-			Id: id, Name: req.GetName(), HashedKey: hashed, CreatedUnix: time.Now().Unix(),
+			Id: id, Name: req.GetName(), HashedKey: hashed, CreatedUnix: time.Now().Unix(), Role: req.GetRole(),
 		}}},
 	}
 	key, appErr, leaderHint := s.applyAPIKeyCommand(ctx, cmd, req.GetTimeoutMs())

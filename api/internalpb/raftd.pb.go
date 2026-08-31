@@ -1254,7 +1254,10 @@ type ValidateAPIKeyHashResponse struct {
 	// used to report "invalid key" or "auth not enabled yet", both of
 	// which are ordinary, expected outcomes carried in valid/
 	// auth_enabled above.
-	Error         string `protobuf:"bytes,4,opt,name=error,proto3" json:"error,omitempty"`
+	Error string `protobuf:"bytes,4,opt,name=error,proto3" json:"error,omitempty"`
+	// role is the matched key's role ("admin"/"operator"/"viewer",
+	// ADR-0030) - meaningless (empty) when valid is false.
+	Role          string `protobuf:"bytes,5,opt,name=role,proto3" json:"role,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1313,6 +1316,13 @@ func (x *ValidateAPIKeyHashResponse) GetAuthEnabled() bool {
 func (x *ValidateAPIKeyHashResponse) GetError() string {
 	if x != nil {
 		return x.Error
+	}
+	return ""
+}
+
+func (x *ValidateAPIKeyHashResponse) GetRole() string {
+	if x != nil {
+		return x.Role
 	}
 	return ""
 }
@@ -1507,12 +1517,13 @@ const file_api_internalpb_raftd_proto_rawDesc = "" +
 	"leaderHint\":\n" +
 	"\x19ValidateAPIKeyHashRequest\x12\x1d\n" +
 	"\n" +
-	"hashed_key\x18\x01 \x01(\tR\thashedKey\"\x82\x01\n" +
+	"hashed_key\x18\x01 \x01(\tR\thashedKey\"\x96\x01\n" +
 	"\x1aValidateAPIKeyHashResponse\x12\x14\n" +
 	"\x05valid\x18\x01 \x01(\bR\x05valid\x12\x15\n" +
 	"\x06key_id\x18\x02 \x01(\tR\x05keyId\x12!\n" +
 	"\fauth_enabled\x18\x03 \x01(\bR\vauthEnabled\x12\x14\n" +
-	"\x05error\x18\x04 \x01(\tR\x05error\"\x14\n" +
+	"\x05error\x18\x04 \x01(\tR\x05error\x12\x12\n" +
+	"\x04role\x18\x05 \x01(\tR\x04role\"\x14\n" +
 	"\x12ListAPIKeysRequest\"|\n" +
 	"\x13ListAPIKeysResponse\x12.\n" +
 	"\x04keys\x18\x01 \x03(\v2\x1a.apiary.internal.v1.ApiKeyR\x04keys\x12\x14\n" +

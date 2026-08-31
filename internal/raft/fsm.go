@@ -402,9 +402,25 @@ func (f *FSM) applyCreateAPIKey(index uint64, key *internalpb.ApiKey) *FSMApplyR
 	if _, exists := f.apiKeys[key.GetId()]; exists {
 		return &FSMApplyResult{Index: index, Error: fmt.Sprintf("CreateAPIKey: id %q already exists", key.GetId())}
 	}
+	if normalized := normalizeRole(key.GetRole()); normalized != key.GetRole() {
+		key = proto.Clone(key).(*internalpb.ApiKey)
+		key.Role = normalized
+	}
 	f.apiKeys[key.GetId()] = key
 	f.authEnabled = true
 	return &FSMApplyResult{Index: index, ApiKey: key}
+}
+
+// normalizeRole maps an empty or unrecognized role to "viewer" (least
+// privilege, ADR-0030) - a key's role is never treated as "no
+// restriction" just because a caller left it unset or misspelled it.
+func normalizeRole(role string) string {
+	switch role {
+	case "admin", "operator", "viewer":
+		return role
+	default:
+		return "viewer"
+	}
 }
 
 // applyRevokeAPIKey removes an ApiKey outright - no soft-delete
@@ -424,15 +440,15 @@ func (f *FSM) applyRevokeAPIKey(index uint64, id string) *FSMApplyResult {
 // Network/ListAPIKeys reads, callers of this (via Node.
 // ValidateAPIKeyHash) do NOT require raft leadership - see that
 // method's doc comment for why.
-func (f *FSM) ValidateHash(hash string) (id string, ok bool) {
+func (f *FSM) ValidateHash(hash string) (id, role string, ok bool) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	for _, k := range f.apiKeys {
 		if k.GetHashedKey() == hash {
-			return k.GetId(), true
+			return k.GetId(), k.GetRole(), true
 		}
 	}
-	return "", false
+	return "", "", false
 }
 
 // AuthEnabled reports whether API-key auth has ever been turned on -

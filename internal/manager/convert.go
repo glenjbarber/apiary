@@ -159,5 +159,6 @@ func fromInternalAPIKey(k *internalpb.ApiKey) *rpcpb.APIKeyInfo {
 		Id:          k.GetId(),
 		Name:        k.GetName(),
 		CreatedUnix: k.GetCreatedUnix(),
+		Role:        k.GetRole(),
 	}
 }

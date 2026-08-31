@@ -1012,11 +1012,17 @@ func (*Command_PurgeJail) isCommand_Op() {}
 // CreateAPIKey RPC handler and returned to the caller exactly once; it
 // is never recoverable from ephemeral state again after that.
 type ApiKey struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
-	Name          string                 `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
-	HashedKey     string                 `protobuf:"bytes,3,opt,name=hashed_key,json=hashedKey,proto3" json:"hashed_key,omitempty"`
-	CreatedUnix   int64                  `protobuf:"varint,4,opt,name=created_unix,json=createdUnix,proto3" json:"created_unix,omitempty"`
+	state       protoimpl.MessageState `protogen:"open.v1"`
+	Id          string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	Name        string                 `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
+	HashedKey   string                 `protobuf:"bytes,3,opt,name=hashed_key,json=hashedKey,proto3" json:"hashed_key,omitempty"`
+	CreatedUnix int64                  `protobuf:"varint,4,opt,name=created_unix,json=createdUnix,proto3" json:"created_unix,omitempty"`
+	// role is one of "admin"/"operator"/"viewer" (ADR-0030) - gates
+	// which RPCs a caller presenting this key may invoke, once auth is
+	// enabled. An empty/unrecognized value is normalized to "viewer"
+	// (least privilege) by applyCreateAPIKey - never treated as "no
+	// restriction".
+	Role          string `protobuf:"bytes,5,opt,name=role,proto3" json:"role,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1077,6 +1083,13 @@ func (x *ApiKey) GetCreatedUnix() int64 {
 		return x.CreatedUnix
 	}
 	return 0
+}
+
+func (x *ApiKey) GetRole() string {
+	if x != nil {
+		return x.Role
+	}
+	return ""
 }
 
 // CreateAPIKey adds a new ApiKey. It fails if an id collision occurs
@@ -1993,13 +2006,14 @@ const file_api_internalpb_state_proto_rawDesc = "" +
 	"\x11update_jail_phase\x18\r \x01(\v2#.apiary.internal.v1.UpdateJailPhaseH\x00R\x0fupdateJailPhase\x12>\n" +
 	"\n" +
 	"purge_jail\x18\x0e \x01(\v2\x1d.apiary.internal.v1.PurgeJailH\x00R\tpurgeJailB\x04\n" +
-	"\x02op\"n\n" +
+	"\x02op\"\x82\x01\n" +
 	"\x06ApiKey\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x1d\n" +
 	"\n" +
 	"hashed_key\x18\x03 \x01(\tR\thashedKey\x12!\n" +
-	"\fcreated_unix\x18\x04 \x01(\x03R\vcreatedUnix\"<\n" +
+	"\fcreated_unix\x18\x04 \x01(\x03R\vcreatedUnix\x12\x12\n" +
+	"\x04role\x18\x05 \x01(\tR\x04role\"<\n" +
 	"\fCreateAPIKey\x12,\n" +
 	"\x03key\x18\x01 \x01(\v2\x1a.apiary.internal.v1.ApiKeyR\x03key\"\x1e\n" +
 	"\fRevokeAPIKey\x12\x0e\n" +

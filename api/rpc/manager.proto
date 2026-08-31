@@ -698,11 +698,20 @@ message APIKeyInfo {
   string id = 1;
   string name = 2;
   int64 created_unix = 3;
+
+  // role is one of "admin"/"operator"/"viewer" (ADR-0030) - gates
+  // which RPCs a caller presenting this key may invoke.
+  string role = 4;
 }
 
 message CreateAPIKeyRequest {
   string name = 1;
   uint32 timeout_ms = 2;
+
+  // role is one of "admin"/"operator"/"viewer" (ADR-0030); empty/
+  // unrecognized is normalized to "viewer" (least privilege) - see
+  // ApiKey.role's own doc comment in api/internalpb/state.proto.
+  string role = 3;
 }
 
 message CreateAPIKeyResponse {

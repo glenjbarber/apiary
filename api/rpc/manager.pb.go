@@ -4282,10 +4282,13 @@ func (x *ReportJailTeardownCompleteResponse) GetLeaderHint() string {
 // or its hash, so a hash can never leak back out over this API even
 // by accident (see ADR-0023).
 type APIKeyInfo struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
-	Name          string                 `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
-	CreatedUnix   int64                  `protobuf:"varint,3,opt,name=created_unix,json=createdUnix,proto3" json:"created_unix,omitempty"`
+	state       protoimpl.MessageState `protogen:"open.v1"`
+	Id          string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	Name        string                 `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
+	CreatedUnix int64                  `protobuf:"varint,3,opt,name=created_unix,json=createdUnix,proto3" json:"created_unix,omitempty"`
+	// role is one of "admin"/"operator"/"viewer" (ADR-0030) - gates
+	// which RPCs a caller presenting this key may invoke.
+	Role          string `protobuf:"bytes,4,opt,name=role,proto3" json:"role,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -4341,10 +4344,21 @@ func (x *APIKeyInfo) GetCreatedUnix() int64 {
 	return 0
 }
 
+func (x *APIKeyInfo) GetRole() string {
+	if x != nil {
+		return x.Role
+	}
+	return ""
+}
+
 type CreateAPIKeyRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
-	TimeoutMs     uint32                 `protobuf:"varint,2,opt,name=timeout_ms,json=timeoutMs,proto3" json:"timeout_ms,omitempty"`
+	state     protoimpl.MessageState `protogen:"open.v1"`
+	Name      string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	TimeoutMs uint32                 `protobuf:"varint,2,opt,name=timeout_ms,json=timeoutMs,proto3" json:"timeout_ms,omitempty"`
+	// role is one of "admin"/"operator"/"viewer" (ADR-0030); empty/
+	// unrecognized is normalized to "viewer" (least privilege) - see
+	// ApiKey.role's own doc comment in api/internalpb/state.proto.
+	Role          string `protobuf:"bytes,3,opt,name=role,proto3" json:"role,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -4391,6 +4405,13 @@ func (x *CreateAPIKeyRequest) GetTimeoutMs() uint32 {
 		return x.TimeoutMs
 	}
 	return 0
+}
+
+func (x *CreateAPIKeyRequest) GetRole() string {
+	if x != nil {
+		return x.Role
+	}
+	return ""
 }
 
 type CreateAPIKeyResponse struct {
@@ -4982,16 +5003,18 @@ const file_api_rpc_manager_proto_rawDesc = "" +
 	"\"ReportJailTeardownCompleteResponse\x12\x14\n" +
 	"\x05error\x18\x01 \x01(\tR\x05error\x12\x1f\n" +
 	"\vleader_hint\x18\x02 \x01(\tR\n" +
-	"leaderHint\"S\n" +
+	"leaderHint\"g\n" +
 	"\n" +
 	"APIKeyInfo\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12!\n" +
-	"\fcreated_unix\x18\x03 \x01(\x03R\vcreatedUnix\"H\n" +
+	"\fcreated_unix\x18\x03 \x01(\x03R\vcreatedUnix\x12\x12\n" +
+	"\x04role\x18\x04 \x01(\tR\x04role\"\\\n" +
 	"\x13CreateAPIKeyRequest\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x1d\n" +
 	"\n" +
-	"timeout_ms\x18\x02 \x01(\rR\ttimeoutMs\"\x93\x01\n" +
+	"timeout_ms\x18\x02 \x01(\rR\ttimeoutMs\x12\x12\n" +
+	"\x04role\x18\x03 \x01(\tR\x04role\"\x93\x01\n" +
 	"\x14CreateAPIKeyResponse\x12+\n" +
 	"\x03key\x18\x01 \x01(\v2\x19.apiary.rpc.v1.APIKeyInfoR\x03key\x12\x17\n" +
 	"\araw_key\x18\x02 \x01(\tR\x06rawKey\x12\x14\n" +

@@ -312,10 +312,10 @@ func (n *Node) ListJailsLocal() []*internalpb.JailDefinition {
 // tradeoff is a lookup against a possibly-just-slightly-stale local
 // copy during the brief replication window right after a
 // create/revoke - acceptable, and documented in ADR-0023.
-func (n *Node) ValidateAPIKeyHash(hash string) (id string, valid, authEnabled bool) {
-	id, valid = n.fsm.ValidateHash(hash)
+func (n *Node) ValidateAPIKeyHash(hash string) (id, role string, valid, authEnabled bool) {
+	id, role, valid = n.fsm.ValidateHash(hash)
 	authEnabled = n.fsm.AuthEnabled()
-	return id, valid, authEnabled
+	return id, role, valid, authEnabled
 }
 
 // ListAPIKeys is a normal leader-only read (mirrors ListNetworks),
