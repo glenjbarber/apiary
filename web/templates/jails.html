@@ -1,0 +1,55 @@
+{{define "jails_page"}}
+<!DOCTYPE html>
+<html lang="en">
+{{template "head" .}}
+<body>
+  <h1>Apiary</h1>
+  {{template "nav" .}}
+  <h2>Jails</h2>
+  <form class="create-vm" hx-post="/jails" hx-target="#jail-panel" hx-swap="innerHTML">
+    <label>ID <input type="text" name="id" required></label>
+    <label>Name <input type="text" name="name"></label>
+    <label>Hostname <input type="text" name="hostname"></label>
+    <label>Node ID <input type="text" name="node_id"></label>
+    <label>Replica node ID (optional - HAST root replication, see ADR-0026)
+      <input type="text" name="replica_node_id">
+    </label>
+    <button type="submit">Create</button>
+  </form>
+  <div id="jail-panel">
+    {{template "jail_panel" .}}
+  </div>
+</body>
+</html>
+{{end}}
+
+{{define "jail_panel"}}
+<div id="jail-error" class="error">{{.JailFormError}}</div>
+<table>
+  <thead>
+    <tr><th>ID</th><th>Name</th><th>Hostname</th><th>Node</th><th>Replica</th><th>State</th><th>Phase</th><th></th></tr>
+  </thead>
+  <tbody id="jail-rows">
+    {{template "jail_rows" .}}
+  </tbody>
+</table>
+{{end}}
+
+{{define "jail_rows"}}
+{{range .Jails}}
+<tr>
+  <td>{{.ID}}</td>
+  <td>{{.Name}}</td>
+  <td>{{.Hostname}}</td>
+  <td>{{.NodeID}}</td>
+  <td>{{if .ReplicaNodeID}}{{.ReplicaNodeID}}{{else}}<em>(none)</em>{{end}}</td>
+  <td>{{.DesiredState}}</td>
+  <td{{if .PhaseError}} title="{{.PhaseError}}"{{end}}>{{.Phase}}</td>
+  <td>
+    <button hx-delete="/jails/{{.ID}}" hx-target="#jail-panel" hx-swap="innerHTML" hx-confirm="Delete jail {{.ID}}?">Delete</button>
+  </td>
+</tr>
+{{else}}
+<tr><td colspan="8"><em>No jails</em></td></tr>
+{{end}}
+{{end}}

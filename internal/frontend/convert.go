@@ -77,6 +77,71 @@ func fromRPCNetwork(n *rpcpb.NetworkDefinition) networkView {
 	}
 }
 
+// jailView is the template-facing shape for a JailDefinition, mirroring
+// vmView's shape but minimal like its own RPC type - see ADR-0026.
+type jailView struct {
+	ID           string
+	Name         string
+	Hostname     string
+	NodeID       string
+	DesiredState string
+
+	// Phase is the reconciler's own observed progress, mirroring
+	// vmView.Phase exactly.
+	Phase      string
+	PhaseError string
+
+	// ReplicaNodeID, if set, names the node this jail's root filesystem
+	// is HAST-replicated to (ADR-0026) - data redundancy, not failover.
+	ReplicaNodeID string
+}
+
+func fromRPCJail(j *rpcpb.JailDefinition) jailView {
+	if j == nil {
+		return jailView{}
+	}
+	return jailView{
+		ID:            j.GetId(),
+		Name:          j.GetName(),
+		Hostname:      j.GetHostname(),
+		NodeID:        j.GetNodeId(),
+		DesiredState:  jailStateFromRPC(j.GetDesiredState()),
+		Phase:         jailPhaseFromRPC(j.GetPhase()),
+		PhaseError:    j.GetPhaseError(),
+		ReplicaNodeID: j.GetReplicaNodeId(),
+	}
+}
+
+// jailStateFromRPC/jailPhaseFromRPC mirror stateFromRPC/phaseFromRPC
+// exactly, for JailState/JailPhase instead of VMState/VMPhase.
+func jailStateFromRPC(s rpcpb.JailState) string {
+	switch s {
+	case rpcpb.JailState_JAIL_STATE_RUNNING:
+		return "running"
+	case rpcpb.JailState_JAIL_STATE_STOPPED:
+		return "stopped"
+	case rpcpb.JailState_JAIL_STATE_DELETING:
+		return "deleting"
+	default:
+		return ""
+	}
+}
+
+func jailPhaseFromRPC(p rpcpb.JailPhase) string {
+	switch p {
+	case rpcpb.JailPhase_JAIL_PHASE_CREATING:
+		return "creating"
+	case rpcpb.JailPhase_JAIL_PHASE_READY:
+		return "ready"
+	case rpcpb.JailPhase_JAIL_PHASE_DELETING:
+		return "deleting"
+	case rpcpb.JailPhase_JAIL_PHASE_ERROR:
+		return "error"
+	default:
+		return "pending"
+	}
+}
+
 // apiKeyView is the template-facing shape for an APIKeyInfo - metadata
 // only, never the raw key or its hash (see ADR-0023). Created is
 // pre-formatted here (rather than in the template, which has no time

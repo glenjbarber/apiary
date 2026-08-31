@@ -44,6 +44,12 @@ type fakeClient struct {
 	lastCreateNetworkReq *rpcpb.CreateNetworkRequest
 	lastDeleteNetworkReq *rpcpb.DeleteNetworkRequest
 
+	listJailsResp     *rpcpb.ListJailsResponse
+	createJailResp    *rpcpb.CreateJailResponse
+	deleteJailResp    *rpcpb.DeleteJailResponse
+	lastCreateJailReq *rpcpb.CreateJailRequest
+	lastDeleteJailReq *rpcpb.DeleteJailRequest
+
 	listAPIKeysResp     *rpcpb.ListAPIKeysResponse
 	createAPIKeyResp    *rpcpb.CreateAPIKeyResponse
 	revokeAPIKeyResp    *rpcpb.RevokeAPIKeyResponse
@@ -168,7 +174,11 @@ func (f *fakeClient) DeleteNetwork(_ context.Context, in *rpcpb.DeleteNetworkReq
 	return &rpcpb.DeleteNetworkResponse{}, nil
 }
 
-func (f *fakeClient) CreateJail(context.Context, *rpcpb.CreateJailRequest, ...grpc.CallOption) (*rpcpb.CreateJailResponse, error) {
+func (f *fakeClient) CreateJail(_ context.Context, in *rpcpb.CreateJailRequest, _ ...grpc.CallOption) (*rpcpb.CreateJailResponse, error) {
+	f.lastCreateJailReq = in
+	if f.createJailResp != nil {
+		return f.createJailResp, nil
+	}
 	return &rpcpb.CreateJailResponse{}, nil
 }
 
@@ -176,7 +186,11 @@ func (f *fakeClient) UpdateJail(context.Context, *rpcpb.UpdateJailRequest, ...gr
 	return &rpcpb.UpdateJailResponse{}, nil
 }
 
-func (f *fakeClient) DeleteJail(context.Context, *rpcpb.DeleteJailRequest, ...grpc.CallOption) (*rpcpb.DeleteJailResponse, error) {
+func (f *fakeClient) DeleteJail(_ context.Context, in *rpcpb.DeleteJailRequest, _ ...grpc.CallOption) (*rpcpb.DeleteJailResponse, error) {
+	f.lastDeleteJailReq = in
+	if f.deleteJailResp != nil {
+		return f.deleteJailResp, nil
+	}
 	return &rpcpb.DeleteJailResponse{}, nil
 }
 
@@ -185,6 +199,9 @@ func (f *fakeClient) GetJail(context.Context, *rpcpb.GetJailRequest, ...grpc.Cal
 }
 
 func (f *fakeClient) ListJails(context.Context, *rpcpb.ListJailsRequest, ...grpc.CallOption) (*rpcpb.ListJailsResponse, error) {
+	if f.listJailsResp != nil {
+		return f.listJailsResp, nil
+	}
 	return &rpcpb.ListJailsResponse{}, nil
 }
 
@@ -680,6 +697,103 @@ func TestServer_DeleteNetwork_ErrorShowsInPanel(t *testing.T) {
 	s.ServeHTTP(rec, req)
 
 	if !strings.Contains(rec.Body.String(), "still referenced") {
+		t.Errorf("response missing error message, got: %s", rec.Body.String())
+	}
+}
+
+func TestServer_JailsPage(t *testing.T) {
+	client := &fakeClient{listJailsResp: &rpcpb.ListJailsResponse{
+		Jails: []*rpcpb.JailDefinition{{Id: "jail-1", Name: "web-1", Hostname: "web-1.local", NodeId: "node-a"}},
+	}}
+	s := newTestServer(t, client)
+
+	req := httptest.NewRequest(http.MethodGet, "/jails", nil)
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, "jail-1") || !strings.Contains(body, "web-1.local") || !strings.Contains(body, "node-a") {
+		t.Errorf("jails page missing expected jail row, got: %s", body)
+	}
+}
+
+func TestServer_JailsPage_ListError(t *testing.T) {
+	client := &fakeClient{listJailsResp: &rpcpb.ListJailsResponse{Error: "raftd unreachable"}}
+	s := newTestServer(t, client)
+
+	req := httptest.NewRequest(http.MethodGet, "/jails", nil)
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, req)
+
+	if !strings.Contains(rec.Body.String(), "raftd unreachable") {
+		t.Errorf("jails page missing error message, got: %s", rec.Body.String())
+	}
+}
+
+func TestServer_CreateJail(t *testing.T) {
+	client := &fakeClient{
+		createJailResp: &rpcpb.CreateJailResponse{Jail: &rpcpb.JailDefinition{Id: "jail-1"}},
+	}
+	s := newTestServer(t, client)
+
+	form := url.Values{"id": {"jail-1"}, "name": {"web-1"}, "hostname": {"web-1.local"}, "node_id": {"node-a"}}
+	req := httptest.NewRequest(http.MethodPost, "/jails", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	got := client.lastCreateJailReq.GetJail()
+	if got.GetId() != "jail-1" || got.GetHostname() != "web-1.local" || got.GetNodeId() != "node-a" {
+		t.Errorf("forwarded jail = %+v, want id=jail-1 hostname=web-1.local node_id=node-a", got)
+	}
+}
+
+func TestServer_CreateJail_ErrorShowsInPanel(t *testing.T) {
+	client := &fakeClient{createJailResp: &rpcpb.CreateJailResponse{Error: `id "jail-1" already exists`}}
+	s := newTestServer(t, client)
+
+	form := url.Values{"id": {"jail-1"}}
+	req := httptest.NewRequest(http.MethodPost, "/jails", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, req)
+
+	if !strings.Contains(rec.Body.String(), "already exists") {
+		t.Errorf("response missing error message, got: %s", rec.Body.String())
+	}
+}
+
+func TestServer_DeleteJail(t *testing.T) {
+	client := &fakeClient{deleteJailResp: &rpcpb.DeleteJailResponse{Jail: &rpcpb.JailDefinition{Id: "jail-1"}}}
+	s := newTestServer(t, client)
+
+	req := httptest.NewRequest(http.MethodDelete, "/jails/jail-1", nil)
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	if client.lastDeleteJailReq.GetId() != "jail-1" {
+		t.Errorf("forwarded delete id = %q, want jail-1", client.lastDeleteJailReq.GetId())
+	}
+}
+
+func TestServer_DeleteJail_ErrorShowsInPanel(t *testing.T) {
+	client := &fakeClient{deleteJailResp: &rpcpb.DeleteJailResponse{Error: "some jail error"}}
+	s := newTestServer(t, client)
+
+	req := httptest.NewRequest(http.MethodDelete, "/jails/jail-1", nil)
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, req)
+
+	if !strings.Contains(rec.Body.String(), "some jail error") {
 		t.Errorf("response missing error message, got: %s", rec.Body.String())
 	}
 }

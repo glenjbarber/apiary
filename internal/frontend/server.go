@@ -107,6 +107,15 @@ type pageData struct {
 	// the one immediately following a successful create.
 	APIKeyRawName  string
 	APIKeyRawValue string
+
+	// Jails lists known jails (ADR-0026's jail-orchestration half): for
+	// the Jails page's own table.
+	Jails []jailView
+
+	// JailFormError reports a create/delete-specific error for the
+	// Jails page, rendered the same way NetworkFormError is for
+	// Networks.
+	JailFormError string
 }
 
 // parseSort reads sort/dir query parameters, defaulting to ascending by
@@ -237,6 +246,9 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /apikeys", s.handleAPIKeysPage)
 	s.mux.HandleFunc("POST /apikeys", s.handleCreateAPIKey)
 	s.mux.HandleFunc("DELETE /apikeys/{id}", s.handleRevokeAPIKey)
+	s.mux.HandleFunc("GET /jails", s.handleJailsPage)
+	s.mux.HandleFunc("POST /jails", s.handleCreateJail)
+	s.mux.HandleFunc("DELETE /jails/{id}", s.handleDeleteJail)
 }
 
 // handleLoginPage serves the login form. If login isn't enabled at all,
@@ -752,6 +764,84 @@ func (s *Server) renderNetworkPanelResult(w http.ResponseWriter, r *http.Request
 		}
 	}
 	s.render(w, "network_panel", pageData{NetworkFormError: formErr, Networks: networks})
+}
+
+// currentJails fetches the current list of jails, returning an error
+// string ("" on success) the same fail-soft convention currentNetworks
+// follows.
+func (s *Server) currentJails(r *http.Request) ([]jailView, string) {
+	resp, err := s.client.ListJails(r.Context(), &rpcpb.ListJailsRequest{})
+	if err != nil {
+		return nil, err.Error()
+	}
+	if resp.GetError() != "" {
+		return nil, resp.GetError()
+	}
+	jails := make([]jailView, 0, len(resp.GetJails()))
+	for _, j := range resp.GetJails() {
+		jails = append(jails, fromRPCJail(j))
+	}
+	return jails, ""
+}
+
+// handleJailsPage serves the Jails list/create page ("/jails").
+func (s *Server) handleJailsPage(w http.ResponseWriter, r *http.Request) {
+	jails, errMsg := s.currentJails(r)
+	s.render(w, "jails_page", pageData{Jails: jails, JailFormError: errMsg, ActivePage: "jails", AuthEnabled: s.authUser != ""})
+}
+
+// handleCreateJail mirrors handleCreateNetwork's combined-panel pattern.
+func (s *Server) handleCreateJail(w http.ResponseWriter, r *http.Request) {
+	if err := r.ParseForm(); err != nil {
+		s.renderJailPanelResult(w, r, "invalid form: "+err.Error())
+		return
+	}
+
+	resp, err := s.client.CreateJail(r.Context(), &rpcpb.CreateJailRequest{
+		Jail: &rpcpb.JailDefinition{
+			Id:            r.FormValue("id"),
+			Name:          r.FormValue("name"),
+			Hostname:      r.FormValue("hostname"),
+			NodeId:        r.FormValue("node_id"),
+			ReplicaNodeId: r.FormValue("replica_node_id"),
+		},
+	})
+	if err != nil {
+		s.renderJailPanelResult(w, r, err.Error())
+		return
+	}
+	if resp.GetError() != "" {
+		s.renderJailPanelResult(w, r, resp.GetError())
+		return
+	}
+	s.renderJailPanelResult(w, r, "")
+}
+
+func (s *Server) handleDeleteJail(w http.ResponseWriter, r *http.Request) {
+	resp, err := s.client.DeleteJail(r.Context(), &rpcpb.DeleteJailRequest{Id: r.PathValue("id")})
+	if err != nil {
+		s.renderJailPanelResult(w, r, err.Error())
+		return
+	}
+	if resp.GetError() != "" {
+		s.renderJailPanelResult(w, r, resp.GetError())
+		return
+	}
+	s.renderJailPanelResult(w, r, "")
+}
+
+// renderJailPanelResult mirrors renderNetworkPanelResult's combined-
+// target pattern.
+func (s *Server) renderJailPanelResult(w http.ResponseWriter, r *http.Request, formErr string) {
+	jails, fetchErr := s.currentJails(r)
+	if fetchErr != "" {
+		if formErr == "" {
+			formErr = fetchErr
+		} else {
+			formErr += "; additionally failed to refresh list: " + fetchErr
+		}
+	}
+	s.render(w, "jail_panel", pageData{JailFormError: formErr, Jails: jails})
 }
 
 // currentAPIKeys fetches the current list of API keys (metadata only),
