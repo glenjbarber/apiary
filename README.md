@@ -174,7 +174,9 @@ each design decision, in order.
   real hardware: real PAM logins against genuine UNIX accounts, a
   wrong password rejected, an unmapped valid account rejected outright
   (default-deny), and Viewer/Operator sessions each correctly allowed
-  and blocked at the right routes. See
+  and blocked at the right routes. Repeated failed logins for one
+  username now lock that account out for a fixed cooldown, checked
+  before the PAM backend is ever called. See
   [ADR-0030](docs/adr/0030-tiered-rbac-pam-login.md).
 
 **Not yet implemented:**

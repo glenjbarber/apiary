@@ -161,10 +161,15 @@ type Server struct {
 	// developer/local-network stage. roleMap resolves an authenticated
 	// username to a Role; a username with no entry is rejected at
 	// login (default-deny), never silently downgraded to Viewer.
-	// sessions tracks logged-in sessions; see session.go.
+	// sessions tracks logged-in sessions; see session.go. lockouts
+	// tracks repeated failed login attempts per username, so an online
+	// password-guessing attack against a real PAM account is at least
+	// slowed down, not merely reported as "invalid" forever with no
+	// consequence - see lockout.go.
 	auth     pam.Authenticator
 	roleMap  map[string]manager.Role
 	sessions *sessionStore
+	lockouts *loginAttemptTracker
 }
 
 // NewServer parses the embedded templates and returns a Server that
@@ -180,6 +185,7 @@ func NewServer(client rpcpb.ManagerServiceClient, auth pam.Authenticator, roleMa
 	s := &Server{
 		client:   client,
 		tmpl:     tmpl,
+		lockouts: newLoginAttemptTracker(defaultMaxFailedAttempts, defaultAttemptWindow, defaultLockDuration),
 		mux:      http.NewServeMux(),
 		auth:     auth,
 		roleMap:  roleMap,
@@ -330,6 +336,10 @@ func (s *Server) handleLoginPage(w http.ResponseWriter, r *http.Request) {
 // default-deny stance (ADR-0025/26/27/28/29's own reasoning, applied
 // here to authorization instead of reconciliation).
 func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
+	if s.auth == nil {
+		http.Redirect(w, r, "/", http.StatusFound)
+		return
+	}
 	if err := r.ParseForm(); err != nil {
 		s.render(w, "login_page", pageData{LoginError: "invalid form: " + err.Error()})
 		return
@@ -338,15 +348,29 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	pass := r.FormValue("password")
 	next := r.FormValue("next")
 
+	// Checked before ever calling s.auth.Authenticate - a locked-out
+	// username shouldn't cost a real PAM round-trip on every retry, and
+	// short-circuiting here also avoids the auth backend itself being
+	// used as an amplification/timing oracle while locked.
+	if locked, remaining := s.lockouts.Locked(user); locked {
+		s.render(w, "login_page", pageData{
+			LoginError: fmt.Sprintf("too many failed attempts for this account - try again in %s", remaining.Round(time.Second)),
+			NextURL:    next,
+		})
+		return
+	}
+
 	ok, err := s.auth.Authenticate(user, pass)
 	if err != nil {
 		s.render(w, "login_page", pageData{LoginError: "authentication backend error: " + err.Error(), NextURL: next})
 		return
 	}
 	if !ok {
+		s.lockouts.RecordFailure(user)
 		s.render(w, "login_page", pageData{LoginError: "invalid username or password", NextURL: next})
 		return
 	}
+	s.lockouts.RecordSuccess(user)
 	role, hasRole := s.roleMap[user]
 	if !hasRole {
 		s.render(w, "login_page", pageData{LoginError: "no Apiary role is assigned to this account - contact an administrator", NextURL: next})

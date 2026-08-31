@@ -126,13 +126,39 @@ as `<username>` (`<role>`)" when a session exists.
 startup, rejecting an unrecognized role or a user listed under two
 roles).
 
+## Follow-up: login lockout (closes one of the items below)
+
+A new `internal/frontend/lockout.go` adds a `loginAttemptTracker`:
+after `defaultMaxFailedAttempts` (5) wrong passwords for one username
+within `defaultAttemptWindow` (15 minutes), that username is locked
+out for `defaultLockDuration` (15 minutes) - checked in `handleLogin`
+*before* ever calling `s.auth.Authenticate`, so a locked-out username
+costs no PAM round-trip on retry and can't be used to probe the auth
+backend's timing while locked. All three durations are fixed
+constants, not flags - the same "simple enough for now" posture
+`sessionTTL` already established. A successful login clears any
+tracked failures for that username. Keyed by username only, not source
+IP - deliberately simple, with an accepted, named tradeoff: someone
+who already knows a valid username could lock out its real owner by
+failing on purpose (a denial-of-service against that one account, not
+a way to get in) - a real cost, judged worth accepting over doing
+nothing at all against online password guessing now that a wrong
+guess is checked against a real credential.
+
+This also fixed a latent bug this same code path had since the PAM
+work landed: `handleLogin` called `s.auth.Authenticate` with no nil
+check, so a `POST /login` while login was disabled (`s.auth == nil`)
+would have panicked - never hit in practice since the UI's own login
+form doesn't render when disabled, but reachable by anyone crafting
+the request directly. Fixed with the same disabled-login redirect
+`handleLoginPage`'s `GET` already had.
+
 ## Deferred (explicitly out of scope for this pass)
 
 - Bespoke direct-Kerberos or direct-LDAP/AD client code in Go - PAM's
   own configuration already bridges to both; a dedicated integration
   is only worth building later if system-PAM delegation proves
   insufficient for a real deployment.
-- Account lockout/rate-limiting on repeated failed PAM attempts.
 - Any self-service account creation/password-reset UI - PAM already
   manages real accounts; Apiary never touches credentials directly.
 
@@ -174,9 +200,15 @@ removed afterward; `apiarium` was left with no trace of the test setup.
   write VMs but not manage API keys; `internal/frontend` route-gating
   and role-map-rejection tests against a fake `Authenticator`;
   `-role-map` flag-parsing unit tests in `cmd/frontend`; `internal/pam`
-  unit tests against a fake `ServiceName`; and, per the live
-  verification above, real PAM authentication itself confirmed working
-  end-to-end against genuine UNIX accounts on real FreeBSD hardware.
+  unit tests against a fake `ServiceName`; `loginAttemptTracker` unit
+  tests (locks after the threshold, doesn't cross-lock a different
+  username, a success resets the count, both the window and the lock
+  duration expire correctly) plus `Server`-level tests confirming
+  lockout after repeated failures, that a success never counts toward
+  it, and that the fixed nil-auth `POST /login` bug doesn't panic; and,
+  per the live verification above, real PAM authentication itself
+  confirmed working end-to-end against genuine UNIX accounts on real
+  FreeBSD hardware.
 - The cgo/native-build requirement for `cmd/frontend` is a real,
   ongoing cost of this design, accepted explicitly in exchange for
   literal PAM (and, transitively, Kerberos/AD) support rather than a

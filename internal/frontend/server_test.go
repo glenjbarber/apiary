@@ -1430,3 +1430,75 @@ func TestServer_Nav_ShowsUsernameAndRole(t *testing.T) {
 		t.Errorf("nav should show the logged-in username and role, got: %s", rec.Body.String())
 	}
 }
+
+func TestServer_PostLogin_NoOpWhenAuthDisabled(t *testing.T) {
+	s := newTestServer(t, &fakeClient{})
+
+	form := url.Values{"username": {"anyone"}, "password": {"anything"}}
+	req := httptest.NewRequest(http.MethodPost, "/login", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusFound || rec.Header().Get("Location") != "/" {
+		t.Errorf("POST /login with auth disabled = %d %q, want 302 to / (not a crash)", rec.Code, rec.Header().Get("Location"))
+	}
+}
+
+func TestServer_Login_LocksOutAfterRepeatedFailures(t *testing.T) {
+	s := newTestServerWithAuth(t, &fakeClient{}, "admin", "secret")
+
+	form := url.Values{"username": {"admin"}, "password": {"wrong"}}
+	for i := 0; i < defaultMaxFailedAttempts; i++ {
+		req := httptest.NewRequest(http.MethodPost, "/login", strings.NewReader(form.Encode()))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		rec := httptest.NewRecorder()
+		s.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("attempt %d: status = %d, want 200", i+1, rec.Code)
+		}
+	}
+
+	// The account is now locked - even the CORRECT password must be
+	// rejected until the lockout clears.
+	correctForm := url.Values{"username": {"admin"}, "password": {"secret"}}
+	req := httptest.NewRequest(http.MethodPost, "/login", strings.NewReader(correctForm.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (re-render with lockout error, not a redirect)", rec.Code)
+	}
+	if !strings.Contains(rec.Body.String(), "too many failed attempts") {
+		t.Errorf("response missing lockout error, got: %s", rec.Body.String())
+	}
+	for _, c := range rec.Result().Cookies() {
+		if c.Name == sessionCookieName {
+			t.Errorf("a session cookie should not be set while the account is locked out")
+		}
+	}
+}
+
+func TestServer_Login_SuccessDoesNotCountAsFailureTowardLockout(t *testing.T) {
+	s := newTestServerWithAuth(t, &fakeClient{}, "admin", "secret")
+
+	// One failure, then a success, repeated well past the failure
+	// threshold - the success should reset the count each time, so the
+	// account never locks.
+	wrongForm := url.Values{"username": {"admin"}, "password": {"wrong"}}
+	correctForm := url.Values{"username": {"admin"}, "password": {"secret"}}
+	for i := 0; i < defaultMaxFailedAttempts+2; i++ {
+		req := httptest.NewRequest(http.MethodPost, "/login", strings.NewReader(wrongForm.Encode()))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		s.ServeHTTP(httptest.NewRecorder(), req)
+
+		req2 := httptest.NewRequest(http.MethodPost, "/login", strings.NewReader(correctForm.Encode()))
+		req2.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		rec2 := httptest.NewRecorder()
+		s.ServeHTTP(rec2, req2)
+		if rec2.Code != http.StatusFound {
+			t.Fatalf("iteration %d: correct-password status = %d, want 302 (never locked out)", i, rec2.Code)
+		}
+	}
+}
