@@ -242,7 +242,14 @@ each design decision, in order.
   v1 has no load-balancer/HA control plane (a single control-plane
   node's own IP is used directly); live verification is staged
   incrementally, single-VM provisioning before a fully joined
-  multi-node cluster.
+  multi-node cluster. CRDs/controllers/REST client are implemented and
+  unit-tested (a `controller-runtime` fake client plus an in-memory
+  `restshimd` stand-in, since `envtest`'s own binaries weren't
+  fetchable in this sandbox); real live verification against a `kind`
+  management cluster is still pending. `providerID`-to-kubelet wiring
+  also has no automatic path (no cloud-controller-manager exists for
+  Apiary) - documented as a manual `preKubeadmCommands` step in the new
+  repo's own README.
 - **Tabled for now** (evaluated, deliberately deferred):
   - **Terraform support** — the infrastructure now exists (`managerd`'s
     API-key auth, `restshimd`'s own binary forwarding each caller's
