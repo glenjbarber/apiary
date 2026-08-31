@@ -20,6 +20,7 @@ import (
 	"github.com/glenjbarber/apiary/internal/bhyve"
 	"github.com/glenjbarber/apiary/internal/cluster"
 	"github.com/glenjbarber/apiary/internal/dhcpd"
+	"github.com/glenjbarber/apiary/internal/hast"
 	"github.com/glenjbarber/apiary/internal/isostore"
 	"github.com/glenjbarber/apiary/internal/manager"
 	"github.com/glenjbarber/apiary/internal/pf"
@@ -45,6 +46,7 @@ func run() error {
 	diskSizeMB := flag.Uint64("disk-size-mb", 0, "size of each VM's boot disk image in MB (0 uses the reconciler's own default)")
 	isoDir := flag.String("iso-dir", "/var/db/apiary/isos", "directory where uploaded installer images are stored on this node")
 	vlanUplink := flag.String("vlan-uplink", "", "physical interface VLAN-tagged networks attach to (e.g. \"re0\", \"em0\" - differs per node); leave empty to disable network management (VLANs/DHCP/firewall) on this node")
+	hastEnabled := flag.Bool("hast-enabled", false, "enable HAST-backed VM disk replication support on this node (requires a real, patched hastd - see ADR-0025); needed on both a replicated VM's owning node and its replica node, regardless of bhyve support")
 	flag.Parse()
 
 	id := *nodeID
@@ -92,6 +94,12 @@ func run() error {
 		DiskSizeMB:  *diskSizeMB,
 		Bridge:      *bhyveBridge,
 		ISOs:        isos,
+	}
+	// HAST is independent of bhyve support: a node holding only a HAST
+	// secondary replica (see ADR-0025) never runs the VM at all, so this
+	// is set regardless of -bhyve-bootrom, unlike VLAN/DHCP/PF below.
+	if *hastEnabled {
+		reconciler.HAST = hast.New()
 	}
 	// reconciler.Bhyve/bhyveMgr are left nil when no boot ROM is
 	// configured, so nodes without hardware-assisted virtualization (the
@@ -151,7 +159,7 @@ func run() error {
 		serveErrCh <- grpcServer.Serve(lis)
 	}()
 
-	log.Printf("managerd: listening on %s (node-id=%s, raftd-socket=%s, vlan-uplink=%s)", *rpcAddr, id, *raftdSocket, *vlanUplink)
+	log.Printf("managerd: listening on %s (node-id=%s, raftd-socket=%s, vlan-uplink=%s, hast-enabled=%v)", *rpcAddr, id, *raftdSocket, *vlanUplink, *hastEnabled)
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()

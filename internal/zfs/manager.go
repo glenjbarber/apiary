@@ -47,6 +47,15 @@ func (m *Manager) CreateDataset(ctx context.Context, name string) error {
 	return err
 }
 
+// FullPath returns the validated full dataset path (Base/name) for
+// name, without performing any zfs(8) operation - callers that need to
+// reference a dataset/zvol by its full name outside this package (e.g.
+// a zvol's /dev/zvol/<full-path> device node) use this rather than
+// duplicating Base concatenation themselves.
+func (m *Manager) FullPath(name string) (string, error) {
+	return m.path(name)
+}
+
 // CreateZvol creates a new zvol (block device dataset) at Base/name,
 // sized sizeMB - used as a HAST-replicated resource's local GEOM
 // provider (see internal/cluster's HAST wiring), since neither of this

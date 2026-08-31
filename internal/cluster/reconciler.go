@@ -57,6 +57,11 @@ type raftClient interface {
 
 	// ListNetworks is only called when VLAN is set - see ensureNetwork.
 	ListNetworks(ctx context.Context) (*internalpb.ListNetworksResponse, error)
+
+	// Status is only called when HAST is set - see
+	// Reconciler.resolvePeerAddresses, which reuses raft's own cluster
+	// membership addresses as hast.conf's Node.Remote.
+	Status(ctx context.Context) (*internalpb.StatusResponse, error)
 }
 
 // datasetManager is the subset of *zfs.Manager the reconciler needs, for
@@ -66,6 +71,14 @@ type datasetManager interface {
 	CreateDataset(ctx context.Context, name string) error
 	DestroyDataset(ctx context.Context, name string) error
 	GetProperty(ctx context.Context, name, prop string) (string, error)
+
+	// CreateZvol and FullPath are used only by HAST replication (see
+	// hast.go) - a zvol backs each replicated resource's local GEOM
+	// provider, and FullPath resolves its /dev/zvol/<full-path> device
+	// node (a zvol's device path always includes Base, unlike this
+	// interface's other methods which take a Base-relative name).
+	CreateZvol(ctx context.Context, name string, sizeMB uint64) error
+	FullPath(name string) (string, error)
 }
 
 // vmManager is the subset of *bhyve.Manager the reconciler needs, for
@@ -161,12 +174,23 @@ type Reconciler struct {
 	DHCP dhcpManager
 	PF   pfManager
 
+	// HAST is optional (nil-able, same opt-in pattern as everything
+	// above): when set, a VM naming ReplicaNodeID gets its disk
+	// HAST-replicated instead of the plain dataset-backed file - real
+	// data redundancy, not automatic failover (see ADR-0025). A VM with
+	// no ReplicaNodeID is completely unaffected by whether HAST is set.
+	HAST hastManager
+
 	// lastDHCPConfig is the last dnsmasq config body actually written,
 	// so reconcileDHCP only calls DHCP.WriteAndReload (which restarts
 	// the dnsmasq service - see internal/dhcpd's own doc comment on why
 	// that isn't a lighter-weight reload) when something has actually
 	// changed, not every tick.
 	lastDHCPConfig string
+
+	// lastHASTConfig mirrors lastDHCPConfig exactly, for hast.conf -
+	// see reconcileHASTRoles.
+	lastHASTConfig string
 }
 
 // RunOnce fetches the current VM list and, for each VM assigned to
@@ -210,6 +234,7 @@ func (r *Reconciler) RunOnce(ctx context.Context) error {
 			IPAddress:     vm.GetIpAddress(),
 			MACAddress:    vm.GetMacAddress(),
 			FirewallRules: rules,
+			ReplicaNodeID: vm.GetReplicaNodeId(),
 		})
 	}
 
@@ -228,10 +253,35 @@ func (r *Reconciler) RunOnce(ctx context.Context) error {
 	}
 
 	planned := Plan(desired, r.LocalNodeID)
+	replicas := PlanReplica(desired, r.LocalNodeID)
 
 	var firstErr error
+
+	// HAST provisioning happens before ensureVM below, since a
+	// primary-role VM's disk path comes from here (see
+	// reconcileHASTRoles). Skipped entirely if HAST isn't configured on
+	// this node - a VM naming ReplicaNodeID in that case surfaces its
+	// own clear error from ensureVM instead.
+	var hastDevicePaths map[string]string
+	if r.HAST != nil {
+		var roles []hastRole
+		for _, vm := range planned {
+			if vm.ReplicaNodeID != "" {
+				roles = append(roles, hastRole{resourceName: vmHASTResourceName(vm.ID), peerNodeID: vm.ReplicaNodeID, sizeMB: r.diskSizeMB(), isPrimary: true})
+			}
+		}
+		for _, vm := range replicas {
+			roles = append(roles, hastRole{resourceName: vmHASTResourceName(vm.ID), peerNodeID: vm.NodeID, sizeMB: r.diskSizeMB(), isPrimary: false})
+		}
+		paths, err := r.reconcileHASTRoles(ctx, roles)
+		hastDevicePaths = paths
+		if err != nil && firstErr == nil {
+			firstErr = fmt.Errorf("cluster: reconciling HAST roles: %w", err)
+		}
+	}
+
 	for _, vm := range planned {
-		if err := r.reconcileVM(ctx, vm, networks); err != nil && firstErr == nil {
+		if err := r.reconcileVM(ctx, vm, networks, hastDevicePaths); err != nil && firstErr == nil {
 			firstErr = fmt.Errorf("cluster: reconciling VM %s: %w", vm.ID, err)
 		}
 	}
@@ -244,6 +294,17 @@ func (r *Reconciler) RunOnce(ctx context.Context) error {
 	for _, id := range PlanReclaim(desired, r.LocalNodeID) {
 		if err := r.reclaimStaleVM(ctx, id); err != nil && firstErr == nil {
 			firstErr = fmt.Errorf("cluster: reclaiming stale VM %s: %w", id, err)
+		}
+	}
+
+	// Reclaim a HAST secondary-role resource this node no longer needs
+	// to hold (the VM was reassigned to a different replica, or is
+	// gone) - mirrors PlanReclaim's reasoning exactly, against
+	// ReplicaNodeID instead of NodeID. Safe even when r.HAST is nil:
+	// reclaimHASTRole only ever destroys a zvol that's actually there.
+	for _, id := range PlanReplicaReclaim(desired, r.LocalNodeID) {
+		if err := r.reclaimHASTRole(ctx, vmHASTResourceName(id)); err != nil && firstErr == nil {
+			firstErr = fmt.Errorf("cluster: reclaiming stale HAST replica %s: %w", id, err)
 		}
 	}
 
@@ -280,7 +341,7 @@ func (r *Reconciler) fetchNetworks(ctx context.Context) (map[string]*internalpb.
 // if it doesn't. These are best-effort writes - see applyPhase - so a
 // phase-update failure never masks or replaces the underlying
 // provisioning error.
-func (r *Reconciler) reconcileVM(ctx context.Context, vm VMPlacement, networks map[string]*internalpb.NetworkDefinition) error {
+func (r *Reconciler) reconcileVM(ctx context.Context, vm VMPlacement, networks map[string]*internalpb.NetworkDefinition, hastDevicePaths map[string]string) error {
 	if vm.Deleting {
 		return r.teardownVM(ctx, vm)
 	}
@@ -288,7 +349,7 @@ func (r *Reconciler) reconcileVM(ctx context.Context, vm VMPlacement, networks m
 	if vm.Phase != PhaseReady && vm.Phase != PhaseCreating {
 		r.applyPhase(ctx, vm.ID, PhaseCreating, "")
 	}
-	if err := r.ensureVM(ctx, vm, networks); err != nil {
+	if err := r.ensureVM(ctx, vm, networks, hastDevicePaths); err != nil {
 		r.applyPhase(ctx, vm.ID, PhaseError, err.Error())
 		return err
 	}
@@ -322,13 +383,19 @@ func (r *Reconciler) teardownVM(ctx context.Context, vm VMPlacement) error {
 		}
 	}
 
-	exists, err := r.ZFS.DatasetExists(ctx, vm.ID)
-	if err != nil {
-		return fmt.Errorf("checking dataset: %w", err)
-	}
-	if exists {
-		if err := r.ZFS.DestroyDataset(ctx, vm.ID); err != nil {
-			return fmt.Errorf("destroying dataset: %w", err)
+	if vm.ReplicaNodeID != "" {
+		if err := r.reclaimHASTRole(ctx, vmHASTResourceName(vm.ID)); err != nil {
+			return fmt.Errorf("reclaiming HAST resource: %w", err)
+		}
+	} else {
+		exists, err := r.ZFS.DatasetExists(ctx, vm.ID)
+		if err != nil {
+			return fmt.Errorf("checking dataset: %w", err)
+		}
+		if exists {
+			if err := r.ZFS.DestroyDataset(ctx, vm.ID); err != nil {
+				return fmt.Errorf("destroying dataset: %w", err)
+			}
 		}
 	}
 
@@ -380,6 +447,14 @@ func (r *Reconciler) reclaimStaleVM(ctx context.Context, id string) error {
 		if err := r.ZFS.DestroyDataset(ctx, id); err != nil {
 			return fmt.Errorf("destroying stale dataset: %w", err)
 		}
+	}
+
+	// A reassigned VM that was HAST-replicated while owned here used a
+	// zvol (vmHASTResourceName), not the plain dataset above - check for
+	// that too, since PlanReclaim only gives an id, not whether it used
+	// to be replicated.
+	if err := r.reclaimHASTRole(ctx, vmHASTResourceName(id)); err != nil {
+		return fmt.Errorf("reclaiming stale HAST resource: %w", err)
 	}
 
 	if r.PF != nil {
@@ -442,17 +517,24 @@ func phaseFromString(p string) internalpb.VMPhase {
 	}
 }
 
-// ensureVM ensures vm's dataset exists, then - if Bhyve is configured -
-// that its disk image and bhyve VM exist too.
-func (r *Reconciler) ensureVM(ctx context.Context, vm VMPlacement, networks map[string]*internalpb.NetworkDefinition) error {
-	exists, err := r.ZFS.DatasetExists(ctx, vm.ID)
-	if err != nil {
-		return fmt.Errorf("checking dataset: %w", err)
-	}
-	if !exists {
-		if err := r.ZFS.CreateDataset(ctx, vm.ID); err != nil {
-			return fmt.Errorf("creating dataset: %w", err)
+// ensureVM ensures vm's disk exists - a plain dataset-backed file, or,
+// if ReplicaNodeID is set, a HAST-replicated device instead (see
+// hastDevicePaths/ADR-0025; no dataset is created in that case, there's
+// nothing useful for it to hold) - then, if Bhyve is configured, that
+// its bhyve VM exists too.
+func (r *Reconciler) ensureVM(ctx context.Context, vm VMPlacement, networks map[string]*internalpb.NetworkDefinition, hastDevicePaths map[string]string) error {
+	if vm.ReplicaNodeID == "" {
+		exists, err := r.ZFS.DatasetExists(ctx, vm.ID)
+		if err != nil {
+			return fmt.Errorf("checking dataset: %w", err)
 		}
+		if !exists {
+			if err := r.ZFS.CreateDataset(ctx, vm.ID); err != nil {
+				return fmt.Errorf("creating dataset: %w", err)
+			}
+		}
+	} else if r.HAST == nil {
+		return fmt.Errorf("VM names replica node %q but no HAST support is configured on this node", vm.ReplicaNodeID)
 	}
 
 	if r.Bhyve == nil {
@@ -476,14 +558,22 @@ func (r *Reconciler) ensureVM(ctx context.Context, vm VMPlacement, networks map[
 		return nil
 	}
 
-	mountpoint, err := r.ZFS.GetProperty(ctx, vm.ID, "mountpoint")
-	if err != nil {
-		return fmt.Errorf("getting dataset mountpoint: %w", err)
-	}
-
-	diskPath, err := r.ensureDiskImage(mountpoint)
-	if err != nil {
-		return fmt.Errorf("preparing disk image: %w", err)
+	var diskPath string
+	if vm.ReplicaNodeID != "" {
+		path, ok := hastDevicePaths[vmHASTResourceName(vm.ID)]
+		if !ok {
+			return fmt.Errorf("HAST device for replicated VM %q was not provisioned this tick", vm.ID)
+		}
+		diskPath = path
+	} else {
+		mountpoint, err := r.ZFS.GetProperty(ctx, vm.ID, "mountpoint")
+		if err != nil {
+			return fmt.Errorf("getting dataset mountpoint: %w", err)
+		}
+		diskPath, err = r.ensureDiskImage(mountpoint)
+		if err != nil {
+			return fmt.Errorf("preparing disk image: %w", err)
+		}
 	}
 
 	cpus := int(vm.Vcpus)
@@ -664,6 +754,17 @@ func (r *Reconciler) reconcileDHCP(ctx context.Context, planned []VMPlacement, n
 
 // ensureDiskImage creates a sparse disk image inside mountpoint if one
 // doesn't already exist, and returns its path.
+// diskSizeMB returns Reconciler.DiskSizeMB, defaulting to 10240
+// (10GiB) if unset - shared by ensureDiskImage (the plain, dataset-
+// backed path) and the HAST-replicated path's zvol sizing, so both
+// paths size a VM's disk identically regardless of which one it uses.
+func (r *Reconciler) diskSizeMB() uint64 {
+	if r.DiskSizeMB == 0 {
+		return 10240
+	}
+	return r.DiskSizeMB
+}
+
 func (r *Reconciler) ensureDiskImage(mountpoint string) (string, error) {
 	path := filepath.Join(mountpoint, diskImageName)
 	if _, err := os.Stat(path); err == nil {
@@ -672,10 +773,7 @@ func (r *Reconciler) ensureDiskImage(mountpoint string) (string, error) {
 		return "", err
 	}
 
-	sizeMB := r.DiskSizeMB
-	if sizeMB == 0 {
-		sizeMB = 10240
-	}
+	sizeMB := r.diskSizeMB()
 
 	f, err := os.Create(path)
 	if err != nil {

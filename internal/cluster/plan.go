@@ -55,6 +55,11 @@ type VMPlacement struct {
 	IPAddress     string
 	MACAddress    string
 	FirewallRules []FirewallRule
+
+	// ReplicaNodeID, if set, names a second node that HAST-replicates
+	// this VM's disk (ADR-0025) - data redundancy, not automatic
+	// failover. Caller-set, exactly like NodeID.
+	ReplicaNodeID string
 }
 
 // FirewallRule mirrors api/internalpb's FirewallRule, kept as a plain
@@ -112,6 +117,40 @@ func PlanReclaim(desired []VMPlacement, localNodeID string) []string {
 	var ids []string
 	for _, vm := range desired {
 		if vm.NodeID != localNodeID {
+			ids = append(ids, vm.ID)
+		}
+	}
+	sort.Strings(ids)
+	return ids
+}
+
+// PlanReplica returns the VMs this node should hold a HAST secondary
+// replica for - ReplicaNodeID names localNodeID, and the VM isn't
+// tombstoned (a deleting VM's replica is torn down instead, via
+// PlanReplicaReclaim below; ensuring it here would just create work
+// immediately undone). Sorted by ID for deterministic ordering, mirroring
+// Plan itself.
+func PlanReplica(desired []VMPlacement, localNodeID string) []VMPlacement {
+	var replicas []VMPlacement
+	for _, vm := range desired {
+		if vm.ReplicaNodeID == localNodeID && !vm.Deleting {
+			replicas = append(replicas, vm)
+		}
+	}
+	sort.Slice(replicas, func(i, j int) bool { return replicas[i].ID < replicas[j].ID })
+	return replicas
+}
+
+// PlanReplicaReclaim returns the IDs of every VM in desired that this
+// node should NOT currently hold a secondary replica for (not named as
+// ReplicaNodeID, or tombstoned) - candidates whose local secondary-role
+// HAST resource (if any exists, left over from before a reassignment or
+// deletion) should be torn down. Mirrors PlanReclaim's own reasoning
+// exactly, just against ReplicaNodeID instead of NodeID.
+func PlanReplicaReclaim(desired []VMPlacement, localNodeID string) []string {
+	var ids []string
+	for _, vm := range desired {
+		if vm.ReplicaNodeID != localNodeID || vm.Deleting {
 			ids = append(ids, vm.ID)
 		}
 	}

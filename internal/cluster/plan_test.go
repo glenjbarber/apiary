@@ -101,3 +101,95 @@ func TestPlanReclaim(t *testing.T) {
 		})
 	}
 }
+
+func TestPlanReplica(t *testing.T) {
+	cases := []struct {
+		name    string
+		desired []VMPlacement
+		local   string
+		want    []VMPlacement
+	}{
+		{
+			name:    "nothing desired",
+			desired: nil,
+			local:   "node-a",
+			want:    nil,
+		},
+		{
+			name:    "VM replicated to this node",
+			desired: []VMPlacement{{ID: "vm-1", NodeID: "node-b", ReplicaNodeID: "node-a"}},
+			local:   "node-a",
+			want:    []VMPlacement{{ID: "vm-1", NodeID: "node-b", ReplicaNodeID: "node-a"}},
+		},
+		{
+			name:    "VM replicated elsewhere is not a candidate",
+			desired: []VMPlacement{{ID: "vm-1", NodeID: "node-b", ReplicaNodeID: "node-c"}},
+			local:   "node-a",
+			want:    nil,
+		},
+		{
+			name:    "no replica set is not a candidate",
+			desired: []VMPlacement{{ID: "vm-1", NodeID: "node-b"}},
+			local:   "node-a",
+			want:    nil,
+		},
+		{
+			name:    "a deleting VM is not ensured as a replica - it's reclaimed instead",
+			desired: []VMPlacement{{ID: "vm-1", NodeID: "node-b", ReplicaNodeID: "node-a", Deleting: true}},
+			local:   "node-a",
+			want:    nil,
+		},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := PlanReplica(c.desired, c.local)
+			if !reflect.DeepEqual(got, c.want) {
+				t.Errorf("PlanReplica() = %+v, want %+v", got, c.want)
+			}
+		})
+	}
+}
+
+func TestPlanReplicaReclaim(t *testing.T) {
+	cases := []struct {
+		name    string
+		desired []VMPlacement
+		local   string
+		want    []string
+	}{
+		{
+			name:    "nothing desired",
+			desired: nil,
+			local:   "node-a",
+			want:    nil,
+		},
+		{
+			name:    "still replicated here is not a reclaim candidate",
+			desired: []VMPlacement{{ID: "vm-1", NodeID: "node-b", ReplicaNodeID: "node-a"}},
+			local:   "node-a",
+			want:    nil,
+		},
+		{
+			name:    "no longer replicated here is a reclaim candidate",
+			desired: []VMPlacement{{ID: "vm-1", NodeID: "node-b", ReplicaNodeID: "node-c"}},
+			local:   "node-a",
+			want:    []string{"vm-1"},
+		},
+		{
+			name:    "a deleting VM is a reclaim candidate even if still named",
+			desired: []VMPlacement{{ID: "vm-1", NodeID: "node-b", ReplicaNodeID: "node-a", Deleting: true}},
+			local:   "node-a",
+			want:    []string{"vm-1"},
+		},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := PlanReplicaReclaim(c.desired, c.local)
+			if !reflect.DeepEqual(got, c.want) {
+				t.Errorf("PlanReplicaReclaim() = %+v, want %+v", got, c.want)
+			}
+		})
+	}
+}

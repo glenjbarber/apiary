@@ -12,6 +12,7 @@ import (
 	internalpb "github.com/glenjbarber/apiary/api/internalpb"
 	"github.com/glenjbarber/apiary/internal/bhyve"
 	"github.com/glenjbarber/apiary/internal/dhcpd"
+	"github.com/glenjbarber/apiary/internal/hast"
 	"github.com/glenjbarber/apiary/internal/pf"
 )
 
@@ -25,8 +26,18 @@ type fakeRaftClient struct {
 	networksResp *internalpb.ListNetworksResponse
 	networksErr  error
 
+	statusResp *internalpb.StatusResponse
+	statusErr  error
+
 	applied  []*internalpb.Command
 	applyErr error
+}
+
+func (f *fakeRaftClient) Status(context.Context) (*internalpb.StatusResponse, error) {
+	if f.statusResp != nil || f.statusErr != nil {
+		return f.statusResp, f.statusErr
+	}
+	return &internalpb.StatusResponse{}, nil
 }
 
 func (f *fakeRaftClient) ListVMs(context.Context) (*internalpb.ListVMsResponse, error) {
@@ -113,6 +124,19 @@ func (f *fakeDatasetManager) DestroyDataset(_ context.Context, name string) erro
 	f.destroyed = append(f.destroyed, name)
 	delete(f.existing, name)
 	return nil
+}
+
+func (f *fakeDatasetManager) CreateZvol(_ context.Context, name string, _ uint64) error {
+	if f.createErr != nil {
+		return f.createErr
+	}
+	f.created = append(f.created, name)
+	f.existing[name] = true
+	return nil
+}
+
+func (f *fakeDatasetManager) FullPath(name string) (string, error) {
+	return "zroot/apiary/" + name, nil
 }
 
 func (f *fakeDatasetManager) GetProperty(_ context.Context, name, _ string) (string, error) {
@@ -927,6 +951,209 @@ func TestReconciler_RunOnce_ReclaimIsNoOpWhenNothingLocalExists(t *testing.T) {
 
 	if len(vms.destroyed) != 0 || len(zfs.destroyed) != 0 {
 		t.Errorf("destroyed bhyve=%v zfs=%v, want none", vms.destroyed, zfs.destroyed)
+	}
+}
+
+type fakeHASTManager struct {
+	writtenConfigs []([]hast.Resource)
+	created        []string
+	roleSet        map[string]hast.Role
+	restarts       int
+
+	// statusKnown tracks resources this fake considers "already
+	// created" (Status succeeds) - mirrors real hastctl requiring
+	// CreateResource before Status/SetRole succeed.
+	statusKnown map[string]bool
+
+	createErr  error
+	roleErr    error
+	restartErr error
+}
+
+func newFakeHASTManager() *fakeHASTManager {
+	return &fakeHASTManager{roleSet: map[string]hast.Role{}, statusKnown: map[string]bool{}}
+}
+
+func (f *fakeHASTManager) WriteConfig(resources []hast.Resource) error {
+	f.writtenConfigs = append(f.writtenConfigs, resources)
+	return nil
+}
+
+func (f *fakeHASTManager) CreateResource(_ context.Context, name string) error {
+	if f.createErr != nil {
+		return f.createErr
+	}
+	f.created = append(f.created, name)
+	f.statusKnown[name] = true
+	return nil
+}
+
+func (f *fakeHASTManager) SetRole(_ context.Context, name string, role hast.Role) error {
+	if f.roleErr != nil {
+		return f.roleErr
+	}
+	f.roleSet[name] = role
+	return nil
+}
+
+func (f *fakeHASTManager) Status(_ context.Context, name string) (*hast.Status, error) {
+	if !f.statusKnown[name] {
+		return nil, fmt.Errorf("fakeHASTManager: resource %q not created", name)
+	}
+	return &hast.Status{Role: string(f.roleSet[name])}, nil
+}
+
+func (f *fakeHASTManager) RestartService(context.Context) error {
+	if f.restartErr != nil {
+		return f.restartErr
+	}
+	f.restarts++
+	return nil
+}
+
+// statusResponseWithPeers builds a fake raft StatusResponse listing
+// localID/peerID with plausible raft-transport addresses - enough for
+// resolvePeerAddresses to succeed.
+func statusResponseWithPeers(localID, localAddr, peerID, peerAddr string) *internalpb.StatusResponse {
+	return &internalpb.StatusResponse{
+		Servers: []*internalpb.ServerInfo{
+			{Id: localID, Address: localAddr},
+			{Id: peerID, Address: peerAddr},
+		},
+	}
+}
+
+func TestReconciler_RunOnce_ProvisionsHASTPrimaryForReplicatedVM(t *testing.T) {
+	raft := &fakeRaftClient{
+		resp: &internalpb.ListVMsResponse{
+			Vms: []*internalpb.VMDefinition{{Id: "vm-1", NodeId: "node-a", ReplicaNodeId: "node-b"}},
+		},
+		statusResp: statusResponseWithPeers("node-a", "10.0.0.1:17600", "node-b", "10.0.0.2:17600"),
+	}
+	zfs := newFakeDatasetManager()
+	vms := newFakeVMManager()
+	h := newFakeHASTManager()
+
+	r := &Reconciler{Raft: raft, ZFS: zfs, Bhyve: vms, HAST: h, LocalNodeID: "node-a", BootROM: "/fw/UEFI.fd"}
+	if err := r.RunOnce(context.Background()); err != nil {
+		t.Fatalf("RunOnce() error: %v", err)
+	}
+
+	if len(zfs.created) != 1 || zfs.created[0] != "hast-vm-vm-1" {
+		t.Errorf("created zvols = %v, want [hast-vm-vm-1]", zfs.created)
+	}
+	if role := h.roleSet["vm-vm-1"]; role != hast.RolePrimary {
+		t.Errorf("role for vm-vm-1 = %q, want primary", role)
+	}
+	if len(h.writtenConfigs) == 0 {
+		t.Fatalf("WriteConfig was never called")
+	}
+	last := h.writtenConfigs[len(h.writtenConfigs)-1]
+	if len(last) != 1 || last[0].Name != "vm-vm-1" {
+		t.Fatalf("written resources = %+v, want one named vm-vm-1", last)
+	}
+	if h.restarts != 1 {
+		t.Errorf("restarts = %d, want 1", h.restarts)
+	}
+
+	cfg, ok := vms.lastCfg["vm-1"]
+	if !ok {
+		t.Fatalf("bhyve CreateVM was never called for vm-1")
+	}
+	if cfg.DiskPath != "/dev/hast/vm-vm-1" {
+		t.Errorf("bhyve DiskPath = %q, want /dev/hast/vm-vm-1", cfg.DiskPath)
+	}
+
+	// A replicated VM gets no plain per-VM dataset - the HAST device is
+	// its whole disk, there's nothing useful for a dataset to hold.
+	if zfs.existing["vm-1"] {
+		t.Errorf("plain dataset vm-1 was created for a replicated VM, want none")
+	}
+}
+
+func TestReconciler_RunOnce_ProvisionsHASTSecondaryForReplicaAssignment(t *testing.T) {
+	raft := &fakeRaftClient{
+		resp: &internalpb.ListVMsResponse{
+			Vms: []*internalpb.VMDefinition{{Id: "vm-1", NodeId: "node-b", ReplicaNodeId: "node-a"}},
+		},
+		statusResp: statusResponseWithPeers("node-a", "10.0.0.1:17600", "node-b", "10.0.0.2:17600"),
+	}
+	zfs := newFakeDatasetManager()
+	vms := newFakeVMManager()
+	h := newFakeHASTManager()
+
+	// node-a is only named as the *replica*, never the owner - it must
+	// never create a bhyve VM, only replicate.
+	r := &Reconciler{Raft: raft, ZFS: zfs, Bhyve: vms, HAST: h, LocalNodeID: "node-a", BootROM: "/fw/UEFI.fd"}
+	if err := r.RunOnce(context.Background()); err != nil {
+		t.Fatalf("RunOnce() error: %v", err)
+	}
+
+	if role := h.roleSet["vm-vm-1"]; role != hast.RoleSecondary {
+		t.Errorf("role for vm-vm-1 = %q, want secondary", role)
+	}
+	if len(vms.created) != 0 {
+		t.Errorf("bhyve VMs created = %v, want none - a replica never runs the VM", vms.created)
+	}
+	if len(zfs.created) != 1 || zfs.created[0] != "hast-vm-vm-1" {
+		t.Errorf("created zvols = %v, want [hast-vm-vm-1]", zfs.created)
+	}
+}
+
+func TestReconciler_RunOnce_ReclaimsHASTSecondaryNoLongerAssigned(t *testing.T) {
+	raft := &fakeRaftClient{
+		resp: &internalpb.ListVMsResponse{
+			// vm-1 is no longer replicated to node-a at all.
+			Vms: []*internalpb.VMDefinition{{Id: "vm-1", NodeId: "node-b"}},
+		},
+	}
+	zfs := newFakeDatasetManager()
+	zfs.existing["hast-vm-vm-1"] = true // leftover from before reassignment
+
+	r := &Reconciler{Raft: raft, ZFS: zfs, LocalNodeID: "node-a"}
+	if err := r.RunOnce(context.Background()); err != nil {
+		t.Fatalf("RunOnce() error: %v", err)
+	}
+
+	if len(zfs.destroyed) != 1 || zfs.destroyed[0] != "hast-vm-vm-1" {
+		t.Errorf("destroyed = %v, want [hast-vm-vm-1]", zfs.destroyed)
+	}
+}
+
+func TestReconciler_RunOnce_DeletingReplicatedVMReclaimsHASTNotDataset(t *testing.T) {
+	raft := &fakeRaftClient{
+		resp: &internalpb.ListVMsResponse{
+			Vms: []*internalpb.VMDefinition{{Id: "vm-1", NodeId: "node-a", ReplicaNodeId: "node-b", DesiredState: internalpb.VMState_VM_STATE_DELETING}},
+		},
+	}
+	zfs := newFakeDatasetManager()
+	zfs.existing["hast-vm-vm-1"] = true
+
+	r := &Reconciler{Raft: raft, ZFS: zfs, LocalNodeID: "node-a"}
+	if err := r.RunOnce(context.Background()); err != nil {
+		t.Fatalf("RunOnce() error: %v", err)
+	}
+
+	if len(zfs.destroyed) != 1 || zfs.destroyed[0] != "hast-vm-vm-1" {
+		t.Errorf("destroyed = %v, want [hast-vm-vm-1]", zfs.destroyed)
+	}
+	if got := raft.purgedIDs(); len(got) != 1 || got[0] != "vm-1" {
+		t.Errorf("purgedIDs = %v, want [vm-1]", got)
+	}
+}
+
+func TestReconciler_RunOnce_ReplicatedVMWithoutHASTConfiguredIsError(t *testing.T) {
+	raft := &fakeRaftClient{
+		resp: &internalpb.ListVMsResponse{
+			Vms: []*internalpb.VMDefinition{{Id: "vm-1", NodeId: "node-a", ReplicaNodeId: "node-b"}},
+		},
+	}
+	zfs := newFakeDatasetManager()
+
+	// HAST is deliberately left nil.
+	r := &Reconciler{Raft: raft, ZFS: zfs, LocalNodeID: "node-a"}
+	if err := r.RunOnce(context.Background()); err == nil {
+		t.Fatalf("RunOnce() error = nil, want a clear error since HAST isn't configured")
 	}
 }
 
