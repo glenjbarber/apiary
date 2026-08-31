@@ -62,6 +62,84 @@ type VMPlacement struct {
 	ReplicaNodeID string
 }
 
+// JailPlacement mirrors VMPlacement, deliberately minimal like
+// JailDefinition itself (see api/internalpb/state.proto) - no vcpus/
+// memory/ISO/network/firewall fields, since internal/jail's v1 scope
+// is flat ip4=inherit networking with no dedicated resource limits.
+type JailPlacement struct {
+	ID       string
+	Name     string
+	Hostname string
+	NodeID   string
+
+	// Deleting is true once the jail has been soft-deleted (see
+	// JAIL_STATE_DELETING) - ensureJail tears its resources down
+	// instead of provisioning them.
+	Deleting bool
+
+	// Phase is the last phase this reconciler itself recorded for this
+	// jail, mirroring VMPlacement.Phase.
+	Phase string
+
+	// ReplicaNodeID, if set, names a second node that HAST-replicates
+	// this jail's root filesystem (ADR-0026) - the same data-redundancy-
+	// not-failover semantics as VMPlacement.ReplicaNodeID.
+	ReplicaNodeID string
+}
+
+// PlanJail mirrors Plan exactly, for jails instead of VMs.
+func PlanJail(desired []JailPlacement, localNodeID string) []JailPlacement {
+	var assigned []JailPlacement
+	for _, jail := range desired {
+		if jail.NodeID == localNodeID {
+			assigned = append(assigned, jail)
+		}
+	}
+	sort.Slice(assigned, func(i, j int) bool { return assigned[i].ID < assigned[j].ID })
+	return assigned
+}
+
+// PlanJailReclaim mirrors PlanReclaim exactly, for jails instead of VMs.
+func PlanJailReclaim(desired []JailPlacement, localNodeID string) []string {
+	var ids []string
+	for _, jail := range desired {
+		if jail.NodeID != localNodeID {
+			ids = append(ids, jail.ID)
+		}
+	}
+	sort.Strings(ids)
+	return ids
+}
+
+// PlanJailReplica mirrors PlanReplica exactly, for jails instead of VMs.
+func PlanJailReplica(desired []JailPlacement, localNodeID string) []JailPlacement {
+	var replicas []JailPlacement
+	for _, jail := range desired {
+		if jail.ReplicaNodeID == localNodeID && !jail.Deleting {
+			replicas = append(replicas, jail)
+		}
+	}
+	sort.Slice(replicas, func(i, j int) bool { return replicas[i].ID < replicas[j].ID })
+	return replicas
+}
+
+// PlanJailReplicaReclaim mirrors PlanReplicaReclaim exactly, for jails
+// instead of VMs - including the same owner-skip guard (a node is
+// never simultaneously primary and secondary for the same jail).
+func PlanJailReplicaReclaim(desired []JailPlacement, localNodeID string) []string {
+	var ids []string
+	for _, jail := range desired {
+		if jail.NodeID == localNodeID {
+			continue
+		}
+		if jail.ReplicaNodeID != localNodeID || jail.Deleting {
+			ids = append(ids, jail.ID)
+		}
+	}
+	sort.Strings(ids)
+	return ids
+}
+
 // FirewallRule mirrors api/internalpb's FirewallRule, kept as a plain
 // Go type for the same reason as the rest of VMPlacement's fields.
 type FirewallRule struct {

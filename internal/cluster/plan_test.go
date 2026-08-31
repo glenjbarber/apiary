@@ -206,3 +206,93 @@ func TestPlanReplicaReclaim(t *testing.T) {
 		})
 	}
 }
+
+func TestPlanJail(t *testing.T) {
+	desired := []JailPlacement{
+		{ID: "jail-b", NodeID: "node-a"},
+		{ID: "jail-a", NodeID: "node-a"},
+		{ID: "jail-c", NodeID: "node-b"},
+	}
+
+	got := PlanJail(desired, "node-a")
+
+	if len(got) != 2 || got[0].ID != "jail-a" || got[1].ID != "jail-b" {
+		t.Errorf("PlanJail() = %+v, want [jail-a, jail-b] sorted", got)
+	}
+}
+
+func TestPlanJailReclaim(t *testing.T) {
+	desired := []JailPlacement{
+		{ID: "jail-a", NodeID: "node-a"},
+		{ID: "jail-b", NodeID: "node-b"},
+	}
+
+	got := PlanJailReclaim(desired, "node-a")
+
+	if len(got) != 1 || got[0] != "jail-b" {
+		t.Errorf("PlanJailReclaim() = %+v, want [jail-b]", got)
+	}
+}
+
+func TestPlanJailReplica(t *testing.T) {
+	desired := []JailPlacement{
+		{ID: "jail-1", NodeID: "node-b", ReplicaNodeID: "node-a"},
+		{ID: "jail-2", NodeID: "node-b", ReplicaNodeID: "node-a", Deleting: true},
+		{ID: "jail-3", NodeID: "node-b", ReplicaNodeID: "node-c"},
+	}
+
+	got := PlanJailReplica(desired, "node-a")
+
+	if len(got) != 1 || got[0].ID != "jail-1" {
+		t.Errorf("PlanJailReplica() = %+v, want [jail-1]", got)
+	}
+}
+
+func TestPlanJailReplicaReclaim(t *testing.T) {
+	cases := []struct {
+		name    string
+		desired []JailPlacement
+		local   string
+		want    []string
+	}{
+		{
+			name:    "nothing desired",
+			desired: nil,
+			local:   "node-a",
+			want:    nil,
+		},
+		{
+			name:    "still replicated here is not a reclaim candidate",
+			desired: []JailPlacement{{ID: "jail-1", NodeID: "node-b", ReplicaNodeID: "node-a"}},
+			local:   "node-a",
+			want:    nil,
+		},
+		{
+			name:    "no longer replicated here is a reclaim candidate",
+			desired: []JailPlacement{{ID: "jail-1", NodeID: "node-b", ReplicaNodeID: "node-c"}},
+			local:   "node-a",
+			want:    []string{"jail-1"},
+		},
+		{
+			name:    "a deleting jail is a reclaim candidate even if still named",
+			desired: []JailPlacement{{ID: "jail-1", NodeID: "node-b", ReplicaNodeID: "node-a", Deleting: true}},
+			local:   "node-a",
+			want:    []string{"jail-1"},
+		},
+		{
+			name:    "a jail this node owns as primary is never a reclaim candidate",
+			desired: []JailPlacement{{ID: "jail-1", NodeID: "node-a", ReplicaNodeID: "node-b"}},
+			local:   "node-a",
+			want:    nil,
+		},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := PlanJailReplicaReclaim(c.desired, c.local)
+			if !reflect.DeepEqual(got, c.want) {
+				t.Errorf("PlanJailReplicaReclaim() = %+v, want %+v", got, c.want)
+			}
+		})
+	}
+}

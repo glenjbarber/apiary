@@ -67,6 +67,9 @@ type raftClient interface {
 	// ListNetworksLocal is only called when VLAN is set - see ensureNetwork.
 	ListNetworksLocal(ctx context.Context) (*internalpb.ListNetworksResponse, error)
 
+	// ListJailsLocal is only called when Jail is set - see RunOnce.
+	ListJailsLocal(ctx context.Context) (*internalpb.ListJailsResponse, error)
+
 	// Status is only called when HAST is set - see
 	// Reconciler.resolvePeerAddresses, which reuses raft's own cluster
 	// membership addresses as hast.conf's Node.Remote.
@@ -199,6 +202,24 @@ type Reconciler struct {
 	// lastHASTConfig mirrors lastDHCPConfig exactly, for hast.conf -
 	// see reconcileHASTRoles.
 	lastHASTConfig string
+
+	// Jail is optional (nil-able, same opt-in pattern as Bhyve above):
+	// nil disables jail provisioning entirely on this node. A node with
+	// Jail set but no HAST support can still run non-replicated jails -
+	// only a jail naming ReplicaNodeID requires HAST/Mount too.
+	Jail jailManager
+
+	// Mount formats/mounts a HAST-replicated jail's root filesystem -
+	// only ever consulted for a jail naming ReplicaNodeID (see
+	// ensureJail). nil disables replicated-jail support even if Jail
+	// and HAST are both set, the same opt-in pattern as everything else.
+	Mount mountManager
+
+	// JailBase is the parent directory replicated jails are mounted
+	// under (defaults to "/apiary-jails" if empty - see jailBase()). A
+	// non-replicated jail's root is its own ZFS dataset's mountpoint
+	// instead, so this only matters when Mount is actually used.
+	JailBase string
 }
 
 // RunOnce fetches the current VM list and, for each VM assigned to
@@ -260,16 +281,47 @@ func (r *Reconciler) RunOnce(ctx context.Context) error {
 		}
 	}
 
+	// Jails are only fetched when Jail is configured on this node - a
+	// node with no jail support can't act on them anyway (see
+	// ensureJail's own clear error for a jail assigned here without it).
+	var desiredJails []JailPlacement
+	if r.Jail != nil {
+		jailsResp, err := r.Raft.ListJailsLocal(ctx)
+		if err != nil {
+			return fmt.Errorf("cluster: listing jails: %w", err)
+		}
+		if jailsResp.GetError() != "" {
+			return fmt.Errorf("cluster: listing jails: %s", jailsResp.GetError())
+		}
+		for _, j := range jailsResp.GetJails() {
+			desiredJails = append(desiredJails, JailPlacement{
+				ID:            j.GetId(),
+				Name:          j.GetName(),
+				Hostname:      j.GetHostname(),
+				NodeID:        j.GetNodeId(),
+				Deleting:      j.GetDesiredState() == internalpb.JailState_JAIL_STATE_DELETING,
+				Phase:         jailPhaseToString(j.GetPhase()),
+				ReplicaNodeID: j.GetReplicaNodeId(),
+			})
+		}
+	}
+
 	planned := Plan(desired, r.LocalNodeID)
 	replicas := PlanReplica(desired, r.LocalNodeID)
+	plannedJails := PlanJail(desiredJails, r.LocalNodeID)
+	jailReplicas := PlanJailReplica(desiredJails, r.LocalNodeID)
 
 	var firstErr error
 
-	// HAST provisioning happens before ensureVM below, since a
-	// primary-role VM's disk path comes from here (see
+	// HAST provisioning happens before ensureVM/ensureJail below, since
+	// a primary-role resource's disk/device path comes from here (see
 	// reconcileHASTRoles). Skipped entirely if HAST isn't configured on
-	// this node - a VM naming ReplicaNodeID in that case surfaces its
-	// own clear error from ensureVM instead.
+	// this node - a VM/jail naming ReplicaNodeID in that case surfaces
+	// its own clear error from ensureVM/ensureJail instead. VM and jail
+	// roles are combined into ONE call: hast.conf holds every resource
+	// this node participates in at once, so building it from two
+	// separate calls would have the second overwrite (and restart
+	// hastd against) whatever the first just wrote.
 	var hastDevicePaths map[string]string
 	if r.HAST != nil {
 		var roles []hastRole
@@ -286,6 +338,14 @@ func (r *Reconciler) RunOnce(ctx context.Context) error {
 		for _, vm := range replicas {
 			roles = append(roles, hastRole{resourceName: vmHASTResourceName(vm.ID), peerNodeID: vm.NodeID, sizeMB: r.diskSizeMB(), isPrimary: false})
 		}
+		for _, j := range plannedJails {
+			if j.ReplicaNodeID != "" && !j.Deleting {
+				roles = append(roles, hastRole{resourceName: jailHASTResourceName(j.ID), peerNodeID: j.ReplicaNodeID, sizeMB: r.diskSizeMB(), isPrimary: true})
+			}
+		}
+		for _, j := range jailReplicas {
+			roles = append(roles, hastRole{resourceName: jailHASTResourceName(j.ID), peerNodeID: j.NodeID, sizeMB: r.diskSizeMB(), isPrimary: false})
+		}
 		paths, err := r.reconcileHASTRoles(ctx, roles)
 		hastDevicePaths = paths
 		if err != nil && firstErr == nil {
@@ -296,6 +356,12 @@ func (r *Reconciler) RunOnce(ctx context.Context) error {
 	for _, vm := range planned {
 		if err := r.reconcileVM(ctx, vm, networks, hastDevicePaths); err != nil && firstErr == nil {
 			firstErr = fmt.Errorf("cluster: reconciling VM %s: %w", vm.ID, err)
+		}
+	}
+
+	for _, j := range plannedJails {
+		if err := r.reconcileJail(ctx, j, hastDevicePaths); err != nil && firstErr == nil {
+			firstErr = fmt.Errorf("cluster: reconciling jail %s: %w", j.ID, err)
 		}
 	}
 
@@ -331,6 +397,25 @@ func (r *Reconciler) RunOnce(ctx context.Context) error {
 	for _, id := range PlanReplicaReclaim(desired, r.LocalNodeID) {
 		if err := r.reclaimHASTRole(ctx, vmHASTResourceName(id)); err != nil && firstErr == nil {
 			firstErr = fmt.Errorf("cluster: reclaiming stale HAST replica %s: %w", id, err)
+		}
+	}
+
+	// Jail reclaim passes mirror the VM ones exactly, against
+	// desiredJails/plannedJails/jailReplicas instead.
+	if r.Jail != nil {
+		jailReplicaIDs := make(map[string]bool, len(jailReplicas))
+		for _, j := range jailReplicas {
+			jailReplicaIDs[j.ID] = true
+		}
+		for _, id := range PlanJailReclaim(desiredJails, r.LocalNodeID) {
+			if err := r.reclaimStaleJail(ctx, id, jailReplicaIDs[id]); err != nil && firstErr == nil {
+				firstErr = fmt.Errorf("cluster: reclaiming stale jail %s: %w", id, err)
+			}
+		}
+		for _, id := range PlanJailReplicaReclaim(desiredJails, r.LocalNodeID) {
+			if err := r.reclaimHASTRole(ctx, jailHASTResourceName(id)); err != nil && firstErr == nil {
+				firstErr = fmt.Errorf("cluster: reclaiming stale jail HAST replica %s: %w", id, err)
+			}
 		}
 	}
 

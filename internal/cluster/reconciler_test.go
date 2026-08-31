@@ -26,6 +26,9 @@ type fakeRaftClient struct {
 	networksResp *internalpb.ListNetworksResponse
 	networksErr  error
 
+	jailsResp *internalpb.ListJailsResponse
+	jailsErr  error
+
 	statusResp *internalpb.StatusResponse
 	statusErr  error
 
@@ -49,6 +52,13 @@ func (f *fakeRaftClient) ListNetworksLocal(context.Context) (*internalpb.ListNet
 		return f.networksResp, f.networksErr
 	}
 	return &internalpb.ListNetworksResponse{}, nil
+}
+
+func (f *fakeRaftClient) ListJailsLocal(context.Context) (*internalpb.ListJailsResponse, error) {
+	if f.jailsResp != nil || f.jailsErr != nil {
+		return f.jailsResp, f.jailsErr
+	}
+	return &internalpb.ListJailsResponse{}, nil
 }
 
 func (f *fakeRaftClient) Apply(_ context.Context, payload []byte, _ time.Duration) (*internalpb.ApplyResponse, error) {
@@ -79,6 +89,17 @@ func (f *fakeRaftClient) purgedIDs() []string {
 	var ids []string
 	for _, cmd := range f.applied {
 		if p := cmd.GetPurgeVm(); p != nil {
+			ids = append(ids, p.GetId())
+		}
+	}
+	return ids
+}
+
+// purgedJailIDs mirrors purgedIDs, for PurgeJail commands instead.
+func (f *fakeRaftClient) purgedJailIDs() []string {
+	var ids []string
+	for _, cmd := range f.applied {
+		if p := cmd.GetPurgeJail(); p != nil {
 			ids = append(ids, p.GetId())
 		}
 	}
