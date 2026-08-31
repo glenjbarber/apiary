@@ -69,9 +69,12 @@ each design decision, in order.
   review, and independently confirmed the fix works. See
   [ADR-0008](docs/adr/0008-hast-config-and-lifecycle.md) for the full
   trail.
-- **`internal/restshim`** — a REST/JSON translation of the external gRPC
-  API, for non-browser clients. Built and tested, not yet wired into its
-  own running binary.
+- **`restshimd`** — a REST/JSON translation of the external gRPC API
+  (`internal/restshim`), for non-browser clients: `curl`, CI, or (once
+  built) a Terraform provider. Runs as its own binary, dialing
+  `managerd` the same way `frontend` does. Each caller's own
+  `Authorization` header is forwarded straight through to `managerd`'s
+  API-key check, rather than the binary holding one shared credential.
 - **Session-based login** — an optional gate on the web UI
   (`APIARY_UI_USER`/`APIARY_UI_PASSWORD`, off by default): a real HTML
   login form, an in-memory session cookie (24-hour TTL, `HttpOnly` +
@@ -94,7 +97,9 @@ each design decision, in order.
   creation. Enabling it is a one-way door: revoking every key locks the
   cluster down rather than reopening it, with no way back short of
   restoring an older raft snapshot. See
-  [ADR-0023](docs/adr/0023-api-key-authentication.md).
+  [ADR-0023](docs/adr/0023-api-key-authentication.md) and
+  [ADR-0024](docs/adr/0024-restshimd-binary.md) for `restshimd`'s own
+  per-request auth forwarding.
 
 **Not yet implemented:**
 
@@ -116,13 +121,13 @@ each design decision, in order.
 - Authentication: the web UI has its own optional shared-password login
   gate, and `managerd`'s external API has its own separate optional
   API-key gate (both off by default, see above); `raftd`'s internal
-  socket and `restshim` have none, and there are no user accounts or
-  roles anywhere (one flat set of API keys, no scoping)
+  socket has none, and there are no user accounts or roles anywhere
+  (one flat set of API keys, no scoping)
 - **Tabled for now** (evaluated, deliberately deferred):
-  - **Terraform support** — `managerd` now has real API-key auth, but
-    still needs a small custom provider against `internal/restshim`'s
-    API, plus wiring a caller's key through `restshim` (itself still not
-    running as its own binary)
+  - **Terraform support** — the infrastructure now exists (`managerd`'s
+    API-key auth, `restshimd`'s own binary forwarding each caller's
+    key), what's left is the provider itself: translating Terraform's
+    plan/apply lifecycle to `restshim`'s create/read/update/delete calls
   - **Kubernetes support** — not an Apiary gap specifically; no one runs
     `kubelet` natively on FreeBSD (it assumes Linux cgroups/overlayfs).
     The viable path is Linux VMs under bhyve running normal Kubernetes
