@@ -31,6 +31,9 @@ const (
 	RaftInternal_ListNetworksLocal_FullMethodName  = "/apiary.internal.v1.RaftInternal/ListNetworksLocal"
 	RaftInternal_ValidateAPIKeyHash_FullMethodName = "/apiary.internal.v1.RaftInternal/ValidateAPIKeyHash"
 	RaftInternal_ListAPIKeys_FullMethodName        = "/apiary.internal.v1.RaftInternal/ListAPIKeys"
+	RaftInternal_GetJail_FullMethodName            = "/apiary.internal.v1.RaftInternal/GetJail"
+	RaftInternal_ListJails_FullMethodName          = "/apiary.internal.v1.RaftInternal/ListJails"
+	RaftInternal_ListJailsLocal_FullMethodName     = "/apiary.internal.v1.RaftInternal/ListJailsLocal"
 )
 
 // RaftInternalClient is the client API for RaftInternal service.
@@ -108,6 +111,15 @@ type RaftInternalClient interface {
 	// used only for the admin-facing key list - never for per-request
 	// authentication, which goes through ValidateAPIKeyHash instead.
 	ListAPIKeys(ctx context.Context, in *ListAPIKeysRequest, opts ...grpc.CallOption) (*ListAPIKeysResponse, error)
+	// GetJail/ListJails mirror GetNetwork/ListNetworks exactly, for
+	// jail orchestration (ADR-0026's second half).
+	GetJail(ctx context.Context, in *GetJailRequest, opts ...grpc.CallOption) (*GetJailResponse, error)
+	ListJails(ctx context.Context, in *ListJailsRequest, opts ...grpc.CallOption) (*ListJailsResponse, error)
+	// ListJailsLocal mirrors ListVMsLocal/ListNetworksLocal above -
+	// internal/cluster's Reconciler needs to read jail state on every
+	// node, leader or not, for the exact same reason it needs
+	// ListVMsLocal/ListNetworksLocal.
+	ListJailsLocal(ctx context.Context, in *ListJailsRequest, opts ...grpc.CallOption) (*ListJailsResponse, error)
 }
 
 type raftInternalClient struct {
@@ -238,6 +250,36 @@ func (c *raftInternalClient) ListAPIKeys(ctx context.Context, in *ListAPIKeysReq
 	return out, nil
 }
 
+func (c *raftInternalClient) GetJail(ctx context.Context, in *GetJailRequest, opts ...grpc.CallOption) (*GetJailResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetJailResponse)
+	err := c.cc.Invoke(ctx, RaftInternal_GetJail_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *raftInternalClient) ListJails(ctx context.Context, in *ListJailsRequest, opts ...grpc.CallOption) (*ListJailsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListJailsResponse)
+	err := c.cc.Invoke(ctx, RaftInternal_ListJails_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *raftInternalClient) ListJailsLocal(ctx context.Context, in *ListJailsRequest, opts ...grpc.CallOption) (*ListJailsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListJailsResponse)
+	err := c.cc.Invoke(ctx, RaftInternal_ListJailsLocal_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // RaftInternalServer is the server API for RaftInternal service.
 // All implementations must embed UnimplementedRaftInternalServer
 // for forward compatibility.
@@ -313,6 +355,15 @@ type RaftInternalServer interface {
 	// used only for the admin-facing key list - never for per-request
 	// authentication, which goes through ValidateAPIKeyHash instead.
 	ListAPIKeys(context.Context, *ListAPIKeysRequest) (*ListAPIKeysResponse, error)
+	// GetJail/ListJails mirror GetNetwork/ListNetworks exactly, for
+	// jail orchestration (ADR-0026's second half).
+	GetJail(context.Context, *GetJailRequest) (*GetJailResponse, error)
+	ListJails(context.Context, *ListJailsRequest) (*ListJailsResponse, error)
+	// ListJailsLocal mirrors ListVMsLocal/ListNetworksLocal above -
+	// internal/cluster's Reconciler needs to read jail state on every
+	// node, leader or not, for the exact same reason it needs
+	// ListVMsLocal/ListNetworksLocal.
+	ListJailsLocal(context.Context, *ListJailsRequest) (*ListJailsResponse, error)
 	mustEmbedUnimplementedRaftInternalServer()
 }
 
@@ -358,6 +409,15 @@ func (UnimplementedRaftInternalServer) ValidateAPIKeyHash(context.Context, *Vali
 }
 func (UnimplementedRaftInternalServer) ListAPIKeys(context.Context, *ListAPIKeysRequest) (*ListAPIKeysResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ListAPIKeys not implemented")
+}
+func (UnimplementedRaftInternalServer) GetJail(context.Context, *GetJailRequest) (*GetJailResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetJail not implemented")
+}
+func (UnimplementedRaftInternalServer) ListJails(context.Context, *ListJailsRequest) (*ListJailsResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ListJails not implemented")
+}
+func (UnimplementedRaftInternalServer) ListJailsLocal(context.Context, *ListJailsRequest) (*ListJailsResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ListJailsLocal not implemented")
 }
 func (UnimplementedRaftInternalServer) mustEmbedUnimplementedRaftInternalServer() {}
 func (UnimplementedRaftInternalServer) testEmbeddedByValue()                      {}
@@ -596,6 +656,60 @@ func _RaftInternal_ListAPIKeys_Handler(srv interface{}, ctx context.Context, dec
 	return interceptor(ctx, in, info, handler)
 }
 
+func _RaftInternal_GetJail_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetJailRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(RaftInternalServer).GetJail(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: RaftInternal_GetJail_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(RaftInternalServer).GetJail(ctx, req.(*GetJailRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _RaftInternal_ListJails_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListJailsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(RaftInternalServer).ListJails(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: RaftInternal_ListJails_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(RaftInternalServer).ListJails(ctx, req.(*ListJailsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _RaftInternal_ListJailsLocal_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListJailsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(RaftInternalServer).ListJailsLocal(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: RaftInternal_ListJailsLocal_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(RaftInternalServer).ListJailsLocal(ctx, req.(*ListJailsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // RaftInternal_ServiceDesc is the grpc.ServiceDesc for RaftInternal service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -650,6 +764,18 @@ var RaftInternal_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ListAPIKeys",
 			Handler:    _RaftInternal_ListAPIKeys_Handler,
+		},
+		{
+			MethodName: "GetJail",
+			Handler:    _RaftInternal_GetJail_Handler,
+		},
+		{
+			MethodName: "ListJails",
+			Handler:    _RaftInternal_ListJails_Handler,
+		},
+		{
+			MethodName: "ListJailsLocal",
+			Handler:    _RaftInternal_ListJailsLocal_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

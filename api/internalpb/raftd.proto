@@ -86,6 +86,17 @@ service RaftInternal {
   // used only for the admin-facing key list - never for per-request
   // authentication, which goes through ValidateAPIKeyHash instead.
   rpc ListAPIKeys(ListAPIKeysRequest) returns (ListAPIKeysResponse);
+
+  // GetJail/ListJails mirror GetNetwork/ListNetworks exactly, for
+  // jail orchestration (ADR-0026's second half).
+  rpc GetJail(GetJailRequest) returns (GetJailResponse);
+  rpc ListJails(ListJailsRequest) returns (ListJailsResponse);
+
+  // ListJailsLocal mirrors ListVMsLocal/ListNetworksLocal above -
+  // internal/cluster's Reconciler needs to read jail state on every
+  // node, leader or not, for the exact same reason it needs
+  // ListVMsLocal/ListNetworksLocal.
+  rpc ListJailsLocal(ListJailsRequest) returns (ListJailsResponse);
 }
 
 message ApplyRequest {
@@ -203,6 +214,25 @@ message ListNetworksRequest {}
 
 message ListNetworksResponse {
   repeated NetworkDefinition networks = 1;
+  string error = 2;
+  string leader_hint = 3;
+}
+
+message GetJailRequest {
+  string id = 1;
+}
+
+message GetJailResponse {
+  JailDefinition jail = 1;
+  bool found = 2;
+  string error = 3;
+  string leader_hint = 4;
+}
+
+message ListJailsRequest {}
+
+message ListJailsResponse {
+  repeated JailDefinition jails = 1;
   string error = 2;
   string leader_hint = 3;
 }

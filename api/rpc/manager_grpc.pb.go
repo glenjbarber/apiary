@@ -37,6 +37,11 @@ const (
 	ManagerService_CreateAPIKey_FullMethodName  = "/apiary.rpc.v1.ManagerService/CreateAPIKey"
 	ManagerService_ListAPIKeys_FullMethodName   = "/apiary.rpc.v1.ManagerService/ListAPIKeys"
 	ManagerService_RevokeAPIKey_FullMethodName  = "/apiary.rpc.v1.ManagerService/RevokeAPIKey"
+	ManagerService_CreateJail_FullMethodName    = "/apiary.rpc.v1.ManagerService/CreateJail"
+	ManagerService_UpdateJail_FullMethodName    = "/apiary.rpc.v1.ManagerService/UpdateJail"
+	ManagerService_DeleteJail_FullMethodName    = "/apiary.rpc.v1.ManagerService/DeleteJail"
+	ManagerService_GetJail_FullMethodName       = "/apiary.rpc.v1.ManagerService/GetJail"
+	ManagerService_ListJails_FullMethodName     = "/apiary.rpc.v1.ManagerService/ListJails"
 )
 
 // ManagerServiceClient is the client API for ManagerService service.
@@ -108,6 +113,15 @@ type ManagerServiceClient interface {
 	CreateAPIKey(ctx context.Context, in *CreateAPIKeyRequest, opts ...grpc.CallOption) (*CreateAPIKeyResponse, error)
 	ListAPIKeys(ctx context.Context, in *ListAPIKeysRequest, opts ...grpc.CallOption) (*ListAPIKeysResponse, error)
 	RevokeAPIKey(ctx context.Context, in *RevokeAPIKeyRequest, opts ...grpc.CallOption) (*RevokeAPIKeyResponse, error)
+	// CreateJail/UpdateJail/DeleteJail/GetJail/ListJails manage
+	// JailDefinitions - see ADR-0026's jail-orchestration half. They
+	// mirror the VM RPCs above exactly, including GetJail/ListJails'
+	// same leader-only read requirement.
+	CreateJail(ctx context.Context, in *CreateJailRequest, opts ...grpc.CallOption) (*CreateJailResponse, error)
+	UpdateJail(ctx context.Context, in *UpdateJailRequest, opts ...grpc.CallOption) (*UpdateJailResponse, error)
+	DeleteJail(ctx context.Context, in *DeleteJailRequest, opts ...grpc.CallOption) (*DeleteJailResponse, error)
+	GetJail(ctx context.Context, in *GetJailRequest, opts ...grpc.CallOption) (*GetJailResponse, error)
+	ListJails(ctx context.Context, in *ListJailsRequest, opts ...grpc.CallOption) (*ListJailsResponse, error)
 }
 
 type managerServiceClient struct {
@@ -301,6 +315,56 @@ func (c *managerServiceClient) RevokeAPIKey(ctx context.Context, in *RevokeAPIKe
 	return out, nil
 }
 
+func (c *managerServiceClient) CreateJail(ctx context.Context, in *CreateJailRequest, opts ...grpc.CallOption) (*CreateJailResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(CreateJailResponse)
+	err := c.cc.Invoke(ctx, ManagerService_CreateJail_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *managerServiceClient) UpdateJail(ctx context.Context, in *UpdateJailRequest, opts ...grpc.CallOption) (*UpdateJailResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(UpdateJailResponse)
+	err := c.cc.Invoke(ctx, ManagerService_UpdateJail_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *managerServiceClient) DeleteJail(ctx context.Context, in *DeleteJailRequest, opts ...grpc.CallOption) (*DeleteJailResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(DeleteJailResponse)
+	err := c.cc.Invoke(ctx, ManagerService_DeleteJail_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *managerServiceClient) GetJail(ctx context.Context, in *GetJailRequest, opts ...grpc.CallOption) (*GetJailResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetJailResponse)
+	err := c.cc.Invoke(ctx, ManagerService_GetJail_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *managerServiceClient) ListJails(ctx context.Context, in *ListJailsRequest, opts ...grpc.CallOption) (*ListJailsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListJailsResponse)
+	err := c.cc.Invoke(ctx, ManagerService_ListJails_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // ManagerServiceServer is the server API for ManagerService service.
 // All implementations must embed UnimplementedManagerServiceServer
 // for forward compatibility.
@@ -370,6 +434,15 @@ type ManagerServiceServer interface {
 	CreateAPIKey(context.Context, *CreateAPIKeyRequest) (*CreateAPIKeyResponse, error)
 	ListAPIKeys(context.Context, *ListAPIKeysRequest) (*ListAPIKeysResponse, error)
 	RevokeAPIKey(context.Context, *RevokeAPIKeyRequest) (*RevokeAPIKeyResponse, error)
+	// CreateJail/UpdateJail/DeleteJail/GetJail/ListJails manage
+	// JailDefinitions - see ADR-0026's jail-orchestration half. They
+	// mirror the VM RPCs above exactly, including GetJail/ListJails'
+	// same leader-only read requirement.
+	CreateJail(context.Context, *CreateJailRequest) (*CreateJailResponse, error)
+	UpdateJail(context.Context, *UpdateJailRequest) (*UpdateJailResponse, error)
+	DeleteJail(context.Context, *DeleteJailRequest) (*DeleteJailResponse, error)
+	GetJail(context.Context, *GetJailRequest) (*GetJailResponse, error)
+	ListJails(context.Context, *ListJailsRequest) (*ListJailsResponse, error)
 	mustEmbedUnimplementedManagerServiceServer()
 }
 
@@ -433,6 +506,21 @@ func (UnimplementedManagerServiceServer) ListAPIKeys(context.Context, *ListAPIKe
 }
 func (UnimplementedManagerServiceServer) RevokeAPIKey(context.Context, *RevokeAPIKeyRequest) (*RevokeAPIKeyResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method RevokeAPIKey not implemented")
+}
+func (UnimplementedManagerServiceServer) CreateJail(context.Context, *CreateJailRequest) (*CreateJailResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method CreateJail not implemented")
+}
+func (UnimplementedManagerServiceServer) UpdateJail(context.Context, *UpdateJailRequest) (*UpdateJailResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method UpdateJail not implemented")
+}
+func (UnimplementedManagerServiceServer) DeleteJail(context.Context, *DeleteJailRequest) (*DeleteJailResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method DeleteJail not implemented")
+}
+func (UnimplementedManagerServiceServer) GetJail(context.Context, *GetJailRequest) (*GetJailResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetJail not implemented")
+}
+func (UnimplementedManagerServiceServer) ListJails(context.Context, *ListJailsRequest) (*ListJailsResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ListJails not implemented")
 }
 func (UnimplementedManagerServiceServer) mustEmbedUnimplementedManagerServiceServer() {}
 func (UnimplementedManagerServiceServer) testEmbeddedByValue()                        {}
@@ -768,6 +856,96 @@ func _ManagerService_RevokeAPIKey_Handler(srv interface{}, ctx context.Context, 
 	return interceptor(ctx, in, info, handler)
 }
 
+func _ManagerService_CreateJail_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(CreateJailRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ManagerServiceServer).CreateJail(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ManagerService_CreateJail_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ManagerServiceServer).CreateJail(ctx, req.(*CreateJailRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ManagerService_UpdateJail_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(UpdateJailRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ManagerServiceServer).UpdateJail(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ManagerService_UpdateJail_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ManagerServiceServer).UpdateJail(ctx, req.(*UpdateJailRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ManagerService_DeleteJail_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(DeleteJailRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ManagerServiceServer).DeleteJail(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ManagerService_DeleteJail_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ManagerServiceServer).DeleteJail(ctx, req.(*DeleteJailRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ManagerService_GetJail_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetJailRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ManagerServiceServer).GetJail(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ManagerService_GetJail_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ManagerServiceServer).GetJail(ctx, req.(*GetJailRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ManagerService_ListJails_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListJailsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ManagerServiceServer).ListJails(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ManagerService_ListJails_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ManagerServiceServer).ListJails(ctx, req.(*ListJailsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // ManagerService_ServiceDesc is the grpc.ServiceDesc for ManagerService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -842,6 +1020,26 @@ var ManagerService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "RevokeAPIKey",
 			Handler:    _ManagerService_RevokeAPIKey_Handler,
+		},
+		{
+			MethodName: "CreateJail",
+			Handler:    _ManagerService_CreateJail_Handler,
+		},
+		{
+			MethodName: "UpdateJail",
+			Handler:    _ManagerService_UpdateJail_Handler,
+		},
+		{
+			MethodName: "DeleteJail",
+			Handler:    _ManagerService_DeleteJail_Handler,
+		},
+		{
+			MethodName: "GetJail",
+			Handler:    _ManagerService_GetJail_Handler,
+		},
+		{
+			MethodName: "ListJails",
+			Handler:    _ManagerService_ListJails_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{

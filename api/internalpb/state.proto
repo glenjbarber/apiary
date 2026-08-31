@@ -100,6 +100,62 @@ message VMDefinition {
   string replica_node_id = 14;
 }
 
+// JailState is the desired run state of a jail, mirroring VMState.
+enum JailState {
+  JAIL_STATE_UNSPECIFIED = 0;
+  JAIL_STATE_STOPPED = 1;
+  JAIL_STATE_RUNNING = 2;
+
+  // JAIL_STATE_DELETING is a soft-delete tombstone, exactly like
+  // VM_STATE_DELETING - see its doc comment above.
+  JAIL_STATE_DELETING = 3;
+}
+
+// JailPhase is the reconciler's own observed progress toward a jail's
+// desired state, mirroring VMPhase.
+enum JailPhase {
+  JAIL_PHASE_UNSPECIFIED = 0;
+  JAIL_PHASE_CREATING = 1;
+  JAIL_PHASE_READY = 2;
+  JAIL_PHASE_DELETING = 3;
+  JAIL_PHASE_ERROR = 4;
+}
+
+// JailDefinition is a jail's ephemeral definition, deliberately minimal
+// compared to VMDefinition: no vcpus/memory/ISO/firewall fields, since
+// internal/jail's v1 scope is flat ip4=inherit networking with no
+// dedicated resource limits or attached media. Physical data (the
+// jail's root filesystem contents) stays local per node, replicated by
+// HAST when replica_node_id is set, never by raft - same split as
+// VMDefinition.
+message JailDefinition {
+  string id = 1;
+  string name = 2;
+
+  // hostname is passed to jail(8) as its own hostname - distinct from
+  // name/id, which are Apiary's own identifiers (internal/jail has no
+  // hierarchical namespace, so id/name double as the jail(8) name too).
+  string hostname = 3;
+
+  // node_id is the node ownership assignment: which cluster member is
+  // responsible for running this jail.
+  string node_id = 4;
+
+  // replica_node_id, if set, names a second cluster node that
+  // replicates this jail's root filesystem via HAST (ADR-0026) - the
+  // exact same data-redundancy-not-failover semantics as
+  // VMDefinition.replica_node_id.
+  string replica_node_id = 5;
+
+  JailState desired_state = 6;
+
+  JailPhase phase = 7;
+
+  // phase_error holds the last reconcile error's message when phase ==
+  // JAIL_PHASE_ERROR; empty otherwise.
+  string phase_error = 8;
+}
+
 // FirewallRule is one pf(8) rule applied to a VM's per-VM anchor. See
 // internal/pf.RenderRules for how these compile to actual pf syntax.
 message FirewallRule {
@@ -164,6 +220,16 @@ message Command {
 
     CreateAPIKey create_api_key = 8;
     RevokeAPIKey revoke_api_key = 9;
+
+    CreateJail create_jail = 10;
+    UpdateJail update_jail = 11;
+    DeleteJail delete_jail = 12;
+
+    // UpdateJailPhase and PurgeJail are submitted by a node's own
+    // reconciler, never by an external caller - mirrors
+    // UpdateVMPhase/PurgeVM above.
+    UpdateJailPhase update_jail_phase = 13;
+    PurgeJail purge_jail = 14;
   }
 }
 
@@ -247,6 +313,39 @@ message PurgeVM {
   string id = 1;
 }
 
+// CreateJail adds a new JailDefinition. It fails if a jail with the
+// same id already exists.
+message CreateJail {
+  JailDefinition jail = 1;
+}
+
+// UpdateJail replaces an existing jail definition. It fails if no jail
+// with the given id exists.
+message UpdateJail {
+  JailDefinition jail = 1;
+}
+
+// DeleteJail marks a jail definition for deletion (see
+// JAIL_STATE_DELETING), mirroring DeleteVM exactly. It fails if no
+// jail with the given id exists.
+message DeleteJail {
+  string id = 1;
+}
+
+// UpdateJailPhase records reconciliation progress against an existing
+// jail definition, mirroring UpdateVMPhase exactly.
+message UpdateJailPhase {
+  string id = 1;
+  JailPhase phase = 2;
+  string phase_error = 3;
+}
+
+// PurgeJail removes a jail definition outright, mirroring PurgeVM
+// exactly. Idempotent: not an error if the id is already gone.
+message PurgeJail {
+  string id = 1;
+}
+
 // CommandResult is the FSM's response to Apply, echoed back through
 // ApplyResponse. error is set (and vm left unset) if the command was
 // rejected at the application level (e.g. duplicate/missing id) - this is
@@ -255,6 +354,7 @@ message PurgeVM {
 message CommandResult {
   VMDefinition vm = 1;
   string error = 2;
+  JailDefinition jail = 3;
 }
 
 // FSMSnapshotState is the full ephemeral state persisted by
@@ -264,6 +364,7 @@ message FSMSnapshotState {
   map<string, VMDefinition> vms = 2;
   map<string, NetworkDefinition> networks = 3;
   map<string, ApiKey> api_keys = 4;
+  map<string, JailDefinition> jails = 6;
 
   // auth_enabled is set permanently, forever, the first time any
   // CreateAPIKey command ever succeeds - unlike api_keys' own size,

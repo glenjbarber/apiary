@@ -77,6 +77,16 @@ service ManagerService {
   rpc CreateAPIKey(CreateAPIKeyRequest) returns (CreateAPIKeyResponse);
   rpc ListAPIKeys(ListAPIKeysRequest) returns (ListAPIKeysResponse);
   rpc RevokeAPIKey(RevokeAPIKeyRequest) returns (RevokeAPIKeyResponse);
+
+  // CreateJail/UpdateJail/DeleteJail/GetJail/ListJails manage
+  // JailDefinitions - see ADR-0026's jail-orchestration half. They
+  // mirror the VM RPCs above exactly, including GetJail/ListJails'
+  // same leader-only read requirement.
+  rpc CreateJail(CreateJailRequest) returns (CreateJailResponse);
+  rpc UpdateJail(UpdateJailRequest) returns (UpdateJailResponse);
+  rpc DeleteJail(DeleteJailRequest) returns (DeleteJailResponse);
+  rpc GetJail(GetJailRequest) returns (GetJailResponse);
+  rpc ListJails(ListJailsRequest) returns (ListJailsResponse);
 }
 
 // VMState mirrors api/internalpb's VMState. Kept as a separate type
@@ -144,6 +154,42 @@ message VMDefinition {
   // exactly like node_id. Empty means the unreplicated disk path from
   // before this existed.
   string replica_node_id = 14;
+}
+
+// JailState mirrors api/internalpb's JailState.
+enum JailState {
+  JAIL_STATE_UNSPECIFIED = 0;
+  JAIL_STATE_STOPPED = 1;
+  JAIL_STATE_RUNNING = 2;
+  JAIL_STATE_DELETING = 3;
+}
+
+// JailPhase mirrors api/internalpb's JailPhase.
+enum JailPhase {
+  JAIL_PHASE_UNSPECIFIED = 0;
+  JAIL_PHASE_CREATING = 1;
+  JAIL_PHASE_READY = 2;
+  JAIL_PHASE_DELETING = 3;
+  JAIL_PHASE_ERROR = 4;
+}
+
+// JailDefinition mirrors api/internalpb's JailDefinition, deliberately
+// minimal like its internal counterpart - see ADR-0026.
+message JailDefinition {
+  string id = 1;
+  string name = 2;
+  string hostname = 3;
+  string node_id = 4;
+
+  // replica_node_id, if set, names a second cluster node that
+  // replicates this jail's root filesystem via HAST (ADR-0026) -
+  // the same data-redundancy-not-failover semantics as
+  // VMDefinition.replica_node_id.
+  string replica_node_id = 5;
+
+  JailState desired_state = 6;
+  JailPhase phase = 7;
+  string phase_error = 8;
 }
 
 // FirewallRule mirrors api/internalpb's FirewallRule.
@@ -443,6 +489,58 @@ message DeleteNetworkRequest {
 
 message DeleteNetworkResponse {
   NetworkDefinition network = 1;
+  string error = 2;
+  string leader_hint = 3;
+}
+
+message CreateJailRequest {
+  JailDefinition jail = 1;
+  uint32 timeout_ms = 2;
+}
+
+message CreateJailResponse {
+  JailDefinition jail = 1;
+  string error = 2;
+  string leader_hint = 3;
+}
+
+message UpdateJailRequest {
+  JailDefinition jail = 1;
+  uint32 timeout_ms = 2;
+}
+
+message UpdateJailResponse {
+  JailDefinition jail = 1;
+  string error = 2;
+  string leader_hint = 3;
+}
+
+message DeleteJailRequest {
+  string id = 1;
+  uint32 timeout_ms = 2;
+}
+
+message DeleteJailResponse {
+  JailDefinition jail = 1;
+  string error = 2;
+  string leader_hint = 3;
+}
+
+message GetJailRequest {
+  string id = 1;
+}
+
+message GetJailResponse {
+  JailDefinition jail = 1;
+  bool found = 2;
+  string error = 3;
+  string leader_hint = 4;
+}
+
+message ListJailsRequest {}
+
+message ListJailsResponse {
+  repeated JailDefinition jails = 1;
   string error = 2;
   string leader_hint = 3;
 }
