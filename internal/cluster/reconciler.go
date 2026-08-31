@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -301,6 +302,7 @@ func (r *Reconciler) RunOnce(ctx context.Context) error {
 			MACAddress:    vm.GetMacAddress(),
 			FirewallRules: rules,
 			ReplicaNodeID: vm.GetReplicaNodeId(),
+			BaseImageName: vm.GetBaseImageName(),
 		})
 	}
 
@@ -756,7 +758,21 @@ func (r *Reconciler) ensureVM(ctx context.Context, vm VMPlacement, networks map[
 		if err != nil {
 			return fmt.Errorf("getting dataset mountpoint: %w", err)
 		}
-		diskPath, err = r.ensureDiskImage(mountpoint)
+		var baseImagePath string
+		if vm.BaseImageName != "" {
+			if r.ISOs == nil {
+				return fmt.Errorf("VM names base image %q but no ISO store is configured on this node", vm.BaseImageName)
+			}
+			path, ok, err := r.ISOs.Path(vm.BaseImageName)
+			if err != nil {
+				return fmt.Errorf("resolving base image %q: %w", vm.BaseImageName, err)
+			}
+			if !ok {
+				return fmt.Errorf("base image %q not found", vm.BaseImageName)
+			}
+			baseImagePath = path
+		}
+		diskPath, err = r.ensureDiskImage(mountpoint, baseImagePath)
 		if err != nil {
 			return fmt.Errorf("preparing disk image: %w", err)
 		}
@@ -938,8 +954,6 @@ func (r *Reconciler) reconcileDHCP(ctx context.Context, planned []VMPlacement, n
 	return nil
 }
 
-// ensureDiskImage creates a sparse disk image inside mountpoint if one
-// doesn't already exist, and returns its path.
 // diskSizeMB returns Reconciler.DiskSizeMB, defaulting to 10240
 // (10GiB) if unset - shared by ensureDiskImage (the plain, dataset-
 // backed path) and the HAST-replicated path's zvol sizing, so both
@@ -951,12 +965,25 @@ func (r *Reconciler) diskSizeMB() uint64 {
 	return r.DiskSizeMB
 }
 
-func (r *Reconciler) ensureDiskImage(mountpoint string) (string, error) {
+// ensureDiskImage ensures the VM's disk file exists at mountpoint,
+// creating it the first time. baseImagePath, if non-empty, seeds a
+// freshly created file by copying that image's contents instead of
+// creating a blank, truncated file - see ADR-0031. An already-existing
+// disk file is never reseeded, matching every other "only act on
+// create" resource in this reconciler (datasets, bhyve VMs).
+func (r *Reconciler) ensureDiskImage(mountpoint, baseImagePath string) (string, error) {
 	path := filepath.Join(mountpoint, diskImageName)
 	if _, err := os.Stat(path); err == nil {
 		return path, nil
 	} else if !os.IsNotExist(err) {
 		return "", err
+	}
+
+	if baseImagePath != "" {
+		if err := copyFile(path, baseImagePath); err != nil {
+			return "", fmt.Errorf("seeding disk from base image: %w", err)
+		}
+		return path, nil
 	}
 
 	sizeMB := r.diskSizeMB()
@@ -970,4 +997,31 @@ func (r *Reconciler) ensureDiskImage(mountpoint string) (string, error) {
 		return "", err
 	}
 	return path, nil
+}
+
+// copyFile copies src's contents into a newly created file at dst.
+// dst is removed on any failure so a partial copy is never mistaken for
+// a valid disk image on the next tick.
+func copyFile(dst, src string) (err error) {
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+
+	out, err := os.Create(dst)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		out.Close()
+		if err != nil {
+			os.Remove(dst)
+		}
+	}()
+
+	if _, err = io.Copy(out, in); err != nil {
+		return err
+	}
+	return out.Sync()
 }

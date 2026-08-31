@@ -48,6 +48,7 @@ func toInternalVM(vm *rpcpb.VMDefinition) *internalpb.VMDefinition {
 		IsoName:       vm.GetIsoName(),
 		NetworkId:     vm.GetNetworkId(),
 		ReplicaNodeId: vm.GetReplicaNodeId(),
+		BaseImageName: vm.GetBaseImageName(),
 		// IpAddress/MacAddress are assigned by the FSM itself, never set
 		// by an external caller.
 		FirewallRules: rules,
@@ -86,6 +87,7 @@ func fromInternalVM(vm *internalpb.VMDefinition) *rpcpb.VMDefinition {
 		IpAddress:     vm.GetIpAddress(),
 		MacAddress:    vm.GetMacAddress(),
 		ReplicaNodeId: vm.GetReplicaNodeId(),
+		BaseImageName: vm.GetBaseImageName(),
 		FirewallRules: rules,
 	}
 }

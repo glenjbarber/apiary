@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -738,6 +740,107 @@ func TestReconciler_RunOnce_UnresolvableISOFailsWithoutCreatingVM(t *testing.T) 
 	}
 	if len(vms.created) != 0 {
 		t.Errorf("created = %v, want none (ISO resolution should fail before CreateVM)", vms.created)
+	}
+}
+
+func TestReconciler_RunOnce_BaseImageSeedsNewDiskFile(t *testing.T) {
+	raft := &fakeRaftClient{resp: &internalpb.ListVMsResponse{
+		Vms: []*internalpb.VMDefinition{{Id: "vm-1", NodeId: "node-a", BaseImageName: "ubuntu-cloud.raw"}},
+	}}
+	zfs := newFakeDatasetManager()
+	mountpoint := t.TempDir()
+	zfs.mountpointFor["vm-1"] = mountpoint
+
+	imageDir := t.TempDir()
+	imagePath := filepath.Join(imageDir, "ubuntu-cloud.raw")
+	const imageContents = "fake raw disk image contents"
+	if err := os.WriteFile(imagePath, []byte(imageContents), 0o644); err != nil {
+		t.Fatalf("WriteFile(base image) error: %v", err)
+	}
+
+	vms := newFakeVMManager()
+	isos := &fakeISOResolver{paths: map[string]string{"ubuntu-cloud.raw": imagePath}}
+
+	r := &Reconciler{Raft: raft, ZFS: zfs, Bhyve: vms, ISOs: isos, LocalNodeID: "node-a", BootROM: "/fw/UEFI.fd"}
+	if err := r.RunOnce(context.Background()); err != nil {
+		t.Fatalf("RunOnce() error: %v", err)
+	}
+
+	diskPath := filepath.Join(mountpoint, diskImageName)
+	got, err := os.ReadFile(diskPath)
+	if err != nil {
+		t.Fatalf("ReadFile(disk image) error: %v", err)
+	}
+	if string(got) != imageContents {
+		t.Errorf("disk image contents = %q, want %q (seeded from base image)", got, imageContents)
+	}
+
+	cfg := vms.lastCfg["vm-1"]
+	if cfg.DiskPath != diskPath {
+		t.Errorf("CreateVM() cfg.DiskPath = %q, want %q", cfg.DiskPath, diskPath)
+	}
+}
+
+func TestReconciler_RunOnce_BaseImageNeverReseedsExistingDisk(t *testing.T) {
+	raft := &fakeRaftClient{resp: &internalpb.ListVMsResponse{
+		Vms: []*internalpb.VMDefinition{{Id: "vm-1", NodeId: "node-a", BaseImageName: "ubuntu-cloud.raw"}},
+	}}
+	zfs := newFakeDatasetManager()
+	mountpoint := t.TempDir()
+	zfs.mountpointFor["vm-1"] = mountpoint
+
+	const existingContents = "already-provisioned disk, must not be touched"
+	diskPath := filepath.Join(mountpoint, diskImageName)
+	if err := os.WriteFile(diskPath, []byte(existingContents), 0o644); err != nil {
+		t.Fatalf("WriteFile(existing disk) error: %v", err)
+	}
+
+	vms := newFakeVMManager()
+	isos := &fakeISOResolver{paths: map[string]string{"ubuntu-cloud.raw": "/images/ubuntu-cloud.raw"}}
+
+	r := &Reconciler{Raft: raft, ZFS: zfs, Bhyve: vms, ISOs: isos, LocalNodeID: "node-a", BootROM: "/fw/UEFI.fd"}
+	if err := r.RunOnce(context.Background()); err != nil {
+		t.Fatalf("RunOnce() error: %v", err)
+	}
+
+	got, err := os.ReadFile(diskPath)
+	if err != nil {
+		t.Fatalf("ReadFile(disk image) error: %v", err)
+	}
+	if string(got) != existingContents {
+		t.Errorf("disk image contents = %q, want unchanged %q (base image must never reseed an existing disk)", got, existingContents)
+	}
+}
+
+func TestReconciler_RunOnce_BaseImageUnresolvableFailsWithoutCreatingVM(t *testing.T) {
+	raft := &fakeRaftClient{resp: &internalpb.ListVMsResponse{
+		Vms: []*internalpb.VMDefinition{{Id: "vm-1", NodeId: "node-a", BaseImageName: "missing.raw"}},
+	}}
+	zfs := newFakeDatasetManager()
+	zfs.mountpointFor["vm-1"] = t.TempDir()
+	vms := newFakeVMManager()
+	isos := &fakeISOResolver{paths: map[string]string{}}
+
+	r := &Reconciler{Raft: raft, ZFS: zfs, Bhyve: vms, ISOs: isos, LocalNodeID: "node-a", BootROM: "/fw/UEFI.fd"}
+	if err := r.RunOnce(context.Background()); err == nil {
+		t.Fatalf("RunOnce() = nil error, want a not-found error for the unresolvable base image")
+	}
+	if len(vms.created) != 0 {
+		t.Errorf("created = %v, want none (base image resolution should fail before CreateVM)", vms.created)
+	}
+}
+
+func TestReconciler_RunOnce_BaseImageNamedButNoStoreConfiguredIsError(t *testing.T) {
+	raft := &fakeRaftClient{resp: &internalpb.ListVMsResponse{
+		Vms: []*internalpb.VMDefinition{{Id: "vm-1", NodeId: "node-a", BaseImageName: "ubuntu-cloud.raw"}},
+	}}
+	zfs := newFakeDatasetManager()
+	zfs.mountpointFor["vm-1"] = t.TempDir()
+	vms := newFakeVMManager()
+
+	r := &Reconciler{Raft: raft, ZFS: zfs, Bhyve: vms, LocalNodeID: "node-a", BootROM: "/fw/UEFI.fd"} // ISOs left nil
+	if err := r.RunOnce(context.Background()); err == nil {
+		t.Fatalf("RunOnce() = nil error, want an error since no ISO store is configured")
 	}
 }
 

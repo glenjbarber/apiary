@@ -282,6 +282,12 @@ type VMDefinition struct {
 	// exactly like node_id. Empty means the unreplicated disk path from
 	// before this existed.
 	ReplicaNodeId string `protobuf:"bytes,14,opt,name=replica_node_id,json=replicaNodeId,proto3" json:"replica_node_id,omitempty"`
+	// base_image_name, if set, names a raw disk image already uploaded
+	// via UploadISO (reusing internal/isostore) on the assigned node -
+	// the reconciler seeds this VM's disk file from it on first creation
+	// instead of creating a blank file. See ADR-0031. Empty means today's
+	// behavior (a blank disk).
+	BaseImageName string `protobuf:"bytes,15,opt,name=base_image_name,json=baseImageName,proto3" json:"base_image_name,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -410,6 +416,13 @@ func (x *VMDefinition) GetFirewallRules() []*FirewallRule {
 func (x *VMDefinition) GetReplicaNodeId() string {
 	if x != nil {
 		return x.ReplicaNodeId
+	}
+	return ""
+}
+
+func (x *VMDefinition) GetBaseImageName() string {
+	if x != nil {
+		return x.BaseImageName
 	}
 	return ""
 }
@@ -4689,7 +4702,7 @@ var File_api_rpc_manager_proto protoreflect.FileDescriptor
 
 const file_api_rpc_manager_proto_rawDesc = "" +
 	"\n" +
-	"\x15api/rpc/manager.proto\x12\rapiary.rpc.v1\"\xf0\x03\n" +
+	"\x15api/rpc/manager.proto\x12\rapiary.rpc.v1\"\x98\x04\n" +
 	"\fVMDefinition\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x14\n" +
@@ -4709,7 +4722,8 @@ const file_api_rpc_manager_proto_rawDesc = "" +
 	"\vmac_address\x18\f \x01(\tR\n" +
 	"macAddress\x12B\n" +
 	"\x0efirewall_rules\x18\r \x03(\v2\x1b.apiary.rpc.v1.FirewallRuleR\rfirewallRules\x12&\n" +
-	"\x0freplica_node_id\x18\x0e \x01(\tR\rreplicaNodeId\"\xa1\x02\n" +
+	"\x0freplica_node_id\x18\x0e \x01(\tR\rreplicaNodeId\x12&\n" +
+	"\x0fbase_image_name\x18\x0f \x01(\tR\rbaseImageName\"\xa1\x02\n" +
 	"\x0eJailDefinition\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x1a\n" +

@@ -178,6 +178,18 @@ each design decision, in order.
   username now lock that account out for a fixed cooldown, checked
   before the PAM backend is ever called. See
   [ADR-0030](docs/adr/0030-tiered-rbac-pam-login.md).
+- **VM base disk images** — `VMDefinition` gains `base_image_name`,
+  resolved by the reconciler exactly like `iso_name` (reusing
+  `internal/isostore` as-is). When set, a VM's disk is seeded by copying
+  the base image the first time it's created, instead of a blank
+  truncated file — never re-seeded afterward. No format conversion: the
+  uploaded file must already be a raw, directly-bootable disk image.
+  This is the prerequisite for the Kubernetes Cluster API provider work
+  below — a k8s node VM needs a real Linux OS with cloud-init already on
+  its boot disk. `internal/restshim`'s REST `vm` shape also gained
+  `iso_name`/`network_id`/`ip_address`/`mac_address`/`base_image_name`,
+  previously missing entirely. See
+  [ADR-0031](docs/adr/0031-vm-base-images.md).
 
 **Not yet implemented:**
 
@@ -208,20 +220,34 @@ each design decision, in order.
 - Authentication: the web UI now supports real PAM-backed per-identity
   login with tiered roles (Viewer/Operator/Admin, ADR-0030), and API
   keys carry the same roles (ADR-0023) — both still off by default.
-  `raftd`'s internal socket has no authentication at all. No account
-  lockout/rate-limiting on repeated failed logins yet, and no direct
-  Kerberos/LDAP client code (PAM's own host configuration bridges to
-  both instead — see ADR-0030's "Deferred" section).
+  `raftd`'s internal socket has no authentication at all. Repeated
+  failed logins for one username now lock that account out for a fixed
+  cooldown (checked before PAM is ever called), but there's still no
+  direct Kerberos/LDAP client code (PAM's own host configuration bridges
+  to both instead — see ADR-0030's "Deferred" section).
+- Importing VMs from other hypervisors (e.g. Proxmox): still no
+  disk-format conversion, and Apiary is UEFI-only. **Partially narrowed
+  by ADR-0031**: a VM's disk can now be seeded from a pre-uploaded raw
+  base image (`base_image_name`, reusing `internal/isostore`) instead of
+  always starting blank — the caller still has to supply an
+  already-raw, already-bootable image. Linux containers have no path at
+  all — jails share the host FreeBSD kernel.
+- A separate `cluster-api-provider-apiary` repo is in progress: a real
+  Cluster API infrastructure provider (`ApiaryCluster`/`ApiaryMachine`/
+  `ApiaryMachineTemplate`), paired with the existing upstream kubeadm
+  bootstrap/control-plane providers, driving Apiary through
+  `internal/restshim`'s REST API. ADR-0031's base-image support plus
+  `internal/isostore`'s existing `UploadISO` (for a cloud-init NoCloud
+  seed ISO the controller builds itself) are what make this possible.
+  v1 has no load-balancer/HA control plane (a single control-plane
+  node's own IP is used directly); live verification is staged
+  incrementally, single-VM provisioning before a fully joined
+  multi-node cluster.
 - **Tabled for now** (evaluated, deliberately deferred):
   - **Terraform support** — the infrastructure now exists (`managerd`'s
     API-key auth, `restshimd`'s own binary forwarding each caller's
     key), what's left is the provider itself: translating Terraform's
     plan/apply lifecycle to `restshim`'s create/read/update/delete calls
-  - **Kubernetes support** — not an Apiary gap specifically; no one runs
-    `kubelet` natively on FreeBSD (it assumes Linux cgroups/overlayfs).
-    The viable path is Linux VMs under bhyve running normal Kubernetes
-    nodes, the same approach Proxmox itself uses — achievable by hand
-    today, but no Cluster-API-style automation exists yet
 
 ## Architecture
 

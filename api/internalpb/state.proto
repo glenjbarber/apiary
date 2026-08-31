@@ -98,6 +98,16 @@ message VMDefinition {
   // dataset-plus-file disk path from before this existed - unchanged
   // behavior for every VM that doesn't set this.
   string replica_node_id = 14;
+
+  // base_image_name, if set, names a raw disk image already uploaded
+  // (via ManagerService.UploadISO, reusing internal/isostore's existing
+  // store - a base image is just another named, hash-verified local
+  // file) on the assigned node. The reconciler resolves it exactly like
+  // iso_name and, only when first creating this VM's disk file, seeds it
+  // by copying the base image instead of creating a blank file - see
+  // ADR-0031. Empty means today's behavior (a blank disk). Ignored for a
+  // disk file that already exists (never re-seeded on every tick).
+  string base_image_name = 15;
 }
 
 // JailState is the desired run state of a jail, mirroring VMState.

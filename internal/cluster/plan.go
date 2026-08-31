@@ -60,6 +60,13 @@ type VMPlacement struct {
 	// this VM's disk (ADR-0026) - data redundancy, not automatic
 	// failover. Caller-set, exactly like NodeID.
 	ReplicaNodeID string
+
+	// BaseImageName, if set, names a raw disk image the reconciler
+	// should resolve (via Reconciler.ISOs, reusing the same store
+	// ISOName does) and copy into this VM's disk file the first time it
+	// creates it, instead of creating a blank file. See ADR-0031.
+	// Ignored once the disk file already exists.
+	BaseImageName string
 }
 
 // JailPlacement mirrors VMPlacement, deliberately minimal like

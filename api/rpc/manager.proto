@@ -207,6 +207,13 @@ message VMDefinition {
   // exactly like node_id. Empty means the unreplicated disk path from
   // before this existed.
   string replica_node_id = 14;
+
+  // base_image_name, if set, names a raw disk image already uploaded
+  // via UploadISO (reusing internal/isostore) on the assigned node -
+  // the reconciler seeds this VM's disk file from it on first creation
+  // instead of creating a blank file. See ADR-0031. Empty means today's
+  // behavior (a blank disk).
+  string base_image_name = 15;
 }
 
 // JailState mirrors api/internalpb's JailState.

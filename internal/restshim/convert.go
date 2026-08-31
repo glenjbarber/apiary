@@ -22,6 +22,15 @@ type vm struct {
 	NodeID        string `json:"node_id,omitempty"`
 	DesiredState  string `json:"desired_state,omitempty"`
 	ReplicaNodeID string `json:"replica_node_id,omitempty"`
+
+	// ISOName/BaseImageName are caller-set on create - see ADR-0017/
+	// ADR-0031. IPAddress/MACAddress are read-only, populated by the FSM
+	// only when NetworkID is set (see VMDefinition's own doc comments).
+	ISOName       string `json:"iso_name,omitempty"`
+	NetworkID     string `json:"network_id,omitempty"`
+	IPAddress     string `json:"ip_address,omitempty"`
+	MACAddress    string `json:"mac_address,omitempty"`
+	BaseImageName string `json:"base_image_name,omitempty"`
 }
 
 // stateToRPC/stateFromRPC translate the REST API's plain string state
@@ -59,6 +68,9 @@ func toRPCVM(v vm) *rpcpb.VMDefinition {
 		NodeId:        v.NodeID,
 		DesiredState:  stateToRPC(v.DesiredState),
 		ReplicaNodeId: v.ReplicaNodeID,
+		IsoName:       v.ISOName,
+		NetworkId:     v.NetworkID,
+		BaseImageName: v.BaseImageName,
 	}
 }
 
@@ -74,6 +86,11 @@ func fromRPCVM(d *rpcpb.VMDefinition) vm {
 		NodeID:        d.GetNodeId(),
 		DesiredState:  stateFromRPC(d.GetDesiredState()),
 		ReplicaNodeID: d.GetReplicaNodeId(),
+		ISOName:       d.GetIsoName(),
+		NetworkID:     d.GetNetworkId(),
+		IPAddress:     d.GetIpAddress(),
+		MACAddress:    d.GetMacAddress(),
+		BaseImageName: d.GetBaseImageName(),
 	}
 }
 

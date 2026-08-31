@@ -303,6 +303,15 @@ type VMDefinition struct {
 	// dataset-plus-file disk path from before this existed - unchanged
 	// behavior for every VM that doesn't set this.
 	ReplicaNodeId string `protobuf:"bytes,14,opt,name=replica_node_id,json=replicaNodeId,proto3" json:"replica_node_id,omitempty"`
+	// base_image_name, if set, names a raw disk image already uploaded
+	// (via ManagerService.UploadISO, reusing internal/isostore's existing
+	// store - a base image is just another named, hash-verified local
+	// file) on the assigned node. The reconciler resolves it exactly like
+	// iso_name and, only when first creating this VM's disk file, seeds it
+	// by copying the base image instead of creating a blank file - see
+	// ADR-0031. Empty means today's behavior (a blank disk). Ignored for a
+	// disk file that already exists (never re-seeded on every tick).
+	BaseImageName string `protobuf:"bytes,15,opt,name=base_image_name,json=baseImageName,proto3" json:"base_image_name,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -431,6 +440,13 @@ func (x *VMDefinition) GetFirewallRules() []*FirewallRule {
 func (x *VMDefinition) GetReplicaNodeId() string {
 	if x != nil {
 		return x.ReplicaNodeId
+	}
+	return ""
+}
+
+func (x *VMDefinition) GetBaseImageName() string {
+	if x != nil {
+		return x.BaseImageName
 	}
 	return ""
 }
@@ -1942,7 +1958,7 @@ var File_api_internalpb_state_proto protoreflect.FileDescriptor
 
 const file_api_internalpb_state_proto_rawDesc = "" +
 	"\n" +
-	"\x1aapi/internalpb/state.proto\x12\x12apiary.internal.v1\"\xff\x03\n" +
+	"\x1aapi/internalpb/state.proto\x12\x12apiary.internal.v1\"\xa7\x04\n" +
 	"\fVMDefinition\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x14\n" +
@@ -1962,7 +1978,8 @@ const file_api_internalpb_state_proto_rawDesc = "" +
 	"\vmac_address\x18\f \x01(\tR\n" +
 	"macAddress\x12G\n" +
 	"\x0efirewall_rules\x18\r \x03(\v2 .apiary.internal.v1.FirewallRuleR\rfirewallRules\x12&\n" +
-	"\x0freplica_node_id\x18\x0e \x01(\tR\rreplicaNodeId\"\xab\x02\n" +
+	"\x0freplica_node_id\x18\x0e \x01(\tR\rreplicaNodeId\x12&\n" +
+	"\x0fbase_image_name\x18\x0f \x01(\tR\rbaseImageName\"\xab\x02\n" +
 	"\x0eJailDefinition\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x1a\n" +
