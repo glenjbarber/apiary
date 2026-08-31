@@ -300,6 +300,69 @@ func TestIntegration_CreateUpdateDeleteVM(t *testing.T) {
 	}
 }
 
+func TestIntegration_ForcePurgeVM_RequiresDeletingState(t *testing.T) {
+	raftdSocket := newRaftdUDSSocket(t)
+	client := newManagerdRPCClient(t, raftdSocket)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if _, err := client.CreateVM(ctx, &rpcpb.CreateVMRequest{
+		Vm: &rpcpb.VMDefinition{Id: "vm-1", Name: "web-1", NodeId: "some-other-node"},
+	}); err != nil {
+		t.Fatalf("CreateVM() error: %v", err)
+	}
+
+	// A live (not-yet-deleting) VM must be rejected.
+	liveResp, err := client.ForcePurgeVM(ctx, &rpcpb.ForcePurgeVMRequest{Id: "vm-1"})
+	if err != nil {
+		t.Fatalf("ForcePurgeVM() (live) error: %v", err)
+	}
+	if liveResp.GetError() == "" {
+		t.Fatalf("ForcePurgeVM() (live) error = empty, want a rejection since the VM isn't marked for deletion")
+	}
+	if getResp, err := client.GetVM(ctx, &rpcpb.GetVMRequest{Id: "vm-1"}); err != nil || !getResp.GetFound() {
+		t.Fatalf("GetVM() after rejected ForcePurgeVM = (found=%v, err=%v), want the VM to still exist", getResp.GetFound(), err)
+	}
+
+	// DeleteVM on a VM with node_id set soft-deletes it (ADR-0016) rather
+	// than removing it outright - this is the state ForcePurgeVM expects.
+	if _, err := client.DeleteVM(ctx, &rpcpb.DeleteVMRequest{Id: "vm-1"}); err != nil {
+		t.Fatalf("DeleteVM() error: %v", err)
+	}
+
+	purgeResp, err := client.ForcePurgeVM(ctx, &rpcpb.ForcePurgeVMRequest{Id: "vm-1"})
+	if err != nil {
+		t.Fatalf("ForcePurgeVM() error: %v", err)
+	}
+	if purgeResp.GetError() != "" {
+		t.Fatalf("ForcePurgeVM() returned error: %s", purgeResp.GetError())
+	}
+	if purgeResp.GetVm().GetName() != "web-1" {
+		t.Errorf("ForcePurgeVM() echoed vm.Name = %q, want web-1", purgeResp.GetVm().GetName())
+	}
+
+	if getResp, err := client.GetVM(ctx, &rpcpb.GetVMRequest{Id: "vm-1"}); err != nil || getResp.GetFound() {
+		t.Fatalf("GetVM() after ForcePurgeVM = (found=%v, err=%v), want the record gone", getResp.GetFound(), err)
+	}
+}
+
+func TestIntegration_ForcePurgeVM_MissingIsError(t *testing.T) {
+	raftdSocket := newRaftdUDSSocket(t)
+	client := newManagerdRPCClient(t, raftdSocket)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	resp, err := client.ForcePurgeVM(ctx, &rpcpb.ForcePurgeVMRequest{Id: "does-not-exist"})
+	if err != nil {
+		t.Fatalf("ForcePurgeVM() error: %v", err)
+	}
+	if resp.GetError() == "" {
+		t.Fatalf("ForcePurgeVM() error = empty, want a not-found rejection")
+	}
+}
+
 func TestIntegration_GetVMAndListVMs(t *testing.T) {
 	raftdSocket := newRaftdUDSSocket(t)
 	client := newManagerdRPCClient(t, raftdSocket)

@@ -328,6 +328,38 @@ func (s *Server) DeleteVM(ctx context.Context, req *rpcpb.DeleteVMRequest) (*rpc
 	return &rpcpb.DeleteVMResponse{Vm: fromInternalVM(vm), Error: appErr, LeaderHint: leaderHint}, nil
 }
 
+// ForcePurgeVM implements rpcpb.ManagerServiceServer. It's an escape
+// hatch for a VM tombstoned by DeleteVM whose owning node will never
+// come back to reconcile it away (see the RPC's own proto doc comment
+// and CLAUDE.md's resource-reclaim gap) - it only succeeds against a
+// VM already in VM_STATE_DELETING, so a live VM can't be force-purged
+// by mistake and silently orphan resources on a node that's actually
+// still up. GetVM here uses the same leader-only read every other
+// lookup in this RPC does - there's no reason to special-case it the
+// way ADR-0023's ValidateAPIKeyHash does, since this isn't a
+// per-request auth check.
+func (s *Server) ForcePurgeVM(ctx context.Context, req *rpcpb.ForcePurgeVMRequest) (*rpcpb.ForcePurgeVMResponse, error) {
+	getResp, err := s.raft.GetVM(ctx, req.GetId())
+	if err != nil {
+		return &rpcpb.ForcePurgeVMResponse{Error: err.Error()}, nil
+	}
+	if getResp.GetError() != "" {
+		return &rpcpb.ForcePurgeVMResponse{Error: getResp.GetError(), LeaderHint: getResp.GetLeaderHint()}, nil
+	}
+	if !getResp.GetFound() {
+		return &rpcpb.ForcePurgeVMResponse{Error: fmt.Sprintf("VM %q not found", req.GetId())}, nil
+	}
+	if getResp.GetVm().GetDesiredState() != internalpb.VMState_VM_STATE_DELETING {
+		return &rpcpb.ForcePurgeVMResponse{Error: fmt.Sprintf("VM %q is not marked for deletion - call DeleteVM first", req.GetId())}, nil
+	}
+
+	cmd := &internalpb.Command{
+		Op: &internalpb.Command_PurgeVm{PurgeVm: &internalpb.PurgeVM{Id: req.GetId()}},
+	}
+	vm, appErr, leaderHint := s.applyCommand(ctx, cmd, req.GetTimeoutMs())
+	return &rpcpb.ForcePurgeVMResponse{Vm: fromInternalVM(vm), Error: appErr, LeaderHint: leaderHint}, nil
+}
+
 // GetVM implements rpcpb.ManagerServiceServer.
 func (s *Server) GetVM(ctx context.Context, req *rpcpb.GetVMRequest) (*rpcpb.GetVMResponse, error) {
 	resp, err := s.raft.GetVM(ctx, req.GetId())

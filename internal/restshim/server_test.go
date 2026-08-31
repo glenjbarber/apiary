@@ -61,6 +61,10 @@ func (f *fakeClient) DeleteVM(_ context.Context, in *rpcpb.DeleteVMRequest, _ ..
 	return f.deleteResp, nil
 }
 
+func (f *fakeClient) ForcePurgeVM(context.Context, *rpcpb.ForcePurgeVMRequest, ...grpc.CallOption) (*rpcpb.ForcePurgeVMResponse, error) {
+	return &rpcpb.ForcePurgeVMResponse{}, nil
+}
+
 func (f *fakeClient) GetVM(_ context.Context, in *rpcpb.GetVMRequest, _ ...grpc.CallOption) (*rpcpb.GetVMResponse, error) {
 	f.lastGetReq = in
 	return f.getResp, nil
