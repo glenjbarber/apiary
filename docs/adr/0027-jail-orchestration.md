@@ -132,6 +132,59 @@ per-caller state). `jailHASTResourceName` (`"jail-" + id`) is `hastRole
 a jail happen to share an id, since the resource name always carries
 which kind it is.
 
+## Live verification found two real bugs in the shared HAST machinery
+
+Deployed to the real 2-node cluster (`apiarium` as owner/primary,
+`freebsd-apiary` as replica/secondary, both already running patched
+`hastd` per ADR-0008) and verified for real:
+
+- A plain, non-replicated jail: created via `CreateJail`, converged to
+  a real running `jail(8)` process (confirmed via `jls`) backed by its
+  own ZFS dataset, then deleted and fully torn down (jail removed,
+  dataset destroyed, record purged) within one reconcile cycle.
+- A HAST-replicated jail (`node_id=apiarium`, `replica_node_id=
+  freebsd-apiary`): converged to a real `newfs`+`mount`'d UFS
+  filesystem on `/dev/hast/jail-<id>` on `apiarium`, with `hastctl
+  list` reaching **`role: primary`/`status: complete`**, and a matching
+  **`role: secondary`/`status: complete`** on `freebsd-apiary` holding
+  its own never-mounted replica - real, active, synced replication,
+  matching ADR-0026's own verification pattern. A write inside the
+  jail's mounted root (`echo ... > /apiary-jails/jail-r1/testfile`)
+  was confirmed to propagate: the primary's `dirty` counter went
+  `0 → 4.0MB`, and the secondary's own write counter incremented to
+  match.
+- **Deleting the replicated jail surfaced two real, previously-latent
+  bugs in `reconcileHASTRoles`** (shared code, also used by VM
+  replication - see ADR-0026), neither specific to jails, just never
+  triggered by prior VM-only testing:
+  1. `reconcileHASTRoles` only called `RestartService` when the new
+     resource set was non-empty. Tearing down a node's *last* HAST
+     resource rewrote `hast.conf` to empty but never actually
+     restarted `hastd`, leaving its still-running worker holding the
+     just-removed resource's backing file open under the stale
+     config - so the reconciler's own very next step (destroying that
+     file's now-unreferenced ZFS dataset) failed forever with
+     `cannot unmount ...: pool or dataset is busy`. Fixed by always
+     restarting on a real config change, including down to zero
+     resources (an empty resource list is a valid, empty `hast.conf`
+     per `RenderConfig`'s own doc comment).
+  2. Fixing bug 1 surfaced a second, subtler one: `lastHASTConfig`'s
+     zero value (`""`) is itself a valid rendered config (zero
+     resources), so a *freshly restarted* `managerd` whose current
+     target already happened to be "no HAST resources on this node"
+     saw `rendered == lastHASTConfig` (both `""`) on its very first
+     tick and skipped the write+restart entirely - even though the
+     actual on-disk `hast.conf`/running `hastd` still reflected a
+     resource from before the restart. Fixed with a new
+     `hastConfigWritten` flag that forces the first tick's sync
+     regardless of what the target renders as.
+  Both fixes were deployed live and confirmed to resolve the exact
+  stuck teardown they caused - the previously-wedged jail's dataset
+  destroyed cleanly, its record purged, both machines back to a clean
+  baseline. Both have regression tests
+  (`TestReconciler_RunOnce_RestartsHASTdWhenLastResourceIsRemoved`,
+  `TestReconciler_RunOnce_WritesHASTConfigOnFirstTickEvenWhenTargetIsEmpty`).
+
 ## Consequences
 
 - Full test coverage at every layer, mirroring the VM test suite
@@ -156,12 +209,14 @@ which kind it is.
   elsewhere. Same reasoning: never infer teardown from an absent
   record without a forced/orphan-reclaim path, which doesn't exist yet
   for either VMs or jails.
-- No live verification against the project's real FreeBSD machines has
-  been done for this feature yet (unlike ADR-0026, which was verified
-  end-to-end on real hardware) - this ADR covers the implementation as
-  built and unit/integration-tested, not as live-verified. Anyone
-  deploying this for real should expect to find and fix at least one
-  surprise the way ADR-0026's own live-debugging trail did; nothing
-  about jails' `newfs`/`mount` step has been exercised against a real
-  `hastd`-backed device yet, only against a local `md(4)` device in
-  `internal/ufsmount`'s own integration test.
+- Live-verified end-to-end on the real 2-node cluster, both plain and
+  HAST-replicated jails - see above. `cmd/managerd`'s
+  `-jail-enabled`/`-jail-prefix`/`-jail-mount-base`/
+  `-jail-disk-size-mb` flags are deployed and running on both
+  `apiarium` and `freebsd-apiary`. The same secondary-orphan-on-full-
+  purge limitation ADR-0026 accepted for VMs applies identically to
+  replicated jails: nothing tears down a jail's secondary-role HAST
+  resource on the replica node if the owning node is permanently gone
+  and the record is force-purged from elsewhere - not exercised in
+  this pass, since `ForcePurgeVM`'s jail equivalent (`ForcePurgeJail`)
+  doesn't exist yet either.

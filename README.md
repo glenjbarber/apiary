@@ -120,7 +120,12 @@ each design decision, in order.
   name a `replica_node_id` to get HAST-replicated instead, formatted
   and mounted via a new `internal/ufsmount` package (a jail needs a
   real filesystem to chroot into, unlike a VM's disk which uses the
-  raw HAST device directly). See
+  raw HAST device directly). Verified live on a real 2-node cluster,
+  both plain and HAST-replicated (`hastctl` reaching `role: primary`/
+  `status: complete` and `role: secondary`/`status: complete`, with a
+  real write propagating between them) — this also caught and fixed
+  two real bugs in the HAST role-reconciliation logic VM replication
+  already shared, both now covered by regression tests. See
   [ADR-0027](docs/adr/0027-jail-orchestration.md).
 - **Resource reclaim** — a VM reassigned to a different node no longer
   leaks its old node's dataset/bhyve VM: the reconciler detects and
@@ -142,10 +147,7 @@ each design decision, in order.
   actually run bhyve VMs, so this is data redundancy, not HA. A
   replica's dataset also isn't cleaned up once its VM's (or jail's)
   record is fully purged (a deliberate consequence of never inferring
-  teardown from an absent record - see ADR-0026/ADR-0027). Jail
-  orchestration itself is implemented and tested but not yet
-  live-verified against the project's real FreeBSD machines the way
-  VM HAST replication was (see ADR-0027's own consequences)
+  teardown from an absent record - see ADR-0026/ADR-0027)
 - Node scheduling: nothing decides which cluster node a VM should run on
   beyond whatever a caller sets directly, and `MigrateVM` doesn't exist
 - Multi-node console/network access: the noVNC console and the Networks
