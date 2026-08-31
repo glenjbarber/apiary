@@ -137,6 +137,16 @@ each design decision, in order.
   work on a record already marked for deletion, and never touch that
   (unreachable) node's real resources.
   See [ADR-0025](docs/adr/0025-resource-reclaim.md).
+- **Manual VM/jail migration** — `MigrateVM`/`MigrateJail` move a
+  VM/jail's ownership to a second node, but only when that node is
+  already a synced HAST replica (any other target would silently
+  destroy the VM/jail's real data - see the ADR). Verified live: a
+  real HAST-replicated jail failed over from `apiarium` to
+  `freebsd-apiary` for real, `hastctl` reaching `status: complete` on
+  both sides before and after. This also caught a serious latent bug -
+  and surfaced a real, still-open gap - in how the reconciler writes
+  back to raft when a resource's owning node isn't the current raft
+  leader. See [ADR-0028](docs/adr/0028-migrate-vm-and-jail.md).
 
 **Not yet implemented:**
 
@@ -149,8 +159,20 @@ each design decision, in order.
   replica's dataset also isn't cleaned up once its VM's (or jail's)
   record is fully purged (a deliberate consequence of never inferring
   teardown from an absent record - see ADR-0026/ADR-0027)
-- Node scheduling: nothing decides which cluster node a VM should run on
-  beyond whatever a caller sets directly, and `MigrateVM` doesn't exist
+- Node scheduling: nothing decides which cluster node a VM should run
+  on beyond whatever a caller sets directly (`MigrateVM`/`MigrateJail`
+  now exist, but only as a manual, explicit operator action - see
+  ADR-0028)
+- **A VM/jail's owning node must also be the current raft leader for
+  its reconciler to successfully report phase updates or complete a
+  delete's final purge** - discovered live via ADR-0028's own
+  migration testing. The physical resource (dataset, bhyve VM, jail)
+  still converges correctly either way; only the raft-side bookkeeping
+  silently fails to write on a non-leader owner (now at least logged
+  as a repeating reconcile error, not silent). No fix yet - would need
+  a networked path for a follower to retry an `Apply` against the real
+  leader, which doesn't exist today (`raftd`'s internal API is
+  deliberately Unix-socket-only, per node)
 - Multi-node console/network access: the noVNC console and the Networks
   page's bridge status both only work when the web UI and the VM/
   network's owning node are the same machine (see ADR-0020/ADR-0022) —

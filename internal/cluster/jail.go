@@ -236,7 +236,9 @@ func (r *Reconciler) applyJailPhase(ctx context.Context, id, phase, phaseError s
 }
 
 // purgeJail submits a PurgeJail command, mirroring teardownVM's own
-// PurgeVM submission exactly.
+// PurgeVM submission exactly - including checking ApplyResponse.Error,
+// not just the transport error (see that call site's own comment for
+// why this matters - ADR-0028).
 func (r *Reconciler) purgeJail(ctx context.Context, id string) error {
 	cmd := &internalpb.Command{
 		Op: &internalpb.Command_PurgeJail{PurgeJail: &internalpb.PurgeJail{Id: id}},
@@ -245,8 +247,12 @@ func (r *Reconciler) purgeJail(ctx context.Context, id string) error {
 	if err != nil {
 		return fmt.Errorf("marshaling PurgeJail: %w", err)
 	}
-	if _, err := r.Raft.Apply(ctx, data, phaseApplyTimeout); err != nil {
+	resp, err := r.Raft.Apply(ctx, data, phaseApplyTimeout)
+	if err != nil {
 		return fmt.Errorf("purging jail record: %w", err)
+	}
+	if resp.GetError() != "" {
+		return fmt.Errorf("purging jail record: %s", resp.GetError())
 	}
 	return nil
 }

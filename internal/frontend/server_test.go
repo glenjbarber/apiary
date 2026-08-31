@@ -105,6 +105,14 @@ func (f *fakeClient) ForcePurgeJail(context.Context, *rpcpb.ForcePurgeJailReques
 	return &rpcpb.ForcePurgeJailResponse{}, nil
 }
 
+func (f *fakeClient) MigrateVM(context.Context, *rpcpb.MigrateVMRequest, ...grpc.CallOption) (*rpcpb.MigrateVMResponse, error) {
+	return &rpcpb.MigrateVMResponse{}, nil
+}
+
+func (f *fakeClient) MigrateJail(context.Context, *rpcpb.MigrateJailRequest, ...grpc.CallOption) (*rpcpb.MigrateJailResponse, error) {
+	return &rpcpb.MigrateJailResponse{}, nil
+}
+
 func (f *fakeClient) GetVM(context.Context, *rpcpb.GetVMRequest, ...grpc.CallOption) (*rpcpb.GetVMResponse, error) {
 	return &rpcpb.GetVMResponse{}, nil
 }

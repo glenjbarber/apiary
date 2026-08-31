@@ -360,6 +360,53 @@ func (s *Server) ForcePurgeVM(ctx context.Context, req *rpcpb.ForcePurgeVMReques
 	return &rpcpb.ForcePurgeVMResponse{Vm: fromInternalVM(vm), Error: appErr, LeaderHint: leaderHint}, nil
 }
 
+// MigrateVM implements rpcpb.ManagerServiceServer. See its own proto
+// doc comment for the full reasoning behind the "target_node_id must
+// already be this VM's replica_node_id" requirement (ADR-0028) - in
+// short, any other target would silently destroy the VM's real disk
+// data (the old node's reconciler tears it down via ADR-0025's
+// resource reclaim, and the new node has never seen the disk at all).
+func (s *Server) MigrateVM(ctx context.Context, req *rpcpb.MigrateVMRequest) (*rpcpb.MigrateVMResponse, error) {
+	if req.GetTargetNodeId() == "" {
+		return &rpcpb.MigrateVMResponse{Error: "target_node_id must be set"}, nil
+	}
+
+	getResp, err := s.raft.GetVM(ctx, req.GetId())
+	if err != nil {
+		return &rpcpb.MigrateVMResponse{Error: err.Error()}, nil
+	}
+	if getResp.GetError() != "" {
+		return &rpcpb.MigrateVMResponse{Error: getResp.GetError(), LeaderHint: getResp.GetLeaderHint()}, nil
+	}
+	if !getResp.GetFound() {
+		return &rpcpb.MigrateVMResponse{Error: fmt.Sprintf("VM %q not found", req.GetId())}, nil
+	}
+	vm := getResp.GetVm()
+	if vm.GetDesiredState() == internalpb.VMState_VM_STATE_DELETING {
+		return &rpcpb.MigrateVMResponse{Error: fmt.Sprintf("VM %q is marked for deletion, cannot migrate", req.GetId())}, nil
+	}
+	if req.GetTargetNodeId() == vm.GetNodeId() {
+		return &rpcpb.MigrateVMResponse{Error: fmt.Sprintf("VM %q is already assigned to node %q", req.GetId(), req.GetTargetNodeId())}, nil
+	}
+	if vm.GetReplicaNodeId() != req.GetTargetNodeId() {
+		return &rpcpb.MigrateVMResponse{Error: fmt.Sprintf(
+			"MigrateVM requires target_node_id (%q) to already be this VM's replica_node_id (currently %q) - a synced HAST secondary. "+
+				"Set replica_node_id via UpdateVM first, confirm hastctl reports status: complete on the target, then migrate.",
+			req.GetTargetNodeId(), vm.GetReplicaNodeId(),
+		)}, nil
+	}
+
+	updated := proto.Clone(vm).(*internalpb.VMDefinition)
+	updated.NodeId = req.GetTargetNodeId()
+	updated.ReplicaNodeId = vm.GetNodeId()
+
+	cmd := &internalpb.Command{
+		Op: &internalpb.Command_UpdateVm{UpdateVm: &internalpb.UpdateVM{Vm: updated}},
+	}
+	result, appErr, leaderHint := s.applyCommand(ctx, cmd, req.GetTimeoutMs())
+	return &rpcpb.MigrateVMResponse{Vm: fromInternalVM(result), Error: appErr, LeaderHint: leaderHint}, nil
+}
+
 // GetVM implements rpcpb.ManagerServiceServer.
 func (s *Server) GetVM(ctx context.Context, req *rpcpb.GetVMRequest) (*rpcpb.GetVMResponse, error) {
 	resp, err := s.raft.GetVM(ctx, req.GetId())
@@ -623,6 +670,49 @@ func (s *Server) ForcePurgeJail(ctx context.Context, req *rpcpb.ForcePurgeJailRe
 	}
 	jail, appErr, leaderHint := s.applyJailCommand(ctx, cmd, req.GetTimeoutMs())
 	return &rpcpb.ForcePurgeJailResponse{Jail: fromInternalJail(jail), Error: appErr, LeaderHint: leaderHint}, nil
+}
+
+// MigrateJail mirrors MigrateVM exactly - see its own doc comment for
+// the full reasoning, which applies identically here.
+func (s *Server) MigrateJail(ctx context.Context, req *rpcpb.MigrateJailRequest) (*rpcpb.MigrateJailResponse, error) {
+	if req.GetTargetNodeId() == "" {
+		return &rpcpb.MigrateJailResponse{Error: "target_node_id must be set"}, nil
+	}
+
+	getResp, err := s.raft.GetJail(ctx, req.GetId())
+	if err != nil {
+		return &rpcpb.MigrateJailResponse{Error: err.Error()}, nil
+	}
+	if getResp.GetError() != "" {
+		return &rpcpb.MigrateJailResponse{Error: getResp.GetError(), LeaderHint: getResp.GetLeaderHint()}, nil
+	}
+	if !getResp.GetFound() {
+		return &rpcpb.MigrateJailResponse{Error: fmt.Sprintf("jail %q not found", req.GetId())}, nil
+	}
+	jail := getResp.GetJail()
+	if jail.GetDesiredState() == internalpb.JailState_JAIL_STATE_DELETING {
+		return &rpcpb.MigrateJailResponse{Error: fmt.Sprintf("jail %q is marked for deletion, cannot migrate", req.GetId())}, nil
+	}
+	if req.GetTargetNodeId() == jail.GetNodeId() {
+		return &rpcpb.MigrateJailResponse{Error: fmt.Sprintf("jail %q is already assigned to node %q", req.GetId(), req.GetTargetNodeId())}, nil
+	}
+	if jail.GetReplicaNodeId() != req.GetTargetNodeId() {
+		return &rpcpb.MigrateJailResponse{Error: fmt.Sprintf(
+			"MigrateJail requires target_node_id (%q) to already be this jail's replica_node_id (currently %q) - a synced HAST secondary. "+
+				"Set replica_node_id via UpdateJail first, confirm hastctl reports status: complete on the target, then migrate.",
+			req.GetTargetNodeId(), jail.GetReplicaNodeId(),
+		)}, nil
+	}
+
+	updated := proto.Clone(jail).(*internalpb.JailDefinition)
+	updated.NodeId = req.GetTargetNodeId()
+	updated.ReplicaNodeId = jail.GetNodeId()
+
+	cmd := &internalpb.Command{
+		Op: &internalpb.Command_UpdateJail{UpdateJail: &internalpb.UpdateJail{Jail: updated}},
+	}
+	result, appErr, leaderHint := s.applyJailCommand(ctx, cmd, req.GetTimeoutMs())
+	return &rpcpb.MigrateJailResponse{Jail: fromInternalJail(result), Error: appErr, LeaderHint: leaderHint}, nil
 }
 
 // ListJails implements rpcpb.ManagerServiceServer.

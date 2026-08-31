@@ -51,6 +51,11 @@ type fakeClient struct {
 	lastGetJailReq    *rpcpb.GetJailRequest
 	lastDeleteJailReq *rpcpb.DeleteJailRequest
 
+	migrateVMResp      *rpcpb.MigrateVMResponse
+	migrateJailResp    *rpcpb.MigrateJailResponse
+	lastMigrateVMReq   *rpcpb.MigrateVMRequest
+	lastMigrateJailReq *rpcpb.MigrateJailRequest
+
 	createNetworkResp *rpcpb.CreateNetworkResponse
 	deleteNetworkResp *rpcpb.DeleteNetworkResponse
 	listNetworksResp  *rpcpb.ListNetworksResponse
@@ -85,6 +90,22 @@ func (f *fakeClient) ForcePurgeVM(context.Context, *rpcpb.ForcePurgeVMRequest, .
 
 func (f *fakeClient) ForcePurgeJail(context.Context, *rpcpb.ForcePurgeJailRequest, ...grpc.CallOption) (*rpcpb.ForcePurgeJailResponse, error) {
 	return &rpcpb.ForcePurgeJailResponse{}, nil
+}
+
+func (f *fakeClient) MigrateVM(_ context.Context, in *rpcpb.MigrateVMRequest, _ ...grpc.CallOption) (*rpcpb.MigrateVMResponse, error) {
+	f.lastMigrateVMReq = in
+	if f.migrateVMResp != nil {
+		return f.migrateVMResp, nil
+	}
+	return &rpcpb.MigrateVMResponse{}, nil
+}
+
+func (f *fakeClient) MigrateJail(_ context.Context, in *rpcpb.MigrateJailRequest, _ ...grpc.CallOption) (*rpcpb.MigrateJailResponse, error) {
+	f.lastMigrateJailReq = in
+	if f.migrateJailResp != nil {
+		return f.migrateJailResp, nil
+	}
+	return &rpcpb.MigrateJailResponse{}, nil
 }
 
 func (f *fakeClient) GetVM(_ context.Context, in *rpcpb.GetVMRequest, _ ...grpc.CallOption) (*rpcpb.GetVMResponse, error) {
@@ -643,5 +664,64 @@ func TestServer_ListNetworks_Empty(t *testing.T) {
 	}
 	if rec.Body.String() != "[]\n" {
 		t.Errorf("body = %q, want an empty JSON array, not null", rec.Body.String())
+	}
+}
+
+func TestServer_MigrateVM(t *testing.T) {
+	client := &fakeClient{migrateVMResp: &rpcpb.MigrateVMResponse{
+		Vm: &rpcpb.VMDefinition{Id: "vm-1", NodeId: "node-b", ReplicaNodeId: "node-a"},
+	}}
+	s := NewServer(client)
+
+	rec := doRequest(t, s, http.MethodPost, "/v1/vms/vm-1/migrate", migrateRequestBody{TargetNodeID: "node-b"})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	if client.lastMigrateVMReq.GetId() != "vm-1" || client.lastMigrateVMReq.GetTargetNodeId() != "node-b" {
+		t.Errorf("forwarded request = %+v, want id=vm-1 target_node_id=node-b", client.lastMigrateVMReq)
+	}
+
+	var got vm
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decoding response: %v", err)
+	}
+	if got.NodeID != "node-b" || got.ReplicaNodeID != "node-a" {
+		t.Errorf("response = %+v, want node_id=node-b replica_node_id=node-a", got)
+	}
+}
+
+func TestServer_MigrateVM_ApplicationErrorIsBadRequest(t *testing.T) {
+	client := &fakeClient{migrateVMResp: &rpcpb.MigrateVMResponse{Error: "MigrateVM requires target_node_id to already be this VM's replica_node_id"}}
+	s := NewServer(client)
+
+	rec := doRequest(t, s, http.MethodPost, "/v1/vms/vm-1/migrate", migrateRequestBody{TargetNodeID: "node-b"})
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400; body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestServer_MigrateJail(t *testing.T) {
+	client := &fakeClient{migrateJailResp: &rpcpb.MigrateJailResponse{
+		Jail: &rpcpb.JailDefinition{Id: "jail-1", NodeId: "node-b", ReplicaNodeId: "node-a"},
+	}}
+	s := NewServer(client)
+
+	rec := doRequest(t, s, http.MethodPost, "/v1/jails/jail-1/migrate", migrateRequestBody{TargetNodeID: "node-b"})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	if client.lastMigrateJailReq.GetId() != "jail-1" || client.lastMigrateJailReq.GetTargetNodeId() != "node-b" {
+		t.Errorf("forwarded request = %+v, want id=jail-1 target_node_id=node-b", client.lastMigrateJailReq)
+	}
+}
+
+func TestServer_MigrateVM_InvalidJSON(t *testing.T) {
+	s := NewServer(&fakeClient{})
+	req := httptest.NewRequest(http.MethodPost, "/v1/vms/vm-1/migrate", bytes.NewBufferString("not json"))
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want 400", rec.Code)
 	}
 }

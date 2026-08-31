@@ -34,6 +34,12 @@ type fakeRaftClient struct {
 
 	applied  []*internalpb.Command
 	applyErr error
+
+	// applyRespErr simulates an application-level Apply rejection (e.g.
+	// "this node is not the leader") - the gRPC call itself succeeds
+	// (err is nil), but ApplyResponse.Error is set. Distinct from
+	// applyErr, which simulates the transport itself failing.
+	applyRespErr string
 }
 
 func (f *fakeRaftClient) Status(context.Context) (*internalpb.StatusResponse, error) {
@@ -64,6 +70,9 @@ func (f *fakeRaftClient) ListJailsLocal(context.Context) (*internalpb.ListJailsR
 func (f *fakeRaftClient) Apply(_ context.Context, payload []byte, _ time.Duration) (*internalpb.ApplyResponse, error) {
 	if f.applyErr != nil {
 		return nil, f.applyErr
+	}
+	if f.applyRespErr != "" {
+		return &internalpb.ApplyResponse{Error: f.applyRespErr}, nil
 	}
 	var cmd internalpb.Command
 	if err := proto.Unmarshal(payload, &cmd); err != nil {
@@ -485,6 +494,33 @@ func TestReconciler_RunOnce_DeletingVMPropagatesTeardownError(t *testing.T) {
 	}
 	if got := raft.purgedIDs(); len(got) != 0 {
 		t.Errorf("purgedIDs = %v, want none (teardown failed, must not purge)", got)
+	}
+}
+
+// TestReconciler_RunOnce_DeletingVMPropagatesRejectedPurge is a
+// regression test for a real bug caught live migrating a jail to a
+// node that wasn't the raft leader: an Apply call that's rejected at
+// the application level (e.g. "not the leader") comes back as a
+// normal, non-error ApplyResponse with Error set, not a transport
+// error - teardownVM's purge step only checked the transport error,
+// so a rejected purge was silently treated as success. The real jail/
+// dataset had already been destroyed by this point, so the failure
+// was invisible: no error logged, next tick just moved on, and the
+// raft record was never actually purged - a permanent tombstone with
+// no real resources left to reconcile. See ADR-0028.
+func TestReconciler_RunOnce_DeletingVMPropagatesRejectedPurge(t *testing.T) {
+	raft := &fakeRaftClient{
+		resp: &internalpb.ListVMsResponse{
+			Vms: []*internalpb.VMDefinition{{Id: "vm-1", NodeId: "node-a", DesiredState: internalpb.VMState_VM_STATE_DELETING}},
+		},
+		applyRespErr: "raft: this node is not the leader",
+	}
+	zfs := newFakeDatasetManager()
+	zfs.existing["vm-1"] = true
+
+	r := &Reconciler{Raft: raft, ZFS: zfs, LocalNodeID: "node-a"}
+	if err := r.RunOnce(context.Background()); err == nil {
+		t.Fatalf("RunOnce() = nil error, want the rejected purge surfaced as an error")
 	}
 }
 

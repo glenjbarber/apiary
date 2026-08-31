@@ -182,6 +182,29 @@ func TestReconciler_RunOnce_DeletingJailTearsDownAndPurges(t *testing.T) {
 	}
 }
 
+// TestReconciler_RunOnce_DeletingJailPropagatesRejectedPurge mirrors
+// TestReconciler_RunOnce_DeletingVMPropagatesRejectedPurge exactly -
+// see its own doc comment (ADR-0028) for the real bug this guards
+// against: a rejected Apply (e.g. "not the leader") must not be
+// silently treated as a successful purge.
+func TestReconciler_RunOnce_DeletingJailPropagatesRejectedPurge(t *testing.T) {
+	raft := &fakeRaftClient{
+		jailsResp: &internalpb.ListJailsResponse{
+			Jails: []*internalpb.JailDefinition{{Id: "jail-1", NodeId: "node-a", DesiredState: internalpb.JailState_JAIL_STATE_DELETING}},
+		},
+		applyRespErr: "raft: this node is not the leader",
+	}
+	zfs2 := newFakeDatasetManager()
+	zfs2.existing["jail-1"] = true
+	jm2 := newFakeJailManager()
+	jm2.running["jail-1"] = true
+
+	r2 := &Reconciler{Raft: raft, ZFS: zfs2, Jail: jm2, LocalNodeID: "node-a"}
+	if err := r2.RunOnce(context.Background()); err == nil {
+		t.Fatalf("RunOnce() = nil error, want the rejected purge surfaced as an error")
+	}
+}
+
 func TestReconciler_RunOnce_ReclaimsJailResourcesForJailReassignedElsewhere(t *testing.T) {
 	raft := &fakeRaftClient{
 		jailsResp: &internalpb.ListJailsResponse{

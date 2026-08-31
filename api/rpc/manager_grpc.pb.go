@@ -24,6 +24,7 @@ const (
 	ManagerService_UpdateVM_FullMethodName       = "/apiary.rpc.v1.ManagerService/UpdateVM"
 	ManagerService_DeleteVM_FullMethodName       = "/apiary.rpc.v1.ManagerService/DeleteVM"
 	ManagerService_ForcePurgeVM_FullMethodName   = "/apiary.rpc.v1.ManagerService/ForcePurgeVM"
+	ManagerService_MigrateVM_FullMethodName      = "/apiary.rpc.v1.ManagerService/MigrateVM"
 	ManagerService_GetVM_FullMethodName          = "/apiary.rpc.v1.ManagerService/GetVM"
 	ManagerService_ListVMs_FullMethodName        = "/apiary.rpc.v1.ManagerService/ListVMs"
 	ManagerService_UploadISO_FullMethodName      = "/apiary.rpc.v1.ManagerService/UploadISO"
@@ -43,6 +44,7 @@ const (
 	ManagerService_GetJail_FullMethodName        = "/apiary.rpc.v1.ManagerService/GetJail"
 	ManagerService_ListJails_FullMethodName      = "/apiary.rpc.v1.ManagerService/ListJails"
 	ManagerService_ForcePurgeJail_FullMethodName = "/apiary.rpc.v1.ManagerService/ForcePurgeJail"
+	ManagerService_MigrateJail_FullMethodName    = "/apiary.rpc.v1.ManagerService/MigrateJail"
 )
 
 // ManagerServiceClient is the client API for ManagerService service.
@@ -70,6 +72,30 @@ type ManagerServiceClient interface {
 	// confirmed gone for good; otherwise its resources are silently
 	// orphaned with no record left to indicate they exist.
 	ForcePurgeVM(ctx context.Context, in *ForcePurgeVMRequest, opts ...grpc.CallOption) (*ForcePurgeVMResponse, error)
+	// MigrateVM is a manual, explicit, human-triggered operation moving
+	// a VM's ownership to target_node_id - Apiary has no automatic
+	// scheduling (CLAUDE.md's deliberate stance), so this exists purely
+	// to fill the "there's no way to move a VM at all" gap, not to add
+	// scheduling logic. It only succeeds when target_node_id is already
+	// this VM's replica_node_id - i.e., a HAST secondary already holding
+	// a synced copy of the disk (see ADR-0026/ADR-0028) - since for any
+	// other target, the VM's disk isn't present there at all: the
+	// reconciler would tear down the real disk on the old node
+	// (ADR-0025's resource reclaim) and provision a brand-new EMPTY one
+	// on the new node, silently destroying the VM's actual data. This
+	// isn't a technical limitation to remove later - it's the same
+	// "never allow a silently destructive default" caution this
+	// project has applied everywhere else. To migrate a VM with no
+	// existing replica: set replica_node_id via UpdateVM first, confirm
+	// real replication has reached hastctl's own "status: complete" on
+	// the target, then call MigrateVM.
+	//
+	// On success, node_id and replica_node_id are swapped (the old
+	// owner becomes the new secondary, continuing replication back) -
+	// the reconciler's existing HAST role machinery converges this
+	// exactly like any other role change, no new reconciler logic
+	// involved.
+	MigrateVM(ctx context.Context, in *MigrateVMRequest, opts ...grpc.CallOption) (*MigrateVMResponse, error)
 	// GetVM and ListVMs only succeed against the current leader - see
 	// api/internalpb/raftd.proto's GetVM/ListVMs doc comments for why v1's
 	// read consistency model is deliberately as simple as its write model.
@@ -128,6 +154,11 @@ type ManagerServiceClient interface {
 	// it away. See ForcePurgeVM's own doc comment above for the full
 	// reasoning - it applies identically here.
 	ForcePurgeJail(ctx context.Context, in *ForcePurgeJailRequest, opts ...grpc.CallOption) (*ForcePurgeJailResponse, error)
+	// MigrateJail mirrors MigrateVM exactly, for jails instead of VMs -
+	// see MigrateVM's own doc comment above for the full reasoning
+	// (including the "target must already be a synced HAST replica"
+	// safety requirement), which applies identically here.
+	MigrateJail(ctx context.Context, in *MigrateJailRequest, opts ...grpc.CallOption) (*MigrateJailResponse, error)
 }
 
 type managerServiceClient struct {
@@ -182,6 +213,16 @@ func (c *managerServiceClient) ForcePurgeVM(ctx context.Context, in *ForcePurgeV
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(ForcePurgeVMResponse)
 	err := c.cc.Invoke(ctx, ManagerService_ForcePurgeVM_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *managerServiceClient) MigrateVM(ctx context.Context, in *MigrateVMRequest, opts ...grpc.CallOption) (*MigrateVMResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(MigrateVMResponse)
+	err := c.cc.Invoke(ctx, ManagerService_MigrateVM_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -381,6 +422,16 @@ func (c *managerServiceClient) ForcePurgeJail(ctx context.Context, in *ForcePurg
 	return out, nil
 }
 
+func (c *managerServiceClient) MigrateJail(ctx context.Context, in *MigrateJailRequest, opts ...grpc.CallOption) (*MigrateJailResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(MigrateJailResponse)
+	err := c.cc.Invoke(ctx, ManagerService_MigrateJail_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // ManagerServiceServer is the server API for ManagerService service.
 // All implementations must embed UnimplementedManagerServiceServer
 // for forward compatibility.
@@ -406,6 +457,30 @@ type ManagerServiceServer interface {
 	// confirmed gone for good; otherwise its resources are silently
 	// orphaned with no record left to indicate they exist.
 	ForcePurgeVM(context.Context, *ForcePurgeVMRequest) (*ForcePurgeVMResponse, error)
+	// MigrateVM is a manual, explicit, human-triggered operation moving
+	// a VM's ownership to target_node_id - Apiary has no automatic
+	// scheduling (CLAUDE.md's deliberate stance), so this exists purely
+	// to fill the "there's no way to move a VM at all" gap, not to add
+	// scheduling logic. It only succeeds when target_node_id is already
+	// this VM's replica_node_id - i.e., a HAST secondary already holding
+	// a synced copy of the disk (see ADR-0026/ADR-0028) - since for any
+	// other target, the VM's disk isn't present there at all: the
+	// reconciler would tear down the real disk on the old node
+	// (ADR-0025's resource reclaim) and provision a brand-new EMPTY one
+	// on the new node, silently destroying the VM's actual data. This
+	// isn't a technical limitation to remove later - it's the same
+	// "never allow a silently destructive default" caution this
+	// project has applied everywhere else. To migrate a VM with no
+	// existing replica: set replica_node_id via UpdateVM first, confirm
+	// real replication has reached hastctl's own "status: complete" on
+	// the target, then call MigrateVM.
+	//
+	// On success, node_id and replica_node_id are swapped (the old
+	// owner becomes the new secondary, continuing replication back) -
+	// the reconciler's existing HAST role machinery converges this
+	// exactly like any other role change, no new reconciler logic
+	// involved.
+	MigrateVM(context.Context, *MigrateVMRequest) (*MigrateVMResponse, error)
 	// GetVM and ListVMs only succeed against the current leader - see
 	// api/internalpb/raftd.proto's GetVM/ListVMs doc comments for why v1's
 	// read consistency model is deliberately as simple as its write model.
@@ -464,6 +539,11 @@ type ManagerServiceServer interface {
 	// it away. See ForcePurgeVM's own doc comment above for the full
 	// reasoning - it applies identically here.
 	ForcePurgeJail(context.Context, *ForcePurgeJailRequest) (*ForcePurgeJailResponse, error)
+	// MigrateJail mirrors MigrateVM exactly, for jails instead of VMs -
+	// see MigrateVM's own doc comment above for the full reasoning
+	// (including the "target must already be a synced HAST replica"
+	// safety requirement), which applies identically here.
+	MigrateJail(context.Context, *MigrateJailRequest) (*MigrateJailResponse, error)
 	mustEmbedUnimplementedManagerServiceServer()
 }
 
@@ -488,6 +568,9 @@ func (UnimplementedManagerServiceServer) DeleteVM(context.Context, *DeleteVMRequ
 }
 func (UnimplementedManagerServiceServer) ForcePurgeVM(context.Context, *ForcePurgeVMRequest) (*ForcePurgeVMResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ForcePurgeVM not implemented")
+}
+func (UnimplementedManagerServiceServer) MigrateVM(context.Context, *MigrateVMRequest) (*MigrateVMResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method MigrateVM not implemented")
 }
 func (UnimplementedManagerServiceServer) GetVM(context.Context, *GetVMRequest) (*GetVMResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetVM not implemented")
@@ -545,6 +628,9 @@ func (UnimplementedManagerServiceServer) ListJails(context.Context, *ListJailsRe
 }
 func (UnimplementedManagerServiceServer) ForcePurgeJail(context.Context, *ForcePurgeJailRequest) (*ForcePurgeJailResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ForcePurgeJail not implemented")
+}
+func (UnimplementedManagerServiceServer) MigrateJail(context.Context, *MigrateJailRequest) (*MigrateJailResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method MigrateJail not implemented")
 }
 func (UnimplementedManagerServiceServer) mustEmbedUnimplementedManagerServiceServer() {}
 func (UnimplementedManagerServiceServer) testEmbeddedByValue()                        {}
@@ -653,6 +739,24 @@ func _ManagerService_ForcePurgeVM_Handler(srv interface{}, ctx context.Context, 
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(ManagerServiceServer).ForcePurgeVM(ctx, req.(*ForcePurgeVMRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ManagerService_MigrateVM_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(MigrateVMRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ManagerServiceServer).MigrateVM(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ManagerService_MigrateVM_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ManagerServiceServer).MigrateVM(ctx, req.(*MigrateVMRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -988,6 +1092,24 @@ func _ManagerService_ForcePurgeJail_Handler(srv interface{}, ctx context.Context
 	return interceptor(ctx, in, info, handler)
 }
 
+func _ManagerService_MigrateJail_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(MigrateJailRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ManagerServiceServer).MigrateJail(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ManagerService_MigrateJail_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ManagerServiceServer).MigrateJail(ctx, req.(*MigrateJailRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // ManagerService_ServiceDesc is the grpc.ServiceDesc for ManagerService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -1014,6 +1136,10 @@ var ManagerService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ForcePurgeVM",
 			Handler:    _ManagerService_ForcePurgeVM_Handler,
+		},
+		{
+			MethodName: "MigrateVM",
+			Handler:    _ManagerService_MigrateVM_Handler,
 		},
 		{
 			MethodName: "GetVM",
@@ -1086,6 +1212,10 @@ var ManagerService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ForcePurgeJail",
 			Handler:    _ManagerService_ForcePurgeJail_Handler,
+		},
+		{
+			MethodName: "MigrateJail",
+			Handler:    _ManagerService_MigrateJail_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{

@@ -545,8 +545,24 @@ func (r *Reconciler) teardownVM(ctx context.Context, vm VMPlacement) error {
 	if err != nil {
 		return fmt.Errorf("marshaling PurgeVM: %w", err)
 	}
-	if _, err := r.Raft.Apply(ctx, data, phaseApplyTimeout); err != nil {
+	resp, err := r.Raft.Apply(ctx, data, phaseApplyTimeout)
+	if err != nil {
 		return fmt.Errorf("purging VM record: %w", err)
+	}
+	// A non-nil transport err above only covers the gRPC call to raftd
+	// itself failing - a rejected Apply (e.g. this node's own raftd
+	// isn't the current raft leader) comes back as a normal, non-error
+	// ApplyResponse with Error set instead, and was silently ignored
+	// here until caught live: a jail migrated onto a node that wasn't
+	// also the raft leader had its real jail(8)/dataset torn down
+	// correctly, but its raft record never got purged - reconcile kept
+	// reporting success every tick while the tombstone sat there
+	// forever. See ADR-0028's own honest account of this gap: checking
+	// the error here surfaces the failure instead of hiding it, but
+	// doesn't yet give a non-leader node any way to actually retry
+	// against the real leader.
+	if resp.GetError() != "" {
+		return fmt.Errorf("purging VM record: %s", resp.GetError())
 	}
 	return nil
 }

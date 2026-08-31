@@ -961,3 +961,173 @@ func TestIntegration_ForcePurgeJail_MissingIsError(t *testing.T) {
 		t.Fatalf("ForcePurgeJail() error = empty, want a not-found rejection")
 	}
 }
+
+func TestIntegration_MigrateVM_RequiresExistingReplicaAtTarget(t *testing.T) {
+	raftdSocket := newRaftdUDSSocket(t)
+	client := newManagerdRPCClient(t, raftdSocket)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if _, err := client.CreateVM(ctx, &rpcpb.CreateVMRequest{
+		Vm: &rpcpb.VMDefinition{Id: "vm-1", Name: "web-1", NodeId: "node-a"},
+	}); err != nil {
+		t.Fatalf("CreateVM() error: %v", err)
+	}
+
+	// No replica_node_id set at all - must be rejected.
+	resp, err := client.MigrateVM(ctx, &rpcpb.MigrateVMRequest{Id: "vm-1", TargetNodeId: "node-b"})
+	if err != nil {
+		t.Fatalf("MigrateVM() error: %v", err)
+	}
+	if resp.GetError() == "" {
+		t.Fatalf("MigrateVM() error = empty, want a rejection (no replica at target)")
+	}
+
+	// replica_node_id set, but to a DIFFERENT node than the migration target.
+	if _, err := client.UpdateVM(ctx, &rpcpb.UpdateVMRequest{
+		Vm: &rpcpb.VMDefinition{Id: "vm-1", Name: "web-1", NodeId: "node-a", ReplicaNodeId: "node-c"},
+	}); err != nil {
+		t.Fatalf("UpdateVM() error: %v", err)
+	}
+	resp2, err := client.MigrateVM(ctx, &rpcpb.MigrateVMRequest{Id: "vm-1", TargetNodeId: "node-b"})
+	if err != nil {
+		t.Fatalf("MigrateVM() error: %v", err)
+	}
+	if resp2.GetError() == "" {
+		t.Fatalf("MigrateVM() error = empty, want a rejection (replica is at node-c, not node-b)")
+	}
+
+	if getResp, err := client.GetVM(ctx, &rpcpb.GetVMRequest{Id: "vm-1"}); err != nil || getResp.GetVm().GetNodeId() != "node-a" {
+		t.Fatalf("GetVM() after rejected migrations = %+v, want node_id still node-a", getResp)
+	}
+}
+
+func TestIntegration_MigrateVM_SwapsNodeAndReplica(t *testing.T) {
+	raftdSocket := newRaftdUDSSocket(t)
+	client := newManagerdRPCClient(t, raftdSocket)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if _, err := client.CreateVM(ctx, &rpcpb.CreateVMRequest{
+		Vm: &rpcpb.VMDefinition{Id: "vm-1", Name: "web-1", Vcpus: 2, NodeId: "node-a", ReplicaNodeId: "node-b"},
+	}); err != nil {
+		t.Fatalf("CreateVM() error: %v", err)
+	}
+
+	resp, err := client.MigrateVM(ctx, &rpcpb.MigrateVMRequest{Id: "vm-1", TargetNodeId: "node-b"})
+	if err != nil {
+		t.Fatalf("MigrateVM() error: %v", err)
+	}
+	if resp.GetError() != "" {
+		t.Fatalf("MigrateVM() returned error: %s", resp.GetError())
+	}
+	if resp.GetVm().GetNodeId() != "node-b" {
+		t.Errorf("MigrateVM() vm.NodeId = %q, want node-b", resp.GetVm().GetNodeId())
+	}
+	if resp.GetVm().GetReplicaNodeId() != "node-a" {
+		t.Errorf("MigrateVM() vm.ReplicaNodeId = %q, want node-a (old owner becomes new replica)", resp.GetVm().GetReplicaNodeId())
+	}
+	// Every other field must survive untouched - MigrateVM must not
+	// require (or risk) the caller re-supplying the whole definition.
+	if resp.GetVm().GetName() != "web-1" || resp.GetVm().GetVcpus() != 2 {
+		t.Errorf("MigrateVM() vm = %+v, want name/vcpus preserved from the original definition", resp.GetVm())
+	}
+
+	getResp, err := client.GetVM(ctx, &rpcpb.GetVMRequest{Id: "vm-1"})
+	if err != nil || !getResp.GetFound() {
+		t.Fatalf("GetVM() after migrate = (found=%v, err=%v)", getResp.GetFound(), err)
+	}
+	if getResp.GetVm().GetNodeId() != "node-b" || getResp.GetVm().GetReplicaNodeId() != "node-a" {
+		t.Errorf("GetVM() after migrate = %+v, want node_id=node-b replica_node_id=node-a", getResp.GetVm())
+	}
+}
+
+func TestIntegration_MigrateVM_RejectsDeletingVM(t *testing.T) {
+	raftdSocket := newRaftdUDSSocket(t)
+	client := newManagerdRPCClient(t, raftdSocket)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if _, err := client.CreateVM(ctx, &rpcpb.CreateVMRequest{
+		Vm: &rpcpb.VMDefinition{Id: "vm-1", NodeId: "node-a", ReplicaNodeId: "node-b"},
+	}); err != nil {
+		t.Fatalf("CreateVM() error: %v", err)
+	}
+	if _, err := client.DeleteVM(ctx, &rpcpb.DeleteVMRequest{Id: "vm-1"}); err != nil {
+		t.Fatalf("DeleteVM() error: %v", err)
+	}
+
+	resp, err := client.MigrateVM(ctx, &rpcpb.MigrateVMRequest{Id: "vm-1", TargetNodeId: "node-b"})
+	if err != nil {
+		t.Fatalf("MigrateVM() error: %v", err)
+	}
+	if resp.GetError() == "" {
+		t.Fatalf("MigrateVM() error = empty, want a rejection (VM marked for deletion)")
+	}
+}
+
+func TestIntegration_MigrateVM_MissingIsError(t *testing.T) {
+	raftdSocket := newRaftdUDSSocket(t)
+	client := newManagerdRPCClient(t, raftdSocket)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	resp, err := client.MigrateVM(ctx, &rpcpb.MigrateVMRequest{Id: "does-not-exist", TargetNodeId: "node-b"})
+	if err != nil {
+		t.Fatalf("MigrateVM() error: %v", err)
+	}
+	if resp.GetError() == "" {
+		t.Fatalf("MigrateVM() error = empty, want a not-found rejection")
+	}
+}
+
+func TestIntegration_MigrateJail_SwapsNodeAndReplica(t *testing.T) {
+	raftdSocket := newRaftdUDSSocket(t)
+	client := newManagerdRPCClient(t, raftdSocket)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if _, err := client.CreateJail(ctx, &rpcpb.CreateJailRequest{
+		Jail: &rpcpb.JailDefinition{Id: "jail-1", Name: "web-1", NodeId: "node-a", ReplicaNodeId: "node-b"},
+	}); err != nil {
+		t.Fatalf("CreateJail() error: %v", err)
+	}
+
+	resp, err := client.MigrateJail(ctx, &rpcpb.MigrateJailRequest{Id: "jail-1", TargetNodeId: "node-b"})
+	if err != nil {
+		t.Fatalf("MigrateJail() error: %v", err)
+	}
+	if resp.GetError() != "" {
+		t.Fatalf("MigrateJail() returned error: %s", resp.GetError())
+	}
+	if resp.GetJail().GetNodeId() != "node-b" || resp.GetJail().GetReplicaNodeId() != "node-a" {
+		t.Errorf("MigrateJail() jail = %+v, want node_id=node-b replica_node_id=node-a", resp.GetJail())
+	}
+}
+
+func TestIntegration_MigrateJail_RequiresExistingReplicaAtTarget(t *testing.T) {
+	raftdSocket := newRaftdUDSSocket(t)
+	client := newManagerdRPCClient(t, raftdSocket)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if _, err := client.CreateJail(ctx, &rpcpb.CreateJailRequest{
+		Jail: &rpcpb.JailDefinition{Id: "jail-1", NodeId: "node-a"},
+	}); err != nil {
+		t.Fatalf("CreateJail() error: %v", err)
+	}
+
+	resp, err := client.MigrateJail(ctx, &rpcpb.MigrateJailRequest{Id: "jail-1", TargetNodeId: "node-b"})
+	if err != nil {
+		t.Fatalf("MigrateJail() error: %v", err)
+	}
+	if resp.GetError() == "" {
+		t.Fatalf("MigrateJail() error = empty, want a rejection (no replica at target)")
+	}
+}

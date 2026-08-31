@@ -28,6 +28,31 @@ service ManagerService {
   // orphaned with no record left to indicate they exist.
   rpc ForcePurgeVM(ForcePurgeVMRequest) returns (ForcePurgeVMResponse);
 
+  // MigrateVM is a manual, explicit, human-triggered operation moving
+  // a VM's ownership to target_node_id - Apiary has no automatic
+  // scheduling (CLAUDE.md's deliberate stance), so this exists purely
+  // to fill the "there's no way to move a VM at all" gap, not to add
+  // scheduling logic. It only succeeds when target_node_id is already
+  // this VM's replica_node_id - i.e., a HAST secondary already holding
+  // a synced copy of the disk (see ADR-0026/ADR-0028) - since for any
+  // other target, the VM's disk isn't present there at all: the
+  // reconciler would tear down the real disk on the old node
+  // (ADR-0025's resource reclaim) and provision a brand-new EMPTY one
+  // on the new node, silently destroying the VM's actual data. This
+  // isn't a technical limitation to remove later - it's the same
+  // "never allow a silently destructive default" caution this
+  // project has applied everywhere else. To migrate a VM with no
+  // existing replica: set replica_node_id via UpdateVM first, confirm
+  // real replication has reached hastctl's own "status: complete" on
+  // the target, then call MigrateVM.
+  //
+  // On success, node_id and replica_node_id are swapped (the old
+  // owner becomes the new secondary, continuing replication back) -
+  // the reconciler's existing HAST role machinery converges this
+  // exactly like any other role change, no new reconciler logic
+  // involved.
+  rpc MigrateVM(MigrateVMRequest) returns (MigrateVMResponse);
+
   // GetVM and ListVMs only succeed against the current leader - see
   // api/internalpb/raftd.proto's GetVM/ListVMs doc comments for why v1's
   // read consistency model is deliberately as simple as its write model.
@@ -93,6 +118,12 @@ service ManagerService {
   // it away. See ForcePurgeVM's own doc comment above for the full
   // reasoning - it applies identically here.
   rpc ForcePurgeJail(ForcePurgeJailRequest) returns (ForcePurgeJailResponse);
+
+  // MigrateJail mirrors MigrateVM exactly, for jails instead of VMs -
+  // see MigrateVM's own doc comment above for the full reasoning
+  // (including the "target must already be a synced HAST replica"
+  // safety requirement), which applies identically here.
+  rpc MigrateJail(MigrateJailRequest) returns (MigrateJailResponse);
 }
 
 // VMState mirrors api/internalpb's VMState. Kept as a separate type
@@ -268,6 +299,23 @@ message ForcePurgeVMResponse {
 
   // error is set if the VM doesn't exist, or exists but isn't in
   // VM_STATE_DELETING yet (call DeleteVM first).
+  string error = 2;
+  string leader_hint = 3;
+}
+
+message MigrateVMRequest {
+  string id = 1;
+  string target_node_id = 2;
+  uint32 timeout_ms = 3;
+}
+
+message MigrateVMResponse {
+  // vm is the updated definition, echoed back for confirmation.
+  VMDefinition vm = 1;
+
+  // error is set if the VM doesn't exist, is marked for deletion, or
+  // target_node_id isn't already this VM's replica_node_id - see
+  // MigrateVM's own doc comment for why that last check exists.
   string error = 2;
   string leader_hint = 3;
 }
@@ -562,6 +610,23 @@ message ForcePurgeJailResponse {
 
   // error is set if the jail doesn't exist, or exists but isn't in
   // JAIL_STATE_DELETING yet (call DeleteJail first).
+  string error = 2;
+  string leader_hint = 3;
+}
+
+message MigrateJailRequest {
+  string id = 1;
+  string target_node_id = 2;
+  uint32 timeout_ms = 3;
+}
+
+message MigrateJailResponse {
+  // jail is the updated definition, echoed back for confirmation.
+  JailDefinition jail = 1;
+
+  // error is set if the jail doesn't exist, is marked for deletion, or
+  // target_node_id isn't already this jail's replica_node_id - see
+  // MigrateVM's own doc comment for why that last check exists.
   string error = 2;
   string leader_hint = 3;
 }

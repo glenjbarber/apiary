@@ -58,12 +58,14 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /v1/vms/{id}", s.handleGetVM)
 	s.mux.HandleFunc("PUT /v1/vms/{id}", s.handleUpdateVM)
 	s.mux.HandleFunc("DELETE /v1/vms/{id}", s.handleDeleteVM)
+	s.mux.HandleFunc("POST /v1/vms/{id}/migrate", s.handleMigrateVM)
 
 	s.mux.HandleFunc("POST /v1/jails", s.handleCreateJail)
 	s.mux.HandleFunc("GET /v1/jails", s.handleListJails)
 	s.mux.HandleFunc("GET /v1/jails/{id}", s.handleGetJail)
 	s.mux.HandleFunc("PUT /v1/jails/{id}", s.handleUpdateJail)
 	s.mux.HandleFunc("DELETE /v1/jails/{id}", s.handleDeleteJail)
+	s.mux.HandleFunc("POST /v1/jails/{id}/migrate", s.handleMigrateJail)
 
 	// NetworkDefinition has no external Update/Get-by-id RPC (see
 	// api/rpc/manager.proto's ManagerService - only Create/List/Delete
@@ -192,6 +194,45 @@ func (s *Server) handleListVMs(w http.ResponseWriter, r *http.Request) {
 		vms = append(vms, fromRPCVM(d))
 	}
 	writeJSON(w, http.StatusOK, vms)
+}
+
+// migrateRequestBody is the JSON body for both migrate endpoints.
+type migrateRequestBody struct {
+	TargetNodeID string `json:"target_node_id"`
+}
+
+func (s *Server) handleMigrateVM(w http.ResponseWriter, r *http.Request) {
+	var body migrateRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeJSON(w, http.StatusBadRequest, errorBody{Error: "invalid JSON body: " + err.Error()})
+		return
+	}
+
+	resp, err := s.client.MigrateVM(authContext(r), &rpcpb.MigrateVMRequest{
+		Id: r.PathValue("id"), TargetNodeId: body.TargetNodeID,
+	})
+	if err != nil || resp.GetError() != "" {
+		writeError(w, err, resp.GetError(), resp.GetLeaderHint())
+		return
+	}
+	writeJSON(w, http.StatusOK, fromRPCVM(resp.GetVm()))
+}
+
+func (s *Server) handleMigrateJail(w http.ResponseWriter, r *http.Request) {
+	var body migrateRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeJSON(w, http.StatusBadRequest, errorBody{Error: "invalid JSON body: " + err.Error()})
+		return
+	}
+
+	resp, err := s.client.MigrateJail(authContext(r), &rpcpb.MigrateJailRequest{
+		Id: r.PathValue("id"), TargetNodeId: body.TargetNodeID,
+	})
+	if err != nil || resp.GetError() != "" {
+		writeError(w, err, resp.GetError(), resp.GetLeaderHint())
+		return
+	}
+	writeJSON(w, http.StatusOK, fromRPCJail(resp.GetJail()))
 }
 
 func (s *Server) handleCreateJail(w http.ResponseWriter, r *http.Request) {
