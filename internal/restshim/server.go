@@ -58,6 +58,19 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /v1/vms/{id}", s.handleGetVM)
 	s.mux.HandleFunc("PUT /v1/vms/{id}", s.handleUpdateVM)
 	s.mux.HandleFunc("DELETE /v1/vms/{id}", s.handleDeleteVM)
+
+	s.mux.HandleFunc("POST /v1/jails", s.handleCreateJail)
+	s.mux.HandleFunc("GET /v1/jails", s.handleListJails)
+	s.mux.HandleFunc("GET /v1/jails/{id}", s.handleGetJail)
+	s.mux.HandleFunc("PUT /v1/jails/{id}", s.handleUpdateJail)
+	s.mux.HandleFunc("DELETE /v1/jails/{id}", s.handleDeleteJail)
+
+	// NetworkDefinition has no external Update/Get-by-id RPC (see
+	// api/rpc/manager.proto's ManagerService - only Create/List/Delete
+	// exist), so there's no PUT or GET /v1/networks/{id} to add here.
+	s.mux.HandleFunc("POST /v1/networks", s.handleCreateNetwork)
+	s.mux.HandleFunc("GET /v1/networks", s.handleListNetworks)
+	s.mux.HandleFunc("DELETE /v1/networks/{id}", s.handleDeleteNetwork)
 }
 
 // errorBody is the JSON shape returned for any non-2xx response.
@@ -179,4 +192,109 @@ func (s *Server) handleListVMs(w http.ResponseWriter, r *http.Request) {
 		vms = append(vms, fromRPCVM(d))
 	}
 	writeJSON(w, http.StatusOK, vms)
+}
+
+func (s *Server) handleCreateJail(w http.ResponseWriter, r *http.Request) {
+	var body jail
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeJSON(w, http.StatusBadRequest, errorBody{Error: "invalid JSON body: " + err.Error()})
+		return
+	}
+
+	resp, err := s.client.CreateJail(authContext(r), &rpcpb.CreateJailRequest{Jail: toRPCJail(body)})
+	if err != nil || resp.GetError() != "" {
+		writeError(w, err, resp.GetError(), resp.GetLeaderHint())
+		return
+	}
+	writeJSON(w, http.StatusCreated, fromRPCJail(resp.GetJail()))
+}
+
+func (s *Server) handleUpdateJail(w http.ResponseWriter, r *http.Request) {
+	var body jail
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeJSON(w, http.StatusBadRequest, errorBody{Error: "invalid JSON body: " + err.Error()})
+		return
+	}
+	body.ID = r.PathValue("id")
+
+	resp, err := s.client.UpdateJail(authContext(r), &rpcpb.UpdateJailRequest{Jail: toRPCJail(body)})
+	if err != nil || resp.GetError() != "" {
+		writeError(w, err, resp.GetError(), resp.GetLeaderHint())
+		return
+	}
+	writeJSON(w, http.StatusOK, fromRPCJail(resp.GetJail()))
+}
+
+func (s *Server) handleDeleteJail(w http.ResponseWriter, r *http.Request) {
+	resp, err := s.client.DeleteJail(authContext(r), &rpcpb.DeleteJailRequest{Id: r.PathValue("id")})
+	if err != nil || resp.GetError() != "" {
+		writeError(w, err, resp.GetError(), resp.GetLeaderHint())
+		return
+	}
+	writeJSON(w, http.StatusOK, fromRPCJail(resp.GetJail()))
+}
+
+func (s *Server) handleGetJail(w http.ResponseWriter, r *http.Request) {
+	resp, err := s.client.GetJail(authContext(r), &rpcpb.GetJailRequest{Id: r.PathValue("id")})
+	if err != nil || resp.GetError() != "" {
+		writeError(w, err, resp.GetError(), resp.GetLeaderHint())
+		return
+	}
+	if !resp.GetFound() {
+		writeJSON(w, http.StatusNotFound, errorBody{Error: "jail not found"})
+		return
+	}
+	writeJSON(w, http.StatusOK, fromRPCJail(resp.GetJail()))
+}
+
+func (s *Server) handleListJails(w http.ResponseWriter, r *http.Request) {
+	resp, err := s.client.ListJails(authContext(r), &rpcpb.ListJailsRequest{})
+	if err != nil || resp.GetError() != "" {
+		writeError(w, err, resp.GetError(), resp.GetLeaderHint())
+		return
+	}
+
+	jails := make([]jail, 0, len(resp.GetJails()))
+	for _, d := range resp.GetJails() {
+		jails = append(jails, fromRPCJail(d))
+	}
+	writeJSON(w, http.StatusOK, jails)
+}
+
+func (s *Server) handleCreateNetwork(w http.ResponseWriter, r *http.Request) {
+	var body network
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeJSON(w, http.StatusBadRequest, errorBody{Error: "invalid JSON body: " + err.Error()})
+		return
+	}
+
+	resp, err := s.client.CreateNetwork(authContext(r), &rpcpb.CreateNetworkRequest{Network: toRPCNetwork(body)})
+	if err != nil || resp.GetError() != "" {
+		writeError(w, err, resp.GetError(), resp.GetLeaderHint())
+		return
+	}
+	writeJSON(w, http.StatusCreated, fromRPCNetwork(resp.GetNetwork()))
+}
+
+func (s *Server) handleDeleteNetwork(w http.ResponseWriter, r *http.Request) {
+	resp, err := s.client.DeleteNetwork(authContext(r), &rpcpb.DeleteNetworkRequest{Id: r.PathValue("id")})
+	if err != nil || resp.GetError() != "" {
+		writeError(w, err, resp.GetError(), resp.GetLeaderHint())
+		return
+	}
+	writeJSON(w, http.StatusOK, fromRPCNetwork(resp.GetNetwork()))
+}
+
+func (s *Server) handleListNetworks(w http.ResponseWriter, r *http.Request) {
+	resp, err := s.client.ListNetworks(authContext(r), &rpcpb.ListNetworksRequest{})
+	if err != nil || resp.GetError() != "" {
+		writeError(w, err, resp.GetError(), resp.GetLeaderHint())
+		return
+	}
+
+	networks := make([]network, 0, len(resp.GetNetworks()))
+	for _, d := range resp.GetNetworks() {
+		networks = append(networks, fromRPCNetwork(d))
+	}
+	writeJSON(w, http.StatusOK, networks)
 }

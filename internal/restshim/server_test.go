@@ -39,6 +39,24 @@ type fakeClient struct {
 	lastDeleteReq *rpcpb.DeleteVMRequest
 
 	lastStatusCtx context.Context
+
+	createJailResp *rpcpb.CreateJailResponse
+	updateJailResp *rpcpb.UpdateJailResponse
+	deleteJailResp *rpcpb.DeleteJailResponse
+	getJailResp    *rpcpb.GetJailResponse
+	listJailsResp  *rpcpb.ListJailsResponse
+
+	lastCreateJailReq *rpcpb.CreateJailRequest
+	lastUpdateJailReq *rpcpb.UpdateJailRequest
+	lastGetJailReq    *rpcpb.GetJailRequest
+	lastDeleteJailReq *rpcpb.DeleteJailRequest
+
+	createNetworkResp *rpcpb.CreateNetworkResponse
+	deleteNetworkResp *rpcpb.DeleteNetworkResponse
+	listNetworksResp  *rpcpb.ListNetworksResponse
+
+	lastCreateNetworkReq *rpcpb.CreateNetworkRequest
+	lastDeleteNetworkReq *rpcpb.DeleteNetworkRequest
 }
 
 func (f *fakeClient) Status(ctx context.Context, _ *rpcpb.StatusRequest, _ ...grpc.CallOption) (*rpcpb.StatusResponse, error) {
@@ -98,35 +116,65 @@ func (f *fakeClient) GetVMConsole(context.Context, *rpcpb.GetVMConsoleRequest, .
 	return &rpcpb.GetVMConsoleResponse{}, nil
 }
 
-func (f *fakeClient) CreateNetwork(context.Context, *rpcpb.CreateNetworkRequest, ...grpc.CallOption) (*rpcpb.CreateNetworkResponse, error) {
+func (f *fakeClient) CreateNetwork(_ context.Context, in *rpcpb.CreateNetworkRequest, _ ...grpc.CallOption) (*rpcpb.CreateNetworkResponse, error) {
+	f.lastCreateNetworkReq = in
+	if f.createNetworkResp != nil {
+		return f.createNetworkResp, nil
+	}
 	return &rpcpb.CreateNetworkResponse{}, nil
 }
 
 func (f *fakeClient) ListNetworks(context.Context, *rpcpb.ListNetworksRequest, ...grpc.CallOption) (*rpcpb.ListNetworksResponse, error) {
+	if f.listNetworksResp != nil {
+		return f.listNetworksResp, nil
+	}
 	return &rpcpb.ListNetworksResponse{}, nil
 }
 
-func (f *fakeClient) DeleteNetwork(context.Context, *rpcpb.DeleteNetworkRequest, ...grpc.CallOption) (*rpcpb.DeleteNetworkResponse, error) {
+func (f *fakeClient) DeleteNetwork(_ context.Context, in *rpcpb.DeleteNetworkRequest, _ ...grpc.CallOption) (*rpcpb.DeleteNetworkResponse, error) {
+	f.lastDeleteNetworkReq = in
+	if f.deleteNetworkResp != nil {
+		return f.deleteNetworkResp, nil
+	}
 	return &rpcpb.DeleteNetworkResponse{}, nil
 }
 
-func (f *fakeClient) CreateJail(context.Context, *rpcpb.CreateJailRequest, ...grpc.CallOption) (*rpcpb.CreateJailResponse, error) {
+func (f *fakeClient) CreateJail(_ context.Context, in *rpcpb.CreateJailRequest, _ ...grpc.CallOption) (*rpcpb.CreateJailResponse, error) {
+	f.lastCreateJailReq = in
+	if f.createJailResp != nil {
+		return f.createJailResp, nil
+	}
 	return &rpcpb.CreateJailResponse{}, nil
 }
 
-func (f *fakeClient) UpdateJail(context.Context, *rpcpb.UpdateJailRequest, ...grpc.CallOption) (*rpcpb.UpdateJailResponse, error) {
+func (f *fakeClient) UpdateJail(_ context.Context, in *rpcpb.UpdateJailRequest, _ ...grpc.CallOption) (*rpcpb.UpdateJailResponse, error) {
+	f.lastUpdateJailReq = in
+	if f.updateJailResp != nil {
+		return f.updateJailResp, nil
+	}
 	return &rpcpb.UpdateJailResponse{}, nil
 }
 
-func (f *fakeClient) DeleteJail(context.Context, *rpcpb.DeleteJailRequest, ...grpc.CallOption) (*rpcpb.DeleteJailResponse, error) {
+func (f *fakeClient) DeleteJail(_ context.Context, in *rpcpb.DeleteJailRequest, _ ...grpc.CallOption) (*rpcpb.DeleteJailResponse, error) {
+	f.lastDeleteJailReq = in
+	if f.deleteJailResp != nil {
+		return f.deleteJailResp, nil
+	}
 	return &rpcpb.DeleteJailResponse{}, nil
 }
 
-func (f *fakeClient) GetJail(context.Context, *rpcpb.GetJailRequest, ...grpc.CallOption) (*rpcpb.GetJailResponse, error) {
+func (f *fakeClient) GetJail(_ context.Context, in *rpcpb.GetJailRequest, _ ...grpc.CallOption) (*rpcpb.GetJailResponse, error) {
+	f.lastGetJailReq = in
+	if f.getJailResp != nil {
+		return f.getJailResp, nil
+	}
 	return &rpcpb.GetJailResponse{}, nil
 }
 
 func (f *fakeClient) ListJails(context.Context, *rpcpb.ListJailsRequest, ...grpc.CallOption) (*rpcpb.ListJailsResponse, error) {
+	if f.listJailsResp != nil {
+		return f.listJailsResp, nil
+	}
 	return &rpcpb.ListJailsResponse{}, nil
 }
 
@@ -384,6 +432,212 @@ func TestServer_ListVMs_Empty(t *testing.T) {
 	s := NewServer(client)
 
 	rec := doRequest(t, s, http.MethodGet, "/v1/vms", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	if rec.Body.String() != "[]\n" {
+		t.Errorf("body = %q, want an empty JSON array, not null", rec.Body.String())
+	}
+}
+
+func TestServer_CreateJail(t *testing.T) {
+	client := &fakeClient{createJailResp: &rpcpb.CreateJailResponse{
+		Jail: &rpcpb.JailDefinition{Id: "jail-1", Name: "web-1", Hostname: "web-1.local"},
+	}}
+	s := NewServer(client)
+
+	rec := doRequest(t, s, http.MethodPost, "/v1/jails", jail{ID: "jail-1", Name: "web-1", Hostname: "web-1.local"})
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want 201; body=%s", rec.Code, rec.Body.String())
+	}
+	if client.lastCreateJailReq.GetJail().GetHostname() != "web-1.local" {
+		t.Errorf("request forwarded jail.Hostname = %q, want web-1.local", client.lastCreateJailReq.GetJail().GetHostname())
+	}
+
+	var got jail
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decoding response: %v", err)
+	}
+	if got.ID != "jail-1" {
+		t.Errorf("response ID = %q, want jail-1", got.ID)
+	}
+}
+
+func TestServer_CreateJail_InvalidJSON(t *testing.T) {
+	s := NewServer(&fakeClient{})
+	req := httptest.NewRequest(http.MethodPost, "/v1/jails", bytes.NewBufferString("not json"))
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want 400", rec.Code)
+	}
+}
+
+func TestServer_CreateJail_ApplicationErrorIsBadRequest(t *testing.T) {
+	client := &fakeClient{createJailResp: &rpcpb.CreateJailResponse{Error: `CreateJail: id "jail-1" already exists`}}
+	s := NewServer(client)
+
+	rec := doRequest(t, s, http.MethodPost, "/v1/jails", jail{ID: "jail-1"})
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400; body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestServer_GetJail_Found(t *testing.T) {
+	client := &fakeClient{getJailResp: &rpcpb.GetJailResponse{
+		Found: true,
+		Jail:  &rpcpb.JailDefinition{Id: "jail-1", Name: "web-1"},
+	}}
+	s := NewServer(client)
+
+	rec := doRequest(t, s, http.MethodGet, "/v1/jails/jail-1", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	if client.lastGetJailReq.GetId() != "jail-1" {
+		t.Errorf("request forwarded id = %q, want jail-1", client.lastGetJailReq.GetId())
+	}
+}
+
+func TestServer_GetJail_NotFound(t *testing.T) {
+	client := &fakeClient{getJailResp: &rpcpb.GetJailResponse{Found: false}}
+	s := NewServer(client)
+
+	rec := doRequest(t, s, http.MethodGet, "/v1/jails/jail-1", nil)
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404; body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestServer_UpdateJail_PathIDOverridesBody(t *testing.T) {
+	client := &fakeClient{updateJailResp: &rpcpb.UpdateJailResponse{Jail: &rpcpb.JailDefinition{Id: "jail-1"}}}
+	s := NewServer(client)
+
+	rec := doRequest(t, s, http.MethodPut, "/v1/jails/jail-1", jail{ID: "wrong-id", Name: "renamed"})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	if client.lastUpdateJailReq.GetJail().GetId() != "jail-1" {
+		t.Errorf("forwarded jail.Id = %q, want jail-1 (from the URL path)", client.lastUpdateJailReq.GetJail().GetId())
+	}
+}
+
+func TestServer_DeleteJail(t *testing.T) {
+	client := &fakeClient{deleteJailResp: &rpcpb.DeleteJailResponse{Jail: &rpcpb.JailDefinition{Id: "jail-1", Name: "web-1"}}}
+	s := NewServer(client)
+
+	rec := doRequest(t, s, http.MethodDelete, "/v1/jails/jail-1", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	if client.lastDeleteJailReq.GetId() != "jail-1" {
+		t.Errorf("forwarded id = %q, want jail-1", client.lastDeleteJailReq.GetId())
+	}
+}
+
+func TestServer_ListJails(t *testing.T) {
+	client := &fakeClient{listJailsResp: &rpcpb.ListJailsResponse{
+		Jails: []*rpcpb.JailDefinition{
+			{Id: "jail-1", Name: "web-1"},
+			{Id: "jail-2", Name: "web-2"},
+		},
+	}}
+	s := NewServer(client)
+
+	rec := doRequest(t, s, http.MethodGet, "/v1/jails", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+
+	var got []jail
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decoding response: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("got %d jails, want 2", len(got))
+	}
+}
+
+func TestServer_ListJails_Empty(t *testing.T) {
+	client := &fakeClient{listJailsResp: &rpcpb.ListJailsResponse{}}
+	s := NewServer(client)
+
+	rec := doRequest(t, s, http.MethodGet, "/v1/jails", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	if rec.Body.String() != "[]\n" {
+		t.Errorf("body = %q, want an empty JSON array, not null", rec.Body.String())
+	}
+}
+
+func TestServer_CreateNetwork(t *testing.T) {
+	client := &fakeClient{createNetworkResp: &rpcpb.CreateNetworkResponse{
+		Network: &rpcpb.NetworkDefinition{Id: "net-1", Name: "prod", VlanId: 100, Subnet: "10.60.0.0/24"},
+	}}
+	s := NewServer(client)
+
+	rec := doRequest(t, s, http.MethodPost, "/v1/networks", network{ID: "net-1", Name: "prod", VLANID: 100, Subnet: "10.60.0.0/24"})
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want 201; body=%s", rec.Code, rec.Body.String())
+	}
+	if client.lastCreateNetworkReq.GetNetwork().GetSubnet() != "10.60.0.0/24" {
+		t.Errorf("forwarded network.Subnet = %q, want 10.60.0.0/24", client.lastCreateNetworkReq.GetNetwork().GetSubnet())
+	}
+}
+
+func TestServer_CreateNetwork_ApplicationErrorIsBadRequest(t *testing.T) {
+	client := &fakeClient{createNetworkResp: &rpcpb.CreateNetworkResponse{Error: `CreateNetwork: id "net-1" already exists`}}
+	s := NewServer(client)
+
+	rec := doRequest(t, s, http.MethodPost, "/v1/networks", network{ID: "net-1", Subnet: "10.60.0.0/24"})
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400; body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestServer_DeleteNetwork(t *testing.T) {
+	client := &fakeClient{deleteNetworkResp: &rpcpb.DeleteNetworkResponse{Network: &rpcpb.NetworkDefinition{Id: "net-1"}}}
+	s := NewServer(client)
+
+	rec := doRequest(t, s, http.MethodDelete, "/v1/networks/net-1", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	if client.lastDeleteNetworkReq.GetId() != "net-1" {
+		t.Errorf("forwarded id = %q, want net-1", client.lastDeleteNetworkReq.GetId())
+	}
+}
+
+func TestServer_ListNetworks(t *testing.T) {
+	client := &fakeClient{listNetworksResp: &rpcpb.ListNetworksResponse{
+		Networks: []*rpcpb.NetworkDefinition{
+			{Id: "net-1", Name: "prod", Subnet: "10.60.0.0/24"},
+			{Id: "net-2", Name: "dev", Subnet: "10.61.0.0/24"},
+		},
+	}}
+	s := NewServer(client)
+
+	rec := doRequest(t, s, http.MethodGet, "/v1/networks", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+
+	var got []network
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decoding response: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("got %d networks, want 2", len(got))
+	}
+}
+
+func TestServer_ListNetworks_Empty(t *testing.T) {
+	client := &fakeClient{listNetworksResp: &rpcpb.ListNetworksResponse{}}
+	s := NewServer(client)
+
+	rec := doRequest(t, s, http.MethodGet, "/v1/networks", nil)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200", rec.Code)
 	}
