@@ -269,8 +269,8 @@ longer needs to be worked around.
 This is a genuine, disclosed **third-party/upstream** patch (like
 D57511 in ADR-0008), not an Apiary code change - it lives entirely in
 `/usr/src/sbin/hastd` on the two patched machines, applied the same
-manual-source-build way D57511 was. It has not been submitted upstream
-(e.g. as a FreeBSD bug report/review) as part of this pass.
+manual-source-build way D57511 was. Filed upstream as
+[bug 298085](https://bugs.freebsd.org/bugzilla/show_bug.cgi?id=298085).
 
 ## Follow-up: `apiarium` migrated to a flat bridge for `-bhyve-bridge`
 

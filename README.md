@@ -273,7 +273,8 @@ each design decision, in order.
   3. A live `hastd`/`hastctl` crash-loop (root-caused and fixed - a
      third-party source patch to `/usr/src/sbin/hastd/hast_proto.c`,
      installed on both `apiarium` and `freebsd-apiary` - see ADR-0022's
-     own "Follow-up"). `-hast-enabled` is back on on both nodes.
+     own "Follow-up"). `-hast-enabled` is back on on both nodes. Filed
+     upstream as [bug 298085](https://bugs.freebsd.org/bugzilla/show_bug.cgi?id=298085).
   4. `apiarium` had no flat bridge (`-bhyve-bridge` was never actually
      set) - fixed by migrating `re0` onto a real bridge under a
      backgrounded rollback safety net (bridging the interface an
