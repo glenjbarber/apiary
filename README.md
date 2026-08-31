@@ -260,14 +260,22 @@ each design decision, in order.
   Confirmed live: a real bhyve VM booted continuously from a real
   `base_image_name`-seeded disk (previously it failed immediately with
   "no bootable device" against a blank disk — the bug this update fixes).
-  Full cloud-init/network completion wasn't independently confirmed in
-  that pass, since the test node had no flat bridge (`-bhyve-bridge`)
-  configured - a separate, pre-existing gap, not chased further live.
   A live `hastd`/`hastctl` crash-loop found during that pass has since
   been root-caused and fixed (a third-party source patch to
   `/usr/src/sbin/hastd/hast_proto.c`, installed on both `apiarium` and
   `freebsd-apiary` - see ADR-0022's own "Follow-up") - `-hast-enabled`
-  is back on on both nodes.
+  is back on on both nodes. `apiarium`'s missing flat bridge
+  (`-bhyve-bridge`, the other gap noted here previously) is also fixed
+  — `re0` was migrated onto a real bridge under a backgrounded rollback
+  safety net (bridging the interface an active SSH session runs over is
+  genuinely risky) — and a flat-bridge VM's networking is now confirmed
+  fully working live: a real DHCP lease, pingable from a separate
+  machine. Full cloud-init/NoCloud completion (custom hostname, SSH)
+  is **still not confirmed** — the VM kept its default hostname and
+  never opened port 22, even after a forced reset; root-causing it
+  further needs a captured serial console log (not yet wired up). See
+  ADR-0022's own "Follow-up" sections and the CAPI repo's own README
+  for the full trail.
 - **Tabled for now** (evaluated, deliberately deferred):
   - **Terraform support** — the infrastructure now exists (`managerd`'s
     API-key auth, `restshimd`'s own binary forwarding each caller's

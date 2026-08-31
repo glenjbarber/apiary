@@ -271,3 +271,48 @@ D57511 in ADR-0008), not an Apiary code change - it lives entirely in
 `/usr/src/sbin/hastd` on the two patched machines, applied the same
 manual-source-build way D57511 was. It has not been submitted upstream
 (e.g. as a FreeBSD bug report/review) as part of this pass.
+
+## Follow-up: `apiarium` migrated to a flat bridge for `-bhyve-bridge`
+
+`apiarium`'s `-bhyve-bridge` flag (mentioned above, in the original
+network-management design) had never actually been set on that node -
+every VM with no `network_id` got no NIC attached at all, a real,
+previously-unnoticed gap (this project's own live testing had only
+ever exercised `network_id`-based VLAN networking, never the plain
+"before network management existed" flat path this flag is for).
+Found and fixed while completing the Kubernetes CAPI provider's live
+network verification (`cluster-api-provider-apiary`), which needs a
+flat-bridge VM to test against since it doesn't set `network_id`.
+
+Fixing it meant bridging `re0` - the same interface this project's own
+SSH access to `apiarium` runs over - a genuinely risky live change
+(done wrong, it strands the host, recoverable only via physical
+access). Handled with an unconditional safety net: a backgrounded
+shell script (`daemon -f sh -c 'sleep 180 && sh rollback.sh'`,
+launched *before* touching the network) that reverts `re0` to a
+plain, un-bridged `DHCP` interface unless a marker file gets touched
+within the window - `at(1)` was considered but ruled out, since
+`apiarium` has no `atrun` cron entry configured, so scheduled `at`
+jobs would never actually fire. The first attempt did trip the
+rollback: a freshly-created bridge gets its own, new locally-
+administered MAC by default, which doesn't match the LAN DHCP server's
+existing reservation for `apiarium` - the bridge got a *different*
+address (`10.50.0.111`, not `10.50.0.14`), and rather than continue
+troubleshooting mid-transition, the safety net was left to fire
+naturally, fully restoring the known-good state. The second attempt -
+explicitly setting the bridge's link address to `re0`'s own MAC
+(`ifconfig bridge12 link <mac>`) before requesting a DHCP lease -
+correctly reacquired `10.50.0.14`, confirmed reachable, and the
+rollback was cancelled with time to spare. `/etc/rc.conf` was updated
+for persistence across reboots (`cloned_interfaces`,
+`create_args_bridge12` for the link-address, `ifconfig_bridge12`
+carrying both `addm re0` and `DHCP`, `ifconfig_re0="up"` with no
+address of its own) - **not verified via an actual reboot**, since
+rebooting `apiarium` remotely carries the same stranding risk with no
+equivalent safety net available across a full power cycle.
+
+Verified live: a real bhyve VM (no `network_id`) got a real tap device
+added to the bridge, broadcast a genuine DHCPv4 request, received a
+real lease from the LAN's own router, and was pingable from an
+entirely separate machine - the first time a flat-bridge Apiary VM has
+had real, working network connectivity confirmed end-to-end.
