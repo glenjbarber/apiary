@@ -263,9 +263,11 @@ each design decision, in order.
   Full cloud-init/network completion wasn't independently confirmed in
   that pass, since the test node had no flat bridge (`-bhyve-bridge`)
   configured - a separate, pre-existing gap, not chased further live.
-  A live, currently-unresolved `hastd` crash-loop was also found and
-  disclosed (see ADR-0022) - `-hast-enabled` was left off on `apiarium`
-  as a result.
+  A live `hastd`/`hastctl` crash-loop found during that pass has since
+  been root-caused and fixed (a third-party source patch to
+  `/usr/src/sbin/hastd/hast_proto.c`, installed on both `apiarium` and
+  `freebsd-apiary` - see ADR-0022's own "Follow-up") - `-hast-enabled`
+  is back on on both nodes.
 - **Tabled for now** (evaluated, deliberately deferred):
   - **Terraform support** — the infrastructure now exists (`managerd`'s
     API-key auth, `restshimd`'s own binary forwarding each caller's

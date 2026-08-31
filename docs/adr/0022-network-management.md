@@ -218,13 +218,56 @@ a failure) - not previously applied to `Flush` because no prior test or
 live pass had exercised deleting a VM that had never had firewall rules
 applied to begin with.
 
-Separately, and *not* fixed as part of this pass (a distinct, pre-existing
-issue, not something this ADR's scope owns): the same live session hit
-`hastd` aborting with a `hast_proto_recv_hdr` assertion failure on
-*every* `service hastd onerestart` on `apiarium`, wedging reconciliation
-independently of the bug above whenever `-hast-enabled` was set - almost
-certainly the same class of upstream `hastd` fragility ADR-0008 already
-tracks, though not confirmed to be the identical bug. Worked around for
-that live session by dropping `-hast-enabled` (no VM/jail on that node
-was using HAST replication at the time); re-enabling it, and properly
-root-causing the crash, is left as real, disclosed follow-up work.
+Separately, the same live session also hit `hastd` aborting with a
+`hast_proto_recv_hdr` assertion failure on *every* `service hastd
+onerestart` on `apiarium` - a distinct, pre-existing issue outside
+this ADR's own scope (it lives in upstream `hastd`/`hastctl`, not in
+any Apiary Go code), but root-caused and fixed in a follow-up pass
+worth recording here since it directly blocked HAST from working at
+all. See "Follow-up: the `hastd`/`hastctl` assertion-failure crash -
+root-caused and fixed" below for the full story.
+
+## Follow-up: the `hastd`/`hastctl` assertion-failure crash - root-caused and fixed
+
+The crash (`[CRIT] Assertion failed: (hptr != ((void *)0)), function
+hast_proto_recv_hdr`, `Abort trap`) reproduced reliably on both
+`apiarium` and `freebsd-apiary`, on a completely empty `/etc/hast.conf`
+- not the connection-migration bug ADR-0008 already tracks (a
+different function, a different failure mode), a separate bug in the
+same source file. Root cause, found by reading
+`/usr/src/sbin/hastd/hast_proto.c`'s `hast_proto_recv_hdr`: it
+unconditionally asserted `ebuf_data(eb, NULL) != NULL` before receiving
+a message's payload, but `ebuf_data` legitimately returns `NULL` for a
+zero-size buffer - and a bare control message with no attached data
+(exactly what `hastd`'s own `stop_precmd`, `hastctl role init all`,
+sends before shutting down) is a completely valid, zero-size message.
+Every `onerestart` hit this precmd, which is why the crash was
+100% reproducible from a cold, resource-less config.
+
+**The actual crashing process was `hastctl`, not `hastd` itself** -
+`stop_precmd` runs `hastctl role init all` before stopping the daemon
+(see `/etc/rc.d/hastd`), and `hastctl` links the same `hast_proto.c`
+object as `hastd` does. The first fix attempt (rebuilding only
+`/sbin/hastd`) didn't resolve anything, because `hastd` was never the
+process crashing.
+
+Fixed by guarding the assert/receive behind `if (hdr.size > 0)` -
+skipping both the assertion and the `proto_recv` call entirely for a
+genuine zero-size message, since there's nothing to receive. Rebuilt
+`/usr/src/sbin/hastd/hast_proto.c` from source (only that one file
+needed recompiling; `make -C sbin/hastd` / `make -C sbin/hastctl`),
+and installed both resulting binaries on both machines via `mv` (a
+plain `cp` fails on the live, running `hastd` binary with "Text file
+busy" - `mv`/`rename(2)` doesn't have that restriction, since a
+still-running process keeps using its old, now-unlinked inode).
+Verified live on both nodes: `service hastd onerestart` now succeeds
+cleanly, repeatedly, and `managerd -hast-enabled` runs its full
+reconcile loop with zero errors where it previously crash-looped on
+every tick. `-hast-enabled` was restored on both nodes afterward - no
+longer needs to be worked around.
+
+This is a genuine, disclosed **third-party/upstream** patch (like
+D57511 in ADR-0008), not an Apiary code change - it lives entirely in
+`/usr/src/sbin/hastd` on the two patched machines, applied the same
+manual-source-build way D57511 was. It has not been submitted upstream
+(e.g. as a FreeBSD bug report/review) as part of this pass.
