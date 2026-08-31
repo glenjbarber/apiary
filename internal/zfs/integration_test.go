@@ -94,6 +94,42 @@ func TestIntegration_DatasetLifecycle(t *testing.T) {
 	}
 }
 
+func TestIntegration_CreateZvol(t *testing.T) {
+	m := testManager(t)
+	ctx := context.Background()
+
+	if err := m.CreateZvol(ctx, "hast-vm-1", 64); err != nil {
+		t.Fatalf("CreateZvol() error: %v", err)
+	}
+
+	exists, err := m.DatasetExists(ctx, "hast-vm-1")
+	if err != nil {
+		t.Fatalf("DatasetExists() error: %v", err)
+	}
+	if !exists {
+		t.Fatalf("DatasetExists() = false after CreateZvol")
+	}
+
+	val, err := m.GetProperty(ctx, "hast-vm-1", "volsize")
+	if err != nil {
+		t.Fatalf("GetProperty(volsize) error: %v", err)
+	}
+	if val != "64M" && val != "67108864" {
+		t.Errorf("GetProperty(volsize) = %q, want 64M-equivalent", val)
+	}
+
+	if err := m.DestroyDataset(ctx, "hast-vm-1"); err != nil {
+		t.Fatalf("DestroyDataset() (zvol) error: %v", err)
+	}
+	exists, err = m.DatasetExists(ctx, "hast-vm-1")
+	if err != nil {
+		t.Fatalf("DatasetExists() error: %v", err)
+	}
+	if exists {
+		t.Fatalf("DatasetExists() = true after destroying zvol")
+	}
+}
+
 func TestIntegration_DestroyRefusesDatasetWithChild(t *testing.T) {
 	m := testManager(t)
 	ctx := context.Background()

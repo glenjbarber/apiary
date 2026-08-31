@@ -3,6 +3,7 @@ package zfs
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"strings"
 )
 
@@ -43,6 +44,22 @@ func (m *Manager) CreateDataset(ctx context.Context, name string) error {
 		return err
 	}
 	_, err = runZFS(ctx, "create", full)
+	return err
+}
+
+// CreateZvol creates a new zvol (block device dataset) at Base/name,
+// sized sizeMB - used as a HAST-replicated resource's local GEOM
+// provider (see internal/cluster's HAST wiring), since neither of this
+// project's real hosts has a spare raw disk/partition to dedicate.
+// DatasetExists/DestroyDataset (unchanged) work identically against a
+// zvol - zfs list/destroy don't distinguish dataset type - so this is
+// the only zvol-specific method needed here.
+func (m *Manager) CreateZvol(ctx context.Context, name string, sizeMB uint64) error {
+	full, err := m.path(name)
+	if err != nil {
+		return err
+	}
+	_, err = runZFS(ctx, "create", "-V", strconv.FormatUint(sizeMB, 10)+"M", full)
 	return err
 }
 

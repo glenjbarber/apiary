@@ -146,6 +146,23 @@ func TestIntegration_ResourceLifecycle(t *testing.T) {
 	}
 }
 
+func TestIntegration_RestartService(t *testing.T) {
+	if _, err := exec.LookPath("hastctl"); err != nil {
+		t.Skip("hastctl not available on this host; see package doc comment for how to run these tests")
+	}
+	ctx := context.Background()
+
+	if _, err := runCmd(ctx, "service", "hastd", "onestart"); err != nil {
+		t.Fatalf("service hastd onestart: %v", err)
+	}
+	t.Cleanup(func() { runCmd(context.Background(), "service", "hastd", "onestop") })
+
+	m := New()
+	if err := m.RestartService(ctx); err != nil {
+		t.Fatalf("RestartService() error: %v", err)
+	}
+}
+
 func TestIntegration_StatusOnUnknownResourceFails(t *testing.T) {
 	newTestDevice(t) // just for the LookPath("hastctl") skip check
 	m := New()

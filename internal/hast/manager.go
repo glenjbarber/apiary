@@ -34,7 +34,12 @@ type Status struct {
 // Unlike internal/zfs and internal/jail, it does not manage the hastd(8)
 // service itself - that is a system-level (rc.conf/service) concern,
 // same as this project doesn't manage the zfs kernel module's load
-// state.
+// state. RestartService (below) is the one narrow exception: hastd must
+// be restarted for a config change to take effect at all (see
+// WriteConfig's own doc comment and ADR-0008's documented gotcha), so a
+// caller that just wrote a changed config has no other way to make it
+// live - but this package still never starts, stops, or enables the
+// service, which stays a one-time host prerequisite (see ADR-0025).
 type Manager struct {
 	// ConfigPath is where hast.conf is written. Defaults to
 	// DefaultConfigPath if empty.
@@ -63,6 +68,21 @@ func (m *Manager) WriteConfig(resources []Resource) error {
 		return err
 	}
 	return os.WriteFile(m.configPath(), []byte(body), 0o644)
+}
+
+// RestartService restarts the local hastd(8) service so a just-written
+// config change takes effect - hastd does not hot-reload hast.conf (see
+// WriteConfig's own doc comment). This is the one exception to this
+// package not managing hastd's lifecycle: only restart, never start/
+// stop/enable.
+func (m *Manager) RestartService(ctx context.Context) error {
+	// -f forces the restart regardless of hastd_enable in rc.conf - this
+	// method only ever runs against an already-running hastd (starting
+	// it in the first place remains a host prerequisite, see the doc
+	// comment above), so an enable-flag mismatch shouldn't silently
+	// no-op a config-reload restart the reconciler is relying on.
+	_, err := runCmd(ctx, "service", "-f", "hastd", "restart")
+	return err
 }
 
 // CreateResource initializes local on-disk metadata for a resource
