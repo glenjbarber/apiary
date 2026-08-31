@@ -101,6 +101,10 @@ func (f *fakeClient) ForcePurgeVM(context.Context, *rpcpb.ForcePurgeVMRequest, .
 	return &rpcpb.ForcePurgeVMResponse{}, nil
 }
 
+func (f *fakeClient) ForcePurgeJail(context.Context, *rpcpb.ForcePurgeJailRequest, ...grpc.CallOption) (*rpcpb.ForcePurgeJailResponse, error) {
+	return &rpcpb.ForcePurgeJailResponse{}, nil
+}
+
 func (f *fakeClient) GetVM(context.Context, *rpcpb.GetVMRequest, ...grpc.CallOption) (*rpcpb.GetVMResponse, error) {
 	return &rpcpb.GetVMResponse{}, nil
 }

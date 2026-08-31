@@ -217,6 +217,8 @@ Deployed to the real 2-node cluster (`apiarium` as owner/primary,
   purge limitation ADR-0026 accepted for VMs applies identically to
   replicated jails: nothing tears down a jail's secondary-role HAST
   resource on the replica node if the owning node is permanently gone
-  and the record is force-purged from elsewhere - not exercised in
-  this pass, since `ForcePurgeVM`'s jail equivalent (`ForcePurgeJail`)
-  doesn't exist yet either.
+  and the record is force-purged from elsewhere - `ForcePurgeJail`
+  (added as a follow-up to this ADR, mirroring `ForcePurgeVM` exactly)
+  closes the "no jail equivalent exists" gap, but its own doc comment
+  carries the same "does NOT touch that node's real resources" caveat
+  `ForcePurgeVM` always has.

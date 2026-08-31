@@ -898,3 +898,66 @@ func TestIntegration_DeleteJob_AssignedJailIsSoftDeletedThroughFullStack(t *test
 		t.Fatalf("GetJail() found=false, want the tombstoned jail to still be present")
 	}
 }
+
+func TestIntegration_ForcePurgeJail_RequiresDeletingState(t *testing.T) {
+	raftdSocket := newRaftdUDSSocket(t)
+	client := newManagerdRPCClient(t, raftdSocket)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if _, err := client.CreateJail(ctx, &rpcpb.CreateJailRequest{
+		Jail: &rpcpb.JailDefinition{Id: "jail-1", Name: "web-1", NodeId: "some-other-node"},
+	}); err != nil {
+		t.Fatalf("CreateJail() error: %v", err)
+	}
+
+	// A live (not-yet-deleting) jail must be rejected.
+	liveResp, err := client.ForcePurgeJail(ctx, &rpcpb.ForcePurgeJailRequest{Id: "jail-1"})
+	if err != nil {
+		t.Fatalf("ForcePurgeJail() (live) error: %v", err)
+	}
+	if liveResp.GetError() == "" {
+		t.Fatalf("ForcePurgeJail() (live) error = empty, want a rejection since the jail isn't marked for deletion")
+	}
+	if getResp, err := client.GetJail(ctx, &rpcpb.GetJailRequest{Id: "jail-1"}); err != nil || !getResp.GetFound() {
+		t.Fatalf("GetJail() after rejected ForcePurgeJail = (found=%v, err=%v), want the jail to still exist", getResp.GetFound(), err)
+	}
+
+	// DeleteJail on a jail with node_id set soft-deletes it rather than
+	// removing it outright - this is the state ForcePurgeJail expects.
+	if _, err := client.DeleteJail(ctx, &rpcpb.DeleteJailRequest{Id: "jail-1"}); err != nil {
+		t.Fatalf("DeleteJail() error: %v", err)
+	}
+
+	purgeResp, err := client.ForcePurgeJail(ctx, &rpcpb.ForcePurgeJailRequest{Id: "jail-1"})
+	if err != nil {
+		t.Fatalf("ForcePurgeJail() error: %v", err)
+	}
+	if purgeResp.GetError() != "" {
+		t.Fatalf("ForcePurgeJail() returned error: %s", purgeResp.GetError())
+	}
+	if purgeResp.GetJail().GetName() != "web-1" {
+		t.Errorf("ForcePurgeJail() echoed jail.Name = %q, want web-1", purgeResp.GetJail().GetName())
+	}
+
+	if getResp, err := client.GetJail(ctx, &rpcpb.GetJailRequest{Id: "jail-1"}); err != nil || getResp.GetFound() {
+		t.Fatalf("GetJail() after ForcePurgeJail = (found=%v, err=%v), want the record gone", getResp.GetFound(), err)
+	}
+}
+
+func TestIntegration_ForcePurgeJail_MissingIsError(t *testing.T) {
+	raftdSocket := newRaftdUDSSocket(t)
+	client := newManagerdRPCClient(t, raftdSocket)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	resp, err := client.ForcePurgeJail(ctx, &rpcpb.ForcePurgeJailRequest{Id: "does-not-exist"})
+	if err != nil {
+		t.Fatalf("ForcePurgeJail() error: %v", err)
+	}
+	if resp.GetError() == "" {
+		t.Fatalf("ForcePurgeJail() error = empty, want a not-found rejection")
+	}
+}

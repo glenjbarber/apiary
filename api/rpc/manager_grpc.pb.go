@@ -19,29 +19,30 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	ManagerService_Status_FullMethodName        = "/apiary.rpc.v1.ManagerService/Status"
-	ManagerService_CreateVM_FullMethodName      = "/apiary.rpc.v1.ManagerService/CreateVM"
-	ManagerService_UpdateVM_FullMethodName      = "/apiary.rpc.v1.ManagerService/UpdateVM"
-	ManagerService_DeleteVM_FullMethodName      = "/apiary.rpc.v1.ManagerService/DeleteVM"
-	ManagerService_ForcePurgeVM_FullMethodName  = "/apiary.rpc.v1.ManagerService/ForcePurgeVM"
-	ManagerService_GetVM_FullMethodName         = "/apiary.rpc.v1.ManagerService/GetVM"
-	ManagerService_ListVMs_FullMethodName       = "/apiary.rpc.v1.ManagerService/ListVMs"
-	ManagerService_UploadISO_FullMethodName     = "/apiary.rpc.v1.ManagerService/UploadISO"
-	ManagerService_ListISOs_FullMethodName      = "/apiary.rpc.v1.ManagerService/ListISOs"
-	ManagerService_DeleteISO_FullMethodName     = "/apiary.rpc.v1.ManagerService/DeleteISO"
-	ManagerService_HostStats_FullMethodName     = "/apiary.rpc.v1.ManagerService/HostStats"
-	ManagerService_GetVMConsole_FullMethodName  = "/apiary.rpc.v1.ManagerService/GetVMConsole"
-	ManagerService_CreateNetwork_FullMethodName = "/apiary.rpc.v1.ManagerService/CreateNetwork"
-	ManagerService_ListNetworks_FullMethodName  = "/apiary.rpc.v1.ManagerService/ListNetworks"
-	ManagerService_DeleteNetwork_FullMethodName = "/apiary.rpc.v1.ManagerService/DeleteNetwork"
-	ManagerService_CreateAPIKey_FullMethodName  = "/apiary.rpc.v1.ManagerService/CreateAPIKey"
-	ManagerService_ListAPIKeys_FullMethodName   = "/apiary.rpc.v1.ManagerService/ListAPIKeys"
-	ManagerService_RevokeAPIKey_FullMethodName  = "/apiary.rpc.v1.ManagerService/RevokeAPIKey"
-	ManagerService_CreateJail_FullMethodName    = "/apiary.rpc.v1.ManagerService/CreateJail"
-	ManagerService_UpdateJail_FullMethodName    = "/apiary.rpc.v1.ManagerService/UpdateJail"
-	ManagerService_DeleteJail_FullMethodName    = "/apiary.rpc.v1.ManagerService/DeleteJail"
-	ManagerService_GetJail_FullMethodName       = "/apiary.rpc.v1.ManagerService/GetJail"
-	ManagerService_ListJails_FullMethodName     = "/apiary.rpc.v1.ManagerService/ListJails"
+	ManagerService_Status_FullMethodName         = "/apiary.rpc.v1.ManagerService/Status"
+	ManagerService_CreateVM_FullMethodName       = "/apiary.rpc.v1.ManagerService/CreateVM"
+	ManagerService_UpdateVM_FullMethodName       = "/apiary.rpc.v1.ManagerService/UpdateVM"
+	ManagerService_DeleteVM_FullMethodName       = "/apiary.rpc.v1.ManagerService/DeleteVM"
+	ManagerService_ForcePurgeVM_FullMethodName   = "/apiary.rpc.v1.ManagerService/ForcePurgeVM"
+	ManagerService_GetVM_FullMethodName          = "/apiary.rpc.v1.ManagerService/GetVM"
+	ManagerService_ListVMs_FullMethodName        = "/apiary.rpc.v1.ManagerService/ListVMs"
+	ManagerService_UploadISO_FullMethodName      = "/apiary.rpc.v1.ManagerService/UploadISO"
+	ManagerService_ListISOs_FullMethodName       = "/apiary.rpc.v1.ManagerService/ListISOs"
+	ManagerService_DeleteISO_FullMethodName      = "/apiary.rpc.v1.ManagerService/DeleteISO"
+	ManagerService_HostStats_FullMethodName      = "/apiary.rpc.v1.ManagerService/HostStats"
+	ManagerService_GetVMConsole_FullMethodName   = "/apiary.rpc.v1.ManagerService/GetVMConsole"
+	ManagerService_CreateNetwork_FullMethodName  = "/apiary.rpc.v1.ManagerService/CreateNetwork"
+	ManagerService_ListNetworks_FullMethodName   = "/apiary.rpc.v1.ManagerService/ListNetworks"
+	ManagerService_DeleteNetwork_FullMethodName  = "/apiary.rpc.v1.ManagerService/DeleteNetwork"
+	ManagerService_CreateAPIKey_FullMethodName   = "/apiary.rpc.v1.ManagerService/CreateAPIKey"
+	ManagerService_ListAPIKeys_FullMethodName    = "/apiary.rpc.v1.ManagerService/ListAPIKeys"
+	ManagerService_RevokeAPIKey_FullMethodName   = "/apiary.rpc.v1.ManagerService/RevokeAPIKey"
+	ManagerService_CreateJail_FullMethodName     = "/apiary.rpc.v1.ManagerService/CreateJail"
+	ManagerService_UpdateJail_FullMethodName     = "/apiary.rpc.v1.ManagerService/UpdateJail"
+	ManagerService_DeleteJail_FullMethodName     = "/apiary.rpc.v1.ManagerService/DeleteJail"
+	ManagerService_GetJail_FullMethodName        = "/apiary.rpc.v1.ManagerService/GetJail"
+	ManagerService_ListJails_FullMethodName      = "/apiary.rpc.v1.ManagerService/ListJails"
+	ManagerService_ForcePurgeJail_FullMethodName = "/apiary.rpc.v1.ManagerService/ForcePurgeJail"
 )
 
 // ManagerServiceClient is the client API for ManagerService service.
@@ -122,6 +123,11 @@ type ManagerServiceClient interface {
 	DeleteJail(ctx context.Context, in *DeleteJailRequest, opts ...grpc.CallOption) (*DeleteJailResponse, error)
 	GetJail(ctx context.Context, in *GetJailRequest, opts ...grpc.CallOption) (*GetJailResponse, error)
 	ListJails(ctx context.Context, in *ListJailsRequest, opts ...grpc.CallOption) (*ListJailsResponse, error)
+	// ForcePurgeJail mirrors ForcePurgeVM exactly, for a jail tombstoned
+	// by DeleteJail whose owning node will never come back to reconcile
+	// it away. See ForcePurgeVM's own doc comment above for the full
+	// reasoning - it applies identically here.
+	ForcePurgeJail(ctx context.Context, in *ForcePurgeJailRequest, opts ...grpc.CallOption) (*ForcePurgeJailResponse, error)
 }
 
 type managerServiceClient struct {
@@ -365,6 +371,16 @@ func (c *managerServiceClient) ListJails(ctx context.Context, in *ListJailsReque
 	return out, nil
 }
 
+func (c *managerServiceClient) ForcePurgeJail(ctx context.Context, in *ForcePurgeJailRequest, opts ...grpc.CallOption) (*ForcePurgeJailResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ForcePurgeJailResponse)
+	err := c.cc.Invoke(ctx, ManagerService_ForcePurgeJail_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // ManagerServiceServer is the server API for ManagerService service.
 // All implementations must embed UnimplementedManagerServiceServer
 // for forward compatibility.
@@ -443,6 +459,11 @@ type ManagerServiceServer interface {
 	DeleteJail(context.Context, *DeleteJailRequest) (*DeleteJailResponse, error)
 	GetJail(context.Context, *GetJailRequest) (*GetJailResponse, error)
 	ListJails(context.Context, *ListJailsRequest) (*ListJailsResponse, error)
+	// ForcePurgeJail mirrors ForcePurgeVM exactly, for a jail tombstoned
+	// by DeleteJail whose owning node will never come back to reconcile
+	// it away. See ForcePurgeVM's own doc comment above for the full
+	// reasoning - it applies identically here.
+	ForcePurgeJail(context.Context, *ForcePurgeJailRequest) (*ForcePurgeJailResponse, error)
 	mustEmbedUnimplementedManagerServiceServer()
 }
 
@@ -521,6 +542,9 @@ func (UnimplementedManagerServiceServer) GetJail(context.Context, *GetJailReques
 }
 func (UnimplementedManagerServiceServer) ListJails(context.Context, *ListJailsRequest) (*ListJailsResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ListJails not implemented")
+}
+func (UnimplementedManagerServiceServer) ForcePurgeJail(context.Context, *ForcePurgeJailRequest) (*ForcePurgeJailResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ForcePurgeJail not implemented")
 }
 func (UnimplementedManagerServiceServer) mustEmbedUnimplementedManagerServiceServer() {}
 func (UnimplementedManagerServiceServer) testEmbeddedByValue()                        {}
@@ -946,6 +970,24 @@ func _ManagerService_ListJails_Handler(srv interface{}, ctx context.Context, dec
 	return interceptor(ctx, in, info, handler)
 }
 
+func _ManagerService_ForcePurgeJail_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ForcePurgeJailRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ManagerServiceServer).ForcePurgeJail(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ManagerService_ForcePurgeJail_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ManagerServiceServer).ForcePurgeJail(ctx, req.(*ForcePurgeJailRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // ManagerService_ServiceDesc is the grpc.ServiceDesc for ManagerService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -1040,6 +1082,10 @@ var ManagerService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ListJails",
 			Handler:    _ManagerService_ListJails_Handler,
+		},
+		{
+			MethodName: "ForcePurgeJail",
+			Handler:    _ManagerService_ForcePurgeJail_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{

@@ -601,6 +601,30 @@ func (s *Server) GetJail(ctx context.Context, req *rpcpb.GetJailRequest) (*rpcpb
 	return &rpcpb.GetJailResponse{Jail: fromInternalJail(resp.GetJail()), Found: resp.GetFound()}, nil
 }
 
+// ForcePurgeJail mirrors ForcePurgeVM exactly - see its own doc
+// comment for the full reasoning, which applies identically here.
+func (s *Server) ForcePurgeJail(ctx context.Context, req *rpcpb.ForcePurgeJailRequest) (*rpcpb.ForcePurgeJailResponse, error) {
+	getResp, err := s.raft.GetJail(ctx, req.GetId())
+	if err != nil {
+		return &rpcpb.ForcePurgeJailResponse{Error: err.Error()}, nil
+	}
+	if getResp.GetError() != "" {
+		return &rpcpb.ForcePurgeJailResponse{Error: getResp.GetError(), LeaderHint: getResp.GetLeaderHint()}, nil
+	}
+	if !getResp.GetFound() {
+		return &rpcpb.ForcePurgeJailResponse{Error: fmt.Sprintf("jail %q not found", req.GetId())}, nil
+	}
+	if getResp.GetJail().GetDesiredState() != internalpb.JailState_JAIL_STATE_DELETING {
+		return &rpcpb.ForcePurgeJailResponse{Error: fmt.Sprintf("jail %q is not marked for deletion - call DeleteJail first", req.GetId())}, nil
+	}
+
+	cmd := &internalpb.Command{
+		Op: &internalpb.Command_PurgeJail{PurgeJail: &internalpb.PurgeJail{Id: req.GetId()}},
+	}
+	jail, appErr, leaderHint := s.applyJailCommand(ctx, cmd, req.GetTimeoutMs())
+	return &rpcpb.ForcePurgeJailResponse{Jail: fromInternalJail(jail), Error: appErr, LeaderHint: leaderHint}, nil
+}
+
 // ListJails implements rpcpb.ManagerServiceServer.
 func (s *Server) ListJails(ctx context.Context, _ *rpcpb.ListJailsRequest) (*rpcpb.ListJailsResponse, error) {
 	resp, err := s.raft.ListJails(ctx)

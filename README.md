@@ -131,10 +131,11 @@ each design decision, in order.
   leaks its old node's dataset/bhyve VM: the reconciler detects and
   tears down its own leftover resources under a VM ID that's been
   reassigned elsewhere, without touching the (now-elsewhere-owned)
-  record itself. Separately, `ForcePurgeVM` is a human-triggered escape
-  hatch for a VM tombstoned by delete whose owning node never comes
-  back to finish removing it - it only works on a VM already marked for
-  deletion, and never touches that (unreachable) node's real resources.
+  record itself. Separately, `ForcePurgeVM`/`ForcePurgeJail` are
+  human-triggered escape hatches for a VM or jail tombstoned by delete
+  whose owning node never comes back to finish removing it - they only
+  work on a record already marked for deletion, and never touch that
+  (unreachable) node's real resources.
   See [ADR-0025](docs/adr/0025-resource-reclaim.md).
 
 **Not yet implemented:**

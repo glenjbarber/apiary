@@ -87,6 +87,12 @@ service ManagerService {
   rpc DeleteJail(DeleteJailRequest) returns (DeleteJailResponse);
   rpc GetJail(GetJailRequest) returns (GetJailResponse);
   rpc ListJails(ListJailsRequest) returns (ListJailsResponse);
+
+  // ForcePurgeJail mirrors ForcePurgeVM exactly, for a jail tombstoned
+  // by DeleteJail whose owning node will never come back to reconcile
+  // it away. See ForcePurgeVM's own doc comment above for the full
+  // reasoning - it applies identically here.
+  rpc ForcePurgeJail(ForcePurgeJailRequest) returns (ForcePurgeJailResponse);
 }
 
 // VMState mirrors api/internalpb's VMState. Kept as a separate type
@@ -541,6 +547,21 @@ message ListJailsRequest {}
 
 message ListJailsResponse {
   repeated JailDefinition jails = 1;
+  string error = 2;
+  string leader_hint = 3;
+}
+
+message ForcePurgeJailRequest {
+  string id = 1;
+  uint32 timeout_ms = 2;
+}
+
+message ForcePurgeJailResponse {
+  // jail is the definition that was purged, echoed back for confirmation.
+  JailDefinition jail = 1;
+
+  // error is set if the jail doesn't exist, or exists but isn't in
+  // JAIL_STATE_DELETING yet (call DeleteJail first).
   string error = 2;
   string leader_hint = 3;
 }
