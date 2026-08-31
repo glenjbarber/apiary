@@ -533,6 +533,90 @@ func (s *Server) GetVMConsole(ctx context.Context, req *rpcpb.GetVMConsoleReques
 	return &rpcpb.GetVMConsoleResponse{Host: "127.0.0.1", Port: uint32(port), Available: true}, nil
 }
 
+// applyJailCommand mirrors applyNetworkCommand, for commands whose
+// result is a JailDefinition instead of a NetworkDefinition
+// (CreateJail/UpdateJail/DeleteJail).
+func (s *Server) applyJailCommand(ctx context.Context, cmd *internalpb.Command, timeoutMs uint32) (jail *internalpb.JailDefinition, appErr, leaderHint string) {
+	timeout := defaultApplyTimeout
+	if timeoutMs > 0 {
+		timeout = time.Duration(timeoutMs) * time.Millisecond
+	}
+
+	payload, err := proto.Marshal(cmd)
+	if err != nil {
+		return nil, err.Error(), ""
+	}
+
+	resp, err := s.raft.Apply(ctx, payload, timeout)
+	if err != nil {
+		return nil, err.Error(), ""
+	}
+	if resp.GetError() != "" {
+		return nil, resp.GetError(), resp.GetLeaderHint()
+	}
+
+	jail = &internalpb.JailDefinition{}
+	if err := proto.Unmarshal(resp.GetResult(), jail); err != nil {
+		return nil, err.Error(), ""
+	}
+	return jail, "", ""
+}
+
+// CreateJail implements rpcpb.ManagerServiceServer.
+func (s *Server) CreateJail(ctx context.Context, req *rpcpb.CreateJailRequest) (*rpcpb.CreateJailResponse, error) {
+	cmd := &internalpb.Command{
+		Op: &internalpb.Command_CreateJail{CreateJail: &internalpb.CreateJail{Jail: toInternalJail(req.GetJail())}},
+	}
+	jail, appErr, leaderHint := s.applyJailCommand(ctx, cmd, req.GetTimeoutMs())
+	return &rpcpb.CreateJailResponse{Jail: fromInternalJail(jail), Error: appErr, LeaderHint: leaderHint}, nil
+}
+
+// UpdateJail implements rpcpb.ManagerServiceServer.
+func (s *Server) UpdateJail(ctx context.Context, req *rpcpb.UpdateJailRequest) (*rpcpb.UpdateJailResponse, error) {
+	cmd := &internalpb.Command{
+		Op: &internalpb.Command_UpdateJail{UpdateJail: &internalpb.UpdateJail{Jail: toInternalJail(req.GetJail())}},
+	}
+	jail, appErr, leaderHint := s.applyJailCommand(ctx, cmd, req.GetTimeoutMs())
+	return &rpcpb.UpdateJailResponse{Jail: fromInternalJail(jail), Error: appErr, LeaderHint: leaderHint}, nil
+}
+
+// DeleteJail implements rpcpb.ManagerServiceServer.
+func (s *Server) DeleteJail(ctx context.Context, req *rpcpb.DeleteJailRequest) (*rpcpb.DeleteJailResponse, error) {
+	cmd := &internalpb.Command{
+		Op: &internalpb.Command_DeleteJail{DeleteJail: &internalpb.DeleteJail{Id: req.GetId()}},
+	}
+	jail, appErr, leaderHint := s.applyJailCommand(ctx, cmd, req.GetTimeoutMs())
+	return &rpcpb.DeleteJailResponse{Jail: fromInternalJail(jail), Error: appErr, LeaderHint: leaderHint}, nil
+}
+
+// GetJail implements rpcpb.ManagerServiceServer.
+func (s *Server) GetJail(ctx context.Context, req *rpcpb.GetJailRequest) (*rpcpb.GetJailResponse, error) {
+	resp, err := s.raft.GetJail(ctx, req.GetId())
+	if err != nil {
+		return &rpcpb.GetJailResponse{Error: err.Error()}, nil
+	}
+	if resp.GetError() != "" {
+		return &rpcpb.GetJailResponse{Error: resp.GetError(), LeaderHint: resp.GetLeaderHint()}, nil
+	}
+	return &rpcpb.GetJailResponse{Jail: fromInternalJail(resp.GetJail()), Found: resp.GetFound()}, nil
+}
+
+// ListJails implements rpcpb.ManagerServiceServer.
+func (s *Server) ListJails(ctx context.Context, _ *rpcpb.ListJailsRequest) (*rpcpb.ListJailsResponse, error) {
+	resp, err := s.raft.ListJails(ctx)
+	if err != nil {
+		return &rpcpb.ListJailsResponse{Error: err.Error()}, nil
+	}
+	if resp.GetError() != "" {
+		return &rpcpb.ListJailsResponse{Error: resp.GetError(), LeaderHint: resp.GetLeaderHint()}, nil
+	}
+	jails := make([]*rpcpb.JailDefinition, 0, len(resp.GetJails()))
+	for _, j := range resp.GetJails() {
+		jails = append(jails, fromInternalJail(j))
+	}
+	return &rpcpb.ListJailsResponse{Jails: jails}, nil
+}
+
 // ListVMs implements rpcpb.ManagerServiceServer.
 func (s *Server) ListVMs(ctx context.Context, _ *rpcpb.ListVMsRequest) (*rpcpb.ListVMsResponse, error) {
 	resp, err := s.raft.ListVMs(ctx)

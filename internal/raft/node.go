@@ -275,6 +275,29 @@ func (n *Node) ListNetworksLocal() []*internalpb.NetworkDefinition {
 	return n.fsm.ListNetworks()
 }
 
+// GetJail/ListJails mirror GetNetwork/ListNetworks exactly, for
+// JailDefinitions instead.
+func (n *Node) GetJail(id string) (jail *internalpb.JailDefinition, found bool, err error) {
+	if n.raft.State() != raft.Leader {
+		return nil, false, ErrNotLeader
+	}
+	jail, found = n.fsm.Jail(id)
+	return jail, found, nil
+}
+
+func (n *Node) ListJails() ([]*internalpb.JailDefinition, error) {
+	if n.raft.State() != raft.Leader {
+		return nil, ErrNotLeader
+	}
+	return n.fsm.ListJails(), nil
+}
+
+// ListJailsLocal mirrors ListVMsLocal/ListNetworksLocal - no leadership
+// check, needed by internal/cluster's Reconciler on every node.
+func (n *Node) ListJailsLocal() []*internalpb.JailDefinition {
+	return n.fsm.ListJails()
+}
+
 // ValidateAPIKeyHash checks hash against this node's own FSM state and
 // reports whether API-key auth has ever been enabled at all (see
 // FSM.AuthEnabled - permanent once set, never reverts even if every

@@ -106,6 +106,26 @@ func (f *fakeClient) DeleteNetwork(context.Context, *rpcpb.DeleteNetworkRequest,
 	return &rpcpb.DeleteNetworkResponse{}, nil
 }
 
+func (f *fakeClient) CreateJail(context.Context, *rpcpb.CreateJailRequest, ...grpc.CallOption) (*rpcpb.CreateJailResponse, error) {
+	return &rpcpb.CreateJailResponse{}, nil
+}
+
+func (f *fakeClient) UpdateJail(context.Context, *rpcpb.UpdateJailRequest, ...grpc.CallOption) (*rpcpb.UpdateJailResponse, error) {
+	return &rpcpb.UpdateJailResponse{}, nil
+}
+
+func (f *fakeClient) DeleteJail(context.Context, *rpcpb.DeleteJailRequest, ...grpc.CallOption) (*rpcpb.DeleteJailResponse, error) {
+	return &rpcpb.DeleteJailResponse{}, nil
+}
+
+func (f *fakeClient) GetJail(context.Context, *rpcpb.GetJailRequest, ...grpc.CallOption) (*rpcpb.GetJailResponse, error) {
+	return &rpcpb.GetJailResponse{}, nil
+}
+
+func (f *fakeClient) ListJails(context.Context, *rpcpb.ListJailsRequest, ...grpc.CallOption) (*rpcpb.ListJailsResponse, error) {
+	return &rpcpb.ListJailsResponse{}, nil
+}
+
 func (f *fakeClient) CreateAPIKey(context.Context, *rpcpb.CreateAPIKeyRequest, ...grpc.CallOption) (*rpcpb.CreateAPIKeyResponse, error) {
 	return &rpcpb.CreateAPIKeyResponse{}, nil
 }

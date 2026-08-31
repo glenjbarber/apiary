@@ -63,6 +63,9 @@ func (s *Server) Apply(_ context.Context, req *internalpb.ApplyRequest) (*intern
 	if result.ApiKey != nil {
 		payload = result.ApiKey
 	}
+	if result.Jail != nil {
+		payload = result.Jail
+	}
 	resultBytes, err := proto.Marshal(payload)
 	if err != nil {
 		return &internalpb.ApplyResponse{Error: fmt.Sprintf("encoding result: %v", err)}, nil
@@ -190,6 +193,38 @@ func (s *Server) ListVMsLocal(_ context.Context, _ *internalpb.ListVMsRequest) (
 
 func (s *Server) ListNetworksLocal(_ context.Context, _ *internalpb.ListNetworksRequest) (*internalpb.ListNetworksResponse, error) {
 	return &internalpb.ListNetworksResponse{Networks: s.node.ListNetworksLocal()}, nil
+}
+
+// GetJail implements internalpb.RaftInternalServer.
+func (s *Server) GetJail(_ context.Context, req *internalpb.GetJailRequest) (*internalpb.GetJailResponse, error) {
+	jail, found, err := s.node.GetJail(req.GetId())
+	if err != nil {
+		resp := &internalpb.GetJailResponse{Error: err.Error()}
+		if errors.Is(err, ErrNotLeader) {
+			resp.LeaderHint = s.node.LeaderHint()
+		}
+		return resp, nil
+	}
+	return &internalpb.GetJailResponse{Jail: jail, Found: found}, nil
+}
+
+// ListJails implements internalpb.RaftInternalServer.
+func (s *Server) ListJails(_ context.Context, _ *internalpb.ListJailsRequest) (*internalpb.ListJailsResponse, error) {
+	jails, err := s.node.ListJails()
+	if err != nil {
+		resp := &internalpb.ListJailsResponse{Error: err.Error()}
+		if errors.Is(err, ErrNotLeader) {
+			resp.LeaderHint = s.node.LeaderHint()
+		}
+		return resp, nil
+	}
+	return &internalpb.ListJailsResponse{Jails: jails}, nil
+}
+
+// ListJailsLocal implements internalpb.RaftInternalServer - deliberately
+// non-leader-restricted, see raftd.proto's doc comment.
+func (s *Server) ListJailsLocal(_ context.Context, _ *internalpb.ListJailsRequest) (*internalpb.ListJailsResponse, error) {
+	return &internalpb.ListJailsResponse{Jails: s.node.ListJailsLocal()}, nil
 }
 
 // ValidateAPIKeyHash implements internalpb.RaftInternalServer. Unlike

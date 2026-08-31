@@ -587,3 +587,233 @@ func TestFSM_SnapshotRestore_APIKeys(t *testing.T) {
 		t.Errorf("restored AuthEnabled() = false, want true (auth_enabled must survive snapshot/restore)")
 	}
 }
+
+func createJailCmd(id, name string) *internalpb.Command {
+	return &internalpb.Command{
+		Op: &internalpb.Command_CreateJail{
+			CreateJail: &internalpb.CreateJail{Jail: &internalpb.JailDefinition{Id: id, Name: name}},
+		},
+	}
+}
+
+func TestFSM_Apply_CreateJail(t *testing.T) {
+	fsm := NewFSM()
+
+	result := fsm.Apply(&raft.Log{Index: 1, Data: mustMarshalCommand(t, createJailCmd("jail-1", "web-1"))})
+
+	applyResult := result.(*FSMApplyResult)
+	if applyResult.Error != "" {
+		t.Fatalf("Error = %q, want empty", applyResult.Error)
+	}
+	if applyResult.Jail.GetId() != "jail-1" || applyResult.Jail.GetName() != "web-1" {
+		t.Errorf("Jail = %+v, want id=jail-1 name=web-1", applyResult.Jail)
+	}
+
+	jail, ok := fsm.Jail("jail-1")
+	if !ok || jail.GetName() != "web-1" {
+		t.Errorf("Jail(jail-1) = (%+v, %v), want web-1 present", jail, ok)
+	}
+}
+
+func TestFSM_Apply_CreateJailDuplicateRejected(t *testing.T) {
+	fsm := NewFSM()
+	fsm.Apply(&raft.Log{Index: 1, Data: mustMarshalCommand(t, createJailCmd("jail-1", "a"))})
+
+	result := fsm.Apply(&raft.Log{Index: 2, Data: mustMarshalCommand(t, createJailCmd("jail-1", "b"))})
+
+	if result.(*FSMApplyResult).Error == "" {
+		t.Fatalf("Error = empty, want a duplicate-id rejection")
+	}
+}
+
+func TestFSM_Apply_CreateJailMissingIDRejected(t *testing.T) {
+	fsm := NewFSM()
+
+	result := fsm.Apply(&raft.Log{Index: 1, Data: mustMarshalCommand(t, createJailCmd("", "a"))})
+
+	if result.(*FSMApplyResult).Error == "" {
+		t.Fatalf("Error = empty, want a missing-id rejection")
+	}
+}
+
+func TestFSM_Apply_UpdateJail(t *testing.T) {
+	fsm := NewFSM()
+	fsm.Apply(&raft.Log{Index: 1, Data: mustMarshalCommand(t, createJailCmd("jail-1", "a"))})
+
+	updateCmd := &internalpb.Command{
+		Op: &internalpb.Command_UpdateJail{UpdateJail: &internalpb.UpdateJail{
+			Jail: &internalpb.JailDefinition{Id: "jail-1", Name: "b"},
+		}},
+	}
+	result := fsm.Apply(&raft.Log{Index: 2, Data: mustMarshalCommand(t, updateCmd)})
+
+	if result.(*FSMApplyResult).Error != "" {
+		t.Fatalf("Error = %q, want empty", result.(*FSMApplyResult).Error)
+	}
+	jail, _ := fsm.Jail("jail-1")
+	if jail.GetName() != "b" {
+		t.Errorf("Jail(jail-1).Name = %q, want b", jail.GetName())
+	}
+}
+
+func TestFSM_Apply_UpdateJailMissingIsError(t *testing.T) {
+	fsm := NewFSM()
+
+	updateCmd := &internalpb.Command{
+		Op: &internalpb.Command_UpdateJail{UpdateJail: &internalpb.UpdateJail{
+			Jail: &internalpb.JailDefinition{Id: "missing"},
+		}},
+	}
+	result := fsm.Apply(&raft.Log{Index: 1, Data: mustMarshalCommand(t, updateCmd)})
+
+	if result.(*FSMApplyResult).Error == "" {
+		t.Fatalf("Error = empty, want a not-found rejection")
+	}
+}
+
+func TestFSM_Apply_DeleteJail(t *testing.T) {
+	fsm := NewFSM()
+	fsm.Apply(&raft.Log{Index: 1, Data: mustMarshalCommand(t, createJailCmd("jail-1", "a"))})
+
+	deleteCmd := &internalpb.Command{
+		Op: &internalpb.Command_DeleteJail{DeleteJail: &internalpb.DeleteJail{Id: "jail-1"}},
+	}
+	result := fsm.Apply(&raft.Log{Index: 2, Data: mustMarshalCommand(t, deleteCmd)})
+
+	if result.(*FSMApplyResult).Error != "" {
+		t.Fatalf("Error = %q, want empty", result.(*FSMApplyResult).Error)
+	}
+	if _, ok := fsm.Jail("jail-1"); ok {
+		t.Errorf("Jail(jail-1) still present after DeleteJail")
+	}
+}
+
+func TestFSM_Apply_DeleteJail_AssignedJailIsSoftDeleted(t *testing.T) {
+	fsm := NewFSM()
+	fsm.Apply(&raft.Log{Index: 1, Data: mustMarshalCommand(t, &internalpb.Command{
+		Op: &internalpb.Command_CreateJail{CreateJail: &internalpb.CreateJail{
+			Jail: &internalpb.JailDefinition{Id: "jail-1", NodeId: "node-a"},
+		}},
+	})})
+
+	deleteCmd := &internalpb.Command{
+		Op: &internalpb.Command_DeleteJail{DeleteJail: &internalpb.DeleteJail{Id: "jail-1"}},
+	}
+	result := fsm.Apply(&raft.Log{Index: 2, Data: mustMarshalCommand(t, deleteCmd)})
+
+	if result.(*FSMApplyResult).Error != "" {
+		t.Fatalf("Error = %q, want empty", result.(*FSMApplyResult).Error)
+	}
+	jail, ok := fsm.Jail("jail-1")
+	if !ok {
+		t.Fatalf("Jail(jail-1) not found, want it to still exist as a tombstone")
+	}
+	if jail.GetDesiredState() != internalpb.JailState_JAIL_STATE_DELETING {
+		t.Errorf("DesiredState = %v, want JAIL_STATE_DELETING", jail.GetDesiredState())
+	}
+}
+
+func TestFSM_Apply_DeleteJailMissingIsError(t *testing.T) {
+	fsm := NewFSM()
+
+	deleteCmd := &internalpb.Command{
+		Op: &internalpb.Command_DeleteJail{DeleteJail: &internalpb.DeleteJail{Id: "missing"}},
+	}
+	result := fsm.Apply(&raft.Log{Index: 1, Data: mustMarshalCommand(t, deleteCmd)})
+
+	if result.(*FSMApplyResult).Error == "" {
+		t.Fatalf("Error = empty, want a not-found rejection")
+	}
+}
+
+func TestFSM_Apply_UpdateJailPhase(t *testing.T) {
+	fsm := NewFSM()
+	fsm.Apply(&raft.Log{Index: 1, Data: mustMarshalCommand(t, createJailCmd("jail-1", "a"))})
+
+	cmd := &internalpb.Command{
+		Op: &internalpb.Command_UpdateJailPhase{UpdateJailPhase: &internalpb.UpdateJailPhase{
+			Id: "jail-1", Phase: internalpb.JailPhase_JAIL_PHASE_READY,
+		}},
+	}
+	result := fsm.Apply(&raft.Log{Index: 2, Data: mustMarshalCommand(t, cmd)})
+
+	if result.(*FSMApplyResult).Error != "" {
+		t.Fatalf("Error = %q, want empty", result.(*FSMApplyResult).Error)
+	}
+	jail, _ := fsm.Jail("jail-1")
+	if jail.GetPhase() != internalpb.JailPhase_JAIL_PHASE_READY {
+		t.Errorf("Phase = %v, want JAIL_PHASE_READY", jail.GetPhase())
+	}
+}
+
+func TestFSM_Apply_UpdateJailPhaseMissingIsError(t *testing.T) {
+	fsm := NewFSM()
+
+	cmd := &internalpb.Command{
+		Op: &internalpb.Command_UpdateJailPhase{UpdateJailPhase: &internalpb.UpdateJailPhase{
+			Id: "missing", Phase: internalpb.JailPhase_JAIL_PHASE_READY,
+		}},
+	}
+	result := fsm.Apply(&raft.Log{Index: 1, Data: mustMarshalCommand(t, cmd)})
+
+	if result.(*FSMApplyResult).Error == "" {
+		t.Fatalf("Error = empty, want a not-found rejection")
+	}
+}
+
+func TestFSM_Apply_PurgeJail(t *testing.T) {
+	fsm := NewFSM()
+	fsm.Apply(&raft.Log{Index: 1, Data: mustMarshalCommand(t, &internalpb.Command{
+		Op: &internalpb.Command_CreateJail{CreateJail: &internalpb.CreateJail{
+			Jail: &internalpb.JailDefinition{Id: "jail-1", NodeId: "node-a"},
+		}},
+	})})
+	fsm.Apply(&raft.Log{Index: 2, Data: mustMarshalCommand(t, &internalpb.Command{
+		Op: &internalpb.Command_DeleteJail{DeleteJail: &internalpb.DeleteJail{Id: "jail-1"}},
+	})})
+
+	purgeCmd := &internalpb.Command{Op: &internalpb.Command_PurgeJail{PurgeJail: &internalpb.PurgeJail{Id: "jail-1"}}}
+	result := fsm.Apply(&raft.Log{Index: 3, Data: mustMarshalCommand(t, purgeCmd)})
+
+	if result.(*FSMApplyResult).Error != "" {
+		t.Fatalf("Error = %q, want empty", result.(*FSMApplyResult).Error)
+	}
+	if _, ok := fsm.Jail("jail-1"); ok {
+		t.Errorf("Jail(jail-1) still present after PurgeJail")
+	}
+}
+
+func TestFSM_Apply_PurgeJailAlreadyGoneIsIdempotent(t *testing.T) {
+	fsm := NewFSM()
+
+	purgeCmd := &internalpb.Command{Op: &internalpb.Command_PurgeJail{PurgeJail: &internalpb.PurgeJail{Id: "missing"}}}
+	result := fsm.Apply(&raft.Log{Index: 1, Data: mustMarshalCommand(t, purgeCmd)})
+
+	if result.(*FSMApplyResult).Error != "" {
+		t.Fatalf("Error = %q, want empty (purging an already-gone id is not an error)", result.(*FSMApplyResult).Error)
+	}
+}
+
+func TestFSM_SnapshotRestore_Jails(t *testing.T) {
+	fsm := NewFSM()
+	fsm.Apply(&raft.Log{Index: 1, Data: mustMarshalCommand(t, createJailCmd("jail-1", "web-1"))})
+
+	snap, err := fsm.Snapshot()
+	if err != nil {
+		t.Fatalf("Snapshot() error: %v", err)
+	}
+	sink := &fakeSnapshotSink{}
+	if err := snap.(*fsmSnapshot).Persist(sink); err != nil {
+		t.Fatalf("Persist() error: %v", err)
+	}
+
+	restored := NewFSM()
+	if err := restored.Restore(io.NopCloser(bytes.NewReader(sink.Bytes()))); err != nil {
+		t.Fatalf("Restore() error: %v", err)
+	}
+
+	jail, ok := restored.Jail("jail-1")
+	if !ok || jail.GetName() != "web-1" {
+		t.Errorf("restored Jail(jail-1) = (%+v, %v), want present with name web-1", jail, ok)
+	}
+}

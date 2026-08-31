@@ -27,6 +27,7 @@ type FSMApplyResult struct {
 	VM      *internalpb.VMDefinition
 	Network *internalpb.NetworkDefinition
 	ApiKey  *internalpb.ApiKey
+	Jail    *internalpb.JailDefinition
 	Error   string
 }
 
@@ -42,6 +43,7 @@ type FSM struct {
 	vms       map[string]*internalpb.VMDefinition
 	networks  map[string]*internalpb.NetworkDefinition
 	apiKeys   map[string]*internalpb.ApiKey
+	jails     map[string]*internalpb.JailDefinition
 
 	// authEnabled is set permanently, forever, the first time any
 	// CreateAPIKey command ever succeeds - it never reverts to false
@@ -59,6 +61,7 @@ func NewFSM() *FSM {
 		vms:      make(map[string]*internalpb.VMDefinition),
 		networks: make(map[string]*internalpb.NetworkDefinition),
 		apiKeys:  make(map[string]*internalpb.ApiKey),
+		jails:    make(map[string]*internalpb.JailDefinition),
 	}
 }
 
@@ -96,6 +99,16 @@ func (f *FSM) Apply(log *raft.Log) interface{} {
 		return f.applyCreateAPIKey(log.Index, op.CreateApiKey.GetKey())
 	case *internalpb.Command_RevokeApiKey:
 		return f.applyRevokeAPIKey(log.Index, op.RevokeApiKey.GetId())
+	case *internalpb.Command_CreateJail:
+		return f.applyCreateJail(log.Index, op.CreateJail.GetJail())
+	case *internalpb.Command_UpdateJail:
+		return f.applyUpdateJail(log.Index, op.UpdateJail.GetJail())
+	case *internalpb.Command_DeleteJail:
+		return f.applyDeleteJail(log.Index, op.DeleteJail.GetId())
+	case *internalpb.Command_UpdateJailPhase:
+		return f.applyUpdateJailPhase(log.Index, op.UpdateJailPhase)
+	case *internalpb.Command_PurgeJail:
+		return f.applyPurgeJail(log.Index, op.PurgeJail.GetId())
 	default:
 		return &FSMApplyResult{Index: log.Index, Error: "command has no op set"}
 	}
@@ -240,6 +253,86 @@ func (f *FSM) applyPurgeVM(index uint64, id string) *FSMApplyResult {
 	vm := f.vms[id]
 	delete(f.vms, id)
 	return &FSMApplyResult{Index: index, VM: vm}
+}
+
+// applyCreateJail adds a new JailDefinition, mirroring applyCreateVM
+// (minus the network-allocation step, since jails have no equivalent
+// yet - see JailDefinition's doc comment).
+func (f *FSM) applyCreateJail(index uint64, jail *internalpb.JailDefinition) *FSMApplyResult {
+	if jail.GetId() == "" {
+		return &FSMApplyResult{Index: index, Error: "CreateJail: id must be set"}
+	}
+	if _, exists := f.jails[jail.GetId()]; exists {
+		return &FSMApplyResult{Index: index, Error: fmt.Sprintf("CreateJail: id %q already exists", jail.GetId())}
+	}
+	f.jails[jail.GetId()] = jail
+	return &FSMApplyResult{Index: index, Jail: jail}
+}
+
+func (f *FSM) applyUpdateJail(index uint64, jail *internalpb.JailDefinition) *FSMApplyResult {
+	if _, exists := f.jails[jail.GetId()]; !exists {
+		return &FSMApplyResult{Index: index, Error: fmt.Sprintf("UpdateJail: id %q does not exist", jail.GetId())}
+	}
+	f.jails[jail.GetId()] = jail
+	return &FSMApplyResult{Index: index, Jail: jail}
+}
+
+// applyDeleteJail mirrors applyDeleteVM exactly: soft-delete
+// (JAIL_STATE_DELETING) when a node_id is assigned (a reconciler needs
+// to tear down real resources first), immediate removal otherwise.
+func (f *FSM) applyDeleteJail(index uint64, id string) *FSMApplyResult {
+	jail, exists := f.jails[id]
+	if !exists {
+		return &FSMApplyResult{Index: index, Error: fmt.Sprintf("DeleteJail: id %q does not exist", id)}
+	}
+	if jail.GetNodeId() == "" {
+		delete(f.jails, id)
+		return &FSMApplyResult{Index: index, Jail: jail}
+	}
+	updated := proto.Clone(jail).(*internalpb.JailDefinition)
+	updated.DesiredState = internalpb.JailState_JAIL_STATE_DELETING
+	f.jails[id] = updated
+	return &FSMApplyResult{Index: index, Jail: updated}
+}
+
+// applyUpdateJailPhase mirrors applyUpdateVMPhase exactly.
+func (f *FSM) applyUpdateJailPhase(index uint64, upd *internalpb.UpdateJailPhase) *FSMApplyResult {
+	jail, exists := f.jails[upd.GetId()]
+	if !exists {
+		return &FSMApplyResult{Index: index, Error: fmt.Sprintf("UpdateJailPhase: id %q does not exist", upd.GetId())}
+	}
+	updated := proto.Clone(jail).(*internalpb.JailDefinition)
+	updated.Phase = upd.GetPhase()
+	updated.PhaseError = upd.GetPhaseError()
+	f.jails[upd.GetId()] = updated
+	return &FSMApplyResult{Index: index, Jail: updated}
+}
+
+// applyPurgeJail mirrors applyPurgeVM exactly: idempotent, not an
+// error if id is already gone.
+func (f *FSM) applyPurgeJail(index uint64, id string) *FSMApplyResult {
+	jail := f.jails[id]
+	delete(f.jails, id)
+	return &FSMApplyResult{Index: index, Jail: jail}
+}
+
+// Jail returns the current definition for id, and whether it exists.
+func (f *FSM) Jail(id string) (*internalpb.JailDefinition, bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	jail, ok := f.jails[id]
+	return jail, ok
+}
+
+// ListJails returns every current jail definition.
+func (f *FSM) ListJails() []*internalpb.JailDefinition {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	jails := make([]*internalpb.JailDefinition, 0, len(f.jails))
+	for _, j := range f.jails {
+		jails = append(jails, j)
+	}
+	return jails
 }
 
 // applyCreateNetwork adds a new NetworkDefinition.
@@ -406,6 +499,7 @@ func (f *FSM) Snapshot() (raft.FSMSnapshot, error) {
 		Vms:         make(map[string]*internalpb.VMDefinition, len(f.vms)),
 		Networks:    make(map[string]*internalpb.NetworkDefinition, len(f.networks)),
 		ApiKeys:     make(map[string]*internalpb.ApiKey, len(f.apiKeys)),
+		Jails:       make(map[string]*internalpb.JailDefinition, len(f.jails)),
 		AuthEnabled: f.authEnabled,
 	}
 	for id, vm := range f.vms {
@@ -416,6 +510,9 @@ func (f *FSM) Snapshot() (raft.FSMSnapshot, error) {
 	}
 	for id, key := range f.apiKeys {
 		state.ApiKeys[id] = key
+	}
+	for id, jail := range f.jails {
+		state.Jails[id] = jail
 	}
 	return &fsmSnapshot{state: state}, nil
 }
@@ -447,6 +544,10 @@ func (f *FSM) Restore(rc io.ReadCloser) error {
 	f.apiKeys = state.GetApiKeys()
 	if f.apiKeys == nil {
 		f.apiKeys = make(map[string]*internalpb.ApiKey)
+	}
+	f.jails = state.GetJails()
+	if f.jails == nil {
+		f.jails = make(map[string]*internalpb.JailDefinition)
 	}
 	f.authEnabled = state.GetAuthEnabled()
 	f.mu.Unlock()

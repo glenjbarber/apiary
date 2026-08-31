@@ -80,6 +80,22 @@ func (c *RaftClient) ListNetworksLocal(ctx context.Context) (*internalpb.ListNet
 	return c.client.ListNetworksLocal(ctx, &internalpb.ListNetworksRequest{})
 }
 
+// GetJail reads a single jail definition from raftd.
+func (c *RaftClient) GetJail(ctx context.Context, id string) (*internalpb.GetJailResponse, error) {
+	return c.client.GetJail(ctx, &internalpb.GetJailRequest{Id: id})
+}
+
+// ListJails reads all jail definitions from raftd (leader-only).
+func (c *RaftClient) ListJails(ctx context.Context) (*internalpb.ListJailsResponse, error) {
+	return c.client.ListJails(ctx, &internalpb.ListJailsRequest{})
+}
+
+// ListJailsLocal is the non-leader-restricted variant used by
+// internal/cluster's Reconciler, mirroring ListVMsLocal/ListNetworksLocal.
+func (c *RaftClient) ListJailsLocal(ctx context.Context) (*internalpb.ListJailsResponse, error) {
+	return c.client.ListJailsLocal(ctx, &internalpb.ListJailsRequest{})
+}
+
 // ValidateAPIKeyHash checks hashedKey (may be empty) against raftd's
 // own FSM state - see ADR-0023 for why this is deliberately not
 // leader-restricted, unlike every other read above.
