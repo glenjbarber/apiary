@@ -54,3 +54,50 @@ func TestPlan(t *testing.T) {
 		})
 	}
 }
+
+func TestPlanReclaim(t *testing.T) {
+	cases := []struct {
+		name    string
+		desired []VMPlacement
+		local   string
+		want    []string
+	}{
+		{
+			name:    "nothing desired",
+			desired: nil,
+			local:   "node-a",
+			want:    nil,
+		},
+		{
+			name:    "VM assigned locally is not a reclaim candidate",
+			desired: []VMPlacement{{ID: "vm-1", NodeID: "node-a"}},
+			local:   "node-a",
+			want:    nil,
+		},
+		{
+			name:    "VM assigned elsewhere is a reclaim candidate",
+			desired: []VMPlacement{{ID: "vm-1", NodeID: "node-b"}},
+			local:   "node-a",
+			want:    []string{"vm-1"},
+		},
+		{
+			name: "mixed: only non-local VMs, sorted by ID",
+			desired: []VMPlacement{
+				{ID: "vm-3", NodeID: "node-b"},
+				{ID: "vm-2", NodeID: "node-a"},
+				{ID: "vm-1", NodeID: "node-c"},
+			},
+			local: "node-a",
+			want:  []string{"vm-1", "vm-3"},
+		},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := PlanReclaim(c.desired, c.local)
+			if !reflect.DeepEqual(got, c.want) {
+				t.Errorf("PlanReclaim() = %+v, want %+v", got, c.want)
+			}
+		})
+	}
+}

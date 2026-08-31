@@ -92,3 +92,29 @@ func Plan(desired []VMPlacement, localNodeID string) []VMPlacement {
 	sort.Slice(assigned, func(i, j int) bool { return assigned[i].ID < assigned[j].ID })
 	return assigned
 }
+
+// PlanReclaim returns the IDs of every VM in desired that is NOT
+// currently assigned to localNodeID - candidates whose local resources
+// (if any exist under that ID on this node, left over from before a
+// reassignment) the reconciler should tear down. See
+// Reconciler.reclaimStaleVM.
+//
+// This is deliberately different from - and safer than - inferring
+// teardown from a VM's absence, which Plan's own doc comment explains
+// this package avoids. Here, the record still exists: it explicitly
+// states a different current owner, an unambiguous, caller-originated
+// fact (the same kind of signal Deleting already is), not an absence
+// that could just as easily mean "the fetch failed" or "raced with a
+// concurrent create." A node that never hosted a given VM in the first
+// place is unaffected: its resource-existence checks simply come back
+// negative and reclaimStaleVM does nothing.
+func PlanReclaim(desired []VMPlacement, localNodeID string) []string {
+	var ids []string
+	for _, vm := range desired {
+		if vm.NodeID != localNodeID {
+			ids = append(ids, vm.ID)
+		}
+	}
+	sort.Strings(ids)
+	return ids
+}

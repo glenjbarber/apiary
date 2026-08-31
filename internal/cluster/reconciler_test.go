@@ -879,3 +879,67 @@ func TestReconciler_RunOnce_ReconcilesDHCPLeasesForNetworkedVMs(t *testing.T) {
 		t.Errorf("dhcp.calls after unchanged 2nd tick = %d, want still 1", dhcp.calls)
 	}
 }
+
+func TestReconciler_RunOnce_ReclaimsResourcesForVMReassignedElsewhere(t *testing.T) {
+	// vm-1 used to be on node-a (this node) and has since been
+	// reassigned to node-b - the record still exists, it's just no
+	// longer this node's responsibility. node-a still has leftover
+	// local resources under vm-1's id from before the reassignment.
+	raft := &fakeRaftClient{resp: &internalpb.ListVMsResponse{
+		Vms: []*internalpb.VMDefinition{{Id: "vm-1", NodeId: "node-b"}},
+	}}
+	zfs := newFakeDatasetManager()
+	zfs.existing["vm-1"] = true
+	vms := newFakeVMManager()
+	vms.running["vm-1"] = true
+
+	r := &Reconciler{Raft: raft, ZFS: zfs, Bhyve: vms, LocalNodeID: "node-a", BootROM: "/fw/UEFI.fd"}
+	if err := r.RunOnce(context.Background()); err != nil {
+		t.Fatalf("RunOnce() error: %v", err)
+	}
+
+	if len(vms.destroyed) != 1 || vms.destroyed[0] != "vm-1" {
+		t.Errorf("bhyve destroyed = %v, want [vm-1]", vms.destroyed)
+	}
+	if len(zfs.destroyed) != 1 || zfs.destroyed[0] != "vm-1" {
+		t.Errorf("dataset destroyed = %v, want [vm-1]", zfs.destroyed)
+	}
+	// The record itself belongs to node-b now - node-a must not purge it.
+	if got := raft.purgedIDs(); len(got) != 0 {
+		t.Errorf("purgedIDs = %v, want none - a reassigned VM's record is not this node's to remove", got)
+	}
+}
+
+func TestReconciler_RunOnce_ReclaimIsNoOpWhenNothingLocalExists(t *testing.T) {
+	// The common case: vm-1 is assigned to node-b and has never touched
+	// node-a at all. Reclaim must do nothing (no destroy calls), not
+	// error.
+	raft := &fakeRaftClient{resp: &internalpb.ListVMsResponse{
+		Vms: []*internalpb.VMDefinition{{Id: "vm-1", NodeId: "node-b"}},
+	}}
+	zfs := newFakeDatasetManager()
+	vms := newFakeVMManager()
+
+	r := &Reconciler{Raft: raft, ZFS: zfs, Bhyve: vms, LocalNodeID: "node-a", BootROM: "/fw/UEFI.fd"}
+	if err := r.RunOnce(context.Background()); err != nil {
+		t.Fatalf("RunOnce() error: %v", err)
+	}
+
+	if len(vms.destroyed) != 0 || len(zfs.destroyed) != 0 {
+		t.Errorf("destroyed bhyve=%v zfs=%v, want none", vms.destroyed, zfs.destroyed)
+	}
+}
+
+func TestReconciler_RunOnce_ReclaimPropagatesDestroyError(t *testing.T) {
+	raft := &fakeRaftClient{resp: &internalpb.ListVMsResponse{
+		Vms: []*internalpb.VMDefinition{{Id: "vm-1", NodeId: "node-b"}},
+	}}
+	zfs := newFakeDatasetManager()
+	zfs.existing["vm-1"] = true
+	zfs.destroyErr = errors.New("dataset busy")
+
+	r := &Reconciler{Raft: raft, ZFS: zfs, LocalNodeID: "node-a"}
+	if err := r.RunOnce(context.Background()); err == nil {
+		t.Fatalf("RunOnce() error = nil, want the reclaim destroy error surfaced")
+	}
+}

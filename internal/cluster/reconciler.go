@@ -236,6 +236,17 @@ func (r *Reconciler) RunOnce(ctx context.Context) error {
 		}
 	}
 
+	// Reclaim any local resources left over under a VM ID that's no
+	// longer assigned to this node (e.g. it was reassigned elsewhere) -
+	// see PlanReclaim's own doc comment for why this is safe to infer,
+	// unlike inferring teardown from a VM disappearing from the list
+	// entirely.
+	for _, id := range PlanReclaim(desired, r.LocalNodeID) {
+		if err := r.reclaimStaleVM(ctx, id); err != nil && firstErr == nil {
+			firstErr = fmt.Errorf("cluster: reclaiming stale VM %s: %w", id, err)
+		}
+	}
+
 	if r.DHCP != nil {
 		if err := r.reconcileDHCP(ctx, planned, networks); err != nil && firstErr == nil {
 			firstErr = fmt.Errorf("cluster: reconciling DHCP: %w", err)
@@ -337,6 +348,46 @@ func (r *Reconciler) teardownVM(ctx context.Context, vm VMPlacement) error {
 	if _, err := r.Raft.Apply(ctx, data, phaseApplyTimeout); err != nil {
 		return fmt.Errorf("purging VM record: %w", err)
 	}
+	return nil
+}
+
+// reclaimStaleVM tears down any local dataset/bhyve VM left over under
+// id from before it was reassigned to a different node (see
+// PlanReclaim). Unlike teardownVM, it never touches id's raft record -
+// that belongs to whichever node currently owns it now, not this one -
+// and it does nothing at all if no local resources exist under this id,
+// which is the common case: most VMs in a cluster never touched this
+// node in the first place, so every tick's reclaim pass is a cheap
+// existence-check no-op for them.
+func (r *Reconciler) reclaimStaleVM(ctx context.Context, id string) error {
+	if r.Bhyve != nil {
+		exists, err := r.Bhyve.VMExists(ctx, id)
+		if err != nil {
+			return fmt.Errorf("checking stale bhyve VM: %w", err)
+		}
+		if exists {
+			if err := r.Bhyve.DestroyVM(ctx, id); err != nil {
+				return fmt.Errorf("destroying stale bhyve VM: %w", err)
+			}
+		}
+	}
+
+	exists, err := r.ZFS.DatasetExists(ctx, id)
+	if err != nil {
+		return fmt.Errorf("checking stale dataset: %w", err)
+	}
+	if exists {
+		if err := r.ZFS.DestroyDataset(ctx, id); err != nil {
+			return fmt.Errorf("destroying stale dataset: %w", err)
+		}
+	}
+
+	if r.PF != nil {
+		if err := r.PF.Flush(ctx, vmAnchor(id)); err != nil {
+			return fmt.Errorf("flushing stale firewall rules: %w", err)
+		}
+	}
+
 	return nil
 }
 
