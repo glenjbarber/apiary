@@ -62,13 +62,26 @@ each design decision, in order.
   network interface counters, surfaced on the UI's default page. See
   [ADR-0018](docs/adr/0018-host-stats-and-multipage-ui.md).
 - **`internal/hast`** — storage replication config/lifecycle management.
-  Cross-node replication itself is currently blocked by an upstream
-  FreeBSD `hastd` bug; we diagnosed it, found it was
+  Cross-node replication was originally blocked by an upstream FreeBSD
+  `hastd` bug; we diagnosed it, found it was
   [already reported](https://bugs.freebsd.org/bugzilla/show_bug.cgi?id=292322)
   with a fix ([D57511](https://reviews.freebsd.org/D57511)) awaiting
   review, and independently confirmed the fix works. See
   [ADR-0008](docs/adr/0008-hast-config-and-lifecycle.md) for the full
-  trail.
+  trail. All four project machines now run the patched `hastd`, and
+  real VM disk replication is wired in for real — see below.
+- **Real HAST-backed VM disk replication** — a VM can name a
+  `replica_node_id` (caller-set, like `node_id`) and its disk is then
+  replicated to that node for real data redundancy - not automatic
+  failover, since only one machine in this project can actually run
+  bhyve VMs. Verified live on a real 2-node raft cluster: `hastctl`
+  reports `role: primary`/`status: complete` on the owning node and
+  `role: secondary`/`status: complete` on the replica, with a real
+  bhyve VM booted against the replicated device. See
+  [ADR-0026](docs/adr/0026-hast-vm-disk-replication.md) - it also
+  documents a genuinely subtle root-cause bug that took an extensive
+  live-debugging session to isolate, worth reading before touching this
+  code.
 - **`restshimd`** — a REST/JSON translation of the external gRPC API
   (`internal/restshim`), for non-browser clients: `curl`, CI, or (once
   built) a Terraform provider. Runs as its own binary, dialing
@@ -112,8 +125,15 @@ each design decision, in order.
 
 **Not yet implemented:**
 
-- Real cross-node HAST replication in normal operation (see above —
-  waiting on the upstream fix to merge, not something fixable here)
+- Cross-node HAST replication works for real on this project's own four
+  machines (all patched - see above), but the underlying fix still
+  isn't merged upstream, so it isn't something a stock FreeBSD install
+  elsewhere could rely on yet. Automatic failover of a replicated VM
+  also isn't implemented - only one machine in this project can
+  actually run bhyve VMs, so this is data redundancy, not HA. A
+  replica's dataset also isn't cleaned up once its VM's record is
+  fully purged (a deliberate consequence of never inferring teardown
+  from an absent record - see ADR-0026)
 - Node scheduling: nothing decides which cluster node a VM should run on
   beyond whatever a caller sets directly, and `MigrateVM` doesn't exist
 - Multi-node console/network access: the noVNC console and the Networks
