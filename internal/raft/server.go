@@ -182,6 +182,16 @@ func (s *Server) ListNetworks(_ context.Context, _ *internalpb.ListNetworksReque
 	return &internalpb.ListNetworksResponse{Networks: networks}, nil
 }
 
+// ListVMsLocal/ListNetworksLocal implement internalpb.RaftInternalServer -
+// deliberately non-leader-restricted, see raftd.proto's doc comment.
+func (s *Server) ListVMsLocal(_ context.Context, _ *internalpb.ListVMsRequest) (*internalpb.ListVMsResponse, error) {
+	return &internalpb.ListVMsResponse{Vms: s.node.ListVMsLocal()}, nil
+}
+
+func (s *Server) ListNetworksLocal(_ context.Context, _ *internalpb.ListNetworksRequest) (*internalpb.ListNetworksResponse, error) {
+	return &internalpb.ListNetworksResponse{Networks: s.node.ListNetworksLocal()}, nil
+}
+
 // ValidateAPIKeyHash implements internalpb.RaftInternalServer. Unlike
 // every other read RPC here, this never returns ErrNotLeader - see
 // Node.ValidateAPIKeyHash's doc comment for why.

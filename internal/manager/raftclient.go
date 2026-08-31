@@ -68,6 +68,18 @@ func (c *RaftClient) ListNetworks(ctx context.Context) (*internalpb.ListNetworks
 	return c.client.ListNetworks(ctx, &internalpb.ListNetworksRequest{})
 }
 
+// ListVMsLocal/ListNetworksLocal are the non-leader-restricted variants
+// used by internal/cluster's Reconciler - see raftd.proto's doc comment
+// on why the reconciler can't use the leader-only ListVMs/ListNetworks
+// above.
+func (c *RaftClient) ListVMsLocal(ctx context.Context) (*internalpb.ListVMsResponse, error) {
+	return c.client.ListVMsLocal(ctx, &internalpb.ListVMsRequest{})
+}
+
+func (c *RaftClient) ListNetworksLocal(ctx context.Context) (*internalpb.ListNetworksResponse, error) {
+	return c.client.ListNetworksLocal(ctx, &internalpb.ListNetworksRequest{})
+}
+
 // ValidateAPIKeyHash checks hashedKey (may be empty) against raftd's
 // own FSM state - see ADR-0023 for why this is deliberately not
 // leader-restricted, unlike every other read above.

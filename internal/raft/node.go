@@ -258,6 +258,23 @@ func (n *Node) ListNetworks() ([]*internalpb.NetworkDefinition, error) {
 	return n.fsm.ListNetworks(), nil
 }
 
+// ListVMsLocal/ListNetworksLocal read the same FSM state as ListVMs/
+// ListNetworks above, but deliberately with NO leadership check - see
+// these methods' own doc comment in raftd.proto for why: every node's
+// Reconciler needs to see the current VM/network list regardless of
+// raft leadership, the same reasoning ValidateAPIKeyHash already
+// established for auth checks. Raft already replicates FSM state onto
+// every node as they replay the log, so this is just as correct as the
+// leader's own copy, modulo the usual brief replication lag right
+// after a write.
+func (n *Node) ListVMsLocal() []*internalpb.VMDefinition {
+	return n.fsm.ListVMs()
+}
+
+func (n *Node) ListNetworksLocal() []*internalpb.NetworkDefinition {
+	return n.fsm.ListNetworks()
+}
+
 // ValidateAPIKeyHash checks hash against this node's own FSM state and
 // reports whether API-key auth has ever been enabled at all (see
 // FSM.AuthEnabled - permanent once set, never reverts even if every

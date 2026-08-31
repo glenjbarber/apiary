@@ -1296,7 +1296,7 @@ const file_api_internalpb_raftd_proto_rawDesc = "" +
 	"\x04keys\x18\x01 \x03(\v2\x1a.apiary.internal.v1.ApiKeyR\x04keys\x12\x14\n" +
 	"\x05error\x18\x02 \x01(\tR\x05error\x12\x1f\n" +
 	"\vleader_hint\x18\x03 \x01(\tR\n" +
-	"leaderHint2\x9e\a\n" +
+	"leaderHint2\xdf\b\n" +
 	"\fRaftInternal\x12L\n" +
 	"\x05Apply\x12 .apiary.internal.v1.ApplyRequest\x1a!.apiary.internal.v1.ApplyResponse\x12O\n" +
 	"\x06Status\x12!.apiary.internal.v1.StatusRequest\x1a\".apiary.internal.v1.StatusResponse\x12U\n" +
@@ -1306,7 +1306,9 @@ const file_api_internalpb_raftd_proto_rawDesc = "" +
 	"\aListVMs\x12\".apiary.internal.v1.ListVMsRequest\x1a#.apiary.internal.v1.ListVMsResponse\x12[\n" +
 	"\n" +
 	"GetNetwork\x12%.apiary.internal.v1.GetNetworkRequest\x1a&.apiary.internal.v1.GetNetworkResponse\x12a\n" +
-	"\fListNetworks\x12'.apiary.internal.v1.ListNetworksRequest\x1a(.apiary.internal.v1.ListNetworksResponse\x12s\n" +
+	"\fListNetworks\x12'.apiary.internal.v1.ListNetworksRequest\x1a(.apiary.internal.v1.ListNetworksResponse\x12W\n" +
+	"\fListVMsLocal\x12\".apiary.internal.v1.ListVMsRequest\x1a#.apiary.internal.v1.ListVMsResponse\x12f\n" +
+	"\x11ListNetworksLocal\x12'.apiary.internal.v1.ListNetworksRequest\x1a(.apiary.internal.v1.ListNetworksResponse\x12s\n" +
 	"\x12ValidateAPIKeyHash\x12-.apiary.internal.v1.ValidateAPIKeyHashRequest\x1a..apiary.internal.v1.ValidateAPIKeyHashResponse\x12^\n" +
 	"\vListAPIKeys\x12&.apiary.internal.v1.ListAPIKeysRequest\x1a'.apiary.internal.v1.ListAPIKeysResponseB9Z7github.com/glenjbarber/apiary/api/internalpb;internalpbb\x06proto3"
 
@@ -1364,20 +1366,24 @@ var file_api_internalpb_raftd_proto_depIdxs = []int32{
 	11, // 11: apiary.internal.v1.RaftInternal.ListVMs:input_type -> apiary.internal.v1.ListVMsRequest
 	13, // 12: apiary.internal.v1.RaftInternal.GetNetwork:input_type -> apiary.internal.v1.GetNetworkRequest
 	15, // 13: apiary.internal.v1.RaftInternal.ListNetworks:input_type -> apiary.internal.v1.ListNetworksRequest
-	17, // 14: apiary.internal.v1.RaftInternal.ValidateAPIKeyHash:input_type -> apiary.internal.v1.ValidateAPIKeyHashRequest
-	19, // 15: apiary.internal.v1.RaftInternal.ListAPIKeys:input_type -> apiary.internal.v1.ListAPIKeysRequest
-	1,  // 16: apiary.internal.v1.RaftInternal.Apply:output_type -> apiary.internal.v1.ApplyResponse
-	3,  // 17: apiary.internal.v1.RaftInternal.Status:output_type -> apiary.internal.v1.StatusResponse
-	6,  // 18: apiary.internal.v1.RaftInternal.AddVoter:output_type -> apiary.internal.v1.AddVoterResponse
-	8,  // 19: apiary.internal.v1.RaftInternal.RemoveServer:output_type -> apiary.internal.v1.RemoveServerResponse
-	10, // 20: apiary.internal.v1.RaftInternal.GetVM:output_type -> apiary.internal.v1.GetVMResponse
-	12, // 21: apiary.internal.v1.RaftInternal.ListVMs:output_type -> apiary.internal.v1.ListVMsResponse
-	14, // 22: apiary.internal.v1.RaftInternal.GetNetwork:output_type -> apiary.internal.v1.GetNetworkResponse
-	16, // 23: apiary.internal.v1.RaftInternal.ListNetworks:output_type -> apiary.internal.v1.ListNetworksResponse
-	18, // 24: apiary.internal.v1.RaftInternal.ValidateAPIKeyHash:output_type -> apiary.internal.v1.ValidateAPIKeyHashResponse
-	20, // 25: apiary.internal.v1.RaftInternal.ListAPIKeys:output_type -> apiary.internal.v1.ListAPIKeysResponse
-	16, // [16:26] is the sub-list for method output_type
-	6,  // [6:16] is the sub-list for method input_type
+	11, // 14: apiary.internal.v1.RaftInternal.ListVMsLocal:input_type -> apiary.internal.v1.ListVMsRequest
+	15, // 15: apiary.internal.v1.RaftInternal.ListNetworksLocal:input_type -> apiary.internal.v1.ListNetworksRequest
+	17, // 16: apiary.internal.v1.RaftInternal.ValidateAPIKeyHash:input_type -> apiary.internal.v1.ValidateAPIKeyHashRequest
+	19, // 17: apiary.internal.v1.RaftInternal.ListAPIKeys:input_type -> apiary.internal.v1.ListAPIKeysRequest
+	1,  // 18: apiary.internal.v1.RaftInternal.Apply:output_type -> apiary.internal.v1.ApplyResponse
+	3,  // 19: apiary.internal.v1.RaftInternal.Status:output_type -> apiary.internal.v1.StatusResponse
+	6,  // 20: apiary.internal.v1.RaftInternal.AddVoter:output_type -> apiary.internal.v1.AddVoterResponse
+	8,  // 21: apiary.internal.v1.RaftInternal.RemoveServer:output_type -> apiary.internal.v1.RemoveServerResponse
+	10, // 22: apiary.internal.v1.RaftInternal.GetVM:output_type -> apiary.internal.v1.GetVMResponse
+	12, // 23: apiary.internal.v1.RaftInternal.ListVMs:output_type -> apiary.internal.v1.ListVMsResponse
+	14, // 24: apiary.internal.v1.RaftInternal.GetNetwork:output_type -> apiary.internal.v1.GetNetworkResponse
+	16, // 25: apiary.internal.v1.RaftInternal.ListNetworks:output_type -> apiary.internal.v1.ListNetworksResponse
+	12, // 26: apiary.internal.v1.RaftInternal.ListVMsLocal:output_type -> apiary.internal.v1.ListVMsResponse
+	16, // 27: apiary.internal.v1.RaftInternal.ListNetworksLocal:output_type -> apiary.internal.v1.ListNetworksResponse
+	18, // 28: apiary.internal.v1.RaftInternal.ValidateAPIKeyHash:output_type -> apiary.internal.v1.ValidateAPIKeyHashResponse
+	20, // 29: apiary.internal.v1.RaftInternal.ListAPIKeys:output_type -> apiary.internal.v1.ListAPIKeysResponse
+	18, // [18:30] is the sub-list for method output_type
+	6,  // [6:18] is the sub-list for method input_type
 	6,  // [6:6] is the sub-list for extension type_name
 	6,  // [6:6] is the sub-list for extension extendee
 	0,  // [0:6] is the sub-list for field type_name

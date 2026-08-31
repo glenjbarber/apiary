@@ -47,6 +47,28 @@ service RaftInternal {
   rpc GetNetwork(GetNetworkRequest) returns (GetNetworkResponse);
   rpc ListNetworks(ListNetworksRequest) returns (ListNetworksResponse);
 
+  // ListVMsLocal/ListNetworksLocal read the same state as ListVMs/
+  // ListNetworks above, but deliberately WITHOUT the leader-only
+  // restriction - see ValidateAPIKeyHash's doc comment below for the
+  // exact same reasoning, applied here for the first time to plain
+  // reads rather than auth. internal/cluster's Reconciler runs
+  // identically on every node, leader or follower, deciding what to
+  // provision locally (its own VMs, HAST replica roles, network
+  // interfaces) - none of that depends on this node being the raft
+  // leader, so requiring leadership here would make every non-leader
+  // node's reconciler permanently unable to do its job. This was a
+  // real, previously-latent gap: found live when a genuine second raft
+  // node's Reconciler.RunOnce failed outright with "this node is not
+  // the leader" the first time real multi-node reconciliation was
+  // exercised (every deployment before this had exactly one node,
+  // always the leader, so ListVMs/ListNetworks's leader restriction
+  // never actually mattered) - see ADR-0025. ListVMs/ListNetworks
+  // themselves stay leader-only, unchanged, for external API reads
+  // (GetVM/ListVMs on ManagerService) - only the reconciler's own
+  // internal use is affected.
+  rpc ListVMsLocal(ListVMsRequest) returns (ListVMsResponse);
+  rpc ListNetworksLocal(ListNetworksRequest) returns (ListNetworksResponse);
+
   // ValidateAPIKeyHash checks a hashed API key against this node's own
   // FSM state (ADR-0023) - deliberately NOT leader-only, unlike every
   // other read RPC in this service. Raft already replicates FSM state
