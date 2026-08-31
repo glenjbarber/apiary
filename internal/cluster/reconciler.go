@@ -51,12 +51,21 @@ const (
 // any changes on its side. Apply is used for the reconciler's own
 // phase/purge status updates (see applyPhase/purgeVM), not just to read
 // the VM list.
+//
+// ListVMsLocal/ListNetworksLocal (not ListVMs/ListNetworks) are used
+// deliberately: those are leader-only, and the reconciler runs on every
+// node regardless of leadership - a real, previously-latent gap only
+// found live the first time a genuine second raft node's own
+// Reconciler.RunOnce needed to read the VM list (every earlier
+// deployment had exactly one node, always the leader, so this never
+// mattered) - see raftd.proto's doc comment on these two RPCs and
+// ADR-0026.
 type raftClient interface {
-	ListVMs(ctx context.Context) (*internalpb.ListVMsResponse, error)
+	ListVMsLocal(ctx context.Context) (*internalpb.ListVMsResponse, error)
 	Apply(ctx context.Context, payload []byte, timeout time.Duration) (*internalpb.ApplyResponse, error)
 
-	// ListNetworks is only called when VLAN is set - see ensureNetwork.
-	ListNetworks(ctx context.Context) (*internalpb.ListNetworksResponse, error)
+	// ListNetworksLocal is only called when VLAN is set - see ensureNetwork.
+	ListNetworksLocal(ctx context.Context) (*internalpb.ListNetworksResponse, error)
 
 	// Status is only called when HAST is set - see
 	// Reconciler.resolvePeerAddresses, which reuses raft's own cluster
@@ -71,14 +80,6 @@ type datasetManager interface {
 	CreateDataset(ctx context.Context, name string) error
 	DestroyDataset(ctx context.Context, name string) error
 	GetProperty(ctx context.Context, name, prop string) (string, error)
-
-	// CreateZvol and FullPath are used only by HAST replication (see
-	// hast.go) - a zvol backs each replicated resource's local GEOM
-	// provider, and FullPath resolves its /dev/zvol/<full-path> device
-	// node (a zvol's device path always includes Base, unlike this
-	// interface's other methods which take a Base-relative name).
-	CreateZvol(ctx context.Context, name string, sizeMB uint64) error
-	FullPath(name string) (string, error)
 }
 
 // vmManager is the subset of *bhyve.Manager the reconciler needs, for
@@ -177,9 +178,16 @@ type Reconciler struct {
 	// HAST is optional (nil-able, same opt-in pattern as everything
 	// above): when set, a VM naming ReplicaNodeID gets its disk
 	// HAST-replicated instead of the plain dataset-backed file - real
-	// data redundancy, not automatic failover (see ADR-0025). A VM with
+	// data redundancy, not automatic failover (see ADR-0026). A VM with
 	// no ReplicaNodeID is completely unaffected by whether HAST is set.
 	HAST hastManager
+
+	// HASTRestartSettleDelay overrides how long reconcileHASTRoles waits
+	// after a real hastd restart before attempting a role change
+	// (defaults to defaultHASTRestartSettleDelay if zero). Tests set
+	// this to a small non-zero value so they don't pay the real-world
+	// settle cost the live hastd startup race actually needs.
+	HASTRestartSettleDelay time.Duration
 
 	// lastDHCPConfig is the last dnsmasq config body actually written,
 	// so reconcileDHCP only calls DHCP.WriteAndReload (which restarts
@@ -203,7 +211,7 @@ type Reconciler struct {
 // reported but does not stop the remaining VMs in this tick from being
 // attempted.
 func (r *Reconciler) RunOnce(ctx context.Context) error {
-	resp, err := r.Raft.ListVMs(ctx)
+	resp, err := r.Raft.ListVMsLocal(ctx)
 	if err != nil {
 		return fmt.Errorf("cluster: listing VMs: %w", err)
 	}
@@ -266,7 +274,12 @@ func (r *Reconciler) RunOnce(ctx context.Context) error {
 	if r.HAST != nil {
 		var roles []hastRole
 		for _, vm := range planned {
-			if vm.ReplicaNodeID != "" {
+			// A Deleting VM is being torn down (teardownVM's own
+			// reclaimHASTRole call, below) this same tick, not ensured -
+			// caught live: including it here raced its own teardown
+			// within one RunOnce, ensuring a provider that then got
+			// destroyed out from under it moments later (see ADR-0026).
+			if vm.ReplicaNodeID != "" && !vm.Deleting {
 				roles = append(roles, hastRole{resourceName: vmHASTResourceName(vm.ID), peerNodeID: vm.ReplicaNodeID, sizeMB: r.diskSizeMB(), isPrimary: true})
 			}
 		}
@@ -291,8 +304,21 @@ func (r *Reconciler) RunOnce(ctx context.Context) error {
 	// see PlanReclaim's own doc comment for why this is safe to infer,
 	// unlike inferring teardown from a VM disappearing from the list
 	// entirely.
+	//
+	// replicaIDs marks VMs this node currently holds a legitimate HAST
+	// secondary role for (from PlanReplica above) - PlanReclaim's own
+	// candidate set only checks NodeID, so it naturally also includes
+	// every VM this node is replicating for someone else (NodeID is
+	// never this node's own for those). reclaimStaleVM must not treat
+	// that legitimate secondary-role zvol as stale and destroy it -
+	// caught live, the mirror image of the primary-side bug PlanReplicaReclaim's
+	// own doc comment describes (see ADR-0026).
+	replicaIDs := make(map[string]bool, len(replicas))
+	for _, vm := range replicas {
+		replicaIDs[vm.ID] = true
+	}
 	for _, id := range PlanReclaim(desired, r.LocalNodeID) {
-		if err := r.reclaimStaleVM(ctx, id); err != nil && firstErr == nil {
+		if err := r.reclaimStaleVM(ctx, id, replicaIDs[id]); err != nil && firstErr == nil {
 			firstErr = fmt.Errorf("cluster: reclaiming stale VM %s: %w", id, err)
 		}
 	}
@@ -320,7 +346,7 @@ func (r *Reconciler) RunOnce(ctx context.Context) error {
 // fetchNetworks reads every current network definition from raft,
 // keyed by id for ensureVM/reconcileDHCP's lookups.
 func (r *Reconciler) fetchNetworks(ctx context.Context) (map[string]*internalpb.NetworkDefinition, error) {
-	resp, err := r.Raft.ListNetworks(ctx)
+	resp, err := r.Raft.ListNetworksLocal(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -426,7 +452,7 @@ func (r *Reconciler) teardownVM(ctx context.Context, vm VMPlacement) error {
 // which is the common case: most VMs in a cluster never touched this
 // node in the first place, so every tick's reclaim pass is a cheap
 // existence-check no-op for them.
-func (r *Reconciler) reclaimStaleVM(ctx context.Context, id string) error {
+func (r *Reconciler) reclaimStaleVM(ctx context.Context, id string, isCurrentReplica bool) error {
 	if r.Bhyve != nil {
 		exists, err := r.Bhyve.VMExists(ctx, id)
 		if err != nil {
@@ -452,9 +478,14 @@ func (r *Reconciler) reclaimStaleVM(ctx context.Context, id string) error {
 	// A reassigned VM that was HAST-replicated while owned here used a
 	// zvol (vmHASTResourceName), not the plain dataset above - check for
 	// that too, since PlanReclaim only gives an id, not whether it used
-	// to be replicated.
-	if err := r.reclaimHASTRole(ctx, vmHASTResourceName(id)); err != nil {
-		return fmt.Errorf("reclaiming stale HAST resource: %w", err)
+	// to be replicated. Skipped when this node is the VM's CURRENT
+	// legitimate HAST secondary (isCurrentReplica) - that's the exact
+	// same zvol this tick's PlanReplica pass just ensured, not a stale
+	// leftover from a past reassignment (caught live - see ADR-0026).
+	if !isCurrentReplica {
+		if err := r.reclaimHASTRole(ctx, vmHASTResourceName(id)); err != nil {
+			return fmt.Errorf("reclaiming stale HAST resource: %w", err)
+		}
 	}
 
 	if r.PF != nil {
@@ -519,7 +550,7 @@ func phaseFromString(p string) internalpb.VMPhase {
 
 // ensureVM ensures vm's disk exists - a plain dataset-backed file, or,
 // if ReplicaNodeID is set, a HAST-replicated device instead (see
-// hastDevicePaths/ADR-0025; no dataset is created in that case, there's
+// hastDevicePaths/ADR-0026; no dataset is created in that case, there's
 // nothing useful for it to hold) - then, if Bhyve is configured, that
 // its bhyve VM exists too.
 func (r *Reconciler) ensureVM(ctx context.Context, vm VMPlacement, networks map[string]*internalpb.NetworkDefinition, hastDevicePaths map[string]string) error {

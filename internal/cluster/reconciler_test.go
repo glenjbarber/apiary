@@ -40,11 +40,11 @@ func (f *fakeRaftClient) Status(context.Context) (*internalpb.StatusResponse, er
 	return &internalpb.StatusResponse{}, nil
 }
 
-func (f *fakeRaftClient) ListVMs(context.Context) (*internalpb.ListVMsResponse, error) {
+func (f *fakeRaftClient) ListVMsLocal(context.Context) (*internalpb.ListVMsResponse, error) {
 	return f.resp, f.err
 }
 
-func (f *fakeRaftClient) ListNetworks(context.Context) (*internalpb.ListNetworksResponse, error) {
+func (f *fakeRaftClient) ListNetworksLocal(context.Context) (*internalpb.ListNetworksResponse, error) {
 	if f.networksResp != nil || f.networksErr != nil {
 		return f.networksResp, f.networksErr
 	}
@@ -124,19 +124,6 @@ func (f *fakeDatasetManager) DestroyDataset(_ context.Context, name string) erro
 	f.destroyed = append(f.destroyed, name)
 	delete(f.existing, name)
 	return nil
-}
-
-func (f *fakeDatasetManager) CreateZvol(_ context.Context, name string, _ uint64) error {
-	if f.createErr != nil {
-		return f.createErr
-	}
-	f.created = append(f.created, name)
-	f.existing[name] = true
-	return nil
-}
-
-func (f *fakeDatasetManager) FullPath(name string) (string, error) {
-	return "zroot/apiary/" + name, nil
 }
 
 func (f *fakeDatasetManager) GetProperty(_ context.Context, name, _ string) (string, error) {
@@ -1031,16 +1018,17 @@ func TestReconciler_RunOnce_ProvisionsHASTPrimaryForReplicatedVM(t *testing.T) {
 		statusResp: statusResponseWithPeers("node-a", "10.0.0.1:17600", "node-b", "10.0.0.2:17600"),
 	}
 	zfs := newFakeDatasetManager()
+	zfs.mountpointFor["hast-vm-vm-1"] = t.TempDir()
 	vms := newFakeVMManager()
 	h := newFakeHASTManager()
 
-	r := &Reconciler{Raft: raft, ZFS: zfs, Bhyve: vms, HAST: h, LocalNodeID: "node-a", BootROM: "/fw/UEFI.fd"}
+	r := &Reconciler{Raft: raft, ZFS: zfs, Bhyve: vms, HAST: h, HASTRestartSettleDelay: time.Millisecond, LocalNodeID: "node-a", BootROM: "/fw/UEFI.fd"}
 	if err := r.RunOnce(context.Background()); err != nil {
 		t.Fatalf("RunOnce() error: %v", err)
 	}
 
 	if len(zfs.created) != 1 || zfs.created[0] != "hast-vm-vm-1" {
-		t.Errorf("created zvols = %v, want [hast-vm-vm-1]", zfs.created)
+		t.Errorf("created datasets = %v, want [hast-vm-vm-1]", zfs.created)
 	}
 	if role := h.roleSet["vm-vm-1"]; role != hast.RolePrimary {
 		t.Errorf("role for vm-vm-1 = %q, want primary", role)
@@ -1079,12 +1067,13 @@ func TestReconciler_RunOnce_ProvisionsHASTSecondaryForReplicaAssignment(t *testi
 		statusResp: statusResponseWithPeers("node-a", "10.0.0.1:17600", "node-b", "10.0.0.2:17600"),
 	}
 	zfs := newFakeDatasetManager()
+	zfs.mountpointFor["hast-vm-vm-1"] = t.TempDir()
 	vms := newFakeVMManager()
 	h := newFakeHASTManager()
 
 	// node-a is only named as the *replica*, never the owner - it must
 	// never create a bhyve VM, only replicate.
-	r := &Reconciler{Raft: raft, ZFS: zfs, Bhyve: vms, HAST: h, LocalNodeID: "node-a", BootROM: "/fw/UEFI.fd"}
+	r := &Reconciler{Raft: raft, ZFS: zfs, Bhyve: vms, HAST: h, HASTRestartSettleDelay: time.Millisecond, LocalNodeID: "node-a", BootROM: "/fw/UEFI.fd"}
 	if err := r.RunOnce(context.Background()); err != nil {
 		t.Fatalf("RunOnce() error: %v", err)
 	}
@@ -1096,7 +1085,98 @@ func TestReconciler_RunOnce_ProvisionsHASTSecondaryForReplicaAssignment(t *testi
 		t.Errorf("bhyve VMs created = %v, want none - a replica never runs the VM", vms.created)
 	}
 	if len(zfs.created) != 1 || zfs.created[0] != "hast-vm-vm-1" {
-		t.Errorf("created zvols = %v, want [hast-vm-vm-1]", zfs.created)
+		t.Errorf("created datasets = %v, want [hast-vm-vm-1]", zfs.created)
+	}
+}
+
+func TestReconciler_RunOnce_PrimaryZvolSurvivesReplicaReclaimPass(t *testing.T) {
+	// Regression: the owner's own just-created primary zvol must not be
+	// destroyed by the same tick's replica-reclaim pass, even though
+	// NodeID != ReplicaNodeID is naturally true for the owner (a node is
+	// never simultaneously primary and secondary for the same VM). This
+	// exact scenario destroyed a real zvol live on apiarium the tick it
+	// was created - see ADR-0026 and TestPlanReplicaReclaim's matching
+	// regression case.
+	raft := &fakeRaftClient{
+		resp: &internalpb.ListVMsResponse{
+			Vms: []*internalpb.VMDefinition{{Id: "vm-1", NodeId: "node-a", ReplicaNodeId: "node-b"}},
+		},
+		statusResp: statusResponseWithPeers("node-a", "10.0.0.1:17600", "node-b", "10.0.0.2:17600"),
+	}
+	zfs := newFakeDatasetManager()
+	zfs.mountpointFor["hast-vm-vm-1"] = t.TempDir()
+	vms := newFakeVMManager()
+	h := newFakeHASTManager()
+
+	r := &Reconciler{Raft: raft, ZFS: zfs, Bhyve: vms, HAST: h, HASTRestartSettleDelay: time.Millisecond, LocalNodeID: "node-a", BootROM: "/fw/UEFI.fd"}
+	if err := r.RunOnce(context.Background()); err != nil {
+		t.Fatalf("RunOnce() error: %v", err)
+	}
+
+	if !zfs.existing["hast-vm-vm-1"] {
+		t.Errorf("primary zvol hast-vm-vm-1 does not exist after RunOnce, want it to survive the same tick's reclaim pass")
+	}
+	if len(zfs.destroyed) != 0 {
+		t.Errorf("destroyed = %v, want none - the primary's own zvol must not be reclaimed", zfs.destroyed)
+	}
+}
+
+func TestReconciler_RunOnce_SecondaryZvolSurvivesOwnerReclaimPass(t *testing.T) {
+	// Regression, mirror image of TestReconciler_RunOnce_PrimaryZvolSurvivesReplicaReclaimPass:
+	// a VM this node holds a legitimate HAST secondary role for is
+	// naturally also a PlanReclaim candidate on this node (NodeID is
+	// never this node's own for a VM it's merely replicating), so
+	// reclaimStaleVM's own HAST cleanup must not treat that same-tick,
+	// just-created secondary zvol as a stale leftover and destroy it.
+	// Caught live on freebsd-apiary - see ADR-0026.
+	raft := &fakeRaftClient{
+		resp: &internalpb.ListVMsResponse{
+			Vms: []*internalpb.VMDefinition{{Id: "vm-1", NodeId: "node-b", ReplicaNodeId: "node-a"}},
+		},
+		statusResp: statusResponseWithPeers("node-a", "10.0.0.1:17600", "node-b", "10.0.0.2:17600"),
+	}
+	zfs := newFakeDatasetManager()
+	zfs.mountpointFor["hast-vm-vm-1"] = t.TempDir()
+	h := newFakeHASTManager()
+
+	r := &Reconciler{Raft: raft, ZFS: zfs, HAST: h, HASTRestartSettleDelay: time.Millisecond, LocalNodeID: "node-a"}
+	if err := r.RunOnce(context.Background()); err != nil {
+		t.Fatalf("RunOnce() error: %v", err)
+	}
+
+	if !zfs.existing["hast-vm-vm-1"] {
+		t.Errorf("secondary zvol hast-vm-vm-1 does not exist after RunOnce, want it to survive the same tick's owner-reclaim pass")
+	}
+	if len(zfs.destroyed) != 0 {
+		t.Errorf("destroyed = %v, want none - the legitimate secondary's own zvol must not be reclaimed", zfs.destroyed)
+	}
+}
+
+func TestReconciler_RunOnce_DeletingReplicatedVMIsNotAlsoEnsured(t *testing.T) {
+	// Regression: a Deleting, replicated VM must not appear in the same
+	// tick's "ensure primary" role list - it's being torn down (via
+	// teardownVM's own reclaimHASTRole call) in that same RunOnce, and
+	// ensuring its provider races that teardown. Caught live: the
+	// ensure step created a dataset moments before teardown destroyed
+	// it, then a later step in the same tick tried to use the
+	// now-gone mountpoint and failed with "open -/backing.img: no such
+	// file or directory" (ZFS reports "-" as the mountpoint of a
+	// nonexistent dataset) - see ADR-0026.
+	raft := &fakeRaftClient{
+		resp: &internalpb.ListVMsResponse{
+			Vms: []*internalpb.VMDefinition{{Id: "vm-1", NodeId: "node-a", ReplicaNodeId: "node-b", DesiredState: internalpb.VMState_VM_STATE_DELETING}},
+		},
+	}
+	zfs := newFakeDatasetManager()
+	h := newFakeHASTManager()
+
+	r := &Reconciler{Raft: raft, ZFS: zfs, HAST: h, HASTRestartSettleDelay: time.Millisecond, LocalNodeID: "node-a"}
+	if err := r.RunOnce(context.Background()); err != nil {
+		t.Fatalf("RunOnce() error: %v", err)
+	}
+
+	if len(zfs.created) != 0 {
+		t.Errorf("created = %v, want none - a deleting VM must never be ensured, only reclaimed", zfs.created)
 	}
 }
 

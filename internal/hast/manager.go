@@ -39,7 +39,7 @@ type Status struct {
 // WriteConfig's own doc comment and ADR-0008's documented gotcha), so a
 // caller that just wrote a changed config has no other way to make it
 // live - but this package still never starts, stops, or enables the
-// service, which stays a one-time host prerequisite (see ADR-0025).
+// service, which stays a one-time host prerequisite (see ADR-0026).
 type Manager struct {
 	// ConfigPath is where hast.conf is written. Defaults to
 	// DefaultConfigPath if empty.
@@ -76,12 +76,15 @@ func (m *Manager) WriteConfig(resources []Resource) error {
 // package not managing hastd's lifecycle: only restart, never start/
 // stop/enable.
 func (m *Manager) RestartService(ctx context.Context) error {
-	// -f forces the restart regardless of hastd_enable in rc.conf - this
-	// method only ever runs against an already-running hastd (starting
-	// it in the first place remains a host prerequisite, see the doc
-	// comment above), so an enable-flag mismatch shouldn't silently
-	// no-op a config-reload restart the reconciler is relying on.
-	_, err := runCmd(ctx, "service", "-f", "hastd", "restart")
+	// "onerestart" (rc.subr's own force-regardless-of-rc.conf verb,
+	// confirmed live: FreeBSD's service(8) has no top-level -f flag for
+	// this - a first attempt using one failed with "Illegal option -f")
+	// restarts regardless of hastd_enable in rc.conf - this method only
+	// ever runs against an already-running hastd (starting it in the
+	// first place remains a host prerequisite, see the doc comment
+	// above), so an enable-flag mismatch shouldn't silently no-op a
+	// config-reload restart the reconciler is relying on.
+	_, err := runCmd(ctx, "service", "hastd", "onerestart")
 	return err
 }
 
@@ -95,8 +98,20 @@ func (m *Manager) CreateResource(ctx context.Context, name string) error {
 
 // SetRole changes a resource's role on the local node.
 func (m *Manager) SetRole(ctx context.Context, name string, role Role) error {
-	_, err := runCmd(ctx, "hastctl", "role", string(role), name)
-	return err
+	out, err := runCmd(ctx, "hastctl", "role", string(role), name)
+	if err != nil {
+		return err
+	}
+	// hastctl can print "[ERROR] ..." (e.g. "Error 57 received from
+	// hastd" - ENOTCONN, seen live when the resource's hastd worker had
+	// already died trying to open a not-yet-provisioned device) while
+	// still exiting 0 - confirmed live, a real hastctl quirk this
+	// package can't rely on exit codes alone to catch. Treat any such
+	// line in its output as a failure even though runCmd saw no error.
+	if strings.Contains(out, "[ERROR]") {
+		return fmt.Errorf("hastctl role %s %s: %s", role, name, out)
+	}
+	return nil
 }
 
 // Status returns the local node's current view of a resource.

@@ -48,7 +48,7 @@ type vmView struct {
 	MACAddress string
 
 	// ReplicaNodeID, if set, names the node this VM's disk is
-	// HAST-replicated to (ADR-0025) - data redundancy, not failover.
+	// HAST-replicated to (ADR-0026) - data redundancy, not failover.
 	ReplicaNodeID string
 }
 

@@ -182,6 +182,19 @@ func TestPlanReplicaReclaim(t *testing.T) {
 			local:   "node-a",
 			want:    []string{"vm-1"},
 		},
+		{
+			// Regression: a VM this node OWNS as primary must never be a
+			// replica-reclaim candidate, even though NodeID and
+			// ReplicaNodeID naturally differ for it (a node is never
+			// simultaneously primary and secondary for the same VM).
+			// Caught live: the naive "ReplicaNodeID != localNodeID" check
+			// destroyed a primary's own just-created zvol the same tick
+			// it was provisioned - see ADR-0026.
+			name:    "a VM this node owns as primary is never a reclaim candidate",
+			desired: []VMPlacement{{ID: "vm-1", NodeID: "node-a", ReplicaNodeID: "node-b"}},
+			local:   "node-a",
+			want:    nil,
+		},
 	}
 
 	for _, c := range cases {

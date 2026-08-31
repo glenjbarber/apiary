@@ -57,7 +57,7 @@ type VMPlacement struct {
 	FirewallRules []FirewallRule
 
 	// ReplicaNodeID, if set, names a second node that HAST-replicates
-	// this VM's disk (ADR-0025) - data redundancy, not automatic
+	// this VM's disk (ADR-0026) - data redundancy, not automatic
 	// failover. Caller-set, exactly like NodeID.
 	ReplicaNodeID string
 }
@@ -147,9 +147,22 @@ func PlanReplica(desired []VMPlacement, localNodeID string) []VMPlacement {
 // HAST resource (if any exists, left over from before a reassignment or
 // deletion) should be torn down. Mirrors PlanReclaim's own reasoning
 // exactly, just against ReplicaNodeID instead of NodeID.
+//
+// A VM this node OWNS (NodeID == localNodeID) is always skipped here,
+// even though NodeID and ReplicaNodeID are naturally never equal - a
+// node is never simultaneously primary and secondary for the same VM,
+// so the naive "ReplicaNodeID != localNodeID" check would otherwise
+// treat the owner's own just-provisioned PRIMARY-role resource as a
+// stale secondary to reclaim, destroying it the very same tick it was
+// created. Caught live: real end-to-end HAST testing showed a
+// primary's zvol vanish immediately after creation, on the same node
+// that had just created it as primary (see ADR-0026).
 func PlanReplicaReclaim(desired []VMPlacement, localNodeID string) []string {
 	var ids []string
 	for _, vm := range desired {
+		if vm.NodeID == localNodeID {
+			continue
+		}
 		if vm.ReplicaNodeID != localNodeID || vm.Deleting {
 			ids = append(ids, vm.ID)
 		}
