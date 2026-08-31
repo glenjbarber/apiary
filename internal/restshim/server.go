@@ -1,8 +1,11 @@
 package restshim
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
+
+	"google.golang.org/grpc/metadata"
 
 	rpcpb "github.com/glenjbarber/apiary/api/rpc"
 )
@@ -28,6 +31,24 @@ func NewServer(client rpcpb.ManagerServiceClient) *Server {
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	s.mux.ServeHTTP(w, r)
+}
+
+// authContext forwards the caller's own "Authorization" HTTP header
+// through to managerd as gRPC metadata (ADR-0023 gates every managerd
+// RPC on exactly this metadata key). Unlike cmd/frontend - a single
+// application-level identity that attaches one static
+// APIARY_MANAGER_API_KEY at dial time - restshim has no identity of
+// its own: it's meant to sit in front of external tooling (curl,
+// Terraform, CI) where each caller presents their own key, so
+// forwarding per-request is the only correct behavior here. A caller
+// with no header attaches nothing, which behaves exactly like an
+// unauthenticated call today - unchanged if managerd has no keys yet.
+func authContext(r *http.Request) context.Context {
+	auth := r.Header.Get("Authorization")
+	if auth == "" {
+		return r.Context()
+	}
+	return metadata.AppendToOutgoingContext(r.Context(), "authorization", auth)
 }
 
 func (s *Server) routes() {
@@ -75,7 +96,7 @@ func writeJSON(w http.ResponseWriter, status int, body interface{}) {
 }
 
 func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
-	resp, err := s.client.Status(r.Context(), &rpcpb.StatusRequest{})
+	resp, err := s.client.Status(authContext(r), &rpcpb.StatusRequest{})
 	if err != nil {
 		writeJSON(w, http.StatusBadGateway, errorBody{Error: err.Error()})
 		return
@@ -100,7 +121,7 @@ func (s *Server) handleCreateVM(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	resp, err := s.client.CreateVM(r.Context(), &rpcpb.CreateVMRequest{Vm: toRPCVM(body)})
+	resp, err := s.client.CreateVM(authContext(r), &rpcpb.CreateVMRequest{Vm: toRPCVM(body)})
 	if err != nil || resp.GetError() != "" {
 		writeError(w, err, resp.GetError(), resp.GetLeaderHint())
 		return
@@ -116,7 +137,7 @@ func (s *Server) handleUpdateVM(w http.ResponseWriter, r *http.Request) {
 	}
 	body.ID = r.PathValue("id")
 
-	resp, err := s.client.UpdateVM(r.Context(), &rpcpb.UpdateVMRequest{Vm: toRPCVM(body)})
+	resp, err := s.client.UpdateVM(authContext(r), &rpcpb.UpdateVMRequest{Vm: toRPCVM(body)})
 	if err != nil || resp.GetError() != "" {
 		writeError(w, err, resp.GetError(), resp.GetLeaderHint())
 		return
@@ -125,7 +146,7 @@ func (s *Server) handleUpdateVM(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleDeleteVM(w http.ResponseWriter, r *http.Request) {
-	resp, err := s.client.DeleteVM(r.Context(), &rpcpb.DeleteVMRequest{Id: r.PathValue("id")})
+	resp, err := s.client.DeleteVM(authContext(r), &rpcpb.DeleteVMRequest{Id: r.PathValue("id")})
 	if err != nil || resp.GetError() != "" {
 		writeError(w, err, resp.GetError(), resp.GetLeaderHint())
 		return
@@ -134,7 +155,7 @@ func (s *Server) handleDeleteVM(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleGetVM(w http.ResponseWriter, r *http.Request) {
-	resp, err := s.client.GetVM(r.Context(), &rpcpb.GetVMRequest{Id: r.PathValue("id")})
+	resp, err := s.client.GetVM(authContext(r), &rpcpb.GetVMRequest{Id: r.PathValue("id")})
 	if err != nil || resp.GetError() != "" {
 		writeError(w, err, resp.GetError(), resp.GetLeaderHint())
 		return
@@ -147,7 +168,7 @@ func (s *Server) handleGetVM(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleListVMs(w http.ResponseWriter, r *http.Request) {
-	resp, err := s.client.ListVMs(r.Context(), &rpcpb.ListVMsRequest{})
+	resp, err := s.client.ListVMs(authContext(r), &rpcpb.ListVMsRequest{})
 	if err != nil || resp.GetError() != "" {
 		writeError(w, err, resp.GetError(), resp.GetLeaderHint())
 		return

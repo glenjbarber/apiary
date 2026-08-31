@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/metadata"
 
 	rpcpb "github.com/glenjbarber/apiary/api/rpc"
 )
@@ -36,9 +37,12 @@ type fakeClient struct {
 	lastUpdateReq *rpcpb.UpdateVMRequest
 	lastGetReq    *rpcpb.GetVMRequest
 	lastDeleteReq *rpcpb.DeleteVMRequest
+
+	lastStatusCtx context.Context
 }
 
-func (f *fakeClient) Status(context.Context, *rpcpb.StatusRequest, ...grpc.CallOption) (*rpcpb.StatusResponse, error) {
+func (f *fakeClient) Status(ctx context.Context, _ *rpcpb.StatusRequest, _ ...grpc.CallOption) (*rpcpb.StatusResponse, error) {
+	f.lastStatusCtx = ctx
 	return f.statusResp, f.statusErr
 }
 
@@ -153,6 +157,41 @@ func TestServer_Status(t *testing.T) {
 	}
 	if got["raft_is_leader"] != true {
 		t.Errorf("raft_is_leader = %v, want true", got["raft_is_leader"])
+	}
+}
+
+func TestServer_ForwardsAuthorizationHeaderToManagerd(t *testing.T) {
+	client := &fakeClient{statusResp: &rpcpb.StatusResponse{}}
+	s := NewServer(client)
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/status", nil)
+	req.Header.Set("Authorization", "Bearer apk_test123")
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	md, ok := metadata.FromOutgoingContext(client.lastStatusCtx)
+	if !ok {
+		t.Fatalf("no outgoing gRPC metadata attached to the context passed to managerd")
+	}
+	got := md.Get("authorization")
+	if len(got) != 1 || got[0] != "Bearer apk_test123" {
+		t.Errorf("forwarded authorization metadata = %v, want [Bearer apk_test123]", got)
+	}
+}
+
+func TestServer_NoAuthorizationHeaderForwardsNothing(t *testing.T) {
+	client := &fakeClient{statusResp: &rpcpb.StatusResponse{}}
+	s := NewServer(client)
+
+	rec := doRequest(t, s, http.MethodGet, "/v1/status", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	if md, ok := metadata.FromOutgoingContext(client.lastStatusCtx); ok && len(md.Get("authorization")) != 0 {
+		t.Errorf("forwarded authorization metadata = %v, want none when no header was sent", md.Get("authorization"))
 	}
 }
 
