@@ -846,6 +846,12 @@ func (r *Reconciler) ensureVM(ctx context.Context, vm VMPlacement, networks map[
 		// be viewed; there's no scenario where the tradeoff runs the
 		// other way, so this isn't a separate opt-in flag.
 		EnableVNC: true,
+		// Same reasoning as EnableVNC above - a captured serial log costs
+		// nothing a running VM doesn't already have spare capacity for,
+		// and is often the only way to see what a guest actually printed
+		// during boot (many cloud/server images redirect console output
+		// to com1 instead of the VGA/EFI framebuffer VNC shows).
+		EnableSerialLog: true,
 	}); err != nil {
 		return fmt.Errorf("creating bhyve VM: %w", err)
 	}

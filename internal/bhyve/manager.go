@@ -76,6 +76,17 @@ type Config struct {
 	// comment for why) and persists it the same way createTap persists a
 	// VM's tap device name, for a later VNCPort lookup.
 	EnableVNC bool
+
+	// EnableSerialLog, if true, attaches the VM's com1 to one end of a
+	// dedicated nmdm(4) null-modem pair and starts a small detached
+	// reader (via daemon(8), the same tool CreateVM itself uses) that
+	// continuously appends whatever the guest writes to its serial
+	// console into a plain log file - see SerialLogPath. Framebuffer
+	// consoles (VNC) only show whatever's currently on screen; many
+	// cloud/server images redirect their actual boot/cloud-init output
+	// to the serial port instead, which a point-in-time VNC screenshot
+	// can never capture. No serial port is attached at all when false.
+	EnableSerialLog bool
 }
 
 // vncBasePort/vncPortRange bound the local TCP ports CreateVM will assign
@@ -86,6 +97,10 @@ const (
 	vncBasePort  = 5900
 	vncPortRange = 100
 )
+
+// nmdmRange bounds the nmdm(4) unit numbers CreateVM will assign for
+// serial console capture - same reasoning as vncPortRange.
+const nmdmRange = 100
 
 // Manager creates, destroys, and lists bhyve VMs, all named with a
 // configured Prefix - bhyve VM names have no hierarchical namespace
@@ -145,6 +160,72 @@ func (m *Manager) tapfile(qname string) string {
 // GetVMConsole) needs to look it up without re-deriving it.
 func (m *Manager) vncfile(qname string) string {
 	return filepath.Join(m.runDir(), qname+".vnc")
+}
+
+// nmdmfile records the nmdm(4) unit number CreateVM allocated for
+// qname's serial console, the same way vncfile records a VNC port.
+func (m *Manager) nmdmfile(qname string) string {
+	return filepath.Join(m.runDir(), qname+".nmdm")
+}
+
+// serialpidfile records the pid of the detached reader process draining
+// qname's nmdm pair into its log file, so DestroyVM can stop it - it's a
+// separate process from bhyve itself, with its own lifecycle.
+func (m *Manager) serialpidfile(qname string) string {
+	return filepath.Join(m.runDir(), qname+".serialpid")
+}
+
+// seriallogfile is where qname's serial console output is continuously
+// appended - see SerialLogPath.
+func (m *Manager) seriallogfile(qname string) string {
+	return filepath.Join(m.runDir(), qname+".serial.log")
+}
+
+// allocateNmdm picks the lowest nmdm(4) unit number in [0, nmdmRange) not
+// already recorded in a *.nmdm file under RunDir - mirrors
+// allocateVNCPort exactly.
+func (m *Manager) allocateNmdm() (int, error) {
+	used := make(map[int]bool)
+	entries, err := os.ReadDir(m.runDir())
+	if err != nil && !os.IsNotExist(err) {
+		return 0, fmt.Errorf("bhyve: scanning run dir for nmdm units: %w", err)
+	}
+	for _, e := range entries {
+		if !strings.HasSuffix(e.Name(), ".nmdm") {
+			continue
+		}
+		data, err := os.ReadFile(filepath.Join(m.runDir(), e.Name()))
+		if err != nil {
+			continue
+		}
+		if unit, err := strconv.Atoi(strings.TrimSpace(string(data))); err == nil {
+			used[unit] = true
+		}
+	}
+	for unit := 0; unit < nmdmRange; unit++ {
+		if !used[unit] {
+			return unit, nil
+		}
+	}
+	return 0, fmt.Errorf("bhyve: no free nmdm unit in [0, %d)", nmdmRange)
+}
+
+// SerialLogPath returns the local path name's serial console output is
+// being continuously appended to, as recorded by CreateVM. ok is false
+// (with err nil) if name has no recorded serial log - not created with
+// EnableSerialLog, or not created at all.
+func (m *Manager) SerialLogPath(name string) (path string, ok bool, err error) {
+	qname, err := m.qualifiedName(name)
+	if err != nil {
+		return "", false, err
+	}
+	logPath := m.seriallogfile(qname)
+	if _, err := os.Stat(logPath); os.IsNotExist(err) {
+		return "", false, nil
+	} else if err != nil {
+		return "", false, err
+	}
+	return logPath, true, nil
 }
 
 // allocateVNCPort picks the lowest port in [vncBasePort, vncBasePort+
@@ -238,6 +319,19 @@ func (m *Manager) CreateVM(ctx context.Context, name string, cfg Config) error {
 		}
 	}
 
+	var nmdmUnit int
+	haveNmdm := false
+	if cfg.EnableSerialLog {
+		nmdmUnit, err = m.allocateNmdm()
+		if err != nil {
+			if tapName != "" {
+				m.destroyTap(ctx, qname, tapName)
+			}
+			return err
+		}
+		haveNmdm = true
+	}
+
 	args := []string{
 		"-f",
 		"-p", m.pidfile(qname),
@@ -271,8 +365,15 @@ func (m *Manager) CreateVM(ctx context.Context, name string, cfg Config) error {
 	args = append(args,
 		"-s", "31,lpc",
 		"-l", "bootrom,"+cfg.BootROM,
-		qname,
 	)
+	if haveNmdm {
+		// The guest gets the "B" end; a separate reader (started below,
+		// once bhyve itself is up) drains the "A" end into a log file.
+		// nmdm(4) device nodes are created on first open, no explicit
+		// setup step needed.
+		args = append(args, "-l", fmt.Sprintf("com1,/dev/nmdm%dB", nmdmUnit))
+	}
+	args = append(args, qname)
 
 	if _, err := runCmd(ctx, "daemon", args...); err != nil {
 		if tapName != "" {
@@ -289,6 +390,36 @@ func (m *Manager) CreateVM(ctx context.Context, name string, cfg Config) error {
 			// VM back down.
 			return fmt.Errorf("bhyve: VM created but recording VNC port failed: %w", err)
 		}
+	}
+
+	if haveNmdm {
+		if err := m.startSerialLogger(ctx, qname, nmdmUnit); err != nil {
+			// Same reasoning as the VNC-port-recording failure above -
+			// the VM is already running; a missing serial log just means
+			// diagnostics are unavailable until this is fixed.
+			return fmt.Errorf("bhyve: VM created but starting serial console logger failed: %w", err)
+		}
+	}
+	return nil
+}
+
+// startSerialLogger starts a small detached reader (via daemon(8), same
+// as bhyve itself) that opens the "A" end of qname's nmdm pair and
+// appends everything it reads to qname's serial log file. Recorded via
+// nmdmfile/serialpidfile so DestroyVM can find and stop it later,
+// mirroring how tapfile/vncfile track bhyve's own per-VM state.
+func (m *Manager) startSerialLogger(ctx context.Context, qname string, nmdmUnit int) error {
+	if err := os.WriteFile(m.nmdmfile(qname), []byte(strconv.Itoa(nmdmUnit)), 0o644); err != nil {
+		return fmt.Errorf("recording nmdm unit: %w", err)
+	}
+	if _, err := runCmd(ctx, "daemon",
+		"-f",
+		"-p", m.serialpidfile(qname),
+		"-o", m.seriallogfile(qname),
+		"cat", fmt.Sprintf("/dev/nmdm%dA", nmdmUnit),
+	); err != nil {
+		os.Remove(m.nmdmfile(qname))
+		return fmt.Errorf("starting reader: %w", err)
 	}
 	return nil
 }
@@ -357,6 +488,18 @@ func (m *Manager) DestroyVM(ctx context.Context, name string) error {
 
 	m.destroyTap(ctx, qname, "")
 	os.Remove(m.vncfile(qname))
+
+	if data, err := os.ReadFile(m.serialpidfile(qname)); err == nil {
+		if pid, err := strconv.Atoi(strings.TrimSpace(string(data))); err == nil {
+			runCmd(ctx, "kill", strconv.Itoa(pid))
+		}
+	}
+	os.Remove(m.serialpidfile(qname))
+	// nmdmfile is removed (it only tracks a live allocation, freeing the
+	// unit for reuse) but seriallogfile deliberately is not - it's the
+	// one place a failed VM's boot/console output survives after
+	// teardown, exactly when a diagnosis is most likely to be needed.
+	os.Remove(m.nmdmfile(qname))
 	return nil
 }
 

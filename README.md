@@ -190,6 +190,17 @@ each design decision, in order.
   `iso_name`/`network_id`/`ip_address`/`mac_address`/`base_image_name`,
   previously missing entirely. See
   [ADR-0031](docs/adr/0031-vm-base-images.md).
+- **bhyve serial console log capture** — every VM's `com1` is attached
+  to an `nmdm(4)` pair and continuously drained to a plain log file
+  (always on, like the noVNC console), for guest boot output the VNC
+  framebuffer can't show (many cloud images redirect their console to
+  serial). Built specifically to diagnose a real bug: a VM wasn't
+  accepting SSH or taking its seed hostname despite booting and getting
+  a DHCP lease — the serial log immediately showed cloud-init rejecting
+  the seed ISO as invalid, traced to a missing Rock Ridge extension in
+  the CAPI provider's own ISO builder (fixed there; see that repo).
+  Requires the `nmdm.ko` kernel module, not loaded by default. See
+  [ADR-0032](docs/adr/0032-bhyve-serial-console-log.md).
 
 **Not yet implemented:**
 
@@ -250,32 +261,45 @@ each design decision, in order.
   also has no automatic path (no cloud-controller-manager exists for
   Apiary) - documented as a manual `preKubeadmCommands` step in the new
   repo's own README.
-  **Update**: live verification against a real `kind` cluster + `apiarium`
-  has now happened. It found and fixed two real bugs: `internal/pf`'s
-  `Flush` wasn't idempotent for an already-gone `pf` anchor, permanently
-  wedging reconciliation for a deleted VM (see ADR-0022's own
-  "Follow-up"); and the CAPI provider's own `createVM` didn't handle a
-  stale-cache-triggered duplicate create attempt (fixed by adopting the
-  already-existing VM instead of erroring, since its id is deterministic).
-  Confirmed live: a real bhyve VM booted continuously from a real
-  `base_image_name`-seeded disk (previously it failed immediately with
-  "no bootable device" against a blank disk — the bug this update fixes).
-  A live `hastd`/`hastctl` crash-loop found during that pass has since
-  been root-caused and fixed (a third-party source patch to
-  `/usr/src/sbin/hastd/hast_proto.c`, installed on both `apiarium` and
-  `freebsd-apiary` - see ADR-0022's own "Follow-up") - `-hast-enabled`
-  is back on on both nodes. `apiarium`'s missing flat bridge
-  (`-bhyve-bridge`, the other gap noted here previously) is also fixed
-  — `re0` was migrated onto a real bridge under a backgrounded rollback
-  safety net (bridging the interface an active SSH session runs over is
-  genuinely risky) — and a flat-bridge VM's networking is now confirmed
-  fully working live: a real DHCP lease, pingable from a separate
-  machine. Full cloud-init/NoCloud completion (custom hostname, SSH)
-  is **still not confirmed** — the VM kept its default hostname and
-  never opened port 22, even after a forced reset; root-causing it
-  further needs a captured serial console log (not yet wired up). See
-  ADR-0022's own "Follow-up" sections and the CAPI repo's own README
-  for the full trail.
+  **Update: live verification is now complete and fully passing.**
+  Getting there found and fixed five real bugs, none of them in the
+  CAPI provider's own core design:
+  1. `internal/pf`'s `Flush` wasn't idempotent for an already-gone `pf`
+     anchor, permanently wedging reconciliation for a deleted VM (see
+     ADR-0022's own "Follow-up").
+  2. The CAPI provider's own `createVM` didn't handle a stale-cache
+     duplicate create attempt (fixed by adopting the already-existing
+     VM instead of erroring, since its id is deterministic).
+  3. A live `hastd`/`hastctl` crash-loop (root-caused and fixed - a
+     third-party source patch to `/usr/src/sbin/hastd/hast_proto.c`,
+     installed on both `apiarium` and `freebsd-apiary` - see ADR-0022's
+     own "Follow-up"). `-hast-enabled` is back on on both nodes.
+  4. `apiarium` had no flat bridge (`-bhyve-bridge` was never actually
+     set) - fixed by migrating `re0` onto a real bridge under a
+     backgrounded rollback safety net (bridging the interface an
+     active SSH session runs over is genuinely risky).
+  5. The CAPI provider's own NoCloud seed ISO (`internal/nocloud`, in
+     that repo) was missing Rock Ridge extensions, so plain ISO9660
+     silently mangled `user-data`/`meta-data` into `USER_DATA`/
+     `META_DATA` - cloud-init rejected it outright
+     (`"not a valid seed"`). Diagnosing this needed a new Apiary
+     feature, bhyve serial console log capture (ADR-0032, added as
+     part of this same pass) - the noVNC console showed nothing useful
+     since this base image redirects its boot output to serial.
+
+  Confirmed live, end to end, for the first time: a real bhyve VM
+  booted from a real `base_image_name`-seeded disk (previously failed
+  immediately with "no bootable device" against a blank one), got a
+  real DHCP lease over a real flat bridge, took its NoCloud seed's
+  custom hostname, ran a custom `runcmd`, and accepted SSH via its
+  seed's injected key. Not yet built: a web UI page/RPC for remote
+  serial-log viewing (real, disclosed follow-on work - an operator
+  reads the log file directly on the node for now), and full
+  multi-node kubeadm cluster joining (this pass used a static
+  bootstrap secret, bypassing the kubeadm bootstrap provider, to
+  isolate the infrastructure provider's own logic). See ADR-0022's own
+  "Follow-up" sections, ADR-0032, and the CAPI repo's own README for
+  the full trail.
 - **Tabled for now** (evaluated, deliberately deferred):
   - **Terraform support** — the infrastructure now exists (`managerd`'s
     API-key auth, `restshimd`'s own binary forwarding each caller's
