@@ -800,3 +800,101 @@ func TestIntegration_ListAPIKeys_NeverReturnsKeyMaterial(t *testing.T) {
 		}
 	}
 }
+
+func TestIntegration_CreateUpdateDeleteJail(t *testing.T) {
+	raftdSocket := newRaftdUDSSocket(t)
+	client := newManagerdRPCClient(t, raftdSocket)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	createResp, err := client.CreateJail(ctx, &rpcpb.CreateJailRequest{
+		Jail: &rpcpb.JailDefinition{Id: "jail-1", Name: "web-1", Hostname: "web-1.local"},
+	})
+	if err != nil {
+		t.Fatalf("CreateJail() error: %v", err)
+	}
+	if createResp.GetError() != "" {
+		t.Fatalf("CreateJail() returned error: %s", createResp.GetError())
+	}
+	if createResp.GetJail().GetId() != "jail-1" {
+		t.Errorf("CreateJail() jail = %+v, want id=jail-1", createResp.GetJail())
+	}
+
+	getResp, err := client.GetJail(ctx, &rpcpb.GetJailRequest{Id: "jail-1"})
+	if err != nil {
+		t.Fatalf("GetJail() error: %v", err)
+	}
+	if !getResp.GetFound() || getResp.GetJail().GetHostname() != "web-1.local" {
+		t.Fatalf("GetJail() = %+v, want found with hostname web-1.local", getResp)
+	}
+
+	updateResp, err := client.UpdateJail(ctx, &rpcpb.UpdateJailRequest{
+		Jail: &rpcpb.JailDefinition{Id: "jail-1", Name: "web-1-renamed", Hostname: "web-1.local"},
+	})
+	if err != nil {
+		t.Fatalf("UpdateJail() error: %v", err)
+	}
+	if updateResp.GetError() != "" || updateResp.GetJail().GetName() != "web-1-renamed" {
+		t.Fatalf("UpdateJail() = %+v, want name=web-1-renamed", updateResp)
+	}
+
+	listResp, err := client.ListJails(ctx, &rpcpb.ListJailsRequest{})
+	if err != nil {
+		t.Fatalf("ListJails() error: %v", err)
+	}
+	if len(listResp.GetJails()) != 1 || listResp.GetJails()[0].GetId() != "jail-1" {
+		t.Fatalf("ListJails() = %+v, want one jail jail-1", listResp.GetJails())
+	}
+
+	deleteResp, err := client.DeleteJail(ctx, &rpcpb.DeleteJailRequest{Id: "jail-1"})
+	if err != nil {
+		t.Fatalf("DeleteJail() error: %v", err)
+	}
+	if deleteResp.GetError() != "" {
+		t.Fatalf("DeleteJail() returned error: %s", deleteResp.GetError())
+	}
+
+	// jail-1 has no node_id, so DeleteJail removes it immediately rather
+	// than soft-deleting it (mirrors DeleteVM's own behavior).
+	listResp2, err := client.ListJails(ctx, &rpcpb.ListJailsRequest{})
+	if err != nil {
+		t.Fatalf("ListJails() (after delete) error: %v", err)
+	}
+	if len(listResp2.GetJails()) != 0 {
+		t.Errorf("ListJails() (after delete) = %+v, want none", listResp2.GetJails())
+	}
+}
+
+func TestIntegration_DeleteJob_AssignedJailIsSoftDeletedThroughFullStack(t *testing.T) {
+	raftdSocket := newRaftdUDSSocket(t)
+	client := newManagerdRPCClient(t, raftdSocket)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if _, err := client.CreateJail(ctx, &rpcpb.CreateJailRequest{
+		Jail: &rpcpb.JailDefinition{Id: "jail-1", Name: "web-1", NodeId: "node-a"},
+	}); err != nil {
+		t.Fatalf("CreateJail() error: %v", err)
+	}
+
+	deleteResp, err := client.DeleteJail(ctx, &rpcpb.DeleteJailRequest{Id: "jail-1"})
+	if err != nil {
+		t.Fatalf("DeleteJail() error: %v", err)
+	}
+	if deleteResp.GetError() != "" {
+		t.Fatalf("DeleteJail() returned error: %s", deleteResp.GetError())
+	}
+	if deleteResp.GetJail().GetDesiredState() != rpcpb.JailState_JAIL_STATE_DELETING {
+		t.Errorf("DeleteJail() jail.DesiredState = %v, want JAIL_STATE_DELETING", deleteResp.GetJail().GetDesiredState())
+	}
+
+	getResp, err := client.GetJail(ctx, &rpcpb.GetJailRequest{Id: "jail-1"})
+	if err != nil {
+		t.Fatalf("GetJail() error: %v", err)
+	}
+	if !getResp.GetFound() {
+		t.Fatalf("GetJail() found=false, want the tombstoned jail to still be present")
+	}
+}
