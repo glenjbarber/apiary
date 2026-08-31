@@ -203,6 +203,22 @@ type Reconciler struct {
 	// see reconcileHASTRoles.
 	lastHASTConfig string
 
+	// hastConfigWritten is false until this Reconciler has written a
+	// HAST config at least once in this process's lifetime. Needed
+	// because lastHASTConfig's zero value ("") is itself a valid
+	// rendered config (zero resources) - without this flag, a freshly
+	// restarted managerd whose current target happens to be "no HAST
+	// resources on this node" would see rendered == lastHASTConfig
+	// (both "") and skip WriteConfig/RestartService entirely, even
+	// though the actual on-disk hast.conf/running hastd might still
+	// reflect resources from before the restart. Caught live: a
+	// managerd restart during a replicated jail's teardown left hastd
+	// running with the jail's now-stale resource still loaded, forever
+	// blocking the reconciler's own next step (destroying that
+	// resource's ZFS dataset) with "pool or dataset is busy" - see
+	// ADR-0027.
+	hastConfigWritten bool
+
 	// Jail is optional (nil-able, same opt-in pattern as Bhyve above):
 	// nil disables jail provisioning entirely on this node. A node with
 	// Jail set but no HAST support can still run non-replicated jails -

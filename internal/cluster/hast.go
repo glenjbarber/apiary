@@ -159,7 +159,7 @@ func (r *Reconciler) reconcileHASTRoles(ctx context.Context, roles []hastRole) (
 	if err != nil {
 		return nil, fmt.Errorf("rendering hast.conf: %w", err)
 	}
-	if rendered != r.lastHASTConfig {
+	if !r.hastConfigWritten || rendered != r.lastHASTConfig {
 		if err := r.HAST.WriteConfig(resources); err != nil {
 			return nil, fmt.Errorf("writing hast.conf: %w", err)
 		}
@@ -196,6 +196,7 @@ func (r *Reconciler) reconcileHASTRoles(ctx context.Context, roles []hastRole) (
 		// avoids the race (see ADR-0026).
 		time.Sleep(r.hastRestartSettleDelay())
 		r.lastHASTConfig = rendered
+		r.hastConfigWritten = true
 	}
 
 	devicePaths := make(map[string]string)

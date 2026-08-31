@@ -1291,6 +1291,33 @@ func TestReconciler_RunOnce_RestartsHASTdWhenLastResourceIsRemoved(t *testing.T)
 	}
 }
 
+// TestReconciler_RunOnce_WritesHASTConfigOnFirstTickEvenWhenTargetIsEmpty
+// is a regression test for a second real bug caught live tearing down
+// the same replicated jail: lastHASTConfig's zero value ("") is itself
+// a valid rendered config (zero resources), so a freshly restarted
+// managerd whose current target already happened to be "no HAST
+// resources on this node" saw rendered == lastHASTConfig (both "")
+// and skipped WriteConfig/RestartService entirely on its very first
+// tick - even though the actual on-disk hast.conf/running hastd still
+// reflected a resource from before the restart, permanently blocking
+// that resource's dataset from ever being destroyed. See ADR-0027.
+func TestReconciler_RunOnce_WritesHASTConfigOnFirstTickEvenWhenTargetIsEmpty(t *testing.T) {
+	raft := &fakeRaftClient{resp: &internalpb.ListVMsResponse{}}
+	h := newFakeHASTManager()
+
+	r := &Reconciler{Raft: raft, ZFS: newFakeDatasetManager(), HAST: h, HASTRestartSettleDelay: time.Millisecond, LocalNodeID: "node-a"}
+	if err := r.RunOnce(context.Background()); err != nil {
+		t.Fatalf("RunOnce() error: %v", err)
+	}
+
+	if len(h.writtenConfigs) != 1 {
+		t.Fatalf("WriteConfig calls = %d, want 1 (must write even an empty config on the first tick)", len(h.writtenConfigs))
+	}
+	if h.restarts != 1 {
+		t.Errorf("restarts = %d, want 1 (must restart even to sync an already-empty-looking target)", h.restarts)
+	}
+}
+
 func TestReconciler_RunOnce_ReplicatedVMWithoutHASTConfiguredIsError(t *testing.T) {
 	raft := &fakeRaftClient{
 		resp: &internalpb.ListVMsResponse{
