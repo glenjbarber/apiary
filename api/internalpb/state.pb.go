@@ -182,6 +182,15 @@ type VMDefinition struct {
 	// today's de facto behavior (everything allowed) - rules are opt-in
 	// restrictions, so an existing VM with none is unaffected.
 	FirewallRules []*FirewallRule `protobuf:"bytes,13,rep,name=firewall_rules,json=firewallRules,proto3" json:"firewall_rules,omitempty"`
+	// replica_node_id, if set, names a second cluster node that
+	// replicates this VM's disk via HAST (ADR-0025) - real-time block
+	// replication for data redundancy, not automatic failover (only a
+	// bhyve-capable node can ever run the VM). Caller-set, exactly like
+	// node_id - this project deliberately has no automatic node
+	// scheduling for either field. Empty means the unreplicated,
+	// dataset-plus-file disk path from before this existed - unchanged
+	// behavior for every VM that doesn't set this.
+	ReplicaNodeId string `protobuf:"bytes,14,opt,name=replica_node_id,json=replicaNodeId,proto3" json:"replica_node_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -305,6 +314,13 @@ func (x *VMDefinition) GetFirewallRules() []*FirewallRule {
 		return x.FirewallRules
 	}
 	return nil
+}
+
+func (x *VMDefinition) GetReplicaNodeId() string {
+	if x != nil {
+		return x.ReplicaNodeId
+	}
+	return ""
 }
 
 // FirewallRule is one pf(8) rule applied to a VM's per-VM anchor. See
@@ -1337,7 +1353,7 @@ var File_api_internalpb_state_proto protoreflect.FileDescriptor
 
 const file_api_internalpb_state_proto_rawDesc = "" +
 	"\n" +
-	"\x1aapi/internalpb/state.proto\x12\x12apiary.internal.v1\"\xd7\x03\n" +
+	"\x1aapi/internalpb/state.proto\x12\x12apiary.internal.v1\"\xff\x03\n" +
 	"\fVMDefinition\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x14\n" +
@@ -1356,7 +1372,8 @@ const file_api_internalpb_state_proto_rawDesc = "" +
 	"ip_address\x18\v \x01(\tR\tipAddress\x12\x1f\n" +
 	"\vmac_address\x18\f \x01(\tR\n" +
 	"macAddress\x12G\n" +
-	"\x0efirewall_rules\x18\r \x03(\v2 .apiary.internal.v1.FirewallRuleR\rfirewallRules\"\x7f\n" +
+	"\x0efirewall_rules\x18\r \x03(\v2 .apiary.internal.v1.FirewallRuleR\rfirewallRules\x12&\n" +
+	"\x0freplica_node_id\x18\x0e \x01(\tR\rreplicaNodeId\"\x7f\n" +
 	"\fFirewallRule\x12\x1c\n" +
 	"\tdirection\x18\x01 \x01(\tR\tdirection\x12\x16\n" +
 	"\x06action\x18\x02 \x01(\tR\x06action\x12\x1a\n" +

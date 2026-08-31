@@ -46,6 +46,10 @@ type vmView struct {
 	NetworkID  string
 	IPAddress  string
 	MACAddress string
+
+	// ReplicaNodeID, if set, names the node this VM's disk is
+	// HAST-replicated to (ADR-0025) - data redundancy, not failover.
+	ReplicaNodeID string
 }
 
 // networkView is the template-facing shape for a NetworkDefinition.
@@ -182,18 +186,19 @@ func fromRPCVM(d *rpcpb.VMDefinition) vmView {
 		return vmView{}
 	}
 	return vmView{
-		ID:           d.GetId(),
-		Name:         d.GetName(),
-		VCPUs:        d.GetVcpus(),
-		MemoryMB:     d.GetMemoryMb(),
-		NodeID:       d.GetNodeId(),
-		DesiredState: stateFromRPC(d.GetDesiredState()),
-		Phase:        phaseFromRPC(d.GetPhase()),
-		PhaseError:   d.GetPhaseError(),
-		ISOName:      d.GetIsoName(),
-		NetworkID:    d.GetNetworkId(),
-		IPAddress:    d.GetIpAddress(),
-		MACAddress:   d.GetMacAddress(),
+		ID:            d.GetId(),
+		Name:          d.GetName(),
+		VCPUs:         d.GetVcpus(),
+		MemoryMB:      d.GetMemoryMb(),
+		NodeID:        d.GetNodeId(),
+		DesiredState:  stateFromRPC(d.GetDesiredState()),
+		Phase:         phaseFromRPC(d.GetPhase()),
+		PhaseError:    d.GetPhaseError(),
+		ISOName:       d.GetIsoName(),
+		NetworkID:     d.GetNetworkId(),
+		IPAddress:     d.GetIpAddress(),
+		MACAddress:    d.GetMacAddress(),
+		ReplicaNodeID: d.GetReplicaNodeId(),
 	}
 }
 

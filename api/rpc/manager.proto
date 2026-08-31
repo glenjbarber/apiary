@@ -137,6 +137,13 @@ message VMDefinition {
   // traffic via a per-VM pf(8) anchor. No rules means everything
   // allowed (today's de facto behavior, unaffected for existing VMs).
   repeated FirewallRule firewall_rules = 13;
+
+  // replica_node_id, if set, names a second cluster node that
+  // replicates this VM's disk via HAST (ADR-0025) - real-time block
+  // replication for data redundancy, not automatic failover. Caller-set,
+  // exactly like node_id. Empty means the unreplicated disk path from
+  // before this existed.
+  string replica_node_id = 14;
 }
 
 // FirewallRule mirrors api/internalpb's FirewallRule.

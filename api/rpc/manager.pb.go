@@ -167,6 +167,12 @@ type VMDefinition struct {
 	// traffic via a per-VM pf(8) anchor. No rules means everything
 	// allowed (today's de facto behavior, unaffected for existing VMs).
 	FirewallRules []*FirewallRule `protobuf:"bytes,13,rep,name=firewall_rules,json=firewallRules,proto3" json:"firewall_rules,omitempty"`
+	// replica_node_id, if set, names a second cluster node that
+	// replicates this VM's disk via HAST (ADR-0025) - real-time block
+	// replication for data redundancy, not automatic failover. Caller-set,
+	// exactly like node_id. Empty means the unreplicated disk path from
+	// before this existed.
+	ReplicaNodeId string `protobuf:"bytes,14,opt,name=replica_node_id,json=replicaNodeId,proto3" json:"replica_node_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -290,6 +296,13 @@ func (x *VMDefinition) GetFirewallRules() []*FirewallRule {
 		return x.FirewallRules
 	}
 	return nil
+}
+
+func (x *VMDefinition) GetReplicaNodeId() string {
+	if x != nil {
+		return x.ReplicaNodeId
+	}
+	return ""
 }
 
 // FirewallRule mirrors api/internalpb's FirewallRule.
@@ -3113,7 +3126,7 @@ var File_api_rpc_manager_proto protoreflect.FileDescriptor
 
 const file_api_rpc_manager_proto_rawDesc = "" +
 	"\n" +
-	"\x15api/rpc/manager.proto\x12\rapiary.rpc.v1\"\xc8\x03\n" +
+	"\x15api/rpc/manager.proto\x12\rapiary.rpc.v1\"\xf0\x03\n" +
 	"\fVMDefinition\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x14\n" +
@@ -3132,7 +3145,8 @@ const file_api_rpc_manager_proto_rawDesc = "" +
 	"ip_address\x18\v \x01(\tR\tipAddress\x12\x1f\n" +
 	"\vmac_address\x18\f \x01(\tR\n" +
 	"macAddress\x12B\n" +
-	"\x0efirewall_rules\x18\r \x03(\v2\x1b.apiary.rpc.v1.FirewallRuleR\rfirewallRules\"\x7f\n" +
+	"\x0efirewall_rules\x18\r \x03(\v2\x1b.apiary.rpc.v1.FirewallRuleR\rfirewallRules\x12&\n" +
+	"\x0freplica_node_id\x18\x0e \x01(\tR\rreplicaNodeId\"\x7f\n" +
 	"\fFirewallRule\x12\x1c\n" +
 	"\tdirection\x18\x01 \x01(\tR\tdirection\x12\x16\n" +
 	"\x06action\x18\x02 \x01(\tR\x06action\x12\x1a\n" +

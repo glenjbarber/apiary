@@ -460,6 +460,7 @@ func (s *Server) handleCreateVM(w http.ResponseWriter, r *http.Request) {
 			DesiredState:  stateToRPC(r.FormValue("desired_state")),
 			IsoName:       r.FormValue("iso_name"),
 			NetworkId:     r.FormValue("network_id"),
+			ReplicaNodeId: r.FormValue("replica_node_id"),
 			FirewallRules: parseFirewallRuleRows(r),
 		},
 	})

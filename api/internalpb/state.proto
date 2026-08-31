@@ -88,6 +88,16 @@ message VMDefinition {
   // today's de facto behavior (everything allowed) - rules are opt-in
   // restrictions, so an existing VM with none is unaffected.
   repeated FirewallRule firewall_rules = 13;
+
+  // replica_node_id, if set, names a second cluster node that
+  // replicates this VM's disk via HAST (ADR-0025) - real-time block
+  // replication for data redundancy, not automatic failover (only a
+  // bhyve-capable node can ever run the VM). Caller-set, exactly like
+  // node_id - this project deliberately has no automatic node
+  // scheduling for either field. Empty means the unreplicated,
+  // dataset-plus-file disk path from before this existed - unchanged
+  // behavior for every VM that doesn't set this.
+  string replica_node_id = 14;
 }
 
 // FirewallRule is one pf(8) rule applied to a VM's per-VM anchor. See

@@ -1,5 +1,5 @@
 {{define "vm_rows"}}
-{{if .Error}}<tr><td colspan="8" class="error">{{.Error}}</td></tr>{{end}}
+{{if .Error}}<tr><td colspan="9" class="error">{{.Error}}</td></tr>{{end}}
 {{range .VMs}}
 <tr>
   <td>{{.ID}}</td>
@@ -9,12 +9,13 @@
   <td>{{.NodeID}}</td>
   <td{{if eq .Phase "error"}} title="{{.PhaseError}}"{{end}}>{{.Phase}}</td>
   <td>{{if .IPAddress}}{{.IPAddress}}{{end}}</td>
+  <td>{{if .ReplicaNodeID}}{{.ReplicaNodeID}}{{else}}<em>none</em>{{end}}</td>
   <td>
     <a href="/vms/{{.ID}}/console">Console</a>
     <button hx-delete="/vms/{{.ID}}" hx-target="#vm-rows" hx-swap="innerHTML" hx-confirm="Delete {{.ID}}?">Delete</button>
   </td>
 </tr>
 {{else}}
-  {{if not .Error}}<tr><td colspan="8"><em>No VMs</em></td></tr>{{end}}
+  {{if not .Error}}<tr><td colspan="9"><em>No VMs</em></td></tr>{{end}}
 {{end}}
 {{end}}
