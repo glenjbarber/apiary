@@ -250,6 +250,22 @@ each design decision, in order.
   also has no automatic path (no cloud-controller-manager exists for
   Apiary) - documented as a manual `preKubeadmCommands` step in the new
   repo's own README.
+  **Update**: live verification against a real `kind` cluster + `apiarium`
+  has now happened. It found and fixed two real bugs: `internal/pf`'s
+  `Flush` wasn't idempotent for an already-gone `pf` anchor, permanently
+  wedging reconciliation for a deleted VM (see ADR-0022's own
+  "Follow-up"); and the CAPI provider's own `createVM` didn't handle a
+  stale-cache-triggered duplicate create attempt (fixed by adopting the
+  already-existing VM instead of erroring, since its id is deterministic).
+  Confirmed live: a real bhyve VM booted continuously from a real
+  `base_image_name`-seeded disk (previously it failed immediately with
+  "no bootable device" against a blank disk — the bug this update fixes).
+  Full cloud-init/network completion wasn't independently confirmed in
+  that pass, since the test node had no flat bridge (`-bhyve-bridge`)
+  configured - a separate, pre-existing gap, not chased further live.
+  A live, currently-unresolved `hastd` crash-loop was also found and
+  disclosed (see ADR-0022) - `-hast-enabled` was left off on `apiarium`
+  as a result.
 - **Tabled for now** (evaluated, deliberately deferred):
   - **Terraform support** — the infrastructure now exists (`managerd`'s
     API-key auth, `restshimd`'s own binary forwarding each caller's

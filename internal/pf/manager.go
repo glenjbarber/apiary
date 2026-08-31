@@ -1,6 +1,9 @@
 package pf
 
-import "context"
+import (
+	"context"
+	"strings"
+)
 
 // Manager applies and clears per-VM pf(8) anchor rulesets via pfctl(8).
 type Manager struct{}
@@ -21,8 +24,17 @@ func (m *Manager) Apply(ctx context.Context, anchor string, rules []Rule) error 
 
 // Flush removes every rule from anchor - used when a VM is torn down,
 // so its anchor doesn't linger with stale rules referencing a VM that
-// no longer exists.
+// no longer exists. pf(8) anchors are created lazily on first use
+// (Apply), so an anchor that was never populated - or whose rules a
+// previous, partially-completed teardown already flushed - genuinely
+// has nothing to flush; pfctl reports that case as "No such anchor",
+// which is treated as success here rather than an error, the same
+// idempotent-teardown posture this project already applies to
+// PurgeVM/DeleteVM (a resource already gone is not a failure).
 func (m *Manager) Flush(ctx context.Context, anchor string) error {
 	_, err := runCmd(ctx, "pfctl", "-a", anchor, "-F", "rules")
+	if err != nil && strings.Contains(err.Error(), "No such anchor") {
+		return nil
+	}
 	return err
 }

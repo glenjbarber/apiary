@@ -197,3 +197,34 @@ rather than a whole separate message.
   network management both still assume the querying `internal/frontend`
   is colocated with the answering `managerd` (same real-multi-node gap
   ADR-0020 already noted for the console).
+
+## Follow-up: `Flush` wasn't idempotent for an already-gone anchor - a real bug caught live
+
+Found while live-verifying the Kubernetes CAPI provider (a separate
+repo, `cluster-api-provider-apiary` - see ADR-0031): `internal/pf.Manager.Flush`
+called `pfctl -a <anchor> -F rules` and treated *any* non-zero exit as
+a hard error, including `pfctl`'s own "No such anchor" - a completely
+normal outcome for a VM whose anchor was never populated (no firewall
+rules ever set) or whose rules a previous, already-completed teardown
+already flushed. Because `internal/cluster`'s reconciler aborts the
+rest of a tick's work on the first per-VM error, this one non-idempotent
+call was enough to permanently wedge reconciliation for that VM - real
+teardown (dataset, bhyve VM) had already succeeded, but the tombstone
+was never purged, tick after tick, with the same "No such anchor" error
+logged every ~30s forever. Fixed by treating `pfctl`'s "No such anchor"
+response as success, the same idempotent-teardown posture this project
+already applies to `PurgeVM`/`DeleteVM` (a resource already gone is not
+a failure) - not previously applied to `Flush` because no prior test or
+live pass had exercised deleting a VM that had never had firewall rules
+applied to begin with.
+
+Separately, and *not* fixed as part of this pass (a distinct, pre-existing
+issue, not something this ADR's scope owns): the same live session hit
+`hastd` aborting with a `hast_proto_recv_hdr` assertion failure on
+*every* `service hastd onerestart` on `apiarium`, wedging reconciliation
+independently of the bug above whenever `-hast-enabled` was set - almost
+certainly the same class of upstream `hastd` fragility ADR-0008 already
+tracks, though not confirmed to be the identical bug. Worked around for
+that live session by dropping `-hast-enabled` (no VM/jail on that node
+was using HAST replication at the time); re-enabling it, and properly
+root-causing the crash, is left as real, disclosed follow-up work.
