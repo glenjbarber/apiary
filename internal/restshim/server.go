@@ -3,7 +3,11 @@ package restshim
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"io"
+	"mime/multipart"
 	"net/http"
+	"strings"
 
 	"google.golang.org/grpc/metadata"
 
@@ -73,6 +77,14 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /v1/networks", s.handleCreateNetwork)
 	s.mux.HandleFunc("GET /v1/networks", s.handleListNetworks)
 	s.mux.HandleFunc("DELETE /v1/networks/{id}", s.handleDeleteNetwork)
+
+	// UploadISO (ADR-0017) previously had no REST equivalent at all -
+	// only ManagerService's own client-streaming gRPC and the web UI's
+	// multipart form could reach it. A REST-only client (e.g. a
+	// Terraform or Cluster API provider - see ADR-0031) needs a way to
+	// upload an ISO/base image too, so this mirrors internal/frontend's
+	// own handleUploadISO multipart-to-gRPC-stream relay exactly.
+	s.mux.HandleFunc("POST /v1/isos", s.handleUploadISO)
 }
 
 // errorBody is the JSON shape returned for any non-2xx response.
@@ -338,4 +350,102 @@ func (s *Server) handleListNetworks(w http.ResponseWriter, r *http.Request) {
 		networks = append(networks, fromRPCNetwork(d))
 	}
 	writeJSON(w, http.StatusOK, networks)
+}
+
+// isoUploadResult is the REST-facing JSON shape for a successful
+// UploadISO call.
+type isoUploadResult struct {
+	Name string `json:"name"`
+}
+
+// handleUploadISO streams a multipart file upload directly into
+// managerd's UploadISO RPC, chunk by chunk - mirrors
+// internal/frontend's own handleUploadISO exactly (same field-order
+// requirement: expected_sha256 must arrive before file, since
+// MultipartReader processes parts strictly in send order and the
+// Metadata message needs the hash already known by the time the file
+// part's bytes start arriving).
+func (s *Server) handleUploadISO(w http.ResponseWriter, r *http.Request) {
+	mr, err := r.MultipartReader()
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, errorBody{Error: "invalid upload: " + err.Error()})
+		return
+	}
+
+	var expectedHash string
+	var result *rpcpb.UploadISOResponse
+	var uploadErr error
+
+	for {
+		part, err := mr.NextPart()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			uploadErr = fmt.Errorf("reading upload: %w", err)
+			break
+		}
+
+		switch part.FormName() {
+		case "expected_sha256":
+			data, _ := io.ReadAll(part)
+			expectedHash = strings.TrimSpace(string(data))
+		case "file":
+			result, uploadErr = s.uploadISOStream(r, part, expectedHash)
+		}
+		part.Close()
+		if uploadErr != nil {
+			break
+		}
+	}
+
+	switch {
+	case uploadErr != nil:
+		writeJSON(w, http.StatusBadGateway, errorBody{Error: uploadErr.Error()})
+		return
+	case result == nil:
+		writeJSON(w, http.StatusBadRequest, errorBody{Error: "no file provided"})
+		return
+	case result.GetError() != "":
+		writeJSON(w, http.StatusBadRequest, errorBody{Error: result.GetError()})
+		return
+	}
+	writeJSON(w, http.StatusCreated, isoUploadResult{Name: result.GetName()})
+}
+
+// uploadISOStream opens managerd's UploadISO client stream, sends the
+// required Metadata message (the file's own name, plus expectedHash
+// gathered from the earlier form field), then relays part's bytes as a
+// sequence of Chunk messages - see internal/frontend's identical helper.
+func (s *Server) uploadISOStream(r *http.Request, part *multipart.Part, expectedHash string) (*rpcpb.UploadISOResponse, error) {
+	stream, err := s.client.UploadISO(authContext(r))
+	if err != nil {
+		return nil, fmt.Errorf("opening upload stream: %w", err)
+	}
+	if err := stream.Send(&rpcpb.UploadISORequest{
+		Data: &rpcpb.UploadISORequest_Metadata{
+			Metadata: &rpcpb.ISOUploadMetadata{Name: part.FileName(), ExpectedSha256: expectedHash},
+		},
+	}); err != nil {
+		return nil, fmt.Errorf("sending upload metadata: %w", err)
+	}
+
+	buf := make([]byte, 256*1024)
+	for {
+		n, rerr := part.Read(buf)
+		if n > 0 {
+			chunk := make([]byte, n)
+			copy(chunk, buf[:n])
+			if serr := stream.Send(&rpcpb.UploadISORequest{Data: &rpcpb.UploadISORequest_Chunk{Chunk: chunk}}); serr != nil {
+				return nil, fmt.Errorf("sending upload data: %w", serr)
+			}
+		}
+		if rerr == io.EOF {
+			break
+		}
+		if rerr != nil {
+			return nil, fmt.Errorf("reading upload data: %w", rerr)
+		}
+	}
+	return stream.CloseAndRecv()
 }

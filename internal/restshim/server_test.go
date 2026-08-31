@@ -4,9 +4,10 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"fmt"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"google.golang.org/grpc"
@@ -62,6 +63,29 @@ type fakeClient struct {
 
 	lastCreateNetworkReq *rpcpb.CreateNetworkRequest
 	lastDeleteNetworkReq *rpcpb.DeleteNetworkRequest
+
+	uploadStream *fakeUploadClientStream
+	uploadErr    error
+}
+
+// fakeUploadClientStream is a fake grpc.ClientStreamingClient for
+// UploadISO - records every message the handler sends and returns a
+// canned final response, without any real gRPC connection. Mirrors
+// internal/frontend's identical test helper.
+type fakeUploadClientStream struct {
+	grpc.ClientStream
+	sent []*rpcpb.UploadISORequest
+	resp *rpcpb.UploadISOResponse
+	err  error
+}
+
+func (f *fakeUploadClientStream) Send(req *rpcpb.UploadISORequest) error {
+	f.sent = append(f.sent, req)
+	return nil
+}
+
+func (f *fakeUploadClientStream) CloseAndRecv() (*rpcpb.UploadISOResponse, error) {
+	return f.resp, f.err
 }
 
 func (f *fakeClient) Status(ctx context.Context, _ *rpcpb.StatusRequest, _ ...grpc.CallOption) (*rpcpb.StatusResponse, error) {
@@ -134,7 +158,13 @@ func (f *fakeClient) ListVMs(context.Context, *rpcpb.ListVMsRequest, ...grpc.Cal
 }
 
 func (f *fakeClient) UploadISO(context.Context, ...grpc.CallOption) (grpc.ClientStreamingClient[rpcpb.UploadISORequest, rpcpb.UploadISOResponse], error) {
-	return nil, fmt.Errorf("fakeClient: UploadISO not implemented")
+	if f.uploadErr != nil {
+		return nil, f.uploadErr
+	}
+	if f.uploadStream == nil {
+		f.uploadStream = &fakeUploadClientStream{resp: &rpcpb.UploadISOResponse{}}
+	}
+	return f.uploadStream, nil
 }
 
 func (f *fakeClient) ListISOs(context.Context, *rpcpb.ListISOsRequest, ...grpc.CallOption) (*rpcpb.ListISOsResponse, error) {
@@ -739,5 +769,93 @@ func TestServer_MigrateVM_InvalidJSON(t *testing.T) {
 
 	if rec.Code != http.StatusBadRequest {
 		t.Errorf("status = %d, want 400", rec.Code)
+	}
+}
+
+// buildUploadRequest constructs a multipart/form-data POST /v1/isos
+// request with expected_sha256 encoded before file - the order
+// handleUploadISO requires, since it streams parts as they arrive
+// rather than buffering the whole form first. Mirrors
+// internal/frontend's identical test helper.
+func buildUploadRequest(t *testing.T, hash, filename, contents string) *http.Request {
+	t.Helper()
+	var buf bytes.Buffer
+	mw := multipart.NewWriter(&buf)
+	if err := mw.WriteField("expected_sha256", hash); err != nil {
+		t.Fatalf("WriteField: %v", err)
+	}
+	fw, err := mw.CreateFormFile("file", filename)
+	if err != nil {
+		t.Fatalf("CreateFormFile: %v", err)
+	}
+	if _, err := fw.Write([]byte(contents)); err != nil {
+		t.Fatalf("writing file part: %v", err)
+	}
+	if err := mw.Close(); err != nil {
+		t.Fatalf("closing multipart writer: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/isos", &buf)
+	req.Header.Set("Content-Type", mw.FormDataContentType())
+	return req
+}
+
+func TestServer_UploadISO_StreamsMetadataThenChunksInOrder(t *testing.T) {
+	client := &fakeClient{uploadStream: &fakeUploadClientStream{
+		resp: &rpcpb.UploadISOResponse{Name: "base.raw", SizeBytes: 4},
+	}}
+	s := NewServer(client)
+
+	req := buildUploadRequest(t, "deadbeef", "base.raw", "data")
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want 201; body=%s", rec.Code, rec.Body.String())
+	}
+
+	sent := client.uploadStream.sent
+	if len(sent) < 2 {
+		t.Fatalf("stream got %d messages, want at least metadata + 1 chunk", len(sent))
+	}
+	meta := sent[0].GetMetadata()
+	if meta == nil {
+		t.Fatalf("first message = %+v, want metadata", sent[0])
+	}
+	if meta.GetName() != "base.raw" || meta.GetExpectedSha256() != "deadbeef" {
+		t.Errorf("metadata = %+v, want name=base.raw hash=deadbeef", meta)
+	}
+	var gotData []byte
+	for _, m := range sent[1:] {
+		gotData = append(gotData, m.GetChunk()...)
+	}
+	if string(gotData) != "data" {
+		t.Errorf("chunk data = %q, want %q", gotData, "data")
+	}
+
+	var body isoUploadResult
+	if err := json.NewDecoder(rec.Body).Decode(&body); err != nil {
+		t.Fatalf("decoding response: %v", err)
+	}
+	if body.Name != "base.raw" {
+		t.Errorf("response name = %q, want base.raw", body.Name)
+	}
+}
+
+func TestServer_UploadISO_ApplicationErrorIsBadRequest(t *testing.T) {
+	client := &fakeClient{uploadStream: &fakeUploadClientStream{
+		resp: &rpcpb.UploadISOResponse{Error: `sha256 mismatch: got aaa, want bbb`},
+	}}
+	s := NewServer(client)
+
+	req := buildUploadRequest(t, "bbb", "base.raw", "data")
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400; body=%s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "sha256 mismatch") {
+		t.Errorf("response missing hash-mismatch error, got: %s", rec.Body.String())
 	}
 }

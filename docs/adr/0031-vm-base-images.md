@@ -73,6 +73,15 @@ already-raw, already-bootable image; Apiary does no conversion.
   Terraform provider, or a future CAPI provider) from ever setting these
   fields - previously only the gRPC `ManagerService` API and the web UI
   could.
+- `internal/restshim` also gained `POST /v1/isos` - `UploadISO`
+  (ADR-0017) previously had no REST equivalent at all, only
+  `ManagerService`'s own client-streaming gRPC and `internal/frontend`'s
+  multipart form. `handleUploadISO`/`uploadISOStream`
+  (`internal/restshim/server.go`) mirror `internal/frontend`'s identical
+  handler exactly - same multipart-to-gRPC-stream relay, same
+  `expected_sha256`-before-`file` field-order requirement. Without this,
+  a REST-only client would have no way to upload the base image or
+  cloud-init seed ISO this ADR's own field exists to reference.
 - Full test coverage: `internal/cluster`'s reconciler tests cover
   seeding a new disk from a base image, never re-seeding an existing
   one, the unresolvable-name and no-store-configured error paths
