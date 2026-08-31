@@ -170,7 +170,11 @@ each design decision, in order.
   three-tier role. This is the one binary in the project that now
   requires `CGO_ENABLED=1` and a native FreeBSD build — confirmed
   live, `managerd`/`raftd`/`restshimd` are unaffected and still
-  cross-compile cleanly from any platform. See
+  cross-compile cleanly from any platform. Live-verified end-to-end on
+  real hardware: real PAM logins against genuine UNIX accounts, a
+  wrong password rejected, an unmapped valid account rejected outright
+  (default-deny), and Viewer/Operator sessions each correctly allowed
+  and blocked at the right routes. See
   [ADR-0030](docs/adr/0030-tiered-rbac-pam-login.md).
 
 **Not yet implemented:**

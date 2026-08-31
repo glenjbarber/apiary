@@ -136,19 +136,47 @@ roles).
 - Any self-service account creation/password-reset UI - PAM already
   manages real accounts; Apiary never touches credentials directly.
 
+## Live verification
+
+Confirmed for real on `apiarium`, end to end: `pkg install go git`
+(neither was previously present), the local working tree copied over
+and built natively there (`go build ./cmd/frontend` - real cgo
+linkage confirmed via `ldd`, showing `libpam.so.6` pulled in, unlike
+this project's other, statically-linked pure-Go binaries), a real
+`/etc/pam.d/apiary` written (`pam_unix.so` for `auth`/`account`), and
+two real, throwaway UNIX accounts created with `pw useradd`. Against
+the real running `frontend` binary:
+
+- A real PAM login with the correct password for a Viewer-mapped
+  account succeeded (a genuine session cookie issued), while the exact
+  same account with a wrong password was rejected with no cookie set.
+- That Viewer session could reach a read-only page (`/vms`, 200) but
+  was rejected with a real `403 Forbidden` from both an Operator-only
+  route (`/vms/new`) and the Admin-only `/apikeys` surface.
+- A second, real UNIX account with valid credentials but **no
+  `-role-map` entry** was rejected at login outright ("no Apiary role
+  is assigned to this account") - confirming the default-deny design
+  decision holds against a real PAM success, not just a mocked one.
+- Redeploying with that second account mapped to Operator, its session
+  could reach `/vms/new` (200) but was still correctly rejected from
+  `/apikeys` (403) - confirming the role hierarchy's middle tier
+  behaves correctly, not just the two extremes.
+
+All test accounts, the PAM service file, and the built binary were
+removed afterward; `apiarium` was left with no trace of the test setup.
+
 ## Consequences
 
-- Full test coverage: role-hierarchy and `checkAuth` unit tests
-  (including the fail-closed-for-unlisted-RPC case) in
+- Full test coverage, unit and live: role-hierarchy and `checkAuth`
+  unit tests (including the fail-closed-for-unlisted-RPC case) in
   `internal/manager`; real raft-harness integration tests confirming a
   Viewer-role key can read but not write and an Operator-role key can
   write VMs but not manage API keys; `internal/frontend` route-gating
   and role-map-rejection tests against a fake `Authenticator`;
-  `-role-map` flag-parsing unit tests in `cmd/frontend`;
-  `internal/pam` tests against a fake `ServiceName` (real PAM
-  authentication success itself needs a live, root-capable FreeBSD
-  host with a genuine configured PAM service - not exercisable in
-  unit tests, and not yet live-verified as of this writing).
+  `-role-map` flag-parsing unit tests in `cmd/frontend`; `internal/pam`
+  unit tests against a fake `ServiceName`; and, per the live
+  verification above, real PAM authentication itself confirmed working
+  end-to-end against genuine UNIX accounts on real FreeBSD hardware.
 - The cgo/native-build requirement for `cmd/frontend` is a real,
   ongoing cost of this design, accepted explicitly in exchange for
   literal PAM (and, transitively, Kerberos/AD) support rather than a
