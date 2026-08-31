@@ -10,12 +10,15 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strings"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 
 	rpcpb "github.com/glenjbarber/apiary/api/rpc"
 	"github.com/glenjbarber/apiary/internal/frontend"
+	"github.com/glenjbarber/apiary/internal/manager"
+	"github.com/glenjbarber/apiary/internal/pam"
 )
 
 // apiKeyCredentials attaches an API key to every outgoing managerd call
@@ -33,6 +36,47 @@ func (k apiKeyCredentials) GetRequestMetadata(context.Context, ...string) (map[s
 
 func (apiKeyCredentials) RequireTransportSecurity() bool { return false }
 
+// parseRoleMap parses the -role-map flag's
+// "admin:alice;operator:bob,carol;viewer:dave" format into a
+// per-username Role lookup (ADR-0030) - deliberately independent of
+// any UNIX/AD group, per the project's explicit "don't use the
+// operator GID" requirement. An empty spec is valid (no login is
+// possible until at least one username is mapped, since handleLogin
+// rejects any username with no entry).
+func parseRoleMap(spec string) (map[string]manager.Role, error) {
+	roleMap := make(map[string]manager.Role)
+	if strings.TrimSpace(spec) == "" {
+		return roleMap, nil
+	}
+	for _, group := range strings.Split(spec, ";") {
+		group = strings.TrimSpace(group)
+		if group == "" {
+			continue
+		}
+		parts := strings.SplitN(group, ":", 2)
+		if len(parts) != 2 {
+			return nil, fmt.Errorf("invalid -role-map entry %q: want \"role:user1,user2\"", group)
+		}
+		role := manager.Role(strings.TrimSpace(parts[0]))
+		switch role {
+		case manager.RoleAdmin, manager.RoleOperator, manager.RoleViewer:
+		default:
+			return nil, fmt.Errorf("invalid -role-map role %q: want admin, operator, or viewer", role)
+		}
+		for _, user := range strings.Split(parts[1], ",") {
+			user = strings.TrimSpace(user)
+			if user == "" {
+				continue
+			}
+			if existing, dup := roleMap[user]; dup {
+				return nil, fmt.Errorf("-role-map lists user %q twice (as both %s and %s)", user, existing, role)
+			}
+			roleMap[user] = role
+		}
+	}
+	return roleMap, nil
+}
+
 func main() {
 	if err := run(); err != nil {
 		log.Fatalf("frontend: %v", err)
@@ -42,6 +86,8 @@ func main() {
 func run() error {
 	managerAddr := flag.String("manager-addr", "127.0.0.1:17700", "TCP address of managerd's external RPC API")
 	httpAddr := flag.String("http-addr", "127.0.0.1:8080", "address to serve the web UI on")
+	pamService := flag.String("pam-service", "", "PAM service name to authenticate web UI logins against (requires a matching /etc/pam.d/<name> on this host - ADR-0030); leave empty to disable login entirely")
+	roleMapFlag := flag.String("role-map", "", "maps usernames to Apiary roles, e.g. \"admin:alice;operator:bob,carol;viewer:dave\" (ADR-0030) - a PAM login for a username with no entry here is rejected, not silently downgraded to viewer")
 	flag.Parse()
 
 	dialOpts := []grpc.DialOption{grpc.WithTransportCredentials(insecure.NewCredentials())}
@@ -50,6 +96,10 @@ func run() error {
 	// auth is opt-in and off until the first key is ever created via
 	// the /apikeys page. Once that happens, this must be set (and
 	// frontend restarted) or every call starts failing Unauthenticated.
+	// The key's own role (ADR-0030) must be at least Operator, since
+	// frontend forwards whatever the logged-in user's role permits -
+	// a frontend whose own key is only Viewer would reject every
+	// Operator/Admin action downstream regardless of the UI session.
 	if apiKey := os.Getenv("APIARY_MANAGER_API_KEY"); apiKey != "" {
 		dialOpts = append(dialOpts, grpc.WithPerRPCCredentials(apiKeyCredentials(apiKey)))
 	}
@@ -59,25 +109,24 @@ func run() error {
 	}
 	defer conn.Close()
 
-	// Credentials come from the environment, not flags, so they don't
-	// show up in `ps` output. Both or neither must be set - a single one
-	// set is almost certainly a typo, not an intentional "half enabled"
-	// state, so it's treated as a startup error rather than silently
-	// disabling login.
-	user := os.Getenv("APIARY_UI_USER")
-	pass := os.Getenv("APIARY_UI_PASSWORD")
-	if (user == "") != (pass == "") {
-		return fmt.Errorf("both APIARY_UI_USER and APIARY_UI_PASSWORD must be set together (or neither, to disable login)")
+	roleMap, err := parseRoleMap(*roleMapFlag)
+	if err != nil {
+		return fmt.Errorf("parsing -role-map: %w", err)
 	}
 
-	srv, err := frontend.NewServer(rpcpb.NewManagerServiceClient(conn), user, pass)
+	var auth pam.Authenticator
+	if *pamService != "" {
+		auth = pam.PAMAuthenticator{ServiceName: *pamService}
+	}
+
+	srv, err := frontend.NewServer(rpcpb.NewManagerServiceClient(conn), auth, roleMap)
 	if err != nil {
 		return fmt.Errorf("creating frontend server: %w", err)
 	}
-	if user != "" {
-		log.Printf("frontend: login enabled (user=%s)", user)
+	if auth != nil {
+		log.Printf("frontend: login enabled (pam-service=%s, %d role-mapped user(s))", *pamService, len(roleMap))
 	} else {
-		log.Printf("frontend: no login configured (set APIARY_UI_USER/APIARY_UI_PASSWORD to require one)")
+		log.Printf("frontend: no login configured (set -pam-service/-role-map to require one)")
 	}
 
 	log.Printf("frontend: listening on %s (manager-addr=%s)", *httpAddr, *managerAddr)

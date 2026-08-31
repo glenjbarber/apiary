@@ -159,6 +159,19 @@ each design decision, in order.
   to be bound to a real, network-reachable interface, not loopback
   (this project's own flag default) - see
   [ADR-0029](docs/adr/0029-cross-node-write-forwarding.md).
+- **Tiered RBAC with PAM-backed web UI login** — real per-identity
+  accounts (Viewer / Operator / Admin) replace the single shared
+  username/password (ADR-0019). The web UI authenticates against a
+  real PAM service (`-pam-service`), so Kerberos or Active Directory
+  work transitively through the host's own PAM configuration
+  (`pam_krb5`/`pam_ldap`/`pam_winbind`) with no bespoke client code in
+  Apiary; usernames map to roles via an explicit `-role-map` flag,
+  independent of any UNIX/AD group. API keys (ADR-0023) gain the same
+  three-tier role. This is the one binary in the project that now
+  requires `CGO_ENABLED=1` and a native FreeBSD build — confirmed
+  live, `managerd`/`raftd`/`restshimd` are unaffected and still
+  cross-compile cleanly from any platform. See
+  [ADR-0030](docs/adr/0030-tiered-rbac-pam-login.md).
 
 **Not yet implemented:**
 
@@ -186,11 +199,13 @@ each design decision, in order.
 - Importing VMs from other hypervisors (e.g. Proxmox): no disk-format
   conversion, and Apiary is UEFI-only. Linux containers have no path at
   all — jails share the host FreeBSD kernel
-- Authentication: the web UI has its own optional shared-password login
-  gate, and `managerd`'s external API has its own separate optional
-  API-key gate (both off by default, see above); `raftd`'s internal
-  socket has none, and there are no user accounts or roles anywhere
-  (one flat set of API keys, no scoping)
+- Authentication: the web UI now supports real PAM-backed per-identity
+  login with tiered roles (Viewer/Operator/Admin, ADR-0030), and API
+  keys carry the same roles (ADR-0023) — both still off by default.
+  `raftd`'s internal socket has no authentication at all. No account
+  lockout/rate-limiting on repeated failed logins yet, and no direct
+  Kerberos/LDAP client code (PAM's own host configuration bridges to
+  both instead — see ADR-0030's "Deferred" section).
 - **Tabled for now** (evaluated, deliberately deferred):
   - **Terraform support** — the infrastructure now exists (`managerd`'s
     API-key auth, `restshimd`'s own binary forwarding each caller's
@@ -240,7 +255,7 @@ Ephemeral state is what raft actually replicates across the cluster.
   socket protocol) and `api/rpc` (external RPC API)
 - `internal/` — core logic: `bhyve`, `jail`, `zfs`, `hast`, `ufsmount`,
   `cluster`, `raft`, `manager`, `restshim`, `frontend`, `isostore`,
-  `hoststats`, `vlan`, `dhcpd`, `pf`
+  `hoststats`, `vlan`, `dhcpd`, `pf`, `pam`
 - `web/` — HTML templates and static assets for the frontend, embedded
   into the `frontend` binary at build time
 - `docs/adr/` — architecture decision records; start here for why things
@@ -257,6 +272,11 @@ resulting binary on a FreeBSD host to exercise them for real.
 
 Proto changes require [`buf`](https://buf.build) (`buf generate`);
 generated `.go` files are committed, so this isn't needed just to build.
+
+`cmd/frontend` links `internal/pam` (cgo) for real PAM login (ADR-0030)
+and can no longer be cross-compiled from macOS the way every other
+binary here can — build it natively on a real FreeBSD host instead.
+`managerd`/`raftd`/`restshimd` are unaffected.
 
 ## License
 

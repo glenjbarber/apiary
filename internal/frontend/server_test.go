@@ -13,6 +13,7 @@ import (
 	"google.golang.org/grpc"
 
 	rpcpb "github.com/glenjbarber/apiary/api/rpc"
+	"github.com/glenjbarber/apiary/internal/manager"
 )
 
 // fakeClient implements rpcpb.ManagerServiceClient with canned responses,
@@ -258,14 +259,30 @@ func (f *fakeClient) RevokeAPIKey(_ context.Context, in *rpcpb.RevokeAPIKeyReque
 
 var _ rpcpb.ManagerServiceClient = (*fakeClient)(nil)
 
+// fakeAuthenticator implements pam.Authenticator with a single fixed
+// username/password pair, standing in for a real PAM stack the same
+// way every other external dependency in this project gets faked for
+// tests.
+type fakeAuthenticator struct {
+	user, pass string
+}
+
+func (f fakeAuthenticator) Authenticate(username, password string) (bool, error) {
+	return username == f.user && password == f.pass, nil
+}
+
 func newTestServer(t *testing.T, client *fakeClient) *Server {
 	t.Helper()
-	return newTestServerWithAuth(t, client, "", "")
+	s, err := NewServer(client, nil, nil)
+	if err != nil {
+		t.Fatalf("NewServer() error: %v", err)
+	}
+	return s
 }
 
 func newTestServerWithAuth(t *testing.T, client *fakeClient, user, pass string) *Server {
 	t.Helper()
-	s, err := NewServer(client, user, pass)
+	s, err := NewServer(client, fakeAuthenticator{user: user, pass: pass}, map[string]manager.Role{user: manager.RoleAdmin})
 	if err != nil {
 		t.Fatalf("NewServer() error: %v", err)
 	}
@@ -1242,7 +1259,7 @@ func TestServer_Login_RejectsOpenRedirectNextURL(t *testing.T) {
 
 func TestServer_Logout_InvalidatesSession(t *testing.T) {
 	s := newTestServerWithAuth(t, &fakeClient{}, "admin", "secret")
-	token, err := s.sessions.Create()
+	token, err := s.sessions.Create("admin", manager.RoleAdmin)
 	if err != nil {
 		t.Fatalf("sessions.Create() error: %v", err)
 	}
@@ -1255,7 +1272,7 @@ func TestServer_Logout_InvalidatesSession(t *testing.T) {
 	if rec.Code != http.StatusFound || rec.Header().Get("Location") != "/login" {
 		t.Fatalf("status/location = %d %q, want 302 to /login", rec.Code, rec.Header().Get("Location"))
 	}
-	if s.sessions.Valid(token) {
+	if _, ok := s.sessions.Valid(token); ok {
 		t.Errorf("session should be invalidated after logout")
 	}
 
@@ -1271,7 +1288,7 @@ func TestServer_Logout_InvalidatesSession(t *testing.T) {
 
 func TestServer_AuthEnabled_NavShowsLogoutLink(t *testing.T) {
 	s := newTestServerWithAuth(t, &fakeClient{}, "admin", "secret")
-	token, _ := s.sessions.Create()
+	token, _ := s.sessions.Create("admin", manager.RoleAdmin)
 
 	req := httptest.NewRequest(http.MethodGet, "/vms", nil)
 	req.AddCookie(&http.Cookie{Name: sessionCookieName, Value: token})
@@ -1292,5 +1309,124 @@ func TestServer_AuthDisabled_NavHasNoLogoutLink(t *testing.T) {
 
 	if strings.Contains(rec.Body.String(), `action="/logout"`) {
 		t.Errorf("nav should not show a logout control when auth is disabled, got: %s", rec.Body.String())
+	}
+}
+
+func TestServer_Login_UnmappedUserIsRejectedDespiteValidCredentials(t *testing.T) {
+	s, err := NewServer(&fakeClient{}, fakeAuthenticator{user: "eve", pass: "secret"}, map[string]manager.Role{
+		// "eve" deliberately absent - a valid PAM login for a real
+		// account nobody has granted an Apiary role to.
+		"admin": manager.RoleAdmin,
+	})
+	if err != nil {
+		t.Fatalf("NewServer() error: %v", err)
+	}
+
+	form := url.Values{"username": {"eve"}, "password": {"secret"}}
+	req := httptest.NewRequest(http.MethodPost, "/login", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (re-render with error, not a redirect)", rec.Code)
+	}
+	if !strings.Contains(rec.Body.String(), "no Apiary role is assigned") {
+		t.Errorf("response missing no-role error, got: %s", rec.Body.String())
+	}
+	for _, c := range rec.Result().Cookies() {
+		if c.Name == sessionCookieName {
+			t.Errorf("a session cookie should not be set for an unmapped user")
+		}
+	}
+}
+
+func TestServer_RoleGate_ViewerCannotReachOperatorRoute(t *testing.T) {
+	s, err := NewServer(&fakeClient{}, fakeAuthenticator{user: "carol", pass: "secret"}, map[string]manager.Role{
+		"carol": manager.RoleViewer,
+	})
+	if err != nil {
+		t.Fatalf("NewServer() error: %v", err)
+	}
+	token, _ := s.sessions.Create("carol", manager.RoleViewer)
+
+	req := httptest.NewRequest(http.MethodGet, "/vms/new", nil)
+	req.AddCookie(&http.Cookie{Name: sessionCookieName, Value: token})
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusForbidden {
+		t.Errorf("status = %d, want 403 for a Viewer reaching an Operator-only route", rec.Code)
+	}
+}
+
+func TestServer_RoleGate_ViewerCanReachReadOnlyRoute(t *testing.T) {
+	s, err := NewServer(&fakeClient{}, fakeAuthenticator{user: "carol", pass: "secret"}, map[string]manager.Role{
+		"carol": manager.RoleViewer,
+	})
+	if err != nil {
+		t.Fatalf("NewServer() error: %v", err)
+	}
+	token, _ := s.sessions.Create("carol", manager.RoleViewer)
+
+	req := httptest.NewRequest(http.MethodGet, "/vms", nil)
+	req.AddCookie(&http.Cookie{Name: sessionCookieName, Value: token})
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Errorf("status = %d, want 200 for a Viewer reaching a read-only route", rec.Code)
+	}
+}
+
+func TestServer_RoleGate_OperatorCannotReachAdminRoute(t *testing.T) {
+	s, err := NewServer(&fakeClient{}, fakeAuthenticator{user: "bob", pass: "secret"}, map[string]manager.Role{
+		"bob": manager.RoleOperator,
+	})
+	if err != nil {
+		t.Fatalf("NewServer() error: %v", err)
+	}
+	token, _ := s.sessions.Create("bob", manager.RoleOperator)
+
+	req := httptest.NewRequest(http.MethodGet, "/apikeys", nil)
+	req.AddCookie(&http.Cookie{Name: sessionCookieName, Value: token})
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusForbidden {
+		t.Errorf("status = %d, want 403 for an Operator reaching an Admin-only route", rec.Code)
+	}
+}
+
+func TestServer_RoleGate_OperatorCanReachOperatorRoute(t *testing.T) {
+	s, err := NewServer(&fakeClient{}, fakeAuthenticator{user: "bob", pass: "secret"}, map[string]manager.Role{
+		"bob": manager.RoleOperator,
+	})
+	if err != nil {
+		t.Fatalf("NewServer() error: %v", err)
+	}
+	token, _ := s.sessions.Create("bob", manager.RoleOperator)
+
+	req := httptest.NewRequest(http.MethodGet, "/vms/new", nil)
+	req.AddCookie(&http.Cookie{Name: sessionCookieName, Value: token})
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Errorf("status = %d, want 200 for an Operator reaching an Operator route", rec.Code)
+	}
+}
+
+func TestServer_Nav_ShowsUsernameAndRole(t *testing.T) {
+	s := newTestServerWithAuth(t, &fakeClient{}, "admin", "secret")
+	token, _ := s.sessions.Create("admin", manager.RoleAdmin)
+
+	req := httptest.NewRequest(http.MethodGet, "/vms", nil)
+	req.AddCookie(&http.Cookie{Name: sessionCookieName, Value: token})
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, req)
+
+	if !strings.Contains(rec.Body.String(), "admin") || !strings.Contains(rec.Body.String(), "admin)") {
+		t.Errorf("nav should show the logged-in username and role, got: %s", rec.Body.String())
 	}
 }

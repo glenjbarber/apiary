@@ -1,7 +1,6 @@
 package frontend
 
 import (
-	"crypto/subtle"
 	"fmt"
 	"html/template"
 	"io"
@@ -13,6 +12,8 @@ import (
 	"time"
 
 	rpcpb "github.com/glenjbarber/apiary/api/rpc"
+	"github.com/glenjbarber/apiary/internal/manager"
+	"github.com/glenjbarber/apiary/internal/pam"
 	"github.com/glenjbarber/apiary/web"
 )
 
@@ -69,6 +70,14 @@ type pageData struct {
 	// partial only shows a "Log out" link when there's actually a
 	// session to log out of.
 	AuthEnabled bool
+
+	// Username/Role identify the current session (ADR-0030) - both
+	// empty when login is disabled or (in principle) unreachable
+	// states like a request that slipped past ServeHTTP's own gate.
+	// The nav partial shows "logged in as <Username> (<Role>)" only
+	// when Username is non-empty.
+	Username string
+	Role     string
 
 	// LoginError and NextURL are only used by the login page: a failed
 	// attempt's message, and the originally-requested path to return to
@@ -146,20 +155,23 @@ type Server struct {
 	tmpl   *template.Template
 	mux    *http.ServeMux
 
-	// authUser/authPass gate every route except /login and /static/ when
-	// non-empty (both empty disables login entirely - the default,
-	// matching this project's current single-developer/local-network
-	// stage). sessions tracks logged-in sessions; see session.go.
-	authUser string
-	authPass string
+	// auth authenticates a login attempt's username/password (ADR-0030,
+	// real PAM by default in cmd/frontend) - nil disables login
+	// entirely, the default, matching this project's current single-
+	// developer/local-network stage. roleMap resolves an authenticated
+	// username to a Role; a username with no entry is rejected at
+	// login (default-deny), never silently downgraded to Viewer.
+	// sessions tracks logged-in sessions; see session.go.
+	auth     pam.Authenticator
+	roleMap  map[string]manager.Role
 	sessions *sessionStore
 }
 
 // NewServer parses the embedded templates and returns a Server that
-// answers requests using client. authUser/authPass enable a login page
-// gating the whole UI when both are non-empty; pass "", "" to disable
-// login entirely.
-func NewServer(client rpcpb.ManagerServiceClient, authUser, authPass string) (*Server, error) {
+// answers requests using client. auth enables a login page gating the
+// whole UI when non-nil; pass nil to disable login entirely (roleMap
+// is then unused).
+func NewServer(client rpcpb.ManagerServiceClient, auth pam.Authenticator, roleMap map[string]manager.Role) (*Server, error) {
 	tmpl, err := template.ParseFS(web.FS, "templates/*.html")
 	if err != nil {
 		return nil, fmt.Errorf("frontend: parsing templates: %w", err)
@@ -169,8 +181,8 @@ func NewServer(client rpcpb.ManagerServiceClient, authUser, authPass string) (*S
 		client:   client,
 		tmpl:     tmpl,
 		mux:      http.NewServeMux(),
-		authUser: authUser,
-		authPass: authPass,
+		auth:     auth,
+		roleMap:  roleMap,
 		sessions: newSessionStore(),
 	}
 	s.routes()
@@ -186,8 +198,8 @@ func NewServer(client rpcpb.ManagerServiceClient, authUser, authPass string) (*S
 // response doesn't reliably drive the *browser's* navigation the way a
 // real page load does.
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	if s.authUser != "" && r.URL.Path != "/login" && !strings.HasPrefix(r.URL.Path, "/static/") {
-		if !s.hasValidSession(r) {
+	if s.auth != nil && r.URL.Path != "/login" && !strings.HasPrefix(r.URL.Path, "/static/") {
+		if _, ok := s.currentSession(r); !ok {
 			s.redirectToLogin(w, r)
 			return
 		}
@@ -195,12 +207,49 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	s.mux.ServeHTTP(w, r)
 }
 
-func (s *Server) hasValidSession(r *http.Request) bool {
+// currentSession returns the requesting session's identity, if any.
+func (s *Server) currentSession(r *http.Request) (sessionInfo, bool) {
 	c, err := r.Cookie(sessionCookieName)
 	if err != nil {
-		return false
+		return sessionInfo{}, false
 	}
 	return s.sessions.Valid(c.Value)
+}
+
+// withAuthFields fills in pd's AuthEnabled/Username/Role from the
+// request's current session (ADR-0030) and returns it - a small
+// helper so every full-page render doesn't repeat the same three-line
+// lookup. Safe to call even when login is disabled or no session
+// exists; both leave Username/Role empty.
+func (s *Server) withAuthFields(r *http.Request, pd pageData) pageData {
+	pd.AuthEnabled = s.auth != nil
+	if info, ok := s.currentSession(r); ok {
+		pd.Username = info.username
+		pd.Role = string(info.role)
+	}
+	return pd
+}
+
+// requireRole wraps handler so it only runs for a session whose role
+// satisfies at least want (ADR-0030) - a no-op wrapper when login
+// itself is disabled (s.auth == nil), matching this project's existing
+// "no login configured" default of leaving every route fully open.
+// ServeHTTP's own gate above already guarantees a valid session exists
+// by the time any handler runs when login is enabled, so the only new
+// outcome here is a role that's too low, not a missing session.
+func (s *Server) requireRole(want manager.Role, handler http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if s.auth == nil {
+			handler(w, r)
+			return
+		}
+		info, ok := s.currentSession(r)
+		if !ok || !info.role.Satisfies(want) {
+			http.Error(w, "forbidden: this account's role does not permit this action", http.StatusForbidden)
+			return
+		}
+		handler(w, r)
+	}
 }
 
 func (s *Server) redirectToLogin(w http.ResponseWriter, r *http.Request) {
@@ -228,44 +277,58 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /login", s.handleLoginPage)
 	s.mux.HandleFunc("POST /login", s.handleLogin)
 	s.mux.HandleFunc("POST /logout", s.handleLogout)
+
+	// Viewer: every read-only page/route.
 	s.mux.HandleFunc("GET /{$}", s.handleStatsPage)
 	s.mux.HandleFunc("GET /vms", s.handleVMsPage)
 	s.mux.HandleFunc("GET /vms/rows", s.handleListVMs)
 	s.mux.HandleFunc("GET /images", s.handleImagesPage)
-	s.mux.HandleFunc("GET /vms/new", s.handleNewVMPage)
-	s.mux.HandleFunc("POST /vms", s.handleCreateVM)
-	s.mux.HandleFunc("DELETE /vms/{id}", s.handleDeleteVM)
 	s.mux.HandleFunc("GET /isos", s.handleListISOs)
-	s.mux.HandleFunc("POST /isos", s.handleUploadISO)
-	s.mux.HandleFunc("DELETE /isos/{name}", s.handleDeleteISO)
 	s.mux.HandleFunc("GET /vms/{id}/console", s.handleConsolePage)
 	s.mux.HandleFunc("GET /vms/{id}/console/ws", s.handleConsoleWS)
 	s.mux.HandleFunc("GET /networks", s.handleNetworksPage)
-	s.mux.HandleFunc("POST /networks", s.handleCreateNetwork)
-	s.mux.HandleFunc("DELETE /networks/{id}", s.handleDeleteNetwork)
-	s.mux.HandleFunc("GET /apikeys", s.handleAPIKeysPage)
-	s.mux.HandleFunc("POST /apikeys", s.handleCreateAPIKey)
-	s.mux.HandleFunc("DELETE /apikeys/{id}", s.handleRevokeAPIKey)
 	s.mux.HandleFunc("GET /jails", s.handleJailsPage)
-	s.mux.HandleFunc("POST /jails", s.handleCreateJail)
-	s.mux.HandleFunc("DELETE /jails/{id}", s.handleDeleteJail)
+
+	// Operator: VM/jail/network/ISO lifecycle - including the create-VM
+	// form's own GET, since a Viewer has nothing useful to do with a
+	// form whose POST it can't reach anyway.
+	s.mux.HandleFunc("GET /vms/new", s.requireRole(manager.RoleOperator, s.handleNewVMPage))
+	s.mux.HandleFunc("POST /vms", s.requireRole(manager.RoleOperator, s.handleCreateVM))
+	s.mux.HandleFunc("DELETE /vms/{id}", s.requireRole(manager.RoleOperator, s.handleDeleteVM))
+	s.mux.HandleFunc("POST /isos", s.requireRole(manager.RoleOperator, s.handleUploadISO))
+	s.mux.HandleFunc("DELETE /isos/{name}", s.requireRole(manager.RoleOperator, s.handleDeleteISO))
+	s.mux.HandleFunc("POST /networks", s.requireRole(manager.RoleOperator, s.handleCreateNetwork))
+	s.mux.HandleFunc("DELETE /networks/{id}", s.requireRole(manager.RoleOperator, s.handleDeleteNetwork))
+	s.mux.HandleFunc("POST /jails", s.requireRole(manager.RoleOperator, s.handleCreateJail))
+	s.mux.HandleFunc("DELETE /jails/{id}", s.requireRole(manager.RoleOperator, s.handleDeleteJail))
+
+	// Admin: API-key management, entirely - including just viewing the
+	// list, unlike every other Viewer-readable page above.
+	s.mux.HandleFunc("GET /apikeys", s.requireRole(manager.RoleAdmin, s.handleAPIKeysPage))
+	s.mux.HandleFunc("POST /apikeys", s.requireRole(manager.RoleAdmin, s.handleCreateAPIKey))
+	s.mux.HandleFunc("DELETE /apikeys/{id}", s.requireRole(manager.RoleAdmin, s.handleRevokeAPIKey))
 }
 
 // handleLoginPage serves the login form. If login isn't enabled at all,
 // there's nothing to log into - redirect straight to the normal
 // landing page rather than showing a form that can't do anything.
 func (s *Server) handleLoginPage(w http.ResponseWriter, r *http.Request) {
-	if s.authUser == "" {
+	if s.auth == nil {
 		http.Redirect(w, r, "/", http.StatusFound)
 		return
 	}
 	s.render(w, "login_page", pageData{NextURL: r.URL.Query().Get("next")})
 }
 
-// handleLogin checks the submitted credentials with a constant-time
-// comparison (avoiding a timing side-channel on either field), and on
-// success starts a session and redirects to NextURL if it's a safe
-// in-app path, or "/" otherwise.
+// handleLogin authenticates the submitted credentials against s.auth
+// (real PAM by default - ADR-0030) and, on success, resolves the
+// username's Role via s.roleMap. A username with no role-map entry is
+// rejected outright here - a valid PAM login that isn't a mistake
+// (real account, real password) but that nobody has explicitly granted
+// an Apiary role to is treated as "no access", never silently
+// downgraded to Viewer, matching this project's established
+// default-deny stance (ADR-0025/26/27/28/29's own reasoning, applied
+// here to authorization instead of reconciliation).
 func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	if err := r.ParseForm(); err != nil {
 		s.render(w, "login_page", pageData{LoginError: "invalid form: " + err.Error()})
@@ -275,14 +338,22 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	pass := r.FormValue("password")
 	next := r.FormValue("next")
 
-	userOK := subtle.ConstantTimeCompare([]byte(user), []byte(s.authUser)) == 1
-	passOK := subtle.ConstantTimeCompare([]byte(pass), []byte(s.authPass)) == 1
-	if !userOK || !passOK {
+	ok, err := s.auth.Authenticate(user, pass)
+	if err != nil {
+		s.render(w, "login_page", pageData{LoginError: "authentication backend error: " + err.Error(), NextURL: next})
+		return
+	}
+	if !ok {
 		s.render(w, "login_page", pageData{LoginError: "invalid username or password", NextURL: next})
 		return
 	}
+	role, hasRole := s.roleMap[user]
+	if !hasRole {
+		s.render(w, "login_page", pageData{LoginError: "no Apiary role is assigned to this account - contact an administrator", NextURL: next})
+		return
+	}
 
-	token, err := s.sessions.Create()
+	token, err := s.sessions.Create(user, role)
 	if err != nil {
 		s.render(w, "login_page", pageData{LoginError: "could not start a session: " + err.Error(), NextURL: next})
 		return
@@ -344,7 +415,7 @@ func (s *Server) currentVMs(r *http.Request, sortBy, dir string) ([]vmView, stri
 // what an operator most likely wants to see first.
 func (s *Server) handleStatsPage(w http.ResponseWriter, r *http.Request) {
 	stats, errMsg := s.currentStats(r)
-	s.render(w, "stats_page", pageData{Error: errMsg, Stats: stats, ActivePage: "stats", AuthEnabled: s.authUser != ""})
+	s.render(w, "stats_page", s.withAuthFields(r, pageData{Error: errMsg, Stats: stats, ActivePage: "stats"}))
 }
 
 // currentStats fetches a HostStats snapshot, returning a zero-value
@@ -365,13 +436,13 @@ func (s *Server) currentStats(r *http.Request) (statsView, string) {
 func (s *Server) handleVMsPage(w http.ResponseWriter, r *http.Request) {
 	sortBy, dir := parseSort(r)
 	vms, errMsg := s.currentVMs(r, sortBy, dir)
-	s.render(w, "vms_page", pageData{Error: errMsg, VMs: vms, SortBy: sortBy, SortDir: dir, ActivePage: "vms", AuthEnabled: s.authUser != ""})
+	s.render(w, "vms_page", s.withAuthFields(r, pageData{Error: errMsg, VMs: vms, SortBy: sortBy, SortDir: dir, ActivePage: "vms"}))
 }
 
 // handleImagesPage serves the Images (ISO upload/list) page ("/images").
 func (s *Server) handleImagesPage(w http.ResponseWriter, r *http.Request) {
 	isos, errMsg := s.currentISOs(r)
-	s.render(w, "images_page", pageData{ISOs: isos, ISOFormError: errMsg, ActivePage: "images", AuthEnabled: s.authUser != ""})
+	s.render(w, "images_page", s.withAuthFields(r, pageData{ISOs: isos, ISOFormError: errMsg, ActivePage: "images"}))
 }
 
 // handleNewVMPage serves the create-VM form page ("/vms/new"). A failed
@@ -384,7 +455,7 @@ func (s *Server) handleNewVMPage(w http.ResponseWriter, r *http.Request) {
 	nodes, _ := s.knownNodes(r)
 	isos, _ := s.currentISOs(r)
 	networks, _ := s.currentNetworks(r)
-	s.render(w, "new_vm_page", pageData{Nodes: nodes, ISOs: isos, Networks: networks, ActivePage: "new_vm", AuthEnabled: s.authUser != ""})
+	s.render(w, "new_vm_page", s.withAuthFields(r, pageData{Nodes: nodes, ISOs: isos, Networks: networks, ActivePage: "new_vm"}))
 }
 
 // currentNetworks fetches the current list of networks, returning an
@@ -705,7 +776,7 @@ func (s *Server) handleDeleteISO(w http.ResponseWriter, r *http.Request) {
 // handleNetworksPage serves the Networks list/create page ("/networks").
 func (s *Server) handleNetworksPage(w http.ResponseWriter, r *http.Request) {
 	networks, errMsg := s.currentNetworks(r)
-	s.render(w, "networks_page", pageData{Networks: networks, NetworkFormError: errMsg, ActivePage: "networks", AuthEnabled: s.authUser != ""})
+	s.render(w, "networks_page", s.withAuthFields(r, pageData{Networks: networks, NetworkFormError: errMsg, ActivePage: "networks"}))
 }
 
 // handleCreateNetwork follows the same combined-panel pattern as
@@ -787,7 +858,7 @@ func (s *Server) currentJails(r *http.Request) ([]jailView, string) {
 // handleJailsPage serves the Jails list/create page ("/jails").
 func (s *Server) handleJailsPage(w http.ResponseWriter, r *http.Request) {
 	jails, errMsg := s.currentJails(r)
-	s.render(w, "jails_page", pageData{Jails: jails, JailFormError: errMsg, ActivePage: "jails", AuthEnabled: s.authUser != ""})
+	s.render(w, "jails_page", s.withAuthFields(r, pageData{Jails: jails, JailFormError: errMsg, ActivePage: "jails"}))
 }
 
 // handleCreateJail mirrors handleCreateNetwork's combined-panel pattern.
@@ -863,7 +934,7 @@ func (s *Server) currentAPIKeys(r *http.Request) ([]apiKeyView, string) {
 
 func (s *Server) handleAPIKeysPage(w http.ResponseWriter, r *http.Request) {
 	keys, errMsg := s.currentAPIKeys(r)
-	s.render(w, "apikeys_page", pageData{APIKeys: keys, APIKeyFormError: errMsg, ActivePage: "apikeys", AuthEnabled: s.authUser != ""})
+	s.render(w, "apikeys_page", s.withAuthFields(r, pageData{APIKeys: keys, APIKeyFormError: errMsg, ActivePage: "apikeys"}))
 }
 
 // handleCreateAPIKey follows the same combined-panel pattern as

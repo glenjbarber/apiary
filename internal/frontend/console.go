@@ -63,14 +63,13 @@ func (s *Server) handleConsolePage(w http.ResponseWriter, r *http.Request) {
 
 	_, consoleErr := s.resolveConsole(r.Context(), id)
 
-	s.render(w, "console_page", pageData{
+	s.render(w, "console_page", s.withAuthFields(r, pageData{
 		ConsoleVMID:   id,
 		ConsoleVMName: vmName,
 		ConsoleWSPath: fmt.Sprintf("/vms/%s/console/ws", id),
 		ConsoleError:  consoleErr,
 		ActivePage:    "vms",
-		AuthEnabled:   s.authUser != "",
-	})
+	}))
 }
 
 // handleConsoleWS upgrades to a WebSocket and proxies raw bytes

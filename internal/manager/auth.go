@@ -44,8 +44,11 @@ func roleRank(r Role) int {
 	}
 }
 
-// satisfies reports whether have's rank meets or exceeds want's.
-func (have Role) satisfies(want Role) bool {
+// Satisfies reports whether have's rank meets or exceeds want's.
+// Exported: internal/frontend's own role-gated routes (ADR-0030) use
+// this same hierarchy for a logged-in session's role, not just an API
+// key's.
+func (have Role) Satisfies(want Role) bool {
 	return roleRank(have) >= roleRank(want)
 }
 
@@ -218,7 +221,7 @@ func checkAuth(ctx context.Context, fullMethod string, v apiKeyValidator) error 
 	if key == "" || !valid {
 		return status.Error(codes.Unauthenticated, "missing or invalid API key")
 	}
-	if !role.satisfies(requiredRoleFor(fullMethod)) {
+	if !role.Satisfies(requiredRoleFor(fullMethod)) {
 		return status.Errorf(codes.PermissionDenied, "this API key's role (%s) may not call %s", role, fullMethod)
 	}
 	return nil

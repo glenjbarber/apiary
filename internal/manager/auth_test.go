@@ -161,8 +161,8 @@ func TestRoleSatisfies_Hierarchy(t *testing.T) {
 		{Role("bogus"), RoleViewer, false},
 	}
 	for _, c := range cases {
-		if got := c.have.satisfies(c.want); got != c.want_ok {
-			t.Errorf("Role(%q).satisfies(%q) = %v, want %v", c.have, c.want, got, c.want_ok)
+		if got := c.have.Satisfies(c.want); got != c.want_ok {
+			t.Errorf("Role(%q).Satisfies(%q) = %v, want %v", c.have, c.want, got, c.want_ok)
 		}
 	}
 }

@@ -120,7 +120,7 @@ func TestServer_ConsoleWS_ProxiesBytesToAndFromVNCEndpoint(t *testing.T) {
 	client := &fakeClient{
 		getVMConsoleResp: &rpcpb.GetVMConsoleResponse{Available: true, Host: host, Port: uint32(port)},
 	}
-	s, err := NewServer(client, "", "")
+	s, err := NewServer(client, nil, nil)
 	if err != nil {
 		t.Fatalf("NewServer() error: %v", err)
 	}
@@ -151,7 +151,7 @@ func TestServer_ConsoleWS_ProxiesBytesToAndFromVNCEndpoint(t *testing.T) {
 
 func TestServer_ConsoleWS_UnavailableConsoleRejectsUpgrade(t *testing.T) {
 	client := &fakeClient{getVMConsoleResp: &rpcpb.GetVMConsoleResponse{Available: false}}
-	s, err := NewServer(client, "", "")
+	s, err := NewServer(client, nil, nil)
 	if err != nil {
 		t.Fatalf("NewServer() error: %v", err)
 	}
