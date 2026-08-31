@@ -22,8 +22,10 @@ import (
 	"github.com/glenjbarber/apiary/internal/dhcpd"
 	"github.com/glenjbarber/apiary/internal/hast"
 	"github.com/glenjbarber/apiary/internal/isostore"
+	"github.com/glenjbarber/apiary/internal/jail"
 	"github.com/glenjbarber/apiary/internal/manager"
 	"github.com/glenjbarber/apiary/internal/pf"
+	"github.com/glenjbarber/apiary/internal/ufsmount"
 	"github.com/glenjbarber/apiary/internal/vlan"
 	"github.com/glenjbarber/apiary/internal/zfs"
 )
@@ -47,6 +49,10 @@ func run() error {
 	isoDir := flag.String("iso-dir", "/var/db/apiary/isos", "directory where uploaded installer images are stored on this node")
 	vlanUplink := flag.String("vlan-uplink", "", "physical interface VLAN-tagged networks attach to (e.g. \"re0\", \"em0\" - differs per node); leave empty to disable network management (VLANs/DHCP/firewall) on this node")
 	hastEnabled := flag.Bool("hast-enabled", false, "enable HAST-backed VM disk replication support on this node (requires a real, patched hastd - see ADR-0026); needed on both a replicated VM's owning node and its replica node, regardless of bhyve support")
+	jailEnabled := flag.Bool("jail-enabled", false, "enable jail orchestration on this node (requires internal/jail's own prerequisites - see CLAUDE.md)")
+	jailPrefix := flag.String("jail-prefix", "apiary-", "name prefix for jails this node creates")
+	jailMountBase := flag.String("jail-mount-base", "/apiary-jails", "parent directory a replicated jail's HAST-backed root filesystem is mounted under (non-replicated jails use their ZFS dataset's own mountpoint instead)")
+	jailDiskSizeMB := flag.Uint64("jail-disk-size-mb", 2048, "size of a replicated jail's HAST-backed root filesystem in MB (ignored for non-replicated jails, which use their ZFS dataset's own quota)")
 	flag.Parse()
 
 	id := *nodeID
@@ -100,6 +106,18 @@ func run() error {
 	// is set regardless of -bhyve-bootrom, unlike VLAN/DHCP/PF below.
 	if *hastEnabled {
 		reconciler.HAST = hast.New()
+	}
+	// Jail orchestration is independent of both bhyve and HAST: a node
+	// can run plain, non-replicated jails with neither. Mount is only
+	// ever consulted for a replicated jail (see ensureJail), so it's
+	// always set here regardless of -hast-enabled - a jail naming
+	// ReplicaNodeID on a node without -hast-enabled still gets a clear
+	// error from ensureJail itself, the same as a replicated VM does.
+	if *jailEnabled {
+		reconciler.Jail = jail.New(*jailPrefix)
+		reconciler.Mount = ufsmount.New()
+		reconciler.JailBase = *jailMountBase
+		reconciler.JailDiskSizeMB = *jailDiskSizeMB
 	}
 	// reconciler.Bhyve/bhyveMgr are left nil when no boot ROM is
 	// configured, so nodes without hardware-assisted virtualization (the
@@ -159,7 +177,7 @@ func run() error {
 		serveErrCh <- grpcServer.Serve(lis)
 	}()
 
-	log.Printf("managerd: listening on %s (node-id=%s, raftd-socket=%s, vlan-uplink=%s, hast-enabled=%v)", *rpcAddr, id, *raftdSocket, *vlanUplink, *hastEnabled)
+	log.Printf("managerd: listening on %s (node-id=%s, raftd-socket=%s, vlan-uplink=%s, hast-enabled=%v, jail-enabled=%v)", *rpcAddr, id, *raftdSocket, *vlanUplink, *hastEnabled, *jailEnabled)
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()

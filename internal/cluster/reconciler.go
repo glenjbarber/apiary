@@ -220,6 +220,12 @@ type Reconciler struct {
 	// non-replicated jail's root is its own ZFS dataset's mountpoint
 	// instead, so this only matters when Mount is actually used.
 	JailBase string
+
+	// JailDiskSizeMB sizes a replicated jail's HAST-backed root
+	// filesystem (defaults to 2048 if zero - see jailDiskSizeMB()). A
+	// non-replicated jail's root has no separate size of its own; it's
+	// whatever its ZFS dataset allows.
+	JailDiskSizeMB uint64
 }
 
 // RunOnce fetches the current VM list and, for each VM assigned to
@@ -340,11 +346,11 @@ func (r *Reconciler) RunOnce(ctx context.Context) error {
 		}
 		for _, j := range plannedJails {
 			if j.ReplicaNodeID != "" && !j.Deleting {
-				roles = append(roles, hastRole{resourceName: jailHASTResourceName(j.ID), peerNodeID: j.ReplicaNodeID, sizeMB: r.diskSizeMB(), isPrimary: true})
+				roles = append(roles, hastRole{resourceName: jailHASTResourceName(j.ID), peerNodeID: j.ReplicaNodeID, sizeMB: r.jailDiskSizeMB(), isPrimary: true})
 			}
 		}
 		for _, j := range jailReplicas {
-			roles = append(roles, hastRole{resourceName: jailHASTResourceName(j.ID), peerNodeID: j.NodeID, sizeMB: r.diskSizeMB(), isPrimary: false})
+			roles = append(roles, hastRole{resourceName: jailHASTResourceName(j.ID), peerNodeID: j.NodeID, sizeMB: r.jailDiskSizeMB(), isPrimary: false})
 		}
 		paths, err := r.reconcileHASTRoles(ctx, roles)
 		hastDevicePaths = paths

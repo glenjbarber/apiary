@@ -281,6 +281,17 @@ func jailPhaseFromString(p string) internalpb.JailPhase {
 	}
 }
 
+// jailDiskSizeMB returns Reconciler.JailDiskSizeMB, defaulting to 2048
+// (2GiB) if unset - only ever consulted for a replicated jail's HAST
+// role sizing (see RunOnce); a non-replicated jail's root has no
+// separate size of its own, it's whatever its ZFS dataset allows.
+func (r *Reconciler) jailDiskSizeMB() uint64 {
+	if r.JailDiskSizeMB == 0 {
+		return 2048
+	}
+	return r.JailDiskSizeMB
+}
+
 // jailBase returns Reconciler.JailBase, defaulting to "/apiary-jails"
 // if unset - only ever consulted for a replicated jail's mount path
 // (a non-replicated jail's root is its ZFS dataset's own mountpoint,
