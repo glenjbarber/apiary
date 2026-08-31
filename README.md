@@ -113,6 +113,15 @@ each design decision, in order.
   [ADR-0023](docs/adr/0023-api-key-authentication.md) and
   [ADR-0024](docs/adr/0024-restshimd-binary.md) for `restshimd`'s own
   per-request auth forwarding.
+- **Jail orchestration** — jails now have the same lifecycle VMs do:
+  a `JailDefinition` (`/jails` in the web UI to create/list/delete),
+  reconciled by the same `Reconciler` that provisions VMs. A jail's
+  root is a plain ZFS dataset by default, or — like a VM's disk — can
+  name a `replica_node_id` to get HAST-replicated instead, formatted
+  and mounted via a new `internal/ufsmount` package (a jail needs a
+  real filesystem to chroot into, unlike a VM's disk which uses the
+  raw HAST device directly). See
+  [ADR-0027](docs/adr/0027-jail-orchestration.md).
 - **Resource reclaim** — a VM reassigned to a different node no longer
   leaks its old node's dataset/bhyve VM: the reconciler detects and
   tears down its own leftover resources under a VM ID that's been
@@ -131,9 +140,12 @@ each design decision, in order.
   elsewhere could rely on yet. Automatic failover of a replicated VM
   also isn't implemented - only one machine in this project can
   actually run bhyve VMs, so this is data redundancy, not HA. A
-  replica's dataset also isn't cleaned up once its VM's record is
-  fully purged (a deliberate consequence of never inferring teardown
-  from an absent record - see ADR-0026)
+  replica's dataset also isn't cleaned up once its VM's (or jail's)
+  record is fully purged (a deliberate consequence of never inferring
+  teardown from an absent record - see ADR-0026/ADR-0027). Jail
+  orchestration itself is implemented and tested but not yet
+  live-verified against the project's real FreeBSD machines the way
+  VM HAST replication was (see ADR-0027's own consequences)
 - Node scheduling: nothing decides which cluster node a VM should run on
   beyond whatever a caller sets directly, and `MigrateVM` doesn't exist
 - Multi-node console/network access: the noVNC console and the Networks
@@ -199,9 +211,9 @@ Ephemeral state is what raft actually replicates across the cluster.
 - `cmd/` — entry points for each binary (`raftd`, `managerd`, `frontend`)
 - `api/` — protobuf schema definitions: `api/internalpb` (internal raft
   socket protocol) and `api/rpc` (external RPC API)
-- `internal/` — core logic: `bhyve`, `jail`, `zfs`, `hast`, `cluster`,
-  `raft`, `manager`, `restshim`, `frontend`, `isostore`, `hoststats`,
-  `vlan`, `dhcpd`, `pf`
+- `internal/` — core logic: `bhyve`, `jail`, `zfs`, `hast`, `ufsmount`,
+  `cluster`, `raft`, `manager`, `restshim`, `frontend`, `isostore`,
+  `hoststats`, `vlan`, `dhcpd`, `pf`
 - `web/` — HTML templates and static assets for the frontend, embedded
   into the `frontend` binary at build time
 - `docs/adr/` — architecture decision records; start here for why things
