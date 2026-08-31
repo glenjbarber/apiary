@@ -100,6 +100,15 @@ each design decision, in order.
   [ADR-0023](docs/adr/0023-api-key-authentication.md) and
   [ADR-0024](docs/adr/0024-restshimd-binary.md) for `restshimd`'s own
   per-request auth forwarding.
+- **Resource reclaim** — a VM reassigned to a different node no longer
+  leaks its old node's dataset/bhyve VM: the reconciler detects and
+  tears down its own leftover resources under a VM ID that's been
+  reassigned elsewhere, without touching the (now-elsewhere-owned)
+  record itself. Separately, `ForcePurgeVM` is a human-triggered escape
+  hatch for a VM tombstoned by delete whose owning node never comes
+  back to finish removing it - it only works on a VM already marked for
+  deletion, and never touches that (unreachable) node's real resources.
+  See [ADR-0025](docs/adr/0025-resource-reclaim.md).
 
 **Not yet implemented:**
 
