@@ -163,22 +163,38 @@ func (r *Reconciler) reconcileHASTRoles(ctx context.Context, roles []hastRole) (
 		if err := r.HAST.WriteConfig(resources); err != nil {
 			return nil, fmt.Errorf("writing hast.conf: %w", err)
 		}
-		if len(resources) > 0 {
-			if err := r.HAST.RestartService(ctx); err != nil {
-				return nil, fmt.Errorf("restarting hastd: %w", err)
-			}
-			// hastd's own worker processes need a few seconds to
-			// (re)spawn and open their providers after a restart -
-			// confirmed live: a role change attempted immediately (or
-			// retried in quick 1s succession starting immediately)
-			// after restart keeps hitting a worker that hasn't finished
-			// starting yet and fails with "Error 57" (ENOTCONN)
-			// repeatedly, while the exact same attempt made once after
-			// this wait succeeds cleanly. A single upfront wait, not a
-			// tighter retry loop starting at t=0, is what actually
-			// avoids the race (see ADR-0026).
-			time.Sleep(r.hastRestartSettleDelay())
+		// RestartService always runs on a real config change, even down
+		// to zero resources - NOT gated on len(resources) > 0 (a real,
+		// live-caught bug: the original guard skipped restarting hastd
+		// entirely when the last resource on a node was removed, since
+		// "nothing left to restart for" seemed reasonable at the time.
+		// In fact the opposite is true - hastd's still-running worker
+		// for that now-removed resource keeps its backing file open
+		// under the STALE config, so the reconciler's own very next
+		// step (destroying that resource's now-unreferenced ZFS
+		// dataset, in reclaimHASTRole/teardownVM/teardownJail) fails
+		// forever with "cannot unmount ...: pool or dataset is busy" -
+		// confirmed live tearing down a replicated jail with no other
+		// HAST resource active on the node at the time. An empty
+		// rendered config is a valid, empty hast.conf (RenderConfig's
+		// own doc comment), and "service hastd onerestart" against it
+		// just leaves hastd running with no active resources - safe,
+		// and exactly what releases the stale worker's hold on the
+		// file being destroyed).
+		if err := r.HAST.RestartService(ctx); err != nil {
+			return nil, fmt.Errorf("restarting hastd: %w", err)
 		}
+		// hastd's own worker processes need a few seconds to
+		// (re)spawn and open their providers after a restart -
+		// confirmed live: a role change attempted immediately (or
+		// retried in quick 1s succession starting immediately)
+		// after restart keeps hitting a worker that hasn't finished
+		// starting yet and fails with "Error 57" (ENOTCONN)
+		// repeatedly, while the exact same attempt made once after
+		// this wait succeeds cleanly. A single upfront wait, not a
+		// tighter retry loop starting at t=0, is what actually
+		// avoids the race (see ADR-0026).
+		time.Sleep(r.hastRestartSettleDelay())
 		r.lastHASTConfig = rendered
 	}
 

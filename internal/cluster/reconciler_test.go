@@ -1243,6 +1243,54 @@ func TestReconciler_RunOnce_DeletingReplicatedVMReclaimsHASTNotDataset(t *testin
 	}
 }
 
+// TestReconciler_RunOnce_RestartsHASTdWhenLastResourceIsRemoved is a
+// regression test for a real bug caught live tearing down a replicated
+// jail: reconcileHASTRoles only called RestartService when the new
+// resource set was non-empty, so removing a node's LAST HAST resource
+// rewrote hast.conf but never actually restarted hastd - leaving its
+// still-running worker holding the just-removed resource's backing
+// file open, which made the very next step (destroying that file's
+// now-unreferenced ZFS dataset) fail forever with "pool or dataset is
+// busy". Confirmed live on apiarium: reconcile logged exactly that
+// error, repeatedly, until this fix. See ADR-0027.
+func TestReconciler_RunOnce_RestartsHASTdWhenLastResourceIsRemoved(t *testing.T) {
+	raft := &fakeRaftClient{
+		resp: &internalpb.ListVMsResponse{
+			Vms: []*internalpb.VMDefinition{{Id: "vm-1", NodeId: "node-a", ReplicaNodeId: "node-b"}},
+		},
+		statusResp: statusResponseWithPeers("node-a", "10.0.0.1:17600", "node-b", "10.0.0.2:17600"),
+	}
+	zfs := newFakeDatasetManager()
+	zfs.mountpointFor["hast-vm-vm-1"] = t.TempDir()
+	vms := newFakeVMManager()
+	h := newFakeHASTManager()
+
+	r := &Reconciler{Raft: raft, ZFS: zfs, Bhyve: vms, HAST: h, HASTRestartSettleDelay: time.Millisecond, LocalNodeID: "node-a", BootROM: "/fw/UEFI.fd"}
+	if err := r.RunOnce(context.Background()); err != nil {
+		t.Fatalf("RunOnce() (create) error: %v", err)
+	}
+	if h.restarts != 1 {
+		t.Fatalf("restarts after create = %d, want 1", h.restarts)
+	}
+
+	// Now the VM is deleted - this node's HAST resource set drops to
+	// zero. RestartService must still be called (this is what the bug
+	// skipped), even though the new resource list is empty.
+	raft.resp = &internalpb.ListVMsResponse{
+		Vms: []*internalpb.VMDefinition{{Id: "vm-1", NodeId: "node-a", ReplicaNodeId: "node-b", DesiredState: internalpb.VMState_VM_STATE_DELETING}},
+	}
+	if err := r.RunOnce(context.Background()); err != nil {
+		t.Fatalf("RunOnce() (delete) error: %v", err)
+	}
+	if h.restarts != 2 {
+		t.Errorf("restarts after last resource removed = %d, want 2 (hastd must be restarted even when the new config is empty)", h.restarts)
+	}
+	last := h.writtenConfigs[len(h.writtenConfigs)-1]
+	if len(last) != 0 {
+		t.Errorf("last written config = %+v, want empty", last)
+	}
+}
+
 func TestReconciler_RunOnce_ReplicatedVMWithoutHASTConfiguredIsError(t *testing.T) {
 	raft := &fakeRaftClient{
 		resp: &internalpb.ListVMsResponse{
