@@ -53,6 +53,8 @@ func run() error {
 	jailPrefix := flag.String("jail-prefix", "apiary-", "name prefix for jails this node creates")
 	jailMountBase := flag.String("jail-mount-base", "/apiary-jails", "parent directory a replicated jail's HAST-backed root filesystem is mounted under (non-replicated jails use their ZFS dataset's own mountpoint instead)")
 	jailDiskSizeMB := flag.Uint64("jail-disk-size-mb", 2048, "size of a replicated jail's HAST-backed root filesystem in MB (ignored for non-replicated jails, which use their ZFS dataset's own quota)")
+	peerAPIKey := flag.String("peer-api-key", "", "API key this node's reconciler attaches when forwarding a raft write to another node's managerd (see ADR-0029); required once the cluster has any API key created (ADR-0023), since peer calls go through the same authenticated ManagerService API as everything else")
+	peerManagerdPort := flag.String("peer-managerd-port", "", "port assumed for a peer node's managerd external API when forwarding (ADR-0029); defaults to this node's own -rpc-addr port, since every node in a real deployment is expected to use the same port")
 	flag.Parse()
 
 	id := *nodeID
@@ -92,14 +94,26 @@ func run() error {
 
 	isos := isostore.New(*isoDir)
 
+	// Defaults to this node's own -rpc-addr port when unset - every
+	// node in a real deployment is expected to run managerd's external
+	// API on the same port (see ADR-0029), differing only by host.
+	resolvedPeerPort := *peerManagerdPort
+	if resolvedPeerPort == "" {
+		if _, port, err := net.SplitHostPort(*rpcAddr); err == nil {
+			resolvedPeerPort = port
+		}
+	}
+
 	reconciler := &cluster.Reconciler{
-		Raft:        raftClient,
-		ZFS:         zfs.New(*zfsBase),
-		LocalNodeID: raftNodeID,
-		BootROM:     *bhyveBootROM,
-		DiskSizeMB:  *diskSizeMB,
-		Bridge:      *bhyveBridge,
-		ISOs:        isos,
+		Raft:             raftClient,
+		ZFS:              zfs.New(*zfsBase),
+		LocalNodeID:      raftNodeID,
+		BootROM:          *bhyveBootROM,
+		DiskSizeMB:       *diskSizeMB,
+		Bridge:           *bhyveBridge,
+		ISOs:             isos,
+		Peers:            manager.NewPeerReporter(*peerAPIKey),
+		PeerManagerdPort: resolvedPeerPort,
 	}
 	// HAST is independent of bhyve support: a node holding only a HAST
 	// secondary replica (see ADR-0026) never runs the VM at all, so this
@@ -177,7 +191,7 @@ func run() error {
 		serveErrCh <- grpcServer.Serve(lis)
 	}()
 
-	log.Printf("managerd: listening on %s (node-id=%s, raftd-socket=%s, vlan-uplink=%s, hast-enabled=%v, jail-enabled=%v)", *rpcAddr, id, *raftdSocket, *vlanUplink, *hastEnabled, *jailEnabled)
+	log.Printf("managerd: listening on %s (node-id=%s, raftd-socket=%s, vlan-uplink=%s, hast-enabled=%v, jail-enabled=%v, peer-managerd-port=%s)", *rpcAddr, id, *raftdSocket, *vlanUplink, *hastEnabled, *jailEnabled, resolvedPeerPort)
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()

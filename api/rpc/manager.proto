@@ -124,6 +124,22 @@ service ManagerService {
   // (including the "target must already be a synced HAST replica"
   // safety requirement), which applies identically here.
   rpc MigrateJail(MigrateJailRequest) returns (MigrateJailResponse);
+
+  // ReportVMPhase/ReportVMTeardownComplete/ReportJailPhase/
+  // ReportJailTeardownComplete are peer-to-peer RPCs, not meant for
+  // human/API-client use: a reconciler on a node that owns a VM/jail
+  // but whose own raftd isn't the current raft leader calls these on
+  // the LEADER node's managerd instead, since only the leader's own
+  // raftd can ever accept an Apply (ADR-0029) - raftd's internal API
+  // stays Unix-socket-only, never exposed over the network; this
+  // reuses ManagerService's existing, already-networked, already-
+  // optionally-API-key-gated external surface instead of opening a
+  // new one. Gated by the same auth as every other RPC here when
+  // enabled - see cmd/managerd's -peer-api-key flag.
+  rpc ReportVMPhase(ReportVMPhaseRequest) returns (ReportVMPhaseResponse);
+  rpc ReportVMTeardownComplete(ReportVMTeardownCompleteRequest) returns (ReportVMTeardownCompleteResponse);
+  rpc ReportJailPhase(ReportJailPhaseRequest) returns (ReportJailPhaseResponse);
+  rpc ReportJailTeardownComplete(ReportJailTeardownCompleteRequest) returns (ReportJailTeardownCompleteResponse);
 }
 
 // VMState mirrors api/internalpb's VMState. Kept as a separate type
@@ -629,6 +645,50 @@ message MigrateJailResponse {
   // MigrateVM's own doc comment for why that last check exists.
   string error = 2;
   string leader_hint = 3;
+}
+
+message ReportVMPhaseRequest {
+  string id = 1;
+  VMPhase phase = 2;
+  string phase_error = 3;
+}
+
+message ReportVMPhaseResponse {
+  // error/leader_hint mirror every other write RPC here: error set on
+  // rejection, leader_hint additionally set specifically when this
+  // node's own raftd has, in turn, lost leadership since the caller
+  // resolved it - the caller re-resolves and retries once more.
+  string error = 1;
+  string leader_hint = 2;
+}
+
+message ReportVMTeardownCompleteRequest {
+  string id = 1;
+}
+
+message ReportVMTeardownCompleteResponse {
+  string error = 1;
+  string leader_hint = 2;
+}
+
+message ReportJailPhaseRequest {
+  string id = 1;
+  JailPhase phase = 2;
+  string phase_error = 3;
+}
+
+message ReportJailPhaseResponse {
+  string error = 1;
+  string leader_hint = 2;
+}
+
+message ReportJailTeardownCompleteRequest {
+  string id = 1;
+}
+
+message ReportJailTeardownCompleteResponse {
+  string error = 1;
+  string leader_hint = 2;
 }
 
 // APIKeyInfo is a key's metadata only - it never carries the raw key

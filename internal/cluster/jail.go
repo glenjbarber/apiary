@@ -232,13 +232,23 @@ func (r *Reconciler) applyJailPhase(ctx context.Context, id, phase, phaseError s
 	if err != nil {
 		return
 	}
-	_, _ = r.Raft.Apply(ctx, data, phaseApplyTimeout)
+	resp, err := r.Raft.Apply(ctx, data, phaseApplyTimeout)
+	if err != nil || resp.GetError() == "" {
+		return
+	}
+	// Best-effort even via Peers (ADR-0029) - mirrors applyPhase's own
+	// reasoning exactly.
+	if r.Peers != nil && resp.GetLeaderHint() != "" {
+		_ = r.Peers.ReportJailPhase(ctx, r.resolvePeerManagerdAddr(resp.GetLeaderHint()), id, phase, phaseError)
+	}
 }
 
 // purgeJail submits a PurgeJail command, mirroring teardownVM's own
 // PurgeVM submission exactly - including checking ApplyResponse.Error,
-// not just the transport error (see that call site's own comment for
-// why this matters - ADR-0028).
+// not just the transport error, and forwarding to the leader's
+// managerd via Peers when this node's own raftd rejects the write for
+// not being the leader (see that call site's own comment - ADR-0028/
+// ADR-0029).
 func (r *Reconciler) purgeJail(ctx context.Context, id string) error {
 	cmd := &internalpb.Command{
 		Op: &internalpb.Command_PurgeJail{PurgeJail: &internalpb.PurgeJail{Id: id}},
@@ -252,6 +262,13 @@ func (r *Reconciler) purgeJail(ctx context.Context, id string) error {
 		return fmt.Errorf("purging jail record: %w", err)
 	}
 	if resp.GetError() != "" {
+		if r.Peers != nil && resp.GetLeaderHint() != "" {
+			addr := r.resolvePeerManagerdAddr(resp.GetLeaderHint())
+			if perr := r.Peers.ReportJailTeardownComplete(ctx, addr, id); perr != nil {
+				return fmt.Errorf("purging jail record via peer %s: %w", addr, perr)
+			}
+			return nil
+		}
 		return fmt.Errorf("purging jail record: %s", resp.GetError())
 	}
 	return nil

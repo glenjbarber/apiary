@@ -1131,3 +1131,95 @@ func TestIntegration_MigrateJail_RequiresExistingReplicaAtTarget(t *testing.T) {
 		t.Fatalf("MigrateJail() error = empty, want a rejection (no replica at target)")
 	}
 }
+
+func TestIntegration_ReportVMPhase(t *testing.T) {
+	raftdSocket := newRaftdUDSSocket(t)
+	client := newManagerdRPCClient(t, raftdSocket)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if _, err := client.CreateVM(ctx, &rpcpb.CreateVMRequest{
+		Vm: &rpcpb.VMDefinition{Id: "vm-1", NodeId: "node-a"},
+	}); err != nil {
+		t.Fatalf("CreateVM() error: %v", err)
+	}
+
+	resp, err := client.ReportVMPhase(ctx, &rpcpb.ReportVMPhaseRequest{
+		Id: "vm-1", Phase: rpcpb.VMPhase_VM_PHASE_READY,
+	})
+	if err != nil {
+		t.Fatalf("ReportVMPhase() error: %v", err)
+	}
+	if resp.GetError() != "" {
+		t.Fatalf("ReportVMPhase() returned error: %s", resp.GetError())
+	}
+
+	getResp, err := client.GetVM(ctx, &rpcpb.GetVMRequest{Id: "vm-1"})
+	if err != nil || getResp.GetVm().GetPhase() != rpcpb.VMPhase_VM_PHASE_READY {
+		t.Fatalf("GetVM() after ReportVMPhase = %+v (err=%v), want Phase=VM_PHASE_READY", getResp, err)
+	}
+}
+
+func TestIntegration_ReportVMTeardownComplete(t *testing.T) {
+	raftdSocket := newRaftdUDSSocket(t)
+	client := newManagerdRPCClient(t, raftdSocket)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if _, err := client.CreateVM(ctx, &rpcpb.CreateVMRequest{
+		Vm: &rpcpb.VMDefinition{Id: "vm-1", NodeId: "node-a"},
+	}); err != nil {
+		t.Fatalf("CreateVM() error: %v", err)
+	}
+	if _, err := client.DeleteVM(ctx, &rpcpb.DeleteVMRequest{Id: "vm-1"}); err != nil {
+		t.Fatalf("DeleteVM() error: %v", err)
+	}
+
+	resp, err := client.ReportVMTeardownComplete(ctx, &rpcpb.ReportVMTeardownCompleteRequest{Id: "vm-1"})
+	if err != nil {
+		t.Fatalf("ReportVMTeardownComplete() error: %v", err)
+	}
+	if resp.GetError() != "" {
+		t.Fatalf("ReportVMTeardownComplete() returned error: %s", resp.GetError())
+	}
+
+	getResp, err := client.GetVM(ctx, &rpcpb.GetVMRequest{Id: "vm-1"})
+	if err != nil || getResp.GetFound() {
+		t.Fatalf("GetVM() after ReportVMTeardownComplete = (found=%v, err=%v), want the record gone", getResp.GetFound(), err)
+	}
+}
+
+func TestIntegration_ReportJailPhaseAndTeardownComplete(t *testing.T) {
+	raftdSocket := newRaftdUDSSocket(t)
+	client := newManagerdRPCClient(t, raftdSocket)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if _, err := client.CreateJail(ctx, &rpcpb.CreateJailRequest{
+		Jail: &rpcpb.JailDefinition{Id: "jail-1", NodeId: "node-a"},
+	}); err != nil {
+		t.Fatalf("CreateJail() error: %v", err)
+	}
+
+	if resp, err := client.ReportJailPhase(ctx, &rpcpb.ReportJailPhaseRequest{
+		Id: "jail-1", Phase: rpcpb.JailPhase_JAIL_PHASE_READY,
+	}); err != nil || resp.GetError() != "" {
+		t.Fatalf("ReportJailPhase() = (%+v, %v)", resp, err)
+	}
+	if getResp, err := client.GetJail(ctx, &rpcpb.GetJailRequest{Id: "jail-1"}); err != nil || getResp.GetJail().GetPhase() != rpcpb.JailPhase_JAIL_PHASE_READY {
+		t.Fatalf("GetJail() after ReportJailPhase = %+v (err=%v), want Phase=JAIL_PHASE_READY", getResp, err)
+	}
+
+	if _, err := client.DeleteJail(ctx, &rpcpb.DeleteJailRequest{Id: "jail-1"}); err != nil {
+		t.Fatalf("DeleteJail() error: %v", err)
+	}
+	if resp, err := client.ReportJailTeardownComplete(ctx, &rpcpb.ReportJailTeardownCompleteRequest{Id: "jail-1"}); err != nil || resp.GetError() != "" {
+		t.Fatalf("ReportJailTeardownComplete() = (%+v, %v)", resp, err)
+	}
+	if getResp, err := client.GetJail(ctx, &rpcpb.GetJailRequest{Id: "jail-1"}); err != nil || getResp.GetFound() {
+		t.Fatalf("GetJail() after ReportJailTeardownComplete = (found=%v, err=%v), want the record gone", getResp.GetFound(), err)
+	}
+}

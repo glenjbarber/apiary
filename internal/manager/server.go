@@ -407,6 +407,89 @@ func (s *Server) MigrateVM(ctx context.Context, req *rpcpb.MigrateVMRequest) (*r
 	return &rpcpb.MigrateVMResponse{Vm: fromInternalVM(result), Error: appErr, LeaderHint: leaderHint}, nil
 }
 
+// ReportVMPhase implements rpcpb.ManagerServiceServer. See its own
+// proto doc comment (ADR-0029): a peer-to-peer RPC letting a
+// reconciler that owns a VM but whose own raftd isn't the current
+// leader still get its phase update applied, by calling the leader
+// node's managerd instead of failing locally. This node's own raftd
+// must itself be the leader for this to succeed - if leadership has
+// moved on again since the caller resolved this address, the normal
+// error/leader_hint response tells it to re-resolve and retry once
+// more, the same way any other rejected Apply does.
+func (s *Server) ReportVMPhase(ctx context.Context, req *rpcpb.ReportVMPhaseRequest) (*rpcpb.ReportVMPhaseResponse, error) {
+	cmd := &internalpb.Command{
+		Op: &internalpb.Command_UpdateVmPhase{UpdateVmPhase: &internalpb.UpdateVMPhase{
+			Id:         req.GetId(),
+			Phase:      internalpb.VMPhase(req.GetPhase()),
+			PhaseError: req.GetPhaseError(),
+		}},
+	}
+	payload, err := proto.Marshal(cmd)
+	if err != nil {
+		return &rpcpb.ReportVMPhaseResponse{Error: err.Error()}, nil
+	}
+	resp, err := s.raft.Apply(ctx, payload, defaultApplyTimeout)
+	if err != nil {
+		return &rpcpb.ReportVMPhaseResponse{Error: err.Error()}, nil
+	}
+	return &rpcpb.ReportVMPhaseResponse{Error: resp.GetError(), LeaderHint: resp.GetLeaderHint()}, nil
+}
+
+// ReportVMTeardownComplete implements rpcpb.ManagerServiceServer,
+// mirroring ReportVMPhase for the final PurgeVM step of teardownVM
+// instead of a phase update.
+func (s *Server) ReportVMTeardownComplete(ctx context.Context, req *rpcpb.ReportVMTeardownCompleteRequest) (*rpcpb.ReportVMTeardownCompleteResponse, error) {
+	cmd := &internalpb.Command{
+		Op: &internalpb.Command_PurgeVm{PurgeVm: &internalpb.PurgeVM{Id: req.GetId()}},
+	}
+	payload, err := proto.Marshal(cmd)
+	if err != nil {
+		return &rpcpb.ReportVMTeardownCompleteResponse{Error: err.Error()}, nil
+	}
+	resp, err := s.raft.Apply(ctx, payload, defaultApplyTimeout)
+	if err != nil {
+		return &rpcpb.ReportVMTeardownCompleteResponse{Error: err.Error()}, nil
+	}
+	return &rpcpb.ReportVMTeardownCompleteResponse{Error: resp.GetError(), LeaderHint: resp.GetLeaderHint()}, nil
+}
+
+// ReportJailPhase mirrors ReportVMPhase exactly, for jails.
+func (s *Server) ReportJailPhase(ctx context.Context, req *rpcpb.ReportJailPhaseRequest) (*rpcpb.ReportJailPhaseResponse, error) {
+	cmd := &internalpb.Command{
+		Op: &internalpb.Command_UpdateJailPhase{UpdateJailPhase: &internalpb.UpdateJailPhase{
+			Id:         req.GetId(),
+			Phase:      internalpb.JailPhase(req.GetPhase()),
+			PhaseError: req.GetPhaseError(),
+		}},
+	}
+	payload, err := proto.Marshal(cmd)
+	if err != nil {
+		return &rpcpb.ReportJailPhaseResponse{Error: err.Error()}, nil
+	}
+	resp, err := s.raft.Apply(ctx, payload, defaultApplyTimeout)
+	if err != nil {
+		return &rpcpb.ReportJailPhaseResponse{Error: err.Error()}, nil
+	}
+	return &rpcpb.ReportJailPhaseResponse{Error: resp.GetError(), LeaderHint: resp.GetLeaderHint()}, nil
+}
+
+// ReportJailTeardownComplete mirrors ReportVMTeardownComplete exactly,
+// for jails.
+func (s *Server) ReportJailTeardownComplete(ctx context.Context, req *rpcpb.ReportJailTeardownCompleteRequest) (*rpcpb.ReportJailTeardownCompleteResponse, error) {
+	cmd := &internalpb.Command{
+		Op: &internalpb.Command_PurgeJail{PurgeJail: &internalpb.PurgeJail{Id: req.GetId()}},
+	}
+	payload, err := proto.Marshal(cmd)
+	if err != nil {
+		return &rpcpb.ReportJailTeardownCompleteResponse{Error: err.Error()}, nil
+	}
+	resp, err := s.raft.Apply(ctx, payload, defaultApplyTimeout)
+	if err != nil {
+		return &rpcpb.ReportJailTeardownCompleteResponse{Error: err.Error()}, nil
+	}
+	return &rpcpb.ReportJailTeardownCompleteResponse{Error: resp.GetError(), LeaderHint: resp.GetLeaderHint()}, nil
+}
+
 // GetVM implements rpcpb.ManagerServiceServer.
 func (s *Server) GetVM(ctx context.Context, req *rpcpb.GetVMRequest) (*rpcpb.GetVMResponse, error) {
 	resp, err := s.raft.GetVM(ctx, req.GetId())

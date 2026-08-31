@@ -19,32 +19,36 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	ManagerService_Status_FullMethodName         = "/apiary.rpc.v1.ManagerService/Status"
-	ManagerService_CreateVM_FullMethodName       = "/apiary.rpc.v1.ManagerService/CreateVM"
-	ManagerService_UpdateVM_FullMethodName       = "/apiary.rpc.v1.ManagerService/UpdateVM"
-	ManagerService_DeleteVM_FullMethodName       = "/apiary.rpc.v1.ManagerService/DeleteVM"
-	ManagerService_ForcePurgeVM_FullMethodName   = "/apiary.rpc.v1.ManagerService/ForcePurgeVM"
-	ManagerService_MigrateVM_FullMethodName      = "/apiary.rpc.v1.ManagerService/MigrateVM"
-	ManagerService_GetVM_FullMethodName          = "/apiary.rpc.v1.ManagerService/GetVM"
-	ManagerService_ListVMs_FullMethodName        = "/apiary.rpc.v1.ManagerService/ListVMs"
-	ManagerService_UploadISO_FullMethodName      = "/apiary.rpc.v1.ManagerService/UploadISO"
-	ManagerService_ListISOs_FullMethodName       = "/apiary.rpc.v1.ManagerService/ListISOs"
-	ManagerService_DeleteISO_FullMethodName      = "/apiary.rpc.v1.ManagerService/DeleteISO"
-	ManagerService_HostStats_FullMethodName      = "/apiary.rpc.v1.ManagerService/HostStats"
-	ManagerService_GetVMConsole_FullMethodName   = "/apiary.rpc.v1.ManagerService/GetVMConsole"
-	ManagerService_CreateNetwork_FullMethodName  = "/apiary.rpc.v1.ManagerService/CreateNetwork"
-	ManagerService_ListNetworks_FullMethodName   = "/apiary.rpc.v1.ManagerService/ListNetworks"
-	ManagerService_DeleteNetwork_FullMethodName  = "/apiary.rpc.v1.ManagerService/DeleteNetwork"
-	ManagerService_CreateAPIKey_FullMethodName   = "/apiary.rpc.v1.ManagerService/CreateAPIKey"
-	ManagerService_ListAPIKeys_FullMethodName    = "/apiary.rpc.v1.ManagerService/ListAPIKeys"
-	ManagerService_RevokeAPIKey_FullMethodName   = "/apiary.rpc.v1.ManagerService/RevokeAPIKey"
-	ManagerService_CreateJail_FullMethodName     = "/apiary.rpc.v1.ManagerService/CreateJail"
-	ManagerService_UpdateJail_FullMethodName     = "/apiary.rpc.v1.ManagerService/UpdateJail"
-	ManagerService_DeleteJail_FullMethodName     = "/apiary.rpc.v1.ManagerService/DeleteJail"
-	ManagerService_GetJail_FullMethodName        = "/apiary.rpc.v1.ManagerService/GetJail"
-	ManagerService_ListJails_FullMethodName      = "/apiary.rpc.v1.ManagerService/ListJails"
-	ManagerService_ForcePurgeJail_FullMethodName = "/apiary.rpc.v1.ManagerService/ForcePurgeJail"
-	ManagerService_MigrateJail_FullMethodName    = "/apiary.rpc.v1.ManagerService/MigrateJail"
+	ManagerService_Status_FullMethodName                     = "/apiary.rpc.v1.ManagerService/Status"
+	ManagerService_CreateVM_FullMethodName                   = "/apiary.rpc.v1.ManagerService/CreateVM"
+	ManagerService_UpdateVM_FullMethodName                   = "/apiary.rpc.v1.ManagerService/UpdateVM"
+	ManagerService_DeleteVM_FullMethodName                   = "/apiary.rpc.v1.ManagerService/DeleteVM"
+	ManagerService_ForcePurgeVM_FullMethodName               = "/apiary.rpc.v1.ManagerService/ForcePurgeVM"
+	ManagerService_MigrateVM_FullMethodName                  = "/apiary.rpc.v1.ManagerService/MigrateVM"
+	ManagerService_GetVM_FullMethodName                      = "/apiary.rpc.v1.ManagerService/GetVM"
+	ManagerService_ListVMs_FullMethodName                    = "/apiary.rpc.v1.ManagerService/ListVMs"
+	ManagerService_UploadISO_FullMethodName                  = "/apiary.rpc.v1.ManagerService/UploadISO"
+	ManagerService_ListISOs_FullMethodName                   = "/apiary.rpc.v1.ManagerService/ListISOs"
+	ManagerService_DeleteISO_FullMethodName                  = "/apiary.rpc.v1.ManagerService/DeleteISO"
+	ManagerService_HostStats_FullMethodName                  = "/apiary.rpc.v1.ManagerService/HostStats"
+	ManagerService_GetVMConsole_FullMethodName               = "/apiary.rpc.v1.ManagerService/GetVMConsole"
+	ManagerService_CreateNetwork_FullMethodName              = "/apiary.rpc.v1.ManagerService/CreateNetwork"
+	ManagerService_ListNetworks_FullMethodName               = "/apiary.rpc.v1.ManagerService/ListNetworks"
+	ManagerService_DeleteNetwork_FullMethodName              = "/apiary.rpc.v1.ManagerService/DeleteNetwork"
+	ManagerService_CreateAPIKey_FullMethodName               = "/apiary.rpc.v1.ManagerService/CreateAPIKey"
+	ManagerService_ListAPIKeys_FullMethodName                = "/apiary.rpc.v1.ManagerService/ListAPIKeys"
+	ManagerService_RevokeAPIKey_FullMethodName               = "/apiary.rpc.v1.ManagerService/RevokeAPIKey"
+	ManagerService_CreateJail_FullMethodName                 = "/apiary.rpc.v1.ManagerService/CreateJail"
+	ManagerService_UpdateJail_FullMethodName                 = "/apiary.rpc.v1.ManagerService/UpdateJail"
+	ManagerService_DeleteJail_FullMethodName                 = "/apiary.rpc.v1.ManagerService/DeleteJail"
+	ManagerService_GetJail_FullMethodName                    = "/apiary.rpc.v1.ManagerService/GetJail"
+	ManagerService_ListJails_FullMethodName                  = "/apiary.rpc.v1.ManagerService/ListJails"
+	ManagerService_ForcePurgeJail_FullMethodName             = "/apiary.rpc.v1.ManagerService/ForcePurgeJail"
+	ManagerService_MigrateJail_FullMethodName                = "/apiary.rpc.v1.ManagerService/MigrateJail"
+	ManagerService_ReportVMPhase_FullMethodName              = "/apiary.rpc.v1.ManagerService/ReportVMPhase"
+	ManagerService_ReportVMTeardownComplete_FullMethodName   = "/apiary.rpc.v1.ManagerService/ReportVMTeardownComplete"
+	ManagerService_ReportJailPhase_FullMethodName            = "/apiary.rpc.v1.ManagerService/ReportJailPhase"
+	ManagerService_ReportJailTeardownComplete_FullMethodName = "/apiary.rpc.v1.ManagerService/ReportJailTeardownComplete"
 )
 
 // ManagerServiceClient is the client API for ManagerService service.
@@ -159,6 +163,21 @@ type ManagerServiceClient interface {
 	// (including the "target must already be a synced HAST replica"
 	// safety requirement), which applies identically here.
 	MigrateJail(ctx context.Context, in *MigrateJailRequest, opts ...grpc.CallOption) (*MigrateJailResponse, error)
+	// ReportVMPhase/ReportVMTeardownComplete/ReportJailPhase/
+	// ReportJailTeardownComplete are peer-to-peer RPCs, not meant for
+	// human/API-client use: a reconciler on a node that owns a VM/jail
+	// but whose own raftd isn't the current raft leader calls these on
+	// the LEADER node's managerd instead, since only the leader's own
+	// raftd can ever accept an Apply (ADR-0029) - raftd's internal API
+	// stays Unix-socket-only, never exposed over the network; this
+	// reuses ManagerService's existing, already-networked, already-
+	// optionally-API-key-gated external surface instead of opening a
+	// new one. Gated by the same auth as every other RPC here when
+	// enabled - see cmd/managerd's -peer-api-key flag.
+	ReportVMPhase(ctx context.Context, in *ReportVMPhaseRequest, opts ...grpc.CallOption) (*ReportVMPhaseResponse, error)
+	ReportVMTeardownComplete(ctx context.Context, in *ReportVMTeardownCompleteRequest, opts ...grpc.CallOption) (*ReportVMTeardownCompleteResponse, error)
+	ReportJailPhase(ctx context.Context, in *ReportJailPhaseRequest, opts ...grpc.CallOption) (*ReportJailPhaseResponse, error)
+	ReportJailTeardownComplete(ctx context.Context, in *ReportJailTeardownCompleteRequest, opts ...grpc.CallOption) (*ReportJailTeardownCompleteResponse, error)
 }
 
 type managerServiceClient struct {
@@ -432,6 +451,46 @@ func (c *managerServiceClient) MigrateJail(ctx context.Context, in *MigrateJailR
 	return out, nil
 }
 
+func (c *managerServiceClient) ReportVMPhase(ctx context.Context, in *ReportVMPhaseRequest, opts ...grpc.CallOption) (*ReportVMPhaseResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ReportVMPhaseResponse)
+	err := c.cc.Invoke(ctx, ManagerService_ReportVMPhase_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *managerServiceClient) ReportVMTeardownComplete(ctx context.Context, in *ReportVMTeardownCompleteRequest, opts ...grpc.CallOption) (*ReportVMTeardownCompleteResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ReportVMTeardownCompleteResponse)
+	err := c.cc.Invoke(ctx, ManagerService_ReportVMTeardownComplete_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *managerServiceClient) ReportJailPhase(ctx context.Context, in *ReportJailPhaseRequest, opts ...grpc.CallOption) (*ReportJailPhaseResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ReportJailPhaseResponse)
+	err := c.cc.Invoke(ctx, ManagerService_ReportJailPhase_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *managerServiceClient) ReportJailTeardownComplete(ctx context.Context, in *ReportJailTeardownCompleteRequest, opts ...grpc.CallOption) (*ReportJailTeardownCompleteResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ReportJailTeardownCompleteResponse)
+	err := c.cc.Invoke(ctx, ManagerService_ReportJailTeardownComplete_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // ManagerServiceServer is the server API for ManagerService service.
 // All implementations must embed UnimplementedManagerServiceServer
 // for forward compatibility.
@@ -544,6 +603,21 @@ type ManagerServiceServer interface {
 	// (including the "target must already be a synced HAST replica"
 	// safety requirement), which applies identically here.
 	MigrateJail(context.Context, *MigrateJailRequest) (*MigrateJailResponse, error)
+	// ReportVMPhase/ReportVMTeardownComplete/ReportJailPhase/
+	// ReportJailTeardownComplete are peer-to-peer RPCs, not meant for
+	// human/API-client use: a reconciler on a node that owns a VM/jail
+	// but whose own raftd isn't the current raft leader calls these on
+	// the LEADER node's managerd instead, since only the leader's own
+	// raftd can ever accept an Apply (ADR-0029) - raftd's internal API
+	// stays Unix-socket-only, never exposed over the network; this
+	// reuses ManagerService's existing, already-networked, already-
+	// optionally-API-key-gated external surface instead of opening a
+	// new one. Gated by the same auth as every other RPC here when
+	// enabled - see cmd/managerd's -peer-api-key flag.
+	ReportVMPhase(context.Context, *ReportVMPhaseRequest) (*ReportVMPhaseResponse, error)
+	ReportVMTeardownComplete(context.Context, *ReportVMTeardownCompleteRequest) (*ReportVMTeardownCompleteResponse, error)
+	ReportJailPhase(context.Context, *ReportJailPhaseRequest) (*ReportJailPhaseResponse, error)
+	ReportJailTeardownComplete(context.Context, *ReportJailTeardownCompleteRequest) (*ReportJailTeardownCompleteResponse, error)
 	mustEmbedUnimplementedManagerServiceServer()
 }
 
@@ -631,6 +705,18 @@ func (UnimplementedManagerServiceServer) ForcePurgeJail(context.Context, *ForceP
 }
 func (UnimplementedManagerServiceServer) MigrateJail(context.Context, *MigrateJailRequest) (*MigrateJailResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method MigrateJail not implemented")
+}
+func (UnimplementedManagerServiceServer) ReportVMPhase(context.Context, *ReportVMPhaseRequest) (*ReportVMPhaseResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ReportVMPhase not implemented")
+}
+func (UnimplementedManagerServiceServer) ReportVMTeardownComplete(context.Context, *ReportVMTeardownCompleteRequest) (*ReportVMTeardownCompleteResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ReportVMTeardownComplete not implemented")
+}
+func (UnimplementedManagerServiceServer) ReportJailPhase(context.Context, *ReportJailPhaseRequest) (*ReportJailPhaseResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ReportJailPhase not implemented")
+}
+func (UnimplementedManagerServiceServer) ReportJailTeardownComplete(context.Context, *ReportJailTeardownCompleteRequest) (*ReportJailTeardownCompleteResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ReportJailTeardownComplete not implemented")
 }
 func (UnimplementedManagerServiceServer) mustEmbedUnimplementedManagerServiceServer() {}
 func (UnimplementedManagerServiceServer) testEmbeddedByValue()                        {}
@@ -1110,6 +1196,78 @@ func _ManagerService_MigrateJail_Handler(srv interface{}, ctx context.Context, d
 	return interceptor(ctx, in, info, handler)
 }
 
+func _ManagerService_ReportVMPhase_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ReportVMPhaseRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ManagerServiceServer).ReportVMPhase(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ManagerService_ReportVMPhase_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ManagerServiceServer).ReportVMPhase(ctx, req.(*ReportVMPhaseRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ManagerService_ReportVMTeardownComplete_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ReportVMTeardownCompleteRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ManagerServiceServer).ReportVMTeardownComplete(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ManagerService_ReportVMTeardownComplete_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ManagerServiceServer).ReportVMTeardownComplete(ctx, req.(*ReportVMTeardownCompleteRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ManagerService_ReportJailPhase_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ReportJailPhaseRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ManagerServiceServer).ReportJailPhase(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ManagerService_ReportJailPhase_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ManagerServiceServer).ReportJailPhase(ctx, req.(*ReportJailPhaseRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ManagerService_ReportJailTeardownComplete_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ReportJailTeardownCompleteRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ManagerServiceServer).ReportJailTeardownComplete(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ManagerService_ReportJailTeardownComplete_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ManagerServiceServer).ReportJailTeardownComplete(ctx, req.(*ReportJailTeardownCompleteRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // ManagerService_ServiceDesc is the grpc.ServiceDesc for ManagerService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -1216,6 +1374,22 @@ var ManagerService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "MigrateJail",
 			Handler:    _ManagerService_MigrateJail_Handler,
+		},
+		{
+			MethodName: "ReportVMPhase",
+			Handler:    _ManagerService_ReportVMPhase_Handler,
+		},
+		{
+			MethodName: "ReportVMTeardownComplete",
+			Handler:    _ManagerService_ReportVMTeardownComplete_Handler,
+		},
+		{
+			MethodName: "ReportJailPhase",
+			Handler:    _ManagerService_ReportJailPhase_Handler,
+		},
+		{
+			MethodName: "ReportJailTeardownComplete",
+			Handler:    _ManagerService_ReportJailTeardownComplete_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{

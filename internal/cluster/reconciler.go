@@ -242,6 +242,21 @@ type Reconciler struct {
 	// non-replicated jail's root has no separate size of its own; it's
 	// whatever its ZFS dataset allows.
 	JailDiskSizeMB uint64
+
+	// Peers is optional (nil-able, same opt-in pattern as everything
+	// above): when set, a raft write rejected because this node's own
+	// raftd isn't the current leader is forwarded to the leader node's
+	// managerd instead of silently failing (ADR-0029). nil preserves
+	// the pre-ADR-0029 behavior exactly (local-only, visibly failing
+	// via the ApplyResponse.Error check added alongside ADR-0028's own
+	// fix) - useful for tests, and harmless on a single-node deployment
+	// where the local node is always the leader anyway.
+	Peers peerReporter
+
+	// PeerManagerdPort overrides the port assumed for a peer's managerd
+	// external API when forwarding via Peers (defaults to
+	// defaultPeerManagerdPort - see resolvePeerManagerdAddr).
+	PeerManagerdPort string
 }
 
 // RunOnce fetches the current VM list and, for each VM assigned to
@@ -553,15 +568,21 @@ func (r *Reconciler) teardownVM(ctx context.Context, vm VMPlacement) error {
 	// itself failing - a rejected Apply (e.g. this node's own raftd
 	// isn't the current raft leader) comes back as a normal, non-error
 	// ApplyResponse with Error set instead, and was silently ignored
-	// here until caught live: a jail migrated onto a node that wasn't
-	// also the raft leader had its real jail(8)/dataset torn down
-	// correctly, but its raft record never got purged - reconcile kept
-	// reporting success every tick while the tombstone sat there
-	// forever. See ADR-0028's own honest account of this gap: checking
-	// the error here surfaces the failure instead of hiding it, but
-	// doesn't yet give a non-leader node any way to actually retry
-	// against the real leader.
+	// here until caught live (ADR-0028): a jail migrated onto a node
+	// that wasn't also the raft leader had its real jail(8)/dataset
+	// torn down correctly, but its raft record never got purged.
+	// Checking the error here surfaces a genuine rejection instead of
+	// hiding it; Peers (ADR-0029), when configured, gives a "not
+	// leader" rejection specifically a real path to still succeed, by
+	// forwarding the same purge to the leader's own managerd instead.
 	if resp.GetError() != "" {
+		if r.Peers != nil && resp.GetLeaderHint() != "" {
+			addr := r.resolvePeerManagerdAddr(resp.GetLeaderHint())
+			if perr := r.Peers.ReportVMTeardownComplete(ctx, addr, vm.ID); perr != nil {
+				return fmt.Errorf("purging VM record via peer %s: %w", addr, perr)
+			}
+			return nil
+		}
 		return fmt.Errorf("purging VM record: %s", resp.GetError())
 	}
 	return nil
@@ -638,7 +659,18 @@ func (r *Reconciler) applyPhase(ctx context.Context, id, phase, phaseError strin
 	if err != nil {
 		return
 	}
-	_, _ = r.Raft.Apply(ctx, data, phaseApplyTimeout)
+	resp, err := r.Raft.Apply(ctx, data, phaseApplyTimeout)
+	if err != nil || resp.GetError() == "" {
+		return
+	}
+	// Still best-effort even with Peers configured (ADR-0029): a lost
+	// phase-update race is genuinely not worth failing reconciliation
+	// over (see this function's own doc comment), so a failed peer
+	// forward is swallowed here too, same as a failed local Apply
+	// always was.
+	if r.Peers != nil && resp.GetLeaderHint() != "" {
+		_ = r.Peers.ReportVMPhase(ctx, r.resolvePeerManagerdAddr(resp.GetLeaderHint()), id, phase, phaseError)
+	}
 }
 
 func phaseToString(p internalpb.VMPhase) string {

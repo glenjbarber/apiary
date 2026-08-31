@@ -39,7 +39,8 @@ type fakeRaftClient struct {
 	// "this node is not the leader") - the gRPC call itself succeeds
 	// (err is nil), but ApplyResponse.Error is set. Distinct from
 	// applyErr, which simulates the transport itself failing.
-	applyRespErr string
+	applyRespErr        string
+	applyRespLeaderHint string
 }
 
 func (f *fakeRaftClient) Status(context.Context) (*internalpb.StatusResponse, error) {
@@ -72,7 +73,7 @@ func (f *fakeRaftClient) Apply(_ context.Context, payload []byte, _ time.Duratio
 		return nil, f.applyErr
 	}
 	if f.applyRespErr != "" {
-		return &internalpb.ApplyResponse{Error: f.applyRespErr}, nil
+		return &internalpb.ApplyResponse{Error: f.applyRespErr, LeaderHint: f.applyRespLeaderHint}, nil
 	}
 	var cmd internalpb.Command
 	if err := proto.Unmarshal(payload, &cmd); err != nil {
@@ -521,6 +522,107 @@ func TestReconciler_RunOnce_DeletingVMPropagatesRejectedPurge(t *testing.T) {
 	r := &Reconciler{Raft: raft, ZFS: zfs, LocalNodeID: "node-a"}
 	if err := r.RunOnce(context.Background()); err == nil {
 		t.Fatalf("RunOnce() = nil error, want the rejected purge surfaced as an error")
+	}
+}
+
+// fakePeerReporter implements peerReporter, recording every forwarded
+// call so tests can assert the reconciler actually forwards a
+// rejected write instead of just surfacing the rejection (ADR-0029).
+type fakePeerReporter struct {
+	vmPhaseCalls      []string // "addr id phase phaseError"
+	vmTeardownCalls   []string // "addr id"
+	jailPhaseCalls    []string
+	jailTeardownCalls []string
+
+	vmPhaseErr      error
+	vmTeardownErr   error
+	jailPhaseErr    error
+	jailTeardownErr error
+}
+
+func (f *fakePeerReporter) ReportVMPhase(_ context.Context, addr, id, phase, phaseError string) error {
+	f.vmPhaseCalls = append(f.vmPhaseCalls, fmt.Sprintf("%s %s %s %s", addr, id, phase, phaseError))
+	return f.vmPhaseErr
+}
+
+func (f *fakePeerReporter) ReportVMTeardownComplete(_ context.Context, addr, id string) error {
+	f.vmTeardownCalls = append(f.vmTeardownCalls, fmt.Sprintf("%s %s", addr, id))
+	return f.vmTeardownErr
+}
+
+func (f *fakePeerReporter) ReportJailPhase(_ context.Context, addr, id, phase, phaseError string) error {
+	f.jailPhaseCalls = append(f.jailPhaseCalls, fmt.Sprintf("%s %s %s %s", addr, id, phase, phaseError))
+	return f.jailPhaseErr
+}
+
+func (f *fakePeerReporter) ReportJailTeardownComplete(_ context.Context, addr, id string) error {
+	f.jailTeardownCalls = append(f.jailTeardownCalls, fmt.Sprintf("%s %s", addr, id))
+	return f.jailTeardownErr
+}
+
+// TestReconciler_RunOnce_DeletingVMForwardsRejectedPurgeToPeer confirms
+// the ADR-0029 fix: a purge rejected for "not leader" (LeaderHint set)
+// is forwarded to Peers instead of just failing, and succeeds when the
+// peer accepts it.
+func TestReconciler_RunOnce_DeletingVMForwardsRejectedPurgeToPeer(t *testing.T) {
+	raft := &fakeRaftClient{
+		resp: &internalpb.ListVMsResponse{
+			Vms: []*internalpb.VMDefinition{{Id: "vm-1", NodeId: "node-a", DesiredState: internalpb.VMState_VM_STATE_DELETING}},
+		},
+		applyRespErr:        "raft: this node is not the leader",
+		applyRespLeaderHint: "10.0.0.2:17600",
+	}
+	zfs := newFakeDatasetManager()
+	zfs.existing["vm-1"] = true
+	peers := &fakePeerReporter{}
+
+	r := &Reconciler{Raft: raft, ZFS: zfs, LocalNodeID: "node-a", Peers: peers, PeerManagerdPort: "17700"}
+	if err := r.RunOnce(context.Background()); err != nil {
+		t.Fatalf("RunOnce() error: %v, want the peer forward to succeed", err)
+	}
+	if len(peers.vmTeardownCalls) != 1 || peers.vmTeardownCalls[0] != "10.0.0.2:17700 vm-1" {
+		t.Errorf("vmTeardownCalls = %v, want [10.0.0.2:17700 vm-1] (leader's host, this node's configured peer port)", peers.vmTeardownCalls)
+	}
+}
+
+func TestReconciler_RunOnce_DeletingVMPropagatesPeerForwardFailure(t *testing.T) {
+	raft := &fakeRaftClient{
+		resp: &internalpb.ListVMsResponse{
+			Vms: []*internalpb.VMDefinition{{Id: "vm-1", NodeId: "node-a", DesiredState: internalpb.VMState_VM_STATE_DELETING}},
+		},
+		applyRespErr:        "raft: this node is not the leader",
+		applyRespLeaderHint: "10.0.0.2:17600",
+	}
+	zfs := newFakeDatasetManager()
+	zfs.existing["vm-1"] = true
+	peers := &fakePeerReporter{vmTeardownErr: errors.New("peer unreachable")}
+
+	r := &Reconciler{Raft: raft, ZFS: zfs, LocalNodeID: "node-a", Peers: peers}
+	if err := r.RunOnce(context.Background()); err == nil {
+		t.Fatalf("RunOnce() = nil error, want the peer forward failure surfaced")
+	}
+}
+
+func TestReconciler_RunOnce_DeletingJailForwardsRejectedPurgeToPeer(t *testing.T) {
+	raft := &fakeRaftClient{
+		jailsResp: &internalpb.ListJailsResponse{
+			Jails: []*internalpb.JailDefinition{{Id: "jail-1", NodeId: "node-a", DesiredState: internalpb.JailState_JAIL_STATE_DELETING}},
+		},
+		applyRespErr:        "raft: this node is not the leader",
+		applyRespLeaderHint: "10.0.0.2:17600",
+	}
+	zfs := newFakeDatasetManager()
+	zfs.existing["jail-1"] = true
+	jm := newFakeJailManager()
+	jm.running["jail-1"] = true
+	peers := &fakePeerReporter{}
+
+	r := &Reconciler{Raft: raft, ZFS: zfs, Jail: jm, LocalNodeID: "node-a", Peers: peers}
+	if err := r.RunOnce(context.Background()); err != nil {
+		t.Fatalf("RunOnce() error: %v, want the peer forward to succeed", err)
+	}
+	if len(peers.jailTeardownCalls) != 1 || peers.jailTeardownCalls[0] != "10.0.0.2:17700 jail-1" {
+		t.Errorf("jailTeardownCalls = %v, want [10.0.0.2:17700 jail-1]", peers.jailTeardownCalls)
 	}
 }
 

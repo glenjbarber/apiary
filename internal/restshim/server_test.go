@@ -100,6 +100,22 @@ func (f *fakeClient) MigrateVM(_ context.Context, in *rpcpb.MigrateVMRequest, _ 
 	return &rpcpb.MigrateVMResponse{}, nil
 }
 
+func (f *fakeClient) ReportVMPhase(context.Context, *rpcpb.ReportVMPhaseRequest, ...grpc.CallOption) (*rpcpb.ReportVMPhaseResponse, error) {
+	return &rpcpb.ReportVMPhaseResponse{}, nil
+}
+
+func (f *fakeClient) ReportVMTeardownComplete(context.Context, *rpcpb.ReportVMTeardownCompleteRequest, ...grpc.CallOption) (*rpcpb.ReportVMTeardownCompleteResponse, error) {
+	return &rpcpb.ReportVMTeardownCompleteResponse{}, nil
+}
+
+func (f *fakeClient) ReportJailPhase(context.Context, *rpcpb.ReportJailPhaseRequest, ...grpc.CallOption) (*rpcpb.ReportJailPhaseResponse, error) {
+	return &rpcpb.ReportJailPhaseResponse{}, nil
+}
+
+func (f *fakeClient) ReportJailTeardownComplete(context.Context, *rpcpb.ReportJailTeardownCompleteRequest, ...grpc.CallOption) (*rpcpb.ReportJailTeardownCompleteResponse, error) {
+	return &rpcpb.ReportJailTeardownCompleteResponse{}, nil
+}
+
 func (f *fakeClient) MigrateJail(_ context.Context, in *rpcpb.MigrateJailRequest, _ ...grpc.CallOption) (*rpcpb.MigrateJailResponse, error) {
 	f.lastMigrateJailReq = in
 	if f.migrateJailResp != nil {
