@@ -23,6 +23,7 @@ const (
 	ManagerService_CreateVM_FullMethodName      = "/apiary.rpc.v1.ManagerService/CreateVM"
 	ManagerService_UpdateVM_FullMethodName      = "/apiary.rpc.v1.ManagerService/UpdateVM"
 	ManagerService_DeleteVM_FullMethodName      = "/apiary.rpc.v1.ManagerService/DeleteVM"
+	ManagerService_ForcePurgeVM_FullMethodName  = "/apiary.rpc.v1.ManagerService/ForcePurgeVM"
 	ManagerService_GetVM_FullMethodName         = "/apiary.rpc.v1.ManagerService/GetVM"
 	ManagerService_ListVMs_FullMethodName       = "/apiary.rpc.v1.ManagerService/ListVMs"
 	ManagerService_UploadISO_FullMethodName     = "/apiary.rpc.v1.ManagerService/UploadISO"
@@ -51,6 +52,18 @@ type ManagerServiceClient interface {
 	CreateVM(ctx context.Context, in *CreateVMRequest, opts ...grpc.CallOption) (*CreateVMResponse, error)
 	UpdateVM(ctx context.Context, in *UpdateVMRequest, opts ...grpc.CallOption) (*UpdateVMResponse, error)
 	DeleteVM(ctx context.Context, in *DeleteVMRequest, opts ...grpc.CallOption) (*DeleteVMResponse, error)
+	// ForcePurgeVM is an escape hatch for a VM tombstoned by DeleteVM
+	// whose owning node will never reconcile it away (permanently
+	// offline/decommissioned) - see CLAUDE.md's "What's not implemented
+	// yet" note on resource reclaim. It only succeeds against a VM
+	// already in VM_STATE_DELETING (call DeleteVM first) and removes the
+	// record outright, the same way the owning node's own reconciler
+	// would via PurgeVM - but it does NOT touch that node's real ZFS
+	// dataset or bhyve VM, since (by definition, this being needed at
+	// all) that node can't be reached. Use only when the owning node is
+	// confirmed gone for good; otherwise its resources are silently
+	// orphaned with no record left to indicate they exist.
+	ForcePurgeVM(ctx context.Context, in *ForcePurgeVMRequest, opts ...grpc.CallOption) (*ForcePurgeVMResponse, error)
 	// GetVM and ListVMs only succeed against the current leader - see
 	// api/internalpb/raftd.proto's GetVM/ListVMs doc comments for why v1's
 	// read consistency model is deliberately as simple as its write model.
@@ -139,6 +152,16 @@ func (c *managerServiceClient) DeleteVM(ctx context.Context, in *DeleteVMRequest
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(DeleteVMResponse)
 	err := c.cc.Invoke(ctx, ManagerService_DeleteVM_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *managerServiceClient) ForcePurgeVM(ctx context.Context, in *ForcePurgeVMRequest, opts ...grpc.CallOption) (*ForcePurgeVMResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ForcePurgeVMResponse)
+	err := c.cc.Invoke(ctx, ManagerService_ForcePurgeVM_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -291,6 +314,18 @@ type ManagerServiceServer interface {
 	CreateVM(context.Context, *CreateVMRequest) (*CreateVMResponse, error)
 	UpdateVM(context.Context, *UpdateVMRequest) (*UpdateVMResponse, error)
 	DeleteVM(context.Context, *DeleteVMRequest) (*DeleteVMResponse, error)
+	// ForcePurgeVM is an escape hatch for a VM tombstoned by DeleteVM
+	// whose owning node will never reconcile it away (permanently
+	// offline/decommissioned) - see CLAUDE.md's "What's not implemented
+	// yet" note on resource reclaim. It only succeeds against a VM
+	// already in VM_STATE_DELETING (call DeleteVM first) and removes the
+	// record outright, the same way the owning node's own reconciler
+	// would via PurgeVM - but it does NOT touch that node's real ZFS
+	// dataset or bhyve VM, since (by definition, this being needed at
+	// all) that node can't be reached. Use only when the owning node is
+	// confirmed gone for good; otherwise its resources are silently
+	// orphaned with no record left to indicate they exist.
+	ForcePurgeVM(context.Context, *ForcePurgeVMRequest) (*ForcePurgeVMResponse, error)
 	// GetVM and ListVMs only succeed against the current leader - see
 	// api/internalpb/raftd.proto's GetVM/ListVMs doc comments for why v1's
 	// read consistency model is deliberately as simple as its write model.
@@ -356,6 +391,9 @@ func (UnimplementedManagerServiceServer) UpdateVM(context.Context, *UpdateVMRequ
 }
 func (UnimplementedManagerServiceServer) DeleteVM(context.Context, *DeleteVMRequest) (*DeleteVMResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method DeleteVM not implemented")
+}
+func (UnimplementedManagerServiceServer) ForcePurgeVM(context.Context, *ForcePurgeVMRequest) (*ForcePurgeVMResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ForcePurgeVM not implemented")
 }
 func (UnimplementedManagerServiceServer) GetVM(context.Context, *GetVMRequest) (*GetVMResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetVM not implemented")
@@ -485,6 +523,24 @@ func _ManagerService_DeleteVM_Handler(srv interface{}, ctx context.Context, dec 
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(ManagerServiceServer).DeleteVM(ctx, req.(*DeleteVMRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ManagerService_ForcePurgeVM_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ForcePurgeVMRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ManagerServiceServer).ForcePurgeVM(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ManagerService_ForcePurgeVM_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ManagerServiceServer).ForcePurgeVM(ctx, req.(*ForcePurgeVMRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -734,6 +790,10 @@ var ManagerService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "DeleteVM",
 			Handler:    _ManagerService_DeleteVM_Handler,
+		},
+		{
+			MethodName: "ForcePurgeVM",
+			Handler:    _ManagerService_ForcePurgeVM_Handler,
 		},
 		{
 			MethodName: "GetVM",
