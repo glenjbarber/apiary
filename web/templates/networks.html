@@ -3,9 +3,8 @@
 <html lang="en">
 {{template "head" .}}
 <body>
-  <h1>Apiary</h1>
   {{template "nav" .}}
-  <h2>Networks</h2>
+  {{template "page_header" (pageHeader "Networks" "Cluster network definitions and local bridge health.")}}
   <form class="create-vm" hx-post="/networks" hx-target="#network-panel" hx-swap="innerHTML">
     <label>ID <input type="text" name="id" required></label>
     <label>Name <input type="text" name="name"></label>

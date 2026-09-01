@@ -3,9 +3,8 @@
 <html lang="en">
 {{template "head" .}}
 <body>
-  <h1>Apiary</h1>
   {{template "nav" .}}
-  <h2>Jails</h2>
+  {{template "page_header" (pageHeader "Jails" "FreeBSD workloads, placement, and replication state.")}}
   <form class="create-vm" hx-post="/jails" hx-target="#jail-panel" hx-swap="innerHTML">
     <label>ID <input type="text" name="id" required></label>
     <label>Name <input type="text" name="name"></label>
@@ -52,7 +51,7 @@
   <td>{{.NodeID}}</td>
   <td>{{if .ReplicaNodeID}}{{.ReplicaNodeID}}{{else}}<em>(none)</em>{{end}}</td>
   <td>{{.DesiredState}}</td>
-  <td{{if .PhaseError}} title="{{.PhaseError}}"{{end}}>{{.Phase}}</td>
+  <td><span class="badge {{.Phase}}"{{if .PhaseError}} title="{{.PhaseError}}"{{end}}>{{.Phase}}</span>{{if .PhaseError}}<div class="error">{{.PhaseError}}</div>{{end}}</td>
   <td>
     <button hx-delete="/jails/{{.ID}}" hx-target="#jail-panel" hx-swap="innerHTML" hx-confirm="Delete jail {{.ID}}?">Delete</button>
   </td>
