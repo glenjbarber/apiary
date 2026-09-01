@@ -34,11 +34,12 @@ func run() error {
 	httpAddr := flag.String("http-addr", "127.0.0.1:8081", "address to serve the REST API on")
 	managerTLS := flag.Bool("manager-tls", false, "dial managerd over TLS instead of plaintext (must match managerd's own -tls-cert/-tls-key)")
 	managerTLSCA := flag.String("manager-tls-ca", "", "PEM CA file to trust for managerd's certificate (for a self-signed cert); leave empty to trust the system certificate pool")
+	managerTLSServerName := flag.String("manager-tls-server-name", "", "hostname to verify managerd's certificate against, if different from -manager-addr's host (e.g. managerd stays loopback-only but its cert names a real public hostname); leave empty to verify against -manager-addr itself")
 	tlsCert := flag.String("tls-cert", "", "PEM certificate file to serve the REST API over HTTPS; leave unset (with -tls-key) to serve plaintext HTTP, as before")
 	tlsKey := flag.String("tls-key", "", "PEM private key file matching -tls-cert")
 	flag.Parse()
 
-	dialCreds, err := tlsdial.ManagerDialOption(*managerTLS, *managerTLSCA)
+	dialCreds, err := tlsdial.ManagerDialOption(*managerTLS, *managerTLSCA, *managerTLSServerName)
 	if err != nil {
 		return err
 	}

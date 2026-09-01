@@ -90,11 +90,12 @@ func run() error {
 	roleMapFlag := flag.String("role-map", "", "maps usernames to Apiary roles, e.g. \"admin:alice;operator:bob,carol;viewer:dave\" (ADR-0030) - a PAM login for a username with no entry here is rejected, not silently downgraded to viewer")
 	managerTLS := flag.Bool("manager-tls", false, "dial managerd over TLS instead of plaintext (must match managerd's own -tls-cert/-tls-key)")
 	managerTLSCA := flag.String("manager-tls-ca", "", "PEM CA file to trust for managerd's certificate (for a self-signed cert); leave empty to trust the system certificate pool")
+	managerTLSServerName := flag.String("manager-tls-server-name", "", "hostname to verify managerd's certificate against, if different from -manager-addr's host (e.g. managerd stays loopback-only but its cert names a real public hostname); leave empty to verify against -manager-addr itself")
 	tlsCert := flag.String("tls-cert", "", "PEM certificate file to serve the web UI over HTTPS; leave unset (with -tls-key) to serve plaintext HTTP, as before")
 	tlsKey := flag.String("tls-key", "", "PEM private key file matching -tls-cert")
 	flag.Parse()
 
-	managerCreds, err := tlsdial.ManagerDialOption(*managerTLS, *managerTLSCA)
+	managerCreds, err := tlsdial.ManagerDialOption(*managerTLS, *managerTLSCA, *managerTLSServerName)
 	if err != nil {
 		return err
 	}

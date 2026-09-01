@@ -42,19 +42,29 @@ func genSelfSignedCertPEM(t *testing.T) []byte {
 func TestManagerDialOption_PlaintextIgnoresCAFile(t *testing.T) {
 	// useTLS=false must never even try to read caFile - a nonexistent
 	// path here would error if it were consulted.
-	if _, err := ManagerDialOption(false, "/nonexistent/ca.pem"); err != nil {
+	if _, err := ManagerDialOption(false, "/nonexistent/ca.pem", ""); err != nil {
 		t.Errorf("ManagerDialOption(false, ...) error: %v, want nil (CA file should be ignored)", err)
 	}
 }
 
 func TestManagerDialOption_TLSWithNoCAUsesSystemPool(t *testing.T) {
-	if _, err := ManagerDialOption(true, ""); err != nil {
+	if _, err := ManagerDialOption(true, "", ""); err != nil {
 		t.Errorf("ManagerDialOption(true, \"\") error: %v, want nil", err)
 	}
 }
 
+func TestManagerDialOption_ServerNameOverrideSucceeds(t *testing.T) {
+	// A non-empty serverName must be accepted without error - the whole
+	// point is decoupling the verified hostname from the dialed address
+	// (e.g. managerd stays loopback-only but its cert names a real
+	// public hostname).
+	if _, err := ManagerDialOption(true, "", "apiarium.apiary.work"); err != nil {
+		t.Errorf("ManagerDialOption(true, \"\", \"apiarium.apiary.work\") error: %v, want nil", err)
+	}
+}
+
 func TestManagerDialOption_TLSWithMissingCAFileErrors(t *testing.T) {
-	if _, err := ManagerDialOption(true, "/nonexistent/ca.pem"); err == nil {
+	if _, err := ManagerDialOption(true, "/nonexistent/ca.pem", ""); err == nil {
 		t.Error("ManagerDialOption(true, missing file) = nil error, want an error")
 	}
 }
@@ -66,7 +76,7 @@ func TestManagerDialOption_TLSWithMalformedCAFileErrors(t *testing.T) {
 		t.Fatalf("WriteFile() error: %v", err)
 	}
 
-	if _, err := ManagerDialOption(true, path); err == nil {
+	if _, err := ManagerDialOption(true, path, ""); err == nil {
 		t.Error("ManagerDialOption(true, malformed file) = nil error, want an error")
 	}
 }
@@ -78,7 +88,7 @@ func TestManagerDialOption_TLSWithValidCAFileSucceeds(t *testing.T) {
 		t.Fatalf("WriteFile() error: %v", err)
 	}
 
-	if _, err := ManagerDialOption(true, path); err != nil {
+	if _, err := ManagerDialOption(true, path, ""); err != nil {
 		t.Errorf("ManagerDialOption(true, valid file) error: %v, want nil", err)
 	}
 }

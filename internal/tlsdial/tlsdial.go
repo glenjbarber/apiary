@@ -24,12 +24,22 @@ import (
 // -tls-cert/-tls-key). caFile, if set, is trusted *instead of* the
 // system pool - the expected case for a self-signed certificate, the
 // same tradeoff any internal-only TLS deployment faces.
-func ManagerDialOption(useTLS bool, caFile string) (grpc.DialOption, error) {
+//
+// serverName, if set, overrides the hostname used for certificate
+// verification independently of the address actually dialed - needed
+// when managerd stays loopback-only (its -rpc-addr is 127.0.0.1, never
+// exposed on the network) but its certificate names a real public
+// hostname a CA like Let's Encrypt could actually issue for (Let's
+// Encrypt never issues for "127.0.0.1" or "localhost"). Leave empty to
+// verify against the dialed address itself, the default grpc-go
+// behavior.
+func ManagerDialOption(useTLS bool, caFile, serverName string) (grpc.DialOption, error) {
 	if !useTLS {
 		return grpc.WithTransportCredentials(insecure.NewCredentials()), nil
 	}
+	cfg := &tls.Config{ServerName: serverName}
 	if caFile == "" {
-		return grpc.WithTransportCredentials(credentials.NewTLS(&tls.Config{})), nil
+		return grpc.WithTransportCredentials(credentials.NewTLS(cfg)), nil
 	}
 	pem, err := os.ReadFile(caFile)
 	if err != nil {
@@ -39,5 +49,6 @@ func ManagerDialOption(useTLS bool, caFile string) (grpc.DialOption, error) {
 	if !pool.AppendCertsFromPEM(pem) {
 		return nil, fmt.Errorf("tlsdial: no valid certificates found in %s", caFile)
 	}
-	return grpc.WithTransportCredentials(credentials.NewTLS(&tls.Config{RootCAs: pool})), nil
+	cfg.RootCAs = pool
+	return grpc.WithTransportCredentials(credentials.NewTLS(cfg)), nil
 }
