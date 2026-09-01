@@ -19,6 +19,8 @@ import (
 // fakeClient implements rpcpb.ManagerServiceClient with canned responses,
 // mirroring internal/restshim's test fake.
 type fakeClient struct {
+	statusResp *rpcpb.StatusResponse
+
 	listResp *rpcpb.ListVMsResponse
 	listErr  error
 
@@ -81,6 +83,9 @@ func (f *fakeUploadClientStream) CloseAndRecv() (*rpcpb.UploadISOResponse, error
 }
 
 func (f *fakeClient) Status(context.Context, *rpcpb.StatusRequest, ...grpc.CallOption) (*rpcpb.StatusResponse, error) {
+	if f.statusResp != nil {
+		return f.statusResp, nil
+	}
 	return &rpcpb.StatusResponse{}, nil
 }
 
@@ -762,6 +767,31 @@ func TestServer_JailsPage(t *testing.T) {
 	body := rec.Body.String()
 	if !strings.Contains(body, "jail-1") || !strings.Contains(body, "web-1.local") || !strings.Contains(body, "node-a") {
 		t.Errorf("jails page missing expected jail row, got: %s", body)
+	}
+}
+
+// TestServer_JailsPage_NodeIDIsADropdownOfKnownNodes guards against a
+// real inconsistency: the jail create form's Node ID field was a plain
+// text input while the VM create form's own equivalent already used a
+// dropdown of known cluster members (see handleNewVMForm) - easy to
+// leave blank or mistype, silently creating a jail record no node will
+// ever reconcile.
+func TestServer_JailsPage_NodeIDIsADropdownOfKnownNodes(t *testing.T) {
+	client := &fakeClient{
+		statusResp: &rpcpb.StatusResponse{KnownNodeIds: []string{"apiarium", "freebsd-apiary"}},
+	}
+	s := newTestServer(t, client)
+
+	req := httptest.NewRequest(http.MethodGet, "/jails", nil)
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, req)
+
+	body := rec.Body.String()
+	if !strings.Contains(body, `<select name="node_id">`) {
+		t.Errorf("jails page node_id is not a <select>, got: %s", body)
+	}
+	if !strings.Contains(body, `<option value="apiarium">apiarium</option>`) {
+		t.Errorf("jails page node_id dropdown missing known node apiarium, got: %s", body)
 	}
 }
 

@@ -882,7 +882,8 @@ func (s *Server) currentJails(r *http.Request) ([]jailView, string) {
 // handleJailsPage serves the Jails list/create page ("/jails").
 func (s *Server) handleJailsPage(w http.ResponseWriter, r *http.Request) {
 	jails, errMsg := s.currentJails(r)
-	s.render(w, "jails_page", s.withAuthFields(r, pageData{Jails: jails, JailFormError: errMsg, ActivePage: "jails"}))
+	nodes, _ := s.knownNodes(r)
+	s.render(w, "jails_page", s.withAuthFields(r, pageData{Jails: jails, Nodes: nodes, JailFormError: errMsg, ActivePage: "jails"}))
 }
 
 // handleCreateJail mirrors handleCreateNetwork's combined-panel pattern.
