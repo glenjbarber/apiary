@@ -63,15 +63,15 @@
   <h3>Network</h3>
   <table>
     <thead>
-      <tr><th>Interface</th><th>Status</th><th>Received</th><th>Transmitted</th></tr>
+      <tr><th>Interface</th><th>Received</th><th>Transmitted</th><th>Status</th></tr>
     </thead>
     <tbody>
       {{range .Stats.Net}}
       <tr>
         <td>{{.Name}}</td>
-        <td>{{if .Up}}<span class="success">up</span>{{else}}<span class="error">down</span>{{end}}</td>
         <td>{{.Rx}}</td>
         <td>{{.Tx}}</td>
+        <td>{{if .Up}}<span class="success">up</span>{{else}}<span class="error">down</span>{{end}}</td>
       </tr>
       {{else}}
       <tr><td colspan="4"><em>No interfaces</em></td></tr>

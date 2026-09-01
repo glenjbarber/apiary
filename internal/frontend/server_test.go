@@ -444,6 +444,51 @@ func TestServer_NewVMPage(t *testing.T) {
 	}
 }
 
+// TestServer_NewJailPage mirrors TestServer_NewVMPage exactly - the
+// jail create form now lives on its own page (/jails/new), matching
+// the VM create form's own established pattern (ADR-0018), instead of
+// inline on the jails list.
+func TestServer_NewJailPage(t *testing.T) {
+	client := &fakeClient{}
+	s := newTestServer(t, client)
+
+	req := httptest.NewRequest(http.MethodGet, "/jails/new", nil)
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, `class="create-vm`) {
+		t.Errorf("new jail page missing create form, got: %s", body)
+	}
+	if !strings.Contains(body, `id="create-error"`) {
+		t.Errorf("new jail page missing error slot, got: %s", body)
+	}
+}
+
+// TestServer_JailsPage_HasCreateJailButton confirms the jails list page
+// links to the new create-jail page, rather than embedding the form
+// inline (the inconsistency a user reported live: VMs had this button/
+// separate-page pattern, Jails didn't).
+func TestServer_JailsPage_HasCreateJailButton(t *testing.T) {
+	client := &fakeClient{}
+	s := newTestServer(t, client)
+
+	req := httptest.NewRequest(http.MethodGet, "/jails", nil)
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, req)
+
+	body := rec.Body.String()
+	if !strings.Contains(body, `href='/jails/new'`) {
+		t.Errorf("jails page missing link to the create-jail page, got: %s", body)
+	}
+	if strings.Contains(body, `name="id" required`) {
+		t.Errorf("jails page should no longer embed the create form inline, got: %s", body)
+	}
+}
+
 func TestServer_ListVMs_ReturnsRowsFragmentOnly(t *testing.T) {
 	client := &fakeClient{listResp: &rpcpb.ListVMsResponse{
 		Vms: []*rpcpb.VMDefinition{{Id: "vm-1", Name: "web-1", Phase: rpcpb.VMPhase_VM_PHASE_CREATING}},
@@ -783,28 +828,28 @@ func TestServer_JailsPage(t *testing.T) {
 	}
 }
 
-// TestServer_JailsPage_NodeIDIsADropdownOfKnownNodes guards against a
+// TestServer_NewJailPage_NodeIDIsADropdownOfKnownNodes guards against a
 // real inconsistency: the jail create form's Node ID field was a plain
 // text input while the VM create form's own equivalent already used a
 // dropdown of known cluster members (see handleNewVMForm) - easy to
 // leave blank or mistype, silently creating a jail record no node will
 // ever reconcile.
-func TestServer_JailsPage_NodeIDIsADropdownOfKnownNodes(t *testing.T) {
+func TestServer_NewJailPage_NodeIDIsADropdownOfKnownNodes(t *testing.T) {
 	client := &fakeClient{
 		statusResp: &rpcpb.StatusResponse{KnownNodeIds: []string{"apiarium", "freebsd-apiary"}},
 	}
 	s := newTestServer(t, client)
 
-	req := httptest.NewRequest(http.MethodGet, "/jails", nil)
+	req := httptest.NewRequest(http.MethodGet, "/jails/new", nil)
 	rec := httptest.NewRecorder()
 	s.ServeHTTP(rec, req)
 
 	body := rec.Body.String()
 	if !strings.Contains(body, `<select name="node_id">`) {
-		t.Errorf("jails page node_id is not a <select>, got: %s", body)
+		t.Errorf("new jail page node_id is not a <select>, got: %s", body)
 	}
 	if !strings.Contains(body, `<option value="apiarium">apiarium</option>`) {
-		t.Errorf("jails page node_id dropdown missing known node apiarium, got: %s", body)
+		t.Errorf("new jail page node_id dropdown missing known node apiarium, got: %s", body)
 	}
 }
 
@@ -840,9 +885,15 @@ func TestServer_CreateJail(t *testing.T) {
 	if got.GetId() != "jail-1" || got.GetHostname() != "web-1.local" || got.GetNodeId() != "node-a" {
 		t.Errorf("forwarded jail = %+v, want id=jail-1 hostname=web-1.local node_id=node-a", got)
 	}
+	// On its own page now (see new_jail.html) with no jail table to
+	// refresh - success is reported via HX-Redirect to the jails page,
+	// not a re-rendered fragment.
+	if got := rec.Header().Get("HX-Redirect"); got != "/jails" {
+		t.Errorf("HX-Redirect = %q, want /jails", got)
+	}
 }
 
-func TestServer_CreateJail_ErrorShowsInPanel(t *testing.T) {
+func TestServer_CreateJail_ErrorRendersDirectlyNoRedirect(t *testing.T) {
 	client := &fakeClient{createJailResp: &rpcpb.CreateJailResponse{Error: `id "jail-1" already exists`}}
 	s := newTestServer(t, client)
 
@@ -854,6 +905,9 @@ func TestServer_CreateJail_ErrorShowsInPanel(t *testing.T) {
 
 	if !strings.Contains(rec.Body.String(), "already exists") {
 		t.Errorf("response missing error message, got: %s", rec.Body.String())
+	}
+	if got := rec.Header().Get("HX-Redirect"); got != "" {
+		t.Errorf("HX-Redirect = %q, want none on error", got)
 	}
 }
 

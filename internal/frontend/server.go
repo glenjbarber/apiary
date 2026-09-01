@@ -362,6 +362,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("DELETE /isos/{name}", s.requireRole(manager.RoleOperator, s.handleDeleteISO))
 	s.mux.HandleFunc("POST /networks", s.requireRole(manager.RoleOperator, s.handleCreateNetwork))
 	s.mux.HandleFunc("DELETE /networks/{id}", s.requireRole(manager.RoleOperator, s.handleDeleteNetwork))
+	s.mux.HandleFunc("GET /jails/new", s.requireRole(manager.RoleOperator, s.handleNewJailPage))
 	s.mux.HandleFunc("POST /jails", s.requireRole(manager.RoleOperator, s.handleCreateJail))
 	s.mux.HandleFunc("DELETE /jails/{id}", s.requireRole(manager.RoleOperator, s.handleDeleteJail))
 
@@ -536,7 +537,7 @@ func (s *Server) handleNewVMPage(w http.ResponseWriter, r *http.Request) {
 	nodes, _ := s.knownNodes(r)
 	isos, _ := s.currentISOs(r)
 	networks, _ := s.currentNetworks(r)
-	s.render(w, "new_vm_page", s.withAuthFields(r, pageData{Nodes: nodes, ISOs: isos, Networks: networks, ActivePage: "new_vm"}))
+	s.render(w, "new_vm_page", s.withAuthFields(r, pageData{Nodes: nodes, ISOs: isos, Networks: networks, ActivePage: "vms"}))
 }
 
 // currentNetworks fetches the current list of networks, returning an
@@ -943,10 +944,22 @@ func (s *Server) handleJailsPage(w http.ResponseWriter, r *http.Request) {
 	s.render(w, "jails_page", s.withAuthFields(r, pageData{Jails: jails, Nodes: nodes, JailFormError: errMsg, ActivePage: "jails"}))
 }
 
-// handleCreateJail mirrors handleCreateNetwork's combined-panel pattern.
+// handleNewJailPage serves the create-jail form page ("/jails/new"),
+// mirroring handleNewVMPage's own separate-page pattern exactly - see
+// ADR-0018 for why a create form lives on its own page rather than
+// inline on the list.
+func (s *Server) handleNewJailPage(w http.ResponseWriter, r *http.Request) {
+	nodes, _ := s.knownNodes(r)
+	s.render(w, "new_jail_page", s.withAuthFields(r, pageData{Nodes: nodes, ActivePage: "jails"}))
+}
+
+// handleCreateJail mirrors handleCreateVM exactly: redirect back to the
+// list on success, render just the error message on failure - the
+// list page never sees this response directly (the form lives on its
+// own page now, not inline on the list).
 func (s *Server) handleCreateJail(w http.ResponseWriter, r *http.Request) {
 	if err := r.ParseForm(); err != nil {
-		s.renderJailPanelResult(w, r, "invalid form: "+err.Error())
+		s.renderCreateError(w, "invalid form: "+err.Error())
 		return
 	}
 
@@ -960,14 +973,14 @@ func (s *Server) handleCreateJail(w http.ResponseWriter, r *http.Request) {
 		},
 	})
 	if err != nil {
-		s.renderJailPanelResult(w, r, err.Error())
+		s.renderCreateError(w, err.Error())
 		return
 	}
 	if resp.GetError() != "" {
-		s.renderJailPanelResult(w, r, resp.GetError())
+		s.renderCreateError(w, resp.GetError())
 		return
 	}
-	s.renderJailPanelResult(w, r, "")
+	w.Header().Set("HX-Redirect", "/jails")
 }
 
 func (s *Server) handleDeleteJail(w http.ResponseWriter, r *http.Request) {

@@ -4,27 +4,11 @@
 {{template "head" .}}
 <body>
   {{template "nav" .}}
-  {{template "page_header" (pageHeader "Jails" "FreeBSD workloads, placement, and replication state.")}}
-  <form class="create-vm" hx-post="/jails" hx-target="#jail-panel" hx-swap="innerHTML">
-    <label>ID <input type="text" name="id" required></label>
-    <label>Name <input type="text" name="name"></label>
-    <label>Hostname <input type="text" name="hostname"></label>
-    <label>Node ID
-      {{if .Nodes}}
-      <select name="node_id">
-        {{range .Nodes}}<option value="{{.}}">{{.}}</option>{{end}}
-      </select>
-      {{else}}
-      <input type="text" name="node_id">
-      {{end}}
-    </label>
-    <label>Replica node ID (optional - HAST root replication, see ADR-0026)
-      <input type="text" name="replica_node_id">
-    </label>
-    <button type="submit">Create</button>
-  </form>
+  {{template "page_header" (pageHeader "Jails" "FreeBSD workloads, placement, and replication state." "<a class='button' href='/jails/new'>Create Jail</a>")}}
+  <div class="panel">
   <div id="jail-panel">
     {{template "jail_panel" .}}
+  </div>
   </div>
 </body>
 </html>
