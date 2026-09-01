@@ -73,6 +73,12 @@ type PeerForwarder interface {
 	DeleteNetwork(ctx context.Context, addr string, req *rpcpb.DeleteNetworkRequest) (*rpcpb.DeleteNetworkResponse, error)
 	CreateAPIKey(ctx context.Context, addr string, req *rpcpb.CreateAPIKeyRequest) (*rpcpb.CreateAPIKeyResponse, error)
 	RevokeAPIKey(ctx context.Context, addr string, req *rpcpb.RevokeAPIKeyRequest) (*rpcpb.RevokeAPIKeyResponse, error)
+	ListAPIKeys(ctx context.Context, addr string) (*rpcpb.ListAPIKeysResponse, error)
+
+	ForcePurgeVM(ctx context.Context, addr string, req *rpcpb.ForcePurgeVMRequest) (*rpcpb.ForcePurgeVMResponse, error)
+	MigrateVM(ctx context.Context, addr string, req *rpcpb.MigrateVMRequest) (*rpcpb.MigrateVMResponse, error)
+	ForcePurgeJail(ctx context.Context, addr string, req *rpcpb.ForcePurgeJailRequest) (*rpcpb.ForcePurgeJailResponse, error)
+	MigrateJail(ctx context.Context, addr string, req *rpcpb.MigrateJailRequest) (*rpcpb.MigrateJailResponse, error)
 }
 
 // defaultPeerManagerdPort mirrors internal/cluster's own constant of
@@ -383,13 +389,22 @@ func (s *Server) RevokeAPIKey(ctx context.Context, req *rpcpb.RevokeAPIKeyReques
 	return &rpcpb.RevokeAPIKeyResponse{Error: appErr, LeaderHint: leaderHint}, nil
 }
 
-// ListAPIKeys implements rpcpb.ManagerServiceServer.
+// ListAPIKeys implements rpcpb.ManagerServiceServer. See ListNetworks's
+// doc comment for the forwarding rationale - ListAPIKeys was missed
+// from ADR-0035's original set of forwarded reads (only VM/Jail/
+// Network reads were covered there); ADR-0037's follow-up closes that
+// gap.
 func (s *Server) ListAPIKeys(ctx context.Context, _ *rpcpb.ListAPIKeysRequest) (*rpcpb.ListAPIKeysResponse, error) {
 	resp, err := s.raft.ListAPIKeys(ctx)
 	if err != nil {
 		return &rpcpb.ListAPIKeysResponse{Error: err.Error()}, nil
 	}
 	if resp.GetError() != "" {
+		if s.peers != nil && resp.GetLeaderHint() != "" {
+			if fwd, ferr := s.peers.ListAPIKeys(ctx, s.peerManagerdAddr(resp.GetLeaderHint())); ferr == nil {
+				return fwd, nil
+			}
+		}
 		return &rpcpb.ListAPIKeysResponse{Error: resp.GetError(), LeaderHint: resp.GetLeaderHint()}, nil
 	}
 	keys := make([]*rpcpb.APIKeyInfo, 0, len(resp.GetKeys()))
@@ -474,13 +489,24 @@ func (s *Server) DeleteVM(ctx context.Context, req *rpcpb.DeleteVMRequest) (*rpc
 // still up. GetVM here uses the same leader-only read every other
 // lookup in this RPC does - there's no reason to special-case it the
 // way ADR-0023's ValidateAPIKeyHash does, since this isn't a
-// per-request auth check.
+// per-request auth check. Unlike CreateVM/UpdateVM/DeleteVM, this RPC's
+// own preliminary read goes through RaftClient.GetVM directly (not the
+// exported, forwarding-enabled GetVM RPC handler), so the forward has
+// to happen right here rather than falling out of GetVM's own
+// forwarding - and it forwards the entire original request, not just
+// the read, since a peer needs to redo this RPC's own validation too
+// (ADR-0037's follow-up, closing the gap that ADR itself named).
 func (s *Server) ForcePurgeVM(ctx context.Context, req *rpcpb.ForcePurgeVMRequest) (*rpcpb.ForcePurgeVMResponse, error) {
 	getResp, err := s.raft.GetVM(ctx, req.GetId())
 	if err != nil {
 		return &rpcpb.ForcePurgeVMResponse{Error: err.Error()}, nil
 	}
 	if getResp.GetError() != "" {
+		if s.peers != nil && getResp.GetLeaderHint() != "" {
+			if fwd, ferr := s.peers.ForcePurgeVM(ctx, s.peerManagerdAddr(getResp.GetLeaderHint()), req); ferr == nil {
+				return fwd, nil
+			}
+		}
 		return &rpcpb.ForcePurgeVMResponse{Error: getResp.GetError(), LeaderHint: getResp.GetLeaderHint()}, nil
 	}
 	if !getResp.GetFound() {
@@ -494,6 +520,11 @@ func (s *Server) ForcePurgeVM(ctx context.Context, req *rpcpb.ForcePurgeVMReques
 		Op: &internalpb.Command_PurgeVm{PurgeVm: &internalpb.PurgeVM{Id: req.GetId()}},
 	}
 	vm, appErr, leaderHint := s.applyCommand(ctx, cmd, req.GetTimeoutMs())
+	if leaderHint != "" && s.peers != nil {
+		if fwd, ferr := s.peers.ForcePurgeVM(ctx, s.peerManagerdAddr(leaderHint), req); ferr == nil {
+			return fwd, nil
+		}
+	}
 	return &rpcpb.ForcePurgeVMResponse{Vm: fromInternalVM(vm), Error: appErr, LeaderHint: leaderHint}, nil
 }
 
@@ -503,6 +534,9 @@ func (s *Server) ForcePurgeVM(ctx context.Context, req *rpcpb.ForcePurgeVMReques
 // short, any other target would silently destroy the VM's real disk
 // data (the old node's reconciler tears it down via ADR-0025's
 // resource reclaim, and the new node has never seen the disk at all).
+// See ForcePurgeVM's doc comment for why forwarding has to happen at
+// this RPC's own call sites rather than through GetVM's forwarding
+// (ADR-0037's follow-up).
 func (s *Server) MigrateVM(ctx context.Context, req *rpcpb.MigrateVMRequest) (*rpcpb.MigrateVMResponse, error) {
 	if req.GetTargetNodeId() == "" {
 		return &rpcpb.MigrateVMResponse{Error: "target_node_id must be set"}, nil
@@ -513,6 +547,11 @@ func (s *Server) MigrateVM(ctx context.Context, req *rpcpb.MigrateVMRequest) (*r
 		return &rpcpb.MigrateVMResponse{Error: err.Error()}, nil
 	}
 	if getResp.GetError() != "" {
+		if s.peers != nil && getResp.GetLeaderHint() != "" {
+			if fwd, ferr := s.peers.MigrateVM(ctx, s.peerManagerdAddr(getResp.GetLeaderHint()), req); ferr == nil {
+				return fwd, nil
+			}
+		}
 		return &rpcpb.MigrateVMResponse{Error: getResp.GetError(), LeaderHint: getResp.GetLeaderHint()}, nil
 	}
 	if !getResp.GetFound() {
@@ -541,6 +580,11 @@ func (s *Server) MigrateVM(ctx context.Context, req *rpcpb.MigrateVMRequest) (*r
 		Op: &internalpb.Command_UpdateVm{UpdateVm: &internalpb.UpdateVM{Vm: updated}},
 	}
 	result, appErr, leaderHint := s.applyCommand(ctx, cmd, req.GetTimeoutMs())
+	if leaderHint != "" && s.peers != nil {
+		if fwd, ferr := s.peers.MigrateVM(ctx, s.peerManagerdAddr(leaderHint), req); ferr == nil {
+			return fwd, nil
+		}
+	}
 	return &rpcpb.MigrateVMResponse{Vm: fromInternalVM(result), Error: appErr, LeaderHint: leaderHint}, nil
 }
 
@@ -976,13 +1020,19 @@ func (s *Server) GetJail(ctx context.Context, req *rpcpb.GetJailRequest) (*rpcpb
 }
 
 // ForcePurgeJail mirrors ForcePurgeVM exactly - see its own doc
-// comment for the full reasoning, which applies identically here.
+// comment for the full reasoning, which applies identically here,
+// including the forwarding rationale (ADR-0037's follow-up).
 func (s *Server) ForcePurgeJail(ctx context.Context, req *rpcpb.ForcePurgeJailRequest) (*rpcpb.ForcePurgeJailResponse, error) {
 	getResp, err := s.raft.GetJail(ctx, req.GetId())
 	if err != nil {
 		return &rpcpb.ForcePurgeJailResponse{Error: err.Error()}, nil
 	}
 	if getResp.GetError() != "" {
+		if s.peers != nil && getResp.GetLeaderHint() != "" {
+			if fwd, ferr := s.peers.ForcePurgeJail(ctx, s.peerManagerdAddr(getResp.GetLeaderHint()), req); ferr == nil {
+				return fwd, nil
+			}
+		}
 		return &rpcpb.ForcePurgeJailResponse{Error: getResp.GetError(), LeaderHint: getResp.GetLeaderHint()}, nil
 	}
 	if !getResp.GetFound() {
@@ -996,11 +1046,17 @@ func (s *Server) ForcePurgeJail(ctx context.Context, req *rpcpb.ForcePurgeJailRe
 		Op: &internalpb.Command_PurgeJail{PurgeJail: &internalpb.PurgeJail{Id: req.GetId()}},
 	}
 	jail, appErr, leaderHint := s.applyJailCommand(ctx, cmd, req.GetTimeoutMs())
+	if leaderHint != "" && s.peers != nil {
+		if fwd, ferr := s.peers.ForcePurgeJail(ctx, s.peerManagerdAddr(leaderHint), req); ferr == nil {
+			return fwd, nil
+		}
+	}
 	return &rpcpb.ForcePurgeJailResponse{Jail: fromInternalJail(jail), Error: appErr, LeaderHint: leaderHint}, nil
 }
 
 // MigrateJail mirrors MigrateVM exactly - see its own doc comment for
-// the full reasoning, which applies identically here.
+// the full reasoning, which applies identically here, including the
+// forwarding rationale (ADR-0037's follow-up).
 func (s *Server) MigrateJail(ctx context.Context, req *rpcpb.MigrateJailRequest) (*rpcpb.MigrateJailResponse, error) {
 	if req.GetTargetNodeId() == "" {
 		return &rpcpb.MigrateJailResponse{Error: "target_node_id must be set"}, nil
@@ -1011,6 +1067,11 @@ func (s *Server) MigrateJail(ctx context.Context, req *rpcpb.MigrateJailRequest)
 		return &rpcpb.MigrateJailResponse{Error: err.Error()}, nil
 	}
 	if getResp.GetError() != "" {
+		if s.peers != nil && getResp.GetLeaderHint() != "" {
+			if fwd, ferr := s.peers.MigrateJail(ctx, s.peerManagerdAddr(getResp.GetLeaderHint()), req); ferr == nil {
+				return fwd, nil
+			}
+		}
 		return &rpcpb.MigrateJailResponse{Error: getResp.GetError(), LeaderHint: getResp.GetLeaderHint()}, nil
 	}
 	if !getResp.GetFound() {
@@ -1039,6 +1100,11 @@ func (s *Server) MigrateJail(ctx context.Context, req *rpcpb.MigrateJailRequest)
 		Op: &internalpb.Command_UpdateJail{UpdateJail: &internalpb.UpdateJail{Jail: updated}},
 	}
 	result, appErr, leaderHint := s.applyJailCommand(ctx, cmd, req.GetTimeoutMs())
+	if leaderHint != "" && s.peers != nil {
+		if fwd, ferr := s.peers.MigrateJail(ctx, s.peerManagerdAddr(leaderHint), req); ferr == nil {
+			return fwd, nil
+		}
+	}
 	return &rpcpb.MigrateJailResponse{Jail: fromInternalJail(result), Error: appErr, LeaderHint: leaderHint}, nil
 }
 

@@ -351,6 +351,64 @@ func (p *PeerReporter) RevokeAPIKey(ctx context.Context, addr string, req *rpcpb
 	return client.RevokeAPIKey(ctx, req)
 }
 
+// ListAPIKeys forwards a leader-only read rejected by this node's own
+// raftd to the leader node's own managerd - mirrors ListVMs/GetVM/etc.
+// above (ADR-0035). Missing from that original set (ADR-0037's
+// follow-up closes the gap): ListAPIKeys is a read, but was never
+// included in ADR-0035's original list of forwarded reads.
+func (p *PeerReporter) ListAPIKeys(ctx context.Context, addr string) (*rpcpb.ListAPIKeysResponse, error) {
+	conn, client, err := p.dial(addr)
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close()
+	return client.ListAPIKeys(ctx, &rpcpb.ListAPIKeysRequest{})
+}
+
+// ForcePurgeVM/MigrateVM/ForcePurgeJail/MigrateJail forward the whole
+// original request to the leader node's own managerd - unlike
+// Create/Update/Delete, these RPCs read local FSM state up front (via
+// RaftClient.GetVM/GetJail, not the exported, now-forwarding GetVM/
+// GetJail RPC handlers) before ever attempting an Apply, so this node's
+// own local read has to be the thing that triggers the forward, not
+// just a rejected Apply (ADR-0037's follow-up, closing the gap that
+// ADR itself named as left open).
+func (p *PeerReporter) ForcePurgeVM(ctx context.Context, addr string, req *rpcpb.ForcePurgeVMRequest) (*rpcpb.ForcePurgeVMResponse, error) {
+	conn, client, err := p.dial(addr)
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close()
+	return client.ForcePurgeVM(ctx, req)
+}
+
+func (p *PeerReporter) MigrateVM(ctx context.Context, addr string, req *rpcpb.MigrateVMRequest) (*rpcpb.MigrateVMResponse, error) {
+	conn, client, err := p.dial(addr)
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close()
+	return client.MigrateVM(ctx, req)
+}
+
+func (p *PeerReporter) ForcePurgeJail(ctx context.Context, addr string, req *rpcpb.ForcePurgeJailRequest) (*rpcpb.ForcePurgeJailResponse, error) {
+	conn, client, err := p.dial(addr)
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close()
+	return client.ForcePurgeJail(ctx, req)
+}
+
+func (p *PeerReporter) MigrateJail(ctx context.Context, addr string, req *rpcpb.MigrateJailRequest) (*rpcpb.MigrateJailResponse, error) {
+	conn, client, err := p.dial(addr)
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close()
+	return client.MigrateJail(ctx, req)
+}
+
 func (p *PeerReporter) ReportJailTeardownComplete(ctx context.Context, addr, id string) error {
 	conn, client, err := p.dial(addr)
 	if err != nil {

@@ -51,6 +51,55 @@ type fakePeerServer struct {
 	createAPIKeyReq  *rpcpb.CreateAPIKeyRequest
 	createAPIKeyResp *rpcpb.CreateAPIKeyResponse
 	revokeAPIKeyReq  *rpcpb.RevokeAPIKeyRequest
+	listAPIKeysResp  *rpcpb.ListAPIKeysResponse
+
+	forcePurgeVMReq    *rpcpb.ForcePurgeVMRequest
+	forcePurgeVMResp   *rpcpb.ForcePurgeVMResponse
+	migrateVMReq       *rpcpb.MigrateVMRequest
+	migrateVMResp      *rpcpb.MigrateVMResponse
+	forcePurgeJailReq  *rpcpb.ForcePurgeJailRequest
+	forcePurgeJailResp *rpcpb.ForcePurgeJailResponse
+	migrateJailReq     *rpcpb.MigrateJailRequest
+	migrateJailResp    *rpcpb.MigrateJailResponse
+}
+
+func (f *fakePeerServer) ListAPIKeys(context.Context, *rpcpb.ListAPIKeysRequest) (*rpcpb.ListAPIKeysResponse, error) {
+	if f.listAPIKeysResp != nil {
+		return f.listAPIKeysResp, nil
+	}
+	return &rpcpb.ListAPIKeysResponse{}, nil
+}
+
+func (f *fakePeerServer) ForcePurgeVM(_ context.Context, req *rpcpb.ForcePurgeVMRequest) (*rpcpb.ForcePurgeVMResponse, error) {
+	f.forcePurgeVMReq = req
+	if f.forcePurgeVMResp != nil {
+		return f.forcePurgeVMResp, nil
+	}
+	return &rpcpb.ForcePurgeVMResponse{}, nil
+}
+
+func (f *fakePeerServer) MigrateVM(_ context.Context, req *rpcpb.MigrateVMRequest) (*rpcpb.MigrateVMResponse, error) {
+	f.migrateVMReq = req
+	if f.migrateVMResp != nil {
+		return f.migrateVMResp, nil
+	}
+	return &rpcpb.MigrateVMResponse{}, nil
+}
+
+func (f *fakePeerServer) ForcePurgeJail(_ context.Context, req *rpcpb.ForcePurgeJailRequest) (*rpcpb.ForcePurgeJailResponse, error) {
+	f.forcePurgeJailReq = req
+	if f.forcePurgeJailResp != nil {
+		return f.forcePurgeJailResp, nil
+	}
+	return &rpcpb.ForcePurgeJailResponse{}, nil
+}
+
+func (f *fakePeerServer) MigrateJail(_ context.Context, req *rpcpb.MigrateJailRequest) (*rpcpb.MigrateJailResponse, error) {
+	f.migrateJailReq = req
+	if f.migrateJailResp != nil {
+		return f.migrateJailResp, nil
+	}
+	return &rpcpb.MigrateJailResponse{}, nil
 }
 
 func (f *fakePeerServer) CreateVM(_ context.Context, req *rpcpb.CreateVMRequest) (*rpcpb.CreateVMResponse, error) {
@@ -501,5 +550,90 @@ func TestPeerReporter_RevokeAPIKey_SendsCorrectRequest(t *testing.T) {
 	}
 	if fake.revokeAPIKeyReq.GetId() != "key-1" {
 		t.Errorf("received request id = %q, want key-1", fake.revokeAPIKeyReq.GetId())
+	}
+}
+
+// The following cover the remaining ADR-0037 follow-up methods:
+// ListAPIKeys (a read missed from ADR-0035's original set) and
+// ForcePurgeVM/MigrateVM/ForcePurgeJail/MigrateJail (forwarding the
+// whole original request, since these RPCs read local FSM state up
+// front rather than going through the exported, forwarding-enabled
+// GetVM/GetJail handlers).
+
+func TestPeerReporter_ListAPIKeys_ReturnsPeerResponse(t *testing.T) {
+	fake := &fakePeerServer{listAPIKeysResp: &rpcpb.ListAPIKeysResponse{Keys: []*rpcpb.APIKeyInfo{{Id: "key-1"}}}}
+	addr := newTestPeerServer(t, fake)
+	p := NewPeerReporter("", false, nil)
+
+	resp, err := p.ListAPIKeys(context.Background(), addr)
+	if err != nil {
+		t.Fatalf("ListAPIKeys() error: %v", err)
+	}
+	if len(resp.GetKeys()) != 1 || resp.GetKeys()[0].GetId() != "key-1" {
+		t.Errorf("ListAPIKeys() = %+v, want one key with id=key-1", resp)
+	}
+}
+
+func TestPeerReporter_ForcePurgeVM_SendsCorrectRequestAndReturnsResponse(t *testing.T) {
+	fake := &fakePeerServer{forcePurgeVMResp: &rpcpb.ForcePurgeVMResponse{Vm: &rpcpb.VMDefinition{Id: "vm-1"}}}
+	addr := newTestPeerServer(t, fake)
+	p := NewPeerReporter("", false, nil)
+
+	req := &rpcpb.ForcePurgeVMRequest{Id: "vm-1"}
+	resp, err := p.ForcePurgeVM(context.Background(), addr, req)
+	if err != nil {
+		t.Fatalf("ForcePurgeVM() error: %v", err)
+	}
+	if fake.forcePurgeVMReq.GetId() != "vm-1" {
+		t.Errorf("received request id = %q, want vm-1", fake.forcePurgeVMReq.GetId())
+	}
+	if resp.GetVm().GetId() != "vm-1" {
+		t.Errorf("ForcePurgeVM() = %+v, want id=vm-1", resp)
+	}
+}
+
+func TestPeerReporter_MigrateVM_SendsCorrectRequest(t *testing.T) {
+	fake := &fakePeerServer{}
+	addr := newTestPeerServer(t, fake)
+	p := NewPeerReporter("", false, nil)
+
+	req := &rpcpb.MigrateVMRequest{Id: "vm-1", TargetNodeId: "node-b"}
+	if _, err := p.MigrateVM(context.Background(), addr, req); err != nil {
+		t.Fatalf("MigrateVM() error: %v", err)
+	}
+	if fake.migrateVMReq.GetTargetNodeId() != "node-b" {
+		t.Errorf("received request target_node_id = %q, want node-b", fake.migrateVMReq.GetTargetNodeId())
+	}
+}
+
+func TestPeerReporter_ForcePurgeJail_SendsCorrectRequestAndReturnsResponse(t *testing.T) {
+	fake := &fakePeerServer{forcePurgeJailResp: &rpcpb.ForcePurgeJailResponse{Jail: &rpcpb.JailDefinition{Id: "jail-1"}}}
+	addr := newTestPeerServer(t, fake)
+	p := NewPeerReporter("", false, nil)
+
+	req := &rpcpb.ForcePurgeJailRequest{Id: "jail-1"}
+	resp, err := p.ForcePurgeJail(context.Background(), addr, req)
+	if err != nil {
+		t.Fatalf("ForcePurgeJail() error: %v", err)
+	}
+	if fake.forcePurgeJailReq.GetId() != "jail-1" {
+		t.Errorf("received request id = %q, want jail-1", fake.forcePurgeJailReq.GetId())
+	}
+	if resp.GetJail().GetId() != "jail-1" {
+		t.Errorf("ForcePurgeJail() = %+v, want id=jail-1", resp)
+	}
+}
+
+func TestPeerReporter_MigrateJail_SendsCorrectRequest(t *testing.T) {
+	fake := &fakePeerServer{}
+	addr := newTestPeerServer(t, fake)
+	p := NewPeerReporter("", false, nil)
+
+	req := &rpcpb.MigrateJailRequest{Id: "jail-1", TargetNodeId: "node-b"}
+	if _, err := p.MigrateJail(context.Background(), addr, req); err != nil {
+		t.Fatalf("MigrateJail() error: %v", err)
+	}
+	if fake.migrateJailReq.GetTargetNodeId() != "node-b" {
+		t.Errorf("received request target_node_id = %q, want node-b", fake.migrateJailReq.GetTargetNodeId())
 	}
 }
