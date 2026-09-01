@@ -105,7 +105,28 @@ func run() error {
 		}
 	}
 
-	grpcServer.GracefulStop()
+	// GracefulStop blocks until every open connection/RPC finishes on its
+	// own - with no bound, a single stuck or unexpectedly long-lived
+	// client (a stray connection, a slow peer) can hang shutdown
+	// indefinitely, which is exactly what a real reboot hit: raftd
+	// didn't respond to SIGTERM within any reasonable window, needing a
+	// SIGKILL to actually stop. Fall back to a forceful Stop() rather
+	// than wait forever - rc.d's own shutdown sequence already gives
+	// every service a bounded window before escalating, but that
+	// escalation shouldn't be the only thing standing between a normal
+	// shutdown and a multi-minute hang.
+	const gracefulStopTimeout = 10 * time.Second
+	stopped := make(chan struct{})
+	go func() {
+		grpcServer.GracefulStop()
+		close(stopped)
+	}()
+	select {
+	case <-stopped:
+	case <-time.After(gracefulStopTimeout):
+		log.Printf("raftd: GracefulStop did not complete within %s, forcing Stop", gracefulStopTimeout)
+		grpcServer.Stop()
+	}
 	if err := node.Shutdown(); err != nil {
 		log.Printf("raftd: error shutting down raft: %v", err)
 	}
