@@ -41,6 +41,9 @@ type fakeClient struct {
 	getVMConsoleResp *rpcpb.GetVMConsoleResponse
 	getVMConsoleErr  error
 
+	getVMSerialLogResp *rpcpb.GetVMSerialLogResponse
+	getVMSerialLogErr  error
+
 	listNetworksResp     *rpcpb.ListNetworksResponse
 	createNetworkResp    *rpcpb.CreateNetworkResponse
 	deleteNetworkResp    *rpcpb.DeleteNetworkResponse
@@ -183,6 +186,16 @@ func (f *fakeClient) GetVMConsole(context.Context, *rpcpb.GetVMConsoleRequest, .
 		return f.getVMConsoleResp, nil
 	}
 	return &rpcpb.GetVMConsoleResponse{}, nil
+}
+
+func (f *fakeClient) GetVMSerialLog(context.Context, *rpcpb.GetVMSerialLogRequest, ...grpc.CallOption) (*rpcpb.GetVMSerialLogResponse, error) {
+	if f.getVMSerialLogErr != nil {
+		return nil, f.getVMSerialLogErr
+	}
+	if f.getVMSerialLogResp != nil {
+		return f.getVMSerialLogResp, nil
+	}
+	return &rpcpb.GetVMSerialLogResponse{}, nil
 }
 
 func (f *fakeClient) ListNetworks(context.Context, *rpcpb.ListNetworksRequest, ...grpc.CallOption) (*rpcpb.ListNetworksResponse, error) {

@@ -32,6 +32,7 @@ const (
 	ManagerService_DeleteISO_FullMethodName                  = "/apiary.rpc.v1.ManagerService/DeleteISO"
 	ManagerService_HostStats_FullMethodName                  = "/apiary.rpc.v1.ManagerService/HostStats"
 	ManagerService_GetVMConsole_FullMethodName               = "/apiary.rpc.v1.ManagerService/GetVMConsole"
+	ManagerService_GetVMSerialLog_FullMethodName             = "/apiary.rpc.v1.ManagerService/GetVMSerialLog"
 	ManagerService_CreateNetwork_FullMethodName              = "/apiary.rpc.v1.ManagerService/CreateNetwork"
 	ManagerService_ListNetworks_FullMethodName               = "/apiary.rpc.v1.ManagerService/ListNetworks"
 	ManagerService_DeleteNetwork_FullMethodName              = "/apiary.rpc.v1.ManagerService/DeleteNetwork"
@@ -126,6 +127,12 @@ type ManagerServiceClient interface {
 	// GetVMConsoleResponse's doc comment for the v1 limitation that
 	// follows from that.
 	GetVMConsole(ctx context.Context, in *GetVMConsoleRequest, opts ...grpc.CallOption) (*GetVMConsoleResponse, error)
+	// GetVMSerialLog returns the tail of a VM's captured serial console
+	// log (ADR-0032's EnableSerialLog), for the web UI - previously this
+	// required an operator to read the file directly on the owning node.
+	// Same locality limitation as GetVMConsole: only answers for a VM
+	// confirmed running on *this* node.
+	GetVMSerialLog(ctx context.Context, in *GetVMSerialLogRequest, opts ...grpc.CallOption) (*GetVMSerialLogResponse, error)
 	// CreateNetwork/ListNetworks/DeleteNetwork manage NetworkDefinitions -
 	// VLAN/subnet/bridge segments a VM can attach to (see ADR-0022).
 	// CreateNetwork/DeleteNetwork just submit a Command through raft
@@ -315,6 +322,16 @@ func (c *managerServiceClient) GetVMConsole(ctx context.Context, in *GetVMConsol
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(GetVMConsoleResponse)
 	err := c.cc.Invoke(ctx, ManagerService_GetVMConsole_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *managerServiceClient) GetVMSerialLog(ctx context.Context, in *GetVMSerialLogRequest, opts ...grpc.CallOption) (*GetVMSerialLogResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetVMSerialLogResponse)
+	err := c.cc.Invoke(ctx, ManagerService_GetVMSerialLog_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -566,6 +583,12 @@ type ManagerServiceServer interface {
 	// GetVMConsoleResponse's doc comment for the v1 limitation that
 	// follows from that.
 	GetVMConsole(context.Context, *GetVMConsoleRequest) (*GetVMConsoleResponse, error)
+	// GetVMSerialLog returns the tail of a VM's captured serial console
+	// log (ADR-0032's EnableSerialLog), for the web UI - previously this
+	// required an operator to read the file directly on the owning node.
+	// Same locality limitation as GetVMConsole: only answers for a VM
+	// confirmed running on *this* node.
+	GetVMSerialLog(context.Context, *GetVMSerialLogRequest) (*GetVMSerialLogResponse, error)
 	// CreateNetwork/ListNetworks/DeleteNetwork manage NetworkDefinitions -
 	// VLAN/subnet/bridge segments a VM can attach to (see ADR-0022).
 	// CreateNetwork/DeleteNetwork just submit a Command through raft
@@ -666,6 +689,9 @@ func (UnimplementedManagerServiceServer) HostStats(context.Context, *HostStatsRe
 }
 func (UnimplementedManagerServiceServer) GetVMConsole(context.Context, *GetVMConsoleRequest) (*GetVMConsoleResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetVMConsole not implemented")
+}
+func (UnimplementedManagerServiceServer) GetVMSerialLog(context.Context, *GetVMSerialLogRequest) (*GetVMSerialLogResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetVMSerialLog not implemented")
 }
 func (UnimplementedManagerServiceServer) CreateNetwork(context.Context, *CreateNetworkRequest) (*CreateNetworkResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method CreateNetwork not implemented")
@@ -958,6 +984,24 @@ func _ManagerService_GetVMConsole_Handler(srv interface{}, ctx context.Context, 
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(ManagerServiceServer).GetVMConsole(ctx, req.(*GetVMConsoleRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ManagerService_GetVMSerialLog_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetVMSerialLogRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ManagerServiceServer).GetVMSerialLog(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ManagerService_GetVMSerialLog_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ManagerServiceServer).GetVMSerialLog(ctx, req.(*GetVMSerialLogRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -1322,6 +1366,10 @@ var ManagerService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "GetVMConsole",
 			Handler:    _ManagerService_GetVMConsole_Handler,
+		},
+		{
+			MethodName: "GetVMSerialLog",
+			Handler:    _ManagerService_GetVMSerialLog_Handler,
 		},
 		{
 			MethodName: "CreateNetwork",

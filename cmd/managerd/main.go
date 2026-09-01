@@ -171,15 +171,17 @@ func run() error {
 	// would panic the first time GetVMConsole/ListNetworks called a
 	// method on it.
 	var vncArg manager.VNCLookup
+	var serialLogArg manager.SerialLogLookup
 	var vlanArg manager.VLANStatus
 	if bhyveMgr != nil {
 		vncArg = bhyveMgr
+		serialLogArg = bhyveMgr
 	}
 	if vlanMgr != nil {
 		vlanArg = vlanMgr
 	}
 
-	srv := manager.NewServer(raftClient, id, isos, vncArg, vlanArg)
+	srv := manager.NewServer(raftClient, id, isos, vncArg, serialLogArg, vlanArg)
 	// Every RPC (including UploadISO's stream) is gated by srv's own
 	// API-key check - see ADR-0023. Auth stays fully open until the
 	// first key is created (CreateAPIKey itself included), so this is

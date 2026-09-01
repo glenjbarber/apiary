@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"os"
+	"strings"
 	"time"
 
 	"google.golang.org/protobuf/proto"
@@ -32,6 +34,12 @@ type VNCLookup interface {
 	VNCPort(name string) (port int, ok bool, err error)
 }
 
+// SerialLogLookup is the subset of *bhyve.Manager the server needs for
+// GetVMSerialLog, defined locally for the same reason as isoManager.
+type SerialLogLookup interface {
+	SerialLogPath(name string) (path string, ok bool, err error)
+}
+
 // VLANStatus is the subset of *vlan.Manager the server needs for
 // ListNetworks's per-node bridge status, defined locally for the same
 // reason as isoManager.
@@ -53,6 +61,11 @@ type Server struct {
 	// reports Available=false rather than panicking in that case.
 	vnc VNCLookup
 
+	// serialLog is nil under the same condition as vnc, for the same
+	// reason - GetVMSerialLog reports Available=false rather than
+	// panicking.
+	serialLog SerialLogLookup
+
 	// vlan is nil on a node with no VLAN support configured (see
 	// cmd/managerd's own nil-able Reconciler.VLAN) - ListNetworks
 	// reports "unknown" bridge status rather than panicking in that case.
@@ -69,10 +82,11 @@ var _ rpcpb.ManagerServiceServer = (*Server)(nil)
 // NewServer returns a Server that answers external RPCs using raft to
 // reach raftd, reporting nodeID as its own identity, isos to store
 // installer images locally on this node, vnc (nil-able) to look up a
-// running VM's VNC console port, and vlanMgr (nil-able) to report a
-// network's bridge status on this node.
-func NewServer(raft *RaftClient, nodeID string, isos isoManager, vnc VNCLookup, vlanMgr VLANStatus) *Server {
-	return &Server{raft: raft, nodeID: nodeID, isos: isos, vnc: vnc, vlan: vlanMgr, statsGather: hoststats.Gather}
+// running VM's VNC console port, serialLog (nil-able) to look up a
+// running VM's captured serial console log, and vlanMgr (nil-able) to
+// report a network's bridge status on this node.
+func NewServer(raft *RaftClient, nodeID string, isos isoManager, vnc VNCLookup, serialLog SerialLogLookup, vlanMgr VLANStatus) *Server {
+	return &Server{raft: raft, nodeID: nodeID, isos: isos, vnc: vnc, serialLog: serialLog, vlan: vlanMgr, statsGather: hoststats.Gather}
 }
 
 // Status implements rpcpb.ManagerServiceServer. If raftd is unreachable,
@@ -661,6 +675,85 @@ func (s *Server) GetVMConsole(ctx context.Context, req *rpcpb.GetVMConsoleReques
 	// managerd couldn't resolve "apiarium"), so loopback avoids a DNS
 	// dependency this project has no other reason to require.
 	return &rpcpb.GetVMConsoleResponse{Host: "127.0.0.1", Port: uint32(port), Available: true}, nil
+}
+
+// defaultSerialLogTailBytes/maxSerialLogTailBytes bound GetVMSerialLog's
+// response regardless of what a caller requests - a plain synchronous
+// RPC (not a stream) has no business returning an arbitrarily large
+// payload, and a runaway VM's serial log has been observed growing to
+// several megabytes within minutes on this project's own hardware.
+const (
+	defaultSerialLogTailBytes = 64 * 1024
+	maxSerialLogTailBytes     = 1024 * 1024
+)
+
+// GetVMSerialLog implements rpcpb.ManagerServiceServer. Like
+// GetVMConsole, it only ever answers for a VM actually running on this
+// node - see GetVMSerialLogResponse's doc comment.
+func (s *Server) GetVMSerialLog(ctx context.Context, req *rpcpb.GetVMSerialLogRequest) (*rpcpb.GetVMSerialLogResponse, error) {
+	resp, err := s.raft.GetVM(ctx, req.GetId())
+	if err != nil {
+		return &rpcpb.GetVMSerialLogResponse{Error: err.Error()}, nil
+	}
+	if resp.GetError() != "" {
+		return &rpcpb.GetVMSerialLogResponse{Error: resp.GetError()}, nil
+	}
+	if !resp.GetFound() {
+		return &rpcpb.GetVMSerialLogResponse{Error: fmt.Sprintf("VM %q not found", req.GetId())}, nil
+	}
+	vm := resp.GetVm()
+	if vm.GetNodeId() != s.nodeID {
+		return &rpcpb.GetVMSerialLogResponse{
+			Error: fmt.Sprintf("VM %q is assigned to node %q; query that node's managerd directly for its serial log", req.GetId(), vm.GetNodeId()),
+		}, nil
+	}
+	if s.serialLog == nil {
+		return &rpcpb.GetVMSerialLogResponse{Error: "this node has no bhyve support configured"}, nil
+	}
+	path, ok, err := s.serialLog.SerialLogPath(req.GetId())
+	if err != nil {
+		return &rpcpb.GetVMSerialLogResponse{Error: err.Error()}, nil
+	}
+	if !ok {
+		return &rpcpb.GetVMSerialLogResponse{Available: false}, nil
+	}
+
+	maxBytes := int64(req.GetMaxBytes())
+	if maxBytes <= 0 {
+		maxBytes = defaultSerialLogTailBytes
+	}
+	if maxBytes > maxSerialLogTailBytes {
+		maxBytes = maxSerialLogTailBytes
+	}
+
+	f, err := os.Open(path)
+	if err != nil {
+		return &rpcpb.GetVMSerialLogResponse{Error: err.Error()}, nil
+	}
+	defer f.Close()
+
+	info, err := f.Stat()
+	if err != nil {
+		return &rpcpb.GetVMSerialLogResponse{Error: err.Error()}, nil
+	}
+	size := info.Size()
+	truncated := size > maxBytes
+	start := int64(0)
+	if truncated {
+		start = size - maxBytes
+	}
+	if _, err := f.Seek(start, io.SeekStart); err != nil {
+		return &rpcpb.GetVMSerialLogResponse{Error: err.Error()}, nil
+	}
+	buf, err := io.ReadAll(f)
+	if err != nil {
+		return &rpcpb.GetVMSerialLogResponse{Error: err.Error()}, nil
+	}
+	return &rpcpb.GetVMSerialLogResponse{
+		Content:   strings.ToValidUTF8(string(buf), "�"),
+		Truncated: truncated,
+		Available: true,
+	}, nil
 }
 
 // applyJailCommand mirrors applyNetworkCommand, for commands whose

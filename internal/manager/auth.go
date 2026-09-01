@@ -68,7 +68,8 @@ var requiredRole = map[string]Role{
 	"/apiary.rpc.v1.ManagerService/ListISOs":     RoleViewer,
 	"/apiary.rpc.v1.ManagerService/ListNetworks": RoleViewer,
 	"/apiary.rpc.v1.ManagerService/HostStats":    RoleViewer,
-	"/apiary.rpc.v1.ManagerService/GetVMConsole": RoleViewer,
+	"/apiary.rpc.v1.ManagerService/GetVMConsole":   RoleViewer,
+	"/apiary.rpc.v1.ManagerService/GetVMSerialLog": RoleViewer,
 
 	// Operator: VM/jail/network lifecycle, ISO management, and the
 	// peer-to-peer reconciler-forwarding RPCs (ADR-0029) - a follower

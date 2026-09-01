@@ -216,6 +216,13 @@ each design decision, in order.
   failed outright against a TLS-only `managerd`, and TLS dial-and-
   serve confirmed working end-to-end through a real `restshimd`. See
   [ADR-0033](docs/adr/0033-internal-transport-security.md).
+- **Remote serial console log viewing** — closes the gap ADR-0032 left
+  open: a new `GetVMSerialLog` RPC (read-only, same role tier as the
+  console) and a `/vms/{id}/serial` web UI page, polling on a timer
+  rather than streaming since a log has no continuous-framebuffer need.
+  Capped server-side at 1MB regardless of what's requested, since a
+  runaway VM's serial log can grow to megabytes within minutes. See
+  [ADR-0034](docs/adr/0034-remote-serial-log-viewing.md).
 
 **Not yet implemented:**
 

@@ -83,6 +83,13 @@ service ManagerService {
   // follows from that.
   rpc GetVMConsole(GetVMConsoleRequest) returns (GetVMConsoleResponse);
 
+  // GetVMSerialLog returns the tail of a VM's captured serial console
+  // log (ADR-0032's EnableSerialLog), for the web UI - previously this
+  // required an operator to read the file directly on the owning node.
+  // Same locality limitation as GetVMConsole: only answers for a VM
+  // confirmed running on *this* node.
+  rpc GetVMSerialLog(GetVMSerialLogRequest) returns (GetVMSerialLogResponse);
+
   // CreateNetwork/ListNetworks/DeleteNetwork manage NetworkDefinitions -
   // VLAN/subnet/bridge segments a VM can attach to (see ADR-0022).
   // CreateNetwork/DeleteNetwork just submit a Command through raft
@@ -535,6 +542,37 @@ message GetVMConsoleResponse {
   // available is false (with host/port left at zero values) if the VM
   // isn't running with VNC on this node - not yet reconciled, running on
   // a different node, or created before VNC support existed.
+  bool available = 3;
+
+  string error = 4;
+}
+
+message GetVMSerialLogRequest {
+  string id = 1;
+
+  // max_bytes caps how much of the log's tail is returned; 0 uses a
+  // server-side default. Bounded server-side regardless of what's
+  // requested - a runaway VM's log can grow to many megabytes in
+  // minutes (seen live), and this is a plain synchronous RPC, not a
+  // stream, so an unbounded read isn't safe to offer at all.
+  uint32 max_bytes = 2;
+}
+
+message GetVMSerialLogResponse {
+  // content is the tail of the log file, as UTF-8 text (best-effort -
+  // a serial console can emit non-UTF-8 bytes, e.g. mid-escape-sequence
+  // at the point the tail window starts; invalid sequences are replaced
+  // rather than erroring the whole response).
+  string content = 1;
+
+  // truncated is true if content was cut short by max_bytes/the
+  // server-side cap rather than being the log's entire (small) content.
+  bool truncated = 2;
+
+  // available is false (with content left empty) if the VM isn't
+  // running with serial logging on this node - not yet reconciled,
+  // running on a different node, or created before serial logging
+  // existed (ADR-0032).
   bool available = 3;
 
   string error = 4;

@@ -12,6 +12,7 @@
   <td>{{if .ReplicaNodeID}}{{.ReplicaNodeID}}{{else}}<em>none</em>{{end}}</td>
   <td>
     <a href="/vms/{{.ID}}/console">Console</a>
+    <a href="/vms/{{.ID}}/serial">Log</a>
     <button hx-delete="/vms/{{.ID}}" hx-target="#vm-rows" hx-swap="innerHTML" hx-confirm="Delete {{.ID}}?">Delete</button>
   </td>
 </tr>

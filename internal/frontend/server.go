@@ -92,6 +92,15 @@ type pageData struct {
 	ConsoleWSPath string
 	ConsoleError  string
 
+	// SerialLogVMID/SerialLogVMName/SerialLogContent/SerialLogTruncated/
+	// SerialLogError are only used by the serial log page
+	// (serial_log.go) - see its own doc comments.
+	SerialLogVMID      string
+	SerialLogVMName    string
+	SerialLogContent   string
+	SerialLogTruncated bool
+	SerialLogError     string
+
 	// Networks lists known networks (ADR-0022): for the Networks page's
 	// own table, and for the create-VM form's network picker.
 	Networks []networkView
@@ -292,6 +301,8 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /isos", s.handleListISOs)
 	s.mux.HandleFunc("GET /vms/{id}/console", s.handleConsolePage)
 	s.mux.HandleFunc("GET /vms/{id}/console/ws", s.handleConsoleWS)
+	s.mux.HandleFunc("GET /vms/{id}/serial", s.handleSerialLogPage)
+	s.mux.HandleFunc("GET /vms/{id}/serial/content", s.handleSerialLogContent)
 	s.mux.HandleFunc("GET /networks", s.handleNetworksPage)
 	s.mux.HandleFunc("GET /jails", s.handleJailsPage)
 

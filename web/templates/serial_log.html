@@ -1,0 +1,22 @@
+{{define "serial_log_page"}}
+<!DOCTYPE html>
+<html lang="en">
+{{template "head" .}}
+<body>
+  {{template "nav" .}}
+  <h1>Serial Log: {{if .SerialLogVMName}}{{.SerialLogVMName}} ({{.SerialLogVMID}}){{else}}{{.SerialLogVMID}}{{end}}</h1>
+  <div id="serial-log-panel" hx-get="/vms/{{.SerialLogVMID}}/serial/content" hx-trigger="every 3s" hx-swap="innerHTML">
+    {{template "serial_log_content" .}}
+  </div>
+</body>
+</html>
+{{end}}
+
+{{define "serial_log_content"}}
+{{if .SerialLogError}}
+  <div class="error">{{.SerialLogError}}</div>
+{{else}}
+  {{if .SerialLogTruncated}}<p><em>Showing the most recent portion only - the full log is larger.</em></p>{{end}}
+  <pre style="max-height: 32rem; overflow-y: auto; background: #111; color: #ddd; padding: 0.75rem; white-space: pre-wrap; word-break: break-all;">{{.SerialLogContent}}</pre>
+{{end}}
+{{end}}

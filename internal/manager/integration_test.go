@@ -120,7 +120,31 @@ func (f *fakeVNCLookup) VNCPort(name string) (int, bool, error) {
 // checks a VM's node_id against the serving Server's own nodeID.
 func newManagerdRPCClientWithVNC(t *testing.T, raftdSocket, nodeID string, vnc VNCLookup) rpcpb.ManagerServiceClient {
 	t.Helper()
-	return newManagerdRPCClientFull(t, raftdSocket, nodeID, vnc, nil)
+	return newManagerdRPCClientFull(t, raftdSocket, nodeID, vnc, nil, nil)
+}
+
+// fakeSerialLogLookup is a fake SerialLogLookup for GetVMSerialLog
+// tests, without any real bhyve.Manager/RunDir involved.
+type fakeSerialLogLookup struct {
+	paths map[string]string
+	err   error
+}
+
+func (f *fakeSerialLogLookup) SerialLogPath(name string) (string, bool, error) {
+	if f.err != nil {
+		return "", false, f.err
+	}
+	path, ok := f.paths[name]
+	return path, ok, nil
+}
+
+// newManagerdRPCClientWithSerialLog is newManagerdRPCClient, but lets a
+// test supply nodeID and serialLog explicitly - needed for
+// GetVMSerialLog, which checks a VM's node_id against the serving
+// Server's own nodeID.
+func newManagerdRPCClientWithSerialLog(t *testing.T, raftdSocket, nodeID string, serialLog SerialLogLookup) rpcpb.ManagerServiceClient {
+	t.Helper()
+	return newManagerdRPCClientFull(t, raftdSocket, nodeID, nil, serialLog, nil)
 }
 
 // fakeVLANStatus is a fake VLANStatus for ListNetworks bridge-status
@@ -141,8 +165,8 @@ func (f *fakeVLANStatus) InterfaceStatus(_ context.Context, name string) (exists
 }
 
 // newManagerdRPCClientFull is newManagerdRPCClient, but lets a test
-// supply nodeID, vnc, and vlanMgr explicitly.
-func newManagerdRPCClientFull(t *testing.T, raftdSocket, nodeID string, vnc VNCLookup, vlanMgr VLANStatus) rpcpb.ManagerServiceClient {
+// supply nodeID, vnc, serialLog, and vlanMgr explicitly.
+func newManagerdRPCClientFull(t *testing.T, raftdSocket, nodeID string, vnc VNCLookup, serialLog SerialLogLookup, vlanMgr VLANStatus) rpcpb.ManagerServiceClient {
 	t.Helper()
 
 	raftClient, err := Dial(raftdSocket, "")
@@ -156,7 +180,7 @@ func newManagerdRPCClientFull(t *testing.T, raftdSocket, nodeID string, vnc VNCL
 		t.Fatalf("Listen(tcp) error: %v", err)
 	}
 
-	srv := NewServer(raftClient, nodeID, isostore.New(t.TempDir()), vnc, vlanMgr)
+	srv := NewServer(raftClient, nodeID, isostore.New(t.TempDir()), vnc, serialLog, vlanMgr)
 	// Wired unconditionally, mirroring cmd/managerd/main.go exactly - this
 	// is a no-op for every pre-existing test here (none of them ever
 	// create an API key, so checkAuth's "zero keys = open" branch always
@@ -526,6 +550,152 @@ func TestIntegration_GetVMConsole_UnknownVM(t *testing.T) {
 	}
 }
 
+func TestIntegration_GetVMSerialLog_RunningLocallyReturnsTail(t *testing.T) {
+	raftdSocket := newRaftdUDSSocket(t)
+	logPath := filepath.Join(t.TempDir(), "vm-1.serial.log")
+	if err := os.WriteFile(logPath, []byte("line one\nline two\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile() error: %v", err)
+	}
+	serialLog := &fakeSerialLogLookup{paths: map[string]string{"vm-1": logPath}}
+	client := newManagerdRPCClientWithSerialLog(t, raftdSocket, "node-a", serialLog)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if _, err := client.CreateVM(ctx, &rpcpb.CreateVMRequest{
+		Vm: &rpcpb.VMDefinition{Id: "vm-1", Name: "web-1", NodeId: "node-a"},
+	}); err != nil {
+		t.Fatalf("CreateVM() error: %v", err)
+	}
+
+	resp, err := client.GetVMSerialLog(ctx, &rpcpb.GetVMSerialLogRequest{Id: "vm-1"})
+	if err != nil {
+		t.Fatalf("GetVMSerialLog() error: %v", err)
+	}
+	if resp.GetError() != "" {
+		t.Fatalf("GetVMSerialLog() returned error: %s", resp.GetError())
+	}
+	if !resp.GetAvailable() || resp.GetContent() != "line one\nline two\n" || resp.GetTruncated() {
+		t.Errorf("GetVMSerialLog() = %+v, want available, untruncated, full content", resp)
+	}
+}
+
+func TestIntegration_GetVMSerialLog_MaxBytesTruncatesToTail(t *testing.T) {
+	raftdSocket := newRaftdUDSSocket(t)
+	logPath := filepath.Join(t.TempDir(), "vm-1.serial.log")
+	if err := os.WriteFile(logPath, []byte("0123456789"), 0o644); err != nil {
+		t.Fatalf("WriteFile() error: %v", err)
+	}
+	serialLog := &fakeSerialLogLookup{paths: map[string]string{"vm-1": logPath}}
+	client := newManagerdRPCClientWithSerialLog(t, raftdSocket, "node-a", serialLog)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if _, err := client.CreateVM(ctx, &rpcpb.CreateVMRequest{
+		Vm: &rpcpb.VMDefinition{Id: "vm-1", Name: "web-1", NodeId: "node-a"},
+	}); err != nil {
+		t.Fatalf("CreateVM() error: %v", err)
+	}
+
+	resp, err := client.GetVMSerialLog(ctx, &rpcpb.GetVMSerialLogRequest{Id: "vm-1", MaxBytes: 4})
+	if err != nil {
+		t.Fatalf("GetVMSerialLog() error: %v", err)
+	}
+	if resp.GetError() != "" {
+		t.Fatalf("GetVMSerialLog() returned error: %s", resp.GetError())
+	}
+	if !resp.GetTruncated() || resp.GetContent() != "6789" {
+		t.Errorf("GetVMSerialLog() = %+v, want truncated tail %q", resp, "6789")
+	}
+}
+
+func TestIntegration_GetVMSerialLog_NotYetProvisioned(t *testing.T) {
+	raftdSocket := newRaftdUDSSocket(t)
+	serialLog := &fakeSerialLogLookup{paths: map[string]string{}}
+	client := newManagerdRPCClientWithSerialLog(t, raftdSocket, "node-a", serialLog)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if _, err := client.CreateVM(ctx, &rpcpb.CreateVMRequest{
+		Vm: &rpcpb.VMDefinition{Id: "vm-1", Name: "web-1", NodeId: "node-a"},
+	}); err != nil {
+		t.Fatalf("CreateVM() error: %v", err)
+	}
+
+	resp, err := client.GetVMSerialLog(ctx, &rpcpb.GetVMSerialLogRequest{Id: "vm-1"})
+	if err != nil {
+		t.Fatalf("GetVMSerialLog() error: %v", err)
+	}
+	if resp.GetError() != "" {
+		t.Fatalf("GetVMSerialLog() returned error: %s", resp.GetError())
+	}
+	if resp.GetAvailable() {
+		t.Errorf("GetVMSerialLog() = %+v, want Available=false (no serial log recorded yet)", resp)
+	}
+}
+
+func TestIntegration_GetVMSerialLog_WrongNodeReportsHint(t *testing.T) {
+	raftdSocket := newRaftdUDSSocket(t)
+	client := newManagerdRPCClientWithSerialLog(t, raftdSocket, "node-a", &fakeSerialLogLookup{})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if _, err := client.CreateVM(ctx, &rpcpb.CreateVMRequest{
+		Vm: &rpcpb.VMDefinition{Id: "vm-1", Name: "web-1", NodeId: "node-b"},
+	}); err != nil {
+		t.Fatalf("CreateVM() error: %v", err)
+	}
+
+	resp, err := client.GetVMSerialLog(ctx, &rpcpb.GetVMSerialLogRequest{Id: "vm-1"})
+	if err != nil {
+		t.Fatalf("GetVMSerialLog() error: %v", err)
+	}
+	if resp.GetError() == "" {
+		t.Fatalf("GetVMSerialLog() returned no error, want a hint that vm-1 is on node-b, not node-a")
+	}
+}
+
+func TestIntegration_GetVMSerialLog_NoBhyveConfigured(t *testing.T) {
+	raftdSocket := newRaftdUDSSocket(t)
+	client := newManagerdRPCClientWithSerialLog(t, raftdSocket, "node-a", nil)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if _, err := client.CreateVM(ctx, &rpcpb.CreateVMRequest{
+		Vm: &rpcpb.VMDefinition{Id: "vm-1", Name: "web-1", NodeId: "node-a"},
+	}); err != nil {
+		t.Fatalf("CreateVM() error: %v", err)
+	}
+
+	resp, err := client.GetVMSerialLog(ctx, &rpcpb.GetVMSerialLogRequest{Id: "vm-1"})
+	if err != nil {
+		t.Fatalf("GetVMSerialLog() error: %v", err)
+	}
+	if resp.GetError() == "" {
+		t.Fatalf("GetVMSerialLog() returned no error, want one reporting no bhyve support on this node")
+	}
+}
+
+func TestIntegration_GetVMSerialLog_UnknownVM(t *testing.T) {
+	raftdSocket := newRaftdUDSSocket(t)
+	client := newManagerdRPCClientWithSerialLog(t, raftdSocket, "node-a", &fakeSerialLogLookup{})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	resp, err := client.GetVMSerialLog(ctx, &rpcpb.GetVMSerialLogRequest{Id: "does-not-exist"})
+	if err != nil {
+		t.Fatalf("GetVMSerialLog() error: %v", err)
+	}
+	if resp.GetError() == "" {
+		t.Fatalf("GetVMSerialLog() returned no error, want a not-found error")
+	}
+}
+
 func TestIntegration_CreateListDeleteNetwork(t *testing.T) {
 	raftdSocket := newRaftdUDSSocket(t)
 	client := newManagerdRPCClient(t, raftdSocket)
@@ -654,7 +824,7 @@ func TestIntegration_ListNetworks_BridgeStatusUpOrDown(t *testing.T) {
 	raftdSocket := newRaftdUDSSocket(t)
 	bridge := resolveBridgeName(&internalpb.NetworkDefinition{Id: "net-1"})
 	vlan := &fakeVLANStatus{up: map[string]bool{bridge: true}}
-	client := newManagerdRPCClientFull(t, raftdSocket, "node-a", nil, vlan)
+	client := newManagerdRPCClientFull(t, raftdSocket, "node-a", nil, nil, vlan)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()

@@ -183,6 +183,10 @@ func (f *fakeClient) GetVMConsole(context.Context, *rpcpb.GetVMConsoleRequest, .
 	return &rpcpb.GetVMConsoleResponse{}, nil
 }
 
+func (f *fakeClient) GetVMSerialLog(context.Context, *rpcpb.GetVMSerialLogRequest, ...grpc.CallOption) (*rpcpb.GetVMSerialLogResponse, error) {
+	return &rpcpb.GetVMSerialLogResponse{}, nil
+}
+
 func (f *fakeClient) CreateNetwork(_ context.Context, in *rpcpb.CreateNetworkRequest, _ ...grpc.CallOption) (*rpcpb.CreateNetworkResponse, error) {
 	f.lastCreateNetworkReq = in
 	if f.createNetworkResp != nil {
