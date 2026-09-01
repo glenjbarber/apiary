@@ -81,6 +81,34 @@ for cross-node peer forwarding to work at all. TLS closes that.
   system certificate pool - the expected case for a self-signed
   certificate; left empty, a real CA-signed certificate is assumed.
 
+## Live verification
+
+Confirmed on `apiarium` against a throwaway `raftd`/`managerd`/
+`restshimd` trio (separate socket/ports/data-dir from the live
+production instance, which was never touched or interrupted):
+
+- `raftd -internal-token`: `managerd` presenting no token failed
+  `Unauthenticated: missing internal token`; presenting the wrong
+  token failed `Unauthenticated: invalid internal token` (a distinct
+  message from "missing", confirming both checks actually run); the
+  correct token connected cleanly and served real requests end to end
+  through `restshimd`'s own REST API.
+- `managerd -tls-cert/-tls-key`: a plaintext `restshimd` dial against a
+  TLS-enabled `managerd` failed immediately (`error reading server
+  preface: EOF` - a real TLS/plaintext protocol mismatch, not a
+  configuration no-op).
+- `restshimd -manager-tls -manager-tls-ca`: with the self-signed cert's
+  CA trusted, the same `restshimd` connected to `managerd` over real
+  TLS and served a genuine end-to-end request.
+- `restshimd -tls-cert/-tls-key`: `restshimd`'s own REST API answered
+  over real HTTPS (`curl https://...`), not just plaintext HTTP on the
+  same port.
+
+`cmd/frontend` was not separately live-verified in this pass (identical
+shared `internal/tlsdial` logic and stdlib `http.ListenAndServeTLS`
+call, already exercised via `restshimd` above) - real, disclosed, low-
+risk gap in this verification's coverage.
+
 ## Consequences
 
 - All new code is opt-in and defaults to today's exact behavior -

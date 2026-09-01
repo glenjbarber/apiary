@@ -201,6 +201,21 @@ each design decision, in order.
   the CAPI provider's own ISO builder (fixed there; see that repo).
   Requires the `nmdm.ko` kernel module, not loaded by default. See
   [ADR-0032](docs/adr/0032-bhyve-serial-console-log.md).
+- **`raftd` internal-socket token auth + TLS everywhere** —
+  `raftd -internal-token` adds a real shared-secret credential on top
+  of the internal socket's existing file permissions (opt-in;
+  `managerd`/`restshimd` are the only real callers, so a single secret
+  rather than a tiered system). `managerd`/`restshimd`/`frontend` can
+  all serve and dial each other over real TLS
+  (`-tls-cert`/`-tls-key`, `-manager-tls`/`-manager-tls-ca`) — also
+  opt-in, defaulting to today's plaintext behavior. Closes the
+  "API key travels in plaintext" gap that mattered once ADR-0029
+  required a real network-bound `-rpc-addr`. Live-verified on
+  `apiarium` against a throwaway instance (production untouched): a
+  missing/wrong token both correctly rejected, a plaintext client
+  failed outright against a TLS-only `managerd`, and TLS dial-and-
+  serve confirmed working end-to-end through a real `restshimd`. See
+  [ADR-0033](docs/adr/0033-internal-transport-security.md).
 
 **Not yet implemented:**
 
@@ -228,14 +243,19 @@ each design decision, in order.
 - Importing VMs from other hypervisors (e.g. Proxmox): no disk-format
   conversion, and Apiary is UEFI-only. Linux containers have no path at
   all — jails share the host FreeBSD kernel
-- Authentication: the web UI now supports real PAM-backed per-identity
+- Authentication: the web UI supports real PAM-backed per-identity
   login with tiered roles (Viewer/Operator/Admin, ADR-0030), and API
   keys carry the same roles (ADR-0023) — both still off by default.
-  `raftd`'s internal socket has no authentication at all. Repeated
-  failed logins for one username now lock that account out for a fixed
-  cooldown (checked before PAM is ever called), but there's still no
-  direct Kerberos/LDAP client code (PAM's own host configuration bridges
-  to both instead — see ADR-0030's "Deferred" section).
+  Repeated failed logins for one username lock that account out for a
+  fixed cooldown (checked before PAM is ever called), but there's
+  still no direct Kerberos/LDAP client code (PAM's own host
+  configuration bridges to both instead — see ADR-0030's "Deferred"
+  section). `raftd`'s internal socket now supports a shared-secret
+  token (`-internal-token`, opt-in, ADR-0033) instead of relying on
+  file permissions alone, and `managerd`/`restshimd`/`frontend` can all
+  serve and dial each other over real TLS (also opt-in, same ADR) —
+  closing the "API key travels in plaintext" gap that mattered once
+  ADR-0029 required binding beyond loopback.
 - Importing VMs from other hypervisors (e.g. Proxmox): still no
   disk-format conversion, and Apiary is UEFI-only. **Partially narrowed
   by ADR-0031**: a VM's disk can now be seeded from a pre-uploaded raw
