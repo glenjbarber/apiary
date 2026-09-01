@@ -245,6 +245,112 @@ func (p *PeerReporter) HostStats(ctx context.Context, addr string) (*rpcpb.HostS
 	return client.HostStats(ctx, &rpcpb.HostStatsRequest{})
 }
 
+// CreateVM/UpdateVM/DeleteVM/CreateJail/UpdateJail/DeleteJail/
+// CreateNetwork/DeleteNetwork/CreateAPIKey/RevokeAPIKey forward an
+// external write RPC rejected by this node's own raftd (not the
+// leader) to the leader node's own managerd, passing the caller's
+// original request through unchanged and returning the leader's actual
+// response - the same "return the real answer, not just success/
+// failure" posture ListVMs/GetVM/etc. already established for reads
+// above, since a Create/Update/Delete response carries the resulting
+// record the caller needs (e.g. the web UI redirecting on a newly
+// created VM's id).
+func (p *PeerReporter) CreateVM(ctx context.Context, addr string, req *rpcpb.CreateVMRequest) (*rpcpb.CreateVMResponse, error) {
+	conn, client, err := p.dial(addr)
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close()
+	return client.CreateVM(ctx, req)
+}
+
+func (p *PeerReporter) UpdateVM(ctx context.Context, addr string, req *rpcpb.UpdateVMRequest) (*rpcpb.UpdateVMResponse, error) {
+	conn, client, err := p.dial(addr)
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close()
+	return client.UpdateVM(ctx, req)
+}
+
+func (p *PeerReporter) DeleteVM(ctx context.Context, addr string, req *rpcpb.DeleteVMRequest) (*rpcpb.DeleteVMResponse, error) {
+	conn, client, err := p.dial(addr)
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close()
+	return client.DeleteVM(ctx, req)
+}
+
+func (p *PeerReporter) CreateJail(ctx context.Context, addr string, req *rpcpb.CreateJailRequest) (*rpcpb.CreateJailResponse, error) {
+	conn, client, err := p.dial(addr)
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close()
+	return client.CreateJail(ctx, req)
+}
+
+func (p *PeerReporter) UpdateJail(ctx context.Context, addr string, req *rpcpb.UpdateJailRequest) (*rpcpb.UpdateJailResponse, error) {
+	conn, client, err := p.dial(addr)
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close()
+	return client.UpdateJail(ctx, req)
+}
+
+func (p *PeerReporter) DeleteJail(ctx context.Context, addr string, req *rpcpb.DeleteJailRequest) (*rpcpb.DeleteJailResponse, error) {
+	conn, client, err := p.dial(addr)
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close()
+	return client.DeleteJail(ctx, req)
+}
+
+func (p *PeerReporter) CreateNetwork(ctx context.Context, addr string, req *rpcpb.CreateNetworkRequest) (*rpcpb.CreateNetworkResponse, error) {
+	conn, client, err := p.dial(addr)
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close()
+	return client.CreateNetwork(ctx, req)
+}
+
+func (p *PeerReporter) DeleteNetwork(ctx context.Context, addr string, req *rpcpb.DeleteNetworkRequest) (*rpcpb.DeleteNetworkResponse, error) {
+	conn, client, err := p.dial(addr)
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close()
+	return client.DeleteNetwork(ctx, req)
+}
+
+// CreateAPIKey/RevokeAPIKey forward the caller's original request as-is
+// - notably, a forwarded CreateAPIKey means the LEADER generates and
+// hashes its own fresh raw key; this node's own locally-generated
+// raw/hashed pair (built before the local Apply was attempted, see
+// Server.CreateAPIKey) is simply discarded on the forwarding path, so
+// no key material ever needs to cross nodes.
+func (p *PeerReporter) CreateAPIKey(ctx context.Context, addr string, req *rpcpb.CreateAPIKeyRequest) (*rpcpb.CreateAPIKeyResponse, error) {
+	conn, client, err := p.dial(addr)
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close()
+	return client.CreateAPIKey(ctx, req)
+}
+
+func (p *PeerReporter) RevokeAPIKey(ctx context.Context, addr string, req *rpcpb.RevokeAPIKeyRequest) (*rpcpb.RevokeAPIKeyResponse, error) {
+	conn, client, err := p.dial(addr)
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close()
+	return client.RevokeAPIKey(ctx, req)
+}
+
 func (p *PeerReporter) ReportJailTeardownComplete(ctx context.Context, addr, id string) error {
 	conn, client, err := p.dial(addr)
 	if err != nil {

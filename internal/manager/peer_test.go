@@ -33,6 +33,86 @@ type fakePeerServer struct {
 	getJailReq       *rpcpb.GetJailRequest
 	getJailResp      *rpcpb.GetJailResponse
 	listNetworksResp *rpcpb.ListNetworksResponse
+
+	createVMReq  *rpcpb.CreateVMRequest
+	createVMResp *rpcpb.CreateVMResponse
+	updateVMReq  *rpcpb.UpdateVMRequest
+	deleteVMReq  *rpcpb.DeleteVMRequest
+
+	createJailReq  *rpcpb.CreateJailRequest
+	createJailResp *rpcpb.CreateJailResponse
+	updateJailReq  *rpcpb.UpdateJailRequest
+	deleteJailReq  *rpcpb.DeleteJailRequest
+
+	createNetworkReq  *rpcpb.CreateNetworkRequest
+	createNetworkResp *rpcpb.CreateNetworkResponse
+	deleteNetworkReq  *rpcpb.DeleteNetworkRequest
+
+	createAPIKeyReq  *rpcpb.CreateAPIKeyRequest
+	createAPIKeyResp *rpcpb.CreateAPIKeyResponse
+	revokeAPIKeyReq  *rpcpb.RevokeAPIKeyRequest
+}
+
+func (f *fakePeerServer) CreateVM(_ context.Context, req *rpcpb.CreateVMRequest) (*rpcpb.CreateVMResponse, error) {
+	f.createVMReq = req
+	if f.createVMResp != nil {
+		return f.createVMResp, nil
+	}
+	return &rpcpb.CreateVMResponse{}, nil
+}
+
+func (f *fakePeerServer) UpdateVM(_ context.Context, req *rpcpb.UpdateVMRequest) (*rpcpb.UpdateVMResponse, error) {
+	f.updateVMReq = req
+	return &rpcpb.UpdateVMResponse{}, nil
+}
+
+func (f *fakePeerServer) DeleteVM(_ context.Context, req *rpcpb.DeleteVMRequest) (*rpcpb.DeleteVMResponse, error) {
+	f.deleteVMReq = req
+	return &rpcpb.DeleteVMResponse{}, nil
+}
+
+func (f *fakePeerServer) CreateJail(_ context.Context, req *rpcpb.CreateJailRequest) (*rpcpb.CreateJailResponse, error) {
+	f.createJailReq = req
+	if f.createJailResp != nil {
+		return f.createJailResp, nil
+	}
+	return &rpcpb.CreateJailResponse{}, nil
+}
+
+func (f *fakePeerServer) UpdateJail(_ context.Context, req *rpcpb.UpdateJailRequest) (*rpcpb.UpdateJailResponse, error) {
+	f.updateJailReq = req
+	return &rpcpb.UpdateJailResponse{}, nil
+}
+
+func (f *fakePeerServer) DeleteJail(_ context.Context, req *rpcpb.DeleteJailRequest) (*rpcpb.DeleteJailResponse, error) {
+	f.deleteJailReq = req
+	return &rpcpb.DeleteJailResponse{}, nil
+}
+
+func (f *fakePeerServer) CreateNetwork(_ context.Context, req *rpcpb.CreateNetworkRequest) (*rpcpb.CreateNetworkResponse, error) {
+	f.createNetworkReq = req
+	if f.createNetworkResp != nil {
+		return f.createNetworkResp, nil
+	}
+	return &rpcpb.CreateNetworkResponse{}, nil
+}
+
+func (f *fakePeerServer) DeleteNetwork(_ context.Context, req *rpcpb.DeleteNetworkRequest) (*rpcpb.DeleteNetworkResponse, error) {
+	f.deleteNetworkReq = req
+	return &rpcpb.DeleteNetworkResponse{}, nil
+}
+
+func (f *fakePeerServer) CreateAPIKey(_ context.Context, req *rpcpb.CreateAPIKeyRequest) (*rpcpb.CreateAPIKeyResponse, error) {
+	f.createAPIKeyReq = req
+	if f.createAPIKeyResp != nil {
+		return f.createAPIKeyResp, nil
+	}
+	return &rpcpb.CreateAPIKeyResponse{}, nil
+}
+
+func (f *fakePeerServer) RevokeAPIKey(_ context.Context, req *rpcpb.RevokeAPIKeyRequest) (*rpcpb.RevokeAPIKeyResponse, error) {
+	f.revokeAPIKeyReq = req
+	return &rpcpb.RevokeAPIKeyResponse{}, nil
 }
 
 func (f *fakePeerServer) ListVMs(context.Context, *rpcpb.ListVMsRequest) (*rpcpb.ListVMsResponse, error) {
@@ -260,5 +340,166 @@ func TestPeerReporter_TLSDialFailsAgainstPlaintextServer(t *testing.T) {
 
 	if _, err := p.ListVMs(context.Background(), addr); err == nil {
 		t.Fatal("ListVMs() over TLS against a plaintext server = nil error, want a handshake failure")
+	}
+}
+
+// The following tests cover the write-forwarding methods added for
+// ADR-0036's follow-up (extending ADR-0035's read forwarding to the
+// external write RPCs) - each just confirms the original request is
+// passed through unchanged and the peer's real response comes back.
+
+func TestPeerReporter_CreateVM_SendsCorrectRequestAndReturnsResponse(t *testing.T) {
+	fake := &fakePeerServer{createVMResp: &rpcpb.CreateVMResponse{Vm: &rpcpb.VMDefinition{Id: "vm-1"}}}
+	addr := newTestPeerServer(t, fake)
+	p := NewPeerReporter("", false, nil)
+
+	req := &rpcpb.CreateVMRequest{Vm: &rpcpb.VMDefinition{Id: "vm-1", NodeId: "node-a"}}
+	resp, err := p.CreateVM(context.Background(), addr, req)
+	if err != nil {
+		t.Fatalf("CreateVM() error: %v", err)
+	}
+	if fake.createVMReq.GetVm().GetNodeId() != "node-a" {
+		t.Errorf("received request node_id = %q, want node-a", fake.createVMReq.GetVm().GetNodeId())
+	}
+	if resp.GetVm().GetId() != "vm-1" {
+		t.Errorf("CreateVM() = %+v, want id=vm-1", resp)
+	}
+}
+
+func TestPeerReporter_UpdateVM_SendsCorrectRequest(t *testing.T) {
+	fake := &fakePeerServer{}
+	addr := newTestPeerServer(t, fake)
+	p := NewPeerReporter("", false, nil)
+
+	req := &rpcpb.UpdateVMRequest{Vm: &rpcpb.VMDefinition{Id: "vm-1"}}
+	if _, err := p.UpdateVM(context.Background(), addr, req); err != nil {
+		t.Fatalf("UpdateVM() error: %v", err)
+	}
+	if fake.updateVMReq.GetVm().GetId() != "vm-1" {
+		t.Errorf("received request id = %q, want vm-1", fake.updateVMReq.GetVm().GetId())
+	}
+}
+
+func TestPeerReporter_DeleteVM_SendsCorrectRequest(t *testing.T) {
+	fake := &fakePeerServer{}
+	addr := newTestPeerServer(t, fake)
+	p := NewPeerReporter("", false, nil)
+
+	req := &rpcpb.DeleteVMRequest{Id: "vm-1"}
+	if _, err := p.DeleteVM(context.Background(), addr, req); err != nil {
+		t.Fatalf("DeleteVM() error: %v", err)
+	}
+	if fake.deleteVMReq.GetId() != "vm-1" {
+		t.Errorf("received request id = %q, want vm-1", fake.deleteVMReq.GetId())
+	}
+}
+
+func TestPeerReporter_CreateJail_SendsCorrectRequestAndReturnsResponse(t *testing.T) {
+	fake := &fakePeerServer{createJailResp: &rpcpb.CreateJailResponse{Jail: &rpcpb.JailDefinition{Id: "jail-1"}}}
+	addr := newTestPeerServer(t, fake)
+	p := NewPeerReporter("", false, nil)
+
+	req := &rpcpb.CreateJailRequest{Jail: &rpcpb.JailDefinition{Id: "jail-1", NodeId: "node-a"}}
+	resp, err := p.CreateJail(context.Background(), addr, req)
+	if err != nil {
+		t.Fatalf("CreateJail() error: %v", err)
+	}
+	if fake.createJailReq.GetJail().GetNodeId() != "node-a" {
+		t.Errorf("received request node_id = %q, want node-a", fake.createJailReq.GetJail().GetNodeId())
+	}
+	if resp.GetJail().GetId() != "jail-1" {
+		t.Errorf("CreateJail() = %+v, want id=jail-1", resp)
+	}
+}
+
+func TestPeerReporter_UpdateJail_SendsCorrectRequest(t *testing.T) {
+	fake := &fakePeerServer{}
+	addr := newTestPeerServer(t, fake)
+	p := NewPeerReporter("", false, nil)
+
+	req := &rpcpb.UpdateJailRequest{Jail: &rpcpb.JailDefinition{Id: "jail-1"}}
+	if _, err := p.UpdateJail(context.Background(), addr, req); err != nil {
+		t.Fatalf("UpdateJail() error: %v", err)
+	}
+	if fake.updateJailReq.GetJail().GetId() != "jail-1" {
+		t.Errorf("received request id = %q, want jail-1", fake.updateJailReq.GetJail().GetId())
+	}
+}
+
+func TestPeerReporter_DeleteJail_SendsCorrectRequest(t *testing.T) {
+	fake := &fakePeerServer{}
+	addr := newTestPeerServer(t, fake)
+	p := NewPeerReporter("", false, nil)
+
+	req := &rpcpb.DeleteJailRequest{Id: "jail-1"}
+	if _, err := p.DeleteJail(context.Background(), addr, req); err != nil {
+		t.Fatalf("DeleteJail() error: %v", err)
+	}
+	if fake.deleteJailReq.GetId() != "jail-1" {
+		t.Errorf("received request id = %q, want jail-1", fake.deleteJailReq.GetId())
+	}
+}
+
+func TestPeerReporter_CreateNetwork_SendsCorrectRequestAndReturnsResponse(t *testing.T) {
+	fake := &fakePeerServer{createNetworkResp: &rpcpb.CreateNetworkResponse{Network: &rpcpb.NetworkDefinition{Id: "net-1"}}}
+	addr := newTestPeerServer(t, fake)
+	p := NewPeerReporter("", false, nil)
+
+	req := &rpcpb.CreateNetworkRequest{Network: &rpcpb.NetworkDefinition{Id: "net-1", VlanId: 42}}
+	resp, err := p.CreateNetwork(context.Background(), addr, req)
+	if err != nil {
+		t.Fatalf("CreateNetwork() error: %v", err)
+	}
+	if fake.createNetworkReq.GetNetwork().GetVlanId() != 42 {
+		t.Errorf("received request vlan_id = %d, want 42", fake.createNetworkReq.GetNetwork().GetVlanId())
+	}
+	if resp.GetNetwork().GetId() != "net-1" {
+		t.Errorf("CreateNetwork() = %+v, want id=net-1", resp)
+	}
+}
+
+func TestPeerReporter_DeleteNetwork_SendsCorrectRequest(t *testing.T) {
+	fake := &fakePeerServer{}
+	addr := newTestPeerServer(t, fake)
+	p := NewPeerReporter("", false, nil)
+
+	req := &rpcpb.DeleteNetworkRequest{Id: "net-1"}
+	if _, err := p.DeleteNetwork(context.Background(), addr, req); err != nil {
+		t.Fatalf("DeleteNetwork() error: %v", err)
+	}
+	if fake.deleteNetworkReq.GetId() != "net-1" {
+		t.Errorf("received request id = %q, want net-1", fake.deleteNetworkReq.GetId())
+	}
+}
+
+func TestPeerReporter_CreateAPIKey_SendsCorrectRequestAndReturnsResponse(t *testing.T) {
+	fake := &fakePeerServer{createAPIKeyResp: &rpcpb.CreateAPIKeyResponse{RawKey: "raw-from-leader"}}
+	addr := newTestPeerServer(t, fake)
+	p := NewPeerReporter("", false, nil)
+
+	req := &rpcpb.CreateAPIKeyRequest{Name: "ci-key", Role: "viewer"}
+	resp, err := p.CreateAPIKey(context.Background(), addr, req)
+	if err != nil {
+		t.Fatalf("CreateAPIKey() error: %v", err)
+	}
+	if fake.createAPIKeyReq.GetName() != "ci-key" {
+		t.Errorf("received request name = %q, want ci-key", fake.createAPIKeyReq.GetName())
+	}
+	if resp.GetRawKey() != "raw-from-leader" {
+		t.Errorf("CreateAPIKey() = %+v, want the leader's own raw key returned", resp)
+	}
+}
+
+func TestPeerReporter_RevokeAPIKey_SendsCorrectRequest(t *testing.T) {
+	fake := &fakePeerServer{}
+	addr := newTestPeerServer(t, fake)
+	p := NewPeerReporter("", false, nil)
+
+	req := &rpcpb.RevokeAPIKeyRequest{Id: "key-1"}
+	if _, err := p.RevokeAPIKey(context.Background(), addr, req); err != nil {
+		t.Fatalf("RevokeAPIKey() error: %v", err)
+	}
+	if fake.revokeAPIKeyReq.GetId() != "key-1" {
+		t.Errorf("received request id = %q, want key-1", fake.revokeAPIKeyReq.GetId())
 	}
 }

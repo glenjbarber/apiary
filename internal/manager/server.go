@@ -49,16 +49,30 @@ type VLANStatus interface {
 }
 
 // PeerForwarder is the subset of *PeerReporter the server needs to
-// forward a leader-only read rejected by this node's own raftd to the
-// current leader's own managerd (ADR-0035) - mirrors internal/cluster's
-// own peerReporter interface, which serves the same role for write
-// forwarding (ADR-0029).
+// forward an operation rejected by this node's own raftd (not the
+// leader) to the current leader's own managerd instead - originally
+// just the leader-only reads (ADR-0035), now also the external write
+// RPCs a caller might aim at any node (ADR-0036's follow-up) -
+// mirrors internal/cluster's own peerReporter interface, which serves
+// the same forwarding role for the reconciler's internal phase-report
+// writes (ADR-0029).
 type PeerForwarder interface {
 	ListVMs(ctx context.Context, addr string) (*rpcpb.ListVMsResponse, error)
 	GetVM(ctx context.Context, addr, id string) (*rpcpb.GetVMResponse, error)
 	ListJails(ctx context.Context, addr string) (*rpcpb.ListJailsResponse, error)
 	GetJail(ctx context.Context, addr, id string) (*rpcpb.GetJailResponse, error)
 	ListNetworks(ctx context.Context, addr string) (*rpcpb.ListNetworksResponse, error)
+
+	CreateVM(ctx context.Context, addr string, req *rpcpb.CreateVMRequest) (*rpcpb.CreateVMResponse, error)
+	UpdateVM(ctx context.Context, addr string, req *rpcpb.UpdateVMRequest) (*rpcpb.UpdateVMResponse, error)
+	DeleteVM(ctx context.Context, addr string, req *rpcpb.DeleteVMRequest) (*rpcpb.DeleteVMResponse, error)
+	CreateJail(ctx context.Context, addr string, req *rpcpb.CreateJailRequest) (*rpcpb.CreateJailResponse, error)
+	UpdateJail(ctx context.Context, addr string, req *rpcpb.UpdateJailRequest) (*rpcpb.UpdateJailResponse, error)
+	DeleteJail(ctx context.Context, addr string, req *rpcpb.DeleteJailRequest) (*rpcpb.DeleteJailResponse, error)
+	CreateNetwork(ctx context.Context, addr string, req *rpcpb.CreateNetworkRequest) (*rpcpb.CreateNetworkResponse, error)
+	DeleteNetwork(ctx context.Context, addr string, req *rpcpb.DeleteNetworkRequest) (*rpcpb.DeleteNetworkResponse, error)
+	CreateAPIKey(ctx context.Context, addr string, req *rpcpb.CreateAPIKeyRequest) (*rpcpb.CreateAPIKeyResponse, error)
+	RevokeAPIKey(ctx context.Context, addr string, req *rpcpb.RevokeAPIKeyRequest) (*rpcpb.RevokeAPIKeyResponse, error)
 }
 
 // defaultPeerManagerdPort mirrors internal/cluster's own constant of
@@ -232,21 +246,37 @@ func (s *Server) applyNetworkCommand(ctx context.Context, cmd *internalpb.Comman
 	return network, "", ""
 }
 
-// CreateNetwork implements rpcpb.ManagerServiceServer.
+// CreateNetwork implements rpcpb.ManagerServiceServer. A rejection
+// specifically for not being the leader is forwarded to the leader's
+// own managerd when peer forwarding is configured (ADR-0036's
+// follow-up to ADR-0035, extending forwarding from reads to writes) -
+// otherwise a caller hitting a non-leader node could never create
+// anything at all.
 func (s *Server) CreateNetwork(ctx context.Context, req *rpcpb.CreateNetworkRequest) (*rpcpb.CreateNetworkResponse, error) {
 	cmd := &internalpb.Command{
 		Op: &internalpb.Command_CreateNetwork{CreateNetwork: &internalpb.CreateNetwork{Network: toInternalNetwork(req.GetNetwork())}},
 	}
 	network, appErr, leaderHint := s.applyNetworkCommand(ctx, cmd, req.GetTimeoutMs())
+	if leaderHint != "" && s.peers != nil {
+		if fwd, ferr := s.peers.CreateNetwork(ctx, s.peerManagerdAddr(leaderHint), req); ferr == nil {
+			return fwd, nil
+		}
+	}
 	return &rpcpb.CreateNetworkResponse{Network: fromInternalNetwork(network), Error: appErr, LeaderHint: leaderHint}, nil
 }
 
-// DeleteNetwork implements rpcpb.ManagerServiceServer.
+// DeleteNetwork implements rpcpb.ManagerServiceServer. See CreateNetwork's
+// doc comment for the forwarding rationale, identical here.
 func (s *Server) DeleteNetwork(ctx context.Context, req *rpcpb.DeleteNetworkRequest) (*rpcpb.DeleteNetworkResponse, error) {
 	cmd := &internalpb.Command{
 		Op: &internalpb.Command_DeleteNetwork{DeleteNetwork: &internalpb.DeleteNetwork{Id: req.GetId()}},
 	}
 	network, appErr, leaderHint := s.applyNetworkCommand(ctx, cmd, req.GetTimeoutMs())
+	if leaderHint != "" && s.peers != nil {
+		if fwd, ferr := s.peers.DeleteNetwork(ctx, s.peerManagerdAddr(leaderHint), req); ferr == nil {
+			return fwd, nil
+		}
+	}
 	return &rpcpb.DeleteNetworkResponse{Network: fromInternalNetwork(network), Error: appErr, LeaderHint: leaderHint}, nil
 }
 
@@ -325,17 +355,31 @@ func (s *Server) CreateAPIKey(ctx context.Context, req *rpcpb.CreateAPIKeyReques
 	}
 	key, appErr, leaderHint := s.applyAPIKeyCommand(ctx, cmd, req.GetTimeoutMs())
 	if appErr != "" {
+		if leaderHint != "" && s.peers != nil {
+			// Forwarded: the leader generates and stores its own fresh
+			// raw/hashed pair - the raw/hashed values generated above are
+			// simply discarded, never sent anywhere.
+			if fwd, ferr := s.peers.CreateAPIKey(ctx, s.peerManagerdAddr(leaderHint), req); ferr == nil {
+				return fwd, nil
+			}
+		}
 		return &rpcpb.CreateAPIKeyResponse{Error: appErr, LeaderHint: leaderHint}, nil
 	}
 	return &rpcpb.CreateAPIKeyResponse{Key: fromInternalAPIKey(key), RawKey: raw}, nil
 }
 
-// RevokeAPIKey implements rpcpb.ManagerServiceServer.
+// RevokeAPIKey implements rpcpb.ManagerServiceServer. See CreateNetwork's
+// doc comment for the forwarding rationale, identical here.
 func (s *Server) RevokeAPIKey(ctx context.Context, req *rpcpb.RevokeAPIKeyRequest) (*rpcpb.RevokeAPIKeyResponse, error) {
 	cmd := &internalpb.Command{
 		Op: &internalpb.Command_RevokeApiKey{RevokeApiKey: &internalpb.RevokeAPIKey{Id: req.GetId()}},
 	}
 	_, appErr, leaderHint := s.applyAPIKeyCommand(ctx, cmd, req.GetTimeoutMs())
+	if leaderHint != "" && s.peers != nil {
+		if fwd, ferr := s.peers.RevokeAPIKey(ctx, s.peerManagerdAddr(leaderHint), req); ferr == nil {
+			return fwd, nil
+		}
+	}
 	return &rpcpb.RevokeAPIKeyResponse{Error: appErr, LeaderHint: leaderHint}, nil
 }
 
@@ -373,30 +417,51 @@ func (s *Server) bridgeStatus(ctx context.Context, n *internalpb.NetworkDefiniti
 	return "down"
 }
 
-// CreateVM implements rpcpb.ManagerServiceServer.
+// CreateVM implements rpcpb.ManagerServiceServer. See CreateNetwork's
+// doc comment for the forwarding rationale, identical here - this is
+// the exact RPC whose non-leader rejection ("raft: this node is not
+// the leader") was visibly surfacing to a real user in the web UI's
+// create-VM form before this forwarding existed.
 func (s *Server) CreateVM(ctx context.Context, req *rpcpb.CreateVMRequest) (*rpcpb.CreateVMResponse, error) {
 	cmd := &internalpb.Command{
 		Op: &internalpb.Command_CreateVm{CreateVm: &internalpb.CreateVM{Vm: toInternalVM(req.GetVm())}},
 	}
 	vm, appErr, leaderHint := s.applyCommand(ctx, cmd, req.GetTimeoutMs())
+	if leaderHint != "" && s.peers != nil {
+		if fwd, ferr := s.peers.CreateVM(ctx, s.peerManagerdAddr(leaderHint), req); ferr == nil {
+			return fwd, nil
+		}
+	}
 	return &rpcpb.CreateVMResponse{Vm: fromInternalVM(vm), Error: appErr, LeaderHint: leaderHint}, nil
 }
 
-// UpdateVM implements rpcpb.ManagerServiceServer.
+// UpdateVM implements rpcpb.ManagerServiceServer. See CreateNetwork's
+// doc comment for the forwarding rationale, identical here.
 func (s *Server) UpdateVM(ctx context.Context, req *rpcpb.UpdateVMRequest) (*rpcpb.UpdateVMResponse, error) {
 	cmd := &internalpb.Command{
 		Op: &internalpb.Command_UpdateVm{UpdateVm: &internalpb.UpdateVM{Vm: toInternalVM(req.GetVm())}},
 	}
 	vm, appErr, leaderHint := s.applyCommand(ctx, cmd, req.GetTimeoutMs())
+	if leaderHint != "" && s.peers != nil {
+		if fwd, ferr := s.peers.UpdateVM(ctx, s.peerManagerdAddr(leaderHint), req); ferr == nil {
+			return fwd, nil
+		}
+	}
 	return &rpcpb.UpdateVMResponse{Vm: fromInternalVM(vm), Error: appErr, LeaderHint: leaderHint}, nil
 }
 
-// DeleteVM implements rpcpb.ManagerServiceServer.
+// DeleteVM implements rpcpb.ManagerServiceServer. See CreateNetwork's
+// doc comment for the forwarding rationale, identical here.
 func (s *Server) DeleteVM(ctx context.Context, req *rpcpb.DeleteVMRequest) (*rpcpb.DeleteVMResponse, error) {
 	cmd := &internalpb.Command{
 		Op: &internalpb.Command_DeleteVm{DeleteVm: &internalpb.DeleteVM{Id: req.GetId()}},
 	}
 	vm, appErr, leaderHint := s.applyCommand(ctx, cmd, req.GetTimeoutMs())
+	if leaderHint != "" && s.peers != nil {
+		if fwd, ferr := s.peers.DeleteVM(ctx, s.peerManagerdAddr(leaderHint), req); ferr == nil {
+			return fwd, nil
+		}
+	}
 	return &rpcpb.DeleteVMResponse{Vm: fromInternalVM(vm), Error: appErr, LeaderHint: leaderHint}, nil
 }
 
@@ -848,30 +913,48 @@ func (s *Server) applyJailCommand(ctx context.Context, cmd *internalpb.Command, 
 	return jail, "", ""
 }
 
-// CreateJail implements rpcpb.ManagerServiceServer.
+// CreateJail implements rpcpb.ManagerServiceServer. See CreateNetwork's
+// doc comment for the forwarding rationale, identical here.
 func (s *Server) CreateJail(ctx context.Context, req *rpcpb.CreateJailRequest) (*rpcpb.CreateJailResponse, error) {
 	cmd := &internalpb.Command{
 		Op: &internalpb.Command_CreateJail{CreateJail: &internalpb.CreateJail{Jail: toInternalJail(req.GetJail())}},
 	}
 	jail, appErr, leaderHint := s.applyJailCommand(ctx, cmd, req.GetTimeoutMs())
+	if leaderHint != "" && s.peers != nil {
+		if fwd, ferr := s.peers.CreateJail(ctx, s.peerManagerdAddr(leaderHint), req); ferr == nil {
+			return fwd, nil
+		}
+	}
 	return &rpcpb.CreateJailResponse{Jail: fromInternalJail(jail), Error: appErr, LeaderHint: leaderHint}, nil
 }
 
-// UpdateJail implements rpcpb.ManagerServiceServer.
+// UpdateJail implements rpcpb.ManagerServiceServer. See CreateNetwork's
+// doc comment for the forwarding rationale, identical here.
 func (s *Server) UpdateJail(ctx context.Context, req *rpcpb.UpdateJailRequest) (*rpcpb.UpdateJailResponse, error) {
 	cmd := &internalpb.Command{
 		Op: &internalpb.Command_UpdateJail{UpdateJail: &internalpb.UpdateJail{Jail: toInternalJail(req.GetJail())}},
 	}
 	jail, appErr, leaderHint := s.applyJailCommand(ctx, cmd, req.GetTimeoutMs())
+	if leaderHint != "" && s.peers != nil {
+		if fwd, ferr := s.peers.UpdateJail(ctx, s.peerManagerdAddr(leaderHint), req); ferr == nil {
+			return fwd, nil
+		}
+	}
 	return &rpcpb.UpdateJailResponse{Jail: fromInternalJail(jail), Error: appErr, LeaderHint: leaderHint}, nil
 }
 
-// DeleteJail implements rpcpb.ManagerServiceServer.
+// DeleteJail implements rpcpb.ManagerServiceServer. See CreateNetwork's
+// doc comment for the forwarding rationale, identical here.
 func (s *Server) DeleteJail(ctx context.Context, req *rpcpb.DeleteJailRequest) (*rpcpb.DeleteJailResponse, error) {
 	cmd := &internalpb.Command{
 		Op: &internalpb.Command_DeleteJail{DeleteJail: &internalpb.DeleteJail{Id: req.GetId()}},
 	}
 	jail, appErr, leaderHint := s.applyJailCommand(ctx, cmd, req.GetTimeoutMs())
+	if leaderHint != "" && s.peers != nil {
+		if fwd, ferr := s.peers.DeleteJail(ctx, s.peerManagerdAddr(leaderHint), req); ferr == nil {
+			return fwd, nil
+		}
+	}
 	return &rpcpb.DeleteJailResponse{Jail: fromInternalJail(jail), Error: appErr, LeaderHint: leaderHint}, nil
 }
 
