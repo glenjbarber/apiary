@@ -974,7 +974,8 @@ func (s *Server) handleCreateAPIKey(w http.ResponseWriter, r *http.Request) {
 	}
 
 	name := r.FormValue("name")
-	resp, err := s.client.CreateAPIKey(r.Context(), &rpcpb.CreateAPIKeyRequest{Name: name})
+	role := r.FormValue("role")
+	resp, err := s.client.CreateAPIKey(r.Context(), &rpcpb.CreateAPIKeyRequest{Name: name, Role: role})
 	if err != nil {
 		s.renderAPIKeyPanelResult(w, r, err.Error(), "", "")
 		return

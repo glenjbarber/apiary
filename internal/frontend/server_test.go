@@ -875,7 +875,7 @@ func TestServer_DeleteJail_ErrorShowsInPanel(t *testing.T) {
 
 func TestServer_APIKeysPage(t *testing.T) {
 	client := &fakeClient{listAPIKeysResp: &rpcpb.ListAPIKeysResponse{
-		Keys: []*rpcpb.APIKeyInfo{{Id: "key-1", Name: "terraform", CreatedUnix: 1700000000}},
+		Keys: []*rpcpb.APIKeyInfo{{Id: "key-1", Name: "terraform", Role: "operator", CreatedUnix: 1700000000}},
 	}}
 	s := newTestServer(t, client)
 
@@ -887,8 +887,8 @@ func TestServer_APIKeysPage(t *testing.T) {
 		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
 	}
 	body := rec.Body.String()
-	if !strings.Contains(body, "key-1") || !strings.Contains(body, "terraform") {
-		t.Errorf("apikeys page missing expected key row, got: %s", body)
+	if !strings.Contains(body, "key-1") || !strings.Contains(body, "terraform") || !strings.Contains(body, "operator") {
+		t.Errorf("apikeys page missing expected key row (with role), got: %s", body)
 	}
 }
 
@@ -914,7 +914,7 @@ func TestServer_CreateAPIKey_ShowsRawKeyOnce(t *testing.T) {
 	}
 	s := newTestServer(t, client)
 
-	form := url.Values{"name": {"terraform"}}
+	form := url.Values{"name": {"terraform"}, "role": {"operator"}}
 	req := httptest.NewRequest(http.MethodPost, "/apikeys", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	rec := httptest.NewRecorder()
@@ -925,6 +925,9 @@ func TestServer_CreateAPIKey_ShowsRawKeyOnce(t *testing.T) {
 	}
 	if client.lastCreateAPIKeyReq.GetName() != "terraform" {
 		t.Errorf("forwarded name = %q, want terraform", client.lastCreateAPIKeyReq.GetName())
+	}
+	if client.lastCreateAPIKeyReq.GetRole() != "operator" {
+		t.Errorf("forwarded role = %q, want operator", client.lastCreateAPIKeyReq.GetRole())
 	}
 	if !strings.Contains(rec.Body.String(), "apk_supersecretvalue") {
 		t.Errorf("create response missing the one-time raw key, got: %s", rec.Body.String())
