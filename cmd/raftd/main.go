@@ -37,6 +37,7 @@ func run() error {
 	nodeID := flag.String("node-id", "", "unique ID for this raft node (defaults to hostname)")
 	bindAddr := flag.String("raft-bind", raftnode.DefaultBindAddr, "loopback TCP address for the raft transport")
 	joinSocket := flag.String("join", "", "internal socket path of an existing cluster member to join through (leave empty to bootstrap a new single-node cluster)")
+	internalToken := flag.String("internal-token", "", "shared secret required from every RaftInternal caller (managerd, or a peer raftd during -join); leave empty to rely on the socket's own file permissions alone, as before (see ADR-0023)")
 	flag.Parse()
 
 	cfg := raftnode.Config{
@@ -62,7 +63,7 @@ func run() error {
 	case hadState:
 		log.Printf("raftd: resuming existing raft state")
 	case *joinSocket != "":
-		if err := joinCluster(*joinSocket, resolvedNodeID, *bindAddr); err != nil {
+		if err := joinCluster(*joinSocket, resolvedNodeID, *bindAddr, *internalToken); err != nil {
 			return fmt.Errorf("joining cluster via %s: %w", *joinSocket, err)
 		}
 		log.Printf("raftd: joined existing cluster via %s", *joinSocket)
@@ -78,7 +79,10 @@ func run() error {
 		return fmt.Errorf("listening on socket: %w", err)
 	}
 
-	grpcServer := grpc.NewServer()
+	grpcServer := grpc.NewServer(
+		grpc.UnaryInterceptor(raftnode.TokenUnaryInterceptor(*internalToken)),
+		grpc.StreamInterceptor(raftnode.TokenStreamInterceptor(*internalToken)),
+	)
 	internalpb.RegisterRaftInternalServer(grpcServer, raftnode.NewServer(node))
 
 	serveErrCh := make(chan error, 1)
@@ -113,10 +117,15 @@ func run() error {
 // joinCluster asks the existing cluster member listening on joinSocket to
 // add this node (nodeID at raftBindAddr) as a voter. The target must
 // already be reachable, and must be (or forward to) the current leader.
-func joinCluster(joinSocket, nodeID, raftBindAddr string) error {
+// token is presented as the target's own -internal-token, if it has one
+// configured - a real multi-node deployment is expected to use the same
+// token on every raftd, the same assumption -peer-api-key already makes
+// for managerd's own cross-node calls (ADR-0029).
+func joinCluster(joinSocket, nodeID, raftBindAddr, token string) error {
 	conn, err := grpc.NewClient(
 		"unix://"+joinSocket,
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
+		grpc.WithPerRPCCredentials(raftnode.TokenCredentials(token)),
 	)
 	if err != nil {
 		return fmt.Errorf("dialing %s: %w", joinSocket, err)

@@ -145,7 +145,7 @@ func (f *fakeVLANStatus) InterfaceStatus(_ context.Context, name string) (exists
 func newManagerdRPCClientFull(t *testing.T, raftdSocket, nodeID string, vnc VNCLookup, vlanMgr VLANStatus) rpcpb.ManagerServiceClient {
 	t.Helper()
 
-	raftClient, err := Dial(raftdSocket)
+	raftClient, err := Dial(raftdSocket, "")
 	if err != nil {
 		t.Fatalf("Dial() error: %v", err)
 	}

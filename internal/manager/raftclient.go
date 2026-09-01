@@ -12,6 +12,7 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 
 	internalpb "github.com/glenjbarber/apiary/api/internalpb"
+	raftnode "github.com/glenjbarber/apiary/internal/raft"
 )
 
 // RaftClient wraps a connection to raftd's internal RaftInternal service
@@ -21,11 +22,16 @@ type RaftClient struct {
 	client internalpb.RaftInternalClient
 }
 
-// Dial connects to raftd's internal socket at socketPath.
-func Dial(socketPath string) (*RaftClient, error) {
+// Dial connects to raftd's internal socket at socketPath. token is the
+// shared secret raftd's own -internal-token-file requires, if any - see
+// internal/raft.TokenCredentials; an empty token attaches nothing,
+// matching raftd's own opt-in behavior when it has no token configured
+// either.
+func Dial(socketPath, token string) (*RaftClient, error) {
 	conn, err := grpc.NewClient(
 		"unix://"+socketPath,
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
+		grpc.WithPerRPCCredentials(raftnode.TokenCredentials(token)),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("manager: dialing raftd at %s: %w", socketPath, err)

@@ -78,7 +78,7 @@ func TestIntegration_ReconcilerProvisionsRealDataset(t *testing.T) {
 	go grpcServer.Serve(lis)
 	t.Cleanup(grpcServer.GracefulStop)
 
-	raftClient, err := manager.Dial(socketPath)
+	raftClient, err := manager.Dial(socketPath, "")
 	if err != nil {
 		t.Fatalf("manager.Dial() error: %v", err)
 	}
@@ -178,7 +178,7 @@ func TestIntegration_ReconcilerProvisionsRealBhyveVM(t *testing.T) {
 	go grpcServer.Serve(lis)
 	t.Cleanup(grpcServer.GracefulStop)
 
-	raftClient, err := manager.Dial(socketPath)
+	raftClient, err := manager.Dial(socketPath, "")
 	if err != nil {
 		t.Fatalf("manager.Dial() error: %v", err)
 	}

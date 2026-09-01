@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials"
 
 	rpcpb "github.com/glenjbarber/apiary/api/rpc"
 	"github.com/glenjbarber/apiary/internal/bhyve"
@@ -38,6 +39,7 @@ func main() {
 
 func run() error {
 	raftdSocket := flag.String("raftd-socket", "/var/run/apiary/raftd.sock", "path to raftd's internal Unix domain socket")
+	raftdToken := flag.String("raftd-token", "", "shared secret to present to raftd's internal socket (must match raftd's own -internal-token); leave empty if raftd has none configured")
 	rpcAddr := flag.String("rpc-addr", "127.0.0.1:17700", "TCP address for managerd's external RPC API")
 	nodeID := flag.String("node-id", "", "identity reported by managerd in Status responses (defaults to hostname)")
 	zfsBase := flag.String("zfs-base", "zroot/apiary", "base ZFS dataset under which this node's VM storage is provisioned")
@@ -55,6 +57,8 @@ func run() error {
 	jailDiskSizeMB := flag.Uint64("jail-disk-size-mb", 2048, "size of a replicated jail's HAST-backed root filesystem in MB (ignored for non-replicated jails, which use their ZFS dataset's own quota)")
 	peerAPIKey := flag.String("peer-api-key", "", "API key this node's reconciler attaches when forwarding a raft write to another node's managerd (see ADR-0029); required once the cluster has any API key created (ADR-0023), since peer calls go through the same authenticated ManagerService API as everything else")
 	peerManagerdPort := flag.String("peer-managerd-port", "", "port assumed for a peer node's managerd external API when forwarding (ADR-0029); defaults to this node's own -rpc-addr port, since every node in a real deployment is expected to use the same port")
+	tlsCert := flag.String("tls-cert", "", "PEM certificate file for managerd's external gRPC API; leave unset (with -tls-key) to serve plaintext, as before")
+	tlsKey := flag.String("tls-key", "", "PEM private key file matching -tls-cert")
 	flag.Parse()
 
 	id := *nodeID
@@ -69,7 +73,7 @@ func run() error {
 	// There is no process-supervision/retry infrastructure yet, so a
 	// managerd that can't reach raftd at all isn't in a useful state:
 	// fail fast rather than retrying with backoff.
-	raftClient, err := manager.Dial(*raftdSocket)
+	raftClient, err := manager.Dial(*raftdSocket, *raftdToken)
 	if err != nil {
 		return fmt.Errorf("connecting to raftd at %s: %w", *raftdSocket, err)
 	}
@@ -180,10 +184,27 @@ func run() error {
 	// API-key check - see ADR-0023. Auth stays fully open until the
 	// first key is created (CreateAPIKey itself included), so this is
 	// non-breaking for any deployment that hasn't created a key yet.
-	grpcServer := grpc.NewServer(
+	serverOpts := []grpc.ServerOption{
 		grpc.UnaryInterceptor(srv.AuthUnaryInterceptor),
 		grpc.StreamInterceptor(srv.AuthStreamInterceptor),
-	)
+	}
+	// TLS is opt-in (both -tls-cert and -tls-key must be set) - without
+	// it, an API key (ADR-0023) travels to managerd in plaintext over
+	// the network, which matters the moment -rpc-addr is bound to
+	// anything beyond loopback (see ADR-0029's own consequences). Left
+	// unset, this preserves the plaintext behavior every deployment so
+	// far has used.
+	if *tlsCert != "" || *tlsKey != "" {
+		if *tlsCert == "" || *tlsKey == "" {
+			return fmt.Errorf("both -tls-cert and -tls-key must be set together")
+		}
+		creds, err := credentials.NewServerTLSFromFile(*tlsCert, *tlsKey)
+		if err != nil {
+			return fmt.Errorf("loading TLS cert/key: %w", err)
+		}
+		serverOpts = append(serverOpts, grpc.Creds(creds))
+	}
+	grpcServer := grpc.NewServer(serverOpts...)
 	rpcpb.RegisterManagerServiceServer(grpcServer, srv)
 
 	serveErrCh := make(chan error, 1)
@@ -191,7 +212,7 @@ func run() error {
 		serveErrCh <- grpcServer.Serve(lis)
 	}()
 
-	log.Printf("managerd: listening on %s (node-id=%s, raftd-socket=%s, vlan-uplink=%s, hast-enabled=%v, jail-enabled=%v, peer-managerd-port=%s)", *rpcAddr, id, *raftdSocket, *vlanUplink, *hastEnabled, *jailEnabled, resolvedPeerPort)
+	log.Printf("managerd: listening on %s (node-id=%s, raftd-socket=%s, vlan-uplink=%s, hast-enabled=%v, jail-enabled=%v, peer-managerd-port=%s, tls=%v)", *rpcAddr, id, *raftdSocket, *vlanUplink, *hastEnabled, *jailEnabled, resolvedPeerPort, *tlsCert != "")
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
