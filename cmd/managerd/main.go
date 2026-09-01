@@ -11,6 +11,7 @@ import (
 	"net"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -57,6 +58,8 @@ func run() error {
 	jailDiskSizeMB := flag.Uint64("jail-disk-size-mb", 2048, "size of a replicated jail's HAST-backed root filesystem in MB (ignored for non-replicated jails, which use their ZFS dataset's own quota)")
 	peerAPIKey := flag.String("peer-api-key", "", "API key this node's reconciler attaches when forwarding a raft write to another node's managerd (see ADR-0029); required once the cluster has any API key created (ADR-0023), since peer calls go through the same authenticated ManagerService API as everything else")
 	peerManagerdPort := flag.String("peer-managerd-port", "", "port assumed for a peer node's managerd external API when forwarding (ADR-0029); defaults to this node's own -rpc-addr port, since every node in a real deployment is expected to use the same port")
+	peerTLS := flag.Bool("peer-tls", false, "dial peer managerds over TLS instead of plaintext when forwarding (ADR-0029/ADR-0035); requires every peer's managerd to also be TLS-enabled")
+	peerTLSHostnameMap := flag.String("peer-tls-hostname-map", "", "comma-separated ip=hostname pairs used to verify a peer's TLS certificate, since a raft leader_hint is always a bare address and a real cert is never issued for a bare IP (e.g. \"10.50.0.11=freebsd-apiary.apiary.work,10.50.0.12=freebsd-apiary2.apiary.work\"); only consulted when -peer-tls is set")
 	tlsCert := flag.String("tls-cert", "", "PEM certificate file for managerd's external gRPC API; leave unset (with -tls-key) to serve plaintext, as before")
 	tlsKey := flag.String("tls-key", "", "PEM private key file matching -tls-cert")
 	flag.Parse()
@@ -108,11 +111,21 @@ func run() error {
 		}
 	}
 
+	// Parsed once here (rather than inside PeerReporter) so a malformed
+	// entry is a plain, silently-skipped no-op instead of a runtime
+	// panic - an operator typo shouldn't crash the whole daemon.
+	peerHostnames := map[string]string{}
+	for _, pair := range strings.Split(*peerTLSHostnameMap, ",") {
+		if ip, host, ok := strings.Cut(pair, "="); ok && ip != "" && host != "" {
+			peerHostnames[ip] = host
+		}
+	}
+
 	// Shared between the reconciler's own write-forwarding (ADR-0029)
 	// and the server's read-forwarding (ADR-0035) - both are forwarding
 	// to the same leader managerd over the same authenticated API, so
 	// there's no reason for two separate peer clients/credentials.
-	peers := manager.NewPeerReporter(*peerAPIKey)
+	peers := manager.NewPeerReporter(*peerAPIKey, *peerTLS, peerHostnames)
 
 	reconciler := &cluster.Reconciler{
 		Raft:             raftClient,

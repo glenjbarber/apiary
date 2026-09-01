@@ -2,9 +2,12 @@ package manager
 
 import (
 	"context"
+	"crypto/tls"
 	"fmt"
+	"net"
 
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
 
 	rpcpb "github.com/glenjbarber/apiary/api/rpc"
@@ -27,14 +30,47 @@ type PeerReporter struct {
 	// Unauthenticated instead of "not leader" - see cmd/managerd's
 	// -peer-api-key flag.
 	APIKey string
+
+	// UseTLS dials every peer over TLS, trusting the system certificate
+	// pool - the expected case once every node in a cluster has a real,
+	// publicly-trusted certificate (ADR-0033), rather than a private CA
+	// needing its own trust configuration. False (the default) preserves
+	// the original plaintext-only behavior for a cluster that hasn't
+	// adopted TLS everywhere yet.
+	UseTLS bool
+
+	// PeerHostnames maps a peer's bare IP (as it appears in a raft
+	// leader_hint, e.g. "10.50.0.11") to the hostname its TLS
+	// certificate actually names (e.g. "freebsd-apiary.apiary.work") -
+	// raft's own leader_hint is always a plain address, never a
+	// hostname, so without this a real cert (which Let's Encrypt never
+	// issues for a bare IP) can never verify against the address
+	// actually being dialed. This project runs on a small, fixed set of
+	// known nodes, not an arbitrary/dynamic fleet, so a small static map
+	// an operator fills in once is the right amount of machinery here -
+	// see cmd/managerd's -peer-tls-hostname-map flag. An IP with no
+	// entry fails TLS verification loudly (dialing the bare IP against
+	// a hostname-only cert) rather than silently skipping verification.
+	PeerHostnames map[string]string
 }
 
-func NewPeerReporter(apiKey string) *PeerReporter {
-	return &PeerReporter{APIKey: apiKey}
+func NewPeerReporter(apiKey string, useTLS bool, peerHostnames map[string]string) *PeerReporter {
+	return &PeerReporter{APIKey: apiKey, UseTLS: useTLS, PeerHostnames: peerHostnames}
 }
 
 func (p *PeerReporter) dial(addr string) (*grpc.ClientConn, rpcpb.ManagerServiceClient, error) {
-	opts := []grpc.DialOption{grpc.WithTransportCredentials(insecure.NewCredentials())}
+	var opts []grpc.DialOption
+	if p.UseTLS {
+		cfg := &tls.Config{}
+		if host, _, err := net.SplitHostPort(addr); err == nil {
+			if name, ok := p.PeerHostnames[host]; ok {
+				cfg.ServerName = name
+			}
+		}
+		opts = []grpc.DialOption{grpc.WithTransportCredentials(credentials.NewTLS(cfg))}
+	} else {
+		opts = []grpc.DialOption{grpc.WithTransportCredentials(insecure.NewCredentials())}
+	}
 	if p.APIKey != "" {
 		opts = append(opts, grpc.WithPerRPCCredentials(apiKeyCredentials(p.APIKey)))
 	}

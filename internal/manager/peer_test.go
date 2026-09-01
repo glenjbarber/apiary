@@ -114,7 +114,7 @@ func newTestPeerServer(t *testing.T, fake *fakePeerServer) string {
 func TestPeerReporter_ReportVMPhase_SendsCorrectRequest(t *testing.T) {
 	fake := &fakePeerServer{}
 	addr := newTestPeerServer(t, fake)
-	p := NewPeerReporter("")
+	p := NewPeerReporter("", false, nil)
 
 	if err := p.ReportVMPhase(context.Background(), addr, "vm-1", "ready", ""); err != nil {
 		t.Fatalf("ReportVMPhase() error: %v", err)
@@ -127,7 +127,7 @@ func TestPeerReporter_ReportVMPhase_SendsCorrectRequest(t *testing.T) {
 func TestPeerReporter_AttachesAPIKey(t *testing.T) {
 	fake := &fakePeerServer{}
 	addr := newTestPeerServer(t, fake)
-	p := NewPeerReporter("test-key")
+	p := NewPeerReporter("test-key", false, nil)
 
 	if err := p.ReportVMPhase(context.Background(), addr, "vm-1", "ready", ""); err != nil {
 		t.Fatalf("ReportVMPhase() error: %v", err)
@@ -140,7 +140,7 @@ func TestPeerReporter_AttachesAPIKey(t *testing.T) {
 func TestPeerReporter_NoAPIKeyAttachesNothing(t *testing.T) {
 	fake := &fakePeerServer{}
 	addr := newTestPeerServer(t, fake)
-	p := NewPeerReporter("")
+	p := NewPeerReporter("", false, nil)
 
 	if err := p.ReportVMPhase(context.Background(), addr, "vm-1", "ready", ""); err != nil {
 		t.Fatalf("ReportVMPhase() error: %v", err)
@@ -153,7 +153,7 @@ func TestPeerReporter_NoAPIKeyAttachesNothing(t *testing.T) {
 func TestPeerReporter_ReportVMPhase_ApplicationErrorIsReturned(t *testing.T) {
 	fake := &fakePeerServer{vmPhaseResp: &rpcpb.ReportVMPhaseResponse{Error: "this node is not the leader either"}}
 	addr := newTestPeerServer(t, fake)
-	p := NewPeerReporter("")
+	p := NewPeerReporter("", false, nil)
 
 	if err := p.ReportVMPhase(context.Background(), addr, "vm-1", "ready", ""); err == nil {
 		t.Fatal("ReportVMPhase() error = nil, want the peer's own rejection surfaced")
@@ -163,7 +163,7 @@ func TestPeerReporter_ReportVMPhase_ApplicationErrorIsReturned(t *testing.T) {
 func TestPeerReporter_ReportJailPhase_SendsCorrectRequest(t *testing.T) {
 	fake := &fakePeerServer{}
 	addr := newTestPeerServer(t, fake)
-	p := NewPeerReporter("")
+	p := NewPeerReporter("", false, nil)
 
 	if err := p.ReportJailPhase(context.Background(), addr, "jail-1", "error", "boom"); err != nil {
 		t.Fatalf("ReportJailPhase() error: %v", err)
@@ -176,7 +176,7 @@ func TestPeerReporter_ReportJailPhase_SendsCorrectRequest(t *testing.T) {
 func TestPeerReporter_ListVMs_ReturnsPeerResponse(t *testing.T) {
 	fake := &fakePeerServer{listVMsResp: &rpcpb.ListVMsResponse{Vms: []*rpcpb.VMDefinition{{Id: "vm-1"}}}}
 	addr := newTestPeerServer(t, fake)
-	p := NewPeerReporter("")
+	p := NewPeerReporter("", false, nil)
 
 	resp, err := p.ListVMs(context.Background(), addr)
 	if err != nil {
@@ -190,7 +190,7 @@ func TestPeerReporter_ListVMs_ReturnsPeerResponse(t *testing.T) {
 func TestPeerReporter_GetVM_SendsCorrectRequest(t *testing.T) {
 	fake := &fakePeerServer{getVMResp: &rpcpb.GetVMResponse{Found: true, Vm: &rpcpb.VMDefinition{Id: "vm-1"}}}
 	addr := newTestPeerServer(t, fake)
-	p := NewPeerReporter("")
+	p := NewPeerReporter("", false, nil)
 
 	resp, err := p.GetVM(context.Background(), addr, "vm-1")
 	if err != nil {
@@ -207,7 +207,7 @@ func TestPeerReporter_GetVM_SendsCorrectRequest(t *testing.T) {
 func TestPeerReporter_ListJails_ReturnsPeerResponse(t *testing.T) {
 	fake := &fakePeerServer{listJailsResp: &rpcpb.ListJailsResponse{Jails: []*rpcpb.JailDefinition{{Id: "jail-1"}}}}
 	addr := newTestPeerServer(t, fake)
-	p := NewPeerReporter("")
+	p := NewPeerReporter("", false, nil)
 
 	resp, err := p.ListJails(context.Background(), addr)
 	if err != nil {
@@ -221,7 +221,7 @@ func TestPeerReporter_ListJails_ReturnsPeerResponse(t *testing.T) {
 func TestPeerReporter_GetJail_SendsCorrectRequest(t *testing.T) {
 	fake := &fakePeerServer{getJailResp: &rpcpb.GetJailResponse{Found: true, Jail: &rpcpb.JailDefinition{Id: "jail-1"}}}
 	addr := newTestPeerServer(t, fake)
-	p := NewPeerReporter("")
+	p := NewPeerReporter("", false, nil)
 
 	resp, err := p.GetJail(context.Background(), addr, "jail-1")
 	if err != nil {
@@ -238,7 +238,7 @@ func TestPeerReporter_GetJail_SendsCorrectRequest(t *testing.T) {
 func TestPeerReporter_ListNetworks_ReturnsPeerResponse(t *testing.T) {
 	fake := &fakePeerServer{listNetworksResp: &rpcpb.ListNetworksResponse{Networks: []*rpcpb.NetworkDefinition{{Id: "net-1"}}}}
 	addr := newTestPeerServer(t, fake)
-	p := NewPeerReporter("")
+	p := NewPeerReporter("", false, nil)
 
 	resp, err := p.ListNetworks(context.Background(), addr)
 	if err != nil {
@@ -246,5 +246,19 @@ func TestPeerReporter_ListNetworks_ReturnsPeerResponse(t *testing.T) {
 	}
 	if len(resp.GetNetworks()) != 1 || resp.GetNetworks()[0].GetId() != "net-1" {
 		t.Errorf("ListNetworks() = %+v, want one network with id=net-1", resp)
+	}
+}
+
+// TestPeerReporter_TLSDialFailsAgainstPlaintextServer confirms UseTLS
+// actually changes the dial behavior (attempts a real TLS handshake)
+// rather than being a no-op - dialing a plain, non-TLS test server
+// with UseTLS=true must fail, not silently succeed in plaintext.
+func TestPeerReporter_TLSDialFailsAgainstPlaintextServer(t *testing.T) {
+	fake := &fakePeerServer{listVMsResp: &rpcpb.ListVMsResponse{}}
+	addr := newTestPeerServer(t, fake)
+	p := NewPeerReporter("", true, nil)
+
+	if _, err := p.ListVMs(context.Background(), addr); err == nil {
+		t.Fatal("ListVMs() over TLS against a plaintext server = nil error, want a handshake failure")
 	}
 }
