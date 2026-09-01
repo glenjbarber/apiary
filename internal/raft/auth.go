@@ -12,7 +12,7 @@ import (
 
 // TokenUnaryInterceptor/TokenStreamInterceptor gate every RaftInternal
 // RPC on a single shared-secret token, checked via gRPC metadata -
-// opt-in via cmd/raftd's own -internal-token-file flag. An empty token
+// opt-in via cmd/raftd's own -internal-token flag. An empty token
 // disables the check entirely, preserving today's behavior (the socket
 // relies on file permissions alone, per ADR-0023's own "judged
 // sufficient for now" - this is the follow-up that adds a real

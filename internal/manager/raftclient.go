@@ -23,7 +23,7 @@ type RaftClient struct {
 }
 
 // Dial connects to raftd's internal socket at socketPath. token is the
-// shared secret raftd's own -internal-token-file requires, if any - see
+// shared secret raftd's own -internal-token requires, if any - see
 // internal/raft.TokenCredentials; an empty token attaches nothing,
 // matching raftd's own opt-in behavior when it has no token configured
 // either.
