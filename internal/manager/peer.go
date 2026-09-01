@@ -229,6 +229,22 @@ func (p *PeerReporter) ListNetworks(ctx context.Context, addr string) (*rpcpb.Li
 	return client.ListNetworks(ctx, &rpcpb.ListNetworksRequest{})
 }
 
+// HostStats forwards to a specific peer's own HostStats RPC - unlike
+// ListVMs/GetVM/etc. above, this isn't leader-only-read forwarding
+// (HostStats always answers locally, for whichever managerd receives
+// the call); it's how internal/frontend reaches a node other than the
+// one it's colocated with at all, addressing addr directly (a real DNS
+// hostname this project's own nodes are each issued, not an IP derived
+// from a raft leader_hint - see cmd/frontend's own -peer-* flags).
+func (p *PeerReporter) HostStats(ctx context.Context, addr string) (*rpcpb.HostStatsResponse, error) {
+	conn, client, err := p.dial(addr)
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close()
+	return client.HostStats(ctx, &rpcpb.HostStatsRequest{})
+}
+
 func (p *PeerReporter) ReportJailTeardownComplete(ctx context.Context, addr, id string) error {
 	conn, client, err := p.dial(addr)
 	if err != nil {

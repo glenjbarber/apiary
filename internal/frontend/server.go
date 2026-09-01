@@ -63,8 +63,13 @@ type pageData struct {
 	// the bottom of a table the user may not be looking at.
 	ISOFormSuccess string
 
-	// Stats is this node's host stats snapshot, for the Stats page.
+	// Stats is one node's host stats snapshot, for the verbose per-node
+	// page ("/host/{id}").
 	Stats statsView
+
+	// ClusterNodes is the basic per-node summary row list for the
+	// default landing page ("/").
+	ClusterNodes []clusterNodeView
 
 	// AuthEnabled reports whether login is required at all, so the nav
 	// partial only shows a "Log out" link when there's actually a
@@ -179,6 +184,15 @@ type Server struct {
 	roleMap  map[string]manager.Role
 	sessions *sessionStore
 	lockouts *loginAttemptTracker
+
+	// peers is nil-able (see cmd/frontend's -peer-tls/-peer-hostname-suffix/
+	// -peer-manager-port) - the cluster overview page ("/") falls back to
+	// reporting only this frontend's own colocated node when unset,
+	// rather than trying to dial peers with no address-derivation
+	// configured.
+	peers              peerHostStatsClient
+	peerHostnameSuffix string
+	peerManagerPort    string
 }
 
 // pageHeaderData is the argument type the "page_header" template (see
@@ -226,8 +240,12 @@ func nodeSubtitle(nodeID string) string {
 // NewServer parses the embedded templates and returns a Server that
 // answers requests using client. auth enables a login page gating the
 // whole UI when non-nil; pass nil to disable login entirely (roleMap
-// is then unused).
-func NewServer(client rpcpb.ManagerServiceClient, auth pam.Authenticator, roleMap map[string]manager.Role) (*Server, error) {
+// is then unused). peers (nil-able) lets the cluster overview page
+// ("/") fetch other nodes' HostStats directly - see cmd/frontend's own
+// -peer-tls/-peer-hostname-suffix/-peer-manager-port flags for how
+// peerHostnameSuffix/peerManagerPort combine with a node ID to form
+// its managerd address.
+func NewServer(client rpcpb.ManagerServiceClient, auth pam.Authenticator, roleMap map[string]manager.Role, peers peerHostStatsClient, peerHostnameSuffix, peerManagerPort string) (*Server, error) {
 	tmpl, err := template.New("").Funcs(template.FuncMap{
 		"pageHeader":   pageHeader,
 		"vmSubtitle":   vmSubtitle,
@@ -238,13 +256,16 @@ func NewServer(client rpcpb.ManagerServiceClient, auth pam.Authenticator, roleMa
 	}
 
 	s := &Server{
-		client:   client,
-		tmpl:     tmpl,
-		lockouts: newLoginAttemptTracker(defaultMaxFailedAttempts, defaultAttemptWindow, defaultLockDuration),
-		mux:      http.NewServeMux(),
-		auth:     auth,
-		roleMap:  roleMap,
-		sessions: newSessionStore(),
+		client:             client,
+		tmpl:               tmpl,
+		lockouts:           newLoginAttemptTracker(defaultMaxFailedAttempts, defaultAttemptWindow, defaultLockDuration),
+		mux:                http.NewServeMux(),
+		auth:               auth,
+		roleMap:            roleMap,
+		sessions:           newSessionStore(),
+		peers:              peers,
+		peerHostnameSuffix: peerHostnameSuffix,
+		peerManagerPort:    peerManagerPort,
 	}
 	s.routes()
 	return s, nil
@@ -340,7 +361,8 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /logout", s.handleLogout)
 
 	// Viewer: every read-only page/route.
-	s.mux.HandleFunc("GET /{$}", s.handleStatsPage)
+	s.mux.HandleFunc("GET /{$}", s.handleClusterOverviewPage)
+	s.mux.HandleFunc("GET /host/{id}", s.handleHostPage)
 	s.mux.HandleFunc("GET /vms", s.handleVMsPage)
 	s.mux.HandleFunc("GET /vms/rows", s.handleListVMs)
 	s.mux.HandleFunc("GET /images", s.handleImagesPage)
@@ -492,27 +514,9 @@ func (s *Server) currentVMs(r *http.Request, sortBy, dir string) ([]vmView, stri
 	return vms, ""
 }
 
-// handleStatsPage serves the host stats page - the default landing
-// page ("/"), ahead of VMs/Images/New VM, since a node's own health is
-// what an operator most likely wants to see first.
-func (s *Server) handleStatsPage(w http.ResponseWriter, r *http.Request) {
-	stats, errMsg := s.currentStats(r)
-	s.render(w, "stats_page", s.withAuthFields(r, pageData{Error: errMsg, Stats: stats, ActivePage: "stats"}))
-}
-
-// currentStats fetches a HostStats snapshot, returning a zero-value
-// statsView (not an error) if the fetch fails entirely - the same
-// fail-soft convention currentVMs/currentISOs follow. A partial
-// failure (one subsystem down) is instead carried in statsView.Errors,
-// since hoststats.Gather already reports best-effort per subsystem
-// rather than failing outright (see internal/hoststats.Snapshot).
-func (s *Server) currentStats(r *http.Request) (statsView, string) {
-	resp, err := s.client.HostStats(r.Context(), &rpcpb.HostStatsRequest{})
-	if err != nil {
-		return statsView{}, err.Error()
-	}
-	return fromRPCStats(resp), ""
-}
+// handleClusterOverviewPage/handleHostPage/nodeHostStats live in
+// cluster_overview.go - the cluster-wide basic-status landing page
+// ("/") and the verbose per-node page ("/host/{id}") it links to.
 
 // handleVMsPage serves the VMs list page ("/vms").
 func (s *Server) handleVMsPage(w http.ResponseWriter, r *http.Request) {

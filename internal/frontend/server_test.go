@@ -291,7 +291,7 @@ func (f fakeAuthenticator) Authenticate(username, password string) (bool, error)
 
 func newTestServer(t *testing.T, client *fakeClient) *Server {
 	t.Helper()
-	s, err := NewServer(client, nil, nil)
+	s, err := NewServer(client, nil, nil, nil, "", "")
 	if err != nil {
 		t.Fatalf("NewServer() error: %v", err)
 	}
@@ -300,7 +300,7 @@ func newTestServer(t *testing.T, client *fakeClient) *Server {
 
 func newTestServerWithAuth(t *testing.T, client *fakeClient, user, pass string) *Server {
 	t.Helper()
-	s, err := NewServer(client, fakeAuthenticator{user: user, pass: pass}, map[string]manager.Role{user: manager.RoleAdmin})
+	s, err := NewServer(client, fakeAuthenticator{user: user, pass: pass}, map[string]manager.Role{user: manager.RoleAdmin}, nil, "", "")
 	if err != nil {
 		t.Fatalf("NewServer() error: %v", err)
 	}
@@ -332,7 +332,44 @@ func TestServer_VMsPage(t *testing.T) {
 	}
 }
 
-func TestServer_StatsPage_IsDefaultLandingPage(t *testing.T) {
+// TestServer_ClusterOverviewPage_IsDefaultLandingPage checks the
+// lightweight, basic-status-per-node page ("/") - the verbose,
+// full-detail equivalent for one selected node lives on "/host/{id}"
+// now (see TestServer_HostPage_ShowsFullDetail).
+func TestServer_ClusterOverviewPage_IsDefaultLandingPage(t *testing.T) {
+	client := &fakeClient{
+		statusResp: &rpcpb.StatusResponse{ManagerNodeId: "apiarium", KnownNodeIds: []string{"apiarium", "freebsd-apiary"}},
+		hostStatsResp: &rpcpb.HostStatsResponse{
+			NodeId: "apiarium",
+			Cpu:    &rpcpb.CPUStats{Cores: 8, LoadAvg_1: 1.23},
+			Mem:    &rpcpb.MemStats{TotalBytes: 1000, FreeBytes: 400},
+			Pools:  []*rpcpb.PoolStats{{Name: "zroot", Health: "ONLINE", CapacityPct: 5}},
+			Pf:     &rpcpb.PFStats{Enabled: true, CurrentStates: 3, Matches: 42},
+		},
+	}
+	s := newTestServer(t, client)
+
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	body := rec.Body.String()
+	for _, want := range []string{"apiarium", "freebsd-apiary", "Reachable", `href="/host/apiarium"`, `href="/host/freebsd-apiary"`} {
+		if !strings.Contains(body, want) {
+			t.Errorf("cluster overview page missing %q, got: %s", want, body)
+		}
+	}
+	if !strings.Contains(body, `<a href="/" class="active">Stats</a>`) {
+		t.Errorf("cluster overview page nav should mark Stats active, got: %s", body)
+	}
+}
+
+// TestServer_HostPage_ShowsFullDetail mirrors the old single-node stats
+// page's own checks, now against "/host/{id}".
+func TestServer_HostPage_ShowsFullDetail(t *testing.T) {
 	client := &fakeClient{hostStatsResp: &rpcpb.HostStatsResponse{
 		NodeId: "apiarium",
 		Cpu:    &rpcpb.CPUStats{Cores: 8, LoadAvg_1: 1.23},
@@ -344,7 +381,7 @@ func TestServer_StatsPage_IsDefaultLandingPage(t *testing.T) {
 	}}
 	s := newTestServer(t, client)
 
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req := httptest.NewRequest(http.MethodGet, "/host/apiarium", nil)
 	rec := httptest.NewRecorder()
 	s.ServeHTTP(rec, req)
 
@@ -354,27 +391,24 @@ func TestServer_StatsPage_IsDefaultLandingPage(t *testing.T) {
 	body := rec.Body.String()
 	for _, want := range []string{"apiarium", "8 cores", "zroot", "ONLINE", "ada0", "healthy", "re0"} {
 		if !strings.Contains(body, want) {
-			t.Errorf("stats page missing %q, got: %s", want, body)
+			t.Errorf("host page missing %q, got: %s", want, body)
 		}
 	}
 	if !strings.Contains(body, `<span class="success">up</span>`) {
-		t.Errorf("stats page missing green 'up' status for re0, got: %s", body)
+		t.Errorf("host page missing green 'up' status for re0, got: %s", body)
 	}
 	if !strings.Contains(body, "42 rule match") {
-		t.Errorf("stats page missing pf match count, got: %s", body)
-	}
-	if !strings.Contains(body, `<a href="/" class="active">Stats</a>`) {
-		t.Errorf("stats page nav should mark Stats active, got: %s", body)
+		t.Errorf("host page missing pf match count, got: %s", body)
 	}
 }
 
-func TestServer_StatsPage_DiskQueryFailureShownWithoutFalseHealthClaim(t *testing.T) {
+func TestServer_HostPage_DiskQueryFailureShownWithoutFalseHealthClaim(t *testing.T) {
 	client := &fakeClient{hostStatsResp: &rpcpb.HostStatsResponse{
 		Disks: []*rpcpb.DiskStats{{Name: "ada1", Error: "smart: permission denied"}},
 	}}
 	s := newTestServer(t, client)
 
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req := httptest.NewRequest(http.MethodGet, "/host/apiarium", nil)
 	rec := httptest.NewRecorder()
 	s.ServeHTTP(rec, req)
 
@@ -383,22 +417,22 @@ func TestServer_StatsPage_DiskQueryFailureShownWithoutFalseHealthClaim(t *testin
 		t.Errorf("a disk with a query error should show neither healthy nor failing, got: %s", body)
 	}
 	if !strings.Contains(body, "unknown") {
-		t.Errorf("stats page missing 'unknown' health for a disk query failure, got: %s", body)
+		t.Errorf("host page missing 'unknown' health for a disk query failure, got: %s", body)
 	}
 }
 
-func TestServer_StatsPage_ColorsDownInterfaceRed(t *testing.T) {
+func TestServer_HostPage_ColorsDownInterfaceRed(t *testing.T) {
 	client := &fakeClient{hostStatsResp: &rpcpb.HostStatsResponse{
 		Net: []*rpcpb.NetIfaceStats{{Name: "tap0", Up: false}},
 	}}
 	s := newTestServer(t, client)
 
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req := httptest.NewRequest(http.MethodGet, "/host/apiarium", nil)
 	rec := httptest.NewRecorder()
 	s.ServeHTTP(rec, req)
 
 	if !strings.Contains(rec.Body.String(), `<span class="error">down</span>`) {
-		t.Errorf("stats page missing red 'down' status for tap0, got: %s", rec.Body.String())
+		t.Errorf("host page missing red 'down' status for tap0, got: %s", rec.Body.String())
 	}
 }
 
@@ -1417,7 +1451,7 @@ func TestServer_Login_UnmappedUserIsRejectedDespiteValidCredentials(t *testing.T
 		// "eve" deliberately absent - a valid PAM login for a real
 		// account nobody has granted an Apiary role to.
 		"admin": manager.RoleAdmin,
-	})
+	}, nil, "", "")
 	if err != nil {
 		t.Fatalf("NewServer() error: %v", err)
 	}
@@ -1444,7 +1478,7 @@ func TestServer_Login_UnmappedUserIsRejectedDespiteValidCredentials(t *testing.T
 func TestServer_RoleGate_ViewerCannotReachOperatorRoute(t *testing.T) {
 	s, err := NewServer(&fakeClient{}, fakeAuthenticator{user: "carol", pass: "secret"}, map[string]manager.Role{
 		"carol": manager.RoleViewer,
-	})
+	}, nil, "", "")
 	if err != nil {
 		t.Fatalf("NewServer() error: %v", err)
 	}
@@ -1463,7 +1497,7 @@ func TestServer_RoleGate_ViewerCannotReachOperatorRoute(t *testing.T) {
 func TestServer_RoleGate_ViewerCanReachReadOnlyRoute(t *testing.T) {
 	s, err := NewServer(&fakeClient{}, fakeAuthenticator{user: "carol", pass: "secret"}, map[string]manager.Role{
 		"carol": manager.RoleViewer,
-	})
+	}, nil, "", "")
 	if err != nil {
 		t.Fatalf("NewServer() error: %v", err)
 	}
@@ -1482,7 +1516,7 @@ func TestServer_RoleGate_ViewerCanReachReadOnlyRoute(t *testing.T) {
 func TestServer_RoleGate_OperatorCannotReachAdminRoute(t *testing.T) {
 	s, err := NewServer(&fakeClient{}, fakeAuthenticator{user: "bob", pass: "secret"}, map[string]manager.Role{
 		"bob": manager.RoleOperator,
-	})
+	}, nil, "", "")
 	if err != nil {
 		t.Fatalf("NewServer() error: %v", err)
 	}
@@ -1501,7 +1535,7 @@ func TestServer_RoleGate_OperatorCannotReachAdminRoute(t *testing.T) {
 func TestServer_RoleGate_OperatorCanReachOperatorRoute(t *testing.T) {
 	s, err := NewServer(&fakeClient{}, fakeAuthenticator{user: "bob", pass: "secret"}, map[string]manager.Role{
 		"bob": manager.RoleOperator,
-	})
+	}, nil, "", "")
 	if err != nil {
 		t.Fatalf("NewServer() error: %v", err)
 	}

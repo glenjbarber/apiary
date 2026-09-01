@@ -93,6 +93,9 @@ func run() error {
 	managerTLSServerName := flag.String("manager-tls-server-name", "", "hostname to verify managerd's certificate against, if different from -manager-addr's host (e.g. managerd stays loopback-only but its cert names a real public hostname); leave empty to verify against -manager-addr itself")
 	tlsCert := flag.String("tls-cert", "", "PEM certificate file to serve the web UI over HTTPS; leave unset (with -tls-key) to serve plaintext HTTP, as before")
 	tlsKey := flag.String("tls-key", "", "PEM private key file matching -tls-cert")
+	peerTLS := flag.Bool("peer-tls", false, "dial other cluster nodes' managerd over TLS when fetching their host stats for the cluster overview page; requires each peer's managerd to also be TLS-enabled with a certificate matching its own hostname (node ID + -peer-hostname-suffix)")
+	peerHostnameSuffix := flag.String("peer-hostname-suffix", "", "appended to a node ID to form its managerd hostname for the cluster overview page (e.g. \".apiary.work\" so node ID \"freebsd-apiary\" dials \"freebsd-apiary.apiary.work\"); leave empty if node IDs are already fully-qualified hostnames")
+	peerManagerPort := flag.String("peer-manager-port", "17700", "port assumed for a peer node's managerd external API when fetching its host stats")
 	flag.Parse()
 
 	managerCreds, err := tlsdial.ManagerDialOption(*managerTLS, *managerTLSCA, *managerTLSServerName)
@@ -128,7 +131,15 @@ func run() error {
 		auth = pam.PAMAuthenticator{ServiceName: *pamService}
 	}
 
-	srv, err := frontend.NewServer(rpcpb.NewManagerServiceClient(conn), auth, roleMap)
+	// Reuses the same API key already attached to dialOpts above for
+	// this node's own managerd - a fetch of another node's HostStats
+	// goes through the same authenticated ManagerService API (HostStats
+	// requires only RoleViewer, well within what that key already
+	// grants) rather than needing a second, separately-configured
+	// credential.
+	peers := manager.NewPeerReporter(os.Getenv("APIARY_MANAGER_API_KEY"), *peerTLS, nil)
+
+	srv, err := frontend.NewServer(rpcpb.NewManagerServiceClient(conn), auth, roleMap, peers, *peerHostnameSuffix, *peerManagerPort)
 	if err != nil {
 		return fmt.Errorf("creating frontend server: %w", err)
 	}
