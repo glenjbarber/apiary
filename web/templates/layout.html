@@ -78,9 +78,9 @@
   <a class="brand" href="/"><span class="brand-mark">A</span><span>APIARY</span></a>
   <a href="/"{{if eq .ActivePage "stats"}} class="active"{{end}}>Stats</a>
   <a href="/vms"{{if eq .ActivePage "vms"}} class="active"{{end}}>VMs</a>
+  <a href="/jails"{{if eq .ActivePage "jails"}} class="active"{{end}}>Jails</a>
   <a href="/images"{{if eq .ActivePage "images"}} class="active"{{end}}>Images</a>
   <a href="/networks"{{if eq .ActivePage "networks"}} class="active"{{end}}>Networks</a>
-  <a href="/jails"{{if eq .ActivePage "jails"}} class="active"{{end}}>Jails</a>
   <a href="/apikeys"{{if eq .ActivePage "apikeys"}} class="active"{{end}}>API Keys</a>
   {{if .AuthEnabled}}
   {{if .Username}}<span class="account">logged in as {{.Username}} ({{.Role}})</span>{{end}}
