@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"net"
 	"os"
 	"strings"
 	"time"
@@ -47,6 +48,26 @@ type VLANStatus interface {
 	InterfaceStatus(ctx context.Context, name string) (exists, up bool, err error)
 }
 
+// PeerForwarder is the subset of *PeerReporter the server needs to
+// forward a leader-only read rejected by this node's own raftd to the
+// current leader's own managerd (ADR-0035) - mirrors internal/cluster's
+// own peerReporter interface, which serves the same role for write
+// forwarding (ADR-0029).
+type PeerForwarder interface {
+	ListVMs(ctx context.Context, addr string) (*rpcpb.ListVMsResponse, error)
+	GetVM(ctx context.Context, addr, id string) (*rpcpb.GetVMResponse, error)
+	ListJails(ctx context.Context, addr string) (*rpcpb.ListJailsResponse, error)
+	GetJail(ctx context.Context, addr, id string) (*rpcpb.GetJailResponse, error)
+	ListNetworks(ctx context.Context, addr string) (*rpcpb.ListNetworksResponse, error)
+}
+
+// defaultPeerManagerdPort mirrors internal/cluster's own constant of
+// the same name and purpose - used when Server.peerManagerdPort is
+// unset. Duplicated rather than shared across the package boundary,
+// the same small-duplication tradeoff internal/cluster/peer.go already
+// documents for this exact value.
+const defaultPeerManagerdPort = "17700"
+
 // Server implements the generated ManagerServiceServer interface, the
 // server side of managerd's external RPC API.
 type Server struct {
@@ -75,6 +96,16 @@ type Server struct {
 	// in tests so HostStats's RPC-translation logic can be exercised
 	// without shelling out to real system commands.
 	statsGather func(context.Context) *hoststats.Snapshot
+
+	// peers is nil on a node with no peer forwarding configured (see
+	// cmd/managerd's own -peer-api-key) - a leader-only read rejected by
+	// this node's own raftd then just returns the LeaderHint error as
+	// before (ADR-0035), rather than forwarding.
+	peers PeerForwarder
+
+	// peerManagerdPort mirrors internal/cluster's own field of the same
+	// name and purpose - empty uses defaultPeerManagerdPort.
+	peerManagerdPort string
 }
 
 var _ rpcpb.ManagerServiceServer = (*Server)(nil)
@@ -83,10 +114,32 @@ var _ rpcpb.ManagerServiceServer = (*Server)(nil)
 // reach raftd, reporting nodeID as its own identity, isos to store
 // installer images locally on this node, vnc (nil-able) to look up a
 // running VM's VNC console port, serialLog (nil-able) to look up a
-// running VM's captured serial console log, and vlanMgr (nil-able) to
-// report a network's bridge status on this node.
-func NewServer(raft *RaftClient, nodeID string, isos isoManager, vnc VNCLookup, serialLog SerialLogLookup, vlanMgr VLANStatus) *Server {
-	return &Server{raft: raft, nodeID: nodeID, isos: isos, vnc: vnc, serialLog: serialLog, vlan: vlanMgr, statsGather: hoststats.Gather}
+// running VM's captured serial console log, vlanMgr (nil-able) to
+// report a network's bridge status on this node, and peers/
+// peerManagerdPort (peers nil-able) to forward a leader-only read
+// rejected by this node's own raftd to the current leader's own
+// managerd instead (ADR-0035).
+func NewServer(raft *RaftClient, nodeID string, isos isoManager, vnc VNCLookup, serialLog SerialLogLookup, vlanMgr VLANStatus, peers PeerForwarder, peerManagerdPort string) *Server {
+	return &Server{raft: raft, nodeID: nodeID, isos: isos, vnc: vnc, serialLog: serialLog, vlan: vlanMgr, statsGather: hoststats.Gather, peers: peers, peerManagerdPort: peerManagerdPort}
+}
+
+// peerManagerdAddr turns a raft leader_hint (the leader's raft
+// transport address, e.g. "10.50.0.14:17600") into that same node's
+// managerd address, by keeping the host and substituting the
+// configured/default managerd port - mirrors internal/cluster's own
+// resolvePeerManagerdAddr exactly (see its doc comment for the full
+// reasoning), duplicated across the package boundary for the same
+// reason defaultPeerManagerdPort is.
+func (s *Server) peerManagerdAddr(leaderHint string) string {
+	port := s.peerManagerdPort
+	if port == "" {
+		port = defaultPeerManagerdPort
+	}
+	host, _, err := net.SplitHostPort(leaderHint)
+	if err != nil {
+		host = leaderHint
+	}
+	return net.JoinHostPort(host, port)
 }
 
 // Status implements rpcpb.ManagerServiceServer. If raftd is unreachable,
@@ -204,6 +257,11 @@ func (s *Server) ListNetworks(ctx context.Context, _ *rpcpb.ListNetworksRequest)
 		return &rpcpb.ListNetworksResponse{Error: err.Error()}, nil
 	}
 	if resp.GetError() != "" {
+		if s.peers != nil && resp.GetLeaderHint() != "" {
+			if fwd, ferr := s.peers.ListNetworks(ctx, s.peerManagerdAddr(resp.GetLeaderHint())); ferr == nil {
+				return fwd, nil
+			}
+		}
 		return &rpcpb.ListNetworksResponse{Error: resp.GetError(), LeaderHint: resp.GetLeaderHint()}, nil
 	}
 	networks := make([]*rpcpb.NetworkDefinition, 0, len(resp.GetNetworks()))
@@ -511,6 +569,11 @@ func (s *Server) GetVM(ctx context.Context, req *rpcpb.GetVMRequest) (*rpcpb.Get
 		return &rpcpb.GetVMResponse{Error: err.Error()}, nil
 	}
 	if resp.GetError() != "" {
+		if s.peers != nil && resp.GetLeaderHint() != "" {
+			if fwd, ferr := s.peers.GetVM(ctx, s.peerManagerdAddr(resp.GetLeaderHint()), req.GetId()); ferr == nil {
+				return fwd, nil
+			}
+		}
 		return &rpcpb.GetVMResponse{Error: resp.GetError(), LeaderHint: resp.GetLeaderHint()}, nil
 	}
 	return &rpcpb.GetVMResponse{Vm: fromInternalVM(resp.GetVm()), Found: resp.GetFound()}, nil
@@ -819,6 +882,11 @@ func (s *Server) GetJail(ctx context.Context, req *rpcpb.GetJailRequest) (*rpcpb
 		return &rpcpb.GetJailResponse{Error: err.Error()}, nil
 	}
 	if resp.GetError() != "" {
+		if s.peers != nil && resp.GetLeaderHint() != "" {
+			if fwd, ferr := s.peers.GetJail(ctx, s.peerManagerdAddr(resp.GetLeaderHint()), req.GetId()); ferr == nil {
+				return fwd, nil
+			}
+		}
 		return &rpcpb.GetJailResponse{Error: resp.GetError(), LeaderHint: resp.GetLeaderHint()}, nil
 	}
 	return &rpcpb.GetJailResponse{Jail: fromInternalJail(resp.GetJail()), Found: resp.GetFound()}, nil
@@ -898,6 +966,11 @@ func (s *Server) ListJails(ctx context.Context, _ *rpcpb.ListJailsRequest) (*rpc
 		return &rpcpb.ListJailsResponse{Error: err.Error()}, nil
 	}
 	if resp.GetError() != "" {
+		if s.peers != nil && resp.GetLeaderHint() != "" {
+			if fwd, ferr := s.peers.ListJails(ctx, s.peerManagerdAddr(resp.GetLeaderHint())); ferr == nil {
+				return fwd, nil
+			}
+		}
 		return &rpcpb.ListJailsResponse{Error: resp.GetError(), LeaderHint: resp.GetLeaderHint()}, nil
 	}
 	jails := make([]*rpcpb.JailDefinition, 0, len(resp.GetJails()))
@@ -914,6 +987,11 @@ func (s *Server) ListVMs(ctx context.Context, _ *rpcpb.ListVMsRequest) (*rpcpb.L
 		return &rpcpb.ListVMsResponse{Error: err.Error()}, nil
 	}
 	if resp.GetError() != "" {
+		if s.peers != nil && resp.GetLeaderHint() != "" {
+			if fwd, ferr := s.peers.ListVMs(ctx, s.peerManagerdAddr(resp.GetLeaderHint())); ferr == nil {
+				return fwd, nil
+			}
+		}
 		return &rpcpb.ListVMsResponse{Error: resp.GetError(), LeaderHint: resp.GetLeaderHint()}, nil
 	}
 

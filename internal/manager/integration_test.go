@@ -180,7 +180,7 @@ func newManagerdRPCClientFull(t *testing.T, raftdSocket, nodeID string, vnc VNCL
 		t.Fatalf("Listen(tcp) error: %v", err)
 	}
 
-	srv := NewServer(raftClient, nodeID, isostore.New(t.TempDir()), vnc, serialLog, vlanMgr)
+	srv := NewServer(raftClient, nodeID, isostore.New(t.TempDir()), vnc, serialLog, vlanMgr, nil, "")
 	// Wired unconditionally, mirroring cmd/managerd/main.go exactly - this
 	// is a no-op for every pre-existing test here (none of them ever
 	// create an API key, so checkAuth's "zero keys = open" branch always

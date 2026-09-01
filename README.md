@@ -223,6 +223,14 @@ each design decision, in order.
   Capped server-side at 1MB regardless of what's requested, since a
   runaway VM's serial log can grow to megabytes within minutes. See
   [ADR-0034](docs/adr/0034-remote-serial-log-viewing.md).
+- **Leader-only read forwarding** — `GetVM`/`ListVMs`/`GetJail`/
+  `ListJails`/`ListNetworks` have always been leader-only reads; a real
+  raft leadership change (surfaced by a live reboot) showed this as a
+  broken VM list on whichever node wasn't currently leader. Mirrors
+  ADR-0029's existing write-forwarding: a rejected read is transparently
+  forwarded to the leader's own `managerd` over the same authenticated
+  API, using the same `-peer-api-key`. See
+  [ADR-0035](docs/adr/0035-leader-only-read-forwarding.md).
 
 **Not yet implemented:**
 

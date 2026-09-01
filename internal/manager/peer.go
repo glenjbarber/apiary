@@ -141,6 +141,58 @@ func (p *PeerReporter) ReportJailPhase(ctx context.Context, addr, id, phase, pha
 	return nil
 }
 
+// ListVMs/GetVM/ListJails/GetJail/ListNetworks forward a leader-only
+// read rejected by this node's own raftd to the leader node's own
+// managerd, mirroring the Report* methods' write-forwarding pattern
+// above but returning the peer's actual response instead of just an
+// error - a read has no local side effect to skip, so the caller
+// should get the real answer, not merely confirmation the forward
+// succeeded (see ADR-0035).
+func (p *PeerReporter) ListVMs(ctx context.Context, addr string) (*rpcpb.ListVMsResponse, error) {
+	conn, client, err := p.dial(addr)
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close()
+	return client.ListVMs(ctx, &rpcpb.ListVMsRequest{})
+}
+
+func (p *PeerReporter) GetVM(ctx context.Context, addr, id string) (*rpcpb.GetVMResponse, error) {
+	conn, client, err := p.dial(addr)
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close()
+	return client.GetVM(ctx, &rpcpb.GetVMRequest{Id: id})
+}
+
+func (p *PeerReporter) ListJails(ctx context.Context, addr string) (*rpcpb.ListJailsResponse, error) {
+	conn, client, err := p.dial(addr)
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close()
+	return client.ListJails(ctx, &rpcpb.ListJailsRequest{})
+}
+
+func (p *PeerReporter) GetJail(ctx context.Context, addr, id string) (*rpcpb.GetJailResponse, error) {
+	conn, client, err := p.dial(addr)
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close()
+	return client.GetJail(ctx, &rpcpb.GetJailRequest{Id: id})
+}
+
+func (p *PeerReporter) ListNetworks(ctx context.Context, addr string) (*rpcpb.ListNetworksResponse, error) {
+	conn, client, err := p.dial(addr)
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close()
+	return client.ListNetworks(ctx, &rpcpb.ListNetworksRequest{})
+}
+
 func (p *PeerReporter) ReportJailTeardownComplete(ctx context.Context, addr, id string) error {
 	conn, client, err := p.dial(addr)
 	if err != nil {

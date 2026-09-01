@@ -108,6 +108,12 @@ func run() error {
 		}
 	}
 
+	// Shared between the reconciler's own write-forwarding (ADR-0029)
+	// and the server's read-forwarding (ADR-0035) - both are forwarding
+	// to the same leader managerd over the same authenticated API, so
+	// there's no reason for two separate peer clients/credentials.
+	peers := manager.NewPeerReporter(*peerAPIKey)
+
 	reconciler := &cluster.Reconciler{
 		Raft:             raftClient,
 		ZFS:              zfs.New(*zfsBase),
@@ -116,7 +122,7 @@ func run() error {
 		DiskSizeMB:       *diskSizeMB,
 		Bridge:           *bhyveBridge,
 		ISOs:             isos,
-		Peers:            manager.NewPeerReporter(*peerAPIKey),
+		Peers:            peers,
 		PeerManagerdPort: resolvedPeerPort,
 	}
 	// HAST is independent of bhyve support: a node holding only a HAST
@@ -181,7 +187,7 @@ func run() error {
 		vlanArg = vlanMgr
 	}
 
-	srv := manager.NewServer(raftClient, id, isos, vncArg, serialLogArg, vlanArg)
+	srv := manager.NewServer(raftClient, id, isos, vncArg, serialLogArg, vlanArg, peers, resolvedPeerPort)
 	// Every RPC (including UploadISO's stream) is gated by srv's own
 	// API-key check - see ADR-0023. Auth stays fully open until the
 	// first key is created (CreateAPIKey itself included), so this is
