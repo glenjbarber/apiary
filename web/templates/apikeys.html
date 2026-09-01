@@ -3,9 +3,8 @@
 <html lang="en">
 {{template "head" .}}
 <body>
-  <h1>Apiary</h1>
   {{template "nav" .}}
-  <h2>API Keys</h2>
+  {{template "page_header" (pageHeader "API keys" "Cluster-wide credentials for API clients and peer operations.")}}
   <p>
     Keys authenticate calls to managerd's external API. Creating the
     <strong>first</strong> key here turns on API-key authentication for

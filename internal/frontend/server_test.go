@@ -436,7 +436,7 @@ func TestServer_NewVMPage(t *testing.T) {
 		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
 	}
 	body := rec.Body.String()
-	if !strings.Contains(body, `class="create-vm"`) {
+	if !strings.Contains(body, `class="create-vm`) {
 		t.Errorf("new VM page missing create form, got: %s", body)
 	}
 	if !strings.Contains(body, `id="create-error"`) {

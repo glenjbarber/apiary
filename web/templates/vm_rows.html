@@ -7,14 +7,14 @@
   <td>{{.VCPUs}}</td>
   <td>{{.MemoryMB}}</td>
   <td>{{.NodeID}}</td>
-  <td{{if eq .Phase "error"}} title="{{.PhaseError}}"{{end}}>{{.Phase}}</td>
+  <td><span class="badge {{.Phase}}"{{if eq .Phase "error"}} title="{{.PhaseError}}"{{end}}>{{.Phase}}</span>{{if .PhaseError}}<div class="error">{{.PhaseError}}</div>{{end}}</td>
   <td>{{if .IPAddress}}{{.IPAddress}}{{end}}</td>
   <td>{{if .ReplicaNodeID}}{{.ReplicaNodeID}}{{else}}<em>none</em>{{end}}</td>
-  <td>
+  <td><div class="actions">
     <a href="/vms/{{.ID}}/console">Console</a>
     <a href="/vms/{{.ID}}/serial">Log</a>
-    <button hx-delete="/vms/{{.ID}}" hx-target="#vm-rows" hx-swap="innerHTML" hx-confirm="Delete {{.ID}}?">Delete</button>
-  </td>
+    <button class="danger" hx-delete="/vms/{{.ID}}" hx-target="#vm-rows" hx-swap="innerHTML" hx-confirm="Delete {{.ID}}?">Delete</button>
+  </div></td>
 </tr>
 {{else}}
   {{if not .Error}}<tr><td colspan="9"><em>No VMs</em></td></tr>{{end}}

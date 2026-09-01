@@ -3,10 +3,9 @@
 <html lang="en">
 {{template "head" .}}
 <body>
-  <h1>Apiary</h1>
   {{template "nav" .}}
-  <h2>New VM</h2>
-  <form class="create-vm" hx-post="/vms" hx-target="#create-error" hx-swap="innerHTML">
+  {{template "page_header" (pageHeader "Create virtual machine" "Define compute, placement, boot media, and network settings." "<a href='/vms'>Cancel</a>")}}
+  <form class="create-vm panel" style="margin-top:1rem" hx-post="/vms" hx-target="#create-error" hx-swap="innerHTML">
     <label>ID <input type="text" name="id" required></label>
     <label>Name <input type="text" name="name"></label>
     <label>vCPUs <input type="number" name="vcpus" value="1" min="1"></label>

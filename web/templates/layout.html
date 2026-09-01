@@ -3,17 +3,46 @@
   <meta charset="utf-8">
   <title>Apiary</title>
   <script src="/static/htmx.min.js"></script>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
   <style>
-    body { font-family: sans-serif; max-width: 960px; margin: 2rem auto; padding: 0 1rem; }
-    nav { margin-bottom: 1.5rem; }
-    nav a { margin-right: 1rem; text-decoration: none; color: #333; }
-    nav a.active { font-weight: bold; text-decoration: underline; }
+    :root { --ink:#171717; --muted:#686868; --line:#dedede; --panel:#fff; --wash:#f6f5f1; --yellow:#ffc928; --danger:#a62020; --success:#166534; }
+    * { box-sizing: border-box; }
+    body { font-family: Inter, ui-sans-serif, system-ui, -apple-system, sans-serif; color:var(--ink); background:var(--wash); max-width:1180px; margin:0 auto; padding:0 1.25rem 3rem; line-height:1.45; }
+    h1 { font-size:1.6rem; margin:0; letter-spacing:-.03em; }
+    h2 { font-size:1.55rem; margin:2rem 0 1rem; letter-spacing:-.02em; }
+    h3 { margin-top:1.75rem; }
+    nav { display:flex; align-items:center; gap:.35rem; margin:0 -1.25rem 1.5rem; padding:.8rem 1.25rem; background:#111; color:#fff; overflow-x:auto; }
+    nav .brand { display:flex; align-items:center; gap:.55rem; color:#fff; font-weight:800; font-size:1.1rem; margin-right:.7rem; }
+    nav .brand-mark { width:28px; height:28px; display:grid; place-items:center; background:var(--yellow); color:#111; clip-path:polygon(25% 7%,75% 7%,100% 50%,75% 93%,25% 93%,0 50%); }
+    nav a { padding:.45rem .65rem; border-radius:6px; white-space:nowrap; text-decoration:none; color:#d6d6d6; font-size:.9rem; }
+    nav a:hover { color:#fff; background:#292929; }
+    nav a.active { color:#111; background:var(--yellow); font-weight:700; }
+    nav .account { margin-left:auto; color:#aaa; white-space:nowrap; font-size:.82rem; }
+    nav form { white-space:nowrap; }
+    nav .logout { border:0; background:none; color:#fff; text-decoration:underline; cursor:pointer; }
     table { border-collapse: collapse; width: 100%; margin-top: 1rem; }
-    th, td { text-align: left; padding: 0.5rem; border-bottom: 1px solid #ddd; }
+    th, td { text-align:left; padding:.7rem .65rem; border-bottom:1px solid var(--line); vertical-align:middle; }
+    th { color:var(--muted); font-size:.74rem; text-transform:uppercase; letter-spacing:.06em; background:#fafafa; }
+    th a { color:inherit; }
+    tbody tr:hover { background:#fffdf4; }
+    button, .button { border:1px solid #111; border-radius:6px; background:#111; color:#fff; padding:.5rem .75rem; font:inherit; font-weight:650; cursor:pointer; text-decoration:none; }
+    button:hover, .button:hover { background:#333; }
+    button.danger { border-color:#e3b5b5; background:#fff; color:var(--danger); }
+    input, select { min-height:2.4rem; border:1px solid #aaa; border-radius:6px; background:#fff; padding:.45rem .55rem; font:inherit; }
+    input:focus, select:focus, button:focus, a:focus { outline:3px solid rgba(255,201,40,.45); outline-offset:2px; }
+    .panel { background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:1.1rem; box-shadow:0 1px 2px rgba(0,0,0,.04); }
+    .page-header { display:flex; align-items:center; justify-content:space-between; gap:1rem; }
+    .page-header h2 { margin:0; }
+    .muted { color:var(--muted); }
+    .badge { display:inline-flex; align-items:center; border-radius:999px; padding:.18rem .55rem; font-size:.76rem; font-weight:700; background:#e8e8e8; }
+    .badge.ready, .badge.running, .badge.up { color:var(--success); background:#dcf4e3; }
+    .badge.error, .badge.down, .badge.deleting { color:var(--danger); background:#fde3e3; }
+    .badge.creating, .badge.pending { color:#765600; background:#fff1b8; }
+    .actions { display:flex; align-items:center; gap:.55rem; white-space:nowrap; }
     form.create-vm, form.upload-iso { display: flex; gap: 0.75rem; align-items: end; flex-wrap: wrap; }
     form.create-vm label, form.upload-iso label { display: flex; flex-direction: column; font-size: 0.85rem; }
-    .error { color: #b00020; }
-    .success { color: #1b5e20; }
+    .error { color:var(--danger); }
+    .success { color:var(--success); }
     /* Fixed height so an appearing/disappearing message doesn't shift
        the table below it up and down; padding/background/border only
        kick in once there's actual text, via :not(:empty), so the
@@ -39,24 +68,28 @@
        browser's default [hidden] handling and the bar would never
        actually hide between uploads. */
     .upload-progress[hidden] { display: none; }
+    @media (max-width:760px) { body{padding:0 .75rem 2rem} nav{margin:0 -.75rem 1rem;padding:.65rem .75rem} nav .account{display:none} table{display:block;overflow-x:auto} form.create-vm,form.upload-iso{align-items:stretch} form.create-vm label,form.upload-iso label{min-width:100%} }
   </style>
 </head>
 {{end}}
 
 {{define "nav"}}
 <nav>
+  <a class="brand" href="/"><span class="brand-mark">A</span><span>APIARY</span></a>
   <a href="/"{{if eq .ActivePage "stats"}} class="active"{{end}}>Stats</a>
   <a href="/vms"{{if eq .ActivePage "vms"}} class="active"{{end}}>VMs</a>
   <a href="/images"{{if eq .ActivePage "images"}} class="active"{{end}}>Images</a>
   <a href="/networks"{{if eq .ActivePage "networks"}} class="active"{{end}}>Networks</a>
   <a href="/jails"{{if eq .ActivePage "jails"}} class="active"{{end}}>Jails</a>
   <a href="/apikeys"{{if eq .ActivePage "apikeys"}} class="active"{{end}}>API Keys</a>
-  <a href="/vms/new"{{if eq .ActivePage "new_vm"}} class="active"{{end}}>New VM</a>
+  <a href="/vms/new"{{if eq .ActivePage "new_vm"}} class="active"{{end}}>Create VM</a>
   {{if .AuthEnabled}}
-  {{if .Username}}<span>logged in as {{.Username}} ({{.Role}})</span>{{end}}
-  <form method="post" action="/logout" style="display: inline;">
-    <button type="submit" style="background: none; border: none; color: #333; text-decoration: underline; cursor: pointer; padding: 0; font: inherit;">Log out</button>
+  {{if .Username}}<span class="account">logged in as {{.Username}} ({{.Role}})</span>{{end}}
+  <form method="post" action="/logout">
+    <button class="logout" type="submit">Log out</button>
   </form>
   {{end}}
 </nav>
 {{end}}
+
+{{define "page_header"}}<div class="page-header"><div><h2>{{.Title}}</h2><div class="muted">{{.Subtitle}}</div></div>{{if .Extra}}{{.Extra}}{{end}}</div>{{end}}

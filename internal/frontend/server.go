@@ -181,12 +181,58 @@ type Server struct {
 	lockouts *loginAttemptTracker
 }
 
+// pageHeaderData is the argument type the "page_header" template (see
+// layout.html) renders - built exclusively by the pageHeader helper
+// below, never from request-derived data, so Extra being pre-built
+// template.HTML (rather than auto-escaped plain text) is safe: every
+// caller is this package's own Go code passing a fixed literal or
+// another helper's output, never anything a user typed.
+type pageHeaderData struct {
+	Title    string
+	Subtitle string
+	Extra    template.HTML
+}
+
+// pageHeader builds a page_header argument. extra, if given, is a
+// trusted HTML fragment (e.g. a Cancel/Back link or an action button) -
+// most pages have none.
+func pageHeader(title, subtitle string, extra ...string) pageHeaderData {
+	var e template.HTML
+	if len(extra) > 0 {
+		e = template.HTML(extra[0])
+	}
+	return pageHeaderData{Title: title, Subtitle: subtitle, Extra: e}
+}
+
+// vmSubtitle/nodeSubtitle exist because the "page_header" template call
+// is a single expression - a template action has no if/else available
+// inside a function-call argument, so the two pages whose subtitle is
+// conditional on request data (serial_log, stats) compute it here in
+// Go instead.
+func vmSubtitle(name, id string) string {
+	if name != "" {
+		return name + " · " + id + " · refreshes every 3 seconds"
+	}
+	return id + " · refreshes every 3 seconds"
+}
+
+func nodeSubtitle(nodeID string) string {
+	if nodeID != "" {
+		return "Node " + nodeID
+	}
+	return "Local manager node"
+}
+
 // NewServer parses the embedded templates and returns a Server that
 // answers requests using client. auth enables a login page gating the
 // whole UI when non-nil; pass nil to disable login entirely (roleMap
 // is then unused).
 func NewServer(client rpcpb.ManagerServiceClient, auth pam.Authenticator, roleMap map[string]manager.Role) (*Server, error) {
-	tmpl, err := template.ParseFS(web.FS, "templates/*.html")
+	tmpl, err := template.New("").Funcs(template.FuncMap{
+		"pageHeader":   pageHeader,
+		"vmSubtitle":   vmSubtitle,
+		"nodeSubtitle": nodeSubtitle,
+	}).ParseFS(web.FS, "templates/*.html")
 	if err != nil {
 		return nil, fmt.Errorf("frontend: parsing templates: %w", err)
 	}
