@@ -27,7 +27,7 @@
         <td>{{.Alloc}}</td>
         <td>{{.Free}}</td>
         <td>{{.CapacityPct}}%</td>
-        <td{{if ne .Health "ONLINE"}} class="error"{{end}}>{{.Health}}</td>
+        <td class="{{if eq .Health "ONLINE"}}success{{else}}error{{end}}">{{.Health}}</td>
       </tr>
       {{else}}
       <tr><td colspan="6"><em>No pools</em></td></tr>
