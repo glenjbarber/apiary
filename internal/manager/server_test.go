@@ -26,6 +26,9 @@ type fakeISOManager struct {
 
 	deletedName string
 	deleteErr   error
+
+	pathFor map[string]string
+	pathErr error
 }
 
 func (f *fakeISOManager) Save(name string, r io.Reader, expectedSHA256 string) (*isostore.Info, error) {
@@ -49,6 +52,18 @@ func (f *fakeISOManager) List() ([]isostore.Info, error) {
 func (f *fakeISOManager) Delete(name string) error {
 	f.deletedName = name
 	return f.deleteErr
+}
+
+func (f *fakeISOManager) Path(name string) (string, bool, error) {
+	if f.pathErr != nil {
+		return "", false, f.pathErr
+	}
+	if f.pathFor != nil {
+		if p, ok := f.pathFor[name]; ok {
+			return p, true, nil
+		}
+	}
+	return "", false, nil
 }
 
 // fakeUploadStream drives Server.UploadISO without any real gRPC

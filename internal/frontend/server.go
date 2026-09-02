@@ -153,6 +153,16 @@ type pageData struct {
 	// their own pages.
 	UserFormError   string
 	UserFormSuccess string
+
+	// ClusterISOs is the Images page's cluster-wide view (ADR-0040) -
+	// distinct from ISOs (still local-only, used by the upload/delete
+	// panel and the create-VM form's picker), since a VM can only ever
+	// boot from an image already present on its own assigned node.
+	ClusterISOs []isoRowView
+
+	// ClusterISOFormError reports a copy-on-demand result, rendered the
+	// same way ISOFormError is for the (separate) upload/delete panel.
+	ClusterISOFormError string
 }
 
 // userView is one row of the Users page's table.
@@ -411,6 +421,11 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("DELETE /vms/{id}", s.requireRole(manager.RoleOperator, s.handleDeleteVM))
 	s.mux.HandleFunc("POST /isos", s.requireRole(manager.RoleOperator, s.handleUploadISO))
 	s.mux.HandleFunc("DELETE /isos/{name}", s.requireRole(manager.RoleOperator, s.handleDeleteISO))
+
+	// Copy-on-demand ISO replication (ADR-0040) - same RoleOperator gate
+	// as upload/delete, matching write blast radius.
+	s.mux.HandleFunc("POST /isos/{name}/replicate/{target_node_id}", s.requireRole(manager.RoleOperator, s.handleReplicateISO))
+	s.mux.HandleFunc("POST /isos/{name}/replicate-all", s.requireRole(manager.RoleOperator, s.handleReplicateISOAll))
 	s.mux.HandleFunc("POST /networks", s.requireRole(manager.RoleOperator, s.handleCreateNetwork))
 	s.mux.HandleFunc("DELETE /networks/{id}", s.requireRole(manager.RoleOperator, s.handleDeleteNetwork))
 	s.mux.HandleFunc("GET /jails/new", s.requireRole(manager.RoleOperator, s.handleNewJailPage))
@@ -568,7 +583,12 @@ func (s *Server) handleVMsPage(w http.ResponseWriter, r *http.Request) {
 // handleImagesPage serves the Images (ISO upload/list) page ("/images").
 func (s *Server) handleImagesPage(w http.ResponseWriter, r *http.Request) {
 	isos, errMsg := s.currentISOs(r)
-	s.render(w, "images_page", s.withAuthFields(r, pageData{ISOs: isos, ISOFormError: errMsg, ActivePage: "images"}))
+	clusterISOs, clusterErrMsg := s.currentClusterISOs(r)
+	s.render(w, "images_page", s.withAuthFields(r, pageData{
+		ISOs: isos, ISOFormError: errMsg,
+		ClusterISOs: clusterISOs, ClusterISOFormError: clusterErrMsg,
+		ActivePage: "images",
+	}))
 }
 
 // handleNewVMPage serves the create-VM form page ("/vms/new"). A failed
@@ -1174,23 +1194,23 @@ func (s *Server) handleUsersPage(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleChangePassword(w http.ResponseWriter, r *http.Request) {
 	info, ok := s.currentSession(r)
 	if !ok {
-		s.renderUserPanelResult(w, r, manager.RoleViewer, "no active session")
+		s.renderUserPanelResult(w, r, "", manager.RoleViewer, "no active session")
 		return
 	}
 
 	target := r.PathValue("username")
 	targetRole, known := s.roleMap[target]
 	if !known {
-		s.renderUserPanelResult(w, r, info.role, fmt.Sprintf("unknown account %q", target))
+		s.renderUserPanelResult(w, r, info.username, info.role, fmt.Sprintf("unknown account %q", target))
 		return
 	}
 	if !canChangePassword(info.role, targetRole) {
-		s.renderUserPanelResult(w, r, info.role, fmt.Sprintf("this account's role does not permit changing %q's password", target))
+		s.renderUserPanelResult(w, r, info.username, info.role, fmt.Sprintf("this account's role does not permit changing %q's password", target))
 		return
 	}
 
 	if err := r.ParseForm(); err != nil {
-		s.renderUserPanelResult(w, r, info.role, "invalid form: "+err.Error())
+		s.renderUserPanelResult(w, r, info.username, info.role, "invalid form: "+err.Error())
 		return
 	}
 	currentPassword := r.FormValue("current_password")
@@ -1198,41 +1218,44 @@ func (s *Server) handleChangePassword(w http.ResponseWriter, r *http.Request) {
 	confirmPassword := r.FormValue("confirm_password")
 
 	if len(newPassword) < minPasswordLength {
-		s.renderUserPanelResult(w, r, info.role, fmt.Sprintf("new password must be at least %d characters", minPasswordLength))
+		s.renderUserPanelResult(w, r, info.username, info.role, fmt.Sprintf("new password must be at least %d characters", minPasswordLength))
 		return
 	}
 	if newPassword != confirmPassword {
-		s.renderUserPanelResult(w, r, info.role, "new password and confirmation do not match")
+		s.renderUserPanelResult(w, r, info.username, info.role, "new password and confirmation do not match")
 		return
 	}
 
 	ok, err := s.auth.Authenticate(info.username, currentPassword)
 	if err != nil {
-		s.renderUserPanelResult(w, r, info.role, "authentication backend error: "+err.Error())
+		s.renderUserPanelResult(w, r, info.username, info.role, "authentication backend error: "+err.Error())
 		return
 	}
 	if !ok {
-		s.renderUserPanelResult(w, r, info.role, "current password is incorrect")
+		s.renderUserPanelResult(w, r, info.username, info.role, fmt.Sprintf("incorrect password for %q - enter *your own* login password here, not %q's", info.username, target))
 		return
 	}
 
 	if err := s.passwords.SetPassword(target, newPassword); err != nil {
-		s.renderUserPanelResult(w, r, info.role, "setting password: "+err.Error())
+		s.renderUserPanelResult(w, r, info.username, info.role, "setting password: "+err.Error())
 		return
 	}
-	s.renderUserPanelSuccess(w, info.role, fmt.Sprintf("password for %q changed successfully", target))
+	s.renderUserPanelSuccess(w, info.username, info.role, fmt.Sprintf("password for %q changed successfully", target))
 }
 
 // renderUserPanelResult/renderUserPanelSuccess re-render the Users
 // page's own list (recomputed against actorRole, so CanChange stays
 // correct) alongside a result message - mirroring
-// renderAPIKeyPanelResult's combined-target pattern.
-func (s *Server) renderUserPanelResult(w http.ResponseWriter, r *http.Request, actorRole manager.Role, formErr string) {
-	s.render(w, "user_panel", pageData{Users: s.currentUsers(actorRole), UserFormError: formErr})
+// renderAPIKeyPanelResult's combined-target pattern. actorUsername
+// flows through to the template so each row's own password field can
+// be labeled unambiguously as "your own password, not <target>'s" -
+// see users.html.
+func (s *Server) renderUserPanelResult(w http.ResponseWriter, r *http.Request, actorUsername string, actorRole manager.Role, formErr string) {
+	s.render(w, "user_panel", pageData{Users: s.currentUsers(actorRole), Username: actorUsername, UserFormError: formErr})
 }
 
-func (s *Server) renderUserPanelSuccess(w http.ResponseWriter, actorRole manager.Role, msg string) {
-	s.render(w, "user_panel", pageData{Users: s.currentUsers(actorRole), UserFormSuccess: msg})
+func (s *Server) renderUserPanelSuccess(w http.ResponseWriter, actorUsername string, actorRole manager.Role, msg string) {
+	s.render(w, "user_panel", pageData{Users: s.currentUsers(actorRole), Username: actorUsername, UserFormSuccess: msg})
 }
 
 func (s *Server) render(w http.ResponseWriter, name string, data pageData) {

@@ -1,6 +1,7 @@
 package manager
 
 import (
+	"bytes"
 	"context"
 	"net"
 	"testing"
@@ -61,6 +62,53 @@ type fakePeerServer struct {
 	forcePurgeJailResp *rpcpb.ForcePurgeJailResponse
 	migrateJailReq     *rpcpb.MigrateJailRequest
 	migrateJailResp    *rpcpb.MigrateJailResponse
+
+	uploadedISOName string
+	uploadedISOHash string
+	uploadedISOData []byte
+	uploadISOResp   *rpcpb.UploadISOResponse
+
+	pushISOToReq  *rpcpb.PushISOToRequest
+	pushISOToResp *rpcpb.PushISOToResponse
+
+	replicateISOReq  *rpcpb.ReplicateISORequest
+	replicateISOResp *rpcpb.ReplicateISOResponse
+}
+
+func (f *fakePeerServer) UploadISO(stream rpcpb.ManagerService_UploadISOServer) error {
+	first, err := stream.Recv()
+	if err != nil {
+		return err
+	}
+	f.uploadedISOName = first.GetMetadata().GetName()
+	f.uploadedISOHash = first.GetMetadata().GetExpectedSha256()
+	for {
+		req, err := stream.Recv()
+		if err != nil {
+			break
+		}
+		f.uploadedISOData = append(f.uploadedISOData, req.GetChunk()...)
+	}
+	if f.uploadISOResp != nil {
+		return stream.SendAndClose(f.uploadISOResp)
+	}
+	return stream.SendAndClose(&rpcpb.UploadISOResponse{})
+}
+
+func (f *fakePeerServer) PushISOTo(_ context.Context, req *rpcpb.PushISOToRequest) (*rpcpb.PushISOToResponse, error) {
+	f.pushISOToReq = req
+	if f.pushISOToResp != nil {
+		return f.pushISOToResp, nil
+	}
+	return &rpcpb.PushISOToResponse{}, nil
+}
+
+func (f *fakePeerServer) ReplicateISO(_ context.Context, req *rpcpb.ReplicateISORequest) (*rpcpb.ReplicateISOResponse, error) {
+	f.replicateISOReq = req
+	if f.replicateISOResp != nil {
+		return f.replicateISOResp, nil
+	}
+	return &rpcpb.ReplicateISOResponse{}, nil
 }
 
 func (f *fakePeerServer) ListAPIKeys(context.Context, *rpcpb.ListAPIKeysRequest) (*rpcpb.ListAPIKeysResponse, error) {
@@ -635,5 +683,78 @@ func TestPeerReporter_MigrateJail_SendsCorrectRequest(t *testing.T) {
 	}
 	if fake.migrateJailReq.GetTargetNodeId() != "node-b" {
 		t.Errorf("received request target_node_id = %q, want node-b", fake.migrateJailReq.GetTargetNodeId())
+	}
+}
+
+// The following tests cover ADR-0040's copy-on-demand ISO replication:
+// PeerReporter.UploadISO (the actual chunked transfer, used by
+// PushISOTo's own handler), RequestISOPush (calls PushISOTo on a
+// peer), and ReplicateISO (forwards the whole external RPC to a peer,
+// the same HostStats-style forwarding pattern).
+
+func TestPeerReporter_UploadISO_SendsMetadataThenChunksInOrder(t *testing.T) {
+	fake := &fakePeerServer{}
+	addr := newTestPeerServer(t, fake)
+	p := NewPeerReporter("", false, nil)
+
+	data := []byte("fake iso file contents")
+	if err := p.UploadISO(context.Background(), addr, "test.iso", "deadbeef", bytes.NewReader(data)); err != nil {
+		t.Fatalf("UploadISO() error: %v", err)
+	}
+	if fake.uploadedISOName != "test.iso" || fake.uploadedISOHash != "deadbeef" {
+		t.Errorf("received metadata = name:%q hash:%q, want name:test.iso hash:deadbeef", fake.uploadedISOName, fake.uploadedISOHash)
+	}
+	if string(fake.uploadedISOData) != string(data) {
+		t.Errorf("received data = %q, want %q", fake.uploadedISOData, data)
+	}
+}
+
+func TestPeerReporter_UploadISO_PeerRejectionIsReturnedAsError(t *testing.T) {
+	fake := &fakePeerServer{uploadISOResp: &rpcpb.UploadISOResponse{Error: "sha256 mismatch"}}
+	addr := newTestPeerServer(t, fake)
+	p := NewPeerReporter("", false, nil)
+
+	if err := p.UploadISO(context.Background(), addr, "test.iso", "deadbeef", bytes.NewReader([]byte("data"))); err == nil {
+		t.Fatal("UploadISO() error = nil, want the peer's own rejection surfaced")
+	}
+}
+
+func TestPeerReporter_RequestISOPush_SendsCorrectRequest(t *testing.T) {
+	fake := &fakePeerServer{}
+	addr := newTestPeerServer(t, fake)
+	p := NewPeerReporter("", false, nil)
+
+	if err := p.RequestISOPush(context.Background(), addr, "test.iso", "node-b"); err != nil {
+		t.Fatalf("RequestISOPush() error: %v", err)
+	}
+	if fake.pushISOToReq.GetName() != "test.iso" || fake.pushISOToReq.GetTargetNodeId() != "node-b" {
+		t.Errorf("received request = %+v, want name=test.iso target_node_id=node-b", fake.pushISOToReq)
+	}
+}
+
+func TestPeerReporter_RequestISOPush_ApplicationErrorIsReturned(t *testing.T) {
+	fake := &fakePeerServer{pushISOToResp: &rpcpb.PushISOToResponse{Error: "not present on this node"}}
+	addr := newTestPeerServer(t, fake)
+	p := NewPeerReporter("", false, nil)
+
+	if err := p.RequestISOPush(context.Background(), addr, "test.iso", "node-b"); err == nil {
+		t.Fatal("RequestISOPush() error = nil, want the peer's own rejection surfaced")
+	}
+}
+
+func TestPeerReporter_ReplicateISO_SendsCorrectRequestAndReturnsResponse(t *testing.T) {
+	fake := &fakePeerServer{replicateISOResp: &rpcpb.ReplicateISOResponse{Name: "test.iso", Sha256: "deadbeef"}}
+	addr := newTestPeerServer(t, fake)
+	p := NewPeerReporter("", false, nil)
+
+	resp, err := p.ReplicateISO(context.Background(), addr, "test.iso", "node-a")
+	if err != nil {
+		t.Fatalf("ReplicateISO() error: %v", err)
+	}
+	if fake.replicateISOReq.GetName() != "test.iso" || fake.replicateISOReq.GetSourceNodeId() != "node-a" {
+		t.Errorf("received request = %+v, want name=test.iso source_node_id=node-a", fake.replicateISOReq)
+	}
+	if resp.GetSha256() != "deadbeef" {
+		t.Errorf("ReplicateISO() = %+v, want sha256=deadbeef", resp)
 	}
 }

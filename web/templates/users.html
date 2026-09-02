@@ -17,6 +17,7 @@
 {{define "user_panel"}}
 <div id="user-error" class="banner-error">{{.UserFormError}}</div>
 <div id="user-success" class="banner-success">{{.UserFormSuccess}}</div>
+{{$actor := .Username}}
 <table>
   <thead>
     <tr><th>Username</th><th>Role</th><th></th></tr>
@@ -31,9 +32,9 @@
         <details>
           <summary>Change password</summary>
           <form class="create-vm" hx-post="/users/{{.Username}}/password" hx-target="#user-panel" hx-swap="innerHTML">
-            <label>Your current password <input type="password" name="current_password" required></label>
-            <label>New password for {{.Username}} <input type="password" name="new_password" required minlength="8"></label>
-            <label>Confirm new password <input type="password" name="confirm_password" required minlength="8"></label>
+            <label><strong>Your own</strong> login password (you are logged in as "{{$actor}}" - this is {{$actor}}'s password, not {{.Username}}'s) <input type="password" name="current_password" required autocomplete="current-password"></label>
+            <label>New password for "{{.Username}}" <input type="password" name="new_password" required minlength="8" autocomplete="new-password"></label>
+            <label>Confirm new password for "{{.Username}}" <input type="password" name="confirm_password" required minlength="8" autocomplete="new-password"></label>
             <button type="submit">Change password</button>
           </form>
         </details>

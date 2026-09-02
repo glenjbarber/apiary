@@ -43,6 +43,12 @@
     {{template "iso_panel" .}}
   </div>
   </div>
+  <div class="panel">
+  <h2>Across the cluster</h2>
+  <div id="cluster-iso-panel">
+    {{template "cluster_iso_panel" .}}
+  </div>
+  </div>
 </body>
 </html>
 {{end}}
@@ -56,6 +62,18 @@
   </thead>
   <tbody id="iso-rows">
     {{template "iso_rows" .}}
+  </tbody>
+</table>
+{{end}}
+
+{{define "cluster_iso_panel"}}
+<div id="cluster-iso-error" class="banner-error">{{.ClusterISOFormError}}</div>
+<table>
+  <thead>
+    <tr><th>Name</th><th>Size (bytes)</th><th>SHA-256</th><th>Present on</th></tr>
+  </thead>
+  <tbody id="cluster-iso-rows">
+    {{template "cluster_iso_rows" .}}
   </tbody>
 </table>
 {{end}}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/tls"
 	"fmt"
+	"io"
 	"net"
 
 	"google.golang.org/grpc"
@@ -229,6 +230,21 @@ func (p *PeerReporter) ListNetworks(ctx context.Context, addr string) (*rpcpb.Li
 	return client.ListNetworks(ctx, &rpcpb.ListNetworksRequest{})
 }
 
+// ListISOs forwards to a specific peer's own ListISOs RPC - like
+// HostStats, not leader-only-read forwarding (ISOs always answer
+// locally for whichever managerd receives the call); this is how
+// internal/frontend's Images page builds its cluster-wide view
+// (ADR-0040), addressing addr directly the same way HostStats already
+// does.
+func (p *PeerReporter) ListISOs(ctx context.Context, addr string) (*rpcpb.ListISOsResponse, error) {
+	conn, client, err := p.dial(addr)
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close()
+	return client.ListISOs(ctx, &rpcpb.ListISOsRequest{})
+}
+
 // HostStats forwards to a specific peer's own HostStats RPC - unlike
 // ListVMs/GetVM/etc. above, this isn't leader-only-read forwarding
 // (HostStats always answers locally, for whichever managerd receives
@@ -423,4 +439,90 @@ func (p *PeerReporter) ReportJailTeardownComplete(ctx context.Context, addr, id 
 		return fmt.Errorf("%s", resp.GetError())
 	}
 	return nil
+}
+
+// UploadISO streams r (a local file this node already has) into addr's
+// own UploadISO RPC as a client, mirroring internal/frontend's own
+// uploadISOStream exactly (metadata message first, then chunks, then
+// CloseAndRecv) - the same client-streaming shape a browser upload
+// already uses, just with this managerd acting as the client instead
+// (ADR-0040's PushISOTo handler is the caller).
+func (p *PeerReporter) UploadISO(ctx context.Context, addr, name, expectedSHA256 string, r io.Reader) error {
+	conn, client, err := p.dial(addr)
+	if err != nil {
+		return err
+	}
+	defer conn.Close()
+
+	stream, err := client.UploadISO(ctx)
+	if err != nil {
+		return fmt.Errorf("opening upload stream to %s: %w", addr, err)
+	}
+	if err := stream.Send(&rpcpb.UploadISORequest{
+		Data: &rpcpb.UploadISORequest_Metadata{
+			Metadata: &rpcpb.ISOUploadMetadata{Name: name, ExpectedSha256: expectedSHA256},
+		},
+	}); err != nil {
+		return fmt.Errorf("sending upload metadata to %s: %w", addr, err)
+	}
+
+	buf := make([]byte, 256*1024)
+	for {
+		n, rerr := r.Read(buf)
+		if n > 0 {
+			chunk := make([]byte, n)
+			copy(chunk, buf[:n])
+			if serr := stream.Send(&rpcpb.UploadISORequest{Data: &rpcpb.UploadISORequest_Chunk{Chunk: chunk}}); serr != nil {
+				return fmt.Errorf("sending upload data to %s: %w", addr, serr)
+			}
+		}
+		if rerr == io.EOF {
+			break
+		}
+		if rerr != nil {
+			return fmt.Errorf("reading local file for upload to %s: %w", addr, rerr)
+		}
+	}
+
+	resp, err := stream.CloseAndRecv()
+	if err != nil {
+		return fmt.Errorf("closing upload stream to %s: %w", addr, err)
+	}
+	if resp.GetError() != "" {
+		return fmt.Errorf("%s rejected the upload: %s", addr, resp.GetError())
+	}
+	return nil
+}
+
+// RequestISOPush calls addr's own PushISOTo RPC (ADR-0040) - used by
+// Server.ReplicateISO to ask the *source* node to push name to
+// targetNodeID, rather than this node pulling bytes itself.
+func (p *PeerReporter) RequestISOPush(ctx context.Context, addr, name, targetNodeID string) error {
+	conn, client, err := p.dial(addr)
+	if err != nil {
+		return err
+	}
+	defer conn.Close()
+	resp, err := client.PushISOTo(ctx, &rpcpb.PushISOToRequest{Name: name, TargetNodeId: targetNodeID})
+	if err != nil {
+		return err
+	}
+	if resp.GetError() != "" {
+		return fmt.Errorf("%s", resp.GetError())
+	}
+	return nil
+}
+
+// ReplicateISO forwards a caller's ReplicateISO request to addr - used
+// by internal/frontend to trigger a copy onto a node other than the one
+// it's colocated with (ADR-0040), the same "forward a plain external
+// RPC to an arbitrary peer" pattern HostStats already established
+// (ADR-0036), not a leader-rejection retry.
+func (p *PeerReporter) ReplicateISO(ctx context.Context, addr, name, sourceNodeID string) (*rpcpb.ReplicateISOResponse, error) {
+	conn, client, err := p.dial(addr)
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close()
+	return client.ReplicateISO(ctx, &rpcpb.ReplicateISORequest{Name: name, SourceNodeId: sourceNodeID})
 }

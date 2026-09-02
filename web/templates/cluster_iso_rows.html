@@ -1,0 +1,24 @@
+{{define "cluster_iso_rows"}}
+{{range .ClusterISOs}}
+{{$row := .}}
+<tr>
+  <td>{{.Name}}</td>
+  <td>{{.SizeBytes}}</td>
+  <td><code>{{.SHA256}}</code></td>
+  <td>
+    {{if .MissingNodes}}
+      {{range .MissingNodes}}
+      <button hx-post="/isos/{{$row.Name}}/replicate/{{.}}" hx-target="#cluster-iso-panel" hx-swap="innerHTML">Copy to {{.}}</button>
+      {{end}}
+      {{if gt (len .MissingNodes) 1}}
+      <button hx-post="/isos/{{.Name}}/replicate-all" hx-target="#cluster-iso-panel" hx-swap="innerHTML">Copy to all missing</button>
+      {{end}}
+    {{else}}
+      <em>on every node</em>
+    {{end}}
+  </td>
+</tr>
+{{else}}
+  <tr><td colspan="4"><em>No images</em></td></tr>
+{{end}}
+{{end}}

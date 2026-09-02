@@ -188,7 +188,7 @@ func TestServer_ChangePassword_WrongCurrentPasswordIsRejected(t *testing.T) {
 	if len(setter.calls) != 0 {
 		t.Errorf("SetPassword should not have been called with a wrong current password, got: %+v", setter.calls)
 	}
-	if !strings.Contains(rec.Body.String(), "current password is incorrect") {
+	if !strings.Contains(rec.Body.String(), "incorrect password for") {
 		t.Errorf("expected an incorrect-current-password message, got: %s", rec.Body.String())
 	}
 }
