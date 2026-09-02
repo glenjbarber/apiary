@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
 )
 
 // DefaultRunDir is where pidfiles for detached bhyve processes are kept.
@@ -568,20 +569,87 @@ func (m *Manager) stopSerialLogger(ctx context.Context, qname string) {
 	os.Remove(m.nmdmfile(qname))
 }
 
-// VMExists reports whether Prefix+name currently has a live vmm context.
+// VMExists reports whether Prefix+name is both a live kernel vmm(4)
+// context AND has a live bhyve process actually behind it.
+//
+// Checking only the kernel context (this function's entire original
+// implementation) is a real bug, found live: a guest-requested reboot
+// exits bhyve's own process while deliberately leaving its vmm(4)
+// context allocated - the standard wrapper-script contract is that a
+// caller notices the exit and either re-execs bhyve against the same
+// context (for a reboot) or destroys it (for a real poweroff).
+// internal/cluster's Reconciler has no such wrapper, so checking only
+// `/dev/vmm/<name>` reported a VM as permanently "running" even after
+// its guest stopped executing entirely, with nothing ever noticing or
+// relaunching it.
+//
+// When the kernel context exists but the recorded bhyve process
+// doesn't (via pidfile - see CreateVM's `-p` daemon(8) argument), this
+// tears the whole stale VM down via DestroyVM (not just the vmm(4)
+// context) before returning false. Found live, the hard way: an
+// earlier version of this fix destroyed only the vmm context, leaving
+// the separate detached serial-log reader process (started by
+// CreateVM, with its own independent lifecycle - see ADR-0042) still
+// running from the dead VM's launch. The caller's next CreateVM then
+// failed outright, colliding with that still-running reader's own
+// daemon(8) pidfile ("process already running"). DestroyVM already
+// knows how to tear down every piece of a VM's state (tap, VNC,
+// serial logger, vmm context) idempotently - reusing it here avoids
+// re-deriving that same cleanup a second, narrower, incomplete way.
 func (m *Manager) VMExists(ctx context.Context, name string) (bool, error) {
 	qname, err := m.qualifiedName(name)
 	if err != nil {
 		return false, err
 	}
 	_, statErr := os.Stat(filepath.Join("/dev/vmm", qname))
-	if statErr == nil {
-		return true, nil
-	}
 	if os.IsNotExist(statErr) {
 		return false, nil
 	}
-	return false, statErr
+	if statErr != nil {
+		return false, statErr
+	}
+
+	alive, err := m.processAlive(qname)
+	if err != nil {
+		return false, err
+	}
+	if alive {
+		return true, nil
+	}
+
+	if err := m.DestroyVM(ctx, name); err != nil {
+		return false, fmt.Errorf("bhyve: tearing down stale VM %q: %w", name, err)
+	}
+	return false, nil
+}
+
+// processAlive reports whether qname's own recorded pidfile (written by
+// CreateVM's daemon(8) invocation - since CreateVM runs bhyve without
+// daemon's own -r/-R restart flags, the supervisor's lifetime tracks
+// bhyve's own exit, so checking the recorded pid is an accurate proxy
+// for "is bhyve itself still running") names a process that's actually
+// still alive, via a signal-0 existence check rather than trusting the
+// pidfile's mere presence.
+func (m *Manager) processAlive(qname string) (bool, error) {
+	data, err := os.ReadFile(m.pidfile(qname))
+	if err != nil {
+		if os.IsNotExist(err) {
+			return false, nil
+		}
+		return false, err
+	}
+	pid, err := strconv.Atoi(strings.TrimSpace(string(data)))
+	if err != nil {
+		return false, nil
+	}
+	proc, err := os.FindProcess(pid)
+	if err != nil {
+		return false, nil
+	}
+	if err := proc.Signal(syscall.Signal(0)); err != nil {
+		return false, nil
+	}
+	return true, nil
 }
 
 // ListVMs returns the names (with Prefix stripped) of all currently

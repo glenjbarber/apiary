@@ -283,6 +283,15 @@ each design decision, in order.
   [ADR-0042](docs/adr/0042-serial-console-echo-loop-fix.md) for the
   full trail, including how a hardware hypothesis test on a second real
   bhyve-capable node ended up being what surfaced the actual clue.
+- **Fixed a related reliability gap in the same investigation**: a
+  VM's `bhyve` process exiting for any reason (a guest reboot, a
+  crash) used to leave the reconciler reporting it as running forever,
+  since it only checked whether the kernel still had a `vmm(4)` context
+  allocated - not whether `bhyve` itself was still alive. The guest
+  never actually ran again until someone destroyed the stale context
+  by hand. Fixed so a dead process is now torn down and relaunched
+  automatically. See
+  [ADR-0043](docs/adr/0043-vmexists-checks-real-process-not-just-vmm-context.md).
 
 **Not yet implemented:**
 

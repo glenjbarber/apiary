@@ -3,6 +3,7 @@ package bhyve
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"testing"
@@ -150,5 +151,87 @@ func TestAllocateNmdm_ExhaustedRangeErrors(t *testing.T) {
 
 	if _, err := m.allocateNmdm(); err == nil {
 		t.Errorf("allocateNmdm() = nil error, want an error once every unit in range is used")
+	}
+}
+
+// The following exercise processAlive directly - the pure-Go half of
+// the ADR-0043 VMExists fix (checking whether a pidfile names a process
+// that's actually still running, not just whether the file exists).
+// The other half (destroying a stale vmm(4) context via bhyvectl when
+// the process is dead) still needs real hardware, covered by this
+// package's own integration tests instead.
+
+func TestProcessAlive_NoRecordedPidfileReturnsFalse(t *testing.T) {
+	m := &Manager{Prefix: "test-", RunDir: t.TempDir()}
+
+	alive, err := m.processAlive("test-vm-1")
+	if err != nil {
+		t.Fatalf("processAlive() error: %v", err)
+	}
+	if alive {
+		t.Error("processAlive() = true, want false for a VM with no recorded pidfile")
+	}
+}
+
+func TestProcessAlive_GenuinelyRunningProcessReturnsTrue(t *testing.T) {
+	m := &Manager{Prefix: "test-", RunDir: t.TempDir()}
+	if err := os.MkdirAll(m.runDir(), 0o755); err != nil {
+		t.Fatalf("MkdirAll() error: %v", err)
+	}
+	// The test process itself is guaranteed to be alive for the
+	// duration of this test.
+	if err := os.WriteFile(m.pidfile("test-vm-1"), []byte(strconv.Itoa(os.Getpid())), 0o644); err != nil {
+		t.Fatalf("WriteFile() error: %v", err)
+	}
+
+	alive, err := m.processAlive("test-vm-1")
+	if err != nil {
+		t.Fatalf("processAlive() error: %v", err)
+	}
+	if !alive {
+		t.Error("processAlive() = false, want true for this test process's own genuinely-running pid")
+	}
+}
+
+func TestProcessAlive_ExitedProcessReturnsFalse(t *testing.T) {
+	m := &Manager{Prefix: "test-", RunDir: t.TempDir()}
+	if err := os.MkdirAll(m.runDir(), 0o755); err != nil {
+		t.Fatalf("MkdirAll() error: %v", err)
+	}
+	// Run a real short-lived process to completion first, so its pid is
+	// guaranteed to no longer exist - this is exactly the ADR-0043
+	// scenario: a recorded pid whose process has since exited.
+	cmd := exec.Command("true")
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("running throwaway process: %v", err)
+	}
+	if err := os.WriteFile(m.pidfile("test-vm-1"), []byte(strconv.Itoa(cmd.Process.Pid)), 0o644); err != nil {
+		t.Fatalf("WriteFile() error: %v", err)
+	}
+
+	alive, err := m.processAlive("test-vm-1")
+	if err != nil {
+		t.Fatalf("processAlive() error: %v", err)
+	}
+	if alive {
+		t.Error("processAlive() = true, want false for a pid whose process has already exited")
+	}
+}
+
+func TestProcessAlive_GarbagePidfileContentReturnsFalse(t *testing.T) {
+	m := &Manager{Prefix: "test-", RunDir: t.TempDir()}
+	if err := os.MkdirAll(m.runDir(), 0o755); err != nil {
+		t.Fatalf("MkdirAll() error: %v", err)
+	}
+	if err := os.WriteFile(m.pidfile("test-vm-1"), []byte("not-a-pid"), 0o644); err != nil {
+		t.Fatalf("WriteFile() error: %v", err)
+	}
+
+	alive, err := m.processAlive("test-vm-1")
+	if err != nil {
+		t.Fatalf("processAlive() error: %v", err)
+	}
+	if alive {
+		t.Error("processAlive() = true, want false for unparseable pidfile content")
 	}
 }
