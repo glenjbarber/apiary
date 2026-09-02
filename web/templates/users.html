@@ -1,0 +1,48 @@
+{{define "users_page"}}
+<!DOCTYPE html>
+<html lang="en">
+{{template "head" .}}
+<body>
+  {{template "nav" .}}
+  {{template "page_header" (pageHeader "Users" "Accounts known to the web UI's login and role map.")}}
+  <div class="panel">
+  <div id="user-panel">
+    {{template "user_panel" .}}
+  </div>
+  </div>
+</body>
+</html>
+{{end}}
+
+{{define "user_panel"}}
+<div id="user-error" class="banner-error">{{.UserFormError}}</div>
+<div id="user-success" class="banner-success">{{.UserFormSuccess}}</div>
+<table>
+  <thead>
+    <tr><th>Username</th><th>Role</th><th></th></tr>
+  </thead>
+  <tbody>
+    {{range .Users}}
+    <tr>
+      <td>{{.Username}}</td>
+      <td>{{.Role}}</td>
+      <td>
+        {{if .CanChange}}
+        <details>
+          <summary>Change password</summary>
+          <form class="create-vm" hx-post="/users/{{.Username}}/password" hx-target="#user-panel" hx-swap="innerHTML">
+            <label>Your current password <input type="password" name="current_password" required></label>
+            <label>New password for {{.Username}} <input type="password" name="new_password" required minlength="8"></label>
+            <label>Confirm new password <input type="password" name="confirm_password" required minlength="8"></label>
+            <button type="submit">Change password</button>
+          </form>
+        </details>
+        {{end}}
+      </td>
+    </tr>
+    {{else}}
+    <tr><td colspan="3"><em>No accounts</em></td></tr>
+    {{end}}
+  </tbody>
+</table>
+{{end}}

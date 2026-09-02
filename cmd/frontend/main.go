@@ -139,7 +139,7 @@ func run() error {
 	// credential.
 	peers := manager.NewPeerReporter(os.Getenv("APIARY_MANAGER_API_KEY"), *peerTLS, nil)
 
-	srv, err := frontend.NewServer(rpcpb.NewManagerServiceClient(conn), auth, roleMap, peers, *peerHostnameSuffix, *peerManagerPort)
+	srv, err := frontend.NewServer(rpcpb.NewManagerServiceClient(conn), auth, roleMap, peers, *peerHostnameSuffix, *peerManagerPort, frontend.UnixPasswordSetter{})
 	if err != nil {
 		return fmt.Errorf("creating frontend server: %w", err)
 	}

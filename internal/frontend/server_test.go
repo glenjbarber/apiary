@@ -291,7 +291,7 @@ func (f fakeAuthenticator) Authenticate(username, password string) (bool, error)
 
 func newTestServer(t *testing.T, client *fakeClient) *Server {
 	t.Helper()
-	s, err := NewServer(client, nil, nil, nil, "", "")
+	s, err := NewServer(client, nil, nil, nil, "", "", nil)
 	if err != nil {
 		t.Fatalf("NewServer() error: %v", err)
 	}
@@ -300,7 +300,7 @@ func newTestServer(t *testing.T, client *fakeClient) *Server {
 
 func newTestServerWithAuth(t *testing.T, client *fakeClient, user, pass string) *Server {
 	t.Helper()
-	s, err := NewServer(client, fakeAuthenticator{user: user, pass: pass}, map[string]manager.Role{user: manager.RoleAdmin}, nil, "", "")
+	s, err := NewServer(client, fakeAuthenticator{user: user, pass: pass}, map[string]manager.Role{user: manager.RoleAdmin}, nil, "", "", nil)
 	if err != nil {
 		t.Fatalf("NewServer() error: %v", err)
 	}
@@ -1451,7 +1451,7 @@ func TestServer_Login_UnmappedUserIsRejectedDespiteValidCredentials(t *testing.T
 		// "eve" deliberately absent - a valid PAM login for a real
 		// account nobody has granted an Apiary role to.
 		"admin": manager.RoleAdmin,
-	}, nil, "", "")
+	}, nil, "", "", nil)
 	if err != nil {
 		t.Fatalf("NewServer() error: %v", err)
 	}
@@ -1478,7 +1478,7 @@ func TestServer_Login_UnmappedUserIsRejectedDespiteValidCredentials(t *testing.T
 func TestServer_RoleGate_ViewerCannotReachOperatorRoute(t *testing.T) {
 	s, err := NewServer(&fakeClient{}, fakeAuthenticator{user: "carol", pass: "secret"}, map[string]manager.Role{
 		"carol": manager.RoleViewer,
-	}, nil, "", "")
+	}, nil, "", "", nil)
 	if err != nil {
 		t.Fatalf("NewServer() error: %v", err)
 	}
@@ -1497,7 +1497,7 @@ func TestServer_RoleGate_ViewerCannotReachOperatorRoute(t *testing.T) {
 func TestServer_RoleGate_ViewerCanReachReadOnlyRoute(t *testing.T) {
 	s, err := NewServer(&fakeClient{}, fakeAuthenticator{user: "carol", pass: "secret"}, map[string]manager.Role{
 		"carol": manager.RoleViewer,
-	}, nil, "", "")
+	}, nil, "", "", nil)
 	if err != nil {
 		t.Fatalf("NewServer() error: %v", err)
 	}
@@ -1516,7 +1516,7 @@ func TestServer_RoleGate_ViewerCanReachReadOnlyRoute(t *testing.T) {
 func TestServer_RoleGate_OperatorCannotReachAdminRoute(t *testing.T) {
 	s, err := NewServer(&fakeClient{}, fakeAuthenticator{user: "bob", pass: "secret"}, map[string]manager.Role{
 		"bob": manager.RoleOperator,
-	}, nil, "", "")
+	}, nil, "", "", nil)
 	if err != nil {
 		t.Fatalf("NewServer() error: %v", err)
 	}
@@ -1535,7 +1535,7 @@ func TestServer_RoleGate_OperatorCannotReachAdminRoute(t *testing.T) {
 func TestServer_RoleGate_OperatorCanReachOperatorRoute(t *testing.T) {
 	s, err := NewServer(&fakeClient{}, fakeAuthenticator{user: "bob", pass: "secret"}, map[string]manager.Role{
 		"bob": manager.RoleOperator,
-	}, nil, "", "")
+	}, nil, "", "", nil)
 	if err != nil {
 		t.Fatalf("NewServer() error: %v", err)
 	}

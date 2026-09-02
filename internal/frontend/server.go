@@ -7,6 +7,7 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/url"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -139,6 +140,26 @@ type pageData struct {
 	// Jails page, rendered the same way NetworkFormError is for
 	// Networks.
 	JailFormError string
+
+	// Users lists every roleMap entry (ADR-0039), for the Users page's
+	// own table - each row's "can I change this account's password"
+	// action is computed once here (CanChange), not re-derived in the
+	// template, since the authorization rule (canChangePassword) is
+	// Go logic a template action can't express inline.
+	Users []userView
+
+	// UserFormError/UserFormSuccess report a change-password result,
+	// rendered the same way APIKeyFormError/ISOFormSuccess are for
+	// their own pages.
+	UserFormError   string
+	UserFormSuccess string
+}
+
+// userView is one row of the Users page's table.
+type userView struct {
+	Username  string
+	Role      string
+	CanChange bool
 }
 
 // parseSort reads sort/dir query parameters, defaulting to ascending by
@@ -193,6 +214,12 @@ type Server struct {
 	peers              peerHostStatsClient
 	peerHostnameSuffix string
 	peerManagerPort    string
+
+	// passwords implements the actual UNIX-account password change
+	// (ADR-0039) - real pw(8) by default in cmd/frontend, faked in
+	// tests. See password.go's canChangePassword for the authorization
+	// rule gating who may target whose account.
+	passwords PasswordSetter
 }
 
 // pageHeaderData is the argument type the "page_header" template (see
@@ -244,8 +271,9 @@ func nodeSubtitle(nodeID string) string {
 // ("/") fetch other nodes' HostStats directly - see cmd/frontend's own
 // -peer-tls/-peer-hostname-suffix/-peer-manager-port flags for how
 // peerHostnameSuffix/peerManagerPort combine with a node ID to form
-// its managerd address.
-func NewServer(client rpcpb.ManagerServiceClient, auth pam.Authenticator, roleMap map[string]manager.Role, peers peerHostStatsClient, peerHostnameSuffix, peerManagerPort string) (*Server, error) {
+// its managerd address. passwords implements the real UNIX-account
+// password change (ADR-0039) - pass UnixPasswordSetter{} in production.
+func NewServer(client rpcpb.ManagerServiceClient, auth pam.Authenticator, roleMap map[string]manager.Role, peers peerHostStatsClient, peerHostnameSuffix, peerManagerPort string, passwords PasswordSetter) (*Server, error) {
 	tmpl, err := template.New("").Funcs(template.FuncMap{
 		"pageHeader":   pageHeader,
 		"vmSubtitle":   vmSubtitle,
@@ -266,6 +294,7 @@ func NewServer(client rpcpb.ManagerServiceClient, auth pam.Authenticator, roleMa
 		peers:              peers,
 		peerHostnameSuffix: peerHostnameSuffix,
 		peerManagerPort:    peerManagerPort,
+		passwords:          passwords,
 	}
 	s.routes()
 	return s, nil
@@ -393,6 +422,17 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /apikeys", s.requireRole(manager.RoleAdmin, s.handleAPIKeysPage))
 	s.mux.HandleFunc("POST /apikeys", s.requireRole(manager.RoleAdmin, s.handleCreateAPIKey))
 	s.mux.HandleFunc("DELETE /apikeys/{id}", s.requireRole(manager.RoleAdmin, s.handleRevokeAPIKey))
+
+	// Users (ADR-0039): visible to everyone logged in (RoleViewer, the
+	// same "always show, gate the action" convention every other page
+	// here follows) - the page itself decides per-row whether a change-
+	// password action is even offered. The route-level gate on the
+	// actual change is RoleOperator (the coarsest role that can ever
+	// change *any* password) - handleChangePassword re-checks the full
+	// per-target rule itself, since Operator is let through here but
+	// still must not be allowed to target Admin.
+	s.mux.HandleFunc("GET /users", s.requireRole(manager.RoleViewer, s.handleUsersPage))
+	s.mux.HandleFunc("POST /users/{username}/password", s.requireRole(manager.RoleOperator, s.handleChangePassword))
 }
 
 // handleLoginPage serves the login form. If login isn't enabled at all,
@@ -1087,6 +1127,112 @@ func (s *Server) renderAPIKeyPanelResult(w http.ResponseWriter, r *http.Request,
 		}
 	}
 	s.render(w, "apikey_panel", pageData{APIKeyFormError: formErr, APIKeys: keys, APIKeyRawName: rawName, APIKeyRawValue: rawValue})
+}
+
+// currentUsers builds the Users page's row list from s.roleMap, sorted
+// by username for deterministic output (roleMap's own iteration order
+// is a plain Go map, unordered) - CanChange is computed once here per
+// row against the acting session's own role, via canChangePassword
+// (password.go), rather than re-derived in the template.
+func (s *Server) currentUsers(actorRole manager.Role) []userView {
+	usernames := make([]string, 0, len(s.roleMap))
+	for u := range s.roleMap {
+		usernames = append(usernames, u)
+	}
+	sort.Strings(usernames)
+
+	users := make([]userView, 0, len(usernames))
+	for _, u := range usernames {
+		role := s.roleMap[u]
+		users = append(users, userView{Username: u, Role: string(role), CanChange: canChangePassword(actorRole, role)})
+	}
+	return users
+}
+
+// handleUsersPage serves the Users page ("/users") - visible to every
+// logged-in role (see routes()'s own doc comment), listing every known
+// account with a per-row change-password action gated by
+// canChangePassword.
+func (s *Server) handleUsersPage(w http.ResponseWriter, r *http.Request) {
+	info, ok := s.currentSession(r)
+	if !ok {
+		s.render(w, "users_page", s.withAuthFields(r, pageData{UserFormError: "no active session", ActivePage: "users"}))
+		return
+	}
+	s.render(w, "users_page", s.withAuthFields(r, pageData{Users: s.currentUsers(info.role), ActivePage: "users"}))
+}
+
+// handleChangePassword implements the actual password change (ADR-0039).
+// The route's own requireRole(RoleOperator, ...) already keeps Viewer
+// out entirely; this handler re-derives the target's role from roleMap
+// and re-checks the full canChangePassword rule, since Operator is let
+// through by the route gate but must still be blocked from targeting
+// Admin. The acting user's own current password is re-verified via
+// s.auth (the same check login itself performs) before anything is
+// actually changed - proof it's really them, not just an unattended
+// open session.
+func (s *Server) handleChangePassword(w http.ResponseWriter, r *http.Request) {
+	info, ok := s.currentSession(r)
+	if !ok {
+		s.renderUserPanelResult(w, r, manager.RoleViewer, "no active session")
+		return
+	}
+
+	target := r.PathValue("username")
+	targetRole, known := s.roleMap[target]
+	if !known {
+		s.renderUserPanelResult(w, r, info.role, fmt.Sprintf("unknown account %q", target))
+		return
+	}
+	if !canChangePassword(info.role, targetRole) {
+		s.renderUserPanelResult(w, r, info.role, fmt.Sprintf("this account's role does not permit changing %q's password", target))
+		return
+	}
+
+	if err := r.ParseForm(); err != nil {
+		s.renderUserPanelResult(w, r, info.role, "invalid form: "+err.Error())
+		return
+	}
+	currentPassword := r.FormValue("current_password")
+	newPassword := r.FormValue("new_password")
+	confirmPassword := r.FormValue("confirm_password")
+
+	if len(newPassword) < minPasswordLength {
+		s.renderUserPanelResult(w, r, info.role, fmt.Sprintf("new password must be at least %d characters", minPasswordLength))
+		return
+	}
+	if newPassword != confirmPassword {
+		s.renderUserPanelResult(w, r, info.role, "new password and confirmation do not match")
+		return
+	}
+
+	ok, err := s.auth.Authenticate(info.username, currentPassword)
+	if err != nil {
+		s.renderUserPanelResult(w, r, info.role, "authentication backend error: "+err.Error())
+		return
+	}
+	if !ok {
+		s.renderUserPanelResult(w, r, info.role, "current password is incorrect")
+		return
+	}
+
+	if err := s.passwords.SetPassword(target, newPassword); err != nil {
+		s.renderUserPanelResult(w, r, info.role, "setting password: "+err.Error())
+		return
+	}
+	s.renderUserPanelSuccess(w, info.role, fmt.Sprintf("password for %q changed successfully", target))
+}
+
+// renderUserPanelResult/renderUserPanelSuccess re-render the Users
+// page's own list (recomputed against actorRole, so CanChange stays
+// correct) alongside a result message - mirroring
+// renderAPIKeyPanelResult's combined-target pattern.
+func (s *Server) renderUserPanelResult(w http.ResponseWriter, r *http.Request, actorRole manager.Role, formErr string) {
+	s.render(w, "user_panel", pageData{Users: s.currentUsers(actorRole), UserFormError: formErr})
+}
+
+func (s *Server) renderUserPanelSuccess(w http.ResponseWriter, actorRole manager.Role, msg string) {
+	s.render(w, "user_panel", pageData{Users: s.currentUsers(actorRole), UserFormSuccess: msg})
 }
 
 func (s *Server) render(w http.ResponseWriter, name string, data pageData) {
