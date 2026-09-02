@@ -292,6 +292,14 @@ each design decision, in order.
   by hand. Fixed so a dead process is now torn down and relaunched
   automatically. See
   [ADR-0043](docs/adr/0043-vmexists-checks-real-process-not-just-vmm-context.md).
+- **Every VM now gets a deterministic MAC address**, not just ones
+  attached to an Apiary-managed network - a flat-bridge VM previously
+  got whatever random MAC `bhyve` generated, making it impossible to
+  set up a static DHCP reservation ahead of creating it. Surfaced a
+  real, currently-invisible-in-the-UI gap too: the VM table never
+  actually displayed a MAC address at all, even though it was already
+  being tracked - now it does. See
+  [ADR-0044](docs/adr/0044-deterministic-mac-for-every-vm.md).
 
 **Not yet implemented:**
 
@@ -395,19 +403,30 @@ each design decision, in order.
   own logic). See ADR-0022's own "Follow-up" sections, ADR-0032, and the
   CAPI repo's own README for the full trail.
 
-  **In progress**: a second real bhyve-capable node (`apiverse`, real
-  bare-metal Skylake hardware, previously dataset-only) and a real
-  `kind` management cluster with `clusterctl init`'s genuine upstream
-  `kubeadm` bootstrap/control-plane providers, working toward that
-  still-missing multi-node join. Along the way: a real, previously
-  latent bug in `internal/bhyve.Manager.VMExists` (it checks only
-  whether the VM's kernel `vmm(4)` context still exists, not whether the
-  `bhyve` process is actually alive - a guest-requested reboot exits the
-  process but deliberately leaves the kernel context allocated, so the
-  reconciler never notices and never relaunches it) surfaced and is not
-  yet fixed - see CLAUDE.md's own trail for the fuller diagnostic
-  detail this pass produced, including an inconclusive first attempt at
-  testing whether the CPU-lockup bug above is hardware-specific.
+  **Update**: a second real bhyve-capable node (`apiverse`, real
+  bare-metal Skylake hardware, previously dataset-only) is now up, and
+  a real `kind` management cluster with `clusterctl init`'s genuine
+  upstream `kubeadm` bootstrap/control-plane providers exercised the
+  real bootstrap machinery end to end for the first time - not the
+  static-secret bypass. Getting `Cluster.spec.controlPlaneEndpoint` to
+  a real, known IP (required before CAPI's kubeadm bootstrap provider
+  renders any bootstrap data) needed a real static DHCP reservation on
+  the operator's own router, keyed by a VM's MAC address - which
+  required every VM to get a deterministic MAC first (see ADR-0044),
+  and a new opt-in `ApiaryMachineSpec.StaticIPAddress` field in the CAPI
+  repo (its `ApiaryMachineStatus.Ready` was otherwise gated on an
+  Apiary-tracked IP a flat-bridge VM never gets). Confirmed live: the
+  real VM Apiary created matched the precomputed id/MAC exactly, a
+  genuine `kubeadm` bootstrap secret was rendered, and the guest's
+  console showed cloud-init actually attempting `kubeadm init` -
+  failing only with `kubeadm: not found`, since the base image is a
+  stock Ubuntu cloud image with no Kubernetes tooling installed. See
+  ADR-0042/ADR-0043/ADR-0044. **Next**: a real "Kubernetes-ready" Linux
+  image (`kubeadm`/`kubelet`/`containerd` pre-installed) - confirmed
+  this must be Linux; FreeBSD has no viable path here (no
+  production-grade CRI runtime for jails, and `kubeadm` itself assumes
+  Linux even for the control-plane node, which runs its own static pods
+  via that node's own `kubelet`).
 - **Tabled for now** (evaluated, deliberately deferred):
   - **Terraform support** — the infrastructure now exists (`managerd`'s
     API-key auth, `restshimd`'s own binary forwarding each caller's
