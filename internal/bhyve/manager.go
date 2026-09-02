@@ -367,17 +367,39 @@ func (m *Manager) CreateVM(ctx context.Context, name string, cfg Config) error {
 		"-l", "bootrom,"+cfg.BootROM,
 	)
 	if haveNmdm {
-		// The guest gets the "B" end; a separate reader (started below,
-		// once bhyve itself is up) drains the "A" end into a log file.
-		// nmdm(4) device nodes are created on first open, no explicit
-		// setup step needed.
+		// The guest gets the "B" end. The reader for the "A" end is
+		// started BELOW, BEFORE bhyve itself launches - this ordering
+		// matters (see ADR-0042). A freshly created nmdm endpoint
+		// defaults to icanon+echo, and that echo fires the instant any
+		// input arrives regardless of whether a reader is actively
+		// consuming it - it's the kernel's own line discipline, not
+		// something a later reader can retroactively prevent. If bhyve
+		// launched first and started writing boot output to "B" before
+		// our reader had a chance to put "A" into raw mode, that output
+		// could already be bouncing back into the guest as bogus
+		// keystrokes before the fix ever took effect. nmdm(4) device
+		// nodes are created on first open by *either* endpoint, so
+		// opening "A" first and letting bhyve open the already-existing
+		// "B" afterward is safe.
 		args = append(args, "-l", fmt.Sprintf("com1,/dev/nmdm%dB", nmdmUnit))
 	}
 	args = append(args, qname)
 
+	if haveNmdm {
+		if err := m.startSerialLogger(ctx, qname, nmdmUnit); err != nil {
+			if tapName != "" {
+				m.destroyTap(ctx, qname, tapName)
+			}
+			return fmt.Errorf("bhyve: starting serial console logger: %w", err)
+		}
+	}
+
 	if _, err := runCmd(ctx, "daemon", args...); err != nil {
 		if tapName != "" {
 			m.destroyTap(ctx, qname, tapName)
+		}
+		if haveNmdm {
+			m.stopSerialLogger(ctx, qname)
 		}
 		return err
 	}
@@ -391,15 +413,6 @@ func (m *Manager) CreateVM(ctx context.Context, name string, cfg Config) error {
 			return fmt.Errorf("bhyve: VM created but recording VNC port failed: %w", err)
 		}
 	}
-
-	if haveNmdm {
-		if err := m.startSerialLogger(ctx, qname, nmdmUnit); err != nil {
-			// Same reasoning as the VNC-port-recording failure above -
-			// the VM is already running; a missing serial log just means
-			// diagnostics are unavailable until this is fixed.
-			return fmt.Errorf("bhyve: VM created but starting serial console logger failed: %w", err)
-		}
-	}
 	return nil
 }
 
@@ -408,15 +421,47 @@ func (m *Manager) CreateVM(ctx context.Context, name string, cfg Config) error {
 // appends everything it reads to qname's serial log file. Recorded via
 // nmdmfile/serialpidfile so DestroyVM can find and stop it later,
 // mirroring how tapfile/vncfile track bhyve's own per-VM state.
+//
+// Critical: a freshly created nmdm endpoint defaults to a normal
+// interactive tty (icanon+echo on, confirmed live via `stty -f
+// /dev/nmdmXA -a`) - opening it with a plain `cat` never disables that.
+// Since nmdm's two endpoints are cross-wired like a null modem, echo
+// being on on the *A* side means every byte the guest writes on its end
+// (arriving as input here) gets echoed straight back out - which loops
+// through the pair and re-arrives at the guest as bogus keystrokes. This
+// was a real, previously-misdiagnosed-as-hardware/kernel bug: a single
+// byte written to one nmdm endpoint was confirmed live to trigger an
+// unbounded self-sustaining flood of newlines with zero further input,
+// entirely in FreeBSD's tty layer, no bhyve or guest involved - and
+// closely reproduced this project's own "sustained high CPU + serial
+// console flooded with bare newlines" symptom (see CLAUDE.md's known
+// issue). Fixed by putting the endpoint into raw mode (`stty raw`,
+// which disables icanon/echo among other line-discipline processing)
+// before reading it.
+//
+// Critical detail, found live: `stty -f <device> raw` as a *separate*
+// process from the eventual reader doesn't stick - the device's own
+// cflags include `hupcl` (hang up on close), and nmdm(4) genuinely
+// emulates that: closing the fd `stty` used (as that process exits)
+// drops the "line" and resets termios back to defaults before `cat`
+// ever opens its own fresh fd, silently undoing the fix. Confirmed by
+// direct experiment: running `stty -f dev raw` then `stty -f dev -a` in
+// two separate commands showed the setting had already reverted.
+// Fixed by never closing the device between the two: redirecting it
+// onto the shell's own stdin once (`{ ...; } < device`) so `stty`
+// (acting on its own stdin) and the exec'd `cat` (reading its own
+// stdin) share the exact same open file description throughout, with
+// no intermediate close to trigger a hangup.
 func (m *Manager) startSerialLogger(ctx context.Context, qname string, nmdmUnit int) error {
 	if err := os.WriteFile(m.nmdmfile(qname), []byte(strconv.Itoa(nmdmUnit)), 0o644); err != nil {
 		return fmt.Errorf("recording nmdm unit: %w", err)
 	}
+	device := fmt.Sprintf("/dev/nmdm%dA", nmdmUnit)
 	if _, err := runCmd(ctx, "daemon",
 		"-f",
 		"-p", m.serialpidfile(qname),
 		"-o", m.seriallogfile(qname),
-		"cat", fmt.Sprintf("/dev/nmdm%dA", nmdmUnit),
+		"/bin/sh", "-c", fmt.Sprintf("{ stty raw && exec cat; } < %s", device),
 	); err != nil {
 		os.Remove(m.nmdmfile(qname))
 		return fmt.Errorf("starting reader: %w", err)
@@ -489,6 +534,19 @@ func (m *Manager) DestroyVM(ctx context.Context, name string) error {
 	m.destroyTap(ctx, qname, "")
 	os.Remove(m.vncfile(qname))
 
+	m.stopSerialLogger(ctx, qname)
+	return nil
+}
+
+// stopSerialLogger kills the detached reader process startSerialLogger
+// started (if any) and clears its pidfile/nmdmfile bookkeeping - shared
+// by DestroyVM's own teardown and CreateVM's failure-cleanup path when
+// bhyve itself fails to start after the reader was already launched
+// (see ADR-0042 for why the reader now starts first). seriallogfile
+// deliberately is not removed - it's the one place a failed VM's boot/
+// console output survives after teardown, exactly when a diagnosis is
+// most likely to be needed.
+func (m *Manager) stopSerialLogger(ctx context.Context, qname string) {
 	if data, err := os.ReadFile(m.serialpidfile(qname)); err == nil {
 		if pid, err := strconv.Atoi(strings.TrimSpace(string(data))); err == nil {
 			runCmd(ctx, "kill", strconv.Itoa(pid))
@@ -496,11 +554,8 @@ func (m *Manager) DestroyVM(ctx context.Context, name string) error {
 	}
 	os.Remove(m.serialpidfile(qname))
 	// nmdmfile is removed (it only tracks a live allocation, freeing the
-	// unit for reuse) but seriallogfile deliberately is not - it's the
-	// one place a failed VM's boot/console output survives after
-	// teardown, exactly when a diagnosis is most likely to be needed.
+	// unit for reuse).
 	os.Remove(m.nmdmfile(qname))
-	return nil
 }
 
 // VMExists reports whether Prefix+name currently has a live vmm context.

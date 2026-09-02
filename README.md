@@ -267,6 +267,22 @@ each design decision, in order.
   earlier, browser-triggered manual "copy to node" feature that didn't
   work reliably in practice and was reconsidered in favor of this.) See
   [ADR-0041](docs/adr/0041-image-fetching-at-vm-creation-time.md).
+- **Fixed a real, previously-mysterious bhyve reliability bug**: a
+  Linux guest VM could reliably boot into a sustained high host-CPU
+  state with its serial console flooded by newlines, previously
+  suspected to be a kernel/TSC-level lockup. Root cause: the host-side
+  serial-log reader opened its end of the VM's `nmdm(4)` pair without
+  disabling that endpoint's default terminal echo - since `nmdm`'s two
+  ends are cross-wired like a null modem, that echo bounced every byte
+  the guest wrote right back into itself as bogus keystrokes, forever.
+  Confirmed independent of any guest/hardware factor by reproducing it
+  with a bare `nmdm` pair and no VM at all. Fixed by putting the reader
+  into raw mode - not as simple as it sounds, since a naive fix using
+  two separate command invocations doesn't stick (the device's own
+  `hupcl` flag resets it the moment the first one exits) - see
+  [ADR-0042](docs/adr/0042-serial-console-echo-loop-fix.md) for the
+  full trail, including how a hardware hypothesis test on a second real
+  bhyve-capable node ended up being what surfaced the actual clue.
 
 **Not yet implemented:**
 
