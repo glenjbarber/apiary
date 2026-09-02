@@ -5,7 +5,9 @@
 <body>
   {{template "nav" .}}
   {{template "page_header" (pageHeader "Virtual machines" "Cluster workloads and their current reconciliation state." "<a class='button' href='/vms/new'>Create VM</a>")}}
-  <div class="panel"><table>
+  <div class="panel">
+  <div id="vm-error" class="banner-error">{{.Error}}</div>
+  <table>
     <thead>
       <tr>
         <th><a href="/vms?sort=id&dir={{if and (eq .SortBy "id") (eq .SortDir "asc")}}desc{{else}}asc{{end}}">ID{{if eq .SortBy "id"}} {{if eq .SortDir "asc"}}&#9650;{{else}}&#9660;{{end}}{{end}}</a></th>

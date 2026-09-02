@@ -1,5 +1,17 @@
+{{/* vm_rows_fragment wraps vm_rows with an out-of-band update to the
+     page's persistent #vm-error banner (see vms.html) - used only by
+     the standalone-fragment handlers (handleListVMs/handleDeleteVM/
+     renderRowsWithError in server.go), which swap into #vm-rows
+     (the <tbody>'s innerHTML) and so can't otherwise reach a banner
+     div living outside the table. vms.html's own full-page render
+     calls "vm_rows" directly instead - it already has that same
+     .Error rendered into its own static #vm-error div, so duplicating
+     it here on a full-page load would just create a second element
+     with the same id (and, worse, land inside the <tbody> where a
+     bare <div> isn't valid HTML). */}}
+{{define "vm_rows_fragment"}}<div id="vm-error" class="banner-error" hx-swap-oob="true">{{.Error}}</div>{{template "vm_rows" .}}{{end}}
+
 {{define "vm_rows"}}
-{{if .Error}}<tr><td colspan="9" class="error">{{.Error}}</td></tr>{{end}}
 {{range .VMs}}
 <tr>
   <td>{{.ID}}</td>

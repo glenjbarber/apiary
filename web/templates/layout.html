@@ -43,19 +43,27 @@
     form.create-vm label, form.upload-iso label { display: flex; flex-direction: column; font-size: 0.85rem; }
     .error { color:var(--danger); }
     .success { color:#166534; font-weight:650; }
-    /* Fixed height so an appearing/disappearing message doesn't shift
-       the table below it up and down; padding/background/border only
-       kick in once there's actual text, via :not(:empty), so the
-       reserved space stays a plain sliver when there's nothing to show. */
-    #create-error, #iso-error, #iso-success {
-      min-height: 1.25em; margin-top: 0.5rem; font-size: 0.9em;
-      word-break: break-word;
+    /* Dedicated banner classes for a page/form-level error or success
+       message - distinct from the bare .error/.success classes above,
+       which stay plain colored text for inline uses (badges, table
+       cells) that shouldn't grow a box around them. Fixed min-height so
+       an appearing/disappearing banner doesn't shift the content below
+       it up and down; padding/background/border only kick in once
+       there's actual text, via :not(:empty), so the reserved space
+       stays a plain sliver when there's nothing to show. One
+       consistent treatment shared by every page with a banner (create-
+       VM/jail, jails, networks, images, VM list, cluster overview,
+       host detail, API keys) rather than a per-page copy. */
+    .banner-error, .banner-success {
+      min-height: 1.25em; margin-bottom: 0.75rem; font-size: 0.9em;
+      word-break: break-word; color: var(--danger);
     }
-    #create-error:not(:empty), #iso-error:not(:empty) {
+    .banner-success { color: #166534; font-weight: 650; }
+    .banner-error:not(:empty) {
       background: #fdecea; border: 1px solid #f5c6c0; border-radius: 4px;
       padding: 0.5rem 0.75rem;
     }
-    #iso-success:not(:empty) {
+    .banner-success:not(:empty) {
       background: #eaf7ec; border: 1px solid #c2e6c6; border-radius: 4px;
       padding: 0.5rem 0.75rem;
     }

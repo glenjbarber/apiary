@@ -38,16 +38,18 @@
     });
   })();
   </script>
+  <div class="panel">
   <div id="iso-panel">
     {{template "iso_panel" .}}
+  </div>
   </div>
 </body>
 </html>
 {{end}}
 
 {{define "iso_panel"}}
-<div id="iso-error" class="error">{{.ISOFormError}}</div>
-<div id="iso-success" class="success">{{.ISOFormSuccess}}</div>
+<div id="iso-error" class="banner-error">{{.ISOFormError}}</div>
+<div id="iso-success" class="banner-success">{{.ISOFormSuccess}}</div>
 <table>
   <thead>
     <tr><th>Name</th><th>Size (bytes)</th><th>SHA-256</th><th></th></tr>

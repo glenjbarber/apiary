@@ -23,17 +23,19 @@
     </label>
     <button type="submit">Create key</button>
   </form>
+  <div class="panel">
   <div id="apikey-panel">
     {{template "apikey_panel" .}}
+  </div>
   </div>
 </body>
 </html>
 {{end}}
 
 {{define "apikey_panel"}}
-<div id="apikey-error" class="error">{{.APIKeyFormError}}</div>
+<div id="apikey-error" class="banner-error">{{.APIKeyFormError}}</div>
 {{if .APIKeyRawValue}}
-<div class="success">
+<div class="banner-success">
   <p><strong>Key "{{.APIKeyRawName}}" created. Copy it now - it will not be shown again:</strong></p>
   <p><code>{{.APIKeyRawValue}}</code></p>
 </div>

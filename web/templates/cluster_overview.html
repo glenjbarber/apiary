@@ -5,7 +5,7 @@
 <body>
   {{template "nav" .}}
   {{template "page_header" (pageHeader "Cluster overview" "Basic status for every known node - select one for detail.")}}
-  {{if .Error}}<div class="error">{{.Error}}</div>{{end}}
+  {{if .Error}}<div class="banner-error">{{.Error}}</div>{{end}}
 
   <div class="panel" style="margin-top:1rem"><table>
     <thead>

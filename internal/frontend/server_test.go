@@ -1187,7 +1187,7 @@ func TestServer_UploadISO_StreamsMetadataThenChunksInOrder(t *testing.T) {
 	if string(gotData) != "data" {
 		t.Errorf("chunk data = %q, want %q", gotData, "data")
 	}
-	if !strings.Contains(rec.Body.String(), `id="iso-error" class="error"></div>`) {
+	if !strings.Contains(rec.Body.String(), `id="iso-error" class="banner-error"></div>`) {
 		t.Errorf("expected an empty iso-error div on success, got: %s", rec.Body.String())
 	}
 	if !strings.Contains(rec.Body.String(), "Uploaded test.iso successfully") {

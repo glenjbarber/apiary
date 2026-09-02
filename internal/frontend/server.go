@@ -599,7 +599,7 @@ func (s *Server) knownNodes(r *http.Request) ([]string, error) {
 func (s *Server) handleListVMs(w http.ResponseWriter, r *http.Request) {
 	sortBy, dir := parseSort(r)
 	vms, errMsg := s.currentVMs(r, sortBy, dir)
-	s.render(w, "vm_rows", pageData{Error: errMsg, VMs: vms})
+	s.render(w, "vm_rows_fragment", pageData{Error: errMsg, VMs: vms})
 }
 
 // handleCreateVM lives on its own page (/vms/new, see new_vm.html) now
@@ -697,7 +697,7 @@ func (s *Server) handleDeleteVM(w http.ResponseWriter, r *http.Request) {
 
 	sortBy, dir := parseSort(r)
 	vms, errMsg := s.currentVMs(r, sortBy, dir)
-	s.render(w, "vm_rows", pageData{Error: errMsg, VMs: vms})
+	s.render(w, "vm_rows_fragment", pageData{Error: errMsg, VMs: vms})
 }
 
 // renderRowsWithError re-fetches the current (unchanged) VM list and
@@ -709,7 +709,7 @@ func (s *Server) renderRowsWithError(w http.ResponseWriter, r *http.Request, msg
 	if fetchErr != "" {
 		msg = msg + "; additionally failed to refresh list: " + fetchErr
 	}
-	s.render(w, "vm_rows", pageData{Error: msg, VMs: vms})
+	s.render(w, "vm_rows_fragment", pageData{Error: msg, VMs: vms})
 }
 
 // handleListISOs serves just the iso_rows fragment, for refreshing the

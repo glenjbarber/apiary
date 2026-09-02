@@ -5,7 +5,7 @@
 <body>
   {{template "nav" .}}
   {{template "page_header" (pageHeader "Host detail" (nodeSubtitle .Stats.NodeID) "<a href='/'>Back to overview</a>")}}
-  {{if .Error}}<div class="error">{{.Error}}</div>{{end}}
+  {{if .Error}}<div class="banner-error">{{.Error}}</div>{{end}}
   {{range .Stats.Errors}}<div class="error">{{.}}</div>{{end}}
 
   <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:1rem;margin-top:1rem">

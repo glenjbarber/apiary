@@ -12,15 +12,17 @@
     <label>Subnet (CIDR) <input type="text" name="subnet" placeholder="10.60.0.0/24" required></label>
     <button type="submit">Create</button>
   </form>
+  <div class="panel">
   <div id="network-panel">
     {{template "network_panel" .}}
+  </div>
   </div>
 </body>
 </html>
 {{end}}
 
 {{define "network_panel"}}
-<div id="network-error" class="error">{{.NetworkFormError}}</div>
+<div id="network-error" class="banner-error">{{.NetworkFormError}}</div>
 <table>
   <thead>
     <tr><th>ID</th><th>Name</th><th>VLAN</th><th>Subnet</th><th>Bridge</th><th>Status</th><th></th></tr>
