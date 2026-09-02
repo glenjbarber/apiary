@@ -231,6 +231,42 @@ each design decision, in order.
   forwarded to the leader's own `managerd` over the same authenticated
   API, using the same `-peer-api-key`. See
   [ADR-0035](docs/adr/0035-leader-only-read-forwarding.md).
+- **Cluster overview and per-node host page** — the default landing
+  page now shows a lightweight, concurrently-fetched status row per
+  known cluster node (reachable/unreachable, load, memory, ZFS pool
+  health, `pf` status), rather than always showing whichever node the
+  web UI happened to be colocated with. The old verbose single-node
+  view moved to `/host/{id}`, addressable per node. See
+  [ADR-0036](docs/adr/0036-cluster-overview-and-per-node-host-page.md).
+- **Write RPC forwarding to the leader** — closes the write-side gap
+  the read-forwarding above left open: `CreateVM`/`UpdateVM`/`DeleteVM`
+  and the jail/network/API-key equivalents now forward a rejected
+  "not the leader" write to the leader's own `managerd` and return its
+  real response, instead of surfacing raft's own rejection straight to
+  the caller. See
+  [ADR-0037](docs/adr/0037-write-rpc-forwarding-to-leader.md).
+- **Tiered reset CLI** — `raftd -reset` wipes only raft-replicated
+  ephemeral state, leaving real ZFS datasets/bhyve VMs/jails/ISOs
+  untouched; `managerd -reset-managed`/`-factory-reset` add two more
+  tiers (destroy every Apiary-managed resource within existing scoping,
+  or ignore scoping entirely with explicit extra-resource lists) - each
+  gated behind its own hardcoded confirmation phrase. See
+  [ADR-0038](docs/adr/0038-tiered-reset-cli.md).
+- **Per-role password-change feature** — the Users page lets Admin
+  change anyone's password, Operator change its own and Viewer's (never
+  Admin's), and Viewer change no one's - backed by a real `pw usermod`
+  call, requiring the actor's own current password to re-authenticate
+  first. See
+  [ADR-0039](docs/adr/0039-per-role-password-change.md).
+- **Automatic image fetching at VM-creation time** — the create-VM form
+  now shows every known node's stored images, not just the local node's,
+  with a live cue for whichever ones aren't yet on the currently-selected
+  node; `internal/cluster`'s reconciler fetches a missing image
+  automatically from whichever peer has it the moment a VM actually
+  needs it, rather than requiring a manual pre-copy step. (Supersedes an
+  earlier, browser-triggered manual "copy to node" feature that didn't
+  work reliably in practice and was reconsidered in favor of this.) See
+  [ADR-0041](docs/adr/0041-image-fetching-at-vm-creation-time.md).
 
 **Not yet implemented:**
 
@@ -328,14 +364,25 @@ each design decision, in order.
   immediately with "no bootable device" against a blank one), got a
   real DHCP lease over a real flat bridge, took its NoCloud seed's
   custom hostname, ran a custom `runcmd`, and accepted SSH via its
-  seed's injected key. Not yet built: a web UI page/RPC for remote
-  serial-log viewing (real, disclosed follow-on work - an operator
-  reads the log file directly on the node for now), and full
-  multi-node kubeadm cluster joining (this pass used a static
-  bootstrap secret, bypassing the kubeadm bootstrap provider, to
-  isolate the infrastructure provider's own logic). See ADR-0022's own
-  "Follow-up" sections, ADR-0032, and the CAPI repo's own README for
-  the full trail.
+  seed's injected key. Not yet built: full multi-node `kubeadm` cluster
+  joining (that pass used a static bootstrap secret, bypassing the
+  `kubeadm` bootstrap provider, to isolate the infrastructure provider's
+  own logic). See ADR-0022's own "Follow-up" sections, ADR-0032, and the
+  CAPI repo's own README for the full trail.
+
+  **In progress**: a second real bhyve-capable node (`apiverse`, real
+  bare-metal Skylake hardware, previously dataset-only) and a real
+  `kind` management cluster with `clusterctl init`'s genuine upstream
+  `kubeadm` bootstrap/control-plane providers, working toward that
+  still-missing multi-node join. Along the way: a real, previously
+  latent bug in `internal/bhyve.Manager.VMExists` (it checks only
+  whether the VM's kernel `vmm(4)` context still exists, not whether the
+  `bhyve` process is actually alive - a guest-requested reboot exits the
+  process but deliberately leaves the kernel context allocated, so the
+  reconciler never notices and never relaunches it) surfaced and is not
+  yet fixed - see CLAUDE.md's own trail for the fuller diagnostic
+  detail this pass produced, including an inconclusive first attempt at
+  testing whether the CPU-lockup bug above is hardware-specific.
 - **Tabled for now** (evaluated, deliberately deferred):
   - **Terraform support** — the infrastructure now exists (`managerd`'s
     API-key auth, `restshimd`'s own binary forwarding each caller's
@@ -375,12 +422,13 @@ Ephemeral state is what raft actually replicates across the cluster.
 
 ## Repository layout
 
-- `cmd/` — entry points for each binary (`raftd`, `managerd`, `frontend`)
+- `cmd/` — entry points for each binary (`raftd`, `managerd`, `frontend`,
+  `restshimd`)
 - `api/` — protobuf schema definitions: `api/internalpb` (internal raft
   socket protocol) and `api/rpc` (external RPC API)
 - `internal/` — core logic: `bhyve`, `jail`, `zfs`, `hast`, `ufsmount`,
   `cluster`, `raft`, `manager`, `restshim`, `frontend`, `isostore`,
-  `hoststats`, `vlan`, `dhcpd`, `pf`, `pam`
+  `hoststats`, `vlan`, `dhcpd`, `pf`, `pam`, `tlsdial`, `resetutil`
 - `web/` — HTML templates and static assets for the frontend, embedded
   into the `frontend` binary at build time
 - `docs/adr/` — architecture decision records; start here for why things
