@@ -281,6 +281,8 @@ func (m *Manager) VNCPort(name string) (port int, ok bool, err error) {
 // CreateVM starts a new VM, detached from this process via daemon(8) so
 // it keeps running independently of whatever started it (the same way a
 // real hypervisor manager must not take its VMs down if it restarts).
+// Always passes bhyve's own -H flag so an idle guest's vCPU thread
+// actually yields on HLT instead of pinning a full host core forever.
 func (m *Manager) CreateVM(ctx context.Context, name string, cfg Config) error {
 	qname, err := m.qualifiedName(name)
 	if err != nil {
@@ -338,6 +340,14 @@ func (m *Manager) CreateVM(ctx context.Context, name string, cfg Config) error {
 		"bhyve",
 		"-c", strconv.Itoa(cfg.CPUs),
 		"-m", fmt.Sprintf("%dM", cfg.MemoryMB),
+		// -H: yield the vCPU thread's timeslice whenever the guest
+		// executes HLT while idle. Without it, a VM's vCPU thread pins
+		// a full host core near 100% even once the guest is genuinely
+		// idle post-boot - confirmed live during the ADR-0042
+		// echo-loop investigation (see that ADR's own "Separately
+		// noted, not fixed" section). Purely a host CPU-accounting
+		// fix - doesn't change guest-visible behavior.
+		"-H",
 		"-s", "0,hostbridge",
 	}
 	if cfg.DiskPath != "" {

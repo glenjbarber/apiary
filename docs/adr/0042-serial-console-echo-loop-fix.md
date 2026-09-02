@@ -156,9 +156,15 @@ previous unbounded newline flood. A literal SSH login wasn't attempted
 piece of the previously-established "real, working boot" bar was
 directly confirmed.
 
-Separately noted, not fixed as part of this ADR: `bhyve` is invoked
-with no `-H` (yield-the-vCPU-thread-on-guest-HLT) flag anywhere in
-`internal/bhyve`, so `top` continued showing the vCPU thread near 100%
-even after the guest was genuinely idle post-boot - a real, minor,
-unrelated tuning gap every VM this project creates already has,
-independent of this bug.
+Separately noted during this investigation (unrelated to the echo-loop
+bug itself, but fixed in the same pass once flagged): `bhyve` was
+invoked with no `-H` (yield-the-vCPU-thread-on-guest-HLT) flag anywhere
+in `internal/bhyve`, so `top` kept showing a VM's vCPU thread near 100%
+even once the guest was genuinely idle post-boot - a real, minor tuning
+gap every VM this project created already had, independent of this
+bug. Fixed by adding `-H` to `CreateVM`'s bhyve args (a single,
+purely-additive flag). Live-verified on `apiverse`: recreating the
+identical test VM, the `bhyve` process settled to 1.46% CPU once idle
+post-boot, down from ~100% before the flag was added - cloud-init
+completing identically either way, confirming the flag has no
+guest-visible effect, only host CPU accounting.
