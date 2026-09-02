@@ -689,6 +689,35 @@ func (f *fakeISOResolver) IsISO9660(name string) (bool, error) {
 	return !f.rawDisk[name], nil
 }
 
+// TestReconciler_RunOnce_FlatBridgeVMStillGetsMACAddress confirms a
+// VM with no NetworkID still passes its (FSM-derived, see
+// internal/raft's applyCreateVM) MACAddress through to bhyve.Config -
+// previously this was only wired for network-attached VMs, leaving a
+// flat-bridge VM's MAC entirely up to bhyve's own random default,
+// which made a static DHCP reservation on an operator's own router
+// impossible to set up ahead of time.
+func TestReconciler_RunOnce_FlatBridgeVMStillGetsMACAddress(t *testing.T) {
+	raft := &fakeRaftClient{resp: &internalpb.ListVMsResponse{
+		Vms: []*internalpb.VMDefinition{{Id: "vm-1", NodeId: "node-a", MacAddress: "02:aa:bb:cc:dd:ee"}},
+	}}
+	zfs := newFakeDatasetManager()
+	zfs.mountpointFor["vm-1"] = t.TempDir()
+	vms := newFakeVMManager()
+
+	r := &Reconciler{Raft: raft, ZFS: zfs, Bhyve: vms, Bridge: "bridge0", LocalNodeID: "node-a", BootROM: "/fw/UEFI.fd"}
+	if err := r.RunOnce(context.Background()); err != nil {
+		t.Fatalf("RunOnce() error: %v", err)
+	}
+
+	cfg := vms.lastCfg["vm-1"]
+	if cfg.Bridge != "bridge0" {
+		t.Errorf("cfg.Bridge = %q, want bridge0 (the flat bridge, no NetworkID involved)", cfg.Bridge)
+	}
+	if cfg.MACAddress != "02:aa:bb:cc:dd:ee" {
+		t.Errorf("cfg.MACAddress = %q, want 02:aa:bb:cc:dd:ee", cfg.MACAddress)
+	}
+}
+
 func TestReconciler_RunOnce_AttachesResolvedISOAndBridge(t *testing.T) {
 	raft := &fakeRaftClient{resp: &internalpb.ListVMsResponse{
 		Vms: []*internalpb.VMDefinition{{Id: "vm-1", NodeId: "node-a", IsoName: "debian.iso"}},

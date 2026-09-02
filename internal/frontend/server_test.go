@@ -336,6 +336,28 @@ func TestServer_VMsPage(t *testing.T) {
 	}
 }
 
+// TestServer_VMsPage_ShowsMACAddress confirms the VM table actually
+// renders a VM's MAC address - previously it was populated in vmView
+// (fromRPCVM) but never rendered anywhere in the UI, so there was no
+// way for an operator to read it off to set up a static DHCP
+// reservation on their own router (every VM now gets a real, derived
+// MAC address regardless of networking mode - see internal/raft's
+// applyCreateVM and ADR-0044).
+func TestServer_VMsPage_ShowsMACAddress(t *testing.T) {
+	client := &fakeClient{listResp: &rpcpb.ListVMsResponse{
+		Vms: []*rpcpb.VMDefinition{{Id: "vm-1", Name: "web-1", MacAddress: "02:aa:bb:cc:dd:ee"}},
+	}}
+	s := newTestServer(t, client)
+
+	req := httptest.NewRequest(http.MethodGet, "/vms", nil)
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, req)
+
+	if !strings.Contains(rec.Body.String(), "02:aa:bb:cc:dd:ee") {
+		t.Errorf("VMs page missing MAC address, got: %s", rec.Body.String())
+	}
+}
+
 // TestServer_ClusterOverviewPage_IsDefaultLandingPage checks the
 // lightweight, basic-status-per-node page ("/") - the verbose,
 // full-detail equivalent for one selected node lives on "/host/{id}"

@@ -367,6 +367,46 @@ func TestFSM_Apply_CreateVMOnNetworkAssignsIPAndMAC(t *testing.T) {
 	}
 }
 
+// TestFSM_Apply_CreateVMWithoutNetworkStillGetsMAC confirms a
+// flat-bridge VM (no network_id) still gets a real, derived MAC address
+// - previously only a network-attached VM did, leaving a flat-bridge
+// VM with whatever random MAC bhyve's own virtio-net device generated,
+// which made it impossible for an operator to set up a static DHCP
+// reservation on their own router ahead of time.
+func TestFSM_Apply_CreateVMWithoutNetworkStillGetsMAC(t *testing.T) {
+	fsm := NewFSM()
+
+	result := fsm.Apply(&raft.Log{Index: 1, Data: mustMarshalCommand(t, createVMCmd("vm-1", "web-1"))})
+
+	applyResult := result.(*FSMApplyResult)
+	if applyResult.Error != "" {
+		t.Fatalf("Error = %q, want empty", applyResult.Error)
+	}
+	if applyResult.VM.GetMacAddress() == "" {
+		t.Errorf("MacAddress = empty, want a derived address even without a network_id")
+	}
+	if applyResult.VM.GetIpAddress() != "" {
+		t.Errorf("IpAddress = %q, want empty - no network_id means no Apiary-managed IP allocation", applyResult.VM.GetIpAddress())
+	}
+}
+
+// TestFSM_Apply_CreateVMWithoutNetworkMACIsDeterministic mirrors
+// TestFSM_Apply_CreateVMOnNetworkIsDeterministic for the flat-bridge
+// case - the same id must always derive the same MAC, independent of
+// FSM instance/networking mode, since an operator's DHCP reservation
+// depends on it never changing.
+func TestFSM_Apply_CreateVMWithoutNetworkMACIsDeterministic(t *testing.T) {
+	fsm1 := NewFSM()
+	r1 := fsm1.Apply(&raft.Log{Index: 1, Data: mustMarshalCommand(t, createVMCmd("vm-1", "web-1"))}).(*FSMApplyResult)
+
+	fsm2 := NewFSM()
+	r2 := fsm2.Apply(&raft.Log{Index: 1, Data: mustMarshalCommand(t, createVMCmd("vm-1", "web-1"))}).(*FSMApplyResult)
+
+	if r1.VM.GetMacAddress() != r2.VM.GetMacAddress() {
+		t.Errorf("two independent FSMs derived different MACs for the same VM id: %q vs %q", r1.VM.GetMacAddress(), r2.VM.GetMacAddress())
+	}
+}
+
 func TestFSM_Apply_CreateVMOnNetworkIsDeterministic(t *testing.T) {
 	fsm := NewFSM()
 	fsm.Apply(&raft.Log{Index: 1, Data: mustMarshalCommand(t, createNetworkCmd("net-1", "prod", "10.60.0.0/24"))})

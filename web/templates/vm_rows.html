@@ -21,6 +21,7 @@
   <td>{{.NodeID}}</td>
   <td><span class="badge {{.Phase}}"{{if eq .Phase "error"}} title="{{.PhaseError}}"{{end}}>{{.Phase}}</span>{{if .PhaseError}}<div class="error">{{.PhaseError}}</div>{{end}}</td>
   <td>{{if .IPAddress}}{{.IPAddress}}{{end}}</td>
+  <td><code>{{.MACAddress}}</code></td>
   <td>{{if .ReplicaNodeID}}{{.ReplicaNodeID}}{{else}}<em>none</em>{{end}}</td>
   <td><div class="actions">
     <a href="/vms/{{.ID}}/console">Console</a>
@@ -29,6 +30,6 @@
   </div></td>
 </tr>
 {{else}}
-  {{if not .Error}}<tr><td colspan="9"><em>No VMs</em></td></tr>{{end}}
+  {{if not .Error}}<tr><td colspan="10"><em>No VMs</em></td></tr>{{end}}
 {{end}}
 {{end}}

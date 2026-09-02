@@ -122,6 +122,16 @@ func (f *FSM) applyCreateVM(index uint64, vm *internalpb.VMDefinition) *FSMApply
 		return &FSMApplyResult{Index: index, Error: fmt.Sprintf("CreateVM: id %q already exists", vm.GetId())}
 	}
 
+	vm = proto.Clone(vm).(*internalpb.VMDefinition)
+	// MacAddress is derived for every VM, not just ones naming a
+	// NetworkDefinition - a flat-bridge VM (no network_id) previously
+	// got whatever random MAC bhyve's own virtio-net device generated,
+	// making it impossible for an operator to set up a static DHCP
+	// reservation on their own router ahead of time. deriveMAC is a
+	// pure function of the VM's own id, so this costs nothing and is
+	// always safe to compute regardless of networking mode.
+	vm.MacAddress = deriveMAC(vm.GetId())
+
 	if vm.GetNetworkId() != "" {
 		network, ok := f.networks[vm.GetNetworkId()]
 		if !ok {
@@ -131,9 +141,7 @@ func (f *FSM) applyCreateVM(index uint64, vm *internalpb.VMDefinition) *FSMApply
 		if err != nil {
 			return &FSMApplyResult{Index: index, Error: fmt.Sprintf("CreateVM: %v", err)}
 		}
-		vm = proto.Clone(vm).(*internalpb.VMDefinition)
 		vm.IpAddress = ip
-		vm.MacAddress = deriveMAC(vm.GetId())
 	}
 
 	f.vms[vm.GetId()] = vm

@@ -837,7 +837,13 @@ func (r *Reconciler) ensureVM(ctx context.Context, vm VMPlacement, networks map[
 	}
 
 	bridge := r.Bridge
-	var macAddress string
+	// MACAddress is always set now (the FSM derives one for every VM,
+	// not just network-attached ones - see fsm.go's applyCreateVM), so
+	// even a flat-bridge VM gets a real, stable, predictable MAC an
+	// operator can hand to their own router's DHCP reservation - not
+	// gated behind NetworkID like the bridge/network provisioning below
+	// legitimately still is.
+	macAddress := vm.MACAddress
 	if vm.NetworkID != "" {
 		if r.VLAN == nil {
 			return fmt.Errorf("VM names network %q but no VLAN support is configured on this node", vm.NetworkID)
@@ -851,7 +857,6 @@ func (r *Reconciler) ensureVM(ctx context.Context, vm VMPlacement, networks map[
 			return fmt.Errorf("provisioning network %q: %w", vm.NetworkID, err)
 		}
 		bridge = networkBridge
-		macAddress = vm.MACAddress
 	}
 
 	if err := r.Bhyve.CreateVM(ctx, vm.ID, bhyve.Config{
