@@ -25,6 +25,15 @@ import (
 
 const socketPerm = 0o660
 
+// resetConfirmPhrase is the exact value -reset must be given to actually
+// wipe raft state (Tier 1, docs/adr/0038-tiered-reset-cli.md). A bare
+// boolean flag would be too easy to leave sitting in rc.conf's
+// apiary_raftd_args by accident - every service here runs under
+// daemon(8)'s -r auto-restart supervisor, so an accidentally-persistent
+// reset flag would wipe the cluster on every single respawn. Anything
+// other than an exact match is rejected with no action taken.
+const resetConfirmPhrase = "yes-wipe-raft-state"
+
 func main() {
 	if err := run(); err != nil {
 		log.Fatalf("raftd: %v", err)
@@ -38,7 +47,12 @@ func run() error {
 	bindAddr := flag.String("raft-bind", raftnode.DefaultBindAddr, "loopback TCP address for the raft transport")
 	joinSocket := flag.String("join", "", "internal socket path of an existing cluster member to join through (leave empty to bootstrap a new single-node cluster)")
 	internalToken := flag.String("internal-token", "", "shared secret required from every RaftInternal caller (managerd, or a peer raftd during -join); leave empty to rely on the socket's own file permissions alone, as before (see ADR-0023)")
+	reset := flag.String("reset", "", fmt.Sprintf("Tier 1 reset (ADR-0038): wipe this node's own raft state and exit, rather than starting the server - real VMs/jails/disks are untouched, just orphaned from tracking until re-registered. Must be exactly %q or nothing happens; the next normal (no -reset) start bootstraps fresh automatically against the now-empty -data-dir", resetConfirmPhrase))
 	flag.Parse()
+
+	if *reset != "" {
+		return resetDataDir(*reset, *dataDir)
+	}
 
 	cfg := raftnode.Config{
 		NodeID:   *nodeID,
@@ -132,6 +146,35 @@ func run() error {
 	}
 	_ = os.Remove(*socketPath)
 
+	return nil
+}
+
+// resetDataDir implements Tier 1 (docs/adr/0038-tiered-reset-cli.md): a
+// one-shot mode run instead of the normal server, moving dataDir aside
+// to a timestamped backup path rather than deleting it outright - cheap
+// insurance matching the manual practice this feature replaces, not a
+// full undo system. phrase must exactly equal resetConfirmPhrase or
+// nothing happens at all (not even a partial rename attempt).
+func resetDataDir(phrase, dataDir string) error {
+	if phrase != resetConfirmPhrase {
+		return fmt.Errorf("-reset value %q does not match the required confirmation phrase %q - nothing was done", phrase, resetConfirmPhrase)
+	}
+
+	backup := fmt.Sprintf("%s.reset-backup-%d", dataDir, time.Now().Unix())
+	if _, err := os.Stat(dataDir); err == nil {
+		if err := os.Rename(dataDir, backup); err != nil {
+			return fmt.Errorf("moving %s aside to %s: %w", dataDir, backup, err)
+		}
+		log.Printf("raftd: moved existing raft state from %s to %s", dataDir, backup)
+	} else if !os.IsNotExist(err) {
+		return fmt.Errorf("checking %s: %w", dataDir, err)
+	}
+
+	if err := os.MkdirAll(dataDir, 0o700); err != nil {
+		return fmt.Errorf("recreating empty %s: %w", dataDir, err)
+	}
+
+	log.Printf("raftd: reset complete - %s is now empty; the next normal start will bootstrap a fresh single-node cluster", dataDir)
 	return nil
 }
 

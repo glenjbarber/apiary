@@ -10,6 +10,7 @@ import (
 	"log"
 	"net"
 	"os"
+	"os/exec"
 	"os/signal"
 	"strings"
 	"syscall"
@@ -27,9 +28,20 @@ import (
 	"github.com/glenjbarber/apiary/internal/jail"
 	"github.com/glenjbarber/apiary/internal/manager"
 	"github.com/glenjbarber/apiary/internal/pf"
+	"github.com/glenjbarber/apiary/internal/resetutil"
 	"github.com/glenjbarber/apiary/internal/ufsmount"
 	"github.com/glenjbarber/apiary/internal/vlan"
 	"github.com/glenjbarber/apiary/internal/zfs"
+)
+
+// Confirmation phrases for the one-shot reset modes (ADR-0038). Bare
+// boolean flags would be too easy to leave sitting in rc.conf's
+// apiary_managerd_args by accident - every service here runs under
+// daemon(8)'s -r auto-restart supervisor, so an accidentally-persistent
+// reset flag would wipe resources on every single respawn.
+const (
+	resetManagedConfirmPhrase = "yes-wipe-managed-resources"
+	factoryResetConfirmPhrase = "yes-nuke-everything"
 )
 
 func main() {
@@ -62,7 +74,15 @@ func run() error {
 	peerTLSHostnameMap := flag.String("peer-tls-hostname-map", "", "comma-separated ip=hostname pairs used to verify a peer's TLS certificate, since a raft leader_hint is always a bare address and a real cert is never issued for a bare IP (e.g. \"10.50.0.11=freebsd-apiary.apiary.work,10.50.0.12=freebsd-apiary2.apiary.work\"); only consulted when -peer-tls is set")
 	tlsCert := flag.String("tls-cert", "", "PEM certificate file for managerd's external gRPC API; leave unset (with -tls-key) to serve plaintext, as before")
 	tlsKey := flag.String("tls-key", "", "PEM private key file matching -tls-cert")
+	resetManaged := flag.String("reset-managed", "", fmt.Sprintf("Tier 2 reset (ADR-0038): destroy every real VM/jail/dataset/ISO this node's own -zfs-base/-jail-prefix/-bhyve-prefix/-iso-dir manage, then exit, rather than starting the server. Never touches anything outside that scope - safe to run without double-checking. Must be exactly %q or nothing happens", resetManagedConfirmPhrase))
+	factoryReset := flag.String("factory-reset", "", fmt.Sprintf("Tier 3 reset (ADR-0038): runs the same destruction as -reset-managed, then also destroys anything named in -factory-reset-extra-jails/-factory-reset-extra-datasets regardless of scope, then exits. Must be exactly %q or nothing happens", factoryResetConfirmPhrase))
+	factoryResetExtraJails := flag.String("factory-reset-extra-jails", "", "comma-separated jail names to destroy for real during -factory-reset, outside the normal -jail-prefix scope (e.g. a jail you want gone that Apiary itself didn't create) - nothing here is ever auto-discovered, only what's named")
+	factoryResetExtraDatasets := flag.String("factory-reset-extra-datasets", "", "comma-separated ZFS dataset/pool names to destroy recursively during -factory-reset, outside the normal -zfs-base scope - nothing here is ever auto-discovered, only what's named")
 	flag.Parse()
+
+	if *resetManaged != "" || *factoryReset != "" {
+		return runReset(*resetManaged, *factoryReset, *factoryResetExtraJails, *factoryResetExtraDatasets, *zfsBase, *jailPrefix, *bhyvePrefix, *isoDir)
+	}
 
 	id := *nodeID
 	if id == "" {
@@ -276,4 +296,97 @@ func reconcileOnce(ctx context.Context, reconciler *cluster.Reconciler) {
 	if err := reconciler.RunOnce(ctx); err != nil {
 		log.Printf("managerd: reconcile: %v", err)
 	}
+}
+
+// isoManagerAdapter satisfies resetutil.ISOManager against a real
+// *isostore.Manager, whose List() returns []isostore.Info rather than
+// []resetutil.ISOInfo - resetutil deliberately doesn't import isostore
+// just for this one struct shape (see its own doc comment).
+type isoManagerAdapter struct{ m *isostore.Manager }
+
+func (a isoManagerAdapter) List() ([]resetutil.ISOInfo, error) {
+	infos, err := a.m.List()
+	if err != nil {
+		return nil, err
+	}
+	out := make([]resetutil.ISOInfo, len(infos))
+	for i, info := range infos {
+		out[i] = resetutil.ISOInfo{Name: info.Name}
+	}
+	return out, nil
+}
+
+func (a isoManagerAdapter) Delete(name string) error { return a.m.Delete(name) }
+
+// runReset implements managerd's one-shot -reset-managed/-factory-reset
+// modes (ADR-0038, Tiers 2 and 3) - run instead of the normal server,
+// with no raftd/raft dependency at all, since the whole point is
+// cleaning up real resources whether or not raft still tracks them.
+// resetManaged and factoryReset are each checked against their own
+// confirmation phrase independently; either (or both) may be set, but a
+// mismatched non-empty value is always a hard error with nothing done,
+// never a silent no-op.
+func runReset(resetManaged, factoryReset, extraJails, extraDatasets, zfsBase, jailPrefix, bhyvePrefix, isoDir string) error {
+	doManaged := false
+	if resetManaged != "" {
+		if resetManaged != resetManagedConfirmPhrase {
+			return fmt.Errorf("-reset-managed value %q does not match the required confirmation phrase %q - nothing was done", resetManaged, resetManagedConfirmPhrase)
+		}
+		doManaged = true
+	}
+	doFactory := false
+	if factoryReset != "" {
+		if factoryReset != factoryResetConfirmPhrase {
+			return fmt.Errorf("-factory-reset value %q does not match the required confirmation phrase %q - nothing was done", factoryReset, factoryResetConfirmPhrase)
+		}
+		doFactory = true
+		doManaged = true // Tier 3 always includes Tier 2's own destruction first.
+	}
+	if !doManaged {
+		return nil
+	}
+
+	ctx := context.Background()
+	res := resetutil.ManagedResources(ctx, jail.New(jailPrefix), bhyve.New(bhyvePrefix), zfs.New(zfsBase), isoManagerAdapter{isostore.New(isoDir)})
+	log.Printf("managerd: reset-managed: removed %d jail(s) %v, destroyed %d VM(s) %v, destroyed %d dataset(s) %v, deleted %d ISO(s) %v",
+		len(res.JailsRemoved), res.JailsRemoved, len(res.VMsDestroyed), res.VMsDestroyed, len(res.DatasetsDestroyed), res.DatasetsDestroyed, len(res.ISOsDeleted), res.ISOsDeleted)
+	for _, err := range res.Errors {
+		log.Printf("managerd: reset-managed: %v", err)
+	}
+
+	if doFactory {
+		for _, name := range splitCommaList(extraJails) {
+			log.Printf("managerd: factory-reset: removing extra jail %q", name)
+			if out, err := exec.CommandContext(ctx, "jail", "-r", name).CombinedOutput(); err != nil {
+				log.Printf("managerd: factory-reset: removing jail %q: %v: %s", name, err, out)
+			}
+		}
+		for _, name := range splitCommaList(extraDatasets) {
+			log.Printf("managerd: factory-reset: destroying extra dataset/pool %q", name)
+			if out, err := exec.CommandContext(ctx, "zfs", "destroy", "-r", name).CombinedOutput(); err != nil {
+				log.Printf("managerd: factory-reset: destroying dataset %q: %v: %s", name, err, out)
+			}
+		}
+	}
+
+	if len(res.Errors) > 0 {
+		return fmt.Errorf("reset completed with %d error(s), see log above", len(res.Errors))
+	}
+	log.Printf("managerd: reset complete")
+	return nil
+}
+
+// splitCommaList splits a comma-separated flag value into non-empty
+// trimmed entries, returning nil for an empty input.
+func splitCommaList(s string) []string {
+	if s == "" {
+		return nil
+	}
+	var out []string
+	for _, part := range strings.Split(s, ",") {
+		if part = strings.TrimSpace(part); part != "" {
+			out = append(out, part)
+		}
+	}
+	return out
 }
