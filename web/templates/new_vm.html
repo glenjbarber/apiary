@@ -29,9 +29,15 @@
       </select>
     </label>
     <label>ISO
-      <select name="iso_name">
+      <select name="iso_name" class="image-picker">
         <option value="">(none)</option>
-        {{range .ISOs}}<option value="{{.Name}}">{{.Name}}</option>{{end}}
+        {{range .ClusterISOs}}<option value="{{.Name}}">{{.Name}}</option>{{end}}
+      </select>
+    </label>
+    <label>Base image (optional - a pre-built bootable disk, e.g. for cloud-init)
+      <select name="base_image_name" class="image-picker">
+        <option value="">(none)</option>
+        {{range .ClusterISOs}}<option value="{{.Name}}">{{.Name}}</option>{{end}}
       </select>
     </label>
     <label>Network
@@ -65,6 +71,34 @@
       tr.querySelector('.remove-firewall-rule').addEventListener('click', function() { rows.removeChild(tr); });
       rows.appendChild(tr);
     });
+  })();
+  </script>
+  <script>
+  (function() {
+    // missingByNode: {"image name": ["node ids missing it"]} - see
+    // isoMissingByNode (ADR-0041). Drives a "will be fetched from a
+    // peer" cue on the ISO/base-image pickers whenever the currently
+    // selected image isn't already on the currently selected node -
+    // internal/cluster's Reconciler fetches it automatically at
+    // provisioning time, so this is informational only, never blocking.
+    var missingByNode = {{isoMissingByNode .ClusterISOs}};
+    var nodeSelect = document.querySelector('select[name="node_id"]');
+    var pickers = document.querySelectorAll('select.image-picker');
+    if (!nodeSelect || pickers.length === 0) return;
+
+    function refresh() {
+      var node = nodeSelect.value;
+      pickers.forEach(function(picker) {
+        Array.prototype.forEach.call(picker.options, function(opt) {
+          if (!opt.value) return;
+          var missing = missingByNode[opt.value] || [];
+          var willFetch = missing.indexOf(node) !== -1;
+          opt.text = opt.value + (willFetch ? ' — will be fetched from a peer' : '');
+        });
+      });
+    }
+    nodeSelect.addEventListener('change', refresh);
+    refresh();
   })();
   </script>
 </body>

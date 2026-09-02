@@ -175,10 +175,6 @@ func (f *fakeClient) DeleteISO(context.Context, *rpcpb.DeleteISORequest, ...grpc
 	return &rpcpb.DeleteISOResponse{}, nil
 }
 
-func (f *fakeClient) ReplicateISO(context.Context, *rpcpb.ReplicateISORequest, ...grpc.CallOption) (*rpcpb.ReplicateISOResponse, error) {
-	return &rpcpb.ReplicateISOResponse{}, nil
-}
-
 func (f *fakeClient) PushISOTo(context.Context, *rpcpb.PushISOToRequest, ...grpc.CallOption) (*rpcpb.PushISOToResponse, error) {
 	return &rpcpb.PushISOToResponse{}, nil
 }

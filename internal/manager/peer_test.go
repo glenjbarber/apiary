@@ -71,8 +71,7 @@ type fakePeerServer struct {
 	pushISOToReq  *rpcpb.PushISOToRequest
 	pushISOToResp *rpcpb.PushISOToResponse
 
-	replicateISOReq  *rpcpb.ReplicateISORequest
-	replicateISOResp *rpcpb.ReplicateISOResponse
+	listISOsResp *rpcpb.ListISOsResponse
 }
 
 func (f *fakePeerServer) UploadISO(stream rpcpb.ManagerService_UploadISOServer) error {
@@ -103,12 +102,11 @@ func (f *fakePeerServer) PushISOTo(_ context.Context, req *rpcpb.PushISOToReques
 	return &rpcpb.PushISOToResponse{}, nil
 }
 
-func (f *fakePeerServer) ReplicateISO(_ context.Context, req *rpcpb.ReplicateISORequest) (*rpcpb.ReplicateISOResponse, error) {
-	f.replicateISOReq = req
-	if f.replicateISOResp != nil {
-		return f.replicateISOResp, nil
+func (f *fakePeerServer) ListISOs(context.Context, *rpcpb.ListISOsRequest) (*rpcpb.ListISOsResponse, error) {
+	if f.listISOsResp != nil {
+		return f.listISOsResp, nil
 	}
-	return &rpcpb.ReplicateISOResponse{}, nil
+	return &rpcpb.ListISOsResponse{}, nil
 }
 
 func (f *fakePeerServer) ListAPIKeys(context.Context, *rpcpb.ListAPIKeysRequest) (*rpcpb.ListAPIKeysResponse, error) {
@@ -686,11 +684,12 @@ func TestPeerReporter_MigrateJail_SendsCorrectRequest(t *testing.T) {
 	}
 }
 
-// The following tests cover ADR-0040's copy-on-demand ISO replication:
+// The following tests cover on-demand image fetching (ADR-0041,
+// superseding ADR-0040's browser-triggered ReplicateISO):
 // PeerReporter.UploadISO (the actual chunked transfer, used by
 // PushISOTo's own handler), RequestISOPush (calls PushISOTo on a
-// peer), and ReplicateISO (forwards the whole external RPC to a peer,
-// the same HostStats-style forwarding pattern).
+// peer), and ListISONames (used by internal/cluster's Reconciler to
+// find which peer, if any, already has an image it's missing locally).
 
 func TestPeerReporter_UploadISO_SendsMetadataThenChunksInOrder(t *testing.T) {
 	fake := &fakePeerServer{}
@@ -742,19 +741,18 @@ func TestPeerReporter_RequestISOPush_ApplicationErrorIsReturned(t *testing.T) {
 	}
 }
 
-func TestPeerReporter_ReplicateISO_SendsCorrectRequestAndReturnsResponse(t *testing.T) {
-	fake := &fakePeerServer{replicateISOResp: &rpcpb.ReplicateISOResponse{Name: "test.iso", Sha256: "deadbeef"}}
+func TestPeerReporter_ListISONames_ExtractsNamesFromListISOs(t *testing.T) {
+	fake := &fakePeerServer{listISOsResp: &rpcpb.ListISOsResponse{Isos: []*rpcpb.ISOInfo{
+		{Name: "a.iso"}, {Name: "b.iso"},
+	}}}
 	addr := newTestPeerServer(t, fake)
 	p := NewPeerReporter("", false, nil)
 
-	resp, err := p.ReplicateISO(context.Background(), addr, "test.iso", "node-a")
+	names, err := p.ListISONames(context.Background(), addr)
 	if err != nil {
-		t.Fatalf("ReplicateISO() error: %v", err)
+		t.Fatalf("ListISONames() error: %v", err)
 	}
-	if fake.replicateISOReq.GetName() != "test.iso" || fake.replicateISOReq.GetSourceNodeId() != "node-a" {
-		t.Errorf("received request = %+v, want name=test.iso source_node_id=node-a", fake.replicateISOReq)
-	}
-	if resp.GetSha256() != "deadbeef" {
-		t.Errorf("ReplicateISO() = %+v, want sha256=deadbeef", resp)
+	if len(names) != 2 || names[0] != "a.iso" || names[1] != "b.iso" {
+		t.Errorf("ListISONames() = %v, want [a.iso b.iso]", names)
 	}
 }

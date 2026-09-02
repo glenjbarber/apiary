@@ -705,6 +705,34 @@ func phaseFromString(p string) internalpb.VMPhase {
 	}
 }
 
+// resolveLocalImagePath resolves name (an ISOName or BaseImageName) to
+// a local path via r.ISOs, automatically fetching it from whichever
+// known peer already has it (ADR-0041) if this node's own isostore
+// doesn't have it yet, rather than failing outright the way a caller
+// used to have to work around with a manual, browser-triggered copy
+// (ADR-0040). r.ISOs must be non-nil - callers already check that
+// before naming an image at all.
+func (r *Reconciler) resolveLocalImagePath(ctx context.Context, name string) (string, error) {
+	path, ok, err := r.ISOs.Path(name)
+	if err != nil {
+		return "", err
+	}
+	if ok {
+		return path, nil
+	}
+	if err := r.fetchImageFromPeer(ctx, name); err != nil {
+		return "", err
+	}
+	path, ok, err = r.ISOs.Path(name)
+	if err != nil {
+		return "", fmt.Errorf("resolving after fetch: %w", err)
+	}
+	if !ok {
+		return "", fmt.Errorf("still not found locally after a reported-successful fetch from a peer")
+	}
+	return path, nil
+}
+
 // ensureVM ensures vm's disk exists - a plain dataset-backed file, or,
 // if ReplicaNodeID is set, a HAST-replicated device instead (see
 // hastDevicePaths/ADR-0026; no dataset is created in that case, there's
@@ -763,12 +791,9 @@ func (r *Reconciler) ensureVM(ctx context.Context, vm VMPlacement, networks map[
 			if r.ISOs == nil {
 				return fmt.Errorf("VM names base image %q but no ISO store is configured on this node", vm.BaseImageName)
 			}
-			path, ok, err := r.ISOs.Path(vm.BaseImageName)
+			path, err := r.resolveLocalImagePath(ctx, vm.BaseImageName)
 			if err != nil {
 				return fmt.Errorf("resolving base image %q: %w", vm.BaseImageName, err)
-			}
-			if !ok {
-				return fmt.Errorf("base image %q not found", vm.BaseImageName)
 			}
 			baseImagePath = path
 		}
@@ -792,12 +817,9 @@ func (r *Reconciler) ensureVM(ctx context.Context, vm VMPlacement, networks map[
 		if r.ISOs == nil {
 			return fmt.Errorf("VM names ISO %q but no ISO store is configured on this node", vm.ISOName)
 		}
-		path, ok, err := r.ISOs.Path(vm.ISOName)
+		path, err := r.resolveLocalImagePath(ctx, vm.ISOName)
 		if err != nil {
 			return fmt.Errorf("resolving ISO %q: %w", vm.ISOName, err)
-		}
-		if !ok {
-			return fmt.Errorf("ISO %q not found", vm.ISOName)
 		}
 		isGenuineISO, err := r.ISOs.IsISO9660(vm.ISOName)
 		if err != nil {

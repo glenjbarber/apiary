@@ -14,6 +14,7 @@ package cluster
 
 import (
 	"context"
+	"fmt"
 	"net"
 )
 
@@ -29,6 +30,20 @@ type peerReporter interface {
 	ReportVMTeardownComplete(ctx context.Context, leaderAddr, id string) error
 	ReportJailPhase(ctx context.Context, leaderAddr, id, phase, phaseError string) error
 	ReportJailTeardownComplete(ctx context.Context, leaderAddr, id string) error
+
+	// ListISONames/RequestISOPush implement on-demand image fetching
+	// (ADR-0041): when a VM/jail names an ISO/base image this node's
+	// own isostore doesn't have yet, the reconciler asks every other
+	// known node's ListISONames whether it has the file, then asks the
+	// first one that does to push it here via RequestISOPush - reusing
+	// exactly the same peer-to-peer UploadISO/PushISOTo mechanism
+	// ADR-0040 originally built for a manual, browser-triggered copy,
+	// just triggered automatically by the reconciler instead of a
+	// button click. Names, not full rpcpb.ISOInfo, for the same
+	// decoupling-from-wire-types reason ReportVMPhase's plain-string
+	// phase already establishes.
+	ListISONames(ctx context.Context, addr string) ([]string, error)
+	RequestISOPush(ctx context.Context, addr, name, targetNodeID string) error
 }
 
 // defaultPeerManagerdPort is used when Reconciler.PeerManagerdPort is
@@ -61,4 +76,45 @@ func (r *Reconciler) resolvePeerManagerdAddr(leaderHint string) string {
 		host = leaderHint
 	}
 	return net.JoinHostPort(host, r.peerManagerdPort())
+}
+
+// fetchImageFromPeer looks for name across every other known cluster
+// node (via resolvePeerAddresses, the same raft-membership-derived
+// address list hast.go's own HAST role resolution already reuses) and,
+// on the first node reporting it, asks that node to push it here
+// (ADR-0041) - the reconciler's own automatic counterpart to ADR-0040's
+// original browser-triggered copy, invoked when a VM/jail names an
+// ISO/base image this node's own isostore doesn't have yet. Returns an
+// error if Peers isn't configured, no peer reports having the file, or
+// the push itself fails; every unreachable/errored peer along the way
+// is simply skipped rather than aborting the whole search.
+func (r *Reconciler) fetchImageFromPeer(ctx context.Context, name string) error {
+	if r.Peers == nil {
+		return fmt.Errorf("image %q not found locally and no peer forwarding is configured on this node", name)
+	}
+	addrs, err := r.resolvePeerAddresses(ctx)
+	if err != nil {
+		return fmt.Errorf("resolving peer addresses: %w", err)
+	}
+	port := r.peerManagerdPort()
+	for nodeID, host := range addrs {
+		if nodeID == r.LocalNodeID {
+			continue
+		}
+		addr := net.JoinHostPort(host, port)
+		names, err := r.Peers.ListISONames(ctx, addr)
+		if err != nil {
+			continue
+		}
+		for _, n := range names {
+			if n != name {
+				continue
+			}
+			if err := r.Peers.RequestISOPush(ctx, addr, name, r.LocalNodeID); err != nil {
+				return fmt.Errorf("fetching %q from %s: %w", name, nodeID, err)
+			}
+			return nil
+		}
+	}
+	return fmt.Errorf("image %q not found on any known cluster node", name)
 }

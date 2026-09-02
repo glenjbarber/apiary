@@ -2,7 +2,8 @@ package frontend
 
 import (
 	"context"
-	"fmt"
+	"encoding/json"
+	"html/template"
 	"net/http"
 	"sort"
 	"sync"
@@ -10,11 +11,14 @@ import (
 	rpcpb "github.com/glenjbarber/apiary/api/rpc"
 )
 
-// isoRowView is one row of the Images page's cluster-wide table
-// (ADR-0040) - unlike the plain isoView (still used by the upload/
-// delete result panel, a purely local operation), this tracks which
-// known nodes actually have the file and which don't, driving the
-// per-row "Copy to <node>"/"Copy to all missing" actions.
+// isoRowView is the cluster-wide view of one stored image (ADR-0041,
+// superseding ADR-0040's manual per-node copy UI) - which known nodes
+// already have it (PresentNodes) and which don't (MissingNodes). Used
+// by the create-VM/create-jail forms' image pickers to show a "will be
+// fetched from a peer" cue for whichever node the operator selects,
+// since internal/cluster's Reconciler now fetches a missing image
+// automatically at provisioning time rather than requiring a manual
+// copy first.
 type isoRowView struct {
 	Name         string
 	SizeBytes    uint64
@@ -30,8 +34,7 @@ type isoRowView struct {
 // row per distinct file. A node that fails to answer at all is simply
 // treated as not having anything - the same fail-soft posture
 // currentVMs/currentISOs already follow, since a transient fetch
-// failure shouldn't be indistinguishable from "click here to trigger a
-// pointless self-copy".
+// failure shouldn't block the create-VM form from rendering at all.
 func (s *Server) currentClusterISOs(r *http.Request) ([]isoRowView, string) {
 	statusResp, err := s.client.Status(r.Context(), &rpcpb.StatusRequest{})
 	if err != nil {
@@ -95,6 +98,29 @@ func (s *Server) currentClusterISOs(r *http.Request) ([]isoRowView, string) {
 	return out, ""
 }
 
+// isoMissingByNode renders rows as a JS object literal mapping each
+// image's name to its MissingNodes list, e.g.
+// {"ubuntu.iso":["freebsd-apiary2"],"base.img":[]} - embedded directly
+// into the create-VM/create-jail forms so their own vanilla JS (no
+// server round-trip needed) can show a "will be fetched from a peer"
+// cue next to whichever image is missing from the currently-selected
+// Node ID, updating live as that selection changes.
+func isoMissingByNode(rows []isoRowView) (template.JS, error) {
+	m := make(map[string][]string, len(rows))
+	for _, row := range rows {
+		missing := row.MissingNodes
+		if missing == nil {
+			missing = []string{}
+		}
+		m[row.Name] = missing
+	}
+	b, err := json.Marshal(m)
+	if err != nil {
+		return "", err
+	}
+	return template.JS(b), nil
+}
+
 // nodeListISOs fetches nodeID's ListISOs: directly through s.client if
 // nodeID is this frontend's own colocated node (or peers isn't
 // configured at all), otherwise by dialing that node's managerd
@@ -105,131 +131,4 @@ func (s *Server) nodeListISOs(ctx context.Context, nodeID, localNodeID string) (
 		return s.client.ListISOs(ctx, &rpcpb.ListISOsRequest{})
 	}
 	return s.peers.ListISOs(ctx, s.peerAddr(nodeID))
-}
-
-// replicateISOTo dispatches a ReplicateISO call to targetNodeID: locally
-// via s.client if it's this frontend's own colocated node, otherwise via
-// s.peers - the same local-vs-peer dispatch nodeListISOs/nodeHostStats
-// already use. sourceNodeID is any node already confirmed (by the
-// caller) to have the file.
-func (s *Server) replicateISOTo(ctx context.Context, targetNodeID, localNodeID, name, sourceNodeID string) (*rpcpb.ReplicateISOResponse, error) {
-	req := &rpcpb.ReplicateISORequest{Name: name, SourceNodeId: sourceNodeID}
-	if s.peers == nil || targetNodeID == localNodeID {
-		return s.client.ReplicateISO(ctx, req)
-	}
-	return s.peers.ReplicateISO(ctx, s.peerAddr(targetNodeID), name, sourceNodeID)
-}
-
-// handleReplicateISO handles "Copy to <node>" (ADR-0040): copies name
-// onto target_node_id from whichever node the row already confirmed has
-// it. Synchronous, like the upload form itself - the response doesn't
-// come back until the copy actually finishes or fails.
-func (s *Server) handleReplicateISO(w http.ResponseWriter, r *http.Request) {
-	name := r.PathValue("name")
-	target := r.PathValue("target_node_id")
-
-	rows, errMsg := s.currentClusterISOs(r)
-	if errMsg != "" {
-		s.renderClusterISOResult(w, r, fmt.Sprintf("refreshing cluster image list: %s", errMsg))
-		return
-	}
-	var source string
-	for _, row := range rows {
-		if row.Name == name && len(row.PresentNodes) > 0 {
-			source = row.PresentNodes[0]
-			break
-		}
-	}
-	if source == "" {
-		s.renderClusterISOResult(w, r, fmt.Sprintf("%q is not present on any known node", name))
-		return
-	}
-
-	localNodeID := s.localNodeIDOrEmpty(r)
-	resp, err := s.replicateISOTo(r.Context(), target, localNodeID, name, source)
-	if err != nil {
-		s.renderClusterISOResult(w, r, err.Error())
-		return
-	}
-	if resp.GetError() != "" {
-		s.renderClusterISOResult(w, r, resp.GetError())
-		return
-	}
-	s.renderClusterISOResult(w, r, "")
-}
-
-// handleReplicateISOAll handles "Copy to all missing" (ADR-0040): loops
-// handleReplicateISO's own per-target dispatch over every node this row
-// currently lacks the file on, so a multi-node gap is one click. One
-// target's failure doesn't stop the others - matching this project's
-// established best-effort-per-item convention (internal/hoststats,
-// internal/resetutil).
-func (s *Server) handleReplicateISOAll(w http.ResponseWriter, r *http.Request) {
-	name := r.PathValue("name")
-
-	rows, errMsg := s.currentClusterISOs(r)
-	if errMsg != "" {
-		s.renderClusterISOResult(w, r, fmt.Sprintf("refreshing cluster image list: %s", errMsg))
-		return
-	}
-	var source string
-	var missing []string
-	for _, row := range rows {
-		if row.Name == name {
-			if len(row.PresentNodes) > 0 {
-				source = row.PresentNodes[0]
-			}
-			missing = row.MissingNodes
-			break
-		}
-	}
-	if source == "" {
-		s.renderClusterISOResult(w, r, fmt.Sprintf("%q is not present on any known node", name))
-		return
-	}
-
-	localNodeID := s.localNodeIDOrEmpty(r)
-	var errs []string
-	for _, target := range missing {
-		resp, err := s.replicateISOTo(r.Context(), target, localNodeID, name, source)
-		if err != nil {
-			errs = append(errs, fmt.Sprintf("%s: %s", target, err.Error()))
-			continue
-		}
-		if resp.GetError() != "" {
-			errs = append(errs, fmt.Sprintf("%s: %s", target, resp.GetError()))
-		}
-	}
-	if len(errs) > 0 {
-		s.renderClusterISOResult(w, r, fmt.Sprintf("some copies failed: %v", errs))
-		return
-	}
-	s.renderClusterISOResult(w, r, "")
-}
-
-// localNodeIDOrEmpty fetches this frontend's own colocated node ID, "" on
-// failure - replicateISOTo's own nil-peers fallback still does the right
-// thing (always dispatches locally) even if this comes back empty.
-func (s *Server) localNodeIDOrEmpty(r *http.Request) string {
-	resp, err := s.client.Status(r.Context(), &rpcpb.StatusRequest{})
-	if err != nil {
-		return ""
-	}
-	return resp.GetManagerNodeId()
-}
-
-// renderClusterISOResult re-renders the Images page's cluster table
-// alongside a result message - mirroring renderISOPanelResult's own
-// combined-target pattern for the (separate, local-only) upload/delete
-// panel.
-func (s *Server) renderClusterISOResult(w http.ResponseWriter, r *http.Request, formErr string) {
-	rows, fetchErr := s.currentClusterISOs(r)
-	if fetchErr != "" {
-		if formErr == "" {
-			formErr = fetchErr
-		} else {
-			formErr += "; additionally failed to refresh list: " + fetchErr
-		}
-	}
-	s.render(w, "cluster_iso_panel", pageData{ClusterISOs: rows, ClusterISOFormError: formErr})
 }

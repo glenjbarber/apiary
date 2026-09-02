@@ -30,7 +30,6 @@ const (
 	ManagerService_UploadISO_FullMethodName                  = "/apiary.rpc.v1.ManagerService/UploadISO"
 	ManagerService_ListISOs_FullMethodName                   = "/apiary.rpc.v1.ManagerService/ListISOs"
 	ManagerService_DeleteISO_FullMethodName                  = "/apiary.rpc.v1.ManagerService/DeleteISO"
-	ManagerService_ReplicateISO_FullMethodName               = "/apiary.rpc.v1.ManagerService/ReplicateISO"
 	ManagerService_HostStats_FullMethodName                  = "/apiary.rpc.v1.ManagerService/HostStats"
 	ManagerService_GetVMConsole_FullMethodName               = "/apiary.rpc.v1.ManagerService/GetVMConsole"
 	ManagerService_GetVMSerialLog_FullMethodName             = "/apiary.rpc.v1.ManagerService/GetVMSerialLog"
@@ -118,14 +117,6 @@ type ManagerServiceClient interface {
 	UploadISO(ctx context.Context, opts ...grpc.CallOption) (grpc.ClientStreamingClient[UploadISORequest, UploadISOResponse], error)
 	ListISOs(ctx context.Context, in *ListISOsRequest, opts ...grpc.CallOption) (*ListISOsResponse, error)
 	DeleteISO(ctx context.Context, in *DeleteISORequest, opts ...grpc.CallOption) (*DeleteISOResponse, error)
-	// ReplicateISO copies an ISO this node doesn't have yet from
-	// source_node_id, instead of the caller re-uploading the whole file
-	// through the browser a second time (ADR-0040) - called on the node
-	// that should *end up* with the file. It works by asking the source
-	// node to push back to this one (see PushISOTo below), reusing
-	// UploadISO's existing client-streaming shape for the actual
-	// transfer rather than adding a new download direction.
-	ReplicateISO(ctx context.Context, in *ReplicateISORequest, opts ...grpc.CallOption) (*ReplicateISOResponse, error)
 	// HostStats reports a point-in-time snapshot of *this* node's own
 	// resource usage and hardware health - physical, per-node data like
 	// ISOs above, gathered locally by managerd (see internal/hoststats),
@@ -195,12 +186,14 @@ type ManagerServiceClient interface {
 	ReportVMTeardownComplete(ctx context.Context, in *ReportVMTeardownCompleteRequest, opts ...grpc.CallOption) (*ReportVMTeardownCompleteResponse, error)
 	ReportJailPhase(ctx context.Context, in *ReportJailPhaseRequest, opts ...grpc.CallOption) (*ReportJailPhaseResponse, error)
 	ReportJailTeardownComplete(ctx context.Context, in *ReportJailTeardownCompleteRequest, opts ...grpc.CallOption) (*ReportJailTeardownCompleteResponse, error)
-	// PushISOTo is ReplicateISO's own peer-to-peer half (ADR-0040): the
-	// *source* node's own managerd calls UploadISO against target_node_id
-	// itself, the same way a browser upload would, in response to being
-	// asked by ReplicateISO's caller. Peer-only, mirrors the Report*
-	// RPCs' own reasoning above exactly - never meant for direct human/
-	// API-client use.
+	// PushISOTo is the peer-to-peer half of on-demand image fetching
+	// (ADR-0041, superseding ADR-0040's browser-triggered ReplicateISO):
+	// the *source* node's own managerd calls UploadISO against
+	// target_node_id itself, the same way a browser upload would, in
+	// response to a peer (usually a reconciler discovering it's missing
+	// an ISO/base image a VM names) asking it to push a file it already
+	// has. Peer-only, mirrors the Report* RPCs' own reasoning above
+	// exactly - never meant for direct human/API-client use.
 	PushISOTo(ctx context.Context, in *PushISOToRequest, opts ...grpc.CallOption) (*PushISOToResponse, error)
 }
 
@@ -319,16 +312,6 @@ func (c *managerServiceClient) DeleteISO(ctx context.Context, in *DeleteISOReque
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(DeleteISOResponse)
 	err := c.cc.Invoke(ctx, ManagerService_DeleteISO_FullMethodName, in, out, cOpts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-func (c *managerServiceClient) ReplicateISO(ctx context.Context, in *ReplicateISORequest, opts ...grpc.CallOption) (*ReplicateISOResponse, error) {
-	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(ReplicateISOResponse)
-	err := c.cc.Invoke(ctx, ManagerService_ReplicateISO_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -609,14 +592,6 @@ type ManagerServiceServer interface {
 	UploadISO(grpc.ClientStreamingServer[UploadISORequest, UploadISOResponse]) error
 	ListISOs(context.Context, *ListISOsRequest) (*ListISOsResponse, error)
 	DeleteISO(context.Context, *DeleteISORequest) (*DeleteISOResponse, error)
-	// ReplicateISO copies an ISO this node doesn't have yet from
-	// source_node_id, instead of the caller re-uploading the whole file
-	// through the browser a second time (ADR-0040) - called on the node
-	// that should *end up* with the file. It works by asking the source
-	// node to push back to this one (see PushISOTo below), reusing
-	// UploadISO's existing client-streaming shape for the actual
-	// transfer rather than adding a new download direction.
-	ReplicateISO(context.Context, *ReplicateISORequest) (*ReplicateISOResponse, error)
 	// HostStats reports a point-in-time snapshot of *this* node's own
 	// resource usage and hardware health - physical, per-node data like
 	// ISOs above, gathered locally by managerd (see internal/hoststats),
@@ -686,12 +661,14 @@ type ManagerServiceServer interface {
 	ReportVMTeardownComplete(context.Context, *ReportVMTeardownCompleteRequest) (*ReportVMTeardownCompleteResponse, error)
 	ReportJailPhase(context.Context, *ReportJailPhaseRequest) (*ReportJailPhaseResponse, error)
 	ReportJailTeardownComplete(context.Context, *ReportJailTeardownCompleteRequest) (*ReportJailTeardownCompleteResponse, error)
-	// PushISOTo is ReplicateISO's own peer-to-peer half (ADR-0040): the
-	// *source* node's own managerd calls UploadISO against target_node_id
-	// itself, the same way a browser upload would, in response to being
-	// asked by ReplicateISO's caller. Peer-only, mirrors the Report*
-	// RPCs' own reasoning above exactly - never meant for direct human/
-	// API-client use.
+	// PushISOTo is the peer-to-peer half of on-demand image fetching
+	// (ADR-0041, superseding ADR-0040's browser-triggered ReplicateISO):
+	// the *source* node's own managerd calls UploadISO against
+	// target_node_id itself, the same way a browser upload would, in
+	// response to a peer (usually a reconciler discovering it's missing
+	// an ISO/base image a VM names) asking it to push a file it already
+	// has. Peer-only, mirrors the Report* RPCs' own reasoning above
+	// exactly - never meant for direct human/API-client use.
 	PushISOTo(context.Context, *PushISOToRequest) (*PushISOToResponse, error)
 	mustEmbedUnimplementedManagerServiceServer()
 }
@@ -735,9 +712,6 @@ func (UnimplementedManagerServiceServer) ListISOs(context.Context, *ListISOsRequ
 }
 func (UnimplementedManagerServiceServer) DeleteISO(context.Context, *DeleteISORequest) (*DeleteISOResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method DeleteISO not implemented")
-}
-func (UnimplementedManagerServiceServer) ReplicateISO(context.Context, *ReplicateISORequest) (*ReplicateISOResponse, error) {
-	return nil, status.Error(codes.Unimplemented, "method ReplicateISO not implemented")
 }
 func (UnimplementedManagerServiceServer) HostStats(context.Context, *HostStatsRequest) (*HostStatsResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method HostStats not implemented")
@@ -1006,24 +980,6 @@ func _ManagerService_DeleteISO_Handler(srv interface{}, ctx context.Context, dec
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(ManagerServiceServer).DeleteISO(ctx, req.(*DeleteISORequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
-func _ManagerService_ReplicateISO_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(ReplicateISORequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(ManagerServiceServer).ReplicateISO(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: ManagerService_ReplicateISO_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(ManagerServiceServer).ReplicateISO(ctx, req.(*ReplicateISORequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -1452,10 +1408,6 @@ var ManagerService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "DeleteISO",
 			Handler:    _ManagerService_DeleteISO_Handler,
-		},
-		{
-			MethodName: "ReplicateISO",
-			Handler:    _ManagerService_ReplicateISO_Handler,
 		},
 		{
 			MethodName: "HostStats",

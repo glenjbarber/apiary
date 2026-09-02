@@ -540,6 +540,22 @@ type fakePeerReporter struct {
 	vmTeardownErr   error
 	jailPhaseErr    error
 	jailTeardownErr error
+
+	// isoNamesByAddr/requestPushCalls/requestPushErr back
+	// fetchImageFromPeer's tests (ADR-0041): isoNamesByAddr canned
+	// per-peer ListISONames results, requestPushCalls records every
+	// RequestISOPush call made.
+	isoNamesByAddr  map[string][]string
+	listISONamesErr map[string]error
+
+	requestPushCalls []string // "addr name targetNodeID"
+	requestPushErr   error
+
+	// onRequestPush, if set, runs after recording a RequestISOPush call -
+	// tests use it to simulate the real side effect a successful
+	// UploadISO stream would have (the file landing in the local
+	// isostore), without a real gRPC round trip.
+	onRequestPush func(name string)
 }
 
 func (f *fakePeerReporter) ReportVMPhase(_ context.Context, addr, id, phase, phaseError string) error {
@@ -560,6 +576,24 @@ func (f *fakePeerReporter) ReportJailPhase(_ context.Context, addr, id, phase, p
 func (f *fakePeerReporter) ReportJailTeardownComplete(_ context.Context, addr, id string) error {
 	f.jailTeardownCalls = append(f.jailTeardownCalls, fmt.Sprintf("%s %s", addr, id))
 	return f.jailTeardownErr
+}
+
+func (f *fakePeerReporter) ListISONames(_ context.Context, addr string) ([]string, error) {
+	if err, ok := f.listISONamesErr[addr]; ok {
+		return nil, err
+	}
+	return f.isoNamesByAddr[addr], nil
+}
+
+func (f *fakePeerReporter) RequestISOPush(_ context.Context, addr, name, targetNodeID string) error {
+	f.requestPushCalls = append(f.requestPushCalls, fmt.Sprintf("%s %s %s", addr, name, targetNodeID))
+	if f.requestPushErr != nil {
+		return f.requestPushErr
+	}
+	if f.onRequestPush != nil {
+		f.onRequestPush(name)
+	}
+	return nil
 }
 
 // TestReconciler_RunOnce_DeletingVMForwardsRejectedPurgeToPeer confirms
@@ -740,6 +774,91 @@ func TestReconciler_RunOnce_UnresolvableISOFailsWithoutCreatingVM(t *testing.T) 
 	}
 	if len(vms.created) != 0 {
 		t.Errorf("created = %v, want none (ISO resolution should fail before CreateVM)", vms.created)
+	}
+}
+
+// TestReconciler_RunOnce_FetchesMissingISOFromPeerBeforeProvisioning
+// covers ADR-0041's core new behavior: an ISO not present in this
+// node's own isostore is fetched automatically from whichever known
+// peer reports having it, and provisioning proceeds using the path
+// that becomes available afterward - no manual copy action needed.
+func TestReconciler_RunOnce_FetchesMissingISOFromPeerBeforeProvisioning(t *testing.T) {
+	raft := &fakeRaftClient{
+		resp:       &internalpb.ListVMsResponse{Vms: []*internalpb.VMDefinition{{Id: "vm-1", NodeId: "node-a", IsoName: "debian.iso"}}},
+		statusResp: statusResponseWithPeers("node-a", "10.0.0.1:17600", "node-b", "10.0.0.2:17600"),
+	}
+	zfs := newFakeDatasetManager()
+	zfs.mountpointFor["vm-1"] = t.TempDir()
+	vms := newFakeVMManager()
+	isos := &fakeISOResolver{paths: map[string]string{}}
+	peers := &fakePeerReporter{
+		isoNamesByAddr: map[string][]string{"10.0.0.2:17700": {"debian.iso"}},
+		onRequestPush: func(name string) {
+			isos.paths[name] = "/isos/" + name
+		},
+	}
+
+	r := &Reconciler{Raft: raft, ZFS: zfs, Bhyve: vms, ISOs: isos, Peers: peers, LocalNodeID: "node-a", BootROM: "/fw/UEFI.fd"}
+	if err := r.RunOnce(context.Background()); err != nil {
+		t.Fatalf("RunOnce() error: %v", err)
+	}
+
+	if len(peers.requestPushCalls) != 1 || peers.requestPushCalls[0] != "10.0.0.2:17700 debian.iso node-a" {
+		t.Errorf("RequestISOPush calls = %v, want one call to 10.0.0.2:17700 for debian.iso targeting node-a", peers.requestPushCalls)
+	}
+	cfg := vms.lastCfg["vm-1"]
+	if cfg.ISOPath != "/isos/debian.iso" {
+		t.Errorf("CreateVM() cfg.ISOPath = %q, want /isos/debian.iso (the path that became available after the fetch)", cfg.ISOPath)
+	}
+}
+
+// TestReconciler_RunOnce_ISONotFoundOnAnyPeerFailsWithoutCreatingVM
+// confirms that when no known peer reports having the missing image
+// either, the reconciler still fails clearly instead of silently
+// skipping provisioning or panicking.
+func TestReconciler_RunOnce_ISONotFoundOnAnyPeerFailsWithoutCreatingVM(t *testing.T) {
+	raft := &fakeRaftClient{
+		resp:       &internalpb.ListVMsResponse{Vms: []*internalpb.VMDefinition{{Id: "vm-1", NodeId: "node-a", IsoName: "debian.iso"}}},
+		statusResp: statusResponseWithPeers("node-a", "10.0.0.1:17600", "node-b", "10.0.0.2:17600"),
+	}
+	zfs := newFakeDatasetManager()
+	zfs.mountpointFor["vm-1"] = t.TempDir()
+	vms := newFakeVMManager()
+	isos := &fakeISOResolver{paths: map[string]string{}}
+	peers := &fakePeerReporter{isoNamesByAddr: map[string][]string{"10.0.0.2:17700": {"other.iso"}}}
+
+	r := &Reconciler{Raft: raft, ZFS: zfs, Bhyve: vms, ISOs: isos, Peers: peers, LocalNodeID: "node-a", BootROM: "/fw/UEFI.fd"}
+	if err := r.RunOnce(context.Background()); err == nil {
+		t.Fatal("RunOnce() = nil error, want a clear failure when no peer has the image either")
+	}
+	if len(vms.created) != 0 {
+		t.Errorf("created = %v, want none", vms.created)
+	}
+	if len(peers.requestPushCalls) != 0 {
+		t.Errorf("RequestISOPush calls = %v, want none (no peer reported having the file)", peers.requestPushCalls)
+	}
+}
+
+// TestReconciler_RunOnce_MissingISONoPeersConfiguredFailsClearly
+// confirms the pre-ADR-0041 behavior is preserved when this node has no
+// peer forwarding configured at all (Peers is nil, matching a node
+// without -peer-api-key set) - the same "not found" failure as before,
+// not a nil-pointer panic.
+func TestReconciler_RunOnce_MissingISONoPeersConfiguredFailsClearly(t *testing.T) {
+	raft := &fakeRaftClient{resp: &internalpb.ListVMsResponse{
+		Vms: []*internalpb.VMDefinition{{Id: "vm-1", NodeId: "node-a", IsoName: "debian.iso"}},
+	}}
+	zfs := newFakeDatasetManager()
+	zfs.mountpointFor["vm-1"] = t.TempDir()
+	vms := newFakeVMManager()
+	isos := &fakeISOResolver{paths: map[string]string{}}
+
+	r := &Reconciler{Raft: raft, ZFS: zfs, Bhyve: vms, ISOs: isos, LocalNodeID: "node-a", BootROM: "/fw/UEFI.fd"}
+	if err := r.RunOnce(context.Background()); err == nil {
+		t.Fatal("RunOnce() = nil error, want a clear failure with no peer forwarding configured")
+	}
+	if len(vms.created) != 0 {
+		t.Errorf("created = %v, want none", vms.created)
 	}
 }
 

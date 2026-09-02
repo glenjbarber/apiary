@@ -19,14 +19,13 @@ import (
 type peerHostStatsClient interface {
 	HostStats(ctx context.Context, addr string) (*rpcpb.HostStatsResponse, error)
 
-	// ListISOs/ReplicateISO (ADR-0040) let the Images page build a
-	// cluster-wide view and trigger a copy onto any node, not just the
-	// one this frontend is colocated with - the same "forward a plain
-	// external RPC to an arbitrary peer" shape HostStats already
-	// established, kept on this same interface rather than a second one
-	// since both are satisfied by the same *manager.PeerReporter value.
+	// ListISOs lets the create-VM/create-jail forms build a cluster-wide
+	// image picker (ADR-0041) reaching any node, not just the one this
+	// frontend is colocated with - the same "forward a plain external
+	// RPC to an arbitrary peer" shape HostStats already established,
+	// kept on this same interface rather than a second one since both
+	// are satisfied by the same *manager.PeerReporter value.
 	ListISOs(ctx context.Context, addr string) (*rpcpb.ListISOsResponse, error)
-	ReplicateISO(ctx context.Context, addr, name, sourceNodeID string) (*rpcpb.ReplicateISOResponse, error)
 }
 
 // clusterNodeView is the template-facing shape for one row on the

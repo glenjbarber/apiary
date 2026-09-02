@@ -446,7 +446,7 @@ func (p *PeerReporter) ReportJailTeardownComplete(ctx context.Context, addr, id 
 // uploadISOStream exactly (metadata message first, then chunks, then
 // CloseAndRecv) - the same client-streaming shape a browser upload
 // already uses, just with this managerd acting as the client instead
-// (ADR-0040's PushISOTo handler is the caller).
+// (the PushISOTo handler is the caller).
 func (p *PeerReporter) UploadISO(ctx context.Context, addr, name, expectedSHA256 string, r io.Reader) error {
 	conn, client, err := p.dial(addr)
 	if err != nil {
@@ -494,9 +494,10 @@ func (p *PeerReporter) UploadISO(ctx context.Context, addr, name, expectedSHA256
 	return nil
 }
 
-// RequestISOPush calls addr's own PushISOTo RPC (ADR-0040) - used by
-// Server.ReplicateISO to ask the *source* node to push name to
-// targetNodeID, rather than this node pulling bytes itself.
+// RequestISOPush calls addr's own PushISOTo RPC - used by
+// internal/cluster's Reconciler (ADR-0041) to ask a peer node that's
+// already confirmed (via ListISONames) to have a named image push it
+// to this node, rather than this node pulling bytes itself.
 func (p *PeerReporter) RequestISOPush(ctx context.Context, addr, name, targetNodeID string) error {
 	conn, client, err := p.dial(addr)
 	if err != nil {
@@ -513,16 +514,21 @@ func (p *PeerReporter) RequestISOPush(ctx context.Context, addr, name, targetNod
 	return nil
 }
 
-// ReplicateISO forwards a caller's ReplicateISO request to addr - used
-// by internal/frontend to trigger a copy onto a node other than the one
-// it's colocated with (ADR-0040), the same "forward a plain external
-// RPC to an arbitrary peer" pattern HostStats already established
-// (ADR-0036), not a leader-rejection retry.
-func (p *PeerReporter) ReplicateISO(ctx context.Context, addr, name, sourceNodeID string) (*rpcpb.ReplicateISOResponse, error) {
-	conn, client, err := p.dial(addr)
+// ListISONames is ListISOs narrowed to just the names present at addr -
+// used by internal/cluster's Reconciler (ADR-0041) to find which known
+// peer, if any, already has an image this node's own isostore lacks.
+// A distinct method (rather than reusing ListISOs's own rpcpb-typed
+// signature) because internal/cluster's peerReporter interface
+// deliberately stays decoupled from rpcpb wire types, the same
+// reasoning peer.go's phase-as-plain-string methods already establish.
+func (p *PeerReporter) ListISONames(ctx context.Context, addr string) ([]string, error) {
+	resp, err := p.ListISOs(ctx, addr)
 	if err != nil {
 		return nil, err
 	}
-	defer conn.Close()
-	return client.ReplicateISO(ctx, &rpcpb.ReplicateISORequest{Name: name, SourceNodeId: sourceNodeID})
+	names := make([]string, 0, len(resp.GetIsos()))
+	for _, iso := range resp.GetIsos() {
+		names = append(names, iso.GetName())
+	}
+	return names, nil
 }

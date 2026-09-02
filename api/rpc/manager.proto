@@ -70,15 +70,6 @@ service ManagerService {
   rpc ListISOs(ListISOsRequest) returns (ListISOsResponse);
   rpc DeleteISO(DeleteISORequest) returns (DeleteISOResponse);
 
-  // ReplicateISO copies an ISO this node doesn't have yet from
-  // source_node_id, instead of the caller re-uploading the whole file
-  // through the browser a second time (ADR-0040) - called on the node
-  // that should *end up* with the file. It works by asking the source
-  // node to push back to this one (see PushISOTo below), reusing
-  // UploadISO's existing client-streaming shape for the actual
-  // transfer rather than adding a new download direction.
-  rpc ReplicateISO(ReplicateISORequest) returns (ReplicateISOResponse);
-
   // HostStats reports a point-in-time snapshot of *this* node's own
   // resource usage and hardware health - physical, per-node data like
   // ISOs above, gathered locally by managerd (see internal/hoststats),
@@ -157,12 +148,14 @@ service ManagerService {
   rpc ReportJailPhase(ReportJailPhaseRequest) returns (ReportJailPhaseResponse);
   rpc ReportJailTeardownComplete(ReportJailTeardownCompleteRequest) returns (ReportJailTeardownCompleteResponse);
 
-  // PushISOTo is ReplicateISO's own peer-to-peer half (ADR-0040): the
-  // *source* node's own managerd calls UploadISO against target_node_id
-  // itself, the same way a browser upload would, in response to being
-  // asked by ReplicateISO's caller. Peer-only, mirrors the Report*
-  // RPCs' own reasoning above exactly - never meant for direct human/
-  // API-client use.
+  // PushISOTo is the peer-to-peer half of on-demand image fetching
+  // (ADR-0041, superseding ADR-0040's browser-triggered ReplicateISO):
+  // the *source* node's own managerd calls UploadISO against
+  // target_node_id itself, the same way a browser upload would, in
+  // response to a peer (usually a reconciler discovering it's missing
+  // an ISO/base image a VM names) asking it to push a file it already
+  // has. Peer-only, mirrors the Report* RPCs' own reasoning above
+  // exactly - never meant for direct human/API-client use.
   rpc PushISOTo(PushISOToRequest) returns (PushISOToResponse);
 }
 
@@ -460,22 +453,6 @@ message DeleteISORequest {
 
 message DeleteISOResponse {
   string error = 1;
-}
-
-message ReplicateISORequest {
-  string name = 1;
-  string source_node_id = 2;
-}
-
-message ReplicateISOResponse {
-  string name = 1;
-  uint64 size_bytes = 2;
-  string sha256 = 3;
-
-  // error is set (with name/size_bytes/sha256 left at zero values) if
-  // the copy failed - an unknown source_node_id, the source not
-  // actually having the file, or the transfer itself failing.
-  string error = 4;
 }
 
 message PushISOToRequest {

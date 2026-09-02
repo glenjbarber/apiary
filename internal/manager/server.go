@@ -86,18 +86,11 @@ type PeerForwarder interface {
 	ForcePurgeJail(ctx context.Context, addr string, req *rpcpb.ForcePurgeJailRequest) (*rpcpb.ForcePurgeJailResponse, error)
 	MigrateJail(ctx context.Context, addr string, req *rpcpb.MigrateJailRequest) (*rpcpb.MigrateJailResponse, error)
 
-	// UploadISO/RequestISOPush/ReplicateISO implement ADR-0040's copy-
-	// on-demand ISO replication: UploadISO streams a local file to
-	// addr's own UploadISO RPC (used by PushISOTo, the source node's
-	// side); RequestISOPush asks addr (the source) to push name to
-	// targetNodeID (used by ReplicateISO, the target node's side);
-	// ReplicateISO forwards the whole external RPC to an arbitrary
-	// peer, the same "forward a plain read/write to any node" pattern
-	// HostStats (ADR-0036) and the write-forwarding methods above
-	// already established.
+	// UploadISO streams a local file to addr's own UploadISO RPC - used
+	// by PushISOTo (the source node's side of on-demand image fetching,
+	// ADR-0041) to push a file this node already has to whichever peer
+	// asked for it.
 	UploadISO(ctx context.Context, addr, name, expectedSHA256 string, r io.Reader) error
-	RequestISOPush(ctx context.Context, addr, name, targetNodeID string) error
-	ReplicateISO(ctx context.Context, addr, name, sourceNodeID string) (*rpcpb.ReplicateISOResponse, error)
 }
 
 // defaultPeerManagerdPort mirrors internal/cluster's own constant of
@@ -801,52 +794,15 @@ func (s *Server) nodeManagerdAddr(ctx context.Context, nodeID string) (string, e
 	return "", fmt.Errorf("unknown node %q", nodeID)
 }
 
-// ReplicateISO implements rpcpb.ManagerServiceServer (ADR-0040) - called
-// on the node that should end up with name, naming the node that
-// already has it. Asks the source to push back to this node (via
-// PushISOTo/RequestISOPush) rather than pulling bytes itself, reusing
-// UploadISO's existing client-streaming direction for the actual
-// transfer. Blocks until the copy actually completes or fails -
-// RequestISOPush's own unary call doesn't return until the source's
-// PushISOTo handler has finished streaming the whole file.
-func (s *Server) ReplicateISO(ctx context.Context, req *rpcpb.ReplicateISORequest) (*rpcpb.ReplicateISOResponse, error) {
-	if req.GetName() == "" || req.GetSourceNodeId() == "" {
-		return &rpcpb.ReplicateISOResponse{Error: "name and source_node_id are required"}, nil
-	}
-	if s.peers == nil {
-		return &rpcpb.ReplicateISOResponse{Error: "peer forwarding is not configured on this node"}, nil
-	}
-
-	sourceAddr, err := s.nodeManagerdAddr(ctx, req.GetSourceNodeId())
-	if err != nil {
-		return &rpcpb.ReplicateISOResponse{Error: err.Error()}, nil
-	}
-
-	if err := s.peers.RequestISOPush(ctx, sourceAddr, req.GetName(), s.nodeID); err != nil {
-		return &rpcpb.ReplicateISOResponse{Error: fmt.Sprintf("requesting push from %q: %v", req.GetSourceNodeId(), err)}, nil
-	}
-
-	// The push just landed the file locally via a real UploadISO call -
-	// read back what was actually saved rather than trusting the
-	// request's own claims about it.
-	infos, err := s.isos.List()
-	if err != nil {
-		return &rpcpb.ReplicateISOResponse{Error: fmt.Sprintf("copy succeeded but listing local ISOs failed: %v", err)}, nil
-	}
-	for _, info := range infos {
-		if info.Name == req.GetName() {
-			return &rpcpb.ReplicateISOResponse{Name: info.Name, SizeBytes: uint64(info.SizeBytes), Sha256: info.SHA256}, nil
-		}
-	}
-	return &rpcpb.ReplicateISOResponse{Error: "copy reported success but the file is not present locally afterward"}, nil
-}
-
-// PushISOTo implements rpcpb.ManagerServiceServer (ADR-0040) -
-// ReplicateISO's peer-to-peer half: this node (which already has name)
-// pushes it to target_node_id via a real UploadISO client stream,
-// verifying against this node's own already-known hash rather than
-// trusting anything the caller supplied - the source is the only side
-// that can actually vouch for the file's integrity here.
+// PushISOTo implements rpcpb.ManagerServiceServer (ADR-0041) - the
+// peer-to-peer half of on-demand image fetching: this node (which
+// already has name) pushes it to target_node_id via a real UploadISO
+// client stream, verifying against this node's own already-known hash
+// rather than trusting anything the caller supplied - the source is the
+// only side that can actually vouch for the file's integrity here.
+// Called by a peer's reconciler (via RequestISOPush) after it's already
+// confirmed via ListISONames that this node has the file a VM/jail it's
+// provisioning names but doesn't have locally yet.
 func (s *Server) PushISOTo(ctx context.Context, req *rpcpb.PushISOToRequest) (*rpcpb.PushISOToResponse, error) {
 	if req.GetName() == "" || req.GetTargetNodeId() == "" {
 		return &rpcpb.PushISOToResponse{Error: "name and target_node_id are required"}, nil

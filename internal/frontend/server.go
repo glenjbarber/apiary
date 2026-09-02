@@ -154,15 +154,15 @@ type pageData struct {
 	UserFormError   string
 	UserFormSuccess string
 
-	// ClusterISOs is the Images page's cluster-wide view (ADR-0040) -
-	// distinct from ISOs (still local-only, used by the upload/delete
-	// panel and the create-VM form's picker), since a VM can only ever
-	// boot from an image already present on its own assigned node.
+	// ClusterISOs is the cluster-wide view of every known node's stored
+	// images (ADR-0041) - distinct from ISOs (still local-only, used by
+	// the Images page's own upload/delete panel), used by the
+	// create-VM/create-jail forms' image pickers to show a "will be
+	// fetched from a peer" cue: internal/cluster's Reconciler now
+	// fetches a missing image automatically at provisioning time, so
+	// the picker no longer needs to restrict itself to images already
+	// present on the currently-selected node.
 	ClusterISOs []isoRowView
-
-	// ClusterISOFormError reports a copy-on-demand result, rendered the
-	// same way ISOFormError is for the (separate) upload/delete panel.
-	ClusterISOFormError string
 }
 
 // userView is one row of the Users page's table.
@@ -285,9 +285,10 @@ func nodeSubtitle(nodeID string) string {
 // password change (ADR-0039) - pass UnixPasswordSetter{} in production.
 func NewServer(client rpcpb.ManagerServiceClient, auth pam.Authenticator, roleMap map[string]manager.Role, peers peerHostStatsClient, peerHostnameSuffix, peerManagerPort string, passwords PasswordSetter) (*Server, error) {
 	tmpl, err := template.New("").Funcs(template.FuncMap{
-		"pageHeader":   pageHeader,
-		"vmSubtitle":   vmSubtitle,
-		"nodeSubtitle": nodeSubtitle,
+		"pageHeader":       pageHeader,
+		"vmSubtitle":       vmSubtitle,
+		"nodeSubtitle":     nodeSubtitle,
+		"isoMissingByNode": isoMissingByNode,
 	}).ParseFS(web.FS, "templates/*.html")
 	if err != nil {
 		return nil, fmt.Errorf("frontend: parsing templates: %w", err)
@@ -424,8 +425,6 @@ func (s *Server) routes() {
 
 	// Copy-on-demand ISO replication (ADR-0040) - same RoleOperator gate
 	// as upload/delete, matching write blast radius.
-	s.mux.HandleFunc("POST /isos/{name}/replicate/{target_node_id}", s.requireRole(manager.RoleOperator, s.handleReplicateISO))
-	s.mux.HandleFunc("POST /isos/{name}/replicate-all", s.requireRole(manager.RoleOperator, s.handleReplicateISOAll))
 	s.mux.HandleFunc("POST /networks", s.requireRole(manager.RoleOperator, s.handleCreateNetwork))
 	s.mux.HandleFunc("DELETE /networks/{id}", s.requireRole(manager.RoleOperator, s.handleDeleteNetwork))
 	s.mux.HandleFunc("GET /jails/new", s.requireRole(manager.RoleOperator, s.handleNewJailPage))
@@ -583,25 +582,28 @@ func (s *Server) handleVMsPage(w http.ResponseWriter, r *http.Request) {
 // handleImagesPage serves the Images (ISO upload/list) page ("/images").
 func (s *Server) handleImagesPage(w http.ResponseWriter, r *http.Request) {
 	isos, errMsg := s.currentISOs(r)
-	clusterISOs, clusterErrMsg := s.currentClusterISOs(r)
 	s.render(w, "images_page", s.withAuthFields(r, pageData{
 		ISOs: isos, ISOFormError: errMsg,
-		ClusterISOs: clusterISOs, ClusterISOFormError: clusterErrMsg,
 		ActivePage: "images",
 	}))
 }
 
 // handleNewVMPage serves the create-VM form page ("/vms/new"). A failed
-// Nodes/ISOs/Networks fetch isn't surfaced as an error here - the node
-// picker already falls back to a free-text input when Nodes is empty
-// (see new_vm.html), and an empty ISO/network picker just means
+// Nodes/ClusterISOs/Networks fetch isn't surfaced as an error here - the
+// node picker already falls back to a free-text input when Nodes is
+// empty (see new_vm.html), and an empty ISO/network picker just means
 // "(none)" is the only option, both harmless degraded states rather
-// than failures worth a banner.
+// than failures worth a banner. ClusterISOs (not the local-only ISOs)
+// populates the image pickers so an operator can pick an image that's
+// only present on some other node - internal/cluster's Reconciler
+// fetches it automatically at provisioning time (ADR-0041) - and the
+// page's own JS uses each row's MissingNodes to show a "will be fetched
+// from a peer" cue as the Node ID picker changes.
 func (s *Server) handleNewVMPage(w http.ResponseWriter, r *http.Request) {
 	nodes, _ := s.knownNodes(r)
-	isos, _ := s.currentISOs(r)
+	clusterISOs, _ := s.currentClusterISOs(r)
 	networks, _ := s.currentNetworks(r)
-	s.render(w, "new_vm_page", s.withAuthFields(r, pageData{Nodes: nodes, ISOs: isos, Networks: networks, ActivePage: "vms"}))
+	s.render(w, "new_vm_page", s.withAuthFields(r, pageData{Nodes: nodes, ClusterISOs: clusterISOs, Networks: networks, ActivePage: "vms"}))
 }
 
 // currentNetworks fetches the current list of networks, returning an
@@ -688,6 +690,7 @@ func (s *Server) handleCreateVM(w http.ResponseWriter, r *http.Request) {
 			NodeId:        r.FormValue("node_id"),
 			DesiredState:  stateToRPC(r.FormValue("desired_state")),
 			IsoName:       r.FormValue("iso_name"),
+			BaseImageName: r.FormValue("base_image_name"),
 			NetworkId:     r.FormValue("network_id"),
 			ReplicaNodeId: r.FormValue("replica_node_id"),
 			FirewallRules: parseFirewallRuleRows(r),

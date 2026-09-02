@@ -39,14 +39,6 @@ func (f *fakePeerHostStatsClient) ListISOs(_ context.Context, addr string) (*rpc
 	return &rpcpb.ListISOsResponse{}, nil
 }
 
-func (f *fakePeerHostStatsClient) ReplicateISO(_ context.Context, addr, name, sourceNodeID string) (*rpcpb.ReplicateISOResponse, error) {
-	f.lastAddr = addr
-	if f.err != nil {
-		return nil, f.err
-	}
-	return &rpcpb.ReplicateISOResponse{Name: name}, nil
-}
-
 func TestServer_ClusterOverviewPage_UnreachableNodeShowsError(t *testing.T) {
 	client := &fakeClient{
 		statusResp: &rpcpb.StatusResponse{ManagerNodeId: "apiarium", KnownNodeIds: []string{"apiarium", "freebsd-apiary"}},

@@ -36,9 +36,6 @@ type fakeClient struct {
 	deleteISOResp    *rpcpb.DeleteISOResponse
 	lastDeleteISOReq *rpcpb.DeleteISORequest
 
-	replicateISOResp    *rpcpb.ReplicateISOResponse
-	lastReplicateISOReq *rpcpb.ReplicateISORequest
-
 	hostStatsResp *rpcpb.HostStatsResponse
 
 	getVMConsoleResp *rpcpb.GetVMConsoleResponse
@@ -168,14 +165,6 @@ func (f *fakeClient) DeleteISO(_ context.Context, in *rpcpb.DeleteISORequest, _ 
 		return f.deleteISOResp, nil
 	}
 	return &rpcpb.DeleteISOResponse{}, nil
-}
-
-func (f *fakeClient) ReplicateISO(_ context.Context, in *rpcpb.ReplicateISORequest, _ ...grpc.CallOption) (*rpcpb.ReplicateISOResponse, error) {
-	f.lastReplicateISOReq = in
-	if f.replicateISOResp != nil {
-		return f.replicateISOResp, nil
-	}
-	return &rpcpb.ReplicateISOResponse{}, nil
 }
 
 func (f *fakeClient) PushISOTo(context.Context, *rpcpb.PushISOToRequest, ...grpc.CallOption) (*rpcpb.PushISOToResponse, error) {
