@@ -300,6 +300,28 @@ each design decision, in order.
   actually displayed a MAC address at all, even though it was already
   being tracked - now it does. See
   [ADR-0044](docs/adr/0044-deterministic-mac-for-every-vm.md).
+- A real "Kubernetes-ready" Linux base image
+  (`containerd`/`kubeadm`/`kubelet`/`kubectl` pre-installed), driving
+  the first genuine, non-bypassed `kubeadm init` success on a real
+  Apiary bhyve VM - two real bugs found only via live boot testing
+  (a missing `conntrack` preflight dependency, and a DHCP
+  client-identifier fix that broke the router's MAC-keyed static
+  reservation from ADR-0044) were found and fixed along the way. See
+  [ADR-0045](docs/adr/0045-kubernetes-ready-base-image-and-first-real-kubeadm-init.md).
+- Fixed a real bug caught live in a browser: the VM table's periodic
+  poll response mixed an out-of-band error-banner `<div>` in with the
+  `<tr>` rows it swaps into the table body. htmx's response parser
+  sniffs the response's first tag to decide whether to wrap it for
+  table parsing, saw `<div>` instead of `<tr>`, and skipped that
+  wrapping - so the browser silently dropped every `<tr>`/`<td>` tag
+  (a stray table element with no table ancestor is a parse error per
+  the HTML5 spec), collapsing the table's columns into one run of text
+  on every single poll. htmx's own `useTemplateFragments` config, meant
+  for exactly this, didn't fix it either (confirmed live in
+  Safari/WebKit). Fixed by never mixing non-table content into this
+  response - the error banner now arrives via an `HX-Trigger` header
+  instead. See
+  [ADR-0046](docs/adr/0046-vm-table-polling-corruption-from-oob-swap.md).
 
 **Not yet implemented:**
 
@@ -421,12 +443,27 @@ each design decision, in order.
   console showed cloud-init actually attempting `kubeadm init` -
   failing only with `kubeadm: not found`, since the base image is a
   stock Ubuntu cloud image with no Kubernetes tooling installed. See
-  ADR-0042/ADR-0043/ADR-0044. **Next**: a real "Kubernetes-ready" Linux
-  image (`kubeadm`/`kubelet`/`containerd` pre-installed) - confirmed
-  this must be Linux; FreeBSD has no viable path here (no
+  ADR-0042/ADR-0043/ADR-0044. FreeBSD has no viable path here (no
   production-grade CRI runtime for jails, and `kubeadm` itself assumes
   Linux even for the control-plane node, which runs its own static pods
-  via that node's own `kubelet`).
+  via that node's own `kubelet`) - confirmed the replacement image must
+  be Linux.
+
+  **Milestone (ADR-0045)**: built a real "Kubernetes-ready" Ubuntu 24.04
+  base image (`containerd`/`kubeadm`/`kubelet`/`kubectl` pre-installed),
+  uploaded as `ubuntu-k8s-1.31.raw`. Two real bugs found only via live
+  boot testing, both fixed: a missing `conntrack` binary failing
+  kubeadm's preflight check, and the image's own `/etc/machine-id` reset
+  (needed for template reuse) silently changing the guest's DHCP client
+  identifier on its next boot, breaking the MAC-keyed static reservation
+  from ADR-0044 - fixed with a low-numbered `/etc/systemd/network/
+  05-dhcp-mac.network` drop-in after a netplan-level attempt didn't take
+  effect. With both fixed, a real boot reached
+  `Your Kubernetes control-plane has initialized successfully!` -
+  the first non-bypassed real kubeadm bootstrap completion in this
+  project's history - independently confirmed via
+  `curl https://10.50.0.50:6443/livez` returning `ok` from outside the
+  guest entirely. See ADR-0045 for the full trail.
 - **Tabled for now** (evaluated, deliberately deferred):
   - **Terraform support** — the infrastructure now exists (`managerd`'s
     API-key auth, `restshimd`'s own binary forwarding each caller's

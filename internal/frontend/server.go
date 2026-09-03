@@ -1,6 +1,7 @@
 package frontend
 
 import (
+	"encoding/json"
 	"fmt"
 	"html/template"
 	"io"
@@ -661,7 +662,24 @@ func (s *Server) knownNodes(r *http.Request) ([]string, error) {
 func (s *Server) handleListVMs(w http.ResponseWriter, r *http.Request) {
 	sortBy, dir := parseSort(r)
 	vms, errMsg := s.currentVMs(r, sortBy, dir)
-	s.render(w, "vm_rows_fragment", pageData{Error: errMsg, VMs: vms})
+	s.renderVMRows(w, errMsg, vms)
+}
+
+// renderVMRows renders the vm_rows fragment for a swap into #vm-rows -
+// used by handleListVMs (htmx polling), handleDeleteVM, and
+// renderRowsWithError. errMsg, when non-empty, is delivered via an
+// HX-Trigger response header (a "vmError" event, picked up by vms.html's
+// listener script to update the page's persistent #vm-error banner)
+// rather than embedded in the response body - see vm_rows.html's own
+// comment for why mixing an out-of-band <div> into a <tbody>-targeted
+// response corrupted the table on every poll.
+func (s *Server) renderVMRows(w http.ResponseWriter, errMsg string, vms []vmView) {
+	if errMsg != "" {
+		if b, err := json.Marshal(map[string]string{"vmError": errMsg}); err == nil {
+			w.Header().Set("HX-Trigger", string(b))
+		}
+	}
+	s.render(w, "vm_rows", pageData{Error: errMsg, VMs: vms})
 }
 
 // handleCreateVM lives on its own page (/vms/new, see new_vm.html) now
@@ -760,7 +778,7 @@ func (s *Server) handleDeleteVM(w http.ResponseWriter, r *http.Request) {
 
 	sortBy, dir := parseSort(r)
 	vms, errMsg := s.currentVMs(r, sortBy, dir)
-	s.render(w, "vm_rows_fragment", pageData{Error: errMsg, VMs: vms})
+	s.renderVMRows(w, errMsg, vms)
 }
 
 // renderRowsWithError re-fetches the current (unchanged) VM list and
@@ -772,7 +790,7 @@ func (s *Server) renderRowsWithError(w http.ResponseWriter, r *http.Request, msg
 	if fetchErr != "" {
 		msg = msg + "; additionally failed to refresh list: " + fetchErr
 	}
-	s.render(w, "vm_rows_fragment", pageData{Error: msg, VMs: vms})
+	s.renderVMRows(w, msg, vms)
 }
 
 // handleListISOs serves just the iso_rows fragment, for refreshing the

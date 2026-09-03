@@ -1,16 +1,30 @@
-{{/* vm_rows_fragment wraps vm_rows with an out-of-band update to the
-     page's persistent #vm-error banner (see vms.html) - used only by
-     the standalone-fragment handlers (handleListVMs/handleDeleteVM/
-     renderRowsWithError in server.go), which swap into #vm-rows
-     (the <tbody>'s innerHTML) and so can't otherwise reach a banner
-     div living outside the table. vms.html's own full-page render
-     calls "vm_rows" directly instead - it already has that same
-     .Error rendered into its own static #vm-error div, so duplicating
-     it here on a full-page load would just create a second element
-     with the same id (and, worse, land inside the <tbody> where a
-     bare <div> isn't valid HTML). */}}
-{{define "vm_rows_fragment"}}<div id="vm-error" class="banner-error" hx-swap-oob="true">{{.Error}}</div>{{template "vm_rows" .}}{{end}}
+{{/* vm_rows is swapped as the <tbody id="vm-rows">'s innerHTML both on
+     the full page load (vms.html) and on every htmx poll/action
+     (server.go's handleListVMs/handleDeleteVM/renderRowsWithError) - it
+     must render *only* <tr> elements, nothing else at the top level.
 
+     An earlier version wrapped this in a second "vm_rows_fragment"
+     template that prepended an out-of-band `<div id="vm-error"
+     hx-swap-oob="true">` sibling, to update the page's persistent error
+     banner from the same response. That looked fine on a full page
+     load but broke the polling swap outright: htmx's own response
+     parser (`makeFragment`) sniffs the *first* tag in the response text
+     to decide whether to wrap it in a `<table>` before parsing - seeing
+     `<div>` first (not `<tr>`), it skipped that wrapping and parsed the
+     whole response as a bare document body instead. Per the HTML5
+     spec, a `<tr>`/`<td>` with no table ancestor is a parse error and
+     the tag itself is silently dropped (its text content is not) -
+     which is exactly what happened: every poll collapsed the row's
+     columns into one run of text. Enabling htmx's own
+     `useTemplateFragments` config does *not* reliably fix this either -
+     confirmed live in WebKit/Safari that its own `<body><template>`-
+     wrapped DOMParser strategy still drops the same `<tr>`/`<td>` tags,
+     unlike a plain `document.createElement('template')`. The real fix:
+     never mix non-table content into a response swapped into a
+     <tbody>. The error banner is now updated via an `HX-Trigger`
+     response header instead (see server.go's `renderVMRows` and
+     vms.html's listener script) - fully decoupled from this response's
+     body, which now always contains rows only. */}}
 {{define "vm_rows"}}
 {{range .VMs}}
 <tr>

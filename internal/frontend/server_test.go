@@ -571,6 +571,59 @@ func TestServer_ListVMs_ReturnsRowsFragmentOnly(t *testing.T) {
 	}
 }
 
+// TestServer_ListVMs_FetchErrorSetsHXTriggerNotBody guards against a
+// real bug: an earlier version embedded the error as an out-of-band
+// <div hx-swap-oob="true"> sibling ahead of the <tr> rows in this same
+// response body. htmx's own response parser sniffs the *first* tag in
+// the body to decide whether to wrap it in a <table> before parsing -
+// seeing that leading <div> (not <tr>), it skipped the wrapping and the
+// browser silently dropped every <tr>/<td> tag per the HTML5 spec's
+// handling of table elements with no table ancestor, collapsing the
+// whole table's columns into one run of text on every single poll (not
+// just when an error occurred - the div was always present, empty or
+// not). The fix delivers the error via an HX-Trigger header instead, so
+// the body is always rows-only.
+func TestServer_ListVMs_FetchErrorSetsHXTriggerNotBody(t *testing.T) {
+	client := &fakeClient{listResp: &rpcpb.ListVMsResponse{Error: "raftd unreachable"}}
+	s := newTestServer(t, client)
+
+	req := httptest.NewRequest(http.MethodGet, "/vms/rows", nil)
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, req)
+
+	if strings.Contains(rec.Body.String(), "<div") {
+		t.Errorf("response body should never contain a <div> (only <tr> rows belong in a <tbody> swap), got: %s", rec.Body.String())
+	}
+	trigger := rec.Header().Get("HX-Trigger")
+	if !strings.Contains(trigger, "vmError") || !strings.Contains(trigger, "raftd unreachable") {
+		t.Errorf("HX-Trigger header = %q, want a vmError event carrying the fetch error", trigger)
+	}
+}
+
+// TestServer_ListVMs_RowsFragmentNeverLeadsWithNonRowContent is the
+// general form of the regression above: whatever this endpoint renders,
+// the first non-whitespace character must start a <tr> - anything else
+// leading the response defeats htmx's own table-wrapping detection for
+// the <tbody> this gets swapped into, regardless of whether an error
+// happens to be present this time.
+func TestServer_ListVMs_RowsFragmentNeverLeadsWithNonRowContent(t *testing.T) {
+	for _, client := range []*fakeClient{
+		{listResp: &rpcpb.ListVMsResponse{}},
+		{listResp: &rpcpb.ListVMsResponse{Error: "raftd unreachable"}},
+		{listResp: &rpcpb.ListVMsResponse{Vms: []*rpcpb.VMDefinition{{Id: "vm-1"}}}},
+	} {
+		s := newTestServer(t, client)
+		req := httptest.NewRequest(http.MethodGet, "/vms/rows", nil)
+		rec := httptest.NewRecorder()
+		s.ServeHTTP(rec, req)
+
+		body := strings.TrimSpace(rec.Body.String())
+		if body != "" && !strings.HasPrefix(body, "<tr") {
+			t.Errorf("rows fragment must start with <tr (or be empty), got: %s", body)
+		}
+	}
+}
+
 func TestServer_ListVMs_DefaultsToSortedByID(t *testing.T) {
 	// ListVMs's own order is unspecified - the response here is
 	// deliberately not alphabetical, to prove the handler sorts rather
@@ -1139,6 +1192,26 @@ func TestServer_DeleteVM(t *testing.T) {
 	}
 	if !strings.Contains(rec.Body.String(), "No VMs") {
 		t.Errorf("response should show empty list after delete, got: %s", rec.Body.String())
+	}
+}
+
+func TestServer_DeleteVM_ErrorSetsHXTriggerNotBody(t *testing.T) {
+	client := &fakeClient{
+		deleteResp: &rpcpb.DeleteVMResponse{Error: "vm not found"},
+		listResp:   &rpcpb.ListVMsResponse{},
+	}
+	s := newTestServer(t, client)
+
+	req := httptest.NewRequest(http.MethodDelete, "/vms/vm-1", nil)
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, req)
+
+	if strings.Contains(rec.Body.String(), "<div") {
+		t.Errorf("response body should never contain a <div>, got: %s", rec.Body.String())
+	}
+	trigger := rec.Header().Get("HX-Trigger")
+	if !strings.Contains(trigger, "vmError") || !strings.Contains(trigger, "vm not found") {
+		t.Errorf("HX-Trigger header = %q, want a vmError event carrying the delete error", trigger)
 	}
 }
 

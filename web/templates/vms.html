@@ -24,6 +24,17 @@
       {{template "vm_rows" .}}
     </tbody>
   </table></div>
+  {{/* vm_rows swaps are always row-only (see vm_rows.html's own comment
+       on why) - a fetch/action error instead arrives as an HX-Trigger
+       "vmError" event (dispatched on, and bubbling from, whichever
+       element made the request - the polling <tbody> or a row's Delete
+       button), picked up here at the document level and written into
+       the persistent #vm-error banner. */}}
+  <script>
+    document.body.addEventListener("vmError", function (e) {
+      document.getElementById("vm-error").textContent = e.detail.value || "";
+    });
+  </script>
 </body>
 </html>
 {{end}}
