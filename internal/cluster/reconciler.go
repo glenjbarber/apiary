@@ -179,6 +179,16 @@ type Reconciler struct {
 	DHCP dhcpManager
 	PF   pfManager
 
+	// DNSServer, if set, is handed to every Apiary-managed network's DHCP
+	// clients via option 6 (see dhcpd.NetworkScope.DNSServer's own doc
+	// comment for why this is required, not optional-with-a-sane-
+	// default: dnsmasq's own default behavior of advertising itself as
+	// DNS server is actively wrong here, since port=0 disables its
+	// resolver). Empty preserves the old (buggy) behavior for a
+	// deployment that hasn't set this yet, rather than silently start
+	// emitting an option with an empty address.
+	DNSServer string
+
 	// HAST is optional (nil-able, same opt-in pattern as everything
 	// above): when set, a VM naming ReplicaNodeID gets its disk
 	// HAST-replicated instead of the plain dataset-backed file - real
@@ -961,7 +971,7 @@ func (r *Reconciler) reconcileDHCP(ctx context.Context, planned []VMPlacement, n
 		}
 		scope, ok := scopeByNetwork[vm.NetworkID]
 		if !ok {
-			scope = &dhcpd.NetworkScope{Bridge: networkBridgeName(network), Subnet: network.GetSubnet()}
+			scope = &dhcpd.NetworkScope{Bridge: networkBridgeName(network), Subnet: network.GetSubnet(), DNSServer: r.DNSServer}
 			scopeByNetwork[vm.NetworkID] = scope
 		}
 		scope.Leases = append(scope.Leases, dhcpd.Lease{MAC: vm.MACAddress, IP: vm.IPAddress, Hostname: vm.ID})

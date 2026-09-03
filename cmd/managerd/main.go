@@ -63,6 +63,7 @@ func run() error {
 	diskSizeMB := flag.Uint64("disk-size-mb", 0, "size of each VM's boot disk image in MB (0 uses the reconciler's own default)")
 	isoDir := flag.String("iso-dir", "/var/db/apiary/isos", "directory where uploaded installer images are stored on this node")
 	vlanUplink := flag.String("vlan-uplink", "", "physical interface VLAN-tagged networks attach to (e.g. \"re0\", \"em0\" - differs per node); leave empty to disable network management (VLANs/DHCP/firewall) on this node")
+	dhcpDNSServer := flag.String("dhcp-dns-server", "", "DNS server address handed to DHCP clients on this node's Apiary-managed networks (dnsmasq's own port=0 disables its resolver, so without this every VM gets a dead-end DNS server - see internal/dhcpd.NetworkScope.DNSServer); leave empty only if no VM on a managed network needs working DNS resolution")
 	hastEnabled := flag.Bool("hast-enabled", false, "enable HAST-backed VM disk replication support on this node (requires a real, patched hastd - see ADR-0026); needed on both a replicated VM's owning node and its replica node, regardless of bhyve support")
 	jailEnabled := flag.Bool("jail-enabled", false, "enable jail orchestration on this node (requires internal/jail's own prerequisites - see CLAUDE.md)")
 	jailPrefix := flag.String("jail-prefix", "apiary-", "name prefix for jails this node creates")
@@ -157,6 +158,7 @@ func run() error {
 		ISOs:             isos,
 		Peers:            peers,
 		PeerManagerdPort: resolvedPeerPort,
+		DNSServer:        *dhcpDNSServer,
 	}
 	// HAST is independent of bhyve support: a node holding only a HAST
 	// secondary replica (see ADR-0026) never runs the VM at all, so this

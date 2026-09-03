@@ -1,6 +1,9 @@
 package dhcpd
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestRenderConfig_SingleScopeNoLeases(t *testing.T) {
 	body, err := RenderConfig([]NetworkScope{
@@ -52,6 +55,36 @@ func TestRenderConfig_LeaseWithoutHostnameUsesWildcard(t *testing.T) {
 	}
 	if !containsLine(body, "dhcp-host=02:aa:bb:cc:dd:ee,10.60.0.5,*") {
 		t.Errorf("RenderConfig() missing the wildcard-hostname lease line, got:\n%s", body)
+	}
+}
+
+// TestRenderConfig_DNSServerOptionOmittedByDefault guards against the
+// real bug this field fixes: without an explicit DNSServer, the config
+// must never claim to offer one - dnsmasq's own default behavior
+// (advertising itself as DNS server despite port=0 disabling its
+// resolver) already produces a dead end on its own, so RenderConfig
+// must not add anything that makes that worse or masks it.
+func TestRenderConfig_DNSServerOptionOmittedByDefault(t *testing.T) {
+	body, err := RenderConfig([]NetworkScope{
+		{Bridge: "apiary-net-1", Subnet: "10.60.0.0/24"},
+	})
+	if err != nil {
+		t.Fatalf("RenderConfig() error: %v", err)
+	}
+	if strings.Contains(body, "dhcp-option") {
+		t.Errorf("RenderConfig() should not emit dhcp-option without a configured DNSServer, got:\n%s", body)
+	}
+}
+
+func TestRenderConfig_DNSServerOptionScopedToInterface(t *testing.T) {
+	body, err := RenderConfig([]NetworkScope{
+		{Bridge: "apiary-net-1", Subnet: "10.60.0.0/24", DNSServer: "10.60.0.1"},
+	})
+	if err != nil {
+		t.Fatalf("RenderConfig() error: %v", err)
+	}
+	if !containsLine(body, "dhcp-option=interface:apiary-net-1,6,10.60.0.1") {
+		t.Errorf("RenderConfig() missing the DNS server option, got:\n%s", body)
 	}
 }
 

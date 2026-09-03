@@ -24,6 +24,18 @@ type NetworkScope struct {
 	Bridge string
 	Subnet string // CIDR, e.g. "10.60.0.0/24"
 	Leases []Lease
+
+	// DNSServer, if set, is handed to DHCP clients on this network via
+	// option 6. Deliberately not implied by dnsmasq's own default
+	// behavior (advertising itself) - port=0 above disables dnsmasq's
+	// resolver entirely, so a client left to that default gets a
+	// DNS server address that never actually answers queries. This
+	// was a real, previously-undiscovered bug: every VM on an
+	// Apiary-managed network got a dead-end DNS server until this
+	// field existed, invisible until a workload actually needed
+	// working internet DNS resolution (a real kubeadm init's image
+	// pulls were the first thing to need it).
+	DNSServer string
 }
 
 // RenderConfig renders a full dnsmasq.conf body serving DHCP for the
@@ -52,6 +64,9 @@ func RenderConfig(scopes []NetworkScope) (string, error) {
 
 		fmt.Fprintf(&b, "interface=%s\n", s.Bridge)
 		fmt.Fprintf(&b, "dhcp-range=%s,%s,%s,12h\n", start, end, netmask)
+		if s.DNSServer != "" {
+			fmt.Fprintf(&b, "dhcp-option=interface:%s,6,%s\n", s.Bridge, s.DNSServer)
+		}
 		for _, l := range s.Leases {
 			if l.MAC == "" || l.IP == "" {
 				return "", fmt.Errorf("dhcpd: scope %q: lease MAC and IP must both be set", s.Bridge)
