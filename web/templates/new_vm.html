@@ -27,7 +27,7 @@
         <label>Owner node
       {{if .Nodes}}
       <select name="node_id" required>
-        {{range .Nodes}}<option value="{{.}}">{{.}}</option>{{end}}
+        {{range .Nodes}}<option value="{{.}}"{{if eq . $.LocalNodeID}} selected{{end}}>{{.}}</option>{{end}}
       </select>
       {{else}}
       <input type="text" name="node_id" required>

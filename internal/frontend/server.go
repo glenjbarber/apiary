@@ -36,6 +36,14 @@ type pageData struct {
 	// node picker. Only populated for the New VM page.
 	Nodes []string
 
+	// LocalNodeID is this managerd's own node id (StatusResponse's
+	// ManagerNodeId), used to pre-select the New VM form's Owner Node
+	// picker - without it, the <select> has no "selected" option and
+	// the browser just defaults to whichever node happens to be first
+	// in Nodes, unrelated to which node's frontend is actually serving
+	// the page. Only populated for the New VM page.
+	LocalNodeID string
+
 	// SortBy/SortDir are the sort currently applied to VMs ("id", "node",
 	// or "state"; "asc" or "desc") - only used by the full index render,
 	// to link each column header to toggle its own sort and to carry the
@@ -633,10 +641,15 @@ func (s *Server) handleImagesPage(w http.ResponseWriter, r *http.Request) {
 // page's own JS uses each row's MissingNodes to show a "will be fetched
 // from a peer" cue as the Node ID picker changes.
 func (s *Server) handleNewVMPage(w http.ResponseWriter, r *http.Request) {
-	nodes, _ := s.knownNodes(r)
+	var nodes []string
+	var localNodeID string
+	if statusResp, err := s.client.Status(r.Context(), &rpcpb.StatusRequest{}); err == nil {
+		nodes = statusResp.GetKnownNodeIds()
+		localNodeID = statusResp.GetManagerNodeId()
+	}
 	clusterISOs, _ := s.currentClusterISOs(r)
 	networks, _ := s.currentNetworks(r)
-	s.render(w, "new_vm_page", s.withAuthFields(r, pageData{Nodes: nodes, ClusterISOs: clusterISOs, Networks: networks, ActivePage: "vms"}))
+	s.render(w, "new_vm_page", s.withAuthFields(r, pageData{Nodes: nodes, LocalNodeID: localNodeID, ClusterISOs: clusterISOs, Networks: networks, ActivePage: "vms"}))
 }
 
 // currentNetworks fetches the current list of networks, returning an

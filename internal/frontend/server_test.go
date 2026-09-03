@@ -512,6 +512,35 @@ func TestServer_NewVMPage(t *testing.T) {
 	}
 }
 
+// TestServer_NewVMPage_OwnerNodeDefaultsToLocalNode guards against a
+// real bug: the Owner Node <select> had no "selected" option at all, so
+// the browser defaulted to whichever node happened to come first in
+// the list - unrelated to which node's frontend was actually serving
+// the page. Caught live: on apiverse's own /vms/new, the Owner Node
+// silently defaulted to apiarium, which cascaded into the Replica Node
+// picker looking wrong (apiverse - the node actually being browsed -
+// was the only enabled replica option, since the JS correctly excludes
+// whatever IS selected as owner; apiverse's own operator had no way to
+// tell apiarium had been silently pre-selected as owner instead).
+func TestServer_NewVMPage_OwnerNodeDefaultsToLocalNode(t *testing.T) {
+	client := &fakeClient{statusResp: &rpcpb.StatusResponse{
+		ManagerNodeId: "apiverse", KnownNodeIds: []string{"apiarium", "apiverse"},
+	}}
+	s := newTestServer(t, client)
+
+	req := httptest.NewRequest(http.MethodGet, "/vms/new", nil)
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, req)
+
+	body := rec.Body.String()
+	if !strings.Contains(body, `<option value="apiverse" selected>apiverse</option>`) {
+		t.Errorf("Owner Node picker should pre-select the local node (apiverse), got: %s", body)
+	}
+	if strings.Contains(body, `<option value="apiarium" selected>apiarium</option>`) {
+		t.Errorf("Owner Node picker should not pre-select a non-local node, got: %s", body)
+	}
+}
+
 func TestServer_VMDetailPage(t *testing.T) {
 	client := &fakeClient{getVMResp: &rpcpb.GetVMResponse{Found: true, Vm: &rpcpb.VMDefinition{
 		Id: "vm-1", Name: "database", Vcpus: 4, MemoryMb: 8192,
