@@ -4,7 +4,11 @@
 {{template "head" .}}
 <body>
   {{template "nav" .}}
-  {{template "page_header" (pageHeader "Virtual machines" "Cluster workloads and their current reconciliation state." "<a class='button' href='/vms/new'>Create VM</a>")}}
+  {{if .CanOperate}}
+    {{template "page_header" (pageHeader "Virtual machines" "Cluster workloads and their current reconciliation state." "<a class='button' href='/vms/new'>Create VM</a>")}}
+  {{else}}
+    {{template "page_header" (pageHeader "Virtual machines" "Cluster workloads and their current reconciliation state.")}}
+  {{end}}
   <div class="panel">
   <div id="vm-error" class="banner-error">{{.Error}}</div>
   <table>

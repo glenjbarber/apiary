@@ -28,6 +28,8 @@
     button, .button { border:1px solid #111; border-radius:6px; background:#111; color:#fff; padding:.5rem .75rem; font:inherit; font-weight:650; cursor:pointer; text-decoration:none; }
     button:hover, .button:hover { background:#333; }
     button.danger { border-color:#e3b5b5; background:#fff; color:var(--danger); }
+    .button.secondary { background:#fff; color:var(--ink); border-color:#aaa; }
+    .button.secondary:hover { background:#f1f1f1; }
     input, select { min-height:2.4rem; border:1px solid #aaa; border-radius:6px; background:#fff; padding:.45rem .55rem; font:inherit; }
     input:focus, select:focus, button:focus, a:focus { outline:3px solid rgba(255,201,40,.45); outline-offset:2px; }
     .panel { background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:1.1rem; box-shadow:0 1px 2px rgba(0,0,0,.04); }
@@ -39,8 +41,27 @@
     .badge.error, .badge.down, .badge.deleting { color:var(--danger); background:#fde3e3; }
     .badge.creating, .badge.pending { color:#765600; background:#fff1b8; }
     .actions { display:flex; align-items:center; gap:.55rem; white-space:nowrap; }
-    form.create-vm, form.upload-iso { display: flex; gap: 0.75rem; align-items: end; flex-wrap: wrap; }
-    form.create-vm label, form.upload-iso label { display: flex; flex-direction: column; font-size: 0.85rem; }
+    form.upload-iso, form.inline-form { display: flex; gap: 0.75rem; align-items: end; flex-wrap: wrap; }
+    form.upload-iso label, form.inline-form label { display: flex; flex-direction: column; font-size: 0.85rem; }
+    .form-section { border:0; border-top:1px solid var(--line); margin:0; padding:1.25rem 0 .25rem; }
+    .form-section:first-child { border-top:0; padding-top:0; }
+    .form-section legend { font-size:1.05rem; font-weight:750; padding:0 .5rem 0 0; }
+    .form-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:1rem; margin-top:.85rem; }
+    .form-grid label { display:flex; flex-direction:column; gap:.3rem; font-size:.85rem; font-weight:650; }
+    .form-grid label.full { grid-column:1 / -1; }
+    .field-help { color:var(--muted); font-size:.78rem; font-weight:400; }
+    .form-actions { display:flex; justify-content:flex-end; align-items:center; gap:.75rem; margin-top:1.25rem; }
+    .detail-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:1rem; margin-top:1rem; }
+    .detail-card h3, .vm-controls h3, .danger-zone h3 { margin:0 0 .75rem; }
+    .detail-list { margin:0; }
+    .detail-list > div { display:flex; justify-content:space-between; gap:1rem; padding:.52rem 0; border-bottom:1px solid var(--line); }
+    .detail-list > div:last-child { border-bottom:0; }
+    .detail-list dt { color:var(--muted); }
+    .detail-list dd { margin:0; text-align:right; font-weight:650; overflow-wrap:anywhere; }
+    .compact-table { margin-top:.25rem; }
+    .vm-controls, .danger-zone { display:flex; justify-content:space-between; align-items:center; gap:1rem; margin-top:1rem; }
+    .vm-controls p, .danger-zone p { margin:.25rem 0 0; }
+    .danger-zone { border-color:#e3b5b5; }
     .error { color:var(--danger); }
     .success { color:#166534; font-weight:650; }
     /* Dedicated banner classes for a page/form-level error or success
@@ -76,7 +97,7 @@
        browser's default [hidden] handling and the bar would never
        actually hide between uploads. */
     .upload-progress[hidden] { display: none; }
-    @media (max-width:760px) { body{padding:0 .75rem 2rem} nav{margin:0 -.75rem 1rem;padding:.65rem .75rem} nav .account{display:none} table{display:block;overflow-x:auto} form.create-vm,form.upload-iso{align-items:stretch} form.create-vm label,form.upload-iso label{min-width:100%} }
+    @media (max-width:760px) { body{padding:0 .75rem 2rem} nav{margin:0 -.75rem 1rem;padding:.65rem .75rem} nav .account{display:none} table{display:block;overflow-x:auto} form.upload-iso,form.inline-form{align-items:stretch} form.upload-iso label,form.inline-form label{min-width:100%} .form-grid,.detail-grid{grid-template-columns:1fr}.form-grid label.full{grid-column:auto}.vm-controls,.danger-zone{align-items:flex-start;flex-direction:column}.page-header{align-items:flex-start} }
   </style>
 </head>
 {{end}}
@@ -89,7 +110,7 @@
   <a href="/jails"{{if eq .ActivePage "jails"}} class="active"{{end}}>Jails</a>
   <a href="/networks"{{if eq .ActivePage "networks"}} class="active"{{end}}>Networks</a>
   <a href="/images"{{if eq .ActivePage "images"}} class="active"{{end}}>Images</a>
-  <a href="/apikeys"{{if eq .ActivePage "apikeys"}} class="active"{{end}}>API Keys</a>
+  {{if .CanAdmin}}<a href="/apikeys"{{if eq .ActivePage "apikeys"}} class="active"{{end}}>API Keys</a>{{end}}
   <a href="/users"{{if eq .ActivePage "users"}} class="active"{{end}}>Users</a>
   {{if .AuthEnabled}}
   {{if .Username}}<span class="account">logged in as {{.Username}} ({{.Role}})</span>{{end}}

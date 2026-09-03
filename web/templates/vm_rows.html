@@ -28,7 +28,7 @@
 {{define "vm_rows"}}
 {{range .VMs}}
 <tr>
-  <td>{{.ID}}</td>
+  <td><a href="/vms/{{.ID}}"><strong>{{.ID}}</strong></a></td>
   <td>{{.Name}}</td>
   <td>{{.VCPUs}}</td>
   <td>{{.MemoryMB}}</td>
@@ -40,7 +40,7 @@
   <td><div class="actions">
     <a href="/vms/{{.ID}}/console">Console</a>
     <a href="/vms/{{.ID}}/serial">Log</a>
-    <button class="danger" hx-delete="/vms/{{.ID}}" hx-target="#vm-rows" hx-swap="innerHTML" hx-confirm="Delete {{.ID}}?">Delete</button>
+    {{if $.CanOperate}}<button class="danger" hx-delete="/vms/{{.ID}}" hx-target="#vm-rows" hx-swap="innerHTML" hx-confirm="Delete {{.ID}}?">Delete</button>{{end}}
   </div></td>
 </tr>
 {{else}}

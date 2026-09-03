@@ -5,58 +5,82 @@
 <body>
   {{template "nav" .}}
   {{template "page_header" (pageHeader "Create virtual machine" "Define compute, placement, boot media, and network settings." "<a href='/vms'>Cancel</a>")}}
+  <div id="create-error" class="banner-error" role="alert" aria-live="polite"></div>
   <form class="create-vm panel" style="margin-top:1rem" hx-post="/vms" hx-target="#create-error" hx-swap="innerHTML">
-    <label>ID <input type="text" name="id" required></label>
-    <label>Name <input type="text" name="name"></label>
-    <label>vCPUs <input type="number" name="vcpus" value="1" min="1"></label>
-    <label>Memory (MB) <input type="number" name="memory_mb" value="512" min="1"></label>
-    <label>Node ID
+    <fieldset class="form-section">
+      <legend>Identity</legend>
+      <div class="form-grid">
+        <label>ID <input type="text" name="id" required autocomplete="off" placeholder="web-01"><span class="field-help">Stable identifier used by Apiary and bhyve.</span></label>
+        <label>Display name <input type="text" name="name" autocomplete="off" placeholder="Web server"></label>
+      </div>
+    </fieldset>
+    <fieldset class="form-section">
+      <legend>Compute</legend>
+      <div class="form-grid">
+        <label>vCPUs <input type="number" name="vcpus" value="1" min="1" required></label>
+        <label>Memory (MB) <input type="number" name="memory_mb" value="512" min="1" required></label>
+      </div>
+    </fieldset>
+    <fieldset class="form-section">
+      <legend>Placement</legend>
+      <div class="form-grid">
+        <label>Owner node
       {{if .Nodes}}
-      <select name="node_id">
+      <select name="node_id" required>
         {{range .Nodes}}<option value="{{.}}">{{.}}</option>{{end}}
       </select>
       {{else}}
-      <input type="text" name="node_id">
+      <input type="text" name="node_id" required>
       {{end}}
-    </label>
-    <label>Replica node ID (optional - HAST disk replication, see ADR-0026)
-      <input type="text" name="replica_node_id">
-    </label>
-    <label>Desired state
-      <select name="desired_state">
-        <option value="stopped">stopped</option>
-        <option value="running">running</option>
-      </select>
-    </label>
-    <label>ISO
+        </label>
+        <label>Replica node <span class="field-help">Optional HAST disk replication target.</span>
+          {{if .Nodes}}<select name="replica_node_id"><option value="">None</option>{{range .Nodes}}<option value="{{.}}">{{.}}</option>{{end}}</select>{{else}}<input type="text" name="replica_node_id">{{end}}
+        </label>
+      </div>
+    </fieldset>
+    <fieldset class="form-section">
+      <legend>Storage and boot</legend>
+      <div class="form-grid">
+        <label>Installer image
       <select name="iso_name" class="image-picker">
-        <option value="">(none)</option>
+        <option value="">None</option>
         {{range .ClusterISOs}}<option value="{{.Name}}">{{.Name}}</option>{{end}}
       </select>
-    </label>
-    <label>Base image (optional - a pre-built bootable disk, e.g. for cloud-init)
+        </label>
+        <label>Base image <span class="field-help">Optional pre-built bootable disk, such as a cloud-init image.</span>
       <select name="base_image_name" class="image-picker">
-        <option value="">(none)</option>
+        <option value="">None</option>
         {{range .ClusterISOs}}<option value="{{.Name}}">{{.Name}}</option>{{end}}
       </select>
-    </label>
-    <label>Network
+        </label>
+      </div>
+    </fieldset>
+    <fieldset class="form-section">
+      <legend>Network</legend>
+      <div class="form-grid">
+        <label>Network
       <select name="network_id">
-        <option value="">(none)</option>
+        <option value="">Default bridge</option>
         {{range .Networks}}<option value="{{.ID}}">{{.Name}} ({{.Subnet}})</option>{{end}}
       </select>
-    </label>
-    <div style="flex-basis: 100%;">
-      <div>Firewall rules (optional - no rules means everything allowed)</div>
+        </label>
+        <label>Initial state
+          <select name="desired_state"><option value="stopped">Stopped</option><option value="running">Running</option></select>
+          <span class="field-help">Starting stopped allows configuration to be reviewed first.</span>
+        </label>
+      </div>
+    </fieldset>
+    <fieldset class="form-section">
+      <legend>Firewall rules</legend>
+      <p class="muted">Optional. With no rules, traffic is allowed.</p>
       <table id="firewall-rules">
         <thead><tr><th>Direction</th><th>Action</th><th>Protocol</th><th>Port/range</th><th></th></tr></thead>
         <tbody id="firewall-rule-rows"></tbody>
       </table>
-      <button type="button" id="add-firewall-rule">Add rule</button>
-    </div>
-    <button type="submit">Create</button>
+      <button type="button" class="button secondary" id="add-firewall-rule">Add rule</button>
+    </fieldset>
+    <div class="form-actions"><a href="/vms">Cancel</a><button type="submit">Create virtual machine</button></div>
   </form>
-  <div id="create-error" class="banner-error"></div>
   <script>
   (function() {
     var rows = document.getElementById('firewall-rule-rows');
@@ -83,11 +107,18 @@
     // provisioning time, so this is informational only, never blocking.
     var missingByNode = {{isoMissingByNode .ClusterISOs}};
     var nodeSelect = document.querySelector('select[name="node_id"]');
+    var replicaSelect = document.querySelector('select[name="replica_node_id"]');
     var pickers = document.querySelectorAll('select.image-picker');
     if (!nodeSelect || pickers.length === 0) return;
 
     function refresh() {
       var node = nodeSelect.value;
+      if (replicaSelect) {
+        Array.prototype.forEach.call(replicaSelect.options, function(opt) {
+          opt.disabled = !!opt.value && opt.value === node;
+        });
+        if (replicaSelect.value === node) replicaSelect.value = '';
+      }
       pickers.forEach(function(picker) {
         Array.prototype.forEach.call(picker.options, function(opt) {
           if (!opt.value) return;

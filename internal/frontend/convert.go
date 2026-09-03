@@ -50,6 +50,15 @@ type vmView struct {
 	// ReplicaNodeID, if set, names the node this VM's disk is
 	// HAST-replicated to (ADR-0026) - data redundancy, not failover.
 	ReplicaNodeID string
+	BaseImageName string
+	FirewallRules []firewallRuleView
+}
+
+type firewallRuleView struct {
+	Direction string
+	Action    string
+	Protocol  string
+	PortRange string
 }
 
 // networkView is the template-facing shape for a NetworkDefinition.
@@ -252,7 +261,7 @@ func fromRPCVM(d *rpcpb.VMDefinition) vmView {
 	if d == nil {
 		return vmView{}
 	}
-	return vmView{
+	v := vmView{
 		ID:            d.GetId(),
 		Name:          d.GetName(),
 		VCPUs:         d.GetVcpus(),
@@ -266,7 +275,15 @@ func fromRPCVM(d *rpcpb.VMDefinition) vmView {
 		IPAddress:     d.GetIpAddress(),
 		MACAddress:    d.GetMacAddress(),
 		ReplicaNodeID: d.GetReplicaNodeId(),
+		BaseImageName: d.GetBaseImageName(),
 	}
+	for _, rule := range d.GetFirewallRules() {
+		v.FirewallRules = append(v.FirewallRules, firewallRuleView{
+			Direction: rule.GetDirection(), Action: rule.GetAction(),
+			Protocol: rule.GetProtocol(), PortRange: rule.GetPortRange(),
+		})
+	}
+	return v
 }
 
 // statsView is the template-facing shape for a HostStats snapshot -

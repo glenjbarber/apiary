@@ -20,6 +20,8 @@ import (
 // mirroring internal/restshim's test fake.
 type fakeClient struct {
 	statusResp *rpcpb.StatusResponse
+	getVMResp  *rpcpb.GetVMResponse
+	getVMErr   error
 
 	listResp *rpcpb.ListVMsResponse
 	listErr  error
@@ -139,6 +141,12 @@ func (f *fakeClient) MigrateJail(context.Context, *rpcpb.MigrateJailRequest, ...
 }
 
 func (f *fakeClient) GetVM(context.Context, *rpcpb.GetVMRequest, ...grpc.CallOption) (*rpcpb.GetVMResponse, error) {
+	if f.getVMErr != nil {
+		return nil, f.getVMErr
+	}
+	if f.getVMResp != nil {
+		return f.getVMResp, nil
+	}
 	return &rpcpb.GetVMResponse{}, nil
 }
 
@@ -501,6 +509,66 @@ func TestServer_NewVMPage(t *testing.T) {
 	}
 	if !strings.Contains(body, `id="create-error"`) {
 		t.Errorf("new VM page missing error slot, got: %s", body)
+	}
+}
+
+func TestServer_VMDetailPage(t *testing.T) {
+	client := &fakeClient{getVMResp: &rpcpb.GetVMResponse{Found: true, Vm: &rpcpb.VMDefinition{
+		Id: "vm-1", Name: "database", Vcpus: 4, MemoryMb: 8192,
+		NodeId: "apiarium", ReplicaNodeId: "apiverse",
+		DesiredState: rpcpb.VMState_VM_STATE_RUNNING, Phase: rpcpb.VMPhase_VM_PHASE_READY,
+		IsoName: "installer.iso", BaseImageName: "freebsd.raw",
+		NetworkId: "servers", IpAddress: "10.60.0.10", MacAddress: "02:00:00:00:00:10",
+		FirewallRules: []*rpcpb.FirewallRule{{Direction: "in", Action: "pass", Protocol: "tcp", PortRange: "22"}},
+	}}}
+	s, err := NewServer(client, nil, nil, nil, "", "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/vms/vm-1", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	body := rec.Body.String()
+	for _, want := range []string{"database", "apiarium", "apiverse", "freebsd.raw", "10.60.0.10", "02:00:00:00:00:10", "Serial log", "Danger zone"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("detail page missing %q", want)
+		}
+	}
+}
+
+func TestServer_VMDetailPage_NotFound(t *testing.T) {
+	s, err := NewServer(&fakeClient{}, nil, nil, nil, "", "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/vms/missing", nil))
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404", rec.Code)
+	}
+}
+
+func TestServer_ViewerDoesNotSeeOperatorOrAdminActions(t *testing.T) {
+	client := &fakeClient{listResp: &rpcpb.ListVMsResponse{Vms: []*rpcpb.VMDefinition{{Id: "vm-1"}}}}
+	s, err := NewServer(client, fakeAuthenticator{user: "viewer", pass: "secret"}, map[string]manager.Role{"viewer": manager.RoleViewer}, nil, "", "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	token, _ := s.sessions.Create("viewer", manager.RoleViewer)
+	req := httptest.NewRequest(http.MethodGet, "/vms", nil)
+	req.AddCookie(&http.Cookie{Name: sessionCookieName, Value: token})
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, req)
+	body := rec.Body.String()
+	for _, forbidden := range []string{"Create VM", "Delete</button>", ">API Keys</a>"} {
+		if strings.Contains(body, forbidden) {
+			t.Errorf("Viewer page unexpectedly contains %q", forbidden)
+		}
+	}
+	if !strings.Contains(body, "/vms/vm-1") {
+		t.Error("Viewer should still see the VM detail link")
 	}
 }
 

@@ -83,8 +83,13 @@ type pageData struct {
 	// states like a request that slipped past ServeHTTP's own gate.
 	// The nav partial shows "logged in as <Username> (<Role>)" only
 	// when Username is non-empty.
-	Username string
-	Role     string
+	Username   string
+	Role       string
+	CanOperate bool
+	CanAdmin   bool
+
+	// VM is the single virtual machine rendered by the detail page.
+	VM vmView
 
 	// LoginError and NextURL are only used by the login page: a failed
 	// attempt's message, and the originally-requested path to return to
@@ -346,9 +351,13 @@ func (s *Server) currentSession(r *http.Request) (sessionInfo, bool) {
 // exists; both leave Username/Role empty.
 func (s *Server) withAuthFields(r *http.Request, pd pageData) pageData {
 	pd.AuthEnabled = s.auth != nil
+	pd.CanOperate = s.auth == nil
+	pd.CanAdmin = s.auth == nil
 	if info, ok := s.currentSession(r); ok {
 		pd.Username = info.username
 		pd.Role = string(info.role)
+		pd.CanOperate = info.role.Satisfies(manager.RoleOperator)
+		pd.CanAdmin = info.role.Satisfies(manager.RoleAdmin)
 	}
 	return pd
 }
@@ -406,6 +415,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /host/{id}", s.handleHostPage)
 	s.mux.HandleFunc("GET /vms", s.handleVMsPage)
 	s.mux.HandleFunc("GET /vms/rows", s.handleListVMs)
+	s.mux.HandleFunc("GET /vms/{id}", s.handleVMPage)
 	s.mux.HandleFunc("GET /images", s.handleImagesPage)
 	s.mux.HandleFunc("GET /isos", s.handleListISOs)
 	s.mux.HandleFunc("GET /vms/{id}/console", s.handleConsolePage)
@@ -580,6 +590,28 @@ func (s *Server) handleVMsPage(w http.ResponseWriter, r *http.Request) {
 	s.render(w, "vms_page", s.withAuthFields(r, pageData{Error: errMsg, VMs: vms, SortBy: sortBy, SortDir: dir, ActivePage: "vms"}))
 }
 
+// handleVMPage renders one VM as an operational summary. It deliberately
+// uses the existing GetVM read path, so the page has the same leader-forwarded
+// consistency semantics as the list without introducing another API surface.
+func (s *Server) handleVMPage(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	resp, err := s.client.GetVM(r.Context(), &rpcpb.GetVMRequest{Id: id})
+	if err != nil {
+		s.render(w, "vm_page", s.withAuthFields(r, pageData{Error: err.Error(), ActivePage: "vms"}))
+		return
+	}
+	if resp.GetError() != "" {
+		s.render(w, "vm_page", s.withAuthFields(r, pageData{Error: resp.GetError(), ActivePage: "vms"}))
+		return
+	}
+	if !resp.GetFound() {
+		w.WriteHeader(http.StatusNotFound)
+		s.render(w, "vm_page", s.withAuthFields(r, pageData{Error: "virtual machine not found", ActivePage: "vms"}))
+		return
+	}
+	s.render(w, "vm_page", s.withAuthFields(r, pageData{VM: fromRPCVM(resp.GetVm()), ActivePage: "vms"}))
+}
+
 // handleImagesPage serves the Images (ISO upload/list) page ("/images").
 func (s *Server) handleImagesPage(w http.ResponseWriter, r *http.Request) {
 	isos, errMsg := s.currentISOs(r)
@@ -662,7 +694,7 @@ func (s *Server) knownNodes(r *http.Request) ([]string, error) {
 func (s *Server) handleListVMs(w http.ResponseWriter, r *http.Request) {
 	sortBy, dir := parseSort(r)
 	vms, errMsg := s.currentVMs(r, sortBy, dir)
-	s.renderVMRows(w, errMsg, vms)
+	s.renderVMRows(w, errMsg, vms, s.withAuthFields(r, pageData{}).CanOperate)
 }
 
 // renderVMRows renders the vm_rows fragment for a swap into #vm-rows -
@@ -673,13 +705,13 @@ func (s *Server) handleListVMs(w http.ResponseWriter, r *http.Request) {
 // rather than embedded in the response body - see vm_rows.html's own
 // comment for why mixing an out-of-band <div> into a <tbody>-targeted
 // response corrupted the table on every poll.
-func (s *Server) renderVMRows(w http.ResponseWriter, errMsg string, vms []vmView) {
+func (s *Server) renderVMRows(w http.ResponseWriter, errMsg string, vms []vmView, canOperate bool) {
 	if errMsg != "" {
 		if b, err := json.Marshal(map[string]string{"vmError": errMsg}); err == nil {
 			w.Header().Set("HX-Trigger", string(b))
 		}
 	}
-	s.render(w, "vm_rows", pageData{Error: errMsg, VMs: vms})
+	s.render(w, "vm_rows", pageData{Error: errMsg, VMs: vms, CanOperate: canOperate})
 }
 
 // handleCreateVM lives on its own page (/vms/new, see new_vm.html) now
@@ -768,17 +800,29 @@ func parseFirewallRuleRows(r *http.Request) []*rpcpb.FirewallRule {
 func (s *Server) handleDeleteVM(w http.ResponseWriter, r *http.Request) {
 	resp, err := s.client.DeleteVM(r.Context(), &rpcpb.DeleteVMRequest{Id: r.PathValue("id")})
 	if err != nil {
+		if r.Header.Get("HX-Target") == "vm-detail-error" {
+			s.renderCreateError(w, err.Error())
+			return
+		}
 		s.renderRowsWithError(w, r, err.Error())
 		return
 	}
 	if resp.GetError() != "" {
+		if r.Header.Get("HX-Target") == "vm-detail-error" {
+			s.renderCreateError(w, resp.GetError())
+			return
+		}
 		s.renderRowsWithError(w, r, resp.GetError())
+		return
+	}
+	if r.Header.Get("HX-Target") == "vm-detail-error" {
+		w.Header().Set("HX-Redirect", "/vms")
 		return
 	}
 
 	sortBy, dir := parseSort(r)
 	vms, errMsg := s.currentVMs(r, sortBy, dir)
-	s.renderVMRows(w, errMsg, vms)
+	s.renderVMRows(w, errMsg, vms, s.withAuthFields(r, pageData{}).CanOperate)
 }
 
 // renderRowsWithError re-fetches the current (unchanged) VM list and
@@ -790,7 +834,7 @@ func (s *Server) renderRowsWithError(w http.ResponseWriter, r *http.Request, msg
 	if fetchErr != "" {
 		msg = msg + "; additionally failed to refresh list: " + fetchErr
 	}
-	s.renderVMRows(w, msg, vms)
+	s.renderVMRows(w, msg, vms, s.withAuthFields(r, pageData{}).CanOperate)
 }
 
 // handleListISOs serves just the iso_rows fragment, for refreshing the
@@ -798,7 +842,7 @@ func (s *Server) renderRowsWithError(w http.ResponseWriter, r *http.Request, msg
 // same pattern as handleListVMs/vm_rows.
 func (s *Server) handleListISOs(w http.ResponseWriter, r *http.Request) {
 	isos, errMsg := s.currentISOs(r)
-	s.render(w, "iso_rows", pageData{Error: errMsg, ISOs: isos})
+	s.render(w, "iso_rows", s.withAuthFields(r, pageData{Error: errMsg, ISOs: isos}))
 }
 
 // handleUploadISO streams a multipart file upload directly into
@@ -924,7 +968,7 @@ func (s *Server) renderISOPanelResult(w http.ResponseWriter, r *http.Request, fo
 	if formErr == "" && successName != "" {
 		success = fmt.Sprintf("Uploaded %s successfully.", successName)
 	}
-	s.render(w, "iso_panel", pageData{ISOFormError: formErr, ISOFormSuccess: success, ISOs: isos})
+	s.render(w, "iso_panel", s.withAuthFields(r, pageData{ISOFormError: formErr, ISOFormSuccess: success, ISOs: isos}))
 }
 
 func (s *Server) handleDeleteISO(w http.ResponseWriter, r *http.Request) {
@@ -1001,7 +1045,7 @@ func (s *Server) renderNetworkPanelResult(w http.ResponseWriter, r *http.Request
 			formErr += "; additionally failed to refresh list: " + fetchErr
 		}
 	}
-	s.render(w, "network_panel", pageData{NetworkFormError: formErr, Networks: networks})
+	s.render(w, "network_panel", s.withAuthFields(r, pageData{NetworkFormError: formErr, Networks: networks}))
 }
 
 // currentJails fetches the current list of jails, returning an error
@@ -1092,7 +1136,7 @@ func (s *Server) renderJailPanelResult(w http.ResponseWriter, r *http.Request, f
 			formErr += "; additionally failed to refresh list: " + fetchErr
 		}
 	}
-	s.render(w, "jail_panel", pageData{JailFormError: formErr, Jails: jails})
+	s.render(w, "jail_panel", s.withAuthFields(r, pageData{JailFormError: formErr, Jails: jails}))
 }
 
 // currentAPIKeys fetches the current list of API keys (metadata only),

@@ -5,7 +5,7 @@
 <body>
   {{template "nav" .}}
   {{template "page_header" (pageHeader "Images" "Verified installer media and raw base disks stored on this node.")}}
-  <form id="iso-upload-form" class="upload-iso" hx-post="/isos" hx-target="#iso-panel" hx-swap="innerHTML" hx-encoding="multipart/form-data">
+  {{if .CanOperate}}<form id="iso-upload-form" class="upload-iso" hx-post="/isos" hx-target="#iso-panel" hx-swap="innerHTML" hx-encoding="multipart/form-data">
     <label>Expected SHA-256
       <input type="text" name="expected_sha256" required pattern="[0-9a-fA-F]{64}" title="64 hex characters" size="64">
     </label>
@@ -38,6 +38,7 @@
     });
   })();
   </script>
+  {{end}}
   <div class="panel">
   <div id="iso-panel">
     {{template "iso_panel" .}}

@@ -6,7 +6,7 @@
   <td>{{.SizeBytes}}</td>
   <td><code>{{.SHA256}}</code></td>
   <td>
-    <button hx-delete="/isos/{{.Name}}" hx-target="#iso-panel" hx-swap="innerHTML" hx-confirm="Delete {{.Name}}?">Delete</button>
+    {{if $.CanOperate}}<button class="danger" hx-delete="/isos/{{.Name}}" hx-target="#iso-panel" hx-swap="innerHTML" hx-confirm="Delete {{.Name}}?">Delete</button>{{end}}
   </td>
 </tr>
 {{else}}

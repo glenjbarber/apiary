@@ -5,13 +5,14 @@
 <body>
   {{template "nav" .}}
   {{template "page_header" (pageHeader "Networks" "Cluster network definitions and local bridge health.")}}
-  <form class="create-vm" hx-post="/networks" hx-target="#network-panel" hx-swap="innerHTML">
+  {{if .CanOperate}}<form class="inline-form panel" style="margin-bottom:1rem" hx-post="/networks" hx-target="#network-panel" hx-swap="innerHTML">
     <label>ID <input type="text" name="id" required></label>
     <label>Name <input type="text" name="name"></label>
     <label>VLAN ID <input type="number" name="vlan_id" value="0" min="0" max="4094"></label>
     <label>Subnet (CIDR) <input type="text" name="subnet" placeholder="10.60.0.0/24" required></label>
     <button type="submit">Create</button>
   </form>
+  {{end}}
   <div class="panel">
   <div id="network-panel">
     {{template "network_panel" .}}
@@ -48,7 +49,7 @@
     {{end}}
   </td>
   <td>
-    <button hx-delete="/networks/{{.ID}}" hx-target="#network-panel" hx-swap="innerHTML" hx-confirm="Delete network {{.ID}}?">Delete</button>
+    {{if $.CanOperate}}<button class="danger" hx-delete="/networks/{{.ID}}" hx-target="#network-panel" hx-swap="innerHTML" hx-confirm="Delete network {{.ID}}?">Delete</button>{{end}}
   </td>
 </tr>
 {{else}}

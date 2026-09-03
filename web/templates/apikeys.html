@@ -12,7 +12,7 @@
     turned back off (short of restoring an older raft snapshot), even
     if every key is later revoked.
   </p>
-  <form class="create-vm" hx-post="/apikeys" hx-target="#apikey-panel" hx-swap="innerHTML">
+  <form class="create-vm inline-form" hx-post="/apikeys" hx-target="#apikey-panel" hx-swap="innerHTML">
     <label>Name <input type="text" name="name" required></label>
     <label>Role
       <select name="role">

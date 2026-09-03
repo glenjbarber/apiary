@@ -4,7 +4,11 @@
 {{template "head" .}}
 <body>
   {{template "nav" .}}
-  {{template "page_header" (pageHeader "Jails" "FreeBSD workloads, placement, and replication state." "<a class='button' href='/jails/new'>Create Jail</a>")}}
+  {{if .CanOperate}}
+    {{template "page_header" (pageHeader "Jails" "FreeBSD workloads, placement, and replication state." "<a class='button' href='/jails/new'>Create Jail</a>")}}
+  {{else}}
+    {{template "page_header" (pageHeader "Jails" "FreeBSD workloads, placement, and replication state.")}}
+  {{end}}
   <div class="panel">
   <div id="jail-panel">
     {{template "jail_panel" .}}
@@ -37,7 +41,7 @@
   <td>{{.DesiredState}}</td>
   <td><span class="badge {{.Phase}}"{{if .PhaseError}} title="{{.PhaseError}}"{{end}}>{{.Phase}}</span>{{if .PhaseError}}<div class="error">{{.PhaseError}}</div>{{end}}</td>
   <td>
-    <button hx-delete="/jails/{{.ID}}" hx-target="#jail-panel" hx-swap="innerHTML" hx-confirm="Delete jail {{.ID}}?">Delete</button>
+    {{if $.CanOperate}}<button class="danger" hx-delete="/jails/{{.ID}}" hx-target="#jail-panel" hx-swap="innerHTML" hx-confirm="Delete jail {{.ID}}?">Delete</button>{{end}}
   </td>
 </tr>
 {{else}}

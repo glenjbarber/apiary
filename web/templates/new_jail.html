@@ -5,7 +5,7 @@
 <body>
   {{template "nav" .}}
   {{template "page_header" (pageHeader "Create jail" "Define a FreeBSD jail's identity and placement." "<a href='/jails'>Cancel</a>")}}
-  <form class="create-vm panel" style="margin-top:1rem" hx-post="/jails" hx-target="#create-error" hx-swap="innerHTML">
+  <form class="create-vm inline-form panel" style="margin-top:1rem" hx-post="/jails" hx-target="#create-error" hx-swap="innerHTML">
     <label>ID <input type="text" name="id" required></label>
     <label>Name <input type="text" name="name"></label>
     <label>Hostname <input type="text" name="hostname"></label>
