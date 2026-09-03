@@ -6,7 +6,37 @@ web frontend.
 
 Apiary is built around bhyve-backed virtual machines and jails under one
 unified abstraction, with cluster consensus handled by a dedicated raft
-agent rather than a bolted-on external dependency.
+agent rather than a bolted-on external dependency. Each physical machine
+in the cluster is a **hive**; the VMs and jails it hosts are its
+**comb**, made up of individual **cells**.
+
+## Vocabulary
+
+Apiary's product language follows the physical structure of a real
+apiary, not the bees themselves:
+
+- **Apiary** — the complete system: every hive, and everything running
+  on it.
+- **Hive** — one physical Apiary node/host.
+- **Comb** — the VMs and jails belonging to one hive, collectively.
+- **Cell** — one individual VM or jail.
+
+That gives `Apiary > Hive > Comb > Cell` — "Hive `apiarium` is
+unreachable," "view this hive's comb," "cell `web-01` is running,"
+"move cell `web-01` to another hive." **Frame** is reserved for a
+possible future subdivision inside a hive (in real beekeeping
+equipment, a frame supports a section of comb) — the hierarchy can
+extend to `Apiary > Hive > Frame > Comb > Cell` later without changing
+what the existing terms mean. "Colony" is deliberately avoided for a
+node: it means the living bee population rather than physical
+infrastructure, and would be easy to confuse with Apiary's own cluster
+concept.
+
+These are product and UI terms, not a code migration: they don't rename
+any Go type, protobuf field, API resource, CLI flag, or storage
+identifier. The rest of this document, the code, and every ADR
+continue to say "node," "VM," and "jail," matching what's actually in
+`api/`, `internal/`, and `cmd/`.
 
 ## Status
 
