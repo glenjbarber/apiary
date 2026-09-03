@@ -52,6 +52,11 @@ type vmView struct {
 	ReplicaNodeID string
 	BaseImageName string
 	FirewallRules []firewallRuleView
+
+	// FirewallPaused, when true, means FirewallRules are temporarily
+	// not enforced (everything allowed) without discarding them - see
+	// ADR-0049's Machine Configuration page.
+	FirewallPaused bool
 }
 
 type firewallRuleView struct {
@@ -61,13 +66,26 @@ type firewallRuleView struct {
 	PortRange string
 }
 
+// nodeConfigView is the template-facing shape for this node's own
+// local settings (ADR-0049) - see api/rpc/manager.proto's
+// GetNodeConfigResponse.
+type nodeConfigView struct {
+	Uplink    string
+	NATUplink string
+}
+
+func fromRPCNodeConfig(d *rpcpb.GetNodeConfigResponse) nodeConfigView {
+	return nodeConfigView{Uplink: d.GetUplink(), NATUplink: d.GetNatUplink()}
+}
+
 // networkView is the template-facing shape for a NetworkDefinition.
 type networkView struct {
-	ID         string
-	Name       string
-	VLANID     uint32
-	Subnet     string
-	BridgeName string
+	ID              string
+	Name            string
+	VLANID          uint32
+	Subnet          string
+	BridgeName      string
+	ExternalGateway string
 
 	// BridgeStatus is "up", "down", or "unknown" (this node has no VLAN
 	// support configured, or the bridge doesn't exist here yet) -
@@ -77,12 +95,13 @@ type networkView struct {
 
 func fromRPCNetwork(n *rpcpb.NetworkDefinition) networkView {
 	return networkView{
-		ID:           n.GetId(),
-		Name:         n.GetName(),
-		VLANID:       n.GetVlanId(),
-		Subnet:       n.GetSubnet(),
-		BridgeName:   n.GetBridgeName(),
-		BridgeStatus: n.GetBridgeStatus(),
+		ID:              n.GetId(),
+		Name:            n.GetName(),
+		VLANID:          n.GetVlanId(),
+		Subnet:          n.GetSubnet(),
+		BridgeName:      n.GetBridgeName(),
+		ExternalGateway: n.GetExternalGateway(),
+		BridgeStatus:    n.GetBridgeStatus(),
 	}
 }
 
@@ -262,20 +281,21 @@ func fromRPCVM(d *rpcpb.VMDefinition) vmView {
 		return vmView{}
 	}
 	v := vmView{
-		ID:            d.GetId(),
-		Name:          d.GetName(),
-		VCPUs:         d.GetVcpus(),
-		MemoryMB:      d.GetMemoryMb(),
-		NodeID:        d.GetNodeId(),
-		DesiredState:  stateFromRPC(d.GetDesiredState()),
-		Phase:         phaseFromRPC(d.GetPhase()),
-		PhaseError:    d.GetPhaseError(),
-		ISOName:       d.GetIsoName(),
-		NetworkID:     d.GetNetworkId(),
-		IPAddress:     d.GetIpAddress(),
-		MACAddress:    d.GetMacAddress(),
-		ReplicaNodeID: d.GetReplicaNodeId(),
-		BaseImageName: d.GetBaseImageName(),
+		ID:             d.GetId(),
+		Name:           d.GetName(),
+		VCPUs:          d.GetVcpus(),
+		MemoryMB:       d.GetMemoryMb(),
+		NodeID:         d.GetNodeId(),
+		DesiredState:   stateFromRPC(d.GetDesiredState()),
+		Phase:          phaseFromRPC(d.GetPhase()),
+		PhaseError:     d.GetPhaseError(),
+		ISOName:        d.GetIsoName(),
+		NetworkID:      d.GetNetworkId(),
+		IPAddress:      d.GetIpAddress(),
+		MACAddress:     d.GetMacAddress(),
+		ReplicaNodeID:  d.GetReplicaNodeId(),
+		BaseImageName:  d.GetBaseImageName(),
+		FirewallPaused: d.GetFirewallPaused(),
 	}
 	for _, rule := range d.GetFirewallRules() {
 		v.FirewallRules = append(v.FirewallRules, firewallRuleView{

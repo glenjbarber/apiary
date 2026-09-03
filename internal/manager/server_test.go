@@ -11,6 +11,7 @@ import (
 	rpcpb "github.com/glenjbarber/apiary/api/rpc"
 	"github.com/glenjbarber/apiary/internal/hoststats"
 	"github.com/glenjbarber/apiary/internal/isostore"
+	"github.com/glenjbarber/apiary/internal/nodeconfig"
 )
 
 // fakeISOManager is a fake isoManager for testing Server's ISO RPCs
@@ -102,7 +103,7 @@ func chunkMsg(data string) *rpcpb.UploadISORequest {
 
 func TestServer_UploadISO_StreamsChunksIntoStore(t *testing.T) {
 	isos := &fakeISOManager{}
-	s := NewServer(nil, "node-1", isos, nil, nil, nil, nil, "")
+	s := NewServer(nil, "node-1", isos, nil, nil, nil, nil, "", nil, nil)
 
 	stream := &fakeUploadStream{reqs: []*rpcpb.UploadISORequest{
 		metadataMsg("test.iso", "deadbeef"),
@@ -128,7 +129,7 @@ func TestServer_UploadISO_StreamsChunksIntoStore(t *testing.T) {
 }
 
 func TestServer_UploadISO_MissingMetadataFirstIsError(t *testing.T) {
-	s := NewServer(nil, "node-1", &fakeISOManager{}, nil, nil, nil, nil, "")
+	s := NewServer(nil, "node-1", &fakeISOManager{}, nil, nil, nil, nil, "", nil, nil)
 	stream := &fakeUploadStream{reqs: []*rpcpb.UploadISORequest{chunkMsg("oops")}}
 
 	if err := s.UploadISO(stream); err == nil {
@@ -138,7 +139,7 @@ func TestServer_UploadISO_MissingMetadataFirstIsError(t *testing.T) {
 
 func TestServer_UploadISO_SaveErrorReportedInResponse(t *testing.T) {
 	isos := &fakeISOManager{saveErr: errors.New("sha256 mismatch")}
-	s := NewServer(nil, "node-1", isos, nil, nil, nil, nil, "")
+	s := NewServer(nil, "node-1", isos, nil, nil, nil, nil, "", nil, nil)
 	stream := &fakeUploadStream{reqs: []*rpcpb.UploadISORequest{
 		metadataMsg("test.iso", "wronghash"),
 		chunkMsg("data"),
@@ -157,7 +158,7 @@ func TestServer_ListISOs(t *testing.T) {
 		{Name: "a.iso", SizeBytes: 100, SHA256: "aaa"},
 		{Name: "b.iso", SizeBytes: 200, SHA256: "bbb"},
 	}}
-	s := NewServer(nil, "node-1", isos, nil, nil, nil, nil, "")
+	s := NewServer(nil, "node-1", isos, nil, nil, nil, nil, "", nil, nil)
 
 	resp, err := s.ListISOs(context.Background(), &rpcpb.ListISOsRequest{})
 	if err != nil {
@@ -170,7 +171,7 @@ func TestServer_ListISOs(t *testing.T) {
 
 func TestServer_ListISOs_ErrorSurfacedInResponse(t *testing.T) {
 	isos := &fakeISOManager{listErr: errors.New("disk error")}
-	s := NewServer(nil, "node-1", isos, nil, nil, nil, nil, "")
+	s := NewServer(nil, "node-1", isos, nil, nil, nil, nil, "", nil, nil)
 
 	resp, err := s.ListISOs(context.Background(), &rpcpb.ListISOsRequest{})
 	if err != nil {
@@ -183,7 +184,7 @@ func TestServer_ListISOs_ErrorSurfacedInResponse(t *testing.T) {
 
 func TestServer_DeleteISO(t *testing.T) {
 	isos := &fakeISOManager{}
-	s := NewServer(nil, "node-1", isos, nil, nil, nil, nil, "")
+	s := NewServer(nil, "node-1", isos, nil, nil, nil, nil, "", nil, nil)
 
 	resp, err := s.DeleteISO(context.Background(), &rpcpb.DeleteISORequest{Name: "old.iso"})
 	if err != nil {
@@ -198,7 +199,7 @@ func TestServer_DeleteISO(t *testing.T) {
 }
 
 func TestServer_HostStats(t *testing.T) {
-	s := NewServer(nil, "node-1", &fakeISOManager{}, nil, nil, nil, nil, "")
+	s := NewServer(nil, "node-1", &fakeISOManager{}, nil, nil, nil, nil, "", nil, nil)
 	s.statsGather = func(context.Context) *hoststats.Snapshot {
 		return &hoststats.Snapshot{
 			CPU:    hoststats.CPUInfo{Cores: 4, LoadAvg1: 1.5},
@@ -234,5 +235,115 @@ func TestServer_HostStats(t *testing.T) {
 	}
 	if len(resp.GetErrors()) != 1 || resp.GetErrors()[0] != "disks: partial failure" {
 		t.Errorf("Errors = %v, want [disks: partial failure]", resp.GetErrors())
+	}
+}
+
+// fakeNodeConfigStore is a fake nodeConfigStore, without any real file
+// I/O involved.
+type fakeNodeConfigStore struct {
+	cfg      nodeconfig.Config
+	loadErr  error
+	saveErr  error
+	lastSave nodeconfig.Config
+}
+
+func (f *fakeNodeConfigStore) Load() (nodeconfig.Config, error) {
+	if f.loadErr != nil {
+		return nodeconfig.Config{}, f.loadErr
+	}
+	return f.cfg, nil
+}
+
+func (f *fakeNodeConfigStore) Save(cfg nodeconfig.Config) error {
+	if f.saveErr != nil {
+		return f.saveErr
+	}
+	f.lastSave = cfg
+	return nil
+}
+
+func TestServer_GetNodeConfig(t *testing.T) {
+	store := &fakeNodeConfigStore{cfg: nodeconfig.Config{Uplink: "re0", NATUplink: "bridge0"}}
+	s := NewServer(nil, "node-1", nil, nil, nil, nil, nil, "", nil, store)
+
+	resp, err := s.GetNodeConfig(context.Background(), &rpcpb.GetNodeConfigRequest{})
+	if err != nil {
+		t.Fatalf("GetNodeConfig() error: %v", err)
+	}
+	if resp.GetUplink() != "re0" || resp.GetNatUplink() != "bridge0" {
+		t.Errorf("GetNodeConfig() = %+v, want Uplink=re0 NatUplink=bridge0", resp)
+	}
+}
+
+func TestServer_GetNodeConfig_NotConfiguredIsError(t *testing.T) {
+	s := NewServer(nil, "node-1", nil, nil, nil, nil, nil, "", nil, nil)
+
+	resp, err := s.GetNodeConfig(context.Background(), &rpcpb.GetNodeConfigRequest{})
+	if err != nil {
+		t.Fatalf("GetNodeConfig() error: %v", err)
+	}
+	if resp.GetError() == "" {
+		t.Errorf("GetNodeConfig() error field = empty, want a not-configured message")
+	}
+}
+
+func TestServer_UpdateNodeConfig(t *testing.T) {
+	store := &fakeNodeConfigStore{}
+	s := NewServer(nil, "node-1", nil, nil, nil, nil, nil, "", nil, store)
+
+	resp, err := s.UpdateNodeConfig(context.Background(), &rpcpb.UpdateNodeConfigRequest{Uplink: "em0", NatUplink: "em0"})
+	if err != nil {
+		t.Fatalf("UpdateNodeConfig() error: %v", err)
+	}
+	if resp.GetError() != "" {
+		t.Fatalf("UpdateNodeConfig() returned error: %s", resp.GetError())
+	}
+	if store.lastSave.Uplink != "em0" || store.lastSave.NATUplink != "em0" {
+		t.Errorf("saved config = %+v, want Uplink=em0 NATUplink=em0", store.lastSave)
+	}
+}
+
+// fakeQuotaSetter is a fake quotaSetter, without any real zfs(8) binary
+// involved.
+type fakeQuotaSetter struct {
+	err          error
+	lastName     string
+	lastProperty string
+	lastValue    string
+}
+
+func (f *fakeQuotaSetter) SetProperty(_ context.Context, name, prop, value string) error {
+	if f.err != nil {
+		return f.err
+	}
+	f.lastName, f.lastProperty, f.lastValue = name, prop, value
+	return nil
+}
+
+func TestServer_SetDatasetQuota(t *testing.T) {
+	zfsMgr := &fakeQuotaSetter{}
+	s := NewServer(nil, "node-1", nil, nil, nil, nil, nil, "", zfsMgr, nil)
+
+	resp, err := s.SetDatasetQuota(context.Background(), &rpcpb.SetDatasetQuotaRequest{DatasetName: "vm-1", Quota: "10G"})
+	if err != nil {
+		t.Fatalf("SetDatasetQuota() error: %v", err)
+	}
+	if resp.GetError() != "" {
+		t.Fatalf("SetDatasetQuota() returned error: %s", resp.GetError())
+	}
+	if zfsMgr.lastName != "vm-1" || zfsMgr.lastProperty != "quota" || zfsMgr.lastValue != "10G" {
+		t.Errorf("SetProperty called with (%q, %q, %q), want (vm-1, quota, 10G)", zfsMgr.lastName, zfsMgr.lastProperty, zfsMgr.lastValue)
+	}
+}
+
+func TestServer_SetDatasetQuota_NotConfiguredIsError(t *testing.T) {
+	s := NewServer(nil, "node-1", nil, nil, nil, nil, nil, "", nil, nil)
+
+	resp, err := s.SetDatasetQuota(context.Background(), &rpcpb.SetDatasetQuotaRequest{DatasetName: "vm-1", Quota: "10G"})
+	if err != nil {
+		t.Fatalf("SetDatasetQuota() error: %v", err)
+	}
+	if resp.GetError() == "" {
+		t.Errorf("SetDatasetQuota() error field = empty, want a not-configured message")
 	}
 }

@@ -158,21 +158,23 @@ func fromRPCJail(d *rpcpb.JailDefinition) jail {
 // network is the REST-facing JSON shape for a NetworkDefinition,
 // mirroring vm/jail's own shape and reasoning.
 type network struct {
-	ID           string `json:"id"`
-	Name         string `json:"name,omitempty"`
-	VLANID       uint32 `json:"vlan_id,omitempty"`
-	Subnet       string `json:"subnet"`
-	BridgeName   string `json:"bridge_name,omitempty"`
-	BridgeStatus string `json:"bridge_status,omitempty"`
+	ID              string `json:"id"`
+	Name            string `json:"name,omitempty"`
+	VLANID          uint32 `json:"vlan_id,omitempty"`
+	Subnet          string `json:"subnet"`
+	BridgeName      string `json:"bridge_name,omitempty"`
+	ExternalGateway string `json:"external_gateway,omitempty"`
+	BridgeStatus    string `json:"bridge_status,omitempty"`
 }
 
 func toRPCNetwork(n network) *rpcpb.NetworkDefinition {
 	return &rpcpb.NetworkDefinition{
-		Id:         n.ID,
-		Name:       n.Name,
-		VlanId:     n.VLANID,
-		Subnet:     n.Subnet,
-		BridgeName: n.BridgeName,
+		Id:              n.ID,
+		Name:            n.Name,
+		VlanId:          n.VLANID,
+		Subnet:          n.Subnet,
+		BridgeName:      n.BridgeName,
+		ExternalGateway: n.ExternalGateway,
 	}
 }
 
@@ -181,11 +183,12 @@ func fromRPCNetwork(d *rpcpb.NetworkDefinition) network {
 		return network{}
 	}
 	return network{
-		ID:           d.GetId(),
-		Name:         d.GetName(),
-		VLANID:       d.GetVlanId(),
-		Subnet:       d.GetSubnet(),
-		BridgeName:   d.GetBridgeName(),
-		BridgeStatus: d.GetBridgeStatus(),
+		ID:              d.GetId(),
+		Name:            d.GetName(),
+		VLANID:          d.GetVlanId(),
+		Subnet:          d.GetSubnet(),
+		BridgeName:      d.GetBridgeName(),
+		ExternalGateway: d.GetExternalGateway(),
+		BridgeStatus:    d.GetBridgeStatus(),
 	}
 }

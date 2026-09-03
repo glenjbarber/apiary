@@ -180,7 +180,7 @@ func newManagerdRPCClientFull(t *testing.T, raftdSocket, nodeID string, vnc VNCL
 		t.Fatalf("Listen(tcp) error: %v", err)
 	}
 
-	srv := NewServer(raftClient, nodeID, isostore.New(t.TempDir()), vnc, serialLog, vlanMgr, nil, "")
+	srv := NewServer(raftClient, nodeID, isostore.New(t.TempDir()), vnc, serialLog, vlanMgr, nil, "", nil, nil)
 	// Wired unconditionally, mirroring cmd/managerd/main.go exactly - this
 	// is a no-op for every pre-existing test here (none of them ever
 	// create an API key, so checkAuth's "zero keys = open" branch always
@@ -1216,6 +1216,68 @@ func TestIntegration_MigrateVM_SwapsNodeAndReplica(t *testing.T) {
 	}
 	if getResp.GetVm().GetNodeId() != "node-b" || getResp.GetVm().GetReplicaNodeId() != "node-a" {
 		t.Errorf("GetVM() after migrate = %+v, want node_id=node-b replica_node_id=node-a", getResp.GetVm())
+	}
+}
+
+// TestIntegration_SetVMFirewallPaused_TouchesOnlyThatField guards the
+// exact reason ADR-0049 uses a dedicated command instead of routing
+// through UpdateVM (a full-record replace): every other field must
+// survive a real round trip through raft untouched.
+func TestIntegration_SetVMFirewallPaused_TouchesOnlyThatField(t *testing.T) {
+	raftdSocket := newRaftdUDSSocket(t)
+	client := newManagerdRPCClient(t, raftdSocket)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if _, err := client.CreateVM(ctx, &rpcpb.CreateVMRequest{
+		Vm: &rpcpb.VMDefinition{
+			Id: "vm-1", Name: "web-1", Vcpus: 2, NodeId: "node-a",
+			FirewallRules: []*rpcpb.FirewallRule{{Direction: "in", Action: "block", Protocol: "tcp", PortRange: "22"}},
+		},
+	}); err != nil {
+		t.Fatalf("CreateVM() error: %v", err)
+	}
+
+	resp, err := client.SetVMFirewallPaused(ctx, &rpcpb.SetVMFirewallPausedRequest{Id: "vm-1", Paused: true})
+	if err != nil {
+		t.Fatalf("SetVMFirewallPaused() error: %v", err)
+	}
+	if resp.GetError() != "" {
+		t.Fatalf("SetVMFirewallPaused() returned error: %s", resp.GetError())
+	}
+	if !resp.GetVm().GetFirewallPaused() {
+		t.Errorf("FirewallPaused = false, want true")
+	}
+	if resp.GetVm().GetName() != "web-1" || resp.GetVm().GetVcpus() != 2 {
+		t.Errorf("vm = %+v, want name/vcpus preserved from the original definition", resp.GetVm())
+	}
+	if len(resp.GetVm().GetFirewallRules()) != 1 || resp.GetVm().GetFirewallRules()[0].GetPortRange() != "22" {
+		t.Errorf("FirewallRules = %v, want the original rule to survive untouched", resp.GetVm().GetFirewallRules())
+	}
+
+	getResp, err := client.GetVM(ctx, &rpcpb.GetVMRequest{Id: "vm-1"})
+	if err != nil || !getResp.GetFound() {
+		t.Fatalf("GetVM() after pause = (found=%v, err=%v)", getResp.GetFound(), err)
+	}
+	if !getResp.GetVm().GetFirewallPaused() {
+		t.Errorf("GetVM() after pause: FirewallPaused = false, want true")
+	}
+}
+
+func TestIntegration_SetVMFirewallPaused_MissingIDIsError(t *testing.T) {
+	raftdSocket := newRaftdUDSSocket(t)
+	client := newManagerdRPCClient(t, raftdSocket)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	resp, err := client.SetVMFirewallPaused(ctx, &rpcpb.SetVMFirewallPausedRequest{Id: "does-not-exist", Paused: true})
+	if err != nil {
+		t.Fatalf("SetVMFirewallPaused() error: %v", err)
+	}
+	if resp.GetError() == "" {
+		t.Fatalf("SetVMFirewallPaused() error = empty, want a missing-id rejection")
 	}
 }
 

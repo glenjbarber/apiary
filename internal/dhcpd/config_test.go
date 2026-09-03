@@ -88,6 +88,35 @@ func TestRenderConfig_DNSServerOptionScopedToInterface(t *testing.T) {
 	}
 }
 
+// TestRenderConfig_GatewayOptionOmittedByDefault guards the real bug
+// this field fixes: without an explicit external Gateway, dnsmasq's own
+// default (advertise the interface's own address as the router) is
+// exactly what's wanted when Apiary's own bridge is the gateway, so
+// RenderConfig must not override that on its own.
+func TestRenderConfig_GatewayOptionOmittedByDefault(t *testing.T) {
+	body, err := RenderConfig([]NetworkScope{
+		{Bridge: "apiary-net-1", Subnet: "10.60.0.0/24"},
+	})
+	if err != nil {
+		t.Fatalf("RenderConfig() error: %v", err)
+	}
+	if strings.Contains(body, ",3,") {
+		t.Errorf("RenderConfig() should not emit a router option without a configured Gateway, got:\n%s", body)
+	}
+}
+
+func TestRenderConfig_GatewayOptionScopedToInterface(t *testing.T) {
+	body, err := RenderConfig([]NetworkScope{
+		{Bridge: "apiary-net-1", Subnet: "10.60.0.0/24", Gateway: "10.60.0.1"},
+	})
+	if err != nil {
+		t.Fatalf("RenderConfig() error: %v", err)
+	}
+	if !containsLine(body, "dhcp-option=interface:apiary-net-1,3,10.60.0.1") {
+		t.Errorf("RenderConfig() missing the gateway/router option, got:\n%s", body)
+	}
+}
+
 func TestRenderConfig_MultipleScopes(t *testing.T) {
 	body, err := RenderConfig([]NetworkScope{
 		{Bridge: "apiary-net-1", Subnet: "10.60.0.0/24"},
@@ -138,6 +167,56 @@ func TestDHCPRange_SmallerSubnet(t *testing.T) {
 	}
 	if start != "192.168.5.2" || end != "192.168.5.14" || mask != "255.255.255.240" {
 		t.Errorf("dhcpRange(/28) = (%q, %q, %q), want (192.168.5.2, 192.168.5.14, 255.255.255.240)", start, end, mask)
+	}
+}
+
+// TestFilterStaleLeases_EvictsLeaseConflictingWithReservation guards
+// the real bug this function fixes: dnsmasq refuses to honor a
+// dhcp-host reservation for an address still recorded as leased to a
+// different MAC in its own lease file, and won't reconsider until that
+// stale lease's timer naturally expires - confirmed live, every VM
+// created on a reused subnet after the first got an effectively random
+// address instead of its FSM-assigned one.
+func TestFilterStaleLeases_EvictsLeaseConflictingWithReservation(t *testing.T) {
+	leases := "1788464793 76:ad:59:4c:d8:f7 10.60.0.2 old-vm 01:76:ad:59:4c:d8:f7\n" +
+		"1788493640 f6:7c:97:d2:94:a8 10.60.0.85 other-vm 01:f6:7c:97:d2:94:a8\n"
+	reservations := map[string]string{"10.60.0.2": "46:b1:28:98:56:72"}
+
+	got := filterStaleLeases(leases, reservations)
+
+	if strings.Contains(got, "76:ad:59:4c:d8:f7") {
+		t.Errorf("filterStaleLeases() kept the stale conflicting lease, got:\n%s", got)
+	}
+	if !strings.Contains(got, "f6:7c:97:d2:94:a8") {
+		t.Errorf("filterStaleLeases() dropped an unrelated lease it shouldn't have, got:\n%s", got)
+	}
+}
+
+// TestFilterStaleLeases_KeepsLeaseMatchingItsOwnReservation guards
+// against over-eager eviction: a lease already held by the exact MAC
+// its own dhcp-host reservation names must survive (dnsmasq will just
+// keep renewing it - nothing stale about it).
+func TestFilterStaleLeases_KeepsLeaseMatchingItsOwnReservation(t *testing.T) {
+	leases := "1788464793 46:b1:28:98:56:72 10.60.0.2 vm-1 01:46:b1:28:98:56:72\n"
+	reservations := map[string]string{"10.60.0.2": "46:B1:28:98:56:72"} // case differs, still a match
+
+	got := filterStaleLeases(leases, reservations)
+
+	if !strings.Contains(got, "10.60.0.2") {
+		t.Errorf("filterStaleLeases() dropped a lease matching its own reservation, got:\n%s", got)
+	}
+}
+
+// TestFilterStaleLeases_KeepsUnreservedLeases guards against evicting
+// leases for addresses no scope has ever reserved at all (e.g. a plain
+// dynamic-pool lease with no matching dhcp-host line).
+func TestFilterStaleLeases_KeepsUnreservedLeases(t *testing.T) {
+	leases := "1788464793 aa:bb:cc:dd:ee:ff 10.60.0.99 dynamic-vm 01:aa:bb:cc:dd:ee:ff\n"
+
+	got := filterStaleLeases(leases, map[string]string{})
+
+	if !strings.Contains(got, "10.60.0.99") {
+		t.Errorf("filterStaleLeases() dropped an unreserved lease it shouldn't have, got:\n%s", got)
 	}
 }
 

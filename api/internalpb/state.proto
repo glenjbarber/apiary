@@ -108,6 +108,15 @@ message VMDefinition {
   // ADR-0031. Empty means today's behavior (a blank disk). Ignored for a
   // disk file that already exists (never re-seeded on every tick).
   string base_image_name = 15;
+
+  // firewall_paused, when true, tells the reconciler to leave this VM's
+  // pf(8) anchor with no active rules (everything allowed) regardless
+  // of firewall_rules - a temporary, reversible override for
+  // troubleshooting that leaves the configured rule list itself
+  // untouched. Set only via the narrow SetVMFirewallPaused command,
+  // never via UpdateVM - see ADR-0049 for why UpdateVM's full-replace
+  // semantics make it unsafe for a single-field toggle like this.
+  bool firewall_paused = 16;
 }
 
 // JailState is the desired run state of a jail, mirroring VMState.
@@ -210,6 +219,20 @@ message NetworkDefinition {
   // mainly so a name collision with something outside Apiary's own
   // management has an escape hatch.
   string bridge_name = 5;
+
+  // external_gateway, if set, is the address of a real router already
+  // serving as this subnet's gateway/DNS (e.g. a hand-configured
+  // firewall sharing this VLAN with non-Apiary traffic) - almost
+  // always still subnet's own ".1", just not one Apiary itself owns.
+  // When set, the reconciler does NOT assign subnet's ".1" to its own
+  // per-network bridge on any node (see EnsureBridgeAddress's normal
+  // behavior above) - claiming that address here would conflict with
+  // the real router owning it on the same L2 segment - and DHCP
+  // advertises this address as the router (option 3) instead of
+  // dnsmasq's own default self-advertisement. Empty (the default)
+  // preserves today's behavior exactly: Apiary's own bridge is the
+  // gateway.
+  string external_gateway = 6;
 }
 
 // Command is the typed payload carried in ApplyRequest.payload (replacing
@@ -240,6 +263,14 @@ message Command {
     // UpdateVMPhase/PurgeVM above.
     UpdateJailPhase update_jail_phase = 13;
     PurgeJail purge_jail = 14;
+
+    // SetVMFirewallPaused is submitted by an external caller (via
+    // ManagerService.SetVMFirewallPaused) - unlike UpdateVMPhase/
+    // PurgeVM above, this is not reconciler-only. Deliberately narrow
+    // (touches only VMDefinition.firewall_paused) rather than routed
+    // through the general UpdateVM, which replaces a VM's entire
+    // record - see ADR-0049.
+    SetVMFirewallPaused set_vm_firewall_paused = 15;
   }
 }
 
@@ -320,6 +351,13 @@ message UpdateVMPhase {
   string id = 1;
   VMPhase phase = 2;
   string phase_error = 3;
+}
+
+// SetVMFirewallPaused toggles VMDefinition.firewall_paused on an
+// existing VM. Fails if the id doesn't exist.
+message SetVMFirewallPaused {
+  string id = 1;
+  bool paused = 2;
 }
 
 // PurgeVM removes a VM definition outright, regardless of its current

@@ -61,15 +61,16 @@ func (have Role) Satisfies(want Role) bool {
 // ship unintentionally under-protected.
 var requiredRole = map[string]Role{
 	// Viewer: read-only.
-	"/apiary.rpc.v1.ManagerService/GetVM":        RoleViewer,
-	"/apiary.rpc.v1.ManagerService/ListVMs":      RoleViewer,
-	"/apiary.rpc.v1.ManagerService/GetJail":      RoleViewer,
-	"/apiary.rpc.v1.ManagerService/ListJails":    RoleViewer,
-	"/apiary.rpc.v1.ManagerService/ListISOs":     RoleViewer,
-	"/apiary.rpc.v1.ManagerService/ListNetworks": RoleViewer,
-	"/apiary.rpc.v1.ManagerService/HostStats":    RoleViewer,
+	"/apiary.rpc.v1.ManagerService/GetVM":          RoleViewer,
+	"/apiary.rpc.v1.ManagerService/ListVMs":        RoleViewer,
+	"/apiary.rpc.v1.ManagerService/GetJail":        RoleViewer,
+	"/apiary.rpc.v1.ManagerService/ListJails":      RoleViewer,
+	"/apiary.rpc.v1.ManagerService/ListISOs":       RoleViewer,
+	"/apiary.rpc.v1.ManagerService/ListNetworks":   RoleViewer,
+	"/apiary.rpc.v1.ManagerService/HostStats":      RoleViewer,
 	"/apiary.rpc.v1.ManagerService/GetVMConsole":   RoleViewer,
 	"/apiary.rpc.v1.ManagerService/GetVMSerialLog": RoleViewer,
+	"/apiary.rpc.v1.ManagerService/GetNodeConfig":  RoleViewer,
 
 	// Operator: VM/jail/network lifecycle, ISO management, and the
 	// peer-to-peer reconciler-forwarding RPCs (ADR-0029) - a follower
@@ -80,6 +81,8 @@ var requiredRole = map[string]Role{
 	"/apiary.rpc.v1.ManagerService/UpdateVM":                   RoleOperator,
 	"/apiary.rpc.v1.ManagerService/DeleteVM":                   RoleOperator,
 	"/apiary.rpc.v1.ManagerService/MigrateVM":                  RoleOperator,
+	"/apiary.rpc.v1.ManagerService/SetVMFirewallPaused":        RoleOperator,
+	"/apiary.rpc.v1.ManagerService/SetDatasetQuota":            RoleOperator,
 	"/apiary.rpc.v1.ManagerService/CreateJail":                 RoleOperator,
 	"/apiary.rpc.v1.ManagerService/UpdateJail":                 RoleOperator,
 	"/apiary.rpc.v1.ManagerService/DeleteJail":                 RoleOperator,
@@ -97,11 +100,12 @@ var requiredRole = map[string]Role{
 	// (a human-triggered override of a reconciler's own normal
 	// teardown sequence - deliberately not something Operator can do
 	// unilaterally).
-	"/apiary.rpc.v1.ManagerService/ForcePurgeVM":   RoleAdmin,
-	"/apiary.rpc.v1.ManagerService/ForcePurgeJail": RoleAdmin,
-	"/apiary.rpc.v1.ManagerService/CreateAPIKey":   RoleAdmin,
-	"/apiary.rpc.v1.ManagerService/ListAPIKeys":    RoleAdmin,
-	"/apiary.rpc.v1.ManagerService/RevokeAPIKey":   RoleAdmin,
+	"/apiary.rpc.v1.ManagerService/ForcePurgeVM":     RoleAdmin,
+	"/apiary.rpc.v1.ManagerService/ForcePurgeJail":   RoleAdmin,
+	"/apiary.rpc.v1.ManagerService/CreateAPIKey":     RoleAdmin,
+	"/apiary.rpc.v1.ManagerService/ListAPIKeys":      RoleAdmin,
+	"/apiary.rpc.v1.ManagerService/RevokeAPIKey":     RoleAdmin,
+	"/apiary.rpc.v1.ManagerService/UpdateNodeConfig": RoleAdmin,
 }
 
 // requiredRoleFor returns the minimum Role fullMethod needs. An RPC

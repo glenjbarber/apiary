@@ -53,6 +53,15 @@ service ManagerService {
   // involved.
   rpc MigrateVM(MigrateVMRequest) returns (MigrateVMResponse);
 
+  // SetVMFirewallPaused temporarily suspends enforcement of a VM's
+  // firewall_rules (everything allowed) without discarding the
+  // configured rule list - useful for troubleshooting connectivity.
+  // Deliberately not folded into UpdateVM: UpdateVM replaces a VM's
+  // entire record, so a caller toggling just this one field would risk
+  // silently wiping firewall_rules/network_id/etc. unless it first
+  // fetched and resent the complete current record - see ADR-0049.
+  rpc SetVMFirewallPaused(SetVMFirewallPausedRequest) returns (SetVMFirewallPausedResponse);
+
   // GetVM and ListVMs only succeed against the current leader - see
   // api/internalpb/raftd.proto's GetVM/ListVMs doc comments for why v1's
   // read consistency model is deliberately as simple as its write model.
@@ -89,6 +98,23 @@ service ManagerService {
   // Same locality limitation as GetVMConsole: only answers for a VM
   // confirmed running on *this* node.
   rpc GetVMSerialLog(GetVMSerialLogRequest) returns (GetVMSerialLogResponse);
+
+  // GetNodeConfig/UpdateNodeConfig manage this node's own local runtime
+  // settings (currently: the uplink interfaces VLAN tagging/outbound
+  // NAT use - see ADR-0048) - physical, per-node data like HostStats/
+  // ISOs above, never routed through raft (a NIC name is only ever
+  // meaningful to the one node that has it). A change here takes
+  // effect the next time this node's managerd restarts, not live -
+  // see ADR-0049 for why. See internal/nodeconfig.
+  rpc GetNodeConfig(GetNodeConfigRequest) returns (GetNodeConfigResponse);
+  rpc UpdateNodeConfig(UpdateNodeConfigRequest) returns (UpdateNodeConfigResponse);
+
+  // SetDatasetQuota sets a ZFS quota on a dataset under this node's own
+  // configured Base scope (see internal/zfs.Manager) - physical,
+  // per-node storage governance, never routed through raft. See
+  // ADR-0049 for the v1 limitation that this can only target a named
+  // sub-dataset, not the Base dataset itself.
+  rpc SetDatasetQuota(SetDatasetQuotaRequest) returns (SetDatasetQuotaResponse);
 
   // CreateNetwork/ListNetworks/DeleteNetwork manage NetworkDefinitions -
   // VLAN/subnet/bridge segments a VM can attach to (see ADR-0022).
@@ -231,6 +257,12 @@ message VMDefinition {
   // instead of creating a blank file. See ADR-0031. Empty means today's
   // behavior (a blank disk).
   string base_image_name = 15;
+
+  // firewall_paused, when true, means firewall_rules are temporarily
+  // not enforced for this VM (everything allowed) without discarding
+  // them - set only via SetVMFirewallPaused, never via UpdateVM. See
+  // ADR-0049.
+  bool firewall_paused = 16;
 }
 
 // JailState mirrors api/internalpb's JailState.
@@ -292,6 +324,13 @@ message NetworkDefinition {
   // never stored and never meaningful on Create/Delete requests or
   // responses.
   string bridge_status = 6;
+
+  // external_gateway, if set, is a real router's address already
+  // serving this subnet - see api/internalpb/state.proto's
+  // NetworkDefinition.external_gateway for the full explanation. Empty
+  // (the default) preserves today's behavior: Apiary's own per-node
+  // bridge is the gateway.
+  string external_gateway = 7;
 }
 
 message CreateVMRequest {
@@ -356,6 +395,19 @@ message MigrateVMResponse {
   // error is set if the VM doesn't exist, is marked for deletion, or
   // target_node_id isn't already this VM's replica_node_id - see
   // MigrateVM's own doc comment for why that last check exists.
+  string error = 2;
+  string leader_hint = 3;
+}
+
+message SetVMFirewallPausedRequest {
+  string id = 1;
+  bool paused = 2;
+  uint32 timeout_ms = 3;
+}
+
+message SetVMFirewallPausedResponse {
+  // vm is the updated definition, echoed back for confirmation.
+  VMDefinition vm = 1;
   string error = 2;
   string leader_hint = 3;
 }
@@ -595,6 +647,50 @@ message GetVMSerialLogResponse {
   bool available = 3;
 
   string error = 4;
+}
+
+message GetNodeConfigRequest {}
+
+message GetNodeConfigResponse {
+  // uplink is the physical interface VLAN-tagged networks attach to
+  // (mirrors -vlan-uplink) - empty if never set.
+  string uplink = 1;
+
+  // nat_uplink is the interface a self-hosted network's outbound NAT
+  // egresses through (mirrors -nat-uplink, see ADR-0048) - empty means
+  // it falls back to uplink's own value.
+  string nat_uplink = 2;
+
+  string error = 3;
+}
+
+message UpdateNodeConfigRequest {
+  string uplink = 1;
+  string nat_uplink = 2;
+}
+
+message UpdateNodeConfigResponse {
+  // error is set if the new settings couldn't be persisted. A
+  // successful response does not mean the change is live yet - see
+  // GetNodeConfig/UpdateNodeConfig's own doc comment in the service
+  // definition above: it takes effect on this node's next managerd
+  // restart.
+  string error = 1;
+}
+
+message SetDatasetQuotaRequest {
+  // dataset_name is relative to this node's own configured ZFS Base
+  // (e.g. a VM or jail id) - never an absolute path. See ADR-0049 for
+  // why the Base dataset itself can't be targeted directly.
+  string dataset_name = 1;
+
+  // quota is passed through to `zfs set quota=<quota>` as-is (e.g.
+  // "10G", or "none" to clear) - zfs(8) validates the value itself.
+  string quota = 2;
+}
+
+message SetDatasetQuotaResponse {
+  string error = 1;
 }
 
 message CreateNetworkRequest {

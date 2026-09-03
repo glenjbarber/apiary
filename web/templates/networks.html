@@ -10,6 +10,7 @@
     <label>Name <input type="text" name="name"></label>
     <label>VLAN ID <input type="number" name="vlan_id" value="0" min="0" max="4094"></label>
     <label>Subnet (CIDR) <input type="text" name="subnet" placeholder="10.60.0.0/24" required></label>
+    <label>External gateway <input type="text" name="external_gateway" placeholder="leave blank unless a real router already serves this subnet"></label>
     <button type="submit">Create</button>
   </form>
   {{end}}
@@ -26,7 +27,7 @@
 <div id="network-error" class="banner-error">{{.NetworkFormError}}</div>
 <table>
   <thead>
-    <tr><th>ID</th><th>Name</th><th>VLAN</th><th>Subnet</th><th>Bridge</th><th>Status</th><th></th></tr>
+    <tr><th>ID</th><th>Name</th><th>VLAN</th><th>Subnet</th><th>Bridge</th><th>Gateway</th><th>Status</th><th></th></tr>
   </thead>
   <tbody id="network-rows">
     {{template "network_rows" .}}
@@ -42,6 +43,7 @@
   <td>{{if .VLANID}}{{.VLANID}}{{else}}(untagged){{end}}</td>
   <td>{{.Subnet}}</td>
   <td>{{if .BridgeName}}{{.BridgeName}}{{else}}<em>(auto-generated)</em>{{end}}</td>
+  <td>{{if .ExternalGateway}}{{.ExternalGateway}}{{else}}<em>(this node's bridge)</em>{{end}}</td>
   <td>
     {{if eq .BridgeStatus "up"}}<span class="success">up</span>
     {{else if eq .BridgeStatus "down"}}<span class="error">down</span>
@@ -53,6 +55,6 @@
   </td>
 </tr>
 {{else}}
-<tr><td colspan="7"><em>No networks</em></td></tr>
+<tr><td colspan="8"><em>No networks</em></td></tr>
 {{end}}
 {{end}}

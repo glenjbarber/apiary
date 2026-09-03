@@ -91,6 +91,8 @@ func (f *FSM) Apply(log *raft.Log) interface{} {
 		return f.applyUpdateVMPhase(log.Index, op.UpdateVmPhase)
 	case *internalpb.Command_PurgeVm:
 		return f.applyPurgeVM(log.Index, op.PurgeVm.GetId())
+	case *internalpb.Command_SetVmFirewallPaused:
+		return f.applySetVMFirewallPaused(log.Index, op.SetVmFirewallPaused)
 	case *internalpb.Command_CreateNetwork:
 		return f.applyCreateNetwork(log.Index, op.CreateNetwork.GetNetwork())
 	case *internalpb.Command_DeleteNetwork:
@@ -250,6 +252,21 @@ func (f *FSM) applyUpdateVMPhase(index uint64, upd *internalpb.UpdateVMPhase) *F
 	updated.Phase = upd.GetPhase()
 	updated.PhaseError = upd.GetPhaseError()
 	f.vms[upd.GetId()] = updated
+	return &FSMApplyResult{Index: index, VM: updated}
+}
+
+// applySetVMFirewallPaused toggles firewall_paused on an existing VM,
+// touching no other field - deliberately narrow, unlike applyUpdateVM's
+// full-replace semantics, since a caller here is only ever intending to
+// change this one flag (see ADR-0049).
+func (f *FSM) applySetVMFirewallPaused(index uint64, req *internalpb.SetVMFirewallPaused) *FSMApplyResult {
+	vm, exists := f.vms[req.GetId()]
+	if !exists {
+		return &FSMApplyResult{Index: index, Error: fmt.Sprintf("SetVMFirewallPaused: id %q does not exist", req.GetId())}
+	}
+	updated := proto.Clone(vm).(*internalpb.VMDefinition)
+	updated.FirewallPaused = req.GetPaused()
+	f.vms[req.GetId()] = updated
 	return &FSMApplyResult{Index: index, VM: updated}
 }
 

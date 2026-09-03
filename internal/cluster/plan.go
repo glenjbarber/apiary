@@ -56,6 +56,13 @@ type VMPlacement struct {
 	MACAddress    string
 	FirewallRules []FirewallRule
 
+	// FirewallPaused, when true, tells the reconciler to leave this
+	// VM's pf(8) anchor with no active rules (everything allowed)
+	// regardless of FirewallRules - a temporary, reversible override
+	// set only via ManagerService.SetVMFirewallPaused, never via
+	// UpdateVM. See ADR-0049.
+	FirewallPaused bool
+
 	// ReplicaNodeID, if set, names a second node that HAST-replicates
 	// this VM's disk (ADR-0026) - data redundancy, not automatic
 	// failover. Caller-set, exactly like NodeID.

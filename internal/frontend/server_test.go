@@ -66,6 +66,16 @@ type fakeClient struct {
 
 	uploadStream *fakeUploadClientStream
 	uploadErr    error
+
+	getNodeConfigResp       *rpcpb.GetNodeConfigResponse
+	updateNodeConfigResp    *rpcpb.UpdateNodeConfigResponse
+	lastUpdateNodeConfigReq *rpcpb.UpdateNodeConfigRequest
+
+	setVMFirewallPausedResp    *rpcpb.SetVMFirewallPausedResponse
+	lastSetVMFirewallPausedReq *rpcpb.SetVMFirewallPausedRequest
+
+	setDatasetQuotaResp    *rpcpb.SetDatasetQuotaResponse
+	lastSetDatasetQuotaReq *rpcpb.SetDatasetQuotaRequest
 }
 
 // fakeUploadClientStream is a fake grpc.ClientStreamingClient for
@@ -114,6 +124,37 @@ func (f *fakeClient) ForcePurgeVM(context.Context, *rpcpb.ForcePurgeVMRequest, .
 
 func (f *fakeClient) ForcePurgeJail(context.Context, *rpcpb.ForcePurgeJailRequest, ...grpc.CallOption) (*rpcpb.ForcePurgeJailResponse, error) {
 	return &rpcpb.ForcePurgeJailResponse{}, nil
+}
+
+func (f *fakeClient) SetVMFirewallPaused(_ context.Context, in *rpcpb.SetVMFirewallPausedRequest, _ ...grpc.CallOption) (*rpcpb.SetVMFirewallPausedResponse, error) {
+	f.lastSetVMFirewallPausedReq = in
+	if f.setVMFirewallPausedResp != nil {
+		return f.setVMFirewallPausedResp, nil
+	}
+	return &rpcpb.SetVMFirewallPausedResponse{}, nil
+}
+
+func (f *fakeClient) GetNodeConfig(context.Context, *rpcpb.GetNodeConfigRequest, ...grpc.CallOption) (*rpcpb.GetNodeConfigResponse, error) {
+	if f.getNodeConfigResp != nil {
+		return f.getNodeConfigResp, nil
+	}
+	return &rpcpb.GetNodeConfigResponse{}, nil
+}
+
+func (f *fakeClient) UpdateNodeConfig(_ context.Context, in *rpcpb.UpdateNodeConfigRequest, _ ...grpc.CallOption) (*rpcpb.UpdateNodeConfigResponse, error) {
+	f.lastUpdateNodeConfigReq = in
+	if f.updateNodeConfigResp != nil {
+		return f.updateNodeConfigResp, nil
+	}
+	return &rpcpb.UpdateNodeConfigResponse{}, nil
+}
+
+func (f *fakeClient) SetDatasetQuota(_ context.Context, in *rpcpb.SetDatasetQuotaRequest, _ ...grpc.CallOption) (*rpcpb.SetDatasetQuotaResponse, error) {
+	f.lastSetDatasetQuotaReq = in
+	if f.setDatasetQuotaResp != nil {
+		return f.setDatasetQuotaResp, nil
+	}
+	return &rpcpb.SetDatasetQuotaResponse{}, nil
 }
 
 func (f *fakeClient) MigrateVM(context.Context, *rpcpb.MigrateVMRequest, ...grpc.CallOption) (*rpcpb.MigrateVMResponse, error) {

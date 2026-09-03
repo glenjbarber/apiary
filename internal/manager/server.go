@@ -15,6 +15,7 @@ import (
 	rpcpb "github.com/glenjbarber/apiary/api/rpc"
 	"github.com/glenjbarber/apiary/internal/hoststats"
 	"github.com/glenjbarber/apiary/internal/isostore"
+	"github.com/glenjbarber/apiary/internal/nodeconfig"
 )
 
 // defaultApplyTimeout is used when a request doesn't specify one.
@@ -83,6 +84,7 @@ type PeerForwarder interface {
 
 	ForcePurgeVM(ctx context.Context, addr string, req *rpcpb.ForcePurgeVMRequest) (*rpcpb.ForcePurgeVMResponse, error)
 	MigrateVM(ctx context.Context, addr string, req *rpcpb.MigrateVMRequest) (*rpcpb.MigrateVMResponse, error)
+	SetVMFirewallPaused(ctx context.Context, addr string, req *rpcpb.SetVMFirewallPausedRequest) (*rpcpb.SetVMFirewallPausedResponse, error)
 	ForcePurgeJail(ctx context.Context, addr string, req *rpcpb.ForcePurgeJailRequest) (*rpcpb.ForcePurgeJailResponse, error)
 	MigrateJail(ctx context.Context, addr string, req *rpcpb.MigrateJailRequest) (*rpcpb.MigrateJailResponse, error)
 
@@ -138,6 +140,31 @@ type Server struct {
 	// peerManagerdPort mirrors internal/cluster's own field of the same
 	// name and purpose - empty uses defaultPeerManagerdPort.
 	peerManagerdPort string
+
+	// zfs is nil on a node with no ZFS Base configured - SetDatasetQuota
+	// reports an error rather than panicking in that case. Physical,
+	// per-node data like isos above - never routed through raft.
+	zfs quotaSetter
+
+	// nodeConfig is nil on a node that never got a node-config file path
+	// wired up - GetNodeConfig/UpdateNodeConfig report an error rather
+	// than panicking. See ADR-0049/internal/nodeconfig.
+	nodeConfig nodeConfigStore
+}
+
+// quotaSetter is the subset of *zfs.Manager SetDatasetQuota needs,
+// defined locally so it can be faked in tests without a real zfs(8)
+// binary - the same reasoning isoManager/VLANStatus already follow.
+type quotaSetter interface {
+	SetProperty(ctx context.Context, name, prop, value string) error
+}
+
+// nodeConfigStore is the subset of *nodeconfig.Manager GetNodeConfig/
+// UpdateNodeConfig need, defined locally for the same fakeability
+// reason as quotaSetter above.
+type nodeConfigStore interface {
+	Load() (nodeconfig.Config, error)
+	Save(nodeconfig.Config) error
 }
 
 var _ rpcpb.ManagerServiceServer = (*Server)(nil)
@@ -147,12 +174,14 @@ var _ rpcpb.ManagerServiceServer = (*Server)(nil)
 // installer images locally on this node, vnc (nil-able) to look up a
 // running VM's VNC console port, serialLog (nil-able) to look up a
 // running VM's captured serial console log, vlanMgr (nil-able) to
-// report a network's bridge status on this node, and peers/
+// report a network's bridge status on this node, peers/
 // peerManagerdPort (peers nil-able) to forward a leader-only read
 // rejected by this node's own raftd to the current leader's own
-// managerd instead (ADR-0035).
-func NewServer(raft *RaftClient, nodeID string, isos isoManager, vnc VNCLookup, serialLog SerialLogLookup, vlanMgr VLANStatus, peers PeerForwarder, peerManagerdPort string) *Server {
-	return &Server{raft: raft, nodeID: nodeID, isos: isos, vnc: vnc, serialLog: serialLog, vlan: vlanMgr, statsGather: hoststats.Gather, peers: peers, peerManagerdPort: peerManagerdPort}
+// managerd instead (ADR-0035), zfsMgr (nil-able) to set a dataset
+// quota locally, and nodeConfig (nil-able) to read/write this node's
+// own local settings file (ADR-0049).
+func NewServer(raft *RaftClient, nodeID string, isos isoManager, vnc VNCLookup, serialLog SerialLogLookup, vlanMgr VLANStatus, peers PeerForwarder, peerManagerdPort string, zfsMgr quotaSetter, nodeConfig nodeConfigStore) *Server {
+	return &Server{raft: raft, nodeID: nodeID, isos: isos, vnc: vnc, serialLog: serialLog, vlan: vlanMgr, statsGather: hoststats.Gather, peers: peers, peerManagerdPort: peerManagerdPort, zfs: zfsMgr, nodeConfig: nodeConfig}
 }
 
 // peerManagerdAddr turns a raft leader_hint (the leader's raft
@@ -490,6 +519,30 @@ func (s *Server) DeleteVM(ctx context.Context, req *rpcpb.DeleteVMRequest) (*rpc
 		}
 	}
 	return &rpcpb.DeleteVMResponse{Vm: fromInternalVM(vm), Error: appErr, LeaderHint: leaderHint}, nil
+}
+
+// SetVMFirewallPaused implements rpcpb.ManagerServiceServer. See
+// CreateNetwork's own doc comment for the general
+// apply-then-forward-on-leader-hint pattern every write RPC here
+// follows. Deliberately submits the narrow SetVMFirewallPaused command
+// rather than reading, cloning, and resubmitting via UpdateVm (as
+// MigrateVM does) - see ADR-0049: a dedicated FSM-level command applies
+// atomically inside the FSM's own single Apply call, with no
+// read-modify-write race against a concurrent UpdateVM changing some
+// other field in between.
+func (s *Server) SetVMFirewallPaused(ctx context.Context, req *rpcpb.SetVMFirewallPausedRequest) (*rpcpb.SetVMFirewallPausedResponse, error) {
+	cmd := &internalpb.Command{
+		Op: &internalpb.Command_SetVmFirewallPaused{SetVmFirewallPaused: &internalpb.SetVMFirewallPaused{
+			Id: req.GetId(), Paused: req.GetPaused(),
+		}},
+	}
+	vm, appErr, leaderHint := s.applyCommand(ctx, cmd, req.GetTimeoutMs())
+	if leaderHint != "" && s.peers != nil {
+		if fwd, ferr := s.peers.SetVMFirewallPaused(ctx, s.peerManagerdAddr(leaderHint), req); ferr == nil {
+			return fwd, nil
+		}
+	}
+	return &rpcpb.SetVMFirewallPausedResponse{Vm: fromInternalVM(vm), Error: appErr, LeaderHint: leaderHint}, nil
 }
 
 // ForcePurgeVM implements rpcpb.ManagerServiceServer. It's an escape
@@ -1014,6 +1067,52 @@ func (s *Server) GetVMSerialLog(ctx context.Context, req *rpcpb.GetVMSerialLogRe
 		Truncated: truncated,
 		Available: true,
 	}, nil
+}
+
+// GetNodeConfig implements rpcpb.ManagerServiceServer - reports this
+// node's own local settings (see internal/nodeconfig), never routed
+// through raft.
+func (s *Server) GetNodeConfig(_ context.Context, _ *rpcpb.GetNodeConfigRequest) (*rpcpb.GetNodeConfigResponse, error) {
+	if s.nodeConfig == nil {
+		return &rpcpb.GetNodeConfigResponse{Error: "this node has no node-config store configured"}, nil
+	}
+	cfg, err := s.nodeConfig.Load()
+	if err != nil {
+		return &rpcpb.GetNodeConfigResponse{Error: err.Error()}, nil
+	}
+	return &rpcpb.GetNodeConfigResponse{Uplink: cfg.Uplink, NatUplink: cfg.NATUplink}, nil
+}
+
+// UpdateNodeConfig implements rpcpb.ManagerServiceServer - persists new
+// local settings, replacing the file in full (matching
+// nodeconfig.Manager.Save's own doc comment) rather than merging, so a
+// caller intending to change only one field must send both. Takes
+// effect on this node's next managerd restart, not live - see
+// ADR-0049.
+func (s *Server) UpdateNodeConfig(_ context.Context, req *rpcpb.UpdateNodeConfigRequest) (*rpcpb.UpdateNodeConfigResponse, error) {
+	if s.nodeConfig == nil {
+		return &rpcpb.UpdateNodeConfigResponse{Error: "this node has no node-config store configured"}, nil
+	}
+	err := s.nodeConfig.Save(nodeconfig.Config{Uplink: req.GetUplink(), NATUplink: req.GetNatUplink()})
+	if err != nil {
+		return &rpcpb.UpdateNodeConfigResponse{Error: err.Error()}, nil
+	}
+	return &rpcpb.UpdateNodeConfigResponse{}, nil
+}
+
+// SetDatasetQuota implements rpcpb.ManagerServiceServer - sets a ZFS
+// quota on a dataset under this node's own configured Base scope,
+// never routed through raft (physical, per-node storage). See
+// ADR-0049 for why the Base dataset itself can't be targeted directly
+// (zfs.Manager's own path() rejects an empty name).
+func (s *Server) SetDatasetQuota(ctx context.Context, req *rpcpb.SetDatasetQuotaRequest) (*rpcpb.SetDatasetQuotaResponse, error) {
+	if s.zfs == nil {
+		return &rpcpb.SetDatasetQuotaResponse{Error: "this node has no ZFS support configured"}, nil
+	}
+	if err := s.zfs.SetProperty(ctx, req.GetDatasetName(), "quota", req.GetQuota()); err != nil {
+		return &rpcpb.SetDatasetQuotaResponse{Error: err.Error()}, nil
+	}
+	return &rpcpb.SetDatasetQuotaResponse{}, nil
 }
 
 // applyJailCommand mirrors applyNetworkCommand, for commands whose

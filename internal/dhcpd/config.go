@@ -10,6 +10,11 @@ import (
 // default on a pkg-installed FreeBSD system.
 const DefaultConfigPath = "/usr/local/etc/dnsmasq.conf"
 
+// DefaultLeaseFilePath is where dnsmasq(8) persists its lease database
+// by default (no dhcp-leasefile= override is ever rendered into
+// dnsmasq.conf, so this default always applies).
+const DefaultLeaseFilePath = "/var/db/dnsmasq.leases"
+
 // Lease is one VM's static DHCP assignment within a network.
 type Lease struct {
 	MAC      string
@@ -36,6 +41,16 @@ type NetworkScope struct {
 	// working internet DNS resolution (a real kubeadm init's image
 	// pulls were the first thing to need it).
 	DNSServer string
+
+	// Gateway, if set, is handed to DHCP clients on this network via
+	// option 3 (router), overriding dnsmasq's own default behavior of
+	// advertising the interface's own address. Set this when the
+	// network has a real external router (NetworkDefinition's
+	// ExternalGateway) rather than Apiary's own per-node bridge -
+	// otherwise a client uses the interface address as its default
+	// route, which is correct only when Apiary's bridge really is the
+	// gateway.
+	Gateway string
 }
 
 // RenderConfig renders a full dnsmasq.conf body serving DHCP for the
@@ -67,6 +82,9 @@ func RenderConfig(scopes []NetworkScope) (string, error) {
 		if s.DNSServer != "" {
 			fmt.Fprintf(&b, "dhcp-option=interface:%s,6,%s\n", s.Bridge, s.DNSServer)
 		}
+		if s.Gateway != "" {
+			fmt.Fprintf(&b, "dhcp-option=interface:%s,3,%s\n", s.Bridge, s.Gateway)
+		}
 		for _, l := range s.Leases {
 			if l.MAC == "" || l.IP == "" {
 				return "", fmt.Errorf("dhcpd: scope %q: lease MAC and IP must both be set", s.Bridge)
@@ -80,6 +98,52 @@ func RenderConfig(scopes []NetworkScope) (string, error) {
 		b.WriteString("\n")
 	}
 	return b.String(), nil
+}
+
+// filterStaleLeases returns leaseFileBody (dnsmasq's own lease-database
+// format: "<expiry> <mac> <ip> <hostname> <client-id>" per line) with
+// any line removed whose IP is now reserved (via a scope's Lease -
+// i.e. a dhcp-host line) for a *different* MAC than the one holding
+// that lease.
+//
+// This exists because of a real, confirmed bug: dnsmasq refuses to
+// honor a dhcp-host static reservation for an address still recorded
+// as leased to someone else in its own persistent lease file - logged
+// as "not using configured address <ip> because it is leased to <mac>"
+// - and won't reconsider until that old lease's own timer naturally
+// expires (up to the full lease-time, 12h here), regardless of what
+// dnsmasq.conf now says. Since this project's networks routinely reuse
+// the same subnet across a NetworkDefinition's delete+recreate (there's
+// no Update RPC - see ADR-0047) or a VM's disposable-and-recreated
+// lifecycle (this session's own CAPI-driven VM churn), a stale lease
+// from a long-gone VM permanently blocked every subsequent VM's FSM-
+// assigned IP (internal/raft's allocateIP) from ever actually being
+// granted - confirmed live: every VM created after the first ended up
+// with an effectively random pool address instead of its intended one.
+// Comparison is case-insensitive since dnsmasq itself normalizes MACs
+// to lowercase in this file, but a caller-supplied reservation's MAC
+// case shouldn't be assumed.
+func filterStaleLeases(leaseFileBody string, reservations map[string]string) string {
+	var kept []string
+	for _, line := range strings.Split(leaseFileBody, "\n") {
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		fields := strings.Fields(line)
+		if len(fields) < 3 {
+			kept = append(kept, line)
+			continue
+		}
+		mac, ip := fields[1], fields[2]
+		if reservedMAC, ok := reservations[ip]; ok && !strings.EqualFold(reservedMAC, mac) {
+			continue
+		}
+		kept = append(kept, line)
+	}
+	if len(kept) == 0 {
+		return ""
+	}
+	return strings.Join(kept, "\n") + "\n"
 }
 
 // dhcpRange computes the DHCP-servable range for subnet: from the first

@@ -1073,11 +1073,17 @@ func (f *fakeDHCPManager) WriteAndReload(_ context.Context, scopes []dhcpd.Netwo
 	return nil
 }
 
+type fakeNATCall struct {
+	anchor, subnet, uplink string
+}
+
 type fakePFManager struct {
 	applied  map[string][]pf.Rule
 	flushed  []string
+	natCalls []fakeNATCall
 	applyErr error
 	flushErr error
+	natErr   error
 }
 
 func newFakePFManager() *fakePFManager {
@@ -1097,6 +1103,14 @@ func (f *fakePFManager) Flush(_ context.Context, anchor string) error {
 		return f.flushErr
 	}
 	f.flushed = append(f.flushed, anchor)
+	return nil
+}
+
+func (f *fakePFManager) ApplyNAT(_ context.Context, anchor, subnet, uplink string) error {
+	if f.natErr != nil {
+		return f.natErr
+	}
+	f.natCalls = append(f.natCalls, fakeNATCall{anchor, subnet, uplink})
 	return nil
 }
 
@@ -1139,6 +1153,182 @@ func TestReconciler_RunOnce_CreatesVMOnNetworkWithAssignedIPAndMAC(t *testing.T)
 	}
 	if members := vlan.members[wantBridge]; len(members) != 1 || members[0] != "vlan100" {
 		t.Errorf("bridge members = %v, want [vlan100]", members)
+	}
+}
+
+// TestReconciler_RunOnce_SkipsBridgeAddressForExternalGateway guards
+// against the real duplicate-IP conflict found live: a network whose
+// ExternalGateway is already a real router's address on the same L2
+// segment must never also get that address on this node's own bridge -
+// claiming it here too made the guest's traffic to the gateway resolve
+// locally instead of ever reaching the real router (confirmed via a
+// completely silent tcpdump on the real router's own interface).
+func TestReconciler_RunOnce_SkipsBridgeAddressForExternalGateway(t *testing.T) {
+	raft := &fakeRaftClient{
+		resp: &internalpb.ListVMsResponse{Vms: []*internalpb.VMDefinition{{
+			Id: "vm-1", NodeId: "node-a", NetworkId: "net-1", IpAddress: "10.60.0.2", MacAddress: "02:aa:bb:cc:dd:ee",
+		}}},
+		networksResp: &internalpb.ListNetworksResponse{Networks: []*internalpb.NetworkDefinition{
+			{Id: "net-1", VlanId: 60, Subnet: "10.60.0.0/24", ExternalGateway: "10.60.0.1"},
+		}},
+	}
+	zfs := newFakeDatasetManager()
+	zfs.mountpointFor["vm-1"] = t.TempDir()
+	vms := newFakeVMManager()
+	vlan := newFakeVLANManager()
+
+	r := &Reconciler{Raft: raft, ZFS: zfs, Bhyve: vms, VLAN: vlan, LocalNodeID: "node-a", BootROM: "/fw/UEFI.fd"}
+	if err := r.RunOnce(context.Background()); err != nil {
+		t.Fatalf("RunOnce() error: %v", err)
+	}
+
+	wantBridge := networkBridgeName(&internalpb.NetworkDefinition{Id: "net-1"})
+	if addr, ok := vlan.addresses[wantBridge]; ok {
+		t.Errorf("bridge address = %q, want no address assigned when ExternalGateway is set", addr)
+	}
+	// The bridge and its vlan member still need to exist for the VM's
+	// tap to attach to - only the address assignment is skipped.
+	if members := vlan.members[wantBridge]; len(members) != 1 || members[0] != "vlan60" {
+		t.Errorf("bridge members = %v, want [vlan60] even with ExternalGateway set", members)
+	}
+}
+
+// TestReconciler_RunOnce_ReconcilesDHCPGatewayForExternalGateway guards
+// the DHCP-option-3 half of the same fix: VMs on a network with an
+// ExternalGateway must be told to route through it, not left to
+// dnsmasq's own default of advertising itself.
+func TestReconciler_RunOnce_ReconcilesDHCPGatewayForExternalGateway(t *testing.T) {
+	raft := &fakeRaftClient{
+		resp: &internalpb.ListVMsResponse{Vms: []*internalpb.VMDefinition{{
+			Id: "vm-1", NodeId: "node-a", NetworkId: "net-1", IpAddress: "10.60.0.2", MacAddress: "02:aa:bb:cc:dd:ee",
+		}}},
+		networksResp: &internalpb.ListNetworksResponse{Networks: []*internalpb.NetworkDefinition{
+			{Id: "net-1", VlanId: 60, Subnet: "10.60.0.0/24", ExternalGateway: "10.60.0.1"},
+		}},
+	}
+	zfs := newFakeDatasetManager()
+	zfs.mountpointFor["vm-1"] = t.TempDir()
+	vms := newFakeVMManager()
+	vlan := newFakeVLANManager()
+	dhcp := &fakeDHCPManager{}
+
+	r := &Reconciler{Raft: raft, ZFS: zfs, Bhyve: vms, VLAN: vlan, DHCP: dhcp, LocalNodeID: "node-a", BootROM: "/fw/UEFI.fd"}
+	if err := r.RunOnce(context.Background()); err != nil {
+		t.Fatalf("RunOnce() error: %v", err)
+	}
+
+	if len(dhcp.lastScopes) != 1 {
+		t.Fatalf("lastScopes = %+v, want one scope", dhcp.lastScopes)
+	}
+	if got := dhcp.lastScopes[0].Gateway; got != "10.60.0.1" {
+		t.Errorf("scope.Gateway = %q, want 10.60.0.1", got)
+	}
+}
+
+// TestReconciler_RunOnce_AppliesOutboundNATForSelfHostedNetwork guards
+// ADR-0048's self-hosted-networking fix: a network with no
+// ExternalGateway and a configured Reconciler.Uplink must get real
+// outbound NAT through that uplink, so its VMs reach the internet
+// without depending on any external router or physical VLAN trunk.
+func TestReconciler_RunOnce_AppliesOutboundNATForSelfHostedNetwork(t *testing.T) {
+	raft := &fakeRaftClient{
+		resp: &internalpb.ListVMsResponse{Vms: []*internalpb.VMDefinition{{
+			Id: "vm-1", NodeId: "node-a", NetworkId: "net-1", IpAddress: "10.60.0.2", MacAddress: "02:aa:bb:cc:dd:ee",
+		}}},
+		networksResp: &internalpb.ListNetworksResponse{Networks: []*internalpb.NetworkDefinition{
+			{Id: "net-1", VlanId: 61, Subnet: "10.60.0.0/24"},
+		}},
+	}
+	zfs := newFakeDatasetManager()
+	zfs.mountpointFor["vm-1"] = t.TempDir()
+	vms := newFakeVMManager()
+	vlan := newFakeVLANManager()
+	pfMgr := newFakePFManager()
+
+	r := &Reconciler{Raft: raft, ZFS: zfs, Bhyve: vms, VLAN: vlan, PF: pfMgr, Uplink: "re0", LocalNodeID: "node-a", BootROM: "/fw/UEFI.fd"}
+	if err := r.RunOnce(context.Background()); err != nil {
+		t.Fatalf("RunOnce() error: %v", err)
+	}
+
+	if len(pfMgr.natCalls) != 1 {
+		t.Fatalf("natCalls = %v, want exactly one", pfMgr.natCalls)
+	}
+	got := pfMgr.natCalls[0]
+	if got.anchor != "apiary/net-net-1" || got.subnet != "10.60.0.0/24" || got.uplink != "re0" {
+		t.Errorf("natCalls[0] = %+v, want {apiary/net-net-1 10.60.0.0/24 re0}", got)
+	}
+}
+
+// TestReconciler_RunOnce_NoNATForExternalGatewayNetwork guards the
+// other half: a network with a real external router must not also get
+// NAT'd through this node's own uplink - that router is responsible
+// for its own internet access.
+func TestReconciler_RunOnce_NoNATForExternalGatewayNetwork(t *testing.T) {
+	raft := &fakeRaftClient{
+		resp: &internalpb.ListVMsResponse{Vms: []*internalpb.VMDefinition{{
+			Id: "vm-1", NodeId: "node-a", NetworkId: "net-1", IpAddress: "10.60.0.2", MacAddress: "02:aa:bb:cc:dd:ee",
+		}}},
+		networksResp: &internalpb.ListNetworksResponse{Networks: []*internalpb.NetworkDefinition{
+			{Id: "net-1", VlanId: 60, Subnet: "10.60.0.0/24", ExternalGateway: "10.60.0.1"},
+		}},
+	}
+	zfs := newFakeDatasetManager()
+	zfs.mountpointFor["vm-1"] = t.TempDir()
+	vms := newFakeVMManager()
+	vlan := newFakeVLANManager()
+	pfMgr := newFakePFManager()
+
+	r := &Reconciler{Raft: raft, ZFS: zfs, Bhyve: vms, VLAN: vlan, PF: pfMgr, Uplink: "re0", LocalNodeID: "node-a", BootROM: "/fw/UEFI.fd"}
+	if err := r.RunOnce(context.Background()); err != nil {
+		t.Fatalf("RunOnce() error: %v", err)
+	}
+
+	if len(pfMgr.natCalls) != 0 {
+		t.Errorf("natCalls = %v, want none for an ExternalGateway network", pfMgr.natCalls)
+	}
+}
+
+// TestReconciler_RunOnce_ReconcilesNetworkForAlreadyRunningVM guards
+// against a real, live-caught gap: network infrastructure (bridge
+// address, outbound NAT) used to only be provisioned during a VM's
+// initial creation (ensureNetwork was only reached in the "not yet
+// running" branch of ensureVM) - so a network-level config change
+// (e.g. Reconciler.Uplink) never took effect for a VM that was already
+// running, only for one recreated from scratch. Confirmed live: an
+// operator's -nat-uplink fix silently never applied to the one VM
+// already running on that network. ensureNetwork must run every tick,
+// the same way firewall rules already do for an already-running VM.
+func TestReconciler_RunOnce_ReconcilesNetworkForAlreadyRunningVM(t *testing.T) {
+	raft := &fakeRaftClient{
+		resp: &internalpb.ListVMsResponse{Vms: []*internalpb.VMDefinition{{
+			Id: "vm-1", NodeId: "node-a", NetworkId: "net-1", IpAddress: "10.60.0.2", MacAddress: "02:aa:bb:cc:dd:ee",
+		}}},
+		networksResp: &internalpb.ListNetworksResponse{Networks: []*internalpb.NetworkDefinition{
+			{Id: "net-1", VlanId: 61, Subnet: "10.60.0.0/24"},
+		}},
+	}
+	zfs := newFakeDatasetManager()
+	zfs.mountpointFor["vm-1"] = t.TempDir()
+	zfs.existing["vm-1"] = true
+	vms := newFakeVMManager()
+	vms.running["vm-1"] = true // already running - the config was fixed at an earlier launch
+	vlan := newFakeVLANManager()
+	pfMgr := newFakePFManager()
+
+	r := &Reconciler{Raft: raft, ZFS: zfs, Bhyve: vms, VLAN: vlan, PF: pfMgr, Uplink: "bridge0", LocalNodeID: "node-a", BootROM: "/fw/UEFI.fd"}
+	if err := r.RunOnce(context.Background()); err != nil {
+		t.Fatalf("RunOnce() error: %v", err)
+	}
+
+	if len(vms.created) != 0 {
+		t.Errorf("created = %v, want none (VM already running)", vms.created)
+	}
+	wantBridge := networkBridgeName(&internalpb.NetworkDefinition{Id: "net-1"})
+	if addr := vlan.addresses[wantBridge]; addr != "10.60.0.0/24" {
+		t.Errorf("bridge address = %q, want 10.60.0.0/24 assigned even for an already-running VM", addr)
+	}
+	if len(pfMgr.natCalls) != 1 || pfMgr.natCalls[0].uplink != "bridge0" {
+		t.Errorf("natCalls = %v, want one call with uplink=bridge0 even for an already-running VM", pfMgr.natCalls)
 	}
 }
 
@@ -1240,6 +1430,63 @@ func TestReconciler_RunOnce_ReappliesFirewallRulesForAlreadyRunningVM(t *testing
 	}
 	if rules := pfMgr.applied["apiary/vm-vm-1"]; len(rules) != 1 {
 		t.Errorf("pf rules applied to apiary/vm-vm-1 = %v, want one rule even though the VM was already running", rules)
+	}
+}
+
+// TestReconciler_RunOnce_FirewallPausedMeansNoRulesOnCreate guards
+// ADR-0049's firewall-pause feature: FirewallPaused must make the VM's
+// pf(8) anchor end up with no active rules (everything allowed), even
+// though FirewallRules itself still has a real rule configured.
+func TestReconciler_RunOnce_FirewallPausedMeansNoRulesOnCreate(t *testing.T) {
+	raft := &fakeRaftClient{resp: &internalpb.ListVMsResponse{Vms: []*internalpb.VMDefinition{{
+		Id: "vm-1", NodeId: "node-a", FirewallPaused: true,
+		FirewallRules: []*internalpb.FirewallRule{{Direction: "in", Action: "block", Protocol: "tcp", PortRange: "22"}},
+	}}}}
+	zfs := newFakeDatasetManager()
+	zfs.mountpointFor["vm-1"] = t.TempDir()
+	vms := newFakeVMManager()
+	pfMgr := newFakePFManager()
+
+	r := &Reconciler{Raft: raft, ZFS: zfs, Bhyve: vms, PF: pfMgr, LocalNodeID: "node-a", BootROM: "/fw/UEFI.fd"}
+	if err := r.RunOnce(context.Background()); err != nil {
+		t.Fatalf("RunOnce() error: %v", err)
+	}
+
+	rules, ok := pfMgr.applied["apiary/vm-vm-1"]
+	if !ok {
+		t.Fatalf("no rules ever applied to apiary/vm-vm-1")
+	}
+	if len(rules) != 0 {
+		t.Errorf("pf rules applied to apiary/vm-vm-1 = %v, want none (firewall paused)", rules)
+	}
+}
+
+// TestReconciler_RunOnce_FirewallPausedForAlreadyRunningVM guards the
+// other call site: pausing must take effect on the very next tick even
+// for a VM that's already running, the same way a normal firewall-rule
+// change already does.
+func TestReconciler_RunOnce_FirewallPausedForAlreadyRunningVM(t *testing.T) {
+	raft := &fakeRaftClient{resp: &internalpb.ListVMsResponse{Vms: []*internalpb.VMDefinition{{
+		Id: "vm-1", NodeId: "node-a", Phase: internalpb.VMPhase_VM_PHASE_READY, FirewallPaused: true,
+		FirewallRules: []*internalpb.FirewallRule{{Direction: "out", Action: "pass", Protocol: "udp", PortRange: "53"}},
+	}}}}
+	zfs := newFakeDatasetManager()
+	zfs.mountpointFor["vm-1"] = t.TempDir()
+	vms := newFakeVMManager()
+	vms.running["vm-1"] = true
+	pfMgr := newFakePFManager()
+
+	r := &Reconciler{Raft: raft, ZFS: zfs, Bhyve: vms, PF: pfMgr, LocalNodeID: "node-a", BootROM: "/fw/UEFI.fd"}
+	if err := r.RunOnce(context.Background()); err != nil {
+		t.Fatalf("RunOnce() error: %v", err)
+	}
+
+	rules, ok := pfMgr.applied["apiary/vm-vm-1"]
+	if !ok {
+		t.Fatalf("no rules ever applied to apiary/vm-vm-1")
+	}
+	if len(rules) != 0 {
+		t.Errorf("pf rules applied to apiary/vm-vm-1 = %v, want none (firewall paused) even for an already-running VM", rules)
 	}
 }
 

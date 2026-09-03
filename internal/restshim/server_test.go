@@ -124,6 +124,22 @@ func (f *fakeClient) MigrateVM(_ context.Context, in *rpcpb.MigrateVMRequest, _ 
 	return &rpcpb.MigrateVMResponse{}, nil
 }
 
+func (f *fakeClient) SetVMFirewallPaused(context.Context, *rpcpb.SetVMFirewallPausedRequest, ...grpc.CallOption) (*rpcpb.SetVMFirewallPausedResponse, error) {
+	return &rpcpb.SetVMFirewallPausedResponse{}, nil
+}
+
+func (f *fakeClient) GetNodeConfig(context.Context, *rpcpb.GetNodeConfigRequest, ...grpc.CallOption) (*rpcpb.GetNodeConfigResponse, error) {
+	return &rpcpb.GetNodeConfigResponse{}, nil
+}
+
+func (f *fakeClient) UpdateNodeConfig(context.Context, *rpcpb.UpdateNodeConfigRequest, ...grpc.CallOption) (*rpcpb.UpdateNodeConfigResponse, error) {
+	return &rpcpb.UpdateNodeConfigResponse{}, nil
+}
+
+func (f *fakeClient) SetDatasetQuota(context.Context, *rpcpb.SetDatasetQuotaRequest, ...grpc.CallOption) (*rpcpb.SetDatasetQuotaResponse, error) {
+	return &rpcpb.SetDatasetQuotaResponse{}, nil
+}
+
 func (f *fakeClient) ReportVMPhase(context.Context, *rpcpb.ReportVMPhaseRequest, ...grpc.CallOption) (*rpcpb.ReportVMPhaseResponse, error) {
 	return &rpcpb.ReportVMPhaseResponse{}, nil
 }

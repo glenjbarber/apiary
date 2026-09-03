@@ -2,6 +2,7 @@ package pf
 
 import (
 	"context"
+	"fmt"
 	"strings"
 )
 
@@ -36,5 +37,26 @@ func (m *Manager) Flush(ctx context.Context, anchor string) error {
 	if err != nil && strings.Contains(err.Error(), "No such anchor") {
 		return nil
 	}
+	return err
+}
+
+// ApplyNAT installs one outbound-NAT rule in anchor so subnet's own
+// traffic reaches the real internet through uplink (the node's own
+// physical interface, already connected to a normal internet-routed
+// LAN) - the same "isolated network gets outbound access via NAT
+// through the host's own uplink" a home router provides, done here so
+// an Apiary-managed network never needs an external router of its own
+// (see ADR-0048; this replaces the ExternalGateway/shared-VLAN
+// approach from ADR-0047 for the common case of a node with its own
+// working internet connection). Uses the same modern `match ... nat-to`
+// form already proven to work in this project's own hand-configured
+// firewall reference config, not the older two-pass `nat` ruleset -
+// both are valid pf syntax, but this one loads through the same
+// `pfctl -a anchor -f -` single-pass path Apply already uses. Full-
+// replace, not diff, matching Apply's own idempotent-reapply-every-tick
+// convention - safe to call unconditionally every reconcile tick.
+func (m *Manager) ApplyNAT(ctx context.Context, anchor, subnet, uplink string) error {
+	body := fmt.Sprintf("match out on %s from %s to any nat-to (%s)\n", uplink, subnet, uplink)
+	_, err := runCmdStdin(ctx, body, "pfctl", "-a", anchor, "-f", "-")
 	return err
 }

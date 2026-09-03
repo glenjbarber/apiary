@@ -1,0 +1,101 @@
+{{define "machine_page"}}
+<!DOCTYPE html>
+<html lang="en">
+{{template "head" .}}
+<body>
+  {{template "nav" .}}
+  {{template "page_header" (pageHeader "Machine Configuration" "This node's own local settings - not replicated to other cluster members.")}}
+
+  <div class="panel">
+    <h3>Network interface</h3>
+    <p class="muted">
+      Which physical interface VLAN tagging and outbound NAT (ADR-0048)
+      use on this node. Changes here take effect the next time this
+      node's managerd restarts, not live.
+    </p>
+    <div id="nodeconfig-panel">
+      {{template "nodeconfig_panel" .}}
+    </div>
+  </div>
+
+  <div class="panel">
+    <h3>VM firewall overrides</h3>
+    <p class="muted">
+      Temporarily suspend enforcement of a VM's firewall rules
+      (everything allowed) without discarding them - useful for
+      troubleshooting connectivity. Only VMs assigned to this node are
+      shown.
+    </p>
+    <div id="machine-vms-panel">
+      {{template "machine_vms_panel" .}}
+    </div>
+  </div>
+
+  <div class="panel">
+    <h3>Dataset quota</h3>
+    <p class="muted">
+      Set a ZFS quota on a dataset under this node's own storage scope
+      (e.g. a VM or jail id). The base dataset itself can't be
+      targeted directly.
+    </p>
+    <div id="quota-panel">
+      {{template "quota_panel" .}}
+    </div>
+  </div>
+</body>
+</html>
+{{end}}
+
+{{define "nodeconfig_panel"}}
+<div id="nodeconfig-error" class="banner-error">{{.NodeConfigFormError}}</div>
+<table>
+  <tbody>
+    <tr><th>Uplink</th><td>{{if .NodeConfig.Uplink}}{{.NodeConfig.Uplink}}{{else}}<em>(unset)</em>{{end}}</td></tr>
+    <tr><th>NAT uplink</th><td>{{if .NodeConfig.NATUplink}}{{.NodeConfig.NATUplink}}{{else}}<em>(falls back to Uplink)</em>{{end}}</td></tr>
+  </tbody>
+</table>
+{{if .CanAdmin}}
+<form class="inline-form" hx-post="/machine/uplink" hx-target="#nodeconfig-panel" hx-swap="innerHTML">
+  <label>Uplink <input type="text" name="uplink" placeholder="re0" value="{{.NodeConfig.Uplink}}"></label>
+  <label>NAT uplink <input type="text" name="nat_uplink" placeholder="leave blank to use Uplink" value="{{.NodeConfig.NATUplink}}"></label>
+  <button type="submit">Save</button>
+</form>
+{{end}}
+{{end}}
+
+{{define "machine_vms_panel"}}
+<div id="machine-vms-error" class="banner-error">{{.MachineFirewallError}}</div>
+<table>
+  <thead>
+    <tr><th>ID</th><th>Name</th><th>Firewall</th><th></th></tr>
+  </thead>
+  <tbody id="machine-vm-rows">
+    {{range .MachineVMs}}
+    <tr>
+      <td>{{.ID}}</td>
+      <td>{{.Name}}</td>
+      <td>{{if .FirewallPaused}}<span class="error">paused</span>{{else}}<span class="success">enforced</span>{{end}}</td>
+      <td>
+        {{if .FirewallPaused}}
+        <button hx-post="/machine/vms/{{.ID}}/firewall" hx-vals='{"paused": "false"}' hx-target="#machine-vms-panel" hx-swap="innerHTML">Resume</button>
+        {{else}}
+        <button hx-post="/machine/vms/{{.ID}}/firewall" hx-vals='{"paused": "true"}' hx-target="#machine-vms-panel" hx-swap="innerHTML" hx-confirm="Pause firewall enforcement for {{.Name}}? All its traffic will be allowed until resumed.">Pause</button>
+        {{end}}
+      </td>
+    </tr>
+    {{else}}
+    <tr><td colspan="4"><em>{{if .MachineFirewallError}}Unable to load VMs{{else}}No VMs assigned to this node{{end}}</em></td></tr>
+    {{end}}
+  </tbody>
+</table>
+{{end}}
+
+{{define "quota_panel"}}
+<div id="quota-error" class="banner-error">{{.QuotaFormError}}</div>
+{{if .QuotaFormSuccess}}<div class="banner-success">{{.QuotaFormSuccess}}</div>{{end}}
+<form class="inline-form" hx-post="/machine/quota" hx-target="#quota-panel" hx-swap="innerHTML">
+  <label>Dataset <input type="text" name="dataset_name" placeholder="vm-1" required></label>
+  <label>Quota <input type="text" name="quota" placeholder="10G, or none to clear" required></label>
+  <button type="submit">Set quota</button>
+</form>
+{{end}}

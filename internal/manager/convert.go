@@ -54,7 +54,8 @@ func toInternalVM(vm *rpcpb.VMDefinition) *internalpb.VMDefinition {
 		FirewallRules: rules,
 		// Phase/PhaseError are the reconciler's own observed state, never
 		// set by an external caller - CreateVM/UpdateVM requests never
-		// carry them through.
+		// carry them through. FirewallPaused is likewise excluded here -
+		// only SetVMFirewallPaused's own dedicated command may set it.
 	}
 }
 
@@ -89,6 +90,9 @@ func fromInternalVM(vm *internalpb.VMDefinition) *rpcpb.VMDefinition {
 		ReplicaNodeId: vm.GetReplicaNodeId(),
 		BaseImageName: vm.GetBaseImageName(),
 		FirewallRules: rules,
+		// FirewallPaused is read-only from this direction too - only
+		// SetVMFirewallPaused's own dedicated command may set it.
+		FirewallPaused: vm.GetFirewallPaused(),
 	}
 }
 
@@ -97,11 +101,12 @@ func fromInternalVM(vm *internalpb.VMDefinition) *rpcpb.VMDefinition {
 // protocol's evolution.
 func toInternalNetwork(n *rpcpb.NetworkDefinition) *internalpb.NetworkDefinition {
 	return &internalpb.NetworkDefinition{
-		Id:         n.GetId(),
-		Name:       n.GetName(),
-		VlanId:     n.GetVlanId(),
-		Subnet:     n.GetSubnet(),
-		BridgeName: n.GetBridgeName(),
+		Id:              n.GetId(),
+		Name:            n.GetName(),
+		VlanId:          n.GetVlanId(),
+		Subnet:          n.GetSubnet(),
+		BridgeName:      n.GetBridgeName(),
+		ExternalGateway: n.GetExternalGateway(),
 	}
 }
 
@@ -110,11 +115,12 @@ func fromInternalNetwork(n *internalpb.NetworkDefinition) *rpcpb.NetworkDefiniti
 		return nil
 	}
 	return &rpcpb.NetworkDefinition{
-		Id:         n.GetId(),
-		Name:       n.GetName(),
-		VlanId:     n.GetVlanId(),
-		Subnet:     n.GetSubnet(),
-		BridgeName: n.GetBridgeName(),
+		Id:              n.GetId(),
+		Name:            n.GetName(),
+		VlanId:          n.GetVlanId(),
+		Subnet:          n.GetSubnet(),
+		BridgeName:      n.GetBridgeName(),
+		ExternalGateway: n.GetExternalGateway(),
 	}
 }
 

@@ -126,6 +126,7 @@ type dhcpManager interface {
 type pfManager interface {
 	Apply(ctx context.Context, anchor string, rules []pf.Rule) error
 	Flush(ctx context.Context, anchor string) error
+	ApplyNAT(ctx context.Context, anchor, subnet, uplink string) error
 }
 
 // Reconciler provisions local ZFS storage - and, if Bhyve is set, a
@@ -178,6 +179,18 @@ type Reconciler struct {
 	VLAN vlanManager
 	DHCP dhcpManager
 	PF   pfManager
+
+	// Uplink is this node's own physical internet-facing interface
+	// (e.g. "re0", "em0" - the same value passed to VLAN's own Uplink).
+	// When set (and PF is set, and a network has no ExternalGateway),
+	// ensureNetwork gives that network's own subnet outbound NAT
+	// through this interface - see ADR-0048. This is what makes an
+	// Apiary-managed network self-sufficient for real internet access
+	// without depending on any external router or physical VLAN
+	// trunking - empty disables it, leaving a network's VMs with only
+	// local (this-node) connectivity, matching today's behavior before
+	// this field existed.
+	Uplink string
 
 	// DNSServer, if set, is handed to every Apiary-managed network's DHCP
 	// clients via option 6 (see dhcpd.NetworkScope.DNSServer's own doc
@@ -300,19 +313,20 @@ func (r *Reconciler) RunOnce(ctx context.Context) error {
 			})
 		}
 		desired = append(desired, VMPlacement{
-			ID:            vm.GetId(),
-			NodeID:        vm.GetNodeId(),
-			Vcpus:         vm.GetVcpus(),
-			MemoryMB:      vm.GetMemoryMb(),
-			Deleting:      vm.GetDesiredState() == internalpb.VMState_VM_STATE_DELETING,
-			Phase:         phaseToString(vm.GetPhase()),
-			ISOName:       vm.GetIsoName(),
-			NetworkID:     vm.GetNetworkId(),
-			IPAddress:     vm.GetIpAddress(),
-			MACAddress:    vm.GetMacAddress(),
-			FirewallRules: rules,
-			ReplicaNodeID: vm.GetReplicaNodeId(),
-			BaseImageName: vm.GetBaseImageName(),
+			ID:             vm.GetId(),
+			NodeID:         vm.GetNodeId(),
+			Vcpus:          vm.GetVcpus(),
+			MemoryMB:       vm.GetMemoryMb(),
+			Deleting:       vm.GetDesiredState() == internalpb.VMState_VM_STATE_DELETING,
+			Phase:          phaseToString(vm.GetPhase()),
+			ISOName:        vm.GetIsoName(),
+			NetworkID:      vm.GetNetworkId(),
+			IPAddress:      vm.GetIpAddress(),
+			MACAddress:     vm.GetMacAddress(),
+			FirewallRules:  rules,
+			ReplicaNodeID:  vm.GetReplicaNodeId(),
+			BaseImageName:  vm.GetBaseImageName(),
+			FirewallPaused: vm.GetFirewallPaused(),
 		})
 	}
 
@@ -767,6 +781,32 @@ func (r *Reconciler) ensureVM(ctx context.Context, vm VMPlacement, networks map[
 		return nil
 	}
 
+	// Network infrastructure (bridge/vlan interfaces, gateway address,
+	// outbound NAT) is per-network, not per-VM device config - unlike a
+	// VM's own tap/MAC (fixed at launch, see below), it needs to stay
+	// correct on every tick even for a VM that's already running,
+	// otherwise a network-level config change (e.g. Reconciler.Uplink)
+	// never takes effect until every VM on that network happens to be
+	// recreated. Confirmed live: this was a real gap - ADR-0048's
+	// -nat-uplink fix silently never applied to an already-running VM
+	// until this was moved ahead of the running-VM early return below.
+	bridge := r.Bridge
+	macAddress := vm.MACAddress
+	if vm.NetworkID != "" {
+		if r.VLAN == nil {
+			return fmt.Errorf("VM names network %q but no VLAN support is configured on this node", vm.NetworkID)
+		}
+		network, ok := networks[vm.NetworkID]
+		if !ok {
+			return fmt.Errorf("network %q not found", vm.NetworkID)
+		}
+		networkBridge, err := r.ensureNetwork(ctx, network)
+		if err != nil {
+			return fmt.Errorf("provisioning network %q: %w", vm.NetworkID, err)
+		}
+		bridge = networkBridge
+	}
+
 	running, err := r.Bhyve.VMExists(ctx, vm.ID)
 	if err != nil {
 		return fmt.Errorf("checking bhyve VM: %w", err)
@@ -777,7 +817,7 @@ func (r *Reconciler) ensureVM(ctx context.Context, vm VMPlacement, networks map[
 		// bhyve device - they can (and should) be kept in sync on every
 		// tick even for an already-running VM.
 		if r.PF != nil {
-			if err := r.PF.Apply(ctx, vmAnchor(vm.ID), toPFRules(vm.FirewallRules)); err != nil {
+			if err := r.PF.Apply(ctx, vmAnchor(vm.ID), effectivePFRules(vm)); err != nil {
 				return fmt.Errorf("applying firewall rules: %w", err)
 			}
 		}
@@ -846,29 +886,6 @@ func (r *Reconciler) ensureVM(ctx context.Context, vm VMPlacement, networks map[
 		}
 	}
 
-	bridge := r.Bridge
-	// MACAddress is always set now (the FSM derives one for every VM,
-	// not just network-attached ones - see fsm.go's applyCreateVM), so
-	// even a flat-bridge VM gets a real, stable, predictable MAC an
-	// operator can hand to their own router's DHCP reservation - not
-	// gated behind NetworkID like the bridge/network provisioning below
-	// legitimately still is.
-	macAddress := vm.MACAddress
-	if vm.NetworkID != "" {
-		if r.VLAN == nil {
-			return fmt.Errorf("VM names network %q but no VLAN support is configured on this node", vm.NetworkID)
-		}
-		network, ok := networks[vm.NetworkID]
-		if !ok {
-			return fmt.Errorf("network %q not found", vm.NetworkID)
-		}
-		networkBridge, err := r.ensureNetwork(ctx, network)
-		if err != nil {
-			return fmt.Errorf("provisioning network %q: %w", vm.NetworkID, err)
-		}
-		bridge = networkBridge
-	}
-
 	if err := r.Bhyve.CreateVM(ctx, vm.ID, bhyve.Config{
 		CPUs:            cpus,
 		MemoryMB:        memoryMB,
@@ -894,7 +911,7 @@ func (r *Reconciler) ensureVM(ctx context.Context, vm VMPlacement, networks map[
 	}
 
 	if r.PF != nil {
-		if err := r.PF.Apply(ctx, vmAnchor(vm.ID), toPFRules(vm.FirewallRules)); err != nil {
+		if err := r.PF.Apply(ctx, vmAnchor(vm.ID), effectivePFRules(vm)); err != nil {
 			return fmt.Errorf("applying firewall rules: %w", err)
 		}
 	}
@@ -917,8 +934,25 @@ func (r *Reconciler) ensureNetwork(ctx context.Context, network *internalpb.Netw
 	if err := r.VLAN.EnsureMember(ctx, bridge, iface); err != nil {
 		return "", fmt.Errorf("adding %s to bridge: %w", iface, err)
 	}
-	if err := r.VLAN.EnsureBridgeAddress(ctx, bridge, network.GetSubnet()); err != nil {
-		return "", fmt.Errorf("assigning gateway address: %w", err)
+	// A network with ExternalGateway set already has a real router
+	// answering for the subnet's gateway address on this L2 segment -
+	// claiming it here too would conflict with that router (confirmed
+	// live: this is what "silent tcpdump on the real router" actually
+	// was - a duplicate-IP conflict, not a firewall/routing bug).
+	if network.GetExternalGateway() == "" {
+		if err := r.VLAN.EnsureBridgeAddress(ctx, bridge, network.GetSubnet()); err != nil {
+			return "", fmt.Errorf("assigning gateway address: %w", err)
+		}
+		// Give this network real outbound internet access through this
+		// node's own uplink - see ADR-0048. Only meaningful when this
+		// node is itself the gateway (ExternalGateway unset, just above);
+		// an externally-gatewayed network's own router is responsible
+		// for its internet access instead.
+		if r.PF != nil && r.Uplink != "" {
+			if err := r.PF.ApplyNAT(ctx, natAnchor(network.GetId()), network.GetSubnet(), r.Uplink); err != nil {
+				return "", fmt.Errorf("applying outbound NAT: %w", err)
+			}
+		}
 	}
 	return bridge, nil
 }
@@ -945,6 +979,14 @@ func vmAnchor(id string) string {
 	return "apiary/vm-" + id
 }
 
+// natAnchor returns the pf(8) anchor name for a network's own outbound
+// NAT rule - a sibling of vmAnchor, one flat level under "apiary/" so
+// it's covered by the same `anchor "apiary/*" all` reservation vmAnchor
+// already relies on, with no separate host prerequisite needed.
+func natAnchor(networkID string) string {
+	return "apiary/net-" + networkID
+}
+
 // toPFRules converts VMPlacement's plain FirewallRule slice into
 // internal/pf's own Rule type.
 func toPFRules(rules []FirewallRule) []pf.Rule {
@@ -953,6 +995,18 @@ func toPFRules(rules []FirewallRule) []pf.Rule {
 		out[i] = pf.Rule{Direction: r.Direction, Action: r.Action, Protocol: r.Protocol, PortRange: r.PortRange}
 	}
 	return out
+}
+
+// effectivePFRules returns vm's firewall rules to actually apply this
+// tick - nil (everything allowed, see pf.Manager.Apply's own doc
+// comment) if FirewallPaused is set, regardless of FirewallRules.
+// FirewallRules itself is never touched by this - un-pausing just
+// resumes normal enforcement on the next tick. See ADR-0049.
+func effectivePFRules(vm VMPlacement) []pf.Rule {
+	if vm.FirewallPaused {
+		return nil
+	}
+	return toPFRules(vm.FirewallRules)
 }
 
 // reconcileDHCP aggregates every local, non-deleting VM's network
@@ -971,7 +1025,7 @@ func (r *Reconciler) reconcileDHCP(ctx context.Context, planned []VMPlacement, n
 		}
 		scope, ok := scopeByNetwork[vm.NetworkID]
 		if !ok {
-			scope = &dhcpd.NetworkScope{Bridge: networkBridgeName(network), Subnet: network.GetSubnet(), DNSServer: r.DNSServer}
+			scope = &dhcpd.NetworkScope{Bridge: networkBridgeName(network), Subnet: network.GetSubnet(), DNSServer: r.DNSServer, Gateway: network.GetExternalGateway()}
 			scopeByNetwork[vm.NetworkID] = scope
 		}
 		scope.Leases = append(scope.Leases, dhcpd.Lease{MAC: vm.MACAddress, IP: vm.IPAddress, Hostname: vm.ID})

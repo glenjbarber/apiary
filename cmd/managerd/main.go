@@ -27,6 +27,7 @@ import (
 	"github.com/glenjbarber/apiary/internal/isostore"
 	"github.com/glenjbarber/apiary/internal/jail"
 	"github.com/glenjbarber/apiary/internal/manager"
+	"github.com/glenjbarber/apiary/internal/nodeconfig"
 	"github.com/glenjbarber/apiary/internal/pf"
 	"github.com/glenjbarber/apiary/internal/resetutil"
 	"github.com/glenjbarber/apiary/internal/ufsmount"
@@ -63,6 +64,7 @@ func run() error {
 	diskSizeMB := flag.Uint64("disk-size-mb", 0, "size of each VM's boot disk image in MB (0 uses the reconciler's own default)")
 	isoDir := flag.String("iso-dir", "/var/db/apiary/isos", "directory where uploaded installer images are stored on this node")
 	vlanUplink := flag.String("vlan-uplink", "", "physical interface VLAN-tagged networks attach to (e.g. \"re0\", \"em0\" - differs per node); leave empty to disable network management (VLANs/DHCP/firewall) on this node")
+	natUplink := flag.String("nat-uplink", "", "interface a self-hosted network's outbound NAT egresses through (see ADR-0048) - defaults to -vlan-uplink's value if unset, which is correct on most nodes, but must be set explicitly when this node's real internet-facing interface differs from its VLAN-tagging uplink (e.g. \"bridge0\" when -vlan-uplink's own NIC has itself been bridged for flat VM networking, as on apiarium - confirmed live: nat-to against an interface with no IPv4 address of its own silently never matches any egress traffic)")
 	dhcpDNSServer := flag.String("dhcp-dns-server", "", "DNS server address handed to DHCP clients on this node's Apiary-managed networks (dnsmasq's own port=0 disables its resolver, so without this every VM gets a dead-end DNS server - see internal/dhcpd.NetworkScope.DNSServer); leave empty only if no VM on a managed network needs working DNS resolution")
 	hastEnabled := flag.Bool("hast-enabled", false, "enable HAST-backed VM disk replication support on this node (requires a real, patched hastd - see ADR-0026); needed on both a replicated VM's owning node and its replica node, regardless of bhyve support")
 	jailEnabled := flag.Bool("jail-enabled", false, "enable jail orchestration on this node (requires internal/jail's own prerequisites - see CLAUDE.md)")
@@ -148,9 +150,27 @@ func run() error {
 	// there's no reason for two separate peer clients/credentials.
 	peers := manager.NewPeerReporter(*peerAPIKey, *peerTLS, peerHostnames)
 
+	// nodeConfig holds this node's own local settings (ADR-0049) - if a
+	// value was saved via the Machine Configuration UI, it overrides the
+	// matching -vlan-uplink/-nat-uplink flag default below, before
+	// either is used to construct anything. A fresh install with no
+	// saved file yet just keeps the flag-provided values.
+	nodeConfigMgr := &nodeconfig.Manager{}
+	if cfg, err := nodeConfigMgr.Load(); err != nil {
+		log.Printf("managerd: reading node config: %v (using flag defaults)", err)
+	} else {
+		if cfg.Uplink != "" {
+			*vlanUplink = cfg.Uplink
+		}
+		if cfg.NATUplink != "" {
+			*natUplink = cfg.NATUplink
+		}
+	}
+
+	zfsMgr := zfs.New(*zfsBase)
 	reconciler := &cluster.Reconciler{
 		Raft:             raftClient,
-		ZFS:              zfs.New(*zfsBase),
+		ZFS:              zfsMgr,
 		LocalNodeID:      raftNodeID,
 		BootROM:          *bhyveBootROM,
 		DiskSizeMB:       *diskSizeMB,
@@ -203,6 +223,10 @@ func run() error {
 			reconciler.VLAN = vlanMgr
 			reconciler.DHCP = &dhcpd.Manager{}
 			reconciler.PF = &pf.Manager{}
+			reconciler.Uplink = *vlanUplink
+			if *natUplink != "" {
+				reconciler.Uplink = *natUplink
+			}
 		}
 	}
 
@@ -222,7 +246,7 @@ func run() error {
 		vlanArg = vlanMgr
 	}
 
-	srv := manager.NewServer(raftClient, id, isos, vncArg, serialLogArg, vlanArg, peers, resolvedPeerPort)
+	srv := manager.NewServer(raftClient, id, isos, vncArg, serialLogArg, vlanArg, peers, resolvedPeerPort, zfsMgr, nodeConfigMgr)
 	// Every RPC (including UploadISO's stream) is gated by srv's own
 	// API-key check - see ADR-0023. Auth stays fully open until the
 	// first key is created (CreateAPIKey itself included), so this is

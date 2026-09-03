@@ -25,6 +25,7 @@ const (
 	ManagerService_DeleteVM_FullMethodName                   = "/apiary.rpc.v1.ManagerService/DeleteVM"
 	ManagerService_ForcePurgeVM_FullMethodName               = "/apiary.rpc.v1.ManagerService/ForcePurgeVM"
 	ManagerService_MigrateVM_FullMethodName                  = "/apiary.rpc.v1.ManagerService/MigrateVM"
+	ManagerService_SetVMFirewallPaused_FullMethodName        = "/apiary.rpc.v1.ManagerService/SetVMFirewallPaused"
 	ManagerService_GetVM_FullMethodName                      = "/apiary.rpc.v1.ManagerService/GetVM"
 	ManagerService_ListVMs_FullMethodName                    = "/apiary.rpc.v1.ManagerService/ListVMs"
 	ManagerService_UploadISO_FullMethodName                  = "/apiary.rpc.v1.ManagerService/UploadISO"
@@ -33,6 +34,9 @@ const (
 	ManagerService_HostStats_FullMethodName                  = "/apiary.rpc.v1.ManagerService/HostStats"
 	ManagerService_GetVMConsole_FullMethodName               = "/apiary.rpc.v1.ManagerService/GetVMConsole"
 	ManagerService_GetVMSerialLog_FullMethodName             = "/apiary.rpc.v1.ManagerService/GetVMSerialLog"
+	ManagerService_GetNodeConfig_FullMethodName              = "/apiary.rpc.v1.ManagerService/GetNodeConfig"
+	ManagerService_UpdateNodeConfig_FullMethodName           = "/apiary.rpc.v1.ManagerService/UpdateNodeConfig"
+	ManagerService_SetDatasetQuota_FullMethodName            = "/apiary.rpc.v1.ManagerService/SetDatasetQuota"
 	ManagerService_CreateNetwork_FullMethodName              = "/apiary.rpc.v1.ManagerService/CreateNetwork"
 	ManagerService_ListNetworks_FullMethodName               = "/apiary.rpc.v1.ManagerService/ListNetworks"
 	ManagerService_DeleteNetwork_FullMethodName              = "/apiary.rpc.v1.ManagerService/DeleteNetwork"
@@ -102,6 +106,14 @@ type ManagerServiceClient interface {
 	// exactly like any other role change, no new reconciler logic
 	// involved.
 	MigrateVM(ctx context.Context, in *MigrateVMRequest, opts ...grpc.CallOption) (*MigrateVMResponse, error)
+	// SetVMFirewallPaused temporarily suspends enforcement of a VM's
+	// firewall_rules (everything allowed) without discarding the
+	// configured rule list - useful for troubleshooting connectivity.
+	// Deliberately not folded into UpdateVM: UpdateVM replaces a VM's
+	// entire record, so a caller toggling just this one field would risk
+	// silently wiping firewall_rules/network_id/etc. unless it first
+	// fetched and resent the complete current record - see ADR-0049.
+	SetVMFirewallPaused(ctx context.Context, in *SetVMFirewallPausedRequest, opts ...grpc.CallOption) (*SetVMFirewallPausedResponse, error)
 	// GetVM and ListVMs only succeed against the current leader - see
 	// api/internalpb/raftd.proto's GetVM/ListVMs doc comments for why v1's
 	// read consistency model is deliberately as simple as its write model.
@@ -134,6 +146,21 @@ type ManagerServiceClient interface {
 	// Same locality limitation as GetVMConsole: only answers for a VM
 	// confirmed running on *this* node.
 	GetVMSerialLog(ctx context.Context, in *GetVMSerialLogRequest, opts ...grpc.CallOption) (*GetVMSerialLogResponse, error)
+	// GetNodeConfig/UpdateNodeConfig manage this node's own local runtime
+	// settings (currently: the uplink interfaces VLAN tagging/outbound
+	// NAT use - see ADR-0048) - physical, per-node data like HostStats/
+	// ISOs above, never routed through raft (a NIC name is only ever
+	// meaningful to the one node that has it). A change here takes
+	// effect the next time this node's managerd restarts, not live -
+	// see ADR-0049 for why. See internal/nodeconfig.
+	GetNodeConfig(ctx context.Context, in *GetNodeConfigRequest, opts ...grpc.CallOption) (*GetNodeConfigResponse, error)
+	UpdateNodeConfig(ctx context.Context, in *UpdateNodeConfigRequest, opts ...grpc.CallOption) (*UpdateNodeConfigResponse, error)
+	// SetDatasetQuota sets a ZFS quota on a dataset under this node's own
+	// configured Base scope (see internal/zfs.Manager) - physical,
+	// per-node storage governance, never routed through raft. See
+	// ADR-0049 for the v1 limitation that this can only target a named
+	// sub-dataset, not the Base dataset itself.
+	SetDatasetQuota(ctx context.Context, in *SetDatasetQuotaRequest, opts ...grpc.CallOption) (*SetDatasetQuotaResponse, error)
 	// CreateNetwork/ListNetworks/DeleteNetwork manage NetworkDefinitions -
 	// VLAN/subnet/bridge segments a VM can attach to (see ADR-0022).
 	// CreateNetwork/DeleteNetwork just submit a Command through raft
@@ -265,6 +292,16 @@ func (c *managerServiceClient) MigrateVM(ctx context.Context, in *MigrateVMReque
 	return out, nil
 }
 
+func (c *managerServiceClient) SetVMFirewallPaused(ctx context.Context, in *SetVMFirewallPausedRequest, opts ...grpc.CallOption) (*SetVMFirewallPausedResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(SetVMFirewallPausedResponse)
+	err := c.cc.Invoke(ctx, ManagerService_SetVMFirewallPaused_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *managerServiceClient) GetVM(ctx context.Context, in *GetVMRequest, opts ...grpc.CallOption) (*GetVMResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(GetVMResponse)
@@ -342,6 +379,36 @@ func (c *managerServiceClient) GetVMSerialLog(ctx context.Context, in *GetVMSeri
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(GetVMSerialLogResponse)
 	err := c.cc.Invoke(ctx, ManagerService_GetVMSerialLog_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *managerServiceClient) GetNodeConfig(ctx context.Context, in *GetNodeConfigRequest, opts ...grpc.CallOption) (*GetNodeConfigResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetNodeConfigResponse)
+	err := c.cc.Invoke(ctx, ManagerService_GetNodeConfig_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *managerServiceClient) UpdateNodeConfig(ctx context.Context, in *UpdateNodeConfigRequest, opts ...grpc.CallOption) (*UpdateNodeConfigResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(UpdateNodeConfigResponse)
+	err := c.cc.Invoke(ctx, ManagerService_UpdateNodeConfig_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *managerServiceClient) SetDatasetQuota(ctx context.Context, in *SetDatasetQuotaRequest, opts ...grpc.CallOption) (*SetDatasetQuotaResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(SetDatasetQuotaResponse)
+	err := c.cc.Invoke(ctx, ManagerService_SetDatasetQuota_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -577,6 +644,14 @@ type ManagerServiceServer interface {
 	// exactly like any other role change, no new reconciler logic
 	// involved.
 	MigrateVM(context.Context, *MigrateVMRequest) (*MigrateVMResponse, error)
+	// SetVMFirewallPaused temporarily suspends enforcement of a VM's
+	// firewall_rules (everything allowed) without discarding the
+	// configured rule list - useful for troubleshooting connectivity.
+	// Deliberately not folded into UpdateVM: UpdateVM replaces a VM's
+	// entire record, so a caller toggling just this one field would risk
+	// silently wiping firewall_rules/network_id/etc. unless it first
+	// fetched and resent the complete current record - see ADR-0049.
+	SetVMFirewallPaused(context.Context, *SetVMFirewallPausedRequest) (*SetVMFirewallPausedResponse, error)
 	// GetVM and ListVMs only succeed against the current leader - see
 	// api/internalpb/raftd.proto's GetVM/ListVMs doc comments for why v1's
 	// read consistency model is deliberately as simple as its write model.
@@ -609,6 +684,21 @@ type ManagerServiceServer interface {
 	// Same locality limitation as GetVMConsole: only answers for a VM
 	// confirmed running on *this* node.
 	GetVMSerialLog(context.Context, *GetVMSerialLogRequest) (*GetVMSerialLogResponse, error)
+	// GetNodeConfig/UpdateNodeConfig manage this node's own local runtime
+	// settings (currently: the uplink interfaces VLAN tagging/outbound
+	// NAT use - see ADR-0048) - physical, per-node data like HostStats/
+	// ISOs above, never routed through raft (a NIC name is only ever
+	// meaningful to the one node that has it). A change here takes
+	// effect the next time this node's managerd restarts, not live -
+	// see ADR-0049 for why. See internal/nodeconfig.
+	GetNodeConfig(context.Context, *GetNodeConfigRequest) (*GetNodeConfigResponse, error)
+	UpdateNodeConfig(context.Context, *UpdateNodeConfigRequest) (*UpdateNodeConfigResponse, error)
+	// SetDatasetQuota sets a ZFS quota on a dataset under this node's own
+	// configured Base scope (see internal/zfs.Manager) - physical,
+	// per-node storage governance, never routed through raft. See
+	// ADR-0049 for the v1 limitation that this can only target a named
+	// sub-dataset, not the Base dataset itself.
+	SetDatasetQuota(context.Context, *SetDatasetQuotaRequest) (*SetDatasetQuotaResponse, error)
 	// CreateNetwork/ListNetworks/DeleteNetwork manage NetworkDefinitions -
 	// VLAN/subnet/bridge segments a VM can attach to (see ADR-0022).
 	// CreateNetwork/DeleteNetwork just submit a Command through raft
@@ -698,6 +788,9 @@ func (UnimplementedManagerServiceServer) ForcePurgeVM(context.Context, *ForcePur
 func (UnimplementedManagerServiceServer) MigrateVM(context.Context, *MigrateVMRequest) (*MigrateVMResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method MigrateVM not implemented")
 }
+func (UnimplementedManagerServiceServer) SetVMFirewallPaused(context.Context, *SetVMFirewallPausedRequest) (*SetVMFirewallPausedResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method SetVMFirewallPaused not implemented")
+}
 func (UnimplementedManagerServiceServer) GetVM(context.Context, *GetVMRequest) (*GetVMResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetVM not implemented")
 }
@@ -721,6 +814,15 @@ func (UnimplementedManagerServiceServer) GetVMConsole(context.Context, *GetVMCon
 }
 func (UnimplementedManagerServiceServer) GetVMSerialLog(context.Context, *GetVMSerialLogRequest) (*GetVMSerialLogResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetVMSerialLog not implemented")
+}
+func (UnimplementedManagerServiceServer) GetNodeConfig(context.Context, *GetNodeConfigRequest) (*GetNodeConfigResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetNodeConfig not implemented")
+}
+func (UnimplementedManagerServiceServer) UpdateNodeConfig(context.Context, *UpdateNodeConfigRequest) (*UpdateNodeConfigResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method UpdateNodeConfig not implemented")
+}
+func (UnimplementedManagerServiceServer) SetDatasetQuota(context.Context, *SetDatasetQuotaRequest) (*SetDatasetQuotaResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method SetDatasetQuota not implemented")
 }
 func (UnimplementedManagerServiceServer) CreateNetwork(context.Context, *CreateNetworkRequest) (*CreateNetworkResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method CreateNetwork not implemented")
@@ -905,6 +1007,24 @@ func _ManagerService_MigrateVM_Handler(srv interface{}, ctx context.Context, dec
 	return interceptor(ctx, in, info, handler)
 }
 
+func _ManagerService_SetVMFirewallPaused_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SetVMFirewallPausedRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ManagerServiceServer).SetVMFirewallPaused(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ManagerService_SetVMFirewallPaused_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ManagerServiceServer).SetVMFirewallPaused(ctx, req.(*SetVMFirewallPausedRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _ManagerService_GetVM_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(GetVMRequest)
 	if err := dec(in); err != nil {
@@ -1034,6 +1154,60 @@ func _ManagerService_GetVMSerialLog_Handler(srv interface{}, ctx context.Context
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(ManagerServiceServer).GetVMSerialLog(ctx, req.(*GetVMSerialLogRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ManagerService_GetNodeConfig_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetNodeConfigRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ManagerServiceServer).GetNodeConfig(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ManagerService_GetNodeConfig_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ManagerServiceServer).GetNodeConfig(ctx, req.(*GetNodeConfigRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ManagerService_UpdateNodeConfig_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(UpdateNodeConfigRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ManagerServiceServer).UpdateNodeConfig(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ManagerService_UpdateNodeConfig_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ManagerServiceServer).UpdateNodeConfig(ctx, req.(*UpdateNodeConfigRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ManagerService_SetDatasetQuota_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SetDatasetQuotaRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ManagerServiceServer).SetDatasetQuota(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ManagerService_SetDatasetQuota_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ManagerServiceServer).SetDatasetQuota(ctx, req.(*SetDatasetQuotaRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -1394,6 +1568,10 @@ var ManagerService_ServiceDesc = grpc.ServiceDesc{
 			Handler:    _ManagerService_MigrateVM_Handler,
 		},
 		{
+			MethodName: "SetVMFirewallPaused",
+			Handler:    _ManagerService_SetVMFirewallPaused_Handler,
+		},
+		{
 			MethodName: "GetVM",
 			Handler:    _ManagerService_GetVM_Handler,
 		},
@@ -1420,6 +1598,18 @@ var ManagerService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "GetVMSerialLog",
 			Handler:    _ManagerService_GetVMSerialLog_Handler,
+		},
+		{
+			MethodName: "GetNodeConfig",
+			Handler:    _ManagerService_GetNodeConfig_Handler,
+		},
+		{
+			MethodName: "UpdateNodeConfig",
+			Handler:    _ManagerService_UpdateNodeConfig_Handler,
+		},
+		{
+			MethodName: "SetDatasetQuota",
+			Handler:    _ManagerService_SetDatasetQuota_Handler,
 		},
 		{
 			MethodName: "CreateNetwork",

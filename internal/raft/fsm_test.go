@@ -148,6 +148,59 @@ func TestFSM_Apply_UpdateVMPhase(t *testing.T) {
 	}
 }
 
+// TestFSM_Apply_SetVMFirewallPaused_TouchesOnlyThatField guards the
+// exact reason this is a dedicated narrow command rather than routed
+// through UpdateVM (which fully replaces the record - see ADR-0049):
+// every other field, especially FirewallRules, must survive untouched.
+func TestFSM_Apply_SetVMFirewallPaused_TouchesOnlyThatField(t *testing.T) {
+	fsm := NewFSM()
+	fsm.Apply(&raft.Log{Index: 1, Data: mustMarshalCommand(t, &internalpb.Command{
+		Op: &internalpb.Command_CreateVm{CreateVm: &internalpb.CreateVM{
+			Vm: &internalpb.VMDefinition{
+				Id: "vm-1", NodeId: "node-a",
+				FirewallRules: []*internalpb.FirewallRule{{Direction: "in", Action: "block", Protocol: "tcp", PortRange: "22"}},
+			},
+		}},
+	})})
+
+	cmd := &internalpb.Command{
+		Op: &internalpb.Command_SetVmFirewallPaused{SetVmFirewallPaused: &internalpb.SetVMFirewallPaused{
+			Id: "vm-1", Paused: true,
+		}},
+	}
+	result := fsm.Apply(&raft.Log{Index: 2, Data: mustMarshalCommand(t, cmd)})
+
+	applyResult := result.(*FSMApplyResult)
+	if applyResult.Error != "" {
+		t.Fatalf("Error = %q, want empty", applyResult.Error)
+	}
+	vm, _ := fsm.VM("vm-1")
+	if !vm.GetFirewallPaused() {
+		t.Errorf("FirewallPaused = false, want true")
+	}
+	if vm.GetNodeId() != "node-a" {
+		t.Errorf("NodeId = %q, want node-a (must survive untouched)", vm.GetNodeId())
+	}
+	if len(vm.GetFirewallRules()) != 1 || vm.GetFirewallRules()[0].GetPortRange() != "22" {
+		t.Errorf("FirewallRules = %v, want the original rule to survive untouched", vm.GetFirewallRules())
+	}
+}
+
+func TestFSM_Apply_SetVMFirewallPaused_MissingIDIsError(t *testing.T) {
+	fsm := NewFSM()
+
+	cmd := &internalpb.Command{
+		Op: &internalpb.Command_SetVmFirewallPaused{SetVmFirewallPaused: &internalpb.SetVMFirewallPaused{
+			Id: "vm-1", Paused: true,
+		}},
+	}
+	result := fsm.Apply(&raft.Log{Index: 1, Data: mustMarshalCommand(t, cmd)})
+
+	if result.(*FSMApplyResult).Error == "" {
+		t.Fatalf("Error = empty, want a missing-id rejection")
+	}
+}
+
 func TestFSM_Apply_UpdateVMPhase_MissingIDIsError(t *testing.T) {
 	fsm := NewFSM()
 

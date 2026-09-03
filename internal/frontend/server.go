@@ -177,6 +177,28 @@ type pageData struct {
 	// the picker no longer needs to restrict itself to images already
 	// present on the currently-selected node.
 	ClusterISOs []isoRowView
+
+	// NodeConfig/NodeConfigFormError back the Machine Configuration
+	// page's uplink section (ADR-0049) - GetNodeConfig's current
+	// snapshot and any Update error, rendered the same way
+	// NetworkFormError/APIKeyFormError are for their own pages.
+	NodeConfig          nodeConfigView
+	NodeConfigFormError string
+
+	// MachineVMs lists VMs assigned to this node (filtered client-side
+	// from ListVMs, which already exists and already forwards to the
+	// leader when needed - ADR-0035), for the Machine Configuration
+	// page's per-VM firewall-pause table.
+	MachineVMs []vmView
+
+	// MachineFirewallError reports a pause/resume-specific error for
+	// that same table.
+	MachineFirewallError string
+
+	// QuotaFormError/QuotaFormSuccess report a set-quota result for the
+	// Machine Configuration page's quota form.
+	QuotaFormError   string
+	QuotaFormSuccess string
 }
 
 // userView is one row of the Users page's table.
@@ -466,6 +488,18 @@ func (s *Server) routes() {
 	// still must not be allowed to target Admin.
 	s.mux.HandleFunc("GET /users", s.requireRole(manager.RoleViewer, s.handleUsersPage))
 	s.mux.HandleFunc("POST /users/{username}/password", s.requireRole(manager.RoleOperator, s.handleChangePassword))
+
+	// Machine Configuration (ADR-0049): the page itself is Operator-
+	// visible (the lowest tier of its three actions) - the uplink form's
+	// own submit is gated RoleAdmin (host-wide network reconfiguration,
+	// same tier as CreateAPIKey), matching UpdateNodeConfig's own RBAC
+	// entry; the page template itself hides that form from a non-Admin
+	// viewer via .CanAdmin, the same defense-in-depth pattern the Users
+	// page already uses for its per-row password action.
+	s.mux.HandleFunc("GET /machine", s.requireRole(manager.RoleOperator, s.handleMachinePage))
+	s.mux.HandleFunc("POST /machine/uplink", s.requireRole(manager.RoleAdmin, s.handleUpdateNodeConfig))
+	s.mux.HandleFunc("POST /machine/vms/{id}/firewall", s.requireRole(manager.RoleOperator, s.handleSetVMFirewallPaused))
+	s.mux.HandleFunc("POST /machine/quota", s.requireRole(manager.RoleOperator, s.handleSetDatasetQuota))
 }
 
 // handleLoginPage serves the login form. If login isn't enabled at all,
@@ -1016,10 +1050,11 @@ func (s *Server) handleCreateNetwork(w http.ResponseWriter, r *http.Request) {
 
 	resp, err := s.client.CreateNetwork(r.Context(), &rpcpb.CreateNetworkRequest{
 		Network: &rpcpb.NetworkDefinition{
-			Id:     r.FormValue("id"),
-			Name:   r.FormValue("name"),
-			VlanId: uint32(vlanID),
-			Subnet: r.FormValue("subnet"),
+			Id:              r.FormValue("id"),
+			Name:            r.FormValue("name"),
+			VlanId:          uint32(vlanID),
+			Subnet:          r.FormValue("subnet"),
+			ExternalGateway: r.FormValue("external_gateway"),
 		},
 	})
 	if err != nil {
