@@ -83,7 +83,7 @@ func TestRenderConfig_DNSServerOptionScopedToInterface(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RenderConfig() error: %v", err)
 	}
-	if !containsLine(body, "dhcp-option=interface:apiary-net-1,6,10.60.0.1") {
+	if !containsLine(body, "dhcp-option=tag:apiary-net-1,6,10.60.0.1") {
 		t.Errorf("RenderConfig() missing the DNS server option, got:\n%s", body)
 	}
 }
@@ -112,7 +112,7 @@ func TestRenderConfig_GatewayOptionScopedToInterface(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RenderConfig() error: %v", err)
 	}
-	if !containsLine(body, "dhcp-option=interface:apiary-net-1,3,10.60.0.1") {
+	if !containsLine(body, "dhcp-option=tag:apiary-net-1,3,10.60.0.1") {
 		t.Errorf("RenderConfig() missing the gateway/router option, got:\n%s", body)
 	}
 }

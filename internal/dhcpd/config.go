@@ -79,11 +79,23 @@ func RenderConfig(scopes []NetworkScope) (string, error) {
 
 		fmt.Fprintf(&b, "interface=%s\n", s.Bridge)
 		fmt.Fprintf(&b, "dhcp-range=%s,%s,%s,12h\n", start, end, netmask)
+		// tag:<bridge>, not interface:<bridge> - a real, previously-
+		// undiscovered bug found live via packet capture: "interface:"
+		// is not a valid dnsmasq scope selector for dhcp-option (unlike
+		// dhcp-range/interface= above, which do support literal
+		// interface names). dnsmasq silently accepted the malformed
+		// line and just never applied it - no error, no warning, no
+		// option 6/3 in any DHCP reply, ever, on any network that ever
+		// set DNSServer/Gateway - confirmed by a client's own requested
+		// parameter list explicitly asking for option 6 and getting
+		// back an ACK with no such option present at all. dnsmasq DOES
+		// automatically tag every request with its arriving interface's
+		// own name, usable as tag:<name> - that's the correct selector.
 		if s.DNSServer != "" {
-			fmt.Fprintf(&b, "dhcp-option=interface:%s,6,%s\n", s.Bridge, s.DNSServer)
+			fmt.Fprintf(&b, "dhcp-option=tag:%s,6,%s\n", s.Bridge, s.DNSServer)
 		}
 		if s.Gateway != "" {
-			fmt.Fprintf(&b, "dhcp-option=interface:%s,3,%s\n", s.Bridge, s.Gateway)
+			fmt.Fprintf(&b, "dhcp-option=tag:%s,3,%s\n", s.Bridge, s.Gateway)
 		}
 		for _, l := range s.Leases {
 			if l.MAC == "" || l.IP == "" {
