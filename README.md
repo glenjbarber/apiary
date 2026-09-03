@@ -68,13 +68,15 @@ each design decision, in order.
   with a fix ([D57511](https://reviews.freebsd.org/D57511)) awaiting
   review, and independently confirmed the fix works. See
   [ADR-0008](docs/adr/0008-hast-config-and-lifecycle.md) for the full
-  trail. All four project machines now run the patched `hastd`, and
-  real VM disk replication is wired in for real — see below.
+  trail. Every project machine ran the patched `hastd` at the time
+  (the three FreeBSD VMs among them were later decommissioned - see
+  "Not yet implemented" below), and real VM disk replication is wired
+  in for real — see below.
 - **Real HAST-backed VM disk replication** — a VM can name a
   `replica_node_id` (caller-set, like `node_id`) and its disk is then
   replicated to that node for real data redundancy - not automatic
-  failover, since only one machine in this project can actually run
-  bhyve VMs. Verified live on a real 2-node raft cluster: `hastctl`
+  failover, since nothing decides on its own that a node is down and a
+  replica should take over. Verified live on a real 2-node raft cluster: `hastctl`
   reports `role: primary`/`status: complete` on the owning node and
   `role: secondary`/`status: complete` on the replica, with a real
   bhyve VM booted against the replicated device. See
@@ -325,13 +327,15 @@ each design decision, in order.
 
 **Not yet implemented:**
 
-- Cross-node HAST replication works for real on this project's own four
-  machines (all patched - see above), but the underlying fix still
-  isn't merged upstream, so it isn't something a stock FreeBSD install
-  elsewhere could rely on yet. Automatic failover of a replicated VM
-  also isn't implemented - only one machine in this project can
-  actually run bhyve VMs, so this is data redundancy, not HA. A
-  replica's dataset also isn't cleaned up once its VM's (or jail's)
+- Cross-node HAST replication works for real on this project's own two
+  remaining machines, `apiarium`/`apiverse` (both patched - see above;
+  the three FreeBSD VMs this was originally verified on were later
+  decommissioned when their host hypervisor was retired), but the
+  underlying fix still isn't merged upstream, so it isn't something a
+  stock FreeBSD install elsewhere could rely on yet. Automatic failover
+  of a replicated VM also isn't implemented - this is data redundancy,
+  not HA. A replica's dataset also isn't cleaned up once its VM's (or
+  jail's)
   record is fully purged (a deliberate consequence of never inferring
   teardown from an absent record - see ADR-0026/ADR-0027)
 - Node scheduling: nothing decides which cluster node a VM should run
@@ -369,101 +373,30 @@ each design decision, in order.
   always starting blank — the caller still has to supply an
   already-raw, already-bootable image. Linux containers have no path at
   all — jails share the host FreeBSD kernel.
-- A separate `cluster-api-provider-apiary` repo is in progress: a real
+- A separate `cluster-api-provider-apiary` repo implements a real
   Cluster API infrastructure provider (`ApiaryCluster`/`ApiaryMachine`/
-  `ApiaryMachineTemplate`), paired with the existing upstream kubeadm
-  bootstrap/control-plane providers, driving Apiary through
-  `internal/restshim`'s REST API. ADR-0031's base-image support plus
-  `internal/isostore`'s existing `UploadISO` (for a cloud-init NoCloud
-  seed ISO the controller builds itself) are what make this possible.
-  v1 has no load-balancer/HA control plane (a single control-plane
-  node's own IP is used directly); live verification is staged
-  incrementally, single-VM provisioning before a fully joined
-  multi-node cluster. CRDs/controllers/REST client are implemented and
-  unit-tested (a `controller-runtime` fake client plus an in-memory
-  `restshimd` stand-in, since `envtest`'s own binaries weren't
-  fetchable in this sandbox); real live verification against a `kind`
-  management cluster is still pending. `providerID`-to-kubelet wiring
-  also has no automatic path (no cloud-controller-manager exists for
-  Apiary) - documented as a manual `preKubeadmCommands` step in the new
-  repo's own README.
-  **Update: live verification is now complete and fully passing.**
-  Getting there found and fixed five real bugs, none of them in the
-  CAPI provider's own core design:
-  1. `internal/pf`'s `Flush` wasn't idempotent for an already-gone `pf`
-     anchor, permanently wedging reconciliation for a deleted VM (see
-     ADR-0022's own "Follow-up").
-  2. The CAPI provider's own `createVM` didn't handle a stale-cache
-     duplicate create attempt (fixed by adopting the already-existing
-     VM instead of erroring, since its id is deterministic).
-  3. A live `hastd`/`hastctl` crash-loop (root-caused and fixed - a
-     third-party source patch to `/usr/src/sbin/hastd/hast_proto.c`,
-     installed on both `apiarium` and `freebsd-apiary` - see ADR-0022's
-     own "Follow-up"). `-hast-enabled` is back on on both nodes. Filed
-     upstream as [bug 298085](https://bugs.freebsd.org/bugzilla/show_bug.cgi?id=298085).
-  4. `apiarium` had no flat bridge (`-bhyve-bridge` was never actually
-     set) - fixed by migrating `re0` onto a real bridge under a
-     backgrounded rollback safety net (bridging the interface an
-     active SSH session runs over is genuinely risky).
-  5. The CAPI provider's own NoCloud seed ISO (`internal/nocloud`, in
-     that repo) was missing Rock Ridge extensions, so plain ISO9660
-     silently mangled `user-data`/`meta-data` into `USER_DATA`/
-     `META_DATA` - cloud-init rejected it outright
-     (`"not a valid seed"`). Diagnosing this needed a new Apiary
-     feature, bhyve serial console log capture (ADR-0032, added as
-     part of this same pass) - the noVNC console showed nothing useful
-     since this base image redirects its boot output to serial.
-
-  Confirmed live, end to end, for the first time: a real bhyve VM
-  booted from a real `base_image_name`-seeded disk (previously failed
-  immediately with "no bootable device" against a blank one), got a
-  real DHCP lease over a real flat bridge, took its NoCloud seed's
-  custom hostname, ran a custom `runcmd`, and accepted SSH via its
-  seed's injected key. Not yet built: full multi-node `kubeadm` cluster
-  joining (that pass used a static bootstrap secret, bypassing the
-  `kubeadm` bootstrap provider, to isolate the infrastructure provider's
-  own logic). See ADR-0022's own "Follow-up" sections, ADR-0032, and the
-  CAPI repo's own README for the full trail.
-
-  **Update**: a second real bhyve-capable node (`apiverse`, real
-  bare-metal Skylake hardware, previously dataset-only) is now up, and
-  a real `kind` management cluster with `clusterctl init`'s genuine
-  upstream `kubeadm` bootstrap/control-plane providers exercised the
-  real bootstrap machinery end to end for the first time - not the
-  static-secret bypass. Getting `Cluster.spec.controlPlaneEndpoint` to
-  a real, known IP (required before CAPI's kubeadm bootstrap provider
-  renders any bootstrap data) needed a real static DHCP reservation on
-  the operator's own router, keyed by a VM's MAC address - which
-  required every VM to get a deterministic MAC first (see ADR-0044),
-  and a new opt-in `ApiaryMachineSpec.StaticIPAddress` field in the CAPI
-  repo (its `ApiaryMachineStatus.Ready` was otherwise gated on an
-  Apiary-tracked IP a flat-bridge VM never gets). Confirmed live: the
-  real VM Apiary created matched the precomputed id/MAC exactly, a
-  genuine `kubeadm` bootstrap secret was rendered, and the guest's
-  console showed cloud-init actually attempting `kubeadm init` -
-  failing only with `kubeadm: not found`, since the base image is a
-  stock Ubuntu cloud image with no Kubernetes tooling installed. See
-  ADR-0042/ADR-0043/ADR-0044. FreeBSD has no viable path here (no
-  production-grade CRI runtime for jails, and `kubeadm` itself assumes
-  Linux even for the control-plane node, which runs its own static pods
-  via that node's own `kubelet`) - confirmed the replacement image must
-  be Linux.
-
-  **Milestone (ADR-0045)**: built a real "Kubernetes-ready" Ubuntu 24.04
-  base image (`containerd`/`kubeadm`/`kubelet`/`kubectl` pre-installed),
-  uploaded as `ubuntu-k8s-1.31.raw`. Two real bugs found only via live
-  boot testing, both fixed: a missing `conntrack` binary failing
-  kubeadm's preflight check, and the image's own `/etc/machine-id` reset
-  (needed for template reuse) silently changing the guest's DHCP client
-  identifier on its next boot, breaking the MAC-keyed static reservation
-  from ADR-0044 - fixed with a low-numbered `/etc/systemd/network/
-  05-dhcp-mac.network` drop-in after a netplan-level attempt didn't take
-  effect. With both fixed, a real boot reached
-  `Your Kubernetes control-plane has initialized successfully!` -
-  the first non-bypassed real kubeadm bootstrap completion in this
-  project's history - independently confirmed via
-  `curl https://10.50.0.50:6443/livez` returning `ok` from outside the
-  guest entirely. See ADR-0045 for the full trail.
+  `ApiaryMachineTemplate`) driving Apiary through `internal/restshim`'s
+  REST API. **Single-control-plane bootstrap is done** - see the
+  ADR-0044/ADR-0045 bullets above for the ready base image, the
+  deterministic-MAC/static-IP fix that unblocked a real
+  `Cluster.spec.controlPlaneEndpoint`, and the real, non-bypassed
+  `kubeadm init` success this all led to. Getting there found and fixed
+  six real bugs along the way (none in the CAPI provider's own core
+  design) - an `internal/pf.Flush` idempotency gap, a stale-cache
+  duplicate-create case, a live `hastd`/`hastctl` crash-loop (filed
+  upstream as
+  [bug 298085](https://bugs.freebsd.org/bugzilla/show_bug.cgi?id=298085)),
+  a missing flat bridge on `apiarium`, a NoCloud seed ISO missing Rock
+  Ridge extensions, and the two ADR-0045 image-build bugs (missing
+  `conntrack`, DHCP client-identifier drift) - see the CAPI repo's own
+  README and ADR-0022/ADR-0032/ADR-0044/ADR-0045 for the full trail.
+  **Still not done**: a real, joined multi-node `kubeadm` cluster (only
+  a single control-plane node has been verified so far) - v1 also has
+  no load-balancer/HA control plane (a single control-plane node's own
+  IP is used directly), and `providerID`-to-kubelet wiring has no
+  automatic path (no cloud-controller-manager exists for Apiary),
+  documented as a manual `preKubeadmCommands` step in the CAPI repo's
+  own README.
 - **Tabled for now** (evaluated, deliberately deferred):
   - **Terraform support** — the infrastructure now exists (`managerd`'s
     API-key auth, `restshimd`'s own binary forwarding each caller's
