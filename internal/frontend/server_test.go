@@ -435,10 +435,11 @@ func TestServer_AppShellUsesHierarchicalSidebar(t *testing.T) {
 		`<aside class="sidebar" id="primary-navigation">`,
 		`id="main-content"`,
 		`id="theme-toggle"`,
+		`class="table-scroll" role="region" aria-label="Virtual machines table" tabindex="0"`,
+		`<table class="resource-table">`,
 		`class="settings-menu`,
 		`>Colony</h2>`,
 		`>Hives</a>`,
-		`>Combs</span>`,
 		`>Cells</span>`,
 		`>Network</h2>`,
 		`>Status</h2>`,
@@ -449,7 +450,10 @@ func TestServer_AppShellUsesHierarchicalSidebar(t *testing.T) {
 			t.Errorf("application shell missing %q", want)
 		}
 	}
-	if !strings.Contains(body, `class="sidebar-link level-three active" href="/vms" aria-current="page"`) {
+	if strings.Contains(body, `>Combs</span>`) {
+		t.Error("sidebar should not include the Combs abstraction")
+	}
+	if !strings.Contains(body, `class="sidebar-link cell-type active" href="/vms" aria-current="page"`) {
 		t.Errorf("VMs page should mark its sidebar entry current, got: %s", body)
 	}
 }

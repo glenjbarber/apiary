@@ -26,7 +26,7 @@ application shell:
   Hive, color-theme control, and settings menu;
 - a persistent desktop sidebar groups existing routes under Colony, Network,
   Status, and Media;
-- the Colony group displays Hives, Combs, and Cells as a hierarchy while the
+- the Colony group displays Hives and Cells as a hierarchy while the
   existing VM and jail pages remain the concrete Cell-type destinations;
 - Machine, Users, API keys, and Log out move to the permission-aware settings
   menu;
@@ -58,3 +58,17 @@ state.
 - The small amount of plain JavaScript is limited to theme persistence and
   mobile-sidebar interaction. HTMX behavior and the server-rendered page model
   remain unchanged.
+
+## Follow-up: simpler navigation and contained VM tables
+
+Remove Combs from the sidebar. It adds an abstract layer between Hives and
+Cells without providing a separate destination or useful operator action.
+This simplifies navigation without changing the underlying resource model.
+
+A populated VM list exposed a layout gap that an empty preview did not:
+identifiers and action buttons could force the table beyond its panel and
+widen the whole page. Wrap the VM table in a keyboard-focusable scroll
+region at every screen width. Keep IDs, addresses, and action controls intact,
+and allow names and error explanations to wrap. Scrolling moves only the table;
+the page header, error banner, and sidebar stay in place. The wrapper surrounds
+the existing table so HTMX still replaces only the row contents.
