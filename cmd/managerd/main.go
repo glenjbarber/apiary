@@ -20,6 +20,8 @@ import (
 	"google.golang.org/grpc/credentials"
 
 	rpcpb "github.com/glenjbarber/apiary/api/rpc"
+	"github.com/glenjbarber/apiary/internal/assumecheck"
+	"github.com/glenjbarber/apiary/internal/assumptions"
 	"github.com/glenjbarber/apiary/internal/bhyve"
 	"github.com/glenjbarber/apiary/internal/cluster"
 	"github.com/glenjbarber/apiary/internal/dhcpd"
@@ -27,6 +29,7 @@ import (
 	"github.com/glenjbarber/apiary/internal/isostore"
 	"github.com/glenjbarber/apiary/internal/jail"
 	"github.com/glenjbarber/apiary/internal/manager"
+	"github.com/glenjbarber/apiary/internal/netroute"
 	"github.com/glenjbarber/apiary/internal/nodeconfig"
 	"github.com/glenjbarber/apiary/internal/pf"
 	"github.com/glenjbarber/apiary/internal/resetutil"
@@ -75,6 +78,12 @@ func run() error {
 	peerManagerdPort := flag.String("peer-managerd-port", "", "port assumed for a peer node's managerd external API when forwarding (ADR-0029); defaults to this node's own -rpc-addr port, since every node in a real deployment is expected to use the same port")
 	peerTLS := flag.Bool("peer-tls", false, "dial peer managerds over TLS instead of plaintext when forwarding (ADR-0029/ADR-0035); requires every peer's managerd to also be TLS-enabled")
 	peerTLSHostnameMap := flag.String("peer-tls-hostname-map", "", "comma-separated ip=hostname pairs used to verify a peer's TLS certificate, since a raft leader_hint is always a bare address and a real cert is never issued for a bare IP (e.g. \"10.50.0.11=freebsd-apiary.apiary.work,10.50.0.12=freebsd-apiary2.apiary.work\"); only consulted when -peer-tls is set")
+	assumptionCheckInterval := flag.Duration("assumption-check-interval", 60*time.Second, "how often this node re-evaluates its Automated Assumption Checks (ADR-0055)")
+	assumptionHeartbeatInterval := flag.Duration("assumption-heartbeat-interval", time.Hour, "how often an unchanged assumption result still gets a fresh persisted history entry, so a real transition is never confused with routine ticking; must be >= -assumption-check-interval")
+	assumptionStaleAfterFlag := flag.Duration("assumption-stale-after", 0, "age past which ListAssumptionResults reports a result as effectively unknown regardless of its stored value; 0 defaults to 3x -assumption-check-interval")
+	assumptionRunDeadline := flag.Duration("assumption-run-deadline", 20*time.Second, "overall timeout for one Automated Assumption Checks tick, so one unresponsive peer can't stall the next tick; must be less than -assumption-check-interval")
+	assumptionHistoryLimit := flag.Int("assumption-history-limit", 200, "maximum persisted history entries retained per assumption key")
+	assumptionHistoryMaxAge := flag.Duration("assumption-history-max-age", 30*24*time.Hour, "maximum age of a persisted assumption history entry before it's pruned")
 	tlsCert := flag.String("tls-cert", "", "PEM certificate file for managerd's external gRPC API; leave unset (with -tls-key) to serve plaintext, as before")
 	tlsKey := flag.String("tls-key", "", "PEM private key file matching -tls-cert")
 	resetManaged := flag.String("reset-managed", "", fmt.Sprintf("Tier 2 reset (ADR-0038): destroy every real VM/jail/dataset/ISO this node's own -zfs-base/-jail-prefix/-bhyve-prefix/-iso-dir manage, then exit, rather than starting the server. Never touches anything outside that scope - safe to run without double-checking. Must be exactly %q or nothing happens", resetManagedConfirmPhrase))
@@ -246,7 +255,55 @@ func run() error {
 		vlanArg = vlanMgr
 	}
 
-	srv := manager.NewServer(raftClient, id, isos, vncArg, serialLogArg, vlanArg, peers, resolvedPeerPort, zfsMgr, nodeConfigMgr)
+	// Automated Assumption Checks (ADR-0055) - validated up front rather
+	// than left to misbehave silently at runtime on a nonsensical
+	// combination.
+	if *assumptionCheckInterval <= 0 {
+		return fmt.Errorf("-assumption-check-interval must be positive")
+	}
+	if *assumptionHeartbeatInterval < *assumptionCheckInterval {
+		return fmt.Errorf("-assumption-heartbeat-interval (%s) must be >= -assumption-check-interval (%s)", *assumptionHeartbeatInterval, *assumptionCheckInterval)
+	}
+	assumptionStaleAfter := *assumptionStaleAfterFlag
+	if assumptionStaleAfter <= 0 {
+		assumptionStaleAfter = 3 * *assumptionCheckInterval
+	}
+	if assumptionStaleAfter < 2**assumptionCheckInterval {
+		return fmt.Errorf("-assumption-stale-after (%s) must be at least 2x -assumption-check-interval (%s)", assumptionStaleAfter, *assumptionCheckInterval)
+	}
+	if *assumptionRunDeadline >= *assumptionCheckInterval {
+		return fmt.Errorf("-assumption-run-deadline (%s) must be less than -assumption-check-interval (%s)", *assumptionRunDeadline, *assumptionCheckInterval)
+	}
+	if *assumptionHistoryLimit <= 0 {
+		return fmt.Errorf("-assumption-history-limit must be positive")
+	}
+	if *assumptionHistoryMaxAge <= 0 {
+		return fmt.Errorf("-assumption-history-max-age must be positive")
+	}
+
+	assumptionsMgr := &assumptions.Manager{}
+	// Constructed after reconciler above so reconciler.Uplink already
+	// reflects both the nat-uplink-falls-back-to-vlan-uplink resolution
+	// and any nodeconfig override - never re-derived independently here,
+	// which would risk a second, driftable copy of that same logic (see
+	// ADR-0055).
+	assumptionChecker := &assumecheck.Checker{
+		NodeID:                raftNodeID,
+		Raft:                  raftClient,
+		Peers:                 peers,
+		PeerManagerdAddr:      peerManagerdAddrFunc(resolvedPeerPort),
+		Route:                 netrouteChecker{},
+		Uplink:                reconciler.Uplink,
+		PeerTLSConfigured:     *peerTLS,
+		PeerAuthKeyConfigured: *peerAPIKey != "",
+		Store:                 assumptionsMgr,
+		HeartbeatInterval:     *assumptionHeartbeatInterval,
+		RunDeadline:           *assumptionRunDeadline,
+		HistoryLimit:          *assumptionHistoryLimit,
+		HistoryMaxAge:         *assumptionHistoryMaxAge,
+	}
+
+	srv := manager.NewServer(raftClient, id, isos, vncArg, serialLogArg, vlanArg, peers, resolvedPeerPort, zfsMgr, nodeConfigMgr, assumptionsMgr, assumptionStaleAfter)
 	// Every RPC (including UploadISO's stream) is gated by srv's own
 	// API-key check - see ADR-0023. Auth stays fully open until the
 	// first key is created (CreateAPIKey itself included), so this is
@@ -285,6 +342,7 @@ func run() error {
 	defer stop()
 
 	go runReconcileLoop(ctx, reconciler, *reconcileInterval)
+	go runAssumptionCheckLoop(ctx, assumptionChecker, *assumptionCheckInterval)
 
 	select {
 	case <-ctx.Done():
@@ -322,6 +380,53 @@ func reconcileOnce(ctx context.Context, reconciler *cluster.Reconciler) {
 	if err := reconciler.RunOnce(ctx); err != nil {
 		log.Printf("managerd: reconcile: %v", err)
 	}
+}
+
+// runAssumptionCheckLoop mirrors runReconcileLoop's own shape exactly -
+// an immediate first run, then one per tick of interval, until ctx is
+// done. Errors are logged, not fatal, matching reconcileOnce's own
+// posture.
+func runAssumptionCheckLoop(ctx context.Context, checker *assumecheck.Checker, interval time.Duration) {
+	assumptionCheckOnce(ctx, checker)
+
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			assumptionCheckOnce(ctx, checker)
+		}
+	}
+}
+
+func assumptionCheckOnce(ctx context.Context, checker *assumecheck.Checker) {
+	if err := checker.RunOnce(ctx); err != nil {
+		log.Printf("managerd: assumption check: %v", err)
+	}
+}
+
+// peerManagerdAddrFunc mirrors internal/manager.Server's own unexported
+// peerManagerdAddr method (and internal/cluster's resolvePeerManagerdAddr)
+// exactly - duplicated across this package boundary for the same reason
+// defaultPeerManagerdPort already is in both of those.
+func peerManagerdAddrFunc(port string) func(string) string {
+	return func(raftAddress string) string {
+		host, _, err := net.SplitHostPort(raftAddress)
+		if err != nil {
+			host = raftAddress
+		}
+		return net.JoinHostPort(host, port)
+	}
+}
+
+// netrouteChecker adapts the free function internal/netroute.DefaultRouteInterface
+// to the single-method interface internal/assumecheck.Checker.Route expects.
+type netrouteChecker struct{}
+
+func (netrouteChecker) DefaultRouteInterface(ctx context.Context) (string, bool, error) {
+	return netroute.DefaultRouteInterface(ctx)
 }
 
 // isoManagerAdapter satisfies resetutil.ISOManager against a real

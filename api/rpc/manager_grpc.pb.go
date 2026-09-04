@@ -19,44 +19,46 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	ManagerService_Status_FullMethodName                     = "/apiary.rpc.v1.ManagerService/Status"
-	ManagerService_CreateVM_FullMethodName                   = "/apiary.rpc.v1.ManagerService/CreateVM"
-	ManagerService_UpdateVM_FullMethodName                   = "/apiary.rpc.v1.ManagerService/UpdateVM"
-	ManagerService_DeleteVM_FullMethodName                   = "/apiary.rpc.v1.ManagerService/DeleteVM"
-	ManagerService_ForcePurgeVM_FullMethodName               = "/apiary.rpc.v1.ManagerService/ForcePurgeVM"
-	ManagerService_MigrateVM_FullMethodName                  = "/apiary.rpc.v1.ManagerService/MigrateVM"
-	ManagerService_SetVMFirewallPaused_FullMethodName        = "/apiary.rpc.v1.ManagerService/SetVMFirewallPaused"
-	ManagerService_GetVM_FullMethodName                      = "/apiary.rpc.v1.ManagerService/GetVM"
-	ManagerService_ListVMs_FullMethodName                    = "/apiary.rpc.v1.ManagerService/ListVMs"
-	ManagerService_UploadISO_FullMethodName                  = "/apiary.rpc.v1.ManagerService/UploadISO"
-	ManagerService_ListISOs_FullMethodName                   = "/apiary.rpc.v1.ManagerService/ListISOs"
-	ManagerService_DeleteISO_FullMethodName                  = "/apiary.rpc.v1.ManagerService/DeleteISO"
-	ManagerService_HostStats_FullMethodName                  = "/apiary.rpc.v1.ManagerService/HostStats"
-	ManagerService_GetVMConsole_FullMethodName               = "/apiary.rpc.v1.ManagerService/GetVMConsole"
-	ManagerService_GetVMSerialLog_FullMethodName             = "/apiary.rpc.v1.ManagerService/GetVMSerialLog"
-	ManagerService_GetNodeConfig_FullMethodName              = "/apiary.rpc.v1.ManagerService/GetNodeConfig"
-	ManagerService_UpdateNodeConfig_FullMethodName           = "/apiary.rpc.v1.ManagerService/UpdateNodeConfig"
-	ManagerService_SetDatasetQuota_FullMethodName            = "/apiary.rpc.v1.ManagerService/SetDatasetQuota"
-	ManagerService_CreateNetwork_FullMethodName              = "/apiary.rpc.v1.ManagerService/CreateNetwork"
-	ManagerService_ListNetworks_FullMethodName               = "/apiary.rpc.v1.ManagerService/ListNetworks"
-	ManagerService_DeleteNetwork_FullMethodName              = "/apiary.rpc.v1.ManagerService/DeleteNetwork"
-	ManagerService_CreateAPIKey_FullMethodName               = "/apiary.rpc.v1.ManagerService/CreateAPIKey"
-	ManagerService_ListAPIKeys_FullMethodName                = "/apiary.rpc.v1.ManagerService/ListAPIKeys"
-	ManagerService_RevokeAPIKey_FullMethodName               = "/apiary.rpc.v1.ManagerService/RevokeAPIKey"
-	ManagerService_CreateJail_FullMethodName                 = "/apiary.rpc.v1.ManagerService/CreateJail"
-	ManagerService_UpdateJail_FullMethodName                 = "/apiary.rpc.v1.ManagerService/UpdateJail"
-	ManagerService_DeleteJail_FullMethodName                 = "/apiary.rpc.v1.ManagerService/DeleteJail"
-	ManagerService_GetJail_FullMethodName                    = "/apiary.rpc.v1.ManagerService/GetJail"
-	ManagerService_ListJails_FullMethodName                  = "/apiary.rpc.v1.ManagerService/ListJails"
-	ManagerService_ForcePurgeJail_FullMethodName             = "/apiary.rpc.v1.ManagerService/ForcePurgeJail"
-	ManagerService_SimulateNodeFailure_FullMethodName        = "/apiary.rpc.v1.ManagerService/SimulateNodeFailure"
-	ManagerService_SimulateNetworkFailure_FullMethodName     = "/apiary.rpc.v1.ManagerService/SimulateNetworkFailure"
-	ManagerService_MigrateJail_FullMethodName                = "/apiary.rpc.v1.ManagerService/MigrateJail"
-	ManagerService_ReportVMPhase_FullMethodName              = "/apiary.rpc.v1.ManagerService/ReportVMPhase"
-	ManagerService_ReportVMTeardownComplete_FullMethodName   = "/apiary.rpc.v1.ManagerService/ReportVMTeardownComplete"
-	ManagerService_ReportJailPhase_FullMethodName            = "/apiary.rpc.v1.ManagerService/ReportJailPhase"
-	ManagerService_ReportJailTeardownComplete_FullMethodName = "/apiary.rpc.v1.ManagerService/ReportJailTeardownComplete"
-	ManagerService_PushISOTo_FullMethodName                  = "/apiary.rpc.v1.ManagerService/PushISOTo"
+	ManagerService_Status_FullMethodName                      = "/apiary.rpc.v1.ManagerService/Status"
+	ManagerService_CreateVM_FullMethodName                    = "/apiary.rpc.v1.ManagerService/CreateVM"
+	ManagerService_UpdateVM_FullMethodName                    = "/apiary.rpc.v1.ManagerService/UpdateVM"
+	ManagerService_DeleteVM_FullMethodName                    = "/apiary.rpc.v1.ManagerService/DeleteVM"
+	ManagerService_ForcePurgeVM_FullMethodName                = "/apiary.rpc.v1.ManagerService/ForcePurgeVM"
+	ManagerService_MigrateVM_FullMethodName                   = "/apiary.rpc.v1.ManagerService/MigrateVM"
+	ManagerService_SetVMFirewallPaused_FullMethodName         = "/apiary.rpc.v1.ManagerService/SetVMFirewallPaused"
+	ManagerService_GetVM_FullMethodName                       = "/apiary.rpc.v1.ManagerService/GetVM"
+	ManagerService_ListVMs_FullMethodName                     = "/apiary.rpc.v1.ManagerService/ListVMs"
+	ManagerService_UploadISO_FullMethodName                   = "/apiary.rpc.v1.ManagerService/UploadISO"
+	ManagerService_ListISOs_FullMethodName                    = "/apiary.rpc.v1.ManagerService/ListISOs"
+	ManagerService_DeleteISO_FullMethodName                   = "/apiary.rpc.v1.ManagerService/DeleteISO"
+	ManagerService_HostStats_FullMethodName                   = "/apiary.rpc.v1.ManagerService/HostStats"
+	ManagerService_GetVMConsole_FullMethodName                = "/apiary.rpc.v1.ManagerService/GetVMConsole"
+	ManagerService_GetVMSerialLog_FullMethodName              = "/apiary.rpc.v1.ManagerService/GetVMSerialLog"
+	ManagerService_GetNodeConfig_FullMethodName               = "/apiary.rpc.v1.ManagerService/GetNodeConfig"
+	ManagerService_UpdateNodeConfig_FullMethodName            = "/apiary.rpc.v1.ManagerService/UpdateNodeConfig"
+	ManagerService_SetDatasetQuota_FullMethodName             = "/apiary.rpc.v1.ManagerService/SetDatasetQuota"
+	ManagerService_CreateNetwork_FullMethodName               = "/apiary.rpc.v1.ManagerService/CreateNetwork"
+	ManagerService_ListNetworks_FullMethodName                = "/apiary.rpc.v1.ManagerService/ListNetworks"
+	ManagerService_DeleteNetwork_FullMethodName               = "/apiary.rpc.v1.ManagerService/DeleteNetwork"
+	ManagerService_CreateAPIKey_FullMethodName                = "/apiary.rpc.v1.ManagerService/CreateAPIKey"
+	ManagerService_ListAPIKeys_FullMethodName                 = "/apiary.rpc.v1.ManagerService/ListAPIKeys"
+	ManagerService_RevokeAPIKey_FullMethodName                = "/apiary.rpc.v1.ManagerService/RevokeAPIKey"
+	ManagerService_CreateJail_FullMethodName                  = "/apiary.rpc.v1.ManagerService/CreateJail"
+	ManagerService_UpdateJail_FullMethodName                  = "/apiary.rpc.v1.ManagerService/UpdateJail"
+	ManagerService_DeleteJail_FullMethodName                  = "/apiary.rpc.v1.ManagerService/DeleteJail"
+	ManagerService_GetJail_FullMethodName                     = "/apiary.rpc.v1.ManagerService/GetJail"
+	ManagerService_ListJails_FullMethodName                   = "/apiary.rpc.v1.ManagerService/ListJails"
+	ManagerService_ForcePurgeJail_FullMethodName              = "/apiary.rpc.v1.ManagerService/ForcePurgeJail"
+	ManagerService_SimulateNodeFailure_FullMethodName         = "/apiary.rpc.v1.ManagerService/SimulateNodeFailure"
+	ManagerService_SimulateNetworkFailure_FullMethodName      = "/apiary.rpc.v1.ManagerService/SimulateNetworkFailure"
+	ManagerService_MigrateJail_FullMethodName                 = "/apiary.rpc.v1.ManagerService/MigrateJail"
+	ManagerService_ReportVMPhase_FullMethodName               = "/apiary.rpc.v1.ManagerService/ReportVMPhase"
+	ManagerService_ReportVMTeardownComplete_FullMethodName    = "/apiary.rpc.v1.ManagerService/ReportVMTeardownComplete"
+	ManagerService_ReportJailPhase_FullMethodName             = "/apiary.rpc.v1.ManagerService/ReportJailPhase"
+	ManagerService_ReportJailTeardownComplete_FullMethodName  = "/apiary.rpc.v1.ManagerService/ReportJailTeardownComplete"
+	ManagerService_PushISOTo_FullMethodName                   = "/apiary.rpc.v1.ManagerService/PushISOTo"
+	ManagerService_GetLocalNetworkBridgeStatus_FullMethodName = "/apiary.rpc.v1.ManagerService/GetLocalNetworkBridgeStatus"
+	ManagerService_ListAssumptionResults_FullMethodName       = "/apiary.rpc.v1.ManagerService/ListAssumptionResults"
 )
 
 // ManagerServiceClient is the client API for ManagerService service.
@@ -246,6 +248,22 @@ type ManagerServiceClient interface {
 	// has. Peer-only, mirrors the Report* RPCs' own reasoning above
 	// exactly - never meant for direct human/API-client use.
 	PushISOTo(ctx context.Context, in *PushISOToRequest, opts ...grpc.CallOption) (*PushISOToResponse, error)
+	// GetLocalNetworkBridgeStatus reports THIS node's own local bridge
+	// status for one network - built from RaftClient.ListNetworksLocal
+	// (the already-replicated network config, read locally, never leader-
+	// restricted) plus the local VLANStatus interface. Deliberately NOT
+	// ListNetworks: that RPC is leader-only and forwards to the current
+	// leader on a non-leader node, which would silently report the
+	// LEADER's bridge state mislabeled as the queried node's own - see
+	// ADR-0055 for the live bug this was built to avoid. Never forwards,
+	// by construction.
+	GetLocalNetworkBridgeStatus(ctx context.Context, in *GetLocalNetworkBridgeStatusRequest, opts ...grpc.CallOption) (*GetLocalNetworkBridgeStatusResponse, error)
+	// ListAssumptionResults reports THIS node's own persisted Automated
+	// Assumption Checks (ADR-0055) - physical, per-node observational
+	// data like HostStats/ISOs above, never routed through raft, and
+	// never leader-forwarded (the same locality convention as HostStats).
+	// See internal/assumptions/internal/assumecheck.
+	ListAssumptionResults(ctx context.Context, in *ListAssumptionResultsRequest, opts ...grpc.CallOption) (*ListAssumptionResultsResponse, error)
 }
 
 type managerServiceClient struct {
@@ -639,6 +657,26 @@ func (c *managerServiceClient) PushISOTo(ctx context.Context, in *PushISOToReque
 	return out, nil
 }
 
+func (c *managerServiceClient) GetLocalNetworkBridgeStatus(ctx context.Context, in *GetLocalNetworkBridgeStatusRequest, opts ...grpc.CallOption) (*GetLocalNetworkBridgeStatusResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetLocalNetworkBridgeStatusResponse)
+	err := c.cc.Invoke(ctx, ManagerService_GetLocalNetworkBridgeStatus_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *managerServiceClient) ListAssumptionResults(ctx context.Context, in *ListAssumptionResultsRequest, opts ...grpc.CallOption) (*ListAssumptionResultsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListAssumptionResultsResponse)
+	err := c.cc.Invoke(ctx, ManagerService_ListAssumptionResults_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // ManagerServiceServer is the server API for ManagerService service.
 // All implementations must embed UnimplementedManagerServiceServer
 // for forward compatibility.
@@ -826,6 +864,22 @@ type ManagerServiceServer interface {
 	// has. Peer-only, mirrors the Report* RPCs' own reasoning above
 	// exactly - never meant for direct human/API-client use.
 	PushISOTo(context.Context, *PushISOToRequest) (*PushISOToResponse, error)
+	// GetLocalNetworkBridgeStatus reports THIS node's own local bridge
+	// status for one network - built from RaftClient.ListNetworksLocal
+	// (the already-replicated network config, read locally, never leader-
+	// restricted) plus the local VLANStatus interface. Deliberately NOT
+	// ListNetworks: that RPC is leader-only and forwards to the current
+	// leader on a non-leader node, which would silently report the
+	// LEADER's bridge state mislabeled as the queried node's own - see
+	// ADR-0055 for the live bug this was built to avoid. Never forwards,
+	// by construction.
+	GetLocalNetworkBridgeStatus(context.Context, *GetLocalNetworkBridgeStatusRequest) (*GetLocalNetworkBridgeStatusResponse, error)
+	// ListAssumptionResults reports THIS node's own persisted Automated
+	// Assumption Checks (ADR-0055) - physical, per-node observational
+	// data like HostStats/ISOs above, never routed through raft, and
+	// never leader-forwarded (the same locality convention as HostStats).
+	// See internal/assumptions/internal/assumecheck.
+	ListAssumptionResults(context.Context, *ListAssumptionResultsRequest) (*ListAssumptionResultsResponse, error)
 	mustEmbedUnimplementedManagerServiceServer()
 }
 
@@ -949,6 +1003,12 @@ func (UnimplementedManagerServiceServer) ReportJailTeardownComplete(context.Cont
 }
 func (UnimplementedManagerServiceServer) PushISOTo(context.Context, *PushISOToRequest) (*PushISOToResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method PushISOTo not implemented")
+}
+func (UnimplementedManagerServiceServer) GetLocalNetworkBridgeStatus(context.Context, *GetLocalNetworkBridgeStatusRequest) (*GetLocalNetworkBridgeStatusResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetLocalNetworkBridgeStatus not implemented")
+}
+func (UnimplementedManagerServiceServer) ListAssumptionResults(context.Context, *ListAssumptionResultsRequest) (*ListAssumptionResultsResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ListAssumptionResults not implemented")
 }
 func (UnimplementedManagerServiceServer) mustEmbedUnimplementedManagerServiceServer() {}
 func (UnimplementedManagerServiceServer) testEmbeddedByValue()                        {}
@@ -1644,6 +1704,42 @@ func _ManagerService_PushISOTo_Handler(srv interface{}, ctx context.Context, dec
 	return interceptor(ctx, in, info, handler)
 }
 
+func _ManagerService_GetLocalNetworkBridgeStatus_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetLocalNetworkBridgeStatusRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ManagerServiceServer).GetLocalNetworkBridgeStatus(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ManagerService_GetLocalNetworkBridgeStatus_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ManagerServiceServer).GetLocalNetworkBridgeStatus(ctx, req.(*GetLocalNetworkBridgeStatusRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ManagerService_ListAssumptionResults_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListAssumptionResultsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ManagerServiceServer).ListAssumptionResults(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ManagerService_ListAssumptionResults_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ManagerServiceServer).ListAssumptionResults(ctx, req.(*ListAssumptionResultsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // ManagerService_ServiceDesc is the grpc.ServiceDesc for ManagerService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -1798,6 +1894,14 @@ var ManagerService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "PushISOTo",
 			Handler:    _ManagerService_PushISOTo_Handler,
+		},
+		{
+			MethodName: "GetLocalNetworkBridgeStatus",
+			Handler:    _ManagerService_GetLocalNetworkBridgeStatus_Handler,
+		},
+		{
+			MethodName: "ListAssumptionResults",
+			Handler:    _ManagerService_ListAssumptionResults_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{

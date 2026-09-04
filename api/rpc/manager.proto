@@ -207,6 +207,24 @@ service ManagerService {
   // has. Peer-only, mirrors the Report* RPCs' own reasoning above
   // exactly - never meant for direct human/API-client use.
   rpc PushISOTo(PushISOToRequest) returns (PushISOToResponse);
+
+  // GetLocalNetworkBridgeStatus reports THIS node's own local bridge
+  // status for one network - built from RaftClient.ListNetworksLocal
+  // (the already-replicated network config, read locally, never leader-
+  // restricted) plus the local VLANStatus interface. Deliberately NOT
+  // ListNetworks: that RPC is leader-only and forwards to the current
+  // leader on a non-leader node, which would silently report the
+  // LEADER's bridge state mislabeled as the queried node's own - see
+  // ADR-0055 for the live bug this was built to avoid. Never forwards,
+  // by construction.
+  rpc GetLocalNetworkBridgeStatus(GetLocalNetworkBridgeStatusRequest) returns (GetLocalNetworkBridgeStatusResponse);
+
+  // ListAssumptionResults reports THIS node's own persisted Automated
+  // Assumption Checks (ADR-0055) - physical, per-node observational
+  // data like HostStats/ISOs above, never routed through raft, and
+  // never leader-forwarded (the same locality convention as HostStats).
+  // See internal/assumptions/internal/assumecheck.
+  rpc ListAssumptionResults(ListAssumptionResultsRequest) returns (ListAssumptionResultsResponse);
 }
 
 // VMState mirrors api/internalpb's VMState. Kept as a separate type
@@ -610,6 +628,14 @@ message HostStatsResponse {
   repeated string errors = 7;
 
   PFStats pf = 8;
+
+  // bhyve_configured is true iff this node's managerd was started with
+  // -bhyve-bootrom set (see internal/manager.Server's nil-able vnc
+  // field). This proves bhyve provisioning is CONFIGURED on this node -
+  // NOT that bhyve is currently usable (e.g. that vmm.ko is genuinely
+  // loaded right now). Named for exactly what's observed - see
+  // ADR-0055.
+  bool bhyve_configured = 9;
 }
 
 message GetVMConsoleRequest {
@@ -1064,4 +1090,170 @@ message ImageAvailabilityImpact {
   repeated string source_nodes = 6;
   repeated string unknown_nodes = 7;
   string explanation = 8;
+}
+
+// --- Automated Assumption Checks (ADR-0055) ---
+//
+// This is a scoped precursor to CODEX.md's fuller "Assumption Register"
+// concept (Priority 2 in its own "Future product directions") - it has
+// no owner field, no explicit scope, no evidence citations, no
+// expiration/verification-method metadata, and no Dependency Graph
+// linkage. It implements exactly three continuously re-evaluated,
+// system-observed checks with real persisted history. See ADR-0055.
+
+message GetLocalNetworkBridgeStatusRequest {
+  string network_id = 1;
+}
+
+message GetLocalNetworkBridgeStatusResponse {
+  // bridge_status is "up"/"down"/"unknown" - THIS node's own local view
+  // only, from RaftClient.ListNetworksLocal + the local VLANStatus
+  // interface. Never forwarded to a leader.
+  string bridge_status = 1;
+
+  // error is set for a network_id this node's local FSM doesn't
+  // recognize (which may reflect replication lag, not a genuinely
+  // absent network) or a local check failure. A caller MUST map this to
+  // an unknown/unverified outcome, never a definitive false - see
+  // internal/assumecheck.
+  string error = 2;
+}
+
+enum AssumptionKind {
+  ASSUMPTION_KIND_UNSPECIFIED = 0;
+
+  // PEER_MANAGER_RPC_SUCCEEDED: a call to a peer's managerd completed at
+  // all - reachability only, no claim about credentials.
+  ASSUMPTION_KIND_PEER_MANAGER_RPC_SUCCEEDED = 1;
+
+  // PEER_SECURITY_PATH_ACCEPTED: a call over this node's CURRENTLY
+  // CONFIGURED local security path (TLS if -peer-tls, an API key if
+  // -peer-api-key) was accepted by the peer. This does NOT prove the
+  // peer validated or even enforces that path -
+  // internal/manager/auth.go's checkAuth accepts every call, key or
+  // not, until any API key has ever been created cluster-wide. Do not
+  // rename this back to anything implying "verified" or
+  // "authenticated" - see ADR-0055.
+  ASSUMPTION_KIND_PEER_SECURITY_PATH_ACCEPTED = 2;
+
+  ASSUMPTION_KIND_NAT_UPLINK_DEFAULT_ROUTE = 3;
+
+  // REPLICA_BHYVE_CONFIGURED / REPLICA_NETWORK_BRIDGE_UP: VMs only -
+  // JailDefinition has no bhyve concept and no network_id field in v1.
+  ASSUMPTION_KIND_REPLICA_BHYVE_CONFIGURED = 4;
+  ASSUMPTION_KIND_REPLICA_NETWORK_BRIDGE_UP = 5;
+}
+
+enum AssumptionStatus {
+  ASSUMPTION_STATUS_UNSPECIFIED = 0;
+  ASSUMPTION_STATUS_TRUE = 1;
+  ASSUMPTION_STATUS_FALSE = 2;
+  ASSUMPTION_STATUS_UNKNOWN = 3;
+
+  // NOT_APPLICABLE: the check does not apply here at all (e.g. no NAT
+  // uplink configured on this node) - this is NOT uncertainty, and must
+  // never be conflated with UNKNOWN in observed_status. Still subject
+  // to the same staleness collapse as every other status in
+  // AssumptionResult.status below - applicability itself can silently
+  // change if the checker stops running.
+  ASSUMPTION_STATUS_NOT_APPLICABLE = 4;
+}
+
+enum AssumptionSubjectKind {
+  ASSUMPTION_SUBJECT_KIND_UNSPECIFIED = 0;
+  ASSUMPTION_SUBJECT_KIND_NODE = 1; // the local node itself (peer/NAT checks)
+  ASSUMPTION_SUBJECT_KIND_VM = 2;
+  ASSUMPTION_SUBJECT_KIND_JAIL = 3; // reserved for a future check - v1 never populates this
+}
+
+// AssumptionKey identifies one continuously-tracked assumption. Every
+// field besides kind may legitimately be empty. subject_kind exists
+// specifically so a VM and a jail sharing a literal id string can never
+// collide under the same key - included now so this identity schema
+// doesn't need a breaking migration once real history has accumulated.
+message AssumptionKey {
+  AssumptionKind kind = 1;
+  AssumptionSubjectKind subject_kind = 6;
+  string subject_id = 2;          // resource this check is ABOUT (e.g. a VM id); "" for node-level checks
+  string dependency_id = 3;       // the thing depended on (peer node id, replica node id, uplink interface name)
+  string qualifier = 4;           // kind-specific disambiguator (e.g. a network id); "" otherwise
+  string observed_by_node_id = 5; // the raft node ID that performed this check - always local
+}
+
+// AssumptionResult is the CURRENT-SNAPSHOT view for one key (see
+// `latest` below) - overwritten on every check tick, whether or not the
+// value changed, so last_observed_at reflects genuine per-tick
+// freshness.
+message AssumptionResult {
+  AssumptionKey key = 1;
+
+  // observed_status is the raw, as-last-measured value - diagnostic
+  // only, never the value a consumer should trust by default.
+  AssumptionStatus observed_status = 2;
+
+  // status is the EFFECTIVE status a consumer should trust by default -
+  // computed server-side from observed_status + staleness. ANY stored
+  // status, including NOT_APPLICABLE, collapses to UNKNOWN once stale;
+  // applicability itself can silently change if the checker stops
+  // running, so it gets no exemption. Never persisted this way - always
+  // computed fresh at response time. This structural split (not a
+  // `stale` flag alone) is what actually satisfies "stale evidence must
+  // not silently count as true": a consumer reading only `status`
+  // already gets a safe answer - see ADR-0055.
+  AssumptionStatus status = 3;
+
+  // reason_code is a small, stable vocabulary (e.g. "connection_refused",
+  // "bridge_down", "uplink_not_configured") - see internal/assumecheck.
+  // Detail is NEVER used for this purpose (free text is not stable
+  // transition identity).
+  string reason_code = 4;
+
+  // detail is sanitized/length-capped human text for diagnosis only -
+  // see internal/assumptions.ClampDetail.
+  string detail = 5;
+
+  // last_observed_at_unix comes from the SNAPSHOT, never the history
+  // journal - genuine per-tick freshness, not throttled by the
+  // heartbeat interval.
+  int64 last_observed_at_unix = 6;
+
+  // stale is informational, for UI treatment - `status` above already
+  // safely reflects this, a consumer does not need to check `stale`
+  // itself to be safe.
+  bool stale = 7;
+}
+
+// AssumptionHistoryEntry is an immutable JOURNAL fact, written only on a
+// (observed_status, reason_code) transition or a periodic heartbeat -
+// no staleness/effective-status split, since it describes a specific
+// past moment, not "what should I trust right now."
+message AssumptionHistoryEntry {
+  AssumptionKey key = 1;
+  AssumptionStatus observed_status = 2;
+  string reason_code = 3;
+  string detail = 4;
+  int64 recorded_at_unix = 5;
+}
+
+message ListAssumptionResultsRequest {
+  // filter unset = latest for every known key. filter set (even with
+  // empty sub-fields, which are legitimate) = additionally return
+  // `history` for that exact key. proto3 `optional` presence-tracking
+  // avoids conflating "no filter" with "a filter whose fields happen to
+  // be empty."
+  optional AssumptionKey filter = 1;
+}
+
+message ListAssumptionResultsResponse {
+  repeated AssumptionResult latest = 1;
+  repeated AssumptionHistoryEntry history = 2; // only populated when filter is set; exact-key match only in v1
+  string error = 3;
+
+  // storage_degraded is true if this node's assumptions store had to
+  // quarantine a corrupt/unrecognized-schema file, or found one with
+  // unsafe permissions - see internal/assumptions.Manager.Degraded.
+  // This is recomputed on every read (self-clearing once an operator
+  // removes the quarantined file), not a one-time latch.
+  bool storage_degraded = 4;
+  string storage_degraded_detail = 5;
 }

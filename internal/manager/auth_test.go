@@ -184,3 +184,21 @@ func TestRequiredRoleFor_SimulateNetworkFailureIsViewer(t *testing.T) {
 		t.Errorf("requiredRoleFor(%q) = %q, want %q", method, got, RoleViewer)
 	}
 }
+
+// TestRequiredRoleFor_GetLocalNetworkBridgeStatusIsViewer and
+// TestRequiredRoleFor_ListAssumptionResultsIsViewer guard against the
+// same easy-to-miss failure mode as SimulateNodeFailure's own test above
+// - see ADR-0055.
+func TestRequiredRoleFor_GetLocalNetworkBridgeStatusIsViewer(t *testing.T) {
+	const method = "/apiary.rpc.v1.ManagerService/GetLocalNetworkBridgeStatus"
+	if got := requiredRoleFor(method); got != RoleViewer {
+		t.Errorf("requiredRoleFor(%q) = %q, want %q", method, got, RoleViewer)
+	}
+}
+
+func TestRequiredRoleFor_ListAssumptionResultsIsViewer(t *testing.T) {
+	const method = "/apiary.rpc.v1.ManagerService/ListAssumptionResults"
+	if got := requiredRoleFor(method); got != RoleViewer {
+		t.Errorf("requiredRoleFor(%q) = %q, want %q", method, got, RoleViewer)
+	}
+}

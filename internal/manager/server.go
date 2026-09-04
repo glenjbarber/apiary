@@ -13,6 +13,7 @@ import (
 
 	internalpb "github.com/glenjbarber/apiary/api/internalpb"
 	rpcpb "github.com/glenjbarber/apiary/api/rpc"
+	"github.com/glenjbarber/apiary/internal/assumptions"
 	"github.com/glenjbarber/apiary/internal/cluster"
 	"github.com/glenjbarber/apiary/internal/hoststats"
 	"github.com/glenjbarber/apiary/internal/isostore"
@@ -112,6 +113,17 @@ type PeerForwarder interface {
 	HostStats(ctx context.Context, addr string) (*rpcpb.HostStatsResponse, error)
 }
 
+// assumptionStore is the subset of *assumptions.Manager the server
+// needs, defined locally so tests can supply a fake - the same
+// reasoning isoManager/VLANStatus already follow. nil on a node that
+// never got a store wired up - ListAssumptionResults reports a clear
+// error rather than panicking, matching every other nil-able dependency
+// here.
+type assumptionStore interface {
+	Load() ([]assumptions.Result, []assumptions.HistoryEntry, error)
+	Degraded() (bool, string)
+}
+
 // defaultPeerManagerdPort mirrors internal/cluster's own constant of
 // the same name and purpose - used when Server.peerManagerdPort is
 // unset. Duplicated rather than shared across the package boundary,
@@ -167,6 +179,18 @@ type Server struct {
 	// wired up - GetNodeConfig/UpdateNodeConfig report an error rather
 	// than panicking. See ADR-0049/internal/nodeconfig.
 	nodeConfig nodeConfigStore
+
+	// assumptions is nil on a node that never got an assumptions store
+	// wired up - ListAssumptionResults reports an error rather than
+	// panicking. Physical, per-node data like isos/nodeConfig above,
+	// never routed through raft. See ADR-0055/internal/assumptions.
+	assumptions assumptionStore
+
+	// assumptionStaleAfter is the age past which ListAssumptionResults
+	// collapses a snapshot entry's effective status to UNKNOWN,
+	// regardless of its stored observed_status - see that handler's own
+	// doc comment.
+	assumptionStaleAfter time.Duration
 }
 
 // quotaSetter is the subset of *zfs.Manager SetDatasetQuota needs,
@@ -195,10 +219,15 @@ var _ rpcpb.ManagerServiceServer = (*Server)(nil)
 // peerManagerdPort (peers nil-able) to forward a leader-only read
 // rejected by this node's own raftd to the current leader's own
 // managerd instead (ADR-0035), zfsMgr (nil-able) to set a dataset
-// quota locally, and nodeConfig (nil-able) to read/write this node's
-// own local settings file (ADR-0049).
-func NewServer(raft *RaftClient, nodeID string, isos isoManager, vnc VNCLookup, serialLog SerialLogLookup, vlanMgr VLANStatus, peers PeerForwarder, peerManagerdPort string, zfsMgr quotaSetter, nodeConfig nodeConfigStore) *Server {
-	return &Server{raft: raft, nodeID: nodeID, isos: isos, vnc: vnc, serialLog: serialLog, vlan: vlanMgr, statsGather: hoststats.Gather, peers: peers, peerManagerdPort: peerManagerdPort, zfs: zfsMgr, nodeConfig: nodeConfig}
+// quota locally, nodeConfig (nil-able) to read/write this node's own
+// local settings file (ADR-0049), assumptionStoreMgr (nil-able) to read
+// this node's persisted Automated Assumption Checks (ADR-0055), and
+// assumptionStaleAfter to compute their effective staleness. The last
+// two are appended at the end (rather than interleaved with the params
+// above) specifically to keep every existing positional NewServer(...)
+// call site a mechanical one-line edit.
+func NewServer(raft *RaftClient, nodeID string, isos isoManager, vnc VNCLookup, serialLog SerialLogLookup, vlanMgr VLANStatus, peers PeerForwarder, peerManagerdPort string, zfsMgr quotaSetter, nodeConfig nodeConfigStore, assumptionStoreMgr assumptionStore, assumptionStaleAfter time.Duration) *Server {
+	return &Server{raft: raft, nodeID: nodeID, isos: isos, vnc: vnc, serialLog: serialLog, vlan: vlanMgr, statsGather: hoststats.Gather, peers: peers, peerManagerdPort: peerManagerdPort, zfs: zfsMgr, nodeConfig: nodeConfig, assumptions: assumptionStoreMgr, assumptionStaleAfter: assumptionStaleAfter}
 }
 
 // peerManagerdAddr turns a raft leader_hint (the leader's raft
@@ -488,6 +517,80 @@ func (s *Server) bridgeStatus(ctx context.Context, n *internalpb.NetworkDefiniti
 		return "up"
 	}
 	return "down"
+}
+
+// GetLocalNetworkBridgeStatus implements rpcpb.ManagerServiceServer. It
+// reports THIS node's own local bridge status for one network, built
+// from RaftClient.ListNetworksLocal (the already-replicated network
+// config, read locally - never leader-restricted) plus the existing
+// local bridgeStatus helper. Deliberately NOT ListNetworks: that RPC is
+// leader-only and forwards to the current leader on a non-leader node,
+// which would silently report the LEADER's bridge state mislabeled as
+// this node's own - see ADR-0055 for the live bug this exists to avoid.
+// Never forwards, by construction - there is no leader concept here at
+// all.
+func (s *Server) GetLocalNetworkBridgeStatus(ctx context.Context, req *rpcpb.GetLocalNetworkBridgeStatusRequest) (*rpcpb.GetLocalNetworkBridgeStatusResponse, error) {
+	resp, err := s.raft.ListNetworksLocal(ctx)
+	if err != nil {
+		return &rpcpb.GetLocalNetworkBridgeStatusResponse{Error: err.Error()}, nil
+	}
+	if resp.GetError() != "" {
+		return &rpcpb.GetLocalNetworkBridgeStatusResponse{Error: resp.GetError()}, nil
+	}
+	for _, n := range resp.GetNetworks() {
+		if n.GetId() == req.GetNetworkId() {
+			return &rpcpb.GetLocalNetworkBridgeStatusResponse{BridgeStatus: s.bridgeStatus(ctx, n)}, nil
+		}
+	}
+	// Not found locally - this may reflect replication lag rather than
+	// a genuinely absent network (see ADR-0055); the caller (typically
+	// internal/assumecheck) must map this to an unknown/unverified
+	// outcome, never a definitive false.
+	return &rpcpb.GetLocalNetworkBridgeStatusResponse{
+		Error: fmt.Sprintf("network_id %q not found on this node's local FSM view", req.GetNetworkId()),
+	}, nil
+}
+
+// ListAssumptionResults implements rpcpb.ManagerServiceServer. Like
+// HostStats/GetVMConsole, this only answers for THIS node's own store -
+// physical, per-node observational data, never routed through raft and
+// never leader-forwarded (see ADR-0055). status is the EFFECTIVE value a
+// consumer should trust: it collapses ANY stored observed_status -
+// including NOT_APPLICABLE - to UNKNOWN once the entry's
+// last_observed_at exceeds assumptionStaleAfter, since applicability
+// itself can silently change if the checker stops running. This is
+// computed fresh on every call, never persisted this way.
+func (s *Server) ListAssumptionResults(ctx context.Context, req *rpcpb.ListAssumptionResultsRequest) (*rpcpb.ListAssumptionResultsResponse, error) {
+	if s.assumptions == nil {
+		return &rpcpb.ListAssumptionResultsResponse{Error: "no assumptions store configured on this node"}, nil
+	}
+
+	snapshot, history, err := s.assumptions.Load()
+	if err != nil {
+		return &rpcpb.ListAssumptionResultsResponse{Error: err.Error()}, nil
+	}
+
+	now := time.Now()
+	latest := make([]*rpcpb.AssumptionResult, 0, len(snapshot))
+	for _, r := range assumptions.LatestPerKey(snapshot) {
+		latest = append(latest, toRPCAssumptionResult(r, now, s.assumptionStaleAfter))
+	}
+
+	var historyOut []*rpcpb.AssumptionHistoryEntry
+	if filter := req.GetFilter(); filter != nil {
+		wantKey := fromRPCAssumptionKey(filter)
+		for _, h := range history {
+			if h.Key == wantKey {
+				historyOut = append(historyOut, toRPCAssumptionHistoryEntry(h))
+			}
+		}
+	}
+
+	degraded, degradedDetail := s.assumptions.Degraded()
+	return &rpcpb.ListAssumptionResultsResponse{
+		Latest: latest, History: historyOut,
+		StorageDegraded: degraded, StorageDegradedDetail: degradedDetail,
+	}, nil
 }
 
 // CreateVM implements rpcpb.ManagerServiceServer. See CreateNetwork's
@@ -962,6 +1065,10 @@ func (s *Server) HostStats(ctx context.Context, _ *rpcpb.HostStatsRequest) (*rpc
 			Enabled: snap.PF.Enabled, CurrentStates: snap.PF.CurrentStates, Matches: snap.PF.Matches,
 		},
 		Errors: snap.Errors,
+		// BhyveConfigured proves this node's managerd was started with
+		// -bhyve-bootrom set, NOT that bhyve is currently usable - see
+		// HostStatsResponse.bhyve_configured's own doc comment.
+		BhyveConfigured: s.vnc != nil,
 	}, nil
 }
 

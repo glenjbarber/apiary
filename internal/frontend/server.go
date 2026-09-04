@@ -221,6 +221,11 @@ type pageData struct {
 	SimulateNetwork           networkView
 	SimulateNetworkImpacts    []networkFailureImpactView
 	SimulateNetworkNote       string
+
+	// AssumptionNodes backs the Automated Assumption Checks page
+	// ("/assumptions", ADR-0055) - one section per known node, fetched
+	// concurrently like ClusterNodes above.
+	AssumptionNodes []nodeAssumptionsView
 }
 
 // userView is one row of the Users page's table.
@@ -478,6 +483,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /networks", s.handleNetworksPage)
 	s.mux.HandleFunc("GET /jails", s.handleJailsPage)
 	s.mux.HandleFunc("GET /simulate", s.handleSimulatePage)
+	s.mux.HandleFunc("GET /assumptions", s.handleAssumptionsPage)
 
 	// Operator: VM/jail/network/ISO lifecycle - including the create-VM
 	// form's own GET, since a Viewer has nothing useful to do with a

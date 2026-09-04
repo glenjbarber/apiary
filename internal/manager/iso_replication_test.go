@@ -62,7 +62,7 @@ func newManagerdRPCClientWithISOAndPeers(t *testing.T, raftdSocket, nodeID strin
 		t.Fatalf("Listen(tcp) error: %v", err)
 	}
 
-	srv := NewServer(raftClient, nodeID, isos, nil, nil, nil, peers, "", nil, nil)
+	srv := NewServer(raftClient, nodeID, isos, nil, nil, nil, peers, "", nil, nil, nil, 0)
 	grpcServer := grpc.NewServer(
 		grpc.UnaryInterceptor(srv.AuthUnaryInterceptor),
 		grpc.StreamInterceptor(srv.AuthStreamInterceptor),

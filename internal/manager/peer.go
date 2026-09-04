@@ -282,6 +282,36 @@ func (p *PeerReporter) HostStats(ctx context.Context, addr string) (*rpcpb.HostS
 	return client.HostStats(ctx, &rpcpb.HostStatsRequest{})
 }
 
+// GetLocalNetworkBridgeStatus forwards to a specific peer's own
+// GetLocalNetworkBridgeStatus RPC - same "always answers locally, dial
+// addr directly" shape as HostStats above, not leader-only-read
+// forwarding. Used by internal/assumecheck's Checker to learn a HAST
+// replica target's own local bridge status for a VM's network, never
+// via the leader-forwarding ListNetworks path (see ADR-0055 for the
+// wrong-Hive bug that would cause).
+func (p *PeerReporter) GetLocalNetworkBridgeStatus(ctx context.Context, addr, networkID string) (*rpcpb.GetLocalNetworkBridgeStatusResponse, error) {
+	conn, client, err := p.dial(addr)
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close()
+	return client.GetLocalNetworkBridgeStatus(ctx, &rpcpb.GetLocalNetworkBridgeStatusRequest{NetworkId: networkID})
+}
+
+// ListAssumptionResults forwards to a specific peer's own
+// ListAssumptionResults RPC - same shape as HostStats/
+// GetLocalNetworkBridgeStatus above. Used by internal/frontend's
+// cluster-wide /assumptions page to fan out to every known node, the
+// same pattern ADR-0036 already established for HostStats.
+func (p *PeerReporter) ListAssumptionResults(ctx context.Context, addr string, req *rpcpb.ListAssumptionResultsRequest) (*rpcpb.ListAssumptionResultsResponse, error) {
+	conn, client, err := p.dial(addr)
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close()
+	return client.ListAssumptionResults(ctx, req)
+}
+
 // CreateVM/UpdateVM/DeleteVM/CreateJail/UpdateJail/DeleteJail/
 // CreateNetwork/DeleteNetwork/CreateAPIKey/RevokeAPIKey forward an
 // external write RPC rejected by this node's own raftd (not the

@@ -39,6 +39,14 @@ func (f *fakePeerHostStatsClient) ListISOs(_ context.Context, addr string) (*rpc
 	return &rpcpb.ListISOsResponse{}, nil
 }
 
+func (f *fakePeerHostStatsClient) ListAssumptionResults(_ context.Context, addr string, _ *rpcpb.ListAssumptionResultsRequest) (*rpcpb.ListAssumptionResultsResponse, error) {
+	f.lastAddr = addr
+	if f.err != nil {
+		return nil, f.err
+	}
+	return &rpcpb.ListAssumptionResultsResponse{}, nil
+}
+
 func TestServer_ClusterOverviewPage_UnreachableNodeShowsError(t *testing.T) {
 	client := &fakeClient{
 		statusResp: &rpcpb.StatusResponse{ManagerNodeId: "apiarium", KnownNodeIds: []string{"apiarium", "freebsd-apiary"}},

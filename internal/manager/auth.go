@@ -81,6 +81,14 @@ var requiredRole = map[string]Role{
 	"/apiary.rpc.v1.ManagerService/SimulateNodeFailure":    RoleViewer,
 	"/apiary.rpc.v1.ManagerService/SimulateNetworkFailure": RoleViewer,
 
+	// GetLocalNetworkBridgeStatus/ListAssumptionResults (ADR-0055,
+	// Automated Assumption Checks v1) are both read-only, local-only
+	// reports - Viewer, same tier as HostStats/ListNetworks above. Same
+	// "mandatory, not optional" reasoning as SimulateNodeFailure's own
+	// comment: this map fails closed to RoleAdmin for anything absent.
+	"/apiary.rpc.v1.ManagerService/GetLocalNetworkBridgeStatus": RoleViewer,
+	"/apiary.rpc.v1.ManagerService/ListAssumptionResults":       RoleViewer,
+
 	// Operator: VM/jail/network lifecycle, ISO management, and the
 	// peer-to-peer reconciler-forwarding RPCs (ADR-0029) - a follower
 	// node forwarding its own already-authorized write needs at least

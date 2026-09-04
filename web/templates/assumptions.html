@@ -1,0 +1,50 @@
+{{define "assumptions_page"}}
+<!DOCTYPE html>
+<html lang="en">
+{{template "head" .}}
+<body>
+  {{template "nav" .}}
+  {{template "page_header" (pageHeader "Automated Assumption Checks" "Continuously re-checked environmental facts, persisted with history. A scoped precursor to a fuller Assumption Register - no owner/scope/evidence/expiration fields yet.")}}
+
+  {{if .Error}}
+  <div class="banner-error">{{.Error}}</div>
+  {{end}}
+
+  {{range .AssumptionNodes}}
+  <div class="panel">
+    <h3>{{.NodeID}}</h3>
+    {{if .Error}}
+    <div class="banner-error">{{.Error}}</div>
+    {{else}}
+    {{if .StorageDegraded}}
+    <div class="banner-error">Storage warning: {{.StorageDegradedDetail}}</div>
+    {{end}}
+    <table>
+      <thead><tr><th>Check</th><th>Subject</th><th>Depends on</th><th>Status</th><th>Reason</th><th>Detail</th><th>Last observed</th></tr></thead>
+      <tbody>
+        {{range .Results}}
+        <tr>
+          <td>{{.Kind}}</td>
+          <td>{{if .SubjectID}}{{.SubjectKind}} {{.SubjectID}}{{else}}<em>this node</em>{{end}}</td>
+          <td>{{.DependencyID}}{{if .Qualifier}} ({{.Qualifier}}){{end}}</td>
+          <td>
+            <span class="badge {{.Status}}">{{.Status}}</span>
+            {{if .Stale}}<span class="badge stale">stale</span>{{end}}
+          </td>
+          <td>{{.ReasonCode}}</td>
+          <td>{{.Detail}}</td>
+          <td>{{.LastObservedAt}}</td>
+        </tr>
+        {{else}}
+        <tr><td colspan="7"><em>No assumption checks recorded yet on this node</em></td></tr>
+        {{end}}
+      </tbody>
+    </table>
+    {{end}}
+  </div>
+  {{else}}
+  <p class="muted"><em>No known nodes</em></p>
+  {{end}}
+</body>
+</html>
+{{end}}

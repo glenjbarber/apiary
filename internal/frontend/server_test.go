@@ -81,6 +81,12 @@ type fakeClient struct {
 	simulateErr         error
 	simulateNetworkResp *rpcpb.SimulateNetworkFailureResponse
 	simulateNetworkErr  error
+
+	bridgeStatusResp *rpcpb.GetLocalNetworkBridgeStatusResponse
+	bridgeStatusErr  error
+
+	assumptionsResp *rpcpb.ListAssumptionResultsResponse
+	assumptionsErr  error
 }
 
 // fakeUploadClientStream is a fake grpc.ClientStreamingClient for
@@ -234,6 +240,14 @@ func (f *fakeClient) HostStats(context.Context, *rpcpb.HostStatsRequest, ...grpc
 
 func (f *fakeClient) ListVMs(context.Context, *rpcpb.ListVMsRequest, ...grpc.CallOption) (*rpcpb.ListVMsResponse, error) {
 	return f.listResp, f.listErr
+}
+
+func (f *fakeClient) GetLocalNetworkBridgeStatus(context.Context, *rpcpb.GetLocalNetworkBridgeStatusRequest, ...grpc.CallOption) (*rpcpb.GetLocalNetworkBridgeStatusResponse, error) {
+	return f.bridgeStatusResp, f.bridgeStatusErr
+}
+
+func (f *fakeClient) ListAssumptionResults(context.Context, *rpcpb.ListAssumptionResultsRequest, ...grpc.CallOption) (*rpcpb.ListAssumptionResultsResponse, error) {
+	return f.assumptionsResp, f.assumptionsErr
 }
 
 func (f *fakeClient) SimulateNodeFailure(context.Context, *rpcpb.SimulateNodeFailureRequest, ...grpc.CallOption) (*rpcpb.SimulateNodeFailureResponse, error) {

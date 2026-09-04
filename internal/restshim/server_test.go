@@ -201,6 +201,18 @@ func (f *fakeClient) SimulateNetworkFailure(context.Context, *rpcpb.SimulateNetw
 	return &rpcpb.SimulateNetworkFailureResponse{}, nil
 }
 
+// GetLocalNetworkBridgeStatus/ListAssumptionResults are not exposed over
+// REST (restshim has no route for either) - these stubs exist only to
+// satisfy rpcpb.ManagerServiceClient, mirroring SimulateNodeFailure's
+// own stub above.
+func (f *fakeClient) GetLocalNetworkBridgeStatus(context.Context, *rpcpb.GetLocalNetworkBridgeStatusRequest, ...grpc.CallOption) (*rpcpb.GetLocalNetworkBridgeStatusResponse, error) {
+	return &rpcpb.GetLocalNetworkBridgeStatusResponse{}, nil
+}
+
+func (f *fakeClient) ListAssumptionResults(context.Context, *rpcpb.ListAssumptionResultsRequest, ...grpc.CallOption) (*rpcpb.ListAssumptionResultsResponse, error) {
+	return &rpcpb.ListAssumptionResultsResponse{}, nil
+}
+
 func (f *fakeClient) UploadISO(context.Context, ...grpc.CallOption) (grpc.ClientStreamingClient[rpcpb.UploadISORequest, rpcpb.UploadISOResponse], error) {
 	if f.uploadErr != nil {
 		return nil, f.uploadErr

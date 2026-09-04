@@ -26,6 +26,11 @@ type peerHostStatsClient interface {
 	// kept on this same interface rather than a second one since both
 	// are satisfied by the same *manager.PeerReporter value.
 	ListISOs(ctx context.Context, addr string) (*rpcpb.ListISOsResponse, error)
+
+	// ListAssumptionResults lets the "/assumptions" page (ADR-0055) fan
+	// out to every known node, the same "forward a plain external RPC to
+	// an arbitrary peer" shape as HostStats/ListISOs above.
+	ListAssumptionResults(ctx context.Context, addr string, req *rpcpb.ListAssumptionResultsRequest) (*rpcpb.ListAssumptionResultsResponse, error)
 }
 
 // clusterNodeView is the template-facing shape for one row on the

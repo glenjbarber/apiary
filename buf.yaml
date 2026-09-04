@@ -3,6 +3,7 @@ modules:
   - path: .
     excludes:
       - .claude
+      - .codex
 lint:
   use:
     - STANDARD

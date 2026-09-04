@@ -120,7 +120,7 @@ func (f *fakeVNCLookup) VNCPort(name string) (int, bool, error) {
 // checks a VM's node_id against the serving Server's own nodeID.
 func newManagerdRPCClientWithVNC(t *testing.T, raftdSocket, nodeID string, vnc VNCLookup) rpcpb.ManagerServiceClient {
 	t.Helper()
-	return newManagerdRPCClientFull(t, raftdSocket, nodeID, vnc, nil, nil)
+	return newManagerdRPCClientFull(t, raftdSocket, nodeID, vnc, nil, nil, nil, 0)
 }
 
 // fakeSerialLogLookup is a fake SerialLogLookup for GetVMSerialLog
@@ -144,7 +144,7 @@ func (f *fakeSerialLogLookup) SerialLogPath(name string) (string, bool, error) {
 // Server's own nodeID.
 func newManagerdRPCClientWithSerialLog(t *testing.T, raftdSocket, nodeID string, serialLog SerialLogLookup) rpcpb.ManagerServiceClient {
 	t.Helper()
-	return newManagerdRPCClientFull(t, raftdSocket, nodeID, nil, serialLog, nil)
+	return newManagerdRPCClientFull(t, raftdSocket, nodeID, nil, serialLog, nil, nil, 0)
 }
 
 // fakeVLANStatus is a fake VLANStatus for ListNetworks bridge-status
@@ -165,8 +165,9 @@ func (f *fakeVLANStatus) InterfaceStatus(_ context.Context, name string) (exists
 }
 
 // newManagerdRPCClientFull is newManagerdRPCClient, but lets a test
-// supply nodeID, vnc, serialLog, and vlanMgr explicitly.
-func newManagerdRPCClientFull(t *testing.T, raftdSocket, nodeID string, vnc VNCLookup, serialLog SerialLogLookup, vlanMgr VLANStatus) rpcpb.ManagerServiceClient {
+// supply nodeID, vnc, serialLog, vlanMgr, and an assumptions store
+// (ADR-0055) explicitly.
+func newManagerdRPCClientFull(t *testing.T, raftdSocket, nodeID string, vnc VNCLookup, serialLog SerialLogLookup, vlanMgr VLANStatus, assumptionStoreMgr assumptionStore, assumptionStaleAfter time.Duration) rpcpb.ManagerServiceClient {
 	t.Helper()
 
 	raftClient, err := Dial(raftdSocket, "")
@@ -180,7 +181,7 @@ func newManagerdRPCClientFull(t *testing.T, raftdSocket, nodeID string, vnc VNCL
 		t.Fatalf("Listen(tcp) error: %v", err)
 	}
 
-	srv := NewServer(raftClient, nodeID, isostore.New(t.TempDir()), vnc, serialLog, vlanMgr, nil, "", nil, nil)
+	srv := NewServer(raftClient, nodeID, isostore.New(t.TempDir()), vnc, serialLog, vlanMgr, nil, "", nil, nil, assumptionStoreMgr, assumptionStaleAfter)
 	// Wired unconditionally, mirroring cmd/managerd/main.go exactly - this
 	// is a no-op for every pre-existing test here (none of them ever
 	// create an API key, so checkAuth's "zero keys = open" branch always
@@ -966,7 +967,7 @@ func TestIntegration_ListNetworks_BridgeStatusUpOrDown(t *testing.T) {
 	raftdSocket := newRaftdUDSSocket(t)
 	bridge := resolveBridgeName(&internalpb.NetworkDefinition{Id: "net-1"})
 	vlan := &fakeVLANStatus{up: map[string]bool{bridge: true}}
-	client := newManagerdRPCClientFull(t, raftdSocket, "node-a", nil, nil, vlan)
+	client := newManagerdRPCClientFull(t, raftdSocket, "node-a", nil, nil, vlan, nil, 0)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()

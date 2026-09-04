@@ -41,6 +41,11 @@
     .badge.ready, .badge.running, .badge.up { color:var(--success); background:#dcf4e3; }
     .badge.error, .badge.down, .badge.deleting { color:var(--danger); background:#fde3e3; }
     .badge.creating, .badge.pending { color:#765600; background:#fff1b8; }
+    .badge.true { color:var(--success); background:#dcf4e3; }
+    .badge.false { color:var(--danger); background:#fde3e3; }
+    .badge.unknown { color:#555; background:#e8e8e8; }
+    .badge.not-applicable { color:#3b5bdb; background:#e7ebfd; }
+    .badge.stale { opacity:.55; border:1px dashed #999; }
     .actions { display:flex; align-items:center; gap:.55rem; white-space:nowrap; }
     form.upload-iso, form.inline-form { display: flex; gap: 0.75rem; align-items: end; flex-wrap: wrap; }
     form.upload-iso label, form.inline-form label { display: flex; flex-direction: column; font-size: 0.85rem; }
@@ -111,6 +116,7 @@
   <a href="/jails"{{if eq .ActivePage "jails"}} class="active"{{end}}>Jails</a>
   <a href="/networks"{{if eq .ActivePage "networks"}} class="active"{{end}}>Networks</a>
   <a href="/simulate"{{if eq .ActivePage "simulate"}} class="active"{{end}}>Simulate</a>
+  <a href="/assumptions"{{if eq .ActivePage "assumptions"}} class="active"{{end}}>Assumptions</a>
   <a href="/images"{{if eq .ActivePage "images"}} class="active"{{end}}>Images</a>
   {{if .CanOperate}}<a href="/machine"{{if eq .ActivePage "machine"}} class="active"{{end}}>Machine</a>{{end}}
   {{if .CanAdmin}}<a href="/apikeys"{{if eq .ActivePage "apikeys"}} class="active"{{end}}>API Keys</a>{{end}}
