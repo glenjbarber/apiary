@@ -1,0 +1,220 @@
+{{define "recovery_handbook_page"}}
+<!DOCTYPE html>
+<html lang="en">
+{{template "head" .}}
+<style>
+  .recovery-step { border:1px solid var(--line); border-radius:6px; padding:.75rem 1rem; margin:.75rem 0; break-inside: avoid; page-break-inside: avoid; }
+  .recovery-step.irreversible { border-color:var(--danger); }
+  .recovery-stop { margin-top:.5rem; padding:.5rem .75rem; background:#fde3e3; border:1px dashed var(--danger); border-radius:4px; }
+  .recovery-label { font-weight:800; }
+  .fencing-record { border:1px dashed #999; border-radius:4px; padding:.6rem .8rem; margin-top:.6rem; font-size:.9rem; }
+  .fencing-record div { margin:.3rem 0; }
+  .fencing-blank { display:inline-block; border-bottom:1px solid #333; min-width:14rem; }
+  @media print {
+    nav, form, .no-print { display:none !important; }
+    @page { margin: 1.5cm; }
+    @page { @bottom-center { content: "Page " counter(page) " of " counter(pages); } }
+  }
+</style>
+<body>
+  {{template "nav" .}}
+  {{template "page_header" (pageHeader "Offline Recovery Handbook" "A printable, on-demand recovery edition for one scenario: loss of one hive. Read-only - nothing here is ever changed.")}}
+
+  <div class="panel no-print">
+    <h3>Hive loss</h3>
+    <form method="get" action="/recovery-handbook" class="inline-form">
+      <label>Hive
+        {{if .RecoveryNodes}}
+        <select name="node_id" required>
+          <option value="">Choose a node</option>
+          {{range .RecoveryNodes}}<option value="{{.}}"{{if eq . $.RecoveryTargetNodeID}} selected{{end}}>{{.}}</option>{{end}}
+        </select>
+        {{else}}
+        <input type="text" name="node_id" placeholder="node id" value="{{.RecoveryTargetNodeID}}" required>
+        {{end}}
+      </label>
+      <button type="submit">Generate handbook</button>
+    </form>
+  </div>
+
+  <div class="panel">
+    <h3>Scope of this edition</h3>
+    <p class="muted">
+      This edition covers exactly one scenario: the loss of a single named hive, including
+      the special case where that hive currently holds raft leadership. It is generated fresh
+      on every request from live cluster state - it is not derived from a persisted "Flight Plan"
+      (that mechanism does not exist yet in Apiary).
+    </p>
+    <p class="muted">
+      <strong>Not covered by this or any current edition</strong>: management-network (control-plane)
+      failure - distinct from the already-built managed tenant-network failure simulator; total
+      control-plane loss (every raft voter gone at once - see <code>raftd -export</code>'s own
+      config-archive mechanism instead); rebuilding from surviving storage; and the online Guided
+      Recovery Mode, both of which depend on a Flight Plan execution engine that does not exist yet.
+    </p>
+  </div>
+
+  <div class="panel">
+    <h3>Current raft membership</h3>
+    <table>
+      <thead><tr><th>Node</th><th>Suffrage</th></tr></thead>
+      <tbody>
+        {{range .RecoveryMembers}}
+        <tr><td>{{.NodeID}}</td><td>{{.Suffrage}}</td></tr>
+        {{else}}
+        <tr><td colspan="2"><em>Raft membership could not be read</em></td></tr>
+        {{end}}
+      </tbody>
+    </table>
+  </div>
+
+  {{if .RecoveryTargetNodeID}}
+  {{if .RecoveryError}}
+  <div class="banner-error">{{.RecoveryError}}</div>
+  {{else}}
+  <div class="panel">
+    <h3>Edition identity</h3>
+    <table>
+      <tbody>
+        <tr><th>Target hive</th><td>{{.RecoveryTargetNodeID}}</td></tr>
+        <tr><th>Generated at</th><td>{{.RecoveryGeneratedAt}}</td></tr>
+        <tr><th>Format version</th><td>v1</td></tr>
+        <tr><th>Snapshot fingerprint</th><td><code>{{.RecoveryFingerprint}}</code> - detects whether a printed copy matches what would be generated right now; not a tamper-proof signature.</td></tr>
+      </tbody>
+    </table>
+    <p class="muted">
+      Assembled from multiple, non-atomic observations taken between {{.RecoveryEvidenceStart}} and
+      {{.RecoveryEvidenceEnd}} - not a single instant. This includes the node picker's own cluster reads,
+      a separate raft-status read for leader identity, the node-failure simulation, and the bounded
+      per-node evidence below.
+    </p>
+  </div>
+
+  <div class="panel">
+    <h3>Recovery steps</h3>
+    <p class="muted">One action at a time. Steps outlined in red are irreversible; a step's stop
+      condition must be resolved before proceeding past it.</p>
+    {{range .RecoverySteps}}
+    <div class="recovery-step{{if .Irreversible}} irreversible{{end}}">
+      <h4>{{.Order}}. {{if .Irreversible}}<span class="recovery-label">IRREVERSIBLE:</span> {{end}}{{.Title}}</h4>
+      <p>{{.Detail}}</p>
+      {{if .StopCondition}}
+      <div class="recovery-stop"><span class="recovery-label">STOP:</span> {{.StopCondition}}</div>
+      {{end}}
+      {{if .Irreversible}}
+      <div class="fencing-record">
+        <strong>Fencing evidence record</strong> (fill in by hand before proceeding)
+        <div>Method: <span class="fencing-blank">&nbsp;</span></div>
+        <div>Evidence: <span class="fencing-blank">&nbsp;</span></div>
+        <div>Operator: <span class="fencing-blank">&nbsp;</span></div>
+        <div>Timestamp: <span class="fencing-blank">&nbsp;</span></div>
+      </div>
+      {{end}}
+    </div>
+    {{end}}
+  </div>
+
+  <div class="panel">
+    <h3>Node context (bounded, embedded evidence)</h3>
+    <p class="muted">Health and environmental-assumption evidence for every node relevant to this
+      hive's own recovery - the replica targets it could migrate to, and the owners of anything it
+      backs. Embedded directly (not linked) so this page stays useful when the rest of the UI is not.</p>
+    <table>
+      <thead><tr><th>Node</th><th>Relevance</th><th>Health</th><th>Assumptions</th></tr></thead>
+      <tbody>
+        {{range .RecoveryNodeContext}}
+        <tr>
+          <td>{{.NodeID}}</td>
+          <td>{{.Reason}}</td>
+          {{if .EvidenceLimitReached}}
+          <td colspan="2"><em>Not checked because the evidence limit was reached.</em></td>
+          {{else}}
+          <td>
+            <span class="badge {{.HealthStatus}}">{{.HealthStatus}}</span> {{.HealthExplanation}}
+            {{if .HealthObservations}}
+            <details>
+              <summary class="muted">Evidence</summary>
+              <ul>
+                {{range .HealthObservations}}<li><strong>{{.Source}}</strong>: {{.Value}} - {{.Detail}}</li>{{end}}
+              </ul>
+            </details>
+            {{end}}
+          </td>
+          <td>
+            {{if .AssumptionsFetchError}}
+            <span class="badge unknown">unreachable</span> {{.AssumptionsFetchError}}
+            {{else if .Assumptions}}
+            <ul>
+              {{range .Assumptions}}
+              <li><span class="badge {{.Status}}">{{.Status}}</span> {{.Kind}} ({{.DependencyID}}){{if .Stale}} <em>stale</em>{{end}} - {{.Detail}}</li>
+              {{end}}
+            </ul>
+            {{if .StorageDegraded}}<p class="muted">{{.StorageDegradedDetail}}</p>{{end}}
+            {{else}}
+            <em>no concerns</em>
+            {{end}}
+          </td>
+          {{end}}
+        </tr>
+        {{else}}
+        <tr><td colspan="4"><em>No other node is relevant to this hive's own recovery</em></td></tr>
+        {{end}}
+      </tbody>
+    </table>
+  </div>
+
+  <div class="panel">
+    <h3>Evidence appendix</h3>
+    <p class="muted">The raw simulator output this handbook's steps were derived from.</p>
+    <table>
+      <tbody>
+        <tr><th>Voting member</th><td>{{if .RecoveryQuorum.TargetIsVoter}}yes{{else}}no{{end}}</td></tr>
+        <tr><th>Remaining voters (configured)</th><td>{{.RecoveryQuorum.RemainingVoters}} of {{.RecoveryQuorum.TotalVoters}} total (quorum needs {{.RecoveryQuorum.QuorumSize}})</td></tr>
+        <tr><th>Remaining voters (confirmed reachable)</th><td>{{.RecoveryQuorum.Reachable}}</td></tr>
+        <tr><th>Remaining voters (reachability unverified)</th><td>{{.RecoveryQuorum.Unknown}}</td></tr>
+        <tr><th>Simulator note</th><td>{{.RecoveryQuorum.Note}}</td></tr>
+      </tbody>
+    </table>
+    <table>
+      <thead><tr><th>ID</th><th>Name</th><th>Kind</th><th>Replica node</th><th>Verdict</th></tr></thead>
+      <tbody>
+        {{range .RecoveryOwnedResources}}
+        <tr>
+          <td>{{.ID}}</td><td>{{.Name}}</td><td>{{.Kind}}</td>
+          <td>{{if .ReplicaNodeID}}{{.ReplicaNodeID}}{{else}}<em>none</em>{{end}}</td>
+          <td>{{if eq .Verdict "unprotected"}}<span class="error">unprotected</span>{{else}}<span class="muted">unverified replica</span>{{end}}</td>
+        </tr>
+        {{else}}
+        <tr><td colspan="5"><em>No resources owned by this node</em></td></tr>
+        {{end}}
+      </tbody>
+    </table>
+    <table>
+      <thead><tr><th>ID</th><th>Name</th><th>Kind</th><th>Owner node</th></tr></thead>
+      <tbody>
+        {{range .RecoveryReplicaBacked}}
+        <tr><td>{{.ID}}</td><td>{{.Name}}</td><td>{{.Kind}}</td><td>{{.OwnerNodeID}}</td></tr>
+        {{else}}
+        <tr><td colspan="4"><em>No resources replica-backed by this node</em></td></tr>
+        {{end}}
+      </tbody>
+    </table>
+    <table>
+      <thead><tr><th>Resource</th><th>Image</th><th>Verdict</th></tr></thead>
+      <tbody>
+        {{range .RecoveryImageAvailability}}
+        <tr>
+          <td>{{.ResourceName}} ({{.ResourceID}})</td><td>{{.ImageName}}</td>
+          <td>{{if eq .Verdict "available"}}<span class="success">available</span>{{else if eq .Verdict "unavailable"}}<span class="error">unavailable</span>{{else}}<span class="muted">unknown</span>{{end}}</td>
+        </tr>
+        {{else}}
+        <tr><td colspan="3"><em>No resources reference stored images</em></td></tr>
+        {{end}}
+      </tbody>
+    </table>
+  </div>
+  {{end}}
+  {{end}}
+</body>
+</html>
+{{end}}

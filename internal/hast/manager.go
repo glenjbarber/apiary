@@ -24,9 +24,14 @@ type Status struct {
 	RemoteAddr string
 
 	// ResourceStatus is hastd's own health assessment ("complete",
-	// "degraded", or "unknown"). It is only reported for a resource in
-	// the primary role - a secondary's `hastctl list` output has no
-	// equivalent field, so this is "" there.
+	// "degraded", or "unknown"). Reported for a resource in EITHER role -
+	// live-verified on this project's own FreeBSD 16.0-CURRENT/hastd
+	// build (ADR-0057): a throwaway primary/secondary pair both reported
+	// "status: complete" in their own `hastctl list` output, matching
+	// ADR-0008's and ADR-0028's own earlier recorded observations. (A
+	// prior version of this comment claimed secondary had no such field
+	// at all - that was never true of this project's own hastd, and is
+	// corrected here.)
 	ResourceStatus string
 }
 

@@ -226,6 +226,30 @@ type pageData struct {
 	// ("/assumptions", ADR-0055) - one section per known node, fetched
 	// concurrently like ClusterNodes above.
 	AssumptionNodes []nodeAssumptionsView
+
+	// Recovery* back the Offline Recovery Handbook page
+	// ("/recovery-handbook", ADR-0057). RecoveryNodes mirrors
+	// SimulateNodes exactly (same picker, same union of raft membership
+	// and VM/jail placement). RecoveryTargetNodeID empty means "no
+	// edition generated yet," just the picker and scope block.
+	// RecoveryError means generation failed outright (a banner, no
+	// handbook rendered) - distinct from a handbook that generated
+	// successfully but whose quorum verdict happens to be LOST/UNKNOWN
+	// (that's real, correctly-generated content, not an error).
+	RecoveryNodes             []string
+	RecoveryTargetNodeID      string
+	RecoveryError             string
+	RecoveryGeneratedAt       string
+	RecoveryFingerprint       string
+	RecoveryEvidenceStart     string
+	RecoveryEvidenceEnd       string
+	RecoverySteps             []recoveryStepView
+	RecoveryNodeContext       []recoveryNodeContextView
+	RecoveryMembers           []recoveryMemberView
+	RecoveryQuorum            quorumImpactView
+	RecoveryOwnedResources    []resourceImpactView
+	RecoveryReplicaBacked     []replicaBackedImpactView
+	RecoveryImageAvailability []imageAvailabilityImpactView
 }
 
 // userView is one row of the Users page's table.
@@ -484,6 +508,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /jails", s.handleJailsPage)
 	s.mux.HandleFunc("GET /simulate", s.handleSimulatePage)
 	s.mux.HandleFunc("GET /assumptions", s.handleAssumptionsPage)
+	s.mux.HandleFunc("GET /recovery-handbook", s.handleRecoveryHandbookPage)
 
 	// Operator: VM/jail/network/ISO lifecycle - including the create-VM
 	// form's own GET, since a Viewer has nothing useful to do with a

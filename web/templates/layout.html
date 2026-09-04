@@ -129,6 +129,7 @@
     <div class="menu-items">
       <a href="/simulate"{{if eq .ActivePage "simulate"}} class="active"{{end}}>Simulate</a>
       <a href="/assumptions"{{if eq .ActivePage "assumptions"}} class="active"{{end}}>Assumptions</a>
+      <a href="/recovery-handbook"{{if eq .ActivePage "recovery-handbook"}} class="active"{{end}}>Recovery Handbook</a>
       <a href="/images"{{if eq .ActivePage "images"}} class="active"{{end}}>Images</a>
       {{if .CanOperate}}<a href="/machine"{{if eq .ActivePage "machine"}} class="active"{{end}}>Machine</a>{{end}}
       {{if .CanAdmin}}<a href="/apikeys"{{if eq .ActivePage "apikeys"}} class="active"{{end}}>API Keys</a>{{end}}
