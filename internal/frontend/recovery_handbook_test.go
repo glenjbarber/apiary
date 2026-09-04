@@ -221,6 +221,10 @@ func (slowRecoveryPeerClient) Status(ctx context.Context, addr string) (*rpcpb.S
 	<-ctx.Done()
 	return nil, ctx.Err()
 }
+func (slowRecoveryPeerClient) GetLocalNetworkBridgeStatus(ctx context.Context, addr, networkID string) (*rpcpb.GetLocalNetworkBridgeStatusResponse, error) {
+	<-ctx.Done()
+	return nil, ctx.Err()
+}
 
 func TestHandleRecoveryHandbookPage_NodeContextRespectsTimeouts(t *testing.T) {
 	oldTimeout, oldOverall := nodeContextTimeout, nodeContextOverallTimeout

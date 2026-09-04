@@ -23,6 +23,11 @@ type fakePeerHostStatsClient struct {
 	statusResp     *rpcpb.StatusResponse
 	statusErr      error
 	statusCalls    int
+
+	lastBridgeAddr    string
+	lastBridgeNetwork string
+	bridgeResp        *rpcpb.GetLocalNetworkBridgeStatusResponse
+	bridgeErr         error
 }
 
 func (f *fakePeerHostStatsClient) HostStats(_ context.Context, addr string) (*rpcpb.HostStatsResponse, error) {
@@ -62,6 +67,18 @@ func (f *fakePeerHostStatsClient) Status(_ context.Context, addr string) (*rpcpb
 		return f.statusResp, nil
 	}
 	return &rpcpb.StatusResponse{}, nil
+}
+
+func (f *fakePeerHostStatsClient) GetLocalNetworkBridgeStatus(_ context.Context, addr, networkID string) (*rpcpb.GetLocalNetworkBridgeStatusResponse, error) {
+	f.lastBridgeAddr = addr
+	f.lastBridgeNetwork = networkID
+	if f.bridgeErr != nil {
+		return nil, f.bridgeErr
+	}
+	if f.bridgeResp != nil {
+		return f.bridgeResp, nil
+	}
+	return &rpcpb.GetLocalNetworkBridgeStatusResponse{}, nil
 }
 
 func TestServer_ClusterOverviewPage_UnreachableNodeShowsError(t *testing.T) {

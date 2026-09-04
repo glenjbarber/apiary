@@ -32,6 +32,10 @@ func (f *fakeISOPeerClient) Status(context.Context, string) (*rpcpb.StatusRespon
 	return &rpcpb.StatusResponse{}, nil
 }
 
+func (f *fakeISOPeerClient) GetLocalNetworkBridgeStatus(context.Context, string, string) (*rpcpb.GetLocalNetworkBridgeStatusResponse, error) {
+	return &rpcpb.GetLocalNetworkBridgeStatusResponse{}, nil
+}
+
 func (f *fakeISOPeerClient) ListISOs(_ context.Context, addr string) (*rpcpb.ListISOsResponse, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()

@@ -1,0 +1,50 @@
+{{define "invariants_page"}}
+<!DOCTYPE html>
+<html lang="en">
+{{template "head" .}}
+<body class="app-layout">
+  {{template "nav" .}}
+  <main class="content" id="main-content">
+  {{template "page_header" (pageHeader "Operational Invariants" "A small, named catalog of safety rules, continuously evaluated to true/false/unknown with cited evidence. A missing observation is never treated as a passed check.")}}
+
+  <div class="panel">
+    <h3>Live-evaluated invariants</h3>
+    <p class="muted">Each evaluated fresh on every load from live cluster state - not a persisted history yet.</p>
+    {{range .InvariantEvaluations}}
+    <div class="panel" style="margin-top:.75rem">
+      <h4>{{.Name}} <span class="badge {{.Result}}">{{.Result}}</span> <span class="muted">({{.Scope}})</span></h4>
+      <p>{{.Explanation}}</p>
+      {{if .Evidence}}
+      <details>
+        <summary class="muted" style="cursor:pointer">Evidence</summary>
+        <ul>
+          {{range .Evidence}}
+          <li><strong>{{.Source}}</strong>: {{.Detail}}{{if .NeverObserved}} <em>(not runtime-observed)</em>{{else}} <span class="muted">observed {{.ObservedAt}}</span>{{end}}</li>
+          {{end}}
+        </ul>
+      </details>
+      {{end}}
+    </div>
+    {{else}}
+    <p class="muted"><em>No live-evaluated invariants</em></p>
+    {{end}}
+  </div>
+
+  <div class="panel">
+    <h3>Structural guarantees</h3>
+    <p class="muted">Enforced by construction and verified by code review/regression tests - not independently checked against current runtime state the way the invariants above are.</p>
+    {{range .InvariantStructural}}
+    <div class="panel" style="margin-top:.75rem">
+      <h4>{{.Name}} <span class="badge {{.Result}}">{{.Result}}</span> <span class="muted">({{.Scope}})</span></h4>
+      <p>{{.Explanation}}</p>
+      {{range .Evidence}}
+      <p class="muted"><strong>{{.Source}}</strong>: {{.Detail}}</p>
+      {{end}}
+    </div>
+    {{end}}
+  </div>
+  </main>
+  {{template "footer" .}}
+</body>
+</html>
+{{end}}

@@ -40,6 +40,17 @@ type peerHostStatsClient interface {
 	// HostStats above, not leader-forwarding (Status has no leader
 	// concept to route through).
 	Status(ctx context.Context, addr string) (*rpcpb.StatusResponse, error)
+
+	// GetLocalNetworkBridgeStatus lets Operational Invariants (ADR-0060)
+	// learn a specific node's own local bridge state for a network it
+	// hosts a resource on - the same "always answers locally, dial addr
+	// directly" shape as HostStats/Status above. Deliberately never
+	// ListNetworks's own bridge_status field, which is populated by
+	// whichever node answers that leader-only, forwarding RPC and would
+	// silently mislabel the LEADER's bridge state as this node's own -
+	// see GetLocalNetworkBridgeStatus's own doc comment in
+	// internal/manager/server.go for the ADR-0055 bug this avoids.
+	GetLocalNetworkBridgeStatus(ctx context.Context, addr, networkID string) (*rpcpb.GetLocalNetworkBridgeStatusResponse, error)
 }
 
 // clusterNodeView is the template-facing shape for one row on the

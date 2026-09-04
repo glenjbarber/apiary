@@ -262,6 +262,15 @@ type pageData struct {
 	TracePort        string
 	TraceError       string
 	TraceResult      pathTraceView
+
+	// Invariant* back the Operational Invariants page ("/invariants",
+	// ADR-0060) - InvariantEvaluations are the four live-evaluated
+	// invariants, InvariantStructural is the ownership-gated-deletion
+	// invariant alone, rendered in its own visually distinct section
+	// since it's a static, code-attested claim rather than something
+	// freshly checked against current state.
+	InvariantEvaluations []invariantEvaluationView
+	InvariantStructural  []invariantEvaluationView
 }
 
 // userView is one row of the Users page's table.
@@ -522,6 +531,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /assumptions", s.handleAssumptionsPage)
 	s.mux.HandleFunc("GET /recovery-handbook", s.handleRecoveryHandbookPage)
 	s.mux.HandleFunc("GET /trace", s.handleTracePage)
+	s.mux.HandleFunc("GET /invariants", s.handleInvariantsPage)
 
 	// Operator: VM/jail/network/ISO lifecycle - including the create-VM
 	// form's own GET, since a Viewer has nothing useful to do with a
