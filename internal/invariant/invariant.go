@@ -171,6 +171,39 @@ func quorumFactFromVoters(voters []VoterReachability, x VoterReachability) recov
 	}
 }
 
+// VoterQuorumImpact is one voter's own hypothetical-loss verdict,
+// exposed as structured data rather than folded into Evidence prose -
+// so a caller (Resilience Coverage Map, ADR-0062) can classify a
+// per-node scenario without parsing Evidence.Detail strings, the same
+// fix ADR-0061 finding 3 applied to NetworkFact/EvaluateNetworkRoute.
+// Valid false means the underlying QuorumFact was internally
+// inconsistent - Verdict is meaningless in that case, never a
+// fabricated finding (mirrors ValidQuorumFact's own guard).
+type VoterQuorumImpact struct {
+	NodeID  string
+	Verdict recovery.QuorumVerdict
+	Valid   bool
+}
+
+// ClassifyVoterQuorumImpacts computes every voter's own hypothetical-
+// loss verdict from one shared reachability snapshot - the same
+// per-voter loop EvaluateQuorumTolerance uses internally, extracted so
+// a caller needing the per-node detail (not just the aggregated worst-
+// case Evaluation) doesn't have to re-derive it or parse prose.
+func ClassifyVoterQuorumImpacts(voters []VoterReachability, leaderID string) []VoterQuorumImpact {
+	impacts := make([]VoterQuorumImpact, 0, len(voters))
+	for _, v := range voters {
+		fact := quorumFactFromVoters(voters, v)
+		valid := recovery.ValidQuorumFact(fact)
+		var verdict recovery.QuorumVerdict
+		if valid {
+			verdict = recovery.ClassifyQuorum(fact, v.NodeID == leaderID)
+		}
+		impacts = append(impacts, VoterQuorumImpact{NodeID: v.NodeID, Verdict: verdict, Valid: valid})
+	}
+	return impacts
+}
+
 // EvaluateQuorumTolerance answers "does the cluster currently tolerate
 // losing any ONE more voter" - CODEX's "a plan cannot remove raft
 // quorum," reframed for v1 since no Flight Plan exists yet to name a
@@ -185,39 +218,33 @@ func quorumFactFromVoters(voters []VoterReachability, x VoterReachability) recov
 // (recovery.ClassifyQuorum's own isCurrentLeader parameter) is
 // recomputed correctly per voter, not hoisted out of the loop.
 func EvaluateQuorumTolerance(voters []VoterReachability, leaderID string) Evaluation {
-	evidence := make([]Evidence, 0, len(voters))
+	impacts := ClassifyVoterQuorumImpacts(voters, leaderID)
+	evidence := make([]Evidence, 0, len(impacts))
 	worst := ResultTrue // Survives < Unknown < Lost in severity; start optimistic, only downgrade
 	now := time.Now()
 
-	for _, v := range voters {
-		fact := quorumFactFromVoters(voters, v)
-		var verdict recovery.QuorumVerdict
-		valid := recovery.ValidQuorumFact(fact)
-		if valid {
-			verdict = recovery.ClassifyQuorum(fact, v.NodeID == leaderID)
-		}
-
+	for _, impact := range impacts {
 		switch {
-		case !valid:
+		case !impact.Valid:
 			evidence = append(evidence, Evidence{
-				Source:     "raft membership + HostStats reachability for " + v.NodeID,
-				Detail:     "Quorum arithmetic for losing " + v.NodeID + " was internally inconsistent - treated as unknown, never a fabricated finding.",
+				Source:     "raft membership + HostStats reachability for " + impact.NodeID,
+				Detail:     "Quorum arithmetic for losing " + impact.NodeID + " was internally inconsistent - treated as unknown, never a fabricated finding.",
 				ObservedAt: now,
 			})
 			if worst == ResultTrue {
 				worst = ResultUnknown
 			}
-		case verdict == recovery.QuorumLost:
+		case impact.Verdict == recovery.QuorumLost:
 			evidence = append(evidence, Evidence{
-				Source:     "raft membership + HostStats reachability for " + v.NodeID,
-				Detail:     "Losing " + v.NodeID + " would LOSE quorum - even crediting every voter with unknown reachability as reachable, a majority cannot be reached.",
+				Source:     "raft membership + HostStats reachability for " + impact.NodeID,
+				Detail:     "Losing " + impact.NodeID + " would LOSE quorum - even crediting every voter with unknown reachability as reachable, a majority cannot be reached.",
 				ObservedAt: now,
 			})
 			worst = ResultFalse
-		case verdict == recovery.QuorumUnknown:
+		case impact.Verdict == recovery.QuorumUnknown:
 			evidence = append(evidence, Evidence{
-				Source:     "raft membership + HostStats reachability for " + v.NodeID,
-				Detail:     "Losing " + v.NodeID + " has an UNKNOWN quorum outcome - see internal/recovery.ClassifyQuorum for why (unverified voter reachability, or this voter is the current leader and reachability was only checked from the leader's own vantage point).",
+				Source:     "raft membership + HostStats reachability for " + impact.NodeID,
+				Detail:     "Losing " + impact.NodeID + " has an UNKNOWN quorum outcome - see internal/recovery.ClassifyQuorum for why (unverified voter reachability, or this voter is the current leader and reachability was only checked from the leader's own vantage point).",
 				ObservedAt: now,
 			})
 			if worst == ResultTrue {
@@ -225,8 +252,8 @@ func EvaluateQuorumTolerance(voters []VoterReachability, leaderID string) Evalua
 			}
 		default: // QuorumSurvives
 			evidence = append(evidence, Evidence{
-				Source:     "raft membership + HostStats reachability for " + v.NodeID,
-				Detail:     "Losing " + v.NodeID + " would leave quorum intact.",
+				Source:     "raft membership + HostStats reachability for " + impact.NodeID,
+				Detail:     "Losing " + impact.NodeID + " would leave quorum intact.",
 				ObservedAt: now,
 			})
 		}

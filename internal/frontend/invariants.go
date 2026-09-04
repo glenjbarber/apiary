@@ -64,6 +64,19 @@ func invariantVoters(statusResp *rpcpb.StatusResponse) []string {
 // RPCs concentrated on the leader) and classifies every voter's own
 // hypothetical loss locally from that one shared snapshot.
 func (s *Server) gatherQuorumTolerance(ctx context.Context, statusResp *rpcpb.StatusResponse, localNodeID string) invariant.Evaluation {
+	voters := s.gatherVoterReachability(ctx, statusResp, localNodeID)
+	return invariant.EvaluateQuorumTolerance(voters, statusResp.GetRaftLeaderId())
+}
+
+// gatherVoterReachability builds the one shared []invariant.VoterReachability
+// snapshot every quorum-related computation is derived from - a single
+// bounded, concurrent HostStats fan-out to every current voter except
+// the local node (trivially reachable). Extracted from
+// gatherQuorumTolerance so a caller needing more than the folded
+// Evaluation (Resilience Coverage Map, ADR-0062, needs the per-voter
+// detail from invariant.ClassifyVoterQuorumImpacts too) reuses this
+// exact fan-out rather than paying for or duplicating it.
+func (s *Server) gatherVoterReachability(ctx context.Context, statusResp *rpcpb.StatusResponse, localNodeID string) []invariant.VoterReachability {
 	voterIDs := invariantVoters(statusResp)
 	if len(voterIDs) > nodeContextLimit {
 		voterIDs = voterIDs[:nodeContextLimit]
@@ -104,7 +117,7 @@ func (s *Server) gatherQuorumTolerance(ctx context.Context, statusResp *rpcpb.St
 	}
 	wg.Wait()
 
-	return invariant.EvaluateQuorumTolerance(voters, statusResp.GetRaftLeaderId())
+	return voters
 }
 
 // gatherCellRecoverability enumerates every VM/jail with a configured

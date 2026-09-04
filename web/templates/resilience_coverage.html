@@ -1,0 +1,57 @@
+{{define "coverage_page"}}
+<!DOCTYPE html>
+<html lang="en">
+{{template "head" .}}
+<body class="app-layout">
+  {{template "nav" .}}
+  <main class="content" id="main-content">
+  {{template "page_header" (pageHeader "Resilience Coverage Map" "Which failure scenarios have real evidence behind them, and which do not. A successful check for one hive, network, storage path, or resource never confirms the same for any other, and results are never combined into a single score.")}}
+
+  <div class="panel">
+    <h3>Failure scenarios</h3>
+    <table>
+      <thead>
+        <tr><th>Kind</th><th>Target</th><th>Scenario</th><th>Status</th><th>Result</th></tr>
+      </thead>
+      <tbody>
+        {{range .CoverageScenarios}}
+        <tr>
+          <td>{{.Kind}}</td>
+          <td>{{.Target}}</td>
+          <td>{{.Label}}<div class="muted">{{.Explanation}}</div></td>
+          <td><span class="badge {{.BadgeClass}}">{{.Status}}</span></td>
+          <td>{{if .Result}}{{.Result}}{{else}}<span class="muted">n/a</span>{{end}}</td>
+        </tr>
+        {{else}}
+        <tr><td colspan="5" class="muted"><em>No scenarios could be enumerated.</em></td></tr>
+        {{end}}
+      </tbody>
+    </table>
+  </div>
+
+  <div class="panel">
+    <h3>Coverage tally</h3>
+    <p class="muted">A plain count, not a percentage. A successful check for one hive, network, storage path, or resource never confirms the same for any other, and these counts are never combined into a single score.</p>
+    <table>
+      <tbody>
+        {{range .CoverageCounts}}
+        <tr><th><span class="badge {{.BadgeClass}}">{{.Status}}</span></th><td>{{.Count}}</td></tr>
+        {{end}}
+      </tbody>
+    </table>
+  </div>
+
+  <div class="panel">
+    <h3>Known unmodeled failure classes</h3>
+    <p class="muted">Named failure scenario classes this codebase has no mechanism to evaluate for any target - not computed rows, just a disclosed, hand-maintained list.</p>
+    <ul>
+      {{range .CoverageGaps}}
+      <li>{{.}}</li>
+      {{end}}
+    </ul>
+  </div>
+  </main>
+  {{template "footer" .}}
+</body>
+</html>
+{{end}}

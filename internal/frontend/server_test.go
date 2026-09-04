@@ -80,10 +80,11 @@ type fakeClient struct {
 	setDatasetQuotaResp    *rpcpb.SetDatasetQuotaResponse
 	lastSetDatasetQuotaReq *rpcpb.SetDatasetQuotaRequest
 
-	simulateResp        *rpcpb.SimulateNodeFailureResponse
-	simulateErr         error
-	simulateNetworkResp *rpcpb.SimulateNetworkFailureResponse
-	simulateNetworkErr  error
+	simulateResp             *rpcpb.SimulateNodeFailureResponse
+	simulateNodeFailureCalls int
+	simulateErr              error
+	simulateNetworkResp      *rpcpb.SimulateNetworkFailureResponse
+	simulateNetworkErr       error
 
 	bridgeStatusResp  *rpcpb.GetLocalNetworkBridgeStatusResponse
 	bridgeStatusErr   error
@@ -260,6 +261,7 @@ func (f *fakeClient) ListAssumptionResults(context.Context, *rpcpb.ListAssumptio
 }
 
 func (f *fakeClient) SimulateNodeFailure(context.Context, *rpcpb.SimulateNodeFailureRequest, ...grpc.CallOption) (*rpcpb.SimulateNodeFailureResponse, error) {
+	f.simulateNodeFailureCalls++
 	return f.simulateResp, f.simulateErr
 }
 

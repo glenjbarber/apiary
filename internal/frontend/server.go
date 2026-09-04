@@ -290,6 +290,16 @@ type pageData struct {
 	WhyNotNetworkID       string
 	WhyNotNetworkError    string
 	WhyNotNetworkConnect  whyNotAnswerView
+
+	// Coverage* back the Resilience Coverage Map page
+	// ("/resilience-coverage", ADR-0062) - CoverageScenarios is every
+	// classified failure scenario, CoverageCounts is a plain, zero-
+	// filled tally across all five Status values (never a percentage),
+	// and CoverageGaps is the fixed, disclosed list of failure classes
+	// this codebase has no mechanism to evaluate at all.
+	CoverageScenarios []coverageScenarioView
+	CoverageCounts    []coverageStatusCountView
+	CoverageGaps      []string
 }
 
 // userView is one row of the Users page's table.
@@ -552,6 +562,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /trace", s.handleTracePage)
 	s.mux.HandleFunc("GET /invariants", s.handleInvariantsPage)
 	s.mux.HandleFunc("GET /why-not", s.handleWhyNotPage)
+	s.mux.HandleFunc("GET /resilience-coverage", s.handleCoveragePage)
 
 	// Operator: VM/jail/network/ISO lifecycle - including the create-VM
 	// form's own GET, since a Viewer has nothing useful to do with a

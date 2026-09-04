@@ -3,6 +3,8 @@ package invariant
 import (
 	"strings"
 	"testing"
+
+	"github.com/glenjbarber/apiary/internal/recovery"
 )
 
 // noLeader is a node ID never present in these tests' voter lists, so
@@ -187,5 +189,98 @@ func TestEvaluateOwnershipGatedDeletion_AlwaysTrueWithZeroObservedAt(t *testing.
 	}
 	if len(eval.Evidence) != 1 || !eval.Evidence[0].ObservedAt.IsZero() {
 		t.Fatalf("Evidence = %+v, want exactly one entry with a zero ObservedAt (structural, not runtime-observed)", eval.Evidence)
+	}
+}
+
+func impactFor(impacts []VoterQuorumImpact, nodeID string) VoterQuorumImpact {
+	for _, i := range impacts {
+		if i.NodeID == nodeID {
+			return i
+		}
+	}
+	return VoterQuorumImpact{}
+}
+
+func TestClassifyVoterQuorumImpacts_SurvivesForEveryVoterWhenAllReachable(t *testing.T) {
+	voters := []VoterReachability{
+		{NodeID: "a", Reachability: ReachabilityReachable},
+		{NodeID: "b", Reachability: ReachabilityReachable},
+		{NodeID: "c", Reachability: ReachabilityReachable},
+	}
+	impacts := ClassifyVoterQuorumImpacts(voters, noLeader)
+	if len(impacts) != 3 {
+		t.Fatalf("len(impacts) = %d, want 3", len(impacts))
+	}
+	for _, impact := range impacts {
+		if !impact.Valid || impact.Verdict != recovery.QuorumSurvives {
+			t.Errorf("impact for %s = %+v, want Valid=true Verdict=Survives", impact.NodeID, impact)
+		}
+	}
+}
+
+func TestClassifyVoterQuorumImpacts_LostOnlyForTheVotersWhoseLossBreaksQuorum(t *testing.T) {
+	// 3 voters, "b" already confirmed unreachable: only {a, c} are
+	// actually reachable right now. Losing the ALREADY-unreachable "b"
+	// changes nothing (2 of the remaining 2 stay reachable -> Survives),
+	// but losing either "a" or "c" drops the reachable set to 1 of 2
+	// remaining voters, short of the quorum size of 2 -> Lost for both.
+	// This proves the verdict is computed per-voter from who ELSE
+	// remains reachable, not a single shared aggregate.
+	voters := []VoterReachability{
+		{NodeID: "a", Reachability: ReachabilityReachable},
+		{NodeID: "b", Reachability: ReachabilityUnreachable},
+		{NodeID: "c", Reachability: ReachabilityReachable},
+	}
+	impacts := ClassifyVoterQuorumImpacts(voters, noLeader)
+	if got := impactFor(impacts, "a"); !got.Valid || got.Verdict != recovery.QuorumLost {
+		t.Errorf("impact for a = %+v, want Valid=true Verdict=Lost", got)
+	}
+	if got := impactFor(impacts, "b"); !got.Valid || got.Verdict != recovery.QuorumSurvives {
+		t.Errorf("impact for b = %+v, want Valid=true Verdict=Survives (b was already unreachable, removing it changes nothing)", got)
+	}
+	if got := impactFor(impacts, "c"); !got.Valid || got.Verdict != recovery.QuorumLost {
+		t.Errorf("impact for c = %+v, want Valid=true Verdict=Lost", got)
+	}
+}
+
+func TestClassifyVoterQuorumImpacts_LeaderLossDowngradesOnlyTheLeadersOwnImpact(t *testing.T) {
+	voters := []VoterReachability{
+		{NodeID: "a", Reachability: ReachabilityReachable},
+		{NodeID: "b", Reachability: ReachabilityReachable},
+		{NodeID: "c", Reachability: ReachabilityReachable},
+	}
+	impacts := ClassifyVoterQuorumImpacts(voters, "a")
+	if got := impactFor(impacts, "a"); !got.Valid || got.Verdict != recovery.QuorumUnknown {
+		t.Errorf("impact for leader a = %+v, want Valid=true Verdict=Unknown (leader-loss downgrade)", got)
+	}
+	if got := impactFor(impacts, "b"); !got.Valid || got.Verdict != recovery.QuorumSurvives {
+		t.Errorf("impact for non-leader b = %+v, must not be downgraded, want Survives", got)
+	}
+	if got := impactFor(impacts, "c"); !got.Valid || got.Verdict != recovery.QuorumSurvives {
+		t.Errorf("impact for non-leader c = %+v, must not be downgraded, want Survives", got)
+	}
+}
+
+func TestClassifyVoterQuorumImpacts_EvaluateQuorumToleranceStaysConsistentWithPerVoterImpacts(t *testing.T) {
+	// Regression guard for the EvaluateQuorumTolerance refactor: the
+	// aggregated worst-of Result must always match what a caller would
+	// derive by scanning ClassifyVoterQuorumImpacts itself - these must
+	// never diverge, since EvaluateQuorumTolerance is now implemented
+	// on top of this function.
+	voters := []VoterReachability{
+		{NodeID: "a", Reachability: ReachabilityReachable},
+		{NodeID: "b", Reachability: ReachabilityUnreachable},
+		{NodeID: "c", Reachability: ReachabilityReachable},
+	}
+	eval := EvaluateQuorumTolerance(voters, noLeader)
+	impacts := ClassifyVoterQuorumImpacts(voters, noLeader)
+	anyLost := false
+	for _, impact := range impacts {
+		if impact.Valid && impact.Verdict == recovery.QuorumLost {
+			anyLost = true
+		}
+	}
+	if anyLost && eval.Result != ResultFalse {
+		t.Fatalf("ClassifyVoterQuorumImpacts found a Lost voter but EvaluateQuorumTolerance.Result = %v, want False", eval.Result)
 	}
 }
