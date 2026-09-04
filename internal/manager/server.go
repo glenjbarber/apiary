@@ -103,6 +103,7 @@ type PeerForwarder interface {
 	// one failed sub-call) is forwarded on a leader-hint rejection.
 	SimulateNodeFailure(ctx context.Context, addr string, req *rpcpb.SimulateNodeFailureRequest) (*rpcpb.SimulateNodeFailureResponse, error)
 	SimulateNetworkFailure(ctx context.Context, addr string, req *rpcpb.SimulateNetworkFailureRequest) (*rpcpb.SimulateNetworkFailureResponse, error)
+	TraceCellPath(ctx context.Context, addr string, req *rpcpb.TraceCellPathRequest) (*rpcpb.TraceCellPathResponse, error)
 
 	// HostStats forwards to addr's own HostStats RPC - already used by
 	// internal/frontend's own separate peer-client interface for the
@@ -111,6 +112,8 @@ type PeerForwarder interface {
 	// (a successful call means the peer is up) rather than inventing a
 	// new ping.
 	HostStats(ctx context.Context, addr string) (*rpcpb.HostStatsResponse, error)
+	GetLocalNetworkBridgeStatus(ctx context.Context, addr, networkID string) (*rpcpb.GetLocalNetworkBridgeStatusResponse, error)
+	ListAssumptionResults(ctx context.Context, addr string, req *rpcpb.ListAssumptionResultsRequest) (*rpcpb.ListAssumptionResultsResponse, error)
 }
 
 // reconcilerStats is the subset of *cluster.Reconciler the server needs

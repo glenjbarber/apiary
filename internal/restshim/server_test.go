@@ -321,6 +321,10 @@ func (f *fakeClient) RevokeAPIKey(context.Context, *rpcpb.RevokeAPIKeyRequest, .
 	return &rpcpb.RevokeAPIKeyResponse{}, nil
 }
 
+func (f *fakeClient) TraceCellPath(context.Context, *rpcpb.TraceCellPathRequest, ...grpc.CallOption) (*rpcpb.TraceCellPathResponse, error) {
+	return &rpcpb.TraceCellPathResponse{}, nil
+}
+
 var _ rpcpb.ManagerServiceClient = (*fakeClient)(nil)
 
 func doRequest(t *testing.T, s *Server, method, path string, body interface{}) *httptest.ResponseRecorder {

@@ -250,6 +250,18 @@ type pageData struct {
 	RecoveryOwnedResources    []resourceImpactView
 	RecoveryReplicaBacked     []replicaBackedImpactView
 	RecoveryImageAvailability []imageAvailabilityImpactView
+
+	// Trace* backs Cell Path Trace ("/trace", ADR-0058). The form is a
+	// bookmarkable read-only GET, and TraceResult is populated only after
+	// a complete RPC response.
+	TraceCells       []vmView
+	TraceRequested   bool
+	TraceCellID      string
+	TraceDestination string
+	TraceProtocol    string
+	TracePort        string
+	TraceError       string
+	TraceResult      pathTraceView
 }
 
 // userView is one row of the Users page's table.
@@ -509,6 +521,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /simulate", s.handleSimulatePage)
 	s.mux.HandleFunc("GET /assumptions", s.handleAssumptionsPage)
 	s.mux.HandleFunc("GET /recovery-handbook", s.handleRecoveryHandbookPage)
+	s.mux.HandleFunc("GET /trace", s.handleTracePage)
 
 	// Operator: VM/jail/network/ISO lifecycle - including the create-VM
 	// form's own GET, since a Viewer has nothing useful to do with a

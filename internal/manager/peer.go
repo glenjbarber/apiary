@@ -251,6 +251,18 @@ func (p *PeerReporter) SimulateNetworkFailure(ctx context.Context, addr string, 
 	return client.SimulateNetworkFailure(ctx, req)
 }
 
+// TraceCellPath forwards the complete trace request to the current
+// leader. The leader must gather all intent and owner-Hive evidence so
+// the caller never assembles one result from different FSM views.
+func (p *PeerReporter) TraceCellPath(ctx context.Context, addr string, req *rpcpb.TraceCellPathRequest) (*rpcpb.TraceCellPathResponse, error) {
+	conn, client, err := p.dial(addr)
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close()
+	return client.TraceCellPath(ctx, req)
+}
+
 // ListISOs forwards to a specific peer's own ListISOs RPC - like
 // HostStats, not leader-only-read forwarding (ISOs always answer
 // locally for whichever managerd receives the call); this is how

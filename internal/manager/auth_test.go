@@ -185,6 +185,13 @@ func TestRequiredRoleFor_SimulateNetworkFailureIsViewer(t *testing.T) {
 	}
 }
 
+func TestRequiredRoleFor_TraceCellPathIsViewer(t *testing.T) {
+	const method = "/apiary.rpc.v1.ManagerService/TraceCellPath"
+	if got := requiredRoleFor(method); got != RoleViewer {
+		t.Errorf("requiredRoleFor(%q) = %q, want %q", method, got, RoleViewer)
+	}
+}
+
 // TestRequiredRoleFor_GetLocalNetworkBridgeStatusIsViewer and
 // TestRequiredRoleFor_ListAssumptionResultsIsViewer guard against the
 // same easy-to-miss failure mode as SimulateNodeFailure's own test above

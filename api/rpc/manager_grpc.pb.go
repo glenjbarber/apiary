@@ -51,6 +51,7 @@ const (
 	ManagerService_ForcePurgeJail_FullMethodName              = "/apiary.rpc.v1.ManagerService/ForcePurgeJail"
 	ManagerService_SimulateNodeFailure_FullMethodName         = "/apiary.rpc.v1.ManagerService/SimulateNodeFailure"
 	ManagerService_SimulateNetworkFailure_FullMethodName      = "/apiary.rpc.v1.ManagerService/SimulateNetworkFailure"
+	ManagerService_TraceCellPath_FullMethodName               = "/apiary.rpc.v1.ManagerService/TraceCellPath"
 	ManagerService_MigrateJail_FullMethodName                 = "/apiary.rpc.v1.ManagerService/MigrateJail"
 	ManagerService_ReportVMPhase_FullMethodName               = "/apiary.rpc.v1.ManagerService/ReportVMPhase"
 	ManagerService_ReportVMTeardownComplete_FullMethodName    = "/apiary.rpc.v1.ManagerService/ReportVMTeardownComplete"
@@ -219,6 +220,13 @@ type ManagerServiceClient interface {
 	// ListVMs reads, so it is not an atomic snapshot. The entire request is
 	// forwarded on a leader-hint rejection to avoid mixing nodes' FSM views.
 	SimulateNetworkFailure(ctx context.Context, in *SimulateNetworkFailureRequest, opts ...grpc.CallOption) (*SimulateNetworkFailureResponse, error)
+	// TraceCellPath explains a VM Cell's intended outbound path to one
+	// destination (ADR-0058). It is read-only and sends no probe. The
+	// trace combines leader-authoritative VM/network intent with bounded
+	// observations from the Cell's owner Hive, so results are sequential
+	// and non-atomic. The entire request is leader-forwarded if the first
+	// authoritative read rejects this node as a follower.
+	TraceCellPath(ctx context.Context, in *TraceCellPathRequest, opts ...grpc.CallOption) (*TraceCellPathResponse, error)
 	// MigrateJail mirrors MigrateVM exactly, for jails instead of VMs -
 	// see MigrateVM's own doc comment above for the full reasoning
 	// (including the "target must already be a synced HAST replica"
@@ -597,6 +605,16 @@ func (c *managerServiceClient) SimulateNetworkFailure(ctx context.Context, in *S
 	return out, nil
 }
 
+func (c *managerServiceClient) TraceCellPath(ctx context.Context, in *TraceCellPathRequest, opts ...grpc.CallOption) (*TraceCellPathResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(TraceCellPathResponse)
+	err := c.cc.Invoke(ctx, ManagerService_TraceCellPath_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *managerServiceClient) MigrateJail(ctx context.Context, in *MigrateJailRequest, opts ...grpc.CallOption) (*MigrateJailResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(MigrateJailResponse)
@@ -835,6 +853,13 @@ type ManagerServiceServer interface {
 	// ListVMs reads, so it is not an atomic snapshot. The entire request is
 	// forwarded on a leader-hint rejection to avoid mixing nodes' FSM views.
 	SimulateNetworkFailure(context.Context, *SimulateNetworkFailureRequest) (*SimulateNetworkFailureResponse, error)
+	// TraceCellPath explains a VM Cell's intended outbound path to one
+	// destination (ADR-0058). It is read-only and sends no probe. The
+	// trace combines leader-authoritative VM/network intent with bounded
+	// observations from the Cell's owner Hive, so results are sequential
+	// and non-atomic. The entire request is leader-forwarded if the first
+	// authoritative read rejects this node as a follower.
+	TraceCellPath(context.Context, *TraceCellPathRequest) (*TraceCellPathResponse, error)
 	// MigrateJail mirrors MigrateVM exactly, for jails instead of VMs -
 	// see MigrateVM's own doc comment above for the full reasoning
 	// (including the "target must already be a synced HAST replica"
@@ -985,6 +1010,9 @@ func (UnimplementedManagerServiceServer) SimulateNodeFailure(context.Context, *S
 }
 func (UnimplementedManagerServiceServer) SimulateNetworkFailure(context.Context, *SimulateNetworkFailureRequest) (*SimulateNetworkFailureResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method SimulateNetworkFailure not implemented")
+}
+func (UnimplementedManagerServiceServer) TraceCellPath(context.Context, *TraceCellPathRequest) (*TraceCellPathResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method TraceCellPath not implemented")
 }
 func (UnimplementedManagerServiceServer) MigrateJail(context.Context, *MigrateJailRequest) (*MigrateJailResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method MigrateJail not implemented")
@@ -1596,6 +1624,24 @@ func _ManagerService_SimulateNetworkFailure_Handler(srv interface{}, ctx context
 	return interceptor(ctx, in, info, handler)
 }
 
+func _ManagerService_TraceCellPath_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(TraceCellPathRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ManagerServiceServer).TraceCellPath(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ManagerService_TraceCellPath_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ManagerServiceServer).TraceCellPath(ctx, req.(*TraceCellPathRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _ManagerService_MigrateJail_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(MigrateJailRequest)
 	if err := dec(in); err != nil {
@@ -1870,6 +1916,10 @@ var ManagerService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "SimulateNetworkFailure",
 			Handler:    _ManagerService_SimulateNetworkFailure_Handler,
+		},
+		{
+			MethodName: "TraceCellPath",
+			Handler:    _ManagerService_TraceCellPath_Handler,
 		},
 		{
 			MethodName: "MigrateJail",
