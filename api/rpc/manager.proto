@@ -152,6 +152,23 @@ service ManagerService {
   // reasoning - it applies identically here.
   rpc ForcePurgeJail(ForcePurgeJailRequest) returns (ForcePurgeJailResponse);
 
+  // SimulateNodeFailure is a read-only "what happens if this node
+  // disappears right now" report (ADR-0052, the Dependency Graph
+  // Simulator's v1 slice) - not fault injection, nothing is changed.
+  // It combines three separate sequential reads (VM list, jail list,
+  // raft status) plus live per-remaining-voter reachability checks -
+  // not an atomic snapshot; a concurrent cluster change, or a peer
+  // becoming reachable/unreachable between checks, could be reflected
+  // in one part of the response and not another. Like GetVM/ListVMs,
+  // this needs the current leader's own FSM view of VM/jail ownership,
+  // so it only succeeds against the current leader; the entire request
+  // (not just the failed sub-call) is forwarded on a leader-hint
+  // rejection so the report never mixes two different nodes' views.
+  // node_id not recognized by raft membership or by any VM/jail's
+  // node_id/replica_node_id returns error set, never a misleadingly
+  // empty-looking "safe" report.
+  rpc SimulateNodeFailure(SimulateNodeFailureRequest) returns (SimulateNodeFailureResponse);
+
   // MigrateJail mirrors MigrateVM exactly, for jails instead of VMs -
   // see MigrateVM's own doc comment above for the full reasoning
   // (including the "target must already be a synced HAST replica"
@@ -902,4 +919,98 @@ message RevokeAPIKeyRequest {
 message RevokeAPIKeyResponse {
   string error = 1;
   string leader_hint = 2;
+}
+
+// SimulateNodeFailureRequest/Response and the messages/enums below back
+// SimulateNodeFailure (ADR-0052). See that RPC's own doc comment for
+// the non-atomicity/leader-forwarding caveats.
+message SimulateNodeFailureRequest {
+  string node_id = 1;
+}
+
+message SimulateNodeFailureResponse {
+  // error is set both for a real RPC failure and for a node_id
+  // unrecognized by raft membership or any VM/jail placement - a
+  // populated quorum/owned_resources/replica_backed_resources payload
+  // only ever accompanies an empty error.
+  string error = 1;
+  string leader_hint = 2;
+  QuorumImpact quorum = 3;
+  repeated OwnedResourceImpact owned_resources = 4;
+  repeated ReplicaBackedImpact replica_backed_resources = 5;
+}
+
+message QuorumImpact {
+  bool target_is_voter = 1;
+  uint32 total_voters = 2;
+
+  // remaining_voters is the configured voter count after removing the
+  // target, ignoring live reachability entirely.
+  uint32 remaining_voters = 3;
+
+  // remaining_reachable_voters is, of those, how many responded to a
+  // live reachability check just now. survives is computed from this
+  // count, not remaining_voters - a raft configuration can look
+  // survivable by pure arithmetic while actually failing right now if
+  // one of the "remaining" voters is already unreachable.
+  uint32 remaining_reachable_voters = 4;
+
+  // remaining_unknown_voters counts remaining voters whose reachability
+  // could not be verified at all (e.g. no peer forwarding configured on
+  // the answering node) - never silently folded into either
+  // remaining_reachable_voters or a lost verdict.
+  uint32 remaining_unknown_voters = 5;
+
+  uint32 quorum_size = 6;
+  bool survives = 7;
+  string note = 8;
+}
+
+enum ResourceKind {
+  RESOURCE_KIND_UNSPECIFIED = 0;
+  RESOURCE_KIND_VM = 1;
+  RESOURCE_KIND_JAIL = 2;
+}
+
+// RecoveryVerdict is deliberately limited to what raft configuration
+// data and node_id/replica_node_id placement alone can prove - see
+// ADR-0052 for why there is no "will recover cleanly" verdict in v1
+// (live HAST sync status has no RPC exposure anywhere in this
+// codebase).
+enum RecoveryVerdict {
+  RECOVERY_VERDICT_UNSPECIFIED = 0;
+
+  // RECOVERY_VERDICT_UNPROTECTED: no replica_node_id configured - this
+  // proves only the absence of HAST-based redundancy Apiary knows
+  // about, not that the resource's data is permanently unrecoverable
+  // by any means.
+  RECOVERY_VERDICT_UNPROTECTED = 1;
+
+  // RECOVERY_VERDICT_UNVERIFIED_REPLICA: replica_node_id is set, but
+  // this RPC does not query live HAST sync status - the replica may or
+  // may not actually be caught up.
+  RECOVERY_VERDICT_UNVERIFIED_REPLICA = 2;
+}
+
+message OwnedResourceImpact {
+  string id = 1;
+  string name = 2;
+  ResourceKind kind = 3;
+  string replica_node_id = 4;
+  RecoveryVerdict verdict = 5;
+  string explanation = 6;
+}
+
+// ReplicaBackedImpact is a resource actually owned by a DIFFERENT node,
+// for which the simulated node is the configured HAST replica target.
+// It keeps running unaffected on its real owner if the simulated node
+// disappears, but loses its redundancy until a new replica is
+// configured elsewhere - a real, distinct consequence from anything in
+// owned_resources above.
+message ReplicaBackedImpact {
+  string id = 1;
+  string name = 2;
+  ResourceKind kind = 3;
+  string owner_node_id = 4;
+  string explanation = 5;
 }

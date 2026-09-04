@@ -438,6 +438,81 @@ func TestIntegration_GetVMAndListVMs(t *testing.T) {
 	}
 }
 
+// TestIntegration_SimulateNodeFailure_ReportsOwnedAndReplicaBackedResources
+// is the real end-to-end proof for ADR-0052 (the Dependency Graph
+// Simulator's v1 slice): against a genuine single-node raft cluster
+// (raft node ID "raftd-1", the only voter), a VM owned by that node
+// with no replica shows up as an unprotected owned resource, and a
+// SEPARATE VM owned by a different node but replica-backed by "raftd-1"
+// shows up under replica_backed_resources instead - confirming
+// ownership and replica-backing are genuinely reported as distinct
+// consequences, not conflated.
+func TestIntegration_SimulateNodeFailure_ReportsOwnedAndReplicaBackedResources(t *testing.T) {
+	raftdSocket := newRaftdUDSSocket(t)
+	client := newManagerdRPCClient(t, raftdSocket)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if _, err := client.CreateVM(ctx, &rpcpb.CreateVMRequest{
+		Vm: &rpcpb.VMDefinition{Id: "vm-owned", Name: "web-1", NodeId: "raftd-1"},
+	}); err != nil {
+		t.Fatalf("CreateVM(vm-owned) error: %v", err)
+	}
+	if _, err := client.CreateVM(ctx, &rpcpb.CreateVMRequest{
+		Vm: &rpcpb.VMDefinition{Id: "vm-replicated", Name: "web-2", NodeId: "other-node", ReplicaNodeId: "raftd-1"},
+	}); err != nil {
+		t.Fatalf("CreateVM(vm-replicated) error: %v", err)
+	}
+
+	resp, err := client.SimulateNodeFailure(ctx, &rpcpb.SimulateNodeFailureRequest{NodeId: "raftd-1"})
+	if err != nil {
+		t.Fatalf("SimulateNodeFailure() error: %v", err)
+	}
+	if resp.GetError() != "" {
+		t.Fatalf("SimulateNodeFailure() returned error: %s", resp.GetError())
+	}
+
+	if resp.GetQuorum().GetTotalVoters() != 1 || resp.GetQuorum().GetSurvives() {
+		t.Errorf("Quorum = %+v, want a single-voter cluster where quorum does NOT survive losing its only voter", resp.GetQuorum())
+	}
+
+	owned := resp.GetOwnedResources()
+	if len(owned) != 1 || owned[0].GetId() != "vm-owned" {
+		t.Fatalf("OwnedResources = %+v, want exactly vm-owned", owned)
+	}
+	if owned[0].GetVerdict() != rpcpb.RecoveryVerdict_RECOVERY_VERDICT_UNPROTECTED {
+		t.Errorf("vm-owned verdict = %v, want RECOVERY_VERDICT_UNPROTECTED", owned[0].GetVerdict())
+	}
+
+	replicaBacked := resp.GetReplicaBackedResources()
+	if len(replicaBacked) != 1 || replicaBacked[0].GetId() != "vm-replicated" {
+		t.Fatalf("ReplicaBackedResources = %+v, want exactly vm-replicated", replicaBacked)
+	}
+	if replicaBacked[0].GetOwnerNodeId() != "other-node" {
+		t.Errorf("vm-replicated OwnerNodeId = %q, want other-node", replicaBacked[0].GetOwnerNodeId())
+	}
+}
+
+// TestIntegration_SimulateNodeFailure_UnknownNodeIDReturnsError guards
+// against the exact failure mode ADR-0052 is built around: a mistyped
+// or unknown target must never look like a safe, empty report.
+func TestIntegration_SimulateNodeFailure_UnknownNodeIDReturnsError(t *testing.T) {
+	raftdSocket := newRaftdUDSSocket(t)
+	client := newManagerdRPCClient(t, raftdSocket)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	resp, err := client.SimulateNodeFailure(ctx, &rpcpb.SimulateNodeFailureRequest{NodeId: "totally-unknown-node"})
+	if err != nil {
+		t.Fatalf("SimulateNodeFailure() error: %v", err)
+	}
+	if resp.GetError() == "" {
+		t.Fatalf("SimulateNodeFailure(unknown node) error = empty, want an explicit rejection, not a silent empty report")
+	}
+}
+
 func TestIntegration_GetVMConsole_RunningLocallyWithVNC(t *testing.T) {
 	raftdSocket := newRaftdUDSSocket(t)
 	vnc := &fakeVNCLookup{ports: map[string]int{"vm-1": 5901}}

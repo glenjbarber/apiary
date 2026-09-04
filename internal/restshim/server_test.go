@@ -191,6 +191,12 @@ func (f *fakeClient) ListVMs(context.Context, *rpcpb.ListVMsRequest, ...grpc.Cal
 	return f.listResp, nil
 }
 
+// SimulateNodeFailure is not exposed over REST (restshim has no route
+// for it) - this stub exists only to satisfy rpcpb.ManagerServiceClient.
+func (f *fakeClient) SimulateNodeFailure(context.Context, *rpcpb.SimulateNodeFailureRequest, ...grpc.CallOption) (*rpcpb.SimulateNodeFailureResponse, error) {
+	return &rpcpb.SimulateNodeFailureResponse{}, nil
+}
+
 func (f *fakeClient) UploadISO(context.Context, ...grpc.CallOption) (grpc.ClientStreamingClient[rpcpb.UploadISORequest, rpcpb.UploadISOResponse], error) {
 	if f.uploadErr != nil {
 		return nil, f.uploadErr

@@ -109,6 +109,7 @@
   <a href="/vms"{{if eq .ActivePage "vms"}} class="active"{{end}}>VMs</a>
   <a href="/jails"{{if eq .ActivePage "jails"}} class="active"{{end}}>Jails</a>
   <a href="/networks"{{if eq .ActivePage "networks"}} class="active"{{end}}>Networks</a>
+  <a href="/simulate"{{if eq .ActivePage "simulate"}} class="active"{{end}}>Simulate</a>
   <a href="/images"{{if eq .ActivePage "images"}} class="active"{{end}}>Images</a>
   {{if .CanOperate}}<a href="/machine"{{if eq .ActivePage "machine"}} class="active"{{end}}>Machine</a>{{end}}
   {{if .CanAdmin}}<a href="/apikeys"{{if eq .ActivePage "apikeys"}} class="active"{{end}}>API Keys</a>{{end}}

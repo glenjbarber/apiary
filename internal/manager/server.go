@@ -13,6 +13,7 @@ import (
 
 	internalpb "github.com/glenjbarber/apiary/api/internalpb"
 	rpcpb "github.com/glenjbarber/apiary/api/rpc"
+	"github.com/glenjbarber/apiary/internal/cluster"
 	"github.com/glenjbarber/apiary/internal/hoststats"
 	"github.com/glenjbarber/apiary/internal/isostore"
 	"github.com/glenjbarber/apiary/internal/nodeconfig"
@@ -93,6 +94,20 @@ type PeerForwarder interface {
 	// ADR-0041) to push a file this node already has to whichever peer
 	// asked for it.
 	UploadISO(ctx context.Context, addr, name, expectedSHA256 string, r io.Reader) error
+
+	// SimulateNodeFailure forwards the entire original request to addr's
+	// own SimulateNodeFailure RPC - see ADR-0052, and this file's own
+	// SimulateNodeFailure handler for why the whole request (not just
+	// one failed sub-call) is forwarded on a leader-hint rejection.
+	SimulateNodeFailure(ctx context.Context, addr string, req *rpcpb.SimulateNodeFailureRequest) (*rpcpb.SimulateNodeFailureResponse, error)
+
+	// HostStats forwards to addr's own HostStats RPC - already used by
+	// internal/frontend's own separate peer-client interface for the
+	// cluster overview page (ADR-0036); exposed here too so
+	// SimulateNodeFailure can reuse the exact same reachability signal
+	// (a successful call means the peer is up) rather than inventing a
+	// new ping.
+	HostStats(ctx context.Context, addr string) (*rpcpb.HostStatsResponse, error)
 }
 
 // defaultPeerManagerdPort mirrors internal/cluster's own constant of
@@ -1336,4 +1351,161 @@ func (s *Server) ListVMs(ctx context.Context, _ *rpcpb.ListVMsRequest) (*rpcpb.L
 		vms = append(vms, fromInternalVM(vm))
 	}
 	return &rpcpb.ListVMsResponse{Vms: vms}, nil
+}
+
+// reachabilityCheckTimeout bounds each individual peer reachability
+// check SimulateNodeFailure performs - short enough that one
+// unreachable peer doesn't make the whole simulation feel hung, long
+// enough not to false-negative a merely slow-but-alive peer.
+const reachabilityCheckTimeout = 3 * time.Second
+
+// SimulateNodeFailure implements rpcpb.ManagerServiceServer - see
+// ADR-0052 (the Dependency Graph Simulator's v1 slice). It combines
+// three separate sequential reads (VM list, jail list, raft status)
+// plus live per-remaining-voter reachability checks - this is NOT an
+// atomic snapshot; a concurrent cluster change, or a peer becoming
+// reachable/unreachable between checks, could be reflected in one part
+// of the response and not another. Like ListVMs/ListJails, this only
+// succeeds against the current leader; the ENTIRE original request
+// (not just the failed sub-call) is forwarded on a leader-hint
+// rejection so the report never mixes this node's own raft view with a
+// different node's VM/jail list.
+func (s *Server) SimulateNodeFailure(ctx context.Context, req *rpcpb.SimulateNodeFailureRequest) (*rpcpb.SimulateNodeFailureResponse, error) {
+	targetID := req.GetNodeId()
+
+	vmsResp, err := s.raft.ListVMs(ctx)
+	if err != nil {
+		return &rpcpb.SimulateNodeFailureResponse{Error: err.Error()}, nil
+	}
+	if vmsResp.GetError() != "" {
+		if s.peers != nil && vmsResp.GetLeaderHint() != "" {
+			if fwd, ferr := s.peers.SimulateNodeFailure(ctx, s.peerManagerdAddr(vmsResp.GetLeaderHint()), req); ferr == nil {
+				return fwd, nil
+			}
+		}
+		return &rpcpb.SimulateNodeFailureResponse{Error: vmsResp.GetError(), LeaderHint: vmsResp.GetLeaderHint()}, nil
+	}
+
+	jailsResp, err := s.raft.ListJails(ctx)
+	if err != nil {
+		return &rpcpb.SimulateNodeFailureResponse{Error: err.Error()}, nil
+	}
+	if jailsResp.GetError() != "" {
+		if s.peers != nil && jailsResp.GetLeaderHint() != "" {
+			if fwd, ferr := s.peers.SimulateNodeFailure(ctx, s.peerManagerdAddr(jailsResp.GetLeaderHint()), req); ferr == nil {
+				return fwd, nil
+			}
+		}
+		return &rpcpb.SimulateNodeFailureResponse{Error: jailsResp.GetError(), LeaderHint: jailsResp.GetLeaderHint()}, nil
+	}
+
+	raftStatus, err := s.raft.Status(ctx)
+	if err != nil {
+		return &rpcpb.SimulateNodeFailureResponse{Error: err.Error()}, nil
+	}
+
+	resources := make([]cluster.OwnedResourcePlacement, 0, len(vmsResp.GetVms())+len(jailsResp.GetJails()))
+	for _, vm := range vmsResp.GetVms() {
+		resources = append(resources, cluster.OwnedResourcePlacement{
+			ID: vm.GetId(), Name: vm.GetName(), Kind: cluster.ResourceKindVM,
+			NodeID: vm.GetNodeId(), ReplicaNodeID: vm.GetReplicaNodeId(),
+		})
+	}
+	for _, jail := range jailsResp.GetJails() {
+		resources = append(resources, cluster.OwnedResourcePlacement{
+			ID: jail.GetId(), Name: jail.GetName(), Kind: cluster.ResourceKindJail,
+			NodeID: jail.GetNodeId(), ReplicaNodeID: jail.GetReplicaNodeId(),
+		})
+	}
+
+	// localNodeID is trivially reachable - this call is answering right
+	// now. Every OTHER voter gets a real reachability check via the
+	// same HostStats mechanism ADR-0036's cluster overview already
+	// uses; if this node has no peer forwarding configured at all
+	// (s.peers == nil), the whole picture is unverifiable, not
+	// "assumed fine" - every other voter's reachability is Unknown.
+	localNodeID := raftStatus.GetNodeId()
+	servers := make([]cluster.ServerSuffrage, 0, len(raftStatus.GetServers()))
+	for _, srv := range raftStatus.GetServers() {
+		reachability := cluster.ReachabilityUnknown
+		switch {
+		case srv.GetId() == localNodeID:
+			reachability = cluster.ReachabilityReachable
+		case srv.GetId() == targetID:
+			// The simulated target's own reachability is meaningless -
+			// ComputeQuorumImpact never reads it.
+		case s.peers != nil:
+			checkCtx, cancel := context.WithTimeout(ctx, reachabilityCheckTimeout)
+			_, herr := s.peers.HostStats(checkCtx, s.peerManagerdAddr(srv.GetAddress()))
+			cancel()
+			if herr == nil {
+				reachability = cluster.ReachabilityReachable
+			} else {
+				reachability = cluster.ReachabilityUnreachable
+			}
+		}
+		servers = append(servers, cluster.ServerSuffrage{ID: srv.GetId(), Suffrage: srv.GetSuffrage(), Reachability: reachability})
+	}
+
+	if !cluster.IsKnownTarget(servers, resources, targetID) {
+		return &rpcpb.SimulateNodeFailureResponse{
+			Error: fmt.Sprintf("node_id %q is not recognized: it does not appear in the raft configuration or as an owner/replica placement for any VM or jail", targetID),
+		}, nil
+	}
+
+	report := cluster.SimulateNodeFailure(servers, resources, targetID)
+	return &rpcpb.SimulateNodeFailureResponse{
+		Quorum:                 toRPCQuorumImpact(report.Quorum),
+		OwnedResources:         toRPCOwnedResourceImpacts(report.OwnedResources),
+		ReplicaBackedResources: toRPCReplicaBackedImpacts(report.ReplicaBackedResources),
+	}, nil
+}
+
+func toRPCQuorumImpact(q cluster.QuorumImpact) *rpcpb.QuorumImpact {
+	return &rpcpb.QuorumImpact{
+		TargetIsVoter:            q.TargetIsVoter,
+		TotalVoters:              q.TotalVoters,
+		RemainingVoters:          q.RemainingVoters,
+		RemainingReachableVoters: q.RemainingReachable,
+		RemainingUnknownVoters:   q.RemainingUnknown,
+		QuorumSize:               q.QuorumSize,
+		Survives:                 q.Survives,
+		Note:                     q.Note,
+	}
+}
+
+func toRPCResourceKind(k cluster.ResourceKind) rpcpb.ResourceKind {
+	if k == cluster.ResourceKindJail {
+		return rpcpb.ResourceKind_RESOURCE_KIND_JAIL
+	}
+	return rpcpb.ResourceKind_RESOURCE_KIND_VM
+}
+
+func toRPCVerdict(v cluster.RecoveryVerdict) rpcpb.RecoveryVerdict {
+	if v == cluster.RecoveryVerdictUnverifiedReplica {
+		return rpcpb.RecoveryVerdict_RECOVERY_VERDICT_UNVERIFIED_REPLICA
+	}
+	return rpcpb.RecoveryVerdict_RECOVERY_VERDICT_UNPROTECTED
+}
+
+func toRPCOwnedResourceImpacts(impacts []cluster.OwnedResourceImpact) []*rpcpb.OwnedResourceImpact {
+	out := make([]*rpcpb.OwnedResourceImpact, 0, len(impacts))
+	for _, i := range impacts {
+		out = append(out, &rpcpb.OwnedResourceImpact{
+			Id: i.ID, Name: i.Name, Kind: toRPCResourceKind(i.Kind),
+			ReplicaNodeId: i.ReplicaNodeID, Verdict: toRPCVerdict(i.Verdict), Explanation: i.Explanation,
+		})
+	}
+	return out
+}
+
+func toRPCReplicaBackedImpacts(impacts []cluster.ReplicaBackedImpact) []*rpcpb.ReplicaBackedImpact {
+	out := make([]*rpcpb.ReplicaBackedImpact, 0, len(impacts))
+	for _, i := range impacts {
+		out = append(out, &rpcpb.ReplicaBackedImpact{
+			Id: i.ID, Name: i.Name, Kind: toRPCResourceKind(i.Kind),
+			OwnerNodeId: i.OwnerNodeID, Explanation: i.Explanation,
+		})
+	}
+	return out
 }

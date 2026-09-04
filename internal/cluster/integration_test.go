@@ -1,4 +1,11 @@
-package cluster
+// Package cluster_test (external test package, not cluster's own
+// internal package) - required so this file's internal/manager import
+// doesn't create a cycle now that internal/manager's regular code
+// imports internal/cluster (see ADR-0052's SimulateNodeFailure
+// handler). An external test package is a separate compiled unit from
+// cluster itself, so cluster_test -> manager -> cluster creates no
+// cycle even though cluster's own package can never import manager.
+package cluster_test
 
 import (
 	"context"
@@ -16,6 +23,7 @@ import (
 
 	internalpb "github.com/glenjbarber/apiary/api/internalpb"
 	"github.com/glenjbarber/apiary/internal/bhyve"
+	"github.com/glenjbarber/apiary/internal/cluster"
 	"github.com/glenjbarber/apiary/internal/manager"
 	raftnode "github.com/glenjbarber/apiary/internal/raft"
 	"github.com/glenjbarber/apiary/internal/zfs"
@@ -89,7 +97,7 @@ func TestIntegration_ReconcilerProvisionsRealDataset(t *testing.T) {
 	mustApplyCreateVM(t, node, "vm-other", "node-b")
 
 	zfsManager := zfs.New(base)
-	r := &Reconciler{Raft: raftClient, ZFS: zfsManager, LocalNodeID: "node-a"}
+	r := &cluster.Reconciler{Raft: raftClient, ZFS: zfsManager, LocalNodeID: "node-a"}
 	if err := r.RunOnce(ctx); err != nil {
 		t.Fatalf("RunOnce() error: %v", err)
 	}
@@ -192,7 +200,7 @@ func TestIntegration_ReconcilerProvisionsRealBhyveVM(t *testing.T) {
 	bhyveManager.RunDir = t.TempDir()
 	t.Cleanup(func() { bhyveManager.DestroyVM(context.Background(), "vm-real") })
 
-	r := &Reconciler{
+	r := &cluster.Reconciler{
 		Raft:        raftClient,
 		ZFS:         zfsManager,
 		Bhyve:       bhyveManager,
@@ -216,8 +224,8 @@ func TestIntegration_ReconcilerProvisionsRealBhyveVM(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetProperty(mountpoint) error: %v", err)
 	}
-	if _, err := os.Stat(filepath.Join(mountpoint, diskImageName)); err != nil {
-		t.Errorf("disk image not created at %s: %v", filepath.Join(mountpoint, diskImageName), err)
+	if _, err := os.Stat(filepath.Join(mountpoint, "disk.img")); err != nil {
+		t.Errorf("disk image not created at %s: %v", filepath.Join(mountpoint, "disk.img"), err)
 	}
 
 	var running bool

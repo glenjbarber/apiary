@@ -1,0 +1,90 @@
+{{define "simulate_page"}}
+<!DOCTYPE html>
+<html lang="en">
+{{template "head" .}}
+<body>
+  {{template "nav" .}}
+  {{template "page_header" (pageHeader "Dependency Graph Simulator" "What happens if this Hive disappears right now? Read-only - nothing here is ever changed.")}}
+
+  <div class="panel">
+    <form method="get" action="/simulate" class="inline-form">
+      <label>Hive
+        {{if .SimulateNodes}}
+        <select name="node_id" required>
+          <option value="">Choose a node</option>
+          {{range .SimulateNodes}}<option value="{{.}}"{{if eq . $.SimulateTargetNodeID}} selected{{end}}>{{.}}</option>{{end}}
+        </select>
+        {{else}}
+        <input type="text" name="node_id" placeholder="node id" value="{{.SimulateTargetNodeID}}" required>
+        {{end}}
+      </label>
+      <button type="submit">Simulate failure</button>
+    </form>
+  </div>
+
+  {{if .SimulateTargetNodeID}}
+  {{if .SimulateError}}
+  <div class="banner-error">{{.SimulateError}}</div>
+  {{else}}
+  <p class="muted">
+    Built from separate reads and live reachability checks taken in
+    sequence, not one atomic snapshot - a concurrent cluster change
+    could be reflected in one part of this report and not another.
+  </p>
+
+  <div class="panel">
+    <h3>Raft quorum impact</h3>
+    <table>
+      <tbody>
+        <tr><th>Voting member</th><td>{{if .SimulateQuorum.TargetIsVoter}}yes{{else}}no{{end}}</td></tr>
+        <tr><th>Remaining voters (configured)</th><td>{{.SimulateQuorum.RemainingVoters}} of {{.SimulateQuorum.TotalVoters}} total (quorum needs {{.SimulateQuorum.QuorumSize}})</td></tr>
+        <tr><th>Remaining voters (confirmed reachable)</th><td>{{.SimulateQuorum.Reachable}}</td></tr>
+        <tr><th>Remaining voters (reachability unverified)</th><td>{{.SimulateQuorum.Unknown}}</td></tr>
+        <tr><th>Verdict</th><td>{{if .SimulateQuorum.Survives}}<span class="success">quorum survives</span>{{else}}<span class="error">quorum LOST</span>{{end}}</td></tr>
+        <tr><th>Note</th><td>{{.SimulateQuorum.Note}}</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="panel">
+    <h3>Cells owned by {{.SimulateTargetNodeID}}</h3>
+    <p class="muted">These Cells run on this Hive - they stop if it disappears.</p>
+    <table>
+      <thead><tr><th>ID</th><th>Name</th><th>Kind</th><th>Replica node</th><th>Verdict</th><th>Explanation</th></tr></thead>
+      <tbody>
+        {{range .SimulateOwnedResources}}
+        <tr>
+          <td>{{.ID}}</td><td>{{.Name}}</td><td>{{.Kind}}</td>
+          <td>{{if .ReplicaNodeID}}{{.ReplicaNodeID}}{{else}}<em>none</em>{{end}}</td>
+          <td>{{if eq .Verdict "unprotected"}}<span class="error">unprotected</span>{{else}}<span class="muted">unverified replica</span>{{end}}</td>
+          <td>{{.Explanation}}</td>
+        </tr>
+        {{else}}
+        <tr><td colspan="6"><em>No Cells owned by this node</em></td></tr>
+        {{end}}
+      </tbody>
+    </table>
+  </div>
+
+  <div class="panel">
+    <h3>Cells replica-backed by {{.SimulateTargetNodeID}}</h3>
+    <p class="muted">These Cells are owned elsewhere and keep running unaffected - they lose their HAST redundancy until a new replica is configured.</p>
+    <table>
+      <thead><tr><th>ID</th><th>Name</th><th>Kind</th><th>Owner node</th><th>Explanation</th></tr></thead>
+      <tbody>
+        {{range .SimulateReplicaBacked}}
+        <tr>
+          <td>{{.ID}}</td><td>{{.Name}}</td><td>{{.Kind}}</td><td>{{.OwnerNodeID}}</td>
+          <td>{{.Explanation}}</td>
+        </tr>
+        {{else}}
+        <tr><td colspan="5"><em>No Cells replica-backed by this node</em></td></tr>
+        {{end}}
+      </tbody>
+    </table>
+  </div>
+  {{end}}
+  {{end}}
+</body>
+</html>
+{{end}}

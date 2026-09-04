@@ -49,6 +49,7 @@ const (
 	ManagerService_GetJail_FullMethodName                    = "/apiary.rpc.v1.ManagerService/GetJail"
 	ManagerService_ListJails_FullMethodName                  = "/apiary.rpc.v1.ManagerService/ListJails"
 	ManagerService_ForcePurgeJail_FullMethodName             = "/apiary.rpc.v1.ManagerService/ForcePurgeJail"
+	ManagerService_SimulateNodeFailure_FullMethodName        = "/apiary.rpc.v1.ManagerService/SimulateNodeFailure"
 	ManagerService_MigrateJail_FullMethodName                = "/apiary.rpc.v1.ManagerService/MigrateJail"
 	ManagerService_ReportVMPhase_FullMethodName              = "/apiary.rpc.v1.ManagerService/ReportVMPhase"
 	ManagerService_ReportVMTeardownComplete_FullMethodName   = "/apiary.rpc.v1.ManagerService/ReportVMTeardownComplete"
@@ -193,6 +194,22 @@ type ManagerServiceClient interface {
 	// it away. See ForcePurgeVM's own doc comment above for the full
 	// reasoning - it applies identically here.
 	ForcePurgeJail(ctx context.Context, in *ForcePurgeJailRequest, opts ...grpc.CallOption) (*ForcePurgeJailResponse, error)
+	// SimulateNodeFailure is a read-only "what happens if this node
+	// disappears right now" report (ADR-0052, the Dependency Graph
+	// Simulator's v1 slice) - not fault injection, nothing is changed.
+	// It combines three separate sequential reads (VM list, jail list,
+	// raft status) plus live per-remaining-voter reachability checks -
+	// not an atomic snapshot; a concurrent cluster change, or a peer
+	// becoming reachable/unreachable between checks, could be reflected
+	// in one part of the response and not another. Like GetVM/ListVMs,
+	// this needs the current leader's own FSM view of VM/jail ownership,
+	// so it only succeeds against the current leader; the entire request
+	// (not just the failed sub-call) is forwarded on a leader-hint
+	// rejection so the report never mixes two different nodes' views.
+	// node_id not recognized by raft membership or by any VM/jail's
+	// node_id/replica_node_id returns error set, never a misleadingly
+	// empty-looking "safe" report.
+	SimulateNodeFailure(ctx context.Context, in *SimulateNodeFailureRequest, opts ...grpc.CallOption) (*SimulateNodeFailureResponse, error)
 	// MigrateJail mirrors MigrateVM exactly, for jails instead of VMs -
 	// see MigrateVM's own doc comment above for the full reasoning
 	// (including the "target must already be a synced HAST replica"
@@ -535,6 +552,16 @@ func (c *managerServiceClient) ForcePurgeJail(ctx context.Context, in *ForcePurg
 	return out, nil
 }
 
+func (c *managerServiceClient) SimulateNodeFailure(ctx context.Context, in *SimulateNodeFailureRequest, opts ...grpc.CallOption) (*SimulateNodeFailureResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(SimulateNodeFailureResponse)
+	err := c.cc.Invoke(ctx, ManagerService_SimulateNodeFailure_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *managerServiceClient) MigrateJail(ctx context.Context, in *MigrateJailRequest, opts ...grpc.CallOption) (*MigrateJailResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(MigrateJailResponse)
@@ -731,6 +758,22 @@ type ManagerServiceServer interface {
 	// it away. See ForcePurgeVM's own doc comment above for the full
 	// reasoning - it applies identically here.
 	ForcePurgeJail(context.Context, *ForcePurgeJailRequest) (*ForcePurgeJailResponse, error)
+	// SimulateNodeFailure is a read-only "what happens if this node
+	// disappears right now" report (ADR-0052, the Dependency Graph
+	// Simulator's v1 slice) - not fault injection, nothing is changed.
+	// It combines three separate sequential reads (VM list, jail list,
+	// raft status) plus live per-remaining-voter reachability checks -
+	// not an atomic snapshot; a concurrent cluster change, or a peer
+	// becoming reachable/unreachable between checks, could be reflected
+	// in one part of the response and not another. Like GetVM/ListVMs,
+	// this needs the current leader's own FSM view of VM/jail ownership,
+	// so it only succeeds against the current leader; the entire request
+	// (not just the failed sub-call) is forwarded on a leader-hint
+	// rejection so the report never mixes two different nodes' views.
+	// node_id not recognized by raft membership or by any VM/jail's
+	// node_id/replica_node_id returns error set, never a misleadingly
+	// empty-looking "safe" report.
+	SimulateNodeFailure(context.Context, *SimulateNodeFailureRequest) (*SimulateNodeFailureResponse, error)
 	// MigrateJail mirrors MigrateVM exactly, for jails instead of VMs -
 	// see MigrateVM's own doc comment above for the full reasoning
 	// (including the "target must already be a synced HAST replica"
@@ -859,6 +902,9 @@ func (UnimplementedManagerServiceServer) ListJails(context.Context, *ListJailsRe
 }
 func (UnimplementedManagerServiceServer) ForcePurgeJail(context.Context, *ForcePurgeJailRequest) (*ForcePurgeJailResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ForcePurgeJail not implemented")
+}
+func (UnimplementedManagerServiceServer) SimulateNodeFailure(context.Context, *SimulateNodeFailureRequest) (*SimulateNodeFailureResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method SimulateNodeFailure not implemented")
 }
 func (UnimplementedManagerServiceServer) MigrateJail(context.Context, *MigrateJailRequest) (*MigrateJailResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method MigrateJail not implemented")
@@ -1428,6 +1474,24 @@ func _ManagerService_ForcePurgeJail_Handler(srv interface{}, ctx context.Context
 	return interceptor(ctx, in, info, handler)
 }
 
+func _ManagerService_SimulateNodeFailure_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SimulateNodeFailureRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ManagerServiceServer).SimulateNodeFailure(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ManagerService_SimulateNodeFailure_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ManagerServiceServer).SimulateNodeFailure(ctx, req.(*SimulateNodeFailureRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _ManagerService_MigrateJail_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(MigrateJailRequest)
 	if err := dec(in); err != nil {
@@ -1658,6 +1722,10 @@ var ManagerService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ForcePurgeJail",
 			Handler:    _ManagerService_ForcePurgeJail_Handler,
+		},
+		{
+			MethodName: "SimulateNodeFailure",
+			Handler:    _ManagerService_SimulateNodeFailure_Handler,
 		},
 		{
 			MethodName: "MigrateJail",

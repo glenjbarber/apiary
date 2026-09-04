@@ -230,6 +230,18 @@ func (p *PeerReporter) ListNetworks(ctx context.Context, addr string) (*rpcpb.Li
 	return client.ListNetworks(ctx, &rpcpb.ListNetworksRequest{})
 }
 
+// SimulateNodeFailure forwards the entire original request to a peer -
+// see ADR-0052's SimulateNodeFailure RPC and its own handler for why
+// the whole request, not just one failed sub-call, is forwarded.
+func (p *PeerReporter) SimulateNodeFailure(ctx context.Context, addr string, req *rpcpb.SimulateNodeFailureRequest) (*rpcpb.SimulateNodeFailureResponse, error) {
+	conn, client, err := p.dial(addr)
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close()
+	return client.SimulateNodeFailure(ctx, req)
+}
+
 // ListISOs forwards to a specific peer's own ListISOs RPC - like
 // HostStats, not leader-only-read forwarding (ISOs always answer
 // locally for whichever managerd receives the call); this is how

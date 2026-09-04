@@ -72,6 +72,9 @@ type fakePeerServer struct {
 	pushISOToResp *rpcpb.PushISOToResponse
 
 	listISOsResp *rpcpb.ListISOsResponse
+
+	simulateNodeFailureReq  *rpcpb.SimulateNodeFailureRequest
+	simulateNodeFailureResp *rpcpb.SimulateNodeFailureResponse
 }
 
 func (f *fakePeerServer) UploadISO(stream rpcpb.ManagerService_UploadISOServer) error {
@@ -217,6 +220,14 @@ func (f *fakePeerServer) ListVMs(context.Context, *rpcpb.ListVMsRequest) (*rpcpb
 	return &rpcpb.ListVMsResponse{}, nil
 }
 
+func (f *fakePeerServer) SimulateNodeFailure(_ context.Context, req *rpcpb.SimulateNodeFailureRequest) (*rpcpb.SimulateNodeFailureResponse, error) {
+	f.simulateNodeFailureReq = req
+	if f.simulateNodeFailureResp != nil {
+		return f.simulateNodeFailureResp, nil
+	}
+	return &rpcpb.SimulateNodeFailureResponse{}, nil
+}
+
 func (f *fakePeerServer) GetVM(_ context.Context, req *rpcpb.GetVMRequest) (*rpcpb.GetVMResponse, error) {
 	f.getVMReq = req
 	if f.getVMResp != nil {
@@ -359,6 +370,25 @@ func TestPeerReporter_ListVMs_ReturnsPeerResponse(t *testing.T) {
 	}
 	if len(resp.GetVms()) != 1 || resp.GetVms()[0].GetId() != "vm-1" {
 		t.Errorf("ListVMs() = %+v, want one VM with id=vm-1", resp)
+	}
+}
+
+func TestPeerReporter_SimulateNodeFailure_ReturnsPeerResponse(t *testing.T) {
+	fake := &fakePeerServer{simulateNodeFailureResp: &rpcpb.SimulateNodeFailureResponse{
+		Quorum: &rpcpb.QuorumImpact{Survives: false, Note: "quorum is LOST"},
+	}}
+	addr := newTestPeerServer(t, fake)
+	p := NewPeerReporter("", false, nil)
+
+	resp, err := p.SimulateNodeFailure(context.Background(), addr, &rpcpb.SimulateNodeFailureRequest{NodeId: "node-a"})
+	if err != nil {
+		t.Fatalf("SimulateNodeFailure() error: %v", err)
+	}
+	if fake.simulateNodeFailureReq.GetNodeId() != "node-a" {
+		t.Errorf("received request node_id = %q, want node-a", fake.simulateNodeFailureReq.GetNodeId())
+	}
+	if resp.GetQuorum().GetSurvives() || resp.GetQuorum().GetNote() != "quorum is LOST" {
+		t.Errorf("SimulateNodeFailure() = %+v, want the peer's response verbatim", resp)
 	}
 }
 

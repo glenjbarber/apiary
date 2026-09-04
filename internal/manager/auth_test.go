@@ -166,3 +166,14 @@ func TestRoleSatisfies_Hierarchy(t *testing.T) {
 		}
 	}
 }
+
+// TestRequiredRoleFor_SimulateNodeFailureIsViewer guards against the
+// easy-to-miss failure mode requiredRoleFor's own doc comment warns
+// about: an RPC accidentally left out of requiredRole silently falls
+// back to RoleAdmin, with no compile-time signal - see ADR-0052.
+func TestRequiredRoleFor_SimulateNodeFailureIsViewer(t *testing.T) {
+	const method = "/apiary.rpc.v1.ManagerService/SimulateNodeFailure"
+	if got := requiredRoleFor(method); got != RoleViewer {
+		t.Errorf("requiredRoleFor(%q) = %q, want %q", method, got, RoleViewer)
+	}
+}

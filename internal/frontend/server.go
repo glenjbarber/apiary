@@ -199,6 +199,20 @@ type pageData struct {
 	// Machine Configuration page's quota form.
 	QuotaFormError   string
 	QuotaFormSuccess string
+
+	// Simulate* back the Dependency Graph Simulator page ("/simulate",
+	// ADR-0052). SimulateNodes is the union of raft membership and every
+	// VM/jail's node_id/replica_node_id - a node can remain a valid
+	// simulation target after being removed from raft entirely, so the
+	// picker must not be limited to current raft membership alone.
+	// SimulateTargetNodeID empty means "no simulation run yet," just the
+	// picker form.
+	SimulateNodes          []string
+	SimulateTargetNodeID   string
+	SimulateError          string
+	SimulateQuorum         quorumImpactView
+	SimulateOwnedResources []resourceImpactView
+	SimulateReplicaBacked  []replicaBackedImpactView
 }
 
 // userView is one row of the Users page's table.
@@ -454,6 +468,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /vms/{id}/serial/content", s.handleSerialLogContent)
 	s.mux.HandleFunc("GET /networks", s.handleNetworksPage)
 	s.mux.HandleFunc("GET /jails", s.handleJailsPage)
+	s.mux.HandleFunc("GET /simulate", s.handleSimulatePage)
 
 	// Operator: VM/jail/network/ISO lifecycle - including the create-VM
 	// form's own GET, since a Viewer has nothing useful to do with a
