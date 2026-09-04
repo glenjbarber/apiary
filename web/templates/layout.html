@@ -11,13 +11,19 @@
     h1 { font-size:1.6rem; margin:0; letter-spacing:-.03em; }
     h2 { font-size:1.55rem; margin:2rem 0 1rem; letter-spacing:-.02em; }
     h3 { margin-top:1.75rem; }
-    nav { display:flex; align-items:center; gap:.35rem; margin:0 -1.25rem 1.5rem; padding:.8rem 1.25rem; background:#111; color:#fff; overflow-x:auto; }
+    nav { display:flex; align-items:center; gap:.25rem; margin:0 -1.25rem 1.5rem; padding:.55rem 1.25rem; background:#111; color:#fff; overflow-x:auto; }
     nav .brand { display:flex; align-items:center; color:#fff; margin-right:.7rem; }
     nav .brand-logo { width:30px; height:30px; display:block; }
     nav .brand-name { color:#fff; font-weight:800; font-size:1.1rem; letter-spacing:.04em; }
     nav a { padding:.45rem .65rem; border-radius:6px; white-space:nowrap; text-decoration:none; color:#d6d6d6; font-size:.9rem; }
     nav a:hover { color:#fff; background:#292929; }
     nav a.active { color:#111; background:var(--yellow); font-weight:700; }
+    nav details { position:relative; white-space:nowrap; }
+    nav summary { list-style:none; cursor:pointer; padding:.45rem .65rem; border-radius:6px; color:#d6d6d6; font-size:.9rem; }
+    nav summary::-webkit-details-marker { display:none; }
+    nav summary:hover, nav details[open] summary { color:#fff; background:#292929; }
+    nav .menu-items { position:absolute; z-index:2; top:calc(100% + .35rem); right:0; min-width:10rem; padding:.35rem; background:#222; border:1px solid #444; border-radius:6px; box-shadow:0 5px 15px rgba(0,0,0,.3); }
+    nav .menu-items a { display:block; }
     nav .account { margin-left:auto; color:#aaa; white-space:nowrap; font-size:.82rem; }
     nav form { white-space:nowrap; }
     nav .logout { border:0; background:none; color:#fff; text-decoration:underline; cursor:pointer; }
@@ -115,12 +121,17 @@
   <a href="/vms"{{if eq .ActivePage "vms"}} class="active"{{end}}>VMs</a>
   <a href="/jails"{{if eq .ActivePage "jails"}} class="active"{{end}}>Jails</a>
   <a href="/networks"{{if eq .ActivePage "networks"}} class="active"{{end}}>Networks</a>
-  <a href="/simulate"{{if eq .ActivePage "simulate"}} class="active"{{end}}>Simulate</a>
-  <a href="/assumptions"{{if eq .ActivePage "assumptions"}} class="active"{{end}}>Assumptions</a>
-  <a href="/images"{{if eq .ActivePage "images"}} class="active"{{end}}>Images</a>
-  {{if .CanOperate}}<a href="/machine"{{if eq .ActivePage "machine"}} class="active"{{end}}>Machine</a>{{end}}
-  {{if .CanAdmin}}<a href="/apikeys"{{if eq .ActivePage "apikeys"}} class="active"{{end}}>API Keys</a>{{end}}
-  <a href="/users"{{if eq .ActivePage "users"}} class="active"{{end}}>Users</a>
+  <details>
+    <summary>Manage ▾</summary>
+    <div class="menu-items">
+      <a href="/simulate"{{if eq .ActivePage "simulate"}} class="active"{{end}}>Simulate</a>
+      <a href="/assumptions"{{if eq .ActivePage "assumptions"}} class="active"{{end}}>Assumptions</a>
+      <a href="/images"{{if eq .ActivePage "images"}} class="active"{{end}}>Images</a>
+      {{if .CanOperate}}<a href="/machine"{{if eq .ActivePage "machine"}} class="active"{{end}}>Machine</a>{{end}}
+      {{if .CanAdmin}}<a href="/apikeys"{{if eq .ActivePage "apikeys"}} class="active"{{end}}>API Keys</a>{{end}}
+      <a href="/users"{{if eq .ActivePage "users"}} class="active"{{end}}>Users</a>
+    </div>
+  </details>
   {{if .AuthEnabled}}
   {{if .Username}}<span class="account">logged in as {{.Username}} ({{.Role}}) · Hive {{.HiveID}}</span>{{end}}
   <form method="post" action="/logout">
