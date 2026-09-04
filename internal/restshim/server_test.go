@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
+	"io"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
@@ -77,14 +79,30 @@ type fakeUploadClientStream struct {
 	sent []*rpcpb.UploadISORequest
 	resp *rpcpb.UploadISOResponse
 	err  error
+
+	// failSendAfter, if > 0, makes Send return a bare io.EOF once this
+	// many messages have already been recorded - mirrors grpc-go's real
+	// documented behavior when a stream is aborted by anything other
+	// than the client's own local encoding (ClientStream.SendMsg: "io.EOF
+	// is returned and the status of the stream may be discovered using
+	// RecvMsg"). closeErr is what CloseAndRecv then reports, simulating
+	// the real status that's only discoverable that way.
+	failSendAfter int
+	closeErr      error
 }
 
 func (f *fakeUploadClientStream) Send(req *rpcpb.UploadISORequest) error {
+	if f.failSendAfter > 0 && len(f.sent) >= f.failSendAfter {
+		return io.EOF
+	}
 	f.sent = append(f.sent, req)
 	return nil
 }
 
 func (f *fakeUploadClientStream) CloseAndRecv() (*rpcpb.UploadISOResponse, error) {
+	if f.closeErr != nil {
+		return nil, f.closeErr
+	}
 	return f.resp, f.err
 }
 
@@ -881,5 +899,39 @@ func TestServer_UploadISO_ApplicationErrorIsBadRequest(t *testing.T) {
 	}
 	if !strings.Contains(rec.Body.String(), "sha256 mismatch") {
 		t.Errorf("response missing hash-mismatch error, got: %s", rec.Body.String())
+	}
+}
+
+// TestServer_UploadISO_SendFailureSurfacesRealCloseAndRecvError guards
+// against a real, confirmed bug: when the outbound gRPC stream to
+// managerd is aborted mid-transfer (a canceled context, a transport
+// reset, an application-level failure - anything other than this
+// client's own local encoding), stream.Send returns a bare io.EOF per
+// grpc-go's own documented ClientStream.SendMsg contract, not the real
+// cause. The real status is only obtainable via CloseAndRecv. Before the
+// fix, uploadISOStream returned immediately on the Send error, so every
+// such failure surfaced to the REST caller as the same useless
+// "sending upload data: EOF" - this reproduced a real large-upload
+// failure mode where the actual cause was never visible.
+func TestServer_UploadISO_SendFailureSurfacesRealCloseAndRecvError(t *testing.T) {
+	realErr := errors.New("rpc error: code = ResourceExhausted desc = grpc: received message larger than max")
+	client := &fakeClient{uploadStream: &fakeUploadClientStream{
+		failSendAfter: 1, // metadata (message 0) succeeds, first chunk send fails
+		closeErr:      realErr,
+	}}
+	s := NewServer(client)
+
+	req := buildUploadRequest(t, "deadbeef", "base.raw", "some file contents")
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadGateway {
+		t.Fatalf("status = %d, want 502; body=%s", rec.Code, rec.Body.String())
+	}
+	if strings.Contains(rec.Body.String(), "sending upload data: EOF") {
+		t.Errorf("response still reports the bare masking EOF instead of the real error: %s", rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "ResourceExhausted") {
+		t.Errorf("response missing the real underlying error, got: %s", rec.Body.String())
 	}
 }

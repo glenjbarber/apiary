@@ -437,6 +437,19 @@ func (s *Server) uploadISOStream(r *http.Request, part *multipart.Part, expected
 			chunk := make([]byte, n)
 			copy(chunk, buf[:n])
 			if serr := stream.Send(&rpcpb.UploadISORequest{Data: &rpcpb.UploadISORequest_Chunk{Chunk: chunk}}); serr != nil {
+				// Send's own error is frequently a bare io.EOF once the
+				// stream has been aborted by anything other than this
+				// client's own local encoding (a canceled context, a
+				// transport reset, an application-level failure from
+				// managerd's isostore.Save) - per grpc-go's documented
+				// ClientStream.SendMsg contract, the real cause is only
+				// discoverable via RecvMsg, which CloseAndRecv wraps for
+				// a client-streaming call. Without this, every relayed
+				// upload failure surfaces as the same useless "EOF"
+				// regardless of what actually happened.
+				if _, recvErr := stream.CloseAndRecv(); recvErr != nil {
+					return nil, fmt.Errorf("sending upload data: %w", recvErr)
+				}
 				return nil, fmt.Errorf("sending upload data: %w", serr)
 			}
 		}
