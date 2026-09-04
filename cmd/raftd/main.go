@@ -4,7 +4,9 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"crypto/sha256"
 	"errors"
 	"flag"
 	"fmt"
@@ -18,6 +20,7 @@ import (
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/protobuf/proto"
 
 	internalpb "github.com/glenjbarber/apiary/api/internalpb"
 	raftnode "github.com/glenjbarber/apiary/internal/raft"
@@ -34,6 +37,21 @@ const socketPerm = 0o660
 // other than an exact match is rejected with no action taken.
 const resetConfirmPhrase = "yes-wipe-raft-state"
 
+// restoreConfirmPhrase is -restore's own confirmation phrase, matching
+// resetConfirmPhrase's exact-match-or-nothing-happens posture
+// (docs/adr/0051-raftd-config-save-restore.md) - restoring is
+// destructive to whatever (if anything) is currently in -data-dir, the
+// same class of accidental-persistent-flag risk resetConfirmPhrase's
+// own doc comment already explains.
+const restoreConfirmPhrase = "yes-restore-raft-state"
+
+// configArchiveFormatVersion is the internalpb.ConfigArchive envelope
+// version this binary writes (-export) and requires (-restore) -
+// independent of FSMSnapshotState's own field additions, which the
+// archive's payload carries unchanged. Bump this if ConfigArchive's
+// own shape ever changes incompatibly.
+const configArchiveFormatVersion = 1
+
 func main() {
 	if err := run(); err != nil {
 		log.Fatalf("raftd: %v", err)
@@ -48,6 +66,10 @@ func run() error {
 	joinSocket := flag.String("join", "", "internal socket path of an existing cluster member to join through (leave empty to bootstrap a new single-node cluster)")
 	internalToken := flag.String("internal-token", "", "shared secret required from every RaftInternal caller (managerd, or a peer raftd during -join); leave empty to rely on the socket's own file permissions alone, as before (see ADR-0023)")
 	reset := flag.String("reset", "", fmt.Sprintf("Tier 1 reset (ADR-0038): wipe this node's own raft state and exit, rather than starting the server - real VMs/jails/disks are untouched, just orphaned from tracking until re-registered. Must be exactly %q or nothing happens; the next normal (no -reset) start bootstraps fresh automatically against the now-empty -data-dir", resetConfirmPhrase))
+	exportPath := flag.String("export", "", "write this node's current, live ephemeral state (VMs/networks/jails/API keys) to the given path as a portable archive, then exit, rather than starting the server - requires raftd already running and reachable at -socket (see docs/adr/0051-raftd-config-save-restore.md)")
+	restorePhrase := flag.String("restore", "", fmt.Sprintf("restore ephemeral state from -restore-file into this node's own, currently-empty -data-dir, then exit, rather than starting the server - run -reset first if -data-dir isn't already empty. Must be exactly %q or nothing happens; the next normal start picks up the restored state automatically", restoreConfirmPhrase))
+	restoreFile := flag.String("restore-file", "", "path to a -export archive to load for -restore")
+	restoreDryRun := flag.String("restore-dry-run", "", "validate the archive at the given path (format version, checksum) and print a summary of what it contains, then exit - makes no changes at all, needs no confirmation phrase, and does not touch -data-dir")
 	flag.Parse()
 
 	if *reset != "" {
@@ -58,6 +80,16 @@ func run() error {
 		NodeID:   *nodeID,
 		DataDir:  *dataDir,
 		BindAddr: *bindAddr,
+	}
+
+	if *exportPath != "" {
+		return exportLiveState(*exportPath, *socketPath, *internalToken)
+	}
+	if *restoreDryRun != "" {
+		return dryRunRestore(*restoreDryRun)
+	}
+	if *restorePhrase != "" {
+		return restoreDataDir(*restorePhrase, *restoreFile, cfg)
 	}
 
 	hadState, err := raftnode.HasExistingState(cfg)
@@ -175,6 +207,141 @@ func resetDataDir(phrase, dataDir string) error {
 	}
 
 	log.Printf("raftd: reset complete - %s is now empty; the next normal start will bootstrap a fresh single-node cluster", dataDir)
+	return nil
+}
+
+// exportLiveState implements the export half of
+// docs/adr/0051-raftd-config-save-restore.md: dial a running raftd at
+// socketPath, read its current, live FSM state via ExportState (not a
+// periodic on-disk raft snapshot - see FSM.SnapshotState's doc comment
+// for why that would be unreliable), and write it to path as an
+// internalpb.ConfigArchive. Non-destructive - unlike every other
+// one-shot mode in this file, needs no confirmation phrase.
+func exportLiveState(path, socketPath, token string) error {
+	conn, err := grpc.NewClient(
+		"unix://"+socketPath,
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+		grpc.WithPerRPCCredentials(raftnode.TokenCredentials(token)),
+	)
+	if err != nil {
+		return fmt.Errorf("dialing %s: %w", socketPath, err)
+	}
+	defer conn.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	client := internalpb.NewRaftInternalClient(conn)
+	resp, err := client.ExportState(ctx, &internalpb.ExportStateRequest{})
+	if err != nil {
+		return err
+	}
+	if resp.GetError() != "" {
+		if resp.GetLeaderHint() != "" {
+			return fmt.Errorf("%s (leader hint: %s)", resp.GetError(), resp.GetLeaderHint())
+		}
+		return errors.New(resp.GetError())
+	}
+
+	checksum := sha256.Sum256(resp.GetFsmSnapshotState())
+	archive := &internalpb.ConfigArchive{
+		FormatVersion:    configArchiveFormatVersion,
+		ExportedUnix:     time.Now().Unix(),
+		NodeId:           resp.GetNodeId(),
+		AppliedIndex:     resp.GetAppliedIndex(),
+		FsmSnapshotState: resp.GetFsmSnapshotState(),
+		Checksum:         checksum[:],
+	}
+	data, err := proto.Marshal(archive)
+	if err != nil {
+		return fmt.Errorf("marshaling archive: %w", err)
+	}
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		return fmt.Errorf("writing %s: %w", path, err)
+	}
+
+	log.Printf("raftd: exported live state (node-id=%s, applied-index=%d) to %s",
+		resp.GetNodeId(), resp.GetAppliedIndex(), path)
+	return nil
+}
+
+// loadConfigArchive reads and validates an archive written by -export:
+// format_version, then a SHA-256 checksum of its embedded
+// FSMSnapshotState payload - independent of raft's own on-disk CRC64,
+// since a portable archive may sit outside raftd's data directory for
+// a long time before being read back. Shared by restoreDataDir and
+// -restore-dry-run so both apply the exact same validation.
+func loadConfigArchive(file string) (*internalpb.ConfigArchive, *internalpb.FSMSnapshotState, error) {
+	if file == "" {
+		return nil, nil, errors.New("archive path must be set")
+	}
+
+	data, err := os.ReadFile(file)
+	if err != nil {
+		return nil, nil, fmt.Errorf("reading %s: %w", file, err)
+	}
+
+	var archive internalpb.ConfigArchive
+	if err := proto.Unmarshal(data, &archive); err != nil {
+		return nil, nil, fmt.Errorf("parsing %s as a config archive: %w", file, err)
+	}
+	if archive.GetFormatVersion() != configArchiveFormatVersion {
+		return nil, nil, fmt.Errorf("%s has format_version %d, this raftd only supports %d", file, archive.GetFormatVersion(), configArchiveFormatVersion)
+	}
+	checksum := sha256.Sum256(archive.GetFsmSnapshotState())
+	if !bytes.Equal(checksum[:], archive.GetChecksum()) {
+		return nil, nil, fmt.Errorf("%s failed checksum verification - the file may be corrupt or truncated", file)
+	}
+
+	var state internalpb.FSMSnapshotState
+	if err := proto.Unmarshal(archive.GetFsmSnapshotState(), &state); err != nil {
+		return nil, nil, fmt.Errorf("parsing %s's embedded FSM state: %w", file, err)
+	}
+
+	return &archive, &state, nil
+}
+
+// dryRunRestore validates an archive exactly like restoreDataDir would,
+// then prints a summary of what it contains and returns - it never
+// touches -data-dir or calls raftnode.SeedSnapshot. Needs no
+// confirmation phrase, since it makes no changes at all.
+func dryRunRestore(file string) error {
+	archive, state, err := loadConfigArchive(file)
+	if err != nil {
+		return err
+	}
+
+	log.Printf("raftd: %s is a valid archive (format_version=%d, exported-node-id=%s, exported-unix=%d, applied-index=%d)",
+		file, archive.GetFormatVersion(), archive.GetNodeId(), archive.GetExportedUnix(), archive.GetAppliedIndex())
+	log.Printf("raftd: would restore %d VMs, %d networks, %d jails, %d API keys - nothing was changed (dry run)",
+		len(state.GetVms()), len(state.GetNetworks()), len(state.GetJails()), len(state.GetApiKeys()))
+	return nil
+}
+
+// restoreDataDir implements the restore half of
+// docs/adr/0051-raftd-config-save-restore.md: verify phrase and
+// archive integrity, then seed cfg.DataDir with the archive's payload
+// via raftnode.SeedSnapshot so the next normal start picks it up
+// automatically - see that function's own doc comment for why this
+// needs no new runtime code path. phrase must exactly equal
+// restoreConfirmPhrase or nothing happens at all, matching
+// resetDataDir's own posture.
+func restoreDataDir(phrase, file string, cfg raftnode.Config) error {
+	if phrase != restoreConfirmPhrase {
+		return fmt.Errorf("-restore value %q does not match the required confirmation phrase %q - nothing was done", phrase, restoreConfirmPhrase)
+	}
+
+	archive, state, err := loadConfigArchive(file)
+	if err != nil {
+		return err
+	}
+
+	if err := raftnode.SeedSnapshot(cfg, state); err != nil {
+		return fmt.Errorf("seeding %s with %s: %w", cfg.DataDir, file, err)
+	}
+
+	log.Printf("raftd: restored %s (exported node-id=%s, applied-index=%d, %d VMs, %d networks, %d jails, %d API keys) into %s - the next normal start will pick it up automatically",
+		file, archive.GetNodeId(), archive.GetAppliedIndex(), len(state.GetVms()), len(state.GetNetworks()), len(state.GetJails()), len(state.GetApiKeys()), cfg.DataDir)
 	return nil
 }
 

@@ -429,3 +429,33 @@ message FSMSnapshotState {
   // silently reopen it (see ADR-0023).
   bool auth_enabled = 5;
 }
+
+// ConfigArchive is the on-disk file format for raftd's -export/
+// -restore (docs/adr/0051-raftd-config-save-restore.md) - a small
+// envelope around an unmodified FSMSnapshotState payload, versioned
+// and checksummed independently of raft's own on-disk CRC64 since a
+// portable archive may sit outside raftd's data directory, on
+// removable media, for a long time before being read back.
+message ConfigArchive {
+  // format_version is this envelope's own schema version, starting at
+  // 1 - independent of FSMSnapshotState's own field additions (it has
+  // already grown once: api_keys/jails were added after the original
+  // vms/networks/last_index).
+  uint32 format_version = 1;
+
+  // exported_unix/node_id/applied_index are provenance only, never
+  // consulted for correctness - the checksum below is what -restore
+  // actually verifies before trusting fsm_snapshot_state.
+  int64 exported_unix = 2;
+  string node_id = 3;
+  uint64 applied_index = 4;
+
+  // fsm_snapshot_state is proto.Marshal(FSMSnapshotState), unchanged -
+  // the exact same bytes FSM.Persist already writes for raft's own
+  // snapshots.
+  bytes fsm_snapshot_state = 5;
+
+  // checksum is SHA-256(fsm_snapshot_state), verified by -restore
+  // before touching anything.
+  bytes checksum = 6;
+}

@@ -247,3 +247,23 @@ func (s *Server) ListAPIKeys(_ context.Context, _ *internalpb.ListAPIKeysRequest
 	}
 	return &internalpb.ListAPIKeysResponse{Keys: keys}, nil
 }
+
+func (s *Server) ExportState(_ context.Context, _ *internalpb.ExportStateRequest) (*internalpb.ExportStateResponse, error) {
+	state, err := s.node.ExportState()
+	if err != nil {
+		resp := &internalpb.ExportStateResponse{Error: err.Error()}
+		if errors.Is(err, ErrNotLeader) {
+			resp.LeaderHint = s.node.LeaderHint()
+		}
+		return resp, nil
+	}
+	data, err := proto.Marshal(state)
+	if err != nil {
+		return &internalpb.ExportStateResponse{Error: err.Error()}, nil
+	}
+	return &internalpb.ExportStateResponse{
+		FsmSnapshotState: data,
+		AppliedIndex:     state.GetLastIndex(),
+		NodeId:           s.node.Status().NodeID,
+	}, nil
+}

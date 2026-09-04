@@ -1423,6 +1423,123 @@ func (x *ListAPIKeysResponse) GetLeaderHint() string {
 	return ""
 }
 
+type ExportStateRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ExportStateRequest) Reset() {
+	*x = ExportStateRequest{}
+	mi := &file_api_internalpb_raftd_proto_msgTypes[25]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ExportStateRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ExportStateRequest) ProtoMessage() {}
+
+func (x *ExportStateRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_api_internalpb_raftd_proto_msgTypes[25]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ExportStateRequest.ProtoReflect.Descriptor instead.
+func (*ExportStateRequest) Descriptor() ([]byte, []int) {
+	return file_api_internalpb_raftd_proto_rawDescGZIP(), []int{25}
+}
+
+type ExportStateResponse struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// fsm_snapshot_state is proto.Marshal(FSMSnapshotState) of this
+	// node's live state as of the call - the same wire format
+	// FSM.Persist already writes for raft's own periodic snapshots, so
+	// the CLI caller can reuse it byte-for-byte as the seed for a later
+	// -restore, with no format conversion.
+	FsmSnapshotState []byte `protobuf:"bytes,1,opt,name=fsm_snapshot_state,json=fsmSnapshotState,proto3" json:"fsm_snapshot_state,omitempty"`
+	AppliedIndex     uint64 `protobuf:"varint,2,opt,name=applied_index,json=appliedIndex,proto3" json:"applied_index,omitempty"`
+	NodeId           string `protobuf:"bytes,3,opt,name=node_id,json=nodeId,proto3" json:"node_id,omitempty"`
+	Error            string `protobuf:"bytes,4,opt,name=error,proto3" json:"error,omitempty"`
+	LeaderHint       string `protobuf:"bytes,5,opt,name=leader_hint,json=leaderHint,proto3" json:"leader_hint,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
+}
+
+func (x *ExportStateResponse) Reset() {
+	*x = ExportStateResponse{}
+	mi := &file_api_internalpb_raftd_proto_msgTypes[26]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ExportStateResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ExportStateResponse) ProtoMessage() {}
+
+func (x *ExportStateResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_api_internalpb_raftd_proto_msgTypes[26]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ExportStateResponse.ProtoReflect.Descriptor instead.
+func (*ExportStateResponse) Descriptor() ([]byte, []int) {
+	return file_api_internalpb_raftd_proto_rawDescGZIP(), []int{26}
+}
+
+func (x *ExportStateResponse) GetFsmSnapshotState() []byte {
+	if x != nil {
+		return x.FsmSnapshotState
+	}
+	return nil
+}
+
+func (x *ExportStateResponse) GetAppliedIndex() uint64 {
+	if x != nil {
+		return x.AppliedIndex
+	}
+	return 0
+}
+
+func (x *ExportStateResponse) GetNodeId() string {
+	if x != nil {
+		return x.NodeId
+	}
+	return ""
+}
+
+func (x *ExportStateResponse) GetError() string {
+	if x != nil {
+		return x.Error
+	}
+	return ""
+}
+
+func (x *ExportStateResponse) GetLeaderHint() string {
+	if x != nil {
+		return x.LeaderHint
+	}
+	return ""
+}
+
 var File_api_internalpb_raftd_proto protoreflect.FileDescriptor
 
 const file_api_internalpb_raftd_proto_rawDesc = "" +
@@ -1529,8 +1646,15 @@ const file_api_internalpb_raftd_proto_rawDesc = "" +
 	"\x04keys\x18\x01 \x03(\v2\x1a.apiary.internal.v1.ApiKeyR\x04keys\x12\x14\n" +
 	"\x05error\x18\x02 \x01(\tR\x05error\x12\x1f\n" +
 	"\vleader_hint\x18\x03 \x01(\tR\n" +
-	"leaderHint2\xec\n" +
-	"\n" +
+	"leaderHint\"\x14\n" +
+	"\x12ExportStateRequest\"\xb8\x01\n" +
+	"\x13ExportStateResponse\x12,\n" +
+	"\x12fsm_snapshot_state\x18\x01 \x01(\fR\x10fsmSnapshotState\x12#\n" +
+	"\rapplied_index\x18\x02 \x01(\x04R\fappliedIndex\x12\x17\n" +
+	"\anode_id\x18\x03 \x01(\tR\x06nodeId\x12\x14\n" +
+	"\x05error\x18\x04 \x01(\tR\x05error\x12\x1f\n" +
+	"\vleader_hint\x18\x05 \x01(\tR\n" +
+	"leaderHint2\xcc\v\n" +
 	"\fRaftInternal\x12L\n" +
 	"\x05Apply\x12 .apiary.internal.v1.ApplyRequest\x1a!.apiary.internal.v1.ApplyResponse\x12O\n" +
 	"\x06Status\x12!.apiary.internal.v1.StatusRequest\x1a\".apiary.internal.v1.StatusResponse\x12U\n" +
@@ -1547,7 +1671,8 @@ const file_api_internalpb_raftd_proto_rawDesc = "" +
 	"\vListAPIKeys\x12&.apiary.internal.v1.ListAPIKeysRequest\x1a'.apiary.internal.v1.ListAPIKeysResponse\x12R\n" +
 	"\aGetJail\x12\".apiary.internal.v1.GetJailRequest\x1a#.apiary.internal.v1.GetJailResponse\x12X\n" +
 	"\tListJails\x12$.apiary.internal.v1.ListJailsRequest\x1a%.apiary.internal.v1.ListJailsResponse\x12]\n" +
-	"\x0eListJailsLocal\x12$.apiary.internal.v1.ListJailsRequest\x1a%.apiary.internal.v1.ListJailsResponseB9Z7github.com/glenjbarber/apiary/api/internalpb;internalpbb\x06proto3"
+	"\x0eListJailsLocal\x12$.apiary.internal.v1.ListJailsRequest\x1a%.apiary.internal.v1.ListJailsResponse\x12^\n" +
+	"\vExportState\x12&.apiary.internal.v1.ExportStateRequest\x1a'.apiary.internal.v1.ExportStateResponseB9Z7github.com/glenjbarber/apiary/api/internalpb;internalpbb\x06proto3"
 
 var (
 	file_api_internalpb_raftd_proto_rawDescOnce sync.Once
@@ -1561,7 +1686,7 @@ func file_api_internalpb_raftd_proto_rawDescGZIP() []byte {
 	return file_api_internalpb_raftd_proto_rawDescData
 }
 
-var file_api_internalpb_raftd_proto_msgTypes = make([]protoimpl.MessageInfo, 25)
+var file_api_internalpb_raftd_proto_msgTypes = make([]protoimpl.MessageInfo, 27)
 var file_api_internalpb_raftd_proto_goTypes = []any{
 	(*ApplyRequest)(nil),               // 0: apiary.internal.v1.ApplyRequest
 	(*ApplyResponse)(nil),              // 1: apiary.internal.v1.ApplyResponse
@@ -1588,20 +1713,22 @@ var file_api_internalpb_raftd_proto_goTypes = []any{
 	(*ValidateAPIKeyHashResponse)(nil), // 22: apiary.internal.v1.ValidateAPIKeyHashResponse
 	(*ListAPIKeysRequest)(nil),         // 23: apiary.internal.v1.ListAPIKeysRequest
 	(*ListAPIKeysResponse)(nil),        // 24: apiary.internal.v1.ListAPIKeysResponse
-	(*VMDefinition)(nil),               // 25: apiary.internal.v1.VMDefinition
-	(*NetworkDefinition)(nil),          // 26: apiary.internal.v1.NetworkDefinition
-	(*JailDefinition)(nil),             // 27: apiary.internal.v1.JailDefinition
-	(*ApiKey)(nil),                     // 28: apiary.internal.v1.ApiKey
+	(*ExportStateRequest)(nil),         // 25: apiary.internal.v1.ExportStateRequest
+	(*ExportStateResponse)(nil),        // 26: apiary.internal.v1.ExportStateResponse
+	(*VMDefinition)(nil),               // 27: apiary.internal.v1.VMDefinition
+	(*NetworkDefinition)(nil),          // 28: apiary.internal.v1.NetworkDefinition
+	(*JailDefinition)(nil),             // 29: apiary.internal.v1.JailDefinition
+	(*ApiKey)(nil),                     // 30: apiary.internal.v1.ApiKey
 }
 var file_api_internalpb_raftd_proto_depIdxs = []int32{
 	4,  // 0: apiary.internal.v1.StatusResponse.servers:type_name -> apiary.internal.v1.ServerInfo
-	25, // 1: apiary.internal.v1.GetVMResponse.vm:type_name -> apiary.internal.v1.VMDefinition
-	25, // 2: apiary.internal.v1.ListVMsResponse.vms:type_name -> apiary.internal.v1.VMDefinition
-	26, // 3: apiary.internal.v1.GetNetworkResponse.network:type_name -> apiary.internal.v1.NetworkDefinition
-	26, // 4: apiary.internal.v1.ListNetworksResponse.networks:type_name -> apiary.internal.v1.NetworkDefinition
-	27, // 5: apiary.internal.v1.GetJailResponse.jail:type_name -> apiary.internal.v1.JailDefinition
-	27, // 6: apiary.internal.v1.ListJailsResponse.jails:type_name -> apiary.internal.v1.JailDefinition
-	28, // 7: apiary.internal.v1.ListAPIKeysResponse.keys:type_name -> apiary.internal.v1.ApiKey
+	27, // 1: apiary.internal.v1.GetVMResponse.vm:type_name -> apiary.internal.v1.VMDefinition
+	27, // 2: apiary.internal.v1.ListVMsResponse.vms:type_name -> apiary.internal.v1.VMDefinition
+	28, // 3: apiary.internal.v1.GetNetworkResponse.network:type_name -> apiary.internal.v1.NetworkDefinition
+	28, // 4: apiary.internal.v1.ListNetworksResponse.networks:type_name -> apiary.internal.v1.NetworkDefinition
+	29, // 5: apiary.internal.v1.GetJailResponse.jail:type_name -> apiary.internal.v1.JailDefinition
+	29, // 6: apiary.internal.v1.ListJailsResponse.jails:type_name -> apiary.internal.v1.JailDefinition
+	30, // 7: apiary.internal.v1.ListAPIKeysResponse.keys:type_name -> apiary.internal.v1.ApiKey
 	0,  // 8: apiary.internal.v1.RaftInternal.Apply:input_type -> apiary.internal.v1.ApplyRequest
 	2,  // 9: apiary.internal.v1.RaftInternal.Status:input_type -> apiary.internal.v1.StatusRequest
 	5,  // 10: apiary.internal.v1.RaftInternal.AddVoter:input_type -> apiary.internal.v1.AddVoterRequest
@@ -1617,23 +1744,25 @@ var file_api_internalpb_raftd_proto_depIdxs = []int32{
 	17, // 20: apiary.internal.v1.RaftInternal.GetJail:input_type -> apiary.internal.v1.GetJailRequest
 	19, // 21: apiary.internal.v1.RaftInternal.ListJails:input_type -> apiary.internal.v1.ListJailsRequest
 	19, // 22: apiary.internal.v1.RaftInternal.ListJailsLocal:input_type -> apiary.internal.v1.ListJailsRequest
-	1,  // 23: apiary.internal.v1.RaftInternal.Apply:output_type -> apiary.internal.v1.ApplyResponse
-	3,  // 24: apiary.internal.v1.RaftInternal.Status:output_type -> apiary.internal.v1.StatusResponse
-	6,  // 25: apiary.internal.v1.RaftInternal.AddVoter:output_type -> apiary.internal.v1.AddVoterResponse
-	8,  // 26: apiary.internal.v1.RaftInternal.RemoveServer:output_type -> apiary.internal.v1.RemoveServerResponse
-	10, // 27: apiary.internal.v1.RaftInternal.GetVM:output_type -> apiary.internal.v1.GetVMResponse
-	12, // 28: apiary.internal.v1.RaftInternal.ListVMs:output_type -> apiary.internal.v1.ListVMsResponse
-	14, // 29: apiary.internal.v1.RaftInternal.GetNetwork:output_type -> apiary.internal.v1.GetNetworkResponse
-	16, // 30: apiary.internal.v1.RaftInternal.ListNetworks:output_type -> apiary.internal.v1.ListNetworksResponse
-	12, // 31: apiary.internal.v1.RaftInternal.ListVMsLocal:output_type -> apiary.internal.v1.ListVMsResponse
-	16, // 32: apiary.internal.v1.RaftInternal.ListNetworksLocal:output_type -> apiary.internal.v1.ListNetworksResponse
-	22, // 33: apiary.internal.v1.RaftInternal.ValidateAPIKeyHash:output_type -> apiary.internal.v1.ValidateAPIKeyHashResponse
-	24, // 34: apiary.internal.v1.RaftInternal.ListAPIKeys:output_type -> apiary.internal.v1.ListAPIKeysResponse
-	18, // 35: apiary.internal.v1.RaftInternal.GetJail:output_type -> apiary.internal.v1.GetJailResponse
-	20, // 36: apiary.internal.v1.RaftInternal.ListJails:output_type -> apiary.internal.v1.ListJailsResponse
-	20, // 37: apiary.internal.v1.RaftInternal.ListJailsLocal:output_type -> apiary.internal.v1.ListJailsResponse
-	23, // [23:38] is the sub-list for method output_type
-	8,  // [8:23] is the sub-list for method input_type
+	25, // 23: apiary.internal.v1.RaftInternal.ExportState:input_type -> apiary.internal.v1.ExportStateRequest
+	1,  // 24: apiary.internal.v1.RaftInternal.Apply:output_type -> apiary.internal.v1.ApplyResponse
+	3,  // 25: apiary.internal.v1.RaftInternal.Status:output_type -> apiary.internal.v1.StatusResponse
+	6,  // 26: apiary.internal.v1.RaftInternal.AddVoter:output_type -> apiary.internal.v1.AddVoterResponse
+	8,  // 27: apiary.internal.v1.RaftInternal.RemoveServer:output_type -> apiary.internal.v1.RemoveServerResponse
+	10, // 28: apiary.internal.v1.RaftInternal.GetVM:output_type -> apiary.internal.v1.GetVMResponse
+	12, // 29: apiary.internal.v1.RaftInternal.ListVMs:output_type -> apiary.internal.v1.ListVMsResponse
+	14, // 30: apiary.internal.v1.RaftInternal.GetNetwork:output_type -> apiary.internal.v1.GetNetworkResponse
+	16, // 31: apiary.internal.v1.RaftInternal.ListNetworks:output_type -> apiary.internal.v1.ListNetworksResponse
+	12, // 32: apiary.internal.v1.RaftInternal.ListVMsLocal:output_type -> apiary.internal.v1.ListVMsResponse
+	16, // 33: apiary.internal.v1.RaftInternal.ListNetworksLocal:output_type -> apiary.internal.v1.ListNetworksResponse
+	22, // 34: apiary.internal.v1.RaftInternal.ValidateAPIKeyHash:output_type -> apiary.internal.v1.ValidateAPIKeyHashResponse
+	24, // 35: apiary.internal.v1.RaftInternal.ListAPIKeys:output_type -> apiary.internal.v1.ListAPIKeysResponse
+	18, // 36: apiary.internal.v1.RaftInternal.GetJail:output_type -> apiary.internal.v1.GetJailResponse
+	20, // 37: apiary.internal.v1.RaftInternal.ListJails:output_type -> apiary.internal.v1.ListJailsResponse
+	20, // 38: apiary.internal.v1.RaftInternal.ListJailsLocal:output_type -> apiary.internal.v1.ListJailsResponse
+	26, // 39: apiary.internal.v1.RaftInternal.ExportState:output_type -> apiary.internal.v1.ExportStateResponse
+	24, // [24:40] is the sub-list for method output_type
+	8,  // [8:24] is the sub-list for method input_type
 	8,  // [8:8] is the sub-list for extension type_name
 	8,  // [8:8] is the sub-list for extension extendee
 	0,  // [0:8] is the sub-list for field type_name
@@ -1651,7 +1780,7 @@ func file_api_internalpb_raftd_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_api_internalpb_raftd_proto_rawDesc), len(file_api_internalpb_raftd_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   25,
+			NumMessages:   27,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

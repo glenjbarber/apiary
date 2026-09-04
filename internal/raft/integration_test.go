@@ -103,4 +103,23 @@ func TestIntegration_ApplyAndStatusOverUDS(t *testing.T) {
 	if statusResp.GetAppliedIndex() == 0 {
 		t.Fatalf("AppliedIndex = 0 after Apply, want > 0")
 	}
+
+	exportResp, err := client.ExportState(ctx, &internalpb.ExportStateRequest{})
+	if err != nil {
+		t.Fatalf("ExportState() error: %v", err)
+	}
+	if exportResp.GetError() != "" {
+		t.Fatalf("ExportState() returned error: %s", exportResp.GetError())
+	}
+	var exported internalpb.FSMSnapshotState
+	if err := proto.Unmarshal(exportResp.GetFsmSnapshotState(), &exported); err != nil {
+		t.Fatalf("unmarshaling ExportState() result: %v", err)
+	}
+	exportedVM, ok := exported.GetVms()["vm-1"]
+	if !ok || exportedVM.GetName() != "over-the-wire" {
+		t.Fatalf("ExportState() vms = %+v, want vm-1/over-the-wire reflecting the earlier Apply", exported.GetVms())
+	}
+	if exportResp.GetNodeId() == "" {
+		t.Fatalf("ExportState() NodeId is empty")
+	}
 }

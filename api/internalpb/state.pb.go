@@ -2065,6 +2065,108 @@ func (x *FSMSnapshotState) GetAuthEnabled() bool {
 	return false
 }
 
+// ConfigArchive is the on-disk file format for raftd's -export/
+// -restore (docs/adr/0051-raftd-config-save-restore.md) - a small
+// envelope around an unmodified FSMSnapshotState payload, versioned
+// and checksummed independently of raft's own on-disk CRC64 since a
+// portable archive may sit outside raftd's data directory, on
+// removable media, for a long time before being read back.
+type ConfigArchive struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// format_version is this envelope's own schema version, starting at
+	// 1 - independent of FSMSnapshotState's own field additions (it has
+	// already grown once: api_keys/jails were added after the original
+	// vms/networks/last_index).
+	FormatVersion uint32 `protobuf:"varint,1,opt,name=format_version,json=formatVersion,proto3" json:"format_version,omitempty"`
+	// exported_unix/node_id/applied_index are provenance only, never
+	// consulted for correctness - the checksum below is what -restore
+	// actually verifies before trusting fsm_snapshot_state.
+	ExportedUnix int64  `protobuf:"varint,2,opt,name=exported_unix,json=exportedUnix,proto3" json:"exported_unix,omitempty"`
+	NodeId       string `protobuf:"bytes,3,opt,name=node_id,json=nodeId,proto3" json:"node_id,omitempty"`
+	AppliedIndex uint64 `protobuf:"varint,4,opt,name=applied_index,json=appliedIndex,proto3" json:"applied_index,omitempty"`
+	// fsm_snapshot_state is proto.Marshal(FSMSnapshotState), unchanged -
+	// the exact same bytes FSM.Persist already writes for raft's own
+	// snapshots.
+	FsmSnapshotState []byte `protobuf:"bytes,5,opt,name=fsm_snapshot_state,json=fsmSnapshotState,proto3" json:"fsm_snapshot_state,omitempty"`
+	// checksum is SHA-256(fsm_snapshot_state), verified by -restore
+	// before touching anything.
+	Checksum      []byte `protobuf:"bytes,6,opt,name=checksum,proto3" json:"checksum,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ConfigArchive) Reset() {
+	*x = ConfigArchive{}
+	mi := &file_api_internalpb_state_proto_msgTypes[23]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ConfigArchive) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ConfigArchive) ProtoMessage() {}
+
+func (x *ConfigArchive) ProtoReflect() protoreflect.Message {
+	mi := &file_api_internalpb_state_proto_msgTypes[23]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ConfigArchive.ProtoReflect.Descriptor instead.
+func (*ConfigArchive) Descriptor() ([]byte, []int) {
+	return file_api_internalpb_state_proto_rawDescGZIP(), []int{23}
+}
+
+func (x *ConfigArchive) GetFormatVersion() uint32 {
+	if x != nil {
+		return x.FormatVersion
+	}
+	return 0
+}
+
+func (x *ConfigArchive) GetExportedUnix() int64 {
+	if x != nil {
+		return x.ExportedUnix
+	}
+	return 0
+}
+
+func (x *ConfigArchive) GetNodeId() string {
+	if x != nil {
+		return x.NodeId
+	}
+	return ""
+}
+
+func (x *ConfigArchive) GetAppliedIndex() uint64 {
+	if x != nil {
+		return x.AppliedIndex
+	}
+	return 0
+}
+
+func (x *ConfigArchive) GetFsmSnapshotState() []byte {
+	if x != nil {
+		return x.FsmSnapshotState
+	}
+	return nil
+}
+
+func (x *ConfigArchive) GetChecksum() []byte {
+	if x != nil {
+		return x.Checksum
+	}
+	return nil
+}
+
 var File_api_internalpb_state_proto protoreflect.FileDescriptor
 
 const file_api_internalpb_state_proto_rawDesc = "" +
@@ -2209,7 +2311,14 @@ const file_api_internalpb_state_proto_rawDesc = "" +
 	"\n" +
 	"JailsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x128\n" +
-	"\x05value\x18\x02 \x01(\v2\".apiary.internal.v1.JailDefinitionR\x05value:\x028\x01*f\n" +
+	"\x05value\x18\x02 \x01(\v2\".apiary.internal.v1.JailDefinitionR\x05value:\x028\x01\"\xe3\x01\n" +
+	"\rConfigArchive\x12%\n" +
+	"\x0eformat_version\x18\x01 \x01(\rR\rformatVersion\x12#\n" +
+	"\rexported_unix\x18\x02 \x01(\x03R\fexportedUnix\x12\x17\n" +
+	"\anode_id\x18\x03 \x01(\tR\x06nodeId\x12#\n" +
+	"\rapplied_index\x18\x04 \x01(\x04R\fappliedIndex\x12,\n" +
+	"\x12fsm_snapshot_state\x18\x05 \x01(\fR\x10fsmSnapshotState\x12\x1a\n" +
+	"\bchecksum\x18\x06 \x01(\fR\bchecksum*f\n" +
 	"\aVMState\x12\x18\n" +
 	"\x14VM_STATE_UNSPECIFIED\x10\x00\x12\x14\n" +
 	"\x10VM_STATE_STOPPED\x10\x01\x12\x14\n" +
@@ -2246,7 +2355,7 @@ func file_api_internalpb_state_proto_rawDescGZIP() []byte {
 }
 
 var file_api_internalpb_state_proto_enumTypes = make([]protoimpl.EnumInfo, 4)
-var file_api_internalpb_state_proto_msgTypes = make([]protoimpl.MessageInfo, 27)
+var file_api_internalpb_state_proto_msgTypes = make([]protoimpl.MessageInfo, 28)
 var file_api_internalpb_state_proto_goTypes = []any{
 	(VMState)(0),                // 0: apiary.internal.v1.VMState
 	(VMPhase)(0),                // 1: apiary.internal.v1.VMPhase
@@ -2275,10 +2384,11 @@ var file_api_internalpb_state_proto_goTypes = []any{
 	(*PurgeJail)(nil),           // 24: apiary.internal.v1.PurgeJail
 	(*CommandResult)(nil),       // 25: apiary.internal.v1.CommandResult
 	(*FSMSnapshotState)(nil),    // 26: apiary.internal.v1.FSMSnapshotState
-	nil,                         // 27: apiary.internal.v1.FSMSnapshotState.VmsEntry
-	nil,                         // 28: apiary.internal.v1.FSMSnapshotState.NetworksEntry
-	nil,                         // 29: apiary.internal.v1.FSMSnapshotState.ApiKeysEntry
-	nil,                         // 30: apiary.internal.v1.FSMSnapshotState.JailsEntry
+	(*ConfigArchive)(nil),       // 27: apiary.internal.v1.ConfigArchive
+	nil,                         // 28: apiary.internal.v1.FSMSnapshotState.VmsEntry
+	nil,                         // 29: apiary.internal.v1.FSMSnapshotState.NetworksEntry
+	nil,                         // 30: apiary.internal.v1.FSMSnapshotState.ApiKeysEntry
+	nil,                         // 31: apiary.internal.v1.FSMSnapshotState.JailsEntry
 }
 var file_api_internalpb_state_proto_depIdxs = []int32{
 	0,  // 0: apiary.internal.v1.VMDefinition.desired_state:type_name -> apiary.internal.v1.VMState
@@ -2311,10 +2421,10 @@ var file_api_internalpb_state_proto_depIdxs = []int32{
 	3,  // 27: apiary.internal.v1.UpdateJailPhase.phase:type_name -> apiary.internal.v1.JailPhase
 	4,  // 28: apiary.internal.v1.CommandResult.vm:type_name -> apiary.internal.v1.VMDefinition
 	5,  // 29: apiary.internal.v1.CommandResult.jail:type_name -> apiary.internal.v1.JailDefinition
-	27, // 30: apiary.internal.v1.FSMSnapshotState.vms:type_name -> apiary.internal.v1.FSMSnapshotState.VmsEntry
-	28, // 31: apiary.internal.v1.FSMSnapshotState.networks:type_name -> apiary.internal.v1.FSMSnapshotState.NetworksEntry
-	29, // 32: apiary.internal.v1.FSMSnapshotState.api_keys:type_name -> apiary.internal.v1.FSMSnapshotState.ApiKeysEntry
-	30, // 33: apiary.internal.v1.FSMSnapshotState.jails:type_name -> apiary.internal.v1.FSMSnapshotState.JailsEntry
+	28, // 30: apiary.internal.v1.FSMSnapshotState.vms:type_name -> apiary.internal.v1.FSMSnapshotState.VmsEntry
+	29, // 31: apiary.internal.v1.FSMSnapshotState.networks:type_name -> apiary.internal.v1.FSMSnapshotState.NetworksEntry
+	30, // 32: apiary.internal.v1.FSMSnapshotState.api_keys:type_name -> apiary.internal.v1.FSMSnapshotState.ApiKeysEntry
+	31, // 33: apiary.internal.v1.FSMSnapshotState.jails:type_name -> apiary.internal.v1.FSMSnapshotState.JailsEntry
 	4,  // 34: apiary.internal.v1.FSMSnapshotState.VmsEntry.value:type_name -> apiary.internal.v1.VMDefinition
 	7,  // 35: apiary.internal.v1.FSMSnapshotState.NetworksEntry.value:type_name -> apiary.internal.v1.NetworkDefinition
 	9,  // 36: apiary.internal.v1.FSMSnapshotState.ApiKeysEntry.value:type_name -> apiary.internal.v1.ApiKey
@@ -2354,7 +2464,7 @@ func file_api_internalpb_state_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_api_internalpb_state_proto_rawDesc), len(file_api_internalpb_state_proto_rawDesc)),
 			NumEnums:      4,
-			NumMessages:   27,
+			NumMessages:   28,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

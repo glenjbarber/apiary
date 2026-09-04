@@ -328,6 +328,20 @@ func (n *Node) ListAPIKeys() ([]*internalpb.ApiKey, error) {
 	return n.fsm.ListAPIKeys(), nil
 }
 
+// ExportState returns this node's current, live FSM state - see
+// FSM.SnapshotState's doc comment for why this reads the FSM directly
+// rather than raft's own on-disk snapshot store. Leader-only, like
+// ListAPIKeys: this is a deliberate, occasional admin action, not a
+// hot-path reconciler read, so it gets the strongest consistency
+// guarantee available rather than the *Local reasoning used
+// elsewhere in this file.
+func (n *Node) ExportState() (*internalpb.FSMSnapshotState, error) {
+	if n.raft.State() != raft.Leader {
+		return nil, ErrNotLeader
+	}
+	return n.fsm.SnapshotState(), nil
+}
+
 func translateMembershipErr(err error) error {
 	if err == nil {
 		return nil

@@ -97,6 +97,18 @@ service RaftInternal {
   // node, leader or not, for the exact same reason it needs
   // ListVMsLocal/ListNetworksLocal.
   rpc ListJailsLocal(ListJailsRequest) returns (ListJailsResponse);
+
+  // ExportState returns this node's current, live FSM state as of the
+  // moment of the call - not a periodic on-disk raft snapshot, since
+  // raft.DefaultConfig's SnapshotInterval/SnapshotThreshold mean the
+  // on-disk snapshot store can be arbitrarily stale (or empty) on a
+  // lightly-loaded cluster. Leader-only, like ListAPIKeys - a
+  // deliberate, occasional admin action gets the strongest
+  // consistency guarantee available, not the *Local reasoning used
+  // for hot-path reconciler reads above. Used by raftd's own -export
+  // CLI mode (docs/adr/0051-raftd-config-save-restore.md), not
+  // exposed through managerd/ManagerService.
+  rpc ExportState(ExportStateRequest) returns (ExportStateResponse);
 }
 
 message ApplyRequest {
@@ -269,4 +281,20 @@ message ListAPIKeysResponse {
   repeated ApiKey keys = 1;
   string error = 2;
   string leader_hint = 3;
+}
+
+message ExportStateRequest {}
+
+message ExportStateResponse {
+  // fsm_snapshot_state is proto.Marshal(FSMSnapshotState) of this
+  // node's live state as of the call - the same wire format
+  // FSM.Persist already writes for raft's own periodic snapshots, so
+  // the CLI caller can reuse it byte-for-byte as the seed for a later
+  // -restore, with no format conversion.
+  bytes fsm_snapshot_state = 1;
+
+  uint64 applied_index = 2;
+  string node_id = 3;
+  string error = 4;
+  string leader_hint = 5;
 }

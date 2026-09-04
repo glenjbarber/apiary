@@ -34,6 +34,7 @@ const (
 	RaftInternal_GetJail_FullMethodName            = "/apiary.internal.v1.RaftInternal/GetJail"
 	RaftInternal_ListJails_FullMethodName          = "/apiary.internal.v1.RaftInternal/ListJails"
 	RaftInternal_ListJailsLocal_FullMethodName     = "/apiary.internal.v1.RaftInternal/ListJailsLocal"
+	RaftInternal_ExportState_FullMethodName        = "/apiary.internal.v1.RaftInternal/ExportState"
 )
 
 // RaftInternalClient is the client API for RaftInternal service.
@@ -120,6 +121,17 @@ type RaftInternalClient interface {
 	// node, leader or not, for the exact same reason it needs
 	// ListVMsLocal/ListNetworksLocal.
 	ListJailsLocal(ctx context.Context, in *ListJailsRequest, opts ...grpc.CallOption) (*ListJailsResponse, error)
+	// ExportState returns this node's current, live FSM state as of the
+	// moment of the call - not a periodic on-disk raft snapshot, since
+	// raft.DefaultConfig's SnapshotInterval/SnapshotThreshold mean the
+	// on-disk snapshot store can be arbitrarily stale (or empty) on a
+	// lightly-loaded cluster. Leader-only, like ListAPIKeys - a
+	// deliberate, occasional admin action gets the strongest
+	// consistency guarantee available, not the *Local reasoning used
+	// for hot-path reconciler reads above. Used by raftd's own -export
+	// CLI mode (docs/adr/0051-raftd-config-save-restore.md), not
+	// exposed through managerd/ManagerService.
+	ExportState(ctx context.Context, in *ExportStateRequest, opts ...grpc.CallOption) (*ExportStateResponse, error)
 }
 
 type raftInternalClient struct {
@@ -280,6 +292,16 @@ func (c *raftInternalClient) ListJailsLocal(ctx context.Context, in *ListJailsRe
 	return out, nil
 }
 
+func (c *raftInternalClient) ExportState(ctx context.Context, in *ExportStateRequest, opts ...grpc.CallOption) (*ExportStateResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ExportStateResponse)
+	err := c.cc.Invoke(ctx, RaftInternal_ExportState_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // RaftInternalServer is the server API for RaftInternal service.
 // All implementations must embed UnimplementedRaftInternalServer
 // for forward compatibility.
@@ -364,6 +386,17 @@ type RaftInternalServer interface {
 	// node, leader or not, for the exact same reason it needs
 	// ListVMsLocal/ListNetworksLocal.
 	ListJailsLocal(context.Context, *ListJailsRequest) (*ListJailsResponse, error)
+	// ExportState returns this node's current, live FSM state as of the
+	// moment of the call - not a periodic on-disk raft snapshot, since
+	// raft.DefaultConfig's SnapshotInterval/SnapshotThreshold mean the
+	// on-disk snapshot store can be arbitrarily stale (or empty) on a
+	// lightly-loaded cluster. Leader-only, like ListAPIKeys - a
+	// deliberate, occasional admin action gets the strongest
+	// consistency guarantee available, not the *Local reasoning used
+	// for hot-path reconciler reads above. Used by raftd's own -export
+	// CLI mode (docs/adr/0051-raftd-config-save-restore.md), not
+	// exposed through managerd/ManagerService.
+	ExportState(context.Context, *ExportStateRequest) (*ExportStateResponse, error)
 	mustEmbedUnimplementedRaftInternalServer()
 }
 
@@ -418,6 +451,9 @@ func (UnimplementedRaftInternalServer) ListJails(context.Context, *ListJailsRequ
 }
 func (UnimplementedRaftInternalServer) ListJailsLocal(context.Context, *ListJailsRequest) (*ListJailsResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ListJailsLocal not implemented")
+}
+func (UnimplementedRaftInternalServer) ExportState(context.Context, *ExportStateRequest) (*ExportStateResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ExportState not implemented")
 }
 func (UnimplementedRaftInternalServer) mustEmbedUnimplementedRaftInternalServer() {}
 func (UnimplementedRaftInternalServer) testEmbeddedByValue()                      {}
@@ -710,6 +746,24 @@ func _RaftInternal_ListJailsLocal_Handler(srv interface{}, ctx context.Context, 
 	return interceptor(ctx, in, info, handler)
 }
 
+func _RaftInternal_ExportState_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ExportStateRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(RaftInternalServer).ExportState(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: RaftInternal_ExportState_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(RaftInternalServer).ExportState(ctx, req.(*ExportStateRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // RaftInternal_ServiceDesc is the grpc.ServiceDesc for RaftInternal service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -776,6 +830,10 @@ var RaftInternal_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ListJailsLocal",
 			Handler:    _RaftInternal_ListJailsLocal_Handler,
+		},
+		{
+			MethodName: "ExportState",
+			Handler:    _RaftInternal_ExportState_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

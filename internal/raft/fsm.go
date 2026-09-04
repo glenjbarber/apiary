@@ -532,6 +532,20 @@ func (f *FSM) ListVMs() []*internalpb.VMDefinition {
 
 // Snapshot implements raft.FSM.
 func (f *FSM) Snapshot() (raft.FSMSnapshot, error) {
+	return &fsmSnapshot{state: f.SnapshotState()}, nil
+}
+
+// SnapshotState returns a deep-enough copy of the FSM's full ephemeral
+// state (every VM/network/API-key/jail record, plus last_index and
+// auth_enabled) as the same internalpb.FSMSnapshotState message
+// Snapshot/Persist already use for raft's own periodic on-disk
+// snapshots. Exported so raftd's -export CLI mode (via the
+// ExportState RPC, docs/adr/0051-raftd-config-save-restore.md) can
+// read this node's current, live state on demand - raft's own
+// snapshot store only updates periodically (raft.DefaultConfig's
+// SnapshotInterval/SnapshotThreshold), so it can't answer "what does
+// this node have right now."
+func (f *FSM) SnapshotState() *internalpb.FSMSnapshotState {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 
@@ -555,7 +569,7 @@ func (f *FSM) Snapshot() (raft.FSMSnapshot, error) {
 	for id, jail := range f.jails {
 		state.Jails[id] = jail
 	}
-	return &fsmSnapshot{state: state}, nil
+	return state
 }
 
 // Restore implements raft.FSM.
