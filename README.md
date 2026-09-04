@@ -399,6 +399,75 @@ each design decision, in order.
   stream in the first place on very large/long uploads specifically is
   still an open question - the fix makes the real reason visible for
   the next occurrence instead of resolving it.
+- **A VM detail page** (`/vms/{id}`), a sectioned/responsive create-VM
+  form, and permission-aware navigation and lifecycle controls (a
+  Viewer never sees create/delete actions; API-key management is
+  Admin-only) - Codex's first merged UI contribution, reviewed before
+  merge.
+- **A cleaner visual design** across every page (branded nav, status
+  badges, panel cards, shared page-header blocks) - later superseded in
+  large part by the hierarchical sidebar shell below, but the shared
+  `.panel`/badge/page-header conventions it introduced are still used
+  throughout.
+- **Portable raft configuration export/restore** (`raftd -export`/
+  `-restore`/`-restore-dry-run`) for moving or rebuilding a node's raft
+  configuration without hand-editing BoltDB state. See
+  [ADR-0051](docs/adr/0051-raftd-config-save-restore.md).
+- **Dependency Graph Simulator v1** - read-only "what happens if this
+  node/network disappears right now" counterfactuals: raft quorum
+  impact from live reachability (not just configured membership), which
+  VMs/jails a node owns or backs as a HAST replica with a conservative
+  recovery verdict, and which cells lose image availability. A
+  mistyped or unknown target always returns an explicit error, never a
+  report that looks identical to a clean result. See
+  [ADR-0052](docs/adr/0052-dependency-graph-simulator.md),
+  [ADR-0053](docs/adr/0053-managed-network-failure-simulation.md), and
+  [ADR-0054](docs/adr/0054-image-availability-in-node-failure-simulation.md).
+- **Automated Assumption Checks v1** - a small, named catalog of
+  operator assumptions (e.g. "this network's bridge is up on every node
+  that needs it") continuously re-verified against live cluster state,
+  reusing the Dependency Graph Simulator's own per-node fan-out pattern
+  rather than `ListNetworks`'s leader-only `bridge_status` field. See
+  [ADR-0055](docs/adr/0055-automated-assumption-checks-v1.md).
+- **Evidence-Aware Health v1** - every node's health rendering now
+  cites the specific observation (and its age) behind each verdict
+  instead of a bare status word, so a stale or missing observation is
+  never mistaken for a healthy one. See
+  [ADR-0056](docs/adr/0056-evidence-aware-health-v1.md).
+- **Offline Recovery Handbook v1** (`/recovery-handbook`) - a
+  point-in-time, printable guide answering "if this node is gone right
+  now, what do I actually do," built from the same quorum/ownership
+  facts as the Dependency Graph Simulator plus a real, disclosed
+  three-state (survives/lost/unknown) quorum verdict. See
+  [ADR-0057](docs/adr/0057-offline-recovery-handbook-v1.md).
+- **Cell Path Trace v1** (`/trace`) - a stage-by-stage, evidence-labeled
+  explanation of one VM's intended network path (cell state, virtual
+  interface, managed network, DHCP, DNS, owner-hive bridge, firewall,
+  route), each stage independently marked clear/blocked/unknown rather
+  than stopping at the first problem - Codex's contribution, reviewed
+  before merge. See [ADR-0058](docs/adr/0058-cell-path-trace-v1.md).
+- **A hierarchical sidebar navigation shell** replacing the flat top
+  nav, with light/dark theming and grouped sections (Colony, Network,
+  Status, Media) - Codex's contribution; a print-CSS regression it
+  introduced in the Recovery Handbook page (still targeting the removed
+  `<nav>` element) was caught and fixed on review. See
+  [ADR-0059](docs/adr/0059-hierarchical-sidebar-shell.md).
+- **Operational Invariants v1** (`/invariants`) - a small, named catalog
+  of safety rules (no HAST resource has two writable primaries, a
+  cluster tolerates losing one more raft voter, a recoverable cell has
+  a synced replica and a capable destination, a managed network has a
+  working route) continuously evaluated to true/false/unknown with
+  cited evidence - a missing observation is never treated as a passed
+  check. See
+  [ADR-0060](docs/adr/0060-operational-invariants-v1.md).
+- **Why Not Engine v1** (`/why-not`) - read-only answers to concrete
+  operator questions ("why can this cell not migrate," "why is this
+  hive unsafe to reboot," "why is this cell not recoverable," "why can
+  this network not provide connectivity"), citing the smallest actual
+  blocker set from already-shipped mechanisms above rather than a dump
+  of every warning, with proven remedies kept clearly separate from
+  plausible-but-unverified ones. See
+  [ADR-0061](docs/adr/0061-why-not-engine-v1.md).
 
 **Not yet implemented:**
 
