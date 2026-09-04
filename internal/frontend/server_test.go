@@ -416,8 +416,41 @@ func TestServer_VMsPage(t *testing.T) {
 	if !strings.Contains(body, "ready") {
 		t.Errorf("VMs page missing observed phase, got: %s", body)
 	}
-	if !strings.Contains(body, `class="active"`) {
-		t.Errorf("VMs page nav should mark its own link active, got: %s", body)
+	if !strings.Contains(body, `href="/vms" aria-current="page"`) {
+		t.Errorf("VMs page navigation should mark its link current, got: %s", body)
+	}
+}
+
+func TestServer_AppShellUsesHierarchicalSidebar(t *testing.T) {
+	s := newTestServer(t, &fakeClient{})
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/vms", nil))
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	body := rec.Body.String()
+	for _, want := range []string{
+		`<body class="app-layout">`,
+		`<aside class="sidebar" id="primary-navigation">`,
+		`id="main-content"`,
+		`id="theme-toggle"`,
+		`class="settings-menu`,
+		`>Colony</h2>`,
+		`>Hives</a>`,
+		`>Combs</span>`,
+		`>Cells</span>`,
+		`>Network</h2>`,
+		`>Status</h2>`,
+		`>Media</h2>`,
+		`class="app-footer"`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("application shell missing %q", want)
+		}
+	}
+	if !strings.Contains(body, `class="sidebar-link level-three active" href="/vms" aria-current="page"`) {
+		t.Errorf("VMs page should mark its sidebar entry current, got: %s", body)
 	}
 }
 
@@ -473,8 +506,8 @@ func TestServer_ClusterOverviewPage_IsDefaultLandingPage(t *testing.T) {
 			t.Errorf("cluster overview page missing %q, got: %s", want, body)
 		}
 	}
-	if !strings.Contains(body, `<a href="/" class="active">Stats</a>`) {
-		t.Errorf("cluster overview page nav should mark Stats active, got: %s", body)
+	if !strings.Contains(body, `class="sidebar-link active" href="/" aria-current="page">Hives</a>`) {
+		t.Errorf("Colony overview should mark Hives active, got: %s", body)
 	}
 }
 
@@ -674,7 +707,7 @@ func TestServer_ViewerDoesNotSeeOperatorOrAdminActions(t *testing.T) {
 	rec := httptest.NewRecorder()
 	s.ServeHTTP(rec, req)
 	body := rec.Body.String()
-	for _, forbidden := range []string{"Create VM", "Delete</button>", ">API Keys</a>"} {
+	for _, forbidden := range []string{"Create VM", "Delete</button>", `href="/machine"`, `href="/apikeys"`} {
 		if strings.Contains(body, forbidden) {
 			t.Errorf("Viewer page unexpectedly contains %q", forbidden)
 		}

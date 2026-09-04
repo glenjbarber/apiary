@@ -2,8 +2,9 @@
 <!DOCTYPE html>
 <html lang="en">
 {{template "head" .}}
-<body>
+<body class="app-layout">
   {{template "nav" .}}
+  <main class="content" id="main-content">
   {{template "page_header" (pageHeader "Cell Path Trace" "Explain the first known blocker or evidence gap between a VM Cell and a destination. Read-only - no packets are sent.")}}
 
   <div class="panel">
@@ -60,6 +61,8 @@
       <p class="muted">This result combines observations taken in sequence, not one atomic snapshot. A clear result means that no blocker was found within the observed scope. The destination was not contacted.</p>
     </div>
   {{end}}
+  </main>
+  {{template "footer" .}}
 </body>
 </html>
 {{end}}

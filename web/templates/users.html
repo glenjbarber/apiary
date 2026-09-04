@@ -2,14 +2,17 @@
 <!DOCTYPE html>
 <html lang="en">
 {{template "head" .}}
-<body>
+<body class="app-layout">
   {{template "nav" .}}
+  <main class="content" id="main-content">
   {{template "page_header" (pageHeader "Users" "Accounts known to the web UI's login and role map.")}}
   <div class="panel">
   <div id="user-panel">
     {{template "user_panel" .}}
   </div>
   </div>
+  </main>
+  {{template "footer" .}}
 </body>
 </html>
 {{end}}

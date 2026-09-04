@@ -2,8 +2,9 @@
 <!DOCTYPE html>
 <html lang="en">
 {{template "head" .}}
-<body>
+<body class="app-layout">
   {{template "nav" .}}
+  <main class="content" id="main-content">
   {{template "page_header" (pageHeader "Create virtual machine" "Define compute, placement, boot media, and network settings." "<a href='/vms'>Cancel</a>")}}
   <div id="create-error" class="banner-error" role="alert" aria-live="polite"></div>
   <form class="create-vm panel" style="margin-top:1rem" hx-post="/vms" hx-target="#create-error" hx-swap="innerHTML">
@@ -132,6 +133,8 @@
     refresh();
   })();
   </script>
+  </main>
+  {{template "footer" .}}
 </body>
 </html>
 {{end}}

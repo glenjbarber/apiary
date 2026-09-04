@@ -2,64 +2,146 @@
 <head>
   <meta charset="utf-8">
   <title>Apiary</title>
+  <script>
+    (function () {
+      try {
+        var saved = localStorage.getItem("apiary-theme");
+        var theme = saved || (window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+        document.documentElement.dataset.theme = theme;
+      } catch (_) {}
+    }());
+  </script>
   <script src="/static/htmx.min.js"></script>
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <style>
-    :root { --ink:#171717; --muted:#686868; --line:#dedede; --panel:#fff; --wash:#f6f5f1; --yellow:#ffc928; --danger:#a62020; --success:#166534; }
-    * { box-sizing: border-box; }
-    body { font-family: Inter, ui-sans-serif, system-ui, -apple-system, sans-serif; color:var(--ink); background:var(--wash); max-width:1180px; margin:0 auto; padding:0 1.25rem 3rem; line-height:1.45; }
+    :root {
+      color-scheme:light;
+      --ink:#171717; --muted:#686868; --line:#dedede; --panel:#fff;
+      --wash:#f6f5f1; --yellow:#ffc928; --danger:#a62020;
+      --success:#166534; --header:#0e1112; --sidebar:#171a1b;
+      --sidebar-ink:#ececec; --sidebar-muted:#92999c;
+      --table-head:#fafafa; --row-hover:#fffdf4; --field:#fff;
+      --shadow:0 1px 2px rgba(0,0,0,.04);
+    }
+    :root[data-theme="dark"] {
+      color-scheme:dark;
+      --ink:#eeeeec; --muted:#a9adaf; --line:#33393c; --panel:#14191b;
+      --wash:#0d1113; --danger:#ff9696; --success:#74d99a;
+      --header:#080b0c; --sidebar:#111516; --sidebar-ink:#eeeeec;
+      --sidebar-muted:#9ba2a5; --table-head:#191f21; --row-hover:#1b2224;
+      --field:#111618; --shadow:0 1px 2px rgba(0,0,0,.35);
+    }
+    * { box-sizing:border-box; }
+    html, body { min-height:100%; }
+    body {
+      margin:0; color:var(--ink); background:var(--wash);
+      font-family:Inter, ui-sans-serif, system-ui, -apple-system, sans-serif;
+      line-height:1.45;
+    }
+    .app-layout {
+      display:grid; min-height:100vh;
+      grid-template-columns:16rem minmax(0, 1fr);
+      grid-template-rows:4.5rem minmax(0, 1fr) auto;
+    }
+    .login-layout { display:grid; place-items:center; min-height:100vh; padding:2rem 1.25rem; }
+    .login-panel { width:min(100%, 28rem); padding:2rem; background:var(--panel); border:1px solid var(--line); border-radius:12px; box-shadow:var(--shadow); }
+    .login-brand { display:inline-flex; margin-bottom:1.5rem; color:var(--ink); }
+    .login-brand .brand-name { color:inherit; }
+    .login-panel h1 { margin-bottom:.25rem; }
+    .login-panel form { align-items:stretch; flex-direction:column; margin-top:1.25rem; }
+    .skip-link { position:fixed; left:1rem; top:-5rem; z-index:300; padding:.6rem .8rem; background:var(--yellow); color:#111; font-weight:750; }
+    .skip-link:focus { top:1rem; }
+    .app-header {
+      position:sticky; top:0; z-index:100; grid-column:1 / -1;
+      display:flex; align-items:center; justify-content:space-between; gap:1rem;
+      min-width:0; padding:.65rem 1.25rem; color:#fff; background:var(--header);
+      border-bottom:1px solid #282d2f;
+    }
+    .header-left, .header-actions { display:flex; align-items:center; gap:.65rem; min-width:0; }
+    .brand { display:flex; align-items:center; gap:.55rem; color:#fff; text-decoration:none; }
+    .brand-logo { width:34px; height:34px; display:block; }
+    .brand-name { font-weight:850; font-size:1.15rem; letter-spacing:.06em; }
+    .icon-button.sidebar-toggle { display:none; }
+    .account { display:flex; flex-direction:column; align-items:flex-end; min-width:0; line-height:1.2; }
+    .account-user { font-size:.84rem; color:#f4f4f4; }
+    .account-hive { margin-top:.18rem; color:#aeb4b6; font-size:.76rem; }
+    .icon-button, .settings-menu > summary {
+      display:grid; place-items:center; width:2.35rem; height:2.35rem;
+      padding:0; border:1px solid #42484a; border-radius:8px;
+      color:#f3f3f3; background:#1a1f21; cursor:pointer; text-decoration:none;
+    }
+    .icon-button:hover, .settings-menu > summary:hover,
+    .settings-menu[open] > summary { background:#2b3234; }
+    .settings-menu { position:relative; }
+    .settings-menu > summary { list-style:none; font-size:1.15rem; }
+    .settings-menu > summary::-webkit-details-marker { display:none; }
+    .settings-menu.current > summary { color:#111; background:var(--yellow); border-color:var(--yellow); }
+    .settings-items {
+      position:absolute; z-index:210; top:calc(100% + .55rem); right:0;
+      min-width:13rem; padding:.4rem; color:var(--ink); background:var(--panel);
+      border:1px solid var(--line); border-radius:9px; box-shadow:0 10px 30px rgba(0,0,0,.32);
+    }
+    .settings-items a, .settings-items button {
+      display:block; width:100%; padding:.55rem .65rem; border:0; border-radius:6px;
+      color:var(--ink); background:transparent; font:inherit; font-size:.9rem;
+      font-weight:500; text-align:left; text-decoration:none; cursor:pointer;
+    }
+    .settings-items a:hover, .settings-items button:hover { background:var(--row-hover); }
+    .settings-items .active { color:#111; background:var(--yellow); font-weight:750; }
+    .settings-items form { margin:0; border-top:1px solid var(--line); padding-top:.3rem; margin-top:.3rem; }
+    .sidebar {
+      position:sticky; top:4.5rem; grid-column:1; grid-row:2 / 4;
+      align-self:start; height:calc(100vh - 4.5rem); overflow-y:auto;
+      padding:1.1rem .85rem 2rem; color:var(--sidebar-ink);
+      background:var(--sidebar); border-right:1px solid #2b3032;
+      scrollbar-width:thin; scrollbar-color:#4a5052 transparent;
+    }
+    .sidebar::-webkit-scrollbar { width:8px; }
+    .sidebar::-webkit-scrollbar-track { background:transparent; }
+    .sidebar::-webkit-scrollbar-thumb { background:#4a5052; border-radius:999px; }
+    .sidebar-section { padding:.2rem 0 1rem; border-bottom:1px solid #303537; margin-bottom:.8rem; }
+    .sidebar-section:last-child { border-bottom:0; }
+    .sidebar-heading { margin:.2rem .7rem .45rem; color:var(--sidebar-muted); font-size:.68rem; font-weight:800; letter-spacing:.11em; text-transform:uppercase; }
+    .sidebar-link, .sidebar-tree-label { display:block; padding:.48rem .7rem; border-radius:7px; color:var(--sidebar-ink); font-size:.9rem; text-decoration:none; }
+    .sidebar-link:hover { color:#fff; background:#272d2f; }
+    .sidebar-link.active { color:#111; background:var(--yellow); font-weight:750; }
+    .sidebar-tree { margin:.1rem 0 0 .9rem; padding-left:.75rem; border-left:1px solid #42484a; }
+    .sidebar-tree-label { padding:.32rem .55rem; color:var(--sidebar-muted); font-size:.78rem; }
+    .sidebar-tree-label.level-two { margin-left:.45rem; }
+    .sidebar-link.level-three { margin-left:.9rem; }
+    .content { grid-column:2; grid-row:2; min-width:0; width:100%; max-width:1500px; padding:2rem clamp(1rem, 2.5vw, 2.5rem) 3rem; }
+    .app-footer { grid-column:2; grid-row:3; padding:1rem clamp(1rem, 2.5vw, 2.5rem) 1.5rem; color:var(--muted); font-size:.78rem; border-top:1px solid var(--line); }
     h1 { font-size:1.6rem; margin:0; letter-spacing:-.03em; }
     h2 { font-size:1.55rem; margin:2rem 0 1rem; letter-spacing:-.02em; }
     h3 { margin-top:1.75rem; }
-    nav { position:relative; z-index:10; display:flex; align-items:center; gap:.25rem; margin:0 -1.25rem 1.5rem; padding:.55rem 1.25rem; background:#111; color:#fff; overflow:visible; }
-    nav .brand { display:flex; align-items:center; color:#fff; margin-right:.7rem; }
-    nav .brand-logo { width:30px; height:30px; display:block; }
-    nav .brand-name { color:#fff; font-weight:800; font-size:1.1rem; letter-spacing:.04em; }
-    nav a { padding:.45rem .65rem; border-radius:6px; white-space:nowrap; text-decoration:none; color:#d6d6d6; font-size:.9rem; }
-    nav a:hover { color:#fff; background:#292929; }
-    nav a.active { color:#111; background:var(--yellow); font-weight:700; }
-    nav details { position:relative; white-space:nowrap; }
-    nav summary { list-style:none; cursor:pointer; padding:.45rem .65rem; border-radius:6px; color:#d6d6d6; font-size:.9rem; }
-    nav summary::-webkit-details-marker { display:none; }
-    nav summary:hover, nav details[open] summary { color:#fff; background:#292929; }
-    nav .menu-items { position:absolute; z-index:2; top:calc(100% + .35rem); right:0; min-width:10rem; padding:.35rem; background:#222; border:1px solid #444; border-radius:6px; box-shadow:0 5px 15px rgba(0,0,0,.3); }
-    nav .menu-items a { display:block; }
-    nav .account { margin-left:auto; color:#aaa; white-space:nowrap; font-size:.82rem; }
-    nav form { white-space:nowrap; }
-    nav .logout { border:0; background:none; color:#fff; text-decoration:underline; cursor:pointer; }
-    table { border-collapse: collapse; width: 100%; margin-top: 1rem; }
+    table { border-collapse:collapse; width:100%; margin-top:1rem; }
     th, td { text-align:left; padding:.7rem .65rem; border-bottom:1px solid var(--line); vertical-align:middle; }
-    th { color:var(--muted); font-size:.74rem; text-transform:uppercase; letter-spacing:.06em; background:#fafafa; }
+    th { color:var(--muted); font-size:.74rem; text-transform:uppercase; letter-spacing:.06em; background:var(--table-head); }
     th a { color:inherit; }
-    tbody tr:hover { background:#fffdf4; }
-    button, .button { border:1px solid #111; border-radius:6px; background:#111; color:#fff; padding:.5rem .75rem; font:inherit; font-weight:650; cursor:pointer; text-decoration:none; }
-    button:hover, .button:hover { background:#333; }
-    button.danger { border-color:#e3b5b5; background:#fff; color:var(--danger); }
-    .button.secondary { background:#fff; color:var(--ink); border-color:#aaa; }
-    .button.secondary:hover { background:#f1f1f1; }
-    input, select { min-height:2.4rem; border:1px solid #aaa; border-radius:6px; background:#fff; padding:.45rem .55rem; font:inherit; }
-    input:focus, select:focus, button:focus, a:focus { outline:3px solid rgba(255,201,40,.45); outline-offset:2px; }
-    .panel { background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:1.1rem; box-shadow:0 1px 2px rgba(0,0,0,.04); }
-    .page-header { display:flex; align-items:center; justify-content:space-between; gap:1rem; }
+    tbody tr:hover { background:var(--row-hover); }
+    button, .button { border:1px solid var(--ink); border-radius:6px; background:var(--ink); color:var(--wash); padding:.5rem .75rem; font:inherit; font-weight:650; cursor:pointer; text-decoration:none; }
+    button:hover, .button:hover { opacity:.86; }
+    button.danger { border-color:#a65b5b; background:var(--panel); color:var(--danger); }
+    .button.secondary { background:var(--panel); color:var(--ink); border-color:var(--muted); }
+    .button.secondary:hover { background:var(--row-hover); }
+    input, select { min-height:2.4rem; border:1px solid var(--muted); border-radius:6px; background:var(--field); color:var(--ink); padding:.45rem .55rem; font:inherit; }
+    input:focus, select:focus, button:focus, a:focus, summary:focus { outline:3px solid rgba(255,201,40,.45); outline-offset:2px; }
+    .panel { background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:1.1rem; box-shadow:var(--shadow); }
+    .page-header { display:flex; align-items:center; justify-content:space-between; gap:1rem; margin-bottom:1rem; }
     .page-header h2 { margin:0; }
     .muted { color:var(--muted); }
-    .badge { display:inline-flex; align-items:center; border-radius:999px; padding:.18rem .55rem; font-size:.76rem; font-weight:700; background:#e8e8e8; }
-    .badge.ready, .badge.running, .badge.up { color:var(--success); background:#dcf4e3; }
-    .badge.error, .badge.down, .badge.deleting { color:var(--danger); background:#fde3e3; }
-    .badge.creating, .badge.pending { color:#765600; background:#fff1b8; }
-    .badge.true { color:var(--success); background:#dcf4e3; }
-    .badge.false { color:var(--danger); background:#fde3e3; }
-    .badge.unknown { color:#555; background:#e8e8e8; }
-    .badge.not-applicable { color:#3b5bdb; background:#e7ebfd; }
-    .badge.stale { opacity:.55; border:1px dashed #999; }
-    .badge.healthy { color:var(--success); background:#dcf4e3; }
-	.badge.clear { color:var(--success); background:#dcf4e3; }
-	.badge.blocked { color:var(--danger); background:#fde3e3; }
-    .badge.degraded { color:#765600; background:#fff1b8; }
+    .badge { display:inline-flex; align-items:center; border-radius:999px; padding:.18rem .55rem; font-size:.76rem; font-weight:700; background:#e8e8e8; color:#333; }
+    .badge.ready, .badge.running, .badge.up, .badge.true, .badge.healthy, .badge.clear { color:var(--success); background:color-mix(in srgb, var(--success) 17%, var(--panel)); }
+    .badge.error, .badge.down, .badge.deleting, .badge.false, .badge.blocked { color:var(--danger); background:color-mix(in srgb, var(--danger) 17%, var(--panel)); }
+    .badge.creating, .badge.pending, .badge.degraded { color:#765600; background:#fff1b8; }
+    :root[data-theme="dark"] .badge.creating, :root[data-theme="dark"] .badge.pending, :root[data-theme="dark"] .badge.degraded { color:#ffe08a; background:#493b11; }
+    .badge.unknown { color:var(--muted); background:var(--table-head); }
+    .badge.not-applicable { color:#6685ef; background:color-mix(in srgb, #6685ef 17%, var(--panel)); }
+    .badge.stale { opacity:.65; border:1px dashed var(--muted); }
     .badge.contradictory { color:#fff; background:var(--danger); }
     .actions { display:flex; align-items:center; gap:.55rem; white-space:nowrap; }
-    form.upload-iso, form.inline-form { display: flex; gap: 0.75rem; align-items: end; flex-wrap: wrap; }
-    form.upload-iso label, form.inline-form label { display: flex; flex-direction: column; font-size: 0.85rem; }
+    form.upload-iso, form.inline-form { display:flex; gap:.75rem; align-items:end; flex-wrap:wrap; }
+    form.upload-iso label, form.inline-form label { display:flex; flex-direction:column; font-size:.85rem; }
     .form-section { border:0; border-top:1px solid var(--line); margin:0; padding:1.25rem 0 .25rem; }
     .form-section:first-child { border-top:0; padding-top:0; }
     .form-section legend { font-size:1.05rem; font-weight:750; padding:0 .5rem 0 0; }
@@ -78,74 +160,134 @@
     .compact-table { margin-top:.25rem; }
     .vm-controls, .danger-zone { display:flex; justify-content:space-between; align-items:center; gap:1rem; margin-top:1rem; }
     .vm-controls p, .danger-zone p { margin:.25rem 0 0; }
-    .danger-zone { border-color:#e3b5b5; }
+    .danger-zone { border-color:#a65b5b; }
     .error { color:var(--danger); }
-    .success { color:#166534; font-weight:650; }
-    /* Dedicated banner classes for a page/form-level error or success
-       message - distinct from the bare .error/.success classes above,
-       which stay plain colored text for inline uses (badges, table
-       cells) that shouldn't grow a box around them. Fixed min-height so
-       an appearing/disappearing banner doesn't shift the content below
-       it up and down; padding/background/border only kick in once
-       there's actual text, via :not(:empty), so the reserved space
-       stays a plain sliver when there's nothing to show. One
-       consistent treatment shared by every page with a banner (create-
-       VM/jail, jails, networks, images, VM list, cluster overview,
-       host detail, API keys) rather than a per-page copy. */
-    .banner-error, .banner-success {
-      min-height: 1.25em; margin-bottom: 0.75rem; font-size: 0.9em;
-      word-break: break-word; color: var(--danger);
+    .success { color:var(--success); font-weight:650; }
+    .banner-error, .banner-success { min-height:1.25em; margin-bottom:.75rem; font-size:.9em; word-break:break-word; color:var(--danger); }
+    .banner-success { color:var(--success); font-weight:650; }
+    .banner-error:not(:empty) { background:color-mix(in srgb, var(--danger) 13%, var(--panel)); border:1px solid color-mix(in srgb, var(--danger) 35%, var(--panel)); border-radius:4px; padding:.5rem .75rem; }
+    .banner-success:not(:empty) { background:color-mix(in srgb, var(--success) 13%, var(--panel)); border:1px solid color-mix(in srgb, var(--success) 35%, var(--panel)); border-radius:4px; padding:.5rem .75rem; }
+    code { font-size:.8em; word-break:break-all; }
+    .upload-progress { display:flex; align-items:center; gap:.5rem; margin-top:.5rem; }
+    .upload-progress progress { flex:1; max-width:20rem; height:1rem; }
+    .upload-progress span { font-size:.85em; min-width:3em; }
+    .upload-progress[hidden] { display:none; }
+    @media (max-width:900px) {
+      .app-layout { grid-template-columns:1fr; }
+      .icon-button.sidebar-toggle { display:inline-grid; }
+      .sidebar { position:fixed; z-index:90; top:4.5rem; bottom:0; left:0; width:min(18rem, 86vw); height:auto; transform:translateX(-105%); transition:transform .18s ease; box-shadow:8px 0 24px rgba(0,0,0,.32); }
+      .nav-open .sidebar { transform:translateX(0); }
+      .content, .app-footer { grid-column:1; }
+      .content { padding:1.35rem 1rem 2.5rem; }
+      .app-footer { padding:1rem; }
+      table { display:block; overflow-x:auto; }
     }
-    .banner-success { color: #166534; font-weight: 650; }
-    .banner-error:not(:empty) {
-      background: #fdecea; border: 1px solid #f5c6c0; border-radius: 4px;
-      padding: 0.5rem 0.75rem;
+    @media (max-width:620px) {
+      .app-header { padding:.6rem .75rem; }
+      .brand-name { display:none; }
+      .account-user { max-width:9rem; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+      form.upload-iso, form.inline-form { align-items:stretch; }
+      form.upload-iso label, form.inline-form label { min-width:100%; }
+      .form-grid, .detail-grid { grid-template-columns:1fr; }
+      .form-grid label.full { grid-column:auto; }
+      .vm-controls, .danger-zone { align-items:flex-start; flex-direction:column; }
+      .page-header { align-items:flex-start; }
     }
-    .banner-success:not(:empty) {
-      background: #eaf7ec; border: 1px solid #c2e6c6; border-radius: 4px;
-      padding: 0.5rem 0.75rem;
-    }
-    code { font-size: 0.8em; word-break: break-all; }
-    .upload-progress { display: flex; align-items: center; gap: 0.5rem; margin-top: 0.5rem; }
-    .upload-progress progress { flex: 1; max-width: 20rem; height: 1rem; }
-    .upload-progress span { font-size: 0.85em; min-width: 3em; }
-    /* Must come after .upload-progress so it wins on equal specificity -
-       otherwise the class rule's own "display: flex" would override the
-       browser's default [hidden] handling and the bar would never
-       actually hide between uploads. */
-    .upload-progress[hidden] { display: none; }
-    @media (max-width:760px) { body{padding:0 .75rem 2rem} nav{margin:0 -.75rem 1rem;padding:.65rem .75rem} nav .account{display:none} table{display:block;overflow-x:auto} form.upload-iso,form.inline-form{align-items:stretch} form.upload-iso label,form.inline-form label{min-width:100%} .form-grid,.detail-grid{grid-template-columns:1fr}.form-grid label.full{grid-column:auto}.vm-controls,.danger-zone{align-items:flex-start;flex-direction:column}.page-header{align-items:flex-start} }
+    @media (prefers-reduced-motion:reduce) { .sidebar { transition:none; } }
   </style>
 </head>
 {{end}}
 
 {{define "nav"}}
-<nav>
-  <a class="brand" href="/" aria-label="Apiary home"><img class="brand-logo" src="/static/apiary-mark.svg" alt=""><span class="brand-name">APIARY</span></a>
-  <a href="/"{{if eq .ActivePage "stats"}} class="active"{{end}}>Stats</a>
-  <a href="/vms"{{if eq .ActivePage "vms"}} class="active"{{end}}>VMs</a>
-  <a href="/jails"{{if eq .ActivePage "jails"}} class="active"{{end}}>Jails</a>
-  <a href="/networks"{{if eq .ActivePage "networks"}} class="active"{{end}}>Networks</a>
-  <details>
-    <summary>Manage ▾</summary>
-    <div class="menu-items">
-      <a href="/simulate"{{if eq .ActivePage "simulate"}} class="active"{{end}}>Simulate</a>
-      <a href="/assumptions"{{if eq .ActivePage "assumptions"}} class="active"{{end}}>Assumptions</a>
-      <a href="/recovery-handbook"{{if eq .ActivePage "recovery-handbook"}} class="active"{{end}}>Recovery Handbook</a>
-      <a href="/trace"{{if eq .ActivePage "trace"}} class="active"{{end}}>Path Trace</a>
-      <a href="/images"{{if eq .ActivePage "images"}} class="active"{{end}}>Images</a>
-      {{if .CanOperate}}<a href="/machine"{{if eq .ActivePage "machine"}} class="active"{{end}}>Machine</a>{{end}}
-      {{if .CanAdmin}}<a href="/apikeys"{{if eq .ActivePage "apikeys"}} class="active"{{end}}>API Keys</a>{{end}}
-      <a href="/users"{{if eq .ActivePage "users"}} class="active"{{end}}>Users</a>
-    </div>
-  </details>
-  {{if .AuthEnabled}}
-  {{if .Username}}<span class="account">logged in as {{.Username}} ({{.Role}}) · Hive {{.HiveID}}</span>{{end}}
-  <form method="post" action="/logout">
-    <button class="logout" type="submit">Log out</button>
-  </form>
-  {{end}}
-</nav>
+<a class="skip-link" href="#main-content">Skip to content</a>
+<header class="app-header">
+  <div class="header-left">
+    <button class="icon-button sidebar-toggle" id="sidebar-toggle" type="button" aria-label="Open navigation" aria-controls="primary-navigation" aria-expanded="false">&#9776;</button>
+    <a class="brand" href="/" aria-label="Apiary home"><img class="brand-logo" src="/static/apiary-mark.svg" alt=""><span class="brand-name">APIARY</span></a>
+  </div>
+  <div class="header-actions">
+    {{if .AuthEnabled}}{{if .Username}}<div class="account"><span class="account-user">{{.Username}} ({{.Role}})</span><span class="account-hive">Hive {{.HiveID}}</span></div>{{end}}{{end}}
+    <button class="icon-button" id="theme-toggle" type="button" aria-label="Switch color theme" title="Switch color theme"><span aria-hidden="true">&#9788;</span></button>
+    <details class="settings-menu{{if or (eq .ActivePage "machine") (eq .ActivePage "apikeys") (eq .ActivePage "users")}} current{{end}}">
+      <summary aria-label="Open settings" title="Settings">&#9881;</summary>
+      <div class="settings-items">
+        {{if .CanOperate}}<a href="/machine"{{if eq .ActivePage "machine"}} class="active" aria-current="page"{{end}}>Machine</a>{{end}}
+        <a href="/users"{{if eq .ActivePage "users"}} class="active" aria-current="page"{{end}}>Users</a>
+        {{if .CanAdmin}}<a href="/apikeys"{{if eq .ActivePage "apikeys"}} class="active" aria-current="page"{{end}}>API keys</a>{{end}}
+        {{if .AuthEnabled}}<form method="post" action="/logout"><button type="submit">Log out</button></form>{{end}}
+      </div>
+    </details>
+  </div>
+</header>
+<aside class="sidebar" id="primary-navigation">
+  <nav class="sidebar-nav" aria-label="Primary navigation">
+    <section class="sidebar-section" aria-labelledby="nav-colony">
+      <h2 class="sidebar-heading" id="nav-colony">Colony</h2>
+      <a class="sidebar-link{{if eq .ActivePage "stats"}} active{{end}}" href="/"{{if eq .ActivePage "stats"}} aria-current="page"{{end}}>Hives</a>
+      <div class="sidebar-tree">
+        <span class="sidebar-tree-label">Combs</span>
+        <span class="sidebar-tree-label level-two">Cells</span>
+        <a class="sidebar-link level-three{{if eq .ActivePage "vms"}} active{{end}}" href="/vms"{{if eq .ActivePage "vms"}} aria-current="page"{{end}}>Virtual machines</a>
+        <a class="sidebar-link level-three{{if eq .ActivePage "jails"}} active{{end}}" href="/jails"{{if eq .ActivePage "jails"}} aria-current="page"{{end}}>Jails</a>
+      </div>
+    </section>
+    <section class="sidebar-section" aria-labelledby="nav-network">
+      <h2 class="sidebar-heading" id="nav-network">Network</h2>
+      <a class="sidebar-link{{if eq .ActivePage "networks"}} active{{end}}" href="/networks"{{if eq .ActivePage "networks"}} aria-current="page"{{end}}>Networks</a>
+      <a class="sidebar-link{{if eq .ActivePage "trace"}} active{{end}}" href="/trace"{{if eq .ActivePage "trace"}} aria-current="page"{{end}}>Path Trace</a>
+    </section>
+    <section class="sidebar-section" aria-labelledby="nav-status">
+      <h2 class="sidebar-heading" id="nav-status">Status</h2>
+      <a class="sidebar-link{{if eq .ActivePage "assumptions"}} active{{end}}" href="/assumptions"{{if eq .ActivePage "assumptions"}} aria-current="page"{{end}}>Assumptions</a>
+      <a class="sidebar-link{{if eq .ActivePage "simulate"}} active{{end}}" href="/simulate"{{if eq .ActivePage "simulate"}} aria-current="page"{{end}}>Simulations</a>
+      <a class="sidebar-link{{if eq .ActivePage "recovery-handbook"}} active{{end}}" href="/recovery-handbook"{{if eq .ActivePage "recovery-handbook"}} aria-current="page"{{end}}>Recovery handbook</a>
+    </section>
+    <section class="sidebar-section" aria-labelledby="nav-media">
+      <h2 class="sidebar-heading" id="nav-media">Media</h2>
+      <a class="sidebar-link{{if eq .ActivePage "images"}} active{{end}}" href="/images"{{if eq .ActivePage "images"}} aria-current="page"{{end}}>ISO and disk images</a>
+    </section>
+  </nav>
+</aside>
+{{end}}
+
+{{define "footer"}}
+<footer class="app-footer">Apiary &middot; FreeBSD-native Colony management</footer>
+<script>
+  (function () {
+    var root = document.documentElement;
+    var themeButton = document.getElementById("theme-toggle");
+    var navButton = document.getElementById("sidebar-toggle");
+    var sidebar = document.getElementById("primary-navigation");
+    if (themeButton) {
+      themeButton.addEventListener("click", function () {
+        var next = root.dataset.theme === "dark" ? "light" : "dark";
+        root.dataset.theme = next;
+        try { localStorage.setItem("apiary-theme", next); } catch (_) {}
+      });
+    }
+    if (navButton && sidebar) {
+      navButton.addEventListener("click", function () {
+        var open = document.body.classList.toggle("nav-open");
+        navButton.setAttribute("aria-expanded", String(open));
+        navButton.setAttribute("aria-label", open ? "Close navigation" : "Open navigation");
+      });
+      sidebar.addEventListener("click", function (event) {
+        if (event.target.closest("a") && document.body.classList.contains("nav-open")) {
+          document.body.classList.remove("nav-open");
+          navButton.setAttribute("aria-expanded", "false");
+          navButton.setAttribute("aria-label", "Open navigation");
+        }
+      });
+      document.addEventListener("keydown", function (event) {
+        if (event.key === "Escape" && document.body.classList.contains("nav-open")) {
+          document.body.classList.remove("nav-open");
+          navButton.setAttribute("aria-expanded", "false");
+          navButton.focus();
+        }
+      });
+    }
+  }());
+</script>
 {{end}}
 
 {{define "page_header"}}<div class="page-header"><div><h2>{{.Title}}</h2><div class="muted">{{.Subtitle}}</div></div>{{if .Extra}}{{.Extra}}{{end}}</div>{{end}}

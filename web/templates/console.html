@@ -2,8 +2,9 @@
 <!DOCTYPE html>
 <html lang="en">
 {{template "head" .}}
-<body>
+<body class="app-layout">
   {{template "nav" .}}
+  <main class="content" id="main-content">
   <h1>Console: {{if .ConsoleVMName}}{{.ConsoleVMName}} ({{.ConsoleVMID}}){{else}}{{.ConsoleVMID}}{{end}}</h1>
   {{if .ConsoleError}}
     <div class="error">{{.ConsoleError}}</div>
@@ -31,6 +32,8 @@
       });
     </script>
   {{end}}
+  </main>
+  {{template "footer" .}}
 </body>
 </html>
 {{end}}

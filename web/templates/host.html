@@ -2,8 +2,9 @@
 <!DOCTYPE html>
 <html lang="en">
 {{template "head" .}}
-<body>
+<body class="app-layout">
   {{template "nav" .}}
+  <main class="content" id="main-content">
   {{template "page_header" (pageHeader "Host detail" (nodeSubtitle .Stats.NodeID) "<a href='/'>Back to overview</a>")}}
   {{if .Error}}<div class="banner-error">{{.Error}}</div>{{end}}
   {{range .Stats.Errors}}<div class="error">{{.}}</div>{{end}}
@@ -80,6 +81,8 @@
   </table>
   <p><em>Network figures are cumulative counters since boot, not a live rate.</em></p>
 
+  </main>
+  {{template "footer" .}}
 </body>
 </html>
 {{end}}

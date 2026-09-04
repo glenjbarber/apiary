@@ -2,8 +2,9 @@
 <!DOCTYPE html>
 <html lang="en">
 {{template "head" .}}
-<body>
+<body class="app-layout">
   {{template "nav" .}}
+  <main class="content" id="main-content">
   {{template "page_header" (pageHeader "Images" "Verified installer media and raw base disks stored on this node.")}}
   {{if .CanOperate}}<form id="iso-upload-form" class="upload-iso" hx-post="/isos" hx-target="#iso-panel" hx-swap="innerHTML" hx-encoding="multipart/form-data">
     <label>Expected SHA-256
@@ -44,6 +45,8 @@
     {{template "iso_panel" .}}
   </div>
   </div>
+  </main>
+  {{template "footer" .}}
 </body>
 </html>
 {{end}}

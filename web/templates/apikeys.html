@@ -2,8 +2,9 @@
 <!DOCTYPE html>
 <html lang="en">
 {{template "head" .}}
-<body>
+<body class="app-layout">
   {{template "nav" .}}
+  <main class="content" id="main-content">
   {{template "page_header" (pageHeader "API keys" "Cluster-wide credentials for API clients and peer operations.")}}
   <p>
     Keys authenticate calls to managerd's external API. Creating the
@@ -28,6 +29,8 @@
     {{template "apikey_panel" .}}
   </div>
   </div>
+  </main>
+  {{template "footer" .}}
 </body>
 </html>
 {{end}}

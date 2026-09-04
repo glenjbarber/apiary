@@ -2,8 +2,9 @@
 <!DOCTYPE html>
 <html lang="en">
 {{template "head" .}}
-<body>
+<body class="app-layout">
   {{template "nav" .}}
+  <main class="content" id="main-content">
   {{if .CanOperate}}
     {{template "page_header" (pageHeader "Virtual machines" "Cluster workloads and their current reconciliation state." "<a class='button' href='/vms/new'>Create VM</a>")}}
   {{else}}
@@ -39,6 +40,8 @@
       document.getElementById("vm-error").textContent = e.detail.value || "";
     });
   </script>
+  </main>
+  {{template "footer" .}}
 </body>
 </html>
 {{end}}

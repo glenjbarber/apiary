@@ -2,8 +2,9 @@
 <!DOCTYPE html>
 <html lang="en">
 {{template "head" .}}
-<body>
+<body class="app-layout">
   {{template "nav" .}}
+  <main class="content" id="main-content">
   {{if .CanOperate}}
     {{template "page_header" (pageHeader "Jails" "FreeBSD workloads, placement, and replication state." "<a class='button' href='/jails/new'>Create Jail</a>")}}
   {{else}}
@@ -14,6 +15,8 @@
     {{template "jail_panel" .}}
   </div>
   </div>
+  </main>
+  {{template "footer" .}}
 </body>
 </html>
 {{end}}

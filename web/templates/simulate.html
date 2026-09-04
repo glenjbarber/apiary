@@ -2,8 +2,9 @@
 <!DOCTYPE html>
 <html lang="en">
 {{template "head" .}}
-<body>
+<body class="app-layout">
   {{template "nav" .}}
+  <main class="content" id="main-content">
   {{template "page_header" (pageHeader "Dependency Graph Simulator" "Explore known consequences of infrastructure failures. Read-only - nothing here is ever changed.")}}
 
   <div class="panel">
@@ -156,6 +157,8 @@
   </div>
   {{end}}
   {{end}}
+  </main>
+  {{template "footer" .}}
 </body>
 </html>
 {{end}}

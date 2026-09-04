@@ -2,8 +2,9 @@
 <!DOCTYPE html>
 <html lang="en">
 {{template "head" .}}
-<body>
+<body class="app-layout">
   {{template "nav" .}}
+  <main class="content" id="main-content">
   {{template "page_header" (pageHeader "Automated Assumption Checks" "Continuously re-checked environmental facts, persisted with history. A scoped precursor to a fuller Assumption Register - no owner/scope/evidence/expiration fields yet.")}}
 
   {{if .Error}}
@@ -45,6 +46,8 @@
   {{else}}
   <p class="muted"><em>No known nodes</em></p>
   {{end}}
+  </main>
+  {{template "footer" .}}
 </body>
 </html>
 {{end}}

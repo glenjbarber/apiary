@@ -2,12 +2,15 @@
 <!DOCTYPE html>
 <html lang="en">
 {{template "head" .}}
-<body>
+<body class="app-layout">
   {{template "nav" .}}
+  <main class="content" id="main-content">
   {{template "page_header" (pageHeader "Serial log" (vmSubtitle .SerialLogVMName .SerialLogVMID) "<a href='/vms'>Back to VMs</a>")}}
   <div id="serial-log-panel" hx-get="/vms/{{.SerialLogVMID}}/serial/content" hx-trigger="every 3s" hx-swap="innerHTML">
     {{template "serial_log_content" .}}
   </div>
+  </main>
+  {{template "footer" .}}
 </body>
 </html>
 {{end}}

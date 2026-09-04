@@ -2,8 +2,9 @@
 <!DOCTYPE html>
 <html lang="en">
 {{template "head" .}}
-<body>
+<body class="app-layout">
   {{template "nav" .}}
+  <main class="content" id="main-content">
   {{template "page_header" (pageHeader "Machine Configuration" "This node's own local settings - not replicated to other cluster members.")}}
 
   <div class="panel">
@@ -42,6 +43,8 @@
       {{template "quota_panel" .}}
     </div>
   </div>
+  </main>
+  {{template "footer" .}}
 </body>
 </html>
 {{end}}

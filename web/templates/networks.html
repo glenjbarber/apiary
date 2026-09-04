@@ -2,8 +2,9 @@
 <!DOCTYPE html>
 <html lang="en">
 {{template "head" .}}
-<body>
+<body class="app-layout">
   {{template "nav" .}}
+  <main class="content" id="main-content">
   {{template "page_header" (pageHeader "Networks" "Cluster network definitions and local bridge health.")}}
   {{if .CanOperate}}<form class="inline-form panel" style="margin-bottom:1rem" hx-post="/networks" hx-target="#network-panel" hx-swap="innerHTML">
     <label>ID <input type="text" name="id" required></label>
@@ -19,6 +20,8 @@
     {{template "network_panel" .}}
   </div>
   </div>
+  </main>
+  {{template "footer" .}}
 </body>
 </html>
 {{end}}

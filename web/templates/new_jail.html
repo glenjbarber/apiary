@@ -2,8 +2,9 @@
 <!DOCTYPE html>
 <html lang="en">
 {{template "head" .}}
-<body>
+<body class="app-layout">
   {{template "nav" .}}
+  <main class="content" id="main-content">
   {{template "page_header" (pageHeader "Create jail" "Define a FreeBSD jail's identity and placement." "<a href='/jails'>Cancel</a>")}}
   <form class="create-vm inline-form panel" style="margin-top:1rem" hx-post="/jails" hx-target="#create-error" hx-swap="innerHTML">
     <label>ID <input type="text" name="id" required></label>
@@ -24,6 +25,8 @@
     <button type="submit">Create</button>
   </form>
   <div id="create-error" class="banner-error"></div>
+  </main>
+  {{template "footer" .}}
 </body>
 </html>
 {{end}}

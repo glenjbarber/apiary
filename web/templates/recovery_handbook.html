@@ -16,8 +16,9 @@
     @page { @bottom-center { content: "Page " counter(page) " of " counter(pages); } }
   }
 </style>
-<body>
+<body class="app-layout">
   {{template "nav" .}}
+  <main class="content" id="main-content">
   {{template "page_header" (pageHeader "Offline Recovery Handbook" "A printable, on-demand recovery edition for one scenario: loss of one hive. Read-only - nothing here is ever changed.")}}
 
   <div class="panel no-print">
@@ -215,6 +216,8 @@
   </div>
   {{end}}
   {{end}}
+  </main>
+  {{template "footer" .}}
 </body>
 </html>
 {{end}}
