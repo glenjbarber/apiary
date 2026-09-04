@@ -73,8 +73,10 @@ type fakePeerServer struct {
 
 	listISOsResp *rpcpb.ListISOsResponse
 
-	simulateNodeFailureReq  *rpcpb.SimulateNodeFailureRequest
-	simulateNodeFailureResp *rpcpb.SimulateNodeFailureResponse
+	simulateNodeFailureReq     *rpcpb.SimulateNodeFailureRequest
+	simulateNodeFailureResp    *rpcpb.SimulateNodeFailureResponse
+	simulateNetworkFailureReq  *rpcpb.SimulateNetworkFailureRequest
+	simulateNetworkFailureResp *rpcpb.SimulateNetworkFailureResponse
 }
 
 func (f *fakePeerServer) UploadISO(stream rpcpb.ManagerService_UploadISOServer) error {
@@ -226,6 +228,14 @@ func (f *fakePeerServer) SimulateNodeFailure(_ context.Context, req *rpcpb.Simul
 		return f.simulateNodeFailureResp, nil
 	}
 	return &rpcpb.SimulateNodeFailureResponse{}, nil
+}
+
+func (f *fakePeerServer) SimulateNetworkFailure(_ context.Context, req *rpcpb.SimulateNetworkFailureRequest) (*rpcpb.SimulateNetworkFailureResponse, error) {
+	f.simulateNetworkFailureReq = req
+	if f.simulateNetworkFailureResp != nil {
+		return f.simulateNetworkFailureResp, nil
+	}
+	return &rpcpb.SimulateNetworkFailureResponse{}, nil
 }
 
 func (f *fakePeerServer) GetVM(_ context.Context, req *rpcpb.GetVMRequest) (*rpcpb.GetVMResponse, error) {
@@ -389,6 +399,20 @@ func TestPeerReporter_SimulateNodeFailure_ReturnsPeerResponse(t *testing.T) {
 	}
 	if resp.GetQuorum().GetSurvives() || resp.GetQuorum().GetNote() != "quorum is LOST" {
 		t.Errorf("SimulateNodeFailure() = %+v, want the peer's response verbatim", resp)
+	}
+}
+
+func TestPeerReporter_SimulateNetworkFailure_ReturnsPeerResponse(t *testing.T) {
+	fake := &fakePeerServer{simulateNetworkFailureResp: &rpcpb.SimulateNetworkFailureResponse{Network: &rpcpb.NetworkDefinition{Id: "net-1"}}}
+	addr := newTestPeerServer(t, fake)
+	p := NewPeerReporter("", false, nil)
+
+	resp, err := p.SimulateNetworkFailure(context.Background(), addr, &rpcpb.SimulateNetworkFailureRequest{NetworkId: "net-1"})
+	if err != nil {
+		t.Fatalf("SimulateNetworkFailure() error: %v", err)
+	}
+	if fake.simulateNetworkFailureReq.GetNetworkId() != "net-1" || resp.GetNetwork().GetId() != "net-1" {
+		t.Errorf("SimulateNetworkFailure() request=%+v response=%+v", fake.simulateNetworkFailureReq, resp)
 	}
 }
 

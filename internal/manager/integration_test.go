@@ -513,6 +513,51 @@ func TestIntegration_SimulateNodeFailure_UnknownNodeIDReturnsError(t *testing.T)
 	}
 }
 
+func TestIntegration_SimulateNetworkFailure_ReportsAttachedVMs(t *testing.T) {
+	raftdSocket := newRaftdUDSSocket(t)
+	client := newManagerdRPCClient(t, raftdSocket)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if _, err := client.CreateNetwork(ctx, &rpcpb.CreateNetworkRequest{Network: &rpcpb.NetworkDefinition{
+		Id: "net-1", Name: "services", VlanId: 100, Subnet: "10.60.0.0/24",
+	}}); err != nil {
+		t.Fatalf("CreateNetwork() error: %v", err)
+	}
+	if _, err := client.CreateVM(ctx, &rpcpb.CreateVMRequest{Vm: &rpcpb.VMDefinition{
+		Id: "vm-1", Name: "frontend", NodeId: "raftd-1", NetworkId: "net-1",
+	}}); err != nil {
+		t.Fatalf("CreateVM() error: %v", err)
+	}
+
+	resp, err := client.SimulateNetworkFailure(ctx, &rpcpb.SimulateNetworkFailureRequest{NetworkId: "net-1"})
+	if err != nil {
+		t.Fatalf("SimulateNetworkFailure() error: %v", err)
+	}
+	if resp.GetError() != "" {
+		t.Fatalf("SimulateNetworkFailure() returned error: %s", resp.GetError())
+	}
+	if resp.GetNetwork().GetId() != "net-1" || len(resp.GetAffectedResources()) != 1 || resp.GetAffectedResources()[0].GetId() != "vm-1" {
+		t.Fatalf("SimulateNetworkFailure() = %+v, want net-1 affecting vm-1", resp)
+	}
+}
+
+func TestIntegration_SimulateNetworkFailure_UnknownNetworkReturnsError(t *testing.T) {
+	raftdSocket := newRaftdUDSSocket(t)
+	client := newManagerdRPCClient(t, raftdSocket)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	resp, err := client.SimulateNetworkFailure(ctx, &rpcpb.SimulateNetworkFailureRequest{NetworkId: "missing"})
+	if err != nil {
+		t.Fatalf("SimulateNetworkFailure() error: %v", err)
+	}
+	if resp.GetError() == "" {
+		t.Fatal("SimulateNetworkFailure(missing) error = empty, want explicit rejection")
+	}
+}
+
 func TestIntegration_GetVMConsole_RunningLocallyWithVNC(t *testing.T) {
 	raftdSocket := newRaftdUDSSocket(t)
 	vnc := &fakeVNCLookup{ports: map[string]int{"vm-1": 5901}}

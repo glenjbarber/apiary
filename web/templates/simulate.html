@@ -4,9 +4,10 @@
 {{template "head" .}}
 <body>
   {{template "nav" .}}
-  {{template "page_header" (pageHeader "Dependency Graph Simulator" "What happens if this Hive disappears right now? Read-only - nothing here is ever changed.")}}
+  {{template "page_header" (pageHeader "Dependency Graph Simulator" "Explore known consequences of infrastructure failures. Read-only - nothing here is ever changed.")}}
 
   <div class="panel">
+    <h3>Hive failure</h3>
     <form method="get" action="/simulate" class="inline-form">
       <label>Hive
         {{if .SimulateNodes}}
@@ -16,6 +17,23 @@
         </select>
         {{else}}
         <input type="text" name="node_id" placeholder="node id" value="{{.SimulateTargetNodeID}}" required>
+        {{end}}
+      </label>
+      <button type="submit">Simulate failure</button>
+    </form>
+  </div>
+
+  <div class="panel">
+    <h3>Managed network failure</h3>
+    <form method="get" action="/simulate" class="inline-form">
+      <label>Network
+        {{if .SimulateNetworks}}
+        <select name="network_id" required>
+          <option value="">Choose a network</option>
+          {{range .SimulateNetworks}}<option value="{{.ID}}"{{if eq .ID $.SimulateTargetNetworkID}} selected{{end}}>{{.Name}} ({{.ID}})</option>{{end}}
+        </select>
+        {{else}}
+        <input type="text" name="network_id" placeholder="network id" value="{{.SimulateTargetNetworkID}}" required>
         {{end}}
       </label>
       <button type="submit">Simulate failure</button>
@@ -79,6 +97,39 @@
         </tr>
         {{else}}
         <tr><td colspan="5"><em>No Cells replica-backed by this node</em></td></tr>
+        {{end}}
+      </tbody>
+    </table>
+  </div>
+  {{end}}
+  {{end}}
+
+  {{if .SimulateTargetNetworkID}}
+  {{if .SimulateError}}
+  <div class="banner-error">{{.SimulateError}}</div>
+  {{else}}
+  <p class="muted">Built from separate network and VM reads, not one atomic snapshot. {{.SimulateNetworkNote}}</p>
+  <div class="panel">
+    <h3>Managed network {{.SimulateNetwork.Name}}</h3>
+    <table>
+      <tbody>
+        <tr><th>ID</th><td>{{.SimulateNetwork.ID}}</td></tr>
+        <tr><th>Subnet</th><td>{{.SimulateNetwork.Subnet}}</td></tr>
+        <tr><th>VLAN</th><td>{{.SimulateNetwork.VLANID}}</td></tr>
+        <tr><th>External gateway</th><td>{{if .SimulateNetwork.ExternalGateway}}{{.SimulateNetwork.ExternalGateway}}{{else}}<em>Apiary-managed</em>{{end}}</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="panel">
+    <h3>Affected Cells</h3>
+    <p class="muted">These Cells declare this managed network. Their process and storage are not assumed to stop.</p>
+    <table>
+      <thead><tr><th>ID</th><th>Name</th><th>Owner Hive</th><th>Known consequence</th></tr></thead>
+      <tbody>
+        {{range .SimulateNetworkImpacts}}
+        <tr><td>{{.ID}}</td><td>{{.Name}}</td><td>{{.NodeID}}</td><td>{{.Explanation}}</td></tr>
+        {{else}}
+        <tr><td colspan="4"><em>No Cells declare this managed network</em></td></tr>
         {{end}}
       </tbody>
     </table>

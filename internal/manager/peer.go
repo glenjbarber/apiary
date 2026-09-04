@@ -242,6 +242,15 @@ func (p *PeerReporter) SimulateNodeFailure(ctx context.Context, addr string, req
 	return client.SimulateNodeFailure(ctx, req)
 }
 
+func (p *PeerReporter) SimulateNetworkFailure(ctx context.Context, addr string, req *rpcpb.SimulateNetworkFailureRequest) (*rpcpb.SimulateNetworkFailureResponse, error) {
+	conn, client, err := p.dial(addr)
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close()
+	return client.SimulateNetworkFailure(ctx, req)
+}
+
 // ListISOs forwards to a specific peer's own ListISOs RPC - like
 // HostStats, not leader-only-read forwarding (ISOs always answer
 // locally for whichever managerd receives the call); this is how

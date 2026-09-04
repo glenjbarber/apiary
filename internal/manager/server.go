@@ -100,6 +100,7 @@ type PeerForwarder interface {
 	// SimulateNodeFailure handler for why the whole request (not just
 	// one failed sub-call) is forwarded on a leader-hint rejection.
 	SimulateNodeFailure(ctx context.Context, addr string, req *rpcpb.SimulateNodeFailureRequest) (*rpcpb.SimulateNodeFailureResponse, error)
+	SimulateNetworkFailure(ctx context.Context, addr string, req *rpcpb.SimulateNetworkFailureRequest) (*rpcpb.SimulateNetworkFailureResponse, error)
 
 	// HostStats forwards to addr's own HostStats RPC - already used by
 	// internal/frontend's own separate peer-client interface for the
@@ -1458,6 +1459,67 @@ func (s *Server) SimulateNodeFailure(ctx context.Context, req *rpcpb.SimulateNod
 		Quorum:                 toRPCQuorumImpact(report.Quorum),
 		OwnedResources:         toRPCOwnedResourceImpacts(report.OwnedResources),
 		ReplicaBackedResources: toRPCReplicaBackedImpacts(report.ReplicaBackedResources),
+	}, nil
+}
+
+// SimulateNetworkFailure reports declared VM dependencies on one managed
+// network. The network and VM lists are sequential leader-only reads, not an
+// atomic snapshot. A leader hint forwards the entire request so one report
+// never combines different nodes' FSM views.
+func (s *Server) SimulateNetworkFailure(ctx context.Context, req *rpcpb.SimulateNetworkFailureRequest) (*rpcpb.SimulateNetworkFailureResponse, error) {
+	networksResp, err := s.raft.ListNetworks(ctx)
+	if err != nil {
+		return &rpcpb.SimulateNetworkFailureResponse{Error: err.Error()}, nil
+	}
+	if networksResp.GetError() != "" {
+		if s.peers != nil && networksResp.GetLeaderHint() != "" {
+			if fwd, ferr := s.peers.SimulateNetworkFailure(ctx, s.peerManagerdAddr(networksResp.GetLeaderHint()), req); ferr == nil {
+				return fwd, nil
+			}
+		}
+		return &rpcpb.SimulateNetworkFailureResponse{Error: networksResp.GetError(), LeaderHint: networksResp.GetLeaderHint()}, nil
+	}
+
+	var target *internalpb.NetworkDefinition
+	for _, network := range networksResp.GetNetworks() {
+		if network.GetId() == req.GetNetworkId() {
+			target = network
+			break
+		}
+	}
+	if target == nil {
+		return &rpcpb.SimulateNetworkFailureResponse{Error: fmt.Sprintf("network_id %q is not recognized", req.GetNetworkId())}, nil
+	}
+
+	vmsResp, err := s.raft.ListVMs(ctx)
+	if err != nil {
+		return &rpcpb.SimulateNetworkFailureResponse{Error: err.Error()}, nil
+	}
+	if vmsResp.GetError() != "" {
+		if s.peers != nil && vmsResp.GetLeaderHint() != "" {
+			if fwd, ferr := s.peers.SimulateNetworkFailure(ctx, s.peerManagerdAddr(vmsResp.GetLeaderHint()), req); ferr == nil {
+				return fwd, nil
+			}
+		}
+		return &rpcpb.SimulateNetworkFailureResponse{Error: vmsResp.GetError(), LeaderHint: vmsResp.GetLeaderHint()}, nil
+	}
+
+	placements := make([]cluster.NetworkAttachedResourcePlacement, 0, len(vmsResp.GetVms()))
+	for _, vm := range vmsResp.GetVms() {
+		placements = append(placements, cluster.NetworkAttachedResourcePlacement{
+			ID: vm.GetId(), Name: vm.GetName(), NodeID: vm.GetNodeId(), NetworkID: vm.GetNetworkId(),
+		})
+	}
+	report := cluster.SimulateNetworkFailure(cluster.ManagedNetworkPlacement{
+		ID: target.GetId(), Name: target.GetName(), VLANID: target.GetVlanId(), Subnet: target.GetSubnet(),
+		BridgeName: target.GetBridgeName(), ExternalGateway: target.GetExternalGateway(),
+	}, placements)
+	impacts := make([]*rpcpb.NetworkFailureImpact, 0, len(report.AffectedResources))
+	for _, impact := range report.AffectedResources {
+		impacts = append(impacts, &rpcpb.NetworkFailureImpact{Id: impact.ID, Name: impact.Name, NodeId: impact.NodeID, Explanation: impact.Explanation})
+	}
+	return &rpcpb.SimulateNetworkFailureResponse{
+		Network: fromInternalNetwork(target), AffectedResources: impacts, Note: report.Note,
 	}, nil
 }
 

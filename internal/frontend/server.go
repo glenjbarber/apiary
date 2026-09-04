@@ -207,12 +207,17 @@ type pageData struct {
 	// picker must not be limited to current raft membership alone.
 	// SimulateTargetNodeID empty means "no simulation run yet," just the
 	// picker form.
-	SimulateNodes          []string
-	SimulateTargetNodeID   string
-	SimulateError          string
-	SimulateQuorum         quorumImpactView
-	SimulateOwnedResources []resourceImpactView
-	SimulateReplicaBacked  []replicaBackedImpactView
+	SimulateNodes           []string
+	SimulateTargetNodeID    string
+	SimulateError           string
+	SimulateQuorum          quorumImpactView
+	SimulateOwnedResources  []resourceImpactView
+	SimulateReplicaBacked   []replicaBackedImpactView
+	SimulateNetworks        []networkView
+	SimulateTargetNetworkID string
+	SimulateNetwork         networkView
+	SimulateNetworkImpacts  []networkFailureImpactView
+	SimulateNetworkNote     string
 }
 
 // userView is one row of the Users page's table.

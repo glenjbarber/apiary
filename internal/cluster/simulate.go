@@ -125,6 +125,42 @@ type NodeFailureReport struct {
 	ReplicaBackedResources []ReplicaBackedImpact
 }
 
+// ManagedNetworkPlacement is the replicated portion of a managed network
+// needed for a read-only network-failure simulation. It deliberately excludes
+// bridge status because that observation is node-local and cannot describe the
+// cluster-wide logical network consistently.
+type ManagedNetworkPlacement struct {
+	ID              string
+	Name            string
+	VLANID          uint32
+	Subnet          string
+	BridgeName      string
+	ExternalGateway string
+}
+
+// NetworkAttachedResourcePlacement is a Cell whose declared connectivity
+// depends on a managed network. Apiary currently attaches only VMs to managed
+// networks; jails still use ip4=inherit.
+type NetworkAttachedResourcePlacement struct {
+	ID        string
+	Name      string
+	NodeID    string
+	NetworkID string
+}
+
+type NetworkFailureImpact struct {
+	ID          string
+	Name        string
+	NodeID      string
+	Explanation string
+}
+
+type NetworkFailureReport struct {
+	Network           ManagedNetworkPlacement
+	AffectedResources []NetworkFailureImpact
+	Note              string
+}
+
 // IsKnownTarget reports whether targetNodeID is recognized at all -
 // either as a raft server, or as the owner or replica of some VM/jail.
 // The RPC handler calls this before computing anything else: a
@@ -262,5 +298,35 @@ func SimulateNodeFailure(servers []ServerSuffrage, resources []OwnedResourcePlac
 		Quorum:                 ComputeQuorumImpact(servers, targetNodeID),
 		OwnedResources:         ComputeOwnedResourceImpacts(resources, targetNodeID),
 		ReplicaBackedResources: ComputeReplicaBackedImpacts(resources, targetNodeID),
+	}
+}
+
+// SimulateNetworkFailure reports the Cells whose declared managed-network
+// attachment would disappear with target. It does not claim that the Cell
+// process or storage stops, nor that every service inside the Cell becomes
+// unreachable: Apiary does not model guest routes, additional interfaces, or
+// service dependencies yet.
+func SimulateNetworkFailure(target ManagedNetworkPlacement, resources []NetworkAttachedResourcePlacement) NetworkFailureReport {
+	impacts := make([]NetworkFailureImpact, 0)
+	for _, resource := range resources {
+		if resource.NetworkID != target.ID {
+			continue
+		}
+		impacts = append(impacts, NetworkFailureImpact{
+			ID:     resource.ID,
+			Name:   resource.Name,
+			NodeID: resource.NodeID,
+			Explanation: fmt.Sprintf(
+				"managed-network connectivity through %s would be unavailable; this simulation does not claim that the Cell process or storage stops",
+				target.ID,
+			),
+		})
+	}
+	sort.Slice(impacts, func(i, j int) bool { return impacts[i].ID < impacts[j].ID })
+
+	return NetworkFailureReport{
+		Network:           target,
+		AffectedResources: impacts,
+		Note:              "This report follows declared network_id attachments only. It does not observe guest routing, additional interfaces, service dependencies, or current packet flow.",
 	}
 }

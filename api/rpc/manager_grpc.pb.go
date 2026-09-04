@@ -50,6 +50,7 @@ const (
 	ManagerService_ListJails_FullMethodName                  = "/apiary.rpc.v1.ManagerService/ListJails"
 	ManagerService_ForcePurgeJail_FullMethodName             = "/apiary.rpc.v1.ManagerService/ForcePurgeJail"
 	ManagerService_SimulateNodeFailure_FullMethodName        = "/apiary.rpc.v1.ManagerService/SimulateNodeFailure"
+	ManagerService_SimulateNetworkFailure_FullMethodName     = "/apiary.rpc.v1.ManagerService/SimulateNetworkFailure"
 	ManagerService_MigrateJail_FullMethodName                = "/apiary.rpc.v1.ManagerService/MigrateJail"
 	ManagerService_ReportVMPhase_FullMethodName              = "/apiary.rpc.v1.ManagerService/ReportVMPhase"
 	ManagerService_ReportVMTeardownComplete_FullMethodName   = "/apiary.rpc.v1.ManagerService/ReportVMTeardownComplete"
@@ -210,6 +211,12 @@ type ManagerServiceClient interface {
 	// node_id/replica_node_id returns error set, never a misleadingly
 	// empty-looking "safe" report.
 	SimulateNodeFailure(ctx context.Context, in *SimulateNodeFailureRequest, opts ...grpc.CallOption) (*SimulateNodeFailureResponse, error)
+	// SimulateNetworkFailure is the Dependency Graph Simulator's second,
+	// read-only slice: which VMs declare an attachment to a managed network if
+	// that logical network disappears. It combines separate ListNetworks and
+	// ListVMs reads, so it is not an atomic snapshot. The entire request is
+	// forwarded on a leader-hint rejection to avoid mixing nodes' FSM views.
+	SimulateNetworkFailure(ctx context.Context, in *SimulateNetworkFailureRequest, opts ...grpc.CallOption) (*SimulateNetworkFailureResponse, error)
 	// MigrateJail mirrors MigrateVM exactly, for jails instead of VMs -
 	// see MigrateVM's own doc comment above for the full reasoning
 	// (including the "target must already be a synced HAST replica"
@@ -562,6 +569,16 @@ func (c *managerServiceClient) SimulateNodeFailure(ctx context.Context, in *Simu
 	return out, nil
 }
 
+func (c *managerServiceClient) SimulateNetworkFailure(ctx context.Context, in *SimulateNetworkFailureRequest, opts ...grpc.CallOption) (*SimulateNetworkFailureResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(SimulateNetworkFailureResponse)
+	err := c.cc.Invoke(ctx, ManagerService_SimulateNetworkFailure_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *managerServiceClient) MigrateJail(ctx context.Context, in *MigrateJailRequest, opts ...grpc.CallOption) (*MigrateJailResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(MigrateJailResponse)
@@ -774,6 +791,12 @@ type ManagerServiceServer interface {
 	// node_id/replica_node_id returns error set, never a misleadingly
 	// empty-looking "safe" report.
 	SimulateNodeFailure(context.Context, *SimulateNodeFailureRequest) (*SimulateNodeFailureResponse, error)
+	// SimulateNetworkFailure is the Dependency Graph Simulator's second,
+	// read-only slice: which VMs declare an attachment to a managed network if
+	// that logical network disappears. It combines separate ListNetworks and
+	// ListVMs reads, so it is not an atomic snapshot. The entire request is
+	// forwarded on a leader-hint rejection to avoid mixing nodes' FSM views.
+	SimulateNetworkFailure(context.Context, *SimulateNetworkFailureRequest) (*SimulateNetworkFailureResponse, error)
 	// MigrateJail mirrors MigrateVM exactly, for jails instead of VMs -
 	// see MigrateVM's own doc comment above for the full reasoning
 	// (including the "target must already be a synced HAST replica"
@@ -905,6 +928,9 @@ func (UnimplementedManagerServiceServer) ForcePurgeJail(context.Context, *ForceP
 }
 func (UnimplementedManagerServiceServer) SimulateNodeFailure(context.Context, *SimulateNodeFailureRequest) (*SimulateNodeFailureResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method SimulateNodeFailure not implemented")
+}
+func (UnimplementedManagerServiceServer) SimulateNetworkFailure(context.Context, *SimulateNetworkFailureRequest) (*SimulateNetworkFailureResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method SimulateNetworkFailure not implemented")
 }
 func (UnimplementedManagerServiceServer) MigrateJail(context.Context, *MigrateJailRequest) (*MigrateJailResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method MigrateJail not implemented")
@@ -1492,6 +1518,24 @@ func _ManagerService_SimulateNodeFailure_Handler(srv interface{}, ctx context.Co
 	return interceptor(ctx, in, info, handler)
 }
 
+func _ManagerService_SimulateNetworkFailure_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SimulateNetworkFailureRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ManagerServiceServer).SimulateNetworkFailure(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ManagerService_SimulateNetworkFailure_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ManagerServiceServer).SimulateNetworkFailure(ctx, req.(*SimulateNetworkFailureRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _ManagerService_MigrateJail_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(MigrateJailRequest)
 	if err := dec(in); err != nil {
@@ -1726,6 +1770,10 @@ var ManagerService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "SimulateNodeFailure",
 			Handler:    _ManagerService_SimulateNodeFailure_Handler,
+		},
+		{
+			MethodName: "SimulateNetworkFailure",
+			Handler:    _ManagerService_SimulateNetworkFailure_Handler,
 		},
 		{
 			MethodName: "MigrateJail",

@@ -40,6 +40,13 @@ type replicaBackedImpactView struct {
 	Explanation string
 }
 
+type networkFailureImpactView struct {
+	ID          string
+	Name        string
+	NodeID      string
+	Explanation string
+}
+
 func fromRPCResourceKind(k rpcpb.ResourceKind) string {
 	if k == rpcpb.ResourceKind_RESOURCE_KIND_JAIL {
 		return "jail"
@@ -142,6 +149,7 @@ func (s *Server) simulateNodeChoices(r *http.Request) []string {
 // every mutating form elsewhere in this package.
 func (s *Server) handleSimulatePage(w http.ResponseWriter, r *http.Request) {
 	nodes := s.simulateNodeChoices(r)
+	networks, _ := s.currentNetworks(r)
 
 	nodeID := r.URL.Query().Get("node_id")
 	var (
@@ -168,13 +176,42 @@ func (s *Server) handleSimulatePage(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	networkID := r.URL.Query().Get("network_id")
+	var (
+		network        networkView
+		networkImpacts []networkFailureImpactView
+		networkNote    string
+	)
+	if networkID != "" {
+		resp, err := s.client.SimulateNetworkFailure(r.Context(), &rpcpb.SimulateNetworkFailureRequest{NetworkId: networkID})
+		switch {
+		case err != nil:
+			simErr = err.Error()
+		case resp.GetError() != "":
+			simErr = resp.GetError()
+		default:
+			network = fromRPCNetwork(resp.GetNetwork())
+			networkNote = resp.GetNote()
+			for _, impact := range resp.GetAffectedResources() {
+				networkImpacts = append(networkImpacts, networkFailureImpactView{
+					ID: impact.GetId(), Name: impact.GetName(), NodeID: impact.GetNodeId(), Explanation: impact.GetExplanation(),
+				})
+			}
+		}
+	}
+
 	s.render(w, "simulate_page", s.withAuthFields(r, pageData{
-		SimulateNodes:          nodes,
-		SimulateTargetNodeID:   nodeID,
-		SimulateError:          simErr,
-		SimulateQuorum:         quorum,
-		SimulateOwnedResources: owned,
-		SimulateReplicaBacked:  replicaBacked,
-		ActivePage:             "simulate",
+		SimulateNodes:           nodes,
+		SimulateTargetNodeID:    nodeID,
+		SimulateError:           simErr,
+		SimulateQuorum:          quorum,
+		SimulateOwnedResources:  owned,
+		SimulateReplicaBacked:   replicaBacked,
+		SimulateNetworks:        networks,
+		SimulateTargetNetworkID: networkID,
+		SimulateNetwork:         network,
+		SimulateNetworkImpacts:  networkImpacts,
+		SimulateNetworkNote:     networkNote,
+		ActivePage:              "simulate",
 	}))
 }

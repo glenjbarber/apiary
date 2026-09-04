@@ -77,8 +77,10 @@ type fakeClient struct {
 	setDatasetQuotaResp    *rpcpb.SetDatasetQuotaResponse
 	lastSetDatasetQuotaReq *rpcpb.SetDatasetQuotaRequest
 
-	simulateResp *rpcpb.SimulateNodeFailureResponse
-	simulateErr  error
+	simulateResp        *rpcpb.SimulateNodeFailureResponse
+	simulateErr         error
+	simulateNetworkResp *rpcpb.SimulateNetworkFailureResponse
+	simulateNetworkErr  error
 }
 
 // fakeUploadClientStream is a fake grpc.ClientStreamingClient for
@@ -236,6 +238,10 @@ func (f *fakeClient) ListVMs(context.Context, *rpcpb.ListVMsRequest, ...grpc.Cal
 
 func (f *fakeClient) SimulateNodeFailure(context.Context, *rpcpb.SimulateNodeFailureRequest, ...grpc.CallOption) (*rpcpb.SimulateNodeFailureResponse, error) {
 	return f.simulateResp, f.simulateErr
+}
+
+func (f *fakeClient) SimulateNetworkFailure(context.Context, *rpcpb.SimulateNetworkFailureRequest, ...grpc.CallOption) (*rpcpb.SimulateNetworkFailureResponse, error) {
+	return f.simulateNetworkResp, f.simulateNetworkErr
 }
 
 func (f *fakeClient) GetVMConsole(context.Context, *rpcpb.GetVMConsoleRequest, ...grpc.CallOption) (*rpcpb.GetVMConsoleResponse, error) {

@@ -197,6 +197,10 @@ func (f *fakeClient) SimulateNodeFailure(context.Context, *rpcpb.SimulateNodeFai
 	return &rpcpb.SimulateNodeFailureResponse{}, nil
 }
 
+func (f *fakeClient) SimulateNetworkFailure(context.Context, *rpcpb.SimulateNetworkFailureRequest, ...grpc.CallOption) (*rpcpb.SimulateNetworkFailureResponse, error) {
+	return &rpcpb.SimulateNetworkFailureResponse{}, nil
+}
+
 func (f *fakeClient) UploadISO(context.Context, ...grpc.CallOption) (grpc.ClientStreamingClient[rpcpb.UploadISORequest, rpcpb.UploadISOResponse], error) {
 	if f.uploadErr != nil {
 		return nil, f.uploadErr

@@ -257,3 +257,39 @@ func TestSimulateNodeFailure_CombinesAllThree(t *testing.T) {
 		t.Errorf("Quorum.TotalVoters = %d, want 2", report.Quorum.TotalVoters)
 	}
 }
+
+func TestSimulateNetworkFailure_ReportsOnlyAttachedCells(t *testing.T) {
+	target := ManagedNetworkPlacement{ID: "net-1", Name: "services", VLANID: 100, Subnet: "10.60.0.0/24"}
+	resources := []NetworkAttachedResourcePlacement{
+		{ID: "vm-b", Name: "database", NodeID: "node-b", NetworkID: "net-1"},
+		{ID: "vm-other", Name: "unrelated", NodeID: "node-a", NetworkID: "net-2"},
+		{ID: "vm-a", Name: "frontend", NodeID: "node-a", NetworkID: "net-1"},
+	}
+
+	report := SimulateNetworkFailure(target, resources)
+	if report.Network.ID != "net-1" {
+		t.Fatalf("Network.ID = %q, want net-1", report.Network.ID)
+	}
+	if len(report.AffectedResources) != 2 {
+		t.Fatalf("AffectedResources = %+v, want 2 entries", report.AffectedResources)
+	}
+	if report.AffectedResources[0].ID != "vm-a" || report.AffectedResources[1].ID != "vm-b" {
+		t.Errorf("AffectedResources order = %+v, want vm-a then vm-b", report.AffectedResources)
+	}
+	if !strings.Contains(report.AffectedResources[0].Explanation, "does not claim") {
+		t.Errorf("Explanation = %q, want conservative scope", report.AffectedResources[0].Explanation)
+	}
+	if report.Note == "" {
+		t.Error("Note is empty, want observation limitations")
+	}
+}
+
+func TestSimulateNetworkFailure_NoAttachedCellsIsExplicitlyEmpty(t *testing.T) {
+	report := SimulateNetworkFailure(ManagedNetworkPlacement{ID: "net-1"}, nil)
+	if report.AffectedResources == nil {
+		t.Fatal("AffectedResources is nil, want an explicitly empty slice")
+	}
+	if len(report.AffectedResources) != 0 {
+		t.Fatalf("AffectedResources = %+v, want none", report.AffectedResources)
+	}
+}

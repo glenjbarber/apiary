@@ -177,3 +177,10 @@ func TestRequiredRoleFor_SimulateNodeFailureIsViewer(t *testing.T) {
 		t.Errorf("requiredRoleFor(%q) = %q, want %q", method, got, RoleViewer)
 	}
 }
+
+func TestRequiredRoleFor_SimulateNetworkFailureIsViewer(t *testing.T) {
+	const method = "/apiary.rpc.v1.ManagerService/SimulateNetworkFailure"
+	if got := requiredRoleFor(method); got != RoleViewer {
+		t.Errorf("requiredRoleFor(%q) = %q, want %q", method, got, RoleViewer)
+	}
+}

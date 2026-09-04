@@ -124,3 +124,28 @@ func TestServer_SimulatePage_NonAtomicDisclaimerAlwaysShownWithReport(t *testing
 		t.Errorf("report rendered without the non-atomicity disclaimer, got: %s", rec.Body.String())
 	}
 }
+
+func TestServer_SimulatePage_RendersManagedNetworkImpact(t *testing.T) {
+	client := &fakeClient{
+		listNetworksResp: &rpcpb.ListNetworksResponse{Networks: []*rpcpb.NetworkDefinition{{Id: "net-1", Name: "services"}}},
+		simulateNetworkResp: &rpcpb.SimulateNetworkFailureResponse{
+			Network:           &rpcpb.NetworkDefinition{Id: "net-1", Name: "services", Subnet: "10.60.0.0/24", VlanId: 100},
+			AffectedResources: []*rpcpb.NetworkFailureImpact{{Id: "vm-1", Name: "frontend", NodeId: "node-a", Explanation: "declared connectivity unavailable"}},
+			Note:              "declared attachments only",
+		},
+	}
+	s := newTestServer(t, client)
+
+	req := httptest.NewRequest(http.MethodGet, "/simulate?network_id=net-1", nil)
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	for _, want := range []string{"Managed network services", "10.60.0.0/24", "vm-1", "node-a", "declared connectivity unavailable", "declared attachments only"} {
+		if !strings.Contains(rec.Body.String(), want) {
+			t.Errorf("body missing %q, got: %s", want, rec.Body.String())
+		}
+	}
+}

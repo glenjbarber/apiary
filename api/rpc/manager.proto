@@ -169,6 +169,13 @@ service ManagerService {
   // empty-looking "safe" report.
   rpc SimulateNodeFailure(SimulateNodeFailureRequest) returns (SimulateNodeFailureResponse);
 
+  // SimulateNetworkFailure is the Dependency Graph Simulator's second,
+  // read-only slice: which VMs declare an attachment to a managed network if
+  // that logical network disappears. It combines separate ListNetworks and
+  // ListVMs reads, so it is not an atomic snapshot. The entire request is
+  // forwarded on a leader-hint rejection to avoid mixing nodes' FSM views.
+  rpc SimulateNetworkFailure(SimulateNetworkFailureRequest) returns (SimulateNetworkFailureResponse);
+
   // MigrateJail mirrors MigrateVM exactly, for jails instead of VMs -
   // see MigrateVM's own doc comment above for the full reasoning
   // (including the "target must already be a synced HAST replica"
@@ -1013,4 +1020,23 @@ message ReplicaBackedImpact {
   ResourceKind kind = 3;
   string owner_node_id = 4;
   string explanation = 5;
+}
+
+message SimulateNetworkFailureRequest {
+  string network_id = 1;
+}
+
+message SimulateNetworkFailureResponse {
+  string error = 1;
+  string leader_hint = 2;
+  NetworkDefinition network = 3;
+  repeated NetworkFailureImpact affected_resources = 4;
+  string note = 5;
+}
+
+message NetworkFailureImpact {
+  string id = 1;
+  string name = 2;
+  string node_id = 3;
+  string explanation = 4;
 }

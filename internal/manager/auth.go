@@ -72,13 +72,14 @@ var requiredRole = map[string]Role{
 	"/apiary.rpc.v1.ManagerService/GetVMSerialLog": RoleViewer,
 	"/apiary.rpc.v1.ManagerService/GetNodeConfig":  RoleViewer,
 
-	// SimulateNodeFailure (ADR-0052, Dependency Graph Simulator v1) is
-	// a read-only report - Viewer, same tier as every other plain read
+	// The Dependency Graph Simulator RPCs are read-only reports - Viewer,
+	// the same tier as every other plain read
 	// above. Mandatory, not optional: this map fails closed to
 	// RoleAdmin for anything absent, so omitting this entry wouldn't
 	// leave the RPC open, it would silently make it Admin-only once
 	// auth is enabled, with no compile-time signal.
-	"/apiary.rpc.v1.ManagerService/SimulateNodeFailure": RoleViewer,
+	"/apiary.rpc.v1.ManagerService/SimulateNodeFailure":    RoleViewer,
+	"/apiary.rpc.v1.ManagerService/SimulateNetworkFailure": RoleViewer,
 
 	// Operator: VM/jail/network lifecycle, ISO management, and the
 	// peer-to-peer reconciler-forwarding RPCs (ADR-0029) - a follower
