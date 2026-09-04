@@ -93,6 +93,7 @@ type pageData struct {
 	// when Username is non-empty.
 	Username   string
 	Role       string
+	HiveID     string
 	CanOperate bool
 	CanAdmin   bool
 
@@ -400,6 +401,7 @@ func (s *Server) currentSession(r *http.Request) (sessionInfo, bool) {
 // lookup. Safe to call even when login is disabled or no session
 // exists; both leave Username/Role empty.
 func (s *Server) withAuthFields(r *http.Request, pd pageData) pageData {
+	pd.HiveID, _ = os.Hostname()
 	pd.AuthEnabled = s.auth != nil
 	pd.CanOperate = s.auth == nil
 	pd.CanAdmin = s.auth == nil

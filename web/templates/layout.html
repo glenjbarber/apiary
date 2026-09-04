@@ -12,8 +12,8 @@
     h2 { font-size:1.55rem; margin:2rem 0 1rem; letter-spacing:-.02em; }
     h3 { margin-top:1.75rem; }
     nav { display:flex; align-items:center; gap:.35rem; margin:0 -1.25rem 1.5rem; padding:.8rem 1.25rem; background:#111; color:#fff; overflow-x:auto; }
-    nav .brand { display:flex; align-items:center; gap:.55rem; color:#fff; font-weight:800; font-size:1.1rem; margin-right:.7rem; }
-    nav .brand-mark { width:28px; height:28px; display:grid; place-items:center; background:var(--yellow); color:#111; clip-path:polygon(25% 7%,75% 7%,100% 50%,75% 93%,25% 93%,0 50%); }
+    nav .brand { display:flex; align-items:center; color:#fff; margin-right:.7rem; }
+    nav .brand-logo { width:112px; height:42px; display:block; }
     nav a { padding:.45rem .65rem; border-radius:6px; white-space:nowrap; text-decoration:none; color:#d6d6d6; font-size:.9rem; }
     nav a:hover { color:#fff; background:#292929; }
     nav a.active { color:#111; background:var(--yellow); font-weight:700; }
@@ -104,7 +104,7 @@
 
 {{define "nav"}}
 <nav>
-  <a class="brand" href="/"><span class="brand-mark">A</span><span>APIARY</span></a>
+  <a class="brand" href="/" aria-label="Apiary home"><img class="brand-logo" src="/static/apiary-logo.svg" alt="Apiary"></a>
   <a href="/"{{if eq .ActivePage "stats"}} class="active"{{end}}>Stats</a>
   <a href="/vms"{{if eq .ActivePage "vms"}} class="active"{{end}}>VMs</a>
   <a href="/jails"{{if eq .ActivePage "jails"}} class="active"{{end}}>Jails</a>
@@ -115,7 +115,7 @@
   {{if .CanAdmin}}<a href="/apikeys"{{if eq .ActivePage "apikeys"}} class="active"{{end}}>API Keys</a>{{end}}
   <a href="/users"{{if eq .ActivePage "users"}} class="active"{{end}}>Users</a>
   {{if .AuthEnabled}}
-  {{if .Username}}<span class="account">logged in as {{.Username}} ({{.Role}})</span>{{end}}
+  {{if .Username}}<span class="account">logged in as {{.Username}} ({{.Role}}) · Hive {{.HiveID}}</span>{{end}}
   <form method="post" action="/logout">
     <button class="logout" type="submit">Log out</button>
   </form>

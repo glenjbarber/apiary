@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 720" role="img" aria-labelledby="title desc">
+  <title id="title">Apiary connected hexagonal mark</title>
+  <desc id="desc">Seven yellow hexagonal cells with solid black centers and compact connection lines.</desc>
+  <defs><g id="cell"><path d="M0-64 55.43-32 55.43 32 0 64-55.43 32-55.43-32Z"/><path d="M0-34 29.45-17 29.45 17 0 34-29.45 17-29.45-17Z" fill="#111" stroke="none"/></g></defs>
+  <g fill="none" stroke="#111" stroke-width="20" stroke-linecap="round" stroke-linejoin="round"><path d="M360 350 360 145M360 350 175 350M360 350 528 246M360 350 528 445M360 350 236 543M360 350 374 575"/></g>
+  <g fill="#FFC928" stroke="#111" stroke-width="8" stroke-linejoin="round"><use href="#cell" transform="translate(360 125)"/><use href="#cell" transform="translate(545 235)"/><use href="#cell" transform="translate(155 350)"/><use href="#cell" transform="translate(360 350)"/><use href="#cell" transform="translate(545 455)"/><use href="#cell" transform="translate(225 560)"/><use href="#cell" transform="translate(375 595)"/></g>
+  <g fill="#FFC928" stroke="#111" stroke-width="8"><circle cx="360" cy="145" r="11"/><circle cx="528" cy="246" r="11"/><circle cx="175" cy="350" r="11"/><circle cx="528" cy="445" r="11"/><circle cx="236" cy="543" r="11"/><circle cx="374" cy="575" r="11"/></g>
+</svg>
