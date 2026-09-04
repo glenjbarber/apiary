@@ -1,0 +1,65 @@
+{{define "trace_page"}}
+<!DOCTYPE html>
+<html lang="en">
+{{template "head" .}}
+<body>
+  {{template "nav" .}}
+  {{template "page_header" (pageHeader "Cell Path Trace" "Explain the first known blocker or evidence gap between a VM Cell and a destination. Read-only - no packets are sent.")}}
+
+  <div class="panel">
+    <form method="get" action="/trace" class="inline-form">
+      <label>Cell
+        {{if .TraceCells}}
+        <select name="cell_id" required>
+          <option value="">Choose a VM Cell</option>
+          {{range .TraceCells}}<option value="{{.ID}}"{{if eq .ID $.TraceCellID}} selected{{end}}>{{.Name}} ({{.ID}}) · {{.NodeID}}</option>{{end}}
+        </select>
+        {{else}}
+        <input type="text" name="cell_id" placeholder="Cell ID" value="{{.TraceCellID}}" required>
+        {{end}}
+      </label>
+      <label>Destination
+        <input type="text" name="destination" placeholder="host or IPv4 address" value="{{.TraceDestination}}" required>
+      </label>
+      <label>Protocol
+        <select name="protocol">
+          <option value=""{{if eq .TraceProtocol ""}} selected{{end}}>Unspecified</option>
+          <option value="tcp"{{if eq .TraceProtocol "tcp"}} selected{{end}}>TCP</option>
+          <option value="udp"{{if eq .TraceProtocol "udp"}} selected{{end}}>UDP</option>
+          <option value="icmp"{{if eq .TraceProtocol "icmp"}} selected{{end}}>ICMP</option>
+        </select>
+      </label>
+      <label>Destination port
+        <input type="number" name="port" min="1" max="65535" placeholder="optional" value="{{.TracePort}}">
+      </label>
+      <button type="submit">Trace path</button>
+    </form>
+  </div>
+
+  {{if .TraceError}}
+  <div class="banner-error">{{.TraceError}}</div>
+  {{else if .TraceRequested}}
+    <div class="panel">
+      <h3>{{.TraceResult.Cell.Name}} to {{.TraceDestination}} <span class="badge {{.TraceResult.StatusClass}}">{{.TraceResult.Status}}</span></h3>
+      <p>{{.TraceResult.Summary}}</p>
+      <p class="muted">Owner Hive: {{.TraceResult.Cell.NodeID}}{{if .TraceResult.Network.ID}} · Managed network: {{.TraceResult.Network.Name}} ({{.TraceResult.Network.ID}}){{end}}</p>
+      <table>
+        <thead><tr><th>Layer</th><th>Status</th><th>Finding</th><th>Evidence</th><th>Explanation</th></tr></thead>
+        <tbody>
+          {{range .TraceResult.Steps}}
+          <tr>
+            <td>{{.Stage}}</td>
+            <td><span class="badge {{.StatusClass}}">{{.Status}}</span></td>
+            <td>{{.Summary}}</td>
+            <td>{{.Evidence}}</td>
+            <td>{{.Explanation}}</td>
+          </tr>
+          {{end}}
+        </tbody>
+      </table>
+      <p class="muted">This result combines observations taken in sequence, not one atomic snapshot. A clear result means that no blocker was found within the observed scope. The destination was not contacted.</p>
+    </div>
+  {{end}}
+</body>
+</html>
+{{end}}

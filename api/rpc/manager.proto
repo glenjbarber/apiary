@@ -176,6 +176,14 @@ service ManagerService {
   // forwarded on a leader-hint rejection to avoid mixing nodes' FSM views.
   rpc SimulateNetworkFailure(SimulateNetworkFailureRequest) returns (SimulateNetworkFailureResponse);
 
+  // TraceCellPath explains a VM Cell's intended outbound path to one
+  // destination (ADR-0058). It is read-only and sends no probe. The
+  // trace combines leader-authoritative VM/network intent with bounded
+  // observations from the Cell's owner Hive, so results are sequential
+  // and non-atomic. The entire request is leader-forwarded if the first
+  // authoritative read rejects this node as a follower.
+  rpc TraceCellPath(TraceCellPathRequest) returns (TraceCellPathResponse);
+
   // MigrateJail mirrors MigrateVM exactly, for jails instead of VMs -
   // see MigrateVM's own doc comment above for the full reasoning
   // (including the "target must already be a synced HAST replica"
@@ -1102,6 +1110,44 @@ message SimulateNetworkFailureResponse {
   NetworkDefinition network = 3;
   repeated NetworkFailureImpact affected_resources = 4;
   string note = 5;
+}
+
+// PathTraceStatus is evidence-aware: UNKNOWN means Apiary lacks enough
+// current evidence, while NOT_APPLICABLE means the step was intentionally
+// not tested or is outside this path.
+enum PathTraceStatus {
+  PATH_TRACE_STATUS_UNSPECIFIED = 0;
+  PATH_TRACE_STATUS_CLEAR = 1;
+  PATH_TRACE_STATUS_BLOCKED = 2;
+  PATH_TRACE_STATUS_UNKNOWN = 3;
+  PATH_TRACE_STATUS_NOT_APPLICABLE = 4;
+}
+
+message TraceCellPathRequest {
+  string cell_id = 1;
+  string destination = 2;
+  string protocol = 3; // "tcp", "udp", "icmp", or empty
+  uint32 port = 4;     // only with tcp/udp; 0 means unspecified
+}
+
+message PathTraceStep {
+  string stage = 1;
+  PathTraceStatus status = 2;
+  string summary = 3;
+  string evidence = 4;
+  string explanation = 5;
+}
+
+message TraceCellPathResponse {
+  string error = 1;
+  string leader_hint = 2;
+  VMDefinition cell = 3;
+  NetworkDefinition network = 4;
+  PathTraceStatus status = 5;
+  string summary = 6;
+  repeated PathTraceStep steps = 7;
+  bool non_atomic = 8;
+  bool active_probe = 9;
 }
 
 message NetworkFailureImpact {

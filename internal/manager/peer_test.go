@@ -77,6 +77,8 @@ type fakePeerServer struct {
 	simulateNodeFailureResp    *rpcpb.SimulateNodeFailureResponse
 	simulateNetworkFailureReq  *rpcpb.SimulateNetworkFailureRequest
 	simulateNetworkFailureResp *rpcpb.SimulateNetworkFailureResponse
+	traceCellPathReq           *rpcpb.TraceCellPathRequest
+	traceCellPathResp          *rpcpb.TraceCellPathResponse
 
 	statusResp *rpcpb.StatusResponse
 }
@@ -245,6 +247,14 @@ func (f *fakePeerServer) SimulateNetworkFailure(_ context.Context, req *rpcpb.Si
 		return f.simulateNetworkFailureResp, nil
 	}
 	return &rpcpb.SimulateNetworkFailureResponse{}, nil
+}
+
+func (f *fakePeerServer) TraceCellPath(_ context.Context, req *rpcpb.TraceCellPathRequest) (*rpcpb.TraceCellPathResponse, error) {
+	f.traceCellPathReq = req
+	if f.traceCellPathResp != nil {
+		return f.traceCellPathResp, nil
+	}
+	return &rpcpb.TraceCellPathResponse{}, nil
 }
 
 func (f *fakePeerServer) GetVM(_ context.Context, req *rpcpb.GetVMRequest) (*rpcpb.GetVMResponse, error) {
@@ -422,6 +432,24 @@ func TestPeerReporter_SimulateNetworkFailure_ReturnsPeerResponse(t *testing.T) {
 	}
 	if fake.simulateNetworkFailureReq.GetNetworkId() != "net-1" || resp.GetNetwork().GetId() != "net-1" {
 		t.Errorf("SimulateNetworkFailure() request=%+v response=%+v", fake.simulateNetworkFailureReq, resp)
+	}
+}
+
+func TestPeerReporter_TraceCellPath_ReturnsPeerResponse(t *testing.T) {
+	fake := &fakePeerServer{traceCellPathResp: &rpcpb.TraceCellPathResponse{
+		Status: rpcpb.PathTraceStatus_PATH_TRACE_STATUS_CLEAR,
+	}}
+	addr := newTestPeerServer(t, fake)
+	p := NewPeerReporter("", false, nil)
+
+	resp, err := p.TraceCellPath(context.Background(), addr, &rpcpb.TraceCellPathRequest{
+		CellId: "vm-1", Destination: "10.60.0.20",
+	})
+	if err != nil {
+		t.Fatalf("TraceCellPath() error: %v", err)
+	}
+	if fake.traceCellPathReq.GetCellId() != "vm-1" || resp.GetStatus() != rpcpb.PathTraceStatus_PATH_TRACE_STATUS_CLEAR {
+		t.Errorf("TraceCellPath() request=%+v response=%+v", fake.traceCellPathReq, resp)
 	}
 }
 

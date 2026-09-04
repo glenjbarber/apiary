@@ -80,6 +80,7 @@ var requiredRole = map[string]Role{
 	// auth is enabled, with no compile-time signal.
 	"/apiary.rpc.v1.ManagerService/SimulateNodeFailure":    RoleViewer,
 	"/apiary.rpc.v1.ManagerService/SimulateNetworkFailure": RoleViewer,
+	"/apiary.rpc.v1.ManagerService/TraceCellPath":           RoleViewer,
 
 	// GetLocalNetworkBridgeStatus/ListAssumptionResults (ADR-0055,
 	// Automated Assumption Checks v1) are both read-only, local-only

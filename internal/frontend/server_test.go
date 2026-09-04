@@ -87,6 +87,10 @@ type fakeClient struct {
 
 	assumptionsResp *rpcpb.ListAssumptionResultsResponse
 	assumptionsErr  error
+
+	traceResp    *rpcpb.TraceCellPathResponse
+	traceErr     error
+	lastTraceReq *rpcpb.TraceCellPathRequest
 }
 
 // fakeUploadClientStream is a fake grpc.ClientStreamingClient for
@@ -256,6 +260,11 @@ func (f *fakeClient) SimulateNodeFailure(context.Context, *rpcpb.SimulateNodeFai
 
 func (f *fakeClient) SimulateNetworkFailure(context.Context, *rpcpb.SimulateNetworkFailureRequest, ...grpc.CallOption) (*rpcpb.SimulateNetworkFailureResponse, error) {
 	return f.simulateNetworkResp, f.simulateNetworkErr
+}
+
+func (f *fakeClient) TraceCellPath(_ context.Context, req *rpcpb.TraceCellPathRequest, _ ...grpc.CallOption) (*rpcpb.TraceCellPathResponse, error) {
+	f.lastTraceReq = req
+	return f.traceResp, f.traceErr
 }
 
 func (f *fakeClient) GetVMConsole(context.Context, *rpcpb.GetVMConsoleRequest, ...grpc.CallOption) (*rpcpb.GetVMConsoleResponse, error) {
