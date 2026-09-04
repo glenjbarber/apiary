@@ -386,6 +386,20 @@ each design decision, in order.
   left over from an earlier bootstrap approach, on the CAPI side's own
   Kubernetes management cluster. See
   [ADR-0050](docs/adr/0050-dnsmasq-tag-not-interface-scoping.md).
+- **Fixed a real bug in `restshimd`'s and `frontend`'s ISO upload
+  relay**: a very large (tens of GB) or long (several-minute) upload
+  through either's REST/multipart endpoint would fail with a bare,
+  content-free `"sending upload data: EOF"`, even though the client had
+  sent every byte - isolated by comparing against a direct-to-managerd
+  gRPC client, which succeeded reliably on the same file. Root cause:
+  gRPC's own `ClientStream.Send` returns a plain `io.EOF` once a stream
+  aborts for any reason other than local encoding - the real cause is
+  only retrievable via `CloseAndRecv`, which both relays failed to call
+  before giving up. Fixed by calling it and surfacing its error instead
+  of the masked one, with a regression test. What actually aborts the
+  stream in the first place on very large/long uploads specifically is
+  still an open question - the fix makes the real reason visible for
+  the next occurrence instead of resolving it.
 
 **Not yet implemented:**
 
