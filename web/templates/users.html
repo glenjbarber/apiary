@@ -29,7 +29,7 @@
       <td>{{.Role}}</td>
       <td>
         {{if .CanChange}}
-        <details>
+        <details class="password-form">
           <summary>Change password</summary>
           <form class="inline-form" hx-post="/users/{{.Username}}/password" hx-target="#user-panel" hx-swap="innerHTML">
             <label><strong>Your own</strong> login password (you are logged in as "{{$actor}}" - this is {{$actor}}'s password, not {{.Username}}'s) <input type="password" name="current_password" required autocomplete="current-password"></label>

@@ -89,7 +89,12 @@ func TestServer_UsersPage_AdminSeesChangeActionForEveryRow(t *testing.T) {
 	rec := httptest.NewRecorder()
 	s.ServeHTTP(rec, req)
 
-	if got := strings.Count(rec.Body.String(), "<details>"); got != 3 {
+	// Scoped to the per-row change-password widget's own class, not a
+	// bare "<details>" tag - the shared nav partial also renders a
+	// <details> element for its "Manage" dropdown menu on every page,
+	// which would otherwise inflate this count by one regardless of the
+	// Users page's own content.
+	if got := strings.Count(rec.Body.String(), `<details class="password-form">`); got != 3 {
 		t.Errorf("Admin should see 3 change-password actions (one per row), got %d", got)
 	}
 }
