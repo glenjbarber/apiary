@@ -11,7 +11,9 @@
   .fencing-record div { margin:.3rem 0; }
   .fencing-blank { display:inline-block; border-bottom:1px solid #333; min-width:14rem; }
   @media print {
-    nav, form, .no-print { display:none !important; }
+    .app-header, .sidebar, .app-footer, form, .no-print { display:none !important; }
+    .app-layout { display:block; }
+    .content { padding:0; max-width:none; }
     @page { margin: 1.5cm; }
     @page { @bottom-center { content: "Page " counter(page) " of " counter(pages); } }
   }
