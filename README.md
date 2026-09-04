@@ -354,6 +354,38 @@ each design decision, in order.
   response - the error banner now arrives via an `HX-Trigger` header
   instead. See
   [ADR-0046](docs/adr/0046-vm-table-polling-corruption-from-oob-swap.md).
+- **Self-hosted outbound NAT for VM networks** - a network no longer
+  has to share an existing external router/VLAN to reach the internet;
+  the default path is now outbound NAT through the node's own uplink,
+  with an optional `external_gateway` field for the case where a real
+  router already serves the subnet. Found and fixed two real bugs
+  along the way: the VLAN-tagging uplink and the NAT egress interface
+  can differ once a node's own NIC has been bridged for other
+  purposes, and network config was previously only ever applied once
+  at VM creation, never re-synced for an already-running VM. See
+  [ADR-0047](docs/adr/0047-external-gateway-networks.md) and
+  [ADR-0048](docs/adr/0048-self-hosted-outbound-nat.md).
+- **Machine Configuration page** - a new `/machine` page for per-node
+  settings: which physical interface a node uses for VLAN tagging vs.
+  NAT egress, a per-VM firewall-pause toggle for troubleshooting
+  without losing the configured rule set, and a ZFS dataset quota
+  action. See
+  [ADR-0049](docs/adr/0049-machine-configuration-page.md).
+- **A real, joined multi-node Kubernetes cluster**, via the separate
+  `cluster-api-provider-apiary` repo - a genuine 2-node cluster (one
+  control-plane, one worker) bootstrapped through the actual upstream
+  Cluster API kubeadm bootstrap/control-plane providers, not a bypass,
+  with both nodes reaching `Ready` behind a real Calico CNI install.
+  Getting there found and fixed three more real bugs on Apiary's own
+  side: `dhcp-option=interface:` is invalid dnsmasq syntax (it should
+  be `tag:`), which had silently broken DNS for every Apiary-managed
+  network until now; the Kubernetes base image doesn't persist
+  kubeadm's own `ip_forward`/`br_netfilter` prerequisites across a
+  fresh boot (worked around in the CAPI repo's own example manifest
+  rather than a third image rebuild); and a stale kubeconfig `Secret`
+  left over from an earlier bootstrap approach, on the CAPI side's own
+  Kubernetes management cluster. See
+  [ADR-0050](docs/adr/0050-dnsmasq-tag-not-interface-scoping.md).
 
 **Not yet implemented:**
 
@@ -420,10 +452,10 @@ each design decision, in order.
   Ridge extensions, and the two ADR-0045 image-build bugs (missing
   `conntrack`, DHCP client-identifier drift) - see the CAPI repo's own
   README and ADR-0022/ADR-0032/ADR-0044/ADR-0045 for the full trail.
-  **Still not done**: a real, joined multi-node `kubeadm` cluster (only
-  a single control-plane node has been verified so far) - v1 also has
-  no load-balancer/HA control plane (a single control-plane node's own
-  IP is used directly), and `providerID`-to-kubelet wiring has no
+  **A real, joined multi-node `kubeadm` cluster is done too** - see the
+  bullet above under "Implemented and tested." **Still not done**: v1
+  has no load-balancer/HA control plane (a single control-plane node's
+  own IP is used directly), and `providerID`-to-kubelet wiring has no
   automatic path (no cloud-controller-manager exists for Apiary),
   documented as a manual `preKubeadmCommands` step in the CAPI repo's
   own README.
