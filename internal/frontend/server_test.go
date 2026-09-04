@@ -23,6 +23,9 @@ type fakeClient struct {
 	getVMResp  *rpcpb.GetVMResponse
 	getVMErr   error
 
+	getJailResp *rpcpb.GetJailResponse
+	getJailErr  error
+
 	listResp *rpcpb.ListVMsResponse
 	listErr  error
 
@@ -82,8 +85,9 @@ type fakeClient struct {
 	simulateNetworkResp *rpcpb.SimulateNetworkFailureResponse
 	simulateNetworkErr  error
 
-	bridgeStatusResp *rpcpb.GetLocalNetworkBridgeStatusResponse
-	bridgeStatusErr  error
+	bridgeStatusResp  *rpcpb.GetLocalNetworkBridgeStatusResponse
+	bridgeStatusErr   error
+	bridgeStatusCalls int
 
 	assumptionsResp *rpcpb.ListAssumptionResultsResponse
 	assumptionsErr  error
@@ -247,6 +251,7 @@ func (f *fakeClient) ListVMs(context.Context, *rpcpb.ListVMsRequest, ...grpc.Cal
 }
 
 func (f *fakeClient) GetLocalNetworkBridgeStatus(context.Context, *rpcpb.GetLocalNetworkBridgeStatusRequest, ...grpc.CallOption) (*rpcpb.GetLocalNetworkBridgeStatusResponse, error) {
+	f.bridgeStatusCalls++
 	return f.bridgeStatusResp, f.bridgeStatusErr
 }
 
@@ -331,6 +336,12 @@ func (f *fakeClient) DeleteJail(_ context.Context, in *rpcpb.DeleteJailRequest, 
 }
 
 func (f *fakeClient) GetJail(context.Context, *rpcpb.GetJailRequest, ...grpc.CallOption) (*rpcpb.GetJailResponse, error) {
+	if f.getJailErr != nil {
+		return nil, f.getJailErr
+	}
+	if f.getJailResp != nil {
+		return f.getJailResp, nil
+	}
 	return &rpcpb.GetJailResponse{}, nil
 }
 

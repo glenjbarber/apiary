@@ -1,0 +1,127 @@
+{{define "why_not_answer"}}
+<div class="panel" style="margin-top:.75rem">
+  <h4>{{.Question}} <span class="badge {{.Verdict}}">{{.Verdict}}</span> <span class="muted">({{.Scope}})</span></h4>
+  {{if .Blockers}}
+  <p><strong>Blockers</strong></p>
+  <ul>
+    {{range .Blockers}}
+    <li>
+      <span class="muted">[{{.Invariant}}]</span> {{.Detail}}
+      {{if .Evidence}}
+      <details>
+        <summary class="muted" style="cursor:pointer">Evidence</summary>
+        <ul>
+          {{range .Evidence}}
+          <li><strong>{{.Source}}</strong>: {{.Detail}}{{if .NeverObserved}} <em>(not runtime-observed)</em>{{else}} <span class="muted">observed {{.ObservedAt}}</span>{{end}}</li>
+          {{end}}
+        </ul>
+      </details>
+      {{end}}
+    </li>
+    {{end}}
+  </ul>
+  {{else}}
+  <p class="muted"><em>No blockers found within v1's observed scope.</em></p>
+  {{end}}
+
+  {{if .Remedies}}
+  <p><strong>Remedies</strong></p>
+  <ul>
+    {{range .Remedies}}
+    <li>{{if .Proven}}<span class="badge clear">proven</span>{{else}}<span class="badge unknown">plausible</span>{{end}} {{.Detail}}</li>
+    {{end}}
+  </ul>
+  {{end}}
+
+  {{if .Caveats}}
+  <details>
+    <summary class="muted" style="cursor:pointer">Disclosed limitations</summary>
+    <ul>
+      {{range .Caveats}}
+      <li><strong>{{.Source}}</strong>: {{.Detail}}{{if .NeverObserved}} <em>(permanent, not runtime-observed)</em>{{end}}</li>
+      {{end}}
+    </ul>
+  </details>
+  {{end}}
+</div>
+{{end}}
+
+{{define "why_not_page"}}
+<!DOCTYPE html>
+<html lang="en">
+{{template "head" .}}
+<body class="app-layout">
+  {{template "nav" .}}
+  <main class="content" id="main-content">
+  {{template "page_header" (pageHeader "Why Not Engine" "Answers to concrete operator questions - the smallest actual blocker set, with the evidence and invariant behind each conclusion. Read-only; never blocks an action.")}}
+
+  <div class="panel">
+    <h3>Cell (migrate / recoverable)</h3>
+    <form method="get" action="/why-not" class="inline-form">
+      <label>Cell ID
+        <input type="text" name="cell_id" placeholder="vm-... or jail-..." value="{{.WhyNotCellID}}" required>
+      </label>
+      <button type="submit">Why not?</button>
+    </form>
+    {{if .WhyNotCellID}}
+    {{if .WhyNotCellError}}
+    <div class="banner-error">{{.WhyNotCellError}}</div>
+    {{else}}
+    {{template "why_not_answer" .WhyNotCellMigrate}}
+    {{template "why_not_answer" .WhyNotCellRecoverable}}
+    {{end}}
+    {{end}}
+  </div>
+
+  <div class="panel">
+    <h3>Hive (reboot)</h3>
+    <form method="get" action="/why-not" class="inline-form">
+      <label>Hive
+        {{if .WhyNotNodes}}
+        <select name="node_id" required>
+          <option value="">Choose a node</option>
+          {{range .WhyNotNodes}}<option value="{{.}}"{{if eq . $.WhyNotNodeID}} selected{{end}}>{{.}}</option>{{end}}
+        </select>
+        {{else}}
+        <input type="text" name="node_id" placeholder="node id" value="{{.WhyNotNodeID}}" required>
+        {{end}}
+      </label>
+      <button type="submit">Why not?</button>
+    </form>
+    {{if .WhyNotNodeID}}
+    {{if .WhyNotHiveError}}
+    <div class="banner-error">{{.WhyNotHiveError}}</div>
+    {{else}}
+    {{template "why_not_answer" .WhyNotHiveReboot}}
+    {{end}}
+    {{end}}
+  </div>
+
+  <div class="panel">
+    <h3>Network (connectivity)</h3>
+    <form method="get" action="/why-not" class="inline-form">
+      <label>Network
+        {{if .WhyNotNetworks}}
+        <select name="network_id" required>
+          <option value="">Choose a network</option>
+          {{range .WhyNotNetworks}}<option value="{{.ID}}"{{if eq .ID $.WhyNotNetworkID}} selected{{end}}>{{.Name}} ({{.ID}})</option>{{end}}
+        </select>
+        {{else}}
+        <input type="text" name="network_id" placeholder="network id" value="{{.WhyNotNetworkID}}" required>
+        {{end}}
+      </label>
+      <button type="submit">Why not?</button>
+    </form>
+    {{if .WhyNotNetworkID}}
+    {{if .WhyNotNetworkError}}
+    <div class="banner-error">{{.WhyNotNetworkError}}</div>
+    {{else}}
+    {{template "why_not_answer" .WhyNotNetworkConnect}}
+    {{end}}
+    {{end}}
+  </div>
+  </main>
+  {{template "footer" .}}
+</body>
+</html>
+{{end}}

@@ -271,6 +271,25 @@ type pageData struct {
 	// freshly checked against current state.
 	InvariantEvaluations []invariantEvaluationView
 	InvariantStructural  []invariantEvaluationView
+
+	// WhyNot* back the Why Not Engine page ("/why-not", ADR-0061) - a
+	// read-only, deterministic answer to concrete operator questions,
+	// citing the smallest actual blocker set plus the evidence and
+	// invariant behind each conclusion. WhyNotCellMigrate/
+	// WhyNotCellRecoverable are both populated from one WhyNotCellID
+	// lookup.
+	WhyNotCellID          string
+	WhyNotCellError       string
+	WhyNotCellMigrate     whyNotAnswerView
+	WhyNotCellRecoverable whyNotAnswerView
+	WhyNotNodes           []string
+	WhyNotNodeID          string
+	WhyNotHiveError       string
+	WhyNotHiveReboot      whyNotAnswerView
+	WhyNotNetworks        []networkView
+	WhyNotNetworkID       string
+	WhyNotNetworkError    string
+	WhyNotNetworkConnect  whyNotAnswerView
 }
 
 // userView is one row of the Users page's table.
@@ -532,6 +551,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /recovery-handbook", s.handleRecoveryHandbookPage)
 	s.mux.HandleFunc("GET /trace", s.handleTracePage)
 	s.mux.HandleFunc("GET /invariants", s.handleInvariantsPage)
+	s.mux.HandleFunc("GET /why-not", s.handleWhyNotPage)
 
 	// Operator: VM/jail/network/ISO lifecycle - including the create-VM
 	// form's own GET, since a Viewer has nothing useful to do with a
