@@ -13,7 +13,8 @@
     h3 { margin-top:1.75rem; }
     nav { display:flex; align-items:center; gap:.35rem; margin:0 -1.25rem 1.5rem; padding:.8rem 1.25rem; background:#111; color:#fff; overflow-x:auto; }
     nav .brand { display:flex; align-items:center; color:#fff; margin-right:.7rem; }
-    nav .brand-logo { width:112px; height:42px; display:block; }
+    nav .brand-logo { width:30px; height:30px; display:block; }
+    nav .brand-name { color:#fff; font-weight:800; font-size:1.1rem; letter-spacing:.04em; }
     nav a { padding:.45rem .65rem; border-radius:6px; white-space:nowrap; text-decoration:none; color:#d6d6d6; font-size:.9rem; }
     nav a:hover { color:#fff; background:#292929; }
     nav a.active { color:#111; background:var(--yellow); font-weight:700; }
@@ -104,7 +105,7 @@
 
 {{define "nav"}}
 <nav>
-  <a class="brand" href="/" aria-label="Apiary home"><img class="brand-logo" src="/static/apiary-logo.svg" alt="Apiary"></a>
+  <a class="brand" href="/" aria-label="Apiary home"><img class="brand-logo" src="/static/apiary-mark.svg" alt=""><span class="brand-name">APIARY</span></a>
   <a href="/"{{if eq .ActivePage "stats"}} class="active"{{end}}>Stats</a>
   <a href="/vms"{{if eq .ActivePage "vms"}} class="active"{{end}}>VMs</a>
   <a href="/jails"{{if eq .ActivePage "jails"}} class="active"{{end}}>Jails</a>
