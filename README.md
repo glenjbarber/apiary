@@ -12,25 +12,24 @@ in the cluster is a **hive**; the VMs and jails it hosts are its
 
 ## Vocabulary
 
-Apiary's product language follows the physical structure of a real
-apiary, not the bees themselves:
+Apiary's product language draws on both the organization of the bees
+and the physical structure of a real apiary:
 
-- **Apiary** — the complete system: every hive, and everything running
-  on it.
+- **Apiary** — the complete system.
+- **Colony** — the entire swarm: every hive and everything running on
+  them.
 - **Hive** — one physical Apiary node/host.
 - **Comb** — the VMs and jails belonging to one hive, collectively.
 - **Cell** — one individual VM or jail.
 
-That gives `Apiary > Hive > Comb > Cell` — "Hive `apiarium` is
+That gives `Apiary > Colony > Hive > Comb > Cell` — "Hive `apiarium` is
 unreachable," "view this hive's comb," "cell `web-01` is running,"
 "move cell `web-01` to another hive." **Frame** is reserved for a
 possible future subdivision inside a hive (in real beekeeping
 equipment, a frame supports a section of comb) — the hierarchy can
-extend to `Apiary > Hive > Frame > Comb > Cell` later without changing
-what the existing terms mean. "Colony" is deliberately avoided for a
-node: it means the living bee population rather than physical
-infrastructure, and would be easy to confuse with Apiary's own cluster
-concept.
+extend to `Apiary > Colony > Hive > Frame > Comb > Cell` later without
+changing what the existing terms mean. "Colony" names the complete
+swarm, not an individual node.
 
 These are product and UI terms, not a code migration: they don't rename
 any Go type, protobuf field, API resource, CLI flag, or storage
