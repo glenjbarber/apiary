@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"sync/atomic"
 	"time"
 
 	"google.golang.org/protobuf/proto"
@@ -281,6 +282,54 @@ type Reconciler struct {
 	// external API when forwarding via Peers (defaults to
 	// defaultPeerManagerdPort - see resolvePeerManagerdAddr).
 	PeerManagerdPort string
+
+	// Interval is this node's own configured -reconcile-interval - set
+	// once at construction, read by internal/manager's HostStats handler
+	// to derive Evidence-Aware Health's (ADR-0056) per-node reconcile
+	// freshness limit. Purely descriptive: RunOnce itself doesn't use
+	// this to schedule anything - cmd/managerd's own ticker does that.
+	Interval time.Duration
+
+	// lastAttemptUnix/lastSuccessUnix record RunOnce's own attempt/
+	// success history in UnixNano, for Evidence-Aware Health's "last
+	// successful reconciliation" signal. atomic, not mutex-protected:
+	// RunOnce is only ever called from cmd/managerd's own single ticker
+	// loop, but LastReconcileAttempt/LastReconcileSuccess below are read
+	// concurrently from RPC-handling goroutines. Zero means "never
+	// observed" - see the accessors' own doc comments.
+	lastAttemptUnix atomic.Int64
+	lastSuccessUnix atomic.Int64
+}
+
+// LastReconcileAttempt reports the last time RunOnce was called at all
+// (regardless of outcome), and whether any attempt has ever been
+// observed. A node whose raft is fully down still "tries" every tick -
+// that attempt is itself real, citable evidence, recorded before RunOnce
+// does anything else.
+func (r *Reconciler) LastReconcileAttempt() (time.Time, bool) {
+	return unixNanoToTime(r.lastAttemptUnix.Load())
+}
+
+// LastReconcileSuccess reports the last time RunOnce completed with no
+// error at all (its own firstErr was nil), and whether any success has
+// ever been observed. This is a whole-tick fact, not a per-resource one -
+// see RunOnce's own doc comment on firstErr.
+func (r *Reconciler) LastReconcileSuccess() (time.Time, bool) {
+	return unixNanoToTime(r.lastSuccessUnix.Load())
+}
+
+// ReconcileInterval returns Interval - a plain accessor so callers outside
+// this package (internal/manager) don't need to read the field directly,
+// matching this type's other accessor methods.
+func (r *Reconciler) ReconcileInterval() time.Duration {
+	return r.Interval
+}
+
+func unixNanoToTime(nano int64) (time.Time, bool) {
+	if nano == 0 {
+		return time.Time{}, false
+	}
+	return time.Unix(0, nano), true
 }
 
 // RunOnce fetches the current VM list and, for each VM assigned to
@@ -292,10 +341,22 @@ type Reconciler struct {
 // note warns about avoiding. A failure partway through one VM is
 // reported but does not stop the remaining VMs in this tick from being
 // attempted.
-func (r *Reconciler) RunOnce(ctx context.Context) error {
-	resp, err := r.Raft.ListVMsLocal(ctx)
-	if err != nil {
-		return fmt.Errorf("cluster: listing VMs: %w", err)
+func (r *Reconciler) RunOnce(ctx context.Context) (err error) {
+	// Recorded unconditionally, before anything else - a node whose raft
+	// is fully down still "tries" every tick, and that attempt is itself
+	// real, citable evidence for Evidence-Aware Health (ADR-0056), not
+	// something to skip recording just because the tick then fails
+	// immediately.
+	r.lastAttemptUnix.Store(time.Now().UnixNano())
+	defer func() {
+		if err == nil {
+			r.lastSuccessUnix.Store(time.Now().UnixNano())
+		}
+	}()
+
+	resp, listErr := r.Raft.ListVMsLocal(ctx)
+	if listErr != nil {
+		return fmt.Errorf("cluster: listing VMs: %w", listErr)
 	}
 	if resp.GetError() != "" {
 		return fmt.Errorf("cluster: listing VMs: %s", resp.GetError())

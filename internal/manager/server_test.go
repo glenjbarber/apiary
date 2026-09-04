@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"testing"
+	"time"
 
 	"google.golang.org/grpc"
 
@@ -103,7 +104,7 @@ func chunkMsg(data string) *rpcpb.UploadISORequest {
 }
 
 func TestServer_ImageInventoryObservations_DistinguishesObservedAndUnknown(t *testing.T) {
-	s := NewServer(nil, "node-a", &fakeISOManager{listInfos: []isostore.Info{{Name: "ubuntu.raw"}}}, nil, nil, nil, nil, "", nil, nil, nil, 0)
+	s := NewServer(nil, "node-a", &fakeISOManager{listInfos: []isostore.Info{{Name: "ubuntu.raw"}}}, nil, nil, nil, nil, "", nil, nil, nil, 0, nil)
 	servers := []*internalpb.ServerInfo{
 		{Id: "node-a", Address: "10.0.0.1:17600"},
 		{Id: "node-b", Address: "10.0.0.2:17600"},
@@ -124,7 +125,7 @@ func TestServer_ImageInventoryObservations_DistinguishesObservedAndUnknown(t *te
 
 func TestServer_UploadISO_StreamsChunksIntoStore(t *testing.T) {
 	isos := &fakeISOManager{}
-	s := NewServer(nil, "node-1", isos, nil, nil, nil, nil, "", nil, nil, nil, 0)
+	s := NewServer(nil, "node-1", isos, nil, nil, nil, nil, "", nil, nil, nil, 0, nil)
 
 	stream := &fakeUploadStream{reqs: []*rpcpb.UploadISORequest{
 		metadataMsg("test.iso", "deadbeef"),
@@ -150,7 +151,7 @@ func TestServer_UploadISO_StreamsChunksIntoStore(t *testing.T) {
 }
 
 func TestServer_UploadISO_MissingMetadataFirstIsError(t *testing.T) {
-	s := NewServer(nil, "node-1", &fakeISOManager{}, nil, nil, nil, nil, "", nil, nil, nil, 0)
+	s := NewServer(nil, "node-1", &fakeISOManager{}, nil, nil, nil, nil, "", nil, nil, nil, 0, nil)
 	stream := &fakeUploadStream{reqs: []*rpcpb.UploadISORequest{chunkMsg("oops")}}
 
 	if err := s.UploadISO(stream); err == nil {
@@ -160,7 +161,7 @@ func TestServer_UploadISO_MissingMetadataFirstIsError(t *testing.T) {
 
 func TestServer_UploadISO_SaveErrorReportedInResponse(t *testing.T) {
 	isos := &fakeISOManager{saveErr: errors.New("sha256 mismatch")}
-	s := NewServer(nil, "node-1", isos, nil, nil, nil, nil, "", nil, nil, nil, 0)
+	s := NewServer(nil, "node-1", isos, nil, nil, nil, nil, "", nil, nil, nil, 0, nil)
 	stream := &fakeUploadStream{reqs: []*rpcpb.UploadISORequest{
 		metadataMsg("test.iso", "wronghash"),
 		chunkMsg("data"),
@@ -179,7 +180,7 @@ func TestServer_ListISOs(t *testing.T) {
 		{Name: "a.iso", SizeBytes: 100, SHA256: "aaa"},
 		{Name: "b.iso", SizeBytes: 200, SHA256: "bbb"},
 	}}
-	s := NewServer(nil, "node-1", isos, nil, nil, nil, nil, "", nil, nil, nil, 0)
+	s := NewServer(nil, "node-1", isos, nil, nil, nil, nil, "", nil, nil, nil, 0, nil)
 
 	resp, err := s.ListISOs(context.Background(), &rpcpb.ListISOsRequest{})
 	if err != nil {
@@ -192,7 +193,7 @@ func TestServer_ListISOs(t *testing.T) {
 
 func TestServer_ListISOs_ErrorSurfacedInResponse(t *testing.T) {
 	isos := &fakeISOManager{listErr: errors.New("disk error")}
-	s := NewServer(nil, "node-1", isos, nil, nil, nil, nil, "", nil, nil, nil, 0)
+	s := NewServer(nil, "node-1", isos, nil, nil, nil, nil, "", nil, nil, nil, 0, nil)
 
 	resp, err := s.ListISOs(context.Background(), &rpcpb.ListISOsRequest{})
 	if err != nil {
@@ -205,7 +206,7 @@ func TestServer_ListISOs_ErrorSurfacedInResponse(t *testing.T) {
 
 func TestServer_DeleteISO(t *testing.T) {
 	isos := &fakeISOManager{}
-	s := NewServer(nil, "node-1", isos, nil, nil, nil, nil, "", nil, nil, nil, 0)
+	s := NewServer(nil, "node-1", isos, nil, nil, nil, nil, "", nil, nil, nil, 0, nil)
 
 	resp, err := s.DeleteISO(context.Background(), &rpcpb.DeleteISORequest{Name: "old.iso"})
 	if err != nil {
@@ -220,7 +221,7 @@ func TestServer_DeleteISO(t *testing.T) {
 }
 
 func TestServer_HostStats(t *testing.T) {
-	s := NewServer(nil, "node-1", &fakeISOManager{}, nil, nil, nil, nil, "", nil, nil, nil, 0)
+	s := NewServer(nil, "node-1", &fakeISOManager{}, nil, nil, nil, nil, "", nil, nil, nil, 0, nil)
 	s.statsGather = func(context.Context) *hoststats.Snapshot {
 		return &hoststats.Snapshot{
 			CPU:    hoststats.CPUInfo{Cores: 4, LoadAvg1: 1.5},
@@ -259,6 +260,55 @@ func TestServer_HostStats(t *testing.T) {
 	}
 }
 
+// fakeReconcilerStats is a fake reconcilerStats for testing HostStats's
+// new reconcile fields (ADR-0056) without a real internal/cluster.Reconciler.
+type fakeReconcilerStats struct {
+	attempt   time.Time
+	attemptOK bool
+	success   time.Time
+	successOK bool
+	interval  time.Duration
+}
+
+func (f *fakeReconcilerStats) LastReconcileAttempt() (time.Time, bool) { return f.attempt, f.attemptOK }
+func (f *fakeReconcilerStats) LastReconcileSuccess() (time.Time, bool) { return f.success, f.successOK }
+func (f *fakeReconcilerStats) ReconcileInterval() time.Duration        { return f.interval }
+
+func TestHostStats_ReconcileFieldsZeroWhenReconcilerNil(t *testing.T) {
+	s := NewServer(nil, "node-1", &fakeISOManager{}, nil, nil, nil, nil, "", nil, nil, nil, 0, nil)
+	s.statsGather = func(context.Context) *hoststats.Snapshot { return &hoststats.Snapshot{} }
+
+	resp, err := s.HostStats(context.Background(), &rpcpb.HostStatsRequest{})
+	if err != nil {
+		t.Fatalf("HostStats() error: %v", err)
+	}
+	if resp.GetLastReconcileSuccessUnix() != 0 || resp.GetLastReconcileAttemptUnix() != 0 || resp.GetReconcileIntervalSeconds() != 0 {
+		t.Errorf("reconcile fields = %+v, want all-zero with a nil reconciler", resp)
+	}
+}
+
+func TestHostStats_ReconcileFieldsPopulatedFromReconciler(t *testing.T) {
+	attempt := time.Unix(2000, 0)
+	success := time.Unix(1000, 0)
+	fake := &fakeReconcilerStats{attempt: attempt, attemptOK: true, success: success, successOK: true, interval: 45 * time.Second}
+	s := NewServer(nil, "node-1", &fakeISOManager{}, nil, nil, nil, nil, "", nil, nil, nil, 0, fake)
+	s.statsGather = func(context.Context) *hoststats.Snapshot { return &hoststats.Snapshot{} }
+
+	resp, err := s.HostStats(context.Background(), &rpcpb.HostStatsRequest{})
+	if err != nil {
+		t.Fatalf("HostStats() error: %v", err)
+	}
+	if resp.GetLastReconcileSuccessUnix() != success.Unix() {
+		t.Errorf("LastReconcileSuccessUnix = %d, want %d", resp.GetLastReconcileSuccessUnix(), success.Unix())
+	}
+	if resp.GetLastReconcileAttemptUnix() != attempt.Unix() {
+		t.Errorf("LastReconcileAttemptUnix = %d, want %d", resp.GetLastReconcileAttemptUnix(), attempt.Unix())
+	}
+	if resp.GetReconcileIntervalSeconds() != 45 {
+		t.Errorf("ReconcileIntervalSeconds = %d, want 45", resp.GetReconcileIntervalSeconds())
+	}
+}
+
 // fakeNodeConfigStore is a fake nodeConfigStore, without any real file
 // I/O involved.
 type fakeNodeConfigStore struct {
@@ -285,7 +335,7 @@ func (f *fakeNodeConfigStore) Save(cfg nodeconfig.Config) error {
 
 func TestServer_GetNodeConfig(t *testing.T) {
 	store := &fakeNodeConfigStore{cfg: nodeconfig.Config{Uplink: "re0", NATUplink: "bridge0"}}
-	s := NewServer(nil, "node-1", nil, nil, nil, nil, nil, "", nil, store, nil, 0)
+	s := NewServer(nil, "node-1", nil, nil, nil, nil, nil, "", nil, store, nil, 0, nil)
 
 	resp, err := s.GetNodeConfig(context.Background(), &rpcpb.GetNodeConfigRequest{})
 	if err != nil {
@@ -297,7 +347,7 @@ func TestServer_GetNodeConfig(t *testing.T) {
 }
 
 func TestServer_GetNodeConfig_NotConfiguredIsError(t *testing.T) {
-	s := NewServer(nil, "node-1", nil, nil, nil, nil, nil, "", nil, nil, nil, 0)
+	s := NewServer(nil, "node-1", nil, nil, nil, nil, nil, "", nil, nil, nil, 0, nil)
 
 	resp, err := s.GetNodeConfig(context.Background(), &rpcpb.GetNodeConfigRequest{})
 	if err != nil {
@@ -310,7 +360,7 @@ func TestServer_GetNodeConfig_NotConfiguredIsError(t *testing.T) {
 
 func TestServer_UpdateNodeConfig(t *testing.T) {
 	store := &fakeNodeConfigStore{}
-	s := NewServer(nil, "node-1", nil, nil, nil, nil, nil, "", nil, store, nil, 0)
+	s := NewServer(nil, "node-1", nil, nil, nil, nil, nil, "", nil, store, nil, 0, nil)
 
 	resp, err := s.UpdateNodeConfig(context.Background(), &rpcpb.UpdateNodeConfigRequest{Uplink: "em0", NatUplink: "em0"})
 	if err != nil {
@@ -343,7 +393,7 @@ func (f *fakeQuotaSetter) SetProperty(_ context.Context, name, prop, value strin
 
 func TestServer_SetDatasetQuota(t *testing.T) {
 	zfsMgr := &fakeQuotaSetter{}
-	s := NewServer(nil, "node-1", nil, nil, nil, nil, nil, "", zfsMgr, nil, nil, 0)
+	s := NewServer(nil, "node-1", nil, nil, nil, nil, nil, "", zfsMgr, nil, nil, 0, nil)
 
 	resp, err := s.SetDatasetQuota(context.Background(), &rpcpb.SetDatasetQuotaRequest{DatasetName: "vm-1", Quota: "10G"})
 	if err != nil {
@@ -358,7 +408,7 @@ func TestServer_SetDatasetQuota(t *testing.T) {
 }
 
 func TestServer_SetDatasetQuota_NotConfiguredIsError(t *testing.T) {
-	s := NewServer(nil, "node-1", nil, nil, nil, nil, nil, "", nil, nil, nil, 0)
+	s := NewServer(nil, "node-1", nil, nil, nil, nil, nil, "", nil, nil, nil, 0, nil)
 
 	resp, err := s.SetDatasetQuota(context.Background(), &rpcpb.SetDatasetQuotaRequest{DatasetName: "vm-1", Quota: "10G"})
 	if err != nil {

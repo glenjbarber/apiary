@@ -188,6 +188,7 @@ func run() error {
 		Peers:            peers,
 		PeerManagerdPort: resolvedPeerPort,
 		DNSServer:        *dhcpDNSServer,
+		Interval:         *reconcileInterval,
 	}
 	// HAST is independent of bhyve support: a node holding only a HAST
 	// secondary replica (see ADR-0026) never runs the VM at all, so this
@@ -303,7 +304,7 @@ func run() error {
 		HistoryMaxAge:         *assumptionHistoryMaxAge,
 	}
 
-	srv := manager.NewServer(raftClient, id, isos, vncArg, serialLogArg, vlanArg, peers, resolvedPeerPort, zfsMgr, nodeConfigMgr, assumptionsMgr, assumptionStaleAfter)
+	srv := manager.NewServer(raftClient, id, isos, vncArg, serialLogArg, vlanArg, peers, resolvedPeerPort, zfsMgr, nodeConfigMgr, assumptionsMgr, assumptionStaleAfter, reconciler)
 	// Every RPC (including UploadISO's stream) is gated by srv's own
 	// API-key check - see ADR-0023. Auth stays fully open until the
 	// first key is created (CreateAPIKey itself included), so this is

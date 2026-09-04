@@ -163,7 +163,7 @@ func TestIntegration_AssumptionChecker_ReplicaChecks_EndToEnd(t *testing.T) {
 	store := &assumptions.Manager{Path: t.TempDir() + "/assumptions.json"}
 	peers := NewPeerReporter("", false, nil)
 
-	srv := NewServer(raftClient, "manager-1", isostore.New(t.TempDir()), nil, nil, vlan, peers, "", nil, nil, store, time.Hour)
+	srv := NewServer(raftClient, "manager-1", isostore.New(t.TempDir()), nil, nil, vlan, peers, "", nil, nil, store, time.Hour, nil)
 	grpcServer := grpc.NewServer(
 		grpc.UnaryInterceptor(srv.AuthUnaryInterceptor),
 		grpc.StreamInterceptor(srv.AuthStreamInterceptor),

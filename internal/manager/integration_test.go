@@ -181,7 +181,7 @@ func newManagerdRPCClientFull(t *testing.T, raftdSocket, nodeID string, vnc VNCL
 		t.Fatalf("Listen(tcp) error: %v", err)
 	}
 
-	srv := NewServer(raftClient, nodeID, isostore.New(t.TempDir()), vnc, serialLog, vlanMgr, nil, "", nil, nil, assumptionStoreMgr, assumptionStaleAfter)
+	srv := NewServer(raftClient, nodeID, isostore.New(t.TempDir()), vnc, serialLog, vlanMgr, nil, "", nil, nil, assumptionStoreMgr, assumptionStaleAfter, nil)
 	// Wired unconditionally, mirroring cmd/managerd/main.go exactly - this
 	// is a no-op for every pre-existing test here (none of them ever
 	// create an API key, so checkAuth's "zero keys = open" branch always
@@ -256,6 +256,69 @@ func TestIntegration_StatusReportsUnreachableRaftd(t *testing.T) {
 	}
 	if resp.GetRaftError() == "" {
 		t.Errorf("RaftError is empty, want a populated error message")
+	}
+}
+
+// TestIntegration_Status_MembersIncludesFullSuffrage confirms the new
+// Members field (ADR-0056) carries the full per-server suffrage/address
+// view alongside the existing, unchanged KnownNodeIds - a single-node
+// raft bootstrap is its own leader and therefore a Voter.
+func TestIntegration_Status_MembersIncludesFullSuffrage(t *testing.T) {
+	raftdSocket := newRaftdUDSSocket(t)
+	client := newManagerdRPCClient(t, raftdSocket)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	resp, err := client.Status(ctx, &rpcpb.StatusRequest{})
+	if err != nil {
+		t.Fatalf("Status() error: %v", err)
+	}
+
+	if len(resp.GetKnownNodeIds()) != 1 || resp.GetKnownNodeIds()[0] != "raftd-1" {
+		t.Fatalf("KnownNodeIds = %v, want [raftd-1]", resp.GetKnownNodeIds())
+	}
+	if len(resp.GetMembers()) != 1 {
+		t.Fatalf("Members = %+v, want exactly one member", resp.GetMembers())
+	}
+	m := resp.GetMembers()[0]
+	if m.GetNodeId() != "raftd-1" {
+		t.Errorf("Members[0].NodeId = %q, want raftd-1", m.GetNodeId())
+	}
+	if m.GetSuffrage() != "Voter" {
+		t.Errorf("Members[0].Suffrage = %q, want Voter (a single-node bootstrap is its own leader)", m.GetSuffrage())
+	}
+	if m.GetAddress() == "" {
+		t.Error("Members[0].Address is empty, want the raft server's own address")
+	}
+}
+
+// TestIntegration_Status_RaftUnreachableLeavesMembersEmptyNotPartial
+// confirms the early-return path (StatusResponse's own doc comment: "the
+// remaining raft_* fields are left at their zero values") applies to the
+// new Members field too - never a partial or stale view.
+func TestIntegration_Status_RaftUnreachableLeavesMembersEmptyNotPartial(t *testing.T) {
+	socketDir, err := os.MkdirTemp("", "managerd-test-dead-uds")
+	if err != nil {
+		t.Fatalf("MkdirTemp() error: %v", err)
+	}
+	t.Cleanup(func() { os.RemoveAll(socketDir) })
+	deadSocket := filepath.Join(socketDir, "raftd.sock")
+
+	client := newManagerdRPCClient(t, deadSocket)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	resp, err := client.Status(ctx, &rpcpb.StatusRequest{})
+	if err != nil {
+		t.Fatalf("Status() error: %v", err)
+	}
+	if resp.GetRaftReachable() {
+		t.Fatalf("RaftReachable = true, want false against a dead raftd socket")
+	}
+	if len(resp.GetMembers()) != 0 {
+		t.Errorf("Members = %+v, want empty when raft is unreachable - never a partial view", resp.GetMembers())
 	}
 }
 

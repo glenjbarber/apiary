@@ -9,7 +9,7 @@
 
   <div class="panel" style="margin-top:1rem"><table>
     <thead>
-      <tr><th>Node</th><th>Status</th><th>CPU load (1m)</th><th>Memory used</th><th>ZFS pools</th><th>Packet filter</th><th></th></tr>
+      <tr><th>Node</th><th>Status</th><th>Health</th><th>CPU load (1m)</th><th>Memory used</th><th>ZFS pools</th><th>Packet filter</th><th></th></tr>
     </thead>
     <tbody>
       {{range .ClusterNodes}}
@@ -17,18 +17,34 @@
         <td>{{.NodeID}}</td>
         {{if .Reachable}}
         <td><span class="badge ready">Reachable</span></td>
+        {{else}}
+        <td><span class="badge error" title="{{.Error}}">Unreachable</span></td>
+        {{end}}
+        <td>
+          <span class="badge {{.HealthStatus}}" title="{{.HealthExplanation}}">{{.HealthStatus}}</span>
+          {{if .HealthObservations}}
+          <details style="margin-top:.35rem">
+            <summary class="muted" style="cursor:pointer">Evidence</summary>
+            <ul style="margin:.35rem 0 0; padding-left:1.1rem; font-size:.82rem;">
+              {{range .HealthObservations}}
+              <li><strong>{{.Source}}</strong>: {{.Value}} - {{.Detail}}</li>
+              {{end}}
+            </ul>
+          </details>
+          {{end}}
+        </td>
+        {{if .Reachable}}
         <td>{{printf "%.2f" .LoadAvg1}}</td>
         <td>{{printf "%.1f" .MemUsedPct}}%</td>
         <td><span class="badge {{if .PoolsOK}}ready{{else}}error{{end}}">{{if .PoolsOK}}Healthy{{else}}Degraded{{end}}</span></td>
         <td><span class="badge {{if .PFEnabled}}ready{{else}}error{{end}}">{{if .PFEnabled}}Enabled{{else}}Disabled{{end}}</span></td>
         {{else}}
-        <td><span class="badge error" title="{{.Error}}">Unreachable</span></td>
         <td colspan="4" class="muted">{{.Error}}</td>
         {{end}}
         <td><a href="/host/{{.NodeID}}">View</a></td>
       </tr>
       {{else}}
-      <tr><td colspan="7"><em>No known nodes</em></td></tr>
+      <tr><td colspan="8"><em>No known nodes</em></td></tr>
       {{end}}
     </tbody>
   </table></div>

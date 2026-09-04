@@ -515,10 +515,16 @@ func TestServer_HostPage_DiskQueryFailureShownWithoutFalseHealthClaim(t *testing
 	s.ServeHTTP(rec, req)
 
 	body := rec.Body.String()
-	if strings.Contains(body, "healthy") || strings.Contains(body, "FAILING") {
+	// Scoped to the actual disk-row markup (host.html's own
+	// class="success">healthy/class="error">FAILING cells) rather than a
+	// bare substring search over the whole page - the page's shared
+	// layout partial legitimately contains the word "healthy" elsewhere
+	// (Evidence-Aware Health's own .badge.healthy CSS rule, ADR-0056),
+	// which a bare Contains("healthy") check would wrongly trip on.
+	if strings.Contains(body, `class="success">healthy<`) || strings.Contains(body, `class="error">FAILING<`) {
 		t.Errorf("a disk with a query error should show neither healthy nor failing, got: %s", body)
 	}
-	if !strings.Contains(body, "unknown") {
+	if !strings.Contains(body, `title="smart: permission denied">unknown<`) {
 		t.Errorf("host page missing 'unknown' health for a disk query failure, got: %s", body)
 	}
 }

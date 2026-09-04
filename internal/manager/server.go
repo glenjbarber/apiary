@@ -113,6 +113,18 @@ type PeerForwarder interface {
 	HostStats(ctx context.Context, addr string) (*rpcpb.HostStatsResponse, error)
 }
 
+// reconcilerStats is the subset of *cluster.Reconciler the server needs
+// for Evidence-Aware Health's (ADR-0056) "last successful reconciliation"
+// signal, defined locally so tests can supply a fake - the same reasoning
+// isoManager/VLANStatus already follow. nil on a node built without a
+// Reconciler - HostStats reports the three reconcile fields as zero
+// rather than panicking, matching every other nil-able dependency here.
+type reconcilerStats interface {
+	LastReconcileAttempt() (time.Time, bool)
+	LastReconcileSuccess() (time.Time, bool)
+	ReconcileInterval() time.Duration
+}
+
 // assumptionStore is the subset of *assumptions.Manager the server
 // needs, defined locally so tests can supply a fake - the same
 // reasoning isoManager/VLANStatus already follow. nil on a node that
@@ -191,6 +203,12 @@ type Server struct {
 	// regardless of its stored observed_status - see that handler's own
 	// doc comment.
 	assumptionStaleAfter time.Duration
+
+	// reconciler is nil on a node built without a Reconciler - HostStats
+	// reports zero for the three reconcile fields rather than panicking.
+	// Physical, per-node data like assumptions/isos above, never routed
+	// through raft. See ADR-0056.
+	reconciler reconcilerStats
 }
 
 // quotaSetter is the subset of *zfs.Manager SetDatasetQuota needs,
@@ -221,13 +239,14 @@ var _ rpcpb.ManagerServiceServer = (*Server)(nil)
 // managerd instead (ADR-0035), zfsMgr (nil-able) to set a dataset
 // quota locally, nodeConfig (nil-able) to read/write this node's own
 // local settings file (ADR-0049), assumptionStoreMgr (nil-able) to read
-// this node's persisted Automated Assumption Checks (ADR-0055), and
-// assumptionStaleAfter to compute their effective staleness. The last
-// two are appended at the end (rather than interleaved with the params
-// above) specifically to keep every existing positional NewServer(...)
-// call site a mechanical one-line edit.
-func NewServer(raft *RaftClient, nodeID string, isos isoManager, vnc VNCLookup, serialLog SerialLogLookup, vlanMgr VLANStatus, peers PeerForwarder, peerManagerdPort string, zfsMgr quotaSetter, nodeConfig nodeConfigStore, assumptionStoreMgr assumptionStore, assumptionStaleAfter time.Duration) *Server {
-	return &Server{raft: raft, nodeID: nodeID, isos: isos, vnc: vnc, serialLog: serialLog, vlan: vlanMgr, statsGather: hoststats.Gather, peers: peers, peerManagerdPort: peerManagerdPort, zfs: zfsMgr, nodeConfig: nodeConfig, assumptions: assumptionStoreMgr, assumptionStaleAfter: assumptionStaleAfter}
+// this node's persisted Automated Assumption Checks (ADR-0055),
+// assumptionStaleAfter to compute their effective staleness, and
+// reconciler (nil-able) for Evidence-Aware Health's (ADR-0056) reconcile
+// signals. These are appended at the end (rather than interleaved with
+// the params above) specifically to keep every existing positional
+// NewServer(...) call site a mechanical one-line edit.
+func NewServer(raft *RaftClient, nodeID string, isos isoManager, vnc VNCLookup, serialLog SerialLogLookup, vlanMgr VLANStatus, peers PeerForwarder, peerManagerdPort string, zfsMgr quotaSetter, nodeConfig nodeConfigStore, assumptionStoreMgr assumptionStore, assumptionStaleAfter time.Duration, reconciler reconcilerStats) *Server {
+	return &Server{raft: raft, nodeID: nodeID, isos: isos, vnc: vnc, serialLog: serialLog, vlan: vlanMgr, statsGather: hoststats.Gather, peers: peers, peerManagerdPort: peerManagerdPort, zfs: zfsMgr, nodeConfig: nodeConfig, assumptions: assumptionStoreMgr, assumptionStaleAfter: assumptionStaleAfter, reconciler: reconciler}
 }
 
 // peerManagerdAddr turns a raft leader_hint (the leader's raft
@@ -272,6 +291,9 @@ func (s *Server) Status(ctx context.Context, _ *rpcpb.StatusRequest) (*rpcpb.Sta
 	resp.RaftState = raftStatus.GetRaftState()
 	for _, server := range raftStatus.GetServers() {
 		resp.KnownNodeIds = append(resp.KnownNodeIds, server.GetId())
+		resp.Members = append(resp.Members, &rpcpb.RaftMember{
+			NodeId: server.GetId(), Address: server.GetAddress(), Suffrage: server.GetSuffrage(),
+		})
 	}
 	return resp, nil
 }
@@ -1051,6 +1073,22 @@ func (s *Server) HostStats(ctx context.Context, _ *rpcpb.HostStatsRequest) (*rpc
 		net = append(net, &rpcpb.NetIfaceStats{Name: n.Name, RxBytes: n.RxBytes, TxBytes: n.TxBytes, Up: n.Up})
 	}
 
+	// The three reconcile fields stay at their zero values when
+	// s.reconciler is nil - internal/health treats that as "no
+	// Reconciler configured on this node," never as "reconciling and
+	// failing" (see ADR-0056).
+	var lastReconcileSuccessUnix, lastReconcileAttemptUnix int64
+	var reconcileIntervalSeconds uint32
+	if s.reconciler != nil {
+		if t, ok := s.reconciler.LastReconcileSuccess(); ok {
+			lastReconcileSuccessUnix = t.Unix()
+		}
+		if t, ok := s.reconciler.LastReconcileAttempt(); ok {
+			lastReconcileAttemptUnix = t.Unix()
+		}
+		reconcileIntervalSeconds = uint32(s.reconciler.ReconcileInterval() / time.Second)
+	}
+
 	return &rpcpb.HostStatsResponse{
 		NodeId: s.nodeID,
 		Cpu: &rpcpb.CPUStats{
@@ -1069,6 +1107,10 @@ func (s *Server) HostStats(ctx context.Context, _ *rpcpb.HostStatsRequest) (*rpc
 		// -bhyve-bootrom set, NOT that bhyve is currently usable - see
 		// HostStatsResponse.bhyve_configured's own doc comment.
 		BhyveConfigured: s.vnc != nil,
+
+		LastReconcileSuccessUnix: lastReconcileSuccessUnix,
+		LastReconcileAttemptUnix: lastReconcileAttemptUnix,
+		ReconcileIntervalSeconds: reconcileIntervalSeconds,
 	}, nil
 }
 

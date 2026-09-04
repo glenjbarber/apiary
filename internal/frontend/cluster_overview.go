@@ -5,8 +5,10 @@ import (
 	"net/http"
 	"sort"
 	"sync"
+	"time"
 
 	rpcpb "github.com/glenjbarber/apiary/api/rpc"
+	"github.com/glenjbarber/apiary/internal/health"
 )
 
 // peerHostStatsClient is the subset of *manager.PeerReporter the
@@ -31,6 +33,13 @@ type peerHostStatsClient interface {
 	// out to every known node, the same "forward a plain external RPC to
 	// an arbitrary peer" shape as HostStats/ListISOs above.
 	ListAssumptionResults(ctx context.Context, addr string, req *rpcpb.ListAssumptionResultsRequest) (*rpcpb.ListAssumptionResultsResponse, error)
+
+	// Status lets Evidence-Aware Health (ADR-0056) learn a peer's own
+	// raft applied/last-log index and its own raft_reachable heartbeat -
+	// the same "always answers locally, dial addr directly" shape as
+	// HostStats above, not leader-forwarding (Status has no leader
+	// concept to route through).
+	Status(ctx context.Context, addr string) (*rpcpb.StatusResponse, error)
 }
 
 // clusterNodeView is the template-facing shape for one row on the
@@ -45,6 +54,13 @@ type clusterNodeView struct {
 	MemUsedPct float64
 	PoolsOK    bool
 	PFEnabled  bool
+
+	// HealthStatus/HealthExplanation/HealthObservations are Evidence-
+	// Aware Health's (ADR-0056) computed verdict for this node - additive
+	// alongside the fields above, which are left untouched.
+	HealthStatus       health.Status
+	HealthExplanation  string
+	HealthObservations []health.Observation
 }
 
 // peerAddr turns a node ID into the address its managerd should be
@@ -54,19 +70,24 @@ func (s *Server) peerAddr(nodeID string) string {
 	return nodeID + s.peerHostnameSuffix + ":" + s.peerManagerPort
 }
 
-// nodeHostStats fetches nodeID's HostStats: directly through s.client
-// if nodeID is this frontend's own colocated node (or peers isn't
-// configured at all), otherwise by dialing that node's managerd
-// directly via s.peers.
-func (s *Server) nodeHostStats(ctx context.Context, nodeID, localNodeID string) (statsView, string) {
+// fetchHostStats dials nodeID's own managerd for a fresh HostStats
+// response: directly through s.client if nodeID is this frontend's own
+// colocated node (or peers isn't configured at all), otherwise by
+// dialing that node's managerd directly via s.peers. Returns the raw
+// response so a caller needing more than statsView's own converted
+// fields (Evidence-Aware Health's reconcile signals, ADR-0056) doesn't
+// need a second call.
+func (s *Server) fetchHostStats(ctx context.Context, nodeID, localNodeID string) (*rpcpb.HostStatsResponse, error) {
 	if s.peers == nil || nodeID == localNodeID {
-		resp, err := s.client.HostStats(ctx, &rpcpb.HostStatsRequest{})
-		if err != nil {
-			return statsView{}, err.Error()
-		}
-		return fromRPCStats(resp), ""
+		return s.client.HostStats(ctx, &rpcpb.HostStatsRequest{})
 	}
-	resp, err := s.peers.HostStats(ctx, s.peerAddr(nodeID))
+	return s.peers.HostStats(ctx, s.peerAddr(nodeID))
+}
+
+// nodeHostStats fetches nodeID's HostStats and converts it to the
+// template-facing statsView shape used by "/host/{id}".
+func (s *Server) nodeHostStats(ctx context.Context, nodeID, localNodeID string) (statsView, string) {
+	resp, err := s.fetchHostStats(ctx, nodeID, localNodeID)
 	if err != nil {
 		return statsView{}, err.Error()
 	}
@@ -98,9 +119,94 @@ func summarizeClusterNode(nodeID string, stats statsView, fetchErr string) clust
 	}
 }
 
+// nodeHealthSignals gathers Evidence-Aware Health's (ADR-0056) raw
+// NodeSignals for one node. Membership/suffrage always come from anchor
+// - the ONE Status() call already fetched once at the top of
+// handleClusterOverviewPage, shared across every node's signals - never
+// a per-node membership read, since raft membership is a cluster-wide-
+// consistent replicated fact (see internal/health's own doc comment).
+// hostStats/hostStatsErr is whatever this same request already fetched
+// for the row's basic stats, threaded through rather than re-fetched.
+// For a non-local node with peer forwarding configured, one additional
+// Status() call supplies that node's own applied/last-log index and
+// heartbeat; for the local node these come from anchor itself, with no
+// second self-dial.
+func (s *Server) nodeHealthSignals(ctx context.Context, nodeID, localNodeID string, anchor *rpcpb.StatusResponse, hostStats *rpcpb.HostStatsResponse, hostStatsErr error, now time.Time) health.NodeSignals {
+	sig := health.NodeSignals{NodeID: nodeID, MembershipObservedAt: now}
+
+	sig.MembershipObserved = anchor.GetRaftReachable()
+	if sig.MembershipObserved {
+		for _, m := range anchor.GetMembers() {
+			if m.GetNodeId() == nodeID {
+				sig.IsRaftMember = true
+				sig.Suffrage = health.ParseSuffrage(m.GetSuffrage())
+				break
+			}
+		}
+	}
+
+	switch {
+	case nodeID == localNodeID:
+		sig.PeerReachability = health.ReachabilityReachable
+	case s.peers == nil:
+		// No peer forwarding configured at all - fetchHostStats above
+		// silently fell back to this node's own local client (a
+		// pre-existing quirk, not introduced here), so its result says
+		// nothing trustworthy about the actual remote node.
+		sig.PeerReachability = health.ReachabilityUnknown
+	case hostStatsErr == nil:
+		sig.PeerReachability = health.ReachabilityReachable
+	default:
+		sig.PeerReachability = health.ReachabilityUnreachable
+	}
+
+	var peerStatus *rpcpb.StatusResponse
+	switch {
+	case nodeID == localNodeID:
+		peerStatus = anchor
+	case s.peers != nil:
+		if resp, err := s.peers.Status(ctx, s.peerAddr(nodeID)); err == nil {
+			peerStatus = resp
+		}
+	}
+	if peerStatus != nil {
+		sig.HeartbeatObserved = true
+		sig.HeartbeatOK = peerStatus.GetRaftReachable()
+		if peerStatus.GetRaftReachable() {
+			sig.AppliedIndexObserved = true
+			sig.AppliedIndex = peerStatus.GetRaftAppliedIndex()
+			sig.LastLogIndex = peerStatus.GetRaftLastLogIndex()
+			sig.IndicesObservedAt = now
+		}
+	}
+
+	if hostStatsErr == nil && hostStats != nil {
+		sig.ReconcileObservedAt = now
+		sig.ReconcileIntervalSeconds = hostStats.GetReconcileIntervalSeconds()
+		// reconcile_interval_seconds == 0 is the only reliable "no
+		// Reconciler configured on this node" signal - a 0 timestamp
+		// alone can't distinguish that from "configured but no tick yet"
+		// (see HostStatsResponse's own doc comment).
+		sig.ReconcilerConfigured = sig.ReconcileIntervalSeconds > 0
+		if unix := hostStats.GetLastReconcileAttemptUnix(); unix > 0 {
+			sig.ReconcileEverAttempted = true
+			sig.LastReconcileAttempt = time.Unix(unix, 0)
+		}
+		if unix := hostStats.GetLastReconcileSuccessUnix(); unix > 0 {
+			sig.ReconcileEverSucceeded = true
+			sig.LastReconcileSuccess = time.Unix(unix, 0)
+		}
+	}
+
+	return sig
+}
+
 // handleClusterOverviewPage serves the default landing page ("/"): a
 // basic-status row per known cluster node, fetched concurrently since
-// one unreachable node shouldn't hold up every other node's row.
+// one unreachable node shouldn't hold up every other node's row. Each
+// row also carries an Evidence-Aware Health (ADR-0056) verdict computed
+// from the same fetch, rather than trusting the basic Reachable/Error
+// fields alone.
 func (s *Server) handleClusterOverviewPage(w http.ResponseWriter, r *http.Request) {
 	statusResp, err := s.client.Status(r.Context(), &rpcpb.StatusRequest{})
 	if err != nil {
@@ -120,8 +226,24 @@ func (s *Server) handleClusterOverviewPage(w http.ResponseWriter, r *http.Reques
 		wg.Add(1)
 		go func(i int, id string) {
 			defer wg.Done()
-			stats, errMsg := s.nodeHostStats(r.Context(), id, localNodeID)
-			nodes[i] = summarizeClusterNode(id, stats, errMsg)
+			now := time.Now()
+			hostStats, hostStatsErr := s.fetchHostStats(r.Context(), id, localNodeID)
+			var stats statsView
+			var errMsg string
+			if hostStatsErr != nil {
+				errMsg = hostStatsErr.Error()
+			} else {
+				stats = fromRPCStats(hostStats)
+			}
+			node := summarizeClusterNode(id, stats, errMsg)
+
+			signals := s.nodeHealthSignals(r.Context(), id, localNodeID, statusResp, hostStats, hostStatsErr, now)
+			result := health.ComputeNodeHealth(signals, now)
+			node.HealthStatus = result.Status
+			node.HealthExplanation = result.Explanation
+			node.HealthObservations = result.Observations
+
+			nodes[i] = node
 		}(i, id)
 	}
 	wg.Wait()

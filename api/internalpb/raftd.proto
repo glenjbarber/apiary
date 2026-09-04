@@ -155,7 +155,11 @@ message ServerInfo {
   string id = 1;
   string address = 2;
 
-  // suffrage is one of "Voter", "Nonvoter", or "Staging".
+  // suffrage is one of "Voter", "Nonvoter", "Staging", or "Unknown" - the
+  // last is a real value internal/raft.suffrageString reports for any
+  // raft.ServerSuffrage it doesn't recognize, not a placeholder for "not
+  // checked." A consumer must never treat "Unknown" as equivalent to
+  // "Voter" - see ADR-0056.
   string suffrage = 3;
 }
 

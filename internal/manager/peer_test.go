@@ -77,6 +77,8 @@ type fakePeerServer struct {
 	simulateNodeFailureResp    *rpcpb.SimulateNodeFailureResponse
 	simulateNetworkFailureReq  *rpcpb.SimulateNetworkFailureRequest
 	simulateNetworkFailureResp *rpcpb.SimulateNetworkFailureResponse
+
+	statusResp *rpcpb.StatusResponse
 }
 
 func (f *fakePeerServer) UploadISO(stream rpcpb.ManagerService_UploadISOServer) error {
@@ -213,6 +215,13 @@ func (f *fakePeerServer) CreateAPIKey(_ context.Context, req *rpcpb.CreateAPIKey
 func (f *fakePeerServer) RevokeAPIKey(_ context.Context, req *rpcpb.RevokeAPIKeyRequest) (*rpcpb.RevokeAPIKeyResponse, error) {
 	f.revokeAPIKeyReq = req
 	return &rpcpb.RevokeAPIKeyResponse{}, nil
+}
+
+func (f *fakePeerServer) Status(context.Context, *rpcpb.StatusRequest) (*rpcpb.StatusResponse, error) {
+	if f.statusResp != nil {
+		return f.statusResp, nil
+	}
+	return &rpcpb.StatusResponse{}, nil
 }
 
 func (f *fakePeerServer) ListVMs(context.Context, *rpcpb.ListVMsRequest) (*rpcpb.ListVMsResponse, error) {
@@ -735,6 +744,27 @@ func TestPeerReporter_MigrateJail_SendsCorrectRequest(t *testing.T) {
 	}
 	if fake.migrateJailReq.GetTargetNodeId() != "node-b" {
 		t.Errorf("received request target_node_id = %q, want node-b", fake.migrateJailReq.GetTargetNodeId())
+	}
+}
+
+// TestPeerReporter_Status_DialsDirectlyNoForwarding mirrors
+// TestPeerReporter's own HostStats-shaped tests (Status, like HostStats,
+// always answers locally for whoever receives the call - there's no
+// leader concept to forward through, so this is a plain direct-dial
+// return, not a forwarding scenario) - see ADR-0056.
+func TestPeerReporter_Status_DialsDirectlyNoForwarding(t *testing.T) {
+	fake := &fakePeerServer{statusResp: &rpcpb.StatusResponse{
+		Members: []*rpcpb.RaftMember{{NodeId: "node-b", Address: "10.0.0.2:17600", Suffrage: "Voter"}},
+	}}
+	addr := newTestPeerServer(t, fake)
+	p := NewPeerReporter("", false, nil)
+
+	resp, err := p.Status(context.Background(), addr)
+	if err != nil {
+		t.Fatalf("Status() error: %v", err)
+	}
+	if len(resp.GetMembers()) != 1 || resp.GetMembers()[0].GetNodeId() != "node-b" || resp.GetMembers()[0].GetSuffrage() != "Voter" {
+		t.Errorf("Status() = %+v, want one member node-b/Voter", resp)
 	}
 }
 

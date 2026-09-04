@@ -28,6 +28,10 @@ func (f *fakeISOPeerClient) ListAssumptionResults(context.Context, string, *rpcp
 	return &rpcpb.ListAssumptionResultsResponse{}, nil
 }
 
+func (f *fakeISOPeerClient) Status(context.Context, string) (*rpcpb.StatusResponse, error) {
+	return &rpcpb.StatusResponse{}, nil
+}
+
 func (f *fakeISOPeerClient) ListISOs(_ context.Context, addr string) (*rpcpb.ListISOsResponse, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()

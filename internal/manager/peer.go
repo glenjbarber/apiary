@@ -282,6 +282,22 @@ func (p *PeerReporter) HostStats(ctx context.Context, addr string) (*rpcpb.HostS
 	return client.HostStats(ctx, &rpcpb.HostStatsRequest{})
 }
 
+// Status forwards to a specific peer's own Status RPC - same "always
+// answers locally, dial addr directly" shape as HostStats above, not
+// leader-only-read forwarding (Status, like HostStats, has no leader
+// concept to route through). Used by internal/frontend's cluster
+// overview page (ADR-0056) to get a peer's own raft membership/suffrage/
+// applied-index view for Evidence-Aware Health, rather than trusting the
+// one anchor Status() call for anything beyond membership itself.
+func (p *PeerReporter) Status(ctx context.Context, addr string) (*rpcpb.StatusResponse, error) {
+	conn, client, err := p.dial(addr)
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close()
+	return client.Status(ctx, &rpcpb.StatusRequest{})
+}
+
 // GetLocalNetworkBridgeStatus forwards to a specific peer's own
 // GetLocalNetworkBridgeStatus RPC - same "always answers locally, dial
 // addr directly" shape as HostStats above, not leader-only-read

@@ -277,7 +277,11 @@ type ServerInfo struct {
 	state   protoimpl.MessageState `protogen:"open.v1"`
 	Id      string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
 	Address string                 `protobuf:"bytes,2,opt,name=address,proto3" json:"address,omitempty"`
-	// suffrage is one of "Voter", "Nonvoter", or "Staging".
+	// suffrage is one of "Voter", "Nonvoter", "Staging", or "Unknown" - the
+	// last is a real value internal/raft.suffrageString reports for any
+	// raft.ServerSuffrage it doesn't recognize, not a placeholder for "not
+	// checked." A consumer must never treat "Unknown" as equivalent to
+	// "Voter" - see ADR-0056.
 	Suffrage      string `protobuf:"bytes,3,opt,name=suffrage,proto3" json:"suffrage,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache

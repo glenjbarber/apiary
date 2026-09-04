@@ -497,6 +497,32 @@ message StatusResponse {
   // this node's raftd. Useful for clients (e.g. the web UI) that need to
   // offer a choice of nodes without a separate scheduling component.
   repeated string known_node_ids = 10;
+
+  // members is the full per-server raft membership view (id, address,
+  // suffrage), additive alongside known_node_ids above (kept as-is for
+  // compatibility - ADR-0056). Used by internal/health to distinguish a
+  // voting member from a non-voting or staging one, since raft
+  // membership arithmetic alone must never be presented as availability
+  // proof - see RaftMember's own doc comment.
+  repeated RaftMember members = 11;
+}
+
+// RaftMember mirrors api/internalpb's ServerInfo, kept as a separate
+// external type for the same reason StatusResponse itself is (ADR-0002):
+// the external schema doesn't couple to the internal protocol's
+// evolution.
+message RaftMember {
+  string node_id = 1;
+  string address = 2;
+
+  // suffrage is one of "Voter", "Nonvoter", "Staging", or "Unknown" -
+  // see internal/raft.suffrageString's own doc comment for why "Unknown"
+  // is a real, live value (any raft.ServerSuffrage this codebase doesn't
+  // recognize), not a placeholder for "not checked." A consumer must
+  // never treat "Unknown" suffrage as equivalent to "Voter" - see
+  // ADR-0056's ComputeNodeHealth, which caps this case at an Unknown
+  // health verdict rather than promoting it to Healthy.
+  string suffrage = 3;
 }
 
 // UploadISORequest is one message in the UploadISO client stream.
@@ -636,6 +662,23 @@ message HostStatsResponse {
   // loaded right now). Named for exactly what's observed - see
   // ADR-0055.
   bool bhyve_configured = 9;
+
+  // last_reconcile_success_unix/last_reconcile_attempt_unix/
+  // reconcile_interval_seconds back Evidence-Aware Health's (ADR-0056)
+  // "last successful reconciliation" signal - physical, per-node
+  // observational data like bhyve_configured above, read directly from
+  // this node's own internal/cluster.Reconciler (nil-able; all three
+  // fields are zero when this node has none configured, which
+  // internal/health treats as "not applicable," never as "reconciling
+  // and failing").
+  //
+  // 0 means "never observed" for the two timestamps - a fresh restart
+  // with no tick completed yet looks the same as "never configured" only
+  // when reconcile_interval_seconds is ALSO 0; a consumer must check
+  // that field first to tell the two apart.
+  int64 last_reconcile_success_unix = 10;
+  int64 last_reconcile_attempt_unix = 11;
+  uint32 reconcile_interval_seconds = 12;
 }
 
 message GetVMConsoleRequest {
