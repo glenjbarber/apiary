@@ -945,6 +945,7 @@ message SimulateNodeFailureResponse {
   QuorumImpact quorum = 3;
   repeated OwnedResourceImpact owned_resources = 4;
   repeated ReplicaBackedImpact replica_backed_resources = 5;
+  repeated ImageAvailabilityImpact image_availability = 6;
 }
 
 message QuorumImpact {
@@ -1039,4 +1040,28 @@ message NetworkFailureImpact {
   string name = 2;
   string node_id = 3;
   string explanation = 4;
+}
+
+enum ImageRole {
+  IMAGE_ROLE_UNSPECIFIED = 0;
+  IMAGE_ROLE_ISO = 1;
+  IMAGE_ROLE_BASE_IMAGE = 2;
+}
+
+enum ImageAvailabilityVerdict {
+  IMAGE_AVAILABILITY_VERDICT_UNSPECIFIED = 0;
+  IMAGE_AVAILABILITY_VERDICT_AVAILABLE = 1;
+  IMAGE_AVAILABILITY_VERDICT_UNAVAILABLE = 2;
+  IMAGE_AVAILABILITY_VERDICT_UNKNOWN = 3;
+}
+
+message ImageAvailabilityImpact {
+  string resource_id = 1;
+  string resource_name = 2;
+  string image_name = 3;
+  ImageRole role = 4;
+  ImageAvailabilityVerdict verdict = 5;
+  repeated string source_nodes = 6;
+  repeated string unknown_nodes = 7;
+  string explanation = 8;
 }

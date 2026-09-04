@@ -70,6 +70,7 @@ type PeerForwarder interface {
 	ListJails(ctx context.Context, addr string) (*rpcpb.ListJailsResponse, error)
 	GetJail(ctx context.Context, addr, id string) (*rpcpb.GetJailResponse, error)
 	ListNetworks(ctx context.Context, addr string) (*rpcpb.ListNetworksResponse, error)
+	ListISOs(ctx context.Context, addr string) (*rpcpb.ListISOsResponse, error)
 
 	CreateVM(ctx context.Context, addr string, req *rpcpb.CreateVMRequest) (*rpcpb.CreateVMResponse, error)
 	UpdateVM(ctx context.Context, addr string, req *rpcpb.UpdateVMRequest) (*rpcpb.UpdateVMResponse, error)
@@ -1455,11 +1456,62 @@ func (s *Server) SimulateNodeFailure(ctx context.Context, req *rpcpb.SimulateNod
 	}
 
 	report := cluster.SimulateNodeFailure(servers, resources, targetID)
+	requirements := make([]cluster.ImageRequirement, 0, len(vmsResp.GetVms())*2)
+	for _, vm := range vmsResp.GetVms() {
+		if vm.GetIsoName() != "" {
+			requirements = append(requirements, cluster.ImageRequirement{
+				ResourceID: vm.GetId(), ResourceName: vm.GetName(), ImageName: vm.GetIsoName(), Role: cluster.ImageRoleISO,
+			})
+		}
+		if vm.GetBaseImageName() != "" {
+			requirements = append(requirements, cluster.ImageRequirement{
+				ResourceID: vm.GetId(), ResourceName: vm.GetName(), ImageName: vm.GetBaseImageName(), Role: cluster.ImageRoleBaseImage,
+			})
+		}
+	}
+	report.ImageAvailability = cluster.ComputeImageAvailability(requirements, s.imageInventoryObservations(ctx, raftStatus.GetServers(), targetID, localNodeID), targetID)
 	return &rpcpb.SimulateNodeFailureResponse{
 		Quorum:                 toRPCQuorumImpact(report.Quorum),
 		OwnedResources:         toRPCOwnedResourceImpacts(report.OwnedResources),
 		ReplicaBackedResources: toRPCReplicaBackedImpacts(report.ReplicaBackedResources),
+		ImageAvailability:      toRPCImageAvailability(report.ImageAvailability),
 	}, nil
+}
+
+// imageInventoryObservations directly queries every remaining raft member's
+// node-local image store. A failed or impossible query is recorded as unknown,
+// never as an empty inventory.
+func (s *Server) imageInventoryObservations(ctx context.Context, raftServers []*internalpb.ServerInfo, targetID, localNodeID string) []cluster.ImageInventoryObservation {
+	observations := make([]cluster.ImageInventoryObservation, 0, len(raftServers))
+	for _, server := range raftServers {
+		if server.GetId() == targetID {
+			continue
+		}
+		observation := cluster.ImageInventoryObservation{NodeID: server.GetId()}
+		if server.GetId() == localNodeID {
+			if s.isos != nil {
+				infos, err := s.isos.List()
+				if err == nil {
+					observation.Observed = true
+					for _, info := range infos {
+						observation.Names = append(observation.Names, info.Name)
+					}
+				}
+			}
+		} else if s.peers != nil {
+			checkCtx, cancel := context.WithTimeout(ctx, reachabilityCheckTimeout)
+			resp, err := s.peers.ListISOs(checkCtx, s.peerManagerdAddr(server.GetAddress()))
+			cancel()
+			if err == nil && resp.GetError() == "" {
+				observation.Observed = true
+				for _, info := range resp.GetIsos() {
+					observation.Names = append(observation.Names, info.GetName())
+				}
+			}
+		}
+		observations = append(observations, observation)
+	}
+	return observations
 }
 
 // SimulateNetworkFailure reports declared VM dependencies on one managed
@@ -1567,6 +1619,30 @@ func toRPCReplicaBackedImpacts(impacts []cluster.ReplicaBackedImpact) []*rpcpb.R
 		out = append(out, &rpcpb.ReplicaBackedImpact{
 			Id: i.ID, Name: i.Name, Kind: toRPCResourceKind(i.Kind),
 			OwnerNodeId: i.OwnerNodeID, Explanation: i.Explanation,
+		})
+	}
+	return out
+}
+
+func toRPCImageAvailability(impacts []cluster.ImageAvailabilityImpact) []*rpcpb.ImageAvailabilityImpact {
+	out := make([]*rpcpb.ImageAvailabilityImpact, 0, len(impacts))
+	for _, impact := range impacts {
+		role := rpcpb.ImageRole_IMAGE_ROLE_ISO
+		if impact.Role == cluster.ImageRoleBaseImage {
+			role = rpcpb.ImageRole_IMAGE_ROLE_BASE_IMAGE
+		}
+		verdict := rpcpb.ImageAvailabilityVerdict_IMAGE_AVAILABILITY_VERDICT_UNKNOWN
+		switch impact.Verdict {
+		case cluster.ImageAvailabilityAvailable:
+			verdict = rpcpb.ImageAvailabilityVerdict_IMAGE_AVAILABILITY_VERDICT_AVAILABLE
+		case cluster.ImageAvailabilityUnavailable:
+			verdict = rpcpb.ImageAvailabilityVerdict_IMAGE_AVAILABILITY_VERDICT_UNAVAILABLE
+		}
+		out = append(out, &rpcpb.ImageAvailabilityImpact{
+			ResourceId: impact.ResourceID, ResourceName: impact.ResourceName,
+			ImageName: impact.ImageName, Role: role, Verdict: verdict,
+			SourceNodes: impact.SourceNodes, UnknownNodes: impact.UnknownNodes,
+			Explanation: impact.Explanation,
 		})
 	}
 	return out

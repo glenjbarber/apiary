@@ -358,6 +358,107 @@ func (RecoveryVerdict) EnumDescriptor() ([]byte, []int) {
 	return file_api_rpc_manager_proto_rawDescGZIP(), []int{5}
 }
 
+type ImageRole int32
+
+const (
+	ImageRole_IMAGE_ROLE_UNSPECIFIED ImageRole = 0
+	ImageRole_IMAGE_ROLE_ISO         ImageRole = 1
+	ImageRole_IMAGE_ROLE_BASE_IMAGE  ImageRole = 2
+)
+
+// Enum value maps for ImageRole.
+var (
+	ImageRole_name = map[int32]string{
+		0: "IMAGE_ROLE_UNSPECIFIED",
+		1: "IMAGE_ROLE_ISO",
+		2: "IMAGE_ROLE_BASE_IMAGE",
+	}
+	ImageRole_value = map[string]int32{
+		"IMAGE_ROLE_UNSPECIFIED": 0,
+		"IMAGE_ROLE_ISO":         1,
+		"IMAGE_ROLE_BASE_IMAGE":  2,
+	}
+)
+
+func (x ImageRole) Enum() *ImageRole {
+	p := new(ImageRole)
+	*p = x
+	return p
+}
+
+func (x ImageRole) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (ImageRole) Descriptor() protoreflect.EnumDescriptor {
+	return file_api_rpc_manager_proto_enumTypes[6].Descriptor()
+}
+
+func (ImageRole) Type() protoreflect.EnumType {
+	return &file_api_rpc_manager_proto_enumTypes[6]
+}
+
+func (x ImageRole) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use ImageRole.Descriptor instead.
+func (ImageRole) EnumDescriptor() ([]byte, []int) {
+	return file_api_rpc_manager_proto_rawDescGZIP(), []int{6}
+}
+
+type ImageAvailabilityVerdict int32
+
+const (
+	ImageAvailabilityVerdict_IMAGE_AVAILABILITY_VERDICT_UNSPECIFIED ImageAvailabilityVerdict = 0
+	ImageAvailabilityVerdict_IMAGE_AVAILABILITY_VERDICT_AVAILABLE   ImageAvailabilityVerdict = 1
+	ImageAvailabilityVerdict_IMAGE_AVAILABILITY_VERDICT_UNAVAILABLE ImageAvailabilityVerdict = 2
+	ImageAvailabilityVerdict_IMAGE_AVAILABILITY_VERDICT_UNKNOWN     ImageAvailabilityVerdict = 3
+)
+
+// Enum value maps for ImageAvailabilityVerdict.
+var (
+	ImageAvailabilityVerdict_name = map[int32]string{
+		0: "IMAGE_AVAILABILITY_VERDICT_UNSPECIFIED",
+		1: "IMAGE_AVAILABILITY_VERDICT_AVAILABLE",
+		2: "IMAGE_AVAILABILITY_VERDICT_UNAVAILABLE",
+		3: "IMAGE_AVAILABILITY_VERDICT_UNKNOWN",
+	}
+	ImageAvailabilityVerdict_value = map[string]int32{
+		"IMAGE_AVAILABILITY_VERDICT_UNSPECIFIED": 0,
+		"IMAGE_AVAILABILITY_VERDICT_AVAILABLE":   1,
+		"IMAGE_AVAILABILITY_VERDICT_UNAVAILABLE": 2,
+		"IMAGE_AVAILABILITY_VERDICT_UNKNOWN":     3,
+	}
+)
+
+func (x ImageAvailabilityVerdict) Enum() *ImageAvailabilityVerdict {
+	p := new(ImageAvailabilityVerdict)
+	*p = x
+	return p
+}
+
+func (x ImageAvailabilityVerdict) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (ImageAvailabilityVerdict) Descriptor() protoreflect.EnumDescriptor {
+	return file_api_rpc_manager_proto_enumTypes[7].Descriptor()
+}
+
+func (ImageAvailabilityVerdict) Type() protoreflect.EnumType {
+	return &file_api_rpc_manager_proto_enumTypes[7]
+}
+
+func (x ImageAvailabilityVerdict) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use ImageAvailabilityVerdict.Descriptor instead.
+func (ImageAvailabilityVerdict) EnumDescriptor() ([]byte, []int) {
+	return file_api_rpc_manager_proto_rawDescGZIP(), []int{7}
+}
+
 type VMDefinition struct {
 	state        protoimpl.MessageState `protogen:"open.v1"`
 	Id           string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
@@ -5541,11 +5642,12 @@ type SimulateNodeFailureResponse struct {
 	// unrecognized by raft membership or any VM/jail placement - a
 	// populated quorum/owned_resources/replica_backed_resources payload
 	// only ever accompanies an empty error.
-	Error                  string                 `protobuf:"bytes,1,opt,name=error,proto3" json:"error,omitempty"`
-	LeaderHint             string                 `protobuf:"bytes,2,opt,name=leader_hint,json=leaderHint,proto3" json:"leader_hint,omitempty"`
-	Quorum                 *QuorumImpact          `protobuf:"bytes,3,opt,name=quorum,proto3" json:"quorum,omitempty"`
-	OwnedResources         []*OwnedResourceImpact `protobuf:"bytes,4,rep,name=owned_resources,json=ownedResources,proto3" json:"owned_resources,omitempty"`
-	ReplicaBackedResources []*ReplicaBackedImpact `protobuf:"bytes,5,rep,name=replica_backed_resources,json=replicaBackedResources,proto3" json:"replica_backed_resources,omitempty"`
+	Error                  string                     `protobuf:"bytes,1,opt,name=error,proto3" json:"error,omitempty"`
+	LeaderHint             string                     `protobuf:"bytes,2,opt,name=leader_hint,json=leaderHint,proto3" json:"leader_hint,omitempty"`
+	Quorum                 *QuorumImpact              `protobuf:"bytes,3,opt,name=quorum,proto3" json:"quorum,omitempty"`
+	OwnedResources         []*OwnedResourceImpact     `protobuf:"bytes,4,rep,name=owned_resources,json=ownedResources,proto3" json:"owned_resources,omitempty"`
+	ReplicaBackedResources []*ReplicaBackedImpact     `protobuf:"bytes,5,rep,name=replica_backed_resources,json=replicaBackedResources,proto3" json:"replica_backed_resources,omitempty"`
+	ImageAvailability      []*ImageAvailabilityImpact `protobuf:"bytes,6,rep,name=image_availability,json=imageAvailability,proto3" json:"image_availability,omitempty"`
 	unknownFields          protoimpl.UnknownFields
 	sizeCache              protoimpl.SizeCache
 }
@@ -5611,6 +5713,13 @@ func (x *SimulateNodeFailureResponse) GetOwnedResources() []*OwnedResourceImpact
 func (x *SimulateNodeFailureResponse) GetReplicaBackedResources() []*ReplicaBackedImpact {
 	if x != nil {
 		return x.ReplicaBackedResources
+	}
+	return nil
+}
+
+func (x *SimulateNodeFailureResponse) GetImageAvailability() []*ImageAvailabilityImpact {
+	if x != nil {
+		return x.ImageAvailability
 	}
 	return nil
 }
@@ -6080,6 +6189,106 @@ func (x *NetworkFailureImpact) GetExplanation() string {
 	return ""
 }
 
+type ImageAvailabilityImpact struct {
+	state         protoimpl.MessageState   `protogen:"open.v1"`
+	ResourceId    string                   `protobuf:"bytes,1,opt,name=resource_id,json=resourceId,proto3" json:"resource_id,omitempty"`
+	ResourceName  string                   `protobuf:"bytes,2,opt,name=resource_name,json=resourceName,proto3" json:"resource_name,omitempty"`
+	ImageName     string                   `protobuf:"bytes,3,opt,name=image_name,json=imageName,proto3" json:"image_name,omitempty"`
+	Role          ImageRole                `protobuf:"varint,4,opt,name=role,proto3,enum=apiary.rpc.v1.ImageRole" json:"role,omitempty"`
+	Verdict       ImageAvailabilityVerdict `protobuf:"varint,5,opt,name=verdict,proto3,enum=apiary.rpc.v1.ImageAvailabilityVerdict" json:"verdict,omitempty"`
+	SourceNodes   []string                 `protobuf:"bytes,6,rep,name=source_nodes,json=sourceNodes,proto3" json:"source_nodes,omitempty"`
+	UnknownNodes  []string                 `protobuf:"bytes,7,rep,name=unknown_nodes,json=unknownNodes,proto3" json:"unknown_nodes,omitempty"`
+	Explanation   string                   `protobuf:"bytes,8,opt,name=explanation,proto3" json:"explanation,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ImageAvailabilityImpact) Reset() {
+	*x = ImageAvailabilityImpact{}
+	mi := &file_api_rpc_manager_proto_msgTypes[93]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ImageAvailabilityImpact) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ImageAvailabilityImpact) ProtoMessage() {}
+
+func (x *ImageAvailabilityImpact) ProtoReflect() protoreflect.Message {
+	mi := &file_api_rpc_manager_proto_msgTypes[93]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ImageAvailabilityImpact.ProtoReflect.Descriptor instead.
+func (*ImageAvailabilityImpact) Descriptor() ([]byte, []int) {
+	return file_api_rpc_manager_proto_rawDescGZIP(), []int{93}
+}
+
+func (x *ImageAvailabilityImpact) GetResourceId() string {
+	if x != nil {
+		return x.ResourceId
+	}
+	return ""
+}
+
+func (x *ImageAvailabilityImpact) GetResourceName() string {
+	if x != nil {
+		return x.ResourceName
+	}
+	return ""
+}
+
+func (x *ImageAvailabilityImpact) GetImageName() string {
+	if x != nil {
+		return x.ImageName
+	}
+	return ""
+}
+
+func (x *ImageAvailabilityImpact) GetRole() ImageRole {
+	if x != nil {
+		return x.Role
+	}
+	return ImageRole_IMAGE_ROLE_UNSPECIFIED
+}
+
+func (x *ImageAvailabilityImpact) GetVerdict() ImageAvailabilityVerdict {
+	if x != nil {
+		return x.Verdict
+	}
+	return ImageAvailabilityVerdict_IMAGE_AVAILABILITY_VERDICT_UNSPECIFIED
+}
+
+func (x *ImageAvailabilityImpact) GetSourceNodes() []string {
+	if x != nil {
+		return x.SourceNodes
+	}
+	return nil
+}
+
+func (x *ImageAvailabilityImpact) GetUnknownNodes() []string {
+	if x != nil {
+		return x.UnknownNodes
+	}
+	return nil
+}
+
+func (x *ImageAvailabilityImpact) GetExplanation() string {
+	if x != nil {
+		return x.Explanation
+	}
+	return ""
+}
+
 var File_api_rpc_manager_proto protoreflect.FileDescriptor
 
 const file_api_rpc_manager_proto_rawDesc = "" +
@@ -6474,14 +6683,15 @@ const file_api_rpc_manager_proto_rawDesc = "" +
 	"\vleader_hint\x18\x02 \x01(\tR\n" +
 	"leaderHint\"5\n" +
 	"\x1aSimulateNodeFailureRequest\x12\x17\n" +
-	"\anode_id\x18\x01 \x01(\tR\x06nodeId\"\xb4\x02\n" +
+	"\anode_id\x18\x01 \x01(\tR\x06nodeId\"\x8b\x03\n" +
 	"\x1bSimulateNodeFailureResponse\x12\x14\n" +
 	"\x05error\x18\x01 \x01(\tR\x05error\x12\x1f\n" +
 	"\vleader_hint\x18\x02 \x01(\tR\n" +
 	"leaderHint\x123\n" +
 	"\x06quorum\x18\x03 \x01(\v2\x1b.apiary.rpc.v1.QuorumImpactR\x06quorum\x12K\n" +
 	"\x0fowned_resources\x18\x04 \x03(\v2\".apiary.rpc.v1.OwnedResourceImpactR\x0eownedResources\x12\\\n" +
-	"\x18replica_backed_resources\x18\x05 \x03(\v2\".apiary.rpc.v1.ReplicaBackedImpactR\x16replicaBackedResources\"\xcd\x02\n" +
+	"\x18replica_backed_resources\x18\x05 \x03(\v2\".apiary.rpc.v1.ReplicaBackedImpactR\x16replicaBackedResources\x12U\n" +
+	"\x12image_availability\x18\x06 \x03(\v2&.apiary.rpc.v1.ImageAvailabilityImpactR\x11imageAvailability\"\xcd\x02\n" +
 	"\fQuorumImpact\x12&\n" +
 	"\x0ftarget_is_voter\x18\x01 \x01(\bR\rtargetIsVoter\x12!\n" +
 	"\ftotal_voters\x18\x02 \x01(\rR\vtotalVoters\x12)\n" +
@@ -6519,7 +6729,18 @@ const file_api_rpc_manager_proto_rawDesc = "" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x17\n" +
 	"\anode_id\x18\x03 \x01(\tR\x06nodeId\x12 \n" +
-	"\vexplanation\x18\x04 \x01(\tR\vexplanation*f\n" +
+	"\vexplanation\x18\x04 \x01(\tR\vexplanation\"\xd9\x02\n" +
+	"\x17ImageAvailabilityImpact\x12\x1f\n" +
+	"\vresource_id\x18\x01 \x01(\tR\n" +
+	"resourceId\x12#\n" +
+	"\rresource_name\x18\x02 \x01(\tR\fresourceName\x12\x1d\n" +
+	"\n" +
+	"image_name\x18\x03 \x01(\tR\timageName\x12,\n" +
+	"\x04role\x18\x04 \x01(\x0e2\x18.apiary.rpc.v1.ImageRoleR\x04role\x12A\n" +
+	"\averdict\x18\x05 \x01(\x0e2'.apiary.rpc.v1.ImageAvailabilityVerdictR\averdict\x12!\n" +
+	"\fsource_nodes\x18\x06 \x03(\tR\vsourceNodes\x12#\n" +
+	"\runknown_nodes\x18\a \x03(\tR\funknownNodes\x12 \n" +
+	"\vexplanation\x18\b \x01(\tR\vexplanation*f\n" +
 	"\aVMState\x12\x18\n" +
 	"\x14VM_STATE_UNSPECIFIED\x10\x00\x12\x14\n" +
 	"\x10VM_STATE_STOPPED\x10\x01\x12\x14\n" +
@@ -6549,7 +6770,16 @@ const file_api_rpc_manager_proto_rawDesc = "" +
 	"\x0fRecoveryVerdict\x12 \n" +
 	"\x1cRECOVERY_VERDICT_UNSPECIFIED\x10\x00\x12 \n" +
 	"\x1cRECOVERY_VERDICT_UNPROTECTED\x10\x01\x12'\n" +
-	"#RECOVERY_VERDICT_UNVERIFIED_REPLICA\x10\x022\xd2\x1a\n" +
+	"#RECOVERY_VERDICT_UNVERIFIED_REPLICA\x10\x02*V\n" +
+	"\tImageRole\x12\x1a\n" +
+	"\x16IMAGE_ROLE_UNSPECIFIED\x10\x00\x12\x12\n" +
+	"\x0eIMAGE_ROLE_ISO\x10\x01\x12\x19\n" +
+	"\x15IMAGE_ROLE_BASE_IMAGE\x10\x02*\xc4\x01\n" +
+	"\x18ImageAvailabilityVerdict\x12*\n" +
+	"&IMAGE_AVAILABILITY_VERDICT_UNSPECIFIED\x10\x00\x12(\n" +
+	"$IMAGE_AVAILABILITY_VERDICT_AVAILABLE\x10\x01\x12*\n" +
+	"&IMAGE_AVAILABILITY_VERDICT_UNAVAILABLE\x10\x02\x12&\n" +
+	"\"IMAGE_AVAILABILITY_VERDICT_UNKNOWN\x10\x032\xd2\x1a\n" +
 	"\x0eManagerService\x12E\n" +
 	"\x06Status\x12\x1c.apiary.rpc.v1.StatusRequest\x1a\x1d.apiary.rpc.v1.StatusResponse\x12K\n" +
 	"\bCreateVM\x12\x1e.apiary.rpc.v1.CreateVMRequest\x1a\x1f.apiary.rpc.v1.CreateVMResponse\x12K\n" +
@@ -6605,8 +6835,8 @@ func file_api_rpc_manager_proto_rawDescGZIP() []byte {
 	return file_api_rpc_manager_proto_rawDescData
 }
 
-var file_api_rpc_manager_proto_enumTypes = make([]protoimpl.EnumInfo, 6)
-var file_api_rpc_manager_proto_msgTypes = make([]protoimpl.MessageInfo, 93)
+var file_api_rpc_manager_proto_enumTypes = make([]protoimpl.EnumInfo, 8)
+var file_api_rpc_manager_proto_msgTypes = make([]protoimpl.MessageInfo, 94)
 var file_api_rpc_manager_proto_goTypes = []any{
 	(VMState)(0),                               // 0: apiary.rpc.v1.VMState
 	(VMPhase)(0),                               // 1: apiary.rpc.v1.VMPhase
@@ -6614,230 +6844,236 @@ var file_api_rpc_manager_proto_goTypes = []any{
 	(JailPhase)(0),                             // 3: apiary.rpc.v1.JailPhase
 	(ResourceKind)(0),                          // 4: apiary.rpc.v1.ResourceKind
 	(RecoveryVerdict)(0),                       // 5: apiary.rpc.v1.RecoveryVerdict
-	(*VMDefinition)(nil),                       // 6: apiary.rpc.v1.VMDefinition
-	(*JailDefinition)(nil),                     // 7: apiary.rpc.v1.JailDefinition
-	(*FirewallRule)(nil),                       // 8: apiary.rpc.v1.FirewallRule
-	(*NetworkDefinition)(nil),                  // 9: apiary.rpc.v1.NetworkDefinition
-	(*CreateVMRequest)(nil),                    // 10: apiary.rpc.v1.CreateVMRequest
-	(*CreateVMResponse)(nil),                   // 11: apiary.rpc.v1.CreateVMResponse
-	(*UpdateVMRequest)(nil),                    // 12: apiary.rpc.v1.UpdateVMRequest
-	(*UpdateVMResponse)(nil),                   // 13: apiary.rpc.v1.UpdateVMResponse
-	(*DeleteVMRequest)(nil),                    // 14: apiary.rpc.v1.DeleteVMRequest
-	(*DeleteVMResponse)(nil),                   // 15: apiary.rpc.v1.DeleteVMResponse
-	(*ForcePurgeVMRequest)(nil),                // 16: apiary.rpc.v1.ForcePurgeVMRequest
-	(*ForcePurgeVMResponse)(nil),               // 17: apiary.rpc.v1.ForcePurgeVMResponse
-	(*MigrateVMRequest)(nil),                   // 18: apiary.rpc.v1.MigrateVMRequest
-	(*MigrateVMResponse)(nil),                  // 19: apiary.rpc.v1.MigrateVMResponse
-	(*SetVMFirewallPausedRequest)(nil),         // 20: apiary.rpc.v1.SetVMFirewallPausedRequest
-	(*SetVMFirewallPausedResponse)(nil),        // 21: apiary.rpc.v1.SetVMFirewallPausedResponse
-	(*GetVMRequest)(nil),                       // 22: apiary.rpc.v1.GetVMRequest
-	(*GetVMResponse)(nil),                      // 23: apiary.rpc.v1.GetVMResponse
-	(*ListVMsRequest)(nil),                     // 24: apiary.rpc.v1.ListVMsRequest
-	(*ListVMsResponse)(nil),                    // 25: apiary.rpc.v1.ListVMsResponse
-	(*StatusRequest)(nil),                      // 26: apiary.rpc.v1.StatusRequest
-	(*StatusResponse)(nil),                     // 27: apiary.rpc.v1.StatusResponse
-	(*UploadISORequest)(nil),                   // 28: apiary.rpc.v1.UploadISORequest
-	(*ISOUploadMetadata)(nil),                  // 29: apiary.rpc.v1.ISOUploadMetadata
-	(*UploadISOResponse)(nil),                  // 30: apiary.rpc.v1.UploadISOResponse
-	(*ListISOsRequest)(nil),                    // 31: apiary.rpc.v1.ListISOsRequest
-	(*ISOInfo)(nil),                            // 32: apiary.rpc.v1.ISOInfo
-	(*ListISOsResponse)(nil),                   // 33: apiary.rpc.v1.ListISOsResponse
-	(*DeleteISORequest)(nil),                   // 34: apiary.rpc.v1.DeleteISORequest
-	(*DeleteISOResponse)(nil),                  // 35: apiary.rpc.v1.DeleteISOResponse
-	(*PushISOToRequest)(nil),                   // 36: apiary.rpc.v1.PushISOToRequest
-	(*PushISOToResponse)(nil),                  // 37: apiary.rpc.v1.PushISOToResponse
-	(*HostStatsRequest)(nil),                   // 38: apiary.rpc.v1.HostStatsRequest
-	(*CPUStats)(nil),                           // 39: apiary.rpc.v1.CPUStats
-	(*MemStats)(nil),                           // 40: apiary.rpc.v1.MemStats
-	(*PoolStats)(nil),                          // 41: apiary.rpc.v1.PoolStats
-	(*DiskStats)(nil),                          // 42: apiary.rpc.v1.DiskStats
-	(*NetIfaceStats)(nil),                      // 43: apiary.rpc.v1.NetIfaceStats
-	(*PFStats)(nil),                            // 44: apiary.rpc.v1.PFStats
-	(*HostStatsResponse)(nil),                  // 45: apiary.rpc.v1.HostStatsResponse
-	(*GetVMConsoleRequest)(nil),                // 46: apiary.rpc.v1.GetVMConsoleRequest
-	(*GetVMConsoleResponse)(nil),               // 47: apiary.rpc.v1.GetVMConsoleResponse
-	(*GetVMSerialLogRequest)(nil),              // 48: apiary.rpc.v1.GetVMSerialLogRequest
-	(*GetVMSerialLogResponse)(nil),             // 49: apiary.rpc.v1.GetVMSerialLogResponse
-	(*GetNodeConfigRequest)(nil),               // 50: apiary.rpc.v1.GetNodeConfigRequest
-	(*GetNodeConfigResponse)(nil),              // 51: apiary.rpc.v1.GetNodeConfigResponse
-	(*UpdateNodeConfigRequest)(nil),            // 52: apiary.rpc.v1.UpdateNodeConfigRequest
-	(*UpdateNodeConfigResponse)(nil),           // 53: apiary.rpc.v1.UpdateNodeConfigResponse
-	(*SetDatasetQuotaRequest)(nil),             // 54: apiary.rpc.v1.SetDatasetQuotaRequest
-	(*SetDatasetQuotaResponse)(nil),            // 55: apiary.rpc.v1.SetDatasetQuotaResponse
-	(*CreateNetworkRequest)(nil),               // 56: apiary.rpc.v1.CreateNetworkRequest
-	(*CreateNetworkResponse)(nil),              // 57: apiary.rpc.v1.CreateNetworkResponse
-	(*ListNetworksRequest)(nil),                // 58: apiary.rpc.v1.ListNetworksRequest
-	(*ListNetworksResponse)(nil),               // 59: apiary.rpc.v1.ListNetworksResponse
-	(*DeleteNetworkRequest)(nil),               // 60: apiary.rpc.v1.DeleteNetworkRequest
-	(*DeleteNetworkResponse)(nil),              // 61: apiary.rpc.v1.DeleteNetworkResponse
-	(*CreateJailRequest)(nil),                  // 62: apiary.rpc.v1.CreateJailRequest
-	(*CreateJailResponse)(nil),                 // 63: apiary.rpc.v1.CreateJailResponse
-	(*UpdateJailRequest)(nil),                  // 64: apiary.rpc.v1.UpdateJailRequest
-	(*UpdateJailResponse)(nil),                 // 65: apiary.rpc.v1.UpdateJailResponse
-	(*DeleteJailRequest)(nil),                  // 66: apiary.rpc.v1.DeleteJailRequest
-	(*DeleteJailResponse)(nil),                 // 67: apiary.rpc.v1.DeleteJailResponse
-	(*GetJailRequest)(nil),                     // 68: apiary.rpc.v1.GetJailRequest
-	(*GetJailResponse)(nil),                    // 69: apiary.rpc.v1.GetJailResponse
-	(*ListJailsRequest)(nil),                   // 70: apiary.rpc.v1.ListJailsRequest
-	(*ListJailsResponse)(nil),                  // 71: apiary.rpc.v1.ListJailsResponse
-	(*ForcePurgeJailRequest)(nil),              // 72: apiary.rpc.v1.ForcePurgeJailRequest
-	(*ForcePurgeJailResponse)(nil),             // 73: apiary.rpc.v1.ForcePurgeJailResponse
-	(*MigrateJailRequest)(nil),                 // 74: apiary.rpc.v1.MigrateJailRequest
-	(*MigrateJailResponse)(nil),                // 75: apiary.rpc.v1.MigrateJailResponse
-	(*ReportVMPhaseRequest)(nil),               // 76: apiary.rpc.v1.ReportVMPhaseRequest
-	(*ReportVMPhaseResponse)(nil),              // 77: apiary.rpc.v1.ReportVMPhaseResponse
-	(*ReportVMTeardownCompleteRequest)(nil),    // 78: apiary.rpc.v1.ReportVMTeardownCompleteRequest
-	(*ReportVMTeardownCompleteResponse)(nil),   // 79: apiary.rpc.v1.ReportVMTeardownCompleteResponse
-	(*ReportJailPhaseRequest)(nil),             // 80: apiary.rpc.v1.ReportJailPhaseRequest
-	(*ReportJailPhaseResponse)(nil),            // 81: apiary.rpc.v1.ReportJailPhaseResponse
-	(*ReportJailTeardownCompleteRequest)(nil),  // 82: apiary.rpc.v1.ReportJailTeardownCompleteRequest
-	(*ReportJailTeardownCompleteResponse)(nil), // 83: apiary.rpc.v1.ReportJailTeardownCompleteResponse
-	(*APIKeyInfo)(nil),                         // 84: apiary.rpc.v1.APIKeyInfo
-	(*CreateAPIKeyRequest)(nil),                // 85: apiary.rpc.v1.CreateAPIKeyRequest
-	(*CreateAPIKeyResponse)(nil),               // 86: apiary.rpc.v1.CreateAPIKeyResponse
-	(*ListAPIKeysRequest)(nil),                 // 87: apiary.rpc.v1.ListAPIKeysRequest
-	(*ListAPIKeysResponse)(nil),                // 88: apiary.rpc.v1.ListAPIKeysResponse
-	(*RevokeAPIKeyRequest)(nil),                // 89: apiary.rpc.v1.RevokeAPIKeyRequest
-	(*RevokeAPIKeyResponse)(nil),               // 90: apiary.rpc.v1.RevokeAPIKeyResponse
-	(*SimulateNodeFailureRequest)(nil),         // 91: apiary.rpc.v1.SimulateNodeFailureRequest
-	(*SimulateNodeFailureResponse)(nil),        // 92: apiary.rpc.v1.SimulateNodeFailureResponse
-	(*QuorumImpact)(nil),                       // 93: apiary.rpc.v1.QuorumImpact
-	(*OwnedResourceImpact)(nil),                // 94: apiary.rpc.v1.OwnedResourceImpact
-	(*ReplicaBackedImpact)(nil),                // 95: apiary.rpc.v1.ReplicaBackedImpact
-	(*SimulateNetworkFailureRequest)(nil),      // 96: apiary.rpc.v1.SimulateNetworkFailureRequest
-	(*SimulateNetworkFailureResponse)(nil),     // 97: apiary.rpc.v1.SimulateNetworkFailureResponse
-	(*NetworkFailureImpact)(nil),               // 98: apiary.rpc.v1.NetworkFailureImpact
+	(ImageRole)(0),                             // 6: apiary.rpc.v1.ImageRole
+	(ImageAvailabilityVerdict)(0),              // 7: apiary.rpc.v1.ImageAvailabilityVerdict
+	(*VMDefinition)(nil),                       // 8: apiary.rpc.v1.VMDefinition
+	(*JailDefinition)(nil),                     // 9: apiary.rpc.v1.JailDefinition
+	(*FirewallRule)(nil),                       // 10: apiary.rpc.v1.FirewallRule
+	(*NetworkDefinition)(nil),                  // 11: apiary.rpc.v1.NetworkDefinition
+	(*CreateVMRequest)(nil),                    // 12: apiary.rpc.v1.CreateVMRequest
+	(*CreateVMResponse)(nil),                   // 13: apiary.rpc.v1.CreateVMResponse
+	(*UpdateVMRequest)(nil),                    // 14: apiary.rpc.v1.UpdateVMRequest
+	(*UpdateVMResponse)(nil),                   // 15: apiary.rpc.v1.UpdateVMResponse
+	(*DeleteVMRequest)(nil),                    // 16: apiary.rpc.v1.DeleteVMRequest
+	(*DeleteVMResponse)(nil),                   // 17: apiary.rpc.v1.DeleteVMResponse
+	(*ForcePurgeVMRequest)(nil),                // 18: apiary.rpc.v1.ForcePurgeVMRequest
+	(*ForcePurgeVMResponse)(nil),               // 19: apiary.rpc.v1.ForcePurgeVMResponse
+	(*MigrateVMRequest)(nil),                   // 20: apiary.rpc.v1.MigrateVMRequest
+	(*MigrateVMResponse)(nil),                  // 21: apiary.rpc.v1.MigrateVMResponse
+	(*SetVMFirewallPausedRequest)(nil),         // 22: apiary.rpc.v1.SetVMFirewallPausedRequest
+	(*SetVMFirewallPausedResponse)(nil),        // 23: apiary.rpc.v1.SetVMFirewallPausedResponse
+	(*GetVMRequest)(nil),                       // 24: apiary.rpc.v1.GetVMRequest
+	(*GetVMResponse)(nil),                      // 25: apiary.rpc.v1.GetVMResponse
+	(*ListVMsRequest)(nil),                     // 26: apiary.rpc.v1.ListVMsRequest
+	(*ListVMsResponse)(nil),                    // 27: apiary.rpc.v1.ListVMsResponse
+	(*StatusRequest)(nil),                      // 28: apiary.rpc.v1.StatusRequest
+	(*StatusResponse)(nil),                     // 29: apiary.rpc.v1.StatusResponse
+	(*UploadISORequest)(nil),                   // 30: apiary.rpc.v1.UploadISORequest
+	(*ISOUploadMetadata)(nil),                  // 31: apiary.rpc.v1.ISOUploadMetadata
+	(*UploadISOResponse)(nil),                  // 32: apiary.rpc.v1.UploadISOResponse
+	(*ListISOsRequest)(nil),                    // 33: apiary.rpc.v1.ListISOsRequest
+	(*ISOInfo)(nil),                            // 34: apiary.rpc.v1.ISOInfo
+	(*ListISOsResponse)(nil),                   // 35: apiary.rpc.v1.ListISOsResponse
+	(*DeleteISORequest)(nil),                   // 36: apiary.rpc.v1.DeleteISORequest
+	(*DeleteISOResponse)(nil),                  // 37: apiary.rpc.v1.DeleteISOResponse
+	(*PushISOToRequest)(nil),                   // 38: apiary.rpc.v1.PushISOToRequest
+	(*PushISOToResponse)(nil),                  // 39: apiary.rpc.v1.PushISOToResponse
+	(*HostStatsRequest)(nil),                   // 40: apiary.rpc.v1.HostStatsRequest
+	(*CPUStats)(nil),                           // 41: apiary.rpc.v1.CPUStats
+	(*MemStats)(nil),                           // 42: apiary.rpc.v1.MemStats
+	(*PoolStats)(nil),                          // 43: apiary.rpc.v1.PoolStats
+	(*DiskStats)(nil),                          // 44: apiary.rpc.v1.DiskStats
+	(*NetIfaceStats)(nil),                      // 45: apiary.rpc.v1.NetIfaceStats
+	(*PFStats)(nil),                            // 46: apiary.rpc.v1.PFStats
+	(*HostStatsResponse)(nil),                  // 47: apiary.rpc.v1.HostStatsResponse
+	(*GetVMConsoleRequest)(nil),                // 48: apiary.rpc.v1.GetVMConsoleRequest
+	(*GetVMConsoleResponse)(nil),               // 49: apiary.rpc.v1.GetVMConsoleResponse
+	(*GetVMSerialLogRequest)(nil),              // 50: apiary.rpc.v1.GetVMSerialLogRequest
+	(*GetVMSerialLogResponse)(nil),             // 51: apiary.rpc.v1.GetVMSerialLogResponse
+	(*GetNodeConfigRequest)(nil),               // 52: apiary.rpc.v1.GetNodeConfigRequest
+	(*GetNodeConfigResponse)(nil),              // 53: apiary.rpc.v1.GetNodeConfigResponse
+	(*UpdateNodeConfigRequest)(nil),            // 54: apiary.rpc.v1.UpdateNodeConfigRequest
+	(*UpdateNodeConfigResponse)(nil),           // 55: apiary.rpc.v1.UpdateNodeConfigResponse
+	(*SetDatasetQuotaRequest)(nil),             // 56: apiary.rpc.v1.SetDatasetQuotaRequest
+	(*SetDatasetQuotaResponse)(nil),            // 57: apiary.rpc.v1.SetDatasetQuotaResponse
+	(*CreateNetworkRequest)(nil),               // 58: apiary.rpc.v1.CreateNetworkRequest
+	(*CreateNetworkResponse)(nil),              // 59: apiary.rpc.v1.CreateNetworkResponse
+	(*ListNetworksRequest)(nil),                // 60: apiary.rpc.v1.ListNetworksRequest
+	(*ListNetworksResponse)(nil),               // 61: apiary.rpc.v1.ListNetworksResponse
+	(*DeleteNetworkRequest)(nil),               // 62: apiary.rpc.v1.DeleteNetworkRequest
+	(*DeleteNetworkResponse)(nil),              // 63: apiary.rpc.v1.DeleteNetworkResponse
+	(*CreateJailRequest)(nil),                  // 64: apiary.rpc.v1.CreateJailRequest
+	(*CreateJailResponse)(nil),                 // 65: apiary.rpc.v1.CreateJailResponse
+	(*UpdateJailRequest)(nil),                  // 66: apiary.rpc.v1.UpdateJailRequest
+	(*UpdateJailResponse)(nil),                 // 67: apiary.rpc.v1.UpdateJailResponse
+	(*DeleteJailRequest)(nil),                  // 68: apiary.rpc.v1.DeleteJailRequest
+	(*DeleteJailResponse)(nil),                 // 69: apiary.rpc.v1.DeleteJailResponse
+	(*GetJailRequest)(nil),                     // 70: apiary.rpc.v1.GetJailRequest
+	(*GetJailResponse)(nil),                    // 71: apiary.rpc.v1.GetJailResponse
+	(*ListJailsRequest)(nil),                   // 72: apiary.rpc.v1.ListJailsRequest
+	(*ListJailsResponse)(nil),                  // 73: apiary.rpc.v1.ListJailsResponse
+	(*ForcePurgeJailRequest)(nil),              // 74: apiary.rpc.v1.ForcePurgeJailRequest
+	(*ForcePurgeJailResponse)(nil),             // 75: apiary.rpc.v1.ForcePurgeJailResponse
+	(*MigrateJailRequest)(nil),                 // 76: apiary.rpc.v1.MigrateJailRequest
+	(*MigrateJailResponse)(nil),                // 77: apiary.rpc.v1.MigrateJailResponse
+	(*ReportVMPhaseRequest)(nil),               // 78: apiary.rpc.v1.ReportVMPhaseRequest
+	(*ReportVMPhaseResponse)(nil),              // 79: apiary.rpc.v1.ReportVMPhaseResponse
+	(*ReportVMTeardownCompleteRequest)(nil),    // 80: apiary.rpc.v1.ReportVMTeardownCompleteRequest
+	(*ReportVMTeardownCompleteResponse)(nil),   // 81: apiary.rpc.v1.ReportVMTeardownCompleteResponse
+	(*ReportJailPhaseRequest)(nil),             // 82: apiary.rpc.v1.ReportJailPhaseRequest
+	(*ReportJailPhaseResponse)(nil),            // 83: apiary.rpc.v1.ReportJailPhaseResponse
+	(*ReportJailTeardownCompleteRequest)(nil),  // 84: apiary.rpc.v1.ReportJailTeardownCompleteRequest
+	(*ReportJailTeardownCompleteResponse)(nil), // 85: apiary.rpc.v1.ReportJailTeardownCompleteResponse
+	(*APIKeyInfo)(nil),                         // 86: apiary.rpc.v1.APIKeyInfo
+	(*CreateAPIKeyRequest)(nil),                // 87: apiary.rpc.v1.CreateAPIKeyRequest
+	(*CreateAPIKeyResponse)(nil),               // 88: apiary.rpc.v1.CreateAPIKeyResponse
+	(*ListAPIKeysRequest)(nil),                 // 89: apiary.rpc.v1.ListAPIKeysRequest
+	(*ListAPIKeysResponse)(nil),                // 90: apiary.rpc.v1.ListAPIKeysResponse
+	(*RevokeAPIKeyRequest)(nil),                // 91: apiary.rpc.v1.RevokeAPIKeyRequest
+	(*RevokeAPIKeyResponse)(nil),               // 92: apiary.rpc.v1.RevokeAPIKeyResponse
+	(*SimulateNodeFailureRequest)(nil),         // 93: apiary.rpc.v1.SimulateNodeFailureRequest
+	(*SimulateNodeFailureResponse)(nil),        // 94: apiary.rpc.v1.SimulateNodeFailureResponse
+	(*QuorumImpact)(nil),                       // 95: apiary.rpc.v1.QuorumImpact
+	(*OwnedResourceImpact)(nil),                // 96: apiary.rpc.v1.OwnedResourceImpact
+	(*ReplicaBackedImpact)(nil),                // 97: apiary.rpc.v1.ReplicaBackedImpact
+	(*SimulateNetworkFailureRequest)(nil),      // 98: apiary.rpc.v1.SimulateNetworkFailureRequest
+	(*SimulateNetworkFailureResponse)(nil),     // 99: apiary.rpc.v1.SimulateNetworkFailureResponse
+	(*NetworkFailureImpact)(nil),               // 100: apiary.rpc.v1.NetworkFailureImpact
+	(*ImageAvailabilityImpact)(nil),            // 101: apiary.rpc.v1.ImageAvailabilityImpact
 }
 var file_api_rpc_manager_proto_depIdxs = []int32{
-	0,  // 0: apiary.rpc.v1.VMDefinition.desired_state:type_name -> apiary.rpc.v1.VMState
-	1,  // 1: apiary.rpc.v1.VMDefinition.phase:type_name -> apiary.rpc.v1.VMPhase
-	8,  // 2: apiary.rpc.v1.VMDefinition.firewall_rules:type_name -> apiary.rpc.v1.FirewallRule
-	2,  // 3: apiary.rpc.v1.JailDefinition.desired_state:type_name -> apiary.rpc.v1.JailState
-	3,  // 4: apiary.rpc.v1.JailDefinition.phase:type_name -> apiary.rpc.v1.JailPhase
-	6,  // 5: apiary.rpc.v1.CreateVMRequest.vm:type_name -> apiary.rpc.v1.VMDefinition
-	6,  // 6: apiary.rpc.v1.CreateVMResponse.vm:type_name -> apiary.rpc.v1.VMDefinition
-	6,  // 7: apiary.rpc.v1.UpdateVMRequest.vm:type_name -> apiary.rpc.v1.VMDefinition
-	6,  // 8: apiary.rpc.v1.UpdateVMResponse.vm:type_name -> apiary.rpc.v1.VMDefinition
-	6,  // 9: apiary.rpc.v1.DeleteVMResponse.vm:type_name -> apiary.rpc.v1.VMDefinition
-	6,  // 10: apiary.rpc.v1.ForcePurgeVMResponse.vm:type_name -> apiary.rpc.v1.VMDefinition
-	6,  // 11: apiary.rpc.v1.MigrateVMResponse.vm:type_name -> apiary.rpc.v1.VMDefinition
-	6,  // 12: apiary.rpc.v1.SetVMFirewallPausedResponse.vm:type_name -> apiary.rpc.v1.VMDefinition
-	6,  // 13: apiary.rpc.v1.GetVMResponse.vm:type_name -> apiary.rpc.v1.VMDefinition
-	6,  // 14: apiary.rpc.v1.ListVMsResponse.vms:type_name -> apiary.rpc.v1.VMDefinition
-	29, // 15: apiary.rpc.v1.UploadISORequest.metadata:type_name -> apiary.rpc.v1.ISOUploadMetadata
-	32, // 16: apiary.rpc.v1.ListISOsResponse.isos:type_name -> apiary.rpc.v1.ISOInfo
-	39, // 17: apiary.rpc.v1.HostStatsResponse.cpu:type_name -> apiary.rpc.v1.CPUStats
-	40, // 18: apiary.rpc.v1.HostStatsResponse.mem:type_name -> apiary.rpc.v1.MemStats
-	41, // 19: apiary.rpc.v1.HostStatsResponse.pools:type_name -> apiary.rpc.v1.PoolStats
-	42, // 20: apiary.rpc.v1.HostStatsResponse.disks:type_name -> apiary.rpc.v1.DiskStats
-	43, // 21: apiary.rpc.v1.HostStatsResponse.net:type_name -> apiary.rpc.v1.NetIfaceStats
-	44, // 22: apiary.rpc.v1.HostStatsResponse.pf:type_name -> apiary.rpc.v1.PFStats
-	9,  // 23: apiary.rpc.v1.CreateNetworkRequest.network:type_name -> apiary.rpc.v1.NetworkDefinition
-	9,  // 24: apiary.rpc.v1.CreateNetworkResponse.network:type_name -> apiary.rpc.v1.NetworkDefinition
-	9,  // 25: apiary.rpc.v1.ListNetworksResponse.networks:type_name -> apiary.rpc.v1.NetworkDefinition
-	9,  // 26: apiary.rpc.v1.DeleteNetworkResponse.network:type_name -> apiary.rpc.v1.NetworkDefinition
-	7,  // 27: apiary.rpc.v1.CreateJailRequest.jail:type_name -> apiary.rpc.v1.JailDefinition
-	7,  // 28: apiary.rpc.v1.CreateJailResponse.jail:type_name -> apiary.rpc.v1.JailDefinition
-	7,  // 29: apiary.rpc.v1.UpdateJailRequest.jail:type_name -> apiary.rpc.v1.JailDefinition
-	7,  // 30: apiary.rpc.v1.UpdateJailResponse.jail:type_name -> apiary.rpc.v1.JailDefinition
-	7,  // 31: apiary.rpc.v1.DeleteJailResponse.jail:type_name -> apiary.rpc.v1.JailDefinition
-	7,  // 32: apiary.rpc.v1.GetJailResponse.jail:type_name -> apiary.rpc.v1.JailDefinition
-	7,  // 33: apiary.rpc.v1.ListJailsResponse.jails:type_name -> apiary.rpc.v1.JailDefinition
-	7,  // 34: apiary.rpc.v1.ForcePurgeJailResponse.jail:type_name -> apiary.rpc.v1.JailDefinition
-	7,  // 35: apiary.rpc.v1.MigrateJailResponse.jail:type_name -> apiary.rpc.v1.JailDefinition
-	1,  // 36: apiary.rpc.v1.ReportVMPhaseRequest.phase:type_name -> apiary.rpc.v1.VMPhase
-	3,  // 37: apiary.rpc.v1.ReportJailPhaseRequest.phase:type_name -> apiary.rpc.v1.JailPhase
-	84, // 38: apiary.rpc.v1.CreateAPIKeyResponse.key:type_name -> apiary.rpc.v1.APIKeyInfo
-	84, // 39: apiary.rpc.v1.ListAPIKeysResponse.keys:type_name -> apiary.rpc.v1.APIKeyInfo
-	93, // 40: apiary.rpc.v1.SimulateNodeFailureResponse.quorum:type_name -> apiary.rpc.v1.QuorumImpact
-	94, // 41: apiary.rpc.v1.SimulateNodeFailureResponse.owned_resources:type_name -> apiary.rpc.v1.OwnedResourceImpact
-	95, // 42: apiary.rpc.v1.SimulateNodeFailureResponse.replica_backed_resources:type_name -> apiary.rpc.v1.ReplicaBackedImpact
-	4,  // 43: apiary.rpc.v1.OwnedResourceImpact.kind:type_name -> apiary.rpc.v1.ResourceKind
-	5,  // 44: apiary.rpc.v1.OwnedResourceImpact.verdict:type_name -> apiary.rpc.v1.RecoveryVerdict
-	4,  // 45: apiary.rpc.v1.ReplicaBackedImpact.kind:type_name -> apiary.rpc.v1.ResourceKind
-	9,  // 46: apiary.rpc.v1.SimulateNetworkFailureResponse.network:type_name -> apiary.rpc.v1.NetworkDefinition
-	98, // 47: apiary.rpc.v1.SimulateNetworkFailureResponse.affected_resources:type_name -> apiary.rpc.v1.NetworkFailureImpact
-	26, // 48: apiary.rpc.v1.ManagerService.Status:input_type -> apiary.rpc.v1.StatusRequest
-	10, // 49: apiary.rpc.v1.ManagerService.CreateVM:input_type -> apiary.rpc.v1.CreateVMRequest
-	12, // 50: apiary.rpc.v1.ManagerService.UpdateVM:input_type -> apiary.rpc.v1.UpdateVMRequest
-	14, // 51: apiary.rpc.v1.ManagerService.DeleteVM:input_type -> apiary.rpc.v1.DeleteVMRequest
-	16, // 52: apiary.rpc.v1.ManagerService.ForcePurgeVM:input_type -> apiary.rpc.v1.ForcePurgeVMRequest
-	18, // 53: apiary.rpc.v1.ManagerService.MigrateVM:input_type -> apiary.rpc.v1.MigrateVMRequest
-	20, // 54: apiary.rpc.v1.ManagerService.SetVMFirewallPaused:input_type -> apiary.rpc.v1.SetVMFirewallPausedRequest
-	22, // 55: apiary.rpc.v1.ManagerService.GetVM:input_type -> apiary.rpc.v1.GetVMRequest
-	24, // 56: apiary.rpc.v1.ManagerService.ListVMs:input_type -> apiary.rpc.v1.ListVMsRequest
-	28, // 57: apiary.rpc.v1.ManagerService.UploadISO:input_type -> apiary.rpc.v1.UploadISORequest
-	31, // 58: apiary.rpc.v1.ManagerService.ListISOs:input_type -> apiary.rpc.v1.ListISOsRequest
-	34, // 59: apiary.rpc.v1.ManagerService.DeleteISO:input_type -> apiary.rpc.v1.DeleteISORequest
-	38, // 60: apiary.rpc.v1.ManagerService.HostStats:input_type -> apiary.rpc.v1.HostStatsRequest
-	46, // 61: apiary.rpc.v1.ManagerService.GetVMConsole:input_type -> apiary.rpc.v1.GetVMConsoleRequest
-	48, // 62: apiary.rpc.v1.ManagerService.GetVMSerialLog:input_type -> apiary.rpc.v1.GetVMSerialLogRequest
-	50, // 63: apiary.rpc.v1.ManagerService.GetNodeConfig:input_type -> apiary.rpc.v1.GetNodeConfigRequest
-	52, // 64: apiary.rpc.v1.ManagerService.UpdateNodeConfig:input_type -> apiary.rpc.v1.UpdateNodeConfigRequest
-	54, // 65: apiary.rpc.v1.ManagerService.SetDatasetQuota:input_type -> apiary.rpc.v1.SetDatasetQuotaRequest
-	56, // 66: apiary.rpc.v1.ManagerService.CreateNetwork:input_type -> apiary.rpc.v1.CreateNetworkRequest
-	58, // 67: apiary.rpc.v1.ManagerService.ListNetworks:input_type -> apiary.rpc.v1.ListNetworksRequest
-	60, // 68: apiary.rpc.v1.ManagerService.DeleteNetwork:input_type -> apiary.rpc.v1.DeleteNetworkRequest
-	85, // 69: apiary.rpc.v1.ManagerService.CreateAPIKey:input_type -> apiary.rpc.v1.CreateAPIKeyRequest
-	87, // 70: apiary.rpc.v1.ManagerService.ListAPIKeys:input_type -> apiary.rpc.v1.ListAPIKeysRequest
-	89, // 71: apiary.rpc.v1.ManagerService.RevokeAPIKey:input_type -> apiary.rpc.v1.RevokeAPIKeyRequest
-	62, // 72: apiary.rpc.v1.ManagerService.CreateJail:input_type -> apiary.rpc.v1.CreateJailRequest
-	64, // 73: apiary.rpc.v1.ManagerService.UpdateJail:input_type -> apiary.rpc.v1.UpdateJailRequest
-	66, // 74: apiary.rpc.v1.ManagerService.DeleteJail:input_type -> apiary.rpc.v1.DeleteJailRequest
-	68, // 75: apiary.rpc.v1.ManagerService.GetJail:input_type -> apiary.rpc.v1.GetJailRequest
-	70, // 76: apiary.rpc.v1.ManagerService.ListJails:input_type -> apiary.rpc.v1.ListJailsRequest
-	72, // 77: apiary.rpc.v1.ManagerService.ForcePurgeJail:input_type -> apiary.rpc.v1.ForcePurgeJailRequest
-	91, // 78: apiary.rpc.v1.ManagerService.SimulateNodeFailure:input_type -> apiary.rpc.v1.SimulateNodeFailureRequest
-	96, // 79: apiary.rpc.v1.ManagerService.SimulateNetworkFailure:input_type -> apiary.rpc.v1.SimulateNetworkFailureRequest
-	74, // 80: apiary.rpc.v1.ManagerService.MigrateJail:input_type -> apiary.rpc.v1.MigrateJailRequest
-	76, // 81: apiary.rpc.v1.ManagerService.ReportVMPhase:input_type -> apiary.rpc.v1.ReportVMPhaseRequest
-	78, // 82: apiary.rpc.v1.ManagerService.ReportVMTeardownComplete:input_type -> apiary.rpc.v1.ReportVMTeardownCompleteRequest
-	80, // 83: apiary.rpc.v1.ManagerService.ReportJailPhase:input_type -> apiary.rpc.v1.ReportJailPhaseRequest
-	82, // 84: apiary.rpc.v1.ManagerService.ReportJailTeardownComplete:input_type -> apiary.rpc.v1.ReportJailTeardownCompleteRequest
-	36, // 85: apiary.rpc.v1.ManagerService.PushISOTo:input_type -> apiary.rpc.v1.PushISOToRequest
-	27, // 86: apiary.rpc.v1.ManagerService.Status:output_type -> apiary.rpc.v1.StatusResponse
-	11, // 87: apiary.rpc.v1.ManagerService.CreateVM:output_type -> apiary.rpc.v1.CreateVMResponse
-	13, // 88: apiary.rpc.v1.ManagerService.UpdateVM:output_type -> apiary.rpc.v1.UpdateVMResponse
-	15, // 89: apiary.rpc.v1.ManagerService.DeleteVM:output_type -> apiary.rpc.v1.DeleteVMResponse
-	17, // 90: apiary.rpc.v1.ManagerService.ForcePurgeVM:output_type -> apiary.rpc.v1.ForcePurgeVMResponse
-	19, // 91: apiary.rpc.v1.ManagerService.MigrateVM:output_type -> apiary.rpc.v1.MigrateVMResponse
-	21, // 92: apiary.rpc.v1.ManagerService.SetVMFirewallPaused:output_type -> apiary.rpc.v1.SetVMFirewallPausedResponse
-	23, // 93: apiary.rpc.v1.ManagerService.GetVM:output_type -> apiary.rpc.v1.GetVMResponse
-	25, // 94: apiary.rpc.v1.ManagerService.ListVMs:output_type -> apiary.rpc.v1.ListVMsResponse
-	30, // 95: apiary.rpc.v1.ManagerService.UploadISO:output_type -> apiary.rpc.v1.UploadISOResponse
-	33, // 96: apiary.rpc.v1.ManagerService.ListISOs:output_type -> apiary.rpc.v1.ListISOsResponse
-	35, // 97: apiary.rpc.v1.ManagerService.DeleteISO:output_type -> apiary.rpc.v1.DeleteISOResponse
-	45, // 98: apiary.rpc.v1.ManagerService.HostStats:output_type -> apiary.rpc.v1.HostStatsResponse
-	47, // 99: apiary.rpc.v1.ManagerService.GetVMConsole:output_type -> apiary.rpc.v1.GetVMConsoleResponse
-	49, // 100: apiary.rpc.v1.ManagerService.GetVMSerialLog:output_type -> apiary.rpc.v1.GetVMSerialLogResponse
-	51, // 101: apiary.rpc.v1.ManagerService.GetNodeConfig:output_type -> apiary.rpc.v1.GetNodeConfigResponse
-	53, // 102: apiary.rpc.v1.ManagerService.UpdateNodeConfig:output_type -> apiary.rpc.v1.UpdateNodeConfigResponse
-	55, // 103: apiary.rpc.v1.ManagerService.SetDatasetQuota:output_type -> apiary.rpc.v1.SetDatasetQuotaResponse
-	57, // 104: apiary.rpc.v1.ManagerService.CreateNetwork:output_type -> apiary.rpc.v1.CreateNetworkResponse
-	59, // 105: apiary.rpc.v1.ManagerService.ListNetworks:output_type -> apiary.rpc.v1.ListNetworksResponse
-	61, // 106: apiary.rpc.v1.ManagerService.DeleteNetwork:output_type -> apiary.rpc.v1.DeleteNetworkResponse
-	86, // 107: apiary.rpc.v1.ManagerService.CreateAPIKey:output_type -> apiary.rpc.v1.CreateAPIKeyResponse
-	88, // 108: apiary.rpc.v1.ManagerService.ListAPIKeys:output_type -> apiary.rpc.v1.ListAPIKeysResponse
-	90, // 109: apiary.rpc.v1.ManagerService.RevokeAPIKey:output_type -> apiary.rpc.v1.RevokeAPIKeyResponse
-	63, // 110: apiary.rpc.v1.ManagerService.CreateJail:output_type -> apiary.rpc.v1.CreateJailResponse
-	65, // 111: apiary.rpc.v1.ManagerService.UpdateJail:output_type -> apiary.rpc.v1.UpdateJailResponse
-	67, // 112: apiary.rpc.v1.ManagerService.DeleteJail:output_type -> apiary.rpc.v1.DeleteJailResponse
-	69, // 113: apiary.rpc.v1.ManagerService.GetJail:output_type -> apiary.rpc.v1.GetJailResponse
-	71, // 114: apiary.rpc.v1.ManagerService.ListJails:output_type -> apiary.rpc.v1.ListJailsResponse
-	73, // 115: apiary.rpc.v1.ManagerService.ForcePurgeJail:output_type -> apiary.rpc.v1.ForcePurgeJailResponse
-	92, // 116: apiary.rpc.v1.ManagerService.SimulateNodeFailure:output_type -> apiary.rpc.v1.SimulateNodeFailureResponse
-	97, // 117: apiary.rpc.v1.ManagerService.SimulateNetworkFailure:output_type -> apiary.rpc.v1.SimulateNetworkFailureResponse
-	75, // 118: apiary.rpc.v1.ManagerService.MigrateJail:output_type -> apiary.rpc.v1.MigrateJailResponse
-	77, // 119: apiary.rpc.v1.ManagerService.ReportVMPhase:output_type -> apiary.rpc.v1.ReportVMPhaseResponse
-	79, // 120: apiary.rpc.v1.ManagerService.ReportVMTeardownComplete:output_type -> apiary.rpc.v1.ReportVMTeardownCompleteResponse
-	81, // 121: apiary.rpc.v1.ManagerService.ReportJailPhase:output_type -> apiary.rpc.v1.ReportJailPhaseResponse
-	83, // 122: apiary.rpc.v1.ManagerService.ReportJailTeardownComplete:output_type -> apiary.rpc.v1.ReportJailTeardownCompleteResponse
-	37, // 123: apiary.rpc.v1.ManagerService.PushISOTo:output_type -> apiary.rpc.v1.PushISOToResponse
-	86, // [86:124] is the sub-list for method output_type
-	48, // [48:86] is the sub-list for method input_type
-	48, // [48:48] is the sub-list for extension type_name
-	48, // [48:48] is the sub-list for extension extendee
-	0,  // [0:48] is the sub-list for field type_name
+	0,   // 0: apiary.rpc.v1.VMDefinition.desired_state:type_name -> apiary.rpc.v1.VMState
+	1,   // 1: apiary.rpc.v1.VMDefinition.phase:type_name -> apiary.rpc.v1.VMPhase
+	10,  // 2: apiary.rpc.v1.VMDefinition.firewall_rules:type_name -> apiary.rpc.v1.FirewallRule
+	2,   // 3: apiary.rpc.v1.JailDefinition.desired_state:type_name -> apiary.rpc.v1.JailState
+	3,   // 4: apiary.rpc.v1.JailDefinition.phase:type_name -> apiary.rpc.v1.JailPhase
+	8,   // 5: apiary.rpc.v1.CreateVMRequest.vm:type_name -> apiary.rpc.v1.VMDefinition
+	8,   // 6: apiary.rpc.v1.CreateVMResponse.vm:type_name -> apiary.rpc.v1.VMDefinition
+	8,   // 7: apiary.rpc.v1.UpdateVMRequest.vm:type_name -> apiary.rpc.v1.VMDefinition
+	8,   // 8: apiary.rpc.v1.UpdateVMResponse.vm:type_name -> apiary.rpc.v1.VMDefinition
+	8,   // 9: apiary.rpc.v1.DeleteVMResponse.vm:type_name -> apiary.rpc.v1.VMDefinition
+	8,   // 10: apiary.rpc.v1.ForcePurgeVMResponse.vm:type_name -> apiary.rpc.v1.VMDefinition
+	8,   // 11: apiary.rpc.v1.MigrateVMResponse.vm:type_name -> apiary.rpc.v1.VMDefinition
+	8,   // 12: apiary.rpc.v1.SetVMFirewallPausedResponse.vm:type_name -> apiary.rpc.v1.VMDefinition
+	8,   // 13: apiary.rpc.v1.GetVMResponse.vm:type_name -> apiary.rpc.v1.VMDefinition
+	8,   // 14: apiary.rpc.v1.ListVMsResponse.vms:type_name -> apiary.rpc.v1.VMDefinition
+	31,  // 15: apiary.rpc.v1.UploadISORequest.metadata:type_name -> apiary.rpc.v1.ISOUploadMetadata
+	34,  // 16: apiary.rpc.v1.ListISOsResponse.isos:type_name -> apiary.rpc.v1.ISOInfo
+	41,  // 17: apiary.rpc.v1.HostStatsResponse.cpu:type_name -> apiary.rpc.v1.CPUStats
+	42,  // 18: apiary.rpc.v1.HostStatsResponse.mem:type_name -> apiary.rpc.v1.MemStats
+	43,  // 19: apiary.rpc.v1.HostStatsResponse.pools:type_name -> apiary.rpc.v1.PoolStats
+	44,  // 20: apiary.rpc.v1.HostStatsResponse.disks:type_name -> apiary.rpc.v1.DiskStats
+	45,  // 21: apiary.rpc.v1.HostStatsResponse.net:type_name -> apiary.rpc.v1.NetIfaceStats
+	46,  // 22: apiary.rpc.v1.HostStatsResponse.pf:type_name -> apiary.rpc.v1.PFStats
+	11,  // 23: apiary.rpc.v1.CreateNetworkRequest.network:type_name -> apiary.rpc.v1.NetworkDefinition
+	11,  // 24: apiary.rpc.v1.CreateNetworkResponse.network:type_name -> apiary.rpc.v1.NetworkDefinition
+	11,  // 25: apiary.rpc.v1.ListNetworksResponse.networks:type_name -> apiary.rpc.v1.NetworkDefinition
+	11,  // 26: apiary.rpc.v1.DeleteNetworkResponse.network:type_name -> apiary.rpc.v1.NetworkDefinition
+	9,   // 27: apiary.rpc.v1.CreateJailRequest.jail:type_name -> apiary.rpc.v1.JailDefinition
+	9,   // 28: apiary.rpc.v1.CreateJailResponse.jail:type_name -> apiary.rpc.v1.JailDefinition
+	9,   // 29: apiary.rpc.v1.UpdateJailRequest.jail:type_name -> apiary.rpc.v1.JailDefinition
+	9,   // 30: apiary.rpc.v1.UpdateJailResponse.jail:type_name -> apiary.rpc.v1.JailDefinition
+	9,   // 31: apiary.rpc.v1.DeleteJailResponse.jail:type_name -> apiary.rpc.v1.JailDefinition
+	9,   // 32: apiary.rpc.v1.GetJailResponse.jail:type_name -> apiary.rpc.v1.JailDefinition
+	9,   // 33: apiary.rpc.v1.ListJailsResponse.jails:type_name -> apiary.rpc.v1.JailDefinition
+	9,   // 34: apiary.rpc.v1.ForcePurgeJailResponse.jail:type_name -> apiary.rpc.v1.JailDefinition
+	9,   // 35: apiary.rpc.v1.MigrateJailResponse.jail:type_name -> apiary.rpc.v1.JailDefinition
+	1,   // 36: apiary.rpc.v1.ReportVMPhaseRequest.phase:type_name -> apiary.rpc.v1.VMPhase
+	3,   // 37: apiary.rpc.v1.ReportJailPhaseRequest.phase:type_name -> apiary.rpc.v1.JailPhase
+	86,  // 38: apiary.rpc.v1.CreateAPIKeyResponse.key:type_name -> apiary.rpc.v1.APIKeyInfo
+	86,  // 39: apiary.rpc.v1.ListAPIKeysResponse.keys:type_name -> apiary.rpc.v1.APIKeyInfo
+	95,  // 40: apiary.rpc.v1.SimulateNodeFailureResponse.quorum:type_name -> apiary.rpc.v1.QuorumImpact
+	96,  // 41: apiary.rpc.v1.SimulateNodeFailureResponse.owned_resources:type_name -> apiary.rpc.v1.OwnedResourceImpact
+	97,  // 42: apiary.rpc.v1.SimulateNodeFailureResponse.replica_backed_resources:type_name -> apiary.rpc.v1.ReplicaBackedImpact
+	101, // 43: apiary.rpc.v1.SimulateNodeFailureResponse.image_availability:type_name -> apiary.rpc.v1.ImageAvailabilityImpact
+	4,   // 44: apiary.rpc.v1.OwnedResourceImpact.kind:type_name -> apiary.rpc.v1.ResourceKind
+	5,   // 45: apiary.rpc.v1.OwnedResourceImpact.verdict:type_name -> apiary.rpc.v1.RecoveryVerdict
+	4,   // 46: apiary.rpc.v1.ReplicaBackedImpact.kind:type_name -> apiary.rpc.v1.ResourceKind
+	11,  // 47: apiary.rpc.v1.SimulateNetworkFailureResponse.network:type_name -> apiary.rpc.v1.NetworkDefinition
+	100, // 48: apiary.rpc.v1.SimulateNetworkFailureResponse.affected_resources:type_name -> apiary.rpc.v1.NetworkFailureImpact
+	6,   // 49: apiary.rpc.v1.ImageAvailabilityImpact.role:type_name -> apiary.rpc.v1.ImageRole
+	7,   // 50: apiary.rpc.v1.ImageAvailabilityImpact.verdict:type_name -> apiary.rpc.v1.ImageAvailabilityVerdict
+	28,  // 51: apiary.rpc.v1.ManagerService.Status:input_type -> apiary.rpc.v1.StatusRequest
+	12,  // 52: apiary.rpc.v1.ManagerService.CreateVM:input_type -> apiary.rpc.v1.CreateVMRequest
+	14,  // 53: apiary.rpc.v1.ManagerService.UpdateVM:input_type -> apiary.rpc.v1.UpdateVMRequest
+	16,  // 54: apiary.rpc.v1.ManagerService.DeleteVM:input_type -> apiary.rpc.v1.DeleteVMRequest
+	18,  // 55: apiary.rpc.v1.ManagerService.ForcePurgeVM:input_type -> apiary.rpc.v1.ForcePurgeVMRequest
+	20,  // 56: apiary.rpc.v1.ManagerService.MigrateVM:input_type -> apiary.rpc.v1.MigrateVMRequest
+	22,  // 57: apiary.rpc.v1.ManagerService.SetVMFirewallPaused:input_type -> apiary.rpc.v1.SetVMFirewallPausedRequest
+	24,  // 58: apiary.rpc.v1.ManagerService.GetVM:input_type -> apiary.rpc.v1.GetVMRequest
+	26,  // 59: apiary.rpc.v1.ManagerService.ListVMs:input_type -> apiary.rpc.v1.ListVMsRequest
+	30,  // 60: apiary.rpc.v1.ManagerService.UploadISO:input_type -> apiary.rpc.v1.UploadISORequest
+	33,  // 61: apiary.rpc.v1.ManagerService.ListISOs:input_type -> apiary.rpc.v1.ListISOsRequest
+	36,  // 62: apiary.rpc.v1.ManagerService.DeleteISO:input_type -> apiary.rpc.v1.DeleteISORequest
+	40,  // 63: apiary.rpc.v1.ManagerService.HostStats:input_type -> apiary.rpc.v1.HostStatsRequest
+	48,  // 64: apiary.rpc.v1.ManagerService.GetVMConsole:input_type -> apiary.rpc.v1.GetVMConsoleRequest
+	50,  // 65: apiary.rpc.v1.ManagerService.GetVMSerialLog:input_type -> apiary.rpc.v1.GetVMSerialLogRequest
+	52,  // 66: apiary.rpc.v1.ManagerService.GetNodeConfig:input_type -> apiary.rpc.v1.GetNodeConfigRequest
+	54,  // 67: apiary.rpc.v1.ManagerService.UpdateNodeConfig:input_type -> apiary.rpc.v1.UpdateNodeConfigRequest
+	56,  // 68: apiary.rpc.v1.ManagerService.SetDatasetQuota:input_type -> apiary.rpc.v1.SetDatasetQuotaRequest
+	58,  // 69: apiary.rpc.v1.ManagerService.CreateNetwork:input_type -> apiary.rpc.v1.CreateNetworkRequest
+	60,  // 70: apiary.rpc.v1.ManagerService.ListNetworks:input_type -> apiary.rpc.v1.ListNetworksRequest
+	62,  // 71: apiary.rpc.v1.ManagerService.DeleteNetwork:input_type -> apiary.rpc.v1.DeleteNetworkRequest
+	87,  // 72: apiary.rpc.v1.ManagerService.CreateAPIKey:input_type -> apiary.rpc.v1.CreateAPIKeyRequest
+	89,  // 73: apiary.rpc.v1.ManagerService.ListAPIKeys:input_type -> apiary.rpc.v1.ListAPIKeysRequest
+	91,  // 74: apiary.rpc.v1.ManagerService.RevokeAPIKey:input_type -> apiary.rpc.v1.RevokeAPIKeyRequest
+	64,  // 75: apiary.rpc.v1.ManagerService.CreateJail:input_type -> apiary.rpc.v1.CreateJailRequest
+	66,  // 76: apiary.rpc.v1.ManagerService.UpdateJail:input_type -> apiary.rpc.v1.UpdateJailRequest
+	68,  // 77: apiary.rpc.v1.ManagerService.DeleteJail:input_type -> apiary.rpc.v1.DeleteJailRequest
+	70,  // 78: apiary.rpc.v1.ManagerService.GetJail:input_type -> apiary.rpc.v1.GetJailRequest
+	72,  // 79: apiary.rpc.v1.ManagerService.ListJails:input_type -> apiary.rpc.v1.ListJailsRequest
+	74,  // 80: apiary.rpc.v1.ManagerService.ForcePurgeJail:input_type -> apiary.rpc.v1.ForcePurgeJailRequest
+	93,  // 81: apiary.rpc.v1.ManagerService.SimulateNodeFailure:input_type -> apiary.rpc.v1.SimulateNodeFailureRequest
+	98,  // 82: apiary.rpc.v1.ManagerService.SimulateNetworkFailure:input_type -> apiary.rpc.v1.SimulateNetworkFailureRequest
+	76,  // 83: apiary.rpc.v1.ManagerService.MigrateJail:input_type -> apiary.rpc.v1.MigrateJailRequest
+	78,  // 84: apiary.rpc.v1.ManagerService.ReportVMPhase:input_type -> apiary.rpc.v1.ReportVMPhaseRequest
+	80,  // 85: apiary.rpc.v1.ManagerService.ReportVMTeardownComplete:input_type -> apiary.rpc.v1.ReportVMTeardownCompleteRequest
+	82,  // 86: apiary.rpc.v1.ManagerService.ReportJailPhase:input_type -> apiary.rpc.v1.ReportJailPhaseRequest
+	84,  // 87: apiary.rpc.v1.ManagerService.ReportJailTeardownComplete:input_type -> apiary.rpc.v1.ReportJailTeardownCompleteRequest
+	38,  // 88: apiary.rpc.v1.ManagerService.PushISOTo:input_type -> apiary.rpc.v1.PushISOToRequest
+	29,  // 89: apiary.rpc.v1.ManagerService.Status:output_type -> apiary.rpc.v1.StatusResponse
+	13,  // 90: apiary.rpc.v1.ManagerService.CreateVM:output_type -> apiary.rpc.v1.CreateVMResponse
+	15,  // 91: apiary.rpc.v1.ManagerService.UpdateVM:output_type -> apiary.rpc.v1.UpdateVMResponse
+	17,  // 92: apiary.rpc.v1.ManagerService.DeleteVM:output_type -> apiary.rpc.v1.DeleteVMResponse
+	19,  // 93: apiary.rpc.v1.ManagerService.ForcePurgeVM:output_type -> apiary.rpc.v1.ForcePurgeVMResponse
+	21,  // 94: apiary.rpc.v1.ManagerService.MigrateVM:output_type -> apiary.rpc.v1.MigrateVMResponse
+	23,  // 95: apiary.rpc.v1.ManagerService.SetVMFirewallPaused:output_type -> apiary.rpc.v1.SetVMFirewallPausedResponse
+	25,  // 96: apiary.rpc.v1.ManagerService.GetVM:output_type -> apiary.rpc.v1.GetVMResponse
+	27,  // 97: apiary.rpc.v1.ManagerService.ListVMs:output_type -> apiary.rpc.v1.ListVMsResponse
+	32,  // 98: apiary.rpc.v1.ManagerService.UploadISO:output_type -> apiary.rpc.v1.UploadISOResponse
+	35,  // 99: apiary.rpc.v1.ManagerService.ListISOs:output_type -> apiary.rpc.v1.ListISOsResponse
+	37,  // 100: apiary.rpc.v1.ManagerService.DeleteISO:output_type -> apiary.rpc.v1.DeleteISOResponse
+	47,  // 101: apiary.rpc.v1.ManagerService.HostStats:output_type -> apiary.rpc.v1.HostStatsResponse
+	49,  // 102: apiary.rpc.v1.ManagerService.GetVMConsole:output_type -> apiary.rpc.v1.GetVMConsoleResponse
+	51,  // 103: apiary.rpc.v1.ManagerService.GetVMSerialLog:output_type -> apiary.rpc.v1.GetVMSerialLogResponse
+	53,  // 104: apiary.rpc.v1.ManagerService.GetNodeConfig:output_type -> apiary.rpc.v1.GetNodeConfigResponse
+	55,  // 105: apiary.rpc.v1.ManagerService.UpdateNodeConfig:output_type -> apiary.rpc.v1.UpdateNodeConfigResponse
+	57,  // 106: apiary.rpc.v1.ManagerService.SetDatasetQuota:output_type -> apiary.rpc.v1.SetDatasetQuotaResponse
+	59,  // 107: apiary.rpc.v1.ManagerService.CreateNetwork:output_type -> apiary.rpc.v1.CreateNetworkResponse
+	61,  // 108: apiary.rpc.v1.ManagerService.ListNetworks:output_type -> apiary.rpc.v1.ListNetworksResponse
+	63,  // 109: apiary.rpc.v1.ManagerService.DeleteNetwork:output_type -> apiary.rpc.v1.DeleteNetworkResponse
+	88,  // 110: apiary.rpc.v1.ManagerService.CreateAPIKey:output_type -> apiary.rpc.v1.CreateAPIKeyResponse
+	90,  // 111: apiary.rpc.v1.ManagerService.ListAPIKeys:output_type -> apiary.rpc.v1.ListAPIKeysResponse
+	92,  // 112: apiary.rpc.v1.ManagerService.RevokeAPIKey:output_type -> apiary.rpc.v1.RevokeAPIKeyResponse
+	65,  // 113: apiary.rpc.v1.ManagerService.CreateJail:output_type -> apiary.rpc.v1.CreateJailResponse
+	67,  // 114: apiary.rpc.v1.ManagerService.UpdateJail:output_type -> apiary.rpc.v1.UpdateJailResponse
+	69,  // 115: apiary.rpc.v1.ManagerService.DeleteJail:output_type -> apiary.rpc.v1.DeleteJailResponse
+	71,  // 116: apiary.rpc.v1.ManagerService.GetJail:output_type -> apiary.rpc.v1.GetJailResponse
+	73,  // 117: apiary.rpc.v1.ManagerService.ListJails:output_type -> apiary.rpc.v1.ListJailsResponse
+	75,  // 118: apiary.rpc.v1.ManagerService.ForcePurgeJail:output_type -> apiary.rpc.v1.ForcePurgeJailResponse
+	94,  // 119: apiary.rpc.v1.ManagerService.SimulateNodeFailure:output_type -> apiary.rpc.v1.SimulateNodeFailureResponse
+	99,  // 120: apiary.rpc.v1.ManagerService.SimulateNetworkFailure:output_type -> apiary.rpc.v1.SimulateNetworkFailureResponse
+	77,  // 121: apiary.rpc.v1.ManagerService.MigrateJail:output_type -> apiary.rpc.v1.MigrateJailResponse
+	79,  // 122: apiary.rpc.v1.ManagerService.ReportVMPhase:output_type -> apiary.rpc.v1.ReportVMPhaseResponse
+	81,  // 123: apiary.rpc.v1.ManagerService.ReportVMTeardownComplete:output_type -> apiary.rpc.v1.ReportVMTeardownCompleteResponse
+	83,  // 124: apiary.rpc.v1.ManagerService.ReportJailPhase:output_type -> apiary.rpc.v1.ReportJailPhaseResponse
+	85,  // 125: apiary.rpc.v1.ManagerService.ReportJailTeardownComplete:output_type -> apiary.rpc.v1.ReportJailTeardownCompleteResponse
+	39,  // 126: apiary.rpc.v1.ManagerService.PushISOTo:output_type -> apiary.rpc.v1.PushISOToResponse
+	89,  // [89:127] is the sub-list for method output_type
+	51,  // [51:89] is the sub-list for method input_type
+	51,  // [51:51] is the sub-list for extension type_name
+	51,  // [51:51] is the sub-list for extension extendee
+	0,   // [0:51] is the sub-list for field type_name
 }
 
 func init() { file_api_rpc_manager_proto_init() }
@@ -6854,8 +7090,8 @@ func file_api_rpc_manager_proto_init() {
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_api_rpc_manager_proto_rawDesc), len(file_api_rpc_manager_proto_rawDesc)),
-			NumEnums:      6,
-			NumMessages:   93,
+			NumEnums:      8,
+			NumMessages:   94,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

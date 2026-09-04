@@ -1,6 +1,7 @@
 package cluster
 
 import (
+	"slices"
 	"strings"
 	"testing"
 )
@@ -291,5 +292,43 @@ func TestSimulateNetworkFailure_NoAttachedCellsIsExplicitlyEmpty(t *testing.T) {
 	}
 	if len(report.AffectedResources) != 0 {
 		t.Fatalf("AffectedResources = %+v, want none", report.AffectedResources)
+	}
+}
+
+func TestComputeImageAvailability_ClassifiesRemainingSources(t *testing.T) {
+	requirements := []ImageRequirement{
+		{ResourceID: "vm-available", ResourceName: "web", ImageName: "ubuntu.raw", Role: ImageRoleBaseImage},
+		{ResourceID: "vm-unavailable", ResourceName: "db", ImageName: "rescue.iso", Role: ImageRoleISO},
+		{ResourceID: "vm-unknown", ResourceName: "worker", ImageName: "tools.iso", Role: ImageRoleISO},
+	}
+	inventories := []ImageInventoryObservation{
+		{NodeID: "failed", Observed: true, Names: []string{"ubuntu.raw", "rescue.iso", "tools.iso"}},
+		{NodeID: "node-a", Observed: true, Names: []string{"ubuntu.raw"}},
+		{NodeID: "node-b", Observed: false},
+	}
+
+	got := ComputeImageAvailability(requirements, inventories, "failed")
+	if len(got) != 3 {
+		t.Fatalf("ComputeImageAvailability() = %+v, want 3 impacts", got)
+	}
+	if got[0].Verdict != ImageAvailabilityAvailable || !slices.Equal(got[0].SourceNodes, []string{"node-a"}) {
+		t.Errorf("available impact = %+v", got[0])
+	}
+	if got[1].Verdict != ImageAvailabilityUnknown || !slices.Equal(got[1].UnknownNodes, []string{"node-b"}) {
+		t.Errorf("unavailable-with-unknown impact = %+v", got[1])
+	}
+	if got[2].Verdict != ImageAvailabilityUnknown {
+		t.Errorf("unknown impact = %+v", got[2])
+	}
+}
+
+func TestComputeImageAvailability_UnavailableRequiresCompleteObservation(t *testing.T) {
+	got := ComputeImageAvailability(
+		[]ImageRequirement{{ResourceID: "vm-1", ImageName: "missing.raw", Role: ImageRoleBaseImage}},
+		[]ImageInventoryObservation{{NodeID: "node-a", Observed: true}},
+		"failed",
+	)
+	if len(got) != 1 || got[0].Verdict != ImageAvailabilityUnavailable {
+		t.Fatalf("ComputeImageAvailability() = %+v, want unavailable", got)
 	}
 }

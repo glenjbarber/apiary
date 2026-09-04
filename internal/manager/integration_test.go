@@ -513,6 +513,28 @@ func TestIntegration_SimulateNodeFailure_UnknownNodeIDReturnsError(t *testing.T)
 	}
 }
 
+func TestIntegration_SimulateNodeFailure_ReportsImageUnavailableAfterOnlySourceHiveLoss(t *testing.T) {
+	raftdSocket := newRaftdUDSSocket(t)
+	client := newManagerdRPCClient(t, raftdSocket)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if _, err := client.CreateVM(ctx, &rpcpb.CreateVMRequest{Vm: &rpcpb.VMDefinition{
+		Id: "vm-image", Name: "frontend", NodeId: "raftd-1", BaseImageName: "ubuntu.raw",
+	}}); err != nil {
+		t.Fatalf("CreateVM() error: %v", err)
+	}
+
+	resp, err := client.SimulateNodeFailure(ctx, &rpcpb.SimulateNodeFailureRequest{NodeId: "raftd-1"})
+	if err != nil {
+		t.Fatalf("SimulateNodeFailure() error: %v", err)
+	}
+	impacts := resp.GetImageAvailability()
+	if len(impacts) != 1 || impacts[0].GetImageName() != "ubuntu.raw" || impacts[0].GetVerdict() != rpcpb.ImageAvailabilityVerdict_IMAGE_AVAILABILITY_VERDICT_UNAVAILABLE {
+		t.Fatalf("ImageAvailability = %+v, want ubuntu.raw unavailable", impacts)
+	}
+}
+
 func TestIntegration_SimulateNetworkFailure_ReportsAttachedVMs(t *testing.T) {
 	raftdSocket := newRaftdUDSSocket(t)
 	client := newManagerdRPCClient(t, raftdSocket)

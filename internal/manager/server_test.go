@@ -8,6 +8,7 @@ import (
 
 	"google.golang.org/grpc"
 
+	internalpb "github.com/glenjbarber/apiary/api/internalpb"
 	rpcpb "github.com/glenjbarber/apiary/api/rpc"
 	"github.com/glenjbarber/apiary/internal/hoststats"
 	"github.com/glenjbarber/apiary/internal/isostore"
@@ -99,6 +100,26 @@ func metadataMsg(name, hash string) *rpcpb.UploadISORequest {
 
 func chunkMsg(data string) *rpcpb.UploadISORequest {
 	return &rpcpb.UploadISORequest{Data: &rpcpb.UploadISORequest_Chunk{Chunk: []byte(data)}}
+}
+
+func TestServer_ImageInventoryObservations_DistinguishesObservedAndUnknown(t *testing.T) {
+	s := NewServer(nil, "node-a", &fakeISOManager{listInfos: []isostore.Info{{Name: "ubuntu.raw"}}}, nil, nil, nil, nil, "", nil, nil)
+	servers := []*internalpb.ServerInfo{
+		{Id: "node-a", Address: "10.0.0.1:17600"},
+		{Id: "node-b", Address: "10.0.0.2:17600"},
+		{Id: "failed", Address: "10.0.0.3:17600"},
+	}
+
+	got := s.imageInventoryObservations(context.Background(), servers, "failed", "node-a")
+	if len(got) != 2 {
+		t.Fatalf("imageInventoryObservations() = %+v, want 2 remaining Hives", got)
+	}
+	if !got[0].Observed || len(got[0].Names) != 1 || got[0].Names[0] != "ubuntu.raw" {
+		t.Errorf("local observation = %+v, want observed ubuntu.raw", got[0])
+	}
+	if got[1].Observed {
+		t.Errorf("remote observation = %+v, want unknown without peer forwarding", got[1])
+	}
 }
 
 func TestServer_UploadISO_StreamsChunksIntoStore(t *testing.T) {

@@ -12,6 +12,7 @@ package cluster
 import (
 	"fmt"
 	"sort"
+	"strings"
 )
 
 // ResourceKind distinguishes a VM from a jail.
@@ -123,6 +124,49 @@ type NodeFailureReport struct {
 	Quorum                 QuorumImpact
 	OwnedResources         []OwnedResourceImpact
 	ReplicaBackedResources []ReplicaBackedImpact
+	ImageAvailability      []ImageAvailabilityImpact
+}
+
+type ImageRole string
+
+const (
+	ImageRoleISO       ImageRole = "iso"
+	ImageRoleBaseImage ImageRole = "base_image"
+)
+
+type ImageAvailabilityVerdict string
+
+const (
+	ImageAvailabilityAvailable   ImageAvailabilityVerdict = "available"
+	ImageAvailabilityUnavailable ImageAvailabilityVerdict = "unavailable"
+	ImageAvailabilityUnknown     ImageAvailabilityVerdict = "unknown"
+)
+
+type ImageRequirement struct {
+	ResourceID   string
+	ResourceName string
+	ImageName    string
+	Role         ImageRole
+}
+
+// ImageInventoryObservation is one remaining Hive's directly queried image
+// inventory. Observed=false means the inventory could not be read, never that
+// the Hive has no images.
+type ImageInventoryObservation struct {
+	NodeID   string
+	Observed bool
+	Names    []string
+}
+
+type ImageAvailabilityImpact struct {
+	ResourceID   string
+	ResourceName string
+	ImageName    string
+	Role         ImageRole
+	Verdict      ImageAvailabilityVerdict
+	SourceNodes  []string
+	UnknownNodes []string
+	Explanation  string
 }
 
 // ManagedNetworkPlacement is the replicated portion of a managed network
@@ -299,6 +343,64 @@ func SimulateNodeFailure(servers []ServerSuffrage, resources []OwnedResourcePlac
 		OwnedResources:         ComputeOwnedResourceImpacts(resources, targetNodeID),
 		ReplicaBackedResources: ComputeReplicaBackedImpacts(resources, targetNodeID),
 	}
+}
+
+// ComputeImageAvailability reports whether each referenced image can still be
+// found on a remaining Hive after targetNodeID disappears. Availability is
+// based on direct ListISOs observations, not raft state. One confirmed source
+// is sufficient for "available"; otherwise any unread inventory makes the
+// result "unknown", and "unavailable" requires every remaining inventory to
+// have been read successfully.
+func ComputeImageAvailability(requirements []ImageRequirement, inventories []ImageInventoryObservation, targetNodeID string) []ImageAvailabilityImpact {
+	impacts := make([]ImageAvailabilityImpact, 0, len(requirements))
+	for _, requirement := range requirements {
+		if requirement.ImageName == "" {
+			continue
+		}
+		impact := ImageAvailabilityImpact{
+			ResourceID: requirement.ResourceID, ResourceName: requirement.ResourceName,
+			ImageName: requirement.ImageName, Role: requirement.Role,
+		}
+		for _, inventory := range inventories {
+			if inventory.NodeID == targetNodeID {
+				continue
+			}
+			if !inventory.Observed {
+				impact.UnknownNodes = append(impact.UnknownNodes, inventory.NodeID)
+				continue
+			}
+			for _, name := range inventory.Names {
+				if name == requirement.ImageName {
+					impact.SourceNodes = append(impact.SourceNodes, inventory.NodeID)
+					break
+				}
+			}
+		}
+		sort.Strings(impact.SourceNodes)
+		sort.Strings(impact.UnknownNodes)
+		switch {
+		case len(impact.SourceNodes) > 0:
+			impact.Verdict = ImageAvailabilityAvailable
+			impact.Explanation = fmt.Sprintf("image remains available from %s", strings.Join(impact.SourceNodes, ", "))
+		case len(impact.UnknownNodes) > 0:
+			impact.Verdict = ImageAvailabilityUnknown
+			impact.Explanation = fmt.Sprintf("no remaining source was confirmed, but inventories could not be read from %s", strings.Join(impact.UnknownNodes, ", "))
+		default:
+			impact.Verdict = ImageAvailabilityUnavailable
+			impact.Explanation = "no remaining Hive reports this image; future provisioning or recovery that needs it would be blocked"
+		}
+		impacts = append(impacts, impact)
+	}
+	sort.Slice(impacts, func(i, j int) bool {
+		if impacts[i].ResourceID != impacts[j].ResourceID {
+			return impacts[i].ResourceID < impacts[j].ResourceID
+		}
+		if impacts[i].Role != impacts[j].Role {
+			return impacts[i].Role < impacts[j].Role
+		}
+		return impacts[i].ImageName < impacts[j].ImageName
+	})
+	return impacts
 }
 
 // SimulateNetworkFailure reports the Cells whose declared managed-network

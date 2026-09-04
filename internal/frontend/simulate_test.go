@@ -149,3 +149,28 @@ func TestServer_SimulatePage_RendersManagedNetworkImpact(t *testing.T) {
 		}
 	}
 }
+
+func TestServer_SimulatePage_RendersImageAvailability(t *testing.T) {
+	client := &fakeClient{
+		statusResp: &rpcpb.StatusResponse{KnownNodeIds: []string{"node-a"}},
+		simulateResp: &rpcpb.SimulateNodeFailureResponse{
+			Quorum: &rpcpb.QuorumImpact{},
+			ImageAvailability: []*rpcpb.ImageAvailabilityImpact{{
+				ResourceId: "vm-1", ResourceName: "frontend", ImageName: "ubuntu.raw",
+				Role:        rpcpb.ImageRole_IMAGE_ROLE_BASE_IMAGE,
+				Verdict:     rpcpb.ImageAvailabilityVerdict_IMAGE_AVAILABILITY_VERDICT_UNAVAILABLE,
+				Explanation: "no remaining Hive reports this image",
+			}},
+		},
+	}
+	s := newTestServer(t, client)
+	req := httptest.NewRequest(http.MethodGet, "/simulate?node_id=node-a", nil)
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, req)
+
+	for _, want := range []string{"Image availability after Hive loss", "frontend (vm-1)", "ubuntu.raw", "base image", "unavailable", "no remaining Hive"} {
+		if !strings.Contains(rec.Body.String(), want) {
+			t.Errorf("body missing %q, got: %s", want, rec.Body.String())
+		}
+	}
+}

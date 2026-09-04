@@ -47,6 +47,37 @@ type networkFailureImpactView struct {
 	Explanation string
 }
 
+type imageAvailabilityImpactView struct {
+	ResourceID   string
+	ResourceName string
+	ImageName    string
+	Role         string
+	Verdict      string
+	SourceNodes  []string
+	UnknownNodes []string
+	Explanation  string
+}
+
+func fromRPCImageAvailability(impact *rpcpb.ImageAvailabilityImpact) imageAvailabilityImpactView {
+	role := "ISO"
+	if impact.GetRole() == rpcpb.ImageRole_IMAGE_ROLE_BASE_IMAGE {
+		role = "base image"
+	}
+	verdict := "unknown"
+	switch impact.GetVerdict() {
+	case rpcpb.ImageAvailabilityVerdict_IMAGE_AVAILABILITY_VERDICT_AVAILABLE:
+		verdict = "available"
+	case rpcpb.ImageAvailabilityVerdict_IMAGE_AVAILABILITY_VERDICT_UNAVAILABLE:
+		verdict = "unavailable"
+	}
+	return imageAvailabilityImpactView{
+		ResourceID: impact.GetResourceId(), ResourceName: impact.GetResourceName(),
+		ImageName: impact.GetImageName(), Role: role, Verdict: verdict,
+		SourceNodes: impact.GetSourceNodes(), UnknownNodes: impact.GetUnknownNodes(),
+		Explanation: impact.GetExplanation(),
+	}
+}
+
 func fromRPCResourceKind(k rpcpb.ResourceKind) string {
 	if k == rpcpb.ResourceKind_RESOURCE_KIND_JAIL {
 		return "jail"
@@ -153,10 +184,11 @@ func (s *Server) handleSimulatePage(w http.ResponseWriter, r *http.Request) {
 
 	nodeID := r.URL.Query().Get("node_id")
 	var (
-		quorum        quorumImpactView
-		owned         []resourceImpactView
-		replicaBacked []replicaBackedImpactView
-		simErr        string
+		quorum            quorumImpactView
+		owned             []resourceImpactView
+		replicaBacked     []replicaBackedImpactView
+		imageAvailability []imageAvailabilityImpactView
+		simErr            string
 	)
 	if nodeID != "" {
 		resp, err := s.client.SimulateNodeFailure(r.Context(), &rpcpb.SimulateNodeFailureRequest{NodeId: nodeID})
@@ -172,6 +204,9 @@ func (s *Server) handleSimulatePage(w http.ResponseWriter, r *http.Request) {
 			}
 			for _, res := range resp.GetReplicaBackedResources() {
 				replicaBacked = append(replicaBacked, fromRPCReplicaBackedImpact(res))
+			}
+			for _, impact := range resp.GetImageAvailability() {
+				imageAvailability = append(imageAvailability, fromRPCImageAvailability(impact))
 			}
 		}
 	}
@@ -201,17 +236,18 @@ func (s *Server) handleSimulatePage(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.render(w, "simulate_page", s.withAuthFields(r, pageData{
-		SimulateNodes:           nodes,
-		SimulateTargetNodeID:    nodeID,
-		SimulateError:           simErr,
-		SimulateQuorum:          quorum,
-		SimulateOwnedResources:  owned,
-		SimulateReplicaBacked:   replicaBacked,
-		SimulateNetworks:        networks,
-		SimulateTargetNetworkID: networkID,
-		SimulateNetwork:         network,
-		SimulateNetworkImpacts:  networkImpacts,
-		SimulateNetworkNote:     networkNote,
-		ActivePage:              "simulate",
+		SimulateNodes:             nodes,
+		SimulateTargetNodeID:      nodeID,
+		SimulateError:             simErr,
+		SimulateQuorum:            quorum,
+		SimulateOwnedResources:    owned,
+		SimulateReplicaBacked:     replicaBacked,
+		SimulateImageAvailability: imageAvailability,
+		SimulateNetworks:          networks,
+		SimulateTargetNetworkID:   networkID,
+		SimulateNetwork:           network,
+		SimulateNetworkImpacts:    networkImpacts,
+		SimulateNetworkNote:       networkNote,
+		ActivePage:                "simulate",
 	}))
 }

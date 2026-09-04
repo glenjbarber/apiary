@@ -101,6 +101,26 @@
       </tbody>
     </table>
   </div>
+
+  <div class="panel">
+    <h3>Image availability after Hive loss</h3>
+    <p class="muted">This affects future provisioning or recovery. A running Cell does not need its source image merely to keep running.</p>
+    <table>
+      <thead><tr><th>Cell</th><th>Image</th><th>Role</th><th>Verdict</th><th>Evidence</th></tr></thead>
+      <tbody>
+        {{range .SimulateImageAvailability}}
+        <tr>
+          <td>{{.ResourceName}} ({{.ResourceID}})</td>
+          <td>{{.ImageName}}</td><td>{{.Role}}</td>
+          <td>{{if eq .Verdict "available"}}<span class="success">available</span>{{else if eq .Verdict "unavailable"}}<span class="error">unavailable</span>{{else}}<span class="muted">unknown</span>{{end}}</td>
+          <td>{{.Explanation}}</td>
+        </tr>
+        {{else}}
+        <tr><td colspan="5"><em>No Cells reference stored images</em></td></tr>
+        {{end}}
+      </tbody>
+    </table>
+  </div>
   {{end}}
   {{end}}
 
