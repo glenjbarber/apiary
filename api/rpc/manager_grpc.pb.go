@@ -27,6 +27,7 @@ const (
 	ManagerService_MigrateVM_FullMethodName                   = "/apiary.rpc.v1.ManagerService/MigrateVM"
 	ManagerService_SetVMFirewallPaused_FullMethodName         = "/apiary.rpc.v1.ManagerService/SetVMFirewallPaused"
 	ManagerService_SetVMCloudflareExposure_FullMethodName     = "/apiary.rpc.v1.ManagerService/SetVMCloudflareExposure"
+	ManagerService_SetVMDesiredState_FullMethodName           = "/apiary.rpc.v1.ManagerService/SetVMDesiredState"
 	ManagerService_GetVM_FullMethodName                       = "/apiary.rpc.v1.ManagerService/GetVM"
 	ManagerService_ListVMs_FullMethodName                     = "/apiary.rpc.v1.ManagerService/ListVMs"
 	ManagerService_UploadISO_FullMethodName                   = "/apiary.rpc.v1.ManagerService/UploadISO"
@@ -49,6 +50,7 @@ const (
 	ManagerService_CreateJail_FullMethodName                  = "/apiary.rpc.v1.ManagerService/CreateJail"
 	ManagerService_UpdateJail_FullMethodName                  = "/apiary.rpc.v1.ManagerService/UpdateJail"
 	ManagerService_DeleteJail_FullMethodName                  = "/apiary.rpc.v1.ManagerService/DeleteJail"
+	ManagerService_SetJailDesiredState_FullMethodName         = "/apiary.rpc.v1.ManagerService/SetJailDesiredState"
 	ManagerService_GetJail_FullMethodName                     = "/apiary.rpc.v1.ManagerService/GetJail"
 	ManagerService_ListJails_FullMethodName                   = "/apiary.rpc.v1.ManagerService/ListJails"
 	ManagerService_ForcePurgeJail_FullMethodName              = "/apiary.rpc.v1.ManagerService/ForcePurgeJail"
@@ -130,6 +132,10 @@ type ManagerServiceClient interface {
 	// flat-bridge VM's IP is never tracked in raft state, so there is no
 	// address for a Tunnel to proxy to.
 	SetVMCloudflareExposure(ctx context.Context, in *SetVMCloudflareExposureRequest, opts ...grpc.CallOption) (*SetVMCloudflareExposureResponse, error)
+	// SetVMDesiredState changes only a VM lifecycle target. It does not
+	// replace the rest of the VM definition. DeleteVM remains the only
+	// operation that marks a VM for deletion.
+	SetVMDesiredState(ctx context.Context, in *SetVMDesiredStateRequest, opts ...grpc.CallOption) (*SetVMDesiredStateResponse, error)
 	// GetVM and ListVMs only succeed against the current leader - see
 	// api/internalpb/raftd.proto's GetVM/ListVMs doc comments for why v1's
 	// read consistency model is deliberately as simple as its write model.
@@ -209,6 +215,8 @@ type ManagerServiceClient interface {
 	CreateJail(ctx context.Context, in *CreateJailRequest, opts ...grpc.CallOption) (*CreateJailResponse, error)
 	UpdateJail(ctx context.Context, in *UpdateJailRequest, opts ...grpc.CallOption) (*UpdateJailResponse, error)
 	DeleteJail(ctx context.Context, in *DeleteJailRequest, opts ...grpc.CallOption) (*DeleteJailResponse, error)
+	// SetJailDesiredState mirrors SetVMDesiredState for jails.
+	SetJailDesiredState(ctx context.Context, in *SetJailDesiredStateRequest, opts ...grpc.CallOption) (*SetJailDesiredStateResponse, error)
 	GetJail(ctx context.Context, in *GetJailRequest, opts ...grpc.CallOption) (*GetJailResponse, error)
 	ListJails(ctx context.Context, in *ListJailsRequest, opts ...grpc.CallOption) (*ListJailsResponse, error)
 	// ForcePurgeJail mirrors ForcePurgeVM exactly, for a jail tombstoned
@@ -374,6 +382,16 @@ func (c *managerServiceClient) SetVMCloudflareExposure(ctx context.Context, in *
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(SetVMCloudflareExposureResponse)
 	err := c.cc.Invoke(ctx, ManagerService_SetVMCloudflareExposure_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *managerServiceClient) SetVMDesiredState(ctx context.Context, in *SetVMDesiredStateRequest, opts ...grpc.CallOption) (*SetVMDesiredStateResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(SetVMDesiredStateResponse)
+	err := c.cc.Invoke(ctx, ManagerService_SetVMDesiredState_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -603,6 +621,16 @@ func (c *managerServiceClient) DeleteJail(ctx context.Context, in *DeleteJailReq
 	return out, nil
 }
 
+func (c *managerServiceClient) SetJailDesiredState(ctx context.Context, in *SetJailDesiredStateRequest, opts ...grpc.CallOption) (*SetJailDesiredStateResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(SetJailDesiredStateResponse)
+	err := c.cc.Invoke(ctx, ManagerService_SetJailDesiredState_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *managerServiceClient) GetJail(ctx context.Context, in *GetJailRequest, opts ...grpc.CallOption) (*GetJailResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(GetJailResponse)
@@ -808,6 +836,10 @@ type ManagerServiceServer interface {
 	// flat-bridge VM's IP is never tracked in raft state, so there is no
 	// address for a Tunnel to proxy to.
 	SetVMCloudflareExposure(context.Context, *SetVMCloudflareExposureRequest) (*SetVMCloudflareExposureResponse, error)
+	// SetVMDesiredState changes only a VM lifecycle target. It does not
+	// replace the rest of the VM definition. DeleteVM remains the only
+	// operation that marks a VM for deletion.
+	SetVMDesiredState(context.Context, *SetVMDesiredStateRequest) (*SetVMDesiredStateResponse, error)
 	// GetVM and ListVMs only succeed against the current leader - see
 	// api/internalpb/raftd.proto's GetVM/ListVMs doc comments for why v1's
 	// read consistency model is deliberately as simple as its write model.
@@ -887,6 +919,8 @@ type ManagerServiceServer interface {
 	CreateJail(context.Context, *CreateJailRequest) (*CreateJailResponse, error)
 	UpdateJail(context.Context, *UpdateJailRequest) (*UpdateJailResponse, error)
 	DeleteJail(context.Context, *DeleteJailRequest) (*DeleteJailResponse, error)
+	// SetJailDesiredState mirrors SetVMDesiredState for jails.
+	SetJailDesiredState(context.Context, *SetJailDesiredStateRequest) (*SetJailDesiredStateResponse, error)
 	GetJail(context.Context, *GetJailRequest) (*GetJailResponse, error)
 	ListJails(context.Context, *ListJailsRequest) (*ListJailsResponse, error)
 	// ForcePurgeJail mirrors ForcePurgeVM exactly, for a jail tombstoned
@@ -1002,6 +1036,9 @@ func (UnimplementedManagerServiceServer) SetVMFirewallPaused(context.Context, *S
 func (UnimplementedManagerServiceServer) SetVMCloudflareExposure(context.Context, *SetVMCloudflareExposureRequest) (*SetVMCloudflareExposureResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method SetVMCloudflareExposure not implemented")
 }
+func (UnimplementedManagerServiceServer) SetVMDesiredState(context.Context, *SetVMDesiredStateRequest) (*SetVMDesiredStateResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method SetVMDesiredState not implemented")
+}
 func (UnimplementedManagerServiceServer) GetVM(context.Context, *GetVMRequest) (*GetVMResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetVM not implemented")
 }
@@ -1067,6 +1104,9 @@ func (UnimplementedManagerServiceServer) UpdateJail(context.Context, *UpdateJail
 }
 func (UnimplementedManagerServiceServer) DeleteJail(context.Context, *DeleteJailRequest) (*DeleteJailResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method DeleteJail not implemented")
+}
+func (UnimplementedManagerServiceServer) SetJailDesiredState(context.Context, *SetJailDesiredStateRequest) (*SetJailDesiredStateResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method SetJailDesiredState not implemented")
 }
 func (UnimplementedManagerServiceServer) GetJail(context.Context, *GetJailRequest) (*GetJailResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetJail not implemented")
@@ -1271,6 +1311,24 @@ func _ManagerService_SetVMCloudflareExposure_Handler(srv interface{}, ctx contex
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(ManagerServiceServer).SetVMCloudflareExposure(ctx, req.(*SetVMCloudflareExposureRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ManagerService_SetVMDesiredState_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SetVMDesiredStateRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ManagerServiceServer).SetVMDesiredState(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ManagerService_SetVMDesiredState_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ManagerServiceServer).SetVMDesiredState(ctx, req.(*SetVMDesiredStateRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -1660,6 +1718,24 @@ func _ManagerService_DeleteJail_Handler(srv interface{}, ctx context.Context, de
 	return interceptor(ctx, in, info, handler)
 }
 
+func _ManagerService_SetJailDesiredState_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SetJailDesiredStateRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ManagerServiceServer).SetJailDesiredState(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ManagerService_SetJailDesiredState_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ManagerServiceServer).SetJailDesiredState(ctx, req.(*SetJailDesiredStateRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _ManagerService_GetJail_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(GetJailRequest)
 	if err := dec(in); err != nil {
@@ -1952,6 +2028,10 @@ var ManagerService_ServiceDesc = grpc.ServiceDesc{
 			Handler:    _ManagerService_SetVMCloudflareExposure_Handler,
 		},
 		{
+			MethodName: "SetVMDesiredState",
+			Handler:    _ManagerService_SetVMDesiredState_Handler,
+		},
+		{
 			MethodName: "GetVM",
 			Handler:    _ManagerService_GetVM_Handler,
 		},
@@ -2034,6 +2114,10 @@ var ManagerService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "DeleteJail",
 			Handler:    _ManagerService_DeleteJail_Handler,
+		},
+		{
+			MethodName: "SetJailDesiredState",
+			Handler:    _ManagerService_SetJailDesiredState_Handler,
 		},
 		{
 			MethodName: "GetJail",

@@ -201,6 +201,27 @@ func TestFSM_Apply_SetVMFirewallPaused_MissingIDIsError(t *testing.T) {
 	}
 }
 
+func TestFSM_Apply_SetVMDesiredState_TouchesOnlyLifecycleState(t *testing.T) {
+	fsm := NewFSM()
+	fsm.Apply(&raft.Log{Index: 1, Data: mustMarshalCommand(t, &internalpb.Command{
+		Op: &internalpb.Command_CreateVm{CreateVm: &internalpb.CreateVM{Vm: &internalpb.VMDefinition{
+			Id: "vm-1", NodeId: "node-a", Vcpus: 2, FirewallPaused: true,
+		}}},
+	})})
+	result := fsm.Apply(&raft.Log{Index: 2, Data: mustMarshalCommand(t, &internalpb.Command{
+		Op: &internalpb.Command_SetVmDesiredState{SetVmDesiredState: &internalpb.SetVMDesiredState{
+			Id: "vm-1", DesiredState: internalpb.VMState_VM_STATE_STOPPED,
+		}},
+	})})
+	if result.(*FSMApplyResult).Error != "" {
+		t.Fatalf("SetVMDesiredState error = %q", result.(*FSMApplyResult).Error)
+	}
+	vm, _ := fsm.VM("vm-1")
+	if vm.GetDesiredState() != internalpb.VMState_VM_STATE_STOPPED || vm.GetVcpus() != 2 || !vm.GetFirewallPaused() {
+		t.Errorf("VM = %+v, want only desired state changed", vm)
+	}
+}
+
 func TestFSM_Apply_UpdateVMPhase_MissingIDIsError(t *testing.T) {
 	fsm := NewFSM()
 

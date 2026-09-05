@@ -568,6 +568,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /vms", s.handleVMsPage)
 	s.mux.HandleFunc("GET /vms/rows", s.handleListVMs)
 	s.mux.HandleFunc("GET /vms/{id}", s.handleVMPage)
+	s.mux.HandleFunc("POST /vms/{id}/lifecycle", s.requireRole(manager.RoleOperator, s.handleSetVMDesiredState))
 	s.mux.HandleFunc("POST /vms/{id}/cloudflare-exposure", s.requireRole(manager.RoleOperator, s.handleSetVMCloudflareExposure))
 	s.mux.HandleFunc("GET /images", s.handleImagesPage)
 	s.mux.HandleFunc("GET /isos", s.handleListISOs)
@@ -602,6 +603,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /jails/new", s.requireRole(manager.RoleOperator, s.handleNewJailPage))
 	s.mux.HandleFunc("POST /jails", s.requireRole(manager.RoleOperator, s.handleCreateJail))
 	s.mux.HandleFunc("DELETE /jails/{id}", s.requireRole(manager.RoleOperator, s.handleDeleteJail))
+	s.mux.HandleFunc("POST /jails/{id}/lifecycle", s.requireRole(manager.RoleOperator, s.handleSetJailDesiredState))
 
 	// Admin: API-key management, entirely - including just viewing the
 	// list, unlike every other Viewer-readable page above.
@@ -797,6 +799,45 @@ func (s *Server) handleSetVMCloudflareExposure(w http.ResponseWriter, r *http.Re
 		}
 	}
 	resp, err := s.client.SetVMCloudflareExposure(r.Context(), &rpcpb.SetVMCloudflareExposureRequest{Id: id, Hostname: hostname, Port: uint32(port)})
+	if err != nil {
+		s.renderVMPage(w, r, id, err.Error())
+		return
+	}
+	if resp.GetError() != "" {
+		s.renderVMPage(w, r, id, resp.GetError())
+		return
+	}
+	s.renderVMPage(w, r, id, "")
+}
+
+func vmLifecycleState(action string) (rpcpb.VMState, string) {
+	switch action {
+	case "stop":
+		return rpcpb.VMState_VM_STATE_STOPPED, ""
+	case "start":
+		return rpcpb.VMState_VM_STATE_RUNNING, ""
+	case "restart":
+		return rpcpb.VMState_VM_STATE_RESTARTING, ""
+	default:
+		return rpcpb.VMState_VM_STATE_UNSPECIFIED, "invalid lifecycle action"
+	}
+}
+
+// handleSetVMDesiredState changes a single lifecycle target. Restart is a
+// durable desired state: the reconciler verifies the VM stopped before it
+// writes running back, rather than issuing two racing client updates.
+func (s *Server) handleSetVMDesiredState(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if err := r.ParseForm(); err != nil {
+		s.renderVMPage(w, r, id, "invalid form: "+err.Error())
+		return
+	}
+	state, formErr := vmLifecycleState(r.FormValue("action"))
+	if formErr != "" {
+		s.renderVMPage(w, r, id, formErr)
+		return
+	}
+	resp, err := s.client.SetVMDesiredState(r.Context(), &rpcpb.SetVMDesiredStateRequest{Id: id, DesiredState: state})
 	if err != nil {
 		s.renderVMPage(w, r, id, err.Error())
 		return
@@ -1374,6 +1415,41 @@ func (s *Server) handleCreateJail(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleDeleteJail(w http.ResponseWriter, r *http.Request) {
 	resp, err := s.client.DeleteJail(r.Context(), &rpcpb.DeleteJailRequest{Id: r.PathValue("id")})
+	if err != nil {
+		s.renderJailPanelResult(w, r, err.Error())
+		return
+	}
+	if resp.GetError() != "" {
+		s.renderJailPanelResult(w, r, resp.GetError())
+		return
+	}
+	s.renderJailPanelResult(w, r, "")
+}
+
+func jailLifecycleState(action string) (rpcpb.JailState, string) {
+	switch action {
+	case "stop":
+		return rpcpb.JailState_JAIL_STATE_STOPPED, ""
+	case "start":
+		return rpcpb.JailState_JAIL_STATE_RUNNING, ""
+	case "restart":
+		return rpcpb.JailState_JAIL_STATE_RESTARTING, ""
+	default:
+		return rpcpb.JailState_JAIL_STATE_UNSPECIFIED, "invalid lifecycle action"
+	}
+}
+
+func (s *Server) handleSetJailDesiredState(w http.ResponseWriter, r *http.Request) {
+	if err := r.ParseForm(); err != nil {
+		s.renderJailPanelResult(w, r, "invalid form: "+err.Error())
+		return
+	}
+	state, formErr := jailLifecycleState(r.FormValue("action"))
+	if formErr != "" {
+		s.renderJailPanelResult(w, r, formErr)
+		return
+	}
+	resp, err := s.client.SetJailDesiredState(r.Context(), &rpcpb.SetJailDesiredStateRequest{Id: r.PathValue("id"), DesiredState: state})
 	if err != nil {
 		s.renderJailPanelResult(w, r, err.Error())
 		return

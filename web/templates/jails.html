@@ -44,7 +44,14 @@
   <td>{{.DesiredState}}</td>
   <td><span class="badge {{.Phase}}"{{if .PhaseError}} title="{{.PhaseError}}"{{end}}>{{.Phase}}</span>{{if .PhaseError}}<div class="error">{{.PhaseError}}</div>{{end}}</td>
   <td>
-    {{if $.CanOperate}}<button class="danger" hx-delete="/jails/{{.ID}}" hx-target="#jail-panel" hx-swap="innerHTML" hx-sync="#jail-panel:replace" hx-confirm="Delete jail {{.ID}}?">Delete</button>{{end}}
+    {{if $.CanOperate}}
+      {{if ne .DesiredState "deleting"}}
+        {{if ne .DesiredState "stopped"}}<button hx-post="/jails/{{.ID}}/lifecycle" hx-vals='{"action":"stop"}' hx-target="#jail-panel" hx-swap="innerHTML" hx-sync="#jail-panel:replace" hx-confirm="Stop jail {{.ID}}?">Stop</button>{{end}}
+        {{if ne .DesiredState "running"}}<button hx-post="/jails/{{.ID}}/lifecycle" hx-vals='{"action":"start"}' hx-target="#jail-panel" hx-swap="innerHTML" hx-sync="#jail-panel:replace">Start</button>{{end}}
+        {{if eq .DesiredState "running"}}<button hx-post="/jails/{{.ID}}/lifecycle" hx-vals='{"action":"restart"}' hx-target="#jail-panel" hx-swap="innerHTML" hx-sync="#jail-panel:replace" hx-confirm="Restart jail {{.ID}}?">Restart</button>{{end}}
+      {{end}}
+      <button class="danger" hx-delete="/jails/{{.ID}}" hx-target="#jail-panel" hx-swap="innerHTML" hx-sync="#jail-panel:replace" hx-confirm="Delete jail {{.ID}}?">Delete</button>
+    {{end}}
   </td>
 </tr>
 {{else}}

@@ -199,6 +199,8 @@ func jailStateFromRPC(s rpcpb.JailState) string {
 		return "stopped"
 	case rpcpb.JailState_JAIL_STATE_DELETING:
 		return "deleting"
+	case rpcpb.JailState_JAIL_STATE_RESTARTING:
+		return "restarting"
 	default:
 		return ""
 	}
@@ -214,6 +216,8 @@ func jailPhaseFromRPC(p rpcpb.JailPhase) string {
 		return "deleting"
 	case rpcpb.JailPhase_JAIL_PHASE_ERROR:
 		return "error"
+	case rpcpb.JailPhase_JAIL_PHASE_STOPPED:
+		return "stopped"
 	default:
 		return "pending"
 	}
@@ -269,6 +273,8 @@ func stateFromRPC(s rpcpb.VMState) string {
 		return "stopped"
 	case rpcpb.VMState_VM_STATE_DELETING:
 		return "deleting"
+	case rpcpb.VMState_VM_STATE_RESTARTING:
+		return "restarting"
 	default:
 		return ""
 	}
@@ -288,6 +294,8 @@ func phaseFromRPC(p rpcpb.VMPhase) string {
 		return "deleting"
 	case rpcpb.VMPhase_VM_PHASE_ERROR:
 		return "error"
+	case rpcpb.VMPhase_VM_PHASE_STOPPED:
+		return "stopped"
 	default:
 		return "pending"
 	}
