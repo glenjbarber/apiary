@@ -203,6 +203,13 @@ func TestRequiredRoleFor_GetLocalNetworkBridgeStatusIsViewer(t *testing.T) {
 	}
 }
 
+func TestRequiredRoleFor_GetLocalNodeHealthIsViewer(t *testing.T) {
+	const method = "/apiary.rpc.v1.ManagerService/GetLocalNodeHealth"
+	if got := requiredRoleFor(method); got != RoleViewer {
+		t.Errorf("requiredRoleFor(%q) = %q, want %q", method, got, RoleViewer)
+	}
+}
+
 func TestRequiredRoleFor_ListAssumptionResultsIsViewer(t *testing.T) {
 	const method = "/apiary.rpc.v1.ManagerService/ListAssumptionResults"
 	if got := requiredRoleFor(method); got != RoleViewer {

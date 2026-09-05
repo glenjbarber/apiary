@@ -20,6 +20,7 @@ const _ = grpc.SupportPackageIsVersion9
 
 const (
 	ManagerService_Status_FullMethodName                      = "/apiary.rpc.v1.ManagerService/Status"
+	ManagerService_GetLocalNodeHealth_FullMethodName          = "/apiary.rpc.v1.ManagerService/GetLocalNodeHealth"
 	ManagerService_CreateVM_FullMethodName                    = "/apiary.rpc.v1.ManagerService/CreateVM"
 	ManagerService_UpdateVM_FullMethodName                    = "/apiary.rpc.v1.ManagerService/UpdateVM"
 	ManagerService_DeleteVM_FullMethodName                    = "/apiary.rpc.v1.ManagerService/DeleteVM"
@@ -78,6 +79,11 @@ const (
 // yet, but the definitions are real, replicated, and persisted.
 type ManagerServiceClient interface {
 	Status(ctx context.Context, in *StatusRequest, opts ...grpc.CallOption) (*StatusResponse, error)
+	// GetLocalNodeHealth reports THIS Hive's Evidence-Aware Health verdict
+	// and the raw observations used to derive it. It never forwards to a
+	// leader: local reconciliation and raft-companion observations belong to
+	// the answering Hive alone.
+	GetLocalNodeHealth(ctx context.Context, in *GetLocalNodeHealthRequest, opts ...grpc.CallOption) (*GetLocalNodeHealthResponse, error)
 	CreateVM(ctx context.Context, in *CreateVMRequest, opts ...grpc.CallOption) (*CreateVMResponse, error)
 	UpdateVM(ctx context.Context, in *UpdateVMRequest, opts ...grpc.CallOption) (*UpdateVMResponse, error)
 	DeleteVM(ctx context.Context, in *DeleteVMRequest, opts ...grpc.CallOption) (*DeleteVMResponse, error)
@@ -319,6 +325,16 @@ func (c *managerServiceClient) Status(ctx context.Context, in *StatusRequest, op
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(StatusResponse)
 	err := c.cc.Invoke(ctx, ManagerService_Status_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *managerServiceClient) GetLocalNodeHealth(ctx context.Context, in *GetLocalNodeHealthRequest, opts ...grpc.CallOption) (*GetLocalNodeHealthResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetLocalNodeHealthResponse)
+	err := c.cc.Invoke(ctx, ManagerService_GetLocalNodeHealth_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -801,6 +817,11 @@ func (c *managerServiceClient) ListAssumptionResults(ctx context.Context, in *Li
 // yet, but the definitions are real, replicated, and persisted.
 type ManagerServiceServer interface {
 	Status(context.Context, *StatusRequest) (*StatusResponse, error)
+	// GetLocalNodeHealth reports THIS Hive's Evidence-Aware Health verdict
+	// and the raw observations used to derive it. It never forwards to a
+	// leader: local reconciliation and raft-companion observations belong to
+	// the answering Hive alone.
+	GetLocalNodeHealth(context.Context, *GetLocalNodeHealthRequest) (*GetLocalNodeHealthResponse, error)
 	CreateVM(context.Context, *CreateVMRequest) (*CreateVMResponse, error)
 	UpdateVM(context.Context, *UpdateVMRequest) (*UpdateVMResponse, error)
 	DeleteVM(context.Context, *DeleteVMRequest) (*DeleteVMResponse, error)
@@ -1041,6 +1062,9 @@ type UnimplementedManagerServiceServer struct{}
 func (UnimplementedManagerServiceServer) Status(context.Context, *StatusRequest) (*StatusResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method Status not implemented")
 }
+func (UnimplementedManagerServiceServer) GetLocalNodeHealth(context.Context, *GetLocalNodeHealthRequest) (*GetLocalNodeHealthResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetLocalNodeHealth not implemented")
+}
 func (UnimplementedManagerServiceServer) CreateVM(context.Context, *CreateVMRequest) (*CreateVMResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method CreateVM not implemented")
 }
@@ -1214,6 +1238,24 @@ func _ManagerService_Status_Handler(srv interface{}, ctx context.Context, dec fu
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(ManagerServiceServer).Status(ctx, req.(*StatusRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ManagerService_GetLocalNodeHealth_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetLocalNodeHealthRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ManagerServiceServer).GetLocalNodeHealth(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ManagerService_GetLocalNodeHealth_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ManagerServiceServer).GetLocalNodeHealth(ctx, req.(*GetLocalNodeHealthRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -2034,6 +2076,10 @@ var ManagerService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "Status",
 			Handler:    _ManagerService_Status_Handler,
+		},
+		{
+			MethodName: "GetLocalNodeHealth",
+			Handler:    _ManagerService_GetLocalNodeHealth_Handler,
 		},
 		{
 			MethodName: "CreateVM",

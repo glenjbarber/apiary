@@ -294,6 +294,32 @@ func TestIntegration_Status_MembersIncludesFullSuffrage(t *testing.T) {
 	}
 }
 
+// TestIntegration_GetLocalNodeHealthUsesOneLocalEvidenceContract proves the
+// public RPC carries the derived verdict plus its raw evidence. The manager
+// node ID deliberately matches this test raftd's node ID: the endpoint is
+// reporting the serving Hive, not an arbitrary manager process label.
+func TestIntegration_GetLocalNodeHealthUsesOneLocalEvidenceContract(t *testing.T) {
+	raftdSocket := newRaftdUDSSocket(t)
+	client := newManagerdRPCClientFull(t, raftdSocket, "raftd-1", nil, nil, nil, nil, 0)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	resp, err := client.GetLocalNodeHealth(ctx, &rpcpb.GetLocalNodeHealthRequest{})
+	if err != nil {
+		t.Fatalf("GetLocalNodeHealth() error: %v", err)
+	}
+	if resp.GetNodeId() != "raftd-1" {
+		t.Errorf("NodeId = %q, want raftd-1", resp.GetNodeId())
+	}
+	if resp.GetStatus() != "healthy" {
+		t.Errorf("Status = %q, want healthy (explanation=%q)", resp.GetStatus(), resp.GetExplanation())
+	}
+	if resp.GetExplanation() == "" || len(resp.GetObservations()) == 0 {
+		t.Errorf("response = %+v, want explanation and raw observations", resp)
+	}
+}
+
 // TestIntegration_Status_RaftUnreachableLeavesMembersEmptyNotPartial
 // confirms the early-return path (StatusResponse's own doc comment: "the
 // remaining raft_* fields are left at their zero values") applies to the

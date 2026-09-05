@@ -136,6 +136,10 @@ func (f *fakeClient) Status(context.Context, *rpcpb.StatusRequest, ...grpc.CallO
 	return &rpcpb.StatusResponse{}, nil
 }
 
+func (f *fakeClient) GetLocalNodeHealth(context.Context, *rpcpb.GetLocalNodeHealthRequest, ...grpc.CallOption) (*rpcpb.GetLocalNodeHealthResponse, error) {
+	return &rpcpb.GetLocalNodeHealthResponse{}, nil
+}
+
 func (f *fakeClient) CreateVM(_ context.Context, in *rpcpb.CreateVMRequest, _ ...grpc.CallOption) (*rpcpb.CreateVMResponse, error) {
 	f.lastCreateReq = in
 	return f.createResp, f.createErr
