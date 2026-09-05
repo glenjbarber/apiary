@@ -326,6 +326,19 @@ func (p *PeerReporter) GetLocalNetworkBridgeStatus(ctx context.Context, addr, ne
 	return client.GetLocalNetworkBridgeStatus(ctx, &rpcpb.GetLocalNetworkBridgeStatusRequest{NetworkId: networkID})
 }
 
+// GetVMSerialLog forwards to a specific Hive's local serial-log reader.
+// Serial logs are captured alongside bhyve, rather than in replicated
+// state, so this is intentionally a direct owner-Hive call, not a
+// leader-forwarded read.
+func (p *PeerReporter) GetVMSerialLog(ctx context.Context, addr, id string) (*rpcpb.GetVMSerialLogResponse, error) {
+	conn, client, err := p.dial(addr)
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close()
+	return client.GetVMSerialLog(ctx, &rpcpb.GetVMSerialLogRequest{Id: id})
+}
+
 // ListAssumptionResults forwards to a specific peer's own
 // ListAssumptionResults RPC - same shape as HostStats/
 // GetLocalNetworkBridgeStatus above. Used by internal/frontend's

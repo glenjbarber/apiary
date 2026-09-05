@@ -84,3 +84,30 @@ func TestSortVMs_UnknownSortByFallsBackToID(t *testing.T) {
 		t.Errorf("order = %v, want %v", got, want)
 	}
 }
+
+func TestSortVMs_RunningGroupsByHiveThenName(t *testing.T) {
+	vms := []vmView{
+		{ID: "stopped", Name: "a", NodeID: "apiarium", DesiredState: "stopped", Phase: "stopped"},
+		{ID: "worker", Name: "worker", NodeID: "apiverse", DesiredState: "running", Phase: "ready"},
+		{ID: "control", Name: "control", NodeID: "apiarium", DesiredState: "running", Phase: "ready"},
+		{ID: "legacy", Name: "legacy", NodeID: "apiarium", Phase: "ready"},
+	}
+	sortVMs(vms, "running", "asc")
+
+	if got, want := idsOf(vms), []string{"control", "legacy", "worker", "stopped"}; !equalStrings(got, want) {
+		t.Errorf("operational order = %v, want %v", got, want)
+	}
+}
+
+func TestSortJails_RunningGroupsByHiveThenName(t *testing.T) {
+	jails := []jailView{
+		{ID: "stopped", Name: "a", NodeID: "apiarium", DesiredState: "stopped", Phase: "stopped"},
+		{ID: "worker", Name: "worker", NodeID: "apiverse", DesiredState: "running", Phase: "ready"},
+		{ID: "control", Name: "control", NodeID: "apiarium", DesiredState: "running", Phase: "ready"},
+	}
+	sortJails(jails)
+	got := []string{jails[0].ID, jails[1].ID, jails[2].ID}
+	if want := []string{"control", "worker", "stopped"}; !equalStrings(got, want) {
+		t.Errorf("operational order = %v, want %v", got, want)
+	}
+}

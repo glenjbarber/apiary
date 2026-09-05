@@ -96,3 +96,25 @@ func TestServer_SerialLogContent_ServesFragmentForPolling(t *testing.T) {
 		t.Errorf("serial log content should be a fragment, not a full page, got: %s", body)
 	}
 }
+
+func TestServer_SerialLogPage_RemoteOwnerUsesPeer(t *testing.T) {
+	client := &fakeClient{
+		getVMResp:  &rpcpb.GetVMResponse{Found: true, Vm: &rpcpb.VMDefinition{Id: "vm-1", NodeId: "apiverse"}},
+		statusResp: &rpcpb.StatusResponse{ManagerNodeId: "apiarium"},
+	}
+	peers := &fakePeerHostStatsClient{serialResp: &rpcpb.GetVMSerialLogResponse{Available: true, Content: "remote content"}}
+	s, err := NewServer(client, nil, nil, peers, ".apiary.work", "17700", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodGet, "/vms/vm-1/serial", nil)
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, req)
+
+	if !strings.Contains(rec.Body.String(), "remote content") {
+		t.Errorf("serial log page did not render peer content: %s", rec.Body.String())
+	}
+	if peers.lastSerialAddr != "apiverse.apiary.work:17700" {
+		t.Errorf("peer serial address = %q", peers.lastSerialAddr)
+	}
+}

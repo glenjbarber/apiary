@@ -13,7 +13,7 @@ import (
 // both handleSerialLogPage and handleSerialLogContent need the same
 // content-or-error shape.
 func (s *Server) resolveSerialLog(ctx context.Context, id string) (content string, truncated bool, errMsg string) {
-	resp, err := s.client.GetVMSerialLog(ctx, &rpcpb.GetVMSerialLogRequest{Id: id})
+	resp, err := s.serialLogForVM(ctx, id)
 	if err != nil {
 		return "", false, err.Error()
 	}
@@ -24,6 +24,23 @@ func (s *Server) resolveSerialLog(ctx context.Context, id string) (content strin
 		return "", false, "this VM has no captured serial log yet (not yet reconciled, or created before serial logging existed)"
 	}
 	return resp.GetContent(), resp.GetTruncated(), ""
+}
+
+// serialLogForVM reads from the owning Hive when this frontend is serving a
+// different Hive. The VM definition is replicated, but the captured serial
+// file is intentionally local state. Falling back to the local managerd is
+// retained for a partial Status/GetVM outage, which preserves the previous
+// behavior and its useful owner-Hive error hint.
+func (s *Server) serialLogForVM(ctx context.Context, id string) (*rpcpb.GetVMSerialLogResponse, error) {
+	vmResp, err := s.client.GetVM(ctx, &rpcpb.GetVMRequest{Id: id})
+	if err != nil || !vmResp.GetFound() || vmResp.GetVm().GetNodeId() == "" || s.peers == nil {
+		return s.client.GetVMSerialLog(ctx, &rpcpb.GetVMSerialLogRequest{Id: id})
+	}
+	statusResp, err := s.client.Status(ctx, &rpcpb.StatusRequest{})
+	if err != nil || statusResp.GetManagerNodeId() == "" || vmResp.GetVm().GetNodeId() == statusResp.GetManagerNodeId() {
+		return s.client.GetVMSerialLog(ctx, &rpcpb.GetVMSerialLogRequest{Id: id})
+	}
+	return s.peers.GetVMSerialLog(ctx, s.peerAddr(vmResp.GetVm().GetNodeId()), id)
 }
 
 // handleSerialLogPage serves the full serial-log page for one VM, with

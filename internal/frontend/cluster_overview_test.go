@@ -28,6 +28,10 @@ type fakePeerHostStatsClient struct {
 	lastBridgeNetwork string
 	bridgeResp        *rpcpb.GetLocalNetworkBridgeStatusResponse
 	bridgeErr         error
+
+	lastSerialAddr string
+	serialResp     *rpcpb.GetVMSerialLogResponse
+	serialErr      error
 }
 
 func (f *fakePeerHostStatsClient) HostStats(_ context.Context, addr string) (*rpcpb.HostStatsResponse, error) {
@@ -79,6 +83,17 @@ func (f *fakePeerHostStatsClient) GetLocalNetworkBridgeStatus(_ context.Context,
 		return f.bridgeResp, nil
 	}
 	return &rpcpb.GetLocalNetworkBridgeStatusResponse{}, nil
+}
+
+func (f *fakePeerHostStatsClient) GetVMSerialLog(_ context.Context, addr, _ string) (*rpcpb.GetVMSerialLogResponse, error) {
+	f.lastSerialAddr = addr
+	if f.serialErr != nil {
+		return nil, f.serialErr
+	}
+	if f.serialResp != nil {
+		return f.serialResp, nil
+	}
+	return &rpcpb.GetVMSerialLogResponse{}, nil
 }
 
 func TestServer_ClusterOverviewPage_UnreachableNodeShowsError(t *testing.T) {

@@ -30,7 +30,7 @@
 <div id="network-error" class="banner-error">{{.NetworkFormError}}</div>
 <table>
   <thead>
-    <tr><th>ID</th><th>Name</th><th>VLAN</th><th>Subnet</th><th>Bridge</th><th>Gateway</th><th>Status</th><th></th></tr>
+    <tr><th>ID</th><th>Name</th><th>VLAN</th><th>Subnet</th><th>Bridge</th><th>Gateway</th><th>Bridge health by Hive</th><th></th></tr>
   </thead>
   <tbody id="network-rows">
     {{template "network_rows" .}}
@@ -48,9 +48,13 @@
   <td>{{if .BridgeName}}{{.BridgeName}}{{else}}<em>(auto-generated)</em>{{end}}</td>
   <td>{{if .ExternalGateway}}{{.ExternalGateway}}{{else}}<em>(this node's bridge)</em>{{end}}</td>
   <td>
-    {{if eq .BridgeStatus "up"}}<span class="success">up</span>
-    {{else if eq .BridgeStatus "down"}}<span class="error">down</span>
-    {{else}}<em>unknown</em>
+    {{range .BridgeStatuses}}
+      <div><strong>{{.NodeID}}</strong>:
+      {{if eq .Status "up"}}<span class="success">up</span>
+      {{else if eq .Status "down"}}<span class="error">down</span>
+      {{else}}<em>unknown</em>{{end}}</div>
+    {{else}}
+      <em>unavailable</em>
     {{end}}
   </td>
   <td>

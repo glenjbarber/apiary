@@ -34,6 +34,8 @@ type fakePeerServer struct {
 	getJailReq       *rpcpb.GetJailRequest
 	getJailResp      *rpcpb.GetJailResponse
 	listNetworksResp *rpcpb.ListNetworksResponse
+	serialLogReq     *rpcpb.GetVMSerialLogRequest
+	serialLogResp    *rpcpb.GetVMSerialLogResponse
 
 	createVMReq  *rpcpb.CreateVMRequest
 	createVMResp *rpcpb.CreateVMResponse
@@ -512,6 +514,28 @@ func TestPeerReporter_ListNetworks_ReturnsPeerResponse(t *testing.T) {
 	}
 	if len(resp.GetNetworks()) != 1 || resp.GetNetworks()[0].GetId() != "net-1" {
 		t.Errorf("ListNetworks() = %+v, want one network with id=net-1", resp)
+	}
+}
+
+func (f *fakePeerServer) GetVMSerialLog(_ context.Context, req *rpcpb.GetVMSerialLogRequest) (*rpcpb.GetVMSerialLogResponse, error) {
+	f.serialLogReq = req
+	if f.serialLogResp != nil {
+		return f.serialLogResp, nil
+	}
+	return &rpcpb.GetVMSerialLogResponse{}, nil
+}
+
+func TestPeerReporter_GetVMSerialLog_ReachesSpecificPeer(t *testing.T) {
+	fake := &fakePeerServer{serialLogResp: &rpcpb.GetVMSerialLogResponse{Available: true, Content: "remote tail"}}
+	addr := newTestPeerServer(t, fake)
+	p := NewPeerReporter("", false, nil)
+
+	resp, err := p.GetVMSerialLog(context.Background(), addr, "vm-1")
+	if err != nil {
+		t.Fatalf("GetVMSerialLog() error: %v", err)
+	}
+	if fake.serialLogReq.GetId() != "vm-1" || !resp.GetAvailable() || resp.GetContent() != "remote tail" {
+		t.Errorf("GetVMSerialLog() request/response = %+v / %+v", fake.serialLogReq, resp)
 	}
 }
 

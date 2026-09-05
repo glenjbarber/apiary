@@ -51,6 +51,11 @@ type peerHostStatsClient interface {
 	// see GetLocalNetworkBridgeStatus's own doc comment in
 	// internal/manager/server.go for the ADR-0055 bug this avoids.
 	GetLocalNetworkBridgeStatus(ctx context.Context, addr, networkID string) (*rpcpb.GetLocalNetworkBridgeStatusResponse, error)
+
+	// GetVMSerialLog reaches the Hive that owns a VM. Serial capture is
+	// deliberately local to the bhyve host, so the frontend must not ask a
+	// non-owning managerd and mistake its ownership hint for a missing log.
+	GetVMSerialLog(ctx context.Context, addr, id string) (*rpcpb.GetVMSerialLogResponse, error)
 }
 
 // clusterNodeView is the template-facing shape for one row on the

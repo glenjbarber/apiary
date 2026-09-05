@@ -329,19 +329,16 @@ type userView struct {
 	CanChange bool
 }
 
-// parseSort reads sort/dir query parameters, defaulting to ascending by
-// ID - which used to be the *only* order (ListVMs's underlying map
-// iteration is unordered), hence "keep it sorted alphabetically by
-// default" being a real, user-visible bug fix, not just an added
-// convenience. Any unrecognized sort value falls back to "id" rather
-// than erroring - a stale or hand-edited URL parameter shouldn't break
-// the page.
+// parseSort reads sort/dir query parameters. The default operational view
+// keeps ready Cells first, grouped by Hive and then alphabetically by name.
+// Explicit table-header sorts remain available. Any unrecognized sort value
+// falls back to the operational view rather than erroring.
 func parseSort(r *http.Request) (sortBy, dir string) {
 	switch r.URL.Query().Get("sort") {
-	case "node", "state":
+	case "id", "node", "state":
 		sortBy = r.URL.Query().Get("sort")
 	default:
-		sortBy = "id"
+		sortBy = "running"
 	}
 	if r.URL.Query().Get("dir") == "desc" {
 		dir = "desc"
@@ -940,6 +937,25 @@ func (s *Server) currentNetworks(r *http.Request) ([]networkView, string) {
 	for _, n := range resp.GetNetworks() {
 		networks = append(networks, fromRPCNetwork(n))
 	}
+	statusResp, err := s.client.Status(r.Context(), &rpcpb.StatusRequest{})
+	if err != nil || len(statusResp.GetKnownNodeIds()) == 0 {
+		return networks, ""
+	}
+	for i := range networks {
+		for _, nodeID := range statusResp.GetKnownNodeIds() {
+			var bridgeResp *rpcpb.GetLocalNetworkBridgeStatusResponse
+			if s.peers == nil || nodeID == statusResp.GetManagerNodeId() {
+				bridgeResp, err = s.client.GetLocalNetworkBridgeStatus(r.Context(), &rpcpb.GetLocalNetworkBridgeStatusRequest{NetworkId: networks[i].ID})
+			} else {
+				bridgeResp, err = s.peers.GetLocalNetworkBridgeStatus(r.Context(), s.peerAddr(nodeID), networks[i].ID)
+			}
+			status := "unknown"
+			if err == nil && bridgeResp.GetError() == "" && bridgeResp.GetBridgeStatus() != "" {
+				status = bridgeResp.GetBridgeStatus()
+			}
+			networks[i].BridgeStatuses = append(networks[i].BridgeStatuses, bridgeStatusView{NodeID: nodeID, Status: status})
+		}
+	}
 	return networks, ""
 }
 
@@ -1360,6 +1376,7 @@ func (s *Server) currentJails(r *http.Request) ([]jailView, string) {
 	for _, j := range resp.GetJails() {
 		jails = append(jails, fromRPCJail(j))
 	}
+	sortJails(jails)
 	return jails, ""
 }
 
