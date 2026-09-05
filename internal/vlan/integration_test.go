@@ -38,10 +38,10 @@ func TestIntegration_EnsureBridge_CreateIsIdempotent(t *testing.T) {
 	name := "apiary-it-br0"
 	t.Cleanup(func() { m.DestroyBridge(ctx, name) })
 
-	if err := m.EnsureBridge(ctx, name); err != nil {
+	if _, err := m.EnsureBridge(ctx, name); err != nil {
 		t.Fatalf("EnsureBridge() error: %v", err)
 	}
-	if err := m.EnsureBridge(ctx, name); err != nil {
+	if _, err := m.EnsureBridge(ctx, name); err != nil {
 		t.Fatalf("EnsureBridge() (2nd call) error: %v", err)
 	}
 
@@ -55,7 +55,7 @@ func TestIntegration_EnsureVLAN_UntaggedReturnsUplink(t *testing.T) {
 	uplink := testUplink(t)
 	m := &Manager{Uplink: uplink}
 
-	got, err := m.EnsureVLAN(context.Background(), 0)
+	got, _, err := m.EnsureVLAN(context.Background(), 0)
 	if err != nil {
 		t.Fatalf("EnsureVLAN(0) error: %v", err)
 	}
@@ -72,7 +72,7 @@ func TestIntegration_EnsureVLAN_CreatesTaggedInterface(t *testing.T) {
 
 	t.Cleanup(func() { runCmd(ctx, "ifconfig", vlanIfaceName(vlanID), "destroy") })
 
-	name, err := m.EnsureVLAN(ctx, vlanID)
+	name, _, err := m.EnsureVLAN(ctx, vlanID)
 	if err != nil {
 		t.Fatalf("EnsureVLAN(%d) error: %v", vlanID, err)
 	}
@@ -81,7 +81,7 @@ func TestIntegration_EnsureVLAN_CreatesTaggedInterface(t *testing.T) {
 	}
 
 	// Idempotent: calling again must not error.
-	if _, err := m.EnsureVLAN(ctx, vlanID); err != nil {
+	if _, _, err := m.EnsureVLAN(ctx, vlanID); err != nil {
 		t.Fatalf("EnsureVLAN(%d) (2nd call) error: %v", vlanID, err)
 	}
 
@@ -101,7 +101,7 @@ func TestIntegration_EnsureMemberAndBridgeAddress(t *testing.T) {
 	bridge := "apiary-it-br1"
 	t.Cleanup(func() { m.DestroyBridge(ctx, bridge) })
 
-	if err := m.EnsureBridge(ctx, bridge); err != nil {
+	if _, err := m.EnsureBridge(ctx, bridge); err != nil {
 		t.Fatalf("EnsureBridge() error: %v", err)
 	}
 	if err := m.EnsureBridgeAddress(ctx, bridge, "10.250.250.0/24"); err != nil {

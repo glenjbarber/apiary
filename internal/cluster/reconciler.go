@@ -3,6 +3,7 @@ package cluster
 import (
 	"context"
 	"crypto/sha256"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -20,6 +21,12 @@ import (
 	"github.com/glenjbarber/apiary/internal/jail"
 	"github.com/glenjbarber/apiary/internal/pf"
 )
+
+// DefaultNetworkStatePath records only network artifacts that this node's
+// reconciler successfully created. It is node-local physical state, never
+// cluster intent: that distinction lets removal remain conservative after a
+// network definition disappears from raft.
+const DefaultNetworkStatePath = "/var/db/apiary/network-artifacts.json"
 
 // diskImageName is the file created inside each VM's dataset to back its
 // boot disk.
@@ -114,10 +121,12 @@ type isoResolver interface {
 // vlanManager is the subset of *vlan.Manager the reconciler needs, for
 // the same reason as raftClient. *vlan.Manager satisfies this today.
 type vlanManager interface {
-	EnsureVLAN(ctx context.Context, vlanID uint32) (string, error)
-	EnsureBridge(ctx context.Context, name string) error
+	EnsureVLAN(ctx context.Context, vlanID uint32) (name string, created bool, err error)
+	EnsureBridge(ctx context.Context, name string) (created bool, err error)
 	EnsureMember(ctx context.Context, bridge, iface string) error
 	EnsureBridgeAddress(ctx context.Context, bridge, subnet string) error
+	DestroyBridge(ctx context.Context, name string) error
+	DestroyVLAN(ctx context.Context, vlanID uint32) error
 }
 
 // dhcpManager is the subset of *dhcpd.Manager the reconciler needs, for
@@ -215,6 +224,11 @@ type Reconciler struct {
 	// deployment that hasn't set this yet, rather than silently start
 	// emitting an option with an empty address.
 	DNSServer string
+
+	// NetworkStatePath is the node-local record of bridges, VLAN interfaces,
+	// and NAT anchors that this reconciler created. Empty disables artifact
+	// cleanup, which keeps lightweight unit-test reconcilers side-effect free.
+	NetworkStatePath string
 
 	// HAST is optional (nil-able, same opt-in pattern as everything
 	// above): when set, a VM naming ReplicaNodeID gets its disk
@@ -537,6 +551,10 @@ func (r *Reconciler) RunOnce(ctx context.Context) (err error) {
 		if err != nil && firstErr == nil {
 			firstErr = fmt.Errorf("cluster: reconciling HAST roles: %w", err)
 		}
+	}
+
+	if err := r.reconcileNetworkArtifacts(ctx, planned, networks); err != nil && firstErr == nil {
+		firstErr = fmt.Errorf("cluster: reconciling managed network cleanup: %w", err)
 	}
 
 	for _, vm := range planned {
@@ -1031,11 +1049,11 @@ func (r *Reconciler) ensureVM(ctx context.Context, vm VMPlacement, networks map[
 		if !ok {
 			return fmt.Errorf("network %q not found", vm.NetworkID)
 		}
-		networkBridge, err := r.ensureNetwork(ctx, network)
+		networkArtifact, err := r.ensureNetwork(ctx, network)
 		if err != nil {
 			return fmt.Errorf("provisioning network %q: %w", vm.NetworkID, err)
 		}
-		bridge = networkBridge
+		bridge = networkArtifact.Bridge
 	}
 
 	running, err := r.Bhyve.VMExists(ctx, vm.ID)
@@ -1149,22 +1167,38 @@ func (r *Reconciler) ensureVM(ctx context.Context, vm VMPlacement, networks map[
 	return nil
 }
 
-// ensureNetwork provisions the vlan(4)/bridge(4) interfaces network
-// implies on this node (idempotent, called every tick like every other
-// existence check in this file) and returns the bridge name to attach
-// the VM's tap to.
-func (r *Reconciler) ensureNetwork(ctx context.Context, network *internalpb.NetworkDefinition) (string, error) {
-	iface, err := r.VLAN.EnsureVLAN(ctx, network.GetVlanId())
+// networkArtifact is the local realization of one network that is safe to
+// tear down later: owned fields are true only when Apiary itself created the
+// corresponding interface, never merely because it found a same-named one.
+type networkArtifact struct {
+	Bridge      string `json:"bridge"`
+	VLANID      uint32 `json:"vlan_id"`
+	OwnBridge   bool   `json:"own_bridge"`
+	OwnVLAN     bool   `json:"own_vlan"`
+	OutboundNAT bool   `json:"outbound_nat"`
+}
+
+type networkArtifactState struct {
+	Networks map[string]networkArtifact `json:"networks"`
+}
+
+// ensureNetwork provisions the vlan(4)/bridge(4) interfaces network implies
+// on this node and returns the local artifact ownership observed during this
+// pass. It is idempotent, like every other existence check in this file.
+func (r *Reconciler) ensureNetwork(ctx context.Context, network *internalpb.NetworkDefinition) (networkArtifact, error) {
+	iface, vlanCreated, err := r.VLAN.EnsureVLAN(ctx, network.GetVlanId())
 	if err != nil {
-		return "", fmt.Errorf("ensuring vlan interface: %w", err)
+		return networkArtifact{}, fmt.Errorf("ensuring vlan interface: %w", err)
 	}
 	bridge := networkBridgeName(network)
-	if err := r.VLAN.EnsureBridge(ctx, bridge); err != nil {
-		return "", fmt.Errorf("ensuring bridge: %w", err)
+	bridgeCreated, err := r.VLAN.EnsureBridge(ctx, bridge)
+	if err != nil {
+		return networkArtifact{}, fmt.Errorf("ensuring bridge: %w", err)
 	}
 	if err := r.VLAN.EnsureMember(ctx, bridge, iface); err != nil {
-		return "", fmt.Errorf("adding %s to bridge: %w", iface, err)
+		return networkArtifact{}, fmt.Errorf("adding %s to bridge: %w", iface, err)
 	}
+	artifact := networkArtifact{Bridge: bridge, VLANID: network.GetVlanId(), OwnBridge: bridgeCreated, OwnVLAN: vlanCreated}
 	// A network with ExternalGateway set already has a real router
 	// answering for the subnet's gateway address on this L2 segment -
 	// claiming it here too would conflict with that router (confirmed
@@ -1172,7 +1206,7 @@ func (r *Reconciler) ensureNetwork(ctx context.Context, network *internalpb.Netw
 	// was - a duplicate-IP conflict, not a firewall/routing bug).
 	if network.GetExternalGateway() == "" {
 		if err := r.VLAN.EnsureBridgeAddress(ctx, bridge, network.GetSubnet()); err != nil {
-			return "", fmt.Errorf("assigning gateway address: %w", err)
+			return networkArtifact{}, fmt.Errorf("assigning gateway address: %w", err)
 		}
 		// Give this network real outbound internet access through this
 		// node's own uplink - see ADR-0048. Only meaningful when this
@@ -1181,11 +1215,134 @@ func (r *Reconciler) ensureNetwork(ctx context.Context, network *internalpb.Netw
 		// for its internet access instead.
 		if r.PF != nil && r.Uplink != "" {
 			if err := r.PF.ApplyNAT(ctx, natAnchor(network.GetId()), network.GetSubnet(), r.Uplink); err != nil {
-				return "", fmt.Errorf("applying outbound NAT: %w", err)
+				return networkArtifact{}, fmt.Errorf("applying outbound NAT: %w", err)
+			}
+			artifact.OutboundNAT = true
+		}
+	}
+	return artifact, nil
+}
+
+// reconcileNetworkArtifacts persists only positive ownership observations and
+// cleans up only after the corresponding replicated network definition has
+// disappeared. A defined but unused network is deliberately retained.
+func (r *Reconciler) reconcileNetworkArtifacts(ctx context.Context, planned []VMPlacement, networks map[string]*internalpb.NetworkDefinition) error {
+	if r.VLAN == nil || r.NetworkStatePath == "" {
+		return nil
+	}
+	state, err := loadNetworkArtifactState(r.NetworkStatePath)
+	if err != nil {
+		return err
+	}
+	next := make(map[string]networkArtifact, len(state.Networks))
+	for id, artifact := range state.Networks {
+		if _, defined := networks[id]; defined {
+			next[id] = artifact
+		}
+	}
+	for _, vm := range planned {
+		if vm.Deleting || vm.NetworkID == "" {
+			continue
+		}
+		network, ok := networks[vm.NetworkID]
+		if !ok {
+			continue // reconcileVM reports the inconsistent intent.
+		}
+		artifact, err := r.ensureNetwork(ctx, network)
+		if err != nil {
+			return fmt.Errorf("ensuring network %q before cleanup: %w", vm.NetworkID, err)
+		}
+		if old, exists := state.Networks[vm.NetworkID]; exists {
+			if old.Bridge == artifact.Bridge {
+				artifact.OwnBridge = artifact.OwnBridge || old.OwnBridge
+			}
+			if old.VLANID == artifact.VLANID {
+				artifact.OwnVLAN = artifact.OwnVLAN || old.OwnVLAN
+			}
+		}
+		next[vm.NetworkID] = artifact
+	}
+
+	for id, old := range state.Networks {
+		if _, defined := networks[id]; defined {
+			continue
+		}
+		if old.OwnBridge && old.Bridge != "" {
+			if err := r.VLAN.DestroyBridge(ctx, old.Bridge); err != nil {
+				return fmt.Errorf("destroying stale bridge for network %q: %w", id, err)
+			}
+		}
+		if old.OutboundNAT && r.PF != nil {
+			if err := r.PF.Flush(ctx, natAnchor(id)); err != nil {
+				return fmt.Errorf("flushing stale NAT for network %q: %w", id, err)
 			}
 		}
 	}
-	return bridge, nil
+
+	activeVLANs := make(map[uint32]bool)
+	for _, artifact := range next {
+		if artifact.VLANID != 0 {
+			activeVLANs[artifact.VLANID] = true
+		}
+	}
+	for id, old := range state.Networks {
+		if _, defined := networks[id]; defined || !old.OwnVLAN || old.VLANID == 0 || activeVLANs[old.VLANID] {
+			continue
+		}
+		if err := r.VLAN.DestroyVLAN(ctx, old.VLANID); err != nil {
+			return fmt.Errorf("destroying stale VLAN %d for network %q: %w", old.VLANID, id, err)
+		}
+	}
+	return saveNetworkArtifactState(r.NetworkStatePath, networkArtifactState{Networks: next})
+}
+
+func loadNetworkArtifactState(path string) (networkArtifactState, error) {
+	body, err := os.ReadFile(path)
+	if os.IsNotExist(err) {
+		return networkArtifactState{Networks: make(map[string]networkArtifact)}, nil
+	}
+	if err != nil {
+		return networkArtifactState{}, fmt.Errorf("reading network artifact state: %w", err)
+	}
+	var state networkArtifactState
+	if err := json.Unmarshal(body, &state); err != nil {
+		return networkArtifactState{}, fmt.Errorf("parsing network artifact state: %w", err)
+	}
+	if state.Networks == nil {
+		state.Networks = make(map[string]networkArtifact)
+	}
+	return state, nil
+}
+
+func saveNetworkArtifactState(path string, state networkArtifactState) error {
+	body, err := json.MarshalIndent(state, "", "  ")
+	if err != nil {
+		return fmt.Errorf("rendering network artifact state: %w", err)
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return fmt.Errorf("creating network artifact state directory: %w", err)
+	}
+	tmp, err := os.CreateTemp(filepath.Dir(path), ".network-artifacts-*")
+	if err != nil {
+		return fmt.Errorf("creating network artifact state: %w", err)
+	}
+	tmpName := tmp.Name()
+	defer os.Remove(tmpName)
+	if _, err := tmp.Write(body); err != nil {
+		tmp.Close()
+		return fmt.Errorf("writing network artifact state: %w", err)
+	}
+	if err := tmp.Chmod(0o644); err != nil {
+		tmp.Close()
+		return fmt.Errorf("setting network artifact state permissions: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		return fmt.Errorf("closing network artifact state: %w", err)
+	}
+	if err := os.Rename(tmpName, path); err != nil {
+		return fmt.Errorf("installing network artifact state: %w", err)
+	}
+	return nil
 }
 
 // networkBridgeName returns network's configured bridge name, or a

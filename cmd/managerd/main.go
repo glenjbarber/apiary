@@ -196,6 +196,7 @@ func run() error {
 		Peers:            peers,
 		PeerManagerdPort: resolvedPeerPort,
 		DNSServer:        *dhcpDNSServer,
+		NetworkStatePath: cluster.DefaultNetworkStatePath,
 		Interval:         *reconcileInterval,
 	}
 	// HAST is independent of bhyve support: a node holding only a HAST

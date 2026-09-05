@@ -90,54 +90,55 @@ func vlanIfaceName(vlanID uint32) string {
 // m.Uplink, and returns its name. vlanID == 0 means "untagged" - there
 // is no vlan interface to create, and the caller should attach directly
 // to m.Uplink instead (returned as-is).
-func (m *Manager) EnsureVLAN(ctx context.Context, vlanID uint32) (string, error) {
+func (m *Manager) EnsureVLAN(ctx context.Context, vlanID uint32) (name string, created bool, err error) {
 	if vlanID == 0 {
-		return m.Uplink, nil
+		return m.Uplink, false, nil
 	}
 	if m.Uplink == "" {
-		return "", fmt.Errorf("vlan: EnsureVLAN(%d): no uplink interface configured", vlanID)
+		return "", false, fmt.Errorf("vlan: EnsureVLAN(%d): no uplink interface configured", vlanID)
 	}
 
-	name := vlanIfaceName(vlanID)
+	name = vlanIfaceName(vlanID)
 	exists, err := ifaceExists(ctx, name)
 	if err != nil {
-		return "", fmt.Errorf("vlan: checking %s: %w", name, err)
+		return "", false, fmt.Errorf("vlan: checking %s: %w", name, err)
 	}
 	if exists {
-		return name, nil
+		return name, false, nil
 	}
 
 	if _, err := runCmd(ctx, "ifconfig", name, "create"); err != nil {
-		return "", fmt.Errorf("vlan: creating %s: %w", name, err)
+		return "", false, fmt.Errorf("vlan: creating %s: %w", name, err)
 	}
 	if _, err := runCmd(ctx, "ifconfig", name, "vlan", strconv.FormatUint(uint64(vlanID), 10), "vlandev", m.Uplink); err != nil {
 		runCmd(ctx, "ifconfig", name, "destroy")
-		return "", fmt.Errorf("vlan: tagging %s onto %s: %w", name, m.Uplink, err)
+		return "", false, fmt.Errorf("vlan: tagging %s onto %s: %w", name, m.Uplink, err)
 	}
 	if _, err := runCmd(ctx, "ifconfig", name, "up"); err != nil {
-		return "", fmt.Errorf("vlan: bringing up %s: %w", name, err)
+		return "", false, fmt.Errorf("vlan: bringing up %s: %w", name, err)
 	}
-	return name, nil
+	return name, true, nil
 }
 
 // EnsureBridge ensures a bridge(4) interface named name exists (and is
 // up), creating it with that exact name if not - FreeBSD's ifconfig
 // supports naming a cloned interface directly at creation time via
 // `name`, the same way any interface can be renamed.
-func (m *Manager) EnsureBridge(ctx context.Context, name string) error {
+func (m *Manager) EnsureBridge(ctx context.Context, name string) (created bool, err error) {
 	exists, err := ifaceExists(ctx, name)
 	if err != nil {
-		return fmt.Errorf("vlan: checking bridge %s: %w", name, err)
+		return false, fmt.Errorf("vlan: checking bridge %s: %w", name, err)
 	}
 	if !exists {
 		if _, err := runCmd(ctx, "ifconfig", "bridge", "create", "name", name); err != nil {
-			return fmt.Errorf("vlan: creating bridge %s: %w", name, err)
+			return false, fmt.Errorf("vlan: creating bridge %s: %w", name, err)
 		}
+		created = true
 	}
 	if _, err := runCmd(ctx, "ifconfig", name, "up"); err != nil {
-		return fmt.Errorf("vlan: bringing up bridge %s: %w", name, err)
+		return false, fmt.Errorf("vlan: bringing up bridge %s: %w", name, err)
 	}
-	return nil
+	return created, nil
 }
 
 // EnsureMember ensures iface is a member of bridge, adding it if not
@@ -204,6 +205,21 @@ func (m *Manager) DestroyBridge(ctx context.Context, name string) error {
 	_, err := runCmd(ctx, "ifconfig", name, "destroy")
 	if err != nil && !strings.Contains(err.Error(), "does not exist") {
 		return fmt.Errorf("vlan: destroying bridge %s: %w", name, err)
+	}
+	return nil
+}
+
+// DestroyVLAN tears down the vlan(4) interface for vlanID. vlan_id zero
+// represents the host uplink rather than an Apiary-created interface, so it
+// is deliberately never destroyed. Like DestroyBridge, this is idempotent.
+func (m *Manager) DestroyVLAN(ctx context.Context, vlanID uint32) error {
+	if vlanID == 0 {
+		return nil
+	}
+	name := vlanIfaceName(vlanID)
+	_, err := runCmd(ctx, "ifconfig", name, "destroy")
+	if err != nil && !strings.Contains(err.Error(), "does not exist") {
+		return fmt.Errorf("vlan: destroying %s: %w", name, err)
 	}
 	return nil
 }
