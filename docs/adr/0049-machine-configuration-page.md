@@ -18,18 +18,18 @@ primitive - `SetProperty` - but no RPC/UI ever exposed it).
 
 ## Decision
 
-One new `/machine` page with three independent sections, each its own
+One new `/machine` page with independent sections, each its own
 HTMX-targeted panel (`internal/frontend/machine.go`).
 
 ### Uplink settings
 
 New `internal/nodeconfig` package: a `Manager{Path string}` doing plain
 local JSON file I/O (mirrors `internal/isostore`'s shape exactly),
-persisting `{Uplink, NATUplink}`. Physical, per-node data - never
+persisting `{Uplink, NATUplink, JailEnabled}`. Physical, per-node data - never
 raft-replicated, since a NIC name is only meaningful to the one node
 that has it. `cmd/managerd` loads this file once at startup, overriding
-the matching `-vlan-uplink`/`-nat-uplink` flag value when set (flags
-remain the bootstrap default for a fresh install with no file yet).
+the matching `-vlan-uplink`/`-nat-uplink`/`-jail-enabled` flag value when set
+(flags remain the bootstrap default for a fresh install with no file yet).
 New RPCs `GetNodeConfig`/`UpdateNodeConfig` (local-only, modeled
 directly on `HostStats`'s existing shape - empty-request-message, no
 raft involved) let the UI read/write the file through managerd's
@@ -39,6 +39,17 @@ already-running process.
 matching how every other node-level flag in this project already
 behaves, rather than introducing live-reload/mutex-guarded-field
 machinery for a first pass. The page says so next to the save button.
+
+### Jail provisioning override
+
+The same Machine configuration panel can explicitly enable or disable
+`-jail-enabled` for this Hive, or clear the override and use the startup flag.
+The field is optional end to end (`optional bool jail_enabled` in the RPC and
+`*bool JailEnabled` in `internal/nodeconfig.Config`) so saving unrelated
+Machine settings does not accidentally convert "use the startup flag" into
+"disabled." This was added after ADR-0064 made disabled jail provisioning
+visible as a reconciliation error; the obvious operator action now lives on
+the same node-local configuration page as the other restart-required settings.
 
 ### Per-VM firewall pause
 
@@ -86,8 +97,8 @@ consistent with `zfs.Manager`'s own existing scoping.
 ## Role gating
 
 - `GetNodeConfig`: Viewer (read-only, mirrors `HostStats`).
-- `UpdateNodeConfig`: Admin - host-wide network reconfiguration, same
-  tier as `CreateAPIKey`.
+- `UpdateNodeConfig`: Admin - host-wide network and jail-provisioning
+  reconfiguration, same tier as `CreateAPIKey`.
 - `SetVMFirewallPaused`: Operator - matches other VM lifecycle actions.
 - `SetDatasetQuota`: Operator - matches `UploadISO`/`DeleteISO`.
 - The `/machine` page itself is Operator-visible (the lowest of the
@@ -121,14 +132,14 @@ result with no new RPC needed.
 ## Verification
 
 Unit tests: `internal/nodeconfig` (load/save round-trip, missing-file
-zero-value); `internal/raft/fsm` (`SetVMFirewallPaused` touches only
-that field); `internal/manager` (local-only handler tests for
-`GetNodeConfig`/`UpdateNodeConfig`/`SetDatasetQuota` with fakes, plus a
-real raft-harness integration test for `SetVMFirewallPaused`);
-`internal/cluster` (`effectivePFRules` applied correctly on both the
-create and already-running branches); `internal/frontend`
-(`/machine`'s three panels, mirroring the `apikeys`/`networks` page
-test patterns).
+zero-value, optional jail provisioning override); `internal/raft/fsm`
+(`SetVMFirewallPaused` touches only that field); `internal/manager`
+(local-only handler tests for `GetNodeConfig`/`UpdateNodeConfig`/
+`SetDatasetQuota` with fakes, plus a real raft-harness integration test for
+`SetVMFirewallPaused`); `internal/cluster` (`effectivePFRules` applied
+correctly on both the create and already-running branches);
+`internal/frontend` (`/machine` panels, mirroring the `apikeys`/`networks`
+page test patterns, including jail provisioning's explicit and default modes).
 
 `go build ./...`, `go vet ./...`, and the full `go test ./...` suite
 all pass.

@@ -353,15 +353,15 @@ func (f *fakeNodeConfigStore) Save(cfg nodeconfig.Config) error {
 }
 
 func TestServer_GetNodeConfig(t *testing.T) {
-	store := &fakeNodeConfigStore{cfg: nodeconfig.Config{Uplink: "re0", NATUplink: "bridge0"}}
+	store := &fakeNodeConfigStore{cfg: nodeconfig.Config{Uplink: "re0", NATUplink: "bridge0", JailEnabled: boolPtr(true)}}
 	s := NewServer(nil, "node-1", nil, nil, nil, nil, nil, "", nil, store, nil, 0, nil)
 
 	resp, err := s.GetNodeConfig(context.Background(), &rpcpb.GetNodeConfigRequest{})
 	if err != nil {
 		t.Fatalf("GetNodeConfig() error: %v", err)
 	}
-	if resp.GetUplink() != "re0" || resp.GetNatUplink() != "bridge0" {
-		t.Errorf("GetNodeConfig() = %+v, want Uplink=re0 NatUplink=bridge0", resp)
+	if resp.GetUplink() != "re0" || resp.GetNatUplink() != "bridge0" || !resp.GetJailEnabled() || resp.JailEnabled == nil {
+		t.Errorf("GetNodeConfig() = %+v, want Uplink=re0 NatUplink=bridge0 JailEnabled=true", resp)
 	}
 }
 
@@ -381,16 +381,20 @@ func TestServer_UpdateNodeConfig(t *testing.T) {
 	store := &fakeNodeConfigStore{}
 	s := NewServer(nil, "node-1", nil, nil, nil, nil, nil, "", nil, store, nil, 0, nil)
 
-	resp, err := s.UpdateNodeConfig(context.Background(), &rpcpb.UpdateNodeConfigRequest{Uplink: "em0", NatUplink: "em0"})
+	resp, err := s.UpdateNodeConfig(context.Background(), &rpcpb.UpdateNodeConfigRequest{Uplink: "em0", NatUplink: "em0", JailEnabled: boolPtr(true)})
 	if err != nil {
 		t.Fatalf("UpdateNodeConfig() error: %v", err)
 	}
 	if resp.GetError() != "" {
 		t.Fatalf("UpdateNodeConfig() returned error: %s", resp.GetError())
 	}
-	if store.lastSave.Uplink != "em0" || store.lastSave.NATUplink != "em0" {
-		t.Errorf("saved config = %+v, want Uplink=em0 NATUplink=em0", store.lastSave)
+	if store.lastSave.Uplink != "em0" || store.lastSave.NATUplink != "em0" || store.lastSave.JailEnabled == nil || !*store.lastSave.JailEnabled {
+		t.Errorf("saved config = %+v, want Uplink=em0 NATUplink=em0 JailEnabled=true", store.lastSave)
 	}
+}
+
+func boolPtr(v bool) *bool {
+	return &v
 }
 
 // fakeQuotaSetter is a fake quotaSetter, without any real zfs(8) binary

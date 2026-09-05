@@ -179,6 +179,9 @@ func run() error {
 		if cfg.NATUplink != "" {
 			*natUplink = cfg.NATUplink
 		}
+		if cfg.JailEnabled != nil {
+			*jailEnabled = *cfg.JailEnabled
+		}
 	}
 
 	zfsMgr := zfs.New(*zfsBase)

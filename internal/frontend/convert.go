@@ -78,12 +78,30 @@ type firewallRuleView struct {
 // local settings (ADR-0049) - see api/rpc/manager.proto's
 // GetNodeConfigResponse.
 type nodeConfigView struct {
-	Uplink    string
-	NATUplink string
+	Uplink            string
+	NATUplink         string
+	JailEnabledMode   string
+	JailEnabledStatus string
 }
 
 func fromRPCNodeConfig(d *rpcpb.GetNodeConfigResponse) nodeConfigView {
-	return nodeConfigView{Uplink: d.GetUplink(), NATUplink: d.GetNatUplink()}
+	view := nodeConfigView{
+		Uplink:            d.GetUplink(),
+		NATUplink:         d.GetNatUplink(),
+		JailEnabledMode:   "default",
+		JailEnabledStatus: "uses startup flag",
+	}
+	if d.JailEnabled == nil {
+		return view
+	}
+	if d.GetJailEnabled() {
+		view.JailEnabledMode = "enabled"
+		view.JailEnabledStatus = "enabled"
+	} else {
+		view.JailEnabledMode = "disabled"
+		view.JailEnabledStatus = "disabled"
+	}
+	return view
 }
 
 // networkView is the template-facing shape for a NetworkDefinition.

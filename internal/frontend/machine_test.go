@@ -14,7 +14,7 @@ func TestServer_MachinePage_ShowsNodeConfigAndLocalVMsOnly(t *testing.T) {
 	client := &fakeClient{
 		statusResp: &rpcpb.StatusResponse{ManagerNodeId: "node-a"},
 		getNodeConfigResp: &rpcpb.GetNodeConfigResponse{
-			Uplink: "re0", NatUplink: "bridge0",
+			Uplink: "re0", NatUplink: "bridge0", JailEnabled: boolPtr(true),
 		},
 		listResp: &rpcpb.ListVMsResponse{Vms: []*rpcpb.VMDefinition{
 			{Id: "vm-1", Name: "web-1", NodeId: "node-a"},
@@ -31,7 +31,7 @@ func TestServer_MachinePage_ShowsNodeConfigAndLocalVMsOnly(t *testing.T) {
 		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
 	}
 	body := rec.Body.String()
-	if !strings.Contains(body, "re0") || !strings.Contains(body, "bridge0") {
+	if !strings.Contains(body, "re0") || !strings.Contains(body, "bridge0") || !strings.Contains(body, "Jail provisioning") || !strings.Contains(body, "Enabled") {
 		t.Errorf("machine page missing node config values, got: %s", body)
 	}
 	if !strings.Contains(body, "vm-1") {
@@ -46,7 +46,7 @@ func TestServer_UpdateNodeConfig_ForwardsFormValues(t *testing.T) {
 	client := &fakeClient{updateNodeConfigResp: &rpcpb.UpdateNodeConfigResponse{}}
 	s := newTestServer(t, client)
 
-	form := url.Values{"uplink": {"em0"}, "nat_uplink": {"em0"}}
+	form := url.Values{"uplink": {"em0"}, "nat_uplink": {"em0"}, "jail_enabled": {"enabled"}}
 	req := httptest.NewRequest(http.MethodPost, "/machine/uplink", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	rec := httptest.NewRecorder()
@@ -55,8 +55,26 @@ func TestServer_UpdateNodeConfig_ForwardsFormValues(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
 	}
-	if client.lastUpdateNodeConfigReq.GetUplink() != "em0" || client.lastUpdateNodeConfigReq.GetNatUplink() != "em0" {
-		t.Errorf("forwarded request = %+v, want Uplink=em0 NatUplink=em0", client.lastUpdateNodeConfigReq)
+	if client.lastUpdateNodeConfigReq.GetUplink() != "em0" || client.lastUpdateNodeConfigReq.GetNatUplink() != "em0" || client.lastUpdateNodeConfigReq.JailEnabled == nil || !client.lastUpdateNodeConfigReq.GetJailEnabled() {
+		t.Errorf("forwarded request = %+v, want Uplink=em0 NatUplink=em0 JailEnabled=true", client.lastUpdateNodeConfigReq)
+	}
+}
+
+func TestServer_UpdateNodeConfig_CanUseStartupFlagForJails(t *testing.T) {
+	client := &fakeClient{updateNodeConfigResp: &rpcpb.UpdateNodeConfigResponse{}}
+	s := newTestServer(t, client)
+
+	form := url.Values{"uplink": {"em0"}, "jail_enabled": {"default"}}
+	req := httptest.NewRequest(http.MethodPost, "/machine/uplink", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	if client.lastUpdateNodeConfigReq.JailEnabled != nil {
+		t.Errorf("JailEnabled = %v, want nil for startup-flag mode", client.lastUpdateNodeConfigReq.JailEnabled)
 	}
 }
 
@@ -157,4 +175,8 @@ func TestServer_SetDatasetQuota_ErrorShowsInPanel(t *testing.T) {
 	if !strings.Contains(rec.Body.String(), "dataset does not exist") {
 		t.Errorf("response missing error message, got: %s", rec.Body.String())
 	}
+}
+
+func boolPtr(v bool) *bool {
+	return &v
 }

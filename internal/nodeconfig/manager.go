@@ -28,6 +28,10 @@ type Config struct {
 	// NATUplink mirrors -nat-uplink: the interface a self-hosted
 	// network's outbound NAT egresses through (ADR-0048).
 	NATUplink string `json:"nat_uplink,omitempty"`
+
+	// JailEnabled mirrors -jail-enabled. Nil means use managerd's
+	// startup flag; true/false are explicit local overrides.
+	JailEnabled *bool `json:"jail_enabled,omitempty"`
 }
 
 // Manager reads/writes Config to a local file. Like internal/isostore,

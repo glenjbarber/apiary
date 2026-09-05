@@ -800,12 +800,17 @@ message GetNodeConfigResponse {
   // it falls back to uplink's own value.
   string nat_uplink = 2;
 
-  string error = 3;
+  // jail_enabled mirrors -jail-enabled when set. Unset means managerd
+  // keeps using the startup flag value.
+  optional bool jail_enabled = 3;
+
+  string error = 4;
 }
 
 message UpdateNodeConfigRequest {
   string uplink = 1;
   string nat_uplink = 2;
+  optional bool jail_enabled = 3;
 }
 
 message UpdateNodeConfigResponse {

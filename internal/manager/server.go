@@ -1305,7 +1305,7 @@ func (s *Server) GetNodeConfig(_ context.Context, _ *rpcpb.GetNodeConfigRequest)
 	if err != nil {
 		return &rpcpb.GetNodeConfigResponse{Error: err.Error()}, nil
 	}
-	return &rpcpb.GetNodeConfigResponse{Uplink: cfg.Uplink, NatUplink: cfg.NATUplink}, nil
+	return &rpcpb.GetNodeConfigResponse{Uplink: cfg.Uplink, NatUplink: cfg.NATUplink, JailEnabled: cfg.JailEnabled}, nil
 }
 
 // UpdateNodeConfig implements rpcpb.ManagerServiceServer - persists new
@@ -1318,7 +1318,7 @@ func (s *Server) UpdateNodeConfig(_ context.Context, req *rpcpb.UpdateNodeConfig
 	if s.nodeConfig == nil {
 		return &rpcpb.UpdateNodeConfigResponse{Error: "this node has no node-config store configured"}, nil
 	}
-	err := s.nodeConfig.Save(nodeconfig.Config{Uplink: req.GetUplink(), NATUplink: req.GetNatUplink()})
+	err := s.nodeConfig.Save(nodeconfig.Config{Uplink: req.GetUplink(), NATUplink: req.GetNatUplink(), JailEnabled: req.JailEnabled})
 	if err != nil {
 		return &rpcpb.UpdateNodeConfigResponse{Error: err.Error()}, nil
 	}

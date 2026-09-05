@@ -93,8 +93,9 @@ func (s *Server) handleUpdateNodeConfig(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	resp, err := s.client.UpdateNodeConfig(r.Context(), &rpcpb.UpdateNodeConfigRequest{
-		Uplink:    r.FormValue("uplink"),
-		NatUplink: r.FormValue("nat_uplink"),
+		Uplink:      r.FormValue("uplink"),
+		NatUplink:   r.FormValue("nat_uplink"),
+		JailEnabled: jailEnabledFromForm(r.FormValue("jail_enabled")),
 	})
 	if err != nil {
 		s.renderNodeConfigPanel(w, r, err.Error())
@@ -105,6 +106,19 @@ func (s *Server) handleUpdateNodeConfig(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	s.renderNodeConfigPanel(w, r, "")
+}
+
+func jailEnabledFromForm(v string) *bool {
+	switch v {
+	case "enabled":
+		enabled := true
+		return &enabled
+	case "disabled":
+		enabled := false
+		return &enabled
+	default:
+		return nil
+	}
 }
 
 func (s *Server) renderNodeConfigPanel(w http.ResponseWriter, r *http.Request, formErr string) {

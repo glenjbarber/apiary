@@ -19,7 +19,7 @@ func TestManager_LoadMissingFileReturnsZeroValueNoError(t *testing.T) {
 
 func TestManager_SaveThenLoadRoundTrips(t *testing.T) {
 	m := &Manager{Path: filepath.Join(t.TempDir(), "node-config.json")}
-	want := Config{Uplink: "re0", NATUplink: "bridge0"}
+	want := Config{Uplink: "re0", NATUplink: "bridge0", JailEnabled: boolPtr(true)}
 
 	if err := m.Save(want); err != nil {
 		t.Fatalf("Save() error: %v", err)
@@ -28,7 +28,7 @@ func TestManager_SaveThenLoadRoundTrips(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load() error: %v", err)
 	}
-	if got != want {
+	if got.Uplink != want.Uplink || got.NATUplink != want.NATUplink || got.JailEnabled == nil || !*got.JailEnabled {
 		t.Errorf("Load() = %+v, want %+v", got, want)
 	}
 }
@@ -49,4 +49,8 @@ func TestManager_SaveReplacesRatherThanMerges(t *testing.T) {
 	if want := (Config{Uplink: "em0"}); got != want {
 		t.Errorf("Load() = %+v, want %+v (NATUplink cleared, not merged)", got, want)
 	}
+}
+
+func boolPtr(v bool) *bool {
+	return &v
 }
