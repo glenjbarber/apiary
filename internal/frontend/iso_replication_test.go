@@ -2,6 +2,8 @@ package frontend
 
 import (
 	"context"
+	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -38,6 +40,14 @@ func (f *fakeISOPeerClient) GetLocalNetworkBridgeStatus(context.Context, string,
 
 func (f *fakeISOPeerClient) GetVMSerialLog(context.Context, string, string) (*rpcpb.GetVMSerialLogResponse, error) {
 	return &rpcpb.GetVMSerialLogResponse{}, nil
+}
+
+func (f *fakeISOPeerClient) GetVMConsole(context.Context, string, string) (*rpcpb.GetVMConsoleResponse, error) {
+	return &rpcpb.GetVMConsoleResponse{}, nil
+}
+
+func (f *fakeISOPeerClient) OpenVMConsole(context.Context, string, string) (io.ReadWriteCloser, error) {
+	return nil, errors.New("test peer console unavailable")
 }
 
 func (f *fakeISOPeerClient) ListISOs(_ context.Context, addr string) (*rpcpb.ListISOsResponse, error) {

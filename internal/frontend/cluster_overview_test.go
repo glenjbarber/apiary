@@ -3,6 +3,7 @@ package frontend
 import (
 	"context"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -94,6 +95,14 @@ func (f *fakePeerHostStatsClient) GetVMSerialLog(_ context.Context, addr, _ stri
 		return f.serialResp, nil
 	}
 	return &rpcpb.GetVMSerialLogResponse{}, nil
+}
+
+func (f *fakePeerHostStatsClient) GetVMConsole(_ context.Context, addr, _ string) (*rpcpb.GetVMConsoleResponse, error) {
+	return &rpcpb.GetVMConsoleResponse{}, nil
+}
+
+func (f *fakePeerHostStatsClient) OpenVMConsole(_ context.Context, addr, _ string) (io.ReadWriteCloser, error) {
+	return nil, errors.New("test peer console unavailable")
 }
 
 func TestServer_ClusterOverviewPage_UnreachableNodeShowsError(t *testing.T) {

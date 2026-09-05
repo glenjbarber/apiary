@@ -1,6 +1,7 @@
 package manager
 
 import (
+	"bytes"
 	"context"
 	"crypto/tls"
 	"fmt"
@@ -337,6 +338,70 @@ func (p *PeerReporter) GetVMSerialLog(ctx context.Context, addr, id string) (*rp
 	}
 	defer conn.Close()
 	return client.GetVMSerialLog(ctx, &rpcpb.GetVMSerialLogRequest{Id: id})
+}
+
+// GetVMConsole asks a specific Hive whether it has the requested local VNC
+// endpoint. The returned loopback address is deliberately consumed only by
+// that Hive's ProxyVMConsole handler, never by a remote frontend.
+func (p *PeerReporter) GetVMConsole(ctx context.Context, addr, id string) (*rpcpb.GetVMConsoleResponse, error) {
+	conn, client, err := p.dial(addr)
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close()
+	return client.GetVMConsole(ctx, &rpcpb.GetVMConsoleRequest{Id: id})
+}
+
+type consoleTunnel struct {
+	conn   *grpc.ClientConn
+	stream rpcpb.ManagerService_ProxyVMConsoleClient
+	read   bytes.Buffer
+}
+
+func (t *consoleTunnel) Read(p []byte) (int, error) {
+	for t.read.Len() == 0 {
+		frame, err := t.stream.Recv()
+		if err != nil {
+			return 0, err
+		}
+		if frame.GetError() != "" {
+			return 0, fmt.Errorf("remote VM console: %s", frame.GetError())
+		}
+		if len(frame.GetData()) == 0 {
+			return 0, fmt.Errorf("remote VM console sent an invalid frame")
+		}
+		t.read.Write(frame.GetData())
+	}
+	return t.read.Read(p)
+}
+
+func (t *consoleTunnel) Write(p []byte) (int, error) {
+	if err := t.stream.Send(&rpcpb.VMConsoleTunnelFrame{Payload: &rpcpb.VMConsoleTunnelFrame_Data{Data: p}}); err != nil {
+		return 0, err
+	}
+	return len(p), nil
+}
+
+func (t *consoleTunnel) Close() error { return t.conn.Close() }
+
+// OpenVMConsole opens a bidirectional, authenticated byte tunnel to a VM
+// console on addr. The tunnel's first frame is the VM ID; the owner managerd
+// validates ownership and chooses its loopback endpoint itself.
+func (p *PeerReporter) OpenVMConsole(ctx context.Context, addr, id string) (io.ReadWriteCloser, error) {
+	conn, client, err := p.dial(addr)
+	if err != nil {
+		return nil, err
+	}
+	stream, err := client.ProxyVMConsole(ctx)
+	if err != nil {
+		conn.Close()
+		return nil, err
+	}
+	if err := stream.Send(&rpcpb.VMConsoleTunnelFrame{Payload: &rpcpb.VMConsoleTunnelFrame_Open{Open: &rpcpb.VMConsoleTunnelOpen{Id: id}}}); err != nil {
+		conn.Close()
+		return nil, err
+	}
+	return &consoleTunnel{conn: conn, stream: stream}, nil
 }
 
 // ListAssumptionResults forwards to a specific peer's own

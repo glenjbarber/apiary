@@ -2,6 +2,7 @@ package manager
 
 import (
 	"context"
+	"fmt"
 	"net"
 	"os"
 	"path/filepath"
@@ -667,6 +668,79 @@ func TestIntegration_GetVMConsole_RunningLocallyWithVNC(t *testing.T) {
 	}
 	if !resp.GetAvailable() || resp.GetHost() != "127.0.0.1" || resp.GetPort() != 5901 {
 		t.Errorf("GetVMConsole() = %+v, want available on 127.0.0.1:5901", resp)
+	}
+}
+
+func TestIntegration_ProxyVMConsole_RelaysOnlyOwnedVM(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	_, portText, err := net.SplitHostPort(listener.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var port int
+	if _, err := fmt.Sscanf(portText, "%d", &port); err != nil {
+		t.Fatal(err)
+	}
+	go func() {
+		conn, acceptErr := listener.Accept()
+		if acceptErr != nil {
+			return
+		}
+		defer conn.Close()
+		buf := make([]byte, 1024)
+		n, _ := conn.Read(buf)
+		if n > 0 {
+			_, _ = conn.Write(buf[:n])
+		}
+	}()
+
+	raftdSocket := newRaftdUDSSocket(t)
+	client := newManagerdRPCClientWithVNC(t, raftdSocket, "node-a", &fakeVNCLookup{ports: map[string]int{"vm-1": port}})
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if _, err := client.CreateVM(ctx, &rpcpb.CreateVMRequest{Vm: &rpcpb.VMDefinition{Id: "vm-1", NodeId: "node-a"}}); err != nil {
+		t.Fatal(err)
+	}
+	stream, err := client.ProxyVMConsole(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := stream.Send(&rpcpb.VMConsoleTunnelFrame{Payload: &rpcpb.VMConsoleTunnelFrame_Open{Open: &rpcpb.VMConsoleTunnelOpen{Id: "vm-1"}}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := stream.Send(&rpcpb.VMConsoleTunnelFrame{Payload: &rpcpb.VMConsoleTunnelFrame_Data{Data: []byte("hello")}}); err != nil {
+		t.Fatal(err)
+	}
+	frame, err := stream.Recv()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := string(frame.GetData()); got != "hello" {
+		t.Errorf("tunnel data = %q, want hello", got)
+	}
+}
+
+func TestIntegration_ProxyVMConsole_RejectsWrongOwner(t *testing.T) {
+	raftdSocket := newRaftdUDSSocket(t)
+	client := newManagerdRPCClientWithVNC(t, raftdSocket, "node-a", &fakeVNCLookup{})
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if _, err := client.CreateVM(ctx, &rpcpb.CreateVMRequest{Vm: &rpcpb.VMDefinition{Id: "vm-1", NodeId: "node-b"}}); err != nil {
+		t.Fatal(err)
+	}
+	stream, err := client.ProxyVMConsole(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := stream.Send(&rpcpb.VMConsoleTunnelFrame{Payload: &rpcpb.VMConsoleTunnelFrame_Open{Open: &rpcpb.VMConsoleTunnelOpen{Id: "vm-1"}}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := stream.Recv(); err == nil {
+		t.Fatal("ProxyVMConsole() accepted a VM owned by another Hive")
 	}
 }
 

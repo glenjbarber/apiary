@@ -209,3 +209,10 @@ func TestRequiredRoleFor_ListAssumptionResultsIsViewer(t *testing.T) {
 		t.Errorf("requiredRoleFor(%q) = %q, want %q", method, got, RoleViewer)
 	}
 }
+
+func TestRequiredRoleFor_ProxyVMConsoleIsViewer(t *testing.T) {
+	const method = "/apiary.rpc.v1.ManagerService/ProxyVMConsole"
+	if got := requiredRoleFor(method); got != RoleViewer {
+		t.Errorf("requiredRoleFor(%q) = %q, want %q", method, got, RoleViewer)
+	}
+}

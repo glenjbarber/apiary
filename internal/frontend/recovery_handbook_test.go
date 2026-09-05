@@ -3,6 +3,7 @@ package frontend
 import (
 	"context"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -226,6 +227,14 @@ func (slowRecoveryPeerClient) GetLocalNetworkBridgeStatus(ctx context.Context, a
 	return nil, ctx.Err()
 }
 func (slowRecoveryPeerClient) GetVMSerialLog(ctx context.Context, addr, id string) (*rpcpb.GetVMSerialLogResponse, error) {
+	<-ctx.Done()
+	return nil, ctx.Err()
+}
+func (slowRecoveryPeerClient) GetVMConsole(ctx context.Context, addr, id string) (*rpcpb.GetVMConsoleResponse, error) {
+	<-ctx.Done()
+	return nil, ctx.Err()
+}
+func (slowRecoveryPeerClient) OpenVMConsole(ctx context.Context, addr, id string) (io.ReadWriteCloser, error) {
 	<-ctx.Done()
 	return nil, ctx.Err()
 }

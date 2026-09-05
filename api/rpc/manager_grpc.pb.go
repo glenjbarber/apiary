@@ -35,6 +35,7 @@ const (
 	ManagerService_DeleteISO_FullMethodName                   = "/apiary.rpc.v1.ManagerService/DeleteISO"
 	ManagerService_HostStats_FullMethodName                   = "/apiary.rpc.v1.ManagerService/HostStats"
 	ManagerService_GetVMConsole_FullMethodName                = "/apiary.rpc.v1.ManagerService/GetVMConsole"
+	ManagerService_ProxyVMConsole_FullMethodName              = "/apiary.rpc.v1.ManagerService/ProxyVMConsole"
 	ManagerService_GetVMSerialLog_FullMethodName              = "/apiary.rpc.v1.ManagerService/GetVMSerialLog"
 	ManagerService_GetNodeConfig_FullMethodName               = "/apiary.rpc.v1.ManagerService/GetNodeConfig"
 	ManagerService_UpdateNodeConfig_FullMethodName            = "/apiary.rpc.v1.ManagerService/UpdateNodeConfig"
@@ -162,6 +163,12 @@ type ManagerServiceClient interface {
 	// GetVMConsoleResponse's doc comment for the v1 limitation that
 	// follows from that.
 	GetVMConsole(ctx context.Context, in *GetVMConsoleRequest, opts ...grpc.CallOption) (*GetVMConsoleResponse, error)
+	// ProxyVMConsole relays one browser console session through the owning
+	// Hive's managerd to its loopback-only VNC listener. The first client frame
+	// must open the named VM; later frames carry opaque RFB bytes in either
+	// direction. This keeps VNC off the network while allowing a frontend on a
+	// different Hive to present the existing noVNC UI.
+	ProxyVMConsole(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[VMConsoleTunnelFrame, VMConsoleTunnelFrame], error)
 	// GetVMSerialLog returns the tail of a VM's captured serial console
 	// log (ADR-0032's EnableSerialLog), for the web UI - previously this
 	// required an operator to read the file directly on the owning node.
@@ -470,6 +477,19 @@ func (c *managerServiceClient) GetVMConsole(ctx context.Context, in *GetVMConsol
 	}
 	return out, nil
 }
+
+func (c *managerServiceClient) ProxyVMConsole(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[VMConsoleTunnelFrame, VMConsoleTunnelFrame], error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	stream, err := c.cc.NewStream(ctx, &ManagerService_ServiceDesc.Streams[1], ManagerService_ProxyVMConsole_FullMethodName, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &grpc.GenericClientStream[VMConsoleTunnelFrame, VMConsoleTunnelFrame]{ClientStream: stream}
+	return x, nil
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type ManagerService_ProxyVMConsoleClient = grpc.BidiStreamingClient[VMConsoleTunnelFrame, VMConsoleTunnelFrame]
 
 func (c *managerServiceClient) GetVMSerialLog(ctx context.Context, in *GetVMSerialLogRequest, opts ...grpc.CallOption) (*GetVMSerialLogResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
@@ -866,6 +886,12 @@ type ManagerServiceServer interface {
 	// GetVMConsoleResponse's doc comment for the v1 limitation that
 	// follows from that.
 	GetVMConsole(context.Context, *GetVMConsoleRequest) (*GetVMConsoleResponse, error)
+	// ProxyVMConsole relays one browser console session through the owning
+	// Hive's managerd to its loopback-only VNC listener. The first client frame
+	// must open the named VM; later frames carry opaque RFB bytes in either
+	// direction. This keeps VNC off the network while allowing a frontend on a
+	// different Hive to present the existing noVNC UI.
+	ProxyVMConsole(grpc.BidiStreamingServer[VMConsoleTunnelFrame, VMConsoleTunnelFrame]) error
 	// GetVMSerialLog returns the tail of a VM's captured serial console
 	// log (ADR-0032's EnableSerialLog), for the web UI - previously this
 	// required an operator to read the file directly on the owning node.
@@ -1059,6 +1085,9 @@ func (UnimplementedManagerServiceServer) HostStats(context.Context, *HostStatsRe
 }
 func (UnimplementedManagerServiceServer) GetVMConsole(context.Context, *GetVMConsoleRequest) (*GetVMConsoleResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetVMConsole not implemented")
+}
+func (UnimplementedManagerServiceServer) ProxyVMConsole(grpc.BidiStreamingServer[VMConsoleTunnelFrame, VMConsoleTunnelFrame]) error {
+	return status.Error(codes.Unimplemented, "method ProxyVMConsole not implemented")
 }
 func (UnimplementedManagerServiceServer) GetVMSerialLog(context.Context, *GetVMSerialLogRequest) (*GetVMSerialLogResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetVMSerialLog not implemented")
@@ -1447,6 +1476,13 @@ func _ManagerService_GetVMConsole_Handler(srv interface{}, ctx context.Context, 
 	}
 	return interceptor(ctx, in, info, handler)
 }
+
+func _ManagerService_ProxyVMConsole_Handler(srv interface{}, stream grpc.ServerStream) error {
+	return srv.(ManagerServiceServer).ProxyVMConsole(&grpc.GenericServerStream[VMConsoleTunnelFrame, VMConsoleTunnelFrame]{ServerStream: stream})
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type ManagerService_ProxyVMConsoleServer = grpc.BidiStreamingServer[VMConsoleTunnelFrame, VMConsoleTunnelFrame]
 
 func _ManagerService_GetVMSerialLog_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(GetVMSerialLogRequest)
@@ -2180,6 +2216,12 @@ var ManagerService_ServiceDesc = grpc.ServiceDesc{
 		{
 			StreamName:    "UploadISO",
 			Handler:       _ManagerService_UploadISO_Handler,
+			ClientStreams: true,
+		},
+		{
+			StreamName:    "ProxyVMConsole",
+			Handler:       _ManagerService_ProxyVMConsole_Handler,
+			ServerStreams: true,
 			ClientStreams: true,
 		},
 	},

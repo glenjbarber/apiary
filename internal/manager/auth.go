@@ -69,6 +69,7 @@ var requiredRole = map[string]Role{
 	"/apiary.rpc.v1.ManagerService/ListNetworks":   RoleViewer,
 	"/apiary.rpc.v1.ManagerService/HostStats":      RoleViewer,
 	"/apiary.rpc.v1.ManagerService/GetVMConsole":   RoleViewer,
+	"/apiary.rpc.v1.ManagerService/ProxyVMConsole": RoleViewer,
 	"/apiary.rpc.v1.ManagerService/GetVMSerialLog": RoleViewer,
 	"/apiary.rpc.v1.ManagerService/GetNodeConfig":  RoleViewer,
 

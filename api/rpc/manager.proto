@@ -106,6 +106,13 @@ service ManagerService {
   // follows from that.
   rpc GetVMConsole(GetVMConsoleRequest) returns (GetVMConsoleResponse);
 
+  // ProxyVMConsole relays one browser console session through the owning
+  // Hive's managerd to its loopback-only VNC listener. The first client frame
+  // must open the named VM; later frames carry opaque RFB bytes in either
+  // direction. This keeps VNC off the network while allowing a frontend on a
+  // different Hive to present the existing noVNC UI.
+  rpc ProxyVMConsole(stream VMConsoleTunnelFrame) returns (stream VMConsoleTunnelFrame);
+
   // GetVMSerialLog returns the tail of a VM's captured serial console
   // log (ADR-0032's EnableSerialLog), for the web UI - previously this
   // required an operator to read the file directly on the owning node.
@@ -786,6 +793,18 @@ message GetVMConsoleResponse {
   bool available = 3;
 
   string error = 4;
+}
+
+message VMConsoleTunnelOpen {
+  string id = 1;
+}
+
+message VMConsoleTunnelFrame {
+  oneof payload {
+    VMConsoleTunnelOpen open = 1;
+    bytes data = 2;
+    string error = 3;
+  }
 }
 
 message GetVMSerialLogRequest {
