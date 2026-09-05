@@ -1009,37 +1009,39 @@ func TestReconciler_RunOnce_ISONamedButNoStoreConfiguredIsError(t *testing.T) {
 // --- Network/DHCP/firewall fakes ---
 
 type fakeVLANManager struct {
-	ensuredVLANs   []uint32
-	ensuredBridges []string
-	members        map[string][]string // bridge -> ifaces added
-	addresses      map[string]string   // bridge -> subnet
-	vlanErr        error
-	bridgeErr      error
-	memberErr      error
-	addressErr     error
+	ensuredVLANs     []uint32
+	ensuredBridges   []string
+	members          map[string][]string // bridge -> ifaces added
+	addresses        map[string]string   // bridge -> subnet
+	vlanErr          error
+	bridgeErr        error
+	memberErr        error
+	addressErr       error
+	destroyedBridges []string
+	destroyedVLANs   []uint32
 }
 
 func newFakeVLANManager() *fakeVLANManager {
 	return &fakeVLANManager{members: map[string][]string{}, addresses: map[string]string{}}
 }
 
-func (f *fakeVLANManager) EnsureVLAN(_ context.Context, vlanID uint32) (string, error) {
+func (f *fakeVLANManager) EnsureVLAN(_ context.Context, vlanID uint32) (string, bool, error) {
 	if f.vlanErr != nil {
-		return "", f.vlanErr
+		return "", false, f.vlanErr
 	}
 	f.ensuredVLANs = append(f.ensuredVLANs, vlanID)
 	if vlanID == 0 {
-		return "uplink0", nil
+		return "uplink0", false, nil
 	}
-	return fmt.Sprintf("vlan%d", vlanID), nil
+	return fmt.Sprintf("vlan%d", vlanID), true, nil
 }
 
-func (f *fakeVLANManager) EnsureBridge(_ context.Context, name string) error {
+func (f *fakeVLANManager) EnsureBridge(_ context.Context, name string) (bool, error) {
 	if f.bridgeErr != nil {
-		return f.bridgeErr
+		return false, f.bridgeErr
 	}
 	f.ensuredBridges = append(f.ensuredBridges, name)
-	return nil
+	return true, nil
 }
 
 func (f *fakeVLANManager) EnsureMember(_ context.Context, bridge, iface string) error {
@@ -1055,6 +1057,16 @@ func (f *fakeVLANManager) EnsureBridgeAddress(_ context.Context, bridge, subnet 
 		return f.addressErr
 	}
 	f.addresses[bridge] = subnet
+	return nil
+}
+
+func (f *fakeVLANManager) DestroyBridge(_ context.Context, name string) error {
+	f.destroyedBridges = append(f.destroyedBridges, name)
+	return nil
+}
+
+func (f *fakeVLANManager) DestroyVLAN(_ context.Context, vlanID uint32) error {
+	f.destroyedVLANs = append(f.destroyedVLANs, vlanID)
 	return nil
 }
 
@@ -1980,5 +1992,54 @@ func TestReconciler_RunOnce_ReclaimPropagatesDestroyError(t *testing.T) {
 	r := &Reconciler{Raft: raft, ZFS: zfs, LocalNodeID: "node-a"}
 	if err := r.RunOnce(context.Background()); err == nil {
 		t.Fatalf("RunOnce() error = nil, want the reclaim destroy error surfaced")
+	}
+}
+
+func TestReconciler_ReconcileNetworkArtifacts_RemovesDeletedOwnedNetwork(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "network-artifacts.json")
+	if err := saveNetworkArtifactState(path, networkArtifactState{Networks: map[string]networkArtifact{
+		"retired": {Bridge: "apnet-deadbeef", VLANID: 110, OwnBridge: true, OwnVLAN: true, OutboundNAT: true},
+	}}); err != nil {
+		t.Fatalf("saveNetworkArtifactState() error: %v", err)
+	}
+	vlan := newFakeVLANManager()
+	pfMgr := newFakePFManager()
+	r := &Reconciler{VLAN: vlan, PF: pfMgr, NetworkStatePath: path}
+	if err := r.reconcileNetworkArtifacts(context.Background(), nil, map[string]*internalpb.NetworkDefinition{}); err != nil {
+		t.Fatalf("reconcileNetworkArtifacts() error: %v", err)
+	}
+	if got := vlan.destroyedBridges; len(got) != 1 || got[0] != "apnet-deadbeef" {
+		t.Errorf("destroyed bridges = %v, want [apnet-deadbeef]", got)
+	}
+	if got := vlan.destroyedVLANs; len(got) != 1 || got[0] != 110 {
+		t.Errorf("destroyed VLANs = %v, want [110]", got)
+	}
+	if got := pfMgr.flushed; len(got) != 1 || got[0] != natAnchor("retired") {
+		t.Errorf("flushed anchors = %v, want [%s]", got, natAnchor("retired"))
+	}
+	state, err := loadNetworkArtifactState(path)
+	if err != nil {
+		t.Fatalf("loadNetworkArtifactState() error: %v", err)
+	}
+	if len(state.Networks) != 0 {
+		t.Errorf("remaining artifacts = %v, want none", state.Networks)
+	}
+}
+
+func TestReconciler_ReconcileNetworkArtifacts_PreservesDefinedUnusedNetwork(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "network-artifacts.json")
+	artifact := networkArtifact{Bridge: "apnet-livecafe", VLANID: 120, OwnBridge: true, OwnVLAN: true, OutboundNAT: true}
+	if err := saveNetworkArtifactState(path, networkArtifactState{Networks: map[string]networkArtifact{"live": artifact}}); err != nil {
+		t.Fatalf("saveNetworkArtifactState() error: %v", err)
+	}
+	vlan := newFakeVLANManager()
+	pfMgr := newFakePFManager()
+	r := &Reconciler{VLAN: vlan, PF: pfMgr, NetworkStatePath: path}
+	networks := map[string]*internalpb.NetworkDefinition{"live": {Id: "live", VlanId: 120, Subnet: "10.120.0.0/24"}}
+	if err := r.reconcileNetworkArtifacts(context.Background(), nil, networks); err != nil {
+		t.Fatalf("reconcileNetworkArtifacts() error: %v", err)
+	}
+	if len(vlan.destroyedBridges) != 0 || len(vlan.destroyedVLANs) != 0 || len(pfMgr.flushed) != 0 {
+		t.Errorf("cleanup ran for defined unused network: bridges=%v vlans=%v anchors=%v", vlan.destroyedBridges, vlan.destroyedVLANs, pfMgr.flushed)
 	}
 }
