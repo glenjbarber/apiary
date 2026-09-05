@@ -145,6 +145,15 @@ type assumptionStore interface {
 	Degraded() (bool, string)
 }
 
+// nodeServiceController keeps the Machine page's host-service controls
+// narrow and testable. It deliberately exposes only Apiary's fixed rc.d
+// service names, never arbitrary commands or service names supplied by a
+// browser request.
+type nodeServiceController interface {
+	List(context.Context) ([]*rpcpb.NodeService, error)
+	Restart(context.Context, string) error
+}
+
 // defaultPeerManagerdPort mirrors internal/cluster's own constant of
 // the same name and purpose - used when Server.peerManagerdPort is
 // unset. Duplicated rather than shared across the package boundary,
@@ -218,6 +227,10 @@ type Server struct {
 	// Physical, per-node data like assumptions/isos above, never routed
 	// through raft. See ADR-0056.
 	reconciler reconcilerStats
+
+	// services is this Hive's narrowly-scoped rc.d service controller. It is
+	// intentionally local rather than a peer-forwarded or raft operation.
+	services nodeServiceController
 }
 
 // quotaSetter is the subset of *zfs.Manager SetDatasetQuota needs,
@@ -255,7 +268,7 @@ var _ rpcpb.ManagerServiceServer = (*Server)(nil)
 // the params above) specifically to keep every existing positional
 // NewServer(...) call site a mechanical one-line edit.
 func NewServer(raft *RaftClient, nodeID string, isos isoManager, vnc VNCLookup, serialLog SerialLogLookup, vlanMgr VLANStatus, peers PeerForwarder, peerManagerdPort string, zfsMgr quotaSetter, nodeConfig nodeConfigStore, assumptionStoreMgr assumptionStore, assumptionStaleAfter time.Duration, reconciler reconcilerStats) *Server {
-	return &Server{raft: raft, nodeID: nodeID, isos: isos, vnc: vnc, serialLog: serialLog, vlan: vlanMgr, statsGather: hoststats.Gather, peers: peers, peerManagerdPort: peerManagerdPort, zfs: zfsMgr, nodeConfig: nodeConfig, assumptions: assumptionStoreMgr, assumptionStaleAfter: assumptionStaleAfter, reconciler: reconciler}
+	return &Server{raft: raft, nodeID: nodeID, isos: isos, vnc: vnc, serialLog: serialLog, vlan: vlanMgr, statsGather: hoststats.Gather, peers: peers, peerManagerdPort: peerManagerdPort, zfs: zfsMgr, nodeConfig: nodeConfig, assumptions: assumptionStoreMgr, assumptionStaleAfter: assumptionStaleAfter, reconciler: reconciler, services: rcServiceController{}}
 }
 
 // peerManagerdAddr turns a raft leader_hint (the leader's raft
@@ -1338,6 +1351,44 @@ func (s *Server) SetDatasetQuota(ctx context.Context, req *rpcpb.SetDatasetQuota
 		return &rpcpb.SetDatasetQuotaResponse{Error: err.Error()}, nil
 	}
 	return &rpcpb.SetDatasetQuotaResponse{}, nil
+}
+
+// ListNodeServices reports this Hive's own fixed Apiary rc.d service
+// inventory. It is intentionally not a cluster view: each Hive knows its
+// own rc.conf and process state, and a peer must be queried directly for its
+// own result.
+func (s *Server) ListNodeServices(ctx context.Context, _ *rpcpb.ListNodeServicesRequest) (*rpcpb.ListNodeServicesResponse, error) {
+	if s.services == nil {
+		return &rpcpb.ListNodeServicesResponse{Error: "this node has no service controller configured"}, nil
+	}
+	services, err := s.services.List(ctx)
+	if err != nil {
+		return &rpcpb.ListNodeServicesResponse{Error: err.Error()}, nil
+	}
+	return &rpcpb.ListNodeServicesResponse{Services: services}, nil
+}
+
+// RestartNodeService restarts one allowlisted service on this Hive. Every
+// restart is scheduled after this RPC returns: restarting either managerd or
+// frontend can otherwise sever the gRPC or HTTP connection carrying the
+// confirmation back to the operator.
+func (s *Server) RestartNodeService(ctx context.Context, req *rpcpb.RestartNodeServiceRequest) (*rpcpb.RestartNodeServiceResponse, error) {
+	if s.services == nil {
+		return &rpcpb.RestartNodeServiceResponse{Error: "this node has no service controller configured"}, nil
+	}
+	name := req.GetName()
+	if !restartableService(name) {
+		return &rpcpb.RestartNodeServiceResponse{Error: fmt.Sprintf("service %q cannot be restarted from Apiary", name)}, nil
+	}
+	go func() {
+		// Let gRPC and the frontend's HTTP handler flush the confirmation
+		// before either target service is restarted.
+		time.Sleep(250 * time.Millisecond)
+		if err := s.services.Restart(context.Background(), name); err != nil {
+			fmt.Fprintf(os.Stderr, "apiary: restarting %s: %v\n", name, err)
+		}
+	}()
+	return &rpcpb.RestartNodeServiceResponse{Scheduled: true}, nil
 }
 
 // applyJailCommand mirrors applyNetworkCommand, for commands whose

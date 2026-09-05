@@ -51,6 +51,25 @@ Machine settings does not accidentally convert "use the startup flag" into
 visible as a reconciliation error; the obvious operator action now lives on
 the same node-local configuration page as the other restart-required settings.
 
+### Apiary service status and restart
+
+The Machine page also reports the local rc.d status and boot-enable setting
+for the fixed Apiary service inventory: `apiary_raftd`, `apiary_managerd`,
+`apiary_frontend`, and `apiary_restshimd`. This is intentionally a local Hive
+view, not a cluster-wide orchestration surface. `ListNodeServices` executes
+only those fixed status queries through managerd; it never accepts a service
+name or shell command from a browser.
+
+The first operational action is deliberately narrower: Admins can restart
+only `apiary_managerd` and `apiary_frontend`. Both restarts are scheduled just
+after the RPC returns, because restarting either process can sever the gRPC or
+HTTP connection that must carry the confirmation to the operator. The page
+states that no `rc.conf` entry is changed. In particular, restarting
+`apiary_managerd` is the visible, targeted way to apply a saved jail
+provisioning override. `raftd` remains read-only because an ad hoc restart of a
+consensus member has a materially different failure domain; `restshimd` is
+also status-only in this pass.
+
 ### Per-VM firewall pause
 
 `VMDefinition` gains `bool firewall_paused`. Deliberately **not**
@@ -101,6 +120,9 @@ consistent with `zfs.Manager`'s own existing scoping.
   reconfiguration, same tier as `CreateAPIKey`.
 - `SetVMFirewallPaused`: Operator - matches other VM lifecycle actions.
 - `SetDatasetQuota`: Operator - matches `UploadISO`/`DeleteISO`.
+- `ListNodeServices`: Operator - read-only local operational status.
+- `RestartNodeService`: Admin - restarting a host daemon is host-wide
+  operational control, matching `UpdateNodeConfig`.
 - The `/machine` page itself is Operator-visible (the lowest of the
   three); the uplink form is additionally hidden from a non-Admin
   viewer in the template (`.CanAdmin`), the same defense-in-depth
@@ -125,6 +147,9 @@ result with no new RPC needed.
   same posture as `HostStats`/`GetVMConsole`, which also never got one.
 - No dataset/quota listing - the quota form is fire-and-report only,
   a "starter" not a full storage management UI.
+- No start/stop actions, arbitrary service names, or `apiary_*_enable`
+  editing. This v1 panel only shows fixed service status and narrowly scoped
+  restart actions.
 - Multi-node dispatch (viewing/editing another node's settings from
   this node's UI, mirroring `HostStats`'s peer-fetch pattern) is out of
   scope for v1 - same limitation `GetVMConsole` already carries.

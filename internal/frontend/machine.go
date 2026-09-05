@@ -59,6 +59,7 @@ func (s *Server) handleMachinePage(w http.ResponseWriter, r *http.Request) {
 	cfg, cfgErr := s.currentNodeConfig(r)
 	vms, vmErr := s.currentMachineVMs(r, nodeID)
 	cloudflareConfigured, _ := s.currentCloudflareStatus(r)
+	services, serviceErr := s.currentNodeServices(r)
 
 	s.render(w, "machine_page", s.withAuthFields(r, pageData{
 		NodeConfig:           cfg,
@@ -66,8 +67,23 @@ func (s *Server) handleMachinePage(w http.ResponseWriter, r *http.Request) {
 		MachineVMs:           vms,
 		MachineFirewallError: vmErr,
 		CloudflareConfigured: cloudflareConfigured,
+		NodeServices:         services,
+		ServiceFormError:     serviceErr,
 		ActivePage:           "machine",
 	}))
+}
+
+// currentNodeServices fetches the fixed set of Apiary rc.d services from
+// this Hive's managerd. The result is intentionally local, like node config.
+func (s *Server) currentNodeServices(r *http.Request) ([]nodeServiceView, string) {
+	resp, err := s.client.ListNodeServices(r.Context(), &rpcpb.ListNodeServicesRequest{})
+	if err != nil {
+		return nil, err.Error()
+	}
+	if resp.GetError() != "" {
+		return nil, resp.GetError()
+	}
+	return fromRPCNodeServices(resp), ""
 }
 
 // currentCloudflareStatus reports whether this node's own managerd has
@@ -234,4 +250,40 @@ func (s *Server) handleSetDatasetQuota(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) renderQuotaPanel(w http.ResponseWriter, r *http.Request, formErr, success string) {
 	s.render(w, "quota_panel", pageData{QuotaFormError: formErr, QuotaFormSuccess: success})
+}
+
+// handleRestartNodeService restarts a managerd-approved Apiary rc.d service
+// on this Hive. managerd self-restarts are accepted asynchronously so the
+// current gRPC request can finish before its process is replaced.
+func (s *Server) handleRestartNodeService(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("name")
+	resp, err := s.client.RestartNodeService(r.Context(), &rpcpb.RestartNodeServiceRequest{Name: name})
+	if err != nil {
+		s.renderNodeServicesPanel(w, r, err.Error(), "")
+		return
+	}
+	if resp.GetError() != "" {
+		s.renderNodeServicesPanel(w, r, resp.GetError(), "")
+		return
+	}
+	success := name + " restarted"
+	if resp.GetScheduled() {
+		success = name + " restart scheduled"
+	}
+	s.renderNodeServicesPanel(w, r, "", success)
+}
+
+func (s *Server) renderNodeServicesPanel(w http.ResponseWriter, r *http.Request, formErr, success string) {
+	services, fetchErr := s.currentNodeServices(r)
+	if fetchErr != "" {
+		if formErr == "" {
+			formErr = fetchErr
+		} else {
+			formErr += "; additionally failed to refresh: " + fetchErr
+		}
+	}
+	s.render(w, "node_services_panel", pageData{
+		NodeServices: services, ServiceFormError: formErr,
+		ServiceFormSuccess: success, CanAdmin: true,
+	})
 }
