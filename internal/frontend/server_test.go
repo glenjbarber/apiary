@@ -1180,6 +1180,54 @@ func TestServer_JailsPage(t *testing.T) {
 	if !strings.Contains(body, "jail-1") || !strings.Contains(body, "web-1.local") || !strings.Contains(body, "node-a") {
 		t.Errorf("jails page missing expected jail row, got: %s", body)
 	}
+	if !strings.Contains(body, `hx-get="/jails/panel" hx-trigger="every 3s"`) ||
+		!strings.Contains(body, `hx-sync="this:drop"`) || !strings.Contains(body, `hx-sync="#jail-panel:replace"`) {
+		t.Error("jail panel must poll without interrupting explicit deletion")
+	}
+}
+
+func TestServer_JailPanelRefresh(t *testing.T) {
+	client := &fakeClient{listJailsResp: &rpcpb.ListJailsResponse{Jails: []*rpcpb.JailDefinition{
+		{Id: "test-jail-01", NodeId: "apiverse", Phase: rpcpb.JailPhase_JAIL_PHASE_ERROR, PhaseError: "jail provisioning is disabled"},
+	}}}
+	s := newTestServer(t, client)
+	request := func() string {
+		t.Helper()
+		rec := httptest.NewRecorder()
+		s.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/jails/panel", nil))
+		if rec.Code != http.StatusOK {
+			t.Fatalf("status=%d", rec.Code)
+		}
+		return rec.Body.String()
+	}
+	body := request()
+	if !strings.Contains(body, "jail provisioning is disabled") || !strings.Contains(body, `id="jail-rows"`) || strings.Contains(body, "<!DOCTYPE") {
+		t.Fatalf("expected updated panel fragment, got %s", body)
+	}
+	client.listJailsResp = &rpcpb.ListJailsResponse{}
+	if body = request(); strings.Contains(body, "test-jail-01") || !strings.Contains(body, "No jails") {
+		t.Fatalf("purged jail remained in refreshed panel: %s", body)
+	}
+	client.listJailsResp = &rpcpb.ListJailsResponse{Error: "raft unavailable"}
+	if !strings.Contains(request(), "raft unavailable") {
+		t.Fatal("list error was hidden")
+	}
+}
+
+func TestServer_JailPanelViewerCannotDelete(t *testing.T) {
+	client := &fakeClient{listJailsResp: &rpcpb.ListJailsResponse{Jails: []*rpcpb.JailDefinition{{Id: "jail-1"}}}}
+	s, err := NewServer(client, fakeAuthenticator{user: "viewer", pass: "secret"}, map[string]manager.Role{"viewer": manager.RoleViewer}, nil, "", "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	token, _ := s.sessions.Create("viewer", manager.RoleViewer)
+	req := httptest.NewRequest(http.MethodGet, "/jails/panel", nil)
+	req.AddCookie(&http.Cookie{Name: sessionCookieName, Value: token})
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "jail-1") || strings.Contains(rec.Body.String(), "hx-delete") {
+		t.Fatalf("viewer panel has incorrect visibility: %s", rec.Body.String())
+	}
 }
 
 // TestServer_NewJailPage_NodeIDIsADropdownOfKnownNodes guards against a

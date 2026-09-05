@@ -17,6 +17,7 @@ import (
 	"github.com/glenjbarber/apiary/internal/bhyve"
 	"github.com/glenjbarber/apiary/internal/cloudflare"
 	"github.com/glenjbarber/apiary/internal/dhcpd"
+	"github.com/glenjbarber/apiary/internal/jail"
 	"github.com/glenjbarber/apiary/internal/pf"
 )
 
@@ -70,7 +71,8 @@ type raftClient interface {
 	// ListNetworksLocal is only called when VLAN is set - see ensureNetwork.
 	ListNetworksLocal(ctx context.Context) (*internalpb.ListNetworksResponse, error)
 
-	// ListJailsLocal is only called when Jail is set - see RunOnce.
+	// ListJailsLocal is fetched even when jail provisioning is disabled,
+	// so assigned records can report errors and tombstones can be processed.
 	ListJailsLocal(ctx context.Context) (*internalpb.ListJailsResponse, error)
 
 	// Status is only called when HAST is set - see
@@ -278,11 +280,16 @@ type Reconciler struct {
 	// ADR-0027.
 	hastConfigWritten bool
 
-	// Jail is optional (nil-able, same opt-in pattern as Bhyve above):
-	// nil disables jail provisioning entirely on this node. A node with
+	// Jail is the lifecycle driver, including explicit deletion. A nil
+	// driver cannot create or safely tear down a jail. A node with
 	// Jail set but no HAST support can still run non-replicated jails -
 	// only a jail naming ReplicaNodeID requires HAST/Mount too.
 	Jail jailManager
+
+	// JailProvisioningDisabled prevents creating jails and provisioning
+	// their replicas, but retains the driver for explicit owner tombstones.
+	// Disabling provisioning must not strand previously assigned records.
+	JailProvisioningDisabled bool
 
 	// Mount formats/mounts a HAST-replicated jail's root filesystem -
 	// only ever consulted for a jail naming ReplicaNodeID (see
@@ -449,11 +456,10 @@ func (r *Reconciler) RunOnce(ctx context.Context) (err error) {
 		}
 	}
 
-	// Jails are only fetched when Jail is configured on this node - a
-	// node with no jail support can't act on them anyway (see
-	// ensureJail's own clear error for a jail assigned here without it).
+	// Always observe jail intent. Disabled provisioning still needs to
+	// report an error for assigned jails and process explicit tombstones.
 	var desiredJails []JailPlacement
-	if r.Jail != nil {
+	{
 		jailsResp, err := r.Raft.ListJailsLocal(ctx)
 		if err != nil {
 			return fmt.Errorf("cluster: listing jails: %w", err)
@@ -462,6 +468,11 @@ func (r *Reconciler) RunOnce(ctx context.Context) (err error) {
 			return fmt.Errorf("cluster: listing jails: %s", jailsResp.GetError())
 		}
 		for _, j := range jailsResp.GetJails() {
+			// timemachine is explicitly outside Apiary's lifecycle, even
+			// if an old or mistaken replicated record names it.
+			if jail.IsProtected(j.GetId()) {
+				continue
+			}
 			desiredJails = append(desiredJails, JailPlacement{
 				ID:            j.GetId(),
 				Name:          j.GetName(),
@@ -507,12 +518,14 @@ func (r *Reconciler) RunOnce(ctx context.Context) (err error) {
 			roles = append(roles, hastRole{resourceName: vmHASTResourceName(vm.ID), peerNodeID: vm.NodeID, sizeMB: r.diskSizeMB(), isPrimary: false})
 		}
 		for _, j := range plannedJails {
-			if j.ReplicaNodeID != "" && !j.Deleting {
+			if r.Jail != nil && !r.JailProvisioningDisabled && j.ReplicaNodeID != "" && !j.Deleting {
 				roles = append(roles, hastRole{resourceName: jailHASTResourceName(j.ID), peerNodeID: j.ReplicaNodeID, sizeMB: r.jailDiskSizeMB(), isPrimary: true})
 			}
 		}
 		for _, j := range jailReplicas {
-			roles = append(roles, hastRole{resourceName: jailHASTResourceName(j.ID), peerNodeID: j.NodeID, sizeMB: r.jailDiskSizeMB(), isPrimary: false})
+			if r.Jail != nil && !r.JailProvisioningDisabled {
+				roles = append(roles, hastRole{resourceName: jailHASTResourceName(j.ID), peerNodeID: j.NodeID, sizeMB: r.jailDiskSizeMB(), isPrimary: false})
+			}
 		}
 		paths, err := r.reconcileHASTRoles(ctx, roles)
 		hastDevicePaths = paths
@@ -570,7 +583,7 @@ func (r *Reconciler) RunOnce(ctx context.Context) (err error) {
 
 	// Jail reclaim passes mirror the VM ones exactly, against
 	// desiredJails/plannedJails/jailReplicas instead.
-	if r.Jail != nil {
+	if r.Jail != nil && !r.JailProvisioningDisabled {
 		jailReplicaIDs := make(map[string]bool, len(jailReplicas))
 		for _, j := range jailReplicas {
 			jailReplicaIDs[j.ID] = true

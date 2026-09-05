@@ -60,7 +60,11 @@ func jailRootPath(jailBase, jailID string) string {
 // UpdateVMPhase).
 func (r *Reconciler) reconcileJail(ctx context.Context, j JailPlacement, hastDevicePaths map[string]string) error {
 	if j.Deleting {
-		return r.teardownJail(ctx, j)
+		if err := r.teardownJail(ctx, j); err != nil {
+			r.applyJailPhase(ctx, j.ID, PhaseError, err.Error())
+			return err
+		}
+		return nil
 	}
 
 	if j.Phase != PhaseReady && j.Phase != PhaseCreating {
@@ -81,8 +85,8 @@ func (r *Reconciler) reconcileJail(ctx context.Context, j JailPlacement, hastDev
 // mounted at this node's own jail root path (see hastDevicePaths/
 // ADR-0026) - then that its jail(8) process is running.
 func (r *Reconciler) ensureJail(ctx context.Context, j JailPlacement, hastDevicePaths map[string]string) error {
-	if r.Jail == nil {
-		return fmt.Errorf("jail %q is assigned to this node but no jail support is configured on this node", j.ID)
+	if r.Jail == nil || r.JailProvisioningDisabled {
+		return fmt.Errorf("jail %q is assigned to this node but jail provisioning is disabled; enable -jail-enabled on the owning node or delete the jail", j.ID)
 	}
 
 	var rootPath string
@@ -140,6 +144,14 @@ func (r *Reconciler) ensureJail(ctx context.Context, j JailPlacement, hastDevice
 // a replicated jail, or destroy the dataset otherwise), then purge the
 // record once both are confirmed gone.
 func (r *Reconciler) teardownJail(ctx context.Context, j JailPlacement) error {
+	// A missing driver is not evidence that no jail is running. Never
+	// destroy its storage or purge its record without checking first.
+	if r.Jail == nil {
+		return fmt.Errorf("cannot delete jail %q: no jail lifecycle driver is configured on the owning node", j.ID)
+	}
+	if r.JailProvisioningDisabled && j.ReplicaNodeID != "" && (r.HAST == nil || r.Mount == nil) {
+		return fmt.Errorf("cannot delete replicated jail %q: HAST and filesystem-mount support must be configured on the owning node", j.ID)
+	}
 	if j.Phase != PhaseDeleting {
 		r.applyJailPhase(ctx, j.ID, PhaseDeleting, "")
 	}

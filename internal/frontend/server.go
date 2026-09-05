@@ -570,6 +570,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /vms/{id}/serial/content", s.handleSerialLogContent)
 	s.mux.HandleFunc("GET /networks", s.handleNetworksPage)
 	s.mux.HandleFunc("GET /jails", s.handleJailsPage)
+	s.mux.HandleFunc("GET /jails/panel", s.handleJailPanel)
 	s.mux.HandleFunc("GET /simulate", s.handleSimulatePage)
 	s.mux.HandleFunc("GET /assumptions", s.handleAssumptionsPage)
 	s.mux.HandleFunc("GET /recovery-handbook", s.handleRecoveryHandbookPage)
@@ -1317,6 +1318,10 @@ func (s *Server) handleJailsPage(w http.ResponseWriter, r *http.Request) {
 	jails, errMsg := s.currentJails(r)
 	nodes, _ := s.knownNodes(r)
 	s.render(w, "jails_page", s.withAuthFields(r, pageData{Jails: jails, Nodes: nodes, JailFormError: errMsg, ActivePage: "jails"}))
+}
+
+func (s *Server) handleJailPanel(w http.ResponseWriter, r *http.Request) {
+	s.renderJailPanelResult(w, r, "")
 }
 
 // handleNewJailPage serves the create-jail form page ("/jails/new"),

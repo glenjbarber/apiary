@@ -41,9 +41,18 @@ func New(prefix string) *Manager {
 	return &Manager{Prefix: prefix}
 }
 
+// IsProtected identifies a host-owned jail that Apiary must never manage.
+// This exclusion is explicit operator policy, independent of Prefix.
+func IsProtected(name string) bool {
+	return name == "timemachine"
+}
+
 // qualifiedName validates name and returns the full jail name
 // (Prefix+name) used with jail(8)/jls(8).
 func (m *Manager) qualifiedName(name string) (string, error) {
+	if IsProtected(name) || IsProtected(m.Prefix+name) {
+		return "", fmt.Errorf("jail: %q is protected and must not be managed by Apiary", name)
+	}
 	if name == "" {
 		return "", fmt.Errorf("jail: name must not be empty")
 	}
@@ -138,6 +147,10 @@ func (m *Manager) ListJails(ctx context.Context) ([]string, error) {
 		return nil, err
 	}
 
+	return m.managedNames(out), nil
+}
+
+func (m *Manager) managedNames(out string) []string {
 	var names []string
 	for _, line := range strings.Split(out, "\n") {
 		fields := parseKeyValues(strings.TrimSpace(line))
@@ -145,9 +158,12 @@ func (m *Manager) ListJails(ctx context.Context) ([]string, error) {
 		if !ok || !strings.HasPrefix(name, m.Prefix) {
 			continue
 		}
+		if IsProtected(name) || IsProtected(strings.TrimPrefix(name, m.Prefix)) {
+			continue
+		}
 		names = append(names, strings.TrimPrefix(name, m.Prefix))
 	}
-	return names, nil
+	return names
 }
 
 // parseKeyValues parses jls(8)'s `-n` output: space-separated key=value

@@ -71,7 +71,7 @@ func run() error {
 	natUplink := flag.String("nat-uplink", "", "interface a self-hosted network's outbound NAT egresses through (see ADR-0048) - defaults to -vlan-uplink's value if unset, which is correct on most nodes, but must be set explicitly when this node's real internet-facing interface differs from its VLAN-tagging uplink (e.g. \"bridge0\" when -vlan-uplink's own NIC has itself been bridged for flat VM networking, as on apiarium - confirmed live: nat-to against an interface with no IPv4 address of its own silently never matches any egress traffic)")
 	dhcpDNSServer := flag.String("dhcp-dns-server", "", "DNS server address handed to DHCP clients on this node's Apiary-managed networks (dnsmasq's own port=0 disables its resolver, so without this every VM gets a dead-end DNS server - see internal/dhcpd.NetworkScope.DNSServer); leave empty only if no VM on a managed network needs working DNS resolution")
 	hastEnabled := flag.Bool("hast-enabled", false, "enable HAST-backed VM disk replication support on this node (requires a real, patched hastd - see ADR-0026); needed on both a replicated VM's owning node and its replica node, regardless of bhyve support")
-	jailEnabled := flag.Bool("jail-enabled", false, "enable jail orchestration on this node (requires internal/jail's own prerequisites - see CLAUDE.md)")
+	jailEnabled := flag.Bool("jail-enabled", false, "enable jail provisioning on this node; explicit deletion remains enabled (see CLAUDE.md)")
 	jailPrefix := flag.String("jail-prefix", "apiary-", "name prefix for jails this node creates")
 	jailMountBase := flag.String("jail-mount-base", "/apiary-jails", "parent directory a replicated jail's HAST-backed root filesystem is mounted under (non-replicated jails use their ZFS dataset's own mountpoint instead)")
 	jailDiskSizeMB := flag.Uint64("jail-disk-size-mb", 2048, "size of a replicated jail's HAST-backed root filesystem in MB (ignored for non-replicated jails, which use their ZFS dataset's own quota)")
@@ -201,18 +201,14 @@ func run() error {
 	if *hastEnabled {
 		reconciler.HAST = hast.New()
 	}
-	// Jail orchestration is independent of both bhyve and HAST: a node
-	// can run plain, non-replicated jails with neither. Mount is only
-	// ever consulted for a replicated jail (see ensureJail), so it's
-	// always set here regardless of -hast-enabled - a jail naming
-	// ReplicaNodeID on a node without -hast-enabled still gets a clear
-	// error from ensureJail itself, the same as a replicated VM does.
-	if *jailEnabled {
-		reconciler.Jail = jail.New(*jailPrefix)
-		reconciler.Mount = ufsmount.New()
-		reconciler.JailBase = *jailMountBase
-		reconciler.JailDiskSizeMB = *jailDiskSizeMB
-	}
+	// Keep lifecycle inspection/teardown available even when provisioning
+	// is disabled, otherwise an explicit DeleteJail tombstone is stranded.
+	// Nothing is created while JailProvisioningDisabled is true.
+	reconciler.Jail = jail.New(*jailPrefix)
+	reconciler.JailProvisioningDisabled = !*jailEnabled
+	reconciler.Mount = ufsmount.New()
+	reconciler.JailBase = *jailMountBase
+	reconciler.JailDiskSizeMB = *jailDiskSizeMB
 	// Cloudflare Tunnel exposure (ADR-0063) is independent of bhyve/
 	// HAST/jail support - it only ever proxies to a VM's own managed-
 	// network address, using a Tunnel the operator pre-provisioned by
@@ -516,6 +512,10 @@ func runReset(resetManaged, factoryReset, extraJails, extraDatasets, zfsBase, ja
 
 	if doFactory {
 		for _, name := range splitCommaList(extraJails) {
+			if jail.IsProtected(name) {
+				log.Printf("managerd: factory-reset: leaving protected jail %q untouched", name)
+				continue
+			}
 			log.Printf("managerd: factory-reset: removing extra jail %q", name)
 			if out, err := exec.CommandContext(ctx, "jail", "-r", name).CombinedOutput(); err != nil {
 				log.Printf("managerd: factory-reset: removing jail %q: %v: %s", name, err, out)
