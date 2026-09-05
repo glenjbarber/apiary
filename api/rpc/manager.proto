@@ -17,6 +17,13 @@ service ManagerService {
   // the answering Hive alone.
   rpc GetLocalNodeHealth(GetLocalNodeHealthRequest) returns (GetLocalNodeHealthResponse);
 
+  // Assumption Register claims are operator-authored, local-to-this-Hive
+  // records. They are not raft-replicated and never change a computed health
+  // or recovery verdict by themselves.
+  rpc ListAssumptionClaims(ListAssumptionClaimsRequest) returns (ListAssumptionClaimsResponse);
+  rpc SaveAssumptionClaim(SaveAssumptionClaimRequest) returns (SaveAssumptionClaimResponse);
+  rpc DeleteAssumptionClaim(DeleteAssumptionClaimRequest) returns (DeleteAssumptionClaimResponse);
+
   rpc CreateVM(CreateVMRequest) returns (CreateVMResponse);
   rpc UpdateVM(UpdateVMRequest) returns (UpdateVMResponse);
   rpc DeleteVM(DeleteVMRequest) returns (DeleteVMResponse);
@@ -611,7 +618,36 @@ message GetLocalNodeHealthResponse {
   string status = 2;
   string explanation = 3;
   repeated HealthObservation observations = 4;
+
+  // relevant_claims are unexpired local register entries scoped to this Hive
+  // or the Colony. They are context, not input to status.
+  repeated AssumptionClaim relevant_claims = 5;
 }
+
+message AssumptionClaim {
+  string id = 1;
+  string statement = 2;
+  string owner = 3;
+  string scope = 4;
+  string evidence = 5;
+  string verification_method = 6;
+  int64 expires_at_unix = 7;
+  int64 created_at_unix = 8;
+  int64 updated_at_unix = 9;
+}
+
+message ListAssumptionClaimsRequest {}
+
+message ListAssumptionClaimsResponse {
+  repeated AssumptionClaim claims = 1;
+  string error = 2;
+}
+
+message SaveAssumptionClaimRequest { AssumptionClaim claim = 1; }
+message SaveAssumptionClaimResponse { string error = 1; }
+
+message DeleteAssumptionClaimRequest { string id = 1; }
+message DeleteAssumptionClaimResponse { string error = 1; }
 
 // RaftMember mirrors api/internalpb's ServerInfo, kept as a separate
 // external type for the same reason StatusResponse itself is (ADR-0002):
@@ -1197,6 +1233,11 @@ message SimulateNodeFailureResponse {
   repeated OwnedResourceImpact owned_resources = 4;
   repeated ReplicaBackedImpact replica_backed_resources = 5;
   repeated ImageAvailabilityImpact image_availability = 6;
+
+  // relevant_claims are unexpired claims from the reporting Hive's local
+  // register, scoped to the Colony or the simulated Hive. They provide
+  // operator context only and do not change any simulator verdict.
+  repeated AssumptionClaim relevant_claims = 7;
 }
 
 message QuorumImpact {

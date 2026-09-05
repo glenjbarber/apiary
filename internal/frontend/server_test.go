@@ -105,6 +105,11 @@ type fakeClient struct {
 	assumptionsResp *rpcpb.ListAssumptionResultsResponse
 	assumptionsErr  error
 
+	assumptionClaimsResp *rpcpb.ListAssumptionClaimsResponse
+	assumptionClaimsErr  error
+	saveClaimResp        *rpcpb.SaveAssumptionClaimResponse
+	deleteClaimResp      *rpcpb.DeleteAssumptionClaimResponse
+
 	traceResp    *rpcpb.TraceCellPathResponse
 	traceErr     error
 	lastTraceReq *rpcpb.TraceCellPathRequest
@@ -313,6 +318,27 @@ func (f *fakeClient) GetLocalNetworkBridgeStatus(context.Context, *rpcpb.GetLoca
 
 func (f *fakeClient) ListAssumptionResults(context.Context, *rpcpb.ListAssumptionResultsRequest, ...grpc.CallOption) (*rpcpb.ListAssumptionResultsResponse, error) {
 	return f.assumptionsResp, f.assumptionsErr
+}
+
+func (f *fakeClient) ListAssumptionClaims(context.Context, *rpcpb.ListAssumptionClaimsRequest, ...grpc.CallOption) (*rpcpb.ListAssumptionClaimsResponse, error) {
+	if f.assumptionClaimsResp == nil {
+		return &rpcpb.ListAssumptionClaimsResponse{}, f.assumptionClaimsErr
+	}
+	return f.assumptionClaimsResp, f.assumptionClaimsErr
+}
+
+func (f *fakeClient) SaveAssumptionClaim(context.Context, *rpcpb.SaveAssumptionClaimRequest, ...grpc.CallOption) (*rpcpb.SaveAssumptionClaimResponse, error) {
+	if f.saveClaimResp != nil {
+		return f.saveClaimResp, nil
+	}
+	return &rpcpb.SaveAssumptionClaimResponse{}, nil
+}
+
+func (f *fakeClient) DeleteAssumptionClaim(context.Context, *rpcpb.DeleteAssumptionClaimRequest, ...grpc.CallOption) (*rpcpb.DeleteAssumptionClaimResponse, error) {
+	if f.deleteClaimResp != nil {
+		return f.deleteClaimResp, nil
+	}
+	return &rpcpb.DeleteAssumptionClaimResponse{}, nil
 }
 
 func (f *fakeClient) SimulateNodeFailure(context.Context, *rpcpb.SimulateNodeFailureRequest, ...grpc.CallOption) (*rpcpb.SimulateNodeFailureResponse, error) {

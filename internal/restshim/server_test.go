@@ -115,6 +115,18 @@ func (f *fakeClient) GetLocalNodeHealth(context.Context, *rpcpb.GetLocalNodeHeal
 	return &rpcpb.GetLocalNodeHealthResponse{}, nil
 }
 
+func (f *fakeClient) ListAssumptionClaims(context.Context, *rpcpb.ListAssumptionClaimsRequest, ...grpc.CallOption) (*rpcpb.ListAssumptionClaimsResponse, error) {
+	return &rpcpb.ListAssumptionClaimsResponse{}, nil
+}
+
+func (f *fakeClient) SaveAssumptionClaim(context.Context, *rpcpb.SaveAssumptionClaimRequest, ...grpc.CallOption) (*rpcpb.SaveAssumptionClaimResponse, error) {
+	return &rpcpb.SaveAssumptionClaimResponse{}, nil
+}
+
+func (f *fakeClient) DeleteAssumptionClaim(context.Context, *rpcpb.DeleteAssumptionClaimRequest, ...grpc.CallOption) (*rpcpb.DeleteAssumptionClaimResponse, error) {
+	return &rpcpb.DeleteAssumptionClaimResponse{}, nil
+}
+
 func (f *fakeClient) CreateVM(_ context.Context, in *rpcpb.CreateVMRequest, _ ...grpc.CallOption) (*rpcpb.CreateVMResponse, error) {
 	f.lastCreateReq = in
 	return f.createResp, f.createErr

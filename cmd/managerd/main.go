@@ -21,6 +21,7 @@ import (
 
 	rpcpb "github.com/glenjbarber/apiary/api/rpc"
 	"github.com/glenjbarber/apiary/internal/assumecheck"
+	"github.com/glenjbarber/apiary/internal/assumptionregister"
 	"github.com/glenjbarber/apiary/internal/assumptions"
 	"github.com/glenjbarber/apiary/internal/bhyve"
 	"github.com/glenjbarber/apiary/internal/cloudflare"
@@ -311,6 +312,7 @@ func run() error {
 	}
 
 	assumptionsMgr := &assumptions.Manager{}
+	registerMgr := &assumptionregister.Manager{}
 	// Constructed after reconciler above so reconciler.Uplink already
 	// reflects both the nat-uplink-falls-back-to-vlan-uplink resolution
 	// and any nodeconfig override - never re-derived independently here,
@@ -333,6 +335,7 @@ func run() error {
 	}
 
 	srv := manager.NewServer(raftClient, id, isos, vncArg, serialLogArg, vlanArg, peers, resolvedPeerPort, zfsMgr, nodeConfigMgr, assumptionsMgr, assumptionStaleAfter, reconciler)
+	srv.SetAssumptionRegister(registerMgr)
 	// Every RPC (including UploadISO's stream) is gated by srv's own
 	// API-key check - see ADR-0023. Auth stays fully open until the
 	// first key is created (CreateAPIKey itself included), so this is

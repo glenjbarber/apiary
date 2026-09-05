@@ -11,6 +11,7 @@ import (
 
 	internalpb "github.com/glenjbarber/apiary/api/internalpb"
 	rpcpb "github.com/glenjbarber/apiary/api/rpc"
+	"github.com/glenjbarber/apiary/internal/assumptionregister"
 	"github.com/glenjbarber/apiary/internal/hoststats"
 	"github.com/glenjbarber/apiary/internal/isostore"
 	"github.com/glenjbarber/apiary/internal/nodeconfig"
@@ -269,6 +270,44 @@ type fakeReconcilerStats struct {
 	successOK            bool
 	interval             time.Duration
 	cloudflareConfigured bool
+}
+
+type fakeAssumptionRegister struct {
+	claims []assumptionregister.Claim
+}
+
+func (f *fakeAssumptionRegister) List() ([]assumptionregister.Claim, error) { return f.claims, nil }
+func (f *fakeAssumptionRegister) Save(c assumptionregister.Claim, _ time.Time) error {
+	f.claims = append(f.claims, c)
+	return nil
+}
+func (f *fakeAssumptionRegister) Delete(id string) error {
+	for i, claim := range f.claims {
+		if claim.ID == id {
+			f.claims = append(f.claims[:i], f.claims[i+1:]...)
+			return nil
+		}
+	}
+	return errors.New("not found")
+}
+
+func TestServer_AssumptionRegisterAPILocalOnly(t *testing.T) {
+	register := &fakeAssumptionRegister{claims: []assumptionregister.Claim{{
+		ID: "claim-1", Statement: "route is stable", Owner: "ops", Scope: "hive:node-1",
+		Evidence: "manual check", ExpiresAt: time.Now().Add(time.Hour),
+	}}}
+	s := NewServer(nil, "node-1", &fakeISOManager{}, nil, nil, nil, nil, "", nil, nil, nil, 0, nil)
+	s.SetAssumptionRegister(register)
+	resp, err := s.ListAssumptionClaims(context.Background(), &rpcpb.ListAssumptionClaimsRequest{})
+	if err != nil || len(resp.GetClaims()) != 1 || resp.GetClaims()[0].GetId() != "claim-1" {
+		t.Fatalf("ListAssumptionClaims() = %+v, %v", resp, err)
+	}
+	result, err := s.SaveAssumptionClaim(context.Background(), &rpcpb.SaveAssumptionClaimRequest{Claim: &rpcpb.AssumptionClaim{
+		Id: "claim-2", Statement: "peer route", Owner: "ops", Scope: "colony", Evidence: "ticket", ExpiresAtUnix: time.Now().Add(time.Hour).Unix(),
+	}})
+	if err != nil || result.GetError() != "" || len(register.claims) != 2 {
+		t.Fatalf("SaveAssumptionClaim() = %+v, %v; claims=%+v", result, err, register.claims)
+	}
 }
 
 func (f *fakeReconcilerStats) LastReconcileAttempt() (time.Time, bool) { return f.attempt, f.attemptOK }

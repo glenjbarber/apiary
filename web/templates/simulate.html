@@ -126,6 +126,21 @@
       </tbody>
     </table>
   </div>
+
+  <div class="panel">
+    <h3>Local Assumption Register context</h3>
+    <p class="muted">Unexpired claims from the reporting Hive whose scope is this Hive or the Colony. They are operator context only and do not change this simulation's verdicts.</p>
+    <table>
+      <thead><tr><th>ID</th><th>Statement</th><th>Owner</th><th>Scope</th><th>Evidence</th><th>Expires</th></tr></thead>
+      <tbody>
+        {{range .SimulateClaims}}
+        <tr><td>{{.ID}}</td><td>{{.Statement}}</td><td>{{.Owner}}</td><td>{{.Scope}}</td><td>{{.Evidence}}</td><td>{{.ExpiresAt}}</td></tr>
+        {{else}}
+        <tr><td colspan="6"><em>No applicable local Register claims.</em></td></tr>
+        {{end}}
+      </tbody>
+    </table>
+  </div>
   {{end}}
   {{end}}
 

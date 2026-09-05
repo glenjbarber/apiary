@@ -224,6 +224,7 @@ type pageData struct {
 	SimulateOwnedResources    []resourceImpactView
 	SimulateReplicaBacked     []replicaBackedImpactView
 	SimulateImageAvailability []imageAvailabilityImpactView
+	SimulateClaims            []assumptionClaimView
 	SimulateNetworks          []networkView
 	SimulateTargetNetworkID   string
 	SimulateNetwork           networkView
@@ -234,6 +235,13 @@ type pageData struct {
 	// ("/assumptions", ADR-0055) - one section per known node, fetched
 	// concurrently like ClusterNodes above.
 	AssumptionNodes []nodeAssumptionsView
+
+	// AssumptionClaims are operator-authored records from this frontend's
+	// local Hive register. Unlike AssumptionNodes, they are not replicated or
+	// fanned out to peers.
+	AssumptionClaims      []assumptionClaimView
+	AssumptionRegisterErr string
+	AssumptionRegisterOK  string
 
 	// Recovery* back the Offline Recovery Handbook page
 	// ("/recovery-handbook", ADR-0057). RecoveryNodes mirrors
@@ -579,6 +587,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /jails/panel", s.handleJailPanel)
 	s.mux.HandleFunc("GET /simulate", s.handleSimulatePage)
 	s.mux.HandleFunc("GET /assumptions", s.handleAssumptionsPage)
+	s.mux.HandleFunc("GET /assumption-register", s.handleAssumptionRegisterPage)
 	s.mux.HandleFunc("GET /recovery-handbook", s.handleRecoveryHandbookPage)
 	s.mux.HandleFunc("GET /trace", s.handleTracePage)
 	s.mux.HandleFunc("GET /invariants", s.handleInvariantsPage)
@@ -602,6 +611,8 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /jails", s.requireRole(manager.RoleOperator, s.handleCreateJail))
 	s.mux.HandleFunc("DELETE /jails/{id}", s.requireRole(manager.RoleOperator, s.handleDeleteJail))
 	s.mux.HandleFunc("POST /jails/{id}/lifecycle", s.requireRole(manager.RoleOperator, s.handleSetJailDesiredState))
+	s.mux.HandleFunc("POST /assumption-register", s.requireRole(manager.RoleOperator, s.handleSaveAssumptionClaim))
+	s.mux.HandleFunc("DELETE /assumption-register/{id}", s.requireRole(manager.RoleOperator, s.handleDeleteAssumptionClaim))
 
 	// Admin: API-key management, entirely - including just viewing the
 	// list, unlike every other Viewer-readable page above.
