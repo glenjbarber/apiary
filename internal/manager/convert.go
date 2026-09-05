@@ -56,6 +56,9 @@ func toInternalVM(vm *rpcpb.VMDefinition) *internalpb.VMDefinition {
 		// set by an external caller - CreateVM/UpdateVM requests never
 		// carry them through. FirewallPaused is likewise excluded here -
 		// only SetVMFirewallPaused's own dedicated command may set it.
+		// CloudflareHostname/CloudflarePort are excluded for the identical
+		// reason - only SetVMCloudflareExposure's own dedicated command
+		// may set them (ADR-0063).
 	}
 }
 
@@ -93,6 +96,11 @@ func fromInternalVM(vm *internalpb.VMDefinition) *rpcpb.VMDefinition {
 		// FirewallPaused is read-only from this direction too - only
 		// SetVMFirewallPaused's own dedicated command may set it.
 		FirewallPaused: vm.GetFirewallPaused(),
+		// CloudflareHostname/CloudflarePort mirror FirewallPaused's own
+		// read-only-here treatment - only SetVMCloudflareExposure's own
+		// dedicated command may set them (ADR-0063).
+		CloudflareHostname: vm.GetCloudflareHostname(),
+		CloudflarePort:     vm.GetCloudflarePort(),
 	}
 }
 

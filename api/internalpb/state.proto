@@ -117,6 +117,24 @@ message VMDefinition {
   // never via UpdateVM - see ADR-0049 for why UpdateVM's full-replace
   // semantics make it unsafe for a single-field toggle like this.
   bool firewall_paused = 16;
+
+  // cloudflare_hostname, if set, names a public hostname this VM's own
+  // HTTP service (on cloudflare_port) should be reachable at via a
+  // pre-provisioned Cloudflare Tunnel on its owning node - see
+  // ADR-0063. Empty means not exposed (today's behavior, unaffected).
+  // Requires network_id to also be set: a flat-bridge VM's IP is never
+  // tracked in raft state, so there is no address for a Tunnel to
+  // proxy to. Set only via the narrow SetVMCloudflareExposure command,
+  // never via UpdateVM, for the exact same full-replace-safety reason
+  // firewall_paused is (see ADR-0049, ADR-0063).
+  string cloudflare_hostname = 17;
+
+  // cloudflare_port is the local TCP port on this VM's own address that
+  // an exposed hostname's cloudflared ingress rule proxies to, always
+  // as plain HTTP (see ADR-0063 for why v1 is HTTP-origin-only, never
+  // raw TCP or HTTPS-origin). Meaningless when cloudflare_hostname is
+  // empty.
+  uint32 cloudflare_port = 18;
 }
 
 // JailState is the desired run state of a jail, mirroring VMState.
@@ -271,6 +289,13 @@ message Command {
     // through the general UpdateVM, which replaces a VM's entire
     // record - see ADR-0049.
     SetVMFirewallPaused set_vm_firewall_paused = 15;
+
+    // SetVMCloudflareExposure is submitted by an external caller (via
+    // ManagerService.SetVMCloudflareExposure) - deliberately narrow
+    // (touches only VMDefinition.cloudflare_hostname/cloudflare_port),
+    // the exact same reasoning as SetVMFirewallPaused above. See
+    // ADR-0063.
+    SetVMCloudflareExposure set_vm_cloudflare_exposure = 16;
   }
 }
 
@@ -358,6 +383,19 @@ message UpdateVMPhase {
 message SetVMFirewallPaused {
   string id = 1;
   bool paused = 2;
+}
+
+// SetVMCloudflareExposure sets VMDefinition.cloudflare_hostname/
+// cloudflare_port on an existing VM. Fails if the id doesn't exist, or
+// if hostname is non-empty and the VM's current network_id is empty
+// (see ADR-0063) - this check happens in the RPC handler before
+// submission, since the FSM apply step itself has no validation
+// beyond "does the VM exist" (matching every other narrow Set*
+// command's own division of labor).
+message SetVMCloudflareExposure {
+  string id = 1;
+  string hostname = 2;
+  uint32 port = 3;
 }
 
 // PurgeVM removes a VM definition outright, regardless of its current

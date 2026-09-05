@@ -74,6 +74,14 @@ type VMPlacement struct {
 	// creates it, instead of creating a blank file. See ADR-0031.
 	// Ignored once the disk file already exists.
 	BaseImageName string
+
+	// CloudflareHostname/CloudflarePort, when hostname is set, name a
+	// public hostname this VM's own HTTP service (on port) should be
+	// reachable at via a pre-provisioned Cloudflare Tunnel on its
+	// owning node - set only via ManagerService.SetVMCloudflareExposure,
+	// never via UpdateVM. See ADR-0063.
+	CloudflareHostname string
+	CloudflarePort     uint32
 }
 
 // JailPlacement mirrors VMPlacement, deliberately minimal like

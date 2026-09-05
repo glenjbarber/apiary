@@ -300,6 +300,11 @@ type pageData struct {
 	CoverageScenarios []coverageScenarioView
 	CoverageCounts    []coverageStatusCountView
 	CoverageGaps      []string
+
+	// VMCloudflareFormError carries a failed public-exposure form
+	// submission's own error, shown alongside the VM detail page's
+	// existing display rather than replacing it - see ADR-0063.
+	VMCloudflareFormError string
 }
 
 // userView is one row of the Users page's table.
@@ -548,6 +553,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /vms", s.handleVMsPage)
 	s.mux.HandleFunc("GET /vms/rows", s.handleListVMs)
 	s.mux.HandleFunc("GET /vms/{id}", s.handleVMPage)
+	s.mux.HandleFunc("POST /vms/{id}/cloudflare-exposure", s.requireRole(manager.RoleOperator, s.handleSetVMCloudflareExposure))
 	s.mux.HandleFunc("GET /images", s.handleImagesPage)
 	s.mux.HandleFunc("GET /isos", s.handleListISOs)
 	s.mux.HandleFunc("GET /vms/{id}/console", s.handleConsolePage)
@@ -761,6 +767,64 @@ func (s *Server) handleVMPage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.render(w, "vm_page", s.withAuthFields(r, pageData{VM: fromRPCVM(resp.GetVm()), ActivePage: "vms"}))
+}
+
+// handleSetVMCloudflareExposure sets or clears one VM's public
+// Cloudflare Tunnel exposure (ADR-0063) - a dedicated form action on
+// the VM detail page, not folded into a general edit form, mirroring
+// ADR-0049's own firewall_paused precedent (a single-purpose command,
+// never routed through UpdateVM). An empty hostname clears exposure;
+// port is only meaningful with a non-empty hostname. Re-renders the VM
+// detail page either way, with a form-specific error on failure so the
+// rest of the page's own display isn't disturbed.
+func (s *Server) handleSetVMCloudflareExposure(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if err := r.ParseForm(); err != nil {
+		s.renderVMPage(w, r, id, "invalid form: "+err.Error())
+		return
+	}
+	hostname := strings.TrimSpace(r.FormValue("cloudflare_hostname"))
+	var port uint64
+	if hostname != "" {
+		var err error
+		port, err = strconv.ParseUint(r.FormValue("cloudflare_port"), 10, 32)
+		if err != nil {
+			s.renderVMPage(w, r, id, "invalid port: "+err.Error())
+			return
+		}
+	}
+	resp, err := s.client.SetVMCloudflareExposure(r.Context(), &rpcpb.SetVMCloudflareExposureRequest{Id: id, Hostname: hostname, Port: uint32(port)})
+	if err != nil {
+		s.renderVMPage(w, r, id, err.Error())
+		return
+	}
+	if resp.GetError() != "" {
+		s.renderVMPage(w, r, id, resp.GetError())
+		return
+	}
+	s.renderVMPage(w, r, id, "")
+}
+
+// renderVMPage re-fetches and renders the VM detail page, with an
+// optional form-specific error - shared by handleSetVMCloudflareExposure
+// so a failed form submission still shows the rest of the page's own
+// current state, not just a bare error.
+func (s *Server) renderVMPage(w http.ResponseWriter, r *http.Request, id, formErr string) {
+	resp, err := s.client.GetVM(r.Context(), &rpcpb.GetVMRequest{Id: id})
+	if err != nil {
+		s.render(w, "vm_page", s.withAuthFields(r, pageData{Error: err.Error(), ActivePage: "vms"}))
+		return
+	}
+	if resp.GetError() != "" {
+		s.render(w, "vm_page", s.withAuthFields(r, pageData{Error: resp.GetError(), ActivePage: "vms"}))
+		return
+	}
+	if !resp.GetFound() {
+		w.WriteHeader(http.StatusNotFound)
+		s.render(w, "vm_page", s.withAuthFields(r, pageData{Error: "virtual machine not found", ActivePage: "vms"}))
+		return
+	}
+	s.render(w, "vm_page", s.withAuthFields(r, pageData{VM: fromRPCVM(resp.GetVm()), VMCloudflareFormError: formErr, ActivePage: "vms"}))
 }
 
 // handleImagesPage serves the Images (ISO upload/list) page ("/images").

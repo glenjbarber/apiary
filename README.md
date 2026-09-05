@@ -468,6 +468,27 @@ each design decision, in order.
   of every warning, with proven remedies kept clearly separate from
   plausible-but-unverified ones. See
   [ADR-0061](docs/adr/0061-why-not-engine-v1.md).
+- **Resilience Coverage Map v1** (`/resilience-coverage`) - enumerates
+  every failure scenario already computable by the mechanisms above
+  (hive failure, network failure, network connectivity, cell
+  recoverability, HAST dual-primary, raft quorum tolerance) and
+  classifies each by whether real evidence exists - simulated,
+  untested, or unsafe/impossible to physically rehearse - never by
+  whether the answer happens to be good news, and never rolled into a
+  percentage. See
+  [ADR-0062](docs/adr/0062-resilience-coverage-map-v1.md).
+- **Cloudflare Tunnel exposure v1** - the operator pre-provisions one
+  Cloudflare Tunnel per Hive by hand; Apiary reconciles which Cells are
+  exposed into that Hive's own `cloudflared` ingress config, manages
+  the `cloudflared` process lifecycle, and calls Cloudflare's DNS API
+  to create/update just a CNAME record per exposed Cell - no Tunnel-
+  provisioning API of Cloudflare's own is ever called, needing only a
+  narrow Zone:DNS:Edit token. The project's first outbound third-party
+  HTTPS API integration and first real internet-facing exposure
+  surface, deliberately scoped to plain HTTP origin traffic only (raw
+  TCP/HTTPS-origin would need Cloudflare Access client tooling or the
+  separate Spectrum product - out of scope). See
+  [ADR-0063](docs/adr/0063-cloudflare-tunnel-exposure-v1.md).
 
 **Not yet implemented:**
 

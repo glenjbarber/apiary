@@ -88,6 +88,7 @@ type PeerForwarder interface {
 	ForcePurgeVM(ctx context.Context, addr string, req *rpcpb.ForcePurgeVMRequest) (*rpcpb.ForcePurgeVMResponse, error)
 	MigrateVM(ctx context.Context, addr string, req *rpcpb.MigrateVMRequest) (*rpcpb.MigrateVMResponse, error)
 	SetVMFirewallPaused(ctx context.Context, addr string, req *rpcpb.SetVMFirewallPausedRequest) (*rpcpb.SetVMFirewallPausedResponse, error)
+	SetVMCloudflareExposure(ctx context.Context, addr string, req *rpcpb.SetVMCloudflareExposureRequest) (*rpcpb.SetVMCloudflareExposureResponse, error)
 	ForcePurgeJail(ctx context.Context, addr string, req *rpcpb.ForcePurgeJailRequest) (*rpcpb.ForcePurgeJailResponse, error)
 	MigrateJail(ctx context.Context, addr string, req *rpcpb.MigrateJailRequest) (*rpcpb.MigrateJailResponse, error)
 
@@ -688,6 +689,53 @@ func (s *Server) SetVMFirewallPaused(ctx context.Context, req *rpcpb.SetVMFirewa
 		}
 	}
 	return &rpcpb.SetVMFirewallPausedResponse{Vm: fromInternalVM(vm), Error: appErr, LeaderHint: leaderHint}, nil
+}
+
+// SetVMCloudflareExposure implements rpcpb.ManagerServiceServer - see
+// ADR-0063. Unlike SetVMFirewallPaused, a non-empty hostname needs a
+// cross-field check (network_id must already be set) that depends on
+// the VM's CURRENT record, so this fetches first (the same GetVM-then-
+// validate-then-submit shape MigrateVM uses) rather than submitting the
+// narrow command blind. Clearing exposure (hostname == "") skips the
+// fetch entirely - there's nothing to validate against for turning
+// exposure off.
+func (s *Server) SetVMCloudflareExposure(ctx context.Context, req *rpcpb.SetVMCloudflareExposureRequest) (*rpcpb.SetVMCloudflareExposureResponse, error) {
+	if req.GetHostname() != "" {
+		getResp, err := s.raft.GetVM(ctx, req.GetId())
+		if err != nil {
+			return &rpcpb.SetVMCloudflareExposureResponse{Error: err.Error()}, nil
+		}
+		if getResp.GetError() != "" {
+			if s.peers != nil && getResp.GetLeaderHint() != "" {
+				if fwd, ferr := s.peers.SetVMCloudflareExposure(ctx, s.peerManagerdAddr(getResp.GetLeaderHint()), req); ferr == nil {
+					return fwd, nil
+				}
+			}
+			return &rpcpb.SetVMCloudflareExposureResponse{Error: getResp.GetError(), LeaderHint: getResp.GetLeaderHint()}, nil
+		}
+		if !getResp.GetFound() {
+			return &rpcpb.SetVMCloudflareExposureResponse{Error: fmt.Sprintf("VM %q not found", req.GetId())}, nil
+		}
+		if getResp.GetVm().GetNetworkId() == "" {
+			return &rpcpb.SetVMCloudflareExposureResponse{Error: fmt.Sprintf(
+				"VM %q has no network_id set - a flat-bridge VM's IP is never tracked in raft state, so there is no address for a Cloudflare Tunnel to proxy to. Set network_id via UpdateVM first.",
+				req.GetId(),
+			)}, nil
+		}
+	}
+
+	cmd := &internalpb.Command{
+		Op: &internalpb.Command_SetVmCloudflareExposure{SetVmCloudflareExposure: &internalpb.SetVMCloudflareExposure{
+			Id: req.GetId(), Hostname: req.GetHostname(), Port: req.GetPort(),
+		}},
+	}
+	vm, appErr, leaderHint := s.applyCommand(ctx, cmd, req.GetTimeoutMs())
+	if leaderHint != "" && s.peers != nil {
+		if fwd, ferr := s.peers.SetVMCloudflareExposure(ctx, s.peerManagerdAddr(leaderHint), req); ferr == nil {
+			return fwd, nil
+		}
+	}
+	return &rpcpb.SetVMCloudflareExposureResponse{Vm: fromInternalVM(vm), Error: appErr, LeaderHint: leaderHint}, nil
 }
 
 // ForcePurgeVM implements rpcpb.ManagerServiceServer. It's an escape

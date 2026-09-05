@@ -15,6 +15,7 @@ import (
 
 	internalpb "github.com/glenjbarber/apiary/api/internalpb"
 	"github.com/glenjbarber/apiary/internal/bhyve"
+	"github.com/glenjbarber/apiary/internal/cloudflare"
 	"github.com/glenjbarber/apiary/internal/dhcpd"
 	"github.com/glenjbarber/apiary/internal/pf"
 )
@@ -130,6 +131,15 @@ type pfManager interface {
 	ApplyNAT(ctx context.Context, anchor, subnet, uplink string) error
 }
 
+// cloudflareManager is the subset of *cloudflare.Manager the reconciler
+// needs, for the same reason as raftClient - lets tests inject a fake
+// with no real outbound HTTP calls or daemon(8)/cloudflared processes.
+// *cloudflare.Manager satisfies this today. See ADR-0063.
+type cloudflareManager interface {
+	ReconcileExposures(ctx context.Context, token, zoneID, tunnelTarget, tunnelID, credentialsFile string, desired []cloudflare.DesiredExposure) error
+	StopIfRunning(ctx context.Context) error
+}
+
 // Reconciler provisions local ZFS storage - and, if Bhyve is set, a
 // running bhyve VM backed by that storage - for VMs assigned to this
 // node, based on VMDefinition.node_id in raft's ephemeral state. It also
@@ -216,6 +226,30 @@ type Reconciler struct {
 	// this to a small non-zero value so they don't pay the real-world
 	// settle cost the live hastd startup race actually needs.
 	HASTRestartSettleDelay time.Duration
+
+	// Cloudflare is optional (nil-able, same opt-in pattern as HAST/
+	// Bhyve/etc. above): when set, VMs naming CloudflareHostname have
+	// their public exposure reconciled into this node's own pre-
+	// provisioned Cloudflare Tunnel - see ADR-0063. A VM naming
+	// CloudflareHostname on a node with this unset is simply never
+	// exposed - no error, the same "opt-in capability, quietly a no-op
+	// when absent" pattern this codebase already applies elsewhere
+	// (e.g. an ISO name on a node with no isostore configured). When
+	// nil, reconcileCloudflareTunnel still calls StopIfRunning against
+	// a Manager with default paths, so a leftover process from before
+	// the feature was disabled gets cleaned up (ADR-0063 finding 8).
+	Cloudflare cloudflareManager
+
+	// CloudflareToken/CloudflareZoneID/CloudflareTunnelID/
+	// CloudflareTunnelCredentialsFile configure the pre-provisioned
+	// Tunnel this node's own cloudflared process authenticates as, and
+	// the Cloudflare API token used to manage DNS records - see
+	// cmd/managerd's own -cloudflare-* flags. All required together
+	// when Cloudflare is set.
+	CloudflareToken                 string
+	CloudflareZoneID                string
+	CloudflareTunnelID              string
+	CloudflareTunnelCredentialsFile string
 
 	// lastDHCPConfig is the last dnsmasq config body actually written,
 	// so reconcileDHCP only calls DHCP.WriteAndReload (which restarts
@@ -374,20 +408,22 @@ func (r *Reconciler) RunOnce(ctx context.Context) (err error) {
 			})
 		}
 		desired = append(desired, VMPlacement{
-			ID:             vm.GetId(),
-			NodeID:         vm.GetNodeId(),
-			Vcpus:          vm.GetVcpus(),
-			MemoryMB:       vm.GetMemoryMb(),
-			Deleting:       vm.GetDesiredState() == internalpb.VMState_VM_STATE_DELETING,
-			Phase:          phaseToString(vm.GetPhase()),
-			ISOName:        vm.GetIsoName(),
-			NetworkID:      vm.GetNetworkId(),
-			IPAddress:      vm.GetIpAddress(),
-			MACAddress:     vm.GetMacAddress(),
-			FirewallRules:  rules,
-			ReplicaNodeID:  vm.GetReplicaNodeId(),
-			BaseImageName:  vm.GetBaseImageName(),
-			FirewallPaused: vm.GetFirewallPaused(),
+			ID:                 vm.GetId(),
+			NodeID:             vm.GetNodeId(),
+			Vcpus:              vm.GetVcpus(),
+			MemoryMB:           vm.GetMemoryMb(),
+			Deleting:           vm.GetDesiredState() == internalpb.VMState_VM_STATE_DELETING,
+			Phase:              phaseToString(vm.GetPhase()),
+			ISOName:            vm.GetIsoName(),
+			NetworkID:          vm.GetNetworkId(),
+			IPAddress:          vm.GetIpAddress(),
+			MACAddress:         vm.GetMacAddress(),
+			FirewallRules:      rules,
+			ReplicaNodeID:      vm.GetReplicaNodeId(),
+			BaseImageName:      vm.GetBaseImageName(),
+			FirewallPaused:     vm.GetFirewallPaused(),
+			CloudflareHostname: vm.GetCloudflareHostname(),
+			CloudflarePort:     vm.GetCloudflarePort(),
 		})
 	}
 
@@ -549,7 +585,51 @@ func (r *Reconciler) RunOnce(ctx context.Context) (err error) {
 		}
 	}
 
+	if err := r.reconcileCloudflareTunnel(ctx, planned); err != nil && firstErr == nil {
+		firstErr = fmt.Errorf("cluster: reconciling cloudflare tunnel: %w", err)
+	}
+
 	return firstErr
+}
+
+// reconcileCloudflareTunnel reconciles every locally-owned VM's public
+// exposure into this node's own pre-provisioned Cloudflare Tunnel (see
+// ADR-0063), aggregating every exposed VM into one
+// cloudflare.Manager.ReconcileExposures call - mirroring
+// reconcileHASTRoles's own "aggregate every relevant resource into one
+// call, not one per resource" shape, since cloudflared's own config
+// holds every exposed Cell this node currently owns at once. planned is
+// already filtered to this node's own owned, non-deleting VMs (see
+// Plan) - a VM entering VM_STATE_DELETING drops out of this list (and
+// so out of its desired exposure) even before its physical resources
+// are torn down, which is the correct behavior: stop advertising a
+// service that's about to be deleted, don't wait for full teardown.
+func (r *Reconciler) reconcileCloudflareTunnel(ctx context.Context, planned []VMPlacement) error {
+	if r.Cloudflare == nil {
+		return (&cloudflare.Manager{}).StopIfRunning(ctx)
+	}
+
+	var desired []cloudflare.DesiredExposure
+	for _, vm := range planned {
+		if vm.CloudflareHostname == "" {
+			continue
+		}
+		if vm.IPAddress == "" {
+			// network_id/ip_address can drift independently of when
+			// SetVMCloudflareExposure last ran (ADR-0063 finding 4) -
+			// skip rather than build a broken ingress entry pointing
+			// nowhere.
+			continue
+		}
+		desired = append(desired, cloudflare.DesiredExposure{
+			VMID:     vm.ID,
+			Hostname: vm.CloudflareHostname,
+			Address:  fmt.Sprintf("%s:%d", vm.IPAddress, vm.CloudflarePort),
+		})
+	}
+
+	tunnelTarget := r.CloudflareTunnelID + ".cfargotunnel.com"
+	return r.Cloudflare.ReconcileExposures(ctx, r.CloudflareToken, r.CloudflareZoneID, tunnelTarget, r.CloudflareTunnelID, r.CloudflareTunnelCredentialsFile, desired)
 }
 
 // fetchNetworks reads every current network definition from raft,
