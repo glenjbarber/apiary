@@ -50,6 +50,10 @@ func (f *fakeISOPeerClient) OpenVMConsole(context.Context, string, string) (io.R
 	return nil, errors.New("test peer console unavailable")
 }
 
+func (f *fakeISOPeerClient) GetNodeConfig(context.Context, string) (*rpcpb.GetNodeConfigResponse, error) {
+	return &rpcpb.GetNodeConfigResponse{}, nil
+}
+
 func (f *fakeISOPeerClient) ListISOs(_ context.Context, addr string) (*rpcpb.ListISOsResponse, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()

@@ -59,6 +59,7 @@ type peerHostStatsClient interface {
 	GetVMSerialLog(ctx context.Context, addr, id string) (*rpcpb.GetVMSerialLogResponse, error)
 	GetVMConsole(ctx context.Context, addr, id string) (*rpcpb.GetVMConsoleResponse, error)
 	OpenVMConsole(ctx context.Context, addr, id string) (io.ReadWriteCloser, error)
+	GetNodeConfig(ctx context.Context, addr string) (*rpcpb.GetNodeConfigResponse, error)
 }
 
 // clusterNodeView is the template-facing shape for one row on the

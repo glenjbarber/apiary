@@ -36,7 +36,8 @@ type pageData struct {
 
 	// Nodes lists known raft cluster member IDs, for the create-VM form's
 	// node picker. Only populated for the New VM page.
-	Nodes []string
+	Nodes          []string
+	PlacementHives []placementHiveView
 
 	// LocalNodeID is this managerd's own node id (StatusResponse's
 	// ManagerNodeId), used to pre-select the New VM form's Owner Node
@@ -919,7 +920,8 @@ func (s *Server) handleNewVMPage(w http.ResponseWriter, r *http.Request) {
 	}
 	clusterISOs, _ := s.currentClusterISOs(r)
 	networks, _ := s.currentNetworks(r)
-	s.render(w, "new_vm_page", s.withAuthFields(r, pageData{Nodes: nodes, LocalNodeID: localNodeID, ClusterISOs: clusterISOs, Networks: networks, ActivePage: "vms"}))
+	placements := s.currentPlacementHives(r, nodes, localNodeID)
+	s.render(w, "new_vm_page", s.withAuthFields(r, pageData{Nodes: nodes, LocalNodeID: localNodeID, ClusterISOs: clusterISOs, Networks: networks, PlacementHives: placements, ActivePage: "vms"}))
 }
 
 // currentNetworks fetches the current list of networks, returning an
@@ -1397,7 +1399,8 @@ func (s *Server) handleJailPanel(w http.ResponseWriter, r *http.Request) {
 // inline on the list.
 func (s *Server) handleNewJailPage(w http.ResponseWriter, r *http.Request) {
 	nodes, _ := s.knownNodes(r)
-	s.render(w, "new_jail_page", s.withAuthFields(r, pageData{Nodes: nodes, ActivePage: "jails"}))
+	localNodeID := s.localNodeID(r)
+	s.render(w, "new_jail_page", s.withAuthFields(r, pageData{Nodes: nodes, LocalNodeID: localNodeID, PlacementHives: s.currentPlacementHives(r, nodes, localNodeID), ActivePage: "jails"}))
 }
 
 // handleCreateJail mirrors handleCreateVM exactly: redirect back to the

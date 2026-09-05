@@ -7,6 +7,7 @@
   <main class="content" id="main-content">
   {{template "page_header" (pageHeader "Create jail" "Define a FreeBSD jail's identity and placement." "<a href='/jails'>Cancel</a>")}}
   <form class="create-vm inline-form panel" style="margin-top:1rem" hx-post="/jails" hx-target="#create-error" hx-swap="innerHTML">
+    {{if .PlacementHives}}<p class="field-help">Jail placement is manual. {{range .PlacementHives}}<br>{{.NodeID}}: {{if .ProbeError}}<span class="error">unreachable</span>{{else if .JailKnown}}{{if .JailCapable}}<span class="success">jail provisioning enabled</span>{{else}}<span class="error">jail provisioning disabled</span>{{end}}{{else}}<em>uses startup jail setting</em>{{end}}{{end}}</p>{{end}}
     <label>ID <input type="text" name="id" required></label>
     <label>Name <input type="text" name="name"></label>
     <label>Hostname <input type="text" name="hostname"></label>

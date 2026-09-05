@@ -105,6 +105,10 @@ func (f *fakePeerHostStatsClient) OpenVMConsole(_ context.Context, addr, _ strin
 	return nil, errors.New("test peer console unavailable")
 }
 
+func (f *fakePeerHostStatsClient) GetNodeConfig(_ context.Context, addr string) (*rpcpb.GetNodeConfigResponse, error) {
+	return &rpcpb.GetNodeConfigResponse{}, nil
+}
+
 func TestServer_ClusterOverviewPage_UnreachableNodeShowsError(t *testing.T) {
 	client := &fakeClient{
 		statusResp: &rpcpb.StatusResponse{ManagerNodeId: "apiarium", KnownNodeIds: []string{"apiarium", "freebsd-apiary"}},
