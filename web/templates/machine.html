@@ -33,6 +33,30 @@
   </div>
 
   <div class="panel">
+    <h3>Cloudflare Tunnel exposure</h3>
+    <p class="muted">
+      Lets a Cell's own HTTP service be reached at a public hostname
+      through a Cloudflare Tunnel, without opening any inbound port on
+      this Hive - see <code>docs/adr/0063-cloudflare-tunnel-exposure-v1.md</code>
+      in the repository. Set per-Cell on each VM's own detail page, once
+      configured here.
+    </p>
+    {{if .CloudflareConfigured}}
+    <p><span class="badge true">configured</span> This Hive's managerd has Cloudflare Tunnel exposure enabled.</p>
+    {{else}}
+    <p><span class="badge unknown">not configured</span> This Hive's managerd has no Cloudflare Tunnel exposure configured - Cells on this Hive cannot be exposed until it is.</p>
+    <p class="muted">One-time setup per Hive, done by hand (this project never automates it):</p>
+    <ol>
+      <li>The domain's DNS must already be managed by Cloudflare (its nameservers point at Cloudflare).</li>
+      <li>Install <code>cloudflared</code> on this Hive, then run <code>cloudflared tunnel login</code> and <code>cloudflared tunnel create &lt;hive-name&gt;</code> once - this produces a tunnel id and a credentials JSON file.</li>
+      <li>Create a Cloudflare API token scoped to <strong>Zone:DNS:Edit only</strong> (never Tunnel:Edit or account-level) for the zone Apiary will manage CNAME records in.</li>
+      <li>Start this Hive's <code>managerd</code> with <code>-cloudflare-token-file</code> (path to a file containing only the raw token), <code>-cloudflare-zone-id</code>, <code>-cloudflare-tunnel-id</code>, and <code>-cloudflare-tunnel-credentials-file</code> all set.</li>
+    </ol>
+    <p class="muted">Once set, Apiary automatically creates/updates the DNS CNAME record for each exposed Cell - no manual DNS editing per Cell.</p>
+    {{end}}
+  </div>
+
+  <div class="panel">
     <h3>Dataset quota</h3>
     <p class="muted">
       Set a ZFS quota on a dataset under this node's own storage scope

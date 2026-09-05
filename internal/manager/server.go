@@ -127,6 +127,11 @@ type reconcilerStats interface {
 	LastReconcileAttempt() (time.Time, bool)
 	LastReconcileSuccess() (time.Time, bool)
 	ReconcileInterval() time.Duration
+
+	// CloudflareConfigured backs HostStatsResponse.cloudflare_configured
+	// (ADR-0063) - reusing this already-nil-able dependency rather than
+	// adding a new NewServer parameter just for one more boolean signal.
+	CloudflareConfigured() bool
 }
 
 // assumptionStore is the subset of *assumptions.Manager the server
@@ -1130,6 +1135,7 @@ func (s *Server) HostStats(ctx context.Context, _ *rpcpb.HostStatsRequest) (*rpc
 	// failing" (see ADR-0056).
 	var lastReconcileSuccessUnix, lastReconcileAttemptUnix int64
 	var reconcileIntervalSeconds uint32
+	var cloudflareConfigured bool
 	if s.reconciler != nil {
 		if t, ok := s.reconciler.LastReconcileSuccess(); ok {
 			lastReconcileSuccessUnix = t.Unix()
@@ -1138,6 +1144,7 @@ func (s *Server) HostStats(ctx context.Context, _ *rpcpb.HostStatsRequest) (*rpc
 			lastReconcileAttemptUnix = t.Unix()
 		}
 		reconcileIntervalSeconds = uint32(s.reconciler.ReconcileInterval() / time.Second)
+		cloudflareConfigured = s.reconciler.CloudflareConfigured()
 	}
 
 	return &rpcpb.HostStatsResponse{
@@ -1162,6 +1169,7 @@ func (s *Server) HostStats(ctx context.Context, _ *rpcpb.HostStatsRequest) (*rpc
 		LastReconcileSuccessUnix: lastReconcileSuccessUnix,
 		LastReconcileAttemptUnix: lastReconcileAttemptUnix,
 		ReconcileIntervalSeconds: reconcileIntervalSeconds,
+		CloudflareConfigured:     cloudflareConfigured,
 	}, nil
 }
 

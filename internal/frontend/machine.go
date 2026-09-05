@@ -58,14 +58,29 @@ func (s *Server) handleMachinePage(w http.ResponseWriter, r *http.Request) {
 	nodeID := s.localNodeID(r)
 	cfg, cfgErr := s.currentNodeConfig(r)
 	vms, vmErr := s.currentMachineVMs(r, nodeID)
+	cloudflareConfigured, _ := s.currentCloudflareStatus(r)
 
 	s.render(w, "machine_page", s.withAuthFields(r, pageData{
 		NodeConfig:           cfg,
 		NodeConfigFormError:  cfgErr,
 		MachineVMs:           vms,
 		MachineFirewallError: vmErr,
+		CloudflareConfigured: cloudflareConfigured,
 		ActivePage:           "machine",
 	}))
+}
+
+// currentCloudflareStatus reports whether this node's own managerd has
+// Cloudflare Tunnel exposure configured (ADR-0063) - best-effort, false
+// on a fetch failure rather than an error, since the Machine page's
+// setup-instructions panel is equally correct either way (a fetch
+// failure just means "assume unconfigured, show the setup steps").
+func (s *Server) currentCloudflareStatus(r *http.Request) (bool, string) {
+	resp, err := s.client.HostStats(r.Context(), &rpcpb.HostStatsRequest{})
+	if err != nil {
+		return false, err.Error()
+	}
+	return resp.GetCloudflareConfigured(), ""
 }
 
 // handleUpdateNodeConfig follows the same combined-panel pattern as

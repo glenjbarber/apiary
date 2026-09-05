@@ -1,6 +1,7 @@
 package frontend
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"html/template"
@@ -305,6 +306,13 @@ type pageData struct {
 	// submission's own error, shown alongside the VM detail page's
 	// existing display rather than replacing it - see ADR-0063.
 	VMCloudflareFormError string
+
+	// CloudflareConfigured mirrors HostStatsResponse.cloudflare_configured
+	// for this node - shown on the Machine Configuration page's own
+	// setup-status panel, and used to warn on a VM's detail page when
+	// its owning Hive has no Cloudflare Tunnel configured at all (see
+	// ADR-0063).
+	CloudflareConfigured bool
 }
 
 // userView is one row of the Users page's table.
@@ -751,22 +759,7 @@ func (s *Server) handleVMsPage(w http.ResponseWriter, r *http.Request) {
 // uses the existing GetVM read path, so the page has the same leader-forwarded
 // consistency semantics as the list without introducing another API surface.
 func (s *Server) handleVMPage(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
-	resp, err := s.client.GetVM(r.Context(), &rpcpb.GetVMRequest{Id: id})
-	if err != nil {
-		s.render(w, "vm_page", s.withAuthFields(r, pageData{Error: err.Error(), ActivePage: "vms"}))
-		return
-	}
-	if resp.GetError() != "" {
-		s.render(w, "vm_page", s.withAuthFields(r, pageData{Error: resp.GetError(), ActivePage: "vms"}))
-		return
-	}
-	if !resp.GetFound() {
-		w.WriteHeader(http.StatusNotFound)
-		s.render(w, "vm_page", s.withAuthFields(r, pageData{Error: "virtual machine not found", ActivePage: "vms"}))
-		return
-	}
-	s.render(w, "vm_page", s.withAuthFields(r, pageData{VM: fromRPCVM(resp.GetVm()), ActivePage: "vms"}))
+	s.renderVMPage(w, r, r.PathValue("id"), "")
 }
 
 // handleSetVMCloudflareExposure sets or clears one VM's public
@@ -824,7 +817,29 @@ func (s *Server) renderVMPage(w http.ResponseWriter, r *http.Request, id, formEr
 		s.render(w, "vm_page", s.withAuthFields(r, pageData{Error: "virtual machine not found", ActivePage: "vms"}))
 		return
 	}
-	s.render(w, "vm_page", s.withAuthFields(r, pageData{VM: fromRPCVM(resp.GetVm()), VMCloudflareFormError: formErr, ActivePage: "vms"}))
+	vm := fromRPCVM(resp.GetVm())
+
+	// Best-effort: whether the VM's OWNING Hive (not necessarily this
+	// frontend's own local node) has Cloudflare Tunnel exposure
+	// configured at all (ADR-0063) - a false here just means the
+	// "Public exposure" panel shows a warning, never blocks the rest of
+	// the page from rendering.
+	var cloudflareConfigured bool
+	if vm.NodeID != "" {
+		statusResp, statusErr := s.client.Status(r.Context(), &rpcpb.StatusRequest{})
+		if statusErr == nil {
+			localNodeID := statusResp.GetManagerNodeId()
+			checkCtx, cancel := context.WithTimeout(r.Context(), nodeContextTimeout)
+			if hs, err := s.fetchHostStats(checkCtx, vm.NodeID, localNodeID); err == nil {
+				cloudflareConfigured = hs.GetCloudflareConfigured()
+			}
+			cancel()
+		}
+	}
+
+	s.render(w, "vm_page", s.withAuthFields(r, pageData{
+		VM: vm, VMCloudflareFormError: formErr, CloudflareConfigured: cloudflareConfigured, ActivePage: "vms",
+	}))
 }
 
 // handleImagesPage serves the Images (ISO upload/list) page ("/images").

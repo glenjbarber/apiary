@@ -263,16 +263,18 @@ func TestServer_HostStats(t *testing.T) {
 // fakeReconcilerStats is a fake reconcilerStats for testing HostStats's
 // new reconcile fields (ADR-0056) without a real internal/cluster.Reconciler.
 type fakeReconcilerStats struct {
-	attempt   time.Time
-	attemptOK bool
-	success   time.Time
-	successOK bool
-	interval  time.Duration
+	attempt              time.Time
+	attemptOK            bool
+	success              time.Time
+	successOK            bool
+	interval             time.Duration
+	cloudflareConfigured bool
 }
 
 func (f *fakeReconcilerStats) LastReconcileAttempt() (time.Time, bool) { return f.attempt, f.attemptOK }
 func (f *fakeReconcilerStats) LastReconcileSuccess() (time.Time, bool) { return f.success, f.successOK }
 func (f *fakeReconcilerStats) ReconcileInterval() time.Duration        { return f.interval }
+func (f *fakeReconcilerStats) CloudflareConfigured() bool              { return f.cloudflareConfigured }
 
 func TestHostStats_ReconcileFieldsZeroWhenReconcilerNil(t *testing.T) {
 	s := NewServer(nil, "node-1", &fakeISOManager{}, nil, nil, nil, nil, "", nil, nil, nil, 0, nil)
@@ -284,6 +286,23 @@ func TestHostStats_ReconcileFieldsZeroWhenReconcilerNil(t *testing.T) {
 	}
 	if resp.GetLastReconcileSuccessUnix() != 0 || resp.GetLastReconcileAttemptUnix() != 0 || resp.GetReconcileIntervalSeconds() != 0 {
 		t.Errorf("reconcile fields = %+v, want all-zero with a nil reconciler", resp)
+	}
+	if resp.GetCloudflareConfigured() {
+		t.Errorf("CloudflareConfigured = true, want false with a nil reconciler")
+	}
+}
+
+func TestHostStats_CloudflareConfiguredReflectsReconciler(t *testing.T) {
+	fake := &fakeReconcilerStats{cloudflareConfigured: true}
+	s := NewServer(nil, "node-1", &fakeISOManager{}, nil, nil, nil, nil, "", nil, nil, nil, 0, fake)
+	s.statsGather = func(context.Context) *hoststats.Snapshot { return &hoststats.Snapshot{} }
+
+	resp, err := s.HostStats(context.Background(), &rpcpb.HostStatsRequest{})
+	if err != nil {
+		t.Fatalf("HostStats() error: %v", err)
+	}
+	if !resp.GetCloudflareConfigured() {
+		t.Errorf("CloudflareConfigured = false, want true when the reconciler reports it configured")
 	}
 }
 

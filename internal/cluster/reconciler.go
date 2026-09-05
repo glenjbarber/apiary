@@ -359,6 +359,14 @@ func (r *Reconciler) ReconcileInterval() time.Duration {
 	return r.Interval
 }
 
+// CloudflareConfigured reports whether Cloudflare Tunnel exposure
+// (ADR-0063) is enabled on this node at all - backs
+// HostStatsResponse.cloudflare_configured, mirroring bhyve_configured's
+// own "proves configured, not currently working" framing.
+func (r *Reconciler) CloudflareConfigured() bool {
+	return r.Cloudflare != nil
+}
+
 func unixNanoToTime(nano int64) (time.Time, bool) {
 	if nano == 0 {
 		return time.Time{}, false

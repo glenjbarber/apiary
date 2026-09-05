@@ -3499,8 +3499,16 @@ type HostStatsResponse struct {
 	LastReconcileSuccessUnix int64  `protobuf:"varint,10,opt,name=last_reconcile_success_unix,json=lastReconcileSuccessUnix,proto3" json:"last_reconcile_success_unix,omitempty"`
 	LastReconcileAttemptUnix int64  `protobuf:"varint,11,opt,name=last_reconcile_attempt_unix,json=lastReconcileAttemptUnix,proto3" json:"last_reconcile_attempt_unix,omitempty"`
 	ReconcileIntervalSeconds uint32 `protobuf:"varint,12,opt,name=reconcile_interval_seconds,json=reconcileIntervalSeconds,proto3" json:"reconcile_interval_seconds,omitempty"`
-	unknownFields            protoimpl.UnknownFields
-	sizeCache                protoimpl.SizeCache
+	// cloudflare_configured is true iff this node's managerd was started
+	// with -cloudflare-token-file (and the other three required
+	// -cloudflare-* flags) set - see ADR-0063. Mirrors bhyve_configured's
+	// own "proves configured, not currently working" framing: this does
+	// not confirm cloudflared is actually running or successfully
+	// connected to Cloudflare's edge, only that the feature is enabled on
+	// this node at all.
+	CloudflareConfigured bool `protobuf:"varint,13,opt,name=cloudflare_configured,json=cloudflareConfigured,proto3" json:"cloudflare_configured,omitempty"`
+	unknownFields        protoimpl.UnknownFields
+	sizeCache            protoimpl.SizeCache
 }
 
 func (x *HostStatsResponse) Reset() {
@@ -3615,6 +3623,13 @@ func (x *HostStatsResponse) GetReconcileIntervalSeconds() uint32 {
 		return x.ReconcileIntervalSeconds
 	}
 	return 0
+}
+
+func (x *HostStatsResponse) GetCloudflareConfigured() bool {
+	if x != nil {
+		return x.CloudflareConfigured
+	}
+	return false
 }
 
 type GetVMConsoleRequest struct {
@@ -7813,7 +7828,7 @@ const file_api_rpc_manager_proto_rawDesc = "" +
 	"\aPFStats\x12\x18\n" +
 	"\aenabled\x18\x01 \x01(\bR\aenabled\x12%\n" +
 	"\x0ecurrent_states\x18\x02 \x01(\x04R\rcurrentStates\x12\x18\n" +
-	"\amatches\x18\x03 \x01(\x04R\amatches\"\xb9\x04\n" +
+	"\amatches\x18\x03 \x01(\x04R\amatches\"\xee\x04\n" +
 	"\x11HostStatsResponse\x12\x17\n" +
 	"\anode_id\x18\x01 \x01(\tR\x06nodeId\x12)\n" +
 	"\x03cpu\x18\x02 \x01(\v2\x17.apiary.rpc.v1.CPUStatsR\x03cpu\x12)\n" +
@@ -7827,7 +7842,8 @@ const file_api_rpc_manager_proto_rawDesc = "" +
 	"\x1blast_reconcile_success_unix\x18\n" +
 	" \x01(\x03R\x18lastReconcileSuccessUnix\x12=\n" +
 	"\x1blast_reconcile_attempt_unix\x18\v \x01(\x03R\x18lastReconcileAttemptUnix\x12<\n" +
-	"\x1areconcile_interval_seconds\x18\f \x01(\rR\x18reconcileIntervalSeconds\"%\n" +
+	"\x1areconcile_interval_seconds\x18\f \x01(\rR\x18reconcileIntervalSeconds\x123\n" +
+	"\x15cloudflare_configured\x18\r \x01(\bR\x14cloudflareConfigured\"%\n" +
 	"\x13GetVMConsoleRequest\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\"r\n" +
 	"\x14GetVMConsoleResponse\x12\x12\n" +

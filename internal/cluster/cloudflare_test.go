@@ -141,3 +141,14 @@ func TestReconciler_RunOnce_CloudflareNilCallsStopIfRunning(t *testing.T) {
 		t.Fatalf("RunOnce() error: %v", err)
 	}
 }
+
+func TestReconciler_CloudflareConfigured(t *testing.T) {
+	r := &Reconciler{}
+	if r.CloudflareConfigured() {
+		t.Errorf("CloudflareConfigured() = true, want false with Cloudflare unset")
+	}
+	r.Cloudflare = &fakeCloudflareManager{}
+	if !r.CloudflareConfigured() {
+		t.Errorf("CloudflareConfigured() = false, want true with Cloudflare set")
+	}
+}

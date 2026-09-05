@@ -60,6 +60,9 @@
     <section class="panel">
       <h3>Public exposure</h3>
       <p class="muted">Reachable via a pre-provisioned Cloudflare Tunnel on this VM's owning Hive - requires a network and a running HTTP service on the given port. See ADR-0063.</p>
+      {{if not .CloudflareConfigured}}
+      <div class="banner-error">This VM's owning Hive has no Cloudflare Tunnel configured (or its status could not be confirmed) - setting a hostname here will have no effect until the Hive's managerd is started with -cloudflare-token-file/-cloudflare-zone-id/-cloudflare-tunnel-id/-cloudflare-tunnel-credentials-file set. See <a href="/machine">Machine Configuration</a> for setup steps.</div>
+      {{end}}
       {{if .VM.CloudflareHostname}}
       <dl class="detail-list">
         <div><dt>Public hostname</dt><dd><a href="https://{{.VM.CloudflareHostname}}" target="_blank" rel="noopener">{{.VM.CloudflareHostname}}</a></dd></div>
