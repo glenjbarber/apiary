@@ -158,6 +158,12 @@ each design decision, in order.
   two real bugs in the HAST role-reconciliation logic VM replication
   already shared, both now covered by regression tests. See
   [ADR-0027](docs/adr/0027-jail-orchestration.md).
+- **Cell lifecycle controls** — Operators can Stop, Start, or Restart a
+  VM or jail from the web UI. Stop removes only the live bhyve or jail
+  process while preserving the Cell definition and ZFS or HAST storage.
+  Restart is durable desired state: reconciliation confirms the Cell has
+  stopped before returning it to running, rather than depending on two
+  racing client requests.
 - **Resource reclaim** — a VM reassigned to a different node no longer
   leaks its old node's dataset/bhyve VM: the reconciler detects and
   tears down its own leftover resources under a VM ID that's been

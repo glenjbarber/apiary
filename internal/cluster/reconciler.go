@@ -46,6 +46,7 @@ const (
 	PhaseReady    = "ready"
 	PhaseDeleting = "deleting"
 	PhaseError    = "error"
+	PhaseStopped  = "stopped"
 )
 
 // raftClient is the subset of *manager.RaftClient the reconciler needs.
@@ -428,6 +429,8 @@ func (r *Reconciler) RunOnce(ctx context.Context) (err error) {
 			Vcpus:              vm.GetVcpus(),
 			MemoryMB:           vm.GetMemoryMb(),
 			Deleting:           vm.GetDesiredState() == internalpb.VMState_VM_STATE_DELETING,
+			Stopped:            vm.GetDesiredState() == internalpb.VMState_VM_STATE_STOPPED,
+			Restarting:         vm.GetDesiredState() == internalpb.VMState_VM_STATE_RESTARTING,
 			Phase:              phaseToString(vm.GetPhase()),
 			ISOName:            vm.GetIsoName(),
 			NetworkID:          vm.GetNetworkId(),
@@ -479,6 +482,8 @@ func (r *Reconciler) RunOnce(ctx context.Context) (err error) {
 				Hostname:      j.GetHostname(),
 				NodeID:        j.GetNodeId(),
 				Deleting:      j.GetDesiredState() == internalpb.JailState_JAIL_STATE_DELETING,
+				Stopped:       j.GetDesiredState() == internalpb.JailState_JAIL_STATE_STOPPED,
+				Restarting:    j.GetDesiredState() == internalpb.JailState_JAIL_STATE_RESTARTING,
 				Phase:         jailPhaseToString(j.GetPhase()),
 				ReplicaNodeID: j.GetReplicaNodeId(),
 			})
@@ -632,6 +637,11 @@ func (r *Reconciler) reconcileCloudflareTunnel(ctx context.Context, planned []VM
 
 	var desired []cloudflare.DesiredExposure
 	for _, vm := range planned {
+		if vm.Stopped || vm.Restarting {
+			// A stopped or restart-pending Cell must not retain a public
+			// ingress route while its local service is deliberately absent.
+			continue
+		}
 		if vm.CloudflareHostname == "" {
 			continue
 		}
@@ -681,6 +691,19 @@ func (r *Reconciler) reconcileVM(ctx context.Context, vm VMPlacement, networks m
 	if vm.Deleting {
 		return r.teardownVM(ctx, vm)
 	}
+	if vm.Stopped || vm.Restarting {
+		if err := r.stopVM(ctx, vm); err != nil {
+			r.applyPhase(ctx, vm.ID, PhaseError, err.Error())
+			return err
+		}
+		if vm.Restarting {
+			if err := r.setVMDesiredState(ctx, vm.ID, internalpb.VMState_VM_STATE_RUNNING); err != nil {
+				r.applyPhase(ctx, vm.ID, PhaseError, err.Error())
+				return err
+			}
+		}
+		return nil
+	}
 
 	if vm.Phase != PhaseReady && vm.Phase != PhaseCreating {
 		r.applyPhase(ctx, vm.ID, PhaseCreating, "")
@@ -691,6 +714,48 @@ func (r *Reconciler) reconcileVM(ctx context.Context, vm VMPlacement, networks m
 	}
 	if vm.Phase != PhaseReady {
 		r.applyPhase(ctx, vm.ID, PhaseReady, "")
+	}
+	return nil
+}
+
+// stopVM removes only the live bhyve process and its transient devices. It
+// deliberately keeps ZFS or HAST storage and the raft record intact.
+func (r *Reconciler) stopVM(ctx context.Context, vm VMPlacement) error {
+	if r.Bhyve == nil {
+		return fmt.Errorf("cannot stop VM %q: no bhyve lifecycle driver is configured on the owning node", vm.ID)
+	}
+	running, err := r.Bhyve.VMExists(ctx, vm.ID)
+	if err != nil {
+		return fmt.Errorf("checking bhyve VM: %w", err)
+	}
+	if running {
+		if err := r.Bhyve.DestroyVM(ctx, vm.ID); err != nil {
+			return fmt.Errorf("stopping bhyve VM: %w", err)
+		}
+	}
+	if r.PF != nil {
+		if err := r.PF.Flush(ctx, vmAnchor(vm.ID)); err != nil {
+			return fmt.Errorf("flushing firewall rules: %w", err)
+		}
+	}
+	if vm.Phase != PhaseStopped {
+		r.applyPhase(ctx, vm.ID, PhaseStopped, "")
+	}
+	return nil
+}
+
+func (r *Reconciler) setVMDesiredState(ctx context.Context, id string, state internalpb.VMState) error {
+	cmd := &internalpb.Command{Op: &internalpb.Command_SetVmDesiredState{SetVmDesiredState: &internalpb.SetVMDesiredState{Id: id, DesiredState: state}}}
+	data, err := proto.Marshal(cmd)
+	if err != nil {
+		return fmt.Errorf("marshaling SetVMDesiredState: %w", err)
+	}
+	resp, err := r.Raft.Apply(ctx, data, phaseApplyTimeout)
+	if err != nil {
+		return fmt.Errorf("setting VM desired state: %w", err)
+	}
+	if resp.GetError() != "" {
+		return fmt.Errorf("setting VM desired state: %s", resp.GetError())
 	}
 	return nil
 }
@@ -871,6 +936,8 @@ func phaseToString(p internalpb.VMPhase) string {
 		return PhaseDeleting
 	case internalpb.VMPhase_VM_PHASE_ERROR:
 		return PhaseError
+	case internalpb.VMPhase_VM_PHASE_STOPPED:
+		return PhaseStopped
 	default:
 		return ""
 	}
@@ -886,6 +953,8 @@ func phaseFromString(p string) internalpb.VMPhase {
 		return internalpb.VMPhase_VM_PHASE_DELETING
 	case PhaseError:
 		return internalpb.VMPhase_VM_PHASE_ERROR
+	case PhaseStopped:
+		return internalpb.VMPhase_VM_PHASE_STOPPED
 	default:
 		return internalpb.VMPhase_VM_PHASE_UNSPECIFIED
 	}

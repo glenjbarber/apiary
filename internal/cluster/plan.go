@@ -35,6 +35,12 @@ type VMPlacement struct {
 	// down instead of provisioning them.
 	Deleting bool
 
+	// Stopped preserves the Cell and all of its storage while ensuring its
+	// local bhyve process is absent. Restarting asks the reconciler to stop
+	// it, record that fact, then return its desired state to running.
+	Stopped    bool
+	Restarting bool
+
 	// Phase is the last phase this reconciler itself recorded for this
 	// VM ("", "creating", "ready", "deleting", "error") - read back so a
 	// tick doesn't redundantly re-submit a phase update it already made.
@@ -97,7 +103,9 @@ type JailPlacement struct {
 	// Deleting is true once the jail has been soft-deleted (see
 	// JAIL_STATE_DELETING) - ensureJail tears its resources down
 	// instead of provisioning them.
-	Deleting bool
+	Deleting   bool
+	Stopped    bool
+	Restarting bool
 
 	// Phase is the last phase this reconciler itself recorded for this
 	// jail, mirroring VMPlacement.Phase.

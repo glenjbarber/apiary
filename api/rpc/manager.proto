@@ -71,6 +71,11 @@ service ManagerService {
   // address for a Tunnel to proxy to.
   rpc SetVMCloudflareExposure(SetVMCloudflareExposureRequest) returns (SetVMCloudflareExposureResponse);
 
+  // SetVMDesiredState changes only a VM lifecycle target. It does not
+  // replace the rest of the VM definition. DeleteVM remains the only
+  // operation that marks a VM for deletion.
+  rpc SetVMDesiredState(SetVMDesiredStateRequest) returns (SetVMDesiredStateResponse);
+
   // GetVM and ListVMs only succeed against the current leader - see
   // api/internalpb/raftd.proto's GetVM/ListVMs doc comments for why v1's
   // read consistency model is deliberately as simple as its write model.
@@ -160,6 +165,8 @@ service ManagerService {
   rpc CreateJail(CreateJailRequest) returns (CreateJailResponse);
   rpc UpdateJail(UpdateJailRequest) returns (UpdateJailResponse);
   rpc DeleteJail(DeleteJailRequest) returns (DeleteJailResponse);
+  // SetJailDesiredState mirrors SetVMDesiredState for jails.
+  rpc SetJailDesiredState(SetJailDesiredStateRequest) returns (SetJailDesiredStateResponse);
   rpc GetJail(GetJailRequest) returns (GetJailResponse);
   rpc ListJails(ListJailsRequest) returns (ListJailsResponse);
 
@@ -266,6 +273,7 @@ enum VMState {
   // resources - see ADR-0016. The record disappears from ListVMs once
   // that completes.
   VM_STATE_DELETING = 3;
+  VM_STATE_RESTARTING = 4;
 }
 
 // VMPhase mirrors api/internalpb's VMPhase: the reconciler's own observed
@@ -277,6 +285,7 @@ enum VMPhase {
   VM_PHASE_READY = 2;
   VM_PHASE_DELETING = 3;
   VM_PHASE_ERROR = 4;
+  VM_PHASE_STOPPED = 5;
 }
 
 message VMDefinition {
@@ -344,6 +353,7 @@ enum JailState {
   JAIL_STATE_STOPPED = 1;
   JAIL_STATE_RUNNING = 2;
   JAIL_STATE_DELETING = 3;
+  JAIL_STATE_RESTARTING = 4;
 }
 
 // JailPhase mirrors api/internalpb's JailPhase.
@@ -353,6 +363,7 @@ enum JailPhase {
   JAIL_PHASE_READY = 2;
   JAIL_PHASE_DELETING = 3;
   JAIL_PHASE_ERROR = 4;
+  JAIL_PHASE_STOPPED = 5;
 }
 
 // JailDefinition mirrors api/internalpb's JailDefinition, deliberately
@@ -494,6 +505,18 @@ message SetVMCloudflareExposureRequest {
 
 message SetVMCloudflareExposureResponse {
   // vm is the updated definition, echoed back for confirmation.
+  VMDefinition vm = 1;
+  string error = 2;
+  string leader_hint = 3;
+}
+
+message SetVMDesiredStateRequest {
+  string id = 1;
+  VMState desired_state = 2;
+  uint32 timeout_ms = 3;
+}
+
+message SetVMDesiredStateResponse {
   VMDefinition vm = 1;
   string error = 2;
   string leader_hint = 3;
@@ -941,6 +964,18 @@ message DeleteJailRequest {
 }
 
 message DeleteJailResponse {
+  JailDefinition jail = 1;
+  string error = 2;
+  string leader_hint = 3;
+}
+
+message SetJailDesiredStateRequest {
+  string id = 1;
+  JailState desired_state = 2;
+  uint32 timeout_ms = 3;
+}
+
+message SetJailDesiredStateResponse {
   JailDefinition jail = 1;
   string error = 2;
   string leader_hint = 3;

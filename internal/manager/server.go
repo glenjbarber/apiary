@@ -89,8 +89,10 @@ type PeerForwarder interface {
 	MigrateVM(ctx context.Context, addr string, req *rpcpb.MigrateVMRequest) (*rpcpb.MigrateVMResponse, error)
 	SetVMFirewallPaused(ctx context.Context, addr string, req *rpcpb.SetVMFirewallPausedRequest) (*rpcpb.SetVMFirewallPausedResponse, error)
 	SetVMCloudflareExposure(ctx context.Context, addr string, req *rpcpb.SetVMCloudflareExposureRequest) (*rpcpb.SetVMCloudflareExposureResponse, error)
+	SetVMDesiredState(ctx context.Context, addr string, req *rpcpb.SetVMDesiredStateRequest) (*rpcpb.SetVMDesiredStateResponse, error)
 	ForcePurgeJail(ctx context.Context, addr string, req *rpcpb.ForcePurgeJailRequest) (*rpcpb.ForcePurgeJailResponse, error)
 	MigrateJail(ctx context.Context, addr string, req *rpcpb.MigrateJailRequest) (*rpcpb.MigrateJailResponse, error)
+	SetJailDesiredState(ctx context.Context, addr string, req *rpcpb.SetJailDesiredStateRequest) (*rpcpb.SetJailDesiredStateResponse, error)
 
 	// UploadISO streams a local file to addr's own UploadISO RPC - used
 	// by PushISOTo (the source node's side of on-demand image fetching,
@@ -754,6 +756,22 @@ func (s *Server) SetVMCloudflareExposure(ctx context.Context, req *rpcpb.SetVMCl
 		}
 	}
 	return &rpcpb.SetVMCloudflareExposureResponse{Vm: fromInternalVM(vm), Error: appErr, LeaderHint: leaderHint}, nil
+}
+
+// SetVMDesiredState changes only a VM lifecycle target. Unlike UpdateVM it is
+// an atomic FSM operation, so a Stop, Start, or Restart request cannot erase
+// unrelated configuration from a concurrent full-record edit.
+func (s *Server) SetVMDesiredState(ctx context.Context, req *rpcpb.SetVMDesiredStateRequest) (*rpcpb.SetVMDesiredStateResponse, error) {
+	cmd := &internalpb.Command{Op: &internalpb.Command_SetVmDesiredState{SetVmDesiredState: &internalpb.SetVMDesiredState{
+		Id: req.GetId(), DesiredState: internalpb.VMState(req.GetDesiredState()),
+	}}}
+	vm, appErr, leaderHint := s.applyCommand(ctx, cmd, req.GetTimeoutMs())
+	if leaderHint != "" && s.peers != nil {
+		if fwd, ferr := s.peers.SetVMDesiredState(ctx, s.peerManagerdAddr(leaderHint), req); ferr == nil {
+			return fwd, nil
+		}
+	}
+	return &rpcpb.SetVMDesiredStateResponse{Vm: fromInternalVM(vm), Error: appErr, LeaderHint: leaderHint}, nil
 }
 
 // ForcePurgeVM implements rpcpb.ManagerServiceServer. It's an escape
@@ -1463,6 +1481,20 @@ func (s *Server) DeleteJail(ctx context.Context, req *rpcpb.DeleteJailRequest) (
 		}
 	}
 	return &rpcpb.DeleteJailResponse{Jail: fromInternalJail(jail), Error: appErr, LeaderHint: leaderHint}, nil
+}
+
+// SetJailDesiredState mirrors SetVMDesiredState for jails.
+func (s *Server) SetJailDesiredState(ctx context.Context, req *rpcpb.SetJailDesiredStateRequest) (*rpcpb.SetJailDesiredStateResponse, error) {
+	cmd := &internalpb.Command{Op: &internalpb.Command_SetJailDesiredState{SetJailDesiredState: &internalpb.SetJailDesiredState{
+		Id: req.GetId(), DesiredState: internalpb.JailState(req.GetDesiredState()),
+	}}}
+	jail, appErr, leaderHint := s.applyJailCommand(ctx, cmd, req.GetTimeoutMs())
+	if leaderHint != "" && s.peers != nil {
+		if fwd, ferr := s.peers.SetJailDesiredState(ctx, s.peerManagerdAddr(leaderHint), req); ferr == nil {
+			return fwd, nil
+		}
+	}
+	return &rpcpb.SetJailDesiredStateResponse{Jail: fromInternalJail(jail), Error: appErr, LeaderHint: leaderHint}, nil
 }
 
 // GetJail implements rpcpb.ManagerServiceServer.

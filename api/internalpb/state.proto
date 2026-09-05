@@ -27,6 +27,11 @@ enum VMState {
   // notices this, tears down its real dataset/bhyve VM, then submits
   // PurgeVM to remove the record for good - see ADR-0016.
   VM_STATE_DELETING = 3;
+
+  // VM_STATE_RESTARTING is a durable stop-then-start request. The
+  // reconciler records stopped physical state before returning it to
+  // VM_STATE_RUNNING; it never relies on two racing client writes.
+  VM_STATE_RESTARTING = 4;
 }
 
 // VMPhase is the reconciler's own observed progress toward a VM's
@@ -39,6 +44,7 @@ enum VMPhase {
   VM_PHASE_READY = 2;
   VM_PHASE_DELETING = 3;
   VM_PHASE_ERROR = 4;
+  VM_PHASE_STOPPED = 5;
 }
 
 // VMDefinition is a VM's ephemeral definition: its identity, resource
@@ -146,6 +152,7 @@ enum JailState {
   // JAIL_STATE_DELETING is a soft-delete tombstone, exactly like
   // VM_STATE_DELETING - see its doc comment above.
   JAIL_STATE_DELETING = 3;
+  JAIL_STATE_RESTARTING = 4;
 }
 
 // JailPhase is the reconciler's own observed progress toward a jail's
@@ -156,6 +163,7 @@ enum JailPhase {
   JAIL_PHASE_READY = 2;
   JAIL_PHASE_DELETING = 3;
   JAIL_PHASE_ERROR = 4;
+  JAIL_PHASE_STOPPED = 5;
 }
 
 // JailDefinition is a jail's ephemeral definition, deliberately minimal
@@ -296,6 +304,11 @@ message Command {
     // the exact same reasoning as SetVMFirewallPaused above. See
     // ADR-0063.
     SetVMCloudflareExposure set_vm_cloudflare_exposure = 16;
+
+    // Lifecycle commands change only desired_state, never replacing a
+    // Cell's complete definition.
+    SetVMDesiredState set_vm_desired_state = 17;
+    SetJailDesiredState set_jail_desired_state = 18;
   }
 }
 
@@ -398,6 +411,13 @@ message SetVMCloudflareExposure {
   uint32 port = 3;
 }
 
+// SetVMDesiredState changes only a VM's desired lifecycle state.
+// Deletion remains DeleteVM's separate tombstone operation.
+message SetVMDesiredState {
+  string id = 1;
+  VMState desired_state = 2;
+}
+
 // PurgeVM removes a VM definition outright, regardless of its current
 // phase. Submitted only by the owning node's reconciler, after it has
 // confirmed the VM's real local resources are torn down. Idempotent: not
@@ -431,6 +451,12 @@ message UpdateJailPhase {
   string id = 1;
   JailPhase phase = 2;
   string phase_error = 3;
+}
+
+// SetJailDesiredState mirrors SetVMDesiredState for jails.
+message SetJailDesiredState {
+  string id = 1;
+  JailState desired_state = 2;
 }
 
 // PurgeJail removes a jail definition outright, mirroring PurgeVM

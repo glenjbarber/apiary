@@ -150,6 +150,14 @@ func (f *fakeClient) SetVMCloudflareExposure(context.Context, *rpcpb.SetVMCloudf
 	return &rpcpb.SetVMCloudflareExposureResponse{}, nil
 }
 
+func (f *fakeClient) SetVMDesiredState(context.Context, *rpcpb.SetVMDesiredStateRequest, ...grpc.CallOption) (*rpcpb.SetVMDesiredStateResponse, error) {
+	return &rpcpb.SetVMDesiredStateResponse{}, nil
+}
+
+func (f *fakeClient) SetJailDesiredState(context.Context, *rpcpb.SetJailDesiredStateRequest, ...grpc.CallOption) (*rpcpb.SetJailDesiredStateResponse, error) {
+	return &rpcpb.SetJailDesiredStateResponse{}, nil
+}
+
 func (f *fakeClient) GetNodeConfig(context.Context, *rpcpb.GetNodeConfigRequest, ...grpc.CallOption) (*rpcpb.GetNodeConfigResponse, error) {
 	return &rpcpb.GetNodeConfigResponse{}, nil
 }

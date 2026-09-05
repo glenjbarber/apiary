@@ -57,6 +57,17 @@
       <div class="actions"><a class="button" href="/vms/{{.VM.ID}}/console">Console</a><a class="button secondary" href="/vms/{{.VM.ID}}/serial">Serial log</a></div>
     </section>
 
+    {{if and .CanOperate (ne .VM.DesiredState "deleting")}}
+    <section class="panel vm-controls">
+      <div><h3>Lifecycle</h3><p class="muted">Stop preserves this VM's storage and definition. Restart waits for the owning Hive to stop it before starting it again.</p></div>
+      <form method="post" action="/vms/{{.VM.ID}}/lifecycle" class="actions">
+        {{if ne .VM.DesiredState "stopped"}}<button name="action" value="stop" class="secondary" type="submit">Stop</button>{{end}}
+        {{if ne .VM.DesiredState "running"}}<button name="action" value="start" type="submit">Start</button>{{end}}
+        {{if eq .VM.DesiredState "running"}}<button name="action" value="restart" type="submit">Restart</button>{{end}}
+      </form>
+    </section>
+    {{end}}
+
     <section class="panel">
       <h3>Public exposure</h3>
       <p class="muted">Reachable via a pre-provisioned Cloudflare Tunnel on this VM's owning Hive - requires a network and a running HTTP service on the given port. See ADR-0063.</p>

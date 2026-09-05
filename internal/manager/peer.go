@@ -504,6 +504,15 @@ func (p *PeerReporter) SetVMCloudflareExposure(ctx context.Context, addr string,
 	return client.SetVMCloudflareExposure(ctx, req)
 }
 
+func (p *PeerReporter) SetVMDesiredState(ctx context.Context, addr string, req *rpcpb.SetVMDesiredStateRequest) (*rpcpb.SetVMDesiredStateResponse, error) {
+	conn, client, err := p.dial(addr)
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close()
+	return client.SetVMDesiredState(ctx, req)
+}
+
 func (p *PeerReporter) ForcePurgeJail(ctx context.Context, addr string, req *rpcpb.ForcePurgeJailRequest) (*rpcpb.ForcePurgeJailResponse, error) {
 	conn, client, err := p.dial(addr)
 	if err != nil {
@@ -520,6 +529,15 @@ func (p *PeerReporter) MigrateJail(ctx context.Context, addr string, req *rpcpb.
 	}
 	defer conn.Close()
 	return client.MigrateJail(ctx, req)
+}
+
+func (p *PeerReporter) SetJailDesiredState(ctx context.Context, addr string, req *rpcpb.SetJailDesiredStateRequest) (*rpcpb.SetJailDesiredStateResponse, error) {
+	conn, client, err := p.dial(addr)
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close()
+	return client.SetJailDesiredState(ctx, req)
 }
 
 func (p *PeerReporter) ReportJailTeardownComplete(ctx context.Context, addr, id string) error {

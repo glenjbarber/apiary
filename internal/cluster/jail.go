@@ -66,6 +66,19 @@ func (r *Reconciler) reconcileJail(ctx context.Context, j JailPlacement, hastDev
 		}
 		return nil
 	}
+	if j.Stopped || j.Restarting {
+		if err := r.stopJail(ctx, j); err != nil {
+			r.applyJailPhase(ctx, j.ID, PhaseError, err.Error())
+			return err
+		}
+		if j.Restarting {
+			if err := r.setJailDesiredState(ctx, j.ID, internalpb.JailState_JAIL_STATE_RUNNING); err != nil {
+				r.applyJailPhase(ctx, j.ID, PhaseError, err.Error())
+				return err
+			}
+		}
+		return nil
+	}
 
 	if j.Phase != PhaseReady && j.Phase != PhaseCreating {
 		r.applyJailPhase(ctx, j.ID, PhaseCreating, "")
@@ -76,6 +89,43 @@ func (r *Reconciler) reconcileJail(ctx context.Context, j JailPlacement, hastDev
 	}
 	if j.Phase != PhaseReady {
 		r.applyJailPhase(ctx, j.ID, PhaseReady, "")
+	}
+	return nil
+}
+
+// stopJail removes only the live jail process. Its dataset or mounted HAST
+// root remains in place so Start can reconcile the same Cell back safely.
+func (r *Reconciler) stopJail(ctx context.Context, j JailPlacement) error {
+	if r.Jail == nil {
+		return fmt.Errorf("cannot stop jail %q: no jail lifecycle driver is configured on the owning node", j.ID)
+	}
+	running, err := r.Jail.JailExists(ctx, j.ID)
+	if err != nil {
+		return fmt.Errorf("checking jail: %w", err)
+	}
+	if running {
+		if err := r.Jail.RemoveJail(ctx, j.ID); err != nil {
+			return fmt.Errorf("stopping jail: %w", err)
+		}
+	}
+	if j.Phase != PhaseStopped {
+		r.applyJailPhase(ctx, j.ID, PhaseStopped, "")
+	}
+	return nil
+}
+
+func (r *Reconciler) setJailDesiredState(ctx context.Context, id string, state internalpb.JailState) error {
+	cmd := &internalpb.Command{Op: &internalpb.Command_SetJailDesiredState{SetJailDesiredState: &internalpb.SetJailDesiredState{Id: id, DesiredState: state}}}
+	data, err := proto.Marshal(cmd)
+	if err != nil {
+		return fmt.Errorf("marshaling SetJailDesiredState: %w", err)
+	}
+	resp, err := r.Raft.Apply(ctx, data, phaseApplyTimeout)
+	if err != nil {
+		return fmt.Errorf("setting jail desired state: %w", err)
+	}
+	if resp.GetError() != "" {
+		return fmt.Errorf("setting jail desired state: %s", resp.GetError())
 	}
 	return nil
 }
@@ -296,6 +346,8 @@ func jailPhaseToString(p internalpb.JailPhase) string {
 		return PhaseDeleting
 	case internalpb.JailPhase_JAIL_PHASE_ERROR:
 		return PhaseError
+	case internalpb.JailPhase_JAIL_PHASE_STOPPED:
+		return PhaseStopped
 	default:
 		return ""
 	}
@@ -311,6 +363,8 @@ func jailPhaseFromString(p string) internalpb.JailPhase {
 		return internalpb.JailPhase_JAIL_PHASE_DELETING
 	case PhaseError:
 		return internalpb.JailPhase_JAIL_PHASE_ERROR
+	case PhaseStopped:
+		return internalpb.JailPhase_JAIL_PHASE_STOPPED
 	default:
 		return internalpb.JailPhase_JAIL_PHASE_UNSPECIFIED
 	}

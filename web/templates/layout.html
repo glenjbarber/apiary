@@ -133,7 +133,9 @@
     .badge.ready, .badge.running, .badge.up, .badge.true, .badge.healthy, .badge.clear { color:var(--success); background:color-mix(in srgb, var(--success) 17%, var(--panel)); }
     .badge.error, .badge.down, .badge.deleting, .badge.false, .badge.blocked { color:var(--danger); background:color-mix(in srgb, var(--danger) 17%, var(--panel)); }
     .badge.creating, .badge.pending, .badge.degraded { color:#765600; background:#fff1b8; }
-    :root[data-theme="dark"] .badge.creating, :root[data-theme="dark"] .badge.pending, :root[data-theme="dark"] .badge.degraded { color:#ffe08a; background:#493b11; }
+    .badge.restarting { color:#765600; background:#fff1b8; }
+    .badge.stopped { color:var(--muted); background:var(--table-head); }
+    :root[data-theme="dark"] .badge.creating, :root[data-theme="dark"] .badge.pending, :root[data-theme="dark"] .badge.degraded, :root[data-theme="dark"] .badge.restarting { color:#ffe08a; background:#493b11; }
     .badge.unknown { color:var(--muted); background:var(--table-head); }
     .badge.not-applicable { color:#6685ef; background:color-mix(in srgb, #6685ef 17%, var(--panel)); }
     .badge.stale { opacity:.65; border:1px dashed var(--muted); }

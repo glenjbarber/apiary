@@ -95,6 +95,8 @@ func (f *FSM) Apply(log *raft.Log) interface{} {
 		return f.applySetVMFirewallPaused(log.Index, op.SetVmFirewallPaused)
 	case *internalpb.Command_SetVmCloudflareExposure:
 		return f.applySetVMCloudflareExposure(log.Index, op.SetVmCloudflareExposure)
+	case *internalpb.Command_SetVmDesiredState:
+		return f.applySetVMDesiredState(log.Index, op.SetVmDesiredState)
 	case *internalpb.Command_CreateNetwork:
 		return f.applyCreateNetwork(log.Index, op.CreateNetwork.GetNetwork())
 	case *internalpb.Command_DeleteNetwork:
@@ -113,6 +115,8 @@ func (f *FSM) Apply(log *raft.Log) interface{} {
 		return f.applyUpdateJailPhase(log.Index, op.UpdateJailPhase)
 	case *internalpb.Command_PurgeJail:
 		return f.applyPurgeJail(log.Index, op.PurgeJail.GetId())
+	case *internalpb.Command_SetJailDesiredState:
+		return f.applySetJailDesiredState(log.Index, op.SetJailDesiredState)
 	default:
 		return &FSMApplyResult{Index: log.Index, Error: "command has no op set"}
 	}
@@ -290,6 +294,28 @@ func (f *FSM) applySetVMCloudflareExposure(index uint64, req *internalpb.SetVMCl
 	return &FSMApplyResult{Index: index, VM: updated}
 }
 
+// applySetVMDesiredState changes only desired_state. Deletion is kept on
+// DeleteVM's separate tombstone path so a lifecycle control cannot discard a
+// Cell's storage or record.
+func (f *FSM) applySetVMDesiredState(index uint64, req *internalpb.SetVMDesiredState) *FSMApplyResult {
+	vm, exists := f.vms[req.GetId()]
+	if !exists {
+		return &FSMApplyResult{Index: index, Error: fmt.Sprintf("SetVMDesiredState: id %q does not exist", req.GetId())}
+	}
+	if vm.GetDesiredState() == internalpb.VMState_VM_STATE_DELETING {
+		return &FSMApplyResult{Index: index, Error: fmt.Sprintf("SetVMDesiredState: VM %q is marked for deletion", req.GetId())}
+	}
+	switch req.GetDesiredState() {
+	case internalpb.VMState_VM_STATE_STOPPED, internalpb.VMState_VM_STATE_RUNNING, internalpb.VMState_VM_STATE_RESTARTING:
+	default:
+		return &FSMApplyResult{Index: index, Error: "SetVMDesiredState: desired_state must be stopped, running, or restarting"}
+	}
+	updated := proto.Clone(vm).(*internalpb.VMDefinition)
+	updated.DesiredState = req.GetDesiredState()
+	f.vms[req.GetId()] = updated
+	return &FSMApplyResult{Index: index, VM: updated}
+}
+
 // applyPurgeVM removes a VM definition outright. Idempotent: purging an
 // id that's already gone is not an error, since the reconciler that
 // submits this may retry after a partial failure (e.g. it purged
@@ -350,6 +376,27 @@ func (f *FSM) applyUpdateJailPhase(index uint64, upd *internalpb.UpdateJailPhase
 	updated.Phase = upd.GetPhase()
 	updated.PhaseError = upd.GetPhaseError()
 	f.jails[upd.GetId()] = updated
+	return &FSMApplyResult{Index: index, Jail: updated}
+}
+
+// applySetJailDesiredState mirrors applySetVMDesiredState and preserves all
+// jail configuration and storage intent while changing only lifecycle state.
+func (f *FSM) applySetJailDesiredState(index uint64, req *internalpb.SetJailDesiredState) *FSMApplyResult {
+	jail, exists := f.jails[req.GetId()]
+	if !exists {
+		return &FSMApplyResult{Index: index, Error: fmt.Sprintf("SetJailDesiredState: id %q does not exist", req.GetId())}
+	}
+	if jail.GetDesiredState() == internalpb.JailState_JAIL_STATE_DELETING {
+		return &FSMApplyResult{Index: index, Error: fmt.Sprintf("SetJailDesiredState: jail %q is marked for deletion", req.GetId())}
+	}
+	switch req.GetDesiredState() {
+	case internalpb.JailState_JAIL_STATE_STOPPED, internalpb.JailState_JAIL_STATE_RUNNING, internalpb.JailState_JAIL_STATE_RESTARTING:
+	default:
+		return &FSMApplyResult{Index: index, Error: "SetJailDesiredState: desired_state must be stopped, running, or restarting"}
+	}
+	updated := proto.Clone(jail).(*internalpb.JailDefinition)
+	updated.DesiredState = req.GetDesiredState()
+	f.jails[req.GetId()] = updated
 	return &FSMApplyResult{Index: index, Jail: updated}
 }
 

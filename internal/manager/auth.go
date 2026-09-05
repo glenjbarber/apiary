@@ -80,7 +80,7 @@ var requiredRole = map[string]Role{
 	// auth is enabled, with no compile-time signal.
 	"/apiary.rpc.v1.ManagerService/SimulateNodeFailure":    RoleViewer,
 	"/apiary.rpc.v1.ManagerService/SimulateNetworkFailure": RoleViewer,
-	"/apiary.rpc.v1.ManagerService/TraceCellPath":           RoleViewer,
+	"/apiary.rpc.v1.ManagerService/TraceCellPath":          RoleViewer,
 
 	// GetLocalNetworkBridgeStatus/ListAssumptionResults (ADR-0055,
 	// Automated Assumption Checks v1) are both read-only, local-only
@@ -101,11 +101,13 @@ var requiredRole = map[string]Role{
 	"/apiary.rpc.v1.ManagerService/MigrateVM":                  RoleOperator,
 	"/apiary.rpc.v1.ManagerService/SetVMFirewallPaused":        RoleOperator,
 	"/apiary.rpc.v1.ManagerService/SetVMCloudflareExposure":    RoleOperator,
+	"/apiary.rpc.v1.ManagerService/SetVMDesiredState":          RoleOperator,
 	"/apiary.rpc.v1.ManagerService/SetDatasetQuota":            RoleOperator,
 	"/apiary.rpc.v1.ManagerService/CreateJail":                 RoleOperator,
 	"/apiary.rpc.v1.ManagerService/UpdateJail":                 RoleOperator,
 	"/apiary.rpc.v1.ManagerService/DeleteJail":                 RoleOperator,
 	"/apiary.rpc.v1.ManagerService/MigrateJail":                RoleOperator,
+	"/apiary.rpc.v1.ManagerService/SetJailDesiredState":        RoleOperator,
 	"/apiary.rpc.v1.ManagerService/CreateNetwork":              RoleOperator,
 	"/apiary.rpc.v1.ManagerService/DeleteNetwork":              RoleOperator,
 	"/apiary.rpc.v1.ManagerService/UploadISO":                  RoleOperator,

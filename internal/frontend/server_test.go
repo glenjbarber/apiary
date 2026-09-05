@@ -80,6 +80,11 @@ type fakeClient struct {
 	setVMCloudflareExposureResp    *rpcpb.SetVMCloudflareExposureResponse
 	lastSetVMCloudflareExposureReq *rpcpb.SetVMCloudflareExposureRequest
 
+	setVMDesiredStateResp      *rpcpb.SetVMDesiredStateResponse
+	lastSetVMDesiredStateReq   *rpcpb.SetVMDesiredStateRequest
+	setJailDesiredStateResp    *rpcpb.SetJailDesiredStateResponse
+	lastSetJailDesiredStateReq *rpcpb.SetJailDesiredStateRequest
+
 	setDatasetQuotaResp    *rpcpb.SetDatasetQuotaResponse
 	lastSetDatasetQuotaReq *rpcpb.SetDatasetQuotaRequest
 
@@ -167,6 +172,22 @@ func (f *fakeClient) SetVMCloudflareExposure(_ context.Context, in *rpcpb.SetVMC
 		return f.setVMCloudflareExposureResp, nil
 	}
 	return &rpcpb.SetVMCloudflareExposureResponse{}, nil
+}
+
+func (f *fakeClient) SetVMDesiredState(_ context.Context, in *rpcpb.SetVMDesiredStateRequest, _ ...grpc.CallOption) (*rpcpb.SetVMDesiredStateResponse, error) {
+	f.lastSetVMDesiredStateReq = in
+	if f.setVMDesiredStateResp != nil {
+		return f.setVMDesiredStateResp, nil
+	}
+	return &rpcpb.SetVMDesiredStateResponse{}, nil
+}
+
+func (f *fakeClient) SetJailDesiredState(_ context.Context, in *rpcpb.SetJailDesiredStateRequest, _ ...grpc.CallOption) (*rpcpb.SetJailDesiredStateResponse, error) {
+	f.lastSetJailDesiredStateReq = in
+	if f.setJailDesiredStateResp != nil {
+		return f.setJailDesiredStateResp, nil
+	}
+	return &rpcpb.SetJailDesiredStateResponse{}, nil
 }
 
 func (f *fakeClient) GetNodeConfig(context.Context, *rpcpb.GetNodeConfigRequest, ...grpc.CallOption) (*rpcpb.GetNodeConfigResponse, error) {
