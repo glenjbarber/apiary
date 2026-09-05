@@ -11,6 +11,12 @@ option go_package = "github.com/glenjbarber/apiary/api/rpc;rpcpb";
 service ManagerService {
   rpc Status(StatusRequest) returns (StatusResponse);
 
+  // GetLocalNodeHealth reports THIS Hive's Evidence-Aware Health verdict
+  // and the raw observations used to derive it. It never forwards to a
+  // leader: local reconciliation and raft-companion observations belong to
+  // the answering Hive alone.
+  rpc GetLocalNodeHealth(GetLocalNodeHealthRequest) returns (GetLocalNodeHealthResponse);
+
   rpc CreateVM(CreateVMRequest) returns (CreateVMResponse);
   rpc UpdateVM(UpdateVMRequest) returns (UpdateVMResponse);
   rpc DeleteVM(DeleteVMRequest) returns (DeleteVMResponse);
@@ -580,6 +586,31 @@ message StatusResponse {
   // membership arithmetic alone must never be presented as availability
   // proof - see RaftMember's own doc comment.
   repeated RaftMember members = 11;
+}
+
+// GetLocalNodeHealth is intentionally local-only. A caller that needs a
+// Colony view must explicitly call each Hive, preserving "unknown" when a
+// Hive cannot be reached instead of receiving another Hive's health under a
+// misleading label.
+message GetLocalNodeHealthRequest {}
+
+message HealthObservation {
+  string source = 1;
+  int64 observed_unix = 2;
+  uint32 freshness_limit_seconds = 3;
+  string value = 4;
+  string detail = 5;
+}
+
+message GetLocalNodeHealthResponse {
+  string node_id = 1;
+
+  // status is one of healthy, degraded, unknown, stale, or contradictory.
+  // It is the safe, derived conclusion. observations preserves the raw
+  // facts that led to it for inspection and later evidence consumers.
+  string status = 2;
+  string explanation = 3;
+  repeated HealthObservation observations = 4;
 }
 
 // RaftMember mirrors api/internalpb's ServerInfo, kept as a separate

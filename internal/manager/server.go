@@ -15,6 +15,7 @@ import (
 	rpcpb "github.com/glenjbarber/apiary/api/rpc"
 	"github.com/glenjbarber/apiary/internal/assumptions"
 	"github.com/glenjbarber/apiary/internal/cluster"
+	"github.com/glenjbarber/apiary/internal/health"
 	"github.com/glenjbarber/apiary/internal/hoststats"
 	"github.com/glenjbarber/apiary/internal/isostore"
 	"github.com/glenjbarber/apiary/internal/nodeconfig"
@@ -320,6 +321,77 @@ func (s *Server) Status(ctx context.Context, _ *rpcpb.StatusRequest) (*rpcpb.Sta
 		})
 	}
 	return resp, nil
+}
+
+// GetLocalNodeHealth implements rpcpb.ManagerServiceServer. It exposes the
+// existing Evidence-Aware Health v1 calculation (ADR-0056) as a reusable,
+// explicitly local read. It does not forward to a leader: local raft and
+// reconciler observations from another Hive would be false attribution.
+func (s *Server) GetLocalNodeHealth(ctx context.Context, _ *rpcpb.GetLocalNodeHealthRequest) (*rpcpb.GetLocalNodeHealthResponse, error) {
+	now := time.Now()
+	status, err := s.Status(ctx, &rpcpb.StatusRequest{})
+	if err != nil {
+		return nil, err
+	}
+	stats, err := s.HostStats(ctx, &rpcpb.HostStatsRequest{})
+	if err != nil {
+		return nil, err
+	}
+
+	signals := health.NodeSignals{
+		NodeID:               s.nodeID,
+		PeerReachability:     health.ReachabilityReachable,
+		HeartbeatObserved:    true,
+		HeartbeatOK:          status.GetRaftReachable(),
+		MembershipObserved:   status.GetRaftReachable(),
+		MembershipObservedAt: now,
+	}
+	if status.GetRaftReachable() {
+		signals.AppliedIndexObserved = true
+		signals.AppliedIndex = status.GetRaftAppliedIndex()
+		signals.LastLogIndex = status.GetRaftLastLogIndex()
+		signals.IndicesObservedAt = now
+		for _, member := range status.GetMembers() {
+			if member.GetNodeId() == s.nodeID {
+				signals.IsRaftMember = true
+				signals.Suffrage = health.ParseSuffrage(member.GetSuffrage())
+				break
+			}
+		}
+	}
+
+	signals.ReconcileObservedAt = now
+	signals.ReconcileIntervalSeconds = stats.GetReconcileIntervalSeconds()
+	signals.ReconcilerConfigured = signals.ReconcileIntervalSeconds > 0
+	if unix := stats.GetLastReconcileAttemptUnix(); unix > 0 {
+		signals.ReconcileEverAttempted = true
+		signals.LastReconcileAttempt = time.Unix(unix, 0)
+	}
+	if unix := stats.GetLastReconcileSuccessUnix(); unix > 0 {
+		signals.ReconcileEverSucceeded = true
+		signals.LastReconcileSuccess = time.Unix(unix, 0)
+	}
+
+	result := health.ComputeNodeHealth(signals, now)
+	response := &rpcpb.GetLocalNodeHealthResponse{
+		NodeId:      result.NodeID,
+		Status:      string(result.Status),
+		Explanation: result.Explanation,
+	}
+	for _, observation := range result.Observations {
+		var observedUnix int64
+		if !observation.ObservedAt.IsZero() {
+			observedUnix = observation.ObservedAt.Unix()
+		}
+		response.Observations = append(response.Observations, &rpcpb.HealthObservation{
+			Source:                observation.Source,
+			ObservedUnix:          observedUnix,
+			FreshnessLimitSeconds: uint32(observation.FreshnessLimit / time.Second),
+			Value:                 observation.Value,
+			Detail:                observation.Detail,
+		})
+	}
+	return response, nil
 }
 
 // applyCommand marshals cmd, submits it via raft, and decodes the result.

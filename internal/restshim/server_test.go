@@ -111,6 +111,10 @@ func (f *fakeClient) Status(ctx context.Context, _ *rpcpb.StatusRequest, _ ...gr
 	return f.statusResp, f.statusErr
 }
 
+func (f *fakeClient) GetLocalNodeHealth(context.Context, *rpcpb.GetLocalNodeHealthRequest, ...grpc.CallOption) (*rpcpb.GetLocalNodeHealthResponse, error) {
+	return &rpcpb.GetLocalNodeHealthResponse{}, nil
+}
+
 func (f *fakeClient) CreateVM(_ context.Context, in *rpcpb.CreateVMRequest, _ ...grpc.CallOption) (*rpcpb.CreateVMResponse, error) {
 	f.lastCreateReq = in
 	return f.createResp, f.createErr

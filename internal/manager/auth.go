@@ -61,17 +61,18 @@ func (have Role) Satisfies(want Role) bool {
 // ship unintentionally under-protected.
 var requiredRole = map[string]Role{
 	// Viewer: read-only.
-	"/apiary.rpc.v1.ManagerService/GetVM":          RoleViewer,
-	"/apiary.rpc.v1.ManagerService/ListVMs":        RoleViewer,
-	"/apiary.rpc.v1.ManagerService/GetJail":        RoleViewer,
-	"/apiary.rpc.v1.ManagerService/ListJails":      RoleViewer,
-	"/apiary.rpc.v1.ManagerService/ListISOs":       RoleViewer,
-	"/apiary.rpc.v1.ManagerService/ListNetworks":   RoleViewer,
-	"/apiary.rpc.v1.ManagerService/HostStats":      RoleViewer,
-	"/apiary.rpc.v1.ManagerService/GetVMConsole":   RoleViewer,
-	"/apiary.rpc.v1.ManagerService/ProxyVMConsole": RoleViewer,
-	"/apiary.rpc.v1.ManagerService/GetVMSerialLog": RoleViewer,
-	"/apiary.rpc.v1.ManagerService/GetNodeConfig":  RoleViewer,
+	"/apiary.rpc.v1.ManagerService/GetVM":              RoleViewer,
+	"/apiary.rpc.v1.ManagerService/ListVMs":            RoleViewer,
+	"/apiary.rpc.v1.ManagerService/GetJail":            RoleViewer,
+	"/apiary.rpc.v1.ManagerService/ListJails":          RoleViewer,
+	"/apiary.rpc.v1.ManagerService/ListISOs":           RoleViewer,
+	"/apiary.rpc.v1.ManagerService/ListNetworks":       RoleViewer,
+	"/apiary.rpc.v1.ManagerService/HostStats":          RoleViewer,
+	"/apiary.rpc.v1.ManagerService/GetVMConsole":       RoleViewer,
+	"/apiary.rpc.v1.ManagerService/ProxyVMConsole":     RoleViewer,
+	"/apiary.rpc.v1.ManagerService/GetVMSerialLog":     RoleViewer,
+	"/apiary.rpc.v1.ManagerService/GetNodeConfig":      RoleViewer,
+	"/apiary.rpc.v1.ManagerService/GetLocalNodeHealth": RoleViewer,
 
 	// The Dependency Graph Simulator RPCs are read-only reports - Viewer,
 	// the same tier as every other plain read
