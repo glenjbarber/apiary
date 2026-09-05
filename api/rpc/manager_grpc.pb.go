@@ -21,6 +21,9 @@ const _ = grpc.SupportPackageIsVersion9
 const (
 	ManagerService_Status_FullMethodName                      = "/apiary.rpc.v1.ManagerService/Status"
 	ManagerService_GetLocalNodeHealth_FullMethodName          = "/apiary.rpc.v1.ManagerService/GetLocalNodeHealth"
+	ManagerService_ListAssumptionClaims_FullMethodName        = "/apiary.rpc.v1.ManagerService/ListAssumptionClaims"
+	ManagerService_SaveAssumptionClaim_FullMethodName         = "/apiary.rpc.v1.ManagerService/SaveAssumptionClaim"
+	ManagerService_DeleteAssumptionClaim_FullMethodName       = "/apiary.rpc.v1.ManagerService/DeleteAssumptionClaim"
 	ManagerService_CreateVM_FullMethodName                    = "/apiary.rpc.v1.ManagerService/CreateVM"
 	ManagerService_UpdateVM_FullMethodName                    = "/apiary.rpc.v1.ManagerService/UpdateVM"
 	ManagerService_DeleteVM_FullMethodName                    = "/apiary.rpc.v1.ManagerService/DeleteVM"
@@ -84,6 +87,12 @@ type ManagerServiceClient interface {
 	// leader: local reconciliation and raft-companion observations belong to
 	// the answering Hive alone.
 	GetLocalNodeHealth(ctx context.Context, in *GetLocalNodeHealthRequest, opts ...grpc.CallOption) (*GetLocalNodeHealthResponse, error)
+	// Assumption Register claims are operator-authored, local-to-this-Hive
+	// records. They are not raft-replicated and never change a computed health
+	// or recovery verdict by themselves.
+	ListAssumptionClaims(ctx context.Context, in *ListAssumptionClaimsRequest, opts ...grpc.CallOption) (*ListAssumptionClaimsResponse, error)
+	SaveAssumptionClaim(ctx context.Context, in *SaveAssumptionClaimRequest, opts ...grpc.CallOption) (*SaveAssumptionClaimResponse, error)
+	DeleteAssumptionClaim(ctx context.Context, in *DeleteAssumptionClaimRequest, opts ...grpc.CallOption) (*DeleteAssumptionClaimResponse, error)
 	CreateVM(ctx context.Context, in *CreateVMRequest, opts ...grpc.CallOption) (*CreateVMResponse, error)
 	UpdateVM(ctx context.Context, in *UpdateVMRequest, opts ...grpc.CallOption) (*UpdateVMResponse, error)
 	DeleteVM(ctx context.Context, in *DeleteVMRequest, opts ...grpc.CallOption) (*DeleteVMResponse, error)
@@ -335,6 +344,36 @@ func (c *managerServiceClient) GetLocalNodeHealth(ctx context.Context, in *GetLo
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(GetLocalNodeHealthResponse)
 	err := c.cc.Invoke(ctx, ManagerService_GetLocalNodeHealth_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *managerServiceClient) ListAssumptionClaims(ctx context.Context, in *ListAssumptionClaimsRequest, opts ...grpc.CallOption) (*ListAssumptionClaimsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListAssumptionClaimsResponse)
+	err := c.cc.Invoke(ctx, ManagerService_ListAssumptionClaims_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *managerServiceClient) SaveAssumptionClaim(ctx context.Context, in *SaveAssumptionClaimRequest, opts ...grpc.CallOption) (*SaveAssumptionClaimResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(SaveAssumptionClaimResponse)
+	err := c.cc.Invoke(ctx, ManagerService_SaveAssumptionClaim_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *managerServiceClient) DeleteAssumptionClaim(ctx context.Context, in *DeleteAssumptionClaimRequest, opts ...grpc.CallOption) (*DeleteAssumptionClaimResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(DeleteAssumptionClaimResponse)
+	err := c.cc.Invoke(ctx, ManagerService_DeleteAssumptionClaim_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -822,6 +861,12 @@ type ManagerServiceServer interface {
 	// leader: local reconciliation and raft-companion observations belong to
 	// the answering Hive alone.
 	GetLocalNodeHealth(context.Context, *GetLocalNodeHealthRequest) (*GetLocalNodeHealthResponse, error)
+	// Assumption Register claims are operator-authored, local-to-this-Hive
+	// records. They are not raft-replicated and never change a computed health
+	// or recovery verdict by themselves.
+	ListAssumptionClaims(context.Context, *ListAssumptionClaimsRequest) (*ListAssumptionClaimsResponse, error)
+	SaveAssumptionClaim(context.Context, *SaveAssumptionClaimRequest) (*SaveAssumptionClaimResponse, error)
+	DeleteAssumptionClaim(context.Context, *DeleteAssumptionClaimRequest) (*DeleteAssumptionClaimResponse, error)
 	CreateVM(context.Context, *CreateVMRequest) (*CreateVMResponse, error)
 	UpdateVM(context.Context, *UpdateVMRequest) (*UpdateVMResponse, error)
 	DeleteVM(context.Context, *DeleteVMRequest) (*DeleteVMResponse, error)
@@ -1065,6 +1110,15 @@ func (UnimplementedManagerServiceServer) Status(context.Context, *StatusRequest)
 func (UnimplementedManagerServiceServer) GetLocalNodeHealth(context.Context, *GetLocalNodeHealthRequest) (*GetLocalNodeHealthResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetLocalNodeHealth not implemented")
 }
+func (UnimplementedManagerServiceServer) ListAssumptionClaims(context.Context, *ListAssumptionClaimsRequest) (*ListAssumptionClaimsResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ListAssumptionClaims not implemented")
+}
+func (UnimplementedManagerServiceServer) SaveAssumptionClaim(context.Context, *SaveAssumptionClaimRequest) (*SaveAssumptionClaimResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method SaveAssumptionClaim not implemented")
+}
+func (UnimplementedManagerServiceServer) DeleteAssumptionClaim(context.Context, *DeleteAssumptionClaimRequest) (*DeleteAssumptionClaimResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method DeleteAssumptionClaim not implemented")
+}
 func (UnimplementedManagerServiceServer) CreateVM(context.Context, *CreateVMRequest) (*CreateVMResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method CreateVM not implemented")
 }
@@ -1256,6 +1310,60 @@ func _ManagerService_GetLocalNodeHealth_Handler(srv interface{}, ctx context.Con
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(ManagerServiceServer).GetLocalNodeHealth(ctx, req.(*GetLocalNodeHealthRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ManagerService_ListAssumptionClaims_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListAssumptionClaimsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ManagerServiceServer).ListAssumptionClaims(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ManagerService_ListAssumptionClaims_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ManagerServiceServer).ListAssumptionClaims(ctx, req.(*ListAssumptionClaimsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ManagerService_SaveAssumptionClaim_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SaveAssumptionClaimRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ManagerServiceServer).SaveAssumptionClaim(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ManagerService_SaveAssumptionClaim_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ManagerServiceServer).SaveAssumptionClaim(ctx, req.(*SaveAssumptionClaimRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ManagerService_DeleteAssumptionClaim_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(DeleteAssumptionClaimRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ManagerServiceServer).DeleteAssumptionClaim(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ManagerService_DeleteAssumptionClaim_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ManagerServiceServer).DeleteAssumptionClaim(ctx, req.(*DeleteAssumptionClaimRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -2080,6 +2188,18 @@ var ManagerService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "GetLocalNodeHealth",
 			Handler:    _ManagerService_GetLocalNodeHealth_Handler,
+		},
+		{
+			MethodName: "ListAssumptionClaims",
+			Handler:    _ManagerService_ListAssumptionClaims_Handler,
+		},
+		{
+			MethodName: "SaveAssumptionClaim",
+			Handler:    _ManagerService_SaveAssumptionClaim_Handler,
+		},
+		{
+			MethodName: "DeleteAssumptionClaim",
+			Handler:    _ManagerService_DeleteAssumptionClaim_Handler,
 		},
 		{
 			MethodName: "CreateVM",

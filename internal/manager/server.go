@@ -13,6 +13,7 @@ import (
 
 	internalpb "github.com/glenjbarber/apiary/api/internalpb"
 	rpcpb "github.com/glenjbarber/apiary/api/rpc"
+	"github.com/glenjbarber/apiary/internal/assumptionregister"
 	"github.com/glenjbarber/apiary/internal/assumptions"
 	"github.com/glenjbarber/apiary/internal/cluster"
 	"github.com/glenjbarber/apiary/internal/health"
@@ -148,6 +149,12 @@ type assumptionStore interface {
 	Degraded() (bool, string)
 }
 
+type assumptionRegisterStore interface {
+	List() ([]assumptionregister.Claim, error)
+	Save(assumptionregister.Claim, time.Time) error
+	Delete(string) error
+}
+
 // nodeServiceController keeps the Machine page's host-service controls
 // narrow and testable. It deliberately exposes only Apiary's fixed rc.d
 // service names, never arbitrary commands or service names supplied by a
@@ -218,6 +225,7 @@ type Server struct {
 	// panicking. Physical, per-node data like isos/nodeConfig above,
 	// never routed through raft. See ADR-0055/internal/assumptions.
 	assumptions assumptionStore
+	register    assumptionRegisterStore
 
 	// assumptionStaleAfter is the age past which ListAssumptionResults
 	// collapses a snapshot entry's effective status to UNKNOWN,
@@ -272,6 +280,94 @@ var _ rpcpb.ManagerServiceServer = (*Server)(nil)
 // NewServer(...) call site a mechanical one-line edit.
 func NewServer(raft *RaftClient, nodeID string, isos isoManager, vnc VNCLookup, serialLog SerialLogLookup, vlanMgr VLANStatus, peers PeerForwarder, peerManagerdPort string, zfsMgr quotaSetter, nodeConfig nodeConfigStore, assumptionStoreMgr assumptionStore, assumptionStaleAfter time.Duration, reconciler reconcilerStats) *Server {
 	return &Server{raft: raft, nodeID: nodeID, isos: isos, vnc: vnc, serialLog: serialLog, vlan: vlanMgr, statsGather: hoststats.Gather, peers: peers, peerManagerdPort: peerManagerdPort, zfs: zfsMgr, nodeConfig: nodeConfig, assumptions: assumptionStoreMgr, assumptionStaleAfter: assumptionStaleAfter, reconciler: reconciler, services: rcServiceController{}}
+}
+
+// SetAssumptionRegister wires the local, operator-authored register after
+// construction. It exists as a setter to keep the established NewServer
+// signature stable across managerd and its many focused tests.
+func (s *Server) SetAssumptionRegister(register assumptionRegisterStore) {
+	s.register = register
+}
+
+func toRPCAssumptionClaim(claim assumptionregister.Claim) *rpcpb.AssumptionClaim {
+	return &rpcpb.AssumptionClaim{
+		Id: claim.ID, Statement: claim.Statement, Owner: claim.Owner,
+		Scope: claim.Scope, Evidence: claim.Evidence,
+		VerificationMethod: claim.VerificationMethod,
+		ExpiresAtUnix:      claim.ExpiresAt.Unix(), CreatedAtUnix: claim.CreatedAt.Unix(),
+		UpdatedAtUnix: claim.UpdatedAt.Unix(),
+	}
+}
+
+func fromRPCAssumptionClaim(claim *rpcpb.AssumptionClaim) assumptionregister.Claim {
+	return assumptionregister.Claim{
+		ID: claim.GetId(), Statement: claim.GetStatement(), Owner: claim.GetOwner(),
+		Scope: claim.GetScope(), Evidence: claim.GetEvidence(),
+		VerificationMethod: claim.GetVerificationMethod(),
+		ExpiresAt:          time.Unix(claim.GetExpiresAtUnix(), 0),
+	}
+}
+
+// relevantRegisterClaims returns unexpired local claims scoped to either the
+// whole Colony or one Hive. It does not parse arbitrary prose scopes or treat
+// an operator claim as evidence used by health or recovery calculations.
+func (s *Server) relevantRegisterClaims(nodeID string, now time.Time) []*rpcpb.AssumptionClaim {
+	if s.register == nil {
+		return nil
+	}
+	claims, err := s.register.List()
+	if err != nil {
+		return nil
+	}
+	wantHive := "hive:" + nodeID
+	var out []*rpcpb.AssumptionClaim
+	for _, claim := range claims {
+		if !claim.ExpiresAt.After(now) {
+			continue
+		}
+		if claim.Scope == "colony" || claim.Scope == wantHive {
+			out = append(out, toRPCAssumptionClaim(claim))
+		}
+	}
+	return out
+}
+
+func (s *Server) ListAssumptionClaims(context.Context, *rpcpb.ListAssumptionClaimsRequest) (*rpcpb.ListAssumptionClaimsResponse, error) {
+	if s.register == nil {
+		return &rpcpb.ListAssumptionClaimsResponse{Error: "no assumption register configured on this node"}, nil
+	}
+	claims, err := s.register.List()
+	if err != nil {
+		return &rpcpb.ListAssumptionClaimsResponse{Error: err.Error()}, nil
+	}
+	resp := &rpcpb.ListAssumptionClaimsResponse{}
+	for _, claim := range claims {
+		resp.Claims = append(resp.Claims, toRPCAssumptionClaim(claim))
+	}
+	return resp, nil
+}
+
+func (s *Server) SaveAssumptionClaim(_ context.Context, req *rpcpb.SaveAssumptionClaimRequest) (*rpcpb.SaveAssumptionClaimResponse, error) {
+	if s.register == nil {
+		return &rpcpb.SaveAssumptionClaimResponse{Error: "no assumption register configured on this node"}, nil
+	}
+	if req.GetClaim() == nil {
+		return &rpcpb.SaveAssumptionClaimResponse{Error: "claim is required"}, nil
+	}
+	if err := s.register.Save(fromRPCAssumptionClaim(req.GetClaim()), time.Now()); err != nil {
+		return &rpcpb.SaveAssumptionClaimResponse{Error: err.Error()}, nil
+	}
+	return &rpcpb.SaveAssumptionClaimResponse{}, nil
+}
+
+func (s *Server) DeleteAssumptionClaim(_ context.Context, req *rpcpb.DeleteAssumptionClaimRequest) (*rpcpb.DeleteAssumptionClaimResponse, error) {
+	if s.register == nil {
+		return &rpcpb.DeleteAssumptionClaimResponse{Error: "no assumption register configured on this node"}, nil
+	}
+	if err := s.register.Delete(req.GetId()); err != nil {
+		return &rpcpb.DeleteAssumptionClaimResponse{Error: err.Error()}, nil
+	}
+	return &rpcpb.DeleteAssumptionClaimResponse{}, nil
 }
 
 // peerManagerdAddr turns a raft leader_hint (the leader's raft
@@ -391,6 +487,7 @@ func (s *Server) GetLocalNodeHealth(ctx context.Context, _ *rpcpb.GetLocalNodeHe
 			Detail:                observation.Detail,
 		})
 	}
+	response.RelevantClaims = s.relevantRegisterClaims(s.nodeID, now)
 	return response, nil
 }
 
@@ -1911,6 +2008,7 @@ func (s *Server) SimulateNodeFailure(ctx context.Context, req *rpcpb.SimulateNod
 		OwnedResources:         toRPCOwnedResourceImpacts(report.OwnedResources),
 		ReplicaBackedResources: toRPCReplicaBackedImpacts(report.ReplicaBackedResources),
 		ImageAvailability:      toRPCImageAvailability(report.ImageAvailability),
+		RelevantClaims:         s.relevantRegisterClaims(targetID, time.Now()),
 	}, nil
 }
 

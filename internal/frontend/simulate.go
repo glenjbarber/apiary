@@ -188,6 +188,7 @@ func (s *Server) handleSimulatePage(w http.ResponseWriter, r *http.Request) {
 		owned             []resourceImpactView
 		replicaBacked     []replicaBackedImpactView
 		imageAvailability []imageAvailabilityImpactView
+		relevantClaims    []assumptionClaimView
 		simErr            string
 	)
 	if nodeID != "" {
@@ -207,6 +208,9 @@ func (s *Server) handleSimulatePage(w http.ResponseWriter, r *http.Request) {
 			}
 			for _, impact := range resp.GetImageAvailability() {
 				imageAvailability = append(imageAvailability, fromRPCImageAvailability(impact))
+			}
+			for _, claim := range resp.GetRelevantClaims() {
+				relevantClaims = append(relevantClaims, fromRPCAssumptionClaim(claim))
 			}
 		}
 	}
@@ -243,6 +247,7 @@ func (s *Server) handleSimulatePage(w http.ResponseWriter, r *http.Request) {
 		SimulateOwnedResources:    owned,
 		SimulateReplicaBacked:     replicaBacked,
 		SimulateImageAvailability: imageAvailability,
+		SimulateClaims:            relevantClaims,
 		SimulateNetworks:          networks,
 		SimulateTargetNetworkID:   networkID,
 		SimulateNetwork:           network,

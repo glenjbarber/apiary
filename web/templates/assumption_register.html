@@ -1,0 +1,32 @@
+{{define "assumption_register_page"}}
+<!DOCTYPE html>
+<html lang="en">
+{{template "head" .}}
+<body class="app-layout">
+  {{template "nav" .}}
+  <main class="content" id="main-content">
+  {{template "page_header" (pageHeader "Assumption Register" "Operator-authored, expiring claims stored only on this Hive. They provide context but never change computed health or recovery verdicts.")}}
+  {{if .AssumptionRegisterErr}}<div class="banner-error">{{.AssumptionRegisterErr}}</div>{{end}}
+  {{if .AssumptionRegisterOK}}<div class="banner-success">{{.AssumptionRegisterOK}}</div>{{end}}
+  {{if .CanOperate}}
+  <div class="panel">
+    <h3>Add or update local claim</h3>
+    <p class="muted">Use scope <code>colony</code> or <code>hive:&lt;id&gt;</code> to make a current claim available as health and simulator context.</p>
+    <form method="post" action="/assumption-register" class="form-grid">
+      <label>ID<input name="id" required></label><label>Owner<input name="owner" required></label>
+      <label>Scope<input name="scope" placeholder="hive:apiarium" required></label><label>Expires at (RFC 3339)<input name="expires_at" placeholder="2026-12-31T23:59:59Z" required></label>
+      <label class="full-width">Statement<input name="statement" required></label>
+      <label class="full-width">Evidence<input name="evidence" required></label>
+      <label class="full-width">Verification method (optional)<input name="verification_method"></label>
+      <button type="submit">Save claim</button>
+    </form>
+  </div>
+  {{end}}
+  <div class="panel">
+    <h3>Local claims</h3>
+    <table><thead><tr><th>ID</th><th>Statement</th><th>Owner</th><th>Scope</th><th>Evidence</th><th>Expires</th><th></th></tr></thead><tbody>
+    {{range .AssumptionClaims}}<tr><td>{{.ID}}</td><td>{{.Statement}}</td><td>{{.Owner}}</td><td>{{.Scope}}</td><td>{{.Evidence}}{{if .VerificationMethod}}<br><span class="muted">{{.VerificationMethod}}</span>{{end}}</td><td>{{if .Expired}}<span class="error">expired</span> {{end}}{{.ExpiresAt}}</td><td>{{if $.CanOperate}}<button hx-delete="/assumption-register/{{.ID}}" hx-target="main" hx-swap="outerHTML">Delete</button>{{end}}</td></tr>{{else}}<tr><td colspan="7"><em>No local claims recorded.</em></td></tr>{{end}}
+    </tbody></table>
+  </div>
+  </main>{{template "footer" .}}
+</body></html>{{end}}
