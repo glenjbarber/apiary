@@ -31,8 +31,11 @@ func TestServer_MachinePage_ShowsNodeConfigAndLocalVMsOnly(t *testing.T) {
 		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
 	}
 	body := rec.Body.String()
-	if !strings.Contains(body, "re0") || !strings.Contains(body, "bridge0") || !strings.Contains(body, "Jail provisioning") || !strings.Contains(body, "Enabled") {
+	if !strings.Contains(body, "re0") || !strings.Contains(body, "bridge0") || !strings.Contains(body, "Jail provisioning") || !strings.Contains(body, "Current mode") || !strings.Contains(body, "Enabled") {
 		t.Errorf("machine page missing node config values, got: %s", body)
+	}
+	if strings.Contains(body, "<th>Jail provisioning</th>") {
+		t.Errorf("jail provisioning should be in its own Machine page section, got: %s", body)
 	}
 	if !strings.Contains(body, "vm-1") {
 		t.Errorf("machine page missing local VM vm-1, got: %s", body)
@@ -75,6 +78,48 @@ func TestServer_UpdateNodeConfig_CanUseStartupFlagForJails(t *testing.T) {
 	}
 	if client.lastUpdateNodeConfigReq.JailEnabled != nil {
 		t.Errorf("JailEnabled = %v, want nil for startup-flag mode", client.lastUpdateNodeConfigReq.JailEnabled)
+	}
+}
+
+func TestServer_UpdateNodeConfig_PreservesJailProvisioningWhenAbsent(t *testing.T) {
+	client := &fakeClient{
+		getNodeConfigResp:    &rpcpb.GetNodeConfigResponse{Uplink: "re0", NatUplink: "bridge0", JailEnabled: boolPtr(true)},
+		updateNodeConfigResp: &rpcpb.UpdateNodeConfigResponse{},
+	}
+	s := newTestServer(t, client)
+
+	form := url.Values{"uplink": {"em0"}, "nat_uplink": {"bridge1"}}
+	req := httptest.NewRequest(http.MethodPost, "/machine/uplink", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, req)
+
+	if client.lastUpdateNodeConfigReq.JailEnabled == nil || !client.lastUpdateNodeConfigReq.GetJailEnabled() {
+		t.Errorf("JailEnabled = %v, want preserved enabled value", client.lastUpdateNodeConfigReq.JailEnabled)
+	}
+}
+
+func TestServer_UpdateJailProvisioning_PreservesNetworkFields(t *testing.T) {
+	client := &fakeClient{
+		getNodeConfigResp:    &rpcpb.GetNodeConfigResponse{Uplink: "re0", NatUplink: "bridge0"},
+		updateNodeConfigResp: &rpcpb.UpdateNodeConfigResponse{},
+	}
+	s := newTestServer(t, client)
+
+	form := url.Values{"jail_enabled": {"enabled"}}
+	req := httptest.NewRequest(http.MethodPost, "/machine/jail-provisioning", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	if client.lastUpdateNodeConfigReq.GetUplink() != "re0" || client.lastUpdateNodeConfigReq.GetNatUplink() != "bridge0" || client.lastUpdateNodeConfigReq.JailEnabled == nil || !client.lastUpdateNodeConfigReq.GetJailEnabled() {
+		t.Errorf("forwarded request = %+v, want preserved network fields and JailEnabled=true", client.lastUpdateNodeConfigReq)
+	}
+	if !strings.Contains(rec.Body.String(), `hx-post="/machine/jail-provisioning"`) {
+		t.Errorf("jail provisioning fragment should still include the admin form, got: %s", rec.Body.String())
 	}
 }
 

@@ -88,24 +88,55 @@ func (s *Server) currentCloudflareStatus(r *http.Request) (bool, string) {
 // current values together). Takes effect on this node's next managerd
 // restart, not live - see ADR-0049.
 func (s *Server) handleUpdateNodeConfig(w http.ResponseWriter, r *http.Request) {
+	s.handleUpdateMachineConfig(w, r, "nodeconfig_panel")
+}
+
+// handleUpdateJailProvisioning updates the same underlying node config
+// as handleUpdateNodeConfig, but refreshes the dedicated jail panel so
+// the setting can live in its own visible section on the Machine page.
+func (s *Server) handleUpdateJailProvisioning(w http.ResponseWriter, r *http.Request) {
+	s.handleUpdateMachineConfig(w, r, "jail_provisioning_panel")
+}
+
+func (s *Server) handleUpdateMachineConfig(w http.ResponseWriter, r *http.Request, panel string) {
 	if err := r.ParseForm(); err != nil {
-		s.renderNodeConfigPanel(w, r, "invalid form: "+err.Error())
+		s.renderMachineConfigPanel(w, r, panel, "invalid form: "+err.Error())
 		return
 	}
+	req := s.nodeConfigUpdateRequest(r)
 	resp, err := s.client.UpdateNodeConfig(r.Context(), &rpcpb.UpdateNodeConfigRequest{
-		Uplink:      r.FormValue("uplink"),
-		NatUplink:   r.FormValue("nat_uplink"),
-		JailEnabled: jailEnabledFromForm(r.FormValue("jail_enabled")),
+		Uplink:      req.GetUplink(),
+		NatUplink:   req.GetNatUplink(),
+		JailEnabled: req.JailEnabled,
 	})
 	if err != nil {
-		s.renderNodeConfigPanel(w, r, err.Error())
+		s.renderMachineConfigPanel(w, r, panel, err.Error())
 		return
 	}
 	if resp.GetError() != "" {
-		s.renderNodeConfigPanel(w, r, resp.GetError())
+		s.renderMachineConfigPanel(w, r, panel, resp.GetError())
 		return
 	}
-	s.renderNodeConfigPanel(w, r, "")
+	s.renderMachineConfigPanel(w, r, panel, "")
+}
+
+func (s *Server) nodeConfigUpdateRequest(r *http.Request) *rpcpb.UpdateNodeConfigRequest {
+	cfg, _ := s.currentNodeConfig(r)
+	req := &rpcpb.UpdateNodeConfigRequest{
+		Uplink:      cfg.Uplink,
+		NatUplink:   cfg.NATUplink,
+		JailEnabled: jailEnabledFromForm(cfg.JailEnabledMode),
+	}
+	if r.Form.Has("uplink") {
+		req.Uplink = r.FormValue("uplink")
+	}
+	if r.Form.Has("nat_uplink") {
+		req.NatUplink = r.FormValue("nat_uplink")
+	}
+	if r.Form.Has("jail_enabled") {
+		req.JailEnabled = jailEnabledFromForm(r.FormValue("jail_enabled"))
+	}
+	return req
 }
 
 func jailEnabledFromForm(v string) *bool {
@@ -122,6 +153,10 @@ func jailEnabledFromForm(v string) *bool {
 }
 
 func (s *Server) renderNodeConfigPanel(w http.ResponseWriter, r *http.Request, formErr string) {
+	s.renderMachineConfigPanel(w, r, "nodeconfig_panel", formErr)
+}
+
+func (s *Server) renderMachineConfigPanel(w http.ResponseWriter, r *http.Request, panel, formErr string) {
 	cfg, fetchErr := s.currentNodeConfig(r)
 	if fetchErr != "" {
 		if formErr == "" {
@@ -130,7 +165,7 @@ func (s *Server) renderNodeConfigPanel(w http.ResponseWriter, r *http.Request, f
 			formErr += "; additionally failed to refresh: " + fetchErr
 		}
 	}
-	s.render(w, "nodeconfig_panel", pageData{NodeConfig: cfg, NodeConfigFormError: formErr})
+	s.render(w, panel, pageData{NodeConfig: cfg, NodeConfigFormError: formErr, CanAdmin: true})
 }
 
 // handleSetVMFirewallPaused toggles one VM's firewall_paused (ADR-0049) -

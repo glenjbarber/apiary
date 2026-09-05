@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"sort"
+	"strings"
 
 	rpcpb "github.com/glenjbarber/apiary/api/rpc"
 	"github.com/glenjbarber/apiary/internal/invariant"
@@ -50,6 +51,13 @@ type whyNotAnswerView struct {
 	Blockers []whyNotBlockerView
 	Remedies []whyNotRemedyView
 	Caveats  []whyNotEvidenceView
+}
+
+type whyNotCellChoiceView struct {
+	ID     string
+	Name   string
+	Kind   string
+	NodeID string
 }
 
 func fromWhyNotAnswer(a whynot.Answer) whyNotAnswerView {
@@ -114,6 +122,47 @@ func (s *Server) lookupCell(ctx context.Context, id, localNodeID string) (whynot
 		}, true
 	}
 	return whynot.CellFact{}, false
+}
+
+// whyNotCellChoices returns every operator-selectable Cell for the
+// Why Not Engine's Cell question. It is best-effort by design: a
+// transient VM or jail list failure must not break the page or prevent
+// the existing typed-ID fallback from being usable.
+func (s *Server) whyNotCellChoices(r *http.Request) []whyNotCellChoiceView {
+	var cells []whyNotCellChoiceView
+	if vms, errMsg := s.currentVMs(r, "id", "asc"); errMsg == "" {
+		for _, vm := range vms {
+			cells = append(cells, whyNotCellChoiceView{
+				ID:     vm.ID,
+				Name:   vm.Name,
+				Kind:   "VM",
+				NodeID: vm.NodeID,
+			})
+		}
+	}
+	if jails, errMsg := s.currentJails(r); errMsg == "" {
+		for _, jail := range jails {
+			if strings.EqualFold(jail.ID, "timemachine") || strings.EqualFold(jail.Name, "timemachine") {
+				continue
+			}
+			cells = append(cells, whyNotCellChoiceView{
+				ID:     jail.ID,
+				Name:   jail.Name,
+				Kind:   "Jail",
+				NodeID: jail.NodeID,
+			})
+		}
+	}
+	sort.SliceStable(cells, func(i, j int) bool {
+		if cells[i].Kind != cells[j].Kind {
+			return cells[i].Kind < cells[j].Kind
+		}
+		if cells[i].Name != cells[j].Name {
+			return cells[i].Name < cells[j].Name
+		}
+		return cells[i].ID < cells[j].ID
+	})
+	return cells
 }
 
 // answerNetworkConnectivity fans GetLocalNetworkBridgeStatus out to the
@@ -256,10 +305,12 @@ func (s *Server) handleWhyNotPage(w http.ResponseWriter, r *http.Request) {
 
 	nodes := s.simulateNodeChoices(r)
 	networks, _ := s.currentNetworks(r)
+	cells := s.whyNotCellChoices(r)
 
 	s.render(w, "why_not_page", s.withAuthFields(r, pageData{
 		WhyNotCellID:          cellID,
 		WhyNotCellError:       cellErr,
+		WhyNotCells:           cells,
 		WhyNotCellMigrate:     cellMigrateAnswer,
 		WhyNotCellRecoverable: cellRecoverAnswer,
 		WhyNotNodes:           nodes,

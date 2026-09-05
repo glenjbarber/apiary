@@ -58,8 +58,15 @@
   <div class="panel">
     <h3>Cell (migrate / recoverable)</h3>
     <form method="get" action="/why-not" class="inline-form">
-      <label>Cell ID
+      <label>Cell
+        {{if .WhyNotCells}}
+        <select name="cell_id" required>
+          <option value="">Choose a Cell</option>
+          {{range .WhyNotCells}}<option value="{{.ID}}"{{if eq .ID $.WhyNotCellID}} selected{{end}}>{{.Kind}} {{if .Name}}{{.Name}} ({{.ID}}){{else}}{{.ID}}{{end}}{{if .NodeID}} · {{.NodeID}}{{end}}</option>{{end}}
+        </select>
+        {{else}}
         <input type="text" name="cell_id" placeholder="vm-... or jail-..." value="{{.WhyNotCellID}}" required>
+        {{end}}
       </label>
       <button type="submit">Why not?</button>
     </form>

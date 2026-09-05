@@ -58,6 +58,38 @@ func TestHandleWhyNotPage_UnknownNetworkIDRendersExplicitError(t *testing.T) {
 	}
 }
 
+func TestHandleWhyNotPage_CellDropdownIncludesVMsAndJails(t *testing.T) {
+	client := &fakeClient{
+		statusResp: &rpcpb.StatusResponse{ManagerNodeId: "node-a"},
+		listResp: &rpcpb.ListVMsResponse{Vms: []*rpcpb.VMDefinition{
+			{Id: "vm-1", Name: "web", NodeId: "node-a"},
+		}},
+		listJailsResp: &rpcpb.ListJailsResponse{Jails: []*rpcpb.JailDefinition{
+			{Id: "jail-1", Name: "worker", NodeId: "node-b"},
+			{Id: "timemachine", Name: "timemachine", NodeId: "node-a"},
+		}},
+	}
+	s := newTestServer(t, client)
+
+	req := httptest.NewRequest(http.MethodGet, "/why-not", nil)
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, req)
+
+	body := rec.Body.String()
+	for _, want := range []string{
+		`<select name="cell_id" required>`,
+		`VM web (vm-1) · node-a`,
+		`Jail worker (jail-1) · node-b`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("expected Why Not Cell dropdown to contain %q, got: %s", want, body)
+		}
+	}
+	if strings.Contains(body, "timemachine") {
+		t.Fatalf("protected jail timemachine must not be offered as a Why Not Cell choice, got: %s", body)
+	}
+}
+
 func TestHandleWhyNotPage_CellMigrateBlockedWithProvenRemedyWhenNoReplica(t *testing.T) {
 	client := &fakeClient{
 		statusResp: &rpcpb.StatusResponse{ManagerNodeId: "node-a"},

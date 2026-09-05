@@ -281,6 +281,7 @@ type pageData struct {
 	// lookup.
 	WhyNotCellID          string
 	WhyNotCellError       string
+	WhyNotCells           []whyNotCellChoiceView
 	WhyNotCellMigrate     whyNotAnswerView
 	WhyNotCellRecoverable whyNotAnswerView
 	WhyNotNodes           []string
@@ -622,6 +623,7 @@ func (s *Server) routes() {
 	// page already uses for its per-row password action.
 	s.mux.HandleFunc("GET /machine", s.requireRole(manager.RoleOperator, s.handleMachinePage))
 	s.mux.HandleFunc("POST /machine/uplink", s.requireRole(manager.RoleAdmin, s.handleUpdateNodeConfig))
+	s.mux.HandleFunc("POST /machine/jail-provisioning", s.requireRole(manager.RoleAdmin, s.handleUpdateJailProvisioning))
 	s.mux.HandleFunc("POST /machine/vms/{id}/firewall", s.requireRole(manager.RoleOperator, s.handleSetVMFirewallPaused))
 	s.mux.HandleFunc("POST /machine/quota", s.requireRole(manager.RoleOperator, s.handleSetDatasetQuota))
 }

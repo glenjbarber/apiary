@@ -20,6 +20,18 @@
   </div>
 
   <div class="panel">
+    <h3>Jail provisioning</h3>
+    <p class="muted">
+      Controls whether this Hive provisions jails assigned to it. If a
+      jail row says provisioning is disabled on the owning node, enable
+      it here on that owning Hive.
+    </p>
+    <div id="jail-provisioning-panel">
+      {{template "jail_provisioning_panel" .}}
+    </div>
+  </div>
+
+  <div class="panel">
     <h3>VM firewall overrides</h3>
     <p class="muted">
       Temporarily suspend enforcement of a VM's firewall rules
@@ -79,13 +91,29 @@
   <tbody>
     <tr><th>Uplink</th><td>{{if .NodeConfig.Uplink}}{{.NodeConfig.Uplink}}{{else}}<em>(unset)</em>{{end}}</td></tr>
     <tr><th>NAT uplink</th><td>{{if .NodeConfig.NATUplink}}{{.NodeConfig.NATUplink}}{{else}}<em>(falls back to Uplink)</em>{{end}}</td></tr>
-    <tr><th>Jail provisioning</th><td>{{.NodeConfig.JailEnabledStatus}}</td></tr>
   </tbody>
 </table>
 {{if .CanAdmin}}
 <form class="inline-form" hx-post="/machine/uplink" hx-target="#nodeconfig-panel" hx-swap="innerHTML">
   <label>Uplink <input type="text" name="uplink" placeholder="re0" value="{{.NodeConfig.Uplink}}"></label>
   <label>NAT uplink <input type="text" name="nat_uplink" placeholder="leave blank to use Uplink" value="{{.NodeConfig.NATUplink}}"></label>
+  <input type="hidden" name="jail_enabled" value="{{.NodeConfig.JailEnabledMode}}">
+  <button type="submit">Save</button>
+</form>
+{{end}}
+{{end}}
+
+{{define "jail_provisioning_panel"}}
+<div id="jail-provisioning-error" class="banner-error">{{.NodeConfigFormError}}</div>
+<table>
+  <tbody>
+    <tr><th>Current mode</th><td>{{.NodeConfig.JailEnabledStatus}}</td></tr>
+  </tbody>
+</table>
+{{if .CanAdmin}}
+<form class="inline-form" hx-post="/machine/jail-provisioning" hx-target="#jail-provisioning-panel" hx-swap="innerHTML">
+  <input type="hidden" name="uplink" value="{{.NodeConfig.Uplink}}">
+  <input type="hidden" name="nat_uplink" value="{{.NodeConfig.NATUplink}}">
   <label>Jail provisioning
     <select name="jail_enabled">
       <option value="default" {{if eq .NodeConfig.JailEnabledMode "default"}}selected{{end}}>Use startup flag</option>
