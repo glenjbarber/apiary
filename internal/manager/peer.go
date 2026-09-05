@@ -352,6 +352,15 @@ func (p *PeerReporter) GetVMConsole(ctx context.Context, addr, id string) (*rpcp
 	return client.GetVMConsole(ctx, &rpcpb.GetVMConsoleRequest{Id: id})
 }
 
+func (p *PeerReporter) GetNodeConfig(ctx context.Context, addr string) (*rpcpb.GetNodeConfigResponse, error) {
+	conn, client, err := p.dial(addr)
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close()
+	return client.GetNodeConfig(ctx, &rpcpb.GetNodeConfigRequest{})
+}
+
 type consoleTunnel struct {
 	conn   *grpc.ClientConn
 	stream rpcpb.ManagerService_ProxyVMConsoleClient
