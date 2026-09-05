@@ -12,7 +12,8 @@
   {{end}}
   <div class="panel">
   <div id="vm-error" class="banner-error">{{.Error}}</div>
-  <table>
+  <div class="table-scroll" role="region" aria-label="Virtual machines table" tabindex="0">
+  <table class="resource-table">
     <thead>
       <tr>
         <th><a href="/vms?sort=id&dir={{if and (eq .SortBy "id") (eq .SortDir "asc")}}desc{{else}}asc{{end}}">ID{{if eq .SortBy "id"}} {{if eq .SortDir "asc"}}&#9650;{{else}}&#9660;{{end}}{{end}}</a></th>
@@ -28,7 +29,9 @@
     <tbody id="vm-rows" hx-get="/vms/rows?sort={{.SortBy}}&dir={{.SortDir}}" hx-trigger="every 3s" hx-swap="innerHTML">
       {{template "vm_rows" .}}
     </tbody>
-  </table></div>
+  </table>
+  </div>
+  </div>
   {{/* vm_rows swaps are always row-only (see vm_rows.html's own comment
        on why) - a fetch/action error instead arrives as an HX-Trigger
        "vmError" event (dispatched on, and bubbling from, whichever

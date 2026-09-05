@@ -107,8 +107,7 @@
     .sidebar-link.active { color:#111; background:var(--yellow); font-weight:750; }
     .sidebar-tree { margin:.1rem 0 0 .9rem; padding-left:.75rem; border-left:1px solid #42484a; }
     .sidebar-tree-label { padding:.32rem .55rem; color:var(--sidebar-muted); font-size:.78rem; }
-    .sidebar-tree-label.level-two { margin-left:.45rem; }
-    .sidebar-link.level-three { margin-left:.9rem; }
+    .sidebar-link.cell-type { margin-left:.45rem; }
     .content { grid-column:2; grid-row:2; min-width:0; width:100%; max-width:1500px; padding:2rem clamp(1rem, 2.5vw, 2.5rem) 3rem; }
     .app-footer { grid-column:2; grid-row:3; padding:1rem clamp(1rem, 2.5vw, 2.5rem) 1.5rem; color:var(--muted); font-size:.78rem; border-top:1px solid var(--line); }
     h1 { font-size:1.6rem; margin:0; letter-spacing:-.03em; }
@@ -168,6 +167,21 @@
     .banner-error:not(:empty) { background:color-mix(in srgb, var(--danger) 13%, var(--panel)); border:1px solid color-mix(in srgb, var(--danger) 35%, var(--panel)); border-radius:4px; padding:.5rem .75rem; }
     .banner-success:not(:empty) { background:color-mix(in srgb, var(--success) 13%, var(--panel)); border:1px solid color-mix(in srgb, var(--success) 35%, var(--panel)); border-radius:4px; padding:.5rem .75rem; }
     code { font-size:.8em; word-break:break-all; }
+    /* Keep scrolling on the table wrapper so headers, banners, and the
+       application shell stay in place while every column is reachable. */
+    .table-scroll { max-width:100%; overflow-x:auto; }
+    .resource-table { min-width:64rem; }
+    .resource-table th, .resource-table td { white-space:nowrap; }
+    .resource-table td:nth-child(2) { min-width:14rem; white-space:normal; overflow-wrap:anywhere; }
+    .resource-table td:nth-child(6) { white-space:normal; overflow-wrap:anywhere; }
+    .resource-table .badge { white-space:nowrap; overflow-wrap:normal; }
+    .resource-table code { word-break:normal; white-space:nowrap; }
+    @media print {
+      .table-scroll { overflow:visible; }
+      .resource-table { min-width:0; }
+      .resource-table th, .resource-table td, .resource-table code { white-space:normal; overflow-wrap:anywhere; }
+      .resource-table td:nth-child(2) { min-width:0; }
+    }
     .upload-progress { display:flex; align-items:center; gap:.5rem; margin-top:.5rem; }
     .upload-progress progress { flex:1; max-width:20rem; height:1rem; }
     .upload-progress span { font-size:.85em; min-width:3em; }
@@ -181,6 +195,7 @@
       .content { padding:1.35rem 1rem 2.5rem; }
       .app-footer { padding:1rem; }
       table { display:block; overflow-x:auto; }
+      .table-scroll > table { display:table; overflow:visible; }
     }
     @media (max-width:620px) {
       .app-header { padding:.6rem .75rem; }
@@ -225,10 +240,9 @@
       <h2 class="sidebar-heading" id="nav-colony">Colony</h2>
       <a class="sidebar-link{{if eq .ActivePage "stats"}} active{{end}}" href="/"{{if eq .ActivePage "stats"}} aria-current="page"{{end}}>Hives</a>
       <div class="sidebar-tree">
-        <span class="sidebar-tree-label">Combs</span>
-        <span class="sidebar-tree-label level-two">Cells</span>
-        <a class="sidebar-link level-three{{if eq .ActivePage "vms"}} active{{end}}" href="/vms"{{if eq .ActivePage "vms"}} aria-current="page"{{end}}>Virtual machines</a>
-        <a class="sidebar-link level-three{{if eq .ActivePage "jails"}} active{{end}}" href="/jails"{{if eq .ActivePage "jails"}} aria-current="page"{{end}}>Jails</a>
+        <span class="sidebar-tree-label">Cells</span>
+        <a class="sidebar-link cell-type{{if eq .ActivePage "vms"}} active{{end}}" href="/vms"{{if eq .ActivePage "vms"}} aria-current="page"{{end}}>Virtual machines</a>
+        <a class="sidebar-link cell-type{{if eq .ActivePage "jails"}} active{{end}}" href="/jails"{{if eq .ActivePage "jails"}} aria-current="page"{{end}}>Jails</a>
       </div>
     </section>
     <section class="sidebar-section" aria-labelledby="nav-network">
