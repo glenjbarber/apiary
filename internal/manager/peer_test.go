@@ -3,6 +3,8 @@ package manager
 import (
 	"bytes"
 	"context"
+	"fmt"
+	"io"
 	"net"
 	"testing"
 
@@ -103,6 +105,25 @@ func (f *fakePeerServer) UploadISO(stream rpcpb.ManagerService_UploadISOServer) 
 		return stream.SendAndClose(f.uploadISOResp)
 	}
 	return stream.SendAndClose(&rpcpb.UploadISOResponse{})
+}
+
+func (f *fakePeerServer) ProxyVMConsole(stream rpcpb.ManagerService_ProxyVMConsoleServer) error {
+	first, err := stream.Recv()
+	if err != nil {
+		return err
+	}
+	if first.GetOpen() == nil {
+		return fmt.Errorf("missing console open")
+	}
+	for {
+		frame, err := stream.Recv()
+		if err != nil {
+			return err
+		}
+		if err := stream.Send(&rpcpb.VMConsoleTunnelFrame{Payload: &rpcpb.VMConsoleTunnelFrame_Data{Data: frame.GetData()}}); err != nil {
+			return err
+		}
+	}
 }
 
 func (f *fakePeerServer) PushISOTo(_ context.Context, req *rpcpb.PushISOToRequest) (*rpcpb.PushISOToResponse, error) {
@@ -536,6 +557,26 @@ func TestPeerReporter_GetVMSerialLog_ReachesSpecificPeer(t *testing.T) {
 	}
 	if fake.serialLogReq.GetId() != "vm-1" || !resp.GetAvailable() || resp.GetContent() != "remote tail" {
 		t.Errorf("GetVMSerialLog() request/response = %+v / %+v", fake.serialLogReq, resp)
+	}
+}
+
+func TestPeerReporter_OpenVMConsole_RelaysBytes(t *testing.T) {
+	addr := newTestPeerServer(t, &fakePeerServer{})
+	p := NewPeerReporter("", false, nil)
+	tunnel, err := p.OpenVMConsole(context.Background(), addr, "vm-1")
+	if err != nil {
+		t.Fatalf("OpenVMConsole() error: %v", err)
+	}
+	defer tunnel.Close()
+	if _, err := tunnel.Write([]byte("console bytes")); err != nil {
+		t.Fatalf("tunnel.Write() error: %v", err)
+	}
+	buf := make([]byte, len("console bytes"))
+	if _, err := io.ReadFull(tunnel, buf); err != nil {
+		t.Fatalf("tunnel.Read() error: %v", err)
+	}
+	if got := string(buf); got != "console bytes" {
+		t.Errorf("tunnel bytes = %q, want console bytes", got)
 	}
 }
 

@@ -3,6 +3,7 @@ package frontend
 import (
 	"context"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"sync"
@@ -36,7 +37,7 @@ var wsUpgrader = websocket.Upgrader{
 // as a plain HTTP error, since a WebSocket upgrade has no good way to
 // carry a human-readable message once it succeeds.
 func (s *Server) resolveConsole(ctx context.Context, id string) (*rpcpb.GetVMConsoleResponse, string) {
-	resp, err := s.client.GetVMConsole(ctx, &rpcpb.GetVMConsoleRequest{Id: id})
+	resp, err := s.consoleInfoForVM(ctx, id)
 	if err != nil {
 		return nil, err.Error()
 	}
@@ -47,6 +48,28 @@ func (s *Server) resolveConsole(ctx context.Context, id string) (*rpcpb.GetVMCon
 		return nil, "this VM has no running console yet (not yet reconciled, or created before VNC support existed)"
 	}
 	return resp, ""
+}
+
+func (s *Server) consoleOwner(ctx context.Context, id string) (string, bool) {
+	if s.peers == nil {
+		return "", false
+	}
+	vmResp, err := s.client.GetVM(ctx, &rpcpb.GetVMRequest{Id: id})
+	if err != nil || !vmResp.GetFound() || vmResp.GetVm().GetNodeId() == "" {
+		return "", false
+	}
+	statusResp, err := s.client.Status(ctx, &rpcpb.StatusRequest{})
+	if err != nil || statusResp.GetManagerNodeId() == "" || vmResp.GetVm().GetNodeId() == statusResp.GetManagerNodeId() {
+		return "", false
+	}
+	return vmResp.GetVm().GetNodeId(), true
+}
+
+func (s *Server) consoleInfoForVM(ctx context.Context, id string) (*rpcpb.GetVMConsoleResponse, error) {
+	if owner, remote := s.consoleOwner(ctx, id); remote {
+		return s.peers.GetVMConsole(ctx, s.peerAddr(owner), id)
+	}
+	return s.client.GetVMConsole(ctx, &rpcpb.GetVMConsoleRequest{Id: id})
 }
 
 // handleConsolePage serves the noVNC-based console page for one VM. The
@@ -88,7 +111,13 @@ func (s *Server) handleConsoleWS(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	tcpConn, err := net.DialTimeout("tcp", fmt.Sprintf("%s:%d", consoleInfo.GetHost(), consoleInfo.GetPort()), consoleDialTimeout)
+	var tcpConn io.ReadWriteCloser
+	var err error
+	if owner, remote := s.consoleOwner(r.Context(), id); remote {
+		tcpConn, err = s.peers.OpenVMConsole(r.Context(), s.peerAddr(owner), id)
+	} else {
+		tcpConn, err = net.DialTimeout("tcp", fmt.Sprintf("%s:%d", consoleInfo.GetHost(), consoleInfo.GetPort()), consoleDialTimeout)
+	}
 	if err != nil {
 		http.Error(w, "dialing VM console: "+err.Error(), http.StatusBadGateway)
 		return
@@ -111,7 +140,7 @@ func (s *Server) handleConsoleWS(w http.ResponseWriter, r *http.Request) {
 // Read unblocks too, and waits for both goroutines to actually exit
 // before returning - so the caller's own deferred Close calls never race
 // a still-running copy.
-func proxyConsole(ws *websocket.Conn, tcp net.Conn) {
+func proxyConsole(ws *websocket.Conn, tcp io.ReadWriteCloser) {
 	var wg sync.WaitGroup
 	wg.Add(2)
 

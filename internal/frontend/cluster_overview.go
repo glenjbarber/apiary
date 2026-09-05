@@ -2,6 +2,7 @@ package frontend
 
 import (
 	"context"
+	"io"
 	"net/http"
 	"sort"
 	"sync"
@@ -56,6 +57,8 @@ type peerHostStatsClient interface {
 	// deliberately local to the bhyve host, so the frontend must not ask a
 	// non-owning managerd and mistake its ownership hint for a missing log.
 	GetVMSerialLog(ctx context.Context, addr, id string) (*rpcpb.GetVMSerialLogResponse, error)
+	GetVMConsole(ctx context.Context, addr, id string) (*rpcpb.GetVMConsoleResponse, error)
+	OpenVMConsole(ctx context.Context, addr, id string) (io.ReadWriteCloser, error)
 }
 
 // clusterNodeView is the template-facing shape for one row on the

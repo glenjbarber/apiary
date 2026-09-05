@@ -263,6 +263,10 @@ func (f *fakeClient) GetVMConsole(context.Context, *rpcpb.GetVMConsoleRequest, .
 	return &rpcpb.GetVMConsoleResponse{}, nil
 }
 
+func (f *fakeClient) ProxyVMConsole(context.Context, ...grpc.CallOption) (grpc.BidiStreamingClient[rpcpb.VMConsoleTunnelFrame, rpcpb.VMConsoleTunnelFrame], error) {
+	return nil, errors.New("console streams are not exposed by restshim")
+}
+
 func (f *fakeClient) GetVMSerialLog(context.Context, *rpcpb.GetVMSerialLogRequest, ...grpc.CallOption) (*rpcpb.GetVMSerialLogResponse, error) {
 	return &rpcpb.GetVMSerialLogResponse{}, nil
 }

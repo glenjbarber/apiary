@@ -1246,6 +1246,79 @@ func (s *Server) GetVMConsole(ctx context.Context, req *rpcpb.GetVMConsoleReques
 	return &rpcpb.GetVMConsoleResponse{Host: "127.0.0.1", Port: uint32(port), Available: true}, nil
 }
 
+// ProxyVMConsole relays an authenticated peer/frontend stream to this Hive's
+// loopback-only VNC listener. It intentionally validates through
+// GetVMConsole here instead of accepting a host or port from the caller: only
+// this managerd may choose the local endpoint, and only for a VM it owns.
+func (s *Server) ProxyVMConsole(stream rpcpb.ManagerService_ProxyVMConsoleServer) error {
+	first, err := stream.Recv()
+	if err != nil {
+		return err
+	}
+	if first.GetOpen() == nil || first.GetOpen().GetId() == "" {
+		return fmt.Errorf("first console tunnel frame must open a VM")
+	}
+	console, err := s.GetVMConsole(stream.Context(), &rpcpb.GetVMConsoleRequest{Id: first.GetOpen().GetId()})
+	if err != nil {
+		return err
+	}
+	if console.GetError() != "" {
+		return fmt.Errorf("opening VM console: %s", console.GetError())
+	}
+	if !console.GetAvailable() {
+		return fmt.Errorf("VM console is not available")
+	}
+	tcpConn, err := net.DialTimeout("tcp", fmt.Sprintf("%s:%d", console.GetHost(), console.GetPort()), 5*time.Second)
+	if err != nil {
+		return fmt.Errorf("dialing VM console: %w", err)
+	}
+	defer tcpConn.Close()
+
+	fromClient := make(chan error, 1)
+	go func() {
+		defer tcpConn.Close()
+		for {
+			frame, recvErr := stream.Recv()
+			if recvErr != nil {
+				fromClient <- recvErr
+				return
+			}
+			if len(frame.GetData()) == 0 {
+				fromClient <- fmt.Errorf("console tunnel accepts only data after open")
+				return
+			}
+			if _, writeErr := tcpConn.Write(frame.GetData()); writeErr != nil {
+				fromClient <- writeErr
+				return
+			}
+		}
+	}()
+
+	buf := make([]byte, 32*1024)
+	for {
+		n, readErr := tcpConn.Read(buf)
+		if n > 0 {
+			if sendErr := stream.Send(&rpcpb.VMConsoleTunnelFrame{Payload: &rpcpb.VMConsoleTunnelFrame_Data{Data: buf[:n]}}); sendErr != nil {
+				return sendErr
+			}
+		}
+		if readErr != nil {
+			if readErr == io.EOF {
+				return nil
+			}
+			return readErr
+		}
+		select {
+		case recvErr := <-fromClient:
+			if recvErr == io.EOF {
+				return nil
+			}
+			return recvErr
+		default:
+		}
+	}
+}
+
 // defaultSerialLogTailBytes/maxSerialLogTailBytes bound GetVMSerialLog's
 // response regardless of what a caller requests - a plain synchronous
 // RPC (not a stream) has no business returning an arbitrarily large
