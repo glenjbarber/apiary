@@ -1099,29 +1099,29 @@ func TestServer_NetworksPage(t *testing.T) {
 	}
 }
 
-func TestServer_NetworksPage_ColorsBridgeStatus(t *testing.T) {
+func TestServer_NetworksPage_ShowsBridgeStatusByHive(t *testing.T) {
 	client := &fakeClient{listNetworksResp: &rpcpb.ListNetworksResponse{
-		Networks: []*rpcpb.NetworkDefinition{
-			{Id: "net-up", Subnet: "10.60.0.0/24", BridgeStatus: "up"},
-			{Id: "net-down", Subnet: "10.61.0.0/24", BridgeStatus: "down"},
-			{Id: "net-unknown", Subnet: "10.62.0.0/24", BridgeStatus: "unknown"},
-		},
-	}}
-	s := newTestServer(t, client)
+		Networks: []*rpcpb.NetworkDefinition{{Id: "net-1", Subnet: "10.60.0.0/24"}},
+	}, statusResp: &rpcpb.StatusResponse{ManagerNodeId: "apiarium", KnownNodeIds: []string{"apiarium", "apiverse"}}, bridgeStatusResp: &rpcpb.GetLocalNetworkBridgeStatusResponse{BridgeStatus: "up"}}
+	peers := &fakePeerHostStatsClient{bridgeResp: &rpcpb.GetLocalNetworkBridgeStatusResponse{BridgeStatus: "down"}}
+	s, err := NewServer(client, nil, nil, peers, ".apiary.work", "17700", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	req := httptest.NewRequest(http.MethodGet, "/networks", nil)
 	rec := httptest.NewRecorder()
 	s.ServeHTTP(rec, req)
 
 	body := rec.Body.String()
-	if !strings.Contains(body, `<span class="success">up</span>`) {
-		t.Errorf("networks page missing green 'up' status, got: %s", body)
+	if !strings.Contains(body, "apiarium") || !strings.Contains(body, `<span class="success">up</span>`) {
+		t.Errorf("networks page missing local Hive status, got: %s", body)
 	}
-	if !strings.Contains(body, `<span class="error">down</span>`) {
-		t.Errorf("networks page missing red 'down' status, got: %s", body)
+	if !strings.Contains(body, "apiverse") || !strings.Contains(body, `<span class="error">down</span>`) {
+		t.Errorf("networks page missing peer Hive status, got: %s", body)
 	}
-	if !strings.Contains(body, "<em>unknown</em>") {
-		t.Errorf("networks page missing 'unknown' status, got: %s", body)
+	if peers.lastBridgeAddr != "apiverse.apiary.work:17700" {
+		t.Errorf("bridge peer address = %q", peers.lastBridgeAddr)
 	}
 }
 

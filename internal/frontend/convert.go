@@ -140,6 +140,17 @@ type networkView struct {
 	// support configured, or the bridge doesn't exist here yet) -
 	// physical, per-node state from ListNetworks, never set on create.
 	BridgeStatus string
+
+	// BridgeStatuses is the authoritative per-Hive bridge evidence for
+	// the Networks page. BridgeStatus is retained for callers that need
+	// the managerd response's local compatibility field, but must not be
+	// presented as a cluster-wide conclusion.
+	BridgeStatuses []bridgeStatusView
+}
+
+type bridgeStatusView struct {
+	NodeID string
+	Status string
 }
 
 func fromRPCNetwork(n *rpcpb.NetworkDefinition) networkView {
@@ -301,13 +312,25 @@ func phaseFromRPC(p rpcpb.VMPhase) string {
 	}
 }
 
-// sortVMs sorts vms in place by sortBy ("id", "node", or "state" -
-// state meaning Phase, the real-time column; anything else falls back
-// to "id"), case-insensitively, ascending unless dir is "desc". Ties
+// sortVMs sorts vms in place by sortBy ("running", "id", "node", or
+// "state" - state meaning Phase, the real-time column). "running" keeps
+// active Cells first, grouped by Hive and then alphabetically by name. Other
+// values fall back to "id", case-insensitively, ascending unless dir is
+// "desc". Ties
 // within the requested key fall back to ID, so the order stays stable
 // and predictable across repeated calls (e.g. every polling tick)
 // rather than shuffling equal-Phase rows relative to each other.
 func sortVMs(vms []vmView, sortBy, dir string) {
+	if sortBy == "running" {
+		sort.SliceStable(vms, func(i, j int) bool {
+			a, b := vmIsRunning(vms[i]), vmIsRunning(vms[j])
+			if a != b {
+				return a
+			}
+			return compareCellListOrder(vms[i].NodeID, vms[i].Name, vms[i].ID, vms[j].NodeID, vms[j].Name, vms[j].ID)
+		})
+		return
+	}
 	key := func(v vmView) string {
 		switch sortBy {
 		case "node":
@@ -331,6 +354,36 @@ func sortVMs(vms []vmView, sortBy, dir string) {
 		}
 		return strings.ToLower(vms[i].ID) < strings.ToLower(vms[j].ID)
 	})
+}
+
+// sortJails gives the jail list the same stable operational order as the VM
+// list: Cells actually reported ready appear first, then Hive, name, and ID.
+func sortJails(jails []jailView) {
+	sort.SliceStable(jails, func(i, j int) bool {
+		a, b := jailIsRunning(jails[i]), jailIsRunning(jails[j])
+		if a != b {
+			return a
+		}
+		return compareCellListOrder(jails[i].NodeID, jails[i].Name, jails[i].ID, jails[j].NodeID, jails[j].Name, jails[j].ID)
+	})
+}
+
+func vmIsRunning(vm vmView) bool {
+	return vm.Phase == "ready" && vm.DesiredState != "stopped" && vm.DesiredState != "restarting" && vm.DesiredState != "deleting"
+}
+
+func jailIsRunning(jail jailView) bool {
+	return jail.Phase == "ready" && jail.DesiredState != "stopped" && jail.DesiredState != "restarting" && jail.DesiredState != "deleting"
+}
+
+func compareCellListOrder(nodeA, nameA, idA, nodeB, nameB, idB string) bool {
+	for _, pair := range [][2]string{{nodeA, nodeB}, {nameA, nameB}, {idA, idB}} {
+		a, b := strings.ToLower(pair[0]), strings.ToLower(pair[1])
+		if a != b {
+			return a < b
+		}
+	}
+	return false
 }
 
 func fromRPCVM(d *rpcpb.VMDefinition) vmView {
