@@ -83,6 +83,10 @@ type fakeClient struct {
 	setDatasetQuotaResp    *rpcpb.SetDatasetQuotaResponse
 	lastSetDatasetQuotaReq *rpcpb.SetDatasetQuotaRequest
 
+	listNodeServicesResp      *rpcpb.ListNodeServicesResponse
+	restartNodeServiceResp    *rpcpb.RestartNodeServiceResponse
+	lastRestartNodeServiceReq *rpcpb.RestartNodeServiceRequest
+
 	simulateResp             *rpcpb.SimulateNodeFailureResponse
 	simulateNodeFailureCalls int
 	simulateErr              error
@@ -186,6 +190,21 @@ func (f *fakeClient) SetDatasetQuota(_ context.Context, in *rpcpb.SetDatasetQuot
 		return f.setDatasetQuotaResp, nil
 	}
 	return &rpcpb.SetDatasetQuotaResponse{}, nil
+}
+
+func (f *fakeClient) ListNodeServices(context.Context, *rpcpb.ListNodeServicesRequest, ...grpc.CallOption) (*rpcpb.ListNodeServicesResponse, error) {
+	if f.listNodeServicesResp != nil {
+		return f.listNodeServicesResp, nil
+	}
+	return &rpcpb.ListNodeServicesResponse{}, nil
+}
+
+func (f *fakeClient) RestartNodeService(_ context.Context, in *rpcpb.RestartNodeServiceRequest, _ ...grpc.CallOption) (*rpcpb.RestartNodeServiceResponse, error) {
+	f.lastRestartNodeServiceReq = in
+	if f.restartNodeServiceResp != nil {
+		return f.restartNodeServiceResp, nil
+	}
+	return &rpcpb.RestartNodeServiceResponse{}, nil
 }
 
 func (f *fakeClient) MigrateVM(context.Context, *rpcpb.MigrateVMRequest, ...grpc.CallOption) (*rpcpb.MigrateVMResponse, error) {

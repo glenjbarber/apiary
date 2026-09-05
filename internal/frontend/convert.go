@@ -104,6 +104,29 @@ func fromRPCNodeConfig(d *rpcpb.GetNodeConfigResponse) nodeConfigView {
 	return view
 }
 
+// nodeServiceView is the template-facing view of a host-local Apiary rc.d
+// service. Status comes from the owning Hive only and is deliberately not a
+// cluster-wide claim.
+type nodeServiceView struct {
+	Name        string
+	Status      string
+	Enabled     bool
+	Detail      string
+	Restartable bool
+}
+
+func fromRPCNodeServices(resp *rpcpb.ListNodeServicesResponse) []nodeServiceView {
+	services := make([]nodeServiceView, 0, len(resp.GetServices()))
+	for _, service := range resp.GetServices() {
+		services = append(services, nodeServiceView{
+			Name: service.GetName(), Status: service.GetStatus(),
+			Enabled: service.GetEnabled(), Detail: service.GetDetail(),
+			Restartable: service.GetRestartable(),
+		})
+	}
+	return services
+}
+
 // networkView is the template-facing shape for a NetworkDefinition.
 type networkView struct {
 	ID              string

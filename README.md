@@ -367,8 +367,10 @@ each design decision, in order.
 - **Machine Configuration page** - a new `/machine` page for per-node
   settings: which physical interface a node uses for VLAN tagging vs.
   NAT egress, a per-VM firewall-pause toggle for troubleshooting
-  without losing the configured rule set, and a ZFS dataset quota
-  action. See
+  without losing the configured rule set, a ZFS dataset quota action,
+  jail-provisioning control, and local Apiary service status. Admins can
+  schedule a restart of `apiary_managerd` or `apiary_frontend` from the
+  same page without changing `rc.conf`. See
   [ADR-0049](docs/adr/0049-machine-configuration-page.md).
 - **A real, joined multi-node Kubernetes cluster**, via the separate
   `cluster-api-provider-apiary` repo - a genuine 2-node cluster (one

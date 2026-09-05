@@ -203,6 +203,12 @@ type pageData struct {
 	QuotaFormError   string
 	QuotaFormSuccess string
 
+	// NodeServices backs the Machine page's host-local Apiary services
+	// panel. ServiceFormError/Success report a restart result there.
+	NodeServices       []nodeServiceView
+	ServiceFormError   string
+	ServiceFormSuccess string
+
 	// Simulate* back the Dependency Graph Simulator page ("/simulate",
 	// ADR-0052). SimulateNodes is the union of raft membership and every
 	// VM/jail's node_id/replica_node_id - a node can remain a valid
@@ -626,6 +632,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /machine/jail-provisioning", s.requireRole(manager.RoleAdmin, s.handleUpdateJailProvisioning))
 	s.mux.HandleFunc("POST /machine/vms/{id}/firewall", s.requireRole(manager.RoleOperator, s.handleSetVMFirewallPaused))
 	s.mux.HandleFunc("POST /machine/quota", s.requireRole(manager.RoleOperator, s.handleSetDatasetQuota))
+	s.mux.HandleFunc("POST /machine/services/{name}/restart", s.requireRole(manager.RoleAdmin, s.handleRestartNodeService))
 }
 
 // handleLoginPage serves the login form. If login isn't enabled at all,

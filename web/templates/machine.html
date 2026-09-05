@@ -32,6 +32,18 @@
   </div>
 
   <div class="panel">
+    <h3>Apiary services</h3>
+    <p class="muted">
+      Status is local to this Hive. Restarting <code>apiary_managerd</code>
+      applies saved Machine settings such as jail provisioning. Apiary does
+      not change <code>rc.conf</code> here.
+    </p>
+    <div id="node-services-panel">
+      {{template "node_services_panel" .}}
+    </div>
+  </div>
+
+  <div class="panel">
     <h3>VM firewall overrides</h3>
     <p class="muted">
       Temporarily suspend enforcement of a VM's firewall rules
@@ -83,6 +95,29 @@
   {{template "footer" .}}
 </body>
 </html>
+{{end}}
+
+{{define "node_services_panel"}}
+<div id="node-services-error" class="banner-error">{{.ServiceFormError}}</div>
+{{if .ServiceFormSuccess}}<div class="banner-success">{{.ServiceFormSuccess}}</div>{{end}}
+<table>
+  <thead>
+    <tr><th>Service</th><th>Status</th><th>Boot enabled</th><th>Detail</th><th></th></tr>
+  </thead>
+  <tbody>
+    {{range .NodeServices}}
+    <tr>
+      <td><code>{{.Name}}</code></td>
+      <td>{{if eq .Status "running"}}<span class="success">running</span>{{else if eq .Status "stopped"}}<span class="error">stopped</span>{{else}}<span class="badge unknown">unknown</span>{{end}}</td>
+      <td>{{if .Enabled}}<span class="success">enabled</span>{{else}}<span class="muted">disabled</span>{{end}}</td>
+      <td>{{.Detail}}</td>
+      <td>{{if and .Restartable $.CanAdmin}}<button hx-post="/machine/services/{{.Name}}/restart" hx-target="#node-services-panel" hx-swap="innerHTML" hx-confirm="Restart {{.Name}} on this Hive?">Restart</button>{{end}}</td>
+    </tr>
+    {{else}}
+    <tr><td colspan="5"><em>{{if .ServiceFormError}}Unable to load service status{{else}}No Apiary services reported{{end}}</em></td></tr>
+    {{end}}
+  </tbody>
+</table>
 {{end}}
 
 {{define "nodeconfig_panel"}}

@@ -162,6 +162,14 @@ func (f *fakeClient) SetDatasetQuota(context.Context, *rpcpb.SetDatasetQuotaRequ
 	return &rpcpb.SetDatasetQuotaResponse{}, nil
 }
 
+func (f *fakeClient) ListNodeServices(context.Context, *rpcpb.ListNodeServicesRequest, ...grpc.CallOption) (*rpcpb.ListNodeServicesResponse, error) {
+	return &rpcpb.ListNodeServicesResponse{}, nil
+}
+
+func (f *fakeClient) RestartNodeService(context.Context, *rpcpb.RestartNodeServiceRequest, ...grpc.CallOption) (*rpcpb.RestartNodeServiceResponse, error) {
+	return &rpcpb.RestartNodeServiceResponse{}, nil
+}
+
 func (f *fakeClient) ReportVMPhase(context.Context, *rpcpb.ReportVMPhaseRequest, ...grpc.CallOption) (*rpcpb.ReportVMPhaseResponse, error) {
 	return &rpcpb.ReportVMPhaseResponse{}, nil
 }

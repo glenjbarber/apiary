@@ -337,6 +337,22 @@ type fakeNodeConfigStore struct {
 	lastSave nodeconfig.Config
 }
 
+type fakeNodeServiceController struct {
+	services    []*rpcpb.NodeService
+	listErr     error
+	restartErr  error
+	restartName string
+}
+
+func (f *fakeNodeServiceController) List(context.Context) ([]*rpcpb.NodeService, error) {
+	return f.services, f.listErr
+}
+
+func (f *fakeNodeServiceController) Restart(_ context.Context, name string) error {
+	f.restartName = name
+	return f.restartErr
+}
+
 func (f *fakeNodeConfigStore) Load() (nodeconfig.Config, error) {
 	if f.loadErr != nil {
 		return nodeconfig.Config{}, f.loadErr
@@ -439,5 +455,33 @@ func TestServer_SetDatasetQuota_NotConfiguredIsError(t *testing.T) {
 	}
 	if resp.GetError() == "" {
 		t.Errorf("SetDatasetQuota() error field = empty, want a not-configured message")
+	}
+}
+
+func TestServer_ListNodeServices_UsesLocalController(t *testing.T) {
+	controller := &fakeNodeServiceController{services: []*rpcpb.NodeService{{Name: "apiary_frontend", Status: "running", Restartable: true}}}
+	s := NewServer(nil, "node-1", nil, nil, nil, nil, nil, "", nil, nil, nil, 0, nil)
+	s.services = controller
+
+	resp, err := s.ListNodeServices(context.Background(), &rpcpb.ListNodeServicesRequest{})
+	if err != nil {
+		t.Fatalf("ListNodeServices() error: %v", err)
+	}
+	if got := resp.GetServices(); len(got) != 1 || got[0].GetName() != "apiary_frontend" {
+		t.Errorf("services = %+v, want apiary_frontend", got)
+	}
+}
+
+func TestServer_RestartNodeService_RejectsNonRestartableService(t *testing.T) {
+	controller := &fakeNodeServiceController{}
+	s := NewServer(nil, "node-1", nil, nil, nil, nil, nil, "", nil, nil, nil, 0, nil)
+	s.services = controller
+
+	resp, err := s.RestartNodeService(context.Background(), &rpcpb.RestartNodeServiceRequest{Name: "apiary_raftd"})
+	if err != nil {
+		t.Fatalf("RestartNodeService() error: %v", err)
+	}
+	if resp.GetError() == "" || controller.restartName != "" {
+		t.Errorf("response = %+v; restart called for %q, want rejection without restart", resp, controller.restartName)
 	}
 }

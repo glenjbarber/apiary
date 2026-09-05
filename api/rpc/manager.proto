@@ -125,6 +125,14 @@ service ManagerService {
   // sub-dataset, not the Base dataset itself.
   rpc SetDatasetQuota(SetDatasetQuotaRequest) returns (SetDatasetQuotaResponse);
 
+  // ListNodeServices reports the locally-installed Apiary rc.d services on
+  // this Hive. RestartNodeService can restart only the narrow allowlist of
+  // services the Machine page exposes; it never edits rc.conf or starts or
+  // stops an arbitrary service. Both operations are strictly host-local and
+  // are never forwarded through raft.
+  rpc ListNodeServices(ListNodeServicesRequest) returns (ListNodeServicesResponse);
+  rpc RestartNodeService(RestartNodeServiceRequest) returns (RestartNodeServiceResponse);
+
   // CreateNetwork/ListNetworks/DeleteNetwork manage NetworkDefinitions -
   // VLAN/subnet/bridge segments a VM can attach to (see ADR-0022).
   // CreateNetwork/DeleteNetwork just submit a Command through raft
@@ -835,6 +843,44 @@ message SetDatasetQuotaRequest {
 
 message SetDatasetQuotaResponse {
   string error = 1;
+}
+
+message NodeService {
+  // rc.d service name, for example "apiary_managerd".
+  string name = 1;
+
+  // "running", "stopped", or "unknown". Unknown means the host could not
+  // determine the state rather than implying the service is stopped.
+  string status = 2;
+
+  // true when rc.conf enables the service at boot. false is also used when
+  // the value cannot be read; detail distinguishes those cases.
+  bool enabled = 3;
+
+  // Brief diagnostic text when the status or rc.conf query failed.
+  string detail = 4;
+
+  // restartable is true only for services RestartNodeService will accept.
+  bool restartable = 5;
+}
+
+message ListNodeServicesRequest {}
+
+message ListNodeServicesResponse {
+  repeated NodeService services = 1;
+  string error = 2;
+}
+
+message RestartNodeServiceRequest {
+  string name = 1;
+}
+
+message RestartNodeServiceResponse {
+  // scheduled is true when a restart was accepted but cannot be awaited
+  // because it may interrupt the current managerd RPC or frontend HTTP
+  // connection.
+  bool scheduled = 1;
+  string error = 2;
 }
 
 message CreateNetworkRequest {

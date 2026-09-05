@@ -38,6 +38,8 @@ const (
 	ManagerService_GetNodeConfig_FullMethodName               = "/apiary.rpc.v1.ManagerService/GetNodeConfig"
 	ManagerService_UpdateNodeConfig_FullMethodName            = "/apiary.rpc.v1.ManagerService/UpdateNodeConfig"
 	ManagerService_SetDatasetQuota_FullMethodName             = "/apiary.rpc.v1.ManagerService/SetDatasetQuota"
+	ManagerService_ListNodeServices_FullMethodName            = "/apiary.rpc.v1.ManagerService/ListNodeServices"
+	ManagerService_RestartNodeService_FullMethodName          = "/apiary.rpc.v1.ManagerService/RestartNodeService"
 	ManagerService_CreateNetwork_FullMethodName               = "/apiary.rpc.v1.ManagerService/CreateNetwork"
 	ManagerService_ListNetworks_FullMethodName                = "/apiary.rpc.v1.ManagerService/ListNetworks"
 	ManagerService_DeleteNetwork_FullMethodName               = "/apiary.rpc.v1.ManagerService/DeleteNetwork"
@@ -175,6 +177,13 @@ type ManagerServiceClient interface {
 	// ADR-0049 for the v1 limitation that this can only target a named
 	// sub-dataset, not the Base dataset itself.
 	SetDatasetQuota(ctx context.Context, in *SetDatasetQuotaRequest, opts ...grpc.CallOption) (*SetDatasetQuotaResponse, error)
+	// ListNodeServices reports the locally-installed Apiary rc.d services on
+	// this Hive. RestartNodeService can restart only the narrow allowlist of
+	// services the Machine page exposes; it never edits rc.conf or starts or
+	// stops an arbitrary service. Both operations are strictly host-local and
+	// are never forwarded through raft.
+	ListNodeServices(ctx context.Context, in *ListNodeServicesRequest, opts ...grpc.CallOption) (*ListNodeServicesResponse, error)
+	RestartNodeService(ctx context.Context, in *RestartNodeServiceRequest, opts ...grpc.CallOption) (*RestartNodeServiceResponse, error)
 	// CreateNetwork/ListNetworks/DeleteNetwork manage NetworkDefinitions -
 	// VLAN/subnet/bridge segments a VM can attach to (see ADR-0022).
 	// CreateNetwork/DeleteNetwork just submit a Command through raft
@@ -478,6 +487,26 @@ func (c *managerServiceClient) SetDatasetQuota(ctx context.Context, in *SetDatas
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(SetDatasetQuotaResponse)
 	err := c.cc.Invoke(ctx, ManagerService_SetDatasetQuota_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *managerServiceClient) ListNodeServices(ctx context.Context, in *ListNodeServicesRequest, opts ...grpc.CallOption) (*ListNodeServicesResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListNodeServicesResponse)
+	err := c.cc.Invoke(ctx, ManagerService_ListNodeServices_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *managerServiceClient) RestartNodeService(ctx context.Context, in *RestartNodeServiceRequest, opts ...grpc.CallOption) (*RestartNodeServiceResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(RestartNodeServiceResponse)
+	err := c.cc.Invoke(ctx, ManagerService_RestartNodeService_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -826,6 +855,13 @@ type ManagerServiceServer interface {
 	// ADR-0049 for the v1 limitation that this can only target a named
 	// sub-dataset, not the Base dataset itself.
 	SetDatasetQuota(context.Context, *SetDatasetQuotaRequest) (*SetDatasetQuotaResponse, error)
+	// ListNodeServices reports the locally-installed Apiary rc.d services on
+	// this Hive. RestartNodeService can restart only the narrow allowlist of
+	// services the Machine page exposes; it never edits rc.conf or starts or
+	// stops an arbitrary service. Both operations are strictly host-local and
+	// are never forwarded through raft.
+	ListNodeServices(context.Context, *ListNodeServicesRequest) (*ListNodeServicesResponse, error)
+	RestartNodeService(context.Context, *RestartNodeServiceRequest) (*RestartNodeServiceResponse, error)
 	// CreateNetwork/ListNetworks/DeleteNetwork manage NetworkDefinitions -
 	// VLAN/subnet/bridge segments a VM can attach to (see ADR-0022).
 	// CreateNetwork/DeleteNetwork just submit a Command through raft
@@ -998,6 +1034,12 @@ func (UnimplementedManagerServiceServer) UpdateNodeConfig(context.Context, *Upda
 }
 func (UnimplementedManagerServiceServer) SetDatasetQuota(context.Context, *SetDatasetQuotaRequest) (*SetDatasetQuotaResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method SetDatasetQuota not implemented")
+}
+func (UnimplementedManagerServiceServer) ListNodeServices(context.Context, *ListNodeServicesRequest) (*ListNodeServicesResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ListNodeServices not implemented")
+}
+func (UnimplementedManagerServiceServer) RestartNodeService(context.Context, *RestartNodeServiceRequest) (*RestartNodeServiceResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method RestartNodeService not implemented")
 }
 func (UnimplementedManagerServiceServer) CreateNetwork(context.Context, *CreateNetworkRequest) (*CreateNetworkResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method CreateNetwork not implemented")
@@ -1416,6 +1458,42 @@ func _ManagerService_SetDatasetQuota_Handler(srv interface{}, ctx context.Contex
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(ManagerServiceServer).SetDatasetQuota(ctx, req.(*SetDatasetQuotaRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ManagerService_ListNodeServices_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListNodeServicesRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ManagerServiceServer).ListNodeServices(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ManagerService_ListNodeServices_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ManagerServiceServer).ListNodeServices(ctx, req.(*ListNodeServicesRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ManagerService_RestartNodeService_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(RestartNodeServiceRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ManagerServiceServer).RestartNodeService(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ManagerService_RestartNodeService_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ManagerServiceServer).RestartNodeService(ctx, req.(*RestartNodeServiceRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -1912,6 +1990,14 @@ var ManagerService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "SetDatasetQuota",
 			Handler:    _ManagerService_SetDatasetQuota_Handler,
+		},
+		{
+			MethodName: "ListNodeServices",
+			Handler:    _ManagerService_ListNodeServices_Handler,
+		},
+		{
+			MethodName: "RestartNodeService",
+			Handler:    _ManagerService_RestartNodeService_Handler,
 		},
 		{
 			MethodName: "CreateNetwork",

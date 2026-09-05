@@ -45,6 +45,47 @@ func TestServer_MachinePage_ShowsNodeConfigAndLocalVMsOnly(t *testing.T) {
 	}
 }
 
+func TestServer_MachinePage_ShowsLocalServiceControls(t *testing.T) {
+	client := &fakeClient{listNodeServicesResp: &rpcpb.ListNodeServicesResponse{
+		Services: []*rpcpb.NodeService{
+			{Name: "apiary_managerd", Status: "running", Enabled: true, Restartable: true},
+			{Name: "apiary_raftd", Status: "running", Enabled: true},
+		},
+	}}
+	s := newTestServer(t, client)
+
+	req := httptest.NewRequest(http.MethodGet, "/machine", nil)
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, req)
+
+	body := rec.Body.String()
+	if !strings.Contains(body, "Apiary services") || !strings.Contains(body, "apiary_managerd") || !strings.Contains(body, `hx-post="/machine/services/apiary_managerd/restart"`) {
+		t.Errorf("machine page missing managerd service control, got: %s", body)
+	}
+	if strings.Contains(body, `hx-post="/machine/services/apiary_raftd/restart"`) {
+		t.Errorf("machine page offered a restart for raftd, got: %s", body)
+	}
+}
+
+func TestServer_RestartNodeService_ForwardsAllowlistedName(t *testing.T) {
+	client := &fakeClient{
+		restartNodeServiceResp: &rpcpb.RestartNodeServiceResponse{Scheduled: true},
+		listNodeServicesResp:   &rpcpb.ListNodeServicesResponse{},
+	}
+	s := newTestServer(t, client)
+
+	req := httptest.NewRequest(http.MethodPost, "/machine/services/apiary_managerd/restart", nil)
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, req)
+
+	if got := client.lastRestartNodeServiceReq.GetName(); got != "apiary_managerd" {
+		t.Errorf("restart request name = %q, want apiary_managerd", got)
+	}
+	if !strings.Contains(rec.Body.String(), "restart scheduled") {
+		t.Errorf("response missing scheduled confirmation, got: %s", rec.Body.String())
+	}
+}
+
 func TestServer_UpdateNodeConfig_ForwardsFormValues(t *testing.T) {
 	client := &fakeClient{updateNodeConfigResp: &rpcpb.UpdateNodeConfigResponse{}}
 	s := newTestServer(t, client)
