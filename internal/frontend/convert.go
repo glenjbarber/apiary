@@ -57,6 +57,14 @@ type vmView struct {
 	// not enforced (everything allowed) without discarding them - see
 	// ADR-0049's Machine Configuration page.
 	FirewallPaused bool
+
+	// CloudflareHostname/CloudflarePort, when hostname is set, name a
+	// public hostname this VM's own HTTP service (on port) is reachable
+	// at via a pre-provisioned Cloudflare Tunnel on its owning node -
+	// read-only here, set only via SetVMCloudflareExposure. See
+	// ADR-0063.
+	CloudflareHostname string
+	CloudflarePort     uint32
 }
 
 type firewallRuleView struct {
@@ -281,21 +289,23 @@ func fromRPCVM(d *rpcpb.VMDefinition) vmView {
 		return vmView{}
 	}
 	v := vmView{
-		ID:             d.GetId(),
-		Name:           d.GetName(),
-		VCPUs:          d.GetVcpus(),
-		MemoryMB:       d.GetMemoryMb(),
-		NodeID:         d.GetNodeId(),
-		DesiredState:   stateFromRPC(d.GetDesiredState()),
-		Phase:          phaseFromRPC(d.GetPhase()),
-		PhaseError:     d.GetPhaseError(),
-		ISOName:        d.GetIsoName(),
-		NetworkID:      d.GetNetworkId(),
-		IPAddress:      d.GetIpAddress(),
-		MACAddress:     d.GetMacAddress(),
-		ReplicaNodeID:  d.GetReplicaNodeId(),
-		BaseImageName:  d.GetBaseImageName(),
-		FirewallPaused: d.GetFirewallPaused(),
+		ID:                 d.GetId(),
+		Name:               d.GetName(),
+		VCPUs:              d.GetVcpus(),
+		MemoryMB:           d.GetMemoryMb(),
+		NodeID:             d.GetNodeId(),
+		DesiredState:       stateFromRPC(d.GetDesiredState()),
+		Phase:              phaseFromRPC(d.GetPhase()),
+		PhaseError:         d.GetPhaseError(),
+		ISOName:            d.GetIsoName(),
+		NetworkID:          d.GetNetworkId(),
+		IPAddress:          d.GetIpAddress(),
+		MACAddress:         d.GetMacAddress(),
+		ReplicaNodeID:      d.GetReplicaNodeId(),
+		BaseImageName:      d.GetBaseImageName(),
+		FirewallPaused:     d.GetFirewallPaused(),
+		CloudflareHostname: d.GetCloudflareHostname(),
+		CloudflarePort:     d.GetCloudflarePort(),
 	}
 	for _, rule := range d.GetFirewallRules() {
 		v.FirewallRules = append(v.FirewallRules, firewallRuleView{

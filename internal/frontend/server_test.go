@@ -77,6 +77,9 @@ type fakeClient struct {
 	setVMFirewallPausedResp    *rpcpb.SetVMFirewallPausedResponse
 	lastSetVMFirewallPausedReq *rpcpb.SetVMFirewallPausedRequest
 
+	setVMCloudflareExposureResp    *rpcpb.SetVMCloudflareExposureResponse
+	lastSetVMCloudflareExposureReq *rpcpb.SetVMCloudflareExposureRequest
+
 	setDatasetQuotaResp    *rpcpb.SetDatasetQuotaResponse
 	lastSetDatasetQuotaReq *rpcpb.SetDatasetQuotaRequest
 
@@ -152,6 +155,14 @@ func (f *fakeClient) SetVMFirewallPaused(_ context.Context, in *rpcpb.SetVMFirew
 		return f.setVMFirewallPausedResp, nil
 	}
 	return &rpcpb.SetVMFirewallPausedResponse{}, nil
+}
+
+func (f *fakeClient) SetVMCloudflareExposure(_ context.Context, in *rpcpb.SetVMCloudflareExposureRequest, _ ...grpc.CallOption) (*rpcpb.SetVMCloudflareExposureResponse, error) {
+	f.lastSetVMCloudflareExposureReq = in
+	if f.setVMCloudflareExposureResp != nil {
+		return f.setVMCloudflareExposureResp, nil
+	}
+	return &rpcpb.SetVMCloudflareExposureResponse{}, nil
 }
 
 func (f *fakeClient) GetNodeConfig(context.Context, *rpcpb.GetNodeConfigRequest, ...grpc.CallOption) (*rpcpb.GetNodeConfigResponse, error) {

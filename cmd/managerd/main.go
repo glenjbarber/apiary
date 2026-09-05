@@ -23,6 +23,7 @@ import (
 	"github.com/glenjbarber/apiary/internal/assumecheck"
 	"github.com/glenjbarber/apiary/internal/assumptions"
 	"github.com/glenjbarber/apiary/internal/bhyve"
+	"github.com/glenjbarber/apiary/internal/cloudflare"
 	"github.com/glenjbarber/apiary/internal/cluster"
 	"github.com/glenjbarber/apiary/internal/dhcpd"
 	"github.com/glenjbarber/apiary/internal/hast"
@@ -86,6 +87,10 @@ func run() error {
 	assumptionHistoryMaxAge := flag.Duration("assumption-history-max-age", 30*24*time.Hour, "maximum age of a persisted assumption history entry before it's pruned")
 	tlsCert := flag.String("tls-cert", "", "PEM certificate file for managerd's external gRPC API; leave unset (with -tls-key) to serve plaintext, as before")
 	tlsKey := flag.String("tls-key", "", "PEM private key file matching -tls-cert")
+	cloudflareTokenFile := flag.String("cloudflare-token-file", "", "path to a file containing only a Cloudflare API token scoped to Zone:DNS:Edit (see ADR-0063); leave empty to disable Cloudflare Tunnel exposure entirely on this node - never a flag value or env var, since this is a long-lived, immediately-exploitable third-party credential if leaked")
+	cloudflareZoneID := flag.String("cloudflare-zone-id", "", "Cloudflare zone ID CNAME records are created/updated in; required when -cloudflare-token-file is set")
+	cloudflareTunnelID := flag.String("cloudflare-tunnel-id", "", "this Hive's own pre-provisioned Cloudflare Tunnel id (from `cloudflared tunnel create`, run once by the operator - see ADR-0063); required when -cloudflare-token-file is set")
+	cloudflareTunnelCredentialsFile := flag.String("cloudflare-tunnel-credentials-file", "", "path to this Hive's own pre-provisioned Tunnel's credentials JSON (from `cloudflared tunnel create`); required when -cloudflare-token-file is set")
 	resetManaged := flag.String("reset-managed", "", fmt.Sprintf("Tier 2 reset (ADR-0038): destroy every real VM/jail/dataset/ISO this node's own -zfs-base/-jail-prefix/-bhyve-prefix/-iso-dir manage, then exit, rather than starting the server. Never touches anything outside that scope - safe to run without double-checking. Must be exactly %q or nothing happens", resetManagedConfirmPhrase))
 	factoryReset := flag.String("factory-reset", "", fmt.Sprintf("Tier 3 reset (ADR-0038): runs the same destruction as -reset-managed, then also destroys anything named in -factory-reset-extra-jails/-factory-reset-extra-datasets regardless of scope, then exits. Must be exactly %q or nothing happens", factoryResetConfirmPhrase))
 	factoryResetExtraJails := flag.String("factory-reset-extra-jails", "", "comma-separated jail names to destroy for real during -factory-reset, outside the normal -jail-prefix scope (e.g. a jail you want gone that Apiary itself didn't create) - nothing here is ever auto-discovered, only what's named")
@@ -207,6 +212,29 @@ func run() error {
 		reconciler.Mount = ufsmount.New()
 		reconciler.JailBase = *jailMountBase
 		reconciler.JailDiskSizeMB = *jailDiskSizeMB
+	}
+	// Cloudflare Tunnel exposure (ADR-0063) is independent of bhyve/
+	// HAST/jail support - it only ever proxies to a VM's own managed-
+	// network address, using a Tunnel the operator pre-provisioned by
+	// hand (cloudflared tunnel create). Empty -cloudflare-token-file
+	// disables it entirely, the same opt-in pattern as -hast-enabled/
+	// -jail-enabled above; reconciler.Cloudflare stays nil in that case,
+	// so reconcileCloudflareTunnel still cleans up any leftover process
+	// from before the feature was disabled (see the Reconciler field's
+	// own doc comment).
+	if *cloudflareTokenFile != "" {
+		if *cloudflareZoneID == "" || *cloudflareTunnelID == "" || *cloudflareTunnelCredentialsFile == "" {
+			return fmt.Errorf("-cloudflare-token-file requires -cloudflare-zone-id, -cloudflare-tunnel-id, and -cloudflare-tunnel-credentials-file to also be set")
+		}
+		tokenBytes, err := os.ReadFile(*cloudflareTokenFile)
+		if err != nil {
+			return fmt.Errorf("reading -cloudflare-token-file: %w", err)
+		}
+		reconciler.Cloudflare = &cloudflare.Manager{}
+		reconciler.CloudflareToken = strings.TrimSpace(string(tokenBytes))
+		reconciler.CloudflareZoneID = *cloudflareZoneID
+		reconciler.CloudflareTunnelID = *cloudflareTunnelID
+		reconciler.CloudflareTunnelCredentialsFile = *cloudflareTunnelCredentialsFile
 	}
 	// reconciler.Bhyve/bhyveMgr are left nil when no boot ROM is
 	// configured, so nodes without hardware-assisted virtualization (the
@@ -337,7 +365,7 @@ func run() error {
 		serveErrCh <- grpcServer.Serve(lis)
 	}()
 
-	log.Printf("managerd: listening on %s (node-id=%s, raftd-socket=%s, vlan-uplink=%s, hast-enabled=%v, jail-enabled=%v, peer-managerd-port=%s, tls=%v)", *rpcAddr, id, *raftdSocket, *vlanUplink, *hastEnabled, *jailEnabled, resolvedPeerPort, *tlsCert != "")
+	log.Printf("managerd: listening on %s (node-id=%s, raftd-socket=%s, vlan-uplink=%s, hast-enabled=%v, jail-enabled=%v, peer-managerd-port=%s, tls=%v, cloudflare-enabled=%v)", *rpcAddr, id, *raftdSocket, *vlanUplink, *hastEnabled, *jailEnabled, resolvedPeerPort, *tlsCert != "", *cloudflareTokenFile != "")
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()

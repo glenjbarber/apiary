@@ -57,6 +57,34 @@
       <div class="actions"><a class="button" href="/vms/{{.VM.ID}}/console">Console</a><a class="button secondary" href="/vms/{{.VM.ID}}/serial">Serial log</a></div>
     </section>
 
+    <section class="panel">
+      <h3>Public exposure</h3>
+      <p class="muted">Reachable via a pre-provisioned Cloudflare Tunnel on this VM's owning Hive - requires a network and a running HTTP service on the given port. See ADR-0063.</p>
+      {{if .VM.CloudflareHostname}}
+      <dl class="detail-list">
+        <div><dt>Public hostname</dt><dd><a href="https://{{.VM.CloudflareHostname}}" target="_blank" rel="noopener">{{.VM.CloudflareHostname}}</a></dd></div>
+        <div><dt>Local port</dt><dd>{{.VM.CloudflarePort}}</dd></div>
+      </dl>
+      {{else}}
+      <p class="muted">Not exposed.</p>
+      {{end}}
+      {{if .VMCloudflareFormError}}<div class="banner-error">{{.VMCloudflareFormError}}</div>{{end}}
+      {{if .CanOperate}}
+      {{$canEdit := or .VM.NetworkID .VM.CloudflareHostname}}
+      <form method="post" action="/vms/{{.VM.ID}}/cloudflare-exposure" class="inline-form">
+        <label>Hostname
+          <input type="text" name="cloudflare_hostname" placeholder="web.example.com" value="{{.VM.CloudflareHostname}}" {{if not $canEdit}}disabled{{end}}>
+        </label>
+        <label>Port
+          <input type="number" name="cloudflare_port" min="1" max="65535" value="{{if .VM.CloudflarePort}}{{.VM.CloudflarePort}}{{end}}" {{if not $canEdit}}disabled{{end}}>
+        </label>
+        <button type="submit" {{if not $canEdit}}disabled{{end}}>Save</button>
+      </form>
+      {{if .VM.CloudflareHostname}}<p class="muted">To stop exposing this VM, clear the Hostname field and press Save.</p>{{end}}
+      {{if not .VM.NetworkID}}<p class="muted">Requires this VM to be attached to a managed network to set a new hostname.</p>{{end}}
+      {{end}}
+    </section>
+
     {{if .CanOperate}}
     <section class="panel danger-zone">
       <div><h3>Danger zone</h3><p class="muted">Deletion tears down this VM through normal reconciliation.</p></div>

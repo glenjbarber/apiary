@@ -100,6 +100,7 @@ var requiredRole = map[string]Role{
 	"/apiary.rpc.v1.ManagerService/DeleteVM":                   RoleOperator,
 	"/apiary.rpc.v1.ManagerService/MigrateVM":                  RoleOperator,
 	"/apiary.rpc.v1.ManagerService/SetVMFirewallPaused":        RoleOperator,
+	"/apiary.rpc.v1.ManagerService/SetVMCloudflareExposure":    RoleOperator,
 	"/apiary.rpc.v1.ManagerService/SetDatasetQuota":            RoleOperator,
 	"/apiary.rpc.v1.ManagerService/CreateJail":                 RoleOperator,
 	"/apiary.rpc.v1.ManagerService/UpdateJail":                 RoleOperator,

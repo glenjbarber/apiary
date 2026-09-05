@@ -93,6 +93,8 @@ func (f *FSM) Apply(log *raft.Log) interface{} {
 		return f.applyPurgeVM(log.Index, op.PurgeVm.GetId())
 	case *internalpb.Command_SetVmFirewallPaused:
 		return f.applySetVMFirewallPaused(log.Index, op.SetVmFirewallPaused)
+	case *internalpb.Command_SetVmCloudflareExposure:
+		return f.applySetVMCloudflareExposure(log.Index, op.SetVmCloudflareExposure)
 	case *internalpb.Command_CreateNetwork:
 		return f.applyCreateNetwork(log.Index, op.CreateNetwork.GetNetwork())
 	case *internalpb.Command_DeleteNetwork:
@@ -266,6 +268,24 @@ func (f *FSM) applySetVMFirewallPaused(index uint64, req *internalpb.SetVMFirewa
 	}
 	updated := proto.Clone(vm).(*internalpb.VMDefinition)
 	updated.FirewallPaused = req.GetPaused()
+	f.vms[req.GetId()] = updated
+	return &FSMApplyResult{Index: index, VM: updated}
+}
+
+// applySetVMCloudflareExposure sets cloudflare_hostname/cloudflare_port
+// on an existing VM, touching no other field - the same narrow,
+// deliberately-not-UpdateVM shape as applySetVMFirewallPaused (see
+// ADR-0063). Cross-field validation (hostname requires network_id) is
+// the RPC handler's job, not the FSM's - matching this command's own
+// division of labor with every other narrow Set* command.
+func (f *FSM) applySetVMCloudflareExposure(index uint64, req *internalpb.SetVMCloudflareExposure) *FSMApplyResult {
+	vm, exists := f.vms[req.GetId()]
+	if !exists {
+		return &FSMApplyResult{Index: index, Error: fmt.Sprintf("SetVMCloudflareExposure: id %q does not exist", req.GetId())}
+	}
+	updated := proto.Clone(vm).(*internalpb.VMDefinition)
+	updated.CloudflareHostname = req.GetHostname()
+	updated.CloudflarePort = req.GetPort()
 	f.vms[req.GetId()] = updated
 	return &FSMApplyResult{Index: index, VM: updated}
 }

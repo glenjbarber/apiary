@@ -1487,6 +1487,125 @@ func TestIntegration_SetVMFirewallPaused_MissingIDIsError(t *testing.T) {
 	}
 }
 
+func TestIntegration_SetVMCloudflareExposure_TouchesOnlyThoseFields(t *testing.T) {
+	raftdSocket := newRaftdUDSSocket(t)
+	client := newManagerdRPCClient(t, raftdSocket)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if createResp, err := client.CreateNetwork(ctx, &rpcpb.CreateNetworkRequest{
+		Network: &rpcpb.NetworkDefinition{Id: "net-1", Name: "prod", Subnet: "10.70.0.0/24"},
+	}); err != nil || createResp.GetError() != "" {
+		t.Fatalf("CreateNetwork() error: %v / %s", err, createResp.GetError())
+	}
+	createVMResp, err := client.CreateVM(ctx, &rpcpb.CreateVMRequest{
+		Vm: &rpcpb.VMDefinition{
+			Id: "vm-1", Name: "web-1", Vcpus: 2, NodeId: "node-a", NetworkId: "net-1",
+			FirewallRules: []*rpcpb.FirewallRule{{Direction: "in", Action: "block", Protocol: "tcp", PortRange: "22"}},
+		},
+	})
+	if err != nil || createVMResp.GetError() != "" {
+		t.Fatalf("CreateVM() error: %v / %s", err, createVMResp.GetError())
+	}
+
+	resp, err := client.SetVMCloudflareExposure(ctx, &rpcpb.SetVMCloudflareExposureRequest{Id: "vm-1", Hostname: "web-1.example.com", Port: 8080})
+	if err != nil {
+		t.Fatalf("SetVMCloudflareExposure() error: %v", err)
+	}
+	if resp.GetError() != "" {
+		t.Fatalf("SetVMCloudflareExposure() returned error: %s", resp.GetError())
+	}
+	if resp.GetVm().GetCloudflareHostname() != "web-1.example.com" || resp.GetVm().GetCloudflarePort() != 8080 {
+		t.Errorf("CloudflareHostname/Port = %q/%d, want web-1.example.com/8080", resp.GetVm().GetCloudflareHostname(), resp.GetVm().GetCloudflarePort())
+	}
+	if resp.GetVm().GetName() != "web-1" || resp.GetVm().GetVcpus() != 2 || resp.GetVm().GetNetworkId() != "net-1" {
+		t.Errorf("vm = %+v, want name/vcpus/network_id preserved from the original definition", resp.GetVm())
+	}
+	if len(resp.GetVm().GetFirewallRules()) != 1 || resp.GetVm().GetFirewallRules()[0].GetPortRange() != "22" {
+		t.Errorf("FirewallRules = %v, want the original rule to survive untouched", resp.GetVm().GetFirewallRules())
+	}
+
+	getResp, err := client.GetVM(ctx, &rpcpb.GetVMRequest{Id: "vm-1"})
+	if err != nil || !getResp.GetFound() {
+		t.Fatalf("GetVM() after exposure = (found=%v, err=%v)", getResp.GetFound(), err)
+	}
+	if getResp.GetVm().GetCloudflareHostname() != "web-1.example.com" {
+		t.Errorf("GetVM() after exposure: CloudflareHostname = %q, want web-1.example.com", getResp.GetVm().GetCloudflareHostname())
+	}
+}
+
+func TestIntegration_SetVMCloudflareExposure_RequiresNetworkID(t *testing.T) {
+	raftdSocket := newRaftdUDSSocket(t)
+	client := newManagerdRPCClient(t, raftdSocket)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if _, err := client.CreateVM(ctx, &rpcpb.CreateVMRequest{
+		Vm: &rpcpb.VMDefinition{Id: "vm-1", Name: "flat-bridge-vm", NodeId: "node-a"},
+	}); err != nil {
+		t.Fatalf("CreateVM() error: %v", err)
+	}
+
+	resp, err := client.SetVMCloudflareExposure(ctx, &rpcpb.SetVMCloudflareExposureRequest{Id: "vm-1", Hostname: "web-1.example.com", Port: 8080})
+	if err != nil {
+		t.Fatalf("SetVMCloudflareExposure() error: %v", err)
+	}
+	if resp.GetError() == "" {
+		t.Fatalf("SetVMCloudflareExposure() error = empty, want a rejection for a flat-bridge VM with no network_id")
+	}
+
+	getResp, err := client.GetVM(ctx, &rpcpb.GetVMRequest{Id: "vm-1"})
+	if err != nil || !getResp.GetFound() {
+		t.Fatalf("GetVM() = (found=%v, err=%v)", getResp.GetFound(), err)
+	}
+	if getResp.GetVm().GetCloudflareHostname() != "" {
+		t.Errorf("GetVM(): CloudflareHostname = %q, want empty - the rejected request must not have been applied", getResp.GetVm().GetCloudflareHostname())
+	}
+}
+
+func TestIntegration_SetVMCloudflareExposure_ClearingNeedsNoNetworkID(t *testing.T) {
+	raftdSocket := newRaftdUDSSocket(t)
+	client := newManagerdRPCClient(t, raftdSocket)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if _, err := client.CreateVM(ctx, &rpcpb.CreateVMRequest{
+		Vm: &rpcpb.VMDefinition{Id: "vm-1", Name: "flat-bridge-vm", NodeId: "node-a"},
+	}); err != nil {
+		t.Fatalf("CreateVM() error: %v", err)
+	}
+
+	// Clearing exposure (empty hostname) must never be blocked by the
+	// network_id check - there's nothing to validate when turning
+	// exposure off.
+	resp, err := client.SetVMCloudflareExposure(ctx, &rpcpb.SetVMCloudflareExposureRequest{Id: "vm-1", Hostname: "", Port: 0})
+	if err != nil {
+		t.Fatalf("SetVMCloudflareExposure() error: %v", err)
+	}
+	if resp.GetError() != "" {
+		t.Fatalf("SetVMCloudflareExposure() returned error clearing exposure on a flat-bridge VM: %s", resp.GetError())
+	}
+}
+
+func TestIntegration_SetVMCloudflareExposure_MissingIDIsError(t *testing.T) {
+	raftdSocket := newRaftdUDSSocket(t)
+	client := newManagerdRPCClient(t, raftdSocket)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	resp, err := client.SetVMCloudflareExposure(ctx, &rpcpb.SetVMCloudflareExposureRequest{Id: "does-not-exist", Hostname: "", Port: 0})
+	if err != nil {
+		t.Fatalf("SetVMCloudflareExposure() error: %v", err)
+	}
+	if resp.GetError() == "" {
+		t.Fatalf("SetVMCloudflareExposure() error = empty, want a missing-id rejection")
+	}
+}
+
 func TestIntegration_MigrateVM_RejectsDeletingVM(t *testing.T) {
 	raftdSocket := newRaftdUDSSocket(t)
 	client := newManagerdRPCClient(t, raftdSocket)

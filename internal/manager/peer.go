@@ -495,6 +495,15 @@ func (p *PeerReporter) SetVMFirewallPaused(ctx context.Context, addr string, req
 	return client.SetVMFirewallPaused(ctx, req)
 }
 
+func (p *PeerReporter) SetVMCloudflareExposure(ctx context.Context, addr string, req *rpcpb.SetVMCloudflareExposureRequest) (*rpcpb.SetVMCloudflareExposureResponse, error) {
+	conn, client, err := p.dial(addr)
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close()
+	return client.SetVMCloudflareExposure(ctx, req)
+}
+
 func (p *PeerReporter) ForcePurgeJail(ctx context.Context, addr string, req *rpcpb.ForcePurgeJailRequest) (*rpcpb.ForcePurgeJailResponse, error) {
 	conn, client, err := p.dial(addr)
 	if err != nil {

@@ -62,6 +62,15 @@ service ManagerService {
   // fetched and resent the complete current record - see ADR-0049.
   rpc SetVMFirewallPaused(SetVMFirewallPausedRequest) returns (SetVMFirewallPausedResponse);
 
+  // SetVMCloudflareExposure sets or clears the public hostname a VM's
+  // own HTTP service is reachable at via a pre-provisioned Cloudflare
+  // Tunnel on its owning node (ADR-0063). Deliberately not folded into
+  // UpdateVM, the exact same reasoning as SetVMFirewallPaused above.
+  // Fails if network_id is empty and hostname is non-empty - a
+  // flat-bridge VM's IP is never tracked in raft state, so there is no
+  // address for a Tunnel to proxy to.
+  rpc SetVMCloudflareExposure(SetVMCloudflareExposureRequest) returns (SetVMCloudflareExposureResponse);
+
   // GetVM and ListVMs only succeed against the current leader - see
   // api/internalpb/raftd.proto's GetVM/ListVMs doc comments for why v1's
   // read consistency model is deliberately as simple as its write model.
@@ -313,6 +322,12 @@ message VMDefinition {
   // them - set only via SetVMFirewallPaused, never via UpdateVM. See
   // ADR-0049.
   bool firewall_paused = 16;
+
+  // cloudflare_hostname/cloudflare_port mirror api/internalpb's own
+  // VMDefinition fields - see ADR-0063. Set only via
+  // SetVMCloudflareExposure, never via UpdateVM.
+  string cloudflare_hostname = 17;
+  uint32 cloudflare_port = 18;
 }
 
 // JailState mirrors api/internalpb's JailState.
@@ -456,6 +471,20 @@ message SetVMFirewallPausedRequest {
 }
 
 message SetVMFirewallPausedResponse {
+  // vm is the updated definition, echoed back for confirmation.
+  VMDefinition vm = 1;
+  string error = 2;
+  string leader_hint = 3;
+}
+
+message SetVMCloudflareExposureRequest {
+  string id = 1;
+  string hostname = 2;
+  uint32 port = 3;
+  uint32 timeout_ms = 4;
+}
+
+message SetVMCloudflareExposureResponse {
   // vm is the updated definition, echoed back for confirmation.
   VMDefinition vm = 1;
   string error = 2;

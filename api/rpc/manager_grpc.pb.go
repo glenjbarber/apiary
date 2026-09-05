@@ -26,6 +26,7 @@ const (
 	ManagerService_ForcePurgeVM_FullMethodName                = "/apiary.rpc.v1.ManagerService/ForcePurgeVM"
 	ManagerService_MigrateVM_FullMethodName                   = "/apiary.rpc.v1.ManagerService/MigrateVM"
 	ManagerService_SetVMFirewallPaused_FullMethodName         = "/apiary.rpc.v1.ManagerService/SetVMFirewallPaused"
+	ManagerService_SetVMCloudflareExposure_FullMethodName     = "/apiary.rpc.v1.ManagerService/SetVMCloudflareExposure"
 	ManagerService_GetVM_FullMethodName                       = "/apiary.rpc.v1.ManagerService/GetVM"
 	ManagerService_ListVMs_FullMethodName                     = "/apiary.rpc.v1.ManagerService/ListVMs"
 	ManagerService_UploadISO_FullMethodName                   = "/apiary.rpc.v1.ManagerService/UploadISO"
@@ -119,6 +120,14 @@ type ManagerServiceClient interface {
 	// silently wiping firewall_rules/network_id/etc. unless it first
 	// fetched and resent the complete current record - see ADR-0049.
 	SetVMFirewallPaused(ctx context.Context, in *SetVMFirewallPausedRequest, opts ...grpc.CallOption) (*SetVMFirewallPausedResponse, error)
+	// SetVMCloudflareExposure sets or clears the public hostname a VM's
+	// own HTTP service is reachable at via a pre-provisioned Cloudflare
+	// Tunnel on its owning node (ADR-0063). Deliberately not folded into
+	// UpdateVM, the exact same reasoning as SetVMFirewallPaused above.
+	// Fails if network_id is empty and hostname is non-empty - a
+	// flat-bridge VM's IP is never tracked in raft state, so there is no
+	// address for a Tunnel to proxy to.
+	SetVMCloudflareExposure(ctx context.Context, in *SetVMCloudflareExposureRequest, opts ...grpc.CallOption) (*SetVMCloudflareExposureResponse, error)
 	// GetVM and ListVMs only succeed against the current leader - see
 	// api/internalpb/raftd.proto's GetVM/ListVMs doc comments for why v1's
 	// read consistency model is deliberately as simple as its write model.
@@ -346,6 +355,16 @@ func (c *managerServiceClient) SetVMFirewallPaused(ctx context.Context, in *SetV
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(SetVMFirewallPausedResponse)
 	err := c.cc.Invoke(ctx, ManagerService_SetVMFirewallPaused_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *managerServiceClient) SetVMCloudflareExposure(ctx context.Context, in *SetVMCloudflareExposureRequest, opts ...grpc.CallOption) (*SetVMCloudflareExposureResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(SetVMCloudflareExposureResponse)
+	err := c.cc.Invoke(ctx, ManagerService_SetVMCloudflareExposure_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -752,6 +771,14 @@ type ManagerServiceServer interface {
 	// silently wiping firewall_rules/network_id/etc. unless it first
 	// fetched and resent the complete current record - see ADR-0049.
 	SetVMFirewallPaused(context.Context, *SetVMFirewallPausedRequest) (*SetVMFirewallPausedResponse, error)
+	// SetVMCloudflareExposure sets or clears the public hostname a VM's
+	// own HTTP service is reachable at via a pre-provisioned Cloudflare
+	// Tunnel on its owning node (ADR-0063). Deliberately not folded into
+	// UpdateVM, the exact same reasoning as SetVMFirewallPaused above.
+	// Fails if network_id is empty and hostname is non-empty - a
+	// flat-bridge VM's IP is never tracked in raft state, so there is no
+	// address for a Tunnel to proxy to.
+	SetVMCloudflareExposure(context.Context, *SetVMCloudflareExposureRequest) (*SetVMCloudflareExposureResponse, error)
 	// GetVM and ListVMs only succeed against the current leader - see
 	// api/internalpb/raftd.proto's GetVM/ListVMs doc comments for why v1's
 	// read consistency model is deliberately as simple as its write model.
@@ -935,6 +962,9 @@ func (UnimplementedManagerServiceServer) MigrateVM(context.Context, *MigrateVMRe
 }
 func (UnimplementedManagerServiceServer) SetVMFirewallPaused(context.Context, *SetVMFirewallPausedRequest) (*SetVMFirewallPausedResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method SetVMFirewallPaused not implemented")
+}
+func (UnimplementedManagerServiceServer) SetVMCloudflareExposure(context.Context, *SetVMCloudflareExposureRequest) (*SetVMCloudflareExposureResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method SetVMCloudflareExposure not implemented")
 }
 func (UnimplementedManagerServiceServer) GetVM(context.Context, *GetVMRequest) (*GetVMResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetVM not implemented")
@@ -1181,6 +1211,24 @@ func _ManagerService_SetVMFirewallPaused_Handler(srv interface{}, ctx context.Co
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(ManagerServiceServer).SetVMFirewallPaused(ctx, req.(*SetVMFirewallPausedRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ManagerService_SetVMCloudflareExposure_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SetVMCloudflareExposureRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ManagerServiceServer).SetVMCloudflareExposure(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ManagerService_SetVMCloudflareExposure_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ManagerServiceServer).SetVMCloudflareExposure(ctx, req.(*SetVMCloudflareExposureRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -1820,6 +1868,10 @@ var ManagerService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "SetVMFirewallPaused",
 			Handler:    _ManagerService_SetVMFirewallPaused_Handler,
+		},
+		{
+			MethodName: "SetVMCloudflareExposure",
+			Handler:    _ManagerService_SetVMCloudflareExposure_Handler,
 		},
 		{
 			MethodName: "GetVM",
