@@ -25,6 +25,48 @@
   </div>
 
   <div class="panel">
+    <h3>Resource scope paths</h3>
+    <p class="muted">
+      Where this Hive looks for its own existing VM storage, jail
+      images, and installer images. <strong>Write-once through this
+      page</strong>: changing one of these after real resources already
+      exist under the old value does not move them - it just makes the
+      reconciler stop seeing them, silently orphaning real VMs, jails,
+      or ISOs. Once a value below is set, it can only be changed by
+      editing the underlying <code>rc.conf</code> flag directly and
+      restarting.
+    </p>
+    <div id="resource-scope-panel">
+      {{template "resource_scope_panel" .}}
+    </div>
+  </div>
+
+  <div class="panel">
+    <h3>Bhyve / VM provisioning</h3>
+    <p class="muted">
+      Blank boot ROM disables bhyve provisioning on this node entirely;
+      blank bridge disables VM networking. Disk size and reconcile
+      interval only affect newly created VMs/ticks, never an existing
+      one.
+    </p>
+    <div id="bhyve-config-panel">
+      {{template "bhyve_config_panel" .}}
+    </div>
+  </div>
+
+  <div class="panel">
+    <h3>HAST-backed disk replication</h3>
+    <p class="muted">
+      Enables HAST support on this node (ADR-0026) - needed on both a
+      replicated VM's owning node and its replica node, regardless of
+      bhyve support. Requires a real, patched <code>hastd</code>.
+    </p>
+    <div id="hast-panel">
+      {{template "hast_panel" .}}
+    </div>
+  </div>
+
+  <div class="panel">
     <h3>Jail provisioning</h3>
     <p class="muted">
       Controls whether this Hive provisions jails assigned to it. If a
@@ -33,6 +75,55 @@
     </p>
     <div id="jail-provisioning-panel">
       {{template "jail_provisioning_panel" .}}
+    </div>
+  </div>
+
+  <div class="panel">
+    <h3>Peer-to-peer forwarding</h3>
+    <p class="muted">
+      Used when this node forwards a raft write/read to the leader's
+      managerd (ADR-0029/ADR-0035), or dials another Hive for a
+      cross-Hive console/serial-log request. The peer API key is
+      write-only - it is never shown once saved, only whether one is
+      set.
+    </p>
+    <div id="peer-forwarding-panel">
+      {{template "peer_forwarding_panel" .}}
+    </div>
+  </div>
+
+  <div class="panel">
+    <h3>TLS</h3>
+    <p class="muted">
+      Certificate/key paths for this node's own external gRPC API
+      (managerd) - not the certificate content itself, which stays on
+      disk. Leave both blank to serve plaintext.
+    </p>
+    <div id="tls-panel">
+      {{template "tls_panel" .}}
+    </div>
+  </div>
+
+  <div class="panel">
+    <h3>Automated Assumption Checks tuning</h3>
+    <p class="muted">
+      Timing and retention for the continuously re-evaluated assumption
+      checks (ADR-0055). Pure tuning knobs - safe to change any time.
+    </p>
+    <div id="assumption-tuning-panel">
+      {{template "assumption_tuning_panel" .}}
+    </div>
+  </div>
+
+  <div class="panel">
+    <h3>Internal security</h3>
+    <p class="muted">
+      Shared secret this node presents to raftd's own internal socket
+      (ADR-0033) - must match raftd's own <code>-internal-token</code>.
+      Write-only, same as the peer API key above.
+    </p>
+    <div id="internal-security-panel">
+      {{template "internal_security_panel" .}}
     </div>
   </div>
 
@@ -78,11 +169,14 @@
     <ol>
       <li>The domain's DNS must already be managed by Cloudflare (its nameservers point at Cloudflare).</li>
       <li>Install <code>cloudflared</code> on this Hive, then run <code>cloudflared tunnel login</code> and <code>cloudflared tunnel create &lt;hive-name&gt;</code> once - this produces a tunnel id and a credentials JSON file.</li>
-      <li>Create a Cloudflare API token scoped to <strong>Zone:DNS:Edit only</strong> (never Tunnel:Edit or account-level) for the zone Apiary will manage CNAME records in.</li>
-      <li>Start this Hive's <code>managerd</code> with <code>-cloudflare-token-file</code> (path to a file containing only the raw token), <code>-cloudflare-zone-id</code>, <code>-cloudflare-tunnel-id</code>, and <code>-cloudflare-tunnel-credentials-file</code> all set.</li>
+      <li>Create a Cloudflare API token scoped to <strong>Zone:DNS:Edit only</strong> (never Tunnel:Edit or account-level) for the zone Apiary will manage CNAME records in, and save it to a file only this host can read.</li>
+      <li>Fill in the token file's path plus the zone/tunnel id and credentials file path below (or set the matching <code>-cloudflare-*</code> flags directly in <code>rc.conf</code>), then restart <code>apiary_managerd</code>.</li>
     </ol>
     <p class="muted">Once set, Apiary automatically creates/updates the DNS CNAME record for each exposed Cell - no manual DNS editing per Cell.</p>
     {{end}}
+    <div id="cloudflare-config-panel">
+      {{template "cloudflare_config_panel" .}}
+    </div>
   </div>
 
   <div class="panel">
@@ -216,4 +310,186 @@
   <label>Quota <input type="text" name="quota" placeholder="10G, or none to clear" required></label>
   <button type="submit">Set quota</button>
 </form>
+{{end}}
+
+{{/* resource_scope_panel: each of the five fields renders read-only
+     once set (see internal/nodeconfig's write-once rule) - there is no
+     input to submit a change through, so the field is simply absent
+     from the form and nodeConfigUpdateRequest's own current-value
+     baseline preserves it untouched. Only an unset field gets an
+     editable input. */}}
+{{define "resource_scope_panel"}}
+<div id="resource-scope-error" class="banner-error">{{.NodeConfigFormError}}</div>
+<table>
+  <tbody>
+    <tr><th>ZFS base</th><td>{{if .NodeConfig.ZFSBase}}<code>{{.NodeConfig.ZFSBase}}</code>{{else}}<em>(unset)</em>{{end}}</td></tr>
+    <tr><th>Bhyve prefix</th><td>{{if .NodeConfig.BhyvePrefix}}<code>{{.NodeConfig.BhyvePrefix}}</code>{{else}}<em>(unset)</em>{{end}}</td></tr>
+    <tr><th>ISO directory</th><td>{{if .NodeConfig.ISODir}}<code>{{.NodeConfig.ISODir}}</code>{{else}}<em>(unset)</em>{{end}}</td></tr>
+    <tr><th>Jail prefix</th><td>{{if .NodeConfig.JailPrefix}}<code>{{.NodeConfig.JailPrefix}}</code>{{else}}<em>(unset)</em>{{end}}</td></tr>
+    <tr><th>Jail mount base</th><td>{{if .NodeConfig.JailMountBase}}<code>{{.NodeConfig.JailMountBase}}</code>{{else}}<em>(unset)</em>{{end}}</td></tr>
+  </tbody>
+</table>
+{{if .CanAdmin}}
+{{if or (not .NodeConfig.ZFSBase) (not .NodeConfig.BhyvePrefix) (not .NodeConfig.ISODir) (not .NodeConfig.JailPrefix) (not .NodeConfig.JailMountBase)}}
+<form class="inline-form" hx-post="/machine/resource-scope" hx-target="#resource-scope-panel" hx-swap="innerHTML">
+  {{if not .NodeConfig.ZFSBase}}<label>ZFS base <input type="text" name="zfs_base" placeholder="zroot/apiary"></label>{{end}}
+  {{if not .NodeConfig.BhyvePrefix}}<label>Bhyve prefix <input type="text" name="bhyve_prefix" placeholder="apiary-"></label>{{end}}
+  {{if not .NodeConfig.ISODir}}<label>ISO directory <input type="text" name="iso_dir" placeholder="/var/db/apiary/isos"></label>{{end}}
+  {{if not .NodeConfig.JailPrefix}}<label>Jail prefix <input type="text" name="jail_prefix" placeholder="apiary-"></label>{{end}}
+  {{if not .NodeConfig.JailMountBase}}<label>Jail mount base <input type="text" name="jail_mount_base" placeholder="/apiary-jails"></label>{{end}}
+  <button type="submit">Save (one-time)</button>
+</form>
+{{else}}
+<p class="muted">Every resource-scope path is already set on this Hive. Edit the underlying <code>rc.conf</code> flag directly and restart to change one.</p>
+{{end}}
+{{end}}
+{{end}}
+
+{{define "bhyve_config_panel"}}
+<div id="bhyve-config-error" class="banner-error">{{.NodeConfigFormError}}</div>
+<table>
+  <tbody>
+    <tr><th>Boot ROM</th><td>{{if .NodeConfig.BhyveBootROM}}<code>{{.NodeConfig.BhyveBootROM}}</code>{{else}}<em>(unset - bhyve provisioning disabled)</em>{{end}}</td></tr>
+    <tr><th>Bridge</th><td>{{if .NodeConfig.BhyveBridge}}{{.NodeConfig.BhyveBridge}}{{else}}<em>(unset - VM networking disabled)</em>{{end}}</td></tr>
+    <tr><th>Disk size (MB)</th><td>{{if .NodeConfig.DiskSizeMB}}{{.NodeConfig.DiskSizeMB}}{{else}}<em>(uses reconciler default)</em>{{end}}</td></tr>
+    <tr><th>Reconcile interval</th><td>{{if .NodeConfig.ReconcileInterval}}{{.NodeConfig.ReconcileInterval}}{{else}}<em>(uses startup flag)</em>{{end}}</td></tr>
+  </tbody>
+</table>
+{{if .CanAdmin}}
+<form class="inline-form" hx-post="/machine/bhyve" hx-target="#bhyve-config-panel" hx-swap="innerHTML">
+  <label>Boot ROM path <input type="text" name="bhyve_bootrom" placeholder="/usr/local/share/uefi-firmware/BHYVE_UEFI.fd" value="{{.NodeConfig.BhyveBootROM}}"></label>
+  <label>Bridge <input type="text" name="bhyve_bridge" placeholder="bridge0" value="{{.NodeConfig.BhyveBridge}}"></label>
+  <label>Disk size MB <input type="text" name="disk_size_mb" placeholder="0 = default" value="{{if .NodeConfig.DiskSizeMB}}{{.NodeConfig.DiskSizeMB}}{{end}}"></label>
+  <label>Reconcile interval <input type="text" name="reconcile_interval" placeholder="30s" value="{{.NodeConfig.ReconcileInterval}}"></label>
+  <button type="submit">Save</button>
+</form>
+{{end}}
+{{end}}
+
+{{define "hast_panel"}}
+<div id="hast-error" class="banner-error">{{.NodeConfigFormError}}</div>
+<table>
+  <tbody>
+    <tr><th>Current mode</th><td>{{.NodeConfig.HASTEnabledStatus}}</td></tr>
+  </tbody>
+</table>
+{{if .CanAdmin}}
+<form class="inline-form" hx-post="/machine/hast" hx-target="#hast-panel" hx-swap="innerHTML">
+  <label>HAST support
+    <select name="hast_enabled">
+      <option value="default" {{if eq .NodeConfig.HASTEnabledMode "default"}}selected{{end}}>Use startup flag</option>
+      <option value="enabled" {{if eq .NodeConfig.HASTEnabledMode "enabled"}}selected{{end}}>Enabled</option>
+      <option value="disabled" {{if eq .NodeConfig.HASTEnabledMode "disabled"}}selected{{end}}>Disabled</option>
+    </select>
+  </label>
+  <button type="submit">Save</button>
+</form>
+{{end}}
+{{end}}
+
+{{define "peer_forwarding_panel"}}
+<div id="peer-forwarding-error" class="banner-error">{{.NodeConfigFormError}}</div>
+<table>
+  <tbody>
+    <tr><th>Peer managerd port</th><td>{{if .NodeConfig.PeerManagerdPort}}{{.NodeConfig.PeerManagerdPort}}{{else}}<em>(uses this node's own rpc-addr port)</em>{{end}}</td></tr>
+    <tr><th>Peer TLS</th><td>{{.NodeConfig.PeerTLSStatus}}</td></tr>
+    <tr><th>Peer TLS hostname map</th><td>{{if .NodeConfig.PeerTLSHostnameMap}}<code>{{.NodeConfig.PeerTLSHostnameMap}}</code>{{else}}<em>(unset)</em>{{end}}</td></tr>
+    <tr><th>Peer API key</th><td>{{if .NodeConfig.PeerAPIKeySet}}<span class="badge true">set</span>{{else}}<span class="badge unknown">not set</span>{{end}}</td></tr>
+  </tbody>
+</table>
+{{if .CanAdmin}}
+<form class="inline-form" hx-post="/machine/peer-forwarding" hx-target="#peer-forwarding-panel" hx-swap="innerHTML">
+  <label>Peer managerd port <input type="text" name="peer_managerd_port" placeholder="17700" value="{{.NodeConfig.PeerManagerdPort}}"></label>
+  <label>Peer TLS
+    <select name="peer_tls">
+      <option value="default" {{if eq .NodeConfig.PeerTLSMode "default"}}selected{{end}}>Use startup flag</option>
+      <option value="enabled" {{if eq .NodeConfig.PeerTLSMode "enabled"}}selected{{end}}>Enabled</option>
+      <option value="disabled" {{if eq .NodeConfig.PeerTLSMode "disabled"}}selected{{end}}>Disabled</option>
+    </select>
+  </label>
+  <label>Peer TLS hostname map <input type="text" name="peer_tls_hostname_map" placeholder="10.50.0.9=apiverse.apiary.work,..." value="{{.NodeConfig.PeerTLSHostnameMap}}"></label>
+  <label>New peer API key <input type="password" name="peer_api_key" placeholder="leave blank to keep current" autocomplete="off"></label>
+  <label><input type="checkbox" name="clear_peer_api_key" value="true"> Clear peer API key</label>
+  <button type="submit">Save</button>
+</form>
+{{end}}
+{{end}}
+
+{{define "tls_panel"}}
+<div id="tls-error" class="banner-error">{{.NodeConfigFormError}}</div>
+<table>
+  <tbody>
+    <tr><th>Certificate</th><td>{{if .NodeConfig.TLSCert}}<code>{{.NodeConfig.TLSCert}}</code>{{else}}<em>(unset - serving plaintext)</em>{{end}}</td></tr>
+    <tr><th>Private key</th><td>{{if .NodeConfig.TLSKey}}<code>{{.NodeConfig.TLSKey}}</code>{{else}}<em>(unset)</em>{{end}}</td></tr>
+  </tbody>
+</table>
+{{if .CanAdmin}}
+<form class="inline-form" hx-post="/machine/tls" hx-target="#tls-panel" hx-swap="innerHTML">
+  <label>Certificate path <input type="text" name="tls_cert" placeholder="/home/claude/apiary-tls/fullchain.pem" value="{{.NodeConfig.TLSCert}}"></label>
+  <label>Key path <input type="text" name="tls_key" placeholder="/home/claude/apiary-tls/key.pem" value="{{.NodeConfig.TLSKey}}"></label>
+  <button type="submit">Save</button>
+</form>
+{{end}}
+{{end}}
+
+{{define "cloudflare_config_panel"}}
+<div id="cloudflare-config-error" class="banner-error">{{.NodeConfigFormError}}</div>
+<table>
+  <tbody>
+    <tr><th>Token file</th><td>{{if .NodeConfig.CloudflareTokenFile}}<code>{{.NodeConfig.CloudflareTokenFile}}</code>{{else}}<em>(unset)</em>{{end}}</td></tr>
+    <tr><th>Zone ID</th><td>{{if .NodeConfig.CloudflareZoneID}}{{.NodeConfig.CloudflareZoneID}}{{else}}<em>(unset)</em>{{end}}</td></tr>
+    <tr><th>Tunnel ID</th><td>{{if .NodeConfig.CloudflareTunnelID}}{{.NodeConfig.CloudflareTunnelID}}{{else}}<em>(unset)</em>{{end}}</td></tr>
+    <tr><th>Tunnel credentials file</th><td>{{if .NodeConfig.CloudflareTunnelCredentialsFile}}<code>{{.NodeConfig.CloudflareTunnelCredentialsFile}}</code>{{else}}<em>(unset)</em>{{end}}</td></tr>
+  </tbody>
+</table>
+{{if .CanAdmin}}
+<form class="inline-form" hx-post="/machine/cloudflare-config" hx-target="#cloudflare-config-panel" hx-swap="innerHTML">
+  <label>Token file path <input type="text" name="cloudflare_token_file" placeholder="/home/claude/cf-token" value="{{.NodeConfig.CloudflareTokenFile}}"></label>
+  <label>Zone ID <input type="text" name="cloudflare_zone_id" value="{{.NodeConfig.CloudflareZoneID}}"></label>
+  <label>Tunnel ID <input type="text" name="cloudflare_tunnel_id" value="{{.NodeConfig.CloudflareTunnelID}}"></label>
+  <label>Tunnel credentials file path <input type="text" name="cloudflare_tunnel_credentials_file" placeholder="/home/claude/cf-creds.json" value="{{.NodeConfig.CloudflareTunnelCredentialsFile}}"></label>
+  <button type="submit">Save</button>
+</form>
+{{end}}
+{{end}}
+
+{{define "assumption_tuning_panel"}}
+<div id="assumption-tuning-error" class="banner-error">{{.NodeConfigFormError}}</div>
+<table>
+  <tbody>
+    <tr><th>Check interval</th><td>{{if .NodeConfig.AssumptionCheckInterval}}{{.NodeConfig.AssumptionCheckInterval}}{{else}}<em>(uses startup flag)</em>{{end}}</td></tr>
+    <tr><th>Heartbeat interval</th><td>{{if .NodeConfig.AssumptionHeartbeatInterval}}{{.NodeConfig.AssumptionHeartbeatInterval}}{{else}}<em>(uses startup flag)</em>{{end}}</td></tr>
+    <tr><th>Stale after</th><td>{{if .NodeConfig.AssumptionStaleAfter}}{{.NodeConfig.AssumptionStaleAfter}}{{else}}<em>(3x check interval)</em>{{end}}</td></tr>
+    <tr><th>Run deadline</th><td>{{if .NodeConfig.AssumptionRunDeadline}}{{.NodeConfig.AssumptionRunDeadline}}{{else}}<em>(uses startup flag)</em>{{end}}</td></tr>
+    <tr><th>History limit</th><td>{{if .NodeConfig.AssumptionHistoryLimit}}{{.NodeConfig.AssumptionHistoryLimit}}{{else}}<em>(uses startup flag)</em>{{end}}</td></tr>
+    <tr><th>History max age</th><td>{{if .NodeConfig.AssumptionHistoryMaxAge}}{{.NodeConfig.AssumptionHistoryMaxAge}}{{else}}<em>(uses startup flag)</em>{{end}}</td></tr>
+  </tbody>
+</table>
+{{if .CanAdmin}}
+<form class="inline-form" hx-post="/machine/assumption-tuning" hx-target="#assumption-tuning-panel" hx-swap="innerHTML">
+  <label>Check interval <input type="text" name="assumption_check_interval" placeholder="60s" value="{{.NodeConfig.AssumptionCheckInterval}}"></label>
+  <label>Heartbeat interval <input type="text" name="assumption_heartbeat_interval" placeholder="1h" value="{{.NodeConfig.AssumptionHeartbeatInterval}}"></label>
+  <label>Stale after <input type="text" name="assumption_stale_after" placeholder="0 = 3x check interval" value="{{.NodeConfig.AssumptionStaleAfter}}"></label>
+  <label>Run deadline <input type="text" name="assumption_run_deadline" placeholder="20s" value="{{.NodeConfig.AssumptionRunDeadline}}"></label>
+  <label>History limit <input type="text" name="assumption_history_limit" placeholder="200" value="{{if .NodeConfig.AssumptionHistoryLimit}}{{.NodeConfig.AssumptionHistoryLimit}}{{end}}"></label>
+  <label>History max age <input type="text" name="assumption_history_max_age" placeholder="720h" value="{{.NodeConfig.AssumptionHistoryMaxAge}}"></label>
+  <button type="submit">Save</button>
+</form>
+{{end}}
+{{end}}
+
+{{define "internal_security_panel"}}
+<div id="internal-security-error" class="banner-error">{{.NodeConfigFormError}}</div>
+<table>
+  <tbody>
+    <tr><th>Raftd token</th><td>{{if .NodeConfig.RaftdTokenSet}}<span class="badge true">set</span>{{else}}<span class="badge unknown">not set</span>{{end}}</td></tr>
+  </tbody>
+</table>
+{{if .CanAdmin}}
+<form class="inline-form" hx-post="/machine/internal-security" hx-target="#internal-security-panel" hx-swap="innerHTML">
+  <label>New raftd token <input type="password" name="raftd_token" placeholder="leave blank to keep current" autocomplete="off"></label>
+  <label><input type="checkbox" name="clear_raftd_token" value="true"> Clear raftd token</label>
+  <button type="submit">Save</button>
+</form>
+{{end}}
 {{end}}

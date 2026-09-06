@@ -582,6 +582,20 @@ each design decision, in order.
   TCP/HTTPS-origin would need Cloudflare Access client tooling or the
   separate Spectrum product - out of scope). See
   [ADR-0063](docs/adr/0063-cloudflare-tunnel-exposure-v1.md).
+- **System settings expansion** - eight new panels on the Machine
+  Configuration page (`/machine`) expose most of `managerd`'s
+  remaining startup flags as editable settings: resource-scope paths,
+  bhyve/VM tuning, HAST/jail-console/peer-TLS toggles, peer forwarding,
+  TLS cert/key paths, Cloudflare Tunnel config, Assumption Register
+  tuning, and the raftd internal token. Raft identity/plumbing flags
+  (`-node-id`/`-rpc-addr`/`-raftd-socket`) stay `rc.conf`/restart-only
+  by design; secrets (`-peer-api-key`/`-raftd-token`) are write-only,
+  never displayed once saved; resource-scope paths are editable only
+  while unset, since changing one after real resources exist under the
+  old value orphans them rather than moving them. Every field still
+  takes effect on the next `managerd` restart, not live, matching
+  ADR-0049's original posture. See
+  [ADR-0070](docs/adr/0070-system-settings-expansion.md).
 
 **Not yet implemented:**
 

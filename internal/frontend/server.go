@@ -715,6 +715,18 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /machine/vms/{id}/firewall", s.requireRole(manager.RoleOperator, s.handleSetVMFirewallPaused))
 	s.mux.HandleFunc("POST /machine/quota", s.requireRole(manager.RoleOperator, s.handleSetDatasetQuota))
 	s.mux.HandleFunc("POST /machine/services/{name}/restart", s.requireRole(manager.RoleAdmin, s.handleRestartNodeService))
+	// ADR-0070's "system settings" expansion - same RoleAdmin gate as
+	// every other Machine Configuration write above, since these are
+	// equally host-wide settings (several are more sensitive: live
+	// secrets, TLS material, resource-scope paths).
+	s.mux.HandleFunc("POST /machine/resource-scope", s.requireRole(manager.RoleAdmin, s.handleUpdateResourceScope))
+	s.mux.HandleFunc("POST /machine/bhyve", s.requireRole(manager.RoleAdmin, s.handleUpdateBhyveConfig))
+	s.mux.HandleFunc("POST /machine/hast", s.requireRole(manager.RoleAdmin, s.handleUpdateHASTProvisioning))
+	s.mux.HandleFunc("POST /machine/peer-forwarding", s.requireRole(manager.RoleAdmin, s.handleUpdatePeerForwarding))
+	s.mux.HandleFunc("POST /machine/tls", s.requireRole(manager.RoleAdmin, s.handleUpdateTLSConfig))
+	s.mux.HandleFunc("POST /machine/cloudflare-config", s.requireRole(manager.RoleAdmin, s.handleUpdateCloudflareConfig))
+	s.mux.HandleFunc("POST /machine/assumption-tuning", s.requireRole(manager.RoleAdmin, s.handleUpdateAssumptionTuning))
+	s.mux.HandleFunc("POST /machine/internal-security", s.requireRole(manager.RoleAdmin, s.handleUpdateInternalSecurity))
 }
 
 // handleLoginPage serves the login form. If login isn't enabled at all,

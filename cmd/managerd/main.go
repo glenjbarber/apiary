@@ -110,6 +110,120 @@ func run() error {
 		return runReset(*resetManaged, *factoryReset, *factoryResetExtraJails, *factoryResetExtraDatasets, *zfsBase, *jailPrefix, *bhyvePrefix, *isoDir)
 	}
 
+	// nodeConfig holds this node's own local settings (ADR-0049/ADR-0070) -
+	// a value saved via the Machine Configuration UI overrides the
+	// matching flag's own default below, before any of them are used to
+	// construct anything (dialing raftd with -raftd-token, in particular,
+	// happens just a few lines down - this must run first). A fresh
+	// install with no saved file yet just keeps every flag-provided
+	// value. node_id/rpc_addr/raftd_socket are deliberately never
+	// represented in nodeconfig.Config at all - see its own package doc
+	// comment for why.
+	nodeConfigMgr := &nodeconfig.Manager{}
+	if cfg, err := nodeConfigMgr.Load(); err != nil {
+		log.Printf("managerd: reading node config: %v (using flag defaults)", err)
+	} else {
+		if cfg.Uplink != "" {
+			*vlanUplink = cfg.Uplink
+		}
+		if cfg.NATUplink != "" {
+			*natUplink = cfg.NATUplink
+		}
+		if cfg.DNSServer != "" {
+			*dhcpDNSServer = cfg.DNSServer
+		}
+		if cfg.JailEnabled != nil {
+			*jailEnabled = *cfg.JailEnabled
+		}
+		if cfg.ZFSBase != "" {
+			*zfsBase = cfg.ZFSBase
+		}
+		if cfg.ReconcileInterval != 0 {
+			*reconcileInterval = cfg.ReconcileInterval
+		}
+		if cfg.BhyvePrefix != "" {
+			*bhyvePrefix = cfg.BhyvePrefix
+		}
+		if cfg.BhyveBootROM != "" {
+			*bhyveBootROM = cfg.BhyveBootROM
+		}
+		if cfg.BhyveBridge != "" {
+			*bhyveBridge = cfg.BhyveBridge
+		}
+		if cfg.DiskSizeMB != 0 {
+			*diskSizeMB = cfg.DiskSizeMB
+		}
+		if cfg.ISODir != "" {
+			*isoDir = cfg.ISODir
+		}
+		if cfg.HASTEnabled != nil {
+			*hastEnabled = *cfg.HASTEnabled
+		}
+		if cfg.JailConsoleEnabled != nil {
+			*jailConsoleEnabled = *cfg.JailConsoleEnabled
+		}
+		if cfg.JailPrefix != "" {
+			*jailPrefix = cfg.JailPrefix
+		}
+		if cfg.JailMountBase != "" {
+			*jailMountBase = cfg.JailMountBase
+		}
+		if cfg.JailDiskSizeMB != 0 {
+			*jailDiskSizeMB = cfg.JailDiskSizeMB
+		}
+		if cfg.PeerAPIKey != "" {
+			*peerAPIKey = cfg.PeerAPIKey
+		}
+		if cfg.PeerManagerdPort != "" {
+			*peerManagerdPort = cfg.PeerManagerdPort
+		}
+		if cfg.PeerTLS != nil {
+			*peerTLS = *cfg.PeerTLS
+		}
+		if cfg.PeerTLSHostnameMap != "" {
+			*peerTLSHostnameMap = cfg.PeerTLSHostnameMap
+		}
+		if cfg.AssumptionCheckInterval != 0 {
+			*assumptionCheckInterval = cfg.AssumptionCheckInterval
+		}
+		if cfg.AssumptionHeartbeatInterval != 0 {
+			*assumptionHeartbeatInterval = cfg.AssumptionHeartbeatInterval
+		}
+		if cfg.AssumptionStaleAfter != 0 {
+			*assumptionStaleAfterFlag = cfg.AssumptionStaleAfter
+		}
+		if cfg.AssumptionRunDeadline != 0 {
+			*assumptionRunDeadline = cfg.AssumptionRunDeadline
+		}
+		if cfg.AssumptionHistoryLimit != 0 {
+			*assumptionHistoryLimit = cfg.AssumptionHistoryLimit
+		}
+		if cfg.AssumptionHistoryMaxAge != 0 {
+			*assumptionHistoryMaxAge = cfg.AssumptionHistoryMaxAge
+		}
+		if cfg.TLSCert != "" {
+			*tlsCert = cfg.TLSCert
+		}
+		if cfg.TLSKey != "" {
+			*tlsKey = cfg.TLSKey
+		}
+		if cfg.CloudflareTokenFile != "" {
+			*cloudflareTokenFile = cfg.CloudflareTokenFile
+		}
+		if cfg.CloudflareZoneID != "" {
+			*cloudflareZoneID = cfg.CloudflareZoneID
+		}
+		if cfg.CloudflareTunnelID != "" {
+			*cloudflareTunnelID = cfg.CloudflareTunnelID
+		}
+		if cfg.CloudflareTunnelCredentialsFile != "" {
+			*cloudflareTunnelCredentialsFile = cfg.CloudflareTunnelCredentialsFile
+		}
+		if cfg.RaftdToken != "" {
+			*raftdToken = cfg.RaftdToken
+		}
+	}
+
 	id := *nodeID
 	if id == "" {
 		host, err := os.Hostname()
@@ -172,29 +286,6 @@ func run() error {
 	// to the same leader managerd over the same authenticated API, so
 	// there's no reason for two separate peer clients/credentials.
 	peers := manager.NewPeerReporter(*peerAPIKey, *peerTLS, peerHostnames)
-
-	// nodeConfig holds this node's own local settings (ADR-0049) - if a
-	// value was saved via the Machine Configuration UI, it overrides the
-	// matching -vlan-uplink/-nat-uplink flag default below, before
-	// either is used to construct anything. A fresh install with no
-	// saved file yet just keeps the flag-provided values.
-	nodeConfigMgr := &nodeconfig.Manager{}
-	if cfg, err := nodeConfigMgr.Load(); err != nil {
-		log.Printf("managerd: reading node config: %v (using flag defaults)", err)
-	} else {
-		if cfg.Uplink != "" {
-			*vlanUplink = cfg.Uplink
-		}
-		if cfg.NATUplink != "" {
-			*natUplink = cfg.NATUplink
-		}
-		if cfg.DNSServer != "" {
-			*dhcpDNSServer = cfg.DNSServer
-		}
-		if cfg.JailEnabled != nil {
-			*jailEnabled = *cfg.JailEnabled
-		}
-	}
 
 	zfsMgr := zfs.New(*zfsBase)
 	reconciler := &cluster.Reconciler{

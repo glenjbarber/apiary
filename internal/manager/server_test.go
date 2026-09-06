@@ -4,10 +4,12 @@ import (
 	"context"
 	"errors"
 	"io"
+	"strings"
 	"testing"
 	"time"
 
 	"google.golang.org/grpc"
+	"google.golang.org/protobuf/encoding/protojson"
 
 	internalpb "github.com/glenjbarber/apiary/api/internalpb"
 	rpcpb "github.com/glenjbarber/apiary/api/rpc"
@@ -471,6 +473,184 @@ func TestServer_UpdateNodeConfig(t *testing.T) {
 	}
 	if store.lastSave.Uplink != "em0" || store.lastSave.NATUplink != "em0" || store.lastSave.DNSServer != "10.62.0.1" || store.lastSave.JailEnabled == nil || !*store.lastSave.JailEnabled {
 		t.Errorf("saved config = %+v, want Uplink=em0 NATUplink=em0 DNSServer=10.62.0.1 JailEnabled=true", store.lastSave)
+	}
+}
+
+// TestServer_GetNodeConfig_NeverReturnsSecrets is the regression test
+// for ADR-0070's write-only secret design: PeerAPIKey/RaftdToken must
+// never appear anywhere in a GetNodeConfig response, only whether one
+// is currently set.
+func TestServer_GetNodeConfig_NeverReturnsSecrets(t *testing.T) {
+	store := &fakeNodeConfigStore{cfg: nodeconfig.Config{PeerAPIKey: "apk_supersecret", RaftdToken: "raftd_supersecret"}}
+	s := NewServer(nil, "node-1", nil, nil, nil, nil, nil, "", nil, store, nil, 0, nil)
+
+	resp, err := s.GetNodeConfig(context.Background(), &rpcpb.GetNodeConfigRequest{})
+	if err != nil {
+		t.Fatalf("GetNodeConfig() error: %v", err)
+	}
+	if !resp.GetPeerApiKeySet() || !resp.GetRaftdTokenSet() {
+		t.Errorf("GetNodeConfig() PeerApiKeySet/RaftdTokenSet = %v/%v, want true/true", resp.GetPeerApiKeySet(), resp.GetRaftdTokenSet())
+	}
+	body, err := (protojson.MarshalOptions{}).Marshal(resp)
+	if err != nil {
+		t.Fatalf("marshaling response: %v", err)
+	}
+	if strings.Contains(string(body), "supersecret") {
+		t.Errorf("GetNodeConfig() response leaked a secret value: %s", body)
+	}
+}
+
+// TestServer_UpdateNodeConfig_SecretSemantics covers the three-way
+// write-only behavior an empty request field must NOT accidentally
+// clear a previously-saved secret (mirroring the Users page's own
+// "leave blank to keep current" password-change convention), a
+// non-empty value sets a new one, and the explicit clear flag actually
+// clears it.
+func TestServer_UpdateNodeConfig_SecretSemantics(t *testing.T) {
+	t.Run("empty leaves current value unchanged", func(t *testing.T) {
+		store := &fakeNodeConfigStore{cfg: nodeconfig.Config{PeerAPIKey: "apk_existing", RaftdToken: "raftd_existing"}}
+		s := NewServer(nil, "node-1", nil, nil, nil, nil, nil, "", nil, store, nil, 0, nil)
+		if _, err := s.UpdateNodeConfig(context.Background(), &rpcpb.UpdateNodeConfigRequest{}); err != nil {
+			t.Fatalf("UpdateNodeConfig() error: %v", err)
+		}
+		if store.lastSave.PeerAPIKey != "apk_existing" || store.lastSave.RaftdToken != "raftd_existing" {
+			t.Errorf("saved secrets = %+v, want both left unchanged", store.lastSave)
+		}
+	})
+	t.Run("non-empty sets a new value", func(t *testing.T) {
+		store := &fakeNodeConfigStore{cfg: nodeconfig.Config{PeerAPIKey: "apk_old"}}
+		s := NewServer(nil, "node-1", nil, nil, nil, nil, nil, "", nil, store, nil, 0, nil)
+		if _, err := s.UpdateNodeConfig(context.Background(), &rpcpb.UpdateNodeConfigRequest{PeerApiKey: "apk_new"}); err != nil {
+			t.Fatalf("UpdateNodeConfig() error: %v", err)
+		}
+		if store.lastSave.PeerAPIKey != "apk_new" {
+			t.Errorf("saved PeerAPIKey = %q, want apk_new", store.lastSave.PeerAPIKey)
+		}
+	})
+	t.Run("explicit clear flag clears it", func(t *testing.T) {
+		store := &fakeNodeConfigStore{cfg: nodeconfig.Config{PeerAPIKey: "apk_old", RaftdToken: "raftd_old"}}
+		s := NewServer(nil, "node-1", nil, nil, nil, nil, nil, "", nil, store, nil, 0, nil)
+		if _, err := s.UpdateNodeConfig(context.Background(), &rpcpb.UpdateNodeConfigRequest{ClearPeerApiKey: true, ClearRaftdToken: true}); err != nil {
+			t.Fatalf("UpdateNodeConfig() error: %v", err)
+		}
+		if store.lastSave.PeerAPIKey != "" || store.lastSave.RaftdToken != "" {
+			t.Errorf("saved secrets = %+v, want both cleared", store.lastSave)
+		}
+	})
+}
+
+// TestServer_UpdateNodeConfig_InvalidDurationRejectedBeforeSave proves
+// a malformed duration field is rejected with a clear error and never
+// reaches nodeconfig.Save at all - not persisted only to fail the next
+// time managerd actually starts.
+func TestServer_UpdateNodeConfig_InvalidDurationRejectedBeforeSave(t *testing.T) {
+	store := &fakeNodeConfigStore{}
+	s := NewServer(nil, "node-1", nil, nil, nil, nil, nil, "", nil, store, nil, 0, nil)
+
+	resp, err := s.UpdateNodeConfig(context.Background(), &rpcpb.UpdateNodeConfigRequest{ReconcileInterval: "not-a-duration"})
+	if err != nil {
+		t.Fatalf("UpdateNodeConfig() error: %v", err)
+	}
+	if resp.GetError() == "" {
+		t.Fatal("UpdateNodeConfig() error field = empty, want a rejection")
+	}
+	if store.lastSave != (nodeconfig.Config{}) {
+		t.Errorf("Save() was called with %+v despite the invalid duration, want it never called", store.lastSave)
+	}
+}
+
+// TestServer_UpdateNodeConfig_ParsesDurationFields confirms a
+// well-formed duration string round-trips into the correct
+// time.Duration value.
+func TestServer_UpdateNodeConfig_ParsesDurationFields(t *testing.T) {
+	store := &fakeNodeConfigStore{}
+	s := NewServer(nil, "node-1", nil, nil, nil, nil, nil, "", nil, store, nil, 0, nil)
+
+	resp, err := s.UpdateNodeConfig(context.Background(), &rpcpb.UpdateNodeConfigRequest{ReconcileInterval: "45s", AssumptionCheckInterval: "2m"})
+	if err != nil {
+		t.Fatalf("UpdateNodeConfig() error: %v", err)
+	}
+	if resp.GetError() != "" {
+		t.Fatalf("UpdateNodeConfig() returned error: %s", resp.GetError())
+	}
+	if store.lastSave.ReconcileInterval != 45*time.Second {
+		t.Errorf("saved ReconcileInterval = %v, want 45s", store.lastSave.ReconcileInterval)
+	}
+	if store.lastSave.AssumptionCheckInterval != 2*time.Minute {
+		t.Errorf("saved AssumptionCheckInterval = %v, want 2m", store.lastSave.AssumptionCheckInterval)
+	}
+}
+
+// TestServer_NodeConfig_NewFieldsRoundTrip is a broad smoke test that
+// the ADR-0070 field expansion is actually wired end to end (RPC
+// request -> nodeconfig.Config -> RPC response), not just present in
+// the proto.
+func TestServer_NodeConfig_NewFieldsRoundTrip(t *testing.T) {
+	store := &fakeNodeConfigStore{}
+	s := NewServer(nil, "node-1", nil, nil, nil, nil, nil, "", nil, store, nil, 0, nil)
+
+	req := &rpcpb.UpdateNodeConfigRequest{
+		ZfsBase:                         "zroot/apiary",
+		BhyvePrefix:                     "apiary-",
+		IsoDir:                          "/var/db/apiary/isos",
+		JailPrefix:                      "apiary-",
+		JailMountBase:                   "/apiary-jails",
+		BhyveBootrom:                    "/usr/local/share/uefi-firmware/BHYVE_UEFI.fd",
+		BhyveBridge:                     "bridge0",
+		DiskSizeMb:                      8192,
+		JailDiskSizeMb:                  2048,
+		HastEnabled:                     boolPtr(true),
+		JailConsoleEnabled:              boolPtr(false),
+		PeerTls:                         boolPtr(true),
+		PeerManagerdPort:                "17700",
+		PeerTlsHostnameMap:              "10.50.0.9=apiverse.apiary.work",
+		TlsCert:                         "/home/claude/apiary-tls/fullchain.pem",
+		TlsKey:                          "/home/claude/apiary-tls/key.pem",
+		CloudflareTokenFile:             "/home/claude/cf-token",
+		CloudflareZoneId:                "zone123",
+		CloudflareTunnelId:              "tunnel456",
+		CloudflareTunnelCredentialsFile: "/home/claude/cf-creds.json",
+	}
+	if _, err := s.UpdateNodeConfig(context.Background(), req); err != nil {
+		t.Fatalf("UpdateNodeConfig() error: %v", err)
+	}
+
+	// Reflect the saved config back through Load/GetNodeConfig, the way
+	// a real store would (the fake doesn't do this automatically).
+	store.cfg = store.lastSave
+	resp, err := s.GetNodeConfig(context.Background(), &rpcpb.GetNodeConfigRequest{})
+	if err != nil {
+		t.Fatalf("GetNodeConfig() error: %v", err)
+	}
+
+	checks := map[string]bool{
+		"zfs_base":          resp.GetZfsBase() == "zroot/apiary",
+		"bhyve_prefix":      resp.GetBhyvePrefix() == "apiary-",
+		"iso_dir":           resp.GetIsoDir() == "/var/db/apiary/isos",
+		"jail_prefix":       resp.GetJailPrefix() == "apiary-",
+		"jail_mount_base":   resp.GetJailMountBase() == "/apiary-jails",
+		"bhyve_bootrom":     resp.GetBhyveBootrom() != "",
+		"bhyve_bridge":      resp.GetBhyveBridge() == "bridge0",
+		"disk_size_mb":      resp.GetDiskSizeMb() == 8192,
+		"jail_disk_size_mb": resp.GetJailDiskSizeMb() == 2048,
+		"hast_enabled":      resp.GetHastEnabled(),
+		"jail_console_enabled_unset": func() bool {
+			return resp.JailConsoleEnabled != nil && !resp.GetJailConsoleEnabled()
+		}(),
+		"peer_tls":              resp.GetPeerTls(),
+		"peer_managerd_port":    resp.GetPeerManagerdPort() == "17700",
+		"peer_tls_hostname_map": resp.GetPeerTlsHostnameMap() == "10.50.0.9=apiverse.apiary.work",
+		"tls_cert":              resp.GetTlsCert() != "",
+		"tls_key":               resp.GetTlsKey() != "",
+		"cloudflare_token_file": resp.GetCloudflareTokenFile() != "",
+		"cloudflare_zone_id":    resp.GetCloudflareZoneId() == "zone123",
+		"cloudflare_tunnel_id":  resp.GetCloudflareTunnelId() == "tunnel456",
+		"cloudflare_creds_file": resp.GetCloudflareTunnelCredentialsFile() != "",
+	}
+	for field, ok := range checks {
+		if !ok {
+			t.Errorf("field %s did not round-trip correctly, got response: %+v", field, resp)
+		}
 	}
 }
 

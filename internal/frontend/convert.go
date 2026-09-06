@@ -86,6 +86,78 @@ type nodeConfigView struct {
 	InterfaceInventoryError string
 	UplinkOptions           []networkInterfaceOption
 	NATUplinkOptions        []networkInterfaceOption
+
+	// The fields below extend the Machine Configuration page to cover
+	// most of managerd's own startup flags (ADR-0070). All share the
+	// same "takes effect on next managerd restart" posture as the
+	// fields above.
+
+	// ZFSBase/BhyvePrefix/ISODir/JailPrefix/JailMountBase are write-once
+	// through UpdateNodeConfig (see internal/nodeconfig's own package
+	// doc comment) - the template renders each as read-only text once
+	// non-empty, with an editable input only while still unset.
+	ZFSBase       string
+	BhyvePrefix   string
+	ISODir        string
+	JailPrefix    string
+	JailMountBase string
+
+	// Duration fields are formatted strings (e.g. "30s"), empty meaning
+	// "not set, use the startup flag" - see durationString's own doc
+	// comment in internal/manager/server.go for why the zero value
+	// renders as "" rather than Go's own "0s".
+	ReconcileInterval           string
+	AssumptionCheckInterval     string
+	AssumptionHeartbeatInterval string
+	AssumptionStaleAfter        string
+	AssumptionRunDeadline       string
+	AssumptionHistoryMaxAge     string
+	AssumptionHistoryLimit      int32
+
+	BhyveBootROM   string
+	BhyveBridge    string
+	DiskSizeMB     uint64
+	JailDiskSizeMB uint64
+
+	// HASTEnabledMode/JailConsoleEnabledMode/PeerTLSMode +
+	// *Status mirror JailEnabledMode/JailEnabledStatus's own tri-state
+	// convention exactly (see triState below).
+	HASTEnabledMode          string
+	HASTEnabledStatus        string
+	JailConsoleEnabledMode   string
+	JailConsoleEnabledStatus string
+	PeerTLSMode              string
+	PeerTLSStatus            string
+
+	PeerManagerdPort   string
+	PeerTLSHostnameMap string
+
+	// PeerAPIKeySet/RaftdTokenSet report only whether a secret is
+	// currently saved - the raw value is never sent to the browser at
+	// all (see GetNodeConfigResponse's own doc comment).
+	PeerAPIKeySet bool
+	RaftdTokenSet bool
+
+	TLSCert string
+	TLSKey  string
+
+	CloudflareTokenFile             string
+	CloudflareZoneID                string
+	CloudflareTunnelID              string
+	CloudflareTunnelCredentialsFile string
+}
+
+// triState mirrors the JailEnabledMode/JailEnabledStatus convention
+// fromRPCNodeConfig already established for jail_enabled, generalized
+// for every other tri-state (nil/true/false) setting ADR-0070 added.
+func triState(mode *bool) (m, status string) {
+	if mode == nil {
+		return "default", "uses startup flag"
+	}
+	if *mode {
+		return "enabled", "enabled"
+	}
+	return "disabled", "disabled"
 }
 
 type networkInterfaceOption struct {
@@ -102,7 +174,42 @@ func fromRPCNodeConfig(d *rpcpb.GetNodeConfigResponse) nodeConfigView {
 		JailEnabledMode:         "default",
 		JailEnabledStatus:       "uses startup flag",
 		InterfaceInventoryError: d.GetInterfaceInventoryError(),
+
+		ZFSBase:       d.GetZfsBase(),
+		BhyvePrefix:   d.GetBhyvePrefix(),
+		ISODir:        d.GetIsoDir(),
+		JailPrefix:    d.GetJailPrefix(),
+		JailMountBase: d.GetJailMountBase(),
+
+		ReconcileInterval:           d.GetReconcileInterval(),
+		AssumptionCheckInterval:     d.GetAssumptionCheckInterval(),
+		AssumptionHeartbeatInterval: d.GetAssumptionHeartbeatInterval(),
+		AssumptionStaleAfter:        d.GetAssumptionStaleAfter(),
+		AssumptionRunDeadline:       d.GetAssumptionRunDeadline(),
+		AssumptionHistoryMaxAge:     d.GetAssumptionHistoryMaxAge(),
+		AssumptionHistoryLimit:      d.GetAssumptionHistoryLimit(),
+
+		BhyveBootROM:   d.GetBhyveBootrom(),
+		BhyveBridge:    d.GetBhyveBridge(),
+		DiskSizeMB:     d.GetDiskSizeMb(),
+		JailDiskSizeMB: d.GetJailDiskSizeMb(),
+
+		PeerManagerdPort:   d.GetPeerManagerdPort(),
+		PeerTLSHostnameMap: d.GetPeerTlsHostnameMap(),
+		PeerAPIKeySet:      d.GetPeerApiKeySet(),
+		RaftdTokenSet:      d.GetRaftdTokenSet(),
+
+		TLSCert: d.GetTlsCert(),
+		TLSKey:  d.GetTlsKey(),
+
+		CloudflareTokenFile:             d.GetCloudflareTokenFile(),
+		CloudflareZoneID:                d.GetCloudflareZoneId(),
+		CloudflareTunnelID:              d.GetCloudflareTunnelId(),
+		CloudflareTunnelCredentialsFile: d.GetCloudflareTunnelCredentialsFile(),
 	}
+	view.HASTEnabledMode, view.HASTEnabledStatus = triState(d.HastEnabled)
+	view.JailConsoleEnabledMode, view.JailConsoleEnabledStatus = triState(d.JailConsoleEnabled)
+	view.PeerTLSMode, view.PeerTLSStatus = triState(d.PeerTls)
 	for _, iface := range d.GetAvailableInterfaces() {
 		label := iface.GetName()
 		if iface.GetUp() {
@@ -122,16 +229,7 @@ func fromRPCNodeConfig(d *rpcpb.GetNodeConfigResponse) nodeConfigView {
 	}
 	view.UplinkOptions = withSavedInterface(view.UplinkOptions, view.Uplink)
 	view.NATUplinkOptions = withSavedInterface(view.NATUplinkOptions, view.NATUplink)
-	if d.JailEnabled == nil {
-		return view
-	}
-	if d.GetJailEnabled() {
-		view.JailEnabledMode = "enabled"
-		view.JailEnabledStatus = "enabled"
-	} else {
-		view.JailEnabledMode = "disabled"
-		view.JailEnabledStatus = "disabled"
-	}
+	view.JailEnabledMode, view.JailEnabledStatus = triState(d.JailEnabled)
 	return view
 }
 

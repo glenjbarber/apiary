@@ -4942,8 +4942,72 @@ type GetNodeConfigResponse struct {
 	// interfaces. The saved settings remain available so an operator can
 	// still clear or correct them.
 	InterfaceInventoryError string `protobuf:"bytes,7,opt,name=interface_inventory_error,json=interfaceInventoryError,proto3" json:"interface_inventory_error,omitempty"`
-	unknownFields           protoimpl.UnknownFields
-	sizeCache               protoimpl.SizeCache
+	// zfs_base/bhyve_prefix/iso_dir/jail_prefix/jail_mount_base
+	// (fields 8-12) mirror their like-named flags. Write-once through
+	// UpdateNodeConfig once a non-empty value is first saved - see
+	// internal/nodeconfig's own package doc comment for why (changing one
+	// after real resources exist under the old value orphans them rather
+	// than moving them).
+	ZfsBase       string `protobuf:"bytes,8,opt,name=zfs_base,json=zfsBase,proto3" json:"zfs_base,omitempty"`
+	BhyvePrefix   string `protobuf:"bytes,9,opt,name=bhyve_prefix,json=bhyvePrefix,proto3" json:"bhyve_prefix,omitempty"`
+	IsoDir        string `protobuf:"bytes,10,opt,name=iso_dir,json=isoDir,proto3" json:"iso_dir,omitempty"`
+	JailPrefix    string `protobuf:"bytes,11,opt,name=jail_prefix,json=jailPrefix,proto3" json:"jail_prefix,omitempty"`
+	JailMountBase string `protobuf:"bytes,12,opt,name=jail_mount_base,json=jailMountBase,proto3" json:"jail_mount_base,omitempty"`
+	// reconcile_interval/assumption_check_interval/
+	// assumption_heartbeat_interval/assumption_stale_after/
+	// assumption_run_deadline/assumption_history_max_age (fields 13-18)
+	// mirror their like-named flags, formatted as Go's own
+	// time.Duration.String() (e.g. "30s", "1h0m0s") - pure tuning knobs,
+	// safe to change any time, unlike the scope paths above.
+	ReconcileInterval           string `protobuf:"bytes,13,opt,name=reconcile_interval,json=reconcileInterval,proto3" json:"reconcile_interval,omitempty"`
+	AssumptionCheckInterval     string `protobuf:"bytes,14,opt,name=assumption_check_interval,json=assumptionCheckInterval,proto3" json:"assumption_check_interval,omitempty"`
+	AssumptionHeartbeatInterval string `protobuf:"bytes,15,opt,name=assumption_heartbeat_interval,json=assumptionHeartbeatInterval,proto3" json:"assumption_heartbeat_interval,omitempty"`
+	AssumptionStaleAfter        string `protobuf:"bytes,16,opt,name=assumption_stale_after,json=assumptionStaleAfter,proto3" json:"assumption_stale_after,omitempty"`
+	AssumptionRunDeadline       string `protobuf:"bytes,17,opt,name=assumption_run_deadline,json=assumptionRunDeadline,proto3" json:"assumption_run_deadline,omitempty"`
+	AssumptionHistoryMaxAge     string `protobuf:"bytes,18,opt,name=assumption_history_max_age,json=assumptionHistoryMaxAge,proto3" json:"assumption_history_max_age,omitempty"`
+	// assumption_history_limit mirrors -assumption-history-limit.
+	AssumptionHistoryLimit int32 `protobuf:"varint,19,opt,name=assumption_history_limit,json=assumptionHistoryLimit,proto3" json:"assumption_history_limit,omitempty"`
+	// bhyve_bootrom/bhyve_bridge mirror their like-named flags - empty
+	// disables bhyve provisioning/VM networking respectively.
+	BhyveBootrom string `protobuf:"bytes,20,opt,name=bhyve_bootrom,json=bhyveBootrom,proto3" json:"bhyve_bootrom,omitempty"`
+	BhyveBridge  string `protobuf:"bytes,21,opt,name=bhyve_bridge,json=bhyveBridge,proto3" json:"bhyve_bridge,omitempty"`
+	// disk_size_mb/jail_disk_size_mb mirror their like-named flags. Only
+	// affect newly created disks/roots, never resize an existing one -
+	// safe to change any time.
+	DiskSizeMb     uint64 `protobuf:"varint,22,opt,name=disk_size_mb,json=diskSizeMb,proto3" json:"disk_size_mb,omitempty"`
+	JailDiskSizeMb uint64 `protobuf:"varint,23,opt,name=jail_disk_size_mb,json=jailDiskSizeMb,proto3" json:"jail_disk_size_mb,omitempty"`
+	// hast_enabled/jail_console_enabled/peer_tls mirror their like-named
+	// flags, tri-state like jail_enabled above: unset means keep using
+	// the startup flag value.
+	HastEnabled        *bool `protobuf:"varint,24,opt,name=hast_enabled,json=hastEnabled,proto3,oneof" json:"hast_enabled,omitempty"`
+	JailConsoleEnabled *bool `protobuf:"varint,25,opt,name=jail_console_enabled,json=jailConsoleEnabled,proto3,oneof" json:"jail_console_enabled,omitempty"`
+	PeerTls            *bool `protobuf:"varint,26,opt,name=peer_tls,json=peerTls,proto3,oneof" json:"peer_tls,omitempty"`
+	// peer_managerd_port/peer_tls_hostname_map mirror their like-named
+	// flags.
+	PeerManagerdPort   string `protobuf:"bytes,27,opt,name=peer_managerd_port,json=peerManagerdPort,proto3" json:"peer_managerd_port,omitempty"`
+	PeerTlsHostnameMap string `protobuf:"bytes,28,opt,name=peer_tls_hostname_map,json=peerTlsHostnameMap,proto3" json:"peer_tls_hostname_map,omitempty"`
+	// peer_api_key_set/raftd_token_set report only whether a value is
+	// currently saved for -peer-api-key/-raftd-token - the raw value
+	// itself is never returned here or anywhere else. See
+	// UpdateNodeConfigRequest's own doc comment for how to set or clear
+	// one.
+	PeerApiKeySet bool `protobuf:"varint,29,opt,name=peer_api_key_set,json=peerApiKeySet,proto3" json:"peer_api_key_set,omitempty"`
+	RaftdTokenSet bool `protobuf:"varint,30,opt,name=raftd_token_set,json=raftdTokenSet,proto3" json:"raftd_token_set,omitempty"`
+	// tls_cert/tls_key mirror their like-named flags - file paths, not
+	// secrets themselves (the key file's own content is the secret, same
+	// posture as cloudflare_token_file below).
+	TlsCert string `protobuf:"bytes,31,opt,name=tls_cert,json=tlsCert,proto3" json:"tls_cert,omitempty"`
+	TlsKey  string `protobuf:"bytes,32,opt,name=tls_key,json=tlsKey,proto3" json:"tls_key,omitempty"`
+	// cloudflare_token_file/cloudflare_zone_id/cloudflare_tunnel_id/
+	// cloudflare_tunnel_credentials_file mirror ADR-0063's four
+	// like-named flags. cloudflare_token_file is a path, never the raw
+	// token.
+	CloudflareTokenFile             string `protobuf:"bytes,33,opt,name=cloudflare_token_file,json=cloudflareTokenFile,proto3" json:"cloudflare_token_file,omitempty"`
+	CloudflareZoneId                string `protobuf:"bytes,34,opt,name=cloudflare_zone_id,json=cloudflareZoneId,proto3" json:"cloudflare_zone_id,omitempty"`
+	CloudflareTunnelId              string `protobuf:"bytes,35,opt,name=cloudflare_tunnel_id,json=cloudflareTunnelId,proto3" json:"cloudflare_tunnel_id,omitempty"`
+	CloudflareTunnelCredentialsFile string `protobuf:"bytes,36,opt,name=cloudflare_tunnel_credentials_file,json=cloudflareTunnelCredentialsFile,proto3" json:"cloudflare_tunnel_credentials_file,omitempty"`
+	unknownFields                   protoimpl.UnknownFields
+	sizeCache                       protoimpl.SizeCache
 }
 
 func (x *GetNodeConfigResponse) Reset() {
@@ -5025,6 +5089,209 @@ func (x *GetNodeConfigResponse) GetInterfaceInventoryError() string {
 	return ""
 }
 
+func (x *GetNodeConfigResponse) GetZfsBase() string {
+	if x != nil {
+		return x.ZfsBase
+	}
+	return ""
+}
+
+func (x *GetNodeConfigResponse) GetBhyvePrefix() string {
+	if x != nil {
+		return x.BhyvePrefix
+	}
+	return ""
+}
+
+func (x *GetNodeConfigResponse) GetIsoDir() string {
+	if x != nil {
+		return x.IsoDir
+	}
+	return ""
+}
+
+func (x *GetNodeConfigResponse) GetJailPrefix() string {
+	if x != nil {
+		return x.JailPrefix
+	}
+	return ""
+}
+
+func (x *GetNodeConfigResponse) GetJailMountBase() string {
+	if x != nil {
+		return x.JailMountBase
+	}
+	return ""
+}
+
+func (x *GetNodeConfigResponse) GetReconcileInterval() string {
+	if x != nil {
+		return x.ReconcileInterval
+	}
+	return ""
+}
+
+func (x *GetNodeConfigResponse) GetAssumptionCheckInterval() string {
+	if x != nil {
+		return x.AssumptionCheckInterval
+	}
+	return ""
+}
+
+func (x *GetNodeConfigResponse) GetAssumptionHeartbeatInterval() string {
+	if x != nil {
+		return x.AssumptionHeartbeatInterval
+	}
+	return ""
+}
+
+func (x *GetNodeConfigResponse) GetAssumptionStaleAfter() string {
+	if x != nil {
+		return x.AssumptionStaleAfter
+	}
+	return ""
+}
+
+func (x *GetNodeConfigResponse) GetAssumptionRunDeadline() string {
+	if x != nil {
+		return x.AssumptionRunDeadline
+	}
+	return ""
+}
+
+func (x *GetNodeConfigResponse) GetAssumptionHistoryMaxAge() string {
+	if x != nil {
+		return x.AssumptionHistoryMaxAge
+	}
+	return ""
+}
+
+func (x *GetNodeConfigResponse) GetAssumptionHistoryLimit() int32 {
+	if x != nil {
+		return x.AssumptionHistoryLimit
+	}
+	return 0
+}
+
+func (x *GetNodeConfigResponse) GetBhyveBootrom() string {
+	if x != nil {
+		return x.BhyveBootrom
+	}
+	return ""
+}
+
+func (x *GetNodeConfigResponse) GetBhyveBridge() string {
+	if x != nil {
+		return x.BhyveBridge
+	}
+	return ""
+}
+
+func (x *GetNodeConfigResponse) GetDiskSizeMb() uint64 {
+	if x != nil {
+		return x.DiskSizeMb
+	}
+	return 0
+}
+
+func (x *GetNodeConfigResponse) GetJailDiskSizeMb() uint64 {
+	if x != nil {
+		return x.JailDiskSizeMb
+	}
+	return 0
+}
+
+func (x *GetNodeConfigResponse) GetHastEnabled() bool {
+	if x != nil && x.HastEnabled != nil {
+		return *x.HastEnabled
+	}
+	return false
+}
+
+func (x *GetNodeConfigResponse) GetJailConsoleEnabled() bool {
+	if x != nil && x.JailConsoleEnabled != nil {
+		return *x.JailConsoleEnabled
+	}
+	return false
+}
+
+func (x *GetNodeConfigResponse) GetPeerTls() bool {
+	if x != nil && x.PeerTls != nil {
+		return *x.PeerTls
+	}
+	return false
+}
+
+func (x *GetNodeConfigResponse) GetPeerManagerdPort() string {
+	if x != nil {
+		return x.PeerManagerdPort
+	}
+	return ""
+}
+
+func (x *GetNodeConfigResponse) GetPeerTlsHostnameMap() string {
+	if x != nil {
+		return x.PeerTlsHostnameMap
+	}
+	return ""
+}
+
+func (x *GetNodeConfigResponse) GetPeerApiKeySet() bool {
+	if x != nil {
+		return x.PeerApiKeySet
+	}
+	return false
+}
+
+func (x *GetNodeConfigResponse) GetRaftdTokenSet() bool {
+	if x != nil {
+		return x.RaftdTokenSet
+	}
+	return false
+}
+
+func (x *GetNodeConfigResponse) GetTlsCert() string {
+	if x != nil {
+		return x.TlsCert
+	}
+	return ""
+}
+
+func (x *GetNodeConfigResponse) GetTlsKey() string {
+	if x != nil {
+		return x.TlsKey
+	}
+	return ""
+}
+
+func (x *GetNodeConfigResponse) GetCloudflareTokenFile() string {
+	if x != nil {
+		return x.CloudflareTokenFile
+	}
+	return ""
+}
+
+func (x *GetNodeConfigResponse) GetCloudflareZoneId() string {
+	if x != nil {
+		return x.CloudflareZoneId
+	}
+	return ""
+}
+
+func (x *GetNodeConfigResponse) GetCloudflareTunnelId() string {
+	if x != nil {
+		return x.CloudflareTunnelId
+	}
+	return ""
+}
+
+func (x *GetNodeConfigResponse) GetCloudflareTunnelCredentialsFile() string {
+	if x != nil {
+		return x.CloudflareTunnelCredentialsFile
+	}
+	return ""
+}
+
 type NetworkInterface struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
@@ -5093,8 +5360,56 @@ type UpdateNodeConfigRequest struct {
 	// dhcp_dns_server is persisted with the other node-local network
 	// settings and takes effect on this node's next managerd restart.
 	DhcpDnsServer string `protobuf:"bytes,4,opt,name=dhcp_dns_server,json=dhcpDnsServer,proto3" json:"dhcp_dns_server,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	// See GetNodeConfigResponse's own doc comments (fields 8-36 there)
+	// for what each of the following means - field numbers deliberately
+	// match across both messages where the same setting appears in both,
+	// for readability, though request/response numbering isn't required
+	// to match in protobuf.
+	ZfsBase       string `protobuf:"bytes,8,opt,name=zfs_base,json=zfsBase,proto3" json:"zfs_base,omitempty"`
+	BhyvePrefix   string `protobuf:"bytes,9,opt,name=bhyve_prefix,json=bhyvePrefix,proto3" json:"bhyve_prefix,omitempty"`
+	IsoDir        string `protobuf:"bytes,10,opt,name=iso_dir,json=isoDir,proto3" json:"iso_dir,omitempty"`
+	JailPrefix    string `protobuf:"bytes,11,opt,name=jail_prefix,json=jailPrefix,proto3" json:"jail_prefix,omitempty"`
+	JailMountBase string `protobuf:"bytes,12,opt,name=jail_mount_base,json=jailMountBase,proto3" json:"jail_mount_base,omitempty"`
+	// Duration fields are submitted as plain strings parseable by Go's
+	// time.ParseDuration (e.g. "30s", "1h") - rejected with a clear error
+	// if malformed, rather than silently saved and only failing the next
+	// time managerd starts.
+	ReconcileInterval           string `protobuf:"bytes,13,opt,name=reconcile_interval,json=reconcileInterval,proto3" json:"reconcile_interval,omitempty"`
+	AssumptionCheckInterval     string `protobuf:"bytes,14,opt,name=assumption_check_interval,json=assumptionCheckInterval,proto3" json:"assumption_check_interval,omitempty"`
+	AssumptionHeartbeatInterval string `protobuf:"bytes,15,opt,name=assumption_heartbeat_interval,json=assumptionHeartbeatInterval,proto3" json:"assumption_heartbeat_interval,omitempty"`
+	AssumptionStaleAfter        string `protobuf:"bytes,16,opt,name=assumption_stale_after,json=assumptionStaleAfter,proto3" json:"assumption_stale_after,omitempty"`
+	AssumptionRunDeadline       string `protobuf:"bytes,17,opt,name=assumption_run_deadline,json=assumptionRunDeadline,proto3" json:"assumption_run_deadline,omitempty"`
+	AssumptionHistoryMaxAge     string `protobuf:"bytes,18,opt,name=assumption_history_max_age,json=assumptionHistoryMaxAge,proto3" json:"assumption_history_max_age,omitempty"`
+	AssumptionHistoryLimit      int32  `protobuf:"varint,19,opt,name=assumption_history_limit,json=assumptionHistoryLimit,proto3" json:"assumption_history_limit,omitempty"`
+	BhyveBootrom                string `protobuf:"bytes,20,opt,name=bhyve_bootrom,json=bhyveBootrom,proto3" json:"bhyve_bootrom,omitempty"`
+	BhyveBridge                 string `protobuf:"bytes,21,opt,name=bhyve_bridge,json=bhyveBridge,proto3" json:"bhyve_bridge,omitempty"`
+	DiskSizeMb                  uint64 `protobuf:"varint,22,opt,name=disk_size_mb,json=diskSizeMb,proto3" json:"disk_size_mb,omitempty"`
+	JailDiskSizeMb              uint64 `protobuf:"varint,23,opt,name=jail_disk_size_mb,json=jailDiskSizeMb,proto3" json:"jail_disk_size_mb,omitempty"`
+	HastEnabled                 *bool  `protobuf:"varint,24,opt,name=hast_enabled,json=hastEnabled,proto3,oneof" json:"hast_enabled,omitempty"`
+	JailConsoleEnabled          *bool  `protobuf:"varint,25,opt,name=jail_console_enabled,json=jailConsoleEnabled,proto3,oneof" json:"jail_console_enabled,omitempty"`
+	PeerTls                     *bool  `protobuf:"varint,26,opt,name=peer_tls,json=peerTls,proto3,oneof" json:"peer_tls,omitempty"`
+	PeerManagerdPort            string `protobuf:"bytes,27,opt,name=peer_managerd_port,json=peerManagerdPort,proto3" json:"peer_managerd_port,omitempty"`
+	PeerTlsHostnameMap          string `protobuf:"bytes,28,opt,name=peer_tls_hostname_map,json=peerTlsHostnameMap,proto3" json:"peer_tls_hostname_map,omitempty"`
+	// peer_api_key/raftd_token, if non-empty, become the new saved
+	// value - write-only, mirroring the Users page's own "leave blank to
+	// keep current" password-change convention. An empty value here
+	// means "leave whatever is currently saved unchanged," not "clear
+	// it" - use clear_peer_api_key/clear_raftd_token to actually clear
+	// one (mirroring SetVMCloudflareExposure's own explicit-clear
+	// pattern rather than overloading an empty string to mean two
+	// different things).
+	PeerApiKey                      string `protobuf:"bytes,37,opt,name=peer_api_key,json=peerApiKey,proto3" json:"peer_api_key,omitempty"`
+	ClearPeerApiKey                 bool   `protobuf:"varint,38,opt,name=clear_peer_api_key,json=clearPeerApiKey,proto3" json:"clear_peer_api_key,omitempty"`
+	RaftdToken                      string `protobuf:"bytes,39,opt,name=raftd_token,json=raftdToken,proto3" json:"raftd_token,omitempty"`
+	ClearRaftdToken                 bool   `protobuf:"varint,40,opt,name=clear_raftd_token,json=clearRaftdToken,proto3" json:"clear_raftd_token,omitempty"`
+	TlsCert                         string `protobuf:"bytes,31,opt,name=tls_cert,json=tlsCert,proto3" json:"tls_cert,omitempty"`
+	TlsKey                          string `protobuf:"bytes,32,opt,name=tls_key,json=tlsKey,proto3" json:"tls_key,omitempty"`
+	CloudflareTokenFile             string `protobuf:"bytes,33,opt,name=cloudflare_token_file,json=cloudflareTokenFile,proto3" json:"cloudflare_token_file,omitempty"`
+	CloudflareZoneId                string `protobuf:"bytes,34,opt,name=cloudflare_zone_id,json=cloudflareZoneId,proto3" json:"cloudflare_zone_id,omitempty"`
+	CloudflareTunnelId              string `protobuf:"bytes,35,opt,name=cloudflare_tunnel_id,json=cloudflareTunnelId,proto3" json:"cloudflare_tunnel_id,omitempty"`
+	CloudflareTunnelCredentialsFile string `protobuf:"bytes,36,opt,name=cloudflare_tunnel_credentials_file,json=cloudflareTunnelCredentialsFile,proto3" json:"cloudflare_tunnel_credentials_file,omitempty"`
+	unknownFields                   protoimpl.UnknownFields
+	sizeCache                       protoimpl.SizeCache
 }
 
 func (x *UpdateNodeConfigRequest) Reset() {
@@ -5151,6 +5466,223 @@ func (x *UpdateNodeConfigRequest) GetJailEnabled() bool {
 func (x *UpdateNodeConfigRequest) GetDhcpDnsServer() string {
 	if x != nil {
 		return x.DhcpDnsServer
+	}
+	return ""
+}
+
+func (x *UpdateNodeConfigRequest) GetZfsBase() string {
+	if x != nil {
+		return x.ZfsBase
+	}
+	return ""
+}
+
+func (x *UpdateNodeConfigRequest) GetBhyvePrefix() string {
+	if x != nil {
+		return x.BhyvePrefix
+	}
+	return ""
+}
+
+func (x *UpdateNodeConfigRequest) GetIsoDir() string {
+	if x != nil {
+		return x.IsoDir
+	}
+	return ""
+}
+
+func (x *UpdateNodeConfigRequest) GetJailPrefix() string {
+	if x != nil {
+		return x.JailPrefix
+	}
+	return ""
+}
+
+func (x *UpdateNodeConfigRequest) GetJailMountBase() string {
+	if x != nil {
+		return x.JailMountBase
+	}
+	return ""
+}
+
+func (x *UpdateNodeConfigRequest) GetReconcileInterval() string {
+	if x != nil {
+		return x.ReconcileInterval
+	}
+	return ""
+}
+
+func (x *UpdateNodeConfigRequest) GetAssumptionCheckInterval() string {
+	if x != nil {
+		return x.AssumptionCheckInterval
+	}
+	return ""
+}
+
+func (x *UpdateNodeConfigRequest) GetAssumptionHeartbeatInterval() string {
+	if x != nil {
+		return x.AssumptionHeartbeatInterval
+	}
+	return ""
+}
+
+func (x *UpdateNodeConfigRequest) GetAssumptionStaleAfter() string {
+	if x != nil {
+		return x.AssumptionStaleAfter
+	}
+	return ""
+}
+
+func (x *UpdateNodeConfigRequest) GetAssumptionRunDeadline() string {
+	if x != nil {
+		return x.AssumptionRunDeadline
+	}
+	return ""
+}
+
+func (x *UpdateNodeConfigRequest) GetAssumptionHistoryMaxAge() string {
+	if x != nil {
+		return x.AssumptionHistoryMaxAge
+	}
+	return ""
+}
+
+func (x *UpdateNodeConfigRequest) GetAssumptionHistoryLimit() int32 {
+	if x != nil {
+		return x.AssumptionHistoryLimit
+	}
+	return 0
+}
+
+func (x *UpdateNodeConfigRequest) GetBhyveBootrom() string {
+	if x != nil {
+		return x.BhyveBootrom
+	}
+	return ""
+}
+
+func (x *UpdateNodeConfigRequest) GetBhyveBridge() string {
+	if x != nil {
+		return x.BhyveBridge
+	}
+	return ""
+}
+
+func (x *UpdateNodeConfigRequest) GetDiskSizeMb() uint64 {
+	if x != nil {
+		return x.DiskSizeMb
+	}
+	return 0
+}
+
+func (x *UpdateNodeConfigRequest) GetJailDiskSizeMb() uint64 {
+	if x != nil {
+		return x.JailDiskSizeMb
+	}
+	return 0
+}
+
+func (x *UpdateNodeConfigRequest) GetHastEnabled() bool {
+	if x != nil && x.HastEnabled != nil {
+		return *x.HastEnabled
+	}
+	return false
+}
+
+func (x *UpdateNodeConfigRequest) GetJailConsoleEnabled() bool {
+	if x != nil && x.JailConsoleEnabled != nil {
+		return *x.JailConsoleEnabled
+	}
+	return false
+}
+
+func (x *UpdateNodeConfigRequest) GetPeerTls() bool {
+	if x != nil && x.PeerTls != nil {
+		return *x.PeerTls
+	}
+	return false
+}
+
+func (x *UpdateNodeConfigRequest) GetPeerManagerdPort() string {
+	if x != nil {
+		return x.PeerManagerdPort
+	}
+	return ""
+}
+
+func (x *UpdateNodeConfigRequest) GetPeerTlsHostnameMap() string {
+	if x != nil {
+		return x.PeerTlsHostnameMap
+	}
+	return ""
+}
+
+func (x *UpdateNodeConfigRequest) GetPeerApiKey() string {
+	if x != nil {
+		return x.PeerApiKey
+	}
+	return ""
+}
+
+func (x *UpdateNodeConfigRequest) GetClearPeerApiKey() bool {
+	if x != nil {
+		return x.ClearPeerApiKey
+	}
+	return false
+}
+
+func (x *UpdateNodeConfigRequest) GetRaftdToken() string {
+	if x != nil {
+		return x.RaftdToken
+	}
+	return ""
+}
+
+func (x *UpdateNodeConfigRequest) GetClearRaftdToken() bool {
+	if x != nil {
+		return x.ClearRaftdToken
+	}
+	return false
+}
+
+func (x *UpdateNodeConfigRequest) GetTlsCert() string {
+	if x != nil {
+		return x.TlsCert
+	}
+	return ""
+}
+
+func (x *UpdateNodeConfigRequest) GetTlsKey() string {
+	if x != nil {
+		return x.TlsKey
+	}
+	return ""
+}
+
+func (x *UpdateNodeConfigRequest) GetCloudflareTokenFile() string {
+	if x != nil {
+		return x.CloudflareTokenFile
+	}
+	return ""
+}
+
+func (x *UpdateNodeConfigRequest) GetCloudflareZoneId() string {
+	if x != nil {
+		return x.CloudflareZoneId
+	}
+	return ""
+}
+
+func (x *UpdateNodeConfigRequest) GetCloudflareTunnelId() string {
+	if x != nil {
+		return x.CloudflareTunnelId
+	}
+	return ""
+}
+
+func (x *UpdateNodeConfigRequest) GetCloudflareTunnelCredentialsFile() string {
+	if x != nil {
+		return x.CloudflareTunnelCredentialsFile
 	}
 	return ""
 }
@@ -9425,7 +9957,7 @@ const file_api_rpc_manager_proto_rawDesc = "" +
 	"\ttruncated\x18\x02 \x01(\bR\ttruncated\x12\x1c\n" +
 	"\tavailable\x18\x03 \x01(\bR\tavailable\x12\x14\n" +
 	"\x05error\x18\x04 \x01(\tR\x05error\"\x16\n" +
-	"\x14GetNodeConfigRequest\"\xd5\x02\n" +
+	"\x14GetNodeConfigRequest\"\x9b\r\n" +
 	"\x15GetNodeConfigResponse\x12\x16\n" +
 	"\x06uplink\x18\x01 \x01(\tR\x06uplink\x12\x1d\n" +
 	"\n" +
@@ -9434,19 +9966,93 @@ const file_api_rpc_manager_proto_rawDesc = "" +
 	"\fjail_enabled\x18\x03 \x01(\bH\x00R\vjailEnabled\x88\x01\x01\x12\x14\n" +
 	"\x05error\x18\x04 \x01(\tR\x05error\x12R\n" +
 	"\x14available_interfaces\x18\x06 \x03(\v2\x1f.apiary.rpc.v1.NetworkInterfaceR\x13availableInterfaces\x12:\n" +
-	"\x19interface_inventory_error\x18\a \x01(\tR\x17interfaceInventoryErrorB\x0f\n" +
-	"\r_jail_enabled\"T\n" +
+	"\x19interface_inventory_error\x18\a \x01(\tR\x17interfaceInventoryError\x12\x19\n" +
+	"\bzfs_base\x18\b \x01(\tR\azfsBase\x12!\n" +
+	"\fbhyve_prefix\x18\t \x01(\tR\vbhyvePrefix\x12\x17\n" +
+	"\aiso_dir\x18\n" +
+	" \x01(\tR\x06isoDir\x12\x1f\n" +
+	"\vjail_prefix\x18\v \x01(\tR\n" +
+	"jailPrefix\x12&\n" +
+	"\x0fjail_mount_base\x18\f \x01(\tR\rjailMountBase\x12-\n" +
+	"\x12reconcile_interval\x18\r \x01(\tR\x11reconcileInterval\x12:\n" +
+	"\x19assumption_check_interval\x18\x0e \x01(\tR\x17assumptionCheckInterval\x12B\n" +
+	"\x1dassumption_heartbeat_interval\x18\x0f \x01(\tR\x1bassumptionHeartbeatInterval\x124\n" +
+	"\x16assumption_stale_after\x18\x10 \x01(\tR\x14assumptionStaleAfter\x126\n" +
+	"\x17assumption_run_deadline\x18\x11 \x01(\tR\x15assumptionRunDeadline\x12;\n" +
+	"\x1aassumption_history_max_age\x18\x12 \x01(\tR\x17assumptionHistoryMaxAge\x128\n" +
+	"\x18assumption_history_limit\x18\x13 \x01(\x05R\x16assumptionHistoryLimit\x12#\n" +
+	"\rbhyve_bootrom\x18\x14 \x01(\tR\fbhyveBootrom\x12!\n" +
+	"\fbhyve_bridge\x18\x15 \x01(\tR\vbhyveBridge\x12 \n" +
+	"\fdisk_size_mb\x18\x16 \x01(\x04R\n" +
+	"diskSizeMb\x12)\n" +
+	"\x11jail_disk_size_mb\x18\x17 \x01(\x04R\x0ejailDiskSizeMb\x12&\n" +
+	"\fhast_enabled\x18\x18 \x01(\bH\x01R\vhastEnabled\x88\x01\x01\x125\n" +
+	"\x14jail_console_enabled\x18\x19 \x01(\bH\x02R\x12jailConsoleEnabled\x88\x01\x01\x12\x1e\n" +
+	"\bpeer_tls\x18\x1a \x01(\bH\x03R\apeerTls\x88\x01\x01\x12,\n" +
+	"\x12peer_managerd_port\x18\x1b \x01(\tR\x10peerManagerdPort\x121\n" +
+	"\x15peer_tls_hostname_map\x18\x1c \x01(\tR\x12peerTlsHostnameMap\x12'\n" +
+	"\x10peer_api_key_set\x18\x1d \x01(\bR\rpeerApiKeySet\x12&\n" +
+	"\x0fraftd_token_set\x18\x1e \x01(\bR\rraftdTokenSet\x12\x19\n" +
+	"\btls_cert\x18\x1f \x01(\tR\atlsCert\x12\x17\n" +
+	"\atls_key\x18  \x01(\tR\x06tlsKey\x122\n" +
+	"\x15cloudflare_token_file\x18! \x01(\tR\x13cloudflareTokenFile\x12,\n" +
+	"\x12cloudflare_zone_id\x18\" \x01(\tR\x10cloudflareZoneId\x120\n" +
+	"\x14cloudflare_tunnel_id\x18# \x01(\tR\x12cloudflareTunnelId\x12K\n" +
+	"\"cloudflare_tunnel_credentials_file\x18$ \x01(\tR\x1fcloudflareTunnelCredentialsFileB\x0f\n" +
+	"\r_jail_enabledB\x0f\n" +
+	"\r_hast_enabledB\x17\n" +
+	"\x15_jail_console_enabledB\v\n" +
+	"\t_peer_tls\"T\n" +
 	"\x10NetworkInterface\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x0e\n" +
 	"\x02up\x18\x02 \x01(\bR\x02up\x12\x1c\n" +
-	"\taddresses\x18\x03 \x03(\tR\taddresses\"\xb1\x01\n" +
+	"\taddresses\x18\x03 \x03(\tR\taddresses\"\xc2\f\n" +
 	"\x17UpdateNodeConfigRequest\x12\x16\n" +
 	"\x06uplink\x18\x01 \x01(\tR\x06uplink\x12\x1d\n" +
 	"\n" +
 	"nat_uplink\x18\x02 \x01(\tR\tnatUplink\x12&\n" +
 	"\fjail_enabled\x18\x03 \x01(\bH\x00R\vjailEnabled\x88\x01\x01\x12&\n" +
-	"\x0fdhcp_dns_server\x18\x04 \x01(\tR\rdhcpDnsServerB\x0f\n" +
-	"\r_jail_enabled\"0\n" +
+	"\x0fdhcp_dns_server\x18\x04 \x01(\tR\rdhcpDnsServer\x12\x19\n" +
+	"\bzfs_base\x18\b \x01(\tR\azfsBase\x12!\n" +
+	"\fbhyve_prefix\x18\t \x01(\tR\vbhyvePrefix\x12\x17\n" +
+	"\aiso_dir\x18\n" +
+	" \x01(\tR\x06isoDir\x12\x1f\n" +
+	"\vjail_prefix\x18\v \x01(\tR\n" +
+	"jailPrefix\x12&\n" +
+	"\x0fjail_mount_base\x18\f \x01(\tR\rjailMountBase\x12-\n" +
+	"\x12reconcile_interval\x18\r \x01(\tR\x11reconcileInterval\x12:\n" +
+	"\x19assumption_check_interval\x18\x0e \x01(\tR\x17assumptionCheckInterval\x12B\n" +
+	"\x1dassumption_heartbeat_interval\x18\x0f \x01(\tR\x1bassumptionHeartbeatInterval\x124\n" +
+	"\x16assumption_stale_after\x18\x10 \x01(\tR\x14assumptionStaleAfter\x126\n" +
+	"\x17assumption_run_deadline\x18\x11 \x01(\tR\x15assumptionRunDeadline\x12;\n" +
+	"\x1aassumption_history_max_age\x18\x12 \x01(\tR\x17assumptionHistoryMaxAge\x128\n" +
+	"\x18assumption_history_limit\x18\x13 \x01(\x05R\x16assumptionHistoryLimit\x12#\n" +
+	"\rbhyve_bootrom\x18\x14 \x01(\tR\fbhyveBootrom\x12!\n" +
+	"\fbhyve_bridge\x18\x15 \x01(\tR\vbhyveBridge\x12 \n" +
+	"\fdisk_size_mb\x18\x16 \x01(\x04R\n" +
+	"diskSizeMb\x12)\n" +
+	"\x11jail_disk_size_mb\x18\x17 \x01(\x04R\x0ejailDiskSizeMb\x12&\n" +
+	"\fhast_enabled\x18\x18 \x01(\bH\x01R\vhastEnabled\x88\x01\x01\x125\n" +
+	"\x14jail_console_enabled\x18\x19 \x01(\bH\x02R\x12jailConsoleEnabled\x88\x01\x01\x12\x1e\n" +
+	"\bpeer_tls\x18\x1a \x01(\bH\x03R\apeerTls\x88\x01\x01\x12,\n" +
+	"\x12peer_managerd_port\x18\x1b \x01(\tR\x10peerManagerdPort\x121\n" +
+	"\x15peer_tls_hostname_map\x18\x1c \x01(\tR\x12peerTlsHostnameMap\x12 \n" +
+	"\fpeer_api_key\x18% \x01(\tR\n" +
+	"peerApiKey\x12+\n" +
+	"\x12clear_peer_api_key\x18& \x01(\bR\x0fclearPeerApiKey\x12\x1f\n" +
+	"\vraftd_token\x18' \x01(\tR\n" +
+	"raftdToken\x12*\n" +
+	"\x11clear_raftd_token\x18( \x01(\bR\x0fclearRaftdToken\x12\x19\n" +
+	"\btls_cert\x18\x1f \x01(\tR\atlsCert\x12\x17\n" +
+	"\atls_key\x18  \x01(\tR\x06tlsKey\x122\n" +
+	"\x15cloudflare_token_file\x18! \x01(\tR\x13cloudflareTokenFile\x12,\n" +
+	"\x12cloudflare_zone_id\x18\" \x01(\tR\x10cloudflareZoneId\x120\n" +
+	"\x14cloudflare_tunnel_id\x18# \x01(\tR\x12cloudflareTunnelId\x12K\n" +
+	"\"cloudflare_tunnel_credentials_file\x18$ \x01(\tR\x1fcloudflareTunnelCredentialsFileB\x0f\n" +
+	"\r_jail_enabledB\x0f\n" +
+	"\r_hast_enabledB\x17\n" +
+	"\x15_jail_console_enabledB\v\n" +
+	"\t_peer_tls\"0\n" +
 	"\x18UpdateNodeConfigResponse\x12\x14\n" +
 	"\x05error\x18\x01 \x01(\tR\x05error\"Q\n" +
 	"\x16SetDatasetQuotaRequest\x12!\n" +

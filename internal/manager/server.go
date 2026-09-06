@@ -1717,7 +1717,52 @@ func (s *Server) GetNodeConfig(_ context.Context, _ *rpcpb.GetNodeConfigRequest)
 	if err != nil {
 		return &rpcpb.GetNodeConfigResponse{Error: err.Error()}, nil
 	}
-	resp := &rpcpb.GetNodeConfigResponse{Uplink: cfg.Uplink, NatUplink: cfg.NATUplink, DhcpDnsServer: cfg.DNSServer, JailEnabled: cfg.JailEnabled}
+	resp := &rpcpb.GetNodeConfigResponse{
+		Uplink:        cfg.Uplink,
+		NatUplink:     cfg.NATUplink,
+		DhcpDnsServer: cfg.DNSServer,
+		JailEnabled:   cfg.JailEnabled,
+
+		ZfsBase:       cfg.ZFSBase,
+		BhyvePrefix:   cfg.BhyvePrefix,
+		IsoDir:        cfg.ISODir,
+		JailPrefix:    cfg.JailPrefix,
+		JailMountBase: cfg.JailMountBase,
+
+		ReconcileInterval:           durationString(cfg.ReconcileInterval),
+		AssumptionCheckInterval:     durationString(cfg.AssumptionCheckInterval),
+		AssumptionHeartbeatInterval: durationString(cfg.AssumptionHeartbeatInterval),
+		AssumptionStaleAfter:        durationString(cfg.AssumptionStaleAfter),
+		AssumptionRunDeadline:       durationString(cfg.AssumptionRunDeadline),
+		AssumptionHistoryMaxAge:     durationString(cfg.AssumptionHistoryMaxAge),
+		AssumptionHistoryLimit:      int32(cfg.AssumptionHistoryLimit),
+
+		BhyveBootrom:   cfg.BhyveBootROM,
+		BhyveBridge:    cfg.BhyveBridge,
+		DiskSizeMb:     cfg.DiskSizeMB,
+		JailDiskSizeMb: cfg.JailDiskSizeMB,
+
+		HastEnabled:        cfg.HASTEnabled,
+		JailConsoleEnabled: cfg.JailConsoleEnabled,
+		PeerTls:            cfg.PeerTLS,
+
+		PeerManagerdPort:   cfg.PeerManagerdPort,
+		PeerTlsHostnameMap: cfg.PeerTLSHostnameMap,
+
+		// Secrets are never returned - only whether one is set. See
+		// UpdateNodeConfigRequest's own doc comment for how to set or
+		// clear one.
+		PeerApiKeySet: cfg.PeerAPIKey != "",
+		RaftdTokenSet: cfg.RaftdToken != "",
+
+		TlsCert: cfg.TLSCert,
+		TlsKey:  cfg.TLSKey,
+
+		CloudflareTokenFile:             cfg.CloudflareTokenFile,
+		CloudflareZoneId:                cfg.CloudflareZoneID,
+		CloudflareTunnelId:              cfg.CloudflareTunnelID,
+		CloudflareTunnelCredentialsFile: cfg.CloudflareTunnelCredentialsFile,
+	}
 	if s.listNetworkInterfaces != nil {
 		if interfaces, err := s.listNetworkInterfaces(); err == nil {
 			resp.AvailableInterfaces = make([]*rpcpb.NetworkInterface, 0, len(interfaces))
@@ -1733,21 +1778,145 @@ func (s *Server) GetNodeConfig(_ context.Context, _ *rpcpb.GetNodeConfigRequest)
 	return resp, nil
 }
 
+// durationString formats a time.Duration for GetNodeConfigResponse -
+// the zero value renders as "" (never set/using the startup flag),
+// not Go's own "0s", so the Machine page's input can stay blank rather
+// than showing a misleadingly specific value nobody actually saved.
+func durationString(d time.Duration) string {
+	if d == 0 {
+		return ""
+	}
+	return d.String()
+}
+
 // UpdateNodeConfig implements rpcpb.ManagerServiceServer - persists new
 // local settings, replacing the file in full (matching
 // nodeconfig.Manager.Save's own doc comment) rather than merging, so a
-// caller intending to change only one field must send both. Takes
-// effect on this node's next managerd restart, not live - see
-// ADR-0049.
+// caller intending to change only one field must send both (the web UI
+// does this by always resending every current value alongside whatever
+// the operator actually changed - see internal/frontend/machine.go).
+// Takes effect on this node's next managerd restart, not live - see
+// ADR-0049/ADR-0070.
+//
+// Duration fields arrive as plain strings (e.g. "30s") and are parsed
+// here, before ever reaching nodeconfig.Save, so a malformed value is
+// rejected immediately with a clear error rather than being persisted
+// and only failing the next time managerd actually starts.
+//
+// peer_api_key/raftd_token are write-only (see
+// UpdateNodeConfigRequest's own doc comment): an empty value here
+// leaves the currently-saved secret untouched by reloading it from the
+// existing config first, rather than accidentally clearing it just
+// because the web form's own field was left blank on a save that was
+// only touching some other setting.
 func (s *Server) UpdateNodeConfig(_ context.Context, req *rpcpb.UpdateNodeConfigRequest) (*rpcpb.UpdateNodeConfigResponse, error) {
 	if s.nodeConfig == nil {
 		return &rpcpb.UpdateNodeConfigResponse{Error: "this node has no node-config store configured"}, nil
 	}
-	err := s.nodeConfig.Save(nodeconfig.Config{Uplink: req.GetUplink(), NATUplink: req.GetNatUplink(), DNSServer: req.GetDhcpDnsServer(), JailEnabled: req.JailEnabled})
+	current, err := s.nodeConfig.Load()
 	if err != nil {
 		return &rpcpb.UpdateNodeConfigResponse{Error: err.Error()}, nil
 	}
+
+	reconcileInterval, err := parseOptionalDuration("reconcile_interval", req.GetReconcileInterval())
+	if err != nil {
+		return &rpcpb.UpdateNodeConfigResponse{Error: err.Error()}, nil
+	}
+	assumptionCheckInterval, err := parseOptionalDuration("assumption_check_interval", req.GetAssumptionCheckInterval())
+	if err != nil {
+		return &rpcpb.UpdateNodeConfigResponse{Error: err.Error()}, nil
+	}
+	assumptionHeartbeatInterval, err := parseOptionalDuration("assumption_heartbeat_interval", req.GetAssumptionHeartbeatInterval())
+	if err != nil {
+		return &rpcpb.UpdateNodeConfigResponse{Error: err.Error()}, nil
+	}
+	assumptionStaleAfter, err := parseOptionalDuration("assumption_stale_after", req.GetAssumptionStaleAfter())
+	if err != nil {
+		return &rpcpb.UpdateNodeConfigResponse{Error: err.Error()}, nil
+	}
+	assumptionRunDeadline, err := parseOptionalDuration("assumption_run_deadline", req.GetAssumptionRunDeadline())
+	if err != nil {
+		return &rpcpb.UpdateNodeConfigResponse{Error: err.Error()}, nil
+	}
+	assumptionHistoryMaxAge, err := parseOptionalDuration("assumption_history_max_age", req.GetAssumptionHistoryMaxAge())
+	if err != nil {
+		return &rpcpb.UpdateNodeConfigResponse{Error: err.Error()}, nil
+	}
+
+	peerAPIKey := current.PeerAPIKey
+	if req.GetClearPeerApiKey() {
+		peerAPIKey = ""
+	} else if req.GetPeerApiKey() != "" {
+		peerAPIKey = req.GetPeerApiKey()
+	}
+	raftdToken := current.RaftdToken
+	if req.GetClearRaftdToken() {
+		raftdToken = ""
+	} else if req.GetRaftdToken() != "" {
+		raftdToken = req.GetRaftdToken()
+	}
+
+	cfg := nodeconfig.Config{
+		Uplink:        req.GetUplink(),
+		NATUplink:     req.GetNatUplink(),
+		DNSServer:     req.GetDhcpDnsServer(),
+		JailEnabled:   req.JailEnabled,
+		ZFSBase:       req.GetZfsBase(),
+		BhyvePrefix:   req.GetBhyvePrefix(),
+		ISODir:        req.GetIsoDir(),
+		JailPrefix:    req.GetJailPrefix(),
+		JailMountBase: req.GetJailMountBase(),
+
+		ReconcileInterval:           reconcileInterval,
+		AssumptionCheckInterval:     assumptionCheckInterval,
+		AssumptionHeartbeatInterval: assumptionHeartbeatInterval,
+		AssumptionStaleAfter:        assumptionStaleAfter,
+		AssumptionRunDeadline:       assumptionRunDeadline,
+		AssumptionHistoryMaxAge:     assumptionHistoryMaxAge,
+		AssumptionHistoryLimit:      int(req.GetAssumptionHistoryLimit()),
+
+		BhyveBootROM:   req.GetBhyveBootrom(),
+		BhyveBridge:    req.GetBhyveBridge(),
+		DiskSizeMB:     req.GetDiskSizeMb(),
+		JailDiskSizeMB: req.GetJailDiskSizeMb(),
+
+		HASTEnabled:        req.HastEnabled,
+		JailConsoleEnabled: req.JailConsoleEnabled,
+		PeerTLS:            req.PeerTls,
+
+		PeerAPIKey:         peerAPIKey,
+		PeerManagerdPort:   req.GetPeerManagerdPort(),
+		PeerTLSHostnameMap: req.GetPeerTlsHostnameMap(),
+
+		TLSCert: req.GetTlsCert(),
+		TLSKey:  req.GetTlsKey(),
+
+		CloudflareTokenFile:             req.GetCloudflareTokenFile(),
+		CloudflareZoneID:                req.GetCloudflareZoneId(),
+		CloudflareTunnelID:              req.GetCloudflareTunnelId(),
+		CloudflareTunnelCredentialsFile: req.GetCloudflareTunnelCredentialsFile(),
+
+		RaftdToken: raftdToken,
+	}
+	if err := s.nodeConfig.Save(cfg); err != nil {
+		return &rpcpb.UpdateNodeConfigResponse{Error: err.Error()}, nil
+	}
 	return &rpcpb.UpdateNodeConfigResponse{}, nil
+}
+
+// parseOptionalDuration parses value with time.ParseDuration unless
+// it's empty (meaning "leave this at its zero value / not set"),
+// naming field in any error so a malformed Machine Configuration form
+// field is easy to identify.
+func parseOptionalDuration(field, value string) (time.Duration, error) {
+	if value == "" {
+		return 0, nil
+	}
+	d, err := time.ParseDuration(value)
+	if err != nil {
+		return 0, fmt.Errorf("invalid %s %q: %w", field, value, err)
+	}
+	return d, nil
 }
 
 // SetDatasetQuota implements rpcpb.ManagerServiceServer - sets a ZFS

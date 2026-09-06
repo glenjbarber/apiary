@@ -120,12 +120,7 @@ func (s *Server) handleUpdateMachineConfig(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	req := s.nodeConfigUpdateRequest(r)
-	resp, err := s.client.UpdateNodeConfig(r.Context(), &rpcpb.UpdateNodeConfigRequest{
-		Uplink:        req.GetUplink(),
-		NatUplink:     req.GetNatUplink(),
-		DhcpDnsServer: req.GetDhcpDnsServer(),
-		JailEnabled:   req.JailEnabled,
-	})
+	resp, err := s.client.UpdateNodeConfig(r.Context(), req)
 	if err != nil {
 		s.renderMachineConfigPanel(w, r, panel, err.Error())
 		return
@@ -137,6 +132,24 @@ func (s *Server) handleUpdateMachineConfig(w http.ResponseWriter, r *http.Reques
 	s.renderMachineConfigPanel(w, r, panel, "")
 }
 
+// nodeConfigUpdateRequest builds a full UpdateNodeConfig request,
+// starting from every currently-saved value (Save replaces the whole
+// file, not a merge - see nodeconfig.Manager.Save's own doc comment)
+// and overriding only the fields the submitting form actually carries
+// (checked via r.Form.Has, the same convention every field here
+// already followed before ADR-0070's expansion). This is shared by
+// every Machine Configuration panel's own POST handler - each panel's
+// form only includes the fields it displays, plus hidden inputs for
+// anything else it needs to avoid accidentally clearing (see
+// machine.html's own per-panel hidden-input pattern).
+//
+// peer_api_key/raftd_token are handled differently, matching
+// UpdateNodeConfigRequest's own write-only design: this function never
+// reads a "current" secret value back out of nodeConfigView (which
+// never has one to begin with - GetNodeConfig never returns it), it
+// just forwards whatever the form submitted (new value, clear flag, or
+// neither) straight through, and UpdateNodeConfig's own RPC handler is
+// what actually implements "empty means leave unchanged."
 func (s *Server) nodeConfigUpdateRequest(r *http.Request) *rpcpb.UpdateNodeConfigRequest {
 	cfg, _ := s.currentNodeConfig(r)
 	req := &rpcpb.UpdateNodeConfigRequest{
@@ -144,6 +157,40 @@ func (s *Server) nodeConfigUpdateRequest(r *http.Request) *rpcpb.UpdateNodeConfi
 		NatUplink:     cfg.NATUplink,
 		DhcpDnsServer: cfg.DNSServer,
 		JailEnabled:   jailEnabledFromForm(cfg.JailEnabledMode),
+
+		ZfsBase:       cfg.ZFSBase,
+		BhyvePrefix:   cfg.BhyvePrefix,
+		IsoDir:        cfg.ISODir,
+		JailPrefix:    cfg.JailPrefix,
+		JailMountBase: cfg.JailMountBase,
+
+		ReconcileInterval:           cfg.ReconcileInterval,
+		AssumptionCheckInterval:     cfg.AssumptionCheckInterval,
+		AssumptionHeartbeatInterval: cfg.AssumptionHeartbeatInterval,
+		AssumptionStaleAfter:        cfg.AssumptionStaleAfter,
+		AssumptionRunDeadline:       cfg.AssumptionRunDeadline,
+		AssumptionHistoryMaxAge:     cfg.AssumptionHistoryMaxAge,
+		AssumptionHistoryLimit:      cfg.AssumptionHistoryLimit,
+
+		BhyveBootrom:   cfg.BhyveBootROM,
+		BhyveBridge:    cfg.BhyveBridge,
+		DiskSizeMb:     cfg.DiskSizeMB,
+		JailDiskSizeMb: cfg.JailDiskSizeMB,
+
+		HastEnabled:        jailEnabledFromForm(cfg.HASTEnabledMode),
+		JailConsoleEnabled: jailEnabledFromForm(cfg.JailConsoleEnabledMode),
+		PeerTls:            jailEnabledFromForm(cfg.PeerTLSMode),
+
+		PeerManagerdPort:   cfg.PeerManagerdPort,
+		PeerTlsHostnameMap: cfg.PeerTLSHostnameMap,
+
+		TlsCert: cfg.TLSCert,
+		TlsKey:  cfg.TLSKey,
+
+		CloudflareTokenFile:             cfg.CloudflareTokenFile,
+		CloudflareZoneId:                cfg.CloudflareZoneID,
+		CloudflareTunnelId:              cfg.CloudflareTunnelID,
+		CloudflareTunnelCredentialsFile: cfg.CloudflareTunnelCredentialsFile,
 	}
 	if r.Form.Has("uplink") {
 		req.Uplink = r.FormValue("uplink")
@@ -157,7 +204,158 @@ func (s *Server) nodeConfigUpdateRequest(r *http.Request) *rpcpb.UpdateNodeConfi
 	if r.Form.Has("jail_enabled") {
 		req.JailEnabled = jailEnabledFromForm(r.FormValue("jail_enabled"))
 	}
+	if r.Form.Has("zfs_base") {
+		req.ZfsBase = r.FormValue("zfs_base")
+	}
+	if r.Form.Has("bhyve_prefix") {
+		req.BhyvePrefix = r.FormValue("bhyve_prefix")
+	}
+	if r.Form.Has("iso_dir") {
+		req.IsoDir = r.FormValue("iso_dir")
+	}
+	if r.Form.Has("jail_prefix") {
+		req.JailPrefix = r.FormValue("jail_prefix")
+	}
+	if r.Form.Has("jail_mount_base") {
+		req.JailMountBase = r.FormValue("jail_mount_base")
+	}
+	if r.Form.Has("reconcile_interval") {
+		req.ReconcileInterval = r.FormValue("reconcile_interval")
+	}
+	if r.Form.Has("assumption_check_interval") {
+		req.AssumptionCheckInterval = r.FormValue("assumption_check_interval")
+	}
+	if r.Form.Has("assumption_heartbeat_interval") {
+		req.AssumptionHeartbeatInterval = r.FormValue("assumption_heartbeat_interval")
+	}
+	if r.Form.Has("assumption_stale_after") {
+		req.AssumptionStaleAfter = r.FormValue("assumption_stale_after")
+	}
+	if r.Form.Has("assumption_run_deadline") {
+		req.AssumptionRunDeadline = r.FormValue("assumption_run_deadline")
+	}
+	if r.Form.Has("assumption_history_max_age") {
+		req.AssumptionHistoryMaxAge = r.FormValue("assumption_history_max_age")
+	}
+	if r.Form.Has("assumption_history_limit") {
+		if n, err := strconv.ParseInt(r.FormValue("assumption_history_limit"), 10, 32); err == nil {
+			req.AssumptionHistoryLimit = int32(n)
+		}
+	}
+	if r.Form.Has("bhyve_bootrom") {
+		req.BhyveBootrom = r.FormValue("bhyve_bootrom")
+	}
+	if r.Form.Has("bhyve_bridge") {
+		req.BhyveBridge = r.FormValue("bhyve_bridge")
+	}
+	if r.Form.Has("disk_size_mb") {
+		if n, err := strconv.ParseUint(r.FormValue("disk_size_mb"), 10, 64); err == nil {
+			req.DiskSizeMb = n
+		}
+	}
+	if r.Form.Has("jail_disk_size_mb") {
+		if n, err := strconv.ParseUint(r.FormValue("jail_disk_size_mb"), 10, 64); err == nil {
+			req.JailDiskSizeMb = n
+		}
+	}
+	if r.Form.Has("hast_enabled") {
+		req.HastEnabled = jailEnabledFromForm(r.FormValue("hast_enabled"))
+	}
+	if r.Form.Has("jail_console_enabled") {
+		req.JailConsoleEnabled = jailEnabledFromForm(r.FormValue("jail_console_enabled"))
+	}
+	if r.Form.Has("peer_tls") {
+		req.PeerTls = jailEnabledFromForm(r.FormValue("peer_tls"))
+	}
+	if r.Form.Has("peer_managerd_port") {
+		req.PeerManagerdPort = r.FormValue("peer_managerd_port")
+	}
+	if r.Form.Has("peer_tls_hostname_map") {
+		req.PeerTlsHostnameMap = r.FormValue("peer_tls_hostname_map")
+	}
+	if r.Form.Has("peer_api_key") {
+		req.PeerApiKey = r.FormValue("peer_api_key")
+	}
+	if r.FormValue("clear_peer_api_key") == "true" {
+		req.ClearPeerApiKey = true
+	}
+	if r.Form.Has("raftd_token") {
+		req.RaftdToken = r.FormValue("raftd_token")
+	}
+	if r.FormValue("clear_raftd_token") == "true" {
+		req.ClearRaftdToken = true
+	}
+	if r.Form.Has("tls_cert") {
+		req.TlsCert = r.FormValue("tls_cert")
+	}
+	if r.Form.Has("tls_key") {
+		req.TlsKey = r.FormValue("tls_key")
+	}
+	if r.Form.Has("cloudflare_token_file") {
+		req.CloudflareTokenFile = r.FormValue("cloudflare_token_file")
+	}
+	if r.Form.Has("cloudflare_zone_id") {
+		req.CloudflareZoneId = r.FormValue("cloudflare_zone_id")
+	}
+	if r.Form.Has("cloudflare_tunnel_id") {
+		req.CloudflareTunnelId = r.FormValue("cloudflare_tunnel_id")
+	}
+	if r.Form.Has("cloudflare_tunnel_credentials_file") {
+		req.CloudflareTunnelCredentialsFile = r.FormValue("cloudflare_tunnel_credentials_file")
+	}
 	return req
+}
+
+// handleUpdateResourceScope updates the five write-once resource-scope
+// paths (ADR-0070) - a dedicated panel/handler since these need the
+// "read-only once set" template behavior none of the other panels do.
+func (s *Server) handleUpdateResourceScope(w http.ResponseWriter, r *http.Request) {
+	s.handleUpdateMachineConfig(w, r, "resource_scope_panel")
+}
+
+// handleUpdateBhyveConfig updates bhyve/VM provisioning tuning
+// (BhyveBootROM, BhyveBridge, DiskSizeMB, ReconcileInterval) - all
+// freely editable any time, unlike the resource-scope paths above.
+func (s *Server) handleUpdateBhyveConfig(w http.ResponseWriter, r *http.Request) {
+	s.handleUpdateMachineConfig(w, r, "bhyve_config_panel")
+}
+
+// handleUpdateHASTProvisioning mirrors handleUpdateJailProvisioning for
+// -hast-enabled.
+func (s *Server) handleUpdateHASTProvisioning(w http.ResponseWriter, r *http.Request) {
+	s.handleUpdateMachineConfig(w, r, "hast_panel")
+}
+
+// handleUpdatePeerForwarding updates peer-to-peer reconciler-forwarding
+// settings (ADR-0029), including the write-only peer_api_key secret.
+func (s *Server) handleUpdatePeerForwarding(w http.ResponseWriter, r *http.Request) {
+	s.handleUpdateMachineConfig(w, r, "peer_forwarding_panel")
+}
+
+// handleUpdateTLSConfig updates this node's own external gRPC TLS
+// cert/key paths.
+func (s *Server) handleUpdateTLSConfig(w http.ResponseWriter, r *http.Request) {
+	s.handleUpdateMachineConfig(w, r, "tls_panel")
+}
+
+// handleUpdateCloudflareConfig updates ADR-0063's four Cloudflare
+// Tunnel settings - lets an operator configure a Hive's Cloudflare
+// Tunnel exposure through this page instead of only rc.conf.
+func (s *Server) handleUpdateCloudflareConfig(w http.ResponseWriter, r *http.Request) {
+	s.handleUpdateMachineConfig(w, r, "cloudflare_config_panel")
+}
+
+// handleUpdateAssumptionTuning updates the six Automated Assumption
+// Checks tuning knobs (ADR-0055) - pure timing/retention settings, safe
+// to change any time.
+func (s *Server) handleUpdateAssumptionTuning(w http.ResponseWriter, r *http.Request) {
+	s.handleUpdateMachineConfig(w, r, "assumption_tuning_panel")
+}
+
+// handleUpdateInternalSecurity updates the write-only raftd_token
+// secret (ADR-0033).
+func (s *Server) handleUpdateInternalSecurity(w http.ResponseWriter, r *http.Request) {
+	s.handleUpdateMachineConfig(w, r, "internal_security_panel")
 }
 
 func jailEnabledFromForm(v string) *bool {

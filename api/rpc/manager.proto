@@ -966,6 +966,87 @@ message GetNodeConfigResponse {
   // interfaces. The saved settings remain available so an operator can
   // still clear or correct them.
   string interface_inventory_error = 7;
+
+  // The following fields extend the Machine Configuration page (ADR-0049)
+  // to cover most of managerd's own startup flags (ADR-0070). Every one
+  // of them shares the same "takes effect on next managerd restart, not
+  // live" posture as the fields above. node_id/rpc_addr/raftd_socket are
+  // deliberately NOT represented anywhere in this message - raft
+  // identity and internal wiring stay CLI/rc.conf-only.
+
+  // zfs_base/bhyve_prefix/iso_dir/jail_prefix/jail_mount_base
+  // (fields 8-12) mirror their like-named flags. Write-once through
+  // UpdateNodeConfig once a non-empty value is first saved - see
+  // internal/nodeconfig's own package doc comment for why (changing one
+  // after real resources exist under the old value orphans them rather
+  // than moving them).
+  string zfs_base = 8;
+  string bhyve_prefix = 9;
+  string iso_dir = 10;
+  string jail_prefix = 11;
+  string jail_mount_base = 12;
+
+  // reconcile_interval/assumption_check_interval/
+  // assumption_heartbeat_interval/assumption_stale_after/
+  // assumption_run_deadline/assumption_history_max_age (fields 13-18)
+  // mirror their like-named flags, formatted as Go's own
+  // time.Duration.String() (e.g. "30s", "1h0m0s") - pure tuning knobs,
+  // safe to change any time, unlike the scope paths above.
+  string reconcile_interval = 13;
+  string assumption_check_interval = 14;
+  string assumption_heartbeat_interval = 15;
+  string assumption_stale_after = 16;
+  string assumption_run_deadline = 17;
+  string assumption_history_max_age = 18;
+
+  // assumption_history_limit mirrors -assumption-history-limit.
+  int32 assumption_history_limit = 19;
+
+  // bhyve_bootrom/bhyve_bridge mirror their like-named flags - empty
+  // disables bhyve provisioning/VM networking respectively.
+  string bhyve_bootrom = 20;
+  string bhyve_bridge = 21;
+
+  // disk_size_mb/jail_disk_size_mb mirror their like-named flags. Only
+  // affect newly created disks/roots, never resize an existing one -
+  // safe to change any time.
+  uint64 disk_size_mb = 22;
+  uint64 jail_disk_size_mb = 23;
+
+  // hast_enabled/jail_console_enabled/peer_tls mirror their like-named
+  // flags, tri-state like jail_enabled above: unset means keep using
+  // the startup flag value.
+  optional bool hast_enabled = 24;
+  optional bool jail_console_enabled = 25;
+  optional bool peer_tls = 26;
+
+  // peer_managerd_port/peer_tls_hostname_map mirror their like-named
+  // flags.
+  string peer_managerd_port = 27;
+  string peer_tls_hostname_map = 28;
+
+  // peer_api_key_set/raftd_token_set report only whether a value is
+  // currently saved for -peer-api-key/-raftd-token - the raw value
+  // itself is never returned here or anywhere else. See
+  // UpdateNodeConfigRequest's own doc comment for how to set or clear
+  // one.
+  bool peer_api_key_set = 29;
+  bool raftd_token_set = 30;
+
+  // tls_cert/tls_key mirror their like-named flags - file paths, not
+  // secrets themselves (the key file's own content is the secret, same
+  // posture as cloudflare_token_file below).
+  string tls_cert = 31;
+  string tls_key = 32;
+
+  // cloudflare_token_file/cloudflare_zone_id/cloudflare_tunnel_id/
+  // cloudflare_tunnel_credentials_file mirror ADR-0063's four
+  // like-named flags. cloudflare_token_file is a path, never the raw
+  // token.
+  string cloudflare_token_file = 33;
+  string cloudflare_zone_id = 34;
+  string cloudflare_tunnel_id = 35;
+  string cloudflare_tunnel_credentials_file = 36;
 }
 
 message NetworkInterface {
@@ -982,6 +1063,59 @@ message UpdateNodeConfigRequest {
   // dhcp_dns_server is persisted with the other node-local network
   // settings and takes effect on this node's next managerd restart.
   string dhcp_dns_server = 4;
+
+  // See GetNodeConfigResponse's own doc comments (fields 8-36 there)
+  // for what each of the following means - field numbers deliberately
+  // match across both messages where the same setting appears in both,
+  // for readability, though request/response numbering isn't required
+  // to match in protobuf.
+  string zfs_base = 8;
+  string bhyve_prefix = 9;
+  string iso_dir = 10;
+  string jail_prefix = 11;
+  string jail_mount_base = 12;
+
+  // Duration fields are submitted as plain strings parseable by Go's
+  // time.ParseDuration (e.g. "30s", "1h") - rejected with a clear error
+  // if malformed, rather than silently saved and only failing the next
+  // time managerd starts.
+  string reconcile_interval = 13;
+  string assumption_check_interval = 14;
+  string assumption_heartbeat_interval = 15;
+  string assumption_stale_after = 16;
+  string assumption_run_deadline = 17;
+  string assumption_history_max_age = 18;
+
+  int32 assumption_history_limit = 19;
+  string bhyve_bootrom = 20;
+  string bhyve_bridge = 21;
+  uint64 disk_size_mb = 22;
+  uint64 jail_disk_size_mb = 23;
+  optional bool hast_enabled = 24;
+  optional bool jail_console_enabled = 25;
+  optional bool peer_tls = 26;
+  string peer_managerd_port = 27;
+  string peer_tls_hostname_map = 28;
+
+  // peer_api_key/raftd_token, if non-empty, become the new saved
+  // value - write-only, mirroring the Users page's own "leave blank to
+  // keep current" password-change convention. An empty value here
+  // means "leave whatever is currently saved unchanged," not "clear
+  // it" - use clear_peer_api_key/clear_raftd_token to actually clear
+  // one (mirroring SetVMCloudflareExposure's own explicit-clear
+  // pattern rather than overloading an empty string to mean two
+  // different things).
+  string peer_api_key = 37;
+  bool clear_peer_api_key = 38;
+  string raftd_token = 39;
+  bool clear_raftd_token = 40;
+
+  string tls_cert = 31;
+  string tls_key = 32;
+  string cloudflare_token_file = 33;
+  string cloudflare_zone_id = 34;
+  string cloudflare_tunnel_id = 35;
+  string cloudflare_tunnel_credentials_file = 36;
 }
 
 message UpdateNodeConfigResponse {
