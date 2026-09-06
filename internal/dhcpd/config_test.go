@@ -137,10 +137,20 @@ func TestRenderConfig_RejectsInvalidSubnet(t *testing.T) {
 	}
 }
 
-func TestRenderConfig_RejectsLargerThanSlash24(t *testing.T) {
-	_, err := RenderConfig([]NetworkScope{{Bridge: "br0", Subnet: "10.60.0.0/16"}})
-	if err == nil {
-		t.Errorf("RenderConfig() = nil error, want one for a subnet larger than /24")
+// TestRenderConfig_SupportsLargerThanSlash24 is the regression test for
+// a previously-real limitation: RenderConfig used to reject any subnet
+// larger than /24 outright (dhcpRange only varied the last octet).
+// internal/raft's allocateIP already used full 32-bit arithmetic for
+// the same problem, so this was the one remaining place actually
+// blocking a larger managed network - fixed by generalizing dhcpRange
+// the same way.
+func TestRenderConfig_SupportsLargerThanSlash24(t *testing.T) {
+	body, err := RenderConfig([]NetworkScope{{Bridge: "br0", Subnet: "10.60.0.0/16"}})
+	if err != nil {
+		t.Fatalf("RenderConfig() error = %v, want a /16 subnet to be accepted", err)
+	}
+	if !strings.Contains(body, "dhcp-range=10.60.0.2,10.60.255.254,255.255.0.0,12h") {
+		t.Errorf("RenderConfig() = %q, want a dhcp-range spanning the full /16", body)
 	}
 }
 
@@ -203,6 +213,33 @@ func TestDHCPRange_SmallerSubnet(t *testing.T) {
 	}
 	if start != "192.168.5.2" || end != "192.168.5.14" || mask != "255.255.255.240" {
 		t.Errorf("dhcpRange(/28) = (%q, %q, %q), want (192.168.5.2, 192.168.5.14, 255.255.255.240)", start, end, mask)
+	}
+}
+
+// TestDHCPRange_LargerThanSlash24 covers a subnet spanning multiple
+// octets of host bits (crossing a third-octet boundary), which the old
+// single-octet arithmetic could never have computed correctly even if
+// its explicit size check had been removed.
+func TestDHCPRange_LargerThanSlash24(t *testing.T) {
+	start, end, mask, err := dhcpRange("10.60.0.0/20")
+	if err != nil {
+		t.Fatalf("dhcpRange() error: %v", err)
+	}
+	if start != "10.60.0.2" || end != "10.60.15.254" || mask != "255.255.240.0" {
+		t.Errorf("dhcpRange(/20) = (%q, %q, %q), want (10.60.0.2, 10.60.15.254, 255.255.240.0)", start, end, mask)
+	}
+}
+
+// TestDHCPRange_MinimalSubnet covers the smallest subnet that can still
+// serve any DHCP range at all (a /30: network, gateway, one usable
+// host, broadcast) - start and end collapse to the same single address.
+func TestDHCPRange_MinimalSubnet(t *testing.T) {
+	start, end, mask, err := dhcpRange("10.60.0.0/30")
+	if err != nil {
+		t.Fatalf("dhcpRange() error: %v", err)
+	}
+	if start != "10.60.0.2" || end != "10.60.0.2" || mask != "255.255.255.252" {
+		t.Errorf("dhcpRange(/30) = (%q, %q, %q), want (10.60.0.2, 10.60.0.2, 255.255.255.252)", start, end, mask)
 	}
 }
 
