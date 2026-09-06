@@ -139,7 +139,17 @@ func run() error {
 	// credential.
 	peers := manager.NewPeerReporter(os.Getenv("APIARY_MANAGER_API_KEY"), *peerTLS, nil)
 
-	srv, err := frontend.NewServer(rpcpb.NewManagerServiceClient(conn), auth, roleMap, peers, *peerHostnameSuffix, *peerManagerPort, frontend.UnixPasswordSetter{})
+	// Validated before NewServer, not after, so the session cookie's
+	// Secure flag (set from tlsEnabled - see NewServer/handleLogin) is
+	// never wrong for a moment: a cookie issued as non-Secure at
+	// construction time could later cross a plaintext channel even if
+	// serving is fixed to reject a mismatched cert/key pair afterward.
+	tlsEnabled := *tlsCert != "" || *tlsKey != ""
+	if tlsEnabled && (*tlsCert == "" || *tlsKey == "") {
+		return fmt.Errorf("both -tls-cert and -tls-key must be set together")
+	}
+
+	srv, err := frontend.NewServer(rpcpb.NewManagerServiceClient(conn), auth, roleMap, peers, *peerHostnameSuffix, *peerManagerPort, frontend.UnixPasswordSetter{}, tlsEnabled)
 	if err != nil {
 		return fmt.Errorf("creating frontend server: %w", err)
 	}
@@ -149,11 +159,8 @@ func run() error {
 		log.Printf("frontend: no login configured (set -pam-service/-role-map to require one)")
 	}
 
-	log.Printf("frontend: listening on %s (manager-addr=%s, manager-tls=%v, tls=%v)", *httpAddr, *managerAddr, *managerTLS, *tlsCert != "")
-	if *tlsCert != "" || *tlsKey != "" {
-		if *tlsCert == "" || *tlsKey == "" {
-			return fmt.Errorf("both -tls-cert and -tls-key must be set together")
-		}
+	log.Printf("frontend: listening on %s (manager-addr=%s, manager-tls=%v, tls=%v)", *httpAddr, *managerAddr, *managerTLS, tlsEnabled)
+	if tlsEnabled {
 		return http.ListenAndServeTLS(*httpAddr, *tlsCert, *tlsKey, srv)
 	}
 	return http.ListenAndServe(*httpAddr, srv)

@@ -10,6 +10,8 @@ package nodeconfig
 
 import (
 	"encoding/json"
+	"fmt"
+	"net"
 	"os"
 )
 
@@ -41,9 +43,17 @@ type Config struct {
 }
 
 // Manager reads/writes Config to a local file. Like internal/isostore,
-// it does no validation of the values themselves (e.g. that Uplink
-// names a real interface) - that's surfaced naturally the next time
-// managerd starts and internal/vlan/internal/pf actually try to use it.
+// it does no validation of *semantic* correctness (e.g. that Uplink
+// names an interface that actually exists) - that's surfaced naturally
+// the next time managerd starts and internal/vlan/internal/pf actually
+// try to use it. It does validate that each value is *safe*, though
+// (see Save): Uplink/NATUplink/DNSServer are rendered verbatim into
+// generated dnsmasq.conf/pf rules (internal/dhcpd.RenderConfig,
+// internal/pf.Manager.ApplyNAT) with no escaping of their own, so an
+// unvalidated newline here previously let an Admin inject arbitrary
+// dnsmasq/pf directives via UpdateNodeConfig - the same class of bug
+// internal/raft.FSM's validResourceID/validInterfaceName close for
+// raft-replicated VM/jail/network fields.
 type Manager struct {
 	// Path is where the config file is read from/written to. Defaults
 	// to DefaultPath if empty.
@@ -80,9 +90,46 @@ func (m *Manager) Load() (Config, error) {
 // only one field, the same convention internal/hast's WriteConfig and
 // internal/dhcpd's RenderConfig already use for their own config files.
 func (m *Manager) Save(cfg Config) error {
+	if err := validate(cfg); err != nil {
+		return err
+	}
 	body, err := json.MarshalIndent(cfg, "", "  ")
 	if err != nil {
 		return err
 	}
 	return os.WriteFile(m.path(), body, 0o644)
+}
+
+// validate rejects a value that would be unsafe to interpolate into
+// generated configuration, without judging whether it's semantically
+// correct (see the Manager doc comment above).
+func validate(cfg Config) error {
+	if cfg.Uplink != "" && !validInterfaceName(cfg.Uplink) {
+		return fmt.Errorf("nodeconfig: invalid uplink %q: must be a plain interface name (alphanumerics and '-', max 15 chars)", cfg.Uplink)
+	}
+	if cfg.NATUplink != "" && !validInterfaceName(cfg.NATUplink) {
+		return fmt.Errorf("nodeconfig: invalid nat_uplink %q: must be a plain interface name (alphanumerics and '-', max 15 chars)", cfg.NATUplink)
+	}
+	if cfg.DNSServer != "" && net.ParseIP(cfg.DNSServer) == nil {
+		return fmt.Errorf("nodeconfig: invalid dhcp_dns_server %q: must be a plain IP address", cfg.DNSServer)
+	}
+	return nil
+}
+
+// validInterfaceName mirrors internal/raft.FSM's own unexported
+// function of the same name and rationale (see its doc comment) -
+// duplicated rather than shared across an otherwise-unrelated package
+// boundary, the same "each package validates its own written format"
+// convention internal/jail and internal/isostore already follow
+// independently for their own name checks.
+func validInterfaceName(name string) bool {
+	if len(name) > 15 {
+		return false
+	}
+	for _, r := range name {
+		if !(r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '-') {
+			return false
+		}
+	}
+	return true
 }

@@ -6,6 +6,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/url"
 	"sync"
 	"time"
 
@@ -20,15 +21,34 @@ import (
 const consoleDialTimeout = 5 * time.Second
 
 // wsUpgrader upgrades the console's HTTP connection to a WebSocket.
-// CheckOrigin is permissive: this endpoint is reached only through the
-// console page this same server renders, on the same local-network
-// deployment every other route in this UI already assumes (see
-// ADR-0014's/ADR-0019's consequences on authentication) - no stricter
-// than the rest of the UI's own trust model.
+// CheckOrigin rejects a cross-origin WebSocket handshake rather than
+// accepting every origin - a 2026-09-06 security-audit finding noted
+// that accepting any origin here is the classic cross-site WebSocket
+// hijacking setup, and that this endpoint's only real protection
+// against it was the session cookie's SameSite=Lax attribute happening
+// to block the cookie on a cross-site request - a defense living in a
+// different file (server.go) than this one, which would silently stop
+// applying if that cookie attribute ever changed. checkConsoleOrigin
+// enforces the check directly here instead of relying on that
+// incidental protection.
 var wsUpgrader = websocket.Upgrader{
 	ReadBufferSize:  32 * 1024,
 	WriteBufferSize: 32 * 1024,
-	CheckOrigin:     func(r *http.Request) bool { return true },
+	CheckOrigin:     checkConsoleOrigin,
+}
+
+// checkConsoleOrigin allows a same-origin WebSocket handshake (no
+// Origin header at all, e.g. a non-browser client or an older browser
+// that omits it, is also allowed - matching gorilla/websocket's own
+// default CheckOrigin behavior for that case) and rejects anything
+// naming a different origin than the request's own Host.
+func checkConsoleOrigin(r *http.Request) bool {
+	origin := r.Header.Get("Origin")
+	if origin == "" {
+		return true
+	}
+	u, err := url.Parse(origin)
+	return err == nil && u.Host == r.Host
 }
 
 // resolveConsole calls managerd's GetVMConsole and folds every failure

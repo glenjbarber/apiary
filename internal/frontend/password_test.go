@@ -54,7 +54,7 @@ func (f *fakePasswordSetter) SetPassword(username, newPassword string) error {
 
 func newTestServerWithRoles(t *testing.T, roleMap map[string]manager.Role, auth pam.Authenticator, passwords PasswordSetter) *Server {
 	t.Helper()
-	s, err := NewServer(&fakeClient{}, auth, roleMap, nil, "", "", passwords)
+	s, err := NewServer(&fakeClient{}, auth, roleMap, nil, "", "", passwords, false)
 	if err != nil {
 		t.Fatalf("NewServer() error: %v", err)
 	}

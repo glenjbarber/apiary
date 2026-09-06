@@ -160,6 +160,42 @@ func TestRenderConfig_RejectsLeaseMissingFields(t *testing.T) {
 	}
 }
 
+// TestRenderConfig_RejectsNewlineInjection is the regression test for a
+// 2026-09-06 security-audit finding: every one of these four fields was
+// interpolated verbatim into dnsmasq.conf with no validation, anywhere
+// in the call chain, before this fix - a newline in any of them injects
+// an arbitrary additional dnsmasq directive, including dhcp-script=,
+// which dnsmasq runs as root on every lease event. Each case here is
+// one of the four vectors actually proven exploitable during the audit
+// (against NetworkDefinition.external_gateway/bridge_name via
+// CreateNetwork, a VM id used as a lease hostname via CreateVM, and
+// nodeconfig.DNSServer via UpdateNodeConfig) - validation has since been
+// added at each of those call sites (internal/raft.FSM,
+// internal/nodeconfig.Manager), but this is the defense-in-depth layer
+// that holds even if a future caller forgets.
+func TestRenderConfig_RejectsNewlineInjection(t *testing.T) {
+	const payload = "dhcp-script=/tmp/pwn.sh"
+	cases := []struct {
+		name  string
+		scope NetworkScope
+	}{
+		{"bridge_name", NetworkScope{Bridge: "apnet-x\n" + payload, Subnet: "10.60.0.0/24"}},
+		{"external_gateway", NetworkScope{Bridge: "apnet-x", Subnet: "10.60.0.0/24", Gateway: "10.60.0.1\n" + payload}},
+		{"dhcp_dns_server", NetworkScope{Bridge: "apnet-x", Subnet: "10.60.0.0/24", DNSServer: "10.62.0.1\n" + payload}},
+		{"vm id as lease hostname", NetworkScope{Bridge: "apnet-x", Subnet: "10.60.0.0/24", Leases: []Lease{
+			{MAC: "02:00:00:00:00:01", IP: "10.60.0.2", Hostname: "vm1\n" + payload},
+		}}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			body, err := RenderConfig([]NetworkScope{c.scope})
+			if err == nil {
+				t.Fatalf("RenderConfig() = nil error, want a rejection; body would have contained:\n%s", body)
+			}
+		})
+	}
+}
+
 func TestDHCPRange_SmallerSubnet(t *testing.T) {
 	start, end, mask, err := dhcpRange("192.168.5.0/28")
 	if err != nil {

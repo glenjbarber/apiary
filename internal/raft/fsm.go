@@ -122,9 +122,37 @@ func (f *FSM) Apply(log *raft.Log) interface{} {
 	}
 }
 
+// validResourceID reports whether id is safe to interpolate as a bare
+// token into a generated configuration file - dnsmasq.conf
+// (internal/dhcpd, as a lease hostname) and hast.conf (internal/hast, as
+// a resource name) both build config text directly from a VM/jail ID
+// with no escaping, on the assumption that an ID is a short, plain
+// token. Before this check, that assumption was enforced nowhere: only
+// non-emptiness and uniqueness were required here, so any Operator
+// could embed a newline in a VM ID and inject an arbitrary dnsmasq/hastd
+// directive - dnsmasq's dhcp-script= in particular runs as root on every
+// lease event. Mirrors internal/jail's own qualifiedName allowlist
+// (alphanumerics, '-', '_'), the one place in this codebase that
+// already got this right. Applied only at Create (not Update), since an
+// ID is otherwise immutable once assigned.
+func validResourceID(id string) bool {
+	if id == "" || len(id) > 64 {
+		return false
+	}
+	for _, r := range id {
+		if !(r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '-' || r == '_') {
+			return false
+		}
+	}
+	return true
+}
+
 func (f *FSM) applyCreateVM(index uint64, vm *internalpb.VMDefinition) *FSMApplyResult {
 	if vm.GetId() == "" {
 		return &FSMApplyResult{Index: index, Error: "CreateVM: id must be set"}
+	}
+	if !validResourceID(vm.GetId()) {
+		return &FSMApplyResult{Index: index, Error: fmt.Sprintf("CreateVM: invalid id %q: only alphanumerics, '-', and '_' are allowed (max 64 chars)", vm.GetId())}
 	}
 	if _, exists := f.vms[vm.GetId()]; exists {
 		return &FSMApplyResult{Index: index, Error: fmt.Sprintf("CreateVM: id %q already exists", vm.GetId())}
@@ -287,6 +315,13 @@ func (f *FSM) applySetVMCloudflareExposure(index uint64, req *internalpb.SetVMCl
 	if !exists {
 		return &FSMApplyResult{Index: index, Error: fmt.Sprintf("SetVMCloudflareExposure: id %q does not exist", req.GetId())}
 	}
+	// Hostname is rendered verbatim into cloudflared's generated YAML
+	// config (internal/cloudflare.RenderConfig) with no escaping - see
+	// validResourceID's rationale above for the same class of bug this
+	// closes (a newline here would inject an arbitrary ingress rule).
+	if req.GetHostname() != "" && !validHostname(req.GetHostname()) {
+		return &FSMApplyResult{Index: index, Error: fmt.Sprintf("SetVMCloudflareExposure: invalid hostname %q: only alphanumerics, '-', and '.' are allowed (max 255 chars)", req.GetHostname())}
+	}
 	updated := proto.Clone(vm).(*internalpb.VMDefinition)
 	updated.CloudflareHostname = req.GetHostname()
 	updated.CloudflarePort = req.GetPort()
@@ -332,6 +367,9 @@ func (f *FSM) applyPurgeVM(index uint64, id string) *FSMApplyResult {
 func (f *FSM) applyCreateJail(index uint64, jail *internalpb.JailDefinition) *FSMApplyResult {
 	if jail.GetId() == "" {
 		return &FSMApplyResult{Index: index, Error: "CreateJail: id must be set"}
+	}
+	if !validResourceID(jail.GetId()) {
+		return &FSMApplyResult{Index: index, Error: fmt.Sprintf("CreateJail: invalid id %q: only alphanumerics, '-', and '_' are allowed (max 64 chars)", jail.GetId())}
 	}
 	if _, exists := f.jails[jail.GetId()]; exists {
 		return &FSMApplyResult{Index: index, Error: fmt.Sprintf("CreateJail: id %q already exists", jail.GetId())}
@@ -432,14 +470,70 @@ func (f *FSM) applyCreateNetwork(index uint64, network *internalpb.NetworkDefini
 	if network.GetId() == "" {
 		return &FSMApplyResult{Index: index, Error: "CreateNetwork: id must be set"}
 	}
+	if !validResourceID(network.GetId()) {
+		return &FSMApplyResult{Index: index, Error: fmt.Sprintf("CreateNetwork: invalid id %q: only alphanumerics, '-', and '_' are allowed (max 64 chars)", network.GetId())}
+	}
 	if _, exists := f.networks[network.GetId()]; exists {
 		return &FSMApplyResult{Index: index, Error: fmt.Sprintf("CreateNetwork: id %q already exists", network.GetId())}
 	}
 	if _, _, err := net.ParseCIDR(network.GetSubnet()); err != nil {
 		return &FSMApplyResult{Index: index, Error: fmt.Sprintf("CreateNetwork: invalid subnet %q: %v", network.GetSubnet(), err)}
 	}
+	// bridge_name and external_gateway are both rendered verbatim into
+	// generated dnsmasq.conf (internal/dhcpd.RenderConfig, as an
+	// interface= line and a dhcp-option=...,3,<gateway> line
+	// respectively) - validated here for the same reason validResourceID
+	// exists: an unvalidated newline in either previously let an
+	// Operator inject arbitrary dnsmasq directives. bridge_name doubles
+	// as a real FreeBSD interface name (see ADR-0022's own 15-usable-
+	// character discovery), so it gets the stricter interface-name check
+	// rather than validResourceID's 64-char id allowance.
+	if network.GetBridgeName() != "" && !validInterfaceName(network.GetBridgeName()) {
+		return &FSMApplyResult{Index: index, Error: fmt.Sprintf("CreateNetwork: invalid bridge_name %q: must be a plain interface name (alphanumerics and '-', max 15 chars)", network.GetBridgeName())}
+	}
+	if network.GetExternalGateway() != "" && net.ParseIP(network.GetExternalGateway()) == nil {
+		return &FSMApplyResult{Index: index, Error: fmt.Sprintf("CreateNetwork: invalid external_gateway %q: must be a plain IP address", network.GetExternalGateway())}
+	}
 	f.networks[network.GetId()] = network
 	return &FSMApplyResult{Index: index, Network: network}
+}
+
+// validInterfaceName reports whether name is safe to both interpolate
+// into generated configuration (dnsmasq.conf's interface=/pf's nat-to)
+// and pass to ifconfig(8)/pfctl(8) as a literal FreeBSD interface name.
+// FreeBSD interface names are null-padded into a 16-byte kernel buffer,
+// leaving 15 usable characters - see ADR-0022's own real discovery of
+// this limit, previously enforced only by luck for names Apiary
+// generates itself (e.g. "apnet-<8 hex chars>"), never for an operator-
+// supplied bridge_name or node-config uplink value.
+func validInterfaceName(name string) bool {
+	if name == "" || len(name) > 15 {
+		return false
+	}
+	for _, r := range name {
+		if !(r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '-') {
+			return false
+		}
+	}
+	return true
+}
+
+// validHostname reports whether s is safe to interpolate as a bare
+// hostname into cloudflared's generated YAML config
+// (internal/cloudflare.RenderConfig) - the same interpolation-safety
+// concern validResourceID/validInterfaceName exist for, not a real DNS
+// validity check (a hostname that fails real DNS resolution just fails
+// later, harmlessly, when cloudflared can't route it).
+func validHostname(s string) bool {
+	if s == "" || len(s) > 255 {
+		return false
+	}
+	for _, r := range s {
+		if !(r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '-' || r == '.') {
+			return false
+		}
+	}
+	return true
 }
 
 // applyDeleteNetwork removes a NetworkDefinition outright - no soft-

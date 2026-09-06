@@ -72,6 +72,19 @@ func RenderConfig(scopes []NetworkScope) (string, error) {
 		if s.Bridge == "" {
 			return "", fmt.Errorf("dhcpd: scope subnet %q: bridge must not be empty", s.Subnet)
 		}
+		// Defense in depth: every caller-supplied string reaching this
+		// renderer is rendered into dnsmasq.conf with no escaping of its
+		// own, so a newline in any of them injects an arbitrary
+		// additional directive - confirmed exploitable via
+		// external_gateway/bridge_name (internal/raft.FSM's
+		// CreateNetwork), a VM id used as a lease hostname (CreateVM),
+		// and DNSServer (internal/nodeconfig.UpdateNodeConfig) before
+		// validation was added at each of those call sites. This check
+		// doesn't know whether its caller already validated anything, so
+		// it never trusts that and rejects unsafely-shaped input itself.
+		if unsafeConfigValue(s.Bridge) || unsafeConfigValue(s.DNSServer) || unsafeConfigValue(s.Gateway) {
+			return "", fmt.Errorf("dhcpd: scope %q: bridge/DNSServer/Gateway must not contain newlines", s.Bridge)
+		}
 		start, end, netmask, err := dhcpRange(s.Subnet)
 		if err != nil {
 			return "", err
@@ -105,11 +118,23 @@ func RenderConfig(scopes []NetworkScope) (string, error) {
 			if name == "" {
 				name = "*"
 			}
+			if unsafeConfigValue(l.MAC) || unsafeConfigValue(l.IP) || unsafeConfigValue(name) {
+				return "", fmt.Errorf("dhcpd: scope %q: lease MAC/IP/hostname must not contain newlines", s.Bridge)
+			}
 			fmt.Fprintf(&b, "dhcp-host=%s,%s,%s\n", l.MAC, l.IP, name)
 		}
 		b.WriteString("\n")
 	}
 	return b.String(), nil
+}
+
+// unsafeConfigValue reports whether s contains a newline or carriage
+// return, either of which would let it inject an additional dnsmasq
+// directive of its own once written into dnsmasq.conf - see the
+// RenderConfig comment above for why this check exists independently of
+// whatever validation a caller may already have done.
+func unsafeConfigValue(s string) bool {
+	return strings.ContainsAny(s, "\n\r")
 }
 
 // filterStaleLeases returns leaseFileBody (dnsmasq's own lease-database

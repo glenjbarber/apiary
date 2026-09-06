@@ -114,7 +114,7 @@ func TestServer_ClusterOverviewPage_UnreachableNodeShowsError(t *testing.T) {
 		statusResp: &rpcpb.StatusResponse{ManagerNodeId: "apiarium", KnownNodeIds: []string{"apiarium", "freebsd-apiary"}},
 	}
 	peers := &fakePeerHostStatsClient{err: errors.New("connection refused")}
-	s, err := NewServer(client, nil, nil, peers, ".apiary.work", "17700", nil)
+	s, err := NewServer(client, nil, nil, peers, ".apiary.work", "17700", nil, false)
 	if err != nil {
 		t.Fatalf("NewServer() error: %v", err)
 	}
@@ -151,7 +151,7 @@ func TestHandleClusterOverviewPage_HostStatsSucceedsStatusFails(t *testing.T) {
 		},
 	}}
 	peers := &fakePeerHostStatsClient{statusErr: errors.New("connection refused")}
-	s, err := NewServer(client, nil, nil, peers, ".apiary.work", "17700", nil)
+	s, err := NewServer(client, nil, nil, peers, ".apiary.work", "17700", nil, false)
 	if err != nil {
 		t.Fatalf("NewServer() error: %v", err)
 	}
@@ -183,7 +183,7 @@ func TestHandleClusterOverviewPage_StatusSucceedsHostStatsFails(t *testing.T) {
 		},
 	}}
 	peers := &fakePeerHostStatsClient{err: errors.New("connection refused"), statusResp: &rpcpb.StatusResponse{RaftReachable: true}}
-	s, err := NewServer(client, nil, nil, peers, ".apiary.work", "17700", nil)
+	s, err := NewServer(client, nil, nil, peers, ".apiary.work", "17700", nil, false)
 	if err != nil {
 		t.Fatalf("NewServer() error: %v", err)
 	}
@@ -208,7 +208,7 @@ func TestHandleClusterOverviewPage_AnchorRaftUnreachableMakesEveryRowMembershipU
 		RaftReachable: false,
 	}}
 	peers := &fakePeerHostStatsClient{}
-	s, err := NewServer(client, nil, nil, peers, ".apiary.work", "17700", nil)
+	s, err := NewServer(client, nil, nil, peers, ".apiary.work", "17700", nil, false)
 	if err != nil {
 		t.Fatalf("NewServer() error: %v", err)
 	}
@@ -231,7 +231,7 @@ func TestHandleClusterOverviewPage_LocalNodeNoSecondStatusDial(t *testing.T) {
 		Members:       []*rpcpb.RaftMember{{NodeId: "apiarium", Suffrage: "Voter"}},
 	}}
 	peers := &fakePeerHostStatsClient{statusErr: errors.New("must never be called for the local node")}
-	s, err := NewServer(client, nil, nil, peers, ".apiary.work", "17700", nil)
+	s, err := NewServer(client, nil, nil, peers, ".apiary.work", "17700", nil, false)
 	if err != nil {
 		t.Fatalf("NewServer() error: %v", err)
 	}
@@ -254,7 +254,7 @@ func TestServer_HostPage_FetchesFromPeerWhenNotLocal(t *testing.T) {
 		hostStatsResp: &rpcpb.HostStatsResponse{NodeId: "apiarium"},
 	}
 	peers := &fakePeerHostStatsClient{resp: &rpcpb.HostStatsResponse{NodeId: "freebsd-apiary", Cpu: &rpcpb.CPUStats{Cores: 4}}}
-	s, err := NewServer(client, nil, nil, peers, ".apiary.work", "17700", nil)
+	s, err := NewServer(client, nil, nil, peers, ".apiary.work", "17700", nil, false)
 	if err != nil {
 		t.Fatalf("NewServer() error: %v", err)
 	}
@@ -277,7 +277,7 @@ func TestServer_HostPage_LocalNodeUsesLocalClientNotPeer(t *testing.T) {
 		hostStatsResp: &rpcpb.HostStatsResponse{NodeId: "apiarium", Cpu: &rpcpb.CPUStats{Cores: 8}},
 	}
 	peers := &fakePeerHostStatsClient{}
-	s, err := NewServer(client, nil, nil, peers, ".apiary.work", "17700", nil)
+	s, err := NewServer(client, nil, nil, peers, ".apiary.work", "17700", nil, false)
 	if err != nil {
 		t.Fatalf("NewServer() error: %v", err)
 	}

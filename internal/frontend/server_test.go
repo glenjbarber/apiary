@@ -478,7 +478,7 @@ func (f fakeAuthenticator) Authenticate(username, password string) (bool, error)
 
 func newTestServer(t *testing.T, client *fakeClient) *Server {
 	t.Helper()
-	s, err := NewServer(client, nil, nil, nil, "", "", nil)
+	s, err := NewServer(client, nil, nil, nil, "", "", nil, false)
 	if err != nil {
 		t.Fatalf("NewServer() error: %v", err)
 	}
@@ -487,7 +487,7 @@ func newTestServer(t *testing.T, client *fakeClient) *Server {
 
 func newTestServerWithAuth(t *testing.T, client *fakeClient, user, pass string) *Server {
 	t.Helper()
-	s, err := NewServer(client, fakeAuthenticator{user: user, pass: pass}, map[string]manager.Role{user: manager.RoleAdmin}, nil, "", "", nil)
+	s, err := NewServer(client, fakeAuthenticator{user: user, pass: pass}, map[string]manager.Role{user: manager.RoleAdmin}, nil, "", "", nil, false)
 	if err != nil {
 		t.Fatalf("NewServer() error: %v", err)
 	}
@@ -768,7 +768,7 @@ func TestServer_VMDetailPage(t *testing.T) {
 		NetworkId: "servers", IpAddress: "10.60.0.10", MacAddress: "02:00:00:00:00:10",
 		FirewallRules: []*rpcpb.FirewallRule{{Direction: "in", Action: "pass", Protocol: "tcp", PortRange: "22"}},
 	}}}
-	s, err := NewServer(client, nil, nil, nil, "", "", nil)
+	s, err := NewServer(client, nil, nil, nil, "", "", nil, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -786,7 +786,7 @@ func TestServer_VMDetailPage(t *testing.T) {
 }
 
 func TestServer_VMDetailPage_NotFound(t *testing.T) {
-	s, err := NewServer(&fakeClient{}, nil, nil, nil, "", "", nil)
+	s, err := NewServer(&fakeClient{}, nil, nil, nil, "", "", nil, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -799,7 +799,7 @@ func TestServer_VMDetailPage_NotFound(t *testing.T) {
 
 func TestServer_ViewerDoesNotSeeOperatorOrAdminActions(t *testing.T) {
 	client := &fakeClient{listResp: &rpcpb.ListVMsResponse{Vms: []*rpcpb.VMDefinition{{Id: "vm-1"}}}}
-	s, err := NewServer(client, fakeAuthenticator{user: "viewer", pass: "secret"}, map[string]manager.Role{"viewer": manager.RoleViewer}, nil, "", "", nil)
+	s, err := NewServer(client, fakeAuthenticator{user: "viewer", pass: "secret"}, map[string]manager.Role{"viewer": manager.RoleViewer}, nil, "", "", nil, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1138,7 +1138,7 @@ func TestServer_NetworksPage_ShowsBridgeStatusByHive(t *testing.T) {
 		Networks: []*rpcpb.NetworkDefinition{{Id: "net-1", Subnet: "10.60.0.0/24"}},
 	}, statusResp: &rpcpb.StatusResponse{ManagerNodeId: "apiarium", KnownNodeIds: []string{"apiarium", "apiverse"}}, bridgeStatusResp: &rpcpb.GetLocalNetworkBridgeStatusResponse{BridgeStatus: "up"}}
 	peers := &fakePeerHostStatsClient{bridgeResp: &rpcpb.GetLocalNetworkBridgeStatusResponse{BridgeStatus: "down"}}
-	s, err := NewServer(client, nil, nil, peers, ".apiary.work", "17700", nil)
+	s, err := NewServer(client, nil, nil, peers, ".apiary.work", "17700", nil, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1290,7 +1290,7 @@ func TestServer_JailPanelRefresh(t *testing.T) {
 
 func TestServer_JailPanelViewerCannotDelete(t *testing.T) {
 	client := &fakeClient{listJailsResp: &rpcpb.ListJailsResponse{Jails: []*rpcpb.JailDefinition{{Id: "jail-1"}}}}
-	s, err := NewServer(client, fakeAuthenticator{user: "viewer", pass: "secret"}, map[string]manager.Role{"viewer": manager.RoleViewer}, nil, "", "", nil)
+	s, err := NewServer(client, fakeAuthenticator{user: "viewer", pass: "secret"}, map[string]manager.Role{"viewer": manager.RoleViewer}, nil, "", "", nil, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1754,7 +1754,7 @@ func TestServer_AuthEnabled_UnauthenticatedRequestRedirectsToLogin(t *testing.T)
 }
 
 func TestServer_AuthEnabled_UnauthenticatedFragmentDefaultsToHomeAfterLogin(t *testing.T) {
-	s, err := NewServer(&fakeClient{}, fakeAuthenticator{user: "viewer", pass: "secret"}, map[string]manager.Role{"viewer": manager.RoleViewer}, nil, "", "", nil)
+	s, err := NewServer(&fakeClient{}, fakeAuthenticator{user: "viewer", pass: "secret"}, map[string]manager.Role{"viewer": manager.RoleViewer}, nil, "", "", nil, false)
 	if err != nil {
 		t.Fatalf("NewServer() error: %v", err)
 	}
@@ -1837,6 +1837,39 @@ func TestServer_Login_CorrectCredentialsGrantsSessionAndRedirects(t *testing.T) 
 	}
 }
 
+// TestServer_Login_SessionCookieSecureFlagMatchesTLSEnabled is the
+// regression test for a 2026-09-06 security-audit finding: the session
+// cookie previously never set Secure at all, even when cmd/frontend was
+// actually configured to serve over TLS, so the cookie could be
+// replayed over a plaintext connection to the same host.
+func TestServer_Login_SessionCookieSecureFlagMatchesTLSEnabled(t *testing.T) {
+	for _, tlsEnabled := range []bool{false, true} {
+		s, err := NewServer(&fakeClient{}, fakeAuthenticator{user: "admin", pass: "secret"}, map[string]manager.Role{"admin": manager.RoleAdmin}, nil, "", "", nil, tlsEnabled)
+		if err != nil {
+			t.Fatalf("NewServer() error: %v", err)
+		}
+
+		form := url.Values{"username": {"admin"}, "password": {"secret"}}
+		req := httptest.NewRequest(http.MethodPost, "/login", strings.NewReader(form.Encode()))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		rec := httptest.NewRecorder()
+		s.ServeHTTP(rec, req)
+
+		var found bool
+		for _, c := range rec.Result().Cookies() {
+			if c.Name == sessionCookieName {
+				found = true
+				if c.Secure != tlsEnabled {
+					t.Errorf("tlsEnabled=%v: cookie Secure=%v, want %v", tlsEnabled, c.Secure, tlsEnabled)
+				}
+			}
+		}
+		if !found {
+			t.Fatalf("tlsEnabled=%v: no session cookie set", tlsEnabled)
+		}
+	}
+}
+
 func TestServer_Login_RedirectsToSafeNextURL(t *testing.T) {
 	s := newTestServerWithAuth(t, &fakeClient{}, "admin", "secret")
 
@@ -1854,7 +1887,14 @@ func TestServer_Login_RedirectsToSafeNextURL(t *testing.T) {
 func TestServer_Login_RejectsOpenRedirectNextURL(t *testing.T) {
 	s := newTestServerWithAuth(t, &fakeClient{}, "admin", "secret")
 
-	for _, next := range []string{"//evil.com", "https://evil.com", "http://evil.com/x"} {
+	// `/\evil.com` is the regression case for a 2026-09-06 security-audit
+	// finding: it starts with a single "/" and contains no "://", so the
+	// old prefix/substring-only guard let it through - but per the
+	// WHATWG URL spec, browsers normalize a leading backslash to a
+	// forward slash in special-scheme URLs, making it behave exactly
+	// like "//evil.com" once a real browser follows the redirect
+	// (confirmed live during the audit with an actual browser).
+	for _, next := range []string{"//evil.com", "https://evil.com", "http://evil.com/x", `/\evil.com`, `/\/evil.com`} {
 		form := url.Values{"username": {"admin"}, "password": {"secret"}, "next": {next}}
 		req := httptest.NewRequest(http.MethodPost, "/login", strings.NewReader(form.Encode()))
 		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
@@ -1927,7 +1967,7 @@ func TestServer_Login_UnmappedUserIsRejectedDespiteValidCredentials(t *testing.T
 		// "eve" deliberately absent - a valid PAM login for a real
 		// account nobody has granted an Apiary role to.
 		"admin": manager.RoleAdmin,
-	}, nil, "", "", nil)
+	}, nil, "", "", nil, false)
 	if err != nil {
 		t.Fatalf("NewServer() error: %v", err)
 	}
@@ -1954,7 +1994,7 @@ func TestServer_Login_UnmappedUserIsRejectedDespiteValidCredentials(t *testing.T
 func TestServer_RoleGate_ViewerCannotReachOperatorRoute(t *testing.T) {
 	s, err := NewServer(&fakeClient{}, fakeAuthenticator{user: "carol", pass: "secret"}, map[string]manager.Role{
 		"carol": manager.RoleViewer,
-	}, nil, "", "", nil)
+	}, nil, "", "", nil, false)
 	if err != nil {
 		t.Fatalf("NewServer() error: %v", err)
 	}
@@ -1973,7 +2013,7 @@ func TestServer_RoleGate_ViewerCannotReachOperatorRoute(t *testing.T) {
 func TestServer_RoleGate_ViewerCanReachReadOnlyRoute(t *testing.T) {
 	s, err := NewServer(&fakeClient{}, fakeAuthenticator{user: "carol", pass: "secret"}, map[string]manager.Role{
 		"carol": manager.RoleViewer,
-	}, nil, "", "", nil)
+	}, nil, "", "", nil, false)
 	if err != nil {
 		t.Fatalf("NewServer() error: %v", err)
 	}
@@ -1992,7 +2032,7 @@ func TestServer_RoleGate_ViewerCanReachReadOnlyRoute(t *testing.T) {
 func TestServer_RoleGate_OperatorCannotReachAdminRoute(t *testing.T) {
 	s, err := NewServer(&fakeClient{}, fakeAuthenticator{user: "bob", pass: "secret"}, map[string]manager.Role{
 		"bob": manager.RoleOperator,
-	}, nil, "", "", nil)
+	}, nil, "", "", nil, false)
 	if err != nil {
 		t.Fatalf("NewServer() error: %v", err)
 	}
@@ -2011,7 +2051,7 @@ func TestServer_RoleGate_OperatorCannotReachAdminRoute(t *testing.T) {
 func TestServer_RoleGate_OperatorCanReachOperatorRoute(t *testing.T) {
 	s, err := NewServer(&fakeClient{}, fakeAuthenticator{user: "bob", pass: "secret"}, map[string]manager.Role{
 		"bob": manager.RoleOperator,
-	}, nil, "", "", nil)
+	}, nil, "", "", nil, false)
 	if err != nil {
 		t.Fatalf("NewServer() error: %v", err)
 	}

@@ -10,9 +10,12 @@ import (
 )
 
 func TestRenderConfig_IncludesCatchAllAndHTTPScheme(t *testing.T) {
-	got := RenderConfig("tunnel-1", "/etc/cloudflared/creds.json", []Ingress{
+	got, err := RenderConfig("tunnel-1", "/etc/cloudflared/creds.json", []Ingress{
 		{Hostname: "web.example.com", Address: "10.60.0.5:8080"},
 	})
+	if err != nil {
+		t.Fatalf("RenderConfig returned error: %v", err)
+	}
 	if !strings.Contains(got, "tunnel: tunnel-1") || !strings.Contains(got, "credentials-file: /etc/cloudflared/creds.json") {
 		t.Fatalf("config missing tunnel/credentials-file lines: %s", got)
 	}
@@ -28,16 +31,31 @@ func TestRenderConfig_IncludesCatchAllAndHTTPScheme(t *testing.T) {
 }
 
 func TestRenderConfig_DeterministicRegardlessOfInputOrder(t *testing.T) {
-	a := RenderConfig("t1", "creds.json", []Ingress{
+	a, err := RenderConfig("t1", "creds.json", []Ingress{
 		{Hostname: "b.example.com", Address: "10.0.0.2:80"},
 		{Hostname: "a.example.com", Address: "10.0.0.1:80"},
 	})
-	b := RenderConfig("t1", "creds.json", []Ingress{
+	if err != nil {
+		t.Fatalf("RenderConfig returned error: %v", err)
+	}
+	b, err := RenderConfig("t1", "creds.json", []Ingress{
 		{Hostname: "a.example.com", Address: "10.0.0.1:80"},
 		{Hostname: "b.example.com", Address: "10.0.0.2:80"},
 	})
+	if err != nil {
+		t.Fatalf("RenderConfig returned error: %v", err)
+	}
 	if a != b {
 		t.Fatalf("RenderConfig is not deterministic across input order:\na=%s\nb=%s", a, b)
+	}
+}
+
+func TestRenderConfig_RejectsNewlineInHostname(t *testing.T) {
+	_, err := RenderConfig("t1", "creds.json", []Ingress{
+		{Hostname: "evil.com\ndhcp-script=/tmp/pwn.sh", Address: "10.0.0.1:80"},
+	})
+	if err == nil {
+		t.Fatal("expected RenderConfig to reject a hostname containing a newline")
 	}
 }
 

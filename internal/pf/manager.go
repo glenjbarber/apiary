@@ -56,6 +56,14 @@ func (m *Manager) Flush(ctx context.Context, anchor string) error {
 // replace, not diff, matching Apply's own idempotent-reapply-every-tick
 // convention - safe to call unconditionally every reconcile tick.
 func (m *Manager) ApplyNAT(ctx context.Context, anchor, subnet, uplink string) error {
+	// Defense in depth: uplink is node-config data validated at
+	// UpdateNodeConfig (internal/nodeconfig.validate) or a managerd
+	// startup flag - but this function has no way to know that
+	// validation ran, so it rejects a newline itself rather than
+	// interpolating it unchecked into a ruleset pfctl then loads.
+	if strings.ContainsAny(uplink, "\n\r") || strings.ContainsAny(subnet, "\n\r") {
+		return fmt.Errorf("pf: uplink/subnet must not contain newlines")
+	}
 	body := fmt.Sprintf("match out on %s from %s to any nat-to (%s)\n", uplink, subnet, uplink)
 	_, err := runCmdStdin(ctx, body, "pfctl", "-a", anchor, "-f", "-")
 	return err

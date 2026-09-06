@@ -43,6 +43,16 @@ func RenderConfig(resources []Resource) (string, error) {
 		if r.Name == "" {
 			return "", fmt.Errorf("hast: resource name must not be empty")
 		}
+		// Defense in depth: r.Name is a raft-replicated VM/jail id
+		// (vm-<id>/jail-<id>), validated at creation by
+		// internal/raft.FSM's validResourceID - but this function has no
+		// way to know that validation ran, so it checks for itself
+		// before trusting the value into a "resource %s {" stanza that
+		// hastd then loads. A newline here previously let an unvalidated
+		// id inject arbitrary hast.conf stanzas.
+		if strings.ContainsAny(r.Name, "\n\r") {
+			return "", fmt.Errorf("hast: resource name %q must not contain newlines", r.Name)
+		}
 		if len(r.Nodes) != 2 {
 			return "", fmt.Errorf("hast: resource %q must have exactly 2 nodes, got %d", r.Name, len(r.Nodes))
 		}
@@ -51,6 +61,9 @@ func RenderConfig(resources []Resource) (string, error) {
 		for _, n := range r.Nodes {
 			if n.Name == "" || n.Local == "" || n.Remote == "" {
 				return "", fmt.Errorf("hast: resource %q: node Name, Local, and Remote must all be set", r.Name)
+			}
+			if strings.ContainsAny(n.Name+n.Local+n.Remote, "\n\r") {
+				return "", fmt.Errorf("hast: resource %q: node Name/Local/Remote must not contain newlines", r.Name)
 			}
 			fmt.Fprintf(&b, "  on %s {\n", n.Name)
 			fmt.Fprintf(&b, "    local %s\n", n.Local)

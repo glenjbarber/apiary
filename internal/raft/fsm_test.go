@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"io"
+	"strings"
 	"testing"
 
 	"github.com/hashicorp/raft"
@@ -80,6 +81,39 @@ func TestFSM_Apply_CreateVMDuplicateRejected(t *testing.T) {
 	// not.
 	if got := fsm.AppliedIndex(); got != 2 {
 		t.Errorf("AppliedIndex() = %d, want 2", got)
+	}
+}
+
+// TestFSM_Apply_CreateVMInvalidIDRejected is the regression test for a
+// 2026-09-06 security-audit finding: a VM id was only checked for
+// non-emptiness/uniqueness, but is later interpolated with no escaping
+// as a dnsmasq lease hostname (internal/dhcpd.RenderConfig) and a
+// hast.conf resource name (internal/hast.RenderConfig) - a newline in
+// the id let an Operator inject an arbitrary dnsmasq directive
+// (including dhcp-script=, which dnsmasq runs as root) or hast.conf
+// stanza. Proven directly against internal/dhcpd.RenderConfig during
+// the audit before this fix existed.
+func TestFSM_Apply_CreateVMInvalidIDRejected(t *testing.T) {
+	fsm := NewFSM()
+
+	cases := []string{
+		"vm-1\ndhcp-script=/tmp/pwn.sh",
+		"vm 1",                  // space
+		"vm-1/etc",              // slash
+		"",                      // handled by the separate empty-id check, included for completeness
+		strings.Repeat("a", 65), // over the 64-char limit
+	}
+	for _, id := range cases {
+		result := fsm.Apply(&raft.Log{Index: 1, Data: mustMarshalCommand(t, createVMCmd(id, "web-1"))})
+		if result.(*FSMApplyResult).Error == "" {
+			t.Errorf("id %q: Error = empty, want a rejection", id)
+		}
+	}
+
+	// A valid id must still be accepted.
+	result := fsm.Apply(&raft.Log{Index: 2, Data: mustMarshalCommand(t, createVMCmd("vm-1", "web-1"))})
+	if result.(*FSMApplyResult).Error != "" {
+		t.Errorf("valid id rejected: %q", result.(*FSMApplyResult).Error)
 	}
 }
 
@@ -198,6 +232,35 @@ func TestFSM_Apply_SetVMFirewallPaused_MissingIDIsError(t *testing.T) {
 
 	if result.(*FSMApplyResult).Error == "" {
 		t.Fatalf("Error = empty, want a missing-id rejection")
+	}
+}
+
+// TestFSM_Apply_SetVMCloudflareExposure_InvalidHostnameRejected is the
+// regression test for a 2026-09-06 security-audit finding: hostname was
+// entirely unvalidated, but is interpolated verbatim into cloudflared's
+// generated YAML config (internal/cloudflare.RenderConfig) - a newline
+// would inject an arbitrary ingress rule routing an attacker-chosen
+// public hostname to an arbitrary internal address.
+func TestFSM_Apply_SetVMCloudflareExposure_InvalidHostnameRejected(t *testing.T) {
+	fsm := NewFSM()
+	fsm.Apply(&raft.Log{Index: 1, Data: mustMarshalCommand(t, createVMCmd("vm-1", "web-1"))})
+
+	bad := &internalpb.Command{Op: &internalpb.Command_SetVmCloudflareExposure{SetVmCloudflareExposure: &internalpb.SetVMCloudflareExposure{
+		Id: "vm-1", Hostname: "evil.example.com\n  - hostname: internal.local\n    service: http://10.0.0.1:22", Port: 80,
+	}}}
+	if result := fsm.Apply(&raft.Log{Index: 2, Data: mustMarshalCommand(t, bad)}); result.(*FSMApplyResult).Error == "" {
+		t.Fatal("hostname with a newline: Error = empty, want a rejection")
+	}
+
+	good := &internalpb.Command{Op: &internalpb.Command_SetVmCloudflareExposure{SetVmCloudflareExposure: &internalpb.SetVMCloudflareExposure{
+		Id: "vm-1", Hostname: "web.example.com", Port: 80,
+	}}}
+	result := fsm.Apply(&raft.Log{Index: 3, Data: mustMarshalCommand(t, good)})
+	if result.(*FSMApplyResult).Error != "" {
+		t.Errorf("valid hostname rejected: %q", result.(*FSMApplyResult).Error)
+	}
+	if got := result.(*FSMApplyResult).VM.GetCloudflareHostname(); got != "web.example.com" {
+		t.Errorf("CloudflareHostname = %q, want web.example.com", got)
 	}
 }
 
@@ -378,6 +441,47 @@ func TestFSM_Apply_CreateNetworkInvalidSubnetRejected(t *testing.T) {
 
 	if result.(*FSMApplyResult).Error == "" {
 		t.Fatalf("Error = empty, want an invalid-subnet rejection")
+	}
+}
+
+// TestFSM_Apply_CreateNetworkInvalidBridgeNameOrGatewayRejected is the
+// regression test for a 2026-09-06 security-audit finding:
+// bridge_name/external_gateway were entirely unvalidated, but both are
+// interpolated verbatim into generated dnsmasq.conf
+// (internal/dhcpd.RenderConfig, as interface=/dhcp-option=...,3,<gw>
+// lines) - a newline in either let an Operator inject an arbitrary
+// dnsmasq directive. Proven directly against internal/dhcpd.RenderConfig
+// during the audit before this fix existed.
+func TestFSM_Apply_CreateNetworkInvalidBridgeNameOrGatewayRejected(t *testing.T) {
+	fsm := NewFSM()
+
+	badBridge := &internalpb.Command{Op: &internalpb.Command_CreateNetwork{CreateNetwork: &internalpb.CreateNetwork{
+		Network: &internalpb.NetworkDefinition{Id: "net-1", Subnet: "10.60.0.0/24", BridgeName: "apnet-x\ndhcp-script=/tmp/pwn.sh"},
+	}}}
+	if result := fsm.Apply(&raft.Log{Index: 1, Data: mustMarshalCommand(t, badBridge)}); result.(*FSMApplyResult).Error == "" {
+		t.Error("bridge_name with a newline: Error = empty, want a rejection")
+	}
+
+	badGateway := &internalpb.Command{Op: &internalpb.Command_CreateNetwork{CreateNetwork: &internalpb.CreateNetwork{
+		Network: &internalpb.NetworkDefinition{Id: "net-2", Subnet: "10.61.0.0/24", ExternalGateway: "10.61.0.1\ndhcp-script=/tmp/pwn.sh"},
+	}}}
+	if result := fsm.Apply(&raft.Log{Index: 2, Data: mustMarshalCommand(t, badGateway)}); result.(*FSMApplyResult).Error == "" {
+		t.Error("external_gateway with a newline: Error = empty, want a rejection")
+	}
+
+	badGatewayNotIP := &internalpb.Command{Op: &internalpb.Command_CreateNetwork{CreateNetwork: &internalpb.CreateNetwork{
+		Network: &internalpb.NetworkDefinition{Id: "net-3", Subnet: "10.62.0.0/24", ExternalGateway: "not-an-ip"},
+	}}}
+	if result := fsm.Apply(&raft.Log{Index: 3, Data: mustMarshalCommand(t, badGatewayNotIP)}); result.(*FSMApplyResult).Error == "" {
+		t.Error("external_gateway not an IP: Error = empty, want a rejection")
+	}
+
+	// A valid bridge_name/external_gateway must still be accepted.
+	good := &internalpb.Command{Op: &internalpb.Command_CreateNetwork{CreateNetwork: &internalpb.CreateNetwork{
+		Network: &internalpb.NetworkDefinition{Id: "net-4", Subnet: "10.63.0.0/24", BridgeName: "bridge12", ExternalGateway: "10.63.0.1"},
+	}}}
+	if result := fsm.Apply(&raft.Log{Index: 4, Data: mustMarshalCommand(t, good)}); result.(*FSMApplyResult).Error != "" {
+		t.Errorf("valid bridge_name/external_gateway rejected: %q", result.(*FSMApplyResult).Error)
 	}
 }
 
@@ -747,6 +851,18 @@ func TestFSM_Apply_CreateJailMissingIDRejected(t *testing.T) {
 
 	if result.(*FSMApplyResult).Error == "" {
 		t.Fatalf("Error = empty, want a missing-id rejection")
+	}
+}
+
+// TestFSM_Apply_CreateJailInvalidIDRejected mirrors
+// TestFSM_Apply_CreateVMInvalidIDRejected - a jail id is interpolated
+// as a hast.conf resource name the same way a VM id is.
+func TestFSM_Apply_CreateJailInvalidIDRejected(t *testing.T) {
+	fsm := NewFSM()
+
+	result := fsm.Apply(&raft.Log{Index: 1, Data: mustMarshalCommand(t, createJailCmd("jail-1\nresource evil {}", "a"))})
+	if result.(*FSMApplyResult).Error == "" {
+		t.Fatalf("Error = empty, want a rejection for a newline in the id")
 	}
 }
 

@@ -24,7 +24,7 @@ func TestServer_AssumptionsPage_FanOut_OneErrorsOneSucceeds(t *testing.T) {
 		},
 	}
 	peers := &fakePeerHostStatsClient{err: errors.New("connection refused")}
-	s, err := NewServer(client, nil, nil, peers, ".apiary.work", "17700", nil)
+	s, err := NewServer(client, nil, nil, peers, ".apiary.work", "17700", nil, false)
 	if err != nil {
 		t.Fatalf("NewServer() error: %v", err)
 	}

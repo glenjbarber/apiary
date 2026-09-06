@@ -120,7 +120,7 @@ func TestServer_ConsoleWS_ProxiesBytesToAndFromVNCEndpoint(t *testing.T) {
 	client := &fakeClient{
 		getVMConsoleResp: &rpcpb.GetVMConsoleResponse{Available: true, Host: host, Port: uint32(port)},
 	}
-	s, err := NewServer(client, nil, nil, nil, "", "", nil)
+	s, err := NewServer(client, nil, nil, nil, "", "", nil, false)
 	if err != nil {
 		t.Fatalf("NewServer() error: %v", err)
 	}
@@ -149,9 +149,63 @@ func TestServer_ConsoleWS_ProxiesBytesToAndFromVNCEndpoint(t *testing.T) {
 	}
 }
 
+// TestServer_ConsoleWS_RejectsCrossOriginUpgrade is the regression test
+// for a 2026-09-06 security-audit finding: wsUpgrader.CheckOrigin used
+// to accept every origin unconditionally, the classic cross-site
+// WebSocket hijacking setup - an attacker's page could open a console
+// socket using a victim's own browser session. checkConsoleOrigin now
+// rejects a mismatched Origin header while still allowing same-origin
+// requests and requests with no Origin header at all (e.g. a
+// non-browser client).
+func TestServer_ConsoleWS_RejectsCrossOriginUpgrade(t *testing.T) {
+	echoAddr := fakeEchoTCPServer(t)
+	host, portStr, err := net.SplitHostPort(echoAddr)
+	if err != nil {
+		t.Fatalf("SplitHostPort() error: %v", err)
+	}
+	port, err := strconv.Atoi(portStr)
+	if err != nil {
+		t.Fatalf("parsing port: %v", err)
+	}
+
+	client := &fakeClient{
+		getVMConsoleResp: &rpcpb.GetVMConsoleResponse{Available: true, Host: host, Port: uint32(port)},
+	}
+	s, err := NewServer(client, nil, nil, nil, "", "", nil, false)
+	if err != nil {
+		t.Fatalf("NewServer() error: %v", err)
+	}
+
+	httpSrv := httptest.NewServer(s)
+	defer httpSrv.Close()
+
+	wsURL := "ws" + strings.TrimPrefix(httpSrv.URL, "http") + "/vms/vm-1/console/ws"
+
+	header := http.Header{}
+	header.Set("Origin", "https://evil.example.com")
+	if _, resp, err := websocket.DefaultDialer.Dial(wsURL, header); err == nil {
+		t.Fatal("expected the cross-origin WebSocket handshake to be rejected")
+	} else if resp == nil || resp.StatusCode != http.StatusForbidden {
+		status := "<nil response>"
+		if resp != nil {
+			status = resp.Status
+		}
+		t.Errorf("expected HTTP 403 rejecting the handshake, got %s (err: %v)", status, err)
+	}
+
+	// A same-origin request (Origin matching the server's own host)
+	// should still be allowed.
+	header.Set("Origin", httpSrv.URL)
+	wsConn, _, err := websocket.DefaultDialer.Dial(wsURL, header)
+	if err != nil {
+		t.Fatalf("same-origin websocket.Dial() error: %v", err)
+	}
+	wsConn.Close()
+}
+
 func TestServer_ConsoleWS_UnavailableConsoleRejectsUpgrade(t *testing.T) {
 	client := &fakeClient{getVMConsoleResp: &rpcpb.GetVMConsoleResponse{Available: false}}
-	s, err := NewServer(client, nil, nil, nil, "", "", nil)
+	s, err := NewServer(client, nil, nil, nil, "", "", nil, false)
 	if err != nil {
 		t.Fatalf("NewServer() error: %v", err)
 	}

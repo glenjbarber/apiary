@@ -148,7 +148,7 @@ func TestHandleWhyNotPage_CellHostStatsFetchFailureIsUnknownNotBlocked(t *testin
 		}},
 	}
 	peers := &fakePeerHostStatsClient{err: errors.New("dial tcp: connection refused")}
-	s, err := NewServer(client, nil, nil, peers, ".test", "17700", nil)
+	s, err := NewServer(client, nil, nil, peers, ".test", "17700", nil, false)
 	if err != nil {
 		t.Fatalf("NewServer() error: %v", err)
 	}

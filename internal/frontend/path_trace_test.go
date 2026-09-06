@@ -26,7 +26,7 @@ func TestTracePage_RendersOrderedEvidence(t *testing.T) {
 			NonAtomic: true,
 		},
 	}
-	s, err := NewServer(client, nil, nil, nil, "", "", nil)
+	s, err := NewServer(client, nil, nil, nil, "", "", nil, false)
 	if err != nil {
 		t.Fatalf("NewServer() error: %v", err)
 	}
@@ -50,7 +50,7 @@ func TestTracePage_RendersOrderedEvidence(t *testing.T) {
 
 func TestTracePage_InvalidPortDoesNotCallManager(t *testing.T) {
 	client := &fakeClient{listResp: &rpcpb.ListVMsResponse{}}
-	s, err := NewServer(client, nil, nil, nil, "", "", nil)
+	s, err := NewServer(client, nil, nil, nil, "", "", nil, false)
 	if err != nil {
 		t.Fatalf("NewServer() error: %v", err)
 	}

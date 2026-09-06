@@ -42,6 +42,13 @@ func TestRenderConfig_RejectsInvalid(t *testing.T) {
 		{"empty resource name", []Resource{{Name: "", Nodes: []Node{{Name: "a", Local: "/dev/da1", Remote: "x"}, {Name: "b", Local: "/dev/da1", Remote: "y"}}}}},
 		{"wrong node count", []Resource{{Name: "test", Nodes: []Node{{Name: "a", Local: "/dev/da1", Remote: "x"}}}}},
 		{"missing node field", []Resource{{Name: "test", Nodes: []Node{{Name: "a", Local: "", Remote: "x"}, {Name: "b", Local: "/dev/da1", Remote: "y"}}}}},
+		// Regression cases for a 2026-09-06 security-audit finding:
+		// resource Name is a VM/jail id, now validated at
+		// internal/raft.FSM's own boundary, but this function has no
+		// way to know that ran - a newline here previously injected an
+		// arbitrary hast.conf stanza.
+		{"newline in resource name", []Resource{{Name: "vm-1\nresource evil {}", Nodes: []Node{{Name: "a", Local: "/dev/da1", Remote: "x"}, {Name: "b", Local: "/dev/da1", Remote: "y"}}}}},
+		{"newline in node field", []Resource{{Name: "test", Nodes: []Node{{Name: "a\nlocal /etc/passwd", Local: "/dev/da1", Remote: "x"}, {Name: "b", Local: "/dev/da1", Remote: "y"}}}}},
 	}
 
 	for _, c := range cases {

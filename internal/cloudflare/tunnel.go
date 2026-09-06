@@ -34,7 +34,19 @@ type Ingress struct {
 // Ingresses are sorted by hostname first, so the same desired set
 // always renders identically regardless of caller iteration order -
 // load-bearing for EnsureRunning's own content-diff restart check.
-func RenderConfig(tunnelID, credentialsFile string, ingresses []Ingress) string {
+//
+// Every string here is rendered with no escaping of its own, so a
+// caller passing a value containing a newline could inject an
+// arbitrary additional YAML entry into the file cloudflared then
+// loads. tunnelID/credentialsFile are managerd startup-flag values
+// (operator-controlled, not attacker-reachable); Hostname is validated
+// at internal/raft.FSM's SetVMCloudflareExposure boundary before it
+// ever reaches here - but this function has no way to know that
+// validation ran, so it checks for itself rather than trusting it.
+func RenderConfig(tunnelID, credentialsFile string, ingresses []Ingress) (string, error) {
+	if strings.ContainsAny(tunnelID+credentialsFile, "\n\r") {
+		return "", fmt.Errorf("cloudflare: tunnelID/credentialsFile must not contain newlines")
+	}
 	sorted := make([]Ingress, len(ingresses))
 	copy(sorted, ingresses)
 	sort.Slice(sorted, func(i, j int) bool { return sorted[i].Hostname < sorted[j].Hostname })
@@ -44,12 +56,15 @@ func RenderConfig(tunnelID, credentialsFile string, ingresses []Ingress) string 
 	fmt.Fprintf(&b, "credentials-file: %s\n", credentialsFile)
 	b.WriteString("ingress:\n")
 	for _, ing := range sorted {
+		if strings.ContainsAny(ing.Hostname+ing.Address, "\n\r") {
+			return "", fmt.Errorf("cloudflare: ingress hostname/address must not contain newlines")
+		}
 		fmt.Fprintf(&b, "  - hostname: %s\n    service: http://%s\n", ing.Hostname, ing.Address)
 	}
 	// cloudflared requires a final catch-all rule with no hostname -
 	// without one, cloudflared refuses to start at all.
 	b.WriteString("  - service: http_status:404\n")
-	return b.String()
+	return b.String(), nil
 }
 
 // Manager manages this node's own single, shared cloudflared process -
@@ -155,7 +170,10 @@ func (m *Manager) EnsureRunning(ctx context.Context, tunnelID, credentialsFile s
 		return fmt.Errorf("creating cloudflared run dir: %w", err)
 	}
 
-	newConfig := RenderConfig(tunnelID, credentialsFile, ingresses)
+	newConfig, err := RenderConfig(tunnelID, credentialsFile, ingresses)
+	if err != nil {
+		return err
+	}
 	oldConfig, _ := os.ReadFile(m.configPath()) // missing file just means "always different" - fine
 	alive, err := m.processAlive()
 	if err != nil {

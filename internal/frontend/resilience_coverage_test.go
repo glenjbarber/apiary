@@ -56,7 +56,7 @@ func TestHandleCoveragePage_QuorumLostRendersUnsafeOrImpossible(t *testing.T) {
 	// loses quorum (quorum size for 2 total is 2), so the aggregate
 	// quorum-tolerance scenario must resolve unsafe_or_impossible.
 	peers := &fakePeerHostStatsClient{err: errors.New("dial tcp: connection refused")}
-	s, err := NewServer(client, nil, nil, peers, ".test", "17700", nil)
+	s, err := NewServer(client, nil, nil, peers, ".test", "17700", nil, false)
 	if err != nil {
 		t.Fatalf("NewServer() error: %v", err)
 	}

@@ -39,7 +39,7 @@ func TestHandleInvariantsPage_HostStatsFetchFailureToReplicaTargetIsUnknown(t *t
 		}},
 	}
 	peers := &fakePeerHostStatsClient{err: errors.New("dial tcp: connection refused")}
-	s, err := NewServer(client, nil, nil, peers, ".test", "17700", nil)
+	s, err := NewServer(client, nil, nil, peers, ".test", "17700", nil, false)
 	if err != nil {
 		t.Fatalf("NewServer() error: %v", err)
 	}
@@ -71,7 +71,7 @@ func TestHandleInvariantsPage_QuorumOnlyQueriesActualVoters(t *testing.T) {
 		},
 	}
 	peers := &fakePeerHostStatsClient{resp: &rpcpb.HostStatsResponse{NodeId: "node-b"}}
-	s, err := NewServer(client, nil, nil, peers, ".test", "17700", nil)
+	s, err := NewServer(client, nil, nil, peers, ".test", "17700", nil, false)
 	if err != nil {
 		t.Fatalf("NewServer() error: %v", err)
 	}
@@ -103,7 +103,7 @@ func TestHandleInvariantsPage_LeaderVsNonLeaderQuorumEvaluationDiffers(t *testin
 
 	run := func(leaderID string) string {
 		client := &fakeClient{statusResp: membersFor(leaderID)}
-		s, err := NewServer(client, nil, nil, peers, ".test", "17700", nil)
+		s, err := NewServer(client, nil, nil, peers, ".test", "17700", nil, false)
 		if err != nil {
 			t.Fatalf("NewServer() error: %v", err)
 		}
@@ -157,7 +157,7 @@ func TestHandleInvariantsPage_RespectsTimeouts(t *testing.T) {
 			{Id: "vm-1", Name: "web-1", NodeId: "node-a", ReplicaNodeId: "node-b"},
 		}},
 	}
-	s, err := NewServer(client, nil, nil, slowRecoveryPeerClient{}, ".test", "17700", nil)
+	s, err := NewServer(client, nil, nil, slowRecoveryPeerClient{}, ".test", "17700", nil, false)
 	if err != nil {
 		t.Fatalf("NewServer() error: %v", err)
 	}

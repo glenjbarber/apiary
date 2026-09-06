@@ -103,7 +103,7 @@ func TestServer_SerialLogPage_RemoteOwnerUsesPeer(t *testing.T) {
 		statusResp: &rpcpb.StatusResponse{ManagerNodeId: "apiarium"},
 	}
 	peers := &fakePeerHostStatsClient{serialResp: &rpcpb.GetVMSerialLogResponse{Available: true, Content: "remote content"}}
-	s, err := NewServer(client, nil, nil, peers, ".apiary.work", "17700", nil)
+	s, err := NewServer(client, nil, nil, peers, ".apiary.work", "17700", nil, false)
 	if err != nil {
 		t.Fatal(err)
 	}

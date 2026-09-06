@@ -393,6 +393,15 @@ type Server struct {
 	// tests. See password.go's canChangePassword for the authorization
 	// rule gating who may target whose account.
 	passwords PasswordSetter
+
+	// tlsEnabled is true when cmd/frontend is serving over HTTPS
+	// (-tls-cert/-tls-key both set) - controls whether the session
+	// cookie is marked Secure (see handleLogin). false in every test in
+	// this package, matching their plaintext httptest.NewRecorder setup;
+	// a security-audit finding (2026-09-06) noted the cookie previously
+	// had no Secure flag at all even when TLS was configured, so it
+	// could be replayed over a plaintext connection to the same host.
+	tlsEnabled bool
 }
 
 // pageHeaderData is the argument type the "page_header" template (see
@@ -446,7 +455,11 @@ func nodeSubtitle(nodeID string) string {
 // peerHostnameSuffix/peerManagerPort combine with a node ID to form
 // its managerd address. passwords implements the real UNIX-account
 // password change (ADR-0039) - pass UnixPasswordSetter{} in production.
-func NewServer(client rpcpb.ManagerServiceClient, auth pam.Authenticator, roleMap map[string]manager.Role, peers peerHostStatsClient, peerHostnameSuffix, peerManagerPort string, passwords PasswordSetter) (*Server, error) {
+// tlsEnabled must reflect whether the caller will actually serve this
+// Server over HTTPS (see cmd/frontend's own -tls-cert/-tls-key
+// validation, done before this call) - it controls the session
+// cookie's Secure flag.
+func NewServer(client rpcpb.ManagerServiceClient, auth pam.Authenticator, roleMap map[string]manager.Role, peers peerHostStatsClient, peerHostnameSuffix, peerManagerPort string, passwords PasswordSetter, tlsEnabled bool) (*Server, error) {
 	tmpl, err := template.New("").Funcs(template.FuncMap{
 		"pageHeader":       pageHeader,
 		"vmSubtitle":       vmSubtitle,
@@ -469,6 +482,7 @@ func NewServer(client rpcpb.ManagerServiceClient, auth pam.Authenticator, roleMa
 		peerHostnameSuffix: peerHostnameSuffix,
 		peerManagerPort:    peerManagerPort,
 		passwords:          passwords,
+		tlsEnabled:         tlsEnabled,
 	}
 	s.routes()
 	return s, nil
@@ -581,8 +595,28 @@ func isSafeLoginReturnPath(p string) bool {
 // path - in particular a protocol-relative "//evil.com" or an absolute
 // "https://evil.com" URL, either of which would turn the login form's
 // own "next" parameter into an open redirect.
+//
+// This used to be a plain prefix/substring check
+// (strings.HasPrefix(p, "/") && !strings.HasPrefix(p, "//") &&
+// !strings.Contains(p, "://")), which missed a real bypass: per the
+// WHATWG URL spec, browsers normalize a leading backslash to a forward
+// slash in special-scheme URLs, so "/\evil.com" is treated identically
+// to "//evil.com" by the browser even though it starts with a single
+// "/" and contains no "://" - confirmed live by driving a real browser
+// at a server emitting exactly that Location header, which navigated to
+// the external origin. Rejecting a leading "/\" explicitly closes that,
+// and parsing with net/url (rather than pattern-matching) catches this
+// whole class rather than one more special case: a path url.Parse
+// considers to have a Scheme or Host isn't a bare in-app path at all.
 func isSafeRedirectPath(p string) bool {
-	return strings.HasPrefix(p, "/") && !strings.HasPrefix(p, "//") && !strings.Contains(p, "://")
+	if p == "" || !strings.HasPrefix(p, "/") {
+		return false
+	}
+	if strings.HasPrefix(p, "//") || strings.HasPrefix(p, `/\`) {
+		return false
+	}
+	u, err := url.Parse(p)
+	return err == nil && u.Scheme == "" && u.Host == ""
 }
 
 func (s *Server) routes() {
@@ -741,6 +775,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		Value:    token,
 		Path:     "/",
 		HttpOnly: true,
+		Secure:   s.tlsEnabled,
 		SameSite: http.SameSiteLaxMode,
 		Expires:  time.Now().Add(sessionTTL),
 	})

@@ -258,7 +258,7 @@ func TestHandleRecoveryHandbookPage_NodeContextRespectsTimeouts(t *testing.T) {
 			},
 		},
 	}
-	s, err := NewServer(client, nil, nil, slowRecoveryPeerClient{}, ".test", "17700", nil)
+	s, err := NewServer(client, nil, nil, slowRecoveryPeerClient{}, ".test", "17700", nil, false)
 	if err != nil {
 		t.Fatalf("NewServer() error: %v", err)
 	}
@@ -301,7 +301,7 @@ func TestHandleRecoveryHandbookPage_NodeContextHealthAndAssumptionsVaryIndepende
 		resp:      &rpcpb.HostStatsResponse{NodeId: "node-b"},
 		statusErr: errors.New("dial tcp: connection refused"),
 	}
-	s, err := NewServer(client, nil, nil, peers, ".test", "17700", nil)
+	s, err := NewServer(client, nil, nil, peers, ".test", "17700", nil, false)
 	if err != nil {
 		t.Fatalf("NewServer() error: %v", err)
 	}

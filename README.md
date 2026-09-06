@@ -415,6 +415,25 @@ each design decision, in order.
   VLAN tagging or NAT, this is advisory only. See
   [ADR-0049](docs/adr/0049-machine-configuration-page.md) and
   [ADR-0066](docs/adr/0066-host-default-egress-contract.md).
+- **Config injection hardening** — a security audit found that VM/jail/
+  network IDs and node-config values (uplink interfaces, the DHCP DNS
+  server, a Cloudflare Tunnel hostname) were validated only for
+  non-emptiness/uniqueness, while being interpolated unescaped into
+  generated `dnsmasq.conf`/`hast.conf`/pf-rule/cloudflared-YAML config -
+  most seriously, a newline in a VM ID (used as a DHCP lease hostname)
+  or a network's `bridge_name`/`external_gateway` let an Operator inject
+  an arbitrary `dnsmasq.conf` directive, including `dhcp-script=`, which
+  dnsmasq runs as root on every lease event. Every affected value now
+  gets a strict allowlist at the point it's first accepted
+  (`internal/raft.FSM`'s `applyCreate*`/`applySet*`, or
+  `internal/nodeconfig.Manager.Save` for the one deliberately
+  non-raft-replicated value), plus each generated-config renderer
+  independently rejects a newline regardless of what its caller already
+  validated. The same audit also closed an open-redirect bypass in the
+  post-login flow (confirmed live in a real browser), added the missing
+  `Secure` flag to the session cookie, and replaced the console
+  WebSocket's permissive `CheckOrigin` with a real same-origin check.
+  See [ADR-0067](docs/adr/0067-config-injection-hardening.md).
 - **A real, joined multi-node Kubernetes cluster**, via the separate
   `cluster-api-provider-apiary` repo - a genuine 2-node cluster (one
   control-plane, one worker) bootstrapped through the actual upstream

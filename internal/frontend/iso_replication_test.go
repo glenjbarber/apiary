@@ -81,7 +81,7 @@ func TestCurrentClusterISOs_MergesPresentAndMissing(t *testing.T) {
 			{Name: "c.iso", Sha256: "ccc", SizeBytes: 300},
 		}},
 	}}
-	s, err := NewServer(client, nil, nil, peers, ".apiary.work", "17700", nil)
+	s, err := NewServer(client, nil, nil, peers, ".apiary.work", "17700", nil, false)
 	if err != nil {
 		t.Fatalf("NewServer() error: %v", err)
 	}
@@ -142,7 +142,7 @@ func TestCurrentClusterISOs_PresentEverywhereHasNoMissingNodes(t *testing.T) {
 			{Name: "a.iso", Sha256: "aaa"},
 		}},
 	}}
-	s, err := NewServer(client, nil, nil, peers, ".apiary.work", "17700", nil)
+	s, err := NewServer(client, nil, nil, peers, ".apiary.work", "17700", nil, false)
 	if err != nil {
 		t.Fatalf("NewServer() error: %v", err)
 	}
@@ -174,7 +174,7 @@ func TestNewVMPage_EmbedsClusterWideImageListAndMissingCueData(t *testing.T) {
 			{Name: "b.iso", Sha256: "bbb"},
 		}},
 	}}
-	s, err := NewServer(client, nil, nil, peers, ".apiary.work", "17700", nil)
+	s, err := NewServer(client, nil, nil, peers, ".apiary.work", "17700", nil, false)
 	if err != nil {
 		t.Fatalf("NewServer() error: %v", err)
 	}
