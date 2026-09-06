@@ -77,6 +77,18 @@ each design decision, in order.
   browser console (`/vms/{id}/console`), proxied over WebSocket straight
   to bhyve's own VNC framebuffer with no separate `websockify` process.
   See [ADR-0020](docs/adr/0020-novnc-console.md).
+- **Cross-Hive console tunnel** — the console above previously only
+  worked when the web UI and the VM's owning node were the same
+  machine, since bhyve's VNC listener is deliberately loopback-only and
+  never exposed on the network. A new bidirectional
+  `ManagerService.ProxyVMConsole` closes that gap: the frontend forwards
+  to the owning Hive's managerd over the existing authenticated peer
+  path, and that managerd independently re-validates ownership through
+  `GetVMConsole` before dialing its own local VNC socket — neither a
+  caller-supplied host nor port is ever accepted. The raw VNC listener
+  itself never leaves loopback; only one more authenticated gRPC hop is
+  added. See
+  [ADR-0065](docs/adr/0065-cross-hive-console-tunnel.md).
 - **`internal/isostore`** — installer images uploaded through the web
   UI, verified against a pasted SHA-256 as they stream to disk and
   refused outright on a mismatch, so an unverified image never lands in
@@ -164,6 +176,22 @@ each design decision, in order.
   Restart is durable desired state: reconciliation confirms the Cell has
   stopped before returning it to running, rather than depending on two
   racing client requests.
+- **Disabled jail provisioning and explicit deletion** — a node with
+  `-jail-enabled=false` used to skip reading jail intent entirely,
+  which hid a real bug: a jail assigned to that node never appeared and
+  its later deletion could never finish, because the reconciler that
+  should have purged the tombstone never even looked at the jail list.
+  The reconciler now always reads jail intent regardless of whether
+  provisioning is enabled, reports an unsupported destination as a
+  visible phase error instead of silence, and still lets an owner
+  finish an explicit delete (removing any running jail/dataset first)
+  even with provisioning disabled — a nil lifecycle driver is never
+  treated as proof there's nothing to clean up. The protected
+  `timemachine` jail is excluded from every jail-planning, wrapper, and
+  factory-reset path as defense in depth beyond the normal `apiary-`
+  prefix boundary. The jail panel now polls a complete, role-aware
+  fragment every three seconds. See
+  [ADR-0064](docs/adr/0064-disabled-jail-lifecycle.md).
 - **Resource reclaim** — a VM reassigned to a different node no longer
   leaks its old node's dataset/bhyve VM: the reconciler detects and
   tears down its own leftover resources under a VM ID that's been
@@ -377,7 +405,14 @@ each design decision, in order.
   without losing the configured rule set, a ZFS dataset quota action,
   jail-provisioning control, and local Apiary service status. Admins can
   schedule a restart of `apiary_managerd` or `apiary_frontend` from the
-  same page without changing `rc.conf`. See
+  same page without changing `rc.conf`. The VLAN/NAT uplink fields are
+  dropdowns populated from that Hive's own live interface inventory
+  (state and addresses shown per option) rather than free text; a saved
+  interface that's since disappeared stays selectable as
+  `(saved, unavailable)` so it can be cleared without hand-editing JSON,
+  and discovery failures are reported without discarding the saved
+  configuration — the host still decides what's actually suitable for
+  VLAN tagging or NAT, this is advisory only. See
   [ADR-0049](docs/adr/0049-machine-configuration-page.md) and
   [ADR-0066](docs/adr/0066-host-default-egress-contract.md).
 - **A real, joined multi-node Kubernetes cluster**, via the separate
@@ -517,11 +552,11 @@ each design decision, in order.
   on beyond whatever a caller sets directly (`MigrateVM`/`MigrateJail`
   now exist, but only as a manual, explicit operator action - see
   ADR-0028)
-- Multi-node console/network access: the noVNC console and the Networks
-  page's bridge status both only work when the web UI and the VM/
-  network's owning node are the same machine (see ADR-0020/ADR-0022) —
-  no VNC credentials/encryption either, relying entirely on the login
-  gate in front of it
+- No VNC credentials/encryption on the underlying console connection
+  itself — it relies entirely on the login gate in front of it (see
+  ADR-0020/ADR-0065 above, which already closed the older cross-node
+  console and Networks-page bridge-status gaps this bullet used to
+  describe)
 - Network management is v1-scoped: `internal/dhcpd` only supports
   `/24`-or-smaller subnets, and firewall rules are a flat allow/block
   list with no priority/ordering beyond `pf`'s own rule evaluation
