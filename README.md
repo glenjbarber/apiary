@@ -493,6 +493,16 @@ each design decision, in order.
   `-restore`/`-restore-dry-run`) for moving or rebuilding a node's raft
   configuration without hand-editing BoltDB state. See
   [ADR-0051](docs/adr/0051-raftd-config-save-restore.md).
+- **Redacted host-config export** (`managerd -export-host-config <dir>`)
+  closes the gap raft's own export doesn't cover: a node's real
+  `/etc/rc.conf`, `/etc/pf.conf`, and `/etc/master.passwd`. Every
+  account's password hash is replaced with `*` (never an empty field),
+  and `-peer-api-key`'s live value is redacted from the exported
+  `rc.conf` — a local, read-only, one-shot CLI action, never a network
+  RPC. Deliberately export-only: there is no restore/apply path, since
+  automatically writing account or firewall data back to a live host is
+  a distinctly higher-risk problem needing its own design. See
+  [ADR-0069](docs/adr/0069-host-config-export.md).
 - **Dependency Graph Simulator v1** - read-only "what happens if this
   node/network disappears right now" counterfactuals: raft quorum
   impact from live reachability (not just configured membership), which

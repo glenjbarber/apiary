@@ -29,6 +29,7 @@ import (
 	"github.com/glenjbarber/apiary/internal/cluster"
 	"github.com/glenjbarber/apiary/internal/dhcpd"
 	"github.com/glenjbarber/apiary/internal/hast"
+	"github.com/glenjbarber/apiary/internal/hostconfig"
 	"github.com/glenjbarber/apiary/internal/isostore"
 	"github.com/glenjbarber/apiary/internal/jail"
 	"github.com/glenjbarber/apiary/internal/manager"
@@ -97,7 +98,12 @@ func run() error {
 	factoryReset := flag.String("factory-reset", "", fmt.Sprintf("Tier 3 reset (ADR-0038): runs the same destruction as -reset-managed, then also destroys anything named in -factory-reset-extra-jails/-factory-reset-extra-datasets regardless of scope, then exits. Must be exactly %q or nothing happens", factoryResetConfirmPhrase))
 	factoryResetExtraJails := flag.String("factory-reset-extra-jails", "", "comma-separated jail names to destroy for real during -factory-reset, outside the normal -jail-prefix scope (e.g. a jail you want gone that Apiary itself didn't create) - nothing here is ever auto-discovered, only what's named")
 	factoryResetExtraDatasets := flag.String("factory-reset-extra-datasets", "", "comma-separated ZFS dataset/pool names to destroy recursively during -factory-reset, outside the normal -zfs-base scope - nothing here is ever auto-discovered, only what's named")
+	exportHostConfig := flag.String("export-host-config", "", "read-only: write a redacted snapshot of this Hive's /etc/rc.conf, /etc/pf.conf, and /etc/master.passwd into this directory, then exit, rather than starting the server - see internal/hostconfig's own doc comment for exactly what's redacted and why there is no matching restore/apply flag")
 	flag.Parse()
+
+	if *exportHostConfig != "" {
+		return runExportHostConfig(hostconfig.Files{}, *exportHostConfig)
+	}
 
 	if *resetManaged != "" || *factoryReset != "" {
 		return runReset(*resetManaged, *factoryReset, *factoryResetExtraJails, *factoryResetExtraDatasets, *zfsBase, *jailPrefix, *bhyvePrefix, *isoDir)
@@ -502,6 +508,23 @@ type jailConsoleAdapter struct{ m *jail.Manager }
 
 func (a jailConsoleAdapter) Attach(ctx context.Context, name string) (io.ReadWriteCloser, error) {
 	return a.m.Attach(ctx, name)
+}
+
+// runExportHostConfig implements managerd's one-shot -export-host-config
+// mode - read-only, no raftd/raft dependency, no confirmation phrase
+// needed (unlike -reset-managed/-factory-reset below, nothing here is
+// destructive). See internal/hostconfig's own package doc comment for
+// the full design, including why this is deliberately export-only.
+// files takes explicit source paths so this is testable against
+// fixture files rather than a real host's own /etc/rc.conf et al. -
+// main() itself always passes hostconfig.Files{}, letting the package
+// fall back to the real default locations.
+func runExportHostConfig(files hostconfig.Files, outDir string) error {
+	if err := hostconfig.Export(files, outDir); err != nil {
+		return err
+	}
+	log.Printf("managerd: export-host-config: wrote a redacted rc.conf/pf.conf/master.passwd snapshot to %s", outDir)
+	return nil
 }
 
 // runReset implements managerd's one-shot -reset-managed/-factory-reset
