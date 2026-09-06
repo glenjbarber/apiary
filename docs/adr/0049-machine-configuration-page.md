@@ -25,11 +25,12 @@ HTMX-targeted panel (`internal/frontend/machine.go`).
 
 New `internal/nodeconfig` package: a `Manager{Path string}` doing plain
 local JSON file I/O (mirrors `internal/isostore`'s shape exactly),
-persisting `{Uplink, NATUplink, JailEnabled}`. Physical, per-node data - never
-raft-replicated, since a NIC name is only meaningful to the one node
-that has it. `cmd/managerd` loads this file once at startup, overriding
-the matching `-vlan-uplink`/`-nat-uplink`/`-jail-enabled` flag value when set
-(flags remain the bootstrap default for a fresh install with no file yet).
+persisting `{Uplink, NATUplink, DNSServer, JailEnabled}`. Physical,
+per-node data - never raft-replicated, since a NIC name is only meaningful
+to the one node that has it. `cmd/managerd` loads this file once at startup,
+overriding the matching `-vlan-uplink`/`-nat-uplink`/`-dhcp-dns-server`/
+`-jail-enabled` flag value when set (flags remain the bootstrap default for
+a fresh install with no file yet).
 New RPCs `GetNodeConfig`/`UpdateNodeConfig` (local-only, modeled
 directly on `HostStats`'s existing shape - empty-request-message, no
 raft involved) let the UI read/write the file through managerd's

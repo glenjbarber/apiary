@@ -917,6 +917,11 @@ message GetNodeConfigResponse {
   // it falls back to uplink's own value.
   string nat_uplink = 2;
 
+  // dhcp_dns_server is the DNS server address handed to clients on
+  // Apiary-managed networks (mirrors -dhcp-dns-server). Empty means no
+  // DNS option is advertised by Apiary's DHCP service.
+  string dhcp_dns_server = 5;
+
   // jail_enabled mirrors -jail-enabled when set. Unset means managerd
   // keeps using the startup flag value.
   optional bool jail_enabled = 3;
@@ -928,6 +933,10 @@ message UpdateNodeConfigRequest {
   string uplink = 1;
   string nat_uplink = 2;
   optional bool jail_enabled = 3;
+
+  // dhcp_dns_server is persisted with the other node-local network
+  // settings and takes effect on this node's next managerd restart.
+  string dhcp_dns_server = 4;
 }
 
 message UpdateNodeConfigResponse {

@@ -19,7 +19,7 @@ func TestManager_LoadMissingFileReturnsZeroValueNoError(t *testing.T) {
 
 func TestManager_SaveThenLoadRoundTrips(t *testing.T) {
 	m := &Manager{Path: filepath.Join(t.TempDir(), "node-config.json")}
-	want := Config{Uplink: "re0", NATUplink: "bridge0", JailEnabled: boolPtr(true)}
+	want := Config{Uplink: "re0", NATUplink: "bridge0", DNSServer: "10.62.0.1", JailEnabled: boolPtr(true)}
 
 	if err := m.Save(want); err != nil {
 		t.Fatalf("Save() error: %v", err)
@@ -28,7 +28,7 @@ func TestManager_SaveThenLoadRoundTrips(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load() error: %v", err)
 	}
-	if got.Uplink != want.Uplink || got.NATUplink != want.NATUplink || got.JailEnabled == nil || !*got.JailEnabled {
+	if got.Uplink != want.Uplink || got.NATUplink != want.NATUplink || got.DNSServer != want.DNSServer || got.JailEnabled == nil || !*got.JailEnabled {
 		t.Errorf("Load() = %+v, want %+v", got, want)
 	}
 }

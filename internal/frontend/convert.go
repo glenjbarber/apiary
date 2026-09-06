@@ -80,6 +80,7 @@ type firewallRuleView struct {
 type nodeConfigView struct {
 	Uplink            string
 	NATUplink         string
+	DNSServer         string
 	JailEnabledMode   string
 	JailEnabledStatus string
 }
@@ -88,6 +89,7 @@ func fromRPCNodeConfig(d *rpcpb.GetNodeConfigResponse) nodeConfigView {
 	view := nodeConfigView{
 		Uplink:            d.GetUplink(),
 		NATUplink:         d.GetNatUplink(),
+		DNSServer:         d.GetDhcpDnsServer(),
 		JailEnabledMode:   "default",
 		JailEnabledStatus: "uses startup flag",
 	}

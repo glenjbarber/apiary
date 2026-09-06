@@ -121,9 +121,10 @@ func (s *Server) handleUpdateMachineConfig(w http.ResponseWriter, r *http.Reques
 	}
 	req := s.nodeConfigUpdateRequest(r)
 	resp, err := s.client.UpdateNodeConfig(r.Context(), &rpcpb.UpdateNodeConfigRequest{
-		Uplink:      req.GetUplink(),
-		NatUplink:   req.GetNatUplink(),
-		JailEnabled: req.JailEnabled,
+		Uplink:        req.GetUplink(),
+		NatUplink:     req.GetNatUplink(),
+		DhcpDnsServer: req.GetDhcpDnsServer(),
+		JailEnabled:   req.JailEnabled,
 	})
 	if err != nil {
 		s.renderMachineConfigPanel(w, r, panel, err.Error())
@@ -139,15 +140,19 @@ func (s *Server) handleUpdateMachineConfig(w http.ResponseWriter, r *http.Reques
 func (s *Server) nodeConfigUpdateRequest(r *http.Request) *rpcpb.UpdateNodeConfigRequest {
 	cfg, _ := s.currentNodeConfig(r)
 	req := &rpcpb.UpdateNodeConfigRequest{
-		Uplink:      cfg.Uplink,
-		NatUplink:   cfg.NATUplink,
-		JailEnabled: jailEnabledFromForm(cfg.JailEnabledMode),
+		Uplink:        cfg.Uplink,
+		NatUplink:     cfg.NATUplink,
+		DhcpDnsServer: cfg.DNSServer,
+		JailEnabled:   jailEnabledFromForm(cfg.JailEnabledMode),
 	}
 	if r.Form.Has("uplink") {
 		req.Uplink = r.FormValue("uplink")
 	}
 	if r.Form.Has("nat_uplink") {
 		req.NatUplink = r.FormValue("nat_uplink")
+	}
+	if r.Form.Has("dhcp_dns_server") {
+		req.DhcpDnsServer = r.FormValue("dhcp_dns_server")
 	}
 	if r.Form.Has("jail_enabled") {
 		req.JailEnabled = jailEnabledFromForm(r.FormValue("jail_enabled"))

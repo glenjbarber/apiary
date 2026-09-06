@@ -180,6 +180,9 @@ func run() error {
 		if cfg.NATUplink != "" {
 			*natUplink = cfg.NATUplink
 		}
+		if cfg.DNSServer != "" {
+			*dhcpDNSServer = cfg.DNSServer
+		}
 		if cfg.JailEnabled != nil {
 			*jailEnabled = *cfg.JailEnabled
 		}

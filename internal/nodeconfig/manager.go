@@ -1,6 +1,7 @@
 // Package nodeconfig persists a small set of node-local runtime
-// settings (currently: the uplink interfaces internal/vlan/internal/pf
-// use - see ADR-0048) as a plain JSON file on disk. Physical, per-node
+// settings (the uplink interfaces internal/vlan/internal/pf use and the
+// DHCP resolver address - see ADR-0048 and ADR-0066) as a plain JSON file
+// on disk. Physical, per-node
 // data like internal/isostore/internal/hoststats - a NIC name is only
 // ever meaningful to the one node that has it, so this is never
 // replicated through raft. A change here takes effect the next time
@@ -28,6 +29,11 @@ type Config struct {
 	// NATUplink mirrors -nat-uplink: the interface a self-hosted
 	// network's outbound NAT egresses through (ADR-0048).
 	NATUplink string `json:"nat_uplink,omitempty"`
+
+	// DNSServer mirrors -dhcp-dns-server: the resolver address handed to
+	// DHCP clients on Apiary-managed networks. It is node-local because
+	// each Hive can have a different reachable resolver.
+	DNSServer string `json:"dhcp_dns_server,omitempty"`
 
 	// JailEnabled mirrors -jail-enabled. Nil means use managerd's
 	// startup flag; true/false are explicit local overrides.

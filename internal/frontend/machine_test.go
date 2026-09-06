@@ -14,7 +14,7 @@ func TestServer_MachinePage_ShowsNodeConfigAndLocalVMsOnly(t *testing.T) {
 	client := &fakeClient{
 		statusResp: &rpcpb.StatusResponse{ManagerNodeId: "node-a"},
 		getNodeConfigResp: &rpcpb.GetNodeConfigResponse{
-			Uplink: "re0", NatUplink: "bridge0", JailEnabled: boolPtr(true),
+			Uplink: "re0", NatUplink: "bridge0", DhcpDnsServer: "10.62.0.1", JailEnabled: boolPtr(true),
 		},
 		listResp: &rpcpb.ListVMsResponse{Vms: []*rpcpb.VMDefinition{
 			{Id: "vm-1", Name: "web-1", NodeId: "node-a"},
@@ -31,7 +31,7 @@ func TestServer_MachinePage_ShowsNodeConfigAndLocalVMsOnly(t *testing.T) {
 		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
 	}
 	body := rec.Body.String()
-	if !strings.Contains(body, "re0") || !strings.Contains(body, "bridge0") || !strings.Contains(body, "Jail provisioning") || !strings.Contains(body, "Current mode") || !strings.Contains(body, "Enabled") {
+	if !strings.Contains(body, "re0") || !strings.Contains(body, "bridge0") || !strings.Contains(body, "self-hosted NAT via bridge0") || !strings.Contains(body, "10.62.0.1") || !strings.Contains(body, "Jail provisioning") || !strings.Contains(body, "Current mode") || !strings.Contains(body, "Enabled") {
 		t.Errorf("machine page missing node config values, got: %s", body)
 	}
 	if strings.Contains(body, "<th>Jail provisioning</th>") {
@@ -90,7 +90,7 @@ func TestServer_UpdateNodeConfig_ForwardsFormValues(t *testing.T) {
 	client := &fakeClient{updateNodeConfigResp: &rpcpb.UpdateNodeConfigResponse{}}
 	s := newTestServer(t, client)
 
-	form := url.Values{"uplink": {"em0"}, "nat_uplink": {"em0"}, "jail_enabled": {"enabled"}}
+	form := url.Values{"uplink": {"em0"}, "nat_uplink": {"em0"}, "dhcp_dns_server": {"10.62.0.1"}, "jail_enabled": {"enabled"}}
 	req := httptest.NewRequest(http.MethodPost, "/machine/uplink", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	rec := httptest.NewRecorder()
@@ -99,8 +99,8 @@ func TestServer_UpdateNodeConfig_ForwardsFormValues(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
 	}
-	if client.lastUpdateNodeConfigReq.GetUplink() != "em0" || client.lastUpdateNodeConfigReq.GetNatUplink() != "em0" || client.lastUpdateNodeConfigReq.JailEnabled == nil || !client.lastUpdateNodeConfigReq.GetJailEnabled() {
-		t.Errorf("forwarded request = %+v, want Uplink=em0 NatUplink=em0 JailEnabled=true", client.lastUpdateNodeConfigReq)
+	if client.lastUpdateNodeConfigReq.GetUplink() != "em0" || client.lastUpdateNodeConfigReq.GetNatUplink() != "em0" || client.lastUpdateNodeConfigReq.GetDhcpDnsServer() != "10.62.0.1" || client.lastUpdateNodeConfigReq.JailEnabled == nil || !client.lastUpdateNodeConfigReq.GetJailEnabled() {
+		t.Errorf("forwarded request = %+v, want Uplink=em0 NatUplink=em0 DhcpDnsServer=10.62.0.1 JailEnabled=true", client.lastUpdateNodeConfigReq)
 	}
 }
 
@@ -124,7 +124,7 @@ func TestServer_UpdateNodeConfig_CanUseStartupFlagForJails(t *testing.T) {
 
 func TestServer_UpdateNodeConfig_PreservesJailProvisioningWhenAbsent(t *testing.T) {
 	client := &fakeClient{
-		getNodeConfigResp:    &rpcpb.GetNodeConfigResponse{Uplink: "re0", NatUplink: "bridge0", JailEnabled: boolPtr(true)},
+		getNodeConfigResp:    &rpcpb.GetNodeConfigResponse{Uplink: "re0", NatUplink: "bridge0", DhcpDnsServer: "10.62.0.1", JailEnabled: boolPtr(true)},
 		updateNodeConfigResp: &rpcpb.UpdateNodeConfigResponse{},
 	}
 	s := newTestServer(t, client)
@@ -135,6 +135,9 @@ func TestServer_UpdateNodeConfig_PreservesJailProvisioningWhenAbsent(t *testing.
 	rec := httptest.NewRecorder()
 	s.ServeHTTP(rec, req)
 
+	if client.lastUpdateNodeConfigReq.GetDhcpDnsServer() != "10.62.0.1" {
+		t.Errorf("DhcpDnsServer = %q, want preserved DNS server", client.lastUpdateNodeConfigReq.GetDhcpDnsServer())
+	}
 	if client.lastUpdateNodeConfigReq.JailEnabled == nil || !client.lastUpdateNodeConfigReq.GetJailEnabled() {
 		t.Errorf("JailEnabled = %v, want preserved enabled value", client.lastUpdateNodeConfigReq.JailEnabled)
 	}
@@ -142,7 +145,7 @@ func TestServer_UpdateNodeConfig_PreservesJailProvisioningWhenAbsent(t *testing.
 
 func TestServer_UpdateJailProvisioning_PreservesNetworkFields(t *testing.T) {
 	client := &fakeClient{
-		getNodeConfigResp:    &rpcpb.GetNodeConfigResponse{Uplink: "re0", NatUplink: "bridge0"},
+		getNodeConfigResp:    &rpcpb.GetNodeConfigResponse{Uplink: "re0", NatUplink: "bridge0", DhcpDnsServer: "10.62.0.1"},
 		updateNodeConfigResp: &rpcpb.UpdateNodeConfigResponse{},
 	}
 	s := newTestServer(t, client)
@@ -156,7 +159,7 @@ func TestServer_UpdateJailProvisioning_PreservesNetworkFields(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
 	}
-	if client.lastUpdateNodeConfigReq.GetUplink() != "re0" || client.lastUpdateNodeConfigReq.GetNatUplink() != "bridge0" || client.lastUpdateNodeConfigReq.JailEnabled == nil || !client.lastUpdateNodeConfigReq.GetJailEnabled() {
+	if client.lastUpdateNodeConfigReq.GetUplink() != "re0" || client.lastUpdateNodeConfigReq.GetNatUplink() != "bridge0" || client.lastUpdateNodeConfigReq.GetDhcpDnsServer() != "10.62.0.1" || client.lastUpdateNodeConfigReq.JailEnabled == nil || !client.lastUpdateNodeConfigReq.GetJailEnabled() {
 		t.Errorf("forwarded request = %+v, want preserved network fields and JailEnabled=true", client.lastUpdateNodeConfigReq)
 	}
 	if !strings.Contains(rec.Body.String(), `hx-post="/machine/jail-provisioning"`) {

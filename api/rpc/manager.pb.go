@@ -4784,6 +4784,10 @@ type GetNodeConfigResponse struct {
 	// egresses through (mirrors -nat-uplink, see ADR-0048) - empty means
 	// it falls back to uplink's own value.
 	NatUplink string `protobuf:"bytes,2,opt,name=nat_uplink,json=natUplink,proto3" json:"nat_uplink,omitempty"`
+	// dhcp_dns_server is the DNS server address handed to clients on
+	// Apiary-managed networks (mirrors -dhcp-dns-server). Empty means no
+	// DNS option is advertised by Apiary's DHCP service.
+	DhcpDnsServer string `protobuf:"bytes,5,opt,name=dhcp_dns_server,json=dhcpDnsServer,proto3" json:"dhcp_dns_server,omitempty"`
 	// jail_enabled mirrors -jail-enabled when set. Unset means managerd
 	// keeps using the startup flag value.
 	JailEnabled   *bool  `protobuf:"varint,3,opt,name=jail_enabled,json=jailEnabled,proto3,oneof" json:"jail_enabled,omitempty"`
@@ -4836,6 +4840,13 @@ func (x *GetNodeConfigResponse) GetNatUplink() string {
 	return ""
 }
 
+func (x *GetNodeConfigResponse) GetDhcpDnsServer() string {
+	if x != nil {
+		return x.DhcpDnsServer
+	}
+	return ""
+}
+
 func (x *GetNodeConfigResponse) GetJailEnabled() bool {
 	if x != nil && x.JailEnabled != nil {
 		return *x.JailEnabled
@@ -4851,10 +4862,13 @@ func (x *GetNodeConfigResponse) GetError() string {
 }
 
 type UpdateNodeConfigRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Uplink        string                 `protobuf:"bytes,1,opt,name=uplink,proto3" json:"uplink,omitempty"`
-	NatUplink     string                 `protobuf:"bytes,2,opt,name=nat_uplink,json=natUplink,proto3" json:"nat_uplink,omitempty"`
-	JailEnabled   *bool                  `protobuf:"varint,3,opt,name=jail_enabled,json=jailEnabled,proto3,oneof" json:"jail_enabled,omitempty"`
+	state       protoimpl.MessageState `protogen:"open.v1"`
+	Uplink      string                 `protobuf:"bytes,1,opt,name=uplink,proto3" json:"uplink,omitempty"`
+	NatUplink   string                 `protobuf:"bytes,2,opt,name=nat_uplink,json=natUplink,proto3" json:"nat_uplink,omitempty"`
+	JailEnabled *bool                  `protobuf:"varint,3,opt,name=jail_enabled,json=jailEnabled,proto3,oneof" json:"jail_enabled,omitempty"`
+	// dhcp_dns_server is persisted with the other node-local network
+	// settings and takes effect on this node's next managerd restart.
+	DhcpDnsServer string `protobuf:"bytes,4,opt,name=dhcp_dns_server,json=dhcpDnsServer,proto3" json:"dhcp_dns_server,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -4908,6 +4922,13 @@ func (x *UpdateNodeConfigRequest) GetJailEnabled() bool {
 		return *x.JailEnabled
 	}
 	return false
+}
+
+func (x *UpdateNodeConfigRequest) GetDhcpDnsServer() string {
+	if x != nil {
+		return x.DhcpDnsServer
+	}
+	return ""
 }
 
 type UpdateNodeConfigResponse struct {
@@ -9173,19 +9194,21 @@ const file_api_rpc_manager_proto_rawDesc = "" +
 	"\ttruncated\x18\x02 \x01(\bR\ttruncated\x12\x1c\n" +
 	"\tavailable\x18\x03 \x01(\bR\tavailable\x12\x14\n" +
 	"\x05error\x18\x04 \x01(\tR\x05error\"\x16\n" +
-	"\x14GetNodeConfigRequest\"\x9d\x01\n" +
+	"\x14GetNodeConfigRequest\"\xc5\x01\n" +
 	"\x15GetNodeConfigResponse\x12\x16\n" +
 	"\x06uplink\x18\x01 \x01(\tR\x06uplink\x12\x1d\n" +
 	"\n" +
 	"nat_uplink\x18\x02 \x01(\tR\tnatUplink\x12&\n" +
+	"\x0fdhcp_dns_server\x18\x05 \x01(\tR\rdhcpDnsServer\x12&\n" +
 	"\fjail_enabled\x18\x03 \x01(\bH\x00R\vjailEnabled\x88\x01\x01\x12\x14\n" +
 	"\x05error\x18\x04 \x01(\tR\x05errorB\x0f\n" +
-	"\r_jail_enabled\"\x89\x01\n" +
+	"\r_jail_enabled\"\xb1\x01\n" +
 	"\x17UpdateNodeConfigRequest\x12\x16\n" +
 	"\x06uplink\x18\x01 \x01(\tR\x06uplink\x12\x1d\n" +
 	"\n" +
 	"nat_uplink\x18\x02 \x01(\tR\tnatUplink\x12&\n" +
-	"\fjail_enabled\x18\x03 \x01(\bH\x00R\vjailEnabled\x88\x01\x01B\x0f\n" +
+	"\fjail_enabled\x18\x03 \x01(\bH\x00R\vjailEnabled\x88\x01\x01\x12&\n" +
+	"\x0fdhcp_dns_server\x18\x04 \x01(\tR\rdhcpDnsServerB\x0f\n" +
 	"\r_jail_enabled\"0\n" +
 	"\x18UpdateNodeConfigResponse\x12\x14\n" +
 	"\x05error\x18\x01 \x01(\tR\x05error\"Q\n" +
