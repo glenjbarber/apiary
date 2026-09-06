@@ -1384,11 +1384,15 @@ func (s *Server) GetVMConsole(ctx context.Context, req *rpcpb.GetVMConsoleReques
 	}
 	if resp.GetError() != "" {
 		if s.peers != nil && resp.GetLeaderHint() != "" {
-			if fwd, ferr := s.peers.GetVMConsole(ctx, s.peerManagerdAddr(resp.GetLeaderHint()), req.GetId()); ferr == nil {
-				return fwd, nil
+			if fwd, ferr := s.peers.GetVM(ctx, s.peerManagerdAddr(resp.GetLeaderHint()), req.GetId()); ferr == nil && fwd.GetError() == "" && fwd.GetFound() && fwd.GetVm().GetNodeId() == s.nodeID {
+				resp = &internalpb.GetVMResponse{Vm: toInternalVM(fwd.GetVm()), Found: true}
+			} else {
+				return &rpcpb.GetVMConsoleResponse{Error: resp.GetError()}, nil
 			}
 		}
-		return &rpcpb.GetVMConsoleResponse{Error: resp.GetError()}, nil
+		if resp.GetError() != "" {
+			return &rpcpb.GetVMConsoleResponse{Error: resp.GetError()}, nil
+		}
 	}
 	if !resp.GetFound() {
 		return &rpcpb.GetVMConsoleResponse{Error: fmt.Sprintf("VM %q not found", req.GetId())}, nil
