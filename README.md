@@ -92,9 +92,12 @@ each design decision, in order.
 - **jexec-based interactive jail console** — a real root shell inside a
   running jail (`/jails/{id}/console`), analogous to the VM console
   above but genuinely higher-privilege: `jexec` shares the host's own
-  kernel with no hardware isolation boundary, so this RPC requires
-  Operator role, one tier above the VM console's Viewer tier, and the
-  executed command is always a fixed `/bin/sh`, never caller-supplied.
+  kernel with no hardware isolation boundary. Off by default —
+  `managerd -jail-console-enabled` is a separate opt-in flag from
+  `-jail-enabled`, must be turned on deliberately per Hive, and layers
+  with an Operator-role requirement on the RPC itself (one tier above
+  the VM console's Viewer tier). The executed command is always a
+  fixed `/bin/sh`, never caller-supplied.
   A real PTY (`github.com/creack/pty`, this project's second-ever
   third-party runtime dependency) gives working line editing, job
   control, and signal handling rather than plain pipes; the browser

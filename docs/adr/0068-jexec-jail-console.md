@@ -20,12 +20,28 @@ design, not folded in as a minor variant of the VM console.
 
 ## Decision
 
-**Operator-tier, not Viewer-tier.** `ProxyVMConsole` is Viewer-role
-because viewing a VM's console is read/write access to that VM's own
-guest, isolated from the host by hardware virtualization.
+**Off by default, a separate opt-in flag from `-jail-enabled`.** A
+first version of this wired `SetJailConsole` unconditionally, following
+ADR-0064's "lifecycle inspection stays available regardless of
+provisioning" precedent - the wrong call here, caught immediately after
+landing: jexec access is a fundamentally different risk class than
+lifecycle inspection, not a variant of it. `-jail-console-enabled`
+(default `false`) is its own explicit flag, independent of
+`-jail-enabled`, and must be turned on deliberately per Hive.
+`SetJailConsole(nil)` (the default, unset state) is a safe no-op -
+`ProxyJailConsole` already reports "this node has no jail support
+configured" rather than panicking, the same nil-able-capability posture
+every other optional RPC in `internal/manager` follows.
+
+**Operator-tier, not Viewer-tier, on top of that.** `ProxyVMConsole` is
+Viewer-role because viewing a VM's console is read/write access to that
+VM's own guest, isolated from the host by hardware virtualization.
 `ProxyJailConsole` requires Operator - one tier stricter - because a
 jail's root shell is a direct, kernel-shared host-level actor. This is
-a deliberate asymmetry with the VM console, not an oversight.
+a deliberate asymmetry with the VM console, not an oversight. The role
+gate and the enable flag are independent, deliberately layered
+defenses: an Operator on a Hive where the flag is off still gets a
+clear "not configured" error, never a silent bypass.
 
 **A real PTY, not plain pipes.** A jexec session without a PTY would
 have no working line editing, job control, or signal handling
@@ -69,10 +85,9 @@ any `io.ReadWriteCloser` and a WebSocket.
 not a `NewServer` parameter** - following the exact precedent
 `SetAssumptionRegister` already established in this same file, to keep
 the already-long constructor signature stable across managerd's many
-focused tests. Wired unconditionally in `cmd/managerd/main.go`
-(independent of `-jail-enabled`), the same "inspection/teardown always
-available" posture ADR-0064 established for jail lifecycle operations
-- console access to an already-running jail is not "provisioning."
+focused tests. `cmd/managerd/main.go` only calls it when
+`-jail-console-enabled` is set (see above) - the setter itself doesn't
+know or care about that flag, it's just wiring.
 
 **Frontend terminal: vendored xterm.js (MIT), not a custom widget.**
 The user's own comparison to noVNC implied real terminal fidelity was
