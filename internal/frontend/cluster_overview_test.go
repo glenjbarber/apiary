@@ -105,6 +105,10 @@ func (f *fakePeerHostStatsClient) OpenVMConsole(_ context.Context, addr, _ strin
 	return nil, errors.New("test peer console unavailable")
 }
 
+func (f *fakePeerHostStatsClient) OpenJailConsole(_ context.Context, addr, _ string) (io.ReadWriteCloser, error) {
+	return nil, errors.New("test peer jail console unavailable")
+}
+
 func (f *fakePeerHostStatsClient) GetNodeConfig(_ context.Context, addr string) (*rpcpb.GetNodeConfigResponse, error) {
 	return &rpcpb.GetNodeConfigResponse{}, nil
 }

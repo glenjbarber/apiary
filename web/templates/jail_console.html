@@ -1,0 +1,62 @@
+{{define "jail_console_page"}}
+<!DOCTYPE html>
+<html lang="en">
+{{template "head" .}}
+<link rel="stylesheet" href="/static/xterm/xterm.css">
+<body class="app-layout">
+  {{template "nav" .}}
+  <main class="content" id="main-content">
+  <h1>Jail console: {{if .JailConsoleName}}{{.JailConsoleName}} ({{.JailConsoleID}}){{else}}{{.JailConsoleID}}{{end}}</h1>
+  {{if .ConsoleError}}
+    <div class="error">{{.ConsoleError}}</div>
+  {{else}}
+    <p class="muted">A real root shell inside this jail (<code>jexec</code>), one Operator session at a time. No window resizing in v1 - the terminal is a fixed 80x24.</p>
+    <div id="jail-console-status">Connecting&hellip;</div>
+    <div id="jail-console-screen" style="width: 100%; max-width: 900px; margin-top: 0.5rem; border: 1px solid #ccc; background: #000; padding: 0.25rem;"></div>
+    <script src="/static/xterm/xterm.js"></script>
+    {{/* xterm.js is a UMD bundle (vendored, MIT - see
+         web/static/xterm/LICENSE.txt), loaded as a plain script rather
+         than an ES module, exposing a global Terminal - mirrors
+         htmx.min.js's own vendoring/loading pattern elsewhere in this
+         project. term.onData delivers already-string-normalized input
+         (including escape sequences for special keys); it's sent as a
+         binary WebSocket frame since handleJailConsoleWS's proxyConsole
+         only relays binary messages, matching the noVNC console's own
+         convention. */}}
+    <script>
+      (function () {
+        var status = document.getElementById("jail-console-status");
+        var term = new Terminal({ cols: 80, rows: 24 });
+        term.open(document.getElementById("jail-console-screen"));
+
+        var proto = location.protocol === "https:" ? "wss:" : "ws:";
+        var url = proto + "//" + location.host + "{{.JailConsoleWSPath}}";
+        var ws = new WebSocket(url);
+        ws.binaryType = "arraybuffer";
+
+        ws.addEventListener("open", function () {
+          status.textContent = "Connected";
+          term.focus();
+        });
+        ws.addEventListener("close", function () {
+          status.textContent = "Disconnected";
+        });
+        ws.addEventListener("error", function () {
+          status.textContent = "Connection error";
+        });
+        ws.addEventListener("message", function (evt) {
+          term.write(new Uint8Array(evt.data));
+        });
+        term.onData(function (data) {
+          if (ws.readyState === WebSocket.OPEN) {
+            ws.send(new TextEncoder().encode(data));
+          }
+        });
+      })();
+    </script>
+  {{end}}
+  </main>
+  {{template "footer" .}}
+</body>
+</html>
+{{end}}

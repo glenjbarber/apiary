@@ -3,9 +3,11 @@ package manager
 import (
 	"context"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -116,12 +118,72 @@ func (f *fakeVNCLookup) VNCPort(name string) (int, bool, error) {
 	return port, ok, nil
 }
 
+// fakeJailConsoleAttach is a fake jailConsoleAttacher for
+// ProxyJailConsole tests, without any real jexec(8)/PTY involved -
+// Attach returns an in-memory echo session (newEchoReadWriteCloser)
+// rather than dialing anything.
+type fakeJailConsoleAttach struct {
+	err error
+}
+
+func (f *fakeJailConsoleAttach) Attach(ctx context.Context, name string) (io.ReadWriteCloser, error) {
+	if f.err != nil {
+		return nil, f.err
+	}
+	return newEchoReadWriteCloser(), nil
+}
+
+// echoReadWriteCloser echoes back whatever is written to it - Read
+// blocks until either a prior Write's bytes are available or Close is
+// called (returning io.EOF), the same "process exited" signal a real
+// jail.Session gives once jexec's child exits.
+type echoReadWriteCloser struct {
+	ch     chan []byte
+	closed chan struct{}
+	once   sync.Once
+}
+
+func newEchoReadWriteCloser() *echoReadWriteCloser {
+	return &echoReadWriteCloser{ch: make(chan []byte, 16), closed: make(chan struct{})}
+}
+
+func (e *echoReadWriteCloser) Write(p []byte) (int, error) {
+	cp := append([]byte(nil), p...)
+	select {
+	case e.ch <- cp:
+		return len(p), nil
+	case <-e.closed:
+		return 0, io.ErrClosedPipe
+	}
+}
+
+func (e *echoReadWriteCloser) Read(p []byte) (int, error) {
+	select {
+	case data := <-e.ch:
+		return copy(p, data), nil
+	case <-e.closed:
+		return 0, io.EOF
+	}
+}
+
+func (e *echoReadWriteCloser) Close() error {
+	e.once.Do(func() { close(e.closed) })
+	return nil
+}
+
 // newManagerdRPCClientWithVNC is newManagerdRPCClient, but lets a test
 // supply nodeID and vnc explicitly - needed for GetVMConsole, which
 // checks a VM's node_id against the serving Server's own nodeID.
 func newManagerdRPCClientWithVNC(t *testing.T, raftdSocket, nodeID string, vnc VNCLookup) rpcpb.ManagerServiceClient {
 	t.Helper()
-	return newManagerdRPCClientFull(t, raftdSocket, nodeID, vnc, nil, nil, nil, 0)
+	return newManagerdRPCClientFull(t, raftdSocket, nodeID, vnc, nil, nil, nil, 0, nil)
+}
+
+// newManagerdRPCClientWithJailConsole mirrors newManagerdRPCClientWithVNC,
+// for ProxyJailConsole tests.
+func newManagerdRPCClientWithJailConsole(t *testing.T, raftdSocket, nodeID string, jailConsole jailConsoleAttacher) rpcpb.ManagerServiceClient {
+	t.Helper()
+	return newManagerdRPCClientFull(t, raftdSocket, nodeID, nil, nil, nil, nil, 0, jailConsole)
 }
 
 // fakeSerialLogLookup is a fake SerialLogLookup for GetVMSerialLog
@@ -145,7 +207,7 @@ func (f *fakeSerialLogLookup) SerialLogPath(name string) (string, bool, error) {
 // Server's own nodeID.
 func newManagerdRPCClientWithSerialLog(t *testing.T, raftdSocket, nodeID string, serialLog SerialLogLookup) rpcpb.ManagerServiceClient {
 	t.Helper()
-	return newManagerdRPCClientFull(t, raftdSocket, nodeID, nil, serialLog, nil, nil, 0)
+	return newManagerdRPCClientFull(t, raftdSocket, nodeID, nil, serialLog, nil, nil, 0, nil)
 }
 
 // fakeVLANStatus is a fake VLANStatus for ListNetworks bridge-status
@@ -168,7 +230,7 @@ func (f *fakeVLANStatus) InterfaceStatus(_ context.Context, name string) (exists
 // newManagerdRPCClientFull is newManagerdRPCClient, but lets a test
 // supply nodeID, vnc, serialLog, vlanMgr, and an assumptions store
 // (ADR-0055) explicitly.
-func newManagerdRPCClientFull(t *testing.T, raftdSocket, nodeID string, vnc VNCLookup, serialLog SerialLogLookup, vlanMgr VLANStatus, assumptionStoreMgr assumptionStore, assumptionStaleAfter time.Duration) rpcpb.ManagerServiceClient {
+func newManagerdRPCClientFull(t *testing.T, raftdSocket, nodeID string, vnc VNCLookup, serialLog SerialLogLookup, vlanMgr VLANStatus, assumptionStoreMgr assumptionStore, assumptionStaleAfter time.Duration, jailConsole jailConsoleAttacher) rpcpb.ManagerServiceClient {
 	t.Helper()
 
 	raftClient, err := Dial(raftdSocket, "")
@@ -183,6 +245,7 @@ func newManagerdRPCClientFull(t *testing.T, raftdSocket, nodeID string, vnc VNCL
 	}
 
 	srv := NewServer(raftClient, nodeID, isostore.New(t.TempDir()), vnc, serialLog, vlanMgr, nil, "", nil, nil, assumptionStoreMgr, assumptionStaleAfter, nil)
+	srv.SetJailConsole(jailConsole)
 	// Wired unconditionally, mirroring cmd/managerd/main.go exactly - this
 	// is a no-op for every pre-existing test here (none of them ever
 	// create an API key, so checkAuth's "zero keys = open" branch always
@@ -300,7 +363,7 @@ func TestIntegration_Status_MembersIncludesFullSuffrage(t *testing.T) {
 // reporting the serving Hive, not an arbitrary manager process label.
 func TestIntegration_GetLocalNodeHealthUsesOneLocalEvidenceContract(t *testing.T) {
 	raftdSocket := newRaftdUDSSocket(t)
-	client := newManagerdRPCClientFull(t, raftdSocket, "raftd-1", nil, nil, nil, nil, 0)
+	client := newManagerdRPCClientFull(t, raftdSocket, "raftd-1", nil, nil, nil, nil, 0, nil)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -770,6 +833,86 @@ func TestIntegration_ProxyVMConsole_RejectsWrongOwner(t *testing.T) {
 	}
 }
 
+// TestIntegration_ProxyJailConsole_RelaysOnlyOwnedJail mirrors
+// TestIntegration_ProxyVMConsole_RelaysOnlyOwnedVM - a real raft-backed
+// CreateJail, then a real ProxyJailConsole round trip through the fake
+// jexec/PTY session (fakeJailConsoleAttach), proving both the ownership
+// check passes for a locally-owned jail and that bytes actually relay
+// in both directions.
+func TestIntegration_ProxyJailConsole_RelaysOnlyOwnedJail(t *testing.T) {
+	raftdSocket := newRaftdUDSSocket(t)
+	client := newManagerdRPCClientWithJailConsole(t, raftdSocket, "node-a", &fakeJailConsoleAttach{})
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if _, err := client.CreateJail(ctx, &rpcpb.CreateJailRequest{Jail: &rpcpb.JailDefinition{Id: "jail-1", NodeId: "node-a"}}); err != nil {
+		t.Fatal(err)
+	}
+	stream, err := client.ProxyJailConsole(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := stream.Send(&rpcpb.JailConsoleTunnelFrame{Payload: &rpcpb.JailConsoleTunnelFrame_Open{Open: &rpcpb.JailConsoleTunnelOpen{Id: "jail-1"}}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := stream.Send(&rpcpb.JailConsoleTunnelFrame{Payload: &rpcpb.JailConsoleTunnelFrame_Data{Data: []byte("hello")}}); err != nil {
+		t.Fatal(err)
+	}
+	frame, err := stream.Recv()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := string(frame.GetData()); got != "hello" {
+		t.Errorf("tunnel data = %q, want hello", got)
+	}
+}
+
+// TestIntegration_ProxyJailConsole_RejectsWrongOwner mirrors
+// TestIntegration_ProxyVMConsole_RejectsWrongOwner exactly.
+func TestIntegration_ProxyJailConsole_RejectsWrongOwner(t *testing.T) {
+	raftdSocket := newRaftdUDSSocket(t)
+	client := newManagerdRPCClientWithJailConsole(t, raftdSocket, "node-a", &fakeJailConsoleAttach{})
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if _, err := client.CreateJail(ctx, &rpcpb.CreateJailRequest{Jail: &rpcpb.JailDefinition{Id: "jail-1", NodeId: "node-b"}}); err != nil {
+		t.Fatal(err)
+	}
+	stream, err := client.ProxyJailConsole(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := stream.Send(&rpcpb.JailConsoleTunnelFrame{Payload: &rpcpb.JailConsoleTunnelFrame_Open{Open: &rpcpb.JailConsoleTunnelOpen{Id: "jail-1"}}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := stream.Recv(); err == nil {
+		t.Fatal("ProxyJailConsole() accepted a jail owned by another Hive")
+	}
+}
+
+// TestIntegration_ProxyJailConsole_NoJailConsoleConfigured proves the
+// nil-able jailConsole field fails cleanly (a clear error, not a panic)
+// on a node with no jail support configured - mirroring the "reports an
+// error rather than panicking" posture every other nil-able capability
+// in this package already follows (vnc, serialLog, zfs, etc.).
+func TestIntegration_ProxyJailConsole_NoJailConsoleConfigured(t *testing.T) {
+	raftdSocket := newRaftdUDSSocket(t)
+	client := newManagerdRPCClientWithJailConsole(t, raftdSocket, "node-a", nil)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if _, err := client.CreateJail(ctx, &rpcpb.CreateJailRequest{Jail: &rpcpb.JailDefinition{Id: "jail-1", NodeId: "node-a"}}); err != nil {
+		t.Fatal(err)
+	}
+	stream, err := client.ProxyJailConsole(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := stream.Send(&rpcpb.JailConsoleTunnelFrame{Payload: &rpcpb.JailConsoleTunnelFrame_Open{Open: &rpcpb.JailConsoleTunnelOpen{Id: "jail-1"}}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := stream.Recv(); err == nil {
+		t.Fatal("ProxyJailConsole() succeeded with no jail console configured")
+	}
+}
+
 func TestIntegration_GetVMConsole_NotYetProvisioned(t *testing.T) {
 	raftdSocket := newRaftdUDSSocket(t)
 	vnc := &fakeVNCLookup{ports: map[string]int{}}
@@ -1130,7 +1273,7 @@ func TestIntegration_ListNetworks_BridgeStatusUpOrDown(t *testing.T) {
 	raftdSocket := newRaftdUDSSocket(t)
 	bridge := resolveBridgeName(&internalpb.NetworkDefinition{Id: "net-1"})
 	vlan := &fakeVLANStatus{up: map[string]bool{bridge: true}}
-	client := newManagerdRPCClientFull(t, raftdSocket, "node-a", nil, nil, vlan, nil, 0)
+	client := newManagerdRPCClientFull(t, raftdSocket, "node-a", nil, nil, vlan, nil, 0, nil)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()

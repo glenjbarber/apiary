@@ -249,6 +249,32 @@ type Server struct {
 	// services is this Hive's narrowly-scoped rc.d service controller. It is
 	// intentionally local rather than a peer-forwarded or raft operation.
 	services nodeServiceController
+
+	// jailConsole is nil on a node with no jail provisioning configured
+	// (see cmd/managerd's own -jail-enabled) - ProxyJailConsole reports
+	// an error rather than panicking in that case. Set via
+	// SetJailConsole, not a NewServer parameter - see SetAssumptionRegister's
+	// own doc comment for why (keeping the established constructor
+	// signature stable across managerd and its many focused tests).
+	jailConsole jailConsoleAttacher
+}
+
+// jailConsoleAttacher is the subset of *jail.Manager ProxyJailConsole
+// needs, defined locally so it can be faked in tests without a real
+// jexec(8) binary - the same reasoning isoManager/VNCLookup/quotaSetter
+// already follow. Attach starts an interactive jexec(8) session inside
+// the named jail (always a fixed shell, never a caller-supplied command
+// - see jail.Manager.Attach's own doc comment) and returns its PTY as a
+// plain io.ReadWriteCloser; closing it terminates the session.
+type jailConsoleAttacher interface {
+	Attach(ctx context.Context, name string) (io.ReadWriteCloser, error)
+}
+
+// SetJailConsole wires jail console (jexec) support after construction -
+// see jailConsole's own field comment for why this is a setter rather
+// than a NewServer parameter.
+func (s *Server) SetJailConsole(attacher jailConsoleAttacher) {
+	s.jailConsole = attacher
 }
 
 // quotaSetter is the subset of *zfs.Manager SetDatasetQuota needs,
@@ -1497,6 +1523,98 @@ func (s *Server) ProxyVMConsole(stream rpcpb.ManagerService_ProxyVMConsoleServer
 				return nil
 			}
 			return readErr
+		}
+		select {
+		case recvErr := <-fromClient:
+			if recvErr == io.EOF {
+				return nil
+			}
+			return recvErr
+		default:
+		}
+	}
+}
+
+// ProxyJailConsole implements rpcpb.ManagerServiceServer - see the
+// proto's own doc comment for the full design rationale (why this has
+// no separate GetVMConsole-style availability RPC, why it's
+// Operator-tier, and the v1 no-resize limitation). Structurally this
+// mirrors ProxyVMConsole closely: validate ownership via the same
+// already-forwarding-aware sibling RPC (GetJail, exactly like
+// ProxyVMConsole delegates to GetVMConsole) before ever spawning
+// anything, then relay opaque bytes in both directions until either
+// side closes.
+func (s *Server) ProxyJailConsole(stream rpcpb.ManagerService_ProxyJailConsoleServer) error {
+	first, err := stream.Recv()
+	if err != nil {
+		return err
+	}
+	if first.GetOpen() == nil || first.GetOpen().GetId() == "" {
+		return fmt.Errorf("first jail console tunnel frame must open a jail")
+	}
+	id := first.GetOpen().GetId()
+
+	jailResp, err := s.GetJail(stream.Context(), &rpcpb.GetJailRequest{Id: id})
+	if err != nil {
+		return err
+	}
+	if jailResp.GetError() != "" {
+		return fmt.Errorf("looking up jail: %s", jailResp.GetError())
+	}
+	if !jailResp.GetFound() {
+		return fmt.Errorf("jail %q not found", id)
+	}
+	if jailResp.GetJail().GetNodeId() != s.nodeID {
+		return fmt.Errorf("jail %q is assigned to node %q; query that node's managerd directly for its console", id, jailResp.GetJail().GetNodeId())
+	}
+	if s.jailConsole == nil {
+		return fmt.Errorf("this node has no jail support configured")
+	}
+	sess, err := s.jailConsole.Attach(stream.Context(), id)
+	if err != nil {
+		return fmt.Errorf("attaching to jail %q: %w", id, err)
+	}
+	defer sess.Close()
+
+	fromClient := make(chan error, 1)
+	go func() {
+		defer sess.Close()
+		for {
+			frame, recvErr := stream.Recv()
+			if recvErr != nil {
+				fromClient <- recvErr
+				return
+			}
+			if len(frame.GetData()) == 0 {
+				fromClient <- fmt.Errorf("console tunnel accepts only data after open")
+				return
+			}
+			if _, writeErr := sess.Write(frame.GetData()); writeErr != nil {
+				fromClient <- writeErr
+				return
+			}
+		}
+	}()
+
+	buf := make([]byte, 32*1024)
+	for {
+		n, readErr := sess.Read(buf)
+		if n > 0 {
+			if sendErr := stream.Send(&rpcpb.JailConsoleTunnelFrame{Payload: &rpcpb.JailConsoleTunnelFrame_Data{Data: buf[:n]}}); sendErr != nil {
+				return sendErr
+			}
+		}
+		if readErr != nil {
+			// Unlike a TCP VNC connection, a PTY master's read error after
+			// its child process exits isn't reliably io.EOF on every
+			// platform (a well-known Linux quirk returns EIO instead; this
+			// project hasn't independently confirmed FreeBSD's exact
+			// behavior either way) - the child exiting (e.g. the operator
+			// typed "exit") is the normal, expected way for this session to
+			// end regardless of which error surfaces, so any read error
+			// here ends the stream cleanly rather than being reported to
+			// the browser as a failure.
+			return nil
 		}
 		select {
 		case recvErr := <-fromClient:

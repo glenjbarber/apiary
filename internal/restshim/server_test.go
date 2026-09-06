@@ -283,6 +283,10 @@ func (f *fakeClient) ProxyVMConsole(context.Context, ...grpc.CallOption) (grpc.B
 	return nil, errors.New("console streams are not exposed by restshim")
 }
 
+func (f *fakeClient) ProxyJailConsole(context.Context, ...grpc.CallOption) (grpc.BidiStreamingClient[rpcpb.JailConsoleTunnelFrame, rpcpb.JailConsoleTunnelFrame], error) {
+	return nil, errors.New("console streams are not exposed by restshim")
+}
+
 func (f *fakeClient) GetVMSerialLog(context.Context, *rpcpb.GetVMSerialLogRequest, ...grpc.CallOption) (*rpcpb.GetVMSerialLogResponse, error) {
 	return &rpcpb.GetVMSerialLogResponse{}, nil
 }

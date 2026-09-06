@@ -13,7 +13,7 @@ func TestIntegration_TraceCellPath_OnLinkPathShowsGuestEvidenceGap(t *testing.T)
 	raftdSocket := newRaftdUDSSocket(t)
 	bridge := resolveBridgeName(&internalpb.NetworkDefinition{Id: "net-1"})
 	vlan := &fakeVLANStatus{up: map[string]bool{bridge: true}}
-	client := newManagerdRPCClientFull(t, raftdSocket, "raftd-1", nil, nil, vlan, nil, 0)
+	client := newManagerdRPCClientFull(t, raftdSocket, "raftd-1", nil, nil, vlan, nil, 0, nil)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()

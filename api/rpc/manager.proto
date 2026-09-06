@@ -190,6 +190,23 @@ service ManagerService {
   rpc GetJail(GetJailRequest) returns (GetJailResponse);
   rpc ListJails(ListJailsRequest) returns (ListJailsResponse);
 
+  // ProxyJailConsole relays one browser terminal session into a real
+  // jexec(8) shell running inside the named jail, always on this jail's
+  // owning Hive's own managerd. Unlike ProxyVMConsole, there is no
+  // separate listener to dial - the owning managerd itself spawns the
+  // jexec(8) session (a real PTY, github.com/creack/pty) and relays its
+  // bytes directly. The first client frame must open the named jail;
+  // the owning managerd independently re-validates ownership before
+  // ever spawning anything, exactly like ProxyVMConsole's own
+  // GetVMConsole re-check. This is deliberately Operator-tier, one step
+  // above ProxyVMConsole's Viewer tier: jexec grants a real root shell
+  // sharing the host's own kernel (a jail has no hardware-level
+  // isolation boundary the way a VM's hypervisor does), a materially
+  // higher-privilege operation than viewing a VM's own console. v1 has
+  // no window-resize support - the PTY is a fixed size for the whole
+  // session.
+  rpc ProxyJailConsole(stream JailConsoleTunnelFrame) returns (stream JailConsoleTunnelFrame);
+
   // ForcePurgeJail mirrors ForcePurgeVM exactly, for a jail tombstoned
   // by DeleteJail whose owning node will never come back to reconcile
   // it away. See ForcePurgeVM's own doc comment above for the full
@@ -869,6 +886,18 @@ message VMConsoleTunnelOpen {
 message VMConsoleTunnelFrame {
   oneof payload {
     VMConsoleTunnelOpen open = 1;
+    bytes data = 2;
+    string error = 3;
+  }
+}
+
+message JailConsoleTunnelOpen {
+  string id = 1;
+}
+
+message JailConsoleTunnelFrame {
+  oneof payload {
+    JailConsoleTunnelOpen open = 1;
     bytes data = 2;
     string error = 3;
   }

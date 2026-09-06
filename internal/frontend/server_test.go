@@ -3,11 +3,13 @@ package frontend
 import (
 	"bytes"
 	"context"
+	"io"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"strings"
+	"sync"
 	"testing"
 
 	"google.golang.org/grpc"
@@ -25,6 +27,11 @@ type fakeClient struct {
 
 	getJailResp *rpcpb.GetJailResponse
 	getJailErr  error
+
+	// proxyJailConsoleErr, when set, makes ProxyJailConsole fail to open
+	// at all (simulating a dial/RPC failure) rather than returning a
+	// working fake stream.
+	proxyJailConsoleErr error
 
 	listResp *rpcpb.ListVMsResponse
 	listErr  error
@@ -369,6 +376,67 @@ func (f *fakeClient) ProxyVMConsole(context.Context, ...grpc.CallOption) (grpc.B
 	return nil, nil
 }
 
+// fakeJailConsoleStream is a fake grpc.BidiStreamingClient for
+// ProxyJailConsole - unlike ProxyVMConsole's stub above (never actually
+// exercised, since the VM console's local path dials a plain TCP
+// address directly instead), the jail console's local path always goes
+// through this RPC, so its own tests need a stream that behaves like a
+// real one: it echoes back whatever data it's sent, simulating a shell
+// that echoes its own input, without any real gRPC connection or real
+// jexec/PTY.
+type fakeJailConsoleStream struct {
+	grpc.ClientStream
+	mu     sync.Mutex
+	opened string
+	recvCh chan *rpcpb.JailConsoleTunnelFrame
+	closed bool
+}
+
+func newFakeJailConsoleStream() *fakeJailConsoleStream {
+	return &fakeJailConsoleStream{recvCh: make(chan *rpcpb.JailConsoleTunnelFrame, 16)}
+}
+
+func (f *fakeJailConsoleStream) Send(frame *rpcpb.JailConsoleTunnelFrame) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.closed {
+		return io.ErrClosedPipe
+	}
+	if open := frame.GetOpen(); open != nil {
+		f.opened = open.GetId()
+		return nil
+	}
+	if data := frame.GetData(); len(data) > 0 {
+		f.recvCh <- &rpcpb.JailConsoleTunnelFrame{Payload: &rpcpb.JailConsoleTunnelFrame_Data{Data: append([]byte(nil), data...)}}
+	}
+	return nil
+}
+
+func (f *fakeJailConsoleStream) Recv() (*rpcpb.JailConsoleTunnelFrame, error) {
+	frame, ok := <-f.recvCh
+	if !ok {
+		return nil, io.EOF
+	}
+	return frame, nil
+}
+
+func (f *fakeJailConsoleStream) CloseSend() error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if !f.closed {
+		f.closed = true
+		close(f.recvCh)
+	}
+	return nil
+}
+
+func (f *fakeClient) ProxyJailConsole(context.Context, ...grpc.CallOption) (grpc.BidiStreamingClient[rpcpb.JailConsoleTunnelFrame, rpcpb.JailConsoleTunnelFrame], error) {
+	if f.proxyJailConsoleErr != nil {
+		return nil, f.proxyJailConsoleErr
+	}
+	return newFakeJailConsoleStream(), nil
+}
+
 func (f *fakeClient) GetVMSerialLog(context.Context, *rpcpb.GetVMSerialLogRequest, ...grpc.CallOption) (*rpcpb.GetVMSerialLogResponse, error) {
 	if f.getVMSerialLogErr != nil {
 		return nil, f.getVMSerialLogErr
@@ -516,6 +584,39 @@ func TestServer_VMsPage(t *testing.T) {
 	}
 	if !strings.Contains(body, `href="/vms" aria-current="page"`) {
 		t.Errorf("VMs page navigation should mark its link current, got: %s", body)
+	}
+}
+
+// TestServer_VMsPage_MarksRemoteNodeVisually is the regression test for
+// a tracked follow-up feature: a Cell whose owning node differs from
+// the Hive answering this page should be styled as obviously remote,
+// not blended in identically with a local Cell.
+func TestServer_VMsPage_MarksRemoteNodeVisually(t *testing.T) {
+	client := &fakeClient{
+		listResp: &rpcpb.ListVMsResponse{Vms: []*rpcpb.VMDefinition{
+			{Id: "vm-local", Name: "web-1", NodeId: "apiarium"},
+			{Id: "vm-remote", Name: "web-2", NodeId: "apiverse"},
+		}},
+		statusResp: &rpcpb.StatusResponse{ManagerNodeId: "apiarium"},
+	}
+	s := newTestServer(t, client)
+
+	req := httptest.NewRequest(http.MethodGet, "/vms", nil)
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	body := rec.Body.String()
+
+	localRow := body[strings.Index(body, "vm-local"):strings.Index(body, "vm-remote")]
+	if strings.Contains(localRow, "remote-node") {
+		t.Errorf("local VM's row should not be marked remote-node, got: %s", localRow)
+	}
+	remoteRow := body[strings.Index(body, "vm-remote"):]
+	if !strings.Contains(remoteRow, "remote-node") {
+		t.Errorf("remote VM's row should be marked remote-node, got: %s", remoteRow)
 	}
 }
 
@@ -1257,6 +1358,37 @@ func TestServer_JailsPage(t *testing.T) {
 	if !strings.Contains(body, `hx-get="/jails/panel" hx-trigger="every 3s"`) ||
 		!strings.Contains(body, `hx-sync="this:drop"`) || !strings.Contains(body, `hx-sync="#jail-panel:replace"`) {
 		t.Error("jail panel must poll without interrupting explicit deletion")
+	}
+}
+
+// TestServer_JailsPage_MarksRemoteNodeVisually mirrors
+// TestServer_VMsPage_MarksRemoteNodeVisually for jails.
+func TestServer_JailsPage_MarksRemoteNodeVisually(t *testing.T) {
+	client := &fakeClient{
+		listJailsResp: &rpcpb.ListJailsResponse{Jails: []*rpcpb.JailDefinition{
+			{Id: "jail-local", Name: "a", NodeId: "apiarium"},
+			{Id: "jail-remote", Name: "b", NodeId: "apiverse"},
+		}},
+		statusResp: &rpcpb.StatusResponse{ManagerNodeId: "apiarium"},
+	}
+	s := newTestServer(t, client)
+
+	req := httptest.NewRequest(http.MethodGet, "/jails", nil)
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	body := rec.Body.String()
+
+	localRow := body[strings.Index(body, "jail-local"):strings.Index(body, "jail-remote")]
+	if strings.Contains(localRow, "remote-node") {
+		t.Errorf("local jail's row should not be marked remote-node, got: %s", localRow)
+	}
+	remoteRow := body[strings.Index(body, "jail-remote"):]
+	if !strings.Contains(remoteRow, "remote-node") {
+		t.Errorf("remote jail's row should be marked remote-node, got: %s", remoteRow)
 	}
 }
 

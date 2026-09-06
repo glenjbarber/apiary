@@ -7,6 +7,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"io"
 	"log"
 	"net"
 	"os"
@@ -211,8 +212,15 @@ func run() error {
 	}
 	// Keep lifecycle inspection/teardown available even when provisioning
 	// is disabled, otherwise an explicit DeleteJail tombstone is stranded.
-	// Nothing is created while JailProvisioningDisabled is true.
-	reconciler.Jail = jail.New(*jailPrefix)
+	// Nothing is created while JailProvisioningDisabled is true. Kept as
+	// its own concrete-typed variable (not read back out of
+	// reconciler.Jail, whose interface type is intentionally narrower)
+	// so it can also be wired into the jail console (below) - jexec
+	// console access to an already-running jail is independent of
+	// -jail-enabled, the same "inspection/teardown always available"
+	// posture ADR-0064 already established for lifecycle operations.
+	jailMgr := jail.New(*jailPrefix)
+	reconciler.Jail = jailMgr
 	reconciler.JailProvisioningDisabled = !*jailEnabled
 	reconciler.Mount = ufsmount.New()
 	reconciler.JailBase = *jailMountBase
@@ -339,6 +347,7 @@ func run() error {
 
 	srv := manager.NewServer(raftClient, id, isos, vncArg, serialLogArg, vlanArg, peers, resolvedPeerPort, zfsMgr, nodeConfigMgr, assumptionsMgr, assumptionStaleAfter, reconciler)
 	srv.SetAssumptionRegister(registerMgr)
+	srv.SetJailConsole(jailConsoleAdapter{jailMgr})
 	// Every RPC (including UploadISO's stream) is gated by srv's own
 	// API-key check - see ADR-0023. Auth stays fully open until the
 	// first key is created (CreateAPIKey itself included), so this is
@@ -483,6 +492,17 @@ func (a isoManagerAdapter) List() ([]resetutil.ISOInfo, error) {
 }
 
 func (a isoManagerAdapter) Delete(name string) error { return a.m.Delete(name) }
+
+// jailConsoleAdapter satisfies manager.jailConsoleAttacher against a
+// real *jail.Manager, whose Attach returns *jail.Session (a concrete
+// type richer than the plain io.ReadWriteCloser the manager package
+// needs and deliberately stays independent of - the same reasoning
+// isoManagerAdapter follows for resetutil.ISOManager above).
+type jailConsoleAdapter struct{ m *jail.Manager }
+
+func (a jailConsoleAdapter) Attach(ctx context.Context, name string) (io.ReadWriteCloser, error) {
+	return a.m.Attach(ctx, name)
+}
 
 // runReset implements managerd's one-shot -reset-managed/-factory-reset
 // modes (ADR-0038, Tiers 2 and 3) - run instead of the normal server,

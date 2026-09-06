@@ -413,6 +413,59 @@ func (p *PeerReporter) OpenVMConsole(ctx context.Context, addr, id string) (io.R
 	return &consoleTunnel{conn: conn, stream: stream}, nil
 }
 
+type jailConsoleTunnel struct {
+	conn   *grpc.ClientConn
+	stream rpcpb.ManagerService_ProxyJailConsoleClient
+	read   bytes.Buffer
+}
+
+func (t *jailConsoleTunnel) Read(p []byte) (int, error) {
+	for t.read.Len() == 0 {
+		frame, err := t.stream.Recv()
+		if err != nil {
+			return 0, err
+		}
+		if frame.GetError() != "" {
+			return 0, fmt.Errorf("remote jail console: %s", frame.GetError())
+		}
+		if len(frame.GetData()) == 0 {
+			return 0, fmt.Errorf("remote jail console sent an invalid frame")
+		}
+		t.read.Write(frame.GetData())
+	}
+	return t.read.Read(p)
+}
+
+func (t *jailConsoleTunnel) Write(p []byte) (int, error) {
+	if err := t.stream.Send(&rpcpb.JailConsoleTunnelFrame{Payload: &rpcpb.JailConsoleTunnelFrame_Data{Data: p}}); err != nil {
+		return 0, err
+	}
+	return len(p), nil
+}
+
+func (t *jailConsoleTunnel) Close() error { return t.conn.Close() }
+
+// OpenJailConsole mirrors OpenVMConsole exactly, for a jexec(8) session
+// instead of a VNC framebuffer - the tunnel's first frame is the jail
+// ID; the owner managerd validates ownership and spawns the session
+// itself (see ProxyJailConsole's own doc comment).
+func (p *PeerReporter) OpenJailConsole(ctx context.Context, addr, id string) (io.ReadWriteCloser, error) {
+	conn, client, err := p.dial(addr)
+	if err != nil {
+		return nil, err
+	}
+	stream, err := client.ProxyJailConsole(ctx)
+	if err != nil {
+		conn.Close()
+		return nil, err
+	}
+	if err := stream.Send(&rpcpb.JailConsoleTunnelFrame{Payload: &rpcpb.JailConsoleTunnelFrame_Open{Open: &rpcpb.JailConsoleTunnelOpen{Id: id}}}); err != nil {
+		conn.Close()
+		return nil, err
+	}
+	return &jailConsoleTunnel{conn: conn, stream: stream}, nil
+}
+
 // ListAssumptionResults forwards to a specific peer's own
 // ListAssumptionResults RPC - same shape as HostStats/
 // GetLocalNetworkBridgeStatus above. Used by internal/frontend's

@@ -6,9 +6,54 @@
   {{template "nav" .}}
   <main class="content" id="main-content">
   {{template "page_header" (pageHeader "Serial log" (vmSubtitle .SerialLogVMName .SerialLogVMID) "<a href='/vms'>Back to VMs</a>")}}
-  <div id="serial-log-panel" hx-get="/vms/{{.SerialLogVMID}}/serial/content" hx-trigger="every 3s" hx-swap="innerHTML">
+  <p>
+    <button type="button" id="serial-log-poll-toggle" aria-pressed="false">Stop refreshing</button>
+    <span class="muted" id="serial-log-poll-status">Refreshing every 3s.</span>
+  </p>
+  <div id="serial-log-panel" hx-get="/vms/{{.SerialLogVMID}}/serial/content" hx-trigger="every 3s [window.apiarySerialLogPolling]" hx-swap="innerHTML">
     {{template "serial_log_content" .}}
   </div>
+  {{/* Refreshing this panel replaces the <pre> element wholesale, which
+       would otherwise silently reset its scroll position to the top on
+       every poll - a real reported annoyance when reading through a
+       long boot log. window.apiarySerialLogPolling gates htmx's own
+       conditional poll trigger above (evaluated fresh before every
+       tick, per htmx's "every <interval> [<expr>]" syntax) so the
+       Stop/Start button can pause polling outright, not just visually;
+       the htmx:beforeSwap/afterSwap listeners below preserve the <pre>'s
+       own scrollTop across every swap regardless of whether polling is
+       paused, since a manual refresh (or the next tick after resuming)
+       should not lose the reader's place either. */}}
+  <script>
+    (function () {
+      window.apiarySerialLogPolling = true;
+      var panel = document.getElementById("serial-log-panel");
+      var toggle = document.getElementById("serial-log-poll-toggle");
+      var status = document.getElementById("serial-log-poll-status");
+      var savedScrollTop = null;
+
+      toggle.addEventListener("click", function () {
+        window.apiarySerialLogPolling = !window.apiarySerialLogPolling;
+        toggle.textContent = window.apiarySerialLogPolling ? "Stop refreshing" : "Start refreshing";
+        toggle.setAttribute("aria-pressed", String(!window.apiarySerialLogPolling));
+        status.textContent = window.apiarySerialLogPolling ? "Refreshing every 3s." : "Refreshing paused.";
+      });
+
+      panel.addEventListener("htmx:beforeSwap", function () {
+        var pre = panel.querySelector("pre");
+        savedScrollTop = pre ? pre.scrollTop : null;
+      });
+      panel.addEventListener("htmx:afterSwap", function () {
+        if (savedScrollTop === null) {
+          return;
+        }
+        var pre = panel.querySelector("pre");
+        if (pre) {
+          pre.scrollTop = savedScrollTop;
+        }
+      });
+    })();
+  </script>
   </main>
   {{template "footer" .}}
 </body>

@@ -32,7 +32,7 @@
   <td>{{.Name}}</td>
   <td>{{.VCPUs}}</td>
   <td>{{.MemoryMB}}</td>
-  <td>{{.NodeID}}</td>
+  <td{{if and $.LocalNodeID (ne .NodeID $.LocalNodeID)}} class="remote-node" title="Owned by a different Hive than the one currently answering this page"{{end}}>{{.NodeID}}</td>
   <td><span class="badge {{.Phase}}"{{if eq .Phase "error"}} title="{{.PhaseError}}"{{end}}>{{.Phase}}</span>{{if .PhaseError}}<div class="error">{{.PhaseError}}</div>{{end}}</td>
   <td>{{if .IPAddress}}{{.IPAddress}}{{end}}</td>
   <td><code>{{.MACAddress}}</code></td>

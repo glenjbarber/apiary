@@ -140,6 +140,14 @@
     .badge.not-applicable { color:#6685ef; background:color-mix(in srgb, #6685ef 17%, var(--panel)); }
     .badge.stale { opacity:.65; border:1px dashed var(--muted); }
     .badge.contradictory { color:#fff; background:var(--danger); }
+    /* remote-node marks a table cell whose Cell/resource is owned by a
+       different Hive than the one currently answering this page - see
+       the vm_rows/jail_rows templates. Muted text plus a small dot
+       (not color alone, for colorblind-safe distinction from a plain
+       local value) rather than a full badge, since this is informational
+       context, not a status. */
+    .remote-node { color:var(--muted); }
+    .remote-node::before { content:"\25CF "; font-size:.6rem; vertical-align:middle; opacity:.7; }
     .actions { display:flex; align-items:center; gap:.55rem; white-space:nowrap; }
     form.upload-iso, form.inline-form { display:flex; gap:.75rem; align-items:end; flex-wrap:wrap; }
     form.upload-iso label, form.inline-form label { display:flex; flex-direction:column; font-size:.85rem; }

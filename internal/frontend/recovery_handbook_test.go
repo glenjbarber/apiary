@@ -238,6 +238,11 @@ func (slowRecoveryPeerClient) OpenVMConsole(ctx context.Context, addr, id string
 	<-ctx.Done()
 	return nil, ctx.Err()
 }
+
+func (slowRecoveryPeerClient) OpenJailConsole(ctx context.Context, addr, id string) (io.ReadWriteCloser, error) {
+	<-ctx.Done()
+	return nil, ctx.Err()
+}
 func (slowRecoveryPeerClient) GetNodeConfig(ctx context.Context, addr string) (*rpcpb.GetNodeConfigResponse, error) {
 	<-ctx.Done()
 	return nil, ctx.Err()

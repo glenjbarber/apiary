@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os/exec"
+	"strings"
 	"testing"
 	"time"
 )
@@ -87,6 +88,55 @@ func TestIntegration_JailLifecycle(t *testing.T) {
 	}
 	if exists {
 		t.Fatalf("JailExists() = true after removal")
+	}
+}
+
+// TestIntegration_Attach exercises a real jexec(8) session end to end:
+// create a jail, attach, run a real command through the PTY, read its
+// real output back, and confirm Close actually terminates the session
+// rather than leaving it running.
+func TestIntegration_Attach(t *testing.T) {
+	if _, err := exec.LookPath("jexec"); err != nil {
+		t.Skip("jexec(8) not available on this host; see package doc comment for how to run these tests")
+	}
+	m, root := testManager(t)
+	ctx := context.Background()
+
+	if err := m.CreateJail(ctx, "console-1", Config{Path: root, Hostname: "console-1.apiary.test"}); err != nil {
+		t.Fatalf("CreateJail() error: %v", err)
+	}
+	t.Cleanup(func() { m.RemoveJail(context.Background(), "console-1") })
+
+	sess, err := m.Attach(ctx, "console-1")
+	if err != nil {
+		t.Fatalf("Attach() error: %v", err)
+	}
+
+	marker := "apiary-attach-test-marker"
+	if _, err := sess.Write([]byte("echo " + marker + "\n")); err != nil {
+		t.Fatalf("Write() error: %v", err)
+	}
+
+	deadline := time.Now().Add(5 * time.Second)
+	var output []byte
+	buf := make([]byte, 4096)
+	for time.Now().Before(deadline) && !strings.Contains(string(output), marker) {
+		sess.pty.SetReadDeadline(time.Now().Add(200 * time.Millisecond))
+		n, _ := sess.Read(buf)
+		output = append(output, buf[:n]...)
+	}
+	if !strings.Contains(string(output), marker) {
+		t.Fatalf("session output = %q, want it to contain %q", output, marker)
+	}
+
+	if err := sess.Close(); err != nil {
+		t.Errorf("Close() error: %v", err)
+	}
+	if err := sess.Close(); err != nil {
+		t.Errorf("second Close() error: %v, want idempotent no-op", err)
+	}
+	if sess.cmd.ProcessState == nil || !sess.cmd.ProcessState.Exited() {
+		t.Error("jexec process did not actually exit after Close()")
 	}
 }
 

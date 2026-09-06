@@ -111,10 +111,19 @@ type pageData struct {
 
 	// ConsoleVMID/ConsoleVMName/ConsoleWSPath/ConsoleError are only used
 	// by the console page (console.go) - see its own doc comments.
+	// ConsoleError is shared with the jail console page below - only one
+	// of the two console pages is ever rendered per request.
 	ConsoleVMID   string
 	ConsoleVMName string
 	ConsoleWSPath string
 	ConsoleError  string
+
+	// JailConsoleID/JailConsoleName/JailConsoleWSPath are only used by
+	// the jail console page (jail_console.go) - see its own doc
+	// comments. Shares ConsoleError above with the VM console page.
+	JailConsoleID     string
+	JailConsoleName   string
+	JailConsoleWSPath string
 
 	// SerialLogVMID/SerialLogVMName/SerialLogContent/SerialLogTruncated/
 	// SerialLogError are only used by the serial log page
@@ -668,6 +677,11 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /jails", s.requireRole(manager.RoleOperator, s.handleCreateJail))
 	s.mux.HandleFunc("DELETE /jails/{id}", s.requireRole(manager.RoleOperator, s.handleDeleteJail))
 	s.mux.HandleFunc("POST /jails/{id}/lifecycle", s.requireRole(manager.RoleOperator, s.handleSetJailDesiredState))
+	// Operator, not Viewer like the VM console routes above - see
+	// ProxyJailConsole's own proto doc comment for why jexec's real
+	// root shell is judged a materially higher-privilege operation.
+	s.mux.HandleFunc("GET /jails/{id}/console", s.requireRole(manager.RoleOperator, s.handleJailConsolePage))
+	s.mux.HandleFunc("GET /jails/{id}/console/ws", s.requireRole(manager.RoleOperator, s.handleJailConsoleWS))
 	s.mux.HandleFunc("POST /assumption-register", s.requireRole(manager.RoleOperator, s.handleSaveAssumptionClaim))
 	s.mux.HandleFunc("DELETE /assumption-register/{id}", s.requireRole(manager.RoleOperator, s.handleDeleteAssumptionClaim))
 
@@ -831,7 +845,8 @@ func (s *Server) currentVMs(r *http.Request, sortBy, dir string) ([]vmView, stri
 func (s *Server) handleVMsPage(w http.ResponseWriter, r *http.Request) {
 	sortBy, dir := parseSort(r)
 	vms, errMsg := s.currentVMs(r, sortBy, dir)
-	s.render(w, "vms_page", s.withAuthFields(r, pageData{Error: errMsg, VMs: vms, SortBy: sortBy, SortDir: dir, ActivePage: "vms"}))
+	localNodeID := s.currentLocalNodeID(r)
+	s.render(w, "vms_page", s.withAuthFields(r, pageData{Error: errMsg, VMs: vms, SortBy: sortBy, SortDir: dir, LocalNodeID: localNodeID, ActivePage: "vms"}))
 }
 
 // handleVMPage renders one VM as an operational summary. It deliberately
@@ -1060,6 +1075,20 @@ func (s *Server) knownNodes(r *http.Request) ([]string, error) {
 	return resp.GetKnownNodeIds(), nil
 }
 
+// currentLocalNodeID fetches this frontend's own colocated managerd's
+// node id, for visually distinguishing a Cell owned by a different Hive
+// in the VM/jail list tables (vm_rows.html/jail_rows.html's
+// "remote-node" styling). Fails soft to "" - a Status fetch failure
+// just means nothing gets marked remote this render, not an error
+// surfaced to the operator, matching knownNodes's own posture.
+func (s *Server) currentLocalNodeID(r *http.Request) string {
+	resp, err := s.client.Status(r.Context(), &rpcpb.StatusRequest{})
+	if err != nil {
+		return ""
+	}
+	return resp.GetManagerNodeId()
+}
+
 // handleListVMs serves just the vm_rows fragment, for HTMX polling
 // (hx-trigger="every ...") to pick up reconciliation progress - e.g. a
 // VM's State column moving from "pending" to "creating" to "ready" -
@@ -1067,7 +1096,7 @@ func (s *Server) knownNodes(r *http.Request) ([]string, error) {
 func (s *Server) handleListVMs(w http.ResponseWriter, r *http.Request) {
 	sortBy, dir := parseSort(r)
 	vms, errMsg := s.currentVMs(r, sortBy, dir)
-	s.renderVMRows(w, errMsg, vms, s.withAuthFields(r, pageData{}).CanOperate)
+	s.renderVMRows(w, errMsg, vms, s.withAuthFields(r, pageData{}).CanOperate, s.currentLocalNodeID(r))
 }
 
 // renderVMRows renders the vm_rows fragment for a swap into #vm-rows -
@@ -1078,13 +1107,13 @@ func (s *Server) handleListVMs(w http.ResponseWriter, r *http.Request) {
 // rather than embedded in the response body - see vm_rows.html's own
 // comment for why mixing an out-of-band <div> into a <tbody>-targeted
 // response corrupted the table on every poll.
-func (s *Server) renderVMRows(w http.ResponseWriter, errMsg string, vms []vmView, canOperate bool) {
+func (s *Server) renderVMRows(w http.ResponseWriter, errMsg string, vms []vmView, canOperate bool, localNodeID string) {
 	if errMsg != "" {
 		if b, err := json.Marshal(map[string]string{"vmError": errMsg}); err == nil {
 			w.Header().Set("HX-Trigger", string(b))
 		}
 	}
-	s.render(w, "vm_rows", pageData{Error: errMsg, VMs: vms, CanOperate: canOperate})
+	s.render(w, "vm_rows", pageData{Error: errMsg, VMs: vms, CanOperate: canOperate, LocalNodeID: localNodeID})
 }
 
 // handleCreateVM lives on its own page (/vms/new, see new_vm.html) now
@@ -1195,7 +1224,7 @@ func (s *Server) handleDeleteVM(w http.ResponseWriter, r *http.Request) {
 
 	sortBy, dir := parseSort(r)
 	vms, errMsg := s.currentVMs(r, sortBy, dir)
-	s.renderVMRows(w, errMsg, vms, s.withAuthFields(r, pageData{}).CanOperate)
+	s.renderVMRows(w, errMsg, vms, s.withAuthFields(r, pageData{}).CanOperate, s.currentLocalNodeID(r))
 }
 
 // renderRowsWithError re-fetches the current (unchanged) VM list and
@@ -1207,7 +1236,7 @@ func (s *Server) renderRowsWithError(w http.ResponseWriter, r *http.Request, msg
 	if fetchErr != "" {
 		msg = msg + "; additionally failed to refresh list: " + fetchErr
 	}
-	s.renderVMRows(w, msg, vms, s.withAuthFields(r, pageData{}).CanOperate)
+	s.renderVMRows(w, msg, vms, s.withAuthFields(r, pageData{}).CanOperate, s.currentLocalNodeID(r))
 }
 
 // handleListISOs serves just the iso_rows fragment, for refreshing the
@@ -1455,7 +1484,8 @@ func (s *Server) currentJails(r *http.Request) ([]jailView, string) {
 func (s *Server) handleJailsPage(w http.ResponseWriter, r *http.Request) {
 	jails, errMsg := s.currentJails(r)
 	nodes, _ := s.knownNodes(r)
-	s.render(w, "jails_page", s.withAuthFields(r, pageData{Jails: jails, Nodes: nodes, JailFormError: errMsg, ActivePage: "jails"}))
+	localNodeID := s.currentLocalNodeID(r)
+	s.render(w, "jails_page", s.withAuthFields(r, pageData{Jails: jails, Nodes: nodes, JailFormError: errMsg, LocalNodeID: localNodeID, ActivePage: "jails"}))
 }
 
 func (s *Server) handleJailPanel(w http.ResponseWriter, r *http.Request) {
@@ -1561,7 +1591,7 @@ func (s *Server) renderJailPanelResult(w http.ResponseWriter, r *http.Request, f
 			formErr += "; additionally failed to refresh list: " + fetchErr
 		}
 	}
-	s.render(w, "jail_panel", s.withAuthFields(r, pageData{JailFormError: formErr, Jails: jails}))
+	s.render(w, "jail_panel", s.withAuthFields(r, pageData{JailFormError: formErr, Jails: jails, LocalNodeID: s.currentLocalNodeID(r)}))
 }
 
 // currentAPIKeys fetches the current list of API keys (metadata only),

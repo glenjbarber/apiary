@@ -32,6 +32,37 @@ func TestServer_SerialLogPage_AvailableShowsContent(t *testing.T) {
 	}
 }
 
+// TestServer_SerialLogPage_HasStopStartPollingToggle is the regression
+// test for a tracked follow-up feature: a refresh used to always reset
+// the reader's scroll position because it replaced the whole <pre>
+// element, with no way to pause it. The page must render a toggle
+// control and gate its poll trigger on a JS-evaluated condition (htmx's
+// "every <interval> [<expr>]" syntax) rather than an unconditional poll.
+func TestServer_SerialLogPage_HasStopStartPollingToggle(t *testing.T) {
+	client := &fakeClient{
+		getVMSerialLogResp: &rpcpb.GetVMSerialLogResponse{Available: true, Content: "line one\n"},
+	}
+	s := newTestServer(t, client)
+
+	req := httptest.NewRequest(http.MethodGet, "/vms/vm-1/serial", nil)
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, `id="serial-log-poll-toggle"`) {
+		t.Errorf("serial log page missing the Stop/Start refreshing toggle, got: %s", body)
+	}
+	if !strings.Contains(body, `hx-trigger="every 3s [window.apiarySerialLogPolling]"`) {
+		t.Errorf("serial log panel's poll trigger must be gated by the toggle's condition, got: %s", body)
+	}
+	if !strings.Contains(body, "htmx:beforeSwap") || !strings.Contains(body, "htmx:afterSwap") {
+		t.Errorf("serial log page missing scroll-position preservation across polls, got: %s", body)
+	}
+}
+
 func TestServer_SerialLogPage_TruncatedShowsNotice(t *testing.T) {
 	client := &fakeClient{
 		getVMSerialLogResp: &rpcpb.GetVMSerialLogResponse{Available: true, Content: "tail only", Truncated: true},
