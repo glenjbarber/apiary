@@ -70,6 +70,7 @@ type VLANStatus interface {
 type PeerForwarder interface {
 	ListVMs(ctx context.Context, addr string) (*rpcpb.ListVMsResponse, error)
 	GetVM(ctx context.Context, addr, id string) (*rpcpb.GetVMResponse, error)
+	GetVMConsole(ctx context.Context, addr, id string) (*rpcpb.GetVMConsoleResponse, error)
 	ListJails(ctx context.Context, addr string) (*rpcpb.ListJailsResponse, error)
 	GetJail(ctx context.Context, addr, id string) (*rpcpb.GetJailResponse, error)
 	ListNetworks(ctx context.Context, addr string) (*rpcpb.ListNetworksResponse, error)
@@ -1373,16 +1374,20 @@ func (s *Server) HostStats(ctx context.Context, _ *rpcpb.HostStatsRequest) (*rpc
 	}, nil
 }
 
-// GetVMConsole implements rpcpb.ManagerServiceServer. It only ever
-// answers for a VM actually running on this node - see
-// GetVMConsoleResponse's doc comment (api/rpc/manager.proto) for the
-// resulting v1 limitation on a true multi-node deployment.
+// GetVMConsole implements rpcpb.ManagerServiceServer. Leader-only VM
+// lookup failures are forwarded to the current leader; the leader then
+// answers only when the VM is actually running on that node.
 func (s *Server) GetVMConsole(ctx context.Context, req *rpcpb.GetVMConsoleRequest) (*rpcpb.GetVMConsoleResponse, error) {
 	resp, err := s.raft.GetVM(ctx, req.GetId())
 	if err != nil {
 		return &rpcpb.GetVMConsoleResponse{Error: err.Error()}, nil
 	}
 	if resp.GetError() != "" {
+		if s.peers != nil && resp.GetLeaderHint() != "" {
+			if fwd, ferr := s.peers.GetVMConsole(ctx, s.peerManagerdAddr(resp.GetLeaderHint()), req.GetId()); ferr == nil {
+				return fwd, nil
+			}
+		}
 		return &rpcpb.GetVMConsoleResponse{Error: resp.GetError()}, nil
 	}
 	if !resp.GetFound() {
