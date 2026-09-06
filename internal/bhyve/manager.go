@@ -289,14 +289,8 @@ func (m *Manager) CreateVM(ctx context.Context, name string, cfg Config) error {
 	if err != nil {
 		return err
 	}
-	if cfg.BootROM == "" {
-		return fmt.Errorf("bhyve: Config.BootROM must be set")
-	}
-	if cfg.CPUs <= 0 {
-		return fmt.Errorf("bhyve: Config.CPUs must be positive")
-	}
-	if cfg.MemoryMB == 0 {
-		return fmt.Errorf("bhyve: Config.MemoryMB must be set")
+	if err := ValidateConfig(cfg); err != nil {
+		return fmt.Errorf("bhyve preflight: %w", err)
 	}
 
 	if err := os.MkdirAll(m.runDir(), 0o755); err != nil {
@@ -423,6 +417,64 @@ func (m *Manager) CreateVM(ctx context.Context, name string, cfg Config) error {
 			// VM back down.
 			return fmt.Errorf("bhyve: VM created but recording VNC port failed: %w", err)
 		}
+	}
+	return nil
+}
+
+// ValidateConfig checks launch inputs that can be verified locally before a
+// tap device, serial logger, or detached bhyve process is created. Callers get
+// a direct, actionable error rather than a later asynchronous guest failure.
+// DiskPath and InstallDiskPath may be block devices such as /dev/hast/*; boot
+// ROM and ISO media must be ordinary readable files.
+func ValidateConfig(cfg Config) error {
+	if cfg.BootROM == "" {
+		return fmt.Errorf("boot ROM must be set")
+	}
+	if cfg.CPUs <= 0 {
+		return fmt.Errorf("vCPU count must be positive")
+	}
+	if cfg.MemoryMB == 0 {
+		return fmt.Errorf("memory must be set")
+	}
+	if cfg.ISOPath != "" && cfg.InstallDiskPath != "" {
+		return fmt.Errorf("installer media cannot be both ISO and disk")
+	}
+	if err := validateReadablePath("boot ROM", cfg.BootROM, false); err != nil {
+		return err
+	}
+	if err := validateReadablePath("boot disk", cfg.DiskPath, true); err != nil {
+		return err
+	}
+	if err := validateReadablePath("installer ISO", cfg.ISOPath, false); err != nil {
+		return err
+	}
+	if err := validateReadablePath("installer disk", cfg.InstallDiskPath, true); err != nil {
+		return err
+	}
+	return nil
+}
+
+func validateReadablePath(label, path string, allowDevice bool) error {
+	if path == "" {
+		return nil
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		return fmt.Errorf("%s %q: %w", label, path, err)
+	}
+	if !info.Mode().IsRegular() && !(allowDevice && info.Mode()&os.ModeDevice != 0) {
+		kind := "file"
+		if allowDevice {
+			kind = "file or device"
+		}
+		return fmt.Errorf("%s %q is not a usable %s", label, path, kind)
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return fmt.Errorf("opening %s %q: %w", label, path, err)
+	}
+	if err := f.Close(); err != nil {
+		return fmt.Errorf("closing %s %q: %w", label, path, err)
 	}
 	return nil
 }

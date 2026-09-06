@@ -235,3 +235,29 @@ func TestProcessAlive_GarbagePidfileContentReturnsFalse(t *testing.T) {
 		t.Error("processAlive() = true, want false for unparseable pidfile content")
 	}
 }
+
+func TestValidateConfig(t *testing.T) {
+	dir := t.TempDir()
+	bootROM := filepath.Join(dir, "BHYVE_UEFI.fd")
+	disk := filepath.Join(dir, "disk.img")
+	installer := filepath.Join(dir, "install.iso")
+	for _, path := range []string{bootROM, disk, installer} {
+		if err := os.WriteFile(path, []byte("test"), 0o600); err != nil {
+			t.Fatalf("WriteFile(%q): %v", path, err)
+		}
+	}
+	valid := Config{CPUs: 1, MemoryMB: 512, BootROM: bootROM, DiskPath: disk, ISOPath: installer}
+
+	if err := ValidateConfig(valid); err != nil {
+		t.Fatalf("ValidateConfig(valid) error: %v", err)
+	}
+	if err := ValidateConfig(Config{CPUs: 1, MemoryMB: 512, BootROM: filepath.Join(dir, "missing.fd")}); err == nil {
+		t.Error("ValidateConfig(missing boot ROM) = nil error, want preflight failure")
+	}
+	if err := ValidateConfig(Config{CPUs: 1, MemoryMB: 512, BootROM: bootROM, DiskPath: filepath.Join(dir, "missing.img")}); err == nil {
+		t.Error("ValidateConfig(missing boot disk) = nil error, want preflight failure")
+	}
+	if err := ValidateConfig(Config{CPUs: 1, MemoryMB: 512, BootROM: bootROM, ISOPath: installer, InstallDiskPath: disk}); err == nil {
+		t.Error("ValidateConfig(two installer types) = nil error, want preflight failure")
+	}
+}
