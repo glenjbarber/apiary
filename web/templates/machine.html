@@ -14,7 +14,10 @@
       use on this node, and which resolver Apiary advertises to Cells.
       Changes here take effect the next time this node's managerd
       restarts, not live. Blank NAT uplink means use Uplink. Blank DNS
-      means use the startup flag value, if one was supplied.
+      means use the startup flag value, if one was supplied. Interface
+      choices are discovered from this Hive; a saved interface that is no
+      longer present is retained as an unavailable choice so it can be
+      cleared safely.
     </p>
     <div id="nodeconfig-panel">
       {{template "nodeconfig_panel" .}}
@@ -133,9 +136,20 @@
   </tbody>
 </table>
 {{if .CanAdmin}}
+{{if .NodeConfig.InterfaceInventoryError}}<div class="banner-error">Unable to discover host interfaces: {{.NodeConfig.InterfaceInventoryError}}. Saved values are still available to clear or correct.</div>{{end}}
 <form class="inline-form" hx-post="/machine/uplink" hx-target="#nodeconfig-panel" hx-swap="innerHTML">
-  <label>Uplink <input type="text" name="uplink" placeholder="re0" value="{{.NodeConfig.Uplink}}"></label>
-  <label>NAT uplink <input type="text" name="nat_uplink" placeholder="leave blank to use Uplink" value="{{.NodeConfig.NATUplink}}"></label>
+  <label>VLAN uplink
+    <select name="uplink">
+      <option value="" {{if eq .NodeConfig.Uplink ""}}selected{{end}}>(unset)</option>
+      {{range .NodeConfig.UplinkOptions}}<option value="{{.Name}}" {{if .Selected}}selected{{end}}>{{.Label}}</option>{{end}}
+    </select>
+  </label>
+  <label>NAT uplink
+    <select name="nat_uplink">
+      <option value="" {{if eq .NodeConfig.NATUplink ""}}selected{{end}}>(unset, use VLAN uplink)</option>
+      {{range .NodeConfig.NATUplinkOptions}}<option value="{{.Name}}" {{if .Selected}}selected{{end}}>{{.Label}}</option>{{end}}
+    </select>
+  </label>
   <label>DHCP DNS server <input type="text" name="dhcp_dns_server" placeholder="10.62.0.1" value="{{.NodeConfig.DNSServer}}"></label>
   <input type="hidden" name="jail_enabled" value="{{.NodeConfig.JailEnabledMode}}">
   <button type="submit">Save</button>

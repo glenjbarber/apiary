@@ -42,16 +42,28 @@ The values are applied on the next managerd restart, and the page states
 that explicitly. Startup flags remain bootstrap defaults for a fresh node
 that has no saved node configuration.
 
-## Why there is no `defaultif0` in this version
+The Machine Configuration page now presents the VLAN uplink and NAT uplink
+as separate dropdowns populated from the answering Hive's live host
+interface inventory. Each option includes its up/down state and addresses.
+An interface saved in node-local configuration but no longer present is
+retained as a marked unavailable option, so an operator can select `(unset)`
+and clear it without editing JSON by hand. Interface discovery is advisory:
+the host remains responsible for deciding whether an interface is suitable
+for VLAN tagging or NAT.
+
+## Why there is no implicit `defaultif0` in this version
 
 FreeBSD PF's `nat-to` rule and the kernel's default route both ultimately
 need a concrete interface. A synthetic `defaultif0` would require a
 second host-side service to create it, route it, and keep it synchronized
 with the real WAN interface. That would add another failure domain while
 making the actual egress less observable. The existing `NATUplink` field
-is the narrower, inspectable host-default contract. A future host adapter
-can provide a stable alias, but it must do so as a documented host
-integration rather than as an implicit Apiary interface.
+is the narrower, inspectable host-default contract. A host may still expose
+a stable real interface or bridge, such as `bridge999`, and select it in the
+NAT uplink dropdown. The host must give that interface the actual L3 address,
+default-route path, and PF/NAT behavior. Apiary does not infer or create that
+host topology, and `ifconfig_DEFAULT` remains a FreeBSD configuration
+fallback rather than an interface or route selector.
 
 ## Safety and failure behavior
 

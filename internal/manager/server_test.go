@@ -14,6 +14,7 @@ import (
 	"github.com/glenjbarber/apiary/internal/assumptionregister"
 	"github.com/glenjbarber/apiary/internal/hoststats"
 	"github.com/glenjbarber/apiary/internal/isostore"
+	"github.com/glenjbarber/apiary/internal/netif"
 	"github.com/glenjbarber/apiary/internal/nodeconfig"
 )
 
@@ -410,6 +411,12 @@ func (f *fakeNodeConfigStore) Save(cfg nodeconfig.Config) error {
 func TestServer_GetNodeConfig(t *testing.T) {
 	store := &fakeNodeConfigStore{cfg: nodeconfig.Config{Uplink: "re0", NATUplink: "bridge0", DNSServer: "10.62.0.1", JailEnabled: boolPtr(true)}}
 	s := NewServer(nil, "node-1", nil, nil, nil, nil, nil, "", nil, store, nil, 0, nil)
+	s.SetNetworkInterfaceLister(func() ([]netif.Interface, error) {
+		return []netif.Interface{
+			{Name: "bridge0", Up: true, Addresses: []string{"10.50.0.14/24"}},
+			{Name: "re0", Up: false},
+		}, nil
+	})
 
 	resp, err := s.GetNodeConfig(context.Background(), &rpcpb.GetNodeConfigRequest{})
 	if err != nil {
@@ -417,6 +424,9 @@ func TestServer_GetNodeConfig(t *testing.T) {
 	}
 	if resp.GetUplink() != "re0" || resp.GetNatUplink() != "bridge0" || resp.GetDhcpDnsServer() != "10.62.0.1" || !resp.GetJailEnabled() || resp.JailEnabled == nil {
 		t.Errorf("GetNodeConfig() = %+v, want Uplink=re0 NatUplink=bridge0 DhcpDnsServer=10.62.0.1 JailEnabled=true", resp)
+	}
+	if len(resp.GetAvailableInterfaces()) != 2 || resp.GetAvailableInterfaces()[0].GetName() != "bridge0" || !resp.GetAvailableInterfaces()[0].GetUp() {
+		t.Errorf("GetNodeConfig() interfaces = %+v, want bridge0 up and re0 down", resp.GetAvailableInterfaces())
 	}
 }
 
@@ -429,6 +439,22 @@ func TestServer_GetNodeConfig_NotConfiguredIsError(t *testing.T) {
 	}
 	if resp.GetError() == "" {
 		t.Errorf("GetNodeConfig() error field = empty, want a not-configured message")
+	}
+}
+
+func TestServer_GetNodeConfig_InterfaceInventoryErrorPreservesConfig(t *testing.T) {
+	store := &fakeNodeConfigStore{cfg: nodeconfig.Config{Uplink: "bridge999"}}
+	s := NewServer(nil, "node-1", nil, nil, nil, nil, nil, "", nil, store, nil, 0, nil)
+	s.SetNetworkInterfaceLister(func() ([]netif.Interface, error) {
+		return nil, errors.New("interface enumeration failed")
+	})
+
+	resp, err := s.GetNodeConfig(context.Background(), &rpcpb.GetNodeConfigRequest{})
+	if err != nil {
+		t.Fatalf("GetNodeConfig() error: %v", err)
+	}
+	if resp.GetUplink() != "bridge999" || resp.GetInterfaceInventoryError() != "interface enumeration failed" {
+		t.Errorf("GetNodeConfig() = %+v, want saved uplink and inventory error", resp)
 	}
 }
 

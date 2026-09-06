@@ -927,6 +927,22 @@ message GetNodeConfigResponse {
   optional bool jail_enabled = 3;
 
   string error = 4;
+
+  // available_interfaces is this Hive's current host-local interface
+  // inventory. It is advisory and never replicated; names and addresses
+  // are meaningful only on the node that answered this request.
+  repeated NetworkInterface available_interfaces = 6;
+
+  // interface_inventory_error is set when the host could not enumerate its
+  // interfaces. The saved settings remain available so an operator can
+  // still clear or correct them.
+  string interface_inventory_error = 7;
+}
+
+message NetworkInterface {
+  string name = 1;
+  bool up = 2;
+  repeated string addresses = 3;
 }
 
 message UpdateNodeConfigRequest {

@@ -1,6 +1,26 @@
 package frontend
 
-import "testing"
+import (
+	"testing"
+
+	rpcpb "github.com/glenjbarber/apiary/api/rpc"
+)
+
+func TestFromRPCNodeConfig_RetainsUnavailableSelections(t *testing.T) {
+	view := fromRPCNodeConfig(&rpcpb.GetNodeConfigResponse{
+		Uplink:    "bridge999",
+		NatUplink: "bridge999",
+		AvailableInterfaces: []*rpcpb.NetworkInterface{
+			{Name: "em0", Up: true, Addresses: []string{"10.50.0.9/24"}},
+		},
+	})
+	if len(view.UplinkOptions) != 2 || view.UplinkOptions[1].Label != "bridge999 (saved, unavailable)" || !view.UplinkOptions[1].Selected {
+		t.Errorf("UplinkOptions = %+v, want discovered em0 and selected unavailable bridge999", view.UplinkOptions)
+	}
+	if len(view.NATUplinkOptions) != 2 || view.NATUplinkOptions[1].Label != "bridge999 (saved, unavailable)" || !view.NATUplinkOptions[1].Selected {
+		t.Errorf("NATUplinkOptions = %+v, want discovered em0 and selected unavailable bridge999", view.NATUplinkOptions)
+	}
+}
 
 func idsOf(vms []vmView) []string {
 	ids := make([]string, len(vms))

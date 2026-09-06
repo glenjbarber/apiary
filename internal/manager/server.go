@@ -19,6 +19,7 @@ import (
 	"github.com/glenjbarber/apiary/internal/health"
 	"github.com/glenjbarber/apiary/internal/hoststats"
 	"github.com/glenjbarber/apiary/internal/isostore"
+	"github.com/glenjbarber/apiary/internal/netif"
 	"github.com/glenjbarber/apiary/internal/nodeconfig"
 )
 
@@ -221,6 +222,11 @@ type Server struct {
 	// than panicking. See ADR-0049/internal/nodeconfig.
 	nodeConfig nodeConfigStore
 
+	// listNetworkInterfaces reports the current host-local interface
+	// inventory for the Machine Configuration page. It is separate from
+	// nodeConfig because discovery is live and is never persisted.
+	listNetworkInterfaces func() ([]netif.Interface, error)
+
 	// assumptions is nil on a node that never got an assumptions store
 	// wired up - ListAssumptionResults reports an error rather than
 	// panicking. Physical, per-node data like isos/nodeConfig above,
@@ -280,7 +286,13 @@ var _ rpcpb.ManagerServiceServer = (*Server)(nil)
 // the params above) specifically to keep every existing positional
 // NewServer(...) call site a mechanical one-line edit.
 func NewServer(raft *RaftClient, nodeID string, isos isoManager, vnc VNCLookup, serialLog SerialLogLookup, vlanMgr VLANStatus, peers PeerForwarder, peerManagerdPort string, zfsMgr quotaSetter, nodeConfig nodeConfigStore, assumptionStoreMgr assumptionStore, assumptionStaleAfter time.Duration, reconciler reconcilerStats) *Server {
-	return &Server{raft: raft, nodeID: nodeID, isos: isos, vnc: vnc, serialLog: serialLog, vlan: vlanMgr, statsGather: hoststats.Gather, peers: peers, peerManagerdPort: peerManagerdPort, zfs: zfsMgr, nodeConfig: nodeConfig, assumptions: assumptionStoreMgr, assumptionStaleAfter: assumptionStaleAfter, reconciler: reconciler, services: rcServiceController{}}
+	return &Server{raft: raft, nodeID: nodeID, isos: isos, vnc: vnc, serialLog: serialLog, vlan: vlanMgr, statsGather: hoststats.Gather, peers: peers, peerManagerdPort: peerManagerdPort, zfs: zfsMgr, nodeConfig: nodeConfig, listNetworkInterfaces: netif.List, assumptions: assumptionStoreMgr, assumptionStaleAfter: assumptionStaleAfter, reconciler: reconciler, services: rcServiceController{}}
+}
+
+// SetNetworkInterfaceLister overrides host interface discovery for tests.
+// Production servers use netif.List automatically.
+func (s *Server) SetNetworkInterfaceLister(lister func() ([]netif.Interface, error)) {
+	s.listNetworkInterfaces = lister
 }
 
 // SetAssumptionRegister wires the local, operator-authored register after
@@ -1587,7 +1599,20 @@ func (s *Server) GetNodeConfig(_ context.Context, _ *rpcpb.GetNodeConfigRequest)
 	if err != nil {
 		return &rpcpb.GetNodeConfigResponse{Error: err.Error()}, nil
 	}
-	return &rpcpb.GetNodeConfigResponse{Uplink: cfg.Uplink, NatUplink: cfg.NATUplink, DhcpDnsServer: cfg.DNSServer, JailEnabled: cfg.JailEnabled}, nil
+	resp := &rpcpb.GetNodeConfigResponse{Uplink: cfg.Uplink, NatUplink: cfg.NATUplink, DhcpDnsServer: cfg.DNSServer, JailEnabled: cfg.JailEnabled}
+	if s.listNetworkInterfaces != nil {
+		if interfaces, err := s.listNetworkInterfaces(); err == nil {
+			resp.AvailableInterfaces = make([]*rpcpb.NetworkInterface, 0, len(interfaces))
+			for _, iface := range interfaces {
+				resp.AvailableInterfaces = append(resp.AvailableInterfaces, &rpcpb.NetworkInterface{
+					Name: iface.Name, Up: iface.Up, Addresses: append([]string(nil), iface.Addresses...),
+				})
+			}
+		} else {
+			resp.InterfaceInventoryError = err.Error()
+		}
+	}
+	return resp, nil
 }
 
 // UpdateNodeConfig implements rpcpb.ManagerServiceServer - persists new

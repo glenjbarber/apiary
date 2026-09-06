@@ -78,21 +78,50 @@ type firewallRuleView struct {
 // local settings (ADR-0049) - see api/rpc/manager.proto's
 // GetNodeConfigResponse.
 type nodeConfigView struct {
-	Uplink            string
-	NATUplink         string
-	DNSServer         string
-	JailEnabledMode   string
-	JailEnabledStatus string
+	Uplink                  string
+	NATUplink               string
+	DNSServer               string
+	JailEnabledMode         string
+	JailEnabledStatus       string
+	InterfaceInventoryError string
+	UplinkOptions           []networkInterfaceOption
+	NATUplinkOptions        []networkInterfaceOption
+}
+
+type networkInterfaceOption struct {
+	Name     string
+	Label    string
+	Selected bool
 }
 
 func fromRPCNodeConfig(d *rpcpb.GetNodeConfigResponse) nodeConfigView {
 	view := nodeConfigView{
-		Uplink:            d.GetUplink(),
-		NATUplink:         d.GetNatUplink(),
-		DNSServer:         d.GetDhcpDnsServer(),
-		JailEnabledMode:   "default",
-		JailEnabledStatus: "uses startup flag",
+		Uplink:                  d.GetUplink(),
+		NATUplink:               d.GetNatUplink(),
+		DNSServer:               d.GetDhcpDnsServer(),
+		JailEnabledMode:         "default",
+		JailEnabledStatus:       "uses startup flag",
+		InterfaceInventoryError: d.GetInterfaceInventoryError(),
 	}
+	for _, iface := range d.GetAvailableInterfaces() {
+		label := iface.GetName()
+		if iface.GetUp() {
+			label += " (up)"
+		} else {
+			label += " (down)"
+		}
+		if addresses := iface.GetAddresses(); len(addresses) > 0 {
+			label += " - " + strings.Join(addresses, ", ")
+		}
+		view.UplinkOptions = append(view.UplinkOptions, networkInterfaceOption{
+			Name: iface.GetName(), Label: label, Selected: iface.GetName() == view.Uplink,
+		})
+		view.NATUplinkOptions = append(view.NATUplinkOptions, networkInterfaceOption{
+			Name: iface.GetName(), Label: label, Selected: iface.GetName() == view.NATUplink,
+		})
+	}
+	view.UplinkOptions = withSavedInterface(view.UplinkOptions, view.Uplink)
+	view.NATUplinkOptions = withSavedInterface(view.NATUplinkOptions, view.NATUplink)
 	if d.JailEnabled == nil {
 		return view
 	}
@@ -104,6 +133,20 @@ func fromRPCNodeConfig(d *rpcpb.GetNodeConfigResponse) nodeConfigView {
 		view.JailEnabledStatus = "disabled"
 	}
 	return view
+}
+
+func withSavedInterface(options []networkInterfaceOption, selected string) []networkInterfaceOption {
+	if selected == "" {
+		return options
+	}
+	for _, option := range options {
+		if option.Name == selected {
+			return options
+		}
+	}
+	return append(options, networkInterfaceOption{
+		Name: selected, Label: selected + " (saved, unavailable)", Selected: true,
+	})
 }
 
 // nodeServiceView is the template-facing view of a host-local Apiary rc.d
