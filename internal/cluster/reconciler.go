@@ -1477,8 +1477,18 @@ func (r *Reconciler) ensureDiskImage(mountpoint, baseImagePath string) (string, 
 	if err != nil {
 		return "", err
 	}
-	defer f.Close()
 	if err := f.Truncate(int64(sizeMB) * 1024 * 1024); err != nil {
+		f.Close()
+		return "", err
+	}
+	// A bhyve VM is launched immediately after this returns.  Commit the
+	// new sparse-file length and close our descriptor before bhyve opens
+	// the AHCI disk, matching the HAST provider path's proven ordering.
+	if err := f.Sync(); err != nil {
+		f.Close()
+		return "", err
+	}
+	if err := f.Close(); err != nil {
 		return "", err
 	}
 	return path, nil

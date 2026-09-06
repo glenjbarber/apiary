@@ -929,6 +929,36 @@ func TestReconciler_RunOnce_BaseImageSeedsNewDiskFile(t *testing.T) {
 	}
 }
 
+func TestReconciler_EnsureDiskImageCreatesUsableSizedDisk(t *testing.T) {
+	r := &Reconciler{DiskSizeMB: 8}
+	path, err := r.ensureDiskImage(t.TempDir(), "")
+	if err != nil {
+		t.Fatalf("ensureDiskImage() error: %v", err)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("Stat(%q) error: %v", path, err)
+	}
+	if want := int64(8 * 1024 * 1024); info.Size() != want {
+		t.Errorf("disk size = %d, want %d", info.Size(), want)
+	}
+
+	// The caller launches bhyve immediately after ensureDiskImage returns.
+	// Reopen the file independently to model that hand-off and make sure the
+	// completed image remains usable for an AHCI backend.
+	f, err := os.OpenFile(path, os.O_RDWR, 0)
+	if err != nil {
+		t.Fatalf("reopening completed disk image: %v", err)
+	}
+	if _, err := f.WriteAt([]byte{0}, info.Size()-1); err != nil {
+		f.Close()
+		t.Fatalf("writing completed disk image: %v", err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatalf("closing reopened disk image: %v", err)
+	}
+}
+
 func TestReconciler_RunOnce_BaseImageNeverReseedsExistingDisk(t *testing.T) {
 	raft := &fakeRaftClient{resp: &internalpb.ListVMsResponse{
 		Vms: []*internalpb.VMDefinition{{Id: "vm-1", NodeId: "node-a", BaseImageName: "ubuntu-cloud.raw"}},
