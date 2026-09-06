@@ -1753,6 +1753,20 @@ func TestServer_AuthEnabled_UnauthenticatedRequestRedirectsToLogin(t *testing.T)
 	}
 }
 
+func TestServer_AuthEnabled_UnauthenticatedFragmentDefaultsToHomeAfterLogin(t *testing.T) {
+	s, err := NewServer(&fakeClient{}, fakeAuthenticator{user: "viewer", pass: "secret"}, map[string]manager.Role{"viewer": manager.RoleViewer}, nil, "", "", nil)
+	if err != nil {
+		t.Fatalf("NewServer() error: %v", err)
+	}
+	for _, path := range []string{"/vms/rows?sort=running&dir=asc", "/jails/panel", "/vms/vm-1/serial/content", "/vms/vm-1/console/ws"} {
+		rec := httptest.NewRecorder()
+		s.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
+		if rec.Code != http.StatusFound || rec.Header().Get("Location") != "/login" {
+			t.Errorf("path %q: status/location = %d %q, want 302 /login", path, rec.Code, rec.Header().Get("Location"))
+		}
+	}
+}
+
 func TestServer_AuthEnabled_HTMXRequestGetsHXRedirectNotBare302(t *testing.T) {
 	s := newTestServerWithAuth(t, &fakeClient{}, "admin", "secret")
 

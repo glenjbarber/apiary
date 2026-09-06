@@ -544,7 +544,7 @@ func (s *Server) requireRole(want manager.Role, handler http.HandlerFunc) http.H
 
 func (s *Server) redirectToLogin(w http.ResponseWriter, r *http.Request) {
 	next := "/login"
-	if isSafeRedirectPath(r.URL.RequestURI()) {
+	if isSafeLoginReturnPath(r.URL.RequestURI()) {
 		next = "/login?next=" + url.QueryEscape(r.URL.RequestURI())
 	}
 	if r.Header.Get("HX-Request") == "true" {
@@ -552,6 +552,29 @@ func (s *Server) redirectToLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	http.Redirect(w, r, next, http.StatusFound)
+}
+
+// isSafeLoginReturnPath keeps ordinary page URLs across login, but sends
+// background fragments and socket endpoints to the home page instead. Those
+// endpoints are not complete documents, so returning to one after a session
+// expires would otherwise leave the browser on a blank or unstyled response.
+func isSafeLoginReturnPath(p string) bool {
+	if !isSafeRedirectPath(p) {
+		return false
+	}
+	path := p
+	if i := strings.IndexByte(path, '?'); i >= 0 {
+		path = path[:i]
+	}
+	if strings.HasSuffix(path, "/ws") || strings.HasSuffix(path, "/content") {
+		return false
+	}
+	switch path {
+	case "/vms/rows", "/jails/panel", "/isos":
+		return false
+	default:
+		return true
+	}
 }
 
 // isSafeRedirectPath rejects anything that isn't an in-app relative
