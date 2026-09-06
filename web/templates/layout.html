@@ -151,6 +151,11 @@
     .actions { display:flex; align-items:center; gap:.55rem; white-space:nowrap; }
     form.upload-iso, form.inline-form { display:flex; gap:.75rem; align-items:end; flex-wrap:wrap; }
     form.upload-iso label, form.inline-form label { display:flex; flex-direction:column; font-size:.85rem; }
+    /* settings-table: a config panel's current value and its editable
+       control live in the same row (see ADR-0070's follow-up) instead
+       of a separate read-only table plus a separate form below it. */
+    table.settings-table td input, table.settings-table td select { width:100%; max-width:26rem; }
+    table.settings-table td label.checkbox-label { display:inline-flex; align-items:center; gap:.4rem; font-weight:400; white-space:nowrap; }
     .form-section { border:0; border-top:1px solid var(--line); margin:0; padding:1.25rem 0 .25rem; }
     .form-section:first-child { border-top:0; padding-top:0; }
     .form-section legend { font-size:1.05rem; font-weight:750; padding:0 .5rem 0 0; }

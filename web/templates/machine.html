@@ -221,6 +221,31 @@
 
 {{define "nodeconfig_panel"}}
 <div id="nodeconfig-error" class="banner-error">{{.NodeConfigFormError}}</div>
+{{if .CanAdmin}}
+{{if .NodeConfig.InterfaceInventoryError}}<div class="banner-error">Unable to discover host interfaces: {{.NodeConfig.InterfaceInventoryError}}. Saved values are still available to clear or correct.</div>{{end}}
+<form hx-post="/machine/uplink" hx-target="#nodeconfig-panel" hx-swap="innerHTML">
+  <table class="settings-table">
+    <tbody>
+      <tr><th>Uplink</th><td>
+        <select name="uplink">
+          <option value="" {{if eq .NodeConfig.Uplink ""}}selected{{end}}>(unset)</option>
+          {{range .NodeConfig.UplinkOptions}}<option value="{{.Name}}" {{if .Selected}}selected{{end}}>{{.Label}}</option>{{end}}
+        </select>
+      </td></tr>
+      <tr><th>NAT uplink</th><td>
+        <select name="nat_uplink">
+          <option value="" {{if eq .NodeConfig.NATUplink ""}}selected{{end}}>(unset, use VLAN uplink)</option>
+          {{range .NodeConfig.NATUplinkOptions}}<option value="{{.Name}}" {{if .Selected}}selected{{end}}>{{.Label}}</option>{{end}}
+        </select>
+      </td></tr>
+      <tr><th>Default managed network egress</th><td>{{if .NodeConfig.Uplink}}self-hosted NAT via {{if .NodeConfig.NATUplink}}{{.NodeConfig.NATUplink}}{{else}}{{.NodeConfig.Uplink}}{{end}}{{else}}<em>(no uplink)</em>{{end}}</td></tr>
+      <tr><th>DHCP DNS server</th><td><input type="text" name="dhcp_dns_server" placeholder="10.62.0.1" value="{{.NodeConfig.DNSServer}}"></td></tr>
+    </tbody>
+  </table>
+  <input type="hidden" name="jail_enabled" value="{{.NodeConfig.JailEnabledMode}}">
+  <div class="form-actions"><button type="submit">Save</button></div>
+</form>
+{{else}}
 <table>
   <tbody>
     <tr><th>Uplink</th><td>{{if .NodeConfig.Uplink}}{{.NodeConfig.Uplink}}{{else}}<em>(unset)</em>{{end}}</td></tr>
@@ -229,49 +254,35 @@
     <tr><th>DHCP DNS server</th><td>{{if .NodeConfig.DNSServer}}{{.NodeConfig.DNSServer}}{{else}}<em>(unset)</em>{{end}}</td></tr>
   </tbody>
 </table>
-{{if .CanAdmin}}
-{{if .NodeConfig.InterfaceInventoryError}}<div class="banner-error">Unable to discover host interfaces: {{.NodeConfig.InterfaceInventoryError}}. Saved values are still available to clear or correct.</div>{{end}}
-<form class="inline-form" hx-post="/machine/uplink" hx-target="#nodeconfig-panel" hx-swap="innerHTML">
-  <label>VLAN uplink
-    <select name="uplink">
-      <option value="" {{if eq .NodeConfig.Uplink ""}}selected{{end}}>(unset)</option>
-      {{range .NodeConfig.UplinkOptions}}<option value="{{.Name}}" {{if .Selected}}selected{{end}}>{{.Label}}</option>{{end}}
-    </select>
-  </label>
-  <label>NAT uplink
-    <select name="nat_uplink">
-      <option value="" {{if eq .NodeConfig.NATUplink ""}}selected{{end}}>(unset, use VLAN uplink)</option>
-      {{range .NodeConfig.NATUplinkOptions}}<option value="{{.Name}}" {{if .Selected}}selected{{end}}>{{.Label}}</option>{{end}}
-    </select>
-  </label>
-  <label>DHCP DNS server <input type="text" name="dhcp_dns_server" placeholder="10.62.0.1" value="{{.NodeConfig.DNSServer}}"></label>
-  <input type="hidden" name="jail_enabled" value="{{.NodeConfig.JailEnabledMode}}">
-  <button type="submit">Save</button>
-</form>
 {{end}}
 {{end}}
 
 {{define "jail_provisioning_panel"}}
 <div id="jail-provisioning-error" class="banner-error">{{.NodeConfigFormError}}</div>
+{{if .CanAdmin}}
+<form hx-post="/machine/jail-provisioning" hx-target="#jail-provisioning-panel" hx-swap="innerHTML">
+  <input type="hidden" name="uplink" value="{{.NodeConfig.Uplink}}">
+  <input type="hidden" name="nat_uplink" value="{{.NodeConfig.NATUplink}}">
+  <input type="hidden" name="dhcp_dns_server" value="{{.NodeConfig.DNSServer}}">
+  <table class="settings-table">
+    <tbody>
+      <tr><th>Current mode</th><td>
+        <select name="jail_enabled">
+          <option value="default" {{if eq .NodeConfig.JailEnabledMode "default"}}selected{{end}}>Use startup flag</option>
+          <option value="enabled" {{if eq .NodeConfig.JailEnabledMode "enabled"}}selected{{end}}>Enabled</option>
+          <option value="disabled" {{if eq .NodeConfig.JailEnabledMode "disabled"}}selected{{end}}>Disabled</option>
+        </select>
+      </td></tr>
+    </tbody>
+  </table>
+  <div class="form-actions"><button type="submit">Save</button></div>
+</form>
+{{else}}
 <table>
   <tbody>
     <tr><th>Current mode</th><td>{{.NodeConfig.JailEnabledStatus}}</td></tr>
   </tbody>
 </table>
-{{if .CanAdmin}}
-<form class="inline-form" hx-post="/machine/jail-provisioning" hx-target="#jail-provisioning-panel" hx-swap="innerHTML">
-  <input type="hidden" name="uplink" value="{{.NodeConfig.Uplink}}">
-  <input type="hidden" name="nat_uplink" value="{{.NodeConfig.NATUplink}}">
-  <input type="hidden" name="dhcp_dns_server" value="{{.NodeConfig.DNSServer}}">
-  <label>Jail provisioning
-    <select name="jail_enabled">
-      <option value="default" {{if eq .NodeConfig.JailEnabledMode "default"}}selected{{end}}>Use startup flag</option>
-      <option value="enabled" {{if eq .NodeConfig.JailEnabledMode "enabled"}}selected{{end}}>Enabled</option>
-      <option value="disabled" {{if eq .NodeConfig.JailEnabledMode "disabled"}}selected{{end}}>Disabled</option>
-    </select>
-  </label>
-  <button type="submit">Save</button>
-</form>
 {{end}}
 {{end}}
 
@@ -320,6 +331,24 @@
      editable input. */}}
 {{define "resource_scope_panel"}}
 <div id="resource-scope-error" class="banner-error">{{.NodeConfigFormError}}</div>
+{{if .CanAdmin}}
+<form hx-post="/machine/resource-scope" hx-target="#resource-scope-panel" hx-swap="innerHTML">
+  <table class="settings-table">
+    <tbody>
+      <tr><th>ZFS base</th><td>{{if .NodeConfig.ZFSBase}}<code>{{.NodeConfig.ZFSBase}}</code>{{else}}<input type="text" name="zfs_base" placeholder="zroot/apiary">{{end}}</td></tr>
+      <tr><th>Bhyve prefix</th><td>{{if .NodeConfig.BhyvePrefix}}<code>{{.NodeConfig.BhyvePrefix}}</code>{{else}}<input type="text" name="bhyve_prefix" placeholder="apiary-">{{end}}</td></tr>
+      <tr><th>ISO directory</th><td>{{if .NodeConfig.ISODir}}<code>{{.NodeConfig.ISODir}}</code>{{else}}<input type="text" name="iso_dir" placeholder="/var/db/apiary/isos">{{end}}</td></tr>
+      <tr><th>Jail prefix</th><td>{{if .NodeConfig.JailPrefix}}<code>{{.NodeConfig.JailPrefix}}</code>{{else}}<input type="text" name="jail_prefix" placeholder="apiary-">{{end}}</td></tr>
+      <tr><th>Jail mount base</th><td>{{if .NodeConfig.JailMountBase}}<code>{{.NodeConfig.JailMountBase}}</code>{{else}}<input type="text" name="jail_mount_base" placeholder="/apiary-jails">{{end}}</td></tr>
+    </tbody>
+  </table>
+  {{if or (not .NodeConfig.ZFSBase) (not .NodeConfig.BhyvePrefix) (not .NodeConfig.ISODir) (not .NodeConfig.JailPrefix) (not .NodeConfig.JailMountBase)}}
+  <div class="form-actions"><button type="submit">Save (one-time)</button></div>
+  {{else}}
+  <p class="muted">Every resource-scope path is already set on this Hive. Edit the underlying <code>rc.conf</code> flag directly and restart to change one.</p>
+  {{end}}
+</form>
+{{else}}
 <table>
   <tbody>
     <tr><th>ZFS base</th><td>{{if .NodeConfig.ZFSBase}}<code>{{.NodeConfig.ZFSBase}}</code>{{else}}<em>(unset)</em>{{end}}</td></tr>
@@ -329,24 +358,24 @@
     <tr><th>Jail mount base</th><td>{{if .NodeConfig.JailMountBase}}<code>{{.NodeConfig.JailMountBase}}</code>{{else}}<em>(unset)</em>{{end}}</td></tr>
   </tbody>
 </table>
-{{if .CanAdmin}}
-{{if or (not .NodeConfig.ZFSBase) (not .NodeConfig.BhyvePrefix) (not .NodeConfig.ISODir) (not .NodeConfig.JailPrefix) (not .NodeConfig.JailMountBase)}}
-<form class="inline-form" hx-post="/machine/resource-scope" hx-target="#resource-scope-panel" hx-swap="innerHTML">
-  {{if not .NodeConfig.ZFSBase}}<label>ZFS base <input type="text" name="zfs_base" placeholder="zroot/apiary"></label>{{end}}
-  {{if not .NodeConfig.BhyvePrefix}}<label>Bhyve prefix <input type="text" name="bhyve_prefix" placeholder="apiary-"></label>{{end}}
-  {{if not .NodeConfig.ISODir}}<label>ISO directory <input type="text" name="iso_dir" placeholder="/var/db/apiary/isos"></label>{{end}}
-  {{if not .NodeConfig.JailPrefix}}<label>Jail prefix <input type="text" name="jail_prefix" placeholder="apiary-"></label>{{end}}
-  {{if not .NodeConfig.JailMountBase}}<label>Jail mount base <input type="text" name="jail_mount_base" placeholder="/apiary-jails"></label>{{end}}
-  <button type="submit">Save (one-time)</button>
-</form>
-{{else}}
-<p class="muted">Every resource-scope path is already set on this Hive. Edit the underlying <code>rc.conf</code> flag directly and restart to change one.</p>
-{{end}}
 {{end}}
 {{end}}
 
 {{define "bhyve_config_panel"}}
 <div id="bhyve-config-error" class="banner-error">{{.NodeConfigFormError}}</div>
+{{if .CanAdmin}}
+<form hx-post="/machine/bhyve" hx-target="#bhyve-config-panel" hx-swap="innerHTML">
+  <table class="settings-table">
+    <tbody>
+      <tr><th>Boot ROM path</th><td><input type="text" name="bhyve_bootrom" placeholder="/usr/local/share/uefi-firmware/BHYVE_UEFI.fd" value="{{.NodeConfig.BhyveBootROM}}"></td></tr>
+      <tr><th>Bridge</th><td><input type="text" name="bhyve_bridge" placeholder="bridge0" value="{{.NodeConfig.BhyveBridge}}"></td></tr>
+      <tr><th>Disk size (MB)</th><td><input type="text" name="disk_size_mb" placeholder="0 = default" value="{{if .NodeConfig.DiskSizeMB}}{{.NodeConfig.DiskSizeMB}}{{end}}"></td></tr>
+      <tr><th>Reconcile interval</th><td><input type="text" name="reconcile_interval" placeholder="30s" value="{{.NodeConfig.ReconcileInterval}}"></td></tr>
+    </tbody>
+  </table>
+  <div class="form-actions"><button type="submit">Save</button></div>
+</form>
+{{else}}
 <table>
   <tbody>
     <tr><th>Boot ROM</th><td>{{if .NodeConfig.BhyveBootROM}}<code>{{.NodeConfig.BhyveBootROM}}</code>{{else}}<em>(unset - bhyve provisioning disabled)</em>{{end}}</td></tr>
@@ -355,40 +384,60 @@
     <tr><th>Reconcile interval</th><td>{{if .NodeConfig.ReconcileInterval}}{{.NodeConfig.ReconcileInterval}}{{else}}<em>(uses startup flag)</em>{{end}}</td></tr>
   </tbody>
 </table>
-{{if .CanAdmin}}
-<form class="inline-form" hx-post="/machine/bhyve" hx-target="#bhyve-config-panel" hx-swap="innerHTML">
-  <label>Boot ROM path <input type="text" name="bhyve_bootrom" placeholder="/usr/local/share/uefi-firmware/BHYVE_UEFI.fd" value="{{.NodeConfig.BhyveBootROM}}"></label>
-  <label>Bridge <input type="text" name="bhyve_bridge" placeholder="bridge0" value="{{.NodeConfig.BhyveBridge}}"></label>
-  <label>Disk size MB <input type="text" name="disk_size_mb" placeholder="0 = default" value="{{if .NodeConfig.DiskSizeMB}}{{.NodeConfig.DiskSizeMB}}{{end}}"></label>
-  <label>Reconcile interval <input type="text" name="reconcile_interval" placeholder="30s" value="{{.NodeConfig.ReconcileInterval}}"></label>
-  <button type="submit">Save</button>
-</form>
 {{end}}
 {{end}}
 
 {{define "hast_panel"}}
 <div id="hast-error" class="banner-error">{{.NodeConfigFormError}}</div>
+{{if .CanAdmin}}
+<form hx-post="/machine/hast" hx-target="#hast-panel" hx-swap="innerHTML">
+  <table class="settings-table">
+    <tbody>
+      <tr><th>HAST support</th><td>
+        <select name="hast_enabled">
+          <option value="default" {{if eq .NodeConfig.HASTEnabledMode "default"}}selected{{end}}>Use startup flag</option>
+          <option value="enabled" {{if eq .NodeConfig.HASTEnabledMode "enabled"}}selected{{end}}>Enabled</option>
+          <option value="disabled" {{if eq .NodeConfig.HASTEnabledMode "disabled"}}selected{{end}}>Disabled</option>
+        </select>
+      </td></tr>
+    </tbody>
+  </table>
+  <div class="form-actions"><button type="submit">Save</button></div>
+</form>
+{{else}}
 <table>
   <tbody>
     <tr><th>Current mode</th><td>{{.NodeConfig.HASTEnabledStatus}}</td></tr>
   </tbody>
 </table>
-{{if .CanAdmin}}
-<form class="inline-form" hx-post="/machine/hast" hx-target="#hast-panel" hx-swap="innerHTML">
-  <label>HAST support
-    <select name="hast_enabled">
-      <option value="default" {{if eq .NodeConfig.HASTEnabledMode "default"}}selected{{end}}>Use startup flag</option>
-      <option value="enabled" {{if eq .NodeConfig.HASTEnabledMode "enabled"}}selected{{end}}>Enabled</option>
-      <option value="disabled" {{if eq .NodeConfig.HASTEnabledMode "disabled"}}selected{{end}}>Disabled</option>
-    </select>
-  </label>
-  <button type="submit">Save</button>
-</form>
 {{end}}
 {{end}}
 
 {{define "peer_forwarding_panel"}}
 <div id="peer-forwarding-error" class="banner-error">{{.NodeConfigFormError}}</div>
+{{if .CanAdmin}}
+<form hx-post="/machine/peer-forwarding" hx-target="#peer-forwarding-panel" hx-swap="innerHTML">
+  <table class="settings-table">
+    <tbody>
+      <tr><th>Peer managerd port</th><td><input type="text" name="peer_managerd_port" placeholder="17700" value="{{.NodeConfig.PeerManagerdPort}}"></td></tr>
+      <tr><th>Peer TLS</th><td>
+        <select name="peer_tls">
+          <option value="default" {{if eq .NodeConfig.PeerTLSMode "default"}}selected{{end}}>Use startup flag</option>
+          <option value="enabled" {{if eq .NodeConfig.PeerTLSMode "enabled"}}selected{{end}}>Enabled</option>
+          <option value="disabled" {{if eq .NodeConfig.PeerTLSMode "disabled"}}selected{{end}}>Disabled</option>
+        </select>
+      </td></tr>
+      <tr><th>Peer TLS hostname map</th><td><input type="text" name="peer_tls_hostname_map" placeholder="10.50.0.9=apiverse.apiary.work,..." value="{{.NodeConfig.PeerTLSHostnameMap}}"></td></tr>
+      <tr><th>Peer API key</th><td>
+        {{if .NodeConfig.PeerAPIKeySet}}<span class="badge true">set</span>{{else}}<span class="badge unknown">not set</span>{{end}}
+        <input type="password" name="peer_api_key" placeholder="new value - leave blank to keep current" autocomplete="off">
+        <label class="checkbox-label"><input type="checkbox" name="clear_peer_api_key" value="true"> Clear</label>
+      </td></tr>
+    </tbody>
+  </table>
+  <div class="form-actions"><button type="submit">Save</button></div>
+</form>
+{{else}}
 <table>
   <tbody>
     <tr><th>Peer managerd port</th><td>{{if .NodeConfig.PeerManagerdPort}}{{.NodeConfig.PeerManagerdPort}}{{else}}<em>(uses this node's own rpc-addr port)</em>{{end}}</td></tr>
@@ -397,43 +446,46 @@
     <tr><th>Peer API key</th><td>{{if .NodeConfig.PeerAPIKeySet}}<span class="badge true">set</span>{{else}}<span class="badge unknown">not set</span>{{end}}</td></tr>
   </tbody>
 </table>
-{{if .CanAdmin}}
-<form class="inline-form" hx-post="/machine/peer-forwarding" hx-target="#peer-forwarding-panel" hx-swap="innerHTML">
-  <label>Peer managerd port <input type="text" name="peer_managerd_port" placeholder="17700" value="{{.NodeConfig.PeerManagerdPort}}"></label>
-  <label>Peer TLS
-    <select name="peer_tls">
-      <option value="default" {{if eq .NodeConfig.PeerTLSMode "default"}}selected{{end}}>Use startup flag</option>
-      <option value="enabled" {{if eq .NodeConfig.PeerTLSMode "enabled"}}selected{{end}}>Enabled</option>
-      <option value="disabled" {{if eq .NodeConfig.PeerTLSMode "disabled"}}selected{{end}}>Disabled</option>
-    </select>
-  </label>
-  <label>Peer TLS hostname map <input type="text" name="peer_tls_hostname_map" placeholder="10.50.0.9=apiverse.apiary.work,..." value="{{.NodeConfig.PeerTLSHostnameMap}}"></label>
-  <label>New peer API key <input type="password" name="peer_api_key" placeholder="leave blank to keep current" autocomplete="off"></label>
-  <label><input type="checkbox" name="clear_peer_api_key" value="true"> Clear peer API key</label>
-  <button type="submit">Save</button>
-</form>
 {{end}}
 {{end}}
 
 {{define "tls_panel"}}
 <div id="tls-error" class="banner-error">{{.NodeConfigFormError}}</div>
+{{if .CanAdmin}}
+<form hx-post="/machine/tls" hx-target="#tls-panel" hx-swap="innerHTML">
+  <table class="settings-table">
+    <tbody>
+      <tr><th>Certificate path</th><td><input type="text" name="tls_cert" placeholder="/home/claude/apiary-tls/fullchain.pem" value="{{.NodeConfig.TLSCert}}"></td></tr>
+      <tr><th>Key path</th><td><input type="text" name="tls_key" placeholder="/home/claude/apiary-tls/key.pem" value="{{.NodeConfig.TLSKey}}"></td></tr>
+    </tbody>
+  </table>
+  <div class="form-actions"><button type="submit">Save</button></div>
+</form>
+{{else}}
 <table>
   <tbody>
     <tr><th>Certificate</th><td>{{if .NodeConfig.TLSCert}}<code>{{.NodeConfig.TLSCert}}</code>{{else}}<em>(unset - serving plaintext)</em>{{end}}</td></tr>
     <tr><th>Private key</th><td>{{if .NodeConfig.TLSKey}}<code>{{.NodeConfig.TLSKey}}</code>{{else}}<em>(unset)</em>{{end}}</td></tr>
   </tbody>
 </table>
-{{if .CanAdmin}}
-<form class="inline-form" hx-post="/machine/tls" hx-target="#tls-panel" hx-swap="innerHTML">
-  <label>Certificate path <input type="text" name="tls_cert" placeholder="/home/claude/apiary-tls/fullchain.pem" value="{{.NodeConfig.TLSCert}}"></label>
-  <label>Key path <input type="text" name="tls_key" placeholder="/home/claude/apiary-tls/key.pem" value="{{.NodeConfig.TLSKey}}"></label>
-  <button type="submit">Save</button>
-</form>
 {{end}}
 {{end}}
 
 {{define "cloudflare_config_panel"}}
 <div id="cloudflare-config-error" class="banner-error">{{.NodeConfigFormError}}</div>
+{{if .CanAdmin}}
+<form hx-post="/machine/cloudflare-config" hx-target="#cloudflare-config-panel" hx-swap="innerHTML">
+  <table class="settings-table">
+    <tbody>
+      <tr><th>Token file path</th><td><input type="text" name="cloudflare_token_file" placeholder="/home/claude/cf-token" value="{{.NodeConfig.CloudflareTokenFile}}"></td></tr>
+      <tr><th>Zone ID</th><td><input type="text" name="cloudflare_zone_id" value="{{.NodeConfig.CloudflareZoneID}}"></td></tr>
+      <tr><th>Tunnel ID</th><td><input type="text" name="cloudflare_tunnel_id" value="{{.NodeConfig.CloudflareTunnelID}}"></td></tr>
+      <tr><th>Tunnel credentials file path</th><td><input type="text" name="cloudflare_tunnel_credentials_file" placeholder="/home/claude/cf-creds.json" value="{{.NodeConfig.CloudflareTunnelCredentialsFile}}"></td></tr>
+    </tbody>
+  </table>
+  <div class="form-actions"><button type="submit">Save</button></div>
+</form>
+{{else}}
 <table>
   <tbody>
     <tr><th>Token file</th><td>{{if .NodeConfig.CloudflareTokenFile}}<code>{{.NodeConfig.CloudflareTokenFile}}</code>{{else}}<em>(unset)</em>{{end}}</td></tr>
@@ -442,19 +494,26 @@
     <tr><th>Tunnel credentials file</th><td>{{if .NodeConfig.CloudflareTunnelCredentialsFile}}<code>{{.NodeConfig.CloudflareTunnelCredentialsFile}}</code>{{else}}<em>(unset)</em>{{end}}</td></tr>
   </tbody>
 </table>
-{{if .CanAdmin}}
-<form class="inline-form" hx-post="/machine/cloudflare-config" hx-target="#cloudflare-config-panel" hx-swap="innerHTML">
-  <label>Token file path <input type="text" name="cloudflare_token_file" placeholder="/home/claude/cf-token" value="{{.NodeConfig.CloudflareTokenFile}}"></label>
-  <label>Zone ID <input type="text" name="cloudflare_zone_id" value="{{.NodeConfig.CloudflareZoneID}}"></label>
-  <label>Tunnel ID <input type="text" name="cloudflare_tunnel_id" value="{{.NodeConfig.CloudflareTunnelID}}"></label>
-  <label>Tunnel credentials file path <input type="text" name="cloudflare_tunnel_credentials_file" placeholder="/home/claude/cf-creds.json" value="{{.NodeConfig.CloudflareTunnelCredentialsFile}}"></label>
-  <button type="submit">Save</button>
-</form>
 {{end}}
 {{end}}
 
 {{define "assumption_tuning_panel"}}
 <div id="assumption-tuning-error" class="banner-error">{{.NodeConfigFormError}}</div>
+{{if .CanAdmin}}
+<form hx-post="/machine/assumption-tuning" hx-target="#assumption-tuning-panel" hx-swap="innerHTML">
+  <table class="settings-table">
+    <tbody>
+      <tr><th>Check interval</th><td><input type="text" name="assumption_check_interval" placeholder="60s" value="{{.NodeConfig.AssumptionCheckInterval}}"></td></tr>
+      <tr><th>Heartbeat interval</th><td><input type="text" name="assumption_heartbeat_interval" placeholder="1h" value="{{.NodeConfig.AssumptionHeartbeatInterval}}"></td></tr>
+      <tr><th>Stale after</th><td><input type="text" name="assumption_stale_after" placeholder="0 = 3x check interval" value="{{.NodeConfig.AssumptionStaleAfter}}"></td></tr>
+      <tr><th>Run deadline</th><td><input type="text" name="assumption_run_deadline" placeholder="20s" value="{{.NodeConfig.AssumptionRunDeadline}}"></td></tr>
+      <tr><th>History limit</th><td><input type="text" name="assumption_history_limit" placeholder="200" value="{{if .NodeConfig.AssumptionHistoryLimit}}{{.NodeConfig.AssumptionHistoryLimit}}{{end}}"></td></tr>
+      <tr><th>History max age</th><td><input type="text" name="assumption_history_max_age" placeholder="720h" value="{{.NodeConfig.AssumptionHistoryMaxAge}}"></td></tr>
+    </tbody>
+  </table>
+  <div class="form-actions"><button type="submit">Save</button></div>
+</form>
+{{else}}
 <table>
   <tbody>
     <tr><th>Check interval</th><td>{{if .NodeConfig.AssumptionCheckInterval}}{{.NodeConfig.AssumptionCheckInterval}}{{else}}<em>(uses startup flag)</em>{{end}}</td></tr>
@@ -465,31 +524,29 @@
     <tr><th>History max age</th><td>{{if .NodeConfig.AssumptionHistoryMaxAge}}{{.NodeConfig.AssumptionHistoryMaxAge}}{{else}}<em>(uses startup flag)</em>{{end}}</td></tr>
   </tbody>
 </table>
-{{if .CanAdmin}}
-<form class="inline-form" hx-post="/machine/assumption-tuning" hx-target="#assumption-tuning-panel" hx-swap="innerHTML">
-  <label>Check interval <input type="text" name="assumption_check_interval" placeholder="60s" value="{{.NodeConfig.AssumptionCheckInterval}}"></label>
-  <label>Heartbeat interval <input type="text" name="assumption_heartbeat_interval" placeholder="1h" value="{{.NodeConfig.AssumptionHeartbeatInterval}}"></label>
-  <label>Stale after <input type="text" name="assumption_stale_after" placeholder="0 = 3x check interval" value="{{.NodeConfig.AssumptionStaleAfter}}"></label>
-  <label>Run deadline <input type="text" name="assumption_run_deadline" placeholder="20s" value="{{.NodeConfig.AssumptionRunDeadline}}"></label>
-  <label>History limit <input type="text" name="assumption_history_limit" placeholder="200" value="{{if .NodeConfig.AssumptionHistoryLimit}}{{.NodeConfig.AssumptionHistoryLimit}}{{end}}"></label>
-  <label>History max age <input type="text" name="assumption_history_max_age" placeholder="720h" value="{{.NodeConfig.AssumptionHistoryMaxAge}}"></label>
-  <button type="submit">Save</button>
-</form>
 {{end}}
 {{end}}
 
 {{define "internal_security_panel"}}
 <div id="internal-security-error" class="banner-error">{{.NodeConfigFormError}}</div>
+{{if .CanAdmin}}
+<form hx-post="/machine/internal-security" hx-target="#internal-security-panel" hx-swap="innerHTML">
+  <table class="settings-table">
+    <tbody>
+      <tr><th>Raftd token</th><td>
+        {{if .NodeConfig.RaftdTokenSet}}<span class="badge true">set</span>{{else}}<span class="badge unknown">not set</span>{{end}}
+        <input type="password" name="raftd_token" placeholder="new value - leave blank to keep current" autocomplete="off">
+        <label class="checkbox-label"><input type="checkbox" name="clear_raftd_token" value="true"> Clear</label>
+      </td></tr>
+    </tbody>
+  </table>
+  <div class="form-actions"><button type="submit">Save</button></div>
+</form>
+{{else}}
 <table>
   <tbody>
     <tr><th>Raftd token</th><td>{{if .NodeConfig.RaftdTokenSet}}<span class="badge true">set</span>{{else}}<span class="badge unknown">not set</span>{{end}}</td></tr>
   </tbody>
 </table>
-{{if .CanAdmin}}
-<form class="inline-form" hx-post="/machine/internal-security" hx-target="#internal-security-panel" hx-swap="innerHTML">
-  <label>New raftd token <input type="password" name="raftd_token" placeholder="leave blank to keep current" autocomplete="off"></label>
-  <label><input type="checkbox" name="clear_raftd_token" value="true"> Clear raftd token</label>
-  <button type="submit">Save</button>
-</form>
 {{end}}
 {{end}}
