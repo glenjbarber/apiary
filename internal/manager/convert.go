@@ -23,11 +23,6 @@ func resolveBridgeName(n *internalpb.NetworkDefinition) string {
 	return fmt.Sprintf("apnet-%x", sum[:4])
 }
 
-// toInternalVM converts the external-facing VMDefinition into the internal
-// protocol's type. Kept as a separate type from api/internalpb's (per
-// ADR-0002/ADR-0005) so the external schema doesn't couple to the internal
-// protocol's evolution - this is the translation layer that decoupling
-// requires.
 // toInternalFirewallRules converts the external, wire FirewallRule
 // shape to its internal counterpart - shared by toInternalVM (at
 // create/update time) and SetVMFirewallRules (editing rules on an
@@ -46,6 +41,11 @@ func toInternalFirewallRules(rules []*rpcpb.FirewallRule) []*internalpb.Firewall
 	return out
 }
 
+// toInternalVM converts the external-facing VMDefinition into the internal
+// protocol's type. Kept as a separate type from api/internalpb's (per
+// ADR-0002/ADR-0005) so the external schema doesn't couple to the internal
+// protocol's evolution - this is the translation layer that decoupling
+// requires.
 func toInternalVM(vm *rpcpb.VMDefinition) *internalpb.VMDefinition {
 	rules := toInternalFirewallRules(vm.GetFirewallRules())
 	return &internalpb.VMDefinition{
