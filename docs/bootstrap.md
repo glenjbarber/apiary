@@ -1,16 +1,17 @@
 # Bootstrapping a fresh Apiary host
 
 A step-by-step runbook for taking a blank FreeBSD host (VM or bare metal)
-to a running Apiary node, using `apiaryinstall` (ADR-0082) for the host
-prerequisites and the four daemons (`raftd`/`managerd`/`frontend`/
-`restshimd`) for the cluster itself. Covers both an independent
-single-node Comb (Path A) and joining an existing multi-node Colony
-(Path B) - they diverge only at the `raftd` step. Written up after a
-live, first-time run on a fresh Colony VM (`node01`) surfaced two real
-`apiaryinstall` bugs (both fixed - see the ADR), a PAM setup pitfall, and
-two bootstrap gotchas that aren't code bugs but cost real time the first
-time through. This doc exists so the next fresh host doesn't rediscover
-any of it.
+to a running Apiary node with real, working VM/jail networking - using
+`apiaryinstall` (ADR-0082) for the host prerequisites, the four daemons
+(`raftd`/`managerd`/`frontend`/`restshimd`) for the cluster itself, and
+the web UI for the first network and first Cell. Covers both an
+independent single-node Comb (Path A) and joining an existing multi-node
+Colony (Path B) - they diverge only at the `raftd` step. Written up
+(and twice revised) from a live, complete first bootstrap of a fresh
+Colony VM, start to finish - every command here was actually run, and
+every callout marks a real thing that went wrong the first time through,
+not a hypothetical. This doc exists so the next fresh host doesn't
+rediscover any of it.
 
 ## 0. Two gotchas to know before you start
 
@@ -42,7 +43,15 @@ cd ~/apiary
 `frontend` must be built natively on the FreeBSD host it will run on,
 ADR-0030.)
 
-## 2. Build all five binaries explicitly
+## 2. Build all five binaries
+
+The repo's own `Makefile` does this in one step:
+
+```bash
+make build
+```
+
+Equivalent by hand, if you ever need it (e.g. building just one):
 
 ```bash
 go build -buildvcs=false -o apiaryinstall ./cmd/apiaryinstall
@@ -335,6 +344,119 @@ role (`"admin:alice;operator:bob,carol;viewer:dave"`).
 `frontend` re-reads `/etc/pam.d/<service>` on every login attempt, not
 just at startup - fixing the file doesn't require restarting `frontend`
 again, only the first `-pam-service` flag change does.
+
+## 12. Create your first network
+
+The web UI's Networks page (Network -> Networks -> Create) is where a
+Comb actually gets usable VM/jail networking - `apiaryinstall`'s own
+network step (Step 4) only prepares the *host* (uplink, bridge). Two
+real things to know before creating one:
+
+**Free the uplink from `apiaryinstall`'s fallback bridge first.**
+`bridge0` (from Step 4, `-bhyve-bridge`) is only ever a fallback for a
+VM with no managed network attached. An untagged (`VLAN ID 0`) managed
+network enslaves the same uplink NIC directly into its *own*,
+separately auto-named bridge (`apnet-<hash>`) - and a FreeBSD interface
+can only belong to one bridge at a time. If you already ran Step 4, free
+the uplink before creating your first network:
+
+```bash
+ifconfig bridge0 deletem <uplink-ifname>
+```
+
+(Same SSH-session caution as Step 4 applies here too, though removing
+from a bridge is generally less disruptive than adding.)
+
+**Decide self-hosted NAT vs. sharing an existing router's VLAN.** This
+project's own history (ADR-0047, superseded in part by ADR-0048) already
+settled this: self-hosted NAT is the default, recommended path -
+depending on a specific external router/VLAN topology is explicitly
+something Apiary is meant to avoid. Create the network with:
+
+- **VLAN ID**: `0` (untagged - no switch/trunk configuration needed
+  either way)
+- **Subnet**: a private range **not** already used by anything else on
+  your physical network (check first - conflicting with an existing
+  router's own subnet, even without an address collision, is possible
+  and confusing on a shared physical segment)
+- **External gateway**: **leave blank** - this is what makes Apiary
+  claim the gateway address and NAT egress out through the uplink
+  itself, rather than depending on a real router already serving that
+  subnet
+
+**Verify it live** once a VM/jail actually uses it (see Step 13 - the
+network's bridge/NAT rule are provisioned lazily, only once something
+references it, not the moment the network is created):
+
+```bash
+ifconfig apnet-<hash>                          # bridge exists, uplink is a member
+pfctl -a apiary/net-<network-id> -s rules       # NAT rule loaded - NOT `-s nat`,
+                                                 # which stays empty even when working
+                                                 # (the rule is a modern `match ... nat-to`
+                                                 # form, not a legacy `nat` rule)
+```
+
+The Networks page itself shows `unknown` for bridge health until the
+first reconcile tick after something actually uses the network - that's
+expected, not stuck.
+
+## 13. Create your first VM (or use a jail instead)
+
+**Check hardware virtualization actually works before creating any VM**,
+especially if this host is itself a VM (nested virtualization):
+
+```bash
+sysctl hw.vmm.vmx.initialized
+dmesg | grep -i vmm
+```
+
+Expect `hw.vmm.vmx.initialized: 1` and no error in `dmesg`. If it reads
+`0`, or `dmesg` shows something like `module_register_init: MOD_LOAD
+(vmm, ...) error 6` (`ENXIO`) - `vmm.ko` loading as a kernel module
+(which is why `apiaryinstall`'s own `vmm-loaded` check can still report
+`ok`) does **not** mean VT-x/EPT is actually usable. This means whatever
+hosts this VM isn't exposing nested hardware virtualization to it - a
+setting on the *outer* hypervisor (e.g. Proxmox/KVM needs CPU type
+`host` and `nested=1` on `kvm_intel`; VMware needs "Expose hardware
+assisted virtualization to the guest OS"), not fixable from inside this
+host, and not an Apiary bug. **Jails remain fully available regardless**
+- they need no hardware virtualization at all, and are the practical
+fallback whenever this check fails.
+
+**Always attach an ISO or base image as the install source.** A VM
+created with neither has nothing bootable - `bhyve` launches and exits
+again almost immediately, over and over, every reconcile tick.
+
+**Known symptom of the above (or any other `bhyve` process dying
+independently of Apiary's own tracking) - a permanent crash loop with a
+misleading error.** `bhyve`'s serial console logger starts (as a
+separate, independently-launched `daemon(8)` process) *before* `bhyve`
+itself - if `bhyve` then exits on its own for any reason, the logger
+keeps running, untouched, since nothing ties its lifecycle to `bhyve`'s.
+The next reconcile retry then fails with:
+
+```
+creating bhyve VM: bhyve: starting serial console logger: starting reader:
+daemon -f -p .../apiary-<vm>.serialpid ...: daemon: process already running, pid: <N>
+```
+
+This is a real gap (tracked as a follow-up, not yet fixed as of this
+writing) - the reconciler's retry path doesn't clean up a previous
+incarnation's leftover logger before trying again, so this repeats
+indefinitely, once every reconcile interval, until an operator
+intervenes by hand:
+
+```bash
+ps -p <N>                                        # confirm it's genuinely still alive
+kill <N>
+rm -f /var/run/apiary/bhyve/apiary-<vm>.serialpid
+```
+
+The next reconcile tick will retry cleanly - but if the VM still has no
+bootable ISO/base image attached, or the host still can't do hardware
+virtualization, it will simply hit the same wall again. Fix the actual
+underlying cause (attach real boot media; confirm VT-x) rather than
+repeating this workaround indefinitely.
 
 ## Not covered here (disclosed gaps, not oversights)
 
