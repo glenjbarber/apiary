@@ -55,8 +55,8 @@
       <section class="panel detail-card">
         <h3>Firewall</h3>
         {{if .VM.FirewallRules}}
-        <table class="compact-table"><thead><tr><th>Direction</th><th>Action</th><th>Protocol</th><th>Port</th></tr></thead><tbody>
-          {{range .VM.FirewallRules}}<tr><td>{{.Direction}}</td><td>{{.Action}}</td><td>{{if .Protocol}}{{.Protocol}}{{else}}any{{end}}</td><td>{{if .PortRange}}{{.PortRange}}{{else}}any{{end}}</td></tr>{{end}}
+        <table class="compact-table"><thead><tr><th>Direction</th><th>Action</th><th>Protocol</th><th>Port</th><th>Priority</th></tr></thead><tbody>
+          {{range .VM.FirewallRules}}<tr><td>{{.Direction}}</td><td>{{.Action}}</td><td>{{if .Protocol}}{{.Protocol}}{{else}}any{{end}}</td><td>{{if .PortRange}}{{.PortRange}}{{else}}any{{end}}</td><td>{{.Priority}}</td></tr>{{end}}
         </tbody></table>
         {{else}}<p class="muted">No rules. Traffic is allowed by default.</p>{{end}}
       </section>

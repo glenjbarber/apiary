@@ -641,7 +641,16 @@ type FirewallRule struct {
 	Protocol string `protobuf:"bytes,3,opt,name=protocol,proto3" json:"protocol,omitempty"`
 	// port_range is a single port ("22"), a range ("8000-9000"), or ""
 	// (any) - meaningless when protocol is "icmp" or "".
-	PortRange     string `protobuf:"bytes,4,opt,name=port_range,json=portRange,proto3" json:"port_range,omitempty"`
+	PortRange string `protobuf:"bytes,4,opt,name=port_range,json=portRange,proto3" json:"port_range,omitempty"`
+	// priority orders rules before they're rendered into pf(8) syntax
+	// (internal/pf.RenderRules gets no `quick` keyword, so pf's own
+	// last-match-wins evaluation still applies - a higher priority
+	// number places a rule later in the rendered ruleset, so it's
+	// evaluated later and wins over a lower-priority rule matching the
+	// same traffic). Rules with equal priority (the default, 0, for
+	// every rule that predates this field) keep their existing relative
+	// list order - a stable sort, not a re-ranking. See ADR-0075.
+	Priority      int32 `protobuf:"varint,5,opt,name=priority,proto3" json:"priority,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -702,6 +711,13 @@ func (x *FirewallRule) GetPortRange() string {
 		return x.PortRange
 	}
 	return ""
+}
+
+func (x *FirewallRule) GetPriority() int32 {
+	if x != nil {
+		return x.Priority
+	}
+	return 0
 }
 
 // NetworkDefinition is a named, cluster-wide L2 segment: a VLAN ID (0 =
@@ -2479,13 +2495,14 @@ const file_api_internalpb_state_proto_rawDesc = "" +
 	"\rdesired_state\x18\x06 \x01(\x0e2\x1d.apiary.internal.v1.JailStateR\fdesiredState\x123\n" +
 	"\x05phase\x18\a \x01(\x0e2\x1d.apiary.internal.v1.JailPhaseR\x05phase\x12\x1f\n" +
 	"\vphase_error\x18\b \x01(\tR\n" +
-	"phaseError\"\x7f\n" +
+	"phaseError\"\x9b\x01\n" +
 	"\fFirewallRule\x12\x1c\n" +
 	"\tdirection\x18\x01 \x01(\tR\tdirection\x12\x16\n" +
 	"\x06action\x18\x02 \x01(\tR\x06action\x12\x1a\n" +
 	"\bprotocol\x18\x03 \x01(\tR\bprotocol\x12\x1d\n" +
 	"\n" +
-	"port_range\x18\x04 \x01(\tR\tportRange\"\xb4\x01\n" +
+	"port_range\x18\x04 \x01(\tR\tportRange\x12\x1a\n" +
+	"\bpriority\x18\x05 \x01(\x05R\bpriority\"\xb4\x01\n" +
 	"\x11NetworkDefinition\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x17\n" +

@@ -36,6 +36,7 @@ func toInternalVM(vm *rpcpb.VMDefinition) *internalpb.VMDefinition {
 			Action:    r.GetAction(),
 			Protocol:  r.GetProtocol(),
 			PortRange: r.GetPortRange(),
+			Priority:  r.GetPriority(),
 		})
 	}
 	return &internalpb.VMDefinition{
@@ -75,6 +76,7 @@ func fromInternalVM(vm *internalpb.VMDefinition) *rpcpb.VMDefinition {
 			Action:    r.GetAction(),
 			Protocol:  r.GetProtocol(),
 			PortRange: r.GetPortRange(),
+			Priority:  r.GetPriority(),
 		})
 	}
 	return &rpcpb.VMDefinition{

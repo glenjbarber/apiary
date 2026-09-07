@@ -213,6 +213,15 @@ message FirewallRule {
   // port_range is a single port ("22"), a range ("8000-9000"), or ""
   // (any) - meaningless when protocol is "icmp" or "".
   string port_range = 4;
+  // priority orders rules before they're rendered into pf(8) syntax
+  // (internal/pf.RenderRules gets no `quick` keyword, so pf's own
+  // last-match-wins evaluation still applies - a higher priority
+  // number places a rule later in the rendered ruleset, so it's
+  // evaluated later and wins over a lower-priority rule matching the
+  // same traffic). Rules with equal priority (the default, 0, for
+  // every rule that predates this field) keep their existing relative
+  // list order - a stable sort, not a re-ranking. See ADR-0075.
+  int32 priority = 5;
 }
 
 // NetworkDefinition is a named, cluster-wide L2 segment: a VLAN ID (0 =

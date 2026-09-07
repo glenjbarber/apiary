@@ -1178,6 +1178,7 @@ func parseFirewallRuleRows(r *http.Request) []*rpcpb.FirewallRule {
 	actions := r.PostForm["fw_action"]
 	protocols := r.PostForm["fw_protocol"]
 	ports := r.PostForm["fw_port"]
+	priorities := r.PostForm["fw_priority"]
 
 	var rules []*rpcpb.FirewallRule
 	for i, direction := range directions {
@@ -1193,6 +1194,14 @@ func parseFirewallRuleRows(r *http.Request) []*rpcpb.FirewallRule {
 		}
 		if i < len(ports) {
 			rule.PortRange = ports[i]
+		}
+		if i < len(priorities) {
+			// A blank or unparseable priority defaults to 0 (the same
+			// value every rule predating this field already has) rather
+			// than rejecting the whole submission over one bad number.
+			if p, err := strconv.ParseInt(priorities[i], 10, 32); err == nil {
+				rule.Priority = int32(p)
+			}
 		}
 		rules = append(rules, rule)
 	}
