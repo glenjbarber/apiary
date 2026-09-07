@@ -431,6 +431,11 @@ message FirewallRule {
   string action = 2;     // "pass" or "block"
   string protocol = 3;   // "tcp", "udp", "icmp", or "" (any)
   string port_range = 4; // "22", "8000-9000", or "" (any)
+  // priority orders rules before pf(8) rendering - a higher number is
+  // evaluated later and wins over a lower-priority rule matching the
+  // same traffic (pf's own last-match-wins semantics, unchanged). See
+  // ADR-0075.
+  int32 priority = 5;
 }
 
 // NetworkDefinition mirrors api/internalpb's NetworkDefinition - a

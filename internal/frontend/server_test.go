@@ -1125,6 +1125,7 @@ func TestServer_CreateVM_WithNetworkAndFirewallRules(t *testing.T) {
 		"fw_action":    {"block", "pass"},
 		"fw_protocol":  {"tcp", ""},
 		"fw_port":      {"22", ""},
+		"fw_priority":  {"10", ""},
 	}
 	req := httptest.NewRequest(http.MethodPost, "/vms", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
@@ -1142,8 +1143,40 @@ func TestServer_CreateVM_WithNetworkAndFirewallRules(t *testing.T) {
 		t.Fatalf("forwarded vm.FirewallRules = %v, want exactly one (the blank second row skipped)", vm.GetFirewallRules())
 	}
 	rule := vm.GetFirewallRules()[0]
-	if rule.GetDirection() != "in" || rule.GetAction() != "block" || rule.GetProtocol() != "tcp" || rule.GetPortRange() != "22" {
-		t.Errorf("forwarded rule = %+v, want direction=in action=block protocol=tcp port=22", rule)
+	if rule.GetDirection() != "in" || rule.GetAction() != "block" || rule.GetProtocol() != "tcp" || rule.GetPortRange() != "22" || rule.GetPriority() != 10 {
+		t.Errorf("forwarded rule = %+v, want direction=in action=block protocol=tcp port=22 priority=10", rule)
+	}
+}
+
+// TestServer_CreateVM_FirewallRuleBlankPriorityDefaultsToZero proves a
+// missing/unparseable fw_priority value doesn't reject the whole
+// submission - it just leaves that rule at the same 0 default every
+// rule created before this field existed already has.
+func TestServer_CreateVM_FirewallRuleBlankPriorityDefaultsToZero(t *testing.T) {
+	client := &fakeClient{
+		createResp: &rpcpb.CreateVMResponse{Vm: &rpcpb.VMDefinition{Id: "vm-1"}},
+	}
+	s := newTestServer(t, client)
+
+	form := url.Values{
+		"id":           {"vm-1"},
+		"fw_direction": {"in"},
+		"fw_action":    {"pass"},
+		"fw_protocol":  {""},
+		"fw_port":      {""},
+		"fw_priority":  {""},
+	}
+	req := httptest.NewRequest(http.MethodPost, "/vms", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	rules := client.lastCreateReq.GetVm().GetFirewallRules()
+	if len(rules) != 1 || rules[0].GetPriority() != 0 {
+		t.Errorf("forwarded rules = %+v, want exactly one rule with priority=0", rules)
 	}
 }
 

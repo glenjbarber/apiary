@@ -177,6 +177,10 @@ type FirewallRule struct {
 	Action    string
 	Protocol  string
 	PortRange string
+	// Priority orders rules before pf(8) rendering - see
+	// api/internalpb's own FirewallRule.priority doc comment (ADR-0075)
+	// for the exact "higher number wins" semantics.
+	Priority int32
 }
 
 // Plan returns the VMs assigned to localNodeID, sorted by ID for

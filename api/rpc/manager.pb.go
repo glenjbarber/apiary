@@ -1030,11 +1030,16 @@ func (x *JailDefinition) GetPhaseError() string {
 
 // FirewallRule mirrors api/internalpb's FirewallRule.
 type FirewallRule struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Direction     string                 `protobuf:"bytes,1,opt,name=direction,proto3" json:"direction,omitempty"`                  // "in" or "out"
-	Action        string                 `protobuf:"bytes,2,opt,name=action,proto3" json:"action,omitempty"`                        // "pass" or "block"
-	Protocol      string                 `protobuf:"bytes,3,opt,name=protocol,proto3" json:"protocol,omitempty"`                    // "tcp", "udp", "icmp", or "" (any)
-	PortRange     string                 `protobuf:"bytes,4,opt,name=port_range,json=portRange,proto3" json:"port_range,omitempty"` // "22", "8000-9000", or "" (any)
+	state     protoimpl.MessageState `protogen:"open.v1"`
+	Direction string                 `protobuf:"bytes,1,opt,name=direction,proto3" json:"direction,omitempty"`                  // "in" or "out"
+	Action    string                 `protobuf:"bytes,2,opt,name=action,proto3" json:"action,omitempty"`                        // "pass" or "block"
+	Protocol  string                 `protobuf:"bytes,3,opt,name=protocol,proto3" json:"protocol,omitempty"`                    // "tcp", "udp", "icmp", or "" (any)
+	PortRange string                 `protobuf:"bytes,4,opt,name=port_range,json=portRange,proto3" json:"port_range,omitempty"` // "22", "8000-9000", or "" (any)
+	// priority orders rules before pf(8) rendering - a higher number is
+	// evaluated later and wins over a lower-priority rule matching the
+	// same traffic (pf's own last-match-wins semantics, unchanged). See
+	// ADR-0075.
+	Priority      int32 `protobuf:"varint,5,opt,name=priority,proto3" json:"priority,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1095,6 +1100,13 @@ func (x *FirewallRule) GetPortRange() string {
 		return x.PortRange
 	}
 	return ""
+}
+
+func (x *FirewallRule) GetPriority() int32 {
+	if x != nil {
+		return x.Priority
+	}
+	return 0
 }
 
 // NetworkDefinition mirrors api/internalpb's NetworkDefinition - a
@@ -9788,13 +9800,14 @@ const file_api_rpc_manager_proto_rawDesc = "" +
 	"\rdesired_state\x18\x06 \x01(\x0e2\x18.apiary.rpc.v1.JailStateR\fdesiredState\x12.\n" +
 	"\x05phase\x18\a \x01(\x0e2\x18.apiary.rpc.v1.JailPhaseR\x05phase\x12\x1f\n" +
 	"\vphase_error\x18\b \x01(\tR\n" +
-	"phaseError\"\x7f\n" +
+	"phaseError\"\x9b\x01\n" +
 	"\fFirewallRule\x12\x1c\n" +
 	"\tdirection\x18\x01 \x01(\tR\tdirection\x12\x16\n" +
 	"\x06action\x18\x02 \x01(\tR\x06action\x12\x1a\n" +
 	"\bprotocol\x18\x03 \x01(\tR\bprotocol\x12\x1d\n" +
 	"\n" +
-	"port_range\x18\x04 \x01(\tR\tportRange\"\xd9\x01\n" +
+	"port_range\x18\x04 \x01(\tR\tportRange\x12\x1a\n" +
+	"\bpriority\x18\x05 \x01(\x05R\bpriority\"\xd9\x01\n" +
 	"\x11NetworkDefinition\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x17\n" +
