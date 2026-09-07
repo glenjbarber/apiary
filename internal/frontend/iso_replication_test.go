@@ -50,10 +50,6 @@ func (f *fakeISOPeerClient) OpenVMConsole(context.Context, string, string) (io.R
 	return nil, errors.New("test peer console unavailable")
 }
 
-func (f *fakeISOPeerClient) OpenJailConsole(context.Context, string, string) (io.ReadWriteCloser, error) {
-	return nil, errors.New("test peer jail console unavailable")
-}
-
 func (f *fakeISOPeerClient) GetNodeConfig(context.Context, string) (*rpcpb.GetNodeConfigResponse, error) {
 	return &rpcpb.GetNodeConfigResponse{}, nil
 }

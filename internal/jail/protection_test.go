@@ -14,8 +14,7 @@ func TestProtectedJailRejectedBeforeExec(t *testing.T) {
 		ctx := context.Background()
 		_, existsErr := m.JailExists(ctx, tc.name)
 		_, infoErr := m.JailInfo(ctx, tc.name)
-		_, attachErr := m.Attach(ctx, tc.name)
-		for _, err := range []error{existsErr, infoErr, attachErr,
+		for _, err := range []error{existsErr, infoErr,
 			m.CreateJail(ctx, tc.name, Config{Path: "/unused"}), m.RemoveJail(ctx, tc.name)} {
 			if err == nil || !strings.Contains(err.Error(), "protected") {
 				t.Fatalf("prefix=%q name=%q: expected protected error, got %v", tc.prefix, tc.name, err)

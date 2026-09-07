@@ -99,26 +99,21 @@ var requiredRole = map[string]Role{
 	// node forwarding its own already-authorized write needs at least
 	// Operator, not Admin, to keep -peer-api-key's required role the
 	// same tier as the writes it's relaying.
-	"/apiary.rpc.v1.ManagerService/CreateVM":                RoleOperator,
-	"/apiary.rpc.v1.ManagerService/UpdateVM":                RoleOperator,
-	"/apiary.rpc.v1.ManagerService/DeleteVM":                RoleOperator,
-	"/apiary.rpc.v1.ManagerService/MigrateVM":               RoleOperator,
-	"/apiary.rpc.v1.ManagerService/SetVMFirewallPaused":     RoleOperator,
-	"/apiary.rpc.v1.ManagerService/SetVMCloudflareExposure": RoleOperator,
-	"/apiary.rpc.v1.ManagerService/SetVMDesiredState":       RoleOperator,
-	"/apiary.rpc.v1.ManagerService/SetDatasetQuota":         RoleOperator,
-	"/apiary.rpc.v1.ManagerService/SaveAssumptionClaim":     RoleOperator,
-	"/apiary.rpc.v1.ManagerService/DeleteAssumptionClaim":   RoleOperator,
-	"/apiary.rpc.v1.ManagerService/CreateJail":              RoleOperator,
-	"/apiary.rpc.v1.ManagerService/UpdateJail":              RoleOperator,
-	"/apiary.rpc.v1.ManagerService/DeleteJail":              RoleOperator,
-	"/apiary.rpc.v1.ManagerService/MigrateJail":             RoleOperator,
-	"/apiary.rpc.v1.ManagerService/SetJailDesiredState":     RoleOperator,
-	// Operator, not Viewer like ProxyVMConsole - see ProxyJailConsole's
-	// own proto doc comment for why jexec's real, kernel-shared root
-	// shell is judged a materially higher-privilege operation than
-	// viewing a VM's own console.
-	"/apiary.rpc.v1.ManagerService/ProxyJailConsole":           RoleOperator,
+	"/apiary.rpc.v1.ManagerService/CreateVM":                   RoleOperator,
+	"/apiary.rpc.v1.ManagerService/UpdateVM":                   RoleOperator,
+	"/apiary.rpc.v1.ManagerService/DeleteVM":                   RoleOperator,
+	"/apiary.rpc.v1.ManagerService/MigrateVM":                  RoleOperator,
+	"/apiary.rpc.v1.ManagerService/SetVMFirewallPaused":        RoleOperator,
+	"/apiary.rpc.v1.ManagerService/SetVMCloudflareExposure":    RoleOperator,
+	"/apiary.rpc.v1.ManagerService/SetVMDesiredState":          RoleOperator,
+	"/apiary.rpc.v1.ManagerService/SetDatasetQuota":            RoleOperator,
+	"/apiary.rpc.v1.ManagerService/SaveAssumptionClaim":        RoleOperator,
+	"/apiary.rpc.v1.ManagerService/DeleteAssumptionClaim":      RoleOperator,
+	"/apiary.rpc.v1.ManagerService/CreateJail":                 RoleOperator,
+	"/apiary.rpc.v1.ManagerService/UpdateJail":                 RoleOperator,
+	"/apiary.rpc.v1.ManagerService/DeleteJail":                 RoleOperator,
+	"/apiary.rpc.v1.ManagerService/MigrateJail":                RoleOperator,
+	"/apiary.rpc.v1.ManagerService/SetJailDesiredState":        RoleOperator,
 	"/apiary.rpc.v1.ManagerService/CreateNetwork":              RoleOperator,
 	"/apiary.rpc.v1.ManagerService/DeleteNetwork":              RoleOperator,
 	"/apiary.rpc.v1.ManagerService/UploadISO":                  RoleOperator,

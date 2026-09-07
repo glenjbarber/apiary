@@ -2,7 +2,9 @@
 
 ## Status
 
-Accepted
+Reverted - see "Removed" section at the end of this ADR. The design
+and reasoning below are preserved as the historical record of what was
+built and why; none of it exists in the codebase any more.
 
 ## Context
 
@@ -146,3 +148,42 @@ concurrent-session check) has not been performed as part of this
 change and should happen before this is treated as fully proven in
 production, the same way ADR-0020's own noVNC console was live-verified
 separately from its initial implementation.
+
+## Removed
+
+The user reconsidered this feature after it shipped and asked for it
+to be removed entirely: "It is the only safe option." The stated
+reason was the same one this ADR's own Context section already named
+as the core risk and never fully resolved - `jexec` grants a real root
+shell sharing the *host's own kernel*, with no hardware isolation
+boundary the way a VM's hypervisor gives the VM console. Every
+mitigation this ADR built (off by default, Operator-tier, fixed
+`/bin/sh` only, no arbitrary commands) reduced the risk without
+changing that structural fact, and the user judged the residual risk -
+what happens if that access is misused or an Operator-tier credential
+is compromised - not worth carrying, live verification (the "Deferred"
+section above) never having happened in the first place.
+
+Removed entirely, not disabled: `ProxyJailConsole` (RPC + proto
+messages), `internal/jail.Manager.Attach`/`Session`, `SetJailConsole`/
+`jailConsoleAttacher`, `-jail-console-enabled` (the flag and its
+`nodeconfig.Config.JailConsoleEnabled`/proto tri-state override),
+`PeerReporter.OpenJailConsole`, the `/jails/{id}/console` page and its
+"Console" link on the Jails page, and the vendored `web/static/xterm/`
+(confirmed unused anywhere else before deleting it). The
+`github.com/creack/pty` dependency - added specifically for this
+feature - is removed from `go.mod`/`go.sum` via `go mod tidy`, since
+nothing else in the codebase used it.
+
+No replacement mechanism was requested or built. An operator who needs
+to inspect or act inside a running jail today has the same tools this
+project offered before ADR-0068: direct host access (`jexec` by hand,
+as root, on the Hive itself), or the existing lifecycle
+inspection/console-free jail management the web UI already provides
+(ADR-0027).
+
+Verification: `go build ./...`, `go vet ./...`, `gofmt -l`, `git diff
+--check`, the full `go test ./...` suite, and the FreeBSD cross-compile
+for managerd/raftd/restshimd all pass with the feature fully absent.
+Not deployed as part of authoring this update - see the Working-state
+entry in `SHARED.md` for when it actually reached `apiarium`/`apiverse`.

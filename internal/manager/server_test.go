@@ -600,7 +600,6 @@ func TestServer_NodeConfig_NewFieldsRoundTrip(t *testing.T) {
 		DiskSizeMb:                      8192,
 		JailDiskSizeMb:                  2048,
 		HastEnabled:                     boolPtr(true),
-		JailConsoleEnabled:              boolPtr(false),
 		PeerTls:                         boolPtr(true),
 		PeerManagerdPort:                "17700",
 		PeerTlsHostnameMap:              "10.50.0.9=apiverse.apiary.work",
@@ -624,19 +623,16 @@ func TestServer_NodeConfig_NewFieldsRoundTrip(t *testing.T) {
 	}
 
 	checks := map[string]bool{
-		"zfs_base":          resp.GetZfsBase() == "zroot/apiary",
-		"bhyve_prefix":      resp.GetBhyvePrefix() == "apiary-",
-		"iso_dir":           resp.GetIsoDir() == "/var/db/apiary/isos",
-		"jail_prefix":       resp.GetJailPrefix() == "apiary-",
-		"jail_mount_base":   resp.GetJailMountBase() == "/apiary-jails",
-		"bhyve_bootrom":     resp.GetBhyveBootrom() != "",
-		"bhyve_bridge":      resp.GetBhyveBridge() == "bridge0",
-		"disk_size_mb":      resp.GetDiskSizeMb() == 8192,
-		"jail_disk_size_mb": resp.GetJailDiskSizeMb() == 2048,
-		"hast_enabled":      resp.GetHastEnabled(),
-		"jail_console_enabled_unset": func() bool {
-			return resp.JailConsoleEnabled != nil && !resp.GetJailConsoleEnabled()
-		}(),
+		"zfs_base":              resp.GetZfsBase() == "zroot/apiary",
+		"bhyve_prefix":          resp.GetBhyvePrefix() == "apiary-",
+		"iso_dir":               resp.GetIsoDir() == "/var/db/apiary/isos",
+		"jail_prefix":           resp.GetJailPrefix() == "apiary-",
+		"jail_mount_base":       resp.GetJailMountBase() == "/apiary-jails",
+		"bhyve_bootrom":         resp.GetBhyveBootrom() != "",
+		"bhyve_bridge":          resp.GetBhyveBridge() == "bridge0",
+		"disk_size_mb":          resp.GetDiskSizeMb() == 8192,
+		"jail_disk_size_mb":     resp.GetJailDiskSizeMb() == 2048,
+		"hast_enabled":          resp.GetHastEnabled(),
 		"peer_tls":              resp.GetPeerTls(),
 		"peer_managerd_port":    resp.GetPeerManagerdPort() == "17700",
 		"peer_tls_hostname_map": resp.GetPeerTlsHostnameMap() == "10.50.0.9=apiverse.apiary.work",

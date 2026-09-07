@@ -3,7 +3,6 @@ module github.com/glenjbarber/apiary
 go 1.27
 
 require (
-	github.com/creack/pty v1.1.24
 	github.com/gorilla/websocket v1.5.3
 	github.com/hashicorp/raft v1.7.3
 	github.com/hashicorp/raft-boltdb/v2 v2.3.1

@@ -3,12 +3,8 @@ package jail
 import (
 	"context"
 	"fmt"
-	"os"
-	"os/exec"
 	"strconv"
 	"strings"
-
-	"github.com/creack/pty"
 )
 
 // Config describes a jail to create.
@@ -98,68 +94,6 @@ func (m *Manager) RemoveJail(ctx context.Context, name string) error {
 	}
 	_, err = runCmd(ctx, "jail", "-r", qname)
 	return err
-}
-
-// consoleShell is the fixed command Attach always runs inside the
-// target jail - never caller-influenced, since an interactive shell is
-// already the most privileged thing this package offers and accepting
-// an operator/caller-supplied command here would be pure downside (a
-// second, redundant way to run arbitrary commands with no additional
-// capability). /bin/sh is present in every real Apiary jail root
-// (v1 jails have no separate minimal/no-shell profile).
-const consoleShell = "/bin/sh"
-
-// Session is one interactive jexec(8) session's PTY, returned by
-// Attach. Read/Write operate on the PTY master side; Close terminates
-// the underlying jexec process (which is what actually exits the
-// shell running inside the jail) and releases the PTY, and is
-// idempotent - safe to call more than once, e.g. from both a stream
-// error path and a deferred cleanup.
-type Session struct {
-	pty    *os.File
-	cmd    *exec.Cmd
-	closed bool
-}
-
-func (s *Session) Read(p []byte) (int, error)  { return s.pty.Read(p) }
-func (s *Session) Write(p []byte) (int, error) { return s.pty.Write(p) }
-
-func (s *Session) Close() error {
-	if s.closed {
-		return nil
-	}
-	s.closed = true
-	if s.cmd.Process != nil {
-		s.cmd.Process.Kill()
-	}
-	err := s.pty.Close()
-	s.cmd.Wait()
-	return err
-}
-
-// Attach starts an interactive jexec(8) session inside the named jail
-// as root (jexec's own default, matching its ordinary sysadmin use -
-// v1 jails have no separate login/credential layer to select a lesser
-// user), running a real PTY (github.com/creack/pty) rather than plain
-// pipes so the shell gets working line editing, job control, and
-// signal handling (Ctrl-C, Ctrl-D) - the same reasoning ADR-0020 needed
-// a real VNC framebuffer for the VM console rather than some
-// approximation. ctx bounds the whole session's lifetime: cancelling it
-// (e.g. the caller's gRPC stream ending) kills the jexec process via
-// exec.CommandContext's own cancellation, same as every other exec.Cmd
-// in this package's ctx handling. v1 has no window-resize support - the
-// PTY is sized once at a fixed default and never adjusted after.
-func (m *Manager) Attach(ctx context.Context, name string) (*Session, error) {
-	qname, err := m.qualifiedName(name)
-	if err != nil {
-		return nil, err
-	}
-	cmd := exec.CommandContext(ctx, "jexec", qname, consoleShell)
-	ptyFile, err := pty.StartWithSize(cmd, &pty.Winsize{Rows: 24, Cols: 80})
-	if err != nil {
-		return nil, fmt.Errorf("jail: starting console session for %q: %w", name, err)
-	}
-	return &Session{pty: ptyFile, cmd: cmd}, nil
 }
 
 // JailExists reports whether a jail by this name is currently running.

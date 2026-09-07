@@ -98,11 +98,6 @@ type Config struct {
 	// startup flag; true/false are explicit local overrides.
 	JailEnabled *bool `json:"jail_enabled,omitempty"`
 
-	// JailConsoleEnabled mirrors -jail-console-enabled (ADR-0068). Off
-	// by default at the flag level already; this tri-state override
-	// follows JailEnabled's own convention.
-	JailConsoleEnabled *bool `json:"jail_console_enabled,omitempty"`
-
 	// JailPrefix mirrors -jail-prefix. Write-once, same reasoning as
 	// ZFSBase.
 	JailPrefix string `json:"jail_prefix,omitempty"`

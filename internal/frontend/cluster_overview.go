@@ -60,10 +60,6 @@ type peerHostStatsClient interface {
 	GetVMConsole(ctx context.Context, addr, id string) (*rpcpb.GetVMConsoleResponse, error)
 	OpenVMConsole(ctx context.Context, addr, id string) (io.ReadWriteCloser, error)
 	GetNodeConfig(ctx context.Context, addr string) (*rpcpb.GetNodeConfigResponse, error)
-
-	// OpenJailConsole mirrors OpenVMConsole for a jexec(8) session -
-	// see ProxyJailConsole's own doc comment for the full design.
-	OpenJailConsole(ctx context.Context, addr, id string) (io.ReadWriteCloser, error)
 }
 
 // clusterNodeView is the template-facing shape for one row on the
