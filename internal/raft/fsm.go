@@ -97,6 +97,8 @@ func (f *FSM) Apply(log *raft.Log) interface{} {
 		return f.applySetVMCloudflareExposure(log.Index, op.SetVmCloudflareExposure)
 	case *internalpb.Command_SetVmDesiredState:
 		return f.applySetVMDesiredState(log.Index, op.SetVmDesiredState)
+	case *internalpb.Command_SetVmFirewallRules:
+		return f.applySetVMFirewallRules(log.Index, op.SetVmFirewallRules)
 	case *internalpb.Command_CreateNetwork:
 		return f.applyCreateNetwork(log.Index, op.CreateNetwork.GetNetwork())
 	case *internalpb.Command_DeleteNetwork:
@@ -347,6 +349,24 @@ func (f *FSM) applySetVMDesiredState(index uint64, req *internalpb.SetVMDesiredS
 	}
 	updated := proto.Clone(vm).(*internalpb.VMDefinition)
 	updated.DesiredState = req.GetDesiredState()
+	f.vms[req.GetId()] = updated
+	return &FSMApplyResult{Index: index, VM: updated}
+}
+
+// applySetVMFirewallRules replaces firewall_rules wholesale on an
+// existing VM, touching no other field - the same narrow,
+// deliberately-not-UpdateVM shape as applySetVMFirewallPaused above.
+// No field-level validation here, matching applyCreateVM's own
+// division of labor: nothing validates individual rule contents at
+// creation time either, so this doesn't hold edits to a stricter
+// standard than creation.
+func (f *FSM) applySetVMFirewallRules(index uint64, req *internalpb.SetVMFirewallRules) *FSMApplyResult {
+	vm, exists := f.vms[req.GetId()]
+	if !exists {
+		return &FSMApplyResult{Index: index, Error: fmt.Sprintf("SetVMFirewallRules: id %q does not exist", req.GetId())}
+	}
+	updated := proto.Clone(vm).(*internalpb.VMDefinition)
+	updated.FirewallRules = req.GetFirewallRules()
 	f.vms[req.GetId()] = updated
 	return &FSMApplyResult{Index: index, VM: updated}
 }

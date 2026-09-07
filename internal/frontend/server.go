@@ -327,6 +327,12 @@ type pageData struct {
 	// existing display rather than replacing it - see ADR-0063.
 	VMCloudflareFormError string
 
+	// VMFirewallFormError carries a failed firewall-rules edit form's
+	// own error, kept separate from VMCloudflareFormError so it renders
+	// next to the Firewall panel an operator is actually looking at,
+	// not the unrelated Public exposure panel.
+	VMFirewallFormError string
+
 	// CloudflareConfigured mirrors HostStatsResponse.cloudflare_configured
 	// for this node - shown on the Machine Configuration page's own
 	// setup-status panel, and used to warn on a VM's detail page when
@@ -672,6 +678,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /vms/{id}", s.handleVMPage)
 	s.mux.HandleFunc("POST /vms/{id}/lifecycle", s.requireRole(manager.RoleOperator, s.handleSetVMDesiredState))
 	s.mux.HandleFunc("POST /vms/{id}/cloudflare-exposure", s.requireRole(manager.RoleOperator, s.handleSetVMCloudflareExposure))
+	s.mux.HandleFunc("POST /vms/{id}/firewall-rules", s.requireRole(manager.RoleOperator, s.handleSetVMFirewallRules))
 	s.mux.HandleFunc("GET /images", s.handleImagesPage)
 	s.mux.HandleFunc("GET /isos", s.handleListISOs)
 	s.mux.HandleFunc("GET /vms/{id}/console", s.handleConsolePage)
@@ -900,7 +907,7 @@ func (s *Server) handleVMsPage(w http.ResponseWriter, r *http.Request) {
 // uses the existing GetVM read path, so the page has the same leader-forwarded
 // consistency semantics as the list without introducing another API surface.
 func (s *Server) handleVMPage(w http.ResponseWriter, r *http.Request) {
-	s.renderVMPage(w, r, r.PathValue("id"), "")
+	s.renderVMPage(w, r, r.PathValue("id"), "", "")
 }
 
 // handleSetVMCloudflareExposure sets or clears one VM's public
@@ -914,7 +921,7 @@ func (s *Server) handleVMPage(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleSetVMCloudflareExposure(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	if err := r.ParseForm(); err != nil {
-		s.renderVMPage(w, r, id, "invalid form: "+err.Error())
+		s.renderVMPage(w, r, id, "invalid form: "+err.Error(), "")
 		return
 	}
 	hostname := strings.TrimSpace(r.FormValue("cloudflare_hostname"))
@@ -923,20 +930,44 @@ func (s *Server) handleSetVMCloudflareExposure(w http.ResponseWriter, r *http.Re
 		var err error
 		port, err = strconv.ParseUint(r.FormValue("cloudflare_port"), 10, 32)
 		if err != nil {
-			s.renderVMPage(w, r, id, "invalid port: "+err.Error())
+			s.renderVMPage(w, r, id, "invalid port: "+err.Error(), "")
 			return
 		}
 	}
 	resp, err := s.client.SetVMCloudflareExposure(r.Context(), &rpcpb.SetVMCloudflareExposureRequest{Id: id, Hostname: hostname, Port: uint32(port)})
 	if err != nil {
-		s.renderVMPage(w, r, id, err.Error())
+		s.renderVMPage(w, r, id, err.Error(), "")
 		return
 	}
 	if resp.GetError() != "" {
-		s.renderVMPage(w, r, id, resp.GetError())
+		s.renderVMPage(w, r, id, resp.GetError(), "")
 		return
 	}
-	s.renderVMPage(w, r, id, "")
+	s.renderVMPage(w, r, id, "", "")
+}
+
+// handleSetVMFirewallRules replaces a VM's firewall rules wholesale -
+// previously only settable at create time. Reuses parseFirewallRuleRows,
+// the same repeating-row parser the create-VM form already uses, since
+// the edit form on vm.html renders identically-named fields. An empty
+// submission (every row removed) clears all rules, matching "no rules
+// means allow by default" - the same semantics CreateVM already has.
+func (s *Server) handleSetVMFirewallRules(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if err := r.ParseForm(); err != nil {
+		s.renderVMPage(w, r, id, "", "invalid form: "+err.Error())
+		return
+	}
+	resp, err := s.client.SetVMFirewallRules(r.Context(), &rpcpb.SetVMFirewallRulesRequest{Id: id, FirewallRules: parseFirewallRuleRows(r)})
+	if err != nil {
+		s.renderVMPage(w, r, id, "", err.Error())
+		return
+	}
+	if resp.GetError() != "" {
+		s.renderVMPage(w, r, id, "", resp.GetError())
+		return
+	}
+	s.renderVMPage(w, r, id, "", "")
 }
 
 func vmLifecycleState(action string) (rpcpb.VMState, string) {
@@ -958,31 +989,31 @@ func vmLifecycleState(action string) (rpcpb.VMState, string) {
 func (s *Server) handleSetVMDesiredState(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	if err := r.ParseForm(); err != nil {
-		s.renderVMPage(w, r, id, "invalid form: "+err.Error())
+		s.renderVMPage(w, r, id, "invalid form: "+err.Error(), "")
 		return
 	}
 	state, formErr := vmLifecycleState(r.FormValue("action"))
 	if formErr != "" {
-		s.renderVMPage(w, r, id, formErr)
+		s.renderVMPage(w, r, id, formErr, "")
 		return
 	}
 	resp, err := s.client.SetVMDesiredState(r.Context(), &rpcpb.SetVMDesiredStateRequest{Id: id, DesiredState: state})
 	if err != nil {
-		s.renderVMPage(w, r, id, err.Error())
+		s.renderVMPage(w, r, id, err.Error(), "")
 		return
 	}
 	if resp.GetError() != "" {
-		s.renderVMPage(w, r, id, resp.GetError())
+		s.renderVMPage(w, r, id, resp.GetError(), "")
 		return
 	}
-	s.renderVMPage(w, r, id, "")
+	s.renderVMPage(w, r, id, "", "")
 }
 
 // renderVMPage re-fetches and renders the VM detail page, with an
 // optional form-specific error - shared by handleSetVMCloudflareExposure
 // so a failed form submission still shows the rest of the page's own
 // current state, not just a bare error.
-func (s *Server) renderVMPage(w http.ResponseWriter, r *http.Request, id, formErr string) {
+func (s *Server) renderVMPage(w http.ResponseWriter, r *http.Request, id, cloudflareErr, firewallErr string) {
 	resp, err := s.client.GetVM(r.Context(), &rpcpb.GetVMRequest{Id: id})
 	if err != nil {
 		s.render(w, "vm_page", s.withAuthFields(r, pageData{Error: err.Error(), ActivePage: "vms"}))
@@ -1018,7 +1049,8 @@ func (s *Server) renderVMPage(w http.ResponseWriter, r *http.Request, id, formEr
 	}
 
 	s.render(w, "vm_page", s.withAuthFields(r, pageData{
-		VM: vm, VMCloudflareFormError: formErr, CloudflareConfigured: cloudflareConfigured, ActivePage: "vms",
+		VM: vm, VMCloudflareFormError: cloudflareErr, VMFirewallFormError: firewallErr,
+		CloudflareConfigured: cloudflareConfigured, ActivePage: "vms",
 	}))
 }
 

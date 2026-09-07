@@ -170,6 +170,10 @@ func (f *fakeClient) SetVMFirewallPaused(context.Context, *rpcpb.SetVMFirewallPa
 	return &rpcpb.SetVMFirewallPausedResponse{}, nil
 }
 
+func (f *fakeClient) SetVMFirewallRules(context.Context, *rpcpb.SetVMFirewallRulesRequest, ...grpc.CallOption) (*rpcpb.SetVMFirewallRulesResponse, error) {
+	return &rpcpb.SetVMFirewallRulesResponse{}, nil
+}
+
 func (f *fakeClient) SetVMCloudflareExposure(context.Context, *rpcpb.SetVMCloudflareExposureRequest, ...grpc.CallOption) (*rpcpb.SetVMCloudflareExposureResponse, error) {
 	return &rpcpb.SetVMCloudflareExposureResponse{}, nil
 }

@@ -94,6 +94,7 @@ type PeerForwarder interface {
 	ForcePurgeVM(ctx context.Context, addr string, req *rpcpb.ForcePurgeVMRequest) (*rpcpb.ForcePurgeVMResponse, error)
 	MigrateVM(ctx context.Context, addr string, req *rpcpb.MigrateVMRequest) (*rpcpb.MigrateVMResponse, error)
 	SetVMFirewallPaused(ctx context.Context, addr string, req *rpcpb.SetVMFirewallPausedRequest) (*rpcpb.SetVMFirewallPausedResponse, error)
+	SetVMFirewallRules(ctx context.Context, addr string, req *rpcpb.SetVMFirewallRulesRequest) (*rpcpb.SetVMFirewallRulesResponse, error)
 	SetVMCloudflareExposure(ctx context.Context, addr string, req *rpcpb.SetVMCloudflareExposureRequest) (*rpcpb.SetVMCloudflareExposureResponse, error)
 	SetVMDesiredState(ctx context.Context, addr string, req *rpcpb.SetVMDesiredStateRequest) (*rpcpb.SetVMDesiredStateResponse, error)
 	ForcePurgeJail(ctx context.Context, addr string, req *rpcpb.ForcePurgeJailRequest) (*rpcpb.ForcePurgeJailResponse, error)
@@ -966,6 +967,25 @@ func (s *Server) SetVMFirewallPaused(ctx context.Context, req *rpcpb.SetVMFirewa
 		}
 	}
 	return &rpcpb.SetVMFirewallPausedResponse{Vm: fromInternalVM(vm), Error: appErr, LeaderHint: leaderHint}, nil
+}
+
+// SetVMFirewallRules implements rpcpb.ManagerServiceServer - lets an
+// operator edit a VM's firewall rules after creation, previously only
+// settable via CreateVM. Same narrow, atomic-apply shape as
+// SetVMFirewallPaused above, for the identical reason (ADR-0049).
+func (s *Server) SetVMFirewallRules(ctx context.Context, req *rpcpb.SetVMFirewallRulesRequest) (*rpcpb.SetVMFirewallRulesResponse, error) {
+	cmd := &internalpb.Command{
+		Op: &internalpb.Command_SetVmFirewallRules{SetVmFirewallRules: &internalpb.SetVMFirewallRules{
+			Id: req.GetId(), FirewallRules: toInternalFirewallRules(req.GetFirewallRules()),
+		}},
+	}
+	vm, appErr, leaderHint := s.applyCommand(ctx, cmd, req.GetTimeoutMs())
+	if leaderHint != "" && s.peers != nil {
+		if fwd, ferr := s.peers.SetVMFirewallRules(ctx, s.peerManagerdAddr(leaderHint), req); ferr == nil {
+			return fwd, nil
+		}
+	}
+	return &rpcpb.SetVMFirewallRulesResponse{Vm: fromInternalVM(vm), Error: appErr, LeaderHint: leaderHint}, nil
 }
 
 // SetVMCloudflareExposure implements rpcpb.ManagerServiceServer - see

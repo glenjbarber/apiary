@@ -52,6 +52,7 @@
         <p class="muted">The log records the resolved disk, installer, bridge, and bhyve launch diagnostics. It is empty until the owning Comb attempts a start.</p>
       </section>
 
+      {{if not .CanOperate}}
       <section class="panel detail-card">
         <h3>Firewall</h3>
         {{if .VM.FirewallRules}}
@@ -60,7 +61,69 @@
         </tbody></table>
         {{else}}<p class="muted">No rules. Traffic is allowed by default.</p>{{end}}
       </section>
+      {{end}}
     </div>
+
+    {{if .CanOperate}}
+    <section class="panel">
+      <h3>Firewall</h3>
+      <p class="muted">With no rules, all traffic is allowed. Priority breaks ties when rules overlap - a higher number is evaluated later and wins (pf's own last-match-wins evaluation); leave at 0 if only one rule could ever match a given packet.</p>
+      {{if .VMFirewallFormError}}<div class="banner-error">{{.VMFirewallFormError}}</div>{{end}}
+      <form method="post" action="/vms/{{.VM.ID}}/firewall-rules">
+        <table id="vm-firewall-rules">
+          <thead><tr><th>Direction</th><th>Action</th><th>Protocol</th><th>Port/range</th><th>Priority</th><th></th></tr></thead>
+          <tbody id="vm-firewall-rule-rows">
+            {{range .VM.FirewallRules}}
+            <tr>
+              <td><select name="fw_direction" title="Whether this rule matches traffic entering or leaving the VM. (unused) rows are ignored.">
+                <option value="">(unused)</option>
+                <option value="in" {{if eq .Direction "in"}}selected{{end}}>in</option>
+                <option value="out" {{if eq .Direction "out"}}selected{{end}}>out</option>
+              </select></td>
+              <td><select name="fw_action" title="pass allows matching traffic through; block drops it.">
+                <option value="pass" {{if eq .Action "pass"}}selected{{end}}>pass</option>
+                <option value="block" {{if eq .Action "block"}}selected{{end}}>block</option>
+              </select></td>
+              <td><select name="fw_protocol" title="Restrict this rule to one protocol, or leave as any to match all of them.">
+                <option value="" {{if eq .Protocol ""}}selected{{end}}>any</option>
+                <option value="tcp" {{if eq .Protocol "tcp"}}selected{{end}}>tcp</option>
+                <option value="udp" {{if eq .Protocol "udp"}}selected{{end}}>udp</option>
+                <option value="icmp" {{if eq .Protocol "icmp"}}selected{{end}}>icmp</option>
+              </select></td>
+              <td><input type="text" name="fw_port" value="{{.PortRange}}" placeholder="22 or 8000-9000" title="A single port or a port range this rule applies to. Leave blank to match any port."></td>
+              <td><input type="number" name="fw_priority" value="{{.Priority}}" step="1" title="Breaks ties when rules overlap - a higher number is evaluated later and wins (pf's last-match-wins evaluation). Leave at 0 if only one rule could ever match a given packet."></td>
+              <td><button type="button" class="remove-firewall-rule">Remove</button></td>
+            </tr>
+            {{end}}
+          </tbody>
+        </table>
+        <div class="form-actions">
+          <button type="button" class="button secondary" id="vm-add-firewall-rule">Add rule</button>
+          <button type="submit">Save firewall rules</button>
+        </div>
+      </form>
+    </section>
+    <script>
+    (function() {
+      var rows = document.getElementById('vm-firewall-rule-rows');
+      document.querySelectorAll('#vm-firewall-rule-rows .remove-firewall-rule').forEach(function(btn) {
+        btn.addEventListener('click', function() { rows.removeChild(btn.closest('tr')); });
+      });
+      document.getElementById('vm-add-firewall-rule').addEventListener('click', function() {
+        var tr = document.createElement('tr');
+        tr.innerHTML =
+          '<td><select name="fw_direction" title="Whether this rule matches traffic entering or leaving the VM. (unused) rows are ignored."><option value="">(unused)</option><option value="in">in</option><option value="out">out</option></select></td>' +
+          '<td><select name="fw_action" title="pass allows matching traffic through; block drops it."><option value="pass">pass</option><option value="block">block</option></select></td>' +
+          '<td><select name="fw_protocol" title="Restrict this rule to one protocol, or leave as any to match all of them."><option value="">any</option><option value="tcp">tcp</option><option value="udp">udp</option><option value="icmp">icmp</option></select></td>' +
+          '<td><input type="text" name="fw_port" placeholder="22 or 8000-9000" title="A single port or a port range this rule applies to. Leave blank to match any port."></td>' +
+          '<td><input type="number" name="fw_priority" value="0" step="1" title="Breaks ties when rules overlap - a higher number is evaluated later and wins (pf\'s last-match-wins evaluation). Leave at 0 if only one rule could ever match a given packet."></td>' +
+          '<td><button type="button" class="remove-firewall-rule">Remove</button></td>';
+        tr.querySelector('.remove-firewall-rule').addEventListener('click', function() { rows.removeChild(tr); });
+        rows.appendChild(tr);
+      });
+    })();
+    </script>
+    {{end}}
 
     <section class="panel vm-controls">
       <div><h3>Access</h3><p class="muted">Open the graphical console or inspect launch and serial evidence.</p></div>

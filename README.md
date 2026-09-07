@@ -665,9 +665,11 @@ each design decision, in order.
   "Update" section. Firewall rules now carry an explicit `priority`
   (a higher number is evaluated later and wins under `pf`'s own
   unchanged last-match-wins semantics) - see
-  [ADR-0075](docs/adr/0075-firewall-rule-priority.md). Still no
-  editing of an existing VM's rules after creation - only the
-  create-VM form sets them at all.
+  [ADR-0075](docs/adr/0075-firewall-rule-priority.md). An existing VM's
+  firewall rules can now be edited after creation too, via a dedicated
+  `SetVMFirewallRules` command (not the general `UpdateVM`, matching
+  every other frontend-initiated VM mutation) - see
+  [ADR-0079](docs/adr/0079-vm-firewall-rule-editing.md).
 - Importing VMs from other hypervisors (e.g. Proxmox): no disk-format
   conversion, and Apiary is UEFI-only. Linux containers have no path at
   all — jails share the host FreeBSD kernel

@@ -318,6 +318,15 @@ message Command {
     // Cell's complete definition.
     SetVMDesiredState set_vm_desired_state = 17;
     SetJailDesiredState set_jail_desired_state = 18;
+
+    // SetVMFirewallRules replaces VMDefinition.firewall_rules wholesale
+    // on an existing VM - deliberately narrow (touches only that one
+    // field) rather than routed through the general UpdateVM, matching
+    // every other frontend-initiated VM mutation in this codebase
+    // (SetVMFirewallPaused, SetVMCloudflareExposure, SetVMDesiredState
+    // above all follow the identical shape, even where the field in
+    // question would technically be safe to carry through UpdateVM).
+    SetVMFirewallRules set_vm_firewall_rules = 19;
   }
 }
 
@@ -425,6 +434,16 @@ message SetVMCloudflareExposure {
 message SetVMDesiredState {
   string id = 1;
   VMState desired_state = 2;
+}
+
+// SetVMFirewallRules replaces VMDefinition.firewall_rules wholesale on
+// an existing VM. Fails if the id doesn't exist. The same narrow,
+// deliberately-not-UpdateVM shape as SetVMFirewallPaused above - an
+// operator editing rules after creation only ever intends to change
+// this one field, never the VM's entire record.
+message SetVMFirewallRules {
+  string id = 1;
+  repeated FirewallRule firewall_rules = 2;
 }
 
 // PurgeVM removes a VM definition outright, regardless of its current

@@ -107,6 +107,7 @@ var requiredRole = map[string]Role{
 	"/apiary.rpc.v1.ManagerService/SetVMFirewallPaused":        RoleOperator,
 	"/apiary.rpc.v1.ManagerService/SetVMCloudflareExposure":    RoleOperator,
 	"/apiary.rpc.v1.ManagerService/SetVMDesiredState":          RoleOperator,
+	"/apiary.rpc.v1.ManagerService/SetVMFirewallRules":         RoleOperator,
 	"/apiary.rpc.v1.ManagerService/SetDatasetQuota":            RoleOperator,
 	"/apiary.rpc.v1.ManagerService/SaveAssumptionClaim":        RoleOperator,
 	"/apiary.rpc.v1.ManagerService/DeleteAssumptionClaim":      RoleOperator,
