@@ -294,6 +294,26 @@ service ManagerService {
   // never leader-forwarded (the same locality convention as HostStats).
   // See internal/assumptions/internal/assumecheck.
   rpc ListAssumptionResults(ListAssumptionResultsRequest) returns (ListAssumptionResultsResponse);
+
+  // ListOrphanedHASTResources/CleanupOrphanedHASTResource close the gap
+  // ADR-0026 named and left open: once a replicated VM/jail's record is
+  // fully purged (not just reassigned - ADR-0025's PlanReclaim already
+  // handles reassignment), the *secondary* node's own local HAST
+  // provider dataset has no signal left to clean itself up, since this
+  // project deliberately never infers teardown from a record's absence.
+  // ListOrphanedHASTResources is a physical, per-node, local-only report
+  // (never routed through raft) comparing this node's own
+  // hast-vm-*/hast-jail-* provider datasets against the current
+  // raft-replicated VM/jail list (both owner and replica roles) -
+  // anything with no matching record at all is orphaned.
+  // CleanupOrphanedHASTResource is the explicit, human-triggered escape
+  // hatch that actually destroys one, mirroring ForcePurgeVM/
+  // ForcePurgeJail's own "an operator decides, the system never guesses"
+  // posture - it re-verifies the resource is still orphaned at the
+  // moment of the call (not just when it was listed) before destroying
+  // anything.
+  rpc ListOrphanedHASTResources(ListOrphanedHASTResourcesRequest) returns (ListOrphanedHASTResourcesResponse);
+  rpc CleanupOrphanedHASTResource(CleanupOrphanedHASTResourceRequest) returns (CleanupOrphanedHASTResourceResponse);
 }
 
 // VMState mirrors api/internalpb's VMState. Kept as a separate type
@@ -1748,4 +1768,40 @@ message ListAssumptionResultsResponse {
   // removes the quarantined file), not a one-time latch.
   bool storage_degraded = 4;
   string storage_degraded_detail = 5;
+}
+
+message ListOrphanedHASTResourcesRequest {}
+
+// OrphanedHASTResource is one hast-vm-*/hast-jail-* provider dataset on
+// this node with no VM/jail record (owner or replica) referencing it
+// any more - see ListOrphanedHASTResources's own doc comment on
+// ManagerService.
+message OrphanedHASTResource {
+  // resource_id is the bare VM/jail id (not the HAST resource name or
+  // dataset name, both of which are derivable from this plus
+  // resource_type).
+  string resource_id = 1;
+  // resource_type is "vm" or "jail".
+  string resource_type = 2;
+  // dataset_name is this node's local ZFS dataset holding the orphaned
+  // HAST provider file (relative to this node's configured -zfs-base).
+  string dataset_name = 3;
+  // used_size is the dataset's "used" ZFS property, exactly as zfs(8)
+  // reports it (e.g. "10.2G") - best-effort context for an operator
+  // deciding whether to clean it up now; empty if it couldn't be read.
+  string used_size = 4;
+}
+
+message ListOrphanedHASTResourcesResponse {
+  repeated OrphanedHASTResource resources = 1;
+  string error = 2;
+}
+
+message CleanupOrphanedHASTResourceRequest {
+  string resource_id = 1;
+  string resource_type = 2; // "vm" or "jail"
+}
+
+message CleanupOrphanedHASTResourceResponse {
+  string error = 1;
 }

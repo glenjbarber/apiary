@@ -95,6 +95,10 @@ type fakeClient struct {
 	setDatasetQuotaResp    *rpcpb.SetDatasetQuotaResponse
 	lastSetDatasetQuotaReq *rpcpb.SetDatasetQuotaRequest
 
+	listOrphanedHASTResourcesResp      *rpcpb.ListOrphanedHASTResourcesResponse
+	cleanupOrphanedHASTResourceResp    *rpcpb.CleanupOrphanedHASTResourceResponse
+	lastCleanupOrphanedHASTResourceReq *rpcpb.CleanupOrphanedHASTResourceRequest
+
 	listNodeServicesResp      *rpcpb.ListNodeServicesResponse
 	restartNodeServiceResp    *rpcpb.RestartNodeServiceResponse
 	lastRestartNodeServiceReq *rpcpb.RestartNodeServiceRequest
@@ -325,6 +329,21 @@ func (f *fakeClient) GetLocalNetworkBridgeStatus(context.Context, *rpcpb.GetLoca
 
 func (f *fakeClient) ListAssumptionResults(context.Context, *rpcpb.ListAssumptionResultsRequest, ...grpc.CallOption) (*rpcpb.ListAssumptionResultsResponse, error) {
 	return f.assumptionsResp, f.assumptionsErr
+}
+
+func (f *fakeClient) ListOrphanedHASTResources(context.Context, *rpcpb.ListOrphanedHASTResourcesRequest, ...grpc.CallOption) (*rpcpb.ListOrphanedHASTResourcesResponse, error) {
+	if f.listOrphanedHASTResourcesResp != nil {
+		return f.listOrphanedHASTResourcesResp, nil
+	}
+	return &rpcpb.ListOrphanedHASTResourcesResponse{}, nil
+}
+
+func (f *fakeClient) CleanupOrphanedHASTResource(_ context.Context, in *rpcpb.CleanupOrphanedHASTResourceRequest, _ ...grpc.CallOption) (*rpcpb.CleanupOrphanedHASTResourceResponse, error) {
+	f.lastCleanupOrphanedHASTResourceReq = in
+	if f.cleanupOrphanedHASTResourceResp != nil {
+		return f.cleanupOrphanedHASTResourceResp, nil
+	}
+	return &rpcpb.CleanupOrphanedHASTResourceResponse{}, nil
 }
 
 func (f *fakeClient) ListAssumptionClaims(context.Context, *rpcpb.ListAssumptionClaimsRequest, ...grpc.CallOption) (*rpcpb.ListAssumptionClaimsResponse, error) {

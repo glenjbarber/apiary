@@ -665,6 +665,12 @@ type fakeQuotaSetter struct {
 	lastName     string
 	lastProperty string
 	lastValue    string
+
+	datasets       []string
+	usedProperty   map[string]string
+	destroyErr     error
+	lastDestroyed  string
+	existsOverride map[string]bool
 }
 
 func (f *fakeQuotaSetter) SetProperty(_ context.Context, name, prop, value string) error {
@@ -672,6 +678,37 @@ func (f *fakeQuotaSetter) SetProperty(_ context.Context, name, prop, value strin
 		return f.err
 	}
 	f.lastName, f.lastProperty, f.lastValue = name, prop, value
+	return nil
+}
+
+func (f *fakeQuotaSetter) ListDatasets(context.Context) ([]string, error) {
+	if f.err != nil {
+		return nil, f.err
+	}
+	return f.datasets, nil
+}
+
+func (f *fakeQuotaSetter) GetProperty(_ context.Context, name, _ string) (string, error) {
+	return f.usedProperty[name], nil
+}
+
+func (f *fakeQuotaSetter) DatasetExists(_ context.Context, name string) (bool, error) {
+	if v, ok := f.existsOverride[name]; ok {
+		return v, nil
+	}
+	for _, d := range f.datasets {
+		if d == name {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+func (f *fakeQuotaSetter) DestroyDataset(_ context.Context, name string) error {
+	if f.destroyErr != nil {
+		return f.destroyErr
+	}
+	f.lastDestroyed = name
 	return nil
 }
 
@@ -700,6 +737,62 @@ func TestServer_SetDatasetQuota_NotConfiguredIsError(t *testing.T) {
 	}
 	if resp.GetError() == "" {
 		t.Errorf("SetDatasetQuota() error field = empty, want a not-configured message")
+	}
+}
+
+func TestServer_ListOrphanedHASTResources_NotConfiguredIsError(t *testing.T) {
+	s := NewServer(nil, "node-1", nil, nil, nil, nil, nil, "", nil, nil, nil, 0, nil)
+
+	resp, err := s.ListOrphanedHASTResources(context.Background(), &rpcpb.ListOrphanedHASTResourcesRequest{})
+	if err != nil {
+		t.Fatalf("ListOrphanedHASTResources() error: %v", err)
+	}
+	if resp.GetError() == "" {
+		t.Errorf("ListOrphanedHASTResources() error field = empty, want a not-configured message")
+	}
+}
+
+func TestServer_CleanupOrphanedHASTResource_NotConfiguredIsError(t *testing.T) {
+	s := NewServer(nil, "node-1", nil, nil, nil, nil, nil, "", nil, nil, nil, 0, nil)
+
+	resp, err := s.CleanupOrphanedHASTResource(context.Background(), &rpcpb.CleanupOrphanedHASTResourceRequest{ResourceId: "x", ResourceType: "vm"})
+	if err != nil {
+		t.Fatalf("CleanupOrphanedHASTResource() error: %v", err)
+	}
+	if resp.GetError() == "" {
+		t.Errorf("CleanupOrphanedHASTResource() error field = empty, want a not-configured message")
+	}
+}
+
+func TestServer_CleanupOrphanedHASTResource_RequiresResourceID(t *testing.T) {
+	zfsMgr := &fakeQuotaSetter{}
+	s := NewServer(nil, "node-1", nil, nil, nil, nil, nil, "", zfsMgr, nil, nil, 0, nil)
+
+	resp, err := s.CleanupOrphanedHASTResource(context.Background(), &rpcpb.CleanupOrphanedHASTResourceRequest{ResourceType: "vm"})
+	if err != nil {
+		t.Fatalf("CleanupOrphanedHASTResource() error: %v", err)
+	}
+	if resp.GetError() == "" {
+		t.Errorf("CleanupOrphanedHASTResource() error field = empty, want a rejection for a missing resource_id")
+	}
+}
+
+// TestServer_CleanupOrphanedHASTResource_RejectsInvalidResourceType checks
+// this before ever touching raft (s.raft is nil here) - a plain
+// validation failure must never depend on a real raft connection.
+func TestServer_CleanupOrphanedHASTResource_RejectsInvalidResourceType(t *testing.T) {
+	zfsMgr := &fakeQuotaSetter{}
+	s := NewServer(nil, "node-1", nil, nil, nil, nil, nil, "", zfsMgr, nil, nil, 0, nil)
+
+	resp, err := s.CleanupOrphanedHASTResource(context.Background(), &rpcpb.CleanupOrphanedHASTResourceRequest{ResourceId: "x", ResourceType: "network"})
+	if err != nil {
+		t.Fatalf("CleanupOrphanedHASTResource() error: %v", err)
+	}
+	if resp.GetError() == "" {
+		t.Errorf("CleanupOrphanedHASTResource() error field = empty, want a rejection for an invalid resource_type")
+	}
+	if zfsMgr.lastDestroyed != "" {
+		t.Errorf("DestroyDataset called (%q) for an invalid resource_type, want no destructive call at all", zfsMgr.lastDestroyed)
 	}
 }
 
