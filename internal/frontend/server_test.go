@@ -879,7 +879,7 @@ func TestServer_VMDetailPage(t *testing.T) {
 		t.Fatalf("status = %d, want 200", rec.Code)
 	}
 	body := rec.Body.String()
-	for _, want := range []string{"database", "apiarium", "apiverse", "freebsd.raw", "10.60.0.10", "02:00:00:00:00:10", "Serial log", "Danger zone"} {
+	for _, want := range []string{"database", "apiarium", "apiverse", "freebsd.raw", "10.60.0.10", "02:00:00:00:00:10", "Provisioning evidence", "Serial log and evidence", "Danger zone"} {
 		if !strings.Contains(body, want) {
 			t.Errorf("detail page missing %q", want)
 		}

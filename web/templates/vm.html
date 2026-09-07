@@ -43,6 +43,16 @@
       </section>
 
       <section class="panel detail-card">
+        <h3>Provisioning evidence</h3>
+        <dl class="detail-list">
+          <div><dt>Last reconciliation</dt><dd><span class="badge {{.VM.Phase}}">{{.VM.Phase}}</span></dd></div>
+          <div><dt>Launch inputs</dt><dd>Recorded on {{.VM.NodeID}} when this VM is started.</dd></div>
+          <div><dt>Evidence log</dt><dd><a href="/vms/{{.VM.ID}}/serial">Open launch and serial log</a></dd></div>
+        </dl>
+        <p class="muted">The log records the resolved disk, installer, bridge, and bhyve launch diagnostics. It is empty until the owning Hive attempts a start.</p>
+      </section>
+
+      <section class="panel detail-card">
         <h3>Firewall</h3>
         {{if .VM.FirewallRules}}
         <table class="compact-table"><thead><tr><th>Direction</th><th>Action</th><th>Protocol</th><th>Port</th></tr></thead><tbody>
@@ -53,8 +63,8 @@
     </div>
 
     <section class="panel vm-controls">
-      <div><h3>Access</h3><p class="muted">Open the graphical console or inspect the serial output.</p></div>
-      <div class="actions"><a class="button" href="/vms/{{.VM.ID}}/console">Console</a><a class="button secondary" href="/vms/{{.VM.ID}}/serial">Serial log</a></div>
+      <div><h3>Access</h3><p class="muted">Open the graphical console or inspect launch and serial evidence.</p></div>
+      <div class="actions"><a class="button" href="/vms/{{.VM.ID}}/console">Console</a><a class="button secondary" href="/vms/{{.VM.ID}}/serial">Serial log and evidence</a></div>
     </section>
 
     {{if and .CanOperate (ne .VM.DesiredState "deleting")}}
