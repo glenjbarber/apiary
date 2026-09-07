@@ -8,12 +8,28 @@ import (
 	"crypto/rand"
 	"crypto/tls"
 	"crypto/x509"
+	"encoding/json"
 	"encoding/pem"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 )
+
+// InventoryEntry contains only the non-secret facts needed to report an
+// Origin CA certificate's lifetime. It is local to one Hive and deliberately
+// excludes token values, private keys, CSRs, and certificate PEM.
+type InventoryEntry struct {
+	Name      string    `json:"name"`
+	Service   string    `json:"service"`
+	Hostnames []string  `json:"hostnames"`
+	ID        string    `json:"id"`
+	ExpiresAt time.Time `json:"expires_at"`
+	CertPath  string    `json:"cert_path"`
+	KeyPath   string    `json:"key_path"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
 
 // NewCSR creates an ECC private key and CSR for a specific hostname set. The
 // returned key is PEM encoded only so the caller can write it directly to a
@@ -58,39 +74,87 @@ func WritePair(directory, name, certPEM, keyPEM string) (certPath, keyPath strin
 	}
 	certPath = filepath.Join(directory, name+".crt")
 	keyPath = filepath.Join(directory, name+".key")
-	if err := writeAtomic(certPath, []byte(certPEM), 0o644); err != nil {
-		return "", "", err
+	certTmp, err := writeTemp(filepath.Dir(certPath), []byte(certPEM), 0o644)
+	if err != nil {
+		return "", "", fmt.Errorf("staging certificate: %w", err)
 	}
-	if err := writeAtomic(keyPath, []byte(keyPEM), 0o600); err != nil {
-		return "", "", err
+	defer os.Remove(certTmp)
+	keyTmp, err := writeTemp(filepath.Dir(keyPath), []byte(keyPEM), 0o600)
+	if err != nil {
+		return "", "", fmt.Errorf("staging private key: %w", err)
+	}
+	defer os.Remove(keyTmp)
+	// Both replacement files are completely written and fsynced before either
+	// live path changes. Apiary schedules the consuming service restart only
+	// after this function succeeds, so it never reloads a mismatched pair.
+	if err := os.Rename(certTmp, certPath); err != nil {
+		return "", "", fmt.Errorf("installing certificate: %w", err)
+	}
+	if err := os.Rename(keyTmp, keyPath); err != nil {
+		return "", "", fmt.Errorf("installing private key: %w", err)
 	}
 	return certPath, keyPath, nil
 }
 
-func writeAtomic(path string, data []byte, mode os.FileMode) error {
-	tmp, err := os.CreateTemp(filepath.Dir(path), ".apiary-origin-ca-*")
+// SaveInventory atomically records the current non-secret certificate
+// inventory alongside the certificate pair. It does not inspect or return
+// PEM contents.
+func SaveInventory(directory string, entries []InventoryEntry) error {
+	data, err := json.MarshalIndent(entries, "", "  ")
 	if err != nil {
-		return err
+		return fmt.Errorf("encoding certificate inventory: %w", err)
+	}
+	tmp, err := writeTemp(directory, append(data, '\n'), 0o600)
+	if err != nil {
+		return fmt.Errorf("staging certificate inventory: %w", err)
+	}
+	defer os.Remove(tmp)
+	if err := os.Rename(tmp, filepath.Join(directory, "inventory.json")); err != nil {
+		return fmt.Errorf("installing certificate inventory: %w", err)
+	}
+	return nil
+}
+
+// LoadInventory returns an empty inventory when it has not yet been created.
+func LoadInventory(directory string) ([]InventoryEntry, error) {
+	data, err := os.ReadFile(filepath.Join(directory, "inventory.json"))
+	if os.IsNotExist(err) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("reading certificate inventory: %w", err)
+	}
+	var entries []InventoryEntry
+	if err := json.Unmarshal(data, &entries); err != nil {
+		return nil, fmt.Errorf("decoding certificate inventory: %w", err)
+	}
+	return entries, nil
+}
+
+func writeTemp(directory string, data []byte, mode os.FileMode) (string, error) {
+	tmp, err := os.CreateTemp(directory, ".apiary-origin-ca-*")
+	if err != nil {
+		return "", err
 	}
 	tmpPath := tmp.Name()
-	defer os.Remove(tmpPath)
 	if err := tmp.Chmod(mode); err != nil {
 		tmp.Close()
-		return err
+		os.Remove(tmpPath)
+		return "", err
 	}
 	if _, err := tmp.Write(data); err != nil {
 		tmp.Close()
-		return err
+		os.Remove(tmpPath)
+		return "", err
 	}
 	if err := tmp.Sync(); err != nil {
 		tmp.Close()
-		return err
+		os.Remove(tmpPath)
+		return "", err
 	}
 	if err := tmp.Close(); err != nil {
-		return err
+		os.Remove(tmpPath)
+		return "", err
 	}
-	if err := os.Rename(tmpPath, path); err != nil {
-		return err
-	}
-	return nil
+	return tmpPath, nil
 }
