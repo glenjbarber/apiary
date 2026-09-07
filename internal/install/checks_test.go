@@ -58,7 +58,7 @@ func TestVMMLoadedCheck(t *testing.T) {
 
 	t.Run("loaded", func(t *testing.T) {
 		r := newFakeRunner()
-		r.on("kldstat -n vmm.ko", fakeResponse{stdout: "vmm.ko loaded"})
+		r.on("kldstat -n vmm", fakeResponse{stdout: "vmm.ko loaded"})
 		res := vmmLoadedCheck.Probe(ctx, r, Options{})
 		if res.Status != StatusOK {
 			t.Fatalf("status = %v, want ok", res.Status)
@@ -91,7 +91,7 @@ func TestVMMLoadedCheck(t *testing.T) {
 
 	t.Run("apply is idempotent when kld_list already contains vmm", func(t *testing.T) {
 		r := newFakeRunner()
-		r.on("kldstat -n vmm.ko", fakeResponse{stdout: "vmm.ko loaded"})
+		r.on("kldstat -n vmm", fakeResponse{stdout: "vmm.ko loaded"})
 		r.on("sysrc -n kld_list", fakeResponse{stdout: "if_bridge vmm nmdm"})
 		if err := vmmLoadedCheck.Apply(ctx, r, Options{}); err != nil {
 			t.Fatalf("apply: %v", err)
@@ -106,23 +106,25 @@ func TestVMMLoadedCheck(t *testing.T) {
 }
 
 // TestKldLoadedNameVsModuleRegistry is the direct regression test for a
-// real bug found live: vmm.ko does not register a kernel module literally
-// named "vmm" (kldstat -m vmm falsely reported "not loaded" on a host
-// where plain kldstat clearly showed vmm.ko loaded), while nmdm.ko
-// happens to coincide with its own file name. kldLoaded must match by
-// loaded-file name (-n <module>.ko) first, falling back to -m only when
-// that fails.
+// real bug found live, twice: vmm.ko does not register a kernel module
+// literally named "vmm" (kldstat -m vmm falsely reported "not loaded" on
+// a host where plain kldstat clearly showed vmm.ko loaded), while
+// kldstat -n vmm (bare, no ".ko" suffix needed) correctly finds it -
+// confirmed against the real command on that same host. nmdm.ko happens
+// to coincide with its own module name, which is why nmdm-loaded never
+// surfaced this. kldLoaded must match by loaded-file name (-n <module>)
+// first, falling back to -m only when that fails.
 func TestKldLoadedNameVsModuleRegistry(t *testing.T) {
 	ctx := context.Background()
 
 	t.Run("file-name match succeeds even when module-name lookup would not", func(t *testing.T) {
 		r := newFakeRunner()
-		r.on("kldstat -n vmm.ko", fakeResponse{stdout: "Id Refs Address Size Name\n6 1 0x0 0x0 vmm.ko"})
+		r.on("kldstat -n vmm", fakeResponse{stdout: "Id Refs Address Size Name\n6 1 0x0 0x0 vmm.ko"})
 		// Deliberately no "kldstat -m vmm" response registered - if
 		// kldLoaded fell back to -m first, or at all when -n already
 		// succeeded, this would return not-found and the test would fail.
 		if !kldLoaded(ctx, r, "vmm") {
-			t.Fatal("kldLoaded(vmm) = false, want true via -n vmm.ko")
+			t.Fatal("kldLoaded(vmm) = false, want true via -n vmm")
 		}
 	})
 

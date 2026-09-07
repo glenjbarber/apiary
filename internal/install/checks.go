@@ -113,17 +113,20 @@ var zfsPoolCheck = Check{
 
 // ---- kernel modules ----
 
-// kldLoaded checks whether module (e.g. "vmm") is loaded. `-n <file>.ko`
-// (matching the loaded KLD's own file name, the "Name" column plain
-// `kldstat` shows) is tried first, since `-m <name>` matches the kernel's
-// internal *module* name registry instead - a different namespace a KLD
-// isn't guaranteed to register itself into under its own file's base
-// name. Confirmed live: vmm.ko does not (kldstat -m vmm falsely reported
-// "not loaded" on a host where plain kldstat clearly showed it loaded),
-// while nmdm.ko happens to coincide with its file name - `-m` is kept
-// only as a fallback for the reverse case.
+// kldLoaded checks whether module (e.g. "vmm") is loaded. `-n <name>`
+// (matching the loaded KLD's own file, resolved the same way `kldload`
+// resolves a bare name to "<name>.ko") is tried first, since `-m <name>`
+// matches the kernel's internal *module* name registry instead - a
+// different namespace a KLD isn't guaranteed to register itself into
+// under its own file's base name. Confirmed live, twice: `kldstat -m vmm`
+// falsely reports "not loaded" on a host where plain `kldstat` clearly
+// shows vmm.ko loaded, and `kldstat -n vmm` (bare, no ".ko" suffix - an
+// appended ".ko" was tried first and is unnecessary) correctly finds it.
+// nmdm.ko happens to coincide with its file's own module name, which is
+// why nmdm-loaded never surfaced this - `-m` is kept only as a fallback
+// for that direction.
 func kldLoaded(ctx context.Context, r Runner, module string) bool {
-	if _, _, err := r.Run(ctx, "kldstat", "-n", module+".ko"); err == nil {
+	if _, _, err := r.Run(ctx, "kldstat", "-n", module); err == nil {
 		return true
 	}
 	_, _, err := r.Run(ctx, "kldstat", "-m", module)
