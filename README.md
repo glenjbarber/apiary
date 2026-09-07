@@ -698,7 +698,12 @@ each design decision, in order.
   operation over SSH. PAM/account setup, ZFS pool creation, and the known
   `hastd` source patch are permanently report-only — this tool tells you
   they're missing, it never attempts them. See
-  [ADR-0082](docs/adr/0082-apiary-installer-preflight.md).
+  [ADR-0082](docs/adr/0082-apiary-installer-preflight.md) for the design
+  and [docs/bootstrap.md](docs/bootstrap.md) for a full step-by-step
+  runbook (building all four daemons plus `apiaryinstall`, the network
+  step's SSH risk, finding the `bhyve-firmware`/`edk2-bhyve` path, and
+  bringing up `raftd`/`managerd`/`frontend`) written from a real, live
+  first bootstrap of a fresh Colony VM.
 - Importing VMs from other hypervisors (e.g. Proxmox): no disk-format
   conversion, and Apiary is UEFI-only. Linux containers have no path at
   all — jails share the host FreeBSD kernel
