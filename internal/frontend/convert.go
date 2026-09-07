@@ -119,15 +119,13 @@ type nodeConfigView struct {
 	DiskSizeMB     uint64
 	JailDiskSizeMB uint64
 
-	// HASTEnabledMode/JailConsoleEnabledMode/PeerTLSMode +
-	// *Status mirror JailEnabledMode/JailEnabledStatus's own tri-state
-	// convention exactly (see triState below).
-	HASTEnabledMode          string
-	HASTEnabledStatus        string
-	JailConsoleEnabledMode   string
-	JailConsoleEnabledStatus string
-	PeerTLSMode              string
-	PeerTLSStatus            string
+	// HASTEnabledMode/PeerTLSMode + *Status mirror JailEnabledMode/
+	// JailEnabledStatus's own tri-state convention exactly (see
+	// triState below).
+	HASTEnabledMode   string
+	HASTEnabledStatus string
+	PeerTLSMode       string
+	PeerTLSStatus     string
 
 	PeerManagerdPort   string
 	PeerTLSHostnameMap string
@@ -208,7 +206,6 @@ func fromRPCNodeConfig(d *rpcpb.GetNodeConfigResponse) nodeConfigView {
 		CloudflareTunnelCredentialsFile: d.GetCloudflareTunnelCredentialsFile(),
 	}
 	view.HASTEnabledMode, view.HASTEnabledStatus = triState(d.HastEnabled)
-	view.JailConsoleEnabledMode, view.JailConsoleEnabledStatus = triState(d.JailConsoleEnabled)
 	view.PeerTLSMode, view.PeerTLSStatus = triState(d.PeerTls)
 	for _, iface := range d.GetAvailableInterfaces() {
 		label := iface.GetName()

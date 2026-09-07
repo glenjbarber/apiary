@@ -3,13 +3,11 @@ package frontend
 import (
 	"bytes"
 	"context"
-	"io"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"strings"
-	"sync"
 	"testing"
 
 	"google.golang.org/grpc"
@@ -27,11 +25,6 @@ type fakeClient struct {
 
 	getJailResp *rpcpb.GetJailResponse
 	getJailErr  error
-
-	// proxyJailConsoleErr, when set, makes ProxyJailConsole fail to open
-	// at all (simulating a dial/RPC failure) rather than returning a
-	// working fake stream.
-	proxyJailConsoleErr error
 
 	listResp *rpcpb.ListVMsResponse
 	listErr  error
@@ -393,67 +386,6 @@ func (f *fakeClient) GetVMConsole(context.Context, *rpcpb.GetVMConsoleRequest, .
 
 func (f *fakeClient) ProxyVMConsole(context.Context, ...grpc.CallOption) (grpc.BidiStreamingClient[rpcpb.VMConsoleTunnelFrame, rpcpb.VMConsoleTunnelFrame], error) {
 	return nil, nil
-}
-
-// fakeJailConsoleStream is a fake grpc.BidiStreamingClient for
-// ProxyJailConsole - unlike ProxyVMConsole's stub above (never actually
-// exercised, since the VM console's local path dials a plain TCP
-// address directly instead), the jail console's local path always goes
-// through this RPC, so its own tests need a stream that behaves like a
-// real one: it echoes back whatever data it's sent, simulating a shell
-// that echoes its own input, without any real gRPC connection or real
-// jexec/PTY.
-type fakeJailConsoleStream struct {
-	grpc.ClientStream
-	mu     sync.Mutex
-	opened string
-	recvCh chan *rpcpb.JailConsoleTunnelFrame
-	closed bool
-}
-
-func newFakeJailConsoleStream() *fakeJailConsoleStream {
-	return &fakeJailConsoleStream{recvCh: make(chan *rpcpb.JailConsoleTunnelFrame, 16)}
-}
-
-func (f *fakeJailConsoleStream) Send(frame *rpcpb.JailConsoleTunnelFrame) error {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	if f.closed {
-		return io.ErrClosedPipe
-	}
-	if open := frame.GetOpen(); open != nil {
-		f.opened = open.GetId()
-		return nil
-	}
-	if data := frame.GetData(); len(data) > 0 {
-		f.recvCh <- &rpcpb.JailConsoleTunnelFrame{Payload: &rpcpb.JailConsoleTunnelFrame_Data{Data: append([]byte(nil), data...)}}
-	}
-	return nil
-}
-
-func (f *fakeJailConsoleStream) Recv() (*rpcpb.JailConsoleTunnelFrame, error) {
-	frame, ok := <-f.recvCh
-	if !ok {
-		return nil, io.EOF
-	}
-	return frame, nil
-}
-
-func (f *fakeJailConsoleStream) CloseSend() error {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	if !f.closed {
-		f.closed = true
-		close(f.recvCh)
-	}
-	return nil
-}
-
-func (f *fakeClient) ProxyJailConsole(context.Context, ...grpc.CallOption) (grpc.BidiStreamingClient[rpcpb.JailConsoleTunnelFrame, rpcpb.JailConsoleTunnelFrame], error) {
-	if f.proxyJailConsoleErr != nil {
-		return nil, f.proxyJailConsoleErr
-	}
-	return newFakeJailConsoleStream(), nil
 }
 
 func (f *fakeClient) GetVMSerialLog(context.Context, *rpcpb.GetVMSerialLogRequest, ...grpc.CallOption) (*rpcpb.GetVMSerialLogResponse, error) {

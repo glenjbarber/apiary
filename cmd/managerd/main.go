@@ -7,7 +7,6 @@ import (
 	"context"
 	"flag"
 	"fmt"
-	"io"
 	"log"
 	"net"
 	"os"
@@ -75,7 +74,6 @@ func run() error {
 	dhcpDNSServer := flag.String("dhcp-dns-server", "", "DNS server address handed to DHCP clients on this node's Apiary-managed networks (dnsmasq's own port=0 disables its resolver, so without this every VM gets a dead-end DNS server - see internal/dhcpd.NetworkScope.DNSServer); leave empty only if no VM on a managed network needs working DNS resolution")
 	hastEnabled := flag.Bool("hast-enabled", false, "enable HAST-backed VM disk replication support on this node (requires a real, patched hastd - see ADR-0026); needed on both a replicated VM's owning node and its replica node, regardless of bhyve support")
 	jailEnabled := flag.Bool("jail-enabled", false, "enable jail provisioning on this node; explicit deletion remains enabled (see CLAUDE.md)")
-	jailConsoleEnabled := flag.Bool("jail-console-enabled", false, "enable ProxyJailConsole (a real jexec(8) root shell into a running jail, ADR-0068) on this node; off by default - this is real, kernel-shared, root-level attack surface, independent of -jail-enabled, and must be turned on deliberately per Hive")
 	jailPrefix := flag.String("jail-prefix", "apiary-", "name prefix for jails this node creates")
 	jailMountBase := flag.String("jail-mount-base", "/apiary-jails", "parent directory a replicated jail's HAST-backed root filesystem is mounted under (non-replicated jails use their ZFS dataset's own mountpoint instead)")
 	jailDiskSizeMB := flag.Uint64("jail-disk-size-mb", 2048, "size of a replicated jail's HAST-backed root filesystem in MB (ignored for non-replicated jails, which use their ZFS dataset's own quota)")
@@ -158,9 +156,6 @@ func run() error {
 		}
 		if cfg.HASTEnabled != nil {
 			*hastEnabled = *cfg.HASTEnabled
-		}
-		if cfg.JailConsoleEnabled != nil {
-			*jailConsoleEnabled = *cfg.JailConsoleEnabled
 		}
 		if cfg.JailPrefix != "" {
 			*jailPrefix = cfg.JailPrefix
@@ -445,18 +440,6 @@ func run() error {
 
 	srv := manager.NewServer(raftClient, id, isos, vncArg, serialLogArg, vlanArg, peers, resolvedPeerPort, zfsMgr, nodeConfigMgr, assumptionsMgr, assumptionStaleAfter, reconciler)
 	srv.SetAssumptionRegister(registerMgr)
-	// Independent of -jail-enabled (see jailMgr's own wiring comment
-	// above on why lifecycle inspection stays available regardless) -
-	// this is a separate, off-by-default opt-in specifically because
-	// jexec grants a real root shell sharing the host's own kernel, a
-	// materially different risk than ordinary jail lifecycle management.
-	// SetJailConsole(nil) is a safe no-op: ProxyJailConsole already
-	// reports "this node has no jail support configured" rather than
-	// panicking, the same nil-able-capability posture every other
-	// optional RPC surface in this package follows.
-	if *jailConsoleEnabled {
-		srv.SetJailConsole(jailConsoleAdapter{jailMgr})
-	}
 	// Every RPC (including UploadISO's stream) is gated by srv's own
 	// API-key check - see ADR-0023. Auth stays fully open until the
 	// first key is created (CreateAPIKey itself included), so this is
@@ -489,7 +472,7 @@ func run() error {
 		serveErrCh <- grpcServer.Serve(lis)
 	}()
 
-	log.Printf("managerd: listening on %s (node-id=%s, raftd-socket=%s, vlan-uplink=%s, hast-enabled=%v, jail-enabled=%v, jail-console-enabled=%v, peer-managerd-port=%s, tls=%v, cloudflare-enabled=%v)", *rpcAddr, id, *raftdSocket, *vlanUplink, *hastEnabled, *jailEnabled, *jailConsoleEnabled, resolvedPeerPort, *tlsCert != "", *cloudflareTokenFile != "")
+	log.Printf("managerd: listening on %s (node-id=%s, raftd-socket=%s, vlan-uplink=%s, hast-enabled=%v, jail-enabled=%v, peer-managerd-port=%s, tls=%v, cloudflare-enabled=%v)", *rpcAddr, id, *raftdSocket, *vlanUplink, *hastEnabled, *jailEnabled, resolvedPeerPort, *tlsCert != "", *cloudflareTokenFile != "")
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -601,17 +584,6 @@ func (a isoManagerAdapter) List() ([]resetutil.ISOInfo, error) {
 }
 
 func (a isoManagerAdapter) Delete(name string) error { return a.m.Delete(name) }
-
-// jailConsoleAdapter satisfies manager.jailConsoleAttacher against a
-// real *jail.Manager, whose Attach returns *jail.Session (a concrete
-// type richer than the plain io.ReadWriteCloser the manager package
-// needs and deliberately stays independent of - the same reasoning
-// isoManagerAdapter follows for resetutil.ISOManager above).
-type jailConsoleAdapter struct{ m *jail.Manager }
-
-func (a jailConsoleAdapter) Attach(ctx context.Context, name string) (io.ReadWriteCloser, error) {
-	return a.m.Attach(ctx, name)
-}
 
 // runExportHostConfig implements managerd's one-shot -export-host-config
 // mode - read-only, no raftd/raft dependency, no confirmation phrase

@@ -29,7 +29,7 @@ func TestIntegration_GetLocalNetworkBridgeStatus_ReflectsLocalVLANState(t *testi
 	raftdSocket := newRaftdUDSSocket(t)
 	bridge := resolveBridgeName(&internalpb.NetworkDefinition{Id: "net-1"})
 	vlan := &fakeVLANStatus{up: map[string]bool{bridge: true}}
-	client := newManagerdRPCClientFull(t, raftdSocket, "node-a", nil, nil, vlan, nil, 0, nil)
+	client := newManagerdRPCClientFull(t, raftdSocket, "node-a", nil, nil, vlan, nil, 0)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -97,7 +97,7 @@ func TestIntegration_ListAssumptionResults_NilStoreReturnsError(t *testing.T) {
 func TestIntegration_ListAssumptionResults_StaleCollapsesToUnknown(t *testing.T) {
 	raftdSocket := newRaftdUDSSocket(t)
 	store := &assumptions.Manager{Path: t.TempDir() + "/assumptions.json"}
-	client := newManagerdRPCClientFull(t, raftdSocket, "node-a", nil, nil, nil, store, time.Minute, nil)
+	client := newManagerdRPCClientFull(t, raftdSocket, "node-a", nil, nil, nil, store, time.Minute)
 
 	old := time.Now().Add(-time.Hour)
 	key := assumptions.Key{Kind: assumptions.KindNATUplinkDefaultRoute, SubjectKind: assumptions.SubjectKindNode, DependencyID: "em0"}

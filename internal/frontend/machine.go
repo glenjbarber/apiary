@@ -177,9 +177,8 @@ func (s *Server) nodeConfigUpdateRequest(r *http.Request) *rpcpb.UpdateNodeConfi
 		DiskSizeMb:     cfg.DiskSizeMB,
 		JailDiskSizeMb: cfg.JailDiskSizeMB,
 
-		HastEnabled:        jailEnabledFromForm(cfg.HASTEnabledMode),
-		JailConsoleEnabled: jailEnabledFromForm(cfg.JailConsoleEnabledMode),
-		PeerTls:            jailEnabledFromForm(cfg.PeerTLSMode),
+		HastEnabled: jailEnabledFromForm(cfg.HASTEnabledMode),
+		PeerTls:     jailEnabledFromForm(cfg.PeerTLSMode),
 
 		PeerManagerdPort:   cfg.PeerManagerdPort,
 		PeerTlsHostnameMap: cfg.PeerTLSHostnameMap,
@@ -260,9 +259,6 @@ func (s *Server) nodeConfigUpdateRequest(r *http.Request) *rpcpb.UpdateNodeConfi
 	}
 	if r.Form.Has("hast_enabled") {
 		req.HastEnabled = jailEnabledFromForm(r.FormValue("hast_enabled"))
-	}
-	if r.Form.Has("jail_console_enabled") {
-		req.JailConsoleEnabled = jailEnabledFromForm(r.FormValue("jail_console_enabled"))
 	}
 	if r.Form.Has("peer_tls") {
 		req.PeerTls = jailEnabledFromForm(r.FormValue("peer_tls"))

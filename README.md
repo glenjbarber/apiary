@@ -89,25 +89,6 @@ each design decision, in order.
   itself never leaves loopback; only one more authenticated gRPC hop is
   added. See
   [ADR-0065](docs/adr/0065-cross-hive-console-tunnel.md).
-- **jexec-based interactive jail console** — a real root shell inside a
-  running jail (`/jails/{id}/console`), analogous to the VM console
-  above but genuinely higher-privilege: `jexec` shares the host's own
-  kernel with no hardware isolation boundary. Off by default —
-  `managerd -jail-console-enabled` is a separate opt-in flag from
-  `-jail-enabled`, must be turned on deliberately per Hive, and layers
-  with an Operator-role requirement on the RPC itself (one tier above
-  the VM console's Viewer tier). The executed command is always a
-  fixed `/bin/sh`, never caller-supplied.
-  A real PTY (`github.com/creack/pty`, this project's second-ever
-  third-party runtime dependency) gives working line editing, job
-  control, and signal handling rather than plain pipes; the browser
-  terminal is vendored xterm.js (MIT), mirroring noVNC's own vendoring
-  precedent. Structurally mirrors `ProxyVMConsole`/ADR-0065 wherever
-  the shape matches, including cross-Hive routing and independent
-  server-side ownership re-validation. v1 has no window-resize support
-  (a fixed 80x24 for the whole session) and does not prevent two
-  operators from attaching to the same jail concurrently. See
-  [ADR-0068](docs/adr/0068-jexec-jail-console.md).
 - **`internal/isostore`** — installer images uploaded through the web
   UI, verified against a pasted SHA-256 as they stream to disk and
   refused outright on a mismatch, so an unverified image never lands in
@@ -612,6 +593,14 @@ each design decision, in order.
 
 **Not yet implemented:**
 
+- An interactive jail console (`jexec`-based) was built, shipped, and
+  then removed entirely at the user's request - a jail's root shell
+  shares the host's own kernel with no hardware isolation boundary,
+  and every mitigation built for it (off by default, Operator-tier,
+  fixed `/bin/sh` only) reduced but never eliminated that structural
+  risk. See ADR-0068's own "Removed" section for the full reasoning
+  and exactly what was taken out. No replacement was requested; direct
+  host access remains the only way to get a shell inside a jail today.
 - Cross-node HAST replication works for real on this project's own two
   remaining machines, `apiarium`/`apiverse` (both patched - see above;
   the three FreeBSD VMs this was originally verified on were later

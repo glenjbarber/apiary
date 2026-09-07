@@ -45,7 +45,6 @@
   <td><span class="badge {{.Phase}}"{{if .PhaseError}} title="{{.PhaseError}}"{{end}}>{{.Phase}}</span>{{if .PhaseError}}<div class="error">{{.PhaseError}}</div>{{end}}</td>
   <td>
     {{if $.CanOperate}}
-      <a href="/jails/{{.ID}}/console">Console</a>
       {{if ne .DesiredState "deleting"}}
         {{if ne .DesiredState "stopped"}}<button hx-post="/jails/{{.ID}}/lifecycle" hx-vals='{"action":"stop"}' hx-target="#jail-panel" hx-swap="innerHTML" hx-sync="#jail-panel:replace" hx-confirm="Stop jail {{.ID}}?">Stop</button>{{end}}
         {{if ne .DesiredState "running"}}<button hx-post="/jails/{{.ID}}/lifecycle" hx-vals='{"action":"start"}' hx-target="#jail-panel" hx-swap="innerHTML" hx-sync="#jail-panel:replace">Start</button>{{end}}

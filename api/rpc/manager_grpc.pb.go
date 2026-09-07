@@ -58,7 +58,6 @@ const (
 	ManagerService_SetJailDesiredState_FullMethodName         = "/apiary.rpc.v1.ManagerService/SetJailDesiredState"
 	ManagerService_GetJail_FullMethodName                     = "/apiary.rpc.v1.ManagerService/GetJail"
 	ManagerService_ListJails_FullMethodName                   = "/apiary.rpc.v1.ManagerService/ListJails"
-	ManagerService_ProxyJailConsole_FullMethodName            = "/apiary.rpc.v1.ManagerService/ProxyJailConsole"
 	ManagerService_ForcePurgeJail_FullMethodName              = "/apiary.rpc.v1.ManagerService/ForcePurgeJail"
 	ManagerService_SimulateNodeFailure_FullMethodName         = "/apiary.rpc.v1.ManagerService/SimulateNodeFailure"
 	ManagerService_SimulateNetworkFailure_FullMethodName      = "/apiary.rpc.v1.ManagerService/SimulateNetworkFailure"
@@ -244,22 +243,6 @@ type ManagerServiceClient interface {
 	SetJailDesiredState(ctx context.Context, in *SetJailDesiredStateRequest, opts ...grpc.CallOption) (*SetJailDesiredStateResponse, error)
 	GetJail(ctx context.Context, in *GetJailRequest, opts ...grpc.CallOption) (*GetJailResponse, error)
 	ListJails(ctx context.Context, in *ListJailsRequest, opts ...grpc.CallOption) (*ListJailsResponse, error)
-	// ProxyJailConsole relays one browser terminal session into a real
-	// jexec(8) shell running inside the named jail, always on this jail's
-	// owning Hive's own managerd. Unlike ProxyVMConsole, there is no
-	// separate listener to dial - the owning managerd itself spawns the
-	// jexec(8) session (a real PTY, github.com/creack/pty) and relays its
-	// bytes directly. The first client frame must open the named jail;
-	// the owning managerd independently re-validates ownership before
-	// ever spawning anything, exactly like ProxyVMConsole's own
-	// GetVMConsole re-check. This is deliberately Operator-tier, one step
-	// above ProxyVMConsole's Viewer tier: jexec grants a real root shell
-	// sharing the host's own kernel (a jail has no hardware-level
-	// isolation boundary the way a VM's hypervisor does), a materially
-	// higher-privilege operation than viewing a VM's own console. v1 has
-	// no window-resize support - the PTY is a fixed size for the whole
-	// session.
-	ProxyJailConsole(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[JailConsoleTunnelFrame, JailConsoleTunnelFrame], error)
 	// ForcePurgeJail mirrors ForcePurgeVM exactly, for a jail tombstoned
 	// by DeleteJail whose owning node will never come back to reconcile
 	// it away. See ForcePurgeVM's own doc comment above for the full
@@ -764,19 +747,6 @@ func (c *managerServiceClient) ListJails(ctx context.Context, in *ListJailsReque
 	return out, nil
 }
 
-func (c *managerServiceClient) ProxyJailConsole(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[JailConsoleTunnelFrame, JailConsoleTunnelFrame], error) {
-	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	stream, err := c.cc.NewStream(ctx, &ManagerService_ServiceDesc.Streams[2], ManagerService_ProxyJailConsole_FullMethodName, cOpts...)
-	if err != nil {
-		return nil, err
-	}
-	x := &grpc.GenericClientStream[JailConsoleTunnelFrame, JailConsoleTunnelFrame]{ClientStream: stream}
-	return x, nil
-}
-
-// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
-type ManagerService_ProxyJailConsoleClient = grpc.BidiStreamingClient[JailConsoleTunnelFrame, JailConsoleTunnelFrame]
-
 func (c *managerServiceClient) ForcePurgeJail(ctx context.Context, in *ForcePurgeJailRequest, opts ...grpc.CallOption) (*ForcePurgeJailResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(ForcePurgeJailResponse)
@@ -1086,22 +1056,6 @@ type ManagerServiceServer interface {
 	SetJailDesiredState(context.Context, *SetJailDesiredStateRequest) (*SetJailDesiredStateResponse, error)
 	GetJail(context.Context, *GetJailRequest) (*GetJailResponse, error)
 	ListJails(context.Context, *ListJailsRequest) (*ListJailsResponse, error)
-	// ProxyJailConsole relays one browser terminal session into a real
-	// jexec(8) shell running inside the named jail, always on this jail's
-	// owning Hive's own managerd. Unlike ProxyVMConsole, there is no
-	// separate listener to dial - the owning managerd itself spawns the
-	// jexec(8) session (a real PTY, github.com/creack/pty) and relays its
-	// bytes directly. The first client frame must open the named jail;
-	// the owning managerd independently re-validates ownership before
-	// ever spawning anything, exactly like ProxyVMConsole's own
-	// GetVMConsole re-check. This is deliberately Operator-tier, one step
-	// above ProxyVMConsole's Viewer tier: jexec grants a real root shell
-	// sharing the host's own kernel (a jail has no hardware-level
-	// isolation boundary the way a VM's hypervisor does), a materially
-	// higher-privilege operation than viewing a VM's own console. v1 has
-	// no window-resize support - the PTY is a fixed size for the whole
-	// session.
-	ProxyJailConsole(grpc.BidiStreamingServer[JailConsoleTunnelFrame, JailConsoleTunnelFrame]) error
 	// ForcePurgeJail mirrors ForcePurgeVM exactly, for a jail tombstoned
 	// by DeleteJail whose owning node will never come back to reconcile
 	// it away. See ForcePurgeVM's own doc comment above for the full
@@ -1326,9 +1280,6 @@ func (UnimplementedManagerServiceServer) GetJail(context.Context, *GetJailReques
 }
 func (UnimplementedManagerServiceServer) ListJails(context.Context, *ListJailsRequest) (*ListJailsResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ListJails not implemented")
-}
-func (UnimplementedManagerServiceServer) ProxyJailConsole(grpc.BidiStreamingServer[JailConsoleTunnelFrame, JailConsoleTunnelFrame]) error {
-	return status.Error(codes.Unimplemented, "method ProxyJailConsole not implemented")
 }
 func (UnimplementedManagerServiceServer) ForcePurgeJail(context.Context, *ForcePurgeJailRequest) (*ForcePurgeJailResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ForcePurgeJail not implemented")
@@ -2073,13 +2024,6 @@ func _ManagerService_ListJails_Handler(srv interface{}, ctx context.Context, dec
 	return interceptor(ctx, in, info, handler)
 }
 
-func _ManagerService_ProxyJailConsole_Handler(srv interface{}, stream grpc.ServerStream) error {
-	return srv.(ManagerServiceServer).ProxyJailConsole(&grpc.GenericServerStream[JailConsoleTunnelFrame, JailConsoleTunnelFrame]{ServerStream: stream})
-}
-
-// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
-type ManagerService_ProxyJailConsoleServer = grpc.BidiStreamingServer[JailConsoleTunnelFrame, JailConsoleTunnelFrame]
-
 func _ManagerService_ForcePurgeJail_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(ForcePurgeJailRequest)
 	if err := dec(in); err != nil {
@@ -2553,12 +2497,6 @@ var ManagerService_ServiceDesc = grpc.ServiceDesc{
 		{
 			StreamName:    "ProxyVMConsole",
 			Handler:       _ManagerService_ProxyVMConsole_Handler,
-			ServerStreams: true,
-			ClientStreams: true,
-		},
-		{
-			StreamName:    "ProxyJailConsole",
-			Handler:       _ManagerService_ProxyJailConsole_Handler,
 			ServerStreams: true,
 			ClientStreams: true,
 		},

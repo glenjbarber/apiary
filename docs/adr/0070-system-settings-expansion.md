@@ -2,7 +2,11 @@
 
 ## Status
 
-Accepted
+Accepted. **Update**: the `jail_console_enabled` tri-state setting this
+ADR added (mentioned below alongside `HASTEnabled`/`PeerTLS`) no longer
+exists - it was removed along with the jexec jail console feature
+itself. See ADR-0068's own "Removed" section for why. Every other
+setting this ADR describes is unaffected.
 
 ## Context
 

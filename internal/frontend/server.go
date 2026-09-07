@@ -118,13 +118,6 @@ type pageData struct {
 	ConsoleWSPath string
 	ConsoleError  string
 
-	// JailConsoleID/JailConsoleName/JailConsoleWSPath are only used by
-	// the jail console page (jail_console.go) - see its own doc
-	// comments. Shares ConsoleError above with the VM console page.
-	JailConsoleID     string
-	JailConsoleName   string
-	JailConsoleWSPath string
-
 	// SerialLogVMID/SerialLogVMName/SerialLogContent/SerialLogTruncated/
 	// SerialLogError are only used by the serial log page
 	// (serial_log.go) - see its own doc comments.
@@ -677,11 +670,6 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /jails", s.requireRole(manager.RoleOperator, s.handleCreateJail))
 	s.mux.HandleFunc("DELETE /jails/{id}", s.requireRole(manager.RoleOperator, s.handleDeleteJail))
 	s.mux.HandleFunc("POST /jails/{id}/lifecycle", s.requireRole(manager.RoleOperator, s.handleSetJailDesiredState))
-	// Operator, not Viewer like the VM console routes above - see
-	// ProxyJailConsole's own proto doc comment for why jexec's real
-	// root shell is judged a materially higher-privilege operation.
-	s.mux.HandleFunc("GET /jails/{id}/console", s.requireRole(manager.RoleOperator, s.handleJailConsolePage))
-	s.mux.HandleFunc("GET /jails/{id}/console/ws", s.requireRole(manager.RoleOperator, s.handleJailConsoleWS))
 	s.mux.HandleFunc("POST /assumption-register", s.requireRole(manager.RoleOperator, s.handleSaveAssumptionClaim))
 	s.mux.HandleFunc("DELETE /assumption-register/{id}", s.requireRole(manager.RoleOperator, s.handleDeleteAssumptionClaim))
 
