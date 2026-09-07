@@ -159,6 +159,12 @@ type Config struct {
 	CloudflareTunnelID              string `json:"cloudflare_tunnel_id,omitempty"`
 	CloudflareTunnelCredentialsFile string `json:"cloudflare_tunnel_credentials_file,omitempty"`
 
+	// OriginCATokenFile and OriginCADirectory configure the separate,
+	// zone-scoped credential and root-owned local storage used by explicit
+	// Cloudflare Origin CA issuance. They never contain a raw token or PEM.
+	OriginCATokenFile string `json:"origin_ca_token_file,omitempty"`
+	OriginCADirectory string `json:"origin_ca_directory,omitempty"`
+
 	// RaftdToken mirrors -raftd-token - a live credential (ADR-0033),
 	// write-only, same posture as PeerAPIKey above.
 	RaftdToken string `json:"raftd_token,omitempty"`
@@ -310,6 +316,12 @@ func validate(cfg Config) error {
 		return err
 	}
 	if err := validatePathField("cloudflare_tunnel_credentials_file", cfg.CloudflareTunnelCredentialsFile); err != nil {
+		return err
+	}
+	if err := validatePathField("origin_ca_token_file", cfg.OriginCATokenFile); err != nil {
+		return err
+	}
+	if err := validatePathField("origin_ca_directory", cfg.OriginCADirectory); err != nil {
 		return err
 	}
 	if err := validateDatasetOrPrefix("zfs_base", cfg.ZFSBase); err != nil {

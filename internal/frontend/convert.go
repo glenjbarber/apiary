@@ -144,6 +144,8 @@ type nodeConfigView struct {
 	CloudflareZoneID                string
 	CloudflareTunnelID              string
 	CloudflareTunnelCredentialsFile string
+	OriginCATokenFile               string
+	OriginCADirectory               string
 }
 
 // triState mirrors the JailEnabledMode/JailEnabledStatus convention
@@ -205,6 +207,8 @@ func fromRPCNodeConfig(d *rpcpb.GetNodeConfigResponse) nodeConfigView {
 		CloudflareZoneID:                d.GetCloudflareZoneId(),
 		CloudflareTunnelID:              d.GetCloudflareTunnelId(),
 		CloudflareTunnelCredentialsFile: d.GetCloudflareTunnelCredentialsFile(),
+		OriginCATokenFile:               d.GetOriginCaTokenFile(),
+		OriginCADirectory:               d.GetOriginCaDirectory(),
 	}
 	view.HASTEnabledMode, view.HASTEnabledStatus = triState(d.HastEnabled)
 	view.PeerTLSMode, view.PeerTLSStatus = triState(d.PeerTls)

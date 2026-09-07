@@ -466,6 +466,25 @@ func TestServer_UpdateCloudflareConfig_ForwardsFormValues(t *testing.T) {
 	}
 }
 
+func TestServer_UpdateOriginCAConfig_ForwardsFormValues(t *testing.T) {
+	client := &fakeClient{updateNodeConfigResp: &rpcpb.UpdateNodeConfigResponse{}}
+	s := newTestServer(t, client)
+
+	form := url.Values{"origin_ca_token_file": {"/root/origin-ca.token"}, "origin_ca_directory": {"/var/db/apiary/origin-ca"}}
+	req := httptest.NewRequest(http.MethodPost, "/machine/origin-ca/config", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	got := client.lastUpdateNodeConfigReq
+	if got.GetOriginCaTokenFile() != "/root/origin-ca.token" || got.GetOriginCaDirectory() != "/var/db/apiary/origin-ca" {
+		t.Errorf("forwarded request = %+v, want Origin CA paths set", got)
+	}
+}
+
 func TestServer_UpdateAssumptionTuning_ForwardsFormValues(t *testing.T) {
 	client := &fakeClient{updateNodeConfigResp: &rpcpb.UpdateNodeConfigResponse{}}
 	s := newTestServer(t, client)

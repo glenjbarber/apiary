@@ -2,8 +2,16 @@ package manager
 
 import (
 	"context"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/x509"
+	"encoding/pem"
 	"errors"
 	"io"
+	"math/big"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -18,6 +26,7 @@ import (
 	"github.com/glenjbarber/apiary/internal/isostore"
 	"github.com/glenjbarber/apiary/internal/netif"
 	"github.com/glenjbarber/apiary/internal/nodeconfig"
+	"github.com/glenjbarber/apiary/internal/origincert"
 )
 
 // fakeISOManager is a fake isoManager for testing Server's ISO RPCs
@@ -386,6 +395,47 @@ type fakeNodeServiceController struct {
 	restartName string
 }
 
+type fakeOriginCAIssuer struct {
+	token        string
+	hostnames    []string
+	validityDays int
+}
+
+func (f *fakeOriginCAIssuer) Issue(_ context.Context, token string, hostnames []string, validityDays int, csrPEM string) (origincert.IssuedCertificate, error) {
+	f.token = token
+	f.hostnames = append([]string(nil), hostnames...)
+	f.validityDays = validityDays
+	block, _ := pem.Decode([]byte(csrPEM))
+	if block == nil {
+		return origincert.IssuedCertificate{}, errors.New("invalid CSR")
+	}
+	csr, err := x509.ParseCertificateRequest(block.Bytes)
+	if err != nil {
+		return origincert.IssuedCertificate{}, err
+	}
+	if err := csr.CheckSignature(); err != nil {
+		return origincert.IssuedCertificate{}, err
+	}
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		return origincert.IssuedCertificate{}, err
+	}
+	now := time.Now().UTC()
+	tmpl := &x509.Certificate{
+		SerialNumber: big.NewInt(1),
+		NotBefore:    now.Add(-time.Minute),
+		NotAfter:     now.Add(24 * time.Hour),
+		DNSNames:     csr.DNSNames,
+		KeyUsage:     x509.KeyUsageDigitalSignature,
+	}
+	der, err := x509.CreateCertificate(rand.Reader, tmpl, tmpl, csr.PublicKey, key)
+	if err != nil {
+		return origincert.IssuedCertificate{}, err
+	}
+	return origincert.IssuedCertificate{ID: "origin-cert-1", ExpiresAt: tmpl.NotAfter,
+		PEM: string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}))}, nil
+}
+
 func (f *fakeNodeServiceController) List(context.Context) ([]*rpcpb.NodeService, error) {
 	return f.services, f.listErr
 }
@@ -393,6 +443,50 @@ func (f *fakeNodeServiceController) List(context.Context) ([]*rpcpb.NodeService,
 func (f *fakeNodeServiceController) Restart(_ context.Context, name string) error {
 	f.restartName = name
 	return f.restartErr
+}
+
+func TestServer_IssueOriginCertificateInstallsAndRestartsManagerd(t *testing.T) {
+	dir := t.TempDir()
+	tokenPath := filepath.Join(dir, "origin-ca.token")
+	if err := os.WriteFile(tokenPath, []byte("token-value\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	store := &fakeNodeConfigStore{cfg: nodeconfig.Config{
+		OriginCATokenFile: tokenPath,
+		OriginCADirectory: dir,
+		TLSCert:           filepath.Join(dir, "managerd.crt"),
+		TLSKey:            filepath.Join(dir, "managerd.key"),
+	}}
+	issuer := &fakeOriginCAIssuer{}
+	services := &fakeNodeServiceController{}
+	s := NewServer(nil, "node-1", nil, nil, nil, nil, nil, "", nil, store, nil, 0, nil)
+	s.SetOriginCAIssuer(issuer)
+	s.services = services
+
+	resp, err := s.IssueOriginCertificate(context.Background(), &rpcpb.IssueOriginCertificateRequest{
+		Name: "managerd", Hostnames: []string{"apiary.example.com"}, ValidityDays: 365,
+	})
+	if err != nil {
+		t.Fatalf("IssueOriginCertificate() error: %v", err)
+	}
+	if resp.GetError() != "" || !resp.GetRestartScheduled() {
+		t.Fatalf("IssueOriginCertificate() = %+v, want success and restart", resp)
+	}
+	if issuer.token != "token-value" || issuer.validityDays != 365 {
+		t.Fatalf("issuer received token=%q validity=%d", issuer.token, issuer.validityDays)
+	}
+	if got := issuer.hostnames; len(got) != 1 || got[0] != "apiary.example.com" {
+		t.Fatalf("issuer hostnames = %q", got)
+	}
+	if services.restartName != "apiary_managerd" {
+		t.Fatalf("restart service = %q, want apiary_managerd", services.restartName)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "managerd.crt")); err != nil {
+		t.Fatalf("certificate was not installed: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "managerd.key")); err != nil {
+		t.Fatalf("private key was not installed: %v", err)
+	}
 }
 
 func (f *fakeNodeConfigStore) Load() (nodeconfig.Config, error) {

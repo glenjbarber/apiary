@@ -74,6 +74,7 @@ var requiredRole = map[string]Role{
 	"/apiary.rpc.v1.ManagerService/GetNodeConfig":             RoleViewer,
 	"/apiary.rpc.v1.ManagerService/GetLocalNodeHealth":        RoleViewer,
 	"/apiary.rpc.v1.ManagerService/ListAssumptionClaims":      RoleViewer,
+	"/apiary.rpc.v1.ManagerService/ListOriginCertificates":    RoleViewer,
 	"/apiary.rpc.v1.ManagerService/ListOrphanedHASTResources": RoleViewer,
 
 	// The Dependency Graph Simulator RPCs are read-only reports - Viewer,
@@ -109,6 +110,7 @@ var requiredRole = map[string]Role{
 	"/apiary.rpc.v1.ManagerService/SetDatasetQuota":            RoleOperator,
 	"/apiary.rpc.v1.ManagerService/SaveAssumptionClaim":        RoleOperator,
 	"/apiary.rpc.v1.ManagerService/DeleteAssumptionClaim":      RoleOperator,
+	"/apiary.rpc.v1.ManagerService/IssueOriginCertificate":     RoleAdmin,
 	"/apiary.rpc.v1.ManagerService/CreateJail":                 RoleOperator,
 	"/apiary.rpc.v1.ManagerService/UpdateJail":                 RoleOperator,
 	"/apiary.rpc.v1.ManagerService/DeleteJail":                 RoleOperator,

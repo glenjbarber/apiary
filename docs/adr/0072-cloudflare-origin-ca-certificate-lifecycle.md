@@ -2,8 +2,9 @@
 
 ## Status
 
-Proposed design. No certificate API client or service mutation is implemented
-by this ADR.
+Implemented v1. API/UI activation and renewal are available for local
+`apiary_managerd` only. Expiry health, renewal scheduling, revocation, and
+support for the other Apiary services remain future work.
 
 ## Context
 
@@ -51,10 +52,9 @@ configured and readable, never its content.
 ### Explicit issuance and renewal
 
 Issuance is an Admin-only, Hive-local action. It requires an explicit hostname
-list, a selected local service, and confirmation that every requested hostname
-is Cloudflare-proxied. Apiary validates each hostname before creating a CSR.
-It does not guess a hostname from a Cell name or automatically request a
-wildcard certificate.
+list and confirmation that every requested hostname is Cloudflare-proxied.
+Apiary validates each hostname before creating a CSR. It does not guess a
+hostname from a Cell name or automatically request a wildcard certificate.
 
 The first implementation must use an explicit **Renew now** operation, not an
 unbounded reconciliation-loop API call. It creates a replacement certificate,
@@ -71,19 +71,20 @@ the explicit flow has been live-verified and has durable failure evidence.
 
 ### Service scope
 
-v1 targets one selected local Apiary service at a time. It reuses the existing
-TLS path configuration and the allowlisted local service controller; it does
-not edit `rc.conf`, configure arbitrary processes, or distribute one key across
-Hives. Each Hive receives its own key and certificate even when the hostname
-set overlaps.
+v1 targets `apiary_managerd` only. It reuses the existing TLS path
+configuration and allowlisted local service controller; it does not edit
+`rc.conf`, configure arbitrary processes, or distribute one key across Hives.
+Each Hive receives its own key and certificate even when the hostname set
+overlaps.
 
 ## Consequences
 
 - This gives Cloudflare-proxied Apiary services an operator-visible, narrow
   certificate lifecycle without introducing a raft-replicated secret.
 - It does not make a service publicly trusted outside Cloudflare.
-- The future implementation needs a small Cloudflare Origin CA API client,
-  local inventory storage, an Admin-only managerd RPC, a Machine page panel,
-  and service-specific post-write verification.
-- The future implementation must prove failure safety on a non-production
-  Hive before any production token or certificate is used.
+- The implemented API/UI flow stores the token-file path and certificate
+  directory locally, issues a local ECC key/CSR transaction, records only
+  non-secret inventory, and schedules `apiary_managerd` restart after a
+  successful replacement.
+- The v1 flow must still be live-verified on a non-production Hive before any
+  production token or certificate is used.
