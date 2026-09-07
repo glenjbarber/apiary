@@ -229,6 +229,61 @@ func TestGatewayEnableCheckApplicability(t *testing.T) {
 	}
 }
 
+// TestGatewayEnableCheckLiveForwarding is the regression test for a real
+// gap: Apply only ever persisted gateway_enable=YES to rc.conf, which
+// takes effect on the next reboot only - a host that hasn't rebooted
+// since would report StatusOK while ADR-0048's own NAT rules silently
+// never route anything. Probe and Apply must both also check/set the
+// live net.inet.ip.forwarding sysctl, not just the persisted value.
+func TestGatewayEnableCheckLiveForwarding(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("misconfigured when persisted but not live", func(t *testing.T) {
+		r := newFakeRunner()
+		r.on("sysrc -n gateway_enable", fakeResponse{stdout: "YES"})
+		r.on("sysctl -n net.inet.ip.forwarding", fakeResponse{stdout: "0"})
+		res := gatewayEnableCheck.Probe(ctx, r, Options{EnableNAT: true})
+		if res.Status != StatusMisconfigured {
+			t.Fatalf("status = %v, want misconfigured when rc.conf is set but the running kernel isn't forwarding yet", res.Status)
+		}
+	})
+
+	t.Run("ok only when both persisted and live", func(t *testing.T) {
+		r := newFakeRunner()
+		r.on("sysrc -n gateway_enable", fakeResponse{stdout: "YES"})
+		r.on("sysctl -n net.inet.ip.forwarding", fakeResponse{stdout: "1"})
+		res := gatewayEnableCheck.Probe(ctx, r, Options{EnableNAT: true})
+		if res.Status != StatusOK {
+			t.Fatalf("status = %v, want ok", res.Status)
+		}
+	})
+
+	t.Run("apply sets the live sysctl, not just rc.conf", func(t *testing.T) {
+		r := newFakeRunner()
+		r.on("sysrc gateway_enable=YES", fakeResponse{})
+		r.on("sysctl -n net.inet.ip.forwarding", fakeResponse{stdout: "0"})
+		r.on("sysctl net.inet.ip.forwarding=1", fakeResponse{})
+		if err := gatewayEnableCheck.Apply(ctx, r, Options{EnableNAT: true}); err != nil {
+			t.Fatalf("apply: %v", err)
+		}
+		if got := r.callCount("sysctl net.inet.ip.forwarding=1"); got != 1 {
+			t.Fatalf("sysctl net.inet.ip.forwarding=1 called %d times, want 1", got)
+		}
+	})
+
+	t.Run("apply skips the sysctl call when already live", func(t *testing.T) {
+		r := newFakeRunner()
+		r.on("sysrc gateway_enable=YES", fakeResponse{})
+		r.on("sysctl -n net.inet.ip.forwarding", fakeResponse{stdout: "1"})
+		if err := gatewayEnableCheck.Apply(ctx, r, Options{EnableNAT: true}); err != nil {
+			t.Fatalf("apply: %v", err)
+		}
+		if got := r.callCount("sysctl net.inet.ip.forwarding=1"); got != 0 {
+			t.Fatalf("sysctl net.inet.ip.forwarding=1 called %d times, want 0 (already live)", got)
+		}
+	})
+}
+
 func TestPFAnchorCheck(t *testing.T) {
 	ctx := context.Background()
 	dir := t.TempDir()

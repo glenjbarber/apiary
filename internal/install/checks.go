@@ -358,21 +358,44 @@ var pfAnchorCheck = Check{
 
 // ---- NAT / gateway ----
 
+// ipForwardingLive reports the currently-running kernel's own
+// net.inet.ip.forwarding sysctl - separate from gateway_enable's
+// persisted /etc/rc.conf value, since sysrc alone only takes effect on
+// the *next* boot. Checking only the persisted value would report
+// StatusOK on a host that hasn't rebooted since -apply ran, even though
+// ADR-0048 is explicit that a NAT'd packet is silently never routed
+// anywhere without live forwarding - the exact trap this check exists to
+// catch.
+func ipForwardingLive(ctx context.Context, r Runner) bool {
+	out, _, err := r.Run(ctx, "sysctl", "-n", "net.inet.ip.forwarding")
+	return err == nil && strings.TrimSpace(out) == "1"
+}
+
 var gatewayEnableCheck = Check{
 	ID:          "gateway-enable",
 	Description: "gateway_enable=YES (IP forwarding) for self-hosted outbound NAT (ADR-0048)",
 	Risk:        RiskSafe,
 	Applicable:  func(opt Options) bool { return opt.EnableNAT },
 	Probe: func(ctx context.Context, r Runner, opt Options) Result {
-		v, _ := sysrcValue(ctx, r, "gateway_enable")
-		if strings.EqualFold(v, "YES") {
-			return Result{ID: "gateway-enable", Status: StatusOK, Detail: "gateway_enable=YES"}
+		persisted, _ := sysrcValue(ctx, r, "gateway_enable")
+		live := ipForwardingLive(ctx, r)
+		if strings.EqualFold(persisted, "YES") && live {
+			return Result{ID: "gateway-enable", Status: StatusOK, Detail: "gateway_enable=YES, net.inet.ip.forwarding=1 (live)"}
 		}
-		return Result{ID: "gateway-enable", Status: StatusMisconfigured, Detail: fmt.Sprintf("gateway_enable=%q", v),
-			FixHint: "sysrc gateway_enable=YES"}
+		return Result{ID: "gateway-enable", Status: StatusMisconfigured,
+			Detail:  fmt.Sprintf("gateway_enable=%q live-forwarding=%v", persisted, live),
+			FixHint: "sysrc gateway_enable=YES; sysctl net.inet.ip.forwarding=1"}
 	},
 	Apply: func(ctx context.Context, r Runner, opt Options) error {
-		return setRcVar(ctx, r, "gateway_enable=YES")
+		if err := setRcVar(ctx, r, "gateway_enable=YES"); err != nil {
+			return err
+		}
+		if !ipForwardingLive(ctx, r) {
+			if _, stderr, err := r.Run(ctx, "sysctl", "net.inet.ip.forwarding=1"); err != nil {
+				return fmt.Errorf("sysctl net.inet.ip.forwarding=1: %s", firstNonEmpty(stderr, err))
+			}
+		}
+		return nil
 	},
 }
 
