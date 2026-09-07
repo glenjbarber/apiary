@@ -2,7 +2,12 @@
 
 ## Status
 
-Accepted
+Accepted. **Update**: this ADR's Naming section below says "Hive"/"Cell"
+are the only product/UI terms appearing in `web/templates/simulate.html`.
+Per [ADR-0076](0076-comb-hierarchy-rename.md), "Hive" was retired in
+favor of "Comb" - the same point still holds (these remain UI-only
+words, never Go/proto identifiers), just with "Comb" in place of
+"Hive" in the template copy now.
 
 ## Context
 

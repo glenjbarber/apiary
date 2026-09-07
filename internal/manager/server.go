@@ -350,7 +350,7 @@ func (s *Server) ListOriginCertificates(_ context.Context, _ *rpcpb.ListOriginCe
 
 func (s *Server) IssueOriginCertificate(ctx context.Context, req *rpcpb.IssueOriginCertificateRequest) (*rpcpb.IssueOriginCertificateResponse, error) {
 	if s.nodeConfig == nil || s.originCA == nil {
-		return &rpcpb.IssueOriginCertificateResponse{Error: "Origin CA issuance is not configured on this Hive"}, nil
+		return &rpcpb.IssueOriginCertificateResponse{Error: "Origin CA issuance is not configured on this Comb"}, nil
 	}
 	cfg, err := s.nodeConfig.Load()
 	if err != nil {

@@ -5,7 +5,7 @@
 <body class="app-layout">
   {{template "nav" .}}
   <main class="content" id="main-content">
-  {{template "page_header" (pageHeader "Assumption Register" "Operator-authored, expiring claims stored only on this Hive. They provide context but never change computed health or recovery verdicts.")}}
+  {{template "page_header" (pageHeader "Assumption Register" "Operator-authored, expiring claims stored only on this Comb. They provide context but never change computed health or recovery verdicts.")}}
   {{if .AssumptionRegisterErr}}<div class="banner-error">{{.AssumptionRegisterErr}}</div>{{end}}
   {{if .AssumptionRegisterOK}}<div class="banner-success">{{.AssumptionRegisterOK}}</div>{{end}}
   {{if .CanOperate}}

@@ -49,15 +49,15 @@ func TestClassifyHASTDualPrimary_AlwaysUntestedNeverSimulated(t *testing.T) {
 }
 
 func TestClassifyHiveFailure_UnsafeOrImpossibleOnlyWhenQuorumLost(t *testing.T) {
-	lost := ClassifyHiveFailure("node-a", "Hive node-a fails", recovery.QuorumLost, true, 2, 1)
+	lost := ClassifyHiveFailure("node-a", "Comb node-a fails", recovery.QuorumLost, true, 2, 1)
 	if lost.Status != StatusUnsafeOrImpossible {
 		t.Errorf("Lost: Status = %v, want StatusUnsafeOrImpossible", lost.Status)
 	}
-	survives := ClassifyHiveFailure("node-a", "Hive node-a fails", recovery.QuorumSurvives, true, 2, 1)
+	survives := ClassifyHiveFailure("node-a", "Comb node-a fails", recovery.QuorumSurvives, true, 2, 1)
 	if survives.Status != StatusSimulated {
 		t.Errorf("Survives: Status = %v, want StatusSimulated", survives.Status)
 	}
-	unknown := ClassifyHiveFailure("node-a", "Hive node-a fails", recovery.QuorumUnknown, true, 2, 1)
+	unknown := ClassifyHiveFailure("node-a", "Comb node-a fails", recovery.QuorumUnknown, true, 2, 1)
 	if unknown.Status != StatusSimulated || unknown.Result != "unknown" {
 		t.Errorf("Unknown: Status/Result = %v/%v, want StatusSimulated/unknown", unknown.Status, unknown.Result)
 	}
@@ -67,7 +67,7 @@ func TestClassifyHiveFailure_InvalidNeverFabricatesUnsafeOrImpossible(t *testing
 	// valid=false means the underlying QuorumFact was internally
 	// inconsistent - must never be treated as a confirmed-bad finding,
 	// even if the (meaningless) Verdict value happens to be QuorumLost.
-	got := ClassifyHiveFailure("node-a", "Hive node-a fails", recovery.QuorumLost, false, 0, 0)
+	got := ClassifyHiveFailure("node-a", "Comb node-a fails", recovery.QuorumLost, false, 0, 0)
 	if got.Status != StatusSimulated || got.Result != "unknown" {
 		t.Fatalf("invalid fact: Status/Result = %v/%v, want StatusSimulated/unknown - never fabricate a finding", got.Status, got.Result)
 	}
@@ -87,7 +87,7 @@ func TestBuildReport_SortsByTierThenStatusThenKindThenTarget(t *testing.T) {
 	scenarios := []Scenario{
 		{Kind: "cell-recoverability", Target: "vm-2", Tier: TierSingleResource, Status: StatusSimulated},
 		{Kind: "quorum-tolerance", Target: "cluster", Tier: TierClusterWide, Status: StatusSimulated},
-		{Kind: "hive-failure", Target: "node-a", Tier: TierMultiResource, Status: StatusUnsafeOrImpossible},
+		{Kind: "comb-failure", Target: "node-a", Tier: TierMultiResource, Status: StatusUnsafeOrImpossible},
 		{Kind: "cell-recoverability", Target: "vm-1", Tier: TierSingleResource, Status: StatusSimulated},
 		{Kind: "hast-dual-primary", Target: "vm-1", Tier: TierSingleResource, Status: StatusUntested},
 	}
@@ -95,7 +95,7 @@ func TestBuildReport_SortsByTierThenStatusThenKindThenTarget(t *testing.T) {
 
 	want := []string{
 		"quorum-tolerance:cluster", // TierClusterWide first
-		"hive-failure:node-a",      // TierMultiResource next
+		"comb-failure:node-a",      // TierMultiResource next
 		"cell-recoverability:vm-1", // TierSingleResource, unsafe/simulated before untested, then target order
 		"cell-recoverability:vm-2",
 		"hast-dual-primary:vm-1",

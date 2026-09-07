@@ -24,7 +24,7 @@
     </fieldset>
     <fieldset class="form-section">
       <legend>Placement</legend>
-      <p class="field-help">Hive capability is checked live. Choose a Hive marked VM-capable; Apiary does not schedule automatically.</p>
+      <p class="field-help">Comb capability is checked live. Choose a Comb marked VM-capable; Apiary does not schedule automatically.</p>
       {{if .PlacementHives}}<ul class="field-help">{{range .PlacementHives}}<li>{{.NodeID}}: {{if .ProbeError}}<span class="error">unreachable</span>{{else if .VMCapable}}<span class="success">VM-capable</span>{{else}}<span class="error">no bhyve provisioning</span>{{end}}</li>{{end}}</ul>{{end}}
       <div class="form-grid">
         <label>Owner node

@@ -33,11 +33,11 @@ func TestHandleCoveragePage_HiveFailureMakesZeroSimulateNodeFailureCalls(t *test
 		t.Errorf("expected zero SimulateNodeFailure calls (finding 1 - owned/replica counts come from local VM/jail lists), got %d", client.simulateNodeFailureCalls)
 	}
 	body := rec.Body.String()
-	if !strings.Contains(body, "hive-failure") || !strings.Contains(body, "node-a") {
-		t.Fatalf("expected a hive-failure row for node-a, got: %s", body)
+	if !strings.Contains(body, "comb-failure") || !strings.Contains(body, "node-a") {
+		t.Fatalf("expected a comb-failure row for node-a, got: %s", body)
 	}
 	if !strings.Contains(body, "owns 1 cell") {
-		t.Errorf("expected node-a's hive-failure row to cite owning 1 cell, got: %s", body)
+		t.Errorf("expected node-a's comb-failure row to cite owning 1 cell, got: %s", body)
 	}
 }
 

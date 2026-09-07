@@ -15,7 +15,7 @@
       Changes here take effect the next time this node's managerd
       restarts, not live. Blank NAT uplink means use Uplink. Blank DNS
       means use the startup flag value, if one was supplied. Interface
-      choices are discovered from this Hive; a saved interface that is no
+      choices are discovered from this Comb; a saved interface that is no
       longer present is retained as an unavailable choice so it can be
       cleared safely.
     </p>
@@ -27,7 +27,7 @@
   <div class="panel">
     <h3>Resource scope paths</h3>
     <p class="muted">
-      Where this Hive looks for its own existing VM storage, jail
+      Where this Comb looks for its own existing VM storage, jail
       images, and installer images. <strong>Write-once through this
       page</strong>: changing one of these after real resources already
       exist under the old value does not move them - it just makes the
@@ -69,9 +69,9 @@
   <div class="panel">
     <h3>Jail provisioning</h3>
     <p class="muted">
-      Controls whether this Hive provisions jails assigned to it. If a
+      Controls whether this Comb provisions jails assigned to it. If a
       jail row says provisioning is disabled on the owning node, enable
-      it here on that owning Hive.
+      it here on that owning Comb.
     </p>
     <div id="jail-provisioning-panel">
       {{template "jail_provisioning_panel" .}}
@@ -82,8 +82,8 @@
     <h3>Peer-to-peer forwarding</h3>
     <p class="muted">
       Used when this node forwards a raft write/read to the leader's
-      managerd (ADR-0029/ADR-0035), or dials another Hive for a
-      cross-Hive console/serial-log request. The peer API key is
+      managerd (ADR-0029/ADR-0035), or dials another Comb for a
+      cross-Comb console/serial-log request. The peer API key is
       write-only - it is never shown once saved, only whether one is
       set.
     </p>
@@ -136,7 +136,7 @@
   <div class="panel">
     <h3>Apiary services</h3>
     <p class="muted">
-      Status is local to this Hive. Restarting <code>apiary_managerd</code>
+      Status is local to this Comb. Restarting <code>apiary_managerd</code>
       applies saved Machine settings such as jail provisioning. Apiary does
       not change <code>rc.conf</code> here.
     </p>
@@ -163,18 +163,18 @@
     <p class="muted">
       Lets a Cell's own HTTP service be reached at a public hostname
       through a Cloudflare Tunnel, without opening any inbound port on
-      this Hive - see <code>docs/adr/0063-cloudflare-tunnel-exposure-v1.md</code>
+      this Comb - see <code>docs/adr/0063-cloudflare-tunnel-exposure-v1.md</code>
       in the repository. Set per-Cell on each VM's own detail page, once
       configured here.
     </p>
     {{if .CloudflareConfigured}}
-    <p><span class="badge true">configured</span> This Hive's managerd has Cloudflare Tunnel exposure enabled.</p>
+    <p><span class="badge true">configured</span> This Comb's managerd has Cloudflare Tunnel exposure enabled.</p>
     {{else}}
-    <p><span class="badge unknown">not configured</span> This Hive's managerd has no Cloudflare Tunnel exposure configured - Cells on this Hive cannot be exposed until it is.</p>
-    <p class="muted">One-time setup per Hive, done by hand (this project never automates it):</p>
+    <p><span class="badge unknown">not configured</span> This Comb's managerd has no Cloudflare Tunnel exposure configured - Cells on this Comb cannot be exposed until it is.</p>
+    <p class="muted">One-time setup per Comb, done by hand (this project never automates it):</p>
     <ol>
       <li>The domain's DNS must already be managed by Cloudflare (its nameservers point at Cloudflare).</li>
-      <li>Install <code>cloudflared</code> on this Hive, then run <code>cloudflared tunnel login</code> and <code>cloudflared tunnel create &lt;hive-name&gt;</code> once - this produces a tunnel id and a credentials JSON file.</li>
+      <li>Install <code>cloudflared</code> on this Comb, then run <code>cloudflared tunnel login</code> and <code>cloudflared tunnel create &lt;comb-name&gt;</code> once - this produces a tunnel id and a credentials JSON file.</li>
       <li>Create a Cloudflare API token scoped to <strong>Zone:DNS:Edit only</strong> (never Tunnel:Edit or account-level) for the zone Apiary will manage CNAME records in, and save it to a file only this host can read.</li>
       <li>Fill in the token file's path plus the zone/tunnel id and credentials file path below (or set the matching <code>-cloudflare-*</code> flags directly in <code>rc.conf</code>), then restart <code>apiary_managerd</code>.</li>
     </ol>
@@ -216,7 +216,7 @@
       <td>{{if eq .Status "running"}}<span class="success">running</span>{{else if eq .Status "stopped"}}<span class="error">stopped</span>{{else}}<span class="badge unknown">unknown</span>{{end}}</td>
       <td>{{if .Enabled}}<span class="success">enabled</span>{{else}}<span class="muted">disabled</span>{{end}}</td>
       <td>{{.Detail}}</td>
-      <td>{{if and .Restartable $.CanAdmin}}<button hx-post="/machine/services/{{.Name}}/restart" hx-target="#node-services-panel" hx-swap="innerHTML" hx-confirm="Restart {{.Name}} on this Hive?">Restart</button>{{end}}</td>
+      <td>{{if and .Restartable $.CanAdmin}}<button hx-post="/machine/services/{{.Name}}/restart" hx-target="#node-services-panel" hx-swap="innerHTML" hx-confirm="Restart {{.Name}} on this Comb?">Restart</button>{{end}}</td>
     </tr>
     {{else}}
     <tr><td colspan="5"><em>{{if .ServiceFormError}}Unable to load service status{{else}}No Apiary services reported{{end}}</em></td></tr>
@@ -351,7 +351,7 @@
   {{if or (not .NodeConfig.ZFSBase) (not .NodeConfig.BhyvePrefix) (not .NodeConfig.ISODir) (not .NodeConfig.JailPrefix) (not .NodeConfig.JailMountBase)}}
   <div class="form-actions"><button type="submit">Save (one-time)</button></div>
   {{else}}
-  <p class="muted">Every resource-scope path is already set on this Hive. Edit the underlying <code>rc.conf</code> flag directly and restart to change one.</p>
+  <p class="muted">Every resource-scope path is already set on this Comb. Edit the underlying <code>rc.conf</code> flag directly and restart to change one.</p>
   {{end}}
 </form>
 {{else}}

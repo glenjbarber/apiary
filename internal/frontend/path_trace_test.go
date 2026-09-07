@@ -17,10 +17,10 @@ func TestTracePage_RendersOrderedEvidence(t *testing.T) {
 			Cell:    &rpcpb.VMDefinition{Id: "vm-1", Name: "frontend", NodeId: "hive-a"},
 			Network: &rpcpb.NetworkDefinition{Id: "net-1", Name: "services"},
 			Status:  rpcpb.PathTraceStatus_PATH_TRACE_STATUS_BLOCKED,
-			Summary: "First blocker: Owner-Hive bridge: bridge is down",
+			Summary: "First blocker: Owner-Comb bridge: bridge is down",
 			Steps: []*rpcpb.PathTraceStep{{
-				Stage: "Owner-Hive bridge", Status: rpcpb.PathTraceStatus_PATH_TRACE_STATUS_BLOCKED,
-				Summary: "Managed-network bridge is down", Evidence: "owner Hive local bridge status",
+				Stage: "Owner-Comb bridge", Status: rpcpb.PathTraceStatus_PATH_TRACE_STATUS_BLOCKED,
+				Summary: "Managed-network bridge is down", Evidence: "owner Comb local bridge status",
 				Explanation: "apnet-1234 is down",
 			}},
 			NonAtomic: true,
@@ -38,7 +38,7 @@ func TestTracePage_RendersOrderedEvidence(t *testing.T) {
 		t.Fatalf("status = %d, want 200", w.Code)
 	}
 	body := w.Body.String()
-	for _, want := range []string{"Cell Path Trace", "frontend to 10.60.0.20", "blocked", "Owner-Hive bridge", "apnet-1234 is down", "The destination was not contacted"} {
+	for _, want := range []string{"Cell Path Trace", "frontend to 10.60.0.20", "blocked", "Owner-Comb bridge", "apnet-1234 is down", "The destination was not contacted"} {
 		if !strings.Contains(body, want) {
 			t.Errorf("response does not contain %q", want)
 		}

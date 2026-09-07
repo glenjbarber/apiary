@@ -103,7 +103,7 @@ func (s *Server) gatherHiveFailureScenarios(nodeIDs []string, voterImpacts []inv
 			verdict, valid = impact.Verdict, impact.Valid
 		}
 
-		scenarios = append(scenarios, coverage.ClassifyHiveFailure(id, "Hive "+id+" fails", verdict, valid, owned, replicaBacked))
+		scenarios = append(scenarios, coverage.ClassifyHiveFailure(id, "Comb "+id+" fails", verdict, valid, owned, replicaBacked))
 	}
 	return scenarios
 }

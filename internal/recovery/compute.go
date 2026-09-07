@@ -178,7 +178,7 @@ func unprotectedStep(order int, r ResourceFact) Step {
 		Title: fmt.Sprintf("No redundancy for %s %q", r.Kind, r.Name),
 		Detail: fmt.Sprintf(
 			"No HAST replica is configured for this %s. It cannot be automatically recovered by Apiary if the "+
-				"target hive is gone for good - rebuilding requires its base image/ISO (see the image availability "+
+				"target comb is gone for good - rebuilding requires its base image/ISO (see the image availability "+
 				"findings below) or an out-of-band backup outside Apiary's own tracking. This is a real data-loss risk.",
 			r.Kind,
 		),
@@ -192,7 +192,7 @@ func imageStep(order int, img ImageFact) Step {
 			Title: fmt.Sprintf("Verify image %q before relying on it for %q", img.ImageName, img.ResourceName),
 			Detail: fmt.Sprintf(
 				"No remaining source for image %q (needed to rebuild %q) was confirmed, but at least one "+
-					"remaining hive's inventory could not be read. Verify a source is actually reachable before "+
+					"remaining comb's inventory could not be read. Verify a source is actually reachable before "+
 					"relying on this image for a rebuild - absence of proof is not proof of absence.",
 				img.ImageName, img.ResourceName,
 			),
@@ -202,7 +202,7 @@ func imageStep(order int, img ImageFact) Step {
 		Order: order,
 		Title: fmt.Sprintf("Image %q is unavailable for %q", img.ImageName, img.ResourceName),
 		Detail: fmt.Sprintf(
-			"No remaining hive reports image %q. A rebuild of %q needing this image is blocked until a source "+
+			"No remaining comb reports image %q. A rebuild of %q needing this image is blocked until a source "+
 				"is restored.",
 			img.ImageName, img.ResourceName,
 		),
