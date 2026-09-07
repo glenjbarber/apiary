@@ -76,6 +76,7 @@ var requiredRole = map[string]Role{
 	"/apiary.rpc.v1.ManagerService/ListAssumptionClaims":      RoleViewer,
 	"/apiary.rpc.v1.ManagerService/ListOriginCertificates":    RoleViewer,
 	"/apiary.rpc.v1.ManagerService/ListOrphanedHASTResources": RoleViewer,
+	"/apiary.rpc.v1.ManagerService/GetNetworkTeardownStatus":  RoleViewer,
 
 	// The Dependency Graph Simulator RPCs are read-only reports - Viewer,
 	// the same tier as every other plain read
@@ -107,6 +108,7 @@ var requiredRole = map[string]Role{
 	"/apiary.rpc.v1.ManagerService/SetVMFirewallPaused":        RoleOperator,
 	"/apiary.rpc.v1.ManagerService/SetVMCloudflareExposure":    RoleOperator,
 	"/apiary.rpc.v1.ManagerService/SetVMDesiredState":          RoleOperator,
+	"/apiary.rpc.v1.ManagerService/SetVMFirewallRules":         RoleOperator,
 	"/apiary.rpc.v1.ManagerService/SetDatasetQuota":            RoleOperator,
 	"/apiary.rpc.v1.ManagerService/SaveAssumptionClaim":        RoleOperator,
 	"/apiary.rpc.v1.ManagerService/DeleteAssumptionClaim":      RoleOperator,
@@ -118,6 +120,7 @@ var requiredRole = map[string]Role{
 	"/apiary.rpc.v1.ManagerService/SetJailDesiredState":        RoleOperator,
 	"/apiary.rpc.v1.ManagerService/CreateNetwork":              RoleOperator,
 	"/apiary.rpc.v1.ManagerService/DeleteNetwork":              RoleOperator,
+	"/apiary.rpc.v1.ManagerService/SetNetworkName":             RoleOperator,
 	"/apiary.rpc.v1.ManagerService/UploadISO":                  RoleOperator,
 	"/apiary.rpc.v1.ManagerService/DeleteISO":                  RoleOperator,
 	"/apiary.rpc.v1.ManagerService/ReportVMPhase":              RoleOperator,

@@ -28,10 +28,14 @@ func resolveBridgeName(n *internalpb.NetworkDefinition) string {
 // ADR-0002/ADR-0005) so the external schema doesn't couple to the internal
 // protocol's evolution - this is the translation layer that decoupling
 // requires.
-func toInternalVM(vm *rpcpb.VMDefinition) *internalpb.VMDefinition {
-	rules := make([]*internalpb.FirewallRule, 0, len(vm.GetFirewallRules()))
-	for _, r := range vm.GetFirewallRules() {
-		rules = append(rules, &internalpb.FirewallRule{
+// toInternalFirewallRules converts the external, wire FirewallRule
+// shape to its internal counterpart - shared by toInternalVM (at
+// create/update time) and SetVMFirewallRules (editing rules on an
+// existing VM), so both paths convert identically.
+func toInternalFirewallRules(rules []*rpcpb.FirewallRule) []*internalpb.FirewallRule {
+	out := make([]*internalpb.FirewallRule, 0, len(rules))
+	for _, r := range rules {
+		out = append(out, &internalpb.FirewallRule{
 			Direction: r.GetDirection(),
 			Action:    r.GetAction(),
 			Protocol:  r.GetProtocol(),
@@ -39,6 +43,11 @@ func toInternalVM(vm *rpcpb.VMDefinition) *internalpb.VMDefinition {
 			Priority:  r.GetPriority(),
 		})
 	}
+	return out
+}
+
+func toInternalVM(vm *rpcpb.VMDefinition) *internalpb.VMDefinition {
+	rules := toInternalFirewallRules(vm.GetFirewallRules())
 	return &internalpb.VMDefinition{
 		Id:            vm.GetId(),
 		Name:          vm.GetName(),

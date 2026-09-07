@@ -97,10 +97,14 @@ func (f *FSM) Apply(log *raft.Log) interface{} {
 		return f.applySetVMCloudflareExposure(log.Index, op.SetVmCloudflareExposure)
 	case *internalpb.Command_SetVmDesiredState:
 		return f.applySetVMDesiredState(log.Index, op.SetVmDesiredState)
+	case *internalpb.Command_SetVmFirewallRules:
+		return f.applySetVMFirewallRules(log.Index, op.SetVmFirewallRules)
 	case *internalpb.Command_CreateNetwork:
 		return f.applyCreateNetwork(log.Index, op.CreateNetwork.GetNetwork())
 	case *internalpb.Command_DeleteNetwork:
 		return f.applyDeleteNetwork(log.Index, op.DeleteNetwork.GetId())
+	case *internalpb.Command_SetNetworkName:
+		return f.applySetNetworkName(log.Index, op.SetNetworkName)
 	case *internalpb.Command_CreateApiKey:
 		return f.applyCreateAPIKey(log.Index, op.CreateApiKey.GetKey())
 	case *internalpb.Command_RevokeApiKey:
@@ -351,6 +355,24 @@ func (f *FSM) applySetVMDesiredState(index uint64, req *internalpb.SetVMDesiredS
 	return &FSMApplyResult{Index: index, VM: updated}
 }
 
+// applySetVMFirewallRules replaces firewall_rules wholesale on an
+// existing VM, touching no other field - the same narrow,
+// deliberately-not-UpdateVM shape as applySetVMFirewallPaused above.
+// No field-level validation here, matching applyCreateVM's own
+// division of labor: nothing validates individual rule contents at
+// creation time either, so this doesn't hold edits to a stricter
+// standard than creation.
+func (f *FSM) applySetVMFirewallRules(index uint64, req *internalpb.SetVMFirewallRules) *FSMApplyResult {
+	vm, exists := f.vms[req.GetId()]
+	if !exists {
+		return &FSMApplyResult{Index: index, Error: fmt.Sprintf("SetVMFirewallRules: id %q does not exist", req.GetId())}
+	}
+	updated := proto.Clone(vm).(*internalpb.VMDefinition)
+	updated.FirewallRules = req.GetFirewallRules()
+	f.vms[req.GetId()] = updated
+	return &FSMApplyResult{Index: index, VM: updated}
+}
+
 // applyPurgeVM removes a VM definition outright. Idempotent: purging an
 // id that's already gone is not an error, since the reconciler that
 // submits this may retry after a partial failure (e.g. it purged
@@ -554,6 +576,20 @@ func (f *FSM) applyDeleteNetwork(index uint64, id string) *FSMApplyResult {
 	}
 	delete(f.networks, id)
 	return &FSMApplyResult{Index: index, Network: network}
+}
+
+// applySetNetworkName renames an existing network, touching no other
+// field - the only mutation a NetworkDefinition supports after
+// creation (ADR-0071/ADR-0080).
+func (f *FSM) applySetNetworkName(index uint64, req *internalpb.SetNetworkName) *FSMApplyResult {
+	network, exists := f.networks[req.GetId()]
+	if !exists {
+		return &FSMApplyResult{Index: index, Error: fmt.Sprintf("SetNetworkName: id %q does not exist", req.GetId())}
+	}
+	updated := proto.Clone(network).(*internalpb.NetworkDefinition)
+	updated.Name = req.GetName()
+	f.networks[req.GetId()] = updated
+	return &FSMApplyResult{Index: index, Network: updated}
 }
 
 // Network returns the current definition for id, and whether it exists.

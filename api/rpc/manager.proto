@@ -94,6 +94,12 @@ service ManagerService {
   // operation that marks a VM for deletion.
   rpc SetVMDesiredState(SetVMDesiredStateRequest) returns (SetVMDesiredStateResponse);
 
+  // SetVMFirewallRules replaces a VM's firewall_rules wholesale, so
+  // rules can be edited after creation - previously only settable at
+  // CreateVM time. Deliberately not folded into UpdateVM, the exact
+  // same reasoning as SetVMFirewallPaused above.
+  rpc SetVMFirewallRules(SetVMFirewallRulesRequest) returns (SetVMFirewallRulesResponse);
+
   // GetVM and ListVMs only succeed against the current leader - see
   // api/internalpb/raftd.proto's GetVM/ListVMs doc comments for why v1's
   // read consistency model is deliberately as simple as its write model.
@@ -171,6 +177,12 @@ service ManagerService {
   rpc CreateNetwork(CreateNetworkRequest) returns (CreateNetworkResponse);
   rpc ListNetworks(ListNetworksRequest) returns (ListNetworksResponse);
   rpc DeleteNetwork(DeleteNetworkRequest) returns (DeleteNetworkResponse);
+
+  // SetNetworkName renames a managed network - the only field on an
+  // existing network definition editable in place (ADR-0071/ADR-0080
+  // reject a general UpdateNetwork for anything with a physical
+  // realization; Name has none).
+  rpc SetNetworkName(SetNetworkNameRequest) returns (SetNetworkNameResponse);
 
   // CreateAPIKey/ListAPIKeys/RevokeAPIKey manage credentials for this
   // service's own RPC surface (ADR-0023). CreateAPIKey is the only
@@ -302,6 +314,19 @@ service ManagerService {
   // anything.
   rpc ListOrphanedHASTResources(ListOrphanedHASTResourcesRequest) returns (ListOrphanedHASTResourcesResponse);
   rpc CleanupOrphanedHASTResource(CleanupOrphanedHASTResourceRequest) returns (CleanupOrphanedHASTResourceResponse);
+
+  // GetNetworkTeardownStatus reports whether THIS node still has a
+  // local artifact-cleanup record for network_id - a physical,
+  // per-node, local-only report (never routed through raft), mirroring
+  // ListOrphanedHASTResources's own posture exactly. Backs the guided
+  // network-replacement workflow ADR-0071 called for and ADR-0081
+  // builds: the frontend calls this once per known node and shows an
+  // operator, per Hive, whether teardown of a deleted network has
+  // actually converged before letting them recreate it. present=true
+  // (or a non-empty error) means "not safe to recreate yet" - an
+  // unreachable or erroring node is treated as unknown/blocking, never
+  // as evidence that cleanup succeeded.
+  rpc GetNetworkTeardownStatus(GetNetworkTeardownStatusRequest) returns (GetNetworkTeardownStatusResponse);
 }
 
 // VMState mirrors api/internalpb's VMState. Kept as a separate type
@@ -567,6 +592,18 @@ message SetVMDesiredStateRequest {
 }
 
 message SetVMDesiredStateResponse {
+  VMDefinition vm = 1;
+  string error = 2;
+  string leader_hint = 3;
+}
+
+message SetVMFirewallRulesRequest {
+  string id = 1;
+  repeated FirewallRule firewall_rules = 2;
+  uint32 timeout_ms = 3;
+}
+
+message SetVMFirewallRulesResponse {
   VMDefinition vm = 1;
   string error = 2;
   string leader_hint = 3;
@@ -1232,6 +1269,18 @@ message DeleteNetworkResponse {
   string leader_hint = 3;
 }
 
+message SetNetworkNameRequest {
+  string id = 1;
+  string name = 2;
+  uint32 timeout_ms = 3;
+}
+
+message SetNetworkNameResponse {
+  NetworkDefinition network = 1;
+  string error = 2;
+  string leader_hint = 3;
+}
+
 message CreateJailRequest {
   JailDefinition jail = 1;
   uint32 timeout_ms = 2;
@@ -1806,4 +1855,21 @@ message CleanupOrphanedHASTResourceRequest {
 
 message CleanupOrphanedHASTResourceResponse {
   string error = 1;
+}
+
+message GetNetworkTeardownStatusRequest {
+  string network_id = 1;
+}
+
+message GetNetworkTeardownStatusResponse {
+  // present is true if this node still has a local artifact-cleanup
+  // record for network_id - not yet safe to recreate this network id
+  // on this node. false means either teardown converged, or this node
+  // never had anything to tear down for it in the first place.
+  bool present = 1;
+  string bridge = 2;
+  bool own_bridge = 3;
+  bool own_vlan = 4;
+  bool outbound_nat = 5;
+  string error = 6;
 }

@@ -137,6 +137,14 @@ type pageData struct {
 	// Networks page, rendered the same way ISOFormError is for Images.
 	NetworkFormError string
 
+	// NetworkTeardownID/NetworkTeardownStatuses/NetworkTeardownError back
+	// the guided network-replacement workflow's teardown-status check
+	// (ADR-0071/ADR-0081) - empty ID means no check has been requested
+	// on this page load.
+	NetworkTeardownID       string
+	NetworkTeardownStatuses []networkTeardownStatusView
+	NetworkTeardownError    string
+
 	// APIKeys lists existing API keys (metadata only) for the API Keys
 	// page's table (ADR-0023).
 	APIKeys []apiKeyView
@@ -326,6 +334,12 @@ type pageData struct {
 	// submission's own error, shown alongside the VM detail page's
 	// existing display rather than replacing it - see ADR-0063.
 	VMCloudflareFormError string
+
+	// VMFirewallFormError carries a failed firewall-rules edit form's
+	// own error, kept separate from VMCloudflareFormError so it renders
+	// next to the Firewall panel an operator is actually looking at,
+	// not the unrelated Public exposure panel.
+	VMFirewallFormError string
 
 	// CloudflareConfigured mirrors HostStatsResponse.cloudflare_configured
 	// for this node - shown on the Machine Configuration page's own
@@ -672,6 +686,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /vms/{id}", s.handleVMPage)
 	s.mux.HandleFunc("POST /vms/{id}/lifecycle", s.requireRole(manager.RoleOperator, s.handleSetVMDesiredState))
 	s.mux.HandleFunc("POST /vms/{id}/cloudflare-exposure", s.requireRole(manager.RoleOperator, s.handleSetVMCloudflareExposure))
+	s.mux.HandleFunc("POST /vms/{id}/firewall-rules", s.requireRole(manager.RoleOperator, s.handleSetVMFirewallRules))
 	s.mux.HandleFunc("GET /images", s.handleImagesPage)
 	s.mux.HandleFunc("GET /isos", s.handleListISOs)
 	s.mux.HandleFunc("GET /vms/{id}/console", s.handleConsolePage)
@@ -703,6 +718,7 @@ func (s *Server) routes() {
 	// as upload/delete, matching write blast radius.
 	s.mux.HandleFunc("POST /networks", s.requireRole(manager.RoleOperator, s.handleCreateNetwork))
 	s.mux.HandleFunc("DELETE /networks/{id}", s.requireRole(manager.RoleOperator, s.handleDeleteNetwork))
+	s.mux.HandleFunc("POST /networks/{id}/name", s.requireRole(manager.RoleOperator, s.handleSetNetworkName))
 	s.mux.HandleFunc("GET /jails/new", s.requireRole(manager.RoleOperator, s.handleNewJailPage))
 	s.mux.HandleFunc("POST /jails", s.requireRole(manager.RoleOperator, s.handleCreateJail))
 	s.mux.HandleFunc("DELETE /jails/{id}", s.requireRole(manager.RoleOperator, s.handleDeleteJail))
@@ -900,7 +916,7 @@ func (s *Server) handleVMsPage(w http.ResponseWriter, r *http.Request) {
 // uses the existing GetVM read path, so the page has the same leader-forwarded
 // consistency semantics as the list without introducing another API surface.
 func (s *Server) handleVMPage(w http.ResponseWriter, r *http.Request) {
-	s.renderVMPage(w, r, r.PathValue("id"), "")
+	s.renderVMPage(w, r, r.PathValue("id"), "", "")
 }
 
 // handleSetVMCloudflareExposure sets or clears one VM's public
@@ -914,7 +930,7 @@ func (s *Server) handleVMPage(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleSetVMCloudflareExposure(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	if err := r.ParseForm(); err != nil {
-		s.renderVMPage(w, r, id, "invalid form: "+err.Error())
+		s.renderVMPage(w, r, id, "invalid form: "+err.Error(), "")
 		return
 	}
 	hostname := strings.TrimSpace(r.FormValue("cloudflare_hostname"))
@@ -923,20 +939,44 @@ func (s *Server) handleSetVMCloudflareExposure(w http.ResponseWriter, r *http.Re
 		var err error
 		port, err = strconv.ParseUint(r.FormValue("cloudflare_port"), 10, 32)
 		if err != nil {
-			s.renderVMPage(w, r, id, "invalid port: "+err.Error())
+			s.renderVMPage(w, r, id, "invalid port: "+err.Error(), "")
 			return
 		}
 	}
 	resp, err := s.client.SetVMCloudflareExposure(r.Context(), &rpcpb.SetVMCloudflareExposureRequest{Id: id, Hostname: hostname, Port: uint32(port)})
 	if err != nil {
-		s.renderVMPage(w, r, id, err.Error())
+		s.renderVMPage(w, r, id, err.Error(), "")
 		return
 	}
 	if resp.GetError() != "" {
-		s.renderVMPage(w, r, id, resp.GetError())
+		s.renderVMPage(w, r, id, resp.GetError(), "")
 		return
 	}
-	s.renderVMPage(w, r, id, "")
+	s.renderVMPage(w, r, id, "", "")
+}
+
+// handleSetVMFirewallRules replaces a VM's firewall rules wholesale -
+// previously only settable at create time. Reuses parseFirewallRuleRows,
+// the same repeating-row parser the create-VM form already uses, since
+// the edit form on vm.html renders identically-named fields. An empty
+// submission (every row removed) clears all rules, matching "no rules
+// means allow by default" - the same semantics CreateVM already has.
+func (s *Server) handleSetVMFirewallRules(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if err := r.ParseForm(); err != nil {
+		s.renderVMPage(w, r, id, "", "invalid form: "+err.Error())
+		return
+	}
+	resp, err := s.client.SetVMFirewallRules(r.Context(), &rpcpb.SetVMFirewallRulesRequest{Id: id, FirewallRules: parseFirewallRuleRows(r)})
+	if err != nil {
+		s.renderVMPage(w, r, id, "", err.Error())
+		return
+	}
+	if resp.GetError() != "" {
+		s.renderVMPage(w, r, id, "", resp.GetError())
+		return
+	}
+	s.renderVMPage(w, r, id, "", "")
 }
 
 func vmLifecycleState(action string) (rpcpb.VMState, string) {
@@ -958,31 +998,31 @@ func vmLifecycleState(action string) (rpcpb.VMState, string) {
 func (s *Server) handleSetVMDesiredState(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	if err := r.ParseForm(); err != nil {
-		s.renderVMPage(w, r, id, "invalid form: "+err.Error())
+		s.renderVMPage(w, r, id, "invalid form: "+err.Error(), "")
 		return
 	}
 	state, formErr := vmLifecycleState(r.FormValue("action"))
 	if formErr != "" {
-		s.renderVMPage(w, r, id, formErr)
+		s.renderVMPage(w, r, id, formErr, "")
 		return
 	}
 	resp, err := s.client.SetVMDesiredState(r.Context(), &rpcpb.SetVMDesiredStateRequest{Id: id, DesiredState: state})
 	if err != nil {
-		s.renderVMPage(w, r, id, err.Error())
+		s.renderVMPage(w, r, id, err.Error(), "")
 		return
 	}
 	if resp.GetError() != "" {
-		s.renderVMPage(w, r, id, resp.GetError())
+		s.renderVMPage(w, r, id, resp.GetError(), "")
 		return
 	}
-	s.renderVMPage(w, r, id, "")
+	s.renderVMPage(w, r, id, "", "")
 }
 
 // renderVMPage re-fetches and renders the VM detail page, with an
 // optional form-specific error - shared by handleSetVMCloudflareExposure
 // so a failed form submission still shows the rest of the page's own
 // current state, not just a bare error.
-func (s *Server) renderVMPage(w http.ResponseWriter, r *http.Request, id, formErr string) {
+func (s *Server) renderVMPage(w http.ResponseWriter, r *http.Request, id, cloudflareErr, firewallErr string) {
 	resp, err := s.client.GetVM(r.Context(), &rpcpb.GetVMRequest{Id: id})
 	if err != nil {
 		s.render(w, "vm_page", s.withAuthFields(r, pageData{Error: err.Error(), ActivePage: "vms"}))
@@ -1018,7 +1058,8 @@ func (s *Server) renderVMPage(w http.ResponseWriter, r *http.Request, id, formEr
 	}
 
 	s.render(w, "vm_page", s.withAuthFields(r, pageData{
-		VM: vm, VMCloudflareFormError: formErr, CloudflareConfigured: cloudflareConfigured, ActivePage: "vms",
+		VM: vm, VMCloudflareFormError: cloudflareErr, VMFirewallFormError: firewallErr,
+		CloudflareConfigured: cloudflareConfigured, ActivePage: "vms",
 	}))
 }
 
@@ -1090,6 +1131,59 @@ func (s *Server) currentNetworks(r *http.Request) ([]networkView, string) {
 		}
 	}
 	return networks, ""
+}
+
+// networkTeardownStatusView is one Comb's own answer to "do you still
+// have local artifacts for this deleted network id" (ADR-0071/ADR-0081).
+// Clear is true only when that Comb was reachable and reported no
+// leftover artifact - an unreachable/erroring Comb is never treated as
+// evidence teardown succeeded there.
+type networkTeardownStatusView struct {
+	NodeID                          string
+	Clear                           bool
+	Bridge                          string
+	OwnBridge, OwnVLAN, OutboundNAT bool
+	Error                           string
+}
+
+// currentNetworkTeardownStatus queries every known node's own local
+// GetNetworkTeardownStatus (never routed through raft - this is
+// per-node physical state) for networkID, the same per-node
+// local-vs-peer branching currentNetworks already uses for bridge
+// status above.
+func (s *Server) currentNetworkTeardownStatus(r *http.Request, networkID string) ([]networkTeardownStatusView, string) {
+	statusResp, err := s.client.Status(r.Context(), &rpcpb.StatusRequest{})
+	if err != nil {
+		return nil, err.Error()
+	}
+	if len(statusResp.GetKnownNodeIds()) == 0 {
+		return nil, "no known Combs to check"
+	}
+	var out []networkTeardownStatusView
+	for _, nodeID := range statusResp.GetKnownNodeIds() {
+		var resp *rpcpb.GetNetworkTeardownStatusResponse
+		var callErr error
+		if s.peers == nil || nodeID == statusResp.GetManagerNodeId() {
+			resp, callErr = s.client.GetNetworkTeardownStatus(r.Context(), &rpcpb.GetNetworkTeardownStatusRequest{NetworkId: networkID})
+		} else {
+			resp, callErr = s.peers.GetNetworkTeardownStatus(r.Context(), s.peerAddr(nodeID), networkID)
+		}
+		view := networkTeardownStatusView{NodeID: nodeID}
+		switch {
+		case callErr != nil:
+			view.Error = callErr.Error()
+		case resp.GetError() != "":
+			view.Error = resp.GetError()
+		default:
+			view.Clear = !resp.GetPresent()
+			view.Bridge = resp.GetBridge()
+			view.OwnBridge = resp.GetOwnBridge()
+			view.OwnVLAN = resp.GetOwnVlan()
+			view.OutboundNAT = resp.GetOutboundNat()
+		}
+		out = append(out, view)
+	}
+	return out, ""
 }
 
 // currentISOs fetches the current list of stored installer images,
@@ -1453,9 +1547,22 @@ func (s *Server) handleDeleteISO(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleNetworksPage serves the Networks list/create page ("/networks").
+// A "teardown_network_id" query parameter (the guided
+// network-replacement workflow, ADR-0071/ADR-0081) triggers a per-Comb
+// teardown-status check for that id - a plain GET, since it's entirely
+// read-only, so the check survives a page refresh and is linkable.
 func (s *Server) handleNetworksPage(w http.ResponseWriter, r *http.Request) {
 	networks, errMsg := s.currentNetworks(r)
-	s.render(w, "networks_page", s.withAuthFields(r, pageData{Networks: networks, NetworkFormError: errMsg, ActivePage: "networks"}))
+	teardownID := strings.TrimSpace(r.URL.Query().Get("teardown_network_id"))
+	var teardownStatuses []networkTeardownStatusView
+	var teardownErr string
+	if teardownID != "" {
+		teardownStatuses, teardownErr = s.currentNetworkTeardownStatus(r, teardownID)
+	}
+	s.render(w, "networks_page", s.withAuthFields(r, pageData{
+		Networks: networks, NetworkFormError: errMsg, ActivePage: "networks",
+		NetworkTeardownID: teardownID, NetworkTeardownStatuses: teardownStatuses, NetworkTeardownError: teardownErr,
+	}))
 }
 
 // handleCreateNetwork follows the same combined-panel pattern as
@@ -1491,6 +1598,27 @@ func (s *Server) handleCreateNetwork(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleDeleteNetwork(w http.ResponseWriter, r *http.Request) {
 	resp, err := s.client.DeleteNetwork(r.Context(), &rpcpb.DeleteNetworkRequest{Id: r.PathValue("id")})
+	if err != nil {
+		s.renderNetworkPanelResult(w, r, err.Error())
+		return
+	}
+	if resp.GetError() != "" {
+		s.renderNetworkPanelResult(w, r, resp.GetError())
+		return
+	}
+	s.renderNetworkPanelResult(w, r, "")
+}
+
+// handleSetNetworkName renames a network - the only field editable on
+// an existing network definition (ADR-0071/ADR-0080); everything else
+// with a physical realization (subnet/VLAN/bridge/gateway) still
+// requires the delete-and-recreate workflow.
+func (s *Server) handleSetNetworkName(w http.ResponseWriter, r *http.Request) {
+	if err := r.ParseForm(); err != nil {
+		s.renderNetworkPanelResult(w, r, "invalid form: "+err.Error())
+		return
+	}
+	resp, err := s.client.SetNetworkName(r.Context(), &rpcpb.SetNetworkNameRequest{Id: r.PathValue("id"), Name: r.FormValue("name")})
 	if err != nil {
 		s.renderNetworkPanelResult(w, r, err.Error())
 		return

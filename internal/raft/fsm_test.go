@@ -235,6 +235,79 @@ func TestFSM_Apply_SetVMFirewallPaused_MissingIDIsError(t *testing.T) {
 	}
 }
 
+func TestFSM_Apply_SetVMFirewallRules_ReplacesRulesTouchesNothingElse(t *testing.T) {
+	fsm := NewFSM()
+	fsm.Apply(&raft.Log{Index: 1, Data: mustMarshalCommand(t, &internalpb.Command{
+		Op: &internalpb.Command_CreateVm{CreateVm: &internalpb.CreateVM{
+			Vm: &internalpb.VMDefinition{
+				Id: "vm-1", NodeId: "node-a",
+				FirewallRules: []*internalpb.FirewallRule{{Direction: "in", Action: "block", Protocol: "tcp", PortRange: "22"}},
+			},
+		}},
+	})})
+
+	cmd := &internalpb.Command{
+		Op: &internalpb.Command_SetVmFirewallRules{SetVmFirewallRules: &internalpb.SetVMFirewallRules{
+			Id: "vm-1",
+			FirewallRules: []*internalpb.FirewallRule{
+				{Direction: "out", Action: "pass", Protocol: "udp", PortRange: "53", Priority: 5},
+			},
+		}},
+	}
+	result := fsm.Apply(&raft.Log{Index: 2, Data: mustMarshalCommand(t, cmd)})
+
+	applyResult := result.(*FSMApplyResult)
+	if applyResult.Error != "" {
+		t.Fatalf("Error = %q, want empty", applyResult.Error)
+	}
+	vm, _ := fsm.VM("vm-1")
+	if vm.GetNodeId() != "node-a" {
+		t.Errorf("NodeId = %q, want node-a (must survive untouched)", vm.GetNodeId())
+	}
+	rules := vm.GetFirewallRules()
+	if len(rules) != 1 || rules[0].GetDirection() != "out" || rules[0].GetPortRange() != "53" || rules[0].GetPriority() != 5 {
+		t.Errorf("FirewallRules = %v, want just the new rule, old one replaced entirely", rules)
+	}
+}
+
+func TestFSM_Apply_SetVMFirewallRules_EmptyListClearsRules(t *testing.T) {
+	fsm := NewFSM()
+	fsm.Apply(&raft.Log{Index: 1, Data: mustMarshalCommand(t, &internalpb.Command{
+		Op: &internalpb.Command_CreateVm{CreateVm: &internalpb.CreateVM{
+			Vm: &internalpb.VMDefinition{
+				Id: "vm-1", NodeId: "node-a",
+				FirewallRules: []*internalpb.FirewallRule{{Direction: "in", Action: "block"}},
+			},
+		}},
+	})})
+
+	cmd := &internalpb.Command{
+		Op: &internalpb.Command_SetVmFirewallRules{SetVmFirewallRules: &internalpb.SetVMFirewallRules{Id: "vm-1"}},
+	}
+	result := fsm.Apply(&raft.Log{Index: 2, Data: mustMarshalCommand(t, cmd)})
+
+	if result.(*FSMApplyResult).Error != "" {
+		t.Fatalf("Error = %q, want empty", result.(*FSMApplyResult).Error)
+	}
+	vm, _ := fsm.VM("vm-1")
+	if len(vm.GetFirewallRules()) != 0 {
+		t.Errorf("FirewallRules = %v, want empty after clearing", vm.GetFirewallRules())
+	}
+}
+
+func TestFSM_Apply_SetVMFirewallRules_MissingIDIsError(t *testing.T) {
+	fsm := NewFSM()
+
+	cmd := &internalpb.Command{
+		Op: &internalpb.Command_SetVmFirewallRules{SetVmFirewallRules: &internalpb.SetVMFirewallRules{Id: "vm-1"}},
+	}
+	result := fsm.Apply(&raft.Log{Index: 1, Data: mustMarshalCommand(t, cmd)})
+
+	if result.(*FSMApplyResult).Error == "" {
+		t.Fatalf("Error = empty, want a missing-id rejection")
+	}
+}
+
 // TestFSM_Apply_SetVMCloudflareExposure_InvalidHostnameRejected is the
 // regression test for a 2026-09-06 security-audit finding: hostname was
 // entirely unvalidated, but is interpolated verbatim into cloudflared's
@@ -497,6 +570,40 @@ func TestFSM_Apply_DeleteNetwork(t *testing.T) {
 	}
 	if _, ok := fsm.Network("net-1"); ok {
 		t.Errorf("Network(net-1) still present after DeleteNetwork")
+	}
+}
+
+func TestFSM_Apply_SetNetworkNameRenamesTouchesNothingElse(t *testing.T) {
+	fsm := NewFSM()
+	fsm.Apply(&raft.Log{Index: 1, Data: mustMarshalCommand(t, createNetworkCmd("net-1", "prod", "10.60.0.0/24"))})
+
+	cmd := &internalpb.Command{Op: &internalpb.Command_SetNetworkName{SetNetworkName: &internalpb.SetNetworkName{Id: "net-1", Name: "production"}}}
+	result := fsm.Apply(&raft.Log{Index: 2, Data: mustMarshalCommand(t, cmd)})
+
+	applyResult := result.(*FSMApplyResult)
+	if applyResult.Error != "" {
+		t.Fatalf("Error = %q, want empty", applyResult.Error)
+	}
+	network, ok := fsm.Network("net-1")
+	if !ok {
+		t.Fatal("Network(net-1) missing after SetNetworkName")
+	}
+	if network.GetName() != "production" {
+		t.Errorf("Name = %q, want production", network.GetName())
+	}
+	if network.GetSubnet() != "10.60.0.0/24" {
+		t.Errorf("Subnet = %q, want the original subnet to survive untouched", network.GetSubnet())
+	}
+}
+
+func TestFSM_Apply_SetNetworkNameMissingIDIsError(t *testing.T) {
+	fsm := NewFSM()
+
+	cmd := &internalpb.Command{Op: &internalpb.Command_SetNetworkName{SetNetworkName: &internalpb.SetNetworkName{Id: "missing", Name: "x"}}}
+	result := fsm.Apply(&raft.Log{Index: 1, Data: mustMarshalCommand(t, cmd)})
+
+	if result.(*FSMApplyResult).Error == "" {
+		t.Fatalf("Error = empty, want a not-found rejection")
 	}
 }
 

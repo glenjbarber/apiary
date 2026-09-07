@@ -54,6 +54,10 @@ func (f *fakeISOPeerClient) GetNodeConfig(context.Context, string) (*rpcpb.GetNo
 	return &rpcpb.GetNodeConfigResponse{}, nil
 }
 
+func (f *fakeISOPeerClient) GetNetworkTeardownStatus(context.Context, string, string) (*rpcpb.GetNetworkTeardownStatusResponse, error) {
+	return &rpcpb.GetNetworkTeardownStatusResponse{}, nil
+}
+
 func (f *fakeISOPeerClient) ListISOs(_ context.Context, addr string) (*rpcpb.ListISOsResponse, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()

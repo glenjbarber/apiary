@@ -20,6 +20,42 @@
     {{template "network_panel" .}}
   </div>
   </div>
+  {{if .CanOperate}}
+  <div class="panel">
+    <h3>Check teardown status before recreating</h3>
+    <p class="muted">A deleted network's id can only be safely reused once every Comb has torn down its own leftover bridge/VLAN/NAT artifacts for it (ADR-0071). Check here before recreating a network with the same id you just deleted.</p>
+    <form method="get" action="/networks" class="inline-form">
+      <label>Network ID <input type="text" name="teardown_network_id" value="{{.NetworkTeardownID}}" required title="The id of a network you deleted and want to recreate - checks whether every Comb has finished tearing it down."></label>
+      <button type="submit">Check status</button>
+    </form>
+    {{if .NetworkTeardownID}}
+    {{if .NetworkTeardownError}}<div class="banner-error">{{.NetworkTeardownError}}</div>{{end}}
+    {{if .NetworkTeardownStatuses}}
+    <table class="compact-table">
+      <thead><tr><th>Comb</th><th>Status</th><th>Detail</th></tr></thead>
+      <tbody>
+        {{range .NetworkTeardownStatuses}}
+        <tr>
+          <td>{{.NodeID}}</td>
+          <td>
+            {{if .Error}}<span class="badge unknown" title="An unreachable or erroring Comb is never treated as evidence teardown succeeded.">unknown</span>
+            {{else if .Clear}}<span class="badge ok">clear</span>
+            {{else}}<span class="badge soon">still present</span>{{end}}
+          </td>
+          <td>
+            {{if .Error}}{{.Error}}
+            {{else if .Clear}}No leftover artifacts recorded for this network id.
+            {{else}}bridge={{.Bridge}} own_bridge={{.OwnBridge}} own_vlan={{.OwnVLAN}} outbound_nat={{.OutboundNAT}}{{end}}
+          </td>
+        </tr>
+        {{end}}
+      </tbody>
+    </table>
+    <p class="muted">Safe to recreate only once every Comb above shows "clear" - "unknown" blocks the same as "still present," since an unreachable Comb's own state can't be confirmed.</p>
+    {{end}}
+    {{end}}
+  </div>
+  {{end}}
   </main>
   {{template "footer" .}}
 </body>
@@ -42,7 +78,14 @@
 {{range .Networks}}
 <tr>
   <td>{{.ID}}</td>
-  <td>{{.Name}}</td>
+  <td>
+    {{if $.CanOperate}}
+    <form class="inline-form" hx-post="/networks/{{.ID}}/name" hx-target="#network-panel" hx-swap="innerHTML">
+      <input type="text" name="name" value="{{.Name}}" title="Display label only - has no effect on networking itself. The only field a network keeps editable after creation; see ADR-0080 for why the rest requires delete-and-recreate.">
+      <button type="submit">Save</button>
+    </form>
+    {{else}}{{.Name}}{{end}}
+  </td>
   <td>{{if .VLANID}}{{.VLANID}}{{else}}(untagged){{end}}</td>
   <td>{{.Subnet}}</td>
   <td>{{if .BridgeName}}{{.BridgeName}}{{else}}<em>(auto-generated)</em>{{end}}</td>

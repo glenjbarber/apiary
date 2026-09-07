@@ -327,6 +327,15 @@ func (p *PeerReporter) GetLocalNetworkBridgeStatus(ctx context.Context, addr, ne
 	return client.GetLocalNetworkBridgeStatus(ctx, &rpcpb.GetLocalNetworkBridgeStatusRequest{NetworkId: networkID})
 }
 
+func (p *PeerReporter) GetNetworkTeardownStatus(ctx context.Context, addr, networkID string) (*rpcpb.GetNetworkTeardownStatusResponse, error) {
+	conn, client, err := p.dial(addr)
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close()
+	return client.GetNetworkTeardownStatus(ctx, &rpcpb.GetNetworkTeardownStatusRequest{NetworkId: networkID})
+}
+
 // GetVMSerialLog forwards to a specific Hive's local serial-log reader.
 // Serial logs are captured alongside bhyve, rather than in replicated
 // state, so this is intentionally a direct owner-Hive call, not a
@@ -509,6 +518,15 @@ func (p *PeerReporter) DeleteNetwork(ctx context.Context, addr string, req *rpcp
 	return client.DeleteNetwork(ctx, req)
 }
 
+func (p *PeerReporter) SetNetworkName(ctx context.Context, addr string, req *rpcpb.SetNetworkNameRequest) (*rpcpb.SetNetworkNameResponse, error) {
+	conn, client, err := p.dial(addr)
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close()
+	return client.SetNetworkName(ctx, req)
+}
+
 // CreateAPIKey/RevokeAPIKey forward the caller's original request as-is
 // - notably, a forwarded CreateAPIKey means the LEADER generates and
 // hashes its own fresh raw key; this node's own locally-generated
@@ -580,6 +598,15 @@ func (p *PeerReporter) SetVMFirewallPaused(ctx context.Context, addr string, req
 	}
 	defer conn.Close()
 	return client.SetVMFirewallPaused(ctx, req)
+}
+
+func (p *PeerReporter) SetVMFirewallRules(ctx context.Context, addr string, req *rpcpb.SetVMFirewallRulesRequest) (*rpcpb.SetVMFirewallRulesResponse, error) {
+	conn, client, err := p.dial(addr)
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close()
+	return client.SetVMFirewallRules(ctx, req)
 }
 
 func (p *PeerReporter) SetVMCloudflareExposure(ctx context.Context, addr string, req *rpcpb.SetVMCloudflareExposureRequest) (*rpcpb.SetVMCloudflareExposureResponse, error) {

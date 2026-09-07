@@ -60,6 +60,13 @@ type peerHostStatsClient interface {
 	GetVMConsole(ctx context.Context, addr, id string) (*rpcpb.GetVMConsoleResponse, error)
 	OpenVMConsole(ctx context.Context, addr, id string) (io.ReadWriteCloser, error)
 	GetNodeConfig(ctx context.Context, addr string) (*rpcpb.GetNodeConfigResponse, error)
+
+	// GetNetworkTeardownStatus lets the guided network-replacement
+	// workflow (ADR-0071/ADR-0081) learn a specific node's own local
+	// artifact-cleanup status for a deleted network id - the same
+	// "always answers locally, dial addr directly" shape as
+	// GetLocalNetworkBridgeStatus above.
+	GetNetworkTeardownStatus(ctx context.Context, addr, networkID string) (*rpcpb.GetNetworkTeardownStatusResponse, error)
 }
 
 // clusterNodeView is the template-facing shape for one row on the

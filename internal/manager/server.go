@@ -87,6 +87,7 @@ type PeerForwarder interface {
 	DeleteJail(ctx context.Context, addr string, req *rpcpb.DeleteJailRequest) (*rpcpb.DeleteJailResponse, error)
 	CreateNetwork(ctx context.Context, addr string, req *rpcpb.CreateNetworkRequest) (*rpcpb.CreateNetworkResponse, error)
 	DeleteNetwork(ctx context.Context, addr string, req *rpcpb.DeleteNetworkRequest) (*rpcpb.DeleteNetworkResponse, error)
+	SetNetworkName(ctx context.Context, addr string, req *rpcpb.SetNetworkNameRequest) (*rpcpb.SetNetworkNameResponse, error)
 	CreateAPIKey(ctx context.Context, addr string, req *rpcpb.CreateAPIKeyRequest) (*rpcpb.CreateAPIKeyResponse, error)
 	RevokeAPIKey(ctx context.Context, addr string, req *rpcpb.RevokeAPIKeyRequest) (*rpcpb.RevokeAPIKeyResponse, error)
 	ListAPIKeys(ctx context.Context, addr string) (*rpcpb.ListAPIKeysResponse, error)
@@ -94,6 +95,7 @@ type PeerForwarder interface {
 	ForcePurgeVM(ctx context.Context, addr string, req *rpcpb.ForcePurgeVMRequest) (*rpcpb.ForcePurgeVMResponse, error)
 	MigrateVM(ctx context.Context, addr string, req *rpcpb.MigrateVMRequest) (*rpcpb.MigrateVMResponse, error)
 	SetVMFirewallPaused(ctx context.Context, addr string, req *rpcpb.SetVMFirewallPausedRequest) (*rpcpb.SetVMFirewallPausedResponse, error)
+	SetVMFirewallRules(ctx context.Context, addr string, req *rpcpb.SetVMFirewallRulesRequest) (*rpcpb.SetVMFirewallRulesResponse, error)
 	SetVMCloudflareExposure(ctx context.Context, addr string, req *rpcpb.SetVMCloudflareExposureRequest) (*rpcpb.SetVMCloudflareExposureResponse, error)
 	SetVMDesiredState(ctx context.Context, addr string, req *rpcpb.SetVMDesiredStateRequest) (*rpcpb.SetVMDesiredStateResponse, error)
 	ForcePurgeJail(ctx context.Context, addr string, req *rpcpb.ForcePurgeJailRequest) (*rpcpb.ForcePurgeJailResponse, error)
@@ -140,6 +142,10 @@ type reconcilerStats interface {
 	// (ADR-0063) - reusing this already-nil-able dependency rather than
 	// adding a new NewServer parameter just for one more boolean signal.
 	CloudflareConfigured() bool
+
+	// NetworkArtifactStatus backs GetNetworkTeardownStatus (ADR-0081) -
+	// this node's own local artifact-cleanup record for one network id.
+	NetworkArtifactStatus(networkID string) (present bool, bridge string, ownBridge, ownVLAN, outboundNAT bool, err error)
 }
 
 // assumptionStore is the subset of *assumptions.Manager the server
@@ -676,6 +682,43 @@ func (s *Server) DeleteNetwork(ctx context.Context, req *rpcpb.DeleteNetworkRequ
 	return &rpcpb.DeleteNetworkResponse{Network: fromInternalNetwork(network), Error: appErr, LeaderHint: leaderHint}, nil
 }
 
+// SetNetworkName implements rpcpb.ManagerServiceServer - renames a
+// network, the only field ADR-0071/ADR-0080 allow changing on an
+// existing definition without the full replace-after-teardown workflow.
+func (s *Server) SetNetworkName(ctx context.Context, req *rpcpb.SetNetworkNameRequest) (*rpcpb.SetNetworkNameResponse, error) {
+	cmd := &internalpb.Command{
+		Op: &internalpb.Command_SetNetworkName{SetNetworkName: &internalpb.SetNetworkName{Id: req.GetId(), Name: req.GetName()}},
+	}
+	network, appErr, leaderHint := s.applyNetworkCommand(ctx, cmd, req.GetTimeoutMs())
+	if leaderHint != "" && s.peers != nil {
+		if fwd, ferr := s.peers.SetNetworkName(ctx, s.peerManagerdAddr(leaderHint), req); ferr == nil {
+			return fwd, nil
+		}
+	}
+	return &rpcpb.SetNetworkNameResponse{Network: fromInternalNetwork(network), Error: appErr, LeaderHint: leaderHint}, nil
+}
+
+// GetNetworkTeardownStatus implements rpcpb.ManagerServiceServer - a
+// physical, per-node, local-only report (never routed through raft),
+// mirroring ListOrphanedHASTResources's own posture exactly. Backs the
+// guided network-replacement workflow (ADR-0071/ADR-0081): the caller
+// is expected to call this once per known node and treat any error
+// (including "no Reconciler configured") the same as present=true -
+// unknown must block a recreate, never be mistaken for evidence that
+// cleanup succeeded.
+func (s *Server) GetNetworkTeardownStatus(_ context.Context, req *rpcpb.GetNetworkTeardownStatusRequest) (*rpcpb.GetNetworkTeardownStatusResponse, error) {
+	if s.reconciler == nil {
+		return &rpcpb.GetNetworkTeardownStatusResponse{Error: "this node has no reconciler configured"}, nil
+	}
+	present, bridge, ownBridge, ownVLAN, outboundNAT, err := s.reconciler.NetworkArtifactStatus(req.GetNetworkId())
+	if err != nil {
+		return &rpcpb.GetNetworkTeardownStatusResponse{Error: err.Error()}, nil
+	}
+	return &rpcpb.GetNetworkTeardownStatusResponse{
+		Present: present, Bridge: bridge, OwnBridge: ownBridge, OwnVlan: ownVLAN, OutboundNat: outboundNAT,
+	}, nil
+}
+
 // ListNetworks implements rpcpb.ManagerServiceServer.
 func (s *Server) ListNetworks(ctx context.Context, _ *rpcpb.ListNetworksRequest) (*rpcpb.ListNetworksResponse, error) {
 	resp, err := s.raft.ListNetworks(ctx)
@@ -966,6 +1009,25 @@ func (s *Server) SetVMFirewallPaused(ctx context.Context, req *rpcpb.SetVMFirewa
 		}
 	}
 	return &rpcpb.SetVMFirewallPausedResponse{Vm: fromInternalVM(vm), Error: appErr, LeaderHint: leaderHint}, nil
+}
+
+// SetVMFirewallRules implements rpcpb.ManagerServiceServer - lets an
+// operator edit a VM's firewall rules after creation, previously only
+// settable via CreateVM. Same narrow, atomic-apply shape as
+// SetVMFirewallPaused above, for the identical reason (ADR-0049).
+func (s *Server) SetVMFirewallRules(ctx context.Context, req *rpcpb.SetVMFirewallRulesRequest) (*rpcpb.SetVMFirewallRulesResponse, error) {
+	cmd := &internalpb.Command{
+		Op: &internalpb.Command_SetVmFirewallRules{SetVmFirewallRules: &internalpb.SetVMFirewallRules{
+			Id: req.GetId(), FirewallRules: toInternalFirewallRules(req.GetFirewallRules()),
+		}},
+	}
+	vm, appErr, leaderHint := s.applyCommand(ctx, cmd, req.GetTimeoutMs())
+	if leaderHint != "" && s.peers != nil {
+		if fwd, ferr := s.peers.SetVMFirewallRules(ctx, s.peerManagerdAddr(leaderHint), req); ferr == nil {
+			return fwd, nil
+		}
+	}
+	return &rpcpb.SetVMFirewallRulesResponse{Vm: fromInternalVM(vm), Error: appErr, LeaderHint: leaderHint}, nil
 }
 
 // SetVMCloudflareExposure implements rpcpb.ManagerServiceServer - see

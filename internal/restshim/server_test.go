@@ -170,6 +170,10 @@ func (f *fakeClient) SetVMFirewallPaused(context.Context, *rpcpb.SetVMFirewallPa
 	return &rpcpb.SetVMFirewallPausedResponse{}, nil
 }
 
+func (f *fakeClient) SetVMFirewallRules(context.Context, *rpcpb.SetVMFirewallRulesRequest, ...grpc.CallOption) (*rpcpb.SetVMFirewallRulesResponse, error) {
+	return &rpcpb.SetVMFirewallRulesResponse{}, nil
+}
+
 func (f *fakeClient) SetVMCloudflareExposure(context.Context, *rpcpb.SetVMCloudflareExposureRequest, ...grpc.CallOption) (*rpcpb.SetVMCloudflareExposureResponse, error) {
 	return &rpcpb.SetVMCloudflareExposureResponse{}, nil
 }
@@ -184,6 +188,10 @@ func (f *fakeClient) SetJailDesiredState(context.Context, *rpcpb.SetJailDesiredS
 
 func (f *fakeClient) GetNodeConfig(context.Context, *rpcpb.GetNodeConfigRequest, ...grpc.CallOption) (*rpcpb.GetNodeConfigResponse, error) {
 	return &rpcpb.GetNodeConfigResponse{}, nil
+}
+
+func (f *fakeClient) GetNetworkTeardownStatus(context.Context, *rpcpb.GetNetworkTeardownStatusRequest, ...grpc.CallOption) (*rpcpb.GetNetworkTeardownStatusResponse, error) {
+	return &rpcpb.GetNetworkTeardownStatusResponse{}, nil
 }
 
 func (f *fakeClient) UpdateNodeConfig(context.Context, *rpcpb.UpdateNodeConfigRequest, ...grpc.CallOption) (*rpcpb.UpdateNodeConfigResponse, error) {
@@ -324,6 +332,10 @@ func (f *fakeClient) DeleteNetwork(_ context.Context, in *rpcpb.DeleteNetworkReq
 		return f.deleteNetworkResp, nil
 	}
 	return &rpcpb.DeleteNetworkResponse{}, nil
+}
+
+func (f *fakeClient) SetNetworkName(context.Context, *rpcpb.SetNetworkNameRequest, ...grpc.CallOption) (*rpcpb.SetNetworkNameResponse, error) {
+	return &rpcpb.SetNetworkNameResponse{}, nil
 }
 
 func (f *fakeClient) CreateJail(_ context.Context, in *rpcpb.CreateJailRequest, _ ...grpc.CallOption) (*rpcpb.CreateJailResponse, error) {

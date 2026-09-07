@@ -1087,6 +1087,58 @@ func TestIntegration_CreateListDeleteNetwork(t *testing.T) {
 	}
 }
 
+func TestIntegration_SetNetworkNameRenamesPreservesEverythingElse(t *testing.T) {
+	raftdSocket := newRaftdUDSSocket(t)
+	client := newManagerdRPCClient(t, raftdSocket)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if _, err := client.CreateNetwork(ctx, &rpcpb.CreateNetworkRequest{
+		Network: &rpcpb.NetworkDefinition{Id: "net-1", Name: "prod", VlanId: 100, Subnet: "10.60.0.0/24"},
+	}); err != nil {
+		t.Fatalf("CreateNetwork() error: %v", err)
+	}
+
+	resp, err := client.SetNetworkName(ctx, &rpcpb.SetNetworkNameRequest{Id: "net-1", Name: "production"})
+	if err != nil {
+		t.Fatalf("SetNetworkName() error: %v", err)
+	}
+	if resp.GetError() != "" {
+		t.Fatalf("SetNetworkName() returned error: %s", resp.GetError())
+	}
+	if resp.GetNetwork().GetName() != "production" {
+		t.Errorf("Name = %q, want production", resp.GetNetwork().GetName())
+	}
+	if resp.GetNetwork().GetSubnet() != "10.60.0.0/24" || resp.GetNetwork().GetVlanId() != 100 {
+		t.Errorf("network = %+v, want subnet/vlan preserved from the original definition", resp.GetNetwork())
+	}
+
+	listResp, err := client.ListNetworks(ctx, &rpcpb.ListNetworksRequest{})
+	if err != nil || len(listResp.GetNetworks()) != 1 {
+		t.Fatalf("ListNetworks() after rename = (%+v, %v)", listResp.GetNetworks(), err)
+	}
+	if listResp.GetNetworks()[0].GetName() != "production" {
+		t.Errorf("ListNetworks() after rename = %+v, want name=production", listResp.GetNetworks()[0])
+	}
+}
+
+func TestIntegration_SetNetworkNameMissingIDIsError(t *testing.T) {
+	raftdSocket := newRaftdUDSSocket(t)
+	client := newManagerdRPCClient(t, raftdSocket)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	resp, err := client.SetNetworkName(ctx, &rpcpb.SetNetworkNameRequest{Id: "does-not-exist", Name: "x"})
+	if err != nil {
+		t.Fatalf("SetNetworkName() error: %v", err)
+	}
+	if resp.GetError() == "" {
+		t.Fatalf("SetNetworkName() error = empty, want a missing-id rejection")
+	}
+}
+
 func TestIntegration_DeleteNetworkStillReferencedByVMIsRejected(t *testing.T) {
 	raftdSocket := newRaftdUDSSocket(t)
 	client := newManagerdRPCClient(t, raftdSocket)
@@ -1751,6 +1803,72 @@ func TestIntegration_SetVMFirewallPaused_MissingIDIsError(t *testing.T) {
 	}
 	if resp.GetError() == "" {
 		t.Fatalf("SetVMFirewallPaused() error = empty, want a missing-id rejection")
+	}
+}
+
+// TestIntegration_SetVMFirewallRules_ReplacesRulesPreservesEverythingElse
+// guards the same real round-trip-through-raft property as
+// TestIntegration_SetVMFirewallPaused_TouchesOnlyThatField, for the new
+// rule-editing command instead of the pause toggle.
+func TestIntegration_SetVMFirewallRules_ReplacesRulesPreservesEverythingElse(t *testing.T) {
+	raftdSocket := newRaftdUDSSocket(t)
+	client := newManagerdRPCClient(t, raftdSocket)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if _, err := client.CreateVM(ctx, &rpcpb.CreateVMRequest{
+		Vm: &rpcpb.VMDefinition{
+			Id: "vm-1", Name: "web-1", Vcpus: 2, NodeId: "node-a",
+			FirewallRules: []*rpcpb.FirewallRule{{Direction: "in", Action: "block", Protocol: "tcp", PortRange: "22"}},
+		},
+	}); err != nil {
+		t.Fatalf("CreateVM() error: %v", err)
+	}
+
+	resp, err := client.SetVMFirewallRules(ctx, &rpcpb.SetVMFirewallRulesRequest{
+		Id: "vm-1",
+		FirewallRules: []*rpcpb.FirewallRule{
+			{Direction: "out", Action: "pass", Protocol: "udp", PortRange: "53", Priority: 5},
+			{Direction: "in", Action: "pass", Protocol: "tcp", PortRange: "443"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("SetVMFirewallRules() error: %v", err)
+	}
+	if resp.GetError() != "" {
+		t.Fatalf("SetVMFirewallRules() returned error: %s", resp.GetError())
+	}
+	if resp.GetVm().GetName() != "web-1" || resp.GetVm().GetVcpus() != 2 {
+		t.Errorf("vm = %+v, want name/vcpus preserved from the original definition", resp.GetVm())
+	}
+	rules := resp.GetVm().GetFirewallRules()
+	if len(rules) != 2 || rules[0].GetPortRange() != "53" || rules[0].GetPriority() != 5 {
+		t.Errorf("FirewallRules = %v, want the new two rules, old one fully replaced", rules)
+	}
+
+	getResp, err := client.GetVM(ctx, &rpcpb.GetVMRequest{Id: "vm-1"})
+	if err != nil || !getResp.GetFound() {
+		t.Fatalf("GetVM() after edit = (found=%v, err=%v)", getResp.GetFound(), err)
+	}
+	if len(getResp.GetVm().GetFirewallRules()) != 2 {
+		t.Errorf("GetVM() after edit: FirewallRules = %v, want 2 rules persisted", getResp.GetVm().GetFirewallRules())
+	}
+}
+
+func TestIntegration_SetVMFirewallRules_MissingIDIsError(t *testing.T) {
+	raftdSocket := newRaftdUDSSocket(t)
+	client := newManagerdRPCClient(t, raftdSocket)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	resp, err := client.SetVMFirewallRules(ctx, &rpcpb.SetVMFirewallRulesRequest{Id: "does-not-exist"})
+	if err != nil {
+		t.Fatalf("SetVMFirewallRules() error: %v", err)
+	}
+	if resp.GetError() == "" {
+		t.Fatalf("SetVMFirewallRules() error = empty, want a missing-id rejection")
 	}
 }
 

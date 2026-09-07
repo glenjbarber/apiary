@@ -2115,6 +2115,52 @@ func TestReconciler_ReconcileNetworkArtifacts_RemovesDeletedOwnedNetwork(t *test
 	}
 }
 
+func TestReconciler_NetworkArtifactStatus_ReportsPresentArtifact(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "network-artifacts.json")
+	if err := saveNetworkArtifactState(path, networkArtifactState{Networks: map[string]networkArtifact{
+		"retired": {Bridge: "apnet-deadbeef", VLANID: 110, OwnBridge: true, OwnVLAN: true, OutboundNAT: true},
+	}}); err != nil {
+		t.Fatalf("saveNetworkArtifactState() error: %v", err)
+	}
+	r := &Reconciler{NetworkStatePath: path}
+
+	present, bridge, ownBridge, ownVLAN, outboundNAT, err := r.NetworkArtifactStatus("retired")
+	if err != nil {
+		t.Fatalf("NetworkArtifactStatus() error: %v", err)
+	}
+	if !present || bridge != "apnet-deadbeef" || !ownBridge || !ownVLAN || !outboundNAT {
+		t.Errorf("NetworkArtifactStatus() = (present=%v bridge=%q ownBridge=%v ownVLAN=%v outboundNAT=%v), want the saved artifact", present, bridge, ownBridge, ownVLAN, outboundNAT)
+	}
+}
+
+func TestReconciler_NetworkArtifactStatus_AbsentIsNotPresent(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "network-artifacts.json")
+	if err := saveNetworkArtifactState(path, networkArtifactState{Networks: map[string]networkArtifact{}}); err != nil {
+		t.Fatalf("saveNetworkArtifactState() error: %v", err)
+	}
+	r := &Reconciler{NetworkStatePath: path}
+
+	present, _, _, _, _, err := r.NetworkArtifactStatus("never-existed")
+	if err != nil {
+		t.Fatalf("NetworkArtifactStatus() error: %v", err)
+	}
+	if present {
+		t.Error("NetworkArtifactStatus() present = true, want false for an id with no recorded artifact")
+	}
+}
+
+func TestReconciler_NetworkArtifactStatus_UnconfiguredIsNotPresentNoError(t *testing.T) {
+	r := &Reconciler{}
+
+	present, _, _, _, _, err := r.NetworkArtifactStatus("net-1")
+	if err != nil {
+		t.Fatalf("NetworkArtifactStatus() error: %v, want nil when NetworkStatePath is unset", err)
+	}
+	if present {
+		t.Error("NetworkArtifactStatus() present = true, want false when unconfigured")
+	}
+}
+
 func TestReconciler_ReconcileNetworkArtifacts_PreservesDefinedUnusedNetwork(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "network-artifacts.json")
 	artifact := networkArtifact{Bridge: "apnet-livecafe", VLANID: 120, OwnBridge: true, OwnVLAN: true, OutboundNAT: true}

@@ -282,6 +282,13 @@ type fakeReconcilerStats struct {
 	successOK            bool
 	interval             time.Duration
 	cloudflareConfigured bool
+
+	artifactPresent     bool
+	artifactBridge      string
+	artifactOwnBridge   bool
+	artifactOwnVLAN     bool
+	artifactOutboundNAT bool
+	artifactErr         error
 }
 
 type fakeAssumptionRegister struct {
@@ -326,6 +333,9 @@ func (f *fakeReconcilerStats) LastReconcileAttempt() (time.Time, bool) { return 
 func (f *fakeReconcilerStats) LastReconcileSuccess() (time.Time, bool) { return f.success, f.successOK }
 func (f *fakeReconcilerStats) ReconcileInterval() time.Duration        { return f.interval }
 func (f *fakeReconcilerStats) CloudflareConfigured() bool              { return f.cloudflareConfigured }
+func (f *fakeReconcilerStats) NetworkArtifactStatus(string) (bool, string, bool, bool, bool, error) {
+	return f.artifactPresent, f.artifactBridge, f.artifactOwnBridge, f.artifactOwnVLAN, f.artifactOutboundNAT, f.artifactErr
+}
 
 func TestHostStats_ReconcileFieldsZeroWhenReconcilerNil(t *testing.T) {
 	s := NewServer(nil, "node-1", &fakeISOManager{}, nil, nil, nil, nil, "", nil, nil, nil, 0, nil)
@@ -901,6 +911,57 @@ func TestServer_ListOrphanedHASTResources_NotConfiguredIsError(t *testing.T) {
 	}
 	if resp.GetError() == "" {
 		t.Errorf("ListOrphanedHASTResources() error field = empty, want a not-configured message")
+	}
+}
+
+func TestServer_GetNetworkTeardownStatus_NotConfiguredIsError(t *testing.T) {
+	s := NewServer(nil, "node-1", nil, nil, nil, nil, nil, "", nil, nil, nil, 0, nil)
+
+	resp, err := s.GetNetworkTeardownStatus(context.Background(), &rpcpb.GetNetworkTeardownStatusRequest{NetworkId: "net-1"})
+	if err != nil {
+		t.Fatalf("GetNetworkTeardownStatus() error: %v", err)
+	}
+	if resp.GetError() == "" {
+		t.Errorf("GetNetworkTeardownStatus() error field = empty, want a not-configured message")
+	}
+}
+
+func TestServer_GetNetworkTeardownStatus_ReportsPresentArtifact(t *testing.T) {
+	reconciler := &fakeReconcilerStats{artifactPresent: true, artifactBridge: "bridge5", artifactOwnBridge: true, artifactOwnVLAN: true}
+	s := NewServer(nil, "node-1", nil, nil, nil, nil, nil, "", nil, nil, nil, 0, reconciler)
+
+	resp, err := s.GetNetworkTeardownStatus(context.Background(), &rpcpb.GetNetworkTeardownStatusRequest{NetworkId: "net-1"})
+	if err != nil || resp.GetError() != "" {
+		t.Fatalf("GetNetworkTeardownStatus() = (%+v, %v)", resp, err)
+	}
+	if !resp.GetPresent() || resp.GetBridge() != "bridge5" || !resp.GetOwnBridge() || !resp.GetOwnVlan() {
+		t.Errorf("GetNetworkTeardownStatus() = %+v, want present artifact details", resp)
+	}
+}
+
+func TestServer_GetNetworkTeardownStatus_ClearWhenAbsent(t *testing.T) {
+	reconciler := &fakeReconcilerStats{artifactPresent: false}
+	s := NewServer(nil, "node-1", nil, nil, nil, nil, nil, "", nil, nil, nil, 0, reconciler)
+
+	resp, err := s.GetNetworkTeardownStatus(context.Background(), &rpcpb.GetNetworkTeardownStatusRequest{NetworkId: "net-1"})
+	if err != nil || resp.GetError() != "" {
+		t.Fatalf("GetNetworkTeardownStatus() = (%+v, %v)", resp, err)
+	}
+	if resp.GetPresent() {
+		t.Errorf("GetNetworkTeardownStatus() Present = true, want false when no artifact recorded")
+	}
+}
+
+func TestServer_GetNetworkTeardownStatus_ReadErrorSurfacesAsError(t *testing.T) {
+	reconciler := &fakeReconcilerStats{artifactErr: errors.New("state file corrupt")}
+	s := NewServer(nil, "node-1", nil, nil, nil, nil, nil, "", nil, nil, nil, 0, reconciler)
+
+	resp, err := s.GetNetworkTeardownStatus(context.Background(), &rpcpb.GetNetworkTeardownStatusRequest{NetworkId: "net-1"})
+	if err != nil {
+		t.Fatalf("GetNetworkTeardownStatus() error: %v", err)
+	}
+	if resp.GetError() == "" {
+		t.Errorf("GetNetworkTeardownStatus() error field = empty, want the reconciler's own read error surfaced")
 	}
 }
 

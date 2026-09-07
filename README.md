@@ -665,9 +665,26 @@ each design decision, in order.
   "Update" section. Firewall rules now carry an explicit `priority`
   (a higher number is evaluated later and wins under `pf`'s own
   unchanged last-match-wins semantics) - see
-  [ADR-0075](docs/adr/0075-firewall-rule-priority.md). Still no
-  editing of an existing VM's rules after creation - only the
-  create-VM form sets them at all.
+  [ADR-0075](docs/adr/0075-firewall-rule-priority.md). An existing VM's
+  firewall rules can now be edited after creation too, via a dedicated
+  `SetVMFirewallRules` command (not the general `UpdateVM`, matching
+  every other frontend-initiated VM mutation) - see
+  [ADR-0079](docs/adr/0079-vm-firewall-rule-editing.md). A managed
+  network's Name can now be edited in place too, via a dedicated
+  `SetNetworkName` command - every other field (subnet, VLAN, bridge,
+  gateway) still requires the delete-and-recreate workflow ADR-0071
+  established, since `Name` alone has no physical realization for that
+  workflow's own hazard to apply to. See
+  [ADR-0080](docs/adr/0080-network-name-editing.md). The guided
+  network-replacement workflow that same ADR called for but never
+  built now exists too: a "Check teardown status before recreating"
+  panel on the Networks page queries every known Comb's own local
+  artifact-cleanup record for a deleted network id and shows clear/
+  still-present/unknown per Comb - an unreachable Comb is never
+  mistaken for evidence that cleanup succeeded there. The Create form
+  itself does not yet block automatically on incomplete teardown; the
+  operator checks this panel first. See
+  [ADR-0081](docs/adr/0081-guided-network-replacement-workflow.md).
 - Importing VMs from other hypervisors (e.g. Proxmox): no disk-format
   conversion, and Apiary is UEFI-only. Linux containers have no path at
   all — jails share the host FreeBSD kernel

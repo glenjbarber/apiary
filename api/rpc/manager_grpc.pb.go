@@ -34,6 +34,7 @@ const (
 	ManagerService_SetVMFirewallPaused_FullMethodName         = "/apiary.rpc.v1.ManagerService/SetVMFirewallPaused"
 	ManagerService_SetVMCloudflareExposure_FullMethodName     = "/apiary.rpc.v1.ManagerService/SetVMCloudflareExposure"
 	ManagerService_SetVMDesiredState_FullMethodName           = "/apiary.rpc.v1.ManagerService/SetVMDesiredState"
+	ManagerService_SetVMFirewallRules_FullMethodName          = "/apiary.rpc.v1.ManagerService/SetVMFirewallRules"
 	ManagerService_GetVM_FullMethodName                       = "/apiary.rpc.v1.ManagerService/GetVM"
 	ManagerService_ListVMs_FullMethodName                     = "/apiary.rpc.v1.ManagerService/ListVMs"
 	ManagerService_UploadISO_FullMethodName                   = "/apiary.rpc.v1.ManagerService/UploadISO"
@@ -51,6 +52,7 @@ const (
 	ManagerService_CreateNetwork_FullMethodName               = "/apiary.rpc.v1.ManagerService/CreateNetwork"
 	ManagerService_ListNetworks_FullMethodName                = "/apiary.rpc.v1.ManagerService/ListNetworks"
 	ManagerService_DeleteNetwork_FullMethodName               = "/apiary.rpc.v1.ManagerService/DeleteNetwork"
+	ManagerService_SetNetworkName_FullMethodName              = "/apiary.rpc.v1.ManagerService/SetNetworkName"
 	ManagerService_CreateAPIKey_FullMethodName                = "/apiary.rpc.v1.ManagerService/CreateAPIKey"
 	ManagerService_ListAPIKeys_FullMethodName                 = "/apiary.rpc.v1.ManagerService/ListAPIKeys"
 	ManagerService_RevokeAPIKey_FullMethodName                = "/apiary.rpc.v1.ManagerService/RevokeAPIKey"
@@ -74,6 +76,7 @@ const (
 	ManagerService_ListAssumptionResults_FullMethodName       = "/apiary.rpc.v1.ManagerService/ListAssumptionResults"
 	ManagerService_ListOrphanedHASTResources_FullMethodName   = "/apiary.rpc.v1.ManagerService/ListOrphanedHASTResources"
 	ManagerService_CleanupOrphanedHASTResource_FullMethodName = "/apiary.rpc.v1.ManagerService/CleanupOrphanedHASTResource"
+	ManagerService_GetNetworkTeardownStatus_FullMethodName    = "/apiary.rpc.v1.ManagerService/GetNetworkTeardownStatus"
 )
 
 // ManagerServiceClient is the client API for ManagerService service.
@@ -160,6 +163,11 @@ type ManagerServiceClient interface {
 	// replace the rest of the VM definition. DeleteVM remains the only
 	// operation that marks a VM for deletion.
 	SetVMDesiredState(ctx context.Context, in *SetVMDesiredStateRequest, opts ...grpc.CallOption) (*SetVMDesiredStateResponse, error)
+	// SetVMFirewallRules replaces a VM's firewall_rules wholesale, so
+	// rules can be edited after creation - previously only settable at
+	// CreateVM time. Deliberately not folded into UpdateVM, the exact
+	// same reasoning as SetVMFirewallPaused above.
+	SetVMFirewallRules(ctx context.Context, in *SetVMFirewallRulesRequest, opts ...grpc.CallOption) (*SetVMFirewallRulesResponse, error)
 	// GetVM and ListVMs only succeed against the current leader - see
 	// api/internalpb/raftd.proto's GetVM/ListVMs doc comments for why v1's
 	// read consistency model is deliberately as simple as its write model.
@@ -228,6 +236,11 @@ type ManagerServiceClient interface {
 	CreateNetwork(ctx context.Context, in *CreateNetworkRequest, opts ...grpc.CallOption) (*CreateNetworkResponse, error)
 	ListNetworks(ctx context.Context, in *ListNetworksRequest, opts ...grpc.CallOption) (*ListNetworksResponse, error)
 	DeleteNetwork(ctx context.Context, in *DeleteNetworkRequest, opts ...grpc.CallOption) (*DeleteNetworkResponse, error)
+	// SetNetworkName renames a managed network - the only field on an
+	// existing network definition editable in place (ADR-0071/ADR-0080
+	// reject a general UpdateNetwork for anything with a physical
+	// realization; Name has none).
+	SetNetworkName(ctx context.Context, in *SetNetworkNameRequest, opts ...grpc.CallOption) (*SetNetworkNameResponse, error)
 	// CreateAPIKey/ListAPIKeys/RevokeAPIKey manage credentials for this
 	// service's own RPC surface (ADR-0023). CreateAPIKey is the only
 	// place a raw key is ever returned - it cannot be retrieved again
@@ -347,6 +360,18 @@ type ManagerServiceClient interface {
 	// anything.
 	ListOrphanedHASTResources(ctx context.Context, in *ListOrphanedHASTResourcesRequest, opts ...grpc.CallOption) (*ListOrphanedHASTResourcesResponse, error)
 	CleanupOrphanedHASTResource(ctx context.Context, in *CleanupOrphanedHASTResourceRequest, opts ...grpc.CallOption) (*CleanupOrphanedHASTResourceResponse, error)
+	// GetNetworkTeardownStatus reports whether THIS node still has a
+	// local artifact-cleanup record for network_id - a physical,
+	// per-node, local-only report (never routed through raft), mirroring
+	// ListOrphanedHASTResources's own posture exactly. Backs the guided
+	// network-replacement workflow ADR-0071 called for and ADR-0081
+	// builds: the frontend calls this once per known node and shows an
+	// operator, per Hive, whether teardown of a deleted network has
+	// actually converged before letting them recreate it. present=true
+	// (or a non-empty error) means "not safe to recreate yet" - an
+	// unreachable or erroring node is treated as unknown/blocking, never
+	// as evidence that cleanup succeeded.
+	GetNetworkTeardownStatus(ctx context.Context, in *GetNetworkTeardownStatusRequest, opts ...grpc.CallOption) (*GetNetworkTeardownStatusResponse, error)
 }
 
 type managerServiceClient struct {
@@ -501,6 +526,16 @@ func (c *managerServiceClient) SetVMDesiredState(ctx context.Context, in *SetVMD
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(SetVMDesiredStateResponse)
 	err := c.cc.Invoke(ctx, ManagerService_SetVMDesiredState_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *managerServiceClient) SetVMFirewallRules(ctx context.Context, in *SetVMFirewallRulesRequest, opts ...grpc.CallOption) (*SetVMFirewallRulesResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(SetVMFirewallRulesResponse)
+	err := c.cc.Invoke(ctx, ManagerService_SetVMFirewallRules_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -677,6 +712,16 @@ func (c *managerServiceClient) DeleteNetwork(ctx context.Context, in *DeleteNetw
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(DeleteNetworkResponse)
 	err := c.cc.Invoke(ctx, ManagerService_DeleteNetwork_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *managerServiceClient) SetNetworkName(ctx context.Context, in *SetNetworkNameRequest, opts ...grpc.CallOption) (*SetNetworkNameResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(SetNetworkNameResponse)
+	err := c.cc.Invoke(ctx, ManagerService_SetNetworkName_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -913,6 +958,16 @@ func (c *managerServiceClient) CleanupOrphanedHASTResource(ctx context.Context, 
 	return out, nil
 }
 
+func (c *managerServiceClient) GetNetworkTeardownStatus(ctx context.Context, in *GetNetworkTeardownStatusRequest, opts ...grpc.CallOption) (*GetNetworkTeardownStatusResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetNetworkTeardownStatusResponse)
+	err := c.cc.Invoke(ctx, ManagerService_GetNetworkTeardownStatus_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // ManagerServiceServer is the server API for ManagerService service.
 // All implementations must embed UnimplementedManagerServiceServer
 // for forward compatibility.
@@ -997,6 +1052,11 @@ type ManagerServiceServer interface {
 	// replace the rest of the VM definition. DeleteVM remains the only
 	// operation that marks a VM for deletion.
 	SetVMDesiredState(context.Context, *SetVMDesiredStateRequest) (*SetVMDesiredStateResponse, error)
+	// SetVMFirewallRules replaces a VM's firewall_rules wholesale, so
+	// rules can be edited after creation - previously only settable at
+	// CreateVM time. Deliberately not folded into UpdateVM, the exact
+	// same reasoning as SetVMFirewallPaused above.
+	SetVMFirewallRules(context.Context, *SetVMFirewallRulesRequest) (*SetVMFirewallRulesResponse, error)
 	// GetVM and ListVMs only succeed against the current leader - see
 	// api/internalpb/raftd.proto's GetVM/ListVMs doc comments for why v1's
 	// read consistency model is deliberately as simple as its write model.
@@ -1065,6 +1125,11 @@ type ManagerServiceServer interface {
 	CreateNetwork(context.Context, *CreateNetworkRequest) (*CreateNetworkResponse, error)
 	ListNetworks(context.Context, *ListNetworksRequest) (*ListNetworksResponse, error)
 	DeleteNetwork(context.Context, *DeleteNetworkRequest) (*DeleteNetworkResponse, error)
+	// SetNetworkName renames a managed network - the only field on an
+	// existing network definition editable in place (ADR-0071/ADR-0080
+	// reject a general UpdateNetwork for anything with a physical
+	// realization; Name has none).
+	SetNetworkName(context.Context, *SetNetworkNameRequest) (*SetNetworkNameResponse, error)
 	// CreateAPIKey/ListAPIKeys/RevokeAPIKey manage credentials for this
 	// service's own RPC surface (ADR-0023). CreateAPIKey is the only
 	// place a raw key is ever returned - it cannot be retrieved again
@@ -1184,6 +1249,18 @@ type ManagerServiceServer interface {
 	// anything.
 	ListOrphanedHASTResources(context.Context, *ListOrphanedHASTResourcesRequest) (*ListOrphanedHASTResourcesResponse, error)
 	CleanupOrphanedHASTResource(context.Context, *CleanupOrphanedHASTResourceRequest) (*CleanupOrphanedHASTResourceResponse, error)
+	// GetNetworkTeardownStatus reports whether THIS node still has a
+	// local artifact-cleanup record for network_id - a physical,
+	// per-node, local-only report (never routed through raft), mirroring
+	// ListOrphanedHASTResources's own posture exactly. Backs the guided
+	// network-replacement workflow ADR-0071 called for and ADR-0081
+	// builds: the frontend calls this once per known node and shows an
+	// operator, per Hive, whether teardown of a deleted network has
+	// actually converged before letting them recreate it. present=true
+	// (or a non-empty error) means "not safe to recreate yet" - an
+	// unreachable or erroring node is treated as unknown/blocking, never
+	// as evidence that cleanup succeeded.
+	GetNetworkTeardownStatus(context.Context, *GetNetworkTeardownStatusRequest) (*GetNetworkTeardownStatusResponse, error)
 	mustEmbedUnimplementedManagerServiceServer()
 }
 
@@ -1239,6 +1316,9 @@ func (UnimplementedManagerServiceServer) SetVMCloudflareExposure(context.Context
 func (UnimplementedManagerServiceServer) SetVMDesiredState(context.Context, *SetVMDesiredStateRequest) (*SetVMDesiredStateResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method SetVMDesiredState not implemented")
 }
+func (UnimplementedManagerServiceServer) SetVMFirewallRules(context.Context, *SetVMFirewallRulesRequest) (*SetVMFirewallRulesResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method SetVMFirewallRules not implemented")
+}
 func (UnimplementedManagerServiceServer) GetVM(context.Context, *GetVMRequest) (*GetVMResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetVM not implemented")
 }
@@ -1289,6 +1369,9 @@ func (UnimplementedManagerServiceServer) ListNetworks(context.Context, *ListNetw
 }
 func (UnimplementedManagerServiceServer) DeleteNetwork(context.Context, *DeleteNetworkRequest) (*DeleteNetworkResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method DeleteNetwork not implemented")
+}
+func (UnimplementedManagerServiceServer) SetNetworkName(context.Context, *SetNetworkNameRequest) (*SetNetworkNameResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method SetNetworkName not implemented")
 }
 func (UnimplementedManagerServiceServer) CreateAPIKey(context.Context, *CreateAPIKeyRequest) (*CreateAPIKeyResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method CreateAPIKey not implemented")
@@ -1358,6 +1441,9 @@ func (UnimplementedManagerServiceServer) ListOrphanedHASTResources(context.Conte
 }
 func (UnimplementedManagerServiceServer) CleanupOrphanedHASTResource(context.Context, *CleanupOrphanedHASTResourceRequest) (*CleanupOrphanedHASTResourceResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method CleanupOrphanedHASTResource not implemented")
+}
+func (UnimplementedManagerServiceServer) GetNetworkTeardownStatus(context.Context, *GetNetworkTeardownStatusRequest) (*GetNetworkTeardownStatusResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetNetworkTeardownStatus not implemented")
 }
 func (UnimplementedManagerServiceServer) mustEmbedUnimplementedManagerServiceServer() {}
 func (UnimplementedManagerServiceServer) testEmbeddedByValue()                        {}
@@ -1650,6 +1736,24 @@ func _ManagerService_SetVMDesiredState_Handler(srv interface{}, ctx context.Cont
 	return interceptor(ctx, in, info, handler)
 }
 
+func _ManagerService_SetVMFirewallRules_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SetVMFirewallRulesRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ManagerServiceServer).SetVMFirewallRules(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ManagerService_SetVMFirewallRules_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ManagerServiceServer).SetVMFirewallRules(ctx, req.(*SetVMFirewallRulesRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _ManagerService_GetVM_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(GetVMRequest)
 	if err := dec(in); err != nil {
@@ -1930,6 +2034,24 @@ func _ManagerService_DeleteNetwork_Handler(srv interface{}, ctx context.Context,
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(ManagerServiceServer).DeleteNetwork(ctx, req.(*DeleteNetworkRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ManagerService_SetNetworkName_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SetNetworkNameRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ManagerServiceServer).SetNetworkName(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ManagerService_SetNetworkName_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ManagerServiceServer).SetNetworkName(ctx, req.(*SetNetworkNameRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -2348,6 +2470,24 @@ func _ManagerService_CleanupOrphanedHASTResource_Handler(srv interface{}, ctx co
 	return interceptor(ctx, in, info, handler)
 }
 
+func _ManagerService_GetNetworkTeardownStatus_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetNetworkTeardownStatusRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ManagerServiceServer).GetNetworkTeardownStatus(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ManagerService_GetNetworkTeardownStatus_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ManagerServiceServer).GetNetworkTeardownStatus(ctx, req.(*GetNetworkTeardownStatusRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // ManagerService_ServiceDesc is the grpc.ServiceDesc for ManagerService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -2416,6 +2556,10 @@ var ManagerService_ServiceDesc = grpc.ServiceDesc{
 			Handler:    _ManagerService_SetVMDesiredState_Handler,
 		},
 		{
+			MethodName: "SetVMFirewallRules",
+			Handler:    _ManagerService_SetVMFirewallRules_Handler,
+		},
+		{
 			MethodName: "GetVM",
 			Handler:    _ManagerService_GetVM_Handler,
 		},
@@ -2474,6 +2618,10 @@ var ManagerService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "DeleteNetwork",
 			Handler:    _ManagerService_DeleteNetwork_Handler,
+		},
+		{
+			MethodName: "SetNetworkName",
+			Handler:    _ManagerService_SetNetworkName_Handler,
 		},
 		{
 			MethodName: "CreateAPIKey",
@@ -2566,6 +2714,10 @@ var ManagerService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "CleanupOrphanedHASTResource",
 			Handler:    _ManagerService_CleanupOrphanedHASTResource_Handler,
+		},
+		{
+			MethodName: "GetNetworkTeardownStatus",
+			Handler:    _ManagerService_GetNetworkTeardownStatus_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{

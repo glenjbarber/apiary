@@ -33,6 +33,23 @@ type fakePeerHostStatsClient struct {
 	lastSerialAddr string
 	serialResp     *rpcpb.GetVMSerialLogResponse
 	serialErr      error
+
+	lastTeardownAddr    string
+	lastTeardownNetwork string
+	teardownResp        *rpcpb.GetNetworkTeardownStatusResponse
+	teardownErr         error
+}
+
+func (f *fakePeerHostStatsClient) GetNetworkTeardownStatus(_ context.Context, addr, networkID string) (*rpcpb.GetNetworkTeardownStatusResponse, error) {
+	f.lastTeardownAddr = addr
+	f.lastTeardownNetwork = networkID
+	if f.teardownErr != nil {
+		return nil, f.teardownErr
+	}
+	if f.teardownResp != nil {
+		return f.teardownResp, nil
+	}
+	return &rpcpb.GetNetworkTeardownStatusResponse{}, nil
 }
 
 func (f *fakePeerHostStatsClient) HostStats(_ context.Context, addr string) (*rpcpb.HostStatsResponse, error) {

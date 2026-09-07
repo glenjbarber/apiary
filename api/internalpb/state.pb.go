@@ -861,6 +861,8 @@ type Command struct {
 	//	*Command_SetVmCloudflareExposure
 	//	*Command_SetVmDesiredState
 	//	*Command_SetJailDesiredState
+	//	*Command_SetVmFirewallRules
+	//	*Command_SetNetworkName
 	Op            isCommand_Op `protobuf_oneof:"op"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -1065,6 +1067,24 @@ func (x *Command) GetSetJailDesiredState() *SetJailDesiredState {
 	return nil
 }
 
+func (x *Command) GetSetVmFirewallRules() *SetVMFirewallRules {
+	if x != nil {
+		if x, ok := x.Op.(*Command_SetVmFirewallRules); ok {
+			return x.SetVmFirewallRules
+		}
+	}
+	return nil
+}
+
+func (x *Command) GetSetNetworkName() *SetNetworkName {
+	if x != nil {
+		if x, ok := x.Op.(*Command_SetNetworkName); ok {
+			return x.SetNetworkName
+		}
+	}
+	return nil
+}
+
 type isCommand_Op interface {
 	isCommand_Op()
 }
@@ -1159,6 +1179,27 @@ type Command_SetJailDesiredState struct {
 	SetJailDesiredState *SetJailDesiredState `protobuf:"bytes,18,opt,name=set_jail_desired_state,json=setJailDesiredState,proto3,oneof"`
 }
 
+type Command_SetVmFirewallRules struct {
+	// SetVMFirewallRules replaces VMDefinition.firewall_rules wholesale
+	// on an existing VM - deliberately narrow (touches only that one
+	// field) rather than routed through the general UpdateVM, matching
+	// every other frontend-initiated VM mutation in this codebase
+	// (SetVMFirewallPaused, SetVMCloudflareExposure, SetVMDesiredState
+	// above all follow the identical shape, even where the field in
+	// question would technically be safe to carry through UpdateVM).
+	SetVmFirewallRules *SetVMFirewallRules `protobuf:"bytes,19,opt,name=set_vm_firewall_rules,json=setVmFirewallRules,proto3,oneof"`
+}
+
+type Command_SetNetworkName struct {
+	// SetNetworkName renames a NetworkDefinition - deliberately the
+	// only mutable field on an existing network (ADR-0071 rejected a
+	// general UpdateNetwork for subnet/vlan/bridge/gateway, since
+	// mutating those in place would leave the reconciler unable to
+	// tell the old and new physical realizations apart; Name has no
+	// physical realization at all, so that hazard doesn't apply to it).
+	SetNetworkName *SetNetworkName `protobuf:"bytes,20,opt,name=set_network_name,json=setNetworkName,proto3,oneof"`
+}
+
 func (*Command_CreateVm) isCommand_Op() {}
 
 func (*Command_UpdateVm) isCommand_Op() {}
@@ -1194,6 +1235,10 @@ func (*Command_SetVmCloudflareExposure) isCommand_Op() {}
 func (*Command_SetVmDesiredState) isCommand_Op() {}
 
 func (*Command_SetJailDesiredState) isCommand_Op() {}
+
+func (*Command_SetVmFirewallRules) isCommand_Op() {}
+
+func (*Command_SetNetworkName) isCommand_Op() {}
 
 // ApiKey is a cluster-wide credential for ManagerService's external
 // gRPC API (ADR-0023). Only hashed_key (a SHA-256 hex digest) is ever
@@ -1850,6 +1895,119 @@ func (x *SetVMDesiredState) GetDesiredState() VMState {
 	return VMState_VM_STATE_UNSPECIFIED
 }
 
+// SetVMFirewallRules replaces VMDefinition.firewall_rules wholesale on
+// an existing VM. Fails if the id doesn't exist. The same narrow,
+// deliberately-not-UpdateVM shape as SetVMFirewallPaused above - an
+// operator editing rules after creation only ever intends to change
+// this one field, never the VM's entire record.
+type SetVMFirewallRules struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	FirewallRules []*FirewallRule        `protobuf:"bytes,2,rep,name=firewall_rules,json=firewallRules,proto3" json:"firewall_rules,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SetVMFirewallRules) Reset() {
+	*x = SetVMFirewallRules{}
+	mi := &file_api_internalpb_state_proto_msgTypes[17]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SetVMFirewallRules) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SetVMFirewallRules) ProtoMessage() {}
+
+func (x *SetVMFirewallRules) ProtoReflect() protoreflect.Message {
+	mi := &file_api_internalpb_state_proto_msgTypes[17]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SetVMFirewallRules.ProtoReflect.Descriptor instead.
+func (*SetVMFirewallRules) Descriptor() ([]byte, []int) {
+	return file_api_internalpb_state_proto_rawDescGZIP(), []int{17}
+}
+
+func (x *SetVMFirewallRules) GetId() string {
+	if x != nil {
+		return x.Id
+	}
+	return ""
+}
+
+func (x *SetVMFirewallRules) GetFirewallRules() []*FirewallRule {
+	if x != nil {
+		return x.FirewallRules
+	}
+	return nil
+}
+
+// SetNetworkName changes only NetworkDefinition.name. Fails if the id
+// doesn't exist. See ADR-0071/ADR-0080: this is deliberately the only
+// field a network's definition can have changed after creation without
+// going through the full replace-after-converged-teardown workflow.
+type SetNetworkName struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	Name          string                 `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SetNetworkName) Reset() {
+	*x = SetNetworkName{}
+	mi := &file_api_internalpb_state_proto_msgTypes[18]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SetNetworkName) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SetNetworkName) ProtoMessage() {}
+
+func (x *SetNetworkName) ProtoReflect() protoreflect.Message {
+	mi := &file_api_internalpb_state_proto_msgTypes[18]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SetNetworkName.ProtoReflect.Descriptor instead.
+func (*SetNetworkName) Descriptor() ([]byte, []int) {
+	return file_api_internalpb_state_proto_rawDescGZIP(), []int{18}
+}
+
+func (x *SetNetworkName) GetId() string {
+	if x != nil {
+		return x.Id
+	}
+	return ""
+}
+
+func (x *SetNetworkName) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
 // PurgeVM removes a VM definition outright, regardless of its current
 // phase. Submitted only by the owning node's reconciler, after it has
 // confirmed the VM's real local resources are torn down. Idempotent: not
@@ -1863,7 +2021,7 @@ type PurgeVM struct {
 
 func (x *PurgeVM) Reset() {
 	*x = PurgeVM{}
-	mi := &file_api_internalpb_state_proto_msgTypes[17]
+	mi := &file_api_internalpb_state_proto_msgTypes[19]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1875,7 +2033,7 @@ func (x *PurgeVM) String() string {
 func (*PurgeVM) ProtoMessage() {}
 
 func (x *PurgeVM) ProtoReflect() protoreflect.Message {
-	mi := &file_api_internalpb_state_proto_msgTypes[17]
+	mi := &file_api_internalpb_state_proto_msgTypes[19]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1888,7 +2046,7 @@ func (x *PurgeVM) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PurgeVM.ProtoReflect.Descriptor instead.
 func (*PurgeVM) Descriptor() ([]byte, []int) {
-	return file_api_internalpb_state_proto_rawDescGZIP(), []int{17}
+	return file_api_internalpb_state_proto_rawDescGZIP(), []int{19}
 }
 
 func (x *PurgeVM) GetId() string {
@@ -1909,7 +2067,7 @@ type CreateJail struct {
 
 func (x *CreateJail) Reset() {
 	*x = CreateJail{}
-	mi := &file_api_internalpb_state_proto_msgTypes[18]
+	mi := &file_api_internalpb_state_proto_msgTypes[20]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1921,7 +2079,7 @@ func (x *CreateJail) String() string {
 func (*CreateJail) ProtoMessage() {}
 
 func (x *CreateJail) ProtoReflect() protoreflect.Message {
-	mi := &file_api_internalpb_state_proto_msgTypes[18]
+	mi := &file_api_internalpb_state_proto_msgTypes[20]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1934,7 +2092,7 @@ func (x *CreateJail) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CreateJail.ProtoReflect.Descriptor instead.
 func (*CreateJail) Descriptor() ([]byte, []int) {
-	return file_api_internalpb_state_proto_rawDescGZIP(), []int{18}
+	return file_api_internalpb_state_proto_rawDescGZIP(), []int{20}
 }
 
 func (x *CreateJail) GetJail() *JailDefinition {
@@ -1955,7 +2113,7 @@ type UpdateJail struct {
 
 func (x *UpdateJail) Reset() {
 	*x = UpdateJail{}
-	mi := &file_api_internalpb_state_proto_msgTypes[19]
+	mi := &file_api_internalpb_state_proto_msgTypes[21]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1967,7 +2125,7 @@ func (x *UpdateJail) String() string {
 func (*UpdateJail) ProtoMessage() {}
 
 func (x *UpdateJail) ProtoReflect() protoreflect.Message {
-	mi := &file_api_internalpb_state_proto_msgTypes[19]
+	mi := &file_api_internalpb_state_proto_msgTypes[21]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1980,7 +2138,7 @@ func (x *UpdateJail) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UpdateJail.ProtoReflect.Descriptor instead.
 func (*UpdateJail) Descriptor() ([]byte, []int) {
-	return file_api_internalpb_state_proto_rawDescGZIP(), []int{19}
+	return file_api_internalpb_state_proto_rawDescGZIP(), []int{21}
 }
 
 func (x *UpdateJail) GetJail() *JailDefinition {
@@ -2002,7 +2160,7 @@ type DeleteJail struct {
 
 func (x *DeleteJail) Reset() {
 	*x = DeleteJail{}
-	mi := &file_api_internalpb_state_proto_msgTypes[20]
+	mi := &file_api_internalpb_state_proto_msgTypes[22]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2014,7 +2172,7 @@ func (x *DeleteJail) String() string {
 func (*DeleteJail) ProtoMessage() {}
 
 func (x *DeleteJail) ProtoReflect() protoreflect.Message {
-	mi := &file_api_internalpb_state_proto_msgTypes[20]
+	mi := &file_api_internalpb_state_proto_msgTypes[22]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2027,7 +2185,7 @@ func (x *DeleteJail) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeleteJail.ProtoReflect.Descriptor instead.
 func (*DeleteJail) Descriptor() ([]byte, []int) {
-	return file_api_internalpb_state_proto_rawDescGZIP(), []int{20}
+	return file_api_internalpb_state_proto_rawDescGZIP(), []int{22}
 }
 
 func (x *DeleteJail) GetId() string {
@@ -2050,7 +2208,7 @@ type UpdateJailPhase struct {
 
 func (x *UpdateJailPhase) Reset() {
 	*x = UpdateJailPhase{}
-	mi := &file_api_internalpb_state_proto_msgTypes[21]
+	mi := &file_api_internalpb_state_proto_msgTypes[23]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2062,7 +2220,7 @@ func (x *UpdateJailPhase) String() string {
 func (*UpdateJailPhase) ProtoMessage() {}
 
 func (x *UpdateJailPhase) ProtoReflect() protoreflect.Message {
-	mi := &file_api_internalpb_state_proto_msgTypes[21]
+	mi := &file_api_internalpb_state_proto_msgTypes[23]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2075,7 +2233,7 @@ func (x *UpdateJailPhase) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UpdateJailPhase.ProtoReflect.Descriptor instead.
 func (*UpdateJailPhase) Descriptor() ([]byte, []int) {
-	return file_api_internalpb_state_proto_rawDescGZIP(), []int{21}
+	return file_api_internalpb_state_proto_rawDescGZIP(), []int{23}
 }
 
 func (x *UpdateJailPhase) GetId() string {
@@ -2110,7 +2268,7 @@ type SetJailDesiredState struct {
 
 func (x *SetJailDesiredState) Reset() {
 	*x = SetJailDesiredState{}
-	mi := &file_api_internalpb_state_proto_msgTypes[22]
+	mi := &file_api_internalpb_state_proto_msgTypes[24]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2122,7 +2280,7 @@ func (x *SetJailDesiredState) String() string {
 func (*SetJailDesiredState) ProtoMessage() {}
 
 func (x *SetJailDesiredState) ProtoReflect() protoreflect.Message {
-	mi := &file_api_internalpb_state_proto_msgTypes[22]
+	mi := &file_api_internalpb_state_proto_msgTypes[24]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2135,7 +2293,7 @@ func (x *SetJailDesiredState) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SetJailDesiredState.ProtoReflect.Descriptor instead.
 func (*SetJailDesiredState) Descriptor() ([]byte, []int) {
-	return file_api_internalpb_state_proto_rawDescGZIP(), []int{22}
+	return file_api_internalpb_state_proto_rawDescGZIP(), []int{24}
 }
 
 func (x *SetJailDesiredState) GetId() string {
@@ -2163,7 +2321,7 @@ type PurgeJail struct {
 
 func (x *PurgeJail) Reset() {
 	*x = PurgeJail{}
-	mi := &file_api_internalpb_state_proto_msgTypes[23]
+	mi := &file_api_internalpb_state_proto_msgTypes[25]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2175,7 +2333,7 @@ func (x *PurgeJail) String() string {
 func (*PurgeJail) ProtoMessage() {}
 
 func (x *PurgeJail) ProtoReflect() protoreflect.Message {
-	mi := &file_api_internalpb_state_proto_msgTypes[23]
+	mi := &file_api_internalpb_state_proto_msgTypes[25]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2188,7 +2346,7 @@ func (x *PurgeJail) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PurgeJail.ProtoReflect.Descriptor instead.
 func (*PurgeJail) Descriptor() ([]byte, []int) {
-	return file_api_internalpb_state_proto_rawDescGZIP(), []int{23}
+	return file_api_internalpb_state_proto_rawDescGZIP(), []int{25}
 }
 
 func (x *PurgeJail) GetId() string {
@@ -2214,7 +2372,7 @@ type CommandResult struct {
 
 func (x *CommandResult) Reset() {
 	*x = CommandResult{}
-	mi := &file_api_internalpb_state_proto_msgTypes[24]
+	mi := &file_api_internalpb_state_proto_msgTypes[26]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2226,7 +2384,7 @@ func (x *CommandResult) String() string {
 func (*CommandResult) ProtoMessage() {}
 
 func (x *CommandResult) ProtoReflect() protoreflect.Message {
-	mi := &file_api_internalpb_state_proto_msgTypes[24]
+	mi := &file_api_internalpb_state_proto_msgTypes[26]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2239,7 +2397,7 @@ func (x *CommandResult) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CommandResult.ProtoReflect.Descriptor instead.
 func (*CommandResult) Descriptor() ([]byte, []int) {
-	return file_api_internalpb_state_proto_rawDescGZIP(), []int{24}
+	return file_api_internalpb_state_proto_rawDescGZIP(), []int{26}
 }
 
 func (x *CommandResult) GetVm() *VMDefinition {
@@ -2285,7 +2443,7 @@ type FSMSnapshotState struct {
 
 func (x *FSMSnapshotState) Reset() {
 	*x = FSMSnapshotState{}
-	mi := &file_api_internalpb_state_proto_msgTypes[25]
+	mi := &file_api_internalpb_state_proto_msgTypes[27]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2297,7 +2455,7 @@ func (x *FSMSnapshotState) String() string {
 func (*FSMSnapshotState) ProtoMessage() {}
 
 func (x *FSMSnapshotState) ProtoReflect() protoreflect.Message {
-	mi := &file_api_internalpb_state_proto_msgTypes[25]
+	mi := &file_api_internalpb_state_proto_msgTypes[27]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2310,7 +2468,7 @@ func (x *FSMSnapshotState) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FSMSnapshotState.ProtoReflect.Descriptor instead.
 func (*FSMSnapshotState) Descriptor() ([]byte, []int) {
-	return file_api_internalpb_state_proto_rawDescGZIP(), []int{25}
+	return file_api_internalpb_state_proto_rawDescGZIP(), []int{27}
 }
 
 func (x *FSMSnapshotState) GetLastIndex() uint64 {
@@ -2387,7 +2545,7 @@ type ConfigArchive struct {
 
 func (x *ConfigArchive) Reset() {
 	*x = ConfigArchive{}
-	mi := &file_api_internalpb_state_proto_msgTypes[26]
+	mi := &file_api_internalpb_state_proto_msgTypes[28]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2399,7 +2557,7 @@ func (x *ConfigArchive) String() string {
 func (*ConfigArchive) ProtoMessage() {}
 
 func (x *ConfigArchive) ProtoReflect() protoreflect.Message {
-	mi := &file_api_internalpb_state_proto_msgTypes[26]
+	mi := &file_api_internalpb_state_proto_msgTypes[28]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2412,7 +2570,7 @@ func (x *ConfigArchive) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ConfigArchive.ProtoReflect.Descriptor instead.
 func (*ConfigArchive) Descriptor() ([]byte, []int) {
-	return file_api_internalpb_state_proto_rawDescGZIP(), []int{26}
+	return file_api_internalpb_state_proto_rawDescGZIP(), []int{28}
 }
 
 func (x *ConfigArchive) GetFormatVersion() uint32 {
@@ -2510,8 +2668,7 @@ const file_api_internalpb_state_proto_rawDesc = "" +
 	"\x06subnet\x18\x04 \x01(\tR\x06subnet\x12\x1f\n" +
 	"\vbridge_name\x18\x05 \x01(\tR\n" +
 	"bridgeName\x12)\n" +
-	"\x10external_gateway\x18\x06 \x01(\tR\x0fexternalGateway\"\xdb\n" +
-	"\n" +
+	"\x10external_gateway\x18\x06 \x01(\tR\x0fexternalGateway\"\x88\f\n" +
 	"\aCommand\x12;\n" +
 	"\tcreate_vm\x18\x01 \x01(\v2\x1c.apiary.internal.v1.CreateVMH\x00R\bcreateVm\x12;\n" +
 	"\tupdate_vm\x18\x02 \x01(\v2\x1c.apiary.internal.v1.UpdateVMH\x00R\bupdateVm\x12;\n" +
@@ -2535,7 +2692,9 @@ const file_api_internalpb_state_proto_rawDesc = "" +
 	"\x16set_vm_firewall_paused\x18\x0f \x01(\v2'.apiary.internal.v1.SetVMFirewallPausedH\x00R\x13setVmFirewallPaused\x12j\n" +
 	"\x1aset_vm_cloudflare_exposure\x18\x10 \x01(\v2+.apiary.internal.v1.SetVMCloudflareExposureH\x00R\x17setVmCloudflareExposure\x12X\n" +
 	"\x14set_vm_desired_state\x18\x11 \x01(\v2%.apiary.internal.v1.SetVMDesiredStateH\x00R\x11setVmDesiredState\x12^\n" +
-	"\x16set_jail_desired_state\x18\x12 \x01(\v2'.apiary.internal.v1.SetJailDesiredStateH\x00R\x13setJailDesiredStateB\x04\n" +
+	"\x16set_jail_desired_state\x18\x12 \x01(\v2'.apiary.internal.v1.SetJailDesiredStateH\x00R\x13setJailDesiredState\x12[\n" +
+	"\x15set_vm_firewall_rules\x18\x13 \x01(\v2&.apiary.internal.v1.SetVMFirewallRulesH\x00R\x12setVmFirewallRules\x12N\n" +
+	"\x10set_network_name\x18\x14 \x01(\v2\".apiary.internal.v1.SetNetworkNameH\x00R\x0esetNetworkNameB\x04\n" +
 	"\x02op\"\x82\x01\n" +
 	"\x06ApiKey\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
@@ -2572,7 +2731,13 @@ const file_api_internalpb_state_proto_rawDesc = "" +
 	"\x04port\x18\x03 \x01(\rR\x04port\"e\n" +
 	"\x11SetVMDesiredState\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12@\n" +
-	"\rdesired_state\x18\x02 \x01(\x0e2\x1b.apiary.internal.v1.VMStateR\fdesiredState\"\x19\n" +
+	"\rdesired_state\x18\x02 \x01(\x0e2\x1b.apiary.internal.v1.VMStateR\fdesiredState\"m\n" +
+	"\x12SetVMFirewallRules\x12\x0e\n" +
+	"\x02id\x18\x01 \x01(\tR\x02id\x12G\n" +
+	"\x0efirewall_rules\x18\x02 \x03(\v2 .apiary.internal.v1.FirewallRuleR\rfirewallRules\"4\n" +
+	"\x0eSetNetworkName\x12\x0e\n" +
+	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
+	"\x04name\x18\x02 \x01(\tR\x04name\"\x19\n" +
 	"\aPurgeVM\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\"D\n" +
 	"\n" +
@@ -2666,7 +2831,7 @@ func file_api_internalpb_state_proto_rawDescGZIP() []byte {
 }
 
 var file_api_internalpb_state_proto_enumTypes = make([]protoimpl.EnumInfo, 4)
-var file_api_internalpb_state_proto_msgTypes = make([]protoimpl.MessageInfo, 31)
+var file_api_internalpb_state_proto_msgTypes = make([]protoimpl.MessageInfo, 33)
 var file_api_internalpb_state_proto_goTypes = []any{
 	(VMState)(0),                    // 0: apiary.internal.v1.VMState
 	(VMPhase)(0),                    // 1: apiary.internal.v1.VMPhase
@@ -2689,20 +2854,22 @@ var file_api_internalpb_state_proto_goTypes = []any{
 	(*SetVMFirewallPaused)(nil),     // 18: apiary.internal.v1.SetVMFirewallPaused
 	(*SetVMCloudflareExposure)(nil), // 19: apiary.internal.v1.SetVMCloudflareExposure
 	(*SetVMDesiredState)(nil),       // 20: apiary.internal.v1.SetVMDesiredState
-	(*PurgeVM)(nil),                 // 21: apiary.internal.v1.PurgeVM
-	(*CreateJail)(nil),              // 22: apiary.internal.v1.CreateJail
-	(*UpdateJail)(nil),              // 23: apiary.internal.v1.UpdateJail
-	(*DeleteJail)(nil),              // 24: apiary.internal.v1.DeleteJail
-	(*UpdateJailPhase)(nil),         // 25: apiary.internal.v1.UpdateJailPhase
-	(*SetJailDesiredState)(nil),     // 26: apiary.internal.v1.SetJailDesiredState
-	(*PurgeJail)(nil),               // 27: apiary.internal.v1.PurgeJail
-	(*CommandResult)(nil),           // 28: apiary.internal.v1.CommandResult
-	(*FSMSnapshotState)(nil),        // 29: apiary.internal.v1.FSMSnapshotState
-	(*ConfigArchive)(nil),           // 30: apiary.internal.v1.ConfigArchive
-	nil,                             // 31: apiary.internal.v1.FSMSnapshotState.VmsEntry
-	nil,                             // 32: apiary.internal.v1.FSMSnapshotState.NetworksEntry
-	nil,                             // 33: apiary.internal.v1.FSMSnapshotState.ApiKeysEntry
-	nil,                             // 34: apiary.internal.v1.FSMSnapshotState.JailsEntry
+	(*SetVMFirewallRules)(nil),      // 21: apiary.internal.v1.SetVMFirewallRules
+	(*SetNetworkName)(nil),          // 22: apiary.internal.v1.SetNetworkName
+	(*PurgeVM)(nil),                 // 23: apiary.internal.v1.PurgeVM
+	(*CreateJail)(nil),              // 24: apiary.internal.v1.CreateJail
+	(*UpdateJail)(nil),              // 25: apiary.internal.v1.UpdateJail
+	(*DeleteJail)(nil),              // 26: apiary.internal.v1.DeleteJail
+	(*UpdateJailPhase)(nil),         // 27: apiary.internal.v1.UpdateJailPhase
+	(*SetJailDesiredState)(nil),     // 28: apiary.internal.v1.SetJailDesiredState
+	(*PurgeJail)(nil),               // 29: apiary.internal.v1.PurgeJail
+	(*CommandResult)(nil),           // 30: apiary.internal.v1.CommandResult
+	(*FSMSnapshotState)(nil),        // 31: apiary.internal.v1.FSMSnapshotState
+	(*ConfigArchive)(nil),           // 32: apiary.internal.v1.ConfigArchive
+	nil,                             // 33: apiary.internal.v1.FSMSnapshotState.VmsEntry
+	nil,                             // 34: apiary.internal.v1.FSMSnapshotState.NetworksEntry
+	nil,                             // 35: apiary.internal.v1.FSMSnapshotState.ApiKeysEntry
+	nil,                             // 36: apiary.internal.v1.FSMSnapshotState.JailsEntry
 }
 var file_api_internalpb_state_proto_depIdxs = []int32{
 	0,  // 0: apiary.internal.v1.VMDefinition.desired_state:type_name -> apiary.internal.v1.VMState
@@ -2714,45 +2881,48 @@ var file_api_internalpb_state_proto_depIdxs = []int32{
 	15, // 6: apiary.internal.v1.Command.update_vm:type_name -> apiary.internal.v1.UpdateVM
 	16, // 7: apiary.internal.v1.Command.delete_vm:type_name -> apiary.internal.v1.DeleteVM
 	17, // 8: apiary.internal.v1.Command.update_vm_phase:type_name -> apiary.internal.v1.UpdateVMPhase
-	21, // 9: apiary.internal.v1.Command.purge_vm:type_name -> apiary.internal.v1.PurgeVM
+	23, // 9: apiary.internal.v1.Command.purge_vm:type_name -> apiary.internal.v1.PurgeVM
 	12, // 10: apiary.internal.v1.Command.create_network:type_name -> apiary.internal.v1.CreateNetwork
 	13, // 11: apiary.internal.v1.Command.delete_network:type_name -> apiary.internal.v1.DeleteNetwork
 	10, // 12: apiary.internal.v1.Command.create_api_key:type_name -> apiary.internal.v1.CreateAPIKey
 	11, // 13: apiary.internal.v1.Command.revoke_api_key:type_name -> apiary.internal.v1.RevokeAPIKey
-	22, // 14: apiary.internal.v1.Command.create_jail:type_name -> apiary.internal.v1.CreateJail
-	23, // 15: apiary.internal.v1.Command.update_jail:type_name -> apiary.internal.v1.UpdateJail
-	24, // 16: apiary.internal.v1.Command.delete_jail:type_name -> apiary.internal.v1.DeleteJail
-	25, // 17: apiary.internal.v1.Command.update_jail_phase:type_name -> apiary.internal.v1.UpdateJailPhase
-	27, // 18: apiary.internal.v1.Command.purge_jail:type_name -> apiary.internal.v1.PurgeJail
+	24, // 14: apiary.internal.v1.Command.create_jail:type_name -> apiary.internal.v1.CreateJail
+	25, // 15: apiary.internal.v1.Command.update_jail:type_name -> apiary.internal.v1.UpdateJail
+	26, // 16: apiary.internal.v1.Command.delete_jail:type_name -> apiary.internal.v1.DeleteJail
+	27, // 17: apiary.internal.v1.Command.update_jail_phase:type_name -> apiary.internal.v1.UpdateJailPhase
+	29, // 18: apiary.internal.v1.Command.purge_jail:type_name -> apiary.internal.v1.PurgeJail
 	18, // 19: apiary.internal.v1.Command.set_vm_firewall_paused:type_name -> apiary.internal.v1.SetVMFirewallPaused
 	19, // 20: apiary.internal.v1.Command.set_vm_cloudflare_exposure:type_name -> apiary.internal.v1.SetVMCloudflareExposure
 	20, // 21: apiary.internal.v1.Command.set_vm_desired_state:type_name -> apiary.internal.v1.SetVMDesiredState
-	26, // 22: apiary.internal.v1.Command.set_jail_desired_state:type_name -> apiary.internal.v1.SetJailDesiredState
-	9,  // 23: apiary.internal.v1.CreateAPIKey.key:type_name -> apiary.internal.v1.ApiKey
-	7,  // 24: apiary.internal.v1.CreateNetwork.network:type_name -> apiary.internal.v1.NetworkDefinition
-	4,  // 25: apiary.internal.v1.CreateVM.vm:type_name -> apiary.internal.v1.VMDefinition
-	4,  // 26: apiary.internal.v1.UpdateVM.vm:type_name -> apiary.internal.v1.VMDefinition
-	1,  // 27: apiary.internal.v1.UpdateVMPhase.phase:type_name -> apiary.internal.v1.VMPhase
-	0,  // 28: apiary.internal.v1.SetVMDesiredState.desired_state:type_name -> apiary.internal.v1.VMState
-	5,  // 29: apiary.internal.v1.CreateJail.jail:type_name -> apiary.internal.v1.JailDefinition
-	5,  // 30: apiary.internal.v1.UpdateJail.jail:type_name -> apiary.internal.v1.JailDefinition
-	3,  // 31: apiary.internal.v1.UpdateJailPhase.phase:type_name -> apiary.internal.v1.JailPhase
-	2,  // 32: apiary.internal.v1.SetJailDesiredState.desired_state:type_name -> apiary.internal.v1.JailState
-	4,  // 33: apiary.internal.v1.CommandResult.vm:type_name -> apiary.internal.v1.VMDefinition
-	5,  // 34: apiary.internal.v1.CommandResult.jail:type_name -> apiary.internal.v1.JailDefinition
-	31, // 35: apiary.internal.v1.FSMSnapshotState.vms:type_name -> apiary.internal.v1.FSMSnapshotState.VmsEntry
-	32, // 36: apiary.internal.v1.FSMSnapshotState.networks:type_name -> apiary.internal.v1.FSMSnapshotState.NetworksEntry
-	33, // 37: apiary.internal.v1.FSMSnapshotState.api_keys:type_name -> apiary.internal.v1.FSMSnapshotState.ApiKeysEntry
-	34, // 38: apiary.internal.v1.FSMSnapshotState.jails:type_name -> apiary.internal.v1.FSMSnapshotState.JailsEntry
-	4,  // 39: apiary.internal.v1.FSMSnapshotState.VmsEntry.value:type_name -> apiary.internal.v1.VMDefinition
-	7,  // 40: apiary.internal.v1.FSMSnapshotState.NetworksEntry.value:type_name -> apiary.internal.v1.NetworkDefinition
-	9,  // 41: apiary.internal.v1.FSMSnapshotState.ApiKeysEntry.value:type_name -> apiary.internal.v1.ApiKey
-	5,  // 42: apiary.internal.v1.FSMSnapshotState.JailsEntry.value:type_name -> apiary.internal.v1.JailDefinition
-	43, // [43:43] is the sub-list for method output_type
-	43, // [43:43] is the sub-list for method input_type
-	43, // [43:43] is the sub-list for extension type_name
-	43, // [43:43] is the sub-list for extension extendee
-	0,  // [0:43] is the sub-list for field type_name
+	28, // 22: apiary.internal.v1.Command.set_jail_desired_state:type_name -> apiary.internal.v1.SetJailDesiredState
+	21, // 23: apiary.internal.v1.Command.set_vm_firewall_rules:type_name -> apiary.internal.v1.SetVMFirewallRules
+	22, // 24: apiary.internal.v1.Command.set_network_name:type_name -> apiary.internal.v1.SetNetworkName
+	9,  // 25: apiary.internal.v1.CreateAPIKey.key:type_name -> apiary.internal.v1.ApiKey
+	7,  // 26: apiary.internal.v1.CreateNetwork.network:type_name -> apiary.internal.v1.NetworkDefinition
+	4,  // 27: apiary.internal.v1.CreateVM.vm:type_name -> apiary.internal.v1.VMDefinition
+	4,  // 28: apiary.internal.v1.UpdateVM.vm:type_name -> apiary.internal.v1.VMDefinition
+	1,  // 29: apiary.internal.v1.UpdateVMPhase.phase:type_name -> apiary.internal.v1.VMPhase
+	0,  // 30: apiary.internal.v1.SetVMDesiredState.desired_state:type_name -> apiary.internal.v1.VMState
+	6,  // 31: apiary.internal.v1.SetVMFirewallRules.firewall_rules:type_name -> apiary.internal.v1.FirewallRule
+	5,  // 32: apiary.internal.v1.CreateJail.jail:type_name -> apiary.internal.v1.JailDefinition
+	5,  // 33: apiary.internal.v1.UpdateJail.jail:type_name -> apiary.internal.v1.JailDefinition
+	3,  // 34: apiary.internal.v1.UpdateJailPhase.phase:type_name -> apiary.internal.v1.JailPhase
+	2,  // 35: apiary.internal.v1.SetJailDesiredState.desired_state:type_name -> apiary.internal.v1.JailState
+	4,  // 36: apiary.internal.v1.CommandResult.vm:type_name -> apiary.internal.v1.VMDefinition
+	5,  // 37: apiary.internal.v1.CommandResult.jail:type_name -> apiary.internal.v1.JailDefinition
+	33, // 38: apiary.internal.v1.FSMSnapshotState.vms:type_name -> apiary.internal.v1.FSMSnapshotState.VmsEntry
+	34, // 39: apiary.internal.v1.FSMSnapshotState.networks:type_name -> apiary.internal.v1.FSMSnapshotState.NetworksEntry
+	35, // 40: apiary.internal.v1.FSMSnapshotState.api_keys:type_name -> apiary.internal.v1.FSMSnapshotState.ApiKeysEntry
+	36, // 41: apiary.internal.v1.FSMSnapshotState.jails:type_name -> apiary.internal.v1.FSMSnapshotState.JailsEntry
+	4,  // 42: apiary.internal.v1.FSMSnapshotState.VmsEntry.value:type_name -> apiary.internal.v1.VMDefinition
+	7,  // 43: apiary.internal.v1.FSMSnapshotState.NetworksEntry.value:type_name -> apiary.internal.v1.NetworkDefinition
+	9,  // 44: apiary.internal.v1.FSMSnapshotState.ApiKeysEntry.value:type_name -> apiary.internal.v1.ApiKey
+	5,  // 45: apiary.internal.v1.FSMSnapshotState.JailsEntry.value:type_name -> apiary.internal.v1.JailDefinition
+	46, // [46:46] is the sub-list for method output_type
+	46, // [46:46] is the sub-list for method input_type
+	46, // [46:46] is the sub-list for extension type_name
+	46, // [46:46] is the sub-list for extension extendee
+	0,  // [0:46] is the sub-list for field type_name
 }
 
 func init() { file_api_internalpb_state_proto_init() }
@@ -2779,6 +2949,8 @@ func file_api_internalpb_state_proto_init() {
 		(*Command_SetVmCloudflareExposure)(nil),
 		(*Command_SetVmDesiredState)(nil),
 		(*Command_SetJailDesiredState)(nil),
+		(*Command_SetVmFirewallRules)(nil),
+		(*Command_SetNetworkName)(nil),
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
@@ -2786,7 +2958,7 @@ func file_api_internalpb_state_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_api_internalpb_state_proto_rawDesc), len(file_api_internalpb_state_proto_rawDesc)),
 			NumEnums:      4,
-			NumMessages:   31,
+			NumMessages:   33,
 			NumExtensions: 0,
 			NumServices:   0,
 		},
