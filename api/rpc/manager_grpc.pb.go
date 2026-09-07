@@ -52,6 +52,7 @@ const (
 	ManagerService_CreateNetwork_FullMethodName               = "/apiary.rpc.v1.ManagerService/CreateNetwork"
 	ManagerService_ListNetworks_FullMethodName                = "/apiary.rpc.v1.ManagerService/ListNetworks"
 	ManagerService_DeleteNetwork_FullMethodName               = "/apiary.rpc.v1.ManagerService/DeleteNetwork"
+	ManagerService_SetNetworkName_FullMethodName              = "/apiary.rpc.v1.ManagerService/SetNetworkName"
 	ManagerService_CreateAPIKey_FullMethodName                = "/apiary.rpc.v1.ManagerService/CreateAPIKey"
 	ManagerService_ListAPIKeys_FullMethodName                 = "/apiary.rpc.v1.ManagerService/ListAPIKeys"
 	ManagerService_RevokeAPIKey_FullMethodName                = "/apiary.rpc.v1.ManagerService/RevokeAPIKey"
@@ -234,6 +235,11 @@ type ManagerServiceClient interface {
 	CreateNetwork(ctx context.Context, in *CreateNetworkRequest, opts ...grpc.CallOption) (*CreateNetworkResponse, error)
 	ListNetworks(ctx context.Context, in *ListNetworksRequest, opts ...grpc.CallOption) (*ListNetworksResponse, error)
 	DeleteNetwork(ctx context.Context, in *DeleteNetworkRequest, opts ...grpc.CallOption) (*DeleteNetworkResponse, error)
+	// SetNetworkName renames a managed network - the only field on an
+	// existing network definition editable in place (ADR-0071/ADR-0080
+	// reject a general UpdateNetwork for anything with a physical
+	// realization; Name has none).
+	SetNetworkName(ctx context.Context, in *SetNetworkNameRequest, opts ...grpc.CallOption) (*SetNetworkNameResponse, error)
 	// CreateAPIKey/ListAPIKeys/RevokeAPIKey manage credentials for this
 	// service's own RPC surface (ADR-0023). CreateAPIKey is the only
 	// place a raw key is ever returned - it cannot be retrieved again
@@ -699,6 +705,16 @@ func (c *managerServiceClient) DeleteNetwork(ctx context.Context, in *DeleteNetw
 	return out, nil
 }
 
+func (c *managerServiceClient) SetNetworkName(ctx context.Context, in *SetNetworkNameRequest, opts ...grpc.CallOption) (*SetNetworkNameResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(SetNetworkNameResponse)
+	err := c.cc.Invoke(ctx, ManagerService_SetNetworkName_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *managerServiceClient) CreateAPIKey(ctx context.Context, in *CreateAPIKeyRequest, opts ...grpc.CallOption) (*CreateAPIKeyResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(CreateAPIKeyResponse)
@@ -1086,6 +1102,11 @@ type ManagerServiceServer interface {
 	CreateNetwork(context.Context, *CreateNetworkRequest) (*CreateNetworkResponse, error)
 	ListNetworks(context.Context, *ListNetworksRequest) (*ListNetworksResponse, error)
 	DeleteNetwork(context.Context, *DeleteNetworkRequest) (*DeleteNetworkResponse, error)
+	// SetNetworkName renames a managed network - the only field on an
+	// existing network definition editable in place (ADR-0071/ADR-0080
+	// reject a general UpdateNetwork for anything with a physical
+	// realization; Name has none).
+	SetNetworkName(context.Context, *SetNetworkNameRequest) (*SetNetworkNameResponse, error)
 	// CreateAPIKey/ListAPIKeys/RevokeAPIKey manage credentials for this
 	// service's own RPC surface (ADR-0023). CreateAPIKey is the only
 	// place a raw key is ever returned - it cannot be retrieved again
@@ -1313,6 +1334,9 @@ func (UnimplementedManagerServiceServer) ListNetworks(context.Context, *ListNetw
 }
 func (UnimplementedManagerServiceServer) DeleteNetwork(context.Context, *DeleteNetworkRequest) (*DeleteNetworkResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method DeleteNetwork not implemented")
+}
+func (UnimplementedManagerServiceServer) SetNetworkName(context.Context, *SetNetworkNameRequest) (*SetNetworkNameResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method SetNetworkName not implemented")
 }
 func (UnimplementedManagerServiceServer) CreateAPIKey(context.Context, *CreateAPIKeyRequest) (*CreateAPIKeyResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method CreateAPIKey not implemented")
@@ -1976,6 +2000,24 @@ func _ManagerService_DeleteNetwork_Handler(srv interface{}, ctx context.Context,
 	return interceptor(ctx, in, info, handler)
 }
 
+func _ManagerService_SetNetworkName_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SetNetworkNameRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ManagerServiceServer).SetNetworkName(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ManagerService_SetNetworkName_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ManagerServiceServer).SetNetworkName(ctx, req.(*SetNetworkNameRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _ManagerService_CreateAPIKey_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(CreateAPIKeyRequest)
 	if err := dec(in); err != nil {
@@ -2520,6 +2562,10 @@ var ManagerService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "DeleteNetwork",
 			Handler:    _ManagerService_DeleteNetwork_Handler,
+		},
+		{
+			MethodName: "SetNetworkName",
+			Handler:    _ManagerService_SetNetworkName_Handler,
 		},
 		{
 			MethodName: "CreateAPIKey",

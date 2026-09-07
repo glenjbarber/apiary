@@ -42,7 +42,14 @@
 {{range .Networks}}
 <tr>
   <td>{{.ID}}</td>
-  <td>{{.Name}}</td>
+  <td>
+    {{if $.CanOperate}}
+    <form class="inline-form" hx-post="/networks/{{.ID}}/name" hx-target="#network-panel" hx-swap="innerHTML">
+      <input type="text" name="name" value="{{.Name}}" title="Display label only - has no effect on networking itself. The only field a network keeps editable after creation; see ADR-0080 for why the rest requires delete-and-recreate.">
+      <button type="submit">Save</button>
+    </form>
+    {{else}}{{.Name}}{{end}}
+  </td>
   <td>{{if .VLANID}}{{.VLANID}}{{else}}(untagged){{end}}</td>
   <td>{{.Subnet}}</td>
   <td>{{if .BridgeName}}{{.BridgeName}}{{else}}<em>(auto-generated)</em>{{end}}</td>

@@ -87,6 +87,7 @@ type PeerForwarder interface {
 	DeleteJail(ctx context.Context, addr string, req *rpcpb.DeleteJailRequest) (*rpcpb.DeleteJailResponse, error)
 	CreateNetwork(ctx context.Context, addr string, req *rpcpb.CreateNetworkRequest) (*rpcpb.CreateNetworkResponse, error)
 	DeleteNetwork(ctx context.Context, addr string, req *rpcpb.DeleteNetworkRequest) (*rpcpb.DeleteNetworkResponse, error)
+	SetNetworkName(ctx context.Context, addr string, req *rpcpb.SetNetworkNameRequest) (*rpcpb.SetNetworkNameResponse, error)
 	CreateAPIKey(ctx context.Context, addr string, req *rpcpb.CreateAPIKeyRequest) (*rpcpb.CreateAPIKeyResponse, error)
 	RevokeAPIKey(ctx context.Context, addr string, req *rpcpb.RevokeAPIKeyRequest) (*rpcpb.RevokeAPIKeyResponse, error)
 	ListAPIKeys(ctx context.Context, addr string) (*rpcpb.ListAPIKeysResponse, error)
@@ -675,6 +676,22 @@ func (s *Server) DeleteNetwork(ctx context.Context, req *rpcpb.DeleteNetworkRequ
 		}
 	}
 	return &rpcpb.DeleteNetworkResponse{Network: fromInternalNetwork(network), Error: appErr, LeaderHint: leaderHint}, nil
+}
+
+// SetNetworkName implements rpcpb.ManagerServiceServer - renames a
+// network, the only field ADR-0071/ADR-0080 allow changing on an
+// existing definition without the full replace-after-teardown workflow.
+func (s *Server) SetNetworkName(ctx context.Context, req *rpcpb.SetNetworkNameRequest) (*rpcpb.SetNetworkNameResponse, error) {
+	cmd := &internalpb.Command{
+		Op: &internalpb.Command_SetNetworkName{SetNetworkName: &internalpb.SetNetworkName{Id: req.GetId(), Name: req.GetName()}},
+	}
+	network, appErr, leaderHint := s.applyNetworkCommand(ctx, cmd, req.GetTimeoutMs())
+	if leaderHint != "" && s.peers != nil {
+		if fwd, ferr := s.peers.SetNetworkName(ctx, s.peerManagerdAddr(leaderHint), req); ferr == nil {
+			return fwd, nil
+		}
+	}
+	return &rpcpb.SetNetworkNameResponse{Network: fromInternalNetwork(network), Error: appErr, LeaderHint: leaderHint}, nil
 }
 
 // ListNetworks implements rpcpb.ManagerServiceServer.

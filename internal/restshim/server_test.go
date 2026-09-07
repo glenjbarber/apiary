@@ -330,6 +330,10 @@ func (f *fakeClient) DeleteNetwork(_ context.Context, in *rpcpb.DeleteNetworkReq
 	return &rpcpb.DeleteNetworkResponse{}, nil
 }
 
+func (f *fakeClient) SetNetworkName(context.Context, *rpcpb.SetNetworkNameRequest, ...grpc.CallOption) (*rpcpb.SetNetworkNameResponse, error) {
+	return &rpcpb.SetNetworkNameResponse{}, nil
+}
+
 func (f *fakeClient) CreateJail(_ context.Context, in *rpcpb.CreateJailRequest, _ ...grpc.CallOption) (*rpcpb.CreateJailResponse, error) {
 	f.lastCreateJailReq = in
 	if f.createJailResp != nil {

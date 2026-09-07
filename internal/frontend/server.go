@@ -710,6 +710,7 @@ func (s *Server) routes() {
 	// as upload/delete, matching write blast radius.
 	s.mux.HandleFunc("POST /networks", s.requireRole(manager.RoleOperator, s.handleCreateNetwork))
 	s.mux.HandleFunc("DELETE /networks/{id}", s.requireRole(manager.RoleOperator, s.handleDeleteNetwork))
+	s.mux.HandleFunc("POST /networks/{id}/name", s.requireRole(manager.RoleOperator, s.handleSetNetworkName))
 	s.mux.HandleFunc("GET /jails/new", s.requireRole(manager.RoleOperator, s.handleNewJailPage))
 	s.mux.HandleFunc("POST /jails", s.requireRole(manager.RoleOperator, s.handleCreateJail))
 	s.mux.HandleFunc("DELETE /jails/{id}", s.requireRole(manager.RoleOperator, s.handleDeleteJail))
@@ -1523,6 +1524,27 @@ func (s *Server) handleCreateNetwork(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleDeleteNetwork(w http.ResponseWriter, r *http.Request) {
 	resp, err := s.client.DeleteNetwork(r.Context(), &rpcpb.DeleteNetworkRequest{Id: r.PathValue("id")})
+	if err != nil {
+		s.renderNetworkPanelResult(w, r, err.Error())
+		return
+	}
+	if resp.GetError() != "" {
+		s.renderNetworkPanelResult(w, r, resp.GetError())
+		return
+	}
+	s.renderNetworkPanelResult(w, r, "")
+}
+
+// handleSetNetworkName renames a network - the only field editable on
+// an existing network definition (ADR-0071/ADR-0080); everything else
+// with a physical realization (subnet/VLAN/bridge/gateway) still
+// requires the delete-and-recreate workflow.
+func (s *Server) handleSetNetworkName(w http.ResponseWriter, r *http.Request) {
+	if err := r.ParseForm(); err != nil {
+		s.renderNetworkPanelResult(w, r, "invalid form: "+err.Error())
+		return
+	}
+	resp, err := s.client.SetNetworkName(r.Context(), &rpcpb.SetNetworkNameRequest{Id: r.PathValue("id"), Name: r.FormValue("name")})
 	if err != nil {
 		s.renderNetworkPanelResult(w, r, err.Error())
 		return

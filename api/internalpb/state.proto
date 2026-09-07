@@ -327,6 +327,14 @@ message Command {
     // above all follow the identical shape, even where the field in
     // question would technically be safe to carry through UpdateVM).
     SetVMFirewallRules set_vm_firewall_rules = 19;
+
+    // SetNetworkName renames a NetworkDefinition - deliberately the
+    // only mutable field on an existing network (ADR-0071 rejected a
+    // general UpdateNetwork for subnet/vlan/bridge/gateway, since
+    // mutating those in place would leave the reconciler unable to
+    // tell the old and new physical realizations apart; Name has no
+    // physical realization at all, so that hazard doesn't apply to it).
+    SetNetworkName set_network_name = 20;
   }
 }
 
@@ -444,6 +452,15 @@ message SetVMDesiredState {
 message SetVMFirewallRules {
   string id = 1;
   repeated FirewallRule firewall_rules = 2;
+}
+
+// SetNetworkName changes only NetworkDefinition.name. Fails if the id
+// doesn't exist. See ADR-0071/ADR-0080: this is deliberately the only
+// field a network's definition can have changed after creation without
+// going through the full replace-after-converged-teardown workflow.
+message SetNetworkName {
+  string id = 1;
+  string name = 2;
 }
 
 // PurgeVM removes a VM definition outright, regardless of its current

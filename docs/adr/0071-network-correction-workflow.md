@@ -2,7 +2,15 @@
 
 ## Status
 
-Accepted
+Accepted. **Update**: `Name` is now a narrow, carved-out exception to
+"replace, never in-place edit" - see
+[ADR-0080](0080-network-name-editing.md) for why this ADR's own hazard
+(ambiguous physical realization) never applied to that field in the
+first place. Every field named below with a real physical
+realization (subnet, VLAN, bridge, gateway) remains exactly as
+immutable as this ADR decided; the guided replacement workflow this
+ADR calls for is built out in
+[ADR-0081](0081-guided-network-replacement-workflow.md).
 
 ## Context
 

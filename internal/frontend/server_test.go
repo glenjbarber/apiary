@@ -49,11 +49,13 @@ type fakeClient struct {
 	getVMSerialLogResp *rpcpb.GetVMSerialLogResponse
 	getVMSerialLogErr  error
 
-	listNetworksResp     *rpcpb.ListNetworksResponse
-	createNetworkResp    *rpcpb.CreateNetworkResponse
-	deleteNetworkResp    *rpcpb.DeleteNetworkResponse
-	lastCreateNetworkReq *rpcpb.CreateNetworkRequest
-	lastDeleteNetworkReq *rpcpb.DeleteNetworkRequest
+	listNetworksResp      *rpcpb.ListNetworksResponse
+	createNetworkResp     *rpcpb.CreateNetworkResponse
+	deleteNetworkResp     *rpcpb.DeleteNetworkResponse
+	lastCreateNetworkReq  *rpcpb.CreateNetworkRequest
+	lastDeleteNetworkReq  *rpcpb.DeleteNetworkRequest
+	setNetworkNameResp    *rpcpb.SetNetworkNameResponse
+	lastSetNetworkNameReq *rpcpb.SetNetworkNameRequest
 
 	listJailsResp     *rpcpb.ListJailsResponse
 	createJailResp    *rpcpb.CreateJailResponse
@@ -449,6 +451,14 @@ func (f *fakeClient) DeleteNetwork(_ context.Context, in *rpcpb.DeleteNetworkReq
 		return f.deleteNetworkResp, nil
 	}
 	return &rpcpb.DeleteNetworkResponse{}, nil
+}
+
+func (f *fakeClient) SetNetworkName(_ context.Context, in *rpcpb.SetNetworkNameRequest, _ ...grpc.CallOption) (*rpcpb.SetNetworkNameResponse, error) {
+	f.lastSetNetworkNameReq = in
+	if f.setNetworkNameResp != nil {
+		return f.setNetworkNameResp, nil
+	}
+	return &rpcpb.SetNetworkNameResponse{}, nil
 }
 
 func (f *fakeClient) CreateJail(_ context.Context, in *rpcpb.CreateJailRequest, _ ...grpc.CallOption) (*rpcpb.CreateJailResponse, error) {
@@ -1346,6 +1356,58 @@ func TestServer_DeleteNetwork_ErrorShowsInPanel(t *testing.T) {
 
 	if !strings.Contains(rec.Body.String(), "still referenced") {
 		t.Errorf("response missing error message, got: %s", rec.Body.String())
+	}
+}
+
+func TestServer_SetNetworkName(t *testing.T) {
+	client := &fakeClient{setNetworkNameResp: &rpcpb.SetNetworkNameResponse{Network: &rpcpb.NetworkDefinition{Id: "net-1", Name: "production"}}}
+	s := newTestServer(t, client)
+
+	form := url.Values{"name": {"production"}}
+	req := httptest.NewRequest(http.MethodPost, "/networks/net-1/name", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	if client.lastSetNetworkNameReq.GetId() != "net-1" || client.lastSetNetworkNameReq.GetName() != "production" {
+		t.Errorf("forwarded request = %+v, want Id=net-1 Name=production", client.lastSetNetworkNameReq)
+	}
+}
+
+func TestServer_SetNetworkName_ErrorShowsInPanel(t *testing.T) {
+	client := &fakeClient{setNetworkNameResp: &rpcpb.SetNetworkNameResponse{Error: "network \"net-1\" does not exist"}}
+	s := newTestServer(t, client)
+
+	form := url.Values{"name": {"production"}}
+	req := httptest.NewRequest(http.MethodPost, "/networks/net-1/name", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, req)
+
+	if !strings.Contains(rec.Body.String(), "does not exist") {
+		t.Errorf("response missing error message, got: %s", rec.Body.String())
+	}
+}
+
+func TestServer_NetworksPage_NameIsAnEditableFormForOperator(t *testing.T) {
+	client := &fakeClient{listNetworksResp: &rpcpb.ListNetworksResponse{
+		Networks: []*rpcpb.NetworkDefinition{{Id: "net-1", Name: "prod", Subnet: "10.60.0.0/24"}},
+	}}
+	s := newTestServer(t, client)
+
+	req := httptest.NewRequest(http.MethodGet, "/networks", nil)
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, req)
+
+	body := rec.Body.String()
+	if !strings.Contains(body, `hx-post="/networks/net-1/name"`) {
+		t.Errorf("expected an editable Name form for net-1, got: %s", body)
+	}
+	if !strings.Contains(body, `value="prod"`) {
+		t.Errorf("expected the current name pre-filled, got: %s", body)
 	}
 }
 

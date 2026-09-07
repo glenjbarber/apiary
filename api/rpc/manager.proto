@@ -178,6 +178,12 @@ service ManagerService {
   rpc ListNetworks(ListNetworksRequest) returns (ListNetworksResponse);
   rpc DeleteNetwork(DeleteNetworkRequest) returns (DeleteNetworkResponse);
 
+  // SetNetworkName renames a managed network - the only field on an
+  // existing network definition editable in place (ADR-0071/ADR-0080
+  // reject a general UpdateNetwork for anything with a physical
+  // realization; Name has none).
+  rpc SetNetworkName(SetNetworkNameRequest) returns (SetNetworkNameResponse);
+
   // CreateAPIKey/ListAPIKeys/RevokeAPIKey manage credentials for this
   // service's own RPC surface (ADR-0023). CreateAPIKey is the only
   // place a raw key is ever returned - it cannot be retrieved again
@@ -1245,6 +1251,18 @@ message DeleteNetworkRequest {
 }
 
 message DeleteNetworkResponse {
+  NetworkDefinition network = 1;
+  string error = 2;
+  string leader_hint = 3;
+}
+
+message SetNetworkNameRequest {
+  string id = 1;
+  string name = 2;
+  uint32 timeout_ms = 3;
+}
+
+message SetNetworkNameResponse {
   NetworkDefinition network = 1;
   string error = 2;
   string leader_hint = 3;

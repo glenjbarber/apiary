@@ -1087,6 +1087,58 @@ func TestIntegration_CreateListDeleteNetwork(t *testing.T) {
 	}
 }
 
+func TestIntegration_SetNetworkNameRenamesPreservesEverythingElse(t *testing.T) {
+	raftdSocket := newRaftdUDSSocket(t)
+	client := newManagerdRPCClient(t, raftdSocket)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if _, err := client.CreateNetwork(ctx, &rpcpb.CreateNetworkRequest{
+		Network: &rpcpb.NetworkDefinition{Id: "net-1", Name: "prod", VlanId: 100, Subnet: "10.60.0.0/24"},
+	}); err != nil {
+		t.Fatalf("CreateNetwork() error: %v", err)
+	}
+
+	resp, err := client.SetNetworkName(ctx, &rpcpb.SetNetworkNameRequest{Id: "net-1", Name: "production"})
+	if err != nil {
+		t.Fatalf("SetNetworkName() error: %v", err)
+	}
+	if resp.GetError() != "" {
+		t.Fatalf("SetNetworkName() returned error: %s", resp.GetError())
+	}
+	if resp.GetNetwork().GetName() != "production" {
+		t.Errorf("Name = %q, want production", resp.GetNetwork().GetName())
+	}
+	if resp.GetNetwork().GetSubnet() != "10.60.0.0/24" || resp.GetNetwork().GetVlanId() != 100 {
+		t.Errorf("network = %+v, want subnet/vlan preserved from the original definition", resp.GetNetwork())
+	}
+
+	listResp, err := client.ListNetworks(ctx, &rpcpb.ListNetworksRequest{})
+	if err != nil || len(listResp.GetNetworks()) != 1 {
+		t.Fatalf("ListNetworks() after rename = (%+v, %v)", listResp.GetNetworks(), err)
+	}
+	if listResp.GetNetworks()[0].GetName() != "production" {
+		t.Errorf("ListNetworks() after rename = %+v, want name=production", listResp.GetNetworks()[0])
+	}
+}
+
+func TestIntegration_SetNetworkNameMissingIDIsError(t *testing.T) {
+	raftdSocket := newRaftdUDSSocket(t)
+	client := newManagerdRPCClient(t, raftdSocket)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	resp, err := client.SetNetworkName(ctx, &rpcpb.SetNetworkNameRequest{Id: "does-not-exist", Name: "x"})
+	if err != nil {
+		t.Fatalf("SetNetworkName() error: %v", err)
+	}
+	if resp.GetError() == "" {
+		t.Fatalf("SetNetworkName() error = empty, want a missing-id rejection")
+	}
+}
+
 func TestIntegration_DeleteNetworkStillReferencedByVMIsRejected(t *testing.T) {
 	raftdSocket := newRaftdUDSSocket(t)
 	client := newManagerdRPCClient(t, raftdSocket)

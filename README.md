@@ -669,7 +669,13 @@ each design decision, in order.
   firewall rules can now be edited after creation too, via a dedicated
   `SetVMFirewallRules` command (not the general `UpdateVM`, matching
   every other frontend-initiated VM mutation) - see
-  [ADR-0079](docs/adr/0079-vm-firewall-rule-editing.md).
+  [ADR-0079](docs/adr/0079-vm-firewall-rule-editing.md). A managed
+  network's Name can now be edited in place too, via a dedicated
+  `SetNetworkName` command - every other field (subnet, VLAN, bridge,
+  gateway) still requires the delete-and-recreate workflow ADR-0071
+  established, since `Name` alone has no physical realization for that
+  workflow's own hazard to apply to. See
+  [ADR-0080](docs/adr/0080-network-name-editing.md).
 - Importing VMs from other hypervisors (e.g. Proxmox): no disk-format
   conversion, and Apiary is UEFI-only. Linux containers have no path at
   all — jails share the host FreeBSD kernel

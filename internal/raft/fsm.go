@@ -103,6 +103,8 @@ func (f *FSM) Apply(log *raft.Log) interface{} {
 		return f.applyCreateNetwork(log.Index, op.CreateNetwork.GetNetwork())
 	case *internalpb.Command_DeleteNetwork:
 		return f.applyDeleteNetwork(log.Index, op.DeleteNetwork.GetId())
+	case *internalpb.Command_SetNetworkName:
+		return f.applySetNetworkName(log.Index, op.SetNetworkName)
 	case *internalpb.Command_CreateApiKey:
 		return f.applyCreateAPIKey(log.Index, op.CreateApiKey.GetKey())
 	case *internalpb.Command_RevokeApiKey:
@@ -574,6 +576,20 @@ func (f *FSM) applyDeleteNetwork(index uint64, id string) *FSMApplyResult {
 	}
 	delete(f.networks, id)
 	return &FSMApplyResult{Index: index, Network: network}
+}
+
+// applySetNetworkName renames an existing network, touching no other
+// field - the only mutation a NetworkDefinition supports after
+// creation (ADR-0071/ADR-0080).
+func (f *FSM) applySetNetworkName(index uint64, req *internalpb.SetNetworkName) *FSMApplyResult {
+	network, exists := f.networks[req.GetId()]
+	if !exists {
+		return &FSMApplyResult{Index: index, Error: fmt.Sprintf("SetNetworkName: id %q does not exist", req.GetId())}
+	}
+	updated := proto.Clone(network).(*internalpb.NetworkDefinition)
+	updated.Name = req.GetName()
+	f.networks[req.GetId()] = updated
+	return &FSMApplyResult{Index: index, Network: updated}
 }
 
 // Network returns the current definition for id, and whether it exists.
