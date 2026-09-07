@@ -13,11 +13,11 @@
     <h3>Add or update local claim</h3>
     <p class="muted">Use scope <code>colony</code> or <code>hive:&lt;id&gt;</code> to make a current claim available as health and simulator context.</p>
     <form method="post" action="/assumption-register" class="form-grid">
-      <label>ID<input name="id" required></label><label>Owner<input name="owner" required></label>
-      <label>Scope<input name="scope" placeholder="hive:apiarium" required></label><label>Expires at (RFC 3339)<input name="expires_at" placeholder="2026-12-31T23:59:59Z" required></label>
-      <label class="full-width">Statement<input name="statement" required></label>
-      <label class="full-width">Evidence<input name="evidence" required></label>
-      <label class="full-width">Verification method (optional)<input name="verification_method"></label>
+      <label>ID<input name="id" required title="Unique identifier for this claim. Saving with an ID that already exists updates that claim in place rather than creating a new one."></label><label>Owner<input name="owner" required title="Who owns this claim - a name or team, for context only. Not a UNIX/PAM account and not checked against any login."></label>
+      <label>Scope<input name="scope" placeholder="hive:apiarium" required title="Must be exactly &quot;colony&quot; (the whole cluster) or &quot;hive:&lt;node-id&gt;&quot; (one Comb, e.g. hive:apiarium) - matched exactly, so any other value is saved but never surfaced as health or simulator context."></label><label>Expires at (RFC 3339)<input name="expires_at" placeholder="2026-12-31T23:59:59Z" required title="Timestamp after which this claim is treated as expired and stops appearing as context, even though it stays listed below until deleted."></label>
+      <label class="full-width">Statement<input name="statement" required title="The claim itself, in plain language (e.g. &quot;route is stable&quot;)."></label>
+      <label class="full-width">Evidence<input name="evidence" required title="What supports this claim - a command, observation, or reference another operator could check (e.g. &quot;route -n get default&quot;)."></label>
+      <label class="full-width">Verification method (optional)<input name="verification_method" title="How this claim could be re-checked later, such as a command to run. Shown alongside the evidence but never required."></label>
       <button type="submit">Save claim</button>
     </form>
   </div>
