@@ -130,12 +130,12 @@
     .page-header h2 { margin:0; }
     .muted { color:var(--muted); }
     .badge { display:inline-flex; align-items:center; border-radius:999px; padding:.18rem .55rem; font-size:.76rem; font-weight:700; background:#e8e8e8; color:#333; }
-    .badge.ready, .badge.running, .badge.up, .badge.true, .badge.healthy, .badge.clear { color:var(--success); background:color-mix(in srgb, var(--success) 17%, var(--panel)); }
-    .badge.error, .badge.down, .badge.deleting, .badge.false, .badge.blocked { color:var(--danger); background:color-mix(in srgb, var(--danger) 17%, var(--panel)); }
-    .badge.creating, .badge.pending, .badge.degraded { color:#765600; background:#fff1b8; }
+    .badge.ready, .badge.running, .badge.up, .badge.true, .badge.healthy, .badge.clear, .badge.ok { color:var(--success); background:color-mix(in srgb, var(--success) 17%, var(--panel)); }
+    .badge.error, .badge.down, .badge.deleting, .badge.false, .badge.blocked, .badge.expired { color:var(--danger); background:color-mix(in srgb, var(--danger) 17%, var(--panel)); }
+    .badge.creating, .badge.pending, .badge.degraded, .badge.soon { color:#765600; background:#fff1b8; }
     .badge.restarting { color:#765600; background:#fff1b8; }
     .badge.stopped { color:var(--muted); background:var(--table-head); }
-    :root[data-theme="dark"] .badge.creating, :root[data-theme="dark"] .badge.pending, :root[data-theme="dark"] .badge.degraded, :root[data-theme="dark"] .badge.restarting { color:#ffe08a; background:#493b11; }
+    :root[data-theme="dark"] .badge.creating, :root[data-theme="dark"] .badge.pending, :root[data-theme="dark"] .badge.degraded, :root[data-theme="dark"] .badge.restarting, :root[data-theme="dark"] .badge.soon { color:#ffe08a; background:#493b11; }
     .badge.unknown { color:var(--muted); background:var(--table-head); }
     .badge.not-applicable { color:#6685ef; background:color-mix(in srgb, #6685ef 17%, var(--panel)); }
     .badge.stale { opacity:.65; border:1px dashed var(--muted); }

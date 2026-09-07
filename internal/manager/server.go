@@ -323,7 +323,8 @@ func originCertificateInfo(entry origincert.InventoryEntry) *rpcpb.OriginCertifi
 	return &rpcpb.OriginCertificateInfo{Name: entry.Name, Service: entry.Service,
 		Hostnames: append([]string(nil), entry.Hostnames...), Id: entry.ID,
 		ExpiresAtUnix: entry.ExpiresAt.Unix(), CertPath: entry.CertPath,
-		KeyPath: entry.KeyPath, UpdatedAtUnix: entry.UpdatedAt.Unix()}
+		KeyPath: entry.KeyPath, UpdatedAtUnix: entry.UpdatedAt.Unix(),
+		AutoRenew: entry.AutoRenew}
 }
 
 func (s *Server) ListOriginCertificates(_ context.Context, _ *rpcpb.ListOriginCertificatesRequest) (*rpcpb.ListOriginCertificatesResponse, error) {
@@ -366,7 +367,7 @@ func (s *Server) IssueOriginCertificate(ctx context.Context, req *rpcpb.IssueOri
 	if err != nil {
 		return &rpcpb.IssueOriginCertificateResponse{Error: "reading Origin CA token file: " + err.Error()}, nil
 	}
-	entry, err := origincert.Issue(ctx, s.originCA, origincert.IssueRequest{Directory: cfg.OriginCADirectory, Name: req.GetName(), Service: "apiary_managerd", Hostnames: req.GetHostnames(), ValidityDays: int(req.GetValidityDays()), Token: strings.TrimSpace(string(token))})
+	entry, err := origincert.Issue(ctx, s.originCA, origincert.IssueRequest{Directory: cfg.OriginCADirectory, Name: req.GetName(), Service: "apiary_managerd", Hostnames: req.GetHostnames(), ValidityDays: int(req.GetValidityDays()), Token: strings.TrimSpace(string(token)), AutoRenew: req.GetAutoRenew()})
 	if err != nil {
 		return &rpcpb.IssueOriginCertificateResponse{Error: err.Error()}, nil
 	}

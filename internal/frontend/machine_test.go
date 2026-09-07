@@ -6,6 +6,7 @@ import (
 	"net/url"
 	"strings"
 	"testing"
+	"time"
 
 	rpcpb "github.com/glenjbarber/apiary/api/rpc"
 )
@@ -482,6 +483,69 @@ func TestServer_UpdateOriginCAConfig_ForwardsFormValues(t *testing.T) {
 	got := client.lastUpdateNodeConfigReq
 	if got.GetOriginCaTokenFile() != "/root/origin-ca.token" || got.GetOriginCaDirectory() != "/var/db/apiary/origin-ca" {
 		t.Errorf("forwarded request = %+v, want Origin CA paths set", got)
+	}
+}
+
+func TestServer_IssueOriginCertificate_ForwardsAutoRenewCheckbox(t *testing.T) {
+	client := &fakeClient{issueOriginCertificateResp: &rpcpb.IssueOriginCertificateResponse{RestartScheduled: true}}
+	s := newTestServer(t, client)
+
+	form := url.Values{"name": {"managerd"}, "hostnames": {"api.example.com"}, "validity_days": {"365"}, "auto_renew": {"true"}}
+	req := httptest.NewRequest(http.MethodPost, "/machine/origin-ca", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	if !client.lastIssueOriginCertificateReq.GetAutoRenew() {
+		t.Errorf("forwarded request = %+v, want AutoRenew true", client.lastIssueOriginCertificateReq)
+	}
+}
+
+func TestServer_IssueOriginCertificate_OmittedCheckboxIsFalse(t *testing.T) {
+	client := &fakeClient{issueOriginCertificateResp: &rpcpb.IssueOriginCertificateResponse{RestartScheduled: true}}
+	s := newTestServer(t, client)
+
+	form := url.Values{"name": {"managerd"}, "hostnames": {"api.example.com"}, "validity_days": {"365"}}
+	req := httptest.NewRequest(http.MethodPost, "/machine/origin-ca", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	if client.lastIssueOriginCertificateReq.GetAutoRenew() {
+		t.Errorf("forwarded request = %+v, want AutoRenew false when the checkbox is omitted", client.lastIssueOriginCertificateReq)
+	}
+}
+
+func TestServer_MachinePage_ShowsOriginCertificateExpiryAndAutoRenew(t *testing.T) {
+	client := &fakeClient{listOriginCertificatesResp: &rpcpb.ListOriginCertificatesResponse{
+		Certificates: []*rpcpb.OriginCertificateInfo{
+			{Name: "managerd", Service: "apiary_managerd", Hostnames: []string{"api.example.com"},
+				ExpiresAtUnix: time.Now().Add(10 * 24 * time.Hour).Unix(), AutoRenew: true},
+			{Name: "old", Service: "apiary_managerd", Hostnames: []string{"old.example.com"},
+				ExpiresAtUnix: time.Now().Add(-time.Hour).Unix(), AutoRenew: false},
+		},
+	}}
+	s := newTestServer(t, client)
+
+	req := httptest.NewRequest(http.MethodGet, "/machine", nil)
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, req)
+
+	body := rec.Body.String()
+	if !strings.Contains(body, `class="badge soon"`) {
+		t.Errorf("machine page missing an ExpirySoon badge for a certificate expiring within 30 days, got: %s", body)
+	}
+	if !strings.Contains(body, `class="badge expired"`) {
+		t.Errorf("machine page missing an ExpiryExpired badge for an already-expired certificate, got: %s", body)
+	}
+	if !strings.Contains(body, `<span class="badge true">on</span>`) || !strings.Contains(body, `<span class="badge unknown">off</span>`) {
+		t.Errorf("machine page missing auto-renew on/off badges, got: %s", body)
 	}
 }
 

@@ -4,7 +4,10 @@
 
 Implemented v1. API/UI activation and renewal are available for local
 `apiary_managerd` only. Expiry health, renewal scheduling, revocation, and
-support for the other Apiary services remain future work.
+support for the other Apiary services remain future work. **Update**:
+expiry health and scheduled renewal are now implemented - see
+[ADR-0077](0077-origin-ca-expiry-health-and-renewal.md). Revocation and
+support for services other than `managerd` remain future work.
 
 ## Context
 

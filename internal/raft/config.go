@@ -19,11 +19,20 @@ type Config struct {
 	// and file-based snapshots. It is created if it does not exist.
 	DataDir string
 
-	// BindAddr is the loopback TCP address the raft transport listens on
-	// for inter-node communication. Even though v1 only supports
-	// single-node bootstrap, a real TCP transport (rather than an in-memory
-	// one) is used so a later multi-node slice needs no transport rework.
+	// BindAddr is the TCP address the raft transport listens on for
+	// inter-node communication - a real network address in a genuine
+	// multi-node cluster, not necessarily loopback.
 	BindAddr string
+
+	// TLSCert, TLSKey, and TLSCA configure mutual TLS on the raft
+	// transport itself (ADR-0078) - this node's own certificate/key and
+	// the CA used to verify every peer. All three must be set together,
+	// or all left empty for today's plain-TCP behavior (see
+	// withDefaults). Opt-in, off by default, matching every other TLS
+	// capability in this codebase.
+	TLSCert string
+	TLSKey  string
+	TLSCA   string
 }
 
 // DefaultBindAddr is used when Config.BindAddr is empty.
@@ -44,5 +53,18 @@ func (cfg Config) withDefaults() (Config, error) {
 	if cfg.DataDir == "" {
 		return cfg, errors.New("raft: Config.DataDir must be set")
 	}
+	if !allSetOrAllEmpty(cfg.TLSCert, cfg.TLSKey, cfg.TLSCA) {
+		return cfg, errors.New("raft: TLSCert, TLSKey, and TLSCA must all be set together, or all left empty")
+	}
 	return cfg, nil
+}
+
+func allSetOrAllEmpty(values ...string) bool {
+	empty := 0
+	for _, v := range values {
+		if v == "" {
+			empty++
+		}
+	}
+	return empty == 0 || empty == len(values)
 }

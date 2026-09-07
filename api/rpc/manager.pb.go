@@ -3120,6 +3120,7 @@ type OriginCertificateInfo struct {
 	CertPath      string                 `protobuf:"bytes,6,opt,name=cert_path,json=certPath,proto3" json:"cert_path,omitempty"`
 	KeyPath       string                 `protobuf:"bytes,7,opt,name=key_path,json=keyPath,proto3" json:"key_path,omitempty"`
 	UpdatedAtUnix int64                  `protobuf:"varint,8,opt,name=updated_at_unix,json=updatedAtUnix,proto3" json:"updated_at_unix,omitempty"`
+	AutoRenew     bool                   `protobuf:"varint,9,opt,name=auto_renew,json=autoRenew,proto3" json:"auto_renew,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -3208,6 +3209,13 @@ func (x *OriginCertificateInfo) GetUpdatedAtUnix() int64 {
 		return x.UpdatedAtUnix
 	}
 	return 0
+}
+
+func (x *OriginCertificateInfo) GetAutoRenew() bool {
+	if x != nil {
+		return x.AutoRenew
+	}
+	return false
 }
 
 type ListOriginCertificatesRequest struct {
@@ -3303,6 +3311,7 @@ type IssueOriginCertificateRequest struct {
 	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
 	Hostnames     []string               `protobuf:"bytes,2,rep,name=hostnames,proto3" json:"hostnames,omitempty"`
 	ValidityDays  int32                  `protobuf:"varint,3,opt,name=validity_days,json=validityDays,proto3" json:"validity_days,omitempty"`
+	AutoRenew     bool                   `protobuf:"varint,4,opt,name=auto_renew,json=autoRenew,proto3" json:"auto_renew,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -3356,6 +3365,13 @@ func (x *IssueOriginCertificateRequest) GetValidityDays() int32 {
 		return x.ValidityDays
 	}
 	return 0
+}
+
+func (x *IssueOriginCertificateRequest) GetAutoRenew() bool {
+	if x != nil {
+		return x.AutoRenew
+	}
+	return false
 }
 
 type IssueOriginCertificateResponse struct {
@@ -10301,7 +10317,7 @@ const file_api_rpc_manager_proto_rawDesc = "" +
 	"\x1cDeleteAssumptionClaimRequest\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\"5\n" +
 	"\x1dDeleteAssumptionClaimResponse\x12\x14\n" +
-	"\x05error\x18\x01 \x01(\tR\x05error\"\xfb\x01\n" +
+	"\x05error\x18\x01 \x01(\tR\x05error\"\x9a\x02\n" +
 	"\x15OriginCertificateInfo\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x18\n" +
 	"\aservice\x18\x02 \x01(\tR\aservice\x12\x1c\n" +
@@ -10310,15 +10326,19 @@ const file_api_rpc_manager_proto_rawDesc = "" +
 	"\x0fexpires_at_unix\x18\x05 \x01(\x03R\rexpiresAtUnix\x12\x1b\n" +
 	"\tcert_path\x18\x06 \x01(\tR\bcertPath\x12\x19\n" +
 	"\bkey_path\x18\a \x01(\tR\akeyPath\x12&\n" +
-	"\x0fupdated_at_unix\x18\b \x01(\x03R\rupdatedAtUnix\"\x1f\n" +
+	"\x0fupdated_at_unix\x18\b \x01(\x03R\rupdatedAtUnix\x12\x1d\n" +
+	"\n" +
+	"auto_renew\x18\t \x01(\bR\tautoRenew\"\x1f\n" +
 	"\x1dListOriginCertificatesRequest\"\x80\x01\n" +
 	"\x1eListOriginCertificatesResponse\x12H\n" +
 	"\fcertificates\x18\x01 \x03(\v2$.apiary.rpc.v1.OriginCertificateInfoR\fcertificates\x12\x14\n" +
-	"\x05error\x18\x02 \x01(\tR\x05error\"v\n" +
+	"\x05error\x18\x02 \x01(\tR\x05error\"\x95\x01\n" +
 	"\x1dIssueOriginCertificateRequest\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x1c\n" +
 	"\thostnames\x18\x02 \x03(\tR\thostnames\x12#\n" +
-	"\rvalidity_days\x18\x03 \x01(\x05R\fvalidityDays\"\xab\x01\n" +
+	"\rvalidity_days\x18\x03 \x01(\x05R\fvalidityDays\x12\x1d\n" +
+	"\n" +
+	"auto_renew\x18\x04 \x01(\bR\tautoRenew\"\xab\x01\n" +
 	"\x1eIssueOriginCertificateResponse\x12F\n" +
 	"\vcertificate\x18\x01 \x01(\v2$.apiary.rpc.v1.OriginCertificateInfoR\vcertificate\x12\x14\n" +
 	"\x05error\x18\x02 \x01(\tR\x05error\x12+\n" +

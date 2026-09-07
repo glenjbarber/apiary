@@ -282,6 +282,19 @@ each design decision, in order.
   failed outright against a TLS-only `managerd`, and TLS dial-and-
   serve confirmed working end-to-end through a real `restshimd`. See
   [ADR-0033](docs/adr/0033-internal-transport-security.md).
+- **Raft transport TLS** — the raft member-to-member TCP transport
+  (`internal/raft`, distinct from ADR-0033's own internal UDS/gRPC
+  transport above) previously had no TLS option at all, not just "off
+  by default." `-raft-tls-cert`/`-raft-tls-key`/`-raft-tls-ca` on
+  `raftd` now enable a custom `raft.StreamLayer` over mutual TLS - each
+  member presents its own certificate and verifies every peer's against
+  a shared CA, appropriate since raft members are a closed, symmetric
+  peer set rather than a public-facing API. Opt-in; all three flags
+  unset preserves today's plain-TCP behavior exactly. Verified by this
+  codebase's first automated multi-node raft test: two real
+  `raft.Node`s, joined via `AddVoter` and replicating a real log entry,
+  entirely over the new TLS transport. See
+  [ADR-0078](docs/adr/0078-raft-transport-tls.md).
 - **Remote serial console log viewing** — closes the gap ADR-0032 left
   open: a new `GetVMSerialLog` RPC (read-only, same role tier as the
   console) and a `/vms/{id}/serial` web UI page, polling on a timer
@@ -564,6 +577,17 @@ each design decision, in order.
   TCP/HTTPS-origin would need Cloudflare Access client tooling or the
   separate Spectrum product - out of scope). See
   [ADR-0063](docs/adr/0063-cloudflare-tunnel-exposure-v1.md).
+- **Origin CA certificate expiry health and scheduled renewal** - the
+  Machine Configuration page's Origin CA panel (ADR-0072) now flags a
+  locally issued certificate as "soon" (within 30 days of expiry) or
+  "expired" instead of only showing a bare date, and an optional
+  Auto-renew flag set at issuance time re-issues that certificate on
+  its own, using the same hostnames and validity period, once it
+  enters that window - checked hourly by a new independent tick in
+  `managerd`, alongside the existing reconcile and Automated Assumption
+  Checks loops. Certificate revocation and issuance for services other
+  than `managerd` remain future work. See
+  [ADR-0077](docs/adr/0077-origin-ca-expiry-health-and-renewal.md).
 - **System settings expansion** - eight new panels on the Machine
   Configuration page (`/machine`) expose most of `managerd`'s
   remaining startup flags as editable settings: resource-scope paths,

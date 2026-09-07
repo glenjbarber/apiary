@@ -77,6 +77,10 @@ type fakeClient struct {
 	setVMFirewallPausedResp    *rpcpb.SetVMFirewallPausedResponse
 	lastSetVMFirewallPausedReq *rpcpb.SetVMFirewallPausedRequest
 
+	listOriginCertificatesResp    *rpcpb.ListOriginCertificatesResponse
+	issueOriginCertificateResp    *rpcpb.IssueOriginCertificateResponse
+	lastIssueOriginCertificateReq *rpcpb.IssueOriginCertificateRequest
+
 	setVMCloudflareExposureResp    *rpcpb.SetVMCloudflareExposureResponse
 	lastSetVMCloudflareExposureReq *rpcpb.SetVMCloudflareExposureRequest
 
@@ -347,10 +351,17 @@ func (f *fakeClient) ListAssumptionClaims(context.Context, *rpcpb.ListAssumption
 }
 
 func (f *fakeClient) ListOriginCertificates(context.Context, *rpcpb.ListOriginCertificatesRequest, ...grpc.CallOption) (*rpcpb.ListOriginCertificatesResponse, error) {
+	if f.listOriginCertificatesResp != nil {
+		return f.listOriginCertificatesResp, nil
+	}
 	return &rpcpb.ListOriginCertificatesResponse{}, nil
 }
 
-func (f *fakeClient) IssueOriginCertificate(context.Context, *rpcpb.IssueOriginCertificateRequest, ...grpc.CallOption) (*rpcpb.IssueOriginCertificateResponse, error) {
+func (f *fakeClient) IssueOriginCertificate(_ context.Context, req *rpcpb.IssueOriginCertificateRequest, _ ...grpc.CallOption) (*rpcpb.IssueOriginCertificateResponse, error) {
+	f.lastIssueOriginCertificateReq = req
+	if f.issueOriginCertificateResp != nil {
+		return f.issueOriginCertificateResp, nil
+	}
 	return &rpcpb.IssueOriginCertificateResponse{}, nil
 }
 

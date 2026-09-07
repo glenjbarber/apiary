@@ -21,14 +21,44 @@ import (
 // Origin CA certificate's lifetime. It is local to one Hive and deliberately
 // excludes token values, private keys, CSRs, and certificate PEM.
 type InventoryEntry struct {
-	Name      string    `json:"name"`
-	Service   string    `json:"service"`
-	Hostnames []string  `json:"hostnames"`
-	ID        string    `json:"id"`
-	ExpiresAt time.Time `json:"expires_at"`
-	CertPath  string    `json:"cert_path"`
-	KeyPath   string    `json:"key_path"`
-	UpdatedAt time.Time `json:"updated_at"`
+	Name         string    `json:"name"`
+	Service      string    `json:"service"`
+	Hostnames    []string  `json:"hostnames"`
+	ID           string    `json:"id"`
+	ExpiresAt    time.Time `json:"expires_at"`
+	CertPath     string    `json:"cert_path"`
+	KeyPath      string    `json:"key_path"`
+	UpdatedAt    time.Time `json:"updated_at"`
+	AutoRenew    bool      `json:"auto_renew,omitempty"`
+	ValidityDays int       `json:"validity_days,omitempty"`
+}
+
+// RenewalWindow is how long before expiry a certificate is considered
+// ExpirySoon: eligible for automatic renewal if AutoRenew is set, and
+// flagged in the UI either way.
+const RenewalWindow = 30 * 24 * time.Hour
+
+// ExpiryStatus classifies an InventoryEntry's expiry relative to now. It
+// is deliberately unrelated to internal/health's node-health computations
+// - this only ever describes one certificate's own remaining lifetime.
+type ExpiryStatus string
+
+const (
+	ExpiryOK      ExpiryStatus = "ok"
+	ExpirySoon    ExpiryStatus = "soon"
+	ExpiryExpired ExpiryStatus = "expired"
+)
+
+// Expiry classifies e's remaining lifetime as of now.
+func (e InventoryEntry) Expiry(now time.Time) ExpiryStatus {
+	switch {
+	case !e.ExpiresAt.After(now):
+		return ExpiryExpired
+	case e.ExpiresAt.Before(now.Add(RenewalWindow)):
+		return ExpirySoon
+	default:
+		return ExpiryOK
+	}
 }
 
 // NewCSR creates an ECC private key and CSR for a specific hostname set. The

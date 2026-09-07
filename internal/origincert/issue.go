@@ -31,6 +31,7 @@ type IssueRequest struct {
 	Hostnames    []string
 	ValidityDays int
 	Token        string
+	AutoRenew    bool
 }
 
 // Issue generates a private key locally, requests a certificate through the
@@ -65,7 +66,7 @@ func Issue(ctx context.Context, issuer Issuer, req IssueRequest) (InventoryEntry
 	entry := InventoryEntry{
 		Name: req.Name, Service: req.Service, Hostnames: append([]string(nil), req.Hostnames...),
 		ID: issued.ID, ExpiresAt: issued.ExpiresAt, CertPath: certPath, KeyPath: keyPath,
-		UpdatedAt: time.Now().UTC(),
+		UpdatedAt: time.Now().UTC(), AutoRenew: req.AutoRenew, ValidityDays: req.ValidityDays,
 	}
 	entries, err := LoadInventory(req.Directory)
 	if err != nil {
