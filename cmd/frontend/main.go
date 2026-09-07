@@ -16,6 +16,7 @@ import (
 
 	rpcpb "github.com/glenjbarber/apiary/api/rpc"
 	"github.com/glenjbarber/apiary/internal/frontend"
+	"github.com/glenjbarber/apiary/internal/loginconfig"
 	"github.com/glenjbarber/apiary/internal/manager"
 	"github.com/glenjbarber/apiary/internal/pam"
 	"github.com/glenjbarber/apiary/internal/tlsdial"
@@ -126,6 +127,23 @@ func run() error {
 		return fmt.Errorf("parsing -role-map: %w", err)
 	}
 
+	// The persisted role-map override (see internal/loginconfig, wired
+	// to the Users page's Admin-only add/change-role/remove actions)
+	// wins wholesale over -role-map once it has ever been written -
+	// mirroring cmd/managerd's own nodeconfig-over-flags precedent
+	// (ADR-0049). Physical, per-node state; never routed through raft,
+	// since who may log in to one Hive's web UI is that Hive's own
+	// concern.
+	roleMapMgr := &loginconfig.Manager{}
+	if cfg, exists, err := roleMapMgr.Load(); err != nil {
+		return fmt.Errorf("loading persisted role map: %w", err)
+	} else if exists {
+		roleMap = make(map[string]manager.Role, len(cfg.RoleMap))
+		for user, role := range cfg.RoleMap {
+			roleMap[user] = manager.Role(role)
+		}
+	}
+
 	var auth pam.Authenticator
 	if *pamService != "" {
 		auth = pam.PAMAuthenticator{ServiceName: *pamService}
@@ -153,6 +171,7 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("creating frontend server: %w", err)
 	}
+	srv.SetRoleMapStore(roleMapMgr)
 	if auth != nil {
 		log.Printf("frontend: login enabled (pam-service=%s, %d role-mapped user(s))", *pamService, len(roleMap))
 	} else {

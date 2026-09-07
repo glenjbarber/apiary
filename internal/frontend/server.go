@@ -13,9 +13,11 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	rpcpb "github.com/glenjbarber/apiary/api/rpc"
+	"github.com/glenjbarber/apiary/internal/loginconfig"
 	"github.com/glenjbarber/apiary/internal/manager"
 	"github.com/glenjbarber/apiary/internal/pam"
 	"github.com/glenjbarber/apiary/web"
@@ -371,15 +373,26 @@ type Server struct {
 	// developer/local-network stage. roleMap resolves an authenticated
 	// username to a Role; a username with no entry is rejected at
 	// login (default-deny), never silently downgraded to Viewer.
-	// sessions tracks logged-in sessions; see session.go. lockouts
-	// tracks repeated failed login attempts per username, so an online
+	// roleMapMu guards roleMap - it starts as a plain read-only copy of
+	// -role-map's parsed value but is now live-editable through the
+	// Users page (Admin-only, see updateRoleMap), so concurrent reads
+	// (every login, every Users page render) and writes (an edit) both
+	// need to be safe. roleMapStore is nil-able: when set (production,
+	// via cmd/frontend), an edit is persisted to disk before it's ever
+	// applied in memory, so a save failure never leaves the running
+	// process out of sync with what's on disk; when nil (most tests),
+	// edits are in-memory only for that test's lifetime. sessions
+	// tracks logged-in sessions; see session.go. lockouts tracks
+	// repeated failed login attempts per username, so an online
 	// password-guessing attack against a real PAM account is at least
 	// slowed down, not merely reported as "invalid" forever with no
 	// consequence - see lockout.go.
-	auth     pam.Authenticator
-	roleMap  map[string]manager.Role
-	sessions *sessionStore
-	lockouts *loginAttemptTracker
+	auth         pam.Authenticator
+	roleMapMu    sync.RWMutex
+	roleMap      map[string]manager.Role
+	roleMapStore roleMapPersister
+	sessions     *sessionStore
+	lockouts     *loginAttemptTracker
 
 	// peers is nil-able (see cmd/frontend's -peer-tls/-peer-hostname-suffix/
 	// -peer-manager-port) - the cluster overview page ("/") falls back to
@@ -488,6 +501,27 @@ func NewServer(client rpcpb.ManagerServiceClient, auth pam.Authenticator, roleMa
 	}
 	s.routes()
 	return s, nil
+}
+
+// roleMapPersister is the subset of *loginconfig.Manager the server
+// needs, defined locally so tests can supply a fake without any real
+// file I/O - the same reasoning PasswordSetter/pam.Authenticator
+// already follow elsewhere in this package.
+type roleMapPersister interface {
+	Save(loginconfig.Config) error
+}
+
+// SetRoleMapStore wires persistence for live role-map edits (the Users
+// page's Admin-only add/change-role/remove actions) after construction,
+// following the same "post-construction setter, not a NewServer
+// parameter" precedent internal/manager.Server.SetAssumptionRegister
+// established, to keep this already-long constructor's signature
+// stable across this package's many focused tests. Leaving this unset
+// (the default in every test) means edits still work for that
+// process's lifetime, just without surviving a restart - see
+// updateRoleMap's own doc comment.
+func (s *Server) SetRoleMapStore(store roleMapPersister) {
+	s.roleMapStore = store
 }
 
 // ServeHTTP gates every request behind a valid session when login is
@@ -689,6 +723,12 @@ func (s *Server) routes() {
 	// still must not be allowed to target Admin.
 	s.mux.HandleFunc("GET /users", s.requireRole(manager.RoleViewer, s.handleUsersPage))
 	s.mux.HandleFunc("POST /users/{username}/password", s.requireRole(manager.RoleOperator, s.handleChangePassword))
+	// Role-map editing (who has an Apiary role at all, and at what
+	// tier) is strictly Admin - a materially more sensitive action than
+	// changing an already-authorized account's own password.
+	s.mux.HandleFunc("POST /users", s.requireRole(manager.RoleAdmin, s.handleAddUser))
+	s.mux.HandleFunc("POST /users/{username}/role", s.requireRole(manager.RoleAdmin, s.handleSetUserRole))
+	s.mux.HandleFunc("DELETE /users/{username}", s.requireRole(manager.RoleAdmin, s.handleRemoveUser))
 
 	// Machine Configuration (ADR-0049): the page itself is Operator-
 	// visible (the lowest tier of its three actions) - the uplink form's
@@ -773,7 +813,9 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.lockouts.RecordSuccess(user)
+	s.roleMapMu.RLock()
 	role, hasRole := s.roleMap[user]
+	s.roleMapMu.RUnlock()
 	if !hasRole {
 		s.render(w, "login_page", pageData{LoginError: "no Apiary role is assigned to this account - contact an administrator", NextURL: next})
 		return
@@ -1675,6 +1717,9 @@ func (s *Server) renderAPIKeyPanelResult(w http.ResponseWriter, r *http.Request,
 // row against the acting session's own role, via canChangePassword
 // (password.go), rather than re-derived in the template.
 func (s *Server) currentUsers(actorRole manager.Role) []userView {
+	s.roleMapMu.RLock()
+	defer s.roleMapMu.RUnlock()
+
 	usernames := make([]string, 0, len(s.roleMap))
 	for u := range s.roleMap {
 		usernames = append(usernames, u)
@@ -1719,7 +1764,9 @@ func (s *Server) handleChangePassword(w http.ResponseWriter, r *http.Request) {
 	}
 
 	target := r.PathValue("username")
+	s.roleMapMu.RLock()
 	targetRole, known := s.roleMap[target]
+	s.roleMapMu.RUnlock()
 	if !known {
 		s.renderUserPanelResult(w, r, info.username, info.role, fmt.Sprintf("unknown account %q", target))
 		return
@@ -1763,19 +1810,173 @@ func (s *Server) handleChangePassword(w http.ResponseWriter, r *http.Request) {
 	s.renderUserPanelSuccess(w, info.username, info.role, fmt.Sprintf("password for %q changed successfully", target))
 }
 
+// validRole reports whether role is one of the three real roles -
+// used to reject a malformed/unknown value from a form before it ever
+// reaches updateRoleMap, matching this project's "validate at the
+// point first accepted" discipline (ADR-0067).
+func validRole(role manager.Role) bool {
+	switch role {
+	case manager.RoleAdmin, manager.RoleOperator, manager.RoleViewer:
+		return true
+	default:
+		return false
+	}
+}
+
+// handleAddUser implements the Admin-only "add a new account" action
+// on the Users page. Adding an entry here does not create a real UNIX/
+// PAM account - ADR-0030's own design already keeps those independent
+// (a role-map entry for a username with no matching PAM account simply
+// never succeeds a login attempt); this only grants an Apiary role to
+// a username, exactly like -role-map itself always has.
+func (s *Server) handleAddUser(w http.ResponseWriter, r *http.Request) {
+	info, ok := s.currentSession(r)
+	if !ok {
+		s.renderUserPanelResult(w, r, "", manager.RoleViewer, "no active session")
+		return
+	}
+	if err := r.ParseForm(); err != nil {
+		s.renderUserPanelResult(w, r, info.username, info.role, "invalid form: "+err.Error())
+		return
+	}
+	target := strings.TrimSpace(r.FormValue("username"))
+	role := manager.Role(r.FormValue("role"))
+	if target == "" {
+		s.renderUserPanelResult(w, r, info.username, info.role, "username must not be empty")
+		return
+	}
+	if !validRole(role) {
+		s.renderUserPanelResult(w, r, info.username, info.role, fmt.Sprintf("invalid role %q: must be admin, operator, or viewer", role))
+		return
+	}
+	s.roleMapMu.RLock()
+	_, exists := s.roleMap[target]
+	s.roleMapMu.RUnlock()
+	if exists {
+		s.renderUserPanelResult(w, r, info.username, info.role, fmt.Sprintf("%q already has a role assigned - use that row to change it instead", target))
+		return
+	}
+	if err := s.updateRoleMap(target, &role); err != nil {
+		s.renderUserPanelResult(w, r, info.username, info.role, err.Error())
+		return
+	}
+	s.renderUserPanelSuccess(w, info.username, info.role, fmt.Sprintf("%q added with role %s", target, role))
+}
+
+// handleSetUserRole implements the Admin-only "change this account's
+// role" action on the Users page.
+func (s *Server) handleSetUserRole(w http.ResponseWriter, r *http.Request) {
+	info, ok := s.currentSession(r)
+	if !ok {
+		s.renderUserPanelResult(w, r, "", manager.RoleViewer, "no active session")
+		return
+	}
+	target := r.PathValue("username")
+	if err := r.ParseForm(); err != nil {
+		s.renderUserPanelResult(w, r, info.username, info.role, "invalid form: "+err.Error())
+		return
+	}
+	role := manager.Role(r.FormValue("role"))
+	if !validRole(role) {
+		s.renderUserPanelResult(w, r, info.username, info.role, fmt.Sprintf("invalid role %q: must be admin, operator, or viewer", role))
+		return
+	}
+	if err := s.updateRoleMap(target, &role); err != nil {
+		s.renderUserPanelResult(w, r, info.username, info.role, err.Error())
+		return
+	}
+	s.renderUserPanelSuccess(w, info.username, info.role, fmt.Sprintf("role for %q set to %s", target, role))
+}
+
+// handleRemoveUser implements the Admin-only "remove this account
+// entirely from the role map" action on the Users page - the account
+// still exists at the OS/PAM level (untouched, out of scope, matching
+// ADR-0030's own deferred self-service account management), it just
+// can no longer log in to Apiary until re-added.
+func (s *Server) handleRemoveUser(w http.ResponseWriter, r *http.Request) {
+	info, ok := s.currentSession(r)
+	if !ok {
+		s.renderUserPanelResult(w, r, "", manager.RoleViewer, "no active session")
+		return
+	}
+	target := r.PathValue("username")
+	if err := s.updateRoleMap(target, nil); err != nil {
+		s.renderUserPanelResult(w, r, info.username, info.role, err.Error())
+		return
+	}
+	s.renderUserPanelSuccess(w, info.username, info.role, fmt.Sprintf("%q removed from the role map", target))
+}
+
+// updateRoleMap sets target's role to *role, or removes target
+// entirely when role is nil. Refuses to leave the map with no admin
+// account at all - a real, cheap-to-prevent lockout distinct from
+// ADR-0023's own deliberate one-way-door API-key posture, since here
+// there's no reason not to just refuse the specific edit that would
+// cause it. Persists via roleMapStore (when configured) BEFORE
+// applying the change in memory, mirroring nodeconfig's own
+// validate-then-persist-then-apply ordering, so a save failure never
+// leaves the running process out of sync with what's on disk.
+func (s *Server) updateRoleMap(target string, role *manager.Role) error {
+	if target == "" {
+		return fmt.Errorf("username must not be empty")
+	}
+
+	s.roleMapMu.Lock()
+	defer s.roleMapMu.Unlock()
+
+	proposed := make(map[string]manager.Role, len(s.roleMap)+1)
+	for u, r := range s.roleMap {
+		proposed[u] = r
+	}
+	if role == nil {
+		delete(proposed, target)
+	} else {
+		proposed[target] = *role
+	}
+
+	if !roleMapHasAdmin(proposed) {
+		return fmt.Errorf("refusing to leave the role map with no admin account - assign another admin first")
+	}
+
+	if s.roleMapStore != nil {
+		cfg := loginconfig.Config{RoleMap: make(map[string]string, len(proposed))}
+		for u, r := range proposed {
+			cfg.RoleMap[u] = string(r)
+		}
+		if err := s.roleMapStore.Save(cfg); err != nil {
+			return fmt.Errorf("saving role map: %w", err)
+		}
+	}
+	s.roleMap = proposed
+	return nil
+}
+
+func roleMapHasAdmin(m map[string]manager.Role) bool {
+	for _, r := range m {
+		if r == manager.RoleAdmin {
+			return true
+		}
+	}
+	return false
+}
+
 // renderUserPanelResult/renderUserPanelSuccess re-render the Users
 // page's own list (recomputed against actorRole, so CanChange stays
 // correct) alongside a result message - mirroring
 // renderAPIKeyPanelResult's combined-target pattern. actorUsername
 // flows through to the template so each row's own password field can
 // be labeled unambiguously as "your own password, not <target>'s" -
-// see users.html.
+// see users.html. CanAdmin is set explicitly here (not via
+// withAuthFields, which also sets HiveID/AuthEnabled this fragment
+// doesn't need) so the role-editing controls stay correctly gated
+// after a form submission's own re-render, not just on the initial
+// full-page load.
 func (s *Server) renderUserPanelResult(w http.ResponseWriter, r *http.Request, actorUsername string, actorRole manager.Role, formErr string) {
-	s.render(w, "user_panel", pageData{Users: s.currentUsers(actorRole), Username: actorUsername, UserFormError: formErr})
+	s.render(w, "user_panel", pageData{Users: s.currentUsers(actorRole), Username: actorUsername, UserFormError: formErr, CanAdmin: actorRole.Satisfies(manager.RoleAdmin)})
 }
 
 func (s *Server) renderUserPanelSuccess(w http.ResponseWriter, actorUsername string, actorRole manager.Role, msg string) {
-	s.render(w, "user_panel", pageData{Users: s.currentUsers(actorRole), Username: actorUsername, UserFormSuccess: msg})
+	s.render(w, "user_panel", pageData{Users: s.currentUsers(actorRole), Username: actorUsername, UserFormSuccess: msg, CanAdmin: actorRole.Satisfies(manager.RoleAdmin)})
 }
 
 func (s *Server) render(w http.ResponseWriter, name string, data pageData) {
