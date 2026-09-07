@@ -79,6 +79,29 @@ exporting a shared helper across the package boundary - it's a
 two-line string format, not shared logic, and `internal/manager` has
 no other reason to import `internal/cluster`.
 
+## Hardening: `resource_id` validated before building a dataset name
+
+A security audit of this feature before deployment found
+`hastOrphanDatasetName` originally concatenated `resource_id` directly
+into a ZFS dataset name (`"hast-vm-" + id`) with no validation of its
+own shape, relying entirely on `zfs.Manager.path()`'s generic
+per-segment `..`/empty-segment traversal guard further downstream to
+keep the result inside `Base`. Traced through and confirmed **not
+currently exploitable** - `path()` already rejects a literal `..`
+segment, `zfs(8)` is invoked via `exec.Command` with args as a slice
+(no shell, no injection risk regardless of `id`'s contents), and this
+codebase never creates a dataset nested under another (everything is a
+flat, one-level child of `Base`), so there's no real target a crafted
+`/`-containing id could redirect toward today. Fixed anyway, per this
+project's own ADR-0067 doctrine (validate at the point a value is
+first accepted, don't rely on a different layer to catch what should
+never have been constructed): `hastOrphanDatasetName` now rejects an
+empty `resource_id` or one containing `/`/`\` outright, before ever
+building the dataset name string. Regression-tested with `../real`,
+`foo/../real`, and a same-length-no-`..` `foo/bar` (the case that
+would have passed `path()`'s literal-`..`-segment check had a nested
+dataset ever existed to redirect toward).
+
 ## Role gating
 
 - `ListOrphanedHASTResources`: Viewer - a read-only local report, same

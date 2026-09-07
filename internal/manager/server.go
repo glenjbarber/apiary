@@ -1961,8 +1961,24 @@ func hastOrphanResourceType(datasetName string) (kind, id string, ok bool) {
 	}
 }
 
-// hastOrphanDatasetName is hastOrphanResourceType's inverse.
+// hastOrphanDatasetName is hastOrphanResourceType's inverse. Validates id
+// itself before ever building the dataset name string - not just trusting
+// zfs.Manager.path()'s own generic per-segment traversal guard further
+// downstream (this project's own ADR-0067 doctrine: validate at the point a
+// value is first accepted, don't rely on a later layer to catch what should
+// never have been constructed in the first place). A "/" in id would let a
+// caller-supplied resource_id build a dataset path deeper than this
+// package's own flat hast-vm-*/hast-jail-* naming convention ever produces -
+// not reachable today (nothing in this codebase creates a nested dataset
+// under Base, and path() already rejects a literal ".." segment), but this
+// closes the gap outright rather than depending on that invariant holding.
 func hastOrphanDatasetName(kind, id string) (string, error) {
+	if id == "" {
+		return "", fmt.Errorf("resource_id must not be empty")
+	}
+	if strings.ContainsAny(id, "/\\") {
+		return "", fmt.Errorf("resource_id %q must not contain a path separator", id)
+	}
 	switch kind {
 	case "vm":
 		return "hast-vm-" + id, nil
