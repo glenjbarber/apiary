@@ -1649,14 +1649,29 @@ const (
 
 // GetVMSerialLog implements rpcpb.ManagerServiceServer. Like
 // GetVMConsole, it only ever answers for a VM actually running on this
-// node - see GetVMSerialLogResponse's doc comment.
+// node - see GetVMSerialLogResponse's doc comment. Mirrors
+// GetVMConsole's own leader-forwarding exactly (a real bug, caught
+// live: this RPC never got the fix GetVMConsole did - see "Allow local
+// VM console on follower"/"Forward VM console lookups to leader" -
+// so a follower node's own GetVM lookup here previously surfaced a raw
+// "raft: this node is not the leader" error instead of forwarding to
+// the leader to resolve the VM's owner first).
 func (s *Server) GetVMSerialLog(ctx context.Context, req *rpcpb.GetVMSerialLogRequest) (*rpcpb.GetVMSerialLogResponse, error) {
 	resp, err := s.raft.GetVM(ctx, req.GetId())
 	if err != nil {
 		return &rpcpb.GetVMSerialLogResponse{Error: err.Error()}, nil
 	}
 	if resp.GetError() != "" {
-		return &rpcpb.GetVMSerialLogResponse{Error: resp.GetError()}, nil
+		if s.peers != nil && resp.GetLeaderHint() != "" {
+			if fwd, ferr := s.peers.GetVM(ctx, s.peerManagerdAddr(resp.GetLeaderHint()), req.GetId()); ferr == nil && fwd.GetError() == "" && fwd.GetFound() && fwd.GetVm().GetNodeId() == s.nodeID {
+				resp = &internalpb.GetVMResponse{Vm: toInternalVM(fwd.GetVm()), Found: true}
+			} else {
+				return &rpcpb.GetVMSerialLogResponse{Error: resp.GetError()}, nil
+			}
+		}
+		if resp.GetError() != "" {
+			return &rpcpb.GetVMSerialLogResponse{Error: resp.GetError()}, nil
+		}
 	}
 	if !resp.GetFound() {
 		return &rpcpb.GetVMSerialLogResponse{Error: fmt.Sprintf("VM %q not found", req.GetId())}, nil
