@@ -6,6 +6,9 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"time"
+
+	"github.com/glenjbarber/apiary/internal/origincert"
 )
 
 // OriginCertificate is the non-secret portion of Cloudflare's Origin CA
@@ -15,6 +18,22 @@ type OriginCertificate struct {
 	ID        string
 	ExpiresOn string
 	PEM       string
+}
+
+// OriginCAIssuer adapts Cloudflare's API response to origincert's local
+// issuance transaction. It keeps the token in memory only for this request.
+type OriginCAIssuer struct{}
+
+func (OriginCAIssuer) Issue(ctx context.Context, token string, hostnames []string, validityDays int, csr string) (origincert.IssuedCertificate, error) {
+	cert, err := CreateOriginCertificate(ctx, token, hostnames, validityDays, csr)
+	if err != nil {
+		return origincert.IssuedCertificate{}, err
+	}
+	expiresAt, err := time.Parse(time.RFC3339, cert.ExpiresOn)
+	if err != nil {
+		return origincert.IssuedCertificate{}, fmt.Errorf("parsing Origin CA expiry: %w", err)
+	}
+	return origincert.IssuedCertificate{ID: cert.ID, ExpiresAt: expiresAt, PEM: cert.PEM}, nil
 }
 
 type originCertificateRequest struct {
