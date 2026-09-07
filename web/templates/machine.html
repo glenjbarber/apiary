@@ -105,6 +105,12 @@
   </div>
 
   <div class="panel">
+    <h3>Cloudflare Origin CA certificates</h3>
+    <p class="muted">For Cloudflare-proxied managerd TLS only. This creates a local ECC key, sends only its CSR to Cloudflare, and restarts managerd after a successful replacement. Do not use for DNS-only or direct client traffic.</p>
+    <div id="origin-ca-panel">{{template "origin_ca_panel" .}}</div>
+  </div>
+
+  <div class="panel">
     <h3>Automated Assumption Checks tuning</h3>
     <p class="muted">
       Timing and retention for the continuously re-evaluated assumption
@@ -469,6 +475,31 @@
   </tbody>
 </table>
 {{end}}
+{{end}}
+
+{{define "origin_ca_panel"}}
+{{if .OriginCAError}}<div class="banner-error">{{.OriginCAError}}</div>{{end}}
+{{if .OriginCAOK}}<div class="banner-success">{{.OriginCAOK}}</div>{{end}}
+{{if .CanAdmin}}
+<p class="muted">Save a dedicated token-file path and certificate directory first. The token needs Cloudflare's <strong>Zone / SSL and Certificates / Edit</strong> permission for this zone. Apiary never displays or stores the token itself.</p>
+<form hx-post="/machine/origin-ca/config" hx-target="#origin-ca-panel" hx-swap="innerHTML">
+  <table class="settings-table"><tbody>
+    <tr><th>Origin CA token file</th><td><input type="text" name="origin_ca_token_file" placeholder="/root/apiary-origin-ca.token" value="{{.NodeConfig.OriginCATokenFile}}"></td></tr>
+    <tr><th>Certificate directory</th><td><input type="text" name="origin_ca_directory" placeholder="/var/db/apiary/origin-ca" value="{{.NodeConfig.OriginCADirectory}}"></td></tr>
+  </tbody></table>
+  <div class="form-actions"><button type="submit">Save Origin CA configuration</button></div>
+</form>
+<p class="muted">Before issuance, save TLS paths in the TLS section above as <code>directory/name.crt</code> and <code>directory/name.key</code>. The successful request installs that pair and restarts <code>apiary_managerd</code>.</p>
+<form hx-post="/machine/origin-ca" hx-target="#origin-ca-panel" hx-swap="innerHTML">
+  <label>Certificate name <input name="name" placeholder="managerd" required></label>
+  <label>Hostnames, comma-separated <input name="hostnames" placeholder="api.example.com" required></label>
+  <label>Validity <select name="validity_days"><option value="365">1 year</option><option value="730">2 years</option><option value="1095">3 years</option><option value="5475">15 years</option></select></label>
+  <button type="submit">Issue or renew managerd certificate</button>
+</form>
+{{end}}
+<table><thead><tr><th>Name</th><th>Service</th><th>Hostnames</th><th>Expires</th></tr></thead><tbody>
+{{range .OriginCertificates}}<tr><td>{{.Name}}</td><td>{{.Service}}</td><td>{{.Hostnames}}</td><td>{{.ExpiresAt}}</td></tr>{{else}}<tr><td colspan="4"><em>No local Origin CA certificates recorded.</em></td></tr>{{end}}
+</tbody></table>
 {{end}}
 
 {{define "cloudflare_config_panel"}}

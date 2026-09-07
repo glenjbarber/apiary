@@ -333,6 +333,9 @@ type pageData struct {
 	// its owning Hive has no Cloudflare Tunnel configured at all (see
 	// ADR-0063).
 	CloudflareConfigured bool
+	OriginCertificates   []originCertificateView
+	OriginCAError        string
+	OriginCAOK           string
 }
 
 // userView is one row of the Users page's table.
@@ -752,6 +755,8 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /machine/hast", s.requireRole(manager.RoleAdmin, s.handleUpdateHASTProvisioning))
 	s.mux.HandleFunc("POST /machine/peer-forwarding", s.requireRole(manager.RoleAdmin, s.handleUpdatePeerForwarding))
 	s.mux.HandleFunc("POST /machine/tls", s.requireRole(manager.RoleAdmin, s.handleUpdateTLSConfig))
+	s.mux.HandleFunc("POST /machine/origin-ca", s.requireRole(manager.RoleAdmin, s.handleIssueOriginCertificate))
+	s.mux.HandleFunc("POST /machine/origin-ca/config", s.requireRole(manager.RoleAdmin, s.handleUpdateOriginCAConfig))
 	s.mux.HandleFunc("POST /machine/cloudflare-config", s.requireRole(manager.RoleAdmin, s.handleUpdateCloudflareConfig))
 	s.mux.HandleFunc("POST /machine/assumption-tuning", s.requireRole(manager.RoleAdmin, s.handleUpdateAssumptionTuning))
 	s.mux.HandleFunc("POST /machine/internal-security", s.requireRole(manager.RoleAdmin, s.handleUpdateInternalSecurity))

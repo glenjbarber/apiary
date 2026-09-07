@@ -3,6 +3,8 @@ package frontend
 import (
 	"net/http"
 	"strconv"
+	"strings"
+	"time"
 
 	rpcpb "github.com/glenjbarber/apiary/api/rpc"
 )
@@ -60,6 +62,7 @@ func (s *Server) handleMachinePage(w http.ResponseWriter, r *http.Request) {
 	vms, vmErr := s.currentMachineVMs(r, nodeID)
 	cloudflareConfigured, _ := s.currentCloudflareStatus(r)
 	services, serviceErr := s.currentNodeServices(r)
+	originCerts, originErr := s.currentOriginCertificates(r)
 
 	s.render(w, "machine_page", s.withAuthFields(r, pageData{
 		NodeConfig:           cfg,
@@ -69,8 +72,69 @@ func (s *Server) handleMachinePage(w http.ResponseWriter, r *http.Request) {
 		CloudflareConfigured: cloudflareConfigured,
 		NodeServices:         services,
 		ServiceFormError:     serviceErr,
+		OriginCertificates:   originCerts,
+		OriginCAError:        originErr,
 		ActivePage:           "machine",
 	}))
+}
+
+type originCertificateView struct{ Name, Service, Hostnames, ExpiresAt string }
+
+func (s *Server) currentOriginCertificates(r *http.Request) ([]originCertificateView, string) {
+	resp, err := s.client.ListOriginCertificates(r.Context(), &rpcpb.ListOriginCertificatesRequest{})
+	if err != nil {
+		return nil, err.Error()
+	}
+	if resp.GetError() != "" {
+		return nil, resp.GetError()
+	}
+	var out []originCertificateView
+	for _, cert := range resp.GetCertificates() {
+		out = append(out, originCertificateView{Name: cert.GetName(), Service: cert.GetService(), Hostnames: strings.Join(cert.GetHostnames(), ", "), ExpiresAt: time.Unix(cert.GetExpiresAtUnix(), 0).Local().Format("2006-01-02 15:04 MST")})
+	}
+	return out, ""
+}
+
+func (s *Server) handleIssueOriginCertificate(w http.ResponseWriter, r *http.Request) {
+	if err := r.ParseForm(); err != nil {
+		s.renderOriginCAPanel(w, r, err.Error(), "")
+		return
+	}
+	days, err := strconv.Atoi(r.FormValue("validity_days"))
+	if err != nil {
+		s.renderOriginCAPanel(w, r, "validity must be a whole number of days", "")
+		return
+	}
+	var hostnames []string
+	for _, host := range strings.Split(r.FormValue("hostnames"), ",") {
+		if host = strings.TrimSpace(host); host != "" {
+			hostnames = append(hostnames, host)
+		}
+	}
+	resp, err := s.client.IssueOriginCertificate(r.Context(), &rpcpb.IssueOriginCertificateRequest{Name: strings.TrimSpace(r.FormValue("name")), Hostnames: hostnames, ValidityDays: int32(days)})
+	if err != nil {
+		s.renderOriginCAPanel(w, r, err.Error(), "")
+		return
+	}
+	if resp.GetError() != "" {
+		s.renderOriginCAPanel(w, r, resp.GetError(), "")
+		return
+	}
+	s.renderOriginCAPanel(w, r, "", "Certificate installed; apiary_managerd restart scheduled.")
+}
+
+func (s *Server) renderOriginCAPanel(w http.ResponseWriter, r *http.Request, formErr, success string) {
+	certs, err := s.currentOriginCertificates(r)
+	if err != "" && formErr == "" {
+		formErr = err
+	}
+	cfg, cfgErr := s.currentNodeConfig(r)
+	if cfgErr != "" && formErr == "" {
+		formErr = cfgErr
+	}
+	s.render(w, "origin_ca_panel", pageData{NodeConfig: cfg,
+		OriginCertificates: certs, OriginCAError: formErr, OriginCAOK: success,
+		CanAdmin: true})
 }
 
 // currentNodeServices fetches the fixed set of Apiary rc.d services from
@@ -190,6 +254,8 @@ func (s *Server) nodeConfigUpdateRequest(r *http.Request) *rpcpb.UpdateNodeConfi
 		CloudflareZoneId:                cfg.CloudflareZoneID,
 		CloudflareTunnelId:              cfg.CloudflareTunnelID,
 		CloudflareTunnelCredentialsFile: cfg.CloudflareTunnelCredentialsFile,
+		OriginCaTokenFile:               cfg.OriginCATokenFile,
+		OriginCaDirectory:               cfg.OriginCADirectory,
 	}
 	if r.Form.Has("uplink") {
 		req.Uplink = r.FormValue("uplink")
@@ -299,6 +365,12 @@ func (s *Server) nodeConfigUpdateRequest(r *http.Request) *rpcpb.UpdateNodeConfi
 	if r.Form.Has("cloudflare_tunnel_credentials_file") {
 		req.CloudflareTunnelCredentialsFile = r.FormValue("cloudflare_tunnel_credentials_file")
 	}
+	if r.Form.Has("origin_ca_token_file") {
+		req.OriginCaTokenFile = r.FormValue("origin_ca_token_file")
+	}
+	if r.Form.Has("origin_ca_directory") {
+		req.OriginCaDirectory = r.FormValue("origin_ca_directory")
+	}
 	return req
 }
 
@@ -339,6 +411,26 @@ func (s *Server) handleUpdateTLSConfig(w http.ResponseWriter, r *http.Request) {
 // Tunnel exposure through this page instead of only rc.conf.
 func (s *Server) handleUpdateCloudflareConfig(w http.ResponseWriter, r *http.Request) {
 	s.handleUpdateMachineConfig(w, r, "cloudflare_config_panel")
+}
+
+// handleUpdateOriginCAConfig saves the two paths used only by the separate
+// Origin CA lifecycle. Keeping this flow beside issuance avoids making the
+// operator search the unrelated Tunnel configuration panel for a credential.
+func (s *Server) handleUpdateOriginCAConfig(w http.ResponseWriter, r *http.Request) {
+	if err := r.ParseForm(); err != nil {
+		s.renderOriginCAPanel(w, r, "invalid form: "+err.Error(), "")
+		return
+	}
+	resp, err := s.client.UpdateNodeConfig(r.Context(), s.nodeConfigUpdateRequest(r))
+	if err != nil {
+		s.renderOriginCAPanel(w, r, err.Error(), "")
+		return
+	}
+	if resp.GetError() != "" {
+		s.renderOriginCAPanel(w, r, resp.GetError(), "")
+		return
+	}
+	s.renderOriginCAPanel(w, r, "", "Origin CA configuration saved.")
 }
 
 // handleUpdateAssumptionTuning updates the six Automated Assumption

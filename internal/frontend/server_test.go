@@ -346,6 +346,14 @@ func (f *fakeClient) ListAssumptionClaims(context.Context, *rpcpb.ListAssumption
 	return f.assumptionClaimsResp, f.assumptionClaimsErr
 }
 
+func (f *fakeClient) ListOriginCertificates(context.Context, *rpcpb.ListOriginCertificatesRequest, ...grpc.CallOption) (*rpcpb.ListOriginCertificatesResponse, error) {
+	return &rpcpb.ListOriginCertificatesResponse{}, nil
+}
+
+func (f *fakeClient) IssueOriginCertificate(context.Context, *rpcpb.IssueOriginCertificateRequest, ...grpc.CallOption) (*rpcpb.IssueOriginCertificateResponse, error) {
+	return &rpcpb.IssueOriginCertificateResponse{}, nil
+}
+
 func (f *fakeClient) SaveAssumptionClaim(context.Context, *rpcpb.SaveAssumptionClaimRequest, ...grpc.CallOption) (*rpcpb.SaveAssumptionClaimResponse, error) {
 	if f.saveClaimResp != nil {
 		return f.saveClaimResp, nil

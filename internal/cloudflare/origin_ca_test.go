@@ -42,3 +42,14 @@ func TestCreateOriginCertificateRejectsMissingInputs(t *testing.T) {
 		t.Error("missing hostname succeeded")
 	}
 }
+
+func TestCreateOriginCertificateRejectsUnsupportedValidity(t *testing.T) {
+	if _, err := CreateOriginCertificate(context.Background(), "token", []string{"api.example.com"}, 366, "csr"); err == nil {
+		t.Fatal("unsupported requested validity succeeded")
+	}
+	for _, days := range []int{7, 30, 90, 365, 730, 1095, 5475} {
+		if !ValidOriginCAValidity(days) {
+			t.Errorf("ValidOriginCAValidity(%d) = false, want true", days)
+		}
+	}
+}

@@ -6,6 +6,7 @@ import (
 	"io"
 	"net"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -21,6 +22,7 @@ import (
 	"github.com/glenjbarber/apiary/internal/isostore"
 	"github.com/glenjbarber/apiary/internal/netif"
 	"github.com/glenjbarber/apiary/internal/nodeconfig"
+	"github.com/glenjbarber/apiary/internal/origincert"
 )
 
 // defaultApplyTimeout is used when a request doesn't specify one.
@@ -249,6 +251,7 @@ type Server struct {
 	// services is this Hive's narrowly-scoped rc.d service controller. It is
 	// intentionally local rather than a peer-forwarded or raft operation.
 	services nodeServiceController
+	originCA origincert.Issuer
 }
 
 // quotaSetter is the subset of *zfs.Manager SetDatasetQuota and the
@@ -310,6 +313,67 @@ func (s *Server) SetNetworkInterfaceLister(lister func() ([]netif.Interface, err
 // signature stable across managerd and its many focused tests.
 func (s *Server) SetAssumptionRegister(register assumptionRegisterStore) {
 	s.register = register
+}
+
+// SetOriginCAIssuer enables explicit local Origin CA issuance. Production
+// wires Cloudflare's client here; tests may supply a non-networking issuer.
+func (s *Server) SetOriginCAIssuer(issuer origincert.Issuer) { s.originCA = issuer }
+
+func originCertificateInfo(entry origincert.InventoryEntry) *rpcpb.OriginCertificateInfo {
+	return &rpcpb.OriginCertificateInfo{Name: entry.Name, Service: entry.Service,
+		Hostnames: append([]string(nil), entry.Hostnames...), Id: entry.ID,
+		ExpiresAtUnix: entry.ExpiresAt.Unix(), CertPath: entry.CertPath,
+		KeyPath: entry.KeyPath, UpdatedAtUnix: entry.UpdatedAt.Unix()}
+}
+
+func (s *Server) ListOriginCertificates(_ context.Context, _ *rpcpb.ListOriginCertificatesRequest) (*rpcpb.ListOriginCertificatesResponse, error) {
+	if s.nodeConfig == nil {
+		return &rpcpb.ListOriginCertificatesResponse{Error: "this node has no node-config store configured"}, nil
+	}
+	cfg, err := s.nodeConfig.Load()
+	if err != nil {
+		return &rpcpb.ListOriginCertificatesResponse{Error: err.Error()}, nil
+	}
+	if cfg.OriginCADirectory == "" {
+		return &rpcpb.ListOriginCertificatesResponse{}, nil
+	}
+	entries, err := origincert.LoadInventory(cfg.OriginCADirectory)
+	if err != nil {
+		return &rpcpb.ListOriginCertificatesResponse{Error: err.Error()}, nil
+	}
+	resp := &rpcpb.ListOriginCertificatesResponse{}
+	for _, entry := range entries {
+		resp.Certificates = append(resp.Certificates, originCertificateInfo(entry))
+	}
+	return resp, nil
+}
+
+func (s *Server) IssueOriginCertificate(ctx context.Context, req *rpcpb.IssueOriginCertificateRequest) (*rpcpb.IssueOriginCertificateResponse, error) {
+	if s.nodeConfig == nil || s.originCA == nil {
+		return &rpcpb.IssueOriginCertificateResponse{Error: "Origin CA issuance is not configured on this Hive"}, nil
+	}
+	cfg, err := s.nodeConfig.Load()
+	if err != nil {
+		return &rpcpb.IssueOriginCertificateResponse{Error: err.Error()}, nil
+	}
+	if cfg.OriginCATokenFile == "" || cfg.OriginCADirectory == "" {
+		return &rpcpb.IssueOriginCertificateResponse{Error: "configure the dedicated Origin CA token file and certificate directory first"}, nil
+	}
+	if cfg.TLSCert != filepath.Join(cfg.OriginCADirectory, req.GetName()+".crt") || cfg.TLSKey != filepath.Join(cfg.OriginCADirectory, req.GetName()+".key") {
+		return &rpcpb.IssueOriginCertificateResponse{Error: "managerd TLS certificate and key paths must match this Origin CA certificate name"}, nil
+	}
+	token, err := os.ReadFile(cfg.OriginCATokenFile)
+	if err != nil {
+		return &rpcpb.IssueOriginCertificateResponse{Error: "reading Origin CA token file: " + err.Error()}, nil
+	}
+	entry, err := origincert.Issue(ctx, s.originCA, origincert.IssueRequest{Directory: cfg.OriginCADirectory, Name: req.GetName(), Service: "apiary_managerd", Hostnames: req.GetHostnames(), ValidityDays: int(req.GetValidityDays()), Token: strings.TrimSpace(string(token))})
+	if err != nil {
+		return &rpcpb.IssueOriginCertificateResponse{Error: err.Error()}, nil
+	}
+	if err := s.services.Restart(ctx, "apiary_managerd"); err != nil {
+		return &rpcpb.IssueOriginCertificateResponse{Certificate: originCertificateInfo(entry), Error: "certificate installed but managerd restart failed: " + err.Error()}, nil
+	}
+	return &rpcpb.IssueOriginCertificateResponse{Certificate: originCertificateInfo(entry), RestartScheduled: true}, nil
 }
 
 func toRPCAssumptionClaim(claim assumptionregister.Claim) *rpcpb.AssumptionClaim {
@@ -1668,6 +1732,8 @@ func (s *Server) GetNodeConfig(_ context.Context, _ *rpcpb.GetNodeConfigRequest)
 		CloudflareZoneId:                cfg.CloudflareZoneID,
 		CloudflareTunnelId:              cfg.CloudflareTunnelID,
 		CloudflareTunnelCredentialsFile: cfg.CloudflareTunnelCredentialsFile,
+		OriginCaTokenFile:               cfg.OriginCATokenFile,
+		OriginCaDirectory:               cfg.OriginCADirectory,
 	}
 	if s.listNetworkInterfaces != nil {
 		if interfaces, err := s.listNetworkInterfaces(); err == nil {
@@ -1800,6 +1866,8 @@ func (s *Server) UpdateNodeConfig(_ context.Context, req *rpcpb.UpdateNodeConfig
 		CloudflareZoneID:                req.GetCloudflareZoneId(),
 		CloudflareTunnelID:              req.GetCloudflareTunnelId(),
 		CloudflareTunnelCredentialsFile: req.GetCloudflareTunnelCredentialsFile(),
+		OriginCATokenFile:               req.GetOriginCaTokenFile(),
+		OriginCADirectory:               req.GetOriginCaDirectory(),
 
 		RaftdToken: raftdToken,
 	}

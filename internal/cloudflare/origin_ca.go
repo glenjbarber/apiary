@@ -11,6 +11,18 @@ import (
 	"github.com/glenjbarber/apiary/internal/origincert"
 )
 
+// ValidOriginCAValidity reports whether days is one of the lifetimes accepted
+// by Cloudflare's Origin CA API. Keep this check at the API boundary as well as
+// the eventual UI boundary, so another caller cannot issue an invalid request.
+func ValidOriginCAValidity(days int) bool {
+	switch days {
+	case 7, 30, 90, 365, 730, 1095, 5475:
+		return true
+	default:
+		return false
+	}
+}
+
 // OriginCertificate is the non-secret portion of Cloudflare's Origin CA
 // issuance response. The certificate PEM is returned separately so callers
 // can write it directly to a root-owned file without storing it in raft.
@@ -63,8 +75,8 @@ func CreateOriginCertificate(ctx context.Context, token string, hostnames []stri
 	if strings.TrimSpace(csr) == "" {
 		return OriginCertificate{}, fmt.Errorf("certificate signing request is empty")
 	}
-	if validityDays <= 0 {
-		return OriginCertificate{}, fmt.Errorf("requested validity must be positive")
+	if !ValidOriginCAValidity(validityDays) {
+		return OriginCertificate{}, fmt.Errorf("requested validity %d is not supported", validityDays)
 	}
 
 	resp, err := doRequest(ctx, http.MethodPost, "/certificates", token, originCertificateRequest{

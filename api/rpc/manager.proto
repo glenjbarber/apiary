@@ -24,6 +24,11 @@ service ManagerService {
   rpc SaveAssumptionClaim(SaveAssumptionClaimRequest) returns (SaveAssumptionClaimResponse);
   rpc DeleteAssumptionClaim(DeleteAssumptionClaimRequest) returns (DeleteAssumptionClaimResponse);
 
+  // Origin CA issuance is a local, Admin-only operation. It never forwards,
+  // replicates a credential, or runs from reconciliation.
+  rpc ListOriginCertificates(ListOriginCertificatesRequest) returns (ListOriginCertificatesResponse);
+  rpc IssueOriginCertificate(IssueOriginCertificateRequest) returns (IssueOriginCertificateResponse);
+
   rpc CreateVM(CreateVMRequest) returns (CreateVMResponse);
   rpc UpdateVM(UpdateVMRequest) returns (UpdateVMResponse);
   rpc DeleteVM(DeleteVMRequest) returns (DeleteVMResponse);
@@ -674,6 +679,21 @@ message SaveAssumptionClaimResponse { string error = 1; }
 message DeleteAssumptionClaimRequest { string id = 1; }
 message DeleteAssumptionClaimResponse { string error = 1; }
 
+message OriginCertificateInfo {
+  string name = 1;
+  string service = 2;
+  repeated string hostnames = 3;
+  string id = 4;
+  int64 expires_at_unix = 5;
+  string cert_path = 6;
+  string key_path = 7;
+  int64 updated_at_unix = 8;
+}
+message ListOriginCertificatesRequest {}
+message ListOriginCertificatesResponse { repeated OriginCertificateInfo certificates = 1; string error = 2; }
+message IssueOriginCertificateRequest { string name = 1; repeated string hostnames = 2; int32 validity_days = 3; }
+message IssueOriginCertificateResponse { OriginCertificateInfo certificate = 1; string error = 2; bool restart_scheduled = 3; }
+
 // RaftMember mirrors api/internalpb's ServerInfo, kept as a separate
 // external type for the same reason StatusResponse itself is (ADR-0002):
 // the external schema doesn't couple to the internal protocol's
@@ -1043,6 +1063,10 @@ message GetNodeConfigResponse {
   string cloudflare_zone_id = 34;
   string cloudflare_tunnel_id = 35;
   string cloudflare_tunnel_credentials_file = 36;
+  // Dedicated Origin CA token and local certificate directory. Neither is
+  // raft-replicated; the token value itself is only ever read from this path.
+  string origin_ca_token_file = 41;
+  string origin_ca_directory = 42;
 }
 
 message NetworkInterface {
@@ -1111,6 +1135,8 @@ message UpdateNodeConfigRequest {
   string cloudflare_zone_id = 34;
   string cloudflare_tunnel_id = 35;
   string cloudflare_tunnel_credentials_file = 36;
+  string origin_ca_token_file = 41;
+  string origin_ca_directory = 42;
 }
 
 message UpdateNodeConfigResponse {

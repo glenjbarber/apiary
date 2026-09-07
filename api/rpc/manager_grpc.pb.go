@@ -24,6 +24,8 @@ const (
 	ManagerService_ListAssumptionClaims_FullMethodName        = "/apiary.rpc.v1.ManagerService/ListAssumptionClaims"
 	ManagerService_SaveAssumptionClaim_FullMethodName         = "/apiary.rpc.v1.ManagerService/SaveAssumptionClaim"
 	ManagerService_DeleteAssumptionClaim_FullMethodName       = "/apiary.rpc.v1.ManagerService/DeleteAssumptionClaim"
+	ManagerService_ListOriginCertificates_FullMethodName      = "/apiary.rpc.v1.ManagerService/ListOriginCertificates"
+	ManagerService_IssueOriginCertificate_FullMethodName      = "/apiary.rpc.v1.ManagerService/IssueOriginCertificate"
 	ManagerService_CreateVM_FullMethodName                    = "/apiary.rpc.v1.ManagerService/CreateVM"
 	ManagerService_UpdateVM_FullMethodName                    = "/apiary.rpc.v1.ManagerService/UpdateVM"
 	ManagerService_DeleteVM_FullMethodName                    = "/apiary.rpc.v1.ManagerService/DeleteVM"
@@ -95,6 +97,10 @@ type ManagerServiceClient interface {
 	ListAssumptionClaims(ctx context.Context, in *ListAssumptionClaimsRequest, opts ...grpc.CallOption) (*ListAssumptionClaimsResponse, error)
 	SaveAssumptionClaim(ctx context.Context, in *SaveAssumptionClaimRequest, opts ...grpc.CallOption) (*SaveAssumptionClaimResponse, error)
 	DeleteAssumptionClaim(ctx context.Context, in *DeleteAssumptionClaimRequest, opts ...grpc.CallOption) (*DeleteAssumptionClaimResponse, error)
+	// Origin CA issuance is a local, Admin-only operation. It never forwards,
+	// replicates a credential, or runs from reconciliation.
+	ListOriginCertificates(ctx context.Context, in *ListOriginCertificatesRequest, opts ...grpc.CallOption) (*ListOriginCertificatesResponse, error)
+	IssueOriginCertificate(ctx context.Context, in *IssueOriginCertificateRequest, opts ...grpc.CallOption) (*IssueOriginCertificateResponse, error)
 	CreateVM(ctx context.Context, in *CreateVMRequest, opts ...grpc.CallOption) (*CreateVMResponse, error)
 	UpdateVM(ctx context.Context, in *UpdateVMRequest, opts ...grpc.CallOption) (*UpdateVMResponse, error)
 	DeleteVM(ctx context.Context, in *DeleteVMRequest, opts ...grpc.CallOption) (*DeleteVMResponse, error)
@@ -395,6 +401,26 @@ func (c *managerServiceClient) DeleteAssumptionClaim(ctx context.Context, in *De
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(DeleteAssumptionClaimResponse)
 	err := c.cc.Invoke(ctx, ManagerService_DeleteAssumptionClaim_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *managerServiceClient) ListOriginCertificates(ctx context.Context, in *ListOriginCertificatesRequest, opts ...grpc.CallOption) (*ListOriginCertificatesResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListOriginCertificatesResponse)
+	err := c.cc.Invoke(ctx, ManagerService_ListOriginCertificates_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *managerServiceClient) IssueOriginCertificate(ctx context.Context, in *IssueOriginCertificateRequest, opts ...grpc.CallOption) (*IssueOriginCertificateResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(IssueOriginCertificateResponse)
+	err := c.cc.Invoke(ctx, ManagerService_IssueOriginCertificate_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -908,6 +934,10 @@ type ManagerServiceServer interface {
 	ListAssumptionClaims(context.Context, *ListAssumptionClaimsRequest) (*ListAssumptionClaimsResponse, error)
 	SaveAssumptionClaim(context.Context, *SaveAssumptionClaimRequest) (*SaveAssumptionClaimResponse, error)
 	DeleteAssumptionClaim(context.Context, *DeleteAssumptionClaimRequest) (*DeleteAssumptionClaimResponse, error)
+	// Origin CA issuance is a local, Admin-only operation. It never forwards,
+	// replicates a credential, or runs from reconciliation.
+	ListOriginCertificates(context.Context, *ListOriginCertificatesRequest) (*ListOriginCertificatesResponse, error)
+	IssueOriginCertificate(context.Context, *IssueOriginCertificateRequest) (*IssueOriginCertificateResponse, error)
 	CreateVM(context.Context, *CreateVMRequest) (*CreateVMResponse, error)
 	UpdateVM(context.Context, *UpdateVMRequest) (*UpdateVMResponse, error)
 	DeleteVM(context.Context, *DeleteVMRequest) (*DeleteVMResponse, error)
@@ -1179,6 +1209,12 @@ func (UnimplementedManagerServiceServer) SaveAssumptionClaim(context.Context, *S
 func (UnimplementedManagerServiceServer) DeleteAssumptionClaim(context.Context, *DeleteAssumptionClaimRequest) (*DeleteAssumptionClaimResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method DeleteAssumptionClaim not implemented")
 }
+func (UnimplementedManagerServiceServer) ListOriginCertificates(context.Context, *ListOriginCertificatesRequest) (*ListOriginCertificatesResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ListOriginCertificates not implemented")
+}
+func (UnimplementedManagerServiceServer) IssueOriginCertificate(context.Context, *IssueOriginCertificateRequest) (*IssueOriginCertificateResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method IssueOriginCertificate not implemented")
+}
 func (UnimplementedManagerServiceServer) CreateVM(context.Context, *CreateVMRequest) (*CreateVMResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method CreateVM not implemented")
 }
@@ -1430,6 +1466,42 @@ func _ManagerService_DeleteAssumptionClaim_Handler(srv interface{}, ctx context.
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(ManagerServiceServer).DeleteAssumptionClaim(ctx, req.(*DeleteAssumptionClaimRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ManagerService_ListOriginCertificates_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListOriginCertificatesRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ManagerServiceServer).ListOriginCertificates(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ManagerService_ListOriginCertificates_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ManagerServiceServer).ListOriginCertificates(ctx, req.(*ListOriginCertificatesRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ManagerService_IssueOriginCertificate_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(IssueOriginCertificateRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ManagerServiceServer).IssueOriginCertificate(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ManagerService_IssueOriginCertificate_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ManagerServiceServer).IssueOriginCertificate(ctx, req.(*IssueOriginCertificateRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -2302,6 +2374,14 @@ var ManagerService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "DeleteAssumptionClaim",
 			Handler:    _ManagerService_DeleteAssumptionClaim_Handler,
+		},
+		{
+			MethodName: "ListOriginCertificates",
+			Handler:    _ManagerService_ListOriginCertificates_Handler,
+		},
+		{
+			MethodName: "IssueOriginCertificate",
+			Handler:    _ManagerService_IssueOriginCertificate_Handler,
 		},
 		{
 			MethodName: "CreateVM",
