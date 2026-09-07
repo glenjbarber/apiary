@@ -72,6 +72,7 @@ type firewallRuleView struct {
 	Action    string
 	Protocol  string
 	PortRange string
+	Priority  int32
 }
 
 // nodeConfigView is the template-facing shape for this node's own
@@ -553,6 +554,7 @@ func fromRPCVM(d *rpcpb.VMDefinition) vmView {
 		v.FirewallRules = append(v.FirewallRules, firewallRuleView{
 			Direction: rule.GetDirection(), Action: rule.GetAction(),
 			Protocol: rule.GetProtocol(), PortRange: rule.GetPortRange(),
+			Priority: rule.GetPriority(),
 		})
 	}
 	return v

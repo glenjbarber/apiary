@@ -435,6 +435,7 @@ func (r *Reconciler) RunOnce(ctx context.Context) (err error) {
 				Action:    rule.GetAction(),
 				Protocol:  rule.GetProtocol(),
 				PortRange: rule.GetPortRange(),
+				Priority:  rule.GetPriority(),
 			})
 		}
 		desired = append(desired, VMPlacement{
@@ -1376,10 +1377,18 @@ func natAnchor(networkID string) string {
 }
 
 // toPFRules converts VMPlacement's plain FirewallRule slice into
-// internal/pf's own Rule type.
+// internal/pf's own Rule type, ordered by Priority first (see
+// FirewallRule.Priority's own doc comment - ADR-0075). A stable sort:
+// rules sharing a priority (0 is the default for every rule that
+// predates this field) keep their existing relative order rather than
+// being silently re-ranked.
 func toPFRules(rules []FirewallRule) []pf.Rule {
-	out := make([]pf.Rule, len(rules))
-	for i, r := range rules {
+	ordered := make([]FirewallRule, len(rules))
+	copy(ordered, rules)
+	sort.SliceStable(ordered, func(i, j int) bool { return ordered[i].Priority < ordered[j].Priority })
+
+	out := make([]pf.Rule, len(ordered))
+	for i, r := range ordered {
 		out[i] = pf.Rule{Direction: r.Direction, Action: r.Action, Protocol: r.Protocol, PortRange: r.PortRange}
 	}
 	return out

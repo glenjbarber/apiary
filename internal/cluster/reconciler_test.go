@@ -1550,6 +1550,65 @@ func TestReconciler_RunOnce_FlushesFirewallOnTeardown(t *testing.T) {
 	}
 }
 
+// TestToPFRules_OrdersByPriorityAscending is the direct regression test
+// for ADR-0075: a higher Priority number must render later, so it wins
+// under pf's own last-match-wins evaluation regardless of the rules'
+// original list order.
+func TestToPFRules_OrdersByPriorityAscending(t *testing.T) {
+	rules := []FirewallRule{
+		{Direction: "in", Action: "pass", PortRange: "22", Priority: 100},
+		{Direction: "in", Action: "block", Priority: 0},
+	}
+	got := toPFRules(rules)
+	if len(got) != 2 || got[0].PortRange != "" || got[0].Action != "block" || got[1].PortRange != "22" || got[1].Action != "pass" {
+		t.Fatalf("toPFRules() = %+v, want the priority-0 block rule first and the priority-100 pass rule last", got)
+	}
+}
+
+// TestToPFRules_StableForEqualPriority proves rules sharing a priority
+// (0, the default for every rule that predates this field) keep their
+// existing relative order rather than being silently re-ranked.
+func TestToPFRules_StableForEqualPriority(t *testing.T) {
+	rules := []FirewallRule{
+		{Direction: "in", Action: "pass", PortRange: "22"},
+		{Direction: "in", Action: "pass", PortRange: "80"},
+		{Direction: "in", Action: "pass", PortRange: "443"},
+	}
+	got := toPFRules(rules)
+	if len(got) != 3 || got[0].PortRange != "22" || got[1].PortRange != "80" || got[2].PortRange != "443" {
+		t.Fatalf("toPFRules() = %+v, want the original order preserved for equal priorities", got)
+	}
+}
+
+// TestReconciler_RunOnce_AppliesFirewallRulesInPriorityOrder is the
+// same regression at the integration level: RunOnce's real end-to-end
+// path (raft -> VMPlacement -> effectivePFRules -> pf.Manager.Apply)
+// must reorder by priority, not just the pure toPFRules helper in
+// isolation.
+func TestReconciler_RunOnce_AppliesFirewallRulesInPriorityOrder(t *testing.T) {
+	raft := &fakeRaftClient{resp: &internalpb.ListVMsResponse{Vms: []*internalpb.VMDefinition{{
+		Id: "vm-1", NodeId: "node-a",
+		FirewallRules: []*internalpb.FirewallRule{
+			{Direction: "in", Action: "block", Priority: 10},
+			{Direction: "in", Action: "pass", Protocol: "tcp", PortRange: "22", Priority: 5},
+		},
+	}}}}
+	zfs := newFakeDatasetManager()
+	zfs.mountpointFor["vm-1"] = t.TempDir()
+	vms := newFakeVMManager()
+	pfMgr := newFakePFManager()
+
+	r := &Reconciler{Raft: raft, ZFS: zfs, Bhyve: vms, PF: pfMgr, LocalNodeID: "node-a", BootROM: "/fw/UEFI.fd"}
+	if err := r.RunOnce(context.Background()); err != nil {
+		t.Fatalf("RunOnce() error: %v", err)
+	}
+
+	rules := pfMgr.applied["apiary/vm-vm-1"]
+	if len(rules) != 2 || rules[0].Action != "pass" || rules[0].PortRange != "22" || rules[1].Action != "block" {
+		t.Errorf("pf rules applied to apiary/vm-vm-1 = %+v, want priority-5 pass first, priority-10 block last", rules)
+	}
+}
+
 func TestReconciler_RunOnce_ReconcilesDHCPLeasesForNetworkedVMs(t *testing.T) {
 	raft := &fakeRaftClient{
 		resp: &internalpb.ListVMsResponse{Vms: []*internalpb.VMDefinition{{

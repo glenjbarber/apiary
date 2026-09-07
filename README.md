@@ -590,6 +590,18 @@ each design decision, in order.
   call. No web UI, matching `ForcePurgeVM`/`ForcePurgeJail`'s own
   precedent for this class of rare, destructive, human-judgment action.
   See [ADR-0073](docs/adr/0073-orphaned-hast-resource-cleanup.md).
+- **Role-map editing UI** - closes the gap ADR-0030's own "Deferred"
+  section named: who has a web UI role, and at what tier, no longer
+  requires hand-editing `-role-map` and restarting `cmd/frontend`. The
+  Users page gains three Admin-only actions - add a username with a
+  role, change an existing account's role, remove an account entirely -
+  persisted via a new `internal/loginconfig` package (physical,
+  per-node, mirroring `internal/nodeconfig`'s own role for `managerd`)
+  that wins over the `-role-map` flag once it's ever been written.
+  Refuses any edit that would leave zero Admin accounts. Adding an
+  entry grants an already-existing PAM/UNIX account an Apiary role - it
+  never creates the account itself, matching ADR-0030's own explicit
+  scope. See [ADR-0074](docs/adr/0074-role-map-editing-ui.md).
 
 **Not yet implemented:**
 
@@ -621,12 +633,16 @@ each design decision, in order.
   ADR-0020/ADR-0065 above, which already closed the older cross-node
   console and Networks-page bridge-status gaps this bullet used to
   describe)
-- Network management is v1-scoped: firewall rules are a flat allow/block
-  list with no priority/ordering beyond `pf`'s own rule evaluation.
-  `internal/dhcpd`'s subnet-size limit (previously `/24`-or-smaller
-  only) is lifted - any valid IPv4 subnet with at least two usable
-  host addresses is now supported, matching `internal/raft`'s own
-  IP-allocation arithmetic. See ADR-0022's "Update" section.
+- Network management: `internal/dhcpd`'s subnet-size limit (previously
+  `/24`-or-smaller only) is lifted - any valid IPv4 subnet with at
+  least two usable host addresses is now supported, matching
+  `internal/raft`'s own IP-allocation arithmetic. See ADR-0022's
+  "Update" section. Firewall rules now carry an explicit `priority`
+  (a higher number is evaluated later and wins under `pf`'s own
+  unchanged last-match-wins semantics) - see
+  [ADR-0075](docs/adr/0075-firewall-rule-priority.md). Still no
+  editing of an existing VM's rules after creation - only the
+  create-VM form sets them at all.
 - Importing VMs from other hypervisors (e.g. Proxmox): no disk-format
   conversion, and Apiary is UEFI-only. Linux containers have no path at
   all — jails share the host FreeBSD kernel
