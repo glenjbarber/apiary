@@ -43,7 +43,7 @@
     <div class="panel">
       <h3>{{.TraceResult.Cell.Name}} to {{.TraceDestination}} <span class="badge {{.TraceResult.StatusClass}}">{{.TraceResult.Status}}</span></h3>
       <p>{{.TraceResult.Summary}}</p>
-      <p class="muted">Owner Hive: {{.TraceResult.Cell.NodeID}}{{if .TraceResult.Network.ID}} · Managed network: {{.TraceResult.Network.Name}} ({{.TraceResult.Network.ID}}){{end}}</p>
+      <p class="muted">Owner Comb: {{.TraceResult.Cell.NodeID}}{{if .TraceResult.Network.ID}} · Managed network: {{.TraceResult.Network.Name}} ({{.TraceResult.Network.ID}}){{end}}</p>
       <table>
         <thead><tr><th>Layer</th><th>Status</th><th>Finding</th><th>Evidence</th><th>Explanation</th></tr></thead>
         <tbody>

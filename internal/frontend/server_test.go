@@ -597,7 +597,7 @@ func TestServer_AppShellUsesHierarchicalSidebar(t *testing.T) {
 		`<table class="resource-table">`,
 		`class="settings-menu`,
 		`>Colony</h2>`,
-		`>Hives</a>`,
+		`>Combs</a>`,
 		`>Cells</span>`,
 		`>Network</h2>`,
 		`>Status</h2>`,
@@ -607,9 +607,6 @@ func TestServer_AppShellUsesHierarchicalSidebar(t *testing.T) {
 		if !strings.Contains(body, want) {
 			t.Errorf("application shell missing %q", want)
 		}
-	}
-	if strings.Contains(body, `>Combs</span>`) {
-		t.Error("sidebar should not include the Combs abstraction")
 	}
 	if !strings.Contains(body, `class="sidebar-link cell-type active" href="/vms" aria-current="page"`) {
 		t.Errorf("VMs page should mark its sidebar entry current, got: %s", body)
@@ -668,8 +665,8 @@ func TestServer_ClusterOverviewPage_IsDefaultLandingPage(t *testing.T) {
 			t.Errorf("cluster overview page missing %q, got: %s", want, body)
 		}
 	}
-	if !strings.Contains(body, `class="sidebar-link active" href="/" aria-current="page">Hives</a>`) {
-		t.Errorf("Colony overview should mark Hives active, got: %s", body)
+	if !strings.Contains(body, `class="sidebar-link active" href="/" aria-current="page">Combs</a>`) {
+		t.Errorf("Colony overview should mark Combs active, got: %s", body)
 	}
 }
 

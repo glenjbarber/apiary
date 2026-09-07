@@ -224,8 +224,8 @@ func TestHandleWhyNotPage_HiveRebootBlockedWhenQuorumDoesNotSurvive(t *testing.T
 	s.ServeHTTP(rec, req)
 
 	body := rec.Body.String()
-	if !strings.Contains(body, "hive-reboot") || !strings.Contains(body, `class="badge blocked"`) {
-		t.Fatalf("expected a blocked hive-reboot answer, got: %s", body)
+	if !strings.Contains(body, "comb-reboot") || !strings.Contains(body, `class="badge blocked"`) {
+		t.Fatalf("expected a blocked comb-reboot answer, got: %s", body)
 	}
 	if !strings.Contains(body, "quorum-tolerance") {
 		t.Errorf("expected the quorum-tolerance blocker to be cited, got: %s", body)

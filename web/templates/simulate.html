@@ -8,9 +8,9 @@
   {{template "page_header" (pageHeader "Dependency Graph Simulator" "Explore known consequences of infrastructure failures. Read-only - nothing here is ever changed.")}}
 
   <div class="panel">
-    <h3>Hive failure</h3>
+    <h3>Comb failure</h3>
     <form method="get" action="/simulate" class="inline-form">
-      <label>Hive
+      <label>Comb
         {{if .SimulateNodes}}
         <select name="node_id" required>
           <option value="">Choose a node</option>
@@ -67,7 +67,7 @@
 
   <div class="panel">
     <h3>Cells owned by {{.SimulateTargetNodeID}}</h3>
-    <p class="muted">These Cells run on this Hive - they stop if it disappears.</p>
+    <p class="muted">These Cells run on this Comb - they stop if it disappears.</p>
     <table>
       <thead><tr><th>ID</th><th>Name</th><th>Kind</th><th>Replica node</th><th>Verdict</th><th>Explanation</th></tr></thead>
       <tbody>
@@ -104,8 +104,8 @@
   </div>
 
   <div class="panel">
-    <h3>Image availability after Hive loss</h3>
-    <p class="muted">This affects future provisioning or recovery. A running Cell does not need its source image merely to keep running. Evidence names only Hives whose local image inventories were read for this report.</p>
+    <h3>Image availability after Comb loss</h3>
+    <p class="muted">This affects future provisioning or recovery. A running Cell does not need its source image merely to keep running. Evidence names only Combs whose local image inventories were read for this report.</p>
     <table>
       <thead><tr><th>Cell</th><th>Image</th><th>Role</th><th>Verdict</th><th>Inventory evidence</th></tr></thead>
       <tbody>
@@ -129,7 +129,7 @@
 
   <div class="panel">
     <h3>Local Assumption Register context</h3>
-    <p class="muted">Unexpired claims from the reporting Hive whose scope is this Hive or the Colony. They are operator context only and do not change this simulation's verdicts.</p>
+    <p class="muted">Unexpired claims from the reporting Comb whose scope is this Comb or the Colony. They are operator context only and do not change this simulation's verdicts.</p>
     <table>
       <thead><tr><th>ID</th><th>Statement</th><th>Owner</th><th>Scope</th><th>Evidence</th><th>Expires</th></tr></thead>
       <tbody>
@@ -164,7 +164,7 @@
     <h3>Affected Cells</h3>
     <p class="muted">These Cells declare this managed network. Their process and storage are not assumed to stop.</p>
     <table>
-      <thead><tr><th>ID</th><th>Name</th><th>Owner Hive</th><th>Known consequence</th></tr></thead>
+      <thead><tr><th>ID</th><th>Name</th><th>Owner Comb</th><th>Known consequence</th></tr></thead>
       <tbody>
         {{range .SimulateNetworkImpacts}}
         <tr><td>{{.ID}}</td><td>{{.Name}}</td><td>{{.NodeID}}</td><td>{{.Explanation}}</td></tr>

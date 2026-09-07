@@ -141,7 +141,7 @@
     .badge.stale { opacity:.65; border:1px dashed var(--muted); }
     .badge.contradictory { color:#fff; background:var(--danger); }
     /* remote-node marks a table cell whose Cell/resource is owned by a
-       different Hive than the one currently answering this page - see
+       different Comb than the one currently answering this page - see
        the vm_rows/jail_rows templates. Muted text plus a small dot
        (not color alone, for colorblind-safe distinction from a plain
        local value) rather than a full badge, since this is informational
@@ -236,7 +236,7 @@
     <a class="brand" href="/" aria-label="Apiary home"><img class="brand-logo" src="/static/apiary-mark.svg" alt=""><span class="brand-name">APIARY</span></a>
   </div>
   <div class="header-actions">
-    {{if .AuthEnabled}}{{if .Username}}<div class="account"><span class="account-user">{{.Username}} ({{.Role}})</span><span class="account-hive">Hive {{.HiveID}}</span></div>{{end}}{{end}}
+    {{if .AuthEnabled}}{{if .Username}}<div class="account"><span class="account-user">{{.Username}} ({{.Role}})</span><span class="account-hive">Comb {{.HiveID}}</span></div>{{end}}{{end}}
     <button class="icon-button" id="theme-toggle" type="button" aria-label="Switch color theme" title="Switch color theme"><span aria-hidden="true">&#9788;</span></button>
     <details class="settings-menu{{if or (eq .ActivePage "machine") (eq .ActivePage "apikeys") (eq .ActivePage "users")}} current{{end}}">
       <summary aria-label="Open settings" title="Settings">&#9881;</summary>
@@ -253,7 +253,7 @@
   <nav class="sidebar-nav" aria-label="Primary navigation">
     <section class="sidebar-section" aria-labelledby="nav-colony">
       <h2 class="sidebar-heading" id="nav-colony">Colony</h2>
-      <a class="sidebar-link{{if eq .ActivePage "stats"}} active{{end}}" href="/"{{if eq .ActivePage "stats"}} aria-current="page"{{end}}>Hives</a>
+      <a class="sidebar-link{{if eq .ActivePage "stats"}} active{{end}}" href="/"{{if eq .ActivePage "stats"}} aria-current="page"{{end}}>Combs</a>
       <div class="sidebar-tree">
         <span class="sidebar-tree-label">Cells</span>
         <a class="sidebar-link cell-type{{if eq .ActivePage "vms"}} active{{end}}" href="/vms"{{if eq .ActivePage "vms"}} aria-current="page"{{end}}>Virtual machines</a>

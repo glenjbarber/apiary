@@ -5,12 +5,12 @@
 <body class="app-layout">
   {{template "nav" .}}
   <main class="content" id="main-content">
-  {{template "page_header" (pageHeader "Colony overview" "Basic status for every known Hive - select one for detail.")}}
+  {{template "page_header" (pageHeader "Colony overview" "Basic status for every known Comb - select one for detail.")}}
   {{if .Error}}<div class="banner-error">{{.Error}}</div>{{end}}
 
   <div class="panel" style="margin-top:1rem"><table>
     <thead>
-      <tr><th>Hive</th><th>Status</th><th>Health</th><th>CPU load (1m)</th><th>Memory used</th><th>ZFS pools</th><th>Packet filter</th><th></th></tr>
+      <tr><th>Comb</th><th>Status</th><th>Health</th><th>CPU load (1m)</th><th>Memory used</th><th>ZFS pools</th><th>Packet filter</th><th></th></tr>
     </thead>
     <tbody>
       {{range .ClusterNodes}}
@@ -45,7 +45,7 @@
         <td><a href="/host/{{.NodeID}}">View</a></td>
       </tr>
       {{else}}
-      <tr><td colspan="8"><em>No known Hives</em></td></tr>
+      <tr><td colspan="8"><em>No known Combs</em></td></tr>
       {{end}}
     </tbody>
   </table></div>

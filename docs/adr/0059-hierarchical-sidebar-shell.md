@@ -2,7 +2,15 @@
 
 ## Status
 
-Accepted
+Accepted. **Update**: the product vocabulary this ADR's Context and
+Follow-up sections describe (`Apiary > Colony > Hive > Comb > Cell`,
+with "Comb" meaning a node's own collection of Cells) has since
+changed - see [ADR-0076](0076-comb-hierarchy-rename.md). "Hive" was
+retired and "Comb" now names the node directly; the hierarchy is
+`Apiary > Colony > Comb > Cell`. The sidebar/navigation decisions this
+ADR made are otherwise unaffected - it already removed Comb-as-grouping
+from the sidebar in the Follow-up section below, before ADR-0076
+existed, for unrelated reasons.
 
 ## Context
 

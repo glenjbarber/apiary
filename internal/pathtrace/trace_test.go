@@ -47,7 +47,7 @@ func TestCompute_BridgeDownIsFirstBlocker(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if trace.Status != StatusBlocked || !strings.Contains(trace.Summary, "Owner-Hive bridge") {
+	if trace.Status != StatusBlocked || !strings.Contains(trace.Summary, "Owner-Comb bridge") {
 		t.Fatalf("trace = %+v", trace)
 	}
 }

@@ -104,10 +104,10 @@ func (s *Server) TraceCellPath(ctx context.Context, req *rpcpb.TraceCellPathRequ
 
 func (s *Server) cellPathEvidence(ctx context.Context, ownerID string, network *internalpb.NetworkDefinition) pathtrace.Evidence {
 	evidence := pathtrace.Evidence{
-		BridgeDetail: fmt.Sprintf("No bridge observation was available from owner Hive %s.", ownerID),
-		PFDetail:     fmt.Sprintf("No packet-filter observation was available from owner Hive %s.", ownerID),
+		BridgeDetail: fmt.Sprintf("No bridge observation was available from owner Comb %s.", ownerID),
+		PFDetail:     fmt.Sprintf("No packet-filter observation was available from owner Comb %s.", ownerID),
 		NATStatus:    pathtrace.StatusUnknown,
-		NATDetail:    fmt.Sprintf("No NAT-uplink observation was available from owner Hive %s.", ownerID),
+		NATDetail:    fmt.Sprintf("No NAT-uplink observation was available from owner Comb %s.", ownerID),
 	}
 
 	var (
@@ -171,7 +171,7 @@ func (s *Server) cellPathEvidence(ctx context.Context, ownerID string, network *
 			evidence.BridgeDetail = bridgeResp.GetError()
 		} else {
 			evidence.BridgeStatus = bridgeResp.GetBridgeStatus()
-			evidence.BridgeDetail = fmt.Sprintf("Owner Hive %s reported %s as %s.", ownerID, resolveBridgeName(network), emptyPathValue(bridgeResp.GetBridgeStatus(), "unknown"))
+			evidence.BridgeDetail = fmt.Sprintf("Owner Comb %s reported %s as %s.", ownerID, resolveBridgeName(network), emptyPathValue(bridgeResp.GetBridgeStatus(), "unknown"))
 		}
 	}
 
@@ -188,7 +188,7 @@ func (s *Server) cellPathEvidence(ctx context.Context, ownerID string, network *
 		if evidence.PFEnabled {
 			state = "enabled"
 		}
-		evidence.PFDetail = fmt.Sprintf("Owner Hive %s reported PF %s.", ownerID, state)
+		evidence.PFDetail = fmt.Sprintf("Owner Comb %s reported PF %s.", ownerID, state)
 	}
 
 	if assumptionErr != nil {
@@ -215,13 +215,13 @@ func hostStatsError(resp *rpcpb.HostStatsResponse, prefix string) (string, bool)
 
 func pathTraceNATEvidence(ownerID string, resp *rpcpb.ListAssumptionResultsResponse) (pathtrace.Status, string) {
 	if resp == nil {
-		return pathtrace.StatusUnknown, fmt.Sprintf("Owner Hive %s did not return assumption evidence.", ownerID)
+		return pathtrace.StatusUnknown, fmt.Sprintf("Owner Comb %s did not return assumption evidence.", ownerID)
 	}
 	if resp.GetError() != "" {
 		return pathtrace.StatusUnknown, resp.GetError()
 	}
 	if resp.GetStorageDegraded() {
-		return pathtrace.StatusUnknown, "The owner Hive's assumption store is degraded: " + resp.GetStorageDegradedDetail()
+		return pathtrace.StatusUnknown, "The owner Comb's assumption store is degraded: " + resp.GetStorageDegradedDetail()
 	}
 	var selected *rpcpb.AssumptionResult
 	ambiguous := false
@@ -243,14 +243,14 @@ func pathTraceNATEvidence(ownerID string, resp *rpcpb.ListAssumptionResultsRespo
 		}
 	}
 	if selected == nil {
-		return pathtrace.StatusUnknown, fmt.Sprintf("Owner Hive %s has no NAT-uplink/default-route observation.", ownerID)
+		return pathtrace.StatusUnknown, fmt.Sprintf("Owner Comb %s has no NAT-uplink/default-route observation.", ownerID)
 	}
 	if ambiguous {
-		return pathtrace.StatusUnknown, fmt.Sprintf("Owner Hive %s returned conflicting NAT observations with the same timestamp.", ownerID)
+		return pathtrace.StatusUnknown, fmt.Sprintf("Owner Comb %s returned conflicting NAT observations with the same timestamp.", ownerID)
 	}
 	detail := selected.GetDetail()
 	if detail == "" {
-		detail = fmt.Sprintf("Owner Hive %s reported a NAT-uplink/default-route observation.", ownerID)
+		detail = fmt.Sprintf("Owner Comb %s reported a NAT-uplink/default-route observation.", ownerID)
 	}
 	if selected.GetStale() {
 		detail = "The stored observation is stale. " + detail

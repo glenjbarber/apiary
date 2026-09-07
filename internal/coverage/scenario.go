@@ -84,7 +84,7 @@ type Tier int
 const (
 	// TierSingleResource scopes to exactly one resource or network.
 	TierSingleResource Tier = iota
-	// TierMultiResource scopes to a hive or network whose blast radius
+	// TierMultiResource scopes to a comb or network whose blast radius
 	// varies (how many cells it owns/backs, or has attached) but is
 	// never reduced to an invented number.
 	TierMultiResource
@@ -94,7 +94,7 @@ const (
 
 // Scenario is one failure scenario's classification.
 type Scenario struct {
-	// Kind: "hive-failure" | "network-failure" | "network-connectivity"
+	// Kind: "comb-failure" | "network-failure" | "network-connectivity"
 	// | "cell-recoverability" | "hast-dual-primary" | "quorum-tolerance"
 	Kind, Target, Label string
 	Status              Status
@@ -221,9 +221,9 @@ func ClassifyHiveFailure(nodeID, label string, verdict recovery.QuorumVerdict, v
 	case !valid || verdict == recovery.QuorumUnknown:
 		result = "unknown"
 	}
-	explanation := "This hive owns " + strconv.Itoa(ownedCount) + " cell(s) and backs " + strconv.Itoa(replicaBackedCount) + " other cell(s) as a HAST replica."
+	explanation := "This comb owns " + strconv.Itoa(ownedCount) + " cell(s) and backs " + strconv.Itoa(replicaBackedCount) + " other cell(s) as a HAST replica."
 	return Scenario{
-		Kind: "hive-failure", Target: nodeID, Label: label,
+		Kind: "comb-failure", Target: nodeID, Label: label,
 		Status: status, Tier: TierMultiResource, Result: result, Explanation: explanation,
 	}
 }

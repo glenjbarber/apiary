@@ -123,15 +123,15 @@ func Compute(req Request) (Trace, error) {
 	case req.Cell.DesiredState != "running":
 		add("Cell", StatusUnknown, "Cell desired state is unspecified", "raft VM desired state", "Apiary cannot confirm that the Cell is intended to be running.")
 	case req.Cell.Phase == "ready":
-		add("Cell", StatusClear, "Cell is intended to run and reported ready", "raft VM desired state and phase", "The owner Hive last reported the running Cell ready.")
+		add("Cell", StatusClear, "Cell is intended to run and reported ready", "raft VM desired state and phase", "The owner Comb last reported the running Cell ready.")
 	default:
 		add("Cell", StatusUnknown, "Cell is not yet reported ready", "raft VM phase", fmt.Sprintf("The current phase is %q.", emptyAs(req.Cell.Phase, "pending")))
 	}
 
 	if req.Cell.NodeID == "" {
-		add("Virtual interface", StatusBlocked, "Cell has no owner Hive", "raft VM definition", "Apiary cannot identify the Hive whose network state must be inspected.")
+		add("Virtual interface", StatusBlocked, "Cell has no owner Comb", "raft VM definition", "Apiary cannot identify the Comb whose network state must be inspected.")
 	}
-	add("Tap attachment", StatusUnknown, "Current tap attachment is not observed", "Cell Path Trace v1 evidence gap", "A ready phase records successful reconciliation, but v1 has no current owner-Hive tap observation or freshness timestamp.")
+	add("Tap attachment", StatusUnknown, "Current tap attachment is not observed", "Cell Path Trace v1 evidence gap", "A ready phase records successful reconciliation, but v1 has no current owner-Comb tap observation or freshness timestamp.")
 	if req.Cell.NetworkID == "" {
 		add("Virtual interface", StatusUnknown, "Cell uses the flat-bridge path", "raft VM definition", "The flat bridge is node-local configuration and is not represented in the Cell's replicated network intent.")
 		add("Destination response", StatusNotApplicable, "No active probe was sent", "Cell Path Trace v1 boundary", "The destination was not contacted.")
@@ -174,11 +174,11 @@ func Compute(req Request) (Trace, error) {
 
 	switch req.Evidence.BridgeStatus {
 	case "up":
-		add("Owner-Hive bridge", StatusClear, "Managed-network bridge is up", "owner Hive local bridge status", req.Evidence.BridgeDetail)
+		add("Owner-Comb bridge", StatusClear, "Managed-network bridge is up", "owner Comb local bridge status", req.Evidence.BridgeDetail)
 	case "down":
-		add("Owner-Hive bridge", StatusBlocked, "Managed-network bridge is down", "owner Hive local bridge status", req.Evidence.BridgeDetail)
+		add("Owner-Comb bridge", StatusBlocked, "Managed-network bridge is down", "owner Comb local bridge status", req.Evidence.BridgeDetail)
 	default:
-		add("Owner-Hive bridge", StatusUnknown, "Managed-network bridge state is unknown", "owner Hive local bridge status", req.Evidence.BridgeDetail)
+		add("Owner-Comb bridge", StatusUnknown, "Managed-network bridge state is unknown", "owner Comb local bridge status", req.Evidence.BridgeDetail)
 	}
 
 	addFirewallStep(&trace, req.Cell, req.Evidence, protocol, req.Port)
@@ -216,11 +216,11 @@ func addFirewallStep(trace *Trace, cell Cell, evidence Evidence, protocol string
 		return
 	}
 	if !evidence.PFObserved {
-		add(StatusUnknown, "Owner Hive packet-filter state is unknown", emptyAs(evidence.PFDetail, "Apiary cannot confirm that the declared Cell rules are currently enforced."))
+		add(StatusUnknown, "Owner Comb packet-filter state is unknown", emptyAs(evidence.PFDetail, "Apiary cannot confirm that the declared Cell rules are currently enforced."))
 		return
 	}
 	if !evidence.PFEnabled {
-		add(StatusUnknown, "Declared Cell firewall rules are not enforced", emptyAs(evidence.PFDetail, "The owner Hive reports PF disabled."))
+		add(StatusUnknown, "Declared Cell firewall rules are not enforced", emptyAs(evidence.PFDetail, "The owner Comb reports PF disabled."))
 		return
 	}
 	if protocol == "" {
@@ -271,14 +271,14 @@ func addFirewallStep(trace *Trace, cell Cell, evidence Evidence, protocol string
 
 func addNATStep(trace *Trace, evidence Evidence) {
 	add := func(status Status, summary, explanation string) {
-		trace.Steps = append(trace.Steps, Step{Stage: "Route and NAT", Status: status, Summary: summary, Evidence: "owner Hive PF status and NAT-uplink assumption", Explanation: explanation})
+		trace.Steps = append(trace.Steps, Step{Stage: "Route and NAT", Status: status, Summary: summary, Evidence: "owner Comb PF status and NAT-uplink assumption", Explanation: explanation})
 	}
 	if !evidence.PFObserved {
-		add(StatusUnknown, "Owner Hive packet-filter state is unknown", emptyAs(evidence.PFDetail, "Apiary could not read HostStats from the owner Hive."))
+		add(StatusUnknown, "Owner Comb packet-filter state is unknown", emptyAs(evidence.PFDetail, "Apiary could not read HostStats from the owner Comb."))
 		return
 	}
 	if !evidence.PFEnabled {
-		add(StatusBlocked, "Owner Hive packet filter is disabled", emptyAs(evidence.PFDetail, "Self-hosted outbound NAT requires PF."))
+		add(StatusBlocked, "Owner Comb packet filter is disabled", emptyAs(evidence.PFDetail, "Self-hosted outbound NAT requires PF."))
 		return
 	}
 	switch evidence.NATStatus {

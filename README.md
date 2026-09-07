@@ -7,8 +7,8 @@ web frontend.
 Apiary is built around bhyve-backed virtual machines and jails under one
 unified abstraction, with cluster consensus handled by a dedicated raft
 agent rather than a bolted-on external dependency. Each physical machine
-in the cluster is a **hive**; the VMs and jails it hosts are its
-**comb**, made up of individual **cells**.
+in the cluster is a **comb**; the VMs and jails it hosts are its
+**cells**.
 
 ## Vocabulary
 
@@ -16,26 +16,27 @@ Apiary's product language draws on both the organization of the bees
 and the physical structure of a real apiary:
 
 - **Apiary** — the complete system.
-- **Colony** — the entire swarm: every hive and everything running on
+- **Colony** — the entire swarm: every comb and everything running on
   them.
-- **Hive** — one physical Apiary node/host.
-- **Comb** — the VMs and jails belonging to one hive, collectively.
+- **Comb** — one physical Apiary node/host.
 - **Cell** — one individual VM or jail.
 
-That gives `Apiary > Colony > Hive > Comb > Cell` — "Hive `apiarium` is
-unreachable," "view this hive's comb," "cell `web-01` is running,"
-"move cell `web-01` to another hive." **Frame** is reserved for a
-possible future subdivision inside a hive (in real beekeeping
-equipment, a frame supports a section of comb) — the hierarchy can
-extend to `Apiary > Colony > Hive > Frame > Comb > Cell` later without
-changing what the existing terms mean. "Colony" names the complete
-swarm, not an individual node.
+That gives `Apiary > Colony > Comb > Cell` — "Comb `apiarium` is
+unreachable," "cell `web-01` is running," "move cell `web-01` to
+another comb." "Colony" names the complete swarm, not an individual
+node.
 
 These are product and UI terms, not a code migration: they don't rename
 any Go type, protobuf field, API resource, CLI flag, or storage
 identifier. The rest of this document, the code, and every ADR
 continue to say "node," "VM," and "jail," matching what's actually in
-`api/`, `internal/`, and `cmd/`.
+`api/`, `internal/`, and `cmd/`. See
+[ADR-0076](docs/adr/0076-comb-hierarchy-rename.md) for why "Hive" was
+retired (it reads as a typo of "bhyve" in prose) — the fifth tier this
+document previously described (an unimplemented "Comb" meaning "the
+cells collectively on one hive") is gone too, since ADR-0059 already
+established it as UI-only grouping with no backing resource; "Comb"
+simply took over the node-level term directly instead.
 
 ## Status
 
@@ -82,7 +83,7 @@ each design decision, in order.
   machine, since bhyve's VNC listener is deliberately loopback-only and
   never exposed on the network. A new bidirectional
   `ManagerService.ProxyVMConsole` closes that gap: the frontend forwards
-  to the owning Hive's managerd over the existing authenticated peer
+  to the owning Comb's managerd over the existing authenticated peer
   path, and that managerd independently re-validates ownership through
   `GetVMConsole` before dialing its own local VNC socket — neither a
   caller-supplied host nor port is ever accepted. The raw VNC listener
@@ -406,7 +407,7 @@ each design decision, in order.
   jail-provisioning control, and local Apiary service status. Admins can
   schedule a restart of `apiary_managerd` or `apiary_frontend` from the
   same page without changing `rc.conf`. The VLAN/NAT uplink fields are
-  dropdowns populated from that Hive's own live interface inventory
+  dropdowns populated from that Comb's own live interface inventory
   (state and addresses shown per option) rather than free text; a saved
   interface that's since disappeared stays selectable as
   `(saved, unavailable)` so it can be cleared without hand-editing JSON,
@@ -516,7 +517,7 @@ each design decision, in order.
   [ADR-0057](docs/adr/0057-offline-recovery-handbook-v1.md).
 - **Cell Path Trace v1** (`/trace`) - a stage-by-stage, evidence-labeled
   explanation of one VM's intended network path (cell state, virtual
-  interface, managed network, DHCP, DNS, owner-hive bridge, firewall,
+  interface, managed network, DHCP, DNS, owner-comb bridge, firewall,
   route), each stage independently marked clear/blocked/unknown rather
   than stopping at the first problem - Codex's contribution, reviewed
   before merge. See [ADR-0058](docs/adr/0058-cell-path-trace-v1.md).
@@ -536,7 +537,7 @@ each design decision, in order.
   [ADR-0060](docs/adr/0060-operational-invariants-v1.md).
 - **Why Not Engine v1** (`/why-not`) - read-only answers to concrete
   operator questions ("why can this cell not migrate," "why is this
-  hive unsafe to reboot," "why is this cell not recoverable," "why can
+  comb unsafe to reboot," "why is this cell not recoverable," "why can
   this network not provide connectivity"), citing the smallest actual
   blocker set from already-shipped mechanisms above rather than a dump
   of every warning, with proven remedies kept clearly separate from
@@ -544,7 +545,7 @@ each design decision, in order.
   [ADR-0061](docs/adr/0061-why-not-engine-v1.md).
 - **Resilience Coverage Map v1** (`/resilience-coverage`) - enumerates
   every failure scenario already computable by the mechanisms above
-  (hive failure, network failure, network connectivity, cell
+  (comb failure, network failure, network connectivity, cell
   recoverability, HAST dual-primary, raft quorum tolerance) and
   classifies each by whether real evidence exists - simulated,
   untested, or unsafe/impossible to physically rehearse - never by
@@ -552,8 +553,8 @@ each design decision, in order.
   percentage. See
   [ADR-0062](docs/adr/0062-resilience-coverage-map-v1.md).
 - **Cloudflare Tunnel exposure v1** - the operator pre-provisions one
-  Cloudflare Tunnel per Hive by hand; Apiary reconciles which Cells are
-  exposed into that Hive's own `cloudflared` ingress config, manages
+  Cloudflare Tunnel per Comb by hand; Apiary reconciles which Cells are
+  exposed into that Comb's own `cloudflared` ingress config, manages
   the `cloudflared` process lifecycle, and calls Cloudflare's DNS API
   to create/update just a CNAME record per exposed Cell - no Tunnel-
   provisioning API of Cloudflare's own is ever called, needing only a

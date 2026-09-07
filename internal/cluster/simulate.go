@@ -387,7 +387,7 @@ func ComputeImageAvailability(requirements []ImageRequirement, inventories []Ima
 			impact.Explanation = fmt.Sprintf("no remaining source was confirmed, but inventories could not be read from %s", strings.Join(impact.UnknownNodes, ", "))
 		default:
 			impact.Verdict = ImageAvailabilityUnavailable
-			impact.Explanation = "no remaining Hive reports this image; future provisioning or recovery that needs it would be blocked"
+			impact.Explanation = "no remaining Comb reports this image; future provisioning or recovery that needs it would be blocked"
 		}
 		impacts = append(impacts, impact)
 	}

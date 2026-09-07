@@ -5,7 +5,7 @@
 <body class="app-layout">
   {{template "nav" .}}
   <main class="content" id="main-content">
-  {{template "page_header" (pageHeader "Resilience Coverage Map" "Which failure scenarios have real evidence behind them, and which do not. A successful check for one hive, network, storage path, or resource never confirms the same for any other, and results are never combined into a single score.")}}
+  {{template "page_header" (pageHeader "Resilience Coverage Map" "Which failure scenarios have real evidence behind them, and which do not. A successful check for one comb, network, storage path, or resource never confirms the same for any other, and results are never combined into a single score.")}}
 
   <div class="panel">
     <h3>Failure scenarios</h3>
@@ -31,7 +31,7 @@
 
   <div class="panel">
     <h3>Coverage tally</h3>
-    <p class="muted">A plain count, not a percentage. A successful check for one hive, network, storage path, or resource never confirms the same for any other, and these counts are never combined into a single score.</p>
+    <p class="muted">A plain count, not a percentage. A successful check for one comb, network, storage path, or resource never confirms the same for any other, and these counts are never combined into a single score.</p>
     <table>
       <tbody>
         {{range .CoverageCounts}}

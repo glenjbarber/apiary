@@ -70,8 +70,8 @@ type Remedy struct {
 
 // Answer is one question's full, deterministic result.
 type Answer struct {
-	Question string // "cell-migrate" | "cell-recoverable" | "hive-reboot" | "network-connectivity"
-	Scope    string // the cell/hive/network ID asked about
+	Question string // "cell-migrate" | "cell-recoverable" | "comb-reboot" | "network-connectivity"
+	Scope    string // the cell/comb/network ID asked about
 	Verdict  Verdict
 	Blockers []Blocker
 	Remedies []Remedy
@@ -249,12 +249,12 @@ type ReplicaBackedFact struct {
 // owner; only its redundancy is lost during this reboot, surfaced as a
 // Caveat only.
 func AnswerHiveReboot(nodeID string, quorum QuorumFact, owned []OwnedResourceFact, replicaBacked []ReplicaBackedFact) Answer {
-	ans := Answer{Question: "hive-reboot", Scope: nodeID}
+	ans := Answer{Question: "comb-reboot", Scope: nodeID}
 
 	if !quorum.Survives {
 		ans.Blockers = append(ans.Blockers, Blocker{
 			Invariant: "quorum-tolerance",
-			Detail:    "Raft quorum would not survive this hive's loss. " + quorum.Note,
+			Detail:    "Raft quorum would not survive this comb's loss. " + quorum.Note,
 		})
 	}
 
@@ -276,7 +276,7 @@ func AnswerHiveReboot(nodeID string, quorum QuorumFact, owned []OwnedResourceFac
 	for _, rb := range replicaBacked {
 		ans.Caveats = append(ans.Caveats, invariant.Evidence{
 			Source: "dependency-graph-simulator (replica-backed resource)",
-			Detail: rb.Name + " (" + rb.Kind + ") stays running, unaffected, on its real owner " + rb.OwnerNodeID + " during this reboot - it only loses this hive as a HAST replica target until reconfigured elsewhere. " + rb.Explanation,
+			Detail: rb.Name + " (" + rb.Kind + ") stays running, unaffected, on its real owner " + rb.OwnerNodeID + " during this reboot - it only loses this comb as a HAST replica target until reconfigured elsewhere. " + rb.Explanation,
 		})
 	}
 
