@@ -796,6 +796,34 @@ func TestServer_CleanupOrphanedHASTResource_RejectsInvalidResourceType(t *testin
 	}
 }
 
+// TestServer_CleanupOrphanedHASTResource_RejectsPathSeparatorInResourceID
+// is the regression test for a security-audit finding: resource_id was
+// concatenated directly into a ZFS dataset name with no validation of its
+// own shape, relying entirely on zfs.Manager.path()'s generic per-segment
+// traversal guard further downstream. A "/" must now be rejected at the
+// point resource_id is first used to build that name, before ever reaching
+// raft or zfs - checked here with a nil raft client to prove the rejection
+// doesn't depend on either being reachable.
+func TestServer_CleanupOrphanedHASTResource_RejectsPathSeparatorInResourceID(t *testing.T) {
+	zfsMgr := &fakeQuotaSetter{datasets: []string{"hast-vm-real"}}
+	s := NewServer(nil, "node-1", nil, nil, nil, nil, nil, "", zfsMgr, nil, nil, 0, nil)
+
+	for _, id := range []string{"../real", "foo/../real", "foo/bar"} {
+		t.Run(id, func(t *testing.T) {
+			resp, err := s.CleanupOrphanedHASTResource(context.Background(), &rpcpb.CleanupOrphanedHASTResourceRequest{ResourceId: id, ResourceType: "vm"})
+			if err != nil {
+				t.Fatalf("CleanupOrphanedHASTResource() error: %v", err)
+			}
+			if resp.GetError() == "" {
+				t.Fatalf("CleanupOrphanedHASTResource(%q) error field = empty, want a rejection for a resource_id containing a path separator", id)
+			}
+			if zfsMgr.lastDestroyed != "" {
+				t.Fatalf("DestroyDataset called (%q) for resource_id %q, want no destructive call at all", zfsMgr.lastDestroyed, id)
+			}
+		})
+	}
+}
+
 func TestServer_ListNodeServices_UsesLocalController(t *testing.T) {
 	controller := &fakeNodeServiceController{services: []*rpcpb.NodeService{{Name: "apiary_frontend", Status: "running", Restartable: true}}}
 	s := NewServer(nil, "node-1", nil, nil, nil, nil, nil, "", nil, nil, nil, 0, nil)
