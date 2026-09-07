@@ -619,9 +619,12 @@ each design decision, in order.
   ADR-0020/ADR-0065 above, which already closed the older cross-node
   console and Networks-page bridge-status gaps this bullet used to
   describe)
-- Network management is v1-scoped: `internal/dhcpd` only supports
-  `/24`-or-smaller subnets, and firewall rules are a flat allow/block
-  list with no priority/ordering beyond `pf`'s own rule evaluation
+- Network management is v1-scoped: firewall rules are a flat allow/block
+  list with no priority/ordering beyond `pf`'s own rule evaluation.
+  `internal/dhcpd`'s subnet-size limit (previously `/24`-or-smaller
+  only) is lifted - any valid IPv4 subnet with at least two usable
+  host addresses is now supported, matching `internal/raft`'s own
+  IP-allocation arithmetic. See ADR-0022's "Update" section.
 - Importing VMs from other hypervisors (e.g. Proxmox): no disk-format
   conversion, and Apiary is UEFI-only. Linux containers have no path at
   all — jails share the host FreeBSD kernel

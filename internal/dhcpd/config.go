@@ -1,6 +1,7 @@
 package dhcpd
 
 import (
+	"encoding/binary"
 	"fmt"
 	"net"
 	"strings"
@@ -188,6 +189,15 @@ func filterStaleLeases(leaseFileBody string, reservations map[string]string) str
 // EnsureBridgeAddress and internal/raft's allocateIP, both of which
 // also reserve it) through the last host address before the broadcast
 // address, plus the subnet's dotted-decimal netmask.
+//
+// Uses full 32-bit arithmetic (matching internal/raft's allocateIP)
+// rather than varying only the last octet, so any valid IPv4 subnet is
+// supported - not just /24-or-smaller. That single-octet arithmetic
+// was a real, previously-enforced limitation (this function used to
+// reject anything larger than /24 outright); lifted once it was clear
+// nothing else in the codebase shares that assumption - allocateIP
+// already did full 32-bit arithmetic, so dhcpd was the only remaining
+// place actually blocking a larger managed network.
 func dhcpRange(subnet string) (start, end, netmask string, err error) {
 	_, ipnet, err := net.ParseCIDR(subnet)
 	if err != nil {
@@ -204,18 +214,13 @@ func dhcpRange(subnet string) (start, end, netmask string, err error) {
 	if hostBits < 2 {
 		return "", "", "", fmt.Errorf("dhcpd: subnet %q is too small to serve any DHCP range", subnet)
 	}
-	// Only /24-or-smaller subnets are supported for now: the arithmetic
-	// below only varies the last octet, matching every other size
-	// assumption already made for this project's home-lab scale (see
-	// internal/raft's own IP-allocation range checks). A real need for
-	// larger networks would need real multi-octet arithmetic here.
-	if hostBits > 8 {
-		return "", "", "", fmt.Errorf("dhcpd: subnet %q is larger than /24, not supported yet", subnet)
-	}
 
-	startIP := net.IPv4(base[0], base[1], base[2], base[3]+2)
-	lastHostOffset := base[3] + byte(1<<uint(hostBits)-2) // broadcast - 1
-	endIP := net.IPv4(base[0], base[1], base[2], lastHostOffset)
+	baseInt := binary.BigEndian.Uint32(base)
+	numAddrs := uint64(1) << uint(hostBits)
 
-	return startIP.String(), endIP.String(), mask, nil
+	var startBuf, endBuf [4]byte
+	binary.BigEndian.PutUint32(startBuf[:], baseInt+2)                // skip network address and .1 (gateway)
+	binary.BigEndian.PutUint32(endBuf[:], baseInt+uint32(numAddrs-2)) // skip broadcast address
+
+	return net.IP(startBuf[:]).String(), net.IP(endBuf[:]).String(), mask, nil
 }

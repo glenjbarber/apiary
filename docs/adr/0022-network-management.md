@@ -316,3 +316,21 @@ added to the bridge, broadcast a genuine DHCPv4 request, received a
 real lease from the LAN's own router, and was pingable from an
 entirely separate machine - the first time a flat-bridge Apiary VM has
 had real, working network connectivity confirmed end-to-end.
+
+## Update: the `/24`-or-smaller subnet limit named above is lifted
+
+This ADR's own Consequences section named `internal/dhcpd`'s subnet
+arithmetic as v1-scoped to `/24`-or-smaller networks. Investigating it
+found the restriction only ever existed in `dhcpRange` (`internal/dhcpd/config.go`),
+which varied only the subnet's last octet - `internal/raft`'s
+`allocateIP` (per-VM IP assignment on the same `NetworkDefinition`)
+already did full 32-bit arithmetic and had no such limit, and nothing
+else in the codebase (`internal/vlan`'s `gatewayCIDR` included) made a
+matching single-octet assumption. Fixed by generalizing `dhcpRange` to
+the same `binary.BigEndian`-based arithmetic `allocateIP` already used,
+rather than inventing a new approach - any valid IPv4 subnet with at
+least two usable host addresses (`/30` or larger) is now accepted, not
+just `/24`-or-smaller. Regression-tested for a `/16` (crossing a
+third-octet boundary, which the old single-octet math could never have
+computed correctly even with its size check removed) and the smallest
+valid case, a `/30`. No other consequence of this ADR changes.
