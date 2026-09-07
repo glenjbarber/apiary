@@ -245,6 +245,14 @@ func (f *fakeClient) GetLocalNetworkBridgeStatus(context.Context, *rpcpb.GetLoca
 	return &rpcpb.GetLocalNetworkBridgeStatusResponse{}, nil
 }
 
+func (f *fakeClient) ListOrphanedHASTResources(context.Context, *rpcpb.ListOrphanedHASTResourcesRequest, ...grpc.CallOption) (*rpcpb.ListOrphanedHASTResourcesResponse, error) {
+	return &rpcpb.ListOrphanedHASTResourcesResponse{}, nil
+}
+
+func (f *fakeClient) CleanupOrphanedHASTResource(context.Context, *rpcpb.CleanupOrphanedHASTResourceRequest, ...grpc.CallOption) (*rpcpb.CleanupOrphanedHASTResourceResponse, error) {
+	return &rpcpb.CleanupOrphanedHASTResourceResponse{}, nil
+}
+
 func (f *fakeClient) ListAssumptionResults(context.Context, *rpcpb.ListAssumptionResultsRequest, ...grpc.CallOption) (*rpcpb.ListAssumptionResultsResponse, error) {
 	return &rpcpb.ListAssumptionResultsResponse{}, nil
 }

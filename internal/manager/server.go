@@ -277,11 +277,21 @@ func (s *Server) SetJailConsole(attacher jailConsoleAttacher) {
 	s.jailConsole = attacher
 }
 
-// quotaSetter is the subset of *zfs.Manager SetDatasetQuota needs,
-// defined locally so it can be faked in tests without a real zfs(8)
-// binary - the same reasoning isoManager/VLANStatus already follow.
+// quotaSetter is the subset of *zfs.Manager SetDatasetQuota and the
+// orphaned-HAST-resource RPCs need, defined locally so it can be faked
+// in tests without a real zfs(8) binary - the same reasoning
+// isoManager/VLANStatus already follow. ListDatasets/DatasetExists/
+// DestroyDataset were added for ListOrphanedHASTResources/
+// CleanupOrphanedHASTResource (see ADR-0026's own "not yet addressed"
+// note) - kept on this same interface/field rather than a new one
+// since it's always backed by the identical *zfs.Manager instance in
+// cmd/managerd.
 type quotaSetter interface {
 	SetProperty(ctx context.Context, name, prop, value string) error
+	ListDatasets(ctx context.Context) ([]string, error)
+	DatasetExists(ctx context.Context, name string) (bool, error)
+	DestroyDataset(ctx context.Context, name string) error
+	GetProperty(ctx context.Context, name, prop string) (string, error)
 }
 
 // nodeConfigStore is the subset of *nodeconfig.Manager GetNodeConfig/
@@ -1932,6 +1942,174 @@ func (s *Server) SetDatasetQuota(ctx context.Context, req *rpcpb.SetDatasetQuota
 		return &rpcpb.SetDatasetQuotaResponse{Error: err.Error()}, nil
 	}
 	return &rpcpb.SetDatasetQuotaResponse{}, nil
+}
+
+// hastOrphanDatasetPrefix/hastOrphanResourceType parse a top-level ZFS
+// dataset name back into a HAST resource's type and bare id, mirroring
+// internal/cluster/hast.go's hastProviderDatasetName("vm-"+id) and
+// jailHASTResourceName ("jail-"+id) naming exactly - kept as a local,
+// duplicated constant rather than an exported cross-package helper
+// since it's a two-line string convention, not shared logic.
+func hastOrphanResourceType(datasetName string) (kind, id string, ok bool) {
+	switch {
+	case strings.HasPrefix(datasetName, "hast-vm-"):
+		return "vm", strings.TrimPrefix(datasetName, "hast-vm-"), true
+	case strings.HasPrefix(datasetName, "hast-jail-"):
+		return "jail", strings.TrimPrefix(datasetName, "hast-jail-"), true
+	default:
+		return "", "", false
+	}
+}
+
+// hastOrphanDatasetName is hastOrphanResourceType's inverse.
+func hastOrphanDatasetName(kind, id string) (string, error) {
+	switch kind {
+	case "vm":
+		return "hast-vm-" + id, nil
+	case "jail":
+		return "hast-jail-" + id, nil
+	default:
+		return "", fmt.Errorf("resource_type must be \"vm\" or \"jail\", got %q", kind)
+	}
+}
+
+// hastResourceActiveOnThisNode reports whether this node is still the
+// owner or replica of the given VM/jail id - i.e. whether its HAST
+// provider dataset is genuinely still in use, not orphaned. Re-run at
+// CleanupOrphanedHASTResource time (not just trusted from an earlier
+// List call) so a resource that became active again in between - a new
+// VM/jail created with the same id, however unlikely - is never
+// destroyed out from under it.
+func (s *Server) hastResourceActiveOnThisNode(ctx context.Context, kind, id string) (bool, error) {
+	switch kind {
+	case "vm":
+		resp, err := s.raft.ListVMsLocal(ctx)
+		if err != nil {
+			return false, err
+		}
+		for _, vm := range resp.GetVms() {
+			if vm.GetId() == id && (vm.GetNodeId() == s.nodeID || vm.GetReplicaNodeId() == s.nodeID) {
+				return true, nil
+			}
+		}
+		return false, nil
+	case "jail":
+		resp, err := s.raft.ListJailsLocal(ctx)
+		if err != nil {
+			return false, err
+		}
+		for _, j := range resp.GetJails() {
+			if j.GetId() == id && (j.GetNodeId() == s.nodeID || j.GetReplicaNodeId() == s.nodeID) {
+				return true, nil
+			}
+		}
+		return false, nil
+	default:
+		return false, fmt.Errorf("resource_type must be \"vm\" or \"jail\", got %q", kind)
+	}
+}
+
+// ListOrphanedHASTResources implements rpcpb.ManagerServiceServer - see
+// its own doc comment on ManagerService for the full gap this closes
+// (ADR-0026). Local-only, never routed through raft: this node's own
+// hast-vm-*/hast-jail-* provider datasets are physical, per-node state,
+// exactly like ISOs/HostStats.
+func (s *Server) ListOrphanedHASTResources(ctx context.Context, _ *rpcpb.ListOrphanedHASTResourcesRequest) (*rpcpb.ListOrphanedHASTResourcesResponse, error) {
+	if s.zfs == nil {
+		return &rpcpb.ListOrphanedHASTResourcesResponse{Error: "this node has no ZFS support configured"}, nil
+	}
+	datasets, err := s.zfs.ListDatasets(ctx)
+	if err != nil {
+		return &rpcpb.ListOrphanedHASTResourcesResponse{Error: err.Error()}, nil
+	}
+
+	vmResp, err := s.raft.ListVMsLocal(ctx)
+	if err != nil {
+		return &rpcpb.ListOrphanedHASTResourcesResponse{Error: err.Error()}, nil
+	}
+	jailResp, err := s.raft.ListJailsLocal(ctx)
+	if err != nil {
+		return &rpcpb.ListOrphanedHASTResourcesResponse{Error: err.Error()}, nil
+	}
+	activeVM := make(map[string]bool, len(vmResp.GetVms()))
+	for _, vm := range vmResp.GetVms() {
+		if vm.GetNodeId() == s.nodeID || vm.GetReplicaNodeId() == s.nodeID {
+			activeVM[vm.GetId()] = true
+		}
+	}
+	activeJail := make(map[string]bool, len(jailResp.GetJails()))
+	for _, j := range jailResp.GetJails() {
+		if j.GetNodeId() == s.nodeID || j.GetReplicaNodeId() == s.nodeID {
+			activeJail[j.GetId()] = true
+		}
+	}
+
+	var orphans []*rpcpb.OrphanedHASTResource
+	for _, ds := range datasets {
+		// ListDatasets is recursive; a hast-*  dataset created by this
+		// codebase is always a direct, childless leaf, so anything with
+		// a "/" here belongs to some other dataset's descendant, not a
+		// HAST provider root itself.
+		if strings.Contains(ds, "/") {
+			continue
+		}
+		kind, id, ok := hastOrphanResourceType(ds)
+		if !ok {
+			continue
+		}
+		if (kind == "vm" && activeVM[id]) || (kind == "jail" && activeJail[id]) {
+			continue
+		}
+		usedSize, _ := s.zfs.GetProperty(ctx, ds, "used") // best-effort context only
+		orphans = append(orphans, &rpcpb.OrphanedHASTResource{
+			ResourceId:   id,
+			ResourceType: kind,
+			DatasetName:  ds,
+			UsedSize:     usedSize,
+		})
+	}
+	return &rpcpb.ListOrphanedHASTResourcesResponse{Resources: orphans}, nil
+}
+
+// CleanupOrphanedHASTResource implements rpcpb.ManagerServiceServer -
+// the explicit, human-triggered destructive half of the pair (see
+// ListOrphanedHASTResources's doc comment on ManagerService). Re-checks
+// orphan status itself rather than trusting the caller's own prior
+// List call, the same defense ForcePurgeVM/ForcePurgeJail apply against
+// state moving between an operator's two separate actions.
+func (s *Server) CleanupOrphanedHASTResource(ctx context.Context, req *rpcpb.CleanupOrphanedHASTResourceRequest) (*rpcpb.CleanupOrphanedHASTResourceResponse, error) {
+	if s.zfs == nil {
+		return &rpcpb.CleanupOrphanedHASTResourceResponse{Error: "this node has no ZFS support configured"}, nil
+	}
+	id := req.GetResourceId()
+	kind := req.GetResourceType()
+	if id == "" {
+		return &rpcpb.CleanupOrphanedHASTResourceResponse{Error: "resource_id must be set"}, nil
+	}
+	datasetName, err := hastOrphanDatasetName(kind, id)
+	if err != nil {
+		return &rpcpb.CleanupOrphanedHASTResourceResponse{Error: err.Error()}, nil
+	}
+	active, err := s.hastResourceActiveOnThisNode(ctx, kind, id)
+	if err != nil {
+		return &rpcpb.CleanupOrphanedHASTResourceResponse{Error: err.Error()}, nil
+	}
+	if active {
+		return &rpcpb.CleanupOrphanedHASTResourceResponse{
+			Error: fmt.Sprintf("%s %q is no longer orphaned - a record on this node now references it again; refusing to destroy its data", kind, id),
+		}, nil
+	}
+	exists, err := s.zfs.DatasetExists(ctx, datasetName)
+	if err != nil {
+		return &rpcpb.CleanupOrphanedHASTResourceResponse{Error: err.Error()}, nil
+	}
+	if !exists {
+		return &rpcpb.CleanupOrphanedHASTResourceResponse{Error: fmt.Sprintf("no such orphaned resource: dataset %q does not exist", datasetName)}, nil
+	}
+	if err := s.zfs.DestroyDataset(ctx, datasetName); err != nil {
+		return &rpcpb.CleanupOrphanedHASTResourceResponse{Error: err.Error()}, nil
+	}
+	return &rpcpb.CleanupOrphanedHASTResourceResponse{}, nil
 }
 
 // ListNodeServices reports this Hive's own fixed Apiary rc.d service

@@ -61,19 +61,20 @@ func (have Role) Satisfies(want Role) bool {
 // ship unintentionally under-protected.
 var requiredRole = map[string]Role{
 	// Viewer: read-only.
-	"/apiary.rpc.v1.ManagerService/GetVM":                RoleViewer,
-	"/apiary.rpc.v1.ManagerService/ListVMs":              RoleViewer,
-	"/apiary.rpc.v1.ManagerService/GetJail":              RoleViewer,
-	"/apiary.rpc.v1.ManagerService/ListJails":            RoleViewer,
-	"/apiary.rpc.v1.ManagerService/ListISOs":             RoleViewer,
-	"/apiary.rpc.v1.ManagerService/ListNetworks":         RoleViewer,
-	"/apiary.rpc.v1.ManagerService/HostStats":            RoleViewer,
-	"/apiary.rpc.v1.ManagerService/GetVMConsole":         RoleViewer,
-	"/apiary.rpc.v1.ManagerService/ProxyVMConsole":       RoleViewer,
-	"/apiary.rpc.v1.ManagerService/GetVMSerialLog":       RoleViewer,
-	"/apiary.rpc.v1.ManagerService/GetNodeConfig":        RoleViewer,
-	"/apiary.rpc.v1.ManagerService/GetLocalNodeHealth":   RoleViewer,
-	"/apiary.rpc.v1.ManagerService/ListAssumptionClaims": RoleViewer,
+	"/apiary.rpc.v1.ManagerService/GetVM":                     RoleViewer,
+	"/apiary.rpc.v1.ManagerService/ListVMs":                   RoleViewer,
+	"/apiary.rpc.v1.ManagerService/GetJail":                   RoleViewer,
+	"/apiary.rpc.v1.ManagerService/ListJails":                 RoleViewer,
+	"/apiary.rpc.v1.ManagerService/ListISOs":                  RoleViewer,
+	"/apiary.rpc.v1.ManagerService/ListNetworks":              RoleViewer,
+	"/apiary.rpc.v1.ManagerService/HostStats":                 RoleViewer,
+	"/apiary.rpc.v1.ManagerService/GetVMConsole":              RoleViewer,
+	"/apiary.rpc.v1.ManagerService/ProxyVMConsole":            RoleViewer,
+	"/apiary.rpc.v1.ManagerService/GetVMSerialLog":            RoleViewer,
+	"/apiary.rpc.v1.ManagerService/GetNodeConfig":             RoleViewer,
+	"/apiary.rpc.v1.ManagerService/GetLocalNodeHealth":        RoleViewer,
+	"/apiary.rpc.v1.ManagerService/ListAssumptionClaims":      RoleViewer,
+	"/apiary.rpc.v1.ManagerService/ListOrphanedHASTResources": RoleViewer,
 
 	// The Dependency Graph Simulator RPCs are read-only reports - Viewer,
 	// the same tier as every other plain read
@@ -131,12 +132,13 @@ var requiredRole = map[string]Role{
 	// (a human-triggered override of a reconciler's own normal
 	// teardown sequence - deliberately not something Operator can do
 	// unilaterally).
-	"/apiary.rpc.v1.ManagerService/ForcePurgeVM":     RoleAdmin,
-	"/apiary.rpc.v1.ManagerService/ForcePurgeJail":   RoleAdmin,
-	"/apiary.rpc.v1.ManagerService/CreateAPIKey":     RoleAdmin,
-	"/apiary.rpc.v1.ManagerService/ListAPIKeys":      RoleAdmin,
-	"/apiary.rpc.v1.ManagerService/RevokeAPIKey":     RoleAdmin,
-	"/apiary.rpc.v1.ManagerService/UpdateNodeConfig": RoleAdmin,
+	"/apiary.rpc.v1.ManagerService/ForcePurgeVM":                RoleAdmin,
+	"/apiary.rpc.v1.ManagerService/ForcePurgeJail":              RoleAdmin,
+	"/apiary.rpc.v1.ManagerService/CleanupOrphanedHASTResource": RoleAdmin,
+	"/apiary.rpc.v1.ManagerService/CreateAPIKey":                RoleAdmin,
+	"/apiary.rpc.v1.ManagerService/ListAPIKeys":                 RoleAdmin,
+	"/apiary.rpc.v1.ManagerService/RevokeAPIKey":                RoleAdmin,
+	"/apiary.rpc.v1.ManagerService/UpdateNodeConfig":            RoleAdmin,
 }
 
 // requiredRoleFor returns the minimum Role fullMethod needs. An RPC

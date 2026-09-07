@@ -71,6 +71,8 @@ const (
 	ManagerService_PushISOTo_FullMethodName                   = "/apiary.rpc.v1.ManagerService/PushISOTo"
 	ManagerService_GetLocalNetworkBridgeStatus_FullMethodName = "/apiary.rpc.v1.ManagerService/GetLocalNetworkBridgeStatus"
 	ManagerService_ListAssumptionResults_FullMethodName       = "/apiary.rpc.v1.ManagerService/ListAssumptionResults"
+	ManagerService_ListOrphanedHASTResources_FullMethodName   = "/apiary.rpc.v1.ManagerService/ListOrphanedHASTResources"
+	ManagerService_CleanupOrphanedHASTResource_FullMethodName = "/apiary.rpc.v1.ManagerService/CleanupOrphanedHASTResource"
 )
 
 // ManagerServiceClient is the client API for ManagerService service.
@@ -337,6 +339,25 @@ type ManagerServiceClient interface {
 	// never leader-forwarded (the same locality convention as HostStats).
 	// See internal/assumptions/internal/assumecheck.
 	ListAssumptionResults(ctx context.Context, in *ListAssumptionResultsRequest, opts ...grpc.CallOption) (*ListAssumptionResultsResponse, error)
+	// ListOrphanedHASTResources/CleanupOrphanedHASTResource close the gap
+	// ADR-0026 named and left open: once a replicated VM/jail's record is
+	// fully purged (not just reassigned - ADR-0025's PlanReclaim already
+	// handles reassignment), the *secondary* node's own local HAST
+	// provider dataset has no signal left to clean itself up, since this
+	// project deliberately never infers teardown from a record's absence.
+	// ListOrphanedHASTResources is a physical, per-node, local-only report
+	// (never routed through raft) comparing this node's own
+	// hast-vm-*/hast-jail-* provider datasets against the current
+	// raft-replicated VM/jail list (both owner and replica roles) -
+	// anything with no matching record at all is orphaned.
+	// CleanupOrphanedHASTResource is the explicit, human-triggered escape
+	// hatch that actually destroys one, mirroring ForcePurgeVM/
+	// ForcePurgeJail's own "an operator decides, the system never guesses"
+	// posture - it re-verifies the resource is still orphaned at the
+	// moment of the call (not just when it was listed) before destroying
+	// anything.
+	ListOrphanedHASTResources(ctx context.Context, in *ListOrphanedHASTResourcesRequest, opts ...grpc.CallOption) (*ListOrphanedHASTResourcesResponse, error)
+	CleanupOrphanedHASTResource(ctx context.Context, in *CleanupOrphanedHASTResourceRequest, opts ...grpc.CallOption) (*CleanupOrphanedHASTResourceResponse, error)
 }
 
 type managerServiceClient struct {
@@ -876,6 +897,26 @@ func (c *managerServiceClient) ListAssumptionResults(ctx context.Context, in *Li
 	return out, nil
 }
 
+func (c *managerServiceClient) ListOrphanedHASTResources(ctx context.Context, in *ListOrphanedHASTResourcesRequest, opts ...grpc.CallOption) (*ListOrphanedHASTResourcesResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListOrphanedHASTResourcesResponse)
+	err := c.cc.Invoke(ctx, ManagerService_ListOrphanedHASTResources_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *managerServiceClient) CleanupOrphanedHASTResource(ctx context.Context, in *CleanupOrphanedHASTResourceRequest, opts ...grpc.CallOption) (*CleanupOrphanedHASTResourceResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(CleanupOrphanedHASTResourceResponse)
+	err := c.cc.Invoke(ctx, ManagerService_CleanupOrphanedHASTResource_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // ManagerServiceServer is the server API for ManagerService service.
 // All implementations must embed UnimplementedManagerServiceServer
 // for forward compatibility.
@@ -1140,6 +1181,25 @@ type ManagerServiceServer interface {
 	// never leader-forwarded (the same locality convention as HostStats).
 	// See internal/assumptions/internal/assumecheck.
 	ListAssumptionResults(context.Context, *ListAssumptionResultsRequest) (*ListAssumptionResultsResponse, error)
+	// ListOrphanedHASTResources/CleanupOrphanedHASTResource close the gap
+	// ADR-0026 named and left open: once a replicated VM/jail's record is
+	// fully purged (not just reassigned - ADR-0025's PlanReclaim already
+	// handles reassignment), the *secondary* node's own local HAST
+	// provider dataset has no signal left to clean itself up, since this
+	// project deliberately never infers teardown from a record's absence.
+	// ListOrphanedHASTResources is a physical, per-node, local-only report
+	// (never routed through raft) comparing this node's own
+	// hast-vm-*/hast-jail-* provider datasets against the current
+	// raft-replicated VM/jail list (both owner and replica roles) -
+	// anything with no matching record at all is orphaned.
+	// CleanupOrphanedHASTResource is the explicit, human-triggered escape
+	// hatch that actually destroys one, mirroring ForcePurgeVM/
+	// ForcePurgeJail's own "an operator decides, the system never guesses"
+	// posture - it re-verifies the resource is still orphaned at the
+	// moment of the call (not just when it was listed) before destroying
+	// anything.
+	ListOrphanedHASTResources(context.Context, *ListOrphanedHASTResourcesRequest) (*ListOrphanedHASTResourcesResponse, error)
+	CleanupOrphanedHASTResource(context.Context, *CleanupOrphanedHASTResourceRequest) (*CleanupOrphanedHASTResourceResponse, error)
 	mustEmbedUnimplementedManagerServiceServer()
 }
 
@@ -1305,6 +1365,12 @@ func (UnimplementedManagerServiceServer) GetLocalNetworkBridgeStatus(context.Con
 }
 func (UnimplementedManagerServiceServer) ListAssumptionResults(context.Context, *ListAssumptionResultsRequest) (*ListAssumptionResultsResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ListAssumptionResults not implemented")
+}
+func (UnimplementedManagerServiceServer) ListOrphanedHASTResources(context.Context, *ListOrphanedHASTResourcesRequest) (*ListOrphanedHASTResourcesResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ListOrphanedHASTResources not implemented")
+}
+func (UnimplementedManagerServiceServer) CleanupOrphanedHASTResource(context.Context, *CleanupOrphanedHASTResourceRequest) (*CleanupOrphanedHASTResourceResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method CleanupOrphanedHASTResource not implemented")
 }
 func (UnimplementedManagerServiceServer) mustEmbedUnimplementedManagerServiceServer() {}
 func (UnimplementedManagerServiceServer) testEmbeddedByValue()                        {}
@@ -2230,6 +2296,42 @@ func _ManagerService_ListAssumptionResults_Handler(srv interface{}, ctx context.
 	return interceptor(ctx, in, info, handler)
 }
 
+func _ManagerService_ListOrphanedHASTResources_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListOrphanedHASTResourcesRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ManagerServiceServer).ListOrphanedHASTResources(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ManagerService_ListOrphanedHASTResources_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ManagerServiceServer).ListOrphanedHASTResources(ctx, req.(*ListOrphanedHASTResourcesRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ManagerService_CleanupOrphanedHASTResource_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(CleanupOrphanedHASTResourceRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ManagerServiceServer).CleanupOrphanedHASTResource(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ManagerService_CleanupOrphanedHASTResource_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ManagerServiceServer).CleanupOrphanedHASTResource(ctx, req.(*CleanupOrphanedHASTResourceRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // ManagerService_ServiceDesc is the grpc.ServiceDesc for ManagerService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -2432,6 +2534,14 @@ var ManagerService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ListAssumptionResults",
 			Handler:    _ManagerService_ListAssumptionResults_Handler,
+		},
+		{
+			MethodName: "ListOrphanedHASTResources",
+			Handler:    _ManagerService_ListOrphanedHASTResources_Handler,
+		},
+		{
+			MethodName: "CleanupOrphanedHASTResource",
+			Handler:    _ManagerService_CleanupOrphanedHASTResource_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{

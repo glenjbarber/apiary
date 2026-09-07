@@ -270,6 +270,46 @@ func newManagerdRPCClientFull(t *testing.T, raftdSocket, nodeID string, vnc VNCL
 	return rpcpb.NewManagerServiceClient(conn)
 }
 
+// newManagerdRPCClientWithZFS mirrors newManagerdRPCClientFull, but lets
+// a test supply a fake quotaSetter - needed for the orphaned-HAST-
+// resource RPCs, which cross-reference real ListVMsLocal/ListJailsLocal
+// results against a set of local dataset names, so they need a genuine
+// raft-backed VM/jail list a plain unit test's nil raft can't provide.
+func newManagerdRPCClientWithZFS(t *testing.T, raftdSocket, nodeID string, zfsMgr quotaSetter) rpcpb.ManagerServiceClient {
+	t.Helper()
+
+	raftClient, err := Dial(raftdSocket, "")
+	if err != nil {
+		t.Fatalf("Dial() error: %v", err)
+	}
+	t.Cleanup(func() { raftClient.Close() })
+
+	lis, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("Listen(tcp) error: %v", err)
+	}
+
+	srv := NewServer(raftClient, nodeID, isostore.New(t.TempDir()), nil, nil, nil, nil, "", zfsMgr, nil, nil, 0, nil)
+	grpcServer := grpc.NewServer(
+		grpc.UnaryInterceptor(srv.AuthUnaryInterceptor),
+		grpc.StreamInterceptor(srv.AuthStreamInterceptor),
+	)
+	rpcpb.RegisterManagerServiceServer(grpcServer, srv)
+	go grpcServer.Serve(lis)
+	t.Cleanup(grpcServer.GracefulStop)
+
+	conn, err := grpc.NewClient(
+		lis.Addr().String(),
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+	)
+	if err != nil {
+		t.Fatalf("grpc.NewClient() error: %v", err)
+	}
+	t.Cleanup(func() { conn.Close() })
+
+	return rpcpb.NewManagerServiceClient(conn)
+}
+
 func TestIntegration_StatusRoundTripsThroughRaftd(t *testing.T) {
 	raftdSocket := newRaftdUDSSocket(t)
 	client := newManagerdRPCClient(t, raftdSocket)
@@ -1583,6 +1623,133 @@ func TestIntegration_ForcePurgeJail_MissingIsError(t *testing.T) {
 	}
 	if resp.GetError() == "" {
 		t.Fatalf("ForcePurgeJail() error = empty, want a not-found rejection")
+	}
+}
+
+// TestIntegration_ListOrphanedHASTResources_ReportsOnlyUnreferencedDatasets
+// is the direct regression test for the gap ADR-0026 named and left
+// open: a hast-vm-*/hast-jail-* provider dataset with no VM/jail record
+// (owner or replica) on this node is reported as orphaned; one that's
+// still referenced - as owner OR as replica - is not, and neither is an
+// unrelated, non-HAST dataset.
+func TestIntegration_ListOrphanedHASTResources_ReportsOnlyUnreferencedDatasets(t *testing.T) {
+	raftdSocket := newRaftdUDSSocket(t)
+	zfsMgr := &fakeQuotaSetter{
+		datasets: []string{
+			"hast-vm-owned", "hast-vm-replicated", "hast-vm-orphan",
+			"hast-jail-owned", "hast-jail-orphan",
+			"vm-owned", // a VM's own regular (non-HAST) dataset - must be ignored
+		},
+		usedProperty: map[string]string{"hast-vm-orphan": "4.20G"},
+	}
+	client := newManagerdRPCClientWithZFS(t, raftdSocket, "node-a", zfsMgr)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if _, err := client.CreateVM(ctx, &rpcpb.CreateVMRequest{
+		Vm: &rpcpb.VMDefinition{Id: "owned", Name: "owned", NodeId: "node-a"},
+	}); err != nil {
+		t.Fatalf("CreateVM(owned) error: %v", err)
+	}
+	if _, err := client.CreateVM(ctx, &rpcpb.CreateVMRequest{
+		Vm: &rpcpb.VMDefinition{Id: "replicated", Name: "replicated", NodeId: "node-b", ReplicaNodeId: "node-a"},
+	}); err != nil {
+		t.Fatalf("CreateVM(replicated) error: %v", err)
+	}
+	if _, err := client.CreateJail(ctx, &rpcpb.CreateJailRequest{
+		Jail: &rpcpb.JailDefinition{Id: "owned", Name: "owned", NodeId: "node-a"},
+	}); err != nil {
+		t.Fatalf("CreateJail(owned) error: %v", err)
+	}
+
+	resp, err := client.ListOrphanedHASTResources(ctx, &rpcpb.ListOrphanedHASTResourcesRequest{})
+	if err != nil {
+		t.Fatalf("ListOrphanedHASTResources() error: %v", err)
+	}
+	if resp.GetError() != "" {
+		t.Fatalf("ListOrphanedHASTResources() returned error: %s", resp.GetError())
+	}
+
+	got := map[string]string{}
+	for _, o := range resp.GetResources() {
+		got[o.GetDatasetName()] = o.GetResourceId() + "/" + o.GetResourceType()
+	}
+	if len(got) != 2 {
+		t.Fatalf("ListOrphanedHASTResources() = %d resources (%v), want exactly 2 (hast-vm-orphan, hast-jail-orphan)", len(got), got)
+	}
+	if got["hast-vm-orphan"] != "orphan/vm" {
+		t.Errorf("hast-vm-orphan reported as %q, want \"orphan/vm\"", got["hast-vm-orphan"])
+	}
+	if got["hast-jail-orphan"] != "orphan/jail" {
+		t.Errorf("hast-jail-orphan reported as %q, want \"orphan/jail\"", got["hast-jail-orphan"])
+	}
+	for _, o := range resp.GetResources() {
+		if o.GetDatasetName() == "hast-vm-orphan" && o.GetUsedSize() != "4.20G" {
+			t.Errorf("hast-vm-orphan UsedSize = %q, want 4.20G", o.GetUsedSize())
+		}
+	}
+}
+
+// TestIntegration_CleanupOrphanedHASTResource_DestroysOnlyGenuineOrphan
+// covers both halves of CleanupOrphanedHASTResource: a genuinely
+// orphaned dataset is destroyed, and one that's still referenced by a
+// real record on this node (checked fresh at call time, not trusted
+// from an earlier List) is refused, mirroring ForcePurgeVM/
+// ForcePurgeJail's own re-verification discipline.
+func TestIntegration_CleanupOrphanedHASTResource_DestroysOnlyGenuineOrphan(t *testing.T) {
+	raftdSocket := newRaftdUDSSocket(t)
+	zfsMgr := &fakeQuotaSetter{datasets: []string{"hast-vm-orphan", "hast-vm-active"}}
+	client := newManagerdRPCClientWithZFS(t, raftdSocket, "node-a", zfsMgr)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if _, err := client.CreateVM(ctx, &rpcpb.CreateVMRequest{
+		Vm: &rpcpb.VMDefinition{Id: "active", Name: "active", NodeId: "node-a"},
+	}); err != nil {
+		t.Fatalf("CreateVM() error: %v", err)
+	}
+
+	// Still referenced - must be refused, and must not destroy anything.
+	activeResp, err := client.CleanupOrphanedHASTResource(ctx, &rpcpb.CleanupOrphanedHASTResourceRequest{ResourceId: "active", ResourceType: "vm"})
+	if err != nil {
+		t.Fatalf("CleanupOrphanedHASTResource(active) error: %v", err)
+	}
+	if activeResp.GetError() == "" {
+		t.Fatalf("CleanupOrphanedHASTResource(active) error = empty, want a refusal since node-a still owns this VM")
+	}
+	if zfsMgr.lastDestroyed != "" {
+		t.Fatalf("DestroyDataset called (%q) for a still-active resource, want no destructive call at all", zfsMgr.lastDestroyed)
+	}
+
+	// Genuinely orphaned - must succeed and actually destroy the dataset.
+	orphanResp, err := client.CleanupOrphanedHASTResource(ctx, &rpcpb.CleanupOrphanedHASTResourceRequest{ResourceId: "orphan", ResourceType: "vm"})
+	if err != nil {
+		t.Fatalf("CleanupOrphanedHASTResource(orphan) error: %v", err)
+	}
+	if orphanResp.GetError() != "" {
+		t.Fatalf("CleanupOrphanedHASTResource(orphan) returned error: %s", orphanResp.GetError())
+	}
+	if zfsMgr.lastDestroyed != "hast-vm-orphan" {
+		t.Errorf("DestroyDataset called with %q, want hast-vm-orphan", zfsMgr.lastDestroyed)
+	}
+}
+
+func TestIntegration_CleanupOrphanedHASTResource_MissingDatasetIsError(t *testing.T) {
+	raftdSocket := newRaftdUDSSocket(t)
+	zfsMgr := &fakeQuotaSetter{}
+	client := newManagerdRPCClientWithZFS(t, raftdSocket, "node-a", zfsMgr)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	resp, err := client.CleanupOrphanedHASTResource(ctx, &rpcpb.CleanupOrphanedHASTResourceRequest{ResourceId: "does-not-exist", ResourceType: "jail"})
+	if err != nil {
+		t.Fatalf("CleanupOrphanedHASTResource() error: %v", err)
+	}
+	if resp.GetError() == "" {
+		t.Fatalf("CleanupOrphanedHASTResource() error = empty, want a not-found rejection")
 	}
 }
 

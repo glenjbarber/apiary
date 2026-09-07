@@ -222,6 +222,11 @@ reclaim pass that didn't know this role was legitimate":
   of two-phase purge (don't fully purge until the secondary also
   confirms cleanup) or an explicit admin-facing "clean up this node's
   orphaned HAST resources" operation - out of scope for this pass.
+  **Update: built - see ADR-0073.** `ListOrphanedHASTResources`/
+  `CleanupOrphanedHASTResource` are the admin-facing operation named
+  here, not the two-phase-purge alternative (which would need
+  cross-node coordination this project's raft-only, no-peer-RPC-for-
+  physical-state posture doesn't otherwise have).
 - `apiarium` and `freebsd-apiary` were left with zero VMs and a clean
   `hast.conf` after verification, joined as a real 2-node raft cluster
   (previously `apiarium` ran alone) with `hastd` enabled and ready for

@@ -596,6 +596,19 @@ each design decision, in order.
   takes effect on the next `managerd` restart, not live, matching
   ADR-0049's original posture. See
   [ADR-0070](docs/adr/0070-system-settings-expansion.md).
+- **Orphaned HAST resource discovery and cleanup** - closes a gap
+  ADR-0026 named and left open: once a replicated VM/jail's record is
+  fully purged (not just reassigned), the secondary node's own local
+  HAST provider dataset has no signal left to clean itself up, since
+  this project never infers teardown from a record's mere absence.
+  `ListOrphanedHASTResources` (local-only, Viewer) reports this node's
+  own `hast-vm-*`/`hast-jail-*` datasets with no VM/jail record - owner
+  or replica - referencing them any more; `CleanupOrphanedHASTResource`
+  (Admin) is the explicit, human-triggered action that actually
+  destroys one, re-verifying it's still orphaned at the moment of the
+  call. No web UI, matching `ForcePurgeVM`/`ForcePurgeJail`'s own
+  precedent for this class of rare, destructive, human-judgment action.
+  See [ADR-0073](docs/adr/0073-orphaned-hast-resource-cleanup.md).
 
 **Not yet implemented:**
 
