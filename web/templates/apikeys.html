@@ -14,9 +14,9 @@
     if every key is later revoked.
   </p>
   <form class="create-vm inline-form" hx-post="/apikeys" hx-target="#apikey-panel" hx-swap="innerHTML">
-    <label>Name <input type="text" name="name" required></label>
+    <label>Name <input type="text" name="name" required title="A label for this key so you can tell it apart later - not used for authentication itself."></label>
     <label>Role
-      <select name="role">
+      <select name="role" title="The permission tier this key grants: Viewer (read-only), Operator (can act on VMs/jails/networks), or Admin (full access, including settings and other keys).">
         <option value="viewer">Viewer</option>
         <option value="operator">Operator</option>
         <option value="admin">Admin</option>

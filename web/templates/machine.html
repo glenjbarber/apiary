@@ -233,19 +233,19 @@
   <table class="settings-table">
     <tbody>
       <tr><th>Uplink</th><td>
-        <select name="uplink">
+        <select name="uplink" title="This Comb's own physical interface for the VLAN uplink - the network path VMs/jails use to reach the outside world.">
           <option value="" {{if eq .NodeConfig.Uplink ""}}selected{{end}}>(unset)</option>
           {{range .NodeConfig.UplinkOptions}}<option value="{{.Name}}" {{if .Selected}}selected{{end}}>{{.Label}}</option>{{end}}
         </select>
       </td></tr>
       <tr><th>NAT uplink</th><td>
-        <select name="nat_uplink">
+        <select name="nat_uplink" title="A separate interface to send self-hosted outbound NAT traffic through, if it should differ from Uplink. Leave unset to use Uplink for both.">
           <option value="" {{if eq .NodeConfig.NATUplink ""}}selected{{end}}>(unset, use VLAN uplink)</option>
           {{range .NodeConfig.NATUplinkOptions}}<option value="{{.Name}}" {{if .Selected}}selected{{end}}>{{.Label}}</option>{{end}}
         </select>
       </td></tr>
       <tr><th>Default managed network egress</th><td>{{if .NodeConfig.Uplink}}self-hosted NAT via {{if .NodeConfig.NATUplink}}{{.NodeConfig.NATUplink}}{{else}}{{.NodeConfig.Uplink}}{{end}}{{else}}<em>(no uplink)</em>{{end}}</td></tr>
-      <tr><th>DHCP DNS server</th><td><input type="text" name="dhcp_dns_server" placeholder="10.62.0.1" value="{{.NodeConfig.DNSServer}}"></td></tr>
+      <tr><th>DHCP DNS server</th><td><input type="text" name="dhcp_dns_server" placeholder="10.62.0.1" value="{{.NodeConfig.DNSServer}}" title="DNS server address Apiary hands out to Cells over DHCP on managed networks. Leave blank to use the startup flag's value, if any."></td></tr>
     </tbody>
   </table>
   <input type="hidden" name="jail_enabled" value="{{.NodeConfig.JailEnabledMode}}">
@@ -273,7 +273,7 @@
   <table class="settings-table">
     <tbody>
       <tr><th>Current mode</th><td>
-        <select name="jail_enabled">
+        <select name="jail_enabled" title="Whether this Comb provisions jails assigned to it. Use startup flag defers to -jail-enabled; Enabled/Disabled explicitly override it here.">
           <option value="default" {{if eq .NodeConfig.JailEnabledMode "default"}}selected{{end}}>Use startup flag</option>
           <option value="enabled" {{if eq .NodeConfig.JailEnabledMode "enabled"}}selected{{end}}>Enabled</option>
           <option value="disabled" {{if eq .NodeConfig.JailEnabledMode "disabled"}}selected{{end}}>Disabled</option>
@@ -323,8 +323,8 @@
 <div id="quota-error" class="banner-error">{{.QuotaFormError}}</div>
 {{if .QuotaFormSuccess}}<div class="banner-success">{{.QuotaFormSuccess}}</div>{{end}}
 <form class="inline-form" hx-post="/machine/quota" hx-target="#quota-panel" hx-swap="innerHTML">
-  <label>Dataset <input type="text" name="dataset_name" placeholder="vm-1" required></label>
-  <label>Quota <input type="text" name="quota" placeholder="10G, or none to clear" required></label>
+  <label>Dataset <input type="text" name="dataset_name" placeholder="vm-1" required title="The VM/jail's own ZFS dataset, relative to this Comb's ZFS base - not a full pool path."></label>
+  <label>Quota <input type="text" name="quota" placeholder="10G, or none to clear" required title="A ZFS quota value such as 10G or 500M, or the literal word none to remove an existing quota."></label>
   <button type="submit">Set quota</button>
 </form>
 {{end}}
@@ -341,11 +341,11 @@
 <form hx-post="/machine/resource-scope" hx-target="#resource-scope-panel" hx-swap="innerHTML">
   <table class="settings-table">
     <tbody>
-      <tr><th>ZFS base</th><td>{{if .NodeConfig.ZFSBase}}<code>{{.NodeConfig.ZFSBase}}</code>{{else}}<input type="text" name="zfs_base" placeholder="zroot/apiary">{{end}}</td></tr>
-      <tr><th>Bhyve prefix</th><td>{{if .NodeConfig.BhyvePrefix}}<code>{{.NodeConfig.BhyvePrefix}}</code>{{else}}<input type="text" name="bhyve_prefix" placeholder="apiary-">{{end}}</td></tr>
-      <tr><th>ISO directory</th><td>{{if .NodeConfig.ISODir}}<code>{{.NodeConfig.ISODir}}</code>{{else}}<input type="text" name="iso_dir" placeholder="/var/db/apiary/isos">{{end}}</td></tr>
-      <tr><th>Jail prefix</th><td>{{if .NodeConfig.JailPrefix}}<code>{{.NodeConfig.JailPrefix}}</code>{{else}}<input type="text" name="jail_prefix" placeholder="apiary-">{{end}}</td></tr>
-      <tr><th>Jail mount base</th><td>{{if .NodeConfig.JailMountBase}}<code>{{.NodeConfig.JailMountBase}}</code>{{else}}<input type="text" name="jail_mount_base" placeholder="/apiary-jails">{{end}}</td></tr>
+      <tr><th>ZFS base</th><td>{{if .NodeConfig.ZFSBase}}<code>{{.NodeConfig.ZFSBase}}</code>{{else}}<input type="text" name="zfs_base" placeholder="zroot/apiary" title="Base ZFS dataset this Comb creates VM/jail datasets under. Write-once: editable only while unset, since changing it later would orphan existing resources rather than move them.">{{end}}</td></tr>
+      <tr><th>Bhyve prefix</th><td>{{if .NodeConfig.BhyvePrefix}}<code>{{.NodeConfig.BhyvePrefix}}</code>{{else}}<input type="text" name="bhyve_prefix" placeholder="apiary-" title="Prefix this Comb uses for bhyve VM resource names. Write-once: editable only while unset, for the same reason as ZFS base.">{{end}}</td></tr>
+      <tr><th>ISO directory</th><td>{{if .NodeConfig.ISODir}}<code>{{.NodeConfig.ISODir}}</code>{{else}}<input type="text" name="iso_dir" placeholder="/var/db/apiary/isos" title="Where this Comb stores installer ISOs and base images. Write-once: editable only while unset, for the same reason as ZFS base.">{{end}}</td></tr>
+      <tr><th>Jail prefix</th><td>{{if .NodeConfig.JailPrefix}}<code>{{.NodeConfig.JailPrefix}}</code>{{else}}<input type="text" name="jail_prefix" placeholder="apiary-" title="Prefix this Comb uses for jail resource names. Write-once: editable only while unset, for the same reason as ZFS base.">{{end}}</td></tr>
+      <tr><th>Jail mount base</th><td>{{if .NodeConfig.JailMountBase}}<code>{{.NodeConfig.JailMountBase}}</code>{{else}}<input type="text" name="jail_mount_base" placeholder="/apiary-jails" title="Filesystem path this Comb mounts jail roots under. Write-once: editable only while unset, for the same reason as ZFS base.">{{end}}</td></tr>
     </tbody>
   </table>
   {{if or (not .NodeConfig.ZFSBase) (not .NodeConfig.BhyvePrefix) (not .NodeConfig.ISODir) (not .NodeConfig.JailPrefix) (not .NodeConfig.JailMountBase)}}
@@ -373,10 +373,10 @@
 <form hx-post="/machine/bhyve" hx-target="#bhyve-config-panel" hx-swap="innerHTML">
   <table class="settings-table">
     <tbody>
-      <tr><th>Boot ROM path</th><td><input type="text" name="bhyve_bootrom" placeholder="/usr/local/share/uefi-firmware/BHYVE_UEFI.fd" value="{{.NodeConfig.BhyveBootROM}}"></td></tr>
-      <tr><th>Bridge</th><td><input type="text" name="bhyve_bridge" placeholder="bridge0" value="{{.NodeConfig.BhyveBridge}}"></td></tr>
-      <tr><th>Disk size (MB)</th><td><input type="text" name="disk_size_mb" placeholder="0 = default" value="{{if .NodeConfig.DiskSizeMB}}{{.NodeConfig.DiskSizeMB}}{{end}}"></td></tr>
-      <tr><th>Reconcile interval</th><td><input type="text" name="reconcile_interval" placeholder="30s" value="{{.NodeConfig.ReconcileInterval}}"></td></tr>
+      <tr><th>Boot ROM path</th><td><input type="text" name="bhyve_bootrom" placeholder="/usr/local/share/uefi-firmware/BHYVE_UEFI.fd" value="{{.NodeConfig.BhyveBootROM}}" title="Path to the UEFI firmware bhyve boots VMs with. Blank disables bhyve provisioning on this Comb entirely."></td></tr>
+      <tr><th>Bridge</th><td><input type="text" name="bhyve_bridge" placeholder="bridge0" value="{{.NodeConfig.BhyveBridge}}" title="The bridge interface VM taps attach to. Blank disables VM networking on this Comb."></td></tr>
+      <tr><th>Disk size (MB)</th><td><input type="text" name="disk_size_mb" placeholder="0 = default" value="{{if .NodeConfig.DiskSizeMB}}{{.NodeConfig.DiskSizeMB}}{{end}}" title="Default disk size for newly created VMs, in megabytes. Only affects VMs created after this is set - never resizes an existing one."></td></tr>
+      <tr><th>Reconcile interval</th><td><input type="text" name="reconcile_interval" placeholder="30s" value="{{.NodeConfig.ReconcileInterval}}" title="How often the reconciler loop runs on this Comb (e.g. 30s, 1m). Blank uses the startup flag's value."></td></tr>
     </tbody>
   </table>
   <div class="form-actions"><button type="submit">Save</button></div>
@@ -400,7 +400,7 @@
   <table class="settings-table">
     <tbody>
       <tr><th>HAST support</th><td>
-        <select name="hast_enabled">
+        <select name="hast_enabled" title="Whether this Comb participates in HAST-backed disk replication (ADR-0026). Needed on both a replicated resource's owning and replica Comb. Use startup flag defers to -hast-enabled.">
           <option value="default" {{if eq .NodeConfig.HASTEnabledMode "default"}}selected{{end}}>Use startup flag</option>
           <option value="enabled" {{if eq .NodeConfig.HASTEnabledMode "enabled"}}selected{{end}}>Enabled</option>
           <option value="disabled" {{if eq .NodeConfig.HASTEnabledMode "disabled"}}selected{{end}}>Disabled</option>
@@ -425,19 +425,19 @@
 <form hx-post="/machine/peer-forwarding" hx-target="#peer-forwarding-panel" hx-swap="innerHTML">
   <table class="settings-table">
     <tbody>
-      <tr><th>Peer managerd port</th><td><input type="text" name="peer_managerd_port" placeholder="17700" value="{{.NodeConfig.PeerManagerdPort}}"></td></tr>
+      <tr><th>Peer managerd port</th><td><input type="text" name="peer_managerd_port" placeholder="17700" value="{{.NodeConfig.PeerManagerdPort}}" title="TCP port other Combs' managerd dial when forwarding a request to this one. Blank uses this Comb's own rpc-addr port."></td></tr>
       <tr><th>Peer TLS</th><td>
-        <select name="peer_tls">
+        <select name="peer_tls" title="Whether managerd-to-managerd peer forwarding (console/serial-log/raft-write forwarding) uses TLS. Use startup flag defers to -peer-tls.">
           <option value="default" {{if eq .NodeConfig.PeerTLSMode "default"}}selected{{end}}>Use startup flag</option>
           <option value="enabled" {{if eq .NodeConfig.PeerTLSMode "enabled"}}selected{{end}}>Enabled</option>
           <option value="disabled" {{if eq .NodeConfig.PeerTLSMode "disabled"}}selected{{end}}>Disabled</option>
         </select>
       </td></tr>
-      <tr><th>Peer TLS hostname map</th><td><input type="text" name="peer_tls_hostname_map" placeholder="10.50.0.9=apiverse.apiary.work,..." value="{{.NodeConfig.PeerTLSHostnameMap}}"></td></tr>
+      <tr><th>Peer TLS hostname map</th><td><input type="text" name="peer_tls_hostname_map" placeholder="10.50.0.9=apiverse.apiary.work,..." value="{{.NodeConfig.PeerTLSHostnameMap}}" title="Comma-separated ip=hostname pairs used to verify each peer Comb's TLS certificate by name instead of by IP."></td></tr>
       <tr><th>Peer API key</th><td>
         {{if .NodeConfig.PeerAPIKeySet}}<span class="badge true">set</span>{{else}}<span class="badge unknown">not set</span>{{end}}
-        <input type="password" name="peer_api_key" placeholder="new value - leave blank to keep current" autocomplete="off">
-        <label class="checkbox-label"><input type="checkbox" name="clear_peer_api_key" value="true"> Clear</label>
+        <input type="password" name="peer_api_key" placeholder="new value - leave blank to keep current" autocomplete="off" title="Shared secret other Combs present when forwarding a request here. Write-only - never shown again once saved; leave blank to keep the current value.">
+        <label class="checkbox-label"><input type="checkbox" name="clear_peer_api_key" value="true" title="Remove the peer API key entirely instead of setting a new one."> Clear</label>
       </td></tr>
     </tbody>
   </table>
@@ -461,8 +461,8 @@
 <form hx-post="/machine/tls" hx-target="#tls-panel" hx-swap="innerHTML">
   <table class="settings-table">
     <tbody>
-      <tr><th>Certificate path</th><td><input type="text" name="tls_cert" placeholder="/home/claude/apiary-tls/fullchain.pem" value="{{.NodeConfig.TLSCert}}"></td></tr>
-      <tr><th>Key path</th><td><input type="text" name="tls_key" placeholder="/home/claude/apiary-tls/key.pem" value="{{.NodeConfig.TLSKey}}"></td></tr>
+      <tr><th>Certificate path</th><td><input type="text" name="tls_cert" placeholder="/home/claude/apiary-tls/fullchain.pem" value="{{.NodeConfig.TLSCert}}" title="Path to this Comb's own external gRPC API certificate. Leave both this and Key path blank to serve plaintext."></td></tr>
+      <tr><th>Key path</th><td><input type="text" name="tls_key" placeholder="/home/claude/apiary-tls/key.pem" value="{{.NodeConfig.TLSKey}}" title="Path to the private key matching Certificate path above."></td></tr>
     </tbody>
   </table>
   <div class="form-actions"><button type="submit">Save</button></div>
@@ -484,16 +484,16 @@
 <p class="muted">Save a dedicated token-file path and certificate directory first. The token needs Cloudflare's <strong>Zone / SSL and Certificates / Edit</strong> permission for this zone. Apiary never displays or stores the token itself.</p>
 <form hx-post="/machine/origin-ca/config" hx-target="#origin-ca-panel" hx-swap="innerHTML">
   <table class="settings-table"><tbody>
-    <tr><th>Origin CA token file</th><td><input type="text" name="origin_ca_token_file" placeholder="/root/apiary-origin-ca.token" value="{{.NodeConfig.OriginCATokenFile}}"></td></tr>
-    <tr><th>Certificate directory</th><td><input type="text" name="origin_ca_directory" placeholder="/var/db/apiary/origin-ca" value="{{.NodeConfig.OriginCADirectory}}"></td></tr>
+    <tr><th>Origin CA token file</th><td><input type="text" name="origin_ca_token_file" placeholder="/root/apiary-origin-ca.token" value="{{.NodeConfig.OriginCATokenFile}}" title="Path to a file containing only a Cloudflare Origin CA token. Never entered directly or displayed - only this path is stored."></td></tr>
+    <tr><th>Certificate directory</th><td><input type="text" name="origin_ca_directory" placeholder="/var/db/apiary/origin-ca" value="{{.NodeConfig.OriginCADirectory}}" title="Local directory issued certificate/key pairs are written into."></td></tr>
   </tbody></table>
   <div class="form-actions"><button type="submit">Save Origin CA configuration</button></div>
 </form>
 <p class="muted">Before issuance, save TLS paths in the TLS section above as <code>directory/name.crt</code> and <code>directory/name.key</code>. The successful request installs that pair and restarts <code>apiary_managerd</code>.</p>
 <form hx-post="/machine/origin-ca" hx-target="#origin-ca-panel" hx-swap="innerHTML">
-  <label>Certificate name <input name="name" placeholder="managerd" required></label>
-  <label>Hostnames, comma-separated <input name="hostnames" placeholder="api.example.com" required></label>
-  <label>Validity <select name="validity_days"><option value="365">1 year</option><option value="730">2 years</option><option value="1095">3 years</option><option value="5475">15 years</option></select></label>
+  <label>Certificate name <input name="name" placeholder="managerd" required title="Matches the file names TLS paths above point at, e.g. managerd for managerd.crt/managerd.key."></label>
+  <label>Hostnames, comma-separated <input name="hostnames" placeholder="api.example.com" required title="Every hostname this certificate should cover, comma-separated. Must be proxied through Cloudflare on this zone."></label>
+  <label>Validity <select name="validity_days" title="How long the issued certificate is valid for before it needs renewing."><option value="365">1 year</option><option value="730">2 years</option><option value="1095">3 years</option><option value="5475">15 years</option></select></label>
   <button type="submit">Issue or renew managerd certificate</button>
 </form>
 {{end}}
@@ -508,10 +508,10 @@
 <form hx-post="/machine/cloudflare-config" hx-target="#cloudflare-config-panel" hx-swap="innerHTML">
   <table class="settings-table">
     <tbody>
-      <tr><th>Token file path</th><td><input type="text" name="cloudflare_token_file" placeholder="/home/claude/cf-token" value="{{.NodeConfig.CloudflareTokenFile}}"></td></tr>
-      <tr><th>Zone ID</th><td><input type="text" name="cloudflare_zone_id" value="{{.NodeConfig.CloudflareZoneID}}"></td></tr>
-      <tr><th>Tunnel ID</th><td><input type="text" name="cloudflare_tunnel_id" value="{{.NodeConfig.CloudflareTunnelID}}"></td></tr>
-      <tr><th>Tunnel credentials file path</th><td><input type="text" name="cloudflare_tunnel_credentials_file" placeholder="/home/claude/cf-creds.json" value="{{.NodeConfig.CloudflareTunnelCredentialsFile}}"></td></tr>
+      <tr><th>Token file path</th><td><input type="text" name="cloudflare_token_file" placeholder="/home/claude/cf-token" value="{{.NodeConfig.CloudflareTokenFile}}" title="Path to a file containing only a Cloudflare API token scoped to Zone:DNS:Edit. Leave blank to disable Cloudflare Tunnel exposure on this Comb entirely."></td></tr>
+      <tr><th>Zone ID</th><td><input type="text" name="cloudflare_zone_id" value="{{.NodeConfig.CloudflareZoneID}}" title="Cloudflare zone ID that CNAME records for exposed Cells are created/updated in."></td></tr>
+      <tr><th>Tunnel ID</th><td><input type="text" name="cloudflare_tunnel_id" value="{{.NodeConfig.CloudflareTunnelID}}" title="This Comb's own pre-provisioned Cloudflare Tunnel id, from running `cloudflared tunnel create` once by hand."></td></tr>
+      <tr><th>Tunnel credentials file path</th><td><input type="text" name="cloudflare_tunnel_credentials_file" placeholder="/home/claude/cf-creds.json" value="{{.NodeConfig.CloudflareTunnelCredentialsFile}}" title="Path to the credentials JSON file `cloudflared tunnel create` produced for this Comb's Tunnel."></td></tr>
     </tbody>
   </table>
   <div class="form-actions"><button type="submit">Save</button></div>
@@ -534,12 +534,12 @@
 <form hx-post="/machine/assumption-tuning" hx-target="#assumption-tuning-panel" hx-swap="innerHTML">
   <table class="settings-table">
     <tbody>
-      <tr><th>Check interval</th><td><input type="text" name="assumption_check_interval" placeholder="60s" value="{{.NodeConfig.AssumptionCheckInterval}}"></td></tr>
-      <tr><th>Heartbeat interval</th><td><input type="text" name="assumption_heartbeat_interval" placeholder="1h" value="{{.NodeConfig.AssumptionHeartbeatInterval}}"></td></tr>
-      <tr><th>Stale after</th><td><input type="text" name="assumption_stale_after" placeholder="0 = 3x check interval" value="{{.NodeConfig.AssumptionStaleAfter}}"></td></tr>
-      <tr><th>Run deadline</th><td><input type="text" name="assumption_run_deadline" placeholder="20s" value="{{.NodeConfig.AssumptionRunDeadline}}"></td></tr>
-      <tr><th>History limit</th><td><input type="text" name="assumption_history_limit" placeholder="200" value="{{if .NodeConfig.AssumptionHistoryLimit}}{{.NodeConfig.AssumptionHistoryLimit}}{{end}}"></td></tr>
-      <tr><th>History max age</th><td><input type="text" name="assumption_history_max_age" placeholder="720h" value="{{.NodeConfig.AssumptionHistoryMaxAge}}"></td></tr>
+      <tr><th>Check interval</th><td><input type="text" name="assumption_check_interval" placeholder="60s" value="{{.NodeConfig.AssumptionCheckInterval}}" title="How often the automated assumption-check loop runs on this Comb."></td></tr>
+      <tr><th>Heartbeat interval</th><td><input type="text" name="assumption_heartbeat_interval" placeholder="1h" value="{{.NodeConfig.AssumptionHeartbeatInterval}}" title="How often an unchanged result is still recorded to history, so 'still true' gets periodically reconfirmed instead of only writing history on a status change."></td></tr>
+      <tr><th>Stale after</th><td><input type="text" name="assumption_stale_after" placeholder="0 = 3x check interval" value="{{.NodeConfig.AssumptionStaleAfter}}" title="Age past which a result is treated as stale rather than current. 0 defaults to 3x the check interval."></td></tr>
+      <tr><th>Run deadline</th><td><input type="text" name="assumption_run_deadline" placeholder="20s" value="{{.NodeConfig.AssumptionRunDeadline}}" title="Maximum time one whole check tick is allowed to run before it's cut off, so a single slow check can't block the next tick indefinitely."></td></tr>
+      <tr><th>History limit</th><td><input type="text" name="assumption_history_limit" placeholder="200" value="{{if .NodeConfig.AssumptionHistoryLimit}}{{.NodeConfig.AssumptionHistoryLimit}}{{end}}" title="Maximum number of historical entries kept per check key before the oldest are trimmed."></td></tr>
+      <tr><th>History max age</th><td><input type="text" name="assumption_history_max_age" placeholder="720h" value="{{.NodeConfig.AssumptionHistoryMaxAge}}" title="Maximum age of a historical entry before it's trimmed, regardless of the history limit above."></td></tr>
     </tbody>
   </table>
   <div class="form-actions"><button type="submit">Save</button></div>
@@ -566,8 +566,8 @@
     <tbody>
       <tr><th>Raftd token</th><td>
         {{if .NodeConfig.RaftdTokenSet}}<span class="badge true">set</span>{{else}}<span class="badge unknown">not set</span>{{end}}
-        <input type="password" name="raftd_token" placeholder="new value - leave blank to keep current" autocomplete="off">
-        <label class="checkbox-label"><input type="checkbox" name="clear_raftd_token" value="true"> Clear</label>
+        <input type="password" name="raftd_token" placeholder="new value - leave blank to keep current" autocomplete="off" title="Shared secret managerd presents to this Comb's own local raftd socket. Write-only - never shown again once saved; leave blank to keep the current value.">
+        <label class="checkbox-label"><input type="checkbox" name="clear_raftd_token" value="true" title="Remove the raftd token entirely instead of setting a new one."> Clear</label>
       </td></tr>
     </tbody>
   </table>

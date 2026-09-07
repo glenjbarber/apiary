@@ -7,11 +7,11 @@
   <main class="content" id="main-content">
   {{template "page_header" (pageHeader "Networks" "Cluster network definitions and local bridge health.")}}
   {{if .CanOperate}}<form class="inline-form panel" style="margin-bottom:1rem" hx-post="/networks" hx-target="#network-panel" hx-swap="innerHTML">
-    <label>ID <input type="text" name="id" required></label>
-    <label>Name <input type="text" name="name"></label>
-    <label>VLAN ID <input type="number" name="vlan_id" value="0" min="0" max="4094"></label>
-    <label>Subnet (CIDR) <input type="text" name="subnet" placeholder="10.60.0.0/24" required></label>
-    <label>External gateway <input type="text" name="external_gateway" placeholder="leave blank unless a real router already serves this subnet"></label>
+    <label>ID <input type="text" name="id" required title="Unique identifier for this managed network. Used elsewhere to attach Cells to it."></label>
+    <label>Name <input type="text" name="name" title="Optional display label - has no effect on networking itself."></label>
+    <label>VLAN ID <input type="number" name="vlan_id" value="0" min="0" max="4094" title="802.1Q VLAN tag for this network's bridge, 0-4094. Leave at 0 for an untagged bridge."></label>
+    <label>Subnet (CIDR) <input type="text" name="subnet" placeholder="10.60.0.0/24" required title="The IPv4 subnet this network manages, in CIDR form. Apiary assigns Cell addresses from within it via DHCP."></label>
+    <label>External gateway <input type="text" name="external_gateway" placeholder="leave blank unless a real router already serves this subnet" title="A plain IP address, only if a real router already serves this subnet. Leave blank to have this Comb act as the gateway and provide outbound NAT itself (ADR-0048)."></label>
     <button type="submit">Create</button>
   </form>
   {{end}}

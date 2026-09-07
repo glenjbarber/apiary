@@ -38,7 +38,7 @@ func TestServer_MachinePage_ShowsNodeConfigAndLocalVMsOnly(t *testing.T) {
 	if !strings.Contains(body, "re0") || !strings.Contains(body, "bridge0") || !strings.Contains(body, "self-hosted NAT via bridge0") || !strings.Contains(body, "10.62.0.1") || !strings.Contains(body, "Jail provisioning") || !strings.Contains(body, "Current mode") || !strings.Contains(body, "Enabled") {
 		t.Errorf("machine page missing node config values, got: %s", body)
 	}
-	if !strings.Contains(body, `<select name="uplink">`) || !strings.Contains(body, `<option value="bridge0"`) || !strings.Contains(body, `bridge0 (up) - 10.50.0.14/24`) {
+	if !strings.Contains(body, `<select name="uplink" title=`) || !strings.Contains(body, `<option value="bridge0"`) || !strings.Contains(body, `bridge0 (up) - 10.50.0.14/24`) {
 		t.Errorf("machine page missing discovered interface choices, got: %s", body)
 	}
 	if strings.Contains(body, "<th>Jail provisioning</th>") {

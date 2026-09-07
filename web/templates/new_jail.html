@@ -8,20 +8,20 @@
   {{template "page_header" (pageHeader "Create jail" "Define a FreeBSD jail's identity and placement." "<a href='/jails'>Cancel</a>")}}
   <form class="create-vm inline-form panel" style="margin-top:1rem" hx-post="/jails" hx-target="#create-error" hx-swap="innerHTML">
     {{if .PlacementHives}}<p class="field-help">Jail placement is manual. {{range .PlacementHives}}<br>{{.NodeID}}: {{if .ProbeError}}<span class="error">unreachable</span>{{else if .JailKnown}}{{if .JailCapable}}<span class="success">jail provisioning enabled</span>{{else}}<span class="error">jail provisioning disabled</span>{{end}}{{else}}<em>uses startup jail setting</em>{{end}}{{end}}</p>{{end}}
-    <label>ID <input type="text" name="id" required></label>
-    <label>Name <input type="text" name="name"></label>
-    <label>Hostname <input type="text" name="hostname"></label>
+    <label>ID <input type="text" name="id" required title="Unique identifier for this jail. Used in the jail's own root dataset name and everywhere it's referenced afterward."></label>
+    <label>Name <input type="text" name="name" title="Optional display label - has no effect on the jail itself."></label>
+    <label>Hostname <input type="text" name="hostname" title="Hostname set inside the jail. Defaults to the ID if left blank."></label>
     <label>Node ID
       {{if .Nodes}}
-      <select name="node_id">
+      <select name="node_id" title="The Comb that will own and run this jail.">
         {{range .Nodes}}<option value="{{.}}">{{.}}</option>{{end}}
       </select>
       {{else}}
-      <input type="text" name="node_id">
+      <input type="text" name="node_id" title="The Comb that will own and run this jail.">
       {{end}}
     </label>
     <label>Replica node ID (optional - HAST root replication, see ADR-0026)
-      <input type="text" name="replica_node_id">
+      <input type="text" name="replica_node_id" title="A second Comb to keep a live HAST-replicated copy of this jail's root dataset on. Leave blank for no replica.">
     </label>
     <button type="submit">Create</button>
   </form>

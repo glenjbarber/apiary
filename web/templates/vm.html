@@ -97,10 +97,10 @@
       {{$canEdit := or .VM.NetworkID .VM.CloudflareHostname}}
       <form method="post" action="/vms/{{.VM.ID}}/cloudflare-exposure" class="inline-form">
         <label>Hostname
-          <input type="text" name="cloudflare_hostname" placeholder="web.example.com" value="{{.VM.CloudflareHostname}}" {{if not $canEdit}}disabled{{end}}>
+          <input type="text" name="cloudflare_hostname" placeholder="web.example.com" value="{{.VM.CloudflareHostname}}" {{if not $canEdit}}disabled{{end}} title="The public hostname this VM will be reachable at through the Comb's Cloudflare Tunnel. Leave blank to stop exposing it. Requires a network to be attached first.">
         </label>
         <label>Port
-          <input type="number" name="cloudflare_port" min="1" max="65535" value="{{if .VM.CloudflarePort}}{{.VM.CloudflarePort}}{{end}}" {{if not $canEdit}}disabled{{end}}>
+          <input type="number" name="cloudflare_port" min="1" max="65535" value="{{if .VM.CloudflarePort}}{{.VM.CloudflarePort}}{{end}}" {{if not $canEdit}}disabled{{end}} title="The VM's own local HTTP port that Cloudflare will proxy public traffic to. Always plain HTTP on this internal leg - the public leg is HTTPS, terminated at Cloudflare's edge.">
         </label>
         <button type="submit" {{if not $canEdit}}disabled{{end}}>Save</button>
       </form>

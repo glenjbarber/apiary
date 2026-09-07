@@ -11,15 +11,15 @@
     <fieldset class="form-section">
       <legend>Identity</legend>
       <div class="form-grid">
-        <label>ID <input type="text" name="id" required autocomplete="off" placeholder="web-01"><span class="field-help">Stable identifier used by Apiary and bhyve.</span></label>
-        <label>Display name <input type="text" name="name" autocomplete="off" placeholder="Web server"></label>
+        <label>ID <input type="text" name="id" required autocomplete="off" placeholder="web-01" title="Stable identifier used by Apiary and bhyve - cannot be changed after creation."><span class="field-help">Stable identifier used by Apiary and bhyve.</span></label>
+        <label>Display name <input type="text" name="name" autocomplete="off" placeholder="Web server" title="Optional label shown in lists - has no effect on the VM itself."></label>
       </div>
     </fieldset>
     <fieldset class="form-section">
       <legend>Compute</legend>
       <div class="form-grid">
-        <label>vCPUs <input type="number" name="vcpus" value="1" min="1" required></label>
-        <label>Memory (MB) <input type="number" name="memory_mb" value="512" min="1" required></label>
+        <label>vCPUs <input type="number" name="vcpus" value="1" min="1" required title="Number of virtual CPUs bhyve allocates to this VM."></label>
+        <label>Memory (MB) <input type="number" name="memory_mb" value="512" min="1" required title="RAM in megabytes bhyve allocates to this VM."></label>
       </div>
     </fieldset>
     <fieldset class="form-section">
@@ -29,15 +29,15 @@
       <div class="form-grid">
         <label>Owner node
       {{if .Nodes}}
-      <select name="node_id" required>
+      <select name="node_id" required title="The Comb that will own and run this VM.">
         {{range .Nodes}}<option value="{{.}}"{{if eq . $.LocalNodeID}} selected{{end}}>{{.}}</option>{{end}}
       </select>
       {{else}}
-      <input type="text" name="node_id" required>
+      <input type="text" name="node_id" required title="The Comb that will own and run this VM.">
       {{end}}
         </label>
         <label>Replica node <span class="field-help">Optional HAST disk replication target.</span>
-          {{if .Nodes}}<select name="replica_node_id"><option value="">None</option>{{range .Nodes}}<option value="{{.}}">{{.}}</option>{{end}}</select>{{else}}<input type="text" name="replica_node_id">{{end}}
+          {{if .Nodes}}<select name="replica_node_id" title="A second Comb to keep a live HAST-replicated copy of this VM's disk on. Leave as None for no replica."><option value="">None</option>{{range .Nodes}}<option value="{{.}}">{{.}}</option>{{end}}</select>{{else}}<input type="text" name="replica_node_id" title="A second Comb to keep a live HAST-replicated copy of this VM's disk on. Leave blank for no replica.">{{end}}
         </label>
       </div>
     </fieldset>
@@ -45,13 +45,13 @@
       <legend>Storage and boot</legend>
       <div class="form-grid">
         <label>Installer image
-      <select name="iso_name" class="image-picker">
+      <select name="iso_name" class="image-picker" title="Boots from this installer ISO on first launch. Leave as None to boot straight from the base image or an empty disk.">
         <option value="">None</option>
         {{range .ClusterISOs}}<option value="{{.Name}}">{{.Name}}</option>{{end}}
       </select>
         </label>
         <label>Base image <span class="field-help">Optional pre-built bootable disk, such as a cloud-init image.</span>
-      <select name="base_image_name" class="image-picker">
+      <select name="base_image_name" class="image-picker" title="Copied in as this VM's starting disk contents. Leave as None to start from an empty disk.">
         <option value="">None</option>
         {{range .ClusterISOs}}<option value="{{.Name}}">{{.Name}}</option>{{end}}
       </select>
@@ -62,13 +62,13 @@
       <legend>Network</legend>
       <div class="form-grid">
         <label>Network
-      <select name="network_id">
+      <select name="network_id" title="Managed network to attach this VM to. Leave as Default bridge for flat, unmanaged networking with no DHCP.">
         <option value="">Default bridge</option>
         {{range .Networks}}<option value="{{.ID}}">{{.Name}} ({{.Subnet}})</option>{{end}}
       </select>
         </label>
         <label>Initial state
-          <select name="desired_state"><option value="stopped">Stopped</option><option value="running">Running</option></select>
+          <select name="desired_state" title="Whether Apiary should launch this VM immediately after creating it, or leave it stopped for review first."><option value="stopped">Stopped</option><option value="running">Running</option></select>
           <span class="field-help">Starting stopped allows configuration to be reviewed first.</span>
         </label>
       </div>
@@ -90,11 +90,11 @@
     document.getElementById('add-firewall-rule').addEventListener('click', function() {
       var tr = document.createElement('tr');
       tr.innerHTML =
-        '<td><select name="fw_direction"><option value="">(unused)</option><option value="in">in</option><option value="out">out</option></select></td>' +
-        '<td><select name="fw_action"><option value="pass">pass</option><option value="block">block</option></select></td>' +
-        '<td><select name="fw_protocol"><option value="">any</option><option value="tcp">tcp</option><option value="udp">udp</option><option value="icmp">icmp</option></select></td>' +
-        '<td><input type="text" name="fw_port" placeholder="22 or 8000-9000"></td>' +
-        '<td><input type="number" name="fw_priority" value="0" step="1"></td>' +
+        '<td><select name="fw_direction" title="Whether this rule matches traffic entering or leaving the VM. (unused) rows are ignored."><option value="">(unused)</option><option value="in">in</option><option value="out">out</option></select></td>' +
+        '<td><select name="fw_action" title="pass allows matching traffic through; block drops it."><option value="pass">pass</option><option value="block">block</option></select></td>' +
+        '<td><select name="fw_protocol" title="Restrict this rule to one protocol, or leave as any to match all of them."><option value="">any</option><option value="tcp">tcp</option><option value="udp">udp</option><option value="icmp">icmp</option></select></td>' +
+        '<td><input type="text" name="fw_port" placeholder="22 or 8000-9000" title="A single port or a port range this rule applies to. Leave blank to match any port."></td>' +
+        '<td><input type="number" name="fw_priority" value="0" step="1" title="Breaks ties when rules overlap - a higher number is evaluated later and wins (pf\'s last-match-wins evaluation). Leave at 0 if only one rule could ever match a given packet."></td>' +
         '<td><button type="button" class="remove-firewall-rule">Remove</button></td>';
       tr.querySelector('.remove-firewall-rule').addEventListener('click', function() { rows.removeChild(tr); });
       rows.appendChild(tr);

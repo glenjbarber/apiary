@@ -11,19 +11,19 @@
     <form method="get" action="/trace" class="inline-form">
       <label>Cell
         {{if .TraceCells}}
-        <select name="cell_id" required>
+        <select name="cell_id" required title="The VM whose outbound network path to explain.">
           <option value="">Choose a VM Cell</option>
           {{range .TraceCells}}<option value="{{.ID}}"{{if eq .ID $.TraceCellID}} selected{{end}}>{{.Name}} ({{.ID}}) · {{.NodeID}}</option>{{end}}
         </select>
         {{else}}
-        <input type="text" name="cell_id" placeholder="Cell ID" value="{{.TraceCellID}}" required>
+        <input type="text" name="cell_id" placeholder="Cell ID" value="{{.TraceCellID}}" required title="The VM whose outbound network path to explain.">
         {{end}}
       </label>
       <label>Destination
-        <input type="text" name="destination" placeholder="host or IPv4 address" value="{{.TraceDestination}}" required>
+        <input type="text" name="destination" placeholder="host or IPv4 address" value="{{.TraceDestination}}" required title="Where the traced path is headed - a hostname or an IPv4 address. No packets are actually sent.">
       </label>
       <label>Protocol
-        <select name="protocol">
+        <select name="protocol" title="Restrict the trace to one protocol, or leave Unspecified if it doesn't matter for this path.">
           <option value=""{{if eq .TraceProtocol ""}} selected{{end}}>Unspecified</option>
           <option value="tcp"{{if eq .TraceProtocol "tcp"}} selected{{end}}>TCP</option>
           <option value="udp"{{if eq .TraceProtocol "udp"}} selected{{end}}>UDP</option>
@@ -31,7 +31,7 @@
         </select>
       </label>
       <label>Destination port
-        <input type="number" name="port" min="1" max="65535" placeholder="optional" value="{{.TracePort}}">
+        <input type="number" name="port" min="1" max="65535" placeholder="optional" value="{{.TracePort}}" title="Optional destination port - only relevant for TCP/UDP, and only matters if it would change which firewall rule matches.">
       </label>
       <button type="submit">Trace path</button>
     </form>

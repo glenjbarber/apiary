@@ -77,7 +77,7 @@ func TestHandleWhyNotPage_CellDropdownIncludesVMsAndJails(t *testing.T) {
 
 	body := rec.Body.String()
 	for _, want := range []string{
-		`<select name="cell_id" required>`,
+		`<select name="cell_id" required title=`,
 		`VM web (vm-1) · node-a`,
 		`Jail worker (jail-1) · node-b`,
 	} {

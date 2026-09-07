@@ -1442,7 +1442,7 @@ func TestServer_NewJailPage_NodeIDIsADropdownOfKnownNodes(t *testing.T) {
 	s.ServeHTTP(rec, req)
 
 	body := rec.Body.String()
-	if !strings.Contains(body, `<select name="node_id">`) {
+	if !strings.Contains(body, `<select name="node_id" title=`) {
 		t.Errorf("new jail page node_id is not a <select>, got: %s", body)
 	}
 	if !strings.Contains(body, `<option value="apiarium">apiarium</option>`) {

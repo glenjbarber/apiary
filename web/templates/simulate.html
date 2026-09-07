@@ -12,12 +12,12 @@
     <form method="get" action="/simulate" class="inline-form">
       <label>Comb
         {{if .SimulateNodes}}
-        <select name="node_id" required>
+        <select name="node_id" required title="Read-only counterfactual: what would happen right now if this Comb disappeared? Nothing is actually stopped or changed.">
           <option value="">Choose a node</option>
           {{range .SimulateNodes}}<option value="{{.}}"{{if eq . $.SimulateTargetNodeID}} selected{{end}}>{{.}}</option>{{end}}
         </select>
         {{else}}
-        <input type="text" name="node_id" placeholder="node id" value="{{.SimulateTargetNodeID}}" required>
+        <input type="text" name="node_id" placeholder="node id" value="{{.SimulateTargetNodeID}}" required title="Read-only counterfactual: what would happen right now if this Comb disappeared? Nothing is actually stopped or changed.">
         {{end}}
       </label>
       <button type="submit">Simulate failure</button>
@@ -29,12 +29,12 @@
     <form method="get" action="/simulate" class="inline-form">
       <label>Network
         {{if .SimulateNetworks}}
-        <select name="network_id" required>
+        <select name="network_id" required title="Read-only counterfactual: what would happen right now if this managed network failed? Nothing is actually stopped or changed.">
           <option value="">Choose a network</option>
           {{range .SimulateNetworks}}<option value="{{.ID}}"{{if eq .ID $.SimulateTargetNetworkID}} selected{{end}}>{{.Name}} ({{.ID}})</option>{{end}}
         </select>
         {{else}}
-        <input type="text" name="network_id" placeholder="network id" value="{{.SimulateTargetNetworkID}}" required>
+        <input type="text" name="network_id" placeholder="network id" value="{{.SimulateTargetNetworkID}}" required title="Read-only counterfactual: what would happen right now if this managed network failed? Nothing is actually stopped or changed.">
         {{end}}
       </label>
       <button type="submit">Simulate failure</button>

@@ -33,7 +33,7 @@
       <td>
         {{if $canAdmin}}
         <form class="inline-form" hx-post="/users/{{.Username}}/role" hx-target="#user-panel" hx-swap="innerHTML">
-          <select name="role">
+          <select name="role" title="Change this account's permission tier. Takes effect on save; refuses to leave zero admin accounts.">
             <option value="admin" {{if eq .Role "admin"}}selected{{end}}>admin</option>
             <option value="operator" {{if eq .Role "operator"}}selected{{end}}>operator</option>
             <option value="viewer" {{if eq .Role "viewer"}}selected{{end}}>viewer</option>
@@ -49,9 +49,9 @@
         <details class="password-form">
           <summary>Change password</summary>
           <form class="inline-form" hx-post="/users/{{.Username}}/password" hx-target="#user-panel" hx-swap="innerHTML">
-            <label><strong>Your own</strong> login password (you are logged in as "{{$actor}}" - this is {{$actor}}'s password, not {{.Username}}'s) <input type="password" name="current_password" required autocomplete="current-password"></label>
-            <label>New password for "{{.Username}}" <input type="password" name="new_password" required minlength="8" autocomplete="new-password"></label>
-            <label>Confirm new password for "{{.Username}}" <input type="password" name="confirm_password" required minlength="8" autocomplete="new-password"></label>
+            <label><strong>Your own</strong> login password (you are logged in as "{{$actor}}" - this is {{$actor}}'s password, not {{.Username}}'s) <input type="password" name="current_password" required autocomplete="current-password" title="Your own current password, to confirm it's really you making this change - not the password being replaced."></label>
+            <label>New password for "{{.Username}}" <input type="password" name="new_password" required minlength="8" autocomplete="new-password" title="At least 8 characters."></label>
+            <label>Confirm new password for "{{.Username}}" <input type="password" name="confirm_password" required minlength="8" autocomplete="new-password" title="Must match the new password above exactly."></label>
             <button type="submit">Change password</button>
           </form>
         </details>
@@ -69,9 +69,9 @@
 {{if $canAdmin}}
 <h3>Add account</h3>
 <form class="inline-form" hx-post="/users" hx-target="#user-panel" hx-swap="innerHTML">
-  <label>Username <input type="text" name="username" required placeholder="a real PAM account's username"></label>
+  <label>Username <input type="text" name="username" required placeholder="a real PAM account's username" title="Must already be a real PAM/UNIX account on this Comb - adding it here grants an Apiary role, it does not create the account."></label>
   <label>Role
-    <select name="role">
+    <select name="role" title="The permission tier to grant this account: viewer (read-only), operator (can act on VMs/jails/networks), or admin (full access, including settings and other accounts).">
       <option value="admin">admin</option>
       <option value="operator">operator</option>
       <option value="viewer" selected>viewer</option>

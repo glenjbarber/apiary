@@ -28,12 +28,12 @@
     <form method="get" action="/recovery-handbook" class="inline-form">
       <label>Comb
         {{if .RecoveryNodes}}
-        <select name="node_id" required>
+        <select name="node_id" required title="Generate a printable recovery edition for the loss of this Comb specifically.">
           <option value="">Choose a node</option>
           {{range .RecoveryNodes}}<option value="{{.}}"{{if eq . $.RecoveryTargetNodeID}} selected{{end}}>{{.}}</option>{{end}}
         </select>
         {{else}}
-        <input type="text" name="node_id" placeholder="node id" value="{{.RecoveryTargetNodeID}}" required>
+        <input type="text" name="node_id" placeholder="node id" value="{{.RecoveryTargetNodeID}}" required title="Generate a printable recovery edition for the loss of this Comb specifically.">
         {{end}}
       </label>
       <button type="submit">Generate handbook</button>

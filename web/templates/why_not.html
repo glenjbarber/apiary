@@ -60,12 +60,12 @@
     <form method="get" action="/why-not" class="inline-form">
       <label>Cell
         {{if .WhyNotCells}}
-        <select name="cell_id" required>
+        <select name="cell_id" required title="Ask whether this VM or jail could migrate to another Comb right now, and whether it could actually be recovered if lost.">
           <option value="">Choose a Cell</option>
           {{range .WhyNotCells}}<option value="{{.ID}}"{{if eq .ID $.WhyNotCellID}} selected{{end}}>{{.Kind}} {{if .Name}}{{.Name}} ({{.ID}}){{else}}{{.ID}}{{end}}{{if .NodeID}} · {{.NodeID}}{{end}}</option>{{end}}
         </select>
         {{else}}
-        <input type="text" name="cell_id" placeholder="vm-... or jail-..." value="{{.WhyNotCellID}}" required>
+        <input type="text" name="cell_id" placeholder="vm-... or jail-..." value="{{.WhyNotCellID}}" required title="Ask whether this VM or jail could migrate to another Comb right now, and whether it could actually be recovered if lost.">
         {{end}}
       </label>
       <button type="submit">Why not?</button>
@@ -85,12 +85,12 @@
     <form method="get" action="/why-not" class="inline-form">
       <label>Comb
         {{if .WhyNotNodes}}
-        <select name="node_id" required>
+        <select name="node_id" required title="Ask whether it's currently safe to reboot this Comb - raft quorum and any unreplicated resources it owns.">
           <option value="">Choose a node</option>
           {{range .WhyNotNodes}}<option value="{{.}}"{{if eq . $.WhyNotNodeID}} selected{{end}}>{{.}}</option>{{end}}
         </select>
         {{else}}
-        <input type="text" name="node_id" placeholder="node id" value="{{.WhyNotNodeID}}" required>
+        <input type="text" name="node_id" placeholder="node id" value="{{.WhyNotNodeID}}" required title="Ask whether it's currently safe to reboot this Comb - raft quorum and any unreplicated resources it owns.">
         {{end}}
       </label>
       <button type="submit">Why not?</button>
@@ -109,12 +109,12 @@
     <form method="get" action="/why-not" class="inline-form">
       <label>Network
         {{if .WhyNotNetworks}}
-        <select name="network_id" required>
+        <select name="network_id" required title="Ask why this managed network can't currently provide connectivity, if it can't.">
           <option value="">Choose a network</option>
           {{range .WhyNotNetworks}}<option value="{{.ID}}"{{if eq .ID $.WhyNotNetworkID}} selected{{end}}>{{.Name}} ({{.ID}})</option>{{end}}
         </select>
         {{else}}
-        <input type="text" name="network_id" placeholder="network id" value="{{.WhyNotNetworkID}}" required>
+        <input type="text" name="network_id" placeholder="network id" value="{{.WhyNotNetworkID}}" required title="Ask why this managed network can't currently provide connectivity, if it can't.">
         {{end}}
       </label>
       <button type="submit">Why not?</button>
