@@ -590,6 +590,18 @@ each design decision, in order.
   call. No web UI, matching `ForcePurgeVM`/`ForcePurgeJail`'s own
   precedent for this class of rare, destructive, human-judgment action.
   See [ADR-0073](docs/adr/0073-orphaned-hast-resource-cleanup.md).
+- **Role-map editing UI** - closes the gap ADR-0030's own "Deferred"
+  section named: who has a web UI role, and at what tier, no longer
+  requires hand-editing `-role-map` and restarting `cmd/frontend`. The
+  Users page gains three Admin-only actions - add a username with a
+  role, change an existing account's role, remove an account entirely -
+  persisted via a new `internal/loginconfig` package (physical,
+  per-node, mirroring `internal/nodeconfig`'s own role for `managerd`)
+  that wins over the `-role-map` flag once it's ever been written.
+  Refuses any edit that would leave zero Admin accounts. Adding an
+  entry grants an already-existing PAM/UNIX account an Apiary role - it
+  never creates the account itself, matching ADR-0030's own explicit
+  scope. See [ADR-0074](docs/adr/0074-role-map-editing-ui.md).
 
 **Not yet implemented:**
 

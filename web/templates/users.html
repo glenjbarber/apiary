@@ -21,6 +21,7 @@
 <div id="user-error" class="banner-error">{{.UserFormError}}</div>
 <div id="user-success" class="banner-success">{{.UserFormSuccess}}</div>
 {{$actor := .Username}}
+{{$canAdmin := .CanAdmin}}
 <table>
   <thead>
     <tr><th>Username</th><th>Role</th><th></th></tr>
@@ -29,7 +30,20 @@
     {{range .Users}}
     <tr>
       <td>{{.Username}}</td>
-      <td>{{.Role}}</td>
+      <td>
+        {{if $canAdmin}}
+        <form class="inline-form" hx-post="/users/{{.Username}}/role" hx-target="#user-panel" hx-swap="innerHTML">
+          <select name="role">
+            <option value="admin" {{if eq .Role "admin"}}selected{{end}}>admin</option>
+            <option value="operator" {{if eq .Role "operator"}}selected{{end}}>operator</option>
+            <option value="viewer" {{if eq .Role "viewer"}}selected{{end}}>viewer</option>
+          </select>
+          <button type="submit">Save role</button>
+        </form>
+        {{else}}
+        {{.Role}}
+        {{end}}
+      </td>
       <td>
         {{if .CanChange}}
         <details class="password-form">
@@ -42,6 +56,9 @@
           </form>
         </details>
         {{end}}
+        {{if $canAdmin}}
+        <button class="danger" hx-delete="/users/{{.Username}}" hx-target="#user-panel" hx-swap="innerHTML" hx-confirm="Remove {{.Username}} from the role map? They will no longer be able to log in until re-added. This does not touch their underlying account.">Remove</button>
+        {{end}}
       </td>
     </tr>
     {{else}}
@@ -49,4 +66,19 @@
     {{end}}
   </tbody>
 </table>
+{{if $canAdmin}}
+<h3>Add account</h3>
+<form class="inline-form" hx-post="/users" hx-target="#user-panel" hx-swap="innerHTML">
+  <label>Username <input type="text" name="username" required placeholder="a real PAM account's username"></label>
+  <label>Role
+    <select name="role">
+      <option value="admin">admin</option>
+      <option value="operator">operator</option>
+      <option value="viewer" selected>viewer</option>
+    </select>
+  </label>
+  <button type="submit">Add</button>
+</form>
+<p class="muted">Adding a username here grants it an Apiary role - it does not create a UNIX/PAM account. The username must already be able to authenticate against this Hive's configured PAM service for a login to succeed.</p>
+{{end}}
 {{end}}
