@@ -332,6 +332,11 @@ func (m *Manager) CreateVM(ctx context.Context, name string, cfg Config) error {
 	args := []string{
 		"-f",
 		"-p", m.pidfile(qname),
+		// Preserve bhyve's own launch diagnostics alongside the guest's
+		// captured serial output. daemon(8) opens this in append mode, so
+		// this does not discard the evidence written by the serial reader.
+		// EnableSerialLog is always true for reconciled Apiary VMs.
+		"-o", m.seriallogfile(qname),
 		"bhyve",
 		"-c", strconv.Itoa(cfg.CPUs),
 		"-m", fmt.Sprintf("%dM", cfg.MemoryMB),
@@ -397,6 +402,13 @@ func (m *Manager) CreateVM(ctx context.Context, name string, cfg Config) error {
 			}
 			return fmt.Errorf("bhyve: starting serial console logger: %w", err)
 		}
+		if err := m.writeProvisioningEvidence(qname, cfg, tapName, nmdmUnit); err != nil {
+			if tapName != "" {
+				m.destroyTap(ctx, qname, tapName)
+			}
+			m.stopSerialLogger(ctx, qname)
+			return fmt.Errorf("bhyve: recording provisioning evidence: %w", err)
+		}
 	}
 
 	if _, err := runCmd(ctx, "daemon", args...); err != nil {
@@ -419,6 +431,25 @@ func (m *Manager) CreateVM(ctx context.Context, name string, cfg Config) error {
 		}
 	}
 	return nil
+}
+
+// writeProvisioningEvidence puts the resolved local launch inputs at the
+// beginning of the VM evidence log. It intentionally records paths, bridge,
+// and media selection, but never credentials or private-key material.
+func (m *Manager) writeProvisioningEvidence(qname string, cfg Config, tapName string, nmdmUnit int) error {
+	f, err := os.OpenFile(m.seriallogfile(qname), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	_, err = fmt.Fprintf(f, "=== Apiary VM provisioning evidence ===\n"+
+		"vm: %s\ncpus: %d\nmemory_mb: %d\nboot_rom: %s\n"+
+		"boot_disk: %s\ninstaller_iso: %s\ninstaller_disk: %s\n"+
+		"bridge: %s\ntap: %s\nserial_nmdm: %d\n"+
+		"launch: daemon stderr follows in this log\n===\n",
+		qname, cfg.CPUs, cfg.MemoryMB, cfg.BootROM, cfg.DiskPath,
+		cfg.ISOPath, cfg.InstallDiskPath, cfg.Bridge, tapName, nmdmUnit)
+	return err
 }
 
 // ValidateConfig checks launch inputs that can be verified locally before a
