@@ -28,8 +28,12 @@ var registry = []Check{
 	bhyveFirmwarePkgCheck,
 	bhyveBinariesCheck,
 	dnsmasqPkgCheck,
-	pfEnabledCheck,
+	// pf-anchor before pf-enabled: pf-anchor's Apply creates /etc/pf.conf
+	// when it doesn't exist yet (a stock FreeBSD install ships without
+	// one) - pf-enabled's Apply runs `service pf onestart`, which needs a
+	// parseable pf.conf to already be there.
 	pfAnchorCheck,
+	pfEnabledCheck,
 	gatewayEnableCheck,
 	rcConfPermsCheck,
 	vlanUplinkCheck,
@@ -278,6 +282,13 @@ var pfAnchorCheck = Check{
 	Applicable:  always,
 	Probe: func(ctx context.Context, r Runner, opt Options) Result {
 		body, err := os.ReadFile(pfConfPath)
+		if os.IsNotExist(err) {
+			// A stock FreeBSD install ships with no /etc/pf.conf at all
+			// until an operator (or this tool) creates one - a real,
+			// reportable "missing" fact, not a measurement failure.
+			return Result{ID: "pf-anchor", Status: StatusMissing, Detail: pfConfPath + " does not exist yet",
+				FixHint: fmt.Sprintf("create %s containing %s", pfConfPath, apiaryPFAnchor)}
+		}
 		if err != nil {
 			return Result{ID: "pf-anchor", Status: StatusUnknown, Detail: err.Error(),
 				FixHint: fmt.Sprintf("add %s to %s", apiaryPFAnchor, pfConfPath)}
@@ -290,6 +301,19 @@ var pfAnchorCheck = Check{
 	},
 	Apply: func(ctx context.Context, r Runner, opt Options) error {
 		body, err := os.ReadFile(pfConfPath)
+		if os.IsNotExist(err) {
+			// Nothing to back up or preserve - a stock FreeBSD install
+			// has no pf.conf at all until something creates one.
+			if err := os.WriteFile(pfConfPath, []byte(apiaryPFAnchor+"\n"), 0o644); err != nil {
+				return fmt.Errorf("creating %s: %w", pfConfPath, err)
+			}
+			if pfRunning(ctx, r) {
+				if _, stderr, err := r.Run(ctx, "service", "pf", "reload"); err != nil {
+					return fmt.Errorf("service pf reload: %s", firstNonEmpty(stderr, err))
+				}
+			}
+			return nil
+		}
 		if err != nil {
 			return fmt.Errorf("reading %s: %w", pfConfPath, err)
 		}

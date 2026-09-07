@@ -241,6 +241,43 @@ func TestPFAnchorCheck(t *testing.T) {
 	}
 }
 
+// TestPFAnchorCheckMissingFile covers a stock FreeBSD install, which ships
+// with no /etc/pf.conf at all - confirmed live on a fresh VM host, where
+// the original implementation reported StatusUnknown and Apply failed
+// outright trying to read a file that doesn't exist yet.
+func TestPFAnchorCheckMissingFile(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "pf.conf") // deliberately never created
+	old := pfConfPath
+	pfConfPath = path
+	defer func() { pfConfPath = old }()
+
+	res := pfAnchorCheck.Probe(ctx, newFakeRunner(), Options{})
+	if res.Status != StatusMissing {
+		t.Fatalf("status = %v, want missing (not unknown) when pf.conf does not exist", res.Status)
+	}
+
+	if err := pfAnchorCheck.Apply(ctx, newFakeRunner(), Options{}); err != nil {
+		t.Fatalf("apply on a nonexistent pf.conf: %v", err)
+	}
+	body, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("expected pf.conf to be created: %v", err)
+	}
+	if !strings.Contains(string(body), apiaryPFAnchor) {
+		t.Fatalf("expected anchor in newly-created pf.conf, got: %s", body)
+	}
+	if _, err := os.Stat(path + ".bak"); err == nil {
+		t.Fatal("did not expect a .bak file when pf.conf never existed")
+	}
+
+	res = pfAnchorCheck.Probe(ctx, newFakeRunner(), Options{})
+	if res.Status != StatusOK {
+		t.Fatalf("status = %v, want ok after apply", res.Status)
+	}
+}
+
 func TestRCConfPermsCheck(t *testing.T) {
 	ctx := context.Background()
 	dir := t.TempDir()
