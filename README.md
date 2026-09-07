@@ -685,6 +685,20 @@ each design decision, in order.
   itself does not yet block automatically on incomplete teardown; the
   operator checks this panel first. See
   [ADR-0081](docs/adr/0081-guided-network-replacement-workflow.md).
+- **`apiaryinstall`, a host preflight/provisioning tool** — every FreeBSD
+  host prerequisite this project has ever disclosed only in ADR prose
+  (`vmm.ko`/`nmdm.ko` loaded, `bhyve-firmware`/`dnsmasq` installed, a ZFS
+  pool present, `pf` enabled with an `apiary/*` anchor, a bridge for the
+  uplink NIC, `/etc/rc.conf` permissions, PAM/HAST setup) is now a single
+  command to check, with `-apply` to fix the safe ones automatically.
+  Creating or modifying a bridge and enslaving the uplink NIC to it is
+  gated behind its own separate, exact-phrase-confirmed flag
+  (`-apply-network yes-modify-network`) rather than the general `-apply`,
+  since ADR-0022 already documents a real near-miss from exactly that
+  operation over SSH. PAM/account setup, ZFS pool creation, and the known
+  `hastd` source patch are permanently report-only — this tool tells you
+  they're missing, it never attempts them. See
+  [ADR-0082](docs/adr/0082-apiary-installer-preflight.md).
 - Importing VMs from other hypervisors (e.g. Proxmox): no disk-format
   conversion, and Apiary is UEFI-only. Linux containers have no path at
   all — jails share the host FreeBSD kernel
