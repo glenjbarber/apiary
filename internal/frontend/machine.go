@@ -7,6 +7,7 @@ import (
 	"time"
 
 	rpcpb "github.com/glenjbarber/apiary/api/rpc"
+	"github.com/glenjbarber/apiary/internal/origincert"
 )
 
 // currentNodeConfig fetches this node's own local settings (ADR-0049).
@@ -78,7 +79,14 @@ func (s *Server) handleMachinePage(w http.ResponseWriter, r *http.Request) {
 	}))
 }
 
-type originCertificateView struct{ Name, Service, Hostnames, ExpiresAt string }
+type originCertificateView struct {
+	Name, Service, Hostnames, ExpiresAt string
+	AutoRenew                           bool
+	// Expiry is "ok", "soon", or "expired" - see origincert.ExpiryStatus,
+	// computed here rather than trusting a stale value from the wire,
+	// since "soon" and "expired" are both relative to the current time.
+	Expiry string
+}
 
 func (s *Server) currentOriginCertificates(r *http.Request) ([]originCertificateView, string) {
 	resp, err := s.client.ListOriginCertificates(r.Context(), &rpcpb.ListOriginCertificatesRequest{})
@@ -88,9 +96,16 @@ func (s *Server) currentOriginCertificates(r *http.Request) ([]originCertificate
 	if resp.GetError() != "" {
 		return nil, resp.GetError()
 	}
+	now := time.Now()
 	var out []originCertificateView
 	for _, cert := range resp.GetCertificates() {
-		out = append(out, originCertificateView{Name: cert.GetName(), Service: cert.GetService(), Hostnames: strings.Join(cert.GetHostnames(), ", "), ExpiresAt: time.Unix(cert.GetExpiresAtUnix(), 0).Local().Format("2006-01-02 15:04 MST")})
+		expiresAt := time.Unix(cert.GetExpiresAtUnix(), 0)
+		out = append(out, originCertificateView{
+			Name: cert.GetName(), Service: cert.GetService(), Hostnames: strings.Join(cert.GetHostnames(), ", "),
+			ExpiresAt: expiresAt.Local().Format("2006-01-02 15:04 MST"),
+			AutoRenew: cert.GetAutoRenew(),
+			Expiry:    string(origincert.InventoryEntry{ExpiresAt: expiresAt}.Expiry(now)),
+		})
 	}
 	return out, ""
 }
@@ -111,7 +126,7 @@ func (s *Server) handleIssueOriginCertificate(w http.ResponseWriter, r *http.Req
 			hostnames = append(hostnames, host)
 		}
 	}
-	resp, err := s.client.IssueOriginCertificate(r.Context(), &rpcpb.IssueOriginCertificateRequest{Name: strings.TrimSpace(r.FormValue("name")), Hostnames: hostnames, ValidityDays: int32(days)})
+	resp, err := s.client.IssueOriginCertificate(r.Context(), &rpcpb.IssueOriginCertificateRequest{Name: strings.TrimSpace(r.FormValue("name")), Hostnames: hostnames, ValidityDays: int32(days), AutoRenew: r.Form.Has("auto_renew")})
 	if err != nil {
 		s.renderOriginCAPanel(w, r, err.Error(), "")
 		return

@@ -34,6 +34,7 @@ import (
 	"github.com/glenjbarber/apiary/internal/manager"
 	"github.com/glenjbarber/apiary/internal/netroute"
 	"github.com/glenjbarber/apiary/internal/nodeconfig"
+	"github.com/glenjbarber/apiary/internal/origincert"
 	"github.com/glenjbarber/apiary/internal/pf"
 	"github.com/glenjbarber/apiary/internal/resetutil"
 	"github.com/glenjbarber/apiary/internal/ufsmount"
@@ -85,6 +86,7 @@ func run() error {
 	assumptionHeartbeatInterval := flag.Duration("assumption-heartbeat-interval", time.Hour, "how often an unchanged assumption result still gets a fresh persisted history entry, so a real transition is never confused with routine ticking; must be >= -assumption-check-interval")
 	assumptionStaleAfterFlag := flag.Duration("assumption-stale-after", 0, "age past which ListAssumptionResults reports a result as effectively unknown regardless of its stored value; 0 defaults to 3x -assumption-check-interval")
 	assumptionRunDeadline := flag.Duration("assumption-run-deadline", 20*time.Second, "overall timeout for one Automated Assumption Checks tick, so one unresponsive peer can't stall the next tick; must be less than -assumption-check-interval")
+	originCARenewalCheckInterval := flag.Duration("origin-ca-renewal-check-interval", time.Hour, "how often to check local Origin CA certificates for ones due for automatic renewal (ADR-0077); renewal itself only happens within a certificate's own last 30 days, an auto-renew flag set at issuance, and a still-valid token file")
 	assumptionHistoryLimit := flag.Int("assumption-history-limit", 200, "maximum persisted history entries retained per assumption key")
 	assumptionHistoryMaxAge := flag.Duration("assumption-history-max-age", 30*24*time.Hour, "maximum age of a persisted assumption history entry before it's pruned")
 	tlsCert := flag.String("tls-cert", "", "PEM certificate file for managerd's external gRPC API; leave unset (with -tls-key) to serve plaintext, as before")
@@ -441,6 +443,21 @@ func run() error {
 	srv := manager.NewServer(raftClient, id, isos, vncArg, serialLogArg, vlanArg, peers, resolvedPeerPort, zfsMgr, nodeConfigMgr, assumptionsMgr, assumptionStaleAfter, reconciler)
 	srv.SetAssumptionRegister(registerMgr)
 	srv.SetOriginCAIssuer(cloudflare.OriginCAIssuer{})
+	originCARenewer := &origincert.Renewer{
+		Config: func() (string, string, error) {
+			cfg, err := nodeConfigMgr.Load()
+			if err != nil {
+				return "", "", err
+			}
+			return cfg.OriginCADirectory, cfg.OriginCATokenFile, nil
+		},
+		Issuer: cloudflare.OriginCAIssuer{},
+		RestartService: func(service string) {
+			if _, err := srv.RestartNodeService(context.Background(), &rpcpb.RestartNodeServiceRequest{Name: service}); err != nil {
+				log.Printf("managerd: origin-ca renewal: restarting %s: %v", service, err)
+			}
+		},
+	}
 	// Every RPC (including UploadISO's stream) is gated by srv's own
 	// API-key check - see ADR-0023. Auth stays fully open until the
 	// first key is created (CreateAPIKey itself included), so this is
@@ -480,6 +497,7 @@ func run() error {
 
 	go runReconcileLoop(ctx, reconciler, *reconcileInterval)
 	go runAssumptionCheckLoop(ctx, assumptionChecker, *assumptionCheckInterval)
+	go runOriginCARenewalLoop(ctx, originCARenewer, *originCARenewalCheckInterval)
 
 	select {
 	case <-ctx.Done():
@@ -541,6 +559,32 @@ func runAssumptionCheckLoop(ctx context.Context, checker *assumecheck.Checker, i
 func assumptionCheckOnce(ctx context.Context, checker *assumecheck.Checker) {
 	if err := checker.RunOnce(ctx); err != nil {
 		log.Printf("managerd: assumption check: %v", err)
+	}
+}
+
+// runOriginCARenewalLoop mirrors runReconcileLoop's own shape exactly -
+// an immediate first run, then one per tick of interval, until ctx is
+// done. Errors are logged, not fatal: a renewal failure (an unreadable
+// token file, a Cloudflare API error) is retried on the next tick, not a
+// reason to bring managerd down.
+func runOriginCARenewalLoop(ctx context.Context, renewer *origincert.Renewer, interval time.Duration) {
+	originCARenewalOnce(ctx, renewer)
+
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			originCARenewalOnce(ctx, renewer)
+		}
+	}
+}
+
+func originCARenewalOnce(ctx context.Context, renewer *origincert.Renewer) {
+	if err := renewer.RunOnce(ctx); err != nil {
+		log.Printf("managerd: origin-ca renewal: %v", err)
 	}
 }
 

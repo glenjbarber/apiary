@@ -564,6 +564,17 @@ each design decision, in order.
   TCP/HTTPS-origin would need Cloudflare Access client tooling or the
   separate Spectrum product - out of scope). See
   [ADR-0063](docs/adr/0063-cloudflare-tunnel-exposure-v1.md).
+- **Origin CA certificate expiry health and scheduled renewal** - the
+  Machine Configuration page's Origin CA panel (ADR-0072) now flags a
+  locally issued certificate as "soon" (within 30 days of expiry) or
+  "expired" instead of only showing a bare date, and an optional
+  Auto-renew flag set at issuance time re-issues that certificate on
+  its own, using the same hostnames and validity period, once it
+  enters that window - checked hourly by a new independent tick in
+  `managerd`, alongside the existing reconcile and Automated Assumption
+  Checks loops. Certificate revocation and issuance for services other
+  than `managerd` remain future work. See
+  [ADR-0077](docs/adr/0077-origin-ca-expiry-health-and-renewal.md).
 - **System settings expansion** - eight new panels on the Machine
   Configuration page (`/machine`) expose most of `managerd`'s
   remaining startup flags as editable settings: resource-scope paths,

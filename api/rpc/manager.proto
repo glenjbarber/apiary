@@ -688,10 +688,11 @@ message OriginCertificateInfo {
   string cert_path = 6;
   string key_path = 7;
   int64 updated_at_unix = 8;
+  bool auto_renew = 9;
 }
 message ListOriginCertificatesRequest {}
 message ListOriginCertificatesResponse { repeated OriginCertificateInfo certificates = 1; string error = 2; }
-message IssueOriginCertificateRequest { string name = 1; repeated string hostnames = 2; int32 validity_days = 3; }
+message IssueOriginCertificateRequest { string name = 1; repeated string hostnames = 2; int32 validity_days = 3; bool auto_renew = 4; }
 message IssueOriginCertificateResponse { OriginCertificateInfo certificate = 1; string error = 2; bool restart_scheduled = 3; }
 
 // RaftMember mirrors api/internalpb's ServerInfo, kept as a separate

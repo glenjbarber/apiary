@@ -489,6 +489,68 @@ func TestServer_IssueOriginCertificateInstallsAndRestartsManagerd(t *testing.T) 
 	}
 }
 
+func TestServer_IssueOriginCertificateAutoRenewRoundTripsThroughListOriginCertificates(t *testing.T) {
+	dir := t.TempDir()
+	tokenPath := filepath.Join(dir, "origin-ca.token")
+	if err := os.WriteFile(tokenPath, []byte("token-value\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	store := &fakeNodeConfigStore{cfg: nodeconfig.Config{
+		OriginCATokenFile: tokenPath,
+		OriginCADirectory: dir,
+		TLSCert:           filepath.Join(dir, "managerd.crt"),
+		TLSKey:            filepath.Join(dir, "managerd.key"),
+	}}
+	s := NewServer(nil, "node-1", nil, nil, nil, nil, nil, "", nil, store, nil, 0, nil)
+	s.SetOriginCAIssuer(&fakeOriginCAIssuer{})
+	s.services = &fakeNodeServiceController{}
+
+	resp, err := s.IssueOriginCertificate(context.Background(), &rpcpb.IssueOriginCertificateRequest{
+		Name: "managerd", Hostnames: []string{"apiary.example.com"}, ValidityDays: 365, AutoRenew: true,
+	})
+	if err != nil {
+		t.Fatalf("IssueOriginCertificate() error: %v", err)
+	}
+	if resp.GetError() != "" || !resp.GetCertificate().GetAutoRenew() {
+		t.Fatalf("IssueOriginCertificate() = %+v, want AutoRenew true on the returned certificate", resp)
+	}
+
+	listResp, err := s.ListOriginCertificates(context.Background(), &rpcpb.ListOriginCertificatesRequest{})
+	if err != nil {
+		t.Fatalf("ListOriginCertificates() error: %v", err)
+	}
+	if len(listResp.GetCertificates()) != 1 || !listResp.GetCertificates()[0].GetAutoRenew() {
+		t.Fatalf("ListOriginCertificates() = %+v, want one certificate with AutoRenew true", listResp.GetCertificates())
+	}
+}
+
+func TestServer_IssueOriginCertificateDefaultsAutoRenewFalse(t *testing.T) {
+	dir := t.TempDir()
+	tokenPath := filepath.Join(dir, "origin-ca.token")
+	if err := os.WriteFile(tokenPath, []byte("token-value\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	store := &fakeNodeConfigStore{cfg: nodeconfig.Config{
+		OriginCATokenFile: tokenPath,
+		OriginCADirectory: dir,
+		TLSCert:           filepath.Join(dir, "managerd.crt"),
+		TLSKey:            filepath.Join(dir, "managerd.key"),
+	}}
+	s := NewServer(nil, "node-1", nil, nil, nil, nil, nil, "", nil, store, nil, 0, nil)
+	s.SetOriginCAIssuer(&fakeOriginCAIssuer{})
+	s.services = &fakeNodeServiceController{}
+
+	resp, err := s.IssueOriginCertificate(context.Background(), &rpcpb.IssueOriginCertificateRequest{
+		Name: "managerd", Hostnames: []string{"apiary.example.com"}, ValidityDays: 365,
+	})
+	if err != nil {
+		t.Fatalf("IssueOriginCertificate() error: %v", err)
+	}
+	if resp.GetCertificate().GetAutoRenew() {
+		t.Fatalf("IssueOriginCertificate() = %+v, want AutoRenew false when not requested", resp.GetCertificate())
+	}
+}
+
 func (f *fakeNodeConfigStore) Load() (nodeconfig.Config, error) {
 	if f.loadErr != nil {
 		return nodeconfig.Config{}, f.loadErr

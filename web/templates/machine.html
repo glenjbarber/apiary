@@ -494,11 +494,12 @@
   <label>Certificate name <input name="name" placeholder="managerd" required title="Matches the file names TLS paths above point at, e.g. managerd for managerd.crt/managerd.key."></label>
   <label>Hostnames, comma-separated <input name="hostnames" placeholder="api.example.com" required title="Every hostname this certificate should cover, comma-separated. Must be proxied through Cloudflare on this zone."></label>
   <label>Validity <select name="validity_days" title="How long the issued certificate is valid for before it needs renewing."><option value="365">1 year</option><option value="730">2 years</option><option value="1095">3 years</option><option value="5475">15 years</option></select></label>
+  <label class="checkbox-label"><input type="checkbox" name="auto_renew" value="true" title="Automatically re-issue this certificate once it enters its last 30 days, using the same hostnames and validity period. Requires the Origin CA token file to remain valid and readable."> Auto-renew</label>
   <button type="submit">Issue or renew managerd certificate</button>
 </form>
 {{end}}
-<table><thead><tr><th>Name</th><th>Service</th><th>Hostnames</th><th>Expires</th></tr></thead><tbody>
-{{range .OriginCertificates}}<tr><td>{{.Name}}</td><td>{{.Service}}</td><td>{{.Hostnames}}</td><td>{{.ExpiresAt}}</td></tr>{{else}}<tr><td colspan="4"><em>No local Origin CA certificates recorded.</em></td></tr>{{end}}
+<table><thead><tr><th>Name</th><th>Service</th><th>Hostnames</th><th>Expires</th><th>Auto-renew</th></tr></thead><tbody>
+{{range .OriginCertificates}}<tr><td>{{.Name}}</td><td>{{.Service}}</td><td>{{.Hostnames}}</td><td><span class="badge {{.Expiry}}" title="{{if eq .Expiry "expired"}}This certificate has already expired.{{else if eq .Expiry "soon"}}Expires within 30 days.{{else}}Not due for renewal yet.{{end}}">{{.ExpiresAt}}</span></td><td>{{if .AutoRenew}}<span class="badge true">on</span>{{else}}<span class="badge unknown">off</span>{{end}}</td></tr>{{else}}<tr><td colspan="5"><em>No local Origin CA certificates recorded.</em></td></tr>{{end}}
 </tbody></table>
 {{end}}
 
