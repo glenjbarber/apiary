@@ -3,7 +3,6 @@ package raft
 import (
 	"errors"
 	"fmt"
-	"net"
 	"os"
 	"path/filepath"
 	"time"
@@ -82,13 +81,9 @@ func New(cfg Config) (*Node, error) {
 		return nil, fmt.Errorf("raft: creating snapshot store: %w", err)
 	}
 
-	addr, err := net.ResolveTCPAddr("tcp", cfg.BindAddr)
+	transport, err := newTransport(cfg)
 	if err != nil {
-		return nil, fmt.Errorf("raft: resolving bind addr: %w", err)
-	}
-	transport, err := raft.NewTCPTransport(cfg.BindAddr, addr, 3, 10*time.Second, os.Stderr)
-	if err != nil {
-		return nil, fmt.Errorf("raft: creating transport: %w", err)
+		return nil, err
 	}
 
 	r, err := raft.NewRaft(raftConfig, fsm, boltStore, boltStore, snapshotStore, transport)

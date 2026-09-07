@@ -62,9 +62,12 @@ func run() error {
 	dataDir := flag.String("data-dir", "/var/db/apiary/raftd", "directory for raft log/stable store and snapshots")
 	socketPath := flag.String("socket", "/var/run/apiary/raftd.sock", "Unix domain socket path for the internal RaftInternal protocol")
 	nodeID := flag.String("node-id", "", "unique ID for this raft node (defaults to hostname)")
-	bindAddr := flag.String("raft-bind", raftnode.DefaultBindAddr, "loopback TCP address for the raft transport")
+	bindAddr := flag.String("raft-bind", raftnode.DefaultBindAddr, "TCP address for the raft transport - a real network address in a genuine multi-node cluster, not necessarily loopback")
 	joinSocket := flag.String("join", "", "internal socket path of an existing cluster member to join through (leave empty to bootstrap a new single-node cluster)")
 	internalToken := flag.String("internal-token", "", "shared secret required from every RaftInternal caller (managerd, or a peer raftd during -join); leave empty to rely on the socket's own file permissions alone, as before (see ADR-0023)")
+	raftTLSCert := flag.String("raft-tls-cert", "", "this node's own certificate for the raft transport (ADR-0078); leave empty, along with -raft-tls-key and -raft-tls-ca, for today's plain-TCP behavior")
+	raftTLSKey := flag.String("raft-tls-key", "", "private key matching -raft-tls-cert")
+	raftTLSCA := flag.String("raft-tls-ca", "", "CA bundle used to verify every peer's raft-transport certificate - raft members mutually authenticate each other, unlike managerd's own public-facing API TLS")
 	reset := flag.String("reset", "", fmt.Sprintf("Tier 1 reset (ADR-0038): wipe this node's own raft state and exit, rather than starting the server - real VMs/jails/disks are untouched, just orphaned from tracking until re-registered. Must be exactly %q or nothing happens; the next normal (no -reset) start bootstraps fresh automatically against the now-empty -data-dir", resetConfirmPhrase))
 	exportPath := flag.String("export", "", "write this node's current, live ephemeral state (VMs/networks/jails/API keys) to the given path as a portable archive, then exit, rather than starting the server - requires raftd already running and reachable at -socket (see docs/adr/0051-raftd-config-save-restore.md)")
 	restorePhrase := flag.String("restore", "", fmt.Sprintf("restore ephemeral state from -restore-file into this node's own, currently-empty -data-dir, then exit, rather than starting the server - run -reset first if -data-dir isn't already empty. Must be exactly %q or nothing happens; the next normal start picks up the restored state automatically", restoreConfirmPhrase))
@@ -80,6 +83,9 @@ func run() error {
 		NodeID:   *nodeID,
 		DataDir:  *dataDir,
 		BindAddr: *bindAddr,
+		TLSCert:  *raftTLSCert,
+		TLSKey:   *raftTLSKey,
+		TLSCA:    *raftTLSCA,
 	}
 
 	if *exportPath != "" {
@@ -136,8 +142,8 @@ func run() error {
 		serveErrCh <- grpcServer.Serve(lis)
 	}()
 
-	log.Printf("raftd: listening on %s (node-id=%s, raft-bind=%s, data-dir=%s)",
-		*socketPath, resolvedNodeID, *bindAddr, *dataDir)
+	log.Printf("raftd: listening on %s (node-id=%s, raft-bind=%s, data-dir=%s, raft-tls=%v)",
+		*socketPath, resolvedNodeID, *bindAddr, *dataDir, *raftTLSCert != "")
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
