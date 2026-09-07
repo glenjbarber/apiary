@@ -137,6 +137,14 @@ type pageData struct {
 	// Networks page, rendered the same way ISOFormError is for Images.
 	NetworkFormError string
 
+	// NetworkTeardownID/NetworkTeardownStatuses/NetworkTeardownError back
+	// the guided network-replacement workflow's teardown-status check
+	// (ADR-0071/ADR-0081) - empty ID means no check has been requested
+	// on this page load.
+	NetworkTeardownID       string
+	NetworkTeardownStatuses []networkTeardownStatusView
+	NetworkTeardownError    string
+
 	// APIKeys lists existing API keys (metadata only) for the API Keys
 	// page's table (ADR-0023).
 	APIKeys []apiKeyView
@@ -1125,6 +1133,59 @@ func (s *Server) currentNetworks(r *http.Request) ([]networkView, string) {
 	return networks, ""
 }
 
+// networkTeardownStatusView is one Comb's own answer to "do you still
+// have local artifacts for this deleted network id" (ADR-0071/ADR-0081).
+// Clear is true only when that Comb was reachable and reported no
+// leftover artifact - an unreachable/erroring Comb is never treated as
+// evidence teardown succeeded there.
+type networkTeardownStatusView struct {
+	NodeID                          string
+	Clear                           bool
+	Bridge                          string
+	OwnBridge, OwnVLAN, OutboundNAT bool
+	Error                           string
+}
+
+// currentNetworkTeardownStatus queries every known node's own local
+// GetNetworkTeardownStatus (never routed through raft - this is
+// per-node physical state) for networkID, the same per-node
+// local-vs-peer branching currentNetworks already uses for bridge
+// status above.
+func (s *Server) currentNetworkTeardownStatus(r *http.Request, networkID string) ([]networkTeardownStatusView, string) {
+	statusResp, err := s.client.Status(r.Context(), &rpcpb.StatusRequest{})
+	if err != nil {
+		return nil, err.Error()
+	}
+	if len(statusResp.GetKnownNodeIds()) == 0 {
+		return nil, "no known Combs to check"
+	}
+	var out []networkTeardownStatusView
+	for _, nodeID := range statusResp.GetKnownNodeIds() {
+		var resp *rpcpb.GetNetworkTeardownStatusResponse
+		var callErr error
+		if s.peers == nil || nodeID == statusResp.GetManagerNodeId() {
+			resp, callErr = s.client.GetNetworkTeardownStatus(r.Context(), &rpcpb.GetNetworkTeardownStatusRequest{NetworkId: networkID})
+		} else {
+			resp, callErr = s.peers.GetNetworkTeardownStatus(r.Context(), s.peerAddr(nodeID), networkID)
+		}
+		view := networkTeardownStatusView{NodeID: nodeID}
+		switch {
+		case callErr != nil:
+			view.Error = callErr.Error()
+		case resp.GetError() != "":
+			view.Error = resp.GetError()
+		default:
+			view.Clear = !resp.GetPresent()
+			view.Bridge = resp.GetBridge()
+			view.OwnBridge = resp.GetOwnBridge()
+			view.OwnVLAN = resp.GetOwnVlan()
+			view.OutboundNAT = resp.GetOutboundNat()
+		}
+		out = append(out, view)
+	}
+	return out, ""
+}
+
 // currentISOs fetches the current list of stored installer images,
 // returning an empty slice (not an error) if the fetch fails - the same
 // fail-soft convention currentVMs follows.
@@ -1486,9 +1547,22 @@ func (s *Server) handleDeleteISO(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleNetworksPage serves the Networks list/create page ("/networks").
+// A "teardown_network_id" query parameter (the guided
+// network-replacement workflow, ADR-0071/ADR-0081) triggers a per-Comb
+// teardown-status check for that id - a plain GET, since it's entirely
+// read-only, so the check survives a page refresh and is linkable.
 func (s *Server) handleNetworksPage(w http.ResponseWriter, r *http.Request) {
 	networks, errMsg := s.currentNetworks(r)
-	s.render(w, "networks_page", s.withAuthFields(r, pageData{Networks: networks, NetworkFormError: errMsg, ActivePage: "networks"}))
+	teardownID := strings.TrimSpace(r.URL.Query().Get("teardown_network_id"))
+	var teardownStatuses []networkTeardownStatusView
+	var teardownErr string
+	if teardownID != "" {
+		teardownStatuses, teardownErr = s.currentNetworkTeardownStatus(r, teardownID)
+	}
+	s.render(w, "networks_page", s.withAuthFields(r, pageData{
+		Networks: networks, NetworkFormError: errMsg, ActivePage: "networks",
+		NetworkTeardownID: teardownID, NetworkTeardownStatuses: teardownStatuses, NetworkTeardownError: teardownErr,
+	}))
 }
 
 // handleCreateNetwork follows the same combined-panel pattern as

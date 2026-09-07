@@ -142,6 +142,10 @@ type reconcilerStats interface {
 	// (ADR-0063) - reusing this already-nil-able dependency rather than
 	// adding a new NewServer parameter just for one more boolean signal.
 	CloudflareConfigured() bool
+
+	// NetworkArtifactStatus backs GetNetworkTeardownStatus (ADR-0081) -
+	// this node's own local artifact-cleanup record for one network id.
+	NetworkArtifactStatus(networkID string) (present bool, bridge string, ownBridge, ownVLAN, outboundNAT bool, err error)
 }
 
 // assumptionStore is the subset of *assumptions.Manager the server
@@ -692,6 +696,27 @@ func (s *Server) SetNetworkName(ctx context.Context, req *rpcpb.SetNetworkNameRe
 		}
 	}
 	return &rpcpb.SetNetworkNameResponse{Network: fromInternalNetwork(network), Error: appErr, LeaderHint: leaderHint}, nil
+}
+
+// GetNetworkTeardownStatus implements rpcpb.ManagerServiceServer - a
+// physical, per-node, local-only report (never routed through raft),
+// mirroring ListOrphanedHASTResources's own posture exactly. Backs the
+// guided network-replacement workflow (ADR-0071/ADR-0081): the caller
+// is expected to call this once per known node and treat any error
+// (including "no Reconciler configured") the same as present=true -
+// unknown must block a recreate, never be mistaken for evidence that
+// cleanup succeeded.
+func (s *Server) GetNetworkTeardownStatus(_ context.Context, req *rpcpb.GetNetworkTeardownStatusRequest) (*rpcpb.GetNetworkTeardownStatusResponse, error) {
+	if s.reconciler == nil {
+		return &rpcpb.GetNetworkTeardownStatusResponse{Error: "this node has no reconciler configured"}, nil
+	}
+	present, bridge, ownBridge, ownVLAN, outboundNAT, err := s.reconciler.NetworkArtifactStatus(req.GetNetworkId())
+	if err != nil {
+		return &rpcpb.GetNetworkTeardownStatusResponse{Error: err.Error()}, nil
+	}
+	return &rpcpb.GetNetworkTeardownStatusResponse{
+		Present: present, Bridge: bridge, OwnBridge: ownBridge, OwnVlan: ownVLAN, OutboundNat: outboundNAT,
+	}, nil
 }
 
 // ListNetworks implements rpcpb.ManagerServiceServer.

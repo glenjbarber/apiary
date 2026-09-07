@@ -57,6 +57,8 @@ type fakeClient struct {
 	setNetworkNameResp    *rpcpb.SetNetworkNameResponse
 	lastSetNetworkNameReq *rpcpb.SetNetworkNameRequest
 
+	getNetworkTeardownStatusResp *rpcpb.GetNetworkTeardownStatusResponse
+
 	listJailsResp     *rpcpb.ListJailsResponse
 	createJailResp    *rpcpb.CreateJailResponse
 	deleteJailResp    *rpcpb.DeleteJailResponse
@@ -225,6 +227,13 @@ func (f *fakeClient) GetNodeConfig(context.Context, *rpcpb.GetNodeConfigRequest,
 		return f.getNodeConfigResp, nil
 	}
 	return &rpcpb.GetNodeConfigResponse{}, nil
+}
+
+func (f *fakeClient) GetNetworkTeardownStatus(context.Context, *rpcpb.GetNetworkTeardownStatusRequest, ...grpc.CallOption) (*rpcpb.GetNetworkTeardownStatusResponse, error) {
+	if f.getNetworkTeardownStatusResp != nil {
+		return f.getNetworkTeardownStatusResp, nil
+	}
+	return &rpcpb.GetNetworkTeardownStatusResponse{}, nil
 }
 
 func (f *fakeClient) UpdateNodeConfig(_ context.Context, in *rpcpb.UpdateNodeConfigRequest, _ ...grpc.CallOption) (*rpcpb.UpdateNodeConfigResponse, error) {

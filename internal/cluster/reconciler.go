@@ -389,6 +389,32 @@ func (r *Reconciler) CloudflareConfigured() bool {
 	return r.Cloudflare != nil
 }
 
+// NetworkArtifactStatus reports whether this node's own local artifact
+// state still has an entry for networkID - the read-only signal
+// ADR-0071/ADR-0081's guided replacement workflow needs to show an
+// operator whether teardown of a deleted network has actually
+// converged on this Hive, without exposing arbitrary host interface
+// inventory (that ADR's own explicit constraint). present is false
+// once reconcileNetworkArtifacts has successfully torn everything down
+// and removed the entry - see that function's own doc comment for
+// exactly when that happens. Returns plain fields rather than the
+// unexported networkArtifact type, since this is called across the
+// internal/manager package boundary (reconcilerStats). A read error
+// (state file present but unparseable) is reported rather than
+// silently treated as either state, since "unknown" must block a
+// recreate, not be mistaken for "clear".
+func (r *Reconciler) NetworkArtifactStatus(networkID string) (present bool, bridge string, ownBridge, ownVLAN, outboundNAT bool, err error) {
+	if r.NetworkStatePath == "" {
+		return false, "", false, false, false, nil
+	}
+	state, err := loadNetworkArtifactState(r.NetworkStatePath)
+	if err != nil {
+		return false, "", false, false, false, err
+	}
+	artifact, present := state.Networks[networkID]
+	return present, artifact.Bridge, artifact.OwnBridge, artifact.OwnVLAN, artifact.OutboundNAT, nil
+}
+
 func unixNanoToTime(nano int64) (time.Time, bool) {
 	if nano == 0 {
 		return time.Time{}, false

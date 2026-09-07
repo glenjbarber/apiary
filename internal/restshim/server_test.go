@@ -190,6 +190,10 @@ func (f *fakeClient) GetNodeConfig(context.Context, *rpcpb.GetNodeConfigRequest,
 	return &rpcpb.GetNodeConfigResponse{}, nil
 }
 
+func (f *fakeClient) GetNetworkTeardownStatus(context.Context, *rpcpb.GetNetworkTeardownStatusRequest, ...grpc.CallOption) (*rpcpb.GetNetworkTeardownStatusResponse, error) {
+	return &rpcpb.GetNetworkTeardownStatusResponse{}, nil
+}
+
 func (f *fakeClient) UpdateNodeConfig(context.Context, *rpcpb.UpdateNodeConfigRequest, ...grpc.CallOption) (*rpcpb.UpdateNodeConfigResponse, error) {
 	return &rpcpb.UpdateNodeConfigResponse{}, nil
 }

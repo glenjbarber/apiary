@@ -76,6 +76,7 @@ var requiredRole = map[string]Role{
 	"/apiary.rpc.v1.ManagerService/ListAssumptionClaims":      RoleViewer,
 	"/apiary.rpc.v1.ManagerService/ListOriginCertificates":    RoleViewer,
 	"/apiary.rpc.v1.ManagerService/ListOrphanedHASTResources": RoleViewer,
+	"/apiary.rpc.v1.ManagerService/GetNetworkTeardownStatus":  RoleViewer,
 
 	// The Dependency Graph Simulator RPCs are read-only reports - Viewer,
 	// the same tier as every other plain read

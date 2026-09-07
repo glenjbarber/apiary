@@ -327,6 +327,15 @@ func (p *PeerReporter) GetLocalNetworkBridgeStatus(ctx context.Context, addr, ne
 	return client.GetLocalNetworkBridgeStatus(ctx, &rpcpb.GetLocalNetworkBridgeStatusRequest{NetworkId: networkID})
 }
 
+func (p *PeerReporter) GetNetworkTeardownStatus(ctx context.Context, addr, networkID string) (*rpcpb.GetNetworkTeardownStatusResponse, error) {
+	conn, client, err := p.dial(addr)
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close()
+	return client.GetNetworkTeardownStatus(ctx, &rpcpb.GetNetworkTeardownStatusRequest{NetworkId: networkID})
+}
+
 // GetVMSerialLog forwards to a specific Hive's local serial-log reader.
 // Serial logs are captured alongside bhyve, rather than in replicated
 // state, so this is intentionally a direct owner-Hive call, not a

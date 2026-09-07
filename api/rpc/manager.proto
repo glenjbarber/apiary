@@ -314,6 +314,19 @@ service ManagerService {
   // anything.
   rpc ListOrphanedHASTResources(ListOrphanedHASTResourcesRequest) returns (ListOrphanedHASTResourcesResponse);
   rpc CleanupOrphanedHASTResource(CleanupOrphanedHASTResourceRequest) returns (CleanupOrphanedHASTResourceResponse);
+
+  // GetNetworkTeardownStatus reports whether THIS node still has a
+  // local artifact-cleanup record for network_id - a physical,
+  // per-node, local-only report (never routed through raft), mirroring
+  // ListOrphanedHASTResources's own posture exactly. Backs the guided
+  // network-replacement workflow ADR-0071 called for and ADR-0081
+  // builds: the frontend calls this once per known node and shows an
+  // operator, per Hive, whether teardown of a deleted network has
+  // actually converged before letting them recreate it. present=true
+  // (or a non-empty error) means "not safe to recreate yet" - an
+  // unreachable or erroring node is treated as unknown/blocking, never
+  // as evidence that cleanup succeeded.
+  rpc GetNetworkTeardownStatus(GetNetworkTeardownStatusRequest) returns (GetNetworkTeardownStatusResponse);
 }
 
 // VMState mirrors api/internalpb's VMState. Kept as a separate type
@@ -1842,4 +1855,21 @@ message CleanupOrphanedHASTResourceRequest {
 
 message CleanupOrphanedHASTResourceResponse {
   string error = 1;
+}
+
+message GetNetworkTeardownStatusRequest {
+  string network_id = 1;
+}
+
+message GetNetworkTeardownStatusResponse {
+  // present is true if this node still has a local artifact-cleanup
+  // record for network_id - not yet safe to recreate this network id
+  // on this node. false means either teardown converged, or this node
+  // never had anything to tear down for it in the first place.
+  bool present = 1;
+  string bridge = 2;
+  bool own_bridge = 3;
+  bool own_vlan = 4;
+  bool outbound_nat = 5;
+  string error = 6;
 }

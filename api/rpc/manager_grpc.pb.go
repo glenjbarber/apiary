@@ -76,6 +76,7 @@ const (
 	ManagerService_ListAssumptionResults_FullMethodName       = "/apiary.rpc.v1.ManagerService/ListAssumptionResults"
 	ManagerService_ListOrphanedHASTResources_FullMethodName   = "/apiary.rpc.v1.ManagerService/ListOrphanedHASTResources"
 	ManagerService_CleanupOrphanedHASTResource_FullMethodName = "/apiary.rpc.v1.ManagerService/CleanupOrphanedHASTResource"
+	ManagerService_GetNetworkTeardownStatus_FullMethodName    = "/apiary.rpc.v1.ManagerService/GetNetworkTeardownStatus"
 )
 
 // ManagerServiceClient is the client API for ManagerService service.
@@ -359,6 +360,18 @@ type ManagerServiceClient interface {
 	// anything.
 	ListOrphanedHASTResources(ctx context.Context, in *ListOrphanedHASTResourcesRequest, opts ...grpc.CallOption) (*ListOrphanedHASTResourcesResponse, error)
 	CleanupOrphanedHASTResource(ctx context.Context, in *CleanupOrphanedHASTResourceRequest, opts ...grpc.CallOption) (*CleanupOrphanedHASTResourceResponse, error)
+	// GetNetworkTeardownStatus reports whether THIS node still has a
+	// local artifact-cleanup record for network_id - a physical,
+	// per-node, local-only report (never routed through raft), mirroring
+	// ListOrphanedHASTResources's own posture exactly. Backs the guided
+	// network-replacement workflow ADR-0071 called for and ADR-0081
+	// builds: the frontend calls this once per known node and shows an
+	// operator, per Hive, whether teardown of a deleted network has
+	// actually converged before letting them recreate it. present=true
+	// (or a non-empty error) means "not safe to recreate yet" - an
+	// unreachable or erroring node is treated as unknown/blocking, never
+	// as evidence that cleanup succeeded.
+	GetNetworkTeardownStatus(ctx context.Context, in *GetNetworkTeardownStatusRequest, opts ...grpc.CallOption) (*GetNetworkTeardownStatusResponse, error)
 }
 
 type managerServiceClient struct {
@@ -945,6 +958,16 @@ func (c *managerServiceClient) CleanupOrphanedHASTResource(ctx context.Context, 
 	return out, nil
 }
 
+func (c *managerServiceClient) GetNetworkTeardownStatus(ctx context.Context, in *GetNetworkTeardownStatusRequest, opts ...grpc.CallOption) (*GetNetworkTeardownStatusResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetNetworkTeardownStatusResponse)
+	err := c.cc.Invoke(ctx, ManagerService_GetNetworkTeardownStatus_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // ManagerServiceServer is the server API for ManagerService service.
 // All implementations must embed UnimplementedManagerServiceServer
 // for forward compatibility.
@@ -1226,6 +1249,18 @@ type ManagerServiceServer interface {
 	// anything.
 	ListOrphanedHASTResources(context.Context, *ListOrphanedHASTResourcesRequest) (*ListOrphanedHASTResourcesResponse, error)
 	CleanupOrphanedHASTResource(context.Context, *CleanupOrphanedHASTResourceRequest) (*CleanupOrphanedHASTResourceResponse, error)
+	// GetNetworkTeardownStatus reports whether THIS node still has a
+	// local artifact-cleanup record for network_id - a physical,
+	// per-node, local-only report (never routed through raft), mirroring
+	// ListOrphanedHASTResources's own posture exactly. Backs the guided
+	// network-replacement workflow ADR-0071 called for and ADR-0081
+	// builds: the frontend calls this once per known node and shows an
+	// operator, per Hive, whether teardown of a deleted network has
+	// actually converged before letting them recreate it. present=true
+	// (or a non-empty error) means "not safe to recreate yet" - an
+	// unreachable or erroring node is treated as unknown/blocking, never
+	// as evidence that cleanup succeeded.
+	GetNetworkTeardownStatus(context.Context, *GetNetworkTeardownStatusRequest) (*GetNetworkTeardownStatusResponse, error)
 	mustEmbedUnimplementedManagerServiceServer()
 }
 
@@ -1406,6 +1441,9 @@ func (UnimplementedManagerServiceServer) ListOrphanedHASTResources(context.Conte
 }
 func (UnimplementedManagerServiceServer) CleanupOrphanedHASTResource(context.Context, *CleanupOrphanedHASTResourceRequest) (*CleanupOrphanedHASTResourceResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method CleanupOrphanedHASTResource not implemented")
+}
+func (UnimplementedManagerServiceServer) GetNetworkTeardownStatus(context.Context, *GetNetworkTeardownStatusRequest) (*GetNetworkTeardownStatusResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetNetworkTeardownStatus not implemented")
 }
 func (UnimplementedManagerServiceServer) mustEmbedUnimplementedManagerServiceServer() {}
 func (UnimplementedManagerServiceServer) testEmbeddedByValue()                        {}
@@ -2432,6 +2470,24 @@ func _ManagerService_CleanupOrphanedHASTResource_Handler(srv interface{}, ctx co
 	return interceptor(ctx, in, info, handler)
 }
 
+func _ManagerService_GetNetworkTeardownStatus_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetNetworkTeardownStatusRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ManagerServiceServer).GetNetworkTeardownStatus(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ManagerService_GetNetworkTeardownStatus_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ManagerServiceServer).GetNetworkTeardownStatus(ctx, req.(*GetNetworkTeardownStatusRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // ManagerService_ServiceDesc is the grpc.ServiceDesc for ManagerService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -2658,6 +2714,10 @@ var ManagerService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "CleanupOrphanedHASTResource",
 			Handler:    _ManagerService_CleanupOrphanedHASTResource_Handler,
+		},
+		{
+			MethodName: "GetNetworkTeardownStatus",
+			Handler:    _ManagerService_GetNetworkTeardownStatus_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{

@@ -244,6 +244,11 @@ func (slowRecoveryPeerClient) GetNodeConfig(ctx context.Context, addr string) (*
 	return nil, ctx.Err()
 }
 
+func (slowRecoveryPeerClient) GetNetworkTeardownStatus(ctx context.Context, addr, networkID string) (*rpcpb.GetNetworkTeardownStatusResponse, error) {
+	<-ctx.Done()
+	return nil, ctx.Err()
+}
+
 func TestHandleRecoveryHandbookPage_NodeContextRespectsTimeouts(t *testing.T) {
 	oldTimeout, oldOverall := nodeContextTimeout, nodeContextOverallTimeout
 	nodeContextTimeout = 10 * time.Millisecond
