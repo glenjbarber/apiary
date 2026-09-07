@@ -21,7 +21,7 @@ compiles and discards the result - it will not leave `raftd`,
 of them needs its own explicit build (step 2 below).
 
 **Building as `root` in a repo cloned by another user fails Go's VCS
-stamping.** If you `git clone` as one user (e.g. `gjb`) and then `go
+stamping.** If you `git clone` as one user (e.g. `admin`) and then `go
 build` as `root`, git's "dubious ownership" protection makes the build
 fail with `error obtaining VCS status: exit status 128`. Either build
 with `-buildvcs=false` (shown throughout this doc), or fix it once with:
