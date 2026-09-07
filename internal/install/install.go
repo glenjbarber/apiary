@@ -63,6 +63,7 @@ const (
 // FixHint naming the missing flag rather than guessing.
 type Options struct {
 	ZFSPool          string
+	ZFSBase          string
 	BhyveFirmwarePkg string
 	VLANUplink       string
 	BhyveBridge      string

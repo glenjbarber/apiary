@@ -59,19 +59,26 @@ go build -buildvcs=false -o restshimd ./cmd/restshimd
 ```
 
 Review the report. Then apply the safe fixes (kernel modules, packages,
-`pf`, `/etc/rc.conf` permissions) in one pass:
+`pf`, `/etc/rc.conf` permissions, the `-zfs-base` dataset) in one pass:
 
 ```bash
 ./apiaryinstall -apply -zfs-pool <your-pool-name>
 ```
 
-`zfs-pool` is report-only - `apiaryinstall` will tell you if it's missing
-but will not create one itself (disk layout is host-specific). If it's
-missing, create it by hand before continuing:
+`zfs-pool` itself is report-only - `apiaryinstall` will tell you if the
+pool is missing but will not create one itself (disk layout is
+host-specific). If it's missing, create it by hand before continuing:
 
 ```bash
 zpool create <your-pool-name> <vdev...>
 ```
+
+`zfs-base-dataset` (managerd's own `-zfs-base`, `<pool>/apiary` by
+default) *is* auto-fixable under `-apply` - a fresh pool has no child
+datasets at all, and this was found live: the first VM ever created
+failed with `zfs create zroot/apiary/<id>: cannot create '...': parent
+does not exist`, one confusing layer removed from the actual missing
+piece.
 
 Re-run `./apiaryinstall -apply -zfs-pool <your-pool-name>` until every
 check besides networking reports `ok`.

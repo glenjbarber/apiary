@@ -23,6 +23,7 @@ const apiaryPFAnchor = `anchor "apiary/*"`
 
 var registry = []Check{
 	zfsPoolCheck,
+	zfsBaseDatasetCheck,
 	vmmLoadedCheck,
 	nmdmLoadedCheck,
 	bhyveFirmwarePkgCheck,
@@ -108,6 +109,53 @@ var zfsPoolCheck = Check{
 				FixHint: fmt.Sprintf("zpool create %s <vdev...> - disk layout is host-specific, Apiary will not choose this for you", pool)}
 		}
 		return Result{ID: "zfs-pool", Status: StatusOK, Detail: fmt.Sprintf("pool %q present", pool)}
+	},
+}
+
+// zfsBase resolves opt.ZFSBase against opt.ZFSPool, matching
+// cmd/managerd's own "-zfs-base zroot/apiary" default exactly - a fresh
+// pool has no child datasets at all, so this is a real, separate thing
+// to check from the pool's own existence.
+func zfsBase(opt Options) string {
+	if opt.ZFSBase != "" {
+		return opt.ZFSBase
+	}
+	pool := opt.ZFSPool
+	if pool == "" {
+		pool = "zroot"
+	}
+	return pool + "/apiary"
+}
+
+// zfsBaseDatasetCheck is the direct regression check for a real bug
+// found live: a fresh pool passing zfs-pool has no child datasets at
+// all, so managerd's own "-zfs-base zroot/apiary" (its default) doesn't
+// exist yet either - the first VM ever created failed with "zfs create
+// zroot/apiary/<id>: cannot create '...': parent does not exist", a
+// confusing error one layer removed from the actual missing piece.
+var zfsBaseDatasetCheck = Check{
+	ID:          "zfs-base-dataset",
+	Description: "the -zfs-base dataset managerd provisions VM/jail datasets under already exists",
+	Risk:        RiskSafe,
+	Applicable:  always,
+	Probe: func(ctx context.Context, r Runner, opt Options) Result {
+		base := zfsBase(opt)
+		if _, stderr, err := r.Run(ctx, "zfs", "list", "-H", base); err != nil {
+			return Result{ID: "zfs-base-dataset", Status: StatusMissing,
+				Detail:  firstNonEmpty(stderr, err),
+				FixHint: fmt.Sprintf("zfs create -p %s", base)}
+		}
+		return Result{ID: "zfs-base-dataset", Status: StatusOK, Detail: fmt.Sprintf("dataset %q present", base)}
+	},
+	Apply: func(ctx context.Context, r Runner, opt Options) error {
+		base := zfsBase(opt)
+		if _, _, err := r.Run(ctx, "zfs", "list", "-H", base); err == nil {
+			return nil
+		}
+		if _, stderr, err := r.Run(ctx, "zfs", "create", "-p", base); err != nil {
+			return fmt.Errorf("zfs create -p %s: %s", base, firstNonEmpty(stderr, err))
+		}
+		return nil
 	},
 }
 

@@ -53,6 +53,61 @@ func (f *fakeRunner) callCount(cmdline string) int {
 
 var errNotFound = errors.New("exit status 1")
 
+// TestZFSBaseDatasetCheck is the direct regression test for a real bug
+// found live: a fresh pool passing zfs-pool has no child datasets yet,
+// so managerd's own -zfs-base ("<pool>/apiary" by default) doesn't
+// exist either - the first VM ever created failed with "zfs create
+// zroot/apiary/<id>: cannot create '...': parent does not exist".
+func TestZFSBaseDatasetCheck(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("defaults to <pool>/apiary", func(t *testing.T) {
+		if got := zfsBase(Options{ZFSPool: "tank"}); got != "tank/apiary" {
+			t.Fatalf("zfsBase = %q, want tank/apiary", got)
+		}
+		if got := zfsBase(Options{}); got != "zroot/apiary" {
+			t.Fatalf("zfsBase = %q, want zroot/apiary (zroot default)", got)
+		}
+	})
+
+	t.Run("explicit -zfs-base overrides the default", func(t *testing.T) {
+		if got := zfsBase(Options{ZFSPool: "tank", ZFSBase: "tank/custom"}); got != "tank/custom" {
+			t.Fatalf("zfsBase = %q, want tank/custom", got)
+		}
+	})
+
+	t.Run("missing dataset", func(t *testing.T) {
+		r := newFakeRunner()
+		res := zfsBaseDatasetCheck.Probe(ctx, r, Options{ZFSPool: "zroot"})
+		if res.Status != StatusMissing {
+			t.Fatalf("status = %v, want missing", res.Status)
+		}
+		if res.FixHint == "" {
+			t.Fatal("expected a fix hint when missing")
+		}
+	})
+
+	t.Run("apply creates it only when missing", func(t *testing.T) {
+		r := newFakeRunner()
+		r.on("zfs create -p zroot/apiary", fakeResponse{})
+		if err := zfsBaseDatasetCheck.Apply(ctx, r, Options{ZFSPool: "zroot"}); err != nil {
+			t.Fatalf("apply: %v", err)
+		}
+		if got := r.callCount("zfs create -p zroot/apiary"); got != 1 {
+			t.Fatalf("zfs create called %d times, want 1", got)
+		}
+
+		r2 := newFakeRunner()
+		r2.on("zfs list -H zroot/apiary", fakeResponse{stdout: "zroot/apiary"})
+		if err := zfsBaseDatasetCheck.Apply(ctx, r2, Options{ZFSPool: "zroot"}); err != nil {
+			t.Fatalf("apply: %v", err)
+		}
+		if got := r2.callCount("zfs create -p zroot/apiary"); got != 0 {
+			t.Fatalf("zfs create called %d times, want 0 (already present)", got)
+		}
+	})
+}
+
 func TestVMMLoadedCheck(t *testing.T) {
 	ctx := context.Background()
 
