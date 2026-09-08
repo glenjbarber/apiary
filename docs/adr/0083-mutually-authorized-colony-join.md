@@ -122,28 +122,38 @@ panel both say so explicitly. The correct operational sequence is: the
 joining Comb's `raftd` should already be reachable at the address it
 submitted *before* an Admin clicks Approve, not after.
 
-### Disclosed gap, not yet solved: `raftd` has no passive "await join" mode
+### Resolved: `raftd -await-join` gives `raftd` a passive "await join" mode
 
 The safest sequence found via `internal/raft/multinode_test.go`'s own
 existing `newUnbootstrappedNode` pattern - construct a `raftnode.Node`
 (so its transport is really listening) but never call `Bootstrap()`,
-leaving it idle until an external `AddVoter` call arrives - exists at
-the library level today, but `cmd/raftd`'s own CLI never exposes it: on
-a fresh, empty `-data-dir` with no `-join`, `main()` always calls
-`Bootstrap()` unconditionally, self-forming a new single-node cluster.
+leaving it idle until an external `AddVoter` call arrives - previously
+existed only at the library level; `cmd/raftd` now exposes it directly
+as a new `-await-join` flag.
 
-This is a real, necessary follow-up, not solved here: a genuinely safe
-"join a *different* existing Colony" flow for a Comb that already
-completed its own standalone bootstrap needs a new `raftd` mode (e.g.
-`-await-join`) that skips `Bootstrap()` and simply listens, matching
-`newUnbootstrappedNode`'s already-proven-safe shape, so the joining
-Comb's operator can wipe its own prior raft state (`raftd -reset
-yes-wipe-raft-state`, ADR-0038, unchanged) and restart into that
-*passive* mode - never self-forming a second independent single-node
-history that would then need reconciling with the real Colony's own log.
-Tracked separately; this ADR's own flow and UI copy disclose the
-prerequisite (bring `raftd` up and reachable first) without yet
-providing the safest way to do so on a previously-bootstrapped Comb.
+On a fresh, empty `-data-dir` with no `-join`, `-await-join` skips
+`Bootstrap()` entirely and starts only the `RaftInternal` socket
+listener and the raft transport listener, mirroring
+`newUnbootstrappedNode`'s already-proven-safe shape - the node then
+sits passively until some other Colony's leader calls `AddVoter`
+against it. It is mutually exclusive with `-join` (`main()` rejects
+both being set), and - like `-join` - is ignored once `hadState` is
+true, so an existing data directory always just resumes normally
+rather than re-entering await-join mode.
+
+The full safe "join a *different* existing Colony" sequence for a Comb
+that already completed its own standalone bootstrap is now: wipe its
+own prior raft state (`raftd -reset yes-wipe-raft-state`, ADR-0038,
+unchanged), restart `raftd` with `-await-join` so it is genuinely
+listening at its `-raft-bind` address but has not self-formed any
+cluster, confirm it is up, and only then have the target Colony's Admin
+approve the request - never resetting and restarting into
+`-await-join`'s absence, which would self-bootstrap a new conflicting
+single-node history instead of waiting to be joined. The Machine page's
+own copy (`web/templates/machine.html`) now walks the operator through
+this sequence. See `cmd/raftd`'s `TestAwaitJoin_*` tests for coverage of
+both halves: no self-bootstrap under `-await-join` alone, and a clean
+follower transition once an external leader calls `AddVoter`.
 
 ### Frontend
 
@@ -161,9 +171,10 @@ providing the safest way to do so on a previously-bootstrapped Comb.
   requirement left is that `raft_bind_address` be reachable, already a
   pre-existing requirement.
 - The riskiest moment in this flow (approving before the joiner is
-  reachable) is disclosed in the UI copy itself, not hidden - but is not
-  yet mechanically prevented; that's the `raftd -await-join` follow-up's
-  job.
+  reachable, and reachable in the right - unbootstrapped - state) is
+  disclosed in the UI copy itself, and `raftd -await-join` now gives
+  operators a mechanically safe way to get there rather than only a
+  documented warning.
 - `code` is a human-correlation aid, not a cryptographic secret - an
   attacker with network access to file a `RequestJoinColony` call could
   see it too. The real trust boundary stays Admin RBAC approving, the

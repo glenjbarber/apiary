@@ -2,15 +2,46 @@ package main
 
 import (
 	"crypto/sha256"
+	"net"
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"google.golang.org/protobuf/proto"
 
 	internalpb "github.com/glenjbarber/apiary/api/internalpb"
 	raftnode "github.com/glenjbarber/apiary/internal/raft"
 )
+
+// freeLoopbackAddr returns a loopback TCP address with a free port, for
+// tests that need a concrete, distinct raft bind address - mirrors
+// internal/raft's own unexported helper of the same name, which this
+// package can't import (it's test-only in package raft).
+func freeLoopbackAddr(t *testing.T) string {
+	t.Helper()
+	lis, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("finding free port: %v", err)
+	}
+	addr := lis.Addr().String()
+	lis.Close()
+	return addr
+}
+
+// eventually polls cond until it returns true or timeout elapses, failing
+// the test otherwise - mirrors internal/raft's own helper.
+func eventually(t *testing.T, timeout time.Duration, cond func() bool) {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if cond() {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("condition not met within %s", timeout)
+}
 
 // writeTestArchive builds a valid ConfigArchive (correct checksum,
 // current format_version) around a small FSMSnapshotState containing
@@ -226,4 +257,149 @@ func TestRestoreDataDir_CorrectPhraseSeedsSnapshot(t *testing.T) {
 	if !hadState {
 		t.Error("HasExistingState() = false after restoreDataDir, want true")
 	}
+}
+
+func TestValidateAwaitJoinFlags_RejectsAwaitJoinWithJoin(t *testing.T) {
+	if err := validateAwaitJoinFlags(true, "/var/run/apiary/raftd.sock"); err == nil {
+		t.Fatal("validateAwaitJoinFlags(true, non-empty join) = nil error, want a rejection")
+	}
+}
+
+func TestValidateAwaitJoinFlags_AllowsEitherAlone(t *testing.T) {
+	if err := validateAwaitJoinFlags(true, ""); err != nil {
+		t.Errorf("validateAwaitJoinFlags(true, \"\") error: %v", err)
+	}
+	if err := validateAwaitJoinFlags(false, "/var/run/apiary/raftd.sock"); err != nil {
+		t.Errorf("validateAwaitJoinFlags(false, non-empty join) error: %v", err)
+	}
+	if err := validateAwaitJoinFlags(false, ""); err != nil {
+		t.Errorf("validateAwaitJoinFlags(false, \"\") error: %v", err)
+	}
+}
+
+// TestStartupJoinOrBootstrap_AwaitJoinDoesNotBootstrap confirms a fresh
+// node started via startupJoinOrBootstrap with awaitJoin=true never forms
+// any cluster of its own - no leader, no configuration - mirroring
+// internal/raft/multinode_test.go's newUnbootstrappedNode/
+// TestMultiNode_AddVoterFormsCluster shape, but exercised through
+// cmd/raftd's own startup decision function (the code -await-join
+// actually runs) rather than the bare library.
+func TestStartupJoinOrBootstrap_AwaitJoinDoesNotBootstrap(t *testing.T) {
+	cfg := raftnode.Config{
+		NodeID:   "await-node",
+		DataDir:  t.TempDir(),
+		BindAddr: freeLoopbackAddr(t),
+	}
+	node, err := raftnode.New(cfg)
+	if err != nil {
+		t.Fatalf("raftnode.New() error: %v", err)
+	}
+	t.Cleanup(func() { node.Shutdown() })
+
+	if err := startupJoinOrBootstrap(node, false, "", cfg.NodeID, cfg.BindAddr, "", true); err != nil {
+		t.Fatalf("startupJoinOrBootstrap(awaitJoin=true) error: %v", err)
+	}
+
+	// Give any accidental self-bootstrap a moment to happen before
+	// asserting it didn't.
+	time.Sleep(200 * time.Millisecond)
+	if node.Status().IsLeader {
+		t.Error("node became leader of its own cluster despite -await-join")
+	}
+	if len(node.Status().Servers) != 0 {
+		t.Errorf("node has %d servers in its configuration despite -await-join, want 0", len(node.Status().Servers))
+	}
+}
+
+// TestStartupJoinOrBootstrap_AwaitJoinThenAddVoterFormsCluster confirms
+// the other half: a node started with awaitJoin=true, once an external
+// leader calls AddVoter against it, cleanly becomes a real follower -
+// the actual mechanism ADR-0083's ApproveJoinRequest handler drives via
+// RaftClient.AddVoter.
+func TestStartupJoinOrBootstrap_AwaitJoinThenAddVoterFormsCluster(t *testing.T) {
+	leaderCfg := raftnode.Config{
+		NodeID:   "leader",
+		DataDir:  t.TempDir(),
+		BindAddr: freeLoopbackAddr(t),
+	}
+	leader, err := raftnode.New(leaderCfg)
+	if err != nil {
+		t.Fatalf("raftnode.New(leader) error: %v", err)
+	}
+	t.Cleanup(func() { leader.Shutdown() })
+	if err := leader.Bootstrap(); err != nil {
+		t.Fatalf("leader.Bootstrap() error: %v", err)
+	}
+	eventually(t, 5*time.Second, func() bool { return leader.Status().IsLeader })
+
+	joinerCfg := raftnode.Config{
+		NodeID:   "joiner",
+		DataDir:  t.TempDir(),
+		BindAddr: freeLoopbackAddr(t),
+	}
+	joiner, err := raftnode.New(joinerCfg)
+	if err != nil {
+		t.Fatalf("raftnode.New(joiner) error: %v", err)
+	}
+	t.Cleanup(func() { joiner.Shutdown() })
+
+	// This is exactly what raftd's run() does when -await-join is set on
+	// a fresh data dir: start the node's transport, then do nothing else
+	// - no Bootstrap, no -join dial.
+	if err := startupJoinOrBootstrap(joiner, false, "", joinerCfg.NodeID, joinerCfg.BindAddr, "", true); err != nil {
+		t.Fatalf("startupJoinOrBootstrap(awaitJoin=true) error: %v", err)
+	}
+
+	if err := leader.AddVoter(joinerCfg.NodeID, joinerCfg.BindAddr, 0, 5*time.Second); err != nil {
+		t.Fatalf("leader.AddVoter(joiner) error: %v", err)
+	}
+
+	eventually(t, 5*time.Second, func() bool {
+		return len(leader.Status().Servers) == 2
+	})
+	eventually(t, 5*time.Second, func() bool {
+		return joiner.Status().LeaderID == leaderCfg.NodeID
+	})
+}
+
+func TestStartupJoinOrBootstrap_HadStateTakesPriorityOverAwaitJoin(t *testing.T) {
+	cfg := raftnode.Config{
+		NodeID:   "resumed-node",
+		DataDir:  t.TempDir(),
+		BindAddr: freeLoopbackAddr(t),
+	}
+	node, err := raftnode.New(cfg)
+	if err != nil {
+		t.Fatalf("raftnode.New() error: %v", err)
+	}
+	if err := node.Bootstrap(); err != nil {
+		t.Fatalf("Bootstrap() error: %v", err)
+	}
+	eventually(t, 5*time.Second, func() bool { return node.Status().IsLeader })
+	if err := node.Shutdown(); err != nil {
+		t.Fatalf("Shutdown() error: %v", err)
+	}
+
+	hadState, err := raftnode.HasExistingState(cfg)
+	if err != nil {
+		t.Fatalf("HasExistingState() error: %v", err)
+	}
+	if !hadState {
+		t.Fatal("HasExistingState() = false after Bootstrap+Shutdown, want true")
+	}
+
+	resumed, err := raftnode.New(cfg)
+	if err != nil {
+		t.Fatalf("raftnode.New() (resume) error: %v", err)
+	}
+	t.Cleanup(func() { resumed.Shutdown() })
+
+	// awaitJoin=true is passed here exactly as run() would pass it on a
+	// restart with -await-join left set in rc.conf - hadState must win,
+	// resuming normally rather than sitting passively.
+	if err := startupJoinOrBootstrap(resumed, hadState, "", cfg.NodeID, cfg.BindAddr, "", true); err != nil {
+		t.Fatalf("startupJoinOrBootstrap() error: %v", err)
+	}
+
+	eventually(t, 5*time.Second, func() bool { return resumed.Status().IsLeader })
 }

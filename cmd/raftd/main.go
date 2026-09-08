@@ -64,6 +64,7 @@ func run() error {
 	nodeID := flag.String("node-id", "", "unique ID for this raft node (defaults to hostname)")
 	bindAddr := flag.String("raft-bind", raftnode.DefaultBindAddr, "TCP address for the raft transport - a real network address in a genuine multi-node cluster, not necessarily loopback")
 	joinSocket := flag.String("join", "", "internal socket path of an existing cluster member to join through (leave empty to bootstrap a new single-node cluster)")
+	awaitJoin := flag.Bool("await-join", false, "on a fresh, empty -data-dir, skip self-bootstrapping a new single-node cluster and just listen, waiting to be added as a voter by an existing Colony's leader (ADR-0083); ignored if -data-dir already has state or -join is set")
 	internalToken := flag.String("internal-token", "", "shared secret required from every RaftInternal caller (managerd, or a peer raftd during -join); leave empty to rely on the socket's own file permissions alone, as before (see ADR-0023)")
 	raftTLSCert := flag.String("raft-tls-cert", "", "this node's own certificate for the raft transport (ADR-0078); leave empty, along with -raft-tls-key and -raft-tls-ca, for today's plain-TCP behavior")
 	raftTLSKey := flag.String("raft-tls-key", "", "private key matching -raft-tls-cert")
@@ -77,6 +78,10 @@ func run() error {
 
 	if *reset != "" {
 		return resetDataDir(*reset, *dataDir)
+	}
+
+	if err := validateAwaitJoinFlags(*awaitJoin, *joinSocket); err != nil {
+		return err
 	}
 
 	cfg := raftnode.Config{
@@ -111,19 +116,8 @@ func run() error {
 	// not reflect; read the resolved value back for logging/joining.
 	resolvedNodeID := node.Status().NodeID
 
-	switch {
-	case hadState:
-		log.Printf("raftd: resuming existing raft state")
-	case *joinSocket != "":
-		if err := joinCluster(*joinSocket, resolvedNodeID, *bindAddr, *internalToken); err != nil {
-			return fmt.Errorf("joining cluster via %s: %w", *joinSocket, err)
-		}
-		log.Printf("raftd: joined existing cluster via %s", *joinSocket)
-	default:
-		if err := node.Bootstrap(); err != nil {
-			return fmt.Errorf("bootstrapping single-node cluster: %w", err)
-		}
-		log.Printf("raftd: bootstrapped new single-node cluster")
+	if err := startupJoinOrBootstrap(node, hadState, *joinSocket, resolvedNodeID, *bindAddr, *internalToken, *awaitJoin); err != nil {
+		return err
 	}
 
 	lis, err := listenUnix(*socketPath)
@@ -348,6 +342,45 @@ func restoreDataDir(phrase, file string, cfg raftnode.Config) error {
 
 	log.Printf("raftd: restored %s (exported node-id=%s, applied-index=%d, %d VMs, %d networks, %d jails, %d API keys) into %s - the next normal start will pick it up automatically",
 		file, archive.GetNodeId(), archive.GetAppliedIndex(), len(state.GetVms()), len(state.GetNetworks()), len(state.GetJails()), len(state.GetApiKeys()), cfg.DataDir)
+	return nil
+}
+
+// validateAwaitJoinFlags rejects the one combination that makes no sense:
+// -await-join asks raftd to sit passively waiting to be joined, while
+// -join actively dials a peer to join through - a caller can't mean both.
+func validateAwaitJoinFlags(awaitJoin bool, joinSocket string) error {
+	if awaitJoin && joinSocket != "" {
+		return errors.New("-await-join and -join are mutually exclusive")
+	}
+	return nil
+}
+
+// startupJoinOrBootstrap decides, exactly once at startup, what this node
+// should do about cluster membership: resume (hadState), join through an
+// existing member's socket (-join), sit passively waiting to be added by
+// some other Colony's leader (-await-join, ADR-0083), or self-bootstrap a
+// new single-node cluster (the default, unchanged since before ADR-0083).
+// Exactly one of these branches ever runs, and -await-join never
+// self-forms anything - it only starts node's transport (already done by
+// raftnode.New before this is called) and returns, mirroring
+// internal/raft/multinode_test.go's newUnbootstrappedNode.
+func startupJoinOrBootstrap(node *raftnode.Node, hadState bool, joinSocket, resolvedNodeID, bindAddr, internalToken string, awaitJoin bool) error {
+	switch {
+	case hadState:
+		log.Printf("raftd: resuming existing raft state")
+	case joinSocket != "":
+		if err := joinCluster(joinSocket, resolvedNodeID, bindAddr, internalToken); err != nil {
+			return fmt.Errorf("joining cluster via %s: %w", joinSocket, err)
+		}
+		log.Printf("raftd: joined existing cluster via %s", joinSocket)
+	case awaitJoin:
+		log.Printf("raftd: -await-join set - not bootstrapping; waiting to be added as a voter by an existing Colony's leader")
+	default:
+		if err := node.Bootstrap(); err != nil {
+			return fmt.Errorf("bootstrapping single-node cluster: %w", err)
+		}
+		log.Printf("raftd: bootstrapped new single-node cluster")
+	}
 	return nil
 }
 
