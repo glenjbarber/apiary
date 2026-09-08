@@ -1881,6 +1881,17 @@ func (s *Server) currentUsers(actorRole manager.Role) []userView {
 // account with a per-row change-password action gated by
 // canChangePassword.
 func (s *Server) handleUsersPage(w http.ResponseWriter, r *http.Request) {
+	if s.auth == nil {
+		// Distinct from the "no active session" case below - there is no
+		// session concept at all right now, not a login this visitor
+		// simply hasn't completed yet. See the "Login disabled" badge in
+		// the header, which surfaces the same fact on every page.
+		s.render(w, "users_page", s.withAuthFields(r, pageData{
+			UserFormError: "login is disabled on this Comb (no -pam-service configured) - every page is fully accessible with no session; see docs/bootstrap.md's PAM step to enable real login",
+			ActivePage:    "users",
+		}))
+		return
+	}
 	info, ok := s.currentSession(r)
 	if !ok {
 		s.render(w, "users_page", s.withAuthFields(r, pageData{UserFormError: "no active session", ActivePage: "users"}))

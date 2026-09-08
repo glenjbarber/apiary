@@ -2176,6 +2176,59 @@ func TestServer_AuthDisabled_NavHasNoLogoutLink(t *testing.T) {
 	}
 }
 
+// TestServer_AuthDisabled_NavShowsLoginDisabledBadge is the regression
+// test for a real discoverability gap: with no -pam-service configured,
+// there was no login page and no indication anywhere that this was
+// intentional rather than broken - a user had to notice the absence of
+// a login link to figure it out. The nav should now say so plainly on
+// every page.
+func TestServer_AuthDisabled_NavShowsLoginDisabledBadge(t *testing.T) {
+	s := newTestServer(t, &fakeClient{})
+
+	req := httptest.NewRequest(http.MethodGet, "/vms", nil)
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, req)
+
+	if !strings.Contains(rec.Body.String(), "Login disabled") {
+		t.Errorf("nav should show a Login disabled badge when auth is disabled, got: %s", rec.Body.String())
+	}
+}
+
+func TestServer_AuthEnabled_NavHasNoLoginDisabledBadge(t *testing.T) {
+	s := newTestServerWithAuth(t, &fakeClient{}, "admin", "secret")
+	token, _ := s.sessions.Create("admin", manager.RoleAdmin)
+
+	req := httptest.NewRequest(http.MethodGet, "/vms", nil)
+	req.AddCookie(&http.Cookie{Name: sessionCookieName, Value: token})
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, req)
+
+	if strings.Contains(rec.Body.String(), "Login disabled") {
+		t.Errorf("nav should not show the Login disabled badge when auth is enabled, got: %s", rec.Body.String())
+	}
+}
+
+// TestServer_UsersPage_AuthDisabled_ExplainsWhyNotJustNoSession is the
+// regression test for the same gap on the Users page specifically: it
+// showed the generic "no active session" error even when login was
+// entirely disabled by configuration, indistinguishable from a visitor
+// who simply hadn't logged in yet on a Comb where login is enabled.
+func TestServer_UsersPage_AuthDisabled_ExplainsWhyNotJustNoSession(t *testing.T) {
+	s := newTestServer(t, &fakeClient{})
+
+	req := httptest.NewRequest(http.MethodGet, "/users", nil)
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, req)
+
+	body := rec.Body.String()
+	if strings.Contains(body, "no active session") {
+		t.Errorf("auth-disabled Users page should not show the generic no-active-session message, got: %s", body)
+	}
+	if !strings.Contains(body, "login is disabled on this Comb") {
+		t.Errorf("auth-disabled Users page should explain login is disabled by configuration, got: %s", body)
+	}
+}
+
 func TestServer_Login_UnmappedUserIsRejectedDespiteValidCredentials(t *testing.T) {
 	s, err := NewServer(&fakeClient{}, fakeAuthenticator{user: "eve", pass: "secret"}, map[string]manager.Role{
 		// "eve" deliberately absent - a valid PAM login for a real

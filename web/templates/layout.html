@@ -236,7 +236,7 @@
     <a class="brand" href="/" aria-label="Apiary home"><img class="brand-logo" src="/static/apiary-mark.svg" alt=""><span class="brand-name">APIARY</span></a>
   </div>
   <div class="header-actions">
-    {{if .AuthEnabled}}{{if .Username}}<div class="account"><span class="account-user">{{.Username}} ({{.Role}})</span><span class="account-hive">Comb {{.HiveID}}</span></div>{{end}}{{end}}
+    {{if .AuthEnabled}}{{if .Username}}<div class="account"><span class="account-user">{{.Username}} ({{.Role}})</span><span class="account-hive">Comb {{.HiveID}}</span></div>{{end}}{{else}}<span class="badge" title="No -pam-service is configured on this Comb's frontend - every page is fully accessible with no login, to anyone who can reach it. See docs/bootstrap.md's PAM step to enable real login.">Login disabled</span>{{end}}
     <button class="icon-button" id="theme-toggle" type="button" aria-label="Switch color theme" title="Switch color theme"><span aria-hidden="true">&#9788;</span></button>
     <details class="settings-menu{{if or (eq .ActivePage "machine") (eq .ActivePage "apikeys") (eq .ActivePage "users")}} current{{end}}">
       <summary aria-label="Open settings" title="Settings">&#9881;</summary>
