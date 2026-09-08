@@ -728,7 +728,9 @@ each design decision, in order.
   idle, they keep periodically retrying in the background (their own
   `-R`/`-C` flags) and were caught live actually colliding with a real
   instance's port during a later restart. Fixed with a `stop_postcmd`
-  hook in each script.
+  hook in each script. `make setup` now installs and enables them
+  (plus writes `/etc/pam.d/apiary` if one doesn't already exist) instead
+  of copy-pasting the commands from `docs/bootstrap.md` by hand.
 - **Jail base images via ZFS clone** — a jail can now name a
   `base_template` at creation time, closing a real gap where a fresh
   jail's root was always an empty ZFS dataset (`jail(8)` doesn't care,

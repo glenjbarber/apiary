@@ -294,7 +294,9 @@ on.
 Skip this only for throwaway testing - without it, the web UI is open to
 anyone who can reach the port.
 
-**Pick a PAM service name** (e.g. `apiary`) and create its policy file
+**Pick a PAM service name** (e.g. `apiary`) and create its policy file.
+`make setup` does this for you (only if `/etc/pam.d/apiary` doesn't
+already exist, so it never clobbers a hand-edited one) - or by hand,
 with `printf`, not a pasted heredoc. A heredoc containing tab
 characters, pasted into an interactive SSH session without bracketed-paste
 support, can have its tabs consumed as tab-completion keystrokes instead
@@ -463,7 +465,9 @@ repeating this workaround indefinitely.
 - ~~No rc.d scripts ship in this repo~~ **Resolved**: `etc/rc.d/apiary_raftd`/
   `apiary_managerd`/`apiary_frontend`/`apiary_restshimd` now ship real,
   working rc.d scripts (matching the service names ADR-0049 already
-  assumed exist) - install with:
+  assumed exist) - install with `make setup` (installs and enables the
+  rc.d scripts, and writes a fresh `/etc/pam.d/apiary` if one isn't
+  already present - see Step 11 below for what that's for), or by hand:
   ```bash
   sudo cp etc/rc.d/apiary_* /usr/local/etc/rc.d/
   sudo chmod 555 /usr/local/etc/rc.d/apiary_*
