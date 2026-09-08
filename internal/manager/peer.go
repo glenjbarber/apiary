@@ -527,6 +527,39 @@ func (p *PeerReporter) SetNetworkName(ctx context.Context, addr string, req *rpc
 	return client.SetNetworkName(ctx, req)
 }
 
+// RequestJoinColony/ApproveJoinRequest/RejectJoinRequest (ADR-0083)
+// forward the caller's original request as-is, mirroring
+// SetNetworkName above - including RequestJoinColony, even though the
+// original caller had no credential at all: this forwarding call
+// itself is authenticated with p.APIKey like any other peer call, not
+// with whatever (nonexistent) credential the joining Comb presented.
+func (p *PeerReporter) RequestJoinColony(ctx context.Context, addr string, req *rpcpb.RequestJoinColonyRequest) (*rpcpb.RequestJoinColonyResponse, error) {
+	conn, client, err := p.dial(addr)
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close()
+	return client.RequestJoinColony(ctx, req)
+}
+
+func (p *PeerReporter) ApproveJoinRequest(ctx context.Context, addr string, req *rpcpb.ApproveJoinRequestRequest) (*rpcpb.ApproveJoinRequestResponse, error) {
+	conn, client, err := p.dial(addr)
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close()
+	return client.ApproveJoinRequest(ctx, req)
+}
+
+func (p *PeerReporter) RejectJoinRequest(ctx context.Context, addr string, req *rpcpb.RejectJoinRequestRequest) (*rpcpb.RejectJoinRequestResponse, error) {
+	conn, client, err := p.dial(addr)
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close()
+	return client.RejectJoinRequest(ctx, req)
+}
+
 // CreateAPIKey/RevokeAPIKey forward the caller's original request as-is
 // - notably, a forwarded CreateAPIKey means the LEADER generates and
 // hashes its own fresh raw key; this node's own locally-generated

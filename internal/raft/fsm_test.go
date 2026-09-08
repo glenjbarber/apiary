@@ -6,6 +6,7 @@ import (
 	"io"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/hashicorp/raft"
 	"google.golang.org/protobuf/proto"
@@ -1152,5 +1153,206 @@ func TestFSM_SnapshotRestore_Jails(t *testing.T) {
 	jail, ok := restored.Jail("jail-1")
 	if !ok || jail.GetName() != "web-1" {
 		t.Errorf("restored Jail(jail-1) = (%+v, %v), want present with name web-1", jail, ok)
+	}
+}
+
+func createPendingJoinRequestCmd(requestID, nodeID, raftBindAddress, code string, expiresAtUnix int64) *internalpb.Command {
+	return &internalpb.Command{
+		Op: &internalpb.Command_CreatePendingJoinRequest{
+			CreatePendingJoinRequest: &internalpb.CreatePendingJoinRequest{
+				Request: &internalpb.PendingJoinRequest{
+					RequestId:       requestID,
+					NodeId:          nodeID,
+					RaftBindAddress: raftBindAddress,
+					Code:            code,
+					ExpiresAtUnix:   expiresAtUnix,
+					Status:          internalpb.JoinRequestStatus_JOIN_REQUEST_STATUS_PENDING,
+				},
+			},
+		},
+	}
+}
+
+func approvePendingJoinRequestCmd(requestID string) *internalpb.Command {
+	return &internalpb.Command{
+		Op: &internalpb.Command_ApprovePendingJoinRequest{
+			ApprovePendingJoinRequest: &internalpb.ApprovePendingJoinRequest{RequestId: requestID},
+		},
+	}
+}
+
+func rejectPendingJoinRequestCmd(requestID string) *internalpb.Command {
+	return &internalpb.Command{
+		Op: &internalpb.Command_RejectPendingJoinRequest{
+			RejectPendingJoinRequest: &internalpb.RejectPendingJoinRequest{RequestId: requestID},
+		},
+	}
+}
+
+func TestFSM_Apply_CreatePendingJoinRequest(t *testing.T) {
+	fsm := NewFSM()
+	expires := time.Now().Add(15 * time.Minute).Unix()
+
+	result := fsm.Apply(&raft.Log{Index: 1, Data: mustMarshalCommand(t, createPendingJoinRequestCmd("jreq-1", "node02", "10.62.0.5:17600", "482913", expires))})
+
+	applyResult := result.(*FSMApplyResult)
+	if applyResult.Error != "" {
+		t.Fatalf("Error = %q, want empty", applyResult.Error)
+	}
+	if applyResult.PendingJoinRequest.GetCode() != "482913" {
+		t.Errorf("PendingJoinRequest.Code = %q, want 482913", applyResult.PendingJoinRequest.GetCode())
+	}
+
+	req, ok := fsm.PendingJoinRequest("jreq-1")
+	if !ok || req.GetStatus() != internalpb.JoinRequestStatus_JOIN_REQUEST_STATUS_PENDING {
+		t.Errorf("PendingJoinRequest(jreq-1) = (%+v, %v), want Pending", req, ok)
+	}
+}
+
+func TestFSM_Apply_CreatePendingJoinRequestDuplicateRejected(t *testing.T) {
+	fsm := NewFSM()
+	expires := time.Now().Add(15 * time.Minute).Unix()
+	fsm.Apply(&raft.Log{Index: 1, Data: mustMarshalCommand(t, createPendingJoinRequestCmd("jreq-1", "node02", "10.62.0.5:17600", "482913", expires))})
+
+	result := fsm.Apply(&raft.Log{Index: 2, Data: mustMarshalCommand(t, createPendingJoinRequestCmd("jreq-1", "node03", "10.62.0.6:17600", "111111", expires))})
+
+	if result.(*FSMApplyResult).Error == "" {
+		t.Fatalf("Error = empty, want a duplicate-request_id rejection")
+	}
+}
+
+func TestFSM_Apply_CreatePendingJoinRequestMissingFieldsRejected(t *testing.T) {
+	fsm := NewFSM()
+	expires := time.Now().Add(15 * time.Minute).Unix()
+
+	result := fsm.Apply(&raft.Log{Index: 1, Data: mustMarshalCommand(t, createPendingJoinRequestCmd("", "node02", "10.62.0.5:17600", "482913", expires))})
+
+	if result.(*FSMApplyResult).Error == "" {
+		t.Fatalf("Error = empty, want a missing-request_id rejection")
+	}
+}
+
+func TestFSM_Apply_ApprovePendingJoinRequest(t *testing.T) {
+	fsm := NewFSM()
+	expires := time.Now().Add(15 * time.Minute).Unix()
+	fsm.Apply(&raft.Log{Index: 1, Data: mustMarshalCommand(t, createPendingJoinRequestCmd("jreq-1", "node02", "10.62.0.5:17600", "482913", expires))})
+
+	result := fsm.Apply(&raft.Log{Index: 2, Data: mustMarshalCommand(t, approvePendingJoinRequestCmd("jreq-1"))})
+
+	applyResult := result.(*FSMApplyResult)
+	if applyResult.Error != "" {
+		t.Fatalf("Error = %q, want empty", applyResult.Error)
+	}
+	if applyResult.PendingJoinRequest.GetStatus() != internalpb.JoinRequestStatus_JOIN_REQUEST_STATUS_APPROVED {
+		t.Errorf("Status = %v, want Approved", applyResult.PendingJoinRequest.GetStatus())
+	}
+
+	// Approved requests are excluded from the actionable list...
+	if list := fsm.ListPendingJoinRequests(); len(list) != 0 {
+		t.Errorf("ListPendingJoinRequests() = %v, want empty once approved", list)
+	}
+	// ...but the record itself is retained, not deleted, so a joining
+	// Comb's own poll can still observe the terminal outcome.
+	req, ok := fsm.PendingJoinRequest("jreq-1")
+	if !ok || req.GetStatus() != internalpb.JoinRequestStatus_JOIN_REQUEST_STATUS_APPROVED {
+		t.Errorf("PendingJoinRequest(jreq-1) = (%+v, %v), want retained as Approved", req, ok)
+	}
+}
+
+func TestFSM_Apply_RejectPendingJoinRequest(t *testing.T) {
+	fsm := NewFSM()
+	expires := time.Now().Add(15 * time.Minute).Unix()
+	fsm.Apply(&raft.Log{Index: 1, Data: mustMarshalCommand(t, createPendingJoinRequestCmd("jreq-1", "node02", "10.62.0.5:17600", "482913", expires))})
+
+	result := fsm.Apply(&raft.Log{Index: 2, Data: mustMarshalCommand(t, rejectPendingJoinRequestCmd("jreq-1"))})
+
+	if result.(*FSMApplyResult).PendingJoinRequest.GetStatus() != internalpb.JoinRequestStatus_JOIN_REQUEST_STATUS_REJECTED {
+		t.Errorf("Status = %v, want Rejected", result.(*FSMApplyResult).PendingJoinRequest.GetStatus())
+	}
+}
+
+// TestFSM_Apply_ApprovePendingJoinRequestTwiceRejected is the direct
+// regression test for a stale-browser-tab double-click: approving (or
+// rejecting) an already-resolved request must fail loudly, not
+// silently no-op or double-apply.
+func TestFSM_Apply_ApprovePendingJoinRequestTwiceRejected(t *testing.T) {
+	fsm := NewFSM()
+	expires := time.Now().Add(15 * time.Minute).Unix()
+	fsm.Apply(&raft.Log{Index: 1, Data: mustMarshalCommand(t, createPendingJoinRequestCmd("jreq-1", "node02", "10.62.0.5:17600", "482913", expires))})
+	fsm.Apply(&raft.Log{Index: 2, Data: mustMarshalCommand(t, approvePendingJoinRequestCmd("jreq-1"))})
+
+	result := fsm.Apply(&raft.Log{Index: 3, Data: mustMarshalCommand(t, approvePendingJoinRequestCmd("jreq-1"))})
+
+	if result.(*FSMApplyResult).Error == "" {
+		t.Fatalf("Error = empty, want a rejection for approving an already-resolved request")
+	}
+}
+
+func TestFSM_Apply_ApprovePendingJoinRequestMissingIsError(t *testing.T) {
+	fsm := NewFSM()
+
+	result := fsm.Apply(&raft.Log{Index: 1, Data: mustMarshalCommand(t, approvePendingJoinRequestCmd("no-such-request"))})
+
+	if result.(*FSMApplyResult).Error == "" {
+		t.Fatalf("Error = empty, want a missing-request rejection")
+	}
+}
+
+// TestFSM_Apply_ApproveExpiredPendingJoinRequestRejected is the direct
+// regression test for lazy expiry: an Admin approving a request that
+// expired since it was listed must fail, not silently approve a stale
+// join.
+func TestFSM_Apply_ApproveExpiredPendingJoinRequestRejected(t *testing.T) {
+	fsm := NewFSM()
+	alreadyExpired := time.Now().Add(-1 * time.Minute).Unix()
+	fsm.Apply(&raft.Log{Index: 1, Data: mustMarshalCommand(t, createPendingJoinRequestCmd("jreq-1", "node02", "10.62.0.5:17600", "482913", alreadyExpired))})
+
+	result := fsm.Apply(&raft.Log{Index: 2, Data: mustMarshalCommand(t, approvePendingJoinRequestCmd("jreq-1"))})
+
+	if result.(*FSMApplyResult).Error == "" {
+		t.Fatalf("Error = empty, want a rejection for approving an expired request")
+	}
+}
+
+// TestFSM_ListPendingJoinRequestsExcludesExpired is the direct
+// regression test for ListPendingJoinRequests's own lazy-expiry filter -
+// an expired request must not appear in the actionable list an Admin
+// reviews, even though (like Approved/Rejected ones) it's never deleted.
+func TestFSM_ListPendingJoinRequestsExcludesExpired(t *testing.T) {
+	fsm := NewFSM()
+	alreadyExpired := time.Now().Add(-1 * time.Minute).Unix()
+	notExpired := time.Now().Add(15 * time.Minute).Unix()
+	fsm.Apply(&raft.Log{Index: 1, Data: mustMarshalCommand(t, createPendingJoinRequestCmd("jreq-old", "node02", "10.62.0.5:17600", "111111", alreadyExpired))})
+	fsm.Apply(&raft.Log{Index: 2, Data: mustMarshalCommand(t, createPendingJoinRequestCmd("jreq-new", "node03", "10.62.0.6:17600", "222222", notExpired))})
+
+	list := fsm.ListPendingJoinRequests()
+
+	if len(list) != 1 || list[0].GetRequestId() != "jreq-new" {
+		t.Errorf("ListPendingJoinRequests() = %v, want only jreq-new", list)
+	}
+}
+
+func TestFSM_SnapshotRestore_PendingJoinRequests(t *testing.T) {
+	fsm := NewFSM()
+	expires := time.Now().Add(15 * time.Minute).Unix()
+	fsm.Apply(&raft.Log{Index: 1, Data: mustMarshalCommand(t, createPendingJoinRequestCmd("jreq-1", "node02", "10.62.0.5:17600", "482913", expires))})
+
+	snap, err := fsm.Snapshot()
+	if err != nil {
+		t.Fatalf("Snapshot() error: %v", err)
+	}
+	sink := &fakeSnapshotSink{}
+	if err := snap.(*fsmSnapshot).Persist(sink); err != nil {
+		t.Fatalf("Persist() error: %v", err)
+	}
+
+	restored := NewFSM()
+	if err := restored.Restore(io.NopCloser(bytes.NewReader(sink.Bytes()))); err != nil {
+		t.Fatalf("Restore() error: %v", err)
+	}
+
+	req, ok := restored.PendingJoinRequest("jreq-1")
+	if !ok || req.GetCode() != "482913" {
+		t.Errorf("restored PendingJoinRequest(jreq-1) = (%+v, %v), want present with code 482913", req, ok)
 	}
 }

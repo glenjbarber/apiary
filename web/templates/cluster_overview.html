@@ -49,6 +49,36 @@
       {{end}}
     </tbody>
   </table></div>
+
+  {{if .CanAdmin}}
+  <div class="panel" style="margin-top:1rem">
+    <h3>Pending join requests</h3>
+    <p class="muted">A Comb requesting to join this Colony (ADR-0083). Compare the code below against the one shown on that Comb's own Machine page before approving - it's a human-correlation check, not a secret.</p>
+    <table>
+      <thead><tr><th>Node ID</th><th>Raft-bind address</th><th>Code</th><th>Requested</th><th></th></tr></thead>
+      <tbody>
+        {{range .JoinRequests}}
+        <tr>
+          <td>{{.NodeID}}</td>
+          <td>{{.RaftBindAddress}}</td>
+          <td><strong style="font-size:1.2em; letter-spacing:0.1em;">{{.Code}}</strong></td>
+          <td>{{.RequestedAt}}</td>
+          <td>
+            <form method="post" action="/join-requests/{{.RequestID}}/approve" style="display:inline">
+              <button type="submit">Approve</button>
+            </form>
+            <form method="post" action="/join-requests/{{.RequestID}}/reject" style="display:inline">
+              <button type="submit" class="danger">Reject</button>
+            </form>
+          </td>
+        </tr>
+        {{else}}
+        <tr><td colspan="5"><em>No pending requests</em></td></tr>
+        {{end}}
+      </tbody>
+    </table>
+  </div>
+  {{end}}
   </main>
   {{template "footer" .}}
 </body>

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"testing"
 
+	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
@@ -221,5 +222,49 @@ func TestRequiredRoleFor_ProxyVMConsoleIsViewer(t *testing.T) {
 	const method = "/apiary.rpc.v1.ManagerService/ProxyVMConsole"
 	if got := requiredRoleFor(method); got != RoleViewer {
 		t.Errorf("requiredRoleFor(%q) = %q, want %q", method, got, RoleViewer)
+	}
+}
+
+// TestRequiredRoleFor_JoinRequestRPCsAreAdmin guards against the same
+// easy-to-miss failure mode as SimulateNodeFailure's own test above,
+// for ADR-0083's three Admin-gated Colony-join RPCs - approving a
+// request calls AddVoter against this node's own raft cluster, a
+// materially bigger consequence than any Operator-tier write, so these
+// sit at the same tier as CreateAPIKey/RevokeAPIKey.
+func TestRequiredRoleFor_JoinRequestRPCsAreAdmin(t *testing.T) {
+	for _, method := range []string{
+		"/apiary.rpc.v1.ManagerService/ListJoinRequests",
+		"/apiary.rpc.v1.ManagerService/ApproveJoinRequest",
+		"/apiary.rpc.v1.ManagerService/RejectJoinRequest",
+	} {
+		if got := requiredRoleFor(method); got != RoleAdmin {
+			t.Errorf("requiredRoleFor(%q) = %q, want %q", method, got, RoleAdmin)
+		}
+	}
+}
+
+// TestAuthUnaryInterceptor_JoinRequestExemptionsBypassCheckAuth is the
+// direct regression test for RequestJoinColony/GetJoinRequestStatus's
+// exemption (ADR-0083): a joining Comb has no Colony API key yet by
+// definition, so these two must reach the handler even when auth is
+// enabled and no credential is presented at all - mirroring
+// statusMethod's own existing exemption, for a different, explicitly
+// disclosed reason (see requestJoinColonyMethod's own doc comment).
+func TestAuthUnaryInterceptor_JoinRequestExemptionsBypassCheckAuth(t *testing.T) {
+	s := &Server{raft: nil} // AuthUnaryInterceptor never reaches checkAuth for an exempt method, so a nil raft client is fine here.
+	handlerCalled := false
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		handlerCalled = true
+		return nil, nil
+	}
+
+	for _, method := range []string{requestJoinColonyMethod, getJoinRequestStatusMethod} {
+		handlerCalled = false
+		if _, err := s.AuthUnaryInterceptor(context.Background(), nil, &grpc.UnaryServerInfo{FullMethod: method}, handler); err != nil {
+			t.Errorf("AuthUnaryInterceptor(%q) error = %v, want nil (exempt, no credential presented)", method, err)
+		}
+		if !handlerCalled {
+			t.Errorf("AuthUnaryInterceptor(%q) did not call the handler - exemption not applied", method)
+		}
 	}
 }

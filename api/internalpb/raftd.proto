@@ -109,6 +109,16 @@ service RaftInternal {
   // CLI mode (docs/adr/0051-raftd-config-save-restore.md), not
   // exposed through managerd/ManagerService.
   rpc ExportState(ExportStateRequest) returns (ExportStateResponse);
+
+  // GetPendingJoinRequestLocal/ListPendingJoinRequestsLocal back the
+  // mutually-authorized Colony-join flow (ADR-0083) - deliberately
+  // WITHOUT the leader-only restriction, the same ListVMsLocal/
+  // ListNetworksLocal reasoning above: a joining Comb polls whichever
+  // specific existing member it originally contacted, which may not be
+  // (or may no longer be) the leader, and raft has already replicated
+  // the record onto it regardless.
+  rpc GetPendingJoinRequestLocal(GetPendingJoinRequestRequest) returns (GetPendingJoinRequestResponse);
+  rpc ListPendingJoinRequestsLocal(ListPendingJoinRequestsRequest) returns (ListPendingJoinRequestsResponse);
 }
 
 message ApplyRequest {
@@ -232,6 +242,22 @@ message ListNetworksResponse {
   repeated NetworkDefinition networks = 1;
   string error = 2;
   string leader_hint = 3;
+}
+
+message GetPendingJoinRequestRequest {
+  string request_id = 1;
+}
+
+message GetPendingJoinRequestResponse {
+  PendingJoinRequest request = 1;
+  string error = 2;
+}
+
+message ListPendingJoinRequestsRequest {}
+
+message ListPendingJoinRequestsResponse {
+  repeated PendingJoinRequest requests = 1;
+  string error = 2;
 }
 
 message GetJailRequest {

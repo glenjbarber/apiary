@@ -1139,6 +1139,167 @@ func TestIntegration_SetNetworkNameMissingIDIsError(t *testing.T) {
 	}
 }
 
+// TestIntegration_RequestJoinColony_NoCredentialNeeded is the direct
+// regression test for ADR-0083's core premise: a joining Comb has no
+// Colony API key yet, and must still be able to call this successfully
+// against a real raftd-backed managerd - not a mock, the same
+// integration harness every other write RPC in this file uses.
+func TestIntegration_RequestJoinColony_NoCredentialNeeded(t *testing.T) {
+	raftdSocket := newRaftdUDSSocket(t)
+	client := newManagerdRPCClient(t, raftdSocket)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	resp, err := client.RequestJoinColony(ctx, &rpcpb.RequestJoinColonyRequest{NodeId: "node02", RaftBindAddress: "10.62.0.5:17600"})
+	if err != nil {
+		t.Fatalf("RequestJoinColony() error: %v", err)
+	}
+	if resp.GetError() != "" {
+		t.Fatalf("RequestJoinColony() returned error: %s", resp.GetError())
+	}
+	if resp.GetRequestId() == "" || len(resp.GetCode()) != 6 {
+		t.Errorf("RequestJoinColony() = %+v, want a request_id and a 6-digit code", resp)
+	}
+
+	statusResp, err := client.GetJoinRequestStatus(ctx, &rpcpb.GetJoinRequestStatusRequest{RequestId: resp.GetRequestId()})
+	if err != nil {
+		t.Fatalf("GetJoinRequestStatus() error: %v", err)
+	}
+	if statusResp.GetRequest().GetStatus() != rpcpb.JoinRequestStatus_JOIN_REQUEST_STATUS_PENDING {
+		t.Errorf("GetJoinRequestStatus() = %+v, want Pending", statusResp.GetRequest())
+	}
+	if statusResp.GetRequest().GetCode() != resp.GetCode() {
+		t.Errorf("GetJoinRequestStatus() code = %q, want %q (same code shown to the Admin reviewing it)", statusResp.GetRequest().GetCode(), resp.GetCode())
+	}
+}
+
+func TestIntegration_RequestJoinColony_MissingFieldsIsError(t *testing.T) {
+	raftdSocket := newRaftdUDSSocket(t)
+	client := newManagerdRPCClient(t, raftdSocket)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	resp, err := client.RequestJoinColony(ctx, &rpcpb.RequestJoinColonyRequest{NodeId: "node02"})
+	if err != nil {
+		t.Fatalf("RequestJoinColony() error: %v", err)
+	}
+	if resp.GetError() == "" {
+		t.Fatalf("RequestJoinColony() error = empty, want a missing-raft_bind_address rejection")
+	}
+}
+
+// TestIntegration_ApproveJoinRequest_AddsRealRaftVoter is the direct
+// regression test for ADR-0083's actual cluster-membership change.
+//
+// A REAL, IMPORTANT FINDING from first writing this test against a
+// bogus, unreachable address ("127.0.0.1:1"): AddVoter's own config
+// commit succeeds immediately (it only needs the CURRENT configuration's
+// quorum, not the new node), but a single-voter cluster going to two
+// voters means quorum now requires BOTH - the existing leader started
+// failing heartbeats to the unreachable address within ~500ms and
+// stepped down entirely, taking the whole Colony's leadership down with
+// it. This is real, load-bearing operational guidance for ADR-0083's own
+// flow, not a test artifact: approving a join before the joining Comb's
+// raftd is actually up and reachable at its raft-bind address can
+// destabilize the existing Colony's leadership. This test uses a real,
+// unbootstrapped second raftnode.Node (mirroring
+// internal/raft/multinode_test.go's own newUnbootstrappedNode pattern)
+// so AddVoter targets something genuinely reachable, matching the
+// correct operational sequence.
+func TestIntegration_ApproveJoinRequest_AddsRealRaftVoter(t *testing.T) {
+	raftdSocket := newRaftdUDSSocket(t)
+	client := newManagerdRPCClient(t, raftdSocket)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	joiningNodeAddr := freeLoopbackAddr(t)
+	joiningNode, err := raftnode.New(raftnode.Config{NodeID: "node02", DataDir: t.TempDir(), BindAddr: joiningNodeAddr})
+	if err != nil {
+		t.Fatalf("raftnode.New(node02) error: %v", err)
+	}
+	t.Cleanup(func() { joiningNode.Shutdown() })
+
+	reqResp, err := client.RequestJoinColony(ctx, &rpcpb.RequestJoinColonyRequest{NodeId: "node02", RaftBindAddress: joiningNodeAddr})
+	if err != nil || reqResp.GetError() != "" {
+		t.Fatalf("RequestJoinColony() = (%+v, %v)", reqResp, err)
+	}
+
+	approveResp, err := client.ApproveJoinRequest(ctx, &rpcpb.ApproveJoinRequestRequest{RequestId: reqResp.GetRequestId()})
+	if err != nil {
+		t.Fatalf("ApproveJoinRequest() error: %v", err)
+	}
+	if approveResp.GetError() != "" {
+		t.Fatalf("ApproveJoinRequest() returned error: %s", approveResp.GetError())
+	}
+	if approveResp.GetRequest().GetStatus() != rpcpb.JoinRequestStatus_JOIN_REQUEST_STATUS_APPROVED {
+		t.Errorf("ApproveJoinRequest() status = %v, want Approved", approveResp.GetRequest().GetStatus())
+	}
+
+	statusResp, err := client.Status(ctx, &rpcpb.StatusRequest{})
+	if err != nil {
+		t.Fatalf("Status() error: %v", err)
+	}
+	found := false
+	for _, m := range statusResp.GetMembers() {
+		if m.GetNodeId() == "node02" && m.GetAddress() == joiningNodeAddr {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("Status().Members = %+v, want node02 at 127.0.0.1:1 present as a real raft voter", statusResp.GetMembers())
+	}
+}
+
+func TestIntegration_ApproveJoinRequest_MissingIsError(t *testing.T) {
+	raftdSocket := newRaftdUDSSocket(t)
+	client := newManagerdRPCClient(t, raftdSocket)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	resp, err := client.ApproveJoinRequest(ctx, &rpcpb.ApproveJoinRequestRequest{RequestId: "no-such-request"})
+	if err != nil {
+		t.Fatalf("ApproveJoinRequest() error: %v", err)
+	}
+	if resp.GetError() == "" {
+		t.Fatalf("ApproveJoinRequest() error = empty, want a missing-request rejection")
+	}
+}
+
+func TestIntegration_RejectJoinRequest_ExcludedFromListAfterward(t *testing.T) {
+	raftdSocket := newRaftdUDSSocket(t)
+	client := newManagerdRPCClient(t, raftdSocket)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	reqResp, err := client.RequestJoinColony(ctx, &rpcpb.RequestJoinColonyRequest{NodeId: "node03", RaftBindAddress: "10.62.0.6:17600"})
+	if err != nil || reqResp.GetError() != "" {
+		t.Fatalf("RequestJoinColony() = (%+v, %v)", reqResp, err)
+	}
+
+	rejectResp, err := client.RejectJoinRequest(ctx, &rpcpb.RejectJoinRequestRequest{RequestId: reqResp.GetRequestId()})
+	if err != nil || rejectResp.GetError() != "" {
+		t.Fatalf("RejectJoinRequest() = (%+v, %v)", rejectResp, err)
+	}
+	if rejectResp.GetRequest().GetStatus() != rpcpb.JoinRequestStatus_JOIN_REQUEST_STATUS_REJECTED {
+		t.Errorf("RejectJoinRequest() status = %v, want Rejected", rejectResp.GetRequest().GetStatus())
+	}
+
+	listResp, err := client.ListJoinRequests(ctx, &rpcpb.ListJoinRequestsRequest{})
+	if err != nil {
+		t.Fatalf("ListJoinRequests() error: %v", err)
+	}
+	for _, r := range listResp.GetRequests() {
+		if r.GetRequestId() == reqResp.GetRequestId() {
+			t.Errorf("ListJoinRequests() still includes the rejected request %+v", r)
+		}
+	}
+}
+
 func TestIntegration_DeleteNetworkStillReferencedByVMIsRejected(t *testing.T) {
 	raftdSocket := newRaftdUDSSocket(t)
 	client := newManagerdRPCClient(t, raftdSocket)

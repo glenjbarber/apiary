@@ -327,6 +327,26 @@ service ManagerService {
   // unreachable or erroring node is treated as unknown/blocking, never
   // as evidence that cleanup succeeded.
   rpc GetNetworkTeardownStatus(GetNetworkTeardownStatusRequest) returns (GetNetworkTeardownStatusResponse);
+
+  // The mutually-authorized Colony-join flow (ADR-0083), modeled on a
+  // device-pairing handshake: a joining Comb calls RequestJoinColony on
+  // one existing Colony member it names by address, gets back a
+  // request_id and polls GetJoinRequestStatus with it. Both are
+  // deliberately unauthenticated - a brand-new Comb has no Colony API
+  // key yet by definition, mirroring Status's own narrow exemption from
+  // the auth interceptor (see internal/manager/auth.go - not a
+  // precedent for adding more). The request is raft-replicated
+  // (CreatePendingJoinRequest), so every current member's UI - not just
+  // whichever one first received the call - shows the same pending
+  // request. An Admin visually compares the returned code against the
+  // one shown on the joining Comb's own screen before calling
+  // ApproveJoinRequest, which is what actually calls AddVoter against
+  // this managerd's own local raftd.
+  rpc RequestJoinColony(RequestJoinColonyRequest) returns (RequestJoinColonyResponse);
+  rpc GetJoinRequestStatus(GetJoinRequestStatusRequest) returns (GetJoinRequestStatusResponse);
+  rpc ListJoinRequests(ListJoinRequestsRequest) returns (ListJoinRequestsResponse);
+  rpc ApproveJoinRequest(ApproveJoinRequestRequest) returns (ApproveJoinRequestResponse);
+  rpc RejectJoinRequest(RejectJoinRequestRequest) returns (RejectJoinRequestResponse);
 }
 
 // VMState mirrors api/internalpb's VMState. Kept as a separate type
@@ -1872,4 +1892,94 @@ message GetNetworkTeardownStatusResponse {
   bool own_vlan = 4;
   bool outbound_nat = 5;
   string error = 6;
+}
+
+// JoinRequestStatus mirrors internalpb.JoinRequestStatus (ADR-0002/0005:
+// the external schema stays decoupled from the internal protocol's own
+// evolution, the same reason every other external/internal type pair in
+// this API does).
+enum JoinRequestStatus {
+  JOIN_REQUEST_STATUS_UNSPECIFIED = 0;
+  JOIN_REQUEST_STATUS_PENDING = 1;
+  JOIN_REQUEST_STATUS_APPROVED = 2;
+  JOIN_REQUEST_STATUS_REJECTED = 3;
+}
+
+// PendingJoinRequest mirrors internalpb.PendingJoinRequest - see
+// ADR-0083. code is returned to the requester (RequestJoinColony's own
+// response) and shown to Admins reviewing ListJoinRequests, so it can
+// be visually compared between the two screens; it is not treated as a
+// secret anywhere in this API.
+message PendingJoinRequest {
+  string request_id = 1;
+  string node_id = 2;
+  string raft_bind_address = 3;
+  string code = 4;
+  int64 requested_at_unix = 5;
+  int64 expires_at_unix = 6;
+  JoinRequestStatus status = 7;
+}
+
+message RequestJoinColonyRequest {
+  // node_id/raft_bind_address are the JOINING Comb's own identity - the
+  // values its own raftd will use once approved. raft_bind_address must
+  // already be the real, reachable address (see ADR-0083's own
+  // "-raft-bind must not be loopback" note) - this Colony member's
+  // eventual leader will dial it directly once AddVoter succeeds.
+  string node_id = 1;
+  string raft_bind_address = 2;
+  uint32 timeout_ms = 3;
+}
+
+message RequestJoinColonyResponse {
+  // request_id/code identify this specific request to later
+  // GetJoinRequestStatus polls - code is also what the joining Comb's
+  // own UI displays for the Admin to visually compare against
+  // ListJoinRequests.
+  string request_id = 1;
+  string code = 2;
+  string error = 3;
+  string leader_hint = 4;
+}
+
+message GetJoinRequestStatusRequest {
+  string request_id = 1;
+}
+
+message GetJoinRequestStatusResponse {
+  PendingJoinRequest request = 1;
+  string error = 2;
+}
+
+message ListJoinRequestsRequest {}
+
+message ListJoinRequestsResponse {
+  // Excludes anything past its own expires_at_unix - expiry is checked
+  // lazily at read time, matching this project's one existing precedent
+  // (the Assumption Register's own ExpiresAt handling), not a
+  // background sweep.
+  repeated PendingJoinRequest requests = 1;
+  string error = 2;
+}
+
+message ApproveJoinRequestRequest {
+  string request_id = 1;
+  uint32 timeout_ms = 2;
+}
+
+message ApproveJoinRequestResponse {
+  PendingJoinRequest request = 1;
+  string error = 2;
+  string leader_hint = 3;
+}
+
+message RejectJoinRequestRequest {
+  string request_id = 1;
+  uint32 timeout_ms = 2;
+}
+
+message RejectJoinRequestResponse {
+  PendingJoinRequest request = 1;
+  string error = 2;
+  string leader_hint = 3;
 }

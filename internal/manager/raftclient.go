@@ -114,6 +114,34 @@ func (c *RaftClient) ListAPIKeys(ctx context.Context) (*internalpb.ListAPIKeysRe
 	return c.client.ListAPIKeys(ctx, &internalpb.ListAPIKeysRequest{})
 }
 
+// AddVoter adds a new voting server to raftd's own cluster - only
+// succeeds against the current leader. This is the one piece
+// ADR-0083's Colony-join flow needed that raftd's own RaftInternal
+// service already had (internal/raft.Node.AddVoter, previously called
+// only by a peer raftd during cmd/raftd's own -join) but RaftClient
+// never wrapped, since nothing on the managerd side had ever needed to
+// call it directly before.
+func (c *RaftClient) AddVoter(ctx context.Context, id, address string, prevIndex uint64, timeout time.Duration) (*internalpb.AddVoterResponse, error) {
+	return c.client.AddVoter(ctx, &internalpb.AddVoterRequest{
+		Id:        id,
+		Address:   address,
+		PrevIndex: prevIndex,
+		TimeoutMs: uint32(timeout.Milliseconds()),
+	})
+}
+
+// GetPendingJoinRequestLocal/ListPendingJoinRequestsLocal are the
+// non-leader-restricted variants backing ADR-0083's Colony-join flow -
+// see raftd.proto's own doc comment for why (a joining Comb polls
+// whichever specific existing member it originally contacted).
+func (c *RaftClient) GetPendingJoinRequestLocal(ctx context.Context, requestID string) (*internalpb.GetPendingJoinRequestResponse, error) {
+	return c.client.GetPendingJoinRequestLocal(ctx, &internalpb.GetPendingJoinRequestRequest{RequestId: requestID})
+}
+
+func (c *RaftClient) ListPendingJoinRequestsLocal(ctx context.Context) (*internalpb.ListPendingJoinRequestsResponse, error) {
+	return c.client.ListPendingJoinRequestsLocal(ctx, &internalpb.ListPendingJoinRequestsRequest{})
+}
+
 // Close closes the underlying connection to raftd.
 func (c *RaftClient) Close() error {
 	return c.conn.Close()

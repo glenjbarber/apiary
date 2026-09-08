@@ -66,6 +66,9 @@ func (s *Server) Apply(_ context.Context, req *internalpb.ApplyRequest) (*intern
 	if result.Jail != nil {
 		payload = result.Jail
 	}
+	if result.PendingJoinRequest != nil {
+		payload = result.PendingJoinRequest
+	}
 	resultBytes, err := proto.Marshal(payload)
 	if err != nil {
 		return &internalpb.ApplyResponse{Error: fmt.Sprintf("encoding result: %v", err)}, nil
@@ -193,6 +196,22 @@ func (s *Server) ListVMsLocal(_ context.Context, _ *internalpb.ListVMsRequest) (
 
 func (s *Server) ListNetworksLocal(_ context.Context, _ *internalpb.ListNetworksRequest) (*internalpb.ListNetworksResponse, error) {
 	return &internalpb.ListNetworksResponse{Networks: s.node.ListNetworksLocal()}, nil
+}
+
+// GetPendingJoinRequestLocal/ListPendingJoinRequestsLocal implement
+// internalpb.RaftInternalServer, mirroring ListNetworksLocal exactly -
+// no leader check, no LeaderHint (see ADR-0083, and node.go's own doc
+// comment on these two Node methods).
+func (s *Server) GetPendingJoinRequestLocal(_ context.Context, req *internalpb.GetPendingJoinRequestRequest) (*internalpb.GetPendingJoinRequestResponse, error) {
+	pendingReq, found := s.node.GetPendingJoinRequestLocal(req.GetRequestId())
+	if !found {
+		return &internalpb.GetPendingJoinRequestResponse{Error: fmt.Sprintf("join request %q not found", req.GetRequestId())}, nil
+	}
+	return &internalpb.GetPendingJoinRequestResponse{Request: pendingReq}, nil
+}
+
+func (s *Server) ListPendingJoinRequestsLocal(_ context.Context, _ *internalpb.ListPendingJoinRequestsRequest) (*internalpb.ListPendingJoinRequestsResponse, error) {
+	return &internalpb.ListPendingJoinRequestsResponse{Requests: s.node.ListPendingJoinRequestsLocal()}, nil
 }
 
 // GetJail implements internalpb.RaftInternalServer.

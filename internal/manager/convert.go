@@ -143,6 +143,27 @@ func fromInternalNetwork(n *internalpb.NetworkDefinition) *rpcpb.NetworkDefiniti
 	}
 }
 
+// fromInternalPendingJoinRequest converts a raft-replicated
+// PendingJoinRequest to its external schema counterpart (ADR-0083) -
+// same decoupling reasoning as every other toInternal*/fromInternal*
+// pair here. JoinRequestStatus is defined identically (same names, same
+// numeric values) in both api/internalpb and api/rpc, so a plain
+// numeric cast is safe and exact, not just coincidentally compatible.
+func fromInternalPendingJoinRequest(r *internalpb.PendingJoinRequest) *rpcpb.PendingJoinRequest {
+	if r == nil {
+		return nil
+	}
+	return &rpcpb.PendingJoinRequest{
+		RequestId:       r.GetRequestId(),
+		NodeId:          r.GetNodeId(),
+		RaftBindAddress: r.GetRaftBindAddress(),
+		Code:            r.GetCode(),
+		RequestedAtUnix: r.GetRequestedAtUnix(),
+		ExpiresAtUnix:   r.GetExpiresAtUnix(),
+		Status:          rpcpb.JoinRequestStatus(r.GetStatus()),
+	}
+}
+
 func toInternalJail(j *rpcpb.JailDefinition) *internalpb.JailDefinition {
 	return &internalpb.JailDefinition{
 		Id:            j.GetId(),

@@ -77,6 +77,11 @@ const (
 	ManagerService_ListOrphanedHASTResources_FullMethodName   = "/apiary.rpc.v1.ManagerService/ListOrphanedHASTResources"
 	ManagerService_CleanupOrphanedHASTResource_FullMethodName = "/apiary.rpc.v1.ManagerService/CleanupOrphanedHASTResource"
 	ManagerService_GetNetworkTeardownStatus_FullMethodName    = "/apiary.rpc.v1.ManagerService/GetNetworkTeardownStatus"
+	ManagerService_RequestJoinColony_FullMethodName           = "/apiary.rpc.v1.ManagerService/RequestJoinColony"
+	ManagerService_GetJoinRequestStatus_FullMethodName        = "/apiary.rpc.v1.ManagerService/GetJoinRequestStatus"
+	ManagerService_ListJoinRequests_FullMethodName            = "/apiary.rpc.v1.ManagerService/ListJoinRequests"
+	ManagerService_ApproveJoinRequest_FullMethodName          = "/apiary.rpc.v1.ManagerService/ApproveJoinRequest"
+	ManagerService_RejectJoinRequest_FullMethodName           = "/apiary.rpc.v1.ManagerService/RejectJoinRequest"
 )
 
 // ManagerServiceClient is the client API for ManagerService service.
@@ -372,6 +377,25 @@ type ManagerServiceClient interface {
 	// unreachable or erroring node is treated as unknown/blocking, never
 	// as evidence that cleanup succeeded.
 	GetNetworkTeardownStatus(ctx context.Context, in *GetNetworkTeardownStatusRequest, opts ...grpc.CallOption) (*GetNetworkTeardownStatusResponse, error)
+	// The mutually-authorized Colony-join flow (ADR-0083), modeled on a
+	// device-pairing handshake: a joining Comb calls RequestJoinColony on
+	// one existing Colony member it names by address, gets back a
+	// request_id and polls GetJoinRequestStatus with it. Both are
+	// deliberately unauthenticated - a brand-new Comb has no Colony API
+	// key yet by definition, mirroring Status's own narrow exemption from
+	// the auth interceptor (see internal/manager/auth.go - not a
+	// precedent for adding more). The request is raft-replicated
+	// (CreatePendingJoinRequest), so every current member's UI - not just
+	// whichever one first received the call - shows the same pending
+	// request. An Admin visually compares the returned code against the
+	// one shown on the joining Comb's own screen before calling
+	// ApproveJoinRequest, which is what actually calls AddVoter against
+	// this managerd's own local raftd.
+	RequestJoinColony(ctx context.Context, in *RequestJoinColonyRequest, opts ...grpc.CallOption) (*RequestJoinColonyResponse, error)
+	GetJoinRequestStatus(ctx context.Context, in *GetJoinRequestStatusRequest, opts ...grpc.CallOption) (*GetJoinRequestStatusResponse, error)
+	ListJoinRequests(ctx context.Context, in *ListJoinRequestsRequest, opts ...grpc.CallOption) (*ListJoinRequestsResponse, error)
+	ApproveJoinRequest(ctx context.Context, in *ApproveJoinRequestRequest, opts ...grpc.CallOption) (*ApproveJoinRequestResponse, error)
+	RejectJoinRequest(ctx context.Context, in *RejectJoinRequestRequest, opts ...grpc.CallOption) (*RejectJoinRequestResponse, error)
 }
 
 type managerServiceClient struct {
@@ -968,6 +992,56 @@ func (c *managerServiceClient) GetNetworkTeardownStatus(ctx context.Context, in 
 	return out, nil
 }
 
+func (c *managerServiceClient) RequestJoinColony(ctx context.Context, in *RequestJoinColonyRequest, opts ...grpc.CallOption) (*RequestJoinColonyResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(RequestJoinColonyResponse)
+	err := c.cc.Invoke(ctx, ManagerService_RequestJoinColony_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *managerServiceClient) GetJoinRequestStatus(ctx context.Context, in *GetJoinRequestStatusRequest, opts ...grpc.CallOption) (*GetJoinRequestStatusResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetJoinRequestStatusResponse)
+	err := c.cc.Invoke(ctx, ManagerService_GetJoinRequestStatus_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *managerServiceClient) ListJoinRequests(ctx context.Context, in *ListJoinRequestsRequest, opts ...grpc.CallOption) (*ListJoinRequestsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListJoinRequestsResponse)
+	err := c.cc.Invoke(ctx, ManagerService_ListJoinRequests_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *managerServiceClient) ApproveJoinRequest(ctx context.Context, in *ApproveJoinRequestRequest, opts ...grpc.CallOption) (*ApproveJoinRequestResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ApproveJoinRequestResponse)
+	err := c.cc.Invoke(ctx, ManagerService_ApproveJoinRequest_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *managerServiceClient) RejectJoinRequest(ctx context.Context, in *RejectJoinRequestRequest, opts ...grpc.CallOption) (*RejectJoinRequestResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(RejectJoinRequestResponse)
+	err := c.cc.Invoke(ctx, ManagerService_RejectJoinRequest_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // ManagerServiceServer is the server API for ManagerService service.
 // All implementations must embed UnimplementedManagerServiceServer
 // for forward compatibility.
@@ -1261,6 +1335,25 @@ type ManagerServiceServer interface {
 	// unreachable or erroring node is treated as unknown/blocking, never
 	// as evidence that cleanup succeeded.
 	GetNetworkTeardownStatus(context.Context, *GetNetworkTeardownStatusRequest) (*GetNetworkTeardownStatusResponse, error)
+	// The mutually-authorized Colony-join flow (ADR-0083), modeled on a
+	// device-pairing handshake: a joining Comb calls RequestJoinColony on
+	// one existing Colony member it names by address, gets back a
+	// request_id and polls GetJoinRequestStatus with it. Both are
+	// deliberately unauthenticated - a brand-new Comb has no Colony API
+	// key yet by definition, mirroring Status's own narrow exemption from
+	// the auth interceptor (see internal/manager/auth.go - not a
+	// precedent for adding more). The request is raft-replicated
+	// (CreatePendingJoinRequest), so every current member's UI - not just
+	// whichever one first received the call - shows the same pending
+	// request. An Admin visually compares the returned code against the
+	// one shown on the joining Comb's own screen before calling
+	// ApproveJoinRequest, which is what actually calls AddVoter against
+	// this managerd's own local raftd.
+	RequestJoinColony(context.Context, *RequestJoinColonyRequest) (*RequestJoinColonyResponse, error)
+	GetJoinRequestStatus(context.Context, *GetJoinRequestStatusRequest) (*GetJoinRequestStatusResponse, error)
+	ListJoinRequests(context.Context, *ListJoinRequestsRequest) (*ListJoinRequestsResponse, error)
+	ApproveJoinRequest(context.Context, *ApproveJoinRequestRequest) (*ApproveJoinRequestResponse, error)
+	RejectJoinRequest(context.Context, *RejectJoinRequestRequest) (*RejectJoinRequestResponse, error)
 	mustEmbedUnimplementedManagerServiceServer()
 }
 
@@ -1444,6 +1537,21 @@ func (UnimplementedManagerServiceServer) CleanupOrphanedHASTResource(context.Con
 }
 func (UnimplementedManagerServiceServer) GetNetworkTeardownStatus(context.Context, *GetNetworkTeardownStatusRequest) (*GetNetworkTeardownStatusResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetNetworkTeardownStatus not implemented")
+}
+func (UnimplementedManagerServiceServer) RequestJoinColony(context.Context, *RequestJoinColonyRequest) (*RequestJoinColonyResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method RequestJoinColony not implemented")
+}
+func (UnimplementedManagerServiceServer) GetJoinRequestStatus(context.Context, *GetJoinRequestStatusRequest) (*GetJoinRequestStatusResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetJoinRequestStatus not implemented")
+}
+func (UnimplementedManagerServiceServer) ListJoinRequests(context.Context, *ListJoinRequestsRequest) (*ListJoinRequestsResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ListJoinRequests not implemented")
+}
+func (UnimplementedManagerServiceServer) ApproveJoinRequest(context.Context, *ApproveJoinRequestRequest) (*ApproveJoinRequestResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ApproveJoinRequest not implemented")
+}
+func (UnimplementedManagerServiceServer) RejectJoinRequest(context.Context, *RejectJoinRequestRequest) (*RejectJoinRequestResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method RejectJoinRequest not implemented")
 }
 func (UnimplementedManagerServiceServer) mustEmbedUnimplementedManagerServiceServer() {}
 func (UnimplementedManagerServiceServer) testEmbeddedByValue()                        {}
@@ -2488,6 +2596,96 @@ func _ManagerService_GetNetworkTeardownStatus_Handler(srv interface{}, ctx conte
 	return interceptor(ctx, in, info, handler)
 }
 
+func _ManagerService_RequestJoinColony_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(RequestJoinColonyRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ManagerServiceServer).RequestJoinColony(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ManagerService_RequestJoinColony_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ManagerServiceServer).RequestJoinColony(ctx, req.(*RequestJoinColonyRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ManagerService_GetJoinRequestStatus_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetJoinRequestStatusRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ManagerServiceServer).GetJoinRequestStatus(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ManagerService_GetJoinRequestStatus_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ManagerServiceServer).GetJoinRequestStatus(ctx, req.(*GetJoinRequestStatusRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ManagerService_ListJoinRequests_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListJoinRequestsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ManagerServiceServer).ListJoinRequests(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ManagerService_ListJoinRequests_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ManagerServiceServer).ListJoinRequests(ctx, req.(*ListJoinRequestsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ManagerService_ApproveJoinRequest_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ApproveJoinRequestRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ManagerServiceServer).ApproveJoinRequest(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ManagerService_ApproveJoinRequest_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ManagerServiceServer).ApproveJoinRequest(ctx, req.(*ApproveJoinRequestRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ManagerService_RejectJoinRequest_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(RejectJoinRequestRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ManagerServiceServer).RejectJoinRequest(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ManagerService_RejectJoinRequest_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ManagerServiceServer).RejectJoinRequest(ctx, req.(*RejectJoinRequestRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // ManagerService_ServiceDesc is the grpc.ServiceDesc for ManagerService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -2718,6 +2916,26 @@ var ManagerService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "GetNetworkTeardownStatus",
 			Handler:    _ManagerService_GetNetworkTeardownStatus_Handler,
+		},
+		{
+			MethodName: "RequestJoinColony",
+			Handler:    _ManagerService_RequestJoinColony_Handler,
+		},
+		{
+			MethodName: "GetJoinRequestStatus",
+			Handler:    _ManagerService_GetJoinRequestStatus_Handler,
+		},
+		{
+			MethodName: "ListJoinRequests",
+			Handler:    _ManagerService_ListJoinRequests_Handler,
+		},
+		{
+			MethodName: "ApproveJoinRequest",
+			Handler:    _ManagerService_ApproveJoinRequest_Handler,
+		},
+		{
+			MethodName: "RejectJoinRequest",
+			Handler:    _ManagerService_RejectJoinRequest_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{

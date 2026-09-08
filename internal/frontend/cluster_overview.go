@@ -277,7 +277,11 @@ func (s *Server) handleClusterOverviewPage(w http.ResponseWriter, r *http.Reques
 
 	sort.Slice(nodes, func(i, j int) bool { return nodes[i].NodeID < nodes[j].NodeID })
 
-	s.render(w, "cluster_overview_page", s.withAuthFields(r, pageData{ClusterNodes: nodes, ActivePage: "stats"}))
+	s.render(w, "cluster_overview_page", s.withAuthFields(r, pageData{
+		ClusterNodes: nodes,
+		JoinRequests: s.currentJoinRequests(r),
+		ActivePage:   "stats",
+	}))
 }
 
 // handleHostPage serves the verbose per-node stats page

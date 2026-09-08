@@ -704,6 +704,19 @@ each design decision, in order.
   step's SSH risk, finding the `bhyve-firmware`/`edk2-bhyve` path, and
   bringing up `raftd`/`managerd`/`frontend`) written from a real, live
   first bootstrap of a fresh Colony VM.
+- **Mutually-authorized Colony join** — joining an existing multi-node
+  Colony is now a UI-driven action (Machine page → Join a Colony) rather
+  than a boot-time `raftd -join` flag needing an SSH tunnel to satisfy
+  its Unix-socket-only requirement. Modeled on device-pairing: the
+  joining Comb shows a short code, an Admin on the existing Colony
+  compares it against the same code on their own "Pending join
+  requests" panel and approves. Building this surfaced a real,
+  disclosed operational hazard (approving before the joining Comb is
+  actually reachable can destabilize the existing Colony's leadership)
+  and a real, disclosed gap (`raftd` still has no passive
+  "await join, don't self-bootstrap" mode — a necessary follow-up, not
+  yet built) — see
+  [ADR-0083](docs/adr/0083-mutually-authorized-colony-join.md).
 - Importing VMs from other hypervisors (e.g. Proxmox): no disk-format
   conversion, and Apiary is UEFI-only. Linux containers have no path at
   all — jails share the host FreeBSD kernel

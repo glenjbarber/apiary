@@ -139,6 +139,19 @@ var requiredRole = map[string]Role{
 	"/apiary.rpc.v1.ManagerService/ListAPIKeys":                 RoleAdmin,
 	"/apiary.rpc.v1.ManagerService/RevokeAPIKey":                RoleAdmin,
 	"/apiary.rpc.v1.ManagerService/UpdateNodeConfig":            RoleAdmin,
+
+	// ListJoinRequests/ApproveJoinRequest/RejectJoinRequest (ADR-0083):
+	// approving a request calls AddVoter against this node's own raft
+	// cluster - a materially bigger consequence than any Operator-tier
+	// write above, so this sits at the same tier as CreateAPIKey/
+	// RevokeAPIKey, not the peer-forwarding RPCs' Operator tier.
+	// RequestJoinColony/GetJoinRequestStatus are deliberately absent from
+	// this map entirely - they're exempted from checkAuth altogether in
+	// AuthUnaryInterceptor, not merely low-tier, since a joining Comb has
+	// no API key yet by definition.
+	"/apiary.rpc.v1.ManagerService/ListJoinRequests":   RoleAdmin,
+	"/apiary.rpc.v1.ManagerService/ApproveJoinRequest": RoleAdmin,
+	"/apiary.rpc.v1.ManagerService/RejectJoinRequest":  RoleAdmin,
 }
 
 // requiredRoleFor returns the minimum Role fullMethod needs. An RPC
@@ -268,6 +281,22 @@ func checkAuth(ctx context.Context, fullMethod string, v apiKeyValidator) error 
 // statusMethod is exempted from checkAuth below - see AuthUnaryInterceptor.
 const statusMethod = "/apiary.rpc.v1.ManagerService/Status"
 
+// requestJoinColonyMethod/getJoinRequestStatusMethod (ADR-0083) are
+// exempted from checkAuth for a genuinely different reason than
+// statusMethod above, not a casual extension of it: a joining Comb
+// calling either has no Colony API key at all yet, by definition - it
+// isn't a member. RequestJoinColony's own real security boundary is
+// entirely downstream of this exemption: the request only ever creates
+// a raft-replicated, plainly-visible PendingJoinRequest record, and the
+// actual cluster-membership change (ApproveJoinRequest, which is what
+// calls AddVoter) stays RoleAdmin-gated below, same as every other
+// consequential write. GetJoinRequestStatus is scoped to exactly one
+// caller-supplied request_id and returns nothing an unauthenticated
+// caller couldn't already see via the (also unauthenticated)
+// RequestJoinColony response that created it.
+const requestJoinColonyMethod = "/apiary.rpc.v1.ManagerService/RequestJoinColony"
+const getJoinRequestStatusMethod = "/apiary.rpc.v1.ManagerService/GetJoinRequestStatus"
+
 // AuthUnaryInterceptor/AuthStreamInterceptor gate every RPC on
 // ManagerService via checkAuth - this project's first use of gRPC
 // interceptors anywhere. UploadISO (the one streaming RPC) is checked
@@ -284,7 +313,7 @@ const statusMethod = "/apiary.rpc.v1.ManagerService/Status"
 // reachability/leader info only), so letting it bypass auth entirely
 // is an acceptable, narrow carve-out - not a precedent for adding more.
 func (s *Server) AuthUnaryInterceptor(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
-	if info.FullMethod != statusMethod {
+	if info.FullMethod != statusMethod && info.FullMethod != requestJoinColonyMethod && info.FullMethod != getJoinRequestStatusMethod {
 		if err := checkAuth(ctx, info.FullMethod, raftAPIKeyValidator{s.raft}); err != nil {
 			return nil, err
 		}

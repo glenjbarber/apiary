@@ -335,6 +335,18 @@ message Command {
     // tell the old and new physical realizations apart; Name has no
     // physical realization at all, so that hazard doesn't apply to it).
     SetNetworkName set_network_name = 20;
+
+    // CreatePendingJoinRequest/ApprovePendingJoinRequest/
+    // RejectPendingJoinRequest back the mutually-authorized Colony-join
+    // flow (ADR-0083): a joining Comb's managerd calls
+    // ManagerService.RequestJoinColony on an existing Colony member,
+    // which Applies CreatePendingJoinRequest so every current member
+    // sees the same pending request regardless of which one first
+    // received the call - deliberately raft-replicated, not node-local,
+    // unlike internal/nodeconfig's genuinely per-host settings.
+    CreatePendingJoinRequest create_pending_join_request = 21;
+    ApprovePendingJoinRequest approve_pending_join_request = 22;
+    RejectPendingJoinRequest reject_pending_join_request = 23;
   }
 }
 
@@ -510,6 +522,56 @@ message PurgeJail {
   string id = 1;
 }
 
+// JoinRequestStatus is a PendingJoinRequest's own lifecycle state -
+// deliberately not removed from FSM state on Approve/Reject (unlike
+// PurgeVM/PurgeJail's outright removal), so a joining Comb's
+// GetJoinRequestStatus poll can still observe the terminal outcome
+// after the fact, up until expires_at_unix.
+enum JoinRequestStatus {
+  JOIN_REQUEST_STATUS_UNSPECIFIED = 0;
+  JOIN_REQUEST_STATUS_PENDING = 1;
+  JOIN_REQUEST_STATUS_APPROVED = 2;
+  JOIN_REQUEST_STATUS_REJECTED = 3;
+}
+
+// PendingJoinRequest records one Comb's request to join this Colony
+// (ADR-0083). code is a short, human-readable value for visual
+// correlation between the joining Comb's own screen and the Admin
+// approving it here - not a cryptographic secret, and not treated as
+// one (see the ADR's own disclosed trust model).
+message PendingJoinRequest {
+  string request_id = 1;
+  string node_id = 2;
+  string raft_bind_address = 3;
+  string code = 4;
+  int64 requested_at_unix = 5;
+  int64 expires_at_unix = 6;
+  JoinRequestStatus status = 7;
+}
+
+// CreatePendingJoinRequest records a new join request. Fails if
+// request_id already exists (collision is treated as a real error, not
+// silently overwritten, the same posture as CreateVM/CreateJail's own
+// duplicate-id handling).
+message CreatePendingJoinRequest {
+  PendingJoinRequest request = 1;
+}
+
+// ApprovePendingJoinRequest marks an existing, still-pending request
+// Approved. Fails if request_id doesn't exist, is already
+// Approved/Rejected, or has expired - the FSM is the single source of
+// truth for this check, not just the RPC layer, so a raft follower
+// applying the same log entry reaches the identical decision.
+message ApprovePendingJoinRequest {
+  string request_id = 1;
+}
+
+// RejectPendingJoinRequest mirrors ApprovePendingJoinRequest exactly,
+// for the symmetric decline action.
+message RejectPendingJoinRequest {
+  string request_id = 1;
+}
+
 // CommandResult is the FSM's response to Apply, echoed back through
 // ApplyResponse. error is set (and vm left unset) if the command was
 // rejected at the application level (e.g. duplicate/missing id) - this is
@@ -519,6 +581,7 @@ message CommandResult {
   VMDefinition vm = 1;
   string error = 2;
   JailDefinition jail = 3;
+  PendingJoinRequest pending_join_request = 4;
 }
 
 // FSMSnapshotState is the full ephemeral state persisted by
@@ -529,6 +592,7 @@ message FSMSnapshotState {
   map<string, NetworkDefinition> networks = 3;
   map<string, ApiKey> api_keys = 4;
   map<string, JailDefinition> jails = 6;
+  map<string, PendingJoinRequest> pending_join_requests = 7;
 
   // auth_enabled is set permanently, forever, the first time any
   // CreateAPIKey command ever succeeds - unlike api_keys' own size,

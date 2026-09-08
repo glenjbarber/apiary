@@ -470,6 +470,26 @@ func (f *fakeClient) SetNetworkName(_ context.Context, in *rpcpb.SetNetworkNameR
 	return &rpcpb.SetNetworkNameResponse{}, nil
 }
 
+func (f *fakeClient) RequestJoinColony(context.Context, *rpcpb.RequestJoinColonyRequest, ...grpc.CallOption) (*rpcpb.RequestJoinColonyResponse, error) {
+	return &rpcpb.RequestJoinColonyResponse{}, nil
+}
+
+func (f *fakeClient) GetJoinRequestStatus(context.Context, *rpcpb.GetJoinRequestStatusRequest, ...grpc.CallOption) (*rpcpb.GetJoinRequestStatusResponse, error) {
+	return &rpcpb.GetJoinRequestStatusResponse{}, nil
+}
+
+func (f *fakeClient) ListJoinRequests(context.Context, *rpcpb.ListJoinRequestsRequest, ...grpc.CallOption) (*rpcpb.ListJoinRequestsResponse, error) {
+	return &rpcpb.ListJoinRequestsResponse{}, nil
+}
+
+func (f *fakeClient) ApproveJoinRequest(context.Context, *rpcpb.ApproveJoinRequestRequest, ...grpc.CallOption) (*rpcpb.ApproveJoinRequestResponse, error) {
+	return &rpcpb.ApproveJoinRequestResponse{}, nil
+}
+
+func (f *fakeClient) RejectJoinRequest(context.Context, *rpcpb.RejectJoinRequestRequest, ...grpc.CallOption) (*rpcpb.RejectJoinRequestResponse, error) {
+	return &rpcpb.RejectJoinRequestResponse{}, nil
+}
+
 func (f *fakeClient) CreateJail(_ context.Context, in *rpcpb.CreateJailRequest, _ ...grpc.CallOption) (*rpcpb.CreateJailResponse, error) {
 	f.lastCreateJailReq = in
 	if f.createJailResp != nil {

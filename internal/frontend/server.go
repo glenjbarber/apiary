@@ -86,6 +86,19 @@ type pageData struct {
 	// default landing page ("/").
 	ClusterNodes []clusterNodeView
 
+	// JoinRequests is the default landing page's Admin-only "Pending
+	// join requests" panel (ADR-0083) - nil (rather than an error) for
+	// a non-Admin session, since ListJoinRequests itself is Admin-gated
+	// at the RPC layer and a PermissionDenied there is expected, not a
+	// real page error.
+	JoinRequests []joinRequestView
+
+	// JoinColonyFormError/JoinColonyResult back the Machine page's own
+	// "Join a Colony" section (ADR-0083) - the joining Comb's side of
+	// the same flow.
+	JoinColonyFormError string
+	JoinColonyResult    *joinRequestView
+
 	// AuthEnabled reports whether login is required at all, so the nav
 	// partial only shows a "Log out" link when there's actually a
 	// session to log out of.
@@ -776,6 +789,13 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /machine/cloudflare-config", s.requireRole(manager.RoleAdmin, s.handleUpdateCloudflareConfig))
 	s.mux.HandleFunc("POST /machine/assumption-tuning", s.requireRole(manager.RoleAdmin, s.handleUpdateAssumptionTuning))
 	s.mux.HandleFunc("POST /machine/internal-security", s.requireRole(manager.RoleAdmin, s.handleUpdateInternalSecurity))
+	// ADR-0083: join-colony is the joining Comb's own side, on the
+	// Machine page (Admin-only, same tier as UpdateNodeConfig - this
+	// changes the Comb's own cluster identity). approve/reject are the
+	// existing Colony's side, reachable from the landing page's panel.
+	s.mux.HandleFunc("POST /machine/join-colony", s.requireRole(manager.RoleAdmin, s.handleRequestJoinColony))
+	s.mux.HandleFunc("POST /join-requests/{id}/approve", s.requireRole(manager.RoleAdmin, s.handleApproveJoinRequest))
+	s.mux.HandleFunc("POST /join-requests/{id}/reject", s.requireRole(manager.RoleAdmin, s.handleRejectJoinRequest))
 }
 
 // handleLoginPage serves the login form. If login isn't enabled at all,

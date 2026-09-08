@@ -8,6 +8,7 @@ import (
 	"net"
 	"sort"
 	"sync"
+	"time"
 
 	"github.com/hashicorp/raft"
 	"google.golang.org/protobuf/proto"
@@ -23,12 +24,13 @@ import (
 // of VM/Network is set on success, depending on which kind of command
 // was applied.
 type FSMApplyResult struct {
-	Index   uint64
-	VM      *internalpb.VMDefinition
-	Network *internalpb.NetworkDefinition
-	ApiKey  *internalpb.ApiKey
-	Jail    *internalpb.JailDefinition
-	Error   string
+	Index              uint64
+	VM                 *internalpb.VMDefinition
+	Network            *internalpb.NetworkDefinition
+	ApiKey             *internalpb.ApiKey
+	Jail               *internalpb.JailDefinition
+	PendingJoinRequest *internalpb.PendingJoinRequest
+	Error              string
 }
 
 // FSM applies typed Command messages (see api/internalpb/state.proto)
@@ -38,12 +40,13 @@ type FSMApplyResult struct {
 // handled by raft's own configuration mechanism (AddVoter/
 // RemoveServer), not by the FSM.
 type FSM struct {
-	mu        sync.Mutex
-	lastIndex uint64
-	vms       map[string]*internalpb.VMDefinition
-	networks  map[string]*internalpb.NetworkDefinition
-	apiKeys   map[string]*internalpb.ApiKey
-	jails     map[string]*internalpb.JailDefinition
+	mu                  sync.Mutex
+	lastIndex           uint64
+	vms                 map[string]*internalpb.VMDefinition
+	networks            map[string]*internalpb.NetworkDefinition
+	apiKeys             map[string]*internalpb.ApiKey
+	jails               map[string]*internalpb.JailDefinition
+	pendingJoinRequests map[string]*internalpb.PendingJoinRequest
 
 	// authEnabled is set permanently, forever, the first time any
 	// CreateAPIKey command ever succeeds - it never reverts to false
@@ -58,10 +61,11 @@ var _ raft.FSM = (*FSM)(nil)
 // NewFSM returns an empty FSM.
 func NewFSM() *FSM {
 	return &FSM{
-		vms:      make(map[string]*internalpb.VMDefinition),
-		networks: make(map[string]*internalpb.NetworkDefinition),
-		apiKeys:  make(map[string]*internalpb.ApiKey),
-		jails:    make(map[string]*internalpb.JailDefinition),
+		vms:                 make(map[string]*internalpb.VMDefinition),
+		networks:            make(map[string]*internalpb.NetworkDefinition),
+		apiKeys:             make(map[string]*internalpb.ApiKey),
+		jails:               make(map[string]*internalpb.JailDefinition),
+		pendingJoinRequests: make(map[string]*internalpb.PendingJoinRequest),
 	}
 }
 
@@ -121,6 +125,12 @@ func (f *FSM) Apply(log *raft.Log) interface{} {
 		return f.applyPurgeJail(log.Index, op.PurgeJail.GetId())
 	case *internalpb.Command_SetJailDesiredState:
 		return f.applySetJailDesiredState(log.Index, op.SetJailDesiredState)
+	case *internalpb.Command_CreatePendingJoinRequest:
+		return f.applyCreatePendingJoinRequest(log.Index, op.CreatePendingJoinRequest.GetRequest())
+	case *internalpb.Command_ApprovePendingJoinRequest:
+		return f.applyApprovePendingJoinRequest(log.Index, op.ApprovePendingJoinRequest.GetRequestId())
+	case *internalpb.Command_RejectPendingJoinRequest:
+		return f.applyRejectPendingJoinRequest(log.Index, op.RejectPendingJoinRequest.GetRequestId())
 	default:
 		return &FSMApplyResult{Index: log.Index, Error: "command has no op set"}
 	}
@@ -468,6 +478,100 @@ func (f *FSM) applyPurgeJail(index uint64, id string) *FSMApplyResult {
 	return &FSMApplyResult{Index: index, Jail: jail}
 }
 
+// applyCreatePendingJoinRequest records a new Colony-join request
+// (ADR-0083). Rejected on a request_id collision (treated as a real
+// error, not silently overwritten - the same posture CreateVM/CreateJail
+// already take on duplicate ids) and on an obviously-malformed request
+// (empty node_id/raft_bind_address/code), so a bad RequestJoinColony
+// call fails loudly at the FSM layer, not just the RPC layer - every
+// raft follower applying this same log entry must reach the identical
+// decision.
+func (f *FSM) applyCreatePendingJoinRequest(index uint64, req *internalpb.PendingJoinRequest) *FSMApplyResult {
+	if req.GetRequestId() == "" || req.GetNodeId() == "" || req.GetRaftBindAddress() == "" || req.GetCode() == "" {
+		return &FSMApplyResult{Index: index, Error: "CreatePendingJoinRequest: request_id, node_id, raft_bind_address, and code must all be set"}
+	}
+	if _, exists := f.pendingJoinRequests[req.GetRequestId()]; exists {
+		return &FSMApplyResult{Index: index, Error: fmt.Sprintf("CreatePendingJoinRequest: request_id %q already exists", req.GetRequestId())}
+	}
+	f.pendingJoinRequests[req.GetRequestId()] = req
+	return &FSMApplyResult{Index: index, PendingJoinRequest: req}
+}
+
+// applyApprovePendingJoinRequest and applyRejectPendingJoinRequest both
+// require the request to currently be Pending and not yet expired - an
+// Admin approving/rejecting a request that some other Admin (on a
+// different Colony member's UI, since this is raft-replicated) already
+// resolved, or that expired in the meantime, is a real error, not a
+// silent no-op, so a stale browser tab's second click surfaces clearly
+// rather than double-applying.
+func (f *FSM) applyApprovePendingJoinRequest(index uint64, requestID string) *FSMApplyResult {
+	return f.applyResolvePendingJoinRequest(index, requestID, internalpb.JoinRequestStatus_JOIN_REQUEST_STATUS_APPROVED, "ApprovePendingJoinRequest")
+}
+
+func (f *FSM) applyRejectPendingJoinRequest(index uint64, requestID string) *FSMApplyResult {
+	return f.applyResolvePendingJoinRequest(index, requestID, internalpb.JoinRequestStatus_JOIN_REQUEST_STATUS_REJECTED, "RejectPendingJoinRequest")
+}
+
+func (f *FSM) applyResolvePendingJoinRequest(index uint64, requestID string, status internalpb.JoinRequestStatus, opName string) *FSMApplyResult {
+	req, exists := f.pendingJoinRequests[requestID]
+	if !exists {
+		return &FSMApplyResult{Index: index, Error: fmt.Sprintf("%s: request_id %q does not exist", opName, requestID)}
+	}
+	if req.GetStatus() != internalpb.JoinRequestStatus_JOIN_REQUEST_STATUS_PENDING {
+		return &FSMApplyResult{Index: index, Error: fmt.Sprintf("%s: request_id %q is already %s", opName, requestID, req.GetStatus())}
+	}
+	if pendingJoinRequestExpired(req) {
+		return &FSMApplyResult{Index: index, Error: fmt.Sprintf("%s: request_id %q has expired", opName, requestID)}
+	}
+	updated := proto.Clone(req).(*internalpb.PendingJoinRequest)
+	updated.Status = status
+	f.pendingJoinRequests[requestID] = updated
+	return &FSMApplyResult{Index: index, PendingJoinRequest: updated}
+}
+
+// pendingJoinRequestExpired checks expiry lazily, at read/apply time -
+// this codebase's one existing precedent (the Assumption Register's own
+// ExpiresAt handling) works the same way, and nothing anywhere in it
+// runs a background sweep/purge goroutine.
+func pendingJoinRequestExpired(req *internalpb.PendingJoinRequest) bool {
+	return time.Now().Unix() >= req.GetExpiresAtUnix()
+}
+
+// PendingJoinRequest returns the current record for requestID (whatever
+// its status), and whether it exists - deliberately not filtering out
+// expired/resolved requests, unlike ListPendingJoinRequests below, since
+// a joining Comb's own GetJoinRequestStatus poll needs to see a
+// terminal Approved/Rejected outcome, or a genuine expiry, not just
+// silence.
+func (f *FSM) PendingJoinRequest(requestID string) (*internalpb.PendingJoinRequest, bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	req, ok := f.pendingJoinRequests[requestID]
+	return req, ok
+}
+
+// ListPendingJoinRequests returns every currently-Pending, not-yet-
+// expired request, sorted by request_id for stable ordering - the list
+// an Admin reviews to approve/reject. Resolved (Approved/Rejected) or
+// expired requests are excluded here (though never deleted - see
+// PendingJoinRequest above) since they're no longer actionable.
+func (f *FSM) ListPendingJoinRequests() []*internalpb.PendingJoinRequest {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	requests := make([]*internalpb.PendingJoinRequest, 0, len(f.pendingJoinRequests))
+	for _, req := range f.pendingJoinRequests {
+		if req.GetStatus() != internalpb.JoinRequestStatus_JOIN_REQUEST_STATUS_PENDING {
+			continue
+		}
+		if pendingJoinRequestExpired(req) {
+			continue
+		}
+		requests = append(requests, req)
+	}
+	sort.Slice(requests, func(i, j int) bool { return requests[i].GetRequestId() < requests[j].GetRequestId() })
+	return requests
+}
+
 // Jail returns the current definition for id, and whether it exists.
 func (f *FSM) Jail(id string) (*internalpb.JailDefinition, bool) {
 	f.mu.Lock()
@@ -747,12 +851,13 @@ func (f *FSM) SnapshotState() *internalpb.FSMSnapshotState {
 	defer f.mu.Unlock()
 
 	state := &internalpb.FSMSnapshotState{
-		LastIndex:   f.lastIndex,
-		Vms:         make(map[string]*internalpb.VMDefinition, len(f.vms)),
-		Networks:    make(map[string]*internalpb.NetworkDefinition, len(f.networks)),
-		ApiKeys:     make(map[string]*internalpb.ApiKey, len(f.apiKeys)),
-		Jails:       make(map[string]*internalpb.JailDefinition, len(f.jails)),
-		AuthEnabled: f.authEnabled,
+		LastIndex:           f.lastIndex,
+		Vms:                 make(map[string]*internalpb.VMDefinition, len(f.vms)),
+		Networks:            make(map[string]*internalpb.NetworkDefinition, len(f.networks)),
+		ApiKeys:             make(map[string]*internalpb.ApiKey, len(f.apiKeys)),
+		Jails:               make(map[string]*internalpb.JailDefinition, len(f.jails)),
+		PendingJoinRequests: make(map[string]*internalpb.PendingJoinRequest, len(f.pendingJoinRequests)),
+		AuthEnabled:         f.authEnabled,
 	}
 	for id, vm := range f.vms {
 		state.Vms[id] = vm
@@ -765,6 +870,9 @@ func (f *FSM) SnapshotState() *internalpb.FSMSnapshotState {
 	}
 	for id, jail := range f.jails {
 		state.Jails[id] = jail
+	}
+	for id, req := range f.pendingJoinRequests {
+		state.PendingJoinRequests[id] = req
 	}
 	return state
 }
@@ -800,6 +908,10 @@ func (f *FSM) Restore(rc io.ReadCloser) error {
 	f.jails = state.GetJails()
 	if f.jails == nil {
 		f.jails = make(map[string]*internalpb.JailDefinition)
+	}
+	f.pendingJoinRequests = state.GetPendingJoinRequests()
+	if f.pendingJoinRequests == nil {
+		f.pendingJoinRequests = make(map[string]*internalpb.PendingJoinRequest)
 	}
 	f.authEnabled = state.GetAuthEnabled()
 	f.mu.Unlock()

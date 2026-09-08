@@ -75,6 +75,7 @@ func (s *Server) handleMachinePage(w http.ResponseWriter, r *http.Request) {
 		ServiceFormError:     serviceErr,
 		OriginCertificates:   originCerts,
 		OriginCAError:        originErr,
+		JoinColonyResult:     s.currentJoinColonyResult(r),
 		ActivePage:           "machine",
 	}))
 }

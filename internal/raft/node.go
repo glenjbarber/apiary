@@ -270,6 +270,18 @@ func (n *Node) ListNetworksLocal() []*internalpb.NetworkDefinition {
 	return n.fsm.ListNetworks()
 }
 
+// GetPendingJoinRequestLocal/ListPendingJoinRequestsLocal mirror
+// ListVMsLocal/ListNetworksLocal exactly - deliberately no leader-only
+// restriction, for the same reason (ADR-0083): a joining Comb polls
+// whichever specific existing member it originally contacted.
+func (n *Node) GetPendingJoinRequestLocal(requestID string) (*internalpb.PendingJoinRequest, bool) {
+	return n.fsm.PendingJoinRequest(requestID)
+}
+
+func (n *Node) ListPendingJoinRequestsLocal() []*internalpb.PendingJoinRequest {
+	return n.fsm.ListPendingJoinRequests()
+}
+
 // GetJail/ListJails mirror GetNetwork/ListNetworks exactly, for
 // JailDefinitions instead.
 func (n *Node) GetJail(id string) (jail *internalpb.JailDefinition, found bool, err error) {

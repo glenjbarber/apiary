@@ -125,6 +125,17 @@ type PeerForwarder interface {
 	HostStats(ctx context.Context, addr string) (*rpcpb.HostStatsResponse, error)
 	GetLocalNetworkBridgeStatus(ctx context.Context, addr, networkID string) (*rpcpb.GetLocalNetworkBridgeStatusResponse, error)
 	ListAssumptionResults(ctx context.Context, addr string, req *rpcpb.ListAssumptionResultsRequest) (*rpcpb.ListAssumptionResultsResponse, error)
+
+	// RequestJoinColony/ApproveJoinRequest/RejectJoinRequest forward on a
+	// leader-hint rejection, mirroring every other Apply-backed write
+	// above (ADR-0083). RequestJoinColony forwards the joining Comb's
+	// original, unauthenticated request through to whichever peer is
+	// actually leader - this forwarding call itself uses this node's own
+	// configured -peer-api-key, not the (nonexistent) credential of the
+	// original unauthenticated caller.
+	RequestJoinColony(ctx context.Context, addr string, req *rpcpb.RequestJoinColonyRequest) (*rpcpb.RequestJoinColonyResponse, error)
+	ApproveJoinRequest(ctx context.Context, addr string, req *rpcpb.ApproveJoinRequestRequest) (*rpcpb.ApproveJoinRequestResponse, error)
+	RejectJoinRequest(ctx context.Context, addr string, req *rpcpb.RejectJoinRequestRequest) (*rpcpb.RejectJoinRequestResponse, error)
 }
 
 // reconcilerStats is the subset of *cluster.Reconciler the server needs

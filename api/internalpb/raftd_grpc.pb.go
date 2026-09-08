@@ -19,22 +19,24 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	RaftInternal_Apply_FullMethodName              = "/apiary.internal.v1.RaftInternal/Apply"
-	RaftInternal_Status_FullMethodName             = "/apiary.internal.v1.RaftInternal/Status"
-	RaftInternal_AddVoter_FullMethodName           = "/apiary.internal.v1.RaftInternal/AddVoter"
-	RaftInternal_RemoveServer_FullMethodName       = "/apiary.internal.v1.RaftInternal/RemoveServer"
-	RaftInternal_GetVM_FullMethodName              = "/apiary.internal.v1.RaftInternal/GetVM"
-	RaftInternal_ListVMs_FullMethodName            = "/apiary.internal.v1.RaftInternal/ListVMs"
-	RaftInternal_GetNetwork_FullMethodName         = "/apiary.internal.v1.RaftInternal/GetNetwork"
-	RaftInternal_ListNetworks_FullMethodName       = "/apiary.internal.v1.RaftInternal/ListNetworks"
-	RaftInternal_ListVMsLocal_FullMethodName       = "/apiary.internal.v1.RaftInternal/ListVMsLocal"
-	RaftInternal_ListNetworksLocal_FullMethodName  = "/apiary.internal.v1.RaftInternal/ListNetworksLocal"
-	RaftInternal_ValidateAPIKeyHash_FullMethodName = "/apiary.internal.v1.RaftInternal/ValidateAPIKeyHash"
-	RaftInternal_ListAPIKeys_FullMethodName        = "/apiary.internal.v1.RaftInternal/ListAPIKeys"
-	RaftInternal_GetJail_FullMethodName            = "/apiary.internal.v1.RaftInternal/GetJail"
-	RaftInternal_ListJails_FullMethodName          = "/apiary.internal.v1.RaftInternal/ListJails"
-	RaftInternal_ListJailsLocal_FullMethodName     = "/apiary.internal.v1.RaftInternal/ListJailsLocal"
-	RaftInternal_ExportState_FullMethodName        = "/apiary.internal.v1.RaftInternal/ExportState"
+	RaftInternal_Apply_FullMethodName                        = "/apiary.internal.v1.RaftInternal/Apply"
+	RaftInternal_Status_FullMethodName                       = "/apiary.internal.v1.RaftInternal/Status"
+	RaftInternal_AddVoter_FullMethodName                     = "/apiary.internal.v1.RaftInternal/AddVoter"
+	RaftInternal_RemoveServer_FullMethodName                 = "/apiary.internal.v1.RaftInternal/RemoveServer"
+	RaftInternal_GetVM_FullMethodName                        = "/apiary.internal.v1.RaftInternal/GetVM"
+	RaftInternal_ListVMs_FullMethodName                      = "/apiary.internal.v1.RaftInternal/ListVMs"
+	RaftInternal_GetNetwork_FullMethodName                   = "/apiary.internal.v1.RaftInternal/GetNetwork"
+	RaftInternal_ListNetworks_FullMethodName                 = "/apiary.internal.v1.RaftInternal/ListNetworks"
+	RaftInternal_ListVMsLocal_FullMethodName                 = "/apiary.internal.v1.RaftInternal/ListVMsLocal"
+	RaftInternal_ListNetworksLocal_FullMethodName            = "/apiary.internal.v1.RaftInternal/ListNetworksLocal"
+	RaftInternal_ValidateAPIKeyHash_FullMethodName           = "/apiary.internal.v1.RaftInternal/ValidateAPIKeyHash"
+	RaftInternal_ListAPIKeys_FullMethodName                  = "/apiary.internal.v1.RaftInternal/ListAPIKeys"
+	RaftInternal_GetJail_FullMethodName                      = "/apiary.internal.v1.RaftInternal/GetJail"
+	RaftInternal_ListJails_FullMethodName                    = "/apiary.internal.v1.RaftInternal/ListJails"
+	RaftInternal_ListJailsLocal_FullMethodName               = "/apiary.internal.v1.RaftInternal/ListJailsLocal"
+	RaftInternal_ExportState_FullMethodName                  = "/apiary.internal.v1.RaftInternal/ExportState"
+	RaftInternal_GetPendingJoinRequestLocal_FullMethodName   = "/apiary.internal.v1.RaftInternal/GetPendingJoinRequestLocal"
+	RaftInternal_ListPendingJoinRequestsLocal_FullMethodName = "/apiary.internal.v1.RaftInternal/ListPendingJoinRequestsLocal"
 )
 
 // RaftInternalClient is the client API for RaftInternal service.
@@ -132,6 +134,15 @@ type RaftInternalClient interface {
 	// CLI mode (docs/adr/0051-raftd-config-save-restore.md), not
 	// exposed through managerd/ManagerService.
 	ExportState(ctx context.Context, in *ExportStateRequest, opts ...grpc.CallOption) (*ExportStateResponse, error)
+	// GetPendingJoinRequestLocal/ListPendingJoinRequestsLocal back the
+	// mutually-authorized Colony-join flow (ADR-0083) - deliberately
+	// WITHOUT the leader-only restriction, the same ListVMsLocal/
+	// ListNetworksLocal reasoning above: a joining Comb polls whichever
+	// specific existing member it originally contacted, which may not be
+	// (or may no longer be) the leader, and raft has already replicated
+	// the record onto it regardless.
+	GetPendingJoinRequestLocal(ctx context.Context, in *GetPendingJoinRequestRequest, opts ...grpc.CallOption) (*GetPendingJoinRequestResponse, error)
+	ListPendingJoinRequestsLocal(ctx context.Context, in *ListPendingJoinRequestsRequest, opts ...grpc.CallOption) (*ListPendingJoinRequestsResponse, error)
 }
 
 type raftInternalClient struct {
@@ -302,6 +313,26 @@ func (c *raftInternalClient) ExportState(ctx context.Context, in *ExportStateReq
 	return out, nil
 }
 
+func (c *raftInternalClient) GetPendingJoinRequestLocal(ctx context.Context, in *GetPendingJoinRequestRequest, opts ...grpc.CallOption) (*GetPendingJoinRequestResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetPendingJoinRequestResponse)
+	err := c.cc.Invoke(ctx, RaftInternal_GetPendingJoinRequestLocal_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *raftInternalClient) ListPendingJoinRequestsLocal(ctx context.Context, in *ListPendingJoinRequestsRequest, opts ...grpc.CallOption) (*ListPendingJoinRequestsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListPendingJoinRequestsResponse)
+	err := c.cc.Invoke(ctx, RaftInternal_ListPendingJoinRequestsLocal_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // RaftInternalServer is the server API for RaftInternal service.
 // All implementations must embed UnimplementedRaftInternalServer
 // for forward compatibility.
@@ -397,6 +428,15 @@ type RaftInternalServer interface {
 	// CLI mode (docs/adr/0051-raftd-config-save-restore.md), not
 	// exposed through managerd/ManagerService.
 	ExportState(context.Context, *ExportStateRequest) (*ExportStateResponse, error)
+	// GetPendingJoinRequestLocal/ListPendingJoinRequestsLocal back the
+	// mutually-authorized Colony-join flow (ADR-0083) - deliberately
+	// WITHOUT the leader-only restriction, the same ListVMsLocal/
+	// ListNetworksLocal reasoning above: a joining Comb polls whichever
+	// specific existing member it originally contacted, which may not be
+	// (or may no longer be) the leader, and raft has already replicated
+	// the record onto it regardless.
+	GetPendingJoinRequestLocal(context.Context, *GetPendingJoinRequestRequest) (*GetPendingJoinRequestResponse, error)
+	ListPendingJoinRequestsLocal(context.Context, *ListPendingJoinRequestsRequest) (*ListPendingJoinRequestsResponse, error)
 	mustEmbedUnimplementedRaftInternalServer()
 }
 
@@ -454,6 +494,12 @@ func (UnimplementedRaftInternalServer) ListJailsLocal(context.Context, *ListJail
 }
 func (UnimplementedRaftInternalServer) ExportState(context.Context, *ExportStateRequest) (*ExportStateResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ExportState not implemented")
+}
+func (UnimplementedRaftInternalServer) GetPendingJoinRequestLocal(context.Context, *GetPendingJoinRequestRequest) (*GetPendingJoinRequestResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetPendingJoinRequestLocal not implemented")
+}
+func (UnimplementedRaftInternalServer) ListPendingJoinRequestsLocal(context.Context, *ListPendingJoinRequestsRequest) (*ListPendingJoinRequestsResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ListPendingJoinRequestsLocal not implemented")
 }
 func (UnimplementedRaftInternalServer) mustEmbedUnimplementedRaftInternalServer() {}
 func (UnimplementedRaftInternalServer) testEmbeddedByValue()                      {}
@@ -764,6 +810,42 @@ func _RaftInternal_ExportState_Handler(srv interface{}, ctx context.Context, dec
 	return interceptor(ctx, in, info, handler)
 }
 
+func _RaftInternal_GetPendingJoinRequestLocal_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetPendingJoinRequestRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(RaftInternalServer).GetPendingJoinRequestLocal(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: RaftInternal_GetPendingJoinRequestLocal_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(RaftInternalServer).GetPendingJoinRequestLocal(ctx, req.(*GetPendingJoinRequestRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _RaftInternal_ListPendingJoinRequestsLocal_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListPendingJoinRequestsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(RaftInternalServer).ListPendingJoinRequestsLocal(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: RaftInternal_ListPendingJoinRequestsLocal_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(RaftInternalServer).ListPendingJoinRequestsLocal(ctx, req.(*ListPendingJoinRequestsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // RaftInternal_ServiceDesc is the grpc.ServiceDesc for RaftInternal service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -834,6 +916,14 @@ var RaftInternal_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ExportState",
 			Handler:    _RaftInternal_ExportState_Handler,
+		},
+		{
+			MethodName: "GetPendingJoinRequestLocal",
+			Handler:    _RaftInternal_GetPendingJoinRequestLocal_Handler,
+		},
+		{
+			MethodName: "ListPendingJoinRequestsLocal",
+			Handler:    _RaftInternal_ListPendingJoinRequestsLocal_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},
