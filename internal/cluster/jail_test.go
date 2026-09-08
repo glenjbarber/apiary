@@ -200,6 +200,7 @@ func TestReconciler_RunOnce_BaseTemplateWithReplicaNodeIsError(t *testing.T) {
 	}
 	zfs := newFakeDatasetManager()
 	zfs.snapshots["templates/freebsd-14@apiary-template"] = true
+	zfs.mountpointFor["hast-jail-jail-1"] = t.TempDir()
 
 	r := &Reconciler{Raft: raft, ZFS: zfs, Jail: newFakeJailManager(), HAST: newFakeHASTManager(), Mount: newFakeMountManager(), LocalNodeID: "node-a"}
 	if err := r.RunOnce(context.Background()); err == nil || !strings.Contains(err.Error(), "not supported together with replica_node_id") {
