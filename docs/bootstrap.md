@@ -425,6 +425,28 @@ host, and not an Apiary bug. **Jails remain fully available regardless**
 - they need no hardware virtualization at all, and are the practical
 fallback whenever this check fails.
 
+**A jail created with nothing else set has an empty root** - `jail(8)`
+starts it "successfully" anyway, with nothing usable inside. Give it
+real content via a `base_template` (ADR-0084) instead of discovering
+this the hard way: on the node that will own the jail, populate a ZFS
+template dataset once and snapshot it with the fixed name Apiary looks
+for:
+
+```bash
+zfs create zroot/apiary/templates/freebsd-14
+mount -t zfs zroot/apiary/templates/freebsd-14 /mnt
+tar -xf base.txz -C /mnt
+umount /mnt
+zfs snapshot zroot/apiary/templates/freebsd-14@apiary-template
+```
+
+Then set `base_template: freebsd-14` (the web UI's "Create jail" page
+has a field for this) when creating the jail - its root is cloned from
+that snapshot the first time it's created, never re-cloned afterward.
+This is manual and per-node by design (see ADR-0084's own disclosed
+limitation): the identically-named template must exist separately on
+every node a templated jail might land on, there's no cross-node fetch.
+
 **Always attach an ISO or base image as the install source.** A VM
 created with neither has nothing bootable - `bhyve` launches and exits
 again almost immediately, over and over, every reconcile tick.
