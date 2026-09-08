@@ -994,6 +994,12 @@ type JailDefinition struct {
 	DesiredState  JailState `protobuf:"varint,6,opt,name=desired_state,json=desiredState,proto3,enum=apiary.rpc.v1.JailState" json:"desired_state,omitempty"`
 	Phase         JailPhase `protobuf:"varint,7,opt,name=phase,proto3,enum=apiary.rpc.v1.JailPhase" json:"phase,omitempty"`
 	PhaseError    string    `protobuf:"bytes,8,opt,name=phase_error,json=phaseError,proto3" json:"phase_error,omitempty"`
+	// base_template, if set, names a ZFS "template" dataset (see
+	// internalpb.JailDefinition's own doc comment and ADR-0084) already
+	// present on the assigned node, cloned into this jail's root the
+	// first time it's created. Empty means an empty dataset, today's
+	// unchanged default behavior.
+	BaseTemplate  string `protobuf:"bytes,9,opt,name=base_template,json=baseTemplate,proto3" json:"base_template,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1080,6 +1086,13 @@ func (x *JailDefinition) GetPhase() JailPhase {
 func (x *JailDefinition) GetPhaseError() string {
 	if x != nil {
 		return x.PhaseError
+	}
+	return ""
+}
+
+func (x *JailDefinition) GetBaseTemplate() string {
+	if x != nil {
+		return x.BaseTemplate
 	}
 	return ""
 }
@@ -11222,7 +11235,7 @@ const file_api_rpc_manager_proto_rawDesc = "" +
 	"\x0fbase_image_name\x18\x0f \x01(\tR\rbaseImageName\x12'\n" +
 	"\x0ffirewall_paused\x18\x10 \x01(\bR\x0efirewallPaused\x12/\n" +
 	"\x13cloudflare_hostname\x18\x11 \x01(\tR\x12cloudflareHostname\x12'\n" +
-	"\x0fcloudflare_port\x18\x12 \x01(\rR\x0ecloudflarePort\"\xa1\x02\n" +
+	"\x0fcloudflare_port\x18\x12 \x01(\rR\x0ecloudflarePort\"\xc6\x02\n" +
 	"\x0eJailDefinition\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x1a\n" +
@@ -11232,7 +11245,8 @@ const file_api_rpc_manager_proto_rawDesc = "" +
 	"\rdesired_state\x18\x06 \x01(\x0e2\x18.apiary.rpc.v1.JailStateR\fdesiredState\x12.\n" +
 	"\x05phase\x18\a \x01(\x0e2\x18.apiary.rpc.v1.JailPhaseR\x05phase\x12\x1f\n" +
 	"\vphase_error\x18\b \x01(\tR\n" +
-	"phaseError\"\x9b\x01\n" +
+	"phaseError\x12#\n" +
+	"\rbase_template\x18\t \x01(\tR\fbaseTemplate\"\x9b\x01\n" +
 	"\fFirewallRule\x12\x1c\n" +
 	"\tdirection\x18\x01 \x01(\tR\tdirection\x12\x16\n" +
 	"\x06action\x18\x02 \x01(\tR\x06action\x12\x1a\n" +

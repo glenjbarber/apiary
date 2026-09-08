@@ -729,6 +729,19 @@ each design decision, in order.
   `-R`/`-C` flags) and were caught live actually colliding with a real
   instance's port during a later restart. Fixed with a `stop_postcmd`
   hook in each script.
+- **Jail base images via ZFS clone** — a jail can now name a
+  `base_template` at creation time, closing a real gap where a fresh
+  jail's root was always an empty ZFS dataset (`jail(8)` doesn't care,
+  so the jail "worked" but had nothing usable inside). An operator
+  creates and populates a template dataset by hand
+  (`<zfs base>/templates/<name>`, snapshotted as `<name>@apiary-template`)
+  and the reconciler clones it into the jail's root the first time it's
+  created — never re-cloned afterward, and not supported together with
+  HAST replication (a replicated jail's root is a raw device, not a ZFS
+  dataset). Deliberately more manual than VM base images (ADR-0031):
+  templates are node-local, created outside Apiary, and not fetched
+  across nodes — a disclosed limitation, not a built follow-up. See
+  [ADR-0084](docs/adr/0084-jail-base-images.md).
 - Importing VMs from other hypervisors (e.g. Proxmox): no disk-format
   conversion, and Apiary is UEFI-only. Linux containers have no path at
   all — jails share the host FreeBSD kernel

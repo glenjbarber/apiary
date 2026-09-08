@@ -130,13 +130,26 @@ func (r *Reconciler) setJailDesiredState(ctx context.Context, id string, state i
 	return nil
 }
 
-// ensureJail ensures j's root filesystem exists - a plain ZFS dataset,
+// jailTemplateSnapshot returns the fixed snapshot name an operator is
+// expected to have created for a jail template named name (ADR-0084) -
+// "templates/<name>@apiary-template", relative to this node's own ZFS
+// base, mirroring jailHASTResourceName's own simple naming-convention
+// approach.
+func jailTemplateSnapshot(name string) string {
+	return "templates/" + name + "@apiary-template"
+}
+
+// ensureJail ensures j's root filesystem exists - a plain ZFS dataset
+// (optionally cloned from a base_template on first creation, ADR-0084),
 // or, if ReplicaNodeID is set, a HAST-replicated device formatted and
 // mounted at this node's own jail root path (see hastDevicePaths/
 // ADR-0026) - then that its jail(8) process is running.
 func (r *Reconciler) ensureJail(ctx context.Context, j JailPlacement, hastDevicePaths map[string]string) error {
 	if r.Jail == nil || r.JailProvisioningDisabled {
 		return fmt.Errorf("jail %q is assigned to this node but jail provisioning is disabled; enable -jail-enabled on the owning node or delete the jail", j.ID)
+	}
+	if j.BaseTemplate != "" && j.ReplicaNodeID != "" {
+		return fmt.Errorf("jail %q: base_template is not supported together with replica_node_id - a HAST-replicated jail's root is a raw device, not a ZFS dataset", j.ID)
 	}
 
 	var rootPath string
@@ -146,7 +159,19 @@ func (r *Reconciler) ensureJail(ctx context.Context, j JailPlacement, hastDevice
 			return fmt.Errorf("checking dataset: %w", err)
 		}
 		if !exists {
-			if err := r.ZFS.CreateDataset(ctx, j.ID); err != nil {
+			if j.BaseTemplate != "" {
+				snap := jailTemplateSnapshot(j.BaseTemplate)
+				snapExists, err := r.ZFS.SnapshotExists(ctx, snap)
+				if err != nil {
+					return fmt.Errorf("checking base template: %w", err)
+				}
+				if !snapExists {
+					return fmt.Errorf("jail %q names base template %q but no snapshot %q exists on this node - see ADR-0084", j.ID, j.BaseTemplate, snap)
+				}
+				if err := r.ZFS.Clone(ctx, snap, j.ID); err != nil {
+					return fmt.Errorf("cloning base template: %w", err)
+				}
+			} else if err := r.ZFS.CreateDataset(ctx, j.ID); err != nil {
 				return fmt.Errorf("creating dataset: %w", err)
 			}
 		}

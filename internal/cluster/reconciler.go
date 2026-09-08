@@ -96,6 +96,11 @@ type datasetManager interface {
 	CreateDataset(ctx context.Context, name string) error
 	DestroyDataset(ctx context.Context, name string) error
 	GetProperty(ctx context.Context, name, prop string) (string, error)
+
+	// SnapshotExists/Clone back a jail's base_template support
+	// (ADR-0084) - see internal/cluster/jail.go's ensureJail.
+	SnapshotExists(ctx context.Context, name string) (bool, error)
+	Clone(ctx context.Context, snapshot, destName string) error
 }
 
 // vmManager is the subset of *bhyve.Manager the reconciler needs, for
@@ -527,6 +532,7 @@ func (r *Reconciler) RunOnce(ctx context.Context) (err error) {
 				Restarting:    j.GetDesiredState() == internalpb.JailState_JAIL_STATE_RESTARTING,
 				Phase:         jailPhaseToString(j.GetPhase()),
 				ReplicaNodeID: j.GetReplicaNodeId(),
+				BaseTemplate:  j.GetBaseTemplate(),
 			})
 		}
 	}

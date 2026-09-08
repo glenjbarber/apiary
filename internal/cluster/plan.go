@@ -115,6 +115,10 @@ type JailPlacement struct {
 	// this jail's root filesystem (ADR-0026) - the same data-redundancy-
 	// not-failover semantics as VMPlacement.ReplicaNodeID.
 	ReplicaNodeID string
+
+	// BaseTemplate, if set, names a ZFS template dataset to clone this
+	// jail's root from on first creation (ADR-0084) - see ensureJail.
+	BaseTemplate string
 }
 
 // PlanJail mirrors Plan exactly, for jails instead of VMs.

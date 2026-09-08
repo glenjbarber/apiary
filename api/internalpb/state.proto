@@ -199,6 +199,21 @@ message JailDefinition {
   // phase_error holds the last reconcile error's message when phase ==
   // JAIL_PHASE_ERROR; empty otherwise.
   string phase_error = 8;
+
+  // base_template, if set, names a ZFS "template" dataset
+  // (<node's ZFS base>/templates/<base_template>, snapshotted by an
+  // operator as <base_template>@apiary-template) already present on
+  // the assigned node. Only when first creating this jail's root
+  // dataset, the reconciler clones that snapshot instead of creating a
+  // blank dataset - see ADR-0084. Unlike VMDefinition.base_image_name
+  // (ADR-0031, a flat file reused from internal/isostore), a jail
+  // template is a ZFS clone source: node-local, operator-populated,
+  // never uploaded through Apiary itself, and never fetched from
+  // another node. Empty means today's behavior (a blank dataset).
+  // Ignored for a dataset that already exists (never re-cloned on
+  // every tick), and unsupported together with replica_node_id (a
+  // HAST-replicated jail's root is a raw device, not a ZFS dataset).
+  string base_template = 9;
 }
 
 // FirewallRule is one pf(8) rule applied to a VM's per-VM anchor. See

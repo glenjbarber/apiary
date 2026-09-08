@@ -1723,6 +1723,7 @@ func (s *Server) handleCreateJail(w http.ResponseWriter, r *http.Request) {
 			Hostname:      r.FormValue("hostname"),
 			NodeId:        r.FormValue("node_id"),
 			ReplicaNodeId: r.FormValue("replica_node_id"),
+			BaseTemplate:  r.FormValue("base_template"),
 		},
 	})
 	if err != nil {

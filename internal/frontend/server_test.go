@@ -1582,7 +1582,7 @@ func TestServer_CreateJail(t *testing.T) {
 	}
 	s := newTestServer(t, client)
 
-	form := url.Values{"id": {"jail-1"}, "name": {"web-1"}, "hostname": {"web-1.local"}, "node_id": {"node-a"}}
+	form := url.Values{"id": {"jail-1"}, "name": {"web-1"}, "hostname": {"web-1.local"}, "node_id": {"node-a"}, "base_template": {"freebsd-14"}}
 	req := httptest.NewRequest(http.MethodPost, "/jails", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	rec := httptest.NewRecorder()
@@ -1592,8 +1592,8 @@ func TestServer_CreateJail(t *testing.T) {
 		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
 	}
 	got := client.lastCreateJailReq.GetJail()
-	if got.GetId() != "jail-1" || got.GetHostname() != "web-1.local" || got.GetNodeId() != "node-a" {
-		t.Errorf("forwarded jail = %+v, want id=jail-1 hostname=web-1.local node_id=node-a", got)
+	if got.GetId() != "jail-1" || got.GetHostname() != "web-1.local" || got.GetNodeId() != "node-a" || got.GetBaseTemplate() != "freebsd-14" {
+		t.Errorf("forwarded jail = %+v, want id=jail-1 hostname=web-1.local node_id=node-a base_template=freebsd-14", got)
 	}
 	// On its own page now (see new_jail.html) with no jail table to
 	// refresh - success is reported via HX-Redirect to the jails page,

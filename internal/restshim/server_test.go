@@ -665,16 +665,19 @@ func TestServer_ListVMs_Empty(t *testing.T) {
 
 func TestServer_CreateJail(t *testing.T) {
 	client := &fakeClient{createJailResp: &rpcpb.CreateJailResponse{
-		Jail: &rpcpb.JailDefinition{Id: "jail-1", Name: "web-1", Hostname: "web-1.local"},
+		Jail: &rpcpb.JailDefinition{Id: "jail-1", Name: "web-1", Hostname: "web-1.local", BaseTemplate: "freebsd-14"},
 	}}
 	s := NewServer(client)
 
-	rec := doRequest(t, s, http.MethodPost, "/v1/jails", jail{ID: "jail-1", Name: "web-1", Hostname: "web-1.local"})
+	rec := doRequest(t, s, http.MethodPost, "/v1/jails", jail{ID: "jail-1", Name: "web-1", Hostname: "web-1.local", BaseTemplate: "freebsd-14"})
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("status = %d, want 201; body=%s", rec.Code, rec.Body.String())
 	}
 	if client.lastCreateJailReq.GetJail().GetHostname() != "web-1.local" {
 		t.Errorf("request forwarded jail.Hostname = %q, want web-1.local", client.lastCreateJailReq.GetJail().GetHostname())
+	}
+	if client.lastCreateJailReq.GetJail().GetBaseTemplate() != "freebsd-14" {
+		t.Errorf("request forwarded jail.BaseTemplate = %q, want freebsd-14", client.lastCreateJailReq.GetJail().GetBaseTemplate())
 	}
 
 	var got jail
@@ -683,6 +686,9 @@ func TestServer_CreateJail(t *testing.T) {
 	}
 	if got.ID != "jail-1" {
 		t.Errorf("response ID = %q, want jail-1", got.ID)
+	}
+	if got.BaseTemplate != "freebsd-14" {
+		t.Errorf("response BaseTemplate = %q, want freebsd-14", got.BaseTemplate)
 	}
 }
 
