@@ -1,0 +1,45 @@
+#!/bin/sh
+#
+# PROVIDE: apiary_frontend
+# REQUIRE: NETWORKING apiary_managerd
+# KEYWORD: shutdown
+
+. /etc/rc.subr
+
+name="apiary_frontend"
+rcvar="apiary_frontend_enable"
+
+load_rc_config "$name"
+
+: ${apiary_frontend_enable:="NO"}
+: ${apiary_frontend_args:=""}
+: ${apiary_frontend_envfile:="/usr/local/etc/apiary/frontend.env"}
+: ${apiary_frontend_logfile:="/var/log/apiary/frontend.log"}
+
+rc_flags=""
+procname="/usr/local/libexec/apiary/frontend"
+pidfile="/var/run/${name}.pid"
+command="/usr/sbin/daemon"
+command_args="-f -r -R 5 -C 24 -o ${apiary_frontend_logfile} -p ${pidfile} ${procname} ${apiary_frontend_args}"
+
+start_precmd="apiary_frontend_loadenv"
+apiary_frontend_loadenv()
+{
+	if [ -r "${apiary_frontend_envfile}" ]; then
+		set -a
+		. "${apiary_frontend_envfile}"
+		set +a
+	fi
+}
+
+# See apiary_raftd's own copy of this hook for why it's needed - the
+# same daemon(8)/rc.subr pidfile race applies identically here.
+stop_postcmd="apiary_frontend_poststop"
+apiary_frontend_poststop()
+{
+	if [ -f "$pidfile" ] && [ -z "$(check_pidfile "$pidfile" "$procname")" ]; then
+		rm -f "$pidfile"
+	fi
+}
+
+run_rc_command "$1"

@@ -1,0 +1,44 @@
+#!/bin/sh
+#
+# PROVIDE: apiary_raftd
+# REQUIRE: NETWORKING
+# BEFORE: apiary_managerd
+# KEYWORD: shutdown
+
+. /etc/rc.subr
+
+name="apiary_raftd"
+rcvar="apiary_raftd_enable"
+
+load_rc_config "$name"
+
+: ${apiary_raftd_enable:="NO"}
+: ${apiary_raftd_args:=""}
+: ${apiary_raftd_logfile:="/var/log/apiary/raftd.log"}
+
+rc_flags=""
+procname="/usr/local/libexec/apiary/raftd"
+pidfile="/var/run/${name}.pid"
+command="/usr/sbin/daemon"
+command_args="-f -r -R 5 -C 24 -o ${apiary_raftd_logfile} -p ${pidfile} ${procname} ${apiary_raftd_args}"
+
+# daemon(8)'s own pidfile can briefly outlive the process it supervised
+# - rc.subr's stop step only waits for the process to leave the process
+# table, not for daemon(8) to finish unlinking its own pidfile. A
+# restart's immediate following start step can then race that
+# still-present pidfile and refuse to launch a new instance ("process
+# already running, pid: -1") even though nothing is actually running -
+# confirmed live, every restart, on both apiarium and apiverse.
+# check_pidfile (rc.subr's own utility, also used internally by
+# run_rc_command) confirms nothing matching the recorded pid is still
+# alive before removing it, so a pidfile for a genuinely-still-running
+# process is never touched.
+stop_postcmd="apiary_raftd_poststop"
+apiary_raftd_poststop()
+{
+	if [ -f "$pidfile" ] && [ -z "$(check_pidfile "$pidfile" "$procname")" ]; then
+		rm -f "$pidfile"
+	fi
+}
+
+run_rc_command "$1"

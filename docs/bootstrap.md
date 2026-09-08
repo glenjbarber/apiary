@@ -460,13 +460,36 @@ repeating this workaround indefinitely.
 
 ## Not covered here (disclosed gaps, not oversights)
 
-- **No rc.d scripts ship in this repo** for the four daemons, so nothing
-  here survives a reboot on its own - the `daemon(8)` invocations above
-  are for getting a node up and verified, not for production
-  persistence. Writing real `/usr/local/etc/rc.d/apiary_*` scripts
-  (matching the `apiary_raftd`/`apiary_managerd`/`apiary_frontend`/
-  `apiary_restshimd` service names ADR-0049 already assumes exist) is a
-  separate piece of work, not part of `apiaryinstall`'s own scope.
+- ~~No rc.d scripts ship in this repo~~ **Resolved**: `etc/rc.d/apiary_raftd`/
+  `apiary_managerd`/`apiary_frontend`/`apiary_restshimd` now ship real,
+  working rc.d scripts (matching the service names ADR-0049 already
+  assumed exist) - install with:
+  ```bash
+  sudo cp etc/rc.d/apiary_* /usr/local/etc/rc.d/
+  sudo chmod 555 /usr/local/etc/rc.d/apiary_*
+  sudo sysrc apiary_raftd_enable=YES apiary_managerd_enable=YES apiary_frontend_enable=YES apiary_restshimd_enable=YES
+  ```
+  then `service apiary_raftd start` (and the others, in dependency
+  order - each script's own `REQUIRE`/`BEFORE` lines handle that if you
+  just use `service apiary_frontend start`, which pulls in the rest).
+  Each daemon's own flags go in `/etc/rc.conf`'s `apiary_<name>_args`,
+  e.g. `apiary_raftd_args="-node-id node001 -data-dir /var/db/apiary/raftd ..."`.
+
+  **Found and fixed live, on real production hosts**: `daemon(8)`'s own
+  pidfile can briefly outlive the process it supervised - `rc.subr`'s
+  stop step only waits for the process to leave the process table, not
+  for `daemon(8)` to finish unlinking its pidfile - so a `restart`'s
+  immediate following `start` step races that still-present pidfile and
+  refuses to launch a new instance (`daemon: process already running,
+  pid: -1`), even though nothing is actually running. Every one of these
+  scripts now has a `stop_postcmd` hook that removes the pidfile once
+  `check_pidfile` confirms nothing matching it is still alive, closing
+  that race. Confirmed live: without the fix, this race isn't just a
+  cosmetic warning - the very same silently-orphaned supervisor
+  processes it leaves behind (never actually killed, just detached from
+  the pidfile) can keep periodically retrying in the background for
+  days, and were caught live actually colliding with a real, functioning
+  instance's own port during a later restart.
 - **HAST (`-enable-hast`)** - `apiaryinstall` can check for `hastd_enable`
   but never configures it, and the known `hastd` source patch (ADR-0022,
   FreeBSD bug 298085) is never applied automatically; see ADR-0026 for

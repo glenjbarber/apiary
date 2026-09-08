@@ -717,6 +717,18 @@ each design decision, in order.
   "await join, don't self-bootstrap" mode — a necessary follow-up, not
   yet built) — see
   [ADR-0083](docs/adr/0083-mutually-authorized-colony-join.md).
+- **Real rc.d scripts** — `etc/rc.d/apiary_{raftd,managerd,frontend,restshimd}`
+  now ship in the repo, closing a previously-disclosed gap
+  (`docs/bootstrap.md` used to say none existed). Found and fixed live
+  on real production hosts in the process: `daemon(8)`'s own pidfile can
+  briefly outlive the process it supervised, so a `restart`'s immediate
+  `start` step can race that stale pidfile and refuse to launch
+  (`daemon: process already running, pid: -1`) - and the orphaned
+  supervisor processes that race silently leaves behind don't just sit
+  idle, they keep periodically retrying in the background (their own
+  `-R`/`-C` flags) and were caught live actually colliding with a real
+  instance's port during a later restart. Fixed with a `stop_postcmd`
+  hook in each script.
 - Importing VMs from other hypervisors (e.g. Proxmox): no disk-format
   conversion, and Apiary is UEFI-only. Linux containers have no path at
   all — jails share the host FreeBSD kernel
