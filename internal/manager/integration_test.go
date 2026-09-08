@@ -1600,6 +1600,40 @@ func TestIntegration_CreateUpdateDeleteJail(t *testing.T) {
 	}
 }
 
+// TestIntegration_CreateJail_BaseTemplateRoundTrips confirms
+// base_template (ADR-0084) survives the full CreateJail/GetJail
+// round-trip through real raftd, exactly like every other jail field -
+// this is manager/raft plumbing only; the reconciler side (resolving
+// and cloning the named template) is covered in internal/cluster.
+func TestIntegration_CreateJail_BaseTemplateRoundTrips(t *testing.T) {
+	raftdSocket := newRaftdUDSSocket(t)
+	client := newManagerdRPCClient(t, raftdSocket)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	createResp, err := client.CreateJail(ctx, &rpcpb.CreateJailRequest{
+		Jail: &rpcpb.JailDefinition{Id: "jail-templated", NodeId: "node-a", BaseTemplate: "freebsd-14"},
+	})
+	if err != nil {
+		t.Fatalf("CreateJail() error: %v", err)
+	}
+	if createResp.GetError() != "" {
+		t.Fatalf("CreateJail() returned error: %s", createResp.GetError())
+	}
+	if createResp.GetJail().GetBaseTemplate() != "freebsd-14" {
+		t.Errorf("CreateJail() jail.base_template = %q, want freebsd-14", createResp.GetJail().GetBaseTemplate())
+	}
+
+	getResp, err := client.GetJail(ctx, &rpcpb.GetJailRequest{Id: "jail-templated"})
+	if err != nil {
+		t.Fatalf("GetJail() error: %v", err)
+	}
+	if !getResp.GetFound() || getResp.GetJail().GetBaseTemplate() != "freebsd-14" {
+		t.Fatalf("GetJail() = %+v, want found with base_template=freebsd-14", getResp)
+	}
+}
+
 func TestIntegration_DeleteJob_AssignedJailIsSoftDeletedThroughFullStack(t *testing.T) {
 	raftdSocket := newRaftdUDSSocket(t)
 	client := newManagerdRPCClient(t, raftdSocket)

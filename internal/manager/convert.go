@@ -172,6 +172,7 @@ func toInternalJail(j *rpcpb.JailDefinition) *internalpb.JailDefinition {
 		NodeId:        j.GetNodeId(),
 		ReplicaNodeId: j.GetReplicaNodeId(),
 		DesiredState:  internalpb.JailState(j.GetDesiredState()),
+		BaseTemplate:  j.GetBaseTemplate(),
 		// Phase/PhaseError are the reconciler's own observed state, never
 		// set by an external caller - CreateJail/UpdateJail requests
 		// never carry them through.
@@ -191,6 +192,7 @@ func fromInternalJail(j *internalpb.JailDefinition) *rpcpb.JailDefinition {
 		DesiredState:  rpcpb.JailState(j.GetDesiredState()),
 		Phase:         rpcpb.JailPhase(j.GetPhase()),
 		PhaseError:    j.GetPhaseError(),
+		BaseTemplate:  j.GetBaseTemplate(),
 	}
 }
 

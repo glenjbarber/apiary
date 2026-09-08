@@ -104,6 +104,7 @@ type jail struct {
 	NodeID        string `json:"node_id,omitempty"`
 	ReplicaNodeID string `json:"replica_node_id,omitempty"`
 	DesiredState  string `json:"desired_state,omitempty"`
+	BaseTemplate  string `json:"base_template,omitempty"`
 }
 
 // jailStateToRPC/jailStateFromRPC mirror stateToRPC/stateFromRPC, for
@@ -138,6 +139,7 @@ func toRPCJail(j jail) *rpcpb.JailDefinition {
 		NodeId:        j.NodeID,
 		ReplicaNodeId: j.ReplicaNodeID,
 		DesiredState:  jailStateToRPC(j.DesiredState),
+		BaseTemplate:  j.BaseTemplate,
 	}
 }
 
@@ -152,6 +154,7 @@ func fromRPCJail(d *rpcpb.JailDefinition) jail {
 		NodeID:        d.GetNodeId(),
 		ReplicaNodeID: d.GetReplicaNodeId(),
 		DesiredState:  jailStateFromRPC(d.GetDesiredState()),
+		BaseTemplate:  d.GetBaseTemplate(),
 	}
 }
 

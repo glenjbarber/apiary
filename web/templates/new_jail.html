@@ -23,6 +23,9 @@
     <label>Replica node ID (optional - HAST root replication, see ADR-0026)
       <input type="text" name="replica_node_id" title="A second Comb to keep a live HAST-replicated copy of this jail's root dataset on. Leave blank for no replica.">
     </label>
+    <label>Base template (optional - ZFS clone, see ADR-0084)
+      <input type="text" name="base_template" title="Name of a pre-populated ZFS template dataset already present on the owning Comb (<zfs base>/templates/<name>, snapshotted by an operator as <name>@apiary-template). Leave blank for an empty jail root you populate yourself. Not supported together with a replica node ID.">
+    </label>
     <button type="submit">Create</button>
   </form>
   <div id="create-error" class="banner-error"></div>

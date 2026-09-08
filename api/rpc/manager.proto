@@ -473,6 +473,13 @@ message JailDefinition {
   JailState desired_state = 6;
   JailPhase phase = 7;
   string phase_error = 8;
+
+  // base_template, if set, names a ZFS "template" dataset (see
+  // internalpb.JailDefinition's own doc comment and ADR-0084) already
+  // present on the assigned node, cloned into this jail's root the
+  // first time it's created. Empty means an empty dataset, today's
+  // unchanged default behavior.
+  string base_template = 9;
 }
 
 // FirewallRule mirrors api/internalpb's FirewallRule.

@@ -116,3 +116,59 @@ func (m *Manager) SetProperty(ctx context.Context, name, prop, value string) err
 	_, err = runZFS(ctx, "set", prop+"="+value, full)
 	return err
 }
+
+// snapshotPath validates a "dataset@snapshot" name relative to Base
+// (e.g. "templates/freebsd-14@apiary-template") and returns the full
+// path. The dataset half is validated by path() exactly like every
+// other dataset name; the snapshot half must be non-empty and contain
+// no "/".
+func (m *Manager) snapshotPath(name string) (string, error) {
+	dataset, snap, ok := strings.Cut(name, "@")
+	if !ok || snap == "" {
+		return "", fmt.Errorf("zfs: invalid snapshot name %q: must be \"dataset@snapshot\"", name)
+	}
+	if strings.Contains(snap, "/") {
+		return "", fmt.Errorf("zfs: invalid snapshot name %q", name)
+	}
+	full, err := m.path(dataset)
+	if err != nil {
+		return "", err
+	}
+	return full + "@" + snap, nil
+}
+
+// SnapshotExists reports whether the snapshot named "dataset@snapshot"
+// (relative to Base) currently exists.
+func (m *Manager) SnapshotExists(ctx context.Context, name string) (bool, error) {
+	full, err := m.snapshotPath(name)
+	if err != nil {
+		return false, err
+	}
+	_, err = runZFS(ctx, "list", "-H", "-o", "name", "-t", "snapshot", full)
+	if err != nil {
+		if strings.Contains(err.Error(), "dataset does not exist") {
+			return false, nil
+		}
+		return false, err
+	}
+	return true, nil
+}
+
+// Clone creates a new dataset at Base/destName from the snapshot named
+// "dataset@snapshot" (relative to Base) - e.g. cloning
+// "templates/freebsd-14@apiary-template" into a fresh jail root. The
+// clone is a normal, independent ZFS dataset from the caller's
+// perspective (DestroyDataset works on it exactly like any other
+// dataset this Manager created directly).
+func (m *Manager) Clone(ctx context.Context, snapshot, destName string) error {
+	fullSnap, err := m.snapshotPath(snapshot)
+	if err != nil {
+		return err
+	}
+	fullDest, err := m.path(destName)
+	if err != nil {
+		return err
+	}
+	_, err = runZFS(ctx, "clone", fullSnap, fullDest)
+	return err
+}

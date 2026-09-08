@@ -128,10 +128,15 @@ type fakeDatasetManager struct {
 	destroyErr    error
 	getPropErr    error
 	mountpointFor map[string]string
+
+	snapshots   map[string]bool
+	cloned      []string // "snapshot->destName" entries
+	snapshotErr error
+	cloneErr    error
 }
 
 func newFakeDatasetManager() *fakeDatasetManager {
-	return &fakeDatasetManager{existing: map[string]bool{}, mountpointFor: map[string]string{}}
+	return &fakeDatasetManager{existing: map[string]bool{}, mountpointFor: map[string]string{}, snapshots: map[string]bool{}}
 }
 
 func (f *fakeDatasetManager) DatasetExists(_ context.Context, name string) (bool, error) {
@@ -164,6 +169,22 @@ func (f *fakeDatasetManager) GetProperty(_ context.Context, name, _ string) (str
 		return "", f.getPropErr
 	}
 	return f.mountpointFor[name], nil
+}
+
+func (f *fakeDatasetManager) SnapshotExists(_ context.Context, name string) (bool, error) {
+	if f.snapshotErr != nil {
+		return false, f.snapshotErr
+	}
+	return f.snapshots[name], nil
+}
+
+func (f *fakeDatasetManager) Clone(_ context.Context, snapshot, destName string) error {
+	if f.cloneErr != nil {
+		return f.cloneErr
+	}
+	f.cloned = append(f.cloned, snapshot+"->"+destName)
+	f.existing[destName] = true
+	return nil
 }
 
 type fakeVMManager struct {
