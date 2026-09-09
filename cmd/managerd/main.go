@@ -461,6 +461,12 @@ func run() error {
 	srv := manager.NewServer(raftClient, id, isos, vncArg, serialLogArg, vlanArg, peers, resolvedPeerPort, zfsMgr, nodeConfigMgr, assumptionsMgr, assumptionStaleAfter, reconciler)
 	srv.SetAssumptionRegister(registerMgr)
 	srv.SetOriginCAIssuer(cloudflare.OriginCAIssuer{})
+	// ADR-0088: reconciler already satisfies natPauser (NATUplink/
+	// PauseOutboundNAT) structurally - wired unconditionally, since
+	// both methods are themselves no-ops when PF/NetworkStatePath
+	// aren't configured, the same posture as reconciler's other
+	// nil-tolerant optional-dependency methods.
+	srv.SetNATPauser(reconciler)
 	if *pamService != "" {
 		srv.SetPAMAuthenticator(pam.PAMAuthenticator{ServiceName: *pamService})
 	}

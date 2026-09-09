@@ -1129,6 +1129,92 @@ func TestServer_SetUplinkState_DownThenUpRoundTrips(t *testing.T) {
 	}
 }
 
+// fakeNATPauser is a fake natPauser for SetUplinkState's NAT-pause
+// side effect (ADR-0088), without any real pf(8) involved.
+type fakeNATPauser struct {
+	uplink  string
+	flushed []string
+	err     error
+	calls   int
+}
+
+func (f *fakeNATPauser) NATUplink() string { return f.uplink }
+
+func (f *fakeNATPauser) PauseOutboundNAT(context.Context) ([]string, error) {
+	f.calls++
+	if f.err != nil {
+		return nil, f.err
+	}
+	return f.flushed, nil
+}
+
+func TestServer_SetUplinkState_PausesNATWhenUplinkMatches(t *testing.T) {
+	vlan := &fakeVLANStatus{uplink: "em0", up: map[string]bool{"em0": true}}
+	nat := &fakeNATPauser{uplink: "em0", flushed: []string{"net-1", "net-2"}}
+	s := NewServer(nil, "node-1", nil, nil, nil, vlan, nil, "", nil, nil, nil, 0, nil)
+	s.SetNATPauser(nat)
+
+	resp, err := s.SetUplinkState(context.Background(), &rpcpb.SetUplinkStateRequest{Down: true})
+	if err != nil {
+		t.Fatalf("SetUplinkState(down) error: %v", err)
+	}
+	if nat.calls != 1 {
+		t.Fatalf("PauseOutboundNAT calls = %d, want 1 when the toggled interface matches NATUplink", nat.calls)
+	}
+	if got := resp.GetNatPausedNetworks(); len(got) != 2 || got[0] != "net-1" || got[1] != "net-2" {
+		t.Errorf("NatPausedNetworks = %v, want [net-1 net-2]", got)
+	}
+}
+
+func TestServer_SetUplinkState_SkipsNATPauseWhenUplinksDiffer(t *testing.T) {
+	// ADR-0048's own disclosed case: -vlan-uplink and -nat-uplink can
+	// name different physical interfaces - downing one must not pause
+	// NAT that depends on the other, unrelated one.
+	vlan := &fakeVLANStatus{uplink: "em0", up: map[string]bool{"em0": true}}
+	nat := &fakeNATPauser{uplink: "bridge0", flushed: []string{"net-1"}}
+	s := NewServer(nil, "node-1", nil, nil, nil, vlan, nil, "", nil, nil, nil, 0, nil)
+	s.SetNATPauser(nat)
+
+	resp, err := s.SetUplinkState(context.Background(), &rpcpb.SetUplinkStateRequest{Down: true})
+	if err != nil {
+		t.Fatalf("SetUplinkState(down) error: %v", err)
+	}
+	if nat.calls != 0 {
+		t.Errorf("PauseOutboundNAT calls = %d, want 0 when the toggled interface doesn't match NATUplink", nat.calls)
+	}
+	if got := resp.GetNatPausedNetworks(); len(got) != 0 {
+		t.Errorf("NatPausedNetworks = %v, want none", got)
+	}
+}
+
+func TestServer_SetUplinkState_SkipsNATPauseWhenNoPauserConfigured(t *testing.T) {
+	vlan := &fakeVLANStatus{uplink: "em0", up: map[string]bool{"em0": true}}
+	s := NewServer(nil, "node-1", nil, nil, nil, vlan, nil, "", nil, nil, nil, 0, nil)
+
+	resp, err := s.SetUplinkState(context.Background(), &rpcpb.SetUplinkStateRequest{Down: true})
+	if err != nil {
+		t.Fatalf("SetUplinkState(down) error: %v", err)
+	}
+	if resp.GetError() != "" {
+		t.Errorf("response = %+v, want no error with no natPauser configured", resp)
+	}
+}
+
+func TestServer_SetUplinkState_NATPauseFailureDoesNotFailTheRPC(t *testing.T) {
+	vlan := &fakeVLANStatus{uplink: "em0", up: map[string]bool{"em0": true}}
+	nat := &fakeNATPauser{uplink: "em0", err: errors.New("pfctl: anchor busy")}
+	s := NewServer(nil, "node-1", nil, nil, nil, vlan, nil, "", nil, nil, nil, 0, nil)
+	s.SetNATPauser(nat)
+
+	resp, err := s.SetUplinkState(context.Background(), &rpcpb.SetUplinkStateRequest{Down: true})
+	if err != nil {
+		t.Fatalf("SetUplinkState(down) error: %v", err)
+	}
+	if resp.GetError() != "" || resp.GetUp() {
+		t.Errorf("response = %+v, want the primary down action to still succeed despite the NAT-pause error", resp)
+	}
+}
+
 func TestServer_SetUplinkState_PropagatesDownError(t *testing.T) {
 	vlan := &fakeVLANStatus{uplink: "em0", downErr: errors.New("ifconfig em0 down: device busy")}
 	s := NewServer(nil, "node-1", nil, nil, nil, vlan, nil, "", nil, nil, nil, 0, nil)

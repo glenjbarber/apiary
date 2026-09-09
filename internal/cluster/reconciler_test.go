@@ -2182,6 +2182,71 @@ func TestReconciler_NetworkArtifactStatus_UnconfiguredIsNotPresentNoError(t *tes
 	}
 }
 
+func TestReconciler_PauseOutboundNAT_FlushesOnlyOutboundNATNetworks(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "network-artifacts.json")
+	if err := saveNetworkArtifactState(path, networkArtifactState{Networks: map[string]networkArtifact{
+		"net-nat":    {Bridge: "apnet-aaaa", OutboundNAT: true},
+		"net-no-nat": {Bridge: "apnet-bbbb", OutboundNAT: false},
+	}}); err != nil {
+		t.Fatalf("saveNetworkArtifactState() error: %v", err)
+	}
+	pfMgr := newFakePFManager()
+	r := &Reconciler{PF: pfMgr, NetworkStatePath: path, Uplink: "em0"}
+
+	flushed, err := r.PauseOutboundNAT(context.Background())
+	if err != nil {
+		t.Fatalf("PauseOutboundNAT() error: %v", err)
+	}
+	if len(flushed) != 1 || flushed[0] != "net-nat" {
+		t.Errorf("PauseOutboundNAT() flushed = %v, want [net-nat]", flushed)
+	}
+	if got := pfMgr.flushed; len(got) != 1 || got[0] != natAnchor("net-nat") {
+		t.Errorf("pf.Flush calls = %v, want [%s]", got, natAnchor("net-nat"))
+	}
+}
+
+func TestReconciler_PauseOutboundNAT_NoOpWithoutPFOrNetworkStatePath(t *testing.T) {
+	pfMgr := newFakePFManager()
+	for _, r := range []*Reconciler{
+		{PF: nil, NetworkStatePath: filepath.Join(t.TempDir(), "network-artifacts.json")},
+		{PF: pfMgr, NetworkStatePath: ""},
+	} {
+		flushed, err := r.PauseOutboundNAT(context.Background())
+		if err != nil {
+			t.Fatalf("PauseOutboundNAT() error: %v, want nil when unconfigured", err)
+		}
+		if len(flushed) != 0 {
+			t.Errorf("PauseOutboundNAT() flushed = %v, want none when unconfigured", flushed)
+		}
+	}
+	if len(pfMgr.flushed) != 0 {
+		t.Errorf("pf.Flush calls = %v, want none", pfMgr.flushed)
+	}
+}
+
+func TestReconciler_PauseOutboundNAT_SurfacesFlushError(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "network-artifacts.json")
+	if err := saveNetworkArtifactState(path, networkArtifactState{Networks: map[string]networkArtifact{
+		"net-nat": {Bridge: "apnet-aaaa", OutboundNAT: true},
+	}}); err != nil {
+		t.Fatalf("saveNetworkArtifactState() error: %v", err)
+	}
+	pfMgr := newFakePFManager()
+	pfMgr.flushErr = errors.New("pfctl: anchor busy")
+	r := &Reconciler{PF: pfMgr, NetworkStatePath: path}
+
+	if _, err := r.PauseOutboundNAT(context.Background()); err == nil {
+		t.Fatal("PauseOutboundNAT() error = nil, want the underlying pfctl error surfaced")
+	}
+}
+
+func TestReconciler_NATUplink_ReturnsUplinkField(t *testing.T) {
+	r := &Reconciler{Uplink: "em0"}
+	if got := r.NATUplink(); got != "em0" {
+		t.Errorf("NATUplink() = %q, want em0", got)
+	}
+}
+
 func TestReconciler_ReconcileNetworkArtifacts_PreservesDefinedUnusedNetwork(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "network-artifacts.json")
 	artifact := networkArtifact{Bridge: "apnet-livecafe", VLANID: 120, OwnBridge: true, OwnVLAN: true, OutboundNAT: true}

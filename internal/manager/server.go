@@ -80,6 +80,17 @@ type VLANStatus interface {
 	Up(ctx context.Context) error
 }
 
+// natPauser is the subset of *cluster.Reconciler the server needs to
+// pause self-hosted outbound NAT when the uplink toggle (ADR-0085)
+// brings the matching interface down (ADR-0088) - a distinct,
+// action-taking interface from the read-only reconcilerStats below,
+// the same separation VLANStatus already keeps from plain read-only
+// status reporting elsewhere in this file.
+type natPauser interface {
+	NATUplink() string
+	PauseOutboundNAT(ctx context.Context) ([]string, error)
+}
+
 // PeerForwarder is the subset of *PeerReporter the server needs to
 // forward an operation rejected by this node's own raftd (not the
 // leader) to the current leader's own managerd instead - originally
@@ -294,6 +305,11 @@ type Server struct {
 	// this. See ADR-0087: PAM authentication lives here now, not in
 	// cmd/frontend, so frontend itself needs no cgo/native build.
 	authPAM pamAuthenticator
+
+	// nat is nil on a node with no reconciler wired up for this purpose
+	// - SetUplinkState simply skips the NAT-pause side effect rather
+	// than panicking. See ADR-0088.
+	nat natPauser
 }
 
 // SetPAMAuthenticator wires PAM login support after construction (ADR-
@@ -302,6 +318,12 @@ type Server struct {
 // here from cmd/managerd's own -pam-service flag; tests may supply a
 // fake implementing the same small interface.
 func (s *Server) SetPAMAuthenticator(auth pamAuthenticator) { s.authPAM = auth }
+
+// SetNATPauser wires the uplink-down NAT-pause side effect (ADR-0088)
+// after construction - production wires the same *cluster.Reconciler
+// already passed to NewServer for reconcilerStats, which satisfies
+// natPauser structurally via NATUplink/PauseOutboundNAT.
+func (s *Server) SetNATPauser(nat natPauser) { s.nat = nat }
 
 // quotaSetter is the subset of *zfs.Manager SetDatasetQuota and the
 // orphaned-HAST-resource RPCs need, defined locally so it can be faked
@@ -2280,7 +2302,23 @@ func (s *Server) SetUplinkState(ctx context.Context, req *rpcpb.SetUplinkStateRe
 		if err := s.vlan.Down(ctx); err != nil {
 			return &rpcpb.SetUplinkStateResponse{Error: err.Error()}, nil
 		}
-		return &rpcpb.SetUplinkStateResponse{Up: false}, nil
+		// ADR-0088: only pause outbound NAT when the interface just
+		// downed is actually the one NAT egress uses - ADR-0048 already
+		// disclosed these can be different physical interfaces, so
+		// downing an unrelated VLAN-trunk interface must not kill a
+		// working, unrelated NAT path. A pause failure is logged but
+		// doesn't fail this RPC - the primary action already succeeded.
+		var paused []string
+		if s.nat != nil {
+			if uplink := s.nat.NATUplink(); uplink != "" && uplink == s.vlan.UplinkInterface() {
+				var err error
+				paused, err = s.nat.PauseOutboundNAT(ctx)
+				if err != nil {
+					fmt.Fprintf(os.Stderr, "apiary: pausing outbound NAT after uplink down: %v\n", err)
+				}
+			}
+		}
+		return &rpcpb.SetUplinkStateResponse{Up: false, NatPausedNetworks: paused}, nil
 	}
 	if err := s.vlan.Up(ctx); err != nil {
 		return &rpcpb.SetUplinkStateResponse{Error: err.Error()}, nil

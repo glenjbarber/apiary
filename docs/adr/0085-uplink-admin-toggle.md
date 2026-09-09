@@ -71,6 +71,12 @@ same SSH session that depended on it, requiring a rollback).
   toggle itself is a manual, deliberate operator action with a visible
   effect (the interface reports "down" on the same page).
 
+  **Resolved**: `SetUplinkState` now proactively flushes the matching
+  NAT anchor(s) immediately on down, and the reconciler's own
+  unconditional-every-tick `ApplyNAT` already restores it on the next
+  tick once the interface comes back up - see
+  [ADR-0088](docs/adr/0088-pause-nat-on-uplink-down.md).
+
 ## Consequences
 
 - `internal/manager/auth.go`'s `requiredRole` map gained explicit

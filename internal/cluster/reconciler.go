@@ -420,6 +420,49 @@ func (r *Reconciler) NetworkArtifactStatus(networkID string) (present bool, brid
 	return present, artifact.Bridge, artifact.OwnBridge, artifact.OwnVLAN, artifact.OutboundNAT, nil
 }
 
+// NATUplink returns the interface name outbound NAT is configured to
+// use (the Uplink field, exposed as a method for the same reason
+// vlan.Manager.UplinkInterface is - a field and method can't share a
+// name on the same type). Used by internal/manager's uplink admin
+// toggle (ADR-0085) to decide whether bringing a given interface down
+// should also pause outbound NAT - see PauseOutboundNAT below.
+func (r *Reconciler) NATUplink() string { return r.Uplink }
+
+// PauseOutboundNAT immediately flushes the pf(8) anchor for every
+// self-hosted network this node currently has outbound NAT active for
+// (ADR-0088). Called when the uplink toggle (ADR-0085) brings the
+// matching interface down, since ensureNetwork would otherwise keep
+// silently reapplying a rule pointing at a dead interface every tick
+// - internal/pf.ApplyNAT is deliberately safe to call unconditionally
+// on every RunOnce pass, which is exactly the problem here once the
+// interface it names is down. No corresponding "resume" call exists:
+// the very next reconcile tick already re-applies NAT for any network
+// that still qualifies (same unconditional-every-tick behavior), the
+// same way every other artifact in this file recovers on its own.
+// Returns the network IDs actually flushed; a nil PF or unset
+// NetworkStatePath is a no-op, not an error - mirrors
+// NetworkArtifactStatus's own "nothing configured" posture.
+func (r *Reconciler) PauseOutboundNAT(ctx context.Context) ([]string, error) {
+	if r.PF == nil || r.NetworkStatePath == "" {
+		return nil, nil
+	}
+	state, err := loadNetworkArtifactState(r.NetworkStatePath)
+	if err != nil {
+		return nil, err
+	}
+	var flushed []string
+	for id, artifact := range state.Networks {
+		if !artifact.OutboundNAT {
+			continue
+		}
+		if err := r.PF.Flush(ctx, natAnchor(id)); err != nil {
+			return flushed, fmt.Errorf("flushing NAT anchor for network %q: %w", id, err)
+		}
+		flushed = append(flushed, id)
+	}
+	return flushed, nil
+}
+
 func unixNanoToTime(nano int64) (time.Time, bool) {
 	if nano == 0 {
 		return time.Time{}, false

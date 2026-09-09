@@ -161,6 +161,28 @@ func TestServer_SetUplinkState_ForwardsDownFlag(t *testing.T) {
 	}
 }
 
+// TestServer_SetUplinkState_MentionsPausedNATNetworks covers ADR-0088's
+// visibility requirement - a NAT pause shouldn't be a silent side
+// effect of the down action.
+func TestServer_SetUplinkState_MentionsPausedNATNetworks(t *testing.T) {
+	client := &fakeClient{
+		setUplinkStateResp:  &rpcpb.SetUplinkStateResponse{Up: false, NatPausedNetworks: []string{"net-1", "net-2"}},
+		getUplinkStatusResp: &rpcpb.GetUplinkStatusResponse{Configured: true, Interface: "em0", Up: false},
+	}
+	s := newTestServer(t, client)
+
+	form := url.Values{"down": {"true"}}
+	req := httptest.NewRequest(http.MethodPost, "/machine/uplink-state", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, req)
+
+	body := rec.Body.String()
+	if !strings.Contains(body, "paused outbound NAT for 2 network(s)") || !strings.Contains(body, "net-1") || !strings.Contains(body, "net-2") {
+		t.Errorf("response missing NAT-pause detail, got: %s", body)
+	}
+}
+
 func TestServer_UpdateNodeConfig_ForwardsFormValues(t *testing.T) {
 	client := &fakeClient{updateNodeConfigResp: &rpcpb.UpdateNodeConfigResponse{}}
 	s := newTestServer(t, client)
