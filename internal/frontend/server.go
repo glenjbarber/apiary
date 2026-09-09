@@ -19,9 +19,22 @@ import (
 	rpcpb "github.com/glenjbarber/apiary/api/rpc"
 	"github.com/glenjbarber/apiary/internal/loginconfig"
 	"github.com/glenjbarber/apiary/internal/manager"
-	"github.com/glenjbarber/apiary/internal/pam"
 	"github.com/glenjbarber/apiary/web"
 )
+
+// Authenticator abstracts how the web UI verifies a username/password
+// pair, defined locally rather than importing internal/pam's own type
+// of the same shape - ADR-0087 moved PAM's actual implementation into
+// managerd, and importing internal/pam here would drag its cgo
+// requirement (github.com/msteinert/pam/v2) into this package even
+// though nothing here would ever call it, since cgo is a per-package
+// build requirement, not a per-symbol one. cmd/frontend's own
+// remoteAuthenticator (calling managerd's AuthenticatePassword RPC)
+// satisfies this structurally, the same way pam.PAMAuthenticator used
+// to and every test's fakeAuthenticator still does.
+type Authenticator interface {
+	Authenticate(username, password string) (bool, error)
+}
 
 // pageData is passed to every full-page and fragment render - Error is
 // empty on the normal path; VMs is always the current list, even when
@@ -427,7 +440,7 @@ type Server struct {
 	// password-guessing attack against a real PAM account is at least
 	// slowed down, not merely reported as "invalid" forever with no
 	// consequence - see lockout.go.
-	auth         pam.Authenticator
+	auth         Authenticator
 	roleMapMu    sync.RWMutex
 	roleMap      map[string]manager.Role
 	roleMapStore roleMapPersister
@@ -514,7 +527,7 @@ func nodeSubtitle(nodeID string) string {
 // Server over HTTPS (see cmd/frontend's own -tls-cert/-tls-key
 // validation, done before this call) - it controls the session
 // cookie's Secure flag.
-func NewServer(client rpcpb.ManagerServiceClient, auth pam.Authenticator, roleMap map[string]manager.Role, peers peerHostStatsClient, peerHostnameSuffix, peerManagerPort string, passwords PasswordSetter, tlsEnabled bool) (*Server, error) {
+func NewServer(client rpcpb.ManagerServiceClient, auth Authenticator, roleMap map[string]manager.Role, peers peerHostStatsClient, peerHostnameSuffix, peerManagerPort string, passwords PasswordSetter, tlsEnabled bool) (*Server, error) {
 	tmpl, err := template.New("").Funcs(template.FuncMap{
 		"pageHeader":       pageHeader,
 		"vmSubtitle":       vmSubtitle,
@@ -545,8 +558,8 @@ func NewServer(client rpcpb.ManagerServiceClient, auth pam.Authenticator, roleMa
 
 // roleMapPersister is the subset of *loginconfig.Manager the server
 // needs, defined locally so tests can supply a fake without any real
-// file I/O - the same reasoning PasswordSetter/pam.Authenticator
-// already follow elsewhere in this package.
+// file I/O - the same reasoning PasswordSetter/Authenticator already
+// follow elsewhere in this package.
 type roleMapPersister interface {
 	Save(loginconfig.Config) error
 }

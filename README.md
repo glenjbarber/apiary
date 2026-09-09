@@ -236,10 +236,15 @@ each design decision, in order.
   no accounts yet grants Admin automatically to whoever logs in first
   (ADR-0086; there's no `-role-map` flag to hand-edit anymore). API
   keys (ADR-0023) gain the same
-  three-tier role. This is the one binary in the project that now
-  requires `CGO_ENABLED=1` and a native FreeBSD build — confirmed
-  live, `managerd`/`raftd`/`restshimd` are unaffected and still
-  cross-compile cleanly from any platform. Live-verified end-to-end on
+  three-tier role. The actual PAM check now lives in `managerd`, not
+  `frontend` (ADR-0087) — `frontend` calls it over gRPC
+  (`AuthenticatePassword`), which requires TLS between the two once
+  `-pam-service` is set, since a login password now travels that
+  channel. This means `managerd` is the one binary in the project that
+  now requires `CGO_ENABLED=1` and a native FreeBSD build — confirmed
+  live; `frontend` itself has no cgo dependency at all anymore and
+  cross-compiles cleanly, along with `raftd`/`restshimd`. Live-verified
+  end-to-end on
   real hardware: real PAM logins against genuine UNIX accounts, a
   wrong password rejected, an unmapped valid account rejected outright
   (default-deny), and Viewer/Operator sessions each correctly allowed

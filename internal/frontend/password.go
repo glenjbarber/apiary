@@ -17,7 +17,7 @@ const minPasswordLength = 8
 // PasswordSetter is the subset of real system behavior
 // handleChangePassword needs, defined locally so tests can supply a
 // fake without touching real UNIX accounts - the same reasoning
-// isoManager/VNCLookup/pam.Authenticator already follow elsewhere in
+// isoManager/VNCLookup/Authenticator already follow elsewhere in
 // this project.
 type PasswordSetter interface {
 	SetPassword(username, newPassword string) error

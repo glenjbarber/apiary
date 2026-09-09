@@ -35,6 +35,7 @@ import (
 	"github.com/glenjbarber/apiary/internal/netroute"
 	"github.com/glenjbarber/apiary/internal/nodeconfig"
 	"github.com/glenjbarber/apiary/internal/origincert"
+	"github.com/glenjbarber/apiary/internal/pam"
 	"github.com/glenjbarber/apiary/internal/pf"
 	"github.com/glenjbarber/apiary/internal/resetutil"
 	"github.com/glenjbarber/apiary/internal/ufsmount"
@@ -91,6 +92,7 @@ func run() error {
 	assumptionHistoryMaxAge := flag.Duration("assumption-history-max-age", 30*24*time.Hour, "maximum age of a persisted assumption history entry before it's pruned")
 	tlsCert := flag.String("tls-cert", "", "PEM certificate file for managerd's external gRPC API; leave unset (with -tls-key) to serve plaintext, as before")
 	tlsKey := flag.String("tls-key", "", "PEM private key file matching -tls-cert")
+	pamService := flag.String("pam-service", "", "PAM service name to authenticate frontend's web UI logins against (requires a matching /etc/pam.d/<name> on this host - ADR-0087, moved here from cmd/frontend); leave empty to disable login entirely. Requires -tls-cert/-tls-key to also be set, since a login password now travels over this RPC channel")
 	cloudflareTokenFile := flag.String("cloudflare-token-file", "", "path to a file containing only a Cloudflare API token scoped to Zone:DNS:Edit (see ADR-0063); leave empty to disable Cloudflare Tunnel exposure entirely on this node - never a flag value or env var, since this is a long-lived, immediately-exploitable third-party credential if leaked")
 	cloudflareZoneID := flag.String("cloudflare-zone-id", "", "Cloudflare zone ID CNAME records are created/updated in; required when -cloudflare-token-file is set")
 	cloudflareTunnelID := flag.String("cloudflare-tunnel-id", "", "this Comb's own pre-provisioned Cloudflare Tunnel id (from `cloudflared tunnel create`, run once by the operator - see ADR-0063); required when -cloudflare-token-file is set")
@@ -445,9 +447,23 @@ func run() error {
 		HistoryMaxAge:         *assumptionHistoryMaxAge,
 	}
 
+	// -pam-service requires TLS (ADR-0087): a login password now
+	// necessarily travels over this RPC channel from frontend, over the
+	// real network (-rpc-addr is not loopback-only, per ADR-0022's own
+	// bridge-migration history) - unlike before, when PAM ran in-process
+	// inside frontend and a password never crossed the wire at all.
+	// Refused outright, the same "cheap to prevent, so don't just
+	// document it" posture as the -tls-cert/-tls-key pairing check below.
+	if *pamService != "" && (*tlsCert == "" || *tlsKey == "") {
+		return fmt.Errorf("-pam-service requires -tls-cert/-tls-key to also be set - a login password must not travel to this RPC over a plaintext channel")
+	}
+
 	srv := manager.NewServer(raftClient, id, isos, vncArg, serialLogArg, vlanArg, peers, resolvedPeerPort, zfsMgr, nodeConfigMgr, assumptionsMgr, assumptionStaleAfter, reconciler)
 	srv.SetAssumptionRegister(registerMgr)
 	srv.SetOriginCAIssuer(cloudflare.OriginCAIssuer{})
+	if *pamService != "" {
+		srv.SetPAMAuthenticator(pam.PAMAuthenticator{ServiceName: *pamService})
+	}
 	originCARenewer := &origincert.Renewer{
 		Config: func() (string, string, error) {
 			cfg, err := nodeConfigMgr.Load()
@@ -495,7 +511,7 @@ func run() error {
 		serveErrCh <- grpcServer.Serve(lis)
 	}()
 
-	log.Printf("managerd: listening on %s (node-id=%s, raftd-socket=%s, vlan-uplink=%s, hast-enabled=%v, jail-enabled=%v, peer-managerd-port=%s, tls=%v, cloudflare-enabled=%v)", *rpcAddr, id, *raftdSocket, *vlanUplink, *hastEnabled, *jailEnabled, resolvedPeerPort, *tlsCert != "", *cloudflareTokenFile != "")
+	log.Printf("managerd: listening on %s (node-id=%s, raftd-socket=%s, vlan-uplink=%s, hast-enabled=%v, jail-enabled=%v, peer-managerd-port=%s, tls=%v, cloudflare-enabled=%v, pam-service=%s)", *rpcAddr, id, *raftdSocket, *vlanUplink, *hastEnabled, *jailEnabled, resolvedPeerPort, *tlsCert != "", *cloudflareTokenFile != "", *pamService)
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()

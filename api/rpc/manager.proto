@@ -11,6 +11,15 @@ option go_package = "github.com/glenjbarber/apiary/api/rpc;rpcpb";
 service ManagerService {
   rpc Status(StatusRequest) returns (StatusResponse);
 
+  // AuthenticatePassword checks a username/password pair against this
+  // node's own PAM stack (ADR-0087 - moved here from cmd/frontend,
+  // which now has no cgo/native-build requirement at all). Exempted
+  // from checkAuth entirely (see AuthUnaryInterceptor) for the same
+  // reason RequestJoinColony is: the caller proving their identity here
+  // has no Colony API key yet by definition - their eventual session
+  // role comes from frontend's own role map only after this succeeds.
+  rpc AuthenticatePassword(AuthenticatePasswordRequest) returns (AuthenticatePasswordResponse);
+
   // GetLocalNodeHealth reports THIS Hive's Evidence-Aware Health verdict
   // and the raw observations used to derive it. It never forwards to a
   // leader: local reconciliation and raft-companion observations belong to
@@ -697,6 +706,22 @@ message StatusResponse {
   // membership arithmetic alone must never be presented as availability
   // proof - see RaftMember's own doc comment.
   repeated RaftMember members = 11;
+
+  // pam_configured is true when this node has -pam-service set
+  // (ADR-0087 - PAM now lives in managerd, not frontend). frontend
+  // uses this, not a flag of its own, to decide whether to enable
+  // login at all.
+  bool pam_configured = 12;
+}
+
+message AuthenticatePasswordRequest {
+  string username = 1;
+  string password = 2;
+}
+
+message AuthenticatePasswordResponse {
+  bool ok = 1;
+  string error = 2;
 }
 
 // GetLocalNodeHealth is intentionally local-only. A caller that needs a

@@ -1141,3 +1141,64 @@ func TestServer_SetUplinkState_PropagatesDownError(t *testing.T) {
 		t.Errorf("response = %+v, want the underlying ifconfig error surfaced", resp)
 	}
 }
+
+// fakePAMAuthenticator is a fake pam.Authenticator for
+// AuthenticatePassword tests (ADR-0087), without any real libpam
+// involved.
+type fakePAMAuthenticator struct {
+	user, pass string
+	err        error
+}
+
+func (f fakePAMAuthenticator) Authenticate(username, password string) (bool, error) {
+	if f.err != nil {
+		return false, f.err
+	}
+	return username == f.user && password == f.pass, nil
+}
+
+func TestServer_AuthenticatePassword_NoPAMConfiguredIsError(t *testing.T) {
+	s := NewServer(nil, "node-1", nil, nil, nil, nil, nil, "", nil, nil, nil, 0, nil)
+
+	resp, err := s.AuthenticatePassword(context.Background(), &rpcpb.AuthenticatePasswordRequest{Username: "alice", Password: "secret"})
+	if err != nil {
+		t.Fatalf("AuthenticatePassword() error: %v", err)
+	}
+	if resp.GetError() == "" {
+		t.Errorf("response = %+v, want an error with no PAM authenticator configured", resp)
+	}
+}
+
+func TestServer_AuthenticatePassword_WrapsRealAuthenticator(t *testing.T) {
+	s := NewServer(nil, "node-1", nil, nil, nil, nil, nil, "", nil, nil, nil, 0, nil)
+	s.SetPAMAuthenticator(fakePAMAuthenticator{user: "alice", pass: "secret"})
+
+	ok, err := s.AuthenticatePassword(context.Background(), &rpcpb.AuthenticatePasswordRequest{Username: "alice", Password: "secret"})
+	if err != nil {
+		t.Fatalf("AuthenticatePassword() error: %v", err)
+	}
+	if !ok.GetOk() || ok.GetError() != "" {
+		t.Errorf("response = %+v, want ok=true no error for correct credentials", ok)
+	}
+
+	bad, err := s.AuthenticatePassword(context.Background(), &rpcpb.AuthenticatePasswordRequest{Username: "alice", Password: "wrong"})
+	if err != nil {
+		t.Fatalf("AuthenticatePassword() error: %v", err)
+	}
+	if bad.GetOk() {
+		t.Errorf("response = %+v, want ok=false for wrong password", bad)
+	}
+}
+
+func TestServer_AuthenticatePassword_PropagatesBackendError(t *testing.T) {
+	s := NewServer(nil, "node-1", nil, nil, nil, nil, nil, "", nil, nil, nil, 0, nil)
+	s.SetPAMAuthenticator(fakePAMAuthenticator{err: errors.New("pam: starting transaction: System error")})
+
+	resp, err := s.AuthenticatePassword(context.Background(), &rpcpb.AuthenticatePasswordRequest{Username: "alice", Password: "secret"})
+	if err != nil {
+		t.Fatalf("AuthenticatePassword() error: %v", err)
+	}
+	if resp.GetError() == "" {
+		t.Errorf("response = %+v, want the backend error surfaced", resp)
+	}
+}

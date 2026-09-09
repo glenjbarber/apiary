@@ -309,6 +309,14 @@ const statusMethod = "/apiary.rpc.v1.ManagerService/Status"
 const requestJoinColonyMethod = "/apiary.rpc.v1.ManagerService/RequestJoinColony"
 const getJoinRequestStatusMethod = "/apiary.rpc.v1.ManagerService/GetJoinRequestStatus"
 
+// authenticatePasswordMethod (ADR-0087) is exempted for the same
+// reason as requestJoinColonyMethod above: a caller proving their
+// identity here has no Colony API key yet, by definition - their
+// eventual session role comes from frontend's own role map only after
+// this succeeds. The real PAM check inside the handler is the actual
+// security boundary, not an API key.
+const authenticatePasswordMethod = "/apiary.rpc.v1.ManagerService/AuthenticatePassword"
+
 // AuthUnaryInterceptor/AuthStreamInterceptor gate every RPC on
 // ManagerService via checkAuth - this project's first use of gRPC
 // interceptors anywhere. UploadISO (the one streaming RPC) is checked
@@ -325,7 +333,7 @@ const getJoinRequestStatusMethod = "/apiary.rpc.v1.ManagerService/GetJoinRequest
 // reachability/leader info only), so letting it bypass auth entirely
 // is an acceptable, narrow carve-out - not a precedent for adding more.
 func (s *Server) AuthUnaryInterceptor(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
-	if info.FullMethod != statusMethod && info.FullMethod != requestJoinColonyMethod && info.FullMethod != getJoinRequestStatusMethod {
+	if info.FullMethod != statusMethod && info.FullMethod != requestJoinColonyMethod && info.FullMethod != getJoinRequestStatusMethod && info.FullMethod != authenticatePasswordMethod {
 		if err := checkAuth(ctx, info.FullMethod, raftAPIKeyValidator{s.raft}); err != nil {
 			return nil, err
 		}

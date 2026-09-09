@@ -287,3 +287,25 @@ func TestAuthUnaryInterceptor_JoinRequestExemptionsBypassCheckAuth(t *testing.T)
 		}
 	}
 }
+
+// TestAuthUnaryInterceptor_AuthenticatePasswordBypassesCheckAuth is the
+// direct regression test for AuthenticatePassword's exemption (ADR-
+// 0087): a caller proving their identity here has no Colony API key
+// yet by definition, so it must reach the handler even when auth is
+// enabled and no credential is presented - mirroring
+// requestJoinColonyMethod's own exemption test exactly.
+func TestAuthUnaryInterceptor_AuthenticatePasswordBypassesCheckAuth(t *testing.T) {
+	s := &Server{raft: nil} // AuthUnaryInterceptor never reaches checkAuth for an exempt method, so a nil raft client is fine here.
+	handlerCalled := false
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		handlerCalled = true
+		return nil, nil
+	}
+
+	if _, err := s.AuthUnaryInterceptor(context.Background(), nil, &grpc.UnaryServerInfo{FullMethod: authenticatePasswordMethod}, handler); err != nil {
+		t.Errorf("AuthUnaryInterceptor(%q) error = %v, want nil (exempt, no credential presented)", authenticatePasswordMethod, err)
+	}
+	if !handlerCalled {
+		t.Errorf("AuthUnaryInterceptor(%q) did not call the handler - exemption not applied", authenticatePasswordMethod)
+	}
+}

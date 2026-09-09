@@ -39,9 +39,11 @@ git clone https://github.com/glenjbarber/apiary.git ~/apiary
 cd ~/apiary
 ```
 
-(`go` here also satisfies `cmd/frontend`'s own cgo/PAM requirement -
-`frontend` must be built natively on the FreeBSD host it will run on,
-ADR-0030.)
+(`go` here also satisfies `cmd/managerd`'s own cgo/PAM requirement -
+`managerd` must be built natively on the FreeBSD host it will run on
+(ADR-0030/ADR-0087; PAM moved from `frontend` into `managerd` in
+ADR-0087, so `frontend` itself has no native-build requirement at
+all).)
 
 ## 2. Build all five binaries
 
@@ -274,9 +276,11 @@ daemon -f -p /var/run/apiary/frontend.pid -o /var/log/apiary/frontend.log $(pwd)
   -http-addr 0.0.0.0:8080
 ```
 
-Without `-pam-service` the web UI is open to anyone who can reach the
-port - fine for initial verification, but add real login (ADR-0030)
-before this host is reachable from anywhere untrusted.
+Without `-pam-service` on `managerd` (see Step 8), the web UI is open
+to anyone who can reach the port - fine for initial verification, but
+add real login (ADR-0030/ADR-0087) before this host is reachable from
+anywhere untrusted. `frontend` itself takes no login-related flag at
+all - it asks `managerd`'s own `Status` RPC whether PAM is configured.
 
 ## 10. Verify
 
@@ -284,14 +288,18 @@ Open `http://<this-host's-address>:8080` in a browser - the Colony
 overview page should show this Comb as `Reachable`/`healthy` with its ZFS
 pool and packet filter both reporting healthy/enabled.
 
-Without `-pam-service` on `frontend`, every page loads with no login at
+Without `-pam-service` on `managerd`, every page loads with no login at
 all and the Users page shows "no active session" - that's the expected
 state with login disabled, not a bug. Step 11 turns real login on.
 
 ## 11. (Optional but recommended) Real login via PAM
 
 Skip this only for throwaway testing - without it, the web UI is open to
-anyone who can reach the port.
+anyone who can reach the port. Since ADR-0087, PAM lives in `managerd`,
+not `frontend` - a login password now travels over the RPC channel
+between them, so `managerd` also needs `-tls-cert`/`-tls-key` set for
+`-pam-service` to be accepted at all (`managerd` refuses to start
+otherwise).
 
 **Pick a PAM service name** (e.g. `apiary`) and create its policy file.
 `make setup` does this for you (only if `/etc/pam.d/apiary` doesn't
@@ -326,15 +334,26 @@ pw useradd -n <username> -m -s /bin/sh
 passwd <username>
 ```
 
-**Restart `frontend`** with PAM enabled:
+**Restart `managerd`** with PAM enabled (requires `-tls-cert`/`-tls-key`
+to already be set - see ADR-0087):
 
 ```bash
-kill $(cat /var/run/apiary/frontend.pid)
-daemon -f -p /var/run/apiary/frontend.pid -o /var/log/apiary/frontend.log $(pwd)/frontend \
-  -manager-addr 127.0.0.1:17700 \
-  -http-addr 0.0.0.0:8080 \
+kill $(cat /var/run/apiary/managerd.pid)
+daemon -f -p /var/run/apiary/managerd.pid -o /var/log/apiary/managerd.log $(pwd)/managerd \
+  -raftd-socket /var/run/apiary/raftd.sock \
+  -rpc-addr 0.0.0.0:17700 \
+  -node-id <this-node-id> \
+  -zfs-base <your-pool-name>/apiary \
+  -bhyve-bootrom /usr/local/share/uefi-firmware/BHYVE_UEFI.fd \
+  -bhyve-bridge bridge0 \
+  -vlan-uplink <uplink-ifname> \
+  -iso-dir /var/db/apiary/isos \
+  -tls-cert <cert> -tls-key <key> \
   -pam-service apiary
 ```
+
+`frontend` picks up the change automatically the next time it calls
+`Status` - no need to restart `frontend` itself.
 
 **Log in as `<username>` right away** - since no Apiary account exists
 on this Comb yet, the first successful login automatically becomes
@@ -344,13 +363,13 @@ through the Users page (Admin-only, `/users`) - a PAM login for a
 username with no role assigned is rejected outright, not silently
 downgraded to Viewer.
 
-Log in as the intended Admin as soon as `frontend` comes up: whoever
-authenticates first wins the bootstrap, so leaving this window open on
-a host reachable by other real UNIX accounts is a real, if narrow, race
-- see ADR-0086's own disclosed risk.
+Log in as the intended Admin as soon as `managerd` comes back up:
+whoever authenticates first wins the bootstrap, so leaving this window
+open on a host reachable by other real UNIX accounts is a real, if
+narrow, race - see ADR-0086's own disclosed risk.
 
-`frontend` re-reads `/etc/pam.d/<service>` on every login attempt, not
-just at startup - fixing the file doesn't require restarting `frontend`
+`managerd` re-reads `/etc/pam.d/<service>` on every login attempt, not
+just at startup - fixing the file doesn't require restarting `managerd`
 again, only the first `-pam-service` flag change does.
 
 ## 12. Create your first network
