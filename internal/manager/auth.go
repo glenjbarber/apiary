@@ -102,6 +102,11 @@ var requiredRole = map[string]Role{
 	// Admin block below.
 	"/apiary.rpc.v1.ManagerService/GetUplinkStatus": RoleViewer,
 
+	// ListJailTemplateNames (ADR-0089) is a read-only report of this
+	// node's own local jail base templates - Viewer, same tier as
+	// ListISOs below (its direct analog).
+	"/apiary.rpc.v1.ManagerService/ListJailTemplateNames": RoleViewer,
+
 	// Operator: VM/jail/network lifecycle, ISO management, and the
 	// peer-to-peer reconciler-forwarding RPCs (ADR-0029) - a follower
 	// node forwarding its own already-authorized write needs at least
@@ -133,6 +138,12 @@ var requiredRole = map[string]Role{
 	"/apiary.rpc.v1.ManagerService/ReportVMTeardownComplete":   RoleOperator,
 	"/apiary.rpc.v1.ManagerService/ReportJailPhase":            RoleOperator,
 	"/apiary.rpc.v1.ManagerService/ReportJailTeardownComplete": RoleOperator,
+
+	// PushJailTemplateTo/ReceiveJailTemplate (ADR-0089) are the jail
+	// base-template equivalents of UploadISO/PushISOTo above - same
+	// Operator tier, same peer-to-peer-only reasoning.
+	"/apiary.rpc.v1.ManagerService/PushJailTemplateTo":  RoleOperator,
+	"/apiary.rpc.v1.ManagerService/ReceiveJailTemplate": RoleOperator,
 
 	// Admin: API-key/administration and the ForcePurge* escape hatches
 	// (a human-triggered override of a reconciler's own normal

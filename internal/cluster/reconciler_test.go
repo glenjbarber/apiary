@@ -577,6 +577,15 @@ type fakePeerReporter struct {
 	// UploadISO stream would have (the file landing in the local
 	// isostore), without a real gRPC round trip.
 	onRequestPush func(name string)
+
+	// jailTemplateNamesByAddr/requestTemplatePushCalls/onRequestTemplatePush
+	// back fetchTemplateFromPeer's tests (ADR-0089) - the jail
+	// base-template equivalents of the ISO fields above.
+	jailTemplateNamesByAddr map[string][]string
+
+	requestTemplatePushCalls []string // "addr name targetNodeID"
+	requestTemplatePushErr   error
+	onRequestTemplatePush    func(name string)
 }
 
 func (f *fakePeerReporter) ReportVMPhase(_ context.Context, addr, id, phase, phaseError string) error {
@@ -613,6 +622,21 @@ func (f *fakePeerReporter) RequestISOPush(_ context.Context, addr, name, targetN
 	}
 	if f.onRequestPush != nil {
 		f.onRequestPush(name)
+	}
+	return nil
+}
+
+func (f *fakePeerReporter) ListJailTemplateNames(_ context.Context, addr string) ([]string, error) {
+	return f.jailTemplateNamesByAddr[addr], nil
+}
+
+func (f *fakePeerReporter) RequestJailTemplatePush(_ context.Context, addr, name, targetNodeID string) error {
+	f.requestTemplatePushCalls = append(f.requestTemplatePushCalls, fmt.Sprintf("%s %s %s", addr, name, targetNodeID))
+	if f.requestTemplatePushErr != nil {
+		return f.requestTemplatePushErr
+	}
+	if f.onRequestTemplatePush != nil {
+		f.onRequestTemplatePush(name)
 	}
 	return nil
 }

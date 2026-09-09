@@ -75,6 +75,9 @@ const (
 	ManagerService_ReportJailPhase_FullMethodName             = "/apiary.rpc.v1.ManagerService/ReportJailPhase"
 	ManagerService_ReportJailTeardownComplete_FullMethodName  = "/apiary.rpc.v1.ManagerService/ReportJailTeardownComplete"
 	ManagerService_PushISOTo_FullMethodName                   = "/apiary.rpc.v1.ManagerService/PushISOTo"
+	ManagerService_ListJailTemplateNames_FullMethodName       = "/apiary.rpc.v1.ManagerService/ListJailTemplateNames"
+	ManagerService_PushJailTemplateTo_FullMethodName          = "/apiary.rpc.v1.ManagerService/PushJailTemplateTo"
+	ManagerService_ReceiveJailTemplate_FullMethodName         = "/apiary.rpc.v1.ManagerService/ReceiveJailTemplate"
 	ManagerService_GetLocalNetworkBridgeStatus_FullMethodName = "/apiary.rpc.v1.ManagerService/GetLocalNetworkBridgeStatus"
 	ManagerService_ListAssumptionResults_FullMethodName       = "/apiary.rpc.v1.ManagerService/ListAssumptionResults"
 	ManagerService_ListOrphanedHASTResources_FullMethodName   = "/apiary.rpc.v1.ManagerService/ListOrphanedHASTResources"
@@ -350,6 +353,18 @@ type ManagerServiceClient interface {
 	// has. Peer-only, mirrors the Report* RPCs' own reasoning above
 	// exactly - never meant for direct human/API-client use.
 	PushISOTo(ctx context.Context, in *PushISOToRequest, opts ...grpc.CallOption) (*PushISOToResponse, error)
+	// ListJailTemplateNames/PushJailTemplateTo/ReceiveJailTemplate
+	// (ADR-0089) mirror ListISOs/PushISOTo/UploadISO exactly, adapted for
+	// a jail base template (a ZFS dataset+snapshot, ADR-0084) instead of
+	// a flat file: ListJailTemplateNames reports which templates this
+	// node has locally; PushJailTemplateTo (peer-only, same reasoning as
+	// PushISOTo above) has this node zfs-send a template it already has
+	// to target_node_id via a real ReceiveJailTemplate client stream;
+	// ReceiveJailTemplate pipes the incoming stream into a local
+	// `zfs receive`.
+	ListJailTemplateNames(ctx context.Context, in *ListJailTemplateNamesRequest, opts ...grpc.CallOption) (*ListJailTemplateNamesResponse, error)
+	PushJailTemplateTo(ctx context.Context, in *PushJailTemplateToRequest, opts ...grpc.CallOption) (*PushJailTemplateToResponse, error)
+	ReceiveJailTemplate(ctx context.Context, opts ...grpc.CallOption) (grpc.ClientStreamingClient[ReceiveJailTemplateRequest, ReceiveJailTemplateResponse], error)
 	// GetLocalNetworkBridgeStatus reports THIS node's own local bridge
 	// status for one network - built from RaftClient.ListNetworksLocal
 	// (the already-replicated network config, read locally, never leader-
@@ -992,6 +1007,39 @@ func (c *managerServiceClient) PushISOTo(ctx context.Context, in *PushISOToReque
 	return out, nil
 }
 
+func (c *managerServiceClient) ListJailTemplateNames(ctx context.Context, in *ListJailTemplateNamesRequest, opts ...grpc.CallOption) (*ListJailTemplateNamesResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListJailTemplateNamesResponse)
+	err := c.cc.Invoke(ctx, ManagerService_ListJailTemplateNames_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *managerServiceClient) PushJailTemplateTo(ctx context.Context, in *PushJailTemplateToRequest, opts ...grpc.CallOption) (*PushJailTemplateToResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(PushJailTemplateToResponse)
+	err := c.cc.Invoke(ctx, ManagerService_PushJailTemplateTo_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *managerServiceClient) ReceiveJailTemplate(ctx context.Context, opts ...grpc.CallOption) (grpc.ClientStreamingClient[ReceiveJailTemplateRequest, ReceiveJailTemplateResponse], error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	stream, err := c.cc.NewStream(ctx, &ManagerService_ServiceDesc.Streams[2], ManagerService_ReceiveJailTemplate_FullMethodName, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &grpc.GenericClientStream[ReceiveJailTemplateRequest, ReceiveJailTemplateResponse]{ClientStream: stream}
+	return x, nil
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type ManagerService_ReceiveJailTemplateClient = grpc.ClientStreamingClient[ReceiveJailTemplateRequest, ReceiveJailTemplateResponse]
+
 func (c *managerServiceClient) GetLocalNetworkBridgeStatus(ctx context.Context, in *GetLocalNetworkBridgeStatusRequest, opts ...grpc.CallOption) (*GetLocalNetworkBridgeStatusResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(GetLocalNetworkBridgeStatusResponse)
@@ -1355,6 +1403,18 @@ type ManagerServiceServer interface {
 	// has. Peer-only, mirrors the Report* RPCs' own reasoning above
 	// exactly - never meant for direct human/API-client use.
 	PushISOTo(context.Context, *PushISOToRequest) (*PushISOToResponse, error)
+	// ListJailTemplateNames/PushJailTemplateTo/ReceiveJailTemplate
+	// (ADR-0089) mirror ListISOs/PushISOTo/UploadISO exactly, adapted for
+	// a jail base template (a ZFS dataset+snapshot, ADR-0084) instead of
+	// a flat file: ListJailTemplateNames reports which templates this
+	// node has locally; PushJailTemplateTo (peer-only, same reasoning as
+	// PushISOTo above) has this node zfs-send a template it already has
+	// to target_node_id via a real ReceiveJailTemplate client stream;
+	// ReceiveJailTemplate pipes the incoming stream into a local
+	// `zfs receive`.
+	ListJailTemplateNames(context.Context, *ListJailTemplateNamesRequest) (*ListJailTemplateNamesResponse, error)
+	PushJailTemplateTo(context.Context, *PushJailTemplateToRequest) (*PushJailTemplateToResponse, error)
+	ReceiveJailTemplate(grpc.ClientStreamingServer[ReceiveJailTemplateRequest, ReceiveJailTemplateResponse]) error
 	// GetLocalNetworkBridgeStatus reports THIS node's own local bridge
 	// status for one network - built from RaftClient.ListNetworksLocal
 	// (the already-replicated network config, read locally, never leader-
@@ -1598,6 +1658,15 @@ func (UnimplementedManagerServiceServer) ReportJailTeardownComplete(context.Cont
 }
 func (UnimplementedManagerServiceServer) PushISOTo(context.Context, *PushISOToRequest) (*PushISOToResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method PushISOTo not implemented")
+}
+func (UnimplementedManagerServiceServer) ListJailTemplateNames(context.Context, *ListJailTemplateNamesRequest) (*ListJailTemplateNamesResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ListJailTemplateNames not implemented")
+}
+func (UnimplementedManagerServiceServer) PushJailTemplateTo(context.Context, *PushJailTemplateToRequest) (*PushJailTemplateToResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method PushJailTemplateTo not implemented")
+}
+func (UnimplementedManagerServiceServer) ReceiveJailTemplate(grpc.ClientStreamingServer[ReceiveJailTemplateRequest, ReceiveJailTemplateResponse]) error {
+	return status.Error(codes.Unimplemented, "method ReceiveJailTemplate not implemented")
 }
 func (UnimplementedManagerServiceServer) GetLocalNetworkBridgeStatus(context.Context, *GetLocalNetworkBridgeStatusRequest) (*GetLocalNetworkBridgeStatusResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetLocalNetworkBridgeStatus not implemented")
@@ -2636,6 +2705,49 @@ func _ManagerService_PushISOTo_Handler(srv interface{}, ctx context.Context, dec
 	return interceptor(ctx, in, info, handler)
 }
 
+func _ManagerService_ListJailTemplateNames_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListJailTemplateNamesRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ManagerServiceServer).ListJailTemplateNames(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ManagerService_ListJailTemplateNames_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ManagerServiceServer).ListJailTemplateNames(ctx, req.(*ListJailTemplateNamesRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ManagerService_PushJailTemplateTo_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(PushJailTemplateToRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ManagerServiceServer).PushJailTemplateTo(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ManagerService_PushJailTemplateTo_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ManagerServiceServer).PushJailTemplateTo(ctx, req.(*PushJailTemplateToRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ManagerService_ReceiveJailTemplate_Handler(srv interface{}, stream grpc.ServerStream) error {
+	return srv.(ManagerServiceServer).ReceiveJailTemplate(&grpc.GenericServerStream[ReceiveJailTemplateRequest, ReceiveJailTemplateResponse]{ServerStream: stream})
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type ManagerService_ReceiveJailTemplateServer = grpc.ClientStreamingServer[ReceiveJailTemplateRequest, ReceiveJailTemplateResponse]
+
 func _ManagerService_GetLocalNetworkBridgeStatus_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(GetLocalNetworkBridgeStatusRequest)
 	if err := dec(in); err != nil {
@@ -3040,6 +3152,14 @@ var ManagerService_ServiceDesc = grpc.ServiceDesc{
 			Handler:    _ManagerService_PushISOTo_Handler,
 		},
 		{
+			MethodName: "ListJailTemplateNames",
+			Handler:    _ManagerService_ListJailTemplateNames_Handler,
+		},
+		{
+			MethodName: "PushJailTemplateTo",
+			Handler:    _ManagerService_PushJailTemplateTo_Handler,
+		},
+		{
 			MethodName: "GetLocalNetworkBridgeStatus",
 			Handler:    _ManagerService_GetLocalNetworkBridgeStatus_Handler,
 		},
@@ -3090,6 +3210,11 @@ var ManagerService_ServiceDesc = grpc.ServiceDesc{
 			StreamName:    "ProxyVMConsole",
 			Handler:       _ManagerService_ProxyVMConsole_Handler,
 			ServerStreams: true,
+			ClientStreams: true,
+		},
+		{
+			StreamName:    "ReceiveJailTemplate",
+			Handler:       _ManagerService_ReceiveJailTemplate_Handler,
 			ClientStreams: true,
 		},
 	},

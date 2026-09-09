@@ -172,6 +172,10 @@ func TestReconciler_RunOnce_ClonesJailFromBaseTemplate(t *testing.T) {
 	}
 }
 
+// TestReconciler_RunOnce_BaseTemplateMissingSnapshotIsError confirms
+// that a missing base template still fails clearly when no peer
+// forwarding is configured (ADR-0089's fallback to ADR-0084's
+// original, pre-peer-fetch behavior).
 func TestReconciler_RunOnce_BaseTemplateMissingSnapshotIsError(t *testing.T) {
 	raft := &fakeRaftClient{
 		jailsResp: &internalpb.ListJailsResponse{
@@ -182,12 +186,73 @@ func TestReconciler_RunOnce_BaseTemplateMissingSnapshotIsError(t *testing.T) {
 	jm := newFakeJailManager()
 
 	r := &Reconciler{Raft: raft, ZFS: zfs, Jail: jm, LocalNodeID: "node-a"}
-	if err := r.RunOnce(context.Background()); err == nil || !strings.Contains(err.Error(), "no snapshot") {
-		t.Fatalf("RunOnce() error: %v, want explicit missing-snapshot error", err)
+	if err := r.RunOnce(context.Background()); err == nil || !strings.Contains(err.Error(), "no peer forwarding is configured") {
+		t.Fatalf("RunOnce() error: %v, want explicit missing-snapshot/no-peers error", err)
 	}
-	assertJailPhaseError(t, raft, "jail-1", "no snapshot")
+	assertJailPhaseError(t, raft, "jail-1", "no peer forwarding is configured")
 	if len(zfs.created) != 0 || len(zfs.cloned) != 0 {
 		t.Fatal("no dataset should be created or cloned when the base template snapshot is missing")
+	}
+}
+
+// TestReconciler_RunOnce_FetchesMissingJailTemplateFromPeerBeforeCloning
+// confirms the ADR-0089 fix: a jail base template missing locally is
+// fetched from the first peer reporting it, then cloned normally.
+func TestReconciler_RunOnce_FetchesMissingJailTemplateFromPeerBeforeCloning(t *testing.T) {
+	raft := &fakeRaftClient{
+		jailsResp: &internalpb.ListJailsResponse{
+			Jails: []*internalpb.JailDefinition{{Id: "jail-1", NodeId: "node-a", BaseTemplate: "freebsd-14"}},
+		},
+		statusResp: statusResponseWithPeers("node-a", "10.0.0.1:17600", "node-b", "10.0.0.2:17600"),
+	}
+	zfs := newFakeDatasetManager()
+	zfs.mountpointFor["jail-1"] = t.TempDir()
+	jm := newFakeJailManager()
+	peers := &fakePeerReporter{
+		jailTemplateNamesByAddr: map[string][]string{"10.0.0.2:17700": {"freebsd-14"}},
+		onRequestTemplatePush: func(name string) {
+			zfs.snapshots["templates/"+name+"@apiary-template"] = true
+		},
+	}
+
+	r := &Reconciler{Raft: raft, ZFS: zfs, Jail: jm, Peers: peers, LocalNodeID: "node-a"}
+	if err := r.RunOnce(context.Background()); err != nil {
+		t.Fatalf("RunOnce() error: %v", err)
+	}
+
+	if len(peers.requestTemplatePushCalls) != 1 || peers.requestTemplatePushCalls[0] != "10.0.0.2:17700 freebsd-14 node-a" {
+		t.Errorf("RequestJailTemplatePush calls = %v, want one call to 10.0.0.2:17700 for freebsd-14 targeting node-a", peers.requestTemplatePushCalls)
+	}
+	want := "templates/freebsd-14@apiary-template->jail-1"
+	if len(zfs.cloned) != 1 || zfs.cloned[0] != want {
+		t.Errorf("Clone calls = %v, want [%q]", zfs.cloned, want)
+	}
+}
+
+// TestReconciler_RunOnce_JailTemplateNotFoundOnAnyPeerFailsWithoutCloning
+// mirrors TestReconciler_RunOnce_ISONotFoundOnAnyPeerFailsWithoutCreatingVM,
+// for jail templates.
+func TestReconciler_RunOnce_JailTemplateNotFoundOnAnyPeerFailsWithoutCloning(t *testing.T) {
+	raft := &fakeRaftClient{
+		jailsResp: &internalpb.ListJailsResponse{
+			Jails: []*internalpb.JailDefinition{{Id: "jail-1", NodeId: "node-a", BaseTemplate: "freebsd-14"}},
+		},
+		statusResp: statusResponseWithPeers("node-a", "10.0.0.1:17600", "node-b", "10.0.0.2:17600"),
+	}
+	zfs := newFakeDatasetManager()
+	zfs.mountpointFor["jail-1"] = t.TempDir()
+	jm := newFakeJailManager()
+	peers := &fakePeerReporter{jailTemplateNamesByAddr: map[string][]string{"10.0.0.2:17700": {"other-template"}}}
+
+	r := &Reconciler{Raft: raft, ZFS: zfs, Jail: jm, Peers: peers, LocalNodeID: "node-a"}
+	if err := r.RunOnce(context.Background()); err == nil {
+		t.Fatal("RunOnce() = nil error, want a clear failure when no peer has the template either")
+	}
+	if len(zfs.cloned) != 0 {
+		t.Errorf("Clone calls = %v, want none", zfs.cloned)
+	}
+	if len(peers.requestTemplatePushCalls) != 0 {
+		t.Errorf("RequestJailTemplatePush calls = %v, want none (no peer reported having the template)", peers.requestTemplatePushCalls)
 	}
 }
 

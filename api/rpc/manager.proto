@@ -296,6 +296,19 @@ service ManagerService {
   // exactly - never meant for direct human/API-client use.
   rpc PushISOTo(PushISOToRequest) returns (PushISOToResponse);
 
+  // ListJailTemplateNames/PushJailTemplateTo/ReceiveJailTemplate
+  // (ADR-0089) mirror ListISOs/PushISOTo/UploadISO exactly, adapted for
+  // a jail base template (a ZFS dataset+snapshot, ADR-0084) instead of
+  // a flat file: ListJailTemplateNames reports which templates this
+  // node has locally; PushJailTemplateTo (peer-only, same reasoning as
+  // PushISOTo above) has this node zfs-send a template it already has
+  // to target_node_id via a real ReceiveJailTemplate client stream;
+  // ReceiveJailTemplate pipes the incoming stream into a local
+  // `zfs receive`.
+  rpc ListJailTemplateNames(ListJailTemplateNamesRequest) returns (ListJailTemplateNamesResponse);
+  rpc PushJailTemplateTo(PushJailTemplateToRequest) returns (PushJailTemplateToResponse);
+  rpc ReceiveJailTemplate(stream ReceiveJailTemplateRequest) returns (ReceiveJailTemplateResponse);
+
   // GetLocalNetworkBridgeStatus reports THIS node's own local bridge
   // status for one network - built from RaftClient.ListNetworksLocal
   // (the already-replicated network config, read locally, never leader-
@@ -869,6 +882,38 @@ message PushISOToRequest {
 
 message PushISOToResponse {
   string error = 1;
+}
+
+message ListJailTemplateNamesRequest {}
+
+message ListJailTemplateNamesResponse {
+  repeated string names = 1;
+  string error = 2;
+}
+
+message PushJailTemplateToRequest {
+  string name = 1;
+  string target_node_id = 2;
+}
+
+message PushJailTemplateToResponse {
+  string error = 1;
+}
+
+message JailTemplateMetadata {
+  string name = 1;
+}
+
+message ReceiveJailTemplateRequest {
+  oneof data {
+    JailTemplateMetadata metadata = 1;
+    bytes chunk = 2;
+  }
+}
+
+message ReceiveJailTemplateResponse {
+  string name = 1;
+  string error = 2;
 }
 
 message HostStatsRequest {}
