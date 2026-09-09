@@ -9,6 +9,7 @@ import (
 	"time"
 
 	rpcpb "github.com/glenjbarber/apiary/api/rpc"
+	"github.com/glenjbarber/apiary/internal/manager"
 )
 
 func TestServer_MachinePage_ShowsNodeConfigAndLocalVMsOnly(t *testing.T) {
@@ -91,6 +92,72 @@ func TestServer_RestartNodeService_ForwardsAllowlistedName(t *testing.T) {
 	}
 	if !strings.Contains(rec.Body.String(), "restart scheduled") {
 		t.Errorf("response missing scheduled confirmation, got: %s", rec.Body.String())
+	}
+}
+
+func TestServer_MachinePage_ShowsUplinkStatusForAdmin(t *testing.T) {
+	client := &fakeClient{getUplinkStatusResp: &rpcpb.GetUplinkStatusResponse{
+		Configured: true, Interface: "em0", Up: true,
+	}}
+	s := newTestServer(t, client)
+
+	req := httptest.NewRequest(http.MethodGet, "/machine", nil)
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, req)
+
+	body := rec.Body.String()
+	if !strings.Contains(body, "Uplink") || !strings.Contains(body, "em0") || !strings.Contains(body, `hx-post="/machine/uplink-state"`) {
+		t.Errorf("machine page missing Uplink panel, got: %s", body)
+	}
+	if !strings.Contains(body, "Bring down") {
+		t.Errorf("machine page for an up interface should offer 'Bring down', got: %s", body)
+	}
+}
+
+// TestServer_MachinePage_HidesUplinkPanelForOperator confirms the
+// Uplink admin toggle (ADR-0085) is Admin-only even though the Machine
+// page itself is Operator-visible - the same defense-in-depth pattern
+// every other Admin-only section of this page already uses.
+func TestServer_MachinePage_HidesUplinkPanelForOperator(t *testing.T) {
+	client := &fakeClient{getUplinkStatusResp: &rpcpb.GetUplinkStatusResponse{
+		Configured: true, Interface: "em0", Up: true,
+	}}
+	s, err := NewServer(client, fakeAuthenticator{user: "op", pass: "secret"}, map[string]manager.Role{"op": manager.RoleOperator}, nil, "", "", nil, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	token, _ := s.sessions.Create("op", manager.RoleOperator)
+	req := httptest.NewRequest(http.MethodGet, "/machine", nil)
+	req.AddCookie(&http.Cookie{Name: sessionCookieName, Value: token})
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	if body := rec.Body.String(); strings.Contains(body, "Bring down") || strings.Contains(body, `hx-post="/machine/uplink-state"`) {
+		t.Errorf("Operator should not see the Uplink admin toggle, got: %s", body)
+	}
+}
+
+func TestServer_SetUplinkState_ForwardsDownFlag(t *testing.T) {
+	client := &fakeClient{
+		setUplinkStateResp:  &rpcpb.SetUplinkStateResponse{Up: false},
+		getUplinkStatusResp: &rpcpb.GetUplinkStatusResponse{Configured: true, Interface: "em0", Up: false},
+	}
+	s := newTestServer(t, client)
+
+	form := url.Values{"down": {"true"}}
+	req := httptest.NewRequest(http.MethodPost, "/machine/uplink-state", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, req)
+
+	if !client.lastSetUplinkStateReq.GetDown() {
+		t.Errorf("SetUplinkState request Down = false, want true")
+	}
+	if !strings.Contains(rec.Body.String(), "brought down") {
+		t.Errorf("response missing down confirmation, got: %s", rec.Body.String())
 	}
 }
 

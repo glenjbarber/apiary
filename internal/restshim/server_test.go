@@ -210,6 +210,14 @@ func (f *fakeClient) RestartNodeService(context.Context, *rpcpb.RestartNodeServi
 	return &rpcpb.RestartNodeServiceResponse{}, nil
 }
 
+func (f *fakeClient) GetUplinkStatus(context.Context, *rpcpb.GetUplinkStatusRequest, ...grpc.CallOption) (*rpcpb.GetUplinkStatusResponse, error) {
+	return &rpcpb.GetUplinkStatusResponse{}, nil
+}
+
+func (f *fakeClient) SetUplinkState(context.Context, *rpcpb.SetUplinkStateRequest, ...grpc.CallOption) (*rpcpb.SetUplinkStateResponse, error) {
+	return &rpcpb.SetUplinkStateResponse{}, nil
+}
+
 func (f *fakeClient) ReportVMPhase(context.Context, *rpcpb.ReportVMPhaseRequest, ...grpc.CallOption) (*rpcpb.ReportVMPhaseResponse, error) {
 	return &rpcpb.ReportVMPhaseResponse{}, nil
 }

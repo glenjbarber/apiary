@@ -225,6 +225,25 @@ func TestRequiredRoleFor_ProxyVMConsoleIsViewer(t *testing.T) {
 	}
 }
 
+func TestRequiredRoleFor_GetUplinkStatusIsViewer(t *testing.T) {
+	const method = "/apiary.rpc.v1.ManagerService/GetUplinkStatus"
+	if got := requiredRoleFor(method); got != RoleViewer {
+		t.Errorf("requiredRoleFor(%q) = %q, want %q", method, got, RoleViewer)
+	}
+}
+
+// TestRequiredRoleFor_SetUplinkStateIsAdmin guards against the same
+// easy-to-miss failure mode as SimulateNodeFailure's own test above -
+// SetUplinkState (ADR-0085) is a host-wide physical change with a real
+// risk of severing this node's own network access, the same tier as
+// UpdateNodeConfig.
+func TestRequiredRoleFor_SetUplinkStateIsAdmin(t *testing.T) {
+	const method = "/apiary.rpc.v1.ManagerService/SetUplinkState"
+	if got := requiredRoleFor(method); got != RoleAdmin {
+		t.Errorf("requiredRoleFor(%q) = %q, want %q", method, got, RoleAdmin)
+	}
+}
+
 // TestRequiredRoleFor_JoinRequestRPCsAreAdmin guards against the same
 // easy-to-miss failure mode as SimulateNodeFailure's own test above,
 // for ADR-0083's three Admin-gated Colony-join RPCs - approving a

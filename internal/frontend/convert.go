@@ -272,6 +272,23 @@ func fromRPCNodeServices(resp *rpcpb.ListNodeServicesResponse) []nodeServiceView
 	return services
 }
 
+// uplinkStatusView is the template-facing view of this Comb's own
+// uplink interface state (ADR-0085) - Configured is false when this
+// node has no VLAN/uplink support at all.
+type uplinkStatusView struct {
+	Configured bool
+	Interface  string
+	Up         bool
+}
+
+func fromRPCUplinkStatus(resp *rpcpb.GetUplinkStatusResponse) uplinkStatusView {
+	return uplinkStatusView{
+		Configured: resp.GetConfigured(),
+		Interface:  resp.GetInterface(),
+		Up:         resp.GetUp(),
+	}
+}
+
 // networkView is the template-facing shape for a NetworkDefinition.
 type networkView struct {
 	ID              string

@@ -57,9 +57,13 @@ type SerialLogLookup interface {
 
 // VLANStatus is the subset of *vlan.Manager the server needs for
 // ListNetworks's per-node bridge status, defined locally for the same
-// reason as isoManager.
+// reason as isoManager. UplinkInterface/Down/Up back the Machine page's
+// uplink admin toggle (ADR-0085) - GetUplinkStatus/SetUplinkState.
 type VLANStatus interface {
 	InterfaceStatus(ctx context.Context, name string) (exists, up bool, err error)
+	UplinkInterface() string
+	Down(ctx context.Context) error
+	Up(ctx context.Context) error
 }
 
 // PeerForwarder is the subset of *PeerReporter the server needs to
@@ -2201,6 +2205,44 @@ func (s *Server) RestartNodeService(ctx context.Context, req *rpcpb.RestartNodeS
 		}
 	}()
 	return &rpcpb.RestartNodeServiceResponse{Scheduled: true}, nil
+}
+
+// GetUplinkStatus reports this node's own uplink interface name and
+// current up/down state (ADR-0085) - Configured is false when this
+// node has no VLAN/uplink support at all (-vlan-uplink unset).
+func (s *Server) GetUplinkStatus(ctx context.Context, _ *rpcpb.GetUplinkStatusRequest) (*rpcpb.GetUplinkStatusResponse, error) {
+	if s.vlan == nil {
+		return &rpcpb.GetUplinkStatusResponse{Configured: false}, nil
+	}
+	name := s.vlan.UplinkInterface()
+	_, up, err := s.vlan.InterfaceStatus(ctx, name)
+	if err != nil {
+		return &rpcpb.GetUplinkStatusResponse{Configured: true, Interface: name, Error: err.Error()}, nil
+	}
+	return &rpcpb.GetUplinkStatusResponse{Configured: true, Interface: name, Up: up}, nil
+}
+
+// SetUplinkState administratively brings this node's uplink interface
+// down or back up (ADR-0085). This is a genuinely dangerous action if
+// the caller's own network path shares the uplink interface - see
+// ADR-0085 and ADR-0022's own prior near-miss doing something adjacent
+// (bridging the same interface an SSH session depended on). Apiary
+// does not attempt an automatic revert; the confirmation is the
+// frontend's own hx-confirm dialog, by explicit user choice.
+func (s *Server) SetUplinkState(ctx context.Context, req *rpcpb.SetUplinkStateRequest) (*rpcpb.SetUplinkStateResponse, error) {
+	if s.vlan == nil {
+		return &rpcpb.SetUplinkStateResponse{Error: "this node has no VLAN/uplink support configured"}, nil
+	}
+	if req.GetDown() {
+		if err := s.vlan.Down(ctx); err != nil {
+			return &rpcpb.SetUplinkStateResponse{Error: err.Error()}, nil
+		}
+		return &rpcpb.SetUplinkStateResponse{Up: false}, nil
+	}
+	if err := s.vlan.Up(ctx); err != nil {
+		return &rpcpb.SetUplinkStateResponse{Error: err.Error()}, nil
+	}
+	return &rpcpb.SetUplinkStateResponse{Up: true}, nil
 }
 
 // applyJailCommand mirrors applyNetworkCommand, for commands whose

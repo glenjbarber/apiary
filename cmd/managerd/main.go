@@ -352,26 +352,31 @@ func run() error {
 	// matters here: a boxed nil pointer would panic the first time
 	// GetVMConsole called a method on it.
 	var bhyveMgr *bhyve.Manager
-	var vlanMgr *vlan.Manager
 	if *bhyveBootROM != "" {
 		bhyveMgr = bhyve.New(*bhyvePrefix)
 		reconciler.Bhyve = bhyveMgr
+	}
 
-		// VLAN/DHCP/PF only make sense alongside real bhyve provisioning
-		// (a dataset-only node has no VM NICs to attach anywhere), and
-		// VLAN specifically needs a real uplink interface to tag onto -
-		// leave all three nil (network management disabled on this
-		// node) if either prerequisite is missing, the same opt-in
-		// pattern as Bhyve/ISOs above.
-		if *vlanUplink != "" {
-			vlanMgr = &vlan.Manager{Uplink: *vlanUplink}
-			reconciler.VLAN = vlanMgr
-			reconciler.DHCP = &dhcpd.Manager{}
-			reconciler.PF = &pf.Manager{}
-			reconciler.Uplink = *vlanUplink
-			if *natUplink != "" {
-				reconciler.Uplink = *natUplink
-			}
+	// VLAN/DHCP/PF used to be nested inside the bhyve-enabled branch
+	// above, on the reasoning that "a dataset-only node has no VM NICs
+	// to attach anywhere." That doesn't hold: jails use ip4=inherit, so
+	// they never needed VLAN/DHCP either, and this coupling had a real,
+	// previously undiscovered side effect - it silently left
+	// reconciler.Uplink unset (so assumecheck.Checker's uplink-mismatch
+	// health check went inert) on any node with bhyve disabled,
+	// regardless of jails. VLAN specifically still needs a real uplink
+	// interface to tag onto, so this is keyed only on -vlan-uplink now -
+	// the same opt-in pattern as Bhyve/ISOs above, just independent of
+	// it. See ADR-0085.
+	var vlanMgr *vlan.Manager
+	if *vlanUplink != "" {
+		vlanMgr = &vlan.Manager{Uplink: *vlanUplink}
+		reconciler.VLAN = vlanMgr
+		reconciler.DHCP = &dhcpd.Manager{}
+		reconciler.PF = &pf.Manager{}
+		reconciler.Uplink = *vlanUplink
+		if *natUplink != "" {
+			reconciler.Uplink = *natUplink
 		}
 	}
 

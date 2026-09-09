@@ -56,6 +56,37 @@ func (m *Manager) InterfaceStatus(ctx context.Context, name string) (exists, up 
 	return true, isUp(out), nil
 }
 
+// UplinkInterface returns the configured uplink interface name (the
+// Uplink field itself, exposed as a method so *Manager can satisfy an
+// interface a struct field can't - see internal/manager's VLANStatus).
+func (m *Manager) UplinkInterface() string {
+	return m.Uplink
+}
+
+// Down administratively brings the uplink interface down
+// (`ifconfig <uplink> down`) - an explicit, operator-triggered action,
+// never called by the reconciler's own tick loop (see ADR-0085: EnsureVLAN
+// already short-circuits for the untagged/raw-uplink case without any
+// ifconfig calls, so a downed uplink is never silently re-upped by normal
+// reconciliation).
+func (m *Manager) Down(ctx context.Context) error {
+	if m.Uplink == "" {
+		return fmt.Errorf("vlan: no uplink interface configured")
+	}
+	_, err := runCmd(ctx, "ifconfig", m.Uplink, "down")
+	return err
+}
+
+// Up administratively brings the uplink interface back up
+// (`ifconfig <uplink> up`), reversing Down.
+func (m *Manager) Up(ctx context.Context) error {
+	if m.Uplink == "" {
+		return fmt.Errorf("vlan: no uplink interface configured")
+	}
+	_, err := runCmd(ctx, "ifconfig", m.Uplink, "up")
+	return err
+}
+
 // isUp parses whether the interface is up from the first line of
 // `ifconfig <name>`'s output, e.g.
 // "bridge0: flags=8843<UP,BROADCAST,RUNNING,SIMPLEX,MULTICAST> ..." -

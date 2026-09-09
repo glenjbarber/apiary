@@ -96,6 +96,12 @@ var requiredRole = map[string]Role{
 	"/apiary.rpc.v1.ManagerService/GetLocalNetworkBridgeStatus": RoleViewer,
 	"/apiary.rpc.v1.ManagerService/ListAssumptionResults":       RoleViewer,
 
+	// GetUplinkStatus (ADR-0085) is a read-only report of this node's
+	// own uplink interface state - Viewer, same tier as HostStats
+	// above. The paired write, SetUplinkState, is Admin-tier - see the
+	// Admin block below.
+	"/apiary.rpc.v1.ManagerService/GetUplinkStatus": RoleViewer,
+
 	// Operator: VM/jail/network lifecycle, ISO management, and the
 	// peer-to-peer reconciler-forwarding RPCs (ADR-0029) - a follower
 	// node forwarding its own already-authorized write needs at least
@@ -139,6 +145,12 @@ var requiredRole = map[string]Role{
 	"/apiary.rpc.v1.ManagerService/ListAPIKeys":                 RoleAdmin,
 	"/apiary.rpc.v1.ManagerService/RevokeAPIKey":                RoleAdmin,
 	"/apiary.rpc.v1.ManagerService/UpdateNodeConfig":            RoleAdmin,
+
+	// SetUplinkState (ADR-0085) administratively downs/ups this node's
+	// uplink interface - a host-wide physical change with a real risk
+	// of severing the node's own network access, the same tier as
+	// UpdateNodeConfig above.
+	"/apiary.rpc.v1.ManagerService/SetUplinkState": RoleAdmin,
 
 	// ListJoinRequests/ApproveJoinRequest/RejectJoinRequest (ADR-0083):
 	// approving a request calls AddVoter against this node's own raft
