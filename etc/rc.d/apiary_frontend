@@ -17,10 +17,14 @@ load_rc_config "$name"
 : ${apiary_frontend_logfile:="/var/log/apiary/frontend.log"}
 
 rc_flags=""
-procname="/usr/local/libexec/apiary/frontend"
+frontend_bin="/usr/local/libexec/apiary/frontend"
+# See apiary_raftd's own copy of this -P/procname setup for why it's
+# needed - the same daemon(8) -p+-r orphan-respawn defect applies
+# identically here.
+procname="/usr/sbin/daemon"
 pidfile="/var/run/${name}.pid"
 command="/usr/sbin/daemon"
-command_args="-f -r -R 5 -C 24 -o ${apiary_frontend_logfile} -p ${pidfile} ${procname} ${apiary_frontend_args}"
+command_args="-f -r -R 5 -C 24 -o ${apiary_frontend_logfile} -P ${pidfile} ${frontend_bin} ${apiary_frontend_args}"
 
 start_precmd="apiary_frontend_loadenv"
 apiary_frontend_loadenv()
