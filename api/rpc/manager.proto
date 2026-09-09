@@ -1324,6 +1324,13 @@ message SetUplinkStateResponse {
   // successful down, true after a successful up.
   bool up = 1;
   string error = 2;
+
+  // nat_paused_networks (ADR-0088) lists the self-hosted networks
+  // whose outbound-NAT pf(8) anchor was flushed as a side effect of
+  // this down request, when the downed interface matches this node's
+  // own NAT-egress interface. Always empty for an "up" request - the
+  // next reconcile tick restores NAT on its own, nothing to report here.
+  repeated string nat_paused_networks = 3;
 }
 
 message CreateNetworkRequest {

@@ -1,6 +1,7 @@
 package frontend
 
 import (
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -632,6 +633,9 @@ func (s *Server) handleSetUplinkState(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	success := "uplink brought down"
+	if paused := resp.GetNatPausedNetworks(); len(paused) > 0 {
+		success = fmt.Sprintf("uplink brought down (also paused outbound NAT for %d network(s): %s)", len(paused), strings.Join(paused, ", "))
+	}
 	if resp.GetUp() {
 		success = "uplink brought back up"
 	}

@@ -6782,10 +6782,16 @@ type SetUplinkStateResponse struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// up reports the interface's resulting state - false after a
 	// successful down, true after a successful up.
-	Up            bool   `protobuf:"varint,1,opt,name=up,proto3" json:"up,omitempty"`
-	Error         string `protobuf:"bytes,2,opt,name=error,proto3" json:"error,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	Up    bool   `protobuf:"varint,1,opt,name=up,proto3" json:"up,omitempty"`
+	Error string `protobuf:"bytes,2,opt,name=error,proto3" json:"error,omitempty"`
+	// nat_paused_networks (ADR-0088) lists the self-hosted networks
+	// whose outbound-NAT pf(8) anchor was flushed as a side effect of
+	// this down request, when the downed interface matches this node's
+	// own NAT-egress interface. Always empty for an "up" request - the
+	// next reconcile tick restores NAT on its own, nothing to report here.
+	NatPausedNetworks []string `protobuf:"bytes,3,rep,name=nat_paused_networks,json=natPausedNetworks,proto3" json:"nat_paused_networks,omitempty"`
+	unknownFields     protoimpl.UnknownFields
+	sizeCache         protoimpl.SizeCache
 }
 
 func (x *SetUplinkStateResponse) Reset() {
@@ -6830,6 +6836,13 @@ func (x *SetUplinkStateResponse) GetError() string {
 		return x.Error
 	}
 	return ""
+}
+
+func (x *SetUplinkStateResponse) GetNatPausedNetworks() []string {
+	if x != nil {
+		return x.NatPausedNetworks
+	}
+	return nil
 }
 
 type CreateNetworkRequest struct {
@@ -12009,10 +12022,11 @@ const file_api_rpc_manager_proto_rawDesc = "" +
 	"\x02up\x18\x03 \x01(\bR\x02up\x12\x14\n" +
 	"\x05error\x18\x04 \x01(\tR\x05error\"+\n" +
 	"\x15SetUplinkStateRequest\x12\x12\n" +
-	"\x04down\x18\x01 \x01(\bR\x04down\">\n" +
+	"\x04down\x18\x01 \x01(\bR\x04down\"n\n" +
 	"\x16SetUplinkStateResponse\x12\x0e\n" +
 	"\x02up\x18\x01 \x01(\bR\x02up\x12\x14\n" +
-	"\x05error\x18\x02 \x01(\tR\x05error\"q\n" +
+	"\x05error\x18\x02 \x01(\tR\x05error\x12.\n" +
+	"\x13nat_paused_networks\x18\x03 \x03(\tR\x11natPausedNetworks\"q\n" +
 	"\x14CreateNetworkRequest\x12:\n" +
 	"\anetwork\x18\x01 \x01(\v2 .apiary.rpc.v1.NetworkDefinitionR\anetwork\x12\x1d\n" +
 	"\n" +

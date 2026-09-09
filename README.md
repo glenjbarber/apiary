@@ -773,7 +773,13 @@ each design decision, in order.
   `managerd` was nested inside bhyve being enabled, which silently also
   disabled uplink-mismatch health checking on any bhyve-disabled node —
   now keyed only on `-vlan-uplink`, independent of bhyve. See
-  [ADR-0085](docs/adr/0085-uplink-admin-toggle.md).
+  [ADR-0085](docs/adr/0085-uplink-admin-toggle.md). **Update**: bringing
+  the uplink down now also immediately pauses outbound NAT for any
+  self-hosted network using that interface (rather than leaving a
+  stale `nat-to` rule silently pointing at a dead interface) — no
+  separate "resume" step needed, since the reconciler already
+  re-applies NAT on its own next tick once the interface comes back
+  up. See [ADR-0088](docs/adr/0088-pause-nat-on-uplink-down.md).
 - Importing VMs from other hypervisors (e.g. Proxmox): no disk-format
   conversion, and Apiary is UEFI-only. Linux containers have no path at
   all — jails share the host FreeBSD kernel
