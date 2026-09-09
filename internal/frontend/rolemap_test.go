@@ -3,6 +3,7 @@ package frontend
 import (
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 
@@ -253,3 +254,92 @@ var errSaveBoom = &saveBoomError{}
 type saveBoomError struct{}
 
 func (*saveBoomError) Error() string { return "disk full" }
+
+// TestServer_Login_EmptyRoleMap_FirstSuccessfulLoginBecomesAdmin covers
+// ADR-0086's replacement for the removed -role-map flag: a fresh Comb
+// with nobody yet in its role map grants Admin to whoever logs in
+// first, and persists it exactly like any other role-map edit.
+func TestServer_Login_EmptyRoleMap_FirstSuccessfulLoginBecomesAdmin(t *testing.T) {
+	store := &fakeRoleMapStore{}
+	s := newTestServerWithRoles(t, map[string]manager.Role{}, fakeAuthenticator{user: "alice", pass: "secret"}, &fakePasswordSetter{})
+	s.SetRoleMapStore(store)
+
+	form := url.Values{"username": {"alice"}, "password": {"secret"}}
+	req := httptest.NewRequest(http.MethodPost, "/login", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusFound || rec.Header().Get("Location") != "/" {
+		t.Fatalf("status/location = %d %q, want 302 to /", rec.Code, rec.Header().Get("Location"))
+	}
+	var token string
+	for _, c := range rec.Result().Cookies() {
+		if c.Name == sessionCookieName {
+			token = c.Value
+		}
+	}
+	if token == "" {
+		t.Fatalf("no session cookie set on the bootstrap login")
+	}
+	if store.saves != 1 || store.lastSave.RoleMap["alice"] != "admin" {
+		t.Errorf("persisted role map = %+v (saves=%d), want alice:admin", store.lastSave.RoleMap, store.saves)
+	}
+	s.roleMapMu.RLock()
+	got := s.roleMap["alice"]
+	s.roleMapMu.RUnlock()
+	if got != manager.RoleAdmin {
+		t.Errorf("in-memory role for alice = %q, want admin", got)
+	}
+}
+
+// TestServer_Login_BootstrapDoesNotRetriggerAfterFirstAdmin confirms
+// the bootstrap is one-shot: once any user has been granted a role
+// (even outside a login, e.g. this test seeds it directly), a
+// different user with no role-map entry gets the normal rejection, not
+// a second, unintended Admin grant.
+func TestServer_Login_BootstrapDoesNotRetriggerAfterFirstAdmin(t *testing.T) {
+	store := &fakeRoleMapStore{}
+	s := newTestServerWithRoles(t, map[string]manager.Role{"alice": manager.RoleAdmin}, fakeAuthenticator{user: "eve", pass: "secret"}, &fakePasswordSetter{})
+	s.SetRoleMapStore(store)
+
+	form := url.Values{"username": {"eve"}, "password": {"secret"}}
+	req := httptest.NewRequest(http.MethodPost, "/login", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (re-render with error, not a redirect)", rec.Code)
+	}
+	if !strings.Contains(rec.Body.String(), "no Apiary role is assigned") {
+		t.Errorf("response missing no-role error, got: %s", rec.Body.String())
+	}
+	if store.saves != 0 {
+		t.Errorf("Save() called %d times, want 0 - bootstrap must not retrigger once the role map is non-empty", store.saves)
+	}
+	for _, c := range rec.Result().Cookies() {
+		if c.Name == sessionCookieName {
+			t.Errorf("a session cookie should not be set for an unmapped user")
+		}
+	}
+}
+
+// TestServer_LoginPage_ShowsBootstrapNoticeOnlyWhenRoleMapEmpty covers
+// the login page's own visibility of the bootstrap mechanic (ADR-0086) -
+// it should be a visible state, not a silent trick.
+func TestServer_LoginPage_ShowsBootstrapNoticeOnlyWhenRoleMapEmpty(t *testing.T) {
+	empty := newTestServerWithRoles(t, map[string]manager.Role{}, fakeAuthenticator{user: "alice", pass: "secret"}, &fakePasswordSetter{})
+	rec := httptest.NewRecorder()
+	empty.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/login", nil))
+	if !strings.Contains(rec.Body.String(), "first successful login") {
+		t.Errorf("login page with an empty role map should mention the bootstrap, got: %s", rec.Body.String())
+	}
+
+	populated := newTestServerWithRoles(t, map[string]manager.Role{"admin": manager.RoleAdmin}, fakeAuthenticator{user: "admin", pass: "secret"}, &fakePasswordSetter{})
+	rec2 := httptest.NewRecorder()
+	populated.ServeHTTP(rec2, httptest.NewRequest(http.MethodGet, "/login", nil))
+	if strings.Contains(rec2.Body.String(), "first successful login") {
+		t.Errorf("login page with a populated role map should not mention the bootstrap, got: %s", rec2.Body.String())
+	}
+}

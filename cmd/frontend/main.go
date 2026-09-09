@@ -10,7 +10,6 @@ import (
 	"log"
 	"net/http"
 	"os"
-	"strings"
 
 	"google.golang.org/grpc"
 
@@ -37,47 +36,6 @@ func (k apiKeyCredentials) GetRequestMetadata(context.Context, ...string) (map[s
 
 func (apiKeyCredentials) RequireTransportSecurity() bool { return false }
 
-// parseRoleMap parses the -role-map flag's
-// "admin:alice;operator:bob,carol;viewer:dave" format into a
-// per-username Role lookup (ADR-0030) - deliberately independent of
-// any UNIX/AD group, per the project's explicit "don't use the
-// operator GID" requirement. An empty spec is valid (no login is
-// possible until at least one username is mapped, since handleLogin
-// rejects any username with no entry).
-func parseRoleMap(spec string) (map[string]manager.Role, error) {
-	roleMap := make(map[string]manager.Role)
-	if strings.TrimSpace(spec) == "" {
-		return roleMap, nil
-	}
-	for _, group := range strings.Split(spec, ";") {
-		group = strings.TrimSpace(group)
-		if group == "" {
-			continue
-		}
-		parts := strings.SplitN(group, ":", 2)
-		if len(parts) != 2 {
-			return nil, fmt.Errorf("invalid -role-map entry %q: want \"role:user1,user2\"", group)
-		}
-		role := manager.Role(strings.TrimSpace(parts[0]))
-		switch role {
-		case manager.RoleAdmin, manager.RoleOperator, manager.RoleViewer:
-		default:
-			return nil, fmt.Errorf("invalid -role-map role %q: want admin, operator, or viewer", role)
-		}
-		for _, user := range strings.Split(parts[1], ",") {
-			user = strings.TrimSpace(user)
-			if user == "" {
-				continue
-			}
-			if existing, dup := roleMap[user]; dup {
-				return nil, fmt.Errorf("-role-map lists user %q twice (as both %s and %s)", user, existing, role)
-			}
-			roleMap[user] = role
-		}
-	}
-	return roleMap, nil
-}
-
 func main() {
 	if err := run(); err != nil {
 		log.Fatalf("frontend: %v", err)
@@ -88,7 +46,6 @@ func run() error {
 	managerAddr := flag.String("manager-addr", "127.0.0.1:17700", "TCP address of managerd's external RPC API")
 	httpAddr := flag.String("http-addr", "127.0.0.1:8080", "address to serve the web UI on")
 	pamService := flag.String("pam-service", "", "PAM service name to authenticate web UI logins against (requires a matching /etc/pam.d/<name> on this host - ADR-0030); leave empty to disable login entirely")
-	roleMapFlag := flag.String("role-map", "", "maps usernames to Apiary roles, e.g. \"admin:alice;operator:bob,carol;viewer:dave\" (ADR-0030) - a PAM login for a username with no entry here is rejected, not silently downgraded to viewer")
 	managerTLS := flag.Bool("manager-tls", false, "dial managerd over TLS instead of plaintext (must match managerd's own -tls-cert/-tls-key)")
 	managerTLSCA := flag.String("manager-tls-ca", "", "PEM CA file to trust for managerd's certificate (for a self-signed cert); leave empty to trust the system certificate pool")
 	managerTLSServerName := flag.String("manager-tls-server-name", "", "hostname to verify managerd's certificate against, if different from -manager-addr's host (e.g. managerd stays loopback-only but its cert names a real public hostname); leave empty to verify against -manager-addr itself")
@@ -122,18 +79,16 @@ func run() error {
 	}
 	defer conn.Close()
 
-	roleMap, err := parseRoleMap(*roleMapFlag)
-	if err != nil {
-		return fmt.Errorf("parsing -role-map: %w", err)
-	}
-
-	// The persisted role-map override (see internal/loginconfig, wired
-	// to the Users page's Admin-only add/change-role/remove actions)
-	// wins wholesale over -role-map once it has ever been written -
-	// mirroring cmd/managerd's own nodeconfig-over-flags precedent
-	// (ADR-0049). Physical, per-node state; never routed through raft,
-	// since who may log in to one Hive's web UI is that Hive's own
-	// concern.
+	// The persisted role map (see internal/loginconfig, wired to the
+	// Users page's Admin-only add/change-role/remove actions) is the
+	// sole source of who may log in - physical, per-node state, never
+	// routed through raft, since who may log in to one Hive's web UI is
+	// that Hive's own concern. When no file has ever been written yet
+	// (a fresh Comb), roleMap starts empty and the very first
+	// successful login becomes Admin automatically (ADR-0086,
+	// replacing the old -role-map bootstrap flag) - see
+	// frontend.Server.bootstrapFirstAdmin.
+	roleMap := map[string]manager.Role{}
 	roleMapMgr := &loginconfig.Manager{}
 	if cfg, exists, err := roleMapMgr.Load(); err != nil {
 		return fmt.Errorf("loading persisted role map: %w", err)
@@ -173,9 +128,13 @@ func run() error {
 	}
 	srv.SetRoleMapStore(roleMapMgr)
 	if auth != nil {
-		log.Printf("frontend: login enabled (pam-service=%s, %d role-mapped user(s))", *pamService, len(roleMap))
+		if len(roleMap) == 0 {
+			log.Printf("frontend: login enabled (pam-service=%s), no accounts yet - the first successful login becomes Admin", *pamService)
+		} else {
+			log.Printf("frontend: login enabled (pam-service=%s, %d role-mapped user(s))", *pamService, len(roleMap))
+		}
 	} else {
-		log.Printf("frontend: no login configured (set -pam-service/-role-map to require one)")
+		log.Printf("frontend: no login configured (set -pam-service to require one)")
 	}
 
 	log.Printf("frontend: listening on %s (manager-addr=%s, manager-tls=%v, tls=%v)", *httpAddr, *managerAddr, *managerTLS, tlsEnabled)

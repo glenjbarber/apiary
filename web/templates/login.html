@@ -7,6 +7,7 @@
     <a class="brand login-brand" href="/" aria-label="Apiary home"><img class="brand-logo" src="/static/apiary-mark.svg" alt=""><span class="brand-name">APIARY</span></a>
     <h1>Log in</h1>
     <div class="muted">Manage the Apiary Colony.</div>
+    {{if .BootstrapPending}}<div class="muted">No Apiary accounts exist yet on this Comb - the first successful login here becomes Admin.</div>{{end}}
     <form method="post" action="/login" class="create-vm inline-form">
       <label>Username <input type="text" name="username" required autofocus></label>
       <label>Password <input type="password" name="password" required></label>

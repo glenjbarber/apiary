@@ -274,9 +274,9 @@ daemon -f -p /var/run/apiary/frontend.pid -o /var/log/apiary/frontend.log $(pwd)
   -http-addr 0.0.0.0:8080
 ```
 
-Without `-pam-service`/`-role-map` the web UI is open to anyone who can
-reach the port - fine for initial verification, but add real login
-(ADR-0030) before this host is reachable from anywhere untrusted.
+Without `-pam-service` the web UI is open to anyone who can reach the
+port - fine for initial verification, but add real login (ADR-0030)
+before this host is reachable from anywhere untrusted.
 
 ## 10. Verify
 
@@ -284,10 +284,9 @@ Open `http://<this-host's-address>:8080` in a browser - the Colony
 overview page should show this Comb as `Reachable`/`healthy` with its ZFS
 pool and packet filter both reporting healthy/enabled.
 
-Without `-pam-service`/`-role-map` on `frontend`, every page loads with no
-login at all and the Users page shows "no active session" - that's the
-expected state with login disabled, not a bug. Step 11 turns real login
-on.
+Without `-pam-service` on `frontend`, every page loads with no login at
+all and the Users page shows "no active session" - that's the expected
+state with login disabled, not a bug. Step 11 turns real login on.
 
 ## 11. (Optional but recommended) Real login via PAM
 
@@ -327,21 +326,28 @@ pw useradd -n <username> -m -s /bin/sh
 passwd <username>
 ```
 
-**Restart `frontend`** with PAM and a role map:
+**Restart `frontend`** with PAM enabled:
 
 ```bash
 kill $(cat /var/run/apiary/frontend.pid)
 daemon -f -p /var/run/apiary/frontend.pid -o /var/log/apiary/frontend.log $(pwd)/frontend \
   -manager-addr 127.0.0.1:17700 \
   -http-addr 0.0.0.0:8080 \
-  -pam-service apiary \
-  -role-map "admin:<username>"
+  -pam-service apiary
 ```
 
-A PAM login for a username with no entry in `-role-map` is rejected
-outright, not silently downgraded to Viewer (ADR-0030) - add every
-account that should be able to log in to the map, semicolon-separated by
-role (`"admin:alice;operator:bob,carol;viewer:dave"`).
+**Log in as `<username>` right away** - since no Apiary account exists
+on this Comb yet, the first successful login automatically becomes
+Admin (ADR-0086; the login page itself says so while this is true).
+Every login after that first one needs an explicit role, granted
+through the Users page (Admin-only, `/users`) - a PAM login for a
+username with no role assigned is rejected outright, not silently
+downgraded to Viewer.
+
+Log in as the intended Admin as soon as `frontend` comes up: whoever
+authenticates first wins the bootstrap, so leaving this window open on
+a host reachable by other real UNIX accounts is a real, if narrow, race
+- see ADR-0086's own disclosed risk.
 
 `frontend` re-reads `/etc/pam.d/<service>` on every login attempt, not
 just at startup - fixing the file doesn't require restarting `frontend`
