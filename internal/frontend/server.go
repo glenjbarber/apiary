@@ -235,6 +235,12 @@ type pageData struct {
 	ServiceFormError   string
 	ServiceFormSuccess string
 
+	// UplinkStatus backs the Machine page's uplink admin down/up toggle
+	// (ADR-0085). UplinkFormError/Success report a toggle result there.
+	UplinkStatus      uplinkStatusView
+	UplinkFormError   string
+	UplinkFormSuccess string
+
 	// Simulate* back the Dependency Graph Simulator page ("/simulate",
 	// ADR-0052). SimulateNodes is the union of raft membership and every
 	// VM/jail's node_id/replica_node_id - a node can remain a valid
@@ -771,6 +777,11 @@ func (s *Server) routes() {
 	// page already uses for its per-row password action.
 	s.mux.HandleFunc("GET /machine", s.requireRole(manager.RoleOperator, s.handleMachinePage))
 	s.mux.HandleFunc("POST /machine/uplink", s.requireRole(manager.RoleAdmin, s.handleUpdateNodeConfig))
+	// /machine/uplink-state (ADR-0085) is deliberately a distinct path
+	// from /machine/uplink above: that one persists which interface to
+	// use, for next restart; this one immediately downs/ups whichever
+	// interface is already configured.
+	s.mux.HandleFunc("POST /machine/uplink-state", s.requireRole(manager.RoleAdmin, s.handleSetUplinkState))
 	s.mux.HandleFunc("POST /machine/jail-provisioning", s.requireRole(manager.RoleAdmin, s.handleUpdateJailProvisioning))
 	s.mux.HandleFunc("POST /machine/vms/{id}/firewall", s.requireRole(manager.RoleOperator, s.handleSetVMFirewallPaused))
 	s.mux.HandleFunc("POST /machine/quota", s.requireRole(manager.RoleOperator, s.handleSetDatasetQuota))

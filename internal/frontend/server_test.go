@@ -107,6 +107,10 @@ type fakeClient struct {
 	restartNodeServiceResp    *rpcpb.RestartNodeServiceResponse
 	lastRestartNodeServiceReq *rpcpb.RestartNodeServiceRequest
 
+	getUplinkStatusResp   *rpcpb.GetUplinkStatusResponse
+	setUplinkStateResp    *rpcpb.SetUplinkStateResponse
+	lastSetUplinkStateReq *rpcpb.SetUplinkStateRequest
+
 	simulateResp             *rpcpb.SimulateNodeFailureResponse
 	simulateNodeFailureCalls int
 	simulateErr              error
@@ -265,6 +269,21 @@ func (f *fakeClient) RestartNodeService(_ context.Context, in *rpcpb.RestartNode
 		return f.restartNodeServiceResp, nil
 	}
 	return &rpcpb.RestartNodeServiceResponse{}, nil
+}
+
+func (f *fakeClient) GetUplinkStatus(context.Context, *rpcpb.GetUplinkStatusRequest, ...grpc.CallOption) (*rpcpb.GetUplinkStatusResponse, error) {
+	if f.getUplinkStatusResp != nil {
+		return f.getUplinkStatusResp, nil
+	}
+	return &rpcpb.GetUplinkStatusResponse{}, nil
+}
+
+func (f *fakeClient) SetUplinkState(_ context.Context, in *rpcpb.SetUplinkStateRequest, _ ...grpc.CallOption) (*rpcpb.SetUplinkStateResponse, error) {
+	f.lastSetUplinkStateReq = in
+	if f.setUplinkStateResp != nil {
+		return f.setUplinkStateResp, nil
+	}
+	return &rpcpb.SetUplinkStateResponse{}, nil
 }
 
 func (f *fakeClient) MigrateVM(context.Context, *rpcpb.MigrateVMRequest, ...grpc.CallOption) (*rpcpb.MigrateVMResponse, error) {

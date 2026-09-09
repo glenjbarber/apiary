@@ -743,6 +743,20 @@ each design decision, in order.
   templates are node-local, created outside Apiary, and not fetched
   across nodes — a disclosed limitation, not a built follow-up. See
   [ADR-0084](docs/adr/0084-jail-base-images.md).
+- **Uplink admin down/up toggle, decoupled from bhyve** — the Machine
+  Configuration page can now administratively bring a Comb's own
+  uplink NIC down or back up (`ifconfig <uplink> down`/`up`), Admin-only
+  and gated by a browser confirm dialog naming the real risk: this can
+  disconnect the Comb's own network access, including the very browser
+  session issuing it, if they share the same NIC — the same class of
+  hazard ADR-0022 already hit once. By explicit user choice there's no
+  automatic revert (an alternative modeled on ADR-0022's own proven
+  rollback was offered and declined). Also fixed a real, previously
+  undiscovered side effect while building this: VLAN/DHCP/PF wiring in
+  `managerd` was nested inside bhyve being enabled, which silently also
+  disabled uplink-mismatch health checking on any bhyve-disabled node —
+  now keyed only on `-vlan-uplink`, independent of bhyve. See
+  [ADR-0085](docs/adr/0085-uplink-admin-toggle.md).
 - Importing VMs from other hypervisors (e.g. Proxmox): no disk-format
   conversion, and Apiary is UEFI-only. Linux containers have no path at
   all — jails share the host FreeBSD kernel

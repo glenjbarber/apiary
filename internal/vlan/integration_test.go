@@ -94,6 +94,40 @@ func TestIntegration_EnsureVLAN_CreatesTaggedInterface(t *testing.T) {
 	}
 }
 
+// TestIntegration_DownUp_TogglesInterfaceState exercises Down/Up
+// (ADR-0085) against a disposable bridge(4) interface created just for
+// this test - deliberately NOT the real uplink NIC named by
+// APIARY_VLAN_TEST_UPLINK, since that would risk actually severing
+// whatever host runs this test suite (exactly the hazard ADR-0085
+// itself documents).
+func TestIntegration_DownUp_TogglesInterfaceState(t *testing.T) {
+	testUplink(t) // just for the root/ifconfig checks
+	ctx := context.Background()
+	bridge := "apiary-it-br3"
+	bridgeMgr := &Manager{}
+	if _, err := bridgeMgr.EnsureBridge(ctx, bridge); err != nil {
+		t.Fatalf("EnsureBridge() error: %v", err)
+	}
+	t.Cleanup(func() { bridgeMgr.DestroyBridge(ctx, bridge) })
+
+	m := &Manager{Uplink: bridge}
+	if err := m.Down(ctx); err != nil {
+		t.Fatalf("Down() error: %v", err)
+	}
+	exists, up, err := m.InterfaceStatus(ctx, bridge)
+	if err != nil || !exists || up {
+		t.Errorf("InterfaceStatus() after Down() = (%v, %v, %v), want (true, false, nil)", exists, up, err)
+	}
+
+	if err := m.Up(ctx); err != nil {
+		t.Fatalf("Up() error: %v", err)
+	}
+	exists, up, err = m.InterfaceStatus(ctx, bridge)
+	if err != nil || !exists || !up {
+		t.Errorf("InterfaceStatus() after Up() = (%v, %v, %v), want (true, true, nil)", exists, up, err)
+	}
+}
+
 func TestIntegration_EnsureMemberAndBridgeAddress(t *testing.T) {
 	testUplink(t)
 	ctx := context.Background()

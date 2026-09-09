@@ -1064,3 +1064,80 @@ func TestServer_RestartNodeService_RejectsNonRestartableService(t *testing.T) {
 		t.Errorf("response = %+v; restart called for %q, want rejection without restart", resp, controller.restartName)
 	}
 }
+
+func TestServer_GetUplinkStatus_NoVLANConfigured(t *testing.T) {
+	s := NewServer(nil, "node-1", nil, nil, nil, nil, nil, "", nil, nil, nil, 0, nil)
+
+	resp, err := s.GetUplinkStatus(context.Background(), &rpcpb.GetUplinkStatusRequest{})
+	if err != nil {
+		t.Fatalf("GetUplinkStatus() error: %v", err)
+	}
+	if resp.GetConfigured() {
+		t.Errorf("Configured = true, want false with no VLAN manager")
+	}
+}
+
+func TestServer_GetUplinkStatus_ReportsInterfaceAndState(t *testing.T) {
+	vlan := &fakeVLANStatus{uplink: "em0", up: map[string]bool{"em0": true}}
+	s := NewServer(nil, "node-1", nil, nil, nil, vlan, nil, "", nil, nil, nil, 0, nil)
+
+	resp, err := s.GetUplinkStatus(context.Background(), &rpcpb.GetUplinkStatusRequest{})
+	if err != nil {
+		t.Fatalf("GetUplinkStatus() error: %v", err)
+	}
+	if !resp.GetConfigured() || resp.GetInterface() != "em0" || !resp.GetUp() {
+		t.Errorf("response = %+v, want configured=true interface=em0 up=true", resp)
+	}
+}
+
+func TestServer_SetUplinkState_NoVLANConfiguredIsError(t *testing.T) {
+	s := NewServer(nil, "node-1", nil, nil, nil, nil, nil, "", nil, nil, nil, 0, nil)
+
+	resp, err := s.SetUplinkState(context.Background(), &rpcpb.SetUplinkStateRequest{Down: true})
+	if err != nil {
+		t.Fatalf("SetUplinkState() error: %v", err)
+	}
+	if resp.GetError() == "" {
+		t.Errorf("response = %+v, want an error with no VLAN manager configured", resp)
+	}
+}
+
+func TestServer_SetUplinkState_DownThenUpRoundTrips(t *testing.T) {
+	vlan := &fakeVLANStatus{uplink: "em0", up: map[string]bool{"em0": true}}
+	s := NewServer(nil, "node-1", nil, nil, nil, vlan, nil, "", nil, nil, nil, 0, nil)
+
+	downResp, err := s.SetUplinkState(context.Background(), &rpcpb.SetUplinkStateRequest{Down: true})
+	if err != nil {
+		t.Fatalf("SetUplinkState(down) error: %v", err)
+	}
+	if downResp.GetError() != "" || downResp.GetUp() {
+		t.Fatalf("SetUplinkState(down) = %+v, want up=false no error", downResp)
+	}
+	if up := vlan.up["em0"]; up {
+		t.Errorf("fake interface state = up, want down after SetUplinkState(down)")
+	}
+
+	upResp, err := s.SetUplinkState(context.Background(), &rpcpb.SetUplinkStateRequest{Down: false})
+	if err != nil {
+		t.Fatalf("SetUplinkState(up) error: %v", err)
+	}
+	if upResp.GetError() != "" || !upResp.GetUp() {
+		t.Fatalf("SetUplinkState(up) = %+v, want up=true no error", upResp)
+	}
+	if up := vlan.up["em0"]; !up {
+		t.Errorf("fake interface state = down, want up after SetUplinkState(up)")
+	}
+}
+
+func TestServer_SetUplinkState_PropagatesDownError(t *testing.T) {
+	vlan := &fakeVLANStatus{uplink: "em0", downErr: errors.New("ifconfig em0 down: device busy")}
+	s := NewServer(nil, "node-1", nil, nil, nil, vlan, nil, "", nil, nil, nil, 0, nil)
+
+	resp, err := s.SetUplinkState(context.Background(), &rpcpb.SetUplinkStateRequest{Down: true})
+	if err != nil {
+		t.Fatalf("SetUplinkState() error: %v", err)
+	}
+	if resp.GetError() == "" {
+		t.Errorf("response = %+v, want the underlying ifconfig error surfaced", resp)
+	}
+}

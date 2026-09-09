@@ -145,6 +145,22 @@
     </div>
   </div>
 
+  {{if .CanAdmin}}
+  <div class="panel">
+    <h3>Uplink</h3>
+    <p class="muted">
+      Administratively bring this Comb's own uplink interface down or
+      back up (see ADR-0085). This can disconnect this Comb's own
+      network access, possibly including this very browser session if
+      it shares the same NIC - recovery may then require physical or
+      out-of-band console access. No automatic revert.
+    </p>
+    <div id="uplink-panel">
+      {{template "uplink_panel" .}}
+    </div>
+  </div>
+  {{end}}
+
   <div class="panel">
     <h3>VM firewall overrides</h3>
     <p class="muted">
@@ -261,6 +277,28 @@
     {{end}}
   </tbody>
 </table>
+{{end}}
+
+{{define "uplink_panel"}}
+<div id="uplink-error" class="banner-error">{{.UplinkFormError}}</div>
+{{if .UplinkFormSuccess}}<div class="banner-success">{{.UplinkFormSuccess}}</div>{{end}}
+{{if not .UplinkStatus.Configured}}
+<p class="muted"><em>No VLAN/uplink support configured on this Comb.</em></p>
+{{else}}
+<table class="settings-table">
+  <tbody>
+    <tr><th>Interface</th><td><code>{{.UplinkStatus.Interface}}</code></td></tr>
+    <tr><th>State</th><td>{{if .UplinkStatus.Up}}<span class="success">up</span>{{else}}<span class="error">down</span>{{end}}</td></tr>
+    <tr><th></th><td>
+      {{if .UplinkStatus.Up}}
+      <button hx-post="/machine/uplink-state" hx-vals='{"down": "true"}' hx-target="#uplink-panel" hx-swap="innerHTML" hx-confirm="Bring {{.UplinkStatus.Interface}} down? This can disconnect this Comb's own network access - including this session, if it shares the same NIC. Recovery may require physical or out-of-band console access. There is no automatic revert.">Bring down</button>
+      {{else}}
+      <button hx-post="/machine/uplink-state" hx-vals='{"down": "false"}' hx-target="#uplink-panel" hx-swap="innerHTML" hx-confirm="Bring {{.UplinkStatus.Interface}} back up?">Bring up</button>
+      {{end}}
+    </td></tr>
+  </tbody>
+</table>
+{{end}}
 {{end}}
 
 {{define "nodeconfig_panel"}}

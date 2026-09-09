@@ -155,6 +155,12 @@ type fakeVLANStatus struct {
 	// this map is treated as not existing on this node yet.
 	up  map[string]bool
 	err error
+
+	// uplink backs UplinkInterface/Down/Up for GetUplinkStatus/
+	// SetUplinkState (ADR-0085) tests.
+	uplink  string
+	downErr error
+	upErr   error
 }
 
 func (f *fakeVLANStatus) InterfaceStatus(_ context.Context, name string) (exists, up bool, err error) {
@@ -163,6 +169,30 @@ func (f *fakeVLANStatus) InterfaceStatus(_ context.Context, name string) (exists
 	}
 	up, exists = f.up[name]
 	return exists, up, nil
+}
+
+func (f *fakeVLANStatus) UplinkInterface() string { return f.uplink }
+
+func (f *fakeVLANStatus) Down(context.Context) error {
+	if f.downErr != nil {
+		return f.downErr
+	}
+	if f.up == nil {
+		f.up = map[string]bool{}
+	}
+	f.up[f.uplink] = false
+	return nil
+}
+
+func (f *fakeVLANStatus) Up(context.Context) error {
+	if f.upErr != nil {
+		return f.upErr
+	}
+	if f.up == nil {
+		f.up = map[string]bool{}
+	}
+	f.up[f.uplink] = true
+	return nil
 }
 
 // newManagerdRPCClientFull is newManagerdRPCClient, but lets a test

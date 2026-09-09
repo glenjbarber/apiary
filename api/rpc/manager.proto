@@ -169,6 +169,16 @@ service ManagerService {
   rpc ListNodeServices(ListNodeServicesRequest) returns (ListNodeServicesResponse);
   rpc RestartNodeService(RestartNodeServiceRequest) returns (RestartNodeServiceResponse);
 
+  // GetUplinkStatus/SetUplinkState are the Machine page's uplink admin
+  // down/up toggle (ADR-0085) - strictly host-local physical state,
+  // never routed through raft, same reasoning as
+  // ListNodeServices/RestartNodeService above. SetUplinkState carries a
+  // genuine risk of severing this node's own network access if the
+  // caller's own path shares the uplink interface - see ADR-0085 and
+  // ADR-0022's own prior near-miss doing something adjacent.
+  rpc GetUplinkStatus(GetUplinkStatusRequest) returns (GetUplinkStatusResponse);
+  rpc SetUplinkState(SetUplinkStateRequest) returns (SetUplinkStateResponse);
+
   // CreateNetwork/ListNetworks/DeleteNetwork manage NetworkDefinitions -
   // VLAN/subnet/bridge segments a VM can attach to (see ADR-0022).
   // CreateNetwork/DeleteNetwork just submit a Command through raft
@@ -1263,6 +1273,31 @@ message RestartNodeServiceResponse {
   // because it may interrupt the current managerd RPC or frontend HTTP
   // connection.
   bool scheduled = 1;
+  string error = 2;
+}
+
+message GetUplinkStatusRequest {}
+
+message GetUplinkStatusResponse {
+  // configured is false when this node has no VLAN/uplink support at
+  // all (-vlan-uplink unset) - interface/up are meaningless in that
+  // case.
+  bool configured = 1;
+  string interface = 2;
+  bool up = 3;
+  string error = 4;
+}
+
+message SetUplinkStateRequest {
+  // down requests the uplink interface be administratively brought
+  // down (true) or back up (false).
+  bool down = 1;
+}
+
+message SetUplinkStateResponse {
+  // up reports the interface's resulting state - false after a
+  // successful down, true after a successful up.
+  bool up = 1;
   string error = 2;
 }
 
