@@ -1204,6 +1204,53 @@ func TestIntegration_RequestJoinColony_NoCredentialNeeded(t *testing.T) {
 	}
 }
 
+// TestIntegration_Status_ReportsPamConfigured is the real-RPC proof
+// for ADR-0087's StatusResponse.pam_configured field - Status's other
+// fields already need a real raftd to exercise, so this reuses that
+// same real-server setup rather than a nil-raft unit test (which would
+// panic reaching s.raft.Status).
+func TestIntegration_Status_ReportsPamConfigured(t *testing.T) {
+	raftdSocket := newRaftdUDSSocket(t)
+
+	raftClient, err := Dial(raftdSocket, "")
+	if err != nil {
+		t.Fatalf("Dial() error: %v", err)
+	}
+	t.Cleanup(func() { raftClient.Close() })
+
+	lis, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("Listen(tcp) error: %v", err)
+	}
+	srv := NewServer(raftClient, "manager-1", isostore.New(t.TempDir()), nil, nil, nil, nil, "", nil, nil, nil, 0, nil)
+	srv.SetPAMAuthenticator(fakePAMAuthenticator{user: "alice", pass: "secret"})
+	grpcServer := grpc.NewServer(
+		grpc.UnaryInterceptor(srv.AuthUnaryInterceptor),
+		grpc.StreamInterceptor(srv.AuthStreamInterceptor),
+	)
+	rpcpb.RegisterManagerServiceServer(grpcServer, srv)
+	go grpcServer.Serve(lis)
+	t.Cleanup(grpcServer.GracefulStop)
+
+	conn, err := grpc.NewClient(lis.Addr().String(), grpc.WithTransportCredentials(insecure.NewCredentials()))
+	if err != nil {
+		t.Fatalf("grpc.NewClient() error: %v", err)
+	}
+	t.Cleanup(func() { conn.Close() })
+	client := rpcpb.NewManagerServiceClient(conn)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	resp, err := client.Status(ctx, &rpcpb.StatusRequest{})
+	if err != nil {
+		t.Fatalf("Status() error: %v", err)
+	}
+	if !resp.GetPamConfigured() {
+		t.Errorf("Status() PamConfigured = false, want true with a PAM authenticator configured")
+	}
+}
+
 func TestIntegration_RequestJoinColony_MissingFieldsIsError(t *testing.T) {
 	raftdSocket := newRaftdUDSSocket(t)
 	client := newManagerdRPCClient(t, raftdSocket)

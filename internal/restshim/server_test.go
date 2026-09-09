@@ -111,6 +111,10 @@ func (f *fakeClient) Status(ctx context.Context, _ *rpcpb.StatusRequest, _ ...gr
 	return f.statusResp, f.statusErr
 }
 
+func (f *fakeClient) AuthenticatePassword(context.Context, *rpcpb.AuthenticatePasswordRequest, ...grpc.CallOption) (*rpcpb.AuthenticatePasswordResponse, error) {
+	return &rpcpb.AuthenticatePasswordResponse{}, nil
+}
+
 func (f *fakeClient) GetLocalNodeHealth(context.Context, *rpcpb.GetLocalNodeHealthRequest, ...grpc.CallOption) (*rpcpb.GetLocalNodeHealthResponse, error) {
 	return &rpcpb.GetLocalNodeHealthResponse{}, nil
 }

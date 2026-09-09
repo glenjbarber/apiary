@@ -20,6 +20,7 @@ const _ = grpc.SupportPackageIsVersion9
 
 const (
 	ManagerService_Status_FullMethodName                      = "/apiary.rpc.v1.ManagerService/Status"
+	ManagerService_AuthenticatePassword_FullMethodName        = "/apiary.rpc.v1.ManagerService/AuthenticatePassword"
 	ManagerService_GetLocalNodeHealth_FullMethodName          = "/apiary.rpc.v1.ManagerService/GetLocalNodeHealth"
 	ManagerService_ListAssumptionClaims_FullMethodName        = "/apiary.rpc.v1.ManagerService/ListAssumptionClaims"
 	ManagerService_SaveAssumptionClaim_FullMethodName         = "/apiary.rpc.v1.ManagerService/SaveAssumptionClaim"
@@ -96,6 +97,14 @@ const (
 // yet, but the definitions are real, replicated, and persisted.
 type ManagerServiceClient interface {
 	Status(ctx context.Context, in *StatusRequest, opts ...grpc.CallOption) (*StatusResponse, error)
+	// AuthenticatePassword checks a username/password pair against this
+	// node's own PAM stack (ADR-0087 - moved here from cmd/frontend,
+	// which now has no cgo/native-build requirement at all). Exempted
+	// from checkAuth entirely (see AuthUnaryInterceptor) for the same
+	// reason RequestJoinColony is: the caller proving their identity here
+	// has no Colony API key yet by definition - their eventual session
+	// role comes from frontend's own role map only after this succeeds.
+	AuthenticatePassword(ctx context.Context, in *AuthenticatePasswordRequest, opts ...grpc.CallOption) (*AuthenticatePasswordResponse, error)
 	// GetLocalNodeHealth reports THIS Hive's Evidence-Aware Health verdict
 	// and the raw observations used to derive it. It never forwards to a
 	// leader: local reconciliation and raft-companion observations belong to
@@ -421,6 +430,16 @@ func (c *managerServiceClient) Status(ctx context.Context, in *StatusRequest, op
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(StatusResponse)
 	err := c.cc.Invoke(ctx, ManagerService_Status_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *managerServiceClient) AuthenticatePassword(ctx context.Context, in *AuthenticatePasswordRequest, opts ...grpc.CallOption) (*AuthenticatePasswordResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(AuthenticatePasswordResponse)
+	err := c.cc.Invoke(ctx, ManagerService_AuthenticatePassword_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -1083,6 +1102,14 @@ func (c *managerServiceClient) RejectJoinRequest(ctx context.Context, in *Reject
 // yet, but the definitions are real, replicated, and persisted.
 type ManagerServiceServer interface {
 	Status(context.Context, *StatusRequest) (*StatusResponse, error)
+	// AuthenticatePassword checks a username/password pair against this
+	// node's own PAM stack (ADR-0087 - moved here from cmd/frontend,
+	// which now has no cgo/native-build requirement at all). Exempted
+	// from checkAuth entirely (see AuthUnaryInterceptor) for the same
+	// reason RequestJoinColony is: the caller proving their identity here
+	// has no Colony API key yet by definition - their eventual session
+	// role comes from frontend's own role map only after this succeeds.
+	AuthenticatePassword(context.Context, *AuthenticatePasswordRequest) (*AuthenticatePasswordResponse, error)
 	// GetLocalNodeHealth reports THIS Hive's Evidence-Aware Health verdict
 	// and the raw observations used to derive it. It never forwards to a
 	// leader: local reconciliation and raft-companion observations belong to
@@ -1407,6 +1434,9 @@ type UnimplementedManagerServiceServer struct{}
 func (UnimplementedManagerServiceServer) Status(context.Context, *StatusRequest) (*StatusResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method Status not implemented")
 }
+func (UnimplementedManagerServiceServer) AuthenticatePassword(context.Context, *AuthenticatePasswordRequest) (*AuthenticatePasswordResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method AuthenticatePassword not implemented")
+}
 func (UnimplementedManagerServiceServer) GetLocalNodeHealth(context.Context, *GetLocalNodeHealthRequest) (*GetLocalNodeHealthResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetLocalNodeHealth not implemented")
 }
@@ -1634,6 +1664,24 @@ func _ManagerService_Status_Handler(srv interface{}, ctx context.Context, dec fu
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(ManagerServiceServer).Status(ctx, req.(*StatusRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ManagerService_AuthenticatePassword_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(AuthenticatePasswordRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ManagerServiceServer).AuthenticatePassword(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ManagerService_AuthenticatePassword_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ManagerServiceServer).AuthenticatePassword(ctx, req.(*AuthenticatePasswordRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -2778,6 +2826,10 @@ var ManagerService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "Status",
 			Handler:    _ManagerService_Status_Handler,
+		},
+		{
+			MethodName: "AuthenticatePassword",
+			Handler:    _ManagerService_AuthenticatePassword_Handler,
 		},
 		{
 			MethodName: "GetLocalNodeHealth",

@@ -17,7 +17,6 @@ import (
 	"github.com/glenjbarber/apiary/internal/frontend"
 	"github.com/glenjbarber/apiary/internal/loginconfig"
 	"github.com/glenjbarber/apiary/internal/manager"
-	"github.com/glenjbarber/apiary/internal/pam"
 	"github.com/glenjbarber/apiary/internal/tlsdial"
 )
 
@@ -36,6 +35,25 @@ func (k apiKeyCredentials) GetRequestMetadata(context.Context, ...string) (map[s
 
 func (apiKeyCredentials) RequireTransportSecurity() bool { return false }
 
+// remoteAuthenticator satisfies frontend.Authenticator by asking
+// managerd's own AuthenticatePassword RPC (ADR-0087) - the raw PAM
+// check now happens there, not in this process, so cmd/frontend
+// itself needs no cgo/native-FreeBSD build anymore.
+type remoteAuthenticator struct {
+	client rpcpb.ManagerServiceClient
+}
+
+func (a remoteAuthenticator) Authenticate(username, password string) (bool, error) {
+	resp, err := a.client.AuthenticatePassword(context.Background(), &rpcpb.AuthenticatePasswordRequest{Username: username, Password: password})
+	if err != nil {
+		return false, err
+	}
+	if resp.GetError() != "" {
+		return false, fmt.Errorf("%s", resp.GetError())
+	}
+	return resp.GetOk(), nil
+}
+
 func main() {
 	if err := run(); err != nil {
 		log.Fatalf("frontend: %v", err)
@@ -45,7 +63,6 @@ func main() {
 func run() error {
 	managerAddr := flag.String("manager-addr", "127.0.0.1:17700", "TCP address of managerd's external RPC API")
 	httpAddr := flag.String("http-addr", "127.0.0.1:8080", "address to serve the web UI on")
-	pamService := flag.String("pam-service", "", "PAM service name to authenticate web UI logins against (requires a matching /etc/pam.d/<name> on this host - ADR-0030); leave empty to disable login entirely")
 	managerTLS := flag.Bool("manager-tls", false, "dial managerd over TLS instead of plaintext (must match managerd's own -tls-cert/-tls-key)")
 	managerTLSCA := flag.String("manager-tls-ca", "", "PEM CA file to trust for managerd's certificate (for a self-signed cert); leave empty to trust the system certificate pool")
 	managerTLSServerName := flag.String("manager-tls-server-name", "", "hostname to verify managerd's certificate against, if different from -manager-addr's host (e.g. managerd stays loopback-only but its cert names a real public hostname); leave empty to verify against -manager-addr itself")
@@ -99,9 +116,18 @@ func run() error {
 		}
 	}
 
-	var auth pam.Authenticator
-	if *pamService != "" {
-		auth = pam.PAMAuthenticator{ServiceName: *pamService}
+	// Whether login is enabled at all is now managerd's own call (ADR-
+	// 0087, PamConfigured on its Status response) - frontend needs no
+	// login-related flag of its own anymore. A Status fetch failure here
+	// is treated the same as "not configured" (auth stays nil) rather
+	// than aborting startup - frontend should still come up and serve
+	// pages even if managerd is briefly unreachable at boot.
+	managerClient := rpcpb.NewManagerServiceClient(conn)
+	var auth frontend.Authenticator
+	if statusResp, err := managerClient.Status(context.Background(), &rpcpb.StatusRequest{}); err != nil {
+		log.Printf("frontend: could not reach managerd to check login configuration: %v", err)
+	} else if statusResp.GetPamConfigured() {
+		auth = remoteAuthenticator{client: managerClient}
 	}
 
 	// Reuses the same API key already attached to dialOpts above for
@@ -122,19 +148,19 @@ func run() error {
 		return fmt.Errorf("both -tls-cert and -tls-key must be set together")
 	}
 
-	srv, err := frontend.NewServer(rpcpb.NewManagerServiceClient(conn), auth, roleMap, peers, *peerHostnameSuffix, *peerManagerPort, frontend.UnixPasswordSetter{}, tlsEnabled)
+	srv, err := frontend.NewServer(managerClient, auth, roleMap, peers, *peerHostnameSuffix, *peerManagerPort, frontend.UnixPasswordSetter{}, tlsEnabled)
 	if err != nil {
 		return fmt.Errorf("creating frontend server: %w", err)
 	}
 	srv.SetRoleMapStore(roleMapMgr)
 	if auth != nil {
 		if len(roleMap) == 0 {
-			log.Printf("frontend: login enabled (pam-service=%s), no accounts yet - the first successful login becomes Admin", *pamService)
+			log.Printf("frontend: login enabled (managerd reports PAM configured), no accounts yet - the first successful login becomes Admin")
 		} else {
-			log.Printf("frontend: login enabled (pam-service=%s, %d role-mapped user(s))", *pamService, len(roleMap))
+			log.Printf("frontend: login enabled (managerd reports PAM configured, %d role-mapped user(s))", len(roleMap))
 		}
 	} else {
-		log.Printf("frontend: no login configured (set -pam-service to require one)")
+		log.Printf("frontend: no login configured (set -pam-service on managerd to require one)")
 	}
 
 	log.Printf("frontend: listening on %s (manager-addr=%s, manager-tls=%v, tls=%v)", *httpAddr, *managerAddr, *managerTLS, tlsEnabled)

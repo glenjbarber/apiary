@@ -25,6 +25,20 @@ import (
 	"github.com/glenjbarber/apiary/internal/origincert"
 )
 
+// pamAuthenticator abstracts a username/password check, defined
+// locally rather than importing internal/pam's own type of the same
+// shape - importing internal/pam here would drag its cgo requirement
+// (github.com/msteinert/pam/v2) into every consumer of this package,
+// including cmd/frontend (which imports internal/manager for
+// manager.Role/NewPeerReporter and must NOT require cgo - ADR-0087).
+// cgo is a per-package build requirement, not a per-symbol one, so
+// only cmd/managerd - which constructs the real pam.PAMAuthenticator
+// and passes it in via SetPAMAuthenticator - ever needs to import
+// internal/pam at all.
+type pamAuthenticator interface {
+	Authenticate(username, password string) (bool, error)
+}
+
 // defaultApplyTimeout is used when a request doesn't specify one.
 const defaultApplyTimeout = 10 * time.Second
 
@@ -273,7 +287,21 @@ type Server struct {
 	// intentionally local rather than a peer-forwarded or raft operation.
 	services nodeServiceController
 	originCA origincert.Issuer
+
+	// authPAM is nil on a node with no -pam-service configured -
+	// AuthenticatePassword reports an explicit "not configured" error
+	// rather than panicking, and Status's pam_configured field reflects
+	// this. See ADR-0087: PAM authentication lives here now, not in
+	// cmd/frontend, so frontend itself needs no cgo/native build.
+	authPAM pamAuthenticator
 }
+
+// SetPAMAuthenticator wires PAM login support after construction (ADR-
+// 0087), the same setter-for-optional-dependency pattern as
+// SetOriginCAIssuer above - production wires a real pam.PAMAuthenticator
+// here from cmd/managerd's own -pam-service flag; tests may supply a
+// fake implementing the same small interface.
+func (s *Server) SetPAMAuthenticator(auth pamAuthenticator) { s.authPAM = auth }
 
 // quotaSetter is the subset of *zfs.Manager SetDatasetQuota and the
 // orphaned-HAST-resource RPCs need, defined locally so it can be faked
@@ -503,7 +531,7 @@ func (s *Server) peerManagerdAddr(leaderHint string) string {
 // RaftError set, rather than a gRPC error, so callers always get a
 // diagnosable payload.
 func (s *Server) Status(ctx context.Context, _ *rpcpb.StatusRequest) (*rpcpb.StatusResponse, error) {
-	resp := &rpcpb.StatusResponse{ManagerNodeId: s.nodeID}
+	resp := &rpcpb.StatusResponse{ManagerNodeId: s.nodeID, PamConfigured: s.authPAM != nil}
 
 	raftStatus, err := s.raft.Status(ctx)
 	if err != nil {
@@ -526,6 +554,21 @@ func (s *Server) Status(ctx context.Context, _ *rpcpb.StatusRequest) (*rpcpb.Sta
 		})
 	}
 	return resp, nil
+}
+
+// AuthenticatePassword checks username/password against this node's
+// own PAM stack (ADR-0087). Exempted from checkAuth entirely (see
+// AuthUnaryInterceptor) - a caller here has no API key yet by
+// definition, and the real PAM check is the actual security boundary.
+func (s *Server) AuthenticatePassword(_ context.Context, req *rpcpb.AuthenticatePasswordRequest) (*rpcpb.AuthenticatePasswordResponse, error) {
+	if s.authPAM == nil {
+		return &rpcpb.AuthenticatePasswordResponse{Error: "this node has no PAM login configured"}, nil
+	}
+	ok, err := s.authPAM.Authenticate(req.GetUsername(), req.GetPassword())
+	if err != nil {
+		return &rpcpb.AuthenticatePasswordResponse{Error: err.Error()}, nil
+	}
+	return &rpcpb.AuthenticatePasswordResponse{Ok: ok}, nil
 }
 
 // GetLocalNodeHealth implements rpcpb.ManagerServiceServer. It exposes the
