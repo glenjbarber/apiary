@@ -231,8 +231,11 @@ each design decision, in order.
   real PAM service (`-pam-service`), so Kerberos or Active Directory
   work transitively through the host's own PAM configuration
   (`pam_krb5`/`pam_ldap`/`pam_winbind`) with no bespoke client code in
-  Apiary; usernames map to roles via an explicit `-role-map` flag,
-  independent of any UNIX/AD group. API keys (ADR-0023) gain the same
+  Apiary; usernames map to roles via a persisted, Users-page-editable
+  map (ADR-0074), independent of any UNIX/AD group - a fresh Comb with
+  no accounts yet grants Admin automatically to whoever logs in first
+  (ADR-0086; there's no `-role-map` flag to hand-edit anymore). API
+  keys (ADR-0023) gain the same
   three-tier role. This is the one binary in the project that now
   requires `CGO_ENABLED=1` and a native FreeBSD build — confirmed
   live, `managerd`/`raftd`/`restshimd` are unaffected and still
@@ -621,12 +624,14 @@ each design decision, in order.
   Users page gains three Admin-only actions - add a username with a
   role, change an existing account's role, remove an account entirely -
   persisted via a new `internal/loginconfig` package (physical,
-  per-node, mirroring `internal/nodeconfig`'s own role for `managerd`)
-  that wins over the `-role-map` flag once it's ever been written.
+  per-node, mirroring `internal/nodeconfig`'s own role for `managerd`).
   Refuses any edit that would leave zero Admin accounts. Adding an
   entry grants an already-existing PAM/UNIX account an Apiary role - it
   never creates the account itself, matching ADR-0030's own explicit
-  scope. See [ADR-0074](docs/adr/0074-role-map-editing-ui.md).
+  scope. See [ADR-0074](docs/adr/0074-role-map-editing-ui.md). The
+  `-role-map` flag itself is gone now - a fresh Comb with no accounts
+  yet grants Admin to whoever logs in first instead. See
+  [ADR-0086](docs/adr/0086-first-login-bootstrap-admin.md).
 
 **Not yet implemented:**
 

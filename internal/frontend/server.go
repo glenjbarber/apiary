@@ -120,9 +120,13 @@ type pageData struct {
 
 	// LoginError and NextURL are only used by the login page: a failed
 	// attempt's message, and the originally-requested path to return to
-	// after a successful login (see isSafeRedirectPath).
-	LoginError string
-	NextURL    string
+	// after a successful login (see isSafeRedirectPath). BootstrapPending
+	// is true when no role has ever been assigned on this Comb yet - the
+	// login page surfaces this so the "first login becomes Admin"
+	// mechanic (ADR-0086) is visible, not a silent trick.
+	LoginError       string
+	NextURL          string
+	BootstrapPending bool
 
 	// ConsoleVMID/ConsoleVMName/ConsoleWSPath/ConsoleError are only used
 	// by the console page (console.go) - see its own doc comments.
@@ -817,7 +821,7 @@ func (s *Server) handleLoginPage(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/", http.StatusFound)
 		return
 	}
-	s.render(w, "login_page", pageData{NextURL: r.URL.Query().Get("next")})
+	s.render(w, "login_page", pageData{NextURL: r.URL.Query().Get("next"), BootstrapPending: s.roleMapEmpty()})
 }
 
 // handleLogin authenticates the submitted credentials against s.auth
@@ -828,7 +832,10 @@ func (s *Server) handleLoginPage(w http.ResponseWriter, r *http.Request) {
 // an Apiary role to is treated as "no access", never silently
 // downgraded to Viewer, matching this project's established
 // default-deny stance (ADR-0025/26/27/28/29's own reasoning, applied
-// here to authorization instead of reconciliation).
+// here to authorization instead of reconciliation) - except when the
+// role map is still empty, in which case this first successful login
+// becomes Admin instead (ADR-0086's bootstrap, replacing the old
+// -role-map flag's one remaining job).
 func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	if s.auth == nil {
 		http.Redirect(w, r, "/", http.StatusFound)
@@ -861,13 +868,23 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	}
 	if !ok {
 		s.lockouts.RecordFailure(user)
-		s.render(w, "login_page", pageData{LoginError: "invalid username or password", NextURL: next})
+		s.render(w, "login_page", pageData{LoginError: "invalid username or password", NextURL: next, BootstrapPending: s.roleMapEmpty()})
 		return
 	}
 	s.lockouts.RecordSuccess(user)
 	s.roleMapMu.RLock()
 	role, hasRole := s.roleMap[user]
 	s.roleMapMu.RUnlock()
+	if !hasRole {
+		granted, err := s.bootstrapFirstAdmin(user)
+		if err != nil {
+			s.render(w, "login_page", pageData{LoginError: "could not bootstrap admin account: " + err.Error(), NextURL: next})
+			return
+		}
+		if granted {
+			role, hasRole = manager.RoleAdmin, true
+		}
+	}
 	if !hasRole {
 		s.render(w, "login_page", pageData{LoginError: "no Apiary role is assigned to this account - contact an administrator", NextURL: next})
 		return
@@ -2092,15 +2109,33 @@ func (s *Server) handleRemoveUser(w http.ResponseWriter, r *http.Request) {
 	s.renderUserPanelSuccess(w, info.username, info.role, fmt.Sprintf("%q removed from the role map", target))
 }
 
+// applyRoleMapLocked persists proposed via roleMapStore (when
+// configured) BEFORE applying it in memory, mirroring nodeconfig's own
+// validate-then-persist-then-apply ordering, so a save failure never
+// leaves the running process out of sync with what's on disk. The
+// caller must already hold roleMapMu for writing and must have already
+// validated proposed (e.g. roleMapHasAdmin) - shared by updateRoleMap
+// and bootstrapFirstAdmin below, the two ways the role map can change.
+func (s *Server) applyRoleMapLocked(proposed map[string]manager.Role) error {
+	if s.roleMapStore != nil {
+		cfg := loginconfig.Config{RoleMap: make(map[string]string, len(proposed))}
+		for u, r := range proposed {
+			cfg.RoleMap[u] = string(r)
+		}
+		if err := s.roleMapStore.Save(cfg); err != nil {
+			return fmt.Errorf("saving role map: %w", err)
+		}
+	}
+	s.roleMap = proposed
+	return nil
+}
+
 // updateRoleMap sets target's role to *role, or removes target
 // entirely when role is nil. Refuses to leave the map with no admin
 // account at all - a real, cheap-to-prevent lockout distinct from
 // ADR-0023's own deliberate one-way-door API-key posture, since here
 // there's no reason not to just refuse the specific edit that would
-// cause it. Persists via roleMapStore (when configured) BEFORE
-// applying the change in memory, mirroring nodeconfig's own
-// validate-then-persist-then-apply ordering, so a save failure never
-// leaves the running process out of sync with what's on disk.
+// cause it.
 func (s *Server) updateRoleMap(target string, role *manager.Role) error {
 	if target == "" {
 		return fmt.Errorf("username must not be empty")
@@ -2123,17 +2158,38 @@ func (s *Server) updateRoleMap(target string, role *manager.Role) error {
 		return fmt.Errorf("refusing to leave the role map with no admin account - assign another admin first")
 	}
 
-	if s.roleMapStore != nil {
-		cfg := loginconfig.Config{RoleMap: make(map[string]string, len(proposed))}
-		for u, r := range proposed {
-			cfg.RoleMap[u] = string(r)
-		}
-		if err := s.roleMapStore.Save(cfg); err != nil {
-			return fmt.Errorf("saving role map: %w", err)
-		}
+	return s.applyRoleMapLocked(proposed)
+}
+
+// bootstrapFirstAdmin grants user Admin and persists it, but only if
+// the role map is still genuinely empty at the moment this runs (ADR-
+// 0086): checked and applied under one write-lock acquisition, closing
+// the race between two concurrent first-ever login attempts - only one
+// can win. updateRoleMap's own roleMapHasAdmin check means the role
+// map can only ever be empty before this bootstrap has happened once,
+// on a fresh Comb - no separate "bootstrap pending" flag is needed.
+// Returns granted=false, nil error if someone else already claimed it,
+// so the caller falls through to the normal no-role-map-entry
+// rejection instead of granting a second, unintended Admin.
+func (s *Server) bootstrapFirstAdmin(user string) (granted bool, err error) {
+	s.roleMapMu.Lock()
+	defer s.roleMapMu.Unlock()
+	if len(s.roleMap) != 0 {
+		return false, nil
 	}
-	s.roleMap = proposed
-	return nil
+	if err := s.applyRoleMapLocked(map[string]manager.Role{user: manager.RoleAdmin}); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+// roleMapEmpty reports whether no role has ever been assigned on this
+// Comb yet - the signal ADR-0086's login-page notice and
+// bootstrapFirstAdmin both key off.
+func (s *Server) roleMapEmpty() bool {
+	s.roleMapMu.RLock()
+	defer s.roleMapMu.RUnlock()
+	return len(s.roleMap) == 0
 }
 
 func roleMapHasAdmin(m map[string]manager.Role) bool {
