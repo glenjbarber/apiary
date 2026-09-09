@@ -713,10 +713,9 @@ each design decision, in order.
   requests" panel and approves. Building this surfaced a real,
   disclosed operational hazard (approving before the joining Comb is
   actually reachable can destabilize the existing Colony's leadership)
-  and a real, disclosed gap (`raftd` still has no passive
-  "await join, don't self-bootstrap" mode — a necessary follow-up, not
-  yet built) — see
-  [ADR-0083](docs/adr/0083-mutually-authorized-colony-join.md).
+  and a real, disclosed gap that's since been resolved: `raftd -await-join`
+  now gives it a passive "wait to be added, don't self-bootstrap" mode
+  — see [ADR-0083](docs/adr/0083-mutually-authorized-colony-join.md).
 - **Real rc.d scripts** — `etc/rc.d/apiary_{raftd,managerd,frontend,restshimd}`
   now ship in the repo, closing a previously-disclosed gap
   (`docs/bootstrap.md` used to say none existed). Found and fixed live
