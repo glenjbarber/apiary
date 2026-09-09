@@ -718,18 +718,25 @@ each design decision, in order.
   — see [ADR-0083](docs/adr/0083-mutually-authorized-colony-join.md).
 - **Real rc.d scripts** — `etc/rc.d/apiary_{raftd,managerd,frontend,restshimd}`
   now ship in the repo, closing a previously-disclosed gap
-  (`docs/bootstrap.md` used to say none existed). Found and fixed live
-  on real production hosts in the process: `daemon(8)`'s own pidfile can
-  briefly outlive the process it supervised, so a `restart`'s immediate
-  `start` step can race that stale pidfile and refuse to launch
-  (`daemon: process already running, pid: -1`) - and the orphaned
-  supervisor processes that race silently leaves behind don't just sit
-  idle, they keep periodically retrying in the background (their own
-  `-R`/`-C` flags) and were caught live actually colliding with a real
-  instance's port during a later restart. Fixed with a `stop_postcmd`
-  hook in each script. `make setup` now installs and enables them
-  (plus writes `/etc/pam.d/apiary` if one doesn't already exist) instead
-  of copy-pasting the commands from `docs/bootstrap.md` by hand.
+  (`docs/bootstrap.md` used to say none existed). Two real bugs found
+  and fixed live on real production hosts in the process, both
+  producing the same visible symptom (silently orphaned supervisor
+  processes that keep retrying in the background and were caught live
+  actually colliding with a real instance's port during a later
+  restart): a `daemon(8)`/`rc.subr` pidfile-timing race (a `restart`'s
+  immediate `start` step could race a not-yet-unlinked pidfile and
+  refuse to launch, `daemon: process already running, pid: -1` -
+  fixed with a `stop_postcmd` hook), and the actual dominant cause -
+  every script used `daemon(8)`'s `-p` (child pidfile) together with
+  `-r` (auto-restart), a combination its own man page names as broken:
+  stopping the service only ever killed the tracked child, so the
+  still-alive supervisor immediately spawned a replacement per `-r`,
+  orphaned and racing the next restart for the same port. Fixed by
+  switching every script to `-P` (supervisor pidfile), which `rc.subr`
+  can actually signal to stop the whole thing cleanly. `make setup`
+  installs and enables the scripts (plus writes `/etc/pam.d/apiary` if
+  one doesn't already exist) instead of copy-pasting the commands from
+  `docs/bootstrap.md` by hand.
 - **Jail base images via ZFS clone** — a jail can now name a
   `base_template` at creation time, closing a real gap where a fresh
   jail's root was always an empty ZFS dataset (`jail(8)` doesn't care,

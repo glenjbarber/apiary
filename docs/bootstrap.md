@@ -510,12 +510,27 @@ repeating this workaround indefinitely.
   pid: -1`), even though nothing is actually running. Every one of these
   scripts now has a `stop_postcmd` hook that removes the pidfile once
   `check_pidfile` confirms nothing matching it is still alive, closing
-  that race. Confirmed live: without the fix, this race isn't just a
-  cosmetic warning - the very same silently-orphaned supervisor
-  processes it leaves behind (never actually killed, just detached from
-  the pidfile) can keep periodically retrying in the background for
-  days, and were caught live actually colliding with a real, functioning
-  instance's own port during a later restart.
+  that race.
+
+  **Corrected - the real root cause of the repeated orphaned-process
+  sightings was something else entirely.** Every one of these scripts
+  originally used `-p pidfile` (daemon(8)'s *child*-pidfile option)
+  together with `-r` (auto-restart). `daemon(8)`'s own man page names
+  this exact combination as broken: "the `--child-pidfile` option will
+  give you the child's ID to signal when you attempt to stop the
+  service, causing daemon to restart the child." That's exactly what
+  was happening on every single restart: `rc.subr`'s stop step correctly
+  killed the real process, but the still-alive supervisor - never
+  targeted at all, since the pidfile only ever named its child - saw its
+  child die and, per `-r`, immediately spawned a replacement, racing the
+  new instance the following `start` step brought up for the same port.
+  Fixed by switching to `-P pidfile` (the *supervisor*-pidfile option)
+  with `procname="/usr/sbin/daemon"` in every script - `rc.subr` now
+  signals the supervisor directly, which forwards the signal to its
+  child and exits cleanly instead of replacing it. The `stop_postcmd`
+  hook above addresses a real but different, narrower timing race and
+  is unchanged; it was never the actual fix for the orphan-respawn
+  problem, which this `-P` change is.
 - **HAST (`-enable-hast`)** - `apiaryinstall` can check for `hastd_enable`
   but never configures it, and the known `hastd` source patch (ADR-0022,
   FreeBSD bug 298085) is never applied automatically; see ADR-0026 for
