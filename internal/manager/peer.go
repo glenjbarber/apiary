@@ -794,3 +794,94 @@ func (p *PeerReporter) ListISONames(ctx context.Context, addr string) ([]string,
 	}
 	return names, nil
 }
+
+// PushJailTemplate streams r (a running `zfs send` this node already
+// started) into addr's own ReceiveJailTemplate RPC as a client -
+// the jail base-template equivalent of UploadISO above (ADR-0089),
+// same metadata-then-chunks-then-CloseAndRecv shape.
+func (p *PeerReporter) PushJailTemplate(ctx context.Context, addr, name string, r io.Reader) error {
+	conn, client, err := p.dial(addr)
+	if err != nil {
+		return err
+	}
+	defer conn.Close()
+
+	stream, err := client.ReceiveJailTemplate(ctx)
+	if err != nil {
+		return fmt.Errorf("opening jail-template stream to %s: %w", addr, err)
+	}
+	if err := stream.Send(&rpcpb.ReceiveJailTemplateRequest{
+		Data: &rpcpb.ReceiveJailTemplateRequest_Metadata{
+			Metadata: &rpcpb.JailTemplateMetadata{Name: name},
+		},
+	}); err != nil {
+		return fmt.Errorf("sending jail-template metadata to %s: %w", addr, err)
+	}
+
+	buf := make([]byte, 256*1024)
+	for {
+		n, rerr := r.Read(buf)
+		if n > 0 {
+			chunk := make([]byte, n)
+			copy(chunk, buf[:n])
+			if serr := stream.Send(&rpcpb.ReceiveJailTemplateRequest{Data: &rpcpb.ReceiveJailTemplateRequest_Chunk{Chunk: chunk}}); serr != nil {
+				return fmt.Errorf("sending jail-template data to %s: %w", addr, serr)
+			}
+		}
+		if rerr == io.EOF {
+			break
+		}
+		if rerr != nil {
+			return fmt.Errorf("reading zfs send stream for %s: %w", addr, rerr)
+		}
+	}
+
+	resp, err := stream.CloseAndRecv()
+	if err != nil {
+		return fmt.Errorf("closing jail-template stream to %s: %w", addr, err)
+	}
+	if resp.GetError() != "" {
+		return fmt.Errorf("%s rejected the jail template: %s", addr, resp.GetError())
+	}
+	return nil
+}
+
+// RequestJailTemplatePush calls addr's own PushJailTemplateTo RPC -
+// used by internal/cluster's Reconciler (ADR-0089) to ask a peer node
+// that's already confirmed (via ListJailTemplateNames) to have a named
+// base template push it to this node, mirroring RequestISOPush exactly.
+func (p *PeerReporter) RequestJailTemplatePush(ctx context.Context, addr, name, targetNodeID string) error {
+	conn, client, err := p.dial(addr)
+	if err != nil {
+		return err
+	}
+	defer conn.Close()
+	resp, err := client.PushJailTemplateTo(ctx, &rpcpb.PushJailTemplateToRequest{Name: name, TargetNodeId: targetNodeID})
+	if err != nil {
+		return err
+	}
+	if resp.GetError() != "" {
+		return fmt.Errorf("%s", resp.GetError())
+	}
+	return nil
+}
+
+// ListJailTemplateNames reports the jail base-template names present
+// at addr - used by internal/cluster's Reconciler (ADR-0089) to find
+// which known peer, if any, already has a base_template this node's
+// own ZFS lacks, mirroring ListISONames exactly.
+func (p *PeerReporter) ListJailTemplateNames(ctx context.Context, addr string) ([]string, error) {
+	conn, client, err := p.dial(addr)
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close()
+	resp, err := client.ListJailTemplateNames(ctx, &rpcpb.ListJailTemplateNamesRequest{})
+	if err != nil {
+		return nil, err
+	}
+	if resp.GetError() != "" {
+		return nil, fmt.Errorf("%s", resp.GetError())
+	}
+	return resp.GetNames(), nil
+}

@@ -307,6 +307,18 @@ func (f *fakeClient) PushISOTo(context.Context, *rpcpb.PushISOToRequest, ...grpc
 	return &rpcpb.PushISOToResponse{}, nil
 }
 
+func (f *fakeClient) ListJailTemplateNames(context.Context, *rpcpb.ListJailTemplateNamesRequest, ...grpc.CallOption) (*rpcpb.ListJailTemplateNamesResponse, error) {
+	return &rpcpb.ListJailTemplateNamesResponse{}, nil
+}
+
+func (f *fakeClient) PushJailTemplateTo(context.Context, *rpcpb.PushJailTemplateToRequest, ...grpc.CallOption) (*rpcpb.PushJailTemplateToResponse, error) {
+	return &rpcpb.PushJailTemplateToResponse{}, nil
+}
+
+func (f *fakeClient) ReceiveJailTemplate(context.Context, ...grpc.CallOption) (grpc.ClientStreamingClient[rpcpb.ReceiveJailTemplateRequest, rpcpb.ReceiveJailTemplateResponse], error) {
+	return nil, errors.New("fakeClient: ReceiveJailTemplate is not implemented by this test double")
+}
+
 func (f *fakeClient) HostStats(context.Context, *rpcpb.HostStatsRequest, ...grpc.CallOption) (*rpcpb.HostStatsResponse, error) {
 	return &rpcpb.HostStatsResponse{}, nil
 }

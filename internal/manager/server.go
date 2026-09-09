@@ -137,6 +137,11 @@ type PeerForwarder interface {
 	// asked for it.
 	UploadISO(ctx context.Context, addr, name, expectedSHA256 string, r io.Reader) error
 
+	// PushJailTemplate streams a local `zfs send` to addr's own
+	// ReceiveJailTemplate RPC - the jail base-template equivalent of
+	// UploadISO above, used by PushJailTemplateTo (ADR-0089).
+	PushJailTemplate(ctx context.Context, addr, name string, r io.Reader) error
+
 	// SimulateNodeFailure forwards the entire original request to addr's
 	// own SimulateNodeFailure RPC - see ADR-0052, and this file's own
 	// SimulateNodeFailure handler for why the whole request (not just
@@ -331,15 +336,21 @@ func (s *Server) SetNATPauser(nat natPauser) { s.nat = nat }
 // isoManager/VLANStatus already follow. ListDatasets/DatasetExists/
 // DestroyDataset were added for ListOrphanedHASTResources/
 // CleanupOrphanedHASTResource (see ADR-0026's own "not yet addressed"
-// note) - kept on this same interface/field rather than a new one
-// since it's always backed by the identical *zfs.Manager instance in
-// cmd/managerd.
+// note); Send/Receive/ListTemplateNames were added for the jail
+// base-template peer-fetch RPCs (ADR-0089) - all kept on this same
+// interface/field rather than a new one since it's always backed by
+// the identical *zfs.Manager instance in cmd/managerd, despite the
+// name now covering more than quotas.
 type quotaSetter interface {
 	SetProperty(ctx context.Context, name, prop, value string) error
 	ListDatasets(ctx context.Context) ([]string, error)
 	DatasetExists(ctx context.Context, name string) (bool, error)
 	DestroyDataset(ctx context.Context, name string) error
 	GetProperty(ctx context.Context, name, prop string) (string, error)
+
+	Send(ctx context.Context, snapshot string) (io.ReadCloser, error)
+	Receive(ctx context.Context, destName string, r io.Reader) error
+	ListTemplateNames(ctx context.Context) ([]string, error)
 }
 
 // nodeConfigStore is the subset of *nodeconfig.Manager GetNodeConfig/
@@ -1531,6 +1542,103 @@ func (s *Server) PushISOTo(ctx context.Context, req *rpcpb.PushISOToRequest) (*r
 		return &rpcpb.PushISOToResponse{Error: fmt.Sprintf("pushing to %q: %v", req.GetTargetNodeId(), err)}, nil
 	}
 	return &rpcpb.PushISOToResponse{}, nil
+}
+
+// ListJailTemplateNames implements rpcpb.ManagerServiceServer (ADR-
+// 0089) - the jail base-template equivalent of ListISOs, backing the
+// reconciler's own "does this peer have it" query when a jail names a
+// base_template this node's own ZFS doesn't have yet (ADR-0084).
+func (s *Server) ListJailTemplateNames(ctx context.Context, _ *rpcpb.ListJailTemplateNamesRequest) (*rpcpb.ListJailTemplateNamesResponse, error) {
+	if s.zfs == nil {
+		return &rpcpb.ListJailTemplateNamesResponse{}, nil
+	}
+	names, err := s.zfs.ListTemplateNames(ctx)
+	if err != nil {
+		return &rpcpb.ListJailTemplateNamesResponse{Error: err.Error()}, nil
+	}
+	return &rpcpb.ListJailTemplateNamesResponse{Names: names}, nil
+}
+
+// PushJailTemplateTo implements rpcpb.ManagerServiceServer (ADR-0089) -
+// the jail base-template equivalent of PushISOTo: this node (which
+// already has name) zfs-sends it to target_node_id via a real
+// ReceiveJailTemplate client stream. Peer-only, mirrors PushISOTo's
+// own reasoning exactly - never meant for direct human/API-client use.
+func (s *Server) PushJailTemplateTo(ctx context.Context, req *rpcpb.PushJailTemplateToRequest) (*rpcpb.PushJailTemplateToResponse, error) {
+	if req.GetName() == "" || req.GetTargetNodeId() == "" {
+		return &rpcpb.PushJailTemplateToResponse{Error: "name and target_node_id are required"}, nil
+	}
+	if s.zfs == nil {
+		return &rpcpb.PushJailTemplateToResponse{Error: "this node has no ZFS support configured"}, nil
+	}
+	if s.peers == nil {
+		return &rpcpb.PushJailTemplateToResponse{Error: "peer forwarding is not configured on this node"}, nil
+	}
+
+	rc, err := s.zfs.Send(ctx, "templates/"+req.GetName()+"@apiary-template")
+	if err != nil {
+		return &rpcpb.PushJailTemplateToResponse{Error: fmt.Sprintf("reading local template %q: %v", req.GetName(), err)}, nil
+	}
+	defer rc.Close()
+
+	targetAddr, err := s.nodeManagerdAddr(ctx, req.GetTargetNodeId())
+	if err != nil {
+		return &rpcpb.PushJailTemplateToResponse{Error: err.Error()}, nil
+	}
+
+	if err := s.peers.PushJailTemplate(ctx, targetAddr, req.GetName(), rc); err != nil {
+		return &rpcpb.PushJailTemplateToResponse{Error: fmt.Sprintf("pushing to %q: %v", req.GetTargetNodeId(), err)}, nil
+	}
+	return &rpcpb.PushJailTemplateToResponse{}, nil
+}
+
+// ReceiveJailTemplate implements rpcpb.ManagerServiceServer (ADR-0089)
+// - the jail base-template equivalent of UploadISO. The first stream
+// message must carry metadata (the template name); every message
+// after that carries a chunk of the `zfs send` stream's bytes, piped
+// directly into `zfs receive` as they arrive - never buffered in
+// memory, mirroring UploadISO's own io.Pipe-based handler exactly.
+func (s *Server) ReceiveJailTemplate(stream rpcpb.ManagerService_ReceiveJailTemplateServer) error {
+	first, err := stream.Recv()
+	if err != nil {
+		return fmt.Errorf("manager: ReceiveJailTemplate: receiving metadata: %w", err)
+	}
+	meta := first.GetMetadata()
+	if meta == nil {
+		return fmt.Errorf("manager: ReceiveJailTemplate: first message must be metadata")
+	}
+	if s.zfs == nil {
+		return stream.SendAndClose(&rpcpb.ReceiveJailTemplateResponse{Error: "this node has no ZFS support configured"})
+	}
+
+	pr, pw := io.Pipe()
+	recvDone := make(chan error, 1)
+	go func() {
+		err := s.zfs.Receive(stream.Context(), "templates/"+meta.GetName(), pr)
+		pr.CloseWithError(err)
+		recvDone <- err
+	}()
+
+	for {
+		req, err := stream.Recv()
+		if err == io.EOF {
+			pw.Close()
+			break
+		}
+		if err != nil {
+			pw.CloseWithError(err)
+			<-recvDone
+			return fmt.Errorf("manager: ReceiveJailTemplate: receiving chunk: %w", err)
+		}
+		if _, err := pw.Write(req.GetChunk()); err != nil {
+			break // Receive's goroutine already failed; its error is reported below
+		}
+	}
+
+	if err := <-recvDone; err != nil {
+		return stream.SendAndClose(&rpcpb.ReceiveJailTemplateResponse{Error: err.Error()})
+	}
+	return stream.SendAndClose(&rpcpb.ReceiveJailTemplateResponse{Name: meta.GetName()})
 }
 
 // HostStats implements rpcpb.ManagerServiceServer. Every subsystem in

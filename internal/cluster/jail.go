@@ -139,6 +139,35 @@ func jailTemplateSnapshot(name string) string {
 	return "templates/" + name + "@apiary-template"
 }
 
+// resolveJailTemplate ensures the base template named name exists as a
+// local snapshot before ensureJail clones it, fetching it from another
+// cluster node first if it's missing locally (ADR-0089) - the jail
+// base-template equivalent of resolveLocalImagePath/fetchImageFromPeer
+// (reconciler.go/peer.go), closing ADR-0084's own disclosed limitation
+// that a template previously had to exist on every node a templated
+// jail might land on.
+func (r *Reconciler) resolveJailTemplate(ctx context.Context, name string) error {
+	snap := jailTemplateSnapshot(name)
+	exists, err := r.ZFS.SnapshotExists(ctx, snap)
+	if err != nil {
+		return fmt.Errorf("checking base template: %w", err)
+	}
+	if exists {
+		return nil
+	}
+	if err := r.fetchTemplateFromPeer(ctx, name); err != nil {
+		return err
+	}
+	exists, err = r.ZFS.SnapshotExists(ctx, snap)
+	if err != nil {
+		return fmt.Errorf("checking base template after fetch: %w", err)
+	}
+	if !exists {
+		return fmt.Errorf("jail base template %q still not found locally after a reported-successful fetch from a peer", name)
+	}
+	return nil
+}
+
 // ensureJail ensures j's root filesystem exists - a plain ZFS dataset
 // (optionally cloned from a base_template on first creation, ADR-0084),
 // or, if ReplicaNodeID is set, a HAST-replicated device formatted and
@@ -160,15 +189,10 @@ func (r *Reconciler) ensureJail(ctx context.Context, j JailPlacement, hastDevice
 		}
 		if !exists {
 			if j.BaseTemplate != "" {
-				snap := jailTemplateSnapshot(j.BaseTemplate)
-				snapExists, err := r.ZFS.SnapshotExists(ctx, snap)
-				if err != nil {
-					return fmt.Errorf("checking base template: %w", err)
+				if err := r.resolveJailTemplate(ctx, j.BaseTemplate); err != nil {
+					return fmt.Errorf("jail %q names base template %q: %w", j.ID, j.BaseTemplate, err)
 				}
-				if !snapExists {
-					return fmt.Errorf("jail %q names base template %q but no snapshot %q exists on this node - see ADR-0084", j.ID, j.BaseTemplate, snap)
-				}
-				if err := r.ZFS.Clone(ctx, snap, j.ID); err != nil {
+				if err := r.ZFS.Clone(ctx, jailTemplateSnapshot(j.BaseTemplate), j.ID); err != nil {
 					return fmt.Errorf("cloning base template: %w", err)
 				}
 			} else if err := r.ZFS.CreateDataset(ctx, j.ID); err != nil {

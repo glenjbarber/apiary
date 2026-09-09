@@ -44,6 +44,14 @@ type peerReporter interface {
 	// phase already establishes.
 	ListISONames(ctx context.Context, addr string) ([]string, error)
 	RequestISOPush(ctx context.Context, addr, name, targetNodeID string) error
+
+	// ListJailTemplateNames/RequestJailTemplatePush (ADR-0089) are the
+	// jail base-template equivalents of ListISONames/RequestISOPush
+	// above - same on-demand fetch shape, just backed by a
+	// zfs send/receive stream instead of a flat-file UploadISO/
+	// PushISOTo transfer.
+	ListJailTemplateNames(ctx context.Context, addr string) ([]string, error)
+	RequestJailTemplatePush(ctx context.Context, addr, name, targetNodeID string) error
 }
 
 // defaultPeerManagerdPort is used when Reconciler.PeerManagerdPort is
@@ -117,4 +125,39 @@ func (r *Reconciler) fetchImageFromPeer(ctx context.Context, name string) error 
 		}
 	}
 	return fmt.Errorf("image %q not found on any known cluster node", name)
+}
+
+// fetchTemplateFromPeer mirrors fetchImageFromPeer exactly, for jail
+// base templates instead of VM/jail ISO images (ADR-0089) - same
+// peer-address resolution, same first-match-wins semantics, same
+// every-unreachable-peer-is-skipped behavior.
+func (r *Reconciler) fetchTemplateFromPeer(ctx context.Context, name string) error {
+	if r.Peers == nil {
+		return fmt.Errorf("jail base template %q not found locally and no peer forwarding is configured on this node", name)
+	}
+	addrs, err := r.resolvePeerAddresses(ctx)
+	if err != nil {
+		return fmt.Errorf("resolving peer addresses: %w", err)
+	}
+	port := r.peerManagerdPort()
+	for nodeID, host := range addrs {
+		if nodeID == r.LocalNodeID {
+			continue
+		}
+		addr := net.JoinHostPort(host, port)
+		names, err := r.Peers.ListJailTemplateNames(ctx, addr)
+		if err != nil {
+			continue
+		}
+		for _, n := range names {
+			if n != name {
+				continue
+			}
+			if err := r.Peers.RequestJailTemplatePush(ctx, addr, name, r.LocalNodeID); err != nil {
+				return fmt.Errorf("fetching base template %q from %s: %w", name, nodeID, err)
+			}
+			return nil
+		}
+	}
+	return fmt.Errorf("jail base template %q not found on any known cluster node", name)
 }

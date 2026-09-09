@@ -232,6 +232,33 @@ func TestRequiredRoleFor_GetUplinkStatusIsViewer(t *testing.T) {
 	}
 }
 
+// TestRequiredRoleFor_ListJailTemplateNamesIsViewer guards against the
+// same easy-to-miss failure mode as SimulateNodeFailure's own test
+// above, for ADR-0089's read-only jail base-template report - the same
+// tier as its direct analog, ListISOs.
+func TestRequiredRoleFor_ListJailTemplateNamesIsViewer(t *testing.T) {
+	const method = "/apiary.rpc.v1.ManagerService/ListJailTemplateNames"
+	if got := requiredRoleFor(method); got != RoleViewer {
+		t.Errorf("requiredRoleFor(%q) = %q, want %q", method, got, RoleViewer)
+	}
+}
+
+// TestRequiredRoleFor_JailTemplatePeerRPCsAreOperator guards against the
+// same easy-to-miss failure mode as SimulateNodeFailure's own test
+// above, for ADR-0089's two peer-to-peer-only jail base-template
+// transfer RPCs - the same tier as their direct analogs,
+// UploadISO/PushISOTo.
+func TestRequiredRoleFor_JailTemplatePeerRPCsAreOperator(t *testing.T) {
+	for _, method := range []string{
+		"/apiary.rpc.v1.ManagerService/PushJailTemplateTo",
+		"/apiary.rpc.v1.ManagerService/ReceiveJailTemplate",
+	} {
+		if got := requiredRoleFor(method); got != RoleOperator {
+			t.Errorf("requiredRoleFor(%q) = %q, want %q", method, got, RoleOperator)
+		}
+	}
+}
+
 // TestRequiredRoleFor_SetUplinkStateIsAdmin guards against the same
 // easy-to-miss failure mode as SimulateNodeFailure's own test above -
 // SetUplinkState (ADR-0085) is a host-wide physical change with a real

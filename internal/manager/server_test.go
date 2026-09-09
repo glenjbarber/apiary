@@ -8,6 +8,7 @@ import (
 	"crypto/x509"
 	"encoding/pem"
 	"errors"
+	"fmt"
 	"io"
 	"math/big"
 	"os"
@@ -185,6 +186,140 @@ func TestServer_UploadISO_SaveErrorReportedInResponse(t *testing.T) {
 	}
 	if stream.resp.GetError() == "" {
 		t.Errorf("response error = empty, want the save error surfaced")
+	}
+}
+
+// fakeReceiveJailTemplateStream mirrors fakeUploadStream exactly, for
+// Server.ReceiveJailTemplate (ADR-0089).
+type fakeReceiveJailTemplateStream struct {
+	grpc.ServerStream
+	reqs []*rpcpb.ReceiveJailTemplateRequest
+	idx  int
+	resp *rpcpb.ReceiveJailTemplateResponse
+}
+
+func (f *fakeReceiveJailTemplateStream) Recv() (*rpcpb.ReceiveJailTemplateRequest, error) {
+	if f.idx >= len(f.reqs) {
+		return nil, io.EOF
+	}
+	req := f.reqs[f.idx]
+	f.idx++
+	return req, nil
+}
+
+func (f *fakeReceiveJailTemplateStream) SendAndClose(resp *rpcpb.ReceiveJailTemplateResponse) error {
+	f.resp = resp
+	return nil
+}
+
+func (f *fakeReceiveJailTemplateStream) Context() context.Context { return context.Background() }
+
+func templateMetadataMsg(name string) *rpcpb.ReceiveJailTemplateRequest {
+	return &rpcpb.ReceiveJailTemplateRequest{Data: &rpcpb.ReceiveJailTemplateRequest_Metadata{
+		Metadata: &rpcpb.JailTemplateMetadata{Name: name},
+	}}
+}
+
+func templateChunkMsg(data string) *rpcpb.ReceiveJailTemplateRequest {
+	return &rpcpb.ReceiveJailTemplateRequest{Data: &rpcpb.ReceiveJailTemplateRequest_Chunk{Chunk: []byte(data)}}
+}
+
+func TestServer_ReceiveJailTemplate_StreamsChunksIntoZFS(t *testing.T) {
+	zfsMgr := &fakeQuotaSetter{}
+	s := NewServer(nil, "node-1", nil, nil, nil, nil, nil, "", zfsMgr, nil, nil, 0, nil)
+
+	stream := &fakeReceiveJailTemplateStream{reqs: []*rpcpb.ReceiveJailTemplateRequest{
+		templateMetadataMsg("freebsd-14"),
+		templateChunkMsg("hello "),
+		templateChunkMsg("world"),
+	}}
+
+	if err := s.ReceiveJailTemplate(stream); err != nil {
+		t.Fatalf("ReceiveJailTemplate() error: %v", err)
+	}
+	if zfsMgr.receivedInto["templates/freebsd-14"] != "hello world" {
+		t.Errorf("received data = %q, want %q", zfsMgr.receivedInto["templates/freebsd-14"], "hello world")
+	}
+	if stream.resp.GetError() != "" {
+		t.Errorf("response error = %q, want empty", stream.resp.GetError())
+	}
+	if stream.resp.GetName() != "freebsd-14" {
+		t.Errorf("response name = %q, want freebsd-14", stream.resp.GetName())
+	}
+}
+
+func TestServer_ReceiveJailTemplate_MissingMetadataFirstIsError(t *testing.T) {
+	s := NewServer(nil, "node-1", nil, nil, nil, nil, nil, "", &fakeQuotaSetter{}, nil, nil, 0, nil)
+	stream := &fakeReceiveJailTemplateStream{reqs: []*rpcpb.ReceiveJailTemplateRequest{templateChunkMsg("oops")}}
+
+	if err := s.ReceiveJailTemplate(stream); err == nil {
+		t.Fatal("ReceiveJailTemplate() = nil error, want rejection when metadata isn't first")
+	}
+}
+
+func TestServer_ReceiveJailTemplate_NoZFSConfiguredIsError(t *testing.T) {
+	s := NewServer(nil, "node-1", nil, nil, nil, nil, nil, "", nil, nil, nil, 0, nil)
+	stream := &fakeReceiveJailTemplateStream{reqs: []*rpcpb.ReceiveJailTemplateRequest{templateMetadataMsg("freebsd-14")}}
+
+	if err := s.ReceiveJailTemplate(stream); err != nil {
+		t.Fatalf("ReceiveJailTemplate() error: %v, want a response-level error instead", err)
+	}
+	if stream.resp.GetError() == "" {
+		t.Error("response error = empty, want the no-ZFS-configured error surfaced")
+	}
+}
+
+func TestServer_ReceiveJailTemplate_ReceiveErrorReportedInResponse(t *testing.T) {
+	zfsMgr := &fakeQuotaSetter{receiveErr: errors.New("zfs receive failed: stream corrupt")}
+	s := NewServer(nil, "node-1", nil, nil, nil, nil, nil, "", zfsMgr, nil, nil, 0, nil)
+	stream := &fakeReceiveJailTemplateStream{reqs: []*rpcpb.ReceiveJailTemplateRequest{
+		templateMetadataMsg("freebsd-14"),
+		templateChunkMsg("data"),
+	}}
+
+	if err := s.ReceiveJailTemplate(stream); err != nil {
+		t.Fatalf("ReceiveJailTemplate() error: %v, want a response-level error instead", err)
+	}
+	if stream.resp.GetError() == "" {
+		t.Error("response error = empty, want the receive error surfaced")
+	}
+}
+
+func TestServer_ListJailTemplateNames(t *testing.T) {
+	zfsMgr := &fakeQuotaSetter{templateNames: []string{"freebsd-14", "debian-12"}}
+	s := NewServer(nil, "node-1", nil, nil, nil, nil, nil, "", zfsMgr, nil, nil, 0, nil)
+
+	resp, err := s.ListJailTemplateNames(context.Background(), &rpcpb.ListJailTemplateNamesRequest{})
+	if err != nil {
+		t.Fatalf("ListJailTemplateNames() error: %v", err)
+	}
+	if len(resp.GetNames()) != 2 || resp.GetNames()[0] != "freebsd-14" {
+		t.Errorf("ListJailTemplateNames() = %+v, want [freebsd-14 debian-12]", resp.GetNames())
+	}
+}
+
+func TestServer_ListJailTemplateNames_ErrorSurfacedInResponse(t *testing.T) {
+	zfsMgr := &fakeQuotaSetter{templateNamesErr: errors.New("zfs list failed")}
+	s := NewServer(nil, "node-1", nil, nil, nil, nil, nil, "", zfsMgr, nil, nil, 0, nil)
+
+	resp, err := s.ListJailTemplateNames(context.Background(), &rpcpb.ListJailTemplateNamesRequest{})
+	if err != nil {
+		t.Fatalf("ListJailTemplateNames() error: %v, want a response-level error instead", err)
+	}
+	if resp.GetError() == "" {
+		t.Error("response error = empty, want the underlying error surfaced")
+	}
+}
+
+func TestServer_ListJailTemplateNames_NotConfiguredReturnsEmpty(t *testing.T) {
+	s := NewServer(nil, "node-1", nil, nil, nil, nil, nil, "", nil, nil, nil, 0, nil)
+
+	resp, err := s.ListJailTemplateNames(context.Background(), &rpcpb.ListJailTemplateNamesRequest{})
+	if err != nil {
+		t.Fatalf("ListJailTemplateNames() error: %v", err)
+	}
+	if len(resp.GetNames()) != 0 || resp.GetError() != "" {
+		t.Errorf("ListJailTemplateNames() = %+v, want an empty, error-free response when no ZFS is configured", resp)
 	}
 }
 
@@ -833,6 +968,18 @@ type fakeQuotaSetter struct {
 	destroyErr     error
 	lastDestroyed  string
 	existsOverride map[string]bool
+
+	// sendData/sendErr, receivedInto/receiveErr, templateNames/
+	// templateNamesErr back Send/Receive/ListTemplateNames' tests
+	// (ADR-0089) - the jail base-template peer-fetch primitives.
+	sendData map[string]string
+	sendErr  error
+
+	receivedInto map[string]string // destName -> received bytes
+	receiveErr   error
+
+	templateNames    []string
+	templateNamesErr error
 }
 
 func (f *fakeQuotaSetter) SetProperty(_ context.Context, name, prop, value string) error {
@@ -872,6 +1019,39 @@ func (f *fakeQuotaSetter) DestroyDataset(_ context.Context, name string) error {
 	}
 	f.lastDestroyed = name
 	return nil
+}
+
+func (f *fakeQuotaSetter) Send(_ context.Context, snapshot string) (io.ReadCloser, error) {
+	if f.sendErr != nil {
+		return nil, f.sendErr
+	}
+	data, ok := f.sendData[snapshot]
+	if !ok {
+		return nil, fmt.Errorf("dataset does not exist: %q", snapshot)
+	}
+	return io.NopCloser(strings.NewReader(data)), nil
+}
+
+func (f *fakeQuotaSetter) Receive(_ context.Context, destName string, r io.Reader) error {
+	if f.receiveErr != nil {
+		return f.receiveErr
+	}
+	data, err := io.ReadAll(r)
+	if err != nil {
+		return err
+	}
+	if f.receivedInto == nil {
+		f.receivedInto = map[string]string{}
+	}
+	f.receivedInto[destName] = string(data)
+	return nil
+}
+
+func (f *fakeQuotaSetter) ListTemplateNames(context.Context) ([]string, error) {
+	if f.templateNamesErr != nil {
+		return nil, f.templateNamesErr
+	}
+	return f.templateNames, nil
 }
 
 func TestServer_SetDatasetQuota(t *testing.T) {

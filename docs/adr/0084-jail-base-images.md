@@ -98,3 +98,11 @@ template convention, no existing UI catalog to mirror).
   cross-node template-fetch mechanism (ZFS send/receive, mirroring
   ADR-0041's peer-fetch for VM images) is a plausible, explicitly
   disclosed follow-up, not attempted here.
+
+**Resolved (narrowed, not eliminated) by ADR-0089**: a jail base
+template missing on the node a templated jail lands on is now fetched
+automatically from the first cluster peer that has it, via a real `zfs
+send`/`receive` stream - mirroring ADR-0041's VM/ISO peer-fetch. This
+narrows the limitation above rather than eliminating it: an operator
+must still create a template once, somewhere in the cluster - only the
+"must exist on every node it might be scheduled to" part is gone.
