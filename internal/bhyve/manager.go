@@ -297,6 +297,24 @@ func (m *Manager) CreateVM(ctx context.Context, name string, cfg Config) error {
 		return fmt.Errorf("bhyve: creating run dir: %w", err)
 	}
 
+	// Defensively clear a stale serial-log reader before allocating a new
+	// one - a real crash-loop bug found live: unlike bhyve itself (whose
+	// daemon(8) supervisor exits when bhyve does, so a stale pidfile never
+	// blocks a fresh launch), the reader startSerialLogger starts has no
+	// lifecycle tie to bhyve at all. If bhyve exits independently of
+	// Apiary's own tracking (crashed, no bootable media attached - the
+	// confirmed live cause) *and* its vmm(4) context happens to be gone
+	// too, VMExists's own stale-VM detection never runs (it only tears
+	// down a stale reader when the kernel context still exists - see its
+	// own doc comment), so the previous incarnation's reader keeps running
+	// forever. The next CreateVM attempt for the same VM then permanently
+	// collided with that still-running reader's own daemon(8) pidfile
+	// ("process already running"), a ~30s crash loop with no automatic
+	// recovery. stopSerialLogger is idempotent and safe to call
+	// unconditionally here: a signal to an already-dead pid is a no-op,
+	// and removing bookkeeping files that don't exist is too.
+	m.stopSerialLogger(ctx, qname)
+
 	var tapName string
 	if cfg.Bridge != "" {
 		tapName, err = m.createTap(ctx, qname, cfg.Bridge)
