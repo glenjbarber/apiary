@@ -130,6 +130,7 @@ type PeerForwarder interface {
 	ForcePurgeJail(ctx context.Context, addr string, req *rpcpb.ForcePurgeJailRequest) (*rpcpb.ForcePurgeJailResponse, error)
 	MigrateJail(ctx context.Context, addr string, req *rpcpb.MigrateJailRequest) (*rpcpb.MigrateJailResponse, error)
 	SetJailDesiredState(ctx context.Context, addr string, req *rpcpb.SetJailDesiredStateRequest) (*rpcpb.SetJailDesiredStateResponse, error)
+	SetJailHostname(ctx context.Context, addr string, req *rpcpb.SetJailHostnameRequest) (*rpcpb.SetJailHostnameResponse, error)
 
 	// UploadISO streams a local file to addr's own UploadISO RPC - used
 	// by PushISOTo (the source node's side of on-demand image fetching,
@@ -2520,6 +2521,24 @@ func (s *Server) SetJailDesiredState(ctx context.Context, req *rpcpb.SetJailDesi
 		}
 	}
 	return &rpcpb.SetJailDesiredStateResponse{Jail: fromInternalJail(jail), Error: appErr, LeaderHint: leaderHint}, nil
+}
+
+// SetJailHostname implements rpcpb.ManagerServiceServer - lets an
+// operator rename a jail's hostname after creation, previously only
+// settable via CreateJail. Same narrow, atomic-apply shape as
+// SetVMFirewallPaused, for the identical reason (a full UpdateJail
+// replace is never routed through the web UI).
+func (s *Server) SetJailHostname(ctx context.Context, req *rpcpb.SetJailHostnameRequest) (*rpcpb.SetJailHostnameResponse, error) {
+	cmd := &internalpb.Command{Op: &internalpb.Command_SetJailHostname{SetJailHostname: &internalpb.SetJailHostname{
+		Id: req.GetId(), Hostname: req.GetHostname(),
+	}}}
+	jail, appErr, leaderHint := s.applyJailCommand(ctx, cmd, req.GetTimeoutMs())
+	if leaderHint != "" && s.peers != nil {
+		if fwd, ferr := s.peers.SetJailHostname(ctx, s.peerManagerdAddr(leaderHint), req); ferr == nil {
+			return fwd, nil
+		}
+	}
+	return &rpcpb.SetJailHostnameResponse{Jail: fromInternalJail(jail), Error: appErr, LeaderHint: leaderHint}, nil
 }
 
 // GetJail implements rpcpb.ManagerServiceServer.

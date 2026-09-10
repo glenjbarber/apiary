@@ -36,7 +36,7 @@
 {{define "jail_rows"}}
 {{range .Jails}}
 <tr>
-  <td>{{.ID}}</td>
+  <td><a href="/jails/{{.ID}}"><strong>{{.ID}}</strong></a></td>
   <td>{{.Name}}</td>
   <td>{{.Hostname}}</td>
   <td{{if and $.LocalNodeID (ne .NodeID $.LocalNodeID)}} class="remote-node" title="Owned by a different Comb than the one currently answering this page"{{end}}>{{.NodeID}}</td>

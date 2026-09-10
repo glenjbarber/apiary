@@ -190,6 +190,10 @@ func (f *fakeClient) SetJailDesiredState(context.Context, *rpcpb.SetJailDesiredS
 	return &rpcpb.SetJailDesiredStateResponse{}, nil
 }
 
+func (f *fakeClient) SetJailHostname(context.Context, *rpcpb.SetJailHostnameRequest, ...grpc.CallOption) (*rpcpb.SetJailHostnameResponse, error) {
+	return &rpcpb.SetJailHostnameResponse{}, nil
+}
+
 func (f *fakeClient) GetNodeConfig(context.Context, *rpcpb.GetNodeConfigRequest, ...grpc.CallOption) (*rpcpb.GetNodeConfigResponse, error) {
 	return &rpcpb.GetNodeConfigResponse{}, nil
 }

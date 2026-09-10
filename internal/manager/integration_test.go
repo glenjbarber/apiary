@@ -2078,6 +2078,61 @@ func TestIntegration_SetVMFirewallPaused_MissingIDIsError(t *testing.T) {
 	}
 }
 
+// TestIntegration_SetJailHostname_TouchesOnlyThatField mirrors
+// TestIntegration_SetVMFirewallPaused_TouchesOnlyThatField exactly, for
+// the jail hostname-edit command backing the jail detail page.
+func TestIntegration_SetJailHostname_TouchesOnlyThatField(t *testing.T) {
+	raftdSocket := newRaftdUDSSocket(t)
+	client := newManagerdRPCClient(t, raftdSocket)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if _, err := client.CreateJail(ctx, &rpcpb.CreateJailRequest{
+		Jail: &rpcpb.JailDefinition{Id: "jail-1", Name: "web-1", Hostname: "old.local", NodeId: "node-a"},
+	}); err != nil {
+		t.Fatalf("CreateJail() error: %v", err)
+	}
+
+	resp, err := client.SetJailHostname(ctx, &rpcpb.SetJailHostnameRequest{Id: "jail-1", Hostname: "new.local"})
+	if err != nil {
+		t.Fatalf("SetJailHostname() error: %v", err)
+	}
+	if resp.GetError() != "" {
+		t.Fatalf("SetJailHostname() returned error: %s", resp.GetError())
+	}
+	if resp.GetJail().GetHostname() != "new.local" {
+		t.Errorf("Hostname = %q, want new.local", resp.GetJail().GetHostname())
+	}
+	if resp.GetJail().GetName() != "web-1" || resp.GetJail().GetNodeId() != "node-a" {
+		t.Errorf("jail = %+v, want name/node_id preserved from the original definition", resp.GetJail())
+	}
+
+	getResp, err := client.GetJail(ctx, &rpcpb.GetJailRequest{Id: "jail-1"})
+	if err != nil || !getResp.GetFound() {
+		t.Fatalf("GetJail() after rename = (found=%v, err=%v)", getResp.GetFound(), err)
+	}
+	if getResp.GetJail().GetHostname() != "new.local" {
+		t.Errorf("GetJail() after rename: Hostname = %q, want new.local", getResp.GetJail().GetHostname())
+	}
+}
+
+func TestIntegration_SetJailHostname_MissingIDIsError(t *testing.T) {
+	raftdSocket := newRaftdUDSSocket(t)
+	client := newManagerdRPCClient(t, raftdSocket)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	resp, err := client.SetJailHostname(ctx, &rpcpb.SetJailHostnameRequest{Id: "does-not-exist", Hostname: "new.local"})
+	if err != nil {
+		t.Fatalf("SetJailHostname() error: %v", err)
+	}
+	if resp.GetError() == "" {
+		t.Fatalf("SetJailHostname() error = empty, want a missing-id rejection")
+	}
+}
+
 // TestIntegration_SetVMFirewallRules_ReplacesRulesPreservesEverythingElse
 // guards the same real round-trip-through-raft property as
 // TestIntegration_SetVMFirewallPaused_TouchesOnlyThatField, for the new

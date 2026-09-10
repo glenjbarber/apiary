@@ -1,0 +1,52 @@
+{{define "jail_page"}}
+<!DOCTYPE html>
+<html lang="en">
+{{template "head" .}}
+<body class="app-layout">
+  {{template "nav" .}}
+  <main class="content" id="main-content">
+  {{if .Error}}
+    {{template "page_header" (pageHeader "Jail" "The requested jail could not be loaded." "<a href='/jails'>Back to Jails</a>")}}
+    <div class="banner-error">{{.Error}}</div>
+  {{else}}
+    {{template "page_header" (pageHeader .Jail.ID .Jail.Name "<a href='/jails'>Back to Jails</a>")}}
+
+    <div class="detail-grid">
+      <section class="panel detail-card">
+        <h3>Status</h3>
+        <dl class="detail-list">
+          <div><dt>Observed state</dt><dd><span class="badge {{.Jail.Phase}}">{{.Jail.Phase}}</span></dd></div>
+          <div><dt>Desired state</dt><dd>{{if .Jail.DesiredState}}{{.Jail.DesiredState}}{{else}}<span class="muted">unspecified</span>{{end}}</dd></div>
+          <div><dt>Owner node</dt><dd>{{.Jail.NodeID}}</dd></div>
+          <div><dt>Replica node</dt><dd>{{if .Jail.ReplicaNodeID}}{{.Jail.ReplicaNodeID}}{{else}}<span class="muted">none</span>{{end}}</dd></div>
+        </dl>
+        {{if .Jail.PhaseError}}<div class="banner-error">{{.Jail.PhaseError}}</div>{{end}}
+      </section>
+    </div>
+
+    <section class="panel">
+      <h3>Hostname</h3>
+      <p class="muted">The hostname this jail reports internally. Changing it here does not by itself update anything already running inside the jail.</p>
+      {{if .JailHostnameFormError}}<div class="banner-error">{{.JailHostnameFormError}}</div>{{end}}
+      {{if .CanOperate}}
+      <form method="post" action="/jails/{{.Jail.ID}}/hostname" class="inline-form">
+        <label>Hostname
+          <input type="text" name="hostname" value="{{.Jail.Hostname}}" placeholder="jail.example.com" title="This jail's hostname.">
+        </label>
+        <button type="submit">Save</button>
+      </form>
+      {{else}}
+      <p>{{if .Jail.Hostname}}{{.Jail.Hostname}}{{else}}<span class="muted">none</span>{{end}}</p>
+      {{end}}
+    </section>
+
+    <section class="panel jail-controls">
+      <div><h3>Lifecycle and deletion</h3><p class="muted">Start, stop, restart, and delete remain on the Jails list.</p></div>
+      <div class="actions"><a class="button secondary" href="/jails">Back to Jails</a></div>
+    </section>
+  {{end}}
+  </main>
+  {{template "footer" .}}
+</body>
+</html>
+{{end}}

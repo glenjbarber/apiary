@@ -97,6 +97,10 @@ type fakeClient struct {
 	setJailDesiredStateResp    *rpcpb.SetJailDesiredStateResponse
 	lastSetJailDesiredStateReq *rpcpb.SetJailDesiredStateRequest
 
+	setJailHostnameResp    *rpcpb.SetJailHostnameResponse
+	setJailHostnameErr     error
+	lastSetJailHostnameReq *rpcpb.SetJailHostnameRequest
+
 	setDatasetQuotaResp    *rpcpb.SetDatasetQuotaResponse
 	lastSetDatasetQuotaReq *rpcpb.SetDatasetQuotaRequest
 
@@ -229,6 +233,17 @@ func (f *fakeClient) SetJailDesiredState(_ context.Context, in *rpcpb.SetJailDes
 		return f.setJailDesiredStateResp, nil
 	}
 	return &rpcpb.SetJailDesiredStateResponse{}, nil
+}
+
+func (f *fakeClient) SetJailHostname(_ context.Context, in *rpcpb.SetJailHostnameRequest, _ ...grpc.CallOption) (*rpcpb.SetJailHostnameResponse, error) {
+	f.lastSetJailHostnameReq = in
+	if f.setJailHostnameErr != nil {
+		return nil, f.setJailHostnameErr
+	}
+	if f.setJailHostnameResp != nil {
+		return f.setJailHostnameResp, nil
+	}
+	return &rpcpb.SetJailHostnameResponse{}, nil
 }
 
 func (f *fakeClient) GetNodeConfig(context.Context, *rpcpb.GetNodeConfigRequest, ...grpc.CallOption) (*rpcpb.GetNodeConfigResponse, error) {
@@ -1530,6 +1545,99 @@ func TestServer_JailsPage_MarksRemoteNodeVisually(t *testing.T) {
 	}
 }
 
+// TestServer_JailPage confirms the jail detail page (ADR-none, a plain
+// bug fix - jails previously had no per-resource page at all) renders
+// the fetched jail's fields, mirroring TestServer_JailsPage's own
+// assertion style.
+func TestServer_JailPage(t *testing.T) {
+	client := &fakeClient{getJailResp: &rpcpb.GetJailResponse{
+		Found: true,
+		Jail:  &rpcpb.JailDefinition{Id: "jail-1", Name: "web-1", Hostname: "web-1.local", NodeId: "node-a"},
+	}}
+	s := newTestServer(t, client)
+
+	req := httptest.NewRequest(http.MethodGet, "/jails/jail-1", nil)
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, "jail-1") || !strings.Contains(body, "web-1.local") || !strings.Contains(body, "node-a") {
+		t.Errorf("jail page missing expected jail data, got: %s", body)
+	}
+}
+
+func TestServer_JailPage_NotFound(t *testing.T) {
+	client := &fakeClient{getJailResp: &rpcpb.GetJailResponse{Found: false}}
+	s := newTestServer(t, client)
+
+	req := httptest.NewRequest(http.MethodGet, "/jails/does-not-exist", nil)
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404; body=%s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "not found") {
+		t.Errorf("body missing not-found message, got: %s", rec.Body.String())
+	}
+}
+
+// TestServer_SetJailHostname confirms the jail detail page's hostname
+// edit form forwards the trimmed hostname to SetJailHostname and
+// re-renders the detail page with the updated value.
+func TestServer_SetJailHostname(t *testing.T) {
+	client := &fakeClient{
+		getJailResp: &rpcpb.GetJailResponse{
+			Found: true,
+			Jail:  &rpcpb.JailDefinition{Id: "jail-1", Hostname: "new.local", NodeId: "node-a"},
+		},
+	}
+	s := newTestServer(t, client)
+
+	form := url.Values{"hostname": {"  new.local  "}}
+	req := httptest.NewRequest(http.MethodPost, "/jails/jail-1/hostname", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	if client.lastSetJailHostnameReq.GetId() != "jail-1" || client.lastSetJailHostnameReq.GetHostname() != "new.local" {
+		t.Errorf("SetJailHostname request = %+v, want id=jail-1 hostname=new.local (trimmed)", client.lastSetJailHostnameReq)
+	}
+	if !strings.Contains(rec.Body.String(), "new.local") {
+		t.Errorf("re-rendered page missing updated hostname, got: %s", rec.Body.String())
+	}
+}
+
+func TestServer_SetJailHostname_ErrorRendersOnPage(t *testing.T) {
+	client := &fakeClient{
+		setJailHostnameResp: &rpcpb.SetJailHostnameResponse{Error: "jail is being deleted"},
+		getJailResp: &rpcpb.GetJailResponse{
+			Found: true,
+			Jail:  &rpcpb.JailDefinition{Id: "jail-1", NodeId: "node-a"},
+		},
+	}
+	s := newTestServer(t, client)
+
+	form := url.Values{"hostname": {"new.local"}}
+	req := httptest.NewRequest(http.MethodPost, "/jails/jail-1/hostname", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "jail is being deleted") {
+		t.Errorf("body missing form error, got: %s", rec.Body.String())
+	}
+}
+
 func TestServer_JailPanelRefresh(t *testing.T) {
 	client := &fakeClient{listJailsResp: &rpcpb.ListJailsResponse{Jails: []*rpcpb.JailDefinition{
 		{Id: "test-jail-01", NodeId: "apiverse", Phase: rpcpb.JailPhase_JAIL_PHASE_ERROR, PhaseError: "jail provisioning is disabled"},
@@ -1555,6 +1663,60 @@ func TestServer_JailPanelRefresh(t *testing.T) {
 	client.listJailsResp = &rpcpb.ListJailsResponse{Error: "raft unavailable"}
 	if !strings.Contains(request(), "raft unavailable") {
 		t.Fatal("list error was hidden")
+	}
+}
+
+// TestServer_JailPage_ViewerSeesReadOnlyHostname confirms the jail
+// detail page's edit form is hidden (not just disabled) for a Viewer,
+// mirroring the VM detail page's own CanOperate-gated form pattern.
+func TestServer_JailPage_ViewerSeesReadOnlyHostname(t *testing.T) {
+	client := &fakeClient{getJailResp: &rpcpb.GetJailResponse{
+		Found: true,
+		Jail:  &rpcpb.JailDefinition{Id: "jail-1", Hostname: "web-1.local", NodeId: "node-a"},
+	}}
+	s, err := NewServer(client, fakeAuthenticator{user: "viewer", pass: "secret"}, map[string]manager.Role{"viewer": manager.RoleViewer}, nil, "", "", nil, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	token, _ := s.sessions.Create("viewer", manager.RoleViewer)
+	req := httptest.NewRequest(http.MethodGet, "/jails/jail-1", nil)
+	req.AddCookie(&http.Cookie{Name: sessionCookieName, Value: token})
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, "web-1.local") {
+		t.Errorf("viewer should still see the current hostname, got: %s", body)
+	}
+	if strings.Contains(body, `action="/jails/jail-1/hostname"`) {
+		t.Errorf("viewer should not see the hostname edit form, got: %s", body)
+	}
+}
+
+// TestServer_SetJailHostname_ViewerForbidden confirms the route itself
+// is Operator-gated, not just hidden in the template.
+func TestServer_SetJailHostname_ViewerForbidden(t *testing.T) {
+	client := &fakeClient{}
+	s, err := NewServer(client, fakeAuthenticator{user: "viewer", pass: "secret"}, map[string]manager.Role{"viewer": manager.RoleViewer}, nil, "", "", nil, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	token, _ := s.sessions.Create("viewer", manager.RoleViewer)
+	form := url.Values{"hostname": {"new.local"}}
+	req := httptest.NewRequest(http.MethodPost, "/jails/jail-1/hostname", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.AddCookie(&http.Cookie{Name: sessionCookieName, Value: token})
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want 403; body=%s", rec.Code, rec.Body.String())
+	}
+	if client.lastSetJailHostnameReq != nil {
+		t.Error("SetJailHostname should never have been called for a forbidden viewer request")
 	}
 }
 

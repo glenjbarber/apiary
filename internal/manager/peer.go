@@ -687,6 +687,15 @@ func (p *PeerReporter) SetJailDesiredState(ctx context.Context, addr string, req
 	return client.SetJailDesiredState(ctx, req)
 }
 
+func (p *PeerReporter) SetJailHostname(ctx context.Context, addr string, req *rpcpb.SetJailHostnameRequest) (*rpcpb.SetJailHostnameResponse, error) {
+	conn, client, err := p.dial(addr)
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close()
+	return client.SetJailHostname(ctx, req)
+}
+
 func (p *PeerReporter) ReportJailTeardownComplete(ctx context.Context, addr, id string) error {
 	conn, client, err := p.dial(addr)
 	if err != nil {
