@@ -55,5 +55,5 @@ setup-pam:
 	@echo "PAM policy at /etc/pam.d/${PAM_SERVICE} - pass -pam-service ${PAM_SERVICE} to managerd to enable real login; the first successful login becomes Admin automatically (see docs/bootstrap.md Step 11)."
 
 setup-quick: setup
-	./apiaryinstall -apply -apply-network yes-modify-network -zfs-pool zroot
+	./apiaryinstall -apply -apply-network yes-modify-network -zfs-pool zroot \
 		-vlan-uplink vtnet0 -bhyve-bridge bridge0
