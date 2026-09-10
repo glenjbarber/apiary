@@ -808,6 +808,15 @@ each design decision, in order.
   fragile multi-node cluster (e.g. one live voter left out of three)
   still renders that way, since that IS a real, actionable hazard. See
   [ADR-0091](docs/adr/0091-single-node-first-class.md).
+- **Join-a-Colony now actually reaches the target you name** — the
+  "Join a Colony" form (Machine page) gained a required "Existing
+  Colony member's address" field, and submitting it now really dials
+  that address, rather than silently recording the request on whichever
+  Comb's own page happened to receive the form (the confusing,
+  backwards-and-invisible-on-the-real-target bug ADR-0083's own
+  described design never actually got built to prevent). Status polling
+  and Cancel now follow the same target automatically. See
+  [ADR-0092](docs/adr/0092-join-colony-target-address.md).
 - Importing VMs from other hypervisors (e.g. Proxmox): no disk-format
   conversion, and Apiary is UEFI-only. Linux containers have no path at
   all — jails share the host FreeBSD kernel

@@ -138,6 +138,10 @@ func (f *fakePeerHostStatsClient) DeleteVMSnapshot(context.Context, string, stri
 	return &rpcpb.DeleteVMSnapshotResponse{}, nil
 }
 
+func (f *fakePeerHostStatsClient) GetJoinRequestStatus(context.Context, string, string) (*rpcpb.GetJoinRequestStatusResponse, error) {
+	return &rpcpb.GetJoinRequestStatusResponse{}, nil
+}
+
 func (f *fakePeerHostStatsClient) GetNodeConfig(_ context.Context, addr string) (*rpcpb.GetNodeConfigResponse, error) {
 	return &rpcpb.GetNodeConfigResponse{}, nil
 }

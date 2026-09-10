@@ -30,7 +30,11 @@ type fakeClient struct {
 	cancelJoinRequestResp    *rpcpb.CancelJoinRequestResponse
 	lastCancelJoinRequestReq *rpcpb.CancelJoinRequestRequest
 
-	getJoinRequestStatusResp *rpcpb.GetJoinRequestStatusResponse
+	requestJoinColonyResp    *rpcpb.RequestJoinColonyResponse
+	lastRequestJoinColonyReq *rpcpb.RequestJoinColonyRequest
+
+	getJoinRequestStatusResp    *rpcpb.GetJoinRequestStatusResponse
+	lastGetJoinRequestStatusReq *rpcpb.GetJoinRequestStatusRequest
 
 	purgeJoinRequestResp    *rpcpb.PurgeJoinRequestResponse
 	lastPurgeJoinRequestReq *rpcpb.PurgeJoinRequestRequest
@@ -571,11 +575,16 @@ func (f *fakeClient) SetNetworkName(_ context.Context, in *rpcpb.SetNetworkNameR
 	return &rpcpb.SetNetworkNameResponse{}, nil
 }
 
-func (f *fakeClient) RequestJoinColony(context.Context, *rpcpb.RequestJoinColonyRequest, ...grpc.CallOption) (*rpcpb.RequestJoinColonyResponse, error) {
+func (f *fakeClient) RequestJoinColony(_ context.Context, in *rpcpb.RequestJoinColonyRequest, _ ...grpc.CallOption) (*rpcpb.RequestJoinColonyResponse, error) {
+	f.lastRequestJoinColonyReq = in
+	if f.requestJoinColonyResp != nil {
+		return f.requestJoinColonyResp, nil
+	}
 	return &rpcpb.RequestJoinColonyResponse{}, nil
 }
 
-func (f *fakeClient) GetJoinRequestStatus(context.Context, *rpcpb.GetJoinRequestStatusRequest, ...grpc.CallOption) (*rpcpb.GetJoinRequestStatusResponse, error) {
+func (f *fakeClient) GetJoinRequestStatus(_ context.Context, in *rpcpb.GetJoinRequestStatusRequest, _ ...grpc.CallOption) (*rpcpb.GetJoinRequestStatusResponse, error) {
+	f.lastGetJoinRequestStatusReq = in
 	if f.getJoinRequestStatusResp != nil {
 		return f.getJoinRequestStatusResp, nil
 	}
@@ -2708,14 +2717,16 @@ func TestServer_Login_SuccessDoesNotCountAsFailureTowardLockout(t *testing.T) {
 }
 
 // TestServer_HandleCancelJoinRequest confirms the Machine page's
-// "Cancel request" form forwards the submitted request_id to
-// CancelJoinRequest and redirects back to a bare /machine (dropping
-// ?join_request_id= so the "Request to join" form shows fresh again).
+// "Cancel request" form forwards the submitted request_id AND
+// target_address (ADR-0092 - the request may live on a remote Colony
+// member, not this node's own raft) to CancelJoinRequest and redirects
+// back to a bare /machine (dropping ?join_request_id= so the "Request
+// to join" form shows fresh again).
 func TestServer_HandleCancelJoinRequest(t *testing.T) {
 	client := &fakeClient{}
 	s := newTestServer(t, client)
 
-	form := url.Values{"request_id": {"jreq-abc123"}}
+	form := url.Values{"request_id": {"jreq-abc123"}, "target_address": {"10.62.0.2:17700"}}
 	req := httptest.NewRequest(http.MethodPost, "/machine/join-colony/cancel", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	rec := httptest.NewRecorder()
@@ -2729,6 +2740,90 @@ func TestServer_HandleCancelJoinRequest(t *testing.T) {
 	}
 	if client.lastCancelJoinRequestReq.GetRequestId() != "jreq-abc123" {
 		t.Errorf("CancelJoinRequest request_id = %q, want jreq-abc123", client.lastCancelJoinRequestReq.GetRequestId())
+	}
+	if client.lastCancelJoinRequestReq.GetTargetAddress() != "10.62.0.2:17700" {
+		t.Errorf("CancelJoinRequest target_address = %q, want 10.62.0.2:17700", client.lastCancelJoinRequestReq.GetTargetAddress())
+	}
+}
+
+// TestServer_HandleRequestJoinColony_RequiresTargetAddress is ADR-0092's
+// own regression test for the confusing trap it closes: submitting the
+// "Join a Colony" form with no target address must be rejected with a
+// clear form error, never silently recorded on this Comb's own local
+// Colony (which is exactly the backwards, invisible-to-the-real-target
+// behavior that confused the operator this ADR is named for).
+func TestServer_HandleRequestJoinColony_RequiresTargetAddress(t *testing.T) {
+	client := &fakeClient{}
+	s := newTestServer(t, client)
+
+	form := url.Values{"node_id": {"node02"}, "raft_bind_address": {"10.62.0.3:17600"}}
+	req := httptest.NewRequest(http.MethodPost, "/machine/join-colony", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (re-rendered form with error); body=%s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "existing Colony member") || !strings.Contains(rec.Body.String(), "address is required") {
+		t.Errorf("expected a target-address-required form error, got: %s", rec.Body.String())
+	}
+	if client.lastRequestJoinColonyReq != nil {
+		t.Errorf("RequestJoinColony was called (%+v), want it never called without a target address", client.lastRequestJoinColonyReq)
+	}
+}
+
+// TestServer_HandleRequestJoinColony_ThreadsTargetAddress confirms a
+// submitted target_address reaches RequestJoinColony and is carried
+// forward into the redirect's own query string, so the subsequent
+// status poll knows where to look.
+func TestServer_HandleRequestJoinColony_ThreadsTargetAddress(t *testing.T) {
+	client := &fakeClient{requestJoinColonyResp: &rpcpb.RequestJoinColonyResponse{RequestId: "jreq-xyz", Code: "482913"}}
+	s := newTestServer(t, client)
+
+	form := url.Values{"node_id": {"node02"}, "raft_bind_address": {"10.62.0.3:17600"}, "target_address": {"10.62.0.2:17700"}}
+	req := httptest.NewRequest(http.MethodPost, "/machine/join-colony", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusFound {
+		t.Fatalf("status = %d, want 302; body=%s", rec.Code, rec.Body.String())
+	}
+	if client.lastRequestJoinColonyReq.GetTargetAddress() != "10.62.0.2:17700" {
+		t.Errorf("RequestJoinColony target_address = %q, want 10.62.0.2:17700", client.lastRequestJoinColonyReq.GetTargetAddress())
+	}
+	loc := rec.Header().Get("Location")
+	if !strings.Contains(loc, "join_request_id=jreq-xyz") || !strings.Contains(loc, "join_target_address=10.62.0.2%3A17700") {
+		t.Errorf("Location = %q, want both join_request_id and join_target_address query params", loc)
+	}
+}
+
+// TestServer_MachinePage_JoinResultPollsWithTargetAddress confirms the
+// status poll on ?join_request_id=&join_target_address= forwards
+// target_address to GetJoinRequestStatus, and that the page threads it
+// back into the Cancel form's hidden field.
+func TestServer_MachinePage_JoinResultPollsWithTargetAddress(t *testing.T) {
+	client := &fakeClient{
+		getJoinRequestStatusResp: &rpcpb.GetJoinRequestStatusResponse{
+			Request: &rpcpb.PendingJoinRequest{RequestId: "jreq-abc123", Code: "482913", Status: rpcpb.JoinRequestStatus_JOIN_REQUEST_STATUS_PENDING},
+		},
+	}
+	s := newTestServer(t, client)
+
+	req := httptest.NewRequest(http.MethodGet, "/machine?join_request_id=jreq-abc123&join_target_address=10.62.0.2%3A17700", nil)
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	if client.lastGetJoinRequestStatusReq.GetTargetAddress() != "10.62.0.2:17700" {
+		t.Errorf("GetJoinRequestStatus target_address = %q, want 10.62.0.2:17700", client.lastGetJoinRequestStatusReq.GetTargetAddress())
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, `name="target_address" value="10.62.0.2:17700"`) {
+		t.Errorf("expected the Cancel form's hidden target_address field to carry it forward, got: %s", body)
 	}
 }
 

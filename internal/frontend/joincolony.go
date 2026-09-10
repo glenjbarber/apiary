@@ -22,6 +22,13 @@ type joinRequestView struct {
 	RequestedAt     string
 	Status          string
 	Error           string
+
+	// TargetAddress (ADR-0092) is NOT part of the underlying
+	// PendingJoinRequest record - it's the existing Colony member's
+	// address this request was forwarded to, carried in the page's own
+	// query string so a later Refresh/Cancel action on this same
+	// request knows where to reach it again.
+	TargetAddress string
 }
 
 func fromRPCJoinRequest(r *rpcpb.PendingJoinRequest) joinRequestView {
@@ -64,16 +71,30 @@ func (s *Server) currentJoinRequests(r *http.Request) []joinRequestView {
 // ADR-0083 - POST /machine/join-colony, Admin-only (joining a Colony
 // changes this Comb's own cluster identity, the same consequence tier
 // as UpdateNodeConfig). Redirects back to the Machine page with the
-// new request's id in the query string so a page reload keeps polling
-// the same request rather than starting a new one.
+// new request's id AND the target address in the query string, so a
+// page reload keeps polling the same request (via the same target,
+// ADR-0092) rather than starting a new one or failing "not found"
+// against this node's own unrelated local raft.
+//
+// target_address is required here (not just at the RPC layer, which
+// keeps it optional for direct callers/tests): submitting this form
+// without one is exactly the confusing trap ADR-0092 closes - it would
+// silently record a request on THIS Comb's own Colony instead of the
+// one actually being joined.
 func (s *Server) handleRequestJoinColony(w http.ResponseWriter, r *http.Request) {
 	if err := r.ParseForm(); err != nil {
 		s.renderMachinePageWithJoinColonyError(w, r, err.Error())
 		return
 	}
+	targetAddress := r.FormValue("target_address")
+	if targetAddress == "" {
+		s.renderMachinePageWithJoinColonyError(w, r, "the existing Colony member's address is required")
+		return
+	}
 	resp, err := s.client.RequestJoinColony(r.Context(), &rpcpb.RequestJoinColonyRequest{
 		NodeId:          r.FormValue("node_id"),
 		RaftBindAddress: r.FormValue("raft_bind_address"),
+		TargetAddress:   targetAddress,
 	})
 	if err != nil {
 		s.renderMachinePageWithJoinColonyError(w, r, err.Error())
@@ -83,7 +104,7 @@ func (s *Server) handleRequestJoinColony(w http.ResponseWriter, r *http.Request)
 		s.renderMachinePageWithJoinColonyError(w, r, resp.GetError())
 		return
 	}
-	http.Redirect(w, r, "/machine?join_request_id="+url.QueryEscape(resp.GetRequestId()), http.StatusFound)
+	http.Redirect(w, r, "/machine?join_request_id="+url.QueryEscape(resp.GetRequestId())+"&join_target_address="+url.QueryEscape(targetAddress), http.StatusFound)
 }
 
 func (s *Server) renderMachinePageWithJoinColonyError(w http.ResponseWriter, r *http.Request, formErr string) {
@@ -101,23 +122,26 @@ func (s *Server) renderMachinePageWithJoinColonyError(w http.ResponseWriter, r *
 	}))
 }
 
-// currentJoinColonyResult reads ?join_request_id= (set by
-// handleRequestJoinColony's own redirect) and polls its current status
-// - GetJoinRequestStatus needs no credential, matching RequestJoinColony
-// itself, since this is this Comb's own outstanding request.
+// currentJoinColonyResult reads ?join_request_id=/?join_target_address=
+// (set by handleRequestJoinColony's own redirect, ADR-0092) and polls
+// the request's current status via that same target - GetJoinRequestStatus
+// needs no credential, matching RequestJoinColony itself, since this is
+// this Comb's own outstanding request.
 func (s *Server) currentJoinColonyResult(r *http.Request) *joinRequestView {
 	requestID := r.URL.Query().Get("join_request_id")
 	if requestID == "" {
 		return nil
 	}
-	resp, err := s.client.GetJoinRequestStatus(r.Context(), &rpcpb.GetJoinRequestStatusRequest{RequestId: requestID})
+	targetAddress := r.URL.Query().Get("join_target_address")
+	resp, err := s.client.GetJoinRequestStatus(r.Context(), &rpcpb.GetJoinRequestStatusRequest{RequestId: requestID, TargetAddress: targetAddress})
 	if err != nil {
-		return &joinRequestView{RequestID: requestID, Error: err.Error()}
+		return &joinRequestView{RequestID: requestID, TargetAddress: targetAddress, Error: err.Error()}
 	}
 	if resp.GetError() != "" {
-		return &joinRequestView{RequestID: requestID, Error: resp.GetError()}
+		return &joinRequestView{RequestID: requestID, TargetAddress: targetAddress, Error: resp.GetError()}
 	}
 	view := fromRPCJoinRequest(resp.GetRequest())
+	view.TargetAddress = targetAddress
 	return &view
 }
 
@@ -157,7 +181,10 @@ func (s *Server) handleCancelJoinRequest(w http.ResponseWriter, r *http.Request)
 		http.Redirect(w, r, "/machine", http.StatusFound)
 		return
 	}
-	s.client.CancelJoinRequest(r.Context(), &rpcpb.CancelJoinRequestRequest{RequestId: r.FormValue("request_id")})
+	s.client.CancelJoinRequest(r.Context(), &rpcpb.CancelJoinRequestRequest{
+		RequestId:     r.FormValue("request_id"),
+		TargetAddress: r.FormValue("target_address"),
+	})
 	http.Redirect(w, r, "/machine", http.StatusFound)
 }
 

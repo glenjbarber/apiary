@@ -76,6 +76,13 @@ type peerHostStatsClient interface {
 	ListVMSnapshots(ctx context.Context, addr, id string) (*rpcpb.ListVMSnapshotsResponse, error)
 	RestoreVMSnapshot(ctx context.Context, addr, id, snapshotName string) (*rpcpb.RestoreVMSnapshotResponse, error)
 	DeleteVMSnapshot(ctx context.Context, addr, id, snapshotName string) (*rpcpb.DeleteVMSnapshotResponse, error)
+
+	// GetJoinRequestStatus (ADR-0092) polls a join request that lives on
+	// a different Colony member than the one this frontend is colocated
+	// with - the normal case now that RequestJoinColony's own
+	// target_address sends the request there directly, rather than
+	// recording it on this node's own (usually unrelated) local raft.
+	GetJoinRequestStatus(ctx context.Context, addr, requestID string) (*rpcpb.GetJoinRequestStatusResponse, error)
 }
 
 // clusterNodeView is the template-facing shape for one row on the
