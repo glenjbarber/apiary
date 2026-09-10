@@ -832,8 +832,10 @@ func (s *Server) routes() {
 	// changes the Comb's own cluster identity). approve/reject are the
 	// existing Colony's side, reachable from the landing page's panel.
 	s.mux.HandleFunc("POST /machine/join-colony", s.requireRole(manager.RoleAdmin, s.handleRequestJoinColony))
+	s.mux.HandleFunc("POST /machine/join-colony/cancel", s.requireRole(manager.RoleAdmin, s.handleCancelJoinRequest))
 	s.mux.HandleFunc("POST /join-requests/{id}/approve", s.requireRole(manager.RoleAdmin, s.handleApproveJoinRequest))
 	s.mux.HandleFunc("POST /join-requests/{id}/reject", s.requireRole(manager.RoleAdmin, s.handleRejectJoinRequest))
+	s.mux.HandleFunc("POST /join-requests/{id}/purge", s.requireRole(manager.RoleAdmin, s.handlePurgeJoinRequest))
 }
 
 // handleLoginPage serves the login form. If login isn't enabled at all,

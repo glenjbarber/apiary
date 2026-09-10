@@ -164,18 +164,23 @@ var requiredRole = map[string]Role{
 	// UpdateNodeConfig above.
 	"/apiary.rpc.v1.ManagerService/SetUplinkState": RoleAdmin,
 
-	// ListJoinRequests/ApproveJoinRequest/RejectJoinRequest (ADR-0083):
-	// approving a request calls AddVoter against this node's own raft
-	// cluster - a materially bigger consequence than any Operator-tier
-	// write above, so this sits at the same tier as CreateAPIKey/
-	// RevokeAPIKey, not the peer-forwarding RPCs' Operator tier.
-	// RequestJoinColony/GetJoinRequestStatus are deliberately absent from
-	// this map entirely - they're exempted from checkAuth altogether in
-	// AuthUnaryInterceptor, not merely low-tier, since a joining Comb has
-	// no API key yet by definition.
+	// ListJoinRequests/ApproveJoinRequest/RejectJoinRequest/
+	// PurgeJoinRequest (ADR-0083): approving a request calls AddVoter
+	// against this node's own raft cluster - a materially bigger
+	// consequence than any Operator-tier write above, so this sits at
+	// the same tier as CreateAPIKey/RevokeAPIKey, not the
+	// peer-forwarding RPCs' Operator tier. PurgeJoinRequest sits here
+	// too even though it never touches raft membership - it's still an
+	// existing Colony member unilaterally discarding another Comb's
+	// request record. RequestJoinColony/GetJoinRequestStatus/
+	// CancelJoinRequest are deliberately absent from this map entirely
+	// - they're exempted from checkAuth altogether in
+	// AuthUnaryInterceptor, not merely low-tier, since a joining Comb
+	// has no API key yet by definition.
 	"/apiary.rpc.v1.ManagerService/ListJoinRequests":   RoleAdmin,
 	"/apiary.rpc.v1.ManagerService/ApproveJoinRequest": RoleAdmin,
 	"/apiary.rpc.v1.ManagerService/RejectJoinRequest":  RoleAdmin,
+	"/apiary.rpc.v1.ManagerService/PurgeJoinRequest":   RoleAdmin,
 }
 
 // requiredRoleFor returns the minimum Role fullMethod needs. An RPC
@@ -321,6 +326,14 @@ const statusMethod = "/apiary.rpc.v1.ManagerService/Status"
 const requestJoinColonyMethod = "/apiary.rpc.v1.ManagerService/RequestJoinColony"
 const getJoinRequestStatusMethod = "/apiary.rpc.v1.ManagerService/GetJoinRequestStatus"
 
+// cancelJoinRequestMethod (ADR-0083) is exempted for the identical
+// reason as requestJoinColonyMethod/getJoinRequestStatusMethod above:
+// the caller is that same joining Comb, withdrawing its own request,
+// still with no Colony API key by definition. Knowledge of
+// request_id - already the only thing GetJoinRequestStatus requires
+// - is the sole credential this needs too.
+const cancelJoinRequestMethod = "/apiary.rpc.v1.ManagerService/CancelJoinRequest"
+
 // authenticatePasswordMethod (ADR-0087) is exempted for the same
 // reason as requestJoinColonyMethod above: a caller proving their
 // identity here has no Colony API key yet, by definition - their
@@ -345,7 +358,7 @@ const authenticatePasswordMethod = "/apiary.rpc.v1.ManagerService/AuthenticatePa
 // reachability/leader info only), so letting it bypass auth entirely
 // is an acceptable, narrow carve-out - not a precedent for adding more.
 func (s *Server) AuthUnaryInterceptor(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
-	if info.FullMethod != statusMethod && info.FullMethod != requestJoinColonyMethod && info.FullMethod != getJoinRequestStatusMethod && info.FullMethod != authenticatePasswordMethod {
+	if info.FullMethod != statusMethod && info.FullMethod != requestJoinColonyMethod && info.FullMethod != getJoinRequestStatusMethod && info.FullMethod != cancelJoinRequestMethod && info.FullMethod != authenticatePasswordMethod {
 		if err := checkAuth(ctx, info.FullMethod, raftAPIKeyValidator{s.raft}); err != nil {
 			return nil, err
 		}

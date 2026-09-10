@@ -560,6 +560,24 @@ func (p *PeerReporter) RejectJoinRequest(ctx context.Context, addr string, req *
 	return client.RejectJoinRequest(ctx, req)
 }
 
+func (p *PeerReporter) CancelJoinRequest(ctx context.Context, addr string, req *rpcpb.CancelJoinRequestRequest) (*rpcpb.CancelJoinRequestResponse, error) {
+	conn, client, err := p.dial(addr)
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close()
+	return client.CancelJoinRequest(ctx, req)
+}
+
+func (p *PeerReporter) PurgeJoinRequest(ctx context.Context, addr string, req *rpcpb.PurgeJoinRequestRequest) (*rpcpb.PurgeJoinRequestResponse, error) {
+	conn, client, err := p.dial(addr)
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close()
+	return client.PurgeJoinRequest(ctx, req)
+}
+
 // CreateAPIKey/RevokeAPIKey forward the caller's original request as-is
 // - notably, a forwarded CreateAPIKey means the LEADER generates and
 // hashes its own fresh raw key; this node's own locally-generated

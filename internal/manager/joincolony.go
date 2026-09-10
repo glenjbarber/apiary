@@ -232,3 +232,53 @@ func (s *Server) RejectJoinRequest(ctx context.Context, req *rpcpb.RejectJoinReq
 	}
 	return &rpcpb.RejectJoinRequestResponse{Request: fromInternalPendingJoinRequest(result)}, nil
 }
+
+// CancelJoinRequest implements rpcpb.ManagerServiceServer - the
+// requesting Comb's own self-service withdrawal of its still-pending
+// request. Deliberately exempted from checkAuth entirely
+// (internal/manager/auth.go), the same reason RequestJoinColony/
+// GetJoinRequestStatus already are: the caller is this request's own
+// creator, which by definition has no Colony API key yet. Knowledge of
+// request_id is the only credential this needs, matching
+// GetJoinRequestStatus's own already-established scoping.
+func (s *Server) CancelJoinRequest(ctx context.Context, req *rpcpb.CancelJoinRequestRequest) (*rpcpb.CancelJoinRequestResponse, error) {
+	cmd := &internalpb.Command{
+		Op: &internalpb.Command_CancelPendingJoinRequest{
+			CancelPendingJoinRequest: &internalpb.CancelPendingJoinRequest{RequestId: req.GetRequestId()},
+		},
+	}
+	result, appErr, leaderHint := s.applyJoinRequestCommand(ctx, cmd, req.GetTimeoutMs())
+	if leaderHint != "" && s.peers != nil {
+		if fwd, ferr := s.peers.CancelJoinRequest(ctx, s.peerManagerdAddr(leaderHint), req); ferr == nil {
+			return fwd, nil
+		}
+	}
+	if appErr != "" {
+		return &rpcpb.CancelJoinRequestResponse{Error: appErr, LeaderHint: leaderHint}, nil
+	}
+	return &rpcpb.CancelJoinRequestResponse{Request: fromInternalPendingJoinRequest(result)}, nil
+}
+
+// PurgeJoinRequest implements rpcpb.ManagerServiceServer - Admin-only,
+// same tier as Approve/Reject/List. Removes the record outright
+// regardless of its current status, for cleaning up a stale or
+// erroneous entry that Approve/Reject/Cancel would otherwise keep
+// forever. Idempotent, mirroring PurgeVM/PurgeJail's own posture - not
+// an error if request_id is already gone.
+func (s *Server) PurgeJoinRequest(ctx context.Context, req *rpcpb.PurgeJoinRequestRequest) (*rpcpb.PurgeJoinRequestResponse, error) {
+	cmd := &internalpb.Command{
+		Op: &internalpb.Command_PurgeJoinRequest{
+			PurgeJoinRequest: &internalpb.PurgeJoinRequest{RequestId: req.GetRequestId()},
+		},
+	}
+	_, appErr, leaderHint := s.applyJoinRequestCommand(ctx, cmd, req.GetTimeoutMs())
+	if leaderHint != "" && s.peers != nil {
+		if fwd, ferr := s.peers.PurgeJoinRequest(ctx, s.peerManagerdAddr(leaderHint), req); ferr == nil {
+			return fwd, nil
+		}
+	}
+	if appErr != "" {
+		return &rpcpb.PurgeJoinRequestResponse{Error: appErr, LeaderHint: leaderHint}, nil
+	}
+	return &rpcpb.PurgeJoinRequestResponse{}, nil
+}

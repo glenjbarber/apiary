@@ -89,6 +89,8 @@ const (
 	ManagerService_ListJoinRequests_FullMethodName            = "/apiary.rpc.v1.ManagerService/ListJoinRequests"
 	ManagerService_ApproveJoinRequest_FullMethodName          = "/apiary.rpc.v1.ManagerService/ApproveJoinRequest"
 	ManagerService_RejectJoinRequest_FullMethodName           = "/apiary.rpc.v1.ManagerService/RejectJoinRequest"
+	ManagerService_CancelJoinRequest_FullMethodName           = "/apiary.rpc.v1.ManagerService/CancelJoinRequest"
+	ManagerService_PurgeJoinRequest_FullMethodName            = "/apiary.rpc.v1.ManagerService/PurgeJoinRequest"
 )
 
 // ManagerServiceClient is the client API for ManagerService service.
@@ -436,6 +438,20 @@ type ManagerServiceClient interface {
 	ListJoinRequests(ctx context.Context, in *ListJoinRequestsRequest, opts ...grpc.CallOption) (*ListJoinRequestsResponse, error)
 	ApproveJoinRequest(ctx context.Context, in *ApproveJoinRequestRequest, opts ...grpc.CallOption) (*ApproveJoinRequestResponse, error)
 	RejectJoinRequest(ctx context.Context, in *RejectJoinRequestRequest, opts ...grpc.CallOption) (*RejectJoinRequestResponse, error)
+	// CancelJoinRequest is the requesting Comb's own self-service
+	// withdrawal of its still-pending request - deliberately
+	// unauthenticated, the same reason RequestJoinColony/
+	// GetJoinRequestStatus above are: the caller is this request's own
+	// creator, which has no Colony API key yet by definition. Knowledge
+	// of request_id is the only credential this needs.
+	CancelJoinRequest(ctx context.Context, in *CancelJoinRequestRequest, opts ...grpc.CallOption) (*CancelJoinRequestResponse, error)
+	// PurgeJoinRequest lets an existing Colony Admin remove a
+	// PendingJoinRequest record outright, regardless of its current
+	// status - unlike Approve/Reject/Cancel, which only ever mark a
+	// record (kept forever so a poll can observe the terminal state),
+	// this actually deletes it, for cleaning up a stale or erroneous
+	// entry. Admin-gated, the same tier as Approve/Reject/List.
+	PurgeJoinRequest(ctx context.Context, in *PurgeJoinRequestRequest, opts ...grpc.CallOption) (*PurgeJoinRequestResponse, error)
 }
 
 type managerServiceClient struct {
@@ -1155,6 +1171,26 @@ func (c *managerServiceClient) RejectJoinRequest(ctx context.Context, in *Reject
 	return out, nil
 }
 
+func (c *managerServiceClient) CancelJoinRequest(ctx context.Context, in *CancelJoinRequestRequest, opts ...grpc.CallOption) (*CancelJoinRequestResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(CancelJoinRequestResponse)
+	err := c.cc.Invoke(ctx, ManagerService_CancelJoinRequest_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *managerServiceClient) PurgeJoinRequest(ctx context.Context, in *PurgeJoinRequestRequest, opts ...grpc.CallOption) (*PurgeJoinRequestResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(PurgeJoinRequestResponse)
+	err := c.cc.Invoke(ctx, ManagerService_PurgeJoinRequest_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // ManagerServiceServer is the server API for ManagerService service.
 // All implementations must embed UnimplementedManagerServiceServer
 // for forward compatibility.
@@ -1500,6 +1536,20 @@ type ManagerServiceServer interface {
 	ListJoinRequests(context.Context, *ListJoinRequestsRequest) (*ListJoinRequestsResponse, error)
 	ApproveJoinRequest(context.Context, *ApproveJoinRequestRequest) (*ApproveJoinRequestResponse, error)
 	RejectJoinRequest(context.Context, *RejectJoinRequestRequest) (*RejectJoinRequestResponse, error)
+	// CancelJoinRequest is the requesting Comb's own self-service
+	// withdrawal of its still-pending request - deliberately
+	// unauthenticated, the same reason RequestJoinColony/
+	// GetJoinRequestStatus above are: the caller is this request's own
+	// creator, which has no Colony API key yet by definition. Knowledge
+	// of request_id is the only credential this needs.
+	CancelJoinRequest(context.Context, *CancelJoinRequestRequest) (*CancelJoinRequestResponse, error)
+	// PurgeJoinRequest lets an existing Colony Admin remove a
+	// PendingJoinRequest record outright, regardless of its current
+	// status - unlike Approve/Reject/Cancel, which only ever mark a
+	// record (kept forever so a poll can observe the terminal state),
+	// this actually deletes it, for cleaning up a stale or erroneous
+	// entry. Admin-gated, the same tier as Approve/Reject/List.
+	PurgeJoinRequest(context.Context, *PurgeJoinRequestRequest) (*PurgeJoinRequestResponse, error)
 	mustEmbedUnimplementedManagerServiceServer()
 }
 
@@ -1719,6 +1769,12 @@ func (UnimplementedManagerServiceServer) ApproveJoinRequest(context.Context, *Ap
 }
 func (UnimplementedManagerServiceServer) RejectJoinRequest(context.Context, *RejectJoinRequestRequest) (*RejectJoinRequestResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method RejectJoinRequest not implemented")
+}
+func (UnimplementedManagerServiceServer) CancelJoinRequest(context.Context, *CancelJoinRequestRequest) (*CancelJoinRequestResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method CancelJoinRequest not implemented")
+}
+func (UnimplementedManagerServiceServer) PurgeJoinRequest(context.Context, *PurgeJoinRequestRequest) (*PurgeJoinRequestResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method PurgeJoinRequest not implemented")
 }
 func (UnimplementedManagerServiceServer) mustEmbedUnimplementedManagerServiceServer() {}
 func (UnimplementedManagerServiceServer) testEmbeddedByValue()                        {}
@@ -2968,6 +3024,42 @@ func _ManagerService_RejectJoinRequest_Handler(srv interface{}, ctx context.Cont
 	return interceptor(ctx, in, info, handler)
 }
 
+func _ManagerService_CancelJoinRequest_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(CancelJoinRequestRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ManagerServiceServer).CancelJoinRequest(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ManagerService_CancelJoinRequest_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ManagerServiceServer).CancelJoinRequest(ctx, req.(*CancelJoinRequestRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ManagerService_PurgeJoinRequest_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(PurgeJoinRequestRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ManagerServiceServer).PurgeJoinRequest(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ManagerService_PurgeJoinRequest_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ManagerServiceServer).PurgeJoinRequest(ctx, req.(*PurgeJoinRequestRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // ManagerService_ServiceDesc is the grpc.ServiceDesc for ManagerService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -3242,6 +3334,14 @@ var ManagerService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "RejectJoinRequest",
 			Handler:    _ManagerService_RejectJoinRequest_Handler,
+		},
+		{
+			MethodName: "CancelJoinRequest",
+			Handler:    _ManagerService_CancelJoinRequest_Handler,
+		},
+		{
+			MethodName: "PurgeJoinRequest",
+			Handler:    _ManagerService_PurgeJoinRequest_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{

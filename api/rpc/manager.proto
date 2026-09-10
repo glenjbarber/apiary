@@ -383,6 +383,22 @@ service ManagerService {
   rpc ListJoinRequests(ListJoinRequestsRequest) returns (ListJoinRequestsResponse);
   rpc ApproveJoinRequest(ApproveJoinRequestRequest) returns (ApproveJoinRequestResponse);
   rpc RejectJoinRequest(RejectJoinRequestRequest) returns (RejectJoinRequestResponse);
+
+  // CancelJoinRequest is the requesting Comb's own self-service
+  // withdrawal of its still-pending request - deliberately
+  // unauthenticated, the same reason RequestJoinColony/
+  // GetJoinRequestStatus above are: the caller is this request's own
+  // creator, which has no Colony API key yet by definition. Knowledge
+  // of request_id is the only credential this needs.
+  rpc CancelJoinRequest(CancelJoinRequestRequest) returns (CancelJoinRequestResponse);
+
+  // PurgeJoinRequest lets an existing Colony Admin remove a
+  // PendingJoinRequest record outright, regardless of its current
+  // status - unlike Approve/Reject/Cancel, which only ever mark a
+  // record (kept forever so a poll can observe the terminal state),
+  // this actually deletes it, for cleaning up a stale or erroneous
+  // entry. Admin-gated, the same tier as Approve/Reject/List.
+  rpc PurgeJoinRequest(PurgeJoinRequestRequest) returns (PurgeJoinRequestResponse);
 }
 
 // VMState mirrors api/internalpb's VMState. Kept as a separate type
@@ -2038,6 +2054,7 @@ enum JoinRequestStatus {
   JOIN_REQUEST_STATUS_PENDING = 1;
   JOIN_REQUEST_STATUS_APPROVED = 2;
   JOIN_REQUEST_STATUS_REJECTED = 3;
+  JOIN_REQUEST_STATUS_CANCELLED = 4;
 }
 
 // PendingJoinRequest mirrors internalpb.PendingJoinRequest - see
@@ -2117,4 +2134,25 @@ message RejectJoinRequestResponse {
   PendingJoinRequest request = 1;
   string error = 2;
   string leader_hint = 3;
+}
+
+message CancelJoinRequestRequest {
+  string request_id = 1;
+  uint32 timeout_ms = 2;
+}
+
+message CancelJoinRequestResponse {
+  PendingJoinRequest request = 1;
+  string error = 2;
+  string leader_hint = 3;
+}
+
+message PurgeJoinRequestRequest {
+  string request_id = 1;
+  uint32 timeout_ms = 2;
+}
+
+message PurgeJoinRequestResponse {
+  string error = 1;
+  string leader_hint = 2;
 }

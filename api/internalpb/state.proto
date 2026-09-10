@@ -363,6 +363,27 @@ message Command {
     ApprovePendingJoinRequest approve_pending_join_request = 22;
     RejectPendingJoinRequest reject_pending_join_request = 23;
 
+    // CancelPendingJoinRequest is the requesting Comb's own withdrawal
+    // of its still-pending request - the symmetric self-service
+    // counterpart to RejectPendingJoinRequest above (an existing
+    // Colony Admin declining someone else's request). Same
+    // mark-not-delete semantics as Approve/Reject, so a joining Comb's
+    // own already-in-flight GetJoinRequestStatus poll still resolves
+    // to a real terminal state instead of "not found".
+    CancelPendingJoinRequest cancel_pending_join_request = 25;
+
+    // PurgeJoinRequest removes a PendingJoinRequest record outright,
+    // regardless of its current status - unlike Approve/Reject/Cancel,
+    // which only ever mark a record (deliberately kept forever so a
+    // poll can observe the terminal state), this is for an existing
+    // Colony Admin to actually clean up a stale, erroneous, or
+    // long-resolved entry. Mirrors PurgeVM/PurgeJail's own idempotent
+    // "not an error if already gone" shape - a PendingJoinRequest has
+    // no physical resource behind it at all, so there is no separate
+    // teardown-then-purge distinction to make here the way there is
+    // for a VM or jail.
+    PurgeJoinRequest purge_join_request = 26;
+
     // SetJailHostname changes only JailDefinition.hostname -
     // deliberately narrow (the jail equivalent of SetVMFirewallPaused/
     // SetVMCloudflareExposure/SetVMFirewallRules above) rather than
@@ -556,8 +577,8 @@ message PurgeJail {
 }
 
 // JoinRequestStatus is a PendingJoinRequest's own lifecycle state -
-// deliberately not removed from FSM state on Approve/Reject (unlike
-// PurgeVM/PurgeJail's outright removal), so a joining Comb's
+// deliberately not removed from FSM state on Approve/Reject/Cancel
+// (that's what PurgeJoinRequest is for), so a joining Comb's
 // GetJoinRequestStatus poll can still observe the terminal outcome
 // after the fact, up until expires_at_unix.
 enum JoinRequestStatus {
@@ -565,6 +586,7 @@ enum JoinRequestStatus {
   JOIN_REQUEST_STATUS_PENDING = 1;
   JOIN_REQUEST_STATUS_APPROVED = 2;
   JOIN_REQUEST_STATUS_REJECTED = 3;
+  JOIN_REQUEST_STATUS_CANCELLED = 4;
 }
 
 // PendingJoinRequest records one Comb's request to join this Colony
@@ -602,6 +624,19 @@ message ApprovePendingJoinRequest {
 // RejectPendingJoinRequest mirrors ApprovePendingJoinRequest exactly,
 // for the symmetric decline action.
 message RejectPendingJoinRequest {
+  string request_id = 1;
+}
+
+// CancelPendingJoinRequest mirrors RejectPendingJoinRequest exactly,
+// for the requesting Comb's own self-service withdrawal.
+message CancelPendingJoinRequest {
+  string request_id = 1;
+}
+
+// PurgeJoinRequest removes a PendingJoinRequest record outright,
+// regardless of its current status. Idempotent, mirroring
+// PurgeVM/PurgeJail - not an error if request_id is already gone.
+message PurgeJoinRequest {
   string request_id = 1;
 }
 

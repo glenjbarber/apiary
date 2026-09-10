@@ -293,6 +293,7 @@ func TestRequiredRoleFor_JoinRequestRPCsAreAdmin(t *testing.T) {
 		"/apiary.rpc.v1.ManagerService/ListJoinRequests",
 		"/apiary.rpc.v1.ManagerService/ApproveJoinRequest",
 		"/apiary.rpc.v1.ManagerService/RejectJoinRequest",
+		"/apiary.rpc.v1.ManagerService/PurgeJoinRequest",
 	} {
 		if got := requiredRoleFor(method); got != RoleAdmin {
 			t.Errorf("requiredRoleFor(%q) = %q, want %q", method, got, RoleAdmin)
@@ -301,12 +302,13 @@ func TestRequiredRoleFor_JoinRequestRPCsAreAdmin(t *testing.T) {
 }
 
 // TestAuthUnaryInterceptor_JoinRequestExemptionsBypassCheckAuth is the
-// direct regression test for RequestJoinColony/GetJoinRequestStatus's
-// exemption (ADR-0083): a joining Comb has no Colony API key yet by
-// definition, so these two must reach the handler even when auth is
-// enabled and no credential is presented at all - mirroring
-// statusMethod's own existing exemption, for a different, explicitly
-// disclosed reason (see requestJoinColonyMethod's own doc comment).
+// direct regression test for RequestJoinColony/GetJoinRequestStatus/
+// CancelJoinRequest's exemption (ADR-0083): a joining Comb has no
+// Colony API key yet by definition, so these must reach the handler
+// even when auth is enabled and no credential is presented at all -
+// mirroring statusMethod's own existing exemption, for a different,
+// explicitly disclosed reason (see requestJoinColonyMethod's own doc
+// comment).
 func TestAuthUnaryInterceptor_JoinRequestExemptionsBypassCheckAuth(t *testing.T) {
 	s := &Server{raft: nil} // AuthUnaryInterceptor never reaches checkAuth for an exempt method, so a nil raft client is fine here.
 	handlerCalled := false
@@ -315,7 +317,7 @@ func TestAuthUnaryInterceptor_JoinRequestExemptionsBypassCheckAuth(t *testing.T)
 		return nil, nil
 	}
 
-	for _, method := range []string{requestJoinColonyMethod, getJoinRequestStatusMethod} {
+	for _, method := range []string{requestJoinColonyMethod, getJoinRequestStatusMethod, cancelJoinRequestMethod} {
 		handlerCalled = false
 		if _, err := s.AuthUnaryInterceptor(context.Background(), nil, &grpc.UnaryServerInfo{FullMethod: method}, handler); err != nil {
 			t.Errorf("AuthUnaryInterceptor(%q) error = %v, want nil (exempt, no credential presented)", method, err)

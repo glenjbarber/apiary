@@ -133,6 +133,10 @@ func (f *FSM) Apply(log *raft.Log) interface{} {
 		return f.applyApprovePendingJoinRequest(log.Index, op.ApprovePendingJoinRequest.GetRequestId())
 	case *internalpb.Command_RejectPendingJoinRequest:
 		return f.applyRejectPendingJoinRequest(log.Index, op.RejectPendingJoinRequest.GetRequestId())
+	case *internalpb.Command_CancelPendingJoinRequest:
+		return f.applyCancelPendingJoinRequest(log.Index, op.CancelPendingJoinRequest.GetRequestId())
+	case *internalpb.Command_PurgeJoinRequest:
+		return f.applyPurgeJoinRequest(log.Index, op.PurgeJoinRequest.GetRequestId())
 	default:
 		return &FSMApplyResult{Index: log.Index, Error: "command has no op set"}
 	}
@@ -529,6 +533,17 @@ func (f *FSM) applyRejectPendingJoinRequest(index uint64, requestID string) *FSM
 	return f.applyResolvePendingJoinRequest(index, requestID, internalpb.JoinRequestStatus_JOIN_REQUEST_STATUS_REJECTED, "RejectPendingJoinRequest")
 }
 
+// applyCancelPendingJoinRequest is the requesting Comb's own withdrawal
+// of its still-pending request - same validation as Approve/Reject
+// (must currently be Pending, not expired), just a different terminal
+// status. Deliberately not restricted to "the caller who created it" -
+// request_id itself already carries that same knowledge-is-the-
+// credential trust model GetJoinRequestStatus already established
+// (ADR-0083), so no new authorization concept is introduced here.
+func (f *FSM) applyCancelPendingJoinRequest(index uint64, requestID string) *FSMApplyResult {
+	return f.applyResolvePendingJoinRequest(index, requestID, internalpb.JoinRequestStatus_JOIN_REQUEST_STATUS_CANCELLED, "CancelPendingJoinRequest")
+}
+
 func (f *FSM) applyResolvePendingJoinRequest(index uint64, requestID string, status internalpb.JoinRequestStatus, opName string) *FSMApplyResult {
 	req, exists := f.pendingJoinRequests[requestID]
 	if !exists {
@@ -544,6 +559,19 @@ func (f *FSM) applyResolvePendingJoinRequest(index uint64, requestID string, sta
 	updated.Status = status
 	f.pendingJoinRequests[requestID] = updated
 	return &FSMApplyResult{Index: index, PendingJoinRequest: updated}
+}
+
+// applyPurgeJoinRequest mirrors applyPurgeJail exactly: idempotent,
+// not an error if requestID is already gone. Unlike
+// applyResolvePendingJoinRequest above, this works regardless of the
+// record's current status (Pending, Approved, Rejected, Cancelled, or
+// expired) - an existing Colony Admin's way to actually clean up a
+// stale or erroneous entry, since Approve/Reject/Cancel deliberately
+// never delete anything.
+func (f *FSM) applyPurgeJoinRequest(index uint64, requestID string) *FSMApplyResult {
+	req := f.pendingJoinRequests[requestID]
+	delete(f.pendingJoinRequests, requestID)
+	return &FSMApplyResult{Index: index, PendingJoinRequest: req}
 }
 
 // pendingJoinRequestExpired checks expiry lazily, at read/apply time -
