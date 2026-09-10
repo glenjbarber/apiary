@@ -17,6 +17,16 @@ coverage.*
 *.coverprofile
 profile.cov
 
+# `make build`'s own output - the built binaries land directly in the
+# repo root, sharing their names with cmd/<name> source directories, so
+# they were never covered by any generic binary pattern above. Found
+# live: `git add -A` in the repo root picked one up and committed it.
+/apiaryinstall
+/raftd
+/managerd
+/frontend
+/restshimd
+
 # Dependency directories (remove the comment below to include it)
 # vendor/
 
