@@ -57,18 +57,27 @@ setup-pam:
 NODE_ZFS_POOL?=		zroot
 NODE_VLAN_UPLINK?=	vtnet0
 NODE_BHYVE_BRIDGE?=	bridge0
+NODE_RPC_ADDR?=		0.0.0.0:17700
+NODE_HTTP_ADDR?=	0.0.0.0:8080
+NODE_REST_ADDR?=	0.0.0.0:8081
 
 # setup-quick is the whole docs/bootstrap.md preflight sequence
-# (Sections 2-8) collapsed into one target for a single-node bring-up:
+# (Sections 2-9) collapsed into one target for a single-node bring-up:
 # packages, apiaryinstall's safe fixes plus its one risky network step
 # together, installing the built binaries where the rc.d scripts expect
-# them, and the one apiary_managerd_args a fresh node actually needs to
-# start with working VM networking (-bhyve-bootrom is resolved here the
-# same way Section 5 does by hand - the package only sometimes carries
-# the real .fd file itself, edk2-bhyve usually carries it instead).
-# NODE_ZFS_POOL/NODE_VLAN_UPLINK/NODE_BHYVE_BRIDGE override the
-# defaults for a host that doesn't match this one's layout, e.g.
-# `make setup-quick NODE_VLAN_UPLINK=em0`.
+# them, and the apiary_managerd_args/apiary_frontend_args/
+# apiary_restshimd_args a fresh node actually needs to be reachable at
+# all - every one of these three daemons defaults its own listen
+# address to 127.0.0.1 (loopback-only) when no arg is given at all, so
+# skipping this step leaves every port genuinely unreachable from
+# anywhere but the host itself, not merely unconfigured
+# (-bhyve-bootrom is resolved here the same way Section 5 does by hand
+# - the package only sometimes carries the real .fd file itself,
+# edk2-bhyve usually carries it instead).
+# NODE_ZFS_POOL/NODE_VLAN_UPLINK/NODE_BHYVE_BRIDGE/NODE_RPC_ADDR/
+# NODE_HTTP_ADDR/NODE_REST_ADDR override the defaults for a host that
+# doesn't match this one's layout, e.g. `make setup-quick
+# NODE_VLAN_UPLINK=em0 NODE_HTTP_ADDR=10.62.0.2:8080`.
 #
 # Deliberately does NOT set -pam-service: managerd refuses to start
 # with it set unless -tls-cert/-tls-key are also configured (ADR-0087),
@@ -87,5 +96,7 @@ setup-quick:
 	done
 	BOOTROM=$$(test -f /usr/local/share/uefi-firmware/BHYVE_UEFI.fd && echo /usr/local/share/uefi-firmware/BHYVE_UEFI.fd || pkg info -l edk2-bhyve 2>/dev/null | grep '\.fd$$' | head -1) ;\
 	test -n "$$BOOTROM" || { echo "could not locate a bhyve UEFI firmware .fd file - install bhyve-firmware/edk2-bhyve and re-run" >&2 ; exit 1 ; } ;\
-	sudo sysrc apiary_managerd_args="-bhyve-bootrom $$BOOTROM -bhyve-bridge ${NODE_BHYVE_BRIDGE} -vlan-uplink ${NODE_VLAN_UPLINK}"
-	@echo "apiary_managerd_args set (no -pam-service - see docs/bootstrap.md Step 11 to add real login once -tls-cert/-tls-key are configured)."
+	sudo sysrc apiary_managerd_args="-rpc-addr ${NODE_RPC_ADDR} -bhyve-bootrom $$BOOTROM -bhyve-bridge ${NODE_BHYVE_BRIDGE} -vlan-uplink ${NODE_VLAN_UPLINK}"
+	sudo sysrc apiary_frontend_args="-http-addr ${NODE_HTTP_ADDR}"
+	sudo sysrc apiary_restshimd_args="-http-addr ${NODE_REST_ADDR}"
+	@echo "apiary_managerd_args/apiary_frontend_args/apiary_restshimd_args set (no -pam-service - see docs/bootstrap.md Step 11 to add real login once -tls-cert/-tls-key are configured)."
