@@ -98,7 +98,7 @@ func (r *Reconciler) resolvePeerManagerdAddr(leaderHint string) string {
 // is simply skipped rather than aborting the whole search.
 func (r *Reconciler) fetchImageFromPeer(ctx context.Context, name string) error {
 	if r.Peers == nil {
-		return fmt.Errorf("image %q not found locally and no peer forwarding is configured on this node", name)
+		return fmt.Errorf("image %q not found locally, and no peer forwarding is configured on this node to look elsewhere (expected on a single-node deployment - add the image locally, or join a peer that already has it)", name)
 	}
 	addrs, err := r.resolvePeerAddresses(ctx)
 	if err != nil {
@@ -133,7 +133,7 @@ func (r *Reconciler) fetchImageFromPeer(ctx context.Context, name string) error 
 // every-unreachable-peer-is-skipped behavior.
 func (r *Reconciler) fetchTemplateFromPeer(ctx context.Context, name string) error {
 	if r.Peers == nil {
-		return fmt.Errorf("jail base template %q not found locally and no peer forwarding is configured on this node", name)
+		return fmt.Errorf("jail base template %q not found locally, and no peer forwarding is configured on this node to look elsewhere (expected on a single-node deployment - create the template locally, or join a peer that already has it)", name)
 	}
 	addrs, err := r.resolvePeerAddresses(ctx)
 	if err != nil {

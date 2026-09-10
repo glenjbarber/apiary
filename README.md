@@ -794,6 +794,20 @@ each design decision, in order.
   desired state is running, and rollback refuses outright rather than
   silently destroying a newer snapshot if one exists. See
   [ADR-0090](docs/adr/0090-vm-snapshot-restore.md).
+- **Single-node is first-class, not a lesser bootstrap state** — a full
+  audit confirmed raftd's default bootstrap, health/assumption checks,
+  and every peer-forwarding feature (ISO/jail-template fetch, console/
+  serial-log/VM-snapshot forwarding) already degrade cleanly with no
+  peers configured. Three real gaps are fixed: the raft package doc
+  comment no longer calls single-node a "(for now)" state; the ISO/jail-
+  template peer-fetch error messages now say plainly that this is
+  expected on a single-node deployment rather than reading as an
+  incomplete setup; and the Resilience Coverage Map no longer renders a
+  single-node cluster's quorum-tolerance scenario as a failing
+  `unsafe_or_impossible` badge purely because it has one voter — a
+  fragile multi-node cluster (e.g. one live voter left out of three)
+  still renders that way, since that IS a real, actionable hazard. See
+  [ADR-0091](docs/adr/0091-single-node-first-class.md).
 - Importing VMs from other hypervisors (e.g. Proxmox): no disk-format
   conversion, and Apiary is UEFI-only. Linux containers have no path at
   all — jails share the host FreeBSD kernel
