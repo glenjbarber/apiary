@@ -75,8 +75,9 @@ NODE_BHYVE_BRIDGE?=	bridge0
 # and setup-quick issues no certificates - real login stays an
 # explicit, separate step (docs/bootstrap.md Step 11), exactly like a
 # manual bring-up.
-setup-quick: setup
-	sudo pkg install -y go git sudo
+setup-quick:
+	pkg install -y go git sudo
+	${MAKE} setup
 	./apiaryinstall -apply -apply-network yes-modify-network -zfs-pool ${NODE_ZFS_POOL} \
 		-vlan-uplink ${NODE_VLAN_UPLINK} -bhyve-bridge ${NODE_BHYVE_BRIDGE}
 	sudo mkdir -p /usr/local/libexec/apiary
