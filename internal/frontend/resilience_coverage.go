@@ -175,13 +175,13 @@ func (s *Server) handleCoveragePage(w http.ResponseWriter, r *http.Request) {
 		}
 		scenarios = append(scenarios, coverage.ClassifyQuorumTolerance(invariant.Evaluation{
 			Result: invariant.ResultUnknown, Explanation: "Quorum tolerance could not be evaluated: " + reason,
-		}))
+		}, 0))
 	} else {
 		voterReachability := s.gatherVoterReachability(r.Context(), statusResp, localNodeID)
 		leaderID := statusResp.GetRaftLeaderId()
 
 		quorumEval := invariant.EvaluateQuorumTolerance(voterReachability, leaderID)
-		scenarios = append(scenarios, coverage.ClassifyQuorumTolerance(quorumEval))
+		scenarios = append(scenarios, coverage.ClassifyQuorumTolerance(quorumEval, len(voterReachability)))
 
 		voterImpacts := invariant.ClassifyVoterQuorumImpacts(voterReachability, leaderID)
 		nodeIDs := s.simulateNodeChoices(r)

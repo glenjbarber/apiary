@@ -1,6 +1,9 @@
-// Package raft wraps HashiCorp's raft library into a single-node-bootstrap
-// (for now) consensus node, backed by raft-boltdb for durable storage, and
-// exposes it over the internal gRPC-over-UDS protocol defined in
+// Package raft wraps HashiCorp's raft library into a consensus node that
+// bootstraps as a single-voter cluster by default and can grow to a
+// multi-node Colony via a join (ADR-0083) - single-node is a fully
+// supported, permanent deployment shape, not a transitional bootstrap
+// state (ADR-0091). Backed by raft-boltdb for durable storage, and
+// exposed over the internal gRPC-over-UDS protocol defined in
 // api/internal/raftd.proto.
 package raft
 

@@ -7,16 +7,32 @@ import (
 	"github.com/glenjbarber/apiary/internal/recovery"
 )
 
-func TestClassifyQuorumTolerance_UnsafeOrImpossibleOnlyWhenResultFalse(t *testing.T) {
-	false_ := ClassifyQuorumTolerance(invariant.Evaluation{Result: invariant.ResultFalse})
+func TestClassifyQuorumTolerance_UnsafeOrImpossibleOnlyWhenResultFalseWithMultipleVoters(t *testing.T) {
+	false_ := ClassifyQuorumTolerance(invariant.Evaluation{Result: invariant.ResultFalse}, 3)
 	if false_.Status != StatusUnsafeOrImpossible {
-		t.Errorf("Result=false: Status = %v, want StatusUnsafeOrImpossible", false_.Status)
+		t.Errorf("Result=false, voterCount=3: Status = %v, want StatusUnsafeOrImpossible", false_.Status)
 	}
 	for _, r := range []invariant.Result{invariant.ResultTrue, invariant.ResultUnknown} {
-		got := ClassifyQuorumTolerance(invariant.Evaluation{Result: r})
+		got := ClassifyQuorumTolerance(invariant.Evaluation{Result: r}, 3)
 		if got.Status != StatusSimulated {
-			t.Errorf("Result=%v: Status = %v, want StatusSimulated", r, got.Status)
+			t.Errorf("Result=%v, voterCount=3: Status = %v, want StatusSimulated", r, got.Status)
 		}
+	}
+}
+
+// TestClassifyQuorumTolerance_SingleVoterFalseIsNotUnsafeOrImpossible
+// confirms ADR-0091's single-node-is-first-class reframing: a lone
+// voter's own loss is always QuorumLost (there is no second voter to
+// fall back on), but that is an accepted, permanent property of
+// running one node, not a confirmed hazard worth flagging the way a
+// fragile multi-node cluster would be.
+func TestClassifyQuorumTolerance_SingleVoterFalseIsNotUnsafeOrImpossible(t *testing.T) {
+	got := ClassifyQuorumTolerance(invariant.Evaluation{Result: invariant.ResultFalse}, 1)
+	if got.Status != StatusSimulated {
+		t.Errorf("Result=false, voterCount=1: Status = %v, want StatusSimulated (single-node is expected, not a hazard)", got.Status)
+	}
+	if got.Result != string(invariant.ResultFalse) {
+		t.Errorf("Result = %v, want the underlying false fact preserved verbatim", got.Result)
 	}
 }
 

@@ -262,7 +262,11 @@ func EvaluateQuorumTolerance(voters []VoterReachability, leaderID string) Evalua
 	explanation := "The cluster tolerates losing any one more voter."
 	switch worst {
 	case ResultFalse:
-		explanation = "The cluster does NOT tolerate losing at least one current voter - quorum would be lost."
+		if len(voters) == 1 {
+			explanation = "This is a single-node deployment: losing its one voter ends quorum entirely, since there is no other voter to fall back on. This is an expected property of running one node, not a misconfiguration - see ADR-0091."
+		} else {
+			explanation = "The cluster does NOT tolerate losing at least one current voter - quorum would be lost."
+		}
 	case ResultUnknown:
 		explanation = "Whether the cluster tolerates losing every current voter could not be fully confirmed."
 	}

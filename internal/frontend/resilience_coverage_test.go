@@ -74,6 +74,51 @@ func TestHandleCoveragePage_QuorumLostRendersUnsafeOrImpossible(t *testing.T) {
 	}
 }
 
+// TestHandleCoveragePage_SingleVoterQuorumLostIsNotUnsafeOrImpossible is
+// ADR-0091's own regression test: a single-node deployment always fails
+// to "tolerate losing its one voter" (there is no second voter to fall
+// back on), but that is an accepted, permanent property of running one
+// node - the coverage page must never render it as the same red
+// unsafe_or_impossible badge a genuinely fragile multi-node cluster
+// gets.
+func TestHandleCoveragePage_SingleVoterQuorumLostIsNotUnsafeOrImpossible(t *testing.T) {
+	client := &fakeClient{
+		statusResp: &rpcpb.StatusResponse{
+			ManagerNodeId: "node-a", RaftReachable: true, RaftLeaderId: "node-a",
+			Members: []*rpcpb.RaftMember{
+				{NodeId: "node-a", Suffrage: "Voter"},
+			},
+		},
+	}
+	s := newTestServer(t, client)
+
+	req := httptest.NewRequest(http.MethodGet, "/resilience-coverage", nil)
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, req)
+
+	body := rec.Body.String()
+	rowStart := strings.Index(body, "quorum-tolerance")
+	if rowStart == -1 {
+		t.Fatalf("expected a quorum-tolerance row, got: %s", body)
+	}
+	rowEnd := strings.Index(body[rowStart:], "</tr>")
+	if rowEnd == -1 {
+		t.Fatalf("could not find end of quorum-tolerance row: %s", body)
+	}
+	row := body[rowStart : rowStart+rowEnd]
+	// The Coverage tally legend always renders one "badge false" row for
+	// the zero-count unsafe_or_impossible bucket (Counts is zero-filled
+	// for all five statuses) - checking the whole page would spuriously
+	// match that, so this scopes the assertion to the quorum-tolerance
+	// scenario row itself.
+	if strings.Contains(row, `class="badge false"`) {
+		t.Errorf("single-node quorum-tolerance row rendered unsafe_or_impossible (badge false), want the expected-for-single-node framing instead: %s", row)
+	}
+	if !strings.Contains(row, "single-node deployment") {
+		t.Errorf("expected the single-node explanation text in the row, got: %s", row)
+	}
+}
+
 func TestHandleCoveragePage_NetworkFailureAndConnectivityBothRender(t *testing.T) {
 	client := &fakeClient{
 		statusResp: &rpcpb.StatusResponse{ManagerNodeId: "node-a", RaftReachable: true, RaftLeaderId: "node-a"},

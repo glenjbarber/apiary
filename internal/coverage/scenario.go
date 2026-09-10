@@ -193,9 +193,23 @@ func BuildReport(scenarios []Scenario) Report {
 // causing exactly that loss, so it resolves StatusUnsafeOrImpossible;
 // otherwise a real mechanism ran and produced a confirmed answer, so it
 // resolves StatusSimulated (True or Unknown alike).
-func ClassifyQuorumTolerance(e invariant.Evaluation) Scenario {
+//
+// voterCount is the current raft membership's voter count (0 when it
+// could not be determined, e.g. raft itself is unreachable). Exactly 1
+// voter is a single-node deployment - single-node is a fully supported,
+// permanent shape (ADR-0091), not a lesser bootstrap state, so a False
+// result there reflects an accepted property of the topology (there is
+// no second voter to ever lose to), not a confirmed hazard worth
+// rehearsing around. That single-voter case resolves StatusSimulated
+// like any other confirmed answer, rather than StatusUnsafeOrImpossible
+// - the badge on the Resilience Coverage Map should never read as "this
+// deployment has a problem" purely because it has one node. A False
+// result with 2+ voters is unchanged: a genuinely fragile multi-node
+// cluster (e.g. only one live voter left out of three) still resolves
+// StatusUnsafeOrImpossible, since that IS an actionable, real hazard.
+func ClassifyQuorumTolerance(e invariant.Evaluation, voterCount int) Scenario {
 	status := StatusSimulated
-	if e.Result == invariant.ResultFalse {
+	if e.Result == invariant.ResultFalse && voterCount != 1 {
 		status = StatusUnsafeOrImpossible
 	}
 	return Scenario{
