@@ -10,6 +10,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"time"
 
 	"google.golang.org/grpc"
 
@@ -18,6 +19,14 @@ import (
 	"github.com/glenjbarber/apiary/internal/loginconfig"
 	"github.com/glenjbarber/apiary/internal/manager"
 	"github.com/glenjbarber/apiary/internal/tlsdial"
+)
+
+// statusRetryAttempts/statusRetryDelay bound how long checkPAMConfigured
+// waits for managerd to become reachable at frontend's own startup - see
+// that function's own doc comment for why this exists at all.
+const (
+	statusRetryAttempts = 5
+	statusRetryDelay    = time.Second
 )
 
 // apiKeyCredentials attaches an API key to every outgoing managerd call
@@ -52,6 +61,34 @@ func (a remoteAuthenticator) Authenticate(username, password string) (bool, erro
 		return false, fmt.Errorf("%s", resp.GetError())
 	}
 	return resp.GetOk(), nil
+}
+
+// checkPAMConfigured calls managerd's Status RPC to learn whether PAM
+// login is configured, retrying up to attempts times (sleeping delay
+// between each) rather than giving up after the first failure - a real
+// race found live: managerd itself can take a few seconds to finish
+// connecting to raftd's own internal socket before it starts listening
+// on its external API at all, so a single attempt made right at
+// frontend's own startup can lose that race purely on timing, even
+// though managerd comes up fine moments later. Whatever this returns
+// is cached by the caller for frontend's entire runtime (see run()'s
+// own comment on why) - there is no later recheck, so getting this
+// right at startup matters more than it would if it were just retried
+// per-request. Still falls back to "unreachable" once attempts are
+// exhausted, preserving the existing policy that frontend always
+// finishes starting up regardless of managerd's state.
+func checkPAMConfigured(client rpcpb.ManagerServiceClient, attempts int, delay time.Duration) (configured bool, err error) {
+	for i := 0; i < attempts; i++ {
+		if i > 0 {
+			time.Sleep(delay)
+		}
+		resp, statusErr := client.Status(context.Background(), &rpcpb.StatusRequest{})
+		if statusErr == nil {
+			return resp.GetPamConfigured(), nil
+		}
+		err = statusErr
+	}
+	return false, err
 }
 
 func main() {
@@ -118,15 +155,16 @@ func run() error {
 
 	// Whether login is enabled at all is now managerd's own call (ADR-
 	// 0087, PamConfigured on its Status response) - frontend needs no
-	// login-related flag of its own anymore. A Status fetch failure here
-	// is treated the same as "not configured" (auth stays nil) rather
-	// than aborting startup - frontend should still come up and serve
-	// pages even if managerd is briefly unreachable at boot.
+	// login-related flag of its own anymore. checkPAMConfigured retries
+	// a few times (see its own doc comment for the exact startup race
+	// this closes) before falling back to "not configured" - frontend
+	// should still come up and serve pages even if managerd stays
+	// genuinely unreachable well past that.
 	managerClient := rpcpb.NewManagerServiceClient(conn)
 	var auth frontend.Authenticator
-	if statusResp, err := managerClient.Status(context.Background(), &rpcpb.StatusRequest{}); err != nil {
-		log.Printf("frontend: could not reach managerd to check login configuration: %v", err)
-	} else if statusResp.GetPamConfigured() {
+	if configured, err := checkPAMConfigured(managerClient, statusRetryAttempts, statusRetryDelay); err != nil {
+		log.Printf("frontend: could not reach managerd to check login configuration after %d attempts: %v", statusRetryAttempts, err)
+	} else if configured {
 		auth = remoteAuthenticator{client: managerClient}
 	}
 
