@@ -170,6 +170,19 @@ service ManagerService {
   // sub-dataset, not the Base dataset itself.
   rpc SetDatasetQuota(SetDatasetQuotaRequest) returns (SetDatasetQuotaResponse);
 
+  // CreateVMSnapshot/ListVMSnapshots/RestoreVMSnapshot/DeleteVMSnapshot
+  // (ADR-0090) checkpoint and roll back a VM's own ZFS dataset (which
+  // holds its disk.img) - the same "physical, per-node, never routed
+  // through raft" posture as SetDatasetQuota above, since a snapshot is
+  // real local storage state, not part of VMDefinition. RestoreVMSnapshot
+  // must only ever be called against a stopped VM - the UI enforces
+  // this via its own copy, not a server-side check (see ADR-0090's own
+  // disclosed limitation).
+  rpc CreateVMSnapshot(CreateVMSnapshotRequest) returns (CreateVMSnapshotResponse);
+  rpc ListVMSnapshots(ListVMSnapshotsRequest) returns (ListVMSnapshotsResponse);
+  rpc RestoreVMSnapshot(RestoreVMSnapshotRequest) returns (RestoreVMSnapshotResponse);
+  rpc DeleteVMSnapshot(DeleteVMSnapshotRequest) returns (DeleteVMSnapshotResponse);
+
   // ListNodeServices reports the locally-installed Apiary rc.d services on
   // this Hive. RestartNodeService can restart only the narrow allowlist of
   // services the Machine page exposes; it never edits rc.conf or starts or
@@ -1325,6 +1338,42 @@ message SetDatasetQuotaRequest {
 }
 
 message SetDatasetQuotaResponse {
+  string error = 1;
+}
+
+message CreateVMSnapshotRequest {
+  string id = 1;
+  string snapshot_name = 2;
+}
+
+message CreateVMSnapshotResponse {
+  string error = 1;
+}
+
+message ListVMSnapshotsRequest {
+  string id = 1;
+}
+
+message ListVMSnapshotsResponse {
+  repeated string snapshot_names = 1;
+  string error = 2;
+}
+
+message RestoreVMSnapshotRequest {
+  string id = 1;
+  string snapshot_name = 2;
+}
+
+message RestoreVMSnapshotResponse {
+  string error = 1;
+}
+
+message DeleteVMSnapshotRequest {
+  string id = 1;
+  string snapshot_name = 2;
+}
+
+message DeleteVMSnapshotResponse {
   string error = 1;
 }
 

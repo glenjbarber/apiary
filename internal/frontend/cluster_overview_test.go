@@ -122,6 +122,22 @@ func (f *fakePeerHostStatsClient) OpenVMConsole(_ context.Context, addr, _ strin
 	return nil, errors.New("test peer console unavailable")
 }
 
+func (f *fakePeerHostStatsClient) CreateVMSnapshot(context.Context, string, string, string) (*rpcpb.CreateVMSnapshotResponse, error) {
+	return &rpcpb.CreateVMSnapshotResponse{}, nil
+}
+
+func (f *fakePeerHostStatsClient) ListVMSnapshots(context.Context, string, string) (*rpcpb.ListVMSnapshotsResponse, error) {
+	return &rpcpb.ListVMSnapshotsResponse{}, nil
+}
+
+func (f *fakePeerHostStatsClient) RestoreVMSnapshot(context.Context, string, string, string) (*rpcpb.RestoreVMSnapshotResponse, error) {
+	return &rpcpb.RestoreVMSnapshotResponse{}, nil
+}
+
+func (f *fakePeerHostStatsClient) DeleteVMSnapshot(context.Context, string, string, string) (*rpcpb.DeleteVMSnapshotResponse, error) {
+	return &rpcpb.DeleteVMSnapshotResponse{}, nil
+}
+
 func (f *fakePeerHostStatsClient) GetNodeConfig(_ context.Context, addr string) (*rpcpb.GetNodeConfigResponse, error) {
 	return &rpcpb.GetNodeConfigResponse{}, nil
 }

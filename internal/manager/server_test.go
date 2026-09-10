@@ -980,6 +980,18 @@ type fakeQuotaSetter struct {
 
 	templateNames    []string
 	templateNamesErr error
+
+	// snapshots/createSnapshotErr/rollbackSnapshotErr/destroySnapshotErr/
+	// listSnapshotsErr back CreateSnapshot/RollbackSnapshot/
+	// DestroySnapshot/ListSnapshots' tests (ADR-0090). snapshots is
+	// keyed by the full "dataset@snapshot" name passed in, mirroring how
+	// the real Manager scopes a snapshot to one specific dataset.
+	snapshots           map[string]bool
+	createSnapshotErr   error
+	rollbackSnapshotErr error
+	destroySnapshotErr  error
+	listSnapshotsErr    error
+	lastRolledBack      string
 }
 
 func (f *fakeQuotaSetter) SetProperty(_ context.Context, name, prop, value string) error {
@@ -1054,6 +1066,47 @@ func (f *fakeQuotaSetter) ListTemplateNames(context.Context) ([]string, error) {
 	return f.templateNames, nil
 }
 
+func (f *fakeQuotaSetter) CreateSnapshot(_ context.Context, name string) error {
+	if f.createSnapshotErr != nil {
+		return f.createSnapshotErr
+	}
+	if f.snapshots == nil {
+		f.snapshots = map[string]bool{}
+	}
+	f.snapshots[name] = true
+	return nil
+}
+
+func (f *fakeQuotaSetter) RollbackSnapshot(_ context.Context, name string) error {
+	if f.rollbackSnapshotErr != nil {
+		return f.rollbackSnapshotErr
+	}
+	f.lastRolledBack = name
+	return nil
+}
+
+func (f *fakeQuotaSetter) DestroySnapshot(_ context.Context, name string) error {
+	if f.destroySnapshotErr != nil {
+		return f.destroySnapshotErr
+	}
+	delete(f.snapshots, name)
+	return nil
+}
+
+func (f *fakeQuotaSetter) ListSnapshots(_ context.Context, datasetName string) ([]string, error) {
+	if f.listSnapshotsErr != nil {
+		return nil, f.listSnapshotsErr
+	}
+	prefix := datasetName + "@"
+	var names []string
+	for full := range f.snapshots {
+		if strings.HasPrefix(full, prefix) {
+			names = append(names, strings.TrimPrefix(full, prefix))
+		}
+	}
+	return names, nil
+}
+
 func TestServer_SetDatasetQuota(t *testing.T) {
 	zfsMgr := &fakeQuotaSetter{}
 	s := NewServer(nil, "node-1", nil, nil, nil, nil, nil, "", zfsMgr, nil, nil, 0, nil)
@@ -1067,6 +1120,151 @@ func TestServer_SetDatasetQuota(t *testing.T) {
 	}
 	if zfsMgr.lastName != "vm-1" || zfsMgr.lastProperty != "quota" || zfsMgr.lastValue != "10G" {
 		t.Errorf("SetProperty called with (%q, %q, %q), want (vm-1, quota, 10G)", zfsMgr.lastName, zfsMgr.lastProperty, zfsMgr.lastValue)
+	}
+}
+
+func TestServer_CreateVMSnapshot(t *testing.T) {
+	zfsMgr := &fakeQuotaSetter{}
+	s := NewServer(nil, "node-1", nil, nil, nil, nil, nil, "", zfsMgr, nil, nil, 0, nil)
+
+	resp, err := s.CreateVMSnapshot(context.Background(), &rpcpb.CreateVMSnapshotRequest{Id: "vm-1", SnapshotName: "before-migration"})
+	if err != nil {
+		t.Fatalf("CreateVMSnapshot() error: %v", err)
+	}
+	if resp.GetError() != "" {
+		t.Fatalf("CreateVMSnapshot() returned error: %s", resp.GetError())
+	}
+	if !zfsMgr.snapshots["vm-1@before-migration"] {
+		t.Errorf("snapshots = %v, want vm-1@before-migration present", zfsMgr.snapshots)
+	}
+}
+
+func TestServer_CreateVMSnapshot_MissingSnapshotNameIsError(t *testing.T) {
+	zfsMgr := &fakeQuotaSetter{}
+	s := NewServer(nil, "node-1", nil, nil, nil, nil, nil, "", zfsMgr, nil, nil, 0, nil)
+
+	resp, err := s.CreateVMSnapshot(context.Background(), &rpcpb.CreateVMSnapshotRequest{Id: "vm-1"})
+	if err != nil {
+		t.Fatalf("CreateVMSnapshot() error: %v", err)
+	}
+	if resp.GetError() == "" {
+		t.Fatal("CreateVMSnapshot() with no snapshot_name = no error, want a validation error")
+	}
+}
+
+func TestServer_CreateVMSnapshot_NotConfiguredIsError(t *testing.T) {
+	s := NewServer(nil, "node-1", nil, nil, nil, nil, nil, "", nil, nil, nil, 0, nil)
+
+	resp, err := s.CreateVMSnapshot(context.Background(), &rpcpb.CreateVMSnapshotRequest{Id: "vm-1", SnapshotName: "x"})
+	if err != nil {
+		t.Fatalf("CreateVMSnapshot() error: %v", err)
+	}
+	if resp.GetError() == "" {
+		t.Fatal("CreateVMSnapshot() with no ZFS configured = no error, want a clear rejection")
+	}
+}
+
+func TestServer_ListVMSnapshots(t *testing.T) {
+	zfsMgr := &fakeQuotaSetter{}
+	s := NewServer(nil, "node-1", nil, nil, nil, nil, nil, "", zfsMgr, nil, nil, 0, nil)
+	zfsMgr.CreateSnapshot(context.Background(), "vm-1@first")
+	zfsMgr.CreateSnapshot(context.Background(), "vm-1@second")
+	zfsMgr.CreateSnapshot(context.Background(), "vm-2@unrelated")
+
+	resp, err := s.ListVMSnapshots(context.Background(), &rpcpb.ListVMSnapshotsRequest{Id: "vm-1"})
+	if err != nil {
+		t.Fatalf("ListVMSnapshots() error: %v", err)
+	}
+	if len(resp.GetSnapshotNames()) != 2 {
+		t.Errorf("ListVMSnapshots() = %v, want exactly vm-1's own two snapshots, not vm-2's", resp.GetSnapshotNames())
+	}
+}
+
+func TestServer_ListVMSnapshots_NotConfiguredReturnsEmpty(t *testing.T) {
+	s := NewServer(nil, "node-1", nil, nil, nil, nil, nil, "", nil, nil, nil, 0, nil)
+
+	resp, err := s.ListVMSnapshots(context.Background(), &rpcpb.ListVMSnapshotsRequest{Id: "vm-1"})
+	if err != nil {
+		t.Fatalf("ListVMSnapshots() error: %v", err)
+	}
+	if len(resp.GetSnapshotNames()) != 0 || resp.GetError() != "" {
+		t.Errorf("ListVMSnapshots() = %+v, want an empty, error-free response when no ZFS is configured", resp)
+	}
+}
+
+// TestServer_RestoreVMSnapshot_NilRaftSkipsRunningCheck guards the real
+// bug this test itself caught during development: RestoreVMSnapshot
+// used to call s.GetVM unconditionally, which panics on a nil s.raft
+// (every other quotaSetter-only unit test in this file constructs the
+// Server that way). The running-VM check must be skippable, not just
+// error-tolerant, when there's no raft client configured at all.
+func TestServer_RestoreVMSnapshot_NilRaftSkipsRunningCheck(t *testing.T) {
+	zfsMgr := &fakeQuotaSetter{}
+	s := NewServer(nil, "node-1", nil, nil, nil, nil, nil, "", zfsMgr, nil, nil, 0, nil)
+
+	resp, err := s.RestoreVMSnapshot(context.Background(), &rpcpb.RestoreVMSnapshotRequest{Id: "vm-1", SnapshotName: "before-migration"})
+	if err != nil {
+		t.Fatalf("RestoreVMSnapshot() error: %v", err)
+	}
+	if resp.GetError() != "" {
+		t.Fatalf("RestoreVMSnapshot() returned error: %s", resp.GetError())
+	}
+	if zfsMgr.lastRolledBack != "vm-1@before-migration" {
+		t.Errorf("RollbackSnapshot called with %q, want vm-1@before-migration", zfsMgr.lastRolledBack)
+	}
+}
+
+func TestServer_RestoreVMSnapshot_ZFSErrorSurfacedInResponse(t *testing.T) {
+	zfsMgr := &fakeQuotaSetter{rollbackSnapshotErr: errors.New("snapshot does not exist")}
+	s := NewServer(nil, "node-1", nil, nil, nil, nil, nil, "", zfsMgr, nil, nil, 0, nil)
+
+	resp, err := s.RestoreVMSnapshot(context.Background(), &rpcpb.RestoreVMSnapshotRequest{Id: "vm-1", SnapshotName: "no-such-snapshot"})
+	if err != nil {
+		t.Fatalf("RestoreVMSnapshot() error: %v", err)
+	}
+	if resp.GetError() == "" {
+		t.Fatal("RestoreVMSnapshot() with a rollback error = no error, want it surfaced")
+	}
+}
+
+func TestServer_RestoreVMSnapshot_NotConfiguredIsError(t *testing.T) {
+	s := NewServer(nil, "node-1", nil, nil, nil, nil, nil, "", nil, nil, nil, 0, nil)
+
+	resp, err := s.RestoreVMSnapshot(context.Background(), &rpcpb.RestoreVMSnapshotRequest{Id: "vm-1", SnapshotName: "x"})
+	if err != nil {
+		t.Fatalf("RestoreVMSnapshot() error: %v", err)
+	}
+	if resp.GetError() == "" {
+		t.Fatal("RestoreVMSnapshot() with no ZFS configured = no error, want a clear rejection")
+	}
+}
+
+func TestServer_DeleteVMSnapshot(t *testing.T) {
+	zfsMgr := &fakeQuotaSetter{}
+	s := NewServer(nil, "node-1", nil, nil, nil, nil, nil, "", zfsMgr, nil, nil, 0, nil)
+	zfsMgr.CreateSnapshot(context.Background(), "vm-1@stale")
+
+	resp, err := s.DeleteVMSnapshot(context.Background(), &rpcpb.DeleteVMSnapshotRequest{Id: "vm-1", SnapshotName: "stale"})
+	if err != nil {
+		t.Fatalf("DeleteVMSnapshot() error: %v", err)
+	}
+	if resp.GetError() != "" {
+		t.Fatalf("DeleteVMSnapshot() returned error: %s", resp.GetError())
+	}
+	if zfsMgr.snapshots["vm-1@stale"] {
+		t.Error("snapshot still present after DeleteVMSnapshot()")
+	}
+}
+
+func TestServer_DeleteVMSnapshot_NotConfiguredIsError(t *testing.T) {
+	s := NewServer(nil, "node-1", nil, nil, nil, nil, nil, "", nil, nil, nil, 0, nil)
+
+	resp, err := s.DeleteVMSnapshot(context.Background(), &rpcpb.DeleteVMSnapshotRequest{Id: "vm-1", SnapshotName: "x"})
+	if err != nil {
+		t.Fatalf("DeleteVMSnapshot() error: %v", err)
+	}
+	if resp.GetError() == "" {
+		t.Fatal("DeleteVMSnapshot() with no ZFS configured = no error, want a clear rejection")
 	}
 }
 

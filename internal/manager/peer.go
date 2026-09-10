@@ -349,6 +349,47 @@ func (p *PeerReporter) GetVMSerialLog(ctx context.Context, addr, id string) (*rp
 	return client.GetVMSerialLog(ctx, &rpcpb.GetVMSerialLogRequest{Id: id})
 }
 
+// CreateVMSnapshot/ListVMSnapshots/RestoreVMSnapshot/DeleteVMSnapshot
+// (ADR-0090) reach a VM's owning Comb directly, the same "physical,
+// per-node state, dial addr directly" shape as GetVMSerialLog above -
+// a VM's ZFS snapshots are real local storage, not raft-replicated, so
+// there's no leader-hint forwarding concept to lean on here either.
+func (p *PeerReporter) CreateVMSnapshot(ctx context.Context, addr, id, snapshotName string) (*rpcpb.CreateVMSnapshotResponse, error) {
+	conn, client, err := p.dial(addr)
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close()
+	return client.CreateVMSnapshot(ctx, &rpcpb.CreateVMSnapshotRequest{Id: id, SnapshotName: snapshotName})
+}
+
+func (p *PeerReporter) ListVMSnapshots(ctx context.Context, addr, id string) (*rpcpb.ListVMSnapshotsResponse, error) {
+	conn, client, err := p.dial(addr)
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close()
+	return client.ListVMSnapshots(ctx, &rpcpb.ListVMSnapshotsRequest{Id: id})
+}
+
+func (p *PeerReporter) RestoreVMSnapshot(ctx context.Context, addr, id, snapshotName string) (*rpcpb.RestoreVMSnapshotResponse, error) {
+	conn, client, err := p.dial(addr)
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close()
+	return client.RestoreVMSnapshot(ctx, &rpcpb.RestoreVMSnapshotRequest{Id: id, SnapshotName: snapshotName})
+}
+
+func (p *PeerReporter) DeleteVMSnapshot(ctx context.Context, addr, id, snapshotName string) (*rpcpb.DeleteVMSnapshotResponse, error) {
+	conn, client, err := p.dial(addr)
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close()
+	return client.DeleteVMSnapshot(ctx, &rpcpb.DeleteVMSnapshotRequest{Id: id, SnapshotName: snapshotName})
+}
+
 // GetVMConsole asks a specific Hive whether it has the requested local VNC
 // endpoint. The returned loopback address is deliberately consumed only by
 // that Hive's ProxyVMConsole handler, never by a remote frontend.

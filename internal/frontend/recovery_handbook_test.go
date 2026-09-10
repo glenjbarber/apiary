@@ -249,6 +249,26 @@ func (slowRecoveryPeerClient) GetNetworkTeardownStatus(ctx context.Context, addr
 	return nil, ctx.Err()
 }
 
+func (slowRecoveryPeerClient) CreateVMSnapshot(ctx context.Context, addr, id, snapshotName string) (*rpcpb.CreateVMSnapshotResponse, error) {
+	<-ctx.Done()
+	return nil, ctx.Err()
+}
+
+func (slowRecoveryPeerClient) ListVMSnapshots(ctx context.Context, addr, id string) (*rpcpb.ListVMSnapshotsResponse, error) {
+	<-ctx.Done()
+	return nil, ctx.Err()
+}
+
+func (slowRecoveryPeerClient) RestoreVMSnapshot(ctx context.Context, addr, id, snapshotName string) (*rpcpb.RestoreVMSnapshotResponse, error) {
+	<-ctx.Done()
+	return nil, ctx.Err()
+}
+
+func (slowRecoveryPeerClient) DeleteVMSnapshot(ctx context.Context, addr, id, snapshotName string) (*rpcpb.DeleteVMSnapshotResponse, error) {
+	<-ctx.Done()
+	return nil, ctx.Err()
+}
+
 func TestHandleRecoveryHandbookPage_NodeContextRespectsTimeouts(t *testing.T) {
 	oldTimeout, oldOverall := nodeContextTimeout, nodeContextOverallTimeout
 	nodeContextTimeout = 10 * time.Millisecond

@@ -58,6 +58,22 @@ func (f *fakeISOPeerClient) GetNetworkTeardownStatus(context.Context, string, st
 	return &rpcpb.GetNetworkTeardownStatusResponse{}, nil
 }
 
+func (f *fakeISOPeerClient) CreateVMSnapshot(context.Context, string, string, string) (*rpcpb.CreateVMSnapshotResponse, error) {
+	return &rpcpb.CreateVMSnapshotResponse{}, nil
+}
+
+func (f *fakeISOPeerClient) ListVMSnapshots(context.Context, string, string) (*rpcpb.ListVMSnapshotsResponse, error) {
+	return &rpcpb.ListVMSnapshotsResponse{}, nil
+}
+
+func (f *fakeISOPeerClient) RestoreVMSnapshot(context.Context, string, string, string) (*rpcpb.RestoreVMSnapshotResponse, error) {
+	return &rpcpb.RestoreVMSnapshotResponse{}, nil
+}
+
+func (f *fakeISOPeerClient) DeleteVMSnapshot(context.Context, string, string, string) (*rpcpb.DeleteVMSnapshotResponse, error) {
+	return &rpcpb.DeleteVMSnapshotResponse{}, nil
+}
+
 func (f *fakeISOPeerClient) ListISOs(_ context.Context, addr string) (*rpcpb.ListISOsResponse, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()

@@ -385,6 +385,15 @@ type pageData struct {
 	// not the unrelated Public exposure panel.
 	VMFirewallFormError string
 
+	// VMSnapshots/VMSnapshotFormError back the VM detail page's own
+	// Snapshots panel (ADR-0090) - the current list of this VM's ZFS
+	// snapshot names, and a failed create/restore/delete form's own
+	// error (or a fetch failure, folded in the same way), kept separate
+	// from the other VM detail-page form errors above for the same
+	// reason they're kept separate from each other.
+	VMSnapshots         []string
+	VMSnapshotFormError string
+
 	// CloudflareConfigured mirrors HostStatsResponse.cloudflare_configured
 	// for this node - shown on the Machine Configuration page's own
 	// setup-status panel, and used to warn on a VM's detail page when
@@ -731,6 +740,15 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /vms/{id}/lifecycle", s.requireRole(manager.RoleOperator, s.handleSetVMDesiredState))
 	s.mux.HandleFunc("POST /vms/{id}/cloudflare-exposure", s.requireRole(manager.RoleOperator, s.handleSetVMCloudflareExposure))
 	s.mux.HandleFunc("POST /vms/{id}/firewall-rules", s.requireRole(manager.RoleOperator, s.handleSetVMFirewallRules))
+	// Snapshot create/restore/delete (ADR-0090) all use plain POST forms
+	// with a full VM-detail-page reload afterward, matching this page's
+	// own existing Cloudflare-exposure/firewall-rules forms exactly -
+	// deliberately not htmx, and deliberately not a literal HTTP DELETE
+	// (which a plain <form> can't issue), for the same consistency
+	// reason.
+	s.mux.HandleFunc("POST /vms/{id}/snapshots", s.requireRole(manager.RoleOperator, s.handleCreateVMSnapshot))
+	s.mux.HandleFunc("POST /vms/{id}/snapshots/{name}/restore", s.requireRole(manager.RoleOperator, s.handleRestoreVMSnapshot))
+	s.mux.HandleFunc("POST /vms/{id}/snapshots/{name}/delete", s.requireRole(manager.RoleOperator, s.handleDeleteVMSnapshot))
 	s.mux.HandleFunc("GET /images", s.handleImagesPage)
 	s.mux.HandleFunc("GET /isos", s.handleListISOs)
 	s.mux.HandleFunc("GET /vms/{id}/console", s.handleConsolePage)
@@ -989,7 +1007,7 @@ func (s *Server) handleVMsPage(w http.ResponseWriter, r *http.Request) {
 // uses the existing GetVM read path, so the page has the same leader-forwarded
 // consistency semantics as the list without introducing another API surface.
 func (s *Server) handleVMPage(w http.ResponseWriter, r *http.Request) {
-	s.renderVMPage(w, r, r.PathValue("id"), "", "")
+	s.renderVMPage(w, r, r.PathValue("id"), "", "", "")
 }
 
 // handleSetVMCloudflareExposure sets or clears one VM's public
@@ -1003,7 +1021,7 @@ func (s *Server) handleVMPage(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleSetVMCloudflareExposure(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	if err := r.ParseForm(); err != nil {
-		s.renderVMPage(w, r, id, "invalid form: "+err.Error(), "")
+		s.renderVMPage(w, r, id, "invalid form: "+err.Error(), "", "")
 		return
 	}
 	hostname := strings.TrimSpace(r.FormValue("cloudflare_hostname"))
@@ -1012,20 +1030,20 @@ func (s *Server) handleSetVMCloudflareExposure(w http.ResponseWriter, r *http.Re
 		var err error
 		port, err = strconv.ParseUint(r.FormValue("cloudflare_port"), 10, 32)
 		if err != nil {
-			s.renderVMPage(w, r, id, "invalid port: "+err.Error(), "")
+			s.renderVMPage(w, r, id, "invalid port: "+err.Error(), "", "")
 			return
 		}
 	}
 	resp, err := s.client.SetVMCloudflareExposure(r.Context(), &rpcpb.SetVMCloudflareExposureRequest{Id: id, Hostname: hostname, Port: uint32(port)})
 	if err != nil {
-		s.renderVMPage(w, r, id, err.Error(), "")
+		s.renderVMPage(w, r, id, err.Error(), "", "")
 		return
 	}
 	if resp.GetError() != "" {
-		s.renderVMPage(w, r, id, resp.GetError(), "")
+		s.renderVMPage(w, r, id, resp.GetError(), "", "")
 		return
 	}
-	s.renderVMPage(w, r, id, "", "")
+	s.renderVMPage(w, r, id, "", "", "")
 }
 
 // handleSetVMFirewallRules replaces a VM's firewall rules wholesale -
@@ -1037,19 +1055,19 @@ func (s *Server) handleSetVMCloudflareExposure(w http.ResponseWriter, r *http.Re
 func (s *Server) handleSetVMFirewallRules(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	if err := r.ParseForm(); err != nil {
-		s.renderVMPage(w, r, id, "", "invalid form: "+err.Error())
+		s.renderVMPage(w, r, id, "", "invalid form: "+err.Error(), "")
 		return
 	}
 	resp, err := s.client.SetVMFirewallRules(r.Context(), &rpcpb.SetVMFirewallRulesRequest{Id: id, FirewallRules: parseFirewallRuleRows(r)})
 	if err != nil {
-		s.renderVMPage(w, r, id, "", err.Error())
+		s.renderVMPage(w, r, id, "", err.Error(), "")
 		return
 	}
 	if resp.GetError() != "" {
-		s.renderVMPage(w, r, id, "", resp.GetError())
+		s.renderVMPage(w, r, id, "", resp.GetError(), "")
 		return
 	}
-	s.renderVMPage(w, r, id, "", "")
+	s.renderVMPage(w, r, id, "", "", "")
 }
 
 func vmLifecycleState(action string) (rpcpb.VMState, string) {
@@ -1071,31 +1089,31 @@ func vmLifecycleState(action string) (rpcpb.VMState, string) {
 func (s *Server) handleSetVMDesiredState(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	if err := r.ParseForm(); err != nil {
-		s.renderVMPage(w, r, id, "invalid form: "+err.Error(), "")
+		s.renderVMPage(w, r, id, "invalid form: "+err.Error(), "", "")
 		return
 	}
 	state, formErr := vmLifecycleState(r.FormValue("action"))
 	if formErr != "" {
-		s.renderVMPage(w, r, id, formErr, "")
+		s.renderVMPage(w, r, id, formErr, "", "")
 		return
 	}
 	resp, err := s.client.SetVMDesiredState(r.Context(), &rpcpb.SetVMDesiredStateRequest{Id: id, DesiredState: state})
 	if err != nil {
-		s.renderVMPage(w, r, id, err.Error(), "")
+		s.renderVMPage(w, r, id, err.Error(), "", "")
 		return
 	}
 	if resp.GetError() != "" {
-		s.renderVMPage(w, r, id, resp.GetError(), "")
+		s.renderVMPage(w, r, id, resp.GetError(), "", "")
 		return
 	}
-	s.renderVMPage(w, r, id, "", "")
+	s.renderVMPage(w, r, id, "", "", "")
 }
 
 // renderVMPage re-fetches and renders the VM detail page, with an
 // optional form-specific error - shared by handleSetVMCloudflareExposure
 // so a failed form submission still shows the rest of the page's own
 // current state, not just a bare error.
-func (s *Server) renderVMPage(w http.ResponseWriter, r *http.Request, id, cloudflareErr, firewallErr string) {
+func (s *Server) renderVMPage(w http.ResponseWriter, r *http.Request, id, cloudflareErr, firewallErr, snapshotErr string) {
 	resp, err := s.client.GetVM(r.Context(), &rpcpb.GetVMRequest{Id: id})
 	if err != nil {
 		s.render(w, "vm_page", s.withAuthFields(r, pageData{Error: err.Error(), ActivePage: "vms"}))
@@ -1130,9 +1148,18 @@ func (s *Server) renderVMPage(w http.ResponseWriter, r *http.Request, id, cloudf
 		}
 	}
 
+	// Best-effort, same reasoning as CloudflareConfigured above: a
+	// snapshot-list fetch failure just means the panel shows an error
+	// banner, never blocks the rest of the page (ADR-0090).
+	snapshots, snapshotListErr := s.currentVMSnapshots(r, id)
+	if snapshotErr == "" {
+		snapshotErr = snapshotListErr
+	}
+
 	s.render(w, "vm_page", s.withAuthFields(r, pageData{
 		VM: vm, VMCloudflareFormError: cloudflareErr, VMFirewallFormError: firewallErr,
-		CloudflareConfigured: cloudflareConfigured, ActivePage: "vms",
+		CloudflareConfigured: cloudflareConfigured, VMSnapshots: snapshots, VMSnapshotFormError: snapshotErr,
+		ActivePage: "vms",
 	}))
 }
 
