@@ -54,12 +54,37 @@ setup-pam:
 		sudo sh -c "printf 'auth required pam_unix.so no_warn\\naccount required pam_unix.so\\n' > /etc/pam.d/${PAM_SERVICE}"
 	@echo "PAM policy at /etc/pam.d/${PAM_SERVICE} - pass -pam-service ${PAM_SERVICE} to managerd to enable real login; the first successful login becomes Admin automatically (see docs/bootstrap.md Step 11)."
 
+NODE_ZFS_POOL?=		zroot
+NODE_VLAN_UPLINK?=	vtnet0
+NODE_BHYVE_BRIDGE?=	bridge0
+
+# setup-quick is the whole docs/bootstrap.md preflight sequence
+# (Sections 2-8) collapsed into one target for a single-node bring-up:
+# packages, apiaryinstall's safe fixes plus its one risky network step
+# together, installing the built binaries where the rc.d scripts expect
+# them, and the one apiary_managerd_args a fresh node actually needs to
+# start with working VM networking (-bhyve-bootrom is resolved here the
+# same way Section 5 does by hand - the package only sometimes carries
+# the real .fd file itself, edk2-bhyve usually carries it instead).
+# NODE_ZFS_POOL/NODE_VLAN_UPLINK/NODE_BHYVE_BRIDGE override the
+# defaults for a host that doesn't match this one's layout, e.g.
+# `make setup-quick NODE_VLAN_UPLINK=em0`.
+#
+# Deliberately does NOT set -pam-service: managerd refuses to start
+# with it set unless -tls-cert/-tls-key are also configured (ADR-0087),
+# and setup-quick issues no certificates - real login stays an
+# explicit, separate step (docs/bootstrap.md Step 11), exactly like a
+# manual bring-up.
 setup-quick: setup
-	pkg install -y go git sudo
-	./apiaryinstall -apply -apply-network yes-modify-network -zfs-pool zroot \
-		-vlan-uplink vtnet0 -bhyve-bridge bridge0 ;\
+	sudo pkg install -y go git sudo
+	./apiaryinstall -apply -apply-network yes-modify-network -zfs-pool ${NODE_ZFS_POOL} \
+		-vlan-uplink ${NODE_VLAN_UPLINK} -bhyve-bridge ${NODE_BHYVE_BRIDGE}
+	sudo mkdir -p /usr/local/libexec/apiary
 	for S in ${SRCS} ; \
-		do mkdir -p /usr/local/libexec/apiary/$$S ;\
-		cp -p $$S /usr/local/libexec/apiary/$$S ;\
-		chmod +x /usr/local/libexec/apiary/$$S ;\
+		do sudo cp -p $$S /usr/local/libexec/apiary/$$S ;\
+		sudo chmod +x /usr/local/libexec/apiary/$$S ;\
 	done
+	BOOTROM=$$(test -f /usr/local/share/uefi-firmware/BHYVE_UEFI.fd && echo /usr/local/share/uefi-firmware/BHYVE_UEFI.fd || pkg info -l edk2-bhyve 2>/dev/null | grep '\.fd$$' | head -1) ;\
+	test -n "$$BOOTROM" || { echo "could not locate a bhyve UEFI firmware .fd file - install bhyve-firmware/edk2-bhyve and re-run" >&2 ; exit 1 ; } ;\
+	sudo sysrc apiary_managerd_args="-bhyve-bootrom $$BOOTROM -bhyve-bridge ${NODE_BHYVE_BRIDGE} -vlan-uplink ${NODE_VLAN_UPLINK}"
+	@echo "apiary_managerd_args set (no -pam-service - see docs/bootstrap.md Step 11 to add real login once -tls-cert/-tls-key are configured)."
