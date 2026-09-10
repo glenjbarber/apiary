@@ -339,6 +339,22 @@ func (f *fakeClient) GetVMSerialLog(context.Context, *rpcpb.GetVMSerialLogReques
 	return &rpcpb.GetVMSerialLogResponse{}, nil
 }
 
+func (f *fakeClient) CreateVMSnapshot(context.Context, *rpcpb.CreateVMSnapshotRequest, ...grpc.CallOption) (*rpcpb.CreateVMSnapshotResponse, error) {
+	return &rpcpb.CreateVMSnapshotResponse{}, nil
+}
+
+func (f *fakeClient) ListVMSnapshots(context.Context, *rpcpb.ListVMSnapshotsRequest, ...grpc.CallOption) (*rpcpb.ListVMSnapshotsResponse, error) {
+	return &rpcpb.ListVMSnapshotsResponse{}, nil
+}
+
+func (f *fakeClient) RestoreVMSnapshot(context.Context, *rpcpb.RestoreVMSnapshotRequest, ...grpc.CallOption) (*rpcpb.RestoreVMSnapshotResponse, error) {
+	return &rpcpb.RestoreVMSnapshotResponse{}, nil
+}
+
+func (f *fakeClient) DeleteVMSnapshot(context.Context, *rpcpb.DeleteVMSnapshotRequest, ...grpc.CallOption) (*rpcpb.DeleteVMSnapshotResponse, error) {
+	return &rpcpb.DeleteVMSnapshotResponse{}, nil
+}
+
 func (f *fakeClient) CreateNetwork(_ context.Context, in *rpcpb.CreateNetworkRequest, _ ...grpc.CallOption) (*rpcpb.CreateNetworkResponse, error) {
 	f.lastCreateNetworkReq = in
 	if f.createNetworkResp != nil {

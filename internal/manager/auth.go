@@ -107,6 +107,13 @@ var requiredRole = map[string]Role{
 	// ListISOs below (its direct analog).
 	"/apiary.rpc.v1.ManagerService/ListJailTemplateNames": RoleViewer,
 
+	// ListVMSnapshots (ADR-0090) is a read-only report of a VM's own
+	// local ZFS snapshots - Viewer, same tier as GetVMSerialLog above
+	// (its direct analog: local, per-node, read-only VM-scoped state).
+	// The three writes (Create/Restore/Delete) sit in the Operator
+	// block below.
+	"/apiary.rpc.v1.ManagerService/ListVMSnapshots": RoleViewer,
+
 	// Operator: VM/jail/network lifecycle, ISO management, and the
 	// peer-to-peer reconciler-forwarding RPCs (ADR-0029) - a follower
 	// node forwarding its own already-authorized write needs at least
@@ -121,6 +128,9 @@ var requiredRole = map[string]Role{
 	"/apiary.rpc.v1.ManagerService/SetVMDesiredState":          RoleOperator,
 	"/apiary.rpc.v1.ManagerService/SetVMFirewallRules":         RoleOperator,
 	"/apiary.rpc.v1.ManagerService/SetDatasetQuota":            RoleOperator,
+	"/apiary.rpc.v1.ManagerService/CreateVMSnapshot":           RoleOperator,
+	"/apiary.rpc.v1.ManagerService/RestoreVMSnapshot":          RoleOperator,
+	"/apiary.rpc.v1.ManagerService/DeleteVMSnapshot":           RoleOperator,
 	"/apiary.rpc.v1.ManagerService/SaveAssumptionClaim":        RoleOperator,
 	"/apiary.rpc.v1.ManagerService/DeleteAssumptionClaim":      RoleOperator,
 	"/apiary.rpc.v1.ManagerService/IssueOriginCertificate":     RoleAdmin,

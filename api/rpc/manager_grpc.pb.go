@@ -48,6 +48,10 @@ const (
 	ManagerService_GetNodeConfig_FullMethodName               = "/apiary.rpc.v1.ManagerService/GetNodeConfig"
 	ManagerService_UpdateNodeConfig_FullMethodName            = "/apiary.rpc.v1.ManagerService/UpdateNodeConfig"
 	ManagerService_SetDatasetQuota_FullMethodName             = "/apiary.rpc.v1.ManagerService/SetDatasetQuota"
+	ManagerService_CreateVMSnapshot_FullMethodName            = "/apiary.rpc.v1.ManagerService/CreateVMSnapshot"
+	ManagerService_ListVMSnapshots_FullMethodName             = "/apiary.rpc.v1.ManagerService/ListVMSnapshots"
+	ManagerService_RestoreVMSnapshot_FullMethodName           = "/apiary.rpc.v1.ManagerService/RestoreVMSnapshot"
+	ManagerService_DeleteVMSnapshot_FullMethodName            = "/apiary.rpc.v1.ManagerService/DeleteVMSnapshot"
 	ManagerService_ListNodeServices_FullMethodName            = "/apiary.rpc.v1.ManagerService/ListNodeServices"
 	ManagerService_RestartNodeService_FullMethodName          = "/apiary.rpc.v1.ManagerService/RestartNodeService"
 	ManagerService_GetUplinkStatus_FullMethodName             = "/apiary.rpc.v1.ManagerService/GetUplinkStatus"
@@ -243,6 +247,18 @@ type ManagerServiceClient interface {
 	// ADR-0049 for the v1 limitation that this can only target a named
 	// sub-dataset, not the Base dataset itself.
 	SetDatasetQuota(ctx context.Context, in *SetDatasetQuotaRequest, opts ...grpc.CallOption) (*SetDatasetQuotaResponse, error)
+	// CreateVMSnapshot/ListVMSnapshots/RestoreVMSnapshot/DeleteVMSnapshot
+	// (ADR-0090) checkpoint and roll back a VM's own ZFS dataset (which
+	// holds its disk.img) - the same "physical, per-node, never routed
+	// through raft" posture as SetDatasetQuota above, since a snapshot is
+	// real local storage state, not part of VMDefinition. RestoreVMSnapshot
+	// must only ever be called against a stopped VM - the UI enforces
+	// this via its own copy, not a server-side check (see ADR-0090's own
+	// disclosed limitation).
+	CreateVMSnapshot(ctx context.Context, in *CreateVMSnapshotRequest, opts ...grpc.CallOption) (*CreateVMSnapshotResponse, error)
+	ListVMSnapshots(ctx context.Context, in *ListVMSnapshotsRequest, opts ...grpc.CallOption) (*ListVMSnapshotsResponse, error)
+	RestoreVMSnapshot(ctx context.Context, in *RestoreVMSnapshotRequest, opts ...grpc.CallOption) (*RestoreVMSnapshotResponse, error)
+	DeleteVMSnapshot(ctx context.Context, in *DeleteVMSnapshotRequest, opts ...grpc.CallOption) (*DeleteVMSnapshotResponse, error)
 	// ListNodeServices reports the locally-installed Apiary rc.d services on
 	// this Hive. RestartNodeService can restart only the narrow allowlist of
 	// services the Machine page exposes; it never edits rc.conf or starts or
@@ -752,6 +768,46 @@ func (c *managerServiceClient) SetDatasetQuota(ctx context.Context, in *SetDatas
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(SetDatasetQuotaResponse)
 	err := c.cc.Invoke(ctx, ManagerService_SetDatasetQuota_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *managerServiceClient) CreateVMSnapshot(ctx context.Context, in *CreateVMSnapshotRequest, opts ...grpc.CallOption) (*CreateVMSnapshotResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(CreateVMSnapshotResponse)
+	err := c.cc.Invoke(ctx, ManagerService_CreateVMSnapshot_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *managerServiceClient) ListVMSnapshots(ctx context.Context, in *ListVMSnapshotsRequest, opts ...grpc.CallOption) (*ListVMSnapshotsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListVMSnapshotsResponse)
+	err := c.cc.Invoke(ctx, ManagerService_ListVMSnapshots_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *managerServiceClient) RestoreVMSnapshot(ctx context.Context, in *RestoreVMSnapshotRequest, opts ...grpc.CallOption) (*RestoreVMSnapshotResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(RestoreVMSnapshotResponse)
+	err := c.cc.Invoke(ctx, ManagerService_RestoreVMSnapshot_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *managerServiceClient) DeleteVMSnapshot(ctx context.Context, in *DeleteVMSnapshotRequest, opts ...grpc.CallOption) (*DeleteVMSnapshotResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(DeleteVMSnapshotResponse)
+	err := c.cc.Invoke(ctx, ManagerService_DeleteVMSnapshot_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -1341,6 +1397,18 @@ type ManagerServiceServer interface {
 	// ADR-0049 for the v1 limitation that this can only target a named
 	// sub-dataset, not the Base dataset itself.
 	SetDatasetQuota(context.Context, *SetDatasetQuotaRequest) (*SetDatasetQuotaResponse, error)
+	// CreateVMSnapshot/ListVMSnapshots/RestoreVMSnapshot/DeleteVMSnapshot
+	// (ADR-0090) checkpoint and roll back a VM's own ZFS dataset (which
+	// holds its disk.img) - the same "physical, per-node, never routed
+	// through raft" posture as SetDatasetQuota above, since a snapshot is
+	// real local storage state, not part of VMDefinition. RestoreVMSnapshot
+	// must only ever be called against a stopped VM - the UI enforces
+	// this via its own copy, not a server-side check (see ADR-0090's own
+	// disclosed limitation).
+	CreateVMSnapshot(context.Context, *CreateVMSnapshotRequest) (*CreateVMSnapshotResponse, error)
+	ListVMSnapshots(context.Context, *ListVMSnapshotsRequest) (*ListVMSnapshotsResponse, error)
+	RestoreVMSnapshot(context.Context, *RestoreVMSnapshotRequest) (*RestoreVMSnapshotResponse, error)
+	DeleteVMSnapshot(context.Context, *DeleteVMSnapshotRequest) (*DeleteVMSnapshotResponse, error)
 	// ListNodeServices reports the locally-installed Apiary rc.d services on
 	// this Hive. RestartNodeService can restart only the narrow allowlist of
 	// services the Machine page exposes; it never edits rc.conf or starts or
@@ -1646,6 +1714,18 @@ func (UnimplementedManagerServiceServer) UpdateNodeConfig(context.Context, *Upda
 }
 func (UnimplementedManagerServiceServer) SetDatasetQuota(context.Context, *SetDatasetQuotaRequest) (*SetDatasetQuotaResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method SetDatasetQuota not implemented")
+}
+func (UnimplementedManagerServiceServer) CreateVMSnapshot(context.Context, *CreateVMSnapshotRequest) (*CreateVMSnapshotResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method CreateVMSnapshot not implemented")
+}
+func (UnimplementedManagerServiceServer) ListVMSnapshots(context.Context, *ListVMSnapshotsRequest) (*ListVMSnapshotsResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ListVMSnapshots not implemented")
+}
+func (UnimplementedManagerServiceServer) RestoreVMSnapshot(context.Context, *RestoreVMSnapshotRequest) (*RestoreVMSnapshotResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method RestoreVMSnapshot not implemented")
+}
+func (UnimplementedManagerServiceServer) DeleteVMSnapshot(context.Context, *DeleteVMSnapshotRequest) (*DeleteVMSnapshotResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method DeleteVMSnapshot not implemented")
 }
 func (UnimplementedManagerServiceServer) ListNodeServices(context.Context, *ListNodeServicesRequest) (*ListNodeServicesResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ListNodeServices not implemented")
@@ -2293,6 +2373,78 @@ func _ManagerService_SetDatasetQuota_Handler(srv interface{}, ctx context.Contex
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(ManagerServiceServer).SetDatasetQuota(ctx, req.(*SetDatasetQuotaRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ManagerService_CreateVMSnapshot_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(CreateVMSnapshotRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ManagerServiceServer).CreateVMSnapshot(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ManagerService_CreateVMSnapshot_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ManagerServiceServer).CreateVMSnapshot(ctx, req.(*CreateVMSnapshotRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ManagerService_ListVMSnapshots_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListVMSnapshotsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ManagerServiceServer).ListVMSnapshots(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ManagerService_ListVMSnapshots_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ManagerServiceServer).ListVMSnapshots(ctx, req.(*ListVMSnapshotsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ManagerService_RestoreVMSnapshot_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(RestoreVMSnapshotRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ManagerServiceServer).RestoreVMSnapshot(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ManagerService_RestoreVMSnapshot_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ManagerServiceServer).RestoreVMSnapshot(ctx, req.(*RestoreVMSnapshotRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ManagerService_DeleteVMSnapshot_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(DeleteVMSnapshotRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ManagerServiceServer).DeleteVMSnapshot(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ManagerService_DeleteVMSnapshot_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ManagerServiceServer).DeleteVMSnapshot(ctx, req.(*DeleteVMSnapshotRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -3174,6 +3326,22 @@ var ManagerService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "SetDatasetQuota",
 			Handler:    _ManagerService_SetDatasetQuota_Handler,
+		},
+		{
+			MethodName: "CreateVMSnapshot",
+			Handler:    _ManagerService_CreateVMSnapshot_Handler,
+		},
+		{
+			MethodName: "ListVMSnapshots",
+			Handler:    _ManagerService_ListVMSnapshots_Handler,
+		},
+		{
+			MethodName: "RestoreVMSnapshot",
+			Handler:    _ManagerService_RestoreVMSnapshot_Handler,
+		},
+		{
+			MethodName: "DeleteVMSnapshot",
+			Handler:    _ManagerService_DeleteVMSnapshot_Handler,
 		},
 		{
 			MethodName: "ListNodeServices",

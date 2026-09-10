@@ -1891,6 +1891,65 @@ func TestIntegration_ForcePurgeJail_MissingIsError(t *testing.T) {
 	}
 }
 
+// TestIntegration_RestoreVMSnapshot_RefusesWhileVMIsRunning is the real,
+// raft-backed proof for RestoreVMSnapshot's own safety check (ADR-0090):
+// a VM whose desired_state is Running must not have its dataset rolled
+// back out from under it.
+func TestIntegration_RestoreVMSnapshot_RefusesWhileVMIsRunning(t *testing.T) {
+	raftdSocket := newRaftdUDSSocket(t)
+	zfsMgr := &fakeQuotaSetter{}
+	client := newManagerdRPCClientWithZFS(t, raftdSocket, "node-a", zfsMgr)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if _, err := client.CreateVM(ctx, &rpcpb.CreateVMRequest{
+		Vm: &rpcpb.VMDefinition{Id: "vm-1", Name: "web-1", NodeId: "node-a", DesiredState: rpcpb.VMState_VM_STATE_RUNNING},
+	}); err != nil {
+		t.Fatalf("CreateVM() error: %v", err)
+	}
+
+	resp, err := client.RestoreVMSnapshot(ctx, &rpcpb.RestoreVMSnapshotRequest{Id: "vm-1", SnapshotName: "before-migration"})
+	if err != nil {
+		t.Fatalf("RestoreVMSnapshot() error: %v", err)
+	}
+	if resp.GetError() == "" {
+		t.Fatal("RestoreVMSnapshot() on a running VM = no error, want a refusal")
+	}
+	if zfsMgr.lastRolledBack != "" {
+		t.Errorf("RollbackSnapshot was called (%q) despite the VM being marked Running, want it never called", zfsMgr.lastRolledBack)
+	}
+}
+
+// TestIntegration_RestoreVMSnapshot_AllowedWhileVMIsStopped is the
+// paired proof: the same check must not block a legitimate restore
+// once the VM is actually stopped.
+func TestIntegration_RestoreVMSnapshot_AllowedWhileVMIsStopped(t *testing.T) {
+	raftdSocket := newRaftdUDSSocket(t)
+	zfsMgr := &fakeQuotaSetter{}
+	client := newManagerdRPCClientWithZFS(t, raftdSocket, "node-a", zfsMgr)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if _, err := client.CreateVM(ctx, &rpcpb.CreateVMRequest{
+		Vm: &rpcpb.VMDefinition{Id: "vm-1", Name: "web-1", NodeId: "node-a", DesiredState: rpcpb.VMState_VM_STATE_STOPPED},
+	}); err != nil {
+		t.Fatalf("CreateVM() error: %v", err)
+	}
+
+	resp, err := client.RestoreVMSnapshot(ctx, &rpcpb.RestoreVMSnapshotRequest{Id: "vm-1", SnapshotName: "before-migration"})
+	if err != nil {
+		t.Fatalf("RestoreVMSnapshot() error: %v", err)
+	}
+	if resp.GetError() != "" {
+		t.Fatalf("RestoreVMSnapshot() on a stopped VM returned error: %s", resp.GetError())
+	}
+	if zfsMgr.lastRolledBack != "vm-1@before-migration" {
+		t.Errorf("RollbackSnapshot called with %q, want vm-1@before-migration", zfsMgr.lastRolledBack)
+	}
+}
+
 // TestIntegration_ListOrphanedHASTResources_ReportsOnlyUnreferencedDatasets
 // is the direct regression test for the gap ADR-0026 named and left
 // open: a hast-vm-*/hast-jail-* provider dataset with no VM/jail record

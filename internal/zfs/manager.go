@@ -251,6 +251,82 @@ func (m *Manager) Receive(ctx context.Context, destName string, r io.Reader) err
 	return nil
 }
 
+// CreateSnapshot creates a new snapshot named "dataset@snapshot"
+// (relative to Base) of an existing dataset - e.g. "vm-1@before-migration"
+// to checkpoint a VM's own dataset (which holds its disk.img, see
+// ADR-0090) before a risky change, so it can be rolled back with
+// RollbackSnapshot instead of rebuilding the VM from scratch.
+func (m *Manager) CreateSnapshot(ctx context.Context, name string) error {
+	full, err := m.snapshotPath(name)
+	if err != nil {
+		return err
+	}
+	_, err = runZFS(ctx, "snapshot", full)
+	return err
+}
+
+// RollbackSnapshot reverts Base/dataset to the state captured by the
+// named snapshot ("dataset@snapshot", relative to Base), discarding
+// every write since. Deliberately does not pass zfs rollback's own -r
+// flag: this fails outright (rather than silently destroying them) if
+// snapshots newer than the target exist, the same "never destroy data
+// without being asked to" caution DestroyDataset's own doc comment
+// states for datasets with children. The caller is responsible for
+// making sure nothing is still using the dataset (see ADR-0090's own
+// disclosed "stop the VM first" requirement) - this method has no way
+// to check that itself.
+func (m *Manager) RollbackSnapshot(ctx context.Context, name string) error {
+	full, err := m.snapshotPath(name)
+	if err != nil {
+		return err
+	}
+	_, err = runZFS(ctx, "rollback", full)
+	return err
+}
+
+// DestroySnapshot removes the named snapshot ("dataset@snapshot",
+// relative to Base) outright.
+func (m *Manager) DestroySnapshot(ctx context.Context, name string) error {
+	full, err := m.snapshotPath(name)
+	if err != nil {
+		return err
+	}
+	_, err = runZFS(ctx, "destroy", full)
+	return err
+}
+
+// ListSnapshots lists the names (just the part after "@") of every
+// snapshot that exists directly on Base/datasetName - deliberately not
+// recursive (no -r), so a VM's own dataset never reports some
+// unrelated child dataset's snapshots as its own. Returns an empty
+// list, not an error, if datasetName doesn't exist at all yet.
+func (m *Manager) ListSnapshots(ctx context.Context, datasetName string) ([]string, error) {
+	full, err := m.path(datasetName)
+	if err != nil {
+		return nil, err
+	}
+	out, err := runZFS(ctx, "list", "-H", "-o", "name", "-t", "snapshot", full)
+	if err != nil {
+		if strings.Contains(err.Error(), "dataset does not exist") {
+			return nil, nil
+		}
+		return nil, err
+	}
+	if out == "" {
+		return nil, nil
+	}
+	prefix := full + "@"
+	var names []string
+	for _, line := range strings.Split(out, "\n") {
+		line = strings.TrimSpace(line)
+		if !strings.HasPrefix(line, prefix) {
+			continue
+		}
+		names = append(names, strings.TrimPrefix(line, prefix))
+	}
+	return names, nil
+}
+
 // ListTemplateNames lists every name under Base/templates that has an
 // @apiary-template snapshot (ADR-0084's own fixed convention) - backs
 // the peer-fetch "does this node have it" query (ADR-0089). Returns an

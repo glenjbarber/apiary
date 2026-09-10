@@ -130,6 +130,42 @@
       <div class="actions"><a class="button" href="/vms/{{.VM.ID}}/console">Console</a><a class="button secondary" href="/vms/{{.VM.ID}}/serial">Serial log and evidence</a></div>
     </section>
 
+    <section class="panel">
+      <h3>Snapshots</h3>
+      <p class="muted">A ZFS checkpoint of this VM's entire disk. Restoring rolls the disk back to exactly that point - anything written since is lost. See ADR-0090.</p>
+      {{if .VMSnapshotFormError}}<div class="banner-error">{{.VMSnapshotFormError}}</div>{{end}}
+      {{if eq .VM.DesiredState "running"}}<p class="muted">This VM is running. Stop it first before restoring a snapshot - restoring while running is refused.</p>{{end}}
+      {{if .VMSnapshots}}
+      <table class="compact-table"><thead><tr><th>Name</th><th></th></tr></thead><tbody>
+        {{range .VMSnapshots}}
+        <tr>
+          <td><code>{{.}}</code></td>
+          <td class="actions">
+            {{if $.CanOperate}}
+            <form method="post" action="/vms/{{$.VM.ID}}/snapshots/{{.}}/restore" class="inline-form" onsubmit="return confirm('Restore {{$.VM.ID}} to snapshot {{.}}? Stop the VM first - this replaces its current disk contents and cannot be undone.');">
+              <button type="submit" class="secondary">Restore</button>
+            </form>
+            <form method="post" action="/vms/{{$.VM.ID}}/snapshots/{{.}}/delete" class="inline-form" onsubmit="return confirm('Delete snapshot {{.}}? This cannot be undone.');">
+              <button type="submit" class="danger">Delete</button>
+            </form>
+            {{end}}
+          </td>
+        </tr>
+        {{end}}
+      </tbody></table>
+      {{else}}
+      <p class="muted">No snapshots yet.</p>
+      {{end}}
+      {{if .CanOperate}}
+      <form method="post" action="/vms/{{.VM.ID}}/snapshots" class="inline-form">
+        <label>Snapshot name
+          <input type="text" name="snapshot_name" placeholder="before-upgrade" required title="A name for this checkpoint. Must be unique among this VM's existing snapshots.">
+        </label>
+        <button type="submit">Create snapshot</button>
+      </form>
+      {{end}}
+    </section>
+
     {{if and .CanOperate (ne .VM.DesiredState "deleting")}}
     <section class="panel vm-controls">
       <div><h3>Lifecycle</h3><p class="muted">Stop preserves this VM's storage and definition. Restart waits for the owning Comb to stop it before starting it again.</p></div>

@@ -349,3 +349,30 @@ func TestAuthUnaryInterceptor_AuthenticatePasswordBypassesCheckAuth(t *testing.T
 		t.Errorf("AuthUnaryInterceptor(%q) did not call the handler - exemption not applied", authenticatePasswordMethod)
 	}
 }
+
+// TestRequiredRoleFor_ListVMSnapshotsIsViewer guards against the same
+// easy-to-miss failure mode as SimulateNodeFailure's own test above -
+// ListVMSnapshots (ADR-0090) is a read-only report of local VM state,
+// the same tier as GetVMSerialLog (its direct analog).
+func TestRequiredRoleFor_ListVMSnapshotsIsViewer(t *testing.T) {
+	const method = "/apiary.rpc.v1.ManagerService/ListVMSnapshots"
+	if got := requiredRoleFor(method); got != RoleViewer {
+		t.Errorf("requiredRoleFor(%q) = %q, want %q", method, got, RoleViewer)
+	}
+}
+
+// TestRequiredRoleFor_VMSnapshotWritesAreOperator guards against the
+// same easy-to-miss failure mode as SimulateNodeFailure's own test
+// above, for ADR-0090's three write RPCs - the same tier as
+// CreateVM/SetDatasetQuota above.
+func TestRequiredRoleFor_VMSnapshotWritesAreOperator(t *testing.T) {
+	for _, method := range []string{
+		"/apiary.rpc.v1.ManagerService/CreateVMSnapshot",
+		"/apiary.rpc.v1.ManagerService/RestoreVMSnapshot",
+		"/apiary.rpc.v1.ManagerService/DeleteVMSnapshot",
+	} {
+		if got := requiredRoleFor(method); got != RoleOperator {
+			t.Errorf("requiredRoleFor(%q) = %q, want %q", method, got, RoleOperator)
+		}
+	}
+}

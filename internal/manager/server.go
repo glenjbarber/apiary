@@ -357,6 +357,13 @@ type quotaSetter interface {
 	Send(ctx context.Context, snapshot string) (io.ReadCloser, error)
 	Receive(ctx context.Context, destName string, r io.Reader) error
 	ListTemplateNames(ctx context.Context) ([]string, error)
+
+	// CreateSnapshot/RollbackSnapshot/DestroySnapshot/ListSnapshots back
+	// ADR-0090's VM checkpoint/rollback RPCs below.
+	CreateSnapshot(ctx context.Context, name string) error
+	RollbackSnapshot(ctx context.Context, name string) error
+	DestroySnapshot(ctx context.Context, name string) error
+	ListSnapshots(ctx context.Context, datasetName string) ([]string, error)
 }
 
 // nodeConfigStore is the subset of *nodeconfig.Manager GetNodeConfig/
@@ -2162,6 +2169,71 @@ func (s *Server) SetDatasetQuota(ctx context.Context, req *rpcpb.SetDatasetQuota
 		return &rpcpb.SetDatasetQuotaResponse{Error: err.Error()}, nil
 	}
 	return &rpcpb.SetDatasetQuotaResponse{}, nil
+}
+
+// CreateVMSnapshot implements rpcpb.ManagerServiceServer (ADR-0090) -
+// takes a ZFS snapshot of a VM's own dataset (which holds its
+// disk.img), the same "physical, per-node, never routed through raft"
+// posture as SetDatasetQuota above.
+func (s *Server) CreateVMSnapshot(ctx context.Context, req *rpcpb.CreateVMSnapshotRequest) (*rpcpb.CreateVMSnapshotResponse, error) {
+	if s.zfs == nil {
+		return &rpcpb.CreateVMSnapshotResponse{Error: "this node has no ZFS support configured"}, nil
+	}
+	if req.GetSnapshotName() == "" {
+		return &rpcpb.CreateVMSnapshotResponse{Error: "snapshot_name must be set"}, nil
+	}
+	if err := s.zfs.CreateSnapshot(ctx, req.GetId()+"@"+req.GetSnapshotName()); err != nil {
+		return &rpcpb.CreateVMSnapshotResponse{Error: err.Error()}, nil
+	}
+	return &rpcpb.CreateVMSnapshotResponse{}, nil
+}
+
+// ListVMSnapshots implements rpcpb.ManagerServiceServer (ADR-0090).
+func (s *Server) ListVMSnapshots(ctx context.Context, req *rpcpb.ListVMSnapshotsRequest) (*rpcpb.ListVMSnapshotsResponse, error) {
+	if s.zfs == nil {
+		return &rpcpb.ListVMSnapshotsResponse{}, nil
+	}
+	names, err := s.zfs.ListSnapshots(ctx, req.GetId())
+	if err != nil {
+		return &rpcpb.ListVMSnapshotsResponse{Error: err.Error()}, nil
+	}
+	return &rpcpb.ListVMSnapshotsResponse{SnapshotNames: names}, nil
+}
+
+// RestoreVMSnapshot implements rpcpb.ManagerServiceServer (ADR-0090) -
+// rolls a VM's dataset back to a named snapshot. Refuses while the VM
+// is currently desired to be running: rolling back a live disk.img out
+// from under a running bhyve process risks silent guest-visible
+// corruption, since ZFS has no notion of coordinating with a process
+// that already has the file open. This check is best-effort (no raft
+// client configured, or a failed/leader-forwarded GetVM lookup, both
+// just skip it rather than block the restore) - the real, disclosed
+// safety boundary here is the UI's own copy telling the operator to
+// stop the VM first, not this check, see ADR-0090.
+func (s *Server) RestoreVMSnapshot(ctx context.Context, req *rpcpb.RestoreVMSnapshotRequest) (*rpcpb.RestoreVMSnapshotResponse, error) {
+	if s.zfs == nil {
+		return &rpcpb.RestoreVMSnapshotResponse{Error: "this node has no ZFS support configured"}, nil
+	}
+	if s.raft != nil {
+		if vmResp, err := s.GetVM(ctx, &rpcpb.GetVMRequest{Id: req.GetId()}); err == nil && vmResp.GetFound() && vmResp.GetVm().GetDesiredState() == rpcpb.VMState_VM_STATE_RUNNING {
+			return &rpcpb.RestoreVMSnapshotResponse{Error: fmt.Sprintf("VM %q must be stopped before restoring a snapshot", req.GetId())}, nil
+		}
+	}
+	if err := s.zfs.RollbackSnapshot(ctx, req.GetId()+"@"+req.GetSnapshotName()); err != nil {
+		return &rpcpb.RestoreVMSnapshotResponse{Error: err.Error()}, nil
+	}
+	return &rpcpb.RestoreVMSnapshotResponse{}, nil
+}
+
+// DeleteVMSnapshot implements rpcpb.ManagerServiceServer (ADR-0090).
+func (s *Server) DeleteVMSnapshot(ctx context.Context, req *rpcpb.DeleteVMSnapshotRequest) (*rpcpb.DeleteVMSnapshotResponse, error) {
+	if s.zfs == nil {
+		return &rpcpb.DeleteVMSnapshotResponse{Error: "this node has no ZFS support configured"}, nil
+	}
+	if err := s.zfs.DestroySnapshot(ctx, req.GetId()+"@"+req.GetSnapshotName()); err != nil {
+		return &rpcpb.DeleteVMSnapshotResponse{Error: err.Error()}, nil
+	}
+	return &rpcpb.DeleteVMSnapshotResponse{}, nil
 }
 
 // hastOrphanDatasetPrefix/hastOrphanResourceType parse a top-level ZFS

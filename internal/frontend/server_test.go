@@ -58,6 +58,17 @@ type fakeClient struct {
 	getVMSerialLogResp *rpcpb.GetVMSerialLogResponse
 	getVMSerialLogErr  error
 
+	createVMSnapshotResp    *rpcpb.CreateVMSnapshotResponse
+	lastCreateVMSnapshotReq *rpcpb.CreateVMSnapshotRequest
+
+	listVMSnapshotsResp *rpcpb.ListVMSnapshotsResponse
+
+	restoreVMSnapshotResp    *rpcpb.RestoreVMSnapshotResponse
+	lastRestoreVMSnapshotReq *rpcpb.RestoreVMSnapshotRequest
+
+	deleteVMSnapshotResp    *rpcpb.DeleteVMSnapshotResponse
+	lastDeleteVMSnapshotReq *rpcpb.DeleteVMSnapshotRequest
+
 	listNetworksResp      *rpcpb.ListNetworksResponse
 	createNetworkResp     *rpcpb.CreateNetworkResponse
 	deleteNetworkResp     *rpcpb.DeleteNetworkResponse
@@ -496,6 +507,37 @@ func (f *fakeClient) GetVMSerialLog(context.Context, *rpcpb.GetVMSerialLogReques
 		return f.getVMSerialLogResp, nil
 	}
 	return &rpcpb.GetVMSerialLogResponse{}, nil
+}
+
+func (f *fakeClient) CreateVMSnapshot(_ context.Context, in *rpcpb.CreateVMSnapshotRequest, _ ...grpc.CallOption) (*rpcpb.CreateVMSnapshotResponse, error) {
+	f.lastCreateVMSnapshotReq = in
+	if f.createVMSnapshotResp != nil {
+		return f.createVMSnapshotResp, nil
+	}
+	return &rpcpb.CreateVMSnapshotResponse{}, nil
+}
+
+func (f *fakeClient) ListVMSnapshots(context.Context, *rpcpb.ListVMSnapshotsRequest, ...grpc.CallOption) (*rpcpb.ListVMSnapshotsResponse, error) {
+	if f.listVMSnapshotsResp != nil {
+		return f.listVMSnapshotsResp, nil
+	}
+	return &rpcpb.ListVMSnapshotsResponse{}, nil
+}
+
+func (f *fakeClient) RestoreVMSnapshot(_ context.Context, in *rpcpb.RestoreVMSnapshotRequest, _ ...grpc.CallOption) (*rpcpb.RestoreVMSnapshotResponse, error) {
+	f.lastRestoreVMSnapshotReq = in
+	if f.restoreVMSnapshotResp != nil {
+		return f.restoreVMSnapshotResp, nil
+	}
+	return &rpcpb.RestoreVMSnapshotResponse{}, nil
+}
+
+func (f *fakeClient) DeleteVMSnapshot(_ context.Context, in *rpcpb.DeleteVMSnapshotRequest, _ ...grpc.CallOption) (*rpcpb.DeleteVMSnapshotResponse, error) {
+	f.lastDeleteVMSnapshotReq = in
+	if f.deleteVMSnapshotResp != nil {
+		return f.deleteVMSnapshotResp, nil
+	}
+	return &rpcpb.DeleteVMSnapshotResponse{}, nil
 }
 
 func (f *fakeClient) ListNetworks(context.Context, *rpcpb.ListNetworksRequest, ...grpc.CallOption) (*rpcpb.ListNetworksResponse, error) {

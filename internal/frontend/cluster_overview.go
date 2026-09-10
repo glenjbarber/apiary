@@ -67,6 +67,15 @@ type peerHostStatsClient interface {
 	// "always answers locally, dial addr directly" shape as
 	// GetLocalNetworkBridgeStatus above.
 	GetNetworkTeardownStatus(ctx context.Context, addr, networkID string) (*rpcpb.GetNetworkTeardownStatusResponse, error)
+
+	// CreateVMSnapshot/ListVMSnapshots/RestoreVMSnapshot/DeleteVMSnapshot
+	// (ADR-0090) reach the Hive that owns a VM - a snapshot is real
+	// local ZFS state, the same "must ask the owning Comb directly"
+	// reasoning as GetVMSerialLog above.
+	CreateVMSnapshot(ctx context.Context, addr, id, snapshotName string) (*rpcpb.CreateVMSnapshotResponse, error)
+	ListVMSnapshots(ctx context.Context, addr, id string) (*rpcpb.ListVMSnapshotsResponse, error)
+	RestoreVMSnapshot(ctx context.Context, addr, id, snapshotName string) (*rpcpb.RestoreVMSnapshotResponse, error)
+	DeleteVMSnapshot(ctx context.Context, addr, id, snapshotName string) (*rpcpb.DeleteVMSnapshotResponse, error)
 }
 
 // clusterNodeView is the template-facing shape for one row on the

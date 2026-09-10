@@ -169,6 +169,106 @@ func TestIntegration_CloneFromSnapshot(t *testing.T) {
 	}
 }
 
+// TestIntegration_SnapshotCreateRestoreDestroy exercises the full
+// checkpoint/rollback cycle (ADR-0090): create a VM-shaped dataset,
+// write something, snapshot it, overwrite that content, roll back, and
+// confirm the original content actually came back - not just that the
+// commands returned no error.
+func TestIntegration_SnapshotCreateRestoreDestroy(t *testing.T) {
+	m := testManager(t)
+	ctx := context.Background()
+
+	if err := m.CreateDataset(ctx, "vm-1"); err != nil {
+		t.Fatalf("CreateDataset(vm-1) error: %v", err)
+	}
+	mountpoint, err := m.GetProperty(ctx, "vm-1", "mountpoint")
+	if err != nil {
+		t.Fatalf("GetProperty(mountpoint) error: %v", err)
+	}
+	diskPath := mountpoint + "/disk.img"
+	if err := os.WriteFile(diskPath, []byte("original content"), 0o644); err != nil {
+		t.Fatalf("writing original content: %v", err)
+	}
+
+	names, err := m.ListSnapshots(ctx, "vm-1")
+	if err != nil {
+		t.Fatalf("ListSnapshots() error: %v", err)
+	}
+	if len(names) != 0 {
+		t.Fatalf("ListSnapshots() = %v, want none before any snapshot exists", names)
+	}
+
+	if err := m.CreateSnapshot(ctx, "vm-1@before-migration"); err != nil {
+		t.Fatalf("CreateSnapshot() error: %v", err)
+	}
+
+	names, err = m.ListSnapshots(ctx, "vm-1")
+	if err != nil {
+		t.Fatalf("ListSnapshots() error: %v", err)
+	}
+	if len(names) != 1 || names[0] != "before-migration" {
+		t.Fatalf("ListSnapshots() = %v, want [before-migration]", names)
+	}
+
+	if err := os.WriteFile(diskPath, []byte("corrupted by a bad migration"), 0o644); err != nil {
+		t.Fatalf("overwriting with corrupted content: %v", err)
+	}
+
+	if err := m.RollbackSnapshot(ctx, "vm-1@before-migration"); err != nil {
+		t.Fatalf("RollbackSnapshot() error: %v", err)
+	}
+
+	restored, err := os.ReadFile(diskPath)
+	if err != nil {
+		t.Fatalf("reading restored content: %v", err)
+	}
+	if string(restored) != "original content" {
+		t.Errorf("restored content = %q, want %q", restored, "original content")
+	}
+
+	if err := m.DestroySnapshot(ctx, "vm-1@before-migration"); err != nil {
+		t.Fatalf("DestroySnapshot() error: %v", err)
+	}
+	names, err = m.ListSnapshots(ctx, "vm-1")
+	if err != nil {
+		t.Fatalf("ListSnapshots() error: %v", err)
+	}
+	if len(names) != 0 {
+		t.Errorf("ListSnapshots() = %v, want none after DestroySnapshot()", names)
+	}
+}
+
+// TestIntegration_RollbackRefusesWithNewerSnapshot guards the
+// deliberate choice not to pass zfs rollback's own -r flag: rolling
+// back past a newer snapshot must fail loudly, never silently destroy
+// it.
+func TestIntegration_RollbackRefusesWithNewerSnapshot(t *testing.T) {
+	m := testManager(t)
+	ctx := context.Background()
+
+	if err := m.CreateDataset(ctx, "vm-1"); err != nil {
+		t.Fatalf("CreateDataset(vm-1) error: %v", err)
+	}
+	if err := m.CreateSnapshot(ctx, "vm-1@first"); err != nil {
+		t.Fatalf("CreateSnapshot(first) error: %v", err)
+	}
+	if err := m.CreateSnapshot(ctx, "vm-1@second"); err != nil {
+		t.Fatalf("CreateSnapshot(second) error: %v", err)
+	}
+
+	if err := m.RollbackSnapshot(ctx, "vm-1@first"); err == nil {
+		t.Fatal("RollbackSnapshot(first) succeeded despite a newer snapshot existing, want a refusal")
+	}
+
+	names, err := m.ListSnapshots(ctx, "vm-1")
+	if err != nil {
+		t.Fatalf("ListSnapshots() error: %v", err)
+	}
+	if len(names) != 2 {
+		t.Errorf("ListSnapshots() = %v, want both snapshots still present after a refused rollback", names)
+	}
+}
+
 func TestSnapshotPath_RejectsInvalidNames(t *testing.T) {
 	m := New("apiarytest/base")
 	for _, name := range []string{"", "no-at-sign", "@missing-dataset", "templates/x@", "templates/x@a/b", "../escape@snap"} {

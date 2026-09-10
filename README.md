@@ -783,6 +783,17 @@ each design decision, in order.
   separate "resume" step needed, since the reconciler already
   re-applies NAT on its own next tick once the interface comes back
   up. See [ADR-0088](docs/adr/0088-pause-nat-on-uplink-down.md).
+- **VM snapshot and restore** — a VM's own ZFS dataset can now be
+  checkpointed and rolled back from its detail page, so recovering from
+  a botched in-guest change no longer means rebuilding the VM from
+  scratch. Local-only (no raft, no cross-node replication of the
+  snapshot itself), reached across nodes the same owner-forwarding way
+  as the console and serial log (ADR-0065): the frontend resolves which
+  Comb owns the VM and dials that Comb's managerd directly. Restoring
+  refuses (best-effort, based on raft's last-known state) while the VM's
+  desired state is running, and rollback refuses outright rather than
+  silently destroying a newer snapshot if one exists. See
+  [ADR-0090](docs/adr/0090-vm-snapshot-restore.md).
 - Importing VMs from other hypervisors (e.g. Proxmox): no disk-format
   conversion, and Apiary is UEFI-only. Linux containers have no path at
   all — jails share the host FreeBSD kernel
