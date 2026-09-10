@@ -86,10 +86,12 @@ NODE_HTTP_ADDR?=	0.0.0.0:8080
 NODE_REST_ADDR?=	0.0.0.0:8081
 
 # setup-quick is the whole docs/bootstrap.md preflight sequence
-# (Sections 2-9) collapsed into one target for a single-node bring-up:
-# packages, apiaryinstall's safe fixes plus its one risky network step
-# together, installing the built binaries where the rc.d scripts expect
-# them, and the apiary_managerd_args/apiary_frontend_args/
+# (Sections 2-9) collapsed into one target for a single-node bring-up
+# on a genuinely fresh checkout - no assumption that `make build` (or
+# anything else) already ran: packages, building every binary, running
+# apiaryinstall's safe fixes plus its one risky network step, installing
+# the built binaries where the rc.d scripts expect them, and the
+# apiary_managerd_args/apiary_frontend_args/
 # apiary_restshimd_args a fresh node actually needs to be reachable at
 # all - every one of these three daemons defaults its own listen
 # address to 127.0.0.1 (loopback-only) when no arg is given at all, so
@@ -127,6 +129,7 @@ NODE_REST_ADDR?=	0.0.0.0:8081
 # apiarium/apiverse deploys already use for exactly this reason.
 setup-quick:
 	pkg install -y go git sudo
+	${MAKE} build
 	${MAKE} setup
 	${MAKE} setup-admin
 	./apiaryinstall -apply -apply-network yes-modify-network -zfs-pool ${NODE_ZFS_POOL} \
