@@ -201,6 +201,14 @@ type pageData struct {
 	// Networks.
 	JailFormError string
 
+	// Jail is the single jail rendered by the jail detail page,
+	// mirroring VM above.
+	Jail jailView
+
+	// JailHostnameFormError carries a failed hostname-edit form's own
+	// error on the jail detail page, mirroring VMCloudflareFormError.
+	JailHostnameFormError string
+
 	// Users lists every roleMap entry (ADR-0039), for the Users page's
 	// own table - each row's "can I change this account's password"
 	// action is computed once here (CanChange), not re-derived in the
@@ -732,6 +740,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /networks", s.handleNetworksPage)
 	s.mux.HandleFunc("GET /jails", s.handleJailsPage)
 	s.mux.HandleFunc("GET /jails/panel", s.handleJailPanel)
+	s.mux.HandleFunc("GET /jails/{id}", s.handleJailPage)
 	s.mux.HandleFunc("GET /simulate", s.handleSimulatePage)
 	s.mux.HandleFunc("GET /assumptions", s.handleAssumptionsPage)
 	s.mux.HandleFunc("GET /assumption-register", s.handleAssumptionRegisterPage)
@@ -759,6 +768,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /jails", s.requireRole(manager.RoleOperator, s.handleCreateJail))
 	s.mux.HandleFunc("DELETE /jails/{id}", s.requireRole(manager.RoleOperator, s.handleDeleteJail))
 	s.mux.HandleFunc("POST /jails/{id}/lifecycle", s.requireRole(manager.RoleOperator, s.handleSetJailDesiredState))
+	s.mux.HandleFunc("POST /jails/{id}/hostname", s.requireRole(manager.RoleOperator, s.handleSetJailHostname))
 	s.mux.HandleFunc("POST /assumption-register", s.requireRole(manager.RoleOperator, s.handleSaveAssumptionClaim))
 	s.mux.HandleFunc("DELETE /assumption-register/{id}", s.requireRole(manager.RoleOperator, s.handleDeleteAssumptionClaim))
 
@@ -1735,6 +1745,63 @@ func (s *Server) handleJailsPage(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleJailPanel(w http.ResponseWriter, r *http.Request) {
 	s.renderJailPanelResult(w, r, "")
+}
+
+// handleJailPage serves the jail detail page ("/jails/{id}") - jails
+// previously had no per-resource page at all, only the list view's
+// Start/Stop/Restart/Delete actions (see handleSetJailHostname below
+// for the edit capability this page exists to host).
+func (s *Server) handleJailPage(w http.ResponseWriter, r *http.Request) {
+	s.renderJailPage(w, r, r.PathValue("id"), "")
+}
+
+// handleSetJailHostname renames a jail's hostname after creation - a
+// dedicated form action on the jail detail page, not folded into a
+// general edit form, mirroring handleSetVMCloudflareExposure's own
+// reasoning exactly (a single-purpose command, never routed through
+// UpdateJail). Re-renders the jail detail page either way, with a
+// form-specific error on failure so the rest of the page's own
+// display isn't disturbed.
+func (s *Server) handleSetJailHostname(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if err := r.ParseForm(); err != nil {
+		s.renderJailPage(w, r, id, "invalid form: "+err.Error())
+		return
+	}
+	resp, err := s.client.SetJailHostname(r.Context(), &rpcpb.SetJailHostnameRequest{Id: id, Hostname: strings.TrimSpace(r.FormValue("hostname"))})
+	if err != nil {
+		s.renderJailPage(w, r, id, err.Error())
+		return
+	}
+	if resp.GetError() != "" {
+		s.renderJailPage(w, r, id, resp.GetError())
+		return
+	}
+	s.renderJailPage(w, r, id, "")
+}
+
+// renderJailPage re-fetches and renders the jail detail page, with an
+// optional form-specific error - shared by handleSetJailHostname so a
+// failed form submission still shows the rest of the page's own
+// current state, not just a bare error. Mirrors renderVMPage exactly.
+func (s *Server) renderJailPage(w http.ResponseWriter, r *http.Request, id, hostnameErr string) {
+	resp, err := s.client.GetJail(r.Context(), &rpcpb.GetJailRequest{Id: id})
+	if err != nil {
+		s.render(w, "jail_page", s.withAuthFields(r, pageData{Error: err.Error(), ActivePage: "jails"}))
+		return
+	}
+	if resp.GetError() != "" {
+		s.render(w, "jail_page", s.withAuthFields(r, pageData{Error: resp.GetError(), ActivePage: "jails"}))
+		return
+	}
+	if !resp.GetFound() {
+		w.WriteHeader(http.StatusNotFound)
+		s.render(w, "jail_page", s.withAuthFields(r, pageData{Error: "jail not found", ActivePage: "jails"}))
+		return
+	}
+	s.render(w, "jail_page", s.withAuthFields(r, pageData{
+		Jail: fromRPCJail(resp.GetJail()), JailHostnameFormError: hostnameErr, ActivePage: "jails",
+	}))
 }
 
 // handleNewJailPage serves the create-jail form page ("/jails/new"),

@@ -362,6 +362,14 @@ message Command {
     CreatePendingJoinRequest create_pending_join_request = 21;
     ApprovePendingJoinRequest approve_pending_join_request = 22;
     RejectPendingJoinRequest reject_pending_join_request = 23;
+
+    // SetJailHostname changes only JailDefinition.hostname -
+    // deliberately narrow (the jail equivalent of SetVMFirewallPaused/
+    // SetVMCloudflareExposure/SetVMFirewallRules above) rather than
+    // routed through the general UpdateJail, which replaces a jail's
+    // entire record. Backs the jail detail page's edit form - jails
+    // previously had no post-creation edit path in the web UI at all.
+    SetJailHostname set_jail_hostname = 24;
   }
 }
 
@@ -529,6 +537,16 @@ message UpdateJailPhase {
 message SetJailDesiredState {
   string id = 1;
   JailState desired_state = 2;
+}
+
+// SetJailHostname changes only JailDefinition.hostname on an existing
+// jail. Fails if the id doesn't exist. The same narrow,
+// deliberately-not-UpdateJail shape as SetVMFirewallPaused above - an
+// operator renaming a jail after creation only ever intends to change
+// this one field, never the jail's entire record.
+message SetJailHostname {
+  string id = 1;
+  string hostname = 2;
 }
 
 // PurgeJail removes a jail definition outright, mirroring PurgeVM

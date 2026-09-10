@@ -223,6 +223,10 @@ service ManagerService {
   rpc DeleteJail(DeleteJailRequest) returns (DeleteJailResponse);
   // SetJailDesiredState mirrors SetVMDesiredState for jails.
   rpc SetJailDesiredState(SetJailDesiredStateRequest) returns (SetJailDesiredStateResponse);
+  // SetJailHostname mirrors SetVMFirewallPaused's own narrow,
+  // deliberately-not-UpdateJail shape - lets an operator rename a
+  // jail's hostname after creation from the jail detail page.
+  rpc SetJailHostname(SetJailHostnameRequest) returns (SetJailHostnameResponse);
   rpc GetJail(GetJailRequest) returns (GetJailResponse);
   rpc ListJails(ListJailsRequest) returns (ListJailsResponse);
 
@@ -1460,6 +1464,18 @@ message SetJailDesiredStateRequest {
 }
 
 message SetJailDesiredStateResponse {
+  JailDefinition jail = 1;
+  string error = 2;
+  string leader_hint = 3;
+}
+
+message SetJailHostnameRequest {
+  string id = 1;
+  string hostname = 2;
+  uint32 timeout_ms = 3;
+}
+
+message SetJailHostnameResponse {
   JailDefinition jail = 1;
   string error = 2;
   string leader_hint = 3;

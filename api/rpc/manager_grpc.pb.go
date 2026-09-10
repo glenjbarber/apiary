@@ -63,6 +63,7 @@ const (
 	ManagerService_UpdateJail_FullMethodName                  = "/apiary.rpc.v1.ManagerService/UpdateJail"
 	ManagerService_DeleteJail_FullMethodName                  = "/apiary.rpc.v1.ManagerService/DeleteJail"
 	ManagerService_SetJailDesiredState_FullMethodName         = "/apiary.rpc.v1.ManagerService/SetJailDesiredState"
+	ManagerService_SetJailHostname_FullMethodName             = "/apiary.rpc.v1.ManagerService/SetJailHostname"
 	ManagerService_GetJail_FullMethodName                     = "/apiary.rpc.v1.ManagerService/GetJail"
 	ManagerService_ListJails_FullMethodName                   = "/apiary.rpc.v1.ManagerService/ListJails"
 	ManagerService_ForcePurgeJail_FullMethodName              = "/apiary.rpc.v1.ManagerService/ForcePurgeJail"
@@ -288,6 +289,10 @@ type ManagerServiceClient interface {
 	DeleteJail(ctx context.Context, in *DeleteJailRequest, opts ...grpc.CallOption) (*DeleteJailResponse, error)
 	// SetJailDesiredState mirrors SetVMDesiredState for jails.
 	SetJailDesiredState(ctx context.Context, in *SetJailDesiredStateRequest, opts ...grpc.CallOption) (*SetJailDesiredStateResponse, error)
+	// SetJailHostname mirrors SetVMFirewallPaused's own narrow,
+	// deliberately-not-UpdateJail shape - lets an operator rename a
+	// jail's hostname after creation from the jail detail page.
+	SetJailHostname(ctx context.Context, in *SetJailHostnameRequest, opts ...grpc.CallOption) (*SetJailHostnameResponse, error)
 	GetJail(ctx context.Context, in *GetJailRequest, opts ...grpc.CallOption) (*GetJailResponse, error)
 	ListJails(ctx context.Context, in *ListJailsRequest, opts ...grpc.CallOption) (*ListJailsResponse, error)
 	// ForcePurgeJail mirrors ForcePurgeVM exactly, for a jail tombstoned
@@ -887,6 +892,16 @@ func (c *managerServiceClient) SetJailDesiredState(ctx context.Context, in *SetJ
 	return out, nil
 }
 
+func (c *managerServiceClient) SetJailHostname(ctx context.Context, in *SetJailHostnameRequest, opts ...grpc.CallOption) (*SetJailHostnameResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(SetJailHostnameResponse)
+	err := c.cc.Invoke(ctx, ManagerService_SetJailHostname_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *managerServiceClient) GetJail(ctx context.Context, in *GetJailRequest, opts ...grpc.CallOption) (*GetJailResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(GetJailResponse)
@@ -1338,6 +1353,10 @@ type ManagerServiceServer interface {
 	DeleteJail(context.Context, *DeleteJailRequest) (*DeleteJailResponse, error)
 	// SetJailDesiredState mirrors SetVMDesiredState for jails.
 	SetJailDesiredState(context.Context, *SetJailDesiredStateRequest) (*SetJailDesiredStateResponse, error)
+	// SetJailHostname mirrors SetVMFirewallPaused's own narrow,
+	// deliberately-not-UpdateJail shape - lets an operator rename a
+	// jail's hostname after creation from the jail detail page.
+	SetJailHostname(context.Context, *SetJailHostnameRequest) (*SetJailHostnameResponse, error)
 	GetJail(context.Context, *GetJailRequest) (*GetJailResponse, error)
 	ListJails(context.Context, *ListJailsRequest) (*ListJailsResponse, error)
 	// ForcePurgeJail mirrors ForcePurgeVM exactly, for a jail tombstoned
@@ -1622,6 +1641,9 @@ func (UnimplementedManagerServiceServer) DeleteJail(context.Context, *DeleteJail
 }
 func (UnimplementedManagerServiceServer) SetJailDesiredState(context.Context, *SetJailDesiredStateRequest) (*SetJailDesiredStateResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method SetJailDesiredState not implemented")
+}
+func (UnimplementedManagerServiceServer) SetJailHostname(context.Context, *SetJailHostnameRequest) (*SetJailHostnameResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method SetJailHostname not implemented")
 }
 func (UnimplementedManagerServiceServer) GetJail(context.Context, *GetJailRequest) (*GetJailResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetJail not implemented")
@@ -2489,6 +2511,24 @@ func _ManagerService_SetJailDesiredState_Handler(srv interface{}, ctx context.Co
 	return interceptor(ctx, in, info, handler)
 }
 
+func _ManagerService_SetJailHostname_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SetJailHostnameRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ManagerServiceServer).SetJailHostname(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ManagerService_SetJailHostname_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ManagerServiceServer).SetJailHostname(ctx, req.(*SetJailHostnameRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _ManagerService_GetJail_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(GetJailRequest)
 	if err := dec(in); err != nil {
@@ -3102,6 +3142,10 @@ var ManagerService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "SetJailDesiredState",
 			Handler:    _ManagerService_SetJailDesiredState_Handler,
+		},
+		{
+			MethodName: "SetJailHostname",
+			Handler:    _ManagerService_SetJailHostname_Handler,
 		},
 		{
 			MethodName: "GetJail",

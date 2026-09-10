@@ -236,6 +236,17 @@ func TestRequiredRoleFor_GetUplinkStatusIsViewer(t *testing.T) {
 // same easy-to-miss failure mode as SimulateNodeFailure's own test
 // above, for ADR-0089's read-only jail base-template report - the same
 // tier as its direct analog, ListISOs.
+// TestRequiredRoleFor_SetJailHostnameIsOperator guards against the same
+// easy-to-miss failure mode as SimulateNodeFailure's own test above -
+// SetJailHostname is the jail detail page's edit command, the same
+// tier as its direct analog, SetVMFirewallPaused.
+func TestRequiredRoleFor_SetJailHostnameIsOperator(t *testing.T) {
+	const method = "/apiary.rpc.v1.ManagerService/SetJailHostname"
+	if got := requiredRoleFor(method); got != RoleOperator {
+		t.Errorf("requiredRoleFor(%q) = %q, want %q", method, got, RoleOperator)
+	}
+}
+
 func TestRequiredRoleFor_ListJailTemplateNamesIsViewer(t *testing.T) {
 	const method = "/apiary.rpc.v1.ManagerService/ListJailTemplateNames"
 	if got := requiredRoleFor(method); got != RoleViewer {

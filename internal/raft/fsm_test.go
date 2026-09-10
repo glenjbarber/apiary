@@ -1026,6 +1026,52 @@ func TestFSM_Apply_DeleteJail(t *testing.T) {
 	}
 }
 
+func TestFSM_Apply_SetJailHostname_TouchesOnlyThatField(t *testing.T) {
+	fsm := NewFSM()
+	fsm.Apply(&raft.Log{Index: 1, Data: mustMarshalCommand(t, &internalpb.Command{
+		Op: &internalpb.Command_CreateJail{CreateJail: &internalpb.CreateJail{
+			Jail: &internalpb.JailDefinition{Id: "jail-1", NodeId: "node-a", Hostname: "old.example.com", ReplicaNodeId: "node-b"},
+		}},
+	})})
+
+	cmd := &internalpb.Command{
+		Op: &internalpb.Command_SetJailHostname{SetJailHostname: &internalpb.SetJailHostname{
+			Id: "jail-1", Hostname: "new.example.com",
+		}},
+	}
+	result := fsm.Apply(&raft.Log{Index: 2, Data: mustMarshalCommand(t, cmd)})
+
+	applyResult := result.(*FSMApplyResult)
+	if applyResult.Error != "" {
+		t.Fatalf("Error = %q, want empty", applyResult.Error)
+	}
+	jail, _ := fsm.Jail("jail-1")
+	if jail.GetHostname() != "new.example.com" {
+		t.Errorf("Hostname = %q, want new.example.com", jail.GetHostname())
+	}
+	if jail.GetNodeId() != "node-a" {
+		t.Errorf("NodeId = %q, want node-a (must survive untouched)", jail.GetNodeId())
+	}
+	if jail.GetReplicaNodeId() != "node-b" {
+		t.Errorf("ReplicaNodeId = %q, want node-b (must survive untouched)", jail.GetReplicaNodeId())
+	}
+}
+
+func TestFSM_Apply_SetJailHostname_MissingIDIsError(t *testing.T) {
+	fsm := NewFSM()
+
+	cmd := &internalpb.Command{
+		Op: &internalpb.Command_SetJailHostname{SetJailHostname: &internalpb.SetJailHostname{
+			Id: "jail-1", Hostname: "new.example.com",
+		}},
+	}
+	result := fsm.Apply(&raft.Log{Index: 1, Data: mustMarshalCommand(t, cmd)})
+
+	if result.(*FSMApplyResult).Error == "" {
+		t.Fatalf("Error = empty, want a missing-id rejection")
+	}
+}
+
 func TestFSM_Apply_DeleteJail_AssignedJailIsSoftDeleted(t *testing.T) {
 	fsm := NewFSM()
 	fsm.Apply(&raft.Log{Index: 1, Data: mustMarshalCommand(t, &internalpb.Command{

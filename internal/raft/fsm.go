@@ -125,6 +125,8 @@ func (f *FSM) Apply(log *raft.Log) interface{} {
 		return f.applyPurgeJail(log.Index, op.PurgeJail.GetId())
 	case *internalpb.Command_SetJailDesiredState:
 		return f.applySetJailDesiredState(log.Index, op.SetJailDesiredState)
+	case *internalpb.Command_SetJailHostname:
+		return f.applySetJailHostname(log.Index, op.SetJailHostname)
 	case *internalpb.Command_CreatePendingJoinRequest:
 		return f.applyCreatePendingJoinRequest(log.Index, op.CreatePendingJoinRequest.GetRequest())
 	case *internalpb.Command_ApprovePendingJoinRequest:
@@ -466,6 +468,21 @@ func (f *FSM) applySetJailDesiredState(index uint64, req *internalpb.SetJailDesi
 	}
 	updated := proto.Clone(jail).(*internalpb.JailDefinition)
 	updated.DesiredState = req.GetDesiredState()
+	f.jails[req.GetId()] = updated
+	return &FSMApplyResult{Index: index, Jail: updated}
+}
+
+// applySetJailHostname sets JailDefinition.hostname on an existing
+// jail, touching no other field - deliberately narrow, unlike
+// applyUpdateJail's full-replace semantics, mirroring
+// applySetVMFirewallPaused's own reasoning exactly.
+func (f *FSM) applySetJailHostname(index uint64, req *internalpb.SetJailHostname) *FSMApplyResult {
+	jail, exists := f.jails[req.GetId()]
+	if !exists {
+		return &FSMApplyResult{Index: index, Error: fmt.Sprintf("SetJailHostname: id %q does not exist", req.GetId())}
+	}
+	updated := proto.Clone(jail).(*internalpb.JailDefinition)
+	updated.Hostname = req.GetHostname()
 	f.jails[req.GetId()] = updated
 	return &FSMApplyResult{Index: index, Jail: updated}
 }

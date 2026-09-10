@@ -944,6 +944,7 @@ type Command struct {
 	//	*Command_CreatePendingJoinRequest
 	//	*Command_ApprovePendingJoinRequest
 	//	*Command_RejectPendingJoinRequest
+	//	*Command_SetJailHostname
 	Op            isCommand_Op `protobuf_oneof:"op"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -1193,6 +1194,15 @@ func (x *Command) GetRejectPendingJoinRequest() *RejectPendingJoinRequest {
 	return nil
 }
 
+func (x *Command) GetSetJailHostname() *SetJailHostname {
+	if x != nil {
+		if x, ok := x.Op.(*Command_SetJailHostname); ok {
+			return x.SetJailHostname
+		}
+	}
+	return nil
+}
+
 type isCommand_Op interface {
 	isCommand_Op()
 }
@@ -1328,6 +1338,16 @@ type Command_RejectPendingJoinRequest struct {
 	RejectPendingJoinRequest *RejectPendingJoinRequest `protobuf:"bytes,23,opt,name=reject_pending_join_request,json=rejectPendingJoinRequest,proto3,oneof"`
 }
 
+type Command_SetJailHostname struct {
+	// SetJailHostname changes only JailDefinition.hostname -
+	// deliberately narrow (the jail equivalent of SetVMFirewallPaused/
+	// SetVMCloudflareExposure/SetVMFirewallRules above) rather than
+	// routed through the general UpdateJail, which replaces a jail's
+	// entire record. Backs the jail detail page's edit form - jails
+	// previously had no post-creation edit path in the web UI at all.
+	SetJailHostname *SetJailHostname `protobuf:"bytes,24,opt,name=set_jail_hostname,json=setJailHostname,proto3,oneof"`
+}
+
 func (*Command_CreateVm) isCommand_Op() {}
 
 func (*Command_UpdateVm) isCommand_Op() {}
@@ -1373,6 +1393,8 @@ func (*Command_CreatePendingJoinRequest) isCommand_Op() {}
 func (*Command_ApprovePendingJoinRequest) isCommand_Op() {}
 
 func (*Command_RejectPendingJoinRequest) isCommand_Op() {}
+
+func (*Command_SetJailHostname) isCommand_Op() {}
 
 // ApiKey is a cluster-wide credential for ManagerService's external
 // gRPC API (ADR-0023). Only hashed_key (a SHA-256 hex digest) is ever
@@ -2444,6 +2466,63 @@ func (x *SetJailDesiredState) GetDesiredState() JailState {
 	return JailState_JAIL_STATE_UNSPECIFIED
 }
 
+// SetJailHostname changes only JailDefinition.hostname on an existing
+// jail. Fails if the id doesn't exist. The same narrow,
+// deliberately-not-UpdateJail shape as SetVMFirewallPaused above - an
+// operator renaming a jail after creation only ever intends to change
+// this one field, never the jail's entire record.
+type SetJailHostname struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	Hostname      string                 `protobuf:"bytes,2,opt,name=hostname,proto3" json:"hostname,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SetJailHostname) Reset() {
+	*x = SetJailHostname{}
+	mi := &file_api_internalpb_state_proto_msgTypes[25]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SetJailHostname) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SetJailHostname) ProtoMessage() {}
+
+func (x *SetJailHostname) ProtoReflect() protoreflect.Message {
+	mi := &file_api_internalpb_state_proto_msgTypes[25]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SetJailHostname.ProtoReflect.Descriptor instead.
+func (*SetJailHostname) Descriptor() ([]byte, []int) {
+	return file_api_internalpb_state_proto_rawDescGZIP(), []int{25}
+}
+
+func (x *SetJailHostname) GetId() string {
+	if x != nil {
+		return x.Id
+	}
+	return ""
+}
+
+func (x *SetJailHostname) GetHostname() string {
+	if x != nil {
+		return x.Hostname
+	}
+	return ""
+}
+
 // PurgeJail removes a jail definition outright, mirroring PurgeVM
 // exactly. Idempotent: not an error if the id is already gone.
 type PurgeJail struct {
@@ -2455,7 +2534,7 @@ type PurgeJail struct {
 
 func (x *PurgeJail) Reset() {
 	*x = PurgeJail{}
-	mi := &file_api_internalpb_state_proto_msgTypes[25]
+	mi := &file_api_internalpb_state_proto_msgTypes[26]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2467,7 +2546,7 @@ func (x *PurgeJail) String() string {
 func (*PurgeJail) ProtoMessage() {}
 
 func (x *PurgeJail) ProtoReflect() protoreflect.Message {
-	mi := &file_api_internalpb_state_proto_msgTypes[25]
+	mi := &file_api_internalpb_state_proto_msgTypes[26]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2480,7 +2559,7 @@ func (x *PurgeJail) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PurgeJail.ProtoReflect.Descriptor instead.
 func (*PurgeJail) Descriptor() ([]byte, []int) {
-	return file_api_internalpb_state_proto_rawDescGZIP(), []int{25}
+	return file_api_internalpb_state_proto_rawDescGZIP(), []int{26}
 }
 
 func (x *PurgeJail) GetId() string {
@@ -2510,7 +2589,7 @@ type PendingJoinRequest struct {
 
 func (x *PendingJoinRequest) Reset() {
 	*x = PendingJoinRequest{}
-	mi := &file_api_internalpb_state_proto_msgTypes[26]
+	mi := &file_api_internalpb_state_proto_msgTypes[27]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2522,7 +2601,7 @@ func (x *PendingJoinRequest) String() string {
 func (*PendingJoinRequest) ProtoMessage() {}
 
 func (x *PendingJoinRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_api_internalpb_state_proto_msgTypes[26]
+	mi := &file_api_internalpb_state_proto_msgTypes[27]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2535,7 +2614,7 @@ func (x *PendingJoinRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PendingJoinRequest.ProtoReflect.Descriptor instead.
 func (*PendingJoinRequest) Descriptor() ([]byte, []int) {
-	return file_api_internalpb_state_proto_rawDescGZIP(), []int{26}
+	return file_api_internalpb_state_proto_rawDescGZIP(), []int{27}
 }
 
 func (x *PendingJoinRequest) GetRequestId() string {
@@ -2600,7 +2679,7 @@ type CreatePendingJoinRequest struct {
 
 func (x *CreatePendingJoinRequest) Reset() {
 	*x = CreatePendingJoinRequest{}
-	mi := &file_api_internalpb_state_proto_msgTypes[27]
+	mi := &file_api_internalpb_state_proto_msgTypes[28]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2612,7 +2691,7 @@ func (x *CreatePendingJoinRequest) String() string {
 func (*CreatePendingJoinRequest) ProtoMessage() {}
 
 func (x *CreatePendingJoinRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_api_internalpb_state_proto_msgTypes[27]
+	mi := &file_api_internalpb_state_proto_msgTypes[28]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2625,7 +2704,7 @@ func (x *CreatePendingJoinRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CreatePendingJoinRequest.ProtoReflect.Descriptor instead.
 func (*CreatePendingJoinRequest) Descriptor() ([]byte, []int) {
-	return file_api_internalpb_state_proto_rawDescGZIP(), []int{27}
+	return file_api_internalpb_state_proto_rawDescGZIP(), []int{28}
 }
 
 func (x *CreatePendingJoinRequest) GetRequest() *PendingJoinRequest {
@@ -2649,7 +2728,7 @@ type ApprovePendingJoinRequest struct {
 
 func (x *ApprovePendingJoinRequest) Reset() {
 	*x = ApprovePendingJoinRequest{}
-	mi := &file_api_internalpb_state_proto_msgTypes[28]
+	mi := &file_api_internalpb_state_proto_msgTypes[29]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2661,7 +2740,7 @@ func (x *ApprovePendingJoinRequest) String() string {
 func (*ApprovePendingJoinRequest) ProtoMessage() {}
 
 func (x *ApprovePendingJoinRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_api_internalpb_state_proto_msgTypes[28]
+	mi := &file_api_internalpb_state_proto_msgTypes[29]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2674,7 +2753,7 @@ func (x *ApprovePendingJoinRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ApprovePendingJoinRequest.ProtoReflect.Descriptor instead.
 func (*ApprovePendingJoinRequest) Descriptor() ([]byte, []int) {
-	return file_api_internalpb_state_proto_rawDescGZIP(), []int{28}
+	return file_api_internalpb_state_proto_rawDescGZIP(), []int{29}
 }
 
 func (x *ApprovePendingJoinRequest) GetRequestId() string {
@@ -2695,7 +2774,7 @@ type RejectPendingJoinRequest struct {
 
 func (x *RejectPendingJoinRequest) Reset() {
 	*x = RejectPendingJoinRequest{}
-	mi := &file_api_internalpb_state_proto_msgTypes[29]
+	mi := &file_api_internalpb_state_proto_msgTypes[30]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2707,7 +2786,7 @@ func (x *RejectPendingJoinRequest) String() string {
 func (*RejectPendingJoinRequest) ProtoMessage() {}
 
 func (x *RejectPendingJoinRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_api_internalpb_state_proto_msgTypes[29]
+	mi := &file_api_internalpb_state_proto_msgTypes[30]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2720,7 +2799,7 @@ func (x *RejectPendingJoinRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RejectPendingJoinRequest.ProtoReflect.Descriptor instead.
 func (*RejectPendingJoinRequest) Descriptor() ([]byte, []int) {
-	return file_api_internalpb_state_proto_rawDescGZIP(), []int{29}
+	return file_api_internalpb_state_proto_rawDescGZIP(), []int{30}
 }
 
 func (x *RejectPendingJoinRequest) GetRequestId() string {
@@ -2747,7 +2826,7 @@ type CommandResult struct {
 
 func (x *CommandResult) Reset() {
 	*x = CommandResult{}
-	mi := &file_api_internalpb_state_proto_msgTypes[30]
+	mi := &file_api_internalpb_state_proto_msgTypes[31]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2759,7 +2838,7 @@ func (x *CommandResult) String() string {
 func (*CommandResult) ProtoMessage() {}
 
 func (x *CommandResult) ProtoReflect() protoreflect.Message {
-	mi := &file_api_internalpb_state_proto_msgTypes[30]
+	mi := &file_api_internalpb_state_proto_msgTypes[31]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2772,7 +2851,7 @@ func (x *CommandResult) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CommandResult.ProtoReflect.Descriptor instead.
 func (*CommandResult) Descriptor() ([]byte, []int) {
-	return file_api_internalpb_state_proto_rawDescGZIP(), []int{30}
+	return file_api_internalpb_state_proto_rawDescGZIP(), []int{31}
 }
 
 func (x *CommandResult) GetVm() *VMDefinition {
@@ -2826,7 +2905,7 @@ type FSMSnapshotState struct {
 
 func (x *FSMSnapshotState) Reset() {
 	*x = FSMSnapshotState{}
-	mi := &file_api_internalpb_state_proto_msgTypes[31]
+	mi := &file_api_internalpb_state_proto_msgTypes[32]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2838,7 +2917,7 @@ func (x *FSMSnapshotState) String() string {
 func (*FSMSnapshotState) ProtoMessage() {}
 
 func (x *FSMSnapshotState) ProtoReflect() protoreflect.Message {
-	mi := &file_api_internalpb_state_proto_msgTypes[31]
+	mi := &file_api_internalpb_state_proto_msgTypes[32]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2851,7 +2930,7 @@ func (x *FSMSnapshotState) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FSMSnapshotState.ProtoReflect.Descriptor instead.
 func (*FSMSnapshotState) Descriptor() ([]byte, []int) {
-	return file_api_internalpb_state_proto_rawDescGZIP(), []int{31}
+	return file_api_internalpb_state_proto_rawDescGZIP(), []int{32}
 }
 
 func (x *FSMSnapshotState) GetLastIndex() uint64 {
@@ -2935,7 +3014,7 @@ type ConfigArchive struct {
 
 func (x *ConfigArchive) Reset() {
 	*x = ConfigArchive{}
-	mi := &file_api_internalpb_state_proto_msgTypes[32]
+	mi := &file_api_internalpb_state_proto_msgTypes[33]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2947,7 +3026,7 @@ func (x *ConfigArchive) String() string {
 func (*ConfigArchive) ProtoMessage() {}
 
 func (x *ConfigArchive) ProtoReflect() protoreflect.Message {
-	mi := &file_api_internalpb_state_proto_msgTypes[32]
+	mi := &file_api_internalpb_state_proto_msgTypes[33]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2960,7 +3039,7 @@ func (x *ConfigArchive) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ConfigArchive.ProtoReflect.Descriptor instead.
 func (*ConfigArchive) Descriptor() ([]byte, []int) {
-	return file_api_internalpb_state_proto_rawDescGZIP(), []int{32}
+	return file_api_internalpb_state_proto_rawDescGZIP(), []int{33}
 }
 
 func (x *ConfigArchive) GetFormatVersion() uint32 {
@@ -3059,7 +3138,7 @@ const file_api_internalpb_state_proto_rawDesc = "" +
 	"\x06subnet\x18\x04 \x01(\tR\x06subnet\x12\x1f\n" +
 	"\vbridge_name\x18\x05 \x01(\tR\n" +
 	"bridgeName\x12)\n" +
-	"\x10external_gateway\x18\x06 \x01(\tR\x0fexternalGateway\"\xd8\x0e\n" +
+	"\x10external_gateway\x18\x06 \x01(\tR\x0fexternalGateway\"\xab\x0f\n" +
 	"\aCommand\x12;\n" +
 	"\tcreate_vm\x18\x01 \x01(\v2\x1c.apiary.internal.v1.CreateVMH\x00R\bcreateVm\x12;\n" +
 	"\tupdate_vm\x18\x02 \x01(\v2\x1c.apiary.internal.v1.UpdateVMH\x00R\bupdateVm\x12;\n" +
@@ -3088,7 +3167,8 @@ const file_api_internalpb_state_proto_rawDesc = "" +
 	"\x10set_network_name\x18\x14 \x01(\v2\".apiary.internal.v1.SetNetworkNameH\x00R\x0esetNetworkName\x12m\n" +
 	"\x1bcreate_pending_join_request\x18\x15 \x01(\v2,.apiary.internal.v1.CreatePendingJoinRequestH\x00R\x18createPendingJoinRequest\x12p\n" +
 	"\x1capprove_pending_join_request\x18\x16 \x01(\v2-.apiary.internal.v1.ApprovePendingJoinRequestH\x00R\x19approvePendingJoinRequest\x12m\n" +
-	"\x1breject_pending_join_request\x18\x17 \x01(\v2,.apiary.internal.v1.RejectPendingJoinRequestH\x00R\x18rejectPendingJoinRequestB\x04\n" +
+	"\x1breject_pending_join_request\x18\x17 \x01(\v2,.apiary.internal.v1.RejectPendingJoinRequestH\x00R\x18rejectPendingJoinRequest\x12Q\n" +
+	"\x11set_jail_hostname\x18\x18 \x01(\v2#.apiary.internal.v1.SetJailHostnameH\x00R\x0fsetJailHostnameB\x04\n" +
 	"\x02op\"\x82\x01\n" +
 	"\x06ApiKey\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
@@ -3150,7 +3230,10 @@ const file_api_internalpb_state_proto_rawDesc = "" +
 	"phaseError\"i\n" +
 	"\x13SetJailDesiredState\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12B\n" +
-	"\rdesired_state\x18\x02 \x01(\x0e2\x1d.apiary.internal.v1.JailStateR\fdesiredState\"\x1b\n" +
+	"\rdesired_state\x18\x02 \x01(\x0e2\x1d.apiary.internal.v1.JailStateR\fdesiredState\"=\n" +
+	"\x0fSetJailHostname\x12\x0e\n" +
+	"\x02id\x18\x01 \x01(\tR\x02id\x12\x1a\n" +
+	"\bhostname\x18\x02 \x01(\tR\bhostname\"\x1b\n" +
 	"\tPurgeJail\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\"\x9f\x02\n" +
 	"\x12PendingJoinRequest\x12\x1d\n" +
@@ -3252,7 +3335,7 @@ func file_api_internalpb_state_proto_rawDescGZIP() []byte {
 }
 
 var file_api_internalpb_state_proto_enumTypes = make([]protoimpl.EnumInfo, 5)
-var file_api_internalpb_state_proto_msgTypes = make([]protoimpl.MessageInfo, 38)
+var file_api_internalpb_state_proto_msgTypes = make([]protoimpl.MessageInfo, 39)
 var file_api_internalpb_state_proto_goTypes = []any{
 	(VMState)(0),                      // 0: apiary.internal.v1.VMState
 	(VMPhase)(0),                      // 1: apiary.internal.v1.VMPhase
@@ -3284,19 +3367,20 @@ var file_api_internalpb_state_proto_goTypes = []any{
 	(*DeleteJail)(nil),                // 27: apiary.internal.v1.DeleteJail
 	(*UpdateJailPhase)(nil),           // 28: apiary.internal.v1.UpdateJailPhase
 	(*SetJailDesiredState)(nil),       // 29: apiary.internal.v1.SetJailDesiredState
-	(*PurgeJail)(nil),                 // 30: apiary.internal.v1.PurgeJail
-	(*PendingJoinRequest)(nil),        // 31: apiary.internal.v1.PendingJoinRequest
-	(*CreatePendingJoinRequest)(nil),  // 32: apiary.internal.v1.CreatePendingJoinRequest
-	(*ApprovePendingJoinRequest)(nil), // 33: apiary.internal.v1.ApprovePendingJoinRequest
-	(*RejectPendingJoinRequest)(nil),  // 34: apiary.internal.v1.RejectPendingJoinRequest
-	(*CommandResult)(nil),             // 35: apiary.internal.v1.CommandResult
-	(*FSMSnapshotState)(nil),          // 36: apiary.internal.v1.FSMSnapshotState
-	(*ConfigArchive)(nil),             // 37: apiary.internal.v1.ConfigArchive
-	nil,                               // 38: apiary.internal.v1.FSMSnapshotState.VmsEntry
-	nil,                               // 39: apiary.internal.v1.FSMSnapshotState.NetworksEntry
-	nil,                               // 40: apiary.internal.v1.FSMSnapshotState.ApiKeysEntry
-	nil,                               // 41: apiary.internal.v1.FSMSnapshotState.JailsEntry
-	nil,                               // 42: apiary.internal.v1.FSMSnapshotState.PendingJoinRequestsEntry
+	(*SetJailHostname)(nil),           // 30: apiary.internal.v1.SetJailHostname
+	(*PurgeJail)(nil),                 // 31: apiary.internal.v1.PurgeJail
+	(*PendingJoinRequest)(nil),        // 32: apiary.internal.v1.PendingJoinRequest
+	(*CreatePendingJoinRequest)(nil),  // 33: apiary.internal.v1.CreatePendingJoinRequest
+	(*ApprovePendingJoinRequest)(nil), // 34: apiary.internal.v1.ApprovePendingJoinRequest
+	(*RejectPendingJoinRequest)(nil),  // 35: apiary.internal.v1.RejectPendingJoinRequest
+	(*CommandResult)(nil),             // 36: apiary.internal.v1.CommandResult
+	(*FSMSnapshotState)(nil),          // 37: apiary.internal.v1.FSMSnapshotState
+	(*ConfigArchive)(nil),             // 38: apiary.internal.v1.ConfigArchive
+	nil,                               // 39: apiary.internal.v1.FSMSnapshotState.VmsEntry
+	nil,                               // 40: apiary.internal.v1.FSMSnapshotState.NetworksEntry
+	nil,                               // 41: apiary.internal.v1.FSMSnapshotState.ApiKeysEntry
+	nil,                               // 42: apiary.internal.v1.FSMSnapshotState.JailsEntry
+	nil,                               // 43: apiary.internal.v1.FSMSnapshotState.PendingJoinRequestsEntry
 }
 var file_api_internalpb_state_proto_depIdxs = []int32{
 	0,  // 0: apiary.internal.v1.VMDefinition.desired_state:type_name -> apiary.internal.v1.VMState
@@ -3317,47 +3401,48 @@ var file_api_internalpb_state_proto_depIdxs = []int32{
 	26, // 15: apiary.internal.v1.Command.update_jail:type_name -> apiary.internal.v1.UpdateJail
 	27, // 16: apiary.internal.v1.Command.delete_jail:type_name -> apiary.internal.v1.DeleteJail
 	28, // 17: apiary.internal.v1.Command.update_jail_phase:type_name -> apiary.internal.v1.UpdateJailPhase
-	30, // 18: apiary.internal.v1.Command.purge_jail:type_name -> apiary.internal.v1.PurgeJail
+	31, // 18: apiary.internal.v1.Command.purge_jail:type_name -> apiary.internal.v1.PurgeJail
 	19, // 19: apiary.internal.v1.Command.set_vm_firewall_paused:type_name -> apiary.internal.v1.SetVMFirewallPaused
 	20, // 20: apiary.internal.v1.Command.set_vm_cloudflare_exposure:type_name -> apiary.internal.v1.SetVMCloudflareExposure
 	21, // 21: apiary.internal.v1.Command.set_vm_desired_state:type_name -> apiary.internal.v1.SetVMDesiredState
 	29, // 22: apiary.internal.v1.Command.set_jail_desired_state:type_name -> apiary.internal.v1.SetJailDesiredState
 	22, // 23: apiary.internal.v1.Command.set_vm_firewall_rules:type_name -> apiary.internal.v1.SetVMFirewallRules
 	23, // 24: apiary.internal.v1.Command.set_network_name:type_name -> apiary.internal.v1.SetNetworkName
-	32, // 25: apiary.internal.v1.Command.create_pending_join_request:type_name -> apiary.internal.v1.CreatePendingJoinRequest
-	33, // 26: apiary.internal.v1.Command.approve_pending_join_request:type_name -> apiary.internal.v1.ApprovePendingJoinRequest
-	34, // 27: apiary.internal.v1.Command.reject_pending_join_request:type_name -> apiary.internal.v1.RejectPendingJoinRequest
-	10, // 28: apiary.internal.v1.CreateAPIKey.key:type_name -> apiary.internal.v1.ApiKey
-	8,  // 29: apiary.internal.v1.CreateNetwork.network:type_name -> apiary.internal.v1.NetworkDefinition
-	5,  // 30: apiary.internal.v1.CreateVM.vm:type_name -> apiary.internal.v1.VMDefinition
-	5,  // 31: apiary.internal.v1.UpdateVM.vm:type_name -> apiary.internal.v1.VMDefinition
-	1,  // 32: apiary.internal.v1.UpdateVMPhase.phase:type_name -> apiary.internal.v1.VMPhase
-	0,  // 33: apiary.internal.v1.SetVMDesiredState.desired_state:type_name -> apiary.internal.v1.VMState
-	7,  // 34: apiary.internal.v1.SetVMFirewallRules.firewall_rules:type_name -> apiary.internal.v1.FirewallRule
-	6,  // 35: apiary.internal.v1.CreateJail.jail:type_name -> apiary.internal.v1.JailDefinition
-	6,  // 36: apiary.internal.v1.UpdateJail.jail:type_name -> apiary.internal.v1.JailDefinition
-	3,  // 37: apiary.internal.v1.UpdateJailPhase.phase:type_name -> apiary.internal.v1.JailPhase
-	2,  // 38: apiary.internal.v1.SetJailDesiredState.desired_state:type_name -> apiary.internal.v1.JailState
-	4,  // 39: apiary.internal.v1.PendingJoinRequest.status:type_name -> apiary.internal.v1.JoinRequestStatus
-	31, // 40: apiary.internal.v1.CreatePendingJoinRequest.request:type_name -> apiary.internal.v1.PendingJoinRequest
-	5,  // 41: apiary.internal.v1.CommandResult.vm:type_name -> apiary.internal.v1.VMDefinition
-	6,  // 42: apiary.internal.v1.CommandResult.jail:type_name -> apiary.internal.v1.JailDefinition
-	31, // 43: apiary.internal.v1.CommandResult.pending_join_request:type_name -> apiary.internal.v1.PendingJoinRequest
-	38, // 44: apiary.internal.v1.FSMSnapshotState.vms:type_name -> apiary.internal.v1.FSMSnapshotState.VmsEntry
-	39, // 45: apiary.internal.v1.FSMSnapshotState.networks:type_name -> apiary.internal.v1.FSMSnapshotState.NetworksEntry
-	40, // 46: apiary.internal.v1.FSMSnapshotState.api_keys:type_name -> apiary.internal.v1.FSMSnapshotState.ApiKeysEntry
-	41, // 47: apiary.internal.v1.FSMSnapshotState.jails:type_name -> apiary.internal.v1.FSMSnapshotState.JailsEntry
-	42, // 48: apiary.internal.v1.FSMSnapshotState.pending_join_requests:type_name -> apiary.internal.v1.FSMSnapshotState.PendingJoinRequestsEntry
-	5,  // 49: apiary.internal.v1.FSMSnapshotState.VmsEntry.value:type_name -> apiary.internal.v1.VMDefinition
-	8,  // 50: apiary.internal.v1.FSMSnapshotState.NetworksEntry.value:type_name -> apiary.internal.v1.NetworkDefinition
-	10, // 51: apiary.internal.v1.FSMSnapshotState.ApiKeysEntry.value:type_name -> apiary.internal.v1.ApiKey
-	6,  // 52: apiary.internal.v1.FSMSnapshotState.JailsEntry.value:type_name -> apiary.internal.v1.JailDefinition
-	31, // 53: apiary.internal.v1.FSMSnapshotState.PendingJoinRequestsEntry.value:type_name -> apiary.internal.v1.PendingJoinRequest
-	54, // [54:54] is the sub-list for method output_type
-	54, // [54:54] is the sub-list for method input_type
-	54, // [54:54] is the sub-list for extension type_name
-	54, // [54:54] is the sub-list for extension extendee
-	0,  // [0:54] is the sub-list for field type_name
+	33, // 25: apiary.internal.v1.Command.create_pending_join_request:type_name -> apiary.internal.v1.CreatePendingJoinRequest
+	34, // 26: apiary.internal.v1.Command.approve_pending_join_request:type_name -> apiary.internal.v1.ApprovePendingJoinRequest
+	35, // 27: apiary.internal.v1.Command.reject_pending_join_request:type_name -> apiary.internal.v1.RejectPendingJoinRequest
+	30, // 28: apiary.internal.v1.Command.set_jail_hostname:type_name -> apiary.internal.v1.SetJailHostname
+	10, // 29: apiary.internal.v1.CreateAPIKey.key:type_name -> apiary.internal.v1.ApiKey
+	8,  // 30: apiary.internal.v1.CreateNetwork.network:type_name -> apiary.internal.v1.NetworkDefinition
+	5,  // 31: apiary.internal.v1.CreateVM.vm:type_name -> apiary.internal.v1.VMDefinition
+	5,  // 32: apiary.internal.v1.UpdateVM.vm:type_name -> apiary.internal.v1.VMDefinition
+	1,  // 33: apiary.internal.v1.UpdateVMPhase.phase:type_name -> apiary.internal.v1.VMPhase
+	0,  // 34: apiary.internal.v1.SetVMDesiredState.desired_state:type_name -> apiary.internal.v1.VMState
+	7,  // 35: apiary.internal.v1.SetVMFirewallRules.firewall_rules:type_name -> apiary.internal.v1.FirewallRule
+	6,  // 36: apiary.internal.v1.CreateJail.jail:type_name -> apiary.internal.v1.JailDefinition
+	6,  // 37: apiary.internal.v1.UpdateJail.jail:type_name -> apiary.internal.v1.JailDefinition
+	3,  // 38: apiary.internal.v1.UpdateJailPhase.phase:type_name -> apiary.internal.v1.JailPhase
+	2,  // 39: apiary.internal.v1.SetJailDesiredState.desired_state:type_name -> apiary.internal.v1.JailState
+	4,  // 40: apiary.internal.v1.PendingJoinRequest.status:type_name -> apiary.internal.v1.JoinRequestStatus
+	32, // 41: apiary.internal.v1.CreatePendingJoinRequest.request:type_name -> apiary.internal.v1.PendingJoinRequest
+	5,  // 42: apiary.internal.v1.CommandResult.vm:type_name -> apiary.internal.v1.VMDefinition
+	6,  // 43: apiary.internal.v1.CommandResult.jail:type_name -> apiary.internal.v1.JailDefinition
+	32, // 44: apiary.internal.v1.CommandResult.pending_join_request:type_name -> apiary.internal.v1.PendingJoinRequest
+	39, // 45: apiary.internal.v1.FSMSnapshotState.vms:type_name -> apiary.internal.v1.FSMSnapshotState.VmsEntry
+	40, // 46: apiary.internal.v1.FSMSnapshotState.networks:type_name -> apiary.internal.v1.FSMSnapshotState.NetworksEntry
+	41, // 47: apiary.internal.v1.FSMSnapshotState.api_keys:type_name -> apiary.internal.v1.FSMSnapshotState.ApiKeysEntry
+	42, // 48: apiary.internal.v1.FSMSnapshotState.jails:type_name -> apiary.internal.v1.FSMSnapshotState.JailsEntry
+	43, // 49: apiary.internal.v1.FSMSnapshotState.pending_join_requests:type_name -> apiary.internal.v1.FSMSnapshotState.PendingJoinRequestsEntry
+	5,  // 50: apiary.internal.v1.FSMSnapshotState.VmsEntry.value:type_name -> apiary.internal.v1.VMDefinition
+	8,  // 51: apiary.internal.v1.FSMSnapshotState.NetworksEntry.value:type_name -> apiary.internal.v1.NetworkDefinition
+	10, // 52: apiary.internal.v1.FSMSnapshotState.ApiKeysEntry.value:type_name -> apiary.internal.v1.ApiKey
+	6,  // 53: apiary.internal.v1.FSMSnapshotState.JailsEntry.value:type_name -> apiary.internal.v1.JailDefinition
+	32, // 54: apiary.internal.v1.FSMSnapshotState.PendingJoinRequestsEntry.value:type_name -> apiary.internal.v1.PendingJoinRequest
+	55, // [55:55] is the sub-list for method output_type
+	55, // [55:55] is the sub-list for method input_type
+	55, // [55:55] is the sub-list for extension type_name
+	55, // [55:55] is the sub-list for extension extendee
+	0,  // [0:55] is the sub-list for field type_name
 }
 
 func init() { file_api_internalpb_state_proto_init() }
@@ -3389,6 +3474,7 @@ func file_api_internalpb_state_proto_init() {
 		(*Command_CreatePendingJoinRequest)(nil),
 		(*Command_ApprovePendingJoinRequest)(nil),
 		(*Command_RejectPendingJoinRequest)(nil),
+		(*Command_SetJailHostname)(nil),
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
@@ -3396,7 +3482,7 @@ func file_api_internalpb_state_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_api_internalpb_state_proto_rawDesc), len(file_api_internalpb_state_proto_rawDesc)),
 			NumEnums:      5,
-			NumMessages:   38,
+			NumMessages:   39,
 			NumExtensions: 0,
 			NumServices:   0,
 		},
