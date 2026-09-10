@@ -181,7 +181,7 @@ type Reconciler struct {
 	BootROM string
 
 	// DiskSizeMB sizes the sparse disk image created for each VM's boot
-	// disk. Defaults to 10240 (10GiB) if zero.
+	// disk. Defaults to 20480 (20GiB) if zero.
 	DiskSizeMB uint64
 
 	// Bridge, if set, is passed through to every VM Bhyve creates,
@@ -1523,13 +1523,13 @@ func (r *Reconciler) reconcileDHCP(ctx context.Context, planned []VMPlacement, n
 	return nil
 }
 
-// diskSizeMB returns Reconciler.DiskSizeMB, defaulting to 10240
-// (10GiB) if unset - shared by ensureDiskImage (the plain, dataset-
+// diskSizeMB returns Reconciler.DiskSizeMB, defaulting to 20480
+// (20GiB) if unset - shared by ensureDiskImage (the plain, dataset-
 // backed path) and the HAST-replicated path's zvol sizing, so both
 // paths size a VM's disk identically regardless of which one it uses.
 func (r *Reconciler) diskSizeMB() uint64 {
 	if r.DiskSizeMB == 0 {
-		return 10240
+		return 20480
 	}
 	return r.DiskSizeMB
 }

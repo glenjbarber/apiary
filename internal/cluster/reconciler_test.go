@@ -1004,6 +1004,24 @@ func TestReconciler_EnsureDiskImageCreatesUsableSizedDisk(t *testing.T) {
 	}
 }
 
+// TestReconciler_EnsureDiskImage_DefaultsToTwentyGiBWhenUnset guards
+// the current default VM boot-disk size, so a future change to it is
+// deliberate, not an accidental one-line slip.
+func TestReconciler_EnsureDiskImage_DefaultsToTwentyGiBWhenUnset(t *testing.T) {
+	r := &Reconciler{}
+	path, err := r.ensureDiskImage(t.TempDir(), "")
+	if err != nil {
+		t.Fatalf("ensureDiskImage() error: %v", err)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("Stat(%q) error: %v", path, err)
+	}
+	if want := int64(20480 * 1024 * 1024); info.Size() != want {
+		t.Errorf("default disk size = %d, want %d (20GiB)", info.Size(), want)
+	}
+}
+
 func TestReconciler_RunOnce_BaseImageNeverReseedsExistingDisk(t *testing.T) {
 	raft := &fakeRaftClient{resp: &internalpb.ListVMsResponse{
 		Vms: []*internalpb.VMDefinition{{Id: "vm-1", NodeId: "node-a", BaseImageName: "ubuntu-cloud.raw"}},
