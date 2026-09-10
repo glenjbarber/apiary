@@ -206,10 +206,12 @@
     <h3>Join a Colony</h3>
     <p class="muted">
       Join this Comb to an existing multi-node Colony instead of running
-      standalone. An Admin on that Colony must approve the request,
-      comparing the code shown below against the one their own UI shows
-      (see ADR-0083) - nothing changes about this Comb's own cluster
-      membership until they do.
+      standalone. Fill in the address of any current member of that
+      Colony below - this Comb asks it directly to record the request.
+      An Admin there compares the code shown below against the one
+      their own "Pending join requests" panel shows (see ADR-0083) -
+      nothing changes about this Comb's own cluster membership until
+      they approve it.
     </p>
     {{if .JoinColonyFormError}}<div class="banner-error">{{.JoinColonyFormError}}</div>{{end}}
     {{if .JoinColonyResult}}
@@ -220,10 +222,11 @@
           <p><strong>Request status:</strong> {{.JoinColonyResult.Status}}</p>
           {{if eq .JoinColonyResult.Status "pending"}}
           <p>Your code: <strong style="font-size:1.4em; letter-spacing:0.1em;">{{.JoinColonyResult.Code}}</strong></p>
-          <p class="muted">Compare this against the code shown on the Colony's own "Pending join requests" panel - but before they approve, get this Comb into the right state: wipe its own raft state (<code>raftd -reset yes-wipe-raft-state</code>) and restart <code>raftd</code> with <code>-await-join</code> so it is genuinely listening at the raft-bind address above but has not formed a cluster of its own. Confirm it is up, <em>then</em> have the Admin approve - approving while this Comb is still running its own standalone-bootstrapped cluster (or isn't listening yet) can destabilize the Colony's existing leadership.</p>
-          <p class="muted"><a href="/machine?join_request_id={{.JoinColonyResult.RequestID}}">Refresh status</a>.</p>
+          <p class="muted">Compare this against the code shown on <code>{{.JoinColonyResult.TargetAddress}}</code>'s own "Pending join requests" panel - but before they approve, get this Comb into the right state: wipe its own raft state (<code>raftd -reset yes-wipe-raft-state</code>) and restart <code>raftd</code> with <code>-await-join</code> so it is genuinely listening at the raft-bind address above but has not formed a cluster of its own. Confirm it is up, <em>then</em> have the Admin approve - approving while this Comb is still running its own standalone-bootstrapped cluster (or isn't listening yet) can destabilize the Colony's existing leadership.</p>
+          <p class="muted"><a href="/machine?join_request_id={{.JoinColonyResult.RequestID}}&amp;join_target_address={{.JoinColonyResult.TargetAddress}}">Refresh status</a>.</p>
           <form method="post" action="/machine/join-colony/cancel">
             <input type="hidden" name="request_id" value="{{.JoinColonyResult.RequestID}}">
+            <input type="hidden" name="target_address" value="{{.JoinColonyResult.TargetAddress}}">
             <button type="submit" class="danger">Cancel request</button>
           </form>
           {{else if eq .JoinColonyResult.Status "approved"}}
@@ -237,6 +240,7 @@
       {{end}}
     {{else}}
     <form class="inline-form" method="post" action="/machine/join-colony">
+      <label>Existing Colony member's address <input type="text" name="target_address" required placeholder="10.62.0.2:17700" title="The managerd RPC address (host:port) of any current member of the Colony you want to join - this Comb asks it directly to record the request. Find this on that Comb's own Machine page (its -rpc-addr, usually port 17700)."></label>
       <label>This Comb's node id <input type="text" name="node_id" required title="This node's own raft node-id, matching the -node-id this Comb's raftd was started with."></label>
       <label>This Comb's raft-bind address <input type="text" name="raft_bind_address" required placeholder="10.62.0.5:17600" title="This node's own real, reachable -raft-bind address - the Colony's leader will dial this directly once approved."></label>
       <button type="submit">Request to join</button>

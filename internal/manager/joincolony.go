@@ -88,9 +88,29 @@ func (s *Server) applyJoinRequestCommand(ctx context.Context, cmd *internalpb.Co
 // file's own doc comment and ADR-0083. Deliberately exempted from
 // checkAuth entirely (internal/manager/auth.go) since the caller has no
 // Colony API key yet by definition.
+//
+// target_address (ADR-0092) is checked first: when set, this call is
+// the JOINING Comb's own managerd asking the operator-named existing
+// Colony member to record the request on ITS OWN raft instead - this
+// managerd never raft-Applies anything itself in that case, it's purely
+// a dial-and-relay. Empty target_address preserves the original
+// ADR-0083 behavior below (record directly on whichever managerd
+// receives the call).
 func (s *Server) RequestJoinColony(ctx context.Context, req *rpcpb.RequestJoinColonyRequest) (*rpcpb.RequestJoinColonyResponse, error) {
 	if req.GetNodeId() == "" || req.GetRaftBindAddress() == "" {
 		return &rpcpb.RequestJoinColonyResponse{Error: "node_id and raft_bind_address must both be set"}, nil
+	}
+	if target := req.GetTargetAddress(); target != "" {
+		if s.peers == nil {
+			return &rpcpb.RequestJoinColonyResponse{Error: "no peer forwarding is configured on this node; cannot reach the named Colony member"}, nil
+		}
+		resp, err := s.peers.RequestJoinColony(ctx, target, &rpcpb.RequestJoinColonyRequest{
+			NodeId: req.GetNodeId(), RaftBindAddress: req.GetRaftBindAddress(), TimeoutMs: req.GetTimeoutMs(),
+		})
+		if err != nil {
+			return &rpcpb.RequestJoinColonyResponse{Error: fmt.Sprintf("reaching %s: %v", target, err)}, nil
+		}
+		return resp, nil
 	}
 	requestID, err := generateJoinRequestID()
 	if err != nil {
@@ -133,7 +153,23 @@ func (s *Server) RequestJoinColony(ctx context.Context, req *rpcpb.RequestJoinCo
 // non-leader-restricted read (ADR-0083: a joining Comb polls whichever
 // specific existing member it originally contacted), also exempted
 // from checkAuth entirely for the same reason RequestJoinColony is.
+//
+// target_address (ADR-0092) mirrors RequestJoinColony's own field: when
+// set, this poll is forwarded to that address instead of reading this
+// node's own local raft - needed because RequestJoinColony's own
+// target_address means the request itself lives on a REMOTE Colony
+// member, not here.
 func (s *Server) GetJoinRequestStatus(ctx context.Context, req *rpcpb.GetJoinRequestStatusRequest) (*rpcpb.GetJoinRequestStatusResponse, error) {
+	if target := req.GetTargetAddress(); target != "" {
+		if s.peers == nil {
+			return &rpcpb.GetJoinRequestStatusResponse{Error: "no peer forwarding is configured on this node; cannot reach the named Colony member"}, nil
+		}
+		resp, err := s.peers.GetJoinRequestStatus(ctx, target, req.GetRequestId())
+		if err != nil {
+			return &rpcpb.GetJoinRequestStatusResponse{Error: fmt.Sprintf("reaching %s: %v", target, err)}, nil
+		}
+		return resp, nil
+	}
 	resp, err := s.raft.GetPendingJoinRequestLocal(ctx, req.GetRequestId())
 	if err != nil {
 		return &rpcpb.GetJoinRequestStatusResponse{Error: err.Error()}, nil
@@ -241,7 +277,22 @@ func (s *Server) RejectJoinRequest(ctx context.Context, req *rpcpb.RejectJoinReq
 // creator, which by definition has no Colony API key yet. Knowledge of
 // request_id is the only credential this needs, matching
 // GetJoinRequestStatus's own already-established scoping.
+//
+// target_address (ADR-0092) mirrors RequestJoinColony/
+// GetJoinRequestStatus's own field: when set, this cancel is forwarded
+// there instead of acting on this node's own local raft, since the
+// request itself may live on a remote Colony member.
 func (s *Server) CancelJoinRequest(ctx context.Context, req *rpcpb.CancelJoinRequestRequest) (*rpcpb.CancelJoinRequestResponse, error) {
+	if target := req.GetTargetAddress(); target != "" {
+		if s.peers == nil {
+			return &rpcpb.CancelJoinRequestResponse{Error: "no peer forwarding is configured on this node; cannot reach the named Colony member"}, nil
+		}
+		resp, err := s.peers.CancelJoinRequest(ctx, target, &rpcpb.CancelJoinRequestRequest{RequestId: req.GetRequestId(), TimeoutMs: req.GetTimeoutMs()})
+		if err != nil {
+			return &rpcpb.CancelJoinRequestResponse{Error: fmt.Sprintf("reaching %s: %v", target, err)}, nil
+		}
+		return resp, nil
+	}
 	cmd := &internalpb.Command{
 		Op: &internalpb.Command_CancelPendingJoinRequest{
 			CancelPendingJoinRequest: &internalpb.CancelPendingJoinRequest{RequestId: req.GetRequestId()},

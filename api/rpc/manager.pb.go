@@ -11873,8 +11873,20 @@ type RequestJoinColonyRequest struct {
 	NodeId          string `protobuf:"bytes,1,opt,name=node_id,json=nodeId,proto3" json:"node_id,omitempty"`
 	RaftBindAddress string `protobuf:"bytes,2,opt,name=raft_bind_address,json=raftBindAddress,proto3" json:"raft_bind_address,omitempty"`
 	TimeoutMs       uint32 `protobuf:"varint,3,opt,name=timeout_ms,json=timeoutMs,proto3" json:"timeout_ms,omitempty"`
-	unknownFields   protoimpl.UnknownFields
-	sizeCache       protoimpl.SizeCache
+	// target_address (ADR-0092), if set, is an existing Colony member's
+	// own managerd address (host:port) - the managerd receiving THIS
+	// call forwards node_id/raft_bind_address to it instead of
+	// raft-Applying a PendingJoinRequest on its own local raft. This is
+	// the normal way to use this RPC: an operator submits the form on
+	// the JOINING Comb's own Machine page, naming the address of any
+	// current member of the Colony they want to join. Empty preserves
+	// the original ADR-0083 behavior (record directly on whichever
+	// managerd receives the call) - used internally when this field is
+	// already set (the forwarded copy clears it) and by direct RPC
+	// callers/tests that intend to record locally.
+	TargetAddress string `protobuf:"bytes,4,opt,name=target_address,json=targetAddress,proto3" json:"target_address,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *RequestJoinColonyRequest) Reset() {
@@ -11926,6 +11938,13 @@ func (x *RequestJoinColonyRequest) GetTimeoutMs() uint32 {
 		return x.TimeoutMs
 	}
 	return 0
+}
+
+func (x *RequestJoinColonyRequest) GetTargetAddress() string {
+	if x != nil {
+		return x.TargetAddress
+	}
+	return ""
 }
 
 type RequestJoinColonyResponse struct {
@@ -12001,8 +12020,14 @@ func (x *RequestJoinColonyResponse) GetLeaderHint() string {
 }
 
 type GetJoinRequestStatusRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	RequestId     string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	state     protoimpl.MessageState `protogen:"open.v1"`
+	RequestId string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	// target_address (ADR-0092) mirrors RequestJoinColonyRequest's own
+	// field - set to the same address the request was originally
+	// forwarded to, so a poll for a request that lives on a remote
+	// Colony member reaches that member instead of failing "not found"
+	// against this node's own (unrelated) local raft.
+	TargetAddress string `protobuf:"bytes,2,opt,name=target_address,json=targetAddress,proto3" json:"target_address,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -12040,6 +12065,13 @@ func (*GetJoinRequestStatusRequest) Descriptor() ([]byte, []int) {
 func (x *GetJoinRequestStatusRequest) GetRequestId() string {
 	if x != nil {
 		return x.RequestId
+	}
+	return ""
+}
+
+func (x *GetJoinRequestStatusRequest) GetTargetAddress() string {
+	if x != nil {
+		return x.TargetAddress
 	}
 	return ""
 }
@@ -12413,9 +12445,14 @@ func (x *RejectJoinRequestResponse) GetLeaderHint() string {
 }
 
 type CancelJoinRequestRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	RequestId     string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
-	TimeoutMs     uint32                 `protobuf:"varint,2,opt,name=timeout_ms,json=timeoutMs,proto3" json:"timeout_ms,omitempty"`
+	state     protoimpl.MessageState `protogen:"open.v1"`
+	RequestId string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	TimeoutMs uint32                 `protobuf:"varint,2,opt,name=timeout_ms,json=timeoutMs,proto3" json:"timeout_ms,omitempty"`
+	// target_address (ADR-0092) mirrors RequestJoinColonyRequest's own
+	// field - see GetJoinRequestStatusRequest's own doc comment for why
+	// this is needed: the request being cancelled may live on a remote
+	// Colony member's raft, not this node's own.
+	TargetAddress string `protobuf:"bytes,3,opt,name=target_address,json=targetAddress,proto3" json:"target_address,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -12462,6 +12499,13 @@ func (x *CancelJoinRequestRequest) GetTimeoutMs() uint32 {
 		return x.TimeoutMs
 	}
 	return 0
+}
+
+func (x *CancelJoinRequestRequest) GetTargetAddress() string {
+	if x != nil {
+		return x.TargetAddress
+	}
+	return ""
 }
 
 type CancelJoinRequestResponse struct {
@@ -13482,22 +13526,24 @@ const file_api_rpc_manager_proto_rawDesc = "" +
 	"\x04code\x18\x04 \x01(\tR\x04code\x12*\n" +
 	"\x11requested_at_unix\x18\x05 \x01(\x03R\x0frequestedAtUnix\x12&\n" +
 	"\x0fexpires_at_unix\x18\x06 \x01(\x03R\rexpiresAtUnix\x128\n" +
-	"\x06status\x18\a \x01(\x0e2 .apiary.rpc.v1.JoinRequestStatusR\x06status\"~\n" +
+	"\x06status\x18\a \x01(\x0e2 .apiary.rpc.v1.JoinRequestStatusR\x06status\"\xa5\x01\n" +
 	"\x18RequestJoinColonyRequest\x12\x17\n" +
 	"\anode_id\x18\x01 \x01(\tR\x06nodeId\x12*\n" +
 	"\x11raft_bind_address\x18\x02 \x01(\tR\x0fraftBindAddress\x12\x1d\n" +
 	"\n" +
-	"timeout_ms\x18\x03 \x01(\rR\ttimeoutMs\"\x85\x01\n" +
+	"timeout_ms\x18\x03 \x01(\rR\ttimeoutMs\x12%\n" +
+	"\x0etarget_address\x18\x04 \x01(\tR\rtargetAddress\"\x85\x01\n" +
 	"\x19RequestJoinColonyResponse\x12\x1d\n" +
 	"\n" +
 	"request_id\x18\x01 \x01(\tR\trequestId\x12\x12\n" +
 	"\x04code\x18\x02 \x01(\tR\x04code\x12\x14\n" +
 	"\x05error\x18\x03 \x01(\tR\x05error\x12\x1f\n" +
 	"\vleader_hint\x18\x04 \x01(\tR\n" +
-	"leaderHint\"<\n" +
+	"leaderHint\"c\n" +
 	"\x1bGetJoinRequestStatusRequest\x12\x1d\n" +
 	"\n" +
-	"request_id\x18\x01 \x01(\tR\trequestId\"q\n" +
+	"request_id\x18\x01 \x01(\tR\trequestId\x12%\n" +
+	"\x0etarget_address\x18\x02 \x01(\tR\rtargetAddress\"q\n" +
 	"\x1cGetJoinRequestStatusResponse\x12;\n" +
 	"\arequest\x18\x01 \x01(\v2!.apiary.rpc.v1.PendingJoinRequestR\arequest\x12\x14\n" +
 	"\x05error\x18\x02 \x01(\tR\x05error\"\x19\n" +
@@ -13524,12 +13570,13 @@ const file_api_rpc_manager_proto_rawDesc = "" +
 	"\arequest\x18\x01 \x01(\v2!.apiary.rpc.v1.PendingJoinRequestR\arequest\x12\x14\n" +
 	"\x05error\x18\x02 \x01(\tR\x05error\x12\x1f\n" +
 	"\vleader_hint\x18\x03 \x01(\tR\n" +
-	"leaderHint\"X\n" +
+	"leaderHint\"\x7f\n" +
 	"\x18CancelJoinRequestRequest\x12\x1d\n" +
 	"\n" +
 	"request_id\x18\x01 \x01(\tR\trequestId\x12\x1d\n" +
 	"\n" +
-	"timeout_ms\x18\x02 \x01(\rR\ttimeoutMs\"\x8f\x01\n" +
+	"timeout_ms\x18\x02 \x01(\rR\ttimeoutMs\x12%\n" +
+	"\x0etarget_address\x18\x03 \x01(\tR\rtargetAddress\"\x8f\x01\n" +
 	"\x19CancelJoinRequestResponse\x12;\n" +
 	"\arequest\x18\x01 \x01(\v2!.apiary.rpc.v1.PendingJoinRequestR\arequest\x12\x14\n" +
 	"\x05error\x18\x02 \x01(\tR\x05error\x12\x1f\n" +

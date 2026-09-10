@@ -269,6 +269,11 @@ func (slowRecoveryPeerClient) DeleteVMSnapshot(ctx context.Context, addr, id, sn
 	return nil, ctx.Err()
 }
 
+func (slowRecoveryPeerClient) GetJoinRequestStatus(ctx context.Context, addr, requestID string) (*rpcpb.GetJoinRequestStatusResponse, error) {
+	<-ctx.Done()
+	return nil, ctx.Err()
+}
+
 func TestHandleRecoveryHandbookPage_NodeContextRespectsTimeouts(t *testing.T) {
 	oldTimeout, oldOverall := nodeContextTimeout, nodeContextOverallTimeout
 	nodeContextTimeout = 10 * time.Millisecond

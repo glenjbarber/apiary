@@ -583,6 +583,20 @@ func (p *PeerReporter) RequestJoinColony(ctx context.Context, addr string, req *
 	return client.RequestJoinColony(ctx, req)
 }
 
+// GetJoinRequestStatus forwards a status poll to addr - used when a
+// join request was itself forwarded there via RequestJoinColony's own
+// target_address (ADR-0092), so the poll reaches the Colony member that
+// actually recorded the request rather than failing "not found" against
+// this node's own unrelated local raft.
+func (p *PeerReporter) GetJoinRequestStatus(ctx context.Context, addr, requestID string) (*rpcpb.GetJoinRequestStatusResponse, error) {
+	conn, client, err := p.dial(addr)
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close()
+	return client.GetJoinRequestStatus(ctx, &rpcpb.GetJoinRequestStatusRequest{RequestId: requestID})
+}
+
 func (p *PeerReporter) ApproveJoinRequest(ctx context.Context, addr string, req *rpcpb.ApproveJoinRequestRequest) (*rpcpb.ApproveJoinRequestResponse, error) {
 	conn, client, err := p.dial(addr)
 	if err != nil {

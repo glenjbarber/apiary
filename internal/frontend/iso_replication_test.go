@@ -74,6 +74,10 @@ func (f *fakeISOPeerClient) DeleteVMSnapshot(context.Context, string, string, st
 	return &rpcpb.DeleteVMSnapshotResponse{}, nil
 }
 
+func (f *fakeISOPeerClient) GetJoinRequestStatus(context.Context, string, string) (*rpcpb.GetJoinRequestStatusResponse, error) {
+	return &rpcpb.GetJoinRequestStatusResponse{}, nil
+}
+
 func (f *fakeISOPeerClient) ListISOs(_ context.Context, addr string) (*rpcpb.ListISOsResponse, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()

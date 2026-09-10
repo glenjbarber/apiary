@@ -2130,6 +2130,19 @@ message RequestJoinColonyRequest {
   string node_id = 1;
   string raft_bind_address = 2;
   uint32 timeout_ms = 3;
+
+  // target_address (ADR-0092), if set, is an existing Colony member's
+  // own managerd address (host:port) - the managerd receiving THIS
+  // call forwards node_id/raft_bind_address to it instead of
+  // raft-Applying a PendingJoinRequest on its own local raft. This is
+  // the normal way to use this RPC: an operator submits the form on
+  // the JOINING Comb's own Machine page, naming the address of any
+  // current member of the Colony they want to join. Empty preserves
+  // the original ADR-0083 behavior (record directly on whichever
+  // managerd receives the call) - used internally when this field is
+  // already set (the forwarded copy clears it) and by direct RPC
+  // callers/tests that intend to record locally.
+  string target_address = 4;
 }
 
 message RequestJoinColonyResponse {
@@ -2145,6 +2158,13 @@ message RequestJoinColonyResponse {
 
 message GetJoinRequestStatusRequest {
   string request_id = 1;
+
+  // target_address (ADR-0092) mirrors RequestJoinColonyRequest's own
+  // field - set to the same address the request was originally
+  // forwarded to, so a poll for a request that lives on a remote
+  // Colony member reaches that member instead of failing "not found"
+  // against this node's own (unrelated) local raft.
+  string target_address = 2;
 }
 
 message GetJoinRequestStatusResponse {
@@ -2188,6 +2208,12 @@ message RejectJoinRequestResponse {
 message CancelJoinRequestRequest {
   string request_id = 1;
   uint32 timeout_ms = 2;
+
+  // target_address (ADR-0092) mirrors RequestJoinColonyRequest's own
+  // field - see GetJoinRequestStatusRequest's own doc comment for why
+  // this is needed: the request being cancelled may live on a remote
+  // Colony member's raft, not this node's own.
+  string target_address = 3;
 }
 
 message CancelJoinRequestResponse {

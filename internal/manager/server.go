@@ -176,6 +176,11 @@ type PeerForwarder interface {
 	// ApproveJoinRequest/RejectJoinRequest above exactly.
 	CancelJoinRequest(ctx context.Context, addr string, req *rpcpb.CancelJoinRequestRequest) (*rpcpb.CancelJoinRequestResponse, error)
 	PurgeJoinRequest(ctx context.Context, addr string, req *rpcpb.PurgeJoinRequestRequest) (*rpcpb.PurgeJoinRequestResponse, error)
+
+	// GetJoinRequestStatus (ADR-0092) forwards a status poll to addr -
+	// used when RequestJoinColony's own target_address sent the request
+	// itself to a different Colony member than the one being asked.
+	GetJoinRequestStatus(ctx context.Context, addr, requestID string) (*rpcpb.GetJoinRequestStatusResponse, error)
 }
 
 // reconcilerStats is the subset of *cluster.Reconciler the server needs

@@ -217,3 +217,16 @@ same Admin tier as every other consequential action in this flow.
   attacker with network access to file a `RequestJoinColony` call could
   see it too. The real trust boundary stays Admin RBAC approving, the
   same trust model every other Admin action already rests on.
+
+**Corrected by ADR-0092**: this ADR's own "Decision" section described
+`RequestJoinColony` as being called "on the target - the address of
+one existing Colony member the operator names," but no such addressing
+mechanism was actually built - the RPC only ever recorded a request on
+whichever managerd happened to receive the call. In practice this meant
+submitting the Machine page's own form on the JOINING Comb (the natural
+reading of both this ADR's flow description and the form's own field
+labels) silently recorded a backwards, invisible-to-the-real-target
+request on the joining Comb's own standalone Colony instead - a real
+user hit this directly. ADR-0092 adds the missing `target_address`
+field and the dial-out it implies, so the flow now genuinely works the
+way this ADR always described it.
