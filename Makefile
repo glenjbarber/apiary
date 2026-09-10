@@ -117,6 +117,14 @@ NODE_REST_ADDR?=	0.0.0.0:8081
 # before logging in - just start the services and log in as
 # NODE_ADMIN_USER right away, since the first successful login on a
 # Comb with no role map yet becomes Admin automatically (ADR-0086).
+#
+# The binary install loop copies to a .new name and mv's it into place
+# rather than copying directly over the destination - found live, on a
+# re-run against an already-running Comb: cp can't overwrite a binary
+# a live process still has open ("Text file busy"), but mv is an
+# atomic rename the running process's already-open file descriptor
+# doesn't notice at all - the same fix this project's own live
+# apiarium/apiverse deploys already use for exactly this reason.
 setup-quick:
 	pkg install -y go git sudo
 	${MAKE} setup
@@ -125,8 +133,9 @@ setup-quick:
 		-vlan-uplink ${NODE_VLAN_UPLINK} -bhyve-bridge ${NODE_BHYVE_BRIDGE}
 	sudo mkdir -p /usr/local/libexec/apiary
 	for S in ${SRCS} ; \
-		do sudo cp -p $$S /usr/local/libexec/apiary/$$S ;\
-		sudo chmod +x /usr/local/libexec/apiary/$$S ;\
+		do sudo cp -p $$S /usr/local/libexec/apiary/$$S.new ;\
+		sudo chmod +x /usr/local/libexec/apiary/$$S.new ;\
+		sudo mv /usr/local/libexec/apiary/$$S.new /usr/local/libexec/apiary/$$S ;\
 	done
 	BOOTROM=$$(test -f /usr/local/share/uefi-firmware/BHYVE_UEFI.fd && echo /usr/local/share/uefi-firmware/BHYVE_UEFI.fd || pkg info -l edk2-bhyve 2>/dev/null | grep '\.fd$$' | head -1) ;\
 	test -n "$$BOOTROM" || { echo "could not locate a bhyve UEFI firmware .fd file - install bhyve-firmware/edk2-bhyve and re-run" >&2 ; exit 1 ; } ;\
