@@ -70,6 +70,9 @@
             <form method="post" action="/join-requests/{{.RequestID}}/reject" style="display:inline">
               <button type="submit" class="danger">Reject</button>
             </form>
+            <form method="post" action="/join-requests/{{.RequestID}}/purge" style="display:inline" onsubmit="return confirm('Delete this pending request outright? Unlike Reject, this removes it completely - the requesting Comb\'s own status poll will show it as not found instead of a resolved outcome.')">
+              <button type="submit" class="danger">Delete</button>
+            </form>
           </td>
         </tr>
         {{else}}

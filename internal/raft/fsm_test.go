@@ -1235,6 +1235,22 @@ func rejectPendingJoinRequestCmd(requestID string) *internalpb.Command {
 	}
 }
 
+func cancelPendingJoinRequestCmd(requestID string) *internalpb.Command {
+	return &internalpb.Command{
+		Op: &internalpb.Command_CancelPendingJoinRequest{
+			CancelPendingJoinRequest: &internalpb.CancelPendingJoinRequest{RequestId: requestID},
+		},
+	}
+}
+
+func purgeJoinRequestCmd(requestID string) *internalpb.Command {
+	return &internalpb.Command{
+		Op: &internalpb.Command_PurgeJoinRequest{
+			PurgeJoinRequest: &internalpb.PurgeJoinRequest{RequestId: requestID},
+		},
+	}
+}
+
 func TestFSM_Apply_CreatePendingJoinRequest(t *testing.T) {
 	fsm := NewFSM()
 	expires := time.Now().Add(15 * time.Minute).Unix()
@@ -1314,6 +1330,76 @@ func TestFSM_Apply_RejectPendingJoinRequest(t *testing.T) {
 
 	if result.(*FSMApplyResult).PendingJoinRequest.GetStatus() != internalpb.JoinRequestStatus_JOIN_REQUEST_STATUS_REJECTED {
 		t.Errorf("Status = %v, want Rejected", result.(*FSMApplyResult).PendingJoinRequest.GetStatus())
+	}
+}
+
+// TestFSM_Apply_CancelPendingJoinRequest mirrors
+// TestFSM_Apply_RejectPendingJoinRequest exactly, for the requesting
+// Comb's own self-service withdrawal instead of an Admin's decline.
+func TestFSM_Apply_CancelPendingJoinRequest(t *testing.T) {
+	fsm := NewFSM()
+	expires := time.Now().Add(15 * time.Minute).Unix()
+	fsm.Apply(&raft.Log{Index: 1, Data: mustMarshalCommand(t, createPendingJoinRequestCmd("jreq-1", "node02", "10.62.0.5:17600", "482913", expires))})
+
+	result := fsm.Apply(&raft.Log{Index: 2, Data: mustMarshalCommand(t, cancelPendingJoinRequestCmd("jreq-1"))})
+
+	if result.(*FSMApplyResult).PendingJoinRequest.GetStatus() != internalpb.JoinRequestStatus_JOIN_REQUEST_STATUS_CANCELLED {
+		t.Errorf("Status = %v, want Cancelled", result.(*FSMApplyResult).PendingJoinRequest.GetStatus())
+	}
+	// Cancelled requests are excluded from the actionable list...
+	if list := fsm.ListPendingJoinRequests(); len(list) != 0 {
+		t.Errorf("ListPendingJoinRequests() = %v, want empty once cancelled", list)
+	}
+	// ...but the record itself is retained, not deleted, mirroring
+	// Approve/Reject's own posture.
+	req, ok := fsm.PendingJoinRequest("jreq-1")
+	if !ok || req.GetStatus() != internalpb.JoinRequestStatus_JOIN_REQUEST_STATUS_CANCELLED {
+		t.Errorf("PendingJoinRequest(jreq-1) = (%+v, %v), want retained as Cancelled", req, ok)
+	}
+}
+
+func TestFSM_Apply_CancelAlreadyApprovedPendingJoinRequestRejected(t *testing.T) {
+	fsm := NewFSM()
+	expires := time.Now().Add(15 * time.Minute).Unix()
+	fsm.Apply(&raft.Log{Index: 1, Data: mustMarshalCommand(t, createPendingJoinRequestCmd("jreq-1", "node02", "10.62.0.5:17600", "482913", expires))})
+	fsm.Apply(&raft.Log{Index: 2, Data: mustMarshalCommand(t, approvePendingJoinRequestCmd("jreq-1"))})
+
+	result := fsm.Apply(&raft.Log{Index: 3, Data: mustMarshalCommand(t, cancelPendingJoinRequestCmd("jreq-1"))})
+
+	if result.(*FSMApplyResult).Error == "" {
+		t.Fatalf("Error = empty, want a rejection for cancelling an already-approved request")
+	}
+}
+
+// TestFSM_Apply_PurgeJoinRequest_RemovesRegardlessOfStatus guards the
+// real distinction between Purge and Approve/Reject/Cancel: Purge
+// actually deletes the record, so it must work on a request in any
+// state, not just Pending.
+func TestFSM_Apply_PurgeJoinRequest_RemovesRegardlessOfStatus(t *testing.T) {
+	fsm := NewFSM()
+	expires := time.Now().Add(15 * time.Minute).Unix()
+	fsm.Apply(&raft.Log{Index: 1, Data: mustMarshalCommand(t, createPendingJoinRequestCmd("jreq-1", "node02", "10.62.0.5:17600", "482913", expires))})
+	fsm.Apply(&raft.Log{Index: 2, Data: mustMarshalCommand(t, rejectPendingJoinRequestCmd("jreq-1"))})
+
+	result := fsm.Apply(&raft.Log{Index: 3, Data: mustMarshalCommand(t, purgeJoinRequestCmd("jreq-1"))})
+
+	if result.(*FSMApplyResult).Error != "" {
+		t.Fatalf("Error = %q, want empty", result.(*FSMApplyResult).Error)
+	}
+	if _, ok := fsm.PendingJoinRequest("jreq-1"); ok {
+		t.Error("PendingJoinRequest(jreq-1) still present after PurgeJoinRequest")
+	}
+}
+
+// TestFSM_Apply_PurgeJoinRequest_MissingIsNotAnError mirrors
+// applyPurgeJail's own idempotent contract.
+func TestFSM_Apply_PurgeJoinRequest_MissingIsNotAnError(t *testing.T) {
+	fsm := NewFSM()
+
+	result := fsm.Apply(&raft.Log{Index: 1, Data: mustMarshalCommand(t, purgeJoinRequestCmd("no-such-request"))})
+
+	if result.(*FSMApplyResult).Error != "" {
+		t.Errorf("Error = %q, want empty (idempotent on an already-gone id)", result.(*FSMApplyResult).Error)
 	}
 }
 

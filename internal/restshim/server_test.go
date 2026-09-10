@@ -386,6 +386,14 @@ func (f *fakeClient) RejectJoinRequest(context.Context, *rpcpb.RejectJoinRequest
 	return &rpcpb.RejectJoinRequestResponse{}, nil
 }
 
+func (f *fakeClient) CancelJoinRequest(context.Context, *rpcpb.CancelJoinRequestRequest, ...grpc.CallOption) (*rpcpb.CancelJoinRequestResponse, error) {
+	return &rpcpb.CancelJoinRequestResponse{}, nil
+}
+
+func (f *fakeClient) PurgeJoinRequest(context.Context, *rpcpb.PurgeJoinRequestRequest, ...grpc.CallOption) (*rpcpb.PurgeJoinRequestResponse, error) {
+	return &rpcpb.PurgeJoinRequestResponse{}, nil
+}
+
 func (f *fakeClient) CreateJail(_ context.Context, in *rpcpb.CreateJailRequest, _ ...grpc.CallOption) (*rpcpb.CreateJailResponse, error) {
 	f.lastCreateJailReq = in
 	if f.createJailResp != nil {

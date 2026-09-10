@@ -171,6 +171,11 @@ type PeerForwarder interface {
 	RequestJoinColony(ctx context.Context, addr string, req *rpcpb.RequestJoinColonyRequest) (*rpcpb.RequestJoinColonyResponse, error)
 	ApproveJoinRequest(ctx context.Context, addr string, req *rpcpb.ApproveJoinRequestRequest) (*rpcpb.ApproveJoinRequestResponse, error)
 	RejectJoinRequest(ctx context.Context, addr string, req *rpcpb.RejectJoinRequestRequest) (*rpcpb.RejectJoinRequestResponse, error)
+
+	// CancelJoinRequest/PurgeJoinRequest mirror RequestJoinColony/
+	// ApproveJoinRequest/RejectJoinRequest above exactly.
+	CancelJoinRequest(ctx context.Context, addr string, req *rpcpb.CancelJoinRequestRequest) (*rpcpb.CancelJoinRequestResponse, error)
+	PurgeJoinRequest(ctx context.Context, addr string, req *rpcpb.PurgeJoinRequestRequest) (*rpcpb.PurgeJoinRequestResponse, error)
 }
 
 // reconcilerStats is the subset of *cluster.Reconciler the server needs

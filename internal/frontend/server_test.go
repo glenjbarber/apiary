@@ -27,6 +27,14 @@ type fakeClient struct {
 	getJailResp *rpcpb.GetJailResponse
 	getJailErr  error
 
+	cancelJoinRequestResp    *rpcpb.CancelJoinRequestResponse
+	lastCancelJoinRequestReq *rpcpb.CancelJoinRequestRequest
+
+	getJoinRequestStatusResp *rpcpb.GetJoinRequestStatusResponse
+
+	purgeJoinRequestResp    *rpcpb.PurgeJoinRequestResponse
+	lastPurgeJoinRequestReq *rpcpb.PurgeJoinRequestRequest
+
 	listResp *rpcpb.ListVMsResponse
 	listErr  error
 
@@ -526,6 +534,9 @@ func (f *fakeClient) RequestJoinColony(context.Context, *rpcpb.RequestJoinColony
 }
 
 func (f *fakeClient) GetJoinRequestStatus(context.Context, *rpcpb.GetJoinRequestStatusRequest, ...grpc.CallOption) (*rpcpb.GetJoinRequestStatusResponse, error) {
+	if f.getJoinRequestStatusResp != nil {
+		return f.getJoinRequestStatusResp, nil
+	}
 	return &rpcpb.GetJoinRequestStatusResponse{}, nil
 }
 
@@ -539,6 +550,22 @@ func (f *fakeClient) ApproveJoinRequest(context.Context, *rpcpb.ApproveJoinReque
 
 func (f *fakeClient) RejectJoinRequest(context.Context, *rpcpb.RejectJoinRequestRequest, ...grpc.CallOption) (*rpcpb.RejectJoinRequestResponse, error) {
 	return &rpcpb.RejectJoinRequestResponse{}, nil
+}
+
+func (f *fakeClient) CancelJoinRequest(_ context.Context, in *rpcpb.CancelJoinRequestRequest, _ ...grpc.CallOption) (*rpcpb.CancelJoinRequestResponse, error) {
+	f.lastCancelJoinRequestReq = in
+	if f.cancelJoinRequestResp != nil {
+		return f.cancelJoinRequestResp, nil
+	}
+	return &rpcpb.CancelJoinRequestResponse{}, nil
+}
+
+func (f *fakeClient) PurgeJoinRequest(_ context.Context, in *rpcpb.PurgeJoinRequestRequest, _ ...grpc.CallOption) (*rpcpb.PurgeJoinRequestResponse, error) {
+	f.lastPurgeJoinRequestReq = in
+	if f.purgeJoinRequestResp != nil {
+		return f.purgeJoinRequestResp, nil
+	}
+	return &rpcpb.PurgeJoinRequestResponse{}, nil
 }
 
 func (f *fakeClient) CreateJail(_ context.Context, in *rpcpb.CreateJailRequest, _ ...grpc.CallOption) (*rpcpb.CreateJailResponse, error) {
@@ -2635,5 +2662,95 @@ func TestServer_Login_SuccessDoesNotCountAsFailureTowardLockout(t *testing.T) {
 		if rec2.Code != http.StatusFound {
 			t.Fatalf("iteration %d: correct-password status = %d, want 302 (never locked out)", i, rec2.Code)
 		}
+	}
+}
+
+// TestServer_HandleCancelJoinRequest confirms the Machine page's
+// "Cancel request" form forwards the submitted request_id to
+// CancelJoinRequest and redirects back to a bare /machine (dropping
+// ?join_request_id= so the "Request to join" form shows fresh again).
+func TestServer_HandleCancelJoinRequest(t *testing.T) {
+	client := &fakeClient{}
+	s := newTestServer(t, client)
+
+	form := url.Values{"request_id": {"jreq-abc123"}}
+	req := httptest.NewRequest(http.MethodPost, "/machine/join-colony/cancel", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusFound {
+		t.Fatalf("status = %d, want 302; body=%s", rec.Code, rec.Body.String())
+	}
+	if got := rec.Header().Get("Location"); got != "/machine" {
+		t.Errorf("Location = %q, want /machine", got)
+	}
+	if client.lastCancelJoinRequestReq.GetRequestId() != "jreq-abc123" {
+		t.Errorf("CancelJoinRequest request_id = %q, want jreq-abc123", client.lastCancelJoinRequestReq.GetRequestId())
+	}
+}
+
+// TestServer_HandlePurgeJoinRequest confirms the landing page's
+// "Delete" button forwards the path id to PurgeJoinRequest and
+// redirects back to the landing page, mirroring Approve/Reject's own
+// redirect behavior.
+func TestServer_HandlePurgeJoinRequest(t *testing.T) {
+	client := &fakeClient{}
+	s := newTestServer(t, client)
+
+	req := httptest.NewRequest(http.MethodPost, "/join-requests/jreq-abc123/purge", nil)
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusFound {
+		t.Fatalf("status = %d, want 302; body=%s", rec.Code, rec.Body.String())
+	}
+	if got := rec.Header().Get("Location"); got != "/" {
+		t.Errorf("Location = %q, want /", got)
+	}
+	if client.lastPurgeJoinRequestReq.GetRequestId() != "jreq-abc123" {
+		t.Errorf("PurgeJoinRequest request_id = %q, want jreq-abc123", client.lastPurgeJoinRequestReq.GetRequestId())
+	}
+}
+
+// TestServer_HandlePurgeJoinRequest_ErrorRedirectsWithMessage mirrors
+// how Approve/Reject surface a failure - via ?join_request_error= on
+// the landing page redirect, not a direct error page.
+func TestServer_HandlePurgeJoinRequest_ErrorRedirectsWithMessage(t *testing.T) {
+	client := &fakeClient{purgeJoinRequestResp: &rpcpb.PurgeJoinRequestResponse{Error: "not the leader"}}
+	s := newTestServer(t, client)
+
+	req := httptest.NewRequest(http.MethodPost, "/join-requests/jreq-abc123/purge", nil)
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusFound {
+		t.Fatalf("status = %d, want 302; body=%s", rec.Code, rec.Body.String())
+	}
+	if loc := rec.Header().Get("Location"); !strings.Contains(loc, "join_request_error=") {
+		t.Errorf("Location = %q, want it to carry join_request_error=", loc)
+	}
+}
+
+// TestServer_MachinePage_JoinResultCancelled confirms the "cancelled"
+// status branch renders on the Machine page rather than falling
+// through unhandled.
+func TestServer_MachinePage_JoinResultCancelled(t *testing.T) {
+	client := &fakeClient{
+		getJoinRequestStatusResp: &rpcpb.GetJoinRequestStatusResponse{
+			Request: &rpcpb.PendingJoinRequest{RequestId: "jreq-abc123", Status: rpcpb.JoinRequestStatus_JOIN_REQUEST_STATUS_CANCELLED},
+		},
+	}
+	s := newTestServer(t, client)
+
+	req := httptest.NewRequest(http.MethodGet, "/machine?join_request_id=jreq-abc123", nil)
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "This request was cancelled") {
+		t.Errorf("machine page missing cancelled-state copy, got: %s", rec.Body.String())
 	}
 }

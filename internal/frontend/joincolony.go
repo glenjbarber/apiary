@@ -31,6 +31,8 @@ func fromRPCJoinRequest(r *rpcpb.PendingJoinRequest) joinRequestView {
 		status = "approved"
 	case rpcpb.JoinRequestStatus_JOIN_REQUEST_STATUS_REJECTED:
 		status = "rejected"
+	case rpcpb.JoinRequestStatus_JOIN_REQUEST_STATUS_CANCELLED:
+		status = "cancelled"
 	}
 	return joinRequestView{
 		RequestID:       r.GetRequestId(),
@@ -131,6 +133,32 @@ func (s *Server) handleApproveJoinRequest(w http.ResponseWriter, r *http.Request
 func (s *Server) handleRejectJoinRequest(w http.ResponseWriter, r *http.Request) {
 	resp, err := s.client.RejectJoinRequest(r.Context(), &rpcpb.RejectJoinRequestRequest{RequestId: r.PathValue("id")})
 	s.redirectAfterJoinRequestAction(w, r, resp.GetError(), err)
+}
+
+// handlePurgeJoinRequest implements the existing Colony's other
+// available action on a request - Admin-only, same redirect-back
+// pattern as Approve/Reject, but deletes the record outright rather
+// than marking it (see PurgeJoinRequest's own doc comment).
+func (s *Server) handlePurgeJoinRequest(w http.ResponseWriter, r *http.Request) {
+	resp, err := s.client.PurgeJoinRequest(r.Context(), &rpcpb.PurgeJoinRequestRequest{RequestId: r.PathValue("id")})
+	s.redirectAfterJoinRequestAction(w, r, resp.GetError(), err)
+}
+
+// handleCancelJoinRequest implements the joining Comb's own side -
+// POST /machine/join-colony/cancel, Admin-gated like every other
+// Machine page action. Redirects back to a bare /machine (no
+// ?join_request_id=) either way, so the "Request to join" form shows
+// again rather than continuing to poll a request that no longer needs
+// it - a cancel failure is rare enough (the request would have to have
+// already been resolved or expired) that showing the same fresh form
+// is a reasonable outcome for that case too, not just the success one.
+func (s *Server) handleCancelJoinRequest(w http.ResponseWriter, r *http.Request) {
+	if err := r.ParseForm(); err != nil {
+		http.Redirect(w, r, "/machine", http.StatusFound)
+		return
+	}
+	s.client.CancelJoinRequest(r.Context(), &rpcpb.CancelJoinRequestRequest{RequestId: r.FormValue("request_id")})
+	http.Redirect(w, r, "/machine", http.StatusFound)
 }
 
 func (s *Server) redirectAfterJoinRequestAction(w http.ResponseWriter, r *http.Request, rpcErr string, err error) {

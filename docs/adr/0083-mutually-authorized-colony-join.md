@@ -164,6 +164,44 @@ follower transition once an external leader calls `AddVoter`.
   panel: inherently Colony-wide membership state, the same page that
   already aggregates every current member. Admin-gated.
 
+### Added later: cancelling and purging a join request
+
+The original flow gave a requester exactly two outcomes once
+`RequestJoinColony` succeeded: wait for an Admin to Approve or Reject,
+or let the request expire after ~15 minutes. There was no way to back
+out early, and no way for an Admin to actually delete a stale or
+erroneous record - Reject only ever marks one Rejected, forever, the
+same as Approve marking one Approved.
+
+Two additions, both mirroring the existing shape exactly rather than
+introducing new patterns:
+
+- **`CancelJoinRequest`** - the requesting Comb's own self-service
+  withdrawal, deliberately unauthenticated for the identical reason
+  `RequestJoinColony`/`GetJoinRequestStatus` already are (the caller
+  has no Colony API key yet by definition). Adds
+  `JOIN_REQUEST_STATUS_CANCELLED` as a fourth terminal status,
+  reusing `applyResolvePendingJoinRequest`'s existing mark-not-delete
+  machinery unchanged - a request can only be cancelled while still
+  Pending, same validation Approve/Reject already enforce. The Machine
+  page's pending-status panel gained a "Cancel request" button
+  alongside the existing "Refresh status" link.
+- **`PurgeJoinRequest`** - Admin-gated (same tier as Approve/Reject/
+  List), and the one genuinely different operation here: it deletes
+  the record outright, regardless of current status, mirroring
+  `PurgeVM`/`PurgeJail`'s idempotent shape rather than
+  `RejectPendingJoinRequest`'s mark-only one. This is what actually
+  lets an Admin clean up a stale, erroneous, or long-resolved entry -
+  something Reject was never able to do, since it deliberately never
+  deletes anything. The landing page's pending-requests panel gained a
+  "Delete" button (with a confirm dialog explicitly naming the
+  difference from Reject) alongside Approve/Reject.
+
+Neither addition changes the original flow's trust model: `Cancel`
+only requires knowledge of `request_id`, the same bearer-capability
+already established for `GetJoinRequestStatus`; `Purge` sits at the
+same Admin tier as every other consequential action in this flow.
+
 ## Consequences
 
 - A fresh host's path into an existing Colony no longer needs an SSH

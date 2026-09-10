@@ -1377,6 +1377,90 @@ func TestIntegration_RejectJoinRequest_ExcludedFromListAfterward(t *testing.T) {
 	}
 }
 
+// TestIntegration_CancelJoinRequest_NoCredentialNeeded mirrors
+// TestIntegration_RequestJoinColony_NoCredentialNeeded - Cancel is the
+// requesting Comb's own action, so it must work with no API key too.
+func TestIntegration_CancelJoinRequest_NoCredentialNeeded(t *testing.T) {
+	raftdSocket := newRaftdUDSSocket(t)
+	client := newManagerdRPCClient(t, raftdSocket)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	reqResp, err := client.RequestJoinColony(ctx, &rpcpb.RequestJoinColonyRequest{NodeId: "node04", RaftBindAddress: "10.62.0.7:17600"})
+	if err != nil || reqResp.GetError() != "" {
+		t.Fatalf("RequestJoinColony() = (%+v, %v)", reqResp, err)
+	}
+
+	cancelResp, err := client.CancelJoinRequest(ctx, &rpcpb.CancelJoinRequestRequest{RequestId: reqResp.GetRequestId()})
+	if err != nil {
+		t.Fatalf("CancelJoinRequest() error: %v", err)
+	}
+	if cancelResp.GetError() != "" {
+		t.Fatalf("CancelJoinRequest() returned error: %s", cancelResp.GetError())
+	}
+	if cancelResp.GetRequest().GetStatus() != rpcpb.JoinRequestStatus_JOIN_REQUEST_STATUS_CANCELLED {
+		t.Errorf("CancelJoinRequest() status = %v, want Cancelled", cancelResp.GetRequest().GetStatus())
+	}
+
+	statusResp, err := client.GetJoinRequestStatus(ctx, &rpcpb.GetJoinRequestStatusRequest{RequestId: reqResp.GetRequestId()})
+	if err != nil {
+		t.Fatalf("GetJoinRequestStatus() error: %v", err)
+	}
+	if statusResp.GetRequest().GetStatus() != rpcpb.JoinRequestStatus_JOIN_REQUEST_STATUS_CANCELLED {
+		t.Errorf("GetJoinRequestStatus() after cancel = %+v, want Cancelled retained", statusResp.GetRequest())
+	}
+}
+
+// TestIntegration_PurgeJoinRequest_RemovesRecordEntirely confirms the
+// real distinction from Cancel/Reject: after Purge, even
+// GetJoinRequestStatus (which normally still resolves a terminal
+// state) can no longer find the record at all.
+func TestIntegration_PurgeJoinRequest_RemovesRecordEntirely(t *testing.T) {
+	raftdSocket := newRaftdUDSSocket(t)
+	client := newManagerdRPCClient(t, raftdSocket)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	reqResp, err := client.RequestJoinColony(ctx, &rpcpb.RequestJoinColonyRequest{NodeId: "node05", RaftBindAddress: "10.62.0.8:17600"})
+	if err != nil || reqResp.GetError() != "" {
+		t.Fatalf("RequestJoinColony() = (%+v, %v)", reqResp, err)
+	}
+
+	purgeResp, err := client.PurgeJoinRequest(ctx, &rpcpb.PurgeJoinRequestRequest{RequestId: reqResp.GetRequestId()})
+	if err != nil {
+		t.Fatalf("PurgeJoinRequest() error: %v", err)
+	}
+	if purgeResp.GetError() != "" {
+		t.Fatalf("PurgeJoinRequest() returned error: %s", purgeResp.GetError())
+	}
+
+	statusResp, err := client.GetJoinRequestStatus(ctx, &rpcpb.GetJoinRequestStatusRequest{RequestId: reqResp.GetRequestId()})
+	if err != nil {
+		t.Fatalf("GetJoinRequestStatus() error: %v", err)
+	}
+	if statusResp.GetError() == "" {
+		t.Errorf("GetJoinRequestStatus() after purge = %+v, want a not-found error, not a resolved record", statusResp)
+	}
+}
+
+func TestIntegration_PurgeJoinRequest_MissingIsNotAnError(t *testing.T) {
+	raftdSocket := newRaftdUDSSocket(t)
+	client := newManagerdRPCClient(t, raftdSocket)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	resp, err := client.PurgeJoinRequest(ctx, &rpcpb.PurgeJoinRequestRequest{RequestId: "no-such-request"})
+	if err != nil {
+		t.Fatalf("PurgeJoinRequest() error: %v", err)
+	}
+	if resp.GetError() != "" {
+		t.Errorf("PurgeJoinRequest() error = %q, want empty (idempotent on an already-gone id)", resp.GetError())
+	}
+}
+
 func TestIntegration_DeleteNetworkStillReferencedByVMIsRejected(t *testing.T) {
 	raftdSocket := newRaftdUDSSocket(t)
 	client := newManagerdRPCClient(t, raftdSocket)

@@ -222,10 +222,16 @@
           <p>Your code: <strong style="font-size:1.4em; letter-spacing:0.1em;">{{.JoinColonyResult.Code}}</strong></p>
           <p class="muted">Compare this against the code shown on the Colony's own "Pending join requests" panel - but before they approve, get this Comb into the right state: wipe its own raft state (<code>raftd -reset yes-wipe-raft-state</code>) and restart <code>raftd</code> with <code>-await-join</code> so it is genuinely listening at the raft-bind address above but has not formed a cluster of its own. Confirm it is up, <em>then</em> have the Admin approve - approving while this Comb is still running its own standalone-bootstrapped cluster (or isn't listening yet) can destabilize the Colony's existing leadership.</p>
           <p class="muted"><a href="/machine?join_request_id={{.JoinColonyResult.RequestID}}">Refresh status</a>.</p>
+          <form method="post" action="/machine/join-colony/cancel">
+            <input type="hidden" name="request_id" value="{{.JoinColonyResult.RequestID}}">
+            <button type="submit" class="danger">Cancel request</button>
+          </form>
           {{else if eq .JoinColonyResult.Status "approved"}}
           <p class="muted">Approved - this Comb has been added as a raft voter. If it was already restarted with <code>-await-join</code> as described above, it will join the Colony automatically with no further action. If not, do that now (<code>raftd -reset yes-wipe-raft-state</code>, then restart with <code>-await-join</code>) and it will join as soon as it comes up.</p>
           {{else if eq .JoinColonyResult.Status "rejected"}}
           <p class="muted">This request was rejected. Nothing about this Comb's own state has changed.</p>
+          {{else if eq .JoinColonyResult.Status "cancelled"}}
+          <p class="muted">This request was cancelled. Nothing about this Comb's own state has changed.</p>
           {{end}}
         </div>
       {{end}}
