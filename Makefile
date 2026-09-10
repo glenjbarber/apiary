@@ -57,4 +57,8 @@ setup-pam:
 setup-quick: setup
 	pkg install -y go git sudo
 	./apiaryinstall -apply -apply-network yes-modify-network -zfs-pool zroot \
-		-vlan-uplink vtnet0 -bhyve-bridge bridge0
+		-vlan-uplink vtnet0 -bhyve-bridge bridge0 ;\
+	for S in ${SRCS} ; \
+		do mkdir -p /usr/local/libexec/apiary/$$S ;\
+		cp -p $$S /usr/local/libexec/apiary/$$S ;\
+	done
