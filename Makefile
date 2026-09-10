@@ -20,15 +20,17 @@ clean:
 # setup installs the pieces a fresh host needs beyond the built binaries
 # themselves: the log/run/data directories every apiary_* rc.d script or
 # daemon expects to already exist, the rc.d scripts (etc/rc.d/apiary_*),
-# and a PAM policy file for the frontend's real login - see
-# docs/bootstrap.md's Step 11 for the full walkthrough this mirrors,
-# including why the PAM file is written with printf rather than a
-# pasted heredoc (tab corruption).
+# a PAM policy file for real login, and a TLS certificate for
+# managerd's external API (required before -pam-service is even
+# accepted - ADR-0087) - see docs/bootstrap.md's Step 11 for the full
+# manual walkthrough this mirrors, including why the PAM file is
+# written with printf rather than a pasted heredoc (tab corruption).
 # Safe to re-run: the directories/rc.d scripts/sysrc enables are always
-# refreshed to match this checkout, but the PAM file is only written if
-# absent, so a later hand-edited /etc/pam.d/apiary is never clobbered
-# by a re-run.
-setup: setup-dirs setup-rcd setup-pam
+# refreshed to match this checkout, but the PAM file and TLS cert are
+# only written if absent, so a later hand-edited /etc/pam.d/apiary or a
+# real (non-self-signed) certificate dropped in NODE_TLS_DIR is never
+# clobbered by a re-run.
+setup: setup-dirs setup-rcd setup-pam setup-tls
 
 # setup-dirs mirrors docs/bootstrap.md's own manual `mkdir -p` step.
 # /var/log/apiary is the one genuine gap: every apiary_* rc.d script's
@@ -54,6 +56,28 @@ setup-pam:
 		sudo sh -c "printf 'auth required pam_unix.so no_warn\\naccount required pam_unix.so\\n' > /etc/pam.d/${PAM_SERVICE}"
 	@echo "PAM policy at /etc/pam.d/${PAM_SERVICE} - pass -pam-service ${PAM_SERVICE} to managerd to enable real login; the first successful login becomes Admin automatically (see docs/bootstrap.md Step 11)."
 
+NODE_TLS_DIR?=	/usr/local/etc/apiary-tls
+
+# setup-tls generates a self-signed certificate for managerd's external
+# API if NODE_TLS_DIR doesn't already have one - only written if
+# absent, so a real (CA-issued) certificate placed there instead is
+# never clobbered by a re-run. Must carry a Subject Alternative Name,
+# not just a CN: Go's TLS client has ignored CN-only certs for
+# hostname verification since 1.15, and every daemon that dials
+# managerd (frontend/restshimd) defaults to 127.0.0.1, so that IP is
+# the one SAN that actually matters for the common single-node case -
+# confirmed live: a CN-only cert, and separately a cert missing this
+# specific IP SAN, both failed real verification with distinct,
+# individually-confusing x509 errors before this was added.
+setup-tls:
+	sudo mkdir -p ${NODE_TLS_DIR}
+	test -f ${NODE_TLS_DIR}/cert.pem -a -f ${NODE_TLS_DIR}/key.pem || \
+		sudo openssl req -x509 -newkey rsa:2048 -nodes -days 3650 \
+			-keyout ${NODE_TLS_DIR}/key.pem -out ${NODE_TLS_DIR}/cert.pem \
+			-subj "/CN=$$(hostname)" \
+			-addext "subjectAltName=IP:127.0.0.1,DNS:$$(hostname)"
+	@echo "TLS cert at ${NODE_TLS_DIR}/cert.pem (self-signed, only written if absent - drop a real certificate/key at this path before running setup to use one instead)."
+
 NODE_ZFS_POOL?=		zroot
 NODE_VLAN_UPLINK?=	vtnet0
 NODE_BHYVE_BRIDGE?=	bridge0
@@ -75,15 +99,24 @@ NODE_REST_ADDR?=	0.0.0.0:8081
 # - the package only sometimes carries the real .fd file itself,
 # edk2-bhyve usually carries it instead).
 # NODE_ZFS_POOL/NODE_VLAN_UPLINK/NODE_BHYVE_BRIDGE/NODE_RPC_ADDR/
-# NODE_HTTP_ADDR/NODE_REST_ADDR override the defaults for a host that
-# doesn't match this one's layout, e.g. `make setup-quick
-# NODE_VLAN_UPLINK=em0 NODE_HTTP_ADDR=10.62.0.2:8080`.
+# NODE_HTTP_ADDR/NODE_REST_ADDR/NODE_TLS_DIR/PAM_SERVICE override the
+# defaults for a host that doesn't match this one's layout, e.g.
+# `make setup-quick NODE_VLAN_UPLINK=em0 NODE_HTTP_ADDR=10.62.0.2:8080`.
 #
-# Deliberately does NOT set -pam-service: managerd refuses to start
-# with it set unless -tls-cert/-tls-key are also configured (ADR-0087),
-# and setup-quick issues no certificates - real login stays an
-# explicit, separate step (docs/bootstrap.md Step 11), exactly like a
-# manual bring-up.
+# Real login is enabled by default now: setup (a prerequisite, via
+# setup-tls/setup-pam) already provisions both a TLS certificate and a
+# PAM policy file unconditionally, so the one thing that used to block
+# -pam-service (ADR-0087's TLS requirement) is always satisfied by the
+# time this runs. frontend/restshimd both get -manager-tls plus
+# -manager-tls-ca pointed at the same certificate, since a self-signed
+# cert has no public CA to verify against otherwise - confirmed live,
+# working through this exact chain of TLS failures one at a time
+# (missing SAN, then unknown authority) before landing here.
+# Still your job, right after this finishes: create a real UNIX
+# account (`pw useradd -n <username> -m -s /bin/sh; passwd <username>`)
+# and log in immediately - the first successful login on a Comb with
+# no role map yet becomes Admin automatically (ADR-0086), so whoever
+# logs in first wins.
 setup-quick:
 	pkg install -y go git sudo
 	${MAKE} setup
@@ -96,7 +129,7 @@ setup-quick:
 	done
 	BOOTROM=$$(test -f /usr/local/share/uefi-firmware/BHYVE_UEFI.fd && echo /usr/local/share/uefi-firmware/BHYVE_UEFI.fd || pkg info -l edk2-bhyve 2>/dev/null | grep '\.fd$$' | head -1) ;\
 	test -n "$$BOOTROM" || { echo "could not locate a bhyve UEFI firmware .fd file - install bhyve-firmware/edk2-bhyve and re-run" >&2 ; exit 1 ; } ;\
-	sudo sysrc apiary_managerd_args="-rpc-addr ${NODE_RPC_ADDR} -bhyve-bootrom $$BOOTROM -bhyve-bridge ${NODE_BHYVE_BRIDGE} -vlan-uplink ${NODE_VLAN_UPLINK}"
-	sudo sysrc apiary_frontend_args="-http-addr ${NODE_HTTP_ADDR}"
-	sudo sysrc apiary_restshimd_args="-http-addr ${NODE_REST_ADDR}"
-	@echo "apiary_managerd_args/apiary_frontend_args/apiary_restshimd_args set (no -pam-service - see docs/bootstrap.md Step 11 to add real login once -tls-cert/-tls-key are configured)."
+	sudo sysrc apiary_managerd_args="-rpc-addr ${NODE_RPC_ADDR} -bhyve-bootrom $$BOOTROM -bhyve-bridge ${NODE_BHYVE_BRIDGE} -vlan-uplink ${NODE_VLAN_UPLINK} -tls-cert ${NODE_TLS_DIR}/cert.pem -tls-key ${NODE_TLS_DIR}/key.pem -pam-service ${PAM_SERVICE}"
+	sudo sysrc apiary_frontend_args="-http-addr ${NODE_HTTP_ADDR} -manager-tls -manager-tls-ca ${NODE_TLS_DIR}/cert.pem"
+	sudo sysrc apiary_restshimd_args="-http-addr ${NODE_REST_ADDR} -manager-tls -manager-tls-ca ${NODE_TLS_DIR}/cert.pem"
+	@echo "apiary_managerd_args/apiary_frontend_args/apiary_restshimd_args set, including real login (-pam-service ${PAM_SERVICE}). Create a real UNIX account and log in right away: whoever logs in first on a Comb with no role map yet becomes Admin automatically (ADR-0086)."
