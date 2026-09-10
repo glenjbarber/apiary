@@ -701,7 +701,7 @@ each design decision, in order.
   pool present, `pf` enabled with an `apiary/*` anchor, a bridge for the
   uplink NIC, `/etc/rc.conf` permissions, PAM/HAST setup) is now a single
   command to check, with `-apply` to fix the safe ones automatically.
-  Creating or modifying a bridge and enslaving the uplink NIC to it is
+  Creating or modifying a bridge and attaching the uplink NIC to it is
   gated behind its own separate, exact-phrase-confirmed flag
   (`-apply-network yes-modify-network`) rather than the general `-apply`,
   since ADR-0022 already documents a real near-miss from exactly that

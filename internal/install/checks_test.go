@@ -472,14 +472,14 @@ func TestBhyveBridgeCheck(t *testing.T) {
 	r2.on("ifconfig bridge0", fakeResponse{stdout: "bridge0: flags=...\n\tmember: em1 flags=...\n"})
 	res2 := bhyveBridgeCheck.Probe(ctx, r2, opt)
 	if res2.Status != StatusMisconfigured {
-		t.Fatalf("status = %v, want misconfigured when uplink not enslaved", res2.Status)
+		t.Fatalf("status = %v, want misconfigured when uplink not attached", res2.Status)
 	}
 
 	r3 := newFakeRunner()
 	r3.on("ifconfig bridge0", fakeResponse{stdout: "bridge0: flags=...\n\tmember: em0 flags=...\n"})
 	res3 := bhyveBridgeCheck.Probe(ctx, r3, opt)
 	if res3.Status != StatusOK {
-		t.Fatalf("status = %v, want ok when uplink enslaved", res3.Status)
+		t.Fatalf("status = %v, want ok when uplink attached", res3.Status)
 	}
 }
 

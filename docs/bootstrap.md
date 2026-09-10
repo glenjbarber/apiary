@@ -382,7 +382,7 @@ real things to know before creating one:
 **Free the uplink from `apiaryinstall`'s fallback bridge first.**
 `bridge0` (from Step 4, `-bhyve-bridge`) is only ever a fallback for a
 VM with no managed network attached. An untagged (`VLAN ID 0`) managed
-network enslaves the same uplink NIC directly into its *own*,
+network attaches the same uplink NIC directly into its *own*,
 separately auto-named bridge (`apnet-<hash>`) - and a FreeBSD interface
 can only belong to one bridge at a time. If you already ran Step 4, free
 the uplink before creating your first network:

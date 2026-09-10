@@ -19,7 +19,7 @@ import (
 )
 
 // networkChangeConfirmPhrase is the exact value -apply-network must be
-// given to actually create/modify a bridge interface and enslave the
+// given to actually create/modify a bridge interface and attach the
 // uplink NIC to it. Matches cmd/raftd's -reset/-restore precedent: the
 // flag's own value IS the phrase, so a bare -apply-network with no value
 // (or the wrong value) does nothing. ADR-0022 documents a live incident
@@ -35,7 +35,7 @@ func main() {
 
 func run() error {
 	apply := flag.Bool("apply", false, "perform RiskSafe fixes for any check that isn't ok (kldload+persist, pkg install, sysrc, chmod, pf.conf anchor) - never touches network topology, see -apply-network")
-	applyNetwork := flag.String("apply-network", "", fmt.Sprintf("create/modify the bhyve bridge and enslave -vlan-uplink to it - a real risk to this host's own network reachability (ADR-0022). Must be exactly %q or nothing happens", networkChangeConfirmPhrase))
+	applyNetwork := flag.String("apply-network", "", fmt.Sprintf("create/modify the bhyve bridge and attach -vlan-uplink to it - a real risk to this host's own network reachability (ADR-0022). Must be exactly %q or nothing happens", networkChangeConfirmPhrase))
 	zfsPool := flag.String("zfs-pool", "zroot", "ZFS pool Apiary's datasets should live under")
 	zfsBase := flag.String("zfs-base", "", "dataset managerd's own -zfs-base provisions VM/jail datasets under (default \"<zfs-pool>/apiary\", matching managerd's own default) - a fresh pool has no child datasets yet, so this is checked separately from -zfs-pool")
 	bhyveFirmwarePkg := flag.String("bhyve-firmware-pkg", "bhyve-firmware", "package providing bhyve's UEFI firmware")

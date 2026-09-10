@@ -493,7 +493,7 @@ var vlanUplinkCheck = Check{
 
 var bhyveBridgeCheck = Check{
 	ID:          "bhyve-bridge",
-	Description: "the bhyve bridge (-bhyve-bridge) exists and has the uplink NIC (-vlan-uplink) enslaved to it",
+	Description: "the bhyve bridge (-bhyve-bridge) exists and has the uplink NIC (-vlan-uplink) attached to it",
 	Risk:        RiskNetwork,
 	Applicable:  func(opt Options) bool { return opt.BhyveBridge != "" && opt.VLANUplink != "" },
 	Probe: func(ctx context.Context, r Runner, opt Options) Result {
@@ -505,10 +505,10 @@ var bhyveBridgeCheck = Check{
 		}
 		if !strings.Contains(out, "member: "+opt.VLANUplink) {
 			return Result{ID: "bhyve-bridge", Status: StatusMisconfigured,
-				Detail:  opt.BhyveBridge + " exists but does not have " + opt.VLANUplink + " enslaved",
+				Detail:  opt.BhyveBridge + " exists but does not have " + opt.VLANUplink + " attached",
 				FixHint: fmt.Sprintf("ifconfig %s addm %s", opt.BhyveBridge, opt.VLANUplink)}
 		}
-		return Result{ID: "bhyve-bridge", Status: StatusOK, Detail: fmt.Sprintf("%s has %s enslaved", opt.BhyveBridge, opt.VLANUplink)}
+		return Result{ID: "bhyve-bridge", Status: StatusOK, Detail: fmt.Sprintf("%s has %s attached", opt.BhyveBridge, opt.VLANUplink)}
 	},
 	Apply: func(ctx context.Context, r Runner, opt Options) error {
 		if _, _, err := r.Run(ctx, "ifconfig", opt.BhyveBridge); err != nil {

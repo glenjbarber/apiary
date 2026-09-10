@@ -12,7 +12,7 @@ never checked in code: `vmm.ko`/`nmdm.ko` loaded (ADR-0032), `bhyve-firmware`
 and `dnsmasq` installed (ADR-0022), a ZFS pool present (ADR-0006), `pf`
 enabled with an `anchor "apiary/*"` stanza reserved (ADR-0022,
 `internal/pf`'s own package doc comment), `gateway_enable`/IP forwarding for
-self-hosted NAT (ADR-0048), a bridge interface enslaving the real uplink NIC
+self-hosted NAT (ADR-0048), a bridge interface attaching the real uplink NIC
 (ADR-0022), `/etc/rc.conf` not being group/world readable (ADR-0067, which
 found it world-readable in production with a live `-peer-api-key` secret),
 and PAM/`hastd` setup (ADR-0030, ADR-0026). None of it is verified anywhere
@@ -56,7 +56,7 @@ testability without a real FreeBSD host.
   `/etc/pf.conf` (after writing a `.bak` copy first - the first place in
   this codebase that mutates one of the three files ADR-0069 only ever
   reads, so the same backup-before-mutate caution applies with more force).
-- **`RiskNetwork`** - creating/modifying a bridge interface and enslaving
+- **`RiskNetwork`** - creating/modifying a bridge interface and attaching
   the uplink NIC to it. ADR-0022's own text describes a live incident where
   exactly this operation nearly cost the operator their SSH session
   ("rollback was cancelled with time to spare"). This tier never runs under

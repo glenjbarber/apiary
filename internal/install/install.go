@@ -13,7 +13,7 @@
 // Every check is tiered by Risk. RiskSafe fixes (kldload, pkg install,
 // sysrc, chmod, appending a known-safe config line after taking a backup)
 // run under a plain -apply. RiskNetwork - creating or modifying a bridge
-// interface and enslaving the uplink NIC to it - never runs under -apply
+// interface and attaching the uplink NIC to it - never runs under -apply
 // alone: ADR-0022 documents a live incident where exactly this operation
 // nearly cost the operator their own SSH session, so it requires its own
 // separate, exact-phrase-gated flag (mirroring cmd/raftd's -reset/-restore
