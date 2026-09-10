@@ -136,6 +136,7 @@ setup-quick:
 	@echo "apiary_managerd_args/apiary_frontend_args/apiary_restshimd_args set, including real login (-pam-service ${PAM_SERVICE}). Start the services (service apiary_raftd start && service apiary_managerd start && service apiary_frontend start && service apiary_restshimd start), then log in as ${NODE_ADMIN_USER} right away: whoever logs in first on a Comb with no role map yet becomes Admin automatically (ADR-0086)."
 
 NODE_ADMIN_USER?=	admin
+NODE_ROLE_MAP?=		/var/db/apiary/frontend-role-map.json
 
 # setup-admin creates NODE_ADMIN_USER and prompts for its password
 # interactively via passwd(1) - a single-node bring-up's whole point is
@@ -146,7 +147,23 @@ NODE_ADMIN_USER?=	admin
 # same "only act if absent" contract setup-pam/setup-tls already
 # follow. To rotate an existing account's password instead, run
 # `passwd ${NODE_ADMIN_USER}` directly.
+#
+# Checks NODE_ROLE_MAP's own contents before doing anything else - a
+# real gap found live: the first version of this target only checked
+# whether the UNIX account already existed, so it happily created one
+# and set its password even when ADR-0086's own bootstrap condition
+# (the role map genuinely empty) no longer held, leaving a real
+# account whose first login could never become Admin - "no Apiary role
+# is assigned to this account" instead. The role map, once it exists
+# at all, is a small `{"role_map": {...}}` file written by
+# applyRoleMapLocked (internal/frontend/server.go); stripping
+# whitespace before matching handles both its own pretty-printed form
+# and a hand-edited compact one identically.
 setup-admin:
+	if [ -f ${NODE_ROLE_MAP} ] && ! tr -d ' \t\n' < ${NODE_ROLE_MAP} | grep -qE '"role_map":(\{\}|null)' ; then \
+		echo "${NODE_ROLE_MAP} already has role entries - a new ${NODE_ADMIN_USER} login would NOT automatically become Admin (ADR-0086 only bootstraps while the role map is genuinely empty). Skipping account setup - grant a role through /users as an existing Admin instead." >&2 ; \
+		exit 0 ; \
+	fi ; \
 	pw usershow ${NODE_ADMIN_USER} >/dev/null 2>&1 && \
 		echo "user ${NODE_ADMIN_USER} already exists - not touching its password (run passwd ${NODE_ADMIN_USER} directly to change it)" || \
 		{ sudo pw useradd -n ${NODE_ADMIN_USER} -m -s /bin/sh && sudo passwd ${NODE_ADMIN_USER} ; }
