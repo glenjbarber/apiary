@@ -112,14 +112,15 @@ NODE_REST_ADDR?=	0.0.0.0:8081
 # cert has no public CA to verify against otherwise - confirmed live,
 # working through this exact chain of TLS failures one at a time
 # (missing SAN, then unknown authority) before landing here.
-# Still your job, right after this finishes: create a real UNIX
-# account (`pw useradd -n <username> -m -s /bin/sh; passwd <username>`)
-# and log in immediately - the first successful login on a Comb with
-# no role map yet becomes Admin automatically (ADR-0086), so whoever
-# logs in first wins.
+# setup-admin (below) creates the actual UNIX account and prompts for
+# its password interactively, so there's no separate manual step left
+# before logging in - just start the services and log in as
+# NODE_ADMIN_USER right away, since the first successful login on a
+# Comb with no role map yet becomes Admin automatically (ADR-0086).
 setup-quick:
 	pkg install -y go git sudo
 	${MAKE} setup
+	${MAKE} setup-admin
 	./apiaryinstall -apply -apply-network yes-modify-network -zfs-pool ${NODE_ZFS_POOL} \
 		-vlan-uplink ${NODE_VLAN_UPLINK} -bhyve-bridge ${NODE_BHYVE_BRIDGE}
 	sudo mkdir -p /usr/local/libexec/apiary
@@ -132,4 +133,20 @@ setup-quick:
 	sudo sysrc apiary_managerd_args="-rpc-addr ${NODE_RPC_ADDR} -bhyve-bootrom $$BOOTROM -bhyve-bridge ${NODE_BHYVE_BRIDGE} -vlan-uplink ${NODE_VLAN_UPLINK} -tls-cert ${NODE_TLS_DIR}/cert.pem -tls-key ${NODE_TLS_DIR}/key.pem -pam-service ${PAM_SERVICE}"
 	sudo sysrc apiary_frontend_args="-http-addr ${NODE_HTTP_ADDR} -manager-tls -manager-tls-ca ${NODE_TLS_DIR}/cert.pem"
 	sudo sysrc apiary_restshimd_args="-http-addr ${NODE_REST_ADDR} -manager-tls -manager-tls-ca ${NODE_TLS_DIR}/cert.pem"
-	@echo "apiary_managerd_args/apiary_frontend_args/apiary_restshimd_args set, including real login (-pam-service ${PAM_SERVICE}). Create a real UNIX account and log in right away: whoever logs in first on a Comb with no role map yet becomes Admin automatically (ADR-0086)."
+	@echo "apiary_managerd_args/apiary_frontend_args/apiary_restshimd_args set, including real login (-pam-service ${PAM_SERVICE}). Start the services (service apiary_raftd start && service apiary_managerd start && service apiary_frontend start && service apiary_restshimd start), then log in as ${NODE_ADMIN_USER} right away: whoever logs in first on a Comb with no role map yet becomes Admin automatically (ADR-0086)."
+
+NODE_ADMIN_USER?=	admin
+
+# setup-admin creates NODE_ADMIN_USER and prompts for its password
+# interactively via passwd(1) - a single-node bring-up's whole point is
+# to end with one working login, not a manual pw useradd/passwd
+# afterward. Only runs useradd/passwd when the account doesn't already
+# exist: re-running setup-quick (or setup-admin directly) must never
+# silently reset an existing admin's password out from under them, the
+# same "only act if absent" contract setup-pam/setup-tls already
+# follow. To rotate an existing account's password instead, run
+# `passwd ${NODE_ADMIN_USER}` directly.
+setup-admin:
+	pw usershow ${NODE_ADMIN_USER} >/dev/null 2>&1 && \
+		echo "user ${NODE_ADMIN_USER} already exists - not touching its password (run passwd ${NODE_ADMIN_USER} directly to change it)" || \
+		{ sudo pw useradd -n ${NODE_ADMIN_USER} -m -s /bin/sh && sudo passwd ${NODE_ADMIN_USER} ; }
