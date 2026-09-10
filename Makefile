@@ -18,14 +18,31 @@ clean:
 	done
 
 # setup installs the pieces a fresh host needs beyond the built binaries
-# themselves: the rc.d scripts (etc/rc.d/apiary_*) and a PAM policy file
-# for the frontend's real login - see docs/bootstrap.md's Step 11 for
-# the full walkthrough this mirrors, including why the PAM file is
-# written with printf rather than a pasted heredoc (tab corruption).
-# Safe to re-run: the rc.d scripts/sysrc enables are always refreshed to
-# match this checkout, but the PAM file is only written if absent, so a
-# later hand-edited /etc/pam.d/apiary is never clobbered by a re-run.
-setup: setup-rcd setup-pam
+# themselves: the log/run/data directories every apiary_* rc.d script or
+# daemon expects to already exist, the rc.d scripts (etc/rc.d/apiary_*),
+# and a PAM policy file for the frontend's real login - see
+# docs/bootstrap.md's Step 11 for the full walkthrough this mirrors,
+# including why the PAM file is written with printf rather than a
+# pasted heredoc (tab corruption).
+# Safe to re-run: the directories/rc.d scripts/sysrc enables are always
+# refreshed to match this checkout, but the PAM file is only written if
+# absent, so a later hand-edited /etc/pam.d/apiary is never clobbered
+# by a re-run.
+setup: setup-dirs setup-rcd setup-pam
+
+# setup-dirs mirrors docs/bootstrap.md's own manual `mkdir -p` step.
+# /var/log/apiary is the one genuine gap: every apiary_* rc.d script's
+# daemon(8) invocation opens its logfile there immediately on start,
+# before the daemon binary itself ever runs, so nothing in the Go code
+# can create it lazily the way raftd's own socket dir (/var/run/apiary)
+# or isostore's data dir (/var/db/apiary/isos) already do at their own
+# startup - a first `service apiary_raftd start` on a truly fresh host
+# fails outright without this. Created here anyway, alongside the
+# others, so one target covers every directory bootstrap.md's manual
+# step lists rather than leaving an operator to remember which
+# directories are and aren't self-creating.
+setup-dirs:
+	sudo mkdir -p /var/db/apiary/raftd /var/db/apiary/isos /var/run/apiary /var/log/apiary
 
 setup-rcd:
 	sudo cp etc/rc.d/apiary_* /usr/local/etc/rc.d/
