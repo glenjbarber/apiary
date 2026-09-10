@@ -61,4 +61,5 @@ setup-quick: setup
 	for S in ${SRCS} ; \
 		do mkdir -p /usr/local/libexec/apiary/$$S ;\
 		cp -p $$S /usr/local/libexec/apiary/$$S ;\
+		chmod +x /usr/local/libexec/apiary/$$S ;\
 	done
