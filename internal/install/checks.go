@@ -13,7 +13,6 @@ import (
 // (not consts) purely so tests can point them at a temp file instead of
 // a real host's own /etc/rc.conf and /etc/pf.conf.
 var (
-	rcConfPath       = "/etc/rc.conf"
 	pfConfPath       = "/etc/pf.conf"
 	devdDhclientPath = "/etc/devd/dhclient.conf"
 )
@@ -38,7 +37,6 @@ var registry = []Check{
 	pfAnchorCheck,
 	pfEnabledCheck,
 	gatewayEnableCheck,
-	rcConfPermsCheck,
 	vlanUplinkCheck,
 	bhyveBridgeCheck,
 	devdDhclientConflictCheck,
@@ -475,33 +473,6 @@ var gatewayEnableCheck = Check{
 			if _, stderr, err := r.Run(ctx, "sysctl", "net.inet.ip.forwarding=1"); err != nil {
 				return fmt.Errorf("sysctl net.inet.ip.forwarding=1: %s", firstNonEmpty(stderr, err))
 			}
-		}
-		return nil
-	},
-}
-
-// ---- rc.conf permissions ----
-
-var rcConfPermsCheck = Check{
-	ID:          "rcconf-perms",
-	Description: "/etc/rc.conf is not group/world readable (ADR-0067: it can carry a live -peer-api-key secret)",
-	Risk:        RiskSafe,
-	Applicable:  always,
-	Probe: func(ctx context.Context, r Runner, opt Options) Result {
-		info, err := os.Stat(rcConfPath)
-		if err != nil {
-			return Result{ID: "rcconf-perms", Status: StatusUnknown, Detail: err.Error()}
-		}
-		if info.Mode().Perm()&0o077 != 0 {
-			return Result{ID: "rcconf-perms", Status: StatusMisconfigured,
-				Detail:  fmt.Sprintf("mode %04o is group/world accessible", info.Mode().Perm()),
-				FixHint: "chmod 600 " + rcConfPath}
-		}
-		return Result{ID: "rcconf-perms", Status: StatusOK, Detail: fmt.Sprintf("mode %04o", info.Mode().Perm())}
-	},
-	Apply: func(ctx context.Context, r Runner, opt Options) error {
-		if err := os.Chmod(rcConfPath, 0o600); err != nil {
-			return fmt.Errorf("chmod 600 %s: %w", rcConfPath, err)
 		}
 		return nil
 	},

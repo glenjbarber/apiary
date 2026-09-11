@@ -426,31 +426,6 @@ func TestPFAnchorCheckMissingFile(t *testing.T) {
 	}
 }
 
-func TestRCConfPermsCheck(t *testing.T) {
-	ctx := context.Background()
-	dir := t.TempDir()
-	path := filepath.Join(dir, "rc.conf")
-	old := rcConfPath
-	rcConfPath = path
-	defer func() { rcConfPath = old }()
-
-	if err := os.WriteFile(path, []byte("hostname=test\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	res := rcConfPermsCheck.Probe(ctx, newFakeRunner(), Options{})
-	if res.Status != StatusMisconfigured {
-		t.Fatalf("status = %v, want misconfigured for mode 0644", res.Status)
-	}
-
-	if err := rcConfPermsCheck.Apply(ctx, newFakeRunner(), Options{}); err != nil {
-		t.Fatalf("apply: %v", err)
-	}
-	res = rcConfPermsCheck.Probe(ctx, newFakeRunner(), Options{})
-	if res.Status != StatusOK {
-		t.Fatalf("status = %v, want ok after chmod 600", res.Status)
-	}
-}
-
 func TestBhyveBridgeCheck(t *testing.T) {
 	ctx := context.Background()
 	opt := Options{BhyveBridge: "bridge0", VLANUplink: "em0"}

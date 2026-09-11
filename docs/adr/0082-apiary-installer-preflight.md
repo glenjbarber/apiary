@@ -13,9 +13,7 @@ and `dnsmasq` installed (ADR-0022), a ZFS pool present (ADR-0006), `pf`
 enabled with an `anchor "apiary/*"` stanza reserved (ADR-0022,
 `internal/pf`'s own package doc comment), `gateway_enable`/IP forwarding for
 self-hosted NAT (ADR-0048), a bridge interface attaching the real uplink NIC
-(ADR-0022), `/etc/rc.conf` not being group/world readable (ADR-0067, which
-found it world-readable in production with a live `-peer-api-key` secret),
-and PAM/`hastd` setup (ADR-0030, ADR-0026). None of it is verified anywhere
+(ADR-0022), and PAM/`hastd` setup (ADR-0030, ADR-0026). None of it is verified anywhere
 today - `internal/bhyve.CreateVM` will happily try to exec `bhyve` even if
 `vmm.ko` isn't loaded and fail with a raw, unfriendly exec error; every
 other package behaves the same way.
@@ -52,7 +50,7 @@ testability without a real FreeBSD host.
 
 - **`RiskSafe`** - runs under a plain `-apply`. Idempotent, low-blast-radius
   changes only: `kldload`+persisting to `kld_list`, `pkg install`, `sysrc`
-  assignments, `chmod 600 /etc/rc.conf`, appending the `apiary/*` anchor to
+  assignments, appending the `apiary/*` anchor to
   `/etc/pf.conf` (after writing a `.bak` copy first - the first place in
   this codebase that mutates one of the three files ADR-0069 only ever
   reads, so the same backup-before-mutate caution applies with more force).
@@ -101,3 +99,17 @@ concerns, not this host's).
 - PAM, ZFS pool layout, and the `hastd` patch stay permanently
   operator-owned - `apiaryinstall` will always tell you they're missing,
   never attempt them, so there is no future expectation to walk back.
+
+## Correction (2026-09-11)
+
+The `rcconf-perms` check (`chmod 600 /etc/rc.conf`, cited above as a
+`RiskSafe` example) has been removed. Mode 600 was never actually a
+documented security decision of this ADR - it was operational follow-up
+language from ADR-0067's audit finding, folded into this tool without
+being named as a real default change. 644 is FreeBSD's own stock default
+for `/etc/rc.conf`; enforcing 600 changed that default rather than fixing
+a vulnerability, and is not something `apiaryinstall` should do on a
+caller's behalf. The underlying secret-in-plaintext concern ADR-0067
+raised (a live `-peer-api-key` readable by any local user) is still real,
+but its fix is key rotation/storage, not a file-permission deviation from
+the OS default.
