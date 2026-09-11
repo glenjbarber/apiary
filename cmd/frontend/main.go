@@ -106,6 +106,7 @@ func run() error {
 	tlsCert := flag.String("tls-cert", "", "PEM certificate file to serve the web UI over HTTPS; leave unset (with -tls-key) to serve plaintext HTTP, as before")
 	tlsKey := flag.String("tls-key", "", "PEM private key file matching -tls-cert")
 	peerTLS := flag.Bool("peer-tls", false, "dial other cluster nodes' managerd over TLS when fetching their host stats for the cluster overview page; requires each peer's managerd to also be TLS-enabled with a certificate matching its own hostname (node ID + -peer-hostname-suffix)")
+	peerTLSCA := flag.String("peer-tls-ca", "", "PEM file trusted INSTEAD OF the system certificate pool when dialing a peer over TLS (ADR-0093) - the peer-forwarding equivalent of -manager-tls-ca, needed when peers present self-signed certificates rather than a real, publicly-trusted one; leave empty to trust the system pool. Only consulted when -peer-tls is set. May list more than one peer's certificate concatenated in one file")
 	peerHostnameSuffix := flag.String("peer-hostname-suffix", "", "appended to a node ID to form its managerd hostname for the cluster overview page (e.g. \".apiary.work\" so node ID \"freebsd-apiary\" dials \"freebsd-apiary.apiary.work\"); leave empty if node IDs are already fully-qualified hostnames")
 	peerManagerPort := flag.String("peer-manager-port", "17700", "port assumed for a peer node's managerd external API when fetching its host stats")
 	flag.Parse()
@@ -175,6 +176,13 @@ func run() error {
 	// grants) rather than needing a second, separately-configured
 	// credential.
 	peers := manager.NewPeerReporter(os.Getenv("APIARY_MANAGER_API_KEY"), *peerTLS, nil)
+	if *peerTLSCA != "" {
+		pool, err := manager.LoadPeerCAPool(*peerTLSCA)
+		if err != nil {
+			return fmt.Errorf("frontend: %w", err)
+		}
+		peers.CAPool = pool
+	}
 
 	// Validated before NewServer, not after, so the session cookie's
 	// Secure flag (set from tlsEnabled - see NewServer/handleLogin) is

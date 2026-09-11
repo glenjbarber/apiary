@@ -520,6 +520,7 @@
         </select>
       </td></tr>
       <tr><th>Peer TLS hostname map</th><td><input type="text" name="peer_tls_hostname_map" placeholder="10.50.0.9=apiverse.apiary.work,..." value="{{.NodeConfig.PeerTLSHostnameMap}}" title="Comma-separated ip=hostname pairs used to verify each peer Comb's TLS certificate by name instead of by IP."></td></tr>
+      <tr><th>Peer TLS CA</th><td><input type="text" name="peer_tls_ca" placeholder="/usr/local/etc/apiary-tls/peer-ca.pem" value="{{.NodeConfig.PeerTLSCA}}" title="Path to a PEM file trusted instead of the system certificate pool when dialing a peer over TLS - needed when peers present self-signed certificates rather than a real, publicly-trusted one. May contain more than one peer's certificate concatenated together. Leave blank to trust the system pool."></td></tr>
       <tr><th>Peer API key</th><td>
         {{if .NodeConfig.PeerAPIKeySet}}<span class="badge true">set</span>{{else}}<span class="badge unknown">not set</span>{{end}}
         <input type="password" name="peer_api_key" placeholder="new value - leave blank to keep current" autocomplete="off" title="Shared secret other Combs present when forwarding a request here. Write-only - never shown again once saved; leave blank to keep the current value.">
@@ -535,6 +536,7 @@
     <tr><th>Peer managerd port</th><td>{{if .NodeConfig.PeerManagerdPort}}{{.NodeConfig.PeerManagerdPort}}{{else}}<em>(uses this node's own rpc-addr port)</em>{{end}}</td></tr>
     <tr><th>Peer TLS</th><td>{{.NodeConfig.PeerTLSStatus}}</td></tr>
     <tr><th>Peer TLS hostname map</th><td>{{if .NodeConfig.PeerTLSHostnameMap}}<code>{{.NodeConfig.PeerTLSHostnameMap}}</code>{{else}}<em>(unset)</em>{{end}}</td></tr>
+    <tr><th>Peer TLS CA</th><td>{{if .NodeConfig.PeerTLSCA}}<code>{{.NodeConfig.PeerTLSCA}}</code>{{else}}<em>(trusts the system pool)</em>{{end}}</td></tr>
     <tr><th>Peer API key</th><td>{{if .NodeConfig.PeerAPIKeySet}}<span class="badge true">set</span>{{else}}<span class="badge unknown">not set</span>{{end}}</td></tr>
   </tbody>
 </table>

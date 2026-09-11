@@ -3,12 +3,24 @@ package manager
 import (
 	"bytes"
 	"context"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/tls"
+	"crypto/x509"
+	"crypto/x509/pkix"
+	"encoding/pem"
 	"fmt"
 	"io"
+	"math/big"
 	"net"
+	"os"
+	"path/filepath"
 	"testing"
+	"time"
 
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/metadata"
 
 	rpcpb "github.com/glenjbarber/apiary/api/rpc"
@@ -591,6 +603,125 @@ func TestPeerReporter_TLSDialFailsAgainstPlaintextServer(t *testing.T) {
 
 	if _, err := p.ListVMs(context.Background(), addr); err == nil {
 		t.Fatal("ListVMs() over TLS against a plaintext server = nil error, want a handshake failure")
+	}
+}
+
+// genSelfSignedCert returns a real, valid self-signed certificate and
+// its matching private key, both in PEM form - generated fresh per
+// test rather than hand-written, since a hand-crafted PEM/DER blob is
+// easy to get subtly wrong in a way that only matters at parse time.
+// Mirrors internal/tlsdial's own test helper, extended to also return
+// the private key so a real TLS server can actually be started with it.
+func genSelfSignedCert(t *testing.T) (certPEM, keyPEM []byte) {
+	t.Helper()
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatalf("GenerateKey() error: %v", err)
+	}
+	tmpl := &x509.Certificate{
+		SerialNumber: big.NewInt(1),
+		Subject:      pkix.Name{Organization: []string{"apiary-test"}},
+		NotBefore:    time.Now().Add(-time.Hour),
+		NotAfter:     time.Now().Add(time.Hour),
+		KeyUsage:     x509.KeyUsageDigitalSignature | x509.KeyUsageCertSign,
+		IsCA:         true,
+		DNSNames:     []string{"127.0.0.1"},
+		IPAddresses:  []net.IP{net.ParseIP("127.0.0.1")},
+	}
+	der, err := x509.CreateCertificate(rand.Reader, tmpl, tmpl, &key.PublicKey, key)
+	if err != nil {
+		t.Fatalf("CreateCertificate() error: %v", err)
+	}
+	certPEM = pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der})
+	keyDER, err := x509.MarshalECPrivateKey(key)
+	if err != nil {
+		t.Fatalf("MarshalECPrivateKey() error: %v", err)
+	}
+	keyPEM = pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: keyDER})
+	return certPEM, keyPEM
+}
+
+// newTestPeerServerTLS mirrors newTestPeerServer but serves over real
+// TLS using a freshly generated, self-signed certificate - the
+// returned certPath (a PEM file containing just that certificate) lets
+// a test load it via LoadPeerCAPool to prove CAPool (ADR-0093) is what
+// actually makes an otherwise-untrusted self-signed peer certificate
+// verify successfully, closing the gap TestPeerReporter_TLSDialFailsAgainstPlaintextServer
+// doesn't cover (a real TLS handshake against a real cert, not just
+// "TLS was attempted at all").
+func newTestPeerServerTLS(t *testing.T, fake *fakePeerServer) (addr, certPath string) {
+	t.Helper()
+	certPEM, keyPEM := genSelfSignedCert(t)
+	cert, err := tls.X509KeyPair(certPEM, keyPEM)
+	if err != nil {
+		t.Fatalf("X509KeyPair() error: %v", err)
+	}
+	lis, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listening: %v", err)
+	}
+	creds := credentials.NewTLS(&tls.Config{Certificates: []tls.Certificate{cert}})
+	srv := grpc.NewServer(grpc.Creds(creds))
+	rpcpb.RegisterManagerServiceServer(srv, fake)
+	go srv.Serve(lis)
+	t.Cleanup(srv.Stop)
+
+	dir := t.TempDir()
+	certPath = filepath.Join(dir, "peer-ca.pem")
+	if err := os.WriteFile(certPath, certPEM, 0o644); err != nil {
+		t.Fatalf("WriteFile() error: %v", err)
+	}
+	return lis.Addr().String(), certPath
+}
+
+// TestPeerReporter_TLSWithNoCAPoolFailsAgainstSelfSignedCert confirms
+// the pre-ADR-0093 gap directly: dialing a real self-signed peer
+// certificate with no CAPool configured (system-pool verification, the
+// zero value) must fail - the system pool has no reason to trust a
+// certificate this project generated itself. This is the exact failure
+// a real user hit joining two freshly-bootstrapped Combs together.
+func TestPeerReporter_TLSWithNoCAPoolFailsAgainstSelfSignedCert(t *testing.T) {
+	fake := &fakePeerServer{listVMsResp: &rpcpb.ListVMsResponse{}}
+	addr, _ := newTestPeerServerTLS(t, fake)
+	p := NewPeerReporter("", true, nil)
+
+	if _, err := p.ListVMs(context.Background(), addr); err == nil {
+		t.Fatal("ListVMs() with no CAPool against a self-signed cert = nil error, want a verification failure")
+	}
+}
+
+// TestPeerReporter_TLSWithCAPoolTrustsSelfSignedCert is ADR-0093's own
+// regression test: loading the peer's own self-signed certificate as
+// CAPool must make the identical dial that just failed above succeed.
+func TestPeerReporter_TLSWithCAPoolTrustsSelfSignedCert(t *testing.T) {
+	fake := &fakePeerServer{listVMsResp: &rpcpb.ListVMsResponse{}}
+	addr, certPath := newTestPeerServerTLS(t, fake)
+	pool, err := LoadPeerCAPool(certPath)
+	if err != nil {
+		t.Fatalf("LoadPeerCAPool() error: %v", err)
+	}
+	p := NewPeerReporter("", true, nil)
+	p.CAPool = pool
+
+	if _, err := p.ListVMs(context.Background(), addr); err != nil {
+		t.Fatalf("ListVMs() with CAPool trusting the peer's own cert error: %v, want success", err)
+	}
+}
+
+func TestLoadPeerCAPool_MissingFileErrors(t *testing.T) {
+	if _, err := LoadPeerCAPool("/nonexistent/peer-ca.pem"); err == nil {
+		t.Error("LoadPeerCAPool(missing file) = nil error, want an error")
+	}
+}
+
+func TestLoadPeerCAPool_MalformedFileErrors(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "peer-ca.pem")
+	if err := os.WriteFile(path, []byte("not a real certificate"), 0o644); err != nil {
+		t.Fatalf("WriteFile() error: %v", err)
+	}
+	if _, err := LoadPeerCAPool(path); err == nil {
+		t.Error("LoadPeerCAPool(malformed file) = nil error, want an error")
 	}
 }
 

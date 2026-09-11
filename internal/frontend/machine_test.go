@@ -485,7 +485,7 @@ func TestServer_UpdatePeerForwarding_ForwardsFieldsAndSecret(t *testing.T) {
 	client := &fakeClient{updateNodeConfigResp: &rpcpb.UpdateNodeConfigResponse{}}
 	s := newTestServer(t, client)
 
-	form := url.Values{"peer_managerd_port": {"17700"}, "peer_tls": {"enabled"}, "peer_tls_hostname_map": {"10.50.0.9=apiverse.apiary.work"}, "peer_api_key": {"new-secret-key"}}
+	form := url.Values{"peer_managerd_port": {"17700"}, "peer_tls": {"enabled"}, "peer_tls_hostname_map": {"10.50.0.9=apiverse.apiary.work"}, "peer_tls_ca": {"/usr/local/etc/apiary-tls/peer-ca.pem"}, "peer_api_key": {"new-secret-key"}}
 	req := httptest.NewRequest(http.MethodPost, "/machine/peer-forwarding", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	rec := httptest.NewRecorder()
@@ -495,7 +495,7 @@ func TestServer_UpdatePeerForwarding_ForwardsFieldsAndSecret(t *testing.T) {
 		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
 	}
 	got := client.lastUpdateNodeConfigReq
-	if got.GetPeerManagerdPort() != "17700" || got.PeerTls == nil || !got.GetPeerTls() || got.GetPeerTlsHostnameMap() != "10.50.0.9=apiverse.apiary.work" || got.GetPeerApiKey() != "new-secret-key" {
+	if got.GetPeerManagerdPort() != "17700" || got.PeerTls == nil || !got.GetPeerTls() || got.GetPeerTlsHostnameMap() != "10.50.0.9=apiverse.apiary.work" || got.GetPeerTlsCa() != "/usr/local/etc/apiary-tls/peer-ca.pem" || got.GetPeerApiKey() != "new-secret-key" {
 		t.Errorf("forwarded request = %+v, want peer forwarding fields and new key set", got)
 	}
 	if rec.Body.String() == "" || strings.Contains(rec.Body.String(), "new-secret-key") {
