@@ -411,8 +411,25 @@ type VMDefinition struct {
 	// raw TCP or HTTPS-origin). Meaningless when cloudflare_hostname is
 	// empty.
 	CloudflarePort uint32 `protobuf:"varint,18,opt,name=cloudflare_port,json=cloudflarePort,proto3" json:"cloudflare_port,omitempty"`
-	unknownFields  protoimpl.UnknownFields
-	sizeCache      protoimpl.SizeCache
+	// clone_from_snapshot (ADR-0095), if set, is "<source_vm_id>@<snapshot_name>"
+	// (the same combined form internal/zfs.Manager.Clone/SnapshotExists
+	// already take) naming an existing VM snapshot (ADR-0090) to clone
+	// this VM's own dataset from, instead of creating a blank one - the
+	// reconciler resolves and clones it exactly once, only when this
+	// VM's dataset doesn't exist yet (mirrors base_image_name's own
+	// "seeded only on first creation, never re-seeded" rule). The clone
+	// is a plain `zfs clone`, local to whichever node ends up owning
+	// this VM - there is no cross-node fetch if the source snapshot
+	// lives on a different node (mirrors ADR-0084's jail base_template,
+	// which has the same node-local limitation, disclosed rather than
+	// silently handled). Mutually exclusive with both replica_node_id
+	// (a HAST-replicated VM's disk is a raw device, not a cloneable ZFS
+	// dataset) and base_image_name (two different ways to seed the same
+	// disk - only one can apply). Empty means today's behavior (a blank
+	// disk, or base_image_name's own file copy if that's set instead).
+	CloneFromSnapshot string `protobuf:"bytes,19,opt,name=clone_from_snapshot,json=cloneFromSnapshot,proto3" json:"clone_from_snapshot,omitempty"`
+	unknownFields     protoimpl.UnknownFields
+	sizeCache         protoimpl.SizeCache
 }
 
 func (x *VMDefinition) Reset() {
@@ -569,6 +586,13 @@ func (x *VMDefinition) GetCloudflarePort() uint32 {
 		return x.CloudflarePort
 	}
 	return 0
+}
+
+func (x *VMDefinition) GetCloneFromSnapshot() string {
+	if x != nil {
+		return x.CloneFromSnapshot
+	}
+	return ""
 }
 
 // JailDefinition is a jail's ephemeral definition, deliberately minimal
@@ -3233,7 +3257,7 @@ var File_api_internalpb_state_proto protoreflect.FileDescriptor
 
 const file_api_internalpb_state_proto_rawDesc = "" +
 	"\n" +
-	"\x1aapi/internalpb/state.proto\x12\x12apiary.internal.v1\"\xaa\x05\n" +
+	"\x1aapi/internalpb/state.proto\x12\x12apiary.internal.v1\"\xda\x05\n" +
 	"\fVMDefinition\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x14\n" +
@@ -3257,7 +3281,8 @@ const file_api_internalpb_state_proto_rawDesc = "" +
 	"\x0fbase_image_name\x18\x0f \x01(\tR\rbaseImageName\x12'\n" +
 	"\x0ffirewall_paused\x18\x10 \x01(\bR\x0efirewallPaused\x12/\n" +
 	"\x13cloudflare_hostname\x18\x11 \x01(\tR\x12cloudflareHostname\x12'\n" +
-	"\x0fcloudflare_port\x18\x12 \x01(\rR\x0ecloudflarePort\"\xd0\x02\n" +
+	"\x0fcloudflare_port\x18\x12 \x01(\rR\x0ecloudflarePort\x12.\n" +
+	"\x13clone_from_snapshot\x18\x13 \x01(\tR\x11cloneFromSnapshot\"\xd0\x02\n" +
 	"\x0eJailDefinition\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x1a\n" +

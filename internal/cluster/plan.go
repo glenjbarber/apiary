@@ -81,6 +81,15 @@ type VMPlacement struct {
 	// Ignored once the disk file already exists.
 	BaseImageName string
 
+	// CloneFromSnapshot (ADR-0095), if set, is "<source_vm_id>@<snapshot_name>"
+	// naming an existing VM snapshot (ADR-0090) the reconciler should
+	// `zfs clone` this VM's own dataset from the first time it creates
+	// it, instead of creating a blank one. Node-local only - no
+	// cross-node fetch if the source snapshot lives elsewhere (mirrors
+	// ADR-0084's jail base_template). Mutually exclusive with both
+	// ReplicaNodeID and BaseImageName.
+	CloneFromSnapshot string
+
 	// CloudflareHostname/CloudflarePort, when hostname is set, name a
 	// public hostname this VM's own HTTP service (on port) should be
 	// reachable at via a pre-provisioned Cloudflare Tunnel on its

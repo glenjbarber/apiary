@@ -500,6 +500,11 @@ message VMDefinition {
   // SetVMCloudflareExposure, never via UpdateVM.
   string cloudflare_hostname = 17;
   uint32 cloudflare_port = 18;
+
+  // clone_from_snapshot (ADR-0095) mirrors api/internalpb's own
+  // VMDefinition field - see its doc comment for the full semantics.
+  // "<source_vm_id>@<snapshot_name>"; only consulted on first creation.
+  string clone_from_snapshot = 19;
 }
 
 // JailState mirrors api/internalpb's JailState.

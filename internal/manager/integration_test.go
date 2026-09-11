@@ -696,6 +696,31 @@ func TestIntegration_SimulateNodeFailure_ReportsImageUnavailableAfterOnlySourceH
 	}
 }
 
+// TestIntegration_CreateVM_CloneFromSnapshotRoundTrips is ADR-0095's own
+// direct regression test for the toInternalVM/fromInternalVM threading -
+// a real CreateVM+GetVM round trip through raftd confirms the field
+// survives both conversions, not just a mock/unit-level check.
+func TestIntegration_CreateVM_CloneFromSnapshotRoundTrips(t *testing.T) {
+	raftdSocket := newRaftdUDSSocket(t)
+	client := newManagerdRPCClient(t, raftdSocket)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if _, err := client.CreateVM(ctx, &rpcpb.CreateVMRequest{Vm: &rpcpb.VMDefinition{
+		Id: "vm-clone", Name: "cloned-vm", NodeId: "raftd-1", CloneFromSnapshot: "vm-1@before-upgrade",
+	}}); err != nil {
+		t.Fatalf("CreateVM() error: %v", err)
+	}
+
+	getResp, err := client.GetVM(ctx, &rpcpb.GetVMRequest{Id: "vm-clone"})
+	if err != nil || !getResp.GetFound() {
+		t.Fatalf("GetVM() = (found=%v, err=%v), want the VM to exist", getResp.GetFound(), err)
+	}
+	if got := getResp.GetVm().GetCloneFromSnapshot(); got != "vm-1@before-upgrade" {
+		t.Errorf("GetVM().CloneFromSnapshot = %q, want vm-1@before-upgrade", got)
+	}
+}
+
 func TestIntegration_SimulateNetworkFailure_ReportsAttachedVMs(t *testing.T) {
 	raftdSocket := newRaftdUDSSocket(t)
 	client := newManagerdRPCClient(t, raftdSocket)

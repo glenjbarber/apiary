@@ -232,6 +232,11 @@ type pageData struct {
 	// present on the currently-selected node.
 	ClusterISOs []isoRowView
 
+	// CloneSources (ADR-0095) lists every known VM with at least one
+	// snapshot, for the create-VM form's "clone from snapshot" cascading
+	// dropdowns - source VM, then one of its snapshots.
+	CloneSources []cloneSourceView
+
 	// NodeConfig/NodeConfigFormError back the Machine Configuration
 	// page's uplink section (ADR-0049) - GetNodeConfig's current
 	// snapshot and any Update error, rendered the same way
@@ -546,10 +551,11 @@ func nodeSubtitle(nodeID string) string {
 // cookie's Secure flag.
 func NewServer(client rpcpb.ManagerServiceClient, auth Authenticator, roleMap map[string]manager.Role, peers peerHostStatsClient, peerHostnameSuffix, peerManagerPort string, passwords PasswordSetter, tlsEnabled bool) (*Server, error) {
 	tmpl, err := template.New("").Funcs(template.FuncMap{
-		"pageHeader":       pageHeader,
-		"vmSubtitle":       vmSubtitle,
-		"nodeSubtitle":     nodeSubtitle,
-		"isoMissingByNode": isoMissingByNode,
+		"pageHeader":               pageHeader,
+		"vmSubtitle":               vmSubtitle,
+		"nodeSubtitle":             nodeSubtitle,
+		"isoMissingByNode":         isoMissingByNode,
+		"cloneSourceSnapshotsJSON": cloneSourceSnapshotsJSON,
 	}).ParseFS(web.FS, "templates/*.html")
 	if err != nil {
 		return nil, fmt.Errorf("frontend: parsing templates: %w", err)
@@ -1193,7 +1199,9 @@ func (s *Server) handleNewVMPage(w http.ResponseWriter, r *http.Request) {
 	clusterISOs, _ := s.currentClusterISOs(r)
 	networks, _ := s.currentNetworks(r)
 	placements := s.currentPlacementHives(r, nodes, localNodeID)
-	s.render(w, "new_vm_page", s.withAuthFields(r, pageData{Nodes: nodes, LocalNodeID: localNodeID, ClusterISOs: clusterISOs, Networks: networks, PlacementHives: placements, ActivePage: "vms"}))
+	existingVMs, _ := s.currentVMs(r, "id", "asc")
+	cloneSources := s.currentCloneSources(r, existingVMs)
+	s.render(w, "new_vm_page", s.withAuthFields(r, pageData{Nodes: nodes, LocalNodeID: localNodeID, ClusterISOs: clusterISOs, Networks: networks, PlacementHives: placements, CloneSources: cloneSources, ActivePage: "vms"}))
 }
 
 // currentNetworks fetches the current list of networks, returning an
@@ -1374,19 +1382,32 @@ func (s *Server) handleCreateVM(w http.ResponseWriter, r *http.Request) {
 	vcpus, _ := strconv.ParseUint(r.FormValue("vcpus"), 10, 32)
 	memoryMB, _ := strconv.ParseUint(r.FormValue("memory_mb"), 10, 64)
 
+	// cloneFromSnapshot combines the create form's two cascading
+	// dropdowns (clone_source_vm_id, clone_snapshot_name - see
+	// new_vm.html's own JS) into the single "<id>@<name>" form
+	// CloneFromSnapshot/internal/zfs.Manager already expect (ADR-0095).
+	// Either alone (a snapshot name with no VM chosen, or vice versa)
+	// is treated as "not requested" rather than a malformed value -
+	// the dropdowns are cascading, so this only happens if JS never ran.
+	var cloneFromSnapshot string
+	if sourceVMID, snapshotName := r.FormValue("clone_source_vm_id"), r.FormValue("clone_snapshot_name"); sourceVMID != "" && snapshotName != "" {
+		cloneFromSnapshot = sourceVMID + "@" + snapshotName
+	}
+
 	resp, err := s.client.CreateVM(r.Context(), &rpcpb.CreateVMRequest{
 		Vm: &rpcpb.VMDefinition{
-			Id:            r.FormValue("id"),
-			Name:          r.FormValue("name"),
-			Vcpus:         uint32(vcpus),
-			MemoryMb:      memoryMB,
-			NodeId:        r.FormValue("node_id"),
-			DesiredState:  stateToRPC(r.FormValue("desired_state")),
-			IsoName:       r.FormValue("iso_name"),
-			BaseImageName: r.FormValue("base_image_name"),
-			NetworkId:     r.FormValue("network_id"),
-			ReplicaNodeId: r.FormValue("replica_node_id"),
-			FirewallRules: parseFirewallRuleRows(r),
+			Id:                r.FormValue("id"),
+			Name:              r.FormValue("name"),
+			Vcpus:             uint32(vcpus),
+			MemoryMb:          memoryMB,
+			NodeId:            r.FormValue("node_id"),
+			DesiredState:      stateToRPC(r.FormValue("desired_state")),
+			IsoName:           r.FormValue("iso_name"),
+			BaseImageName:     r.FormValue("base_image_name"),
+			CloneFromSnapshot: cloneFromSnapshot,
+			NetworkId:         r.FormValue("network_id"),
+			ReplicaNodeId:     r.FormValue("replica_node_id"),
+			FirewallRules:     parseFirewallRuleRows(r),
 		},
 	})
 	if err != nil {
