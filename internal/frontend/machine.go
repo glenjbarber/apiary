@@ -279,6 +279,7 @@ func (s *Server) nodeConfigUpdateRequest(r *http.Request) *rpcpb.UpdateNodeConfi
 
 		PeerManagerdPort:   cfg.PeerManagerdPort,
 		PeerTlsHostnameMap: cfg.PeerTLSHostnameMap,
+		PeerTlsCa:          cfg.PeerTLSCA,
 
 		TlsCert: cfg.TLSCert,
 		TlsKey:  cfg.TLSKey,
@@ -367,6 +368,9 @@ func (s *Server) nodeConfigUpdateRequest(r *http.Request) *rpcpb.UpdateNodeConfi
 	}
 	if r.Form.Has("peer_tls_hostname_map") {
 		req.PeerTlsHostnameMap = r.FormValue("peer_tls_hostname_map")
+	}
+	if r.Form.Has("peer_tls_ca") {
+		req.PeerTlsCa = r.FormValue("peer_tls_ca")
 	}
 	if r.Form.Has("peer_api_key") {
 		req.PeerApiKey = r.FormValue("peer_api_key")

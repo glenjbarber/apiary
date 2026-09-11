@@ -4,9 +4,11 @@ import (
 	"bytes"
 	"context"
 	"crypto/tls"
+	"crypto/x509"
 	"fmt"
 	"io"
 	"net"
+	"os"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
@@ -54,16 +56,48 @@ type PeerReporter struct {
 	// entry fails TLS verification loudly (dialing the bare IP against
 	// a hostname-only cert) rather than silently skipping verification.
 	PeerHostnames map[string]string
+
+	// CAPool (ADR-0093), if set, is trusted INSTEAD OF the system
+	// certificate pool when dialing a peer over TLS - the peer-forwarding
+	// equivalent of -manager-tls-ca (internal/tlsdial), needed when
+	// peers present self-signed certificates the system pool has no
+	// reason to trust. nil (the default) preserves system-pool
+	// verification, correct for real CA-issued certificates (ADR-0033).
+	// Set via LoadPeerCAPool and cmd/managerd's/cmd/frontend's own
+	// -peer-tls-ca flag - only consulted when UseTLS is true.
+	CAPool *x509.CertPool
 }
 
 func NewPeerReporter(apiKey string, useTLS bool, peerHostnames map[string]string) *PeerReporter {
 	return &PeerReporter{APIKey: apiKey, UseTLS: useTLS, PeerHostnames: peerHostnames}
 }
 
+// LoadPeerCAPool reads a PEM file - one or more concatenated
+// certificates, typically every known peer's own self-signed
+// certificate, or a real shared CA - for PeerReporter.CAPool. Mirrors
+// internal/tlsdial.ManagerDialOption's own CA-loading logic; kept local
+// rather than shared, since that package returns a single fixed
+// grpc.DialOption while PeerReporter needs a reusable *x509.CertPool it
+// applies fresh per address in its own dial().
+func LoadPeerCAPool(caFile string) (*x509.CertPool, error) {
+	pem, err := os.ReadFile(caFile)
+	if err != nil {
+		return nil, fmt.Errorf("reading peer CA file %s: %w", caFile, err)
+	}
+	pool := x509.NewCertPool()
+	if !pool.AppendCertsFromPEM(pem) {
+		return nil, fmt.Errorf("no valid certificates found in %s", caFile)
+	}
+	return pool, nil
+}
+
 func (p *PeerReporter) dial(addr string) (*grpc.ClientConn, rpcpb.ManagerServiceClient, error) {
 	var opts []grpc.DialOption
 	if p.UseTLS {
 		cfg := &tls.Config{}
+		if p.CAPool != nil {
+			cfg.RootCAs = p.CAPool
+		}
 		if host, _, err := net.SplitHostPort(addr); err == nil {
 			if name, ok := p.PeerHostnames[host]; ok {
 				cfg.ServerName = name

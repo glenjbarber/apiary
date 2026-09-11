@@ -83,6 +83,7 @@ func run() error {
 	peerManagerdPort := flag.String("peer-managerd-port", "", "port assumed for a peer node's managerd external API when forwarding (ADR-0029); defaults to this node's own -rpc-addr port, since every node in a real deployment is expected to use the same port")
 	peerTLS := flag.Bool("peer-tls", false, "dial peer managerds over TLS instead of plaintext when forwarding (ADR-0029/ADR-0035); requires every peer's managerd to also be TLS-enabled")
 	peerTLSHostnameMap := flag.String("peer-tls-hostname-map", "", "comma-separated ip=hostname pairs used to verify a peer's TLS certificate, since a raft leader_hint is always a bare address and a real cert is never issued for a bare IP (e.g. \"10.50.0.11=freebsd-apiary.apiary.work,10.50.0.12=freebsd-apiary2.apiary.work\"); only consulted when -peer-tls is set")
+	peerTLSCA := flag.String("peer-tls-ca", "", "PEM file trusted INSTEAD OF the system certificate pool when dialing a peer over TLS (ADR-0093) - the peer-forwarding equivalent of -manager-tls-ca, needed when peers present self-signed certificates rather than a real, publicly-trusted one (ADR-0033); leave empty to trust the system pool. Only consulted when -peer-tls is set. May list more than one peer's certificate concatenated in one file")
 	assumptionCheckInterval := flag.Duration("assumption-check-interval", 60*time.Second, "how often this node re-evaluates its Automated Assumption Checks (ADR-0055)")
 	assumptionHeartbeatInterval := flag.Duration("assumption-heartbeat-interval", time.Hour, "how often an unchanged assumption result still gets a fresh persisted history entry, so a real transition is never confused with routine ticking; must be >= -assumption-check-interval")
 	assumptionStaleAfterFlag := flag.Duration("assumption-stale-after", 0, "age past which ListAssumptionResults reports a result as effectively unknown regardless of its stored value; 0 defaults to 3x -assumption-check-interval")
@@ -181,6 +182,9 @@ func run() error {
 		}
 		if cfg.PeerTLSHostnameMap != "" {
 			*peerTLSHostnameMap = cfg.PeerTLSHostnameMap
+		}
+		if cfg.PeerTLSCA != "" {
+			*peerTLSCA = cfg.PeerTLSCA
 		}
 		if cfg.AssumptionCheckInterval != 0 {
 			*assumptionCheckInterval = cfg.AssumptionCheckInterval
@@ -285,6 +289,13 @@ func run() error {
 	// to the same leader managerd over the same authenticated API, so
 	// there's no reason for two separate peer clients/credentials.
 	peers := manager.NewPeerReporter(*peerAPIKey, *peerTLS, peerHostnames)
+	if *peerTLSCA != "" {
+		pool, err := manager.LoadPeerCAPool(*peerTLSCA)
+		if err != nil {
+			return fmt.Errorf("managerd: %w", err)
+		}
+		peers.CAPool = pool
+	}
 
 	zfsMgr := zfs.New(*zfsBase)
 	reconciler := &cluster.Reconciler{

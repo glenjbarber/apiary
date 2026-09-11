@@ -1219,6 +1219,14 @@ message GetNodeConfigResponse {
   string peer_managerd_port = 27;
   string peer_tls_hostname_map = 28;
 
+  // peer_tls_ca (ADR-0093) mirrors -peer-tls-ca: a PEM file trusted
+  // INSTEAD OF the system certificate pool when dialing a peer over
+  // TLS - the peer-forwarding equivalent of -manager-tls-ca, needed
+  // when peers present self-signed certificates (no real CA the system
+  // pool already trusts). Empty means trust the system pool, correct
+  // for real CA-issued certificates (ADR-0033).
+  string peer_tls_ca = 43;
+
   // peer_api_key_set/raftd_token_set report only whether a value is
   // currently saved for -peer-api-key/-raftd-token - the raw value
   // itself is never returned here or anywhere else. See
@@ -1293,6 +1301,10 @@ message UpdateNodeConfigRequest {
   optional bool peer_tls = 26;
   string peer_managerd_port = 27;
   string peer_tls_hostname_map = 28;
+
+  // peer_tls_ca (ADR-0093) mirrors -peer-tls-ca - see
+  // GetNodeConfigResponse's own doc comment for its full semantics.
+  string peer_tls_ca = 43;
 
   // peer_api_key/raftd_token, if non-empty, become the new saved
   // value - write-only, mirroring the Users page's own "leave blank to

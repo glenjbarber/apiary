@@ -138,6 +138,7 @@ func TestManager_SaveRejectsUnsafeNewFields(t *testing.T) {
 		CloudflareTunnelID:              "def-456",
 		PeerManagerdPort:                "17700",
 		PeerTLSHostnameMap:              "10.50.0.9=apiverse.apiary.work,10.50.0.14=apiarium.apiary.work",
+		PeerTLSCA:                       "/usr/local/etc/apiary-tls/peer-ca.pem",
 		ReconcileInterval:               30_000_000_000, // 30s in ns
 		AssumptionHistoryLimit:          200,
 	}

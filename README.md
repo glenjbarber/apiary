@@ -817,6 +817,16 @@ each design decision, in order.
   described design never actually got built to prevent). Status polling
   and Cancel now follow the same target automatically. See
   [ADR-0092](docs/adr/0092-join-colony-target-address.md).
+- **Peer-forwarding TLS can now trust self-signed certificates** — a
+  new `-peer-tls-ca` flag (`managerd`/`frontend`, also editable live on
+  the Machine page's "Peer forwarding" panel) is the peer-to-peer
+  equivalent of `-manager-tls-ca`: point it at a PEM file (one or more
+  peers' own certificates concatenated together) to trust instead of
+  the system pool. Without it, two Combs with self-signed certificates
+  could never successfully forward a peer RPC to each other at all -
+  found live while verifying ADR-0092: even a managerd dialing its own
+  address failed with `x509: certificate signed by unknown authority`.
+  See [ADR-0093](docs/adr/0093-peer-tls-ca-trust.md).
 - Importing VMs from other hypervisors (e.g. Proxmox): no disk-format
   conversion, and Apiary is UEFI-only. Linux containers have no path at
   all — jails share the host FreeBSD kernel

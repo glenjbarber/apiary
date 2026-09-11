@@ -132,6 +132,11 @@ type Config struct {
 	// PeerTLSHostnameMap mirrors -peer-tls-hostname-map.
 	PeerTLSHostnameMap string `json:"peer_tls_hostname_map,omitempty"`
 
+	// PeerTLSCA mirrors -peer-tls-ca (ADR-0093): a PEM file trusted
+	// instead of the system certificate pool when dialing a peer over
+	// TLS - needed when peers present self-signed certificates.
+	PeerTLSCA string `json:"peer_tls_ca,omitempty"`
+
 	// AssumptionCheckInterval/AssumptionHeartbeatInterval/
 	// AssumptionStaleAfter/AssumptionRunDeadline/AssumptionHistoryLimit/
 	// AssumptionHistoryMaxAge mirror the six -assumption-* flags -
