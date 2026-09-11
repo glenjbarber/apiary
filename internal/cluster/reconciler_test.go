@@ -1035,6 +1035,7 @@ func TestReconciler_RunOnce_CloneFromSnapshotWithReplicaNodeIsError(t *testing.T
 	}
 	zfs := newFakeDatasetManager()
 	zfs.snapshots["vm-1@before-upgrade"] = true
+	zfs.mountpointFor["hast-vm-vm-2"] = t.TempDir()
 
 	r := &Reconciler{Raft: raft, ZFS: zfs, Bhyve: newFakeVMManager(), HAST: newFakeHASTManager(), Mount: newFakeMountManager(), LocalNodeID: "node-a", BootROM: "/fw/UEFI.fd"}
 	if err := r.RunOnce(context.Background()); err == nil || !strings.Contains(err.Error(), "not supported together with replica_node_id") {
