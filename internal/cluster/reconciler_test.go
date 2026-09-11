@@ -1040,6 +1040,17 @@ func TestReconciler_RunOnce_CloneFromSnapshotWithReplicaNodeIsError(t *testing.T
 	if err := r.RunOnce(context.Background()); err == nil || !strings.Contains(err.Error(), "not supported together with replica_node_id") {
 		t.Fatalf("RunOnce() error: %v, want explicit unsupported-combination error", err)
 	}
+	// This VM's invalid combination must be caught before any HAST
+	// provider work happens for it - no dataset (including the HAST
+	// provider's own backing dataset) should ever get created for a VM
+	// that's about to fail validation anyway. No mountpoint is set up
+	// for "hast-vm-vm-2" above precisely so a regression here (HAST
+	// provisioning running before this validation) would try to create
+	// a real backing file at a bogus relative path and fail loudly
+	// instead of silently leaking a file onto disk.
+	if len(zfs.created) != 0 {
+		t.Errorf("CreateDataset called = %v, want none - HAST provisioning must not run before this VM's invalid combination is rejected", zfs.created)
+	}
 }
 
 // TestReconciler_RunOnce_CloneFromSnapshotWithBaseImageIsError confirms

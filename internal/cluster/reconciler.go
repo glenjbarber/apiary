@@ -606,7 +606,14 @@ func (r *Reconciler) RunOnce(ctx context.Context) (err error) {
 			// caught live: including it here raced its own teardown
 			// within one RunOnce, ensuring a provider that then got
 			// destroyed out from under it moments later (see ADR-0026).
-			if vm.ReplicaNodeID != "" && !vm.Deleting {
+			// A VM naming both CloneFromSnapshot and ReplicaNodeID is
+			// rejected by ensureVM's own validation below, but that runs
+			// per-VM only after this whole HAST pass - skip provisioning
+			// a real backing file for it here too, or the invalid VM
+			// still pays for a dataset/disk that's about to be an error
+			// anyway (caught live: a 20GiB sparse file got created on
+			// disk for a VM that RunOnce went on to reject outright).
+			if vm.ReplicaNodeID != "" && !vm.Deleting && vm.CloneFromSnapshot == "" {
 				roles = append(roles, hastRole{resourceName: vmHASTResourceName(vm.ID), peerNodeID: vm.ReplicaNodeID, sizeMB: r.diskSizeMB(), isPrimary: true})
 			}
 		}
