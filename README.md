@@ -827,18 +827,28 @@ each design decision, in order.
   found live while verifying ADR-0092: even a managerd dialing its own
   address failed with `x509: certificate signed by unknown authority`.
   See [ADR-0093](docs/adr/0093-peer-tls-ca-trust.md).
-- **Two new `apiaryinstall` preflight checks, found live on a real
+- **A new `apiaryinstall` preflight check, found live on a real
   reboot** — `dnsmasq-rc-enable` flags `dnsmasq_enable=YES` in
   `rc.conf`, which races Apiary's own `internal/dhcpd` (it already
   restarts dnsmasq itself on every network change) against the
   system's boot-time `rc.d` start, before `managerd`'s reconciler has
   had a chance to recreate the network interface dnsmasq is meant to
-  serve. `devd-dhclient-conflict` flags FreeBSD's stock
-  `/etc/devd/dhclient.conf` rule, which independently DHCPs a bridge
-  member NIC on every link-up (including every boot) - duplicating
-  `-bhyve-bridge`'s own DHCP-acquired address for the identical MAC,
-  confirmed live via two separate lease files both holding the same
-  address. Both are `apiaryinstall -apply`-fixable. See
+  serve. `apiaryinstall -apply`-fixable. A second check,
+  `devd-dhclient-conflict`, was also added after the same reboot -
+  disabling FreeBSD's stock `/etc/devd/dhclient.conf` rule, based on a
+  theory that it was independently DHCPing the bridged uplink NIC and
+  duplicating `-bhyve-bridge`'s own lease for the same MAC. That theory
+  was disproven immediately afterward: this host's own `dhcpif()`
+  logic (`/etc/network.subr`) refuses to start `dhclient` on an
+  interface with no `DHCP` token in its `ifconfig_<if>` value, and
+  devd's rule only ever calls `service dhclient quietstart` (not
+  `forcestart`), so it should never have been able to start it in the
+  first place - confirmed directly on the host (`dhcpif em0` returns
+  false). The real mechanism behind the duplicate lease (reproducible
+  on every boot since at least Sep 2) is still unidentified. The
+  `devd-dhclient-conflict` check and its live fix on `apiverse`/
+  `apiarium` are harmless either way, just not a confirmed fix for
+  anything. See
   [ADR-0094](docs/adr/0094-boot-time-network-robustness.md).
 - Importing VMs from other hypervisors (e.g. Proxmox): no disk-format
   conversion, and Apiary is UEFI-only. Linux containers have no path at
