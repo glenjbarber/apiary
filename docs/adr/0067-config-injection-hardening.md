@@ -130,7 +130,13 @@ constraint).
 
 ## Deferred
 
-Rotating the disclosed `-peer-api-key` and tightening `/etc/rc.conf`'s
-permissions on both Hives are live production changes, not a code fix,
-and are tracked as a separate operational follow-up rather than bundled
-into this commit.
+Rotating the disclosed `-peer-api-key` on both Hives is a live production
+change, not a code fix, and is tracked as a separate operational
+follow-up rather than bundled into this commit.
+
+`apiaryinstall` (ADR-0082) briefly enforced `chmod 600 /etc/rc.conf` as a
+follow-up to this finding, but that has been removed (see ADR-0082's
+2026-09-11 correction): 644 is FreeBSD's own stock default, and changing
+it was never actually a decision of this ADR, just unlabeled operational
+language. The plaintext-secret concern itself is still real and still
+unresolved - key rotation (above) is its actual fix.

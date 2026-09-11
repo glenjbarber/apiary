@@ -699,8 +699,8 @@ each design decision, in order.
   host prerequisite this project has ever disclosed only in ADR prose
   (`vmm.ko`/`nmdm.ko` loaded, `bhyve-firmware`/`dnsmasq` installed, a ZFS
   pool present, `pf` enabled with an `apiary/*` anchor, a bridge for the
-  uplink NIC, `/etc/rc.conf` permissions, PAM/HAST setup) is now a single
-  command to check, with `-apply` to fix the safe ones automatically.
+  uplink NIC, PAM/HAST setup) is now a single command to check, with
+  `-apply` to fix the safe ones automatically.
   Creating or modifying a bridge and attaching the uplink NIC to it is
   gated behind its own separate, exact-phrase-confirmed flag
   (`-apply-network yes-modify-network`) rather than the general `-apply`,
