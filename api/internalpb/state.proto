@@ -141,6 +141,24 @@ message VMDefinition {
   // raw TCP or HTTPS-origin). Meaningless when cloudflare_hostname is
   // empty.
   uint32 cloudflare_port = 18;
+
+  // clone_from_snapshot (ADR-0095), if set, is "<source_vm_id>@<snapshot_name>"
+  // (the same combined form internal/zfs.Manager.Clone/SnapshotExists
+  // already take) naming an existing VM snapshot (ADR-0090) to clone
+  // this VM's own dataset from, instead of creating a blank one - the
+  // reconciler resolves and clones it exactly once, only when this
+  // VM's dataset doesn't exist yet (mirrors base_image_name's own
+  // "seeded only on first creation, never re-seeded" rule). The clone
+  // is a plain `zfs clone`, local to whichever node ends up owning
+  // this VM - there is no cross-node fetch if the source snapshot
+  // lives on a different node (mirrors ADR-0084's jail base_template,
+  // which has the same node-local limitation, disclosed rather than
+  // silently handled). Mutually exclusive with both replica_node_id
+  // (a HAST-replicated VM's disk is a raw device, not a cloneable ZFS
+  // dataset) and base_image_name (two different ways to seed the same
+  // disk - only one can apply). Empty means today's behavior (a blank
+  // disk, or base_image_name's own file copy if that's set instead).
+  string clone_from_snapshot = 19;
 }
 
 // JailState is the desired run state of a jail, mirroring VMState.

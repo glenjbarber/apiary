@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -971,6 +972,107 @@ func TestReconciler_RunOnce_BaseImageSeedsNewDiskFile(t *testing.T) {
 	cfg := vms.lastCfg["vm-1"]
 	if cfg.DiskPath != diskPath {
 		t.Errorf("CreateVM() cfg.DiskPath = %q, want %q", cfg.DiskPath, diskPath)
+	}
+}
+
+// TestReconciler_RunOnce_ClonesVMFromSnapshot is ADR-0095's own direct
+// regression test, mirroring TestReconciler_RunOnce_ClonesJailFromBaseTemplate
+// exactly: a VM naming clone_from_snapshot gets its dataset created via
+// zfs clone, never CreateDataset.
+func TestReconciler_RunOnce_ClonesVMFromSnapshot(t *testing.T) {
+	raft := &fakeRaftClient{resp: &internalpb.ListVMsResponse{
+		Vms: []*internalpb.VMDefinition{{Id: "vm-2", NodeId: "node-a", CloneFromSnapshot: "vm-1@before-upgrade"}},
+	}}
+	zfs := newFakeDatasetManager()
+	zfs.snapshots["vm-1@before-upgrade"] = true
+	zfs.mountpointFor["vm-2"] = t.TempDir()
+	vms := newFakeVMManager()
+
+	r := &Reconciler{Raft: raft, ZFS: zfs, Bhyve: vms, LocalNodeID: "node-a", BootROM: "/fw/UEFI.fd"}
+	if err := r.RunOnce(context.Background()); err != nil {
+		t.Fatalf("RunOnce() error: %v", err)
+	}
+
+	if len(zfs.created) != 0 {
+		t.Errorf("CreateDataset called = %v, want none - a cloned VM's dataset is cloned, not created blank", zfs.created)
+	}
+	want := "vm-1@before-upgrade->vm-2"
+	if len(zfs.cloned) != 1 || zfs.cloned[0] != want {
+		t.Errorf("Clone calls = %v, want [%q]", zfs.cloned, want)
+	}
+	if _, ok := vms.lastCfg["vm-2"]; !ok {
+		t.Fatalf("CreateVM was never called for vm-2")
+	}
+}
+
+// TestReconciler_RunOnce_CloneFromSnapshotMissingIsError confirms a
+// missing source snapshot fails clearly rather than silently falling
+// back to a blank dataset - mirrors TestReconciler_RunOnce_BaseTemplateMissingSnapshotIsError.
+func TestReconciler_RunOnce_CloneFromSnapshotMissingIsError(t *testing.T) {
+	raft := &fakeRaftClient{resp: &internalpb.ListVMsResponse{
+		Vms: []*internalpb.VMDefinition{{Id: "vm-2", NodeId: "node-a", CloneFromSnapshot: "vm-1@before-upgrade"}},
+	}}
+	zfs := newFakeDatasetManager()
+
+	r := &Reconciler{Raft: raft, ZFS: zfs, Bhyve: newFakeVMManager(), LocalNodeID: "node-a", BootROM: "/fw/UEFI.fd"}
+	if err := r.RunOnce(context.Background()); err == nil || !strings.Contains(err.Error(), "does not exist locally") {
+		t.Fatalf("RunOnce() error: %v, want explicit missing-snapshot error", err)
+	}
+	if len(zfs.created) != 0 || len(zfs.cloned) != 0 {
+		t.Fatal("no dataset should be created or cloned when the source snapshot is missing")
+	}
+}
+
+// TestReconciler_RunOnce_CloneFromSnapshotWithReplicaNodeIsError mirrors
+// TestReconciler_RunOnce_BaseTemplateWithReplicaNodeIsError - a
+// HAST-replicated VM's disk is a raw device, not a cloneable dataset.
+func TestReconciler_RunOnce_CloneFromSnapshotWithReplicaNodeIsError(t *testing.T) {
+	raft := &fakeRaftClient{
+		resp: &internalpb.ListVMsResponse{
+			Vms: []*internalpb.VMDefinition{{Id: "vm-2", NodeId: "node-a", ReplicaNodeId: "node-b", CloneFromSnapshot: "vm-1@before-upgrade"}},
+		},
+		statusResp: statusResponseWithPeers("node-a", "10.0.0.1:17600", "node-b", "10.0.0.2:17600"),
+	}
+	zfs := newFakeDatasetManager()
+	zfs.snapshots["vm-1@before-upgrade"] = true
+
+	r := &Reconciler{Raft: raft, ZFS: zfs, Bhyve: newFakeVMManager(), HAST: newFakeHASTManager(), Mount: newFakeMountManager(), LocalNodeID: "node-a", BootROM: "/fw/UEFI.fd"}
+	if err := r.RunOnce(context.Background()); err == nil || !strings.Contains(err.Error(), "not supported together with replica_node_id") {
+		t.Fatalf("RunOnce() error: %v, want explicit unsupported-combination error", err)
+	}
+}
+
+// TestReconciler_RunOnce_CloneFromSnapshotWithBaseImageIsError confirms
+// the two disk-seeding mechanisms can't both apply to the same VM.
+func TestReconciler_RunOnce_CloneFromSnapshotWithBaseImageIsError(t *testing.T) {
+	raft := &fakeRaftClient{resp: &internalpb.ListVMsResponse{
+		Vms: []*internalpb.VMDefinition{{Id: "vm-2", NodeId: "node-a", BaseImageName: "ubuntu.raw", CloneFromSnapshot: "vm-1@before-upgrade"}},
+	}}
+	zfs := newFakeDatasetManager()
+	zfs.snapshots["vm-1@before-upgrade"] = true
+
+	r := &Reconciler{Raft: raft, ZFS: zfs, Bhyve: newFakeVMManager(), LocalNodeID: "node-a", BootROM: "/fw/UEFI.fd"}
+	if err := r.RunOnce(context.Background()); err == nil || !strings.Contains(err.Error(), "not supported together with base_image_name") {
+		t.Fatalf("RunOnce() error: %v, want explicit unsupported-combination error", err)
+	}
+}
+
+// TestReconciler_RunOnce_CloneFromSnapshotNeverReClonesExistingDataset
+// mirrors TestReconciler_RunOnce_BaseTemplateNeverReClonesExistingDataset.
+func TestReconciler_RunOnce_CloneFromSnapshotNeverReClonesExistingDataset(t *testing.T) {
+	raft := &fakeRaftClient{resp: &internalpb.ListVMsResponse{
+		Vms: []*internalpb.VMDefinition{{Id: "vm-2", NodeId: "node-a", CloneFromSnapshot: "vm-1@before-upgrade"}},
+	}}
+	zfs := newFakeDatasetManager()
+	zfs.existing["vm-2"] = true
+	zfs.mountpointFor["vm-2"] = t.TempDir()
+
+	r := &Reconciler{Raft: raft, ZFS: zfs, Bhyve: newFakeVMManager(), LocalNodeID: "node-a", BootROM: "/fw/UEFI.fd"}
+	if err := r.RunOnce(context.Background()); err != nil {
+		t.Fatalf("RunOnce() error: %v", err)
+	}
+	if len(zfs.cloned) != 0 {
+		t.Errorf("Clone calls = %v, want none - an already-existing dataset must never be re-cloned", zfs.cloned)
 	}
 }
 

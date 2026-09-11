@@ -794,6 +794,13 @@ each design decision, in order.
   desired state is running, and rollback refuses outright rather than
   silently destroying a newer snapshot if one exists. See
   [ADR-0090](docs/adr/0090-vm-snapshot-restore.md).
+- **Create a VM from an existing VM's snapshot** — the create-VM form
+  gained a "Clone from snapshot" section (cascading dropdowns: pick a
+  source VM, then one of its ADR-0090 snapshots) that seeds the new
+  VM's disk as a real ZFS clone instead of a blank disk or a copied
+  base image. Node-local only, like ADR-0084's jail base templates - no
+  cross-node fetch if the source snapshot lives elsewhere. See
+  [ADR-0095](docs/adr/0095-create-vm-from-snapshot.md).
 - **Single-node is first-class, not a lesser bootstrap state** — a full
   audit confirmed raftd's default bootstrap, health/assumption checks,
   and every peer-forwarding feature (ISO/jail-template fetch, console/

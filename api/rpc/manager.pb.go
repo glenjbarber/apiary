@@ -821,8 +821,12 @@ type VMDefinition struct {
 	// SetVMCloudflareExposure, never via UpdateVM.
 	CloudflareHostname string `protobuf:"bytes,17,opt,name=cloudflare_hostname,json=cloudflareHostname,proto3" json:"cloudflare_hostname,omitempty"`
 	CloudflarePort     uint32 `protobuf:"varint,18,opt,name=cloudflare_port,json=cloudflarePort,proto3" json:"cloudflare_port,omitempty"`
-	unknownFields      protoimpl.UnknownFields
-	sizeCache          protoimpl.SizeCache
+	// clone_from_snapshot (ADR-0095) mirrors api/internalpb's own
+	// VMDefinition field - see its doc comment for the full semantics.
+	// "<source_vm_id>@<snapshot_name>"; only consulted on first creation.
+	CloneFromSnapshot string `protobuf:"bytes,19,opt,name=clone_from_snapshot,json=cloneFromSnapshot,proto3" json:"clone_from_snapshot,omitempty"`
+	unknownFields     protoimpl.UnknownFields
+	sizeCache         protoimpl.SizeCache
 }
 
 func (x *VMDefinition) Reset() {
@@ -979,6 +983,13 @@ func (x *VMDefinition) GetCloudflarePort() uint32 {
 		return x.CloudflarePort
 	}
 	return 0
+}
+
+func (x *VMDefinition) GetCloneFromSnapshot() string {
+	if x != nil {
+		return x.CloneFromSnapshot
+	}
+	return ""
 }
 
 // JailDefinition mirrors api/internalpb's JailDefinition, deliberately
@@ -12700,7 +12711,7 @@ var File_api_rpc_manager_proto protoreflect.FileDescriptor
 
 const file_api_rpc_manager_proto_rawDesc = "" +
 	"\n" +
-	"\x15api/rpc/manager.proto\x12\rapiary.rpc.v1\"\x9b\x05\n" +
+	"\x15api/rpc/manager.proto\x12\rapiary.rpc.v1\"\xcb\x05\n" +
 	"\fVMDefinition\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x14\n" +
@@ -12724,7 +12735,8 @@ const file_api_rpc_manager_proto_rawDesc = "" +
 	"\x0fbase_image_name\x18\x0f \x01(\tR\rbaseImageName\x12'\n" +
 	"\x0ffirewall_paused\x18\x10 \x01(\bR\x0efirewallPaused\x12/\n" +
 	"\x13cloudflare_hostname\x18\x11 \x01(\tR\x12cloudflareHostname\x12'\n" +
-	"\x0fcloudflare_port\x18\x12 \x01(\rR\x0ecloudflarePort\"\xc6\x02\n" +
+	"\x0fcloudflare_port\x18\x12 \x01(\rR\x0ecloudflarePort\x12.\n" +
+	"\x13clone_from_snapshot\x18\x13 \x01(\tR\x11cloneFromSnapshot\"\xc6\x02\n" +
 	"\x0eJailDefinition\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x1a\n" +

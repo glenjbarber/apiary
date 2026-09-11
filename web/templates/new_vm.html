@@ -57,6 +57,17 @@
       </select>
         </label>
       </div>
+      <div class="form-grid">
+        <label>Clone from snapshot <span class="field-help">Optional - a fast ZFS clone of an existing VM's own snapshot instead of a blank disk or base image. Mutually exclusive with both Base image and Replica node; only works when this VM's Owner node matches the source VM's own node (a clone is local to one node, never fetched across nodes).</span>
+      <select name="clone_source_vm_id" id="clone-source-vm" title="An existing VM to clone this VM's disk from - only VMs with at least one snapshot are listed.">
+        <option value="">None</option>
+        {{range .CloneSources}}<option value="{{.VMID}}" data-node-id="{{.NodeID}}">{{.VMID}}{{if .VMName}} ({{.VMName}}){{end}} — on {{.NodeID}}</option>{{end}}
+      </select>
+      <select name="clone_snapshot_name" id="clone-source-snapshot" title="Which of the source VM's snapshots to clone from." disabled>
+        <option value="">Select a source VM first</option>
+      </select>
+        </label>
+      </div>
     </fieldset>
     <fieldset class="form-section">
       <legend>Network</legend>
@@ -134,6 +145,48 @@
     }
     nodeSelect.addEventListener('change', refresh);
     refresh();
+  })();
+  </script>
+  <script>
+  (function() {
+    // cloneSources: {"vm id": {name, node_id, snapshots: [...]}} - see
+    // cloneSourceSnapshotsJSON (ADR-0095). Populates the snapshot
+    // dropdown from whichever source VM is chosen, and warns when the
+    // Owner node above doesn't match the source's own node - cloning is
+    // a plain `zfs clone`, local to one node only, never fetched
+    // across nodes (unlike the ISO/base-image pickers above).
+    var cloneSources = {{cloneSourceSnapshotsJSON .CloneSources}};
+    var sourceSelect = document.getElementById('clone-source-vm');
+    var snapshotSelect = document.getElementById('clone-source-snapshot');
+    var nodeSelect2 = document.querySelector('select[name="node_id"], input[name="node_id"]');
+    if (!sourceSelect || !snapshotSelect) return;
+
+    function refreshSnapshots() {
+      var source = cloneSources[sourceSelect.value];
+      snapshotSelect.innerHTML = '';
+      if (!source) {
+        var placeholder = document.createElement('option');
+        placeholder.value = '';
+        placeholder.text = 'Select a source VM first';
+        snapshotSelect.appendChild(placeholder);
+        snapshotSelect.disabled = true;
+        return;
+      }
+      snapshotSelect.disabled = false;
+      source.snapshots.forEach(function(name) {
+        var opt = document.createElement('option');
+        opt.value = name;
+        var label = name;
+        if (nodeSelect2 && nodeSelect2.value && nodeSelect2.value !== source.node_id) {
+          label += ' — different node than ' + source.node_id + ', clone will fail';
+        }
+        opt.text = label;
+        snapshotSelect.appendChild(opt);
+      });
+    }
+    sourceSelect.addEventListener('change', refreshSnapshots);
+    if (nodeSelect2) nodeSelect2.addEventListener('change', refreshSnapshots);
+    refreshSnapshots();
   })();
   </script>
   </main>

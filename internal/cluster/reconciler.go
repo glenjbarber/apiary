@@ -528,6 +528,7 @@ func (r *Reconciler) RunOnce(ctx context.Context) (err error) {
 			FirewallRules:      rules,
 			ReplicaNodeID:      vm.GetReplicaNodeId(),
 			BaseImageName:      vm.GetBaseImageName(),
+			CloneFromSnapshot:  vm.GetCloneFromSnapshot(),
 			FirewallPaused:     vm.GetFirewallPaused(),
 			CloudflareHostname: vm.GetCloudflareHostname(),
 			CloudflarePort:     vm.GetCloudflarePort(),
@@ -1088,13 +1089,33 @@ func (r *Reconciler) resolveLocalImagePath(ctx context.Context, name string) (st
 // nothing useful for it to hold) - then, if Bhyve is configured, that
 // its bhyve VM exists too.
 func (r *Reconciler) ensureVM(ctx context.Context, vm VMPlacement, networks map[string]*internalpb.NetworkDefinition, hastDevicePaths map[string]string) error {
+	if vm.CloneFromSnapshot != "" {
+		if vm.ReplicaNodeID != "" {
+			return fmt.Errorf("VM %q: clone_from_snapshot is not supported together with replica_node_id - a HAST-replicated VM's disk is a raw device, not a cloneable ZFS dataset", vm.ID)
+		}
+		if vm.BaseImageName != "" {
+			return fmt.Errorf("VM %q: clone_from_snapshot is not supported together with base_image_name - only one way to seed this VM's disk can apply", vm.ID)
+		}
+	}
+
 	if vm.ReplicaNodeID == "" {
 		exists, err := r.ZFS.DatasetExists(ctx, vm.ID)
 		if err != nil {
 			return fmt.Errorf("checking dataset: %w", err)
 		}
 		if !exists {
-			if err := r.ZFS.CreateDataset(ctx, vm.ID); err != nil {
+			if vm.CloneFromSnapshot != "" {
+				snapExists, err := r.ZFS.SnapshotExists(ctx, vm.CloneFromSnapshot)
+				if err != nil {
+					return fmt.Errorf("checking source snapshot %q: %w", vm.CloneFromSnapshot, err)
+				}
+				if !snapExists {
+					return fmt.Errorf("VM %q names source snapshot %q but it does not exist locally - a VM snapshot is node-local (ADR-0090/ADR-0095), so the source VM's snapshot must exist on this same node", vm.ID, vm.CloneFromSnapshot)
+				}
+				if err := r.ZFS.Clone(ctx, vm.CloneFromSnapshot, vm.ID); err != nil {
+					return fmt.Errorf("cloning source snapshot %q: %w", vm.CloneFromSnapshot, err)
+				}
+			} else if err := r.ZFS.CreateDataset(ctx, vm.ID); err != nil {
 				return fmt.Errorf("creating dataset: %w", err)
 			}
 		}

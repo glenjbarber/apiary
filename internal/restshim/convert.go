@@ -31,6 +31,10 @@ type vm struct {
 	IPAddress     string `json:"ip_address,omitempty"`
 	MACAddress    string `json:"mac_address,omitempty"`
 	BaseImageName string `json:"base_image_name,omitempty"`
+
+	// CloneFromSnapshot mirrors ADR-0095 - "<source_vm_id>@<snapshot_name>",
+	// caller-set on create only.
+	CloneFromSnapshot string `json:"clone_from_snapshot,omitempty"`
 }
 
 // stateToRPC/stateFromRPC translate the REST API's plain string state
@@ -61,16 +65,17 @@ func stateFromRPC(s rpcpb.VMState) string {
 
 func toRPCVM(v vm) *rpcpb.VMDefinition {
 	return &rpcpb.VMDefinition{
-		Id:            v.ID,
-		Name:          v.Name,
-		Vcpus:         v.VCPUs,
-		MemoryMb:      v.MemoryMB,
-		NodeId:        v.NodeID,
-		DesiredState:  stateToRPC(v.DesiredState),
-		ReplicaNodeId: v.ReplicaNodeID,
-		IsoName:       v.ISOName,
-		NetworkId:     v.NetworkID,
-		BaseImageName: v.BaseImageName,
+		Id:                v.ID,
+		Name:              v.Name,
+		Vcpus:             v.VCPUs,
+		MemoryMb:          v.MemoryMB,
+		NodeId:            v.NodeID,
+		DesiredState:      stateToRPC(v.DesiredState),
+		ReplicaNodeId:     v.ReplicaNodeID,
+		IsoName:           v.ISOName,
+		NetworkId:         v.NetworkID,
+		BaseImageName:     v.BaseImageName,
+		CloneFromSnapshot: v.CloneFromSnapshot,
 	}
 }
 
@@ -79,18 +84,19 @@ func fromRPCVM(d *rpcpb.VMDefinition) vm {
 		return vm{}
 	}
 	return vm{
-		ID:            d.GetId(),
-		Name:          d.GetName(),
-		VCPUs:         d.GetVcpus(),
-		MemoryMB:      d.GetMemoryMb(),
-		NodeID:        d.GetNodeId(),
-		DesiredState:  stateFromRPC(d.GetDesiredState()),
-		ReplicaNodeID: d.GetReplicaNodeId(),
-		ISOName:       d.GetIsoName(),
-		NetworkID:     d.GetNetworkId(),
-		IPAddress:     d.GetIpAddress(),
-		MACAddress:    d.GetMacAddress(),
-		BaseImageName: d.GetBaseImageName(),
+		ID:                d.GetId(),
+		Name:              d.GetName(),
+		VCPUs:             d.GetVcpus(),
+		MemoryMB:          d.GetMemoryMb(),
+		NodeID:            d.GetNodeId(),
+		DesiredState:      stateFromRPC(d.GetDesiredState()),
+		ReplicaNodeID:     d.GetReplicaNodeId(),
+		ISOName:           d.GetIsoName(),
+		NetworkID:         d.GetNetworkId(),
+		IPAddress:         d.GetIpAddress(),
+		MACAddress:        d.GetMacAddress(),
+		BaseImageName:     d.GetBaseImageName(),
+		CloneFromSnapshot: d.GetCloneFromSnapshot(),
 	}
 }
 

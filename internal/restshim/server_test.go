@@ -570,6 +570,31 @@ func TestServer_CreateVM(t *testing.T) {
 	}
 }
 
+// TestServer_CreateVM_CloneFromSnapshotRoundTrips is ADR-0095's own
+// regression test for the REST JSON shape's toRPCVM/fromRPCVM threading.
+func TestServer_CreateVM_CloneFromSnapshotRoundTrips(t *testing.T) {
+	client := &fakeClient{createResp: &rpcpb.CreateVMResponse{
+		Vm: &rpcpb.VMDefinition{Id: "vm-2", Name: "cloned-vm", CloneFromSnapshot: "vm-1@before-upgrade"},
+	}}
+	s := NewServer(client)
+
+	rec := doRequest(t, s, http.MethodPost, "/v1/vms", vm{ID: "vm-2", Name: "cloned-vm", CloneFromSnapshot: "vm-1@before-upgrade"})
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want 201; body=%s", rec.Code, rec.Body.String())
+	}
+	if client.lastCreateReq.GetVm().GetCloneFromSnapshot() != "vm-1@before-upgrade" {
+		t.Errorf("request forwarded vm.CloneFromSnapshot = %q, want vm-1@before-upgrade", client.lastCreateReq.GetVm().GetCloneFromSnapshot())
+	}
+
+	var got vm
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decoding response: %v", err)
+	}
+	if got.CloneFromSnapshot != "vm-1@before-upgrade" {
+		t.Errorf("response CloneFromSnapshot = %q, want vm-1@before-upgrade", got.CloneFromSnapshot)
+	}
+}
+
 func TestServer_CreateVM_InvalidJSON(t *testing.T) {
 	s := NewServer(&fakeClient{})
 	req := httptest.NewRequest(http.MethodPost, "/v1/vms", bytes.NewBufferString("not json"))

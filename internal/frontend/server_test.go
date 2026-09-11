@@ -977,6 +977,35 @@ func TestServer_NewVMPage(t *testing.T) {
 	}
 }
 
+// TestServer_NewVMPage_ShowsCloneSources confirms the create-VM form's
+// clone-from-snapshot dropdown lists an existing VM that has at least
+// one snapshot (ADR-0095).
+func TestServer_NewVMPage_ShowsCloneSources(t *testing.T) {
+	client := &fakeClient{
+		listResp:            &rpcpb.ListVMsResponse{Vms: []*rpcpb.VMDefinition{{Id: "vm-1", Name: "web-1", NodeId: "node-a"}}},
+		listVMSnapshotsResp: &rpcpb.ListVMSnapshotsResponse{SnapshotNames: []string{"before-upgrade"}},
+	}
+	s := newTestServer(t, client)
+
+	req := httptest.NewRequest(http.MethodGet, "/vms/new", nil)
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, `id="clone-source-vm"`) {
+		t.Fatalf("new VM page missing clone-source dropdown, got: %s", body)
+	}
+	if !strings.Contains(body, `value="vm-1"`) {
+		t.Errorf("expected vm-1 (has a snapshot) as a clone source option, got: %s", body)
+	}
+	if !strings.Contains(body, "before-upgrade") {
+		t.Errorf("expected the embedded snapshot cue data to include before-upgrade, got: %s", body)
+	}
+}
+
 // TestServer_NewVMPage_OwnerNodeDefaultsToLocalNode guards against a
 // real bug: the Owner Node <select> had no "selected" option at all, so
 // the browser defaulted to whichever node happened to come first in
@@ -1283,6 +1312,50 @@ func TestServer_CreateVM(t *testing.T) {
 	// re-rendered fragment.
 	if got := rec.Header().Get("HX-Redirect"); got != "/vms" {
 		t.Errorf("HX-Redirect = %q, want /vms", got)
+	}
+}
+
+// TestServer_CreateVM_CombinesCloneSourceFields confirms the two
+// cascading dropdowns (clone_source_vm_id, clone_snapshot_name) are
+// combined into CloneFromSnapshot's "<id>@<name>" form (ADR-0095).
+func TestServer_CreateVM_CombinesCloneSourceFields(t *testing.T) {
+	client := &fakeClient{createResp: &rpcpb.CreateVMResponse{Vm: &rpcpb.VMDefinition{Id: "vm-2"}}}
+	s := newTestServer(t, client)
+
+	form := url.Values{"id": {"vm-2"}, "clone_source_vm_id": {"vm-1"}, "clone_snapshot_name": {"before-upgrade"}}
+	req := httptest.NewRequest(http.MethodPost, "/vms", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	if got := client.lastCreateReq.GetVm().GetCloneFromSnapshot(); got != "vm-1@before-upgrade" {
+		t.Errorf("forwarded vm.CloneFromSnapshot = %q, want vm-1@before-upgrade", got)
+	}
+}
+
+// TestServer_CreateVM_CloneSourceRequiresBothFields confirms an
+// incomplete pair (only one of the two dropdowns set - shouldn't
+// normally happen given they cascade in JS, but the server must not
+// forward a malformed value if it does) results in no CloneFromSnapshot
+// being sent at all, rather than a bare "vm-1@" or "@before-upgrade".
+func TestServer_CreateVM_CloneSourceRequiresBothFields(t *testing.T) {
+	client := &fakeClient{createResp: &rpcpb.CreateVMResponse{Vm: &rpcpb.VMDefinition{Id: "vm-2"}}}
+	s := newTestServer(t, client)
+
+	form := url.Values{"id": {"vm-2"}, "clone_source_vm_id": {"vm-1"}}
+	req := httptest.NewRequest(http.MethodPost, "/vms", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	if got := client.lastCreateReq.GetVm().GetCloneFromSnapshot(); got != "" {
+		t.Errorf("forwarded vm.CloneFromSnapshot = %q, want empty (incomplete pair)", got)
 	}
 }
 
