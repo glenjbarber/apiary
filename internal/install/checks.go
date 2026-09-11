@@ -13,8 +13,9 @@ import (
 // (not consts) purely so tests can point them at a temp file instead of
 // a real host's own /etc/rc.conf and /etc/pf.conf.
 var (
-	rcConfPath = "/etc/rc.conf"
-	pfConfPath = "/etc/pf.conf"
+	rcConfPath       = "/etc/rc.conf"
+	pfConfPath       = "/etc/pf.conf"
+	devdDhclientPath = "/etc/devd/dhclient.conf"
 )
 
 // apiaryPFAnchor is the exact anchor stanza internal/pf's own doc comment
@@ -29,6 +30,7 @@ var registry = []Check{
 	bhyveFirmwarePkgCheck,
 	bhyveBinariesCheck,
 	dnsmasqPkgCheck,
+	dnsmasqRcEnableCheck,
 	// pf-anchor before pf-enabled: pf-anchor's Apply creates /etc/pf.conf
 	// when it doesn't exist yet (a stock FreeBSD install ships without
 	// one) - pf-enabled's Apply runs `service pf onestart`, which needs a
@@ -39,6 +41,7 @@ var registry = []Check{
 	rcConfPermsCheck,
 	vlanUplinkCheck,
 	bhyveBridgeCheck,
+	devdDhclientConflictCheck,
 	hastdEnableCheck,
 	pamServiceCheck,
 }
@@ -283,6 +286,36 @@ var dnsmasqPkgCheck = Check{
 			return fmt.Errorf("pkg install -y dnsmasq: %s", firstNonEmpty(stderr, err))
 		}
 		return nil
+	},
+}
+
+// dnsmasqRcEnableCheck (ADR-0094) flags a real, confirmed-live boot
+// race: internal/dhcpd.Manager.WriteAndReload already calls `service
+// dnsmasq restart` itself on every network reconcile, which is the
+// only start dnsmasq ever needs - a persisted dnsmasq_enable=YES also
+// starts it via rc.d at boot, before managerd's own reconciler has had
+// its first tick to (re)create the network interfaces dnsmasq is
+// configured to serve. Found live: dnsmasq logged "unknown interface"
+// twice at boot before self-healing once the reconciler caught up and
+// issued its own restart - harmless there only because that restart
+// happened to follow soon after, not because the race is safe in
+// general.
+var dnsmasqRcEnableCheck = Check{
+	ID:          "dnsmasq-rc-enable",
+	Description: "dnsmasq_enable is not YES in rc.conf - Apiary's own reconciler starts/restarts dnsmasq itself on every network change (ADR-0022), so a boot-time rc.d start only races it before the first reconcile tick creates the interface",
+	Risk:        RiskSafe,
+	Applicable:  always,
+	Probe: func(ctx context.Context, r Runner, opt Options) Result {
+		persisted, ok := sysrcValue(ctx, r, "dnsmasq_enable")
+		if ok && strings.EqualFold(persisted, "YES") {
+			return Result{ID: "dnsmasq-rc-enable", Status: StatusMisconfigured,
+				Detail:  "dnsmasq_enable=YES races Apiary's own dnsmasq restart at boot",
+				FixHint: "sysrc dnsmasq_enable=NO - Apiary starts dnsmasq itself once it has real networks to serve"}
+		}
+		return Result{ID: "dnsmasq-rc-enable", Status: StatusOK, Detail: "dnsmasq_enable is not YES"}
+	},
+	Apply: func(ctx context.Context, r Runner, opt Options) error {
+		return setRcVar(ctx, r, "dnsmasq_enable=NO")
 	},
 }
 
@@ -535,6 +568,52 @@ var bhyveBridgeCheck = Check{
 			return err
 		}
 		return setRcVar(ctx, r, fmt.Sprintf("ifconfig_%s=addm %s up", opt.BhyveBridge, opt.VLANUplink))
+	},
+}
+
+// devdDhclientConflictCheck (ADR-0094) flags a confirmed-live root
+// cause of a real host going unreachable after a reboot: FreeBSD's
+// stock /etc/devd/dhclient.conf fires `service dhclient quietstart
+// <if>` on ANY Ethernet-like interface's link-up event, completely
+// independent of that interface's own rc.conf ifconfig_<if> value.
+// When the uplink NIC (-vlan-uplink) is meant to be a pure, address-
+// less bridge member - -bhyve-bridge's own ifconfig_<bridge> carries
+// the real "DHCP" token, not the NIC's - this rule still independently
+// DHCPs the NIC too, racing the bridge for the identical MAC-keyed
+// lease/address. Confirmed live: both the uplink NIC and the bridge
+// obtained the SAME address via separate leases after a reboot,
+// leaving whichever interface most recently renewed holding it - an
+// unstable, duplicate-address configuration that can flip which
+// interface actually answers ARP for the host's own management
+// address on any future link flap or reboot, not just this one.
+// Disabling the rule host-wide is the standard fix for exactly this
+// bridge-vs-devd conflict; the tradeoff (any OTHER, non-bridged NIC on
+// the same host also loses automatic DHCP-on-link-up) is named in the
+// FixHint rather than silently accepted.
+var devdDhclientConflictCheck = Check{
+	ID:          "devd-dhclient-conflict",
+	Description: "the stock devd(8) auto-dhclient rule does not independently DHCP the bridged uplink NIC, duplicating -bhyve-bridge's own DHCP-acquired address",
+	Risk:        RiskSafe,
+	Applicable:  func(opt Options) bool { return opt.VLANUplink != "" && opt.BhyveBridge != "" },
+	Probe: func(ctx context.Context, r Runner, opt Options) Result {
+		if _, err := os.Stat(devdDhclientPath); err != nil {
+			return Result{ID: "devd-dhclient-conflict", Status: StatusOK, Detail: "no live devd dhclient rule found"}
+		}
+		return Result{ID: "devd-dhclient-conflict", Status: StatusMisconfigured,
+			Detail:  devdDhclientPath + " can independently DHCP " + opt.VLANUplink + ", duplicating " + opt.BhyveBridge + "'s own lease for the same MAC",
+			FixHint: fmt.Sprintf("mv %s %s.disabled && service devd restart - trades away automatic DHCP-on-link-up for any OTHER, non-bridged NIC on this host", devdDhclientPath, devdDhclientPath)}
+	},
+	Apply: func(ctx context.Context, r Runner, opt Options) error {
+		if _, err := os.Stat(devdDhclientPath); err != nil {
+			return nil
+		}
+		if err := os.Rename(devdDhclientPath, devdDhclientPath+".disabled"); err != nil {
+			return fmt.Errorf("disabling %s: %w", devdDhclientPath, err)
+		}
+		if _, stderr, err := r.Run(ctx, "service", "devd", "restart"); err != nil {
+			return fmt.Errorf("service devd restart: %s", firstNonEmpty(stderr, err))
+		}
+		return nil
 	},
 }
 

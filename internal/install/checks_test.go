@@ -492,6 +492,108 @@ func TestPAMServiceCheckNeverAutoFixes(t *testing.T) {
 	}
 }
 
+// TestDnsmasqRcEnableCheck is the direct regression test for a real
+// bug found live: dnsmasq_enable=YES starts dnsmasq via rc.d at boot
+// before managerd's own reconciler has had its first tick to
+// (re)create the network interfaces dnsmasq is configured to serve -
+// dnsmasq logged "unknown interface" twice before self-healing once
+// the reconciler's own restart caught up.
+func TestDnsmasqRcEnableCheck(t *testing.T) {
+	ctx := context.Background()
+
+	r := newFakeRunner()
+	r.on("sysrc -n dnsmasq_enable", fakeResponse{stdout: "YES"})
+	res := dnsmasqRcEnableCheck.Probe(ctx, r, Options{})
+	if res.Status != StatusMisconfigured {
+		t.Fatalf("status = %v, want misconfigured when dnsmasq_enable=YES", res.Status)
+	}
+
+	r2 := newFakeRunner()
+	r2.on("sysrc -n dnsmasq_enable", fakeResponse{stdout: "NO"})
+	res2 := dnsmasqRcEnableCheck.Probe(ctx, r2, Options{})
+	if res2.Status != StatusOK {
+		t.Fatalf("status = %v, want ok when dnsmasq_enable=NO", res2.Status)
+	}
+
+	r3 := newFakeRunner()
+	res3 := dnsmasqRcEnableCheck.Probe(ctx, r3, Options{})
+	if res3.Status != StatusOK {
+		t.Fatalf("status = %v, want ok when dnsmasq_enable is unset entirely", res3.Status)
+	}
+
+	r4 := newFakeRunner()
+	r4.on("sysrc -n dnsmasq_enable", fakeResponse{stdout: "YES"})
+	r4.on("sysrc dnsmasq_enable=NO", fakeResponse{stdout: "dnsmasq_enable: YES -> NO"})
+	if err := dnsmasqRcEnableCheck.Apply(ctx, r4, Options{}); err != nil {
+		t.Fatalf("apply: %v", err)
+	}
+}
+
+// TestDevdDhclientConflictCheck is the direct regression test for the
+// second real bug found live in the same incident: the stock devd(8)
+// auto-dhclient rule independently DHCPs a bridge member NIC on every
+// link-up (including every boot), duplicating -bhyve-bridge's own
+// DHCP-acquired address for the identical MAC - confirmed live via two
+// separate lease files (dhclient.leases.em0 and dhclient.leases.bridge0)
+// both holding the same fixed-address for the same dhcp-client-identifier.
+func TestDevdDhclientConflictCheck(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "dhclient.conf")
+	old := devdDhclientPath
+	devdDhclientPath = path
+	defer func() { devdDhclientPath = old }()
+
+	opt := Options{VLANUplink: "em0", BhyveBridge: "bridge0"}
+
+	if devdDhclientConflictCheck.Applicable(Options{}) {
+		t.Error("Applicable(no uplink/bridge) = true, want false")
+	}
+	if !devdDhclientConflictCheck.Applicable(opt) {
+		t.Error("Applicable(uplink+bridge set) = false, want true")
+	}
+
+	// The rule file doesn't exist (already disabled, or never present).
+	res := devdDhclientConflictCheck.Probe(ctx, newFakeRunner(), opt)
+	if res.Status != StatusOK {
+		t.Fatalf("status = %v, want ok when the devd rule file is absent", res.Status)
+	}
+
+	// The rule file exists live - the conflict condition this check exists for.
+	if err := os.WriteFile(path, []byte("notify 10 {\n};\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	res2 := devdDhclientConflictCheck.Probe(ctx, newFakeRunner(), opt)
+	if res2.Status != StatusMisconfigured {
+		t.Fatalf("status = %v, want misconfigured when the devd rule file exists", res2.Status)
+	}
+
+	r := newFakeRunner()
+	r.on("service devd restart", fakeResponse{stdout: ""})
+	if err := devdDhclientConflictCheck.Apply(ctx, r, opt); err != nil {
+		t.Fatalf("apply: %v", err)
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Error("apply did not move the original file away")
+	}
+	if _, err := os.Stat(path + ".disabled"); err != nil {
+		t.Errorf("apply did not leave a .disabled copy: %v", err)
+	}
+	if r.callCount("service devd restart") != 1 {
+		t.Errorf("service devd restart calls = %d, want 1", r.callCount("service devd restart"))
+	}
+
+	// Re-applying after the file is already gone must be a no-op, not
+	// an error - matching every other idempotent Apply in this package.
+	res3 := devdDhclientConflictCheck.Probe(ctx, newFakeRunner(), opt)
+	if res3.Status != StatusOK {
+		t.Fatalf("status = %v, want ok after apply", res3.Status)
+	}
+	if err := devdDhclientConflictCheck.Apply(ctx, newFakeRunner(), opt); err != nil {
+		t.Fatalf("re-apply after already-disabled: %v", err)
+	}
+}
+
 func TestManualOnlyChecksHaveNoApply(t *testing.T) {
 	for _, c := range All() {
 		if c.Risk == RiskManualOnly && c.Apply != nil {
