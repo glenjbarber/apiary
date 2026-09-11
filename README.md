@@ -827,6 +827,19 @@ each design decision, in order.
   found live while verifying ADR-0092: even a managerd dialing its own
   address failed with `x509: certificate signed by unknown authority`.
   See [ADR-0093](docs/adr/0093-peer-tls-ca-trust.md).
+- **Two new `apiaryinstall` preflight checks, found live on a real
+  reboot** — `dnsmasq-rc-enable` flags `dnsmasq_enable=YES` in
+  `rc.conf`, which races Apiary's own `internal/dhcpd` (it already
+  restarts dnsmasq itself on every network change) against the
+  system's boot-time `rc.d` start, before `managerd`'s reconciler has
+  had a chance to recreate the network interface dnsmasq is meant to
+  serve. `devd-dhclient-conflict` flags FreeBSD's stock
+  `/etc/devd/dhclient.conf` rule, which independently DHCPs a bridge
+  member NIC on every link-up (including every boot) - duplicating
+  `-bhyve-bridge`'s own DHCP-acquired address for the identical MAC,
+  confirmed live via two separate lease files both holding the same
+  address. Both are `apiaryinstall -apply`-fixable. See
+  [ADR-0094](docs/adr/0094-boot-time-network-robustness.md).
 - Importing VMs from other hypervisors (e.g. Proxmox): no disk-format
   conversion, and Apiary is UEFI-only. Linux containers have no path at
   all — jails share the host FreeBSD kernel
