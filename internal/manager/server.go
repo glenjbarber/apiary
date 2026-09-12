@@ -2530,7 +2530,7 @@ func (s *Server) SimulateNodeFailure(ctx context.Context, req *rpcpb.SimulateNod
 	}
 
 	report := cluster.SimulateNodeFailure(servers, resources, targetID)
-	requirements := make([]cluster.ImageRequirement, 0, len(vmsResp.GetVms())*2)
+	requirements := make([]cluster.ImageRequirement, 0, len(vmsResp.GetVms())*2+len(jailsResp.GetJails()))
 	for _, vm := range vmsResp.GetVms() {
 		if vm.GetIsoName() != "" {
 			requirements = append(requirements, cluster.ImageRequirement{
@@ -2540,6 +2540,13 @@ func (s *Server) SimulateNodeFailure(ctx context.Context, req *rpcpb.SimulateNod
 		if vm.GetBaseImageName() != "" {
 			requirements = append(requirements, cluster.ImageRequirement{
 				ResourceID: vm.GetId(), ResourceName: vm.GetName(), ImageName: vm.GetBaseImageName(), Role: cluster.ImageRoleBaseImage,
+			})
+		}
+	}
+	for _, j := range jailsResp.GetJails() {
+		if j.GetBaseArchiveName() != "" {
+			requirements = append(requirements, cluster.ImageRequirement{
+				ResourceID: j.GetId(), ResourceName: j.GetName(), ImageName: j.GetBaseArchiveName(), Role: cluster.ImageRoleBaseArchive,
 			})
 		}
 	}
@@ -2703,8 +2710,11 @@ func toRPCImageAvailability(impacts []cluster.ImageAvailabilityImpact) []*rpcpb.
 	out := make([]*rpcpb.ImageAvailabilityImpact, 0, len(impacts))
 	for _, impact := range impacts {
 		role := rpcpb.ImageRole_IMAGE_ROLE_ISO
-		if impact.Role == cluster.ImageRoleBaseImage {
+		switch impact.Role {
+		case cluster.ImageRoleBaseImage:
 			role = rpcpb.ImageRole_IMAGE_ROLE_BASE_IMAGE
+		case cluster.ImageRoleBaseArchive:
+			role = rpcpb.ImageRole_IMAGE_ROLE_BASE_ARCHIVE
 		}
 		verdict := rpcpb.ImageAvailabilityVerdict_IMAGE_AVAILABILITY_VERDICT_UNKNOWN
 		switch impact.Verdict {

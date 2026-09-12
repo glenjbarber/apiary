@@ -434,6 +434,9 @@ const (
 	ImageRole_IMAGE_ROLE_UNSPECIFIED ImageRole = 0
 	ImageRole_IMAGE_ROLE_ISO         ImageRole = 1
 	ImageRole_IMAGE_ROLE_BASE_IMAGE  ImageRole = 2
+	// IMAGE_ROLE_BASE_ARCHIVE is a jail's base_archive_name (ADR-0083) -
+	// the jail equivalent of IMAGE_ROLE_BASE_IMAGE.
+	ImageRole_IMAGE_ROLE_BASE_ARCHIVE ImageRole = 3
 )
 
 // Enum value maps for ImageRole.
@@ -442,11 +445,13 @@ var (
 		0: "IMAGE_ROLE_UNSPECIFIED",
 		1: "IMAGE_ROLE_ISO",
 		2: "IMAGE_ROLE_BASE_IMAGE",
+		3: "IMAGE_ROLE_BASE_ARCHIVE",
 	}
 	ImageRole_value = map[string]int32{
-		"IMAGE_ROLE_UNSPECIFIED": 0,
-		"IMAGE_ROLE_ISO":         1,
-		"IMAGE_ROLE_BASE_IMAGE":  2,
+		"IMAGE_ROLE_UNSPECIFIED":  0,
+		"IMAGE_ROLE_ISO":          1,
+		"IMAGE_ROLE_BASE_IMAGE":   2,
+		"IMAGE_ROLE_BASE_ARCHIVE": 3,
 	}
 )
 
@@ -938,8 +943,11 @@ type JailDefinition struct {
 	DesiredState  JailState `protobuf:"varint,6,opt,name=desired_state,json=desiredState,proto3,enum=apiary.rpc.v1.JailState" json:"desired_state,omitempty"`
 	Phase         JailPhase `protobuf:"varint,7,opt,name=phase,proto3,enum=apiary.rpc.v1.JailPhase" json:"phase,omitempty"`
 	PhaseError    string    `protobuf:"bytes,8,opt,name=phase_error,json=phaseError,proto3" json:"phase_error,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	// base_archive_name mirrors api/internalpb's JailDefinition field of
+	// the same name - see ADR-0083.
+	BaseArchiveName string `protobuf:"bytes,9,opt,name=base_archive_name,json=baseArchiveName,proto3" json:"base_archive_name,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
 }
 
 func (x *JailDefinition) Reset() {
@@ -1024,6 +1032,13 @@ func (x *JailDefinition) GetPhase() JailPhase {
 func (x *JailDefinition) GetPhaseError() string {
 	if x != nil {
 		return x.PhaseError
+	}
+	return ""
+}
+
+func (x *JailDefinition) GetBaseArchiveName() string {
+	if x != nil {
+		return x.BaseArchiveName
 	}
 	return ""
 }
@@ -10520,7 +10535,7 @@ const file_api_rpc_manager_proto_rawDesc = "" +
 	"\x0fbase_image_name\x18\x0f \x01(\tR\rbaseImageName\x12'\n" +
 	"\x0ffirewall_paused\x18\x10 \x01(\bR\x0efirewallPaused\x12/\n" +
 	"\x13cloudflare_hostname\x18\x11 \x01(\tR\x12cloudflareHostname\x12'\n" +
-	"\x0fcloudflare_port\x18\x12 \x01(\rR\x0ecloudflarePort\"\xa1\x02\n" +
+	"\x0fcloudflare_port\x18\x12 \x01(\rR\x0ecloudflarePort\"\xcd\x02\n" +
 	"\x0eJailDefinition\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x1a\n" +
@@ -10530,7 +10545,8 @@ const file_api_rpc_manager_proto_rawDesc = "" +
 	"\rdesired_state\x18\x06 \x01(\x0e2\x18.apiary.rpc.v1.JailStateR\fdesiredState\x12.\n" +
 	"\x05phase\x18\a \x01(\x0e2\x18.apiary.rpc.v1.JailPhaseR\x05phase\x12\x1f\n" +
 	"\vphase_error\x18\b \x01(\tR\n" +
-	"phaseError\"\x9b\x01\n" +
+	"phaseError\x12*\n" +
+	"\x11base_archive_name\x18\t \x01(\tR\x0fbaseArchiveName\"\x9b\x01\n" +
 	"\fFirewallRule\x12\x1c\n" +
 	"\tdirection\x18\x01 \x01(\tR\tdirection\x12\x16\n" +
 	"\x06action\x18\x02 \x01(\tR\x06action\x12\x1a\n" +
@@ -11307,11 +11323,12 @@ const file_api_rpc_manager_proto_rawDesc = "" +
 	"\x17PATH_TRACE_STATUS_CLEAR\x10\x01\x12\x1d\n" +
 	"\x19PATH_TRACE_STATUS_BLOCKED\x10\x02\x12\x1d\n" +
 	"\x19PATH_TRACE_STATUS_UNKNOWN\x10\x03\x12$\n" +
-	" PATH_TRACE_STATUS_NOT_APPLICABLE\x10\x04*V\n" +
+	" PATH_TRACE_STATUS_NOT_APPLICABLE\x10\x04*s\n" +
 	"\tImageRole\x12\x1a\n" +
 	"\x16IMAGE_ROLE_UNSPECIFIED\x10\x00\x12\x12\n" +
 	"\x0eIMAGE_ROLE_ISO\x10\x01\x12\x19\n" +
-	"\x15IMAGE_ROLE_BASE_IMAGE\x10\x02*\xc4\x01\n" +
+	"\x15IMAGE_ROLE_BASE_IMAGE\x10\x02\x12\x1b\n" +
+	"\x17IMAGE_ROLE_BASE_ARCHIVE\x10\x03*\xc4\x01\n" +
 	"\x18ImageAvailabilityVerdict\x12*\n" +
 	"&IMAGE_AVAILABILITY_VERDICT_UNSPECIFIED\x10\x00\x12(\n" +
 	"$IMAGE_AVAILABILITY_VERDICT_AVAILABLE\x10\x01\x12*\n" +

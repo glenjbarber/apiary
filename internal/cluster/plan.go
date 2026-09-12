@@ -115,6 +115,14 @@ type JailPlacement struct {
 	// this jail's root filesystem (ADR-0026) - the same data-redundancy-
 	// not-failover semantics as VMPlacement.ReplicaNodeID.
 	ReplicaNodeID string
+
+	// BaseArchiveName, if set, names a base.txz-style archive the
+	// reconciler should resolve (via Reconciler.ISOs, reusing the same
+	// store VMPlacement.BaseImageName does) and extract into this
+	// jail's root the first time it's empty, instead of leaving jail(8)
+	// to attach to a completely empty dataset. Ignored once the root is
+	// already populated. See ADR-0083.
+	BaseArchiveName string
 }
 
 // PlanJail mirrors Plan exactly, for jails instead of VMs.

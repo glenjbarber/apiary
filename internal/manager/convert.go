@@ -145,12 +145,13 @@ func fromInternalNetwork(n *internalpb.NetworkDefinition) *rpcpb.NetworkDefiniti
 
 func toInternalJail(j *rpcpb.JailDefinition) *internalpb.JailDefinition {
 	return &internalpb.JailDefinition{
-		Id:            j.GetId(),
-		Name:          j.GetName(),
-		Hostname:      j.GetHostname(),
-		NodeId:        j.GetNodeId(),
-		ReplicaNodeId: j.GetReplicaNodeId(),
-		DesiredState:  internalpb.JailState(j.GetDesiredState()),
+		Id:              j.GetId(),
+		Name:            j.GetName(),
+		Hostname:        j.GetHostname(),
+		NodeId:          j.GetNodeId(),
+		ReplicaNodeId:   j.GetReplicaNodeId(),
+		DesiredState:    internalpb.JailState(j.GetDesiredState()),
+		BaseArchiveName: j.GetBaseArchiveName(),
 		// Phase/PhaseError are the reconciler's own observed state, never
 		// set by an external caller - CreateJail/UpdateJail requests
 		// never carry them through.
@@ -162,14 +163,15 @@ func fromInternalJail(j *internalpb.JailDefinition) *rpcpb.JailDefinition {
 		return nil
 	}
 	return &rpcpb.JailDefinition{
-		Id:            j.GetId(),
-		Name:          j.GetName(),
-		Hostname:      j.GetHostname(),
-		NodeId:        j.GetNodeId(),
-		ReplicaNodeId: j.GetReplicaNodeId(),
-		DesiredState:  rpcpb.JailState(j.GetDesiredState()),
-		Phase:         rpcpb.JailPhase(j.GetPhase()),
-		PhaseError:    j.GetPhaseError(),
+		Id:              j.GetId(),
+		Name:            j.GetName(),
+		Hostname:        j.GetHostname(),
+		NodeId:          j.GetNodeId(),
+		ReplicaNodeId:   j.GetReplicaNodeId(),
+		DesiredState:    rpcpb.JailState(j.GetDesiredState()),
+		Phase:           rpcpb.JailPhase(j.GetPhase()),
+		PhaseError:      j.GetPhaseError(),
+		BaseArchiveName: j.GetBaseArchiveName(),
 	}
 }
 

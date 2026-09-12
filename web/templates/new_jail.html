@@ -23,9 +23,39 @@
     <label>Replica node ID (optional - HAST root replication, see ADR-0026)
       <input type="text" name="replica_node_id" title="A second Comb to keep a live HAST-replicated copy of this jail's root dataset on. Leave blank for no replica.">
     </label>
+    <label>Base archive <span class="field-help">A base.txz-style FreeBSD userland archive extracted into this jail's root on first creation. Leave as None only if the root will be populated some other way before this jail starts - an empty root has no /bin/sh and jail(8) will refuse to become Ready (see ADR-0083).</span>
+      <select name="base_archive_name" class="image-picker" title="Extracted into this jail's root the first time it's empty. Leave as None only if the root will be populated some other way.">
+        <option value="">None</option>
+        {{range .ClusterISOs}}<option value="{{.Name}}">{{.Name}}</option>{{end}}
+      </select>
+    </label>
     <button type="submit">Create</button>
   </form>
   <div id="create-error" class="banner-error"></div>
+  <script>
+  (function() {
+    // missingByNode mirrors new_vm.html's own "will be fetched from a
+    // peer" cue (ADR-0041) for the base-archive picker.
+    var missingByNode = {{isoMissingByNode .ClusterISOs}};
+    var nodeSelect = document.querySelector('select[name="node_id"]');
+    var pickers = document.querySelectorAll('select.image-picker');
+    if (!nodeSelect || pickers.length === 0) return;
+
+    function refresh() {
+      var node = nodeSelect.value;
+      pickers.forEach(function(picker) {
+        Array.prototype.forEach.call(picker.options, function(opt) {
+          if (!opt.value) return;
+          var missing = missingByNode[opt.value] || [];
+          var willFetch = missing.indexOf(node) !== -1;
+          opt.text = opt.value + (willFetch ? ' — will be fetched from a peer' : '');
+        });
+      });
+    }
+    nodeSelect.addEventListener('change', refresh);
+    refresh();
+  })();
+  </script>
   </main>
   {{template "footer" .}}
 </body>

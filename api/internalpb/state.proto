@@ -199,6 +199,17 @@ message JailDefinition {
   // phase_error holds the last reconcile error's message when phase ==
   // JAIL_PHASE_ERROR; empty otherwise.
   string phase_error = 8;
+
+  // base_archive_name, if set, names a base.txz-style FreeBSD userland
+  // archive already uploaded (via ManagerService.UploadISO, reusing
+  // internal/isostore's existing store exactly like VMDefinition's
+  // iso_name/base_image_name) on the assigned node. The reconciler
+  // resolves it the same way it resolves a VM's image names and, only
+  // the first time this jail's root filesystem is empty, extracts it
+  // in place instead of leaving an empty ZFS dataset for jail(8) to
+  // attach to with nothing in it. Ignored once the root is already
+  // populated (never re-extracted on every tick). See ADR-0083.
+  string base_archive_name = 9;
 }
 
 // FirewallRule is one pf(8) rule applied to a VM's per-VM anchor. See

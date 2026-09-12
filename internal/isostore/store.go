@@ -10,6 +10,7 @@
 package isostore
 
 import (
+	"bufio"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
@@ -17,6 +18,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"time"
 )
 
@@ -122,6 +124,40 @@ func (m *Manager) Save(name string, r io.Reader, expectedSHA256 string) (*Info, 
 		return nil, fmt.Errorf("isostore: stat after save: %w", err)
 	}
 	return &Info{Name: name, SizeBytes: size, SHA256: got, ModTime: info.ModTime()}, nil
+}
+
+// ParseManifest parses a FreeBSD release MANIFEST file's contents -
+// each line "name<TAB>sha256<TAB>size<TAB>\"description\"" - into a
+// name -> sha256 map, so a base.txz upload's expectedSHA256 can be
+// looked up from the checksum FreeBSD itself publishes right next to
+// the archive on every release mirror, instead of an operator having
+// to compute or transcribe it by hand. Blank lines and lines starting
+// with "#" are skipped; a malformed line (fewer than two fields) is
+// skipped rather than treated as an error, since a MANIFEST lists many
+// files Apiary has no use for verifying, and this is meant to be
+// pasted in as-is.
+func ParseManifest(r io.Reader) (map[string]string, error) {
+	sums := map[string]string{}
+	scanner := bufio.NewScanner(r)
+	// A MANIFEST line can be long (the description field), and some
+	// distributions' lines exceed bufio.Scanner's 64KiB default - give
+	// it plenty of headroom rather than fail on an unusually long line.
+	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		fields := strings.Fields(line)
+		if len(fields) < 2 {
+			continue
+		}
+		sums[fields[0]] = fields[1]
+	}
+	if err := scanner.Err(); err != nil {
+		return nil, fmt.Errorf("isostore: reading manifest: %w", err)
+	}
+	return sums, nil
 }
 
 func (m *Manager) hashSidecarPath(name string) string {

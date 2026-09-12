@@ -98,12 +98,13 @@ func fromRPCVM(d *rpcpb.VMDefinition) vm {
 // vm's own shape and reasoning - deliberately minimal like
 // JailDefinition itself (see ADR-0027).
 type jail struct {
-	ID            string `json:"id"`
-	Name          string `json:"name,omitempty"`
-	Hostname      string `json:"hostname,omitempty"`
-	NodeID        string `json:"node_id,omitempty"`
-	ReplicaNodeID string `json:"replica_node_id,omitempty"`
-	DesiredState  string `json:"desired_state,omitempty"`
+	ID              string `json:"id"`
+	Name            string `json:"name,omitempty"`
+	Hostname        string `json:"hostname,omitempty"`
+	NodeID          string `json:"node_id,omitempty"`
+	ReplicaNodeID   string `json:"replica_node_id,omitempty"`
+	DesiredState    string `json:"desired_state,omitempty"`
+	BaseArchiveName string `json:"base_archive_name,omitempty"`
 }
 
 // jailStateToRPC/jailStateFromRPC mirror stateToRPC/stateFromRPC, for
@@ -132,12 +133,13 @@ func jailStateFromRPC(s rpcpb.JailState) string {
 
 func toRPCJail(j jail) *rpcpb.JailDefinition {
 	return &rpcpb.JailDefinition{
-		Id:            j.ID,
-		Name:          j.Name,
-		Hostname:      j.Hostname,
-		NodeId:        j.NodeID,
-		ReplicaNodeId: j.ReplicaNodeID,
-		DesiredState:  jailStateToRPC(j.DesiredState),
+		Id:              j.ID,
+		Name:            j.Name,
+		Hostname:        j.Hostname,
+		NodeId:          j.NodeID,
+		ReplicaNodeId:   j.ReplicaNodeID,
+		DesiredState:    jailStateToRPC(j.DesiredState),
+		BaseArchiveName: j.BaseArchiveName,
 	}
 }
 
@@ -146,12 +148,13 @@ func fromRPCJail(d *rpcpb.JailDefinition) jail {
 		return jail{}
 	}
 	return jail{
-		ID:            d.GetId(),
-		Name:          d.GetName(),
-		Hostname:      d.GetHostname(),
-		NodeID:        d.GetNodeId(),
-		ReplicaNodeID: d.GetReplicaNodeId(),
-		DesiredState:  jailStateFromRPC(d.GetDesiredState()),
+		ID:              d.GetId(),
+		Name:            d.GetName(),
+		Hostname:        d.GetHostname(),
+		NodeID:          d.GetNodeId(),
+		ReplicaNodeID:   d.GetReplicaNodeId(),
+		DesiredState:    jailStateFromRPC(d.GetDesiredState()),
+		BaseArchiveName: d.GetBaseArchiveName(),
 	}
 }
 

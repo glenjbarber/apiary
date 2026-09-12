@@ -31,6 +31,7 @@ import (
 	"github.com/glenjbarber/apiary/internal/hostconfig"
 	"github.com/glenjbarber/apiary/internal/isostore"
 	"github.com/glenjbarber/apiary/internal/jail"
+	"github.com/glenjbarber/apiary/internal/jailarchive"
 	"github.com/glenjbarber/apiary/internal/manager"
 	"github.com/glenjbarber/apiary/internal/netroute"
 	"github.com/glenjbarber/apiary/internal/nodeconfig"
@@ -293,6 +294,7 @@ func run() error {
 		DiskSizeMB:       *diskSizeMB,
 		Bridge:           *bhyveBridge,
 		ISOs:             isos,
+		JailArchives:     jailarchive.New(),
 		Peers:            peers,
 		PeerManagerdPort: resolvedPeerPort,
 		DNSServer:        *dhcpDNSServer,
