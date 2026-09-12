@@ -120,3 +120,17 @@ filled out the form already knew exactly which node they'd typed in.
   intent was right, only its implementation was incomplete.
 - Full `go build ./...`, `go vet ./...`, `go test ./...`, `gofmt -l .`
   all clean.
+
+## Correction (2026-09-11, ADR-0096)
+
+`target_address` being caller-supplied on RPCs deliberately exempt from
+`checkAuth` had a real, unaddressed consequence: the three handlers
+dialed it via the same authenticated `PeerReporter.dial`, which
+attaches this node's own `-peer-api-key` whenever one is configured -
+regardless of whether the dialed address was ever a real, trusted peer.
+An unauthenticated caller could name any host they controlled and
+receive this node's shared peer secret. ADR-0096 adds
+`dialUnauthenticated`/the three `*Unauthenticated` `PeerReporter`
+methods, used only for this field; the trusted, internally-derived
+leader-hint forwarding paths this ADR also touches are unaffected and
+still authenticate normally.

@@ -123,3 +123,13 @@ than forwarding a malformed `"vm-1@"` or `"@snapshot"` value.
   incomplete-pair safety case.
 - Full `go build ./...`, `go vet ./...`, `go test ./...`, `gofmt -l .`
   all clean.
+
+## Correction (2026-09-11, ADR-0096)
+
+`clone_from_snapshot` never got the FSM-boundary validation ADR-0067
+requires for every other caller-supplied, later-interpolated
+identifier - it relied solely on `internal/zfs.Manager`'s own path
+confinement. Not independently exploitable (that confinement is
+correct), but inconsistent with this project's own stated doctrine; a
+new `validSnapshotRef` in `internal/raft/fsm.go` closes the gap in
+`applyCreateVM`/`applyUpdateVM`.

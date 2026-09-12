@@ -7,6 +7,7 @@ import (
 	"io"
 	"net"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -167,6 +168,21 @@ func validResourceID(id string) bool {
 	return true
 }
 
+// validSnapshotRef reports whether ref is safe to interpolate as a
+// zfs(8) "dataset@snapshot" argument - both halves use validResourceID's
+// own character class, so a value that passes here can never contain a
+// "/" (dataset-path traversal) or a second "@" (snapshot-delimiter
+// confusion). internal/zfs.Manager's own path()/snapshotPath() already
+// reject those independently when CloneFromSnapshot/BaseTemplate
+// actually get used (defense in depth, the same posture ADR-0067
+// established for every renderer) - this closes the FSM-boundary gap
+// those two fields (ADR-0095/ADR-0084) were never given, unlike every
+// other interpolated field validResourceID/validHostname cover (ADR-0096).
+func validSnapshotRef(ref string) bool {
+	dataset, snap, ok := strings.Cut(ref, "@")
+	return ok && validResourceID(dataset) && validResourceID(snap)
+}
+
 func (f *FSM) applyCreateVM(index uint64, vm *internalpb.VMDefinition) *FSMApplyResult {
 	if vm.GetId() == "" {
 		return &FSMApplyResult{Index: index, Error: "CreateVM: id must be set"}
@@ -176,6 +192,9 @@ func (f *FSM) applyCreateVM(index uint64, vm *internalpb.VMDefinition) *FSMApply
 	}
 	if _, exists := f.vms[vm.GetId()]; exists {
 		return &FSMApplyResult{Index: index, Error: fmt.Sprintf("CreateVM: id %q already exists", vm.GetId())}
+	}
+	if vm.GetCloneFromSnapshot() != "" && !validSnapshotRef(vm.GetCloneFromSnapshot()) {
+		return &FSMApplyResult{Index: index, Error: fmt.Sprintf("CreateVM: invalid clone_from_snapshot %q: must be \"sourceid@snapshotname\" using only alphanumerics, '-', and '_'", vm.GetCloneFromSnapshot())}
 	}
 
 	vm = proto.Clone(vm).(*internalpb.VMDefinition)
@@ -265,6 +284,9 @@ func deriveMAC(id string) string {
 func (f *FSM) applyUpdateVM(index uint64, vm *internalpb.VMDefinition) *FSMApplyResult {
 	if _, exists := f.vms[vm.GetId()]; !exists {
 		return &FSMApplyResult{Index: index, Error: fmt.Sprintf("UpdateVM: id %q does not exist", vm.GetId())}
+	}
+	if vm.GetCloneFromSnapshot() != "" && !validSnapshotRef(vm.GetCloneFromSnapshot()) {
+		return &FSMApplyResult{Index: index, Error: fmt.Sprintf("UpdateVM: invalid clone_from_snapshot %q: must be \"sourceid@snapshotname\" using only alphanumerics, '-', and '_'", vm.GetCloneFromSnapshot())}
 	}
 	f.vms[vm.GetId()] = vm
 	return &FSMApplyResult{Index: index, VM: vm}
@@ -412,6 +434,15 @@ func (f *FSM) applyCreateJail(index uint64, jail *internalpb.JailDefinition) *FS
 	if _, exists := f.jails[jail.GetId()]; exists {
 		return &FSMApplyResult{Index: index, Error: fmt.Sprintf("CreateJail: id %q already exists", jail.GetId())}
 	}
+	// base_template is interpolated into a ZFS dataset/snapshot path
+	// (internal/zfs.Manager.Clone, via internal/cluster's
+	// jailTemplateSnapshot) - see validSnapshotRef's own doc comment
+	// (ADR-0096) for why this needs the same FSM-boundary check as
+	// clone_from_snapshot, even though it's a bare name rather than a
+	// "dataset@snapshot" pair.
+	if jail.GetBaseTemplate() != "" && !validResourceID(jail.GetBaseTemplate()) {
+		return &FSMApplyResult{Index: index, Error: fmt.Sprintf("CreateJail: invalid base_template %q: only alphanumerics, '-', and '_' are allowed (max 64 chars)", jail.GetBaseTemplate())}
+	}
 	f.jails[jail.GetId()] = jail
 	return &FSMApplyResult{Index: index, Jail: jail}
 }
@@ -419,6 +450,9 @@ func (f *FSM) applyCreateJail(index uint64, jail *internalpb.JailDefinition) *FS
 func (f *FSM) applyUpdateJail(index uint64, jail *internalpb.JailDefinition) *FSMApplyResult {
 	if _, exists := f.jails[jail.GetId()]; !exists {
 		return &FSMApplyResult{Index: index, Error: fmt.Sprintf("UpdateJail: id %q does not exist", jail.GetId())}
+	}
+	if jail.GetBaseTemplate() != "" && !validResourceID(jail.GetBaseTemplate()) {
+		return &FSMApplyResult{Index: index, Error: fmt.Sprintf("UpdateJail: invalid base_template %q: only alphanumerics, '-', and '_' are allowed (max 64 chars)", jail.GetBaseTemplate())}
 	}
 	f.jails[jail.GetId()] = jail
 	return &FSMApplyResult{Index: index, Jail: jail}

@@ -104,7 +104,11 @@ func (s *Server) RequestJoinColony(ctx context.Context, req *rpcpb.RequestJoinCo
 		if s.peers == nil {
 			return &rpcpb.RequestJoinColonyResponse{Error: "no peer forwarding is configured on this node; cannot reach the named Colony member"}, nil
 		}
-		resp, err := s.peers.RequestJoinColony(ctx, target, &rpcpb.RequestJoinColonyRequest{
+		// Unauthenticated dial (ADR-0096): target is caller-supplied and
+		// this RPC is itself deliberately never authenticated, so it must
+		// never be dialed with this node's own shared -peer-api-key
+		// attached - see PeerForwarder's own doc comment.
+		resp, err := s.peers.RequestJoinColonyUnauthenticated(ctx, target, &rpcpb.RequestJoinColonyRequest{
 			NodeId: req.GetNodeId(), RaftBindAddress: req.GetRaftBindAddress(), TimeoutMs: req.GetTimeoutMs(),
 		})
 		if err != nil {
@@ -164,7 +168,9 @@ func (s *Server) GetJoinRequestStatus(ctx context.Context, req *rpcpb.GetJoinReq
 		if s.peers == nil {
 			return &rpcpb.GetJoinRequestStatusResponse{Error: "no peer forwarding is configured on this node; cannot reach the named Colony member"}, nil
 		}
-		resp, err := s.peers.GetJoinRequestStatus(ctx, target, req.GetRequestId())
+		// Unauthenticated dial (ADR-0096) - see RequestJoinColony's own
+		// identical comment above.
+		resp, err := s.peers.GetJoinRequestStatusUnauthenticated(ctx, target, req.GetRequestId())
 		if err != nil {
 			return &rpcpb.GetJoinRequestStatusResponse{Error: fmt.Sprintf("reaching %s: %v", target, err)}, nil
 		}
@@ -287,7 +293,9 @@ func (s *Server) CancelJoinRequest(ctx context.Context, req *rpcpb.CancelJoinReq
 		if s.peers == nil {
 			return &rpcpb.CancelJoinRequestResponse{Error: "no peer forwarding is configured on this node; cannot reach the named Colony member"}, nil
 		}
-		resp, err := s.peers.CancelJoinRequest(ctx, target, &rpcpb.CancelJoinRequestRequest{RequestId: req.GetRequestId(), TimeoutMs: req.GetTimeoutMs()})
+		// Unauthenticated dial (ADR-0096) - see RequestJoinColony's own
+		// identical comment above.
+		resp, err := s.peers.CancelJoinRequestUnauthenticated(ctx, target, &rpcpb.CancelJoinRequestRequest{RequestId: req.GetRequestId(), TimeoutMs: req.GetTimeoutMs()})
 		if err != nil {
 			return &rpcpb.CancelJoinRequestResponse{Error: fmt.Sprintf("reaching %s: %v", target, err)}, nil
 		}

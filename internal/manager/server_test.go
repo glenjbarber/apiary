@@ -1668,3 +1668,64 @@ func TestServer_AuthenticatePassword_PropagatesBackendError(t *testing.T) {
 		t.Errorf("response = %+v, want the backend error surfaced", resp)
 	}
 }
+
+// TestServer_AuthenticatePassword_LocksOutAfterRepeatedFailures is
+// ADR-0096's own regression test: before this fix, AuthenticatePassword
+// enforced no lockout of its own at all, relying entirely on
+// internal/frontend's separate handleLogin tracker - but this RPC is
+// deliberately unauthenticated and reachable by any client that can
+// dial managerd directly, bypassing frontend (and its lockout)
+// entirely. Confirms this handler now locks out a repeatedly-failing
+// username on its own, independent of any HTTP layer in front of it.
+func TestServer_AuthenticatePassword_LocksOutAfterRepeatedFailures(t *testing.T) {
+	s := NewServer(nil, "node-1", nil, nil, nil, nil, nil, "", nil, nil, nil, 0, nil)
+	s.SetPAMAuthenticator(fakePAMAuthenticator{user: "alice", pass: "secret"})
+
+	for i := 0; i < defaultPAMMaxFailedAttempts; i++ {
+		resp, err := s.AuthenticatePassword(context.Background(), &rpcpb.AuthenticatePasswordRequest{Username: "alice", Password: "wrong"})
+		if err != nil {
+			t.Fatalf("attempt %d: AuthenticatePassword() error: %v", i+1, err)
+		}
+		if resp.GetOk() {
+			t.Fatalf("attempt %d: Ok = true, want false for a wrong password", i+1)
+		}
+	}
+
+	// The account is now locked - even the CORRECT password must be
+	// rejected until the lockout clears, and PAM itself must never be
+	// consulted again while locked (proven by using the correct
+	// credential here - if PAM were still being called, this would
+	// succeed).
+	resp, err := s.AuthenticatePassword(context.Background(), &rpcpb.AuthenticatePasswordRequest{Username: "alice", Password: "secret"})
+	if err != nil {
+		t.Fatalf("AuthenticatePassword() error: %v", err)
+	}
+	if resp.GetOk() {
+		t.Error("Ok = true for the correct password while locked out, want the lockout enforced regardless")
+	}
+	if resp.GetError() == "" {
+		t.Errorf("response = %+v, want a lockout error message", resp)
+	}
+}
+
+// TestServer_AuthenticatePassword_SuccessDoesNotCountAsFailureTowardLockout
+// mirrors internal/frontend's identical test for its own tracker -
+// confirms RecordSuccess resets the failure count so an intermittently-
+// mistyped password never accumulates toward a lockout.
+func TestServer_AuthenticatePassword_SuccessDoesNotCountAsFailureTowardLockout(t *testing.T) {
+	s := NewServer(nil, "node-1", nil, nil, nil, nil, nil, "", nil, nil, nil, 0, nil)
+	s.SetPAMAuthenticator(fakePAMAuthenticator{user: "alice", pass: "secret"})
+
+	for i := 0; i < defaultPAMMaxFailedAttempts*3; i++ {
+		if _, err := s.AuthenticatePassword(context.Background(), &rpcpb.AuthenticatePasswordRequest{Username: "alice", Password: "wrong"}); err != nil {
+			t.Fatalf("failure attempt: AuthenticatePassword() error: %v", err)
+		}
+		resp, err := s.AuthenticatePassword(context.Background(), &rpcpb.AuthenticatePasswordRequest{Username: "alice", Password: "secret"})
+		if err != nil {
+			t.Fatalf("success attempt: AuthenticatePassword() error: %v", err)
+		}
+		if !resp.GetOk() {
+			t.Fatalf("round %d: correct password rejected (Error=%q) - success should keep resetting the failure count", i, resp.GetError())
+		}
+	}
+}

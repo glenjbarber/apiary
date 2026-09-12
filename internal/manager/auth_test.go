@@ -218,10 +218,22 @@ func TestRequiredRoleFor_ListAssumptionResultsIsViewer(t *testing.T) {
 	}
 }
 
-func TestRequiredRoleFor_ProxyVMConsoleIsViewer(t *testing.T) {
+// TestRequiredRoleFor_ProxyVMConsoleIsOperator / GetVMConsoleIsOperator
+// (ADR-0096) confirm these sit above Viewer, unlike every other RPC in
+// that tier: a VM console is a full bidirectional VNC/RFB tunnel
+// (keyboard/mouse control of the guest), not a read-only view, so
+// "Viewer" materially understated what a caller here could actually do.
+func TestRequiredRoleFor_ProxyVMConsoleIsOperator(t *testing.T) {
 	const method = "/apiary.rpc.v1.ManagerService/ProxyVMConsole"
-	if got := requiredRoleFor(method); got != RoleViewer {
-		t.Errorf("requiredRoleFor(%q) = %q, want %q", method, got, RoleViewer)
+	if got := requiredRoleFor(method); got != RoleOperator {
+		t.Errorf("requiredRoleFor(%q) = %q, want %q", method, got, RoleOperator)
+	}
+}
+
+func TestRequiredRoleFor_GetVMConsoleIsOperator(t *testing.T) {
+	const method = "/apiary.rpc.v1.ManagerService/GetVMConsole"
+	if got := requiredRoleFor(method); got != RoleOperator {
+		t.Errorf("requiredRoleFor(%q) = %q, want %q", method, got, RoleOperator)
 	}
 }
 

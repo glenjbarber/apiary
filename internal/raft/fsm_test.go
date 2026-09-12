@@ -118,6 +118,47 @@ func TestFSM_Apply_CreateVMInvalidIDRejected(t *testing.T) {
 	}
 }
 
+// TestFSM_Apply_CreateVMInvalidCloneFromSnapshotRejected is ADR-0096's
+// own regression test: clone_from_snapshot (ADR-0095) never got an
+// FSM-boundary check when it was added, unlike every other field this
+// codebase interpolates into a generated path/config (validResourceID's
+// own rationale above). internal/zfs.Manager's own path()/
+// snapshotPath() already reject these same character classes when the
+// snapshot actually gets resolved, so this closes a defense-in-depth
+// gap rather than a directly exploitable one.
+func TestFSM_Apply_CreateVMInvalidCloneFromSnapshotRejected(t *testing.T) {
+	fsm := NewFSM()
+
+	cases := []string{
+		"novalue",       // missing "@"
+		"vm-1@",         // empty snapshot half
+		"@snap-1",       // empty dataset half
+		"vm-1/etc@snap", // slash in dataset half
+		"vm-1@a/b",      // slash in snapshot half
+		"vm-1@a@b",      // a second "@"
+	}
+	for _, ref := range cases {
+		cmd := &internalpb.Command{Op: &internalpb.Command_CreateVm{
+			CreateVm: &internalpb.CreateVM{Vm: &internalpb.VMDefinition{Id: "vm-x", Name: "a", CloneFromSnapshot: ref}},
+		}}
+		result := fsm.Apply(&raft.Log{Index: 1, Data: mustMarshalCommand(t, cmd)})
+		if result.(*FSMApplyResult).Error == "" {
+			t.Errorf("clone_from_snapshot %q: Error = empty, want a rejection", ref)
+		}
+	}
+
+	// A valid ref and an empty one (opt-out) must still work.
+	for i, ref := range []string{"vm-1@before-upgrade", ""} {
+		cmd := &internalpb.Command{Op: &internalpb.Command_CreateVm{
+			CreateVm: &internalpb.CreateVM{Vm: &internalpb.VMDefinition{Id: fmt.Sprintf("vm-ok-%d", i), Name: "a", CloneFromSnapshot: ref}},
+		}}
+		result := fsm.Apply(&raft.Log{Index: uint64(2 + i), Data: mustMarshalCommand(t, cmd)})
+		if result.(*FSMApplyResult).Error != "" {
+			t.Errorf("clone_from_snapshot %q rejected: %q", ref, result.(*FSMApplyResult).Error)
+		}
+	}
+}
+
 func TestFSM_Apply_DeleteVM(t *testing.T) {
 	fsm := NewFSM()
 	fsm.Apply(&raft.Log{Index: 1, Data: mustMarshalCommand(t, createVMCmd("vm-1", "web-1"))})
@@ -971,6 +1012,45 @@ func TestFSM_Apply_CreateJailInvalidIDRejected(t *testing.T) {
 	result := fsm.Apply(&raft.Log{Index: 1, Data: mustMarshalCommand(t, createJailCmd("jail-1\nresource evil {}", "a"))})
 	if result.(*FSMApplyResult).Error == "" {
 		t.Fatalf("Error = empty, want a rejection for a newline in the id")
+	}
+}
+
+// TestFSM_Apply_CreateJailInvalidBaseTemplateRejected is ADR-0096's own
+// regression test: base_template (ADR-0084) never got an FSM-boundary
+// check when it was added, unlike every other field this codebase
+// interpolates into a generated path/config (validResourceID/
+// validHostname's own rationale above). internal/zfs.Manager's own
+// path()/snapshotPath() already reject these same character classes
+// when the template actually gets resolved, so this closes a defense-
+// in-depth gap rather than a directly exploitable one.
+func TestFSM_Apply_CreateJailInvalidBaseTemplateRejected(t *testing.T) {
+	fsm := NewFSM()
+
+	cases := []string{
+		"../etc",
+		"tmpl/evil",
+		"tmpl@snap",
+		strings.Repeat("a", 65),
+	}
+	for _, tmpl := range cases {
+		cmd := &internalpb.Command{Op: &internalpb.Command_CreateJail{
+			CreateJail: &internalpb.CreateJail{Jail: &internalpb.JailDefinition{Id: "jail-1", Name: "a", BaseTemplate: tmpl}},
+		}}
+		result := fsm.Apply(&raft.Log{Index: 1, Data: mustMarshalCommand(t, cmd)})
+		if result.(*FSMApplyResult).Error == "" {
+			t.Errorf("base_template %q: Error = empty, want a rejection", tmpl)
+		}
+	}
+
+	// A valid template name and an empty one (opt-out) must still work.
+	for i, tmpl := range []string{"freebsd-14", ""} {
+		cmd := &internalpb.Command{Op: &internalpb.Command_CreateJail{
+			CreateJail: &internalpb.CreateJail{Jail: &internalpb.JailDefinition{Id: fmt.Sprintf("jail-ok-%d", i), Name: "a", BaseTemplate: tmpl}},
+		}}
+		result := fsm.Apply(&raft.Log{Index: uint64(2 + i), Data: mustMarshalCommand(t, cmd)})
+		if result.(*FSMApplyResult).Error != "" {
+			t.Errorf("base_template %q rejected: %q", tmpl, result.(*FSMApplyResult).Error)
+		}
 	}
 }
 

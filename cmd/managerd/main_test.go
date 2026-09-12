@@ -69,6 +69,51 @@ func TestRunReset_BothEmptyIsANoOp(t *testing.T) {
 	}
 }
 
+// TestResolvePeerAPIKey_FileTakesPrecedenceAndTrimsWhitespace confirms
+// -peer-api-key-file (ADR-0096) is read and trimmed correctly - the
+// preferred way to configure -peer-api-key, since a value passed
+// directly on the command line is visible to any local user via
+// ps(1)/procstat(1) regardless of /etc/rc.conf's own permissions.
+func TestResolvePeerAPIKey_FileTakesPrecedenceAndTrimsWhitespace(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "peer-api-key")
+	if err := os.WriteFile(path, []byte("apk_realsecret\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got, err := resolvePeerAPIKey("", path)
+	if err != nil {
+		t.Fatalf("resolvePeerAPIKey() error: %v", err)
+	}
+	if got != "apk_realsecret" {
+		t.Errorf("resolvePeerAPIKey() = %q, want %q (trailing newline trimmed)", got, "apk_realsecret")
+	}
+}
+
+func TestResolvePeerAPIKey_NoFileReturnsFlagValue(t *testing.T) {
+	got, err := resolvePeerAPIKey("apk_fromflag", "")
+	if err != nil {
+		t.Fatalf("resolvePeerAPIKey() error: %v", err)
+	}
+	if got != "apk_fromflag" {
+		t.Errorf("resolvePeerAPIKey() = %q, want %q", got, "apk_fromflag")
+	}
+}
+
+func TestResolvePeerAPIKey_BothSetIsAnError(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "peer-api-key")
+	if err := os.WriteFile(path, []byte("apk_realsecret"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := resolvePeerAPIKey("apk_fromflag", path); err == nil {
+		t.Fatal("resolvePeerAPIKey() with both -peer-api-key and -peer-api-key-file set = nil error, want a rejection")
+	}
+}
+
+func TestResolvePeerAPIKey_MissingFileIsAnError(t *testing.T) {
+	if _, err := resolvePeerAPIKey("", filepath.Join(t.TempDir(), "missing")); err == nil {
+		t.Fatal("resolvePeerAPIKey() with a missing -peer-api-key-file = nil error, want one")
+	}
+}
+
 func TestSplitCommaList(t *testing.T) {
 	cases := map[string][]string{
 		"":         nil,

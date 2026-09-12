@@ -13,6 +13,7 @@ import (
 	"github.com/gorilla/websocket"
 
 	rpcpb "github.com/glenjbarber/apiary/api/rpc"
+	"github.com/glenjbarber/apiary/internal/manager"
 )
 
 func TestServer_ConsolePage_AvailableShowsNoVNCWidget(t *testing.T) {
@@ -53,6 +54,53 @@ func TestServer_ConsolePage_UnavailableShowsErrorNotWidget(t *testing.T) {
 	}
 	if strings.Contains(body, "novnc/core/rfb.js") {
 		t.Errorf("console page should not attempt to connect when unavailable, got: %s", body)
+	}
+}
+
+// TestServer_ConsoleRoutes_ViewerBlockedByRouteGate is ADR-0096's own
+// regression test: a VM console is a full bidirectional VNC/RFB tunnel
+// (keyboard/mouse control of the guest), not a read-only view, so it
+// must sit behind the same requireRole(RoleOperator, ...) gate as every
+// other state-changing route - a Viewer session must be turned away
+// from both the console page and its WebSocket tunnel.
+func TestServer_ConsoleRoutes_ViewerBlockedByRouteGate(t *testing.T) {
+	client := &fakeClient{getVMConsoleResp: &rpcpb.GetVMConsoleResponse{Available: true, Host: "apiarium", Port: 5901}}
+	roleMap := map[string]manager.Role{"viewer": manager.RoleViewer}
+	s, err := NewServer(client, fakeAuthenticator{user: "viewer", pass: "secret"}, roleMap, nil, "", "", nil, false)
+	if err != nil {
+		t.Fatalf("NewServer() error: %v", err)
+	}
+	token, _ := s.sessions.Create("viewer", manager.RoleViewer)
+
+	for _, path := range []string{"/vms/vm-1/console", "/vms/vm-1/console/ws"} {
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		req.AddCookie(&http.Cookie{Name: sessionCookieName, Value: token})
+		rec := httptest.NewRecorder()
+		s.ServeHTTP(rec, req)
+		if rec.Code != http.StatusForbidden {
+			t.Errorf("%s: status = %d, want %d (forbidden by the route's own requireRole gate)", path, rec.Code, http.StatusForbidden)
+		}
+	}
+}
+
+// TestServer_ConsolePage_OperatorAllowed confirms the gate above is a
+// floor, not a lockout: an Operator session still reaches the console
+// page normally.
+func TestServer_ConsolePage_OperatorAllowed(t *testing.T) {
+	client := &fakeClient{getVMConsoleResp: &rpcpb.GetVMConsoleResponse{Available: true, Host: "apiarium", Port: 5901}}
+	roleMap := map[string]manager.Role{"ops": manager.RoleOperator}
+	s, err := NewServer(client, fakeAuthenticator{user: "ops", pass: "secret"}, roleMap, nil, "", "", nil, false)
+	if err != nil {
+		t.Fatalf("NewServer() error: %v", err)
+	}
+	token, _ := s.sessions.Create("ops", manager.RoleOperator)
+
+	req := httptest.NewRequest(http.MethodGet, "/vms/vm-1/console", nil)
+	req.AddCookie(&http.Cookie{Name: sessionCookieName, Value: token})
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Errorf("status = %d, want 200 - an Operator session must still reach the console page", rec.Code)
 	}
 }
 

@@ -11,7 +11,9 @@ import (
 // fakeJoinColonyPeerForwarder embeds the (nil) PeerForwarder interface
 // so it only needs to implement the join-colony methods this file's
 // tests actually exercise - mirrors fakeISOPeerForwarder's own
-// established shape in iso_replication_test.go.
+// established shape in iso_replication_test.go. Implements the
+// *Unauthenticated variants (ADR-0096), since target_address forwarding
+// now dials through those, never the authenticated originals.
 type fakeJoinColonyPeerForwarder struct {
 	PeerForwarder
 
@@ -25,7 +27,7 @@ type fakeJoinColonyPeerForwarder struct {
 	cancelResp  *rpcpb.CancelJoinRequestResponse
 }
 
-func (f *fakeJoinColonyPeerForwarder) RequestJoinColony(_ context.Context, addr string, req *rpcpb.RequestJoinColonyRequest) (*rpcpb.RequestJoinColonyResponse, error) {
+func (f *fakeJoinColonyPeerForwarder) RequestJoinColonyUnauthenticated(_ context.Context, addr string, req *rpcpb.RequestJoinColonyRequest) (*rpcpb.RequestJoinColonyResponse, error) {
 	f.lastAddr, f.lastReq = addr, req
 	if f.requestResp != nil {
 		return f.requestResp, nil
@@ -33,7 +35,7 @@ func (f *fakeJoinColonyPeerForwarder) RequestJoinColony(_ context.Context, addr 
 	return &rpcpb.RequestJoinColonyResponse{RequestId: "jreq-forwarded", Code: "123456"}, nil
 }
 
-func (f *fakeJoinColonyPeerForwarder) GetJoinRequestStatus(_ context.Context, addr, requestID string) (*rpcpb.GetJoinRequestStatusResponse, error) {
+func (f *fakeJoinColonyPeerForwarder) GetJoinRequestStatusUnauthenticated(_ context.Context, addr, requestID string) (*rpcpb.GetJoinRequestStatusResponse, error) {
 	f.lastAddr, f.lastReqID = addr, requestID
 	if f.statusResp != nil {
 		return f.statusResp, nil
@@ -41,7 +43,7 @@ func (f *fakeJoinColonyPeerForwarder) GetJoinRequestStatus(_ context.Context, ad
 	return &rpcpb.GetJoinRequestStatusResponse{Request: &rpcpb.PendingJoinRequest{RequestId: requestID}}, nil
 }
 
-func (f *fakeJoinColonyPeerForwarder) CancelJoinRequest(_ context.Context, addr string, req *rpcpb.CancelJoinRequestRequest) (*rpcpb.CancelJoinRequestResponse, error) {
+func (f *fakeJoinColonyPeerForwarder) CancelJoinRequestUnauthenticated(_ context.Context, addr string, req *rpcpb.CancelJoinRequestRequest) (*rpcpb.CancelJoinRequestResponse, error) {
 	f.lastAddr, f.lastCancelReqID = addr, req.GetRequestId()
 	if f.cancelResp != nil {
 		return f.cancelResp, nil

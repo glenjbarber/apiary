@@ -97,6 +97,8 @@ type fakePeerServer struct {
 	traceCellPathResp          *rpcpb.TraceCellPathResponse
 
 	statusResp *rpcpb.StatusResponse
+
+	joinAuth string
 }
 
 func (f *fakePeerServer) UploadISO(stream rpcpb.ManagerService_UploadISOServer) error {
@@ -335,6 +337,15 @@ func (f *fakePeerServer) ReportVMPhase(ctx context.Context, req *rpcpb.ReportVMP
 	return &rpcpb.ReportVMPhaseResponse{}, nil
 }
 
+func (f *fakePeerServer) RequestJoinColony(ctx context.Context, req *rpcpb.RequestJoinColonyRequest) (*rpcpb.RequestJoinColonyResponse, error) {
+	if md, ok := metadata.FromIncomingContext(ctx); ok {
+		if vals := md.Get("authorization"); len(vals) > 0 {
+			f.joinAuth = vals[0]
+		}
+	}
+	return &rpcpb.RequestJoinColonyResponse{RequestId: "jreq-1", Code: "123456"}, nil
+}
+
 func (f *fakePeerServer) ReportVMTeardownComplete(_ context.Context, _ *rpcpb.ReportVMTeardownCompleteRequest) (*rpcpb.ReportVMTeardownCompleteResponse, error) {
 	return &rpcpb.ReportVMTeardownCompleteResponse{}, nil
 }
@@ -397,6 +408,48 @@ func TestPeerReporter_NoAPIKeyAttachesNothing(t *testing.T) {
 	}
 	if fake.lastAuth != "" {
 		t.Errorf("received Authorization = %q, want none", fake.lastAuth)
+	}
+}
+
+// TestPeerReporter_RequestJoinColony_AttachesAPIKey confirms the
+// ordinary, authenticated RequestJoinColony (used for a trusted,
+// internally-derived leader-hint address) still attaches this node's
+// own -peer-api-key exactly like every other authenticated peer call -
+// the baseline TestPeerReporter_RequestJoinColonyUnauthenticated_
+// NeverAttachesAPIKey below is meaningful only in contrast to this.
+func TestPeerReporter_RequestJoinColony_AttachesAPIKey(t *testing.T) {
+	fake := &fakePeerServer{}
+	addr := newTestPeerServer(t, fake)
+	p := NewPeerReporter("test-key", false, nil)
+
+	if _, err := p.RequestJoinColony(context.Background(), addr, &rpcpb.RequestJoinColonyRequest{NodeId: "node-2", RaftBindAddress: "10.0.0.2:17600"}); err != nil {
+		t.Fatalf("RequestJoinColony() error: %v", err)
+	}
+	if fake.joinAuth != "Bearer test-key" {
+		t.Errorf("received Authorization = %q, want \"Bearer test-key\"", fake.joinAuth)
+	}
+}
+
+// TestPeerReporter_RequestJoinColonyUnauthenticated_NeverAttachesAPIKey
+// is ADR-0096's own regression test: RequestJoinColony's target_address
+// (ADR-0092) is a caller-supplied address from an RPC that is
+// deliberately never authenticated (a joining Comb has no Colony API
+// key yet, by definition). Before this fix, forwarding to that address
+// reused the same authenticated dial as every other peer call, meaning
+// any unauthenticated network caller who could reach this managerd's
+// gRPC port could make it leak its own shared -peer-api-key to a host
+// of their choosing. Confirms the fix: even with an API key configured,
+// the unauthenticated variant sends no Authorization header at all.
+func TestPeerReporter_RequestJoinColonyUnauthenticated_NeverAttachesAPIKey(t *testing.T) {
+	fake := &fakePeerServer{}
+	addr := newTestPeerServer(t, fake)
+	p := NewPeerReporter("test-key", false, nil)
+
+	if _, err := p.RequestJoinColonyUnauthenticated(context.Background(), addr, &rpcpb.RequestJoinColonyRequest{NodeId: "node-2", RaftBindAddress: "10.0.0.2:17600"}); err != nil {
+		t.Fatalf("RequestJoinColonyUnauthenticated() error: %v", err)
+	}
+	if fake.joinAuth != "" {
+		t.Errorf("received Authorization = %q, want none - this node's own -peer-api-key must never reach a caller-supplied target_address", fake.joinAuth)
 	}
 }
 

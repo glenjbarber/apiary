@@ -106,3 +106,11 @@ send`/`receive` stream - mirroring ADR-0041's VM/ISO peer-fetch. This
 narrows the limitation above rather than eliminating it: an operator
 must still create a template once, somewhere in the cluster - only the
 "must exist on every node it might be scheduled to" part is gone.
+
+**Gap closed by ADR-0096**: `base_template` never got the FSM-boundary
+validation ADR-0067 requires for every other caller-supplied,
+later-interpolated identifier - it relied solely on `internal/zfs.Manager`'s
+own path confinement. Not independently exploitable (that confinement
+is correct), but inconsistent with this project's own stated doctrine;
+`applyCreateJail`/`applyUpdateJail` now reject an invalid, non-empty
+value the same way `validResourceID` already gates a VM/jail's own id.

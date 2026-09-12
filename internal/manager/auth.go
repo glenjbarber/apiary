@@ -68,8 +68,6 @@ var requiredRole = map[string]Role{
 	"/apiary.rpc.v1.ManagerService/ListISOs":                  RoleViewer,
 	"/apiary.rpc.v1.ManagerService/ListNetworks":              RoleViewer,
 	"/apiary.rpc.v1.ManagerService/HostStats":                 RoleViewer,
-	"/apiary.rpc.v1.ManagerService/GetVMConsole":              RoleViewer,
-	"/apiary.rpc.v1.ManagerService/ProxyVMConsole":            RoleViewer,
 	"/apiary.rpc.v1.ManagerService/GetVMSerialLog":            RoleViewer,
 	"/apiary.rpc.v1.ManagerService/GetNodeConfig":             RoleViewer,
 	"/apiary.rpc.v1.ManagerService/GetLocalNodeHealth":        RoleViewer,
@@ -113,6 +111,18 @@ var requiredRole = map[string]Role{
 	// The three writes (Create/Restore/Delete) sit in the Operator
 	// block below.
 	"/apiary.rpc.v1.ManagerService/ListVMSnapshots": RoleViewer,
+
+	// GetVMConsole/ProxyVMConsole (ADR-0096) sit at Operator, not Viewer:
+	// unlike every other RPC in the Viewer block above, a VM console is
+	// a full bidirectional VNC/RFB tunnel (internal/frontend's
+	// proxyConsole pumps bytes both ways) - keyboard and mouse input
+	// reach the guest, not just a framebuffer view. That's real control
+	// (reboot the guest, reach single-user mode or a bootloader,
+	// interact with an in-guest login prompt), a materially different
+	// capability than "read-only" implies for the lowest tier this
+	// project defines everywhere else.
+	"/apiary.rpc.v1.ManagerService/GetVMConsole":   RoleOperator,
+	"/apiary.rpc.v1.ManagerService/ProxyVMConsole": RoleOperator,
 
 	// Operator: VM/jail/network lifecycle, ISO management, and the
 	// peer-to-peer reconciler-forwarding RPCs (ADR-0029) - a follower
@@ -167,6 +177,15 @@ var requiredRole = map[string]Role{
 	"/apiary.rpc.v1.ManagerService/ListAPIKeys":                 RoleAdmin,
 	"/apiary.rpc.v1.ManagerService/RevokeAPIKey":                RoleAdmin,
 	"/apiary.rpc.v1.ManagerService/UpdateNodeConfig":            RoleAdmin,
+
+	// RestartNodeService (ADR-0085 era) restarts an allowlisted rc.d
+	// service on this Hive, including managerd/frontend themselves - a
+	// host-wide action, same tier as UpdateNodeConfig above. Already
+	// RoleAdmin via requiredRoleFor's own fail-closed default even
+	// without this entry; listed explicitly anyway (ADR-0096) so this
+	// map stays a complete, honest reference of every RPC's tier rather
+	// than relying silently on the default for one of them.
+	"/apiary.rpc.v1.ManagerService/RestartNodeService": RoleAdmin,
 
 	// SetUplinkState (ADR-0085) administratively downs/ups this node's
 	// uplink interface - a host-wide physical change with a real risk

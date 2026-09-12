@@ -140,3 +140,10 @@ follow-up to this finding, but that has been removed (see ADR-0082's
 it was never actually a decision of this ADR, just unlabeled operational
 language. The plaintext-secret concern itself is still real and still
 unresolved - key rotation (above) is its actual fix.
+
+ADR-0096 (2026-09-11) closes a related but distinct part of this: even
+at 600, `-peer-api-key` passed as a literal CLI argument is visible to
+any local user via `ps(1)`/`procstat(1)`, independent of `rc.conf`'s own
+permissions entirely. `cmd/managerd` gained `-peer-api-key-file` to read
+the value from a file instead - migrating `apiverse`/`apiarium` to it is
+still a live-host follow-up, not done as part of that ADR's own commit.
