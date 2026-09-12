@@ -237,6 +237,49 @@ func newManagerdRPCClientFull(t *testing.T, raftdSocket, nodeID string, vnc VNCL
 	return rpcpb.NewManagerServiceClient(conn)
 }
 
+// newManagerdRPCClientAndServer mirrors newManagerdRPCClientFull
+// exactly, but also returns the underlying *Server - needed by tests
+// that override one of its swappable fields (e.g. reachabilityCheck,
+// ADR-0097) before exercising it through the real gRPC client, rather
+// than calling a handler method directly (ApproveJoinRequest's very
+// first line touches s.raft, which has no nil-safe fake here - a real
+// raftd, via this same harness every other integration test already
+// uses, is simpler than inventing one).
+func newManagerdRPCClientAndServer(t *testing.T, raftdSocket, nodeID string) (rpcpb.ManagerServiceClient, *Server) {
+	t.Helper()
+
+	raftClient, err := Dial(raftdSocket, "")
+	if err != nil {
+		t.Fatalf("Dial() error: %v", err)
+	}
+	t.Cleanup(func() { raftClient.Close() })
+
+	lis, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("Listen(tcp) error: %v", err)
+	}
+
+	srv := NewServer(raftClient, nodeID, isostore.New(t.TempDir()), nil, nil, nil, nil, "", nil, nil, nil, 0, nil)
+	grpcServer := grpc.NewServer(
+		grpc.UnaryInterceptor(srv.AuthUnaryInterceptor),
+		grpc.StreamInterceptor(srv.AuthStreamInterceptor),
+	)
+	rpcpb.RegisterManagerServiceServer(grpcServer, srv)
+	go grpcServer.Serve(lis)
+	t.Cleanup(grpcServer.GracefulStop)
+
+	conn, err := grpc.NewClient(
+		lis.Addr().String(),
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+	)
+	if err != nil {
+		t.Fatalf("grpc.NewClient() error: %v", err)
+	}
+	t.Cleanup(func() { conn.Close() })
+
+	return rpcpb.NewManagerServiceClient(conn), srv
+}
+
 // newManagerdRPCClientWithZFS mirrors newManagerdRPCClientFull, but lets
 // a test supply a fake quotaSetter - needed for the orphaned-HAST-
 // resource RPCs, which cross-reference real ListVMsLocal/ListJailsLocal
@@ -1368,6 +1411,86 @@ func TestIntegration_ApproveJoinRequest_MissingIsError(t *testing.T) {
 	}
 	if resp.GetError() == "" {
 		t.Fatalf("ApproveJoinRequest() error = empty, want a missing-request rejection")
+	}
+}
+
+// TestIntegration_ApproveJoinRequest_UnreachableNodeIsRefused is
+// ADR-0097's own regression test: this project's own history (see
+// SHARED.md) recorded a real stranded cluster from approving a join
+// before the joiner was actually reachable - AddVoter commits under
+// whatever quorum exists the instant it's called, and reversing it
+// needs agreement from every current voter, including one that was
+// never reachable, so the only recovery has been a full raft state
+// wipe. Overrides reachabilityCheck (a real TCP dial in production)
+// with a fake that always reports unreachable, then confirms both that
+// the RPC refuses with a clear error AND that AddVoter was never
+// actually called (the node never appears in Status().Members) -
+// proving this is a refusal, not merely a warning alongside the write
+// still happening.
+func TestIntegration_ApproveJoinRequest_UnreachableNodeIsRefused(t *testing.T) {
+	raftdSocket := newRaftdUDSSocket(t)
+	client, srv := newManagerdRPCClientAndServer(t, raftdSocket, "manager-1")
+	srv.reachabilityCheck = func(context.Context, string) error {
+		return fmt.Errorf("simulated: connection refused")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	reqResp, err := client.RequestJoinColony(ctx, &rpcpb.RequestJoinColonyRequest{NodeId: "node02", RaftBindAddress: "127.0.0.1:1"})
+	if err != nil || reqResp.GetError() != "" {
+		t.Fatalf("RequestJoinColony() = (%+v, %v)", reqResp, err)
+	}
+
+	approveResp, err := client.ApproveJoinRequest(ctx, &rpcpb.ApproveJoinRequestRequest{RequestId: reqResp.GetRequestId()})
+	if err != nil {
+		t.Fatalf("ApproveJoinRequest() error: %v", err)
+	}
+	if approveResp.GetError() == "" {
+		t.Fatal("ApproveJoinRequest() error = empty, want a refusal for an unreachable raft_bind_address")
+	}
+
+	statusResp, err := client.Status(ctx, &rpcpb.StatusRequest{})
+	if err != nil {
+		t.Fatalf("Status() error: %v", err)
+	}
+	for _, m := range statusResp.GetMembers() {
+		if m.GetNodeId() == "node02" {
+			t.Fatalf("Status().Members = %+v, want node02 NOT added - AddVoter must never run when the reachability check fails", statusResp.GetMembers())
+		}
+	}
+}
+
+// TestIntegration_ApproveJoinRequest_ReachableNodeStillWorks confirms
+// the check above is a floor, not a lockout: a genuinely reachable
+// joiner (mirroring TestIntegration_ApproveJoinRequest_AddsRealRaftVoter's
+// own real raftnode setup) still gets approved normally through the
+// same reachabilityCheck-bearing harness.
+func TestIntegration_ApproveJoinRequest_ReachableNodeStillWorks(t *testing.T) {
+	raftdSocket := newRaftdUDSSocket(t)
+	client, _ := newManagerdRPCClientAndServer(t, raftdSocket, "manager-1")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	joiningNodeAddr := freeLoopbackAddr(t)
+	joiningNode, err := raftnode.New(raftnode.Config{NodeID: "node02", DataDir: t.TempDir(), BindAddr: joiningNodeAddr})
+	if err != nil {
+		t.Fatalf("raftnode.New(node02) error: %v", err)
+	}
+	t.Cleanup(func() { joiningNode.Shutdown() })
+
+	reqResp, err := client.RequestJoinColony(ctx, &rpcpb.RequestJoinColonyRequest{NodeId: "node02", RaftBindAddress: joiningNodeAddr})
+	if err != nil || reqResp.GetError() != "" {
+		t.Fatalf("RequestJoinColony() = (%+v, %v)", reqResp, err)
+	}
+
+	approveResp, err := client.ApproveJoinRequest(ctx, &rpcpb.ApproveJoinRequestRequest{RequestId: reqResp.GetRequestId()})
+	if err != nil {
+		t.Fatalf("ApproveJoinRequest() error: %v", err)
+	}
+	if approveResp.GetError() != "" {
+		t.Fatalf("ApproveJoinRequest() returned error: %s", approveResp.GetError())
 	}
 }
 

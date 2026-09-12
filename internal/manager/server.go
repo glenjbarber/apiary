@@ -348,6 +348,21 @@ type Server struct {
 	// - SetUplinkState simply skips the NAT-pause side effect rather
 	// than panicking. See ADR-0088.
 	nat natPauser
+
+	// knownPeerAddresses (ADR-0097), when non-empty, is the sole
+	// allowlist RequestJoinColony/GetJoinRequestStatus/CancelJoinRequest
+	// check target_address against before dialing it - see
+	// checkTargetAddressAllowed's own doc comment (joincolony.go). Nil
+	// (the default, no -known-peer-addresses configured) preserves
+	// ADR-0092's original behavior: any caller-supplied target_address
+	// is dialed, the accepted-as-of-ADR-0096 residual risk.
+	knownPeerAddresses map[string]bool
+
+	// reachabilityCheck is swappable in tests (real TCP dials aren't
+	// deterministic/fast enough for unit tests) - production always uses
+	// the package-level dialReachable. See ApproveJoinRequest's own
+	// pre-AddVoter check (ADR-0097).
+	reachabilityCheck func(ctx context.Context, addr string) error
 }
 
 // SetPAMAuthenticator wires PAM login support after construction (ADR-
@@ -356,6 +371,22 @@ type Server struct {
 // here from cmd/managerd's own -pam-service flag; tests may supply a
 // fake implementing the same small interface.
 func (s *Server) SetPAMAuthenticator(auth pamAuthenticator) { s.authPAM = auth }
+
+// SetKnownPeerAddresses configures the target_address allowlist
+// (ADR-0097) from cmd/managerd's own -known-peer-addresses flag - a
+// nil/empty slice clears it back to ADR-0092's original
+// accept-any-target_address behavior.
+func (s *Server) SetKnownPeerAddresses(addrs []string) {
+	if len(addrs) == 0 {
+		s.knownPeerAddresses = nil
+		return
+	}
+	m := make(map[string]bool, len(addrs))
+	for _, a := range addrs {
+		m[a] = true
+	}
+	s.knownPeerAddresses = m
+}
 
 // SetNATPauser wires the uplink-down NAT-pause side effect (ADR-0088)
 // after construction - production wires the same *cluster.Reconciler
@@ -421,7 +452,7 @@ var _ rpcpb.ManagerServiceServer = (*Server)(nil)
 // the params above) specifically to keep every existing positional
 // NewServer(...) call site a mechanical one-line edit.
 func NewServer(raft *RaftClient, nodeID string, isos isoManager, vnc VNCLookup, serialLog SerialLogLookup, vlanMgr VLANStatus, peers PeerForwarder, peerManagerdPort string, zfsMgr quotaSetter, nodeConfig nodeConfigStore, assumptionStoreMgr assumptionStore, assumptionStaleAfter time.Duration, reconciler reconcilerStats) *Server {
-	return &Server{raft: raft, nodeID: nodeID, isos: isos, vnc: vnc, serialLog: serialLog, vlan: vlanMgr, statsGather: hoststats.Gather, peers: peers, peerManagerdPort: peerManagerdPort, zfs: zfsMgr, nodeConfig: nodeConfig, listNetworkInterfaces: netif.List, assumptions: assumptionStoreMgr, assumptionStaleAfter: assumptionStaleAfter, reconciler: reconciler, services: rcServiceController{}, pamLockouts: newPAMLockoutTracker()}
+	return &Server{raft: raft, nodeID: nodeID, isos: isos, vnc: vnc, serialLog: serialLog, vlan: vlanMgr, statsGather: hoststats.Gather, peers: peers, peerManagerdPort: peerManagerdPort, zfs: zfsMgr, nodeConfig: nodeConfig, listNetworkInterfaces: netif.List, assumptions: assumptionStoreMgr, assumptionStaleAfter: assumptionStaleAfter, reconciler: reconciler, services: rcServiceController{}, pamLockouts: newPAMLockoutTracker(), reachabilityCheck: dialReachable}
 }
 
 // SetNetworkInterfaceLister overrides host interface discovery for tests.

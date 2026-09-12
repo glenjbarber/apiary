@@ -267,7 +267,14 @@ install -m 0600 /dev/stdin /var/db/apiary/peer-api-key <<< "<the-same-key-every-
 ```
 
 Add `-peer-tls`/`-peer-tls-hostname-map` too if the other Combs'
-`managerd` instances serve TLS.
+`managerd` instances serve TLS. Optionally, add `-known-peer-addresses`
+(ADR-0097) listing every Comb's `host:port` in this Colony, comma-
+separated - once set, the join-colony RPCs refuse a `target_address`
+outside that list, closing off the residual risk that an unauthenticated
+caller could otherwise point this managerd at an arbitrary host. Leave
+it unset on a Comb's very first bootstrap (before any peer addresses are
+even known yet); it's safe to add once the Colony's membership is
+settled.
 
 Verify:
 
