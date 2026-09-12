@@ -764,6 +764,31 @@ func TestIntegration_CreateVM_CloneFromSnapshotRoundTrips(t *testing.T) {
 	}
 }
 
+// TestIntegration_SimulateNodeFailure_ReportsJailBaseArchiveUnavailableAfterOnlySourceHiveLoss
+// mirrors the VM base-image test above, for a jail's base_archive_name
+// (ADR-0098) instead.
+func TestIntegration_SimulateNodeFailure_ReportsJailBaseArchiveUnavailableAfterOnlySourceHiveLoss(t *testing.T) {
+	raftdSocket := newRaftdUDSSocket(t)
+	client := newManagerdRPCClient(t, raftdSocket)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if _, err := client.CreateJail(ctx, &rpcpb.CreateJailRequest{Jail: &rpcpb.JailDefinition{
+		Id: "jail-image", Name: "web", NodeId: "raftd-1", BaseArchiveName: "base.txz",
+	}}); err != nil {
+		t.Fatalf("CreateJail() error: %v", err)
+	}
+
+	resp, err := client.SimulateNodeFailure(ctx, &rpcpb.SimulateNodeFailureRequest{NodeId: "raftd-1"})
+	if err != nil {
+		t.Fatalf("SimulateNodeFailure() error: %v", err)
+	}
+	impacts := resp.GetImageAvailability()
+	if len(impacts) != 1 || impacts[0].GetImageName() != "base.txz" || impacts[0].GetRole() != rpcpb.ImageRole_IMAGE_ROLE_BASE_ARCHIVE || impacts[0].GetVerdict() != rpcpb.ImageAvailabilityVerdict_IMAGE_AVAILABILITY_VERDICT_UNAVAILABLE {
+		t.Fatalf("ImageAvailability = %+v, want base.txz unavailable with role base_archive", impacts)
+	}
+}
+
 func TestIntegration_SimulateNetworkFailure_ReportsAttachedVMs(t *testing.T) {
 	raftdSocket := newRaftdUDSSocket(t)
 	client := newManagerdRPCClient(t, raftdSocket)

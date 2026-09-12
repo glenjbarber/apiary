@@ -550,6 +550,12 @@ message JailDefinition {
   // first time it's created. Empty means an empty dataset, today's
   // unchanged default behavior.
   string base_template = 9;
+
+  // base_archive_name mirrors api/internalpb's JailDefinition field of
+  // the same name - see ADR-0098 (renumbered from this branch's own
+  // original ADR-0083, which collided with the already-shipped
+  // ADR-0083, Mutually-authorized Colony join).
+  string base_archive_name = 10;
 }
 
 // FirewallRule mirrors api/internalpb's FirewallRule.
@@ -1872,6 +1878,10 @@ enum ImageRole {
   IMAGE_ROLE_UNSPECIFIED = 0;
   IMAGE_ROLE_ISO = 1;
   IMAGE_ROLE_BASE_IMAGE = 2;
+
+  // IMAGE_ROLE_BASE_ARCHIVE is a jail's base_archive_name (ADR-0098) -
+  // the jail equivalent of IMAGE_ROLE_BASE_IMAGE.
+  IMAGE_ROLE_BASE_ARCHIVE = 3;
 }
 
 enum ImageAvailabilityVerdict {

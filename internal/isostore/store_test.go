@@ -206,3 +206,52 @@ func TestIsISO9660_ShortFileIsNotISO9660(t *testing.T) {
 		t.Errorf("IsISO9660() = true, want false for a file shorter than the sniff offset")
 	}
 }
+
+func TestParseManifest(t *testing.T) {
+	manifest := strings.NewReader(strings.Join([]string{
+		"# FreeBSD 14.2-RELEASE",
+		"",
+		"base.txz\t" + sha256Hex("base") + "\t123456\t\"Base distribution\"",
+		"kernel.txz\t" + sha256Hex("kernel") + "\t654321\t\"Kernel\"",
+		"malformed-line-with-no-hash",
+	}, "\n"))
+
+	sums, err := ParseManifest(manifest)
+	if err != nil {
+		t.Fatalf("ParseManifest() error: %v", err)
+	}
+	if got, want := sums["base.txz"], sha256Hex("base"); got != want {
+		t.Errorf("sums[base.txz] = %q, want %q", got, want)
+	}
+	if got, want := sums["kernel.txz"], sha256Hex("kernel"); got != want {
+		t.Errorf("sums[kernel.txz] = %q, want %q", got, want)
+	}
+	if _, ok := sums["malformed-line-with-no-hash"]; ok {
+		t.Errorf("malformed line should not have produced an entry")
+	}
+	if len(sums) != 2 {
+		t.Errorf("len(sums) = %d, want 2", len(sums))
+	}
+}
+
+func TestParseManifest_UsedAsExpectedSHA256(t *testing.T) {
+	m := New(t.TempDir())
+	manifest := strings.NewReader("base.txz\t" + sha256Hex("real base contents") + "\t19\t\"Base\"")
+
+	sums, err := ParseManifest(manifest)
+	if err != nil {
+		t.Fatalf("ParseManifest() error: %v", err)
+	}
+	expected, ok := sums["base.txz"]
+	if !ok {
+		t.Fatal("expected base.txz in parsed manifest")
+	}
+
+	if _, err := m.Save("base.txz", strings.NewReader("real base contents"), expected); err != nil {
+		t.Fatalf("Save with manifest-derived hash: %v", err)
+	}
+
+	if _, err := m.Save("base.txz", strings.NewReader("tampered contents"), expected); err == nil {
+		t.Fatal("expected Save to reject contents that don't match the manifest's checksum")
+	}
+}

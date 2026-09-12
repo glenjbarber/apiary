@@ -13,6 +13,7 @@ package cluster
 import (
 	"context"
 	"fmt"
+	"os"
 
 	"google.golang.org/protobuf/proto"
 
@@ -26,6 +27,13 @@ type jailManager interface {
 	CreateJail(ctx context.Context, name string, cfg jail.Config) error
 	RemoveJail(ctx context.Context, name string) error
 	JailExists(ctx context.Context, name string) (bool, error)
+}
+
+// jailArchiveExtractor is the subset of *jailarchive.Extractor the
+// reconciler needs - the same narrow-interface-per-dependency pattern
+// as jailManager/mountManager above. See Reconciler.JailArchives.
+type jailArchiveExtractor interface {
+	Extract(ctx context.Context, archivePath, destDir string) error
 }
 
 // mountManager is the subset of *ufsmount.Manager the reconciler
@@ -180,6 +188,18 @@ func (r *Reconciler) ensureJail(ctx context.Context, j JailPlacement, hastDevice
 	if j.BaseTemplate != "" && j.ReplicaNodeID != "" {
 		return fmt.Errorf("jail %q: base_template is not supported together with replica_node_id - a HAST-replicated jail's root is a raw device, not a ZFS dataset", j.ID)
 	}
+	// BaseTemplate (ADR-0084, ZFS clone) and BaseArchiveName (ADR-0098,
+	// tar extraction) are two independent ways to populate a jail's
+	// root - each was built without knowledge of the other (merged from
+	// separate branches), so nothing previously stopped a jail from
+	// naming both. Without this check, BaseTemplate's clone (which runs
+	// first, below) would silently win and BaseArchiveName would never
+	// even be consulted, since ensureJailRoot's own extraction only
+	// triggers on an empty root - a confusing silent precedence rather
+	// than a clear rejection, unlike the replica_node_id case above.
+	if j.BaseTemplate != "" && j.BaseArchiveName != "" {
+		return fmt.Errorf("jail %q: base_template and base_archive_name are not supported together - choose one way to populate this jail's root", j.ID)
+	}
 
 	var rootPath string
 	if j.ReplicaNodeID == "" {
@@ -204,6 +224,9 @@ func (r *Reconciler) ensureJail(ctx context.Context, j JailPlacement, hastDevice
 			return fmt.Errorf("getting dataset mountpoint: %w", err)
 		}
 		rootPath = mountpoint
+		if err := r.ensureJailRoot(ctx, j, rootPath); err != nil {
+			return err
+		}
 	} else {
 		if r.HAST == nil {
 			return fmt.Errorf("jail names replica node %q but no HAST support is configured on this node", j.ReplicaNodeID)
@@ -222,6 +245,9 @@ func (r *Reconciler) ensureJail(ctx context.Context, j JailPlacement, hastDevice
 		if err := r.Mount.Mount(ctx, devicePath, rootPath); err != nil {
 			return fmt.Errorf("mounting HAST device: %w", err)
 		}
+		if err := r.ensureJailRoot(ctx, j, rootPath); err != nil {
+			return err
+		}
 	}
 
 	running, err := r.Jail.JailExists(ctx, j.ID)
@@ -236,6 +262,63 @@ func (r *Reconciler) ensureJail(ctx context.Context, j JailPlacement, hastDevice
 		return fmt.Errorf("creating jail: %w", err)
 	}
 	return nil
+}
+
+// ensureJailRoot populates rootPath with j's base archive the first
+// time it's empty (mirroring ensureDiskImage's "seed only a fresh
+// resource, never re-seed" pattern - jail(8) is never asked to attach
+// to rootPath until this returns), then refuses to let a completely
+// empty root reach PhaseReady: jail(8) itself never validates that its
+// root holds a real FreeBSD userland, so without this check a jail
+// with no base_archive_name (and nothing placed there some other way)
+// would "successfully" start attached to an empty directory - no
+// /bin/sh, nothing - and be reported Ready with no error anywhere.
+// See ADR-0098.
+func (r *Reconciler) ensureJailRoot(ctx context.Context, j JailPlacement, rootPath string) error {
+	empty, err := dirEmpty(rootPath)
+	if err != nil {
+		return fmt.Errorf("checking jail root: %w", err)
+	}
+	if empty && j.BaseArchiveName != "" {
+		if r.ISOs == nil {
+			return fmt.Errorf("jail %q names base archive %q but no ISO store is configured on this node", j.ID, j.BaseArchiveName)
+		}
+		if r.JailArchives == nil {
+			return fmt.Errorf("jail %q names base archive %q but no jail-archive extractor is configured on this node", j.ID, j.BaseArchiveName)
+		}
+		archivePath, err := r.resolveLocalImagePath(ctx, j.BaseArchiveName)
+		if err != nil {
+			return fmt.Errorf("resolving base archive %q: %w", j.BaseArchiveName, err)
+		}
+		if err := r.JailArchives.Extract(ctx, archivePath, rootPath); err != nil {
+			return fmt.Errorf("extracting base archive %q: %w", j.BaseArchiveName, err)
+		}
+		empty, err = dirEmpty(rootPath)
+		if err != nil {
+			return fmt.Errorf("checking jail root after extraction: %w", err)
+		}
+	}
+	if empty {
+		return fmt.Errorf("jail %q's root filesystem (%s) is empty, so jail(8) would start with no /bin/sh and nothing else usable; set base_archive_name to a base.txz-style archive uploaded to the ISO store, or populate the root manually before creating this jail", j.ID, rootPath)
+	}
+	return nil
+}
+
+// dirEmpty reports whether path contains no entries. A path that
+// doesn't exist at all counts as empty too - a real ZFS dataset or a
+// real ufsmount.Mount always creates its target directory as part of
+// creating/mounting it, so a still-missing path here means "definitely
+// has no populated jail root yet", the same conclusion an empty
+// existing directory reaches.
+func dirEmpty(path string) (bool, error) {
+	entries, err := os.ReadDir(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return true, nil
+		}
+		return false, err
+	}
+	return len(entries) == 0, nil
 }
 
 // teardownJail mirrors teardownVM exactly: destroy the real jail(8)

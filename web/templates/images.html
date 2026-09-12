@@ -8,9 +8,12 @@
   {{template "page_header" (pageHeader "Images" "Verified installer media and raw base disks stored on this node.")}}
   {{if .CanOperate}}<form id="iso-upload-form" class="upload-iso" hx-post="/isos" hx-target="#iso-panel" hx-swap="innerHTML" hx-encoding="multipart/form-data">
     <label>Expected SHA-256
-      <input type="text" name="expected_sha256" required pattern="[0-9a-fA-F]{64}" title="64 hex characters. Checked against the file as it streams to disk - the upload is refused outright if the hash does not match, so an unverified image never lands in storage." size="64">
+      <input type="text" id="iso-expected-sha256" name="expected_sha256" pattern="[0-9a-fA-F]{64}" title="64 hex characters. Checked against the file as it streams to disk - the upload is refused outright if the hash does not match, so an unverified image never lands in storage. Leave blank if pasting a MANIFEST below instead." size="64">
     </label>
-    <label>File <input type="file" name="file" required title="The installer ISO or raw disk image to upload. Verified against the SHA-256 above before it is kept."></label>
+    <label>MANIFEST (optional) <span class="field-help">Paste a FreeBSD release MANIFEST file's contents to look up the checksum by filename instead of typing it in - the same file FreeBSD publishes next to base.txz on every mirror. Used only when Expected SHA-256 above is left blank.</span>
+      <textarea id="iso-manifest" name="manifest" rows="3" placeholder="base.txz&#9;&lt;sha256&gt;&#9;&lt;size&gt;&#9;&quot;Base distribution&quot;"></textarea>
+    </label>
+    <label>File <input type="file" id="iso-file" name="file" required title="The installer ISO, raw disk image, or base.txz-style archive to upload. Verified against the SHA-256 (typed or looked up from the MANIFEST) before it is kept."></label>
     <button type="submit">Upload</button>
   </form>
   <div id="iso-upload-progress" class="upload-progress" hidden>

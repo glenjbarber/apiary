@@ -24,11 +24,41 @@
       <input type="text" name="replica_node_id" title="A second Comb to keep a live HAST-replicated copy of this jail's root dataset on. Leave blank for no replica.">
     </label>
     <label>Base template (optional - ZFS clone, see ADR-0084)
-      <input type="text" name="base_template" title="Name of a pre-populated ZFS template dataset already present on the owning Comb (<zfs base>/templates/<name>, snapshotted by an operator as <name>@apiary-template). Leave blank for an empty jail root you populate yourself. Not supported together with a replica node ID.">
+      <input type="text" name="base_template" title="Name of a pre-populated ZFS template dataset already present on the owning Comb (<zfs base>/templates/<name>, snapshotted by an operator as <name>@apiary-template). Leave blank for an empty jail root you populate yourself. Not supported together with a replica node ID or a base archive.">
+    </label>
+    <label>Base archive <span class="field-help">A base.txz-style FreeBSD userland archive extracted into this jail's root on first creation, an alternative to a ZFS base template above - set at most one of the two. Leave as None only if the root will be populated some other way before this jail starts - an empty root has no /bin/sh and jail(8) will refuse to become Ready (see ADR-0098).</span>
+      <select name="base_archive_name" class="image-picker" title="Extracted into this jail's root the first time it's empty. Leave as None only if the root will be populated some other way, or a base template above is set instead.">
+        <option value="">None</option>
+        {{range .ClusterISOs}}<option value="{{.Name}}">{{.Name}}</option>{{end}}
+      </select>
     </label>
     <button type="submit">Create</button>
   </form>
   <div id="create-error" class="banner-error"></div>
+  <script>
+  (function() {
+    // missingByNode mirrors new_vm.html's own "will be fetched from a
+    // peer" cue (ADR-0041) for the base-archive picker.
+    var missingByNode = {{isoMissingByNode .ClusterISOs}};
+    var nodeSelect = document.querySelector('select[name="node_id"]');
+    var pickers = document.querySelectorAll('select.image-picker');
+    if (!nodeSelect || pickers.length === 0) return;
+
+    function refresh() {
+      var node = nodeSelect.value;
+      pickers.forEach(function(picker) {
+        Array.prototype.forEach.call(picker.options, function(opt) {
+          if (!opt.value) return;
+          var missing = missingByNode[opt.value] || [];
+          var willFetch = missing.indexOf(node) !== -1;
+          opt.text = opt.value + (willFetch ? ' — will be fetched from a peer' : '');
+        });
+      });
+    }
+    nodeSelect.addEventListener('change', refresh);
+    refresh();
+  })();
+  </script>
   </main>
   {{template "footer" .}}
 </body>

@@ -132,6 +132,10 @@ type ImageRole string
 const (
 	ImageRoleISO       ImageRole = "iso"
 	ImageRoleBaseImage ImageRole = "base_image"
+
+	// ImageRoleBaseArchive is a jail's base_archive_name (ADR-0098) -
+	// the jail equivalent of ImageRoleBaseImage.
+	ImageRoleBaseArchive ImageRole = "base_archive"
 )
 
 type ImageAvailabilityVerdict string

@@ -128,6 +128,15 @@ type JailPlacement struct {
 	// BaseTemplate, if set, names a ZFS template dataset to clone this
 	// jail's root from on first creation (ADR-0084) - see ensureJail.
 	BaseTemplate string
+
+	// BaseArchiveName, if set, names a base.txz-style archive the
+	// reconciler should resolve (via Reconciler.ISOs, reusing the same
+	// store VMPlacement.BaseImageName does) and extract into this
+	// jail's root the first time it's empty, instead of leaving jail(8)
+	// to attach to a completely empty dataset. Ignored once the root is
+	// already populated. A jail names BaseTemplate or BaseArchiveName,
+	// not both - see ensureJail. See ADR-0098.
+	BaseArchiveName string
 }
 
 // PlanJail mirrors Plan exactly, for jails instead of VMs.

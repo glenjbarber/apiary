@@ -636,9 +636,27 @@ type JailDefinition struct {
 	// Ignored for a dataset that already exists (never re-cloned on
 	// every tick), and unsupported together with replica_node_id (a
 	// HAST-replicated jail's root is a raw device, not a ZFS dataset).
-	BaseTemplate  string `protobuf:"bytes,9,opt,name=base_template,json=baseTemplate,proto3" json:"base_template,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	BaseTemplate string `protobuf:"bytes,9,opt,name=base_template,json=baseTemplate,proto3" json:"base_template,omitempty"`
+	// base_archive_name, if set, names a base.txz-style FreeBSD userland
+	// archive already uploaded (via ManagerService.UploadISO, reusing
+	// internal/isostore's existing store exactly like VMDefinition's
+	// iso_name/base_image_name) on the assigned node. The reconciler
+	// resolves it the same way it resolves a VM's image names and, only
+	// the first time this jail's root filesystem is empty, extracts it
+	// in place instead of leaving an empty ZFS dataset for jail(8) to
+	// attach to with nothing in it. Ignored once the root is already
+	// populated (never re-extracted on every tick). A jail may name
+	// base_template or base_archive_name but not both - see ADR-0098
+	// (renumbered from this branch's own original ADR-0083, which
+	// collided with the already-shipped ADR-0083, Mutually-authorized
+	// Colony join). Distinct from base_template: an archive is extracted
+	// into a plain dataset (no ZFS clone source needed), the same
+	// upload-once/reuse-everywhere model VMDefinition.base_image_name
+	// already established, rather than an operator-populated ZFS
+	// template.
+	BaseArchiveName string `protobuf:"bytes,10,opt,name=base_archive_name,json=baseArchiveName,proto3" json:"base_archive_name,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
 }
 
 func (x *JailDefinition) Reset() {
@@ -730,6 +748,13 @@ func (x *JailDefinition) GetPhaseError() string {
 func (x *JailDefinition) GetBaseTemplate() string {
 	if x != nil {
 		return x.BaseTemplate
+	}
+	return ""
+}
+
+func (x *JailDefinition) GetBaseArchiveName() string {
+	if x != nil {
+		return x.BaseArchiveName
 	}
 	return ""
 }
@@ -3282,7 +3307,7 @@ const file_api_internalpb_state_proto_rawDesc = "" +
 	"\x0ffirewall_paused\x18\x10 \x01(\bR\x0efirewallPaused\x12/\n" +
 	"\x13cloudflare_hostname\x18\x11 \x01(\tR\x12cloudflareHostname\x12'\n" +
 	"\x0fcloudflare_port\x18\x12 \x01(\rR\x0ecloudflarePort\x12.\n" +
-	"\x13clone_from_snapshot\x18\x13 \x01(\tR\x11cloneFromSnapshot\"\xd0\x02\n" +
+	"\x13clone_from_snapshot\x18\x13 \x01(\tR\x11cloneFromSnapshot\"\xfc\x02\n" +
 	"\x0eJailDefinition\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x1a\n" +
@@ -3293,7 +3318,9 @@ const file_api_internalpb_state_proto_rawDesc = "" +
 	"\x05phase\x18\a \x01(\x0e2\x1d.apiary.internal.v1.JailPhaseR\x05phase\x12\x1f\n" +
 	"\vphase_error\x18\b \x01(\tR\n" +
 	"phaseError\x12#\n" +
-	"\rbase_template\x18\t \x01(\tR\fbaseTemplate\"\x9b\x01\n" +
+	"\rbase_template\x18\t \x01(\tR\fbaseTemplate\x12*\n" +
+	"\x11base_archive_name\x18\n" +
+	" \x01(\tR\x0fbaseArchiveName\"\x9b\x01\n" +
 	"\fFirewallRule\x12\x1c\n" +
 	"\tdirection\x18\x01 \x01(\tR\tdirection\x12\x16\n" +
 	"\x06action\x18\x02 \x01(\tR\x06action\x12\x1a\n" +
