@@ -31,6 +31,9 @@ func fromRPCAssumptionClaim(claim *rpcpb.AssumptionClaim) assumptionClaimView {
 }
 
 func (s *Server) assumptionRegisterData(r *http.Request, data pageData) pageData {
+	// Suggestions are optional: custom scopes and an unavailable membership
+	// inventory must not prevent recording a local claim.
+	data.Nodes, _ = s.knownNodes(r)
 	resp, err := s.client.ListAssumptionClaims(r.Context(), &rpcpb.ListAssumptionClaimsRequest{})
 	if err != nil {
 		data.AssumptionRegisterErr = err.Error()

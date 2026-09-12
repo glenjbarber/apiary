@@ -6,24 +6,46 @@
   {{template "nav" .}}
   <main class="content" id="main-content">
   {{template "page_header" (pageHeader "Create jail" "Define a FreeBSD jail's identity and placement." "<a href='/jails'>Cancel</a>")}}
-  <form class="create-vm inline-form panel" style="margin-top:1rem" hx-post="/jails" hx-target="#create-error" hx-swap="innerHTML">
-    {{if .PlacementHives}}<p class="field-help">Jail placement is manual. {{range .PlacementHives}}<br>{{.NodeID}}: {{if .ProbeError}}<span class="error">unreachable</span>{{else if .JailKnown}}{{if .JailCapable}}<span class="success">jail provisioning enabled</span>{{else}}<span class="error">jail provisioning disabled</span>{{end}}{{else}}<em>uses startup jail setting</em>{{end}}{{end}}</p>{{end}}
+  <div id="create-error" class="banner-error" role="alert" aria-live="polite"></div>
+  <form class="create-vm panel" hx-post="/jails" hx-target="#create-error" hx-swap="innerHTML">
+    <fieldset class="form-section">
+      <legend>Identity</legend>
+      <div class="form-grid">
     <label>ID <input type="text" name="id" required title="Unique identifier for this jail. Used in the jail's own root dataset name and everywhere it's referenced afterward."></label>
     <label>Name <input type="text" name="name" title="Optional display label - has no effect on the jail itself."></label>
     <label>Hostname <input type="text" name="hostname" title="Hostname set inside the jail. Defaults to the ID if left blank."></label>
-    <label>Node ID
+      </div>
+    </fieldset>
+    <fieldset class="form-section">
+      <legend>Placement</legend>
+      <p class="field-help">Jail placement is manual. Choose a Comb with jail provisioning enabled.</p>
+      {{if .PlacementHives}}<ul class="field-help">{{range .PlacementHives}}<li>{{.NodeID}}: {{if .ProbeError}}<span class="error">unreachable</span>{{else if .JailKnown}}{{if .JailCapable}}<span class="success">jail provisioning enabled</span>{{else}}<span class="error">jail provisioning disabled</span>{{end}}{{else}}<em>uses startup jail setting</em>{{end}}</li>{{end}}</ul>{{end}}
+      <div class="form-grid">
+    <label>Owner node
       {{if .Nodes}}
       <select name="node_id" title="The Comb that will own and run this jail.">
-        {{range .Nodes}}<option value="{{.}}">{{.}}</option>{{end}}
+        {{range .Nodes}}<option value="{{.}}"{{if eq . $.LocalNodeID}} selected{{end}}>{{.}}</option>{{end}}
       </select>
       {{else}}
       <input type="text" name="node_id" title="The Comb that will own and run this jail.">
       {{end}}
     </label>
-    <label>Replica node ID (optional - HAST root replication, see ADR-0026)
+    <label>Replica node <span class="field-help">Optional HAST root replication target (ADR-0026).</span>
+      {{if .Nodes}}
+      <select name="replica_node_id" title="A second Comb to keep a HAST-replicated copy of this jail's root dataset on.">
+        <option value="">None</option>
+        {{range .Nodes}}<option value="{{.}}">{{.}}</option>{{end}}
+      </select>
+      {{else}}
       <input type="text" name="replica_node_id" title="A second Comb to keep a live HAST-replicated copy of this jail's root dataset on. Leave blank for no replica.">
+      {{end}}
     </label>
-    <label>Base template (optional - ZFS clone, see ADR-0084)
+      </div>
+    </fieldset>
+    <fieldset class="form-section">
+      <legend>Root filesystem</legend>
+      <div class="form-grid">
+    <label>Base template <span class="field-help">Optional ZFS template name on the owning Comb (ADR-0084). Use a template or a base archive, not both. Templates cannot be combined with a replica node.</span>
       <input type="text" name="base_template" title="Name of a pre-populated ZFS template dataset already present on the owning Comb (<zfs base>/templates/<name>, snapshotted by an operator as <name>@apiary-template). Leave blank for an empty jail root you populate yourself. Not supported together with a replica node ID or a base archive.">
     </label>
     <label>Base archive <span class="field-help">A base.txz-style FreeBSD userland archive extracted into this jail's root on first creation, an alternative to a ZFS base template above - set at most one of the two. Leave as None only if the root will be populated some other way before this jail starts - an empty root has no /bin/sh and jail(8) will refuse to become Ready (see ADR-0098).</span>
@@ -32,20 +54,28 @@
         {{range .ClusterISOs}}<option value="{{.Name}}">{{.Name}}</option>{{end}}
       </select>
     </label>
-    <button type="submit">Create</button>
+      </div>
+    </fieldset>
+    <div class="form-actions"><a href="/jails">Cancel</a><button type="submit">Create jail</button></div>
   </form>
-  <div id="create-error" class="banner-error"></div>
   <script>
   (function() {
     // missingByNode mirrors new_vm.html's own "will be fetched from a
     // peer" cue (ADR-0041) for the base-archive picker.
     var missingByNode = {{isoMissingByNode .ClusterISOs}};
     var nodeSelect = document.querySelector('select[name="node_id"]');
+    var replicaSelect = document.querySelector('select[name="replica_node_id"]');
     var pickers = document.querySelectorAll('select.image-picker');
     if (!nodeSelect || pickers.length === 0) return;
 
     function refresh() {
       var node = nodeSelect.value;
+      if (replicaSelect) {
+        Array.prototype.forEach.call(replicaSelect.options, function(opt) {
+          opt.disabled = !!opt.value && opt.value === node;
+        });
+        if (replicaSelect.value === node) replicaSelect.value = '';
+      }
       pickers.forEach(function(picker) {
         Array.prototype.forEach.call(picker.options, function(opt) {
           if (!opt.value) return;

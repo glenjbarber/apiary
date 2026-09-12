@@ -123,9 +123,16 @@
     button.danger { border-color:#a65b5b; background:var(--panel); color:var(--danger); }
     .button.secondary { background:var(--panel); color:var(--ink); border-color:var(--muted); }
     .button.secondary:hover { background:var(--row-hover); }
-    input, select { min-height:2.4rem; border:1px solid var(--muted); border-radius:6px; background:var(--field); color:var(--ink); padding:.45rem .55rem; font:inherit; }
-    input:focus, select:focus, button:focus, a:focus, summary:focus { outline:3px solid rgba(255,201,40,.45); outline-offset:2px; }
+    input, select, textarea { min-width:0; max-width:100%; min-height:2.4rem; border:1px solid var(--muted); border-radius:6px; background:var(--field); color:var(--ink); padding:.45rem .55rem; font:inherit; }
+    textarea { resize:vertical; }
+    input[type="checkbox"], input[type="radio"] { min-height:0; flex:none; }
+    input:focus, select:focus, textarea:focus, button:focus, a:focus, summary:focus { outline:3px solid rgba(255,201,40,.45); outline-offset:2px; }
     .panel { background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:1.1rem; box-shadow:var(--shadow); }
+    .panel + .panel { margin-top:1rem; }
+    .panel > h3:first-child { margin-top:0; }
+    .section-nav { display:flex; flex-wrap:wrap; gap:.5rem 1rem; margin:1rem 0; }
+    .section-nav a { color:var(--ink); text-underline-offset:.2em; }
+    .settings-group > h2 { scroll-margin-top:5.5rem; font-size:1.2rem; }
     .page-header { display:flex; align-items:center; justify-content:space-between; gap:1rem; margin-bottom:1rem; }
     .page-header h2 { margin:0; }
     .muted { color:var(--muted); }
@@ -148,20 +155,28 @@
        context, not a status. */
     .remote-node { color:var(--muted); }
     .remote-node::before { content:"\25CF "; font-size:.6rem; vertical-align:middle; opacity:.7; }
-    .actions { display:flex; align-items:center; gap:.55rem; white-space:nowrap; }
+    .actions { display:flex; align-items:center; flex-wrap:wrap; gap:.55rem; }
     form.upload-iso, form.inline-form { display:flex; gap:.75rem; align-items:end; flex-wrap:wrap; }
-    form.upload-iso label, form.inline-form label { display:flex; flex-direction:column; font-size:.85rem; }
+    form.upload-iso label, form.inline-form label { display:flex; flex-direction:column; gap:.3rem; min-width:0; font-size:.85rem; }
+    form.inline-form label.checkbox-label { flex-direction:row; align-items:center; min-width:0; }
     /* settings-table: a config panel's current value and its editable
        control live in the same row (see ADR-0070's follow-up) instead
        of a separate read-only table plus a separate form below it. */
     table.settings-table td input, table.settings-table td select { width:100%; max-width:26rem; }
+    table.settings-table { table-layout:fixed; }
+    table.settings-table th { width:32%; overflow-wrap:anywhere; }
+    table.settings-table td { overflow-wrap:anywhere; }
+    table.settings-table td input[type="checkbox"] { width:auto; }
     table.settings-table td label.checkbox-label { display:inline-flex; align-items:center; gap:.4rem; font-weight:400; white-space:nowrap; }
-    .form-section { border:0; border-top:1px solid var(--line); margin:0; padding:1.25rem 0 .25rem; }
+    .form-section { min-width:0; border:0; border-top:1px solid var(--line); margin:0; padding:1.25rem 0; }
     .form-section:first-child { border-top:0; padding-top:0; }
     .form-section legend { font-size:1.05rem; font-weight:750; padding:0 .5rem 0 0; }
     .form-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:1rem; margin-top:.85rem; }
-    .form-grid label { display:flex; flex-direction:column; gap:.3rem; font-size:.85rem; font-weight:650; }
-    .form-grid label.full { grid-column:1 / -1; }
+    .form-grid label { display:flex; min-width:0; flex-direction:column; gap:.3rem; font-size:.85rem; font-weight:650; }
+    .form-grid label > .field-help { order:1; }
+    .form-grid input, .form-grid select, .form-grid textarea { width:100%; }
+    .form-grid .full, .form-grid .full-width { grid-column:1 / -1; }
+    .form-grid > .form-actions { grid-column:1 / -1; margin-top:.25rem; }
     .field-help { color:var(--muted); font-size:.78rem; font-weight:400; }
     .form-actions { display:flex; justify-content:flex-end; align-items:center; gap:.75rem; margin-top:1.25rem; }
     .detail-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:1rem; margin-top:1rem; }
@@ -179,6 +194,7 @@
     .success { color:var(--success); font-weight:650; }
     .banner-error, .banner-success { min-height:1.25em; margin-bottom:.75rem; font-size:.9em; word-break:break-word; color:var(--danger); }
     .banner-success { color:var(--success); font-weight:650; }
+    .banner-error:empty, .banner-success:empty { display:none; }
     .banner-error:not(:empty) { background:color-mix(in srgb, var(--danger) 13%, var(--panel)); border:1px solid color-mix(in srgb, var(--danger) 35%, var(--panel)); border-radius:4px; padding:.5rem .75rem; }
     .banner-success:not(:empty) { background:color-mix(in srgb, var(--success) 13%, var(--panel)); border:1px solid color-mix(in srgb, var(--success) 35%, var(--panel)); border-radius:4px; padding:.5rem .75rem; }
     code { font-size:.8em; word-break:break-all; }
@@ -198,6 +214,7 @@
       .resource-table td:nth-child(2) { min-width:0; }
     }
     .upload-progress { display:flex; align-items:center; gap:.5rem; margin-top:.5rem; }
+    #iso-upload-form { margin-bottom:1rem; }
     .upload-progress progress { flex:1; max-width:20rem; height:1rem; }
     .upload-progress span { font-size:.85em; min-width:3em; }
     .upload-progress[hidden] { display:none; }
@@ -219,7 +236,11 @@
       form.upload-iso, form.inline-form { align-items:stretch; }
       form.upload-iso label, form.inline-form label { min-width:100%; }
       .form-grid, .detail-grid { grid-template-columns:1fr; }
-      .form-grid label.full { grid-column:auto; }
+      .form-grid .full, .form-grid .full-width { grid-column:auto; }
+      .settings-table, .settings-table tbody, .settings-table tr,
+      .settings-table th, .settings-table td { display:block; width:100%; }
+      table.settings-table th { width:100%; border-bottom:0; padding-bottom:.25rem; }
+      .settings-table td { padding-top:.25rem; }
       .vm-controls, .danger-zone { align-items:flex-start; flex-direction:column; }
       .page-header { align-items:flex-start; }
     }

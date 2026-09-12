@@ -58,11 +58,13 @@
         </label>
       </div>
       <div class="form-grid">
-        <label>Clone from snapshot <span class="field-help">Optional - a fast ZFS clone of an existing VM's own snapshot instead of a blank disk or base image. Mutually exclusive with both Base image and Replica node; only works when this VM's Owner node matches the source VM's own node (a clone is local to one node, never fetched across nodes).</span>
+        <label>Clone source VM <span class="field-help">Optional - a fast ZFS clone of an existing VM's own snapshot instead of a blank disk or base image. Mutually exclusive with both Base image and Replica node; only works when this VM's Owner node matches the source VM's own node (a clone is local to one node, never fetched across nodes).</span>
       <select name="clone_source_vm_id" id="clone-source-vm" title="An existing VM to clone this VM's disk from - only VMs with at least one snapshot are listed.">
         <option value="">None</option>
         {{range .CloneSources}}<option value="{{.VMID}}" data-node-id="{{.NodeID}}">{{.VMID}}{{if .VMName}} ({{.VMName}}){{end}} — on {{.NodeID}}</option>{{end}}
       </select>
+        </label>
+        <label>Clone snapshot
       <select name="clone_snapshot_name" id="clone-source-snapshot" title="Which of the source VM's snapshots to clone from." disabled>
         <option value="">Select a source VM first</option>
       </select>
