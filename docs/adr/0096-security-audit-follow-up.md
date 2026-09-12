@@ -201,3 +201,31 @@ completeness gap, no behavior change.
   `TestFSM_Apply_CreateJailInvalidBaseTemplateRejected` for #5.
 - `go build ./...`, `go vet ./...`, `go test ./...`, `gofmt -l .` all
   clean.
+
+## Follow-up (2026-09-12): bounded timeout on unauthenticated forwarding
+
+A second, independent audit (`docs/audits/2026-09-12-security-audit.md`,
+Codex) reviewed this ADR's own fixes directly against `main` and
+confirmed all six land correctly. It also raised a residual point on
+finding #1 that this ADR already disclosed but didn't fully close:
+closing the credential leak didn't stop `target_address` from making
+managerd dial an arbitrary caller-chosen host, usable as a limited
+network-reachability oracle. The audit's full recommended fix (route
+joins through trusted local configuration or a separately-authenticated
+enrollment record) is correctly flagged as needing its own design
+decision, not something to patch in unilaterally - not attempted here.
+
+What *is* fixed here, since it's bounded and doesn't touch the feature's
+trust model at all: `RequestJoinColony`/`GetJoinRequestStatus`/
+`CancelJoinRequest`'s three `target_address` branches had no timeout of
+their own on the outbound dial - a target that never completes a TCP
+handshake (a black-holed IP, a firewalled port) could hang the handling
+goroutine for as long as the OS's own connect timeout, on top of the
+reachability-oracle behavior itself. A new `defaultUnauthenticatedForwardTimeout`
+(10s, matching `defaultApplyTimeout`'s existing value) wraps each of the
+three forwarding calls via `context.WithTimeout`, independent of
+whatever deadline the caller's own incoming request carries. This
+doesn't eliminate the reachability-oracle primitive (an attacker can
+still learn "did this connect within 10s" for an address of their
+choosing) - only the unbounded-hang / mild resource-exhaustion angle on
+top of it.

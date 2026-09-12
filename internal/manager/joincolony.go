@@ -29,6 +29,22 @@ import (
 // background sweep.
 const defaultJoinRequestTTL = 15 * time.Minute
 
+// defaultUnauthenticatedForwardTimeout bounds every dial-and-relay call
+// to a caller-supplied target_address (ADR-0092), independent of
+// whatever deadline (if any) the caller's own incoming request context
+// carries. A 2026-09-12 audit (docs/audits/2026-09-12-security-audit.md)
+// noted these three RPCs are deliberately unauthenticated, so
+// target_address can name any host:port an attacker chooses; without a
+// bound here, pointing it at an address that never completes a TCP
+// handshake (a black-holed IP, a firewalled port) would hang the
+// handling goroutine for as long as the underlying OS's own connect
+// timeout, one goroutine per call - a mild resource-exhaustion angle on
+// top of the reachability-oracle behavior the audit also flagged as an
+// accepted residual risk. Same value as defaultApplyTimeout, not
+// because the two are related, just because it's this codebase's own
+// existing "a reasonable few seconds for one RPC hop" default.
+const defaultUnauthenticatedForwardTimeout = 10 * time.Second
+
 // generateJoinRequestID returns a random, non-secret identifier for a
 // new PendingJoinRequest - mirrors generateAPIKeyID's own shape
 // (auth.go), a short hex id purely for correlating a joining Comb's own
@@ -107,8 +123,13 @@ func (s *Server) RequestJoinColony(ctx context.Context, req *rpcpb.RequestJoinCo
 		// Unauthenticated dial (ADR-0096): target is caller-supplied and
 		// this RPC is itself deliberately never authenticated, so it must
 		// never be dialed with this node's own shared -peer-api-key
-		// attached - see PeerForwarder's own doc comment.
-		resp, err := s.peers.RequestJoinColonyUnauthenticated(ctx, target, &rpcpb.RequestJoinColonyRequest{
+		// attached - see PeerForwarder's own doc comment. Bounded by
+		// defaultUnauthenticatedForwardTimeout regardless of the caller's
+		// own context, so an unreachable target can't hang this goroutine
+		// indefinitely (2026-09-12 audit finding).
+		fctx, cancel := context.WithTimeout(ctx, defaultUnauthenticatedForwardTimeout)
+		defer cancel()
+		resp, err := s.peers.RequestJoinColonyUnauthenticated(fctx, target, &rpcpb.RequestJoinColonyRequest{
 			NodeId: req.GetNodeId(), RaftBindAddress: req.GetRaftBindAddress(), TimeoutMs: req.GetTimeoutMs(),
 		})
 		if err != nil {
@@ -168,9 +189,11 @@ func (s *Server) GetJoinRequestStatus(ctx context.Context, req *rpcpb.GetJoinReq
 		if s.peers == nil {
 			return &rpcpb.GetJoinRequestStatusResponse{Error: "no peer forwarding is configured on this node; cannot reach the named Colony member"}, nil
 		}
-		// Unauthenticated dial (ADR-0096) - see RequestJoinColony's own
-		// identical comment above.
-		resp, err := s.peers.GetJoinRequestStatusUnauthenticated(ctx, target, req.GetRequestId())
+		// Unauthenticated dial (ADR-0096), bounded (2026-09-12 audit
+		// finding) - see RequestJoinColony's own identical comment above.
+		fctx, cancel := context.WithTimeout(ctx, defaultUnauthenticatedForwardTimeout)
+		defer cancel()
+		resp, err := s.peers.GetJoinRequestStatusUnauthenticated(fctx, target, req.GetRequestId())
 		if err != nil {
 			return &rpcpb.GetJoinRequestStatusResponse{Error: fmt.Sprintf("reaching %s: %v", target, err)}, nil
 		}
@@ -293,9 +316,11 @@ func (s *Server) CancelJoinRequest(ctx context.Context, req *rpcpb.CancelJoinReq
 		if s.peers == nil {
 			return &rpcpb.CancelJoinRequestResponse{Error: "no peer forwarding is configured on this node; cannot reach the named Colony member"}, nil
 		}
-		// Unauthenticated dial (ADR-0096) - see RequestJoinColony's own
-		// identical comment above.
-		resp, err := s.peers.CancelJoinRequestUnauthenticated(ctx, target, &rpcpb.CancelJoinRequestRequest{RequestId: req.GetRequestId(), TimeoutMs: req.GetTimeoutMs()})
+		// Unauthenticated dial (ADR-0096), bounded (2026-09-12 audit
+		// finding) - see RequestJoinColony's own identical comment above.
+		fctx, cancel := context.WithTimeout(ctx, defaultUnauthenticatedForwardTimeout)
+		defer cancel()
+		resp, err := s.peers.CancelJoinRequestUnauthenticated(fctx, target, &rpcpb.CancelJoinRequestRequest{RequestId: req.GetRequestId(), TimeoutMs: req.GetTimeoutMs()})
 		if err != nil {
 			return &rpcpb.CancelJoinRequestResponse{Error: fmt.Sprintf("reaching %s: %v", target, err)}, nil
 		}

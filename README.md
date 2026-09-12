@@ -874,7 +874,14 @@ each design decision, in order.
   tier, since a console is a full bidirectional control tunnel, not a
   read-only view. `clone_from_snapshot`/`base_template` (ADR-0095/
   ADR-0084) gained the same FSM-boundary validation ADR-0067 already
-  requires for every other interpolated identifier. See
+  requires for every other interpolated identifier. A follow-up
+  independent audit (`docs/audits/2026-09-12-security-audit.md`)
+  confirmed all six land correctly and flagged one residual, disclosed
+  risk (`target_address` still lets a caller make managerd dial an
+  arbitrary host, just without the credential attached) - the dial-hang
+  half of that is now bounded by a 10s timeout regardless of the
+  caller's own request deadline; the reachability-oracle half needs a
+  real join-enrollment design decision, not a patch. See
   [ADR-0096](docs/adr/0096-security-audit-follow-up.md).
 - Importing VMs from other hypervisors (e.g. Proxmox): no disk-format
   conversion, and Apiary is UEFI-only. Linux containers have no path at
