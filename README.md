@@ -898,6 +898,23 @@ each design decision, in order.
   commits immediately with no clean way to reverse a bad membership
   change short of wiping raft state entirely. See
   [ADR-0097](docs/adr/0097-join-flow-hardening.md).
+- **Jail base archives, plus an empty-root safety check for every
+  jail** — a jail's Create form gains an optional base-archive picker
+  (an uploaded `base.txz`-style FreeBSD userland archive, reusing
+  `internal/isostore` exactly like a VM's own base image), extracted
+  into the jail's root the first time it's empty via a new
+  `internal/jailarchive` package (shells out to `tar(1)`, since Go has
+  no xz decoder). A base.txz upload can also be checksum-verified
+  against a pasted FreeBSD `MANIFEST` file's own published hash instead
+  of an operator transcribing it by hand. Independent of whether a
+  base archive is named at all, `ensureJail` now refuses to let any
+  jail's root reach `PhaseReady` while genuinely empty — `jail(8)`
+  itself never validated that, so a jail with no `/bin/sh` used to
+  "succeed" silently. This is a distinct, coexisting alternative to
+  ADR-0084's ZFS-clone-based `base_template` (naming both is refused
+  outright) — see the ADR's own "Merge note" for why both exist rather
+  than one superseding the other. See
+  [ADR-0098](docs/adr/0098-jail-base-archives.md).
 - Importing VMs from other hypervisors (e.g. Proxmox): no disk-format
   conversion, and Apiary is UEFI-only. Linux containers have no path at
   all — jails share the host FreeBSD kernel
