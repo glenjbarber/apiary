@@ -880,9 +880,24 @@ each design decision, in order.
   risk (`target_address` still lets a caller make managerd dial an
   arbitrary host, just without the credential attached) - the dial-hang
   half of that is now bounded by a 10s timeout regardless of the
-  caller's own request deadline; the reachability-oracle half needs a
-  real join-enrollment design decision, not a patch. See
+  caller's own request deadline; the reachability-oracle half was left
+  for a follow-up design decision (below). See
   [ADR-0096](docs/adr/0096-security-audit-follow-up.md).
+- **Join-flow hardening: target-address allowlist and a pre-approval
+  reachability check** — closes the reachability-oracle finding
+  ADR-0096 left open, and a real, separately-hit incident: a new opt-in
+  `-known-peer-addresses` flag restricts `target_address` on the three
+  unauthenticated join-colony RPCs to an operator-listed set of
+  `host:port` values (unconfigured, the default, keeps ADR-0092's
+  original accept-any behavior - forcing this on every deployment would
+  break a fresh bootstrap with no migration path). Separately,
+  `ApproveJoinRequest` now dials the pending request's own
+  `raft_bind_address` before ever calling `AddVoter` and refuses to
+  approve an unreachable one - approving before a joiner is actually up
+  has stranded this project's own raft cluster twice, and `AddVoter`
+  commits immediately with no clean way to reverse a bad membership
+  change short of wiping raft state entirely. See
+  [ADR-0097](docs/adr/0097-join-flow-hardening.md).
 - Importing VMs from other hypervisors (e.g. Proxmox): no disk-format
   conversion, and Apiary is UEFI-only. Linux containers have no path at
   all — jails share the host FreeBSD kernel

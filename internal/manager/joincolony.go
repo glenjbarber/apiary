@@ -15,6 +15,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"math/big"
+	"net"
 	"time"
 
 	"google.golang.org/protobuf/proto"
@@ -44,6 +45,58 @@ const defaultJoinRequestTTL = 15 * time.Minute
 // because the two are related, just because it's this codebase's own
 // existing "a reasonable few seconds for one RPC hop" default.
 const defaultUnauthenticatedForwardTimeout = 10 * time.Second
+
+// checkTargetAddressAllowed enforces the target_address allowlist
+// (ADR-0097): when s.knownPeerAddresses is configured (non-nil, via
+// -known-peer-addresses), target_address on RequestJoinColony/
+// GetJoinRequestStatus/CancelJoinRequest must exactly match one of its
+// entries or the call is refused before ever dialing. A 2026-09-12
+// independent audit (docs/audits/2026-09-12-security-audit.md)
+// confirmed ADR-0096's dialUnauthenticated closed the credential-leak
+// half of this finding but not the underlying primitive: these three
+// RPCs are deliberately unauthenticated (a joining Comb has no Colony
+// API key yet), so target_address itself is caller-supplied and could
+// still name any host an attacker chooses, usable as a limited network-
+// reachability oracle. This allowlist is opt-in, not a default-secure
+// change: an operator's own Colony is a small, fixed, already-known set
+// of addresses (this project's own actual deployments top out at four
+// hosts), so pre-listing them is practical, but forcing it on every
+// deployment would break a fresh, never-configured join with no
+// migration path. Nil (unconfigured, the default) preserves ADR-0092's
+// original accept-any-target_address behavior exactly.
+func (s *Server) checkTargetAddressAllowed(target string) error {
+	if s.knownPeerAddresses == nil {
+		return nil
+	}
+	if !s.knownPeerAddresses[target] {
+		return fmt.Errorf("target_address %q is not in this node's -known-peer-addresses allowlist", target)
+	}
+	return nil
+}
+
+// dialReachable is the production reachabilityCheck (Server field) -
+// a plain TCP connect, not a raft protocol handshake, so it can't catch
+// every way a peer might be misconfigured, but it does catch the exact
+// failure this project has already been burned by more than once (see
+// SHARED.md): approving a join before the joiner's raftd was actually
+// up and listening on raft_bind_address. AddVoter commits immediately
+// under whatever quorum exists at that instant and can only be reversed
+// with agreement from every current voter - including one that was
+// never reachable in the first place - so the only recovery from
+// approving an unreachable node has been a full raft state wipe. See
+// ApproveJoinRequest's own use of this (ADR-0097).
+func dialReachable(ctx context.Context, addr string) error {
+	var d net.Dialer
+	conn, err := d.DialContext(ctx, "tcp", addr)
+	if err != nil {
+		return err
+	}
+	return conn.Close()
+}
+
+// preApprovalReachabilityTimeout bounds how long ApproveJoinRequest
+// waits for dialReachable before giving up and refusing to approve.
+const preApprovalReachabilityTimeout = 5 * time.Second
 
 // generateJoinRequestID returns a random, non-secret identifier for a
 // new PendingJoinRequest - mirrors generateAPIKeyID's own shape
@@ -120,6 +173,9 @@ func (s *Server) RequestJoinColony(ctx context.Context, req *rpcpb.RequestJoinCo
 		if s.peers == nil {
 			return &rpcpb.RequestJoinColonyResponse{Error: "no peer forwarding is configured on this node; cannot reach the named Colony member"}, nil
 		}
+		if err := s.checkTargetAddressAllowed(target); err != nil {
+			return &rpcpb.RequestJoinColonyResponse{Error: err.Error()}, nil
+		}
 		// Unauthenticated dial (ADR-0096): target is caller-supplied and
 		// this RPC is itself deliberately never authenticated, so it must
 		// never be dialed with this node's own shared -peer-api-key
@@ -189,6 +245,9 @@ func (s *Server) GetJoinRequestStatus(ctx context.Context, req *rpcpb.GetJoinReq
 		if s.peers == nil {
 			return &rpcpb.GetJoinRequestStatusResponse{Error: "no peer forwarding is configured on this node; cannot reach the named Colony member"}, nil
 		}
+		if err := s.checkTargetAddressAllowed(target); err != nil {
+			return &rpcpb.GetJoinRequestStatusResponse{Error: err.Error()}, nil
+		}
 		// Unauthenticated dial (ADR-0096), bounded (2026-09-12 audit
 		// finding) - see RequestJoinColony's own identical comment above.
 		fctx, cancel := context.WithTimeout(ctx, defaultUnauthenticatedForwardTimeout)
@@ -233,6 +292,18 @@ func (s *Server) ListJoinRequests(ctx context.Context, _ *rpcpb.ListJoinRequests
 // Pending (not marked Approved) so the Admin can retry, rather than
 // silently recording success for a membership change that didn't
 // actually happen.
+//
+// Before AddVoter, a pre-approval reachability check (ADR-0097) dials
+// pending.raft_bind_address - approving a join before the joiner is
+// actually reachable has stranded this project's own cluster more than
+// once (see SHARED.md): AddVoter commits under whatever quorum exists
+// the instant it's called, and reversing it needs agreement from every
+// current voter, including the one that was never reachable. The only
+// recovery available in this codebase is a full raft state wipe. This
+// check can't guarantee the joiner is fully healthy (it's a plain TCP
+// dial, not a raft handshake), but it catches exactly the failure mode
+// that has actually happened here: clicking Approve before the joining
+// Comb's raftd was actually up.
 func (s *Server) ApproveJoinRequest(ctx context.Context, req *rpcpb.ApproveJoinRequestRequest) (*rpcpb.ApproveJoinRequestResponse, error) {
 	getResp, err := s.raft.GetPendingJoinRequestLocal(ctx, req.GetRequestId())
 	if err != nil {
@@ -242,6 +313,17 @@ func (s *Server) ApproveJoinRequest(ctx context.Context, req *rpcpb.ApproveJoinR
 		return &rpcpb.ApproveJoinRequestResponse{Error: getResp.GetError()}, nil
 	}
 	pending := getResp.GetRequest()
+
+	if s.reachabilityCheck != nil {
+		checkCtx, cancel := context.WithTimeout(ctx, preApprovalReachabilityTimeout)
+		err := s.reachabilityCheck(checkCtx, pending.GetRaftBindAddress())
+		cancel()
+		if err != nil {
+			return &rpcpb.ApproveJoinRequestResponse{Error: fmt.Sprintf(
+				"refusing to approve: raft_bind_address %q is not reachable: %v - approving an unreachable node strands the cluster and can only be recovered by wiping raft state, so this is refused rather than attempted",
+				pending.GetRaftBindAddress(), err)}, nil
+		}
+	}
 
 	timeout := defaultApplyTimeout
 	if req.GetTimeoutMs() > 0 {
@@ -315,6 +397,9 @@ func (s *Server) CancelJoinRequest(ctx context.Context, req *rpcpb.CancelJoinReq
 	if target := req.GetTargetAddress(); target != "" {
 		if s.peers == nil {
 			return &rpcpb.CancelJoinRequestResponse{Error: "no peer forwarding is configured on this node; cannot reach the named Colony member"}, nil
+		}
+		if err := s.checkTargetAddressAllowed(target); err != nil {
+			return &rpcpb.CancelJoinRequestResponse{Error: err.Error()}, nil
 		}
 		// Unauthenticated dial (ADR-0096), bounded (2026-09-12 audit
 		// finding) - see RequestJoinColony's own identical comment above.

@@ -99,6 +99,111 @@ func TestServer_RequestJoinColony_TargetAddressForwardsToPeer(t *testing.T) {
 	}
 }
 
+// TestServer_RequestJoinColony_TargetAddressRejectedWhenNotAllowlisted
+// is ADR-0097's own regression test: once -known-peer-addresses is
+// configured, a target_address outside that list must be refused
+// before ever dialing - the fake peer's lastAddr staying empty proves
+// the dial never happened, not just that an error was also returned.
+func TestServer_RequestJoinColony_TargetAddressRejectedWhenNotAllowlisted(t *testing.T) {
+	peers := &fakeJoinColonyPeerForwarder{}
+	s := NewServer(nil, "node-1", nil, nil, nil, nil, peers, "", nil, nil, nil, 0, nil)
+	s.SetKnownPeerAddresses([]string{"10.0.0.9:17700", "10.0.0.14:17700"})
+
+	resp, err := s.RequestJoinColony(context.Background(), &rpcpb.RequestJoinColonyRequest{
+		NodeId: "node-2", RaftBindAddress: "10.0.0.2:17600", TargetAddress: "10.0.0.1:17700",
+	})
+	if err != nil {
+		t.Fatalf("RequestJoinColony() error: %v", err)
+	}
+	if !strings.Contains(resp.GetError(), "known-peer-addresses") {
+		t.Errorf("Error = %q, want a clear allowlist-rejection message", resp.GetError())
+	}
+	if peers.lastAddr != "" {
+		t.Errorf("lastAddr = %q, want empty - the peer must never be dialed for a disallowed target", peers.lastAddr)
+	}
+}
+
+// TestServer_RequestJoinColony_TargetAddressAllowedWhenAllowlisted
+// confirms the allowlist is a floor, not a lockout: a target_address
+// that IS listed still forwards normally.
+func TestServer_RequestJoinColony_TargetAddressAllowedWhenAllowlisted(t *testing.T) {
+	peers := &fakeJoinColonyPeerForwarder{requestResp: &rpcpb.RequestJoinColonyResponse{RequestId: "jreq-1", Code: "482913"}}
+	s := NewServer(nil, "node-1", nil, nil, nil, nil, peers, "", nil, nil, nil, 0, nil)
+	s.SetKnownPeerAddresses([]string{"10.0.0.1:17700"})
+
+	resp, err := s.RequestJoinColony(context.Background(), &rpcpb.RequestJoinColonyRequest{
+		NodeId: "node-2", RaftBindAddress: "10.0.0.2:17600", TargetAddress: "10.0.0.1:17700",
+	})
+	if err != nil {
+		t.Fatalf("RequestJoinColony() error: %v", err)
+	}
+	if resp.GetError() != "" || resp.GetRequestId() != "jreq-1" {
+		t.Errorf("response = %+v, want the forwarded call to succeed", resp)
+	}
+	if peers.lastAddr != "10.0.0.1:17700" {
+		t.Errorf("lastAddr = %q, want the allowlisted target dialed", peers.lastAddr)
+	}
+}
+
+// TestServer_SetKnownPeerAddresses_EmptyClearsAllowlist confirms
+// passing an empty/nil slice restores ADR-0092's original accept-any
+// behavior, not an empty (deny-everything) allowlist - the difference
+// between "unconfigured" and "configured but empty" matters here.
+func TestServer_SetKnownPeerAddresses_EmptyClearsAllowlist(t *testing.T) {
+	peers := &fakeJoinColonyPeerForwarder{}
+	s := NewServer(nil, "node-1", nil, nil, nil, nil, peers, "", nil, nil, nil, 0, nil)
+	s.SetKnownPeerAddresses([]string{"10.0.0.9:17700"})
+	s.SetKnownPeerAddresses(nil)
+
+	resp, err := s.RequestJoinColony(context.Background(), &rpcpb.RequestJoinColonyRequest{
+		NodeId: "node-2", RaftBindAddress: "10.0.0.2:17600", TargetAddress: "10.0.0.1:17700",
+	})
+	if err != nil {
+		t.Fatalf("RequestJoinColony() error: %v", err)
+	}
+	if resp.GetError() != "" {
+		t.Errorf("response = %+v, want an unconfigured allowlist to accept any target_address", resp)
+	}
+}
+
+func TestServer_GetJoinRequestStatus_TargetAddressRejectedWhenNotAllowlisted(t *testing.T) {
+	peers := &fakeJoinColonyPeerForwarder{}
+	s := NewServer(nil, "node-1", nil, nil, nil, nil, peers, "", nil, nil, nil, 0, nil)
+	s.SetKnownPeerAddresses([]string{"10.0.0.9:17700"})
+
+	resp, err := s.GetJoinRequestStatus(context.Background(), &rpcpb.GetJoinRequestStatusRequest{
+		RequestId: "jreq-1", TargetAddress: "10.0.0.1:17700",
+	})
+	if err != nil {
+		t.Fatalf("GetJoinRequestStatus() error: %v", err)
+	}
+	if !strings.Contains(resp.GetError(), "known-peer-addresses") {
+		t.Errorf("Error = %q, want a clear allowlist-rejection message", resp.GetError())
+	}
+	if peers.lastAddr != "" {
+		t.Errorf("lastAddr = %q, want empty - the peer must never be dialed for a disallowed target", peers.lastAddr)
+	}
+}
+
+func TestServer_CancelJoinRequest_TargetAddressRejectedWhenNotAllowlisted(t *testing.T) {
+	peers := &fakeJoinColonyPeerForwarder{}
+	s := NewServer(nil, "node-1", nil, nil, nil, nil, peers, "", nil, nil, nil, 0, nil)
+	s.SetKnownPeerAddresses([]string{"10.0.0.9:17700"})
+
+	resp, err := s.CancelJoinRequest(context.Background(), &rpcpb.CancelJoinRequestRequest{
+		RequestId: "jreq-1", TargetAddress: "10.0.0.1:17700",
+	})
+	if err != nil {
+		t.Fatalf("CancelJoinRequest() error: %v", err)
+	}
+	if !strings.Contains(resp.GetError(), "known-peer-addresses") {
+		t.Errorf("Error = %q, want a clear allowlist-rejection message", resp.GetError())
+	}
+	if peers.lastAddr != "" {
+		t.Errorf("lastAddr = %q, want empty - the peer must never be dialed for a disallowed target", peers.lastAddr)
+	}
+}
+
 func TestServer_GetJoinRequestStatus_TargetAddressWithNilPeersErrors(t *testing.T) {
 	s := NewServer(nil, "node-1", nil, nil, nil, nil, nil, "", nil, nil, nil, 0, nil)
 	resp, err := s.GetJoinRequestStatus(context.Background(), &rpcpb.GetJoinRequestStatusRequest{
