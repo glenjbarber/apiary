@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"time"
 
 	rpcpb "github.com/glenjbarber/apiary/api/rpc"
 )
@@ -21,30 +22,31 @@ type fakeJoinColonyPeerForwarder struct {
 	lastReq  *rpcpb.RequestJoinColonyRequest
 	lastReqID,
 	lastCancelReqID string
+	lastCtx context.Context
 
 	requestResp *rpcpb.RequestJoinColonyResponse
 	statusResp  *rpcpb.GetJoinRequestStatusResponse
 	cancelResp  *rpcpb.CancelJoinRequestResponse
 }
 
-func (f *fakeJoinColonyPeerForwarder) RequestJoinColonyUnauthenticated(_ context.Context, addr string, req *rpcpb.RequestJoinColonyRequest) (*rpcpb.RequestJoinColonyResponse, error) {
-	f.lastAddr, f.lastReq = addr, req
+func (f *fakeJoinColonyPeerForwarder) RequestJoinColonyUnauthenticated(ctx context.Context, addr string, req *rpcpb.RequestJoinColonyRequest) (*rpcpb.RequestJoinColonyResponse, error) {
+	f.lastAddr, f.lastReq, f.lastCtx = addr, req, ctx
 	if f.requestResp != nil {
 		return f.requestResp, nil
 	}
 	return &rpcpb.RequestJoinColonyResponse{RequestId: "jreq-forwarded", Code: "123456"}, nil
 }
 
-func (f *fakeJoinColonyPeerForwarder) GetJoinRequestStatusUnauthenticated(_ context.Context, addr, requestID string) (*rpcpb.GetJoinRequestStatusResponse, error) {
-	f.lastAddr, f.lastReqID = addr, requestID
+func (f *fakeJoinColonyPeerForwarder) GetJoinRequestStatusUnauthenticated(ctx context.Context, addr, requestID string) (*rpcpb.GetJoinRequestStatusResponse, error) {
+	f.lastAddr, f.lastReqID, f.lastCtx = addr, requestID, ctx
 	if f.statusResp != nil {
 		return f.statusResp, nil
 	}
 	return &rpcpb.GetJoinRequestStatusResponse{Request: &rpcpb.PendingJoinRequest{RequestId: requestID}}, nil
 }
 
-func (f *fakeJoinColonyPeerForwarder) CancelJoinRequestUnauthenticated(_ context.Context, addr string, req *rpcpb.CancelJoinRequestRequest) (*rpcpb.CancelJoinRequestResponse, error) {
-	f.lastAddr, f.lastCancelReqID = addr, req.GetRequestId()
+func (f *fakeJoinColonyPeerForwarder) CancelJoinRequestUnauthenticated(ctx context.Context, addr string, req *rpcpb.CancelJoinRequestRequest) (*rpcpb.CancelJoinRequestResponse, error) {
+	f.lastAddr, f.lastCancelReqID, f.lastCtx = addr, req.GetRequestId(), ctx
 	if f.cancelResp != nil {
 		return f.cancelResp, nil
 	}
@@ -157,4 +159,60 @@ func TestServer_CancelJoinRequest_TargetAddressForwardsToPeer(t *testing.T) {
 	if peers.lastAddr != "10.0.0.1:17700" || peers.lastCancelReqID != "jreq-1" {
 		t.Errorf("forwarded to addr=%q requestID=%q, want 10.0.0.1:17700/jreq-1", peers.lastAddr, peers.lastCancelReqID)
 	}
+}
+
+// assertBoundedForwardDeadline confirms ctx carries a deadline no later
+// than defaultUnauthenticatedForwardTimeout from now, regardless of
+// whatever (or however unbounded) a deadline the original caller's own
+// context had - see defaultUnauthenticatedForwardTimeout's own doc
+// comment (2026-09-12 audit finding).
+func assertBoundedForwardDeadline(t *testing.T, ctx context.Context) {
+	t.Helper()
+	deadline, ok := ctx.Deadline()
+	if !ok {
+		t.Fatal("forwarding context has no deadline, want one bounded by defaultUnauthenticatedForwardTimeout")
+	}
+	if remaining := time.Until(deadline); remaining <= 0 || remaining > defaultUnauthenticatedForwardTimeout {
+		t.Errorf("forwarding context deadline is %v from now, want (0, %v]", remaining, defaultUnauthenticatedForwardTimeout)
+	}
+}
+
+// TestServer_RequestJoinColony_TargetAddressForwardIsBounded is the
+// 2026-09-12 audit's own regression test: a caller-supplied
+// target_address that never completes a TCP handshake (a black-holed
+// IP, a firewalled port) must not hang this handler indefinitely, even
+// though RequestJoinColony's own incoming context (ctx.Background()
+// here, standing in for a caller who set no deadline at all) carries
+// none itself.
+func TestServer_RequestJoinColony_TargetAddressForwardIsBounded(t *testing.T) {
+	peers := &fakeJoinColonyPeerForwarder{}
+	s := NewServer(nil, "node-1", nil, nil, nil, nil, peers, "", nil, nil, nil, 0, nil)
+	if _, err := s.RequestJoinColony(context.Background(), &rpcpb.RequestJoinColonyRequest{
+		NodeId: "node-2", RaftBindAddress: "10.0.0.2:17600", TargetAddress: "10.0.0.1:17700",
+	}); err != nil {
+		t.Fatalf("RequestJoinColony() error: %v", err)
+	}
+	assertBoundedForwardDeadline(t, peers.lastCtx)
+}
+
+func TestServer_GetJoinRequestStatus_TargetAddressForwardIsBounded(t *testing.T) {
+	peers := &fakeJoinColonyPeerForwarder{}
+	s := NewServer(nil, "node-1", nil, nil, nil, nil, peers, "", nil, nil, nil, 0, nil)
+	if _, err := s.GetJoinRequestStatus(context.Background(), &rpcpb.GetJoinRequestStatusRequest{
+		RequestId: "jreq-1", TargetAddress: "10.0.0.1:17700",
+	}); err != nil {
+		t.Fatalf("GetJoinRequestStatus() error: %v", err)
+	}
+	assertBoundedForwardDeadline(t, peers.lastCtx)
+}
+
+func TestServer_CancelJoinRequest_TargetAddressForwardIsBounded(t *testing.T) {
+	peers := &fakeJoinColonyPeerForwarder{}
+	s := NewServer(nil, "node-1", nil, nil, nil, nil, peers, "", nil, nil, nil, 0, nil)
+	if _, err := s.CancelJoinRequest(context.Background(), &rpcpb.CancelJoinRequestRequest{
+		RequestId: "jreq-1", TargetAddress: "10.0.0.1:17700",
+	}); err != nil {
+		t.Fatalf("CancelJoinRequest() error: %v", err)
+	}
+	assertBoundedForwardDeadline(t, peers.lastCtx)
 }
