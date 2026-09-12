@@ -3,6 +3,8 @@ package cluster
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -89,6 +91,17 @@ func (f *fakeMountManager) Unmount(_ context.Context, mountPoint string) error {
 	return nil
 }
 
+// writePlaceholderJailRoot drops a file into dir so ensureJailRoot's
+// empty-root safety check (ADR-0098) sees a populated root, standing
+// in for a real base.txz extraction - these tests aren't exercising
+// root population, just everything else ensureJail does.
+func writePlaceholderJailRoot(t *testing.T, dir string) {
+	t.Helper()
+	if err := os.WriteFile(filepath.Join(dir, "placeholder"), []byte("stand-in for a real FreeBSD userland"), 0o644); err != nil {
+		t.Fatalf("writePlaceholderJailRoot: %v", err)
+	}
+}
+
 func TestReconciler_RunOnce_CreatesJailOnPlainDataset(t *testing.T) {
 	raft := &fakeRaftClient{
 		jailsResp: &internalpb.ListJailsResponse{
@@ -96,7 +109,9 @@ func TestReconciler_RunOnce_CreatesJailOnPlainDataset(t *testing.T) {
 		},
 	}
 	zfs := newFakeDatasetManager()
-	zfs.mountpointFor["jail-1"] = t.TempDir()
+	root := t.TempDir()
+	writePlaceholderJailRoot(t, root)
+	zfs.mountpointFor["jail-1"] = root
 	jm := newFakeJailManager()
 
 	r := &Reconciler{Raft: raft, ZFS: zfs, Jail: jm, LocalNodeID: "node-a"}
@@ -127,7 +142,9 @@ func TestReconciler_RunOnce_SkipsJailAlreadyRunning(t *testing.T) {
 	}
 	zfs := newFakeDatasetManager()
 	zfs.existing["jail-1"] = true
-	zfs.mountpointFor["jail-1"] = t.TempDir()
+	root := t.TempDir()
+	writePlaceholderJailRoot(t, root)
+	zfs.mountpointFor["jail-1"] = root
 	jm := newFakeJailManager()
 	jm.running["jail-1"] = true
 
@@ -141,6 +158,35 @@ func TestReconciler_RunOnce_SkipsJailAlreadyRunning(t *testing.T) {
 	}
 }
 
+// fakeJailArchiveExtractor stands in for internal/jailarchive.Extractor,
+// mirroring fakeISOResolver's own hand-off pattern.
+type fakeJailArchiveExtractor struct {
+	extracted  []string // "archivePath -> destDir" pairs, in call order
+	extractErr error
+	// noop, if true, records the call but writes nothing into destDir -
+	// simulates a "successful" extraction of an archive that turns out
+	// to contain nothing, to prove the safety check still fires even
+	// after a real extraction step ran.
+	noop bool
+}
+
+func (f *fakeJailArchiveExtractor) Extract(_ context.Context, archivePath, destDir string) error {
+	f.extracted = append(f.extracted, archivePath+" -> "+destDir)
+	if f.extractErr != nil {
+		return f.extractErr
+	}
+	if f.noop {
+		return nil
+	}
+	return os.WriteFile(filepath.Join(destDir, "bin-sh"), []byte("#!/bin/sh\n"), 0o755)
+}
+
+// TestReconciler_RunOnce_ClonesJailFromBaseTemplate. The mountpoint gets
+// a placeholder file (writePlaceholderJailRoot) even though a real `zfs
+// clone` would populate it for real - the fake ZFS manager's own Clone
+// only records the call, so without this the new unconditional empty-
+// root check (ADR-0098) would fail this test for a reason unrelated to
+// what it's actually testing.
 func TestReconciler_RunOnce_ClonesJailFromBaseTemplate(t *testing.T) {
 	raft := &fakeRaftClient{
 		jailsResp: &internalpb.ListJailsResponse{
@@ -149,7 +195,9 @@ func TestReconciler_RunOnce_ClonesJailFromBaseTemplate(t *testing.T) {
 	}
 	zfs := newFakeDatasetManager()
 	zfs.snapshots["templates/freebsd-14@apiary-template"] = true
-	zfs.mountpointFor["jail-1"] = t.TempDir()
+	root := t.TempDir()
+	writePlaceholderJailRoot(t, root)
+	zfs.mountpointFor["jail-1"] = root
 	jm := newFakeJailManager()
 
 	r := &Reconciler{Raft: raft, ZFS: zfs, Jail: jm, LocalNodeID: "node-a"}
@@ -166,6 +214,85 @@ func TestReconciler_RunOnce_ClonesJailFromBaseTemplate(t *testing.T) {
 	}
 	if !zfs.existing["jail-1"] {
 		t.Errorf("dataset jail-1 was not created via clone")
+	}
+	if _, ok := jm.lastCfg["jail-1"]; !ok {
+		t.Fatalf("CreateJail was never called for jail-1")
+	}
+}
+
+// TestReconciler_RunOnce_BaseTemplateAndBaseArchiveTogetherIsError
+// confirms ensureJail's own explicit rejection: these are two
+// independent ways to populate a jail's root (ADR-0084 and ADR-0098),
+// and naming both is refused outright rather than letting one silently
+// win over the other.
+func TestReconciler_RunOnce_BaseTemplateAndBaseArchiveTogetherIsError(t *testing.T) {
+	raft := &fakeRaftClient{
+		jailsResp: &internalpb.ListJailsResponse{
+			Jails: []*internalpb.JailDefinition{{Id: "jail-1", NodeId: "node-a", BaseTemplate: "freebsd-14", BaseArchiveName: "base.txz"}},
+		},
+	}
+	zfs := newFakeDatasetManager()
+	zfs.snapshots["templates/freebsd-14@apiary-template"] = true
+
+	r := &Reconciler{Raft: raft, ZFS: zfs, Jail: newFakeJailManager(), LocalNodeID: "node-a"}
+	if err := r.RunOnce(context.Background()); err == nil || !strings.Contains(err.Error(), "not supported together") {
+		t.Fatalf("RunOnce() error: %v, want explicit unsupported-combination error", err)
+	}
+	assertJailPhaseError(t, raft, "jail-1", "not supported together")
+	if len(zfs.cloned) != 0 {
+		t.Errorf("Clone calls = %v, want none", zfs.cloned)
+	}
+}
+
+// TestReconciler_RunOnce_EmptyJailRootWithNoBaseArchiveIsError confirms
+// the ADR-0098 safety check: a jail whose root is a completely empty
+// dataset, and which names no base_archive_name, must fail
+// reconciliation with a clear error rather than reach PhaseReady with
+// jail(8) attached to nothing.
+func TestReconciler_RunOnce_EmptyJailRootWithNoBaseArchiveIsError(t *testing.T) {
+	raft := &fakeRaftClient{
+		jailsResp: &internalpb.ListJailsResponse{
+			Jails: []*internalpb.JailDefinition{{Id: "jail-1", NodeId: "node-a"}},
+		},
+	}
+	zfs := newFakeDatasetManager()
+	zfs.mountpointFor["jail-1"] = t.TempDir() // left empty - no placeholder written
+	jm := newFakeJailManager()
+
+	r := &Reconciler{Raft: raft, ZFS: zfs, Jail: jm, LocalNodeID: "node-a"}
+	err := r.RunOnce(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "is empty") {
+		t.Fatalf("RunOnce() error = %v, want an empty-root error", err)
+	}
+	if len(jm.created) != 0 {
+		t.Errorf("CreateJail called = %v, want none - an empty root must never reach jail(8)", jm.created)
+	}
+}
+
+// TestReconciler_RunOnce_BaseArchiveExtractsIntoEmptyJailRoot confirms
+// a jail naming base_archive_name gets it resolved via ISOs and
+// extracted via JailArchives into its empty root before jail(8) is
+// asked to attach to it.
+func TestReconciler_RunOnce_BaseArchiveExtractsIntoEmptyJailRoot(t *testing.T) {
+	raft := &fakeRaftClient{
+		jailsResp: &internalpb.ListJailsResponse{
+			Jails: []*internalpb.JailDefinition{{Id: "jail-1", NodeId: "node-a", BaseArchiveName: "base.txz"}},
+		},
+	}
+	zfs := newFakeDatasetManager()
+	root := t.TempDir()
+	zfs.mountpointFor["jail-1"] = root
+	jm := newFakeJailManager()
+	isos := &fakeISOResolver{paths: map[string]string{"base.txz": "/isos/base.txz"}}
+	archives := &fakeJailArchiveExtractor{}
+
+	r := &Reconciler{Raft: raft, ZFS: zfs, Jail: jm, ISOs: isos, JailArchives: archives, LocalNodeID: "node-a"}
+	if err := r.RunOnce(context.Background()); err != nil {
+		t.Fatalf("RunOnce() error: %v", err)
+	}
+
+	if want := []string{"/isos/base.txz -> " + root}; len(archives.extracted) != 1 || archives.extracted[0] != want[0] {
+		t.Errorf("extracted = %v, want %v", archives.extracted, want)
 	}
 	if _, ok := jm.lastCfg["jail-1"]; !ok {
 		t.Fatalf("CreateJail was never called for jail-1")
@@ -206,7 +333,9 @@ func TestReconciler_RunOnce_FetchesMissingJailTemplateFromPeerBeforeCloning(t *t
 		statusResp: statusResponseWithPeers("node-a", "10.0.0.1:17600", "node-b", "10.0.0.2:17600"),
 	}
 	zfs := newFakeDatasetManager()
-	zfs.mountpointFor["jail-1"] = t.TempDir()
+	root := t.TempDir()
+	writePlaceholderJailRoot(t, root)
+	zfs.mountpointFor["jail-1"] = root
 	jm := newFakeJailManager()
 	peers := &fakePeerReporter{
 		jailTemplateNamesByAddr: map[string][]string{"10.0.0.2:17700": {"freebsd-14"}},
@@ -282,7 +411,9 @@ func TestReconciler_RunOnce_BaseTemplateNeverReClonesExistingDataset(t *testing.
 	}
 	zfs := newFakeDatasetManager()
 	zfs.existing["jail-1"] = true
-	zfs.mountpointFor["jail-1"] = t.TempDir()
+	root := t.TempDir()
+	writePlaceholderJailRoot(t, root)
+	zfs.mountpointFor["jail-1"] = root
 	jm := newFakeJailManager()
 
 	r := &Reconciler{Raft: raft, ZFS: zfs, Jail: jm, LocalNodeID: "node-a"}
@@ -292,6 +423,81 @@ func TestReconciler_RunOnce_BaseTemplateNeverReClonesExistingDataset(t *testing.
 
 	if len(zfs.cloned) != 0 {
 		t.Errorf("Clone calls = %v, want none - an already-existing dataset must never be re-cloned", zfs.cloned)
+	}
+}
+
+// TestReconciler_RunOnce_BaseArchiveNotReExtractedOncePopulated
+// confirms a jail root that's already populated is never re-extracted
+// into on a later tick, mirroring ensureDiskImage's own "only act on
+// create" behavior for VM base images.
+func TestReconciler_RunOnce_BaseArchiveNotReExtractedOncePopulated(t *testing.T) {
+	raft := &fakeRaftClient{
+		jailsResp: &internalpb.ListJailsResponse{
+			Jails: []*internalpb.JailDefinition{{Id: "jail-1", NodeId: "node-a", BaseArchiveName: "base.txz"}},
+		},
+	}
+	zfs := newFakeDatasetManager()
+	zfs.existing["jail-1"] = true
+	root := t.TempDir()
+	writePlaceholderJailRoot(t, root)
+	zfs.mountpointFor["jail-1"] = root
+	jm := newFakeJailManager()
+	isos := &fakeISOResolver{paths: map[string]string{"base.txz": "/isos/base.txz"}}
+	archives := &fakeJailArchiveExtractor{}
+
+	r := &Reconciler{Raft: raft, ZFS: zfs, Jail: jm, ISOs: isos, JailArchives: archives, LocalNodeID: "node-a"}
+	if err := r.RunOnce(context.Background()); err != nil {
+		t.Fatalf("RunOnce() error: %v", err)
+	}
+
+	if len(archives.extracted) != 0 {
+		t.Errorf("extracted = %v, want none - an already-populated root must never be re-extracted into", archives.extracted)
+	}
+}
+
+// TestReconciler_RunOnce_BaseArchiveThatExtractsNothingIsStillAnError
+// confirms the safety check runs again after extraction: an archive
+// that "successfully" extracts but leaves the root empty must still
+// fail, not silently reach PhaseReady.
+func TestReconciler_RunOnce_BaseArchiveThatExtractsNothingIsStillAnError(t *testing.T) {
+	raft := &fakeRaftClient{
+		jailsResp: &internalpb.ListJailsResponse{
+			Jails: []*internalpb.JailDefinition{{Id: "jail-1", NodeId: "node-a", BaseArchiveName: "empty.txz"}},
+		},
+	}
+	zfs := newFakeDatasetManager()
+	zfs.mountpointFor["jail-1"] = t.TempDir()
+	jm := newFakeJailManager()
+	isos := &fakeISOResolver{paths: map[string]string{"empty.txz": "/isos/empty.txz"}}
+	archives := &fakeJailArchiveExtractor{noop: true}
+
+	r := &Reconciler{Raft: raft, ZFS: zfs, Jail: jm, ISOs: isos, JailArchives: archives, LocalNodeID: "node-a"}
+	err := r.RunOnce(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "is empty") {
+		t.Fatalf("RunOnce() error = %v, want an empty-root error", err)
+	}
+	if len(jm.created) != 0 {
+		t.Errorf("CreateJail called = %v, want none", jm.created)
+	}
+}
+
+// TestReconciler_RunOnce_BaseArchiveWithNoISOStoreIsError confirms a
+// jail naming base_archive_name on a node with no ISO store configured
+// fails clearly, mirroring the equivalent VM base-image check.
+func TestReconciler_RunOnce_BaseArchiveWithNoISOStoreIsError(t *testing.T) {
+	raft := &fakeRaftClient{
+		jailsResp: &internalpb.ListJailsResponse{
+			Jails: []*internalpb.JailDefinition{{Id: "jail-1", NodeId: "node-a", BaseArchiveName: "base.txz"}},
+		},
+	}
+	zfs := newFakeDatasetManager()
+	zfs.mountpointFor["jail-1"] = t.TempDir()
+	jm := newFakeJailManager()
+
+	r := &Reconciler{Raft: raft, ZFS: zfs, Jail: jm, LocalNodeID: "node-a"}
+	err := r.RunOnce(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "no ISO store is configured") {
+		t.Fatalf("RunOnce() error = %v, want a no-ISO-store error", err)
 	}
 }
 
@@ -512,9 +718,21 @@ func TestReconciler_RunOnce_ProvisionsHASTPrimaryForReplicatedJail(t *testing.T)
 	mnt := newFakeMountManager()
 	h := newFakeHASTManager()
 
+	// The fake Mount never actually creates jailBase+"/jail-1" on disk
+	// (unlike a real ufsmount.Mount, which mounts onto a real
+	// directory) - pre-create it with a placeholder so the empty-root
+	// safety check (ADR-0098) sees an already-populated root, since
+	// this test isn't exercising root population.
+	jailBase := t.TempDir()
+	rootPath := filepath.Join(jailBase, "jail-1")
+	if err := os.MkdirAll(rootPath, 0o755); err != nil {
+		t.Fatalf("creating fake jail root: %v", err)
+	}
+	writePlaceholderJailRoot(t, rootPath)
+
 	r := &Reconciler{
 		Raft: raft, ZFS: zfs, Jail: jm, Mount: mnt, HAST: h,
-		HASTRestartSettleDelay: time.Millisecond, LocalNodeID: "node-a", JailBase: "/apiary-jails",
+		HASTRestartSettleDelay: time.Millisecond, LocalNodeID: "node-a", JailBase: jailBase,
 	}
 	if err := r.RunOnce(context.Background()); err != nil {
 		t.Fatalf("RunOnce() error: %v", err)
@@ -526,15 +744,15 @@ func TestReconciler_RunOnce_ProvisionsHASTPrimaryForReplicatedJail(t *testing.T)
 	if !mnt.formatted["/dev/hast/jail-jail-1"] {
 		t.Errorf("HAST device was not formatted")
 	}
-	if mnt.mounted["/apiary-jails/jail-1"] != "/dev/hast/jail-jail-1" {
-		t.Errorf("mounted = %+v, want /apiary-jails/jail-1 -> /dev/hast/jail-jail-1", mnt.mounted)
+	if mnt.mounted[rootPath] != "/dev/hast/jail-jail-1" {
+		t.Errorf("mounted = %+v, want %s -> /dev/hast/jail-jail-1", mnt.mounted, rootPath)
 	}
 	cfg, ok := jm.lastCfg["jail-1"]
 	if !ok {
 		t.Fatalf("CreateJail was never called for jail-1")
 	}
-	if cfg.Path != "/apiary-jails/jail-1" {
-		t.Errorf("Path = %q, want /apiary-jails/jail-1", cfg.Path)
+	if cfg.Path != rootPath {
+		t.Errorf("Path = %q, want %q", cfg.Path, rootPath)
 	}
 	if zfs.existing["jail-1"] {
 		t.Errorf("plain dataset jail-1 was created for a replicated jail, want none")

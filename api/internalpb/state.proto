@@ -232,6 +232,25 @@ message JailDefinition {
   // every tick), and unsupported together with replica_node_id (a
   // HAST-replicated jail's root is a raw device, not a ZFS dataset).
   string base_template = 9;
+
+  // base_archive_name, if set, names a base.txz-style FreeBSD userland
+  // archive already uploaded (via ManagerService.UploadISO, reusing
+  // internal/isostore's existing store exactly like VMDefinition's
+  // iso_name/base_image_name) on the assigned node. The reconciler
+  // resolves it the same way it resolves a VM's image names and, only
+  // the first time this jail's root filesystem is empty, extracts it
+  // in place instead of leaving an empty ZFS dataset for jail(8) to
+  // attach to with nothing in it. Ignored once the root is already
+  // populated (never re-extracted on every tick). A jail may name
+  // base_template or base_archive_name but not both - see ADR-0098
+  // (renumbered from this branch's own original ADR-0083, which
+  // collided with the already-shipped ADR-0083, Mutually-authorized
+  // Colony join). Distinct from base_template: an archive is extracted
+  // into a plain dataset (no ZFS clone source needed), the same
+  // upload-once/reuse-everywhere model VMDefinition.base_image_name
+  // already established, rather than an operator-populated ZFS
+  // template.
+  string base_archive_name = 10;
 }
 
 // FirewallRule is one pf(8) rule applied to a VM's per-VM anchor. See

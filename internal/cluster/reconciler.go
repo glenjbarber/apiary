@@ -192,8 +192,17 @@ type Reconciler struct {
 	// ISOs resolves a VM's ISOName to a local file path, for VMs that
 	// name an installer image to boot from. Optional: nil (or an unset
 	// ISOName) means no CD-ROM is attached, the same opt-in pattern as
-	// Bhyve/Bridge above.
+	// Bhyve/Bridge above. Also used to resolve a jail's BaseArchiveName
+	// (see JailArchives) - both share the same isostore-backed pool of
+	// uploaded images.
 	ISOs isoResolver
+
+	// JailArchives extracts a resolved base archive (BaseArchiveName)
+	// into a jail's root the first time it's empty. Optional: nil
+	// means a jail with a BaseArchiveName set fails reconciliation with
+	// a clear error instead of silently leaving its root empty, the
+	// same opt-in-capability pattern as Bhyve/ISOs above. See ADR-0083.
+	JailArchives jailArchiveExtractor
 
 	// VLAN, DHCP, and PF are optional (nil-able, same opt-in pattern as
 	// Bhyve/ISOs above): together they realize a VM's NetworkID/
@@ -567,16 +576,17 @@ func (r *Reconciler) RunOnce(ctx context.Context) (err error) {
 				continue
 			}
 			desiredJails = append(desiredJails, JailPlacement{
-				ID:            j.GetId(),
-				Name:          j.GetName(),
-				Hostname:      j.GetHostname(),
-				NodeID:        j.GetNodeId(),
-				Deleting:      j.GetDesiredState() == internalpb.JailState_JAIL_STATE_DELETING,
-				Stopped:       j.GetDesiredState() == internalpb.JailState_JAIL_STATE_STOPPED,
-				Restarting:    j.GetDesiredState() == internalpb.JailState_JAIL_STATE_RESTARTING,
-				Phase:         jailPhaseToString(j.GetPhase()),
-				ReplicaNodeID: j.GetReplicaNodeId(),
-				BaseTemplate:  j.GetBaseTemplate(),
+				ID:              j.GetId(),
+				Name:            j.GetName(),
+				Hostname:        j.GetHostname(),
+				NodeID:          j.GetNodeId(),
+				Deleting:        j.GetDesiredState() == internalpb.JailState_JAIL_STATE_DELETING,
+				Stopped:         j.GetDesiredState() == internalpb.JailState_JAIL_STATE_STOPPED,
+				Restarting:      j.GetDesiredState() == internalpb.JailState_JAIL_STATE_RESTARTING,
+				Phase:           jailPhaseToString(j.GetPhase()),
+				ReplicaNodeID:   j.GetReplicaNodeId(),
+				BaseTemplate:    j.GetBaseTemplate(),
+				BaseArchiveName: j.GetBaseArchiveName(),
 			})
 		}
 	}

@@ -17,6 +17,7 @@ import (
 	"time"
 
 	rpcpb "github.com/glenjbarber/apiary/api/rpc"
+	"github.com/glenjbarber/apiary/internal/isostore"
 	"github.com/glenjbarber/apiary/internal/loginconfig"
 	"github.com/glenjbarber/apiary/internal/manager"
 	"github.com/glenjbarber/apiary/web"
@@ -1527,11 +1528,19 @@ func (s *Server) handleListISOs(w http.ResponseWriter, r *http.Request) {
 // handleUploadISO streams a multipart file upload directly into
 // managerd's UploadISO RPC, chunk by chunk, without ever buffering the
 // whole file in this process - an installer image can be several
-// gigabytes. This requires the form's hash field to be encoded before
-// its file field (see images.html's field order), since MultipartReader
-// processes parts strictly in the order the client sent them - by the
-// time the file part arrives, the hash needed for its Metadata message
-// must already be known.
+// gigabytes. This requires the form's hash/manifest fields to be
+// encoded before its file field (see images.html's field order), since
+// MultipartReader processes parts strictly in the order the client
+// sent them - by the time the file part arrives, the hash needed for
+// its Metadata message must already be known.
+//
+// The manifest field is an optional paste of a FreeBSD release
+// MANIFEST file's contents (published by FreeBSD right next to every
+// base.txz it ships) - when expected_sha256 is left blank, the
+// uploaded file's own name is looked up in it via isostore.
+// ParseManifest, so uploading a base archive for a jail (see
+// ADR-0098) can be checksum-verified against FreeBSD's own published
+// hash instead of an operator transcribing it by hand.
 func (s *Server) handleUploadISO(w http.ResponseWriter, r *http.Request) {
 	mr, err := r.MultipartReader()
 	if err != nil {
@@ -1540,6 +1549,7 @@ func (s *Server) handleUploadISO(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var expectedHash string
+	var manifestSums map[string]string
 	var result *rpcpb.UploadISOResponse
 	var uploadErr error
 
@@ -1557,7 +1567,24 @@ func (s *Server) handleUploadISO(w http.ResponseWriter, r *http.Request) {
 		case "expected_sha256":
 			data, _ := io.ReadAll(part)
 			expectedHash = strings.TrimSpace(string(data))
+		case "manifest":
+			data, _ := io.ReadAll(part)
+			if strings.TrimSpace(string(data)) != "" {
+				manifestSums, uploadErr = isostore.ParseManifest(strings.NewReader(string(data)))
+			}
 		case "file":
+			if expectedHash == "" && manifestSums != nil {
+				sum, ok := manifestSums[part.FileName()]
+				if !ok {
+					uploadErr = fmt.Errorf("no entry for %q found in the pasted MANIFEST", part.FileName())
+					break
+				}
+				expectedHash = sum
+			}
+			if expectedHash == "" {
+				uploadErr = fmt.Errorf("either expected_sha256 or a MANIFEST containing %q must be provided", part.FileName())
+				break
+			}
 			result, uploadErr = s.uploadISOStream(r, part, expectedHash)
 		}
 		part.Close()
@@ -1867,7 +1894,8 @@ func (s *Server) renderJailPage(w http.ResponseWriter, r *http.Request, id, host
 func (s *Server) handleNewJailPage(w http.ResponseWriter, r *http.Request) {
 	nodes, _ := s.knownNodes(r)
 	localNodeID := s.localNodeID(r)
-	s.render(w, "new_jail_page", s.withAuthFields(r, pageData{Nodes: nodes, LocalNodeID: localNodeID, PlacementHives: s.currentPlacementHives(r, nodes, localNodeID), ActivePage: "jails"}))
+	clusterISOs, _ := s.currentClusterISOs(r)
+	s.render(w, "new_jail_page", s.withAuthFields(r, pageData{Nodes: nodes, LocalNodeID: localNodeID, ClusterISOs: clusterISOs, PlacementHives: s.currentPlacementHives(r, nodes, localNodeID), ActivePage: "jails"}))
 }
 
 // handleCreateJail mirrors handleCreateVM exactly: redirect back to the
@@ -1882,12 +1910,13 @@ func (s *Server) handleCreateJail(w http.ResponseWriter, r *http.Request) {
 
 	resp, err := s.client.CreateJail(r.Context(), &rpcpb.CreateJailRequest{
 		Jail: &rpcpb.JailDefinition{
-			Id:            r.FormValue("id"),
-			Name:          r.FormValue("name"),
-			Hostname:      r.FormValue("hostname"),
-			NodeId:        r.FormValue("node_id"),
-			ReplicaNodeId: r.FormValue("replica_node_id"),
-			BaseTemplate:  r.FormValue("base_template"),
+			Id:              r.FormValue("id"),
+			Name:            r.FormValue("name"),
+			Hostname:        r.FormValue("hostname"),
+			NodeId:          r.FormValue("node_id"),
+			ReplicaNodeId:   r.FormValue("replica_node_id"),
+			BaseTemplate:    r.FormValue("base_template"),
+			BaseArchiveName: r.FormValue("base_archive_name"),
 		},
 	})
 	if err != nil {
