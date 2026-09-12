@@ -92,6 +92,21 @@ func LoadPeerCAPool(caFile string) (*x509.CertPool, error) {
 }
 
 func (p *PeerReporter) dial(addr string) (*grpc.ClientConn, rpcpb.ManagerServiceClient, error) {
+	return p.dialOpts(addr, true)
+}
+
+// dialUnauthenticated dials addr exactly like dial (same TLS/CA-pool/
+// hostname-verification behavior) but never attaches p.APIKey - see
+// RequestJoinColonyUnauthenticated's own doc comment (ADR-0096). Used
+// only where addr is a caller-supplied, unauthenticated target_address
+// (ADR-0092's RequestJoinColony/GetJoinRequestStatus/CancelJoinRequest),
+// never for an address this node derived itself from trusted cluster
+// state (e.g. a raft leader_hint) - those keep using dial above.
+func (p *PeerReporter) dialUnauthenticated(addr string) (*grpc.ClientConn, rpcpb.ManagerServiceClient, error) {
+	return p.dialOpts(addr, false)
+}
+
+func (p *PeerReporter) dialOpts(addr string, attachAPIKey bool) (*grpc.ClientConn, rpcpb.ManagerServiceClient, error) {
 	var opts []grpc.DialOption
 	if p.UseTLS {
 		cfg := &tls.Config{}
@@ -107,7 +122,7 @@ func (p *PeerReporter) dial(addr string) (*grpc.ClientConn, rpcpb.ManagerService
 	} else {
 		opts = []grpc.DialOption{grpc.WithTransportCredentials(insecure.NewCredentials())}
 	}
-	if p.APIKey != "" {
+	if attachAPIKey && p.APIKey != "" {
 		opts = append(opts, grpc.WithPerRPCCredentials(apiKeyCredentials(p.APIKey)))
 	}
 	conn, err := grpc.NewClient(addr, opts...)
@@ -608,6 +623,10 @@ func (p *PeerReporter) SetNetworkName(ctx context.Context, addr string, req *rpc
 // original caller had no credential at all: this forwarding call
 // itself is authenticated with p.APIKey like any other peer call, not
 // with whatever (nonexistent) credential the joining Comb presented.
+// addr here is always this node's own trusted, internally-derived
+// notion of who's leader (a raft leader_hint) - never the caller-
+// supplied target_address that RequestJoinColonyUnauthenticated below
+// exists for.
 func (p *PeerReporter) RequestJoinColony(ctx context.Context, addr string, req *rpcpb.RequestJoinColonyRequest) (*rpcpb.RequestJoinColonyResponse, error) {
 	conn, client, err := p.dial(addr)
 	if err != nil {
@@ -624,6 +643,38 @@ func (p *PeerReporter) RequestJoinColony(ctx context.Context, addr string, req *
 // this node's own unrelated local raft.
 func (p *PeerReporter) GetJoinRequestStatus(ctx context.Context, addr, requestID string) (*rpcpb.GetJoinRequestStatusResponse, error) {
 	conn, client, err := p.dial(addr)
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close()
+	return client.GetJoinRequestStatus(ctx, &rpcpb.GetJoinRequestStatusRequest{RequestId: requestID})
+}
+
+// RequestJoinColonyUnauthenticated/GetJoinRequestStatusUnauthenticated/
+// CancelJoinRequestUnauthenticated (ADR-0096) mirror their authenticated
+// namesakes above exactly, except they dial via dialUnauthenticated -
+// never attaching this node's own -peer-api-key. These exist
+// specifically for RequestJoinColony/GetJoinRequestStatus/
+// CancelJoinRequest's own target_address field (ADR-0092): that address
+// is supplied by a caller these three RPCs deliberately never
+// authenticate (a joining Comb has no Colony API key yet, by
+// definition - see internal/manager/auth.go), so it could name
+// anything, including a host the caller controls. Dialing it with this
+// node's real shared peer secret attached would let any unauthenticated
+// network caller who can reach this managerd's gRPC port make it leak
+// that secret to an address of their choosing - a real, previously-
+// exploitable SSRF-plus-credential-exfiltration path this closes.
+func (p *PeerReporter) RequestJoinColonyUnauthenticated(ctx context.Context, addr string, req *rpcpb.RequestJoinColonyRequest) (*rpcpb.RequestJoinColonyResponse, error) {
+	conn, client, err := p.dialUnauthenticated(addr)
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close()
+	return client.RequestJoinColony(ctx, req)
+}
+
+func (p *PeerReporter) GetJoinRequestStatusUnauthenticated(ctx context.Context, addr, requestID string) (*rpcpb.GetJoinRequestStatusResponse, error) {
+	conn, client, err := p.dialUnauthenticated(addr)
 	if err != nil {
 		return nil, err
 	}
@@ -651,6 +702,15 @@ func (p *PeerReporter) RejectJoinRequest(ctx context.Context, addr string, req *
 
 func (p *PeerReporter) CancelJoinRequest(ctx context.Context, addr string, req *rpcpb.CancelJoinRequestRequest) (*rpcpb.CancelJoinRequestResponse, error) {
 	conn, client, err := p.dial(addr)
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close()
+	return client.CancelJoinRequest(ctx, req)
+}
+
+func (p *PeerReporter) CancelJoinRequestUnauthenticated(ctx context.Context, addr string, req *rpcpb.CancelJoinRequestRequest) (*rpcpb.CancelJoinRequestResponse, error) {
+	conn, client, err := p.dialUnauthenticated(addr)
 	if err != nil {
 		return nil, err
 	}

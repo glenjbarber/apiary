@@ -248,15 +248,26 @@ Combs, and so the cluster-overview page can reach their host stats
 (ADR-0029):
 
 ```bash
-  -peer-api-key <the-same-key-every-Comb-in-this-Colony-uses> \
+  -peer-api-key-file /var/db/apiary/peer-api-key \
   -peer-managerd-port 17700
 ```
 
-`-peer-api-key` is required once the Colony has any API key at all
+A peer key is required once the Colony has any API key at all
 (ADR-0023) - peer-to-peer forwarding goes through the same authenticated
-`ManagerService` API as everything else. Add `-peer-tls`/
-`-peer-tls-hostname-map` too if the other Combs' `managerd` instances
-serve TLS.
+`ManagerService` API as everything else. Prefer `-peer-api-key-file`
+(ADR-0096) over `-peer-api-key <value>` directly: a value passed as a
+literal flag is visible to any local user via `ps(1)`/`procstat(1)`
+regardless of `/etc/rc.conf`'s own permissions, since that's true of any
+process's own argument list, not something a config file's mode can fix.
+Write the shared key to that file once (`0600`, root-owned) before
+starting `managerd`:
+
+```bash
+install -m 0600 /dev/stdin /var/db/apiary/peer-api-key <<< "<the-same-key-every-Comb-in-this-Colony-uses>"
+```
+
+Add `-peer-tls`/`-peer-tls-hostname-map` too if the other Combs'
+`managerd` instances serve TLS.
 
 Verify:
 

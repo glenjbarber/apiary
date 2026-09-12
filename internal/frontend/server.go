@@ -757,8 +757,14 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /vms/{id}/snapshots/{name}/delete", s.requireRole(manager.RoleOperator, s.handleDeleteVMSnapshot))
 	s.mux.HandleFunc("GET /images", s.handleImagesPage)
 	s.mux.HandleFunc("GET /isos", s.handleListISOs)
-	s.mux.HandleFunc("GET /vms/{id}/console", s.handleConsolePage)
-	s.mux.HandleFunc("GET /vms/{id}/console/ws", s.handleConsoleWS)
+	// Operator, not Viewer (ADR-0096): a VM console is a full
+	// bidirectional VNC/RFB tunnel - keyboard and mouse control of the
+	// guest, not a read-only view - so it belongs with every other
+	// state-changing capability below, not this section's read-only
+	// routes. See internal/manager/auth.go's matching GetVMConsole/
+	// ProxyVMConsole reclassification.
+	s.mux.HandleFunc("GET /vms/{id}/console", s.requireRole(manager.RoleOperator, s.handleConsolePage))
+	s.mux.HandleFunc("GET /vms/{id}/console/ws", s.requireRole(manager.RoleOperator, s.handleConsoleWS))
 	s.mux.HandleFunc("GET /vms/{id}/serial", s.handleSerialLogPage)
 	s.mux.HandleFunc("GET /vms/{id}/serial/content", s.handleSerialLogContent)
 	s.mux.HandleFunc("GET /networks", s.handleNetworksPage)

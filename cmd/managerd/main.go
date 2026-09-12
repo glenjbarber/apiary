@@ -79,7 +79,8 @@ func run() error {
 	jailPrefix := flag.String("jail-prefix", "apiary-", "name prefix for jails this node creates")
 	jailMountBase := flag.String("jail-mount-base", "/apiary-jails", "parent directory a replicated jail's HAST-backed root filesystem is mounted under (non-replicated jails use their ZFS dataset's own mountpoint instead)")
 	jailDiskSizeMB := flag.Uint64("jail-disk-size-mb", 2048, "size of a replicated jail's HAST-backed root filesystem in MB (ignored for non-replicated jails, which use their ZFS dataset's own quota)")
-	peerAPIKey := flag.String("peer-api-key", "", "API key this node's reconciler attaches when forwarding a raft write to another node's managerd (see ADR-0029); required once the cluster has any API key created (ADR-0023), since peer calls go through the same authenticated ManagerService API as everything else")
+	peerAPIKey := flag.String("peer-api-key", "", "API key this node's reconciler attaches when forwarding a raft write to another node's managerd (see ADR-0029); required once the cluster has any API key created (ADR-0023), since peer calls go through the same authenticated ManagerService API as everything else. Prefer -peer-api-key-file instead (ADR-0096): a value set here is a literal argv entry, visible to any local user via ps(1)/procstat(1) regardless of /etc/rc.conf's own file permissions")
+	peerAPIKeyFile := flag.String("peer-api-key-file", "", "path to a file containing only -peer-api-key's value (ADR-0096) - the preferred way to configure it. Never a flag value or env var for the same reason -cloudflare-token-file isn't: unlike a file's permissions, a process's command-line arguments are visible to any local user via ps(1)/procstat(1) regardless of who can read /etc/rc.conf. Mutually exclusive with -peer-api-key")
 	peerManagerdPort := flag.String("peer-managerd-port", "", "port assumed for a peer node's managerd external API when forwarding (ADR-0029); defaults to this node's own -rpc-addr port, since every node in a real deployment is expected to use the same port")
 	peerTLS := flag.Bool("peer-tls", false, "dial peer managerds over TLS instead of plaintext when forwarding (ADR-0029/ADR-0035); requires every peer's managerd to also be TLS-enabled")
 	peerTLSHostnameMap := flag.String("peer-tls-hostname-map", "", "comma-separated ip=hostname pairs used to verify a peer's TLS certificate, since a raft leader_hint is always a bare address and a real cert is never issued for a bare IP (e.g. \"10.50.0.11=freebsd-apiary.apiary.work,10.50.0.12=freebsd-apiary2.apiary.work\"); only consulted when -peer-tls is set")
@@ -112,6 +113,15 @@ func run() error {
 	if *resetManaged != "" || *factoryReset != "" {
 		return runReset(*resetManaged, *factoryReset, *factoryResetExtraJails, *factoryResetExtraDatasets, *zfsBase, *jailPrefix, *bhyvePrefix, *isoDir)
 	}
+
+	// -peer-api-key-file (ADR-0096): resolved before nodeConfigMgr.Load()
+	// below so a saved node-config's own PeerAPIKey can still override it
+	// afterwards, the same precedence every other flag already has.
+	resolvedPeerAPIKey, err := resolvePeerAPIKey(*peerAPIKey, *peerAPIKeyFile)
+	if err != nil {
+		return err
+	}
+	peerAPIKey = &resolvedPeerAPIKey
 
 	// nodeConfig holds this node's own local settings (ADR-0049/ADR-0070) -
 	// a value saved via the Machine Configuration UI overrides the
@@ -760,4 +770,24 @@ func splitCommaList(s string) []string {
 		}
 	}
 	return out
+}
+
+// resolvePeerAPIKey applies -peer-api-key-file's precedence over
+// -peer-api-key (ADR-0096), returning the effective key. Extracted as
+// its own pure function - separate from run()'s own flag-parsing flow
+// - so this logic is unit-testable without needing a real flag.Parse()
+// invocation, the same reasoning runReset/splitCommaList above are
+// already separate functions for.
+func resolvePeerAPIKey(flagKey, keyFile string) (string, error) {
+	if keyFile == "" {
+		return flagKey, nil
+	}
+	if flagKey != "" {
+		return "", fmt.Errorf("-peer-api-key and -peer-api-key-file are mutually exclusive")
+	}
+	keyBytes, err := os.ReadFile(keyFile)
+	if err != nil {
+		return "", fmt.Errorf("reading -peer-api-key-file: %w", err)
+	}
+	return strings.TrimSpace(string(keyBytes)), nil
 }

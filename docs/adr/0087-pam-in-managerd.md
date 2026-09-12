@@ -107,3 +107,15 @@ passes without further changes needed there.
   `pam_configured` field reflects whether a PAM authenticator is
   configured, since that handler needs a real raft connection to
   exercise at all.
+
+## Correction (2026-09-11, ADR-0096)
+
+`AuthenticatePassword`'s own exemption from `checkAuth` (necessary,
+since a caller here has no session yet) had a real, unaddressed
+consequence at the time this ADR was written: `internal/frontend`'s
+`handleLogin` lockout was the only rate-limiting protecting a real PAM/
+UNIX account from repeated guesses, and nothing stopped a network
+client from calling this RPC directly, bypassing frontend (and its
+lockout) entirely. ADR-0096 adds an equivalent lockout directly in this
+handler, closing that bypass at the actual trust boundary rather than
+relying on a caller's own good behavior.

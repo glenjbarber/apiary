@@ -304,9 +304,12 @@ each design decision, in order.
   entirely over the new TLS transport. See
   [ADR-0078](docs/adr/0078-raft-transport-tls.md).
 - **Remote serial console log viewing** — closes the gap ADR-0032 left
-  open: a new `GetVMSerialLog` RPC (read-only, same role tier as the
-  console) and a `/vms/{id}/serial` web UI page, polling on a timer
-  rather than streaming since a log has no continuous-framebuffer need.
+  open: a new `GetVMSerialLog` RPC (read-only, Viewer tier — a plain
+  text log, unlike the interactive VNC console below, which needs
+  Operator since it's a full bidirectional control tunnel, not a
+  read-only view; see ADR-0096) and a `/vms/{id}/serial` web UI page,
+  polling on a timer rather than streaming since a log has no
+  continuous-framebuffer need.
   Capped server-side at 1MB regardless of what's requested, since a
   runaway VM's serial log can grow to megabytes within minutes. See
   [ADR-0034](docs/adr/0034-remote-serial-log-viewing.md).
@@ -857,6 +860,22 @@ each design decision, in order.
   `apiarium` are harmless either way, just not a confirmed fix for
   anything. See
   [ADR-0094](docs/adr/0094-boot-time-network-robustness.md).
+- **Security audit follow-up (six findings)** — a caller-supplied
+  `target_address` on the deliberately-unauthenticated join-colony RPCs
+  (ADR-0092) could make managerd dial an attacker-chosen host and hand
+  over its own `-peer-api-key`; a new `dialUnauthenticated` closes it.
+  `-peer-api-key` also gained a `-peer-api-key-file` alternative
+  (mirroring `-cloudflare-token-file`'s own precedent) since a value
+  passed directly as a flag is visible to any local user via `ps(1)`
+  regardless of `/etc/rc.conf`'s permissions. `AuthenticatePassword`
+  (ADR-0087) now enforces its own lockout, not only `frontend`'s -
+  calling it directly used to bypass rate-limiting entirely. VM console
+  access (`GetVMConsole`/`ProxyVMConsole`) moved from Viewer to Operator
+  tier, since a console is a full bidirectional control tunnel, not a
+  read-only view. `clone_from_snapshot`/`base_template` (ADR-0095/
+  ADR-0084) gained the same FSM-boundary validation ADR-0067 already
+  requires for every other interpolated identifier. See
+  [ADR-0096](docs/adr/0096-security-audit-follow-up.md).
 - Importing VMs from other hypervisors (e.g. Proxmox): no disk-format
   conversion, and Apiary is UEFI-only. Linux containers have no path at
   all — jails share the host FreeBSD kernel

@@ -181,6 +181,20 @@ type PeerForwarder interface {
 	// used when RequestJoinColony's own target_address sent the request
 	// itself to a different Colony member than the one being asked.
 	GetJoinRequestStatus(ctx context.Context, addr, requestID string) (*rpcpb.GetJoinRequestStatusResponse, error)
+
+	// RequestJoinColonyUnauthenticated/GetJoinRequestStatusUnauthenticated/
+	// CancelJoinRequestUnauthenticated (ADR-0096) are used only for
+	// RequestJoinColony/GetJoinRequestStatus/CancelJoinRequest's own
+	// target_address (ADR-0092) - a caller-supplied address from an RPC
+	// that is deliberately never authenticated (see internal/manager/
+	// auth.go), so it must never be dialed with this node's own shared
+	// -peer-api-key attached. Distinct from RequestJoinColony/
+	// GetJoinRequestStatus/CancelJoinRequest above, which stay
+	// authenticated for their own (trusted, internally-derived leader-
+	// hint) use.
+	RequestJoinColonyUnauthenticated(ctx context.Context, addr string, req *rpcpb.RequestJoinColonyRequest) (*rpcpb.RequestJoinColonyResponse, error)
+	GetJoinRequestStatusUnauthenticated(ctx context.Context, addr, requestID string) (*rpcpb.GetJoinRequestStatusResponse, error)
+	CancelJoinRequestUnauthenticated(ctx context.Context, addr string, req *rpcpb.CancelJoinRequestRequest) (*rpcpb.CancelJoinRequestResponse, error)
 }
 
 // reconcilerStats is the subset of *cluster.Reconciler the server needs
@@ -322,6 +336,14 @@ type Server struct {
 	// cmd/frontend, so frontend itself needs no cgo/native build.
 	authPAM pamAuthenticator
 
+	// pamLockouts enforces AuthenticatePassword's own lockout (ADR-0096)
+	// - always initialized (never nil), since it's harmless to consult
+	// even on a node with authPAM unset (AuthenticatePassword returns
+	// before ever touching it in that case). See pamLockoutTracker's own
+	// doc comment for why this can't simply rely on
+	// internal/frontend's identical tracker.
+	pamLockouts *pamLockoutTracker
+
 	// nat is nil on a node with no reconciler wired up for this purpose
 	// - SetUplinkState simply skips the NAT-pause side effect rather
 	// than panicking. See ADR-0088.
@@ -399,7 +421,7 @@ var _ rpcpb.ManagerServiceServer = (*Server)(nil)
 // the params above) specifically to keep every existing positional
 // NewServer(...) call site a mechanical one-line edit.
 func NewServer(raft *RaftClient, nodeID string, isos isoManager, vnc VNCLookup, serialLog SerialLogLookup, vlanMgr VLANStatus, peers PeerForwarder, peerManagerdPort string, zfsMgr quotaSetter, nodeConfig nodeConfigStore, assumptionStoreMgr assumptionStore, assumptionStaleAfter time.Duration, reconciler reconcilerStats) *Server {
-	return &Server{raft: raft, nodeID: nodeID, isos: isos, vnc: vnc, serialLog: serialLog, vlan: vlanMgr, statsGather: hoststats.Gather, peers: peers, peerManagerdPort: peerManagerdPort, zfs: zfsMgr, nodeConfig: nodeConfig, listNetworkInterfaces: netif.List, assumptions: assumptionStoreMgr, assumptionStaleAfter: assumptionStaleAfter, reconciler: reconciler, services: rcServiceController{}}
+	return &Server{raft: raft, nodeID: nodeID, isos: isos, vnc: vnc, serialLog: serialLog, vlan: vlanMgr, statsGather: hoststats.Gather, peers: peers, peerManagerdPort: peerManagerdPort, zfs: zfsMgr, nodeConfig: nodeConfig, listNetworkInterfaces: netif.List, assumptions: assumptionStoreMgr, assumptionStaleAfter: assumptionStaleAfter, reconciler: reconciler, services: rcServiceController{}, pamLockouts: newPAMLockoutTracker()}
 }
 
 // SetNetworkInterfaceLister overrides host interface discovery for tests.
@@ -611,15 +633,33 @@ func (s *Server) Status(ctx context.Context, _ *rpcpb.StatusRequest) (*rpcpb.Sta
 // own PAM stack (ADR-0087). Exempted from checkAuth entirely (see
 // AuthUnaryInterceptor) - a caller here has no API key yet by
 // definition, and the real PAM check is the actual security boundary.
+//
+// pamLockouts (ADR-0096) enforces its own lockout directly here, not
+// only in internal/frontend's handleLogin: this RPC's own
+// unauthenticated exemption means any network client reaching
+// managerd's gRPC port can call it directly, bypassing frontend (and
+// its own, separate lockout) entirely. Without a check here too, that
+// path let an attacker brute-force a real PAM/UNIX account with no
+// rate limit at all - the actual trust boundary for this credential
+// check is this handler, not frontend's HTTP layer in front of it.
 func (s *Server) AuthenticatePassword(_ context.Context, req *rpcpb.AuthenticatePasswordRequest) (*rpcpb.AuthenticatePasswordResponse, error) {
 	if s.authPAM == nil {
 		return &rpcpb.AuthenticatePasswordResponse{Error: "this node has no PAM login configured"}, nil
 	}
-	ok, err := s.authPAM.Authenticate(req.GetUsername(), req.GetPassword())
+	user := req.GetUsername()
+	if locked, remaining := s.pamLockouts.Locked(user); locked {
+		return &rpcpb.AuthenticatePasswordResponse{Error: fmt.Sprintf("account temporarily locked after repeated failed attempts; try again in %s", remaining.Round(time.Second))}, nil
+	}
+	ok, err := s.authPAM.Authenticate(user, req.GetPassword())
 	if err != nil {
 		return &rpcpb.AuthenticatePasswordResponse{Error: err.Error()}, nil
 	}
-	return &rpcpb.AuthenticatePasswordResponse{Ok: ok}, nil
+	if !ok {
+		s.pamLockouts.RecordFailure(user)
+		return &rpcpb.AuthenticatePasswordResponse{Ok: false}, nil
+	}
+	s.pamLockouts.RecordSuccess(user)
+	return &rpcpb.AuthenticatePasswordResponse{Ok: true}, nil
 }
 
 // GetLocalNodeHealth implements rpcpb.ManagerServiceServer. It exposes the
