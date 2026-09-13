@@ -440,6 +440,18 @@ each design decision, in order.
   VLAN tagging or NAT, this is advisory only. See
   [ADR-0049](docs/adr/0049-machine-configuration-page.md) and
   [ADR-0066](docs/adr/0066-host-default-egress-contract.md).
+- **UI organization and form controls** - Machine Configuration groups
+  panels into Operations, Networking, Storage and provisioning, Colony
+  membership and peers, TLS and security, and Service exposure, with jump
+  links and local service controls first. Jail creation has separate
+  Identity, Placement, and Root filesystem sections, defaults to the local
+  owner, and offers a replica dropdown that excludes the selected owner.
+  Manual replica entry remains available when membership is unavailable.
+  Assumption Register scope suggestions include the Colony and known
+  Combs without restricting custom claims. Creation, upload, and settings
+  forms share aligned controls and narrow-screen layouts; VM clone source
+  and snapshot controls have separate labels. These are presentation
+  improvements, not changes to placement, authorization, or provisioning.
 - **Config injection hardening** — a security audit found that VM/jail/
   network IDs and node-config values (uplink interfaces, the DHCP DNS
   server, a Cloudflare Tunnel hostname) were validated only for
