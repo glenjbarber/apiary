@@ -185,6 +185,30 @@ func (r *Reconciler) ensureJail(ctx context.Context, j JailPlacement, hastDevice
 	if r.Jail == nil || r.JailProvisioningDisabled {
 		return fmt.Errorf("jail %q is assigned to this node but jail provisioning is disabled; enable -jail-enabled on the owning node or delete the jail", j.ID)
 	}
+
+	// Checked first, before any dataset/root work (ADR-0099): a jail
+	// jail(8) already reports running needs nothing further this tick,
+	// regardless of whether it even has a dataset matching Apiary's own
+	// zroot/apiary/<id> naming convention. This matters for a jail
+	// adopted into this Colony's raft state that predates Apiary ever
+	// provisioning it - no such dataset was ever created for it. Before
+	// this reordering, that case silently created an unused blank
+	// dataset every tick (harmless-looking, since the real jail ran
+	// independently); ADR-0098's own new empty-root check turned that
+	// into a loud, recurring reconciliation failure instead - proven
+	// live against real jails (freebsd-sync1/6, www0) that were
+	// perfectly healthy the whole time. Checking running first, before
+	// any of that machinery runs at all, is the correct fix: there is
+	// nothing to ensure for a jail already satisfying its own
+	// definition.
+	running, err := r.Jail.JailExists(ctx, j.ID)
+	if err != nil {
+		return fmt.Errorf("checking jail: %w", err)
+	}
+	if running {
+		return nil
+	}
+
 	if j.BaseTemplate != "" && j.ReplicaNodeID != "" {
 		return fmt.Errorf("jail %q: base_template is not supported together with replica_node_id - a HAST-replicated jail's root is a raw device, not a ZFS dataset", j.ID)
 	}
@@ -248,14 +272,6 @@ func (r *Reconciler) ensureJail(ctx context.Context, j JailPlacement, hastDevice
 		if err := r.ensureJailRoot(ctx, j, rootPath); err != nil {
 			return err
 		}
-	}
-
-	running, err := r.Jail.JailExists(ctx, j.ID)
-	if err != nil {
-		return fmt.Errorf("checking jail: %w", err)
-	}
-	if running {
-		return nil
 	}
 
 	if err := r.Jail.CreateJail(ctx, j.ID, jail.Config{Path: rootPath, Hostname: j.Hostname}); err != nil {
