@@ -2059,6 +2059,7 @@ func (s *Server) GetNodeConfig(_ context.Context, _ *rpcpb.GetNodeConfigRequest)
 		PeerManagerdPort:   cfg.PeerManagerdPort,
 		PeerTlsHostnameMap: cfg.PeerTLSHostnameMap,
 		PeerTlsCa:          cfg.PeerTLSCA,
+		KnownPeerAddresses: cfg.KnownPeerAddresses,
 
 		// Secrets are never returned - only whether one is set. See
 		// UpdateNodeConfigRequest's own doc comment for how to set or
@@ -2200,6 +2201,7 @@ func (s *Server) UpdateNodeConfig(_ context.Context, req *rpcpb.UpdateNodeConfig
 		PeerManagerdPort:   req.GetPeerManagerdPort(),
 		PeerTLSHostnameMap: req.GetPeerTlsHostnameMap(),
 		PeerTLSCA:          req.GetPeerTlsCa(),
+		KnownPeerAddresses: req.GetKnownPeerAddresses(),
 
 		TLSCert: req.GetTlsCert(),
 		TLSKey:  req.GetTlsKey(),

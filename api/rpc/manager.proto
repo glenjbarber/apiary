@@ -1238,6 +1238,13 @@ message GetNodeConfigResponse {
   // for real CA-issued certificates (ADR-0033).
   string peer_tls_ca = 43;
 
+  // known_peer_addresses (ADR-0097) mirrors -known-peer-addresses: a
+  // comma-separated host:port allowlist target_address must match on
+  // RequestJoinColony/GetJoinRequestStatus/CancelJoinRequest, which
+  // are deliberately unauthenticated. Empty preserves ADR-0092's
+  // original accept-any-target_address behavior.
+  string known_peer_addresses = 44;
+
   // peer_api_key_set/raftd_token_set report only whether a value is
   // currently saved for -peer-api-key/-raftd-token - the raw value
   // itself is never returned here or anywhere else. See
@@ -1316,6 +1323,10 @@ message UpdateNodeConfigRequest {
   // peer_tls_ca (ADR-0093) mirrors -peer-tls-ca - see
   // GetNodeConfigResponse's own doc comment for its full semantics.
   string peer_tls_ca = 43;
+
+  // known_peer_addresses (ADR-0097) - see GetNodeConfigResponse's own
+  // doc comment for its full semantics.
+  string known_peer_addresses = 44;
 
   // peer_api_key/raftd_token, if non-empty, become the new saved
   // value - write-only, mirroring the Users page's own "leave blank to
