@@ -927,6 +927,17 @@ each design decision, in order.
   outright) — see the ADR's own "Merge note" for why both exist rather
   than one superseding the other. See
   [ADR-0098](docs/adr/0098-jail-base-archives.md).
+- **Fixed a live regression from ADR-0098's own empty-root check** —
+  deploying it immediately made three genuinely healthy, already-running
+  jails (adopted into this Colony's raft state without ever getting an
+  Apiary-managed `zroot/apiary/<id>` dataset) fail reconciliation every
+  tick. The real, pre-existing cause: `ensureJail` checked `jail(8)`'s
+  own running state *last*, after already trying to create a dataset
+  and populate its root - harmless before ADR-0098 (an unused blank
+  dataset nobody looked at again), loud after it. `ensureJail` now
+  checks running state first; nothing further runs for a jail already
+  satisfying its own definition. See
+  [ADR-0099](docs/adr/0099-jail-running-check-before-root-ensure.md).
 - Importing VMs from other hypervisors (e.g. Proxmox): no disk-format
   conversion, and Apiary is UEFI-only. Linux containers have no path at
   all — jails share the host FreeBSD kernel

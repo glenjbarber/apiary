@@ -158,6 +158,41 @@ func TestReconciler_RunOnce_SkipsJailAlreadyRunning(t *testing.T) {
 	}
 }
 
+// TestReconciler_RunOnce_SkipsJailAlreadyRunningWithNoManagedDataset is
+// ADR-0099's own regression test: a jail already running per jail(8),
+// but with no ZFS dataset under Apiary's own zroot/apiary/<id> naming
+// convention at all (a real, live-production case - a jail adopted
+// into this Colony's raft state that predates Apiary ever provisioning
+// it). Confirms the running check now runs before any dataset/root
+// work, so this jail is left completely alone: no CreateDataset, no
+// GetProperty, no CreateJail. Before this fix, DatasetExists would
+// report false, ensureJail would try to create a blank dataset and
+// then fail ADR-0098's own empty-root safety check against it - a
+// loud, recurring reconciliation error for a jail that was never
+// actually broken.
+func TestReconciler_RunOnce_SkipsJailAlreadyRunningWithNoManagedDataset(t *testing.T) {
+	raft := &fakeRaftClient{
+		jailsResp: &internalpb.ListJailsResponse{
+			Jails: []*internalpb.JailDefinition{{Id: "freebsd-sync1", NodeId: "node-a"}},
+		},
+	}
+	zfs := newFakeDatasetManager()
+	jm := newFakeJailManager()
+	jm.running["freebsd-sync1"] = true
+
+	r := &Reconciler{Raft: raft, ZFS: zfs, Jail: jm, LocalNodeID: "node-a"}
+	if err := r.RunOnce(context.Background()); err != nil {
+		t.Fatalf("RunOnce() error: %v", err)
+	}
+
+	if len(zfs.created) != 0 {
+		t.Errorf("CreateDataset called = %v, want none - an already-running jail needs no dataset work at all", zfs.created)
+	}
+	if len(jm.created) != 0 {
+		t.Errorf("CreateJail called = %v, want none - jail already running", jm.created)
+	}
+}
+
 // fakeJailArchiveExtractor stands in for internal/jailarchive.Extractor,
 // mirroring fakeISOResolver's own hand-off pattern.
 type fakeJailArchiveExtractor struct {
