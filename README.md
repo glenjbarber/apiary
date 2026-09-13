@@ -221,9 +221,9 @@ each design decision, in order.
   API instead of exposing `raftd`'s internal socket over the network.
   Live-verified: repeating ADR-0028's migrate-then-delete test with
   this fix deployed, the record purged automatically with no manual
-  `ForcePurgeJail` needed. Requires every node's managerd `-rpc-addr`
+  `ForcePurgeJail` needed. Requires every node's managerd `rpc_addr`
   to be bound to a real, network-reachable interface, not loopback
-  (this project's own flag default) - see
+  (this project's own default) - see
   [ADR-0029](docs/adr/0029-cross-node-write-forwarding.md).
 - **Tiered RBAC with PAM-backed web UI login** — real per-identity
   accounts (Viewer / Operator / Admin) replace the single shared
@@ -288,7 +288,7 @@ each design decision, in order.
   (`-tls-cert`/`-tls-key`, `-manager-tls`/`-manager-tls-ca`) — also
   opt-in, defaulting to today's plaintext behavior. Closes the
   "API key travels in plaintext" gap that mattered once ADR-0029
-  required a real network-bound `-rpc-addr`. Live-verified on
+  required a real network-bound `rpc_addr`. Live-verified on
   `apiarium` against a throwaway instance (production untouched): a
   missing/wrong token both correctly rejected, a plaintext client
   failed outright against a TLS-only `managerd`, and TLS dial-and-
@@ -617,18 +617,41 @@ each design decision, in order.
   [ADR-0077](docs/adr/0077-origin-ca-expiry-health-and-renewal.md).
 - **System settings expansion** - eight new panels on the Machine
   Configuration page (`/machine`) expose most of `managerd`'s
-  remaining startup flags as editable settings: resource-scope paths,
+  settings as editable settings: resource-scope paths,
   bhyve/VM tuning, HAST/jail-console/peer-TLS toggles, peer forwarding,
   TLS cert/key paths, Cloudflare Tunnel config, Assumption Register
-  tuning, and the raftd internal token. Raft identity/plumbing flags
-  (`-node-id`/`-rpc-addr`/`-raftd-socket`) stay `rc.conf`/restart-only
-  by design; secrets (`-peer-api-key`/`-raftd-token`) are write-only,
-  never displayed once saved; resource-scope paths are editable only
-  while unset, since changing one after real resources exist under the
-  old value orphans them rather than moving them. Every field still
-  takes effect on the next `managerd` restart, not live, matching
-  ADR-0049's original posture. See
-  [ADR-0070](docs/adr/0070-system-settings-expansion.md).
+  tuning, and the raftd internal token. Raft identity/plumbing settings
+  (`node_id`/`rpc_addr`/`raftd_socket`) stay config-file/restart-only
+  by design (as of ADR-0100, loaded from `managerd.json` but never
+  exposed through this page's own RPCs - see below); secrets
+  (`peer_api_key`/`raftd_token`) are write-only, never displayed once
+  saved; resource-scope paths are editable only while unset, since
+  changing one after real resources exist under the old value orphans
+  them rather than moving them. Every field still takes effect on the
+  next `managerd` restart, not live, matching ADR-0049's original
+  posture. See [ADR-0070](docs/adr/0070-system-settings-expansion.md).
+- **CLI flags moved into per-daemon JSON config files** -
+  `managerd`/`frontend`/`restshimd`/`raftd` now each read a fixed-path
+  JSON file under `/usr/local/etc/apiary/` (`managerd.json`,
+  `frontend.json`, `restshimd.json`, `raftd.json`) instead of taking
+  their configuration as CLI flags, closing off the `ps(1)`/`procstat(1)`
+  visibility every flag value (including near-secrets like TLS key
+  paths) previously had for as long as the process ran. `managerd`
+  absorbs its remaining identity/wiring flags this way too
+  (`node_id`/`rpc_addr`/`raftd_socket`), though those three stay out of
+  the Machine Configuration page's own RPCs, exactly as before -
+  relocated from CLI-only to file-only-not-RPC-editable, not exposed
+  live. `frontend`/`restshimd`/`raftd`'s new config files are
+  hand-edited only in this pass - no RPC/web-UI editing yet, unlike
+  `managerd`'s. The handful of one-shot destructive/export flags
+  (`-reset-managed`/`-factory-reset`/`-export-host-config` on
+  `managerd`; `-reset`/`-restore`/`-export`/`-restore-dry-run` on
+  `raftd`) deliberately stay CLI-only forever - a value persisted in a
+  config file would re-trigger on every `daemon(8)` auto-respawn, not
+  just once. `-peer-api-key-file` (ADR-0096) is retired: its only
+  purpose was avoiding `-peer-api-key`'s argv visibility, moot once
+  nothing is passed via argv at all. See
+  [ADR-0100](docs/adr/0100-daemon-config-files.md).
 - **Orphaned HAST resource discovery and cleanup** - closes a gap
   ADR-0026 named and left open: once a replicated VM/jail's record is
   fully purged (not just reassigned), the secondary node's own local

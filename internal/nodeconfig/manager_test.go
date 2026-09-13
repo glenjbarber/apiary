@@ -4,7 +4,34 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
+
+// TestManager_SaveThenLoadRoundTrips_ADR0100Fields covers the fields
+// added by ADR-0100 - NodeID/RPCAddr/RaftdSocket (loaded from this
+// file but deliberately not RPC-editable, see the package doc
+// comment) and OriginCARenewalCheckInterval (a plain oversight fix,
+// same tuning-knob treatment as every other duration field).
+func TestManager_SaveThenLoadRoundTrips_ADR0100Fields(t *testing.T) {
+	m := &Manager{Path: filepath.Join(t.TempDir(), "managerd.json")}
+	want := Config{
+		NodeID:                       "apiverse",
+		RPCAddr:                      "10.50.0.9:17700",
+		RaftdSocket:                  "/var/run/apiary/raftd.sock",
+		OriginCARenewalCheckInterval: 2 * time.Hour,
+	}
+
+	if err := m.Save(want); err != nil {
+		t.Fatalf("Save() error: %v", err)
+	}
+	got, err := m.Load()
+	if err != nil {
+		t.Fatalf("Load() error: %v", err)
+	}
+	if got != want {
+		t.Errorf("Load() = %+v, want %+v", got, want)
+	}
+}
 
 func TestManager_LoadMissingFileReturnsZeroValueNoError(t *testing.T) {
 	m := &Manager{Path: filepath.Join(t.TempDir(), "does-not-exist.json")}

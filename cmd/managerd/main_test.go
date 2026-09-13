@@ -5,8 +5,10 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/glenjbarber/apiary/internal/hostconfig"
+	"github.com/glenjbarber/apiary/internal/nodeconfig"
 )
 
 func TestRunExportHostConfig_WritesRedactedFiles(t *testing.T) {
@@ -69,48 +71,48 @@ func TestRunReset_BothEmptyIsANoOp(t *testing.T) {
 	}
 }
 
-// TestResolvePeerAPIKey_FileTakesPrecedenceAndTrimsWhitespace confirms
-// -peer-api-key-file (ADR-0096) is read and trimmed correctly - the
-// preferred way to configure -peer-api-key, since a value passed
-// directly on the command line is visible to any local user via
-// ps(1)/procstat(1) regardless of /etc/rc.conf's own permissions.
-func TestResolvePeerAPIKey_FileTakesPrecedenceAndTrimsWhitespace(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "peer-api-key")
-	if err := os.WriteFile(path, []byte("apk_realsecret\n"), 0o600); err != nil {
-		t.Fatal(err)
+// TestApplyManagerdDefaults_FillsOnlyZeroValueFields confirms
+// applyManagerdDefaults (ADR-0100) fills a default only where the
+// loaded config left a field at its zero value, and leaves an
+// explicitly-set field untouched - the same "config file wins, then
+// hardcoded default" precedence every flag used to have.
+func TestApplyManagerdDefaults_FillsOnlyZeroValueFields(t *testing.T) {
+	cfg := nodeconfig.Config{ZFSBase: "custom/pool", ReconcileInterval: 5 * time.Second}
+	applyManagerdDefaults(&cfg)
+
+	if cfg.ZFSBase != "custom/pool" {
+		t.Errorf("ZFSBase = %q, want the explicitly-set value preserved", cfg.ZFSBase)
 	}
-	got, err := resolvePeerAPIKey("", path)
-	if err != nil {
-		t.Fatalf("resolvePeerAPIKey() error: %v", err)
+	if cfg.ReconcileInterval != 5*time.Second {
+		t.Errorf("ReconcileInterval = %s, want the explicitly-set value preserved", cfg.ReconcileInterval)
 	}
-	if got != "apk_realsecret" {
-		t.Errorf("resolvePeerAPIKey() = %q, want %q (trailing newline trimmed)", got, "apk_realsecret")
+	if cfg.RPCAddr != "127.0.0.1:17700" {
+		t.Errorf("RPCAddr = %q, want the default since the config didn't set it", cfg.RPCAddr)
+	}
+	if cfg.RaftdSocket != "/var/run/apiary/raftd.sock" {
+		t.Errorf("RaftdSocket = %q, want the default since the config didn't set it", cfg.RaftdSocket)
+	}
+	if cfg.BhyvePrefix != "apiary-" {
+		t.Errorf("BhyvePrefix = %q, want the default since the config didn't set it", cfg.BhyvePrefix)
+	}
+	if cfg.JailDiskSizeMB != 2048 {
+		t.Errorf("JailDiskSizeMB = %d, want the default 2048 since the config didn't set it", cfg.JailDiskSizeMB)
+	}
+	if cfg.OriginCARenewalCheckInterval != time.Hour {
+		t.Errorf("OriginCARenewalCheckInterval = %s, want the default 1h since the config didn't set it", cfg.OriginCARenewalCheckInterval)
 	}
 }
 
-func TestResolvePeerAPIKey_NoFileReturnsFlagValue(t *testing.T) {
-	got, err := resolvePeerAPIKey("apk_fromflag", "")
-	if err != nil {
-		t.Fatalf("resolvePeerAPIKey() error: %v", err)
-	}
-	if got != "apk_fromflag" {
-		t.Errorf("resolvePeerAPIKey() = %q, want %q", got, "apk_fromflag")
-	}
-}
+// TestApplyManagerdDefaults_EmptyFieldsStayEmpty confirms fields whose
+// former flag default was itself empty/disabled (BhyveBootROM, Uplink,
+// TLSCert, PAMService) are never given a non-empty default - an empty
+// managerd.json must behave exactly like every flag being left unset.
+func TestApplyManagerdDefaults_EmptyFieldsStayEmpty(t *testing.T) {
+	cfg := nodeconfig.Config{}
+	applyManagerdDefaults(&cfg)
 
-func TestResolvePeerAPIKey_BothSetIsAnError(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "peer-api-key")
-	if err := os.WriteFile(path, []byte("apk_realsecret"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := resolvePeerAPIKey("apk_fromflag", path); err == nil {
-		t.Fatal("resolvePeerAPIKey() with both -peer-api-key and -peer-api-key-file set = nil error, want a rejection")
-	}
-}
-
-func TestResolvePeerAPIKey_MissingFileIsAnError(t *testing.T) {
-	if _, err := resolvePeerAPIKey("", filepath.Join(t.TempDir(), "missing")); err == nil {
-		t.Fatal("resolvePeerAPIKey() with a missing -peer-api-key-file = nil error, want one")
+	if cfg.BhyveBootROM != "" || cfg.Uplink != "" || cfg.TLSCert != "" || cfg.PAMService != "" || cfg.NodeID != "" {
+		t.Errorf("applyManagerdDefaults() = %+v, want these fields to stay empty (their own former flag default was empty)", cfg)
 	}
 }
 

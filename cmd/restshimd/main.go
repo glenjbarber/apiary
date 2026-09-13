@@ -11,7 +11,6 @@
 package main
 
 import (
-	"flag"
 	"fmt"
 	"log"
 	"net/http"
@@ -20,6 +19,7 @@ import (
 
 	rpcpb "github.com/glenjbarber/apiary/api/rpc"
 	"github.com/glenjbarber/apiary/internal/restshim"
+	"github.com/glenjbarber/apiary/internal/restshimdconfig"
 	"github.com/glenjbarber/apiary/internal/tlsdial"
 )
 
@@ -30,33 +30,39 @@ func main() {
 }
 
 func run() error {
-	managerAddr := flag.String("manager-addr", "127.0.0.1:17700", "TCP address of managerd's external RPC API")
-	httpAddr := flag.String("http-addr", "127.0.0.1:8081", "address to serve the REST API on")
-	managerTLS := flag.Bool("manager-tls", false, "dial managerd over TLS instead of plaintext (must match managerd's own -tls-cert/-tls-key)")
-	managerTLSCA := flag.String("manager-tls-ca", "", "PEM CA file to trust for managerd's certificate (for a self-signed cert); leave empty to trust the system certificate pool")
-	managerTLSServerName := flag.String("manager-tls-server-name", "", "hostname to verify managerd's certificate against, if different from -manager-addr's host (e.g. managerd stays loopback-only but its cert names a real public hostname); leave empty to verify against -manager-addr itself")
-	tlsCert := flag.String("tls-cert", "", "PEM certificate file to serve the REST API over HTTPS; leave unset (with -tls-key) to serve plaintext HTTP, as before")
-	tlsKey := flag.String("tls-key", "", "PEM private key file matching -tls-cert")
-	flag.Parse()
+	cfg, err := (&restshimdconfig.Manager{}).Load()
+	if err != nil {
+		return fmt.Errorf("reading %s: %w", restshimdconfig.DefaultPath, err)
+	}
 
-	dialCreds, err := tlsdial.ManagerDialOption(*managerTLS, *managerTLSCA, *managerTLSServerName)
+	dialCreds, err := tlsdial.ManagerDialOption(cfg.ManagerTLS, cfg.ManagerTLSCA, cfg.ManagerTLSServerName)
 	if err != nil {
 		return err
 	}
-	conn, err := grpc.NewClient(*managerAddr, dialCreds)
+	conn, err := grpc.NewClient(cfg.ManagerAddr, dialCreds)
 	if err != nil {
-		return fmt.Errorf("dialing managerd at %s: %w", *managerAddr, err)
+		return fmt.Errorf("dialing managerd at %s: %w", cfg.ManagerAddr, err)
 	}
 	defer conn.Close()
 
 	srv := restshim.NewServer(rpcpb.NewManagerServiceClient(conn))
 
-	log.Printf("restshimd: listening on %s (manager-addr=%s, manager-tls=%v, tls=%v)", *httpAddr, *managerAddr, *managerTLS, *tlsCert != "")
-	if *tlsCert != "" || *tlsKey != "" {
-		if *tlsCert == "" || *tlsKey == "" {
-			return fmt.Errorf("both -tls-cert and -tls-key must be set together")
+	log.Printf("restshimd: listening on %s (manager-addr=%s, manager-tls=%v, tls=%v)", cfg.HTTPAddr, cfg.ManagerAddr, cfg.ManagerTLS, cfg.TLSCert != "")
+	if cfg.TLSCert != "" || cfg.TLSKey != "" {
+		if err := requireTLSPair(cfg.TLSCert, cfg.TLSKey); err != nil {
+			return err
 		}
-		return http.ListenAndServeTLS(*httpAddr, *tlsCert, *tlsKey, srv)
+		return http.ListenAndServeTLS(cfg.HTTPAddr, cfg.TLSCert, cfg.TLSKey, srv)
 	}
-	return http.ListenAndServe(*httpAddr, srv)
+	return http.ListenAndServe(cfg.HTTPAddr, srv)
+}
+
+// requireTLSPair rejects a config setting only one of tls_cert/tls_key -
+// serving TLS needs both, and silently falling back to plaintext
+// because only one was set would be a confusing way to fail.
+func requireTLSPair(cert, key string) error {
+	if cert == "" || key == "" {
+		return fmt.Errorf("both tls_cert and tls_key must be set together")
+	}
+	return nil
 }

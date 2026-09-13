@@ -5920,8 +5920,14 @@ type GetNodeConfigResponse struct {
 	// raft-replicated; the token value itself is only ever read from this path.
 	OriginCaTokenFile string `protobuf:"bytes,41,opt,name=origin_ca_token_file,json=originCaTokenFile,proto3" json:"origin_ca_token_file,omitempty"`
 	OriginCaDirectory string `protobuf:"bytes,42,opt,name=origin_ca_directory,json=originCaDirectory,proto3" json:"origin_ca_directory,omitempty"`
-	unknownFields     protoimpl.UnknownFields
-	sizeCache         protoimpl.SizeCache
+	// origin_ca_renewal_check_interval mirrors
+	// -origin-ca-renewal-check-interval (ADR-0100 - no longer a flag):
+	// how often to check local Origin CA certificates for ones due for
+	// automatic renewal (ADR-0077). Formatted as a duration string, same
+	// convention as reconcile_interval above.
+	OriginCaRenewalCheckInterval string `protobuf:"bytes,46,opt,name=origin_ca_renewal_check_interval,json=originCaRenewalCheckInterval,proto3" json:"origin_ca_renewal_check_interval,omitempty"`
+	unknownFields                protoimpl.UnknownFields
+	sizeCache                    protoimpl.SizeCache
 }
 
 func (x *GetNodeConfigResponse) Reset() {
@@ -6234,6 +6240,13 @@ func (x *GetNodeConfigResponse) GetOriginCaDirectory() string {
 	return ""
 }
 
+func (x *GetNodeConfigResponse) GetOriginCaRenewalCheckInterval() string {
+	if x != nil {
+		return x.OriginCaRenewalCheckInterval
+	}
+	return ""
+}
+
 type NetworkInterface struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
@@ -6360,8 +6373,11 @@ type UpdateNodeConfigRequest struct {
 	CloudflareTunnelCredentialsFile string `protobuf:"bytes,36,opt,name=cloudflare_tunnel_credentials_file,json=cloudflareTunnelCredentialsFile,proto3" json:"cloudflare_tunnel_credentials_file,omitempty"`
 	OriginCaTokenFile               string `protobuf:"bytes,41,opt,name=origin_ca_token_file,json=originCaTokenFile,proto3" json:"origin_ca_token_file,omitempty"`
 	OriginCaDirectory               string `protobuf:"bytes,42,opt,name=origin_ca_directory,json=originCaDirectory,proto3" json:"origin_ca_directory,omitempty"`
-	unknownFields                   protoimpl.UnknownFields
-	sizeCache                       protoimpl.SizeCache
+	// origin_ca_renewal_check_interval (ADR-0100) - see
+	// GetNodeConfigResponse's own doc comment for its full semantics.
+	OriginCaRenewalCheckInterval string `protobuf:"bytes,46,opt,name=origin_ca_renewal_check_interval,json=originCaRenewalCheckInterval,proto3" json:"origin_ca_renewal_check_interval,omitempty"`
+	unknownFields                protoimpl.UnknownFields
+	sizeCache                    protoimpl.SizeCache
 }
 
 func (x *UpdateNodeConfigRequest) Reset() {
@@ -6663,6 +6679,13 @@ func (x *UpdateNodeConfigRequest) GetOriginCaTokenFile() string {
 func (x *UpdateNodeConfigRequest) GetOriginCaDirectory() string {
 	if x != nil {
 		return x.OriginCaDirectory
+	}
+	return ""
+}
+
+func (x *UpdateNodeConfigRequest) GetOriginCaRenewalCheckInterval() string {
+	if x != nil {
+		return x.OriginCaRenewalCheckInterval
 	}
 	return ""
 }
@@ -13142,7 +13165,7 @@ const file_api_rpc_manager_proto_rawDesc = "" +
 	"\ttruncated\x18\x02 \x01(\bR\ttruncated\x12\x1c\n" +
 	"\tavailable\x18\x03 \x01(\bR\tavailable\x12\x14\n" +
 	"\x05error\x18\x04 \x01(\tR\x05error\"\x16\n" +
-	"\x14GetNodeConfigRequest\"\x9f\x0e\n" +
+	"\x14GetNodeConfigRequest\"\xe7\x0e\n" +
 	"\x15GetNodeConfigResponse\x12\x16\n" +
 	"\x06uplink\x18\x01 \x01(\tR\x06uplink\x12\x1d\n" +
 	"\n" +
@@ -13188,14 +13211,15 @@ const file_api_rpc_manager_proto_rawDesc = "" +
 	"\x14cloudflare_tunnel_id\x18# \x01(\tR\x12cloudflareTunnelId\x12K\n" +
 	"\"cloudflare_tunnel_credentials_file\x18$ \x01(\tR\x1fcloudflareTunnelCredentialsFile\x12/\n" +
 	"\x14origin_ca_token_file\x18) \x01(\tR\x11originCaTokenFile\x12.\n" +
-	"\x13origin_ca_directory\x18* \x01(\tR\x11originCaDirectoryB\x0f\n" +
+	"\x13origin_ca_directory\x18* \x01(\tR\x11originCaDirectory\x12F\n" +
+	" origin_ca_renewal_check_interval\x18. \x01(\tR\x1coriginCaRenewalCheckIntervalB\x0f\n" +
 	"\r_jail_enabledB\x0f\n" +
 	"\r_hast_enabledB\v\n" +
 	"\t_peer_tls\"T\n" +
 	"\x10NetworkInterface\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x0e\n" +
 	"\x02up\x18\x02 \x01(\bR\x02up\x12\x1c\n" +
-	"\taddresses\x18\x03 \x03(\tR\taddresses\"\xc6\r\n" +
+	"\taddresses\x18\x03 \x03(\tR\taddresses\"\x8e\x0e\n" +
 	"\x17UpdateNodeConfigRequest\x12\x16\n" +
 	"\x06uplink\x18\x01 \x01(\tR\x06uplink\x12\x1d\n" +
 	"\n" +
@@ -13242,7 +13266,8 @@ const file_api_rpc_manager_proto_rawDesc = "" +
 	"\x14cloudflare_tunnel_id\x18# \x01(\tR\x12cloudflareTunnelId\x12K\n" +
 	"\"cloudflare_tunnel_credentials_file\x18$ \x01(\tR\x1fcloudflareTunnelCredentialsFile\x12/\n" +
 	"\x14origin_ca_token_file\x18) \x01(\tR\x11originCaTokenFile\x12.\n" +
-	"\x13origin_ca_directory\x18* \x01(\tR\x11originCaDirectoryB\x0f\n" +
+	"\x13origin_ca_directory\x18* \x01(\tR\x11originCaDirectory\x12F\n" +
+	" origin_ca_renewal_check_interval\x18. \x01(\tR\x1coriginCaRenewalCheckIntervalB\x0f\n" +
 	"\r_jail_enabledB\x0f\n" +
 	"\r_hast_enabledB\v\n" +
 	"\t_peer_tls\"0\n" +

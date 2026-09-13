@@ -5,17 +5,16 @@ package main
 
 import (
 	"context"
-	"flag"
 	"fmt"
 	"log"
 	"net/http"
-	"os"
 	"time"
 
 	"google.golang.org/grpc"
 
 	rpcpb "github.com/glenjbarber/apiary/api/rpc"
 	"github.com/glenjbarber/apiary/internal/frontend"
+	"github.com/glenjbarber/apiary/internal/frontendconfig"
 	"github.com/glenjbarber/apiary/internal/loginconfig"
 	"github.com/glenjbarber/apiary/internal/manager"
 	"github.com/glenjbarber/apiary/internal/tlsdial"
@@ -98,39 +97,31 @@ func main() {
 }
 
 func run() error {
-	managerAddr := flag.String("manager-addr", "127.0.0.1:17700", "TCP address of managerd's external RPC API")
-	httpAddr := flag.String("http-addr", "127.0.0.1:8080", "address to serve the web UI on")
-	managerTLS := flag.Bool("manager-tls", false, "dial managerd over TLS instead of plaintext (must match managerd's own -tls-cert/-tls-key)")
-	managerTLSCA := flag.String("manager-tls-ca", "", "PEM CA file to trust for managerd's certificate (for a self-signed cert); leave empty to trust the system certificate pool")
-	managerTLSServerName := flag.String("manager-tls-server-name", "", "hostname to verify managerd's certificate against, if different from -manager-addr's host (e.g. managerd stays loopback-only but its cert names a real public hostname); leave empty to verify against -manager-addr itself")
-	tlsCert := flag.String("tls-cert", "", "PEM certificate file to serve the web UI over HTTPS; leave unset (with -tls-key) to serve plaintext HTTP, as before")
-	tlsKey := flag.String("tls-key", "", "PEM private key file matching -tls-cert")
-	peerTLS := flag.Bool("peer-tls", false, "dial other cluster nodes' managerd over TLS when fetching their host stats for the cluster overview page; requires each peer's managerd to also be TLS-enabled with a certificate matching its own hostname (node ID + -peer-hostname-suffix)")
-	peerTLSCA := flag.String("peer-tls-ca", "", "PEM file trusted INSTEAD OF the system certificate pool when dialing a peer over TLS (ADR-0093) - the peer-forwarding equivalent of -manager-tls-ca, needed when peers present self-signed certificates rather than a real, publicly-trusted one; leave empty to trust the system pool. Only consulted when -peer-tls is set. May list more than one peer's certificate concatenated in one file")
-	peerHostnameSuffix := flag.String("peer-hostname-suffix", "", "appended to a node ID to form its managerd hostname for the cluster overview page (e.g. \".apiary.work\" so node ID \"freebsd-apiary\" dials \"freebsd-apiary.apiary.work\"); leave empty if node IDs are already fully-qualified hostnames")
-	peerManagerPort := flag.String("peer-manager-port", "17700", "port assumed for a peer node's managerd external API when fetching its host stats")
-	flag.Parse()
+	cfg, err := (&frontendconfig.Manager{}).Load()
+	if err != nil {
+		return fmt.Errorf("reading %s: %w", frontendconfig.DefaultPath, err)
+	}
 
-	managerCreds, err := tlsdial.ManagerDialOption(*managerTLS, *managerTLSCA, *managerTLSServerName)
+	managerCreds, err := tlsdial.ManagerDialOption(cfg.ManagerTLS, cfg.ManagerTLSCA, cfg.ManagerTLSServerName)
 	if err != nil {
 		return err
 	}
 	dialOpts := []grpc.DialOption{managerCreds}
-	// APIARY_MANAGER_API_KEY authenticates every call to managerd once
-	// it has API-key auth enabled (ADR-0023) - unset by default, since
-	// auth is opt-in and off until the first key is ever created via
-	// the /apikeys page. Once that happens, this must be set (and
-	// frontend restarted) or every call starts failing Unauthenticated.
-	// The key's own role (ADR-0030) must be at least Operator, since
+	// ManagerAPIKey authenticates every call to managerd once it has
+	// API-key auth enabled (ADR-0023) - unset by default, since auth
+	// is opt-in and off until the first key is ever created via the
+	// /apikeys page. Once that happens, this must be set (and frontend
+	// restarted) or every call starts failing Unauthenticated. The
+	// key's own role (ADR-0030) must be at least Operator, since
 	// frontend forwards whatever the logged-in user's role permits -
 	// a frontend whose own key is only Viewer would reject every
 	// Operator/Admin action downstream regardless of the UI session.
-	if apiKey := os.Getenv("APIARY_MANAGER_API_KEY"); apiKey != "" {
-		dialOpts = append(dialOpts, grpc.WithPerRPCCredentials(apiKeyCredentials(apiKey)))
+	if cfg.ManagerAPIKey != "" {
+		dialOpts = append(dialOpts, grpc.WithPerRPCCredentials(apiKeyCredentials(cfg.ManagerAPIKey)))
 	}
-	conn, err := grpc.NewClient(*managerAddr, dialOpts...)
+	conn, err := grpc.NewClient(cfg.ManagerAddr, dialOpts...)
 	if err != nil {
-		return fmt.Errorf("dialing managerd at %s: %w", *managerAddr, err)
+		return fmt.Errorf("dialing managerd at %s: %w", cfg.ManagerAddr, err)
 	}
 	defer conn.Close()
 
@@ -175,9 +166,9 @@ func run() error {
 	// requires only RoleViewer, well within what that key already
 	// grants) rather than needing a second, separately-configured
 	// credential.
-	peers := manager.NewPeerReporter(os.Getenv("APIARY_MANAGER_API_KEY"), *peerTLS, nil)
-	if *peerTLSCA != "" {
-		pool, err := manager.LoadPeerCAPool(*peerTLSCA)
+	peers := manager.NewPeerReporter(cfg.ManagerAPIKey, cfg.PeerTLS, nil)
+	if cfg.PeerTLSCA != "" {
+		pool, err := manager.LoadPeerCAPool(cfg.PeerTLSCA)
 		if err != nil {
 			return fmt.Errorf("frontend: %w", err)
 		}
@@ -189,12 +180,12 @@ func run() error {
 	// never wrong for a moment: a cookie issued as non-Secure at
 	// construction time could later cross a plaintext channel even if
 	// serving is fixed to reject a mismatched cert/key pair afterward.
-	tlsEnabled := *tlsCert != "" || *tlsKey != ""
-	if tlsEnabled && (*tlsCert == "" || *tlsKey == "") {
-		return fmt.Errorf("both -tls-cert and -tls-key must be set together")
+	tlsEnabled := cfg.TLSCert != "" || cfg.TLSKey != ""
+	if tlsEnabled && (cfg.TLSCert == "" || cfg.TLSKey == "") {
+		return fmt.Errorf("both tls_cert and tls_key must be set together")
 	}
 
-	srv, err := frontend.NewServer(managerClient, auth, roleMap, peers, *peerHostnameSuffix, *peerManagerPort, frontend.UnixPasswordSetter{}, tlsEnabled)
+	srv, err := frontend.NewServer(managerClient, auth, roleMap, peers, cfg.PeerHostnameSuffix, cfg.PeerManagerPort, frontend.UnixPasswordSetter{}, tlsEnabled)
 	if err != nil {
 		return fmt.Errorf("creating frontend server: %w", err)
 	}
@@ -206,12 +197,12 @@ func run() error {
 			log.Printf("frontend: login enabled (managerd reports PAM configured, %d role-mapped user(s))", len(roleMap))
 		}
 	} else {
-		log.Printf("frontend: no login configured (set -pam-service on managerd to require one)")
+		log.Printf("frontend: no login configured (set pam_service in managerd's own config to require one)")
 	}
 
-	log.Printf("frontend: listening on %s (manager-addr=%s, manager-tls=%v, tls=%v)", *httpAddr, *managerAddr, *managerTLS, tlsEnabled)
+	log.Printf("frontend: listening on %s (manager-addr=%s, manager-tls=%v, tls=%v)", cfg.HTTPAddr, cfg.ManagerAddr, cfg.ManagerTLS, tlsEnabled)
 	if tlsEnabled {
-		return http.ListenAndServeTLS(*httpAddr, *tlsCert, *tlsKey, srv)
+		return http.ListenAndServeTLS(cfg.HTTPAddr, cfg.TLSCert, cfg.TLSKey, srv)
 	}
-	return http.ListenAndServe(*httpAddr, srv)
+	return http.ListenAndServe(cfg.HTTPAddr, srv)
 }

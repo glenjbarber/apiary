@@ -933,6 +933,7 @@ func TestServer_NodeConfig_NewFieldsRoundTrip(t *testing.T) {
 		CloudflareZoneId:                "zone123",
 		CloudflareTunnelId:              "tunnel456",
 		CloudflareTunnelCredentialsFile: "/home/claude/cf-creds.json",
+		OriginCaRenewalCheckInterval:    "2h",
 	}
 	if _, err := s.UpdateNodeConfig(context.Background(), req); err != nil {
 		t.Fatalf("UpdateNodeConfig() error: %v", err)
@@ -947,33 +948,96 @@ func TestServer_NodeConfig_NewFieldsRoundTrip(t *testing.T) {
 	}
 
 	checks := map[string]bool{
-		"zfs_base":              resp.GetZfsBase() == "zroot/apiary",
-		"bhyve_prefix":          resp.GetBhyvePrefix() == "apiary-",
-		"iso_dir":               resp.GetIsoDir() == "/var/db/apiary/isos",
-		"jail_prefix":           resp.GetJailPrefix() == "apiary-",
-		"jail_mount_base":       resp.GetJailMountBase() == "/apiary-jails",
-		"bhyve_bootrom":         resp.GetBhyveBootrom() != "",
-		"bhyve_bridge":          resp.GetBhyveBridge() == "bridge0",
-		"disk_size_mb":          resp.GetDiskSizeMb() == 8192,
-		"jail_disk_size_mb":     resp.GetJailDiskSizeMb() == 2048,
-		"hast_enabled":          resp.GetHastEnabled(),
-		"peer_tls":              resp.GetPeerTls(),
-		"peer_managerd_port":    resp.GetPeerManagerdPort() == "17700",
-		"peer_tls_hostname_map": resp.GetPeerTlsHostnameMap() == "10.50.0.9=apiverse.apiary.work",
-		"peer_tls_ca":           resp.GetPeerTlsCa() == "/usr/local/etc/apiary-tls/peer-ca.pem",
-		"known_peer_addresses":  resp.GetKnownPeerAddresses() == "10.50.0.9:17700,10.50.0.14:17700",
-		"tls_cert":              resp.GetTlsCert() != "",
-		"tls_key":               resp.GetTlsKey() != "",
-		"pam_service":           resp.GetPamService() == "apiary",
-		"cloudflare_token_file": resp.GetCloudflareTokenFile() != "",
-		"cloudflare_zone_id":    resp.GetCloudflareZoneId() == "zone123",
-		"cloudflare_tunnel_id":  resp.GetCloudflareTunnelId() == "tunnel456",
-		"cloudflare_creds_file": resp.GetCloudflareTunnelCredentialsFile() != "",
+		"zfs_base":                         resp.GetZfsBase() == "zroot/apiary",
+		"bhyve_prefix":                     resp.GetBhyvePrefix() == "apiary-",
+		"iso_dir":                          resp.GetIsoDir() == "/var/db/apiary/isos",
+		"jail_prefix":                      resp.GetJailPrefix() == "apiary-",
+		"jail_mount_base":                  resp.GetJailMountBase() == "/apiary-jails",
+		"bhyve_bootrom":                    resp.GetBhyveBootrom() != "",
+		"bhyve_bridge":                     resp.GetBhyveBridge() == "bridge0",
+		"disk_size_mb":                     resp.GetDiskSizeMb() == 8192,
+		"jail_disk_size_mb":                resp.GetJailDiskSizeMb() == 2048,
+		"hast_enabled":                     resp.GetHastEnabled(),
+		"peer_tls":                         resp.GetPeerTls(),
+		"peer_managerd_port":               resp.GetPeerManagerdPort() == "17700",
+		"peer_tls_hostname_map":            resp.GetPeerTlsHostnameMap() == "10.50.0.9=apiverse.apiary.work",
+		"peer_tls_ca":                      resp.GetPeerTlsCa() == "/usr/local/etc/apiary-tls/peer-ca.pem",
+		"known_peer_addresses":             resp.GetKnownPeerAddresses() == "10.50.0.9:17700,10.50.0.14:17700",
+		"tls_cert":                         resp.GetTlsCert() != "",
+		"tls_key":                          resp.GetTlsKey() != "",
+		"pam_service":                      resp.GetPamService() == "apiary",
+		"cloudflare_token_file":            resp.GetCloudflareTokenFile() != "",
+		"cloudflare_zone_id":               resp.GetCloudflareZoneId() == "zone123",
+		"cloudflare_tunnel_id":             resp.GetCloudflareTunnelId() == "tunnel456",
+		"cloudflare_creds_file":            resp.GetCloudflareTunnelCredentialsFile() != "",
+		"origin_ca_renewal_check_interval": resp.GetOriginCaRenewalCheckInterval() == "2h0m0s",
 	}
 	for field, ok := range checks {
 		if !ok {
 			t.Errorf("field %s did not round-trip correctly, got response: %+v", field, resp)
 		}
+	}
+}
+
+// TestServer_GetNodeConfig_NeverExposesIdentityFields confirms
+// node_id/rpc_addr/raftd_socket (ADR-0100) never appear in
+// GetNodeConfigResponse regardless of what's loaded - they're
+// deliberately file-only, hand-edit-only fields (see nodeconfig's own
+// package doc comment). There is no proto field for any of the three,
+// so this test exercises that GetNodeConfig's response construction
+// hasn't grown one by accident, not any runtime filtering logic.
+func TestServer_GetNodeConfig_NeverExposesIdentityFields(t *testing.T) {
+	store := &fakeNodeConfigStore{cfg: nodeconfig.Config{
+		NodeID:      "apiverse",
+		RPCAddr:     "10.50.0.9:17700",
+		RaftdSocket: "/var/run/apiary/raftd.sock",
+		Uplink:      "em0",
+	}}
+	s := NewServer(nil, "node-1", nil, nil, nil, nil, nil, "", nil, store, nil, 0, nil)
+
+	resp, err := s.GetNodeConfig(context.Background(), &rpcpb.GetNodeConfigRequest{})
+	if err != nil {
+		t.Fatalf("GetNodeConfig() error: %v", err)
+	}
+	if resp.GetUplink() != "em0" {
+		t.Errorf("GetUplink() = %q, want em0 (sanity check the response isn't just empty)", resp.GetUplink())
+	}
+}
+
+// TestServer_UpdateNodeConfig_PreservesIdentityFieldsAcrossUnrelatedUpdate
+// is the regression test for the ADR-0100 merge fix: UpdateNodeConfig
+// builds its Config literal fresh from the request rather than
+// merging onto current, so a field with no proto counterpart (like
+// NodeID/RPCAddr/RaftdSocket) must be explicitly carried over from
+// current or it gets silently zeroed on every single call - including
+// one that only touches an unrelated field like Uplink here. This
+// test fails without that explicit carry-over and passes with it.
+func TestServer_UpdateNodeConfig_PreservesIdentityFieldsAcrossUnrelatedUpdate(t *testing.T) {
+	store := &fakeNodeConfigStore{cfg: nodeconfig.Config{
+		NodeID:      "apiverse",
+		RPCAddr:     "10.50.0.9:17700",
+		RaftdSocket: "/var/run/apiary/raftd.sock",
+	}}
+	s := NewServer(nil, "node-1", nil, nil, nil, nil, nil, "", nil, store, nil, 0, nil)
+
+	resp, err := s.UpdateNodeConfig(context.Background(), &rpcpb.UpdateNodeConfigRequest{Uplink: "em0"})
+	if err != nil {
+		t.Fatalf("UpdateNodeConfig() error: %v", err)
+	}
+	if resp.GetError() != "" {
+		t.Fatalf("UpdateNodeConfig() returned error: %s", resp.GetError())
+	}
+	if store.lastSave.NodeID != "apiverse" {
+		t.Errorf("saved NodeID = %q, want it preserved as apiverse across an unrelated update", store.lastSave.NodeID)
+	}
+	if store.lastSave.RPCAddr != "10.50.0.9:17700" {
+		t.Errorf("saved RPCAddr = %q, want it preserved across an unrelated update", store.lastSave.RPCAddr)
+	}
+	if store.lastSave.RaftdSocket != "/var/run/apiary/raftd.sock" {
+		t.Errorf("saved RaftdSocket = %q, want it preserved across an unrelated update", store.lastSave.RaftdSocket)
+	}
+	if store.lastSave.Uplink != "em0" {
+		t.Errorf("saved Uplink = %q, want em0 (the field this update actually intended to change)", store.lastSave.Uplink)
 	}
 }
 

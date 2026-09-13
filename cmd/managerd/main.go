@@ -61,50 +61,15 @@ func main() {
 }
 
 func run() error {
-	raftdSocket := flag.String("raftd-socket", "/var/run/apiary/raftd.sock", "path to raftd's internal Unix domain socket")
-	raftdToken := flag.String("raftd-token", "", "shared secret to present to raftd's internal socket (must match raftd's own -internal-token); leave empty if raftd has none configured")
-	rpcAddr := flag.String("rpc-addr", "127.0.0.1:17700", "TCP address for managerd's external RPC API")
-	nodeID := flag.String("node-id", "", "identity reported by managerd in Status responses (defaults to hostname)")
-	zfsBase := flag.String("zfs-base", "zroot/apiary", "base ZFS dataset under which this node's VM storage is provisioned")
-	reconcileInterval := flag.Duration("reconcile-interval", 30*time.Second, "how often to reconcile local VM storage against raftd's VM list")
-	bhyvePrefix := flag.String("bhyve-prefix", "apiary-", "name prefix for bhyve VMs this node creates")
-	bhyveBootROM := flag.String("bhyve-bootrom", "", "UEFI boot ROM path for bhyve VMs; leave empty to disable bhyve provisioning on this node (e.g. nodes without hardware-assisted virtualization)")
-	bhyveBridge := flag.String("bhyve-bridge", "", "existing bridge(4) interface to attach bhyve VMs' tap devices to; leave empty to disable VM networking on this node")
-	diskSizeMB := flag.Uint64("disk-size-mb", 0, "size of each VM's boot disk image in MB (0 uses the reconciler's own default)")
-	isoDir := flag.String("iso-dir", "/var/db/apiary/isos", "directory where uploaded installer images are stored on this node")
-	vlanUplink := flag.String("vlan-uplink", "", "physical interface VLAN-tagged networks attach to (e.g. \"re0\", \"em0\" - differs per node); leave empty to disable network management (VLANs/DHCP/firewall) on this node")
-	natUplink := flag.String("nat-uplink", "", "interface a self-hosted network's outbound NAT egresses through (see ADR-0048) - defaults to -vlan-uplink's value if unset, which is correct on most nodes, but must be set explicitly when this node's real internet-facing interface differs from its VLAN-tagging uplink (e.g. \"bridge0\" when -vlan-uplink's own NIC has itself been bridged for flat VM networking, as on apiarium - confirmed live: nat-to against an interface with no IPv4 address of its own silently never matches any egress traffic)")
-	dhcpDNSServer := flag.String("dhcp-dns-server", "", "DNS server address handed to DHCP clients on this node's Apiary-managed networks (dnsmasq's own port=0 disables its resolver, so without this every VM gets a dead-end DNS server - see internal/dhcpd.NetworkScope.DNSServer); leave empty only if no VM on a managed network needs working DNS resolution")
-	hastEnabled := flag.Bool("hast-enabled", false, "enable HAST-backed VM disk replication support on this node (requires a real, patched hastd - see ADR-0026); needed on both a replicated VM's owning node and its replica node, regardless of bhyve support")
-	jailEnabled := flag.Bool("jail-enabled", false, "enable jail provisioning on this node; explicit deletion remains enabled (see CLAUDE.md)")
-	jailPrefix := flag.String("jail-prefix", "apiary-", "name prefix for jails this node creates")
-	jailMountBase := flag.String("jail-mount-base", "/apiary-jails", "parent directory a replicated jail's HAST-backed root filesystem is mounted under (non-replicated jails use their ZFS dataset's own mountpoint instead)")
-	jailDiskSizeMB := flag.Uint64("jail-disk-size-mb", 2048, "size of a replicated jail's HAST-backed root filesystem in MB (ignored for non-replicated jails, which use their ZFS dataset's own quota)")
-	peerAPIKey := flag.String("peer-api-key", "", "API key this node's reconciler attaches when forwarding a raft write to another node's managerd (see ADR-0029); required once the cluster has any API key created (ADR-0023), since peer calls go through the same authenticated ManagerService API as everything else. Prefer -peer-api-key-file instead (ADR-0096): a value set here is a literal argv entry, visible to any local user via ps(1)/procstat(1) regardless of /etc/rc.conf's own file permissions")
-	peerAPIKeyFile := flag.String("peer-api-key-file", "", "path to a file containing only -peer-api-key's value (ADR-0096) - the preferred way to configure it. Never a flag value or env var for the same reason -cloudflare-token-file isn't: unlike a file's permissions, a process's command-line arguments are visible to any local user via ps(1)/procstat(1) regardless of who can read /etc/rc.conf. Mutually exclusive with -peer-api-key")
-	peerManagerdPort := flag.String("peer-managerd-port", "", "port assumed for a peer node's managerd external API when forwarding (ADR-0029); defaults to this node's own -rpc-addr port, since every node in a real deployment is expected to use the same port")
-	peerTLS := flag.Bool("peer-tls", false, "dial peer managerds over TLS instead of plaintext when forwarding (ADR-0029/ADR-0035); requires every peer's managerd to also be TLS-enabled")
-	peerTLSHostnameMap := flag.String("peer-tls-hostname-map", "", "comma-separated ip=hostname pairs used to verify a peer's TLS certificate, since a raft leader_hint is always a bare address and a real cert is never issued for a bare IP (e.g. \"10.50.0.11=freebsd-apiary.apiary.work,10.50.0.12=freebsd-apiary2.apiary.work\"); only consulted when -peer-tls is set")
-	peerTLSCA := flag.String("peer-tls-ca", "", "PEM file trusted INSTEAD OF the system certificate pool when dialing a peer over TLS (ADR-0093) - the peer-forwarding equivalent of -manager-tls-ca, needed when peers present self-signed certificates rather than a real, publicly-trusted one (ADR-0033); leave empty to trust the system pool. Only consulted when -peer-tls is set. May list more than one peer's certificate concatenated in one file")
-	knownPeerAddresses := flag.String("known-peer-addresses", "", "comma-separated host:port allowlist (ADR-0097) RequestJoinColony/GetJoinRequestStatus/CancelJoinRequest's own target_address must match before this node will dial it - these three RPCs are deliberately unauthenticated (a joining Comb has no Colony API key yet), so without this, target_address could name any host an attacker chooses. Leave empty (the default) to preserve ADR-0092's original accept-any-target_address behavior; set it to this Colony's own known member addresses to close that off, since a real deployment's membership is typically small and fixed")
-	assumptionCheckInterval := flag.Duration("assumption-check-interval", 60*time.Second, "how often this node re-evaluates its Automated Assumption Checks (ADR-0055)")
-	assumptionHeartbeatInterval := flag.Duration("assumption-heartbeat-interval", time.Hour, "how often an unchanged assumption result still gets a fresh persisted history entry, so a real transition is never confused with routine ticking; must be >= -assumption-check-interval")
-	assumptionStaleAfterFlag := flag.Duration("assumption-stale-after", 0, "age past which ListAssumptionResults reports a result as effectively unknown regardless of its stored value; 0 defaults to 3x -assumption-check-interval")
-	assumptionRunDeadline := flag.Duration("assumption-run-deadline", 20*time.Second, "overall timeout for one Automated Assumption Checks tick, so one unresponsive peer can't stall the next tick; must be less than -assumption-check-interval")
-	originCARenewalCheckInterval := flag.Duration("origin-ca-renewal-check-interval", time.Hour, "how often to check local Origin CA certificates for ones due for automatic renewal (ADR-0077); renewal itself only happens within a certificate's own last 30 days, an auto-renew flag set at issuance, and a still-valid token file")
-	assumptionHistoryLimit := flag.Int("assumption-history-limit", 200, "maximum persisted history entries retained per assumption key")
-	assumptionHistoryMaxAge := flag.Duration("assumption-history-max-age", 30*24*time.Hour, "maximum age of a persisted assumption history entry before it's pruned")
-	tlsCert := flag.String("tls-cert", "", "PEM certificate file for managerd's external gRPC API; leave unset (with -tls-key) to serve plaintext, as before")
-	tlsKey := flag.String("tls-key", "", "PEM private key file matching -tls-cert")
-	pamService := flag.String("pam-service", "", "PAM service name to authenticate frontend's web UI logins against (requires a matching /etc/pam.d/<name> on this host - ADR-0087, moved here from cmd/frontend); leave empty to disable login entirely. Requires -tls-cert/-tls-key to also be set, since a login password now travels over this RPC channel")
-	cloudflareTokenFile := flag.String("cloudflare-token-file", "", "path to a file containing only a Cloudflare API token scoped to Zone:DNS:Edit (see ADR-0063); leave empty to disable Cloudflare Tunnel exposure entirely on this node - never a flag value or env var, since this is a long-lived, immediately-exploitable third-party credential if leaked")
-	cloudflareZoneID := flag.String("cloudflare-zone-id", "", "Cloudflare zone ID CNAME records are created/updated in; required when -cloudflare-token-file is set")
-	cloudflareTunnelID := flag.String("cloudflare-tunnel-id", "", "this Comb's own pre-provisioned Cloudflare Tunnel id (from `cloudflared tunnel create`, run once by the operator - see ADR-0063); required when -cloudflare-token-file is set")
-	cloudflareTunnelCredentialsFile := flag.String("cloudflare-tunnel-credentials-file", "", "path to this Comb's own pre-provisioned Tunnel's credentials JSON (from `cloudflared tunnel create`); required when -cloudflare-token-file is set")
-	resetManaged := flag.String("reset-managed", "", fmt.Sprintf("Tier 2 reset (ADR-0038): destroy every real VM/jail/dataset/ISO this node's own -zfs-base/-jail-prefix/-bhyve-prefix/-iso-dir manage, then exit, rather than starting the server. Never touches anything outside that scope - safe to run without double-checking. Must be exactly %q or nothing happens", resetManagedConfirmPhrase))
+	// Only these five one-shot destructive/export modes remain CLI
+	// flags (ADR-0100) - see this file's own resetManagedConfirmPhrase/
+	// factoryResetConfirmPhrase doc comment for why: a value persisted
+	// in a config file would act on every daemon(8) -r respawn, not
+	// just once.
+	resetManaged := flag.String("reset-managed", "", fmt.Sprintf("Tier 2 reset (ADR-0038): destroy every real VM/jail/dataset/ISO this node's own zfs_base/jail_prefix/bhyve_prefix/iso_dir config manage, then exit, rather than starting the server. Never touches anything outside that scope - safe to run without double-checking. Must be exactly %q or nothing happens", resetManagedConfirmPhrase))
 	factoryReset := flag.String("factory-reset", "", fmt.Sprintf("Tier 3 reset (ADR-0038): runs the same destruction as -reset-managed, then also destroys anything named in -factory-reset-extra-jails/-factory-reset-extra-datasets regardless of scope, then exits. Must be exactly %q or nothing happens", factoryResetConfirmPhrase))
-	factoryResetExtraJails := flag.String("factory-reset-extra-jails", "", "comma-separated jail names to destroy for real during -factory-reset, outside the normal -jail-prefix scope (e.g. a jail you want gone that Apiary itself didn't create) - nothing here is ever auto-discovered, only what's named")
-	factoryResetExtraDatasets := flag.String("factory-reset-extra-datasets", "", "comma-separated ZFS dataset/pool names to destroy recursively during -factory-reset, outside the normal -zfs-base scope - nothing here is ever auto-discovered, only what's named")
+	factoryResetExtraJails := flag.String("factory-reset-extra-jails", "", "comma-separated jail names to destroy for real during -factory-reset, outside the normal jail_prefix scope (e.g. a jail you want gone that Apiary itself didn't create) - nothing here is ever auto-discovered, only what's named")
+	factoryResetExtraDatasets := flag.String("factory-reset-extra-datasets", "", "comma-separated ZFS dataset/pool names to destroy recursively during -factory-reset, outside the normal zfs_base scope - nothing here is ever auto-discovered, only what's named")
 	exportHostConfig := flag.String("export-host-config", "", "read-only: write a redacted snapshot of this Comb's /etc/rc.conf, /etc/pf.conf, and /etc/master.passwd into this directory, then exit, rather than starting the server - see internal/hostconfig's own doc comment for exactly what's redacted and why there is no matching restore/apply flag")
 	flag.Parse()
 
@@ -112,140 +77,30 @@ func run() error {
 		return runExportHostConfig(hostconfig.Files{}, *exportHostConfig)
 	}
 
-	if *resetManaged != "" || *factoryReset != "" {
-		return runReset(*resetManaged, *factoryReset, *factoryResetExtraJails, *factoryResetExtraDatasets, *zfsBase, *jailPrefix, *bhyvePrefix, *isoDir)
-	}
-
-	// -peer-api-key-file (ADR-0096): resolved before nodeConfigMgr.Load()
-	// below so a saved node-config's own PeerAPIKey can still override it
-	// afterwards, the same precedence every other flag already has.
-	resolvedPeerAPIKey, err := resolvePeerAPIKey(*peerAPIKey, *peerAPIKeyFile)
-	if err != nil {
-		return err
-	}
-	peerAPIKey = &resolvedPeerAPIKey
-
-	// nodeConfig holds this node's own local settings (ADR-0049/ADR-0070) -
-	// a value saved via the Machine Configuration UI overrides the
-	// matching flag's own default below, before any of them are used to
-	// construct anything (dialing raftd with -raftd-token, in particular,
-	// happens just a few lines down - this must run first). A fresh
-	// install with no saved file yet just keeps every flag-provided
-	// value. node_id/rpc_addr/raftd_socket are deliberately never
-	// represented in nodeconfig.Config at all - see its own package doc
-	// comment for why.
+	// -reset-managed/-factory-reset are, like raftd's own -reset/
+	// -restore, "break glass" recovery tools - they must keep working
+	// even if managerd.json itself is malformed, since a broken config
+	// is exactly the situation an operator most needs them for. A
+	// Load() error here falls back to applyManagerdDefaults's zero-cfg
+	// baseline with a warning, rather than aborting; normal server
+	// startup below is stricter.
+	oneShotReset := *resetManaged != "" || *factoryReset != ""
 	nodeConfigMgr := &nodeconfig.Manager{}
-	if cfg, err := nodeConfigMgr.Load(); err != nil {
-		log.Printf("managerd: reading node config: %v (using flag defaults)", err)
-	} else {
-		if cfg.Uplink != "" {
-			*vlanUplink = cfg.Uplink
+	cfg, err := nodeConfigMgr.Load()
+	if err != nil {
+		if !oneShotReset {
+			return fmt.Errorf("reading %s: %w", nodeconfig.DefaultPath, err)
 		}
-		if cfg.NATUplink != "" {
-			*natUplink = cfg.NATUplink
-		}
-		if cfg.DNSServer != "" {
-			*dhcpDNSServer = cfg.DNSServer
-		}
-		if cfg.JailEnabled != nil {
-			*jailEnabled = *cfg.JailEnabled
-		}
-		if cfg.ZFSBase != "" {
-			*zfsBase = cfg.ZFSBase
-		}
-		if cfg.ReconcileInterval != 0 {
-			*reconcileInterval = cfg.ReconcileInterval
-		}
-		if cfg.BhyvePrefix != "" {
-			*bhyvePrefix = cfg.BhyvePrefix
-		}
-		if cfg.BhyveBootROM != "" {
-			*bhyveBootROM = cfg.BhyveBootROM
-		}
-		if cfg.BhyveBridge != "" {
-			*bhyveBridge = cfg.BhyveBridge
-		}
-		if cfg.DiskSizeMB != 0 {
-			*diskSizeMB = cfg.DiskSizeMB
-		}
-		if cfg.ISODir != "" {
-			*isoDir = cfg.ISODir
-		}
-		if cfg.HASTEnabled != nil {
-			*hastEnabled = *cfg.HASTEnabled
-		}
-		if cfg.JailPrefix != "" {
-			*jailPrefix = cfg.JailPrefix
-		}
-		if cfg.JailMountBase != "" {
-			*jailMountBase = cfg.JailMountBase
-		}
-		if cfg.JailDiskSizeMB != 0 {
-			*jailDiskSizeMB = cfg.JailDiskSizeMB
-		}
-		if cfg.PeerAPIKey != "" {
-			*peerAPIKey = cfg.PeerAPIKey
-		}
-		if cfg.PeerManagerdPort != "" {
-			*peerManagerdPort = cfg.PeerManagerdPort
-		}
-		if cfg.PeerTLS != nil {
-			*peerTLS = *cfg.PeerTLS
-		}
-		if cfg.PeerTLSHostnameMap != "" {
-			*peerTLSHostnameMap = cfg.PeerTLSHostnameMap
-		}
-		if cfg.PeerTLSCA != "" {
-			*peerTLSCA = cfg.PeerTLSCA
-		}
-		if cfg.KnownPeerAddresses != "" {
-			*knownPeerAddresses = cfg.KnownPeerAddresses
-		}
-		if cfg.AssumptionCheckInterval != 0 {
-			*assumptionCheckInterval = cfg.AssumptionCheckInterval
-		}
-		if cfg.AssumptionHeartbeatInterval != 0 {
-			*assumptionHeartbeatInterval = cfg.AssumptionHeartbeatInterval
-		}
-		if cfg.AssumptionStaleAfter != 0 {
-			*assumptionStaleAfterFlag = cfg.AssumptionStaleAfter
-		}
-		if cfg.AssumptionRunDeadline != 0 {
-			*assumptionRunDeadline = cfg.AssumptionRunDeadline
-		}
-		if cfg.AssumptionHistoryLimit != 0 {
-			*assumptionHistoryLimit = cfg.AssumptionHistoryLimit
-		}
-		if cfg.AssumptionHistoryMaxAge != 0 {
-			*assumptionHistoryMaxAge = cfg.AssumptionHistoryMaxAge
-		}
-		if cfg.TLSCert != "" {
-			*tlsCert = cfg.TLSCert
-		}
-		if cfg.TLSKey != "" {
-			*tlsKey = cfg.TLSKey
-		}
-		if cfg.PAMService != "" {
-			*pamService = cfg.PAMService
-		}
-		if cfg.CloudflareTokenFile != "" {
-			*cloudflareTokenFile = cfg.CloudflareTokenFile
-		}
-		if cfg.CloudflareZoneID != "" {
-			*cloudflareZoneID = cfg.CloudflareZoneID
-		}
-		if cfg.CloudflareTunnelID != "" {
-			*cloudflareTunnelID = cfg.CloudflareTunnelID
-		}
-		if cfg.CloudflareTunnelCredentialsFile != "" {
-			*cloudflareTunnelCredentialsFile = cfg.CloudflareTunnelCredentialsFile
-		}
-		if cfg.RaftdToken != "" {
-			*raftdToken = cfg.RaftdToken
-		}
+		log.Printf("managerd: reading %s: %v - falling back to defaults for this one-shot command", nodeconfig.DefaultPath, err)
+		cfg = nodeconfig.Config{}
+	}
+	applyManagerdDefaults(&cfg)
+
+	if *resetManaged != "" || *factoryReset != "" {
+		return runReset(*resetManaged, *factoryReset, *factoryResetExtraJails, *factoryResetExtraDatasets, cfg.ZFSBase, cfg.JailPrefix, cfg.BhyvePrefix, cfg.ISODir)
 	}
 
-	id := *nodeID
+	id := cfg.NodeID
 	if id == "" {
 		host, err := os.Hostname()
 		if err != nil {
@@ -257,9 +112,9 @@ func run() error {
 	// There is no process-supervision/retry infrastructure yet, so a
 	// managerd that can't reach raftd at all isn't in a useful state:
 	// fail fast rather than retrying with backoff.
-	raftClient, err := manager.Dial(*raftdSocket, *raftdToken)
+	raftClient, err := manager.Dial(cfg.RaftdSocket, cfg.RaftdToken)
 	if err != nil {
-		return fmt.Errorf("connecting to raftd at %s: %w", *raftdSocket, err)
+		return fmt.Errorf("connecting to raftd at %s: %w", cfg.RaftdSocket, err)
 	}
 	defer raftClient.Close()
 
@@ -275,19 +130,19 @@ func run() error {
 	}
 	raftNodeID := raftStatus.GetNodeId()
 
-	lis, err := net.Listen("tcp", *rpcAddr)
+	lis, err := net.Listen("tcp", cfg.RPCAddr)
 	if err != nil {
-		return fmt.Errorf("listening on %s: %w", *rpcAddr, err)
+		return fmt.Errorf("listening on %s: %w", cfg.RPCAddr, err)
 	}
 
-	isos := isostore.New(*isoDir)
+	isos := isostore.New(cfg.ISODir)
 
-	// Defaults to this node's own -rpc-addr port when unset - every
+	// Defaults to this node's own rpc_addr port when unset - every
 	// node in a real deployment is expected to run managerd's external
 	// API on the same port (see ADR-0029), differing only by host.
-	resolvedPeerPort := *peerManagerdPort
+	resolvedPeerPort := cfg.PeerManagerdPort
 	if resolvedPeerPort == "" {
-		if _, port, err := net.SplitHostPort(*rpcAddr); err == nil {
+		if _, port, err := net.SplitHostPort(cfg.RPCAddr); err == nil {
 			resolvedPeerPort = port
 		}
 	}
@@ -296,45 +151,47 @@ func run() error {
 	// entry is a plain, silently-skipped no-op instead of a runtime
 	// panic - an operator typo shouldn't crash the whole daemon.
 	peerHostnames := map[string]string{}
-	for _, pair := range strings.Split(*peerTLSHostnameMap, ",") {
+	for _, pair := range strings.Split(cfg.PeerTLSHostnameMap, ",") {
 		if ip, host, ok := strings.Cut(pair, "="); ok && ip != "" && host != "" {
 			peerHostnames[ip] = host
 		}
 	}
 
+	peerTLS := cfg.PeerTLS != nil && *cfg.PeerTLS
+
 	// Shared between the reconciler's own write-forwarding (ADR-0029)
 	// and the server's read-forwarding (ADR-0035) - both are forwarding
 	// to the same leader managerd over the same authenticated API, so
 	// there's no reason for two separate peer clients/credentials.
-	peers := manager.NewPeerReporter(*peerAPIKey, *peerTLS, peerHostnames)
-	if *peerTLSCA != "" {
-		pool, err := manager.LoadPeerCAPool(*peerTLSCA)
+	peers := manager.NewPeerReporter(cfg.PeerAPIKey, peerTLS, peerHostnames)
+	if cfg.PeerTLSCA != "" {
+		pool, err := manager.LoadPeerCAPool(cfg.PeerTLSCA)
 		if err != nil {
 			return fmt.Errorf("managerd: %w", err)
 		}
 		peers.CAPool = pool
 	}
 
-	zfsMgr := zfs.New(*zfsBase)
+	zfsMgr := zfs.New(cfg.ZFSBase)
 	reconciler := &cluster.Reconciler{
 		Raft:             raftClient,
 		ZFS:              zfsMgr,
 		LocalNodeID:      raftNodeID,
-		BootROM:          *bhyveBootROM,
-		DiskSizeMB:       *diskSizeMB,
-		Bridge:           *bhyveBridge,
+		BootROM:          cfg.BhyveBootROM,
+		DiskSizeMB:       cfg.DiskSizeMB,
+		Bridge:           cfg.BhyveBridge,
 		ISOs:             isos,
 		JailArchives:     jailarchive.New(),
 		Peers:            peers,
 		PeerManagerdPort: resolvedPeerPort,
-		DNSServer:        *dhcpDNSServer,
+		DNSServer:        cfg.DNSServer,
 		NetworkStatePath: cluster.DefaultNetworkStatePath,
-		Interval:         *reconcileInterval,
+		Interval:         cfg.ReconcileInterval,
 	}
 	// HAST is independent of bhyve support: a node holding only a HAST
 	// secondary replica (see ADR-0026) never runs the VM at all, so this
-	// is set regardless of -bhyve-bootrom, unlike VLAN/DHCP/PF below.
-	if *hastEnabled {
+	// is set regardless of bhyve_bootrom, unlike VLAN/DHCP/PF below.
+	if cfg.HASTEnabled != nil && *cfg.HASTEnabled {
 		reconciler.HAST = hast.New()
 	}
 	// Keep lifecycle inspection/teardown available even when provisioning
@@ -344,36 +201,37 @@ func run() error {
 	// reconciler.Jail, whose interface type is intentionally narrower)
 	// so it can also be wired into the jail console (below) - jexec
 	// console access to an already-running jail is independent of
-	// -jail-enabled, the same "inspection/teardown always available"
+	// jail_enabled, the same "inspection/teardown always available"
 	// posture ADR-0064 already established for lifecycle operations.
-	jailMgr := jail.New(*jailPrefix)
+	jailEnabled := cfg.JailEnabled != nil && *cfg.JailEnabled
+	jailMgr := jail.New(cfg.JailPrefix)
 	reconciler.Jail = jailMgr
-	reconciler.JailProvisioningDisabled = !*jailEnabled
+	reconciler.JailProvisioningDisabled = !jailEnabled
 	reconciler.Mount = ufsmount.New()
-	reconciler.JailBase = *jailMountBase
-	reconciler.JailDiskSizeMB = *jailDiskSizeMB
+	reconciler.JailBase = cfg.JailMountBase
+	reconciler.JailDiskSizeMB = cfg.JailDiskSizeMB
 	// Cloudflare Tunnel exposure (ADR-0063) is independent of bhyve/
 	// HAST/jail support - it only ever proxies to a VM's own managed-
 	// network address, using a Tunnel the operator pre-provisioned by
-	// hand (cloudflared tunnel create). Empty -cloudflare-token-file
-	// disables it entirely, the same opt-in pattern as -hast-enabled/
-	// -jail-enabled above; reconciler.Cloudflare stays nil in that case,
+	// hand (cloudflared tunnel create). Empty cloudflare_token_file
+	// disables it entirely, the same opt-in pattern as hast_enabled/
+	// jail_enabled above; reconciler.Cloudflare stays nil in that case,
 	// so reconcileCloudflareTunnel still cleans up any leftover process
 	// from before the feature was disabled (see the Reconciler field's
 	// own doc comment).
-	if *cloudflareTokenFile != "" {
-		if *cloudflareZoneID == "" || *cloudflareTunnelID == "" || *cloudflareTunnelCredentialsFile == "" {
-			return fmt.Errorf("-cloudflare-token-file requires -cloudflare-zone-id, -cloudflare-tunnel-id, and -cloudflare-tunnel-credentials-file to also be set")
+	if cfg.CloudflareTokenFile != "" {
+		if cfg.CloudflareZoneID == "" || cfg.CloudflareTunnelID == "" || cfg.CloudflareTunnelCredentialsFile == "" {
+			return fmt.Errorf("cloudflare_token_file requires cloudflare_zone_id, cloudflare_tunnel_id, and cloudflare_tunnel_credentials_file to also be set")
 		}
-		tokenBytes, err := os.ReadFile(*cloudflareTokenFile)
+		tokenBytes, err := os.ReadFile(cfg.CloudflareTokenFile)
 		if err != nil {
-			return fmt.Errorf("reading -cloudflare-token-file: %w", err)
+			return fmt.Errorf("reading cloudflare_token_file: %w", err)
 		}
 		reconciler.Cloudflare = &cloudflare.Manager{}
 		reconciler.CloudflareToken = strings.TrimSpace(string(tokenBytes))
-		reconciler.CloudflareZoneID = *cloudflareZoneID
-		reconciler.CloudflareTunnelID = *cloudflareTunnelID
-		reconciler.CloudflareTunnelCredentialsFile = *cloudflareTunnelCredentialsFile
+		reconciler.CloudflareZoneID = cfg.CloudflareZoneID
+		reconciler.CloudflareTunnelID = cfg.CloudflareTunnelID
+		reconciler.CloudflareTunnelCredentialsFile = cfg.CloudflareTunnelCredentialsFile
 	}
 	// reconciler.Bhyve/bhyveMgr are left nil when no boot ROM is
 	// configured, so nodes without hardware-assisted virtualization (the
@@ -384,8 +242,8 @@ func run() error {
 	// matters here: a boxed nil pointer would panic the first time
 	// GetVMConsole called a method on it.
 	var bhyveMgr *bhyve.Manager
-	if *bhyveBootROM != "" {
-		bhyveMgr = bhyve.New(*bhyvePrefix)
+	if cfg.BhyveBootROM != "" {
+		bhyveMgr = bhyve.New(cfg.BhyvePrefix)
 		reconciler.Bhyve = bhyveMgr
 	}
 
@@ -397,18 +255,18 @@ func run() error {
 	// reconciler.Uplink unset (so assumecheck.Checker's uplink-mismatch
 	// health check went inert) on any node with bhyve disabled,
 	// regardless of jails. VLAN specifically still needs a real uplink
-	// interface to tag onto, so this is keyed only on -vlan-uplink now -
-	// the same opt-in pattern as Bhyve/ISOs above, just independent of
-	// it. See ADR-0085.
+	// interface to tag onto, so this is keyed only on uplink now - the
+	// same opt-in pattern as Bhyve/ISOs above, just independent of it.
+	// See ADR-0085.
 	var vlanMgr *vlan.Manager
-	if *vlanUplink != "" {
-		vlanMgr = &vlan.Manager{Uplink: *vlanUplink}
+	if cfg.Uplink != "" {
+		vlanMgr = &vlan.Manager{Uplink: cfg.Uplink}
 		reconciler.VLAN = vlanMgr
 		reconciler.DHCP = &dhcpd.Manager{}
 		reconciler.PF = &pf.Manager{}
-		reconciler.Uplink = *vlanUplink
-		if *natUplink != "" {
-			reconciler.Uplink = *natUplink
+		reconciler.Uplink = cfg.Uplink
+		if cfg.NATUplink != "" {
+			reconciler.Uplink = cfg.NATUplink
 		}
 	}
 
@@ -431,35 +289,35 @@ func run() error {
 	// Automated Assumption Checks (ADR-0055) - validated up front rather
 	// than left to misbehave silently at runtime on a nonsensical
 	// combination.
-	if *assumptionCheckInterval <= 0 {
-		return fmt.Errorf("-assumption-check-interval must be positive")
+	if cfg.AssumptionCheckInterval <= 0 {
+		return fmt.Errorf("assumption_check_interval must be positive")
 	}
-	if *assumptionHeartbeatInterval < *assumptionCheckInterval {
-		return fmt.Errorf("-assumption-heartbeat-interval (%s) must be >= -assumption-check-interval (%s)", *assumptionHeartbeatInterval, *assumptionCheckInterval)
+	if cfg.AssumptionHeartbeatInterval < cfg.AssumptionCheckInterval {
+		return fmt.Errorf("assumption_heartbeat_interval (%s) must be >= assumption_check_interval (%s)", cfg.AssumptionHeartbeatInterval, cfg.AssumptionCheckInterval)
 	}
-	assumptionStaleAfter := *assumptionStaleAfterFlag
+	assumptionStaleAfter := cfg.AssumptionStaleAfter
 	if assumptionStaleAfter <= 0 {
-		assumptionStaleAfter = 3 * *assumptionCheckInterval
+		assumptionStaleAfter = 3 * cfg.AssumptionCheckInterval
 	}
-	if assumptionStaleAfter < 2**assumptionCheckInterval {
-		return fmt.Errorf("-assumption-stale-after (%s) must be at least 2x -assumption-check-interval (%s)", assumptionStaleAfter, *assumptionCheckInterval)
+	if assumptionStaleAfter < 2*cfg.AssumptionCheckInterval {
+		return fmt.Errorf("assumption_stale_after (%s) must be at least 2x assumption_check_interval (%s)", assumptionStaleAfter, cfg.AssumptionCheckInterval)
 	}
-	if *assumptionRunDeadline >= *assumptionCheckInterval {
-		return fmt.Errorf("-assumption-run-deadline (%s) must be less than -assumption-check-interval (%s)", *assumptionRunDeadline, *assumptionCheckInterval)
+	if cfg.AssumptionRunDeadline >= cfg.AssumptionCheckInterval {
+		return fmt.Errorf("assumption_run_deadline (%s) must be less than assumption_check_interval (%s)", cfg.AssumptionRunDeadline, cfg.AssumptionCheckInterval)
 	}
-	if *assumptionHistoryLimit <= 0 {
-		return fmt.Errorf("-assumption-history-limit must be positive")
+	if cfg.AssumptionHistoryLimit <= 0 {
+		return fmt.Errorf("assumption_history_limit must be positive")
 	}
-	if *assumptionHistoryMaxAge <= 0 {
-		return fmt.Errorf("-assumption-history-max-age must be positive")
+	if cfg.AssumptionHistoryMaxAge <= 0 {
+		return fmt.Errorf("assumption_history_max_age must be positive")
 	}
 
 	assumptionsMgr := &assumptions.Manager{}
 	registerMgr := &assumptionregister.Manager{}
 	// Constructed after reconciler above so reconciler.Uplink already
-	// reflects both the nat-uplink-falls-back-to-vlan-uplink resolution
-	// and any nodeconfig override - never re-derived independently here,
-	// which would risk a second, driftable copy of that same logic (see
+	// reflects both the nat-uplink-falls-back-to-uplink resolution and
+	// the loaded config - never re-derived independently here, which
+	// would risk a second, driftable copy of that same logic (see
 	// ADR-0055).
 	assumptionChecker := &assumecheck.Checker{
 		NodeID:                raftNodeID,
@@ -468,24 +326,27 @@ func run() error {
 		PeerManagerdAddr:      peerManagerdAddrFunc(resolvedPeerPort),
 		Route:                 netrouteChecker{},
 		Uplink:                reconciler.Uplink,
-		PeerTLSConfigured:     *peerTLS,
-		PeerAuthKeyConfigured: *peerAPIKey != "",
+		PeerTLSConfigured:     peerTLS,
+		PeerAuthKeyConfigured: cfg.PeerAPIKey != "",
 		Store:                 assumptionsMgr,
-		HeartbeatInterval:     *assumptionHeartbeatInterval,
-		RunDeadline:           *assumptionRunDeadline,
-		HistoryLimit:          *assumptionHistoryLimit,
-		HistoryMaxAge:         *assumptionHistoryMaxAge,
+		HeartbeatInterval:     cfg.AssumptionHeartbeatInterval,
+		RunDeadline:           cfg.AssumptionRunDeadline,
+		HistoryLimit:          cfg.AssumptionHistoryLimit,
+		HistoryMaxAge:         cfg.AssumptionHistoryMaxAge,
 	}
 
-	// -pam-service requires TLS (ADR-0087): a login password now
+	// pam_service requires TLS (ADR-0087): a login password now
 	// necessarily travels over this RPC channel from frontend, over the
-	// real network (-rpc-addr is not loopback-only, per ADR-0022's own
+	// real network (rpc_addr is not loopback-only, per ADR-0022's own
 	// bridge-migration history) - unlike before, when PAM ran in-process
 	// inside frontend and a password never crossed the wire at all.
 	// Refused outright, the same "cheap to prevent, so don't just
-	// document it" posture as the -tls-cert/-tls-key pairing check below.
-	if *pamService != "" && (*tlsCert == "" || *tlsKey == "") {
-		return fmt.Errorf("-pam-service requires -tls-cert/-tls-key to also be set - a login password must not travel to this RPC over a plaintext channel")
+	// document it" posture as the tls_cert/tls_key pairing check below.
+	// UpdateNodeConfig enforces this too (see internal/manager/server.go)
+	// so a bad combination set through the web UI is rejected immediately,
+	// not just on the next restart.
+	if cfg.PAMService != "" && (cfg.TLSCert == "" || cfg.TLSKey == "") {
+		return fmt.Errorf("pam_service requires tls_cert/tls_key to also be set - a login password must not travel to this RPC over a plaintext channel")
 	}
 
 	srv := manager.NewServer(raftClient, id, isos, vncArg, serialLogArg, vlanArg, peers, resolvedPeerPort, zfsMgr, nodeConfigMgr, assumptionsMgr, assumptionStaleAfter, reconciler)
@@ -497,9 +358,9 @@ func run() error {
 	// aren't configured, the same posture as reconciler's other
 	// nil-tolerant optional-dependency methods.
 	srv.SetNATPauser(reconciler)
-	srv.SetKnownPeerAddresses(splitCommaList(*knownPeerAddresses))
-	if *pamService != "" {
-		srv.SetPAMAuthenticator(pam.PAMAuthenticator{ServiceName: *pamService})
+	srv.SetKnownPeerAddresses(splitCommaList(cfg.KnownPeerAddresses))
+	if cfg.PAMService != "" {
+		srv.SetPAMAuthenticator(pam.PAMAuthenticator{ServiceName: cfg.PAMService})
 	}
 	originCARenewer := &origincert.Renewer{
 		Config: func() (string, string, error) {
@@ -524,17 +385,17 @@ func run() error {
 		grpc.UnaryInterceptor(srv.AuthUnaryInterceptor),
 		grpc.StreamInterceptor(srv.AuthStreamInterceptor),
 	}
-	// TLS is opt-in (both -tls-cert and -tls-key must be set) - without
+	// TLS is opt-in (both tls_cert and tls_key must be set) - without
 	// it, an API key (ADR-0023) travels to managerd in plaintext over
-	// the network, which matters the moment -rpc-addr is bound to
+	// the network, which matters the moment rpc_addr is bound to
 	// anything beyond loopback (see ADR-0029's own consequences). Left
 	// unset, this preserves the plaintext behavior every deployment so
 	// far has used.
-	if *tlsCert != "" || *tlsKey != "" {
-		if *tlsCert == "" || *tlsKey == "" {
-			return fmt.Errorf("both -tls-cert and -tls-key must be set together")
+	if cfg.TLSCert != "" || cfg.TLSKey != "" {
+		if cfg.TLSCert == "" || cfg.TLSKey == "" {
+			return fmt.Errorf("both tls_cert and tls_key must be set together")
 		}
-		creds, err := credentials.NewServerTLSFromFile(*tlsCert, *tlsKey)
+		creds, err := credentials.NewServerTLSFromFile(cfg.TLSCert, cfg.TLSKey)
 		if err != nil {
 			return fmt.Errorf("loading TLS cert/key: %w", err)
 		}
@@ -548,14 +409,14 @@ func run() error {
 		serveErrCh <- grpcServer.Serve(lis)
 	}()
 
-	log.Printf("managerd: listening on %s (node-id=%s, raftd-socket=%s, vlan-uplink=%s, hast-enabled=%v, jail-enabled=%v, peer-managerd-port=%s, tls=%v, cloudflare-enabled=%v, pam-service=%s)", *rpcAddr, id, *raftdSocket, *vlanUplink, *hastEnabled, *jailEnabled, resolvedPeerPort, *tlsCert != "", *cloudflareTokenFile != "", *pamService)
+	log.Printf("managerd: listening on %s (node-id=%s, raftd-socket=%s, vlan-uplink=%s, hast-enabled=%v, jail-enabled=%v, peer-managerd-port=%s, tls=%v, cloudflare-enabled=%v, pam-service=%s)", cfg.RPCAddr, id, cfg.RaftdSocket, cfg.Uplink, cfg.HASTEnabled != nil && *cfg.HASTEnabled, jailEnabled, resolvedPeerPort, cfg.TLSCert != "", cfg.CloudflareTokenFile != "", cfg.PAMService)
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	go runReconcileLoop(ctx, reconciler, *reconcileInterval)
-	go runAssumptionCheckLoop(ctx, assumptionChecker, *assumptionCheckInterval)
-	go runOriginCARenewalLoop(ctx, originCARenewer, *originCARenewalCheckInterval)
+	go runReconcileLoop(ctx, reconciler, cfg.ReconcileInterval)
+	go runAssumptionCheckLoop(ctx, assumptionChecker, cfg.AssumptionCheckInterval)
+	go runOriginCARenewalLoop(ctx, originCARenewer, cfg.OriginCARenewalCheckInterval)
 
 	select {
 	case <-ctx.Done():
@@ -782,22 +643,56 @@ func splitCommaList(s string) []string {
 	return out
 }
 
-// resolvePeerAPIKey applies -peer-api-key-file's precedence over
-// -peer-api-key (ADR-0096), returning the effective key. Extracted as
-// its own pure function - separate from run()'s own flag-parsing flow
-// - so this logic is unit-testable without needing a real flag.Parse()
-// invocation, the same reasoning runReset/splitCommaList above are
-// already separate functions for.
-func resolvePeerAPIKey(flagKey, keyFile string) (string, error) {
-	if keyFile == "" {
-		return flagKey, nil
+// applyManagerdDefaults fills any zero-value field in cfg with the
+// same default every corresponding flag used to have (ADR-0100), so a
+// missing or partial managerd.json behaves identically to how an
+// unset flag used to. Fields left at "" (e.g. BhyveBootROM, Uplink,
+// TLSCert, PAMService, ...) are unchanged - their own former flag
+// default was already empty, meaning "disabled"/"use system default."
+func applyManagerdDefaults(cfg *nodeconfig.Config) {
+	if cfg.RPCAddr == "" {
+		cfg.RPCAddr = "127.0.0.1:17700"
 	}
-	if flagKey != "" {
-		return "", fmt.Errorf("-peer-api-key and -peer-api-key-file are mutually exclusive")
+	if cfg.RaftdSocket == "" {
+		cfg.RaftdSocket = "/var/run/apiary/raftd.sock"
 	}
-	keyBytes, err := os.ReadFile(keyFile)
-	if err != nil {
-		return "", fmt.Errorf("reading -peer-api-key-file: %w", err)
+	if cfg.ZFSBase == "" {
+		cfg.ZFSBase = "zroot/apiary"
 	}
-	return strings.TrimSpace(string(keyBytes)), nil
+	if cfg.ReconcileInterval == 0 {
+		cfg.ReconcileInterval = 30 * time.Second
+	}
+	if cfg.BhyvePrefix == "" {
+		cfg.BhyvePrefix = "apiary-"
+	}
+	if cfg.ISODir == "" {
+		cfg.ISODir = "/var/db/apiary/isos"
+	}
+	if cfg.JailPrefix == "" {
+		cfg.JailPrefix = "apiary-"
+	}
+	if cfg.JailMountBase == "" {
+		cfg.JailMountBase = "/apiary-jails"
+	}
+	if cfg.JailDiskSizeMB == 0 {
+		cfg.JailDiskSizeMB = 2048
+	}
+	if cfg.AssumptionCheckInterval == 0 {
+		cfg.AssumptionCheckInterval = 60 * time.Second
+	}
+	if cfg.AssumptionHeartbeatInterval == 0 {
+		cfg.AssumptionHeartbeatInterval = time.Hour
+	}
+	if cfg.AssumptionRunDeadline == 0 {
+		cfg.AssumptionRunDeadline = 20 * time.Second
+	}
+	if cfg.AssumptionHistoryLimit == 0 {
+		cfg.AssumptionHistoryLimit = 200
+	}
+	if cfg.AssumptionHistoryMaxAge == 0 {
+		cfg.AssumptionHistoryMaxAge = 30 * 24 * time.Hour
+	}
+	if cfg.OriginCARenewalCheckInterval == 0 {
+		cfg.OriginCARenewalCheckInterval = time.Hour
+	}
 }

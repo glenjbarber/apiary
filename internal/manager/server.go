@@ -2077,6 +2077,7 @@ func (s *Server) GetNodeConfig(_ context.Context, _ *rpcpb.GetNodeConfigRequest)
 		CloudflareTunnelCredentialsFile: cfg.CloudflareTunnelCredentialsFile,
 		OriginCaTokenFile:               cfg.OriginCATokenFile,
 		OriginCaDirectory:               cfg.OriginCADirectory,
+		OriginCaRenewalCheckInterval:    durationString(cfg.OriginCARenewalCheckInterval),
 	}
 	if s.listNetworkInterfaces != nil {
 		if interfaces, err := s.listNetworkInterfaces(); err == nil {
@@ -2157,6 +2158,10 @@ func (s *Server) UpdateNodeConfig(_ context.Context, req *rpcpb.UpdateNodeConfig
 	if err != nil {
 		return &rpcpb.UpdateNodeConfigResponse{Error: err.Error()}, nil
 	}
+	originCARenewalCheckInterval, err := parseOptionalDuration("origin_ca_renewal_check_interval", req.GetOriginCaRenewalCheckInterval())
+	if err != nil {
+		return &rpcpb.UpdateNodeConfigResponse{Error: err.Error()}, nil
+	}
 
 	peerAPIKey := current.PeerAPIKey
 	if req.GetClearPeerApiKey() {
@@ -2172,6 +2177,19 @@ func (s *Server) UpdateNodeConfig(_ context.Context, req *rpcpb.UpdateNodeConfig
 	}
 
 	cfg := nodeconfig.Config{
+		// NodeID/RPCAddr/RaftdSocket (ADR-0100) are deliberately never
+		// part of UpdateNodeConfigRequest - see nodeconfig's own
+		// package doc comment for why they stay file-only, hand-edit
+		// only. Because they have no proto field to read from req,
+		// they must be explicitly carried over from current here, or
+		// every UpdateNodeConfig call - not just ones touching these
+		// fields - would silently zero them out, since cfg below is
+		// otherwise built fresh from req rather than merged onto
+		// current.
+		NodeID:      current.NodeID,
+		RPCAddr:     current.RPCAddr,
+		RaftdSocket: current.RaftdSocket,
+
 		Uplink:        req.GetUplink(),
 		NATUplink:     req.GetNatUplink(),
 		DNSServer:     req.GetDhcpDnsServer(),
@@ -2214,6 +2232,7 @@ func (s *Server) UpdateNodeConfig(_ context.Context, req *rpcpb.UpdateNodeConfig
 		CloudflareTunnelCredentialsFile: req.GetCloudflareTunnelCredentialsFile(),
 		OriginCATokenFile:               req.GetOriginCaTokenFile(),
 		OriginCADirectory:               req.GetOriginCaDirectory(),
+		OriginCARenewalCheckInterval:    originCARenewalCheckInterval,
 
 		RaftdToken: raftdToken,
 	}

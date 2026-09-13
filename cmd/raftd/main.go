@@ -24,6 +24,7 @@ import (
 
 	internalpb "github.com/glenjbarber/apiary/api/internalpb"
 	raftnode "github.com/glenjbarber/apiary/internal/raft"
+	"github.com/glenjbarber/apiary/internal/raftdconfig"
 )
 
 const socketPerm = 0o660
@@ -59,42 +60,54 @@ func main() {
 }
 
 func run() error {
-	dataDir := flag.String("data-dir", "/var/db/apiary/raftd", "directory for raft log/stable store and snapshots")
-	socketPath := flag.String("socket", "/var/run/apiary/raftd.sock", "Unix domain socket path for the internal RaftInternal protocol")
-	nodeID := flag.String("node-id", "", "unique ID for this raft node (defaults to hostname)")
-	bindAddr := flag.String("raft-bind", raftnode.DefaultBindAddr, "TCP address for the raft transport - a real network address in a genuine multi-node cluster, not necessarily loopback")
-	joinSocket := flag.String("join", "", "internal socket path of an existing cluster member to join through (leave empty to bootstrap a new single-node cluster)")
-	awaitJoin := flag.Bool("await-join", false, "on a fresh, empty -data-dir, skip self-bootstrapping a new single-node cluster and just listen, waiting to be added as a voter by an existing Colony's leader (ADR-0083); ignored if -data-dir already has state or -join is set")
-	internalToken := flag.String("internal-token", "", "shared secret required from every RaftInternal caller (managerd, or a peer raftd during -join); leave empty to rely on the socket's own file permissions alone, as before (see ADR-0023)")
-	raftTLSCert := flag.String("raft-tls-cert", "", "this node's own certificate for the raft transport (ADR-0078); leave empty, along with -raft-tls-key and -raft-tls-ca, for today's plain-TCP behavior")
-	raftTLSKey := flag.String("raft-tls-key", "", "private key matching -raft-tls-cert")
-	raftTLSCA := flag.String("raft-tls-ca", "", "CA bundle used to verify every peer's raft-transport certificate - raft members mutually authenticate each other, unlike managerd's own public-facing API TLS")
-	reset := flag.String("reset", "", fmt.Sprintf("Tier 1 reset (ADR-0038): wipe this node's own raft state and exit, rather than starting the server - real VMs/jails/disks are untouched, just orphaned from tracking until re-registered. Must be exactly %q or nothing happens; the next normal (no -reset) start bootstraps fresh automatically against the now-empty -data-dir", resetConfirmPhrase))
-	exportPath := flag.String("export", "", "write this node's current, live ephemeral state (VMs/networks/jails/API keys) to the given path as a portable archive, then exit, rather than starting the server - requires raftd already running and reachable at -socket (see docs/adr/0051-raftd-config-save-restore.md)")
-	restorePhrase := flag.String("restore", "", fmt.Sprintf("restore ephemeral state from -restore-file into this node's own, currently-empty -data-dir, then exit, rather than starting the server - run -reset first if -data-dir isn't already empty. Must be exactly %q or nothing happens; the next normal start picks up the restored state automatically", restoreConfirmPhrase))
+	// Only these five one-shot recovery/destructive modes remain CLI
+	// flags (see this file's own resetConfirmPhrase/
+	// restoreConfirmPhrase doc comments, and raftdconfig's package doc
+	// comment, for why: a value persisted in a config file would act
+	// on every daemon(8) -r respawn, not just once).
+	reset := flag.String("reset", "", fmt.Sprintf("Tier 1 reset (ADR-0038): wipe this node's own raft state and exit, rather than starting the server - real VMs/jails/disks are untouched, just orphaned from tracking until re-registered. Must be exactly %q or nothing happens; the next normal (no -reset) start bootstraps fresh automatically against the now-empty data directory", resetConfirmPhrase))
+	exportPath := flag.String("export", "", "write this node's current, live ephemeral state (VMs/networks/jails/API keys) to the given path as a portable archive, then exit, rather than starting the server - requires raftd already running and reachable at its own configured socket (see docs/adr/0051-raftd-config-save-restore.md)")
+	restorePhrase := flag.String("restore", "", fmt.Sprintf("restore ephemeral state from -restore-file into this node's own, currently-empty data directory, then exit, rather than starting the server - run -reset first if it isn't already empty. Must be exactly %q or nothing happens; the next normal start picks up the restored state automatically", restoreConfirmPhrase))
 	restoreFile := flag.String("restore-file", "", "path to a -export archive to load for -restore")
-	restoreDryRun := flag.String("restore-dry-run", "", "validate the archive at the given path (format version, checksum) and print a summary of what it contains, then exit - makes no changes at all, needs no confirmation phrase, and does not touch -data-dir")
+	restoreDryRun := flag.String("restore-dry-run", "", "validate the archive at the given path (format version, checksum) and print a summary of what it contains, then exit - makes no changes at all, needs no confirmation phrase, and does not touch the data directory")
 	flag.Parse()
 
-	if *reset != "" {
-		return resetDataDir(*reset, *dataDir)
+	// -reset/-export/-restore/-restore-dry-run are raftd's "break
+	// glass" recovery tools - they must keep working even if
+	// raftd.json itself is malformed, since a broken config is
+	// exactly the situation an operator most needs them for. Load()
+	// error here falls back to raftdconfig.Defaults() with a warning,
+	// rather than aborting; normal server startup below is stricter.
+	oneShot := *reset != "" || *exportPath != "" || *restorePhrase != "" || *restoreDryRun != ""
+	cfgMgr := &raftdconfig.Manager{}
+	rcfg, err := cfgMgr.Load()
+	if err != nil {
+		if !oneShot {
+			return fmt.Errorf("reading %s: %w", raftdconfig.DefaultPath, err)
+		}
+		log.Printf("raftd: reading %s: %v - falling back to defaults for this one-shot command", raftdconfig.DefaultPath, err)
+		rcfg = raftdconfig.Defaults()
 	}
 
-	if err := validateAwaitJoinFlags(*awaitJoin, *joinSocket); err != nil {
+	if *reset != "" {
+		return resetDataDir(*reset, rcfg.DataDir)
+	}
+
+	if err := validateAwaitJoinFlags(rcfg.AwaitJoin, rcfg.Join); err != nil {
 		return err
 	}
 
 	cfg := raftnode.Config{
-		NodeID:   *nodeID,
-		DataDir:  *dataDir,
-		BindAddr: *bindAddr,
-		TLSCert:  *raftTLSCert,
-		TLSKey:   *raftTLSKey,
-		TLSCA:    *raftTLSCA,
+		NodeID:   rcfg.NodeID,
+		DataDir:  rcfg.DataDir,
+		BindAddr: rcfg.RaftBind,
+		TLSCert:  rcfg.RaftTLSCert,
+		TLSKey:   rcfg.RaftTLSKey,
+		TLSCA:    rcfg.RaftTLSCA,
 	}
 
 	if *exportPath != "" {
-		return exportLiveState(*exportPath, *socketPath, *internalToken)
+		return exportLiveState(*exportPath, rcfg.Socket, rcfg.InternalToken)
 	}
 	if *restoreDryRun != "" {
 		return dryRunRestore(*restoreDryRun)
@@ -116,18 +129,18 @@ func run() error {
 	// not reflect; read the resolved value back for logging/joining.
 	resolvedNodeID := node.Status().NodeID
 
-	if err := startupJoinOrBootstrap(node, hadState, *joinSocket, resolvedNodeID, *bindAddr, *internalToken, *awaitJoin); err != nil {
+	if err := startupJoinOrBootstrap(node, hadState, rcfg.Join, resolvedNodeID, rcfg.RaftBind, rcfg.InternalToken, rcfg.AwaitJoin); err != nil {
 		return err
 	}
 
-	lis, err := listenUnix(*socketPath)
+	lis, err := listenUnix(rcfg.Socket)
 	if err != nil {
 		return fmt.Errorf("listening on socket: %w", err)
 	}
 
 	grpcServer := grpc.NewServer(
-		grpc.UnaryInterceptor(raftnode.TokenUnaryInterceptor(*internalToken)),
-		grpc.StreamInterceptor(raftnode.TokenStreamInterceptor(*internalToken)),
+		grpc.UnaryInterceptor(raftnode.TokenUnaryInterceptor(rcfg.InternalToken)),
+		grpc.StreamInterceptor(raftnode.TokenStreamInterceptor(rcfg.InternalToken)),
 	)
 	internalpb.RegisterRaftInternalServer(grpcServer, raftnode.NewServer(node))
 
@@ -137,7 +150,7 @@ func run() error {
 	}()
 
 	log.Printf("raftd: listening on %s (node-id=%s, raft-bind=%s, data-dir=%s, raft-tls=%v)",
-		*socketPath, resolvedNodeID, *bindAddr, *dataDir, *raftTLSCert != "")
+		rcfg.Socket, resolvedNodeID, rcfg.RaftBind, rcfg.DataDir, rcfg.RaftTLSCert != "")
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -176,7 +189,7 @@ func run() error {
 	if err := node.Shutdown(); err != nil {
 		log.Printf("raftd: error shutting down raft: %v", err)
 	}
-	_ = os.Remove(*socketPath)
+	_ = os.Remove(rcfg.Socket)
 
 	return nil
 }
