@@ -860,6 +860,26 @@ func TestServer_UpdateNodeConfig_InvalidDurationRejectedBeforeSave(t *testing.T)
 	}
 }
 
+// TestServer_UpdateNodeConfig_PamServiceRequiresTLS confirms the
+// ADR-0087 safety rail (pam_service requires tls_cert/tls_key) is
+// enforced here too, not just at managerd startup - a bad combination
+// must never reach Save.
+func TestServer_UpdateNodeConfig_PamServiceRequiresTLS(t *testing.T) {
+	store := &fakeNodeConfigStore{}
+	s := NewServer(nil, "node-1", nil, nil, nil, nil, nil, "", nil, store, nil, 0, nil)
+
+	resp, err := s.UpdateNodeConfig(context.Background(), &rpcpb.UpdateNodeConfigRequest{PamService: "apiary"})
+	if err != nil {
+		t.Fatalf("UpdateNodeConfig() error: %v", err)
+	}
+	if resp.GetError() == "" {
+		t.Fatal("UpdateNodeConfig() error field = empty, want a rejection for pam_service without TLS")
+	}
+	if store.lastSave != (nodeconfig.Config{}) {
+		t.Errorf("Save() was called with %+v despite the missing TLS config, want it never called", store.lastSave)
+	}
+}
+
 // TestServer_UpdateNodeConfig_ParsesDurationFields confirms a
 // well-formed duration string round-trips into the correct
 // time.Duration value.
@@ -908,6 +928,7 @@ func TestServer_NodeConfig_NewFieldsRoundTrip(t *testing.T) {
 		KnownPeerAddresses:              "10.50.0.9:17700,10.50.0.14:17700",
 		TlsCert:                         "/home/claude/apiary-tls/fullchain.pem",
 		TlsKey:                          "/home/claude/apiary-tls/key.pem",
+		PamService:                      "apiary",
 		CloudflareTokenFile:             "/home/claude/cf-token",
 		CloudflareZoneId:                "zone123",
 		CloudflareTunnelId:              "tunnel456",
@@ -943,6 +964,7 @@ func TestServer_NodeConfig_NewFieldsRoundTrip(t *testing.T) {
 		"known_peer_addresses":  resp.GetKnownPeerAddresses() == "10.50.0.9:17700,10.50.0.14:17700",
 		"tls_cert":              resp.GetTlsCert() != "",
 		"tls_key":               resp.GetTlsKey() != "",
+		"pam_service":           resp.GetPamService() == "apiary",
 		"cloudflare_token_file": resp.GetCloudflareTokenFile() != "",
 		"cloudflare_zone_id":    resp.GetCloudflareZoneId() == "zone123",
 		"cloudflare_tunnel_id":  resp.GetCloudflareTunnelId() == "tunnel456",

@@ -5903,6 +5903,11 @@ type GetNodeConfigResponse struct {
 	// posture as cloudflare_token_file below).
 	TlsCert string `protobuf:"bytes,31,opt,name=tls_cert,json=tlsCert,proto3" json:"tls_cert,omitempty"`
 	TlsKey  string `protobuf:"bytes,32,opt,name=tls_key,json=tlsKey,proto3" json:"tls_key,omitempty"`
+	// pam_service (ADR-0087) mirrors -pam-service: the PAM service name
+	// frontend's web UI logins are authenticated against. Empty
+	// disables login entirely. Requires tls_cert/tls_key to also be
+	// set, enforced at managerd startup.
+	PamService string `protobuf:"bytes,45,opt,name=pam_service,json=pamService,proto3" json:"pam_service,omitempty"`
 	// cloudflare_token_file/cloudflare_zone_id/cloudflare_tunnel_id/
 	// cloudflare_tunnel_credentials_file mirror ADR-0063's four
 	// like-named flags. cloudflare_token_file is a path, never the raw
@@ -6180,6 +6185,13 @@ func (x *GetNodeConfigResponse) GetTlsKey() string {
 	return ""
 }
 
+func (x *GetNodeConfigResponse) GetPamService() string {
+	if x != nil {
+		return x.PamService
+	}
+	return ""
+}
+
 func (x *GetNodeConfigResponse) GetCloudflareTokenFile() string {
 	if x != nil {
 		return x.CloudflareTokenFile
@@ -6333,12 +6345,15 @@ type UpdateNodeConfigRequest struct {
 	// one (mirroring SetVMCloudflareExposure's own explicit-clear
 	// pattern rather than overloading an empty string to mean two
 	// different things).
-	PeerApiKey                      string `protobuf:"bytes,37,opt,name=peer_api_key,json=peerApiKey,proto3" json:"peer_api_key,omitempty"`
-	ClearPeerApiKey                 bool   `protobuf:"varint,38,opt,name=clear_peer_api_key,json=clearPeerApiKey,proto3" json:"clear_peer_api_key,omitempty"`
-	RaftdToken                      string `protobuf:"bytes,39,opt,name=raftd_token,json=raftdToken,proto3" json:"raftd_token,omitempty"`
-	ClearRaftdToken                 bool   `protobuf:"varint,40,opt,name=clear_raftd_token,json=clearRaftdToken,proto3" json:"clear_raftd_token,omitempty"`
-	TlsCert                         string `protobuf:"bytes,31,opt,name=tls_cert,json=tlsCert,proto3" json:"tls_cert,omitempty"`
-	TlsKey                          string `protobuf:"bytes,32,opt,name=tls_key,json=tlsKey,proto3" json:"tls_key,omitempty"`
+	PeerApiKey      string `protobuf:"bytes,37,opt,name=peer_api_key,json=peerApiKey,proto3" json:"peer_api_key,omitempty"`
+	ClearPeerApiKey bool   `protobuf:"varint,38,opt,name=clear_peer_api_key,json=clearPeerApiKey,proto3" json:"clear_peer_api_key,omitempty"`
+	RaftdToken      string `protobuf:"bytes,39,opt,name=raftd_token,json=raftdToken,proto3" json:"raftd_token,omitempty"`
+	ClearRaftdToken bool   `protobuf:"varint,40,opt,name=clear_raftd_token,json=clearRaftdToken,proto3" json:"clear_raftd_token,omitempty"`
+	TlsCert         string `protobuf:"bytes,31,opt,name=tls_cert,json=tlsCert,proto3" json:"tls_cert,omitempty"`
+	TlsKey          string `protobuf:"bytes,32,opt,name=tls_key,json=tlsKey,proto3" json:"tls_key,omitempty"`
+	// pam_service (ADR-0087) - see GetNodeConfigResponse's own doc
+	// comment for its full semantics.
+	PamService                      string `protobuf:"bytes,45,opt,name=pam_service,json=pamService,proto3" json:"pam_service,omitempty"`
 	CloudflareTokenFile             string `protobuf:"bytes,33,opt,name=cloudflare_token_file,json=cloudflareTokenFile,proto3" json:"cloudflare_token_file,omitempty"`
 	CloudflareZoneId                string `protobuf:"bytes,34,opt,name=cloudflare_zone_id,json=cloudflareZoneId,proto3" json:"cloudflare_zone_id,omitempty"`
 	CloudflareTunnelId              string `protobuf:"bytes,35,opt,name=cloudflare_tunnel_id,json=cloudflareTunnelId,proto3" json:"cloudflare_tunnel_id,omitempty"`
@@ -6599,6 +6614,13 @@ func (x *UpdateNodeConfigRequest) GetTlsCert() string {
 func (x *UpdateNodeConfigRequest) GetTlsKey() string {
 	if x != nil {
 		return x.TlsKey
+	}
+	return ""
+}
+
+func (x *UpdateNodeConfigRequest) GetPamService() string {
+	if x != nil {
+		return x.PamService
 	}
 	return ""
 }
@@ -13120,7 +13142,7 @@ const file_api_rpc_manager_proto_rawDesc = "" +
 	"\ttruncated\x18\x02 \x01(\bR\ttruncated\x12\x1c\n" +
 	"\tavailable\x18\x03 \x01(\bR\tavailable\x12\x14\n" +
 	"\x05error\x18\x04 \x01(\tR\x05error\"\x16\n" +
-	"\x14GetNodeConfigRequest\"\xfe\r\n" +
+	"\x14GetNodeConfigRequest\"\x9f\x0e\n" +
 	"\x15GetNodeConfigResponse\x12\x16\n" +
 	"\x06uplink\x18\x01 \x01(\tR\x06uplink\x12\x1d\n" +
 	"\n" +
@@ -13158,7 +13180,9 @@ const file_api_rpc_manager_proto_rawDesc = "" +
 	"\x10peer_api_key_set\x18\x1d \x01(\bR\rpeerApiKeySet\x12&\n" +
 	"\x0fraftd_token_set\x18\x1e \x01(\bR\rraftdTokenSet\x12\x19\n" +
 	"\btls_cert\x18\x1f \x01(\tR\atlsCert\x12\x17\n" +
-	"\atls_key\x18  \x01(\tR\x06tlsKey\x122\n" +
+	"\atls_key\x18  \x01(\tR\x06tlsKey\x12\x1f\n" +
+	"\vpam_service\x18- \x01(\tR\n" +
+	"pamService\x122\n" +
 	"\x15cloudflare_token_file\x18! \x01(\tR\x13cloudflareTokenFile\x12,\n" +
 	"\x12cloudflare_zone_id\x18\" \x01(\tR\x10cloudflareZoneId\x120\n" +
 	"\x14cloudflare_tunnel_id\x18# \x01(\tR\x12cloudflareTunnelId\x12K\n" +
@@ -13171,7 +13195,7 @@ const file_api_rpc_manager_proto_rawDesc = "" +
 	"\x10NetworkInterface\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x0e\n" +
 	"\x02up\x18\x02 \x01(\bR\x02up\x12\x1c\n" +
-	"\taddresses\x18\x03 \x03(\tR\taddresses\"\xa5\r\n" +
+	"\taddresses\x18\x03 \x03(\tR\taddresses\"\xc6\r\n" +
 	"\x17UpdateNodeConfigRequest\x12\x16\n" +
 	"\x06uplink\x18\x01 \x01(\tR\x06uplink\x12\x1d\n" +
 	"\n" +
@@ -13210,7 +13234,9 @@ const file_api_rpc_manager_proto_rawDesc = "" +
 	"raftdToken\x12*\n" +
 	"\x11clear_raftd_token\x18( \x01(\bR\x0fclearRaftdToken\x12\x19\n" +
 	"\btls_cert\x18\x1f \x01(\tR\atlsCert\x12\x17\n" +
-	"\atls_key\x18  \x01(\tR\x06tlsKey\x122\n" +
+	"\atls_key\x18  \x01(\tR\x06tlsKey\x12\x1f\n" +
+	"\vpam_service\x18- \x01(\tR\n" +
+	"pamService\x122\n" +
 	"\x15cloudflare_token_file\x18! \x01(\tR\x13cloudflareTokenFile\x12,\n" +
 	"\x12cloudflare_zone_id\x18\" \x01(\tR\x10cloudflareZoneId\x120\n" +
 	"\x14cloudflare_tunnel_id\x18# \x01(\tR\x12cloudflareTunnelId\x12K\n" +

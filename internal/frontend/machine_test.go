@@ -522,7 +522,7 @@ func TestServer_UpdateTLSConfig_ForwardsFormValues(t *testing.T) {
 	client := &fakeClient{updateNodeConfigResp: &rpcpb.UpdateNodeConfigResponse{}}
 	s := newTestServer(t, client)
 
-	form := url.Values{"tls_cert": {"/path/fullchain.pem"}, "tls_key": {"/path/key.pem"}}
+	form := url.Values{"tls_cert": {"/path/fullchain.pem"}, "tls_key": {"/path/key.pem"}, "pam_service": {"apiary"}}
 	req := httptest.NewRequest(http.MethodPost, "/machine/tls", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	rec := httptest.NewRecorder()
@@ -532,8 +532,8 @@ func TestServer_UpdateTLSConfig_ForwardsFormValues(t *testing.T) {
 		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
 	}
 	got := client.lastUpdateNodeConfigReq
-	if got.GetTlsCert() != "/path/fullchain.pem" || got.GetTlsKey() != "/path/key.pem" {
-		t.Errorf("forwarded request = %+v, want TLS cert/key set", got)
+	if got.GetTlsCert() != "/path/fullchain.pem" || got.GetTlsKey() != "/path/key.pem" || got.GetPamService() != "apiary" {
+		t.Errorf("forwarded request = %+v, want TLS cert/key and PAM service set", got)
 	}
 }
 

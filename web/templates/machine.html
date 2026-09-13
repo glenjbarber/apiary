@@ -585,6 +585,7 @@
     <tbody>
       <tr><th>Certificate path</th><td><input type="text" name="tls_cert" placeholder="/home/claude/apiary-tls/fullchain.pem" value="{{.NodeConfig.TLSCert}}" title="Path to this Comb's own external gRPC API certificate. Leave both this and Key path blank to serve plaintext." aria-label="Certificate path"></td></tr>
       <tr><th>Key path</th><td><input type="text" name="tls_key" placeholder="/home/claude/apiary-tls/key.pem" value="{{.NodeConfig.TLSKey}}" title="Path to the private key matching Certificate path above." aria-label="Key path"></td></tr>
+      <tr><th>PAM service</th><td><input type="text" name="pam_service" placeholder="apiary" value="{{.NodeConfig.PAMService}}" title="PAM service name (/etc/pam.d/<name> on this host) to authenticate frontend's web UI logins against. Leave blank to disable login entirely. Requires Certificate path/Key path above to also be set - a login password must not travel to this RPC over a plaintext channel." aria-label="PAM service"></td></tr>
     </tbody>
   </table>
   <div class="form-actions"><button type="submit">Save</button></div>
@@ -594,6 +595,7 @@
   <tbody>
     <tr><th>Certificate</th><td>{{if .NodeConfig.TLSCert}}<code>{{.NodeConfig.TLSCert}}</code>{{else}}<em>(unset - serving plaintext)</em>{{end}}</td></tr>
     <tr><th>Private key</th><td>{{if .NodeConfig.TLSKey}}<code>{{.NodeConfig.TLSKey}}</code>{{else}}<em>(unset)</em>{{end}}</td></tr>
+    <tr><th>PAM service</th><td>{{if .NodeConfig.PAMService}}<code>{{.NodeConfig.PAMService}}</code>{{else}}<em>(unset - login disabled)</em>{{end}}</td></tr>
   </tbody>
 </table>
 {{end}}

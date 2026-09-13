@@ -142,6 +142,10 @@ type nodeConfigView struct {
 	TLSCert string
 	TLSKey  string
 
+	// PAMService mirrors -pam-service (ADR-0087): empty means login is
+	// disabled entirely on this node.
+	PAMService string
+
 	CloudflareTokenFile             string
 	CloudflareZoneID                string
 	CloudflareTunnelID              string
@@ -204,8 +208,9 @@ func fromRPCNodeConfig(d *rpcpb.GetNodeConfigResponse) nodeConfigView {
 		PeerAPIKeySet:      d.GetPeerApiKeySet(),
 		RaftdTokenSet:      d.GetRaftdTokenSet(),
 
-		TLSCert: d.GetTlsCert(),
-		TLSKey:  d.GetTlsKey(),
+		TLSCert:    d.GetTlsCert(),
+		TLSKey:     d.GetTlsKey(),
+		PAMService: d.GetPamService(),
 
 		CloudflareTokenFile:             d.GetCloudflareTokenFile(),
 		CloudflareZoneID:                d.GetCloudflareZoneId(),

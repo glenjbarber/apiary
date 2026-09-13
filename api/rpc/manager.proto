@@ -1259,6 +1259,12 @@ message GetNodeConfigResponse {
   string tls_cert = 31;
   string tls_key = 32;
 
+  // pam_service (ADR-0087) mirrors -pam-service: the PAM service name
+  // frontend's web UI logins are authenticated against. Empty
+  // disables login entirely. Requires tls_cert/tls_key to also be
+  // set, enforced at managerd startup.
+  string pam_service = 45;
+
   // cloudflare_token_file/cloudflare_zone_id/cloudflare_tunnel_id/
   // cloudflare_tunnel_credentials_file mirror ADR-0063's four
   // like-named flags. cloudflare_token_file is a path, never the raw
@@ -1343,6 +1349,11 @@ message UpdateNodeConfigRequest {
 
   string tls_cert = 31;
   string tls_key = 32;
+
+  // pam_service (ADR-0087) - see GetNodeConfigResponse's own doc
+  // comment for its full semantics.
+  string pam_service = 45;
+
   string cloudflare_token_file = 33;
   string cloudflare_zone_id = 34;
   string cloudflare_tunnel_id = 35;
