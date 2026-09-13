@@ -909,7 +909,10 @@ each design decision, in order.
   has stranded this project's own raft cluster twice, and `AddVoter`
   commits immediately with no clean way to reverse a bad membership
   change short of wiping raft state entirely. See
-  [ADR-0097](docs/adr/0097-join-flow-hardening.md).
+  [ADR-0097](docs/adr/0097-join-flow-hardening.md). `-known-peer-addresses`
+  gained UI support in the Machine Configuration page's Peer forwarding
+  panel, persisted through node-config like its sibling peer-forwarding
+  settings, rather than staying CLI-flag-only.
 - **Jail base archives, plus an empty-root safety check for every
   jail** — a jail's Create form gains an optional base-archive picker
   (an uploaded `base.txz`-style FreeBSD userland archive, reusing
