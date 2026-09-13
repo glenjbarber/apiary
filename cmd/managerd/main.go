@@ -198,6 +198,9 @@ func run() error {
 		if cfg.PeerTLSCA != "" {
 			*peerTLSCA = cfg.PeerTLSCA
 		}
+		if cfg.KnownPeerAddresses != "" {
+			*knownPeerAddresses = cfg.KnownPeerAddresses
+		}
 		if cfg.AssumptionCheckInterval != 0 {
 			*assumptionCheckInterval = cfg.AssumptionCheckInterval
 		}

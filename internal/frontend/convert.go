@@ -131,6 +131,7 @@ type nodeConfigView struct {
 	PeerManagerdPort   string
 	PeerTLSHostnameMap string
 	PeerTLSCA          string
+	KnownPeerAddresses string
 
 	// PeerAPIKeySet/RaftdTokenSet report only whether a secret is
 	// currently saved - the raw value is never sent to the browser at
@@ -199,6 +200,7 @@ func fromRPCNodeConfig(d *rpcpb.GetNodeConfigResponse) nodeConfigView {
 		PeerManagerdPort:   d.GetPeerManagerdPort(),
 		PeerTLSHostnameMap: d.GetPeerTlsHostnameMap(),
 		PeerTLSCA:          d.GetPeerTlsCa(),
+		KnownPeerAddresses: d.GetKnownPeerAddresses(),
 		PeerAPIKeySet:      d.GetPeerApiKeySet(),
 		RaftdTokenSet:      d.GetRaftdTokenSet(),
 

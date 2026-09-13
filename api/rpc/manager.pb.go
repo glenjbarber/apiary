@@ -5885,6 +5885,12 @@ type GetNodeConfigResponse struct {
 	// pool already trusts). Empty means trust the system pool, correct
 	// for real CA-issued certificates (ADR-0033).
 	PeerTlsCa string `protobuf:"bytes,43,opt,name=peer_tls_ca,json=peerTlsCa,proto3" json:"peer_tls_ca,omitempty"`
+	// known_peer_addresses (ADR-0097) mirrors -known-peer-addresses: a
+	// comma-separated host:port allowlist target_address must match on
+	// RequestJoinColony/GetJoinRequestStatus/CancelJoinRequest, which
+	// are deliberately unauthenticated. Empty preserves ADR-0092's
+	// original accept-any-target_address behavior.
+	KnownPeerAddresses string `protobuf:"bytes,44,opt,name=known_peer_addresses,json=knownPeerAddresses,proto3" json:"known_peer_addresses,omitempty"`
 	// peer_api_key_set/raftd_token_set report only whether a value is
 	// currently saved for -peer-api-key/-raftd-token - the raw value
 	// itself is never returned here or anywhere else. See
@@ -6139,6 +6145,13 @@ func (x *GetNodeConfigResponse) GetPeerTlsCa() string {
 	return ""
 }
 
+func (x *GetNodeConfigResponse) GetKnownPeerAddresses() string {
+	if x != nil {
+		return x.KnownPeerAddresses
+	}
+	return ""
+}
+
 func (x *GetNodeConfigResponse) GetPeerApiKeySet() bool {
 	if x != nil {
 		return x.PeerApiKeySet
@@ -6309,6 +6322,9 @@ type UpdateNodeConfigRequest struct {
 	// peer_tls_ca (ADR-0093) mirrors -peer-tls-ca - see
 	// GetNodeConfigResponse's own doc comment for its full semantics.
 	PeerTlsCa string `protobuf:"bytes,43,opt,name=peer_tls_ca,json=peerTlsCa,proto3" json:"peer_tls_ca,omitempty"`
+	// known_peer_addresses (ADR-0097) - see GetNodeConfigResponse's own
+	// doc comment for its full semantics.
+	KnownPeerAddresses string `protobuf:"bytes,44,opt,name=known_peer_addresses,json=knownPeerAddresses,proto3" json:"known_peer_addresses,omitempty"`
 	// peer_api_key/raftd_token, if non-empty, become the new saved
 	// value - write-only, mirroring the Users page's own "leave blank to
 	// keep current" password-change convention. An empty value here
@@ -6534,6 +6550,13 @@ func (x *UpdateNodeConfigRequest) GetPeerTlsHostnameMap() string {
 func (x *UpdateNodeConfigRequest) GetPeerTlsCa() string {
 	if x != nil {
 		return x.PeerTlsCa
+	}
+	return ""
+}
+
+func (x *UpdateNodeConfigRequest) GetKnownPeerAddresses() string {
+	if x != nil {
+		return x.KnownPeerAddresses
 	}
 	return ""
 }
@@ -13097,7 +13120,7 @@ const file_api_rpc_manager_proto_rawDesc = "" +
 	"\ttruncated\x18\x02 \x01(\bR\ttruncated\x12\x1c\n" +
 	"\tavailable\x18\x03 \x01(\bR\tavailable\x12\x14\n" +
 	"\x05error\x18\x04 \x01(\tR\x05error\"\x16\n" +
-	"\x14GetNodeConfigRequest\"\xcc\r\n" +
+	"\x14GetNodeConfigRequest\"\xfe\r\n" +
 	"\x15GetNodeConfigResponse\x12\x16\n" +
 	"\x06uplink\x18\x01 \x01(\tR\x06uplink\x12\x1d\n" +
 	"\n" +
@@ -13130,7 +13153,8 @@ const file_api_rpc_manager_proto_rawDesc = "" +
 	"\bpeer_tls\x18\x1a \x01(\bH\x02R\apeerTls\x88\x01\x01\x12,\n" +
 	"\x12peer_managerd_port\x18\x1b \x01(\tR\x10peerManagerdPort\x121\n" +
 	"\x15peer_tls_hostname_map\x18\x1c \x01(\tR\x12peerTlsHostnameMap\x12\x1e\n" +
-	"\vpeer_tls_ca\x18+ \x01(\tR\tpeerTlsCa\x12'\n" +
+	"\vpeer_tls_ca\x18+ \x01(\tR\tpeerTlsCa\x120\n" +
+	"\x14known_peer_addresses\x18, \x01(\tR\x12knownPeerAddresses\x12'\n" +
 	"\x10peer_api_key_set\x18\x1d \x01(\bR\rpeerApiKeySet\x12&\n" +
 	"\x0fraftd_token_set\x18\x1e \x01(\bR\rraftdTokenSet\x12\x19\n" +
 	"\btls_cert\x18\x1f \x01(\tR\atlsCert\x12\x17\n" +
@@ -13147,7 +13171,7 @@ const file_api_rpc_manager_proto_rawDesc = "" +
 	"\x10NetworkInterface\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x0e\n" +
 	"\x02up\x18\x02 \x01(\bR\x02up\x12\x1c\n" +
-	"\taddresses\x18\x03 \x03(\tR\taddresses\"\xf3\f\n" +
+	"\taddresses\x18\x03 \x03(\tR\taddresses\"\xa5\r\n" +
 	"\x17UpdateNodeConfigRequest\x12\x16\n" +
 	"\x06uplink\x18\x01 \x01(\tR\x06uplink\x12\x1d\n" +
 	"\n" +
@@ -13177,7 +13201,8 @@ const file_api_rpc_manager_proto_rawDesc = "" +
 	"\bpeer_tls\x18\x1a \x01(\bH\x02R\apeerTls\x88\x01\x01\x12,\n" +
 	"\x12peer_managerd_port\x18\x1b \x01(\tR\x10peerManagerdPort\x121\n" +
 	"\x15peer_tls_hostname_map\x18\x1c \x01(\tR\x12peerTlsHostnameMap\x12\x1e\n" +
-	"\vpeer_tls_ca\x18+ \x01(\tR\tpeerTlsCa\x12 \n" +
+	"\vpeer_tls_ca\x18+ \x01(\tR\tpeerTlsCa\x120\n" +
+	"\x14known_peer_addresses\x18, \x01(\tR\x12knownPeerAddresses\x12 \n" +
 	"\fpeer_api_key\x18% \x01(\tR\n" +
 	"peerApiKey\x12+\n" +
 	"\x12clear_peer_api_key\x18& \x01(\bR\x0fclearPeerApiKey\x12\x1f\n" +

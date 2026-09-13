@@ -137,6 +137,12 @@ type Config struct {
 	// TLS - needed when peers present self-signed certificates.
 	PeerTLSCA string `json:"peer_tls_ca,omitempty"`
 
+	// KnownPeerAddresses mirrors -known-peer-addresses (ADR-0097): a
+	// comma-separated host:port allowlist target_address must match on
+	// the three unauthenticated join-colony RPCs. Empty preserves
+	// ADR-0092's original accept-any-target_address behavior.
+	KnownPeerAddresses string `json:"known_peer_addresses,omitempty"`
+
 	// AssumptionCheckInterval/AssumptionHeartbeatInterval/
 	// AssumptionStaleAfter/AssumptionRunDeadline/AssumptionHistoryLimit/
 	// AssumptionHistoryMaxAge mirror the six -assumption-* flags -
