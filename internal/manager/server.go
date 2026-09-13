@@ -2067,8 +2067,9 @@ func (s *Server) GetNodeConfig(_ context.Context, _ *rpcpb.GetNodeConfigRequest)
 		PeerApiKeySet: cfg.PeerAPIKey != "",
 		RaftdTokenSet: cfg.RaftdToken != "",
 
-		TlsCert: cfg.TLSCert,
-		TlsKey:  cfg.TLSKey,
+		TlsCert:    cfg.TLSCert,
+		TlsKey:     cfg.TLSKey,
+		PamService: cfg.PAMService,
 
 		CloudflareTokenFile:             cfg.CloudflareTokenFile,
 		CloudflareZoneId:                cfg.CloudflareZoneID,
@@ -2203,8 +2204,9 @@ func (s *Server) UpdateNodeConfig(_ context.Context, req *rpcpb.UpdateNodeConfig
 		PeerTLSCA:          req.GetPeerTlsCa(),
 		KnownPeerAddresses: req.GetKnownPeerAddresses(),
 
-		TLSCert: req.GetTlsCert(),
-		TLSKey:  req.GetTlsKey(),
+		TLSCert:    req.GetTlsCert(),
+		TLSKey:     req.GetTlsKey(),
+		PAMService: req.GetPamService(),
 
 		CloudflareTokenFile:             req.GetCloudflareTokenFile(),
 		CloudflareZoneID:                req.GetCloudflareZoneId(),
@@ -2214,6 +2216,14 @@ func (s *Server) UpdateNodeConfig(_ context.Context, req *rpcpb.UpdateNodeConfig
 		OriginCADirectory:               req.GetOriginCaDirectory(),
 
 		RaftdToken: raftdToken,
+	}
+	// pam_service requires tls_cert/tls_key (ADR-0087): a login
+	// password must not travel to this RPC over a plaintext channel.
+	// Checked here too, not just at managerd startup, so a bad
+	// combination is rejected immediately rather than only failing the
+	// next time managerd restarts.
+	if cfg.PAMService != "" && (cfg.TLSCert == "" || cfg.TLSKey == "") {
+		return &rpcpb.UpdateNodeConfigResponse{Error: "pam_service requires tls_cert/tls_key to also be set - a login password must not travel to this RPC over a plaintext channel"}, nil
 	}
 	if err := s.nodeConfig.Save(cfg); err != nil {
 		return &rpcpb.UpdateNodeConfigResponse{Error: err.Error()}, nil

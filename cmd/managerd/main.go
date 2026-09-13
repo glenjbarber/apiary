@@ -225,6 +225,9 @@ func run() error {
 		if cfg.TLSKey != "" {
 			*tlsKey = cfg.TLSKey
 		}
+		if cfg.PAMService != "" {
+			*pamService = cfg.PAMService
+		}
 		if cfg.CloudflareTokenFile != "" {
 			*cloudflareTokenFile = cfg.CloudflareTokenFile
 		}

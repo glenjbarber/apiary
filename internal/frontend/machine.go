@@ -282,8 +282,9 @@ func (s *Server) nodeConfigUpdateRequest(r *http.Request) *rpcpb.UpdateNodeConfi
 		PeerTlsCa:          cfg.PeerTLSCA,
 		KnownPeerAddresses: cfg.KnownPeerAddresses,
 
-		TlsCert: cfg.TLSCert,
-		TlsKey:  cfg.TLSKey,
+		TlsCert:    cfg.TLSCert,
+		TlsKey:     cfg.TLSKey,
+		PamService: cfg.PAMService,
 
 		CloudflareTokenFile:             cfg.CloudflareTokenFile,
 		CloudflareZoneId:                cfg.CloudflareZoneID,
@@ -394,6 +395,9 @@ func (s *Server) nodeConfigUpdateRequest(r *http.Request) *rpcpb.UpdateNodeConfi
 	if r.Form.Has("tls_key") {
 		req.TlsKey = r.FormValue("tls_key")
 	}
+	if r.Form.Has("pam_service") {
+		req.PamService = r.FormValue("pam_service")
+	}
 	if r.Form.Has("cloudflare_token_file") {
 		req.CloudflareTokenFile = r.FormValue("cloudflare_token_file")
 	}
@@ -442,7 +446,9 @@ func (s *Server) handleUpdatePeerForwarding(w http.ResponseWriter, r *http.Reque
 }
 
 // handleUpdateTLSConfig updates this node's own external gRPC TLS
-// cert/key paths.
+// cert/key paths, and (ADR-0087) the PAM service name login is
+// authenticated against - grouped here since the latter requires the
+// former to be set.
 func (s *Server) handleUpdateTLSConfig(w http.ResponseWriter, r *http.Request) {
 	s.handleUpdateMachineConfig(w, r, "tls_panel")
 }

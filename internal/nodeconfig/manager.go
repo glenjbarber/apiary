@@ -160,6 +160,15 @@ type Config struct {
 	TLSCert string `json:"tls_cert,omitempty"`
 	TLSKey  string `json:"tls_key,omitempty"`
 
+	// PAMService mirrors -pam-service (ADR-0087): the PAM service name
+	// frontend's web UI logins are authenticated against. Empty
+	// disables login entirely. Enforced together with TLSCert/TLSKey
+	// at managerd startup (a login password must not travel to this
+	// RPC over a plaintext channel) - that check runs after this
+	// package's own overrides are applied, so a config-set PAMService
+	// is covered by it exactly like a flag-set one.
+	PAMService string `json:"pam_service,omitempty"`
+
 	// CloudflareTokenFile/CloudflareZoneID/CloudflareTunnelID/
 	// CloudflareTunnelCredentialsFile mirror ADR-0063's four
 	// -cloudflare-* flags. CloudflareTokenFile is a path, never the raw
