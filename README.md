@@ -251,7 +251,11 @@ each design decision, in order.
   and blocked at the right routes. Repeated failed logins for one
   username now lock that account out for a fixed cooldown, checked
   before the PAM backend is ever called. See
-  [ADR-0030](docs/adr/0030-tiered-rbac-pam-login.md).
+  [ADR-0030](docs/adr/0030-tiered-rbac-pam-login.md). `-pam-service`
+  gained UI support in the Machine Configuration page's TLS panel
+  (ADR-0087), persisted through node-config alongside `tls_cert`/
+  `tls_key` - the pam-requires-TLS safety rail is enforced both there
+  and at managerd startup.
 - **VM base disk images** — `VMDefinition` gains `base_image_name`,
   resolved by the reconciler exactly like `iso_name` (reusing
   `internal/isostore` as-is). When set, a VM's disk is seeded by copying
