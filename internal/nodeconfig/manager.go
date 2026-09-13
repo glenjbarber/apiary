@@ -24,9 +24,14 @@
 //     them - it just makes the reconciler stop seeing them, silently
 //     orphaning real VMs/jails/ISOs. This is deliberate friction, not a
 //     missing feature - see ADR-0070.
-//   - node_id, rpc_addr, and raftd_socket are not represented in this
-//     package at all - raft identity and internal wiring stay
-//     CLI/rc.conf-only, never settable through a running instance.
+//   - node_id, rpc_addr, and raftd_socket are loaded from this file at
+//     startup (ADR-0100 - managerd now has no CLI flags for them, or
+//     almost anything else) but deliberately excluded from
+//     GetNodeConfig/UpdateNodeConfig's RPC surface - raft identity and
+//     internal wiring stay hand-edit-the-file-and-restart-only, never
+//     settable through a running instance's web UI. Relocated from
+//     CLI-only to file-only-not-RPC-editable; the caution itself is
+//     unchanged.
 package nodeconfig
 
 import (
@@ -38,15 +43,30 @@ import (
 )
 
 // DefaultPath is where the settings file lives by default on a
-// pkg-installed FreeBSD system, alongside internal/isostore's own
-// /var/db/apiary/isos convention.
-const DefaultPath = "/var/db/apiary/node-config.json"
+// pkg-installed FreeBSD system, alongside every other daemon's own
+// config file under /usr/local/etc/apiary (ADR-0100).
+const DefaultPath = "/usr/local/etc/apiary/managerd.json"
 
 // Config is the full set of node-local settings this package manages.
-// Every field's zero value means "use the flag-provided default" - see
-// cmd/managerd's own startup wiring. Grouped to mirror
-// cmd/managerd/main.go's own flag declaration order.
+// Every field's zero value means "use the hardcoded default" - see
+// applyManagerdDefaults in cmd/managerd/main.go. Grouped to mirror
+// cmd/managerd/main.go's own former flag declaration order.
 type Config struct {
+	// NodeID mirrors -node-id (ADR-0100 - no longer a flag): identity
+	// reported in Status responses. Empty means "use os.Hostname()",
+	// same as the flag's own former default. Loaded from this file but
+	// not RPC-editable - see the package doc comment.
+	NodeID string `json:"node_id,omitempty"`
+
+	// RPCAddr mirrors -rpc-addr (ADR-0100): the TCP address managerd's
+	// own external RPC API listens on. Not RPC-editable.
+	RPCAddr string `json:"rpc_addr,omitempty"`
+
+	// RaftdSocket mirrors -raftd-socket (ADR-0100): path to raftd's
+	// internal Unix socket this node dials at startup. Not
+	// RPC-editable.
+	RaftdSocket string `json:"raftd_socket,omitempty"`
+
 	// Uplink mirrors -vlan-uplink: the physical interface VLAN-tagged
 	// networks attach to.
 	Uplink string `json:"uplink,omitempty"`
@@ -119,7 +139,11 @@ type Config struct {
 	// (the RPC handler is what implements "empty means unchanged" by
 	// re-reading the current value first, the same pattern the Users
 	// page's own password change already established for "leave blank
-	// to keep current").
+	// to keep current"). The former -peer-api-key-file flag (a path
+	// indirection that existed only to avoid this value's argv
+	// visibility via ps(1)) is retired as of ADR-0100 - moot once
+	// nothing is passed via argv at all; this field holds the literal
+	// secret directly, protected by this file's own 0600 permissions.
 	PeerAPIKey string `json:"peer_api_key,omitempty"`
 
 	// PeerManagerdPort mirrors -peer-managerd-port.
@@ -184,6 +208,15 @@ type Config struct {
 	// Cloudflare Origin CA issuance. They never contain a raw token or PEM.
 	OriginCATokenFile string `json:"origin_ca_token_file,omitempty"`
 	OriginCADirectory string `json:"origin_ca_directory,omitempty"`
+
+	// OriginCARenewalCheckInterval mirrors
+	// -origin-ca-renewal-check-interval: how often to check local
+	// Origin CA certificates for ones due for automatic renewal
+	// (ADR-0077). A pure tuning knob, safe to change any time - added
+	// here as part of ADR-0100, fixing a plain oversight (this flag
+	// was never added to this struct before now, unlike every other
+	// tuning duration).
+	OriginCARenewalCheckInterval time.Duration `json:"origin_ca_renewal_check_interval,omitempty"`
 
 	// RaftdToken mirrors -raftd-token - a live credential (ADR-0033),
 	// write-only, same posture as PeerAPIKey above.
@@ -387,6 +420,18 @@ func validate(cfg Config) error {
 	}
 	if cfg.AssumptionHistoryLimit < 0 {
 		return fmt.Errorf("nodeconfig: invalid assumption_history_limit %d: must not be negative", cfg.AssumptionHistoryLimit)
+	}
+	if err := validateDurationField("origin_ca_renewal_check_interval", cfg.OriginCARenewalCheckInterval); err != nil {
+		return err
+	}
+	if err := validatePathField("node_id", cfg.NodeID); err != nil {
+		return err
+	}
+	if err := validatePathField("rpc_addr", cfg.RPCAddr); err != nil {
+		return err
+	}
+	if err := validatePathField("raftd_socket", cfg.RaftdSocket); err != nil {
+		return err
 	}
 	return nil
 }

@@ -1277,6 +1277,13 @@ message GetNodeConfigResponse {
   // raft-replicated; the token value itself is only ever read from this path.
   string origin_ca_token_file = 41;
   string origin_ca_directory = 42;
+
+  // origin_ca_renewal_check_interval mirrors
+  // -origin-ca-renewal-check-interval (ADR-0100 - no longer a flag):
+  // how often to check local Origin CA certificates for ones due for
+  // automatic renewal (ADR-0077). Formatted as a duration string, same
+  // convention as reconcile_interval above.
+  string origin_ca_renewal_check_interval = 46;
 }
 
 message NetworkInterface {
@@ -1360,6 +1367,10 @@ message UpdateNodeConfigRequest {
   string cloudflare_tunnel_credentials_file = 36;
   string origin_ca_token_file = 41;
   string origin_ca_directory = 42;
+
+  // origin_ca_renewal_check_interval (ADR-0100) - see
+  // GetNodeConfigResponse's own doc comment for its full semantics.
+  string origin_ca_renewal_check_interval = 46;
 }
 
 message UpdateNodeConfigResponse {

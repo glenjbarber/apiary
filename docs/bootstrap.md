@@ -152,74 +152,93 @@ mkdir -p /var/db/apiary/raftd /var/db/apiary/isos /var/run/apiary /var/log/apiar
 
 ## 7. Start `raftd`
 
+As of ADR-0100, `raftd` takes no CLI flags for its steady-state
+configuration - it reads `/usr/local/etc/apiary/raftd.json`
+unconditionally (only `-reset`/`-restore`/`-restore-file`/
+`-restore-dry-run`/`-export` remain CLI flags, and only for their own
+one-shot recovery/export runs - see ADR-0038/ADR-0051). Create the
+directory and file first:
+
+```bash
+sudo mkdir -p /usr/local/etc/apiary
+sudo -e /usr/local/etc/apiary/raftd.json
+sudo chmod 600 /usr/local/etc/apiary/raftd.json
+```
+
 Decide first: does this node bootstrap its own independent cluster, or
-join an existing multi-node Colony? The two paths diverge here and
-rejoin at step 8.
+join an existing multi-node Colony? The two paths diverge in what
+`raftd.json` contains and rejoin at step 8.
 
 ### Path A - independent single-node cluster
 
-Omit `-join` entirely - do **not** pass an empty `-join ""`, just leave
-the flag off:
+Leave `join` unset entirely - do **not** set it to `""` explicitly,
+just omit the key:
 
-```bash
-./raftd -data-dir /var/db/apiary/raftd -socket /var/run/apiary/raftd.sock -node-id <this-node-id>
+```json
+{
+  "data_dir": "/var/db/apiary/raftd",
+  "socket": "/var/run/apiary/raftd.sock",
+  "node_id": "<this-node-id>"
+}
 ```
 
-Confirm a clean single-node leader election in the output, `Ctrl-C`, then
-launch it detached:
+Run it in the foreground once to confirm a clean single-node leader
+election in the output, `Ctrl-C`, then launch it detached:
 
 ```bash
-daemon -f -p /var/run/apiary/raftd.pid -o /var/log/apiary/raftd.log $(pwd)/raftd -data-dir /var/db/apiary/raftd -socket /var/run/apiary/raftd.sock -node-id <this-node-id>
+./raftd
+daemon -f -p /var/run/apiary/raftd.pid -o /var/log/apiary/raftd.log $(pwd)/raftd
 ```
 
 ### Path B - join an existing multi-node Colony
 
-Two things `-join` needs that are easy to get wrong:
+Two things easy to get wrong:
 
-**`-raft-bind` must be a real, routable address, not the default.**
-`raftd`'s default `-raft-bind` is `127.0.0.1:17600` - loopback, correct
-only for a single-host test cluster. For a genuine cross-host join, pass
-this node's own real, reachable address:
+**`raft_bind` must be a real, routable address, not the default.**
+`raftd`'s default is `127.0.0.1:17600` - loopback, correct only for a
+single-host test cluster. For a genuine cross-host join, set this
+node's own real, reachable address:
 
-```bash
--raft-bind <this-host's-real-address>:17600
+```json
+{
+  "data_dir": "/var/db/apiary/raftd",
+  "socket": "/var/run/apiary/raftd.sock",
+  "node_id": "<this-node-id>",
+  "raft_bind": "<this-host's-real-address>:17600",
+  "join": "/tmp/existing-member-raftd.sock"
+}
 ```
 
-**`-join` only ever dials its argument as a local Unix domain socket**
+**`join` only ever dials its value as a local Unix domain socket**
 (`unix://<path>`, hardcoded in `cmd/raftd`'s own `joinCluster` - see
 ADR-0003) - it has no TCP option. That's fine for multiple `raftd`
 processes on one host, but the existing cluster member's socket lives on
 a *different* host. Make it reachable as a local path with a one-shot SSH
-local forward before running `-join`, then tear the tunnel down once the
-join succeeds - ongoing raft replication travels over the real
-`-raft-bind` TCP addresses afterward, not through this tunnel:
+local forward before starting `raftd` with the config above, then tear
+the tunnel down once the join succeeds - ongoing raft replication
+travels over the real `raft_bind` TCP addresses afterward, not through
+this tunnel:
 
 ```bash
 ssh -f -N -L /tmp/existing-member-raftd.sock:/var/run/apiary/raftd.sock <existing-member-host>
 ```
 
-Now join through the forwarded local path:
+If the existing cluster runs with `internal_token` set, set the same
+value here too - every `raftd` in one cluster is expected to share it.
+Run `./raftd` in the foreground; once the join succeeds and this
+node's own log shows it as a voter, kill the SSH tunnel, remove `join`
+from `raftd.json` (a node with existing on-disk raft state ignores it
+and simply resumes as the member it already is - see ADR-0003's own
+`hadState` note - but there's no reason to leave a stale join target
+sitting in the file), and launch normally, detached:
 
 ```bash
-./raftd -data-dir /var/db/apiary/raftd -socket /var/run/apiary/raftd.sock -node-id <this-node-id> -raft-bind <this-host's-real-address>:17600 -join /tmp/existing-member-raftd.sock
+daemon -f -p /var/run/apiary/raftd.pid -o /var/log/apiary/raftd.log $(pwd)/raftd
 ```
-
-If the existing cluster runs with `-internal-token` set, pass the same
-token here too (`-internal-token <value>`) - every `raftd` in one cluster
-is expected to share it. Once the join succeeds and this node's own log
-shows it as a voter, kill the SSH tunnel and launch normally, detached:
-
-```bash
-daemon -f -p /var/run/apiary/raftd.pid -o /var/log/apiary/raftd.log $(pwd)/raftd -data-dir /var/db/apiary/raftd -socket /var/run/apiary/raftd.sock -node-id <this-node-id> -raft-bind <this-host's-real-address>:17600
-```
-
-(no `-join` on the detached relaunch - a node with existing on-disk raft
-state ignores `-join` and simply resumes as the member it already is; see
-ADR-0003's own `hadState` note.)
 
 A node joined at the wrong target (a follower, not the leader) fails fast
 with a `leader_hint` in the error rather than retrying automatically -
-re-run `-join` against the hinted address instead.
+update `join` to the hinted address and retry.
 
 ### Verify (either path)
 
@@ -230,16 +249,36 @@ ps auxww | grep raftd
 
 ## 8. Start `managerd`
 
+As of ADR-0100, `managerd` takes no CLI flags for its steady-state
+configuration either - it reads `/usr/local/etc/apiary/managerd.json`
+unconditionally (only `-reset-managed`/`-factory-reset`/
+`-factory-reset-extra-jails`/`-factory-reset-extra-datasets`/
+`-export-host-config` remain CLI flags, and only for their own one-shot
+runs - see ADR-0038/ADR-0069). This same file is also what the Machine
+Configuration web page reads and writes later, for every field except
+`node_id`/`rpc_addr`/`raftd_socket` (deliberately not exposed there -
+see ADR-0100).
+
 ```bash
-daemon -f -p /var/run/apiary/managerd.pid -o /var/log/apiary/managerd.log $(pwd)/managerd \
-  -raftd-socket /var/run/apiary/raftd.sock \
-  -rpc-addr 0.0.0.0:17700 \
-  -node-id <this-node-id> \
-  -zfs-base <your-pool-name>/apiary \
-  -bhyve-bootrom /usr/local/share/uefi-firmware/BHYVE_UEFI.fd \
-  -bhyve-bridge bridge0 \
-  -vlan-uplink <uplink-ifname> \
-  -iso-dir /var/db/apiary/isos
+sudo -e /usr/local/etc/apiary/managerd.json
+sudo chmod 600 /usr/local/etc/apiary/managerd.json
+```
+
+```json
+{
+  "raftd_socket": "/var/run/apiary/raftd.sock",
+  "rpc_addr": "0.0.0.0:17700",
+  "node_id": "<this-node-id>",
+  "zfs_base": "<your-pool-name>/apiary",
+  "bhyve_bootrom": "/usr/local/share/uefi-firmware/BHYVE_UEFI.fd",
+  "bhyve_bridge": "bridge0",
+  "uplink": "<uplink-ifname>",
+  "iso_dir": "/var/db/apiary/isos"
+}
+```
+
+```bash
+daemon -f -p /var/run/apiary/managerd.pid -o /var/log/apiary/managerd.log $(pwd)/managerd
 ```
 
 **Joining a multi-node Colony (Path B only)** - add these so this node's
@@ -247,27 +286,22 @@ daemon -f -p /var/run/apiary/managerd.pid -o /var/log/apiary/managerd.log $(pwd)
 Combs, and so the cluster-overview page can reach their host stats
 (ADR-0029):
 
-```bash
-  -peer-api-key-file /var/db/apiary/peer-api-key \
-  -peer-managerd-port 17700
+```json
+  "peer_api_key": "<the-same-key-every-Comb-in-this-Colony-uses>",
+  "peer_managerd_port": "17700"
 ```
 
 A peer key is required once the Colony has any API key at all
 (ADR-0023) - peer-to-peer forwarding goes through the same authenticated
-`ManagerService` API as everything else. Prefer `-peer-api-key-file`
-(ADR-0096) over `-peer-api-key <value>` directly: a value passed as a
-literal flag is visible to any local user via `ps(1)`/`procstat(1)`
-regardless of `/etc/rc.conf`'s own permissions, since that's true of any
-process's own argument list, not something a config file's mode can fix.
-Write the shared key to that file once (`0600`, root-owned) before
-starting `managerd`:
+`ManagerService` API as everything else. This value now lives directly
+in `managerd.json` (mode `0600`, root-owned) rather than a separate
+file a `-peer-api-key-file` flag pointed at - the whole reason for that
+indirection (ADR-0096) was avoiding a literal flag value's `ps(1)`
+visibility, which no longer applies once nothing is passed via argv at
+all.
 
-```bash
-install -m 0600 /dev/stdin /var/db/apiary/peer-api-key <<< "<the-same-key-every-Comb-in-this-Colony-uses>"
-```
-
-Add `-peer-tls`/`-peer-tls-hostname-map` too if the other Combs'
-`managerd` instances serve TLS. Optionally, add `-known-peer-addresses`
+Add `peer_tls`/`peer_tls_hostname_map` too if the other Combs'
+`managerd` instances serve TLS. Optionally, add `known_peer_addresses`
 (ADR-0097) listing every Comb's `host:port` in this Colony, comma-
 separated - once set, the join-colony RPCs refuse a `target_address`
 outside that list, closing off the residual risk that an unauthenticated
@@ -286,19 +320,50 @@ ps auxww | grep managerd
 A clean log shows one line: `managerd: listening on 0.0.0.0:17700
 (node-id=..., raftd-socket=..., ...)` and nothing after it.
 
-## 9. Start `frontend`
+## 9. Start `frontend` and `restshimd`
+
+As of ADR-0100, both take no CLI flags either - `frontend` reads
+`/usr/local/etc/apiary/frontend.json`, `restshimd` reads
+`/usr/local/etc/apiary/restshimd.json`, each unconditionally.
 
 ```bash
-daemon -f -p /var/run/apiary/frontend.pid -o /var/log/apiary/frontend.log $(pwd)/frontend \
-  -manager-addr 127.0.0.1:17700 \
-  -http-addr 0.0.0.0:8080
+sudo -e /usr/local/etc/apiary/frontend.json
 ```
 
-Without `-pam-service` on `managerd` (see Step 8), the web UI is open
+```json
+{
+  "manager_addr": "127.0.0.1:17700",
+  "http_addr": "0.0.0.0:8080"
+}
+```
+
+```bash
+daemon -f -p /var/run/apiary/frontend.pid -o /var/log/apiary/frontend.log $(pwd)/frontend
+```
+
+`restshimd` (Apiary's REST/JSON API, if you need it) follows the same
+pattern:
+
+```bash
+sudo -e /usr/local/etc/apiary/restshimd.json
+```
+
+```json
+{
+  "manager_addr": "127.0.0.1:17700",
+  "http_addr": "0.0.0.0:8081"
+}
+```
+
+```bash
+daemon -f -p /var/run/apiary/restshimd.pid -o /var/log/apiary/restshimd.log $(pwd)/restshimd
+```
+
+Without `pam_service` on `managerd` (see Step 8), the web UI is open
 to anyone who can reach the port - fine for initial verification, but
 add real login (ADR-0030/ADR-0087) before this host is reachable from
-anywhere untrusted. `frontend` itself takes no login-related flag at
-all - it asks `managerd`'s own `Status` RPC whether PAM is configured.
+anywhere untrusted. `frontend` itself has no login-related config field
+at all - it asks `managerd`'s own `Status` RPC whether PAM is configured.
 
 ## 10. Verify
 
@@ -306,18 +371,20 @@ Open `http://<this-host's-address>:8080` in a browser - the Colony
 overview page should show this Comb as `Reachable`/`healthy` with its ZFS
 pool and packet filter both reporting healthy/enabled.
 
-Without `-pam-service` on `managerd`, every page loads with no login at
-all and the Users page shows "no active session" - that's the expected
-state with login disabled, not a bug. Step 11 turns real login on.
+Without `pam_service` set in `managerd.json`, every page loads with no
+login at all and the Users page shows "no active session" - that's the
+expected state with login disabled, not a bug. Step 11 turns real
+login on.
 
 ## 11. (Optional but recommended) Real login via PAM
 
 Skip this only for throwaway testing - without it, the web UI is open to
 anyone who can reach the port. Since ADR-0087, PAM lives in `managerd`,
 not `frontend` - a login password now travels over the RPC channel
-between them, so `managerd` also needs `-tls-cert`/`-tls-key` set for
-`-pam-service` to be accepted at all (`managerd` refuses to start
-otherwise).
+between them, so `managerd` also needs `tls_cert`/`tls_key` set in its
+own config for `pam_service` to be accepted at all (`managerd` refuses
+to start otherwise, and `UpdateNodeConfig` rejects the same bad
+combination through the web UI too).
 
 **Pick a PAM service name** (e.g. `apiary`) and create its policy file.
 `make setup` does this for you (only if `/etc/pam.d/apiary` doesn't
@@ -352,22 +419,20 @@ pw useradd -n <username> -m -s /bin/sh
 passwd <username>
 ```
 
-**Restart `managerd`** with PAM enabled (requires `-tls-cert`/`-tls-key`
-to already be set - see ADR-0087):
+**Add `tls_cert`/`tls_key`/`pam_service` to `managerd.json`** (via
+`sudo -e /usr/local/etc/apiary/managerd.json`, or through the Machine
+Configuration page's TLS panel once `managerd` is already up) and
+restart:
+
+```json
+  "tls_cert": "<cert>",
+  "tls_key": "<key>",
+  "pam_service": "apiary"
+```
 
 ```bash
 kill $(cat /var/run/apiary/managerd.pid)
-daemon -f -p /var/run/apiary/managerd.pid -o /var/log/apiary/managerd.log $(pwd)/managerd \
-  -raftd-socket /var/run/apiary/raftd.sock \
-  -rpc-addr 0.0.0.0:17700 \
-  -node-id <this-node-id> \
-  -zfs-base <your-pool-name>/apiary \
-  -bhyve-bootrom /usr/local/share/uefi-firmware/BHYVE_UEFI.fd \
-  -bhyve-bridge bridge0 \
-  -vlan-uplink <uplink-ifname> \
-  -iso-dir /var/db/apiary/isos \
-  -tls-cert <cert> -tls-key <key> \
-  -pam-service apiary
+daemon -f -p /var/run/apiary/managerd.pid -o /var/log/apiary/managerd.log $(pwd)/managerd
 ```
 
 `frontend` picks up the change automatically the next time it calls
@@ -388,7 +453,7 @@ narrow, race - see ADR-0086's own disclosed risk.
 
 `managerd` re-reads `/etc/pam.d/<service>` on every login attempt, not
 just at startup - fixing the file doesn't require restarting `managerd`
-again, only the first `-pam-service` flag change does.
+again, only the first `pam_service` config change does.
 
 ## 12. Create your first network
 
@@ -541,8 +606,17 @@ repeating this workaround indefinitely.
   then `service apiary_raftd start` (and the others, in dependency
   order - each script's own `REQUIRE`/`BEFORE` lines handle that if you
   just use `service apiary_frontend start`, which pulls in the rest).
-  Each daemon's own flags go in `/etc/rc.conf`'s `apiary_<name>_args`,
-  e.g. `apiary_raftd_args="-node-id node001 -data-dir /var/db/apiary/raftd ..."`.
+  As of ADR-0100, each daemon's own steady-state configuration lives in
+  its own JSON file under `/usr/local/etc/apiary/` (`raftd.json`,
+  `managerd.json`, `frontend.json`, `restshimd.json` - see Steps 7-9
+  above for their shape), not `/etc/rc.conf`'s `apiary_<name>_args`.
+  That variable is still read by each rc.d script (harmless if left
+  empty) but should normally stay unset now - it exists only for
+  raftd's/managerd's own one-shot recovery flags
+  (`-reset`/`-restore`/`-export-host-config`/etc.), which are never
+  meant to be persisted in rc.conf or any config file (see ADR-0100's
+  own reasoning: a value left sitting in `apiary_<name>_args` would
+  re-trigger on every `daemon(8)` respawn).
 
   **Found and fixed live, on real production hosts**: `daemon(8)`'s own
   pidfile can briefly outlive the process it supervised - `rc.subr`'s
@@ -578,7 +652,7 @@ repeating this workaround indefinitely.
   but never configures it, and the known `hastd` source patch (ADR-0022,
   FreeBSD bug 298085) is never applied automatically; see ADR-0026 for
   what real setup requires.
-- **`-internal-token`/raft transport TLS for a multi-node join** - step 7
-  Path B covers the SSH-tunnel mechanics `-join` needs across hosts and
-  `-internal-token`, but TLS between raft members (ADR-0078) is left to
+- **`internal_token`/raft transport TLS for a multi-node join** - step 7
+  Path B covers the SSH-tunnel mechanics `join` needs across hosts and
+  `internal_token`, but TLS between raft members (ADR-0078) is left to
   that ADR's own docs if the Colony requires it.
