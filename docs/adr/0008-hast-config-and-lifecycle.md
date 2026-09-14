@@ -7,7 +7,11 @@ upstream FreeBSD bug (not this project's environment), and its fix
 ([D57511](https://reviews.freebsd.org/D57511)) has been independently
 built and confirmed to actually work (real data replication verified,
 not just status). Not yet merged/released upstream — patched nodes
-currently require a manual source build.
+currently require a manual source build. As of 2026-09-14, the
+superseding review ([D59521](https://reviews.freebsd.org/D59521), a
+cleaner fix for the same root cause) has also been independently built
+and confirmed working on the current production pair — see the
+2026-09-14 update below. Same "manual source build" caveat applies.
 
 ## Context
 
@@ -241,6 +245,88 @@ a manually built `hastd` doesn't make the fix a reliable foundation for
 anyone else running Apiary on a stock FreeBSD install. The guardrail
 stays until D57511 merges upstream and is available via a normal
 release — what's changed is confidence, not the deployment story.
+
+**Update 2026-09-14 — superseding patch D59521 built and verified on
+the current production pair (`apiverse`/`apiarium`, formerly named
+`freebsd-apiary`/`freebsd-apiary2`).** D57511 never merged as-is - a
+reviewer (`glebius`) asked for a refactor before landing it (see
+above). [D59521](https://reviews.freebsd.org/D59521) is that refactor:
+instead of relying on a short read racing with descriptor arrival (the
+original fd-passing bug's root cause), it enforces a fixed 4-byte
+protocol name across `sbin/hastd/proto.c`, `proto_impl.h`, and
+`proto_socketpair.c` - a cleaner fix for the same underlying defect,
+accepted by multiple reviewers (`kevans`, `glebius`,
+`xtronom_gmail.com`). Glen built `hastd` from a source tree with
+D59521 applied and installed it on both `apiverse` and `apiarium`
+(only `hastd` needed rebuilding - `hastctl` binaries are unchanged,
+consistent with the patch only touching `hastd`'s own
+connection-migration path, matching Martin's original diagnosis that
+only a resource's primary side exercises the buggy code).
+
+Verification repeated the exact original failing scenario end-to-end,
+with a fresh throwaway resource (`d59521test`, a 64MB `mdconfig`
+vnode-backed device on each host, not the project's own dedicated
+`backing.img`-in-ZFS-dataset provider convention - unnecessary for a
+one-off protocol test) between the current production pair:
+
+- `hastctl create`, `role secondary` (apiverse), `role primary`
+  (apiarium) - **`status: complete` on both sides**, immediately, no
+  `degraded` state at any point. This is the exact symptom that
+  persisted through the entire investigation above.
+- A real 2MB write (`dd` to `/dev/hast/d59521test` on the primary)
+  showed `writes: 2` on **both** primary and secondary via `hastctl
+  list` - real data reached the secondary, not just a status flag.
+  `dirty` returned to `0 (0B)` on the primary essentially immediately
+  (`memsync` replication, low-latency LAN) - no lingering dirty extent
+  the way a stalled/degraded link would show.
+- `service hastd onerestart` on the primary while the resource was
+  actively `primary` completed cleanly with no `hastctl` crash (the
+  separate bug 298085 zero-size-message assertion, already patched
+  earlier, stayed fixed) and no error. The resource dropped to `role:
+  init` after the restart, as expected (`hastd` does not persist role
+  across a restart) - explicit re-promotion to `primary` recovered
+  `status: complete` again immediately. Apiary's own reconciler already
+  re-asserts HAST roles every tick for exactly this reason (see
+  "Committed HAST replication" in SHARED.md).
+- `grep`ing `/var/log/messages` on both hosts across the entire test
+  found zero occurrences of the original `Unable to receive header
+  ... Operation timed out.` signature.
+
+Test resource fully torn down afterward (`role init`, config file and
+`mdconfig` device removed on both hosts, `hastd` restarted on
+`apiarium` to drop the resource from its running state) - both hosts
+confirmed back to their pre-test state (`apiverse`: `hastd` stopped, no
+configured resources; `apiarium`: `hastd` running with zero configured
+resources). No production jail/VM was touched - neither host had any
+real HAST resource configured before or after this test.
+
+This closes the loop a second time, on the current production pair,
+with a cleaner upstream fix than D57511. **The "Decision" below is
+intentionally left unchanged**: D59521 is "Accepted" on Phabricator
+(review sign-off), not confirmed merged into the FreeBSD source tree or
+available via a normal package/release - "accepted" and "committed
+upstream" are different things, and this update does not attempt to
+verify which applies here. Revisit the guardrail once D59521's actual
+upstream commit/release status is confirmed, not from this test alone.
+
+**Update 2026-09-14 (continued) — re-verified against a clean D59521-only
+build, superseding the D57511 build entirely.** Glen tore down `hastd`
+on both hosts and rebuilt each from a source tree with **only** D59521
+applied (no residual D57511 build) - D59521 supersedes D57511 outright,
+so this is the correct, final state, not two patches stacked. Re-ran the
+identical `d59521test` scenario end-to-end against the fresh binaries
+(`hastd` rebuilt on both hosts, confirmed via mtime): `status: complete`
+on both sides immediately, a real 2MB write showed `writes: 2` on both
+primary and secondary, `service hastd onerestart` on the primary during
+active replication caused no crash and recovered to `complete` again
+after re-promotion, and `/var/log/messages` on both hosts again showed
+zero occurrences of the original error signature. Identical result to
+the first pass above - this rules out any possibility that the first
+pass's clean result was an artifact of leftover state from the earlier
+manually-built D57511 binary. Test resource fully torn down again
+afterward; both hosts confirmed back to `hastd` stopped, zero configured
+resources - the same "torn down" state Glen explicitly requested going
+into the rebuild.
 
 ## Consequences
 
