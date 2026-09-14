@@ -600,6 +600,44 @@ func TestFSM_Apply_CreateNetworkInvalidBridgeNameOrGatewayRejected(t *testing.T)
 	}
 }
 
+// TestFSM_Apply_CreateNetworkUplinkBridgedValidation covers ADR-0101's
+// three mutual-exclusion rules for uplink_bridged: it can't also carry a
+// VLAN tag, an external gateway, or a bridge_name override, since it
+// always reuses the node's own pre-existing -bhyve-bridge as-is. A plain
+// uplink_bridged network (only id/subnet/uplink_bridged set) must still
+// be accepted.
+func TestFSM_Apply_CreateNetworkUplinkBridgedValidation(t *testing.T) {
+	fsm := NewFSM()
+
+	withVLAN := &internalpb.Command{Op: &internalpb.Command_CreateNetwork{CreateNetwork: &internalpb.CreateNetwork{
+		Network: &internalpb.NetworkDefinition{Id: "net-1", Subnet: "10.50.0.0/24", UplinkBridged: true, VlanId: 60},
+	}}}
+	if result := fsm.Apply(&raft.Log{Index: 1, Data: mustMarshalCommand(t, withVLAN)}); result.(*FSMApplyResult).Error == "" {
+		t.Error("uplink_bridged with vlan_id set: Error = empty, want a rejection")
+	}
+
+	withGateway := &internalpb.Command{Op: &internalpb.Command_CreateNetwork{CreateNetwork: &internalpb.CreateNetwork{
+		Network: &internalpb.NetworkDefinition{Id: "net-2", Subnet: "10.50.0.0/24", UplinkBridged: true, ExternalGateway: "10.50.0.1"},
+	}}}
+	if result := fsm.Apply(&raft.Log{Index: 2, Data: mustMarshalCommand(t, withGateway)}); result.(*FSMApplyResult).Error == "" {
+		t.Error("uplink_bridged with external_gateway set: Error = empty, want a rejection")
+	}
+
+	withBridgeName := &internalpb.Command{Op: &internalpb.Command_CreateNetwork{CreateNetwork: &internalpb.CreateNetwork{
+		Network: &internalpb.NetworkDefinition{Id: "net-3", Subnet: "10.50.0.0/24", UplinkBridged: true, BridgeName: "apnet-x"},
+	}}}
+	if result := fsm.Apply(&raft.Log{Index: 3, Data: mustMarshalCommand(t, withBridgeName)}); result.(*FSMApplyResult).Error == "" {
+		t.Error("uplink_bridged with bridge_name set: Error = empty, want a rejection")
+	}
+
+	good := &internalpb.Command{Op: &internalpb.Command_CreateNetwork{CreateNetwork: &internalpb.CreateNetwork{
+		Network: &internalpb.NetworkDefinition{Id: "net-4", Subnet: "10.50.0.0/24", UplinkBridged: true},
+	}}}
+	if result := fsm.Apply(&raft.Log{Index: 4, Data: mustMarshalCommand(t, good)}); result.(*FSMApplyResult).Error != "" {
+		t.Errorf("valid uplink_bridged network rejected: %q", result.(*FSMApplyResult).Error)
+	}
+}
+
 func TestFSM_Apply_DeleteNetwork(t *testing.T) {
 	fsm := NewFSM()
 	fsm.Apply(&raft.Log{Index: 1, Data: mustMarshalCommand(t, createNetworkCmd("net-1", "prod", "10.60.0.0/24"))})
@@ -761,6 +799,42 @@ func TestFSM_Apply_CreateVMOnNetworkSkipsUsedIPs(t *testing.T) {
 	second := fsm.Apply(&raft.Log{Index: 3, Data: mustMarshalCommand(t, createVMOnNetworkCmd("vm-2", "net-1"))})
 	if second.(*FSMApplyResult).Error == "" {
 		t.Fatalf("second CreateVM Error = empty, want an exhausted-network rejection")
+	}
+}
+
+// TestFSM_Apply_CreateVMOnUplinkBridgedNetworkSkipsIPAllocation confirms
+// ADR-0101's core FSM change: a VM on an uplink_bridged network never gets
+// a raft-allocated IP (the physical LAN's own router/DHCP owns that, not
+// Apiary), and - since nothing is ever allocated - many VMs can share the
+// same tiny/doc-only subnet without ever hitting an "exhausted network"
+// error the isolated-network path would raise.
+func TestFSM_Apply_CreateVMOnUplinkBridgedNetworkSkipsIPAllocation(t *testing.T) {
+	fsm := NewFSM()
+	uplinkNet := &internalpb.Command{Op: &internalpb.Command_CreateNetwork{CreateNetwork: &internalpb.CreateNetwork{
+		Network: &internalpb.NetworkDefinition{Id: "net-1", Subnet: "10.50.0.0/30", UplinkBridged: true},
+	}}}
+	fsm.Apply(&raft.Log{Index: 1, Data: mustMarshalCommand(t, uplinkNet)})
+
+	first := fsm.Apply(&raft.Log{Index: 2, Data: mustMarshalCommand(t, createVMOnNetworkCmd("vm-1", "net-1"))}).(*FSMApplyResult)
+	if first.Error != "" {
+		t.Fatalf("first CreateVM Error = %q, want empty", first.Error)
+	}
+	if first.VM.GetIpAddress() != "" {
+		t.Errorf("IpAddress = %q, want empty - uplink_bridged networks are never Apiary-IP-allocated", first.VM.GetIpAddress())
+	}
+	if first.VM.GetMacAddress() == "" {
+		t.Errorf("MacAddress = empty, want a derived address even on an uplink_bridged network")
+	}
+
+	// A /30 would exhaust after one VM on the isolated-network path
+	// (TestFSM_Apply_CreateVMOnNetworkSkipsUsedIPs) - here a second VM must
+	// still succeed, since nothing was ever allocated against it.
+	second := fsm.Apply(&raft.Log{Index: 3, Data: mustMarshalCommand(t, createVMOnNetworkCmd("vm-2", "net-1"))}).(*FSMApplyResult)
+	if second.Error != "" {
+		t.Fatalf("second CreateVM Error = %q, want empty (uplink_bridged never allocates, so it can't exhaust)", second.Error)
+	}
+	if second.VM.GetIpAddress() != "" {
+		t.Errorf("IpAddress = %q, want empty", second.VM.GetIpAddress())
 	}
 }
 

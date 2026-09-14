@@ -22,6 +22,15 @@ import (
 	"github.com/glenjbarber/apiary/internal/pf"
 )
 
+// deadManager is the subset of *deadman.Manager the reconciler needs, for
+// the same reason as raftClient - lets tests inject a fake with no real
+// at(8)/atq(1)/atrm(1) calls. *deadman.Manager satisfies this today. See
+// ADR-0101.
+type deadManager interface {
+	ArmTapRevert(ctx context.Context, bridge, tap string) error
+	ConfirmBridgeHealthy(ctx context.Context, bridge, tap string) error
+}
+
 // DefaultNetworkStatePath records only network artifacts that this node's
 // reconciler successfully created. It is node-local physical state, never
 // cluster intent: that distinction lets removal remain conservative after a
@@ -109,6 +118,11 @@ type vmManager interface {
 	VMExists(ctx context.Context, name string) (bool, error)
 	CreateVM(ctx context.Context, name string, cfg bhyve.Config) error
 	DestroyVM(ctx context.Context, name string) error
+
+	// TapName is used only for a VM on an uplink_bridged network
+	// (ADR-0101), to learn the tap device CreateVM just created so the
+	// dead-man's switch can be armed for it.
+	TapName(name string) (tap string, ok bool, err error)
 }
 
 // isoResolver is the subset of *isostore.Manager the reconciler needs,
@@ -132,6 +146,11 @@ type vlanManager interface {
 	EnsureBridgeAddress(ctx context.Context, bridge, subnet string) error
 	DestroyBridge(ctx context.Context, name string) error
 	DestroyVLAN(ctx context.Context, vlanID uint32) error
+
+	// InterfaceStatus is used only for uplink_bridged networks (ADR-0101),
+	// to confirm this node's own uplink bridge already exists without
+	// creating or modifying it - see ensureUplinkBridgedNetwork.
+	InterfaceStatus(ctx context.Context, name string) (exists, up bool, err error)
 }
 
 // dhcpManager is the subset of *dhcpd.Manager the reconciler needs, for
@@ -228,6 +247,26 @@ type Reconciler struct {
 	// local (this-node) connectivity, matching today's behavior before
 	// this field existed.
 	Uplink string
+
+	// UplinkBridgingEnabled gates provisioning of any uplink_bridged
+	// NetworkDefinition on this node (see ADR-0101 and
+	// ensureUplinkBridgedNetwork). false (the default) makes ensureNetwork
+	// fail loudly for such a network rather than silently joining a VM's
+	// tap to this node's own management bridge - a misbehaving VM there
+	// has direct L2 access to the same broadcast domain the host's own
+	// management IP lives on. Set only from an explicit per-node
+	// confirmation phrase (-allow-uplink-bridging), never a plain
+	// operator-facing boolean - see internal/nodeconfig.
+	UplinkBridgingEnabled bool
+
+	// DeadMan is optional (nil-able, same opt-in pattern as Bhyve/ISOs
+	// above): when set (only ever done alongside UplinkBridgingEnabled),
+	// ensureVM arms a revert job before joining an uplink-bridged VM's
+	// tap to this node's own bridge, and confirms it healthy once a full
+	// tick succeeds - see ADR-0101 and internal/deadman. nil means no
+	// dead-man's switch at all; a node that never sets
+	// UplinkBridgingEnabled never needs one.
+	DeadMan deadManager
 
 	// DNSServer, if set, is handed to every Apiary-managed network's DHCP
 	// clients via option 6 (see dhcpd.NetworkScope.DNSServer's own doc
@@ -1155,6 +1194,7 @@ func (r *Reconciler) ensureVM(ctx context.Context, vm VMPlacement, networks map[
 	// until this was moved ahead of the running-VM early return below.
 	bridge := r.Bridge
 	macAddress := vm.MACAddress
+	uplinkBridged := false
 	if vm.NetworkID != "" {
 		if r.VLAN == nil {
 			return fmt.Errorf("VM names network %q but no VLAN support is configured on this node", vm.NetworkID)
@@ -1163,6 +1203,7 @@ func (r *Reconciler) ensureVM(ctx context.Context, vm VMPlacement, networks map[
 		if !ok {
 			return fmt.Errorf("network %q not found", vm.NetworkID)
 		}
+		uplinkBridged = network.GetUplinkBridged()
 		networkArtifact, err := r.ensureNetwork(ctx, network)
 		if err != nil {
 			return fmt.Errorf("provisioning network %q: %w", vm.NetworkID, err)
@@ -1182,6 +1223,21 @@ func (r *Reconciler) ensureVM(ctx context.Context, vm VMPlacement, networks map[
 		if r.PF != nil {
 			if err := r.PF.Apply(ctx, vmAnchor(vm.ID), effectivePFRules(vm)); err != nil {
 				return fmt.Errorf("applying firewall rules: %w", err)
+			}
+		}
+		// Confirm this VM's tap healthy (ADR-0101) once it's been observed
+		// still running and reconciling cleanly on a tick *after* the one
+		// that created it and armed its revert - deliberately not done
+		// immediately at creation time, so the dead-man's switch actually
+		// covers the window where a misbehaving guest's traffic (e.g. a
+		// broadcast storm right after boot) could wedge the host's own
+		// management bridge before anyone confirms otherwise. A no-op if
+		// nothing is armed for this tap.
+		if uplinkBridged && r.DeadMan != nil {
+			if tap, ok, err := r.Bhyve.TapName(vm.ID); err == nil && ok {
+				if err := r.DeadMan.ConfirmBridgeHealthy(ctx, bridge, tap); err != nil {
+					return fmt.Errorf("confirming uplink bridge healthy for %q: %w", vm.ID, err)
+				}
 			}
 		}
 		return nil
@@ -1273,6 +1329,23 @@ func (r *Reconciler) ensureVM(ctx context.Context, vm VMPlacement, networks map[
 		return fmt.Errorf("creating bhyve VM: %w", err)
 	}
 
+	// Arm the dead-man's switch (ADR-0101) for this VM's tap immediately
+	// after it joins the host's own uplink bridge, before anything else
+	// about this VM is considered done - RunOnce's own success path
+	// confirms it healthy once a full tick (including reaching raft)
+	// completes without error.
+	if uplinkBridged && r.DeadMan != nil {
+		tap, ok, err := r.Bhyve.TapName(vm.ID)
+		if err != nil {
+			return fmt.Errorf("looking up tap device for %q: %w", vm.ID, err)
+		}
+		if ok {
+			if err := r.DeadMan.ArmTapRevert(ctx, bridge, tap); err != nil {
+				return fmt.Errorf("arming uplink-bridge revert for %q: %w", vm.ID, err)
+			}
+		}
+	}
+
 	if r.PF != nil {
 		if err := r.PF.Apply(ctx, vmAnchor(vm.ID), effectivePFRules(vm)); err != nil {
 			return fmt.Errorf("applying firewall rules: %w", err)
@@ -1300,6 +1373,9 @@ type networkArtifactState struct {
 // on this node and returns the local artifact ownership observed during this
 // pass. It is idempotent, like every other existence check in this file.
 func (r *Reconciler) ensureNetwork(ctx context.Context, network *internalpb.NetworkDefinition) (networkArtifact, error) {
+	if network.GetUplinkBridged() {
+		return r.ensureUplinkBridgedNetwork(ctx, network)
+	}
 	iface, vlanCreated, err := r.VLAN.EnsureVLAN(ctx, network.GetVlanId())
 	if err != nil {
 		return networkArtifact{}, fmt.Errorf("ensuring vlan interface: %w", err)
@@ -1335,6 +1411,32 @@ func (r *Reconciler) ensureNetwork(ctx context.Context, network *internalpb.Netw
 		}
 	}
 	return artifact, nil
+}
+
+// ensureUplinkBridgedNetwork realizes an uplink_bridged network (ADR-0101):
+// unlike ensureNetwork's normal path, it never creates, tags, addresses, or
+// NATs anything - it only confirms this node has opted in and that its own
+// pre-existing uplink bridge (r.Bridge) already exists, then hands that
+// bridge straight back for the VM's tap to join. OwnBridge/OwnVLAN/
+// OutboundNAT are always false, which is the entire safety argument: it
+// guarantees reconcileNetworkArtifacts (and DeleteNetwork by extension) can
+// never tear down or detach the host's own management bridge - there is
+// nothing of this mode's own for Apiary to ever consider owning.
+func (r *Reconciler) ensureUplinkBridgedNetwork(ctx context.Context, network *internalpb.NetworkDefinition) (networkArtifact, error) {
+	if !r.UplinkBridgingEnabled {
+		return networkArtifact{}, fmt.Errorf("network %q is uplink_bridged but this node has not opted in via -allow-uplink-bridging (ADR-0101) - refusing to attach any VM tap to this node's own management bridge", network.GetId())
+	}
+	if r.Bridge == "" {
+		return networkArtifact{}, fmt.Errorf("network %q is uplink_bridged but this node has no -bhyve-bridge configured", network.GetId())
+	}
+	exists, _, err := r.VLAN.InterfaceStatus(ctx, r.Bridge)
+	if err != nil {
+		return networkArtifact{}, fmt.Errorf("checking uplink bridge %q: %w", r.Bridge, err)
+	}
+	if !exists {
+		return networkArtifact{}, fmt.Errorf("network %q is uplink_bridged but this node's configured bridge %q does not exist", network.GetId(), r.Bridge)
+	}
+	return networkArtifact{Bridge: r.Bridge}, nil
 }
 
 // reconcileNetworkArtifacts persists only positive ownership observations and

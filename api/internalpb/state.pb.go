@@ -891,8 +891,20 @@ type NetworkDefinition struct {
 	// preserves today's behavior exactly: Apiary's own bridge is the
 	// gateway.
 	ExternalGateway string `protobuf:"bytes,6,opt,name=external_gateway,json=externalGateway,proto3" json:"external_gateway,omitempty"`
-	unknownFields   protoimpl.UnknownFields
-	sizeCache       protoimpl.SizeCache
+	// uplink_bridged, if true, means VMs on this network attach directly
+	// to the node's own pre-existing uplink bridge (Reconciler.Bridge /
+	// -bhyve-bridge) rather than a new Apiary-owned per-network bridge -
+	// see ADR-0101. The reconciler never creates, tags, addresses, or
+	// NATs anything for such a network; it only verifies the configured
+	// bridge already exists. Mutually exclusive with external_gateway;
+	// vlan_id and bridge_name must both be zero/empty when this is true
+	// (validated at CreateNetwork time - see internal/raft/fsm.go). Gated
+	// per-node by AllowUplinkBridging (internal/nodeconfig) since a
+	// misbehaving VM here has direct L2 access to the host's own
+	// management broadcast domain.
+	UplinkBridged bool `protobuf:"varint,7,opt,name=uplink_bridged,json=uplinkBridged,proto3" json:"uplink_bridged,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *NetworkDefinition) Reset() {
@@ -965,6 +977,13 @@ func (x *NetworkDefinition) GetExternalGateway() string {
 		return x.ExternalGateway
 	}
 	return ""
+}
+
+func (x *NetworkDefinition) GetUplinkBridged() bool {
+	if x != nil {
+		return x.UplinkBridged
+	}
+	return false
 }
 
 // Command is the typed payload carried in ApplyRequest.payload (replacing
@@ -3327,7 +3346,7 @@ const file_api_internalpb_state_proto_rawDesc = "" +
 	"\bprotocol\x18\x03 \x01(\tR\bprotocol\x12\x1d\n" +
 	"\n" +
 	"port_range\x18\x04 \x01(\tR\tportRange\x12\x1a\n" +
-	"\bpriority\x18\x05 \x01(\x05R\bpriority\"\xb4\x01\n" +
+	"\bpriority\x18\x05 \x01(\x05R\bpriority\"\xdb\x01\n" +
 	"\x11NetworkDefinition\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x17\n" +
@@ -3335,7 +3354,8 @@ const file_api_internalpb_state_proto_rawDesc = "" +
 	"\x06subnet\x18\x04 \x01(\tR\x06subnet\x12\x1f\n" +
 	"\vbridge_name\x18\x05 \x01(\tR\n" +
 	"bridgeName\x12)\n" +
-	"\x10external_gateway\x18\x06 \x01(\tR\x0fexternalGateway\"\xf0\x10\n" +
+	"\x10external_gateway\x18\x06 \x01(\tR\x0fexternalGateway\x12%\n" +
+	"\x0euplink_bridged\x18\a \x01(\bR\ruplinkBridged\"\xf0\x10\n" +
 	"\aCommand\x12;\n" +
 	"\tcreate_vm\x18\x01 \x01(\v2\x1c.apiary.internal.v1.CreateVMH\x00R\bcreateVm\x12;\n" +
 	"\tupdate_vm\x18\x02 \x01(\v2\x1c.apiary.internal.v1.UpdateVMH\x00R\bupdateVm\x12;\n" +

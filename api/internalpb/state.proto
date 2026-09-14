@@ -320,6 +320,19 @@ message NetworkDefinition {
   // preserves today's behavior exactly: Apiary's own bridge is the
   // gateway.
   string external_gateway = 6;
+
+  // uplink_bridged, if true, means VMs on this network attach directly
+  // to the node's own pre-existing uplink bridge (Reconciler.Bridge /
+  // -bhyve-bridge) rather than a new Apiary-owned per-network bridge -
+  // see ADR-0101. The reconciler never creates, tags, addresses, or
+  // NATs anything for such a network; it only verifies the configured
+  // bridge already exists. Mutually exclusive with external_gateway;
+  // vlan_id and bridge_name must both be zero/empty when this is true
+  // (validated at CreateNetwork time - see internal/raft/fsm.go). Gated
+  // per-node by AllowUplinkBridging (internal/nodeconfig) since a
+  // misbehaving VM here has direct L2 access to the host's own
+  // management broadcast domain.
+  bool uplink_bridged = 7;
 }
 
 // Command is the typed payload carried in ApplyRequest.payload (replacing

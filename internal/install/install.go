@@ -62,14 +62,15 @@ const (
 // option (e.g. bhyve-bridge needs VLANUplink) report StatusManual with a
 // FixHint naming the missing flag rather than guessing.
 type Options struct {
-	ZFSPool          string
-	ZFSBase          string
-	BhyveFirmwarePkg string
-	VLANUplink       string
-	BhyveBridge      string
-	EnableNAT        bool
-	EnableHAST       bool
-	PAMService       string
+	ZFSPool             string
+	ZFSBase             string
+	BhyveFirmwarePkg    string
+	VLANUplink          string
+	BhyveBridge         string
+	EnableNAT           bool
+	EnableHAST          bool
+	PAMService          string
+	AllowUplinkBridging string
 }
 
 // Runner executes a real host command, returning its stdout and stderr

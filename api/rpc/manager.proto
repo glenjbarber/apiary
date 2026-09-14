@@ -593,6 +593,20 @@ message NetworkDefinition {
   // (the default) preserves today's behavior: Apiary's own per-node
   // bridge is the gateway.
   string external_gateway = 7;
+
+  // uplink_bridged, if true, attaches VMs on this network directly to
+  // the same bridge(4) interface this node's own uplink NIC is already
+  // a member of (Reconciler.Bridge / -bhyve-bridge) instead of a new
+  // Apiary-owned per-network bridge - VMs get a real DHCP lease from
+  // the physical LAN's own router, indistinguishable from any other
+  // device on that LAN. See ADR-0101. Mutually exclusive with
+  // external_gateway; vlan_id and bridge_name must both be unset (this
+  // mode shares the host's own untagged L2 segment and reuses its
+  // existing bridge by construction). Requires the node's operator to
+  // have explicitly opted in via -allow-uplink-bridging - a
+  // misbehaving VM on this network has direct L2 access to the same
+  // broadcast domain the host's own management IP lives on.
+  bool uplink_bridged = 8;
 }
 
 message CreateVMRequest {

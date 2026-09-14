@@ -257,6 +257,26 @@ func (m *Manager) allocateVNCPort() (int, error) {
 	return 0, fmt.Errorf("bhyve: no free VNC port in [%d, %d)", vncBasePort, vncBasePort+vncPortRange)
 }
 
+// TapName returns the tap(4) device name CreateVM created for name, as
+// recorded by createTap. ok is false (with err nil) if name has no
+// recorded tap device - created with no Bridge set, or not created at
+// all. Used by ADR-0101's uplink-bridged dead-man's switch, which needs
+// the specific tap name to arm a revert for after CreateVM returns.
+func (m *Manager) TapName(name string) (tap string, ok bool, err error) {
+	qname, err := m.qualifiedName(name)
+	if err != nil {
+		return "", false, err
+	}
+	data, err := os.ReadFile(m.tapfile(qname))
+	if os.IsNotExist(err) {
+		return "", false, nil
+	}
+	if err != nil {
+		return "", false, err
+	}
+	return strings.TrimSpace(string(data)), true, nil
+}
+
 // VNCPort returns the local TCP port name's VNC framebuffer is listening
 // on, as recorded by CreateVM. ok is false (with err nil) if name has no
 // recorded VNC port - not created with EnableVNC, or not created at all.

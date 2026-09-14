@@ -458,6 +458,31 @@ func TestBhyveBridgeCheck(t *testing.T) {
 	}
 }
 
+func TestUplinkBridgingCheck(t *testing.T) {
+	ctx := context.Background()
+
+	if uplinkBridgingCheck.Applicable(Options{}) {
+		t.Fatal("uplink-bridging should not apply when -allow-uplink-bridging is unset")
+	}
+	opt := Options{AllowUplinkBridging: "yes-share-uplink-bridge", BhyveBridge: "bridge0", VLANUplink: "em0"}
+	if !uplinkBridgingCheck.Applicable(opt) {
+		t.Fatal("uplink-bridging should apply once -allow-uplink-bridging is set")
+	}
+
+	res := uplinkBridgingCheck.Probe(ctx, newFakeRunner(), Options{AllowUplinkBridging: "yes-share-uplink-bridge"})
+	if res.Status != StatusMisconfigured {
+		t.Fatalf("status = %v, want misconfigured when -bhyve-bridge/-vlan-uplink are unset", res.Status)
+	}
+
+	res2 := uplinkBridgingCheck.Probe(ctx, newFakeRunner(), opt)
+	if res2.Status != StatusManual {
+		t.Fatalf("status = %v, want manual (report-only, never auto-fixed) once bridge/uplink are configured", res2.Status)
+	}
+	if uplinkBridgingCheck.Apply != nil {
+		t.Error("uplink-bridging must have no Apply - it never modifies anything, only warns")
+	}
+}
+
 func TestPAMServiceCheckNeverAutoFixes(t *testing.T) {
 	if pamServiceCheck.Apply != nil {
 		t.Fatal("pam-service must never have an Apply - PAM/account config is permanently manual-only")

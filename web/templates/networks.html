@@ -25,8 +25,13 @@
     <h3>Check teardown status before recreating</h3>
     <p class="muted">A deleted network's id can only be safely reused once every Comb has torn down its own leftover bridge/VLAN/NAT artifacts for it (ADR-0071). Check here before recreating a network with the same id you just deleted.</p>
     <form method="get" action="/networks" class="inline-form">
-      <label>Network ID <input type="text" name="teardown_network_id" value="{{.NetworkTeardownID}}" required list="teardown-network-ids" title="The id of a network you deleted and want to recreate - checks whether every Comb has finished tearing it down. A deleted id won't appear in the dropdown suggestions below since it no longer exists as a network - type it directly."></label>
-      <datalist id="teardown-network-ids">{{range .Networks}}<option value="{{.ID}}">{{end}}</datalist>
+      <label>Existing network
+        <select onchange="if(this.value){this.form.teardown_network_id.value=this.value}" title="Networks that still exist - pick one here only to copy its id into the field on the right; this dropdown can't list a network you already deleted.">
+          <option value="">-- pick to copy id --</option>
+          {{range .Networks}}<option value="{{.ID}}">{{.ID}}</option>{{end}}
+        </select>
+      </label>
+      <label>Network ID <input type="text" name="teardown_network_id" value="{{.NetworkTeardownID}}" required title="The id of a network you deleted and want to recreate - checks whether every Comb has finished tearing it down. Type the id directly - a deleted network can't appear in the dropdown on the left since it no longer exists."></label>
       <button type="submit">Check status</button>
     </form>
     {{if .NetworkTeardownID}}
