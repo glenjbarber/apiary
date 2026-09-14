@@ -320,7 +320,7 @@ func checkScopePathConflicts(current, next Config) error {
 		newVal := f.value(next)
 		curVal := f.value(current)
 		if newVal != "" && curVal != "" && newVal != curVal {
-			return fmt.Errorf("nodeconfig: %s is already configured as %q; edit the underlying rc.conf flag directly and restart to change it - changing it here could orphan existing resources still using the old value", f.name, curVal)
+			return fmt.Errorf("nodeconfig: %s is already configured as %q; edit it directly in %s and restart to change it - changing it here could orphan existing resources still using the old value", f.name, curVal, DefaultPath)
 		}
 	}
 	return nil

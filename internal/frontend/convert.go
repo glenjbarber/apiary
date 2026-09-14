@@ -426,14 +426,35 @@ func fromRPCAPIKey(k *rpcpb.APIKeyInfo) apiKeyView {
 }
 
 // isoView is the template-facing shape for a stored installer image.
+// Size/SHA256Short are pre-formatted for scanability on the Images
+// page - the full SHA256 is still available (as a data attribute the
+// template's own copy button reads), never dropped.
 type isoView struct {
-	Name      string
-	SizeBytes uint64
-	SHA256    string
+	Name        string
+	SizeBytes   uint64
+	Size        string
+	SHA256      string
+	SHA256Short string
 }
 
 func fromRPCISO(i *rpcpb.ISOInfo) isoView {
-	return isoView{Name: i.GetName(), SizeBytes: i.GetSizeBytes(), SHA256: i.GetSha256()}
+	sha := i.GetSha256()
+	return isoView{
+		Name: i.GetName(), SizeBytes: i.GetSizeBytes(), Size: formatBytes(i.GetSizeBytes()),
+		SHA256: sha, SHA256Short: shortHash(sha),
+	}
+}
+
+// shortHash renders a long hex digest as "first8...last8" for
+// scanability in a table - the full value is never lost, only
+// display-truncated; callers keep the untruncated value available
+// (e.g. as a data attribute) for copying.
+func shortHash(hash string) string {
+	const headTail = 8
+	if len(hash) <= headTail*2+3 {
+		return hash
+	}
+	return hash[:headTail] + "..." + hash[len(hash)-headTail:]
 }
 
 func stateToRPC(s string) rpcpb.VMState {

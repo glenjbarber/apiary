@@ -20,7 +20,7 @@
           <td>{{.Target}}</td>
           <td>{{.Label}}<div class="muted">{{.Explanation}}</div></td>
           <td><span class="badge {{.BadgeClass}}">{{.Status}}</span></td>
-          <td>{{if .Result}}{{.Result}}{{else}}<span class="muted">n/a</span>{{end}}</td>
+          <td>{{if .Result}}{{.Result}}{{else}}<span class="muted">&mdash;</span>{{end}}</td>
         </tr>
         {{else}}
         <tr><td colspan="5" class="muted"><em>No scenarios could be enumerated.</em></td></tr>

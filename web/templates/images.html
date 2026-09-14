@@ -48,6 +48,21 @@
     {{template "iso_panel" .}}
   </div>
   </div>
+  {{/* Delegated on the document body, not each button, since #iso-panel's
+       rows are re-rendered by htmx swaps (upload/delete) - a
+       per-element listener would need to be re-attached after every
+       swap, but a body-level listener survives them for free. */}}
+  <script>
+    document.body.addEventListener("click", function (e) {
+      var btn = e.target.closest("[data-copy]");
+      if (!btn) return;
+      navigator.clipboard.writeText(btn.getAttribute("data-copy")).then(function () {
+        var original = btn.textContent;
+        btn.textContent = "Copied";
+        setTimeout(function () { btn.textContent = original; }, 1500);
+      });
+    });
+  </script>
   </main>
   {{template "footer" .}}
 </body>
@@ -59,7 +74,7 @@
 <div id="iso-success" class="banner-success">{{.ISOFormSuccess}}</div>
 <table>
   <thead>
-    <tr><th>Name</th><th>Size (bytes)</th><th>SHA-256</th><th></th></tr>
+    <tr><th>Name</th><th>Size</th><th>SHA-256</th><th></th></tr>
   </thead>
   <tbody id="iso-rows">
     {{template "iso_rows" .}}

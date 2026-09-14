@@ -185,7 +185,7 @@ func TestHandleCoveragePage_CountsTallyShowsAllFiveStatusesZeroFilled(t *testing
 	s.ServeHTTP(rec, req)
 
 	body := rec.Body.String()
-	for _, want := range []string{"simulated", "physically_rehearsed", "stale", "untested", "unsafe_or_impossible"} {
+	for _, want := range []string{"Simulated", "Physically rehearsed", "Stale", "Untested", "Not survivable"} {
 		if !strings.Contains(body, want) {
 			t.Errorf("expected the Counts tally to show %q even when zero, got: %s", want, body)
 		}
