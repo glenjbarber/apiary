@@ -58,16 +58,25 @@ func TestMachineSectionNavigationPreservesPanels(t *testing.T) {
 	}
 }
 
-func TestAssumptionScopeSuggestionsKeepManualEntry(t *testing.T) {
+// TestAssumptionScopeIsDropdownOnly confirms the scope field is a
+// strict <select> (colony plus one hive:<id> option per known node),
+// with no manual text-entry fallback - the user explicitly asked for
+// the free-text option to be removed once dropdown suggestions existed,
+// accepting that a scope beyond colony/hive:<id> can no longer be
+// entered through this form.
+func TestAssumptionScopeIsDropdownOnly(t *testing.T) {
 	for _, nodes := range [][]string{nil, {"node-a", "node-b"}} {
 		rec := httptest.NewRecorder()
 		client := &fakeClient{statusResp: &rpcpb.StatusResponse{KnownNodeIds: nodes}}
 		newTestServer(t, client).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/assumption-register", nil))
 		body := rec.Body.String()
-		for _, want := range []string{`<input name="scope" list="claim-scopes"`, `<option value="colony">`, `class="form-actions"`} {
+		for _, want := range []string{`<select name="scope"`, `<option value="colony">`, `class="form-actions"`} {
 			if !strings.Contains(body, want) {
 				t.Errorf("missing %s", want)
 			}
+		}
+		if strings.Contains(body, `<input name="scope"`) {
+			t.Error("manual scope text input still present, want dropdown-only")
 		}
 		for _, node := range nodes {
 			if !strings.Contains(body, `<option value="hive:`+node+`">`) {
