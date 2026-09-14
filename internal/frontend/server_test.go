@@ -2293,6 +2293,30 @@ func TestServer_StaticAssets(t *testing.T) {
 	}
 }
 
+// TestServer_Favicon confirms the multi-resolution favicon.ico is
+// embedded and served, and that every page's <head> references it.
+func TestServer_Favicon(t *testing.T) {
+	s := newTestServer(t, &fakeClient{})
+
+	req := httptest.NewRequest(http.MethodGet, "/static/favicon.ico", nil)
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 for favicon.ico", rec.Code)
+	}
+	if rec.Body.Len() == 0 {
+		t.Errorf("favicon.ico served empty body")
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/", nil)
+	rec = httptest.NewRecorder()
+	s.ServeHTTP(rec, req)
+	if !strings.Contains(rec.Body.String(), `/static/favicon.ico`) {
+		t.Errorf("page <head> missing favicon link, got: %s", rec.Body.String())
+	}
+}
+
 func TestServer_NoAuthConfigured_AllPagesReachableWithoutLogin(t *testing.T) {
 	s := newTestServer(t, &fakeClient{})
 
