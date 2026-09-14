@@ -22,8 +22,8 @@
     <h3>Apiary services</h3>
     <p class="muted">
       Status is local to this Comb. Restarting <code>apiary_managerd</code>
-      applies saved Machine settings such as jail provisioning. Apiary does
-      not change <code>rc.conf</code> here.
+      applies saved Machine settings such as jail provisioning, read from
+      <code>/usr/local/etc/apiary/managerd.json</code> (ADR-0100).
     </p>
     <div id="node-services-panel">
       {{template "node_services_panel" .}}
@@ -104,8 +104,8 @@
       exist under the old value does not move them - it just makes the
       reconciler stop seeing them, silently orphaning real VMs, jails,
       or ISOs. Once a value below is set, it can only be changed by
-      editing the underlying <code>rc.conf</code> flag directly and
-      restarting.
+      editing it directly in <code>/usr/local/etc/apiary/managerd.json</code>
+      (ADR-0100) and restarting.
     </p>
     <div id="resource-scope-panel">
       {{template "resource_scope_panel" .}}
@@ -282,7 +282,7 @@
       <li>The domain's DNS must already be managed by Cloudflare (its nameservers point at Cloudflare).</li>
       <li>Install <code>cloudflared</code> on this Comb, then run <code>cloudflared tunnel login</code> and <code>cloudflared tunnel create &lt;comb-name&gt;</code> once - this produces a tunnel id and a credentials JSON file.</li>
       <li>Create a Cloudflare API token scoped to <strong>Zone:DNS:Edit only</strong> (never Tunnel:Edit or account-level) for the zone Apiary will manage CNAME records in, and save it to a file only this host can read.</li>
-      <li>Fill in the token file's path plus the zone/tunnel id and credentials file path below (or set the matching <code>-cloudflare-*</code> flags directly in <code>rc.conf</code>), then restart <code>apiary_managerd</code>.</li>
+      <li>Fill in the token file's path plus the zone/tunnel id and credentials file path below (or set the matching <code>cloudflare_*</code> fields directly in <code>/usr/local/etc/apiary/managerd.json</code>, ADR-0100), then restart <code>apiary_managerd</code>.</li>
     </ol>
     <p class="muted">Once set, Apiary automatically creates/updates the DNS CNAME record for each exposed Cell - no manual DNS editing per Cell.</p>
     {{end}}
@@ -470,7 +470,7 @@
   {{if or (not .NodeConfig.ZFSBase) (not .NodeConfig.BhyvePrefix) (not .NodeConfig.ISODir) (not .NodeConfig.JailPrefix) (not .NodeConfig.JailMountBase)}}
   <div class="form-actions"><button type="submit">Save (one-time)</button></div>
   {{else}}
-  <p class="muted">Every resource-scope path is already set on this Comb. Edit the underlying <code>rc.conf</code> flag directly and restart to change one.</p>
+  <p class="muted">Every resource-scope path is already set on this Comb. Edit it directly in <code>/usr/local/etc/apiary/managerd.json</code> (ADR-0100) and restart to change one.</p>
   {{end}}
 </form>
 {{else}}

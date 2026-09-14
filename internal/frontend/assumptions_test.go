@@ -83,6 +83,51 @@ func TestServer_AssumptionsPage_NotApplicableAndStaleRenderDistinctly(t *testing
 	}
 }
 
+// TestServer_AssumptionsPage_StaleResultsGroupedSeparately confirms a
+// stale result never appears in the main table's own rows - only
+// inside the collapsed "superseded/stale" details section - so a
+// still-current result and its own stale, superseded counterpart (same
+// Kind, different DependencyID - e.g. an uplink assumption keyed on an
+// old, no-longer-checked interface name) don't visually read as two
+// current results for the same thing.
+func TestServer_AssumptionsPage_StaleResultsGroupedSeparately(t *testing.T) {
+	client := &fakeClient{
+		statusResp: &rpcpb.StatusResponse{ManagerNodeId: "apiverse", KnownNodeIds: []string{"apiverse"}},
+		assumptionsResp: &rpcpb.ListAssumptionResultsResponse{
+			Latest: []*rpcpb.AssumptionResult{
+				{
+					Key:            &rpcpb.AssumptionKey{Kind: rpcpb.AssumptionKind_ASSUMPTION_KIND_NAT_UPLINK_DEFAULT_ROUTE, DependencyId: "em0"},
+					ObservedStatus: rpcpb.AssumptionStatus_ASSUMPTION_STATUS_TRUE,
+					Status:         rpcpb.AssumptionStatus_ASSUMPTION_STATUS_TRUE,
+				},
+				{
+					Key:            &rpcpb.AssumptionKey{Kind: rpcpb.AssumptionKind_ASSUMPTION_KIND_NAT_UPLINK_DEFAULT_ROUTE},
+					ObservedStatus: rpcpb.AssumptionStatus_ASSUMPTION_STATUS_NOT_APPLICABLE,
+					Status:         rpcpb.AssumptionStatus_ASSUMPTION_STATUS_UNKNOWN,
+					Stale:          true,
+				},
+			},
+		},
+	}
+	s := newTestServer(t, client)
+
+	req := httptest.NewRequest(http.MethodGet, "/assumptions", nil)
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, req)
+
+	body := rec.Body.String()
+	mainTable := body[:strings.Index(body, "<details>")]
+	if !strings.Contains(mainTable, "badge true") {
+		t.Errorf("current result missing from the main table, got: %s", mainTable)
+	}
+	if strings.Contains(mainTable, "badge stale") {
+		t.Errorf("stale result leaked into the main table rather than staying inside <details>, got: %s", mainTable)
+	}
+	if !strings.Contains(body, "superseded/stale") || !strings.Contains(body, "badge stale") {
+		t.Errorf("stale result missing from the collapsed details section, got: %s", body)
+	}
+}
+
 func TestServer_AssumptionsPage_StorageDegradedShowsBanner(t *testing.T) {
 	client := &fakeClient{
 		statusResp: &rpcpb.StatusResponse{ManagerNodeId: "apiarium", KnownNodeIds: []string{"apiarium"}},

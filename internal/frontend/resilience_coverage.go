@@ -33,6 +33,40 @@ func coverageBadgeClass(status coverage.Status) string {
 	}
 }
 
+// coverageStatusLabel renders a coverage.Status for a human reader,
+// rather than its internal enum spelling (e.g. "unsafe_or_impossible").
+func coverageStatusLabel(status coverage.Status) string {
+	switch status {
+	case coverage.StatusSimulated:
+		return "Simulated"
+	case coverage.StatusPhysicallyRehearsed:
+		return "Physically rehearsed"
+	case coverage.StatusUnsafeOrImpossible:
+		return "Not survivable"
+	case coverage.StatusStale:
+		return "Stale"
+	default: // StatusUntested
+		return "Untested"
+	}
+}
+
+// coverageResultLabel renders an invariant.Result string for a human
+// reader - empty (no result computed for this scenario kind) becomes
+// an em dash, matching this project's own "muted em dash for absent
+// data" convention elsewhere, rather than the raw enum spellings.
+func coverageResultLabel(result string) string {
+	switch result {
+	case "true":
+		return "Survives"
+	case "false":
+		return "Lost"
+	case "unknown":
+		return "Unknown"
+	default:
+		return ""
+	}
+}
+
 // coverageScenarioView is the template-facing shape for one
 // coverage.Scenario.
 type coverageScenarioView struct {
@@ -46,8 +80,8 @@ type coverageScenarioView struct {
 func fromCoverageScenario(s coverage.Scenario) coverageScenarioView {
 	return coverageScenarioView{
 		Kind: s.Kind, Target: s.Target, Label: s.Label,
-		Status: string(s.Status), BadgeClass: coverageBadgeClass(s.Status),
-		Result: s.Result, Explanation: s.Explanation,
+		Status: coverageStatusLabel(s.Status), BadgeClass: coverageBadgeClass(s.Status),
+		Result: coverageResultLabel(s.Result), Explanation: s.Explanation,
 	}
 }
 
@@ -228,7 +262,7 @@ func (s *Server) handleCoveragePage(w http.ResponseWriter, r *http.Request) {
 
 	counts := make([]coverageStatusCountView, 0, len(coverageStatusDisplayOrder))
 	for _, st := range coverageStatusDisplayOrder {
-		counts = append(counts, coverageStatusCountView{Status: string(st), BadgeClass: coverageBadgeClass(st), Count: report.Counts[st]})
+		counts = append(counts, coverageStatusCountView{Status: coverageStatusLabel(st), BadgeClass: coverageBadgeClass(st), Count: report.Counts[st]})
 	}
 
 	s.render(w, "coverage_page", s.withAuthFields(r, pageData{

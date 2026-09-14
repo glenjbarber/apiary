@@ -29,12 +29,19 @@ type assumptionResultView struct {
 }
 
 // nodeAssumptionsView is one node's section on the "/assumptions" page.
+// Results and StaleResults are the same LatestPerKey snapshot split by
+// .Stale - a stale entry (e.g. a check keyed on an uplink or peer this
+// node no longer has, its key simply never recomputed since) is real,
+// honest data, not a bug, but rendering it inline with genuinely
+// current results reads as duplicated current state. Grouped
+// separately, with StaleResults collapsed by default in the template.
 type nodeAssumptionsView struct {
 	NodeID                string
 	Error                 string
 	StorageDegraded       bool
 	StorageDegradedDetail string
 	Results               []assumptionResultView
+	StaleResults          []assumptionResultView
 }
 
 func fromRPCAssumptionStatus(s rpcpb.AssumptionStatus) string {
@@ -119,22 +126,32 @@ func (s *Server) nodeAssumptions(ctx context.Context, nodeID, localNodeID string
 		return nodeAssumptionsView{NodeID: nodeID, Error: resp.GetError()}
 	}
 
-	results := make([]assumptionResultView, 0, len(resp.GetLatest()))
-	for _, r := range resp.GetLatest() {
-		results = append(results, fromRPCAssumptionResult(r))
+	sortResults := func(results []assumptionResultView) {
+		sort.Slice(results, func(i, j int) bool {
+			if results[i].Kind != results[j].Kind {
+				return results[i].Kind < results[j].Kind
+			}
+			if results[i].SubjectID != results[j].SubjectID {
+				return results[i].SubjectID < results[j].SubjectID
+			}
+			return results[i].DependencyID < results[j].DependencyID
+		})
 	}
-	sort.Slice(results, func(i, j int) bool {
-		if results[i].Kind != results[j].Kind {
-			return results[i].Kind < results[j].Kind
+
+	var current, stale []assumptionResultView
+	for _, r := range resp.GetLatest() {
+		v := fromRPCAssumptionResult(r)
+		if v.Stale {
+			stale = append(stale, v)
+		} else {
+			current = append(current, v)
 		}
-		if results[i].SubjectID != results[j].SubjectID {
-			return results[i].SubjectID < results[j].SubjectID
-		}
-		return results[i].DependencyID < results[j].DependencyID
-	})
+	}
+	sortResults(current)
+	sortResults(stale)
 
 	return nodeAssumptionsView{
-		NodeID: nodeID, Results: results,
+		NodeID: nodeID, Results: current, StaleResults: stale,
 		StorageDegraded: resp.GetStorageDegraded(), StorageDegradedDetail: resp.GetStorageDegradedDetail(),
 	}
 }
@@ -143,8 +160,9 @@ func (s *Server) nodeAssumptions(ctx context.Context, nodeID, localNodeID string
 // ("/assumptions", ADR-0055): one section per known node, fetched
 // concurrently (mirrors handleClusterOverviewPage's own fan-out) since
 // one unreachable node shouldn't hold up every other node's section.
-// This is a scoped precursor to CODEX.md's fuller Assumption Register -
-// v1 shows only the current (`latest`) view, no history drill-down.
+// Complementary to the separate, operator-authored Assumption Register
+// (assumption_register.go) - this page shows only the current
+// (`latest`) automated view, no history drill-down.
 func (s *Server) handleAssumptionsPage(w http.ResponseWriter, r *http.Request) {
 	statusResp, err := s.client.Status(r.Context(), &rpcpb.StatusRequest{})
 	if err != nil {
