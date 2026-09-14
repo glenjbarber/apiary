@@ -26,6 +26,7 @@ import (
 	"github.com/glenjbarber/apiary/internal/bhyve"
 	"github.com/glenjbarber/apiary/internal/cloudflare"
 	"github.com/glenjbarber/apiary/internal/cluster"
+	"github.com/glenjbarber/apiary/internal/deadman"
 	"github.com/glenjbarber/apiary/internal/dhcpd"
 	"github.com/glenjbarber/apiary/internal/hast"
 	"github.com/glenjbarber/apiary/internal/hostconfig"
@@ -268,6 +269,17 @@ func run() error {
 		if cfg.NATUplink != "" {
 			reconciler.Uplink = cfg.NATUplink
 		}
+	}
+
+	// uplink_bridged NetworkDefinition support (ADR-0101) is gated by an
+	// explicit confirmation phrase, not a plain boolean - see
+	// nodeconfig.Config.AllowUplinkBridging's own doc comment for why. A
+	// node that never opts in pays zero cost here: reconciler.DeadMan
+	// stays nil, so ensureVM never shells out to at(8)/atq(1)/atrm(1).
+	const uplinkBridgingConfirmPhrase = "yes-share-uplink-bridge"
+	reconciler.UplinkBridgingEnabled = cfg.AllowUplinkBridging == uplinkBridgingConfirmPhrase
+	if reconciler.UplinkBridgingEnabled {
+		reconciler.DeadMan = &deadman.Manager{StateDir: "/var/db/apiary/deadman"}
 	}
 
 	// Passing literal nils into NewServer below (rather than nil

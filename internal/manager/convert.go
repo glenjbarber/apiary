@@ -128,6 +128,7 @@ func toInternalNetwork(n *rpcpb.NetworkDefinition) *internalpb.NetworkDefinition
 		Subnet:          n.GetSubnet(),
 		BridgeName:      n.GetBridgeName(),
 		ExternalGateway: n.GetExternalGateway(),
+		UplinkBridged:   n.GetUplinkBridged(),
 	}
 }
 
@@ -142,6 +143,7 @@ func fromInternalNetwork(n *internalpb.NetworkDefinition) *rpcpb.NetworkDefiniti
 		Subnet:          n.GetSubnet(),
 		BridgeName:      n.GetBridgeName(),
 		ExternalGateway: n.GetExternalGateway(),
+		UplinkBridged:   n.GetUplinkBridged(),
 	}
 }
 

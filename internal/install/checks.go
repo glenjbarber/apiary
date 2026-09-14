@@ -39,6 +39,7 @@ var registry = []Check{
 	gatewayEnableCheck,
 	vlanUplinkCheck,
 	bhyveBridgeCheck,
+	uplinkBridgingCheck,
 	devdDhclientConflictCheck,
 	hastdEnableCheck,
 	pamServiceCheck,
@@ -539,6 +540,28 @@ var bhyveBridgeCheck = Check{
 			return err
 		}
 		return setRcVar(ctx, r, fmt.Sprintf("ifconfig_%s=addm %s up", opt.BhyveBridge, opt.VLANUplink))
+	},
+}
+
+// uplinkBridgingCheck (ADR-0101) is applicable only when the operator has
+// actually opted into uplink_bridged NetworkDefinition support on this
+// node (-allow-uplink-bridging). It never applies anything itself -
+// StatusManual either way - it exists purely to make the real risk
+// explicit at install time, and to catch the meaningless case of opting
+// in without a bridge/uplink for it to reuse.
+var uplinkBridgingCheck = Check{
+	ID:          "uplink-bridging",
+	Description: "uplink_bridged networks (-allow-uplink-bridging) are configured on top of a working -bhyve-bridge/-vlan-uplink pair",
+	Risk:        RiskManualOnly,
+	Applicable:  func(opt Options) bool { return opt.AllowUplinkBridging != "" },
+	Probe: func(ctx context.Context, r Runner, opt Options) Result {
+		if opt.BhyveBridge == "" || opt.VLANUplink == "" {
+			return Result{ID: "uplink-bridging", Status: StatusMisconfigured,
+				Detail:  "-allow-uplink-bridging is set but -bhyve-bridge and/or -vlan-uplink is not - uplink_bridged mode has no bridge to reuse",
+				FixHint: "set both -bhyve-bridge and -vlan-uplink, or unset -allow-uplink-bridging"}
+		}
+		return Result{ID: "uplink-bridging", Status: StatusManual,
+			Detail: fmt.Sprintf("this node will attach uplink_bridged VMs' taps directly to %s, the same bridge carrying this host's own management traffic - a misbehaving VM there has direct L2 access to that broadcast domain (see ADR-0101)", opt.BhyveBridge)}
 	},
 }
 

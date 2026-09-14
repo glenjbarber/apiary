@@ -212,11 +212,17 @@ func (f *FSM) applyCreateVM(index uint64, vm *internalpb.VMDefinition) *FSMApply
 		if !ok {
 			return &FSMApplyResult{Index: index, Error: fmt.Sprintf("CreateVM: network %q does not exist", vm.GetNetworkId())}
 		}
-		ip, err := f.allocateIP(network)
-		if err != nil {
-			return &FSMApplyResult{Index: index, Error: fmt.Sprintf("CreateVM: %v", err)}
+		// uplink_bridged networks are served by the physical LAN's own
+		// DHCP, not Apiary's - allocating (and thus reserving) a raft IP
+		// here would just be bookkeeping Apiary can never enforce or
+		// know is accurate. See ADR-0101.
+		if !network.GetUplinkBridged() {
+			ip, err := f.allocateIP(network)
+			if err != nil {
+				return &FSMApplyResult{Index: index, Error: fmt.Sprintf("CreateVM: %v", err)}
+			}
+			vm.IpAddress = ip
 		}
-		vm.IpAddress = ip
 	}
 
 	f.vms[vm.GetId()] = vm
@@ -698,6 +704,22 @@ func (f *FSM) applyCreateNetwork(index uint64, network *internalpb.NetworkDefini
 	}
 	if network.GetExternalGateway() != "" && net.ParseIP(network.GetExternalGateway()) == nil {
 		return &FSMApplyResult{Index: index, Error: fmt.Sprintf("CreateNetwork: invalid external_gateway %q: must be a plain IP address", network.GetExternalGateway())}
+	}
+	// uplink_bridged reuses the node's own pre-existing uplink bridge
+	// directly (see ADR-0101) - it can't also be tagged with a VLAN, use
+	// a real external gateway (mutually exclusive network modes), or
+	// override the bridge name (there is no Apiary-owned bridge for this
+	// mode to name).
+	if network.GetUplinkBridged() {
+		if network.GetVlanId() != 0 {
+			return &FSMApplyResult{Index: index, Error: "CreateNetwork: uplink_bridged networks must not set vlan_id (they share the host's own untagged uplink segment)"}
+		}
+		if network.GetExternalGateway() != "" {
+			return &FSMApplyResult{Index: index, Error: "CreateNetwork: uplink_bridged and external_gateway are mutually exclusive"}
+		}
+		if network.GetBridgeName() != "" {
+			return &FSMApplyResult{Index: index, Error: "CreateNetwork: uplink_bridged networks reuse each node's own -bhyve-bridge and cannot set bridge_name"}
+		}
 	}
 	f.networks[network.GetId()] = network
 	return &FSMApplyResult{Index: index, Network: network}

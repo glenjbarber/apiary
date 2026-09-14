@@ -228,6 +228,14 @@ func (f *fakeVMManager) DestroyVM(_ context.Context, name string) error {
 	return nil
 }
 
+func (f *fakeVMManager) TapName(name string) (string, bool, error) {
+	cfg, ok := f.lastCfg[name]
+	if !ok || cfg.Bridge == "" {
+		return "", false, nil
+	}
+	return "tap-" + name, true, nil
+}
+
 func TestReconciler_RunOnce_CreatesMissingDatasets(t *testing.T) {
 	raft := &fakeRaftClient{resp: &internalpb.ListVMsResponse{
 		Vms: []*internalpb.VMDefinition{
@@ -1226,10 +1234,17 @@ type fakeVLANManager struct {
 	addressErr       error
 	destroyedBridges []string
 	destroyedVLANs   []uint32
+
+	// existingInterfaces/interfaceStatusErr back InterfaceStatus, used
+	// only by ADR-0101's uplink_bridged path - a name not present here
+	// reports as not existing, matching ifaceExists's own real "does not
+	// exist" behavior for an absent interface.
+	existingInterfaces map[string]bool
+	interfaceStatusErr error
 }
 
 func newFakeVLANManager() *fakeVLANManager {
-	return &fakeVLANManager{members: map[string][]string{}, addresses: map[string]string{}}
+	return &fakeVLANManager{members: map[string][]string{}, addresses: map[string]string{}, existingInterfaces: map[string]bool{}}
 }
 
 func (f *fakeVLANManager) EnsureVLAN(_ context.Context, vlanID uint32) (string, bool, error) {
@@ -1275,6 +1290,13 @@ func (f *fakeVLANManager) DestroyBridge(_ context.Context, name string) error {
 func (f *fakeVLANManager) DestroyVLAN(_ context.Context, vlanID uint32) error {
 	f.destroyedVLANs = append(f.destroyedVLANs, vlanID)
 	return nil
+}
+
+func (f *fakeVLANManager) InterfaceStatus(_ context.Context, name string) (exists, up bool, err error) {
+	if f.interfaceStatusErr != nil {
+		return false, false, f.interfaceStatusErr
+	}
+	return f.existingInterfaces[name], f.existingInterfaces[name], nil
 }
 
 type fakeDHCPManager struct {
@@ -1504,6 +1526,123 @@ func TestReconciler_RunOnce_NoNATForExternalGatewayNetwork(t *testing.T) {
 
 	if len(pfMgr.natCalls) != 0 {
 		t.Errorf("natCalls = %v, want none for an ExternalGateway network", pfMgr.natCalls)
+	}
+}
+
+// TestReconciler_EnsureUplinkBridgedNetwork_RequiresOptIn confirms
+// ADR-0101's Layer 1 safety gate: ensureNetwork must refuse an
+// uplink_bridged network outright when this node hasn't set
+// UplinkBridgingEnabled, making zero VLAN/bridge calls in the process -
+// never falling back to creating anything.
+func TestReconciler_EnsureUplinkBridgedNetwork_RequiresOptIn(t *testing.T) {
+	vlan := newFakeVLANManager()
+	vlan.existingInterfaces["bridge0"] = true
+	r := &Reconciler{VLAN: vlan, Bridge: "bridge0"}
+
+	_, err := r.ensureNetwork(context.Background(), &internalpb.NetworkDefinition{Id: "net-1", UplinkBridged: true, Subnet: "10.50.0.0/24"})
+	if err == nil {
+		t.Fatal("ensureNetwork() error = nil, want a not-opted-in rejection")
+	}
+	if len(vlan.ensuredBridges) != 0 || len(vlan.ensuredVLANs) != 0 {
+		t.Errorf("ensuredBridges = %v, ensuredVLANs = %v, want none touched when not opted in", vlan.ensuredBridges, vlan.ensuredVLANs)
+	}
+}
+
+// TestReconciler_EnsureUplinkBridgedNetwork_RequiresConfiguredBridge
+// confirms a node with UplinkBridgingEnabled but no -bhyve-bridge (Bridge
+// unset) still refuses rather than silently doing nothing useful.
+func TestReconciler_EnsureUplinkBridgedNetwork_RequiresConfiguredBridge(t *testing.T) {
+	vlan := newFakeVLANManager()
+	r := &Reconciler{VLAN: vlan, UplinkBridgingEnabled: true}
+
+	if _, err := r.ensureNetwork(context.Background(), &internalpb.NetworkDefinition{Id: "net-1", UplinkBridged: true, Subnet: "10.50.0.0/24"}); err == nil {
+		t.Fatal("ensureNetwork() error = nil, want a no-bridge-configured rejection")
+	}
+}
+
+// TestReconciler_EnsureUplinkBridgedNetwork_RequiresBridgeToExist
+// confirms ensureUplinkBridgedNetwork never falls back to creating the
+// bridge itself if it's missing - unlike the isolated-network path, this
+// mode must never bring a new interface into existence, only reuse one
+// the operator already set up (per internal/install's own bhyve-bridge
+// check).
+func TestReconciler_EnsureUplinkBridgedNetwork_RequiresBridgeToExist(t *testing.T) {
+	vlan := newFakeVLANManager() // bridge0 deliberately not in existingInterfaces
+	r := &Reconciler{VLAN: vlan, UplinkBridgingEnabled: true, Bridge: "bridge0"}
+
+	if _, err := r.ensureNetwork(context.Background(), &internalpb.NetworkDefinition{Id: "net-1", UplinkBridged: true, Subnet: "10.50.0.0/24"}); err == nil {
+		t.Fatal("ensureNetwork() error = nil, want a bridge-does-not-exist rejection")
+	}
+	if len(vlan.ensuredBridges) != 0 {
+		t.Errorf("ensuredBridges = %v, want none - this mode must never create the bridge", vlan.ensuredBridges)
+	}
+}
+
+// TestReconciler_EnsureUplinkBridgedNetwork_Success is the core safety
+// invariant this whole feature rests on: a successful uplink_bridged
+// network realizes to the node's own pre-existing bridge with
+// OwnBridge/OwnVLAN/OutboundNAT all false, guaranteeing
+// reconcileNetworkArtifacts can never later destroy or detach it -
+// unlike every other network mode, which owns what it creates.
+func TestReconciler_EnsureUplinkBridgedNetwork_Success(t *testing.T) {
+	vlan := newFakeVLANManager()
+	vlan.existingInterfaces["bridge0"] = true
+	r := &Reconciler{VLAN: vlan, UplinkBridgingEnabled: true, Bridge: "bridge0"}
+
+	artifact, err := r.ensureNetwork(context.Background(), &internalpb.NetworkDefinition{Id: "net-1", UplinkBridged: true, Subnet: "10.50.0.0/24"})
+	if err != nil {
+		t.Fatalf("ensureNetwork() error = %v, want success", err)
+	}
+	if artifact.Bridge != "bridge0" || artifact.OwnBridge || artifact.OwnVLAN || artifact.OutboundNAT {
+		t.Errorf("artifact = %+v, want {Bridge: bridge0, OwnBridge/OwnVLAN/OutboundNAT: false}", artifact)
+	}
+	if len(vlan.ensuredBridges) != 0 || len(vlan.ensuredVLANs) != 0 || len(vlan.members) != 0 || len(vlan.addresses) != 0 {
+		t.Errorf("vlan manager was touched (bridges=%v vlans=%v members=%v addresses=%v), want it left entirely alone", vlan.ensuredBridges, vlan.ensuredVLANs, vlan.members, vlan.addresses)
+	}
+}
+
+// TestReconciler_RunOnce_UplinkBridgedVM_JoinsHostsOwnBridge is the
+// end-to-end RunOnce version of the same invariant: a VM on an
+// uplink_bridged network gets its tap attached to this node's own
+// -bhyve-bridge directly, with no VLAN interface created, no bridge
+// address claimed, and no outbound NAT applied - unlike an isolated
+// network, which does all three.
+func TestReconciler_RunOnce_UplinkBridgedVM_JoinsHostsOwnBridge(t *testing.T) {
+	raft := &fakeRaftClient{
+		resp: &internalpb.ListVMsResponse{Vms: []*internalpb.VMDefinition{{
+			Id: "vm-1", NodeId: "node-a", NetworkId: "net-1",
+		}}},
+		networksResp: &internalpb.ListNetworksResponse{Networks: []*internalpb.NetworkDefinition{
+			{Id: "net-1", Subnet: "10.50.0.0/24", UplinkBridged: true},
+		}},
+	}
+	zfs := newFakeDatasetManager()
+	zfs.mountpointFor["vm-1"] = t.TempDir()
+	vms := newFakeVMManager()
+	vlan := newFakeVLANManager()
+	vlan.existingInterfaces["bridge0"] = true
+	pfMgr := newFakePFManager()
+
+	r := &Reconciler{
+		Raft: raft, ZFS: zfs, Bhyve: vms, VLAN: vlan, PF: pfMgr, Uplink: "re0",
+		Bridge: "bridge0", UplinkBridgingEnabled: true, LocalNodeID: "node-a", BootROM: "/fw/UEFI.fd",
+	}
+	if err := r.RunOnce(context.Background()); err != nil {
+		t.Fatalf("RunOnce() error: %v", err)
+	}
+
+	cfg := vms.lastCfg["vm-1"]
+	if cfg.Bridge != "bridge0" {
+		t.Errorf("cfg.Bridge = %q, want bridge0 (the node's own -bhyve-bridge, not a new apnet-<hash> bridge)", cfg.Bridge)
+	}
+	if len(vlan.ensuredVLANs) != 0 || len(vlan.ensuredBridges) != 0 {
+		t.Errorf("ensuredVLANs = %v, ensuredBridges = %v, want none for an uplink_bridged network", vlan.ensuredVLANs, vlan.ensuredBridges)
+	}
+	if len(vlan.addresses) != 0 {
+		t.Errorf("addresses = %v, want none - Apiary must never claim an address on the host's own bridge", vlan.addresses)
+	}
+	if len(pfMgr.natCalls) != 0 {
+		t.Errorf("natCalls = %v, want none for an uplink_bridged network", pfMgr.natCalls)
 	}
 }
 
@@ -2289,6 +2428,44 @@ func TestReconciler_ReconcileNetworkArtifacts_RemovesDeletedOwnedNetwork(t *test
 	}
 	if len(state.Networks) != 0 {
 		t.Errorf("remaining artifacts = %v, want none", state.Networks)
+	}
+}
+
+// TestReconciler_ReconcileNetworkArtifacts_NeverDestroysUplinkBridge is
+// the regression test for ADR-0101's entire safety argument: deleting an
+// uplink_bridged NetworkDefinition must never call DestroyBridge/Flush on
+// the shared bridge it pointed at, because ensureUplinkBridgedNetwork
+// always records OwnBridge/OwnVLAN/OutboundNAT as false. Unlike
+// TestReconciler_ReconcileNetworkArtifacts_RemovesDeletedOwnedNetwork
+// (which correctly expects a torn-down owned bridge), a stale artifact
+// entry pointing at the host's own bridge must be dropped from state
+// without ever touching the real interface - it was never Apiary's to
+// destroy in the first place.
+func TestReconciler_ReconcileNetworkArtifacts_NeverDestroysUplinkBridge(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "network-artifacts.json")
+	if err := saveNetworkArtifactState(path, networkArtifactState{Networks: map[string]networkArtifact{
+		"uplink-net": {Bridge: "bridge0", OwnBridge: false, OwnVLAN: false, OutboundNAT: false},
+	}}); err != nil {
+		t.Fatalf("saveNetworkArtifactState() error: %v", err)
+	}
+	vlan := newFakeVLANManager()
+	pfMgr := newFakePFManager()
+	r := &Reconciler{VLAN: vlan, PF: pfMgr, NetworkStatePath: path}
+	if err := r.reconcileNetworkArtifacts(context.Background(), nil, map[string]*internalpb.NetworkDefinition{}); err != nil {
+		t.Fatalf("reconcileNetworkArtifacts() error: %v", err)
+	}
+	if len(vlan.destroyedBridges) != 0 {
+		t.Errorf("destroyed bridges = %v, want none - bridge0 is the host's own management bridge, never Apiary's to destroy", vlan.destroyedBridges)
+	}
+	if len(pfMgr.flushed) != 0 {
+		t.Errorf("flushed anchors = %v, want none for an uplink_bridged network (it never had one)", pfMgr.flushed)
+	}
+	state, err := loadNetworkArtifactState(path)
+	if err != nil {
+		t.Fatalf("loadNetworkArtifactState() error: %v", err)
+	}
+	if len(state.Networks) != 0 {
+		t.Errorf("remaining artifacts = %v, want none (the stale entry itself is still dropped)", state.Networks)
 	}
 }
 

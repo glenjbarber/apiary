@@ -101,6 +101,17 @@ type Config struct {
 	// on this node.
 	BhyveBridge string `json:"bhyve_bridge,omitempty"`
 
+	// AllowUplinkBridging gates whether this node will provision any
+	// uplink_bridged NetworkDefinition (ADR-0101) - VMs attached directly
+	// to this node's own BhyveBridge, sharing the host's own management
+	// broadcast domain, instead of an Apiary-owned isolated network. Must
+	// be exactly "yes-share-uplink-bridge" to opt in; any other value
+	// (including a plain "true") is treated as unset, deliberately - a
+	// boolean invites an unreviewed "true" copy-pasted from node to node
+	// for a setting whose whole risk is "this node's management
+	// connectivity can now be affected by VM traffic."
+	AllowUplinkBridging string `json:"allow_uplink_bridging,omitempty"`
+
 	// DiskSizeMB mirrors -disk-size-mb. Only affects newly created VM
 	// disks, never resizes an existing one - safe to change any time.
 	DiskSizeMB uint64 `json:"disk_size_mb,omitempty"`

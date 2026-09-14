@@ -1230,8 +1230,21 @@ type NetworkDefinition struct {
 	// (the default) preserves today's behavior: Apiary's own per-node
 	// bridge is the gateway.
 	ExternalGateway string `protobuf:"bytes,7,opt,name=external_gateway,json=externalGateway,proto3" json:"external_gateway,omitempty"`
-	unknownFields   protoimpl.UnknownFields
-	sizeCache       protoimpl.SizeCache
+	// uplink_bridged, if true, attaches VMs on this network directly to
+	// the same bridge(4) interface this node's own uplink NIC is already
+	// a member of (Reconciler.Bridge / -bhyve-bridge) instead of a new
+	// Apiary-owned per-network bridge - VMs get a real DHCP lease from
+	// the physical LAN's own router, indistinguishable from any other
+	// device on that LAN. See ADR-0101. Mutually exclusive with
+	// external_gateway; vlan_id and bridge_name must both be unset (this
+	// mode shares the host's own untagged L2 segment and reuses its
+	// existing bridge by construction). Requires the node's operator to
+	// have explicitly opted in via -allow-uplink-bridging - a
+	// misbehaving VM on this network has direct L2 access to the same
+	// broadcast domain the host's own management IP lives on.
+	UplinkBridged bool `protobuf:"varint,8,opt,name=uplink_bridged,json=uplinkBridged,proto3" json:"uplink_bridged,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *NetworkDefinition) Reset() {
@@ -1311,6 +1324,13 @@ func (x *NetworkDefinition) GetExternalGateway() string {
 		return x.ExternalGateway
 	}
 	return ""
+}
+
+func (x *NetworkDefinition) GetUplinkBridged() bool {
+	if x != nil {
+		return x.UplinkBridged
+	}
+	return false
 }
 
 type CreateVMRequest struct {
@@ -12841,7 +12861,7 @@ const file_api_rpc_manager_proto_rawDesc = "" +
 	"\bprotocol\x18\x03 \x01(\tR\bprotocol\x12\x1d\n" +
 	"\n" +
 	"port_range\x18\x04 \x01(\tR\tportRange\x12\x1a\n" +
-	"\bpriority\x18\x05 \x01(\x05R\bpriority\"\xd9\x01\n" +
+	"\bpriority\x18\x05 \x01(\x05R\bpriority\"\x80\x02\n" +
 	"\x11NetworkDefinition\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x17\n" +
@@ -12850,7 +12870,8 @@ const file_api_rpc_manager_proto_rawDesc = "" +
 	"\vbridge_name\x18\x05 \x01(\tR\n" +
 	"bridgeName\x12#\n" +
 	"\rbridge_status\x18\x06 \x01(\tR\fbridgeStatus\x12)\n" +
-	"\x10external_gateway\x18\a \x01(\tR\x0fexternalGateway\"]\n" +
+	"\x10external_gateway\x18\a \x01(\tR\x0fexternalGateway\x12%\n" +
+	"\x0euplink_bridged\x18\b \x01(\bR\ruplinkBridged\"]\n" +
 	"\x0fCreateVMRequest\x12+\n" +
 	"\x02vm\x18\x01 \x01(\v2\x1b.apiary.rpc.v1.VMDefinitionR\x02vm\x12\x1d\n" +
 	"\n" +

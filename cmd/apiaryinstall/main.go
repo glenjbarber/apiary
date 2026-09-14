@@ -44,18 +44,20 @@ func run() error {
 	enableNAT := flag.Bool("enable-nat", false, "also check gateway_enable/IP forwarding, for self-hosted outbound NAT (ADR-0048)")
 	enableHAST := flag.Bool("enable-hast", false, "also check hastd_enable, for HAST-replicated disks (ADR-0026) - report-only, the hastd source patch is never applied automatically")
 	pamService := flag.String("pam-service", "", "PAM service name cmd/frontend will use (ADR-0030) - report-only, Apiary never generates PAM/account configuration itself")
+	allowUplinkBridging := flag.String("allow-uplink-bridging", "", "report-only: check this node's -bhyve-bridge/-vlan-uplink are ready for managerd's own allow_uplink_bridging config setting (ADR-0101) - pass the same confirmation phrase managerd expects, or anything non-empty; Apiary never sets managerd's config itself")
 	jsonOutput := flag.Bool("json", false, "emit results as JSON instead of a table")
 	flag.Parse()
 
 	opt := install.Options{
-		ZFSPool:          *zfsPool,
-		ZFSBase:          *zfsBase,
-		BhyveFirmwarePkg: *bhyveFirmwarePkg,
-		VLANUplink:       *vlanUplink,
-		BhyveBridge:      *bhyveBridge,
-		EnableNAT:        *enableNAT,
-		EnableHAST:       *enableHAST,
-		PAMService:       *pamService,
+		ZFSPool:             *zfsPool,
+		ZFSBase:             *zfsBase,
+		BhyveFirmwarePkg:    *bhyveFirmwarePkg,
+		VLANUplink:          *vlanUplink,
+		BhyveBridge:         *bhyveBridge,
+		EnableNAT:           *enableNAT,
+		EnableHAST:          *enableHAST,
+		PAMService:          *pamService,
+		AllowUplinkBridging: *allowUplinkBridging,
 	}
 	networkConfirmed := *applyNetwork != "" && *applyNetwork == networkChangeConfirmPhrase
 	if *applyNetwork != "" && !networkConfirmed {

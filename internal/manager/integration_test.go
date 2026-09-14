@@ -1210,6 +1210,70 @@ func TestIntegration_CreateListDeleteNetwork(t *testing.T) {
 	}
 }
 
+// TestIntegration_CreateListDeleteUplinkBridgedNetwork mirrors
+// TestIntegration_CreateListDeleteNetwork for ADR-0101's uplink_bridged
+// mode, confirming the new field survives the full RPC round trip
+// (toInternalNetwork/fromInternalNetwork) unlike vlan_id/external_gateway/
+// bridge_name, which stay unset for this mode by construction.
+func TestIntegration_CreateListDeleteUplinkBridgedNetwork(t *testing.T) {
+	raftdSocket := newRaftdUDSSocket(t)
+	client := newManagerdRPCClient(t, raftdSocket)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	createResp, err := client.CreateNetwork(ctx, &rpcpb.CreateNetworkRequest{
+		Network: &rpcpb.NetworkDefinition{Id: "net-uplink", Name: "lan", Subnet: "10.50.0.0/24", UplinkBridged: true},
+	})
+	if err != nil {
+		t.Fatalf("CreateNetwork() error: %v", err)
+	}
+	if createResp.GetError() != "" {
+		t.Fatalf("CreateNetwork() returned error: %s", createResp.GetError())
+	}
+	if !createResp.GetNetwork().GetUplinkBridged() {
+		t.Errorf("CreateNetwork() network = %+v, want uplink_bridged=true", createResp.GetNetwork())
+	}
+
+	listResp, err := client.ListNetworks(ctx, &rpcpb.ListNetworksRequest{})
+	if err != nil {
+		t.Fatalf("ListNetworks() error: %v", err)
+	}
+	if len(listResp.GetNetworks()) != 1 || !listResp.GetNetworks()[0].GetUplinkBridged() {
+		t.Fatalf("ListNetworks() = %+v, want one uplink_bridged network", listResp.GetNetworks())
+	}
+
+	deleteResp, err := client.DeleteNetwork(ctx, &rpcpb.DeleteNetworkRequest{Id: "net-uplink"})
+	if err != nil {
+		t.Fatalf("DeleteNetwork() error: %v", err)
+	}
+	if deleteResp.GetError() != "" {
+		t.Fatalf("DeleteNetwork() returned error: %s", deleteResp.GetError())
+	}
+}
+
+// TestIntegration_CreateUplinkBridgedNetworkRejectsVLANID confirms the
+// FSM's own mutual-exclusion validation (internal/raft/fsm.go) is
+// actually reachable through the real RPC layer, not just unit-tested in
+// isolation.
+func TestIntegration_CreateUplinkBridgedNetworkRejectsVLANID(t *testing.T) {
+	raftdSocket := newRaftdUDSSocket(t)
+	client := newManagerdRPCClient(t, raftdSocket)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	createResp, err := client.CreateNetwork(ctx, &rpcpb.CreateNetworkRequest{
+		Network: &rpcpb.NetworkDefinition{Id: "net-bad", Subnet: "10.50.0.0/24", UplinkBridged: true, VlanId: 60},
+	})
+	if err != nil {
+		t.Fatalf("CreateNetwork() error: %v", err)
+	}
+	if createResp.GetError() == "" {
+		t.Fatal("CreateNetwork() returned no error, want a rejection for uplink_bridged with vlan_id set")
+	}
+}
+
 func TestIntegration_SetNetworkNameRenamesPreservesEverythingElse(t *testing.T) {
 	raftdSocket := newRaftdUDSSocket(t)
 	client := newManagerdRPCClient(t, raftdSocket)
