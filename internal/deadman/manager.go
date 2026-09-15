@@ -190,14 +190,28 @@ func (m *Manager) jobPending(ctx context.Context, jobID int) (bool, error) {
 	want := strconv.Itoa(jobID)
 	for _, line := range strings.Split(out, "\n") {
 		fields := strings.Fields(line)
-		if len(fields) > 0 && fields[0] == want {
+		// Real FreeBSD atq(1) output is "<date...> <owner> <queue> <job#>"
+		// (plus a leading "Date ... Job#" header line) - the job number is
+		// the LAST field on a job line, never the first (confirmed live
+		// against apiverse/apiarium: "Tue Sep 15 02:10:00 UTC 2026	root
+		// c	1"). Checking fields[0] here, as an earlier version of this
+		// function did, always compared against a date token and could
+		// never match - jobPending would always report false, defeating
+		// ArmTapRevert's own idempotency check.
+		if len(fields) > 0 && fields[len(fields)-1] == want {
 			return true, nil
 		}
 	}
 	return false, nil
 }
 
-var jobLinePattern = regexp.MustCompile(`job\s+(\d+)`)
+// jobLinePattern matches at(1)'s own job-confirmation line on stderr, e.g.
+// "Job 2 will be executed using /bin/sh". Case-insensitive because real
+// FreeBSD at(1) capitalizes "Job" - confirmed live against apiverse/
+// apiarium, where a case-sensitive lowercase "job" pattern never matched
+// at all, so ArmTapRevert could never successfully parse a job ID on
+// either host.
+var jobLinePattern = regexp.MustCompile(`(?i)job\s+(\d+)`)
 
 // execAtRunner is the real, production atRunner - it shells out to
 // FreeBSD base-system at(8)/atq(1)/atrm(1).

@@ -41,10 +41,14 @@ func (f *fakeAtRunner) atq(_ context.Context) (string, error) {
 	if f.atqErr != nil {
 		return "", f.atqErr
 	}
-	var lines []string
+	// Mirrors real FreeBSD atq(1) output shape: a header line, then one
+	// line per job with the date/owner/queue first and the job number
+	// LAST - not first. jobPending must parse against this real shape,
+	// not an invented one.
+	lines := []string{"Date\t\t\t\tOwner\t\tQueue\tJob#"}
 	for id, ok := range f.pending {
 		if ok {
-			lines = append(lines, fmt.Sprintf("%d\tSun Jan  1 00:00:00 2026 a root", id))
+			lines = append(lines, fmt.Sprintf("Sun Jan  1 00:00:00 2026\troot\tc\t%d", id))
 		}
 	}
 	return strings.Join(lines, "\n"), nil
@@ -219,6 +223,63 @@ func TestManager_StatePersistsAcrossManagerInstances(t *testing.T) {
 		t.Errorf("pending jobs = %v, want none - state must survive across Manager instances via StateDir", fake.pending)
 	}
 }
+
+// TestJobLinePattern_MatchesRealFreeBSDAtOutput guards against a real bug
+// found live on apiverse/apiarium: at(1) on FreeBSD prints "Job 2 will be
+// executed using /bin/sh" (capital J) on stderr, but jobLinePattern was
+// originally lowercase-only ("job\s+(\d+)") and never matched real output
+// at all - ArmTapRevert failed on every single call on real hardware,
+// even though every unit test passed (they never exercised this regex,
+// only the fake atRunner).
+func TestJobLinePattern_MatchesRealFreeBSDAtOutput(t *testing.T) {
+	match := jobLinePattern.FindStringSubmatch("Job 2 will be executed using /bin/sh\n")
+	if match == nil {
+		t.Fatal("jobLinePattern did not match real FreeBSD at(1) output")
+	}
+	if match[1] != "2" {
+		t.Errorf("parsed job id = %q, want \"2\"", match[1])
+	}
+}
+
+// TestManager_JobPending_MatchesRealFreeBSDAtqOutput guards against a
+// second real bug found alongside the one above: real atq(1) output puts
+// the job number LAST on each line, after a date/owner/queue prefix (plus
+// a leading header line) - not first, which is what jobPending originally
+// checked. That meant jobPending always returned false on real hardware,
+// so ArmTapRevert's idempotency check never worked and repeated arms for
+// the same tap could stack up duplicate at(8) jobs that ConfirmBridgeHealthy
+// would not fully cancel.
+func TestManager_JobPending_MatchesRealFreeBSDAtqOutput(t *testing.T) {
+	fake := &fakeAtRunnerRawAtq{
+		raw: "Date\t\t\t\tOwner\t\tQueue\tJob#\n" +
+			"Tue Sep 15 02:10:00 UTC 2026\troot            c\t1\n",
+	}
+	m := &Manager{StateDir: t.TempDir(), runner: fake}
+	pending, err := m.jobPending(context.Background(), 1)
+	if err != nil {
+		t.Fatalf("jobPending() error: %v", err)
+	}
+	if !pending {
+		t.Fatal("jobPending() = false, want true against real atq(1) output naming job 1")
+	}
+	pending, err = m.jobPending(context.Background(), 99)
+	if err != nil {
+		t.Fatalf("jobPending() error: %v", err)
+	}
+	if pending {
+		t.Fatal("jobPending() = true for a job id not present in atq output, want false")
+	}
+}
+
+type fakeAtRunnerRawAtq struct {
+	raw string
+}
+
+func (f *fakeAtRunnerRawAtq) at(context.Context, string, time.Duration) (int, error) {
+	return 0, fmt.Errorf("not implemented")
+}
+func (f *fakeAtRunnerRawAtq) atq(context.Context) (string, error) { return f.raw, nil }
+func (f *fakeAtRunnerRawAtq) atrm(context.Context, int) error     { return fmt.Errorf("not implemented") }
 
 func TestManager_StatePath_IsScopedPerBridgeAndTap(t *testing.T) {
 	m := &Manager{StateDir: "/var/db/apiary/deadman"}
