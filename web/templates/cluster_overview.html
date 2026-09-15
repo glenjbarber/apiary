@@ -64,6 +64,9 @@
           <td><strong style="font-size:1.2em; letter-spacing:0.1em;">{{.Code}}</strong></td>
           <td>{{.RequestedAt}}</td>
           <td>
+            <form method="post" action="/join-requests/{{.RequestID}}/preflight" style="display:inline">
+              <button type="submit">Check reachability</button>
+            </form>
             <form method="post" action="/join-requests/{{.RequestID}}/approve" style="display:inline">
               <button type="submit">Approve</button>
             </form>
@@ -73,6 +76,9 @@
             <form method="post" action="/join-requests/{{.RequestID}}/purge" style="display:inline" onsubmit="return confirm('Delete this pending request outright? Unlike Reject, this removes it completely - the requesting Comb\'s own status poll will show it as not found instead of a resolved outcome.')">
               <button type="submit" class="danger">Delete</button>
             </form>
+            {{if eq $.JoinRequestPreflightID .RequestID}}
+            <p class="muted">Reachability check: <strong>{{$.JoinRequestPreflightVerdict}}</strong>{{if $.JoinRequestPreflightDetail}} - {{$.JoinRequestPreflightDetail}}{{end}}. This is a preview only - it does not gate or disable Approve above.</p>
+            {{end}}
           </td>
         </tr>
         {{else}}

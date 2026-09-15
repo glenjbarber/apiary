@@ -66,6 +66,15 @@ type PeerReporter struct {
 	// Set via LoadPeerCAPool and cmd/managerd's/cmd/frontend's own
 	// -peer-tls-ca flag - only consulted when UseTLS is true.
 	CAPool *x509.CertPool
+
+	// RestartGuardrailToken authenticates ONLY ReserveRestartLease/
+	// ConfirmRestartCompleted (ADR-0103) - deliberately never APIKey
+	// above, since those two RPCs sit outside the normal Viewer/Admin
+	// role hierarchy entirely (internal/manager/auth.go's own
+	// restartGuardrailTokenValid). Empty means this node cannot forward
+	// either call to a peer leader - see restartGuardrailTokenValid's
+	// own doc comment for why that fails closed, not open.
+	RestartGuardrailToken string
 }
 
 func NewPeerReporter(apiKey string, useTLS bool, peerHostnames map[string]string) *PeerReporter {
@@ -104,6 +113,38 @@ func (p *PeerReporter) dial(addr string) (*grpc.ClientConn, rpcpb.ManagerService
 // state (e.g. a raft leader_hint) - those keep using dial above.
 func (p *PeerReporter) dialUnauthenticated(addr string) (*grpc.ClientConn, rpcpb.ManagerServiceClient, error) {
 	return p.dialOpts(addr, false)
+}
+
+// dialRestartGuardrail dials addr with the same TLS/CA-pool/hostname-
+// verification behavior as dial, but attaches p.RestartGuardrailToken as
+// the bearer credential instead of p.APIKey - used only by
+// ReserveRestartLease/ConfirmRestartCompleted (ADR-0103), which are
+// authorized by a dedicated token check, not the normal Viewer/Admin
+// role hierarchy every other forwarded RPC uses.
+func (p *PeerReporter) dialRestartGuardrail(addr string) (*grpc.ClientConn, rpcpb.ManagerServiceClient, error) {
+	var opts []grpc.DialOption
+	if p.UseTLS {
+		cfg := &tls.Config{}
+		if p.CAPool != nil {
+			cfg.RootCAs = p.CAPool
+		}
+		if host, _, err := net.SplitHostPort(addr); err == nil {
+			if name, ok := p.PeerHostnames[host]; ok {
+				cfg.ServerName = name
+			}
+		}
+		opts = []grpc.DialOption{grpc.WithTransportCredentials(credentials.NewTLS(cfg))}
+	} else {
+		opts = []grpc.DialOption{grpc.WithTransportCredentials(insecure.NewCredentials())}
+	}
+	if p.RestartGuardrailToken != "" {
+		opts = append(opts, grpc.WithPerRPCCredentials(apiKeyCredentials(p.RestartGuardrailToken)))
+	}
+	conn, err := grpc.NewClient(addr, opts...)
+	if err != nil {
+		return nil, nil, fmt.Errorf("dialing peer managerd at %s: %w", addr, err)
+	}
+	return conn, rpcpb.NewManagerServiceClient(conn), nil
 }
 
 func (p *PeerReporter) dialOpts(addr string, attachAPIKey bool) (*grpc.ClientConn, rpcpb.ManagerServiceClient, error) {
@@ -689,6 +730,39 @@ func (p *PeerReporter) ApproveJoinRequest(ctx context.Context, addr string, req 
 	}
 	defer conn.Close()
 	return client.ApproveJoinRequest(ctx, req)
+}
+
+// PreflightApproveJoinRequest forwards on a leader-hint rejection,
+// mirroring ApproveJoinRequest above exactly (ADR-0103).
+func (p *PeerReporter) PreflightApproveJoinRequest(ctx context.Context, addr string, req *rpcpb.PreflightApproveJoinRequestRequest) (*rpcpb.PreflightApproveJoinRequestResponse, error) {
+	conn, client, err := p.dial(addr)
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close()
+	return client.PreflightApproveJoinRequest(ctx, req)
+}
+
+// ReserveRestartLease/ConfirmRestartCompleted forward on a leader-hint
+// rejection like every other Apply-backed write, but dial with
+// dialRestartGuardrail (p.RestartGuardrailToken), not p.dial (p.APIKey) -
+// see ADR-0103 and PeerReporter.RestartGuardrailToken's own doc comment.
+func (p *PeerReporter) ReserveRestartLease(ctx context.Context, addr string, req *rpcpb.ReserveRestartLeaseRequest) (*rpcpb.ReserveRestartLeaseResponse, error) {
+	conn, client, err := p.dialRestartGuardrail(addr)
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close()
+	return client.ReserveRestartLease(ctx, req)
+}
+
+func (p *PeerReporter) ConfirmRestartCompleted(ctx context.Context, addr string, req *rpcpb.ConfirmRestartCompletedRequest) (*rpcpb.ConfirmRestartCompletedResponse, error) {
+	conn, client, err := p.dialRestartGuardrail(addr)
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close()
+	return client.ConfirmRestartCompleted(ctx, req)
 }
 
 func (p *PeerReporter) RejectJoinRequest(ctx context.Context, addr string, req *rpcpb.RejectJoinRequestRequest) (*rpcpb.RejectJoinRequestResponse, error) {

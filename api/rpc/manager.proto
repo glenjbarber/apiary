@@ -223,6 +223,32 @@ service ManagerService {
   rpc ListNodeServices(ListNodeServicesRequest) returns (ListNodeServicesResponse);
   rpc RestartNodeService(RestartNodeServiceRequest) returns (RestartNodeServiceResponse);
 
+  // PreflightRestartNodeService previews the action-preflight restart
+  // guardrail (ADR-0103) for "apiary_managerd" (always Allow for every
+  // other service, which carries no quorum stake) - read-only, Viewer-
+  // tier, makes no live network dial (only a local raft-internal state
+  // read), unlike PreflightApproveJoinRequest below.
+  rpc PreflightRestartNodeService(PreflightRestartNodeServiceRequest) returns (PreflightRestartNodeServiceResponse);
+
+  // ReserveRestartLease/ConfirmRestartCompleted are internal plumbing
+  // behind RestartNodeService's own guardrail (ADR-0103), never called
+  // by an operator or exposed in any UI control. They are deliberately
+  // NOT authorized via the normal Viewer/Admin role hierarchy in
+  // internal/manager/auth.go's requiredRoleFor map - no CreateAPIKey-
+  // issued credential, however privileged, satisfies them. Instead each
+  // is gated by a dedicated comparison against a root-owned local file
+  // (/usr/local/etc/apiary/restart-guardrail-token), loaded once at
+  // managerd startup and never exposed through nodeconfig/UpdateNodeConfig
+  // or any other RPC in either direction - the same posture raftd's own
+  // internal_token has relative to managerd's external RPC surface. See
+  // ADR-0103's own Consequences for the honest scope of what this closes
+  // (the RPC-level path, not a fully root-privileged operator) and why
+  // two earlier designs (a CreateAPIKey-mintable "peer" role; a
+  // write-only nodeconfig field) were rejected as not actually
+  // closing it.
+  rpc ReserveRestartLease(ReserveRestartLeaseRequest) returns (ReserveRestartLeaseResponse);
+  rpc ConfirmRestartCompleted(ConfirmRestartCompletedRequest) returns (ConfirmRestartCompletedResponse);
+
   // GetUplinkStatus/SetUplinkState are the Machine page's uplink admin
   // down/up toggle (ADR-0085) - strictly host-local physical state,
   // never routed through raft, same reasoning as
@@ -428,6 +454,16 @@ service ManagerService {
   rpc ListJoinRequests(ListJoinRequestsRequest) returns (ListJoinRequestsResponse);
   rpc ApproveJoinRequest(ApproveJoinRequestRequest) returns (ApproveJoinRequestResponse);
   rpc RejectJoinRequest(RejectJoinRequestRequest) returns (RejectJoinRequestResponse);
+
+  // PreflightApproveJoinRequest previews ApproveJoinRequest's own
+  // reachability gate (ADR-0097/ADR-0103) without ever calling AddVoter -
+  // Admin-tier, not Viewer, because it makes managerd dial a
+  // caller-selected pending request's raft_bind_address, which a Viewer
+  // could otherwise use as a network reachability oracle. Applies the
+  // same leadership-first ordering as ApproveJoinRequest itself, so the
+  // preview always reflects the same network vantage point the real
+  // approval would use.
+  rpc PreflightApproveJoinRequest(PreflightApproveJoinRequestRequest) returns (PreflightApproveJoinRequestResponse);
 
   // CancelJoinRequest is the requesting Comb's own self-service
   // withdrawal of its still-pending request - deliberately
@@ -1635,6 +1671,13 @@ message ListNodeServicesResponse {
 
 message RestartNodeServiceRequest {
   string name = 1;
+
+  // force overrides the action-preflight restart guardrail (ADR-0103)
+  // for "apiary_managerd" - an explicit, logged acknowledgment that the
+  // operator has manually verified it is safe to proceed despite an
+  // unconfirmed prior restart or recent cooldown. Ignored for every
+  // other service (no guardrail applies to them).
+  bool force = 2;
 }
 
 message RestartNodeServiceResponse {
@@ -1643,6 +1686,77 @@ message RestartNodeServiceResponse {
   // connection.
   bool scheduled = 1;
   string error = 2;
+
+  // guardrail_overridden is true iff this restart proceeded only because
+  // force=true overrode an existing block (ADR-0103) - never set on a
+  // clean grant with nothing to override.
+  bool guardrail_overridden = 3;
+}
+
+// GuardrailFinding is one cited reason behind a guardrail Verdict
+// (ADR-0103) - mirrors AssumptionClaim.evidence's own flat-string
+// convention rather than a nested message.
+message GuardrailFinding {
+  string rule = 1;
+  string detail = 2;
+  repeated string evidence = 3;
+}
+
+message PreflightApproveJoinRequestRequest {
+  string request_id = 1;
+}
+
+message PreflightApproveJoinRequestResponse {
+  // verdict is "allow", "block", or "unknown" - see internal/guardrail.Verdict.
+  string verdict = 1;
+  repeated GuardrailFinding findings = 2;
+  string error = 3;
+  string leader_hint = 4;
+}
+
+message PreflightRestartNodeServiceRequest {
+  string name = 1;
+}
+
+message PreflightRestartNodeServiceResponse {
+  string verdict = 1;
+  repeated GuardrailFinding findings = 2;
+  string error = 3;
+}
+
+// ReserveRestartLeaseRequest/Response and ConfirmRestartCompletedRequest/
+// Response back the two internal-only RPCs behind RestartNodeService's own
+// guardrail (ADR-0103). Neither is authorized via the normal Viewer/Admin
+// role hierarchy - see ManagerService's own doc comment on
+// ReserveRestartLease for why, and internal/manager/auth.go for the
+// dedicated token check that gates them instead.
+message ReserveRestartLeaseRequest {
+  string service = 1;
+  // node_id is the node that actually wants to restart - almost always
+  // the caller's own node id, but may differ from whichever node ends up
+  // handling this call after leader-forwarding.
+  string node_id = 2;
+  bool force = 3;
+}
+
+message ReserveRestartLeaseResponse {
+  bool granted = 1;
+  bool guardrail_overridden = 2;
+  uint64 lease_id = 3;
+  repeated GuardrailFinding findings = 4;
+  string error = 5;
+  string leader_hint = 6;
+}
+
+message ConfirmRestartCompletedRequest {
+  string service = 1;
+  string node_id = 2;
+  uint64 lease_id = 3;
+}
+
+message ConfirmRestartCompletedResponse {
+  string error = 1;
+  string leader_hint = 2;
 }
 
 message GetUplinkStatusRequest {}

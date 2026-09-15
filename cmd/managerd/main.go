@@ -176,6 +176,24 @@ func run() error {
 		peers.CAPool = pool
 	}
 
+	// restartGuardrailToken (ADR-0103) gates ReserveRestartLease/
+	// ConfirmRestartCompleted - deliberately a plain root-owned file, NOT
+	// a nodeconfig.Config field or any RPC-settable value (two earlier
+	// designs of this guardrail tried exactly that and neither actually
+	// closed the "no Admin API call can produce a valid credential"
+	// requirement - see the ADR's own Consequences). A missing file is
+	// not an error: it just means this node can never grant/forward
+	// these two calls until an operator provisions one identically
+	// across every node.
+	const restartGuardrailTokenPath = "/usr/local/etc/apiary/restart-guardrail-token"
+	restartGuardrailToken := ""
+	if data, err := os.ReadFile(restartGuardrailTokenPath); err == nil {
+		restartGuardrailToken = strings.TrimSpace(string(data))
+	} else if !os.IsNotExist(err) {
+		log.Printf("managerd: reading %s: %v - the action-preflight restart guardrail will refuse every forwarded call until this is fixed", restartGuardrailTokenPath, err)
+	}
+	peers.RestartGuardrailToken = restartGuardrailToken
+
 	zfsMgr := zfs.New(cfg.ZFSBase)
 	reconciler := &cluster.Reconciler{
 		Raft:             raftClient,
@@ -382,6 +400,9 @@ func run() error {
 	// nil-tolerant optional-dependency methods.
 	srv.SetNATPauser(reconciler)
 	srv.SetKnownPeerAddresses(splitCommaList(cfg.KnownPeerAddresses))
+	srv.SetRestartGuardrailToken(restartGuardrailToken)
+	restartConfirm := manager.NewRestartConfirmStore("/var/db/apiary/guardrail")
+	srv.SetRestartConfirmStore(restartConfirm)
 	if cfg.PAMService != "" {
 		srv.SetPAMAuthenticator(pam.PAMAuthenticator{ServiceName: cfg.PAMService})
 	}
@@ -440,6 +461,7 @@ func run() error {
 	go runReconcileLoop(ctx, reconciler, cfg.ReconcileInterval)
 	go runAssumptionCheckLoop(ctx, assumptionChecker, cfg.AssumptionCheckInterval)
 	go runOriginCARenewalLoop(ctx, originCARenewer, cfg.OriginCARenewalCheckInterval)
+	go confirmPendingRestartOnStartup(ctx, srv, restartConfirm, id)
 
 	select {
 	case <-ctx.Done():
@@ -529,6 +551,64 @@ func originCARenewalOnce(ctx context.Context, renewer *origincert.Renewer) {
 		log.Printf("managerd: origin-ca renewal: %v", err)
 	}
 }
+
+// restartGuardrailConfirmRetries/-Backoff bound how hard this startup
+// path tries before giving up on a single boot - not indefinite silent
+// retrying (ADR-0103, revision note #16's own "bounded, not indefinite"
+// framing). A repeated failure here (e.g. no leader reachable yet) is
+// logged loudly and the pending record is left in place - a later
+// managerd restart, or an operator noticing the persisted, still-blocking
+// lease via PreflightRestartNodeService, is the actual recovery path,
+// not an unbounded background loop.
+const restartGuardrailConfirmRetries = 5
+const restartGuardrailConfirmBackoff = 3 * time.Second
+
+// confirmPendingRestartOnStartup checks for a pending-restart-
+// confirmation record left by RestartNodeService (ADR-0103) before this
+// process's own predecessor restarted apiary_managerd, and calls
+// ConfirmRestartCompleted on its behalf now that this - the replacement
+// process - is up. This is the first point after the restart that can
+// reliably do so: the process that requested the restart cannot
+// reliably observe its own replacement's outcome, since the restart
+// itself is what replaces it (see RestartNodeService's own doc comment).
+func confirmPendingRestartOnStartup(ctx context.Context, srv *manager.Server, store *manager.RestartConfirmStore, nodeID string) {
+	pending, found, err := store.Load(restartGuardrailService)
+	if err != nil {
+		log.Printf("managerd: reading pending restart-guardrail confirmation: %v", err)
+		return
+	}
+	if !found {
+		return
+	}
+	for attempt := 1; attempt <= restartGuardrailConfirmRetries; attempt++ {
+		resp, err := srv.ConfirmRestartCompletedLocal(ctx, pending.Service, pending.NodeID, pending.LeaseID)
+		if err == nil && resp.GetError() == "" {
+			if clearErr := store.Clear(pending.Service); clearErr != nil {
+				log.Printf("managerd: clearing confirmed restart-guardrail record for %s: %v", pending.Service, clearErr)
+			}
+			log.Printf("managerd: confirmed restart-guardrail lease %d for %s complete (node %s)", pending.LeaseID, pending.Service, nodeID)
+			return
+		}
+		detail := err
+		if detail == nil {
+			detail = fmt.Errorf("%s", resp.GetError())
+		}
+		log.Printf("managerd: confirming restart-guardrail completion for %s (attempt %d/%d): %v", pending.Service, attempt, restartGuardrailConfirmRetries, detail)
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(restartGuardrailConfirmBackoff):
+		}
+	}
+	log.Printf("managerd: could not confirm restart-guardrail completion for %s after %d attempts - the cluster-wide restart lease remains blocked until this succeeds on a future startup or an operator investigates", pending.Service, restartGuardrailConfirmRetries)
+}
+
+// restartGuardrailService mirrors internal/manager's own unexported
+// constant of the same name - duplicated here rather than exported,
+// since cmd/managerd is the only external caller that ever needs it and
+// this project's existing convention already accepts this kind of small
+// duplication across independent binaries/packages.
+const restartGuardrailService = "apiary_managerd"
 
 // peerManagerdAddrFunc mirrors internal/manager.Server's own unexported
 // peerManagerdAddr method (and internal/cluster's resolvePeerManagerdAddr)

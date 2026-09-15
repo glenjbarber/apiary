@@ -31,6 +31,8 @@ type FSMApplyResult struct {
 	ApiKey             *internalpb.ApiKey
 	Jail               *internalpb.JailDefinition
 	PendingJoinRequest *internalpb.PendingJoinRequest
+	RestartLease       *internalpb.RestartLease
+	RestartRecord      *internalpb.RestartRecord
 	Error              string
 }
 
@@ -48,6 +50,12 @@ type FSM struct {
 	apiKeys             map[string]*internalpb.ApiKey
 	jails               map[string]*internalpb.JailDefinition
 	pendingJoinRequests map[string]*internalpb.PendingJoinRequest
+
+	// restartLeases/restartRecords back the action-preflight restart
+	// guardrail (ADR-0103) - see RestartLease/RestartRecord's own doc
+	// comments in api/internalpb/state.proto.
+	restartLeases  map[string]*internalpb.RestartLease
+	restartRecords map[string]*internalpb.RestartRecord
 
 	// authEnabled is set permanently, forever, the first time any
 	// CreateAPIKey command ever succeeds - it never reverts to false
@@ -67,6 +75,8 @@ func NewFSM() *FSM {
 		apiKeys:             make(map[string]*internalpb.ApiKey),
 		jails:               make(map[string]*internalpb.JailDefinition),
 		pendingJoinRequests: make(map[string]*internalpb.PendingJoinRequest),
+		restartLeases:       make(map[string]*internalpb.RestartLease),
+		restartRecords:      make(map[string]*internalpb.RestartRecord),
 	}
 }
 
@@ -138,6 +148,10 @@ func (f *FSM) Apply(log *raft.Log) interface{} {
 		return f.applyCancelPendingJoinRequest(log.Index, op.CancelPendingJoinRequest.GetRequestId())
 	case *internalpb.Command_PurgeJoinRequest:
 		return f.applyPurgeJoinRequest(log.Index, op.PurgeJoinRequest.GetRequestId())
+	case *internalpb.Command_AcquireRestartLease:
+		return f.applyAcquireRestartLease(log.Index, op.AcquireRestartLease)
+	case *internalpb.Command_RecordRestartCompleted:
+		return f.applyRecordRestartCompleted(log.Index, op.RecordRestartCompleted)
 	default:
 		return &FSMApplyResult{Index: log.Index, Error: "command has no op set"}
 	}
@@ -614,6 +628,113 @@ func (f *FSM) applyPurgeJoinRequest(index uint64, requestID string) *FSMApplyRes
 	return &FSMApplyResult{Index: index, PendingJoinRequest: req}
 }
 
+// applyAcquireRestartLease is the sole enforcement point for the
+// action-preflight restart guardrail (ADR-0103): raft's own serialized
+// log-apply order is what makes "at most one node holds a lease for a
+// given service at a time" an actual guarantee, not a per-node check
+// racing against another node's identical check (the exact flaw an
+// earlier, purely local-timestamp design of this guardrail had). Every
+// field on req is authored by the current leader immediately before
+// submission (ManagerService.ReserveRestartLease's own doc comment) -
+// this function never calls time.Now() or re-derives voter membership
+// itself, since every raft replica must reach the identical decision
+// from the identical command.
+func (f *FSM) applyAcquireRestartLease(index uint64, req *internalpb.AcquireRestartLease) *FSMApplyResult {
+	service := req.GetService()
+
+	// An existing lease blocks unconditionally, regardless of age -
+	// deliberately no expiry check here. A time-based auto-clear was
+	// considered and rejected (see RestartLease's own doc comment):
+	// letting a lease lapse while the underlying restart's outcome is
+	// still genuinely unknown would reopen the exact concurrent-restart
+	// window this guardrail exists to close.
+	existingLease := f.restartLeases[service]
+	activeLease := existingLease != nil
+
+	// A prior RestartRecord only counts toward the cooldown if its
+	// holder is a currently-known Raft voter - a non-voter's own
+	// manager restart carries no quorum risk and must never block a
+	// voter's restart.
+	var recentVoterRestart bool
+	if record := f.restartRecords[service]; record != nil && voterListContains(req.GetVoterNodeIds(), record.GetNodeId()) {
+		// A negative elapsed value (from clock skew across a leader
+		// election) already blocks here, conservatively - see
+		// ADR-0103's own Consequences for why this is deliberate, not
+		// an unhandled edge case.
+		elapsed := req.GetRequestedAtUnix() - record.GetCompletedAtUnix()
+		recentVoterRestart = elapsed < req.GetCooldownSeconds()
+	}
+
+	blocked := activeLease || recentVoterRestart
+	if blocked && !req.GetForce() {
+		switch {
+		case activeLease:
+			return &FSMApplyResult{Index: index, Error: fmt.Sprintf(
+				"AcquireRestartLease: %q already has an unconfirmed restart lease held by node %q (requested at %d) - refusing to grant a second one until it is confirmed complete or explicitly overridden with force",
+				service, existingLease.GetHolderNodeId(), existingLease.GetRequestedAtUnix(),
+			)}
+		default:
+			record := f.restartRecords[service]
+			return &FSMApplyResult{Index: index, Error: fmt.Sprintf(
+				"AcquireRestartLease: %q was restarted by voter %q %ds ago, inside the %ds cooldown - refusing to grant a concurrent restart lease",
+				service, record.GetNodeId(), req.GetRequestedAtUnix()-record.GetCompletedAtUnix(), req.GetCooldownSeconds(),
+			)}
+		}
+	}
+
+	lease := &internalpb.RestartLease{
+		LeaseId:         index,
+		Service:         service,
+		HolderNodeId:    req.GetNodeId(),
+		RequestedAtUnix: req.GetRequestedAtUnix(),
+		Force:           blocked && req.GetForce(),
+	}
+	f.restartLeases[service] = lease
+	return &FSMApplyResult{Index: index, RestartLease: lease}
+}
+
+// applyRecordRestartCompleted is submitted by the restarted node's own
+// next startup, never by the process that requested the restart (see
+// ADR-0103) - completed_at_unix is authored by whichever node applies
+// this (the current leader), the same determinism reasoning as
+// applyAcquireRestartLease.
+func (f *FSM) applyRecordRestartCompleted(index uint64, req *internalpb.RecordRestartCompleted) *FSMApplyResult {
+	service := req.GetService()
+
+	// The record is written unconditionally - a real restart really did
+	// complete, regardless of whether the lease below still matches.
+	record := &internalpb.RestartRecord{
+		Service:         service,
+		NodeId:          req.GetNodeId(),
+		CompletedAtUnix: req.GetCompletedAtUnix(),
+	}
+	f.restartRecords[service] = record
+
+	// The lease is released ONLY on an exact lease_id AND holder_node_id
+	// match - a stale or out-of-order confirmation must never release a
+	// different, currently-active lease for the same service/node pair
+	// (see RestartLease's own doc comment).
+	if lease := f.restartLeases[service]; lease != nil &&
+		lease.GetLeaseId() == req.GetLeaseId() &&
+		lease.GetHolderNodeId() == req.GetNodeId() {
+		delete(f.restartLeases, service)
+	}
+
+	return &FSMApplyResult{Index: index, RestartRecord: record}
+}
+
+// voterListContains reports whether nodeID appears in voters - a plain
+// linear scan, since voters is always the small (single-digit) size of
+// this codebase's own raft membership, never worth indexing.
+func voterListContains(voters []string, nodeID string) bool {
+	for _, v := range voters {
+		if v == nodeID {
+			return true
+		}
+	}
+	return false
+}
+
 // pendingJoinRequestExpired checks expiry lazily, at read/apply time -
 // this codebase's one existing precedent (the Assumption Register's own
 // ExpiresAt handling) works the same way, and nothing anywhere in it
@@ -633,6 +754,17 @@ func (f *FSM) PendingJoinRequest(requestID string) (*internalpb.PendingJoinReque
 	defer f.mu.Unlock()
 	req, ok := f.pendingJoinRequests[requestID]
 	return req, ok
+}
+
+// RestartLeaseState returns the current lease (nil if none held) and the
+// most recent completed-restart record (nil if never confirmed) for
+// service - backs GetRestartLeaseStateLocal (ADR-0103). A plain read of
+// already-replicated FSM state, safe to answer from any node's own
+// local copy without leader routing.
+func (f *FSM) RestartLeaseState(service string) (*internalpb.RestartLease, *internalpb.RestartRecord) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.restartLeases[service], f.restartRecords[service]
 }
 
 // ListPendingJoinRequests returns every currently-Pending, not-yet-
@@ -958,6 +1090,8 @@ func (f *FSM) SnapshotState() *internalpb.FSMSnapshotState {
 		ApiKeys:             make(map[string]*internalpb.ApiKey, len(f.apiKeys)),
 		Jails:               make(map[string]*internalpb.JailDefinition, len(f.jails)),
 		PendingJoinRequests: make(map[string]*internalpb.PendingJoinRequest, len(f.pendingJoinRequests)),
+		RestartLeases:       make(map[string]*internalpb.RestartLease, len(f.restartLeases)),
+		RestartRecords:      make(map[string]*internalpb.RestartRecord, len(f.restartRecords)),
 		AuthEnabled:         f.authEnabled,
 	}
 	for id, vm := range f.vms {
@@ -974,6 +1108,12 @@ func (f *FSM) SnapshotState() *internalpb.FSMSnapshotState {
 	}
 	for id, req := range f.pendingJoinRequests {
 		state.PendingJoinRequests[id] = req
+	}
+	for service, lease := range f.restartLeases {
+		state.RestartLeases[service] = lease
+	}
+	for service, record := range f.restartRecords {
+		state.RestartRecords[service] = record
 	}
 	return state
 }
@@ -1013,6 +1153,14 @@ func (f *FSM) Restore(rc io.ReadCloser) error {
 	f.pendingJoinRequests = state.GetPendingJoinRequests()
 	if f.pendingJoinRequests == nil {
 		f.pendingJoinRequests = make(map[string]*internalpb.PendingJoinRequest)
+	}
+	f.restartLeases = state.GetRestartLeases()
+	if f.restartLeases == nil {
+		f.restartLeases = make(map[string]*internalpb.RestartLease)
+	}
+	f.restartRecords = state.GetRestartRecords()
+	if f.restartRecords == nil {
+		f.restartRecords = make(map[string]*internalpb.RestartRecord)
 	}
 	f.authEnabled = state.GetAuthEnabled()
 	f.mu.Unlock()

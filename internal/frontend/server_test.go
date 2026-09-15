@@ -145,6 +145,11 @@ type fakeClient struct {
 	restartNodeServiceResp    *rpcpb.RestartNodeServiceResponse
 	lastRestartNodeServiceReq *rpcpb.RestartNodeServiceRequest
 
+	preflightRestartNodeServiceResp    *rpcpb.PreflightRestartNodeServiceResponse
+	preflightApproveJoinRequestResp    *rpcpb.PreflightApproveJoinRequestResponse
+	lastPreflightApproveJoinRequestReq *rpcpb.PreflightApproveJoinRequestRequest
+	listJoinRequestsResp               *rpcpb.ListJoinRequestsResponse
+
 	getUplinkStatusResp   *rpcpb.GetUplinkStatusResponse
 	setUplinkStateResp    *rpcpb.SetUplinkStateResponse
 	lastSetUplinkStateReq *rpcpb.SetUplinkStateRequest
@@ -639,11 +644,37 @@ func (f *fakeClient) GetJoinRequestStatus(_ context.Context, in *rpcpb.GetJoinRe
 }
 
 func (f *fakeClient) ListJoinRequests(context.Context, *rpcpb.ListJoinRequestsRequest, ...grpc.CallOption) (*rpcpb.ListJoinRequestsResponse, error) {
+	if f.listJoinRequestsResp != nil {
+		return f.listJoinRequestsResp, nil
+	}
 	return &rpcpb.ListJoinRequestsResponse{}, nil
 }
 
 func (f *fakeClient) ApproveJoinRequest(context.Context, *rpcpb.ApproveJoinRequestRequest, ...grpc.CallOption) (*rpcpb.ApproveJoinRequestResponse, error) {
 	return &rpcpb.ApproveJoinRequestResponse{}, nil
+}
+
+func (f *fakeClient) PreflightApproveJoinRequest(_ context.Context, in *rpcpb.PreflightApproveJoinRequestRequest, _ ...grpc.CallOption) (*rpcpb.PreflightApproveJoinRequestResponse, error) {
+	f.lastPreflightApproveJoinRequestReq = in
+	if f.preflightApproveJoinRequestResp != nil {
+		return f.preflightApproveJoinRequestResp, nil
+	}
+	return &rpcpb.PreflightApproveJoinRequestResponse{}, nil
+}
+
+func (f *fakeClient) PreflightRestartNodeService(context.Context, *rpcpb.PreflightRestartNodeServiceRequest, ...grpc.CallOption) (*rpcpb.PreflightRestartNodeServiceResponse, error) {
+	if f.preflightRestartNodeServiceResp != nil {
+		return f.preflightRestartNodeServiceResp, nil
+	}
+	return &rpcpb.PreflightRestartNodeServiceResponse{}, nil
+}
+
+func (f *fakeClient) ReserveRestartLease(context.Context, *rpcpb.ReserveRestartLeaseRequest, ...grpc.CallOption) (*rpcpb.ReserveRestartLeaseResponse, error) {
+	return &rpcpb.ReserveRestartLeaseResponse{}, nil
+}
+
+func (f *fakeClient) ConfirmRestartCompleted(context.Context, *rpcpb.ConfirmRestartCompletedRequest, ...grpc.CallOption) (*rpcpb.ConfirmRestartCompletedResponse, error) {
+	return &rpcpb.ConfirmRestartCompletedResponse{}, nil
 }
 
 func (f *fakeClient) RejectJoinRequest(context.Context, *rpcpb.RejectJoinRequestRequest, ...grpc.CallOption) (*rpcpb.RejectJoinRequestResponse, error) {
@@ -3010,6 +3041,52 @@ func TestServer_HandlePurgeJoinRequest_ErrorRedirectsWithMessage(t *testing.T) {
 	}
 	if loc := rec.Header().Get("Location"); !strings.Contains(loc, "join_request_error=") {
 		t.Errorf("Location = %q, want it to carry join_request_error=", loc)
+	}
+}
+
+// TestServer_HandlePreflightJoinRequest_RedirectsWithVerdict is the
+// direct regression test for ADR-0103's join-approval preview: the
+// "Check reachability" button forwards the path id to
+// PreflightApproveJoinRequest (never ApproveJoinRequest itself) and
+// redirects back to the landing page carrying the verdict/detail, and
+// the landing page renders that verdict inline next to the matching
+// request without gating the real Approve button.
+func TestServer_HandlePreflightJoinRequest_RedirectsWithVerdict(t *testing.T) {
+	client := &fakeClient{
+		preflightApproveJoinRequestResp: &rpcpb.PreflightApproveJoinRequestResponse{
+			Verdict:  "block",
+			Findings: []*rpcpb.GuardrailFinding{{Rule: "join-reachability", Detail: "not reachable: connection refused"}},
+		},
+		listJoinRequestsResp: &rpcpb.ListJoinRequestsResponse{Requests: []*rpcpb.PendingJoinRequest{
+			{RequestId: "jreq-abc123", NodeId: "node02", RaftBindAddress: "10.62.0.5:17600", Code: "482913"},
+		}},
+	}
+	s := newTestServer(t, client)
+
+	req := httptest.NewRequest(http.MethodPost, "/join-requests/jreq-abc123/preflight", nil)
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusFound {
+		t.Fatalf("status = %d, want 302; body=%s", rec.Code, rec.Body.String())
+	}
+	if client.lastPreflightApproveJoinRequestReq.GetRequestId() != "jreq-abc123" {
+		t.Errorf("PreflightApproveJoinRequest request_id = %q, want jreq-abc123", client.lastPreflightApproveJoinRequestReq.GetRequestId())
+	}
+	loc := rec.Header().Get("Location")
+	if !strings.Contains(loc, "preflight_request_id=jreq-abc123") || !strings.Contains(loc, "preflight_verdict=block") {
+		t.Errorf("Location = %q, want it to carry the request id and verdict", loc)
+	}
+
+	followUp := httptest.NewRequest(http.MethodGet, loc, nil)
+	followRec := httptest.NewRecorder()
+	s.ServeHTTP(followRec, followUp)
+	body := followRec.Body.String()
+	if !strings.Contains(body, "Reachability check") || !strings.Contains(body, "block") || !strings.Contains(body, "not reachable: connection refused") {
+		t.Errorf("landing page missing the rendered preflight verdict, got: %s", body)
+	}
+	if !strings.Contains(body, `action="/join-requests/jreq-abc123/approve"`) {
+		t.Errorf("landing page must still show the real Approve form, unaffected by the preview - got: %s", body)
 	}
 }
 

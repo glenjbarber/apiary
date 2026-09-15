@@ -282,6 +282,13 @@ func (n *Node) ListPendingJoinRequestsLocal() []*internalpb.PendingJoinRequest {
 	return n.fsm.ListPendingJoinRequests()
 }
 
+// RestartLeaseStateLocal backs GetRestartLeaseStateLocal (ADR-0103) - a
+// plain read of this node's own FSM copy, mirroring
+// GetPendingJoinRequestLocal's own "any node can answer" posture.
+func (n *Node) RestartLeaseStateLocal(service string) (*internalpb.RestartLease, *internalpb.RestartRecord) {
+	return n.fsm.RestartLeaseState(service)
+}
+
 // GetJail/ListJails mirror GetNetwork/ListNetworks exactly, for
 // JailDefinitions instead.
 func (n *Node) GetJail(id string) (jail *internalpb.JailDefinition, found bool, err error) {

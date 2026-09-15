@@ -138,6 +138,13 @@ func (c *RaftClient) GetPendingJoinRequestLocal(ctx context.Context, requestID s
 	return c.client.GetPendingJoinRequestLocal(ctx, &internalpb.GetPendingJoinRequestRequest{RequestId: requestID})
 }
 
+// GetRestartLeaseStateLocal backs PreflightRestartNodeService (ADR-0103) -
+// a plain read of this node's own FSM copy, mirroring
+// GetPendingJoinRequestLocal above.
+func (c *RaftClient) GetRestartLeaseStateLocal(ctx context.Context, service string) (*internalpb.GetRestartLeaseStateResponse, error) {
+	return c.client.GetRestartLeaseStateLocal(ctx, &internalpb.GetRestartLeaseStateRequest{Service: service})
+}
+
 func (c *RaftClient) ListPendingJoinRequestsLocal(ctx context.Context) (*internalpb.ListPendingJoinRequestsResponse, error) {
 	return c.client.ListPendingJoinRequestsLocal(ctx, &internalpb.ListPendingJoinRequestsRequest{})
 }

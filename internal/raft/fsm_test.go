@@ -1642,3 +1642,216 @@ func TestFSM_SnapshotRestore_PendingJoinRequests(t *testing.T) {
 		t.Errorf("restored PendingJoinRequest(jreq-1) = (%+v, %v), want present with code 482913", req, ok)
 	}
 }
+
+func acquireRestartLeaseCmd(service, nodeID string, requestedAtUnix, cooldownSeconds int64, voters []string, force bool) *internalpb.Command {
+	return &internalpb.Command{
+		Op: &internalpb.Command_AcquireRestartLease{
+			AcquireRestartLease: &internalpb.AcquireRestartLease{
+				Service:         service,
+				NodeId:          nodeID,
+				RequestedAtUnix: requestedAtUnix,
+				VoterNodeIds:    voters,
+				CooldownSeconds: cooldownSeconds,
+				Force:           force,
+			},
+		},
+	}
+}
+
+func recordRestartCompletedCmd(service, nodeID string, completedAtUnix int64, leaseID uint64) *internalpb.Command {
+	return &internalpb.Command{
+		Op: &internalpb.Command_RecordRestartCompleted{
+			RecordRestartCompleted: &internalpb.RecordRestartCompleted{
+				Service:         service,
+				NodeId:          nodeID,
+				CompletedAtUnix: completedAtUnix,
+				LeaseId:         leaseID,
+			},
+		},
+	}
+}
+
+func TestFSM_AcquireRestartLease_GrantsWhenClear(t *testing.T) {
+	fsm := NewFSM()
+	result := fsm.Apply(&raft.Log{Index: 1, Data: mustMarshalCommand(t, acquireRestartLeaseCmd("apiary_managerd", "node01", 1000, 600, []string{"node01", "node02"}, false))}).(*FSMApplyResult)
+
+	if result.Error != "" {
+		t.Fatalf("AcquireRestartLease error: %v", result.Error)
+	}
+	if result.RestartLease == nil || result.RestartLease.GetLeaseId() != 1 || result.RestartLease.GetHolderNodeId() != "node01" {
+		t.Errorf("RestartLease = %+v, want lease_id=1 holder=node01", result.RestartLease)
+	}
+	if result.RestartLease.GetForce() {
+		t.Errorf("RestartLease.Force = true for a clean grant, want false")
+	}
+}
+
+func TestFSM_AcquireRestartLease_BlocksWhileUnconfirmedLeaseExists_RegardlessOfAge(t *testing.T) {
+	fsm := NewFSM()
+	fsm.Apply(&raft.Log{Index: 1, Data: mustMarshalCommand(t, acquireRestartLeaseCmd("apiary_managerd", "node01", 1000, 600, []string{"node01", "node02"}, false))})
+
+	// A second acquire attempt long after the first (no TTL concept at
+	// all - see RestartLease's own doc comment) must still block.
+	result := fsm.Apply(&raft.Log{Index: 2, Data: mustMarshalCommand(t, acquireRestartLeaseCmd("apiary_managerd", "node02", 1000000, 600, []string{"node01", "node02"}, false))}).(*FSMApplyResult)
+
+	if result.Error == "" {
+		t.Fatal("AcquireRestartLease() = no error, want blocked by the still-unconfirmed prior lease")
+	}
+	if result.RestartLease != nil {
+		t.Errorf("RestartLease = %+v, want nil on a blocked acquire", result.RestartLease)
+	}
+}
+
+func TestFSM_AcquireRestartLease_ForceGrantsOverBlock(t *testing.T) {
+	fsm := NewFSM()
+	fsm.Apply(&raft.Log{Index: 1, Data: mustMarshalCommand(t, acquireRestartLeaseCmd("apiary_managerd", "node01", 1000, 600, []string{"node01", "node02"}, false))})
+
+	result := fsm.Apply(&raft.Log{Index: 2, Data: mustMarshalCommand(t, acquireRestartLeaseCmd("apiary_managerd", "node02", 1000000, 600, []string{"node01", "node02"}, true))}).(*FSMApplyResult)
+
+	if result.Error != "" {
+		t.Fatalf("AcquireRestartLease with force error: %v", result.Error)
+	}
+	if result.RestartLease == nil || !result.RestartLease.GetForce() {
+		t.Errorf("RestartLease = %+v, want force=true on an override grant", result.RestartLease)
+	}
+	if result.RestartLease.GetHolderNodeId() != "node02" {
+		t.Errorf("RestartLease.HolderNodeId = %q, want node02 (the forcing caller)", result.RestartLease.GetHolderNodeId())
+	}
+}
+
+func TestFSM_AcquireRestartLease_BlocksOnRecentVoterRestartRecord(t *testing.T) {
+	fsm := NewFSM()
+	fsm.Apply(&raft.Log{Index: 1, Data: mustMarshalCommand(t, recordRestartCompletedCmd("apiary_managerd", "node01", 1000, 0))})
+
+	result := fsm.Apply(&raft.Log{Index: 2, Data: mustMarshalCommand(t, acquireRestartLeaseCmd("apiary_managerd", "node02", 1300, 600, []string{"node01", "node02"}, false))}).(*FSMApplyResult)
+
+	if result.Error == "" {
+		t.Fatal("AcquireRestartLease() = no error, want blocked - node01's restart was 300s ago, inside the 600s cooldown")
+	}
+}
+
+func TestFSM_AcquireRestartLease_IgnoresNonVoterRestartRecord(t *testing.T) {
+	fsm := NewFSM()
+	fsm.Apply(&raft.Log{Index: 1, Data: mustMarshalCommand(t, recordRestartCompletedCmd("apiary_managerd", "node03-decommissioned", 1000, 0))})
+
+	// node03-decommissioned is NOT in the voter snapshot below - its
+	// recent restart must not block a current voter's restart.
+	result := fsm.Apply(&raft.Log{Index: 2, Data: mustMarshalCommand(t, acquireRestartLeaseCmd("apiary_managerd", "node02", 1300, 600, []string{"node01", "node02"}, false))}).(*FSMApplyResult)
+
+	if result.Error != "" {
+		t.Fatalf("AcquireRestartLease() error: %v, want granted - the recent restart's node is not a current voter", result.Error)
+	}
+}
+
+func TestFSM_AcquireRestartLease_NegativeElapsedFromClockSkewBlocksConservatively(t *testing.T) {
+	fsm := NewFSM()
+	// record completed "at" 5000, but the next request's own leader-
+	// authored timestamp reads earlier (2000) due to clock skew across a
+	// leader election - elapsed is negative, which must still block.
+	fsm.Apply(&raft.Log{Index: 1, Data: mustMarshalCommand(t, recordRestartCompletedCmd("apiary_managerd", "node01", 5000, 0))})
+
+	result := fsm.Apply(&raft.Log{Index: 2, Data: mustMarshalCommand(t, acquireRestartLeaseCmd("apiary_managerd", "node02", 2000, 600, []string{"node01", "node02"}, false))}).(*FSMApplyResult)
+
+	if result.Error == "" {
+		t.Fatal("AcquireRestartLease() = no error, want blocked - a negative elapsed value from clock skew must fail closed")
+	}
+}
+
+// TestFSM_AcquireRestartLease_ConcurrentRequestsOnlyOneGranted is the
+// direct regression test for this guardrail's core safety property: raft's
+// own serialized log-apply order, not any check-then-write coordination in
+// caller code, is what makes "at most one node holds a lease for a given
+// service" an actual guarantee. Simulated here by applying two
+// AcquireRestartLease commands for the same service back-to-back through
+// the same FSM, exactly as two managers submitting via raft would appear
+// to this FSM regardless of which one raft's leader election happened to
+// let go first.
+func TestFSM_AcquireRestartLease_ConcurrentRequestsOnlyOneGranted(t *testing.T) {
+	fsm := NewFSM()
+	first := fsm.Apply(&raft.Log{Index: 1, Data: mustMarshalCommand(t, acquireRestartLeaseCmd("apiary_managerd", "node01", 1000, 600, []string{"node01", "node02"}, false))}).(*FSMApplyResult)
+	second := fsm.Apply(&raft.Log{Index: 2, Data: mustMarshalCommand(t, acquireRestartLeaseCmd("apiary_managerd", "node02", 1001, 600, []string{"node01", "node02"}, false))}).(*FSMApplyResult)
+
+	if first.Error != "" || first.RestartLease == nil {
+		t.Fatalf("first AcquireRestartLease should have been granted cleanly, got error=%q lease=%+v", first.Error, first.RestartLease)
+	}
+	if second.Error == "" {
+		t.Fatal("second concurrent AcquireRestartLease should have been rejected, got no error")
+	}
+}
+
+func TestFSM_RecordRestartCompleted_ReleasesLeaseOnExactMatch(t *testing.T) {
+	fsm := NewFSM()
+	granted := fsm.Apply(&raft.Log{Index: 1, Data: mustMarshalCommand(t, acquireRestartLeaseCmd("apiary_managerd", "node01", 1000, 600, []string{"node01", "node02"}, false))}).(*FSMApplyResult)
+
+	fsm.Apply(&raft.Log{Index: 2, Data: mustMarshalCommand(t, recordRestartCompletedCmd("apiary_managerd", "node01", 1010, granted.RestartLease.GetLeaseId()))})
+
+	lease, record := fsm.RestartLeaseState("apiary_managerd")
+	if lease != nil {
+		t.Errorf("lease = %+v after a matching confirm, want released", lease)
+	}
+	if record == nil || record.GetCompletedAtUnix() != 1010 {
+		t.Errorf("record = %+v, want completed_at_unix=1010", record)
+	}
+
+	// The lease is now clear - a fresh acquire should succeed.
+	fresh := fsm.Apply(&raft.Log{Index: 3, Data: mustMarshalCommand(t, acquireRestartLeaseCmd("apiary_managerd", "node02", 1020, 1, []string{"node01", "node02"}, false))}).(*FSMApplyResult)
+	if fresh.Error != "" {
+		t.Errorf("fresh AcquireRestartLease after release error: %v", fresh.Error)
+	}
+}
+
+// TestFSM_RecordRestartCompleted_StaleLeaseIDDoesNotReleaseADifferentLease
+// is the direct regression test for the review finding that matching only
+// on node_id (not also lease_id) could let a stale or out-of-order confirm
+// release a different, currently-active lease for the same node/service
+// pair.
+func TestFSM_RecordRestartCompleted_StaleLeaseIDDoesNotReleaseADifferentLease(t *testing.T) {
+	fsm := NewFSM()
+	// node01 acquires lease #1, then (simulating a very late, out-of-
+	// order confirm arriving after the fact) something else has since
+	// force-acquired lease #2, also held by node01.
+	first := fsm.Apply(&raft.Log{Index: 1, Data: mustMarshalCommand(t, acquireRestartLeaseCmd("apiary_managerd", "node01", 1000, 600, []string{"node01", "node02"}, false))}).(*FSMApplyResult)
+	fsm.Apply(&raft.Log{Index: 2, Data: mustMarshalCommand(t, acquireRestartLeaseCmd("apiary_managerd", "node01", 1005, 600, []string{"node01", "node02"}, true))})
+
+	// A stale confirm for the FIRST lease_id arrives late.
+	fsm.Apply(&raft.Log{Index: 3, Data: mustMarshalCommand(t, recordRestartCompletedCmd("apiary_managerd", "node01", 1010, first.RestartLease.GetLeaseId()))})
+
+	lease, record := fsm.RestartLeaseState("apiary_managerd")
+	if lease == nil || lease.GetLeaseId() != 2 {
+		t.Errorf("lease = %+v, want the second (still-active) lease untouched by the stale confirm for the first", lease)
+	}
+	// The record is still written unconditionally - a real restart
+	// really did complete, regardless of the lease mismatch.
+	if record == nil || record.GetCompletedAtUnix() != 1010 {
+		t.Errorf("record = %+v, want completed_at_unix=1010 written regardless of the lease mismatch", record)
+	}
+}
+
+func TestFSM_SnapshotRestore_PreservesRestartLeaseAndRecordState(t *testing.T) {
+	fsm := NewFSM()
+	granted := fsm.Apply(&raft.Log{Index: 1, Data: mustMarshalCommand(t, acquireRestartLeaseCmd("apiary_managerd", "node01", 1000, 600, []string{"node01", "node02"}, false))}).(*FSMApplyResult)
+	fsm.Apply(&raft.Log{Index: 2, Data: mustMarshalCommand(t, recordRestartCompletedCmd("apiary_restshimd", "node02", 2000, 0))})
+
+	snap, err := fsm.Snapshot()
+	if err != nil {
+		t.Fatalf("Snapshot() error: %v", err)
+	}
+	sink := &fakeSnapshotSink{}
+	if err := snap.(*fsmSnapshot).Persist(sink); err != nil {
+		t.Fatalf("Persist() error: %v", err)
+	}
+
+	restored := NewFSM()
+	if err := restored.Restore(io.NopCloser(bytes.NewReader(sink.Bytes()))); err != nil {
+		t.Fatalf("Restore() error: %v", err)
+	}
+
+	lease, _ := restored.RestartLeaseState("apiary_managerd")
+	if lease == nil || lease.GetLeaseId() != granted.RestartLease.GetLeaseId() {
+		t.Errorf("restored lease = %+v, want lease_id=%d preserved across snapshot/restore", lease, granted.RestartLease.GetLeaseId())
+	}
+	_, record := restored.RestartLeaseState("apiary_restshimd")
+	if record == nil || record.GetNodeId() != "node02" {
+		t.Errorf("restored record = %+v, want node02's restshimd restart preserved across snapshot/restore", record)
+	}
+}

@@ -365,6 +365,15 @@ type nodeServiceView struct {
 	Enabled     bool
 	Detail      string
 	Restartable bool
+
+	// GuardrailBlocked/GuardrailDetail (ADR-0103) are populated only for
+	// apiary_managerd, from PreflightRestartNodeService's own Block/Unknown
+	// verdict - both gate the same way here (force overrides either), per
+	// that guardrail's own "an evaluation that couldn't determine the real
+	// state must fail closed" posture. Every other service leaves these
+	// zero-valued, since the guardrail carries no stake in them.
+	GuardrailBlocked bool
+	GuardrailDetail  string
 }
 
 func fromRPCNodeServices(resp *rpcpb.ListNodeServicesResponse) []nodeServiceView {

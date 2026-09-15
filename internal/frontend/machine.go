@@ -204,6 +204,11 @@ func (s *Server) renderOriginCAPanel(w http.ResponseWriter, r *http.Request, for
 
 // currentNodeServices fetches the fixed set of Apiary rc.d services from
 // this Hive's managerd. The result is intentionally local, like node config.
+// apiary_managerd's own row is additionally annotated with the action-
+// preflight restart guardrail's current verdict (ADR-0103) - a failed
+// preflight call itself is treated as GuardrailBlocked too, matching the
+// guardrail's own fail-closed posture, rather than silently showing a
+// clean row.
 func (s *Server) currentNodeServices(r *http.Request) ([]nodeServiceView, string) {
 	resp, err := s.client.ListNodeServices(r.Context(), &rpcpb.ListNodeServicesRequest{})
 	if err != nil {
@@ -212,7 +217,29 @@ func (s *Server) currentNodeServices(r *http.Request) ([]nodeServiceView, string
 	if resp.GetError() != "" {
 		return nil, resp.GetError()
 	}
-	return fromRPCNodeServices(resp), ""
+	services := fromRPCNodeServices(resp)
+	for i := range services {
+		if services[i].Name != "apiary_managerd" {
+			continue
+		}
+		preflight, perr := s.client.PreflightRestartNodeService(r.Context(), &rpcpb.PreflightRestartNodeServiceRequest{Name: services[i].Name})
+		switch {
+		case perr != nil:
+			services[i].GuardrailBlocked = true
+			services[i].GuardrailDetail = "could not check the restart guardrail: " + perr.Error()
+		case preflight.GetError() != "":
+			services[i].GuardrailBlocked = true
+			services[i].GuardrailDetail = "could not check the restart guardrail: " + preflight.GetError()
+		case preflight.GetVerdict() == "block" || preflight.GetVerdict() == "unknown":
+			services[i].GuardrailBlocked = true
+			if len(preflight.GetFindings()) > 0 {
+				services[i].GuardrailDetail = preflight.GetFindings()[0].GetDetail()
+			} else {
+				services[i].GuardrailDetail = "restart is currently blocked"
+			}
+		}
+	}
+	return services, ""
 }
 
 // currentUplinkStatus fetches this Comb's own uplink interface state
@@ -815,7 +842,15 @@ func (s *Server) renderQuotaPanel(w http.ResponseWriter, r *http.Request, formEr
 // current gRPC request can finish before its process is replaced.
 func (s *Server) handleRestartNodeService(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
-	resp, err := s.client.RestartNodeService(r.Context(), &rpcpb.RestartNodeServiceRequest{Name: name})
+	r.ParseForm()
+	// force (ADR-0103) overrides the action-preflight restart guardrail
+	// for apiary_managerd - an explicit "I understand this bypasses a
+	// safety check" acknowledgment, only ever present when the panel
+	// itself rendered the force checkbox because the guardrail was
+	// already reporting Block/Unknown. Meaningless for every other
+	// service, which the guardrail never gates.
+	force := r.Form.Has("force")
+	resp, err := s.client.RestartNodeService(r.Context(), &rpcpb.RestartNodeServiceRequest{Name: name, Force: force})
 	if err != nil {
 		s.renderNodeServicesPanel(w, r, err.Error(), "")
 		return
@@ -827,6 +862,9 @@ func (s *Server) handleRestartNodeService(w http.ResponseWriter, r *http.Request
 	success := name + " restarted"
 	if resp.GetScheduled() {
 		success = name + " restart scheduled"
+	}
+	if resp.GetGuardrailOverridden() {
+		success += " (restart guardrail overridden by force)"
 	}
 	s.renderNodeServicesPanel(w, r, "", success)
 }

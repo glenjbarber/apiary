@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
+	"crypto/subtle"
 	"encoding/base64"
 	"encoding/hex"
 	"fmt"
@@ -226,6 +227,23 @@ var requiredRole = map[string]Role{
 	"/apiary.rpc.v1.ManagerService/ApproveJoinRequest": RoleAdmin,
 	"/apiary.rpc.v1.ManagerService/RejectJoinRequest":  RoleAdmin,
 	"/apiary.rpc.v1.ManagerService/PurgeJoinRequest":   RoleAdmin,
+
+	// PreflightApproveJoinRequest (ADR-0103) previews ApproveJoinRequest's
+	// own reachability gate - Admin-tier, matching ApproveJoinRequest
+	// itself exactly, since it makes managerd dial a caller-selected
+	// address (a Viewer could otherwise use it as a reachability oracle).
+	"/apiary.rpc.v1.ManagerService/PreflightApproveJoinRequest": RoleAdmin,
+
+	// PreflightRestartNodeService (ADR-0103) is read-only and makes no
+	// live dial to a caller-influenced address (only a local raft-
+	// internal state read) - Viewer-tier, matching
+	// GetLocalNetworkBridgeStatus/SimulateNodeFailure's own posture.
+	// ReserveRestartLease/ConfirmRestartCompleted are deliberately absent
+	// from this map entirely, the same way RequestJoinColony/
+	// GetJoinRequestStatus/CancelJoinRequest are above - they're exempted
+	// from checkAuth altogether in AuthUnaryInterceptor and gated by
+	// restartGuardrailTokenValid instead, not merely a low tier.
+	"/apiary.rpc.v1.ManagerService/PreflightRestartNodeService": RoleViewer,
 }
 
 // requiredRoleFor returns the minimum Role fullMethod needs. An RPC
@@ -387,6 +405,36 @@ const cancelJoinRequestMethod = "/apiary.rpc.v1.ManagerService/CancelJoinRequest
 // security boundary, not an API key.
 const authenticatePasswordMethod = "/apiary.rpc.v1.ManagerService/AuthenticatePassword"
 
+// reserveRestartLeaseMethod/confirmRestartCompletedMethod (ADR-0103) are
+// exempted from checkAuth for a deliberately different reason than every
+// other exemption above: these two are NOT meant to be reachable by any
+// CreateAPIKey-issued credential at all, Admin or otherwise - two earlier
+// designs (a CreateAPIKey-mintable "peer" role; a write-only nodeconfig
+// field) both turned out not to actually close that off, since either
+// gave an ordinary Admin a real path to mint or set a valid credential
+// themselves. The real security boundary here is entirely inside each
+// handler: a dedicated comparison (restartGuardrailTokenValid) against
+// Server.restartGuardrailToken, a value loaded once from a root-owned
+// local file at managerd startup and never exposed through any RPC in
+// either direction. Bypassing checkAuth here is not "no authorization" -
+// it is "a different, stricter authorization that checkAuth's own
+// API-key/role model cannot express."
+const reserveRestartLeaseMethod = "/apiary.rpc.v1.ManagerService/ReserveRestartLease"
+const confirmRestartCompletedMethod = "/apiary.rpc.v1.ManagerService/ConfirmRestartCompleted"
+
+// restartGuardrailTokenValid reports whether presented matches configured
+// exactly, in constant time - and, critically, only when configured is
+// non-empty. subtle.ConstantTimeCompare on two empty byte slices returns
+// 1 (equal), so an unprovisioned node (no token file, configured == "")
+// must reject unconditionally rather than let an equally-empty (or
+// entirely absent) presented token pass by accident.
+func restartGuardrailTokenValid(presented, configured string) bool {
+	if configured == "" {
+		return false
+	}
+	return subtle.ConstantTimeCompare([]byte(presented), []byte(configured)) == 1
+}
+
 // AuthUnaryInterceptor/AuthStreamInterceptor gate every RPC on
 // ManagerService via checkAuth - this project's first use of gRPC
 // interceptors anywhere. UploadISO (the one streaming RPC) is checked
@@ -403,7 +451,7 @@ const authenticatePasswordMethod = "/apiary.rpc.v1.ManagerService/AuthenticatePa
 // reachability/leader info only), so letting it bypass auth entirely
 // is an acceptable, narrow carve-out - not a precedent for adding more.
 func (s *Server) AuthUnaryInterceptor(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
-	if info.FullMethod != statusMethod && info.FullMethod != requestJoinColonyMethod && info.FullMethod != getJoinRequestStatusMethod && info.FullMethod != cancelJoinRequestMethod && info.FullMethod != authenticatePasswordMethod {
+	if info.FullMethod != statusMethod && info.FullMethod != requestJoinColonyMethod && info.FullMethod != getJoinRequestStatusMethod && info.FullMethod != cancelJoinRequestMethod && info.FullMethod != authenticatePasswordMethod && info.FullMethod != reserveRestartLeaseMethod && info.FullMethod != confirmRestartCompletedMethod {
 		if err := checkAuth(ctx, info.FullMethod, raftAPIKeyValidator{s.raft}); err != nil {
 			return nil, err
 		}

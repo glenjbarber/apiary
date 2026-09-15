@@ -10,6 +10,8 @@ import (
 	"strings"
 	"time"
 
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
 
 	internalpb "github.com/glenjbarber/apiary/api/internalpb"
@@ -18,6 +20,7 @@ import (
 	"github.com/glenjbarber/apiary/internal/assumptions"
 	"github.com/glenjbarber/apiary/internal/cluster"
 	"github.com/glenjbarber/apiary/internal/frontendconfig"
+	"github.com/glenjbarber/apiary/internal/guardrail"
 	"github.com/glenjbarber/apiary/internal/health"
 	"github.com/glenjbarber/apiary/internal/hoststats"
 	"github.com/glenjbarber/apiary/internal/isostore"
@@ -198,6 +201,20 @@ type PeerForwarder interface {
 	RequestJoinColonyUnauthenticated(ctx context.Context, addr string, req *rpcpb.RequestJoinColonyRequest) (*rpcpb.RequestJoinColonyResponse, error)
 	GetJoinRequestStatusUnauthenticated(ctx context.Context, addr, requestID string) (*rpcpb.GetJoinRequestStatusResponse, error)
 	CancelJoinRequestUnauthenticated(ctx context.Context, addr string, req *rpcpb.CancelJoinRequestRequest) (*rpcpb.CancelJoinRequestResponse, error)
+
+	// PreflightApproveJoinRequest forwards on a leader-hint rejection,
+	// mirroring ApproveJoinRequest above exactly (ADR-0103).
+	PreflightApproveJoinRequest(ctx context.Context, addr string, req *rpcpb.PreflightApproveJoinRequestRequest) (*rpcpb.PreflightApproveJoinRequestResponse, error)
+
+	// ReserveRestartLease/ConfirmRestartCompleted forward on a leader-hint
+	// rejection like every other Apply-backed write above, but
+	// authenticate with this node's own restart-guardrail token instead
+	// of -peer-api-key - see ADR-0103 and internal/manager/auth.go's own
+	// restartGuardrailTokenValid doc comment for why these two RPCs
+	// deliberately sit outside the normal Viewer/Admin role hierarchy
+	// every other forwarded RPC here uses.
+	ReserveRestartLease(ctx context.Context, addr string, req *rpcpb.ReserveRestartLeaseRequest) (*rpcpb.ReserveRestartLeaseResponse, error)
+	ConfirmRestartCompleted(ctx context.Context, addr string, req *rpcpb.ConfirmRestartCompletedRequest) (*rpcpb.ConfirmRestartCompletedResponse, error)
 }
 
 // reconcilerStats is the subset of *cluster.Reconciler the server needs
@@ -379,6 +396,20 @@ type Server struct {
 	// the package-level dialReachable. See ApproveJoinRequest's own
 	// pre-AddVoter check (ADR-0097).
 	reachabilityCheck func(ctx context.Context, addr string) error
+
+	// restartGuardrailToken gates ReserveRestartLease/ConfirmRestartCompleted
+	// (ADR-0103) - loaded once from a root-owned local file at managerd
+	// startup (SetRestartGuardrailToken), never exposed through any RPC.
+	// Empty (the default, no file provisioned) means these two RPCs can
+	// never succeed for a forwarded call - see restartGuardrailTokenValid's
+	// own doc comment for why this fails closed rather than open.
+	restartGuardrailToken string
+
+	// restartConfirm persists the pending-restart-confirmation record
+	// RestartNodeService writes before restarting apiary_managerd, read
+	// back by cmd/managerd's own startup path to self-confirm (ADR-0103) -
+	// nil on a node with no restart-confirmation state directory wired up.
+	restartConfirm *RestartConfirmStore
 }
 
 // SetPAMAuthenticator wires PAM login support after construction (ADR-
@@ -521,6 +552,20 @@ func (s *Server) SetOriginCAIssuer(issuer origincert.Issuer) { s.originCA = issu
 func (s *Server) SetFrontendConfig(store frontendConfigStore)   { s.frontendConfig = store }
 func (s *Server) SetRestshimdConfig(store restshimdConfigStore) { s.restshimdConfig = store }
 func (s *Server) SetRaftdConfig(store raftdConfigStore)         { s.raftdConfig = store }
+
+// SetRestartGuardrailToken wires the action-preflight restart guardrail's
+// dedicated credential (ADR-0103) - loaded once by cmd/managerd from a
+// root-owned local file, never an RPC-settable value. Empty (the
+// default, no file provisioned) means ReserveRestartLease/
+// ConfirmRestartCompleted can never succeed for a forwarded call.
+func (s *Server) SetRestartGuardrailToken(token string) { s.restartGuardrailToken = token }
+
+// SetRestartConfirmStore wires the small local state file
+// RestartNodeService writes before restarting apiary_managerd, read back
+// by cmd/managerd's own startup path to self-confirm (ADR-0103). Nil
+// (the default) leaves RestartNodeService unable to persist the pending
+// record - callers should always wire this alongside restartGuardrailToken.
+func (s *Server) SetRestartConfirmStore(store *RestartConfirmStore) { s.restartConfirm = store }
 
 func originCertificateInfo(entry origincert.InventoryEntry) *rpcpb.OriginCertificateInfo {
 	return &rpcpb.OriginCertificateInfo{Name: entry.Name, Service: entry.Service,
@@ -2767,10 +2812,37 @@ func (s *Server) ListNodeServices(ctx context.Context, _ *rpcpb.ListNodeServices
 	return &rpcpb.ListNodeServicesResponse{Services: services}, nil
 }
 
+// restartGuardrailService is the one service the action-preflight
+// restart guardrail (ADR-0103) applies to - the real cross-node quorum
+// risk the guardrail exists for. frontend/restshimd restarts never kill
+// the process handling the RestartNodeService call itself (they're
+// separate processes), so neither needs the guardrail's lease/confirm
+// machinery at all.
+const restartGuardrailService = "apiary_managerd"
+
+// restartLeaseCooldownSeconds is the minimum time between confirmed
+// apiary_managerd restarts on any Raft voter - "do not restart both
+// managers within ten minutes," the roadmap's own example verbatim.
+const restartLeaseCooldownSeconds = 600
+
+// restartCommandTimeout bounds the `service apiary_managerd restart`
+// call itself - comfortably shorter than nothing (there is no lease TTL
+// to race against any more, ADR-0103's revision note #17), but still
+// bounded so a hung command doesn't block this goroutine forever.
+const restartCommandTimeout = 60 * time.Second
+
 // RestartNodeService restarts one allowlisted service on this Hive. Every
 // restart is scheduled after this RPC returns: restarting either managerd or
 // frontend can otherwise sever the gRPC or HTTP connection carrying the
 // confirmation back to the operator.
+//
+// For apiary_managerd only, this now goes through the action-preflight
+// restart guardrail (ADR-0103): a cluster-wide Raft lease must be
+// reserved first, and - critically - this process can never reliably
+// observe or confirm the restart's own outcome, because the restart
+// replaces the very process handling this call. Confirmation instead
+// happens from the restarted node's own next startup (cmd/managerd's own
+// startup path) - see RestartConfirmStore's doc comment.
 func (s *Server) RestartNodeService(ctx context.Context, req *rpcpb.RestartNodeServiceRequest) (*rpcpb.RestartNodeServiceResponse, error) {
 	if s.services == nil {
 		return &rpcpb.RestartNodeServiceResponse{Error: "this node has no service controller configured"}, nil
@@ -2779,15 +2851,275 @@ func (s *Server) RestartNodeService(ctx context.Context, req *rpcpb.RestartNodeS
 	if !restartableService(name) {
 		return &rpcpb.RestartNodeServiceResponse{Error: fmt.Sprintf("service %q cannot be restarted from Apiary", name)}, nil
 	}
+
+	var guardrailOverridden bool
+	var leaseID uint64
+	if name == restartGuardrailService {
+		reserveResp, err := s.reserveRestartLease(ctx, &rpcpb.ReserveRestartLeaseRequest{
+			Service: name,
+			NodeId:  s.nodeID,
+			Force:   req.GetForce(),
+		})
+		if err != nil {
+			return &rpcpb.RestartNodeServiceResponse{Error: err.Error()}, nil
+		}
+		// Fail closed on both a real block and any raft-level failure to
+		// even determine one - an evaluation that couldn't determine the
+		// real state must never be silently treated as safe.
+		if reserveResp.GetError() != "" || !reserveResp.GetGranted() {
+			errMsg := reserveResp.GetError()
+			if errMsg == "" {
+				errMsg = "refusing to restart: the restart-lease reservation was not granted"
+			}
+			return &rpcpb.RestartNodeServiceResponse{Error: errMsg}, nil
+		}
+		guardrailOverridden = reserveResp.GetGuardrailOverridden()
+		leaseID = reserveResp.GetLeaseId()
+
+		if s.restartConfirm != nil {
+			// Written BEFORE issuing the restart command below, not
+			// after - a crash immediately after issuing the command
+			// still leaves a discoverable, correctly-blocking trace
+			// (ADR-0103).
+			if err := s.restartConfirm.Save(PendingRestart{Service: name, NodeID: s.nodeID, LeaseID: leaseID}); err != nil {
+				fmt.Fprintf(os.Stderr, "apiary: saving pending restart confirmation for %s: %v\n", name, err)
+			}
+		}
+	}
+
 	go func() {
 		// Let gRPC and the frontend's HTTP handler flush the confirmation
 		// before either target service is restarted.
 		time.Sleep(250 * time.Millisecond)
-		if err := s.services.Restart(context.Background(), name); err != nil {
+		restartCtx, cancel := context.WithTimeout(context.Background(), restartCommandTimeout)
+		defer cancel()
+		if err := s.services.Restart(restartCtx, name); err != nil {
 			fmt.Fprintf(os.Stderr, "apiary: restarting %s: %v\n", name, err)
 		}
+		// No further action here for restartGuardrailService: this
+		// process cannot reliably confirm its own replacement's outcome
+		// (ADR-0103) - confirmation happens from the NEW process's own
+		// startup, which reads back the pending-restart record this
+		// handler already wrote above.
 	}()
-	return &rpcpb.RestartNodeServiceResponse{Scheduled: true}, nil
+	return &rpcpb.RestartNodeServiceResponse{Scheduled: true, GuardrailOverridden: guardrailOverridden}, nil
+}
+
+// toRPCGuardrailFindings converts internal/guardrail.Finding values into
+// their flat, wire-safe rpcpb.GuardrailFinding form - mirroring
+// AssumptionClaim.evidence's own flat-string convention rather than a
+// nested message.
+func toRPCGuardrailFindings(findings []guardrail.Finding) []*rpcpb.GuardrailFinding {
+	out := make([]*rpcpb.GuardrailFinding, 0, len(findings))
+	for _, f := range findings {
+		evidence := make([]string, 0, len(f.Evidence))
+		for _, e := range f.Evidence {
+			evidence = append(evidence, e.Source+": "+e.Detail)
+		}
+		out = append(out, &rpcpb.GuardrailFinding{Rule: f.Rule, Detail: f.Detail, Evidence: evidence})
+	}
+	return out
+}
+
+// voterNodeIDs returns the node ids of every currently-Voter server in
+// status, per ADR-0103's own "only actual Raft voters count" rule.
+func voterNodeIDs(status *internalpb.StatusResponse) []string {
+	var voters []string
+	for _, srv := range status.GetServers() {
+		if srv.GetSuffrage() == "Voter" {
+			voters = append(voters, srv.GetId())
+		}
+	}
+	return voters
+}
+
+// PreflightRestartNodeService previews the action-preflight restart
+// guardrail (ADR-0103) for apiary_managerd - Viewer-tier, read-only, no
+// live dial to a caller-influenced address (only a local raft-internal
+// state read, unlike PreflightApproveJoinRequest). Always Allow for
+// every other service, which carries no quorum stake.
+func (s *Server) PreflightRestartNodeService(ctx context.Context, req *rpcpb.PreflightRestartNodeServiceRequest) (*rpcpb.PreflightRestartNodeServiceResponse, error) {
+	name := req.GetName()
+	if name != restartGuardrailService {
+		return &rpcpb.PreflightRestartNodeServiceResponse{Verdict: string(guardrail.Allow)}, nil
+	}
+
+	fact := guardrail.RestartCooldownFact{TargetService: name}
+	raftStatus, err := s.raft.Status(ctx)
+	if err != nil {
+		// Can't determine voter status either - assume this node could
+		// be a voter so the read failure below is actually consulted,
+		// rather than silently short-circuiting to Allow.
+		fact.IsLocalNodeVoter = true
+		fact.ReadOK = false
+	} else {
+		fact.IsLocalNodeVoter = false
+		for _, v := range voterNodeIDs(raftStatus) {
+			if v == s.nodeID {
+				fact.IsLocalNodeVoter = true
+				break
+			}
+		}
+		leaseResp, leaseErr := s.raft.GetRestartLeaseStateLocal(ctx, name)
+		fact.ReadOK = leaseErr == nil
+		if leaseErr == nil {
+			if lease := leaseResp.GetLease(); lease != nil {
+				fact.ActiveLease = &guardrail.LeaseInfo{HolderNodeID: lease.GetHolderNodeId(), RequestedAtUnix: lease.GetRequestedAtUnix()}
+			}
+			if record := leaseResp.GetRecord(); record != nil && fact.ActiveLease == nil {
+				elapsed := time.Now().Unix() - record.GetCompletedAtUnix()
+				if elapsed < restartLeaseCooldownSeconds {
+					fact.RecentRestart = &guardrail.RestartInfo{NodeID: record.GetNodeId(), CompletedAtUnix: record.GetCompletedAtUnix()}
+				}
+			}
+		}
+	}
+
+	report := guardrail.EvaluateConcurrentManagerRestart(fact)
+	return &rpcpb.PreflightRestartNodeServiceResponse{
+		Verdict:  string(report.Verdict),
+		Findings: toRPCGuardrailFindings(report.Findings),
+	}, nil
+}
+
+// ReserveRestartLease is the external RPC form, gRPC-reachable by a
+// peer's own forwarded call - gated by restartGuardrailTokenValid against
+// a root-owned local file loaded once at startup, deliberately NOT the
+// normal Viewer/Admin role hierarchy (see internal/manager/auth.go's own
+// reserveRestartLeaseMethod doc comment). RestartNodeService, in the same
+// process, calls reserveRestartLease directly instead of this method -
+// its own caller's incoming context carries whatever credential the
+// *operator* presented (an Admin API key, or none), never this dedicated
+// token, so gating the same-process path here would make every local
+// restart fail closed for the wrong reason.
+func (s *Server) ReserveRestartLease(ctx context.Context, req *rpcpb.ReserveRestartLeaseRequest) (*rpcpb.ReserveRestartLeaseResponse, error) {
+	presented, _ := extractBearerToken(ctx)
+	if !restartGuardrailTokenValid(presented, s.restartGuardrailToken) {
+		return nil, status.Error(codes.PermissionDenied, "invalid or missing restart-guardrail token")
+	}
+	return s.reserveRestartLease(ctx, req)
+}
+
+// reserveRestartLease is internal plumbing behind RestartNodeService's own
+// guardrail (ADR-0103) - never called by an operator or exposed in any
+// UI control, and carries no token check of its own: the only two
+// callers are ReserveRestartLease above (already checked the token) and
+// RestartNodeService (the same trusted process calling itself directly,
+// never over the wire).
+func (s *Server) reserveRestartLease(ctx context.Context, req *rpcpb.ReserveRestartLeaseRequest) (*rpcpb.ReserveRestartLeaseResponse, error) {
+	raftStatus, err := s.raft.Status(ctx)
+	if err != nil {
+		return &rpcpb.ReserveRestartLeaseResponse{Error: err.Error()}, nil
+	}
+	if !raftStatus.GetIsLeader() {
+		if hint := currentLeaderRaftAddress(raftStatus); hint != "" && s.peers != nil {
+			if fwd, ferr := s.peers.ReserveRestartLease(ctx, s.peerManagerdAddr(hint), req); ferr == nil {
+				return fwd, nil
+			}
+		}
+		return &rpcpb.ReserveRestartLeaseResponse{Error: "not leader and no reachable leader hint for the restart-guardrail lease"}, nil
+	}
+
+	// The leader authors both the voter snapshot and the timestamp
+	// itself, immediately before submitting - never accepted from the
+	// request, so a stale follower view or cross-node clock skew can
+	// never influence the decision (ADR-0103).
+	cmd := &internalpb.Command{
+		Op: &internalpb.Command_AcquireRestartLease{
+			AcquireRestartLease: &internalpb.AcquireRestartLease{
+				Service:         req.GetService(),
+				NodeId:          req.GetNodeId(),
+				RequestedAtUnix: time.Now().Unix(),
+				VoterNodeIds:    voterNodeIDs(raftStatus),
+				CooldownSeconds: restartLeaseCooldownSeconds,
+				Force:           req.GetForce(),
+			},
+		},
+	}
+	payload, err := proto.Marshal(cmd)
+	if err != nil {
+		return &rpcpb.ReserveRestartLeaseResponse{Error: err.Error()}, nil
+	}
+	applyResp, err := s.raft.Apply(ctx, payload, defaultApplyTimeout)
+	if err != nil {
+		return &rpcpb.ReserveRestartLeaseResponse{Error: err.Error()}, nil
+	}
+	if applyResp.GetError() != "" {
+		return &rpcpb.ReserveRestartLeaseResponse{Error: applyResp.GetError(), LeaderHint: applyResp.GetLeaderHint()}, nil
+	}
+	var lease internalpb.RestartLease
+	if err := proto.Unmarshal(applyResp.GetResult(), &lease); err != nil {
+		return &rpcpb.ReserveRestartLeaseResponse{Error: err.Error()}, nil
+	}
+	return &rpcpb.ReserveRestartLeaseResponse{
+		Granted:             true,
+		GuardrailOverridden: lease.GetForce(),
+		LeaseId:             lease.GetLeaseId(),
+	}, nil
+}
+
+// ConfirmRestartCompleted is the external RPC form, gRPC-reachable by a
+// peer's own forwarded call - same token-gating posture as
+// ReserveRestartLease above, for the identical reason.
+func (s *Server) ConfirmRestartCompleted(ctx context.Context, req *rpcpb.ConfirmRestartCompletedRequest) (*rpcpb.ConfirmRestartCompletedResponse, error) {
+	presented, _ := extractBearerToken(ctx)
+	if !restartGuardrailTokenValid(presented, s.restartGuardrailToken) {
+		return nil, status.Error(codes.PermissionDenied, "invalid or missing restart-guardrail token")
+	}
+	return s.confirmRestartCompleted(ctx, req)
+}
+
+// ConfirmRestartCompletedLocal is for cmd/managerd's own startup-
+// confirmation path (ADR-0103) ONLY - the restarted node's own next
+// startup calling on its own behalf, the same trusted process as this
+// Server, never over the wire. Skips the token check entirely, the same
+// same-process-trusts-itself reasoning reserveRestartLease has relative
+// to ReserveRestartLease - cmd/managerd has no way to present this
+// Server's own dedicated token back to itself (nor should it need to).
+func (s *Server) ConfirmRestartCompletedLocal(ctx context.Context, service, nodeID string, leaseID uint64) (*rpcpb.ConfirmRestartCompletedResponse, error) {
+	return s.confirmRestartCompleted(ctx, &rpcpb.ConfirmRestartCompletedRequest{Service: service, NodeId: nodeID, LeaseId: leaseID})
+}
+
+// confirmRestartCompleted is submitted by the restarted node's own next
+// startup, never by the process that requested the restart (ADR-0103,
+// revision note #16) - carries no token check of its own, mirroring
+// reserveRestartLease's identical split above.
+func (s *Server) confirmRestartCompleted(ctx context.Context, req *rpcpb.ConfirmRestartCompletedRequest) (*rpcpb.ConfirmRestartCompletedResponse, error) {
+	raftStatus, err := s.raft.Status(ctx)
+	if err != nil {
+		return &rpcpb.ConfirmRestartCompletedResponse{Error: err.Error()}, nil
+	}
+	if !raftStatus.GetIsLeader() {
+		if hint := currentLeaderRaftAddress(raftStatus); hint != "" && s.peers != nil {
+			if fwd, ferr := s.peers.ConfirmRestartCompleted(ctx, s.peerManagerdAddr(hint), req); ferr == nil {
+				return fwd, nil
+			}
+		}
+		return &rpcpb.ConfirmRestartCompletedResponse{Error: "not leader and no reachable leader hint for the restart-guardrail confirmation"}, nil
+	}
+
+	cmd := &internalpb.Command{
+		Op: &internalpb.Command_RecordRestartCompleted{
+			RecordRestartCompleted: &internalpb.RecordRestartCompleted{
+				Service:         req.GetService(),
+				NodeId:          req.GetNodeId(),
+				CompletedAtUnix: time.Now().Unix(),
+				LeaseId:         req.GetLeaseId(),
+			},
+		},
+	}
+	payload, err := proto.Marshal(cmd)
+	if err != nil {
+		return &rpcpb.ConfirmRestartCompletedResponse{Error: err.Error()}, nil
+	}
+	applyResp, err := s.raft.Apply(ctx, payload, defaultApplyTimeout)
+	if err != nil {
+		return &rpcpb.ConfirmRestartCompletedResponse{Error: err.Error()}, nil
+	}
+	if applyResp.GetError() != "" {
+		return &rpcpb.ConfirmRestartCompletedResponse{Error: applyResp.GetError(), LeaderHint: applyResp.GetLeaderHint()}, nil
+	}
+	return &rpcpb.ConfirmRestartCompletedResponse{}, nil
 }
 
 // GetUplinkStatus reports this node's own uplink interface name and
