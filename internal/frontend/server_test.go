@@ -110,9 +110,7 @@ type fakeClient struct {
 	updateRestshimdConfigResp    *rpcpb.UpdateRestshimdConfigResponse
 	lastUpdateRestshimdConfigReq *rpcpb.UpdateRestshimdConfigRequest
 
-	getRaftdConfigResp       *rpcpb.GetRaftdConfigResponse
-	updateRaftdConfigResp    *rpcpb.UpdateRaftdConfigResponse
-	lastUpdateRaftdConfigReq *rpcpb.UpdateRaftdConfigRequest
+	getRaftdConfigResp *rpcpb.GetRaftdConfigResponse
 
 	setVMFirewallPausedResp    *rpcpb.SetVMFirewallPausedResponse
 	lastSetVMFirewallPausedReq *rpcpb.SetVMFirewallPausedRequest
@@ -338,14 +336,6 @@ func (f *fakeClient) GetRaftdConfig(context.Context, *rpcpb.GetRaftdConfigReques
 		return f.getRaftdConfigResp, nil
 	}
 	return &rpcpb.GetRaftdConfigResponse{}, nil
-}
-
-func (f *fakeClient) UpdateRaftdConfig(_ context.Context, in *rpcpb.UpdateRaftdConfigRequest, _ ...grpc.CallOption) (*rpcpb.UpdateRaftdConfigResponse, error) {
-	f.lastUpdateRaftdConfigReq = in
-	if f.updateRaftdConfigResp != nil {
-		return f.updateRaftdConfigResp, nil
-	}
-	return &rpcpb.UpdateRaftdConfigResponse{}, nil
 }
 
 func (f *fakeClient) SetDatasetQuota(_ context.Context, in *rpcpb.SetDatasetQuotaRequest, _ ...grpc.CallOption) (*rpcpb.SetDatasetQuotaResponse, error) {

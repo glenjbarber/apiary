@@ -861,11 +861,12 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /machine/cloudflare-config", s.requireRole(manager.RoleAdmin, s.handleUpdateCloudflareConfig))
 	s.mux.HandleFunc("POST /machine/assumption-tuning", s.requireRole(manager.RoleAdmin, s.handleUpdateAssumptionTuning))
 	s.mux.HandleFunc("POST /machine/internal-security", s.requireRole(manager.RoleAdmin, s.handleUpdateInternalSecurity))
-	// ADR-0102: config editing for the three sibling daemons co-located
-	// on this host, same tier as every write above.
+	// ADR-0102: config editing for the two sibling daemons co-located on
+	// this host that can safely auto-restart, same tier as every write
+	// above. raftd has no write route at all - see GetRaftdConfig's own
+	// doc comment in internal/manager/server.go.
 	s.mux.HandleFunc("POST /machine/frontend-config", s.requireRole(manager.RoleAdmin, s.handleUpdateFrontendConfig))
 	s.mux.HandleFunc("POST /machine/restshimd-config", s.requireRole(manager.RoleAdmin, s.handleUpdateRestshimdConfig))
-	s.mux.HandleFunc("POST /machine/raftd-config", s.requireRole(manager.RoleAdmin, s.handleUpdateRaftdConfig))
 	// ADR-0083: join-colony is the joining Comb's own side, on the
 	// Machine page (Admin-only, same tier as UpdateNodeConfig - this
 	// changes the Comb's own cluster identity). approve/reject are the

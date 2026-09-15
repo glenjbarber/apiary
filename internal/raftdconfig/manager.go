@@ -1,39 +1,20 @@
 // Package raftdconfig persists cmd/raftd's own local settings
 // (ADR-0100) as a plain JSON file on disk, replacing what were
-// previously its own CLI flags. Save (ADR-0102) is called only from
-// managerd's own RPC handler (UpdateRaftdConfig), and only for a
-// narrow subset of fields - see "Deliberately excluded from
-// UpdateRaftdConfig" below. raftd itself has no RPC surface of its own
-// to expose live editing through directly (its only listener is the
-// internal, token-authenticated RaftInternal protocol for cluster
-// replication, not a general config-management surface), so managerd
-// writes this file on raftd's behalf instead (the two are always
-// co-located on the same host). A change here takes effect the next
-// time raftd restarts - and unlike frontend/restshimd, managerd never
-// restarts raftd automatically after a config save (raftd is
-// consensus-critical), so a saved change here is inert until an
-// operator manually restarts it.
-//
-// Deliberately excluded from UpdateRaftdConfig (ADR-0102), even though
-// they're plain fields on this struct and fully hand-editable:
-// NodeID (raft identity, same class of thing as managerd's own
-// excluded node_id - see internal/nodeconfig's package doc comment),
-// Join/AwaitJoin (one-time-bootstrap-only flags raftd's own
-// startupJoinOrBootstrap only consults on a truly empty DataDir -
-// editing them post-bootstrap via a web form is meaningless at best, a
-// live footgun at worst), and DataDir/Socket/RaftBind (changing any of
-// these without a restart - which this RPC never triggers - would
-// either do nothing or point raftd at a wrong/nonexistent path next
-// restart with no validation path today; they're returned by
-// GetRaftdConfig for display only). Only RaftTLSCert/RaftTLSKey/
-// RaftTLSCA/InternalToken are actually settable through
-// UpdateRaftdConfig - pure security-transport/credential knobs with no
-// topology meaning. Save itself doesn't enforce this exclusion (it
-// faithfully persists whatever Config it's given, full stop) - that's
-// UpdateRaftdConfig's own responsibility, by explicitly carrying every
-// excluded field over from the current on-disk value before calling
-// Save. See internal/manager/server.go's UpdateRaftdConfig for why this
-// carry-over is load-bearing, not optional.
+// previously its own CLI flags. Hand-edited only, for every field -
+// unlike managerd's own internal/nodeconfig, there is no RPC path that
+// writes this file at all. managerd's RPC does read it (GetRaftdConfig,
+// ADR-0102, for read-only display on the Machine page), but there is
+// no UpdateRaftdConfig: a 2026-09-15 audit found that editing
+// internal_token or raft TLS material through a plain per-host save
+// form is unsafe for a consensus-critical daemon - internal_token must
+// match managerd's own separately-configured raftd_token for
+// RaftInternal auth to keep working, and raft TLS material is
+// cluster-coupled (changing it on one voter and restarting can isolate
+// that voter and lose quorum). Both need a real coordinated rotation
+// workflow (updating every affected file, and for TLS checking peer
+// compatibility, before any restart) - out of scope here. Save exists
+// on this Manager purely as general-purpose infrastructure a future
+// rotation workflow could use; nothing in this codebase calls it today.
 //
 // Deliberately excluded: raftd's five one-shot recovery/destructive
 // flags (-reset, -export, -restore, -restore-file, -restore-dry-run)
@@ -194,7 +175,44 @@ func (m *Manager) Save(cfg Config) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(m.path(), body, 0o600)
+	// Written atomically via a temp file + explicit chmod, not a plain
+	// os.WriteFile (2026-09-15 audit fix) - see frontendconfig.Save's
+	// own doc comment for why a plain os.WriteFile's mode argument
+	// alone is insufficient for an already-existing file. Especially
+	// important here: this file can hold InternalToken.
+	return atomicWriteFile(m.path(), body)
+}
+
+// atomicWriteFile writes body to path via a temp file in the same
+// directory, explicitly chmod 0600, then renames it into place -
+// mirroring internal/assumptions.Manager's own atomic-write-then-
+// rename convention.
+func atomicWriteFile(path string, body []byte) error {
+	dir := filepath.Dir(path)
+	tmp, err := os.CreateTemp(dir, ".raftdconfig-*.tmp")
+	if err != nil {
+		return fmt.Errorf("raftdconfig: creating temp file: %w", err)
+	}
+	tmpPath := tmp.Name()
+	defer os.Remove(tmpPath) // no-op once successfully renamed
+	if _, err := tmp.Write(body); err != nil {
+		tmp.Close()
+		return fmt.Errorf("raftdconfig: writing temp file: %w", err)
+	}
+	if err := tmp.Sync(); err != nil {
+		tmp.Close()
+		return fmt.Errorf("raftdconfig: syncing temp file: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		return fmt.Errorf("raftdconfig: closing temp file: %w", err)
+	}
+	if err := os.Chmod(tmpPath, 0o600); err != nil {
+		return fmt.Errorf("raftdconfig: setting permissions: %w", err)
+	}
+	if err := os.Rename(tmpPath, path); err != nil {
+		return fmt.Errorf("raftdconfig: finalizing write: %w", err)
+	}
+	return nil
 }
 
 // validate rejects a value that would be unsafe to interpolate or

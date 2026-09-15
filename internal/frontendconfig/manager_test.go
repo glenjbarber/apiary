@@ -128,3 +128,29 @@ func TestManager_SaveIsFullReplaceNotMerge(t *testing.T) {
 		t.Errorf("HTTPAddr = %q, want the second Save's value", got.HTTPAddr)
 	}
 }
+
+// TestManager_SaveTightensPermissionsOnExistingFile is the regression
+// test for a 2026-09-15 audit finding: os.WriteFile's mode argument is
+// only applied when it CREATES a file - saving over an existing file
+// (e.g. one hand-created at 0644 before this package ever touched it)
+// previously left it at whatever mode it already had, despite this
+// file's own "must be root-owned, mode 0600" doc comment. Save must
+// now tighten permissions on every call, not just the first.
+func TestManager_SaveTightensPermissionsOnExistingFile(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "frontend.json")
+	if err := os.WriteFile(path, []byte(`{}`), 0o644); err != nil {
+		t.Fatalf("writing pre-existing file: %v", err)
+	}
+	m := &Manager{Path: path}
+
+	if err := m.Save(Config{ManagerAPIKey: "apk_test"}); err != nil {
+		t.Fatalf("Save() error: %v", err)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("Stat() error: %v", err)
+	}
+	if perm := info.Mode().Perm(); perm != 0o600 {
+		t.Errorf("permissions after Save = %o, want 0600 even though the file pre-existed at 0644", perm)
+	}
+}

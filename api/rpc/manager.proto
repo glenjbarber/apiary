@@ -163,31 +163,37 @@ service ManagerService {
   rpc GetNodeConfig(GetNodeConfigRequest) returns (GetNodeConfigResponse);
   rpc UpdateNodeConfig(UpdateNodeConfigRequest) returns (UpdateNodeConfigResponse);
 
-  // GetFrontendConfig/UpdateFrontendConfig, GetRestshimdConfig/
-  // UpdateRestshimdConfig, and GetRaftdConfig/UpdateRaftdConfig
-  // (ADR-0102) extend the same "manage this node's own local runtime
-  // settings" posture above to the three sibling daemons co-located on
-  // this same host (frontend, restshimd, raftd) - none of which has an
-  // RPC/web-UI surface of its own, so managerd writes their config
-  // files (frontend.json/restshimd.json/raftd.json, ADR-0100) directly
-  // on their behalf, assuming co-location (already true in this
-  // project's own topology). A successful UpdateFrontendConfig/
-  // UpdateRestshimdConfig also restarts that daemon (see
+  // GetFrontendConfig/UpdateFrontendConfig and GetRestshimdConfig/
+  // UpdateRestshimdConfig (ADR-0102) extend the same "manage this
+  // node's own local runtime settings" posture above to the two
+  // sibling daemons co-located on this same host - neither of which
+  // has an RPC/web-UI surface of its own, so managerd writes their
+  // config files (frontend.json/restshimd.json, ADR-0100) directly on
+  // their behalf, assuming co-location (already true in this project's
+  // own topology). A successful call also restarts that daemon (see
   // Update*ConfigResponse.scheduled) since both are stateless and
-  // non-consensus; UpdateRaftdConfig deliberately never restarts raftd
-  // (consensus-critical) - a saved raftd.json is inert until an
-  // operator manually restarts it. raftd's own identity/topology/
-  // bootstrap fields (node_id, data_dir, socket, raft_bind, join,
-  // await_join) are excluded from this RPC surface entirely, mirroring
-  // GetNodeConfig/UpdateNodeConfig's own exclusion of node_id/
-  // rpc_addr/raftd_socket above - see GetRaftdConfigResponse's own doc
-  // comment.
+  // non-consensus.
+  //
+  // GetRaftdConfig (ADR-0102) is read-only display for raftd's own
+  // config, for the same reason. There is deliberately no
+  // UpdateRaftdConfig: a 2026-09-15 audit found that editing
+  // internal_token or the raft TLS material through this kind of
+  // per-host save form is unsafe for a consensus-critical daemon -
+  // internal_token must match managerd's own separately-configured
+  // raftd_token (NodeConfig) for RaftInternal auth to keep working,
+  // and changing raft TLS material on one voter and restarting it can
+  // isolate that voter and lose quorum in a small cluster. Both need a
+  // real coordinated rotation workflow (updating every affected file
+  // and, for TLS, checking peer compatibility, before any restart) -
+  // out of scope for this ADR. raftd's config stays hand-edit-the-file-
+  // and-restart-only for every field, same as before this ADR;
+  // GetRaftdConfig exists purely so the Machine page can show current
+  // values for context.
   rpc GetFrontendConfig(GetFrontendConfigRequest) returns (GetFrontendConfigResponse);
   rpc UpdateFrontendConfig(UpdateFrontendConfigRequest) returns (UpdateFrontendConfigResponse);
   rpc GetRestshimdConfig(GetRestshimdConfigRequest) returns (GetRestshimdConfigResponse);
   rpc UpdateRestshimdConfig(UpdateRestshimdConfigRequest) returns (UpdateRestshimdConfigResponse);
   rpc GetRaftdConfig(GetRaftdConfigRequest) returns (GetRaftdConfigResponse);
-  rpc UpdateRaftdConfig(UpdateRaftdConfigRequest) returns (UpdateRaftdConfigResponse);
 
   // SetDatasetQuota sets a ZFS quota on a dataset under this node's own
   // configured Base scope (see internal/zfs.Manager) - physical,
@@ -1522,63 +1528,32 @@ message UpdateRestshimdConfigResponse {
   string error = 2;
 }
 
-// GetRaftdConfigRequest/GetRaftdConfigResponse,
-// UpdateRaftdConfigRequest/UpdateRaftdConfigResponse (ADR-0102) cover
-// only a narrow, deliberately incomplete subset of raftd.json
-// (ADR-0100) - raftd's identity/topology/bootstrap fields (node_id,
-// data_dir, socket, raft_bind, join, await_join) are excluded from
-// Update entirely, mirroring GetNodeConfig/UpdateNodeConfig's own
-// exclusion of managerd's node_id/rpc_addr/raftd_socket, for the same
-// "hand-edit-the-file-and-restart-only" reasoning - see
-// internal/raftdconfig's own package doc comment for the full
-// rationale specific to each excluded field. data_dir/socket/
-// raft_bind ARE returned by Get, read-only, so the Machine page can
-// display them next to a note that they require hand-editing the file
-// and manually restarting raftd to change - this RPC pair never
-// restarts raftd (see UpdateRaftdConfigResponse's own doc comment).
+// GetRaftdConfigRequest/GetRaftdConfigResponse (ADR-0102) are read-only
+// display of raftd.json (ADR-0100) - there is deliberately no
+// UpdateRaftdConfig at all (see the service definition's own doc
+// comment above for why: a 2026-09-15 audit found that per-host
+// editing of internal_token or raft TLS material is unsafe for a
+// consensus-critical daemon without a real coordinated rotation
+// workflow, which is out of scope here). Every field in this response,
+// not just the identity/topology/bootstrap ones, is for display only -
+// raftd's config stays entirely hand-edit-the-file-and-restart-only.
 message GetRaftdConfigRequest {}
 
 message GetRaftdConfigResponse {
-  // data_dir/socket/raft_bind are read-only here - present for
-  // display only, never settable via UpdateRaftdConfig. See this
-  // message group's own doc comment above.
-  string data_dir = 1;
-  string socket = 2;
+  string data_dir  = 1;
+  string socket    = 2;
   string raft_bind = 3;
 
   string raft_tls_cert = 4;
-  string raft_tls_key = 5;
-  string raft_tls_ca = 6;
+  string raft_tls_key  = 5;
+  string raft_tls_ca   = 6;
 
   // internal_token_set reports only whether a value is currently saved
-  // for internal_token - the raw value itself is never returned here
-  // or anywhere else, the same posture as GetNodeConfigResponse's own
-  // raftd_token_set. See UpdateRaftdConfigRequest's own doc comment
-  // for how to set or clear one.
+  // - the raw value itself is never returned here or anywhere else,
+  // the same posture as GetNodeConfigResponse's own raftd_token_set.
   bool internal_token_set = 7;
 
   string error = 8;
-}
-
-message UpdateRaftdConfigRequest {
-  string raft_tls_cert = 1;
-  string raft_tls_key = 2;
-  string raft_tls_ca = 3;
-
-  // internal_token, if non-empty, becomes the new saved value -
-  // write-only, mirroring UpdateNodeConfigRequest's own raftd_token/
-  // clear_raftd_token pattern. An empty value here means "leave
-  // whatever is currently saved unchanged," not "clear it" - use
-  // clear_internal_token to actually clear one.
-  string internal_token = 4;
-  bool clear_internal_token = 5;
-}
-
-message UpdateRaftdConfigResponse {
-  // No scheduled field: unlike Update{Frontend,Restshimd}ConfigResponse,
-  // this call never restarts raftd (consensus-critical, ADR-0102) - a
-  // successful save is inert until an operator manually restarts raftd.
-  string error = 1;
 }
 
 message SetDatasetQuotaRequest {
