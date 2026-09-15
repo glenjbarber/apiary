@@ -55,3 +55,78 @@ func TestManager_LoadMalformedFileIsAnError(t *testing.T) {
 		t.Error("Load() error = nil, want an error for malformed JSON")
 	}
 }
+
+// TestManager_SaveThenLoadRoundTripsEveryField confirms Save itself
+// faithfully persists every field it's given, including the ones
+// UpdateRaftdConfig (internal/manager/server.go) deliberately excludes
+// from its own request message (NodeID, DataDir, Socket, RaftBind,
+// Join, AwaitJoin) - exclusion is the RPC handler's job, not Save's;
+// Save must never silently drop a field on its own.
+func TestManager_SaveThenLoadRoundTripsEveryField(t *testing.T) {
+	m := &Manager{Path: filepath.Join(t.TempDir(), "raftd.json")}
+	want := Config{
+		DataDir:       "/var/db/apiary/raftd",
+		Socket:        "/var/run/apiary/raftd.sock",
+		NodeID:        "apiverse",
+		RaftBind:      "10.50.0.9:17701",
+		Join:          "/var/run/apiary/raftd.sock",
+		AwaitJoin:     true,
+		InternalToken: "shh_test_token",
+		RaftTLSCert:   "/usr/local/etc/apiary/tls/raft-cert.pem",
+		RaftTLSKey:    "/usr/local/etc/apiary/tls/raft-key.pem",
+		RaftTLSCA:     "/usr/local/etc/apiary/tls/raft-ca.pem",
+	}
+
+	if err := m.Save(want); err != nil {
+		t.Fatalf("Save() error: %v", err)
+	}
+	got, err := m.Load()
+	if err != nil {
+		t.Fatalf("Load() error: %v", err)
+	}
+	if got != want {
+		t.Errorf("round trip = %+v, want %+v", got, want)
+	}
+}
+
+func TestManager_SaveRejectsMalformedFields(t *testing.T) {
+	m := &Manager{Path: filepath.Join(t.TempDir(), "raftd.json")}
+	for _, cfg := range []Config{
+		{DataDir: "relative/path"},
+		{Socket: "relative/path"},
+		{RaftBind: "not-a-host-port"},
+	} {
+		if err := m.Save(cfg); err == nil {
+			t.Errorf("Save(%+v) error = nil, want a validation rejection", cfg)
+		}
+	}
+}
+
+func TestManager_SaveRejectsNewlineInSecretOrTLSFields(t *testing.T) {
+	m := &Manager{Path: filepath.Join(t.TempDir(), "raftd.json")}
+	for _, cfg := range []Config{
+		{InternalToken: "shh\ninjected"},
+		{RaftTLSCert: "/a.pem\ninjected"},
+	} {
+		if err := m.Save(cfg); err == nil {
+			t.Errorf("Save(%+v) error = nil, want a newline rejection", cfg)
+		}
+	}
+}
+
+func TestManager_SaveIsFullReplaceNotMerge(t *testing.T) {
+	m := &Manager{Path: filepath.Join(t.TempDir(), "raftd.json")}
+	if err := m.Save(Config{NodeID: "apiverse", InternalToken: "shh_first"}); err != nil {
+		t.Fatalf("first Save() error: %v", err)
+	}
+	if err := m.Save(Config{NodeID: "apiverse"}); err != nil {
+		t.Fatalf("second Save() error: %v", err)
+	}
+	got, err := m.Load()
+	if err != nil {
+		t.Fatalf("Load() error: %v", err)
+	}
+	if got.InternalToken != "" {
+		t.Errorf("InternalToken = %q after a Save that omitted it, want empty - Save must fully replace, not merge", got.InternalToken)
+	}
+}

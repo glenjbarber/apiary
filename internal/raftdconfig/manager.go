@@ -1,9 +1,39 @@
 // Package raftdconfig persists cmd/raftd's own local settings
 // (ADR-0100) as a plain JSON file on disk, replacing what were
-// previously its own CLI flags. Hand-edited only - raftd has no web
-// UI of its own to expose live editing through, unlike managerd's
-// internal/nodeconfig. A change here takes effect the next time
-// raftd restarts.
+// previously its own CLI flags. Save (ADR-0102) is called only from
+// managerd's own RPC handler (UpdateRaftdConfig), and only for a
+// narrow subset of fields - see "Deliberately excluded from
+// UpdateRaftdConfig" below. raftd itself has no RPC surface of its own
+// to expose live editing through directly (its only listener is the
+// internal, token-authenticated RaftInternal protocol for cluster
+// replication, not a general config-management surface), so managerd
+// writes this file on raftd's behalf instead (the two are always
+// co-located on the same host). A change here takes effect the next
+// time raftd restarts - and unlike frontend/restshimd, managerd never
+// restarts raftd automatically after a config save (raftd is
+// consensus-critical), so a saved change here is inert until an
+// operator manually restarts it.
+//
+// Deliberately excluded from UpdateRaftdConfig (ADR-0102), even though
+// they're plain fields on this struct and fully hand-editable:
+// NodeID (raft identity, same class of thing as managerd's own
+// excluded node_id - see internal/nodeconfig's package doc comment),
+// Join/AwaitJoin (one-time-bootstrap-only flags raftd's own
+// startupJoinOrBootstrap only consults on a truly empty DataDir -
+// editing them post-bootstrap via a web form is meaningless at best, a
+// live footgun at worst), and DataDir/Socket/RaftBind (changing any of
+// these without a restart - which this RPC never triggers - would
+// either do nothing or point raftd at a wrong/nonexistent path next
+// restart with no validation path today; they're returned by
+// GetRaftdConfig for display only). Only RaftTLSCert/RaftTLSKey/
+// RaftTLSCA/InternalToken are actually settable through
+// UpdateRaftdConfig - pure security-transport/credential knobs with no
+// topology meaning. Save itself doesn't enforce this exclusion (it
+// faithfully persists whatever Config it's given, full stop) - that's
+// UpdateRaftdConfig's own responsibility, by explicitly carrying every
+// excluded field over from the current on-disk value before calling
+// Save. See internal/manager/server.go's UpdateRaftdConfig for why this
+// carry-over is load-bearing, not optional.
 //
 // Deliberately excluded: raftd's five one-shot recovery/destructive
 // flags (-reset, -export, -restore, -restore-file, -restore-dry-run)
@@ -18,7 +48,9 @@ package raftdconfig
 import (
 	"encoding/json"
 	"fmt"
+	"net"
 	"os"
+	"path/filepath"
 
 	raftnode "github.com/glenjbarber/apiary/internal/raft"
 )
@@ -144,4 +176,69 @@ func warnIfWorldReadable(path string) {
 	if info.Mode().Perm()&0o077 != 0 {
 		fmt.Fprintf(os.Stderr, "apiary: %s is readable by group/other but contains internal_token - recommend chmod 600\n", path)
 	}
+}
+
+// Save writes cfg, replacing whatever was there before in full (not a
+// merge) - the caller (managerd's UpdateRaftdConfig handler) is
+// expected to Load first and carry over every RPC-excluded field
+// (see the package doc comment) before calling Save, the same
+// convention nodeconfig.Manager.Save already establishes. Save itself
+// persists whatever Config it's given, full stop - it does not know or
+// enforce which fields the RPC layer chooses to expose. 0600 since
+// this file can hold InternalToken.
+func (m *Manager) Save(cfg Config) error {
+	if err := validate(cfg); err != nil {
+		return err
+	}
+	body, err := json.MarshalIndent(cfg, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(m.path(), body, 0o600)
+}
+
+// validate rejects a value that would be unsafe to interpolate or
+// otherwise malformed, without judging semantic correctness (e.g.
+// whether DataDir actually exists) - the same posture and reasoning as
+// nodeconfig.validate's own doc comment. Join/AwaitJoin get no
+// additional validation here beyond Load's own JSON unmarshaling,
+// since they're excluded from UpdateRaftdConfig entirely (see the
+// package doc comment) - this only needs to protect hand-edited files.
+func validate(cfg Config) error {
+	if cfg.DataDir != "" && !filepath.IsAbs(cfg.DataDir) {
+		return fmt.Errorf("raftdconfig: invalid data_dir %q: must be an absolute path", cfg.DataDir)
+	}
+	if cfg.Socket != "" && !filepath.IsAbs(cfg.Socket) {
+		return fmt.Errorf("raftdconfig: invalid socket %q: must be an absolute path", cfg.Socket)
+	}
+	if cfg.RaftBind != "" {
+		if _, _, err := net.SplitHostPort(cfg.RaftBind); err != nil {
+			return fmt.Errorf("raftdconfig: invalid raft_bind %q: %w", cfg.RaftBind, err)
+		}
+	}
+	for _, f := range []struct{ name, value string }{
+		{"raft_tls_cert", cfg.RaftTLSCert},
+		{"raft_tls_key", cfg.RaftTLSKey},
+		{"raft_tls_ca", cfg.RaftTLSCA},
+		{"internal_token", cfg.InternalToken},
+	} {
+		if err := validateNoNewline(f.name, f.value); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// validateNoNewline rejects a newline/carriage-return - defense in
+// depth, mirroring nodeconfig.validatePathField's own reasoning.
+func validateNoNewline(name, value string) error {
+	if value == "" {
+		return nil
+	}
+	for _, r := range value {
+		if r == '\n' || r == '\r' {
+			return fmt.Errorf("raftdconfig: invalid %s: must not contain newlines", name)
+		}
+	}
+	return nil
 }

@@ -260,6 +260,48 @@
     </div>
   </div>
 
+  <div class="panel">
+    <h3>Frontend configuration</h3>
+    <p class="muted">
+      Settings for the co-located <code>frontend</code> web server
+      (<code>/usr/local/etc/apiary/frontend.json</code>, ADR-0100/ADR-0102).
+      Saving restarts frontend automatically to apply the change - this
+      may briefly interrupt the page you're viewing right now.
+    </p>
+    <div id="frontend-config-panel">
+      {{template "frontend_config_panel" .}}
+    </div>
+  </div>
+
+  <div class="panel">
+    <h3>Restshimd configuration</h3>
+    <p class="muted">
+      Settings for the co-located <code>restshimd</code> REST API
+      (<code>/usr/local/etc/apiary/restshimd.json</code>, ADR-0100/ADR-0102).
+      Saving restarts restshimd automatically to apply the change.
+    </p>
+    <div id="restshimd-config-panel">
+      {{template "restshimd_config_panel" .}}
+    </div>
+  </div>
+
+  <div class="panel">
+    <h3>Raftd configuration</h3>
+    <p class="muted">
+      Raft-transport TLS and internal-token settings for the co-located
+      <code>raftd</code> (<code>/usr/local/etc/apiary/raftd.json</code>,
+      ADR-0100/ADR-0102). Raftd is consensus-critical and is never
+      restarted automatically - saving here takes effect only after you
+      manually restart <code>apiary_raftd</code> on this Comb. Identity
+      and topology fields (node id, data directory, socket, raft-bind
+      address, join target) are shown for reference only and must be
+      hand-edited in the file directly.
+    </p>
+    <div id="raftd-config-panel">
+      {{template "raftd_config_panel" .}}
+    </div>
+  </div>
+
   </section>
 
   <section class="settings-group" aria-labelledby="machine-exposure">
@@ -702,6 +744,105 @@
 <table>
   <tbody>
     <tr><th>Raftd token</th><td>{{if .NodeConfig.RaftdTokenSet}}<span class="badge true">set</span>{{else}}<span class="badge unknown">not set</span>{{end}}</td></tr>
+  </tbody>
+</table>
+{{end}}
+{{end}}
+
+{{define "frontend_config_panel"}}
+<div id="frontend-config-error" class="banner-error">{{.FrontendConfigFormError}}</div>
+{{if .CanAdmin}}
+<form hx-post="/machine/frontend-config" hx-target="#frontend-config-panel" hx-swap="innerHTML">
+  <table class="settings-table">
+    <tbody>
+      <tr><th>Manager address</th><td><input type="text" name="manager_addr" placeholder="127.0.0.1:17700" value="{{.FrontendConfig.ManagerAddr}}" title="TCP address of managerd's own external RPC API this frontend dials." aria-label="Manager address"></td></tr>
+      <tr><th>HTTP address</th><td><input type="text" name="http_addr" placeholder="127.0.0.1:8080" value="{{.FrontendConfig.HTTPAddr}}" title="Address frontend serves the web UI on." aria-label="HTTP address"></td></tr>
+      <tr><th>Manager TLS</th><td><label class="checkbox-label"><input type="checkbox" name="manager_tls" value="true" {{if .FrontendConfig.ManagerTLS}}checked{{end}} title="Dial managerd over TLS instead of plaintext." aria-label="Manager TLS"> Enabled</label></td></tr>
+      <tr><th>Manager TLS CA</th><td><input type="text" name="manager_tls_ca" value="{{.FrontendConfig.ManagerTLSCA}}" title="PEM CA file to trust for managerd's certificate; blank trusts the system pool." aria-label="Manager TLS CA"></td></tr>
+      <tr><th>Manager TLS server name</th><td><input type="text" name="manager_tls_server_name" value="{{.FrontendConfig.ManagerTLSServerName}}" title="Hostname to verify managerd's certificate against, if different from Manager address's own host." aria-label="Manager TLS server name"></td></tr>
+      <tr><th>Certificate path</th><td><input type="text" name="tls_cert" value="{{.FrontendConfig.TLSCert}}" title="Path to frontend's own web UI certificate. Leave both this and Key path blank to serve plaintext." aria-label="Certificate path"></td></tr>
+      <tr><th>Key path</th><td><input type="text" name="tls_key" value="{{.FrontendConfig.TLSKey}}" title="Path to the private key matching Certificate path above." aria-label="Key path"></td></tr>
+      <tr><th>Peer TLS</th><td><label class="checkbox-label"><input type="checkbox" name="peer_tls" value="true" {{if .FrontendConfig.PeerTLS}}checked{{end}} title="Dial other Combs' managerd over TLS when fetching their host stats for the cluster overview page." aria-label="Peer TLS"> Enabled</label></td></tr>
+      <tr><th>Peer TLS CA</th><td><input type="text" name="peer_tls_ca" value="{{.FrontendConfig.PeerTLSCA}}" title="PEM file trusted instead of the system pool when dialing a peer over TLS. Only consulted when Peer TLS is set." aria-label="Peer TLS CA"></td></tr>
+      <tr><th>Peer hostname suffix</th><td><input type="text" name="peer_hostname_suffix" placeholder=".apiary.work" value="{{.FrontendConfig.PeerHostnameSuffix}}" title="Appended to a node id to form its managerd hostname for the cluster overview page." aria-label="Peer hostname suffix"></td></tr>
+      <tr><th>Peer manager port</th><td><input type="text" name="peer_manager_port" placeholder="17700" value="{{.FrontendConfig.PeerManagerPort}}" title="Port assumed for a peer node's managerd external API when fetching its host stats." aria-label="Peer manager port"></td></tr>
+      <tr><th>Manager API key</th><td>
+        {{if .FrontendConfig.ManagerAPIKeySet}}<span class="badge true">set</span>{{else}}<span class="badge unknown">not set</span>{{end}}
+        <input type="password" name="manager_api_key" placeholder="new value - leave blank to keep current" autocomplete="off" title="API key frontend attaches to every call it makes to managerd on the logged-in user's behalf, once managerd has API-key auth enabled. Write-only - never shown again once saved." aria-label="Manager API key">
+        <label class="checkbox-label"><input type="checkbox" name="clear_manager_api_key" value="true" title="Remove the manager API key entirely instead of setting a new one." aria-label="Clear manager API key"> Clear</label>
+      </td></tr>
+    </tbody>
+  </table>
+  <div class="form-actions"><button type="submit">Save (restarts frontend)</button></div>
+</form>
+{{else}}
+<table>
+  <tbody>
+    <tr><th>Manager address</th><td>{{.FrontendConfig.ManagerAddr}}</td></tr>
+    <tr><th>HTTP address</th><td>{{.FrontendConfig.HTTPAddr}}</td></tr>
+    <tr><th>Manager API key</th><td>{{if .FrontendConfig.ManagerAPIKeySet}}<span class="badge true">set</span>{{else}}<span class="badge unknown">not set</span>{{end}}</td></tr>
+  </tbody>
+</table>
+{{end}}
+{{end}}
+
+{{define "restshimd_config_panel"}}
+<div id="restshimd-config-error" class="banner-error">{{.RestshimdConfigFormError}}</div>
+{{if .CanAdmin}}
+<form hx-post="/machine/restshimd-config" hx-target="#restshimd-config-panel" hx-swap="innerHTML">
+  <table class="settings-table">
+    <tbody>
+      <tr><th>Manager address</th><td><input type="text" name="manager_addr" placeholder="127.0.0.1:17700" value="{{.RestshimdConfig.ManagerAddr}}" title="TCP address of managerd's own external RPC API this restshimd dials." aria-label="Manager address"></td></tr>
+      <tr><th>HTTP address</th><td><input type="text" name="http_addr" placeholder="127.0.0.1:8081" value="{{.RestshimdConfig.HTTPAddr}}" title="Address restshimd serves the REST API on." aria-label="HTTP address"></td></tr>
+      <tr><th>Manager TLS</th><td><label class="checkbox-label"><input type="checkbox" name="manager_tls" value="true" {{if .RestshimdConfig.ManagerTLS}}checked{{end}} title="Dial managerd over TLS instead of plaintext." aria-label="Manager TLS"> Enabled</label></td></tr>
+      <tr><th>Manager TLS CA</th><td><input type="text" name="manager_tls_ca" value="{{.RestshimdConfig.ManagerTLSCA}}" title="PEM CA file to trust for managerd's certificate; blank trusts the system pool." aria-label="Manager TLS CA"></td></tr>
+      <tr><th>Manager TLS server name</th><td><input type="text" name="manager_tls_server_name" value="{{.RestshimdConfig.ManagerTLSServerName}}" title="Hostname to verify managerd's certificate against, if different from Manager address's own host." aria-label="Manager TLS server name"></td></tr>
+      <tr><th>Certificate path</th><td><input type="text" name="tls_cert" value="{{.RestshimdConfig.TLSCert}}" title="Path to restshimd's own REST API certificate. Leave both this and Key path blank to serve plaintext." aria-label="Certificate path"></td></tr>
+      <tr><th>Key path</th><td><input type="text" name="tls_key" value="{{.RestshimdConfig.TLSKey}}" title="Path to the private key matching Certificate path above." aria-label="Key path"></td></tr>
+    </tbody>
+  </table>
+  <div class="form-actions"><button type="submit">Save (restarts restshimd)</button></div>
+</form>
+{{else}}
+<table>
+  <tbody>
+    <tr><th>Manager address</th><td>{{.RestshimdConfig.ManagerAddr}}</td></tr>
+    <tr><th>HTTP address</th><td>{{.RestshimdConfig.HTTPAddr}}</td></tr>
+  </tbody>
+</table>
+{{end}}
+{{end}}
+
+{{define "raftd_config_panel"}}
+<div id="raftd-config-error" class="banner-error">{{.RaftdConfigFormError}}</div>
+{{if .CanAdmin}}
+<form hx-post="/machine/raftd-config" hx-target="#raftd-config-panel" hx-swap="innerHTML">
+  <table class="settings-table">
+    <tbody>
+      <tr><th>Node id</th><td><em>(not shown here - hand-edit raftd.json and restart raftd to change)</em></td></tr>
+      <tr><th>Data directory</th><td><code>{{.RaftdConfig.DataDir}}</code> <em>(hand-edit raftd.json and restart raftd to change)</em></td></tr>
+      <tr><th>Socket</th><td><code>{{.RaftdConfig.Socket}}</code> <em>(hand-edit raftd.json and restart raftd to change)</em></td></tr>
+      <tr><th>Raft bind address</th><td><code>{{.RaftdConfig.RaftBind}}</code> <em>(hand-edit raftd.json and restart raftd to change)</em></td></tr>
+      <tr><th>Raft TLS certificate</th><td><input type="text" name="raft_tls_cert" value="{{.RaftdConfig.RaftTLSCert}}" title="This node's own raft-transport certificate. Leave all three raft TLS fields empty for plain-TCP raft traffic." aria-label="Raft TLS certificate"></td></tr>
+      <tr><th>Raft TLS key</th><td><input type="text" name="raft_tls_key" value="{{.RaftdConfig.RaftTLSKey}}" title="Private key matching Raft TLS certificate above." aria-label="Raft TLS key"></td></tr>
+      <tr><th>Raft TLS CA</th><td><input type="text" name="raft_tls_ca" value="{{.RaftdConfig.RaftTLSCA}}" title="CA bundle used to verify every peer on the raft transport." aria-label="Raft TLS CA"></td></tr>
+      <tr><th>Internal token</th><td>
+        {{if .RaftdConfig.InternalTokenSet}}<span class="badge true">set</span>{{else}}<span class="badge unknown">not set</span>{{end}}
+        <input type="password" name="internal_token" placeholder="new value - leave blank to keep current" autocomplete="off" title="Shared secret required from every RaftInternal caller (must match managerd's own Raftd token, in Internal security above). Write-only - never shown again once saved." aria-label="Internal token">
+        <label class="checkbox-label"><input type="checkbox" name="clear_internal_token" value="true" title="Remove the internal token entirely instead of setting a new one." aria-label="Clear internal token"> Clear</label>
+      </td></tr>
+    </tbody>
+  </table>
+  <p class="muted">Raftd is consensus-critical and is never restarted automatically - saving here takes effect only after you manually restart <code>apiary_raftd</code>.</p>
+  <div class="form-actions"><button type="submit">Save (raftd restart required)</button></div>
+</form>
+{{else}}
+<table>
+  <tbody>
+    <tr><th>Data directory</th><td><code>{{.RaftdConfig.DataDir}}</code></td></tr>
+    <tr><th>Socket</th><td><code>{{.RaftdConfig.Socket}}</code></td></tr>
+    <tr><th>Raft bind address</th><td><code>{{.RaftdConfig.RaftBind}}</code></td></tr>
+    <tr><th>Internal token</th><td>{{if .RaftdConfig.InternalTokenSet}}<span class="badge true">set</span>{{else}}<span class="badge unknown">not set</span>{{end}}</td></tr>
   </tbody>
 </table>
 {{end}}

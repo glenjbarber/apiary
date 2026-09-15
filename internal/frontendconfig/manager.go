@@ -3,9 +3,12 @@
 // previously its own CLI flags and, for ManagerAPIKey, the
 // APIARY_MANAGER_API_KEY environment variable (formerly sourced via
 // etc/rc.d/apiary_frontend's own envfile mechanism, now retired).
-// Hand-edited only - frontend has no RPC layer of its own to expose
-// live editing through, unlike managerd's internal/nodeconfig. This
-// is unrelated to internal/loginconfig, which persists the login
+// Save (ADR-0102) is called only from managerd's own RPC handlers
+// (UpdateFrontendConfig) - frontend itself has no RPC layer of its own
+// to expose live editing through directly, unlike managerd's own
+// internal/nodeconfig, so managerd writes this file on frontend's
+// behalf instead (the two are always co-located on the same host).
+// This is unrelated to internal/loginconfig, which persists the login
 // role map (a live, RPC-editable, Users-page concern) - untouched by
 // this package. A change here takes effect the next time frontend
 // restarts.
@@ -14,6 +17,7 @@ package frontendconfig
 import (
 	"encoding/json"
 	"fmt"
+	"net"
 	"os"
 )
 
@@ -128,6 +132,75 @@ func (m *Manager) Load() (Config, error) {
 		warnIfWorldReadable(m.path())
 	}
 	return cfg, nil
+}
+
+// Save writes cfg, replacing whatever was there before in full (not a
+// merge) - the caller (managerd's UpdateFrontendConfig handler) is
+// expected to Load first if it wants to change only one field, the
+// same convention nodeconfig.Manager.Save already establishes. 0600
+// since this file can hold ManagerAPIKey.
+func (m *Manager) Save(cfg Config) error {
+	if err := validate(cfg); err != nil {
+		return err
+	}
+	body, err := json.MarshalIndent(cfg, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(m.path(), body, 0o600)
+}
+
+// validate rejects a value that would be unsafe to interpolate or
+// otherwise malformed, without judging semantic correctness (e.g.
+// whether ManagerAddr is actually reachable) - the same posture and
+// reasoning as nodeconfig.validate's own doc comment.
+func validate(cfg Config) error {
+	if cfg.ManagerAddr != "" {
+		if _, _, err := net.SplitHostPort(cfg.ManagerAddr); err != nil {
+			return fmt.Errorf("frontendconfig: invalid manager_addr %q: %w", cfg.ManagerAddr, err)
+		}
+	}
+	if cfg.HTTPAddr != "" {
+		if _, _, err := net.SplitHostPort(cfg.HTTPAddr); err != nil {
+			return fmt.Errorf("frontendconfig: invalid http_addr %q: %w", cfg.HTTPAddr, err)
+		}
+	}
+	for _, f := range []struct{ name, value string }{
+		{"manager_tls_ca", cfg.ManagerTLSCA},
+		{"tls_cert", cfg.TLSCert},
+		{"tls_key", cfg.TLSKey},
+		{"peer_tls_ca", cfg.PeerTLSCA},
+	} {
+		if err := validateNoNewline(f.name, f.value); err != nil {
+			return err
+		}
+	}
+	for _, f := range []struct{ name, value string }{
+		{"peer_hostname_suffix", cfg.PeerHostnameSuffix},
+		{"peer_manager_port", cfg.PeerManagerPort},
+		{"manager_api_key", cfg.ManagerAPIKey},
+	} {
+		if err := validateNoNewline(f.name, f.value); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// validateNoNewline rejects a newline/carriage-return - defense in
+// depth against future code that might interpolate this value into
+// generated text, mirroring nodeconfig.validatePathField's own
+// reasoning and doc comment.
+func validateNoNewline(name, value string) error {
+	if value == "" {
+		return nil
+	}
+	for _, r := range value {
+		if r == '\n' || r == '\r' {
+			return fmt.Errorf("frontendconfig: invalid %s: must not contain newlines", name)
+		}
+	}
+	return nil
 }
 
 // warnIfWorldReadable logs (does not fail) when path is readable by

@@ -23,6 +23,42 @@ func (s *Server) currentNodeConfig(r *http.Request) (nodeConfigView, string) {
 	return fromRPCNodeConfig(resp), ""
 }
 
+// currentFrontendConfig/currentRestshimdConfig/currentRaftdConfig
+// (ADR-0102) fetch the co-located sibling daemons' own settings,
+// mirroring currentNodeConfig above exactly.
+func (s *Server) currentFrontendConfig(r *http.Request) (frontendConfigView, string) {
+	resp, err := s.client.GetFrontendConfig(r.Context(), &rpcpb.GetFrontendConfigRequest{})
+	if err != nil {
+		return frontendConfigView{}, err.Error()
+	}
+	if resp.GetError() != "" {
+		return frontendConfigView{}, resp.GetError()
+	}
+	return fromRPCFrontendConfig(resp), ""
+}
+
+func (s *Server) currentRestshimdConfig(r *http.Request) (restshimdConfigView, string) {
+	resp, err := s.client.GetRestshimdConfig(r.Context(), &rpcpb.GetRestshimdConfigRequest{})
+	if err != nil {
+		return restshimdConfigView{}, err.Error()
+	}
+	if resp.GetError() != "" {
+		return restshimdConfigView{}, resp.GetError()
+	}
+	return fromRPCRestshimdConfig(resp), ""
+}
+
+func (s *Server) currentRaftdConfig(r *http.Request) (raftdConfigView, string) {
+	resp, err := s.client.GetRaftdConfig(r.Context(), &rpcpb.GetRaftdConfigRequest{})
+	if err != nil {
+		return raftdConfigView{}, err.Error()
+	}
+	if resp.GetError() != "" {
+		return raftdConfigView{}, resp.GetError()
+	}
+	return fromRPCRaftdConfig(resp), ""
+}
+
 // currentMachineVMs fetches every VM (reusing currentVMs, which already
 // forwards to the leader when needed - ADR-0035) and filters down to
 // the ones assigned to this node, for the firewall-pause table. There
@@ -61,6 +97,9 @@ func (s *Server) localNodeID(r *http.Request) string {
 func (s *Server) handleMachinePage(w http.ResponseWriter, r *http.Request) {
 	nodeID := s.localNodeID(r)
 	cfg, cfgErr := s.currentNodeConfig(r)
+	frontendCfg, frontendCfgErr := s.currentFrontendConfig(r)
+	restshimdCfg, restshimdCfgErr := s.currentRestshimdConfig(r)
+	raftdCfg, raftdCfgErr := s.currentRaftdConfig(r)
 	vms, vmErr := s.currentMachineVMs(r, nodeID)
 	cloudflareConfigured, _ := s.currentCloudflareStatus(r)
 	services, serviceErr := s.currentNodeServices(r)
@@ -68,19 +107,25 @@ func (s *Server) handleMachinePage(w http.ResponseWriter, r *http.Request) {
 	originCerts, originErr := s.currentOriginCertificates(r)
 
 	s.render(w, "machine_page", s.withAuthFields(r, pageData{
-		NodeConfig:           cfg,
-		NodeConfigFormError:  cfgErr,
-		MachineVMs:           vms,
-		MachineFirewallError: vmErr,
-		CloudflareConfigured: cloudflareConfigured,
-		NodeServices:         services,
-		ServiceFormError:     serviceErr,
-		UplinkStatus:         uplinkStatus,
-		UplinkFormError:      uplinkErr,
-		OriginCertificates:   originCerts,
-		OriginCAError:        originErr,
-		JoinColonyResult:     s.currentJoinColonyResult(r),
-		ActivePage:           "machine",
+		NodeConfig:               cfg,
+		NodeConfigFormError:      cfgErr,
+		FrontendConfig:           frontendCfg,
+		FrontendConfigFormError:  frontendCfgErr,
+		RestshimdConfig:          restshimdCfg,
+		RestshimdConfigFormError: restshimdCfgErr,
+		RaftdConfig:              raftdCfg,
+		RaftdConfigFormError:     raftdCfgErr,
+		MachineVMs:               vms,
+		MachineFirewallError:     vmErr,
+		CloudflareConfigured:     cloudflareConfigured,
+		NodeServices:             services,
+		ServiceFormError:         serviceErr,
+		UplinkStatus:             uplinkStatus,
+		UplinkFormError:          uplinkErr,
+		OriginCertificates:       originCerts,
+		OriginCAError:            originErr,
+		JoinColonyResult:         s.currentJoinColonyResult(r),
+		ActivePage:               "machine",
 	}))
 }
 
@@ -417,6 +462,240 @@ func (s *Server) nodeConfigUpdateRequest(r *http.Request) *rpcpb.UpdateNodeConfi
 		req.OriginCaDirectory = r.FormValue("origin_ca_directory")
 	}
 	return req
+}
+
+// handleUpdateFrontendConfig updates the co-located frontend's own
+// settings (ADR-0102) - same combined-panel refresh pattern as
+// handleUpdateMachineConfig, but against a separate RPC/response type
+// since frontend has no config fields in common with managerd's own
+// UpdateNodeConfig.
+func (s *Server) handleUpdateFrontendConfig(w http.ResponseWriter, r *http.Request) {
+	if err := r.ParseForm(); err != nil {
+		s.renderFrontendConfigPanel(w, r, "invalid form: "+err.Error())
+		return
+	}
+	req := s.frontendConfigUpdateRequest(r)
+	resp, err := s.client.UpdateFrontendConfig(r.Context(), req)
+	if err != nil {
+		s.renderFrontendConfigPanel(w, r, err.Error())
+		return
+	}
+	if resp.GetError() != "" {
+		s.renderFrontendConfigPanel(w, r, resp.GetError())
+		return
+	}
+	s.renderFrontendConfigPanel(w, r, "")
+}
+
+// frontendConfigUpdateRequest mirrors nodeConfigUpdateRequest's own
+// resend-current-plus-r.Form.Has()-override pattern, for frontend's
+// own settings. manager_api_key is write-only, same reasoning as
+// peer_api_key on nodeConfigUpdateRequest - never read back from
+// frontendConfigView (which never has the raw value to begin with),
+// just forwarded as submitted.
+func (s *Server) frontendConfigUpdateRequest(r *http.Request) *rpcpb.UpdateFrontendConfigRequest {
+	cfg, _ := s.currentFrontendConfig(r)
+	req := &rpcpb.UpdateFrontendConfigRequest{
+		ManagerAddr:          cfg.ManagerAddr,
+		HttpAddr:             cfg.HTTPAddr,
+		ManagerTls:           cfg.ManagerTLS,
+		ManagerTlsCa:         cfg.ManagerTLSCA,
+		ManagerTlsServerName: cfg.ManagerTLSServerName,
+		TlsCert:              cfg.TLSCert,
+		TlsKey:               cfg.TLSKey,
+		PeerTls:              cfg.PeerTLS,
+		PeerTlsCa:            cfg.PeerTLSCA,
+		PeerHostnameSuffix:   cfg.PeerHostnameSuffix,
+		PeerManagerPort:      cfg.PeerManagerPort,
+	}
+	if r.Form.Has("manager_addr") {
+		req.ManagerAddr = r.FormValue("manager_addr")
+	}
+	if r.Form.Has("http_addr") {
+		req.HttpAddr = r.FormValue("http_addr")
+	}
+	if r.Form.Has("manager_tls") {
+		req.ManagerTls = r.FormValue("manager_tls") == "true"
+	}
+	if r.Form.Has("manager_tls_ca") {
+		req.ManagerTlsCa = r.FormValue("manager_tls_ca")
+	}
+	if r.Form.Has("manager_tls_server_name") {
+		req.ManagerTlsServerName = r.FormValue("manager_tls_server_name")
+	}
+	if r.Form.Has("tls_cert") {
+		req.TlsCert = r.FormValue("tls_cert")
+	}
+	if r.Form.Has("tls_key") {
+		req.TlsKey = r.FormValue("tls_key")
+	}
+	if r.Form.Has("peer_tls") {
+		req.PeerTls = r.FormValue("peer_tls") == "true"
+	}
+	if r.Form.Has("peer_tls_ca") {
+		req.PeerTlsCa = r.FormValue("peer_tls_ca")
+	}
+	if r.Form.Has("peer_hostname_suffix") {
+		req.PeerHostnameSuffix = r.FormValue("peer_hostname_suffix")
+	}
+	if r.Form.Has("peer_manager_port") {
+		req.PeerManagerPort = r.FormValue("peer_manager_port")
+	}
+	if r.Form.Has("manager_api_key") {
+		req.ManagerApiKey = r.FormValue("manager_api_key")
+	}
+	if r.FormValue("clear_manager_api_key") == "true" {
+		req.ClearManagerApiKey = true
+	}
+	return req
+}
+
+func (s *Server) renderFrontendConfigPanel(w http.ResponseWriter, r *http.Request, formErr string) {
+	cfg, fetchErr := s.currentFrontendConfig(r)
+	if fetchErr != "" {
+		if formErr == "" {
+			formErr = fetchErr
+		} else {
+			formErr += "; additionally failed to refresh: " + fetchErr
+		}
+	}
+	s.render(w, "frontend_config_panel", pageData{FrontendConfig: cfg, FrontendConfigFormError: formErr, CanAdmin: true})
+}
+
+// handleUpdateRestshimdConfig mirrors handleUpdateFrontendConfig for
+// the co-located restshimd (ADR-0102).
+func (s *Server) handleUpdateRestshimdConfig(w http.ResponseWriter, r *http.Request) {
+	if err := r.ParseForm(); err != nil {
+		s.renderRestshimdConfigPanel(w, r, "invalid form: "+err.Error())
+		return
+	}
+	req := s.restshimdConfigUpdateRequest(r)
+	resp, err := s.client.UpdateRestshimdConfig(r.Context(), req)
+	if err != nil {
+		s.renderRestshimdConfigPanel(w, r, err.Error())
+		return
+	}
+	if resp.GetError() != "" {
+		s.renderRestshimdConfigPanel(w, r, resp.GetError())
+		return
+	}
+	s.renderRestshimdConfigPanel(w, r, "")
+}
+
+// restshimdConfigUpdateRequest mirrors frontendConfigUpdateRequest,
+// minus any secret handling - restshimdconfig.Config has none.
+func (s *Server) restshimdConfigUpdateRequest(r *http.Request) *rpcpb.UpdateRestshimdConfigRequest {
+	cfg, _ := s.currentRestshimdConfig(r)
+	req := &rpcpb.UpdateRestshimdConfigRequest{
+		ManagerAddr:          cfg.ManagerAddr,
+		HttpAddr:             cfg.HTTPAddr,
+		ManagerTls:           cfg.ManagerTLS,
+		ManagerTlsCa:         cfg.ManagerTLSCA,
+		ManagerTlsServerName: cfg.ManagerTLSServerName,
+		TlsCert:              cfg.TLSCert,
+		TlsKey:               cfg.TLSKey,
+	}
+	if r.Form.Has("manager_addr") {
+		req.ManagerAddr = r.FormValue("manager_addr")
+	}
+	if r.Form.Has("http_addr") {
+		req.HttpAddr = r.FormValue("http_addr")
+	}
+	if r.Form.Has("manager_tls") {
+		req.ManagerTls = r.FormValue("manager_tls") == "true"
+	}
+	if r.Form.Has("manager_tls_ca") {
+		req.ManagerTlsCa = r.FormValue("manager_tls_ca")
+	}
+	if r.Form.Has("manager_tls_server_name") {
+		req.ManagerTlsServerName = r.FormValue("manager_tls_server_name")
+	}
+	if r.Form.Has("tls_cert") {
+		req.TlsCert = r.FormValue("tls_cert")
+	}
+	if r.Form.Has("tls_key") {
+		req.TlsKey = r.FormValue("tls_key")
+	}
+	return req
+}
+
+func (s *Server) renderRestshimdConfigPanel(w http.ResponseWriter, r *http.Request, formErr string) {
+	cfg, fetchErr := s.currentRestshimdConfig(r)
+	if fetchErr != "" {
+		if formErr == "" {
+			formErr = fetchErr
+		} else {
+			formErr += "; additionally failed to refresh: " + fetchErr
+		}
+	}
+	s.render(w, "restshimd_config_panel", pageData{RestshimdConfig: cfg, RestshimdConfigFormError: formErr, CanAdmin: true})
+}
+
+// handleUpdateRaftdConfig mirrors handleUpdateFrontendConfig for the
+// co-located raftd (ADR-0102) - only a narrow field set is ever
+// submitted (see raftdConfigUpdateRequest), since DataDir/Socket/
+// NodeID/RaftBind/Join/AwaitJoin are excluded from
+// UpdateRaftdConfigRequest entirely at the proto level (see
+// internal/raftdconfig's own package doc comment).
+func (s *Server) handleUpdateRaftdConfig(w http.ResponseWriter, r *http.Request) {
+	if err := r.ParseForm(); err != nil {
+		s.renderRaftdConfigPanel(w, r, "invalid form: "+err.Error())
+		return
+	}
+	req := s.raftdConfigUpdateRequest(r)
+	resp, err := s.client.UpdateRaftdConfig(r.Context(), req)
+	if err != nil {
+		s.renderRaftdConfigPanel(w, r, err.Error())
+		return
+	}
+	if resp.GetError() != "" {
+		s.renderRaftdConfigPanel(w, r, resp.GetError())
+		return
+	}
+	s.renderRaftdConfigPanel(w, r, "")
+}
+
+// raftdConfigUpdateRequest mirrors frontendConfigUpdateRequest's
+// resend-current-plus-override pattern, but only for the five fields
+// UpdateRaftdConfigRequest actually has - raftd's identity/topology/
+// bootstrap fields have no form inputs at all (see raftd_config_panel
+// in machine.html), so there is nothing to accidentally submit for
+// them in the first place.
+func (s *Server) raftdConfigUpdateRequest(r *http.Request) *rpcpb.UpdateRaftdConfigRequest {
+	cfg, _ := s.currentRaftdConfig(r)
+	req := &rpcpb.UpdateRaftdConfigRequest{
+		RaftTlsCert: cfg.RaftTLSCert,
+		RaftTlsKey:  cfg.RaftTLSKey,
+		RaftTlsCa:   cfg.RaftTLSCA,
+	}
+	if r.Form.Has("raft_tls_cert") {
+		req.RaftTlsCert = r.FormValue("raft_tls_cert")
+	}
+	if r.Form.Has("raft_tls_key") {
+		req.RaftTlsKey = r.FormValue("raft_tls_key")
+	}
+	if r.Form.Has("raft_tls_ca") {
+		req.RaftTlsCa = r.FormValue("raft_tls_ca")
+	}
+	if r.Form.Has("internal_token") {
+		req.InternalToken = r.FormValue("internal_token")
+	}
+	if r.FormValue("clear_internal_token") == "true" {
+		req.ClearInternalToken = true
+	}
+	return req
+}
+
+func (s *Server) renderRaftdConfigPanel(w http.ResponseWriter, r *http.Request, formErr string) {
+	cfg, fetchErr := s.currentRaftdConfig(r)
+	if fetchErr != "" {
+		if formErr == "" {
+			formErr = fetchErr
+		} else {
+			formErr += "; additionally failed to refresh: " + fetchErr
+		}
+	}
+	s.render(w, "raftd_config_panel", pageData{RaftdConfig: cfg, RaftdConfigFormError: formErr, CanAdmin: true})
 }
 
 // handleUpdateResourceScope updates the five write-once resource-scope

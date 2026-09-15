@@ -17,12 +17,15 @@ import (
 	"github.com/glenjbarber/apiary/internal/assumptionregister"
 	"github.com/glenjbarber/apiary/internal/assumptions"
 	"github.com/glenjbarber/apiary/internal/cluster"
+	"github.com/glenjbarber/apiary/internal/frontendconfig"
 	"github.com/glenjbarber/apiary/internal/health"
 	"github.com/glenjbarber/apiary/internal/hoststats"
 	"github.com/glenjbarber/apiary/internal/isostore"
 	"github.com/glenjbarber/apiary/internal/netif"
 	"github.com/glenjbarber/apiary/internal/nodeconfig"
 	"github.com/glenjbarber/apiary/internal/origincert"
+	"github.com/glenjbarber/apiary/internal/raftdconfig"
+	"github.com/glenjbarber/apiary/internal/restshimdconfig"
 )
 
 // pamAuthenticator abstracts a username/password check, defined
@@ -300,6 +303,19 @@ type Server struct {
 	// than panicking. See ADR-0049/internal/nodeconfig.
 	nodeConfig nodeConfigStore
 
+	// frontendConfig/restshimdConfig/raftdConfig (ADR-0102) let this
+	// managerd read/write the three sibling daemons' own config files,
+	// co-located on this same host - Get*Config/Update*Config report an
+	// error rather than panicking when nil, the same opt-in pattern as
+	// nodeConfig above. Wired via SetFrontendConfig/SetRestshimdConfig/
+	// SetRaftdConfig after construction (not a NewServer parameter) to
+	// avoid touching NewServer's already-long positional signature -
+	// the same reasoning SetAssumptionRegister/SetOriginCAIssuer below
+	// already established for this exact situation.
+	frontendConfig  frontendConfigStore
+	restshimdConfig restshimdConfigStore
+	raftdConfig     raftdConfigStore
+
 	// listNetworkInterfaces reports the current host-local interface
 	// inventory for the Machine Configuration page. It is separate from
 	// nodeConfig because discovery is live and is never persisted.
@@ -432,6 +448,26 @@ type nodeConfigStore interface {
 	Save(nodeconfig.Config) error
 }
 
+// frontendConfigStore/restshimdConfigStore/raftdConfigStore (ADR-0102)
+// are the subset of *frontendconfig.Manager/*restshimdconfig.Manager/
+// *raftdconfig.Manager the new Get*Config/Update*Config handlers need,
+// defined locally for the same fakeability reason as nodeConfigStore
+// above.
+type frontendConfigStore interface {
+	Load() (frontendconfig.Config, error)
+	Save(frontendconfig.Config) error
+}
+
+type restshimdConfigStore interface {
+	Load() (restshimdconfig.Config, error)
+	Save(restshimdconfig.Config) error
+}
+
+type raftdConfigStore interface {
+	Load() (raftdconfig.Config, error)
+	Save(raftdconfig.Config) error
+}
+
 var _ rpcpb.ManagerServiceServer = (*Server)(nil)
 
 // NewServer returns a Server that answers external RPCs using raft to
@@ -471,6 +507,18 @@ func (s *Server) SetAssumptionRegister(register assumptionRegisterStore) {
 // SetOriginCAIssuer enables explicit local Origin CA issuance. Production
 // wires Cloudflare's client here; tests may supply a non-networking issuer.
 func (s *Server) SetOriginCAIssuer(issuer origincert.Issuer) { s.originCA = issuer }
+
+// SetFrontendConfig/SetRestshimdConfig/SetRaftdConfig (ADR-0102) wire
+// this managerd's ability to read/write the three sibling daemons' own
+// config files, co-located on this same host - nil (the default)
+// leaves Get*Config/Update*Config reporting an error rather than
+// panicking, the same opt-in pattern nodeConfig itself already
+// follows. Setters, not NewServer parameters, for the same reason
+// SetAssumptionRegister/SetOriginCAIssuer above are setters: keeping
+// every existing positional NewServer(...) call site untouched.
+func (s *Server) SetFrontendConfig(store frontendConfigStore)   { s.frontendConfig = store }
+func (s *Server) SetRestshimdConfig(store restshimdConfigStore) { s.restshimdConfig = store }
+func (s *Server) SetRaftdConfig(store raftdConfigStore)         { s.raftdConfig = store }
 
 func originCertificateInfo(entry origincert.InventoryEntry) *rpcpb.OriginCertificateInfo {
 	return &rpcpb.OriginCertificateInfo{Name: entry.Name, Service: entry.Service,
@@ -2263,6 +2311,224 @@ func parseOptionalDuration(field, value string) (time.Duration, error) {
 		return 0, fmt.Errorf("invalid %s %q: %w", field, value, err)
 	}
 	return d, nil
+}
+
+// GetFrontendConfig implements rpcpb.ManagerServiceServer - reports
+// the co-located frontend's own local settings (ADR-0102), never
+// routed through raft. See internal/frontendconfig.
+func (s *Server) GetFrontendConfig(_ context.Context, _ *rpcpb.GetFrontendConfigRequest) (*rpcpb.GetFrontendConfigResponse, error) {
+	if s.frontendConfig == nil {
+		return &rpcpb.GetFrontendConfigResponse{Error: "this node has no frontend-config store configured"}, nil
+	}
+	cfg, err := s.frontendConfig.Load()
+	if err != nil {
+		return &rpcpb.GetFrontendConfigResponse{Error: err.Error()}, nil
+	}
+	return &rpcpb.GetFrontendConfigResponse{
+		ManagerAddr:          cfg.ManagerAddr,
+		HttpAddr:             cfg.HTTPAddr,
+		ManagerTls:           cfg.ManagerTLS,
+		ManagerTlsCa:         cfg.ManagerTLSCA,
+		ManagerTlsServerName: cfg.ManagerTLSServerName,
+		TlsCert:              cfg.TLSCert,
+		TlsKey:               cfg.TLSKey,
+		PeerTls:              cfg.PeerTLS,
+		PeerTlsCa:            cfg.PeerTLSCA,
+		PeerHostnameSuffix:   cfg.PeerHostnameSuffix,
+		PeerManagerPort:      cfg.PeerManagerPort,
+		// manager_api_key is never returned - only whether one is set.
+		// See UpdateFrontendConfigRequest's own doc comment for how to
+		// set or clear one.
+		ManagerApiKeySet: cfg.ManagerAPIKey != "",
+	}, nil
+}
+
+// UpdateFrontendConfig implements rpcpb.ManagerServiceServer -
+// persists new settings for the co-located frontend, replacing the
+// file in full (matching frontendconfig.Manager.Save's own doc
+// comment) rather than merging - same posture as UpdateNodeConfig.
+// Since every frontendconfig.Config field is fully RPC-editable,
+// there's nothing to carry over from current except the secret. On
+// success, schedules a restart of frontend to apply the change - see
+// UpdateFrontendConfigResponse's own doc comment in the proto.
+func (s *Server) UpdateFrontendConfig(_ context.Context, req *rpcpb.UpdateFrontendConfigRequest) (*rpcpb.UpdateFrontendConfigResponse, error) {
+	if s.frontendConfig == nil {
+		return &rpcpb.UpdateFrontendConfigResponse{Error: "this node has no frontend-config store configured"}, nil
+	}
+	current, err := s.frontendConfig.Load()
+	if err != nil {
+		return &rpcpb.UpdateFrontendConfigResponse{Error: err.Error()}, nil
+	}
+	apiKey := current.ManagerAPIKey
+	if req.GetClearManagerApiKey() {
+		apiKey = ""
+	} else if req.GetManagerApiKey() != "" {
+		apiKey = req.GetManagerApiKey()
+	}
+	cfg := frontendconfig.Config{
+		ManagerAddr:          req.GetManagerAddr(),
+		HTTPAddr:             req.GetHttpAddr(),
+		ManagerTLS:           req.GetManagerTls(),
+		ManagerTLSCA:         req.GetManagerTlsCa(),
+		ManagerTLSServerName: req.GetManagerTlsServerName(),
+		TLSCert:              req.GetTlsCert(),
+		TLSKey:               req.GetTlsKey(),
+		PeerTLS:              req.GetPeerTls(),
+		PeerTLSCA:            req.GetPeerTlsCa(),
+		PeerHostnameSuffix:   req.GetPeerHostnameSuffix(),
+		PeerManagerPort:      req.GetPeerManagerPort(),
+		ManagerAPIKey:        apiKey,
+	}
+	if err := s.frontendConfig.Save(cfg); err != nil {
+		return &rpcpb.UpdateFrontendConfigResponse{Error: err.Error()}, nil
+	}
+	s.scheduleServiceRestart("apiary_frontend")
+	return &rpcpb.UpdateFrontendConfigResponse{Scheduled: true}, nil
+}
+
+// GetRestshimdConfig implements rpcpb.ManagerServiceServer - mirrors
+// GetFrontendConfig for the co-located restshimd (ADR-0102). No secret
+// fields to redact - restshimdconfig.Config has none.
+func (s *Server) GetRestshimdConfig(_ context.Context, _ *rpcpb.GetRestshimdConfigRequest) (*rpcpb.GetRestshimdConfigResponse, error) {
+	if s.restshimdConfig == nil {
+		return &rpcpb.GetRestshimdConfigResponse{Error: "this node has no restshimd-config store configured"}, nil
+	}
+	cfg, err := s.restshimdConfig.Load()
+	if err != nil {
+		return &rpcpb.GetRestshimdConfigResponse{Error: err.Error()}, nil
+	}
+	return &rpcpb.GetRestshimdConfigResponse{
+		ManagerAddr:          cfg.ManagerAddr,
+		HttpAddr:             cfg.HTTPAddr,
+		ManagerTls:           cfg.ManagerTLS,
+		ManagerTlsCa:         cfg.ManagerTLSCA,
+		ManagerTlsServerName: cfg.ManagerTLSServerName,
+		TlsCert:              cfg.TLSCert,
+		TlsKey:               cfg.TLSKey,
+	}, nil
+}
+
+// UpdateRestshimdConfig implements rpcpb.ManagerServiceServer - mirrors
+// UpdateFrontendConfig for the co-located restshimd (ADR-0102), minus
+// any secret handling (restshimdconfig.Config has none) - the simplest
+// of the six new handlers. Schedules a restshimd restart on success.
+func (s *Server) UpdateRestshimdConfig(_ context.Context, req *rpcpb.UpdateRestshimdConfigRequest) (*rpcpb.UpdateRestshimdConfigResponse, error) {
+	if s.restshimdConfig == nil {
+		return &rpcpb.UpdateRestshimdConfigResponse{Error: "this node has no restshimd-config store configured"}, nil
+	}
+	cfg := restshimdconfig.Config{
+		ManagerAddr:          req.GetManagerAddr(),
+		HTTPAddr:             req.GetHttpAddr(),
+		ManagerTLS:           req.GetManagerTls(),
+		ManagerTLSCA:         req.GetManagerTlsCa(),
+		ManagerTLSServerName: req.GetManagerTlsServerName(),
+		TLSCert:              req.GetTlsCert(),
+		TLSKey:               req.GetTlsKey(),
+	}
+	if err := s.restshimdConfig.Save(cfg); err != nil {
+		return &rpcpb.UpdateRestshimdConfigResponse{Error: err.Error()}, nil
+	}
+	s.scheduleServiceRestart("apiary_restshimd")
+	return &rpcpb.UpdateRestshimdConfigResponse{Scheduled: true}, nil
+}
+
+// GetRaftdConfig implements rpcpb.ManagerServiceServer - reports only
+// the RPC-editable subset of the co-located raftd's own settings, plus
+// data_dir/socket/raft_bind for read-only display (ADR-0102) - see
+// internal/raftdconfig's own package doc comment for exactly which
+// fields are excluded and why.
+func (s *Server) GetRaftdConfig(_ context.Context, _ *rpcpb.GetRaftdConfigRequest) (*rpcpb.GetRaftdConfigResponse, error) {
+	if s.raftdConfig == nil {
+		return &rpcpb.GetRaftdConfigResponse{Error: "this node has no raftd-config store configured"}, nil
+	}
+	cfg, err := s.raftdConfig.Load()
+	if err != nil {
+		return &rpcpb.GetRaftdConfigResponse{Error: err.Error()}, nil
+	}
+	return &rpcpb.GetRaftdConfigResponse{
+		DataDir:  cfg.DataDir,
+		Socket:   cfg.Socket,
+		RaftBind: cfg.RaftBind,
+
+		RaftTlsCert: cfg.RaftTLSCert,
+		RaftTlsKey:  cfg.RaftTLSKey,
+		RaftTlsCa:   cfg.RaftTLSCA,
+
+		// internal_token is never returned - only whether one is set.
+		// See UpdateRaftdConfigRequest's own doc comment for how to set
+		// or clear one.
+		InternalTokenSet: cfg.InternalToken != "",
+	}, nil
+}
+
+// UpdateRaftdConfig implements rpcpb.ManagerServiceServer - persists
+// new raft-TLS/internal-token settings for the co-located raftd
+// (ADR-0102). This is the load-bearing correctness point of the whole
+// feature: because cfg below is built fresh from req rather than
+// merged onto current, and NodeID/DataDir/Socket/RaftBind/Join/
+// AwaitJoin have no proto counterpart at all (deliberately excluded -
+// see internal/raftdconfig's own package doc comment), every one of
+// them MUST be explicitly carried over from current here, or ANY call
+// to this RPC - not just ones touching raft TLS - would silently wipe
+// this node's raft identity and topology. Never schedules a raftd
+// restart (consensus-critical) - a successful save is inert until an
+// operator manually restarts raftd; see UpdateRaftdConfigResponse's
+// own doc comment in the proto.
+func (s *Server) UpdateRaftdConfig(_ context.Context, req *rpcpb.UpdateRaftdConfigRequest) (*rpcpb.UpdateRaftdConfigResponse, error) {
+	if s.raftdConfig == nil {
+		return &rpcpb.UpdateRaftdConfigResponse{Error: "this node has no raftd-config store configured"}, nil
+	}
+	current, err := s.raftdConfig.Load()
+	if err != nil {
+		return &rpcpb.UpdateRaftdConfigResponse{Error: err.Error()}, nil
+	}
+	token := current.InternalToken
+	if req.GetClearInternalToken() {
+		token = ""
+	} else if req.GetInternalToken() != "" {
+		token = req.GetInternalToken()
+	}
+	cfg := raftdconfig.Config{
+		// Deliberately excluded from UpdateRaftdConfigRequest (ADR-0102)
+		// - identity/topology/bootstrap fields stay hand-edit-only. See
+		// this function's own doc comment for why carrying these over
+		// is mandatory, not optional.
+		DataDir:   current.DataDir,
+		Socket:    current.Socket,
+		NodeID:    current.NodeID,
+		RaftBind:  current.RaftBind,
+		Join:      current.Join,
+		AwaitJoin: current.AwaitJoin,
+
+		RaftTLSCert:   req.GetRaftTlsCert(),
+		RaftTLSKey:    req.GetRaftTlsKey(),
+		RaftTLSCA:     req.GetRaftTlsCa(),
+		InternalToken: token,
+	}
+	if err := s.raftdConfig.Save(cfg); err != nil {
+		return &rpcpb.UpdateRaftdConfigResponse{Error: err.Error()}, nil
+	}
+	return &rpcpb.UpdateRaftdConfigResponse{}, nil
+}
+
+// scheduleServiceRestart is UpdateFrontendConfig/UpdateRestshimdConfig's
+// shared internal restart-to-apply mechanism (ADR-0102) - the same
+// underlying s.services.Restart call and 250ms flush-first delay
+// RestartNodeService's own handler already uses, called directly
+// rather than through the RestartNodeService RPC itself since name is
+// always one of the two hardcoded, already-known-restartable values
+// here, never caller-supplied. A no-op if this node has no service
+// controller configured, matching RestartNodeService's own posture.
+func (s *Server) scheduleServiceRestart(name string) {
+	if s.services == nil {
+		return
+	}
+	go func() {
+		time.Sleep(250 * time.Millisecond)
+		if err := s.services.Restart(context.Background(), name); err != nil {
+			fmt.Fprintf(os.Stderr, "apiary: restarting %s: %v\n", name, err)
+		}
+	}()
 }
 
 // SetDatasetQuota implements rpcpb.ManagerServiceServer - sets a ZFS

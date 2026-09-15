@@ -206,6 +206,30 @@ func (f *fakeClient) UpdateNodeConfig(context.Context, *rpcpb.UpdateNodeConfigRe
 	return &rpcpb.UpdateNodeConfigResponse{}, nil
 }
 
+func (f *fakeClient) GetFrontendConfig(context.Context, *rpcpb.GetFrontendConfigRequest, ...grpc.CallOption) (*rpcpb.GetFrontendConfigResponse, error) {
+	return &rpcpb.GetFrontendConfigResponse{}, nil
+}
+
+func (f *fakeClient) UpdateFrontendConfig(context.Context, *rpcpb.UpdateFrontendConfigRequest, ...grpc.CallOption) (*rpcpb.UpdateFrontendConfigResponse, error) {
+	return &rpcpb.UpdateFrontendConfigResponse{}, nil
+}
+
+func (f *fakeClient) GetRestshimdConfig(context.Context, *rpcpb.GetRestshimdConfigRequest, ...grpc.CallOption) (*rpcpb.GetRestshimdConfigResponse, error) {
+	return &rpcpb.GetRestshimdConfigResponse{}, nil
+}
+
+func (f *fakeClient) UpdateRestshimdConfig(context.Context, *rpcpb.UpdateRestshimdConfigRequest, ...grpc.CallOption) (*rpcpb.UpdateRestshimdConfigResponse, error) {
+	return &rpcpb.UpdateRestshimdConfigResponse{}, nil
+}
+
+func (f *fakeClient) GetRaftdConfig(context.Context, *rpcpb.GetRaftdConfigRequest, ...grpc.CallOption) (*rpcpb.GetRaftdConfigResponse, error) {
+	return &rpcpb.GetRaftdConfigResponse{}, nil
+}
+
+func (f *fakeClient) UpdateRaftdConfig(context.Context, *rpcpb.UpdateRaftdConfigRequest, ...grpc.CallOption) (*rpcpb.UpdateRaftdConfigResponse, error) {
+	return &rpcpb.UpdateRaftdConfigResponse{}, nil
+}
+
 func (f *fakeClient) SetDatasetQuota(context.Context, *rpcpb.SetDatasetQuotaRequest, ...grpc.CallOption) (*rpcpb.SetDatasetQuotaResponse, error) {
 	return &rpcpb.SetDatasetQuotaResponse{}, nil
 }

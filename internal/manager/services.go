@@ -9,9 +9,13 @@ import (
 	rpcpb "github.com/glenjbarber/apiary/api/rpc"
 )
 
-// apiaryServices is the full status inventory for this Machine page. Only
-// managerd and frontend are restartable in v1: raftd is consensus-critical,
-// and restshimd is not currently a user-facing web dependency.
+// apiaryServices is the full status inventory for this Machine page.
+// raftd stays excluded - consensus-critical, and its own config write
+// path (UpdateRaftdConfig, ADR-0102) deliberately never auto-restarts
+// it either, the same judgment applied consistently in two places.
+// restshimd is now restartable (ADR-0102): it's stateless and
+// non-consensus, and UpdateRestshimdConfig needs to be able to trigger
+// a restart after a successful config save.
 var apiaryServices = []struct {
 	name        string
 	restartable bool
@@ -19,7 +23,7 @@ var apiaryServices = []struct {
 	{name: "apiary_raftd"},
 	{name: "apiary_managerd", restartable: true},
 	{name: "apiary_frontend", restartable: true},
-	{name: "apiary_restshimd"},
+	{name: "apiary_restshimd", restartable: true},
 }
 
 type rcServiceController struct{}

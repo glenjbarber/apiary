@@ -244,6 +244,104 @@ func fromRPCNodeConfig(d *rpcpb.GetNodeConfigResponse) nodeConfigView {
 	return view
 }
 
+// frontendConfigView is the template-facing shape for the co-located
+// frontend's own settings (ADR-0102) - see
+// api/rpc/manager.proto's GetFrontendConfigResponse.
+type frontendConfigView struct {
+	ManagerAddr          string
+	HTTPAddr             string
+	ManagerTLS           bool
+	ManagerTLSCA         string
+	ManagerTLSServerName string
+	TLSCert              string
+	TLSKey               string
+	PeerTLS              bool
+	PeerTLSCA            string
+	PeerHostnameSuffix   string
+	PeerManagerPort      string
+
+	// ManagerAPIKeySet reports only whether a secret is currently
+	// saved - the raw value is never sent to the browser (see
+	// GetFrontendConfigResponse's own doc comment).
+	ManagerAPIKeySet bool
+}
+
+func fromRPCFrontendConfig(d *rpcpb.GetFrontendConfigResponse) frontendConfigView {
+	return frontendConfigView{
+		ManagerAddr:          d.GetManagerAddr(),
+		HTTPAddr:             d.GetHttpAddr(),
+		ManagerTLS:           d.GetManagerTls(),
+		ManagerTLSCA:         d.GetManagerTlsCa(),
+		ManagerTLSServerName: d.GetManagerTlsServerName(),
+		TLSCert:              d.GetTlsCert(),
+		TLSKey:               d.GetTlsKey(),
+		PeerTLS:              d.GetPeerTls(),
+		PeerTLSCA:            d.GetPeerTlsCa(),
+		PeerHostnameSuffix:   d.GetPeerHostnameSuffix(),
+		PeerManagerPort:      d.GetPeerManagerPort(),
+		ManagerAPIKeySet:     d.GetManagerApiKeySet(),
+	}
+}
+
+// restshimdConfigView is the template-facing shape for the co-located
+// restshimd's own settings (ADR-0102) - see
+// api/rpc/manager.proto's GetRestshimdConfigResponse. No secret
+// fields - restshimdconfig.Config has none.
+type restshimdConfigView struct {
+	ManagerAddr          string
+	HTTPAddr             string
+	ManagerTLS           bool
+	ManagerTLSCA         string
+	ManagerTLSServerName string
+	TLSCert              string
+	TLSKey               string
+}
+
+func fromRPCRestshimdConfig(d *rpcpb.GetRestshimdConfigResponse) restshimdConfigView {
+	return restshimdConfigView{
+		ManagerAddr:          d.GetManagerAddr(),
+		HTTPAddr:             d.GetHttpAddr(),
+		ManagerTLS:           d.GetManagerTls(),
+		ManagerTLSCA:         d.GetManagerTlsCa(),
+		ManagerTLSServerName: d.GetManagerTlsServerName(),
+		TLSCert:              d.GetTlsCert(),
+		TLSKey:               d.GetTlsKey(),
+	}
+}
+
+// raftdConfigView is the template-facing shape for the co-located
+// raftd's own settings (ADR-0102) - see api/rpc/manager.proto's
+// GetRaftdConfigResponse. DataDir/Socket/RaftBind are display-only
+// (no corresponding editable form field - see internal/raftdconfig's
+// own package doc comment for why they're excluded from
+// UpdateRaftdConfig entirely).
+type raftdConfigView struct {
+	DataDir  string
+	Socket   string
+	RaftBind string
+
+	RaftTLSCert string
+	RaftTLSKey  string
+	RaftTLSCA   string
+
+	// InternalTokenSet reports only whether a secret is currently
+	// saved - the raw value is never sent to the browser (see
+	// GetRaftdConfigResponse's own doc comment).
+	InternalTokenSet bool
+}
+
+func fromRPCRaftdConfig(d *rpcpb.GetRaftdConfigResponse) raftdConfigView {
+	return raftdConfigView{
+		DataDir:          d.GetDataDir(),
+		Socket:           d.GetSocket(),
+		RaftBind:         d.GetRaftBind(),
+		RaftTLSCert:      d.GetRaftTlsCert(),
+		RaftTLSKey:       d.GetRaftTlsKey(),
+		RaftTLSCA:        d.GetRaftTlsCa(),
+		InternalTokenSet: d.GetInternalTokenSet(),
+	}
+}
+
 func withSavedInterface(options []networkInterfaceOption, selected string) []networkInterfaceOption {
 	if selected == "" {
 		return options

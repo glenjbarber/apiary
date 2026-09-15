@@ -1,14 +1,18 @@
 // Package restshimdconfig persists cmd/restshimd's own local
 // settings (ADR-0100) as a plain JSON file on disk, replacing what
-// were previously its own CLI flags. Hand-edited only - restshimd has
-// no web UI of its own to expose live editing through, unlike
-// managerd's internal/nodeconfig. A change here takes effect the next
+// were previously its own CLI flags. Save (ADR-0102) is called only
+// from managerd's own RPC handlers (UpdateRestshimdConfig) - restshimd
+// itself has no RPC/web UI of its own to expose live editing through
+// directly, unlike managerd's own internal/nodeconfig, so managerd
+// writes this file on restshimd's behalf instead (the two are always
+// co-located on the same host). A change here takes effect the next
 // time restshimd restarts.
 package restshimdconfig
 
 import (
 	"encoding/json"
 	"fmt"
+	"net"
 	"os"
 )
 
@@ -89,4 +93,61 @@ func (m *Manager) Load() (Config, error) {
 		return Config{}, fmt.Errorf("restshimdconfig: parsing %s: %w", m.path(), err)
 	}
 	return cfg, nil
+}
+
+// Save writes cfg, replacing whatever was there before in full (not a
+// merge) - the caller (managerd's UpdateRestshimdConfig handler) is
+// expected to Load first if it wants to change only one field, the
+// same convention nodeconfig.Manager.Save already establishes. 0600 to
+// match every sibling config file's own convention, even though this
+// one holds no secret today.
+func (m *Manager) Save(cfg Config) error {
+	if err := validate(cfg); err != nil {
+		return err
+	}
+	body, err := json.MarshalIndent(cfg, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(m.path(), body, 0o600)
+}
+
+// validate rejects a value that would be unsafe to interpolate or
+// otherwise malformed, without judging semantic correctness - the same
+// posture and reasoning as nodeconfig.validate's own doc comment.
+func validate(cfg Config) error {
+	if cfg.ManagerAddr != "" {
+		if _, _, err := net.SplitHostPort(cfg.ManagerAddr); err != nil {
+			return fmt.Errorf("restshimdconfig: invalid manager_addr %q: %w", cfg.ManagerAddr, err)
+		}
+	}
+	if cfg.HTTPAddr != "" {
+		if _, _, err := net.SplitHostPort(cfg.HTTPAddr); err != nil {
+			return fmt.Errorf("restshimdconfig: invalid http_addr %q: %w", cfg.HTTPAddr, err)
+		}
+	}
+	for _, f := range []struct{ name, value string }{
+		{"manager_tls_ca", cfg.ManagerTLSCA},
+		{"tls_cert", cfg.TLSCert},
+		{"tls_key", cfg.TLSKey},
+	} {
+		if err := validateNoNewline(f.name, f.value); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// validateNoNewline rejects a newline/carriage-return - defense in
+// depth, mirroring nodeconfig.validatePathField's own reasoning.
+func validateNoNewline(name, value string) error {
+	if value == "" {
+		return nil
+	}
+	for _, r := range value {
+		if r == '\n' || r == '\r' {
+			return fmt.Errorf("restshimdconfig: invalid %s: must not contain newlines", name)
+		}
+	}
+	return nil
 }

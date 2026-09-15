@@ -47,6 +47,12 @@ const (
 	ManagerService_GetVMSerialLog_FullMethodName              = "/apiary.rpc.v1.ManagerService/GetVMSerialLog"
 	ManagerService_GetNodeConfig_FullMethodName               = "/apiary.rpc.v1.ManagerService/GetNodeConfig"
 	ManagerService_UpdateNodeConfig_FullMethodName            = "/apiary.rpc.v1.ManagerService/UpdateNodeConfig"
+	ManagerService_GetFrontendConfig_FullMethodName           = "/apiary.rpc.v1.ManagerService/GetFrontendConfig"
+	ManagerService_UpdateFrontendConfig_FullMethodName        = "/apiary.rpc.v1.ManagerService/UpdateFrontendConfig"
+	ManagerService_GetRestshimdConfig_FullMethodName          = "/apiary.rpc.v1.ManagerService/GetRestshimdConfig"
+	ManagerService_UpdateRestshimdConfig_FullMethodName       = "/apiary.rpc.v1.ManagerService/UpdateRestshimdConfig"
+	ManagerService_GetRaftdConfig_FullMethodName              = "/apiary.rpc.v1.ManagerService/GetRaftdConfig"
+	ManagerService_UpdateRaftdConfig_FullMethodName           = "/apiary.rpc.v1.ManagerService/UpdateRaftdConfig"
 	ManagerService_SetDatasetQuota_FullMethodName             = "/apiary.rpc.v1.ManagerService/SetDatasetQuota"
 	ManagerService_CreateVMSnapshot_FullMethodName            = "/apiary.rpc.v1.ManagerService/CreateVMSnapshot"
 	ManagerService_ListVMSnapshots_FullMethodName             = "/apiary.rpc.v1.ManagerService/ListVMSnapshots"
@@ -241,6 +247,31 @@ type ManagerServiceClient interface {
 	// see ADR-0049 for why. See internal/nodeconfig.
 	GetNodeConfig(ctx context.Context, in *GetNodeConfigRequest, opts ...grpc.CallOption) (*GetNodeConfigResponse, error)
 	UpdateNodeConfig(ctx context.Context, in *UpdateNodeConfigRequest, opts ...grpc.CallOption) (*UpdateNodeConfigResponse, error)
+	// GetFrontendConfig/UpdateFrontendConfig, GetRestshimdConfig/
+	// UpdateRestshimdConfig, and GetRaftdConfig/UpdateRaftdConfig
+	// (ADR-0102) extend the same "manage this node's own local runtime
+	// settings" posture above to the three sibling daemons co-located on
+	// this same host (frontend, restshimd, raftd) - none of which has an
+	// RPC/web-UI surface of its own, so managerd writes their config
+	// files (frontend.json/restshimd.json/raftd.json, ADR-0100) directly
+	// on their behalf, assuming co-location (already true in this
+	// project's own topology). A successful UpdateFrontendConfig/
+	// UpdateRestshimdConfig also restarts that daemon (see
+	// Update*ConfigResponse.scheduled) since both are stateless and
+	// non-consensus; UpdateRaftdConfig deliberately never restarts raftd
+	// (consensus-critical) - a saved raftd.json is inert until an
+	// operator manually restarts it. raftd's own identity/topology/
+	// bootstrap fields (node_id, data_dir, socket, raft_bind, join,
+	// await_join) are excluded from this RPC surface entirely, mirroring
+	// GetNodeConfig/UpdateNodeConfig's own exclusion of node_id/
+	// rpc_addr/raftd_socket above - see GetRaftdConfigResponse's own doc
+	// comment.
+	GetFrontendConfig(ctx context.Context, in *GetFrontendConfigRequest, opts ...grpc.CallOption) (*GetFrontendConfigResponse, error)
+	UpdateFrontendConfig(ctx context.Context, in *UpdateFrontendConfigRequest, opts ...grpc.CallOption) (*UpdateFrontendConfigResponse, error)
+	GetRestshimdConfig(ctx context.Context, in *GetRestshimdConfigRequest, opts ...grpc.CallOption) (*GetRestshimdConfigResponse, error)
+	UpdateRestshimdConfig(ctx context.Context, in *UpdateRestshimdConfigRequest, opts ...grpc.CallOption) (*UpdateRestshimdConfigResponse, error)
+	GetRaftdConfig(ctx context.Context, in *GetRaftdConfigRequest, opts ...grpc.CallOption) (*GetRaftdConfigResponse, error)
+	UpdateRaftdConfig(ctx context.Context, in *UpdateRaftdConfigRequest, opts ...grpc.CallOption) (*UpdateRaftdConfigResponse, error)
 	// SetDatasetQuota sets a ZFS quota on a dataset under this node's own
 	// configured Base scope (see internal/zfs.Manager) - physical,
 	// per-node storage governance, never routed through raft. See
@@ -758,6 +789,66 @@ func (c *managerServiceClient) UpdateNodeConfig(ctx context.Context, in *UpdateN
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(UpdateNodeConfigResponse)
 	err := c.cc.Invoke(ctx, ManagerService_UpdateNodeConfig_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *managerServiceClient) GetFrontendConfig(ctx context.Context, in *GetFrontendConfigRequest, opts ...grpc.CallOption) (*GetFrontendConfigResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetFrontendConfigResponse)
+	err := c.cc.Invoke(ctx, ManagerService_GetFrontendConfig_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *managerServiceClient) UpdateFrontendConfig(ctx context.Context, in *UpdateFrontendConfigRequest, opts ...grpc.CallOption) (*UpdateFrontendConfigResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(UpdateFrontendConfigResponse)
+	err := c.cc.Invoke(ctx, ManagerService_UpdateFrontendConfig_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *managerServiceClient) GetRestshimdConfig(ctx context.Context, in *GetRestshimdConfigRequest, opts ...grpc.CallOption) (*GetRestshimdConfigResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetRestshimdConfigResponse)
+	err := c.cc.Invoke(ctx, ManagerService_GetRestshimdConfig_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *managerServiceClient) UpdateRestshimdConfig(ctx context.Context, in *UpdateRestshimdConfigRequest, opts ...grpc.CallOption) (*UpdateRestshimdConfigResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(UpdateRestshimdConfigResponse)
+	err := c.cc.Invoke(ctx, ManagerService_UpdateRestshimdConfig_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *managerServiceClient) GetRaftdConfig(ctx context.Context, in *GetRaftdConfigRequest, opts ...grpc.CallOption) (*GetRaftdConfigResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetRaftdConfigResponse)
+	err := c.cc.Invoke(ctx, ManagerService_GetRaftdConfig_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *managerServiceClient) UpdateRaftdConfig(ctx context.Context, in *UpdateRaftdConfigRequest, opts ...grpc.CallOption) (*UpdateRaftdConfigResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(UpdateRaftdConfigResponse)
+	err := c.cc.Invoke(ctx, ManagerService_UpdateRaftdConfig_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -1391,6 +1482,31 @@ type ManagerServiceServer interface {
 	// see ADR-0049 for why. See internal/nodeconfig.
 	GetNodeConfig(context.Context, *GetNodeConfigRequest) (*GetNodeConfigResponse, error)
 	UpdateNodeConfig(context.Context, *UpdateNodeConfigRequest) (*UpdateNodeConfigResponse, error)
+	// GetFrontendConfig/UpdateFrontendConfig, GetRestshimdConfig/
+	// UpdateRestshimdConfig, and GetRaftdConfig/UpdateRaftdConfig
+	// (ADR-0102) extend the same "manage this node's own local runtime
+	// settings" posture above to the three sibling daemons co-located on
+	// this same host (frontend, restshimd, raftd) - none of which has an
+	// RPC/web-UI surface of its own, so managerd writes their config
+	// files (frontend.json/restshimd.json/raftd.json, ADR-0100) directly
+	// on their behalf, assuming co-location (already true in this
+	// project's own topology). A successful UpdateFrontendConfig/
+	// UpdateRestshimdConfig also restarts that daemon (see
+	// Update*ConfigResponse.scheduled) since both are stateless and
+	// non-consensus; UpdateRaftdConfig deliberately never restarts raftd
+	// (consensus-critical) - a saved raftd.json is inert until an
+	// operator manually restarts it. raftd's own identity/topology/
+	// bootstrap fields (node_id, data_dir, socket, raft_bind, join,
+	// await_join) are excluded from this RPC surface entirely, mirroring
+	// GetNodeConfig/UpdateNodeConfig's own exclusion of node_id/
+	// rpc_addr/raftd_socket above - see GetRaftdConfigResponse's own doc
+	// comment.
+	GetFrontendConfig(context.Context, *GetFrontendConfigRequest) (*GetFrontendConfigResponse, error)
+	UpdateFrontendConfig(context.Context, *UpdateFrontendConfigRequest) (*UpdateFrontendConfigResponse, error)
+	GetRestshimdConfig(context.Context, *GetRestshimdConfigRequest) (*GetRestshimdConfigResponse, error)
+	UpdateRestshimdConfig(context.Context, *UpdateRestshimdConfigRequest) (*UpdateRestshimdConfigResponse, error)
+	GetRaftdConfig(context.Context, *GetRaftdConfigRequest) (*GetRaftdConfigResponse, error)
+	UpdateRaftdConfig(context.Context, *UpdateRaftdConfigRequest) (*UpdateRaftdConfigResponse, error)
 	// SetDatasetQuota sets a ZFS quota on a dataset under this node's own
 	// configured Base scope (see internal/zfs.Manager) - physical,
 	// per-node storage governance, never routed through raft. See
@@ -1711,6 +1827,24 @@ func (UnimplementedManagerServiceServer) GetNodeConfig(context.Context, *GetNode
 }
 func (UnimplementedManagerServiceServer) UpdateNodeConfig(context.Context, *UpdateNodeConfigRequest) (*UpdateNodeConfigResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method UpdateNodeConfig not implemented")
+}
+func (UnimplementedManagerServiceServer) GetFrontendConfig(context.Context, *GetFrontendConfigRequest) (*GetFrontendConfigResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetFrontendConfig not implemented")
+}
+func (UnimplementedManagerServiceServer) UpdateFrontendConfig(context.Context, *UpdateFrontendConfigRequest) (*UpdateFrontendConfigResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method UpdateFrontendConfig not implemented")
+}
+func (UnimplementedManagerServiceServer) GetRestshimdConfig(context.Context, *GetRestshimdConfigRequest) (*GetRestshimdConfigResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetRestshimdConfig not implemented")
+}
+func (UnimplementedManagerServiceServer) UpdateRestshimdConfig(context.Context, *UpdateRestshimdConfigRequest) (*UpdateRestshimdConfigResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method UpdateRestshimdConfig not implemented")
+}
+func (UnimplementedManagerServiceServer) GetRaftdConfig(context.Context, *GetRaftdConfigRequest) (*GetRaftdConfigResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetRaftdConfig not implemented")
+}
+func (UnimplementedManagerServiceServer) UpdateRaftdConfig(context.Context, *UpdateRaftdConfigRequest) (*UpdateRaftdConfigResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method UpdateRaftdConfig not implemented")
 }
 func (UnimplementedManagerServiceServer) SetDatasetQuota(context.Context, *SetDatasetQuotaRequest) (*SetDatasetQuotaResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method SetDatasetQuota not implemented")
@@ -2355,6 +2489,114 @@ func _ManagerService_UpdateNodeConfig_Handler(srv interface{}, ctx context.Conte
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(ManagerServiceServer).UpdateNodeConfig(ctx, req.(*UpdateNodeConfigRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ManagerService_GetFrontendConfig_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetFrontendConfigRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ManagerServiceServer).GetFrontendConfig(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ManagerService_GetFrontendConfig_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ManagerServiceServer).GetFrontendConfig(ctx, req.(*GetFrontendConfigRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ManagerService_UpdateFrontendConfig_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(UpdateFrontendConfigRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ManagerServiceServer).UpdateFrontendConfig(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ManagerService_UpdateFrontendConfig_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ManagerServiceServer).UpdateFrontendConfig(ctx, req.(*UpdateFrontendConfigRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ManagerService_GetRestshimdConfig_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetRestshimdConfigRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ManagerServiceServer).GetRestshimdConfig(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ManagerService_GetRestshimdConfig_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ManagerServiceServer).GetRestshimdConfig(ctx, req.(*GetRestshimdConfigRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ManagerService_UpdateRestshimdConfig_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(UpdateRestshimdConfigRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ManagerServiceServer).UpdateRestshimdConfig(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ManagerService_UpdateRestshimdConfig_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ManagerServiceServer).UpdateRestshimdConfig(ctx, req.(*UpdateRestshimdConfigRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ManagerService_GetRaftdConfig_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetRaftdConfigRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ManagerServiceServer).GetRaftdConfig(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ManagerService_GetRaftdConfig_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ManagerServiceServer).GetRaftdConfig(ctx, req.(*GetRaftdConfigRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ManagerService_UpdateRaftdConfig_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(UpdateRaftdConfigRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ManagerServiceServer).UpdateRaftdConfig(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ManagerService_UpdateRaftdConfig_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ManagerServiceServer).UpdateRaftdConfig(ctx, req.(*UpdateRaftdConfigRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -3322,6 +3564,30 @@ var ManagerService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "UpdateNodeConfig",
 			Handler:    _ManagerService_UpdateNodeConfig_Handler,
+		},
+		{
+			MethodName: "GetFrontendConfig",
+			Handler:    _ManagerService_GetFrontendConfig_Handler,
+		},
+		{
+			MethodName: "UpdateFrontendConfig",
+			Handler:    _ManagerService_UpdateFrontendConfig_Handler,
+		},
+		{
+			MethodName: "GetRestshimdConfig",
+			Handler:    _ManagerService_GetRestshimdConfig_Handler,
+		},
+		{
+			MethodName: "UpdateRestshimdConfig",
+			Handler:    _ManagerService_UpdateRestshimdConfig_Handler,
+		},
+		{
+			MethodName: "GetRaftdConfig",
+			Handler:    _ManagerService_GetRaftdConfig_Handler,
+		},
+		{
+			MethodName: "UpdateRaftdConfig",
+			Handler:    _ManagerService_UpdateRaftdConfig_Handler,
 		},
 		{
 			MethodName: "SetDatasetQuota",
