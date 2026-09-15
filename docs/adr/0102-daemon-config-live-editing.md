@@ -182,3 +182,51 @@ survives its self-triggered restart; then raftd's config-write-only
 path, verified without ever test-restarting raftd through this new
 RPC), with explicit operator confirmation at each step given the
 production stakes.
+
+## Correction (2026-09-15): removed UpdateRaftdConfig; fixed a permissions bug in every Save()
+
+A post-merge audit (before any real `Update*` write was ever made
+against the live cluster - only read-only `Get*` calls had been
+exercised) found two release-blocking issues and one real bug in the
+design above:
+
+- **P1**: `internal_token` (raftd's own config) and managerd's
+  separately-configured `raftd_token` (`nodeconfig.Config`) must match
+  for `RaftInternal` auth to keep working - `UpdateRaftdConfig` let an
+  operator change one independently of the other via two entirely
+  separate panels, with no coordination. Restarting raftd after such a
+  change would break managerd-to-raftd authentication until the
+  mismatch was noticed and fixed by hand.
+- **P1**: raft TLS certificate/key/CA is cluster-coupled, not a plain
+  per-host setting - changing it on one voter and manually restarting
+  raftd (which this RPC never automated, by design) can isolate that
+  voter and lose quorum in a two-node cluster.
+- **P2**: `Save()` in every one of the four config packages
+  (`nodeconfig` included - this bug predates this ADR, inherited by
+  the three new packages that mirrored its shape) used a plain
+  `os.WriteFile(path, body, 0o600)`. Go only applies the mode argument
+  when the file is *created*; saving over an already-existing file
+  left it at whatever permissions it already had. A `frontend.json` or
+  `raftd.json` that had ever existed at `0644` - however that
+  happened - would stay world/group-readable across every subsequent
+  `Save`, despite holding real credentials.
+
+**Remediation, chosen over building a full coordinated rotation
+workflow** (a materially larger feature - cross-host transactions,
+peer TLS compatibility checks - deferred as genuinely future work, not
+implemented here): `UpdateRaftdConfig` and its request/response
+messages were removed entirely from the proto, the RPC handler, the
+auth map, and the web UI. `GetRaftdConfig` is unchanged and still shows
+every field (including raft TLS paths and whether `internal_token` is
+set) for context - raftd's config remains hand-edit-the-file-and-
+restart-only for every field, exactly as before this ADR, with the
+Machine page's raftd panel now explaining why in its own copy. All
+four `Save()` implementations were changed to write via a temp file in
+the same directory, explicit `chmod 0600`, then atomic rename -
+mirroring `internal/assumptions.Manager`'s own existing
+write-then-rename convention - with a dedicated regression test per
+package proving `Save` tightens permissions on a file that pre-existed
+at `0644`.
+
+`frontend`/`restshimd` config editing (the two daemons where this audit
+found no equivalent coupling risk) is unaffected by this correction.

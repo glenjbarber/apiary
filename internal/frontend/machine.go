@@ -631,72 +631,13 @@ func (s *Server) renderRestshimdConfigPanel(w http.ResponseWriter, r *http.Reque
 	s.render(w, "restshimd_config_panel", pageData{RestshimdConfig: cfg, RestshimdConfigFormError: formErr, CanAdmin: true})
 }
 
-// handleUpdateRaftdConfig mirrors handleUpdateFrontendConfig for the
-// co-located raftd (ADR-0102) - only a narrow field set is ever
-// submitted (see raftdConfigUpdateRequest), since DataDir/Socket/
-// NodeID/RaftBind/Join/AwaitJoin are excluded from
-// UpdateRaftdConfigRequest entirely at the proto level (see
-// internal/raftdconfig's own package doc comment).
-func (s *Server) handleUpdateRaftdConfig(w http.ResponseWriter, r *http.Request) {
-	if err := r.ParseForm(); err != nil {
-		s.renderRaftdConfigPanel(w, r, "invalid form: "+err.Error())
-		return
-	}
-	req := s.raftdConfigUpdateRequest(r)
-	resp, err := s.client.UpdateRaftdConfig(r.Context(), req)
-	if err != nil {
-		s.renderRaftdConfigPanel(w, r, err.Error())
-		return
-	}
-	if resp.GetError() != "" {
-		s.renderRaftdConfigPanel(w, r, resp.GetError())
-		return
-	}
-	s.renderRaftdConfigPanel(w, r, "")
-}
-
-// raftdConfigUpdateRequest mirrors frontendConfigUpdateRequest's
-// resend-current-plus-override pattern, but only for the five fields
-// UpdateRaftdConfigRequest actually has - raftd's identity/topology/
-// bootstrap fields have no form inputs at all (see raftd_config_panel
-// in machine.html), so there is nothing to accidentally submit for
-// them in the first place.
-func (s *Server) raftdConfigUpdateRequest(r *http.Request) *rpcpb.UpdateRaftdConfigRequest {
-	cfg, _ := s.currentRaftdConfig(r)
-	req := &rpcpb.UpdateRaftdConfigRequest{
-		RaftTlsCert: cfg.RaftTLSCert,
-		RaftTlsKey:  cfg.RaftTLSKey,
-		RaftTlsCa:   cfg.RaftTLSCA,
-	}
-	if r.Form.Has("raft_tls_cert") {
-		req.RaftTlsCert = r.FormValue("raft_tls_cert")
-	}
-	if r.Form.Has("raft_tls_key") {
-		req.RaftTlsKey = r.FormValue("raft_tls_key")
-	}
-	if r.Form.Has("raft_tls_ca") {
-		req.RaftTlsCa = r.FormValue("raft_tls_ca")
-	}
-	if r.Form.Has("internal_token") {
-		req.InternalToken = r.FormValue("internal_token")
-	}
-	if r.FormValue("clear_internal_token") == "true" {
-		req.ClearInternalToken = true
-	}
-	return req
-}
-
-func (s *Server) renderRaftdConfigPanel(w http.ResponseWriter, r *http.Request, formErr string) {
-	cfg, fetchErr := s.currentRaftdConfig(r)
-	if fetchErr != "" {
-		if formErr == "" {
-			formErr = fetchErr
-		} else {
-			formErr += "; additionally failed to refresh: " + fetchErr
-		}
-	}
-	s.render(w, "raftd_config_panel", pageData{RaftdConfig: cfg, RaftdConfigFormError: formErr, CanAdmin: true})
-}
+// raftd_config_panel (web/templates/machine.html) is read-only only -
+// there is no handleUpdateRaftdConfig/raftdConfigUpdateRequest/
+// renderRaftdConfigPanel at all. A 2026-09-15 audit found that a
+// per-host save form is unsafe for raftd's internal_token/raft TLS
+// material (see GetRaftdConfig's own doc comment in
+// internal/manager/server.go) - the panel only ever calls
+// currentRaftdConfig (a plain Get) from handleMachinePage.
 
 // handleUpdateResourceScope updates the five write-once resource-scope
 // paths (ADR-0070) - a dedicated panel/handler since these need the

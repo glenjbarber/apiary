@@ -463,9 +463,11 @@ type restshimdConfigStore interface {
 	Save(restshimdconfig.Config) error
 }
 
+// raftdConfigStore is deliberately Load-only - see GetRaftdConfig's own
+// doc comment for why there is no UpdateRaftdConfig (and so no Save
+// call) at all.
 type raftdConfigStore interface {
 	Load() (raftdconfig.Config, error)
-	Save(raftdconfig.Config) error
 }
 
 var _ rpcpb.ManagerServiceServer = (*Server)(nil)
@@ -2432,11 +2434,18 @@ func (s *Server) UpdateRestshimdConfig(_ context.Context, req *rpcpb.UpdateRests
 	return &rpcpb.UpdateRestshimdConfigResponse{Scheduled: true}, nil
 }
 
-// GetRaftdConfig implements rpcpb.ManagerServiceServer - reports only
-// the RPC-editable subset of the co-located raftd's own settings, plus
-// data_dir/socket/raft_bind for read-only display (ADR-0102) - see
-// internal/raftdconfig's own package doc comment for exactly which
-// fields are excluded and why.
+// GetRaftdConfig implements rpcpb.ManagerServiceServer - read-only
+// display of the co-located raftd's own settings (ADR-0102). There is
+// deliberately no UpdateRaftdConfig: a 2026-09-15 audit found that
+// per-host editing of internal_token or raft TLS material is unsafe
+// for a consensus-critical daemon without a real coordinated rotation
+// workflow (internal_token must match managerd's own separately-
+// configured raftd_token for RaftInternal auth to keep working;
+// changing raft TLS material on one voter and restarting it can
+// isolate that voter and lose quorum) - both out of scope here. raftd's
+// config stays entirely hand-edit-the-file-and-restart-only; this RPC
+// exists purely so the Machine page can show current values for
+// context.
 func (s *Server) GetRaftdConfig(_ context.Context, _ *rpcpb.GetRaftdConfigRequest) (*rpcpb.GetRaftdConfigResponse, error) {
 	if s.raftdConfig == nil {
 		return &rpcpb.GetRaftdConfigResponse{Error: "this node has no raftd-config store configured"}, nil
@@ -2455,60 +2464,8 @@ func (s *Server) GetRaftdConfig(_ context.Context, _ *rpcpb.GetRaftdConfigReques
 		RaftTlsCa:   cfg.RaftTLSCA,
 
 		// internal_token is never returned - only whether one is set.
-		// See UpdateRaftdConfigRequest's own doc comment for how to set
-		// or clear one.
 		InternalTokenSet: cfg.InternalToken != "",
 	}, nil
-}
-
-// UpdateRaftdConfig implements rpcpb.ManagerServiceServer - persists
-// new raft-TLS/internal-token settings for the co-located raftd
-// (ADR-0102). This is the load-bearing correctness point of the whole
-// feature: because cfg below is built fresh from req rather than
-// merged onto current, and NodeID/DataDir/Socket/RaftBind/Join/
-// AwaitJoin have no proto counterpart at all (deliberately excluded -
-// see internal/raftdconfig's own package doc comment), every one of
-// them MUST be explicitly carried over from current here, or ANY call
-// to this RPC - not just ones touching raft TLS - would silently wipe
-// this node's raft identity and topology. Never schedules a raftd
-// restart (consensus-critical) - a successful save is inert until an
-// operator manually restarts raftd; see UpdateRaftdConfigResponse's
-// own doc comment in the proto.
-func (s *Server) UpdateRaftdConfig(_ context.Context, req *rpcpb.UpdateRaftdConfigRequest) (*rpcpb.UpdateRaftdConfigResponse, error) {
-	if s.raftdConfig == nil {
-		return &rpcpb.UpdateRaftdConfigResponse{Error: "this node has no raftd-config store configured"}, nil
-	}
-	current, err := s.raftdConfig.Load()
-	if err != nil {
-		return &rpcpb.UpdateRaftdConfigResponse{Error: err.Error()}, nil
-	}
-	token := current.InternalToken
-	if req.GetClearInternalToken() {
-		token = ""
-	} else if req.GetInternalToken() != "" {
-		token = req.GetInternalToken()
-	}
-	cfg := raftdconfig.Config{
-		// Deliberately excluded from UpdateRaftdConfigRequest (ADR-0102)
-		// - identity/topology/bootstrap fields stay hand-edit-only. See
-		// this function's own doc comment for why carrying these over
-		// is mandatory, not optional.
-		DataDir:   current.DataDir,
-		Socket:    current.Socket,
-		NodeID:    current.NodeID,
-		RaftBind:  current.RaftBind,
-		Join:      current.Join,
-		AwaitJoin: current.AwaitJoin,
-
-		RaftTLSCert:   req.GetRaftTlsCert(),
-		RaftTLSKey:    req.GetRaftTlsKey(),
-		RaftTLSCA:     req.GetRaftTlsCa(),
-		InternalToken: token,
-	}
-	if err := s.raftdConfig.Save(cfg); err != nil {
-		return &rpcpb.UpdateRaftdConfigResponse{Error: err.Error()}, nil
-	}
-	return &rpcpb.UpdateRaftdConfigResponse{}, nil
 }
 
 // scheduleServiceRestart is UpdateFrontendConfig/UpdateRestshimdConfig's

@@ -266,6 +266,33 @@ func TestManager_Save_FileModeIs0600(t *testing.T) {
 	}
 }
 
+// TestManager_Save_TightensPermissionsOnExistingFile is the regression
+// test for a 2026-09-15 audit finding: the test above only ever
+// exercised Save creating a brand new file, which os.WriteFile's mode
+// argument does correctly handle - it never covered Save writing over
+// an already-existing file at looser permissions (e.g. one
+// hand-created at 0644 before this package ever touched it), which
+// os.WriteFile's mode argument does NOT retroactively fix. Save must
+// tighten permissions on every call, not just the first.
+func TestManager_Save_TightensPermissionsOnExistingFile(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "node-config.json")
+	if err := os.WriteFile(path, []byte(`{}`), 0o644); err != nil {
+		t.Fatalf("writing pre-existing file: %v", err)
+	}
+	m := &Manager{Path: path}
+
+	if err := m.Save(Config{PeerAPIKey: "apk_test"}); err != nil {
+		t.Fatalf("Save() error: %v", err)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("Stat() error: %v", err)
+	}
+	if perm := info.Mode().Perm(); perm != 0o600 {
+		t.Errorf("permissions after Save = %o, want 0600 even though the file pre-existed at 0644", perm)
+	}
+}
+
 func boolPtr(v bool) *bool {
 	return &v
 }

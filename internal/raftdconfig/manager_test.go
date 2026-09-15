@@ -57,11 +57,11 @@ func TestManager_LoadMalformedFileIsAnError(t *testing.T) {
 }
 
 // TestManager_SaveThenLoadRoundTripsEveryField confirms Save itself
-// faithfully persists every field it's given, including the ones
-// UpdateRaftdConfig (internal/manager/server.go) deliberately excludes
-// from its own request message (NodeID, DataDir, Socket, RaftBind,
-// Join, AwaitJoin) - exclusion is the RPC handler's job, not Save's;
-// Save must never silently drop a field on its own.
+// faithfully persists every field it's given - it has no notion of
+// which fields any future caller might consider hand-edit-only
+// (NodeID, DataDir, Socket, RaftBind, Join, AwaitJoin); that's a
+// caller's responsibility, not Save's, and Save must never silently
+// drop a field on its own.
 func TestManager_SaveThenLoadRoundTripsEveryField(t *testing.T) {
 	m := &Manager{Path: filepath.Join(t.TempDir(), "raftd.json")}
 	want := Config{
@@ -128,5 +128,28 @@ func TestManager_SaveIsFullReplaceNotMerge(t *testing.T) {
 	}
 	if got.InternalToken != "" {
 		t.Errorf("InternalToken = %q after a Save that omitted it, want empty - Save must fully replace, not merge", got.InternalToken)
+	}
+}
+
+// TestManager_SaveTightensPermissionsOnExistingFile is the regression
+// test for a 2026-09-15 audit finding - see the identical test in
+// internal/frontendconfig for the full explanation. Especially
+// important here: this file can hold InternalToken.
+func TestManager_SaveTightensPermissionsOnExistingFile(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "raftd.json")
+	if err := os.WriteFile(path, []byte(`{}`), 0o644); err != nil {
+		t.Fatalf("writing pre-existing file: %v", err)
+	}
+	m := &Manager{Path: path}
+
+	if err := m.Save(Config{InternalToken: "shh"}); err != nil {
+		t.Fatalf("Save() error: %v", err)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("Stat() error: %v", err)
+	}
+	if perm := info.Mode().Perm(); perm != 0o600 {
+		t.Errorf("permissions after Save = %o, want 0600 even though the file pre-existed at 0644", perm)
 	}
 }

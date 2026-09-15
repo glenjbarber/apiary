@@ -39,6 +39,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"path/filepath"
 	"time"
 )
 
@@ -315,8 +316,47 @@ func (m *Manager) Save(cfg Config) error {
 	}
 	// 0600, not 0644: this file can hold a live credential
 	// (PeerAPIKey/RaftdToken) since the fields above were added - see
-	// the package doc comment.
-	return os.WriteFile(m.path(), body, 0o600)
+	// the package doc comment. Written atomically via a temp file + a
+	// separate chmod (2026-09-15 audit fix): os.WriteFile's own mode
+	// argument is only applied when it CREATES a file - an existing
+	// file (e.g. one hand-created at 0644 before this package ever
+	// touched it) kept whatever mode it already had on every previous
+	// Save, silently leaving a real credential world/group-readable.
+	return atomicWriteFile(m.path(), body)
+}
+
+// atomicWriteFile writes body to path via a temp file in the same
+// directory, explicitly chmod 0600 (never inherited from a plain
+// os.WriteFile mode argument, which only applies on file creation -
+// see Save's own doc comment above), then renames it into place -
+// mirroring internal/assumptions.Manager's own atomic-write-then-
+// rename convention.
+func atomicWriteFile(path string, body []byte) error {
+	dir := filepath.Dir(path)
+	tmp, err := os.CreateTemp(dir, ".nodeconfig-*.tmp")
+	if err != nil {
+		return fmt.Errorf("nodeconfig: creating temp file: %w", err)
+	}
+	tmpPath := tmp.Name()
+	defer os.Remove(tmpPath) // no-op once successfully renamed
+	if _, err := tmp.Write(body); err != nil {
+		tmp.Close()
+		return fmt.Errorf("nodeconfig: writing temp file: %w", err)
+	}
+	if err := tmp.Sync(); err != nil {
+		tmp.Close()
+		return fmt.Errorf("nodeconfig: syncing temp file: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		return fmt.Errorf("nodeconfig: closing temp file: %w", err)
+	}
+	if err := os.Chmod(tmpPath, 0o600); err != nil {
+		return fmt.Errorf("nodeconfig: setting permissions: %w", err)
+	}
+	if err := os.Rename(tmpPath, path); err != nil {
+		return fmt.Errorf("nodeconfig: finalizing write: %w", err)
+	}
+	return nil
 }
 
 // checkScopePathConflicts rejects saving a new, different, non-empty

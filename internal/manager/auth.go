@@ -186,13 +186,13 @@ var requiredRole = map[string]Role{
 	"/apiary.rpc.v1.ManagerService/RevokeAPIKey":                RoleAdmin,
 	"/apiary.rpc.v1.ManagerService/UpdateNodeConfig":            RoleAdmin,
 
-	// UpdateFrontendConfig/UpdateRestshimdConfig/UpdateRaftdConfig
-	// (ADR-0102): same tier as UpdateNodeConfig above - writes a
-	// sibling daemon's own config file (including a real credential for
-	// frontend/raftd) and, for frontend/restshimd, schedules a restart.
+	// UpdateFrontendConfig/UpdateRestshimdConfig (ADR-0102): same tier
+	// as UpdateNodeConfig above - writes a sibling daemon's own config
+	// file (including a real credential for frontend) and schedules a
+	// restart. There is no UpdateRaftdConfig - see GetRaftdConfig's own
+	// doc comment in internal/manager/server.go.
 	"/apiary.rpc.v1.ManagerService/UpdateFrontendConfig":  RoleAdmin,
 	"/apiary.rpc.v1.ManagerService/UpdateRestshimdConfig": RoleAdmin,
-	"/apiary.rpc.v1.ManagerService/UpdateRaftdConfig":     RoleAdmin,
 
 	// RestartNodeService (ADR-0085 era) restarts an allowlisted rc.d
 	// service on this Hive, including managerd/frontend themselves - a

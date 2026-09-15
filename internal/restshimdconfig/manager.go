@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"path/filepath"
 )
 
 // DefaultPath is where this file lives by default on a pkg-installed
@@ -109,7 +110,43 @@ func (m *Manager) Save(cfg Config) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(m.path(), body, 0o600)
+	// Written atomically via a temp file + explicit chmod, not a plain
+	// os.WriteFile (2026-09-15 audit fix) - see frontendconfig.Save's
+	// own doc comment for why a plain os.WriteFile's mode argument
+	// alone is insufficient for an already-existing file.
+	return atomicWriteFile(m.path(), body)
+}
+
+// atomicWriteFile writes body to path via a temp file in the same
+// directory, explicitly chmod 0600, then renames it into place -
+// mirroring internal/assumptions.Manager's own atomic-write-then-
+// rename convention.
+func atomicWriteFile(path string, body []byte) error {
+	dir := filepath.Dir(path)
+	tmp, err := os.CreateTemp(dir, ".restshimdconfig-*.tmp")
+	if err != nil {
+		return fmt.Errorf("restshimdconfig: creating temp file: %w", err)
+	}
+	tmpPath := tmp.Name()
+	defer os.Remove(tmpPath) // no-op once successfully renamed
+	if _, err := tmp.Write(body); err != nil {
+		tmp.Close()
+		return fmt.Errorf("restshimdconfig: writing temp file: %w", err)
+	}
+	if err := tmp.Sync(); err != nil {
+		tmp.Close()
+		return fmt.Errorf("restshimdconfig: syncing temp file: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		return fmt.Errorf("restshimdconfig: closing temp file: %w", err)
+	}
+	if err := os.Chmod(tmpPath, 0o600); err != nil {
+		return fmt.Errorf("restshimdconfig: setting permissions: %w", err)
+	}
+	if err := os.Rename(tmpPath, path); err != nil {
+		return fmt.Errorf("restshimdconfig: finalizing write: %w", err)
+	}
+	return nil
 }
 
 // validate rejects a value that would be unsafe to interpolate or

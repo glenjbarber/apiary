@@ -102,3 +102,25 @@ func TestManager_SaveIsFullReplaceNotMerge(t *testing.T) {
 		t.Errorf("TLSCert = %q after a Save that omitted it, want empty - Save must fully replace, not merge", got.TLSCert)
 	}
 }
+
+// TestManager_SaveTightensPermissionsOnExistingFile is the regression
+// test for a 2026-09-15 audit finding - see the identical test in
+// internal/frontendconfig for the full explanation.
+func TestManager_SaveTightensPermissionsOnExistingFile(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "restshimd.json")
+	if err := os.WriteFile(path, []byte(`{}`), 0o644); err != nil {
+		t.Fatalf("writing pre-existing file: %v", err)
+	}
+	m := &Manager{Path: path}
+
+	if err := m.Save(Config{HTTPAddr: "0.0.0.0:8081"}); err != nil {
+		t.Fatalf("Save() error: %v", err)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("Stat() error: %v", err)
+	}
+	if perm := info.Mode().Perm(); perm != 0o600 {
+		t.Errorf("permissions after Save = %o, want 0600 even though the file pre-existed at 0644", perm)
+	}
+}

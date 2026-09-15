@@ -226,10 +226,6 @@ func (f *fakeClient) GetRaftdConfig(context.Context, *rpcpb.GetRaftdConfigReques
 	return &rpcpb.GetRaftdConfigResponse{}, nil
 }
 
-func (f *fakeClient) UpdateRaftdConfig(context.Context, *rpcpb.UpdateRaftdConfigRequest, ...grpc.CallOption) (*rpcpb.UpdateRaftdConfigResponse, error) {
-	return &rpcpb.UpdateRaftdConfigResponse{}, nil
-}
-
 func (f *fakeClient) SetDatasetQuota(context.Context, *rpcpb.SetDatasetQuotaRequest, ...grpc.CallOption) (*rpcpb.SetDatasetQuotaResponse, error) {
 	return &rpcpb.SetDatasetQuotaResponse{}, nil
 }
