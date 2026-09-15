@@ -28,6 +28,7 @@ import (
 	"github.com/glenjbarber/apiary/internal/cluster"
 	"github.com/glenjbarber/apiary/internal/deadman"
 	"github.com/glenjbarber/apiary/internal/dhcpd"
+	"github.com/glenjbarber/apiary/internal/frontendconfig"
 	"github.com/glenjbarber/apiary/internal/hast"
 	"github.com/glenjbarber/apiary/internal/hostconfig"
 	"github.com/glenjbarber/apiary/internal/isostore"
@@ -39,7 +40,9 @@ import (
 	"github.com/glenjbarber/apiary/internal/origincert"
 	"github.com/glenjbarber/apiary/internal/pam"
 	"github.com/glenjbarber/apiary/internal/pf"
+	"github.com/glenjbarber/apiary/internal/raftdconfig"
 	"github.com/glenjbarber/apiary/internal/resetutil"
+	"github.com/glenjbarber/apiary/internal/restshimdconfig"
 	"github.com/glenjbarber/apiary/internal/ufsmount"
 	"github.com/glenjbarber/apiary/internal/vlan"
 	"github.com/glenjbarber/apiary/internal/zfs"
@@ -364,6 +367,14 @@ func run() error {
 	srv := manager.NewServer(raftClient, id, isos, vncArg, serialLogArg, vlanArg, peers, resolvedPeerPort, zfsMgr, nodeConfigMgr, assumptionsMgr, assumptionStaleAfter, reconciler)
 	srv.SetAssumptionRegister(registerMgr)
 	srv.SetOriginCAIssuer(cloudflare.OriginCAIssuer{})
+	// ADR-0102: wired unconditionally, same posture as nodeConfigMgr
+	// above - Load()/Save() on a missing file already behave correctly
+	// (missing is not an error), and frontend/restshimd/raftd are
+	// always co-located with managerd on the same host in this
+	// project's own topology.
+	srv.SetFrontendConfig(&frontendconfig.Manager{})
+	srv.SetRestshimdConfig(&restshimdconfig.Manager{})
+	srv.SetRaftdConfig(&raftdconfig.Manager{})
 	// ADR-0088: reconciler already satisfies natPauser (NATUplink/
 	// PauseOutboundNAT) structurally - wired unconditionally, since
 	// both methods are themselves no-ops when PF/NetworkStatePath

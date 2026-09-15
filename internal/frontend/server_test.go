@@ -102,6 +102,18 @@ type fakeClient struct {
 	updateNodeConfigResp    *rpcpb.UpdateNodeConfigResponse
 	lastUpdateNodeConfigReq *rpcpb.UpdateNodeConfigRequest
 
+	getFrontendConfigResp       *rpcpb.GetFrontendConfigResponse
+	updateFrontendConfigResp    *rpcpb.UpdateFrontendConfigResponse
+	lastUpdateFrontendConfigReq *rpcpb.UpdateFrontendConfigRequest
+
+	getRestshimdConfigResp       *rpcpb.GetRestshimdConfigResponse
+	updateRestshimdConfigResp    *rpcpb.UpdateRestshimdConfigResponse
+	lastUpdateRestshimdConfigReq *rpcpb.UpdateRestshimdConfigRequest
+
+	getRaftdConfigResp       *rpcpb.GetRaftdConfigResponse
+	updateRaftdConfigResp    *rpcpb.UpdateRaftdConfigResponse
+	lastUpdateRaftdConfigReq *rpcpb.UpdateRaftdConfigRequest
+
 	setVMFirewallPausedResp    *rpcpb.SetVMFirewallPausedResponse
 	lastSetVMFirewallPausedReq *rpcpb.SetVMFirewallPausedRequest
 
@@ -289,6 +301,51 @@ func (f *fakeClient) UpdateNodeConfig(_ context.Context, in *rpcpb.UpdateNodeCon
 		return f.updateNodeConfigResp, nil
 	}
 	return &rpcpb.UpdateNodeConfigResponse{}, nil
+}
+
+func (f *fakeClient) GetFrontendConfig(context.Context, *rpcpb.GetFrontendConfigRequest, ...grpc.CallOption) (*rpcpb.GetFrontendConfigResponse, error) {
+	if f.getFrontendConfigResp != nil {
+		return f.getFrontendConfigResp, nil
+	}
+	return &rpcpb.GetFrontendConfigResponse{}, nil
+}
+
+func (f *fakeClient) UpdateFrontendConfig(_ context.Context, in *rpcpb.UpdateFrontendConfigRequest, _ ...grpc.CallOption) (*rpcpb.UpdateFrontendConfigResponse, error) {
+	f.lastUpdateFrontendConfigReq = in
+	if f.updateFrontendConfigResp != nil {
+		return f.updateFrontendConfigResp, nil
+	}
+	return &rpcpb.UpdateFrontendConfigResponse{}, nil
+}
+
+func (f *fakeClient) GetRestshimdConfig(context.Context, *rpcpb.GetRestshimdConfigRequest, ...grpc.CallOption) (*rpcpb.GetRestshimdConfigResponse, error) {
+	if f.getRestshimdConfigResp != nil {
+		return f.getRestshimdConfigResp, nil
+	}
+	return &rpcpb.GetRestshimdConfigResponse{}, nil
+}
+
+func (f *fakeClient) UpdateRestshimdConfig(_ context.Context, in *rpcpb.UpdateRestshimdConfigRequest, _ ...grpc.CallOption) (*rpcpb.UpdateRestshimdConfigResponse, error) {
+	f.lastUpdateRestshimdConfigReq = in
+	if f.updateRestshimdConfigResp != nil {
+		return f.updateRestshimdConfigResp, nil
+	}
+	return &rpcpb.UpdateRestshimdConfigResponse{}, nil
+}
+
+func (f *fakeClient) GetRaftdConfig(context.Context, *rpcpb.GetRaftdConfigRequest, ...grpc.CallOption) (*rpcpb.GetRaftdConfigResponse, error) {
+	if f.getRaftdConfigResp != nil {
+		return f.getRaftdConfigResp, nil
+	}
+	return &rpcpb.GetRaftdConfigResponse{}, nil
+}
+
+func (f *fakeClient) UpdateRaftdConfig(_ context.Context, in *rpcpb.UpdateRaftdConfigRequest, _ ...grpc.CallOption) (*rpcpb.UpdateRaftdConfigResponse, error) {
+	f.lastUpdateRaftdConfigReq = in
+	if f.updateRaftdConfigResp != nil {
+		return f.updateRaftdConfigResp, nil
+	}
+	return &rpcpb.UpdateRaftdConfigResponse{}, nil
 }
 
 func (f *fakeClient) SetDatasetQuota(_ context.Context, in *rpcpb.SetDatasetQuotaRequest, _ ...grpc.CallOption) (*rpcpb.SetDatasetQuotaResponse, error) {

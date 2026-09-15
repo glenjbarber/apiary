@@ -237,6 +237,17 @@ type pageData struct {
 	NodeConfig          nodeConfigView
 	NodeConfigFormError string
 
+	// FrontendConfig/RestshimdConfig/RaftdConfig and their own
+	// *FormError fields (ADR-0102) back three more panels on the same
+	// Machine Configuration page, one per sibling daemon co-located on
+	// this host - same rendering convention as NodeConfig above.
+	FrontendConfig           frontendConfigView
+	FrontendConfigFormError  string
+	RestshimdConfig          restshimdConfigView
+	RestshimdConfigFormError string
+	RaftdConfig              raftdConfigView
+	RaftdConfigFormError     string
+
 	// MachineVMs lists VMs assigned to this node (filtered client-side
 	// from ListVMs, which already exists and already forwards to the
 	// leader when needed - ADR-0035), for the Machine Configuration
@@ -850,6 +861,11 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /machine/cloudflare-config", s.requireRole(manager.RoleAdmin, s.handleUpdateCloudflareConfig))
 	s.mux.HandleFunc("POST /machine/assumption-tuning", s.requireRole(manager.RoleAdmin, s.handleUpdateAssumptionTuning))
 	s.mux.HandleFunc("POST /machine/internal-security", s.requireRole(manager.RoleAdmin, s.handleUpdateInternalSecurity))
+	// ADR-0102: config editing for the three sibling daemons co-located
+	// on this host, same tier as every write above.
+	s.mux.HandleFunc("POST /machine/frontend-config", s.requireRole(manager.RoleAdmin, s.handleUpdateFrontendConfig))
+	s.mux.HandleFunc("POST /machine/restshimd-config", s.requireRole(manager.RoleAdmin, s.handleUpdateRestshimdConfig))
+	s.mux.HandleFunc("POST /machine/raftd-config", s.requireRole(manager.RoleAdmin, s.handleUpdateRaftdConfig))
 	// ADR-0083: join-colony is the joining Comb's own side, on the
 	// Machine page (Admin-only, same tier as UpdateNodeConfig - this
 	// changes the Comb's own cluster identity). approve/reject are the

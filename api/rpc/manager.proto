@@ -163,6 +163,32 @@ service ManagerService {
   rpc GetNodeConfig(GetNodeConfigRequest) returns (GetNodeConfigResponse);
   rpc UpdateNodeConfig(UpdateNodeConfigRequest) returns (UpdateNodeConfigResponse);
 
+  // GetFrontendConfig/UpdateFrontendConfig, GetRestshimdConfig/
+  // UpdateRestshimdConfig, and GetRaftdConfig/UpdateRaftdConfig
+  // (ADR-0102) extend the same "manage this node's own local runtime
+  // settings" posture above to the three sibling daemons co-located on
+  // this same host (frontend, restshimd, raftd) - none of which has an
+  // RPC/web-UI surface of its own, so managerd writes their config
+  // files (frontend.json/restshimd.json/raftd.json, ADR-0100) directly
+  // on their behalf, assuming co-location (already true in this
+  // project's own topology). A successful UpdateFrontendConfig/
+  // UpdateRestshimdConfig also restarts that daemon (see
+  // Update*ConfigResponse.scheduled) since both are stateless and
+  // non-consensus; UpdateRaftdConfig deliberately never restarts raftd
+  // (consensus-critical) - a saved raftd.json is inert until an
+  // operator manually restarts it. raftd's own identity/topology/
+  // bootstrap fields (node_id, data_dir, socket, raft_bind, join,
+  // await_join) are excluded from this RPC surface entirely, mirroring
+  // GetNodeConfig/UpdateNodeConfig's own exclusion of node_id/
+  // rpc_addr/raftd_socket above - see GetRaftdConfigResponse's own doc
+  // comment.
+  rpc GetFrontendConfig(GetFrontendConfigRequest) returns (GetFrontendConfigResponse);
+  rpc UpdateFrontendConfig(UpdateFrontendConfigRequest) returns (UpdateFrontendConfigResponse);
+  rpc GetRestshimdConfig(GetRestshimdConfigRequest) returns (GetRestshimdConfigResponse);
+  rpc UpdateRestshimdConfig(UpdateRestshimdConfigRequest) returns (UpdateRestshimdConfigResponse);
+  rpc GetRaftdConfig(GetRaftdConfigRequest) returns (GetRaftdConfigResponse);
+  rpc UpdateRaftdConfig(UpdateRaftdConfigRequest) returns (UpdateRaftdConfigResponse);
+
   // SetDatasetQuota sets a ZFS quota on a dataset under this node's own
   // configured Base scope (see internal/zfs.Manager) - physical,
   // per-node storage governance, never routed through raft. See
@@ -1393,6 +1419,165 @@ message UpdateNodeConfigResponse {
   // GetNodeConfig/UpdateNodeConfig's own doc comment in the service
   // definition above: it takes effect on this node's next managerd
   // restart.
+  string error = 1;
+}
+
+// GetFrontendConfigRequest/GetFrontendConfigResponse,
+// UpdateFrontendConfigRequest/UpdateFrontendConfigResponse (ADR-0102)
+// mirror GetNodeConfigRequest/GetNodeConfigResponse's own shape for
+// frontend.json (ADR-0100), except every field here is fully editable
+// (frontend has no write-once resource-scope-path fields the way
+// managerd does).
+message GetFrontendConfigRequest {}
+
+message GetFrontendConfigResponse {
+  string manager_addr = 1;
+  string http_addr = 2;
+  bool manager_tls = 3;
+  string manager_tls_ca = 4;
+  string manager_tls_server_name = 5;
+  string tls_cert = 6;
+  string tls_key = 7;
+  bool peer_tls = 8;
+  string peer_tls_ca = 9;
+  string peer_hostname_suffix = 10;
+  string peer_manager_port = 11;
+
+  // manager_api_key_set reports only whether a value is currently
+  // saved for manager_api_key - the raw value itself is never returned
+  // here or anywhere else, the same posture as GetNodeConfigResponse's
+  // own peer_api_key_set. See UpdateFrontendConfigRequest's own doc
+  // comment for how to set or clear one.
+  bool manager_api_key_set = 12;
+
+  string error = 13;
+}
+
+message UpdateFrontendConfigRequest {
+  string manager_addr = 1;
+  string http_addr = 2;
+  bool manager_tls = 3;
+  string manager_tls_ca = 4;
+  string manager_tls_server_name = 5;
+  string tls_cert = 6;
+  string tls_key = 7;
+  bool peer_tls = 8;
+  string peer_tls_ca = 9;
+  string peer_hostname_suffix = 10;
+  string peer_manager_port = 11;
+
+  // manager_api_key, if non-empty, becomes the new saved value -
+  // write-only, mirroring UpdateNodeConfigRequest's own peer_api_key/
+  // clear_peer_api_key pattern. An empty value here means "leave
+  // whatever is currently saved unchanged," not "clear it" - use
+  // clear_manager_api_key to actually clear one.
+  string manager_api_key = 12;
+  bool clear_manager_api_key = 13;
+}
+
+message UpdateFrontendConfigResponse {
+  // scheduled is true when a config save succeeded and a restart of
+  // frontend was scheduled to apply it - mirrors
+  // RestartNodeServiceResponse's own field, since this call restarts
+  // frontend internally on success (ADR-0102). May interrupt the
+  // current HTTP connection carrying this very response, the same
+  // caveat RestartNodeService's own doc comment already gives.
+  bool scheduled = 1;
+  string error = 2;
+}
+
+// GetRestshimdConfigRequest/GetRestshimdConfigResponse,
+// UpdateRestshimdConfigRequest/UpdateRestshimdConfigResponse (ADR-0102)
+// mirror the frontend pair above for restshimd.json (ADR-0100) - no
+// secret fields at all.
+message GetRestshimdConfigRequest {}
+
+message GetRestshimdConfigResponse {
+  string manager_addr = 1;
+  string http_addr = 2;
+  bool manager_tls = 3;
+  string manager_tls_ca = 4;
+  string manager_tls_server_name = 5;
+  string tls_cert = 6;
+  string tls_key = 7;
+  string error = 8;
+}
+
+message UpdateRestshimdConfigRequest {
+  string manager_addr = 1;
+  string http_addr = 2;
+  bool manager_tls = 3;
+  string manager_tls_ca = 4;
+  string manager_tls_server_name = 5;
+  string tls_cert = 6;
+  string tls_key = 7;
+}
+
+message UpdateRestshimdConfigResponse {
+  // scheduled is true when a config save succeeded and a restart of
+  // restshimd was scheduled to apply it - see
+  // UpdateFrontendConfigResponse's own doc comment for the same
+  // reasoning, applied to restshimd instead.
+  bool scheduled = 1;
+  string error = 2;
+}
+
+// GetRaftdConfigRequest/GetRaftdConfigResponse,
+// UpdateRaftdConfigRequest/UpdateRaftdConfigResponse (ADR-0102) cover
+// only a narrow, deliberately incomplete subset of raftd.json
+// (ADR-0100) - raftd's identity/topology/bootstrap fields (node_id,
+// data_dir, socket, raft_bind, join, await_join) are excluded from
+// Update entirely, mirroring GetNodeConfig/UpdateNodeConfig's own
+// exclusion of managerd's node_id/rpc_addr/raftd_socket, for the same
+// "hand-edit-the-file-and-restart-only" reasoning - see
+// internal/raftdconfig's own package doc comment for the full
+// rationale specific to each excluded field. data_dir/socket/
+// raft_bind ARE returned by Get, read-only, so the Machine page can
+// display them next to a note that they require hand-editing the file
+// and manually restarting raftd to change - this RPC pair never
+// restarts raftd (see UpdateRaftdConfigResponse's own doc comment).
+message GetRaftdConfigRequest {}
+
+message GetRaftdConfigResponse {
+  // data_dir/socket/raft_bind are read-only here - present for
+  // display only, never settable via UpdateRaftdConfig. See this
+  // message group's own doc comment above.
+  string data_dir = 1;
+  string socket = 2;
+  string raft_bind = 3;
+
+  string raft_tls_cert = 4;
+  string raft_tls_key = 5;
+  string raft_tls_ca = 6;
+
+  // internal_token_set reports only whether a value is currently saved
+  // for internal_token - the raw value itself is never returned here
+  // or anywhere else, the same posture as GetNodeConfigResponse's own
+  // raftd_token_set. See UpdateRaftdConfigRequest's own doc comment
+  // for how to set or clear one.
+  bool internal_token_set = 7;
+
+  string error = 8;
+}
+
+message UpdateRaftdConfigRequest {
+  string raft_tls_cert = 1;
+  string raft_tls_key = 2;
+  string raft_tls_ca = 3;
+
+  // internal_token, if non-empty, becomes the new saved value -
+  // write-only, mirroring UpdateNodeConfigRequest's own raftd_token/
+  // clear_raftd_token pattern. An empty value here means "leave
+  // whatever is currently saved unchanged," not "clear it" - use
+  // clear_internal_token to actually clear one.
+  string internal_token = 4;
+  bool clear_internal_token = 5;
+}
+
+message UpdateRaftdConfigResponse {
+  // No scheduled field: unlike Update{Frontend,Restshimd}ConfigResponse,
+  // this call never restarts raftd (consensus-critical, ADR-0102) - a
+  // successful save is inert until an operator manually restarts raftd.
   string error = 1;
 }
 

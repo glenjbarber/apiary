@@ -14,6 +14,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -534,10 +535,23 @@ type fakeNodeConfigStore struct {
 }
 
 type fakeNodeServiceController struct {
-	services    []*rpcpb.NodeService
-	listErr     error
-	restartErr  error
+	services   []*rpcpb.NodeService
+	listErr    error
+	restartErr error
+
+	// mu guards restartName - ADR-0102's UpdateFrontendConfig/
+	// UpdateRestshimdConfig call Restart from a delayed goroutine
+	// (scheduleServiceRestart), unlike every pre-existing caller of
+	// this fake, so a test reading restartName back needs real
+	// synchronization, not just a plain field.
+	mu          sync.Mutex
 	restartName string
+}
+
+func (f *fakeNodeServiceController) lastRestartName() string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.restartName
 }
 
 type fakeOriginCAIssuer struct {
@@ -586,7 +600,9 @@ func (f *fakeNodeServiceController) List(context.Context) ([]*rpcpb.NodeService,
 }
 
 func (f *fakeNodeServiceController) Restart(_ context.Context, name string) error {
+	f.mu.Lock()
 	f.restartName = name
+	f.mu.Unlock()
 	return f.restartErr
 }
 

@@ -49,3 +49,56 @@ func TestManager_LoadMalformedFileIsAnError(t *testing.T) {
 		t.Error("Load() error = nil, want an error for malformed JSON")
 	}
 }
+
+func TestManager_SaveThenLoadRoundTripsEveryField(t *testing.T) {
+	m := &Manager{Path: filepath.Join(t.TempDir(), "restshimd.json")}
+	want := Config{
+		ManagerAddr:          "10.50.0.9:17700",
+		HTTPAddr:             "0.0.0.0:8081",
+		ManagerTLS:           true,
+		ManagerTLSCA:         "/usr/local/etc/apiary/tls/ca.pem",
+		ManagerTLSServerName: "apiverse.apiary.work",
+		TLSCert:              "/usr/local/etc/apiary/tls/fullchain.pem",
+		TLSKey:               "/usr/local/etc/apiary/tls/key.pem",
+	}
+
+	if err := m.Save(want); err != nil {
+		t.Fatalf("Save() error: %v", err)
+	}
+	got, err := m.Load()
+	if err != nil {
+		t.Fatalf("Load() error: %v", err)
+	}
+	if got != want {
+		t.Errorf("round trip = %+v, want %+v", got, want)
+	}
+}
+
+func TestManager_SaveRejectsMalformedAddresses(t *testing.T) {
+	m := &Manager{Path: filepath.Join(t.TempDir(), "restshimd.json")}
+	for _, cfg := range []Config{
+		{ManagerAddr: "not-a-host-port"},
+		{HTTPAddr: "also-not-valid"},
+	} {
+		if err := m.Save(cfg); err == nil {
+			t.Errorf("Save(%+v) error = nil, want a validation rejection", cfg)
+		}
+	}
+}
+
+func TestManager_SaveIsFullReplaceNotMerge(t *testing.T) {
+	m := &Manager{Path: filepath.Join(t.TempDir(), "restshimd.json")}
+	if err := m.Save(Config{HTTPAddr: "0.0.0.0:8081", TLSCert: "/a.pem"}); err != nil {
+		t.Fatalf("first Save() error: %v", err)
+	}
+	if err := m.Save(Config{HTTPAddr: "0.0.0.0:9091"}); err != nil {
+		t.Fatalf("second Save() error: %v", err)
+	}
+	got, err := m.Load()
+	if err != nil {
+		t.Fatalf("Load() error: %v", err)
+	}
+	if got.TLSCert != "" {
+		t.Errorf("TLSCert = %q after a Save that omitted it, want empty - Save must fully replace, not merge", got.TLSCert)
+	}
+}
