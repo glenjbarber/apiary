@@ -22,6 +22,7 @@ import (
 
 	internalpb "github.com/glenjbarber/apiary/api/internalpb"
 	rpcpb "github.com/glenjbarber/apiary/api/rpc"
+	"github.com/glenjbarber/apiary/internal/guardrail"
 )
 
 // defaultJoinRequestTTL bounds how long a PendingJoinRequest stays
@@ -97,6 +98,49 @@ func dialReachable(ctx context.Context, addr string) error {
 // preApprovalReachabilityTimeout bounds how long ApproveJoinRequest
 // waits for dialReachable before giving up and refusing to approve.
 const preApprovalReachabilityTimeout = 5 * time.Second
+
+// currentLeaderRaftAddress finds status's own leader_id in its servers
+// list and returns that server's raft address, or "" if the leader is
+// unknown or not currently a listed server. Used by
+// ApproveJoinRequest/PreflightApproveJoinRequest/ReserveRestartLease/
+// ConfirmRestartCompleted to forward to the leader BEFORE doing any
+// local work that only the leader's own vantage point should perform
+// (ADR-0103) - a cheap, local, already-available read (Status), not a
+// new RPC.
+func currentLeaderRaftAddress(status *internalpb.StatusResponse) string {
+	leaderID := status.GetLeaderId()
+	if leaderID == "" {
+		return ""
+	}
+	for _, srv := range status.GetServers() {
+		if srv.GetId() == leaderID {
+			return srv.GetAddress()
+		}
+	}
+	return ""
+}
+
+// evaluateJoinReachability dials addr (via s.reachabilityCheck, swappable
+// in tests) and returns guardrail.EvaluateJoinReachability's own verdict
+// - the single source of truth for both ApproveJoinRequest's real gate
+// and PreflightApproveJoinRequest's preview (ADR-0103), so the two can
+// never silently drift apart. A nil s.reachabilityCheck (never set in
+// production, only possible if a caller deliberately disables it)
+// reports Allow, matching ApproveJoinRequest's own prior "if
+// s.reachabilityCheck != nil" skip.
+func (s *Server) evaluateJoinReachability(ctx context.Context, addr string) guardrail.Report {
+	if s.reachabilityCheck == nil {
+		return guardrail.Report{Intent: "approve-join-request", Verdict: guardrail.Allow}
+	}
+	checkCtx, cancel := context.WithTimeout(ctx, preApprovalReachabilityTimeout)
+	err := s.reachabilityCheck(checkCtx, addr)
+	cancel()
+	fact := guardrail.JoinReachabilityFact{Address: addr, Reachable: err == nil}
+	if err != nil {
+		fact.DialError = err.Error()
+	}
+	return guardrail.EvaluateJoinReachability(fact)
+}
 
 // generateJoinRequestID returns a random, non-secret identifier for a
 // new PendingJoinRequest - mirrors generateAPIKeyID's own shape
@@ -305,6 +349,22 @@ func (s *Server) ListJoinRequests(ctx context.Context, _ *rpcpb.ListJoinRequests
 // that has actually happened here: clicking Approve before the joining
 // Comb's raftd was actually up.
 func (s *Server) ApproveJoinRequest(ctx context.Context, req *rpcpb.ApproveJoinRequestRequest) (*rpcpb.ApproveJoinRequestResponse, error) {
+	// Check leadership BEFORE running the local reachability dial below -
+	// only the leader's own network vantage point actually matters, since
+	// only the leader calls AddVoter. A follower with its own, different
+	// network path to the joiner's address could otherwise reject (or
+	// wrongly approve) based on the wrong node's view (ADR-0103). The
+	// existing post-AddVoter-failure forward further down stays as a
+	// fallback for the race window where leadership changes between this
+	// check and the AddVoter call itself.
+	if status, statusErr := s.raft.Status(ctx); statusErr == nil && !status.GetIsLeader() {
+		if hint := currentLeaderRaftAddress(status); hint != "" && s.peers != nil {
+			if fwd, ferr := s.peers.ApproveJoinRequest(ctx, s.peerManagerdAddr(hint), req); ferr == nil {
+				return fwd, nil
+			}
+		}
+	}
+
 	getResp, err := s.raft.GetPendingJoinRequestLocal(ctx, req.GetRequestId())
 	if err != nil {
 		return &rpcpb.ApproveJoinRequestResponse{Error: err.Error()}, nil
@@ -314,15 +374,10 @@ func (s *Server) ApproveJoinRequest(ctx context.Context, req *rpcpb.ApproveJoinR
 	}
 	pending := getResp.GetRequest()
 
-	if s.reachabilityCheck != nil {
-		checkCtx, cancel := context.WithTimeout(ctx, preApprovalReachabilityTimeout)
-		err := s.reachabilityCheck(checkCtx, pending.GetRaftBindAddress())
-		cancel()
-		if err != nil {
-			return &rpcpb.ApproveJoinRequestResponse{Error: fmt.Sprintf(
-				"refusing to approve: raft_bind_address %q is not reachable: %v - approving an unreachable node strands the cluster and can only be recovered by wiping raft state, so this is refused rather than attempted",
-				pending.GetRaftBindAddress(), err)}, nil
-		}
+	if report := s.evaluateJoinReachability(ctx, pending.GetRaftBindAddress()); report.Verdict != guardrail.Allow {
+		return &rpcpb.ApproveJoinRequestResponse{Error: fmt.Sprintf(
+			"refusing to approve: %s - approving an unreachable node strands the cluster and can only be recovered by wiping raft state, so this is refused rather than attempted",
+			report.Findings[0].Detail)}, nil
 	}
 
 	timeout := defaultApplyTimeout
@@ -357,6 +412,39 @@ func (s *Server) ApproveJoinRequest(ctx context.Context, req *rpcpb.ApproveJoinR
 		return &rpcpb.ApproveJoinRequestResponse{Error: appErr, LeaderHint: leaderHint}, nil
 	}
 	return &rpcpb.ApproveJoinRequestResponse{Request: fromInternalPendingJoinRequest(result)}, nil
+}
+
+// PreflightApproveJoinRequest previews ApproveJoinRequest's own
+// reachability gate without ever calling AddVoter (ADR-0103) - Admin-tier,
+// not Viewer, since it makes managerd dial a caller-selected pending
+// request's raft_bind_address, which a Viewer could otherwise use as a
+// network reachability oracle. Applies the identical leadership-first
+// reordering as ApproveJoinRequest, so the preview always reflects the
+// same network vantage point the real approval would use, and calls the
+// same evaluateJoinReachability helper so the two can never drift apart.
+func (s *Server) PreflightApproveJoinRequest(ctx context.Context, req *rpcpb.PreflightApproveJoinRequestRequest) (*rpcpb.PreflightApproveJoinRequestResponse, error) {
+	if status, statusErr := s.raft.Status(ctx); statusErr == nil && !status.GetIsLeader() {
+		if hint := currentLeaderRaftAddress(status); hint != "" && s.peers != nil {
+			if fwd, ferr := s.peers.PreflightApproveJoinRequest(ctx, s.peerManagerdAddr(hint), req); ferr == nil {
+				return fwd, nil
+			}
+		}
+	}
+
+	getResp, err := s.raft.GetPendingJoinRequestLocal(ctx, req.GetRequestId())
+	if err != nil {
+		return &rpcpb.PreflightApproveJoinRequestResponse{Error: err.Error()}, nil
+	}
+	if getResp.GetError() != "" {
+		return &rpcpb.PreflightApproveJoinRequestResponse{Error: getResp.GetError()}, nil
+	}
+	pending := getResp.GetRequest()
+
+	report := s.evaluateJoinReachability(ctx, pending.GetRaftBindAddress())
+	return &rpcpb.PreflightApproveJoinRequestResponse{
+		Verdict:  string(report.Verdict),
+		Findings: toRPCGuardrailFindings(report.Findings),
+	}, nil
 }
 
 // RejectJoinRequest implements rpcpb.ManagerServiceServer - Admin-only,

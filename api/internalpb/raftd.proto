@@ -119,6 +119,13 @@ service RaftInternal {
   // the record onto it regardless.
   rpc GetPendingJoinRequestLocal(GetPendingJoinRequestRequest) returns (GetPendingJoinRequestResponse);
   rpc ListPendingJoinRequestsLocal(ListPendingJoinRequestsRequest) returns (ListPendingJoinRequestsResponse);
+
+  // GetRestartLeaseStateLocal backs the action-preflight restart
+  // guardrail (ADR-0103) - deliberately WITHOUT the leader-only
+  // restriction, the same GetPendingJoinRequestLocal reasoning above:
+  // this is a plain read of already-replicated FSM state, safe to
+  // answer from any node's own local copy.
+  rpc GetRestartLeaseStateLocal(GetRestartLeaseStateRequest) returns (GetRestartLeaseStateResponse);
 }
 
 message ApplyRequest {
@@ -258,6 +265,19 @@ message ListPendingJoinRequestsRequest {}
 message ListPendingJoinRequestsResponse {
   repeated PendingJoinRequest requests = 1;
   string error = 2;
+}
+
+message GetRestartLeaseStateRequest {
+  string service = 1;
+}
+
+message GetRestartLeaseStateResponse {
+  // lease is unset when no lease is currently held for service.
+  RestartLease lease = 1;
+  // record is unset when no restart of service has ever been confirmed
+  // complete on this node's own view of replicated state.
+  RestartRecord record = 2;
+  string error = 3;
 }
 
 message GetJailRequest {

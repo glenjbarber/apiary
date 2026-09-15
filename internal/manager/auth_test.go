@@ -313,6 +313,69 @@ func TestRequiredRoleFor_JoinRequestRPCsAreAdmin(t *testing.T) {
 	}
 }
 
+// TestRequiredRoleFor_ActionPreflightGuardrailRPCs (ADR-0103) confirms
+// PreflightApproveJoinRequest sits at ApproveJoinRequest's own Admin
+// tier (it makes managerd dial a caller-selected address, so a Viewer
+// could otherwise use it as a reachability oracle) and
+// PreflightRestartNodeService sits at Viewer (pure read, no live dial to
+// a caller-influenced address).
+func TestRequiredRoleFor_ActionPreflightGuardrailRPCs(t *testing.T) {
+	if got := requiredRoleFor("/apiary.rpc.v1.ManagerService/PreflightApproveJoinRequest"); got != RoleAdmin {
+		t.Errorf("requiredRoleFor(PreflightApproveJoinRequest) = %q, want %q", got, RoleAdmin)
+	}
+	if got := requiredRoleFor("/apiary.rpc.v1.ManagerService/PreflightRestartNodeService"); got != RoleViewer {
+		t.Errorf("requiredRoleFor(PreflightRestartNodeService) = %q, want %q", got, RoleViewer)
+	}
+}
+
+// TestAuthUnaryInterceptor_RestartGuardrailRPCsBypassCheckAuthEntirely is
+// the direct regression test for ADR-0103's revision note #15:
+// ReserveRestartLease/ConfirmRestartCompleted must never be gated by the
+// normal API-key role hierarchy at all - not Admin, not any tier - since
+// no CreateAPIKey-issued credential should ever satisfy them. They are
+// gated instead by a dedicated token check inside each handler itself
+// (restartGuardrailTokenValid), which AuthUnaryInterceptor's own
+// exemption here deliberately makes room for.
+func TestAuthUnaryInterceptor_RestartGuardrailRPCsBypassCheckAuthEntirely(t *testing.T) {
+	s := &Server{raft: nil} // AuthUnaryInterceptor never reaches checkAuth for an exempt method, so a nil raft client is fine here.
+	handlerCalled := false
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		handlerCalled = true
+		return nil, nil
+	}
+
+	for _, method := range []string{reserveRestartLeaseMethod, confirmRestartCompletedMethod} {
+		handlerCalled = false
+		if _, err := s.AuthUnaryInterceptor(context.Background(), nil, &grpc.UnaryServerInfo{FullMethod: method}, handler); err != nil {
+			t.Errorf("AuthUnaryInterceptor(%q) error = %v, want nil (exempt from checkAuth - gated by its own token check instead)", method, err)
+		}
+		if !handlerCalled {
+			t.Errorf("AuthUnaryInterceptor(%q) did not call the handler - exemption not applied", method)
+		}
+	}
+}
+
+// TestRestartGuardrailTokenValid_RequiresNonEmptyConfigured is the direct
+// regression test for the final review finding on this guardrail's own
+// token check: subtle.ConstantTimeCompare on two empty byte slices
+// returns 1 (equal), so an unconfigured node (configured == "") must
+// reject unconditionally regardless of what's presented - including an
+// equally-empty presented value - rather than let that pass by accident.
+func TestRestartGuardrailTokenValid_RequiresNonEmptyConfigured(t *testing.T) {
+	if restartGuardrailTokenValid("", "") {
+		t.Error("restartGuardrailTokenValid(\"\", \"\") = true, want false - an unconfigured token must never validate")
+	}
+	if restartGuardrailTokenValid("anything", "") {
+		t.Error("restartGuardrailTokenValid(\"anything\", \"\") = true, want false")
+	}
+	if !restartGuardrailTokenValid("secret", "secret") {
+		t.Error("restartGuardrailTokenValid(\"secret\", \"secret\") = false, want true")
+	}
+	if restartGuardrailTokenValid("wrong", "secret") {
+		t.Error("restartGuardrailTokenValid(\"wrong\", \"secret\") = true, want false")
+	}
+}
+
 // TestAuthUnaryInterceptor_JoinRequestExemptionsBypassCheckAuth is the
 // direct regression test for RequestJoinColony/GetJoinRequestStatus/
 // CancelJoinRequest's exemption (ADR-0083): a joining Comb has no

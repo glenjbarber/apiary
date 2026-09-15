@@ -69,6 +69,12 @@ func (s *Server) Apply(_ context.Context, req *internalpb.ApplyRequest) (*intern
 	if result.PendingJoinRequest != nil {
 		payload = result.PendingJoinRequest
 	}
+	if result.RestartLease != nil {
+		payload = result.RestartLease
+	}
+	if result.RestartRecord != nil {
+		payload = result.RestartRecord
+	}
 	resultBytes, err := proto.Marshal(payload)
 	if err != nil {
 		return &internalpb.ApplyResponse{Error: fmt.Sprintf("encoding result: %v", err)}, nil
@@ -212,6 +218,13 @@ func (s *Server) GetPendingJoinRequestLocal(_ context.Context, req *internalpb.G
 
 func (s *Server) ListPendingJoinRequestsLocal(_ context.Context, _ *internalpb.ListPendingJoinRequestsRequest) (*internalpb.ListPendingJoinRequestsResponse, error) {
 	return &internalpb.ListPendingJoinRequestsResponse{Requests: s.node.ListPendingJoinRequestsLocal()}, nil
+}
+
+// GetRestartLeaseStateLocal implements internalpb.RaftInternalServer
+// (ADR-0103).
+func (s *Server) GetRestartLeaseStateLocal(_ context.Context, req *internalpb.GetRestartLeaseStateRequest) (*internalpb.GetRestartLeaseStateResponse, error) {
+	lease, record := s.node.RestartLeaseStateLocal(req.GetService())
+	return &internalpb.GetRestartLeaseStateResponse{Lease: lease, Record: record}, nil
 }
 
 // GetJail implements internalpb.RaftInternalServer.

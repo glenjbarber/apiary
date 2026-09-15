@@ -294,9 +294,12 @@ func (s *Server) handleClusterOverviewPage(w http.ResponseWriter, r *http.Reques
 	sort.Slice(nodes, func(i, j int) bool { return nodes[i].NodeID < nodes[j].NodeID })
 
 	s.render(w, "cluster_overview_page", s.withAuthFields(r, pageData{
-		ClusterNodes: nodes,
-		JoinRequests: s.currentJoinRequests(r),
-		ActivePage:   "stats",
+		ClusterNodes:                nodes,
+		JoinRequests:                s.currentJoinRequests(r),
+		ActivePage:                  "stats",
+		JoinRequestPreflightID:      r.URL.Query().Get("preflight_request_id"),
+		JoinRequestPreflightVerdict: r.URL.Query().Get("preflight_verdict"),
+		JoinRequestPreflightDetail:  r.URL.Query().Get("preflight_detail"),
 	}))
 }
 

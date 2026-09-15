@@ -159,6 +159,34 @@ func (s *Server) handleRejectJoinRequest(w http.ResponseWriter, r *http.Request)
 	s.redirectAfterJoinRequestAction(w, r, resp.GetError(), err)
 }
 
+// handlePreflightJoinRequest previews ApproveJoinRequest's own
+// reachability gate without ever approving anything (ADR-0103) - Admin-
+// only, matching Approve/Reject/Purge's own tier exactly, since it makes
+// managerd dial a caller-selected address. Redirects back to the landing
+// page carrying the verdict/detail in the query string, the same
+// pattern (if more fully wired up for actual display) as
+// redirectAfterJoinRequestAction's own ?join_request_error=. Never gates
+// or disables the real Approve button - the operator checks themselves.
+func (s *Server) handlePreflightJoinRequest(w http.ResponseWriter, r *http.Request) {
+	requestID := r.PathValue("id")
+	resp, err := s.client.PreflightApproveJoinRequest(r.Context(), &rpcpb.PreflightApproveJoinRequestRequest{RequestId: requestID})
+	verdict := "unknown"
+	detail := ""
+	if err != nil {
+		detail = err.Error()
+	} else if resp.GetError() != "" {
+		detail = resp.GetError()
+	} else {
+		verdict = resp.GetVerdict()
+		if len(resp.GetFindings()) > 0 {
+			detail = resp.GetFindings()[0].GetDetail()
+		}
+	}
+	http.Redirect(w, r, "/?preflight_request_id="+url.QueryEscape(requestID)+
+		"&preflight_verdict="+url.QueryEscape(verdict)+
+		"&preflight_detail="+url.QueryEscape(detail), http.StatusFound)
+}
+
 // handlePurgeJoinRequest implements the existing Colony's other
 // available action on a request - Admin-only, same redirect-back
 // pattern as Approve/Reject, but deletes the record outright rather

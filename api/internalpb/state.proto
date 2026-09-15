@@ -441,6 +441,19 @@ message Command {
     // entire record. Backs the jail detail page's edit form - jails
     // previously had no post-creation edit path in the web UI at all.
     SetJailHostname set_jail_hostname = 24;
+
+    // AcquireRestartLease/RecordRestartCompleted back the action-preflight
+    // restart guardrail (ADR-0103): a cluster-wide, Raft-committed lease
+    // that prevents apiary_managerd from being restarted on two Raft
+    // voters within the same window (the real 2026-09-11 stranded-cluster
+    // incident this guardrail exists to close). Deliberately raft-
+    // replicated, not node-local - the whole safety property depends on
+    // raft's own serialized log-apply order making concurrent acquisition
+    // impossible, which a per-node check could never guarantee. See
+    // internal/guardrail and internal/raft/fsm.go's own doc comments for
+    // the full design.
+    AcquireRestartLease acquire_restart_lease = 27;
+    RecordRestartCompleted record_restart_completed = 28;
   }
 }
 
@@ -690,6 +703,91 @@ message PurgeJoinRequest {
   string request_id = 1;
 }
 
+// RestartLease is a cluster-wide, Raft-committed exclusive reservation
+// for restarting one service (in practice, only ever "apiary_managerd" -
+// see ADR-0103). Deliberately has NO expiry/TTL field: a granted lease
+// blocks further AcquireRestartLease calls for the same service
+// indefinitely, until either a matching RecordRestartCompleted clears it
+// (the restarted node's own next startup confirming itself healthy) or
+// an operator explicitly re-acquires with force=true. A time-based
+// auto-clear was considered and rejected - see ADR-0103's own
+// Consequences section - because it can let a lease lapse while the
+// underlying restart's outcome is still genuinely unknown, reopening the
+// exact concurrent-restart window this exists to close.
+message RestartLease {
+  // lease_id is the raft log index of the AcquireRestartLease command
+  // that granted this lease - unique and monotonic for free, no separate
+  // ID scheme needed. RecordRestartCompleted must match this exactly
+  // (along with holder_node_id) before releasing the lease, so a stale
+  // or out-of-order confirmation can never release a different,
+  // currently-active lease for the same service/node pair.
+  uint64 lease_id = 1;
+  string service = 2;
+  string holder_node_id = 3;
+  // requested_at_unix is display/diagnostic only (an operator
+  // investigating a stuck lease wants to know how old it is) - it plays
+  // no role in any blocking decision, unlike an earlier design of this
+  // guardrail that tied expiry to it.
+  int64 requested_at_unix = 4;
+  // force is true iff this lease was granted over an existing block
+  // (either an unconfirmed prior lease or a recent RestartRecord) via an
+  // explicit operator override.
+  bool force = 5;
+}
+
+// RestartRecord is the most recent confirmed-complete restart of one
+// service by one node - written only after that node's own next startup
+// (after the restart) confirms itself healthy, never merely because a
+// restart command was issued. Used by AcquireRestartLease's own cooldown
+// check (only counts if holder is a currently-known Raft voter, per
+// ADR-0103) and reported read-only via GetRestartLeaseStateLocal.
+message RestartRecord {
+  string service = 1;
+  string node_id = 2;
+  int64 completed_at_unix = 3;
+}
+
+// AcquireRestartLease is submitted only by the current Raft leader (see
+// ManagerService.ReserveRestartLease's own doc comment) - node_id,
+// requested_at_unix, and voter_node_ids are all authored by the leader
+// itself immediately before submitting, never accepted from whichever
+// node originally received the restart request, so a stale follower
+// view or cross-node clock skew can never influence the decision (see
+// ADR-0103's own Consequences).
+message AcquireRestartLease {
+  string service = 1;
+  string node_id = 2;
+  int64 requested_at_unix = 3;
+  // voter_node_ids is the leader's own snapshot of current Raft voters
+  // at submission time - a prior RestartRecord only counts toward the
+  // cooldown check if its node_id appears here, so a non-voter's own
+  // manager restart (no quorum risk) can never block a voter's restart.
+  repeated string voter_node_ids = 4;
+  int64 cooldown_seconds = 5;
+  // force grants the lease even over an existing block (an unconfirmed
+  // prior lease, or a recent voter RestartRecord within cooldown) - an
+  // explicit, logged operator override, never silent.
+  bool force = 6;
+}
+
+// RecordRestartCompleted is submitted by the restarted node's own next
+// startup (never by the process that requested the restart, which the
+// restart itself may have already replaced - see ADR-0103) once that
+// startup confirms itself healthy. completed_at_unix is authored by
+// whichever node applies this (the current leader), the same
+// determinism/clock-skew reasoning as AcquireRestartLease.
+message RecordRestartCompleted {
+  string service = 1;
+  string node_id = 2;
+  int64 completed_at_unix = 3;
+  // lease_id must match the currently-active lease for service exactly
+  // (along with node_id) before it is released - see RestartLease's own
+  // doc comment for why. The RestartRecord itself is still written
+  // unconditionally regardless of whether the lease matched, since a
+  // real restart really did complete either way.
+  uint64 lease_id = 4;
+}
+
 // CommandResult is the FSM's response to Apply, echoed back through
 // ApplyResponse. error is set (and vm left unset) if the command was
 // rejected at the application level (e.g. duplicate/missing id) - this is
@@ -711,6 +809,13 @@ message FSMSnapshotState {
   map<string, ApiKey> api_keys = 4;
   map<string, JailDefinition> jails = 6;
   map<string, PendingJoinRequest> pending_join_requests = 7;
+
+  // restart_leases/restart_records back the action-preflight restart
+  // guardrail (ADR-0103) - included here so a raft snapshot restore or
+  // a seeded recovery via raftd -restore never silently drops this
+  // state and reopens the concurrent-restart window it exists to close.
+  map<string, RestartLease> restart_leases = 8;
+  map<string, RestartRecord> restart_records = 9;
 
   // auth_enabled is set permanently, forever, the first time any
   // CreateAPIKey command ever succeeds - unlike api_keys' own size,

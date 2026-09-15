@@ -37,6 +37,7 @@ const (
 	RaftInternal_ExportState_FullMethodName                  = "/apiary.internal.v1.RaftInternal/ExportState"
 	RaftInternal_GetPendingJoinRequestLocal_FullMethodName   = "/apiary.internal.v1.RaftInternal/GetPendingJoinRequestLocal"
 	RaftInternal_ListPendingJoinRequestsLocal_FullMethodName = "/apiary.internal.v1.RaftInternal/ListPendingJoinRequestsLocal"
+	RaftInternal_GetRestartLeaseStateLocal_FullMethodName    = "/apiary.internal.v1.RaftInternal/GetRestartLeaseStateLocal"
 )
 
 // RaftInternalClient is the client API for RaftInternal service.
@@ -143,6 +144,12 @@ type RaftInternalClient interface {
 	// the record onto it regardless.
 	GetPendingJoinRequestLocal(ctx context.Context, in *GetPendingJoinRequestRequest, opts ...grpc.CallOption) (*GetPendingJoinRequestResponse, error)
 	ListPendingJoinRequestsLocal(ctx context.Context, in *ListPendingJoinRequestsRequest, opts ...grpc.CallOption) (*ListPendingJoinRequestsResponse, error)
+	// GetRestartLeaseStateLocal backs the action-preflight restart
+	// guardrail (ADR-0103) - deliberately WITHOUT the leader-only
+	// restriction, the same GetPendingJoinRequestLocal reasoning above:
+	// this is a plain read of already-replicated FSM state, safe to
+	// answer from any node's own local copy.
+	GetRestartLeaseStateLocal(ctx context.Context, in *GetRestartLeaseStateRequest, opts ...grpc.CallOption) (*GetRestartLeaseStateResponse, error)
 }
 
 type raftInternalClient struct {
@@ -333,6 +340,16 @@ func (c *raftInternalClient) ListPendingJoinRequestsLocal(ctx context.Context, i
 	return out, nil
 }
 
+func (c *raftInternalClient) GetRestartLeaseStateLocal(ctx context.Context, in *GetRestartLeaseStateRequest, opts ...grpc.CallOption) (*GetRestartLeaseStateResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetRestartLeaseStateResponse)
+	err := c.cc.Invoke(ctx, RaftInternal_GetRestartLeaseStateLocal_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // RaftInternalServer is the server API for RaftInternal service.
 // All implementations must embed UnimplementedRaftInternalServer
 // for forward compatibility.
@@ -437,6 +454,12 @@ type RaftInternalServer interface {
 	// the record onto it regardless.
 	GetPendingJoinRequestLocal(context.Context, *GetPendingJoinRequestRequest) (*GetPendingJoinRequestResponse, error)
 	ListPendingJoinRequestsLocal(context.Context, *ListPendingJoinRequestsRequest) (*ListPendingJoinRequestsResponse, error)
+	// GetRestartLeaseStateLocal backs the action-preflight restart
+	// guardrail (ADR-0103) - deliberately WITHOUT the leader-only
+	// restriction, the same GetPendingJoinRequestLocal reasoning above:
+	// this is a plain read of already-replicated FSM state, safe to
+	// answer from any node's own local copy.
+	GetRestartLeaseStateLocal(context.Context, *GetRestartLeaseStateRequest) (*GetRestartLeaseStateResponse, error)
 	mustEmbedUnimplementedRaftInternalServer()
 }
 
@@ -500,6 +523,9 @@ func (UnimplementedRaftInternalServer) GetPendingJoinRequestLocal(context.Contex
 }
 func (UnimplementedRaftInternalServer) ListPendingJoinRequestsLocal(context.Context, *ListPendingJoinRequestsRequest) (*ListPendingJoinRequestsResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ListPendingJoinRequestsLocal not implemented")
+}
+func (UnimplementedRaftInternalServer) GetRestartLeaseStateLocal(context.Context, *GetRestartLeaseStateRequest) (*GetRestartLeaseStateResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetRestartLeaseStateLocal not implemented")
 }
 func (UnimplementedRaftInternalServer) mustEmbedUnimplementedRaftInternalServer() {}
 func (UnimplementedRaftInternalServer) testEmbeddedByValue()                      {}
@@ -846,6 +872,24 @@ func _RaftInternal_ListPendingJoinRequestsLocal_Handler(srv interface{}, ctx con
 	return interceptor(ctx, in, info, handler)
 }
 
+func _RaftInternal_GetRestartLeaseStateLocal_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetRestartLeaseStateRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(RaftInternalServer).GetRestartLeaseStateLocal(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: RaftInternal_GetRestartLeaseStateLocal_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(RaftInternalServer).GetRestartLeaseStateLocal(ctx, req.(*GetRestartLeaseStateRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // RaftInternal_ServiceDesc is the grpc.ServiceDesc for RaftInternal service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -924,6 +968,10 @@ var RaftInternal_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ListPendingJoinRequestsLocal",
 			Handler:    _RaftInternal_ListPendingJoinRequestsLocal_Handler,
+		},
+		{
+			MethodName: "GetRestartLeaseStateLocal",
+			Handler:    _RaftInternal_GetRestartLeaseStateLocal_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

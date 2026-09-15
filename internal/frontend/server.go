@@ -107,6 +107,17 @@ type pageData struct {
 	// real page error.
 	JoinRequests []joinRequestView
 
+	// JoinRequestPreflight* back the "Check reachability" preview button
+	// on each pending join request row (ADR-0103) - populated from the
+	// redirect query string after a POST /join-requests/{id}/preflight,
+	// the same pattern the pre-existing (if never actually rendered)
+	// ?join_request_error= carries. Never gates or disables the real
+	// Approve button - the operator checks themselves, matching ADR-0081's
+	// own "operator checks before acting, not a blocking wizard" precedent.
+	JoinRequestPreflightID      string
+	JoinRequestPreflightVerdict string
+	JoinRequestPreflightDetail  string
+
 	// JoinColonyFormError/JoinColonyResult back the Machine page's own
 	// "Join a Colony" section (ADR-0083) - the joining Comb's side of
 	// the same flow.
@@ -873,6 +884,7 @@ func (s *Server) routes() {
 	// existing Colony's side, reachable from the landing page's panel.
 	s.mux.HandleFunc("POST /machine/join-colony", s.requireRole(manager.RoleAdmin, s.handleRequestJoinColony))
 	s.mux.HandleFunc("POST /machine/join-colony/cancel", s.requireRole(manager.RoleAdmin, s.handleCancelJoinRequest))
+	s.mux.HandleFunc("POST /join-requests/{id}/preflight", s.requireRole(manager.RoleAdmin, s.handlePreflightJoinRequest))
 	s.mux.HandleFunc("POST /join-requests/{id}/approve", s.requireRole(manager.RoleAdmin, s.handleApproveJoinRequest))
 	s.mux.HandleFunc("POST /join-requests/{id}/reject", s.requireRole(manager.RoleAdmin, s.handleRejectJoinRequest))
 	s.mux.HandleFunc("POST /join-requests/{id}/purge", s.requireRole(manager.RoleAdmin, s.handlePurgeJoinRequest))

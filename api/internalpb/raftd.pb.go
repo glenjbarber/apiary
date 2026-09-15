@@ -1176,6 +1176,113 @@ func (x *ListPendingJoinRequestsResponse) GetError() string {
 	return ""
 }
 
+type GetRestartLeaseStateRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Service       string                 `protobuf:"bytes,1,opt,name=service,proto3" json:"service,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetRestartLeaseStateRequest) Reset() {
+	*x = GetRestartLeaseStateRequest{}
+	mi := &file_api_internalpb_raftd_proto_msgTypes[21]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetRestartLeaseStateRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetRestartLeaseStateRequest) ProtoMessage() {}
+
+func (x *GetRestartLeaseStateRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_api_internalpb_raftd_proto_msgTypes[21]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetRestartLeaseStateRequest.ProtoReflect.Descriptor instead.
+func (*GetRestartLeaseStateRequest) Descriptor() ([]byte, []int) {
+	return file_api_internalpb_raftd_proto_rawDescGZIP(), []int{21}
+}
+
+func (x *GetRestartLeaseStateRequest) GetService() string {
+	if x != nil {
+		return x.Service
+	}
+	return ""
+}
+
+type GetRestartLeaseStateResponse struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// lease is unset when no lease is currently held for service.
+	Lease *RestartLease `protobuf:"bytes,1,opt,name=lease,proto3" json:"lease,omitempty"`
+	// record is unset when no restart of service has ever been confirmed
+	// complete on this node's own view of replicated state.
+	Record        *RestartRecord `protobuf:"bytes,2,opt,name=record,proto3" json:"record,omitempty"`
+	Error         string         `protobuf:"bytes,3,opt,name=error,proto3" json:"error,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetRestartLeaseStateResponse) Reset() {
+	*x = GetRestartLeaseStateResponse{}
+	mi := &file_api_internalpb_raftd_proto_msgTypes[22]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetRestartLeaseStateResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetRestartLeaseStateResponse) ProtoMessage() {}
+
+func (x *GetRestartLeaseStateResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_api_internalpb_raftd_proto_msgTypes[22]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetRestartLeaseStateResponse.ProtoReflect.Descriptor instead.
+func (*GetRestartLeaseStateResponse) Descriptor() ([]byte, []int) {
+	return file_api_internalpb_raftd_proto_rawDescGZIP(), []int{22}
+}
+
+func (x *GetRestartLeaseStateResponse) GetLease() *RestartLease {
+	if x != nil {
+		return x.Lease
+	}
+	return nil
+}
+
+func (x *GetRestartLeaseStateResponse) GetRecord() *RestartRecord {
+	if x != nil {
+		return x.Record
+	}
+	return nil
+}
+
+func (x *GetRestartLeaseStateResponse) GetError() string {
+	if x != nil {
+		return x.Error
+	}
+	return ""
+}
+
 type GetJailRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
@@ -1185,7 +1292,7 @@ type GetJailRequest struct {
 
 func (x *GetJailRequest) Reset() {
 	*x = GetJailRequest{}
-	mi := &file_api_internalpb_raftd_proto_msgTypes[21]
+	mi := &file_api_internalpb_raftd_proto_msgTypes[23]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1197,7 +1304,7 @@ func (x *GetJailRequest) String() string {
 func (*GetJailRequest) ProtoMessage() {}
 
 func (x *GetJailRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_api_internalpb_raftd_proto_msgTypes[21]
+	mi := &file_api_internalpb_raftd_proto_msgTypes[23]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1210,7 +1317,7 @@ func (x *GetJailRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetJailRequest.ProtoReflect.Descriptor instead.
 func (*GetJailRequest) Descriptor() ([]byte, []int) {
-	return file_api_internalpb_raftd_proto_rawDescGZIP(), []int{21}
+	return file_api_internalpb_raftd_proto_rawDescGZIP(), []int{23}
 }
 
 func (x *GetJailRequest) GetId() string {
@@ -1232,7 +1339,7 @@ type GetJailResponse struct {
 
 func (x *GetJailResponse) Reset() {
 	*x = GetJailResponse{}
-	mi := &file_api_internalpb_raftd_proto_msgTypes[22]
+	mi := &file_api_internalpb_raftd_proto_msgTypes[24]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1244,7 +1351,7 @@ func (x *GetJailResponse) String() string {
 func (*GetJailResponse) ProtoMessage() {}
 
 func (x *GetJailResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_api_internalpb_raftd_proto_msgTypes[22]
+	mi := &file_api_internalpb_raftd_proto_msgTypes[24]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1257,7 +1364,7 @@ func (x *GetJailResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetJailResponse.ProtoReflect.Descriptor instead.
 func (*GetJailResponse) Descriptor() ([]byte, []int) {
-	return file_api_internalpb_raftd_proto_rawDescGZIP(), []int{22}
+	return file_api_internalpb_raftd_proto_rawDescGZIP(), []int{24}
 }
 
 func (x *GetJailResponse) GetJail() *JailDefinition {
@@ -1296,7 +1403,7 @@ type ListJailsRequest struct {
 
 func (x *ListJailsRequest) Reset() {
 	*x = ListJailsRequest{}
-	mi := &file_api_internalpb_raftd_proto_msgTypes[23]
+	mi := &file_api_internalpb_raftd_proto_msgTypes[25]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1308,7 +1415,7 @@ func (x *ListJailsRequest) String() string {
 func (*ListJailsRequest) ProtoMessage() {}
 
 func (x *ListJailsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_api_internalpb_raftd_proto_msgTypes[23]
+	mi := &file_api_internalpb_raftd_proto_msgTypes[25]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1321,7 +1428,7 @@ func (x *ListJailsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListJailsRequest.ProtoReflect.Descriptor instead.
 func (*ListJailsRequest) Descriptor() ([]byte, []int) {
-	return file_api_internalpb_raftd_proto_rawDescGZIP(), []int{23}
+	return file_api_internalpb_raftd_proto_rawDescGZIP(), []int{25}
 }
 
 type ListJailsResponse struct {
@@ -1335,7 +1442,7 @@ type ListJailsResponse struct {
 
 func (x *ListJailsResponse) Reset() {
 	*x = ListJailsResponse{}
-	mi := &file_api_internalpb_raftd_proto_msgTypes[24]
+	mi := &file_api_internalpb_raftd_proto_msgTypes[26]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1347,7 +1454,7 @@ func (x *ListJailsResponse) String() string {
 func (*ListJailsResponse) ProtoMessage() {}
 
 func (x *ListJailsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_api_internalpb_raftd_proto_msgTypes[24]
+	mi := &file_api_internalpb_raftd_proto_msgTypes[26]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1360,7 +1467,7 @@ func (x *ListJailsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListJailsResponse.ProtoReflect.Descriptor instead.
 func (*ListJailsResponse) Descriptor() ([]byte, []int) {
-	return file_api_internalpb_raftd_proto_rawDescGZIP(), []int{24}
+	return file_api_internalpb_raftd_proto_rawDescGZIP(), []int{26}
 }
 
 func (x *ListJailsResponse) GetJails() []*JailDefinition {
@@ -1394,7 +1501,7 @@ type ValidateAPIKeyHashRequest struct {
 
 func (x *ValidateAPIKeyHashRequest) Reset() {
 	*x = ValidateAPIKeyHashRequest{}
-	mi := &file_api_internalpb_raftd_proto_msgTypes[25]
+	mi := &file_api_internalpb_raftd_proto_msgTypes[27]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1406,7 +1513,7 @@ func (x *ValidateAPIKeyHashRequest) String() string {
 func (*ValidateAPIKeyHashRequest) ProtoMessage() {}
 
 func (x *ValidateAPIKeyHashRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_api_internalpb_raftd_proto_msgTypes[25]
+	mi := &file_api_internalpb_raftd_proto_msgTypes[27]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1419,7 +1526,7 @@ func (x *ValidateAPIKeyHashRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ValidateAPIKeyHashRequest.ProtoReflect.Descriptor instead.
 func (*ValidateAPIKeyHashRequest) Descriptor() ([]byte, []int) {
-	return file_api_internalpb_raftd_proto_rawDescGZIP(), []int{25}
+	return file_api_internalpb_raftd_proto_rawDescGZIP(), []int{27}
 }
 
 func (x *ValidateAPIKeyHashRequest) GetHashedKey() string {
@@ -1452,7 +1559,7 @@ type ValidateAPIKeyHashResponse struct {
 
 func (x *ValidateAPIKeyHashResponse) Reset() {
 	*x = ValidateAPIKeyHashResponse{}
-	mi := &file_api_internalpb_raftd_proto_msgTypes[26]
+	mi := &file_api_internalpb_raftd_proto_msgTypes[28]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1464,7 +1571,7 @@ func (x *ValidateAPIKeyHashResponse) String() string {
 func (*ValidateAPIKeyHashResponse) ProtoMessage() {}
 
 func (x *ValidateAPIKeyHashResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_api_internalpb_raftd_proto_msgTypes[26]
+	mi := &file_api_internalpb_raftd_proto_msgTypes[28]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1477,7 +1584,7 @@ func (x *ValidateAPIKeyHashResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ValidateAPIKeyHashResponse.ProtoReflect.Descriptor instead.
 func (*ValidateAPIKeyHashResponse) Descriptor() ([]byte, []int) {
-	return file_api_internalpb_raftd_proto_rawDescGZIP(), []int{26}
+	return file_api_internalpb_raftd_proto_rawDescGZIP(), []int{28}
 }
 
 func (x *ValidateAPIKeyHashResponse) GetValid() bool {
@@ -1523,7 +1630,7 @@ type ListAPIKeysRequest struct {
 
 func (x *ListAPIKeysRequest) Reset() {
 	*x = ListAPIKeysRequest{}
-	mi := &file_api_internalpb_raftd_proto_msgTypes[27]
+	mi := &file_api_internalpb_raftd_proto_msgTypes[29]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1535,7 +1642,7 @@ func (x *ListAPIKeysRequest) String() string {
 func (*ListAPIKeysRequest) ProtoMessage() {}
 
 func (x *ListAPIKeysRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_api_internalpb_raftd_proto_msgTypes[27]
+	mi := &file_api_internalpb_raftd_proto_msgTypes[29]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1548,7 +1655,7 @@ func (x *ListAPIKeysRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListAPIKeysRequest.ProtoReflect.Descriptor instead.
 func (*ListAPIKeysRequest) Descriptor() ([]byte, []int) {
-	return file_api_internalpb_raftd_proto_rawDescGZIP(), []int{27}
+	return file_api_internalpb_raftd_proto_rawDescGZIP(), []int{29}
 }
 
 type ListAPIKeysResponse struct {
@@ -1562,7 +1669,7 @@ type ListAPIKeysResponse struct {
 
 func (x *ListAPIKeysResponse) Reset() {
 	*x = ListAPIKeysResponse{}
-	mi := &file_api_internalpb_raftd_proto_msgTypes[28]
+	mi := &file_api_internalpb_raftd_proto_msgTypes[30]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1574,7 +1681,7 @@ func (x *ListAPIKeysResponse) String() string {
 func (*ListAPIKeysResponse) ProtoMessage() {}
 
 func (x *ListAPIKeysResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_api_internalpb_raftd_proto_msgTypes[28]
+	mi := &file_api_internalpb_raftd_proto_msgTypes[30]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1587,7 +1694,7 @@ func (x *ListAPIKeysResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListAPIKeysResponse.ProtoReflect.Descriptor instead.
 func (*ListAPIKeysResponse) Descriptor() ([]byte, []int) {
-	return file_api_internalpb_raftd_proto_rawDescGZIP(), []int{28}
+	return file_api_internalpb_raftd_proto_rawDescGZIP(), []int{30}
 }
 
 func (x *ListAPIKeysResponse) GetKeys() []*ApiKey {
@@ -1619,7 +1726,7 @@ type ExportStateRequest struct {
 
 func (x *ExportStateRequest) Reset() {
 	*x = ExportStateRequest{}
-	mi := &file_api_internalpb_raftd_proto_msgTypes[29]
+	mi := &file_api_internalpb_raftd_proto_msgTypes[31]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1631,7 +1738,7 @@ func (x *ExportStateRequest) String() string {
 func (*ExportStateRequest) ProtoMessage() {}
 
 func (x *ExportStateRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_api_internalpb_raftd_proto_msgTypes[29]
+	mi := &file_api_internalpb_raftd_proto_msgTypes[31]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1644,7 +1751,7 @@ func (x *ExportStateRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ExportStateRequest.ProtoReflect.Descriptor instead.
 func (*ExportStateRequest) Descriptor() ([]byte, []int) {
-	return file_api_internalpb_raftd_proto_rawDescGZIP(), []int{29}
+	return file_api_internalpb_raftd_proto_rawDescGZIP(), []int{31}
 }
 
 type ExportStateResponse struct {
@@ -1665,7 +1772,7 @@ type ExportStateResponse struct {
 
 func (x *ExportStateResponse) Reset() {
 	*x = ExportStateResponse{}
-	mi := &file_api_internalpb_raftd_proto_msgTypes[30]
+	mi := &file_api_internalpb_raftd_proto_msgTypes[32]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1677,7 +1784,7 @@ func (x *ExportStateResponse) String() string {
 func (*ExportStateResponse) ProtoMessage() {}
 
 func (x *ExportStateResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_api_internalpb_raftd_proto_msgTypes[30]
+	mi := &file_api_internalpb_raftd_proto_msgTypes[32]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1690,7 +1797,7 @@ func (x *ExportStateResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ExportStateResponse.ProtoReflect.Descriptor instead.
 func (*ExportStateResponse) Descriptor() ([]byte, []int) {
-	return file_api_internalpb_raftd_proto_rawDescGZIP(), []int{30}
+	return file_api_internalpb_raftd_proto_rawDescGZIP(), []int{32}
 }
 
 func (x *ExportStateResponse) GetFsmSnapshotState() []byte {
@@ -1815,7 +1922,13 @@ const file_api_internalpb_raftd_proto_rawDesc = "" +
 	"\x1eListPendingJoinRequestsRequest\"{\n" +
 	"\x1fListPendingJoinRequestsResponse\x12B\n" +
 	"\brequests\x18\x01 \x03(\v2&.apiary.internal.v1.PendingJoinRequestR\brequests\x12\x14\n" +
-	"\x05error\x18\x02 \x01(\tR\x05error\" \n" +
+	"\x05error\x18\x02 \x01(\tR\x05error\"7\n" +
+	"\x1bGetRestartLeaseStateRequest\x12\x18\n" +
+	"\aservice\x18\x01 \x01(\tR\aservice\"\xa7\x01\n" +
+	"\x1cGetRestartLeaseStateResponse\x126\n" +
+	"\x05lease\x18\x01 \x01(\v2 .apiary.internal.v1.RestartLeaseR\x05lease\x129\n" +
+	"\x06record\x18\x02 \x01(\v2!.apiary.internal.v1.RestartRecordR\x06record\x12\x14\n" +
+	"\x05error\x18\x03 \x01(\tR\x05error\" \n" +
 	"\x0eGetJailRequest\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\"\x96\x01\n" +
 	"\x0fGetJailResponse\x126\n" +
@@ -1852,7 +1965,7 @@ const file_api_internalpb_raftd_proto_rawDesc = "" +
 	"\anode_id\x18\x03 \x01(\tR\x06nodeId\x12\x14\n" +
 	"\x05error\x18\x04 \x01(\tR\x05error\x12\x1f\n" +
 	"\vleader_hint\x18\x05 \x01(\tR\n" +
-	"leaderHint2\xda\r\n" +
+	"leaderHint2\xda\x0e\n" +
 	"\fRaftInternal\x12L\n" +
 	"\x05Apply\x12 .apiary.internal.v1.ApplyRequest\x1a!.apiary.internal.v1.ApplyResponse\x12O\n" +
 	"\x06Status\x12!.apiary.internal.v1.StatusRequest\x1a\".apiary.internal.v1.StatusResponse\x12U\n" +
@@ -1872,7 +1985,8 @@ const file_api_internalpb_raftd_proto_rawDesc = "" +
 	"\x0eListJailsLocal\x12$.apiary.internal.v1.ListJailsRequest\x1a%.apiary.internal.v1.ListJailsResponse\x12^\n" +
 	"\vExportState\x12&.apiary.internal.v1.ExportStateRequest\x1a'.apiary.internal.v1.ExportStateResponse\x12\x81\x01\n" +
 	"\x1aGetPendingJoinRequestLocal\x120.apiary.internal.v1.GetPendingJoinRequestRequest\x1a1.apiary.internal.v1.GetPendingJoinRequestResponse\x12\x87\x01\n" +
-	"\x1cListPendingJoinRequestsLocal\x122.apiary.internal.v1.ListPendingJoinRequestsRequest\x1a3.apiary.internal.v1.ListPendingJoinRequestsResponseB9Z7github.com/glenjbarber/apiary/api/internalpb;internalpbb\x06proto3"
+	"\x1cListPendingJoinRequestsLocal\x122.apiary.internal.v1.ListPendingJoinRequestsRequest\x1a3.apiary.internal.v1.ListPendingJoinRequestsResponse\x12~\n" +
+	"\x19GetRestartLeaseStateLocal\x12/.apiary.internal.v1.GetRestartLeaseStateRequest\x1a0.apiary.internal.v1.GetRestartLeaseStateResponseB9Z7github.com/glenjbarber/apiary/api/internalpb;internalpbb\x06proto3"
 
 var (
 	file_api_internalpb_raftd_proto_rawDescOnce sync.Once
@@ -1886,7 +2000,7 @@ func file_api_internalpb_raftd_proto_rawDescGZIP() []byte {
 	return file_api_internalpb_raftd_proto_rawDescData
 }
 
-var file_api_internalpb_raftd_proto_msgTypes = make([]protoimpl.MessageInfo, 31)
+var file_api_internalpb_raftd_proto_msgTypes = make([]protoimpl.MessageInfo, 33)
 var file_api_internalpb_raftd_proto_goTypes = []any{
 	(*ApplyRequest)(nil),                    // 0: apiary.internal.v1.ApplyRequest
 	(*ApplyResponse)(nil),                   // 1: apiary.internal.v1.ApplyResponse
@@ -1909,74 +2023,82 @@ var file_api_internalpb_raftd_proto_goTypes = []any{
 	(*GetPendingJoinRequestResponse)(nil),   // 18: apiary.internal.v1.GetPendingJoinRequestResponse
 	(*ListPendingJoinRequestsRequest)(nil),  // 19: apiary.internal.v1.ListPendingJoinRequestsRequest
 	(*ListPendingJoinRequestsResponse)(nil), // 20: apiary.internal.v1.ListPendingJoinRequestsResponse
-	(*GetJailRequest)(nil),                  // 21: apiary.internal.v1.GetJailRequest
-	(*GetJailResponse)(nil),                 // 22: apiary.internal.v1.GetJailResponse
-	(*ListJailsRequest)(nil),                // 23: apiary.internal.v1.ListJailsRequest
-	(*ListJailsResponse)(nil),               // 24: apiary.internal.v1.ListJailsResponse
-	(*ValidateAPIKeyHashRequest)(nil),       // 25: apiary.internal.v1.ValidateAPIKeyHashRequest
-	(*ValidateAPIKeyHashResponse)(nil),      // 26: apiary.internal.v1.ValidateAPIKeyHashResponse
-	(*ListAPIKeysRequest)(nil),              // 27: apiary.internal.v1.ListAPIKeysRequest
-	(*ListAPIKeysResponse)(nil),             // 28: apiary.internal.v1.ListAPIKeysResponse
-	(*ExportStateRequest)(nil),              // 29: apiary.internal.v1.ExportStateRequest
-	(*ExportStateResponse)(nil),             // 30: apiary.internal.v1.ExportStateResponse
-	(*VMDefinition)(nil),                    // 31: apiary.internal.v1.VMDefinition
-	(*NetworkDefinition)(nil),               // 32: apiary.internal.v1.NetworkDefinition
-	(*PendingJoinRequest)(nil),              // 33: apiary.internal.v1.PendingJoinRequest
-	(*JailDefinition)(nil),                  // 34: apiary.internal.v1.JailDefinition
-	(*ApiKey)(nil),                          // 35: apiary.internal.v1.ApiKey
+	(*GetRestartLeaseStateRequest)(nil),     // 21: apiary.internal.v1.GetRestartLeaseStateRequest
+	(*GetRestartLeaseStateResponse)(nil),    // 22: apiary.internal.v1.GetRestartLeaseStateResponse
+	(*GetJailRequest)(nil),                  // 23: apiary.internal.v1.GetJailRequest
+	(*GetJailResponse)(nil),                 // 24: apiary.internal.v1.GetJailResponse
+	(*ListJailsRequest)(nil),                // 25: apiary.internal.v1.ListJailsRequest
+	(*ListJailsResponse)(nil),               // 26: apiary.internal.v1.ListJailsResponse
+	(*ValidateAPIKeyHashRequest)(nil),       // 27: apiary.internal.v1.ValidateAPIKeyHashRequest
+	(*ValidateAPIKeyHashResponse)(nil),      // 28: apiary.internal.v1.ValidateAPIKeyHashResponse
+	(*ListAPIKeysRequest)(nil),              // 29: apiary.internal.v1.ListAPIKeysRequest
+	(*ListAPIKeysResponse)(nil),             // 30: apiary.internal.v1.ListAPIKeysResponse
+	(*ExportStateRequest)(nil),              // 31: apiary.internal.v1.ExportStateRequest
+	(*ExportStateResponse)(nil),             // 32: apiary.internal.v1.ExportStateResponse
+	(*VMDefinition)(nil),                    // 33: apiary.internal.v1.VMDefinition
+	(*NetworkDefinition)(nil),               // 34: apiary.internal.v1.NetworkDefinition
+	(*PendingJoinRequest)(nil),              // 35: apiary.internal.v1.PendingJoinRequest
+	(*RestartLease)(nil),                    // 36: apiary.internal.v1.RestartLease
+	(*RestartRecord)(nil),                   // 37: apiary.internal.v1.RestartRecord
+	(*JailDefinition)(nil),                  // 38: apiary.internal.v1.JailDefinition
+	(*ApiKey)(nil),                          // 39: apiary.internal.v1.ApiKey
 }
 var file_api_internalpb_raftd_proto_depIdxs = []int32{
 	4,  // 0: apiary.internal.v1.StatusResponse.servers:type_name -> apiary.internal.v1.ServerInfo
-	31, // 1: apiary.internal.v1.GetVMResponse.vm:type_name -> apiary.internal.v1.VMDefinition
-	31, // 2: apiary.internal.v1.ListVMsResponse.vms:type_name -> apiary.internal.v1.VMDefinition
-	32, // 3: apiary.internal.v1.GetNetworkResponse.network:type_name -> apiary.internal.v1.NetworkDefinition
-	32, // 4: apiary.internal.v1.ListNetworksResponse.networks:type_name -> apiary.internal.v1.NetworkDefinition
-	33, // 5: apiary.internal.v1.GetPendingJoinRequestResponse.request:type_name -> apiary.internal.v1.PendingJoinRequest
-	33, // 6: apiary.internal.v1.ListPendingJoinRequestsResponse.requests:type_name -> apiary.internal.v1.PendingJoinRequest
-	34, // 7: apiary.internal.v1.GetJailResponse.jail:type_name -> apiary.internal.v1.JailDefinition
-	34, // 8: apiary.internal.v1.ListJailsResponse.jails:type_name -> apiary.internal.v1.JailDefinition
-	35, // 9: apiary.internal.v1.ListAPIKeysResponse.keys:type_name -> apiary.internal.v1.ApiKey
-	0,  // 10: apiary.internal.v1.RaftInternal.Apply:input_type -> apiary.internal.v1.ApplyRequest
-	2,  // 11: apiary.internal.v1.RaftInternal.Status:input_type -> apiary.internal.v1.StatusRequest
-	5,  // 12: apiary.internal.v1.RaftInternal.AddVoter:input_type -> apiary.internal.v1.AddVoterRequest
-	7,  // 13: apiary.internal.v1.RaftInternal.RemoveServer:input_type -> apiary.internal.v1.RemoveServerRequest
-	9,  // 14: apiary.internal.v1.RaftInternal.GetVM:input_type -> apiary.internal.v1.GetVMRequest
-	11, // 15: apiary.internal.v1.RaftInternal.ListVMs:input_type -> apiary.internal.v1.ListVMsRequest
-	13, // 16: apiary.internal.v1.RaftInternal.GetNetwork:input_type -> apiary.internal.v1.GetNetworkRequest
-	15, // 17: apiary.internal.v1.RaftInternal.ListNetworks:input_type -> apiary.internal.v1.ListNetworksRequest
-	11, // 18: apiary.internal.v1.RaftInternal.ListVMsLocal:input_type -> apiary.internal.v1.ListVMsRequest
-	15, // 19: apiary.internal.v1.RaftInternal.ListNetworksLocal:input_type -> apiary.internal.v1.ListNetworksRequest
-	25, // 20: apiary.internal.v1.RaftInternal.ValidateAPIKeyHash:input_type -> apiary.internal.v1.ValidateAPIKeyHashRequest
-	27, // 21: apiary.internal.v1.RaftInternal.ListAPIKeys:input_type -> apiary.internal.v1.ListAPIKeysRequest
-	21, // 22: apiary.internal.v1.RaftInternal.GetJail:input_type -> apiary.internal.v1.GetJailRequest
-	23, // 23: apiary.internal.v1.RaftInternal.ListJails:input_type -> apiary.internal.v1.ListJailsRequest
-	23, // 24: apiary.internal.v1.RaftInternal.ListJailsLocal:input_type -> apiary.internal.v1.ListJailsRequest
-	29, // 25: apiary.internal.v1.RaftInternal.ExportState:input_type -> apiary.internal.v1.ExportStateRequest
-	17, // 26: apiary.internal.v1.RaftInternal.GetPendingJoinRequestLocal:input_type -> apiary.internal.v1.GetPendingJoinRequestRequest
-	19, // 27: apiary.internal.v1.RaftInternal.ListPendingJoinRequestsLocal:input_type -> apiary.internal.v1.ListPendingJoinRequestsRequest
-	1,  // 28: apiary.internal.v1.RaftInternal.Apply:output_type -> apiary.internal.v1.ApplyResponse
-	3,  // 29: apiary.internal.v1.RaftInternal.Status:output_type -> apiary.internal.v1.StatusResponse
-	6,  // 30: apiary.internal.v1.RaftInternal.AddVoter:output_type -> apiary.internal.v1.AddVoterResponse
-	8,  // 31: apiary.internal.v1.RaftInternal.RemoveServer:output_type -> apiary.internal.v1.RemoveServerResponse
-	10, // 32: apiary.internal.v1.RaftInternal.GetVM:output_type -> apiary.internal.v1.GetVMResponse
-	12, // 33: apiary.internal.v1.RaftInternal.ListVMs:output_type -> apiary.internal.v1.ListVMsResponse
-	14, // 34: apiary.internal.v1.RaftInternal.GetNetwork:output_type -> apiary.internal.v1.GetNetworkResponse
-	16, // 35: apiary.internal.v1.RaftInternal.ListNetworks:output_type -> apiary.internal.v1.ListNetworksResponse
-	12, // 36: apiary.internal.v1.RaftInternal.ListVMsLocal:output_type -> apiary.internal.v1.ListVMsResponse
-	16, // 37: apiary.internal.v1.RaftInternal.ListNetworksLocal:output_type -> apiary.internal.v1.ListNetworksResponse
-	26, // 38: apiary.internal.v1.RaftInternal.ValidateAPIKeyHash:output_type -> apiary.internal.v1.ValidateAPIKeyHashResponse
-	28, // 39: apiary.internal.v1.RaftInternal.ListAPIKeys:output_type -> apiary.internal.v1.ListAPIKeysResponse
-	22, // 40: apiary.internal.v1.RaftInternal.GetJail:output_type -> apiary.internal.v1.GetJailResponse
-	24, // 41: apiary.internal.v1.RaftInternal.ListJails:output_type -> apiary.internal.v1.ListJailsResponse
-	24, // 42: apiary.internal.v1.RaftInternal.ListJailsLocal:output_type -> apiary.internal.v1.ListJailsResponse
-	30, // 43: apiary.internal.v1.RaftInternal.ExportState:output_type -> apiary.internal.v1.ExportStateResponse
-	18, // 44: apiary.internal.v1.RaftInternal.GetPendingJoinRequestLocal:output_type -> apiary.internal.v1.GetPendingJoinRequestResponse
-	20, // 45: apiary.internal.v1.RaftInternal.ListPendingJoinRequestsLocal:output_type -> apiary.internal.v1.ListPendingJoinRequestsResponse
-	28, // [28:46] is the sub-list for method output_type
-	10, // [10:28] is the sub-list for method input_type
-	10, // [10:10] is the sub-list for extension type_name
-	10, // [10:10] is the sub-list for extension extendee
-	0,  // [0:10] is the sub-list for field type_name
+	33, // 1: apiary.internal.v1.GetVMResponse.vm:type_name -> apiary.internal.v1.VMDefinition
+	33, // 2: apiary.internal.v1.ListVMsResponse.vms:type_name -> apiary.internal.v1.VMDefinition
+	34, // 3: apiary.internal.v1.GetNetworkResponse.network:type_name -> apiary.internal.v1.NetworkDefinition
+	34, // 4: apiary.internal.v1.ListNetworksResponse.networks:type_name -> apiary.internal.v1.NetworkDefinition
+	35, // 5: apiary.internal.v1.GetPendingJoinRequestResponse.request:type_name -> apiary.internal.v1.PendingJoinRequest
+	35, // 6: apiary.internal.v1.ListPendingJoinRequestsResponse.requests:type_name -> apiary.internal.v1.PendingJoinRequest
+	36, // 7: apiary.internal.v1.GetRestartLeaseStateResponse.lease:type_name -> apiary.internal.v1.RestartLease
+	37, // 8: apiary.internal.v1.GetRestartLeaseStateResponse.record:type_name -> apiary.internal.v1.RestartRecord
+	38, // 9: apiary.internal.v1.GetJailResponse.jail:type_name -> apiary.internal.v1.JailDefinition
+	38, // 10: apiary.internal.v1.ListJailsResponse.jails:type_name -> apiary.internal.v1.JailDefinition
+	39, // 11: apiary.internal.v1.ListAPIKeysResponse.keys:type_name -> apiary.internal.v1.ApiKey
+	0,  // 12: apiary.internal.v1.RaftInternal.Apply:input_type -> apiary.internal.v1.ApplyRequest
+	2,  // 13: apiary.internal.v1.RaftInternal.Status:input_type -> apiary.internal.v1.StatusRequest
+	5,  // 14: apiary.internal.v1.RaftInternal.AddVoter:input_type -> apiary.internal.v1.AddVoterRequest
+	7,  // 15: apiary.internal.v1.RaftInternal.RemoveServer:input_type -> apiary.internal.v1.RemoveServerRequest
+	9,  // 16: apiary.internal.v1.RaftInternal.GetVM:input_type -> apiary.internal.v1.GetVMRequest
+	11, // 17: apiary.internal.v1.RaftInternal.ListVMs:input_type -> apiary.internal.v1.ListVMsRequest
+	13, // 18: apiary.internal.v1.RaftInternal.GetNetwork:input_type -> apiary.internal.v1.GetNetworkRequest
+	15, // 19: apiary.internal.v1.RaftInternal.ListNetworks:input_type -> apiary.internal.v1.ListNetworksRequest
+	11, // 20: apiary.internal.v1.RaftInternal.ListVMsLocal:input_type -> apiary.internal.v1.ListVMsRequest
+	15, // 21: apiary.internal.v1.RaftInternal.ListNetworksLocal:input_type -> apiary.internal.v1.ListNetworksRequest
+	27, // 22: apiary.internal.v1.RaftInternal.ValidateAPIKeyHash:input_type -> apiary.internal.v1.ValidateAPIKeyHashRequest
+	29, // 23: apiary.internal.v1.RaftInternal.ListAPIKeys:input_type -> apiary.internal.v1.ListAPIKeysRequest
+	23, // 24: apiary.internal.v1.RaftInternal.GetJail:input_type -> apiary.internal.v1.GetJailRequest
+	25, // 25: apiary.internal.v1.RaftInternal.ListJails:input_type -> apiary.internal.v1.ListJailsRequest
+	25, // 26: apiary.internal.v1.RaftInternal.ListJailsLocal:input_type -> apiary.internal.v1.ListJailsRequest
+	31, // 27: apiary.internal.v1.RaftInternal.ExportState:input_type -> apiary.internal.v1.ExportStateRequest
+	17, // 28: apiary.internal.v1.RaftInternal.GetPendingJoinRequestLocal:input_type -> apiary.internal.v1.GetPendingJoinRequestRequest
+	19, // 29: apiary.internal.v1.RaftInternal.ListPendingJoinRequestsLocal:input_type -> apiary.internal.v1.ListPendingJoinRequestsRequest
+	21, // 30: apiary.internal.v1.RaftInternal.GetRestartLeaseStateLocal:input_type -> apiary.internal.v1.GetRestartLeaseStateRequest
+	1,  // 31: apiary.internal.v1.RaftInternal.Apply:output_type -> apiary.internal.v1.ApplyResponse
+	3,  // 32: apiary.internal.v1.RaftInternal.Status:output_type -> apiary.internal.v1.StatusResponse
+	6,  // 33: apiary.internal.v1.RaftInternal.AddVoter:output_type -> apiary.internal.v1.AddVoterResponse
+	8,  // 34: apiary.internal.v1.RaftInternal.RemoveServer:output_type -> apiary.internal.v1.RemoveServerResponse
+	10, // 35: apiary.internal.v1.RaftInternal.GetVM:output_type -> apiary.internal.v1.GetVMResponse
+	12, // 36: apiary.internal.v1.RaftInternal.ListVMs:output_type -> apiary.internal.v1.ListVMsResponse
+	14, // 37: apiary.internal.v1.RaftInternal.GetNetwork:output_type -> apiary.internal.v1.GetNetworkResponse
+	16, // 38: apiary.internal.v1.RaftInternal.ListNetworks:output_type -> apiary.internal.v1.ListNetworksResponse
+	12, // 39: apiary.internal.v1.RaftInternal.ListVMsLocal:output_type -> apiary.internal.v1.ListVMsResponse
+	16, // 40: apiary.internal.v1.RaftInternal.ListNetworksLocal:output_type -> apiary.internal.v1.ListNetworksResponse
+	28, // 41: apiary.internal.v1.RaftInternal.ValidateAPIKeyHash:output_type -> apiary.internal.v1.ValidateAPIKeyHashResponse
+	30, // 42: apiary.internal.v1.RaftInternal.ListAPIKeys:output_type -> apiary.internal.v1.ListAPIKeysResponse
+	24, // 43: apiary.internal.v1.RaftInternal.GetJail:output_type -> apiary.internal.v1.GetJailResponse
+	26, // 44: apiary.internal.v1.RaftInternal.ListJails:output_type -> apiary.internal.v1.ListJailsResponse
+	26, // 45: apiary.internal.v1.RaftInternal.ListJailsLocal:output_type -> apiary.internal.v1.ListJailsResponse
+	32, // 46: apiary.internal.v1.RaftInternal.ExportState:output_type -> apiary.internal.v1.ExportStateResponse
+	18, // 47: apiary.internal.v1.RaftInternal.GetPendingJoinRequestLocal:output_type -> apiary.internal.v1.GetPendingJoinRequestResponse
+	20, // 48: apiary.internal.v1.RaftInternal.ListPendingJoinRequestsLocal:output_type -> apiary.internal.v1.ListPendingJoinRequestsResponse
+	22, // 49: apiary.internal.v1.RaftInternal.GetRestartLeaseStateLocal:output_type -> apiary.internal.v1.GetRestartLeaseStateResponse
+	31, // [31:50] is the sub-list for method output_type
+	12, // [12:31] is the sub-list for method input_type
+	12, // [12:12] is the sub-list for extension type_name
+	12, // [12:12] is the sub-list for extension extendee
+	0,  // [0:12] is the sub-list for field type_name
 }
 
 func init() { file_api_internalpb_raftd_proto_init() }
@@ -1991,7 +2113,7 @@ func file_api_internalpb_raftd_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_api_internalpb_raftd_proto_rawDesc), len(file_api_internalpb_raftd_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   31,
+			NumMessages:   33,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

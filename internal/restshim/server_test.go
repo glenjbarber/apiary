@@ -418,6 +418,22 @@ func (f *fakeClient) ApproveJoinRequest(context.Context, *rpcpb.ApproveJoinReque
 	return &rpcpb.ApproveJoinRequestResponse{}, nil
 }
 
+func (f *fakeClient) PreflightApproveJoinRequest(context.Context, *rpcpb.PreflightApproveJoinRequestRequest, ...grpc.CallOption) (*rpcpb.PreflightApproveJoinRequestResponse, error) {
+	return &rpcpb.PreflightApproveJoinRequestResponse{}, nil
+}
+
+func (f *fakeClient) PreflightRestartNodeService(context.Context, *rpcpb.PreflightRestartNodeServiceRequest, ...grpc.CallOption) (*rpcpb.PreflightRestartNodeServiceResponse, error) {
+	return &rpcpb.PreflightRestartNodeServiceResponse{}, nil
+}
+
+func (f *fakeClient) ReserveRestartLease(context.Context, *rpcpb.ReserveRestartLeaseRequest, ...grpc.CallOption) (*rpcpb.ReserveRestartLeaseResponse, error) {
+	return &rpcpb.ReserveRestartLeaseResponse{}, nil
+}
+
+func (f *fakeClient) ConfirmRestartCompleted(context.Context, *rpcpb.ConfirmRestartCompletedRequest, ...grpc.CallOption) (*rpcpb.ConfirmRestartCompletedResponse, error) {
+	return &rpcpb.ConfirmRestartCompletedResponse{}, nil
+}
+
 func (f *fakeClient) RejectJoinRequest(context.Context, *rpcpb.RejectJoinRequestRequest, ...grpc.CallOption) (*rpcpb.RejectJoinRequestResponse, error) {
 	return &rpcpb.RejectJoinRequestResponse{}, nil
 }

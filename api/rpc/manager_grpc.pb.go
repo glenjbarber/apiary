@@ -59,6 +59,9 @@ const (
 	ManagerService_DeleteVMSnapshot_FullMethodName            = "/apiary.rpc.v1.ManagerService/DeleteVMSnapshot"
 	ManagerService_ListNodeServices_FullMethodName            = "/apiary.rpc.v1.ManagerService/ListNodeServices"
 	ManagerService_RestartNodeService_FullMethodName          = "/apiary.rpc.v1.ManagerService/RestartNodeService"
+	ManagerService_PreflightRestartNodeService_FullMethodName = "/apiary.rpc.v1.ManagerService/PreflightRestartNodeService"
+	ManagerService_ReserveRestartLease_FullMethodName         = "/apiary.rpc.v1.ManagerService/ReserveRestartLease"
+	ManagerService_ConfirmRestartCompleted_FullMethodName     = "/apiary.rpc.v1.ManagerService/ConfirmRestartCompleted"
 	ManagerService_GetUplinkStatus_FullMethodName             = "/apiary.rpc.v1.ManagerService/GetUplinkStatus"
 	ManagerService_SetUplinkState_FullMethodName              = "/apiary.rpc.v1.ManagerService/SetUplinkState"
 	ManagerService_CreateNetwork_FullMethodName               = "/apiary.rpc.v1.ManagerService/CreateNetwork"
@@ -98,6 +101,7 @@ const (
 	ManagerService_ListJoinRequests_FullMethodName            = "/apiary.rpc.v1.ManagerService/ListJoinRequests"
 	ManagerService_ApproveJoinRequest_FullMethodName          = "/apiary.rpc.v1.ManagerService/ApproveJoinRequest"
 	ManagerService_RejectJoinRequest_FullMethodName           = "/apiary.rpc.v1.ManagerService/RejectJoinRequest"
+	ManagerService_PreflightApproveJoinRequest_FullMethodName = "/apiary.rpc.v1.ManagerService/PreflightApproveJoinRequest"
 	ManagerService_CancelJoinRequest_FullMethodName           = "/apiary.rpc.v1.ManagerService/CancelJoinRequest"
 	ManagerService_PurgeJoinRequest_FullMethodName            = "/apiary.rpc.v1.ManagerService/PurgeJoinRequest"
 )
@@ -302,6 +306,30 @@ type ManagerServiceClient interface {
 	// are never forwarded through raft.
 	ListNodeServices(ctx context.Context, in *ListNodeServicesRequest, opts ...grpc.CallOption) (*ListNodeServicesResponse, error)
 	RestartNodeService(ctx context.Context, in *RestartNodeServiceRequest, opts ...grpc.CallOption) (*RestartNodeServiceResponse, error)
+	// PreflightRestartNodeService previews the action-preflight restart
+	// guardrail (ADR-0103) for "apiary_managerd" (always Allow for every
+	// other service, which carries no quorum stake) - read-only, Viewer-
+	// tier, makes no live network dial (only a local raft-internal state
+	// read), unlike PreflightApproveJoinRequest below.
+	PreflightRestartNodeService(ctx context.Context, in *PreflightRestartNodeServiceRequest, opts ...grpc.CallOption) (*PreflightRestartNodeServiceResponse, error)
+	// ReserveRestartLease/ConfirmRestartCompleted are internal plumbing
+	// behind RestartNodeService's own guardrail (ADR-0103), never called
+	// by an operator or exposed in any UI control. They are deliberately
+	// NOT authorized via the normal Viewer/Admin role hierarchy in
+	// internal/manager/auth.go's requiredRoleFor map - no CreateAPIKey-
+	// issued credential, however privileged, satisfies them. Instead each
+	// is gated by a dedicated comparison against a root-owned local file
+	// (/usr/local/etc/apiary/restart-guardrail-token), loaded once at
+	// managerd startup and never exposed through nodeconfig/UpdateNodeConfig
+	// or any other RPC in either direction - the same posture raftd's own
+	// internal_token has relative to managerd's external RPC surface. See
+	// ADR-0103's own Consequences for the honest scope of what this closes
+	// (the RPC-level path, not a fully root-privileged operator) and why
+	// two earlier designs (a CreateAPIKey-mintable "peer" role; a
+	// write-only nodeconfig field) were rejected as not actually
+	// closing it.
+	ReserveRestartLease(ctx context.Context, in *ReserveRestartLeaseRequest, opts ...grpc.CallOption) (*ReserveRestartLeaseResponse, error)
+	ConfirmRestartCompleted(ctx context.Context, in *ConfirmRestartCompletedRequest, opts ...grpc.CallOption) (*ConfirmRestartCompletedResponse, error)
 	// GetUplinkStatus/SetUplinkState are the Machine page's uplink admin
 	// down/up toggle (ADR-0085) - strictly host-local physical state,
 	// never routed through raft, same reasoning as
@@ -490,6 +518,15 @@ type ManagerServiceClient interface {
 	ListJoinRequests(ctx context.Context, in *ListJoinRequestsRequest, opts ...grpc.CallOption) (*ListJoinRequestsResponse, error)
 	ApproveJoinRequest(ctx context.Context, in *ApproveJoinRequestRequest, opts ...grpc.CallOption) (*ApproveJoinRequestResponse, error)
 	RejectJoinRequest(ctx context.Context, in *RejectJoinRequestRequest, opts ...grpc.CallOption) (*RejectJoinRequestResponse, error)
+	// PreflightApproveJoinRequest previews ApproveJoinRequest's own
+	// reachability gate (ADR-0097/ADR-0103) without ever calling AddVoter -
+	// Admin-tier, not Viewer, because it makes managerd dial a
+	// caller-selected pending request's raft_bind_address, which a Viewer
+	// could otherwise use as a network reachability oracle. Applies the
+	// same leadership-first ordering as ApproveJoinRequest itself, so the
+	// preview always reflects the same network vantage point the real
+	// approval would use.
+	PreflightApproveJoinRequest(ctx context.Context, in *PreflightApproveJoinRequestRequest, opts ...grpc.CallOption) (*PreflightApproveJoinRequestResponse, error)
 	// CancelJoinRequest is the requesting Comb's own self-service
 	// withdrawal of its still-pending request - deliberately
 	// unauthenticated, the same reason RequestJoinColony/
@@ -920,6 +957,36 @@ func (c *managerServiceClient) RestartNodeService(ctx context.Context, in *Resta
 	return out, nil
 }
 
+func (c *managerServiceClient) PreflightRestartNodeService(ctx context.Context, in *PreflightRestartNodeServiceRequest, opts ...grpc.CallOption) (*PreflightRestartNodeServiceResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(PreflightRestartNodeServiceResponse)
+	err := c.cc.Invoke(ctx, ManagerService_PreflightRestartNodeService_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *managerServiceClient) ReserveRestartLease(ctx context.Context, in *ReserveRestartLeaseRequest, opts ...grpc.CallOption) (*ReserveRestartLeaseResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ReserveRestartLeaseResponse)
+	err := c.cc.Invoke(ctx, ManagerService_ReserveRestartLease_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *managerServiceClient) ConfirmRestartCompleted(ctx context.Context, in *ConfirmRestartCompletedRequest, opts ...grpc.CallOption) (*ConfirmRestartCompletedResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ConfirmRestartCompletedResponse)
+	err := c.cc.Invoke(ctx, ManagerService_ConfirmRestartCompleted_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *managerServiceClient) GetUplinkStatus(ctx context.Context, in *GetUplinkStatusRequest, opts ...grpc.CallOption) (*GetUplinkStatusResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(GetUplinkStatusResponse)
@@ -1313,6 +1380,16 @@ func (c *managerServiceClient) RejectJoinRequest(ctx context.Context, in *Reject
 	return out, nil
 }
 
+func (c *managerServiceClient) PreflightApproveJoinRequest(ctx context.Context, in *PreflightApproveJoinRequestRequest, opts ...grpc.CallOption) (*PreflightApproveJoinRequestResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(PreflightApproveJoinRequestResponse)
+	err := c.cc.Invoke(ctx, ManagerService_PreflightApproveJoinRequest_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *managerServiceClient) CancelJoinRequest(ctx context.Context, in *CancelJoinRequestRequest, opts ...grpc.CallOption) (*CancelJoinRequestResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(CancelJoinRequestResponse)
@@ -1533,6 +1610,30 @@ type ManagerServiceServer interface {
 	// are never forwarded through raft.
 	ListNodeServices(context.Context, *ListNodeServicesRequest) (*ListNodeServicesResponse, error)
 	RestartNodeService(context.Context, *RestartNodeServiceRequest) (*RestartNodeServiceResponse, error)
+	// PreflightRestartNodeService previews the action-preflight restart
+	// guardrail (ADR-0103) for "apiary_managerd" (always Allow for every
+	// other service, which carries no quorum stake) - read-only, Viewer-
+	// tier, makes no live network dial (only a local raft-internal state
+	// read), unlike PreflightApproveJoinRequest below.
+	PreflightRestartNodeService(context.Context, *PreflightRestartNodeServiceRequest) (*PreflightRestartNodeServiceResponse, error)
+	// ReserveRestartLease/ConfirmRestartCompleted are internal plumbing
+	// behind RestartNodeService's own guardrail (ADR-0103), never called
+	// by an operator or exposed in any UI control. They are deliberately
+	// NOT authorized via the normal Viewer/Admin role hierarchy in
+	// internal/manager/auth.go's requiredRoleFor map - no CreateAPIKey-
+	// issued credential, however privileged, satisfies them. Instead each
+	// is gated by a dedicated comparison against a root-owned local file
+	// (/usr/local/etc/apiary/restart-guardrail-token), loaded once at
+	// managerd startup and never exposed through nodeconfig/UpdateNodeConfig
+	// or any other RPC in either direction - the same posture raftd's own
+	// internal_token has relative to managerd's external RPC surface. See
+	// ADR-0103's own Consequences for the honest scope of what this closes
+	// (the RPC-level path, not a fully root-privileged operator) and why
+	// two earlier designs (a CreateAPIKey-mintable "peer" role; a
+	// write-only nodeconfig field) were rejected as not actually
+	// closing it.
+	ReserveRestartLease(context.Context, *ReserveRestartLeaseRequest) (*ReserveRestartLeaseResponse, error)
+	ConfirmRestartCompleted(context.Context, *ConfirmRestartCompletedRequest) (*ConfirmRestartCompletedResponse, error)
 	// GetUplinkStatus/SetUplinkState are the Machine page's uplink admin
 	// down/up toggle (ADR-0085) - strictly host-local physical state,
 	// never routed through raft, same reasoning as
@@ -1721,6 +1822,15 @@ type ManagerServiceServer interface {
 	ListJoinRequests(context.Context, *ListJoinRequestsRequest) (*ListJoinRequestsResponse, error)
 	ApproveJoinRequest(context.Context, *ApproveJoinRequestRequest) (*ApproveJoinRequestResponse, error)
 	RejectJoinRequest(context.Context, *RejectJoinRequestRequest) (*RejectJoinRequestResponse, error)
+	// PreflightApproveJoinRequest previews ApproveJoinRequest's own
+	// reachability gate (ADR-0097/ADR-0103) without ever calling AddVoter -
+	// Admin-tier, not Viewer, because it makes managerd dial a
+	// caller-selected pending request's raft_bind_address, which a Viewer
+	// could otherwise use as a network reachability oracle. Applies the
+	// same leadership-first ordering as ApproveJoinRequest itself, so the
+	// preview always reflects the same network vantage point the real
+	// approval would use.
+	PreflightApproveJoinRequest(context.Context, *PreflightApproveJoinRequestRequest) (*PreflightApproveJoinRequestResponse, error)
 	// CancelJoinRequest is the requesting Comb's own self-service
 	// withdrawal of its still-pending request - deliberately
 	// unauthenticated, the same reason RequestJoinColony/
@@ -1865,6 +1975,15 @@ func (UnimplementedManagerServiceServer) ListNodeServices(context.Context, *List
 func (UnimplementedManagerServiceServer) RestartNodeService(context.Context, *RestartNodeServiceRequest) (*RestartNodeServiceResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method RestartNodeService not implemented")
 }
+func (UnimplementedManagerServiceServer) PreflightRestartNodeService(context.Context, *PreflightRestartNodeServiceRequest) (*PreflightRestartNodeServiceResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method PreflightRestartNodeService not implemented")
+}
+func (UnimplementedManagerServiceServer) ReserveRestartLease(context.Context, *ReserveRestartLeaseRequest) (*ReserveRestartLeaseResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ReserveRestartLease not implemented")
+}
+func (UnimplementedManagerServiceServer) ConfirmRestartCompleted(context.Context, *ConfirmRestartCompletedRequest) (*ConfirmRestartCompletedResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ConfirmRestartCompleted not implemented")
+}
 func (UnimplementedManagerServiceServer) GetUplinkStatus(context.Context, *GetUplinkStatusRequest) (*GetUplinkStatusResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetUplinkStatus not implemented")
 }
@@ -1981,6 +2100,9 @@ func (UnimplementedManagerServiceServer) ApproveJoinRequest(context.Context, *Ap
 }
 func (UnimplementedManagerServiceServer) RejectJoinRequest(context.Context, *RejectJoinRequestRequest) (*RejectJoinRequestResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method RejectJoinRequest not implemented")
+}
+func (UnimplementedManagerServiceServer) PreflightApproveJoinRequest(context.Context, *PreflightApproveJoinRequestRequest) (*PreflightApproveJoinRequestResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method PreflightApproveJoinRequest not implemented")
 }
 func (UnimplementedManagerServiceServer) CancelJoinRequest(context.Context, *CancelJoinRequestRequest) (*CancelJoinRequestResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method CancelJoinRequest not implemented")
@@ -2707,6 +2829,60 @@ func _ManagerService_RestartNodeService_Handler(srv interface{}, ctx context.Con
 	return interceptor(ctx, in, info, handler)
 }
 
+func _ManagerService_PreflightRestartNodeService_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(PreflightRestartNodeServiceRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ManagerServiceServer).PreflightRestartNodeService(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ManagerService_PreflightRestartNodeService_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ManagerServiceServer).PreflightRestartNodeService(ctx, req.(*PreflightRestartNodeServiceRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ManagerService_ReserveRestartLease_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ReserveRestartLeaseRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ManagerServiceServer).ReserveRestartLease(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ManagerService_ReserveRestartLease_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ManagerServiceServer).ReserveRestartLease(ctx, req.(*ReserveRestartLeaseRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ManagerService_ConfirmRestartCompleted_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ConfirmRestartCompletedRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ManagerServiceServer).ConfirmRestartCompleted(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ManagerService_ConfirmRestartCompleted_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ManagerServiceServer).ConfirmRestartCompleted(ctx, req.(*ConfirmRestartCompletedRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _ManagerService_GetUplinkStatus_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(GetUplinkStatusRequest)
 	if err := dec(in); err != nil {
@@ -3398,6 +3574,24 @@ func _ManagerService_RejectJoinRequest_Handler(srv interface{}, ctx context.Cont
 	return interceptor(ctx, in, info, handler)
 }
 
+func _ManagerService_PreflightApproveJoinRequest_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(PreflightApproveJoinRequestRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ManagerServiceServer).PreflightApproveJoinRequest(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ManagerService_PreflightApproveJoinRequest_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ManagerServiceServer).PreflightApproveJoinRequest(ctx, req.(*PreflightApproveJoinRequestRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _ManagerService_CancelJoinRequest_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(CancelJoinRequestRequest)
 	if err := dec(in); err != nil {
@@ -3594,6 +3788,18 @@ var ManagerService_ServiceDesc = grpc.ServiceDesc{
 			Handler:    _ManagerService_RestartNodeService_Handler,
 		},
 		{
+			MethodName: "PreflightRestartNodeService",
+			Handler:    _ManagerService_PreflightRestartNodeService_Handler,
+		},
+		{
+			MethodName: "ReserveRestartLease",
+			Handler:    _ManagerService_ReserveRestartLease_Handler,
+		},
+		{
+			MethodName: "ConfirmRestartCompleted",
+			Handler:    _ManagerService_ConfirmRestartCompleted_Handler,
+		},
+		{
 			MethodName: "GetUplinkStatus",
 			Handler:    _ManagerService_GetUplinkStatus_Handler,
 		},
@@ -3744,6 +3950,10 @@ var ManagerService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "RejectJoinRequest",
 			Handler:    _ManagerService_RejectJoinRequest_Handler,
+		},
+		{
+			MethodName: "PreflightApproveJoinRequest",
+			Handler:    _ManagerService_PreflightApproveJoinRequest_Handler,
 		},
 		{
 			MethodName: "CancelJoinRequest",

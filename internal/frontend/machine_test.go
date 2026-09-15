@@ -95,6 +95,89 @@ func TestServer_RestartNodeService_ForwardsAllowlistedName(t *testing.T) {
 	}
 }
 
+// TestServer_MachinePage_ShowsRestartGuardrailWarningWhenBlocked is the
+// direct regression test for ADR-0103's UI gating: when
+// PreflightRestartNodeService reports Block for apiary_managerd, the
+// Machine page must show the finding detail and a force-acknowledgment
+// checkbox instead of the plain restart button - never a bare hx-post
+// with no warning.
+func TestServer_MachinePage_ShowsRestartGuardrailWarningWhenBlocked(t *testing.T) {
+	client := &fakeClient{
+		listNodeServicesResp: &rpcpb.ListNodeServicesResponse{
+			Services: []*rpcpb.NodeService{
+				{Name: "apiary_managerd", Status: "running", Enabled: true, Restartable: true},
+			},
+		},
+		preflightRestartNodeServiceResp: &rpcpb.PreflightRestartNodeServiceResponse{
+			Verdict:  "block",
+			Findings: []*rpcpb.GuardrailFinding{{Rule: "concurrent-manager-restart", Detail: "held by node02"}},
+		},
+	}
+	s := newTestServer(t, client)
+
+	req := httptest.NewRequest(http.MethodGet, "/machine", nil)
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, req)
+
+	body := rec.Body.String()
+	if !strings.Contains(body, "Blocked by the restart guardrail") || !strings.Contains(body, "held by node02") {
+		t.Errorf("machine page missing restart guardrail warning, got: %s", body)
+	}
+	if !strings.Contains(body, `name="force"`) {
+		t.Errorf("machine page missing the force-acknowledgment checkbox for a blocked restart, got: %s", body)
+	}
+}
+
+// TestServer_MachinePage_AllowsPlainRestartWhenGuardrailClear confirms
+// the ordinary restart button (no warning, no force checkbox) still
+// renders when the guardrail reports Allow - the common case.
+func TestServer_MachinePage_AllowsPlainRestartWhenGuardrailClear(t *testing.T) {
+	client := &fakeClient{
+		listNodeServicesResp: &rpcpb.ListNodeServicesResponse{
+			Services: []*rpcpb.NodeService{
+				{Name: "apiary_managerd", Status: "running", Enabled: true, Restartable: true},
+			},
+		},
+		preflightRestartNodeServiceResp: &rpcpb.PreflightRestartNodeServiceResponse{Verdict: "allow"},
+	}
+	s := newTestServer(t, client)
+
+	req := httptest.NewRequest(http.MethodGet, "/machine", nil)
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, req)
+
+	body := rec.Body.String()
+	if strings.Contains(body, "Blocked by the restart guardrail") {
+		t.Errorf("machine page shows a guardrail warning when the verdict was allow, got: %s", body)
+	}
+	if !strings.Contains(body, `hx-post="/machine/services/apiary_managerd/restart"`) {
+		t.Errorf("machine page missing the plain restart control when the guardrail is clear, got: %s", body)
+	}
+}
+
+// TestServer_RestartNodeService_PassesForceFlag confirms the force
+// checkbox's form value actually reaches RestartNodeServiceRequest.Force.
+func TestServer_RestartNodeService_PassesForceFlag(t *testing.T) {
+	client := &fakeClient{
+		restartNodeServiceResp: &rpcpb.RestartNodeServiceResponse{Scheduled: true, GuardrailOverridden: true},
+		listNodeServicesResp:   &rpcpb.ListNodeServicesResponse{},
+	}
+	s := newTestServer(t, client)
+
+	form := url.Values{"force": {"1"}}
+	req := httptest.NewRequest(http.MethodPost, "/machine/services/apiary_managerd/restart", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, req)
+
+	if !client.lastRestartNodeServiceReq.GetForce() {
+		t.Error("RestartNodeServiceRequest.Force = false, want true when the force checkbox was submitted")
+	}
+	if !strings.Contains(rec.Body.String(), "restart guardrail overridden") {
+		t.Errorf("response missing the override confirmation, got: %s", rec.Body.String())
+	}
+}
+
 func TestServer_MachinePage_ShowsUplinkStatusForAdmin(t *testing.T) {
 	client := &fakeClient{getUplinkStatusResp: &rpcpb.GetUplinkStatusResponse{
 		Configured: true, Interface: "em0", Up: true,

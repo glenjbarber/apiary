@@ -1018,6 +1018,8 @@ type Command struct {
 	//	*Command_CancelPendingJoinRequest
 	//	*Command_PurgeJoinRequest
 	//	*Command_SetJailHostname
+	//	*Command_AcquireRestartLease
+	//	*Command_RecordRestartCompleted
 	Op            isCommand_Op `protobuf_oneof:"op"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -1294,6 +1296,24 @@ func (x *Command) GetSetJailHostname() *SetJailHostname {
 	return nil
 }
 
+func (x *Command) GetAcquireRestartLease() *AcquireRestartLease {
+	if x != nil {
+		if x, ok := x.Op.(*Command_AcquireRestartLease); ok {
+			return x.AcquireRestartLease
+		}
+	}
+	return nil
+}
+
+func (x *Command) GetRecordRestartCompleted() *RecordRestartCompleted {
+	if x != nil {
+		if x, ok := x.Op.(*Command_RecordRestartCompleted); ok {
+			return x.RecordRestartCompleted
+		}
+	}
+	return nil
+}
+
 type isCommand_Op interface {
 	isCommand_Op()
 }
@@ -1464,6 +1484,24 @@ type Command_SetJailHostname struct {
 	SetJailHostname *SetJailHostname `protobuf:"bytes,24,opt,name=set_jail_hostname,json=setJailHostname,proto3,oneof"`
 }
 
+type Command_AcquireRestartLease struct {
+	// AcquireRestartLease/RecordRestartCompleted back the action-preflight
+	// restart guardrail (ADR-0103): a cluster-wide, Raft-committed lease
+	// that prevents apiary_managerd from being restarted on two Raft
+	// voters within the same window (the real 2026-09-11 stranded-cluster
+	// incident this guardrail exists to close). Deliberately raft-
+	// replicated, not node-local - the whole safety property depends on
+	// raft's own serialized log-apply order making concurrent acquisition
+	// impossible, which a per-node check could never guarantee. See
+	// internal/guardrail and internal/raft/fsm.go's own doc comments for
+	// the full design.
+	AcquireRestartLease *AcquireRestartLease `protobuf:"bytes,27,opt,name=acquire_restart_lease,json=acquireRestartLease,proto3,oneof"`
+}
+
+type Command_RecordRestartCompleted struct {
+	RecordRestartCompleted *RecordRestartCompleted `protobuf:"bytes,28,opt,name=record_restart_completed,json=recordRestartCompleted,proto3,oneof"`
+}
+
 func (*Command_CreateVm) isCommand_Op() {}
 
 func (*Command_UpdateVm) isCommand_Op() {}
@@ -1515,6 +1553,10 @@ func (*Command_CancelPendingJoinRequest) isCommand_Op() {}
 func (*Command_PurgeJoinRequest) isCommand_Op() {}
 
 func (*Command_SetJailHostname) isCommand_Op() {}
+
+func (*Command_AcquireRestartLease) isCommand_Op() {}
+
+func (*Command_RecordRestartCompleted) isCommand_Op() {}
 
 // ApiKey is a cluster-wide credential for ManagerService's external
 // gRPC API (ADR-0023). Only hashed_key (a SHA-256 hex digest) is ever
@@ -3022,6 +3064,349 @@ func (x *PurgeJoinRequest) GetRequestId() string {
 	return ""
 }
 
+// RestartLease is a cluster-wide, Raft-committed exclusive reservation
+// for restarting one service (in practice, only ever "apiary_managerd" -
+// see ADR-0103). Deliberately has NO expiry/TTL field: a granted lease
+// blocks further AcquireRestartLease calls for the same service
+// indefinitely, until either a matching RecordRestartCompleted clears it
+// (the restarted node's own next startup confirming itself healthy) or
+// an operator explicitly re-acquires with force=true. A time-based
+// auto-clear was considered and rejected - see ADR-0103's own
+// Consequences section - because it can let a lease lapse while the
+// underlying restart's outcome is still genuinely unknown, reopening the
+// exact concurrent-restart window this exists to close.
+type RestartLease struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// lease_id is the raft log index of the AcquireRestartLease command
+	// that granted this lease - unique and monotonic for free, no separate
+	// ID scheme needed. RecordRestartCompleted must match this exactly
+	// (along with holder_node_id) before releasing the lease, so a stale
+	// or out-of-order confirmation can never release a different,
+	// currently-active lease for the same service/node pair.
+	LeaseId      uint64 `protobuf:"varint,1,opt,name=lease_id,json=leaseId,proto3" json:"lease_id,omitempty"`
+	Service      string `protobuf:"bytes,2,opt,name=service,proto3" json:"service,omitempty"`
+	HolderNodeId string `protobuf:"bytes,3,opt,name=holder_node_id,json=holderNodeId,proto3" json:"holder_node_id,omitempty"`
+	// requested_at_unix is display/diagnostic only (an operator
+	// investigating a stuck lease wants to know how old it is) - it plays
+	// no role in any blocking decision, unlike an earlier design of this
+	// guardrail that tied expiry to it.
+	RequestedAtUnix int64 `protobuf:"varint,4,opt,name=requested_at_unix,json=requestedAtUnix,proto3" json:"requested_at_unix,omitempty"`
+	// force is true iff this lease was granted over an existing block
+	// (either an unconfirmed prior lease or a recent RestartRecord) via an
+	// explicit operator override.
+	Force         bool `protobuf:"varint,5,opt,name=force,proto3" json:"force,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RestartLease) Reset() {
+	*x = RestartLease{}
+	mi := &file_api_internalpb_state_proto_msgTypes[33]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RestartLease) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RestartLease) ProtoMessage() {}
+
+func (x *RestartLease) ProtoReflect() protoreflect.Message {
+	mi := &file_api_internalpb_state_proto_msgTypes[33]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RestartLease.ProtoReflect.Descriptor instead.
+func (*RestartLease) Descriptor() ([]byte, []int) {
+	return file_api_internalpb_state_proto_rawDescGZIP(), []int{33}
+}
+
+func (x *RestartLease) GetLeaseId() uint64 {
+	if x != nil {
+		return x.LeaseId
+	}
+	return 0
+}
+
+func (x *RestartLease) GetService() string {
+	if x != nil {
+		return x.Service
+	}
+	return ""
+}
+
+func (x *RestartLease) GetHolderNodeId() string {
+	if x != nil {
+		return x.HolderNodeId
+	}
+	return ""
+}
+
+func (x *RestartLease) GetRequestedAtUnix() int64 {
+	if x != nil {
+		return x.RequestedAtUnix
+	}
+	return 0
+}
+
+func (x *RestartLease) GetForce() bool {
+	if x != nil {
+		return x.Force
+	}
+	return false
+}
+
+// RestartRecord is the most recent confirmed-complete restart of one
+// service by one node - written only after that node's own next startup
+// (after the restart) confirms itself healthy, never merely because a
+// restart command was issued. Used by AcquireRestartLease's own cooldown
+// check (only counts if holder is a currently-known Raft voter, per
+// ADR-0103) and reported read-only via GetRestartLeaseStateLocal.
+type RestartRecord struct {
+	state           protoimpl.MessageState `protogen:"open.v1"`
+	Service         string                 `protobuf:"bytes,1,opt,name=service,proto3" json:"service,omitempty"`
+	NodeId          string                 `protobuf:"bytes,2,opt,name=node_id,json=nodeId,proto3" json:"node_id,omitempty"`
+	CompletedAtUnix int64                  `protobuf:"varint,3,opt,name=completed_at_unix,json=completedAtUnix,proto3" json:"completed_at_unix,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
+}
+
+func (x *RestartRecord) Reset() {
+	*x = RestartRecord{}
+	mi := &file_api_internalpb_state_proto_msgTypes[34]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RestartRecord) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RestartRecord) ProtoMessage() {}
+
+func (x *RestartRecord) ProtoReflect() protoreflect.Message {
+	mi := &file_api_internalpb_state_proto_msgTypes[34]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RestartRecord.ProtoReflect.Descriptor instead.
+func (*RestartRecord) Descriptor() ([]byte, []int) {
+	return file_api_internalpb_state_proto_rawDescGZIP(), []int{34}
+}
+
+func (x *RestartRecord) GetService() string {
+	if x != nil {
+		return x.Service
+	}
+	return ""
+}
+
+func (x *RestartRecord) GetNodeId() string {
+	if x != nil {
+		return x.NodeId
+	}
+	return ""
+}
+
+func (x *RestartRecord) GetCompletedAtUnix() int64 {
+	if x != nil {
+		return x.CompletedAtUnix
+	}
+	return 0
+}
+
+// AcquireRestartLease is submitted only by the current Raft leader (see
+// ManagerService.ReserveRestartLease's own doc comment) - node_id,
+// requested_at_unix, and voter_node_ids are all authored by the leader
+// itself immediately before submitting, never accepted from whichever
+// node originally received the restart request, so a stale follower
+// view or cross-node clock skew can never influence the decision (see
+// ADR-0103's own Consequences).
+type AcquireRestartLease struct {
+	state           protoimpl.MessageState `protogen:"open.v1"`
+	Service         string                 `protobuf:"bytes,1,opt,name=service,proto3" json:"service,omitempty"`
+	NodeId          string                 `protobuf:"bytes,2,opt,name=node_id,json=nodeId,proto3" json:"node_id,omitempty"`
+	RequestedAtUnix int64                  `protobuf:"varint,3,opt,name=requested_at_unix,json=requestedAtUnix,proto3" json:"requested_at_unix,omitempty"`
+	// voter_node_ids is the leader's own snapshot of current Raft voters
+	// at submission time - a prior RestartRecord only counts toward the
+	// cooldown check if its node_id appears here, so a non-voter's own
+	// manager restart (no quorum risk) can never block a voter's restart.
+	VoterNodeIds    []string `protobuf:"bytes,4,rep,name=voter_node_ids,json=voterNodeIds,proto3" json:"voter_node_ids,omitempty"`
+	CooldownSeconds int64    `protobuf:"varint,5,opt,name=cooldown_seconds,json=cooldownSeconds,proto3" json:"cooldown_seconds,omitempty"`
+	// force grants the lease even over an existing block (an unconfirmed
+	// prior lease, or a recent voter RestartRecord within cooldown) - an
+	// explicit, logged operator override, never silent.
+	Force         bool `protobuf:"varint,6,opt,name=force,proto3" json:"force,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AcquireRestartLease) Reset() {
+	*x = AcquireRestartLease{}
+	mi := &file_api_internalpb_state_proto_msgTypes[35]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AcquireRestartLease) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AcquireRestartLease) ProtoMessage() {}
+
+func (x *AcquireRestartLease) ProtoReflect() protoreflect.Message {
+	mi := &file_api_internalpb_state_proto_msgTypes[35]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AcquireRestartLease.ProtoReflect.Descriptor instead.
+func (*AcquireRestartLease) Descriptor() ([]byte, []int) {
+	return file_api_internalpb_state_proto_rawDescGZIP(), []int{35}
+}
+
+func (x *AcquireRestartLease) GetService() string {
+	if x != nil {
+		return x.Service
+	}
+	return ""
+}
+
+func (x *AcquireRestartLease) GetNodeId() string {
+	if x != nil {
+		return x.NodeId
+	}
+	return ""
+}
+
+func (x *AcquireRestartLease) GetRequestedAtUnix() int64 {
+	if x != nil {
+		return x.RequestedAtUnix
+	}
+	return 0
+}
+
+func (x *AcquireRestartLease) GetVoterNodeIds() []string {
+	if x != nil {
+		return x.VoterNodeIds
+	}
+	return nil
+}
+
+func (x *AcquireRestartLease) GetCooldownSeconds() int64 {
+	if x != nil {
+		return x.CooldownSeconds
+	}
+	return 0
+}
+
+func (x *AcquireRestartLease) GetForce() bool {
+	if x != nil {
+		return x.Force
+	}
+	return false
+}
+
+// RecordRestartCompleted is submitted by the restarted node's own next
+// startup (never by the process that requested the restart, which the
+// restart itself may have already replaced - see ADR-0103) once that
+// startup confirms itself healthy. completed_at_unix is authored by
+// whichever node applies this (the current leader), the same
+// determinism/clock-skew reasoning as AcquireRestartLease.
+type RecordRestartCompleted struct {
+	state           protoimpl.MessageState `protogen:"open.v1"`
+	Service         string                 `protobuf:"bytes,1,opt,name=service,proto3" json:"service,omitempty"`
+	NodeId          string                 `protobuf:"bytes,2,opt,name=node_id,json=nodeId,proto3" json:"node_id,omitempty"`
+	CompletedAtUnix int64                  `protobuf:"varint,3,opt,name=completed_at_unix,json=completedAtUnix,proto3" json:"completed_at_unix,omitempty"`
+	// lease_id must match the currently-active lease for service exactly
+	// (along with node_id) before it is released - see RestartLease's own
+	// doc comment for why. The RestartRecord itself is still written
+	// unconditionally regardless of whether the lease matched, since a
+	// real restart really did complete either way.
+	LeaseId       uint64 `protobuf:"varint,4,opt,name=lease_id,json=leaseId,proto3" json:"lease_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RecordRestartCompleted) Reset() {
+	*x = RecordRestartCompleted{}
+	mi := &file_api_internalpb_state_proto_msgTypes[36]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RecordRestartCompleted) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RecordRestartCompleted) ProtoMessage() {}
+
+func (x *RecordRestartCompleted) ProtoReflect() protoreflect.Message {
+	mi := &file_api_internalpb_state_proto_msgTypes[36]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RecordRestartCompleted.ProtoReflect.Descriptor instead.
+func (*RecordRestartCompleted) Descriptor() ([]byte, []int) {
+	return file_api_internalpb_state_proto_rawDescGZIP(), []int{36}
+}
+
+func (x *RecordRestartCompleted) GetService() string {
+	if x != nil {
+		return x.Service
+	}
+	return ""
+}
+
+func (x *RecordRestartCompleted) GetNodeId() string {
+	if x != nil {
+		return x.NodeId
+	}
+	return ""
+}
+
+func (x *RecordRestartCompleted) GetCompletedAtUnix() int64 {
+	if x != nil {
+		return x.CompletedAtUnix
+	}
+	return 0
+}
+
+func (x *RecordRestartCompleted) GetLeaseId() uint64 {
+	if x != nil {
+		return x.LeaseId
+	}
+	return 0
+}
+
 // CommandResult is the FSM's response to Apply, echoed back through
 // ApplyResponse. error is set (and vm left unset) if the command was
 // rejected at the application level (e.g. duplicate/missing id) - this is
@@ -3039,7 +3424,7 @@ type CommandResult struct {
 
 func (x *CommandResult) Reset() {
 	*x = CommandResult{}
-	mi := &file_api_internalpb_state_proto_msgTypes[33]
+	mi := &file_api_internalpb_state_proto_msgTypes[37]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3051,7 +3436,7 @@ func (x *CommandResult) String() string {
 func (*CommandResult) ProtoMessage() {}
 
 func (x *CommandResult) ProtoReflect() protoreflect.Message {
-	mi := &file_api_internalpb_state_proto_msgTypes[33]
+	mi := &file_api_internalpb_state_proto_msgTypes[37]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3064,7 +3449,7 @@ func (x *CommandResult) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CommandResult.ProtoReflect.Descriptor instead.
 func (*CommandResult) Descriptor() ([]byte, []int) {
-	return file_api_internalpb_state_proto_rawDescGZIP(), []int{33}
+	return file_api_internalpb_state_proto_rawDescGZIP(), []int{37}
 }
 
 func (x *CommandResult) GetVm() *VMDefinition {
@@ -3105,6 +3490,12 @@ type FSMSnapshotState struct {
 	ApiKeys             map[string]*ApiKey             `protobuf:"bytes,4,rep,name=api_keys,json=apiKeys,proto3" json:"api_keys,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
 	Jails               map[string]*JailDefinition     `protobuf:"bytes,6,rep,name=jails,proto3" json:"jails,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
 	PendingJoinRequests map[string]*PendingJoinRequest `protobuf:"bytes,7,rep,name=pending_join_requests,json=pendingJoinRequests,proto3" json:"pending_join_requests,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	// restart_leases/restart_records back the action-preflight restart
+	// guardrail (ADR-0103) - included here so a raft snapshot restore or
+	// a seeded recovery via raftd -restore never silently drops this
+	// state and reopens the concurrent-restart window it exists to close.
+	RestartLeases  map[string]*RestartLease  `protobuf:"bytes,8,rep,name=restart_leases,json=restartLeases,proto3" json:"restart_leases,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	RestartRecords map[string]*RestartRecord `protobuf:"bytes,9,rep,name=restart_records,json=restartRecords,proto3" json:"restart_records,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
 	// auth_enabled is set permanently, forever, the first time any
 	// CreateAPIKey command ever succeeds - unlike api_keys' own size,
 	// it never reverts to false even if every key is later revoked.
@@ -3118,7 +3509,7 @@ type FSMSnapshotState struct {
 
 func (x *FSMSnapshotState) Reset() {
 	*x = FSMSnapshotState{}
-	mi := &file_api_internalpb_state_proto_msgTypes[34]
+	mi := &file_api_internalpb_state_proto_msgTypes[38]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3130,7 +3521,7 @@ func (x *FSMSnapshotState) String() string {
 func (*FSMSnapshotState) ProtoMessage() {}
 
 func (x *FSMSnapshotState) ProtoReflect() protoreflect.Message {
-	mi := &file_api_internalpb_state_proto_msgTypes[34]
+	mi := &file_api_internalpb_state_proto_msgTypes[38]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3143,7 +3534,7 @@ func (x *FSMSnapshotState) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FSMSnapshotState.ProtoReflect.Descriptor instead.
 func (*FSMSnapshotState) Descriptor() ([]byte, []int) {
-	return file_api_internalpb_state_proto_rawDescGZIP(), []int{34}
+	return file_api_internalpb_state_proto_rawDescGZIP(), []int{38}
 }
 
 func (x *FSMSnapshotState) GetLastIndex() uint64 {
@@ -3188,6 +3579,20 @@ func (x *FSMSnapshotState) GetPendingJoinRequests() map[string]*PendingJoinReque
 	return nil
 }
 
+func (x *FSMSnapshotState) GetRestartLeases() map[string]*RestartLease {
+	if x != nil {
+		return x.RestartLeases
+	}
+	return nil
+}
+
+func (x *FSMSnapshotState) GetRestartRecords() map[string]*RestartRecord {
+	if x != nil {
+		return x.RestartRecords
+	}
+	return nil
+}
+
 func (x *FSMSnapshotState) GetAuthEnabled() bool {
 	if x != nil {
 		return x.AuthEnabled
@@ -3227,7 +3632,7 @@ type ConfigArchive struct {
 
 func (x *ConfigArchive) Reset() {
 	*x = ConfigArchive{}
-	mi := &file_api_internalpb_state_proto_msgTypes[35]
+	mi := &file_api_internalpb_state_proto_msgTypes[39]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3239,7 +3644,7 @@ func (x *ConfigArchive) String() string {
 func (*ConfigArchive) ProtoMessage() {}
 
 func (x *ConfigArchive) ProtoReflect() protoreflect.Message {
-	mi := &file_api_internalpb_state_proto_msgTypes[35]
+	mi := &file_api_internalpb_state_proto_msgTypes[39]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3252,7 +3657,7 @@ func (x *ConfigArchive) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ConfigArchive.ProtoReflect.Descriptor instead.
 func (*ConfigArchive) Descriptor() ([]byte, []int) {
-	return file_api_internalpb_state_proto_rawDescGZIP(), []int{35}
+	return file_api_internalpb_state_proto_rawDescGZIP(), []int{39}
 }
 
 func (x *ConfigArchive) GetFormatVersion() uint32 {
@@ -3355,7 +3760,7 @@ const file_api_internalpb_state_proto_rawDesc = "" +
 	"\vbridge_name\x18\x05 \x01(\tR\n" +
 	"bridgeName\x12)\n" +
 	"\x10external_gateway\x18\x06 \x01(\tR\x0fexternalGateway\x12%\n" +
-	"\x0euplink_bridged\x18\a \x01(\bR\ruplinkBridged\"\xf0\x10\n" +
+	"\x0euplink_bridged\x18\a \x01(\bR\ruplinkBridged\"\xb7\x12\n" +
 	"\aCommand\x12;\n" +
 	"\tcreate_vm\x18\x01 \x01(\v2\x1c.apiary.internal.v1.CreateVMH\x00R\bcreateVm\x12;\n" +
 	"\tupdate_vm\x18\x02 \x01(\v2\x1c.apiary.internal.v1.UpdateVMH\x00R\bupdateVm\x12;\n" +
@@ -3387,7 +3792,9 @@ const file_api_internalpb_state_proto_rawDesc = "" +
 	"\x1breject_pending_join_request\x18\x17 \x01(\v2,.apiary.internal.v1.RejectPendingJoinRequestH\x00R\x18rejectPendingJoinRequest\x12m\n" +
 	"\x1bcancel_pending_join_request\x18\x19 \x01(\v2,.apiary.internal.v1.CancelPendingJoinRequestH\x00R\x18cancelPendingJoinRequest\x12T\n" +
 	"\x12purge_join_request\x18\x1a \x01(\v2$.apiary.internal.v1.PurgeJoinRequestH\x00R\x10purgeJoinRequest\x12Q\n" +
-	"\x11set_jail_hostname\x18\x18 \x01(\v2#.apiary.internal.v1.SetJailHostnameH\x00R\x0fsetJailHostnameB\x04\n" +
+	"\x11set_jail_hostname\x18\x18 \x01(\v2#.apiary.internal.v1.SetJailHostnameH\x00R\x0fsetJailHostname\x12]\n" +
+	"\x15acquire_restart_lease\x18\x1b \x01(\v2'.apiary.internal.v1.AcquireRestartLeaseH\x00R\x13acquireRestartLease\x12f\n" +
+	"\x18record_restart_completed\x18\x1c \x01(\v2*.apiary.internal.v1.RecordRestartCompletedH\x00R\x16recordRestartCompletedB\x04\n" +
 	"\x02op\"\x82\x01\n" +
 	"\x06ApiKey\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
@@ -3477,12 +3884,35 @@ const file_api_internalpb_state_proto_rawDesc = "" +
 	"request_id\x18\x01 \x01(\tR\trequestId\"1\n" +
 	"\x10PurgeJoinRequest\x12\x1d\n" +
 	"\n" +
-	"request_id\x18\x01 \x01(\tR\trequestId\"\xe9\x01\n" +
+	"request_id\x18\x01 \x01(\tR\trequestId\"\xab\x01\n" +
+	"\fRestartLease\x12\x19\n" +
+	"\blease_id\x18\x01 \x01(\x04R\aleaseId\x12\x18\n" +
+	"\aservice\x18\x02 \x01(\tR\aservice\x12$\n" +
+	"\x0eholder_node_id\x18\x03 \x01(\tR\fholderNodeId\x12*\n" +
+	"\x11requested_at_unix\x18\x04 \x01(\x03R\x0frequestedAtUnix\x12\x14\n" +
+	"\x05force\x18\x05 \x01(\bR\x05force\"n\n" +
+	"\rRestartRecord\x12\x18\n" +
+	"\aservice\x18\x01 \x01(\tR\aservice\x12\x17\n" +
+	"\anode_id\x18\x02 \x01(\tR\x06nodeId\x12*\n" +
+	"\x11completed_at_unix\x18\x03 \x01(\x03R\x0fcompletedAtUnix\"\xdb\x01\n" +
+	"\x13AcquireRestartLease\x12\x18\n" +
+	"\aservice\x18\x01 \x01(\tR\aservice\x12\x17\n" +
+	"\anode_id\x18\x02 \x01(\tR\x06nodeId\x12*\n" +
+	"\x11requested_at_unix\x18\x03 \x01(\x03R\x0frequestedAtUnix\x12$\n" +
+	"\x0evoter_node_ids\x18\x04 \x03(\tR\fvoterNodeIds\x12)\n" +
+	"\x10cooldown_seconds\x18\x05 \x01(\x03R\x0fcooldownSeconds\x12\x14\n" +
+	"\x05force\x18\x06 \x01(\bR\x05force\"\x92\x01\n" +
+	"\x16RecordRestartCompleted\x12\x18\n" +
+	"\aservice\x18\x01 \x01(\tR\aservice\x12\x17\n" +
+	"\anode_id\x18\x02 \x01(\tR\x06nodeId\x12*\n" +
+	"\x11completed_at_unix\x18\x03 \x01(\x03R\x0fcompletedAtUnix\x12\x19\n" +
+	"\blease_id\x18\x04 \x01(\x04R\aleaseId\"\xe9\x01\n" +
 	"\rCommandResult\x120\n" +
 	"\x02vm\x18\x01 \x01(\v2 .apiary.internal.v1.VMDefinitionR\x02vm\x12\x14\n" +
 	"\x05error\x18\x02 \x01(\tR\x05error\x126\n" +
 	"\x04jail\x18\x03 \x01(\v2\".apiary.internal.v1.JailDefinitionR\x04jail\x12X\n" +
-	"\x14pending_join_request\x18\x04 \x01(\v2&.apiary.internal.v1.PendingJoinRequestR\x12pendingJoinRequest\"\xd1\a\n" +
+	"\x14pending_join_request\x18\x04 \x01(\v2&.apiary.internal.v1.PendingJoinRequestR\x12pendingJoinRequest\"\xde\n" +
+	"\n" +
 	"\x10FSMSnapshotState\x12\x1d\n" +
 	"\n" +
 	"last_index\x18\x01 \x01(\x04R\tlastIndex\x12?\n" +
@@ -3490,7 +3920,9 @@ const file_api_internalpb_state_proto_rawDesc = "" +
 	"\bnetworks\x18\x03 \x03(\v22.apiary.internal.v1.FSMSnapshotState.NetworksEntryR\bnetworks\x12L\n" +
 	"\bapi_keys\x18\x04 \x03(\v21.apiary.internal.v1.FSMSnapshotState.ApiKeysEntryR\aapiKeys\x12E\n" +
 	"\x05jails\x18\x06 \x03(\v2/.apiary.internal.v1.FSMSnapshotState.JailsEntryR\x05jails\x12q\n" +
-	"\x15pending_join_requests\x18\a \x03(\v2=.apiary.internal.v1.FSMSnapshotState.PendingJoinRequestsEntryR\x13pendingJoinRequests\x12!\n" +
+	"\x15pending_join_requests\x18\a \x03(\v2=.apiary.internal.v1.FSMSnapshotState.PendingJoinRequestsEntryR\x13pendingJoinRequests\x12^\n" +
+	"\x0erestart_leases\x18\b \x03(\v27.apiary.internal.v1.FSMSnapshotState.RestartLeasesEntryR\rrestartLeases\x12a\n" +
+	"\x0frestart_records\x18\t \x03(\v28.apiary.internal.v1.FSMSnapshotState.RestartRecordsEntryR\x0erestartRecords\x12!\n" +
 	"\fauth_enabled\x18\x05 \x01(\bR\vauthEnabled\x1aX\n" +
 	"\bVmsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x126\n" +
@@ -3507,7 +3939,13 @@ const file_api_internalpb_state_proto_rawDesc = "" +
 	"\x05value\x18\x02 \x01(\v2\".apiary.internal.v1.JailDefinitionR\x05value:\x028\x01\x1an\n" +
 	"\x18PendingJoinRequestsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12<\n" +
-	"\x05value\x18\x02 \x01(\v2&.apiary.internal.v1.PendingJoinRequestR\x05value:\x028\x01\"\xe3\x01\n" +
+	"\x05value\x18\x02 \x01(\v2&.apiary.internal.v1.PendingJoinRequestR\x05value:\x028\x01\x1ab\n" +
+	"\x12RestartLeasesEntry\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x126\n" +
+	"\x05value\x18\x02 \x01(\v2 .apiary.internal.v1.RestartLeaseR\x05value:\x028\x01\x1ad\n" +
+	"\x13RestartRecordsEntry\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x127\n" +
+	"\x05value\x18\x02 \x01(\v2!.apiary.internal.v1.RestartRecordR\x05value:\x028\x01\"\xe3\x01\n" +
 	"\rConfigArchive\x12%\n" +
 	"\x0eformat_version\x18\x01 \x01(\rR\rformatVersion\x12#\n" +
 	"\rexported_unix\x18\x02 \x01(\x03R\fexportedUnix\x12\x17\n" +
@@ -3561,7 +3999,7 @@ func file_api_internalpb_state_proto_rawDescGZIP() []byte {
 }
 
 var file_api_internalpb_state_proto_enumTypes = make([]protoimpl.EnumInfo, 5)
-var file_api_internalpb_state_proto_msgTypes = make([]protoimpl.MessageInfo, 41)
+var file_api_internalpb_state_proto_msgTypes = make([]protoimpl.MessageInfo, 47)
 var file_api_internalpb_state_proto_goTypes = []any{
 	(VMState)(0),                      // 0: apiary.internal.v1.VMState
 	(VMPhase)(0),                      // 1: apiary.internal.v1.VMPhase
@@ -3601,14 +4039,20 @@ var file_api_internalpb_state_proto_goTypes = []any{
 	(*RejectPendingJoinRequest)(nil),  // 35: apiary.internal.v1.RejectPendingJoinRequest
 	(*CancelPendingJoinRequest)(nil),  // 36: apiary.internal.v1.CancelPendingJoinRequest
 	(*PurgeJoinRequest)(nil),          // 37: apiary.internal.v1.PurgeJoinRequest
-	(*CommandResult)(nil),             // 38: apiary.internal.v1.CommandResult
-	(*FSMSnapshotState)(nil),          // 39: apiary.internal.v1.FSMSnapshotState
-	(*ConfigArchive)(nil),             // 40: apiary.internal.v1.ConfigArchive
-	nil,                               // 41: apiary.internal.v1.FSMSnapshotState.VmsEntry
-	nil,                               // 42: apiary.internal.v1.FSMSnapshotState.NetworksEntry
-	nil,                               // 43: apiary.internal.v1.FSMSnapshotState.ApiKeysEntry
-	nil,                               // 44: apiary.internal.v1.FSMSnapshotState.JailsEntry
-	nil,                               // 45: apiary.internal.v1.FSMSnapshotState.PendingJoinRequestsEntry
+	(*RestartLease)(nil),              // 38: apiary.internal.v1.RestartLease
+	(*RestartRecord)(nil),             // 39: apiary.internal.v1.RestartRecord
+	(*AcquireRestartLease)(nil),       // 40: apiary.internal.v1.AcquireRestartLease
+	(*RecordRestartCompleted)(nil),    // 41: apiary.internal.v1.RecordRestartCompleted
+	(*CommandResult)(nil),             // 42: apiary.internal.v1.CommandResult
+	(*FSMSnapshotState)(nil),          // 43: apiary.internal.v1.FSMSnapshotState
+	(*ConfigArchive)(nil),             // 44: apiary.internal.v1.ConfigArchive
+	nil,                               // 45: apiary.internal.v1.FSMSnapshotState.VmsEntry
+	nil,                               // 46: apiary.internal.v1.FSMSnapshotState.NetworksEntry
+	nil,                               // 47: apiary.internal.v1.FSMSnapshotState.ApiKeysEntry
+	nil,                               // 48: apiary.internal.v1.FSMSnapshotState.JailsEntry
+	nil,                               // 49: apiary.internal.v1.FSMSnapshotState.PendingJoinRequestsEntry
+	nil,                               // 50: apiary.internal.v1.FSMSnapshotState.RestartLeasesEntry
+	nil,                               // 51: apiary.internal.v1.FSMSnapshotState.RestartRecordsEntry
 }
 var file_api_internalpb_state_proto_depIdxs = []int32{
 	0,  // 0: apiary.internal.v1.VMDefinition.desired_state:type_name -> apiary.internal.v1.VMState
@@ -3642,37 +4086,43 @@ var file_api_internalpb_state_proto_depIdxs = []int32{
 	36, // 28: apiary.internal.v1.Command.cancel_pending_join_request:type_name -> apiary.internal.v1.CancelPendingJoinRequest
 	37, // 29: apiary.internal.v1.Command.purge_join_request:type_name -> apiary.internal.v1.PurgeJoinRequest
 	30, // 30: apiary.internal.v1.Command.set_jail_hostname:type_name -> apiary.internal.v1.SetJailHostname
-	10, // 31: apiary.internal.v1.CreateAPIKey.key:type_name -> apiary.internal.v1.ApiKey
-	8,  // 32: apiary.internal.v1.CreateNetwork.network:type_name -> apiary.internal.v1.NetworkDefinition
-	5,  // 33: apiary.internal.v1.CreateVM.vm:type_name -> apiary.internal.v1.VMDefinition
-	5,  // 34: apiary.internal.v1.UpdateVM.vm:type_name -> apiary.internal.v1.VMDefinition
-	1,  // 35: apiary.internal.v1.UpdateVMPhase.phase:type_name -> apiary.internal.v1.VMPhase
-	0,  // 36: apiary.internal.v1.SetVMDesiredState.desired_state:type_name -> apiary.internal.v1.VMState
-	7,  // 37: apiary.internal.v1.SetVMFirewallRules.firewall_rules:type_name -> apiary.internal.v1.FirewallRule
-	6,  // 38: apiary.internal.v1.CreateJail.jail:type_name -> apiary.internal.v1.JailDefinition
-	6,  // 39: apiary.internal.v1.UpdateJail.jail:type_name -> apiary.internal.v1.JailDefinition
-	3,  // 40: apiary.internal.v1.UpdateJailPhase.phase:type_name -> apiary.internal.v1.JailPhase
-	2,  // 41: apiary.internal.v1.SetJailDesiredState.desired_state:type_name -> apiary.internal.v1.JailState
-	4,  // 42: apiary.internal.v1.PendingJoinRequest.status:type_name -> apiary.internal.v1.JoinRequestStatus
-	32, // 43: apiary.internal.v1.CreatePendingJoinRequest.request:type_name -> apiary.internal.v1.PendingJoinRequest
-	5,  // 44: apiary.internal.v1.CommandResult.vm:type_name -> apiary.internal.v1.VMDefinition
-	6,  // 45: apiary.internal.v1.CommandResult.jail:type_name -> apiary.internal.v1.JailDefinition
-	32, // 46: apiary.internal.v1.CommandResult.pending_join_request:type_name -> apiary.internal.v1.PendingJoinRequest
-	41, // 47: apiary.internal.v1.FSMSnapshotState.vms:type_name -> apiary.internal.v1.FSMSnapshotState.VmsEntry
-	42, // 48: apiary.internal.v1.FSMSnapshotState.networks:type_name -> apiary.internal.v1.FSMSnapshotState.NetworksEntry
-	43, // 49: apiary.internal.v1.FSMSnapshotState.api_keys:type_name -> apiary.internal.v1.FSMSnapshotState.ApiKeysEntry
-	44, // 50: apiary.internal.v1.FSMSnapshotState.jails:type_name -> apiary.internal.v1.FSMSnapshotState.JailsEntry
-	45, // 51: apiary.internal.v1.FSMSnapshotState.pending_join_requests:type_name -> apiary.internal.v1.FSMSnapshotState.PendingJoinRequestsEntry
-	5,  // 52: apiary.internal.v1.FSMSnapshotState.VmsEntry.value:type_name -> apiary.internal.v1.VMDefinition
-	8,  // 53: apiary.internal.v1.FSMSnapshotState.NetworksEntry.value:type_name -> apiary.internal.v1.NetworkDefinition
-	10, // 54: apiary.internal.v1.FSMSnapshotState.ApiKeysEntry.value:type_name -> apiary.internal.v1.ApiKey
-	6,  // 55: apiary.internal.v1.FSMSnapshotState.JailsEntry.value:type_name -> apiary.internal.v1.JailDefinition
-	32, // 56: apiary.internal.v1.FSMSnapshotState.PendingJoinRequestsEntry.value:type_name -> apiary.internal.v1.PendingJoinRequest
-	57, // [57:57] is the sub-list for method output_type
-	57, // [57:57] is the sub-list for method input_type
-	57, // [57:57] is the sub-list for extension type_name
-	57, // [57:57] is the sub-list for extension extendee
-	0,  // [0:57] is the sub-list for field type_name
+	40, // 31: apiary.internal.v1.Command.acquire_restart_lease:type_name -> apiary.internal.v1.AcquireRestartLease
+	41, // 32: apiary.internal.v1.Command.record_restart_completed:type_name -> apiary.internal.v1.RecordRestartCompleted
+	10, // 33: apiary.internal.v1.CreateAPIKey.key:type_name -> apiary.internal.v1.ApiKey
+	8,  // 34: apiary.internal.v1.CreateNetwork.network:type_name -> apiary.internal.v1.NetworkDefinition
+	5,  // 35: apiary.internal.v1.CreateVM.vm:type_name -> apiary.internal.v1.VMDefinition
+	5,  // 36: apiary.internal.v1.UpdateVM.vm:type_name -> apiary.internal.v1.VMDefinition
+	1,  // 37: apiary.internal.v1.UpdateVMPhase.phase:type_name -> apiary.internal.v1.VMPhase
+	0,  // 38: apiary.internal.v1.SetVMDesiredState.desired_state:type_name -> apiary.internal.v1.VMState
+	7,  // 39: apiary.internal.v1.SetVMFirewallRules.firewall_rules:type_name -> apiary.internal.v1.FirewallRule
+	6,  // 40: apiary.internal.v1.CreateJail.jail:type_name -> apiary.internal.v1.JailDefinition
+	6,  // 41: apiary.internal.v1.UpdateJail.jail:type_name -> apiary.internal.v1.JailDefinition
+	3,  // 42: apiary.internal.v1.UpdateJailPhase.phase:type_name -> apiary.internal.v1.JailPhase
+	2,  // 43: apiary.internal.v1.SetJailDesiredState.desired_state:type_name -> apiary.internal.v1.JailState
+	4,  // 44: apiary.internal.v1.PendingJoinRequest.status:type_name -> apiary.internal.v1.JoinRequestStatus
+	32, // 45: apiary.internal.v1.CreatePendingJoinRequest.request:type_name -> apiary.internal.v1.PendingJoinRequest
+	5,  // 46: apiary.internal.v1.CommandResult.vm:type_name -> apiary.internal.v1.VMDefinition
+	6,  // 47: apiary.internal.v1.CommandResult.jail:type_name -> apiary.internal.v1.JailDefinition
+	32, // 48: apiary.internal.v1.CommandResult.pending_join_request:type_name -> apiary.internal.v1.PendingJoinRequest
+	45, // 49: apiary.internal.v1.FSMSnapshotState.vms:type_name -> apiary.internal.v1.FSMSnapshotState.VmsEntry
+	46, // 50: apiary.internal.v1.FSMSnapshotState.networks:type_name -> apiary.internal.v1.FSMSnapshotState.NetworksEntry
+	47, // 51: apiary.internal.v1.FSMSnapshotState.api_keys:type_name -> apiary.internal.v1.FSMSnapshotState.ApiKeysEntry
+	48, // 52: apiary.internal.v1.FSMSnapshotState.jails:type_name -> apiary.internal.v1.FSMSnapshotState.JailsEntry
+	49, // 53: apiary.internal.v1.FSMSnapshotState.pending_join_requests:type_name -> apiary.internal.v1.FSMSnapshotState.PendingJoinRequestsEntry
+	50, // 54: apiary.internal.v1.FSMSnapshotState.restart_leases:type_name -> apiary.internal.v1.FSMSnapshotState.RestartLeasesEntry
+	51, // 55: apiary.internal.v1.FSMSnapshotState.restart_records:type_name -> apiary.internal.v1.FSMSnapshotState.RestartRecordsEntry
+	5,  // 56: apiary.internal.v1.FSMSnapshotState.VmsEntry.value:type_name -> apiary.internal.v1.VMDefinition
+	8,  // 57: apiary.internal.v1.FSMSnapshotState.NetworksEntry.value:type_name -> apiary.internal.v1.NetworkDefinition
+	10, // 58: apiary.internal.v1.FSMSnapshotState.ApiKeysEntry.value:type_name -> apiary.internal.v1.ApiKey
+	6,  // 59: apiary.internal.v1.FSMSnapshotState.JailsEntry.value:type_name -> apiary.internal.v1.JailDefinition
+	32, // 60: apiary.internal.v1.FSMSnapshotState.PendingJoinRequestsEntry.value:type_name -> apiary.internal.v1.PendingJoinRequest
+	38, // 61: apiary.internal.v1.FSMSnapshotState.RestartLeasesEntry.value:type_name -> apiary.internal.v1.RestartLease
+	39, // 62: apiary.internal.v1.FSMSnapshotState.RestartRecordsEntry.value:type_name -> apiary.internal.v1.RestartRecord
+	63, // [63:63] is the sub-list for method output_type
+	63, // [63:63] is the sub-list for method input_type
+	63, // [63:63] is the sub-list for extension type_name
+	63, // [63:63] is the sub-list for extension extendee
+	0,  // [0:63] is the sub-list for field type_name
 }
 
 func init() { file_api_internalpb_state_proto_init() }
@@ -3707,6 +4157,8 @@ func file_api_internalpb_state_proto_init() {
 		(*Command_CancelPendingJoinRequest)(nil),
 		(*Command_PurgeJoinRequest)(nil),
 		(*Command_SetJailHostname)(nil),
+		(*Command_AcquireRestartLease)(nil),
+		(*Command_RecordRestartCompleted)(nil),
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
@@ -3714,7 +4166,7 @@ func file_api_internalpb_state_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_api_internalpb_state_proto_rawDesc), len(file_api_internalpb_state_proto_rawDesc)),
 			NumEnums:      5,
-			NumMessages:   41,
+			NumMessages:   47,
 			NumExtensions: 0,
 			NumServices:   0,
 		},
