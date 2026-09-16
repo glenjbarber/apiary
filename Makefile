@@ -1,4 +1,14 @@
 # Makefile
+#
+# Every target that touches the filesystem outside this checkout
+# (/usr/local, /var/db, /var/run, /var/log, /etc) assumes it is being
+# run with root privileges already - as root directly, or via `sudo
+# make <target>` wrapping the whole invocation. No individual recipe
+# line calls `sudo` itself: doing so per-line only matters for a
+# non-root, non-sudo'd `make` invocation, which was never a supported
+# case (an Apiary Comb's admin is assumed to actually have admin
+# access on the host), and it multiplies password prompts for no
+# benefit when the whole invocation is already privileged.
 SRCS=		apiaryinstall \
 			raftd \
 			managerd \
@@ -36,12 +46,28 @@ INSTALL_SRCS=	raftd \
 # disturb the running process's already-open file descriptor at all -
 # the same fix this project's own live apiarium/apiverse deploys use.
 # Re-run this after every rebuild, then `service apiary_<name> restart`.
+#
+# Also installs each daemon's commented .json.sample reference file
+# (etc/apiary/<name>.json.sample) alongside its real config path, e.g.
+# /usr/local/etc/apiary/raftd.json.sample next to raftd.json. These are
+# pure documentation, never read by any daemon (JSON has no comment
+# syntax, and every daemon parses its config with plain encoding/json -
+# see docs/bootstrap.md Steps 7-9), so they are always refreshed on
+# every install, unlike the real config files they sit beside, which
+# this target never touches. Copy one to the real path and strip its
+# "//" lines to use it (each is written so every comment stands on its
+# own line and never trails a value, so a plain `grep -v '^\s*//'`
+# does this safely).
 install: build setup-dirs
-	sudo mkdir -p /usr/local/libexec/apiary
+	mkdir -p /usr/local/libexec/apiary /usr/local/etc/apiary
 	for S in ${INSTALL_SRCS} ; \
-		do sudo cp -p $$S /usr/local/libexec/apiary/$$S.new ;\
-		sudo chmod +x /usr/local/libexec/apiary/$$S.new ;\
-		sudo mv /usr/local/libexec/apiary/$$S.new /usr/local/libexec/apiary/$$S ;\
+		do cp -p $$S /usr/local/libexec/apiary/$$S.new ;\
+		chmod +x /usr/local/libexec/apiary/$$S.new ;\
+		mv /usr/local/libexec/apiary/$$S.new /usr/local/libexec/apiary/$$S ;\
+	done
+	for S in ${INSTALL_SRCS} ; \
+		do cp -p etc/apiary/$$S.json.sample /usr/local/etc/apiary/$$S.json.sample ;\
+		chmod 644 /usr/local/etc/apiary/$$S.json.sample ;\
 	done
 
 # setup installs the pieces a fresh host needs beyond the built binaries
@@ -71,16 +97,16 @@ setup: setup-dirs setup-rcd setup-pam setup-tls
 # step lists rather than leaving an operator to remember which
 # directories are and aren't self-creating.
 setup-dirs:
-	sudo mkdir -p /var/db/apiary/raftd /var/db/apiary/isos /var/run/apiary /var/log/apiary
+	mkdir -p /var/db/apiary/raftd /var/db/apiary/isos /var/run/apiary /var/log/apiary
 
 setup-rcd:
-	sudo cp etc/rc.d/apiary_* /usr/local/etc/rc.d/
-	sudo chmod 555 /usr/local/etc/rc.d/apiary_*
-	sudo sysrc apiary_raftd_enable=YES apiary_managerd_enable=YES apiary_frontend_enable=YES apiary_restshimd_enable=YES
+	cp etc/rc.d/apiary_* /usr/local/etc/rc.d/
+	chmod 555 /usr/local/etc/rc.d/apiary_*
+	sysrc apiary_raftd_enable=YES apiary_managerd_enable=YES apiary_frontend_enable=YES apiary_restshimd_enable=YES
 
 setup-pam:
 	test -f /etc/pam.d/${PAM_SERVICE} || \
-		sudo sh -c "printf 'auth required pam_unix.so no_warn\\naccount required pam_unix.so\\n' > /etc/pam.d/${PAM_SERVICE}"
+		printf 'auth required pam_unix.so no_warn\naccount required pam_unix.so\n' > /etc/pam.d/${PAM_SERVICE}
 	@echo "PAM policy at /etc/pam.d/${PAM_SERVICE} - pass -pam-service ${PAM_SERVICE} to managerd to enable real login; the first successful login becomes Admin automatically (see docs/bootstrap.md Step 11)."
 
 NODE_TLS_DIR?=	/usr/local/etc/apiary-tls
@@ -97,9 +123,9 @@ NODE_TLS_DIR?=	/usr/local/etc/apiary-tls
 # specific IP SAN, both failed real verification with distinct,
 # individually-confusing x509 errors before this was added.
 setup-tls:
-	sudo mkdir -p ${NODE_TLS_DIR}
+	mkdir -p ${NODE_TLS_DIR}
 	test -f ${NODE_TLS_DIR}/cert.pem -a -f ${NODE_TLS_DIR}/key.pem || \
-		sudo openssl req -x509 -newkey rsa:2048 -nodes -days 3650 \
+		openssl req -x509 -newkey rsa:2048 -nodes -days 3650 \
 			-keyout ${NODE_TLS_DIR}/key.pem -out ${NODE_TLS_DIR}/cert.pem \
 			-subj "/CN=$$(hostname)" \
 			-addext "subjectAltName=IP:127.0.0.1,DNS:$$(hostname)"
@@ -117,89 +143,72 @@ NODE_REST_ADDR?=	0.0.0.0:8081
 # on a genuinely fresh checkout - no assumption that `make build` (or
 # anything else) already ran: packages, building every binary, running
 # apiaryinstall's safe fixes plus its one risky network step, installing
-# the built binaries where the rc.d scripts expect them, and the
-# apiary_managerd_args/apiary_frontend_args/
-# apiary_restshimd_args a fresh node actually needs to be reachable at
-# all - every one of these three daemons defaults its own listen
-# address to 127.0.0.1 (loopback-only) when no arg is given at all, so
-# skipping this step leaves every port genuinely unreachable from
-# anywhere but the host itself, not merely unconfigured
-# (-bhyve-bootrom is resolved here the same way Section 5 does by hand
-# - the package only sometimes carries the real .fd file itself,
-# edk2-bhyve usually carries it instead).
+# the built binaries where the rc.d scripts expect them, and writing
+# each daemon's real /usr/local/etc/apiary/<name>.json config directly
+# (ADR-0100 - CLI flags/sysrc *_args are legacy, not used here or
+# anywhere else in this Makefile) - every one of raftd/managerd/
+# frontend/restshimd defaults its own listen address to 127.0.0.1
+# (loopback-only) with no config at all, so skipping this step leaves
+# every port genuinely unreachable from anywhere but the host itself,
+# not merely unconfigured (-bhyve-bootrom is resolved here the same
+# way Section 5 does by hand - the package only sometimes carries the
+# real .fd file itself, edk2-bhyve usually carries it instead).
 # NODE_ZFS_POOL/NODE_VLAN_UPLINK/NODE_BHYVE_BRIDGE/NODE_RPC_ADDR/
 # NODE_HTTP_ADDR/NODE_REST_ADDR/NODE_TLS_DIR/PAM_SERVICE override the
 # defaults for a host that doesn't match this one's layout, e.g.
 # `make setup-quick NODE_VLAN_UPLINK=em0 NODE_HTTP_ADDR=10.62.0.2:8080`.
+# node_id uses this host's own hostname, never the doc's own
+# "<this-node-id>" placeholder text - a real handoff bug (see
+# SHARED.md) came from that literal placeholder getting copied verbatim
+# and committing itself into persistent raft state.
 #
-# Real login is enabled by default now: setup (a prerequisite, via
-# setup-tls/setup-pam) already provisions both a TLS certificate and a
-# PAM policy file unconditionally, so the one thing that used to block
-# -pam-service (ADR-0087's TLS requirement) is always satisfied by the
-# time this runs. frontend/restshimd both get -manager-tls plus
-# -manager-tls-ca pointed at the same certificate, since a self-signed
-# cert has no public CA to verify against otherwise - confirmed live,
+# Real login and TLS are both mandatory here, not optional: setup (a
+# prerequisite, via setup-tls/setup-pam) already provisions both a TLS
+# certificate and a PAM policy file unconditionally, so managerd.json
+# below always sets tls_cert/tls_key/pam_service together, and
+# frontend.json/restshimd.json always set manager_tls/manager_tls_ca to
+# match, even for a pure loopback, single-node Comb - confirmed live,
 # working through this exact chain of TLS failures one at a time
-# (missing SAN, then unknown authority) before landing here.
-# setup-admin (below) creates the actual UNIX account and prompts for
-# its password interactively, so there's no separate manual step left
-# before logging in - just start the services and log in as
-# NODE_ADMIN_USER right away, since the first successful login on a
-# Comb with no role map yet becomes Admin automatically (ADR-0086).
+# (missing SAN, then unknown authority) before landing on this shape.
+#
+# No account-creation step here (removed - see SHARED.md's own dated
+# entry for why): PAM only needs some valid UNIX account with a
+# password, not specifically one Apiary creates. Whichever account is
+# already running this `make setup-quick` invocation (or any other
+# existing account) becomes Admin automatically on its first
+# successful login, since the role map on a fresh Comb starts out
+# genuinely empty (ADR-0086) - just start the services and log in.
 #
 # The binary-install step (${MAKE} install, plus a separate copy for
 # apiaryinstall alone below - see the `install` target's own comment
 # for why apiaryinstall isn't part of `install` itself) uses the same
 # .new-then-mv atomic rename this project's own live apiarium/apiverse
 # deploys already rely on, so re-running setup-quick against an
-# already-running Comb never hits "Text file busy".
+# already-running Comb never hits "Text file busy". The config files
+# below are written unconditionally on every run, matching a fresh
+# checkout's values - re-running this against a Comb with hand-edited
+# config will overwrite those edits (unlike setup-pam/setup-tls's own
+# "only if absent" contract, since these carry real per-host settings
+# that only setup-quick itself knows how to regenerate correctly).
 setup-quick:
-	pkg install -y go git sudo
+	pkg install -y go git
 	${MAKE} build
 	${MAKE} setup
-	${MAKE} setup-admin
 	./apiaryinstall -apply -apply-network yes-modify-network -zfs-pool ${NODE_ZFS_POOL} \
 		-vlan-uplink ${NODE_VLAN_UPLINK} -bhyve-bridge ${NODE_BHYVE_BRIDGE}
 	${MAKE} install
-	sudo cp -p apiaryinstall /usr/local/libexec/apiary/apiaryinstall.new
-	sudo chmod +x /usr/local/libexec/apiary/apiaryinstall.new
-	sudo mv /usr/local/libexec/apiary/apiaryinstall.new /usr/local/libexec/apiary/apiaryinstall
+	cp -p apiaryinstall /usr/local/libexec/apiary/apiaryinstall.new
+	chmod +x /usr/local/libexec/apiary/apiaryinstall.new
+	mv /usr/local/libexec/apiary/apiaryinstall.new /usr/local/libexec/apiary/apiaryinstall
 	BOOTROM=$$(test -f /usr/local/share/uefi-firmware/BHYVE_UEFI.fd && echo /usr/local/share/uefi-firmware/BHYVE_UEFI.fd || pkg info -l edk2-bhyve 2>/dev/null | grep '\.fd$$' | head -1) ;\
 	test -n "$$BOOTROM" || { echo "could not locate a bhyve UEFI firmware .fd file - install bhyve-firmware/edk2-bhyve and re-run" >&2 ; exit 1 ; } ;\
-	sudo sysrc apiary_managerd_args="-rpc-addr ${NODE_RPC_ADDR} -bhyve-bootrom $$BOOTROM -bhyve-bridge ${NODE_BHYVE_BRIDGE} -vlan-uplink ${NODE_VLAN_UPLINK} -tls-cert ${NODE_TLS_DIR}/cert.pem -tls-key ${NODE_TLS_DIR}/key.pem -pam-service ${PAM_SERVICE}"
-	sudo sysrc apiary_frontend_args="-http-addr ${NODE_HTTP_ADDR} -manager-tls -manager-tls-ca ${NODE_TLS_DIR}/cert.pem"
-	sudo sysrc apiary_restshimd_args="-http-addr ${NODE_REST_ADDR} -manager-tls -manager-tls-ca ${NODE_TLS_DIR}/cert.pem"
-	@echo "apiary_managerd_args/apiary_frontend_args/apiary_restshimd_args set, including real login (-pam-service ${PAM_SERVICE}). Start the services (service apiary_raftd start && service apiary_managerd start && service apiary_frontend start && service apiary_restshimd start), then log in as ${NODE_ADMIN_USER} right away: whoever logs in first on a Comb with no role map yet becomes Admin automatically (ADR-0086)."
-
-NODE_ADMIN_USER?=	admin
-NODE_ROLE_MAP?=		/var/db/apiary/frontend-role-map.json
-
-# setup-admin creates NODE_ADMIN_USER and prompts for its password
-# interactively via passwd(1) - a single-node bring-up's whole point is
-# to end with one working login, not a manual pw useradd/passwd
-# afterward. Only runs useradd/passwd when the account doesn't already
-# exist: re-running setup-quick (or setup-admin directly) must never
-# silently reset an existing admin's password out from under them, the
-# same "only act if absent" contract setup-pam/setup-tls already
-# follow. To rotate an existing account's password instead, run
-# `passwd ${NODE_ADMIN_USER}` directly.
-#
-# Checks NODE_ROLE_MAP's own contents before doing anything else - a
-# real gap found live: the first version of this target only checked
-# whether the UNIX account already existed, so it happily created one
-# and set its password even when ADR-0086's own bootstrap condition
-# (the role map genuinely empty) no longer held, leaving a real
-# account whose first login could never become Admin - "no Apiary role
-# is assigned to this account" instead. The role map, once it exists
-# at all, is a small `{"role_map": {...}}` file written by
-# applyRoleMapLocked (internal/frontend/server.go); stripping
-# whitespace before matching handles both its own pretty-printed form
-# and a hand-edited compact one identically.
-setup-admin:
-	if [ -f ${NODE_ROLE_MAP} ] && ! tr -d ' \t\n' < ${NODE_ROLE_MAP} | grep -qE '"role_map":(\{\}|null)' ; then \
-		echo "${NODE_ROLE_MAP} already has role entries - a new ${NODE_ADMIN_USER} login would NOT automatically become Admin (ADR-0086 only bootstraps while the role map is genuinely empty). Skipping account setup - grant a role through /users as an existing Admin instead." >&2 ; \
-		exit 0 ; \
-	fi ; \
-	pw usershow ${NODE_ADMIN_USER} >/dev/null 2>&1 && \
-		echo "user ${NODE_ADMIN_USER} already exists - not touching its password (run passwd ${NODE_ADMIN_USER} directly to change it)" || \
-		{ sudo pw useradd -n ${NODE_ADMIN_USER} -m -s /bin/sh && sudo passwd ${NODE_ADMIN_USER} ; }
+	NODEID=$$(hostname) ;\
+	RPCADDR="${NODE_RPC_ADDR}" ;\
+	RPCPORT=$${RPCADDR##*:} ;\
+	printf '{\n  "data_dir": "/var/db/apiary/raftd",\n  "socket": "/var/run/apiary/raftd.sock",\n  "node_id": "%s"\n}\n' "$$NODEID" > /usr/local/etc/apiary/raftd.json ;\
+	chmod 600 /usr/local/etc/apiary/raftd.json ;\
+	printf '{\n  "raftd_socket": "/var/run/apiary/raftd.sock",\n  "rpc_addr": "%s",\n  "node_id": "%s",\n  "zfs_base": "%s/apiary",\n  "bhyve_bootrom": "%s",\n  "bhyve_bridge": "%s",\n  "uplink": "%s",\n  "iso_dir": "/var/db/apiary/isos",\n  "tls_cert": "%s/cert.pem",\n  "tls_key": "%s/key.pem",\n  "pam_service": "%s"\n}\n' "${NODE_RPC_ADDR}" "$$NODEID" "${NODE_ZFS_POOL}" "$$BOOTROM" "${NODE_BHYVE_BRIDGE}" "${NODE_VLAN_UPLINK}" "${NODE_TLS_DIR}" "${NODE_TLS_DIR}" "${PAM_SERVICE}" > /usr/local/etc/apiary/managerd.json ;\
+	chmod 600 /usr/local/etc/apiary/managerd.json ;\
+	printf '{\n  "manager_addr": "127.0.0.1:%s",\n  "http_addr": "%s",\n  "manager_tls": true,\n  "manager_tls_ca": "%s/cert.pem"\n}\n' "$$RPCPORT" "${NODE_HTTP_ADDR}" "${NODE_TLS_DIR}" > /usr/local/etc/apiary/frontend.json ;\
+	printf '{\n  "manager_addr": "127.0.0.1:%s",\n  "http_addr": "%s",\n  "manager_tls": true,\n  "manager_tls_ca": "%s/cert.pem"\n}\n' "$$RPCPORT" "${NODE_REST_ADDR}" "${NODE_TLS_DIR}" > /usr/local/etc/apiary/restshimd.json
+	@echo "/usr/local/etc/apiary/{raftd,managerd,frontend,restshimd}.json written, including real login (pam_service=${PAM_SERVICE}) and TLS. Start the services (service apiary_raftd start && service apiary_managerd start && service apiary_frontend start && service apiary_restshimd start), then log in with any existing UNIX account right away: whoever logs in first on a Comb with no role map yet becomes Admin automatically (ADR-0086)."

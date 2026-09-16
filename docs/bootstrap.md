@@ -13,7 +13,26 @@ every callout marks a real thing that went wrong the first time through,
 not a hypothetical. This doc exists so the next fresh host doesn't
 rediscover any of it.
 
-## 0. Two gotchas to know before you start
+**Fast path**: `make setup-quick` collapses Steps 2-9 below into
+one command for a single-node Path A bring-up on a genuinely fresh
+checkout - packages, building every binary, `apiaryinstall`'s safe
+fixes plus its one risky network step, installing binaries where the
+rc.d scripts expect them, and setting each daemon's listen-address
+args, with real login and TLS enabled by default - log in with
+whichever UNIX account ran this command (see Step 11's own note on
+why no separate account-creation step exists). This whole document
+assumes you are operating as root throughout, the same way a fresh
+FreeBSD install typically drops you at a root shell - no command
+anywhere here, including `make setup-quick` itself, calls `sudo`;
+become root first (`su -`, or log in as root directly) if you aren't
+already. Override its `NODE_*` variables for a host that doesn't match the
+defaults, e.g. `make setup-quick NODE_VLAN_UPLINK=em0
+NODE_HTTP_ADDR=10.62.0.2:8080`. It does not cover Path B (joining an
+existing Colony) or Step 12/13 (creating a network, VM, or jail) -
+read on for those regardless, and read on generally the first time
+through so a `setup-quick` failure is legible rather than a black box.
+
+## 0. Gotchas to know before you start
 
 **`go build ./...` does not produce a binary.** With multiple `main`
 packages in this module, `go build ./...` only verifies everything
@@ -30,6 +49,40 @@ with `-buildvcs=false` (shown throughout this doc), or fix it once with:
 ```bash
 git config --global --add safe.directory /path/to/apiary
 ```
+
+**On bare-metal hardware, check BIOS virtualization before installing
+FreeBSD at all - not after.** Confirmed on real hardware (a Lenovo
+ThinkPad T540p/Haswell and a ThinkPad X270/Kaby Lake): laptops of this
+era frequently ship with VT-x/EPT disabled in BIOS by default, and the
+resulting failure is identical to Step 13's *nested*-virtualization
+symptom (`hw.vmm.vmx.initialized: 0`) even though nothing about it points
+at firmware. If this host is bare metal (not itself a VM), go into BIOS
+and confirm virtualization extensions are enabled before you even start
+Step 1 - it's a much shorter detour than debugging a `vmm.ko` failure
+that turns out to be a BIOS setting.
+
+**A laptop node's lid-close suspend looks exactly like a raft network
+partition, not a power event.** If this node is a laptop, disable
+lid-close suspend (and check `hw.acpi.cpu.cx_lowest`/
+`performance_cx_lowest`) before it ever joins a cluster - the actual
+symptom (missed heartbeats, an election on the surviving member) reads
+as a networking or raft bug and is easy to chase in entirely the wrong
+direction if you don't already know the real cause is "someone closed
+the lid."
+
+**Mixing CPU generations across cluster nodes creates a one-directional
+migration hazard.** A newer-generation node (e.g. Kaby Lake) exposes CPU
+instruction-set extensions an older-generation node (e.g. Haswell)
+doesn't have. A guest that boots on the newer node and detects those
+extensions can execute an unsupported instruction after migrating to the
+older node - the guest dies on resume, not a clean migration error.
+Migrating old-generation -> new-generation is safe; the reverse is not.
+Until every guest's visible CPU features are masked down to the
+cluster's lowest common baseline (other hypervisors solve this with
+explicit CPU model definitions; whether bhyve currently exposes the
+necessary knobs has not been determined as of this writing - may warrant
+its own ADR), know which of your nodes is the oldest generation and
+default to creating/booting new guests there first.
 
 ## 1. Base OS and source
 
@@ -53,15 +106,9 @@ The repo's own `Makefile` does this in one step:
 make build
 ```
 
-Equivalent by hand, if you ever need it (e.g. building just one):
-
-```bash
-go build -buildvcs=false -o apiaryinstall ./cmd/apiaryinstall
-go build -buildvcs=false -o raftd ./cmd/raftd
-go build -buildvcs=false -o managerd ./cmd/managerd
-go build -buildvcs=false -o frontend ./cmd/frontend
-go build -buildvcs=false -o restshimd ./cmd/restshimd
-```
+`make clean` removes all five built binaries from the checkout root
+(it does not touch anything installed under `/usr/local/libexec/apiary`
+- see Step 6).
 
 ## 3. Run `apiaryinstall` - check first, then apply
 
@@ -144,11 +191,60 @@ present (the ADRs' assumed default) - `edk2-bhyve` installs the same
 files under both `/usr/local/share/edk2-bhyve/` and
 `/usr/local/share/uefi-firmware/`.
 
-## 6. Runtime directories
+## 6. Runtime directories, rc.d scripts, and installed binaries
+
+`make setup` runs four sub-targets in one pass, each independently
+re-runnable if you only need to redo one piece:
+
+- `setup-dirs` - creates the directories every `apiary_*` rc.d script
+  or daemon expects to already exist (`/var/db/apiary/raftd`,
+  `/var/db/apiary/isos`, `/var/run/apiary`, `/var/log/apiary` -
+  `/var/log/apiary` is the one genuine gap, since a first `service
+  apiary_raftd start` on a truly fresh host fails outright without it).
+- `setup-rcd` - installs and enables the rc.d scripts themselves
+  (`etc/rc.d/apiary_*`). Re-run this alone (`make setup-rcd`)
+  after pulling a change to one of those scripts, without redoing
+  PAM/TLS provisioning.
+- `setup-pam` - writes a fresh `/etc/pam.d/apiary` only if one isn't
+  already present, so a later hand-edited policy file is never
+  clobbered by a re-run (see Step 11 for what this is for).
+- `setup-tls` - generates a self-signed certificate/key pair at
+  `/usr/local/etc/apiary-tls/{cert.pem,key.pem}` (override the
+  directory with `NODE_TLS_DIR`) only if that path doesn't already
+  have one, so a real CA-issued certificate dropped there instead is
+  never overwritten. This is the certificate Step 11's `tls_cert`/
+  `tls_key` config values come from.
+
+Run all four together:
 
 ```bash
-mkdir -p /var/db/apiary/raftd /var/db/apiary/isos /var/run/apiary /var/log/apiary
+make setup
 ```
+
+Each rc.d script runs a fixed binary path, `/usr/local/libexec/apiary/<name>`
+- not the copy sitting in this checkout - so install the four daemons
+there too, every time you rebuild them:
+
+```bash
+make install
+```
+
+`make install` builds the four daemons (`raftd`/`managerd`/`frontend`/
+`restshimd` - not `apiaryinstall`, which is a one-shot CLI meant to be
+run from this checkout, never installed permanently), makes sure the
+runtime directories from Step 6 exist first, then copies each binary
+to `/usr/local/libexec/apiary/<name>.new` and atomically renames it
+into place - `cp` over a binary a live process still has open fails
+with "Text file busy," but `mv`'s atomic rename doesn't disturb the
+running process's already-open file descriptor at all.
+
+From here on, every "start the daemon" step below means `service
+apiary_<name> start`, never a direct `daemon`/`./<binary>` invocation -
+the rc.d scripts are what actually supervise these processes correctly
+(auto-restart, correct pidfile handling on stop/restart - see the
+"Not covered here" section's own history of getting this wrong by
+hand). Re-run the binary-install loop above and `service apiary_<name>
+restart` after every rebuild.
 
 ## 7. Start `raftd`
 
@@ -156,13 +252,16 @@ As of ADR-0100, `raftd` takes no CLI flags for its steady-state
 configuration - it reads `/usr/local/etc/apiary/raftd.json`
 unconditionally (only `-reset`/`-restore`/`-restore-file`/
 `-restore-dry-run`/`-export` remain CLI flags, and only for their own
-one-shot recovery/export runs - see ADR-0038/ADR-0051). Create the
-directory and file first:
+one-shot recovery/export runs - see ADR-0038/ADR-0051). `make
+install` (Step 6) already dropped a fully-commented reference copy at
+`/usr/local/etc/apiary/raftd.json.sample` - copy it and strip its
+comments as a starting point instead of writing the file from scratch:
 
 ```bash
-sudo mkdir -p /usr/local/etc/apiary
-sudo -e /usr/local/etc/apiary/raftd.json
-sudo chmod 600 /usr/local/etc/apiary/raftd.json
+mkdir -p /usr/local/etc/apiary
+grep -v '^\s*//' /usr/local/etc/apiary/raftd.json.sample > /usr/local/etc/apiary/raftd.json
+${EDITOR:-vi} /usr/local/etc/apiary/raftd.json
+chmod 600 /usr/local/etc/apiary/raftd.json
 ```
 
 Decide first: does this node bootstrap its own independent cluster, or
@@ -183,11 +282,13 @@ just omit the key:
 ```
 
 Run it in the foreground once to confirm a clean single-node leader
-election in the output, `Ctrl-C`, then launch it detached:
+election in the output, `Ctrl-C`, then start it via rc.d (Step 6 must
+already have installed the binary to `/usr/local/libexec/apiary/raftd`
+and enabled the service):
 
 ```bash
 ./raftd
-daemon -f -p /var/run/apiary/raftd.pid -o /var/log/apiary/raftd.log $(pwd)/raftd
+service apiary_raftd start
 ```
 
 ### Path B - join an existing multi-node Colony
@@ -205,7 +306,7 @@ node's own real, reachable address:
   "socket": "/var/run/apiary/raftd.sock",
   "node_id": "<this-node-id>",
   "raft_bind": "<this-host's-real-address>:17600",
-  "join": "/tmp/existing-member-raftd.sock"
+  "join": "/var/run/apiary/join-tmp.sock"
 }
 ```
 
@@ -217,23 +318,35 @@ a *different* host. Make it reachable as a local path with a one-shot SSH
 local forward before starting `raftd` with the config above, then tear
 the tunnel down once the join succeeds - ongoing raft replication
 travels over the real `raft_bind` TCP addresses afterward, not through
-this tunnel:
+this tunnel. **Never point this at `/tmp`** (or any other world-searchable
+directory) - `raftd` itself creates `/var/run/apiary/` at mode `0700`
+specifically so only root can reach its real socket, and forwarding the
+same RPC surface into `/tmp` (mode `1777`) throws that hardening away for
+as long as the tunnel is open: any local unprivileged user on this host
+could then dial the forwarded socket and issue internal `RaftInternal`
+RPCs against the *remote* node, unauthenticated unless `internal_token`
+is set. Use the same `/var/run/apiary/` directory instead, which is
+already root-only:
 
 ```bash
-ssh -f -N -L /tmp/existing-member-raftd.sock:/var/run/apiary/raftd.sock <existing-member-host>
+ssh -f -N -L /var/run/apiary/join-tmp.sock:/var/run/apiary/raftd.sock <existing-member-host>
 ```
 
 If the existing cluster runs with `internal_token` set, set the same
 value here too - every `raftd` in one cluster is expected to share it.
 Run `./raftd` in the foreground; once the join succeeds and this
-node's own log shows it as a voter, kill the SSH tunnel, remove `join`
-from `raftd.json` (a node with existing on-disk raft state ignores it
-and simply resumes as the member it already is - see ADR-0003's own
-`hadState` note - but there's no reason to leave a stale join target
-sitting in the file), and launch normally, detached:
+node's own log shows it as a voter, kill the SSH tunnel (`pkill -f
+"L /var/run/apiary/join-tmp.sock"` or the tunnel's own PID) and remove
+the socket file it leaves behind (`rm -f
+/var/run/apiary/join-tmp.sock` - killing the `ssh` process doesn't
+reliably unlink it), remove `join` from `raftd.json` (a node with
+existing on-disk raft state ignores it and simply resumes as the
+member it already is - see ADR-0003's own `hadState` note - but
+there's no reason to leave a stale join target sitting in the file),
+and start it normally via rc.d:
 
 ```bash
-daemon -f -p /var/run/apiary/raftd.pid -o /var/log/apiary/raftd.log $(pwd)/raftd
+service apiary_raftd start
 ```
 
 A node joined at the wrong target (a follower, not the leader) fails fast
@@ -257,11 +370,18 @@ unconditionally (only `-reset-managed`/`-factory-reset`/
 runs - see ADR-0038/ADR-0069). This same file is also what the Machine
 Configuration web page reads and writes later, for every field except
 `node_id`/`rpc_addr`/`raftd_socket` (deliberately not exposed there -
-see ADR-0100).
+see ADR-0100). `make install` (Step 6) already dropped a
+fully-commented reference copy at
+`/usr/local/etc/apiary/managerd.json.sample` covering every field
+this daemon has, including the advanced ones (Cloudflare exposure,
+peer forwarding, assumption-checker tuning) not shown below - copy it
+and strip its comments as a starting point instead of writing the file
+from scratch:
 
 ```bash
-sudo -e /usr/local/etc/apiary/managerd.json
-sudo chmod 600 /usr/local/etc/apiary/managerd.json
+grep -v '^\s*//' /usr/local/etc/apiary/managerd.json.sample > /usr/local/etc/apiary/managerd.json
+${EDITOR:-vi} /usr/local/etc/apiary/managerd.json
+chmod 600 /usr/local/etc/apiary/managerd.json
 ```
 
 ```json
@@ -273,12 +393,24 @@ sudo chmod 600 /usr/local/etc/apiary/managerd.json
   "bhyve_bootrom": "/usr/local/share/uefi-firmware/BHYVE_UEFI.fd",
   "bhyve_bridge": "bridge0",
   "uplink": "<uplink-ifname>",
-  "iso_dir": "/var/db/apiary/isos"
+  "iso_dir": "/var/db/apiary/isos",
+  "tls_cert": "/usr/local/etc/apiary-tls/cert.pem",
+  "tls_key": "/usr/local/etc/apiary-tls/key.pem"
 }
 ```
 
+**TLS is mandatory here, not an afterthought reserved for Step 11's
+PAM login** - `tls_cert`/`tls_key` above already point at the
+certificate Step 6's `make setup`/`setup-tls` generated
+(`/usr/local/etc/apiary-tls/cert.pem`/`key.pem` by default, or your
+own `NODE_TLS_DIR` if overridden). managerd's external RPC API is
+encrypted from this point on regardless of whether real login is ever
+turned on - even a purely loopback-only single-node Comb gets TLS on
+this channel, since it costs nothing to have it and Step 11 requires
+it anyway the moment `pam_service` is set.
+
 ```bash
-daemon -f -p /var/run/apiary/managerd.pid -o /var/log/apiary/managerd.log $(pwd)/managerd
+service apiary_managerd start
 ```
 
 **Joining a multi-node Colony (Path B only)** - add these so this node's
@@ -324,39 +456,58 @@ A clean log shows one line: `managerd: listening on 0.0.0.0:17700
 
 As of ADR-0100, both take no CLI flags either - `frontend` reads
 `/usr/local/etc/apiary/frontend.json`, `restshimd` reads
-`/usr/local/etc/apiary/restshimd.json`, each unconditionally.
+`/usr/local/etc/apiary/restshimd.json`, each unconditionally. `make
+install` (Step 6) already dropped a commented reference copy of
+each alongside its real path (`frontend.json.sample`/
+`restshimd.json.sample`) - copy and strip comments as a starting point
+instead of writing either from scratch:
 
 ```bash
-sudo -e /usr/local/etc/apiary/frontend.json
+grep -v '^\s*//' /usr/local/etc/apiary/frontend.json.sample > /usr/local/etc/apiary/frontend.json
+${EDITOR:-vi} /usr/local/etc/apiary/frontend.json
 ```
 
 ```json
 {
   "manager_addr": "127.0.0.1:17700",
-  "http_addr": "0.0.0.0:8080"
+  "http_addr": "0.0.0.0:8080",
+  "manager_tls": true,
+  "manager_tls_ca": "/usr/local/etc/apiary-tls/cert.pem"
 }
 ```
 
+`manager_tls`/`manager_tls_ca` are required here, not optional -
+`managerd` now always serves its external RPC API over TLS (Step 8),
+so a plaintext dial from `frontend` would fail the handshake outright.
+Point `manager_tls_ca` at the same certificate Step 6 generated (a
+self-signed certificate has no public CA to verify against otherwise).
+
 ```bash
-daemon -f -p /var/run/apiary/frontend.pid -o /var/log/apiary/frontend.log $(pwd)/frontend
+service apiary_frontend start
 ```
 
 `restshimd` (Apiary's REST/JSON API, if you need it) follows the same
 pattern:
 
 ```bash
-sudo -e /usr/local/etc/apiary/restshimd.json
+grep -v '^\s*//' /usr/local/etc/apiary/restshimd.json.sample > /usr/local/etc/apiary/restshimd.json
+${EDITOR:-vi} /usr/local/etc/apiary/restshimd.json
 ```
 
 ```json
 {
   "manager_addr": "127.0.0.1:17700",
-  "http_addr": "0.0.0.0:8081"
+  "http_addr": "0.0.0.0:8081",
+  "manager_tls": true,
+  "manager_tls_ca": "/usr/local/etc/apiary-tls/cert.pem"
 }
 ```
 
+Same reasoning as `frontend` above - `manager_tls`/`manager_tls_ca`
+are required now that `managerd` always serves TLS, not optional.
+
 ```bash
-daemon -f -p /var/run/apiary/restshimd.pid -o /var/log/apiary/restshimd.log $(pwd)/restshimd
+service apiary_restshimd start
 ```
 
 Without `pam_service` on `managerd` (see Step 8), the web UI is open
@@ -384,21 +535,17 @@ not `frontend` - a login password now travels over the RPC channel
 between them, so `managerd` also needs `tls_cert`/`tls_key` set in its
 own config for `pam_service` to be accepted at all (`managerd` refuses
 to start otherwise, and `UpdateNodeConfig` rejects the same bad
-combination through the web UI too).
+combination through the web UI too). Step 8 already set `tls_cert`/
+`tls_key` unconditionally, so that requirement is already satisfied -
+this step only adds `pam_service`.
 
-**Pick a PAM service name** (e.g. `apiary`) and create its policy file.
-`make setup` does this for you (only if `/etc/pam.d/apiary` doesn't
-already exist, so it never clobbers a hand-edited one) - or by hand,
-with `printf`, not a pasted heredoc. A heredoc containing tab
-characters, pasted into an interactive SSH session without bracketed-paste
-support, can have its tabs consumed as tab-completion keystrokes instead
-of inserted literally - confirmed live: it produced a corrupted,
-field-less `/etc/pam.d/apiary` and a `pam: starting transaction ...
-System error` at login. `printf` with explicit `\n`s sidesteps this
-class of problem entirely:
+**Pick a PAM service name** (e.g. `apiary`) and create its policy file
+with `make setup-pam` (bundled into `make setup` too, from Step 6) -
+only if `/etc/pam.d/apiary` doesn't already exist, so it never
+clobbers a hand-edited one:
 
 ```bash
-printf 'auth required pam_unix.so no_warn\naccount required pam_unix.so\n' > /etc/pam.d/apiary
+make setup-pam
 ```
 
 **Verify it landed correctly** before trying to log in - `cat -A` reveals
@@ -411,40 +558,39 @@ cat -A /etc/pam.d/apiary
 Expect exactly two clean lines, each ending in `$`, nothing squished
 together.
 
-**Create a real UNIX account** for each person who should log in (or
-reuse existing ones):
+**A real UNIX account is all PAM needs to authenticate against** - not
+specifically one Apiary creates. If you're already logged into this
+host as a suitable account (yourself, or whichever user is running
+this bootstrap), you can use it directly; to create an additional
+account instead:
 
 ```bash
 pw useradd -n <username> -m -s /bin/sh
 passwd <username>
 ```
 
-**Add `tls_cert`/`tls_key`/`pam_service` to `managerd.json`** (via
-`sudo -e /usr/local/etc/apiary/managerd.json`, or through the Machine
+**Add `pam_service` to `managerd.json`** (via `${EDITOR:-vi}
+/usr/local/etc/apiary/managerd.json`, or through the Machine
 Configuration page's TLS panel once `managerd` is already up) and
 restart:
 
 ```json
-  "tls_cert": "<cert>",
-  "tls_key": "<key>",
   "pam_service": "apiary"
 ```
 
 ```bash
-kill $(cat /var/run/apiary/managerd.pid)
-daemon -f -p /var/run/apiary/managerd.pid -o /var/log/apiary/managerd.log $(pwd)/managerd
+service apiary_managerd restart
 ```
 
 `frontend` picks up the change automatically the next time it calls
 `Status` - no need to restart `frontend` itself.
 
-**Log in as `<username>` right away** - since no Apiary account exists
-on this Comb yet, the first successful login automatically becomes
-Admin (ADR-0086; the login page itself says so while this is true).
-Every login after that first one needs an explicit role, granted
-through the Users page (Admin-only, `/users`) - a PAM login for a
-username with no role assigned is rejected outright, not silently
-downgraded to Viewer.
+**Log in right away** - since no Apiary account exists on this Comb
+yet, the first successful login automatically becomes Admin (ADR-0086;
+the login page itself says so while this is true). Every login after
+that first one needs an explicit role, granted through the Users page
+(Admin-only, `/users`) - a PAM login for a username with no role
+assigned is rejected outright, not silently downgraded to Viewer.
 
 Log in as the intended Admin as soon as `managerd` comes back up:
 whoever authenticates first wins the bootstrap, so leaving this window
@@ -597,13 +743,8 @@ repeating this workaround indefinitely.
   working rc.d scripts (matching the service names ADR-0049 already
   assumed exist) - install with `make setup` (installs and enables the
   rc.d scripts, and writes a fresh `/etc/pam.d/apiary` if one isn't
-  already present - see Step 11 below for what that's for), or by hand:
-  ```bash
-  sudo cp etc/rc.d/apiary_* /usr/local/etc/rc.d/
-  sudo chmod 555 /usr/local/etc/rc.d/apiary_*
-  sudo sysrc apiary_raftd_enable=YES apiary_managerd_enable=YES apiary_frontend_enable=YES apiary_restshimd_enable=YES
-  ```
-  then `service apiary_raftd start` (and the others, in dependency
+  already present - see Step 11 below for what that's for), then
+  `service apiary_raftd start` (and the others, in dependency
   order - each script's own `REQUIRE`/`BEFORE` lines handle that if you
   just use `service apiary_frontend start`, which pulls in the rest).
   As of ADR-0100, each daemon's own steady-state configuration lives in
