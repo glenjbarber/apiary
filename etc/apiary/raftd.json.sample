@@ -9,10 +9,10 @@
 // out - so the stripped result is a complete, valid config.
 //
 // Only data_dir/socket/node_id matter for an independent single-node
-// Comb (docs/bootstrap.md Path A). raft_bind/join/await_join only
-// matter when joining an existing multi-node Colony (Path B) - see
-// Step 7 there for the full walkthrough, including the SSH-tunnel
-// mechanics "join" needs across hosts.
+// Comb (docs/create-node.md). raft_bind/join/await_join only matter
+// when joining an existing multi-node Colony. The current, safe flow
+// uses await_join - see docs/add-node-to-colony.md. Do not use an SSH
+// tunnel to make join reach a remote Unix socket.
 {
   // Directory for raft's own log/stable store and snapshots.
   "data_dir": "/var/db/apiary/raftd",

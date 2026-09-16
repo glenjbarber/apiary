@@ -1,4 +1,18 @@
-# Bootstrapping a fresh Apiary host
+# Apiary node runbooks
+
+Use the runbook that matches the outcome you want:
+
+- [Create a new standalone node](create-node.md) creates a fully working
+  single-node Comb. It is the correct starting point for an independent
+  installation or a host you want to validate before joining elsewhere.
+- [Add a node to an existing Colony](add-node-to-colony.md) prepares a new
+  host and uses Apiary's approved join flow. It does not use the old manual
+  SSH Unix-socket forwarding procedure.
+
+This document is retained as the detailed combined reference from which the
+two focused runbooks were split. Prefer the two documents above for new work.
+
+# Detailed combined bootstrap reference
 
 A step-by-step runbook for taking a blank FreeBSD host (VM or bare metal)
 to a running Apiary node with real, working VM/jail networking - using
@@ -293,67 +307,13 @@ service apiary_raftd start
 
 ### Path B - join an existing multi-node Colony
 
-Two things easy to get wrong:
+**This historical path is retired. Do not use `join` or an SSH Unix-socket
+forward to join a different host.** Apiary now has a mutually authorized,
+UI-driven join flow with `await_join`, reachability preflight, and an
+Admin approval on the target Colony. Follow
+[Add a node to an existing Colony](add-node-to-colony.md) instead.
 
-**`raft_bind` must be a real, routable address, not the default.**
-`raftd`'s default is `127.0.0.1:17600` - loopback, correct only for a
-single-host test cluster. For a genuine cross-host join, set this
-node's own real, reachable address:
-
-```json
-{
-  "data_dir": "/var/db/apiary/raftd",
-  "socket": "/var/run/apiary/raftd.sock",
-  "node_id": "<this-node-id>",
-  "raft_bind": "<this-host's-real-address>:17600",
-  "join": "/var/run/apiary/join-tmp.sock"
-}
-```
-
-**`join` only ever dials its value as a local Unix domain socket**
-(`unix://<path>`, hardcoded in `cmd/raftd`'s own `joinCluster` - see
-ADR-0003) - it has no TCP option. That's fine for multiple `raftd`
-processes on one host, but the existing cluster member's socket lives on
-a *different* host. Make it reachable as a local path with a one-shot SSH
-local forward before starting `raftd` with the config above, then tear
-the tunnel down once the join succeeds - ongoing raft replication
-travels over the real `raft_bind` TCP addresses afterward, not through
-this tunnel. **Never point this at `/tmp`** (or any other world-searchable
-directory) - `raftd` itself creates `/var/run/apiary/` at mode `0700`
-specifically so only root can reach its real socket, and forwarding the
-same RPC surface into `/tmp` (mode `1777`) throws that hardening away for
-as long as the tunnel is open: any local unprivileged user on this host
-could then dial the forwarded socket and issue internal `RaftInternal`
-RPCs against the *remote* node, unauthenticated unless `internal_token`
-is set. Use the same `/var/run/apiary/` directory instead, which is
-already root-only:
-
-```bash
-ssh -f -N -L /var/run/apiary/join-tmp.sock:/var/run/apiary/raftd.sock <existing-member-host>
-```
-
-If the existing cluster runs with `internal_token` set, set the same
-value here too - every `raftd` in one cluster is expected to share it.
-Run `./raftd` in the foreground; once the join succeeds and this
-node's own log shows it as a voter, kill the SSH tunnel (`pkill -f
-"L /var/run/apiary/join-tmp.sock"` or the tunnel's own PID) and remove
-the socket file it leaves behind (`rm -f
-/var/run/apiary/join-tmp.sock` - killing the `ssh` process doesn't
-reliably unlink it), remove `join` from `raftd.json` (a node with
-existing on-disk raft state ignores it and simply resumes as the
-member it already is - see ADR-0003's own `hadState` note - but
-there's no reason to leave a stale join target sitting in the file),
-and start it normally via rc.d:
-
-```bash
-service apiary_raftd start
-```
-
-A node joined at the wrong target (a follower, not the leader) fails fast
-with a `leader_hint` in the error rather than retrying automatically -
-update `join` to the hinted address and retry.
-
-### Verify (either path)
+### Verify (Path A)
 
 ```bash
 cat /var/log/apiary/raftd.log
