@@ -63,6 +63,32 @@ self-signed certificate, create a root-readable PEM trust bundle containing
 that certificate and configure `peer_tls`, `peer_tls_ca`, and the peer TLS
 hostname mapping on the joining host before continuing.
 
+For example, copy the existing Comb's self-signed certificate into a
+root-readable trust bundle on the joining host:
+
+```bash
+install -d -m 700 /usr/local/etc/apiary/peer-ca
+scp root@<existing-comb>:/usr/local/etc/apiary-tls/cert.pem \
+  /usr/local/etc/apiary/peer-ca/<existing-comb>.pem
+cat /usr/local/etc/apiary/peer-ca/<existing-comb>.pem \
+  > /usr/local/etc/apiary/peer-ca.pem
+chmod 600 /usr/local/etc/apiary/peer-ca.pem
+```
+
+Then set the corresponding fields in the joining host's `managerd.json`:
+
+```json
+{
+  "peer_tls": true,
+  "peer_tls_ca": "/usr/local/etc/apiary/peer-ca.pem",
+  "peer_tls_hostname_map": "<existing-comb-address>=<existing-comb-name>"
+}
+```
+
+The hostname-map value must match the DNS name in the existing Comb's
+certificate. If that certificate is issued by a CA already trusted by the
+joining host, omit `peer_tls_ca`; the system trust store is used instead.
+
 If Raft transport mutual TLS is enabled, the existing Colony also needs to
 trust the joining node's Raft certificate before approval. Do not weaken TLS
 verification to bypass this requirement.
