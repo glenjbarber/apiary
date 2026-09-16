@@ -17,6 +17,33 @@ clean:
 		do rm -f $$S ; \
 	done
 
+INSTALL_SRCS=	raftd \
+		managerd \
+		frontend \
+		restshimd
+
+# install copies the four apiary daemons - not apiaryinstall, a
+# one-shot host-prep CLI meant to be run from this checkout and never
+# installed permanently - to the fixed path every etc/rc.d/apiary_*
+# script execs, /usr/local/libexec/apiary/<name> (see docs/bootstrap.md
+# Step 6 for the manual equivalent this mirrors exactly). Depends on
+# setup-dirs so /var/log/apiary, /var/run/apiary, etc. already exist -
+# a first `service apiary_raftd start` on a truly fresh host fails
+# outright without /var/log/apiary in particular. Copies to a .new name
+# and atomically renames into place rather than overwriting the
+# destination directly: cp can't overwrite a binary a live process
+# still has open ("Text file busy"), but mv's atomic rename doesn't
+# disturb the running process's already-open file descriptor at all -
+# the same fix this project's own live apiarium/apiverse deploys use.
+# Re-run this after every rebuild, then `service apiary_<name> restart`.
+install: build setup-dirs
+	sudo mkdir -p /usr/local/libexec/apiary
+	for S in ${INSTALL_SRCS} ; \
+		do sudo cp -p $$S /usr/local/libexec/apiary/$$S.new ;\
+		sudo chmod +x /usr/local/libexec/apiary/$$S.new ;\
+		sudo mv /usr/local/libexec/apiary/$$S.new /usr/local/libexec/apiary/$$S ;\
+	done
+
 # setup installs the pieces a fresh host needs beyond the built binaries
 # themselves: the log/run/data directories every apiary_* rc.d script or
 # daemon expects to already exist, the rc.d scripts (etc/rc.d/apiary_*),
@@ -120,13 +147,12 @@ NODE_REST_ADDR?=	0.0.0.0:8081
 # NODE_ADMIN_USER right away, since the first successful login on a
 # Comb with no role map yet becomes Admin automatically (ADR-0086).
 #
-# The binary install loop copies to a .new name and mv's it into place
-# rather than copying directly over the destination - found live, on a
-# re-run against an already-running Comb: cp can't overwrite a binary
-# a live process still has open ("Text file busy"), but mv is an
-# atomic rename the running process's already-open file descriptor
-# doesn't notice at all - the same fix this project's own live
-# apiarium/apiverse deploys already use for exactly this reason.
+# The binary-install step (${MAKE} install, plus a separate copy for
+# apiaryinstall alone below - see the `install` target's own comment
+# for why apiaryinstall isn't part of `install` itself) uses the same
+# .new-then-mv atomic rename this project's own live apiarium/apiverse
+# deploys already rely on, so re-running setup-quick against an
+# already-running Comb never hits "Text file busy".
 setup-quick:
 	pkg install -y go git sudo
 	${MAKE} build
@@ -134,12 +160,10 @@ setup-quick:
 	${MAKE} setup-admin
 	./apiaryinstall -apply -apply-network yes-modify-network -zfs-pool ${NODE_ZFS_POOL} \
 		-vlan-uplink ${NODE_VLAN_UPLINK} -bhyve-bridge ${NODE_BHYVE_BRIDGE}
-	sudo mkdir -p /usr/local/libexec/apiary
-	for S in ${SRCS} ; \
-		do sudo cp -p $$S /usr/local/libexec/apiary/$$S.new ;\
-		sudo chmod +x /usr/local/libexec/apiary/$$S.new ;\
-		sudo mv /usr/local/libexec/apiary/$$S.new /usr/local/libexec/apiary/$$S ;\
-	done
+	${MAKE} install
+	sudo cp -p apiaryinstall /usr/local/libexec/apiary/apiaryinstall.new
+	sudo chmod +x /usr/local/libexec/apiary/apiaryinstall.new
+	sudo mv /usr/local/libexec/apiary/apiaryinstall.new /usr/local/libexec/apiary/apiaryinstall
 	BOOTROM=$$(test -f /usr/local/share/uefi-firmware/BHYVE_UEFI.fd && echo /usr/local/share/uefi-firmware/BHYVE_UEFI.fd || pkg info -l edk2-bhyve 2>/dev/null | grep '\.fd$$' | head -1) ;\
 	test -n "$$BOOTROM" || { echo "could not locate a bhyve UEFI firmware .fd file - install bhyve-firmware/edk2-bhyve and re-run" >&2 ; exit 1 ; } ;\
 	sudo sysrc apiary_managerd_args="-rpc-addr ${NODE_RPC_ADDR} -bhyve-bootrom $$BOOTROM -bhyve-bridge ${NODE_BHYVE_BRIDGE} -vlan-uplink ${NODE_VLAN_UPLINK} -tls-cert ${NODE_TLS_DIR}/cert.pem -tls-key ${NODE_TLS_DIR}/key.pem -pam-service ${PAM_SERVICE}"
