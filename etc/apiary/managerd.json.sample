@@ -1,0 +1,179 @@
+// managerd sample configuration (ADR-0100).
+//
+// JSON has no comment syntax - managerd's own parser will reject this
+// file as-is. Copy it to /usr/local/etc/apiary/managerd.json and
+// remove every "//" line first ("grep -v '^\s*//' managerd.json.sample"
+// does this safely, since every comment here stands on its own line
+// and never trails a value). Every field below is present with either
+// a realistic default or an empty/zero value you may fill in - not
+// commented out - so the stripped result is a complete, valid config.
+//
+// This same file is also what the Machine Configuration web page
+// reads and writes later, for every field except node_id/rpc_addr/
+// raftd_socket (deliberately not exposed there - see ADR-0100).
+// Fields marked "write-once" below should not be changed after this
+// node has real state under the old value - see each field's own note.
+{
+  // Identity reported in Status responses. Leave the key absent
+  // entirely (not empty string) to fall back to os.Hostname(). Not
+  // RPC-editable.
+  "node_id": "<this-node-id>",
+
+  // The TCP address managerd's own external RPC API listens on. Not
+  // RPC-editable. The default (127.0.0.1:17700, loopback-only) leaves
+  // this node unreachable from anywhere but itself - set a real,
+  // network-reachable address for a multi-node Colony or any peer
+  // forwarding to work.
+  "rpc_addr": "0.0.0.0:17700",
+
+  // Path to raftd's internal Unix socket this node dials at startup.
+  // Not RPC-editable.
+  "raftd_socket": "/var/run/apiary/raftd.sock",
+
+  // The physical interface VLAN-tagged networks attach to.
+  "uplink": "<uplink-ifname>",
+
+  // The interface a self-hosted network's outbound NAT egresses
+  // through (ADR-0048). Empty falls back to the VLAN uplink above.
+  "nat_uplink": "",
+
+  // The resolver address handed to DHCP clients on Apiary-managed
+  // networks. Node-local because each Hive can have a different
+  // reachable resolver.
+  "dhcp_dns_server": "",
+
+  // WRITE-ONCE: base ZFS dataset for VM/jail resources
+  // (<pool>/apiary). Existing datasets under an old value would be
+  // silently orphaned, not moved, by changing this later. The parent
+  // dataset must already exist - creation is intentionally
+  // non-recursive.
+  "zfs_base": "<your-pool-name>/apiary",
+
+  // Pure tuning knob, safe to change any time. Go duration string
+  // (e.g. "30s"). Empty uses managerd's own built-in default.
+  "reconcile_interval": "",
+
+  // WRITE-ONCE, same reasoning as zfs_base.
+  "bhyve_prefix": "",
+
+  // Empty disables bhyve provisioning on this node entirely (nodes
+  // performing dataset-only reconciliation still work without this).
+  "bhyve_bootrom": "/usr/local/share/uefi-firmware/BHYVE_UEFI.fd",
+
+  // Empty disables VM networking on this node.
+  "bhyve_bridge": "bridge0",
+
+  // Gates whether this node will provision an uplink_bridged network
+  // (ADR-0101) - VMs attached directly to this node's own bhyve
+  // bridge, sharing the host's own management broadcast domain. Must
+  // be exactly "yes-share-uplink-bridge" to opt in; any other value,
+  // including "true", is treated as unset deliberately.
+  "allow_uplink_bridging": "",
+
+  // Only affects newly created VM disks, never resizes an existing
+  // one - safe to change any time. Zero uses managerd's own built-in
+  // default.
+  "disk_size_mb": 0,
+
+  // WRITE-ONCE, same reasoning as zfs_base - existing uploaded images
+  // would become invisible, not moved, by changing this later.
+  "iso_dir": "/var/db/apiary/isos",
+
+  // Tri-state: omit this key entirely to use managerd's own startup
+  // default: true/false are explicit local overrides.
+  "hast_enabled": false,
+
+  // Tri-state, same convention as hast_enabled.
+  "jail_enabled": false,
+
+  // WRITE-ONCE, same reasoning as zfs_base.
+  "jail_prefix": "",
+
+  // WRITE-ONCE, same reasoning as zfs_base.
+  "jail_mount_base": "",
+
+  // Only affects newly created replicated jail roots, never resizes
+  // an existing one - safe to change any time. Zero uses managerd's
+  // own built-in default.
+  "jail_disk_size_mb": 0,
+
+  // A real credential if set (ADR-0029) - required once the Colony
+  // has any API key at all (ADR-0023), so every managerd can forward
+  // writes to and be forwarded to from its peers. This file must then
+  // be root-owned, mode 0600. Every Comb in one Colony shares this
+  // same value.
+  "peer_api_key": "",
+
+  // Port assumed for a peer node's managerd external API when
+  // forwarding.
+  "peer_managerd_port": "17700",
+
+  // Tri-state, same convention as hast_enabled. Dial peer managerd
+  // instances over TLS.
+  "peer_tls": false,
+
+  // Comma-separated ip=hostname mappings, needed because raft leader
+  // hints contain bare IP addresses while real certificates are
+  // hostname-based. A missing mapping fails verification rather than
+  // weakening TLS.
+  "peer_tls_hostname_map": "",
+
+  // A PEM file trusted instead of the system certificate pool when
+  // dialing a peer over TLS (ADR-0093) - needed when peers present
+  // self-signed certificates.
+  "peer_tls_ca": "",
+
+  // Comma-separated host:port allowlist (ADR-0097) that target_address
+  // must match on the three unauthenticated join-colony RPCs. Leave
+  // empty on a Comb's very first bootstrap, before any peer addresses
+  // are even known yet - safe to add once the Colony's membership is
+  // settled.
+  "known_peer_addresses": "",
+
+  // Pure tuning knobs for the assumption-checker subsystem, safe to
+  // change any time. Go duration strings; empty/zero uses managerd's
+  // own built-in defaults.
+  "assumption_check_interval": "",
+  "assumption_heartbeat_interval": "",
+  "assumption_stale_after": "",
+  "assumption_run_deadline": "",
+  "assumption_history_limit": 0,
+  "assumption_history_max_age": "",
+
+  // managerd's own external API TLS - mandatory, not an afterthought
+  // reserved for when pam_service is set. Setting both here makes
+  // managerd's whole gRPC listener TLS-only (frontend/restshimd must
+  // then set manager_tls/manager_tls_ca to still reach it), even for
+  // a purely loopback, single-node Comb. Points at Step 6's
+  // "make setup"/setup-tls output by default.
+  "tls_cert": "/usr/local/etc/apiary-tls/cert.pem",
+  "tls_key": "/usr/local/etc/apiary-tls/key.pem",
+
+  // The PAM service name frontend's web UI logins are authenticated
+  // against. Empty disables login entirely - the web UI is then open
+  // to anyone who can reach the port. See docs/bootstrap.md Step 11.
+  "pam_service": "",
+
+  // Cloudflare Tunnel exposure (ADR-0063). CloudflareTokenFile is a
+  // path to a Zone:DNS:Edit-scoped API token, never the raw token
+  // itself. An empty token file disables the whole feature.
+  "cloudflare_token_file": "",
+  "cloudflare_zone_id": "",
+  "cloudflare_tunnel_id": "",
+  "cloudflare_tunnel_credentials_file": "",
+
+  // Cloudflare Origin CA issuance - a separate, zone-scoped credential
+  // and local storage from the Tunnel fields above. Never contain a
+  // raw token or PEM directly.
+  "origin_ca_token_file": "",
+  "origin_ca_directory": "",
+
+  // How often to check local Origin CA certificates for ones due for
+  // automatic renewal. Pure tuning knob, safe to change any time.
+  "origin_ca_renewal_check_interval": "",
+
+  // Shared secret presented to raftd's internal socket (ADR-0033) -
+  // required if raftd's own internal_token is set. A real credential
+  // if set - this file must then be root-owned, mode 0600.
+  "raftd_token": ""
+}

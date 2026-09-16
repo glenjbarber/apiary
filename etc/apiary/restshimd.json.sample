@@ -1,0 +1,41 @@
+// restshimd sample configuration (ADR-0100).
+//
+// JSON has no comment syntax - restshimd's own parser will reject this
+// file as-is. Copy it to /usr/local/etc/apiary/restshimd.json and
+// remove every "//" line first ("grep -v '^\s*//' restshimd.json.sample"
+// does this safely, since every comment here stands on its own line
+// and never trails a value). Every field below is present with either
+// a realistic default or an empty value you may fill in - not
+// commented out - so the stripped result is a complete, valid config.
+//
+// restshimd has no static process-wide manager API key of its own -
+// every external caller presents its own bearer key, which every REST
+// handler forwards unchanged to managerd. There is no field for that
+// here; it travels in each request's own Authorization header.
+{
+  // TCP address of managerd's external RPC API.
+  "manager_addr": "127.0.0.1:17700",
+
+  // Address to serve the REST API on.
+  "http_addr": "0.0.0.0:8081",
+
+  // Dial managerd over TLS instead of plaintext. managerd always
+  // serves TLS by default now (see managerd.json.sample's own
+  // tls_cert/tls_key) - leave this true unless managerd was
+  // specifically reconfigured without TLS.
+  "manager_tls": true,
+
+  // PEM CA file to trust for managerd's certificate; empty trusts the
+  // system pool. Points at the same self-signed certificate Step 6's
+  // "make setup"/setup-tls generated.
+  "manager_tls_ca": "/usr/local/etc/apiary-tls/cert.pem",
+
+  // Hostname to verify managerd's certificate against, if different
+  // from manager_addr's own host.
+  "manager_tls_server_name": "",
+
+  // Serve the REST API over HTTPS; leave both empty to serve plaintext
+  // HTTP.
+  "tls_cert": "",
+  "tls_key": ""
+}

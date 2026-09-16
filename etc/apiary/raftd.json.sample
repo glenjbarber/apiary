@@ -1,0 +1,58 @@
+// raftd sample configuration (ADR-0100).
+//
+// JSON has no comment syntax - raftd's own parser will reject this
+// file as-is. Copy it to /usr/local/etc/apiary/raftd.json and remove
+// every "//" line first ("grep -v '^\s*//' raftd.json.sample" does
+// this safely, since every comment here stands on its own line and
+// never trails a value). Every field below is present with either a
+// realistic default or a placeholder you must edit - not commented
+// out - so the stripped result is a complete, valid config.
+//
+// Only data_dir/socket/node_id matter for an independent single-node
+// Comb (docs/bootstrap.md Path A). raft_bind/join/await_join only
+// matter when joining an existing multi-node Colony (Path B) - see
+// Step 7 there for the full walkthrough, including the SSH-tunnel
+// mechanics "join" needs across hosts.
+{
+  // Directory for raft's own log/stable store and snapshots.
+  "data_dir": "/var/db/apiary/raftd",
+
+  // Unix domain socket for the internal RaftInternal protocol -
+  // managerd dials this. Must live under a root-only directory
+  // (/var/run/apiary is created mode 0700 by "make setup").
+  "socket": "/var/run/apiary/raftd.sock",
+
+  // Unique ID for this raft node. Edit this - leaving the literal
+  // placeholder below has previously caused a node to commit
+  // "<this-node-id>" into raft state permanently (see SHARED.md).
+  // Leave the key absent entirely (not empty string) to fall back to
+  // os.Hostname().
+  "node_id": "<this-node-id>",
+
+  // TCP address for the raft transport. Only needed for a genuine
+  // cross-host join (Path B) - raftd's own default (127.0.0.1:17600)
+  // is loopback-only, correct only for a single-host test cluster.
+  "raft_bind": "",
+
+  // Unix socket path of an existing cluster member to join through
+  // (Path B only). Only ever consulted on a truly fresh, empty
+  // data_dir. Never point this at a world-searchable directory like
+  // /tmp - use /var/run/apiary/ (root-only) instead.
+  "join": "",
+
+  // Wait to be added as a voter rather than self-bootstrapping
+  // (ADR-0083), instead of setting "join" directly. Mutually
+  // exclusive with join.
+  "await_join": false,
+
+  // Shared secret required from every RaftInternal caller (ADR-0033).
+  // A real credential if set - this file must then be root-owned,
+  // mode 0600 (already the default from "make setup").
+  "internal_token": "",
+
+  // Raft transport mutual TLS (ADR-0078). Leave all three empty for
+  // plain TCP, the common case.
+  "raft_tls_cert": "",
+  "raft_tls_key": "",
+  "raft_tls_ca": ""
+}

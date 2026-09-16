@@ -1,0 +1,61 @@
+// frontend sample configuration (ADR-0100).
+//
+// JSON has no comment syntax - frontend's own parser will reject this
+// file as-is. Copy it to /usr/local/etc/apiary/frontend.json and
+// remove every "//" line first ("grep -v '^\s*//' frontend.json.sample"
+// does this safely, since every comment here stands on its own line
+// and never trails a value). Every field below is present with either
+// a realistic default or an empty value you may fill in - not
+// commented out - so the stripped result is a complete, valid config.
+{
+  // TCP address of managerd's external RPC API.
+  "manager_addr": "127.0.0.1:17700",
+
+  // Address to serve the web UI on.
+  "http_addr": "0.0.0.0:8080",
+
+  // Dial managerd over TLS instead of plaintext. managerd always
+  // serves TLS by default now (see managerd.json.sample's own
+  // tls_cert/tls_key) - leave this true unless managerd was
+  // specifically reconfigured without TLS.
+  "manager_tls": true,
+
+  // PEM CA file to trust for managerd's certificate; empty trusts the
+  // system pool. Points at the same self-signed certificate Step 6's
+  // "make setup"/setup-tls generated - managerd has no public CA to
+  // verify against otherwise.
+  "manager_tls_ca": "/usr/local/etc/apiary-tls/cert.pem",
+
+  // Hostname to verify managerd's certificate against, if different
+  // from manager_addr's own host.
+  "manager_tls_server_name": "",
+
+  // Serve the web UI over HTTPS; leave both empty to serve plaintext
+  // HTTP.
+  "tls_cert": "",
+  "tls_key": "",
+
+  // Dial other cluster nodes' managerd over TLS when fetching their
+  // host stats for the cluster overview page.
+  "peer_tls": false,
+
+  // A PEM file trusted instead of the system certificate pool when
+  // dialing a peer over TLS (ADR-0093). Only consulted when peer_tls
+  // is set.
+  "peer_tls_ca": "",
+
+  // Appended to a node ID to form its managerd hostname for the
+  // cluster overview page. Leave unset if node IDs are already fully
+  // qualified hostnames.
+  "peer_hostname_suffix": "",
+
+  // Port assumed for a peer node's managerd external API when
+  // fetching its host stats.
+  "peer_manager_port": "17700",
+
+  // The API key frontend attaches to every call it makes to managerd
+  // on the logged-in user's behalf, once managerd has API-key auth
+  // enabled (ADR-0023). A real credential if set - this file must
+  // then be root-owned, mode 0600.
+  "manager_api_key": ""
+}
