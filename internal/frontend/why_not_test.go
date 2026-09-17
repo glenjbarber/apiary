@@ -232,6 +232,33 @@ func TestHandleWhyNotPage_HiveRebootBlockedWhenQuorumDoesNotSurvive(t *testing.T
 	}
 }
 
+func TestHandleWhyNotPage_SingleNodeRebootExplainsTemporaryOutage(t *testing.T) {
+	client := &fakeClient{
+		statusResp: &rpcpb.StatusResponse{ManagerNodeId: "node-a"},
+		simulateResp: &rpcpb.SimulateNodeFailureResponse{
+			Quorum: &rpcpb.QuorumImpact{
+				Survives: false, TotalVoters: 1,
+				Note: "this is the cluster's only voter - losing it ends the cluster's ability to reach quorum entirely.",
+			},
+		},
+	}
+	s := newTestServer(t, client)
+
+	req := httptest.NewRequest(http.MethodGet, "/why-not?node_id=node-a", nil)
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, req)
+
+	body := rec.Body.String()
+	for _, want := range []string{"single-node Colony", "temporarily", "does not by itself imply permanent data loss"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("expected single-node explanation %q, got: %s", want, body)
+		}
+	}
+	if strings.Contains(body, "ends the cluster") {
+		t.Errorf("single-node page retained the ambiguous permanent-loss wording: %s", body)
+	}
+}
+
 func TestHandleWhyNotPage_HiveRebootReplicaBackedNeverBlocksOnlyCaveat(t *testing.T) {
 	client := &fakeClient{
 		statusResp: &rpcpb.StatusResponse{ManagerNodeId: "node-a"},

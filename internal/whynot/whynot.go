@@ -217,8 +217,9 @@ func AnswerCellRecoverable(f CellFact) Answer {
 // frontend builds these directly from the rpcpb.SimulateNodeFailureResponse
 // it already fetches via the existing SimulateNodeFailure RPC.
 type QuorumFact struct {
-	Survives bool
-	Note     string
+	Survives    bool
+	TotalVoters uint32
+	Note        string
 }
 
 type OwnedResourceFact struct {
@@ -252,9 +253,13 @@ func AnswerHiveReboot(nodeID string, quorum QuorumFact, owned []OwnedResourceFac
 	ans := Answer{Question: "comb-reboot", Scope: nodeID}
 
 	if !quorum.Survives {
+		detail := "Raft quorum would not survive this comb's loss. " + quorum.Note
+		if quorum.TotalVoters == 1 {
+			detail = "This is a single-node Colony. Rebooting its only Comb will make Apiary temporarily unavailable until this same Comb returns. This temporary loss of quorum is expected for a standalone deployment and does not by itself imply permanent data loss."
+		}
 		ans.Blockers = append(ans.Blockers, Blocker{
 			Invariant: "quorum-tolerance",
-			Detail:    "Raft quorum would not survive this comb's loss. " + quorum.Note,
+			Detail:    detail,
 		})
 	}
 

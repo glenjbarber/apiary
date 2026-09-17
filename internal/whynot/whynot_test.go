@@ -1,6 +1,7 @@
 package whynot
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/glenjbarber/apiary/internal/invariant"
@@ -95,6 +96,28 @@ func TestAnswerHiveReboot_BlockedWhenQuorumDoesNotSurvive(t *testing.T) {
 	}
 	if !hasBlockerInvariant(ans.Blockers, "quorum-tolerance") {
 		t.Errorf("expected a quorum-tolerance blocker, got %+v", ans.Blockers)
+	}
+}
+
+func TestAnswerHiveReboot_SingleNodeExplainsTemporaryOutage(t *testing.T) {
+	ans := AnswerHiveReboot("node-a", QuorumFact{
+		Survives: false, TotalVoters: 1,
+		Note: "this is the cluster's only voter - losing it ends the cluster's ability to reach quorum entirely.",
+	}, nil, nil)
+	if ans.Verdict != VerdictBlocked {
+		t.Fatalf("expected VerdictBlocked, got %v", ans.Verdict)
+	}
+	if len(ans.Blockers) != 1 {
+		t.Fatalf("expected one quorum blocker, got %+v", ans.Blockers)
+	}
+	detail := ans.Blockers[0].Detail
+	for _, want := range []string{"single-node Colony", "temporarily", "does not by itself imply permanent data loss"} {
+		if !strings.Contains(detail, want) {
+			t.Errorf("single-node blocker does not contain %q: %s", want, detail)
+		}
+	}
+	if strings.Contains(detail, "ends the cluster") {
+		t.Errorf("single-node blocker retained the ambiguous permanent-loss wording: %s", detail)
 	}
 }
 

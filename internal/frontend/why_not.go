@@ -256,7 +256,11 @@ func (s *Server) handleWhyNotPage(w http.ResponseWriter, r *http.Request) {
 		case resp.GetError() != "":
 			hiveErr = resp.GetError()
 		default:
-			quorum := whynot.QuorumFact{Survives: resp.GetQuorum().GetSurvives(), Note: resp.GetQuorum().GetNote()}
+			quorum := whynot.QuorumFact{
+				Survives:    resp.GetQuorum().GetSurvives(),
+				TotalVoters: resp.GetQuorum().GetTotalVoters(),
+				Note:        resp.GetQuorum().GetNote(),
+			}
 			var owned []whynot.OwnedResourceFact
 			for _, res := range resp.GetOwnedResources() {
 				view := fromRPCOwnedResourceImpact(res)
