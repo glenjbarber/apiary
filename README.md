@@ -1,4 +1,5 @@
 # Apiary
+[![Go CI](https://github.com/glenjbarber/apiary/actions/workflows/go-ci.yml/badge.svg?branch=main)](https://github.com/glenjbarber/apiary/actions/workflows/go-ci.yml)
 
 A FreeBSD-native virtualization management platform for cluster
 management, VM and container orchestration, storage replication, and a
