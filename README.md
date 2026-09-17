@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/apiary-mark.svg" alt="Apiary Project Logo" width="180">
+</p>
+
 # Apiary
 [![Go CI](https://github.com/glenjbarber/apiary/actions/workflows/go-ci.yml/badge.svg?branch=main)](https://github.com/glenjbarber/apiary/actions/workflows/go-ci.yml)
 
