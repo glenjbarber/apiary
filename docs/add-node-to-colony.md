@@ -71,6 +71,32 @@ Replace `<this-host-address>` with the joining host's real, reachable
 address. Do not use `0.0.0.0`: Apiary also advertises this value to Raft
 peers.
 
+**Verify the existing Colony member's own `raft_bind` too, not just the
+joining host's.** `raft_bind` defaults to `127.0.0.1:17600` when left
+unset (`internal/raft`'s own `DefaultBindAddr`) - if the existing member's
+own first, original bootstrap never set this explicitly, its own address
+as recorded in the cluster's committed Raft configuration may still be
+loopback-only, unreachable from any other host including the one you are
+now trying to join. This was confirmed live: an existing single-node Comb
+that had never set `raft_bind` sat permanently unable to win an election
+the moment a second voter was added, since neither side could reach the
+other by the recorded address. Check this on the existing member *before*
+troubleshooting anything about the joining host.
+
+**If Raft transport mutual TLS (`raft_tls_cert`/`raft_tls_key`/
+`raft_tls_ca`, ADR-0078) is used anywhere in this Colony, every voter must
+have all three set identically in kind - all set, or all left empty.** A
+partial mismatch (one voter with Raft TLS configured, another without) is
+a real, confirmed failure mode, not a hypothetical: the TLS-configured
+side's `raftd.log` shows `tls: first record does not look like a TLS
+handshake` repeating for every RPC attempt from the plaintext side; the
+plaintext side's own `raftd.log` shows a bare `error=EOF` on
+`failed to make requestVote RPC`, with pre-votes endlessly denied and no
+leader ever elected. This looks identical to a network reachability
+problem but is not one - `service apiary_raftd onestatus` and even
+`ps`/`sockstat` will show `raftd` genuinely running and listening on both
+sides throughout.
+
 If this host previously bootstrapped its own independent Comb and you are
 not using the guided "Convert this Comb to a joiner" action above (e.g. it
 failed partway and you are recovering by hand, or you are following this
@@ -175,11 +201,34 @@ The approval changes the real Raft membership. It is not merely a UI setting.
 
 Each member needs peer-forwarding configuration so managerd and the frontend
 can reach the other Combs. Configure the shared peer API key, peer managerd
-port, and peer TLS settings on every participating node.
+port, and peer TLS settings on every participating node - including any
+existing member that has never needed peer configuration before (a Comb
+that was the very first, standalone-bootstrapped node in its Colony may
+have none of this set at all, not just an incomplete version of it).
+
+**`managerd.json` and `frontend.json` each have their own, separate
+`peer_tls`/`peer_tls_ca` fields, and both must be set on both roles -
+setting one without the other reproduces the exact same symptom on
+whichever role is still missing it.** `managerd`'s own peer settings cover
+managerd-to-managerd RPC forwarding (reconciliation writes/reads, ADR-0029).
+`frontend`'s own, independent peer settings (also `peer_tls`/`peer_tls_ca`,
+plus `peer_manager_port`) cover the Colony overview page's own direct
+host-stats fetch from every other Comb's managerd. Confirmed live: fixing
+only `managerd.json`'s peer TLS left the Colony overview still showing
+`rpc error: code = Unavailable desc = connection error: desc = "error
+reading server preface: EOF"` for the other Comb, because `frontend.json`
+on that same host still had no peer TLS configured at all. That exact
+error text means a plaintext client is dialing a TLS-only managerd -
+check both files' `peer_tls`/`peer_tls_ca` on the host reporting the
+error, not just one.
 
 For self-signed node certificates, update each member's peer CA bundle so it
 contains every peer certificate it must trust, then configure the peer TLS CA
-and hostname mapping. A real shared CA is preferable for a growing fleet.
+and hostname mapping. A real shared CA is preferable for a growing fleet. The
+same trust bundle file can be reused for both `managerd.json`'s and
+`frontend.json`'s `peer_tls_ca` field on a given host - it is the same
+peer-trust requirement in both cases, just consumed by two independent
+config surfaces.
 
 Use the Machine Configuration page for the fields it exposes. Keep the peer
 key and trust material root-readable only. Do not put secrets into Raft state
