@@ -7,6 +7,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -2124,6 +2125,7 @@ func (s *Server) GetNodeConfig(_ context.Context, _ *rpcpb.GetNodeConfigRequest)
 		return &rpcpb.GetNodeConfigResponse{Error: err.Error()}, nil
 	}
 	resp := &rpcpb.GetNodeConfigResponse{
+		RpcAddr:       effectiveRPCAddr(cfg.RPCAddr),
 		Uplink:        cfg.Uplink,
 		NatUplink:     cfg.NATUplink,
 		DhcpDnsServer: cfg.DNSServer,
@@ -2187,6 +2189,78 @@ func (s *Server) GetNodeConfig(_ context.Context, _ *rpcpb.GetNodeConfigRequest)
 		}
 	}
 	return resp, nil
+}
+
+// effectiveRPCAddr mirrors cmd/managerd's startup default so a newly
+// installed host reports the endpoint it will actually use, rather than an
+// empty persisted value that only means "use the default".
+func effectiveRPCAddr(value string) string {
+	if value == "" {
+		return "127.0.0.1:17700"
+	}
+	return value
+}
+
+// UpdateManagerdBindAddress changes only managerd's own external RPC bind
+// address. It deliberately does not restart managerd: an endpoint change can
+// sever the connection carrying this response, and managerd's restart
+// guardrail remains the single, explicit action that makes the saved value
+// live.
+func (s *Server) UpdateManagerdBindAddress(_ context.Context, req *rpcpb.UpdateManagerdBindAddressRequest) (*rpcpb.UpdateManagerdBindAddressResponse, error) {
+	if s.nodeConfig == nil {
+		return &rpcpb.UpdateManagerdBindAddressResponse{Error: "this node has no node-config store configured"}, nil
+	}
+	addr := strings.TrimSpace(req.GetRpcAddr())
+	if err := s.validateLocalBindAddress(addr); err != nil {
+		return &rpcpb.UpdateManagerdBindAddressResponse{Error: err.Error()}, nil
+	}
+	current, err := s.nodeConfig.Load()
+	if err != nil {
+		return &rpcpb.UpdateManagerdBindAddressResponse{Error: err.Error()}, nil
+	}
+	current.RPCAddr = addr
+	if err := s.nodeConfig.Save(current); err != nil {
+		return &rpcpb.UpdateManagerdBindAddressResponse{Error: err.Error()}, nil
+	}
+	return &rpcpb.UpdateManagerdBindAddressResponse{RestartRequired: true}, nil
+}
+
+// validateLocalBindAddress rejects a syntactically valid but remote endpoint
+// before it reaches managerd.json. The browser offers the same host-local
+// addresses from GetNodeConfig's interface inventory, but RPC callers are not
+// trusted to have used that UI. Wildcard and loopback are retained for the
+// established single-node/default configurations.
+func (s *Server) validateLocalBindAddress(value string) error {
+	host, port, err := net.SplitHostPort(value)
+	if err != nil || host == "" {
+		return fmt.Errorf("rpc_addr must be an address and port, such as 10.90.0.12:17700")
+	}
+	if n, err := strconv.Atoi(port); err != nil || n < 1 || n > 65535 {
+		return fmt.Errorf("rpc_addr has invalid port %q", port)
+	}
+	ip := net.ParseIP(host)
+	if ip == nil {
+		return fmt.Errorf("rpc_addr host %q must be a numeric address assigned to this Comb", host)
+	}
+	if ip.IsUnspecified() || ip.IsLoopback() {
+		return nil
+	}
+	if s.listNetworkInterfaces == nil {
+		return fmt.Errorf("cannot validate rpc_addr against this Comb's interface inventory")
+	}
+	interfaces, err := s.listNetworkInterfaces()
+	if err != nil {
+		return fmt.Errorf("cannot validate rpc_addr against this Comb's interface inventory: %w", err)
+	}
+	for _, iface := range interfaces {
+		for _, raw := range iface.Addresses {
+			candidate, _, err := net.ParseCIDR(raw)
+			if err == nil && candidate.Equal(ip) {
+				return nil
+			}
+		}
+	}
+	return fmt.Errorf("rpc_addr host %q is not assigned to this Comb", host)
 }
 
 // durationString formats a time.Duration for GetNodeConfigResponse -

@@ -728,7 +728,7 @@ func (f *fakeNodeConfigStore) Save(cfg nodeconfig.Config) error {
 }
 
 func TestServer_GetNodeConfig(t *testing.T) {
-	store := &fakeNodeConfigStore{cfg: nodeconfig.Config{Uplink: "re0", NATUplink: "bridge0", DNSServer: "10.62.0.1", JailEnabled: boolPtr(true)}}
+	store := &fakeNodeConfigStore{cfg: nodeconfig.Config{RPCAddr: "10.50.0.14:17700", Uplink: "re0", NATUplink: "bridge0", DNSServer: "10.62.0.1", JailEnabled: boolPtr(true)}}
 	s := NewServer(nil, "node-1", nil, nil, nil, nil, nil, "", nil, store, nil, 0, nil)
 	s.SetNetworkInterfaceLister(func() ([]netif.Interface, error) {
 		return []netif.Interface{
@@ -743,6 +743,9 @@ func TestServer_GetNodeConfig(t *testing.T) {
 	}
 	if resp.GetUplink() != "re0" || resp.GetNatUplink() != "bridge0" || resp.GetDhcpDnsServer() != "10.62.0.1" || !resp.GetJailEnabled() || resp.JailEnabled == nil {
 		t.Errorf("GetNodeConfig() = %+v, want Uplink=re0 NatUplink=bridge0 DhcpDnsServer=10.62.0.1 JailEnabled=true", resp)
+	}
+	if resp.GetRpcAddr() != "10.50.0.14:17700" {
+		t.Errorf("GetNodeConfig() RPCAddr = %q, want configured address", resp.GetRpcAddr())
 	}
 	if len(resp.GetAvailableInterfaces()) != 2 || resp.GetAvailableInterfaces()[0].GetName() != "bridge0" || !resp.GetAvailableInterfaces()[0].GetUp() {
 		t.Errorf("GetNodeConfig() interfaces = %+v, want bridge0 up and re0 down", resp.GetAvailableInterfaces())

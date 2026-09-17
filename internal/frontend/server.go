@@ -247,6 +247,8 @@ type pageData struct {
 	// NetworkFormError/APIKeyFormError are for their own pages.
 	NodeConfig          nodeConfigView
 	NodeConfigFormError string
+	ManagerdBindError   string
+	ManagerdBindSuccess string
 
 	// FrontendConfig/RestshimdConfig/RaftdConfig and their own
 	// *FormError fields (ADR-0102) back three more panels on the same
@@ -849,6 +851,7 @@ func (s *Server) routes() {
 	// page already uses for its per-row password action.
 	s.mux.HandleFunc("GET /machine", s.requireRole(manager.RoleOperator, s.handleMachinePage))
 	s.mux.HandleFunc("POST /machine/uplink", s.requireRole(manager.RoleAdmin, s.handleUpdateNodeConfig))
+	s.mux.HandleFunc("POST /machine/managerd-bind", s.requireRole(manager.RoleAdmin, s.handleUpdateManagerdBindAddress))
 	// /machine/uplink-state (ADR-0085) is deliberately a distinct path
 	// from /machine/uplink above: that one persists which interface to
 	// use, for next restart; this one immediately downs/ups whichever

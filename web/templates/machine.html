@@ -31,6 +31,19 @@
   </div>
 
   <div class="panel">
+    <h3>Local service endpoints</h3>
+    <p class="muted">
+      Configured local bind addresses for Apiary services. Changing
+      managerd's endpoint is saved first and only takes effect after the
+      existing guarded managerd restart. The address suggestions below are
+      currently assigned to this Comb.
+    </p>
+    <div id="managerd-bind-panel">
+      {{template "managerd_bind_panel" .}}
+    </div>
+  </div>
+
+  <div class="panel">
     <h3>Automated Assumption Checks tuning</h3>
     <p class="muted">
       Timing and retention for the continuously re-evaluated assumption
@@ -371,6 +384,28 @@
     {{end}}
   </tbody>
 </table>
+{{end}}
+
+{{define "managerd_bind_panel"}}
+<div id="managerd-bind-error" class="banner-error">{{.ManagerdBindError}}</div>
+{{if .ManagerdBindSuccess}}<div class="banner-success">{{.ManagerdBindSuccess}}</div>{{end}}
+<table class="settings-table">
+  <tbody>
+    <tr><th>apiary_managerd (gRPC)</th><td>
+      {{if .CanAdmin}}
+      <form hx-post="/machine/managerd-bind" hx-target="#managerd-bind-panel" hx-swap="innerHTML">
+        <input type="text" list="managerd-bind-addresses" name="rpc_addr" value="{{.NodeConfig.RPCAddr}}" title="Configured gRPC bind address for managerd. Choose a local address:port suggestion or enter another valid local endpoint. Saving does not restart managerd." aria-label="Managerd bind address" required>
+        <datalist id="managerd-bind-addresses">{{range .NodeConfig.BindAddressOptions}}<option value="{{.}}">{{end}}</datalist>
+        <button type="submit">Save endpoint</button>
+      </form>
+      {{else}}<code>{{.NodeConfig.RPCAddr}}</code>{{end}}
+    </td></tr>
+    <tr><th>apiary_frontend (HTTPS/HTTP)</th><td><code>{{.FrontendConfig.HTTPAddr}}</code></td></tr>
+    <tr><th>apiary_restshimd (HTTPS/HTTP)</th><td><code>{{.RestshimdConfig.HTTPAddr}}</code></td></tr>
+    <tr><th>apiary_raftd (Raft)</th><td><code>{{.RaftdConfig.RaftBind}}</code></td></tr>
+  </tbody>
+</table>
+<p class="muted">Frontend and restshimd have their own editable endpoint fields below. Raftd's bind address remains read-only here because changing Raft topology requires a deliberate membership workflow.</p>
 {{end}}
 
 {{define "uplink_panel"}}
@@ -765,7 +800,7 @@
   <table class="settings-table">
     <tbody>
       <tr><th>Manager address</th><td><input type="text" name="manager_addr" placeholder="127.0.0.1:17700" value="{{.FrontendConfig.ManagerAddr}}" title="TCP address of managerd's own external RPC API this frontend dials." aria-label="Manager address"></td></tr>
-      <tr><th>HTTP address</th><td><input type="text" name="http_addr" placeholder="127.0.0.1:8080" value="{{.FrontendConfig.HTTPAddr}}" title="Address frontend serves the web UI on." aria-label="HTTP address"></td></tr>
+      <tr><th>HTTP address</th><td><input type="text" list="frontend-bind-addresses" name="http_addr" placeholder="127.0.0.1:8080" value="{{.FrontendConfig.HTTPAddr}}" title="Address frontend serves the web UI on. Choose a local address:port suggestion or enter another valid local endpoint." aria-label="HTTP address"><datalist id="frontend-bind-addresses">{{range .NodeConfig.BindAddressOptions}}<option value="{{.}}">{{end}}</datalist></td></tr>
       <tr><th>Manager TLS</th><td><label class="checkbox-label"><input type="checkbox" name="manager_tls" value="true" {{if .FrontendConfig.ManagerTLS}}checked{{end}} title="Dial managerd over TLS instead of plaintext." aria-label="Manager TLS"> Enabled</label></td></tr>
       <tr><th>Manager TLS CA</th><td><input type="text" name="manager_tls_ca" value="{{.FrontendConfig.ManagerTLSCA}}" title="PEM CA file to trust for managerd's certificate; blank trusts the system pool." aria-label="Manager TLS CA"></td></tr>
       <tr><th>Manager TLS server name</th><td><input type="text" name="manager_tls_server_name" value="{{.FrontendConfig.ManagerTLSServerName}}" title="Hostname to verify managerd's certificate against, if different from Manager address's own host." aria-label="Manager TLS server name"></td></tr>
@@ -802,7 +837,7 @@
   <table class="settings-table">
     <tbody>
       <tr><th>Manager address</th><td><input type="text" name="manager_addr" placeholder="127.0.0.1:17700" value="{{.RestshimdConfig.ManagerAddr}}" title="TCP address of managerd's own external RPC API this restshimd dials." aria-label="Manager address"></td></tr>
-      <tr><th>HTTP address</th><td><input type="text" name="http_addr" placeholder="127.0.0.1:8081" value="{{.RestshimdConfig.HTTPAddr}}" title="Address restshimd serves the REST API on." aria-label="HTTP address"></td></tr>
+      <tr><th>HTTP address</th><td><input type="text" list="restshimd-bind-addresses" name="http_addr" placeholder="127.0.0.1:8081" value="{{.RestshimdConfig.HTTPAddr}}" title="Address restshimd serves the REST API on. Choose a local address:port suggestion or enter another valid local endpoint." aria-label="HTTP address"><datalist id="restshimd-bind-addresses">{{range .NodeConfig.BindAddressOptions}}<option value="{{.}}">{{end}}</datalist></td></tr>
       <tr><th>Manager TLS</th><td><label class="checkbox-label"><input type="checkbox" name="manager_tls" value="true" {{if .RestshimdConfig.ManagerTLS}}checked{{end}} title="Dial managerd over TLS instead of plaintext." aria-label="Manager TLS"> Enabled</label></td></tr>
       <tr><th>Manager TLS CA</th><td><input type="text" name="manager_tls_ca" value="{{.RestshimdConfig.ManagerTLSCA}}" title="PEM CA file to trust for managerd's certificate; blank trusts the system pool." aria-label="Manager TLS CA"></td></tr>
       <tr><th>Manager TLS server name</th><td><input type="text" name="manager_tls_server_name" value="{{.RestshimdConfig.ManagerTLSServerName}}" title="Hostname to verify managerd's certificate against, if different from Manager address's own host." aria-label="Manager TLS server name"></td></tr>

@@ -7,6 +7,7 @@ package frontend
 
 import (
 	"fmt"
+	"net"
 	"sort"
 	"strings"
 	"time"
@@ -79,6 +80,8 @@ type firewallRuleView struct {
 // local settings (ADR-0049) - see api/rpc/manager.proto's
 // GetNodeConfigResponse.
 type nodeConfigView struct {
+	RPCAddr string
+
 	Uplink                  string
 	NATUplink               string
 	DNSServer               string
@@ -152,6 +155,11 @@ type nodeConfigView struct {
 	CloudflareTunnelCredentialsFile string
 	OriginCATokenFile               string
 	OriginCADirectory               string
+
+	// BindAddressOptions are host-local endpoint suggestions constructed
+	// from managerd's interface inventory. They are suggestions only;
+	// managerd validates a submitted RPC bind address independently.
+	BindAddressOptions []string
 }
 
 // triState mirrors the JailEnabledMode/JailEnabledStatus convention
@@ -175,6 +183,7 @@ type networkInterfaceOption struct {
 
 func fromRPCNodeConfig(d *rpcpb.GetNodeConfigResponse) nodeConfigView {
 	view := nodeConfigView{
+		RPCAddr:                 d.GetRpcAddr(),
 		Uplink:                  d.GetUplink(),
 		NATUplink:               d.GetNatUplink(),
 		DNSServer:               d.GetDhcpDnsServer(),
@@ -237,11 +246,41 @@ func fromRPCNodeConfig(d *rpcpb.GetNodeConfigResponse) nodeConfigView {
 		view.NATUplinkOptions = append(view.NATUplinkOptions, networkInterfaceOption{
 			Name: iface.GetName(), Label: label, Selected: iface.GetName() == view.NATUplink,
 		})
+		for _, raw := range iface.GetAddresses() {
+			ip, _, err := net.ParseCIDR(raw)
+			if err != nil || ip == nil {
+				continue
+			}
+			for _, port := range []string{"17600", "17700", "8080", "8081"} {
+				view.BindAddressOptions = append(view.BindAddressOptions, net.JoinHostPort(ip.String(), port))
+			}
+		}
 	}
+	view.BindAddressOptions = append(view.BindAddressOptions,
+		"0.0.0.0:17600", "0.0.0.0:17700", "0.0.0.0:8080", "0.0.0.0:8081",
+		"127.0.0.1:17600", "127.0.0.1:17700", "127.0.0.1:8080", "127.0.0.1:8081")
+	if view.RPCAddr != "" {
+		view.BindAddressOptions = append(view.BindAddressOptions, view.RPCAddr)
+	}
+	sort.Strings(view.BindAddressOptions)
+	view.BindAddressOptions = compactStrings(view.BindAddressOptions)
 	view.UplinkOptions = withSavedInterface(view.UplinkOptions, view.Uplink)
 	view.NATUplinkOptions = withSavedInterface(view.NATUplinkOptions, view.NATUplink)
 	view.JailEnabledMode, view.JailEnabledStatus = triState(d.JailEnabled)
 	return view
+}
+
+func compactStrings(values []string) []string {
+	if len(values) == 0 {
+		return nil
+	}
+	out := values[:1]
+	for _, value := range values[1:] {
+		if value != out[len(out)-1] {
+			out = append(out, value)
+		}
+	}
+	return out
 }
 
 // frontendConfigView is the template-facing shape for the co-located

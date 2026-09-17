@@ -98,9 +98,11 @@ type fakeClient struct {
 	uploadStream *fakeUploadClientStream
 	uploadErr    error
 
-	getNodeConfigResp       *rpcpb.GetNodeConfigResponse
-	updateNodeConfigResp    *rpcpb.UpdateNodeConfigResponse
-	lastUpdateNodeConfigReq *rpcpb.UpdateNodeConfigRequest
+	getNodeConfigResp         *rpcpb.GetNodeConfigResponse
+	updateNodeConfigResp      *rpcpb.UpdateNodeConfigResponse
+	lastUpdateNodeConfigReq   *rpcpb.UpdateNodeConfigRequest
+	updateManagerdBindResp    *rpcpb.UpdateManagerdBindAddressResponse
+	lastUpdateManagerdBindReq *rpcpb.UpdateManagerdBindAddressRequest
 
 	getFrontendConfigResp       *rpcpb.GetFrontendConfigResponse
 	updateFrontendConfigResp    *rpcpb.UpdateFrontendConfigResponse
@@ -304,6 +306,14 @@ func (f *fakeClient) UpdateNodeConfig(_ context.Context, in *rpcpb.UpdateNodeCon
 		return f.updateNodeConfigResp, nil
 	}
 	return &rpcpb.UpdateNodeConfigResponse{}, nil
+}
+
+func (f *fakeClient) UpdateManagerdBindAddress(_ context.Context, in *rpcpb.UpdateManagerdBindAddressRequest, _ ...grpc.CallOption) (*rpcpb.UpdateManagerdBindAddressResponse, error) {
+	f.lastUpdateManagerdBindReq = in
+	if f.updateManagerdBindResp != nil {
+		return f.updateManagerdBindResp, nil
+	}
+	return &rpcpb.UpdateManagerdBindAddressResponse{}, nil
 }
 
 func (f *fakeClient) GetFrontendConfig(context.Context, *rpcpb.GetFrontendConfigRequest, ...grpc.CallOption) (*rpcpb.GetFrontendConfigResponse, error) {

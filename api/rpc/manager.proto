@@ -163,6 +163,12 @@ service ManagerService {
   rpc GetNodeConfig(GetNodeConfigRequest) returns (GetNodeConfigResponse);
   rpc UpdateNodeConfig(UpdateNodeConfigRequest) returns (UpdateNodeConfigResponse);
 
+  // UpdateManagerdBindAddress changes only managerd's own configured
+  // external RPC bind address. It never restarts managerd: the operator
+  // must use the existing guarded Restart action after confirming the new
+  // endpoint is appropriate for this Comb.
+  rpc UpdateManagerdBindAddress(UpdateManagerdBindAddressRequest) returns (UpdateManagerdBindAddressResponse);
+
   // GetFrontendConfig/UpdateFrontendConfig and GetRestshimdConfig/
   // UpdateRestshimdConfig (ADR-0102) extend the same "manage this
   // node's own local runtime settings" posture above to the two
@@ -1257,9 +1263,11 @@ message GetNodeConfigResponse {
   // The following fields extend the Machine Configuration page (ADR-0049)
   // to cover most of managerd's own startup flags (ADR-0070). Every one
   // of them shares the same "takes effect on next managerd restart, not
-  // live" posture as the fields above. node_id/rpc_addr/raftd_socket are
+  // live" posture as the fields above. node_id/raftd_socket are
   // deliberately NOT represented anywhere in this message - raft
-  // identity and internal wiring stay CLI/rc.conf-only.
+  // identity and internal wiring stay file-only. rpc_addr is returned
+  // below for endpoint visibility and changed only through the dedicated,
+  // restart-explicit UpdateManagerdBindAddress action.
 
   // zfs_base/bhyve_prefix/iso_dir/jail_prefix/jail_mount_base
   // (fields 8-12) mirror their like-named flags. Write-once through
@@ -1366,6 +1374,25 @@ message GetNodeConfigResponse {
   // automatic renewal (ADR-0077). Formatted as a duration string, same
   // convention as reconcile_interval above.
   string origin_ca_renewal_check_interval = 46;
+
+  // rpc_addr is managerd's configured external gRPC bind address. It is
+  // returned so the Machine page can show every local service endpoint;
+  // UpdateNodeConfig never changes it.
+  string rpc_addr = 47;
+}
+
+message UpdateManagerdBindAddressRequest {
+  // rpc_addr must be a numeric address currently assigned to this Comb,
+  // or an explicit wildcard/loopback address, followed by a valid port.
+  string rpc_addr = 1;
+}
+
+message UpdateManagerdBindAddressResponse {
+  // restart_required is true after the new endpoint was saved. The value
+  // is inert until an Admin restarts apiary_managerd through its existing
+  // guardrail-protected action.
+  bool restart_required = 1;
+  string error = 2;
 }
 
 message NetworkInterface {

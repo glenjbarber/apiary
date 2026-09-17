@@ -23,6 +23,57 @@ func (s *Server) currentNodeConfig(r *http.Request) (nodeConfigView, string) {
 	return fromRPCNodeConfig(resp), ""
 }
 
+// handleUpdateManagerdBindAddress saves managerd's next external RPC bind
+// address. The RPC deliberately does not restart managerd: the existing
+// Operations-panel restart action has the cluster restart guardrail and makes
+// the endpoint change explicit to the operator.
+func (s *Server) handleUpdateManagerdBindAddress(w http.ResponseWriter, r *http.Request) {
+	if err := r.ParseForm(); err != nil {
+		s.renderManagerdBindPanel(w, r, "invalid form: "+err.Error(), "")
+		return
+	}
+	resp, err := s.client.UpdateManagerdBindAddress(r.Context(), &rpcpb.UpdateManagerdBindAddressRequest{
+		RpcAddr: r.FormValue("rpc_addr"),
+	})
+	if err != nil {
+		s.renderManagerdBindPanel(w, r, err.Error(), "")
+		return
+	}
+	if resp.GetError() != "" {
+		s.renderManagerdBindPanel(w, r, resp.GetError(), "")
+		return
+	}
+	success := "Saved. Restart apiary_managerd from Operations to apply this endpoint."
+	s.renderManagerdBindPanel(w, r, "", success)
+}
+
+func (s *Server) renderManagerdBindPanel(w http.ResponseWriter, r *http.Request, formErr, success string) {
+	cfg, fetchErr := s.currentNodeConfig(r)
+	if fetchErr != "" {
+		if formErr == "" {
+			formErr = fetchErr
+		} else {
+			formErr += "; additionally failed to refresh: " + fetchErr
+		}
+	}
+	frontendCfg, frontendErr := s.currentFrontendConfig(r)
+	if frontendErr != "" && formErr == "" {
+		formErr = frontendErr
+	}
+	restshimdCfg, restshimdErr := s.currentRestshimdConfig(r)
+	if restshimdErr != "" && formErr == "" {
+		formErr = restshimdErr
+	}
+	raftdCfg, raftdErr := s.currentRaftdConfig(r)
+	if raftdErr != "" && formErr == "" {
+		formErr = raftdErr
+	}
+	s.render(w, "managerd_bind_panel", pageData{
+		NodeConfig: cfg, FrontendConfig: frontendCfg, RestshimdConfig: restshimdCfg, RaftdConfig: raftdCfg,
+		ManagerdBindError: formErr, ManagerdBindSuccess: success, CanAdmin: true,
+	})
+}
+
 // currentFrontendConfig/currentRestshimdConfig/currentRaftdConfig
 // (ADR-0102) fetch the co-located sibling daemons' own settings,
 // mirroring currentNodeConfig above exactly.
@@ -586,7 +637,15 @@ func (s *Server) renderFrontendConfigPanel(w http.ResponseWriter, r *http.Reques
 			formErr += "; additionally failed to refresh: " + fetchErr
 		}
 	}
-	s.render(w, "frontend_config_panel", pageData{FrontendConfig: cfg, FrontendConfigFormError: formErr, CanAdmin: true})
+	nodeCfg, nodeErr := s.currentNodeConfig(r)
+	if nodeErr != "" {
+		if formErr == "" {
+			formErr = nodeErr
+		} else {
+			formErr += "; additionally failed to load local endpoint suggestions: " + nodeErr
+		}
+	}
+	s.render(w, "frontend_config_panel", pageData{NodeConfig: nodeCfg, FrontendConfig: cfg, FrontendConfigFormError: formErr, CanAdmin: true})
 }
 
 // handleUpdateRestshimdConfig mirrors handleUpdateFrontendConfig for
@@ -655,7 +714,15 @@ func (s *Server) renderRestshimdConfigPanel(w http.ResponseWriter, r *http.Reque
 			formErr += "; additionally failed to refresh: " + fetchErr
 		}
 	}
-	s.render(w, "restshimd_config_panel", pageData{RestshimdConfig: cfg, RestshimdConfigFormError: formErr, CanAdmin: true})
+	nodeCfg, nodeErr := s.currentNodeConfig(r)
+	if nodeErr != "" {
+		if formErr == "" {
+			formErr = nodeErr
+		} else {
+			formErr += "; additionally failed to load local endpoint suggestions: " + nodeErr
+		}
+	}
+	s.render(w, "restshimd_config_panel", pageData{NodeConfig: nodeCfg, RestshimdConfig: cfg, RestshimdConfigFormError: formErr, CanAdmin: true})
 }
 
 // raftd_config_panel (web/templates/machine.html) is read-only only -

@@ -16,7 +16,7 @@ func TestServer_MachinePage_ShowsNodeConfigAndLocalVMsOnly(t *testing.T) {
 	client := &fakeClient{
 		statusResp: &rpcpb.StatusResponse{ManagerNodeId: "node-a"},
 		getNodeConfigResp: &rpcpb.GetNodeConfigResponse{
-			Uplink: "re0", NatUplink: "bridge0", DhcpDnsServer: "10.62.0.1", JailEnabled: boolPtr(true),
+			RpcAddr: "10.50.0.14:17700", Uplink: "re0", NatUplink: "bridge0", DhcpDnsServer: "10.62.0.1", JailEnabled: boolPtr(true),
 			AvailableInterfaces: []*rpcpb.NetworkInterface{
 				{Name: "bridge0", Up: true, Addresses: []string{"10.50.0.14/24"}},
 				{Name: "re0", Up: false},
@@ -43,6 +43,9 @@ func TestServer_MachinePage_ShowsNodeConfigAndLocalVMsOnly(t *testing.T) {
 	if !strings.Contains(body, `<select name="uplink" title=`) || !strings.Contains(body, `<option value="bridge0"`) || !strings.Contains(body, `bridge0 (up) - 10.50.0.14/24`) {
 		t.Errorf("machine page missing discovered interface choices, got: %s", body)
 	}
+	if !strings.Contains(body, `name="rpc_addr" value="10.50.0.14:17700"`) || !strings.Contains(body, `value="10.50.0.14:17600"`) {
+		t.Errorf("machine page missing configured managerd endpoint or local endpoint suggestions, got: %s", body)
+	}
 	if strings.Contains(body, "<th>Jail provisioning</th>") {
 		t.Errorf("jail provisioning should be in its own Machine page section, got: %s", body)
 	}
@@ -51,6 +54,30 @@ func TestServer_MachinePage_ShowsNodeConfigAndLocalVMsOnly(t *testing.T) {
 	}
 	if strings.Contains(body, "vm-2") {
 		t.Errorf("machine page shows vm-2, which belongs to a different node: %s", body)
+	}
+}
+
+func TestServer_UpdateManagerdBindAddress_ForwardsEndpoint(t *testing.T) {
+	client := &fakeClient{
+		getNodeConfigResp:      &rpcpb.GetNodeConfigResponse{RpcAddr: "10.90.0.12:17700"},
+		updateManagerdBindResp: &rpcpb.UpdateManagerdBindAddressResponse{RestartRequired: true},
+		getFrontendConfigResp:  &rpcpb.GetFrontendConfigResponse{},
+		getRestshimdConfigResp: &rpcpb.GetRestshimdConfigResponse{},
+		getRaftdConfigResp:     &rpcpb.GetRaftdConfigResponse{},
+	}
+	s := newTestServer(t, client)
+
+	form := url.Values{"rpc_addr": {"10.90.0.12:17700"}}
+	req := httptest.NewRequest(http.MethodPost, "/machine/managerd-bind", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, req)
+
+	if got := client.lastUpdateManagerdBindReq.GetRpcAddr(); got != "10.90.0.12:17700" {
+		t.Errorf("RPCAddr = %q, want selected endpoint", got)
+	}
+	if !strings.Contains(rec.Body.String(), "Restart apiary_managerd from Operations") {
+		t.Errorf("response missing explicit restart requirement, got: %s", rec.Body.String())
 	}
 }
 

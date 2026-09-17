@@ -47,6 +47,7 @@ const (
 	ManagerService_GetVMSerialLog_FullMethodName              = "/apiary.rpc.v1.ManagerService/GetVMSerialLog"
 	ManagerService_GetNodeConfig_FullMethodName               = "/apiary.rpc.v1.ManagerService/GetNodeConfig"
 	ManagerService_UpdateNodeConfig_FullMethodName            = "/apiary.rpc.v1.ManagerService/UpdateNodeConfig"
+	ManagerService_UpdateManagerdBindAddress_FullMethodName   = "/apiary.rpc.v1.ManagerService/UpdateManagerdBindAddress"
 	ManagerService_GetFrontendConfig_FullMethodName           = "/apiary.rpc.v1.ManagerService/GetFrontendConfig"
 	ManagerService_UpdateFrontendConfig_FullMethodName        = "/apiary.rpc.v1.ManagerService/UpdateFrontendConfig"
 	ManagerService_GetRestshimdConfig_FullMethodName          = "/apiary.rpc.v1.ManagerService/GetRestshimdConfig"
@@ -250,6 +251,11 @@ type ManagerServiceClient interface {
 	// see ADR-0049 for why. See internal/nodeconfig.
 	GetNodeConfig(ctx context.Context, in *GetNodeConfigRequest, opts ...grpc.CallOption) (*GetNodeConfigResponse, error)
 	UpdateNodeConfig(ctx context.Context, in *UpdateNodeConfigRequest, opts ...grpc.CallOption) (*UpdateNodeConfigResponse, error)
+	// UpdateManagerdBindAddress changes only managerd's own configured
+	// external RPC bind address. It never restarts managerd: the operator
+	// must use the existing guarded Restart action after confirming the new
+	// endpoint is appropriate for this Comb.
+	UpdateManagerdBindAddress(ctx context.Context, in *UpdateManagerdBindAddressRequest, opts ...grpc.CallOption) (*UpdateManagerdBindAddressResponse, error)
 	// GetFrontendConfig/UpdateFrontendConfig and GetRestshimdConfig/
 	// UpdateRestshimdConfig (ADR-0102) extend the same "manage this
 	// node's own local runtime settings" posture above to the two
@@ -831,6 +837,16 @@ func (c *managerServiceClient) UpdateNodeConfig(ctx context.Context, in *UpdateN
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(UpdateNodeConfigResponse)
 	err := c.cc.Invoke(ctx, ManagerService_UpdateNodeConfig_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *managerServiceClient) UpdateManagerdBindAddress(ctx context.Context, in *UpdateManagerdBindAddressRequest, opts ...grpc.CallOption) (*UpdateManagerdBindAddressResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(UpdateManagerdBindAddressResponse)
+	err := c.cc.Invoke(ctx, ManagerService_UpdateManagerdBindAddress_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -1554,6 +1570,11 @@ type ManagerServiceServer interface {
 	// see ADR-0049 for why. See internal/nodeconfig.
 	GetNodeConfig(context.Context, *GetNodeConfigRequest) (*GetNodeConfigResponse, error)
 	UpdateNodeConfig(context.Context, *UpdateNodeConfigRequest) (*UpdateNodeConfigResponse, error)
+	// UpdateManagerdBindAddress changes only managerd's own configured
+	// external RPC bind address. It never restarts managerd: the operator
+	// must use the existing guarded Restart action after confirming the new
+	// endpoint is appropriate for this Comb.
+	UpdateManagerdBindAddress(context.Context, *UpdateManagerdBindAddressRequest) (*UpdateManagerdBindAddressResponse, error)
 	// GetFrontendConfig/UpdateFrontendConfig and GetRestshimdConfig/
 	// UpdateRestshimdConfig (ADR-0102) extend the same "manage this
 	// node's own local runtime settings" posture above to the two
@@ -1938,6 +1959,9 @@ func (UnimplementedManagerServiceServer) GetNodeConfig(context.Context, *GetNode
 }
 func (UnimplementedManagerServiceServer) UpdateNodeConfig(context.Context, *UpdateNodeConfigRequest) (*UpdateNodeConfigResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method UpdateNodeConfig not implemented")
+}
+func (UnimplementedManagerServiceServer) UpdateManagerdBindAddress(context.Context, *UpdateManagerdBindAddressRequest) (*UpdateManagerdBindAddressResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method UpdateManagerdBindAddress not implemented")
 }
 func (UnimplementedManagerServiceServer) GetFrontendConfig(context.Context, *GetFrontendConfigRequest) (*GetFrontendConfigResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetFrontendConfig not implemented")
@@ -2609,6 +2633,24 @@ func _ManagerService_UpdateNodeConfig_Handler(srv interface{}, ctx context.Conte
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(ManagerServiceServer).UpdateNodeConfig(ctx, req.(*UpdateNodeConfigRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ManagerService_UpdateManagerdBindAddress_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(UpdateManagerdBindAddressRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ManagerServiceServer).UpdateManagerdBindAddress(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ManagerService_UpdateManagerdBindAddress_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ManagerServiceServer).UpdateManagerdBindAddress(ctx, req.(*UpdateManagerdBindAddressRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -3738,6 +3780,10 @@ var ManagerService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "UpdateNodeConfig",
 			Handler:    _ManagerService_UpdateNodeConfig_Handler,
+		},
+		{
+			MethodName: "UpdateManagerdBindAddress",
+			Handler:    _ManagerService_UpdateManagerdBindAddress_Handler,
 		},
 		{
 			MethodName: "GetFrontendConfig",

@@ -186,6 +186,7 @@ var requiredRole = map[string]Role{
 	"/apiary.rpc.v1.ManagerService/ListAPIKeys":                 RoleAdmin,
 	"/apiary.rpc.v1.ManagerService/RevokeAPIKey":                RoleAdmin,
 	"/apiary.rpc.v1.ManagerService/UpdateNodeConfig":            RoleAdmin,
+	"/apiary.rpc.v1.ManagerService/UpdateManagerdBindAddress":  RoleAdmin,
 
 	// UpdateFrontendConfig/UpdateRestshimdConfig (ADR-0102): same tier
 	// as UpdateNodeConfig above - writes a sibling daemon's own config

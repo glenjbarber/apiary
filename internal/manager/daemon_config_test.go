@@ -10,6 +10,8 @@ import (
 
 	rpcpb "github.com/glenjbarber/apiary/api/rpc"
 	"github.com/glenjbarber/apiary/internal/frontendconfig"
+	"github.com/glenjbarber/apiary/internal/netif"
+	"github.com/glenjbarber/apiary/internal/nodeconfig"
 	"github.com/glenjbarber/apiary/internal/raftdconfig"
 	"github.com/glenjbarber/apiary/internal/restshimdconfig"
 )
@@ -28,6 +30,32 @@ func waitForRestart(t *testing.T, fake *fakeNodeServiceController) string {
 		time.Sleep(10 * time.Millisecond)
 	}
 	return fake.lastRestartName()
+}
+
+func TestServer_UpdateManagerdBindAddress_PersistsLocalAddressOnly(t *testing.T) {
+	store := &fakeNodeConfigStore{cfg: nodeconfig.Config{
+		NodeID: "node-a", RPCAddr: "127.0.0.1:17700", RaftdSocket: "/var/run/apiary/raftd.sock",
+	}}
+	s := NewServer(nil, "node-a", nil, nil, nil, nil, nil, "", nil, store, nil, 0, nil)
+	s.SetNetworkInterfaceLister(func() ([]netif.Interface, error) {
+		return []netif.Interface{{Name: "em0", Up: true, Addresses: []string{"10.90.0.12/24"}}}, nil
+	})
+
+	resp, err := s.UpdateManagerdBindAddress(context.Background(), &rpcpb.UpdateManagerdBindAddressRequest{RpcAddr: "10.90.0.12:17700"})
+	if err != nil || resp.GetError() != "" {
+		t.Fatalf("UpdateManagerdBindAddress() = (%+v, %v)", resp, err)
+	}
+	if !resp.GetRestartRequired() {
+		t.Fatal("UpdateManagerdBindAddress() RestartRequired = false, want true")
+	}
+	if store.lastSave.RPCAddr != "10.90.0.12:17700" || store.lastSave.NodeID != "node-a" || store.lastSave.RaftdSocket != "/var/run/apiary/raftd.sock" {
+		t.Fatalf("saved config = %+v, want only RPCAddr changed", store.lastSave)
+	}
+
+	resp, err = s.UpdateManagerdBindAddress(context.Background(), &rpcpb.UpdateManagerdBindAddressRequest{RpcAddr: "10.90.0.99:17700"})
+	if err != nil || !strings.Contains(resp.GetError(), "not assigned") {
+		t.Fatalf("remote address = (%+v, %v), want local-address rejection", resp, err)
+	}
 }
 
 // fakeFrontendConfigStore/fakeRestshimdConfigStore/fakeRaftdConfigStore
