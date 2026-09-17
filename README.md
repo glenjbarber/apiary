@@ -3,6 +3,8 @@
 </p>
 
 [![Go CI](https://github.com/glenjbarber/apiary/actions/workflows/go-ci.yml/badge.svg?branch=main)](https://github.com/glenjbarber/apiary/actions/workflows/go-ci.yml)
+![OS](https://img.shields.io/badge/OS-FreeBSD-red.svg?logo=freebsd&logoColor=white)
+![Architecture](https://img.shields.io/badge/arch-amd64-blue)
 
 A FreeBSD-native virtualization management platform for cluster
 management, VM and container orchestration, storage replication, and a
