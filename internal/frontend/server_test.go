@@ -104,6 +104,9 @@ type fakeClient struct {
 	updateManagerdBindResp    *rpcpb.UpdateManagerdBindAddressResponse
 	lastUpdateManagerdBindReq *rpcpb.UpdateManagerdBindAddressRequest
 
+	convertStandaloneToJoinerResp    *rpcpb.ConvertStandaloneToJoinerResponse
+	lastConvertStandaloneToJoinerReq *rpcpb.ConvertStandaloneToJoinerRequest
+
 	getFrontendConfigResp       *rpcpb.GetFrontendConfigResponse
 	updateFrontendConfigResp    *rpcpb.UpdateFrontendConfigResponse
 	lastUpdateFrontendConfigReq *rpcpb.UpdateFrontendConfigRequest
@@ -314,6 +317,14 @@ func (f *fakeClient) UpdateManagerdBindAddress(_ context.Context, in *rpcpb.Upda
 		return f.updateManagerdBindResp, nil
 	}
 	return &rpcpb.UpdateManagerdBindAddressResponse{}, nil
+}
+
+func (f *fakeClient) ConvertStandaloneToJoiner(_ context.Context, in *rpcpb.ConvertStandaloneToJoinerRequest, _ ...grpc.CallOption) (*rpcpb.ConvertStandaloneToJoinerResponse, error) {
+	f.lastConvertStandaloneToJoinerReq = in
+	if f.convertStandaloneToJoinerResp != nil {
+		return f.convertStandaloneToJoinerResp, nil
+	}
+	return &rpcpb.ConvertStandaloneToJoinerResponse{}, nil
 }
 
 func (f *fakeClient) GetFrontendConfig(context.Context, *rpcpb.GetFrontendConfigRequest, ...grpc.CallOption) (*rpcpb.GetFrontendConfigResponse, error) {

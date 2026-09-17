@@ -334,6 +334,24 @@ type Server struct {
 	restshimdConfig restshimdConfigStore
 	raftdConfig     raftdConfigStore
 
+	// raftdConversionConfig (ADR-0105) is a separate, write-capable view
+	// of the same underlying raftd.json GetRaftdConfig reads through
+	// raftdConfig above - kept as its own field/interface rather than
+	// adding Save to raftdConfigStore, since raftdConfigStore's own doc
+	// comment is deliberate that no general write path exists there
+	// (the 2026-09-15 audit finding that a plain per-host save form is
+	// unsafe for internal_token/Raft TLS material). ConvertStandaloneToJoiner
+	// is the only caller, and it only ever rewrites raft_bind/await_join.
+	raftdConversionConfig raftdConversionConfigStore
+
+	// raftdConversion (ADR-0105) is the narrowly-scoped stop/reset/start
+	// controller ConvertStandaloneToJoiner uses - see
+	// raftdConversionController's own doc comment (raftdservice.go) for
+	// why this is separate from services/nodeServiceController above
+	// (raftd is deliberately excluded from that controller's restart
+	// allowlist, being consensus-critical).
+	raftdConversion raftdConversionController
+
 	// listNetworkInterfaces reports the current host-local interface
 	// inventory for the Machine Configuration page. It is separate from
 	// nodeConfig because discovery is live and is never persisted.
@@ -502,6 +520,15 @@ type raftdConfigStore interface {
 	Load() (raftdconfig.Config, error)
 }
 
+// raftdConversionConfigStore is ConvertStandaloneToJoiner's own
+// Load-and-Save view of raftd.json (ADR-0105) - see raftdConversionConfig's
+// own field doc comment above for why this is a separate interface from
+// raftdConfigStore rather than adding Save there.
+type raftdConversionConfigStore interface {
+	Load() (raftdconfig.Config, error)
+	Save(raftdconfig.Config) error
+}
+
 var _ rpcpb.ManagerServiceServer = (*Server)(nil)
 
 // NewServer returns a Server that answers external RPCs using raft to
@@ -522,7 +549,7 @@ var _ rpcpb.ManagerServiceServer = (*Server)(nil)
 // the params above) specifically to keep every existing positional
 // NewServer(...) call site a mechanical one-line edit.
 func NewServer(raft *RaftClient, nodeID string, isos isoManager, vnc VNCLookup, serialLog SerialLogLookup, vlanMgr VLANStatus, peers PeerForwarder, peerManagerdPort string, zfsMgr quotaSetter, nodeConfig nodeConfigStore, assumptionStoreMgr assumptionStore, assumptionStaleAfter time.Duration, reconciler reconcilerStats) *Server {
-	return &Server{raft: raft, nodeID: nodeID, isos: isos, vnc: vnc, serialLog: serialLog, vlan: vlanMgr, statsGather: hoststats.Gather, peers: peers, peerManagerdPort: peerManagerdPort, zfs: zfsMgr, nodeConfig: nodeConfig, listNetworkInterfaces: netif.List, assumptions: assumptionStoreMgr, assumptionStaleAfter: assumptionStaleAfter, reconciler: reconciler, services: rcServiceController{}, pamLockouts: newPAMLockoutTracker(), reachabilityCheck: dialReachable}
+	return &Server{raft: raft, nodeID: nodeID, isos: isos, vnc: vnc, serialLog: serialLog, vlan: vlanMgr, statsGather: hoststats.Gather, peers: peers, peerManagerdPort: peerManagerdPort, zfs: zfsMgr, nodeConfig: nodeConfig, listNetworkInterfaces: netif.List, assumptions: assumptionStoreMgr, assumptionStaleAfter: assumptionStaleAfter, reconciler: reconciler, services: rcServiceController{}, pamLockouts: newPAMLockoutTracker(), reachabilityCheck: dialReachable, raftdConversion: rcRaftdConversionAdapter{}}
 }
 
 // SetNetworkInterfaceLister overrides host interface discovery for tests.
@@ -553,6 +580,10 @@ func (s *Server) SetOriginCAIssuer(issuer origincert.Issuer) { s.originCA = issu
 func (s *Server) SetFrontendConfig(store frontendConfigStore)   { s.frontendConfig = store }
 func (s *Server) SetRestshimdConfig(store restshimdConfigStore) { s.restshimdConfig = store }
 func (s *Server) SetRaftdConfig(store raftdConfigStore)         { s.raftdConfig = store }
+func (s *Server) SetRaftdConversionConfig(store raftdConversionConfigStore) {
+	s.raftdConversionConfig = store
+}
+func (s *Server) SetRaftdConversion(ctrl raftdConversionController) { s.raftdConversion = ctrl }
 
 // SetRestartGuardrailToken wires the action-preflight restart guardrail's
 // dedicated credential (ADR-0103) - loaded once by cmd/managerd from a

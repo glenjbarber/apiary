@@ -206,6 +206,14 @@ func (f *fakeClient) UpdateNodeConfig(context.Context, *rpcpb.UpdateNodeConfigRe
 	return &rpcpb.UpdateNodeConfigResponse{}, nil
 }
 
+func (f *fakeClient) UpdateManagerdBindAddress(context.Context, *rpcpb.UpdateManagerdBindAddressRequest, ...grpc.CallOption) (*rpcpb.UpdateManagerdBindAddressResponse, error) {
+	return &rpcpb.UpdateManagerdBindAddressResponse{}, nil
+}
+
+func (f *fakeClient) ConvertStandaloneToJoiner(context.Context, *rpcpb.ConvertStandaloneToJoinerRequest, ...grpc.CallOption) (*rpcpb.ConvertStandaloneToJoinerResponse, error) {
+	return &rpcpb.ConvertStandaloneToJoinerResponse{}, nil
+}
+
 func (f *fakeClient) GetFrontendConfig(context.Context, *rpcpb.GetFrontendConfigRequest, ...grpc.CallOption) (*rpcpb.GetFrontendConfigResponse, error) {
 	return &rpcpb.GetFrontendConfigResponse{}, nil
 }

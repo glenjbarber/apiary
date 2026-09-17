@@ -393,6 +393,7 @@ func run() error {
 	srv.SetFrontendConfig(&frontendconfig.Manager{})
 	srv.SetRestshimdConfig(&restshimdconfig.Manager{})
 	srv.SetRaftdConfig(&raftdconfig.Manager{})
+	srv.SetRaftdConversionConfig(&raftdconfig.Manager{})
 	// ADR-0088: reconciler already satisfies natPauser (NATUplink/
 	// PauseOutboundNAT) structurally - wired unconditionally, since
 	// both methods are themselves no-ops when PF/NetworkStatePath

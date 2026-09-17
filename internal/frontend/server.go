@@ -124,6 +124,13 @@ type pageData struct {
 	JoinColonyFormError string
 	JoinColonyResult    *joinRequestView
 
+	// ConvertJoinerFormError/ConvertJoinerResult back the Machine page's
+	// "Convert this Comb to a joiner" action (ADR-0105) - distinct from
+	// JoinColonyFormError/JoinColonyResult above, which is for a
+	// genuinely fresh node with no state of its own.
+	ConvertJoinerFormError string
+	ConvertJoinerResult    *convertJoinerResultView
+
 	// AuthEnabled reports whether login is required at all, so the nav
 	// partial only shows a "Log out" link when there's actually a
 	// session to log out of.
@@ -887,6 +894,7 @@ func (s *Server) routes() {
 	// existing Colony's side, reachable from the landing page's panel.
 	s.mux.HandleFunc("POST /machine/join-colony", s.requireRole(manager.RoleAdmin, s.handleRequestJoinColony))
 	s.mux.HandleFunc("POST /machine/join-colony/cancel", s.requireRole(manager.RoleAdmin, s.handleCancelJoinRequest))
+	s.mux.HandleFunc("POST /machine/convert-to-joiner", s.requireRole(manager.RoleAdmin, s.handleConvertStandaloneToJoiner))
 	s.mux.HandleFunc("POST /join-requests/{id}/preflight", s.requireRole(manager.RoleAdmin, s.handlePreflightJoinRequest))
 	s.mux.HandleFunc("POST /join-requests/{id}/approve", s.requireRole(manager.RoleAdmin, s.handleApproveJoinRequest))
 	s.mux.HandleFunc("POST /join-requests/{id}/reject", s.requireRole(manager.RoleAdmin, s.handleRejectJoinRequest))

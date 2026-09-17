@@ -48,6 +48,7 @@ const (
 	ManagerService_GetNodeConfig_FullMethodName               = "/apiary.rpc.v1.ManagerService/GetNodeConfig"
 	ManagerService_UpdateNodeConfig_FullMethodName            = "/apiary.rpc.v1.ManagerService/UpdateNodeConfig"
 	ManagerService_UpdateManagerdBindAddress_FullMethodName   = "/apiary.rpc.v1.ManagerService/UpdateManagerdBindAddress"
+	ManagerService_ConvertStandaloneToJoiner_FullMethodName   = "/apiary.rpc.v1.ManagerService/ConvertStandaloneToJoiner"
 	ManagerService_GetFrontendConfig_FullMethodName           = "/apiary.rpc.v1.ManagerService/GetFrontendConfig"
 	ManagerService_UpdateFrontendConfig_FullMethodName        = "/apiary.rpc.v1.ManagerService/UpdateFrontendConfig"
 	ManagerService_GetRestshimdConfig_FullMethodName          = "/apiary.rpc.v1.ManagerService/GetRestshimdConfig"
@@ -256,6 +257,21 @@ type ManagerServiceClient interface {
 	// must use the existing guarded Restart action after confirming the new
 	// endpoint is appropriate for this Comb.
 	UpdateManagerdBindAddress(ctx context.Context, in *UpdateManagerdBindAddressRequest, opts ...grpc.CallOption) (*UpdateManagerdBindAddressResponse, error)
+	// ConvertStandaloneToJoiner (ADR-0105) guards the one-shot conversion of
+	// an already-bootstrapped, standalone single-node Comb into a joiner for
+	// an existing Colony. It is not a generic Raft configuration editor: it
+	// requires an exact confirm_phrase, stops this node's own raftd, moves
+	// its existing raft state aside to a timestamped backup (reusing raftd's
+	// own -reset semantics), rewrites only raft_bind and await_join in
+	// raftd.json (every other field - node_id, socket, data_dir,
+	// internal_token, Raft TLS material - is preserved untouched), restarts
+	// raftd, confirms it is actually listening at the new raft_bind address,
+	// and only then submits a mutually-authorized ADR-0083 join request
+	// against target_managerd_address using this node's own real, current
+	// identity. It never merges divergent Raft histories: the existing
+	// ApproveJoinRequest reachability preflight on the target Colony member
+	// still applies unchanged.
+	ConvertStandaloneToJoiner(ctx context.Context, in *ConvertStandaloneToJoinerRequest, opts ...grpc.CallOption) (*ConvertStandaloneToJoinerResponse, error)
 	// GetFrontendConfig/UpdateFrontendConfig and GetRestshimdConfig/
 	// UpdateRestshimdConfig (ADR-0102) extend the same "manage this
 	// node's own local runtime settings" posture above to the two
@@ -847,6 +863,16 @@ func (c *managerServiceClient) UpdateManagerdBindAddress(ctx context.Context, in
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(UpdateManagerdBindAddressResponse)
 	err := c.cc.Invoke(ctx, ManagerService_UpdateManagerdBindAddress_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *managerServiceClient) ConvertStandaloneToJoiner(ctx context.Context, in *ConvertStandaloneToJoinerRequest, opts ...grpc.CallOption) (*ConvertStandaloneToJoinerResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ConvertStandaloneToJoinerResponse)
+	err := c.cc.Invoke(ctx, ManagerService_ConvertStandaloneToJoiner_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -1575,6 +1601,21 @@ type ManagerServiceServer interface {
 	// must use the existing guarded Restart action after confirming the new
 	// endpoint is appropriate for this Comb.
 	UpdateManagerdBindAddress(context.Context, *UpdateManagerdBindAddressRequest) (*UpdateManagerdBindAddressResponse, error)
+	// ConvertStandaloneToJoiner (ADR-0105) guards the one-shot conversion of
+	// an already-bootstrapped, standalone single-node Comb into a joiner for
+	// an existing Colony. It is not a generic Raft configuration editor: it
+	// requires an exact confirm_phrase, stops this node's own raftd, moves
+	// its existing raft state aside to a timestamped backup (reusing raftd's
+	// own -reset semantics), rewrites only raft_bind and await_join in
+	// raftd.json (every other field - node_id, socket, data_dir,
+	// internal_token, Raft TLS material - is preserved untouched), restarts
+	// raftd, confirms it is actually listening at the new raft_bind address,
+	// and only then submits a mutually-authorized ADR-0083 join request
+	// against target_managerd_address using this node's own real, current
+	// identity. It never merges divergent Raft histories: the existing
+	// ApproveJoinRequest reachability preflight on the target Colony member
+	// still applies unchanged.
+	ConvertStandaloneToJoiner(context.Context, *ConvertStandaloneToJoinerRequest) (*ConvertStandaloneToJoinerResponse, error)
 	// GetFrontendConfig/UpdateFrontendConfig and GetRestshimdConfig/
 	// UpdateRestshimdConfig (ADR-0102) extend the same "manage this
 	// node's own local runtime settings" posture above to the two
@@ -1962,6 +2003,9 @@ func (UnimplementedManagerServiceServer) UpdateNodeConfig(context.Context, *Upda
 }
 func (UnimplementedManagerServiceServer) UpdateManagerdBindAddress(context.Context, *UpdateManagerdBindAddressRequest) (*UpdateManagerdBindAddressResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method UpdateManagerdBindAddress not implemented")
+}
+func (UnimplementedManagerServiceServer) ConvertStandaloneToJoiner(context.Context, *ConvertStandaloneToJoinerRequest) (*ConvertStandaloneToJoinerResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ConvertStandaloneToJoiner not implemented")
 }
 func (UnimplementedManagerServiceServer) GetFrontendConfig(context.Context, *GetFrontendConfigRequest) (*GetFrontendConfigResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetFrontendConfig not implemented")
@@ -2651,6 +2695,24 @@ func _ManagerService_UpdateManagerdBindAddress_Handler(srv interface{}, ctx cont
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(ManagerServiceServer).UpdateManagerdBindAddress(ctx, req.(*UpdateManagerdBindAddressRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ManagerService_ConvertStandaloneToJoiner_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ConvertStandaloneToJoinerRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ManagerServiceServer).ConvertStandaloneToJoiner(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ManagerService_ConvertStandaloneToJoiner_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ManagerServiceServer).ConvertStandaloneToJoiner(ctx, req.(*ConvertStandaloneToJoinerRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -3784,6 +3846,10 @@ var ManagerService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "UpdateManagerdBindAddress",
 			Handler:    _ManagerService_UpdateManagerdBindAddress_Handler,
+		},
+		{
+			MethodName: "ConvertStandaloneToJoiner",
+			Handler:    _ManagerService_ConvertStandaloneToJoiner_Handler,
 		},
 		{
 			MethodName: "GetFrontendConfig",
