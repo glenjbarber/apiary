@@ -2,9 +2,9 @@
 //
 // JSON has no comment syntax - restshimd's own parser will reject this
 // file as-is. Copy it to /usr/local/etc/apiary/restshimd.json and
-// remove every "//" line first ("grep -v '^\s*//' restshimd.json.sample"
-// does this safely, since every comment here stands on its own line
-// and never trails a value). Every field below is present with either
+// remove comment-only and blank lines first (see docs/create-node.md).
+// Every comment here stands on its own line and never trails a value.
+// Every field below is present with either
 // a realistic default or an empty value you may fill in - not
 // commented out - so the stripped result is a complete, valid config.
 //

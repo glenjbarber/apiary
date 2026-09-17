@@ -109,7 +109,8 @@ The usual path is `/usr/local/share/uefi-firmware/BHYVE_UEFI.fd`.
 Create the real configuration from the installed sample:
 
 ```bash
-grep -v '^\s*//' /usr/local/etc/apiary/raftd.json.sample \
+sed -e '/^[[:space:]]*\/\//d' -e '/^[[:space:]]*$/d' \
+  /usr/local/etc/apiary/raftd.json.sample \
   > /usr/local/etc/apiary/raftd.json
 ${EDITOR:-vi} /usr/local/etc/apiary/raftd.json
 chmod 600 /usr/local/etc/apiary/raftd.json
@@ -138,7 +139,8 @@ service apiary_raftd start
 ## 6. Configure and start managerd
 
 ```bash
-grep -v '^\s*//' /usr/local/etc/apiary/managerd.json.sample \
+sed -e '/^[[:space:]]*\/\//d' -e '/^[[:space:]]*$/d' \
+  /usr/local/etc/apiary/managerd.json.sample \
   > /usr/local/etc/apiary/managerd.json
 ${EDITOR:-vi} /usr/local/etc/apiary/managerd.json
 chmod 600 /usr/local/etc/apiary/managerd.json
@@ -169,9 +171,11 @@ service apiary_managerd start
 ## 7. Configure and start the web and REST services
 
 ```bash
-grep -v '^\s*//' /usr/local/etc/apiary/frontend.json.sample \
+sed -e '/^[[:space:]]*\/\//d' -e '/^[[:space:]]*$/d' \
+  /usr/local/etc/apiary/frontend.json.sample \
   > /usr/local/etc/apiary/frontend.json
-grep -v '^\s*//' /usr/local/etc/apiary/restshimd.json.sample \
+sed -e '/^[[:space:]]*\/\//d' -e '/^[[:space:]]*$/d' \
+  /usr/local/etc/apiary/restshimd.json.sample \
   > /usr/local/etc/apiary/restshimd.json
 ${EDITOR:-vi} /usr/local/etc/apiary/frontend.json
 ${EDITOR:-vi} /usr/local/etc/apiary/restshimd.json

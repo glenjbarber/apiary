@@ -278,7 +278,8 @@ comments as a starting point instead of writing the file from scratch:
 
 ```bash
 mkdir -p /usr/local/etc/apiary
-grep -v '^\s*//' /usr/local/etc/apiary/raftd.json.sample > /usr/local/etc/apiary/raftd.json
+sed -e '/^[[:space:]]*\/\//d' -e '/^[[:space:]]*$/d' \
+  /usr/local/etc/apiary/raftd.json.sample > /usr/local/etc/apiary/raftd.json
 ${EDITOR:-vi} /usr/local/etc/apiary/raftd.json
 chmod 600 /usr/local/etc/apiary/raftd.json
 ```
@@ -348,7 +349,8 @@ and strip its comments as a starting point instead of writing the file
 from scratch:
 
 ```bash
-grep -v '^\s*//' /usr/local/etc/apiary/managerd.json.sample > /usr/local/etc/apiary/managerd.json
+sed -e '/^[[:space:]]*\/\//d' -e '/^[[:space:]]*$/d' \
+  /usr/local/etc/apiary/managerd.json.sample > /usr/local/etc/apiary/managerd.json
 ${EDITOR:-vi} /usr/local/etc/apiary/managerd.json
 chmod 600 /usr/local/etc/apiary/managerd.json
 ```
@@ -432,7 +434,8 @@ each alongside its real path (`frontend.json.sample`/
 instead of writing either from scratch:
 
 ```bash
-grep -v '^\s*//' /usr/local/etc/apiary/frontend.json.sample > /usr/local/etc/apiary/frontend.json
+sed -e '/^[[:space:]]*\/\//d' -e '/^[[:space:]]*$/d' \
+  /usr/local/etc/apiary/frontend.json.sample > /usr/local/etc/apiary/frontend.json
 ${EDITOR:-vi} /usr/local/etc/apiary/frontend.json
 ```
 
@@ -461,7 +464,8 @@ service apiary_frontend start
 pattern:
 
 ```bash
-grep -v '^\s*//' /usr/local/etc/apiary/restshimd.json.sample > /usr/local/etc/apiary/restshimd.json
+sed -e '/^[[:space:]]*\/\//d' -e '/^[[:space:]]*$/d' \
+  /usr/local/etc/apiary/restshimd.json.sample > /usr/local/etc/apiary/restshimd.json
 ${EDITOR:-vi} /usr/local/etc/apiary/restshimd.json
 ```
 

@@ -56,8 +56,8 @@ INSTALL_SRCS=	raftd \
 # every install, unlike the real config files they sit beside, which
 # this target never touches. Copy one to the real path and strip its
 # "//" lines to use it (each is written so every comment stands on its
-# own line and never trails a value, so a plain `grep -v '^\s*//'`
-# does this safely).
+# own line and never trails a value. The documented POSIX sed command
+# removes both those comment-only lines and the blank lines they leave).
 install: build setup-dirs
 	mkdir -p /usr/local/libexec/apiary /usr/local/etc/apiary
 	for S in ${INSTALL_SRCS} ; \
