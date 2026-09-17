@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/apiary-mark.svg" alt="Apiary Project Logo" width="180">
+  <img src="assets/apiary-logo.svg" alt="Apiary Project Logo" width="180">
 </p>
 
 # Apiary
