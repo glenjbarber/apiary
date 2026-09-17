@@ -29,10 +29,10 @@
   // os.Hostname().
   "node_id": "<this-node-id>",
 
-  // TCP address for the raft transport. Only needed for a genuine
-  // cross-host join (Path B) - raftd's own default (127.0.0.1:17600)
-  // is loopback-only, correct only for a single-host test cluster.
-  "raft_bind": "",
+  // TCP address for the raft transport. Replace the placeholder with
+  // this host's real, reachable address. Do not use 0.0.0.0 here: the
+  // same value is advertised to Raft peers, which must be able to dial it.
+  "raft_bind": "<this-host-address>:17600",
 
   // Unix socket path of an existing cluster member to join through
   // (Path B only). Only ever consulted on a truly fresh, empty

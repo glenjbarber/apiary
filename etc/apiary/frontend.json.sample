@@ -30,10 +30,10 @@
   // from manager_addr's own host.
   "manager_tls_server_name": "",
 
-  // Serve the web UI over HTTPS; leave both empty to serve plaintext
-  // HTTP.
-  "tls_cert": "",
-  "tls_key": "",
+  // Serve the web UI over HTTPS using Step 6's
+  // "make setup"/setup-tls output by default.
+  "tls_cert": "/usr/local/etc/apiary-tls/cert.pem",
+  "tls_key": "/usr/local/etc/apiary-tls/key.pem",
 
   // Dial other cluster nodes' managerd over TLS when fetching their
   // host stats for the cluster overview page.
