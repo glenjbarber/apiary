@@ -309,14 +309,37 @@ func (s *Server) handleClusterOverviewPage(w http.ResponseWriter, r *http.Reques
 func (s *Server) handleHostPage(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 
-	localNodeID := ""
-	if statusResp, err := s.client.Status(r.Context(), &rpcpb.StatusRequest{}); err == nil {
-		localNodeID = statusResp.GetManagerNodeId()
+	statusResp, err := s.client.Status(r.Context(), &rpcpb.StatusRequest{})
+	if err != nil {
+		http.Error(w, "could not verify current Colony membership", http.StatusServiceUnavailable)
+		return
+	}
+	if !knownColonyMember(statusResp, id) {
+		http.NotFound(w, r)
+		return
 	}
 
-	stats, errMsg := s.nodeHostStats(r.Context(), id, localNodeID)
+	stats, errMsg := s.nodeHostStats(r.Context(), id, statusResp.GetManagerNodeId())
 	if stats.NodeID == "" {
 		stats.NodeID = id
 	}
 	s.render(w, "host_page", s.withAuthFields(r, pageData{Error: errMsg, Stats: stats, ActivePage: "stats"}))
+}
+
+// knownColonyMember reports whether id is in the current raft membership
+// returned by this frontend's colocated managerd. It is deliberately checked
+// before handleHostPage derives a peer address: a URL path value is
+// attacker-controlled, while KnownNodeIds is obtained from raftd's current
+// server configuration. This keeps the frontend's peer credential from being
+// sent to an arbitrary endpoint through /host/{id}.
+func knownColonyMember(status *rpcpb.StatusResponse, id string) bool {
+	if id != "" && id == status.GetManagerNodeId() {
+		return true
+	}
+	for _, knownID := range status.GetKnownNodeIds() {
+		if knownID == id {
+			return true
+		}
+	}
+	return false
 }
