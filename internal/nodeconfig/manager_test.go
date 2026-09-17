@@ -1,11 +1,36 @@
 package nodeconfig
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
+
+// TestManagerdSampleConfigParses protects the installed sample from fields
+// whose documented JSON representation does not match Config. The sample's
+// comment-only and blank lines are stripped exactly as the bootstrap guide
+// instructs before decoding it as a real managerd configuration.
+func TestManagerdSampleConfigParses(t *testing.T) {
+	body, err := os.ReadFile("../../etc/apiary/managerd.json.sample")
+	if err != nil {
+		t.Fatalf("ReadFile(sample) error: %v", err)
+	}
+	var kept []string
+	for _, line := range strings.Split(string(body), "\n") {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" || strings.HasPrefix(trimmed, "//") {
+			continue
+		}
+		kept = append(kept, line)
+	}
+	var cfg Config
+	if err := json.Unmarshal([]byte(strings.Join(kept, "\n")), &cfg); err != nil {
+		t.Fatalf("managerd.json.sample does not decode as Config: %v", err)
+	}
+}
 
 // TestManager_SaveThenLoadRoundTrips_ADR0100Fields covers the fields
 // added by ADR-0100 - NodeID/RPCAddr/RaftdSocket (loaded from this

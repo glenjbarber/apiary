@@ -2,9 +2,9 @@
 //
 // JSON has no comment syntax - managerd's own parser will reject this
 // file as-is. Copy it to /usr/local/etc/apiary/managerd.json and
-// remove every "//" line first ("grep -v '^\s*//' managerd.json.sample"
-// does this safely, since every comment here stands on its own line
-// and never trails a value). Every field below is present with either
+// remove comment-only and blank lines first (see docs/create-node.md).
+// Every comment here stands on its own line and never trails a value.
+// Every field below is present with either
 // a realistic default or an empty/zero value you may fill in - not
 // commented out - so the stripped result is a complete, valid config.
 //
@@ -49,9 +49,9 @@
   // non-recursive.
   "zfs_base": "<your-pool-name>/apiary",
 
-  // Pure tuning knob, safe to change any time. Go duration string
-  // (e.g. "30s"). Empty uses managerd's own built-in default.
-  "reconcile_interval": "",
+  // Pure tuning knob, safe to change any time. JSON stores Go
+  // durations as integer nanoseconds; zero uses the built-in default.
+  "reconcile_interval": 0,
 
   // WRITE-ONCE, same reasoning as zfs_base.
   "bhyve_prefix": "",
@@ -131,14 +131,14 @@
   "known_peer_addresses": "",
 
   // Pure tuning knobs for the assumption-checker subsystem, safe to
-  // change any time. Go duration strings; empty/zero uses managerd's
-  // own built-in defaults.
-  "assumption_check_interval": "",
-  "assumption_heartbeat_interval": "",
-  "assumption_stale_after": "",
-  "assumption_run_deadline": "",
+  // change any time. JSON stores Go durations as integer nanoseconds;
+  // zero uses managerd's own built-in defaults.
+  "assumption_check_interval": 0,
+  "assumption_heartbeat_interval": 0,
+  "assumption_stale_after": 0,
+  "assumption_run_deadline": 0,
   "assumption_history_limit": 0,
-  "assumption_history_max_age": "",
+  "assumption_history_max_age": 0,
 
   // managerd's own external API TLS - mandatory, not an afterthought
   // reserved for when pam_service is set. Setting both here makes
@@ -169,8 +169,8 @@
   "origin_ca_directory": "",
 
   // How often to check local Origin CA certificates for ones due for
-  // automatic renewal. Pure tuning knob, safe to change any time.
-  "origin_ca_renewal_check_interval": "",
+  // automatic renewal. Integer nanoseconds; zero uses the default.
+  "origin_ca_renewal_check_interval": 0,
 
   // Shared secret presented to raftd's internal socket (ADR-0033) -
   // required if raftd's own internal_token is set. A real credential
