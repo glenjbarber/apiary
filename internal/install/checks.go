@@ -13,8 +13,7 @@ import (
 // (not consts) purely so tests can point them at a temp file instead of
 // a real host's own /etc/rc.conf and /etc/pf.conf.
 var (
-	pfConfPath       = "/etc/pf.conf"
-	devdDhclientPath = "/etc/devd/dhclient.conf"
+	pfConfPath = "/etc/pf.conf"
 )
 
 // apiaryPFAnchor is the exact anchor stanza internal/pf's own doc comment
@@ -40,7 +39,6 @@ var registry = []Check{
 	vlanUplinkCheck,
 	bhyveBridgeCheck,
 	uplinkBridgingCheck,
-	devdDhclientConflictCheck,
 	hastdEnableCheck,
 	pamServiceCheck,
 }
@@ -513,9 +511,51 @@ var bhyveBridgeCheck = Check{
 				Detail:  opt.BhyveBridge + " exists but does not have " + opt.VLANUplink + " attached",
 				FixHint: fmt.Sprintf("ifconfig %s addm %s", opt.BhyveBridge, opt.VLANUplink)}
 		}
+
+		cloned, _ := sysrcValue(ctx, r, "cloned_interfaces")
+		if !wordPresent(cloned, opt.BhyveBridge) {
+			return bridgeRCResult(opt, fmt.Sprintf("%s is live but is not listed in cloned_interfaces", opt.BhyveBridge))
+		}
+
+		uplinkConfig, _ := sysrcValue(ctx, r, "ifconfig_"+opt.VLANUplink)
+		bridgeConfig, _ := sysrcValue(ctx, r, "ifconfig_"+opt.BhyveBridge)
+		if !strings.Contains(bridgeConfig, "addm "+opt.VLANUplink) {
+			return bridgeRCResult(opt, fmt.Sprintf("ifconfig_%s does not persistently attach %s", opt.BhyveBridge, opt.VLANUplink))
+		}
+		if hasDHCPToken(uplinkConfig) {
+			return bridgeRCResult(opt, fmt.Sprintf("DHCP is configured on bridge member %s instead of %s", opt.VLANUplink, opt.BhyveBridge))
+		}
+		if hasDHCPToken(bridgeConfig) {
+			if !wordPresentFold(bridgeConfig, "SYNCDHCP") {
+				return bridgeRCResult(opt, fmt.Sprintf("ifconfig_%s uses asynchronous DHCP; SYNCDHCP is required for deterministic boot networking", opt.BhyveBridge))
+			}
+			uplinkOut, stderr, err := r.Run(ctx, "ifconfig", opt.VLANUplink)
+			if err != nil {
+				return bridgeRCResult(opt, firstNonEmpty(stderr, err))
+			}
+			mac := interfaceMAC(uplinkOut)
+			createArgs, _ := sysrcValue(ctx, r, "create_args_"+opt.BhyveBridge)
+			if mac == "" || !strings.EqualFold(strings.TrimSpace(createArgs), "ether "+mac) {
+				return bridgeRCResult(opt, fmt.Sprintf("create_args_%s must pin the bridge MAC to %s's MAC %s", opt.BhyveBridge, opt.VLANUplink, mac))
+			}
+		}
 		return Result{ID: "bhyve-bridge", Status: StatusOK, Detail: fmt.Sprintf("%s has %s attached", opt.BhyveBridge, opt.VLANUplink)}
 	},
 	Apply: func(ctx context.Context, r Runner, opt Options) error {
+		uplinkConfig, _ := sysrcValue(ctx, r, "ifconfig_"+opt.VLANUplink)
+		bridgeConfig, _ := sysrcValue(ctx, r, "ifconfig_"+opt.BhyveBridge)
+		moveDHCPToBridge := hasDHCPToken(uplinkConfig) || hasDHCPToken(bridgeConfig)
+		mac := ""
+		if moveDHCPToBridge {
+			uplinkOut, stderr, err := r.Run(ctx, "ifconfig", opt.VLANUplink)
+			if err != nil {
+				return fmt.Errorf("ifconfig %s: %s", opt.VLANUplink, firstNonEmpty(stderr, err))
+			}
+			mac = interfaceMAC(uplinkOut)
+			if mac == "" {
+				return fmt.Errorf("ifconfig %s: no ether address found", opt.VLANUplink)
+			}
+		}
 		if _, _, err := r.Run(ctx, "ifconfig", opt.BhyveBridge); err != nil {
 			if _, stderr, err := r.Run(ctx, "ifconfig", opt.BhyveBridge, "create"); err != nil {
 				return fmt.Errorf("ifconfig %s create: %s", opt.BhyveBridge, firstNonEmpty(stderr, err))
@@ -532,15 +572,75 @@ var bhyveBridgeCheck = Check{
 		if _, stderr, err := r.Run(ctx, "ifconfig", opt.VLANUplink, "up"); err != nil {
 			return fmt.Errorf("ifconfig %s up: %s", opt.VLANUplink, firstNonEmpty(stderr, err))
 		}
-		// Persist across reboots, mirroring the rc.conf lines ADR-0022
-		// itself documents for this exact setup (the simple addm form -
-		// the MAC-pinning create_args_bridgeN variant ADR-0022 also shows
-		// is not handled here; disclosed in the ADR for this feature).
 		if err := ensureRcListContains(ctx, r, "cloned_interfaces", opt.BhyveBridge); err != nil {
 			return err
 		}
+		if moveDHCPToBridge {
+			// The physical member stays addressless. Pinning the bridge to
+			// the member's MAC preserves the DHCP identity while SYNCDHCP
+			// makes the management lease available deterministically during
+			// boot. The live lease is deliberately not moved here because
+			// doing so would sever the SSH session running apiaryinstall.
+			if err := setRcVar(ctx, r, fmt.Sprintf("ifconfig_%s=up", opt.VLANUplink)); err != nil {
+				return err
+			}
+			if err := setRcVar(ctx, r, fmt.Sprintf("create_args_%s=ether %s", opt.BhyveBridge, mac)); err != nil {
+				return err
+			}
+			return setRcVar(ctx, r, fmt.Sprintf("ifconfig_%s=addm %s up SYNCDHCP", opt.BhyveBridge, opt.VLANUplink))
+		}
 		return setRcVar(ctx, r, fmt.Sprintf("ifconfig_%s=addm %s up", opt.BhyveBridge, opt.VLANUplink))
 	},
+}
+
+func bridgeRCResult(opt Options, detail string) Result {
+	return Result{
+		ID:     "bhyve-bridge",
+		Status: StatusMisconfigured,
+		Detail: detail,
+		FixHint: fmt.Sprintf("- Apply the persistent bridge layout: apiaryinstall -apply-network yes-modify-network -vlan-uplink %s -bhyve-bridge %s\n"+
+			"- If %s currently uses DHCP, the installer moves that DHCP configuration to %s, pins the bridge MAC, and leaves the physical member addressless.\n"+
+			"- Risk: the live lease is not moved, but attaching %s can still interrupt the current SSH session. Use a console when possible.",
+			opt.VLANUplink, opt.BhyveBridge, opt.VLANUplink, opt.BhyveBridge, opt.VLANUplink),
+	}
+}
+
+func wordPresent(value, wanted string) bool {
+	for _, word := range strings.Fields(value) {
+		if word == wanted {
+			return true
+		}
+	}
+	return false
+}
+
+func wordPresentFold(value, wanted string) bool {
+	for _, word := range strings.Fields(value) {
+		if strings.EqualFold(word, wanted) {
+			return true
+		}
+	}
+	return false
+}
+
+func hasDHCPToken(value string) bool {
+	for _, word := range strings.Fields(value) {
+		switch strings.ToUpper(word) {
+		case "DHCP", "SYNCDHCP", "NOSYNCDHCP":
+			return true
+		}
+	}
+	return false
+}
+
+func interfaceMAC(ifconfigOutput string) string {
+	for _, line := range strings.Split(ifconfigOutput, "\n") {
+		fields := strings.Fields(line)
+		if len(fields) == 2 && fields[0] == "ether" {
+			return fields[1]
+		}
+	}
+	return ""
 }
 
 // uplinkBridgingCheck (ADR-0101) is applicable only when the operator has
@@ -562,52 +662,6 @@ var uplinkBridgingCheck = Check{
 		}
 		return Result{ID: "uplink-bridging", Status: StatusManual,
 			Detail: fmt.Sprintf("this node will attach uplink_bridged VMs' taps directly to %s, the same bridge carrying this host's own management traffic - a misbehaving VM there has direct L2 access to that broadcast domain (see ADR-0101)", opt.BhyveBridge)}
-	},
-}
-
-// devdDhclientConflictCheck (ADR-0094) flags a confirmed-live root
-// cause of a real host going unreachable after a reboot: FreeBSD's
-// stock /etc/devd/dhclient.conf fires `service dhclient quietstart
-// <if>` on ANY Ethernet-like interface's link-up event, completely
-// independent of that interface's own rc.conf ifconfig_<if> value.
-// When the uplink NIC (-vlan-uplink) is meant to be a pure, address-
-// less bridge member - -bhyve-bridge's own ifconfig_<bridge> carries
-// the real "DHCP" token, not the NIC's - this rule still independently
-// DHCPs the NIC too, racing the bridge for the identical MAC-keyed
-// lease/address. Confirmed live: both the uplink NIC and the bridge
-// obtained the SAME address via separate leases after a reboot,
-// leaving whichever interface most recently renewed holding it - an
-// unstable, duplicate-address configuration that can flip which
-// interface actually answers ARP for the host's own management
-// address on any future link flap or reboot, not just this one.
-// Disabling the rule host-wide is the standard fix for exactly this
-// bridge-vs-devd conflict; the tradeoff (any OTHER, non-bridged NIC on
-// the same host also loses automatic DHCP-on-link-up) is named in the
-// FixHint rather than silently accepted.
-var devdDhclientConflictCheck = Check{
-	ID:          "devd-dhclient-conflict",
-	Description: "the stock devd(8) auto-dhclient rule does not independently DHCP the bridged uplink NIC, duplicating -bhyve-bridge's own DHCP-acquired address",
-	Risk:        RiskSafe,
-	Applicable:  func(opt Options) bool { return opt.VLANUplink != "" && opt.BhyveBridge != "" },
-	Probe: func(ctx context.Context, r Runner, opt Options) Result {
-		if _, err := os.Stat(devdDhclientPath); err != nil {
-			return Result{ID: "devd-dhclient-conflict", Status: StatusOK, Detail: "no live devd dhclient rule found"}
-		}
-		return Result{ID: "devd-dhclient-conflict", Status: StatusMisconfigured,
-			Detail:  devdDhclientPath + " can independently DHCP " + opt.VLANUplink + ", duplicating " + opt.BhyveBridge + "'s own lease for the same MAC",
-			FixHint: fmt.Sprintf("- Disable the conflicting rule: mv %s %s.disabled && service devd restart\n- Tradeoff: other non-bridged NICs on this host will no longer DHCP automatically when their link comes up", devdDhclientPath, devdDhclientPath)}
-	},
-	Apply: func(ctx context.Context, r Runner, opt Options) error {
-		if _, err := os.Stat(devdDhclientPath); err != nil {
-			return nil
-		}
-		if err := os.Rename(devdDhclientPath, devdDhclientPath+".disabled"); err != nil {
-			return fmt.Errorf("disabling %s: %w", devdDhclientPath, err)
-		}
-		if _, stderr, err := r.Run(ctx, "service", "devd", "restart"); err != nil {
-			return fmt.Errorf("service devd restart: %s", firstNonEmpty(stderr, err))
-		}
-		return nil
 	},
 }
 

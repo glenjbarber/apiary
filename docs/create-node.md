@@ -72,6 +72,11 @@ Use a console when possible.
   -vlan-uplink <uplink-ifname> -bhyve-bridge bridge0
 ```
 
+If the uplink currently uses DHCP, this persists the safe bridge layout:
+the physical NIC becomes an addressless member, `bridge0` inherits its MAC,
+and `SYNCDHCP` moves the management lease to the bridge. The stock
+`/etc/devd/dhclient.conf` remains enabled.
+
 Verify the result:
 
 ```bash

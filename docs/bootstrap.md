@@ -180,6 +180,11 @@ normally sub-second, not a real outage.
 ./apiaryinstall -apply-network yes-modify-network -vlan-uplink <uplink-ifname> -bhyve-bridge bridge0
 ```
 
+When the uplink currently uses DHCP, this writes an addressless physical
+member plus a MAC-pinned `bridge0` using `SYNCDHCP`. It does not disable
+FreeBSD's stock `/etc/devd/dhclient.conf`; that rule respects the normal
+`dhcpif()` eligibility check and is not a conflicting DHCP client.
+
 Confirm everything is clean:
 
 ```bash

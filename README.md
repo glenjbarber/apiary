@@ -882,7 +882,7 @@ each design decision, in order.
   system's boot-time `rc.d` start, before `managerd`'s reconciler has
   had a chance to recreate the network interface dnsmasq is meant to
   serve. `apiaryinstall -apply`-fixable. A second check,
-  `devd-dhclient-conflict`, was also added after the same reboot -
+  `devd-dhclient-conflict`, was initially added after the same reboot -
   disabling FreeBSD's stock `/etc/devd/dhclient.conf` rule, based on a
   theory that it was independently DHCPing the bridged uplink NIC and
   duplicating `-bhyve-bridge`'s own lease for the same MAC. That theory
@@ -892,11 +892,10 @@ each design decision, in order.
   devd's rule only ever calls `service dhclient quietstart` (not
   `forcestart`), so it should never have been able to start it in the
   first place - confirmed directly on the host (`dhcpif em0` returns
-  false). The real mechanism behind the duplicate lease (reproducible
-  on every boot since at least Sep 2) is still unidentified. The
-  `devd-dhclient-conflict` check and its live fix on `apiverse`/
-  `apiarium` are harmless either way, just not a confirmed fix for
-  anything. See
+  false). The obsolete check was removed. The `bhyve-bridge` preflight
+  now validates the real persistent layout instead: the physical member
+  is addressless, the bridge MAC is pinned to it, and DHCP runs as
+  `SYNCDHCP` on the bridge. See
   [ADR-0094](docs/adr/0094-boot-time-network-robustness.md).
 - **Security audit follow-up (six findings)** — a caller-supplied
   `target_address` on the deliberately-unauthenticated join-colony RPCs

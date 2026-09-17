@@ -452,9 +452,55 @@ func TestBhyveBridgeCheck(t *testing.T) {
 
 	r3 := newFakeRunner()
 	r3.on("ifconfig bridge0", fakeResponse{stdout: "bridge0: flags=...\n\tmember: em0 flags=...\n"})
+	r3.on("ifconfig em0", fakeResponse{stdout: "em0: flags=...\n\tether 02:00:00:00:00:01\n"})
+	r3.on("sysrc -n cloned_interfaces", fakeResponse{stdout: "bridge0"})
+	r3.on("sysrc -n ifconfig_em0", fakeResponse{stdout: "up"})
+	r3.on("sysrc -n ifconfig_bridge0", fakeResponse{stdout: "addm em0 up SYNCDHCP"})
+	r3.on("sysrc -n create_args_bridge0", fakeResponse{stdout: "ether 02:00:00:00:00:01"})
 	res3 := bhyveBridgeCheck.Probe(ctx, r3, opt)
 	if res3.Status != StatusOK {
 		t.Fatalf("status = %v, want ok when uplink attached", res3.Status)
+	}
+
+	// DHCP on the physical bridge member is the old, reboot-fragile
+	// layout. The stock devd rule is not the problem: dhclient quietstart
+	// still honors dhcpif(), so the installer must migrate the rc.conf
+	// DHCP token to the bridge rather than disable devd system-wide.
+	r4 := newFakeRunner()
+	r4.on("ifconfig bridge0", fakeResponse{stdout: "bridge0: flags=...\n\tmember: em0 flags=...\n"})
+	r4.on("sysrc -n cloned_interfaces", fakeResponse{stdout: "bridge0"})
+	r4.on("sysrc -n ifconfig_em0", fakeResponse{stdout: "DHCP"})
+	r4.on("sysrc -n ifconfig_bridge0", fakeResponse{stdout: "addm em0 up"})
+	res4 := bhyveBridgeCheck.Probe(ctx, r4, opt)
+	if res4.Status != StatusMisconfigured {
+		t.Fatalf("status = %v, want misconfigured when DHCP remains on em0", res4.Status)
+	}
+	if !strings.Contains(res4.Detail, "instead of bridge0") {
+		t.Fatalf("detail = %q, want bridge DHCP migration explanation", res4.Detail)
+	}
+
+	r5 := newFakeRunner()
+	r5.on("sysrc -n ifconfig_em0", fakeResponse{stdout: "DHCP"})
+	r5.on("sysrc -n ifconfig_bridge0", fakeResponse{stdout: "addm em0 up"})
+	r5.on("ifconfig em0", fakeResponse{stdout: "em0: flags=...\n\tether 02:00:00:00:00:01\n"})
+	r5.on("ifconfig bridge0", fakeResponse{stdout: "bridge0: flags=...\n\tmember: em0 flags=...\n"})
+	r5.on("ifconfig bridge0 up", fakeResponse{})
+	r5.on("ifconfig em0 up", fakeResponse{})
+	r5.on("sysrc -n cloned_interfaces", fakeResponse{stdout: "bridge0"})
+	r5.on("sysrc ifconfig_em0=up", fakeResponse{})
+	r5.on("sysrc create_args_bridge0=ether 02:00:00:00:00:01", fakeResponse{})
+	r5.on("sysrc ifconfig_bridge0=addm em0 up SYNCDHCP", fakeResponse{})
+	if err := bhyveBridgeCheck.Apply(ctx, r5, opt); err != nil {
+		t.Fatalf("apply DHCP bridge migration: %v", err)
+	}
+	for _, call := range []string{
+		"sysrc ifconfig_em0=up",
+		"sysrc create_args_bridge0=ether 02:00:00:00:00:01",
+		"sysrc ifconfig_bridge0=addm em0 up SYNCDHCP",
+	} {
+		if got := r5.callCount(call); got != 1 {
+			t.Errorf("%s calls = %d, want 1", call, got)
+		}
 	}
 }
 
@@ -526,71 +572,6 @@ func TestDnsmasqRcEnableCheck(t *testing.T) {
 	r4.on("sysrc dnsmasq_enable=NO", fakeResponse{stdout: "dnsmasq_enable: YES -> NO"})
 	if err := dnsmasqRcEnableCheck.Apply(ctx, r4, Options{}); err != nil {
 		t.Fatalf("apply: %v", err)
-	}
-}
-
-// TestDevdDhclientConflictCheck is the direct regression test for the
-// second real bug found live in the same incident: the stock devd(8)
-// auto-dhclient rule independently DHCPs a bridge member NIC on every
-// link-up (including every boot), duplicating -bhyve-bridge's own
-// DHCP-acquired address for the identical MAC - confirmed live via two
-// separate lease files (dhclient.leases.em0 and dhclient.leases.bridge0)
-// both holding the same fixed-address for the same dhcp-client-identifier.
-func TestDevdDhclientConflictCheck(t *testing.T) {
-	ctx := context.Background()
-	dir := t.TempDir()
-	path := filepath.Join(dir, "dhclient.conf")
-	old := devdDhclientPath
-	devdDhclientPath = path
-	defer func() { devdDhclientPath = old }()
-
-	opt := Options{VLANUplink: "em0", BhyveBridge: "bridge0"}
-
-	if devdDhclientConflictCheck.Applicable(Options{}) {
-		t.Error("Applicable(no uplink/bridge) = true, want false")
-	}
-	if !devdDhclientConflictCheck.Applicable(opt) {
-		t.Error("Applicable(uplink+bridge set) = false, want true")
-	}
-
-	// The rule file doesn't exist (already disabled, or never present).
-	res := devdDhclientConflictCheck.Probe(ctx, newFakeRunner(), opt)
-	if res.Status != StatusOK {
-		t.Fatalf("status = %v, want ok when the devd rule file is absent", res.Status)
-	}
-
-	// The rule file exists live - the conflict condition this check exists for.
-	if err := os.WriteFile(path, []byte("notify 10 {\n};\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	res2 := devdDhclientConflictCheck.Probe(ctx, newFakeRunner(), opt)
-	if res2.Status != StatusMisconfigured {
-		t.Fatalf("status = %v, want misconfigured when the devd rule file exists", res2.Status)
-	}
-
-	r := newFakeRunner()
-	r.on("service devd restart", fakeResponse{stdout: ""})
-	if err := devdDhclientConflictCheck.Apply(ctx, r, opt); err != nil {
-		t.Fatalf("apply: %v", err)
-	}
-	if _, err := os.Stat(path); !os.IsNotExist(err) {
-		t.Error("apply did not move the original file away")
-	}
-	if _, err := os.Stat(path + ".disabled"); err != nil {
-		t.Errorf("apply did not leave a .disabled copy: %v", err)
-	}
-	if r.callCount("service devd restart") != 1 {
-		t.Errorf("service devd restart calls = %d, want 1", r.callCount("service devd restart"))
-	}
-
-	// Re-applying after the file is already gone must be a no-op, not
-	// an error - matching every other idempotent Apply in this package.
-	res3 := devdDhclientConflictCheck.Probe(ctx, newFakeRunner(), opt)
-	if res3.Status != StatusOK {
-		t.Fatalf("status = %v, want ok after apply", res3.Status)
-	}
-	if err := devdDhclientConflictCheck.Apply(ctx, newFakeRunner(), opt); err != nil {
-		t.Fatalf("re-apply after already-disabled: %v", err)
 	}
 }
 
