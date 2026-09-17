@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"strings"
 	"text/tabwriter"
 
 	"github.com/glenjbarber/apiary/internal/install"
@@ -116,7 +117,13 @@ func printTable(results []install.Result) {
 		if r.Status == install.StatusOK {
 			ok++
 		}
-		fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", r.ID, r.Status, r.Detail, r.FixHint)
+		hints := strings.Split(r.FixHint, "\n")
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", r.ID, r.Status, r.Detail, hints[0])
+		for _, hint := range hints[1:] {
+			// Keep a multi-line fix hint in the FIX HINT column rather than
+			// making its continuation lines look like separate checks.
+			fmt.Fprintf(w, "\t\t\t%s\n", hint)
+		}
 	}
 	w.Flush()
 	fmt.Printf("\n%d/%d checks ok\n", ok, total)

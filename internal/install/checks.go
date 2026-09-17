@@ -506,7 +506,7 @@ var bhyveBridgeCheck = Check{
 		if err != nil {
 			return Result{ID: "bhyve-bridge", Status: StatusMissing,
 				Detail:  firstNonEmpty(stderr, err),
-				FixHint: fmt.Sprintf("ifconfig %s create; ifconfig %s addm %s up - RISK: this can drop network connectivity if run over the uplink NIC's own SSH session (ADR-0022's own near-miss); run apiaryinstall -apply-network yes-modify-network instead of by hand where possible", opt.BhyveBridge, opt.BhyveBridge, opt.VLANUplink)}
+				FixHint: fmt.Sprintf("- Preferred: apiaryinstall -apply-network yes-modify-network -vlan-uplink %s -bhyve-bridge %s\n- Risk: this can interrupt an SSH session using %s. Use a console when possible.\n- Manual equivalent: ifconfig %s create; ifconfig %s addm %s up", opt.VLANUplink, opt.BhyveBridge, opt.VLANUplink, opt.BhyveBridge, opt.BhyveBridge, opt.VLANUplink)}
 		}
 		if !strings.Contains(out, "member: "+opt.VLANUplink) {
 			return Result{ID: "bhyve-bridge", Status: StatusMisconfigured,
@@ -595,7 +595,7 @@ var devdDhclientConflictCheck = Check{
 		}
 		return Result{ID: "devd-dhclient-conflict", Status: StatusMisconfigured,
 			Detail:  devdDhclientPath + " can independently DHCP " + opt.VLANUplink + ", duplicating " + opt.BhyveBridge + "'s own lease for the same MAC",
-			FixHint: fmt.Sprintf("mv %s %s.disabled && service devd restart - trades away automatic DHCP-on-link-up for any OTHER, non-bridged NIC on this host", devdDhclientPath, devdDhclientPath)}
+			FixHint: fmt.Sprintf("- Disable the conflicting rule: mv %s %s.disabled && service devd restart\n- Tradeoff: other non-bridged NICs on this host will no longer DHCP automatically when their link comes up", devdDhclientPath, devdDhclientPath)}
 	},
 	Apply: func(ctx context.Context, r Runner, opt Options) error {
 		if _, err := os.Stat(devdDhclientPath); err != nil {
