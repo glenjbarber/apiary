@@ -8,6 +8,10 @@ The safety rule is simple: the joining node must be reachable and waiting for
 membership before an Admin approves it. Adding an unreachable voter can make a
 small Colony lose leadership.
 
+Keep `apiary_raftd` stopped throughout ordinary host preparation. Start it
+only after the `await_join` configuration in Step 2 is complete and you are
+ready to proceed with the Colony join.
+
 ## 1. Prepare the new host
 
 Follow [Create a new Apiary node](create-node.md) through host preparation:
@@ -20,7 +24,9 @@ Follow [Create a new Apiary node](create-node.md) through host preparation:
    with local TLS enabled.
 
 Do not start a normal standalone `raftd` cluster on a node intended to join.
-If it has already formed one, reset its local Raft state before continuing.
+A fresh raftd without `await_join` immediately creates an independent Raft
+cluster. If it has already formed one, reset its local Raft state before
+continuing.
 
 ## 2. Configure Raft to wait for approval
 

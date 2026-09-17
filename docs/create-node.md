@@ -1,8 +1,13 @@
 # Create a new Apiary node
 
 This runbook creates one independent Apiary Comb on a fresh FreeBSD host.
-Use it for a standalone installation or to prepare and validate a host before
-you later add it to a Colony. It does **not** add the node to another Colony.
+Use it only for the first node in a new Colony or for a node that will remain
+standalone. It does **not** add the node to an existing Colony.
+
+If this host will join an existing Colony, follow
+[Add a node to an existing Colony](add-node-to-colony.md) from the outset.
+Do not start `apiary_raftd` during generic host preparation: a fresh raftd
+without `await_join` immediately creates its own independent Raft cluster.
 
 For the complete historical reference and troubleshooting notes, see
 [bootstrap.md](bootstrap.md).
@@ -105,6 +110,10 @@ pkg info -l edk2-bhyve
 The usual path is `/usr/local/share/uefi-firmware/BHYVE_UEFI.fd`.
 
 ## 5. Configure and start the independent Raft node
+
+Only continue with this section when this is the first or only node. A host
+intended for an existing Colony must remain stopped until its `await_join`
+configuration is complete and the join operation is ready to begin.
 
 Create the real configuration from the installed sample:
 

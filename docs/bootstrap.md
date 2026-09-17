@@ -267,6 +267,13 @@ restart` after every rebuild.
 
 ## 7. Start `raftd`
 
+Do not start `apiary_raftd` merely to validate a newly prepared host. A fresh
+raftd without `await_join` immediately bootstraps its own independent Raft
+cluster. Start it normally only for the first node in a new Colony or for a
+permanently standalone node. A node joining an existing Colony must remain
+stopped until its `await_join` configuration is complete and the operator is
+ready to begin the join flow.
+
 As of ADR-0100, `raftd` takes no CLI flags for its steady-state
 configuration - it reads `/usr/local/etc/apiary/raftd.json`
 unconditionally (only `-reset`/`-restore`/`-restore-file`/
@@ -294,6 +301,9 @@ join an existing multi-node Colony? The two paths diverge in what
 `raftd.json` contains and rejoin at step 8.
 
 ### Path A - independent single-node cluster
+
+Use this path only for the first node in a new Colony or a node that will
+remain standalone.
 
 Leave `join` unset entirely - do **not** set it to `""` explicitly,
 just omit the key:
@@ -326,7 +336,8 @@ service apiary_raftd start
 forward to join a different host.** Apiary now has a mutually authorized,
 UI-driven join flow with `await_join`, reachability preflight, and an
 Admin approval on the target Colony. Follow
-[Add a node to an existing Colony](add-node-to-colony.md) instead.
+[Add a node to an existing Colony](add-node-to-colony.md) instead, and keep
+`apiary_raftd` stopped until that guide tells you to start it.
 
 ### Verify (Path A)
 
