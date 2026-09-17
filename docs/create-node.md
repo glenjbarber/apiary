@@ -126,6 +126,9 @@ For an independent node, omit `join` and `await_join` entirely:
 }
 ```
 
+Replace `<this-host-address>` with this host's real, reachable address.
+Do not use `0.0.0.0`: Apiary also advertises this value to Raft peers.
+
 Start it through rc.d:
 
 ```bash
@@ -181,7 +184,9 @@ Both services must trust managerd's certificate:
   "manager_addr": "127.0.0.1:17700",
   "http_addr": "0.0.0.0:8080",
   "manager_tls": true,
-  "manager_tls_ca": "/usr/local/etc/apiary-tls/cert.pem"
+  "manager_tls_ca": "/usr/local/etc/apiary-tls/cert.pem",
+  "tls_cert": "/usr/local/etc/apiary-tls/cert.pem",
+  "tls_key": "/usr/local/etc/apiary-tls/key.pem"
 }
 ```
 
@@ -194,7 +199,7 @@ service apiary_restshimd start
 
 ## 8. Verify and secure the node
 
-Open `http://<this-host-address>:8080`. The overview should show one
+Open `https://<this-host-address>:8080`. The overview should show one
 reachable, healthy Comb.
 
 Enable real PAM login before exposing the frontend to an untrusted network:

@@ -296,9 +296,13 @@ just omit the key:
 {
   "data_dir": "/var/db/apiary/raftd",
   "socket": "/var/run/apiary/raftd.sock",
-  "node_id": "<this-node-id>"
+  "node_id": "<this-node-id>",
+  "raft_bind": "<this-host-address>:17600"
 }
 ```
+
+Replace `<this-host-address>` with this host's real, reachable address.
+Do not use `0.0.0.0`: Apiary also advertises this value to Raft peers.
 
 Run it in the foreground once to confirm a clean single-node leader
 election in the output, `Ctrl-C`, then start it via rc.d (Step 6 must
@@ -437,7 +441,9 @@ ${EDITOR:-vi} /usr/local/etc/apiary/frontend.json
   "manager_addr": "127.0.0.1:17700",
   "http_addr": "0.0.0.0:8080",
   "manager_tls": true,
-  "manager_tls_ca": "/usr/local/etc/apiary-tls/cert.pem"
+  "manager_tls_ca": "/usr/local/etc/apiary-tls/cert.pem",
+  "tls_cert": "/usr/local/etc/apiary-tls/cert.pem",
+  "tls_key": "/usr/local/etc/apiary-tls/key.pem"
 }
 ```
 
@@ -464,7 +470,9 @@ ${EDITOR:-vi} /usr/local/etc/apiary/restshimd.json
   "manager_addr": "127.0.0.1:17700",
   "http_addr": "0.0.0.0:8081",
   "manager_tls": true,
-  "manager_tls_ca": "/usr/local/etc/apiary-tls/cert.pem"
+  "manager_tls_ca": "/usr/local/etc/apiary-tls/cert.pem",
+  "tls_cert": "/usr/local/etc/apiary-tls/cert.pem",
+  "tls_key": "/usr/local/etc/apiary-tls/key.pem"
 }
 ```
 
@@ -483,7 +491,7 @@ at all - it asks `managerd`'s own `Status` RPC whether PAM is configured.
 
 ## 10. Verify
 
-Open `http://<this-host's-address>:8080` in a browser - the Colony
+Open `https://<this-host-address>:8080` in a browser - the Colony
 overview page should show this Comb as `Reachable`/`healthy` with its ZFS
 pool and packet filter both reporting healthy/enabled.
 

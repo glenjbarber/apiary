@@ -32,10 +32,14 @@ stable node identity and a real routable Raft address:
   "data_dir": "/var/db/apiary/raftd",
   "socket": "/var/run/apiary/raftd.sock",
   "node_id": "<new-node-id>",
-  "raft_bind": "<new-node-address>:17600",
+  "raft_bind": "<this-host-address>:17600",
   "await_join": true
 }
 ```
+
+Replace `<this-host-address>` with the joining host's real, reachable
+address. Do not use `0.0.0.0`: Apiary also advertises this value to Raft
+peers.
 
 If this host previously bootstrapped its own independent Comb, stop raftd and
 reset only its local Raft state before entering await-join mode:
