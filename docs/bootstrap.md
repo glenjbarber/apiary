@@ -577,10 +577,12 @@ restart:
 
 ```bash
 service apiary_managerd restart
+service apiary_frontend restart
 ```
 
-`frontend` picks up the change automatically the next time it calls
-`Status` - no need to restart `frontend` itself.
+Restart `frontend` after `managerd`: it checks managerd's PAM status only at
+frontend startup and keeps that login-enabled state for the life of the
+process.
 
 **Log in right away** - since no Apiary account exists on this Comb
 yet, the first successful login automatically becomes Admin (ADR-0086;

@@ -107,7 +107,7 @@ setup-rcd:
 setup-pam:
 	test -f /etc/pam.d/${PAM_SERVICE} || \
 		printf 'auth required pam_unix.so no_warn\naccount required pam_unix.so\n' > /etc/pam.d/${PAM_SERVICE}
-	@echo "PAM policy at /etc/pam.d/${PAM_SERVICE} - pass -pam-service ${PAM_SERVICE} to managerd to enable real login; the first successful login becomes Admin automatically (see docs/bootstrap.md Step 11)."
+	@echo "PAM policy at /etc/pam.d/${PAM_SERVICE} - set pam_service to ${PAM_SERVICE} in managerd.json, then restart apiary_managerd followed by apiary_frontend; the first successful login becomes Admin automatically (see docs/bootstrap.md Step 11)."
 
 NODE_TLS_DIR?=	/usr/local/etc/apiary-tls
 

@@ -243,10 +243,12 @@ Add this field to `managerd.json`:
 "pam_service": "apiary"
 ```
 
-Then restart managerd:
+Then restart managerd followed by frontend. Frontend checks PAM status only
+at startup:
 
 ```bash
 service apiary_managerd restart
+service apiary_frontend restart
 ```
 
 The first successful PAM login becomes Apiary Admin. Log in immediately using

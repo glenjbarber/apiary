@@ -151,7 +151,9 @@
 
   // The PAM service name frontend's web UI logins are authenticated
   // against. Empty disables login entirely - the web UI is then open
-  // to anyone who can reach the port. See docs/bootstrap.md Step 11.
+  // to anyone who can reach the port. Restart managerd followed by
+  // frontend after changing this; frontend checks PAM only at startup.
+  // See docs/bootstrap.md Step 11.
   "pam_service": "",
 
   // Cloudflare Tunnel exposure (ADR-0063). CloudflareTokenFile is a
