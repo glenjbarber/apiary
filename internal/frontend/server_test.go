@@ -116,6 +116,7 @@ type fakeClient struct {
 	lastUpdateRestshimdConfigReq *rpcpb.UpdateRestshimdConfigRequest
 
 	getRaftdConfigResp *rpcpb.GetRaftdConfigResponse
+	statusErr          error
 
 	setVMFirewallPausedResp    *rpcpb.SetVMFirewallPausedResponse
 	lastSetVMFirewallPausedReq *rpcpb.SetVMFirewallPausedRequest
@@ -202,6 +203,9 @@ func (f *fakeUploadClientStream) CloseAndRecv() (*rpcpb.UploadISOResponse, error
 }
 
 func (f *fakeClient) Status(context.Context, *rpcpb.StatusRequest, ...grpc.CallOption) (*rpcpb.StatusResponse, error) {
+	if f.statusErr != nil {
+		return nil, f.statusErr
+	}
 	if f.statusResp != nil {
 		return f.statusResp, nil
 	}
@@ -962,7 +966,7 @@ func TestServer_ClusterOverviewPage_IsDefaultLandingPage(t *testing.T) {
 // TestServer_HostPage_ShowsFullDetail mirrors the old single-node stats
 // page's own checks, now against "/host/{id}".
 func TestServer_HostPage_ShowsFullDetail(t *testing.T) {
-	client := &fakeClient{hostStatsResp: &rpcpb.HostStatsResponse{
+	client := &fakeClient{statusResp: &rpcpb.StatusResponse{ManagerNodeId: "apiarium"}, hostStatsResp: &rpcpb.HostStatsResponse{
 		NodeId: "apiarium",
 		Cpu:    &rpcpb.CPUStats{Cores: 8, LoadAvg_1: 1.23},
 		Mem:    &rpcpb.MemStats{TotalBytes: 1000, FreeBytes: 400},
@@ -995,7 +999,7 @@ func TestServer_HostPage_ShowsFullDetail(t *testing.T) {
 }
 
 func TestServer_HostPage_DiskQueryFailureShownWithoutFalseHealthClaim(t *testing.T) {
-	client := &fakeClient{hostStatsResp: &rpcpb.HostStatsResponse{
+	client := &fakeClient{statusResp: &rpcpb.StatusResponse{ManagerNodeId: "apiarium"}, hostStatsResp: &rpcpb.HostStatsResponse{
 		Disks: []*rpcpb.DiskStats{{Name: "ada1", Error: "smart: permission denied"}},
 	}}
 	s := newTestServer(t, client)
@@ -1020,7 +1024,7 @@ func TestServer_HostPage_DiskQueryFailureShownWithoutFalseHealthClaim(t *testing
 }
 
 func TestServer_HostPage_ColorsDownInterfaceRed(t *testing.T) {
-	client := &fakeClient{hostStatsResp: &rpcpb.HostStatsResponse{
+	client := &fakeClient{statusResp: &rpcpb.StatusResponse{ManagerNodeId: "apiarium"}, hostStatsResp: &rpcpb.HostStatsResponse{
 		Net: []*rpcpb.NetIfaceStats{{Name: "tap0", Up: false}},
 	}}
 	s := newTestServer(t, client)

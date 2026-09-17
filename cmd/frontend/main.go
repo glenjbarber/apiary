@@ -73,9 +73,9 @@ func (a remoteAuthenticator) Authenticate(username, password string) (bool, erro
 // is cached by the caller for frontend's entire runtime (see run()'s
 // own comment on why) - there is no later recheck, so getting this
 // right at startup matters more than it would if it were just retried
-// per-request. Still falls back to "unreachable" once attempts are
-// exhausted, preserving the existing policy that frontend always
-// finishes starting up regardless of managerd's state.
+// per-request. An exhausted retry budget is an error, not evidence that
+// PAM is disabled: callers must fail closed rather than start an
+// unauthenticated frontend when managerd's authentication state is unknown.
 func checkPAMConfigured(client rpcpb.ManagerServiceClient, attempts int, delay time.Duration) (configured bool, err error) {
 	for i := 0; i < attempts; i++ {
 		if i > 0 {
@@ -88,6 +88,21 @@ func checkPAMConfigured(client rpcpb.ManagerServiceClient, attempts int, delay t
 		err = statusErr
 	}
 	return false, err
+}
+
+// managerAuthenticator turns managerd's authoritative PAM status into the
+// frontend authentication mode. An explicit "not configured" response keeps
+// the supported no-login mode; an unavailable or indeterminate response is
+// not interchangeable with that deliberate choice, so startup must fail.
+func managerAuthenticator(client rpcpb.ManagerServiceClient, attempts int, delay time.Duration) (frontend.Authenticator, error) {
+	configured, err := checkPAMConfigured(client, attempts, delay)
+	if err != nil {
+		return nil, fmt.Errorf("checking managerd login configuration after %d attempts: %w", attempts, err)
+	}
+	if !configured {
+		return nil, nil
+	}
+	return remoteAuthenticator{client: client}, nil
 }
 
 func main() {
@@ -149,15 +164,13 @@ func run() error {
 	// 0087, PamConfigured on its Status response) - frontend needs no
 	// login-related flag of its own anymore. checkPAMConfigured retries
 	// a few times (see its own doc comment for the exact startup race
-	// this closes) before falling back to "not configured" - frontend
-	// should still come up and serve pages even if managerd stays
-	// genuinely unreachable well past that.
+	// this closes) before accepting its answer. An unavailable managerd
+	// does not establish that login is disabled, so frontend fails closed
+	// instead of serving an unauthenticated UI with an unknown policy.
 	managerClient := rpcpb.NewManagerServiceClient(conn)
-	var auth frontend.Authenticator
-	if configured, err := checkPAMConfigured(managerClient, statusRetryAttempts, statusRetryDelay); err != nil {
-		log.Printf("frontend: could not reach managerd to check login configuration after %d attempts: %v", statusRetryAttempts, err)
-	} else if configured {
-		auth = remoteAuthenticator{client: managerClient}
+	auth, err := managerAuthenticator(managerClient, statusRetryAttempts, statusRetryDelay)
+	if err != nil {
+		return err
 	}
 
 	// Reuses the same API key already attached to dialOpts above for

@@ -287,7 +287,7 @@ func TestHandleClusterOverviewPage_LocalNodeNoSecondStatusDial(t *testing.T) {
 
 func TestServer_HostPage_FetchesFromPeerWhenNotLocal(t *testing.T) {
 	client := &fakeClient{
-		statusResp:    &rpcpb.StatusResponse{ManagerNodeId: "apiarium"},
+		statusResp:    &rpcpb.StatusResponse{ManagerNodeId: "apiarium", KnownNodeIds: []string{"apiarium", "freebsd-apiary"}},
 		hostStatsResp: &rpcpb.HostStatsResponse{NodeId: "apiarium"},
 	}
 	peers := &fakePeerHostStatsClient{resp: &rpcpb.HostStatsResponse{NodeId: "freebsd-apiary", Cpu: &rpcpb.CPUStats{Cores: 4}}}
@@ -310,7 +310,7 @@ func TestServer_HostPage_FetchesFromPeerWhenNotLocal(t *testing.T) {
 
 func TestServer_HostPage_LocalNodeUsesLocalClientNotPeer(t *testing.T) {
 	client := &fakeClient{
-		statusResp:    &rpcpb.StatusResponse{ManagerNodeId: "apiarium"},
+		statusResp:    &rpcpb.StatusResponse{ManagerNodeId: "apiarium", KnownNodeIds: []string{"apiarium"}},
 		hostStatsResp: &rpcpb.HostStatsResponse{NodeId: "apiarium", Cpu: &rpcpb.CPUStats{Cores: 8}},
 	}
 	peers := &fakePeerHostStatsClient{}
@@ -328,5 +328,68 @@ func TestServer_HostPage_LocalNodeUsesLocalClientNotPeer(t *testing.T) {
 	}
 	if !strings.Contains(rec.Body.String(), "8 cores") {
 		t.Errorf("host page missing local stats, got: %s", rec.Body.String())
+	}
+}
+
+func TestServer_HostPage_UnknownNodeDoesNotDialPeer(t *testing.T) {
+	client := &fakeClient{statusResp: &rpcpb.StatusResponse{
+		ManagerNodeId: "apiarium",
+		KnownNodeIds:  []string{"apiarium", "freebsd-apiary"},
+	}}
+	peers := &fakePeerHostStatsClient{}
+	s, err := NewServer(client, nil, nil, peers, ".apiary.work", "17700", nil, false)
+	if err != nil {
+		t.Fatalf("NewServer() error: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/host/attacker.example", nil)
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("status = %d, want 404 for a node outside current raft membership", rec.Code)
+	}
+	if peers.lastAddr != "" {
+		t.Errorf("peer dial address = %q, want none for an unknown node", peers.lastAddr)
+	}
+}
+
+func TestServer_HostPage_MembershipUnavailableDoesNotDialPeer(t *testing.T) {
+	client := &fakeClient{statusResp: &rpcpb.StatusResponse{ManagerNodeId: "apiarium"}}
+	peers := &fakePeerHostStatsClient{}
+	s, err := NewServer(client, nil, nil, peers, ".apiary.work", "17700", nil, false)
+	if err != nil {
+		t.Fatalf("NewServer() error: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/host/freebsd-apiary", nil)
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("status = %d, want 404 when raft membership is unavailable", rec.Code)
+	}
+	if peers.lastAddr != "" {
+		t.Errorf("peer dial address = %q, want none without trusted membership", peers.lastAddr)
+	}
+}
+
+func TestServer_HostPage_StatusFailureDoesNotDialPeer(t *testing.T) {
+	client := &fakeClient{statusErr: errors.New("managerd unavailable")}
+	peers := &fakePeerHostStatsClient{}
+	s, err := NewServer(client, nil, nil, peers, ".apiary.work", "17700", nil, false)
+	if err != nil {
+		t.Fatalf("NewServer() error: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/host/freebsd-apiary", nil)
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Errorf("status = %d, want 503 when membership cannot be verified", rec.Code)
+	}
+	if peers.lastAddr != "" {
+		t.Errorf("peer dial address = %q, want none after a Status failure", peers.lastAddr)
 	}
 }

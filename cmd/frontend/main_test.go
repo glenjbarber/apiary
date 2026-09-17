@@ -104,3 +104,27 @@ func TestCheckPAMConfigured_NotConfiguredIsNotAnError(t *testing.T) {
 		t.Error("configured = true, want false")
 	}
 }
+
+func TestManagerAuthenticator_RefusesUnknownPAMState(t *testing.T) {
+	client := &fakeStatusClient{errsThenSucceeds: []error{errors.New("connection refused")}}
+
+	auth, err := managerAuthenticator(client, 1, time.Millisecond)
+	if err == nil {
+		t.Fatal("managerAuthenticator() error = nil, want failure when PAM state is unknown")
+	}
+	if auth != nil {
+		t.Error("managerAuthenticator() returned an authenticator when PAM state is unknown")
+	}
+}
+
+func TestManagerAuthenticator_PreservesExplicitNoLoginMode(t *testing.T) {
+	client := &fakeStatusClient{resp: &rpcpb.StatusResponse{PamConfigured: false}}
+
+	auth, err := managerAuthenticator(client, 1, time.Millisecond)
+	if err != nil {
+		t.Fatalf("managerAuthenticator() error: %v", err)
+	}
+	if auth != nil {
+		t.Error("managerAuthenticator() returned an authenticator with PAM explicitly disabled")
+	}
+}
