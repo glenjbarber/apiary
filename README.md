@@ -5,13 +5,10 @@
 [![Go CI](https://github.com/glenjbarber/apiary/actions/workflows/go-ci.yml/badge.svg?branch=main)](https://github.com/glenjbarber/apiary/actions/workflows/go-ci.yml)
 ![OS](https://img.shields.io/badge/OS-FreeBSD-red.svg?logo=freebsd&logoColor=white)
 ![Architecture](https://img.shields.io/badge/arch-amd64-blue)
-[![Go Report Card](https://goreportcard.com/badge/github.com/glenjbarber/apiary)](https://goreportcard.com/report/github.com/glenjbarber/apiary)
 [![Go Reference](https://pkg.go.dev/badge/github.com/glenjbarber/apiary.svg)](https://pkg.go.dev/github.com/glenjbarber/apiary)
 ![Go Version](https://img.shields.io/github/go-mod/go-version/glenjbarber/apiary)
 [![License](https://img.shields.io/github/license/glenjbarber/apiary?color=blue)](LICENSE)
 ![Last Commit](https://img.shields.io/github/last-commit/glenjbarber/apiary)
-[![codecov](https://codecov.io/gh/glenjbarber/apiary/branch/main/graph/badge.svg)](https://codecov.io/gh/glenjbarber/apiary)
-![Lines of Code](https://img.shields.io/tokei/lines/github/glenjbarber/apiary)
 <!--
 [![Latest Release](https://img.shields.io/github/v/release/glenjbarber/apiary)](https://github.com/glenjbarber/apiary/releases)
 -->
