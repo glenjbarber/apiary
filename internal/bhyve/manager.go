@@ -163,6 +163,13 @@ func (m *Manager) vncfile(qname string) string {
 	return filepath.Join(m.runDir(), qname+".vnc")
 }
 
+// vncFramebufferArg returns the bhyve fbuf argument for a raw VNC console.
+// The noVNC proxy dials this listener locally, so raw VNC must never be
+// exposed on a host network interface.
+func vncFramebufferArg(port int) string {
+	return fmt.Sprintf("29,fbuf,tcp=127.0.0.1:%d,w=1024,h=768", port)
+}
+
 // nmdmfile records the nmdm(4) unit number CreateVM allocated for
 // qname's serial console, the same way vncfile records a VNC port.
 func (m *Manager) nmdmfile(qname string) string {
@@ -406,7 +413,7 @@ func (m *Manager) CreateVM(ctx context.Context, name string, cfg Config) error {
 	}
 	if cfg.EnableVNC {
 		args = append(args,
-			"-s", fmt.Sprintf("29,fbuf,tcp=0.0.0.0:%d,w=1024,h=768", vncPort),
+			"-s", vncFramebufferArg(vncPort),
 			"-s", "30,xhci,tablet",
 		)
 	}

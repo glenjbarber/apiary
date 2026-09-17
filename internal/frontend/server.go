@@ -961,7 +961,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	}
 	s.lockouts.RecordSuccess(user)
 	s.roleMapMu.RLock()
-	role, hasRole := s.roleMap[user]
+	_, hasRole := s.roleMap[user]
 	s.roleMapMu.RUnlock()
 	if !hasRole {
 		granted, err := s.bootstrapFirstAdmin(user)
@@ -970,7 +970,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if granted {
-			role, hasRole = manager.RoleAdmin, true
+			hasRole = true
 		}
 	}
 	if !hasRole {
@@ -978,7 +978,10 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	token, err := s.sessions.Create(user, role)
+	// Resolve and mint under the same role-map read lock. updateRoleMap holds
+	// the write lock until it has revoked old sessions, so a concurrent role
+	// edit cannot leave a newly minted session carrying a stale privilege.
+	token, err := s.createSessionForCurrentRole(user)
 	if err != nil {
 		s.render(w, "login_page", pageData{LoginError: "could not start a session: " + err.Error(), NextURL: next})
 		return
@@ -998,6 +1001,19 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		dest = next
 	}
 	http.Redirect(w, r, dest, http.StatusFound)
+}
+
+// createSessionForCurrentRole snapshots the current role while holding
+// roleMapMu. It is the only login-time path that mints a session, paired with
+// updateRoleMap's write-locked revocation of old sessions.
+func (s *Server) createSessionForCurrentRole(user string) (string, error) {
+	s.roleMapMu.RLock()
+	defer s.roleMapMu.RUnlock()
+	role, ok := s.roleMap[user]
+	if !ok {
+		return "", fmt.Errorf("no Apiary role is assigned to this account")
+	}
+	return s.sessions.Create(user, role)
 }
 
 func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
@@ -2291,7 +2307,13 @@ func (s *Server) updateRoleMap(target string, role *manager.Role) error {
 		return fmt.Errorf("refusing to leave the role map with no admin account - assign another admin first")
 	}
 
-	return s.applyRoleMapLocked(proposed)
+	if err := s.applyRoleMapLocked(proposed); err != nil {
+		return err
+	}
+	// Roles are copied into sessions at login. Revoke every existing session
+	// for the changed account so a removal or demotion takes effect now.
+	s.sessions.DeleteUser(target)
+	return nil
 }
 
 // bootstrapFirstAdmin grants user Admin and persists it, but only if

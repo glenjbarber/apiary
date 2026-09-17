@@ -137,6 +137,47 @@ func TestServer_SetUserRole_ChangesExistingAccount(t *testing.T) {
 	}
 }
 
+func TestServer_SetUserRole_InvalidatesExistingSessions(t *testing.T) {
+	roleMap := map[string]manager.Role{"admin": manager.RoleAdmin, "bob": manager.RoleAdmin}
+	s := newTestServerWithRoles(t, roleMap, fakeAuthenticator{user: "admin", pass: "secret"}, &fakePasswordSetter{})
+	adminToken, _ := s.sessions.Create("admin", manager.RoleAdmin)
+	bobToken, _ := s.sessions.Create("bob", manager.RoleAdmin)
+
+	req := httptest.NewRequest(http.MethodPost, "/users/bob/role", strings.NewReader("role=viewer"))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.AddCookie(&http.Cookie{Name: sessionCookieName, Value: adminToken})
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, req)
+
+	if _, ok := s.sessions.Valid(bobToken); ok {
+		t.Fatal("bob's prior Admin session remained valid after a role change")
+	}
+	if _, ok := s.sessions.Valid(adminToken); !ok {
+		t.Fatal("unrelated admin session was revoked")
+	}
+}
+
+func TestServer_CreateSessionForCurrentRole_UsesRoleAfterConcurrentEdit(t *testing.T) {
+	roleMap := map[string]manager.Role{"admin": manager.RoleAdmin, "bob": manager.RoleAdmin}
+	s := newTestServerWithRoles(t, roleMap, fakeAuthenticator{user: "admin", pass: "secret"}, &fakePasswordSetter{})
+
+	viewer := manager.RoleViewer
+	if err := s.updateRoleMap("bob", &viewer); err != nil {
+		t.Fatalf("updateRoleMap() error: %v", err)
+	}
+	token, err := s.createSessionForCurrentRole("bob")
+	if err != nil {
+		t.Fatalf("createSessionForCurrentRole() error: %v", err)
+	}
+	info, ok := s.sessions.Valid(token)
+	if !ok {
+		t.Fatal("newly created session is not valid")
+	}
+	if info.role != manager.RoleViewer {
+		t.Errorf("new session role = %q, want viewer after the role change", info.role)
+	}
+}
+
 func TestServer_RemoveUser_DeletesFromRoleMap(t *testing.T) {
 	roleMap := map[string]manager.Role{"admin": manager.RoleAdmin, "bob": manager.RoleViewer}
 	store := &fakeRoleMapStore{}
@@ -157,6 +198,22 @@ func TestServer_RemoveUser_DeletesFromRoleMap(t *testing.T) {
 	}
 	if _, stillThere := store.lastSave.RoleMap["bob"]; stillThere {
 		t.Errorf("persisted role map still has bob: %+v", store.lastSave.RoleMap)
+	}
+}
+
+func TestServer_RemoveUser_InvalidatesExistingSessions(t *testing.T) {
+	roleMap := map[string]manager.Role{"admin": manager.RoleAdmin, "bob": manager.RoleViewer}
+	s := newTestServerWithRoles(t, roleMap, fakeAuthenticator{user: "admin", pass: "secret"}, &fakePasswordSetter{})
+	adminToken, _ := s.sessions.Create("admin", manager.RoleAdmin)
+	bobToken, _ := s.sessions.Create("bob", manager.RoleViewer)
+
+	req := httptest.NewRequest(http.MethodDelete, "/users/bob", nil)
+	req.AddCookie(&http.Cookie{Name: sessionCookieName, Value: adminToken})
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, req)
+
+	if _, ok := s.sessions.Valid(bobToken); ok {
+		t.Fatal("bob's session remained valid after removal from the role map")
 	}
 }
 

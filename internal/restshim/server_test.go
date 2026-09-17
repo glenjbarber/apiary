@@ -68,6 +68,7 @@ type fakeClient struct {
 
 	uploadStream *fakeUploadClientStream
 	uploadErr    error
+	uploadCalls  int
 }
 
 // fakeUploadClientStream is a fake grpc.ClientStreamingClient for
@@ -318,6 +319,7 @@ func (f *fakeClient) ListAssumptionResults(context.Context, *rpcpb.ListAssumptio
 }
 
 func (f *fakeClient) UploadISO(context.Context, ...grpc.CallOption) (grpc.ClientStreamingClient[rpcpb.UploadISORequest, rpcpb.UploadISOResponse], error) {
+	f.uploadCalls++
 	if f.uploadErr != nil {
 		return nil, f.uploadErr
 	}
@@ -1122,6 +1124,22 @@ func TestServer_UploadISO_StreamsMetadataThenChunksInOrder(t *testing.T) {
 	}
 	if body.Name != "base.raw" {
 		t.Errorf("response name = %q, want base.raw", body.Name)
+	}
+}
+
+func TestServer_UploadISO_RejectsOversizedExpectedHashBeforeOpeningStream(t *testing.T) {
+	client := &fakeClient{uploadStream: &fakeUploadClientStream{}}
+	s := NewServer(client)
+
+	req := buildUploadRequest(t, strings.Repeat("a", maxExpectedSHA256FieldBytes+1), "base.raw", "data")
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want 400", rec.Code)
+	}
+	if client.uploadCalls != 0 {
+		t.Errorf("UploadISO() calls = %d, want 0 for oversized metadata", client.uploadCalls)
 	}
 }
 

@@ -26,6 +26,14 @@ func TestVNCPort_NoRecordedPortReturnsNotOK(t *testing.T) {
 	}
 }
 
+func TestVNCFramebufferArg_BindsOnlyLoopback(t *testing.T) {
+	got := vncFramebufferArg(5907)
+	const want = "29,fbuf,tcp=127.0.0.1:5907,w=1024,h=768"
+	if got != want {
+		t.Errorf("vncFramebufferArg() = %q, want %q", got, want)
+	}
+}
+
 func TestVNCPort_ReadsWhatWasRecorded(t *testing.T) {
 	m := &Manager{Prefix: "test-", RunDir: t.TempDir()}
 	if err := os.MkdirAll(m.runDir(), 0o755); err != nil {

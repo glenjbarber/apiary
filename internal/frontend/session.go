@@ -82,3 +82,16 @@ func (s *sessionStore) Delete(token string) {
 	defer s.mu.Unlock()
 	delete(s.sessions, token)
 }
+
+// DeleteUser invalidates every session belonging to username. A session's
+// role is a login-time snapshot, so role-map changes must revoke that snapshot
+// rather than allowing an old privilege level to survive until sessionTTL.
+func (s *sessionStore) DeleteUser(username string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for token, info := range s.sessions {
+		if info.username == username {
+			delete(s.sessions, token)
+		}
+	}
+}

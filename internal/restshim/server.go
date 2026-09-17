@@ -358,6 +358,11 @@ type isoUploadResult struct {
 	Name string `json:"name"`
 }
 
+// maxExpectedSHA256FieldBytes bounds the small metadata field before it is
+// copied into memory. The actual SHA-256 text is 64 bytes; this leaves room
+// for surrounding whitespace while refusing an unbounded pre-auth allocation.
+const maxExpectedSHA256FieldBytes = 1024
+
 // handleUploadISO streams a multipart file upload directly into
 // managerd's UploadISO RPC, chunk by chunk - mirrors
 // internal/frontend's own handleUploadISO exactly (same field-order
@@ -375,6 +380,7 @@ func (s *Server) handleUploadISO(w http.ResponseWriter, r *http.Request) {
 	var expectedHash string
 	var result *rpcpb.UploadISOResponse
 	var uploadErr error
+	var formErr error
 
 	for {
 		part, err := mr.NextPart()
@@ -388,18 +394,29 @@ func (s *Server) handleUploadISO(w http.ResponseWriter, r *http.Request) {
 
 		switch part.FormName() {
 		case "expected_sha256":
-			data, _ := io.ReadAll(part)
+			data, readErr := io.ReadAll(io.LimitReader(part, maxExpectedSHA256FieldBytes+1))
+			if readErr != nil {
+				formErr = fmt.Errorf("reading expected_sha256: %w", readErr)
+				break
+			}
+			if len(data) > maxExpectedSHA256FieldBytes {
+				formErr = fmt.Errorf("expected_sha256 exceeds %d bytes", maxExpectedSHA256FieldBytes)
+				break
+			}
 			expectedHash = strings.TrimSpace(string(data))
 		case "file":
 			result, uploadErr = s.uploadISOStream(r, part, expectedHash)
 		}
 		part.Close()
-		if uploadErr != nil {
+		if uploadErr != nil || formErr != nil {
 			break
 		}
 	}
 
 	switch {
+	case formErr != nil:
+		writeJSON(w, http.StatusBadRequest, errorBody{Error: formErr.Error()})
+		return
 	case uploadErr != nil:
 		writeJSON(w, http.StatusBadGateway, errorBody{Error: uploadErr.Error()})
 		return
