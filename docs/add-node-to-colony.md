@@ -25,8 +25,32 @@ Follow [Create a new Apiary node](create-node.md) through host preparation:
 
 Do not start a normal standalone `raftd` cluster on a node intended to join.
 A fresh raftd without `await_join` immediately creates an independent Raft
-cluster. If it has already formed one, reset its local Raft state before
-continuing.
+cluster.
+
+**If this host already formed its own independent Comb** (real state
+already exists - this is not the case for a genuinely fresh host), skip
+Step 2 and Step 4 below entirely and use the guided **"Convert this Comb
+to a joiner"** action on that Comb's own Machine Configuration page
+instead (ADR-0105). It performs the entire stop/reset/reconfigure/
+restart/confirm/submit sequence those two steps describe by hand, in one
+Admin-only action with an exact typed confirmation phrase: it stops local
+`apiary_raftd`, moves its existing state aside to a timestamped backup
+(reusing `raftd -reset` itself, not a reimplementation of it), rewrites
+only `raft_bind`/`await_join` in `raftd.json` while leaving `node_id`,
+`socket`, `internal_token`, and Raft TLS settings untouched, restarts
+`raftd`, confirms it is actually listening at the new address before
+doing anything else, and only then submits the join request against the
+target Colony member you name - using this Comb's own real, current
+identity. It fails closed (refuses and leaves the Comb running exactly as
+it already was) on an unreachable target, an invalid `raft_bind`, or no
+existing state to convert. Continue reading this whole document anyway -
+**Step 3 (peer TLS trust) must still be configured on this Comb's own
+`managerd.json` before you use the guided action**, since its final step
+(submitting the join request) dials the target through the exact same
+TLS-respecting path Step 3 sets up, not a separate plaintext path. Steps
+5-7 still apply afterward. The manual sequence below documents exactly
+what the guided action does internally - useful if it ever fails partway
+and you need to understand the current state by hand.
 
 ## 2. Configure Raft to wait for approval
 
@@ -47,8 +71,11 @@ Replace `<this-host-address>` with the joining host's real, reachable
 address. Do not use `0.0.0.0`: Apiary also advertises this value to Raft
 peers.
 
-If this host previously bootstrapped its own independent Comb, stop raftd and
-reset only its local Raft state before entering await-join mode:
+If this host previously bootstrapped its own independent Comb and you are
+not using the guided "Convert this Comb to a joiner" action above (e.g. it
+failed partway and you are recovering by hand, or you are following this
+manually for another reason), stop raftd and reset only its local Raft
+state before entering await-join mode:
 
 ```bash
 service apiary_raftd stop
@@ -105,7 +132,15 @@ verification to bypass this requirement.
 
 ## 4. Start the local services
 
-Start managerd and the frontend after raftd is waiting:
+**If you used the guided "Convert this Comb to a joiner" action in Step 1,
+the join request below is already submitted** - that action is itself an
+RPC served by `managerd`/`frontend`, so those two must already have been
+running (on this Comb's own prior standalone bootstrap) to reach its
+Machine page at all; only `apiary_raftd` gets stopped and restarted by the
+action itself. Skip ahead to Step 5 with the confirmation code that action
+displayed.
+
+Otherwise, start managerd and the frontend after raftd is waiting:
 
 ```bash
 service apiary_managerd start
