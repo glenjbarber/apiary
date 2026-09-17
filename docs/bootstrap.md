@@ -280,8 +280,13 @@ comments as a starting point instead of writing the file from scratch:
 mkdir -p /usr/local/etc/apiary
 sed -e '/^[[:space:]]*\/\//d' -e '/^[[:space:]]*$/d' \
   /usr/local/etc/apiary/raftd.json.sample > /usr/local/etc/apiary/raftd.json
-${EDITOR:-vi} /usr/local/etc/apiary/raftd.json
 chmod 600 /usr/local/etc/apiary/raftd.json
+```
+
+Then edit the generated file with this separate command:
+
+```bash
+${EDITOR:-vi} /usr/local/etc/apiary/raftd.json
 ```
 
 Decide first: does this node bootstrap its own independent cluster, or
@@ -351,8 +356,13 @@ from scratch:
 ```bash
 sed -e '/^[[:space:]]*\/\//d' -e '/^[[:space:]]*$/d' \
   /usr/local/etc/apiary/managerd.json.sample > /usr/local/etc/apiary/managerd.json
-${EDITOR:-vi} /usr/local/etc/apiary/managerd.json
 chmod 600 /usr/local/etc/apiary/managerd.json
+```
+
+Then edit the generated file with this separate command:
+
+```bash
+${EDITOR:-vi} /usr/local/etc/apiary/managerd.json
 ```
 
 ```json
@@ -436,6 +446,11 @@ instead of writing either from scratch:
 ```bash
 sed -e '/^[[:space:]]*\/\//d' -e '/^[[:space:]]*$/d' \
   /usr/local/etc/apiary/frontend.json.sample > /usr/local/etc/apiary/frontend.json
+```
+
+Then edit the generated file with this separate command:
+
+```bash
 ${EDITOR:-vi} /usr/local/etc/apiary/frontend.json
 ```
 
@@ -466,6 +481,11 @@ pattern:
 ```bash
 sed -e '/^[[:space:]]*\/\//d' -e '/^[[:space:]]*$/d' \
   /usr/local/etc/apiary/restshimd.json.sample > /usr/local/etc/apiary/restshimd.json
+```
+
+Then edit the generated file with this separate command:
+
+```bash
 ${EDITOR:-vi} /usr/local/etc/apiary/restshimd.json
 ```
 

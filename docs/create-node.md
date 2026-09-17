@@ -112,8 +112,13 @@ Create the real configuration from the installed sample:
 sed -e '/^[[:space:]]*\/\//d' -e '/^[[:space:]]*$/d' \
   /usr/local/etc/apiary/raftd.json.sample \
   > /usr/local/etc/apiary/raftd.json
-${EDITOR:-vi} /usr/local/etc/apiary/raftd.json
 chmod 600 /usr/local/etc/apiary/raftd.json
+```
+
+Then edit the generated file with this separate command:
+
+```bash
+${EDITOR:-vi} /usr/local/etc/apiary/raftd.json
 ```
 
 For an independent node, omit `join` and `await_join` entirely:
@@ -142,8 +147,13 @@ service apiary_raftd start
 sed -e '/^[[:space:]]*\/\//d' -e '/^[[:space:]]*$/d' \
   /usr/local/etc/apiary/managerd.json.sample \
   > /usr/local/etc/apiary/managerd.json
-${EDITOR:-vi} /usr/local/etc/apiary/managerd.json
 chmod 600 /usr/local/etc/apiary/managerd.json
+```
+
+Then edit the generated file with this separate command:
+
+```bash
+${EDITOR:-vi} /usr/local/etc/apiary/managerd.json
 ```
 
 Set at least the host identity, local Raft socket, manager address, storage,
@@ -177,7 +187,16 @@ sed -e '/^[[:space:]]*\/\//d' -e '/^[[:space:]]*$/d' \
 sed -e '/^[[:space:]]*\/\//d' -e '/^[[:space:]]*$/d' \
   /usr/local/etc/apiary/restshimd.json.sample \
   > /usr/local/etc/apiary/restshimd.json
+```
+
+Edit each generated file separately. Do not paste both editor commands at
+once, because the second command can be consumed as input by the first editor.
+
+```bash
 ${EDITOR:-vi} /usr/local/etc/apiary/frontend.json
+```
+
+```bash
 ${EDITOR:-vi} /usr/local/etc/apiary/restshimd.json
 ```
 
@@ -210,14 +229,24 @@ Enable real PAM login before exposing the frontend to an untrusted network:
 
 ```bash
 make setup-pam
+```
+
+Edit the configuration in a separate command:
+
+```bash
 ${EDITOR:-vi} /usr/local/etc/apiary/managerd.json
-service apiary_managerd restart
 ```
 
 Add this field to `managerd.json`:
 
 ```json
 "pam_service": "apiary"
+```
+
+Then restart managerd:
+
+```bash
+service apiary_managerd restart
 ```
 
 The first successful PAM login becomes Apiary Admin. Log in immediately using
