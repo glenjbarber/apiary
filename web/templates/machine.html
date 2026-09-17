@@ -237,6 +237,39 @@
     </form>
     {{end}}
   </div>
+
+  <div class="panel">
+    <h3>Convert this Comb to a joiner</h3>
+    <p class="muted">
+      For a Comb that already has its own standalone raft state (unlike
+      "Join a Colony" above, which is for a genuinely fresh node) - this
+      guards and automates the same manual sequence that panel's own
+      text describes by hand: stop <code>raftd</code>, move its existing
+      state aside to a timestamped backup, reconfigure it to await a
+      join, restart it, confirm it is actually listening, then submit
+      the join request. This Comb's current raft data directory is
+      <code>{{.RaftdConfig.DataDir}}</code> and its currently configured
+      raft-bind address is <code>{{.RaftdConfig.RaftBind}}</code> - the
+      raft-bind address below replaces that value once this completes.
+      This does not merge history with the target Colony; the target's
+      own Admin still separately approves the resulting request.
+    </p>
+    {{if .ConvertJoinerFormError}}<div class="banner-error">{{.ConvertJoinerFormError}}</div>{{end}}
+    {{if .ConvertJoinerResult}}
+    <div class="panel">
+      <p><strong>Conversion succeeded.</strong> Existing state moved to <code>{{.ConvertJoinerResult.BackupDataDir}}</code>.</p>
+      <p>Your code: <strong style="font-size:1.4em; letter-spacing:0.1em;">{{.ConvertJoinerResult.JoinRequestCode}}</strong></p>
+      <p class="muted">Relay this code to the target Colony's Admin - they compare it against their own "Pending join requests" panel before approving. Nothing about the target Colony changes until they do.</p>
+    </div>
+    {{else}}
+    <form class="inline-form" method="post" action="/machine/convert-to-joiner" hx-confirm="This stops raftd, moves this Comb's existing raft state aside to a timestamped backup, and reconfigures it to join the named Colony. There is no automatic revert. Continue?">
+      <label>Target Colony member's managerd address <input type="text" name="target_managerd_address" required placeholder="10.90.0.1:17700" title="The managerd RPC address (host:port) of any current member of the Colony to join."></label>
+      <label>This Comb's new raft-bind address <input type="text" name="raft_bind" required placeholder="10.90.0.20:17600" title="This node's own real, reachable raft-bind address, replacing its current standalone value - not 0.0.0.0/127.0.0.1/localhost, since a Colony peer must be able to dial it directly."></label>
+      <label>Type <code>yes-convert-to-joiner</code> to confirm <input type="text" name="confirm_phrase" required placeholder="yes-convert-to-joiner" title="Must match exactly or nothing happens."></label>
+      <button type="submit" class="danger">Convert to joiner</button>
+    </form>
+    {{end}}
+  </div>
   {{end}}
 
   </section>

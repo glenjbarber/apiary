@@ -186,7 +186,12 @@ var requiredRole = map[string]Role{
 	"/apiary.rpc.v1.ManagerService/ListAPIKeys":                 RoleAdmin,
 	"/apiary.rpc.v1.ManagerService/RevokeAPIKey":                RoleAdmin,
 	"/apiary.rpc.v1.ManagerService/UpdateNodeConfig":            RoleAdmin,
-	"/apiary.rpc.v1.ManagerService/UpdateManagerdBindAddress":  RoleAdmin,
+	"/apiary.rpc.v1.ManagerService/UpdateManagerdBindAddress":   RoleAdmin,
+	// ConvertStandaloneToJoiner (ADR-0105) stops/resets/restarts this
+	// node's own raftd and submits a Colony join request - a host-wide,
+	// only-narrowly-reversible physical change, same tier as
+	// SetUplinkState/UpdateManagerdBindAddress above.
+	"/apiary.rpc.v1.ManagerService/ConvertStandaloneToJoiner": RoleAdmin,
 
 	// UpdateFrontendConfig/UpdateRestshimdConfig (ADR-0102): same tier
 	// as UpdateNodeConfig above - writes a sibling daemon's own config

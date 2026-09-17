@@ -169,6 +169,22 @@ service ManagerService {
   // endpoint is appropriate for this Comb.
   rpc UpdateManagerdBindAddress(UpdateManagerdBindAddressRequest) returns (UpdateManagerdBindAddressResponse);
 
+  // ConvertStandaloneToJoiner (ADR-0105) guards the one-shot conversion of
+  // an already-bootstrapped, standalone single-node Comb into a joiner for
+  // an existing Colony. It is not a generic Raft configuration editor: it
+  // requires an exact confirm_phrase, stops this node's own raftd, moves
+  // its existing raft state aside to a timestamped backup (reusing raftd's
+  // own -reset semantics), rewrites only raft_bind and await_join in
+  // raftd.json (every other field - node_id, socket, data_dir,
+  // internal_token, Raft TLS material - is preserved untouched), restarts
+  // raftd, confirms it is actually listening at the new raft_bind address,
+  // and only then submits a mutually-authorized ADR-0083 join request
+  // against target_managerd_address using this node's own real, current
+  // identity. It never merges divergent Raft histories: the existing
+  // ApproveJoinRequest reachability preflight on the target Colony member
+  // still applies unchanged.
+  rpc ConvertStandaloneToJoiner(ConvertStandaloneToJoinerRequest) returns (ConvertStandaloneToJoinerResponse);
+
   // GetFrontendConfig/UpdateFrontendConfig and GetRestshimdConfig/
   // UpdateRestshimdConfig (ADR-0102) extend the same "manage this
   // node's own local runtime settings" posture above to the two
@@ -1393,6 +1409,51 @@ message UpdateManagerdBindAddressResponse {
   // guardrail-protected action.
   bool restart_required = 1;
   string error = 2;
+}
+
+message ConvertStandaloneToJoinerRequest {
+  // target_managerd_address is the existing Colony member's managerd
+  // address this Comb will submit its join request against. Always an
+  // operator-supplied value at call time - never a compiled-in or
+  // previously-cached default.
+  string target_managerd_address = 1;
+
+  // raft_bind is this Comb's own new raft_bind address, replacing
+  // whatever raft_bind was previously configured (which may have been
+  // this node's own standalone bootstrap value). Must be a real,
+  // reachable host:port - not 0.0.0.0/127.0.0.1/localhost, since a
+  // remote Colony peer must be able to dial it directly.
+  string raft_bind = 2;
+
+  // confirm_phrase must exactly equal the server's own required phrase
+  // or nothing happens at all - matches the same exact-match-or-nothing
+  // convention as apiaryinstall's -apply-network and raftd's own -reset.
+  string confirm_phrase = 3;
+}
+
+message ConvertStandaloneToJoinerResponse {
+  // error is set (and every other field left empty) on any fail-closed
+  // condition: wrong confirm_phrase, unreadable/malformed local raftd
+  // config, no existing local raft state to convert, invalid raft_bind,
+  // an unreachable target, or a failure stopping/resetting/starting
+  // raftd. A non-empty error never accompanies a populated
+  // join_request_id/join_request_code - this response is never
+  // ambiguously "partially ready."
+  string error = 1;
+
+  // backup_data_dir is the timestamped path raftd's own -reset moved the
+  // prior standalone raft state to, reported even when a later stage
+  // (rewriting config, restarting raftd) fails after the reset already
+  // succeeded - the state is never silently lost track of.
+  string backup_data_dir = 2;
+
+  // join_request_id/join_request_code are only set once raftd has been
+  // confirmed listening at the new raft_bind and the ADR-0083
+  // RequestJoinColony call actually succeeded. join_request_code is the
+  // correlation code to relay to the target Colony's Admin for visual
+  // comparison before they call ApproveJoinRequest.
+  string join_request_id = 3;
+  string join_request_code = 4;
 }
 
 message NetworkInterface {
