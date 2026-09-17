@@ -2,13 +2,15 @@
   <img src="assets/apiary-logo.svg" alt="Apiary Project Logo" width="180">
 </p>
 
-[![Go CI](https://github.com/glenjbarber/apiary/actions/workflows/go-ci.yml/badge.svg?branch=main)](https://github.com/glenjbarber/apiary/actions/workflows/go-ci.yml)
 ![OS](https://img.shields.io/badge/OS-FreeBSD-red.svg?logo=freebsd&logoColor=white)
 ![Architecture](https://img.shields.io/badge/arch-amd64-blue)
-[![Go Reference](https://pkg.go.dev/badge/github.com/glenjbarber/apiary.svg)](https://pkg.go.dev/github.com/glenjbarber/apiary)
-![Go Version](https://img.shields.io/github/go-mod/go-version/glenjbarber/apiary)
 [![License](https://img.shields.io/github/license/glenjbarber/apiary?color=blue)](LICENSE)
+
+![Go Version](https://img.shields.io/github/go-mod/go-version/glenjbarber/apiary)
+[![Go Reference](https://pkg.go.dev/badge/github.com/glenjbarber/apiary.svg)](https://pkg.go.dev/github.com/glenjbarber/apiary)
+
 ![Last Commit](https://img.shields.io/github/last-commit/glenjbarber/apiary)
+[![Go CI](https://github.com/glenjbarber/apiary/actions/workflows/go-ci.yml/badge.svg?branch=main)](https://github.com/glenjbarber/apiary/actions/workflows/go-ci.yml)
 <!--
 [![Latest Release](https://img.shields.io/github/v/release/glenjbarber/apiary)](https://github.com/glenjbarber/apiary/releases)
 -->
