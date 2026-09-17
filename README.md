@@ -2,7 +2,6 @@
   <img src="assets/apiary-logo.svg" alt="Apiary Project Logo" width="180">
 </p>
 
-# Apiary
 [![Go CI](https://github.com/glenjbarber/apiary/actions/workflows/go-ci.yml/badge.svg?branch=main)](https://github.com/glenjbarber/apiary/actions/workflows/go-ci.yml)
 
 A FreeBSD-native virtualization management platform for cluster
