@@ -54,12 +54,56 @@
       .cockpit-join table { margin-top:.8rem; }
       .cockpit-join h2 { font-size:1.1rem; }
       .cockpit-join p { margin:.4rem 0 0; }
+      .cockpit-shell { display:grid; grid-template-columns:190px 190px minmax(0,1fr); min-height:680px; margin-top:1rem; border:1px solid var(--line); border-radius:10px; overflow:hidden; background:var(--panel); box-shadow:var(--shadow); }
+      .cockpit-rail, .cockpit-subnav { padding:.8rem .55rem; background:var(--table-head); border-right:1px solid var(--line); }
+      .cockpit-subnav { background:var(--field); }
+      .cockpit-rail-label { margin:.7rem .55rem .35rem; color:var(--muted); font-size:.68rem; font-weight:750; letter-spacing:.13em; }
+      .cockpit-tree, .cockpit-subitem { display:flex; align-items:center; gap:.5rem; width:100%; padding:.55rem .6rem; color:var(--ink); border-radius:6px; text-decoration:none; }
+      .cockpit-tree:hover, .cockpit-subitem:hover { background:var(--row-hover); }
+      .cockpit-tree.active, .cockpit-subitem.active { color:var(--wash); background:var(--ink); font-weight:700; }
+      .cockpit-tree.child { padding-left:1.55rem; font-size:.82rem; }
+      .cockpit-tree small { margin-left:auto; color:var(--muted); font-size:.68rem; }
+      .cockpit-tree.active small { color:inherit; opacity:.75; }
+      .cockpit-subitem { font-size:.86rem; }
+      .cockpit-main { min-width:0; background:var(--panel); }
+      .cockpit-topbar { display:flex; align-items:center; justify-content:space-between; gap:1rem; padding:.7rem 1rem; border-bottom:1px solid var(--line); color:var(--muted); font-size:.82rem; }
+      .cockpit-topbar strong { color:var(--ink); }
+      .cockpit-workspace { padding:1rem; }
+      .cockpit-workspace .cockpit-header { margin-bottom:1rem; }
+      .cockpit-top-grid { display:grid; grid-template-columns:minmax(0,1.35fr) minmax(16rem,.85fr); gap:1rem; }
+      .cockpit-top-grid > .panel { margin-top:0; min-width:0; }
+      .cockpit-kpis { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); padding:0; overflow:hidden; }
+      .cockpit-kpi { padding:.9rem; border-right:1px solid var(--line); }
+      .cockpit-kpi:last-child { border-right:0; }
+      .cockpit-kpi small { display:block; color:var(--muted); }
+      .cockpit-kpi strong { display:block; margin-top:.2rem; font-size:1.2rem; }
+      .cockpit-kpi em { display:block; margin-top:.15rem; color:var(--muted); font-size:.72rem; font-style:normal; }
+      .cockpit-topology { grid-column:1 / -1; }
+      .cockpit-topology-list { display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:.75rem; margin-top:.8rem; }
+      .cockpit-topology-node { position:relative; display:block; padding:.85rem; color:var(--ink); background:var(--field); border:1px solid var(--line); border-radius:7px; text-decoration:none; }
+      .cockpit-topology-node:hover { background:var(--row-hover); }
+      .cockpit-topology-node::before { content:""; display:block; width:.55rem; height:.55rem; margin-bottom:.45rem; border-radius:50%; background:var(--success); box-shadow:0 0 0 4px color-mix(in srgb, var(--success) 16%, transparent); }
+      .cockpit-topology-node.unreachable::before { background:var(--danger); box-shadow:0 0 0 4px color-mix(in srgb, var(--danger) 16%, transparent); }
+      .cockpit-topology-node strong { display:block; overflow-wrap:anywhere; }
+      .cockpit-topology-node small { display:block; margin-top:.25rem; color:var(--muted); }
+      .cockpit-topology-state { display:flex; align-items:center; gap:.4rem; margin-top:.65rem; }
+      .cockpit-topology-state .badge { font-size:.7rem; }
+      .cockpit-scope-list { list-style:none; margin:.7rem 0 0; padding:0; }
+      .cockpit-scope-list li { padding:.55rem 0; border-bottom:1px solid var(--line); }
+      .cockpit-scope-list li:last-child { border-bottom:0; }
+      .cockpit-scope-list a { color:var(--ink); text-decoration:none; }
+      .cockpit-scope-list a:hover { text-decoration:underline; }
       @media (max-width:1000px) {
         .cockpit-summary { grid-template-columns:repeat(2,minmax(0,1fr)); }
         .cockpit-stat:nth-child(2) { border-right:0; }
         .cockpit-stat:nth-child(-n+2) { border-bottom:1px solid var(--line); }
         .cockpit-grid { grid-template-columns:1fr; }
         .cockpit-grid > .panel { margin-top:0; }
+        .cockpit-shell { grid-template-columns:62px 180px minmax(0,1fr); }
+        .cockpit-rail-label, .cockpit-rail .cockpit-tree span, .cockpit-rail .cockpit-tree small { display:none; }
+        .cockpit-rail .cockpit-tree { justify-content:center; }
+        .cockpit-top-grid { grid-template-columns:1fr; }
+        .cockpit-topology { grid-column:auto; }
       }
       @media (max-width:620px) {
         .cockpit-header { display:block; }
@@ -69,61 +113,52 @@
         .cockpit-stat:last-child { border-bottom:0; }
         .cockpit-action-list, .cockpit-resource-grid { grid-template-columns:1fr; }
         .cockpit-node-table { min-width:62rem; }
+        .cockpit-shell { display:block; min-height:0; }
+        .cockpit-rail, .cockpit-subnav { display:none; }
+        .cockpit-topbar { padding:.65rem .8rem; }
+        .cockpit-workspace { padding:.8rem; }
+        .cockpit-kpis { grid-template-columns:1fr; }
+        .cockpit-kpi { border-right:0; border-bottom:1px solid var(--line); }
+        .cockpit-kpi:last-child { border-bottom:0; }
       }
     </style>
 
-    <div class="page-header cockpit-header">
-      <div class="page-header-copy">
-        <h2>Command center</h2>
-        <p>Current state, safe next actions, and the evidence behind every answer.</p>
-      </div>
-      <div class="cockpit-actions">
-        <a class="button secondary" href="/simulate">Failure preview</a>
-        <a class="button secondary" href="/why-not">Why not?</a>
-        {{if .CanOperate}}<a class="button" href="/vms/new">Create resource</a>{{end}}
-      </div>
-    </div>
-
     {{if .Error}}<div class="banner-error">{{.Error}}</div>{{end}}
-
-    <section class="panel cockpit-summary" aria-label="Control plane summary">
-      <div class="cockpit-stat"><div class="cockpit-stat-label">Known Combs</div><div class="cockpit-stat-value">{{len .ClusterNodes}}</div><div class="cockpit-stat-note">Raft membership observed</div></div>
-      <div class="cockpit-stat"><div class="cockpit-stat-label">Control plane</div><div class="cockpit-stat-value"><span class="badge ready">Evidence-backed</span></div><div class="cockpit-stat-note">Health is computed from live signals</div></div>
-      <div class="cockpit-stat"><div class="cockpit-stat-label">Action safety</div><div class="cockpit-stat-value">Preflight</div><div class="cockpit-stat-note">Inspect impact before changing state</div></div>
-      <div class="cockpit-stat"><div class="cockpit-stat-label">Attention</div><div class="cockpit-stat-value">Review</div><div class="cockpit-stat-note">Use Why Not and Simulations before risky actions</div></div>
-    </section>
-
-    <div class="cockpit-grid">
-      <section class="panel">
-        <div class="cockpit-panel-head"><h2>Control-plane map</h2><a href="/trace">Trace a path</a></div>
-        <p class="muted">Every Comb is shown with reachability, health, host evidence, and a direct path to detail.</p>
-        <div class="table-scroll"><table class="cockpit-node-table"><thead><tr><th>Comb</th><th>Reachability</th><th>Health</th><th>Host evidence</th><th>Actions</th></tr></thead><tbody>
-          {{range .ClusterNodes}}
-          <tr>
-            <td><div class="cockpit-node-name">{{.NodeID}}</div><div class="cockpit-node-address">managerd :17700</div></td>
-            {{if .Reachable}}<td><span class="badge ready">Reachable</span></td>{{else}}<td><span class="badge error" title="{{.Error}}">Unreachable</span></td>{{end}}
-            <td><a class="badge {{.HealthStatus}}" href="/host/{{.NodeID}}/evidence" title="{{.HealthExplanation}}">{{.HealthStatus}}</a><br><a class="muted cockpit-evidence-link" href="/host/{{.NodeID}}/evidence">Evidence</a></td>
-            {{if .Reachable}}<td><span class="badge {{if .PoolsOK}}ready{{else}}error{{end}}">ZFS {{if .PoolsOK}}healthy{{else}}degraded{{end}}</span><br><span class="badge {{if .PFEnabled}}ready{{else}}error{{end}}">PF {{if .PFEnabled}}enabled{{else}}disabled{{end}}</span></td>{{else}}<td class="muted">{{.Error}}</td>{{end}}
-            <td><div class="cockpit-node-actions"><a href="/host/{{.NodeID}}">Details</a><a href="/why-not?node_id={{.NodeID}}">Why not?</a></div></td>
-          </tr>
-          {{else}}<tr><td colspan="5"><em>No known Combs</em></td></tr>{{end}}
-        </tbody></table></div>
-      </section>
-
-      <section class="panel">
-        <div class="cockpit-panel-head"><h2>Next safe actions</h2><span class="muted">operator tools</span></div>
-        <div class="cockpit-warning"><span class="cockpit-warning-icon" aria-hidden="true">!</span><div><strong>Check impact before changing state</strong><div class="muted">Failure preview and Why Not are read-only. Use them before reboot, migration, or teardown.</div></div></div>
-        <div class="cockpit-action-list">
-          <a class="button secondary" href="/simulate"><strong>Run simulation</strong><small>Preview failure and recovery impact</small></a>
-          <a class="button secondary" href="/why-not"><strong>Ask Why Not?</strong><small>Get the smallest blocker set</small></a>
-          <a class="button secondary" href="/recovery-handbook"><strong>Open recovery</strong><small>Use the offline-safe handbook</small></a>
-          <a class="button secondary" href="/assumptions"><strong>Review evidence</strong><small>Inspect current assumptions</small></a>
+    <div class="cockpit-shell">
+      <aside class="cockpit-rail" aria-label="Resource tree">
+        <div class="cockpit-rail-label">COLONY</div>
+        <a class="cockpit-tree active" href="/"><span aria-hidden="true">⌘</span><span>Data Center</span></a>
+        {{range .ClusterNodes}}
+        <a class="cockpit-tree" href="/host/{{.NodeID}}"><span aria-hidden="true">▣</span><span>{{.NodeID}}</span><small>{{.HealthStatus}}</small></a>
+        <a class="cockpit-tree child" href="/host/{{.NodeID}}/evidence"><span aria-hidden="true">↳</span><span>Evidence</span></a>
+        {{end}}
+        <div class="cockpit-rail-label">INVENTORY</div>
+        <a class="cockpit-tree" href="/vms"><span aria-hidden="true">▱</span><span>Virtual machines</span></a>
+        <a class="cockpit-tree" href="/jails"><span aria-hidden="true">▤</span><span>Jails</span></a>
+        <a class="cockpit-tree" href="/networks"><span aria-hidden="true">⌘</span><span>Networks</span></a>
+      </aside>
+      <nav class="cockpit-subnav" aria-label="Command center sections">
+        <div class="cockpit-rail-label">DATA CENTER</div>
+        <a class="cockpit-subitem active" href="/">Summary</a>
+        <a class="cockpit-subitem" href="/vms">Resources <span class="muted">›</span></a>
+        <a class="cockpit-subitem" href="/simulate">Failure preview</a>
+        <a class="cockpit-subitem" href="/invariants">Evidence</a>
+        <a class="cockpit-subitem" href="/assumptions">Assumptions <span class="muted">›</span></a>
+        <a class="cockpit-subitem" href="/recovery-handbook">Recovery</a>
+      </nav>
+      <section class="cockpit-main">
+        <div class="cockpit-topbar"><span>Colony / <strong>Data Center</strong></span><div class="cockpit-actions"><a class="button secondary" href="/simulate">Failure preview</a>{{if .CanOperate}}<a class="button" href="/vms/new">Create</a>{{end}}</div></div>
+        <div class="cockpit-workspace">
+          <div class="page-header cockpit-header"><div class="page-header-copy"><h2>Command center</h2><p>Current state, safe next actions, and the evidence behind every answer.</p></div><span class="badge ready">Live evidence</span></div>
+          <div class="cockpit-top-grid">
+            <section class="panel cockpit-kpis" aria-label="Control plane summary"><div class="cockpit-kpi"><small>Combs</small><strong>{{len .ClusterNodes}}</strong><em>membership observed</em></div><div class="cockpit-kpi"><small>Control plane</small><strong>Evidence-backed</strong><em>health computed from live signals</em></div><div class="cockpit-kpi"><small>Action safety</small><strong>Preflight</strong><em>inspect impact before change</em></div></section>
+            <section class="panel"><div class="cockpit-panel-head"><h2>Attention</h2><span class="badge degraded">Review</span></div><p class="muted">Use Failure preview and Why Not before reboot, migration, or teardown.</p><div class="cockpit-action-list"><a class="button secondary" href="/why-not"><strong>Ask Why Not?</strong><small>Get the smallest blocker set</small></a><a class="button secondary" href="/recovery-handbook"><strong>Open recovery</strong><small>Use the offline-safe handbook</small></a></div></section>
+            <section class="panel cockpit-topology"><div class="cockpit-panel-head"><h2>Live control-plane topology</h2><a href="/trace">Trace a path</a></div><p class="muted">Fresh reachability and health evidence for every known Comb. Select a node for details.</p><div class="cockpit-topology-list">{{range .ClusterNodes}}<a class="cockpit-topology-node {{if not .Reachable}}unreachable{{end}}" href="/host/{{.NodeID}}/evidence" title="{{.Error}}"><strong>{{.NodeID}}</strong><small>managerd :17700</small><div class="cockpit-topology-state">{{if .Reachable}}<span class="badge ready">Reachable</span>{{else}}<span class="badge error">Unreachable</span>{{end}}<span class="badge {{.HealthStatus}}">{{.HealthStatus}}</span></div></a>{{else}}<p class="muted">No known Combs.</p>{{end}}</div></section>
+            <section class="panel"><div class="cockpit-panel-head"><h2>Resources</h2><a href="/vms">Open explorer</a></div><ul class="cockpit-scope-list"><li><a href="/vms"><strong>Virtual machines</strong></a><div class="muted">Placement, lifecycle, console, and snapshots</div></li><li><a href="/jails"><strong>Jails</strong></a><div class="muted">Owner, replica, root filesystem, and lifecycle</div></li><li><a href="/networks"><strong>Networks</strong></a><div class="muted">VLAN, bridge, DHCP, DNS, NAT, and PF</div></li><li><a href="/images"><strong>Images</strong></a><div class="muted">ISO inventory and availability evidence</div></li></ul></section>
+            <section class="panel"><div class="cockpit-panel-head"><h2>Control-plane workflow</h2><a href="/invariants">Evidence model</a></div><ul class="cockpit-activity"><li><span class="cockpit-activity-mark">1</span><div><strong>Observe</strong><div class="muted">Read current reachability, health, host, and resource evidence.</div></div></li><li><span class="cockpit-activity-mark">2</span><div><strong>Preflight</strong><div class="muted">Use Failure preview or Why Not before a disruptive action.</div></div></li><li><span class="cockpit-activity-mark">3</span><div><strong>Act</strong><div class="muted">Open the resource page only after impact is understood.</div></div></li></ul></section>
+          </div>
         </div>
       </section>
-
-      <section class="panel"><div class="cockpit-panel-head"><h2>Resources in scope</h2><a href="/vms">Open explorer</a></div><p class="muted">Jump directly into the inventory that the control plane reconciles.</p><div class="cockpit-resource-grid"><a class="cockpit-resource" href="/vms"><strong>Virtual machines</strong><span>Placement, lifecycle, console, and snapshots</span></a><a class="cockpit-resource" href="/jails"><strong>Jails</strong><span>Owner, replica, root filesystem, and lifecycle</span></a><a class="cockpit-resource" href="/networks"><strong>Networks</strong><span>VLAN, bridge, DHCP, DNS, NAT, and PF</span></a><a class="cockpit-resource" href="/images"><strong>Images</strong><span>ISO inventory and availability evidence</span></a></div></section>
-
-      <section class="panel"><div class="cockpit-panel-head"><h2>Control-plane workflow</h2><a href="/invariants">Evidence model</a></div><ul class="cockpit-activity"><li><span class="cockpit-activity-mark" aria-hidden="true">1</span><div><strong>Observe</strong><div class="muted">Read current reachability, health, host, and resource evidence.</div></div></li><li><span class="cockpit-activity-mark" aria-hidden="true">2</span><div><strong>Preflight</strong><div class="muted">Use Failure preview or Why Not before a disruptive action.</div></div></li><li><span class="cockpit-activity-mark" aria-hidden="true">3</span><div><strong>Act</strong><div class="muted">Open the resource page only after the impact is understood.</div></div></li></ul></section>
     </div>
 
     {{if .CanAdmin}}
