@@ -805,3 +805,82 @@ func TestServer_UpdateInternalSecurity_SetsAndClearsRaftdToken(t *testing.T) {
 func boolPtr(v bool) *bool {
 	return &v
 }
+
+// TestServer_MachineSectionPages_EachRendersOwnSubsystemOnly covers the
+// focused per-subsystem pages added alongside the full /machine page
+// (SHARED.md's 2026-09-17 12:34 EDT TODO). Each should render only its
+// own section's heading and panel content, plus the cross-page nav
+// linking to the other five and back to the full page.
+func TestServer_MachineSectionPages_EachRendersOwnSubsystemOnly(t *testing.T) {
+	client := &fakeClient{
+		statusResp:        &rpcpb.StatusResponse{ManagerNodeId: "node-a"},
+		getNodeConfigResp: &rpcpb.GetNodeConfigResponse{RpcAddr: "10.50.0.14:17700"},
+	}
+	s := newTestServer(t, client)
+
+	cases := []struct {
+		path        string
+		wantHeading string
+		wantAbsent  []string
+	}{
+		{"/machine/operations", "Operations", []string{"id=\"machine-networking\"", "id=\"machine-security\""}},
+		{"/machine/networking", "Networking", []string{"id=\"machine-operations\"", "id=\"machine-exposure\""}},
+		{"/machine/workloads", "Storage and provisioning", []string{"id=\"machine-cluster\"", "id=\"machine-operations\""}},
+		{"/machine/cluster", "Colony membership and peers", []string{"id=\"machine-security\"", "id=\"machine-workloads\""}},
+		{"/machine/security", "TLS and security", []string{"id=\"machine-exposure\"", "id=\"machine-cluster\""}},
+		{"/machine/exposure", "Service exposure", []string{"id=\"machine-security\"", "id=\"machine-networking\""}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.path, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, tc.path, nil)
+			rec := httptest.NewRecorder()
+			s.ServeHTTP(rec, req)
+			if rec.Code != http.StatusOK {
+				t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+			}
+			body := rec.Body.String()
+			if !strings.Contains(body, ">"+tc.wantHeading+"<") {
+				t.Errorf("%s: missing heading %q in body", tc.path, tc.wantHeading)
+			}
+			for _, absent := range tc.wantAbsent {
+				if strings.Contains(body, absent) {
+					t.Errorf("%s: unexpectedly contains %q (another section's content)", tc.path, absent)
+				}
+			}
+			// Cross-page nav to the other focused pages and back to the
+			// full page must always be present.
+			if !strings.Contains(body, `href="/machine"`) {
+				t.Errorf("%s: missing link back to full /machine page", tc.path)
+			}
+			for _, section := range machineSections {
+				if !strings.Contains(body, `href="/machine/`+section.Slug+`"`) {
+					t.Errorf("%s: missing nav link to /machine/%s", tc.path, section.Slug)
+				}
+			}
+		})
+	}
+}
+
+// TestServer_MachinePage_LinksToFocusedSubpages confirms the legacy
+// full page also links forward to each new focused page, so it's
+// discoverable without knowing the URL in advance.
+func TestServer_MachinePage_LinksToFocusedSubpages(t *testing.T) {
+	client := &fakeClient{
+		statusResp:        &rpcpb.StatusResponse{ManagerNodeId: "node-a"},
+		getNodeConfigResp: &rpcpb.GetNodeConfigResponse{RpcAddr: "10.50.0.14:17700"},
+	}
+	s := newTestServer(t, client)
+
+	req := httptest.NewRequest(http.MethodGet, "/machine", nil)
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d", rec.Code)
+	}
+	body := rec.Body.String()
+	for _, section := range machineSections {
+		if !strings.Contains(body, `href="/machine/`+section.Slug+`"`) {
+			t.Errorf("full page missing link to /machine/%s", section.Slug)
+		}
+	}
+}

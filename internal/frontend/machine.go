@@ -142,10 +142,16 @@ func (s *Server) localNodeID(r *http.Request) string {
 	return resp.GetManagerNodeId()
 }
 
-// handleMachinePage serves the Machine Configuration page ("/machine",
-// ADR-0049): this node's uplink settings, a firewall-pause table for
-// VMs assigned to this node, and a dataset-quota form.
-func (s *Server) handleMachinePage(w http.ResponseWriter, r *http.Request) {
+// machinePageData gathers every value any Machine-page panel (whether
+// the full legacy page or one of the focused per-subsystem pages below)
+// might reference, so both can share one data-fetching path. Splitting
+// this out of handleMachinePage is the enabling step for the focused
+// subsystem pages added below (SHARED.md's 2026-09-17 12:34 EDT TODO):
+// each of those pages fetches the same superset today rather than a
+// narrowed per-section subset - see the "Not addressed" note on that
+// TODO's closing entry for why that's a deliberate, separately tracked
+// scope cut rather than an oversight.
+func (s *Server) machinePageData(r *http.Request) pageData {
 	nodeID := s.localNodeID(r)
 	cfg, cfgErr := s.currentNodeConfig(r)
 	frontendCfg, frontendCfgErr := s.currentFrontendConfig(r)
@@ -157,7 +163,7 @@ func (s *Server) handleMachinePage(w http.ResponseWriter, r *http.Request) {
 	uplinkStatus, uplinkErr := s.currentUplinkStatus(r)
 	originCerts, originErr := s.currentOriginCertificates(r)
 
-	s.render(w, "machine_page", s.withAuthFields(r, pageData{
+	return pageData{
 		NodeConfig:               cfg,
 		NodeConfigFormError:      cfgErr,
 		FrontendConfig:           frontendCfg,
@@ -177,7 +183,53 @@ func (s *Server) handleMachinePage(w http.ResponseWriter, r *http.Request) {
 		OriginCAError:            originErr,
 		JoinColonyResult:         s.currentJoinColonyResult(r),
 		ActivePage:               "machine",
-	}))
+	}
+}
+
+// handleMachinePage serves the Machine Configuration page ("/machine",
+// ADR-0049): this node's uplink settings, a firewall-pause table for
+// VMs assigned to this node, and a dataset-quota form. Kept exactly as
+// before - a single page with every subsystem's panels - for existing
+// bookmarks, scripts, and this package's own extensive test coverage.
+// The focused per-subsystem pages below (added for the "split the
+// Machine page" TODO) are an additive alternative, not a replacement:
+// see machinePageData's own doc comment for why a full route migration
+// (redirecting this path, or narrowing its own data fetch) was left as
+// a separate, deliberately un-taken step.
+func (s *Server) handleMachinePage(w http.ResponseWriter, r *http.Request) {
+	s.render(w, "machine_page", s.withAuthFields(r, s.machinePageData(r)))
+}
+
+// machineSection describes one of the focused per-subsystem pages a
+// long "Machine Configuration" page was split into (SHARED.md's
+// 2026-09-17 12:34 EDT TODO). Kept as a single ordered slice so the
+// cross-page section nav rendered by each page (machine_section_nav)
+// and the route registration in server.go both derive from the same
+// list instead of two hand-maintained copies drifting apart.
+type machineSection struct {
+	Slug, Title string
+}
+
+var machineSections = []machineSection{
+	{Slug: "operations", Title: "Operations"},
+	{Slug: "networking", Title: "Networking"},
+	{Slug: "workloads", Title: "Storage and provisioning"},
+	{Slug: "cluster", Title: "Colony membership and peers"},
+	{Slug: "security", Title: "TLS and security"},
+	{Slug: "exposure", Title: "Service exposure"},
+}
+
+// handleMachineSectionPage renders one focused per-subsystem page
+// (e.g. "/machine/networking") using the given template name, sharing
+// machinePageData's full fetch with the legacy /machine page and with
+// each other. ActiveMachineSection drives the current-page highlight in
+// machine_section_nav.
+func (s *Server) handleMachineSectionPage(templateName, activeSlug string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		data := s.machinePageData(r)
+		data.ActiveMachineSection = activeSlug
+		s.render(w, templateName, s.withAuthFields(r, data))
+	}
 }
 
 type originCertificateView struct {

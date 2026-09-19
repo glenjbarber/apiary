@@ -50,6 +50,12 @@ type pageData struct {
 	// Empty for fragment renders, which don't include the nav.
 	ActivePage string
 
+	// ActiveMachineSection names the current page's slug ("operations",
+	// "networking", ...) among the focused per-subsystem Machine pages
+	// (machineSections in machine.go), so machine_section_nav can
+	// highlight it. Empty on the legacy full /machine page.
+	ActiveMachineSection string
+
 	// Nodes lists known raft cluster member IDs, for the create-VM form's
 	// node picker. Only populated for the New VM page.
 	Nodes          []string
@@ -580,6 +586,7 @@ func NewServer(client rpcpb.ManagerServiceClient, auth Authenticator, roleMap ma
 		"nodeSubtitle":             nodeSubtitle,
 		"isoMissingByNode":         isoMissingByNode,
 		"cloneSourceSnapshotsJSON": cloneSourceSnapshotsJSON,
+		"machineSections":          func() []machineSection { return machineSections },
 	}).ParseFS(web.FS, "templates/*.html")
 	if err != nil {
 		return nil, fmt.Errorf("frontend: parsing templates: %w", err)
@@ -857,6 +864,16 @@ func (s *Server) routes() {
 	// viewer via .CanAdmin, the same defense-in-depth pattern the Users
 	// page already uses for its per-row password action.
 	s.mux.HandleFunc("GET /machine", s.requireRole(manager.RoleOperator, s.handleMachinePage))
+	// Focused per-subsystem Machine pages (SHARED.md's 2026-09-17 12:34
+	// EDT TODO), additive alongside the full /machine page above - see
+	// machinePageData's doc comment in machine.go for why /machine
+	// itself was deliberately left unchanged rather than redirected.
+	s.mux.HandleFunc("GET /machine/operations", s.requireRole(manager.RoleOperator, s.handleMachineSectionPage("machine_operations_page", "operations")))
+	s.mux.HandleFunc("GET /machine/networking", s.requireRole(manager.RoleOperator, s.handleMachineSectionPage("machine_networking_page", "networking")))
+	s.mux.HandleFunc("GET /machine/workloads", s.requireRole(manager.RoleOperator, s.handleMachineSectionPage("machine_workloads_page", "workloads")))
+	s.mux.HandleFunc("GET /machine/cluster", s.requireRole(manager.RoleOperator, s.handleMachineSectionPage("machine_cluster_page", "cluster")))
+	s.mux.HandleFunc("GET /machine/security", s.requireRole(manager.RoleOperator, s.handleMachineSectionPage("machine_security_page", "security")))
+	s.mux.HandleFunc("GET /machine/exposure", s.requireRole(manager.RoleOperator, s.handleMachineSectionPage("machine_exposure_page", "exposure")))
 	s.mux.HandleFunc("POST /machine/uplink", s.requireRole(manager.RoleAdmin, s.handleUpdateNodeConfig))
 	s.mux.HandleFunc("POST /machine/managerd-bind", s.requireRole(manager.RoleAdmin, s.handleUpdateManagerdBindAddress))
 	// /machine/uplink-state (ADR-0085) is deliberately a distinct path
