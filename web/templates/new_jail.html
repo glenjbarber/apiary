@@ -10,10 +10,15 @@
   <form class="create-vm panel" hx-post="/jails" hx-target="#create-error" hx-swap="innerHTML">
     <fieldset class="form-section">
       <legend>Identity</legend>
+      <p class="field-help">Hostname is the canonical input - it may be a full FQDN (e.g. <code>jail-brood-01.lab3.home.arpa</code>). The ID and display name below are derived from it automatically and can be overridden if needed.</p>
       <div class="form-grid">
-    <label>ID <input type="text" name="id" required title="Unique identifier for this jail. Used in the jail's own root dataset name and everywhere it's referenced afterward."></label>
-    <label>Name <input type="text" name="name" title="Optional display label - has no effect on the jail itself."></label>
-    <label>Hostname <input type="text" name="hostname" title="Hostname set inside the jail. Defaults to the ID if left blank."></label>
+    <label>Hostname <input type="text" name="hostname" id="jail-hostname" required title="Hostname set inside the jail. May be a full FQDN. Drives the auto-derived ID and Name below unless you override them."></label>
+    <label>ID <span class="field-help" id="jail-id-help">Auto-derived from Hostname - edit to override.</span>
+      <input type="text" name="id" id="jail-id" required title="Unique identifier for this jail. Used in the jail's own root dataset name and everywhere it's referenced afterward. Only alphanumerics, '-', and '_' are allowed, max 64 characters. Auto-derived from Hostname unless edited directly.">
+    </label>
+    <label>Name <span class="field-help" id="jail-name-help">Auto-derived from Hostname - edit to override.</span>
+      <input type="text" name="name" id="jail-name" title="Optional display label - has no effect on the jail itself. Auto-derived from Hostname unless edited directly.">
+    </label>
       </div>
     </fieldset>
     <fieldset class="form-section">
@@ -59,6 +64,55 @@
     <div class="form-actions"><a href="/jails">Cancel</a><button type="submit">Create jail</button></div>
   </form>
   <script>
+  (function() {
+    // Simplifies the previously-redundant ID/Name/Hostname trio (see
+    // SHARED.md's 2026-09-17 12:35/12:42 EDT TODO): Hostname is now the
+    // canonical field a user types, and ID/Name auto-derive from it
+    // live, tracking "dirty" (manually edited) state per field so a
+    // deliberate override is never silently clobbered. The derivation
+    // enforces validResourceID's own character class server-side
+    // (internal/raft/fsm.go) - alphanumerics, '-', '_', max 64 chars -
+    // since a dotted FQDN hostname is not a valid ID or Name as-is
+    // (the 12:42 EDT addendum this exists to satisfy).
+    var hostnameInput = document.getElementById('jail-hostname');
+    var idInput = document.getElementById('jail-id');
+    var nameInput = document.getElementById('jail-name');
+    var idDirty = false;
+    var nameDirty = false;
+
+    function deriveID(hostname) {
+      var slug = hostname
+        .toLowerCase()
+        .replace(/[^a-z0-9_-]+/g, '-')
+        .replace(/-{2,}/g, '-')
+        .replace(/^-+|-+$/g, '')
+        .slice(0, 64)
+        .replace(/-+$/g, '');
+      return slug;
+    }
+
+    function refreshIdentity() {
+      if (!hostnameInput) return;
+      var hostname = hostnameInput.value;
+      if (!idDirty) {
+        var derived = deriveID(hostname);
+        idInput.value = derived;
+      }
+      if (!nameDirty) {
+        nameInput.value = hostname;
+      }
+    }
+
+    if (hostnameInput && idInput && nameInput) {
+      hostnameInput.addEventListener('input', refreshIdentity);
+      idInput.addEventListener('input', function() {
+        idDirty = idInput.value !== deriveID(hostnameInput.value);
+      });
+      nameInput.addEventListener('input', function() {
+        nameDirty = nameInput.value !== hostnameInput.value;
+      });
+    }
+  })();
   (function() {
     // missingByNode mirrors new_vm.html's own "will be fetched from a
     // peer" cue (ADR-0041) for the base-archive picker.
