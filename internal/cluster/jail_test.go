@@ -640,28 +640,6 @@ func TestReconciler_DisabledJailDeletion(t *testing.T) {
 	}
 }
 
-func TestReconciler_ProtectedTimemachineIsNeverManaged(t *testing.T) {
-	for _, deleting := range []bool{false, true} {
-		j := &internalpb.JailDefinition{Id: "timemachine", NodeId: "node-a", ReplicaNodeId: "node-b"}
-		if deleting {
-			j.DesiredState = internalpb.JailState_JAIL_STATE_DELETING
-		}
-		raft := &fakeRaftClient{jailsResp: &internalpb.ListJailsResponse{Jails: []*internalpb.JailDefinition{j}}}
-		zfs, jm := newFakeDatasetManager(), newFakeJailManager()
-		zfs.existing[j.Id], jm.running[j.Id] = true, true
-		r := &Reconciler{Raft: raft, ZFS: zfs, Jail: jm, HAST: newFakeHASTManager(), LocalNodeID: "node-a"}
-		if err := r.RunOnce(context.Background()); err != nil {
-			t.Fatal(err)
-		}
-		if len(raft.applied)+len(zfs.created)+len(zfs.destroyed)+len(jm.created)+len(jm.destroyed) != 0 {
-			t.Fatal("protected jail caused lifecycle actions")
-		}
-		if !jm.running[j.Id] || !zfs.existing[j.Id] {
-			t.Fatal("protected resources changed")
-		}
-	}
-}
-
 func TestReconciler_RunOnce_DeletingJailTearsDownAndPurges(t *testing.T) {
 	raft := &fakeRaftClient{
 		jailsResp: &internalpb.ListJailsResponse{

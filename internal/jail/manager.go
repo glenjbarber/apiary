@@ -41,18 +41,9 @@ func New(prefix string) *Manager {
 	return &Manager{Prefix: prefix}
 }
 
-// IsProtected identifies a host-owned jail that Apiary must never manage.
-// This exclusion is explicit operator policy, independent of Prefix.
-func IsProtected(name string) bool {
-	return name == "timemachine"
-}
-
 // qualifiedName validates name and returns the full jail name
 // (Prefix+name) used with jail(8)/jls(8).
 func (m *Manager) qualifiedName(name string) (string, error) {
-	if IsProtected(name) || IsProtected(m.Prefix+name) {
-		return "", fmt.Errorf("jail: %q is protected and must not be managed by Apiary", name)
-	}
 	if name == "" {
 		return "", fmt.Errorf("jail: name must not be empty")
 	}
@@ -156,9 +147,6 @@ func (m *Manager) managedNames(out string) []string {
 		fields := parseKeyValues(strings.TrimSpace(line))
 		name, ok := fields["name"]
 		if !ok || !strings.HasPrefix(name, m.Prefix) {
-			continue
-		}
-		if IsProtected(name) || IsProtected(strings.TrimPrefix(name, m.Prefix)) {
 			continue
 		}
 		names = append(names, strings.TrimPrefix(name, m.Prefix))

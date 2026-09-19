@@ -80,13 +80,11 @@ func TestHandleWhyNotPage_CellDropdownIncludesVMsAndJails(t *testing.T) {
 		`<select name="cell_id" required title=`,
 		`VM web (vm-1) · node-a`,
 		`Jail worker (jail-1) · node-b`,
+		`Jail timemachine (timemachine) · node-a`,
 	} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("expected Why Not Cell dropdown to contain %q, got: %s", want, body)
 		}
-	}
-	if strings.Contains(body, "timemachine") {
-		t.Fatalf("protected jail timemachine must not be offered as a Why Not Cell choice, got: %s", body)
 	}
 }
 

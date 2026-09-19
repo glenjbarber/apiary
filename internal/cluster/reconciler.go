@@ -18,7 +18,6 @@ import (
 	"github.com/glenjbarber/apiary/internal/bhyve"
 	"github.com/glenjbarber/apiary/internal/cloudflare"
 	"github.com/glenjbarber/apiary/internal/dhcpd"
-	"github.com/glenjbarber/apiary/internal/jail"
 	"github.com/glenjbarber/apiary/internal/pf"
 )
 
@@ -609,11 +608,6 @@ func (r *Reconciler) RunOnce(ctx context.Context) (err error) {
 			return fmt.Errorf("cluster: listing jails: %s", jailsResp.GetError())
 		}
 		for _, j := range jailsResp.GetJails() {
-			// timemachine is explicitly outside Apiary's lifecycle, even
-			// if an old or mistaken replicated record names it.
-			if jail.IsProtected(j.GetId()) {
-				continue
-			}
 			desiredJails = append(desiredJails, JailPlacement{
 				ID:              j.GetId(),
 				Name:            j.GetName(),

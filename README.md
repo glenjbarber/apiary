@@ -202,10 +202,8 @@ each design decision, in order.
   visible phase error instead of silence, and still lets an owner
   finish an explicit delete (removing any running jail/dataset first)
   even with provisioning disabled — a nil lifecycle driver is never
-  treated as proof there's nothing to clean up. The protected
-  `timemachine` jail is excluded from every jail-planning, wrapper, and
-  factory-reset path as defense in depth beyond the normal `apiary-`
-  prefix boundary. The jail panel now polls a complete, role-aware
+  treated as proof there's nothing to clean up. The jail panel now polls a
+  complete, role-aware
   fragment every three seconds. See
   [ADR-0064](docs/adr/0064-disabled-jail-lifecycle.md).
 - **Resource reclaim** — a VM reassigned to a different node no longer
