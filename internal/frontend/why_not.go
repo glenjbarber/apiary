@@ -4,7 +4,6 @@ import (
 	"context"
 	"net/http"
 	"sort"
-	"strings"
 
 	rpcpb "github.com/glenjbarber/apiary/api/rpc"
 	"github.com/glenjbarber/apiary/internal/invariant"
@@ -142,9 +141,6 @@ func (s *Server) whyNotCellChoices(r *http.Request) []whyNotCellChoiceView {
 	}
 	if jails, errMsg := s.currentJails(r); errMsg == "" {
 		for _, jail := range jails {
-			if strings.EqualFold(jail.ID, "timemachine") || strings.EqualFold(jail.Name, "timemachine") {
-				continue
-			}
 			cells = append(cells, whyNotCellChoiceView{
 				ID:     jail.ID,
 				Name:   jail.Name,

@@ -708,10 +708,6 @@ func runReset(resetManaged, factoryReset, extraJails, extraDatasets, zfsBase, ja
 
 	if doFactory {
 		for _, name := range splitCommaList(extraJails) {
-			if jail.IsProtected(name) {
-				log.Printf("managerd: factory-reset: leaving protected jail %q untouched", name)
-				continue
-			}
 			log.Printf("managerd: factory-reset: removing extra jail %q", name)
 			if out, err := exec.CommandContext(ctx, "jail", "-r", name).CombinedOutput(); err != nil {
 				log.Printf("managerd: factory-reset: removing jail %q: %v: %s", name, err, out)

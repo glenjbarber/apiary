@@ -17,8 +17,9 @@ stored a tombstone for the owning reconciler, but that reconciler ignored
 the tombstone too. The existing disabled-jail test explicitly expected this
 silent behavior. In addition, the jail UI did not poll reconciliation state.
 
-The operator also explicitly requires that the host-owned `timemachine` jail
-always remain outside Apiary management.
+The former host-owned `timemachine` exception has since been retired because
+that jail no longer exists on the relevant host. This ADR's lifecycle rules
+remain applicable to ordinary managed jails.
 
 ## Decision
 
@@ -43,13 +44,6 @@ always remain outside Apiary management.
 - Keep stale-assignment reclamation and jail HAST provisioning gated off
   when provisioning is disabled. The newly available cleanup path is for
   explicit owner tombstones, not general garbage collection.
-- Exclude the protected `timemachine` ID before jail planning, including
-  primary, replica, reclaim, and tombstone paths. The jail wrapper also
-  rejects both the logical and qualified protected name before executing
-  host commands, and omits it from managed inventory. The factory-reset
-  extra-jail loop skips the exact protected jail name as well. This is
-  defense in depth beyond the normal `apiary-` prefix boundary. This does
-  not introduce a general storage-dependency or protected-dataset model.
 - Poll the complete jail panel every three seconds via a read-only,
   authenticated endpoint. Preserve role-specific action visibility. Drop
   polling requests while a deletion request is in flight; a delete may
