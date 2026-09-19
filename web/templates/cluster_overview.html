@@ -4,90 +4,133 @@
 {{template "head" .}}
 <body class="app-layout">
   {{template "nav" .}}
-  <main class="content" id="main-content">
-  {{template "page_header" (pageHeader "Colony overview" "Basic status for every known Comb - select one for detail.")}}
-  {{if .Error}}<div class="banner-error">{{.Error}}</div>{{end}}
+  <main class="content cockpit-page" id="main-content">
+    <style>
+      .cockpit-page { max-width: 1560px; }
+      .cockpit-header { align-items: flex-start; }
+      .cockpit-header .page-header-copy { min-width: 0; }
+      .cockpit-header .page-header-copy p { margin: .35rem 0 0; color: var(--muted); }
+      .cockpit-actions { display:flex; align-items:center; justify-content:flex-end; flex-wrap:wrap; gap:.55rem; }
+      .cockpit-actions .button { white-space:nowrap; }
+      .cockpit-summary { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); padding:0; overflow:hidden; }
+      .cockpit-stat { min-width:0; padding:1rem 1.1rem; border-right:1px solid var(--line); }
+      .cockpit-stat:last-child { border-right:0; }
+      .cockpit-stat-label { color:var(--muted); font-size:.76rem; text-transform:uppercase; letter-spacing:.06em; }
+      .cockpit-stat-value { margin-top:.25rem; font-size:1.35rem; font-weight:750; }
+      .cockpit-stat-note { margin-top:.2rem; color:var(--muted); font-size:.78rem; }
+      .cockpit-grid { display:grid; grid-template-columns:minmax(0,1.55fr) minmax(18rem,.85fr); gap:1rem; margin-top:1rem; }
+      .cockpit-grid > .panel { min-width:0; margin-top:0; }
+      .cockpit-panel-head { display:flex; align-items:center; justify-content:space-between; gap:.8rem; }
+      .cockpit-panel-head h2, .cockpit-panel-head h3 { margin:0; }
+      .cockpit-panel-head h2 { font-size:1.1rem; }
+      .cockpit-panel-head h3 { font-size:1rem; }
+      .cockpit-panel-head .muted { font-size:.78rem; }
+      .cockpit-node-table { margin-top:.8rem; }
+      .cockpit-node-table th, .cockpit-node-table td { padding:.6rem .55rem; }
+      .cockpit-node-table td:first-child { min-width:14rem; }
+      .cockpit-node-name { font-weight:700; overflow-wrap:anywhere; }
+      .cockpit-node-address { margin-top:.15rem; color:var(--muted); font-size:.78rem; }
+      .cockpit-node-actions { display:flex; flex-wrap:wrap; gap:.4rem; align-items:center; }
+      .cockpit-node-actions a { white-space:nowrap; }
+      .cockpit-warning { display:flex; align-items:flex-start; gap:.55rem; padding:.75rem; color:var(--danger); background:color-mix(in srgb, var(--danger) 13%, var(--panel)); border:1px solid color-mix(in srgb, var(--danger) 35%, var(--panel)); border-left-width:3px; border-radius:5px; }
+      .cockpit-warning strong { display:block; }
+      .cockpit-warning .muted { margin-top:.2rem; color:var(--muted); font-size:.82rem; }
+      .cockpit-warning-icon { font-size:1.1rem; line-height:1; }
+      .cockpit-action-list { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:.55rem; margin-top:.8rem; }
+      .cockpit-action-list .button { display:block; min-width:0; padding:.65rem .7rem; text-align:left; }
+      .cockpit-action-list strong { display:block; }
+      .cockpit-action-list small { display:block; margin-top:.15rem; color:var(--muted); font-size:.75rem; font-weight:400; }
+      .cockpit-resource-grid { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:.6rem; margin-top:.8rem; }
+      .cockpit-resource { display:block; padding:.75rem; color:var(--ink); background:var(--table-head); border:1px solid var(--line); border-radius:7px; text-decoration:none; }
+      .cockpit-resource:hover { background:var(--row-hover); }
+      .cockpit-resource strong { display:block; }
+      .cockpit-resource span { display:block; margin-top:.2rem; color:var(--muted); font-size:.77rem; }
+      .cockpit-activity { list-style:none; margin:.65rem 0 0; padding:0; }
+      .cockpit-activity li { display:flex; align-items:flex-start; gap:.6rem; padding:.65rem 0; border-bottom:1px solid var(--line); }
+      .cockpit-activity li:last-child { border-bottom:0; padding-bottom:0; }
+      .cockpit-activity-mark { color:var(--success); font-size:.9rem; }
+      .cockpit-activity-time { margin-left:auto; color:var(--muted); font-size:.75rem; white-space:nowrap; }
+      .cockpit-join { margin-top:1rem; }
+      .cockpit-join table { margin-top:.8rem; }
+      .cockpit-join h2 { font-size:1.1rem; }
+      .cockpit-join p { margin:.4rem 0 0; }
+      @media (max-width:1000px) {
+        .cockpit-summary { grid-template-columns:repeat(2,minmax(0,1fr)); }
+        .cockpit-stat:nth-child(2) { border-right:0; }
+        .cockpit-stat:nth-child(-n+2) { border-bottom:1px solid var(--line); }
+        .cockpit-grid { grid-template-columns:1fr; }
+        .cockpit-grid > .panel { margin-top:0; }
+      }
+      @media (max-width:620px) {
+        .cockpit-header { display:block; }
+        .cockpit-actions { justify-content:flex-start; margin-top:.8rem; }
+        .cockpit-summary { grid-template-columns:1fr; }
+        .cockpit-stat { border-right:0; border-bottom:1px solid var(--line); }
+        .cockpit-stat:last-child { border-bottom:0; }
+        .cockpit-action-list, .cockpit-resource-grid { grid-template-columns:1fr; }
+        .cockpit-node-table { min-width:62rem; }
+      }
+    </style>
 
-  <div class="panel" style="margin-top:1rem"><table>
-    <thead>
-      <tr><th>Comb</th><th>Status</th><th>Health</th><th>CPU load (1m)</th><th>Memory used</th><th>ZFS pools</th><th>Packet filter</th><th></th></tr>
-    </thead>
-    <tbody>
-      {{range .ClusterNodes}}
-      <tr>
-        <td>{{.NodeID}}</td>
-        {{if .Reachable}}
-        <td><span class="badge ready">Reachable</span></td>
-        {{else}}
-        <td><span class="badge error" title="{{.Error}}">Unreachable</span></td>
-        {{end}}
-        <td>
-          <span class="badge {{.HealthStatus}}" title="{{.HealthExplanation}}">{{.HealthStatus}}</span>
-          {{if .HealthObservations}}
-          <details style="margin-top:.35rem">
-            <summary class="muted" style="cursor:pointer">Evidence</summary>
-            <ul style="margin:.35rem 0 0; padding-left:1.1rem; font-size:.82rem;">
-              {{range .HealthObservations}}
-              <li><strong>{{.Source}}</strong>: {{.Value}} - {{.Detail}}</li>
-              {{end}}
-            </ul>
-          </details>
-          {{end}}
-        </td>
-        {{if .Reachable}}
-        <td>{{printf "%.2f" .LoadAvg1}}</td>
-        <td>{{printf "%.1f" .MemUsedPct}}%</td>
-        <td><span class="badge {{if .PoolsOK}}ready{{else}}error{{end}}">{{if .PoolsOK}}Healthy{{else}}Degraded{{end}}</span></td>
-        <td><span class="badge {{if .PFEnabled}}ready{{else}}error{{end}}">{{if .PFEnabled}}Enabled{{else}}Disabled{{end}}</span></td>
-        {{else}}
-        <td colspan="4" class="muted">{{.Error}}</td>
-        {{end}}
-        <td><a href="/host/{{.NodeID}}">View</a></td>
-      </tr>
-      {{else}}
-      <tr><td colspan="8"><em>No known Combs</em></td></tr>
-      {{end}}
-    </tbody>
-  </table></div>
+    <div class="page-header cockpit-header">
+      <div class="page-header-copy">
+        <h2>Command center</h2>
+        <p>Current state, safe next actions, and the evidence behind every answer.</p>
+      </div>
+      <div class="cockpit-actions">
+        <a class="button secondary" href="/simulate">Failure preview</a>
+        <a class="button secondary" href="/why-not">Why not?</a>
+        {{if .CanOperate}}<a class="button" href="/vms/new">Create resource</a>{{end}}
+      </div>
+    </div>
 
-  {{if .CanAdmin}}
-  <div class="panel" style="margin-top:1rem">
-    <h3>Pending join requests</h3>
-    <p class="muted">A Comb requesting to join this Colony (ADR-0083). Compare the code below against the one shown on that Comb's own Machine page before approving - it's a human-correlation check, not a secret.</p>
-    <table>
-      <thead><tr><th>Node ID</th><th>Raft-bind address</th><th>Code</th><th>Requested</th><th></th></tr></thead>
-      <tbody>
-        {{range .JoinRequests}}
-        <tr>
-          <td>{{.NodeID}}</td>
-          <td>{{.RaftBindAddress}}</td>
-          <td><strong style="font-size:1.2em; letter-spacing:0.1em;">{{.Code}}</strong></td>
-          <td>{{.RequestedAt}}</td>
-          <td>
-            <form method="post" action="/join-requests/{{.RequestID}}/preflight" style="display:inline">
-              <button type="submit">Check reachability</button>
-            </form>
-            <form method="post" action="/join-requests/{{.RequestID}}/approve" style="display:inline">
-              <button type="submit">Approve</button>
-            </form>
-            <form method="post" action="/join-requests/{{.RequestID}}/reject" style="display:inline">
-              <button type="submit" class="danger">Reject</button>
-            </form>
-            <form method="post" action="/join-requests/{{.RequestID}}/purge" style="display:inline" onsubmit="return confirm('Delete this pending request outright? Unlike Reject, this removes it completely - the requesting Comb\'s own status poll will show it as not found instead of a resolved outcome.')">
-              <button type="submit" class="danger">Delete</button>
-            </form>
-            {{if eq $.JoinRequestPreflightID .RequestID}}
-            <p class="muted">Reachability check: <strong>{{$.JoinRequestPreflightVerdict}}</strong>{{if $.JoinRequestPreflightDetail}} - {{$.JoinRequestPreflightDetail}}{{end}}. This is a preview only - it does not gate or disable Approve above.</p>
-            {{end}}
-          </td>
-        </tr>
-        {{else}}
-        <tr><td colspan="5"><em>No pending requests</em></td></tr>
-        {{end}}
-      </tbody>
-    </table>
-  </div>
-  {{end}}
+    {{if .Error}}<div class="banner-error">{{.Error}}</div>{{end}}
+
+    <section class="panel cockpit-summary" aria-label="Control plane summary">
+      <div class="cockpit-stat"><div class="cockpit-stat-label">Known Combs</div><div class="cockpit-stat-value">{{len .ClusterNodes}}</div><div class="cockpit-stat-note">Raft membership observed</div></div>
+      <div class="cockpit-stat"><div class="cockpit-stat-label">Control plane</div><div class="cockpit-stat-value"><span class="badge ready">Evidence-backed</span></div><div class="cockpit-stat-note">Health is computed from live signals</div></div>
+      <div class="cockpit-stat"><div class="cockpit-stat-label">Action safety</div><div class="cockpit-stat-value">Preflight</div><div class="cockpit-stat-note">Inspect impact before changing state</div></div>
+      <div class="cockpit-stat"><div class="cockpit-stat-label">Attention</div><div class="cockpit-stat-value">Review</div><div class="cockpit-stat-note">Use Why Not and Simulations before risky actions</div></div>
+    </section>
+
+    <div class="cockpit-grid">
+      <section class="panel">
+        <div class="cockpit-panel-head"><h2>Control-plane map</h2><a href="/trace">Trace a path</a></div>
+        <p class="muted">Every Comb is shown with reachability, health, host evidence, and a direct path to detail.</p>
+        <div class="table-scroll"><table class="cockpit-node-table"><thead><tr><th>Comb</th><th>Reachability</th><th>Health</th><th>Host evidence</th><th>Actions</th></tr></thead><tbody>
+          {{range .ClusterNodes}}
+          <tr>
+            <td><div class="cockpit-node-name">{{.NodeID}}</div><div class="cockpit-node-address">managerd :17700</div></td>
+            {{if .Reachable}}<td><span class="badge ready">Reachable</span></td>{{else}}<td><span class="badge error" title="{{.Error}}">Unreachable</span></td>{{end}}
+            <td><span class="badge {{.HealthStatus}}" title="{{.HealthExplanation}}">{{.HealthStatus}}</span>{{if .HealthObservations}}<details style="margin-top:.35rem"><summary class="muted" style="cursor:pointer">Evidence</summary><ul style="margin:.35rem 0 0; padding-left:1.1rem; font-size:.82rem;">{{range .HealthObservations}}<li><strong>{{.Source}}</strong>: {{.Value}} - {{.Detail}}</li>{{end}}</ul></details>{{end}}</td>
+            {{if .Reachable}}<td><span class="badge {{if .PoolsOK}}ready{{else}}error{{end}}">ZFS {{if .PoolsOK}}healthy{{else}}degraded{{end}}</span><br><span class="badge {{if .PFEnabled}}ready{{else}}error{{end}}">PF {{if .PFEnabled}}enabled{{else}}disabled{{end}}</span></td>{{else}}<td class="muted">{{.Error}}</td>{{end}}
+            <td><div class="cockpit-node-actions"><a href="/host/{{.NodeID}}">Details</a><a href="/why-not?node_id={{.NodeID}}">Why not?</a></div></td>
+          </tr>
+          {{else}}<tr><td colspan="5"><em>No known Combs</em></td></tr>{{end}}
+        </tbody></table></div>
+      </section>
+
+      <section class="panel">
+        <div class="cockpit-panel-head"><h2>Next safe actions</h2><span class="muted">operator tools</span></div>
+        <div class="cockpit-warning"><span class="cockpit-warning-icon" aria-hidden="true">!</span><div><strong>Check impact before changing state</strong><div class="muted">Failure preview and Why Not are read-only. Use them before reboot, migration, or teardown.</div></div></div>
+        <div class="cockpit-action-list">
+          <a class="button secondary" href="/simulate"><strong>Run simulation</strong><small>Preview failure and recovery impact</small></a>
+          <a class="button secondary" href="/why-not"><strong>Ask Why Not?</strong><small>Get the smallest blocker set</small></a>
+          <a class="button secondary" href="/recovery-handbook"><strong>Open recovery</strong><small>Use the offline-safe handbook</small></a>
+          <a class="button secondary" href="/assumptions"><strong>Review evidence</strong><small>Inspect current assumptions</small></a>
+        </div>
+      </section>
+
+      <section class="panel"><div class="cockpit-panel-head"><h2>Resources in scope</h2><a href="/vms">Open explorer</a></div><p class="muted">Jump directly into the inventory that the control plane reconciles.</p><div class="cockpit-resource-grid"><a class="cockpit-resource" href="/vms"><strong>Virtual machines</strong><span>Placement, lifecycle, console, and snapshots</span></a><a class="cockpit-resource" href="/jails"><strong>Jails</strong><span>Owner, replica, root filesystem, and lifecycle</span></a><a class="cockpit-resource" href="/networks"><strong>Networks</strong><span>VLAN, bridge, DHCP, DNS, NAT, and PF</span></a><a class="cockpit-resource" href="/images"><strong>Images</strong><span>ISO inventory and availability evidence</span></a></div></section>
+
+      <section class="panel"><div class="cockpit-panel-head"><h2>Control-plane workflow</h2><a href="/invariants">Evidence model</a></div><ul class="cockpit-activity"><li><span class="cockpit-activity-mark" aria-hidden="true">1</span><div><strong>Observe</strong><div class="muted">Read current reachability, health, host, and resource evidence.</div></div></li><li><span class="cockpit-activity-mark" aria-hidden="true">2</span><div><strong>Preflight</strong><div class="muted">Use Failure preview or Why Not before a disruptive action.</div></div></li><li><span class="cockpit-activity-mark" aria-hidden="true">3</span><div><strong>Act</strong><div class="muted">Open the resource page only after the impact is understood.</div></div></li></ul></section>
+    </div>
+
+    {{if .CanAdmin}}
+    <section class="panel cockpit-join"><div class="cockpit-panel-head"><h2>Pending join requests</h2><span class="muted">membership changes require explicit approval</span></div><p class="muted">Compare each request code against the requesting Comb's own Machine page before approving.</p><div class="table-scroll"><table><thead><tr><th>Node ID</th><th>Raft-bind address</th><th>Code</th><th>Requested</th><th></th></tr></thead><tbody>
+      {{range .JoinRequests}}<tr><td>{{.NodeID}}</td><td>{{.RaftBindAddress}}</td><td><strong style="font-size:1.2em; letter-spacing:.1em;">{{.Code}}</strong></td><td>{{.RequestedAt}}</td><td><form method="post" action="/join-requests/{{.RequestID}}/preflight" style="display:inline"><button type="submit">Check reachability</button></form> <form method="post" action="/join-requests/{{.RequestID}}/approve" style="display:inline"><button type="submit">Approve</button></form> <form method="post" action="/join-requests/{{.RequestID}}/reject" style="display:inline"><button type="submit" class="danger">Reject</button></form> <form method="post" action="/join-requests/{{.RequestID}}/purge" style="display:inline" onsubmit="return confirm('Delete this pending request outright? Unlike Reject, this removes it completely - the requesting Comb\'s own status poll will show it as not found instead of a resolved outcome.')"><button type="submit" class="danger">Delete</button></form>{{if eq $.JoinRequestPreflightID .RequestID}}<p class="muted">Reachability check: <strong>{{$.JoinRequestPreflightVerdict}}</strong>{{if $.JoinRequestPreflightDetail}} - {{$.JoinRequestPreflightDetail}}{{end}}. This is a preview only - it does not gate or disable Approve above.</p>{{end}}</td></tr>{{else}}<tr><td colspan="5"><em>No pending requests</em></td></tr>{{end}}
+    </tbody></table></div></section>
+    {{end}}
   </main>
   {{template "footer" .}}
 </body>
