@@ -283,6 +283,39 @@ func TestHandleClusterOverviewPage_LocalNodeNoSecondStatusDial(t *testing.T) {
 	if !strings.Contains(rec.Body.String(), `class="badge healthy"`) {
 		t.Errorf("expected the local node's health to be healthy, got: %s", rec.Body.String())
 	}
+	if !strings.Contains(rec.Body.String(), `href="/host/apiarium/evidence"`) {
+		t.Errorf("expected the overview health state to link to dedicated evidence, got: %s", rec.Body.String())
+	}
+}
+
+func TestServer_ClusterEvidencePage_RendersDedicatedEvidence(t *testing.T) {
+	client := &fakeClient{
+		statusResp: &rpcpb.StatusResponse{
+			ManagerNodeId: "apiarium",
+			KnownNodeIds:  []string{"apiarium"},
+			RaftReachable: true,
+			Members:       []*rpcpb.RaftMember{{NodeId: "apiarium", Suffrage: "Voter"}},
+		},
+		hostStatsResp: &rpcpb.HostStatsResponse{NodeId: "apiarium"},
+	}
+	s, err := NewServer(client, nil, nil, &fakePeerHostStatsClient{}, ".apiary.work", "17700", nil, false)
+	if err != nil {
+		t.Fatalf("NewServer() error: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/host/apiarium/evidence", nil)
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body: %s", rec.Code, rec.Body.String())
+	}
+	body := rec.Body.String()
+	for _, want := range []string{"Comb evidence", "Observed signals", "Health verdict", "raft_membership"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("dedicated evidence page missing %q, got: %s", want, body)
+		}
+	}
 }
 
 func TestServer_HostPage_FetchesFromPeerWhenNotLocal(t *testing.T) {

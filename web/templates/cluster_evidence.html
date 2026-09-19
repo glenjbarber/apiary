@@ -1,0 +1,55 @@
+{{define "cluster_evidence_page"}}
+<!DOCTYPE html>
+<html lang="en">
+{{template "head" .}}
+<body class="app-layout">
+  {{template "nav" .}}
+  <main class="content" id="main-content">
+    {{template "page_header" (pageHeader "Comb evidence" (nodeSubtitle .EvidenceNode.NodeID) "<a href='/'>Back to command center</a>")}}
+    <p class="muted">Fresh observations gathered for this Comb and the health verdict derived from them. This page is read-only.</p>
+
+    <section class="panel" style="margin-top:1rem">
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:1rem;flex-wrap:wrap">
+        <div>
+          <div class="muted">Health verdict</div>
+          <h3 style="margin:.35rem 0"><span class="badge {{.EvidenceNode.HealthStatus}}">{{.EvidenceNode.HealthStatus}}</span></h3>
+          <div>{{.EvidenceNode.HealthExplanation}}</div>
+        </div>
+        <div class="actions">
+          <a class="button secondary" href="/host/{{.EvidenceNode.NodeID}}">Host details</a>
+          <a class="button secondary" href="/why-not?node_id={{.EvidenceNode.NodeID}}">Why not?</a>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h3>Observed signals</h3>
+      <table>
+        <thead><tr><th>Source</th><th>Value</th><th>Detail</th><th>Observed</th></tr></thead>
+        <tbody>
+          {{range .EvidenceNode.HealthObservations}}
+          <tr><td><strong>{{.Source}}</strong></td><td>{{.Value}}</td><td>{{.Detail}}</td><td>{{.ObservedAt.Format "2006-01-02 15:04:05 MST"}}</td></tr>
+          {{else}}<tr><td colspan="4"><em>No health observations were returned.</em></td></tr>{{end}}
+        </tbody>
+      </table>
+    </section>
+
+    <section class="panel">
+      <h3>Host evidence</h3>
+      {{if .EvidenceNode.Reachable}}
+      <table>
+        <tbody>
+          <tr><th>Manager reachability</th><td><span class="badge ready">Reachable</span></td></tr>
+          <tr><th>ZFS pools</th><td><span class="badge {{if .EvidenceNode.PoolsOK}}ready{{else}}error{{end}}">{{if .EvidenceNode.PoolsOK}}healthy{{else}}degraded{{end}}</span></td></tr>
+          <tr><th>Packet filter</th><td><span class="badge {{if .EvidenceNode.PFEnabled}}ready{{else}}error{{end}}">{{if .EvidenceNode.PFEnabled}}enabled{{else}}disabled{{end}}</span></td></tr>
+        </tbody>
+      </table>
+      {{else}}
+      <p class="error">Manager reachability failed: {{.EvidenceNode.Error}}</p>
+      {{end}}
+    </section>
+  </main>
+  {{template "footer" .}}
+</body>
+</html>
+{{end}}

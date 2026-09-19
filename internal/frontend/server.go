@@ -106,6 +106,10 @@ type pageData struct {
 	// default landing page ("/").
 	ClusterNodes []clusterNodeView
 
+	// EvidenceNode is the selected node's evidence-backed summary for the
+	// dedicated per-node evidence page ("/host/{id}/evidence").
+	EvidenceNode clusterNodeView
+
 	// JoinRequests is the default landing page's Admin-only "Pending
 	// join requests" panel (ADR-0083) - nil (rather than an error) for
 	// a non-Admin session, since ListJoinRequests itself is Admin-gated
@@ -771,6 +775,7 @@ func (s *Server) routes() {
 	// Viewer: every read-only page/route.
 	s.mux.HandleFunc("GET /{$}", s.handleClusterOverviewPage)
 	s.mux.HandleFunc("GET /host/{id}", s.handleHostPage)
+	s.mux.HandleFunc("GET /host/{id}/evidence", s.handleClusterEvidencePage)
 	s.mux.HandleFunc("GET /vms", s.handleVMsPage)
 	s.mux.HandleFunc("GET /vms/rows", s.handleListVMs)
 	s.mux.HandleFunc("GET /vms/{id}", s.handleVMPage)

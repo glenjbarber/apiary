@@ -102,7 +102,7 @@
           <tr>
             <td><div class="cockpit-node-name">{{.NodeID}}</div><div class="cockpit-node-address">managerd :17700</div></td>
             {{if .Reachable}}<td><span class="badge ready">Reachable</span></td>{{else}}<td><span class="badge error" title="{{.Error}}">Unreachable</span></td>{{end}}
-            <td><span class="badge {{.HealthStatus}}" title="{{.HealthExplanation}}">{{.HealthStatus}}</span>{{if .HealthObservations}}<details style="margin-top:.35rem"><summary class="muted" style="cursor:pointer">Evidence</summary><ul style="margin:.35rem 0 0; padding-left:1.1rem; font-size:.82rem;">{{range .HealthObservations}}<li><strong>{{.Source}}</strong>: {{.Value}} - {{.Detail}}</li>{{end}}</ul></details>{{end}}</td>
+            <td><a class="badge {{.HealthStatus}}" href="/host/{{.NodeID}}/evidence" title="{{.HealthExplanation}}">{{.HealthStatus}}</a><br><a class="muted cockpit-evidence-link" href="/host/{{.NodeID}}/evidence">Evidence</a></td>
             {{if .Reachable}}<td><span class="badge {{if .PoolsOK}}ready{{else}}error{{end}}">ZFS {{if .PoolsOK}}healthy{{else}}degraded{{end}}</span><br><span class="badge {{if .PFEnabled}}ready{{else}}error{{end}}">PF {{if .PFEnabled}}enabled{{else}}disabled{{end}}</span></td>{{else}}<td class="muted">{{.Error}}</td>{{end}}
             <td><div class="cockpit-node-actions"><a href="/host/{{.NodeID}}">Details</a><a href="/why-not?node_id={{.NodeID}}">Why not?</a></div></td>
           </tr>

@@ -244,6 +244,30 @@ func (s *Server) nodeHealthSignals(ctx context.Context, nodeID, localNodeID stri
 	return sig
 }
 
+// clusterNodeEvidence gathers the same host and Evidence-Aware Health facts
+// used by the overview row, for a single node. Keeping this calculation in
+// one place prevents the overview and the dedicated evidence page from
+// presenting different answers for the same request.
+func (s *Server) clusterNodeEvidence(ctx context.Context, nodeID, localNodeID string, anchor *rpcpb.StatusResponse) clusterNodeView {
+	now := time.Now()
+	hostStats, hostStatsErr := s.fetchHostStats(ctx, nodeID, localNodeID)
+	var stats statsView
+	var errMsg string
+	if hostStatsErr != nil {
+		errMsg = hostStatsErr.Error()
+	} else {
+		stats = fromRPCStats(hostStats)
+	}
+	node := summarizeClusterNode(nodeID, stats, errMsg)
+
+	signals := s.nodeHealthSignals(ctx, nodeID, localNodeID, anchor, hostStats, hostStatsErr, now)
+	result := health.ComputeNodeHealth(signals, now)
+	node.HealthStatus = result.Status
+	node.HealthExplanation = result.Explanation
+	node.HealthObservations = result.Observations
+	return node
+}
+
 // handleClusterOverviewPage serves the default landing page ("/"): a
 // basic-status row per known cluster node, fetched concurrently since
 // one unreachable node shouldn't hold up every other node's row. Each
@@ -269,24 +293,7 @@ func (s *Server) handleClusterOverviewPage(w http.ResponseWriter, r *http.Reques
 		wg.Add(1)
 		go func(i int, id string) {
 			defer wg.Done()
-			now := time.Now()
-			hostStats, hostStatsErr := s.fetchHostStats(r.Context(), id, localNodeID)
-			var stats statsView
-			var errMsg string
-			if hostStatsErr != nil {
-				errMsg = hostStatsErr.Error()
-			} else {
-				stats = fromRPCStats(hostStats)
-			}
-			node := summarizeClusterNode(id, stats, errMsg)
-
-			signals := s.nodeHealthSignals(r.Context(), id, localNodeID, statusResp, hostStats, hostStatsErr, now)
-			result := health.ComputeNodeHealth(signals, now)
-			node.HealthStatus = result.Status
-			node.HealthExplanation = result.Explanation
-			node.HealthObservations = result.Observations
-
-			nodes[i] = node
+			nodes[i] = s.clusterNodeEvidence(r.Context(), id, localNodeID, statusResp)
 		}(i, id)
 	}
 	wg.Wait()
@@ -300,6 +307,29 @@ func (s *Server) handleClusterOverviewPage(w http.ResponseWriter, r *http.Reques
 		JoinRequestPreflightID:      r.URL.Query().Get("preflight_request_id"),
 		JoinRequestPreflightVerdict: r.URL.Query().Get("preflight_verdict"),
 		JoinRequestPreflightDetail:  r.URL.Query().Get("preflight_detail"),
+	}))
+}
+
+// handleClusterEvidencePage serves the evidence-backed health details for
+// one known Comb ("/host/{id}/evidence"). It reuses the same fresh facts and
+// verdict calculation as the overview page, but gives the operator a stable
+// page to inspect and link to directly.
+func (s *Server) handleClusterEvidencePage(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	statusResp, err := s.client.Status(r.Context(), &rpcpb.StatusRequest{})
+	if err != nil {
+		http.Error(w, "could not verify current Colony membership", http.StatusServiceUnavailable)
+		return
+	}
+	if !knownColonyMember(statusResp, id) {
+		http.NotFound(w, r)
+		return
+	}
+
+	node := s.clusterNodeEvidence(r.Context(), id, statusResp.GetManagerNodeId(), statusResp)
+	s.render(w, "cluster_evidence_page", s.withAuthFields(r, pageData{
+		EvidenceNode: node,
+		ActivePage:   "stats",
 	}))
 }
 
