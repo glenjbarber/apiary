@@ -111,6 +111,26 @@
     .sidebar-tree { margin:.1rem 0 0 .9rem; padding-left:.75rem; border-left:1px solid #42484a; }
     .sidebar-tree-label { padding:.32rem .55rem; color:var(--sidebar-muted); font-size:.78rem; }
     .sidebar-link.cell-type { margin-left:.45rem; }
+    /* Live per-Comb resource tree (GET /nav/tree) - a collapsible
+       section per known Comb listing its own VMs/jails with a small
+       status dot, reusing the same badge color meanings as every list/
+       detail page (see .badge rules) rather than a second palette. */
+    #sidebar-resource-tree { margin-top:.35rem; }
+    .sidebar-comb { margin-top:.15rem; }
+    .sidebar-comb > summary { display:flex; align-items:center; gap:.4rem; padding:.4rem .7rem; border-radius:7px; color:var(--sidebar-muted); font-size:.78rem; font-weight:750; letter-spacing:.02em; list-style:none; cursor:pointer; }
+    .sidebar-comb > summary::-webkit-details-marker { display:none; }
+    .sidebar-comb > summary::before { content:"\25B8"; display:inline-block; font-size:.65rem; transition:transform .12s ease; }
+    .sidebar-comb[open] > summary::before { transform:rotate(90deg); }
+    .sidebar-comb > summary:hover { color:var(--sidebar-ink); background:#272d2f; }
+    .sidebar-comb-items { margin:.05rem 0 .3rem .9rem; padding-left:.75rem; border-left:1px solid #42484a; }
+    .sidebar-cell-link { display:flex; align-items:center; gap:.5rem; padding:.34rem .55rem; border-radius:6px; color:var(--sidebar-ink); font-size:.83rem; text-decoration:none; overflow-wrap:anywhere; }
+    .sidebar-cell-link:hover { color:#fff; background:#272d2f; }
+    .sidebar-cell-dot { flex:none; width:.5rem; height:.5rem; border-radius:50%; }
+    .sidebar-cell-dot.dot-ready { background:var(--success); }
+    .sidebar-cell-dot.dot-error { background:var(--danger); }
+    .sidebar-cell-dot.dot-creating { background:var(--yellow); }
+    .sidebar-cell-dot.dot-stopped, .sidebar-cell-dot.dot-unknown { background:var(--sidebar-muted); }
+    .sidebar-cell-empty, .sidebar-tree-empty, .sidebar-tree-loading, .sidebar-tree-error { padding:.3rem .7rem; color:var(--sidebar-muted); font-size:.78rem; }
     .content { grid-column:2; grid-row:2; min-width:0; width:100%; max-width:1500px; padding:2rem clamp(1rem, 2.5vw, 2.5rem) 3rem; }
     .app-footer { grid-column:2; grid-row:3; padding:1rem clamp(1rem, 2.5vw, 2.5rem) 1.5rem; color:var(--muted); font-size:.78rem; border-top:1px solid var(--line); }
     h1 { font-size:1.6rem; margin:0; letter-spacing:-.03em; }
@@ -284,6 +304,9 @@
         <a class="sidebar-link cell-type{{if eq .ActivePage "vms"}} active{{end}}" href="/vms"{{if eq .ActivePage "vms"}} aria-current="page"{{end}}>Virtual machines</a>
         <a class="sidebar-link cell-type{{if eq .ActivePage "jails"}} active{{end}}" href="/jails"{{if eq .ActivePage "jails"}} aria-current="page"{{end}}>Jails</a>
       </div>
+      <div id="sidebar-resource-tree" hx-get="/nav/tree" hx-trigger="load, every 30s" hx-swap="innerHTML">
+        <div class="sidebar-tree-loading muted">Loading Combs&hellip;</div>
+      </div>
     </section>
     <section class="sidebar-section" aria-labelledby="nav-network">
       <h2 class="sidebar-heading" id="nav-network">Network</h2>
@@ -306,6 +329,25 @@
     </section>
   </nav>
 </aside>
+{{end}}
+
+{{/* sidebar_tree renders the sidebar's live per-Comb resource tree
+     fragment - served standalone by GET /nav/tree (sidebar_tree.go) and
+     swapped into #sidebar-resource-tree by the htmx attributes on that
+     container in the "nav" define above. Never rendered as part of a
+     full page - only ever this fragment's own response. */}}
+{{define "sidebar_tree"}}
+{{if .SidebarTreeError}}<div class="sidebar-tree-error">{{.SidebarTreeError}}</div>{{end}}
+{{range .SidebarTreeNodes}}
+<details class="sidebar-comb" open>
+  <summary>{{.NodeID}}</summary>
+  <div class="sidebar-comb-items">
+    {{range .Items}}<a class="sidebar-cell-link" href="/{{if eq .Kind "vm"}}vms{{else}}jails{{end}}/{{.ID}}"><span class="sidebar-cell-dot dot-{{.DotClass}}" aria-hidden="true"></span>{{.Name}}</a>{{else}}<div class="sidebar-cell-empty">No Cells</div>{{end}}
+  </div>
+</details>
+{{else}}
+{{if not .SidebarTreeError}}<div class="sidebar-tree-empty">No known Combs</div>{{end}}
+{{end}}
 {{end}}
 
 {{define "footer"}}
