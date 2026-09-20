@@ -234,6 +234,11 @@ var requiredRole = map[string]Role{
 	"/apiary.rpc.v1.ManagerService/RejectJoinRequest":  RoleAdmin,
 	"/apiary.rpc.v1.ManagerService/PurgeJoinRequest":   RoleAdmin,
 
+	// UpdateVoterAddress (ADR-0106) also calls AddVoter against this
+	// node's own raft cluster - the same materially-bigger-consequence
+	// reasoning as ApproveJoinRequest above, same tier.
+	"/apiary.rpc.v1.ManagerService/UpdateVoterAddress": RoleAdmin,
+
 	// PreflightApproveJoinRequest (ADR-0103) previews ApproveJoinRequest's
 	// own reachability gate - Admin-tier, matching ApproveJoinRequest
 	// itself exactly, since it makes managerd dial a caller-selected

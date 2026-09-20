@@ -1487,6 +1487,97 @@ func TestIntegration_ApproveJoinRequest_AddsRealRaftVoter(t *testing.T) {
 	}
 }
 
+// TestIntegration_RequestJoinColony_DuplicateNodeIDRejected is
+// ADR-0106's own regression test: a node_id that already names the
+// bootstrap voter ("raftd-1", per newRaftdUDSSocket) must be refused
+// outright, with no PendingJoinRequest created - confirmed by then
+// approving nothing and checking ListJoinRequests stays empty, not just
+// checking the immediate response.
+func TestIntegration_RequestJoinColony_DuplicateNodeIDRejected(t *testing.T) {
+	raftdSocket := newRaftdUDSSocket(t)
+	client := newManagerdRPCClient(t, raftdSocket)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	resp, err := client.RequestJoinColony(ctx, &rpcpb.RequestJoinColonyRequest{NodeId: "raftd-1", RaftBindAddress: "127.0.0.1:1"})
+	if err != nil {
+		t.Fatalf("RequestJoinColony() error: %v", err)
+	}
+	if resp.GetError() == "" {
+		t.Fatal("RequestJoinColony() error = empty, want a rejection for a node_id that is already a voter")
+	}
+	if resp.GetRequestId() != "" {
+		t.Errorf("RequestId = %q, want empty - no PendingJoinRequest should be created", resp.GetRequestId())
+	}
+
+	listResp, err := client.ListJoinRequests(ctx, &rpcpb.ListJoinRequestsRequest{})
+	if err != nil {
+		t.Fatalf("ListJoinRequests() error: %v", err)
+	}
+	if len(listResp.GetRequests()) != 0 {
+		t.Errorf("ListJoinRequests() = %+v, want none - the rejected call must not have recorded anything", listResp.GetRequests())
+	}
+}
+
+// TestIntegration_ApproveJoinRequest_DuplicateNodeIDRejected exercises
+// the ApproveJoinRequest-level guard specifically (not the
+// RequestJoinColony-level one above): two requests for the same
+// node_id are both created while node02 is not yet a voter (allowed -
+// RequestJoinColony only checks against CURRENT voters, not other
+// pending requests), the first is approved, and the second - now
+// referencing a node_id that became a voter in the meantime - must be
+// refused rather than silently re-pointing node02's address via
+// AddVoter's own update-in-place behavior.
+func TestIntegration_ApproveJoinRequest_DuplicateNodeIDRejected(t *testing.T) {
+	raftdSocket := newRaftdUDSSocket(t)
+	client := newManagerdRPCClient(t, raftdSocket)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	// Both node02 instances must be genuinely reachable (real raftnode.New
+	// listeners) - reqB's own address must pass ApproveJoinRequest's
+	// existing reachability guardrail (ADR-0097) cleanly, so the refusal
+	// this test expects is unambiguously the new duplicate-voter check,
+	// not a reachability failure wearing the same "refused" shape.
+	nodeAAddr := freeLoopbackAddr(t)
+	nodeA, err := raftnode.New(raftnode.Config{NodeID: "node02", DataDir: t.TempDir(), BindAddr: nodeAAddr})
+	if err != nil {
+		t.Fatalf("raftnode.New(node02 A) error: %v", err)
+	}
+	t.Cleanup(func() { nodeA.Shutdown() })
+
+	nodeBAddr := freeLoopbackAddr(t)
+	nodeB, err := raftnode.New(raftnode.Config{NodeID: "node02", DataDir: t.TempDir(), BindAddr: nodeBAddr})
+	if err != nil {
+		t.Fatalf("raftnode.New(node02 B) error: %v", err)
+	}
+	t.Cleanup(func() { nodeB.Shutdown() })
+
+	reqA, err := client.RequestJoinColony(ctx, &rpcpb.RequestJoinColonyRequest{NodeId: "node02", RaftBindAddress: nodeAAddr})
+	if err != nil || reqA.GetError() != "" {
+		t.Fatalf("RequestJoinColony(A) = (%+v, %v)", reqA, err)
+	}
+	reqB, err := client.RequestJoinColony(ctx, &rpcpb.RequestJoinColonyRequest{NodeId: "node02", RaftBindAddress: nodeBAddr})
+	if err != nil || reqB.GetError() != "" {
+		t.Fatalf("RequestJoinColony(B) = (%+v, %v) - a second pending request for a node_id that is not YET a voter must be allowed", reqB, err)
+	}
+
+	approveA, err := client.ApproveJoinRequest(ctx, &rpcpb.ApproveJoinRequestRequest{RequestId: reqA.GetRequestId()})
+	if err != nil || approveA.GetError() != "" {
+		t.Fatalf("ApproveJoinRequest(A) = (%+v, %v)", approveA, err)
+	}
+
+	approveB, err := client.ApproveJoinRequest(ctx, &rpcpb.ApproveJoinRequestRequest{RequestId: reqB.GetRequestId()})
+	if err != nil {
+		t.Fatalf("ApproveJoinRequest(B) error: %v", err)
+	}
+	if approveB.GetError() == "" {
+		t.Fatal("ApproveJoinRequest(B) error = empty, want a refusal - node02 became a voter via request A in the meantime")
+	}
+}
+
 func TestIntegration_ApproveJoinRequest_MissingIsError(t *testing.T) {
 	raftdSocket := newRaftdUDSSocket(t)
 	client := newManagerdRPCClient(t, raftdSocket)
@@ -1580,6 +1671,171 @@ func TestIntegration_ApproveJoinRequest_ReachableNodeStillWorks(t *testing.T) {
 	}
 	if approveResp.GetError() != "" {
 		t.Fatalf("ApproveJoinRequest() returned error: %s", approveResp.GetError())
+	}
+}
+
+// TestIntegration_UpdateVoterAddress_UpdatesRealRaftVoterAddress is
+// ADR-0106's own regression test: the first-class replacement for the
+// ad hoc "resubmit a join request against an existing node_id"
+// technique used during the 2026-09-17 brood/drone incident (see
+// SHARED.md). Joins node02 normally, then re-points its address to a
+// second, independently reachable raftnode instance still using the
+// same node_id - confirming AddVoter's own "existing voter -> address
+// update" semantics still work through this dedicated RPC, and that
+// Status().Members reflects the new address afterward.
+func TestIntegration_UpdateVoterAddress_UpdatesRealRaftVoterAddress(t *testing.T) {
+	raftdSocket := newRaftdUDSSocket(t)
+	client := newManagerdRPCClient(t, raftdSocket)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	firstAddr := freeLoopbackAddr(t)
+	firstNode, err := raftnode.New(raftnode.Config{NodeID: "node02", DataDir: t.TempDir(), BindAddr: firstAddr})
+	if err != nil {
+		t.Fatalf("raftnode.New(node02, first) error: %v", err)
+	}
+	t.Cleanup(func() { firstNode.Shutdown() })
+
+	reqResp, err := client.RequestJoinColony(ctx, &rpcpb.RequestJoinColonyRequest{NodeId: "node02", RaftBindAddress: firstAddr})
+	if err != nil || reqResp.GetError() != "" {
+		t.Fatalf("RequestJoinColony() = (%+v, %v)", reqResp, err)
+	}
+	if approveResp, err := client.ApproveJoinRequest(ctx, &rpcpb.ApproveJoinRequestRequest{RequestId: reqResp.GetRequestId()}); err != nil || approveResp.GetError() != "" {
+		t.Fatalf("ApproveJoinRequest() = (%+v, %v)", approveResp, err)
+	}
+
+	secondAddr := freeLoopbackAddr(t)
+	secondNode, err := raftnode.New(raftnode.Config{NodeID: "node02", DataDir: t.TempDir(), BindAddr: secondAddr})
+	if err != nil {
+		t.Fatalf("raftnode.New(node02, second) error: %v", err)
+	}
+	t.Cleanup(func() { secondNode.Shutdown() })
+
+	updateResp, err := client.UpdateVoterAddress(ctx, &rpcpb.UpdateVoterAddressRequest{NodeId: "node02", NewRaftBindAddress: secondAddr})
+	if err != nil {
+		t.Fatalf("UpdateVoterAddress() error: %v", err)
+	}
+	if updateResp.GetError() != "" {
+		t.Fatalf("UpdateVoterAddress() returned error: %s", updateResp.GetError())
+	}
+
+	statusResp, err := client.Status(ctx, &rpcpb.StatusRequest{})
+	if err != nil {
+		t.Fatalf("Status() error: %v", err)
+	}
+	found := false
+	for _, m := range statusResp.GetMembers() {
+		if m.GetNodeId() == "node02" {
+			found = true
+			if m.GetAddress() != secondAddr {
+				t.Errorf("node02 address = %q, want %q", m.GetAddress(), secondAddr)
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("Status().Members = %+v, want node02 still present", statusResp.GetMembers())
+	}
+}
+
+// TestIntegration_UpdateVoterAddress_UnknownNodeIDRejected confirms
+// this RPC never adds a new voter - that remains RequestJoinColony/
+// ApproveJoinRequest's job exclusively.
+func TestIntegration_UpdateVoterAddress_UnknownNodeIDRejected(t *testing.T) {
+	raftdSocket := newRaftdUDSSocket(t)
+	client := newManagerdRPCClient(t, raftdSocket)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	resp, err := client.UpdateVoterAddress(ctx, &rpcpb.UpdateVoterAddressRequest{NodeId: "never-joined", NewRaftBindAddress: freeLoopbackAddr(t)})
+	if err != nil {
+		t.Fatalf("UpdateVoterAddress() error: %v", err)
+	}
+	if resp.GetError() == "" {
+		t.Fatal("UpdateVoterAddress() error = empty, want a rejection for a node_id that is not a current member")
+	}
+
+	statusResp, err := client.Status(ctx, &rpcpb.StatusRequest{})
+	if err != nil {
+		t.Fatalf("Status() error: %v", err)
+	}
+	for _, m := range statusResp.GetMembers() {
+		if m.GetNodeId() == "never-joined" {
+			t.Fatalf("Status().Members = %+v, want never-joined NOT added - this RPC must never call AddVoter for an unknown node_id", statusResp.GetMembers())
+		}
+	}
+}
+
+// TestIntegration_UpdateVoterAddress_UnreachableAddressRejected mirrors
+// TestIntegration_ApproveJoinRequest_UnreachableNodeIsRefused: an
+// unreachable new address risks stranding the cluster exactly as an
+// unreachable new joiner does, so the same guardrail applies here.
+func TestIntegration_UpdateVoterAddress_UnreachableAddressRejected(t *testing.T) {
+	raftdSocket := newRaftdUDSSocket(t)
+	client, srv := newManagerdRPCClientAndServer(t, raftdSocket, "manager-1")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	joiningNodeAddr := freeLoopbackAddr(t)
+	joiningNode, err := raftnode.New(raftnode.Config{NodeID: "node02", DataDir: t.TempDir(), BindAddr: joiningNodeAddr})
+	if err != nil {
+		t.Fatalf("raftnode.New(node02) error: %v", err)
+	}
+	t.Cleanup(func() { joiningNode.Shutdown() })
+
+	reqResp, err := client.RequestJoinColony(ctx, &rpcpb.RequestJoinColonyRequest{NodeId: "node02", RaftBindAddress: joiningNodeAddr})
+	if err != nil || reqResp.GetError() != "" {
+		t.Fatalf("RequestJoinColony() = (%+v, %v)", reqResp, err)
+	}
+	if approveResp, err := client.ApproveJoinRequest(ctx, &rpcpb.ApproveJoinRequestRequest{RequestId: reqResp.GetRequestId()}); err != nil || approveResp.GetError() != "" {
+		t.Fatalf("ApproveJoinRequest() = (%+v, %v)", approveResp, err)
+	}
+
+	srv.reachabilityCheck = func(context.Context, string) error {
+		return fmt.Errorf("simulated: connection refused")
+	}
+	updateResp, err := client.UpdateVoterAddress(ctx, &rpcpb.UpdateVoterAddressRequest{NodeId: "node02", NewRaftBindAddress: "127.0.0.1:1"})
+	if err != nil {
+		t.Fatalf("UpdateVoterAddress() error: %v", err)
+	}
+	if updateResp.GetError() == "" {
+		t.Fatal("UpdateVoterAddress() error = empty, want a refusal for an unreachable new address")
+	}
+
+	statusResp, err := client.Status(ctx, &rpcpb.StatusRequest{})
+	if err != nil {
+		t.Fatalf("Status() error: %v", err)
+	}
+	for _, m := range statusResp.GetMembers() {
+		if m.GetNodeId() == "node02" && m.GetAddress() != joiningNodeAddr {
+			t.Fatalf("node02 address = %q, want unchanged (%q) - AddVoter must never run when the reachability check fails", m.GetAddress(), joiningNodeAddr)
+		}
+	}
+}
+
+// TestIntegration_UpdateVoterAddress_MissingFieldsRejected confirms
+// both fields are required before any raft call happens at all.
+func TestIntegration_UpdateVoterAddress_MissingFieldsRejected(t *testing.T) {
+	raftdSocket := newRaftdUDSSocket(t)
+	client := newManagerdRPCClient(t, raftdSocket)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	cases := []*rpcpb.UpdateVoterAddressRequest{
+		{NodeId: "", NewRaftBindAddress: freeLoopbackAddr(t)},
+		{NodeId: "raftd-1", NewRaftBindAddress: ""},
+	}
+	for _, req := range cases {
+		resp, err := client.UpdateVoterAddress(ctx, req)
+		if err != nil {
+			t.Fatalf("UpdateVoterAddress(%+v) error: %v", req, err)
+		}
+		if resp.GetError() == "" {
+			t.Errorf("UpdateVoterAddress(%+v) error = empty, want a missing-field rejection", req)
+		}
 	}
 }
 

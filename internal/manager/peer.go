@@ -732,6 +732,17 @@ func (p *PeerReporter) ApproveJoinRequest(ctx context.Context, addr string, req 
 	return client.ApproveJoinRequest(ctx, req)
 }
 
+// UpdateVoterAddress forwards on a leader-hint rejection, mirroring
+// ApproveJoinRequest above exactly (ADR-0106).
+func (p *PeerReporter) UpdateVoterAddress(ctx context.Context, addr string, req *rpcpb.UpdateVoterAddressRequest) (*rpcpb.UpdateVoterAddressResponse, error) {
+	conn, client, err := p.dial(addr)
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close()
+	return client.UpdateVoterAddress(ctx, req)
+}
+
 // PreflightApproveJoinRequest forwards on a leader-hint rejection,
 // mirroring ApproveJoinRequest above exactly (ADR-0103).
 func (p *PeerReporter) PreflightApproveJoinRequest(ctx context.Context, addr string, req *rpcpb.PreflightApproveJoinRequestRequest) (*rpcpb.PreflightApproveJoinRequestResponse, error) {

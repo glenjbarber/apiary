@@ -128,6 +128,26 @@ func currentLeaderRaftAddress(status *internalpb.StatusResponse) string {
 // production, only possible if a caller deliberately disables it)
 // reports Allow, matching ApproveJoinRequest's own prior "if
 // s.reachabilityCheck != nil" skip.
+// existingVoter looks up nodeID in this managerd's own local raft
+// membership view (ADR-0106) and returns its ServerInfo if it is
+// already a member (Voter or Nonvoter - either already occupies the
+// identity, so both count for collision purposes), or nil if it is not
+// currently known. A raft Status error is returned unmodified so
+// callers can decide how to treat "raft unreachable" themselves,
+// rather than this helper silently treating it as "no collision."
+func (s *Server) existingVoter(ctx context.Context, nodeID string) (*internalpb.ServerInfo, error) {
+	status, err := s.raft.Status(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for _, srv := range status.GetServers() {
+		if srv.GetId() == nodeID {
+			return srv, nil
+		}
+	}
+	return nil, nil
+}
+
 func (s *Server) evaluateJoinReachability(ctx context.Context, addr string) guardrail.Report {
 	if s.reachabilityCheck == nil {
 		return guardrail.Report{Intent: "approve-join-request", Verdict: guardrail.Allow}
@@ -212,6 +232,21 @@ func (s *Server) applyJoinRequestCommand(ctx context.Context, cmd *internalpb.Co
 func (s *Server) RequestJoinColony(ctx context.Context, req *rpcpb.RequestJoinColonyRequest) (*rpcpb.RequestJoinColonyResponse, error) {
 	if req.GetNodeId() == "" || req.GetRaftBindAddress() == "" {
 		return &rpcpb.RequestJoinColonyResponse{Error: "node_id and raft_bind_address must both be set"}, nil
+	}
+	// ADR-0106: a node_id that already names an existing raft voter is
+	// never accepted as a new join - it's either an accidental collision
+	// with a different physical Comb, or the same Comb trying to report
+	// a corrected address, and this call has no way to tell which.
+	// UpdateVoterAddress is the only supported path for the latter.
+	// target_address forwarding (below) skips this check here since the
+	// named remote member performs the identical check on its own,
+	// authoritative view of Colony membership.
+	if req.GetTargetAddress() == "" {
+		if existing, err := s.existingVoter(ctx, req.GetNodeId()); err == nil && existing != nil {
+			return &rpcpb.RequestJoinColonyResponse{Error: fmt.Sprintf(
+				"node_id %q is already a Colony voter at address %q; use UpdateVoterAddress to correct an existing member's address instead of requesting a new join",
+				req.GetNodeId(), existing.GetAddress())}, nil
+		}
 	}
 	if target := req.GetTargetAddress(); target != "" {
 		if s.peers == nil {
@@ -380,6 +415,17 @@ func (s *Server) ApproveJoinRequest(ctx context.Context, req *rpcpb.ApproveJoinR
 			report.Findings[0].Detail)}, nil
 	}
 
+	// Re-checked here, not just at RequestJoinColony time (ADR-0106): the
+	// colony's membership can change between a request being created and
+	// an Admin approving it (including another request for the same
+	// node_id being approved in that window), and AddVoter is the actual
+	// point of no return this whole guardrail exists to protect.
+	if existing, err := s.existingVoter(ctx, pending.GetNodeId()); err == nil && existing != nil {
+		return &rpcpb.ApproveJoinRequestResponse{Error: fmt.Sprintf(
+			"refusing to approve: node_id %q is already a Colony voter at address %q; use UpdateVoterAddress instead",
+			pending.GetNodeId(), existing.GetAddress())}, nil
+	}
+
 	timeout := defaultApplyTimeout
 	if req.GetTimeoutMs() > 0 {
 		timeout = time.Duration(req.GetTimeoutMs()) * time.Millisecond
@@ -412,6 +458,80 @@ func (s *Server) ApproveJoinRequest(ctx context.Context, req *rpcpb.ApproveJoinR
 		return &rpcpb.ApproveJoinRequestResponse{Error: appErr, LeaderHint: leaderHint}, nil
 	}
 	return &rpcpb.ApproveJoinRequestResponse{Request: fromInternalPendingJoinRequest(result)}, nil
+}
+
+// UpdateVoterAddress implements rpcpb.ManagerServiceServer (ADR-0106) -
+// Admin-only. The first-class replacement for resubmitting
+// RequestJoinColony/ApproveJoinRequest against an already-voting
+// node_id (the ad hoc technique used during the 2026-09-17 brood/drone
+// incident, see SHARED.md) now that those two reject that case
+// outright. Requires node_id to already be a known voter - the mirror
+// image of ApproveJoinRequest's own new "must not already exist" check
+// - so this can never be used to sneak in a brand-new member without
+// the mutual-authorization join flow.
+func (s *Server) UpdateVoterAddress(ctx context.Context, req *rpcpb.UpdateVoterAddressRequest) (*rpcpb.UpdateVoterAddressResponse, error) {
+	if req.GetNodeId() == "" || req.GetNewRaftBindAddress() == "" {
+		return &rpcpb.UpdateVoterAddressResponse{Error: "node_id and new_raft_bind_address must both be set"}, nil
+	}
+	// Deliberately no validateJoinerRaftBind-style format check here -
+	// that helper exists for ConvertStandaloneToJoiner (ADR-0105), where
+	// a Comb validates its OWN bind address and a loopback value is
+	// always a self-inflicted misconfiguration. This RPC plays
+	// ApproveJoinRequest's role instead (approving ANOTHER Comb's
+	// claimed address), which has never format-checked addresses beyond
+	// the reachability guardrail below - a real deployment's addresses
+	// are never loopback in practice, and this project's own integration
+	// test harness legitimately uses loopback throughout. Adding a
+	// stricter check here than ApproveJoinRequest already applies would
+	// make the two RPCs inconsistent for no safety benefit.
+
+	// Same leadership-first ordering as ApproveJoinRequest, and for the
+	// same reason: only the leader's own network vantage point matters,
+	// since only the leader can actually call AddVoter.
+	if status, statusErr := s.raft.Status(ctx); statusErr == nil && !status.GetIsLeader() {
+		if hint := currentLeaderRaftAddress(status); hint != "" && s.peers != nil {
+			if fwd, ferr := s.peers.UpdateVoterAddress(ctx, s.peerManagerdAddr(hint), req); ferr == nil {
+				return fwd, nil
+			}
+		}
+	}
+
+	existing, err := s.existingVoter(ctx, req.GetNodeId())
+	if err != nil {
+		return &rpcpb.UpdateVoterAddressResponse{Error: fmt.Sprintf("reading current Colony membership: %v", err)}, nil
+	}
+	if existing == nil {
+		return &rpcpb.UpdateVoterAddressResponse{Error: fmt.Sprintf(
+			"node_id %q is not a current Colony member; use RequestJoinColony/ApproveJoinRequest to add a new member instead", req.GetNodeId())}, nil
+	}
+
+	// Same reachability guardrail as ApproveJoinRequest, applied to the
+	// NEW address - an unreachable new address strands the cluster
+	// exactly as an unreachable new joiner does (ADR-0097), and this is
+	// the only other call site that ever changes a voter's address.
+	if report := s.evaluateJoinReachability(ctx, req.GetNewRaftBindAddress()); report.Verdict != guardrail.Allow {
+		return &rpcpb.UpdateVoterAddressResponse{Error: fmt.Sprintf(
+			"refusing to update: %s - approving an unreachable address strands the cluster and can only be recovered by wiping raft state, so this is refused rather than attempted",
+			report.Findings[0].Detail)}, nil
+	}
+
+	timeout := defaultApplyTimeout
+	if req.GetTimeoutMs() > 0 {
+		timeout = time.Duration(req.GetTimeoutMs()) * time.Millisecond
+	}
+	addResp, err := s.raft.AddVoter(ctx, req.GetNodeId(), req.GetNewRaftBindAddress(), 0, timeout)
+	if err != nil {
+		return &rpcpb.UpdateVoterAddressResponse{Error: fmt.Sprintf("updating %q's address: %v", req.GetNodeId(), err)}, nil
+	}
+	if addResp.GetError() != "" {
+		if addResp.GetLeaderHint() != "" && s.peers != nil {
+			if fwd, ferr := s.peers.UpdateVoterAddress(ctx, s.peerManagerdAddr(addResp.GetLeaderHint()), req); ferr == nil {
+				return fwd, nil
+			}
+		}
+		return &rpcpb.UpdateVoterAddressResponse{Error: addResp.GetError(), LeaderHint: addResp.GetLeaderHint()}, nil
+	}
+	return &rpcpb.UpdateVoterAddressResponse{}, nil
 }
 
 // PreflightApproveJoinRequest previews ApproveJoinRequest's own

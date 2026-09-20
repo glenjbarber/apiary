@@ -428,6 +428,10 @@ func (f *fakeClient) ApproveJoinRequest(context.Context, *rpcpb.ApproveJoinReque
 	return &rpcpb.ApproveJoinRequestResponse{}, nil
 }
 
+func (f *fakeClient) UpdateVoterAddress(context.Context, *rpcpb.UpdateVoterAddressRequest, ...grpc.CallOption) (*rpcpb.UpdateVoterAddressResponse, error) {
+	return &rpcpb.UpdateVoterAddressResponse{}, nil
+}
+
 func (f *fakeClient) PreflightApproveJoinRequest(context.Context, *rpcpb.PreflightApproveJoinRequestRequest, ...grpc.CallOption) (*rpcpb.PreflightApproveJoinRequestResponse, error) {
 	return &rpcpb.PreflightApproveJoinRequestResponse{}, nil
 }

@@ -1128,6 +1128,82 @@ func TestFSM_Apply_CreateJailInvalidBaseTemplateRejected(t *testing.T) {
 	}
 }
 
+// TestFSM_Apply_CreateJailDuplicateHostnameRejected is ADR-0106's
+// regression test: two jails sharing a jail(8) hostname is exactly the
+// ambiguous-resource-identity outcome this check exists to prevent,
+// now that every jail is visible cluster-wide regardless of which Comb
+// owns it.
+func TestFSM_Apply_CreateJailDuplicateHostnameRejected(t *testing.T) {
+	fsm := NewFSM()
+	fsm.Apply(&raft.Log{Index: 1, Data: mustMarshalCommand(t, &internalpb.Command{
+		Op: &internalpb.Command_CreateJail{CreateJail: &internalpb.CreateJail{
+			Jail: &internalpb.JailDefinition{Id: "jail-1", Name: "a", Hostname: "web.example.com"},
+		}},
+	})})
+
+	result := fsm.Apply(&raft.Log{Index: 2, Data: mustMarshalCommand(t, &internalpb.Command{
+		Op: &internalpb.Command_CreateJail{CreateJail: &internalpb.CreateJail{
+			Jail: &internalpb.JailDefinition{Id: "jail-2", Name: "b", Hostname: "web.example.com"},
+		}},
+	})})
+
+	if result.(*FSMApplyResult).Error == "" {
+		t.Fatalf("Error = empty, want a duplicate-hostname rejection")
+	}
+	if _, ok := fsm.Jail("jail-2"); ok {
+		t.Errorf("Jail(jail-2) exists, want rejected create to leave no record")
+	}
+}
+
+// TestFSM_Apply_CreateJailDuplicateHostnameCaseInsensitive confirms the
+// check normalizes case - "Web.example.com" and "web.example.com" name
+// the same jail(8) hostname.
+func TestFSM_Apply_CreateJailDuplicateHostnameCaseInsensitive(t *testing.T) {
+	fsm := NewFSM()
+	fsm.Apply(&raft.Log{Index: 1, Data: mustMarshalCommand(t, &internalpb.Command{
+		Op: &internalpb.Command_CreateJail{CreateJail: &internalpb.CreateJail{
+			Jail: &internalpb.JailDefinition{Id: "jail-1", Name: "a", Hostname: "Web.Example.com"},
+		}},
+	})})
+
+	result := fsm.Apply(&raft.Log{Index: 2, Data: mustMarshalCommand(t, &internalpb.Command{
+		Op: &internalpb.Command_CreateJail{CreateJail: &internalpb.CreateJail{
+			Jail: &internalpb.JailDefinition{Id: "jail-2", Name: "b", Hostname: "web.example.com"},
+		}},
+	})})
+
+	if result.(*FSMApplyResult).Error == "" {
+		t.Fatalf("Error = empty, want a case-insensitive duplicate-hostname rejection")
+	}
+}
+
+// TestFSM_Apply_CreateJailEmptyHostnameNeverConflicts confirms an
+// unset hostname (the field's existing optional status) never collides
+// with another jail that also left it unset.
+func TestFSM_Apply_CreateJailEmptyHostnameNeverConflicts(t *testing.T) {
+	fsm := NewFSM()
+	fsm.Apply(&raft.Log{Index: 1, Data: mustMarshalCommand(t, createJailCmd("jail-1", "a"))})
+
+	result := fsm.Apply(&raft.Log{Index: 2, Data: mustMarshalCommand(t, createJailCmd("jail-2", "b"))})
+
+	if result.(*FSMApplyResult).Error != "" {
+		t.Fatalf("Error = %q, want empty (two jails with no hostname set must not conflict)", result.(*FSMApplyResult).Error)
+	}
+}
+
+func TestFSM_Apply_CreateJailInvalidHostnameRejected(t *testing.T) {
+	fsm := NewFSM()
+
+	cmd := &internalpb.Command{Op: &internalpb.Command_CreateJail{
+		CreateJail: &internalpb.CreateJail{Jail: &internalpb.JailDefinition{Id: "jail-1", Name: "a", Hostname: "evil\nhost"}},
+	}}
+	result := fsm.Apply(&raft.Log{Index: 1, Data: mustMarshalCommand(t, cmd)})
+
+	if result.(*FSMApplyResult).Error == "" {
+		t.Fatalf("Error = empty, want a rejection for a newline in the hostname")
+	}
+}
+
 func TestFSM_Apply_UpdateJail(t *testing.T) {
 	fsm := NewFSM()
 	fsm.Apply(&raft.Log{Index: 1, Data: mustMarshalCommand(t, createJailCmd("jail-1", "a"))})
@@ -1208,6 +1284,58 @@ func TestFSM_Apply_SetJailHostname_TouchesOnlyThatField(t *testing.T) {
 	}
 	if jail.GetReplicaNodeId() != "node-b" {
 		t.Errorf("ReplicaNodeId = %q, want node-b (must survive untouched)", jail.GetReplicaNodeId())
+	}
+}
+
+// TestFSM_Apply_SetJailHostname_DuplicateRejected mirrors
+// TestFSM_Apply_CreateJailDuplicateHostnameRejected for the update path
+// - the same ambiguous-identity outcome, reached by editing an existing
+// jail's hostname instead of setting it at creation.
+func TestFSM_Apply_SetJailHostname_DuplicateRejected(t *testing.T) {
+	fsm := NewFSM()
+	fsm.Apply(&raft.Log{Index: 1, Data: mustMarshalCommand(t, &internalpb.Command{
+		Op: &internalpb.Command_CreateJail{CreateJail: &internalpb.CreateJail{
+			Jail: &internalpb.JailDefinition{Id: "jail-1", Name: "a", Hostname: "taken.example.com"},
+		}},
+	})})
+	fsm.Apply(&raft.Log{Index: 2, Data: mustMarshalCommand(t, createJailCmd("jail-2", "b"))})
+
+	cmd := &internalpb.Command{
+		Op: &internalpb.Command_SetJailHostname{SetJailHostname: &internalpb.SetJailHostname{
+			Id: "jail-2", Hostname: "taken.example.com",
+		}},
+	}
+	result := fsm.Apply(&raft.Log{Index: 3, Data: mustMarshalCommand(t, cmd)})
+
+	if result.(*FSMApplyResult).Error == "" {
+		t.Fatalf("Error = empty, want a duplicate-hostname rejection")
+	}
+	jail, _ := fsm.Jail("jail-2")
+	if jail.GetHostname() != "" {
+		t.Errorf("Hostname = %q, want unchanged after a rejected update", jail.GetHostname())
+	}
+}
+
+// TestFSM_Apply_SetJailHostname_SameJailReassertingOwnHostname confirms
+// the exclude-self behavior: re-applying (or no-op editing) a jail's
+// own current hostname must not be rejected as a conflict with itself.
+func TestFSM_Apply_SetJailHostname_SameJailReassertingOwnHostname(t *testing.T) {
+	fsm := NewFSM()
+	fsm.Apply(&raft.Log{Index: 1, Data: mustMarshalCommand(t, &internalpb.Command{
+		Op: &internalpb.Command_CreateJail{CreateJail: &internalpb.CreateJail{
+			Jail: &internalpb.JailDefinition{Id: "jail-1", Name: "a", Hostname: "web.example.com"},
+		}},
+	})})
+
+	cmd := &internalpb.Command{
+		Op: &internalpb.Command_SetJailHostname{SetJailHostname: &internalpb.SetJailHostname{
+			Id: "jail-1", Hostname: "web.example.com",
+		}},
+	}
+	result := fsm.Apply(&raft.Log{Index: 2, Data: mustMarshalCommand(t, cmd)})
+
+	if result.(*FSMApplyResult).Error != "" {
+		t.Fatalf("Error = %q, want empty (a jail reasserting its own hostname is not a conflict)", result.(*FSMApplyResult).Error)
 	}
 }
 

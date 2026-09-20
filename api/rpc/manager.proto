@@ -502,6 +502,26 @@ service ManagerService {
   // this actually deletes it, for cleaning up a stale or erroneous
   // entry. Admin-gated, the same tier as Approve/Reject/List.
   rpc PurgeJoinRequest(PurgeJoinRequestRequest) returns (PurgeJoinRequestResponse);
+
+  // UpdateVoterAddress (ADR-0106) re-points an EXISTING raft voter's
+  // address in place - the first-class replacement for resubmitting a
+  // RequestJoinColony/ApproveJoinRequest pair against an already-voting
+  // node_id, a technique used ad hoc during the 2026-09-17 brood/drone
+  // incident (see SHARED.md) that relied on hashicorp/raft's own
+  // AddVoter semantics ("if the server is already in the cluster as a
+  // voter, this updates the server's address") rather than a dedicated
+  // API. RequestJoinColony/ApproveJoinRequest now reject a node_id that
+  // already names an existing voter outright, so that ambiguous case -
+  // "is this a new Comb colliding with an old node_id, or the same Comb
+  // reporting a corrected address?" - is never silently resolved by
+  // AddVoter's own update-in-place behavior. This RPC is the only
+  // supported way to change an existing voter's recorded address.
+  // Admin-gated, same tier as ApproveJoinRequest, and applies the same
+  // leadership-first ordering and pre-change reachability guardrail
+  // (ADR-0097) against the NEW address before calling AddVoter - an
+  // unreachable new address risks stranding the cluster exactly as an
+  // unreachable new joiner does.
+  rpc UpdateVoterAddress(UpdateVoterAddressRequest) returns (UpdateVoterAddressResponse);
 }
 
 // VMState mirrors api/internalpb's VMState. Kept as a separate type
@@ -2664,6 +2684,19 @@ message PurgeJoinRequestRequest {
 }
 
 message PurgeJoinRequestResponse {
+  string error = 1;
+  string leader_hint = 2;
+}
+
+message UpdateVoterAddressRequest {
+  // node_id must already name an existing raft voter - this RPC never
+  // adds a new voter (RequestJoinColony/ApproveJoinRequest do that).
+  string node_id = 1;
+  string new_raft_bind_address = 2;
+  uint32 timeout_ms = 3;
+}
+
+message UpdateVoterAddressResponse {
   string error = 1;
   string leader_hint = 2;
 }
