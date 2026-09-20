@@ -237,6 +237,17 @@ func TestRequiredRoleFor_GetVMConsoleIsOperator(t *testing.T) {
 	}
 }
 
+// TestRequiredRoleFor_PurgeStaleAssumptionResultsIsOperator (ADR-0106)
+// confirms this sits at the same tier as SaveAssumptionClaim/
+// DeleteAssumptionClaim - it only clears accounting data, never live
+// cluster state, so Admin would materially overstate what it does.
+func TestRequiredRoleFor_PurgeStaleAssumptionResultsIsOperator(t *testing.T) {
+	const method = "/apiary.rpc.v1.ManagerService/PurgeStaleAssumptionResults"
+	if got := requiredRoleFor(method); got != RoleOperator {
+		t.Errorf("requiredRoleFor(%q) = %q, want %q", method, got, RoleOperator)
+	}
+}
+
 func TestRequiredRoleFor_GetUplinkStatusIsViewer(t *testing.T) {
 	const method = "/apiary.rpc.v1.ManagerService/GetUplinkStatus"
 	if got := requiredRoleFor(method); got != RoleViewer {

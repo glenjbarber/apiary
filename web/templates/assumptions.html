@@ -41,6 +41,9 @@
     {{if .StaleResults}}
     <details>
       <summary class="muted">{{len .StaleResults}} superseded/stale result(s) - keyed on something (an interface, a peer) no longer actively checked, kept for history</summary>
+      {{if $.CanOperate}}
+      <button hx-post="/assumptions/purge-stale" hx-vals='{"node_id":"{{.NodeID}}"}' hx-target="main" hx-swap="outerHTML" hx-confirm="Clear {{len .StaleResults}} stale result(s) on {{.NodeID}}? Any check that resumes will simply reappear on its next observation.">Clear stale results</button>
+      {{end}}
       <table>
         <thead><tr><th>Check</th><th>Subject</th><th>Depends on</th><th>Status</th><th>Reason</th><th>Detail</th><th>Last observed</th></tr></thead>
         <tbody>

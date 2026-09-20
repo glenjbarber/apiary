@@ -38,6 +38,10 @@ type fakePeerHostStatsClient struct {
 	lastTeardownNetwork string
 	teardownResp        *rpcpb.GetNetworkTeardownStatusResponse
 	teardownErr         error
+
+	lastPurgeStaleAddr string
+	purgeStaleResp     *rpcpb.PurgeStaleAssumptionResultsResponse
+	purgeStaleErr      error
 }
 
 func (f *fakePeerHostStatsClient) GetNetworkTeardownStatus(_ context.Context, addr, networkID string) (*rpcpb.GetNetworkTeardownStatusResponse, error) {
@@ -77,6 +81,17 @@ func (f *fakePeerHostStatsClient) ListAssumptionResults(_ context.Context, addr 
 		return nil, f.err
 	}
 	return &rpcpb.ListAssumptionResultsResponse{}, nil
+}
+
+func (f *fakePeerHostStatsClient) PurgeStaleAssumptionResults(_ context.Context, addr string, _ *rpcpb.PurgeStaleAssumptionResultsRequest) (*rpcpb.PurgeStaleAssumptionResultsResponse, error) {
+	f.lastPurgeStaleAddr = addr
+	if f.purgeStaleErr != nil {
+		return nil, f.purgeStaleErr
+	}
+	if f.purgeStaleResp != nil {
+		return f.purgeStaleResp, nil
+	}
+	return &rpcpb.PurgeStaleAssumptionResultsResponse{}, nil
 }
 
 func (f *fakePeerHostStatsClient) Status(_ context.Context, addr string) (*rpcpb.StatusResponse, error) {

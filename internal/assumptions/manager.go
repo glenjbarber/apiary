@@ -279,6 +279,49 @@ func (m *Manager) Degraded() (bool, string) {
 	return m.storageWarning, m.storageWarningDetail
 }
 
+// PurgeStale removes every current-snapshot entry whose LastObservedAt
+// is older than staleAfter (relative to now) - the same staleness
+// definition ListAssumptionResults already computes for display
+// (internal/manager's toRPCAssumptionResult), so this only ever removes
+// entries a caller could already see labeled "stale." Returns the
+// number of entries removed. History is never touched - it is a
+// separate, already self-pruning journal (see pruneHistory), and this
+// method only de-clutters the current-snapshot view. staleAfter <= 0
+// means "never stale" (matching toRPCAssumptionResult's own convention)
+// and removes nothing. Safe and idempotent: a purged key whose checker
+// resumes ticking simply reappears via the next Append call, exactly
+// as a never-before-seen key would.
+func (m *Manager) PurgeStale(staleAfter time.Duration, now time.Time) (int, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if staleAfter <= 0 {
+		return 0, nil
+	}
+
+	snapshot, history, err := m.loadLocked()
+	if err != nil {
+		return 0, err
+	}
+
+	kept := snapshot[:0:0]
+	removed := 0
+	for _, r := range snapshot {
+		if now.Sub(r.LastObservedAt) > staleAfter {
+			removed++
+			continue
+		}
+		kept = append(kept, r)
+	}
+	if removed == 0 {
+		return 0, nil
+	}
+	if err := m.writeLocked(kept, history); err != nil {
+		return 0, err
+	}
+	return removed, nil
+}
+
 // Append is called once per checker tick with that tick's freshly
 // computed Results (at most one per Key). Every Key present in tick gets
 // its snapshot entry unconditionally overwritten - fresh LastObservedAt,

@@ -424,6 +424,21 @@ service ManagerService {
   // See internal/assumptions/internal/assumecheck.
   rpc ListAssumptionResults(ListAssumptionResultsRequest) returns (ListAssumptionResultsResponse);
 
+  // PurgeStaleAssumptionResults removes THIS node's own current-snapshot
+  // entries that are presently stale (same staleness definition
+  // ListAssumptionResults already computes: last_observed_at older than
+  // this node's configured -assumption-stale-after) - a de-cluttering
+  // action for entries "keyed on something no longer actively checked"
+  // (the assumptions page's own existing description of this group),
+  // e.g. a deleted VM's replica check. Never touches the history
+  // journal, which stays independently self-pruning by count/age (see
+  // internal/assumptions). Safe and idempotent: if a purged key's check
+  // resumes ticking, its entry simply reappears fresh on the next
+  // successful observation, exactly as a never-before-seen key would.
+  // Operator-tier, matching SaveAssumptionClaim/DeleteAssumptionClaim
+  // above - this only clears accounting data, never live cluster state.
+  rpc PurgeStaleAssumptionResults(PurgeStaleAssumptionResultsRequest) returns (PurgeStaleAssumptionResultsResponse);
+
   // ListOrphanedHASTResources/CleanupOrphanedHASTResource close the gap
   // ADR-0026 named and left open: once a replicated VM/jail's record is
   // fully purged (not just reassigned - ADR-0025's PlanReclaim already
@@ -2495,6 +2510,13 @@ message ListAssumptionResultsResponse {
   // removes the quarantined file), not a one-time latch.
   bool storage_degraded = 4;
   string storage_degraded_detail = 5;
+}
+
+message PurgeStaleAssumptionResultsRequest {}
+
+message PurgeStaleAssumptionResultsResponse {
+  uint32 removed_count = 1;
+  string error = 2;
 }
 
 message ListOrphanedHASTResourcesRequest {}

@@ -191,3 +191,57 @@ func (s *Server) handleAssumptionsPage(w http.ResponseWriter, r *http.Request) {
 
 	s.render(w, "assumptions_page", s.withAuthFields(r, pageData{AssumptionNodes: nodes, ActivePage: "assumptions"}))
 }
+
+// handlePurgeStaleAssumptionResults clears one node's own stale
+// current-snapshot entries (ADR-0055's "superseded/stale result(s)"
+// group the page already displays), then re-renders the page exactly
+// as handleAssumptionsPage does - node_id names which node's section
+// to act on, since this is per-node local data with no cluster-wide
+// concept, the same locality nodeAssumptions already follows for
+// reading it.
+func (s *Server) handlePurgeStaleAssumptionResults(w http.ResponseWriter, r *http.Request) {
+	if err := r.ParseForm(); err != nil {
+		s.render(w, "assumptions_page", s.withAuthFields(r, pageData{Error: err.Error(), ActivePage: "assumptions"}))
+		return
+	}
+	nodeID := r.FormValue("node_id")
+
+	statusResp, err := s.client.Status(r.Context(), &rpcpb.StatusRequest{})
+	if err != nil {
+		s.render(w, "assumptions_page", s.withAuthFields(r, pageData{Error: err.Error(), ActivePage: "assumptions"}))
+		return
+	}
+	localNodeID := statusResp.GetManagerNodeId()
+
+	var resp *rpcpb.PurgeStaleAssumptionResultsResponse
+	var rpcErr error
+	if s.peers == nil || nodeID == localNodeID {
+		resp, rpcErr = s.client.PurgeStaleAssumptionResults(r.Context(), &rpcpb.PurgeStaleAssumptionResultsRequest{})
+	} else {
+		resp, rpcErr = s.peers.PurgeStaleAssumptionResults(r.Context(), s.peerAddr(nodeID), &rpcpb.PurgeStaleAssumptionResultsRequest{})
+	}
+	var purgeErr string
+	if rpcErr != nil {
+		purgeErr = rpcErr.Error()
+	} else if resp.GetError() != "" {
+		purgeErr = resp.GetError()
+	}
+
+	nodeIDs := statusResp.GetKnownNodeIds()
+	if len(nodeIDs) == 0 && localNodeID != "" {
+		nodeIDs = []string{localNodeID}
+	}
+	nodes := make([]nodeAssumptionsView, len(nodeIDs))
+	var wg sync.WaitGroup
+	for i, id := range nodeIDs {
+		wg.Add(1)
+		go func(i int, id string) {
+			defer wg.Done()
+			nodes[i] = s.nodeAssumptions(r.Context(), id, localNodeID)
+		}(i, id)
+	}
+	wg.Wait()
+	sort.Slice(nodes, func(i, j int) bool { return nodes[i].NodeID < nodes[j].NodeID })
+
+	s.render(w, "assumptions_page", s.withAuthFields(r, pageData{AssumptionNodes: nodes, ActivePage: "assumptions", Error: purgeErr}))
+}

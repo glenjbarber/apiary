@@ -567,6 +567,19 @@ func (p *PeerReporter) ListAssumptionResults(ctx context.Context, addr string, r
 	return client.ListAssumptionResults(ctx, req)
 }
 
+// PurgeStaleAssumptionResults forwards to a specific peer's own
+// PurgeStaleAssumptionResults RPC - same shape as ListAssumptionResults
+// above, so the /assumptions page can offer this action against any
+// node's own section, not only the locally-viewed one.
+func (p *PeerReporter) PurgeStaleAssumptionResults(ctx context.Context, addr string, req *rpcpb.PurgeStaleAssumptionResultsRequest) (*rpcpb.PurgeStaleAssumptionResultsResponse, error) {
+	conn, client, err := p.dial(addr)
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close()
+	return client.PurgeStaleAssumptionResults(ctx, req)
+}
+
 // CreateVM/UpdateVM/DeleteVM/CreateJail/UpdateJail/DeleteJail/
 // CreateNetwork/DeleteNetwork/CreateAPIKey/RevokeAPIKey forward an
 // external write RPC rejected by this node's own raftd (not the

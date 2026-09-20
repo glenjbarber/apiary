@@ -173,6 +173,9 @@ type fakeClient struct {
 	assumptionsResp *rpcpb.ListAssumptionResultsResponse
 	assumptionsErr  error
 
+	purgeStaleAssumptionsResp *rpcpb.PurgeStaleAssumptionResultsResponse
+	purgeStaleAssumptionsErr  error
+
 	assumptionClaimsResp *rpcpb.ListAssumptionClaimsResponse
 	assumptionClaimsErr  error
 	saveClaimResp        *rpcpb.SaveAssumptionClaimResponse
@@ -499,6 +502,13 @@ func (f *fakeClient) GetLocalNetworkBridgeStatus(context.Context, *rpcpb.GetLoca
 
 func (f *fakeClient) ListAssumptionResults(context.Context, *rpcpb.ListAssumptionResultsRequest, ...grpc.CallOption) (*rpcpb.ListAssumptionResultsResponse, error) {
 	return f.assumptionsResp, f.assumptionsErr
+}
+
+func (f *fakeClient) PurgeStaleAssumptionResults(context.Context, *rpcpb.PurgeStaleAssumptionResultsRequest, ...grpc.CallOption) (*rpcpb.PurgeStaleAssumptionResultsResponse, error) {
+	if f.purgeStaleAssumptionsResp != nil {
+		return f.purgeStaleAssumptionsResp, f.purgeStaleAssumptionsErr
+	}
+	return &rpcpb.PurgeStaleAssumptionResultsResponse{}, f.purgeStaleAssumptionsErr
 }
 
 func (f *fakeClient) ListOrphanedHASTResources(context.Context, *rpcpb.ListOrphanedHASTResourcesRequest, ...grpc.CallOption) (*rpcpb.ListOrphanedHASTResourcesResponse, error) {
