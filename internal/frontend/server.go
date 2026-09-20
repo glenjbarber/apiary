@@ -598,6 +598,7 @@ func NewServer(client rpcpb.ManagerServiceClient, auth Authenticator, roleMap ma
 		"isoMissingByNode":         isoMissingByNode,
 		"cloneSourceSnapshotsJSON": cloneSourceSnapshotsJSON,
 		"machineSections":          func() []machineSection { return machineSections },
+		"hostOnly":                 hostOnly,
 	}).ParseFS(web.FS, "templates/*.html")
 	if err != nil {
 		return nil, fmt.Errorf("frontend: parsing templates: %w", err)

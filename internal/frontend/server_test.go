@@ -2970,7 +2970,7 @@ func TestServer_HandleRequestJoinColony_RequiresTargetAddress(t *testing.T) {
 	client := &fakeClient{}
 	s := newTestServer(t, client)
 
-	form := url.Values{"node_id": {"node02"}, "raft_bind_address": {"10.62.0.3:17600"}}
+	form := url.Values{"node_id": {"node02"}, "raft_bind_host": {"10.62.0.3"}}
 	req := httptest.NewRequest(http.MethodPost, "/machine/join-colony", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	rec := httptest.NewRecorder()
@@ -2995,7 +2995,7 @@ func TestServer_HandleRequestJoinColony_ThreadsTargetAddress(t *testing.T) {
 	client := &fakeClient{requestJoinColonyResp: &rpcpb.RequestJoinColonyResponse{RequestId: "jreq-xyz", Code: "482913"}}
 	s := newTestServer(t, client)
 
-	form := url.Values{"node_id": {"node02"}, "raft_bind_address": {"10.62.0.3:17600"}, "target_address": {"10.62.0.2:17700"}}
+	form := url.Values{"node_id": {"node02"}, "raft_bind_host": {"10.62.0.3"}, "target_host": {"10.62.0.2"}}
 	req := httptest.NewRequest(http.MethodPost, "/machine/join-colony", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	rec := httptest.NewRecorder()
@@ -3004,8 +3004,10 @@ func TestServer_HandleRequestJoinColony_ThreadsTargetAddress(t *testing.T) {
 	if rec.Code != http.StatusFound {
 		t.Fatalf("status = %d, want 302; body=%s", rec.Code, rec.Body.String())
 	}
+	// The port is fixed server-side (fixedport.go) - the submitted host
+	// comes back joined with managerd's own fixed 17700.
 	if client.lastRequestJoinColonyReq.GetTargetAddress() != "10.62.0.2:17700" {
-		t.Errorf("RequestJoinColony target_address = %q, want 10.62.0.2:17700", client.lastRequestJoinColonyReq.GetTargetAddress())
+		t.Errorf("RequestJoinColony target_address = %q, want the submitted host joined with the fixed managerd port 10.62.0.2:17700", client.lastRequestJoinColonyReq.GetTargetAddress())
 	}
 	loc := rec.Header().Get("Location")
 	if !strings.Contains(loc, "join_request_id=jreq-xyz") || !strings.Contains(loc, "join_target_address=10.62.0.2%3A17700") {

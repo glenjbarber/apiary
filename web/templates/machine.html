@@ -231,9 +231,9 @@
       {{end}}
     {{else}}
     <form class="inline-form" method="post" action="/machine/join-colony">
-      <label>Existing Colony member's address <input type="text" name="target_address" required placeholder="10.62.0.2:17700" title="The managerd RPC address (host:port) of any current member of the Colony you want to join - this Comb asks it directly to record the request. Find this on that Comb's own Machine page (its -rpc-addr, usually port 17700)."></label>
+      <label>Existing Colony member's address <span class="host-port"><input type="text" name="target_host" required placeholder="10.62.0.2" title="The managerd host of any current member of the Colony you want to join - this Comb asks it directly to record the request. Find this on that Comb's own Machine page (its -rpc-addr host). The port is always 17700 and cannot be changed here."><span class="fixed-port">:17700</span></span></label>
       <label>This Comb's node id <input type="text" name="node_id" required title="This node's own raft node-id, matching the -node-id this Comb's raftd was started with."></label>
-      <label>This Comb's raft-bind address <input type="text" name="raft_bind_address" required placeholder="10.62.0.5:17600" title="This node's own real, reachable -raft-bind address - the Colony's leader will dial this directly once approved."></label>
+      <label>This Comb's raft-bind address <span class="host-port"><input type="text" name="raft_bind_host" required placeholder="10.62.0.5" title="This node's own real, reachable raft-bind host - the Colony's leader will dial this directly once approved. The port is always 17600 and cannot be changed here."><span class="fixed-port">:17600</span></span></label>
       <button type="submit">Request to join</button>
     </form>
     {{end}}
@@ -264,8 +264,8 @@
     </div>
     {{else}}
     <form class="inline-form" method="post" action="/machine/convert-to-joiner" hx-confirm="This stops raftd, moves this Comb's existing raft state aside to a timestamped backup, and reconfigures it to join the named Colony. There is no automatic revert. Continue?">
-      <label>Target Colony member's managerd address <input type="text" name="target_managerd_address" required placeholder="10.90.0.1:17700" title="The managerd RPC address (host:port) of any current member of the Colony to join."></label>
-      <label>This Comb's new raft-bind address <input type="text" name="raft_bind" required placeholder="10.90.0.20:17600" title="This node's own real, reachable raft-bind address, replacing its current standalone value - not 0.0.0.0/127.0.0.1/localhost, since a Colony peer must be able to dial it directly."></label>
+      <label>Target Colony member's managerd address <span class="host-port"><input type="text" name="target_managerd_host" required placeholder="10.90.0.1" title="The managerd host of any current member of the Colony to join. The port is always 17700 and cannot be changed here."><span class="fixed-port">:17700</span></span></label>
+      <label>This Comb's new raft-bind address <span class="host-port"><input type="text" name="raft_bind_host" required placeholder="10.90.0.20" title="This node's own real, reachable raft-bind host, replacing its current standalone value - not 0.0.0.0/127.0.0.1/localhost, since a Colony peer must be able to dial it directly. The port is always 17600 and cannot be changed here."><span class="fixed-port">:17600</span></span></label>
       <label>Type <code>yes-convert-to-joiner</code> to confirm <input type="text" name="confirm_phrase" required placeholder="yes-convert-to-joiner" title="Must match exactly or nothing happens."></label>
       <button type="submit" class="danger">Convert to joiner</button>
     </form>
@@ -428,8 +428,8 @@
     <tr><th>apiary_managerd (gRPC)</th><td>
       {{if .CanAdmin}}
       <form hx-post="/machine/managerd-bind" hx-target="#managerd-bind-panel" hx-swap="innerHTML">
-        <input type="text" list="managerd-bind-addresses" name="rpc_addr" value="{{.NodeConfig.RPCAddr}}" title="Configured gRPC bind address for managerd. Choose a local address:port suggestion or enter another valid local endpoint. Saving does not restart managerd." aria-label="Managerd bind address" required>
-        <datalist id="managerd-bind-addresses">{{range .NodeConfig.BindAddressOptions}}<option value="{{.}}">{{end}}</datalist>
+        <span class="host-port"><input type="text" list="managerd-bind-addresses" name="rpc_host" value="{{hostOnly .NodeConfig.RPCAddr}}" title="Host managerd's gRPC listener binds to. Choose a local address suggestion or enter another valid local host. The port is always 17700 and cannot be changed here. Saving does not restart managerd." aria-label="Managerd bind host" required><span class="fixed-port">:17700</span></span>
+        <datalist id="managerd-bind-addresses">{{range .NodeConfig.HostOptions}}<option value="{{.}}">{{end}}</datalist>
         <button type="submit">Save endpoint</button>
       </form>
       {{else}}<code>{{.NodeConfig.RPCAddr}}</code>{{end}}
@@ -833,8 +833,8 @@
 <form hx-post="/machine/frontend-config" hx-target="#frontend-config-panel" hx-swap="innerHTML">
   <table class="settings-table">
     <tbody>
-      <tr><th>Manager address</th><td><input type="text" name="manager_addr" placeholder="127.0.0.1:17700" value="{{.FrontendConfig.ManagerAddr}}" title="TCP address of managerd's own external RPC API this frontend dials." aria-label="Manager address"></td></tr>
-      <tr><th>HTTP address</th><td><input type="text" list="frontend-bind-addresses" name="http_addr" placeholder="127.0.0.1:8080" value="{{.FrontendConfig.HTTPAddr}}" title="Address frontend serves the web UI on. Choose a local address:port suggestion or enter another valid local endpoint." aria-label="HTTP address"><datalist id="frontend-bind-addresses">{{range .NodeConfig.BindAddressOptions}}<option value="{{.}}">{{end}}</datalist></td></tr>
+      <tr><th>Manager address</th><td><span class="host-port"><input type="text" name="manager_host" placeholder="127.0.0.1" value="{{hostOnly .FrontendConfig.ManagerAddr}}" title="Host of managerd's own external RPC API this frontend dials. The port is always 17700 and cannot be changed here." aria-label="Manager host"><span class="fixed-port">:17700</span></span></td></tr>
+      <tr><th>HTTP address</th><td><span class="host-port"><input type="text" list="frontend-bind-addresses" name="http_host" placeholder="127.0.0.1" value="{{hostOnly .FrontendConfig.HTTPAddr}}" title="Host frontend serves the web UI on. Choose a local address suggestion or enter another valid local host. The port is always 8080 and cannot be changed here." aria-label="HTTP host"><span class="fixed-port">:8080</span></span><datalist id="frontend-bind-addresses">{{range .NodeConfig.HostOptions}}<option value="{{.}}">{{end}}</datalist></td></tr>
       <tr><th>Manager TLS</th><td><label class="checkbox-label"><input type="checkbox" name="manager_tls" value="true" {{if .FrontendConfig.ManagerTLS}}checked{{end}} title="Dial managerd over TLS instead of plaintext." aria-label="Manager TLS"> Enabled</label></td></tr>
       <tr><th>Manager TLS CA</th><td><input type="text" name="manager_tls_ca" value="{{.FrontendConfig.ManagerTLSCA}}" title="PEM CA file to trust for managerd's certificate; blank trusts the system pool." aria-label="Manager TLS CA"></td></tr>
       <tr><th>Manager TLS server name</th><td><input type="text" name="manager_tls_server_name" value="{{.FrontendConfig.ManagerTLSServerName}}" title="Hostname to verify managerd's certificate against, if different from Manager address's own host." aria-label="Manager TLS server name"></td></tr>
@@ -870,8 +870,8 @@
 <form hx-post="/machine/restshimd-config" hx-target="#restshimd-config-panel" hx-swap="innerHTML">
   <table class="settings-table">
     <tbody>
-      <tr><th>Manager address</th><td><input type="text" name="manager_addr" placeholder="127.0.0.1:17700" value="{{.RestshimdConfig.ManagerAddr}}" title="TCP address of managerd's own external RPC API this restshimd dials." aria-label="Manager address"></td></tr>
-      <tr><th>HTTP address</th><td><input type="text" list="restshimd-bind-addresses" name="http_addr" placeholder="127.0.0.1:8081" value="{{.RestshimdConfig.HTTPAddr}}" title="Address restshimd serves the REST API on. Choose a local address:port suggestion or enter another valid local endpoint." aria-label="HTTP address"><datalist id="restshimd-bind-addresses">{{range .NodeConfig.BindAddressOptions}}<option value="{{.}}">{{end}}</datalist></td></tr>
+      <tr><th>Manager address</th><td><span class="host-port"><input type="text" name="manager_host" placeholder="127.0.0.1" value="{{hostOnly .RestshimdConfig.ManagerAddr}}" title="Host of managerd's own external RPC API this restshimd dials. The port is always 17700 and cannot be changed here." aria-label="Manager host"><span class="fixed-port">:17700</span></span></td></tr>
+      <tr><th>HTTP address</th><td><span class="host-port"><input type="text" list="restshimd-bind-addresses" name="http_host" placeholder="127.0.0.1" value="{{hostOnly .RestshimdConfig.HTTPAddr}}" title="Host restshimd serves the REST API on. Choose a local address suggestion or enter another valid local host. The port is always 8081 and cannot be changed here." aria-label="HTTP host"><span class="fixed-port">:8081</span></span><datalist id="restshimd-bind-addresses">{{range .NodeConfig.HostOptions}}<option value="{{.}}">{{end}}</datalist></td></tr>
       <tr><th>Manager TLS</th><td><label class="checkbox-label"><input type="checkbox" name="manager_tls" value="true" {{if .RestshimdConfig.ManagerTLS}}checked{{end}} title="Dial managerd over TLS instead of plaintext." aria-label="Manager TLS"> Enabled</label></td></tr>
       <tr><th>Manager TLS CA</th><td><input type="text" name="manager_tls_ca" value="{{.RestshimdConfig.ManagerTLSCA}}" title="PEM CA file to trust for managerd's certificate; blank trusts the system pool." aria-label="Manager TLS CA"></td></tr>
       <tr><th>Manager TLS server name</th><td><input type="text" name="manager_tls_server_name" value="{{.RestshimdConfig.ManagerTLSServerName}}" title="Hostname to verify managerd's certificate against, if different from Manager address's own host." aria-label="Manager TLS server name"></td></tr>

@@ -43,8 +43,8 @@ func TestServer_MachinePage_ShowsNodeConfigAndLocalVMsOnly(t *testing.T) {
 	if !strings.Contains(body, `<select name="uplink" title=`) || !strings.Contains(body, `<option value="bridge0"`) || !strings.Contains(body, `bridge0 (up) - 10.50.0.14/24`) {
 		t.Errorf("machine page missing discovered interface choices, got: %s", body)
 	}
-	if !strings.Contains(body, `name="rpc_addr" value="10.50.0.14:17700"`) || !strings.Contains(body, `value="10.50.0.14:17600"`) {
-		t.Errorf("machine page missing configured managerd endpoint or local endpoint suggestions, got: %s", body)
+	if !strings.Contains(body, `name="rpc_host" value="10.50.0.14"`) || !strings.Contains(body, `<option value="10.50.0.14">`) {
+		t.Errorf("machine page missing configured managerd endpoint host or local host suggestions, got: %s", body)
 	}
 	if strings.Contains(body, "<th>Jail provisioning</th>") {
 		t.Errorf("jail provisioning should be in its own Machine page section, got: %s", body)
@@ -67,14 +67,17 @@ func TestServer_UpdateManagerdBindAddress_ForwardsEndpoint(t *testing.T) {
 	}
 	s := newTestServer(t, client)
 
-	form := url.Values{"rpc_addr": {"10.90.0.12:17700"}}
+	form := url.Values{"rpc_host": {"10.90.0.12"}}
 	req := httptest.NewRequest(http.MethodPost, "/machine/managerd-bind", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	rec := httptest.NewRecorder()
 	s.ServeHTTP(rec, req)
 
+	// The port is fixed server-side (fixedport.go) - the submitted host
+	// comes back joined with managerd's own fixed 17700, never a port
+	// the form could influence.
 	if got := client.lastUpdateManagerdBindReq.GetRpcAddr(); got != "10.90.0.12:17700" {
-		t.Errorf("RPCAddr = %q, want selected endpoint", got)
+		t.Errorf("RPCAddr = %q, want the submitted host joined with the fixed managerd port 10.90.0.12:17700", got)
 	}
 	if !strings.Contains(rec.Body.String(), "Restart apiary_managerd from Operations") {
 		t.Errorf("response missing explicit restart requirement, got: %s", rec.Body.String())

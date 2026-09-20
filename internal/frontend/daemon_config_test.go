@@ -87,7 +87,7 @@ func TestServer_UpdateFrontendConfig_ForwardsFieldsAndSecret(t *testing.T) {
 	}
 	s := newTestServer(t, client)
 
-	form := url.Values{"http_addr": {"0.0.0.0:8080"}, "peer_tls": {"true"}, "manager_api_key": {"new-secret-key"}}
+	form := url.Values{"http_host": {"0.0.0.0"}, "peer_tls": {"true"}, "manager_api_key": {"new-secret-key"}}
 	req := httptest.NewRequest(http.MethodPost, "/machine/frontend-config", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	rec := httptest.NewRecorder()
@@ -100,8 +100,11 @@ func TestServer_UpdateFrontendConfig_ForwardsFieldsAndSecret(t *testing.T) {
 	if got.GetManagerAddr() != "127.0.0.1:17700" {
 		t.Errorf("ManagerAddr = %q, want the resent current value 127.0.0.1:17700 (untouched field must survive)", got.GetManagerAddr())
 	}
+	// The port is fixed server-side (fixedport.go) - a submitted host
+	// always comes back joined with frontend's own fixed 8080, never a
+	// port the form could influence.
 	if got.GetHttpAddr() != "0.0.0.0:8080" {
-		t.Errorf("HttpAddr = %q, want the submitted value 0.0.0.0:8080", got.GetHttpAddr())
+		t.Errorf("HttpAddr = %q, want the submitted host joined with the fixed frontend port 0.0.0.0:8080", got.GetHttpAddr())
 	}
 	if !got.GetPeerTls() {
 		t.Error("PeerTls = false, want true from the submitted form")
@@ -133,7 +136,7 @@ func TestServer_UpdateFrontendConfig_ErrorShowsInPanel(t *testing.T) {
 	client := &fakeClient{updateFrontendConfigResp: &rpcpb.UpdateFrontendConfigResponse{Error: "disk full"}}
 	s := newTestServer(t, client)
 
-	form := url.Values{"http_addr": {"0.0.0.0:8080"}}
+	form := url.Values{"http_host": {"0.0.0.0"}}
 	req := httptest.NewRequest(http.MethodPost, "/machine/frontend-config", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	rec := httptest.NewRecorder()
@@ -155,7 +158,7 @@ func TestServer_UpdateRestshimdConfig_PreservesUntouchedFields(t *testing.T) {
 	}
 	s := newTestServer(t, client)
 
-	form := url.Values{"http_addr": {"0.0.0.0:8081"}}
+	form := url.Values{"http_host": {"0.0.0.0"}}
 	req := httptest.NewRequest(http.MethodPost, "/machine/restshimd-config", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	rec := httptest.NewRecorder()
@@ -169,6 +172,6 @@ func TestServer_UpdateRestshimdConfig_PreservesUntouchedFields(t *testing.T) {
 		t.Errorf("ManagerAddr = %q, want the preserved current value 10.50.0.9:17700", got.GetManagerAddr())
 	}
 	if got.GetHttpAddr() != "0.0.0.0:8081" {
-		t.Errorf("HttpAddr = %q, want the submitted value 0.0.0.0:8081", got.GetHttpAddr())
+		t.Errorf("HttpAddr = %q, want the submitted host joined with the fixed restshimd port 0.0.0.0:8081", got.GetHttpAddr())
 	}
 }

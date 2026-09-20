@@ -86,14 +86,14 @@ func (s *Server) handleRequestJoinColony(w http.ResponseWriter, r *http.Request)
 		s.renderMachinePageWithJoinColonyError(w, r, err.Error())
 		return
 	}
-	targetAddress := r.FormValue("target_address")
+	targetAddress := withFixedPort(r.FormValue("target_host"), managerdListenerPort)
 	if targetAddress == "" {
 		s.renderMachinePageWithJoinColonyError(w, r, "the existing Colony member's address is required")
 		return
 	}
 	resp, err := s.client.RequestJoinColony(r.Context(), &rpcpb.RequestJoinColonyRequest{
 		NodeId:          r.FormValue("node_id"),
-		RaftBindAddress: r.FormValue("raft_bind_address"),
+		RaftBindAddress: withFixedPort(r.FormValue("raft_bind_host"), raftdListenerPort),
 		TargetAddress:   targetAddress,
 	})
 	if err != nil {

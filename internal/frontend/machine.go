@@ -33,7 +33,7 @@ func (s *Server) handleUpdateManagerdBindAddress(w http.ResponseWriter, r *http.
 		return
 	}
 	resp, err := s.client.UpdateManagerdBindAddress(r.Context(), &rpcpb.UpdateManagerdBindAddressRequest{
-		RpcAddr: r.FormValue("rpc_addr"),
+		RpcAddr: withFixedPort(r.FormValue("rpc_host"), managerdListenerPort),
 	})
 	if err != nil {
 		s.renderManagerdBindPanel(w, r, err.Error(), "")
@@ -638,11 +638,11 @@ func (s *Server) frontendConfigUpdateRequest(r *http.Request) *rpcpb.UpdateFront
 		PeerHostnameSuffix:   cfg.PeerHostnameSuffix,
 		PeerManagerPort:      cfg.PeerManagerPort,
 	}
-	if r.Form.Has("manager_addr") {
-		req.ManagerAddr = r.FormValue("manager_addr")
+	if r.Form.Has("manager_host") {
+		req.ManagerAddr = withFixedPort(r.FormValue("manager_host"), managerdListenerPort)
 	}
-	if r.Form.Has("http_addr") {
-		req.HttpAddr = r.FormValue("http_addr")
+	if r.Form.Has("http_host") {
+		req.HttpAddr = withFixedPort(r.FormValue("http_host"), frontendListenerPort)
 	}
 	if r.Form.Has("manager_tls") {
 		req.ManagerTls = r.FormValue("manager_tls") == "true"
@@ -733,11 +733,11 @@ func (s *Server) restshimdConfigUpdateRequest(r *http.Request) *rpcpb.UpdateRest
 		TlsCert:              cfg.TLSCert,
 		TlsKey:               cfg.TLSKey,
 	}
-	if r.Form.Has("manager_addr") {
-		req.ManagerAddr = r.FormValue("manager_addr")
+	if r.Form.Has("manager_host") {
+		req.ManagerAddr = withFixedPort(r.FormValue("manager_host"), managerdListenerPort)
 	}
-	if r.Form.Has("http_addr") {
-		req.HttpAddr = r.FormValue("http_addr")
+	if r.Form.Has("http_host") {
+		req.HttpAddr = withFixedPort(r.FormValue("http_host"), restshimdListenerPort)
 	}
 	if r.Form.Has("manager_tls") {
 		req.ManagerTls = r.FormValue("manager_tls") == "true"

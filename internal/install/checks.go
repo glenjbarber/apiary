@@ -13,12 +13,74 @@ import (
 // (not consts) purely so tests can point them at a temp file instead of
 // a real host's own /etc/rc.conf and /etc/pf.conf.
 var (
-	pfConfPath = "/etc/pf.conf"
+	pfConfPath      = "/etc/pf.conf"
+	etcServicesPath = "/etc/services"
 )
 
 // apiaryPFAnchor is the exact anchor stanza internal/pf's own doc comment
 // (internal/pf/exec.go) says it requires already present in pf.conf.
 const apiaryPFAnchor = `anchor "apiary/*"`
+
+// apiaryServiceEntry is one line this project wants present in
+// /etc/services (services(5)) - purely a documentation/registration
+// convenience (netstat -p, sockstat, and getservbyname(3) callers can
+// resolve a symbolic name instead of a bare port number); Apiary's own
+// daemons never call getservbyname to find their own default port -
+// see internal/frontend/fixedport.go's identical, independently
+// maintained port list for the web UI's own fixed-port fields.
+type apiaryServiceEntry struct {
+	Name    string
+	Port    string
+	Proto   string
+	Comment string
+}
+
+var apiaryServiceEntries = []apiaryServiceEntry{
+	{Name: "apiary-raftd", Port: "17600", Proto: "tcp", Comment: "Apiary raftd Raft consensus"},
+	{Name: "apiary-managerd", Port: "17700", Proto: "tcp", Comment: "Apiary managerd RPC"},
+	{Name: "apiary-frontend", Port: "8080", Proto: "tcp", Comment: "Apiary frontend web UI"},
+	{Name: "apiary-restshimd", Port: "8081", Proto: "tcp", Comment: "Apiary restshimd REST API"},
+}
+
+func (e apiaryServiceEntry) line() string {
+	// A plain "%-16s" field width guarantees nothing once Name is at
+	// least as wide as the field (e.g. "apiary-restshimd" is 17 chars) -
+	// with no separating space, the name and port/proto would run
+	// together into one unparseable token. Pad to at least one space
+	// explicitly instead of trusting the format verb's own width alone.
+	pad := 16 - len(e.Name)
+	if pad < 1 {
+		pad = 1
+	}
+	return fmt.Sprintf("%s%s%s/%s\t\t\t#%s", e.Name, strings.Repeat(" ", pad), e.Port, e.Proto, e.Comment)
+}
+
+// servicesLineMatch reports whether an /etc/services line's own name
+// and port/proto exactly match e - the trailing comment/whitespace is
+// never compared, since a host administrator may have reformatted it.
+func servicesLineMatch(line string, e apiaryServiceEntry) bool {
+	fields := strings.Fields(strings.SplitN(line, "#", 2)[0])
+	if len(fields) < 2 {
+		return false
+	}
+	return fields[0] == e.Name && fields[1] == e.Port+"/"+e.Proto
+}
+
+// servicesLinePortConflict reports the name already bound to
+// port/proto on line, or "" if line doesn't claim that port/proto at
+// all - used to fail closed rather than append a second, conflicting
+// name for a port this project wants to claim.
+func servicesLinePortConflict(line, port, proto string) string {
+	trimmed := strings.TrimSpace(strings.SplitN(line, "#", 2)[0])
+	if trimmed == "" {
+		return ""
+	}
+	fields := strings.Fields(trimmed)
+	if len(fields) < 2 || fields[1] != port+"/"+proto {
+		return ""
+	}
+	return fields[0]
+}
 
 var registry = []Check{
 	zfsPoolCheck,
@@ -35,6 +97,7 @@ var registry = []Check{
 	// parseable pf.conf to already be there.
 	pfAnchorCheck,
 	pfEnabledCheck,
+	etcServicesCheck,
 	gatewayEnableCheck,
 	vlanUplinkCheck,
 	bhyveBridgeCheck,
@@ -429,6 +492,109 @@ var pfAnchorCheck = Check{
 			if _, stderr, err := r.Run(ctx, "service", "pf", "reload"); err != nil {
 				return fmt.Errorf("service pf reload: %s", firstNonEmpty(stderr, err))
 			}
+		}
+		return nil
+	},
+}
+
+// etcServicesCheck registers Apiary's own fixed listener ports
+// (apiaryServiceEntries) in /etc/services (services(5)) - purely a
+// registration convenience for netstat/sockstat/getservbyname(3)
+// callers, never consulted by Apiary's own daemons themselves. Fails
+// closed rather than silently duplicating a port: if an existing,
+// differently-named entry already claims one of these ports, the
+// check reports Misconfigured and Apply refuses to touch the file at
+// all, since resolving that conflict is a judgment call for whoever
+// already owns the existing entry, not something to overwrite.
+var etcServicesCheck = Check{
+	ID:          "etc-services",
+	Description: "Apiary's own daemons (raftd/managerd/frontend/restshimd) are registered in /etc/services",
+	Risk:        RiskSafe,
+	Applicable:  always,
+	Probe: func(ctx context.Context, r Runner, opt Options) Result {
+		body, err := os.ReadFile(etcServicesPath)
+		if os.IsNotExist(err) {
+			return Result{ID: "etc-services", Status: StatusMissing, Detail: etcServicesPath + " does not exist yet",
+				FixHint: fmt.Sprintf("create %s registering Apiary's own service ports", etcServicesPath)}
+		}
+		if err != nil {
+			return Result{ID: "etc-services", Status: StatusUnknown, Detail: err.Error(),
+				FixHint: "add Apiary's own service entries to " + etcServicesPath}
+		}
+		lines := strings.Split(string(body), "\n")
+		var missing []string
+		for _, e := range apiaryServiceEntries {
+			found := false
+			for _, line := range lines {
+				if servicesLineMatch(line, e) {
+					found = true
+					break
+				}
+				if owner := servicesLinePortConflict(line, e.Port, e.Proto); owner != "" && owner != e.Name {
+					return Result{ID: "etc-services", Status: StatusMisconfigured,
+						Detail:  fmt.Sprintf("%s/%s is already registered to %q, not %q", e.Port, e.Proto, owner, e.Name),
+						FixHint: fmt.Sprintf("resolve the conflicting %s/%s entry in %s by hand - Apiary will not overwrite an existing service registration", e.Port, e.Proto, etcServicesPath)}
+				}
+			}
+			if !found {
+				missing = append(missing, e.Name)
+			}
+		}
+		if len(missing) == 0 {
+			return Result{ID: "etc-services", Status: StatusOK, Detail: "all Apiary service entries present"}
+		}
+		return Result{ID: "etc-services", Status: StatusMissing,
+			Detail:  "missing entries: " + strings.Join(missing, ", "),
+			FixHint: fmt.Sprintf("append the missing entries to %s", etcServicesPath)}
+	},
+	Apply: func(ctx context.Context, r Runner, opt Options) error {
+		body, err := os.ReadFile(etcServicesPath)
+		if os.IsNotExist(err) {
+			var buf strings.Builder
+			buf.WriteString("# Apiary service registrations - see docs/bootstrap.md\n")
+			for _, e := range apiaryServiceEntries {
+				buf.WriteString(e.line() + "\n")
+			}
+			if err := os.WriteFile(etcServicesPath, []byte(buf.String()), 0o644); err != nil {
+				return fmt.Errorf("creating %s: %w", etcServicesPath, err)
+			}
+			return nil
+		}
+		if err != nil {
+			return fmt.Errorf("reading %s: %w", etcServicesPath, err)
+		}
+		lines := strings.Split(string(body), "\n")
+		var toAppend []string
+		for _, e := range apiaryServiceEntries {
+			found := false
+			for _, line := range lines {
+				if servicesLineMatch(line, e) {
+					found = true
+					break
+				}
+				if owner := servicesLinePortConflict(line, e.Port, e.Proto); owner != "" && owner != e.Name {
+					return fmt.Errorf("%s/%s is already registered to %q, not %q - resolve this by hand before re-running", e.Port, e.Proto, owner, e.Name)
+				}
+			}
+			if !found {
+				toAppend = append(toAppend, e.line())
+			}
+		}
+		if len(toAppend) == 0 {
+			return nil
+		}
+		// Back up before mutating a shared system file, mirroring
+		// pf-anchor's own caution above.
+		if err := os.WriteFile(etcServicesPath+".bak", body, 0o644); err != nil {
+			return fmt.Errorf("backing up %s: %w", etcServicesPath, err)
+		}
+		updated := append([]byte{}, body...)
+		if len(updated) > 0 && updated[len(updated)-1] != '\n' {
+			updated = append(updated, '\n')
+		}
+		updated = append(updated, []byte(strings.Join(toAppend, "\n")+"\n")...)
+		if err := os.WriteFile(etcServicesPath, updated, 0o644); err != nil {
+			return fmt.Errorf("writing %s: %w", etcServicesPath, err)
 		}
 		return nil
 	},

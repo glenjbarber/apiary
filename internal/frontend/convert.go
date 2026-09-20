@@ -156,10 +156,14 @@ type nodeConfigView struct {
 	OriginCATokenFile               string
 	OriginCADirectory               string
 
-	// BindAddressOptions are host-local endpoint suggestions constructed
-	// from managerd's interface inventory. They are suggestions only;
-	// managerd validates a submitted RPC bind address independently.
-	BindAddressOptions []string
+	// HostOptions are bare host/IP suggestions (no port) constructed from
+	// managerd's own interface inventory, shared by every fixed-port
+	// endpoint field (managerd rpc_addr, frontend/restshimd http_addr) -
+	// the port each of those daemons listens on is fixed, never chosen
+	// here (see fixedport.go), so a suggestion list only ever needs to
+	// offer which host, not which host:port. Suggestions only; managerd
+	// validates a submitted bind address independently.
+	HostOptions []string
 }
 
 // triState mirrors the JailEnabledMode/JailEnabledStatus convention
@@ -251,19 +255,15 @@ func fromRPCNodeConfig(d *rpcpb.GetNodeConfigResponse) nodeConfigView {
 			if err != nil || ip == nil {
 				continue
 			}
-			for _, port := range []string{"17600", "17700", "8080", "8081"} {
-				view.BindAddressOptions = append(view.BindAddressOptions, net.JoinHostPort(ip.String(), port))
-			}
+			view.HostOptions = append(view.HostOptions, ip.String())
 		}
 	}
-	view.BindAddressOptions = append(view.BindAddressOptions,
-		"0.0.0.0:17600", "0.0.0.0:17700", "0.0.0.0:8080", "0.0.0.0:8081",
-		"127.0.0.1:17600", "127.0.0.1:17700", "127.0.0.1:8080", "127.0.0.1:8081")
-	if view.RPCAddr != "" {
-		view.BindAddressOptions = append(view.BindAddressOptions, view.RPCAddr)
+	view.HostOptions = append(view.HostOptions, "0.0.0.0", "127.0.0.1")
+	if rpcHost := hostOnly(view.RPCAddr); rpcHost != "" {
+		view.HostOptions = append(view.HostOptions, rpcHost)
 	}
-	sort.Strings(view.BindAddressOptions)
-	view.BindAddressOptions = compactStrings(view.BindAddressOptions)
+	sort.Strings(view.HostOptions)
+	view.HostOptions = compactStrings(view.HostOptions)
 	view.UplinkOptions = withSavedInterface(view.UplinkOptions, view.Uplink)
 	view.NATUplinkOptions = withSavedInterface(view.NATUplinkOptions, view.NATUplink)
 	view.JailEnabledMode, view.JailEnabledStatus = triState(d.JailEnabled)
