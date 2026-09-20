@@ -19,18 +19,21 @@ func TestServer_ConvertStandaloneToJoiner_ForwardsFormValues(t *testing.T) {
 	s := newTestServer(t, client)
 
 	form := url.Values{
-		"target_managerd_address": {"10.90.0.1:17700"},
-		"raft_bind":               {"10.90.0.20:17600"},
-		"confirm_phrase":          {"yes-convert-to-joiner"},
+		"target_managerd_host": {"10.90.0.1"},
+		"raft_bind_host":       {"10.90.0.20"},
+		"confirm_phrase":       {"yes-convert-to-joiner"},
 	}
 	req := httptest.NewRequest(http.MethodPost, "/machine/convert-to-joiner", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	rec := httptest.NewRecorder()
 	s.ServeHTTP(rec, req)
 
+	// ADR: the port is fixed server-side (fixedport.go), never taken
+	// from the form - so the submitted host-only values must come back
+	// joined with managerd/raftd's own fixed ports, not verbatim.
 	if got := client.lastConvertStandaloneToJoinerReq; got.GetTargetManagerdAddress() != "10.90.0.1:17700" ||
 		got.GetRaftBind() != "10.90.0.20:17600" || got.GetConfirmPhrase() != "yes-convert-to-joiner" {
-		t.Fatalf("RPC request = %+v, want the submitted form values verbatim", got)
+		t.Fatalf("RPC request = %+v, want the submitted hosts joined with the fixed managerd/raftd ports", got)
 	}
 	body := rec.Body.String()
 	if !strings.Contains(body, "654321") || !strings.Contains(body, "raftd.reset-backup-123") {

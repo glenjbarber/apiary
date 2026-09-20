@@ -30,8 +30,8 @@ func (s *Server) handleConvertStandaloneToJoiner(w http.ResponseWriter, r *http.
 		return
 	}
 	resp, err := s.client.ConvertStandaloneToJoiner(r.Context(), &rpcpb.ConvertStandaloneToJoinerRequest{
-		TargetManagerdAddress: r.FormValue("target_managerd_address"),
-		RaftBind:              r.FormValue("raft_bind"),
+		TargetManagerdAddress: withFixedPort(r.FormValue("target_managerd_host"), managerdListenerPort),
+		RaftBind:              withFixedPort(r.FormValue("raft_bind_host"), raftdListenerPort),
 		ConfirmPhrase:         r.FormValue("confirm_phrase"),
 	})
 	if err != nil {

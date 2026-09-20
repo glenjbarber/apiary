@@ -575,6 +575,136 @@ func TestDnsmasqRcEnableCheck(t *testing.T) {
 	}
 }
 
+func TestEtcServicesCheck(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "services")
+	old := etcServicesPath
+	etcServicesPath = path
+	defer func() { etcServicesPath = old }()
+
+	if err := os.WriteFile(path, []byte("ssh\t\t\t22/tcp\nhttp\t\t\t80/tcp\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	res := etcServicesCheck.Probe(ctx, newFakeRunner(), Options{})
+	if res.Status != StatusMissing {
+		t.Fatalf("status = %v, want missing", res.Status)
+	}
+
+	if err := etcServicesCheck.Apply(ctx, newFakeRunner(), Options{}); err != nil {
+		t.Fatalf("apply: %v", err)
+	}
+	body, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range apiaryServiceEntries {
+		if !strings.Contains(string(body), e.Name) || !strings.Contains(string(body), e.Port+"/"+e.Proto) {
+			t.Errorf("expected %s (%s/%s) appended, got: %s", e.Name, e.Port, e.Proto, body)
+		}
+	}
+	if !strings.Contains(string(body), "ssh") || !strings.Contains(string(body), "http") {
+		t.Errorf("existing entries must survive untouched, got: %s", body)
+	}
+	if _, err := os.Stat(path + ".bak"); err != nil {
+		t.Fatalf("expected a .bak file before mutating /etc/services: %v", err)
+	}
+
+	// Applying again must not duplicate any entry.
+	before := string(body)
+	if err := etcServicesCheck.Apply(ctx, newFakeRunner(), Options{}); err != nil {
+		t.Fatalf("second apply: %v", err)
+	}
+	after, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(after) != before {
+		t.Fatalf("second apply changed the file; want idempotent no-op\nbefore=%q\nafter=%q", before, after)
+	}
+
+	res = etcServicesCheck.Probe(ctx, newFakeRunner(), Options{})
+	if res.Status != StatusOK {
+		t.Fatalf("status = %v, want ok after apply", res.Status)
+	}
+}
+
+// TestEtcServicesCheckMissingFile mirrors TestPFAnchorCheckMissingFile -
+// a from-scratch host with no /etc/services at all (unlikely on real
+// FreeBSD, but the check must not crash trying to read it).
+func TestEtcServicesCheckMissingFile(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "services") // deliberately never created
+	old := etcServicesPath
+	etcServicesPath = path
+	defer func() { etcServicesPath = old }()
+
+	res := etcServicesCheck.Probe(ctx, newFakeRunner(), Options{})
+	if res.Status != StatusMissing {
+		t.Fatalf("status = %v, want missing (not unknown) when /etc/services does not exist", res.Status)
+	}
+
+	if err := etcServicesCheck.Apply(ctx, newFakeRunner(), Options{}); err != nil {
+		t.Fatalf("apply on a nonexistent /etc/services: %v", err)
+	}
+	body, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("expected /etc/services to be created: %v", err)
+	}
+	for _, e := range apiaryServiceEntries {
+		if !strings.Contains(string(body), e.Name) {
+			t.Errorf("expected %s in newly-created /etc/services, got: %s", e.Name, body)
+		}
+	}
+	if _, err := os.Stat(path + ".bak"); err == nil {
+		t.Fatal("did not expect a .bak file when /etc/services never existed")
+	}
+}
+
+// TestEtcServicesCheckPortConflictFailsClosed is this check's own
+// regression test for the one real risk in mutating a shared system
+// file: another service (real or operator-added) already claiming one
+// of Apiary's own ports under a different name must never be silently
+// overwritten or duplicated - the check reports Misconfigured and
+// Apply refuses to touch the file at all.
+func TestEtcServicesCheckPortConflictFailsClosed(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "services")
+	old := etcServicesPath
+	etcServicesPath = path
+	defer func() { etcServicesPath = old }()
+
+	original := "some-other-service\t17700/tcp\t\t#not Apiary\n"
+	if err := os.WriteFile(path, []byte(original), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	res := etcServicesCheck.Probe(ctx, newFakeRunner(), Options{})
+	if res.Status != StatusMisconfigured {
+		t.Fatalf("status = %v, want misconfigured when another service already claims 17700/tcp", res.Status)
+	}
+	if !strings.Contains(res.Detail, "some-other-service") {
+		t.Errorf("Detail should name the conflicting service, got: %s", res.Detail)
+	}
+
+	if err := etcServicesCheck.Apply(ctx, newFakeRunner(), Options{}); err == nil {
+		t.Fatal("Apply() error = nil, want a refusal when a port conflict exists")
+	}
+	body, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(body) != original {
+		t.Fatalf("file must be left untouched on a conflict, got: %s", body)
+	}
+	if _, err := os.Stat(path + ".bak"); err == nil {
+		t.Fatal("did not expect a .bak file when Apply refused due to a conflict")
+	}
+}
+
 func TestManualOnlyChecksHaveNoApply(t *testing.T) {
 	for _, c := range All() {
 		if c.Risk == RiskManualOnly && c.Apply != nil {
