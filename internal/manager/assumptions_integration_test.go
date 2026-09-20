@@ -127,6 +127,70 @@ func TestIntegration_ListAssumptionResults_StaleCollapsesToUnknown(t *testing.T)
 	}
 }
 
+func TestIntegration_PurgeStaleAssumptionResults_NilStoreReturnsError(t *testing.T) {
+	raftdSocket := newRaftdUDSSocket(t)
+	client := newManagerdRPCClient(t, raftdSocket) // no assumptions store configured
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	resp, err := client.PurgeStaleAssumptionResults(ctx, &rpcpb.PurgeStaleAssumptionResultsRequest{})
+	if err != nil {
+		t.Fatalf("PurgeStaleAssumptionResults() error: %v", err)
+	}
+	if resp.GetError() == "" {
+		t.Error("PurgeStaleAssumptionResults() with no store configured must set error, not panic or look like a clean no-op")
+	}
+}
+
+// TestIntegration_PurgeStaleAssumptionResults_RemovesStaleAndKeepsFresh
+// is ADR-0106's own end-to-end regression test: the RPC must use
+// exactly the same staleness threshold ListAssumptionResults already
+// uses to compute the `stale` flag callers see (both read
+// s.assumptionStaleAfter), so it never removes an entry that wasn't
+// already visibly labeled stale, and a subsequent list call reflects
+// the removal immediately.
+func TestIntegration_PurgeStaleAssumptionResults_RemovesStaleAndKeepsFresh(t *testing.T) {
+	raftdSocket := newRaftdUDSSocket(t)
+	store := &assumptions.Manager{Path: t.TempDir() + "/assumptions.json"}
+	client := newManagerdRPCClientFull(t, raftdSocket, "node-a", nil, nil, nil, store, time.Minute)
+
+	now := time.Now()
+	staleKey := assumptions.Key{Kind: assumptions.KindNATUplinkDefaultRoute, SubjectKind: assumptions.SubjectKindNode, DependencyID: "em0"}
+	freshKey := assumptions.Key{Kind: assumptions.KindPeerManagerRPCSucceeded, SubjectKind: assumptions.SubjectKindNode, DependencyID: "node-b"}
+	if err := store.Append([]assumptions.Result{
+		{Key: staleKey, ObservedStatus: assumptions.StatusTrue, LastObservedAt: now.Add(-time.Hour)},
+		{Key: freshKey, ObservedStatus: assumptions.StatusTrue, LastObservedAt: now},
+	}, time.Hour, 50, 24*time.Hour); err != nil {
+		t.Fatalf("store.Append() error: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	purgeResp, err := client.PurgeStaleAssumptionResults(ctx, &rpcpb.PurgeStaleAssumptionResultsRequest{})
+	if err != nil {
+		t.Fatalf("PurgeStaleAssumptionResults() error: %v", err)
+	}
+	if purgeResp.GetError() != "" {
+		t.Fatalf("PurgeStaleAssumptionResults() returned error: %s", purgeResp.GetError())
+	}
+	if purgeResp.GetRemovedCount() != 1 {
+		t.Errorf("RemovedCount = %d, want 1", purgeResp.GetRemovedCount())
+	}
+
+	listResp, err := client.ListAssumptionResults(ctx, &rpcpb.ListAssumptionResultsRequest{})
+	if err != nil {
+		t.Fatalf("ListAssumptionResults() error: %v", err)
+	}
+	if len(listResp.GetLatest()) != 1 {
+		t.Fatalf("latest count after purge = %d, want 1 (only the fresh key)", len(listResp.GetLatest()))
+	}
+	if listResp.GetLatest()[0].GetKey().GetDependencyId() != "node-b" {
+		t.Errorf("remaining entry = %+v, want the fresh key (node-b)", listResp.GetLatest()[0])
+	}
+}
+
 // TestIntegration_AssumptionChecker_ReplicaChecks_EndToEnd wires a real
 // assumecheck.Checker against a genuine raftd + managerd pair - a VM
 // owned by this node is self-referentially replicated to the SAME node

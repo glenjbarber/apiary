@@ -218,6 +218,10 @@ func (slowRecoveryPeerClient) ListAssumptionResults(ctx context.Context, addr st
 	<-ctx.Done()
 	return nil, ctx.Err()
 }
+func (slowRecoveryPeerClient) PurgeStaleAssumptionResults(ctx context.Context, addr string, _ *rpcpb.PurgeStaleAssumptionResultsRequest) (*rpcpb.PurgeStaleAssumptionResultsResponse, error) {
+	<-ctx.Done()
+	return nil, ctx.Err()
+}
 func (slowRecoveryPeerClient) Status(ctx context.Context, addr string) (*rpcpb.StatusResponse, error) {
 	<-ctx.Done()
 	return nil, ctx.Err()

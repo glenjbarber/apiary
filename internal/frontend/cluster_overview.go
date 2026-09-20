@@ -35,6 +35,12 @@ type peerHostStatsClient interface {
 	// an arbitrary peer" shape as HostStats/ListISOs above.
 	ListAssumptionResults(ctx context.Context, addr string, req *rpcpb.ListAssumptionResultsRequest) (*rpcpb.ListAssumptionResultsResponse, error)
 
+	// PurgeStaleAssumptionResults lets the "/assumptions" page's own
+	// clear-stale action (ADR-0106) reach any known node, not only the
+	// one this frontend is colocated with - same shape as
+	// ListAssumptionResults above.
+	PurgeStaleAssumptionResults(ctx context.Context, addr string, req *rpcpb.PurgeStaleAssumptionResultsRequest) (*rpcpb.PurgeStaleAssumptionResultsResponse, error)
+
 	// Status lets Evidence-Aware Health (ADR-0056) learn a peer's own
 	// raft applied/last-log index and its own raft_reachable heartbeat -
 	// the same "always answers locally, dial addr directly" shape as

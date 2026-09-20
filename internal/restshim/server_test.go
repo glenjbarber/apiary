@@ -318,6 +318,10 @@ func (f *fakeClient) ListAssumptionResults(context.Context, *rpcpb.ListAssumptio
 	return &rpcpb.ListAssumptionResultsResponse{}, nil
 }
 
+func (f *fakeClient) PurgeStaleAssumptionResults(context.Context, *rpcpb.PurgeStaleAssumptionResultsRequest, ...grpc.CallOption) (*rpcpb.PurgeStaleAssumptionResultsResponse, error) {
+	return &rpcpb.PurgeStaleAssumptionResultsResponse{}, nil
+}
+
 func (f *fakeClient) UploadISO(context.Context, ...grpc.CallOption) (grpc.ClientStreamingClient[rpcpb.UploadISORequest, rpcpb.UploadISOResponse], error) {
 	f.uploadCalls++
 	if f.uploadErr != nil {

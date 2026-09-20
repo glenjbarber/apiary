@@ -30,6 +30,10 @@ func (f *fakeISOPeerClient) ListAssumptionResults(context.Context, string, *rpcp
 	return &rpcpb.ListAssumptionResultsResponse{}, nil
 }
 
+func (f *fakeISOPeerClient) PurgeStaleAssumptionResults(context.Context, string, *rpcpb.PurgeStaleAssumptionResultsRequest) (*rpcpb.PurgeStaleAssumptionResultsResponse, error) {
+	return &rpcpb.PurgeStaleAssumptionResultsResponse{}, nil
+}
+
 func (f *fakeISOPeerClient) Status(context.Context, string) (*rpcpb.StatusResponse, error) {
 	return &rpcpb.StatusResponse{}, nil
 }

@@ -95,6 +95,7 @@ const (
 	ManagerService_ReceiveJailTemplate_FullMethodName         = "/apiary.rpc.v1.ManagerService/ReceiveJailTemplate"
 	ManagerService_GetLocalNetworkBridgeStatus_FullMethodName = "/apiary.rpc.v1.ManagerService/GetLocalNetworkBridgeStatus"
 	ManagerService_ListAssumptionResults_FullMethodName       = "/apiary.rpc.v1.ManagerService/ListAssumptionResults"
+	ManagerService_PurgeStaleAssumptionResults_FullMethodName = "/apiary.rpc.v1.ManagerService/PurgeStaleAssumptionResults"
 	ManagerService_ListOrphanedHASTResources_FullMethodName   = "/apiary.rpc.v1.ManagerService/ListOrphanedHASTResources"
 	ManagerService_CleanupOrphanedHASTResource_FullMethodName = "/apiary.rpc.v1.ManagerService/CleanupOrphanedHASTResource"
 	ManagerService_GetNetworkTeardownStatus_FullMethodName    = "/apiary.rpc.v1.ManagerService/GetNetworkTeardownStatus"
@@ -491,6 +492,20 @@ type ManagerServiceClient interface {
 	// never leader-forwarded (the same locality convention as HostStats).
 	// See internal/assumptions/internal/assumecheck.
 	ListAssumptionResults(ctx context.Context, in *ListAssumptionResultsRequest, opts ...grpc.CallOption) (*ListAssumptionResultsResponse, error)
+	// PurgeStaleAssumptionResults removes THIS node's own current-snapshot
+	// entries that are presently stale (same staleness definition
+	// ListAssumptionResults already computes: last_observed_at older than
+	// this node's configured -assumption-stale-after) - a de-cluttering
+	// action for entries "keyed on something no longer actively checked"
+	// (the assumptions page's own existing description of this group),
+	// e.g. a deleted VM's replica check. Never touches the history
+	// journal, which stays independently self-pruning by count/age (see
+	// internal/assumptions). Safe and idempotent: if a purged key's check
+	// resumes ticking, its entry simply reappears fresh on the next
+	// successful observation, exactly as a never-before-seen key would.
+	// Operator-tier, matching SaveAssumptionClaim/DeleteAssumptionClaim
+	// above - this only clears accounting data, never live cluster state.
+	PurgeStaleAssumptionResults(ctx context.Context, in *PurgeStaleAssumptionResultsRequest, opts ...grpc.CallOption) (*PurgeStaleAssumptionResultsResponse, error)
 	// ListOrphanedHASTResources/CleanupOrphanedHASTResource close the gap
 	// ADR-0026 named and left open: once a replicated VM/jail's record is
 	// fully purged (not just reassigned - ADR-0025's PlanReclaim already
@@ -1362,6 +1377,16 @@ func (c *managerServiceClient) ListAssumptionResults(ctx context.Context, in *Li
 	return out, nil
 }
 
+func (c *managerServiceClient) PurgeStaleAssumptionResults(ctx context.Context, in *PurgeStaleAssumptionResultsRequest, opts ...grpc.CallOption) (*PurgeStaleAssumptionResultsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(PurgeStaleAssumptionResultsResponse)
+	err := c.cc.Invoke(ctx, ManagerService_PurgeStaleAssumptionResults_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *managerServiceClient) ListOrphanedHASTResources(ctx context.Context, in *ListOrphanedHASTResourcesRequest, opts ...grpc.CallOption) (*ListOrphanedHASTResourcesResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(ListOrphanedHASTResourcesResponse)
@@ -1864,6 +1889,20 @@ type ManagerServiceServer interface {
 	// never leader-forwarded (the same locality convention as HostStats).
 	// See internal/assumptions/internal/assumecheck.
 	ListAssumptionResults(context.Context, *ListAssumptionResultsRequest) (*ListAssumptionResultsResponse, error)
+	// PurgeStaleAssumptionResults removes THIS node's own current-snapshot
+	// entries that are presently stale (same staleness definition
+	// ListAssumptionResults already computes: last_observed_at older than
+	// this node's configured -assumption-stale-after) - a de-cluttering
+	// action for entries "keyed on something no longer actively checked"
+	// (the assumptions page's own existing description of this group),
+	// e.g. a deleted VM's replica check. Never touches the history
+	// journal, which stays independently self-pruning by count/age (see
+	// internal/assumptions). Safe and idempotent: if a purged key's check
+	// resumes ticking, its entry simply reappears fresh on the next
+	// successful observation, exactly as a never-before-seen key would.
+	// Operator-tier, matching SaveAssumptionClaim/DeleteAssumptionClaim
+	// above - this only clears accounting data, never live cluster state.
+	PurgeStaleAssumptionResults(context.Context, *PurgeStaleAssumptionResultsRequest) (*PurgeStaleAssumptionResultsResponse, error)
 	// ListOrphanedHASTResources/CleanupOrphanedHASTResource close the gap
 	// ADR-0026 named and left open: once a replicated VM/jail's record is
 	// fully purged (not just reassigned - ADR-0025's PlanReclaim already
@@ -2193,6 +2232,9 @@ func (UnimplementedManagerServiceServer) GetLocalNetworkBridgeStatus(context.Con
 }
 func (UnimplementedManagerServiceServer) ListAssumptionResults(context.Context, *ListAssumptionResultsRequest) (*ListAssumptionResultsResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ListAssumptionResults not implemented")
+}
+func (UnimplementedManagerServiceServer) PurgeStaleAssumptionResults(context.Context, *PurgeStaleAssumptionResultsRequest) (*PurgeStaleAssumptionResultsResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method PurgeStaleAssumptionResults not implemented")
 }
 func (UnimplementedManagerServiceServer) ListOrphanedHASTResources(context.Context, *ListOrphanedHASTResourcesRequest) (*ListOrphanedHASTResourcesResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ListOrphanedHASTResources not implemented")
@@ -3586,6 +3628,24 @@ func _ManagerService_ListAssumptionResults_Handler(srv interface{}, ctx context.
 	return interceptor(ctx, in, info, handler)
 }
 
+func _ManagerService_PurgeStaleAssumptionResults_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(PurgeStaleAssumptionResultsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ManagerServiceServer).PurgeStaleAssumptionResults(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ManagerService_PurgeStaleAssumptionResults_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ManagerServiceServer).PurgeStaleAssumptionResults(ctx, req.(*PurgeStaleAssumptionResultsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _ManagerService_ListOrphanedHASTResources_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(ListOrphanedHASTResourcesRequest)
 	if err := dec(in); err != nil {
@@ -4100,6 +4160,10 @@ var ManagerService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ListAssumptionResults",
 			Handler:    _ManagerService_ListAssumptionResults_Handler,
+		},
+		{
+			MethodName: "PurgeStaleAssumptionResults",
+			Handler:    _ManagerService_PurgeStaleAssumptionResults_Handler,
 		},
 		{
 			MethodName: "ListOrphanedHASTResources",

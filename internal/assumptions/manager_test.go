@@ -129,6 +129,70 @@ func TestManager_Append_PruneByMaxAge(t *testing.T) {
 	}
 }
 
+// TestManager_PurgeStale_RemovesOnlyEntriesOlderThanThreshold is
+// ADR-0106's own regression test: the assumptions page's "superseded/
+// stale result(s)" group (a check keyed on something no longer
+// actively checked, e.g. a deleted VM) previously had no way to be
+// cleared - PurgeStale is the mechanism, and must remove exactly the
+// entries a caller would already see labeled stale, nothing more.
+func TestManager_PurgeStale_RemovesOnlyEntriesOlderThanThreshold(t *testing.T) {
+	m := &Manager{Path: filepath.Join(t.TempDir(), "assumptions.json")}
+	now := time.Now()
+	staleKey := testKey("node-stale")
+	freshKey := testKey("node-fresh")
+
+	must(t, m.Append([]Result{
+		{Key: staleKey, ObservedStatus: StatusTrue, LastObservedAt: now.Add(-2 * time.Hour)},
+		{Key: freshKey, ObservedStatus: StatusTrue, LastObservedAt: now},
+	}, time.Hour, 200, 30*24*time.Hour))
+
+	removed, err := m.PurgeStale(time.Hour, now)
+	must(t, err)
+	if removed != 1 {
+		t.Fatalf("PurgeStale() removed = %d, want 1", removed)
+	}
+
+	snapshot, history, err := m.Load()
+	must(t, err)
+	if len(snapshot) != 1 || snapshot[0].Key != freshKey {
+		t.Fatalf("snapshot after purge = %+v, want only freshKey remaining", snapshot)
+	}
+	if len(history) == 0 {
+		t.Errorf("history is empty after PurgeStale - the journal must never be touched by this method")
+	}
+}
+
+// TestManager_PurgeStale_NothingStaleIsANoOp confirms this never
+// rewrites the file (and thus never bumps mtime/fsyncs) when nothing
+// qualifies - PurgeStale is meant to be safe to call speculatively.
+func TestManager_PurgeStale_NothingStaleIsANoOp(t *testing.T) {
+	m := &Manager{Path: filepath.Join(t.TempDir(), "assumptions.json")}
+	now := time.Now()
+	must(t, m.Append([]Result{{Key: testKey("node-b"), ObservedStatus: StatusTrue, LastObservedAt: now}}, time.Hour, 200, 30*24*time.Hour))
+
+	removed, err := m.PurgeStale(time.Hour, now)
+	must(t, err)
+	if removed != 0 {
+		t.Errorf("PurgeStale() removed = %d, want 0 (nothing is stale yet)", removed)
+	}
+}
+
+// TestManager_PurgeStale_ZeroStaleAfterRemovesNothing mirrors
+// toRPCAssumptionResult's own "staleAfter <= 0 means never stale"
+// convention (internal/manager/assumptions_convert.go) - PurgeStale
+// must never disagree with what the page itself would label stale.
+func TestManager_PurgeStale_ZeroStaleAfterRemovesNothing(t *testing.T) {
+	m := &Manager{Path: filepath.Join(t.TempDir(), "assumptions.json")}
+	now := time.Now()
+	must(t, m.Append([]Result{{Key: testKey("node-b"), ObservedStatus: StatusTrue, LastObservedAt: now.Add(-999 * time.Hour)}}, time.Hour, 200, 30*24*time.Hour))
+
+	removed, err := m.PurgeStale(0, now)
+	must(t, err)
+	if removed != 0 {
+		t.Errorf("PurgeStale(0, ...) removed = %d, want 0", removed)
+	}
+}
+
 func TestManager_LoadAppend_ConcurrentAccess(t *testing.T) {
 	m := &Manager{Path: filepath.Join(t.TempDir(), "assumptions.json")}
 	var wg sync.WaitGroup

@@ -167,6 +167,7 @@ type PeerForwarder interface {
 	HostStats(ctx context.Context, addr string) (*rpcpb.HostStatsResponse, error)
 	GetLocalNetworkBridgeStatus(ctx context.Context, addr, networkID string) (*rpcpb.GetLocalNetworkBridgeStatusResponse, error)
 	ListAssumptionResults(ctx context.Context, addr string, req *rpcpb.ListAssumptionResultsRequest) (*rpcpb.ListAssumptionResultsResponse, error)
+	PurgeStaleAssumptionResults(ctx context.Context, addr string, req *rpcpb.PurgeStaleAssumptionResultsRequest) (*rpcpb.PurgeStaleAssumptionResultsResponse, error)
 
 	// RequestJoinColony/ApproveJoinRequest/RejectJoinRequest forward on a
 	// leader-hint rejection, mirroring every other Apply-backed write
@@ -252,6 +253,7 @@ type reconcilerStats interface {
 type assumptionStore interface {
 	Load() ([]assumptions.Result, []assumptions.HistoryEntry, error)
 	Degraded() (bool, string)
+	PurgeStale(staleAfter time.Duration, now time.Time) (int, error)
 }
 
 type assumptionRegisterStore interface {
@@ -1248,6 +1250,23 @@ func (s *Server) ListAssumptionResults(ctx context.Context, req *rpcpb.ListAssum
 		Latest: latest, History: historyOut,
 		StorageDegraded: degraded, StorageDegradedDetail: degradedDetail,
 	}, nil
+}
+
+// PurgeStaleAssumptionResults implements rpcpb.ManagerServiceServer.
+// Like ListAssumptionResults, this only ever touches THIS node's own
+// store - never routed through raft, never leader-forwarded. Uses the
+// same s.assumptionStaleAfter threshold ListAssumptionResults already
+// uses to compute the `stale` flag callers see, so this can never
+// remove an entry that wasn't already visibly labeled stale.
+func (s *Server) PurgeStaleAssumptionResults(_ context.Context, _ *rpcpb.PurgeStaleAssumptionResultsRequest) (*rpcpb.PurgeStaleAssumptionResultsResponse, error) {
+	if s.assumptions == nil {
+		return &rpcpb.PurgeStaleAssumptionResultsResponse{Error: "no assumptions store configured on this node"}, nil
+	}
+	removed, err := s.assumptions.PurgeStale(s.assumptionStaleAfter, time.Now())
+	if err != nil {
+		return &rpcpb.PurgeStaleAssumptionResultsResponse{Error: err.Error()}, nil
+	}
+	return &rpcpb.PurgeStaleAssumptionResultsResponse{RemovedCount: uint32(removed)}, nil
 }
 
 // CreateVM implements rpcpb.ManagerServiceServer. See CreateNetwork's

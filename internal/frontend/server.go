@@ -809,6 +809,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /jails/{id}", s.handleJailPage)
 	s.mux.HandleFunc("GET /simulate", s.handleSimulatePage)
 	s.mux.HandleFunc("GET /assumptions", s.handleAssumptionsPage)
+	s.mux.HandleFunc("POST /assumptions/purge-stale", s.requireRole(manager.RoleOperator, s.handlePurgeStaleAssumptionResults))
 	s.mux.HandleFunc("GET /assumption-register", s.handleAssumptionRegisterPage)
 	s.mux.HandleFunc("GET /recovery-handbook", s.handleRecoveryHandbookPage)
 	s.mux.HandleFunc("GET /trace", s.handleTracePage)
