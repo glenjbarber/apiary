@@ -157,13 +157,6 @@ type pageData struct {
 	CanOperate bool
 	CanAdmin   bool
 
-	// SidebarTreeNodes/SidebarTreeError back the sidebar's own live
-	// resource tree ("sidebar_tree" template, loaded via GET /nav/tree,
-	// see sidebar_tree.go) - not fetched for every ordinary page render,
-	// only for that fragment's own response.
-	SidebarTreeNodes []sidebarTreeNode
-	SidebarTreeError string
-
 	// VM is the single virtual machine rendered by the detail page.
 	VM vmView
 
@@ -814,7 +807,6 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /networks", s.handleNetworksPage)
 	s.mux.HandleFunc("GET /jails", s.handleJailsPage)
 	s.mux.HandleFunc("GET /jails/panel", s.handleJailPanel)
-	s.mux.HandleFunc("GET /nav/tree", s.handleSidebarTreePanel)
 	s.mux.HandleFunc("GET /jails/{id}", s.handleJailPage)
 	s.mux.HandleFunc("GET /simulate", s.handleSimulatePage)
 	s.mux.HandleFunc("GET /assumptions", s.handleAssumptionsPage)
