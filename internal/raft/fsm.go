@@ -454,6 +454,14 @@ func (f *FSM) applyCreateJail(index uint64, jail *internalpb.JailDefinition) *FS
 	if _, exists := f.jails[jail.GetId()]; exists {
 		return &FSMApplyResult{Index: index, Error: fmt.Sprintf("CreateJail: id %q already exists", jail.GetId())}
 	}
+	if jail.GetHostname() != "" {
+		if !validHostname(jail.GetHostname()) {
+			return &FSMApplyResult{Index: index, Error: fmt.Sprintf("CreateJail: invalid hostname %q: only alphanumerics, '-', and '.' are allowed (max 255 chars)", jail.GetHostname())}
+		}
+		if conflict := f.jailHostnameConflict(jail.GetHostname(), ""); conflict != "" {
+			return &FSMApplyResult{Index: index, Error: fmt.Sprintf("CreateJail: hostname %q is already used by jail %q", jail.GetHostname(), conflict)}
+		}
+	}
 	// base_template is interpolated into a ZFS dataset/snapshot path
 	// (internal/zfs.Manager.Clone, via internal/cluster's
 	// jailTemplateSnapshot) - see validSnapshotRef's own doc comment
@@ -538,6 +546,14 @@ func (f *FSM) applySetJailHostname(index uint64, req *internalpb.SetJailHostname
 	jail, exists := f.jails[req.GetId()]
 	if !exists {
 		return &FSMApplyResult{Index: index, Error: fmt.Sprintf("SetJailHostname: id %q does not exist", req.GetId())}
+	}
+	if req.GetHostname() != "" {
+		if !validHostname(req.GetHostname()) {
+			return &FSMApplyResult{Index: index, Error: fmt.Sprintf("SetJailHostname: invalid hostname %q: only alphanumerics, '-', and '.' are allowed (max 255 chars)", req.GetHostname())}
+		}
+		if conflict := f.jailHostnameConflict(req.GetHostname(), req.GetId()); conflict != "" {
+			return &FSMApplyResult{Index: index, Error: fmt.Sprintf("SetJailHostname: hostname %q is already used by jail %q", req.GetHostname(), conflict)}
+		}
 	}
 	updated := proto.Clone(jail).(*internalpb.JailDefinition)
 	updated.Hostname = req.GetHostname()
@@ -893,6 +909,33 @@ func validHostname(s string) bool {
 		}
 	}
 	return true
+}
+
+// jailHostnameConflict returns the id of an existing jail (other than
+// excludeID) whose hostname already equals hostname, or "" if none
+// does. Comparison is case-insensitive - jail(8) hostnames are DNS
+// names, and "Web01.lan"/"web01.lan" naming two different jails would
+// be exactly the ambiguous-identity outcome ADR-0106 exists to prevent,
+// even though validHostname itself (shared with the unrelated Cloudflare
+// interpolation-safety check above) does not normalize case. An empty
+// hostname never conflicts with another empty hostname: it means "not
+// set," not a shared identity, matching this field's existing optional
+// status (no CreateJail/SetJailHostname caller has ever been required
+// to set it).
+func (f *FSM) jailHostnameConflict(hostname, excludeID string) string {
+	if hostname == "" {
+		return ""
+	}
+	want := strings.ToLower(hostname)
+	for id, jail := range f.jails {
+		if id == excludeID {
+			continue
+		}
+		if strings.ToLower(jail.GetHostname()) == want {
+			return id
+		}
+	}
+	return ""
 }
 
 // applyDeleteNetwork removes a NetworkDefinition outright - no soft-

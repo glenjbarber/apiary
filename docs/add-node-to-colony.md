@@ -83,6 +83,21 @@ the moment a second voter was added, since neither side could reach the
 other by the recorded address. Check this on the existing member *before*
 troubleshooting anything about the joining host.
 
+**If a voter's recorded address is stale (as above, or after any other
+address change), use `UpdateVoterAddress` (ADR-0106), not a repeated
+join request.** An earlier version of this recovery - resubmitting
+`RequestJoinColony`/`ApproveJoinRequest` against the same, already-voting
+`node_id` to let `AddVoter`'s own "existing voter -> update its address"
+behavior take effect - is no longer possible: both RPCs now reject a
+`node_id` that already names a current voter outright, specifically to
+prevent an accidental collision between a new Comb and an existing one
+from being silently treated as an address correction. `UpdateVoterAddress`
+is the dedicated replacement - it requires `node_id` to already be a
+known voter (the opposite of `RequestJoinColony`'s new check), applies
+the same reachability guardrail against the new address that
+`ApproveJoinRequest` applies against a joiner's, and is Admin-only. It
+has no Colony overview UI yet; call it directly via the manager RPC.
+
 **If Raft transport mutual TLS (`raft_tls_cert`/`raft_tls_key`/
 `raft_tls_ca`, ADR-0078) is used anywhere in this Colony, every voter must
 have all three set identically in kind - all set, or all left empty.** A

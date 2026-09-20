@@ -207,6 +207,10 @@ type PeerForwarder interface {
 	// mirroring ApproveJoinRequest above exactly (ADR-0103).
 	PreflightApproveJoinRequest(ctx context.Context, addr string, req *rpcpb.PreflightApproveJoinRequestRequest) (*rpcpb.PreflightApproveJoinRequestResponse, error)
 
+	// UpdateVoterAddress forwards on a leader-hint rejection, mirroring
+	// ApproveJoinRequest above exactly (ADR-0106).
+	UpdateVoterAddress(ctx context.Context, addr string, req *rpcpb.UpdateVoterAddressRequest) (*rpcpb.UpdateVoterAddressResponse, error)
+
 	// ReserveRestartLease/ConfirmRestartCompleted forward on a leader-hint
 	// rejection like every other Apply-backed write above, but
 	// authenticate with this node's own restart-guardrail token instead
