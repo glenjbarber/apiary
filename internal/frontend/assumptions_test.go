@@ -35,6 +35,13 @@ func TestServer_AssumptionsPage_FanOut_OneErrorsOneSucceeds(t *testing.T) {
 	s.ServeHTTP(rec, req)
 
 	body := rec.Body.String()
+	if strings.Count(body, `<details class="panel assumption-host">`) != 2 {
+		t.Error("expected two host sections collapsed by default")
+	}
+	if !strings.Contains(body, `badge true">All green`) || !strings.Contains(body, `badge false">Needs attention`) {
+		t.Error("expected green and red summaries for the healthy and unreachable hosts")
+	}
+
 	if !strings.Contains(body, "apiarium") || !strings.Contains(body, "true") {
 		t.Errorf("page missing the local (working) node's result, got: %s", body)
 	}
@@ -263,5 +270,29 @@ func TestServer_AssumptionsPage_StorageDegradedShowsBanner(t *testing.T) {
 	body := rec.Body.String()
 	if !strings.Contains(body, "Storage warning") || !strings.Contains(body, "corrupt-123") {
 		t.Errorf("page missing the storage-degraded banner, got: %s", body)
+	}
+}
+
+func TestNodeAssumptionsAllGreen(t *testing.T) {
+	for _, tt := range []struct {
+		name string
+		node nodeAssumptionsView
+		want bool
+	}{
+		{"passing", nodeAssumptionsView{Results: []assumptionResultView{{Status: "true"}, {Status: "not_applicable"}}}, true},
+		{"not applicable", nodeAssumptionsView{Results: []assumptionResultView{{Status: "not_applicable"}}}, true},
+		{"failed", nodeAssumptionsView{Results: []assumptionResultView{{Status: "true"}, {Status: "false"}}}, false},
+		{"unknown overrides observed true", nodeAssumptionsView{Results: []assumptionResultView{{Status: "unknown", ObservedStatus: "true"}}}, false},
+		{"no observations", nodeAssumptionsView{}, false},
+		{"unreachable", nodeAssumptionsView{Error: "unreachable"}, false},
+		{"storage degraded", nodeAssumptionsView{StorageDegraded: true, Results: []assumptionResultView{{Status: "true"}}}, false},
+		{"historical failures", nodeAssumptionsView{Results: []assumptionResultView{{Status: "true"}}, StaleResults: []assumptionResultView{{Status: "false", Stale: true}}}, true},
+		{"stale only", nodeAssumptionsView{StaleResults: []assumptionResultView{{Status: "true", Stale: true}}}, false},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.node.AllGreen(); got != tt.want {
+				t.Errorf("AllGreen() = %v, want %v", got, tt.want)
+			}
+		})
 	}
 }

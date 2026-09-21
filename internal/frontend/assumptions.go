@@ -44,6 +44,20 @@ type nodeAssumptionsView struct {
 	StaleResults          []assumptionResultView
 }
 
+// AllGreen summarizes current effective observations only. Historical stale
+// results remain available separately and do not override current evidence.
+func (n nodeAssumptionsView) AllGreen() bool {
+	if n.Error != "" || n.StorageDegraded || len(n.Results) == 0 {
+		return false
+	}
+	for _, r := range n.Results {
+		if r.Stale || (r.Status != "true" && r.Status != "not_applicable") {
+			return false
+		}
+	}
+	return true
+}
+
 func fromRPCAssumptionStatus(s rpcpb.AssumptionStatus) string {
 	switch s {
 	case rpcpb.AssumptionStatus_ASSUMPTION_STATUS_TRUE:

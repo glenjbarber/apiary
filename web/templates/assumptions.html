@@ -12,8 +12,9 @@
   {{end}}
 
   {{range .AssumptionNodes}}
-  <div class="panel">
-    <h3>{{.NodeID}}</h3>
+  <details class="panel assumption-host">
+    <summary><strong>{{.NodeID}}</strong> <span class="badge {{if .AllGreen}}true{{else}}false{{end}}">{{if .AllGreen}}All green{{else}}Needs attention{{end}}</span></summary>
+    <div class="assumption-host-results">
     {{if .Error}}
     <div class="banner-error">{{.Error}}</div>
     {{else}}
@@ -63,7 +64,8 @@
     </details>
     {{end}}
     {{end}}
-  </div>
+    </div>
+  </details>
   {{else}}
   <p class="muted"><em>No known nodes</em></p>
   {{end}}
