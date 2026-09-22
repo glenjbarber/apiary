@@ -763,6 +763,28 @@ func (s *Server) peerManagerdAddr(leaderHint string) string {
 	return net.JoinHostPort(host, port)
 }
 
+// augmentForwardError appends ferr's own text to baseErr when a forward
+// attempt to leaderHint was actually made and failed (ferr != nil) -
+// every leader-forwarding RPC below uses this instead of returning
+// baseErr bare, so a real forwarding failure (TLS handshake, peer auth,
+// network) is never silently indistinguishable from "this node simply
+// doesn't know who the leader is." That indistinguishability was a real,
+// live-diagnosed bug (see SHARED.md's 2026-09-21 buzz/brood incident):
+// LeaderHint was correctly populated and a forward was attempted, but
+// its TLS-verification failure was discarded entirely, leaving only
+// the generic "raft: this node is not the leader" - which took an
+// extensive live SSH investigation with a custom-built diagnostic tool
+// to trace back to its real cause. ferr == nil (no forward attempted,
+// or the forward itself never ran) returns baseErr completely
+// unchanged - this must never alter the existing "no peers configured"
+// or "no leader known" error text.
+func augmentForwardError(baseErr, leaderHint string, ferr error) string {
+	if ferr == nil {
+		return baseErr
+	}
+	return fmt.Sprintf("%s (forwarding to leader hint %q also failed: %v)", baseErr, leaderHint, ferr)
+}
+
 // Status implements rpcpb.ManagerServiceServer. If raftd is unreachable,
 // it still returns a normal response with RaftReachable=false and
 // RaftError set, rather than a gRPC error, so callers always get a
@@ -972,12 +994,14 @@ func (s *Server) CreateNetwork(ctx context.Context, req *rpcpb.CreateNetworkRequ
 		Op: &internalpb.Command_CreateNetwork{CreateNetwork: &internalpb.CreateNetwork{Network: toInternalNetwork(req.GetNetwork())}},
 	}
 	network, appErr, leaderHint := s.applyNetworkCommand(ctx, cmd, req.GetTimeoutMs())
+	var ferr error
 	if leaderHint != "" && s.peers != nil {
-		if fwd, ferr := s.peers.CreateNetwork(ctx, s.peerManagerdAddr(leaderHint), req); ferr == nil {
+		var fwd *rpcpb.CreateNetworkResponse
+		if fwd, ferr = s.peers.CreateNetwork(ctx, s.peerManagerdAddr(leaderHint), req); ferr == nil {
 			return fwd, nil
 		}
 	}
-	return &rpcpb.CreateNetworkResponse{Network: fromInternalNetwork(network), Error: appErr, LeaderHint: leaderHint}, nil
+	return &rpcpb.CreateNetworkResponse{Network: fromInternalNetwork(network), Error: augmentForwardError(appErr, leaderHint, ferr), LeaderHint: leaderHint}, nil
 }
 
 // DeleteNetwork implements rpcpb.ManagerServiceServer. See CreateNetwork's
@@ -987,12 +1011,14 @@ func (s *Server) DeleteNetwork(ctx context.Context, req *rpcpb.DeleteNetworkRequ
 		Op: &internalpb.Command_DeleteNetwork{DeleteNetwork: &internalpb.DeleteNetwork{Id: req.GetId()}},
 	}
 	network, appErr, leaderHint := s.applyNetworkCommand(ctx, cmd, req.GetTimeoutMs())
+	var ferr error
 	if leaderHint != "" && s.peers != nil {
-		if fwd, ferr := s.peers.DeleteNetwork(ctx, s.peerManagerdAddr(leaderHint), req); ferr == nil {
+		var fwd *rpcpb.DeleteNetworkResponse
+		if fwd, ferr = s.peers.DeleteNetwork(ctx, s.peerManagerdAddr(leaderHint), req); ferr == nil {
 			return fwd, nil
 		}
 	}
-	return &rpcpb.DeleteNetworkResponse{Network: fromInternalNetwork(network), Error: appErr, LeaderHint: leaderHint}, nil
+	return &rpcpb.DeleteNetworkResponse{Network: fromInternalNetwork(network), Error: augmentForwardError(appErr, leaderHint, ferr), LeaderHint: leaderHint}, nil
 }
 
 // SetNetworkName implements rpcpb.ManagerServiceServer - renames a
@@ -1003,12 +1029,14 @@ func (s *Server) SetNetworkName(ctx context.Context, req *rpcpb.SetNetworkNameRe
 		Op: &internalpb.Command_SetNetworkName{SetNetworkName: &internalpb.SetNetworkName{Id: req.GetId(), Name: req.GetName()}},
 	}
 	network, appErr, leaderHint := s.applyNetworkCommand(ctx, cmd, req.GetTimeoutMs())
+	var ferr error
 	if leaderHint != "" && s.peers != nil {
-		if fwd, ferr := s.peers.SetNetworkName(ctx, s.peerManagerdAddr(leaderHint), req); ferr == nil {
+		var fwd *rpcpb.SetNetworkNameResponse
+		if fwd, ferr = s.peers.SetNetworkName(ctx, s.peerManagerdAddr(leaderHint), req); ferr == nil {
 			return fwd, nil
 		}
 	}
-	return &rpcpb.SetNetworkNameResponse{Network: fromInternalNetwork(network), Error: appErr, LeaderHint: leaderHint}, nil
+	return &rpcpb.SetNetworkNameResponse{Network: fromInternalNetwork(network), Error: augmentForwardError(appErr, leaderHint, ferr), LeaderHint: leaderHint}, nil
 }
 
 // GetNetworkTeardownStatus implements rpcpb.ManagerServiceServer - a
@@ -1039,12 +1067,14 @@ func (s *Server) ListNetworks(ctx context.Context, _ *rpcpb.ListNetworksRequest)
 		return &rpcpb.ListNetworksResponse{Error: err.Error()}, nil
 	}
 	if resp.GetError() != "" {
+		var ferr error
 		if s.peers != nil && resp.GetLeaderHint() != "" {
-			if fwd, ferr := s.peers.ListNetworks(ctx, s.peerManagerdAddr(resp.GetLeaderHint())); ferr == nil {
+			var fwd *rpcpb.ListNetworksResponse
+			if fwd, ferr = s.peers.ListNetworks(ctx, s.peerManagerdAddr(resp.GetLeaderHint())); ferr == nil {
 				return fwd, nil
 			}
 		}
-		return &rpcpb.ListNetworksResponse{Error: resp.GetError(), LeaderHint: resp.GetLeaderHint()}, nil
+		return &rpcpb.ListNetworksResponse{Error: augmentForwardError(resp.GetError(), resp.GetLeaderHint(), ferr), LeaderHint: resp.GetLeaderHint()}, nil
 	}
 	networks := make([]*rpcpb.NetworkDefinition, 0, len(resp.GetNetworks()))
 	for _, n := range resp.GetNetworks() {
@@ -1107,15 +1137,17 @@ func (s *Server) CreateAPIKey(ctx context.Context, req *rpcpb.CreateAPIKeyReques
 	}
 	key, appErr, leaderHint := s.applyAPIKeyCommand(ctx, cmd, req.GetTimeoutMs())
 	if appErr != "" {
+		var ferr error
 		if leaderHint != "" && s.peers != nil {
 			// Forwarded: the leader generates and stores its own fresh
 			// raw/hashed pair - the raw/hashed values generated above are
 			// simply discarded, never sent anywhere.
-			if fwd, ferr := s.peers.CreateAPIKey(ctx, s.peerManagerdAddr(leaderHint), req); ferr == nil {
+			var fwd *rpcpb.CreateAPIKeyResponse
+			if fwd, ferr = s.peers.CreateAPIKey(ctx, s.peerManagerdAddr(leaderHint), req); ferr == nil {
 				return fwd, nil
 			}
 		}
-		return &rpcpb.CreateAPIKeyResponse{Error: appErr, LeaderHint: leaderHint}, nil
+		return &rpcpb.CreateAPIKeyResponse{Error: augmentForwardError(appErr, leaderHint, ferr), LeaderHint: leaderHint}, nil
 	}
 	return &rpcpb.CreateAPIKeyResponse{Key: fromInternalAPIKey(key), RawKey: raw}, nil
 }
@@ -1127,12 +1159,14 @@ func (s *Server) RevokeAPIKey(ctx context.Context, req *rpcpb.RevokeAPIKeyReques
 		Op: &internalpb.Command_RevokeApiKey{RevokeApiKey: &internalpb.RevokeAPIKey{Id: req.GetId()}},
 	}
 	_, appErr, leaderHint := s.applyAPIKeyCommand(ctx, cmd, req.GetTimeoutMs())
+	var ferr error
 	if leaderHint != "" && s.peers != nil {
-		if fwd, ferr := s.peers.RevokeAPIKey(ctx, s.peerManagerdAddr(leaderHint), req); ferr == nil {
+		var fwd *rpcpb.RevokeAPIKeyResponse
+		if fwd, ferr = s.peers.RevokeAPIKey(ctx, s.peerManagerdAddr(leaderHint), req); ferr == nil {
 			return fwd, nil
 		}
 	}
-	return &rpcpb.RevokeAPIKeyResponse{Error: appErr, LeaderHint: leaderHint}, nil
+	return &rpcpb.RevokeAPIKeyResponse{Error: augmentForwardError(appErr, leaderHint, ferr), LeaderHint: leaderHint}, nil
 }
 
 // ListAPIKeys implements rpcpb.ManagerServiceServer. See ListNetworks's
@@ -1146,12 +1180,14 @@ func (s *Server) ListAPIKeys(ctx context.Context, _ *rpcpb.ListAPIKeysRequest) (
 		return &rpcpb.ListAPIKeysResponse{Error: err.Error()}, nil
 	}
 	if resp.GetError() != "" {
+		var ferr error
 		if s.peers != nil && resp.GetLeaderHint() != "" {
-			if fwd, ferr := s.peers.ListAPIKeys(ctx, s.peerManagerdAddr(resp.GetLeaderHint())); ferr == nil {
+			var fwd *rpcpb.ListAPIKeysResponse
+			if fwd, ferr = s.peers.ListAPIKeys(ctx, s.peerManagerdAddr(resp.GetLeaderHint())); ferr == nil {
 				return fwd, nil
 			}
 		}
-		return &rpcpb.ListAPIKeysResponse{Error: resp.GetError(), LeaderHint: resp.GetLeaderHint()}, nil
+		return &rpcpb.ListAPIKeysResponse{Error: augmentForwardError(resp.GetError(), resp.GetLeaderHint(), ferr), LeaderHint: resp.GetLeaderHint()}, nil
 	}
 	keys := make([]*rpcpb.APIKeyInfo, 0, len(resp.GetKeys()))
 	for _, k := range resp.GetKeys() {
@@ -1279,12 +1315,14 @@ func (s *Server) CreateVM(ctx context.Context, req *rpcpb.CreateVMRequest) (*rpc
 		Op: &internalpb.Command_CreateVm{CreateVm: &internalpb.CreateVM{Vm: toInternalVM(req.GetVm())}},
 	}
 	vm, appErr, leaderHint := s.applyCommand(ctx, cmd, req.GetTimeoutMs())
+	var ferr error
 	if leaderHint != "" && s.peers != nil {
-		if fwd, ferr := s.peers.CreateVM(ctx, s.peerManagerdAddr(leaderHint), req); ferr == nil {
+		var fwd *rpcpb.CreateVMResponse
+		if fwd, ferr = s.peers.CreateVM(ctx, s.peerManagerdAddr(leaderHint), req); ferr == nil {
 			return fwd, nil
 		}
 	}
-	return &rpcpb.CreateVMResponse{Vm: fromInternalVM(vm), Error: appErr, LeaderHint: leaderHint}, nil
+	return &rpcpb.CreateVMResponse{Vm: fromInternalVM(vm), Error: augmentForwardError(appErr, leaderHint, ferr), LeaderHint: leaderHint}, nil
 }
 
 // UpdateVM implements rpcpb.ManagerServiceServer. See CreateNetwork's
@@ -1294,12 +1332,14 @@ func (s *Server) UpdateVM(ctx context.Context, req *rpcpb.UpdateVMRequest) (*rpc
 		Op: &internalpb.Command_UpdateVm{UpdateVm: &internalpb.UpdateVM{Vm: toInternalVM(req.GetVm())}},
 	}
 	vm, appErr, leaderHint := s.applyCommand(ctx, cmd, req.GetTimeoutMs())
+	var ferr error
 	if leaderHint != "" && s.peers != nil {
-		if fwd, ferr := s.peers.UpdateVM(ctx, s.peerManagerdAddr(leaderHint), req); ferr == nil {
+		var fwd *rpcpb.UpdateVMResponse
+		if fwd, ferr = s.peers.UpdateVM(ctx, s.peerManagerdAddr(leaderHint), req); ferr == nil {
 			return fwd, nil
 		}
 	}
-	return &rpcpb.UpdateVMResponse{Vm: fromInternalVM(vm), Error: appErr, LeaderHint: leaderHint}, nil
+	return &rpcpb.UpdateVMResponse{Vm: fromInternalVM(vm), Error: augmentForwardError(appErr, leaderHint, ferr), LeaderHint: leaderHint}, nil
 }
 
 // DeleteVM implements rpcpb.ManagerServiceServer. See CreateNetwork's
@@ -1309,12 +1349,14 @@ func (s *Server) DeleteVM(ctx context.Context, req *rpcpb.DeleteVMRequest) (*rpc
 		Op: &internalpb.Command_DeleteVm{DeleteVm: &internalpb.DeleteVM{Id: req.GetId()}},
 	}
 	vm, appErr, leaderHint := s.applyCommand(ctx, cmd, req.GetTimeoutMs())
+	var ferr error
 	if leaderHint != "" && s.peers != nil {
-		if fwd, ferr := s.peers.DeleteVM(ctx, s.peerManagerdAddr(leaderHint), req); ferr == nil {
+		var fwd *rpcpb.DeleteVMResponse
+		if fwd, ferr = s.peers.DeleteVM(ctx, s.peerManagerdAddr(leaderHint), req); ferr == nil {
 			return fwd, nil
 		}
 	}
-	return &rpcpb.DeleteVMResponse{Vm: fromInternalVM(vm), Error: appErr, LeaderHint: leaderHint}, nil
+	return &rpcpb.DeleteVMResponse{Vm: fromInternalVM(vm), Error: augmentForwardError(appErr, leaderHint, ferr), LeaderHint: leaderHint}, nil
 }
 
 // SetVMFirewallPaused implements rpcpb.ManagerServiceServer. See
@@ -1333,12 +1375,14 @@ func (s *Server) SetVMFirewallPaused(ctx context.Context, req *rpcpb.SetVMFirewa
 		}},
 	}
 	vm, appErr, leaderHint := s.applyCommand(ctx, cmd, req.GetTimeoutMs())
+	var ferr error
 	if leaderHint != "" && s.peers != nil {
-		if fwd, ferr := s.peers.SetVMFirewallPaused(ctx, s.peerManagerdAddr(leaderHint), req); ferr == nil {
+		var fwd *rpcpb.SetVMFirewallPausedResponse
+		if fwd, ferr = s.peers.SetVMFirewallPaused(ctx, s.peerManagerdAddr(leaderHint), req); ferr == nil {
 			return fwd, nil
 		}
 	}
-	return &rpcpb.SetVMFirewallPausedResponse{Vm: fromInternalVM(vm), Error: appErr, LeaderHint: leaderHint}, nil
+	return &rpcpb.SetVMFirewallPausedResponse{Vm: fromInternalVM(vm), Error: augmentForwardError(appErr, leaderHint, ferr), LeaderHint: leaderHint}, nil
 }
 
 // SetVMFirewallRules implements rpcpb.ManagerServiceServer - lets an
@@ -1352,12 +1396,14 @@ func (s *Server) SetVMFirewallRules(ctx context.Context, req *rpcpb.SetVMFirewal
 		}},
 	}
 	vm, appErr, leaderHint := s.applyCommand(ctx, cmd, req.GetTimeoutMs())
+	var ferr error
 	if leaderHint != "" && s.peers != nil {
-		if fwd, ferr := s.peers.SetVMFirewallRules(ctx, s.peerManagerdAddr(leaderHint), req); ferr == nil {
+		var fwd *rpcpb.SetVMFirewallRulesResponse
+		if fwd, ferr = s.peers.SetVMFirewallRules(ctx, s.peerManagerdAddr(leaderHint), req); ferr == nil {
 			return fwd, nil
 		}
 	}
-	return &rpcpb.SetVMFirewallRulesResponse{Vm: fromInternalVM(vm), Error: appErr, LeaderHint: leaderHint}, nil
+	return &rpcpb.SetVMFirewallRulesResponse{Vm: fromInternalVM(vm), Error: augmentForwardError(appErr, leaderHint, ferr), LeaderHint: leaderHint}, nil
 }
 
 // SetVMCloudflareExposure implements rpcpb.ManagerServiceServer - see
@@ -1375,12 +1421,14 @@ func (s *Server) SetVMCloudflareExposure(ctx context.Context, req *rpcpb.SetVMCl
 			return &rpcpb.SetVMCloudflareExposureResponse{Error: err.Error()}, nil
 		}
 		if getResp.GetError() != "" {
+			var ferr error
 			if s.peers != nil && getResp.GetLeaderHint() != "" {
-				if fwd, ferr := s.peers.SetVMCloudflareExposure(ctx, s.peerManagerdAddr(getResp.GetLeaderHint()), req); ferr == nil {
+				var fwd *rpcpb.SetVMCloudflareExposureResponse
+				if fwd, ferr = s.peers.SetVMCloudflareExposure(ctx, s.peerManagerdAddr(getResp.GetLeaderHint()), req); ferr == nil {
 					return fwd, nil
 				}
 			}
-			return &rpcpb.SetVMCloudflareExposureResponse{Error: getResp.GetError(), LeaderHint: getResp.GetLeaderHint()}, nil
+			return &rpcpb.SetVMCloudflareExposureResponse{Error: augmentForwardError(getResp.GetError(), getResp.GetLeaderHint(), ferr), LeaderHint: getResp.GetLeaderHint()}, nil
 		}
 		if !getResp.GetFound() {
 			return &rpcpb.SetVMCloudflareExposureResponse{Error: fmt.Sprintf("VM %q not found", req.GetId())}, nil
@@ -1399,12 +1447,14 @@ func (s *Server) SetVMCloudflareExposure(ctx context.Context, req *rpcpb.SetVMCl
 		}},
 	}
 	vm, appErr, leaderHint := s.applyCommand(ctx, cmd, req.GetTimeoutMs())
+	var ferr error
 	if leaderHint != "" && s.peers != nil {
-		if fwd, ferr := s.peers.SetVMCloudflareExposure(ctx, s.peerManagerdAddr(leaderHint), req); ferr == nil {
+		var fwd *rpcpb.SetVMCloudflareExposureResponse
+		if fwd, ferr = s.peers.SetVMCloudflareExposure(ctx, s.peerManagerdAddr(leaderHint), req); ferr == nil {
 			return fwd, nil
 		}
 	}
-	return &rpcpb.SetVMCloudflareExposureResponse{Vm: fromInternalVM(vm), Error: appErr, LeaderHint: leaderHint}, nil
+	return &rpcpb.SetVMCloudflareExposureResponse{Vm: fromInternalVM(vm), Error: augmentForwardError(appErr, leaderHint, ferr), LeaderHint: leaderHint}, nil
 }
 
 // SetVMDesiredState changes only a VM lifecycle target. Unlike UpdateVM it is
@@ -1415,12 +1465,14 @@ func (s *Server) SetVMDesiredState(ctx context.Context, req *rpcpb.SetVMDesiredS
 		Id: req.GetId(), DesiredState: internalpb.VMState(req.GetDesiredState()),
 	}}}
 	vm, appErr, leaderHint := s.applyCommand(ctx, cmd, req.GetTimeoutMs())
+	var ferr error
 	if leaderHint != "" && s.peers != nil {
-		if fwd, ferr := s.peers.SetVMDesiredState(ctx, s.peerManagerdAddr(leaderHint), req); ferr == nil {
+		var fwd *rpcpb.SetVMDesiredStateResponse
+		if fwd, ferr = s.peers.SetVMDesiredState(ctx, s.peerManagerdAddr(leaderHint), req); ferr == nil {
 			return fwd, nil
 		}
 	}
-	return &rpcpb.SetVMDesiredStateResponse{Vm: fromInternalVM(vm), Error: appErr, LeaderHint: leaderHint}, nil
+	return &rpcpb.SetVMDesiredStateResponse{Vm: fromInternalVM(vm), Error: augmentForwardError(appErr, leaderHint, ferr), LeaderHint: leaderHint}, nil
 }
 
 // ForcePurgeVM implements rpcpb.ManagerServiceServer. It's an escape
@@ -1445,12 +1497,14 @@ func (s *Server) ForcePurgeVM(ctx context.Context, req *rpcpb.ForcePurgeVMReques
 		return &rpcpb.ForcePurgeVMResponse{Error: err.Error()}, nil
 	}
 	if getResp.GetError() != "" {
+		var ferr error
 		if s.peers != nil && getResp.GetLeaderHint() != "" {
-			if fwd, ferr := s.peers.ForcePurgeVM(ctx, s.peerManagerdAddr(getResp.GetLeaderHint()), req); ferr == nil {
+			var fwd *rpcpb.ForcePurgeVMResponse
+			if fwd, ferr = s.peers.ForcePurgeVM(ctx, s.peerManagerdAddr(getResp.GetLeaderHint()), req); ferr == nil {
 				return fwd, nil
 			}
 		}
-		return &rpcpb.ForcePurgeVMResponse{Error: getResp.GetError(), LeaderHint: getResp.GetLeaderHint()}, nil
+		return &rpcpb.ForcePurgeVMResponse{Error: augmentForwardError(getResp.GetError(), getResp.GetLeaderHint(), ferr), LeaderHint: getResp.GetLeaderHint()}, nil
 	}
 	if !getResp.GetFound() {
 		return &rpcpb.ForcePurgeVMResponse{Error: fmt.Sprintf("VM %q not found", req.GetId())}, nil
@@ -1463,12 +1517,14 @@ func (s *Server) ForcePurgeVM(ctx context.Context, req *rpcpb.ForcePurgeVMReques
 		Op: &internalpb.Command_PurgeVm{PurgeVm: &internalpb.PurgeVM{Id: req.GetId()}},
 	}
 	vm, appErr, leaderHint := s.applyCommand(ctx, cmd, req.GetTimeoutMs())
+	var ferr error
 	if leaderHint != "" && s.peers != nil {
-		if fwd, ferr := s.peers.ForcePurgeVM(ctx, s.peerManagerdAddr(leaderHint), req); ferr == nil {
+		var fwd *rpcpb.ForcePurgeVMResponse
+		if fwd, ferr = s.peers.ForcePurgeVM(ctx, s.peerManagerdAddr(leaderHint), req); ferr == nil {
 			return fwd, nil
 		}
 	}
-	return &rpcpb.ForcePurgeVMResponse{Vm: fromInternalVM(vm), Error: appErr, LeaderHint: leaderHint}, nil
+	return &rpcpb.ForcePurgeVMResponse{Vm: fromInternalVM(vm), Error: augmentForwardError(appErr, leaderHint, ferr), LeaderHint: leaderHint}, nil
 }
 
 // MigrateVM implements rpcpb.ManagerServiceServer. See its own proto
@@ -1490,12 +1546,14 @@ func (s *Server) MigrateVM(ctx context.Context, req *rpcpb.MigrateVMRequest) (*r
 		return &rpcpb.MigrateVMResponse{Error: err.Error()}, nil
 	}
 	if getResp.GetError() != "" {
+		var ferr error
 		if s.peers != nil && getResp.GetLeaderHint() != "" {
-			if fwd, ferr := s.peers.MigrateVM(ctx, s.peerManagerdAddr(getResp.GetLeaderHint()), req); ferr == nil {
+			var fwd *rpcpb.MigrateVMResponse
+			if fwd, ferr = s.peers.MigrateVM(ctx, s.peerManagerdAddr(getResp.GetLeaderHint()), req); ferr == nil {
 				return fwd, nil
 			}
 		}
-		return &rpcpb.MigrateVMResponse{Error: getResp.GetError(), LeaderHint: getResp.GetLeaderHint()}, nil
+		return &rpcpb.MigrateVMResponse{Error: augmentForwardError(getResp.GetError(), getResp.GetLeaderHint(), ferr), LeaderHint: getResp.GetLeaderHint()}, nil
 	}
 	if !getResp.GetFound() {
 		return &rpcpb.MigrateVMResponse{Error: fmt.Sprintf("VM %q not found", req.GetId())}, nil
@@ -1523,12 +1581,14 @@ func (s *Server) MigrateVM(ctx context.Context, req *rpcpb.MigrateVMRequest) (*r
 		Op: &internalpb.Command_UpdateVm{UpdateVm: &internalpb.UpdateVM{Vm: updated}},
 	}
 	result, appErr, leaderHint := s.applyCommand(ctx, cmd, req.GetTimeoutMs())
+	var ferr error
 	if leaderHint != "" && s.peers != nil {
-		if fwd, ferr := s.peers.MigrateVM(ctx, s.peerManagerdAddr(leaderHint), req); ferr == nil {
+		var fwd *rpcpb.MigrateVMResponse
+		if fwd, ferr = s.peers.MigrateVM(ctx, s.peerManagerdAddr(leaderHint), req); ferr == nil {
 			return fwd, nil
 		}
 	}
-	return &rpcpb.MigrateVMResponse{Vm: fromInternalVM(result), Error: appErr, LeaderHint: leaderHint}, nil
+	return &rpcpb.MigrateVMResponse{Vm: fromInternalVM(result), Error: augmentForwardError(appErr, leaderHint, ferr), LeaderHint: leaderHint}, nil
 }
 
 // ReportVMPhase implements rpcpb.ManagerServiceServer. See its own
@@ -1621,12 +1681,14 @@ func (s *Server) GetVM(ctx context.Context, req *rpcpb.GetVMRequest) (*rpcpb.Get
 		return &rpcpb.GetVMResponse{Error: err.Error()}, nil
 	}
 	if resp.GetError() != "" {
+		var ferr error
 		if s.peers != nil && resp.GetLeaderHint() != "" {
-			if fwd, ferr := s.peers.GetVM(ctx, s.peerManagerdAddr(resp.GetLeaderHint()), req.GetId()); ferr == nil {
+			var fwd *rpcpb.GetVMResponse
+			if fwd, ferr = s.peers.GetVM(ctx, s.peerManagerdAddr(resp.GetLeaderHint()), req.GetId()); ferr == nil {
 				return fwd, nil
 			}
 		}
-		return &rpcpb.GetVMResponse{Error: resp.GetError(), LeaderHint: resp.GetLeaderHint()}, nil
+		return &rpcpb.GetVMResponse{Error: augmentForwardError(resp.GetError(), resp.GetLeaderHint(), ferr), LeaderHint: resp.GetLeaderHint()}, nil
 	}
 	return &rpcpb.GetVMResponse{Vm: fromInternalVM(resp.GetVm()), Found: resp.GetFound()}, nil
 }
@@ -1960,10 +2022,13 @@ func (s *Server) GetVMConsole(ctx context.Context, req *rpcpb.GetVMConsoleReques
 	}
 	if resp.GetError() != "" {
 		if s.peers != nil && resp.GetLeaderHint() != "" {
-			if fwd, ferr := s.peers.GetVM(ctx, s.peerManagerdAddr(resp.GetLeaderHint()), req.GetId()); ferr == nil && fwd.GetError() == "" && fwd.GetFound() && fwd.GetVm().GetNodeId() == s.nodeID {
+			var fwd *rpcpb.GetVMResponse
+			var ferr error
+			fwd, ferr = s.peers.GetVM(ctx, s.peerManagerdAddr(resp.GetLeaderHint()), req.GetId())
+			if ferr == nil && fwd.GetError() == "" && fwd.GetFound() && fwd.GetVm().GetNodeId() == s.nodeID {
 				resp = &internalpb.GetVMResponse{Vm: toInternalVM(fwd.GetVm()), Found: true}
 			} else {
-				return &rpcpb.GetVMConsoleResponse{Error: resp.GetError()}, nil
+				return &rpcpb.GetVMConsoleResponse{Error: augmentForwardError(resp.GetError(), resp.GetLeaderHint(), ferr)}, nil
 			}
 		}
 		if resp.GetError() != "" {
@@ -2099,10 +2164,13 @@ func (s *Server) GetVMSerialLog(ctx context.Context, req *rpcpb.GetVMSerialLogRe
 	}
 	if resp.GetError() != "" {
 		if s.peers != nil && resp.GetLeaderHint() != "" {
-			if fwd, ferr := s.peers.GetVM(ctx, s.peerManagerdAddr(resp.GetLeaderHint()), req.GetId()); ferr == nil && fwd.GetError() == "" && fwd.GetFound() && fwd.GetVm().GetNodeId() == s.nodeID {
+			var fwd *rpcpb.GetVMResponse
+			var ferr error
+			fwd, ferr = s.peers.GetVM(ctx, s.peerManagerdAddr(resp.GetLeaderHint()), req.GetId())
+			if ferr == nil && fwd.GetError() == "" && fwd.GetFound() && fwd.GetVm().GetNodeId() == s.nodeID {
 				resp = &internalpb.GetVMResponse{Vm: toInternalVM(fwd.GetVm()), Found: true}
 			} else {
-				return &rpcpb.GetVMSerialLogResponse{Error: resp.GetError()}, nil
+				return &rpcpb.GetVMSerialLogResponse{Error: augmentForwardError(resp.GetError(), resp.GetLeaderHint(), ferr)}, nil
 			}
 		}
 		if resp.GetError() != "" {
@@ -3141,9 +3209,15 @@ func (s *Server) reserveRestartLease(ctx context.Context, req *rpcpb.ReserveRest
 	}
 	if !raftStatus.GetIsLeader() {
 		if hint := currentLeaderRaftAddress(raftStatus); hint != "" && s.peers != nil {
-			if fwd, ferr := s.peers.ReserveRestartLease(ctx, s.peerManagerdAddr(hint), req); ferr == nil {
+			fwd, ferr := s.peers.ReserveRestartLease(ctx, s.peerManagerdAddr(hint), req)
+			if ferr == nil {
 				return fwd, nil
 			}
+			// A hint was known and a forward was actually attempted here -
+			// the "no reachable leader hint" message below would be false
+			// in this branch, so this reports the real (forwarding)
+			// failure instead of reusing that unrelated text.
+			return &rpcpb.ReserveRestartLeaseResponse{Error: augmentForwardError("not leader", hint, ferr)}, nil
 		}
 		return &rpcpb.ReserveRestartLeaseResponse{Error: "not leader and no reachable leader hint for the restart-guardrail lease"}, nil
 	}
@@ -3219,9 +3293,12 @@ func (s *Server) confirmRestartCompleted(ctx context.Context, req *rpcpb.Confirm
 	}
 	if !raftStatus.GetIsLeader() {
 		if hint := currentLeaderRaftAddress(raftStatus); hint != "" && s.peers != nil {
-			if fwd, ferr := s.peers.ConfirmRestartCompleted(ctx, s.peerManagerdAddr(hint), req); ferr == nil {
+			fwd, ferr := s.peers.ConfirmRestartCompleted(ctx, s.peerManagerdAddr(hint), req)
+			if ferr == nil {
 				return fwd, nil
 			}
+			// See reserveRestartLease's identical comment above.
+			return &rpcpb.ConfirmRestartCompletedResponse{Error: augmentForwardError("not leader", hint, ferr)}, nil
 		}
 		return &rpcpb.ConfirmRestartCompletedResponse{Error: "not leader and no reachable leader hint for the restart-guardrail confirmation"}, nil
 	}
@@ -3340,12 +3417,14 @@ func (s *Server) CreateJail(ctx context.Context, req *rpcpb.CreateJailRequest) (
 		Op: &internalpb.Command_CreateJail{CreateJail: &internalpb.CreateJail{Jail: toInternalJail(req.GetJail())}},
 	}
 	jail, appErr, leaderHint := s.applyJailCommand(ctx, cmd, req.GetTimeoutMs())
+	var ferr error
 	if leaderHint != "" && s.peers != nil {
-		if fwd, ferr := s.peers.CreateJail(ctx, s.peerManagerdAddr(leaderHint), req); ferr == nil {
+		var fwd *rpcpb.CreateJailResponse
+		if fwd, ferr = s.peers.CreateJail(ctx, s.peerManagerdAddr(leaderHint), req); ferr == nil {
 			return fwd, nil
 		}
 	}
-	return &rpcpb.CreateJailResponse{Jail: fromInternalJail(jail), Error: appErr, LeaderHint: leaderHint}, nil
+	return &rpcpb.CreateJailResponse{Jail: fromInternalJail(jail), Error: augmentForwardError(appErr, leaderHint, ferr), LeaderHint: leaderHint}, nil
 }
 
 // UpdateJail implements rpcpb.ManagerServiceServer. See CreateNetwork's
@@ -3355,12 +3434,14 @@ func (s *Server) UpdateJail(ctx context.Context, req *rpcpb.UpdateJailRequest) (
 		Op: &internalpb.Command_UpdateJail{UpdateJail: &internalpb.UpdateJail{Jail: toInternalJail(req.GetJail())}},
 	}
 	jail, appErr, leaderHint := s.applyJailCommand(ctx, cmd, req.GetTimeoutMs())
+	var ferr error
 	if leaderHint != "" && s.peers != nil {
-		if fwd, ferr := s.peers.UpdateJail(ctx, s.peerManagerdAddr(leaderHint), req); ferr == nil {
+		var fwd *rpcpb.UpdateJailResponse
+		if fwd, ferr = s.peers.UpdateJail(ctx, s.peerManagerdAddr(leaderHint), req); ferr == nil {
 			return fwd, nil
 		}
 	}
-	return &rpcpb.UpdateJailResponse{Jail: fromInternalJail(jail), Error: appErr, LeaderHint: leaderHint}, nil
+	return &rpcpb.UpdateJailResponse{Jail: fromInternalJail(jail), Error: augmentForwardError(appErr, leaderHint, ferr), LeaderHint: leaderHint}, nil
 }
 
 // DeleteJail implements rpcpb.ManagerServiceServer. See CreateNetwork's
@@ -3370,12 +3451,14 @@ func (s *Server) DeleteJail(ctx context.Context, req *rpcpb.DeleteJailRequest) (
 		Op: &internalpb.Command_DeleteJail{DeleteJail: &internalpb.DeleteJail{Id: req.GetId()}},
 	}
 	jail, appErr, leaderHint := s.applyJailCommand(ctx, cmd, req.GetTimeoutMs())
+	var ferr error
 	if leaderHint != "" && s.peers != nil {
-		if fwd, ferr := s.peers.DeleteJail(ctx, s.peerManagerdAddr(leaderHint), req); ferr == nil {
+		var fwd *rpcpb.DeleteJailResponse
+		if fwd, ferr = s.peers.DeleteJail(ctx, s.peerManagerdAddr(leaderHint), req); ferr == nil {
 			return fwd, nil
 		}
 	}
-	return &rpcpb.DeleteJailResponse{Jail: fromInternalJail(jail), Error: appErr, LeaderHint: leaderHint}, nil
+	return &rpcpb.DeleteJailResponse{Jail: fromInternalJail(jail), Error: augmentForwardError(appErr, leaderHint, ferr), LeaderHint: leaderHint}, nil
 }
 
 // SetJailDesiredState mirrors SetVMDesiredState for jails.
@@ -3384,12 +3467,14 @@ func (s *Server) SetJailDesiredState(ctx context.Context, req *rpcpb.SetJailDesi
 		Id: req.GetId(), DesiredState: internalpb.JailState(req.GetDesiredState()),
 	}}}
 	jail, appErr, leaderHint := s.applyJailCommand(ctx, cmd, req.GetTimeoutMs())
+	var ferr error
 	if leaderHint != "" && s.peers != nil {
-		if fwd, ferr := s.peers.SetJailDesiredState(ctx, s.peerManagerdAddr(leaderHint), req); ferr == nil {
+		var fwd *rpcpb.SetJailDesiredStateResponse
+		if fwd, ferr = s.peers.SetJailDesiredState(ctx, s.peerManagerdAddr(leaderHint), req); ferr == nil {
 			return fwd, nil
 		}
 	}
-	return &rpcpb.SetJailDesiredStateResponse{Jail: fromInternalJail(jail), Error: appErr, LeaderHint: leaderHint}, nil
+	return &rpcpb.SetJailDesiredStateResponse{Jail: fromInternalJail(jail), Error: augmentForwardError(appErr, leaderHint, ferr), LeaderHint: leaderHint}, nil
 }
 
 // SetJailHostname implements rpcpb.ManagerServiceServer - lets an
@@ -3402,12 +3487,14 @@ func (s *Server) SetJailHostname(ctx context.Context, req *rpcpb.SetJailHostname
 		Id: req.GetId(), Hostname: req.GetHostname(),
 	}}}
 	jail, appErr, leaderHint := s.applyJailCommand(ctx, cmd, req.GetTimeoutMs())
+	var ferr error
 	if leaderHint != "" && s.peers != nil {
-		if fwd, ferr := s.peers.SetJailHostname(ctx, s.peerManagerdAddr(leaderHint), req); ferr == nil {
+		var fwd *rpcpb.SetJailHostnameResponse
+		if fwd, ferr = s.peers.SetJailHostname(ctx, s.peerManagerdAddr(leaderHint), req); ferr == nil {
 			return fwd, nil
 		}
 	}
-	return &rpcpb.SetJailHostnameResponse{Jail: fromInternalJail(jail), Error: appErr, LeaderHint: leaderHint}, nil
+	return &rpcpb.SetJailHostnameResponse{Jail: fromInternalJail(jail), Error: augmentForwardError(appErr, leaderHint, ferr), LeaderHint: leaderHint}, nil
 }
 
 // GetJail implements rpcpb.ManagerServiceServer.
@@ -3417,12 +3504,14 @@ func (s *Server) GetJail(ctx context.Context, req *rpcpb.GetJailRequest) (*rpcpb
 		return &rpcpb.GetJailResponse{Error: err.Error()}, nil
 	}
 	if resp.GetError() != "" {
+		var ferr error
 		if s.peers != nil && resp.GetLeaderHint() != "" {
-			if fwd, ferr := s.peers.GetJail(ctx, s.peerManagerdAddr(resp.GetLeaderHint()), req.GetId()); ferr == nil {
+			var fwd *rpcpb.GetJailResponse
+			if fwd, ferr = s.peers.GetJail(ctx, s.peerManagerdAddr(resp.GetLeaderHint()), req.GetId()); ferr == nil {
 				return fwd, nil
 			}
 		}
-		return &rpcpb.GetJailResponse{Error: resp.GetError(), LeaderHint: resp.GetLeaderHint()}, nil
+		return &rpcpb.GetJailResponse{Error: augmentForwardError(resp.GetError(), resp.GetLeaderHint(), ferr), LeaderHint: resp.GetLeaderHint()}, nil
 	}
 	return &rpcpb.GetJailResponse{Jail: fromInternalJail(resp.GetJail()), Found: resp.GetFound()}, nil
 }
@@ -3436,12 +3525,14 @@ func (s *Server) ForcePurgeJail(ctx context.Context, req *rpcpb.ForcePurgeJailRe
 		return &rpcpb.ForcePurgeJailResponse{Error: err.Error()}, nil
 	}
 	if getResp.GetError() != "" {
+		var ferr error
 		if s.peers != nil && getResp.GetLeaderHint() != "" {
-			if fwd, ferr := s.peers.ForcePurgeJail(ctx, s.peerManagerdAddr(getResp.GetLeaderHint()), req); ferr == nil {
+			var fwd *rpcpb.ForcePurgeJailResponse
+			if fwd, ferr = s.peers.ForcePurgeJail(ctx, s.peerManagerdAddr(getResp.GetLeaderHint()), req); ferr == nil {
 				return fwd, nil
 			}
 		}
-		return &rpcpb.ForcePurgeJailResponse{Error: getResp.GetError(), LeaderHint: getResp.GetLeaderHint()}, nil
+		return &rpcpb.ForcePurgeJailResponse{Error: augmentForwardError(getResp.GetError(), getResp.GetLeaderHint(), ferr), LeaderHint: getResp.GetLeaderHint()}, nil
 	}
 	if !getResp.GetFound() {
 		return &rpcpb.ForcePurgeJailResponse{Error: fmt.Sprintf("jail %q not found", req.GetId())}, nil
@@ -3454,12 +3545,14 @@ func (s *Server) ForcePurgeJail(ctx context.Context, req *rpcpb.ForcePurgeJailRe
 		Op: &internalpb.Command_PurgeJail{PurgeJail: &internalpb.PurgeJail{Id: req.GetId()}},
 	}
 	jail, appErr, leaderHint := s.applyJailCommand(ctx, cmd, req.GetTimeoutMs())
+	var ferr error
 	if leaderHint != "" && s.peers != nil {
-		if fwd, ferr := s.peers.ForcePurgeJail(ctx, s.peerManagerdAddr(leaderHint), req); ferr == nil {
+		var fwd *rpcpb.ForcePurgeJailResponse
+		if fwd, ferr = s.peers.ForcePurgeJail(ctx, s.peerManagerdAddr(leaderHint), req); ferr == nil {
 			return fwd, nil
 		}
 	}
-	return &rpcpb.ForcePurgeJailResponse{Jail: fromInternalJail(jail), Error: appErr, LeaderHint: leaderHint}, nil
+	return &rpcpb.ForcePurgeJailResponse{Jail: fromInternalJail(jail), Error: augmentForwardError(appErr, leaderHint, ferr), LeaderHint: leaderHint}, nil
 }
 
 // MigrateJail mirrors MigrateVM exactly - see its own doc comment for
@@ -3475,12 +3568,14 @@ func (s *Server) MigrateJail(ctx context.Context, req *rpcpb.MigrateJailRequest)
 		return &rpcpb.MigrateJailResponse{Error: err.Error()}, nil
 	}
 	if getResp.GetError() != "" {
+		var ferr error
 		if s.peers != nil && getResp.GetLeaderHint() != "" {
-			if fwd, ferr := s.peers.MigrateJail(ctx, s.peerManagerdAddr(getResp.GetLeaderHint()), req); ferr == nil {
+			var fwd *rpcpb.MigrateJailResponse
+			if fwd, ferr = s.peers.MigrateJail(ctx, s.peerManagerdAddr(getResp.GetLeaderHint()), req); ferr == nil {
 				return fwd, nil
 			}
 		}
-		return &rpcpb.MigrateJailResponse{Error: getResp.GetError(), LeaderHint: getResp.GetLeaderHint()}, nil
+		return &rpcpb.MigrateJailResponse{Error: augmentForwardError(getResp.GetError(), getResp.GetLeaderHint(), ferr), LeaderHint: getResp.GetLeaderHint()}, nil
 	}
 	if !getResp.GetFound() {
 		return &rpcpb.MigrateJailResponse{Error: fmt.Sprintf("jail %q not found", req.GetId())}, nil
@@ -3508,12 +3603,14 @@ func (s *Server) MigrateJail(ctx context.Context, req *rpcpb.MigrateJailRequest)
 		Op: &internalpb.Command_UpdateJail{UpdateJail: &internalpb.UpdateJail{Jail: updated}},
 	}
 	result, appErr, leaderHint := s.applyJailCommand(ctx, cmd, req.GetTimeoutMs())
+	var ferr error
 	if leaderHint != "" && s.peers != nil {
-		if fwd, ferr := s.peers.MigrateJail(ctx, s.peerManagerdAddr(leaderHint), req); ferr == nil {
+		var fwd *rpcpb.MigrateJailResponse
+		if fwd, ferr = s.peers.MigrateJail(ctx, s.peerManagerdAddr(leaderHint), req); ferr == nil {
 			return fwd, nil
 		}
 	}
-	return &rpcpb.MigrateJailResponse{Jail: fromInternalJail(result), Error: appErr, LeaderHint: leaderHint}, nil
+	return &rpcpb.MigrateJailResponse{Jail: fromInternalJail(result), Error: augmentForwardError(appErr, leaderHint, ferr), LeaderHint: leaderHint}, nil
 }
 
 // ListJails implements rpcpb.ManagerServiceServer.
@@ -3523,12 +3620,14 @@ func (s *Server) ListJails(ctx context.Context, _ *rpcpb.ListJailsRequest) (*rpc
 		return &rpcpb.ListJailsResponse{Error: err.Error()}, nil
 	}
 	if resp.GetError() != "" {
+		var ferr error
 		if s.peers != nil && resp.GetLeaderHint() != "" {
-			if fwd, ferr := s.peers.ListJails(ctx, s.peerManagerdAddr(resp.GetLeaderHint())); ferr == nil {
+			var fwd *rpcpb.ListJailsResponse
+			if fwd, ferr = s.peers.ListJails(ctx, s.peerManagerdAddr(resp.GetLeaderHint())); ferr == nil {
 				return fwd, nil
 			}
 		}
-		return &rpcpb.ListJailsResponse{Error: resp.GetError(), LeaderHint: resp.GetLeaderHint()}, nil
+		return &rpcpb.ListJailsResponse{Error: augmentForwardError(resp.GetError(), resp.GetLeaderHint(), ferr), LeaderHint: resp.GetLeaderHint()}, nil
 	}
 	jails := make([]*rpcpb.JailDefinition, 0, len(resp.GetJails()))
 	for _, j := range resp.GetJails() {
@@ -3544,12 +3643,14 @@ func (s *Server) ListVMs(ctx context.Context, _ *rpcpb.ListVMsRequest) (*rpcpb.L
 		return &rpcpb.ListVMsResponse{Error: err.Error()}, nil
 	}
 	if resp.GetError() != "" {
+		var ferr error
 		if s.peers != nil && resp.GetLeaderHint() != "" {
-			if fwd, ferr := s.peers.ListVMs(ctx, s.peerManagerdAddr(resp.GetLeaderHint())); ferr == nil {
+			var fwd *rpcpb.ListVMsResponse
+			if fwd, ferr = s.peers.ListVMs(ctx, s.peerManagerdAddr(resp.GetLeaderHint())); ferr == nil {
 				return fwd, nil
 			}
 		}
-		return &rpcpb.ListVMsResponse{Error: resp.GetError(), LeaderHint: resp.GetLeaderHint()}, nil
+		return &rpcpb.ListVMsResponse{Error: augmentForwardError(resp.GetError(), resp.GetLeaderHint(), ferr), LeaderHint: resp.GetLeaderHint()}, nil
 	}
 
 	vms := make([]*rpcpb.VMDefinition, 0, len(resp.GetVms()))
@@ -3584,12 +3685,14 @@ func (s *Server) SimulateNodeFailure(ctx context.Context, req *rpcpb.SimulateNod
 		return &rpcpb.SimulateNodeFailureResponse{Error: err.Error()}, nil
 	}
 	if vmsResp.GetError() != "" {
+		var ferr error
 		if s.peers != nil && vmsResp.GetLeaderHint() != "" {
-			if fwd, ferr := s.peers.SimulateNodeFailure(ctx, s.peerManagerdAddr(vmsResp.GetLeaderHint()), req); ferr == nil {
+			var fwd *rpcpb.SimulateNodeFailureResponse
+			if fwd, ferr = s.peers.SimulateNodeFailure(ctx, s.peerManagerdAddr(vmsResp.GetLeaderHint()), req); ferr == nil {
 				return fwd, nil
 			}
 		}
-		return &rpcpb.SimulateNodeFailureResponse{Error: vmsResp.GetError(), LeaderHint: vmsResp.GetLeaderHint()}, nil
+		return &rpcpb.SimulateNodeFailureResponse{Error: augmentForwardError(vmsResp.GetError(), vmsResp.GetLeaderHint(), ferr), LeaderHint: vmsResp.GetLeaderHint()}, nil
 	}
 
 	jailsResp, err := s.raft.ListJails(ctx)
@@ -3597,12 +3700,14 @@ func (s *Server) SimulateNodeFailure(ctx context.Context, req *rpcpb.SimulateNod
 		return &rpcpb.SimulateNodeFailureResponse{Error: err.Error()}, nil
 	}
 	if jailsResp.GetError() != "" {
+		var ferr error
 		if s.peers != nil && jailsResp.GetLeaderHint() != "" {
-			if fwd, ferr := s.peers.SimulateNodeFailure(ctx, s.peerManagerdAddr(jailsResp.GetLeaderHint()), req); ferr == nil {
+			var fwd *rpcpb.SimulateNodeFailureResponse
+			if fwd, ferr = s.peers.SimulateNodeFailure(ctx, s.peerManagerdAddr(jailsResp.GetLeaderHint()), req); ferr == nil {
 				return fwd, nil
 			}
 		}
-		return &rpcpb.SimulateNodeFailureResponse{Error: jailsResp.GetError(), LeaderHint: jailsResp.GetLeaderHint()}, nil
+		return &rpcpb.SimulateNodeFailureResponse{Error: augmentForwardError(jailsResp.GetError(), jailsResp.GetLeaderHint(), ferr), LeaderHint: jailsResp.GetLeaderHint()}, nil
 	}
 
 	raftStatus, err := s.raft.Status(ctx)
@@ -3736,12 +3841,14 @@ func (s *Server) SimulateNetworkFailure(ctx context.Context, req *rpcpb.Simulate
 		return &rpcpb.SimulateNetworkFailureResponse{Error: err.Error()}, nil
 	}
 	if networksResp.GetError() != "" {
+		var ferr error
 		if s.peers != nil && networksResp.GetLeaderHint() != "" {
-			if fwd, ferr := s.peers.SimulateNetworkFailure(ctx, s.peerManagerdAddr(networksResp.GetLeaderHint()), req); ferr == nil {
+			var fwd *rpcpb.SimulateNetworkFailureResponse
+			if fwd, ferr = s.peers.SimulateNetworkFailure(ctx, s.peerManagerdAddr(networksResp.GetLeaderHint()), req); ferr == nil {
 				return fwd, nil
 			}
 		}
-		return &rpcpb.SimulateNetworkFailureResponse{Error: networksResp.GetError(), LeaderHint: networksResp.GetLeaderHint()}, nil
+		return &rpcpb.SimulateNetworkFailureResponse{Error: augmentForwardError(networksResp.GetError(), networksResp.GetLeaderHint(), ferr), LeaderHint: networksResp.GetLeaderHint()}, nil
 	}
 
 	var target *internalpb.NetworkDefinition
@@ -3760,12 +3867,14 @@ func (s *Server) SimulateNetworkFailure(ctx context.Context, req *rpcpb.Simulate
 		return &rpcpb.SimulateNetworkFailureResponse{Error: err.Error()}, nil
 	}
 	if vmsResp.GetError() != "" {
+		var ferr error
 		if s.peers != nil && vmsResp.GetLeaderHint() != "" {
-			if fwd, ferr := s.peers.SimulateNetworkFailure(ctx, s.peerManagerdAddr(vmsResp.GetLeaderHint()), req); ferr == nil {
+			var fwd *rpcpb.SimulateNetworkFailureResponse
+			if fwd, ferr = s.peers.SimulateNetworkFailure(ctx, s.peerManagerdAddr(vmsResp.GetLeaderHint()), req); ferr == nil {
 				return fwd, nil
 			}
 		}
-		return &rpcpb.SimulateNetworkFailureResponse{Error: vmsResp.GetError(), LeaderHint: vmsResp.GetLeaderHint()}, nil
+		return &rpcpb.SimulateNetworkFailureResponse{Error: augmentForwardError(vmsResp.GetError(), vmsResp.GetLeaderHint(), ferr), LeaderHint: vmsResp.GetLeaderHint()}, nil
 	}
 
 	placements := make([]cluster.NetworkAttachedResourcePlacement, 0, len(vmsResp.GetVms()))
