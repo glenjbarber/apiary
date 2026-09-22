@@ -28,18 +28,14 @@
 {{define "vm_rows"}}
 {{range .VMs}}
 <tr>
-  <td><a href="/vms/{{.ID}}"><strong>{{.ID}}</strong></a></td>
-  <td>{{.Name}}</td>
-  <td>{{.VCPUs}}</td>
-  <td>{{.MemoryMB}}</td>
-  <td{{if and $.LocalNodeID (ne .NodeID $.LocalNodeID)}} class="remote-node" title="Owned by a different Comb than the one currently answering this page"{{end}}>{{.NodeID}}</td>
+  <td><a href="/vms/{{.ID}}"><strong>{{.ID}}</strong></a>{{if and .Name (ne .Name .ID)}}<div class="muted">{{.Name}}</div>{{end}}</td>
+  <td>{{.VCPUs}} vCPU · {{.MemoryMB}} MB</td>
+  <td{{if and $.LocalNodeID (ne .NodeID $.LocalNodeID)}} class="remote-node" title="Owned by a different Comb than the one currently answering this page"{{end}}>{{.NodeID}}{{if .ReplicaNodeID}}<div class="muted">replica: {{.ReplicaNodeID}}</div>{{end}}</td>
   <td><span class="badge {{.Phase}}"{{if eq .Phase "error"}} title="{{.PhaseError}}"{{end}}>{{.Phase}}</span>{{if .PhaseError}}<div class="error">{{.PhaseError}}</div>{{end}}</td>
-  <td>{{if .IPAddress}}{{.IPAddress}}{{end}}</td>
-  <td><code>{{.MACAddress}}</code></td>
-  <td>{{if .ReplicaNodeID}}{{.ReplicaNodeID}}{{else}}<em>none</em>{{end}}</td>
+  <td>{{if .IPAddress}}{{.IPAddress}}{{else}}<span class="muted">no IP</span>{{end}}{{if .MACAddress}}<div class="muted"><code>{{.MACAddress}}</code></div>{{end}}</td>
   <td>{{if $.CanOperate}}<button class="danger" hx-delete="/vms/{{.ID}}" hx-target="#vm-rows" hx-swap="innerHTML" hx-confirm="Delete {{.ID}}?">Delete</button>{{end}}</td>
 </tr>
 {{else}}
-  {{if not .Error}}<tr><td colspan="10"><em>No VMs</em></td></tr>{{end}}
+  {{if not .Error}}<tr><td colspan="6"><em>No VMs</em></td></tr>{{end}}
 {{end}}
 {{end}}
