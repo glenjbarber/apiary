@@ -33,6 +33,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/glenjbarber/apiary/internal/commonconfig"
 	raftnode "github.com/glenjbarber/apiary/internal/raft"
 )
 
@@ -126,12 +127,21 @@ func (m *Manager) path() string {
 // to silently fall back to. Warns (does not fail) if the file is
 // readable by group/other despite holding InternalToken - see
 // warnIfWorldReadable.
+//
+// Before reading this file, Load also consults common.json (ADR-0111)
+// in the same directory for fields shared across every daemon on this
+// Comb. A field this file itself sets always wins; common.json only
+// fills in node_id when this file leaves it unset.
 func (m *Manager) Load() (Config, error) {
+	common, err := loadCommonConfig(m.path())
+	if err != nil {
+		return Config{}, err
+	}
 	cfg := Defaults()
 	data, err := os.ReadFile(m.path())
 	if err != nil {
 		if os.IsNotExist(err) {
-			return cfg, nil
+			return applyCommonConfig(cfg, common), nil
 		}
 		return Config{}, err
 	}
@@ -141,7 +151,26 @@ func (m *Manager) Load() (Config, error) {
 	if cfg.InternalToken != "" {
 		warnIfWorldReadable(m.path())
 	}
-	return cfg, nil
+	return applyCommonConfig(cfg, common), nil
+}
+
+// loadCommonConfig loads common.json from the same directory as
+// servicePath (ADR-0111). A missing common.json is not an error - it
+// yields a zero-value commonconfig.Config, so applyCommonConfig below
+// has nothing to fill in.
+func loadCommonConfig(servicePath string) (commonconfig.Config, error) {
+	cm := commonconfig.Manager{Path: filepath.Join(filepath.Dir(servicePath), filepath.Base(commonconfig.DefaultPath))}
+	return cm.Load()
+}
+
+// applyCommonConfig fills NodeID from common when this file doesn't
+// set it itself - the only field raftdconfig.Config shares with
+// commonconfig.Config today (ADR-0111).
+func applyCommonConfig(cfg Config, common commonconfig.Config) Config {
+	if cfg.NodeID == "" {
+		cfg.NodeID = common.NodeID
+	}
+	return cfg
 }
 
 // warnIfWorldReadable logs (does not fail) when path is readable by
