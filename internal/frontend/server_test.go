@@ -2549,6 +2549,56 @@ func TestServer_AuthEnabled_UnauthenticatedFragmentDefaultsToHomeAfterLogin(t *t
 	}
 }
 
+// TestServer_AuthRestart_ActionRequestDefaultsToHomeAfterLogin simulates
+// the actual restart condition this fix addresses: an apiary_frontend
+// restart wipes the in-memory session store (server.go's sessions field),
+// so a browser tab that already had an action button (e.g. "restart VM")
+// mid-click sends its POST with a now-invalid session cookie. Before this
+// fix, the login redirect preserved that POST-only path as "next", and
+// the login page's own follow-up redirect is always a GET, which no
+// action route accepts - handleLogin's later http.Redirect landed the
+// user on a bare 405. Confirms it now goes home instead.
+func TestServer_AuthRestart_ActionRequestDefaultsToHomeAfterLogin(t *testing.T) {
+	s := newTestServerWithAuth(t, &fakeClient{}, "admin", "secret")
+
+	for _, tc := range []struct {
+		method, path string
+	}{
+		{http.MethodPost, "/vms/vm-1/lifecycle"},
+		{http.MethodDelete, "/vms/vm-1"},
+		{http.MethodPost, "/jails/jail-1/lifecycle"},
+	} {
+		req := httptest.NewRequest(tc.method, tc.path, nil)
+		rec := httptest.NewRecorder()
+		s.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusFound || rec.Header().Get("Location") != "/login" {
+			t.Errorf("%s %s: status/location = %d %q, want 302 to /login with no next", tc.method, tc.path, rec.Code, rec.Header().Get("Location"))
+		}
+	}
+
+	// The GET-navigable case must still preserve next - only non-GET
+	// action routes are affected.
+	req := httptest.NewRequest(http.MethodGet, "/vms/vm-1", nil)
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, req)
+	loc := rec.Header().Get("Location")
+	if !strings.HasPrefix(loc, "/login") || !strings.Contains(loc, url.QueryEscape("/vms/vm-1")) {
+		t.Errorf("GET /vms/vm-1: Location = %q, want next to carry the original path", loc)
+	}
+
+	// Logging back in after the action-request case above must land on
+	// "/", not attempt to GET-replay the original POST-only path.
+	form := url.Values{"username": {"admin"}, "password": {"secret"}}
+	loginReq := httptest.NewRequest(http.MethodPost, "/login", strings.NewReader(form.Encode()))
+	loginReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	loginRec := httptest.NewRecorder()
+	s.ServeHTTP(loginRec, loginReq)
+	if got := loginRec.Header().Get("Location"); got != "/" {
+		t.Errorf("post-login Location = %q, want / (no next was carried for the action request)", got)
+	}
+}
+
 func TestServer_AuthEnabled_HTMXRequestGetsHXRedirectNotBare302(t *testing.T) {
 	s := newTestServerWithAuth(t, &fakeClient{}, "admin", "secret")
 

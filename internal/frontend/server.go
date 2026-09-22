@@ -701,9 +701,29 @@ func (s *Server) requireRole(want manager.Role, handler http.HandlerFunc) http.H
 	}
 }
 
+// redirectToLogin sends an unauthenticated request to the login page,
+// preserving the original URL as "next" only when GET-replaying that
+// exact URL after login would actually work.
+//
+// A frontend restart (rc.d service restart, e.g. after a binary upgrade
+// or a managerd PAM config change per docs/bootstrap.md) wipes the
+// in-memory session store (see sessions field doc comment), so every
+// browser tab with an open session hits this gate on its very next
+// request - which, for an action button like "restart VM" or "delete
+// jail", is a POST/DELETE to an action-only route such as
+// "POST /vms/{id}/lifecycle". Before this fix, next carried that exact
+// path unconditionally; the login page always issues its own follow-up
+// redirect as a plain GET (see handleLogin's http.Redirect), and no
+// action route registers a GET handler, so the user landed on a bare
+// "405 Method Not Allowed" instead of anywhere useful. Restricting next
+// preservation to GET requests routes that case to "/" instead (see
+// isSafeLoginReturnPath's default false is used below when r.Method
+// isn't GET), matching the existing fragment/socket handling immediately
+// below for the same underlying reason: the saved URL has to be safe to
+// GET again.
 func (s *Server) redirectToLogin(w http.ResponseWriter, r *http.Request) {
 	next := "/login"
-	if isSafeLoginReturnPath(r.URL.RequestURI()) {
+	if isSafeLoginReturnPath(r.URL.RequestURI()) && r.Method == http.MethodGet {
 		next = "/login?next=" + url.QueryEscape(r.URL.RequestURI())
 	}
 	if r.Header.Get("HX-Request") == "true" {
