@@ -12,10 +12,15 @@ package manager
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
+	"crypto/x509"
 	"encoding/hex"
+	"encoding/pem"
 	"fmt"
 	"math/big"
 	"net"
+	"os"
+	"strings"
 	"time"
 
 	"google.golang.org/protobuf/proto"
@@ -24,6 +29,18 @@ import (
 	rpcpb "github.com/glenjbarber/apiary/api/rpc"
 	"github.com/glenjbarber/apiary/internal/guardrail"
 )
+
+// approveJoinRequestConfirmPhrase is ApproveJoinRequest's own exact-match
+// confirmation phrase (ADR-0113) - the same convention as raftd's own
+// -reset (raftdResetConfirmPhrase, raftdservice.go), apiaryinstall's
+// -apply-network, and ConvertStandaloneToJoiner's own confirm_phrase
+// (convertjoiner.go). Approving a join request is the moment this Comb
+// starts trusting a brand new Comb's identity going forward - the Admin
+// must type this exactly, every time, whether or not the pending
+// request carries a tls_cert_fingerprint, since the UI always shows
+// whatever identity information is available (a real fingerprint, or an
+// explicit "no TLS certificate presented") right next to this field.
+const approveJoinRequestConfirmPhrase = "yes-trust-new-comb"
 
 // defaultJoinRequestTTL bounds how long a PendingJoinRequest stays
 // actionable - checked lazily at read/apply time (see
@@ -162,6 +179,52 @@ func (s *Server) evaluateJoinReachability(ctx context.Context, addr string) guar
 	return guardrail.EvaluateJoinReachability(fact)
 }
 
+// localTLSCertFingerprint reads this managerd's own configured tls_cert
+// (ADR-0087/ADR-0093) and returns its SHA-256 fingerprint in the same
+// "SHA256:AA:BB:..." shape openssl/ssh tooling commonly uses, so an
+// Admin can cross-check it against the joining Comb's own certificate
+// by any familiar means (ADR-0113). Returns "" with no error whenever
+// there is nothing to report - no nodeConfig configured, no tls_cert
+// set, or the file is unreadable/unparsable - since a joining Comb with
+// TLS not yet configured is a legitimate, existing deployment state
+// (TLS is opt-in throughout this codebase), not a fatal condition that
+// should block RequestJoinColony from forwarding the join itself.
+func (s *Server) localTLSCertFingerprint() string {
+	if s.nodeConfig == nil {
+		return ""
+	}
+	cfg, err := s.nodeConfig.Load()
+	if err != nil || cfg.TLSCert == "" {
+		return ""
+	}
+	data, err := os.ReadFile(cfg.TLSCert)
+	if err != nil {
+		return ""
+	}
+	block, _ := pem.Decode(data)
+	if block == nil {
+		return ""
+	}
+	cert, err := x509.ParseCertificate(block.Bytes)
+	if err != nil {
+		return ""
+	}
+	return tlsCertFingerprint(cert.Raw)
+}
+
+// tlsCertFingerprint formats a DER-encoded certificate's SHA-256 digest
+// as colon-separated uppercase hex pairs prefixed "SHA256:" - a plain,
+// deterministic function of the raw bytes so it's independently
+// testable without needing a real on-disk cert/nodeConfig.
+func tlsCertFingerprint(der []byte) string {
+	sum := sha256.Sum256(der)
+	pairs := make([]string, len(sum))
+	for i, b := range sum {
+		pairs[i] = fmt.Sprintf("%02X", b)
+	}
+	return "SHA256:" + strings.Join(pairs, ":")
+}
+
 // generateJoinRequestID returns a random, non-secret identifier for a
 // new PendingJoinRequest - mirrors generateAPIKeyID's own shape
 // (auth.go), a short hex id purely for correlating a joining Comb's own
@@ -264,8 +327,18 @@ func (s *Server) RequestJoinColony(ctx context.Context, req *rpcpb.RequestJoinCo
 		// indefinitely (2026-09-12 audit finding).
 		fctx, cancel := context.WithTimeout(ctx, defaultUnauthenticatedForwardTimeout)
 		defer cancel()
+		// tls_cert_fingerprint (ADR-0113): fill it in from this managerd's
+		// own local tls_cert when the caller didn't already supply one -
+		// the normal case, since the joining Comb's own frontend submits
+		// this call with only node_id/raft_bind_address/target_address set.
+		// A caller (or a test) that already set it explicitly is trusted as-is.
+		fingerprint := req.GetTlsCertFingerprint()
+		if fingerprint == "" {
+			fingerprint = s.localTLSCertFingerprint()
+		}
 		resp, err := s.peers.RequestJoinColonyUnauthenticated(fctx, target, &rpcpb.RequestJoinColonyRequest{
 			NodeId: req.GetNodeId(), RaftBindAddress: req.GetRaftBindAddress(), TimeoutMs: req.GetTimeoutMs(),
+			TlsCertFingerprint: fingerprint,
 		})
 		if err != nil {
 			return &rpcpb.RequestJoinColonyResponse{Error: fmt.Sprintf("reaching %s: %v", target, err)}, nil
@@ -286,13 +359,14 @@ func (s *Server) RequestJoinColony(ctx context.Context, req *rpcpb.RequestJoinCo
 		Op: &internalpb.Command_CreatePendingJoinRequest{
 			CreatePendingJoinRequest: &internalpb.CreatePendingJoinRequest{
 				Request: &internalpb.PendingJoinRequest{
-					RequestId:       requestID,
-					NodeId:          req.GetNodeId(),
-					RaftBindAddress: req.GetRaftBindAddress(),
-					Code:            code,
-					RequestedAtUnix: now.Unix(),
-					ExpiresAtUnix:   now.Add(defaultJoinRequestTTL).Unix(),
-					Status:          internalpb.JoinRequestStatus_JOIN_REQUEST_STATUS_PENDING,
+					RequestId:          requestID,
+					NodeId:             req.GetNodeId(),
+					RaftBindAddress:    req.GetRaftBindAddress(),
+					Code:               code,
+					RequestedAtUnix:    now.Unix(),
+					ExpiresAtUnix:      now.Add(defaultJoinRequestTTL).Unix(),
+					Status:             internalpb.JoinRequestStatus_JOIN_REQUEST_STATUS_PENDING,
+					TlsCertFingerprint: req.GetTlsCertFingerprint(),
 				},
 			},
 		},
@@ -384,6 +458,18 @@ func (s *Server) ListJoinRequests(ctx context.Context, _ *rpcpb.ListJoinRequests
 // that has actually happened here: clicking Approve before the joining
 // Comb's raftd was actually up.
 func (s *Server) ApproveJoinRequest(ctx context.Context, req *rpcpb.ApproveJoinRequestRequest) (*rpcpb.ApproveJoinRequestResponse, error) {
+	// confirm_phrase (ADR-0113) is checked first, before anything else in
+	// this function - including the leadership check/forward below - so a
+	// wrong or missing phrase never causes so much as a forwarded RPC to
+	// a peer, exactly the same "no action at all" posture
+	// ConvertStandaloneToJoiner's own confirm_phrase check already
+	// established (convertjoiner.go).
+	if req.GetConfirmPhrase() != approveJoinRequestConfirmPhrase {
+		return &rpcpb.ApproveJoinRequestResponse{Error: fmt.Sprintf(
+			"confirm_phrase %q does not match the required confirmation phrase %q - nothing was done",
+			req.GetConfirmPhrase(), approveJoinRequestConfirmPhrase)}, nil
+	}
+
 	// Check leadership BEFORE running the local reachability dial below -
 	// only the leader's own network vantage point actually matters, since
 	// only the leader calls AddVoter. A follower with its own, different

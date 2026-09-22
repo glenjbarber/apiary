@@ -92,7 +92,7 @@ func newJoinedFollowerRaftdSocket(t *testing.T, leaderClient rpcpb.ManagerServic
 	if err != nil || reqResp.GetError() != "" {
 		t.Fatalf("RequestJoinColony() = (%+v, %v)", reqResp, err)
 	}
-	approveResp, err := leaderClient.ApproveJoinRequest(ctx, &rpcpb.ApproveJoinRequestRequest{RequestId: reqResp.GetRequestId()})
+	approveResp, err := leaderClient.ApproveJoinRequest(ctx, &rpcpb.ApproveJoinRequestRequest{RequestId: reqResp.GetRequestId(), ConfirmPhrase: "yes-trust-new-comb"})
 	if err != nil || approveResp.GetError() != "" {
 		t.Fatalf("ApproveJoinRequest() = (%+v, %v)", approveResp, err)
 	}

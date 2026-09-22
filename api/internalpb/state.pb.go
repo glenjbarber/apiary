@@ -2745,8 +2745,11 @@ type PendingJoinRequest struct {
 	RequestedAtUnix int64                  `protobuf:"varint,5,opt,name=requested_at_unix,json=requestedAtUnix,proto3" json:"requested_at_unix,omitempty"`
 	ExpiresAtUnix   int64                  `protobuf:"varint,6,opt,name=expires_at_unix,json=expiresAtUnix,proto3" json:"expires_at_unix,omitempty"`
 	Status          JoinRequestStatus      `protobuf:"varint,7,opt,name=status,proto3,enum=apiary.internal.v1.JoinRequestStatus" json:"status,omitempty"`
-	unknownFields   protoimpl.UnknownFields
-	sizeCache       protoimpl.SizeCache
+	// tls_cert_fingerprint (ADR-0113) mirrors rpcpb.PendingJoinRequest's
+	// own field of the same name - see there for the full doc comment.
+	TlsCertFingerprint string `protobuf:"bytes,8,opt,name=tls_cert_fingerprint,json=tlsCertFingerprint,proto3" json:"tls_cert_fingerprint,omitempty"`
+	unknownFields      protoimpl.UnknownFields
+	sizeCache          protoimpl.SizeCache
 }
 
 func (x *PendingJoinRequest) Reset() {
@@ -2826,6 +2829,13 @@ func (x *PendingJoinRequest) GetStatus() JoinRequestStatus {
 		return x.Status
 	}
 	return JoinRequestStatus_JOIN_REQUEST_STATUS_UNSPECIFIED
+}
+
+func (x *PendingJoinRequest) GetTlsCertFingerprint() string {
+	if x != nil {
+		return x.TlsCertFingerprint
+	}
+	return ""
 }
 
 // CreatePendingJoinRequest records a new join request. Fails if
@@ -3861,7 +3871,7 @@ const file_api_internalpb_state_proto_rawDesc = "" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x1a\n" +
 	"\bhostname\x18\x02 \x01(\tR\bhostname\"\x1b\n" +
 	"\tPurgeJail\x12\x0e\n" +
-	"\x02id\x18\x01 \x01(\tR\x02id\"\x9f\x02\n" +
+	"\x02id\x18\x01 \x01(\tR\x02id\"\xd1\x02\n" +
 	"\x12PendingJoinRequest\x12\x1d\n" +
 	"\n" +
 	"request_id\x18\x01 \x01(\tR\trequestId\x12\x17\n" +
@@ -3870,7 +3880,8 @@ const file_api_internalpb_state_proto_rawDesc = "" +
 	"\x04code\x18\x04 \x01(\tR\x04code\x12*\n" +
 	"\x11requested_at_unix\x18\x05 \x01(\x03R\x0frequestedAtUnix\x12&\n" +
 	"\x0fexpires_at_unix\x18\x06 \x01(\x03R\rexpiresAtUnix\x12=\n" +
-	"\x06status\x18\a \x01(\x0e2%.apiary.internal.v1.JoinRequestStatusR\x06status\"\\\n" +
+	"\x06status\x18\a \x01(\x0e2%.apiary.internal.v1.JoinRequestStatusR\x06status\x120\n" +
+	"\x14tls_cert_fingerprint\x18\b \x01(\tR\x12tlsCertFingerprint\"\\\n" +
 	"\x18CreatePendingJoinRequest\x12@\n" +
 	"\arequest\x18\x01 \x01(\v2&.apiary.internal.v1.PendingJoinRequestR\arequest\":\n" +
 	"\x19ApprovePendingJoinRequest\x12\x1d\n" +

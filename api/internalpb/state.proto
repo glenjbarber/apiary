@@ -665,6 +665,10 @@ message PendingJoinRequest {
   int64 requested_at_unix = 5;
   int64 expires_at_unix = 6;
   JoinRequestStatus status = 7;
+
+  // tls_cert_fingerprint (ADR-0113) mirrors rpcpb.PendingJoinRequest's
+  // own field of the same name - see there for the full doc comment.
+  string tls_cert_fingerprint = 8;
 }
 
 // CreatePendingJoinRequest records a new join request. Fails if

@@ -13671,8 +13671,22 @@ type PendingJoinRequest struct {
 	RequestedAtUnix int64                  `protobuf:"varint,5,opt,name=requested_at_unix,json=requestedAtUnix,proto3" json:"requested_at_unix,omitempty"`
 	ExpiresAtUnix   int64                  `protobuf:"varint,6,opt,name=expires_at_unix,json=expiresAtUnix,proto3" json:"expires_at_unix,omitempty"`
 	Status          JoinRequestStatus      `protobuf:"varint,7,opt,name=status,proto3,enum=apiary.rpc.v1.JoinRequestStatus" json:"status,omitempty"`
-	unknownFields   protoimpl.UnknownFields
-	sizeCache       protoimpl.SizeCache
+	// tls_cert_fingerprint (ADR-0113) is the joining Comb's own managerd
+	// TLS certificate fingerprint (SHA-256 over the DER-encoded cert,
+	// "SHA256:" plus colon-separated uppercase hex), computed by the
+	// joining Comb's own managerd from its locally-configured tls_cert at
+	// the moment RequestJoinColony forwards to target_address. Empty when
+	// the joining Comb has no tls_cert configured (TLS remains opt-in,
+	// ADR-0087/ADR-0093) - the Admin then sees "no TLS certificate
+	// presented" instead of a fingerprint, but still must acknowledge the
+	// join via ApproveJoinRequest's confirm_phrase either way. Best-effort
+	// and shown for the Admin's own visual comparison only - this is not
+	// an authentication mechanism and nothing yet validates the joiner's
+	// future peer_tls_ca setup against it (see the ADR's own explicit
+	// scope note).
+	TlsCertFingerprint string `protobuf:"bytes,8,opt,name=tls_cert_fingerprint,json=tlsCertFingerprint,proto3" json:"tls_cert_fingerprint,omitempty"`
+	unknownFields      protoimpl.UnknownFields
+	sizeCache          protoimpl.SizeCache
 }
 
 func (x *PendingJoinRequest) Reset() {
@@ -13754,6 +13768,13 @@ func (x *PendingJoinRequest) GetStatus() JoinRequestStatus {
 	return JoinRequestStatus_JOIN_REQUEST_STATUS_UNSPECIFIED
 }
 
+func (x *PendingJoinRequest) GetTlsCertFingerprint() string {
+	if x != nil {
+		return x.TlsCertFingerprint
+	}
+	return ""
+}
+
 type RequestJoinColonyRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// node_id/raft_bind_address are the JOINING Comb's own identity - the
@@ -13776,8 +13797,14 @@ type RequestJoinColonyRequest struct {
 	// already set (the forwarded copy clears it) and by direct RPC
 	// callers/tests that intend to record locally.
 	TargetAddress string `protobuf:"bytes,4,opt,name=target_address,json=targetAddress,proto3" json:"target_address,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	// tls_cert_fingerprint (ADR-0113): a direct caller (or a test) may set
+	// this explicitly. When target_address is set and this is left empty,
+	// RequestJoinColony fills it in automatically from this managerd's
+	// own locally-configured tls_cert before forwarding - see
+	// PendingJoinRequest's own field doc.
+	TlsCertFingerprint string `protobuf:"bytes,5,opt,name=tls_cert_fingerprint,json=tlsCertFingerprint,proto3" json:"tls_cert_fingerprint,omitempty"`
+	unknownFields      protoimpl.UnknownFields
+	sizeCache          protoimpl.SizeCache
 }
 
 func (x *RequestJoinColonyRequest) Reset() {
@@ -13834,6 +13861,13 @@ func (x *RequestJoinColonyRequest) GetTimeoutMs() uint32 {
 func (x *RequestJoinColonyRequest) GetTargetAddress() string {
 	if x != nil {
 		return x.TargetAddress
+	}
+	return ""
+}
+
+func (x *RequestJoinColonyRequest) GetTlsCertFingerprint() string {
+	if x != nil {
+		return x.TlsCertFingerprint
 	}
 	return ""
 }
@@ -14112,9 +14146,21 @@ func (x *ListJoinRequestsResponse) GetError() string {
 }
 
 type ApproveJoinRequestRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	RequestId     string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
-	TimeoutMs     uint32                 `protobuf:"varint,2,opt,name=timeout_ms,json=timeoutMs,proto3" json:"timeout_ms,omitempty"`
+	state     protoimpl.MessageState `protogen:"open.v1"`
+	RequestId string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	TimeoutMs uint32                 `protobuf:"varint,2,opt,name=timeout_ms,json=timeoutMs,proto3" json:"timeout_ms,omitempty"`
+	// confirm_phrase (ADR-0113) must exactly equal the server's own
+	// required phrase ("yes-trust-new-comb") or the whole call is refused
+	// with no action taken at all - not even a re-check of request_id -
+	// matching this codebase's existing exact-match confirmation-phrase
+	// convention (raftd's own -reset, apiaryinstall's -apply-network,
+	// ConvertStandaloneToJoiner's own confirm_phrase). Approving a join
+	// request is the moment this Comb starts trusting a brand new Comb's
+	// identity going forward; the Admin must have actually seen the
+	// pending request's tls_cert_fingerprint (or its absence) before
+	// typing this, which the UI enforces by only ever showing this field
+	// alongside that value.
+	ConfirmPhrase string `protobuf:"bytes,3,opt,name=confirm_phrase,json=confirmPhrase,proto3" json:"confirm_phrase,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -14161,6 +14207,13 @@ func (x *ApproveJoinRequestRequest) GetTimeoutMs() uint32 {
 		return x.TimeoutMs
 	}
 	return 0
+}
+
+func (x *ApproveJoinRequestRequest) GetConfirmPhrase() string {
+	if x != nil {
+		return x.ConfirmPhrase
+	}
+	return ""
 }
 
 type ApproveJoinRequestResponse struct {
@@ -15666,7 +15719,7 @@ const file_api_rpc_manager_proto_rawDesc = "" +
 	"own_bridge\x18\x03 \x01(\bR\townBridge\x12\x19\n" +
 	"\bown_vlan\x18\x04 \x01(\bR\aownVlan\x12!\n" +
 	"\foutbound_nat\x18\x05 \x01(\bR\voutboundNat\x12\x14\n" +
-	"\x05error\x18\x06 \x01(\tR\x05error\"\x9a\x02\n" +
+	"\x05error\x18\x06 \x01(\tR\x05error\"\xcc\x02\n" +
 	"\x12PendingJoinRequest\x12\x1d\n" +
 	"\n" +
 	"request_id\x18\x01 \x01(\tR\trequestId\x12\x17\n" +
@@ -15675,13 +15728,15 @@ const file_api_rpc_manager_proto_rawDesc = "" +
 	"\x04code\x18\x04 \x01(\tR\x04code\x12*\n" +
 	"\x11requested_at_unix\x18\x05 \x01(\x03R\x0frequestedAtUnix\x12&\n" +
 	"\x0fexpires_at_unix\x18\x06 \x01(\x03R\rexpiresAtUnix\x128\n" +
-	"\x06status\x18\a \x01(\x0e2 .apiary.rpc.v1.JoinRequestStatusR\x06status\"\xa5\x01\n" +
+	"\x06status\x18\a \x01(\x0e2 .apiary.rpc.v1.JoinRequestStatusR\x06status\x120\n" +
+	"\x14tls_cert_fingerprint\x18\b \x01(\tR\x12tlsCertFingerprint\"\xd7\x01\n" +
 	"\x18RequestJoinColonyRequest\x12\x17\n" +
 	"\anode_id\x18\x01 \x01(\tR\x06nodeId\x12*\n" +
 	"\x11raft_bind_address\x18\x02 \x01(\tR\x0fraftBindAddress\x12\x1d\n" +
 	"\n" +
 	"timeout_ms\x18\x03 \x01(\rR\ttimeoutMs\x12%\n" +
-	"\x0etarget_address\x18\x04 \x01(\tR\rtargetAddress\"\x85\x01\n" +
+	"\x0etarget_address\x18\x04 \x01(\tR\rtargetAddress\x120\n" +
+	"\x14tls_cert_fingerprint\x18\x05 \x01(\tR\x12tlsCertFingerprint\"\x85\x01\n" +
 	"\x19RequestJoinColonyResponse\x12\x1d\n" +
 	"\n" +
 	"request_id\x18\x01 \x01(\tR\trequestId\x12\x12\n" +
@@ -15699,12 +15754,13 @@ const file_api_rpc_manager_proto_rawDesc = "" +
 	"\x17ListJoinRequestsRequest\"o\n" +
 	"\x18ListJoinRequestsResponse\x12=\n" +
 	"\brequests\x18\x01 \x03(\v2!.apiary.rpc.v1.PendingJoinRequestR\brequests\x12\x14\n" +
-	"\x05error\x18\x02 \x01(\tR\x05error\"Y\n" +
+	"\x05error\x18\x02 \x01(\tR\x05error\"\x80\x01\n" +
 	"\x19ApproveJoinRequestRequest\x12\x1d\n" +
 	"\n" +
 	"request_id\x18\x01 \x01(\tR\trequestId\x12\x1d\n" +
 	"\n" +
-	"timeout_ms\x18\x02 \x01(\rR\ttimeoutMs\"\x90\x01\n" +
+	"timeout_ms\x18\x02 \x01(\rR\ttimeoutMs\x12%\n" +
+	"\x0econfirm_phrase\x18\x03 \x01(\tR\rconfirmPhrase\"\x90\x01\n" +
 	"\x1aApproveJoinRequestResponse\x12;\n" +
 	"\arequest\x18\x01 \x01(\v2!.apiary.rpc.v1.PendingJoinRequestR\arequest\x12\x14\n" +
 	"\x05error\x18\x02 \x01(\tR\x05error\x12\x1f\n" +
