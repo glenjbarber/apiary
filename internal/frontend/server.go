@@ -77,10 +77,6 @@ type pageData struct {
 	SortBy  string
 	SortDir string
 
-	// ISOs lists stored installer images, for both the Images section's
-	// table and the create-VM form's ISO picker.
-	ISOs []isoView
-
 	// ISOFormError reports an upload/delete-specific error for the
 	// Images section. Rendered inside the same #iso-panel target the
 	// upload form's own hx-target points at - not via an out-of-band
@@ -244,13 +240,14 @@ type pageData struct {
 	UserFormSuccess string
 
 	// ClusterISOs is the cluster-wide view of every known node's stored
-	// images (ADR-0041) - distinct from ISOs (still local-only, used by
-	// the Images page's own upload/delete panel), used by the
-	// create-VM/create-jail forms' image pickers to show a "will be
-	// fetched from a peer" cue: internal/cluster's Reconciler now
-	// fetches a missing image automatically at provisioning time, so
-	// the picker no longer needs to restrict itself to images already
-	// present on the currently-selected node.
+	// images (ADR-0041) - one row per distinct file, annotated with
+	// which Combs have a copy. Backs the Images page itself (upload/
+	// delete still target only the locally-viewed Comb) and the
+	// create-VM/create-jail forms' image pickers, where it shows a
+	// "will be fetched from a peer" cue: internal/cluster's Reconciler
+	// fetches a missing image automatically at provisioning time, so a
+	// picker never needs to restrict itself to images already present
+	// on the currently-selected node.
 	ClusterISOs []isoRowView
 
 	// CloneSources (ADR-0095) lists every known VM with at least one
@@ -1248,11 +1245,15 @@ func (s *Server) renderVMPage(w http.ResponseWriter, r *http.Request, id, cloudf
 	}))
 }
 
-// handleImagesPage serves the Images (ISO upload/list) page ("/images").
+// handleImagesPage serves the Images (ISO upload/list) page ("/images") -
+// a cluster-wide view (currentClusterISOs, same data already backing the
+// create-VM/create-jail image pickers) rather than only this node's own
+// local storage, since an operator managing images needs to see what
+// every Comb has, not just the one they happen to be looking at.
 func (s *Server) handleImagesPage(w http.ResponseWriter, r *http.Request) {
-	isos, errMsg := s.currentISOs(r)
+	isos, errMsg := s.currentClusterISOs(r)
 	s.render(w, "images_page", s.withAuthFields(r, pageData{
-		ISOs: isos, ISOFormError: errMsg,
+		ClusterISOs: isos, ISOFormError: errMsg, LocalNodeID: s.localNodeID(r),
 		ActivePage: "images",
 	}))
 }
@@ -1318,24 +1319,6 @@ func (s *Server) currentNetworks(r *http.Request) ([]networkView, string) {
 		}
 	}
 	return networks, ""
-}
-
-// currentISOs fetches the current list of stored installer images,
-// returning an empty slice (not an error) if the fetch fails - the same
-// fail-soft convention currentVMs follows.
-func (s *Server) currentISOs(r *http.Request) ([]isoView, string) {
-	resp, err := s.client.ListISOs(r.Context(), &rpcpb.ListISOsRequest{})
-	if err != nil {
-		return nil, err.Error()
-	}
-	if resp.GetError() != "" {
-		return nil, resp.GetError()
-	}
-	isos := make([]isoView, 0, len(resp.GetIsos()))
-	for _, i := range resp.GetIsos() {
-		isos = append(isos, fromRPCISO(i))
-	}
-	return isos, ""
 }
 
 // knownNodes fetches the current raft cluster membership via Status, for
@@ -1540,8 +1523,8 @@ func (s *Server) renderRowsWithError(w http.ResponseWriter, r *http.Request, msg
 // Images table after an upload or delete without a full page reload -
 // same pattern as handleListVMs/vm_rows.
 func (s *Server) handleListISOs(w http.ResponseWriter, r *http.Request) {
-	isos, errMsg := s.currentISOs(r)
-	s.render(w, "iso_rows", s.withAuthFields(r, pageData{Error: errMsg, ISOs: isos}))
+	isos, errMsg := s.currentClusterISOs(r)
+	s.render(w, "iso_rows", s.withAuthFields(r, pageData{Error: errMsg, ClusterISOs: isos, LocalNodeID: s.localNodeID(r)}))
 }
 
 // handleUploadISO streams a multipart file upload directly into
@@ -1691,7 +1674,7 @@ func (s *Server) uploadISOStream(r *http.Request, part *multipart.Part, expected
 // finished with no error" and "it silently didn't happen" look
 // identical.
 func (s *Server) renderISOPanelResult(w http.ResponseWriter, r *http.Request, formErr, successName string) {
-	isos, fetchErr := s.currentISOs(r)
+	isos, fetchErr := s.currentClusterISOs(r)
 	if fetchErr != "" {
 		if formErr == "" {
 			formErr = fetchErr
@@ -1703,7 +1686,9 @@ func (s *Server) renderISOPanelResult(w http.ResponseWriter, r *http.Request, fo
 	if formErr == "" && successName != "" {
 		success = fmt.Sprintf("Uploaded %s successfully.", successName)
 	}
-	s.render(w, "iso_panel", s.withAuthFields(r, pageData{ISOFormError: formErr, ISOFormSuccess: success, ISOs: isos}))
+	s.render(w, "iso_panel", s.withAuthFields(r, pageData{
+		ISOFormError: formErr, ISOFormSuccess: success, ClusterISOs: isos, LocalNodeID: s.localNodeID(r),
+	}))
 }
 
 func (s *Server) handleDeleteISO(w http.ResponseWriter, r *http.Request) {

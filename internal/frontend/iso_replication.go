@@ -18,13 +18,28 @@ import (
 // fetched from a peer" cue for whichever node the operator selects,
 // since internal/cluster's Reconciler now fetches a missing image
 // automatically at provisioning time rather than requiring a manual
-// copy first.
+// copy first. Also backs the Images page itself (handleImagesPage) -
+// ISOs are physical per-node files, never raft-replicated state like a
+// VM/jail record, so "cluster-wide" here means "one row per distinct
+// file, annotated with which Combs actually have a copy," not a single
+// canonical owner the way VM/jail listing already is (ADR-0106).
 type isoRowView struct {
-	Name         string
-	SizeBytes    uint64
-	SHA256       string
+	Name        string
+	SizeBytes   uint64
+	Size        string
+	SHA256      string
+	SHA256Short string
+
 	PresentNodes []string
 	MissingNodes []string
+
+	// PresentLocally mirrors (PresentNodes contains the viewing node's
+	// own id) - precomputed here rather than checked in the template,
+	// since Go's html/template has no built-in slice-membership test.
+	// Gates the Images page's own Delete button: only ever removes the
+	// LOCALLY-viewed Comb's own copy (DeleteISO has no remote-node
+	// concept), so a row missing locally must never offer it.
+	PresentLocally bool
 }
 
 // currentClusterISOs fetches every known node's own ListISOs
@@ -72,7 +87,10 @@ func (s *Server) currentClusterISOs(r *http.Request) ([]isoRowView, string) {
 			k := key{info.GetName(), info.GetSha256()}
 			row, ok := rows[k]
 			if !ok {
-				row = &isoRowView{Name: info.GetName(), SizeBytes: info.GetSizeBytes(), SHA256: info.GetSha256()}
+				row = &isoRowView{
+					Name: info.GetName(), SizeBytes: info.GetSizeBytes(), Size: formatBytes(info.GetSizeBytes()),
+					SHA256: info.GetSha256(), SHA256Short: shortHash(info.GetSha256()),
+				}
 				rows[k] = row
 			}
 			row.PresentNodes = append(row.PresentNodes, res.nodeID)
@@ -85,6 +103,7 @@ func (s *Server) currentClusterISOs(r *http.Request) ([]isoRowView, string) {
 		for _, id := range row.PresentNodes {
 			present[id] = true
 		}
+		row.PresentLocally = present[localNodeID]
 		for _, id := range nodeIDs {
 			if !present[id] {
 				row.MissingNodes = append(row.MissingNodes, id)

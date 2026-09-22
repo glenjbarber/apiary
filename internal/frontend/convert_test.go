@@ -133,19 +133,6 @@ func TestShortHash_ShortValueIsUnchanged(t *testing.T) {
 	}
 }
 
-func TestFromRPCISO_FormatsSizeAndKeepsFullHashAlongsideShortened(t *testing.T) {
-	v := fromRPCISO(&rpcpb.ISOInfo{Name: "freebsd.iso", SizeBytes: 5242880, Sha256: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b85"})
-	if v.Size != "5.00 MB" {
-		t.Errorf("Size = %q, want a human-readable size", v.Size)
-	}
-	if v.SHA256 != "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b85" {
-		t.Errorf("SHA256 = %q, want the full digest preserved for copying", v.SHA256)
-	}
-	if v.SHA256Short == v.SHA256 {
-		t.Errorf("SHA256Short should be a shortened form of SHA256, got the same value")
-	}
-}
-
 func TestSortJails_RunningGroupsByHiveThenName(t *testing.T) {
 	jails := []jailView{
 		{ID: "stopped", Name: "a", NodeID: "apiarium", DesiredState: "stopped", Phase: "stopped"},
