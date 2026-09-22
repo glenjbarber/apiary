@@ -153,3 +153,83 @@ func TestManager_SaveTightensPermissionsOnExistingFile(t *testing.T) {
 		t.Errorf("permissions after Save = %o, want 0600 even though the file pre-existed at 0644", perm)
 	}
 }
+
+// TestManager_LoadFillsNodeIDFromCommonConfig covers ADR-0111: when
+// raftd.json itself doesn't set node_id, Load falls back to
+// common.json's own node_id in the same directory.
+func TestManager_LoadFillsNodeIDFromCommonConfig(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "common.json"), []byte(`{"node_id":"comb-common"}`), 0o644); err != nil {
+		t.Fatalf("writing common.json: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "raftd.json"), []byte(`{}`), 0o644); err != nil {
+		t.Fatalf("writing raftd.json: %v", err)
+	}
+	m := &Manager{Path: filepath.Join(dir, "raftd.json")}
+
+	cfg, err := m.Load()
+	if err != nil {
+		t.Fatalf("Load() error: %v", err)
+	}
+	if cfg.NodeID != "comb-common" {
+		t.Errorf("NodeID = %q, want %q (from common.json)", cfg.NodeID, "comb-common")
+	}
+}
+
+// TestManager_LoadServiceNodeIDWinsOverCommonConfig covers ADR-0111's
+// precedence rule: a node_id set in raftd.json itself always wins over
+// common.json's value.
+func TestManager_LoadServiceNodeIDWinsOverCommonConfig(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "common.json"), []byte(`{"node_id":"comb-common"}`), 0o644); err != nil {
+		t.Fatalf("writing common.json: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "raftd.json"), []byte(`{"node_id":"comb-own"}`), 0o644); err != nil {
+		t.Fatalf("writing raftd.json: %v", err)
+	}
+	m := &Manager{Path: filepath.Join(dir, "raftd.json")}
+
+	cfg, err := m.Load()
+	if err != nil {
+		t.Fatalf("Load() error: %v", err)
+	}
+	if cfg.NodeID != "comb-own" {
+		t.Errorf("NodeID = %q, want %q (service file must win)", cfg.NodeID, "comb-own")
+	}
+}
+
+// TestManager_LoadMissingCommonConfigUnaffected covers ADR-0111's
+// "hosts with no common.json at all must be unaffected" requirement.
+func TestManager_LoadMissingCommonConfigUnaffected(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "raftd.json"), []byte(`{"node_id":"comb-own"}`), 0o644); err != nil {
+		t.Fatalf("writing raftd.json: %v", err)
+	}
+	m := &Manager{Path: filepath.Join(dir, "raftd.json")}
+
+	cfg, err := m.Load()
+	if err != nil {
+		t.Fatalf("Load() error: %v", err)
+	}
+	if cfg.NodeID != "comb-own" {
+		t.Errorf("NodeID = %q, want %q", cfg.NodeID, "comb-own")
+	}
+}
+
+// TestManager_LoadMalformedCommonConfigIsError covers ADR-0111's rule
+// that a malformed common.json is a real error, not silently ignored
+// the way a missing one is.
+func TestManager_LoadMalformedCommonConfigIsError(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "common.json"), []byte(`{not valid json`), 0o644); err != nil {
+		t.Fatalf("writing common.json: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "raftd.json"), []byte(`{}`), 0o644); err != nil {
+		t.Fatalf("writing raftd.json: %v", err)
+	}
+	m := &Manager{Path: filepath.Join(dir, "raftd.json")}
+
+	if _, err := m.Load(); err == nil {
+		t.Fatal("Load() expected error for malformed common.json, got nil")
+	}
+}

@@ -41,6 +41,8 @@ import (
 	"os"
 	"path/filepath"
 	"time"
+
+	"github.com/glenjbarber/apiary/internal/commonconfig"
 )
 
 // DefaultPath is where the settings file lives by default on a
@@ -276,12 +278,22 @@ func (m *Manager) path() string {
 }
 
 // Load reads the current config. A missing file is not an error - it
-// returns the zero Config, matching a fresh install that has never
+// returns the zero Config (with NodeID possibly filled in from
+// common.json, see below), matching a fresh install that has never
 // saved an override yet.
+//
+// Before reading this file, Load consults common.json (ADR-0111) in
+// the same directory for fields shared across every daemon on this
+// Comb. A field this file itself sets always wins; common.json only
+// fills in a field this file leaves unset.
 func (m *Manager) Load() (Config, error) {
+	common, err := loadCommonConfig(m.path())
+	if err != nil {
+		return Config{}, err
+	}
 	body, err := os.ReadFile(m.path())
 	if os.IsNotExist(err) {
-		return Config{}, nil
+		return applyCommonConfig(Config{}, common), nil
 	}
 	if err != nil {
 		return Config{}, err
@@ -290,7 +302,27 @@ func (m *Manager) Load() (Config, error) {
 	if err := json.Unmarshal(body, &cfg); err != nil {
 		return Config{}, err
 	}
-	return cfg, nil
+	return applyCommonConfig(cfg, common), nil
+}
+
+// loadCommonConfig loads common.json from the same directory as
+// servicePath (ADR-0111). A missing common.json is not an error - it
+// yields a zero-value commonconfig.Config, so applyCommonConfig below
+// has nothing to fill in and every field behaves exactly as it did
+// before common.json existed.
+func loadCommonConfig(servicePath string) (commonconfig.Config, error) {
+	cm := commonconfig.Manager{Path: filepath.Join(filepath.Dir(servicePath), filepath.Base(commonconfig.DefaultPath))}
+	return cm.Load()
+}
+
+// applyCommonConfig fills NodeID from common when this file doesn't
+// set it itself - the only field nodeconfig.Config shares with
+// commonconfig.Config today (ADR-0111).
+func applyCommonConfig(cfg Config, common commonconfig.Config) Config {
+	if cfg.NodeID == "" {
+		cfg.NodeID = common.NodeID
+	}
+	return cfg
 }
 
 // Save writes cfg, replacing whatever was there before in full (not a
