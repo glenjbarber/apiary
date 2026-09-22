@@ -32,7 +32,7 @@ INSTALL_SRCS=	raftd \
 		frontend \
 		restshimd
 
-INSTALL_SRCS_FILTERED := $(filter-out raftd, $(INSTALL_SRCS))
+INSTALL_SRCS_FILTERED= ${INSTALL_SRCS:Nmanagerd:Nraftd}
 
 # install copies the four apiary daemons - not apiaryinstall, a
 # one-shot host-prep CLI meant to be run from this checkout and never
