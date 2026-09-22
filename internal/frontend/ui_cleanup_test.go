@@ -48,7 +48,7 @@ func TestMachineSectionNavigationPreservesPanels(t *testing.T) {
 			t.Errorf("missing or duplicate navigation target %s", id)
 		}
 	}
-	for _, id := range []string{"node-services", "assumption-tuning", "nodeconfig", "uplink", "machine-vms", "resource-scope", "bhyve-config", "jail-provisioning", "hast", "quota", "peer-forwarding", "tls", "origin-ca", "internal-security", "cloudflare-config"} {
+	for _, id := range []string{"node-services", "assumption-tuning", "nodeconfig", "machine-vms", "resource-scope", "bhyve-config", "jail-provisioning", "hast", "quota", "peer-forwarding", "tls", "origin-ca", "internal-security", "cloudflare-config"} {
 		if strings.Count(body, `id="`+id+`-panel"`) != 1 {
 			t.Errorf("missing or duplicate HTMX target %s", id)
 		}

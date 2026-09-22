@@ -37,12 +37,11 @@ func TestVLANIfaceName(t *testing.T) {
 	}
 }
 
-// TestEnsureVLAN_UntaggedIsANoOp guards the claim ADR-0085/Down's own
-// doc comment relies on: EnsureVLAN(0) (the untagged/raw-uplink case,
-// hit on every reconciler tick for any untagged network) never issues
-// an ifconfig call at all, so it can never silently re-up an
-// administratively-downed uplink. No root needed - this asserts the
-// exact code path takes the early return, not real interface state.
+// TestEnsureVLAN_UntaggedIsANoOp asserts EnsureVLAN(0) (the
+// untagged/raw-uplink case, hit on every reconciler tick for any
+// untagged network) never issues an ifconfig call at all. No root
+// needed - this asserts the exact code path takes the early return,
+// not real interface state.
 func TestEnsureVLAN_UntaggedIsANoOp(t *testing.T) {
 	m := &Manager{Uplink: "em0"}
 	name, created, err := m.EnsureVLAN(context.Background(), 0)
@@ -51,27 +50,6 @@ func TestEnsureVLAN_UntaggedIsANoOp(t *testing.T) {
 	}
 	if name != "em0" || created {
 		t.Errorf("EnsureVLAN(0) = (%q, %v), want (\"em0\", false)", name, created)
-	}
-}
-
-func TestUplinkInterface(t *testing.T) {
-	m := &Manager{Uplink: "em0"}
-	if got := m.UplinkInterface(); got != "em0" {
-		t.Errorf("UplinkInterface() = %q, want em0", got)
-	}
-}
-
-func TestDown_NoUplinkConfiguredIsError(t *testing.T) {
-	m := &Manager{}
-	if err := m.Down(context.Background()); err == nil {
-		t.Error("Down() = nil error, want one with no uplink configured")
-	}
-}
-
-func TestUp_NoUplinkConfiguredIsError(t *testing.T) {
-	m := &Manager{}
-	if err := m.Up(context.Background()); err == nil {
-		t.Error("Up() = nil error, want one with no uplink configured")
 	}
 }
 

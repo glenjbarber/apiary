@@ -1,7 +1,6 @@
 package frontend
 
 import (
-	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -160,7 +159,6 @@ func (s *Server) machinePageData(r *http.Request) pageData {
 	vms, vmErr := s.currentMachineVMs(r, nodeID)
 	cloudflareConfigured, _ := s.currentCloudflareStatus(r)
 	services, serviceErr := s.currentNodeServices(r)
-	uplinkStatus, uplinkErr := s.currentUplinkStatus(r)
 	originCerts, originErr := s.currentOriginCertificates(r)
 
 	return pageData{
@@ -177,8 +175,6 @@ func (s *Server) machinePageData(r *http.Request) pageData {
 		CloudflareConfigured:     cloudflareConfigured,
 		NodeServices:             services,
 		ServiceFormError:         serviceErr,
-		UplinkStatus:             uplinkStatus,
-		UplinkFormError:          uplinkErr,
 		OriginCertificates:       originCerts,
 		OriginCAError:            originErr,
 		JoinColonyResult:         s.currentJoinColonyResult(r),
@@ -343,19 +339,6 @@ func (s *Server) currentNodeServices(r *http.Request) ([]nodeServiceView, string
 		}
 	}
 	return services, ""
-}
-
-// currentUplinkStatus fetches this Comb's own uplink interface state
-// (ADR-0085) - intentionally local, like node config/services above.
-func (s *Server) currentUplinkStatus(r *http.Request) (uplinkStatusView, string) {
-	resp, err := s.client.GetUplinkStatus(r.Context(), &rpcpb.GetUplinkStatusRequest{})
-	if err != nil {
-		return uplinkStatusView{}, err.Error()
-	}
-	if resp.GetError() != "" {
-		return uplinkStatusView{}, resp.GetError()
-	}
-	return fromRPCUplinkStatus(resp), ""
 }
 
 // currentCloudflareStatus reports whether this node's own managerd has
@@ -1000,50 +983,5 @@ func (s *Server) renderNodeServicesPanel(w http.ResponseWriter, r *http.Request,
 	s.render(w, "node_services_panel", pageData{
 		NodeServices: services, ServiceFormError: formErr,
 		ServiceFormSuccess: success, CanAdmin: true,
-	})
-}
-
-// handleSetUplinkState administratively brings this Comb's uplink
-// interface down or back up (ADR-0085). This is a genuinely dangerous
-// action if the caller's own network path shares the uplink interface -
-// the confirmation is the form's own hx-confirm dialog (machine.html's
-// uplink_panel), by explicit user choice; there is no automatic revert.
-func (s *Server) handleSetUplinkState(w http.ResponseWriter, r *http.Request) {
-	if err := r.ParseForm(); err != nil {
-		s.renderUplinkPanel(w, r, "invalid form: "+err.Error(), "")
-		return
-	}
-	down := r.FormValue("down") == "true"
-	resp, err := s.client.SetUplinkState(r.Context(), &rpcpb.SetUplinkStateRequest{Down: down})
-	if err != nil {
-		s.renderUplinkPanel(w, r, err.Error(), "")
-		return
-	}
-	if resp.GetError() != "" {
-		s.renderUplinkPanel(w, r, resp.GetError(), "")
-		return
-	}
-	success := "uplink brought down"
-	if paused := resp.GetNatPausedNetworks(); len(paused) > 0 {
-		success = fmt.Sprintf("uplink brought down (also paused outbound NAT for %d network(s): %s)", len(paused), strings.Join(paused, ", "))
-	}
-	if resp.GetUp() {
-		success = "uplink brought back up"
-	}
-	s.renderUplinkPanel(w, r, "", success)
-}
-
-func (s *Server) renderUplinkPanel(w http.ResponseWriter, r *http.Request, formErr, success string) {
-	status, fetchErr := s.currentUplinkStatus(r)
-	if fetchErr != "" {
-		if formErr == "" {
-			formErr = fetchErr
-		} else {
-			formErr += "; additionally failed to refresh: " + fetchErr
-		}
-	}
-	s.render(w, "uplink_panel", pageData{
-		UplinkStatus: status, UplinkFormError: formErr,
-		UplinkFormSuccess: success, CanAdmin: true,
 	})
 }

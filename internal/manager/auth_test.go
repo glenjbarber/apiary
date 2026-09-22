@@ -248,13 +248,6 @@ func TestRequiredRoleFor_PurgeStaleAssumptionResultsIsOperator(t *testing.T) {
 	}
 }
 
-func TestRequiredRoleFor_GetUplinkStatusIsViewer(t *testing.T) {
-	const method = "/apiary.rpc.v1.ManagerService/GetUplinkStatus"
-	if got := requiredRoleFor(method); got != RoleViewer {
-		t.Errorf("requiredRoleFor(%q) = %q, want %q", method, got, RoleViewer)
-	}
-}
-
 // TestRequiredRoleFor_ListJailTemplateNamesIsViewer guards against the
 // same easy-to-miss failure mode as SimulateNodeFailure's own test
 // above, for ADR-0089's read-only jail base-template report - the same
@@ -290,18 +283,6 @@ func TestRequiredRoleFor_JailTemplatePeerRPCsAreOperator(t *testing.T) {
 		if got := requiredRoleFor(method); got != RoleOperator {
 			t.Errorf("requiredRoleFor(%q) = %q, want %q", method, got, RoleOperator)
 		}
-	}
-}
-
-// TestRequiredRoleFor_SetUplinkStateIsAdmin guards against the same
-// easy-to-miss failure mode as SimulateNodeFailure's own test above -
-// SetUplinkState (ADR-0085) is a host-wide physical change with a real
-// risk of severing this node's own network access, the same tier as
-// UpdateNodeConfig.
-func TestRequiredRoleFor_SetUplinkStateIsAdmin(t *testing.T) {
-	const method = "/apiary.rpc.v1.ManagerService/SetUplinkState"
-	if got := requiredRoleFor(method); got != RoleAdmin {
-		t.Errorf("requiredRoleFor(%q) = %q, want %q", method, got, RoleAdmin)
 	}
 }
 

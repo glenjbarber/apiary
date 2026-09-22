@@ -394,12 +394,6 @@ func run() error {
 	srv.SetRestshimdConfig(&restshimdconfig.Manager{})
 	srv.SetRaftdConfig(&raftdconfig.Manager{})
 	srv.SetRaftdConversionConfig(&raftdconfig.Manager{})
-	// ADR-0088: reconciler already satisfies natPauser (NATUplink/
-	// PauseOutboundNAT) structurally - wired unconditionally, since
-	// both methods are themselves no-ops when PF/NetworkStatePath
-	// aren't configured, the same posture as reconciler's other
-	// nil-tolerant optional-dependency methods.
-	srv.SetNATPauser(reconciler)
 	srv.SetKnownPeerAddresses(splitCommaList(cfg.KnownPeerAddresses))
 	srv.SetRestartGuardrailToken(restartGuardrailToken)
 	restartConfirm := manager.NewRestartConfirmStore("/var/db/apiary/guardrail")

@@ -2,7 +2,14 @@
 
 ## Status
 
-Accepted
+Accepted. The down/up toggle itself (`GetUplinkStatus`/`SetUplinkState`,
+`vlan.Manager.Down`/`Up`/`UplinkInterface`) was removed in
+[ADR-0113](0113-remove-uplink-takedown.md) - it never gained the
+server-side "is this the host's only interface" guardrail this ADR's own
+Context section already flagged as a risk, and was cut rather than
+gated after the fact. This ADR's other, unrelated fix (VLAN/DHCP/PF
+construction keyed on `-vlan-uplink` alone, independent of
+`-bhyve-bootrom`) remains in effect.
 
 ## Context
 
