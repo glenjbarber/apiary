@@ -9,6 +9,7 @@ import (
 	"io"
 	"net"
 	"os"
+	"sync"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
@@ -75,10 +76,94 @@ type PeerReporter struct {
 	// either call to a peer leader - see restartGuardrailTokenValid's
 	// own doc comment for why that fails closed, not open.
 	RestartGuardrailToken string
+
+	// ResolveFunc resolves a raft-bind hostname to its current IP
+	// addresses, used by RefreshDerivedHostnames (ADR-0115) to build the
+	// automatic IP->hostname map. A field rather than a package-level
+	// var so tests can inject a fake without touching real DNS. nil
+	// means net.LookupHost.
+	ResolveFunc func(host string) ([]string, error)
+
+	// mu guards derived, the map RefreshDerivedHostnames rebuilds -
+	// PeerHostnames above is operator-provided and effectively
+	// read-only after startup, but derived is refreshed from a
+	// background goroutine (cmd/managerd's peer hostname refresh loop)
+	// while dial/dialOpts/dialRestartGuardrail read it concurrently.
+	mu      sync.RWMutex
+	derived map[string]string
+}
+
+// KnownRaftServer is the minimal shape RefreshDerivedHostnames needs
+// from one member of raft's own committed configuration - just the
+// raft-bind address, not the full internalpb.ServerInfo/raft.ServerInfo
+// wire types, so this package doesn't need to import either just for
+// this.
+type KnownRaftServer struct {
+	// Address is the raft-bind "host:port" as raft's own configuration
+	// stores it (raft.Server.Address, ADR-0115's Context). May already
+	// be a bare IP on a cluster bootstrapped that way, in which case
+	// there's nothing to derive and the entry is skipped.
+	Address string
 }
 
 func NewPeerReporter(apiKey string, useTLS bool, peerHostnames map[string]string) *PeerReporter {
 	return &PeerReporter{APIKey: apiKey, UseTLS: useTLS, PeerHostnames: peerHostnames}
+}
+
+// RefreshDerivedHostnames rebuilds the automatic IP->hostname map
+// (ADR-0115) from servers, raft's own known cluster membership. For
+// each server whose Address host part is a real hostname (not already
+// a bare IP), it resolves that hostname and records IP->hostname for
+// every address returned. A hostname that fails to resolve is skipped,
+// not fatal - one peer's DNS hiccup should not take down the whole
+// mapping. The rebuilt map fully replaces the previous one, so a peer
+// removed from raft's configuration (or renamed) stops being derived
+// on the very next refresh instead of leaking a stale entry forever.
+func (p *PeerReporter) RefreshDerivedHostnames(servers []KnownRaftServer) {
+	resolve := p.ResolveFunc
+	if resolve == nil {
+		resolve = net.LookupHost
+	}
+
+	derived := make(map[string]string, len(servers))
+	for _, s := range servers {
+		host, _, err := net.SplitHostPort(s.Address)
+		if err != nil || host == "" {
+			continue
+		}
+		if net.ParseIP(host) != nil {
+			// Already a bare IP - nothing to derive, and resolving it
+			// as a hostname would be meaningless.
+			continue
+		}
+		ips, err := resolve(host)
+		if err != nil {
+			continue
+		}
+		for _, ip := range ips {
+			derived[ip] = host
+		}
+	}
+
+	p.mu.Lock()
+	p.derived = derived
+	p.mu.Unlock()
+}
+
+// serverNameFor returns the TLS ServerName to use when dialing ip, if
+// any is known. A manual PeerHostnames entry always wins over a derived
+// one for the same IP (ADR-0115): an operator who hand-configured an
+// override did so for a reason - an exotic network where DNS is
+// unreliable, or a hostname mismatch - and automatic derivation must
+// not silently out-vote that choice.
+func (p *PeerReporter) serverNameFor(ip string) (string, bool) {
+	if name, ok := p.PeerHostnames[ip]; ok {
+		return name, true
+	}
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	name, ok := p.derived[ip]
+	return name, ok
 }
 
 // LoadPeerCAPool reads a PEM file - one or more concatenated
@@ -129,7 +214,7 @@ func (p *PeerReporter) dialRestartGuardrail(addr string) (*grpc.ClientConn, rpcp
 			cfg.RootCAs = p.CAPool
 		}
 		if host, _, err := net.SplitHostPort(addr); err == nil {
-			if name, ok := p.PeerHostnames[host]; ok {
+			if name, ok := p.serverNameFor(host); ok {
 				cfg.ServerName = name
 			}
 		}
@@ -155,7 +240,7 @@ func (p *PeerReporter) dialOpts(addr string, attachAPIKey bool) (*grpc.ClientCon
 			cfg.RootCAs = p.CAPool
 		}
 		if host, _, err := net.SplitHostPort(addr); err == nil {
-			if name, ok := p.PeerHostnames[host]; ok {
+			if name, ok := p.serverNameFor(host); ok {
 				cfg.ServerName = name
 			}
 		}

@@ -138,8 +138,8 @@ the join until this is true.
 The joining managerd must be able to verify the target Colony member's
 certificate before it can submit its request. If the target uses a
 self-signed certificate, create a root-readable PEM trust bundle containing
-that certificate and configure `peer_tls`, `peer_tls_ca`, and the peer TLS
-hostname mapping on the joining host before continuing.
+that certificate and configure `peer_tls` and `peer_tls_ca` on the joining
+host before continuing.
 
 For example, copy the existing Comb's self-signed certificate into a
 root-readable trust bundle on the joining host:
@@ -158,14 +158,25 @@ Then set the corresponding fields in the joining host's `managerd.json`:
 ```json
 {
   "peer_tls": true,
-  "peer_tls_ca": "/usr/local/etc/apiary/peer-ca.pem",
-  "peer_tls_hostname_map": "<existing-comb-address>=<existing-comb-name>"
+  "peer_tls_ca": "/usr/local/etc/apiary/peer-ca.pem"
 }
 ```
 
-The hostname-map value must match the DNS name in the existing Comb's
-certificate. If that certificate is issued by a CA already trusted by the
-joining host, omit `peer_tls_ca`; the system trust store is used instead.
+If that certificate is issued by a CA already trusted by the joining host,
+omit `peer_tls_ca`; the system trust store is used instead.
+
+As of ADR-0115, `peer_tls_hostname_map` no longer needs to be set by hand
+for the normal case: each managerd derives its own IP-to-hostname map
+automatically from raft's own known cluster membership (every voter's
+raft-bind hostname, resolved via DNS), refreshed periodically, and this
+covers exactly the case a raft leader_hint reports as a bare IP. Leave
+`peer_tls_hostname_map` unset unless DNS resolution for a peer's raft-bind
+hostname is unreliable on this network (e.g. split-horizon DNS gaps, a
+peer bootstrapped with a raft-bind hostname that doesn't actually resolve
+everywhere) or a peer's certificate names a hostname other than its
+raft-bind hostname - in either case, set it exactly as before
+(`"<ip>=<hostname>"`); a manually-configured entry always takes precedence
+over the automatically derived one for the same IP.
 
 If Raft transport mutual TLS is enabled, the existing Colony also needs to
 trust the joining node's Raft certificate before approval. Do not weaken TLS
