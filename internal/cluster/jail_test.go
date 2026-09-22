@@ -134,6 +134,72 @@ func TestReconciler_RunOnce_CreatesJailOnPlainDataset(t *testing.T) {
 	}
 }
 
+// TestReconciler_RunOnce_CreatesVNETJailOnNetwork covers the ADR-0117
+// opt-in increment end to end through RunOnce: a jail naming both
+// network_id and vnet=true gets its dedicated epair(4) pair, the jail
+// end handed to jail.Config, and the assigned IP/prefix/gateway
+// computed from the network's subnet.
+func TestReconciler_RunOnce_CreatesVNETJailOnNetwork(t *testing.T) {
+	raft := &fakeRaftClient{
+		jailsResp: &internalpb.ListJailsResponse{
+			Jails: []*internalpb.JailDefinition{{
+				Id: "jail-1", Name: "web-1", Hostname: "web-1.local", NodeId: "node-a",
+				NetworkId: "net-1", IpAddress: "10.60.0.2", Vnet: true,
+			}},
+		},
+		networksResp: &internalpb.ListNetworksResponse{Networks: []*internalpb.NetworkDefinition{
+			{Id: "net-1", Name: "prod", Subnet: "10.60.0.0/24"},
+		}},
+	}
+	zfs := newFakeDatasetManager()
+	root := t.TempDir()
+	writePlaceholderJailRoot(t, root)
+	zfs.mountpointFor["jail-1"] = root
+	jm := newFakeJailManager()
+	vlan := newFakeVLANManager()
+	epairStatePath := filepath.Join(t.TempDir(), "jail-epairs.json")
+
+	r := &Reconciler{Raft: raft, ZFS: zfs, Jail: jm, VLAN: vlan, LocalNodeID: "node-a", JailEpairStatePath: epairStatePath}
+	if err := r.RunOnce(context.Background()); err != nil {
+		t.Fatalf("RunOnce() error: %v", err)
+	}
+
+	cfg, ok := jm.lastCfg["jail-1"]
+	if !ok {
+		t.Fatalf("CreateJail was never called for jail-1")
+	}
+	if !cfg.VNET {
+		t.Errorf("Config.VNET = false, want true")
+	}
+	if cfg.VNETInterface == "" {
+		t.Errorf("Config.VNETInterface = empty, want the epair jail-side name")
+	}
+	if cfg.IPAddress != "10.60.0.2" {
+		t.Errorf("Config.IPAddress = %q, want 10.60.0.2", cfg.IPAddress)
+	}
+	if cfg.IPPrefixLen != 24 {
+		t.Errorf("Config.IPPrefixLen = %d, want 24", cfg.IPPrefixLen)
+	}
+	if cfg.Gateway != "10.60.0.1" {
+		t.Errorf("Config.Gateway = %q, want 10.60.0.1", cfg.Gateway)
+	}
+	totalMembers := 0
+	for _, ifaces := range vlan.members {
+		totalMembers += len(ifaces)
+	}
+	if totalMembers == 0 {
+		t.Errorf("no interface was added to the network's bridge")
+	}
+
+	state, err := loadJailEpairState(epairStatePath)
+	if err != nil {
+		t.Fatalf("loadJailEpairState() error: %v", err)
+	}
+	if _, ok := state.Epairs["jail-1"]; !ok {
+		t.Errorf("no epair record persisted for jail-1")
+	}
+}
+
 func TestReconciler_RunOnce_SkipsJailAlreadyRunning(t *testing.T) {
 	raft := &fakeRaftClient{
 		jailsResp: &internalpb.ListJailsResponse{

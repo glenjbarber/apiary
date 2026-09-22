@@ -179,9 +179,13 @@ func toInternalJail(j *rpcpb.JailDefinition) *internalpb.JailDefinition {
 		DesiredState:    internalpb.JailState(j.GetDesiredState()),
 		BaseTemplate:    j.GetBaseTemplate(),
 		BaseArchiveName: j.GetBaseArchiveName(),
+		NetworkId:       j.GetNetworkId(),
+		Vnet:            j.GetVnet(),
 		// Phase/PhaseError are the reconciler's own observed state, never
 		// set by an external caller - CreateJail/UpdateJail requests
-		// never carry them through.
+		// never carry them through. IpAddress is likewise never set by
+		// the caller - it's assigned by applyCreateJail when NetworkId
+		// is set, mirroring VMDefinition.ip_address exactly.
 	}
 }
 
@@ -200,6 +204,9 @@ func fromInternalJail(j *internalpb.JailDefinition) *rpcpb.JailDefinition {
 		PhaseError:      j.GetPhaseError(),
 		BaseTemplate:    j.GetBaseTemplate(),
 		BaseArchiveName: j.GetBaseArchiveName(),
+		NetworkId:       j.GetNetworkId(),
+		IpAddress:       j.GetIpAddress(),
+		Vnet:            j.GetVnet(),
 	}
 }
 

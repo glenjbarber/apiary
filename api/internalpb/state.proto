@@ -251,6 +251,25 @@ message JailDefinition {
   // already established, rather than an operator-populated ZFS
   // template.
   string base_archive_name = 10;
+
+  // network_id, if set, names a NetworkDefinition this jail's VNET
+  // interface belongs to - mirrors VMDefinition.network_id exactly
+  // (ADR-0022, ADR-0117). Empty means today's unchanged default:
+  // ip4=inherit, no VNET/epair(4) wiring at all. Setting network_id is
+  // what opts a jail into dedicated VNET networking; it is never
+  // implied by any other field.
+  string network_id = 11;
+
+  // ip_address is assigned by the FSM itself when CreateJail runs (see
+  // applyCreateJail) if network_id is set - never by the caller, and
+  // never mutated afterward. Mirrors VMDefinition.ip_address exactly.
+  string ip_address = 12;
+
+  // vnet, if true, gives this jail its own network stack (jail(8)'s
+  // "vnet;" parameter) wired to network_id's bridge via a dedicated
+  // epair(4) pair, instead of sharing the host's stack via
+  // ip4=inherit. Requires network_id to be set. See ADR-0117.
+  bool vnet = 13;
 }
 
 // FirewallRule is one pf(8) rule applied to a VM's per-VM anchor. See

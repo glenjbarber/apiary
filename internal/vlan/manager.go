@@ -197,6 +197,66 @@ func gatewayCIDR(subnet string) (cidr, ip string, err error) {
 	return fmt.Sprintf("%s/%d", gw.String(), ones), gw.String(), nil
 }
 
+// EnsureEpair creates a new epair(4) pair and adds its host-side ("a")
+// end to bridge, for VNET jail networking (ADR-0117) - the epair
+// equivalent of bhyve's own per-VM tap(4)/createTap, reusing this same
+// Manager's existing bridge-membership logic (EnsureMember) rather than
+// duplicating it.
+//
+// Unlike a vlan(4)/bridge(4) interface, an epair(4) pair can't be
+// created with a caller-chosen name - `ifconfig epair create` always
+// auto-numbers both ends (e.g. "epair0a"/"epair0b"), so this always
+// creates a fresh pair; the caller (internal/cluster's reconciler) is
+// responsible for recording the returned names so a later tick or
+// teardown can find them again, mirroring how internal/bhyve's own
+// tapfile records its tap device name for the same reason.
+//
+// hostSide is the "a" end (kept on the host, added to bridge); jailSide
+// is the "b" end (handed to jail(8) via vnet.interface, moved into the
+// jail's own vnet at jail creation time and never touched by this
+// Manager again).
+func (m *Manager) EnsureEpair(ctx context.Context, bridge string) (hostSide, jailSide string, err error) {
+	out, err := runCmd(ctx, "ifconfig", "epair", "create")
+	if err != nil {
+		return "", "", fmt.Errorf("vlan: creating epair: %w", err)
+	}
+	// `ifconfig epair create` prints only the "a" end's name, e.g.
+	// "epair0a" - the "b" end is the same base with the trailing "a"
+	// swapped for "b" (FreeBSD's own epair(4) naming convention).
+	hostSide = strings.TrimSpace(out)
+	if !strings.HasSuffix(hostSide, "a") {
+		runCmd(ctx, "ifconfig", hostSide, "destroy")
+		return "", "", fmt.Errorf("vlan: unexpected epair create output %q", out)
+	}
+	jailSide = strings.TrimSuffix(hostSide, "a") + "b"
+
+	if _, err := runCmd(ctx, "ifconfig", hostSide, "up"); err != nil {
+		runCmd(ctx, "ifconfig", hostSide, "destroy")
+		return "", "", fmt.Errorf("vlan: bringing up %s: %w", hostSide, err)
+	}
+	if err := m.EnsureMember(ctx, bridge, hostSide); err != nil {
+		runCmd(ctx, "ifconfig", hostSide, "destroy")
+		return "", "", err
+	}
+	return hostSide, jailSide, nil
+}
+
+// DestroyEpair tears down an epair(4) pair by its host-side ("a") name
+// - destroying either end destroys both, the same as bhyve's tap
+// devices. Best-effort and idempotent, like DestroyBridge/DestroyVLAN:
+// "already gone" (e.g. because the jail that owned the "b" end was
+// already removed, taking the whole pair with it) is not an error.
+func (m *Manager) DestroyEpair(ctx context.Context, hostSide string) error {
+	if hostSide == "" {
+		return nil
+	}
+	_, err := runCmd(ctx, "ifconfig", hostSide, "destroy")
+	if err != nil && !strings.Contains(err.Error(), "does not exist") {
+		return fmt.Errorf("vlan: destroying epair %s: %w", hostSide, err)
+	}
+	return nil
+}
+
 // DestroyBridge tears bridge down. Best-effort and idempotent, like
 // internal/bhyve's destroyTap: "already gone" is not an error, since
 // this runs during teardown where a previous partial attempt may have

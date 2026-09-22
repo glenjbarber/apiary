@@ -1037,6 +1037,92 @@ func createJailCmd(id, name string) *internalpb.Command {
 	}
 }
 
+func createJailOnNetworkCmd(id, networkID string, vnet bool) *internalpb.Command {
+	return &internalpb.Command{
+		Op: &internalpb.Command_CreateJail{
+			CreateJail: &internalpb.CreateJail{Jail: &internalpb.JailDefinition{Id: id, NetworkId: networkID, Vnet: vnet}},
+		},
+	}
+}
+
+// TestFSM_Apply_CreateJailOnNetworkAssignsIP mirrors
+// TestFSM_Apply_CreateVMOnNetworkAssignsIPAndMAC - see ADR-0117.
+func TestFSM_Apply_CreateJailOnNetworkAssignsIP(t *testing.T) {
+	fsm := NewFSM()
+	fsm.Apply(&raft.Log{Index: 1, Data: mustMarshalCommand(t, createNetworkCmd("net-1", "prod", "10.60.0.0/24"))})
+
+	result := fsm.Apply(&raft.Log{Index: 2, Data: mustMarshalCommand(t, createJailOnNetworkCmd("jail-1", "net-1", true))})
+
+	applyResult := result.(*FSMApplyResult)
+	if applyResult.Error != "" {
+		t.Fatalf("Error = %q, want empty", applyResult.Error)
+	}
+	if applyResult.Jail.GetIpAddress() != "10.60.0.2" {
+		t.Errorf("IpAddress = %q, want 10.60.0.2 (skipping .0 network, .1 gateway)", applyResult.Jail.GetIpAddress())
+	}
+}
+
+// TestFSM_Apply_CreateJailWithoutNetworkGetsNoIP confirms today's
+// unchanged default (no network_id, no vnet) allocates no IP - the
+// ip4=inherit path must see zero behavior change from ADR-0117.
+func TestFSM_Apply_CreateJailWithoutNetworkGetsNoIP(t *testing.T) {
+	fsm := NewFSM()
+
+	result := fsm.Apply(&raft.Log{Index: 1, Data: mustMarshalCommand(t, createJailCmd("jail-1", "web-1"))})
+
+	applyResult := result.(*FSMApplyResult)
+	if applyResult.Error != "" {
+		t.Fatalf("Error = %q, want empty", applyResult.Error)
+	}
+	if applyResult.Jail.GetIpAddress() != "" {
+		t.Errorf("IpAddress = %q, want empty - no network_id means no Apiary-managed IP allocation", applyResult.Jail.GetIpAddress())
+	}
+}
+
+// TestFSM_Apply_CreateJailVnetRequiresNetworkID confirms vnet is
+// rejected without network_id - there is nothing for a VNET jail's
+// epair to attach to otherwise.
+func TestFSM_Apply_CreateJailVnetRequiresNetworkID(t *testing.T) {
+	fsm := NewFSM()
+
+	result := fsm.Apply(&raft.Log{Index: 1, Data: mustMarshalCommand(t, createJailOnNetworkCmd("jail-1", "", true))})
+
+	if result.(*FSMApplyResult).Error == "" {
+		t.Fatalf("Error = empty, want a vnet-without-network_id rejection")
+	}
+}
+
+// TestFSM_Apply_CreateJailUnknownNetworkRejected mirrors
+// TestFSM_Apply_CreateVMUnknownNetworkRejected, for jails.
+func TestFSM_Apply_CreateJailUnknownNetworkRejected(t *testing.T) {
+	fsm := NewFSM()
+
+	result := fsm.Apply(&raft.Log{Index: 1, Data: mustMarshalCommand(t, createJailOnNetworkCmd("jail-1", "does-not-exist", true))})
+
+	if result.(*FSMApplyResult).Error == "" {
+		t.Fatalf("Error = empty, want an unknown-network rejection")
+	}
+}
+
+// TestFSM_Apply_CreateJailAndVMShareNetworkIPPool confirms a jail and a
+// VM on the same network never get the same allocated address - the
+// whole reason allocateIP was extended to also scan f.jails.
+func TestFSM_Apply_CreateJailAndVMShareNetworkIPPool(t *testing.T) {
+	fsm := NewFSM()
+	fsm.Apply(&raft.Log{Index: 1, Data: mustMarshalCommand(t, createNetworkCmd("net-1", "prod", "10.60.0.0/24"))})
+	vmResult := fsm.Apply(&raft.Log{Index: 2, Data: mustMarshalCommand(t, createVMOnNetworkCmd("vm-1", "net-1"))})
+	jailResult := fsm.Apply(&raft.Log{Index: 3, Data: mustMarshalCommand(t, createJailOnNetworkCmd("jail-1", "net-1", true))})
+
+	vmIP := vmResult.(*FSMApplyResult).VM.GetIpAddress()
+	jailIP := jailResult.(*FSMApplyResult).Jail.GetIpAddress()
+	if vmIP == "" || jailIP == "" {
+		t.Fatalf("vmIP=%q jailIP=%q, want both non-empty", vmIP, jailIP)
+	}
+	if vmIP == jailIP {
+		t.Errorf("vmIP and jailIP both = %q, want distinct addresses", vmIP)
+	}
+}
+
 func TestFSM_Apply_CreateJail(t *testing.T) {
 	fsm := NewFSM()
 
