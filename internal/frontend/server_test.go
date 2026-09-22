@@ -1173,6 +1173,38 @@ func TestServer_NewVMPage(t *testing.T) {
 	}
 }
 
+// TestServer_NewVMPage_HasHostnameDrivenIdentity confirms the create-VM
+// form matches create-jail's own Hostname -> ID/Name derivation UX
+// (SHARED.md's 2026-09-22 00:37 EDT TODO): a Hostname field exists
+// (client-side convenience only - VMDefinition has no hostname field,
+// so it must not carry a name attribute that would submit it), and the
+// ID/Display name inputs carry the ids the derivation JS targets.
+func TestServer_NewVMPage_HasHostnameDrivenIdentity(t *testing.T) {
+	client := &fakeClient{}
+	s := newTestServer(t, client)
+
+	req := httptest.NewRequest(http.MethodGet, "/vms/new", nil)
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, `id="vm-hostname"`) {
+		t.Errorf("new VM page missing Hostname input, got: %s", body)
+	}
+	if strings.Contains(body, `id="vm-hostname" name=`) {
+		t.Errorf("Hostname input must not be submitted (no VMDefinition hostname field exists), got: %s", body)
+	}
+	if !strings.Contains(body, `id="vm-id"`) || !strings.Contains(body, `name="id"`) {
+		t.Errorf("new VM page missing ID input the derivation JS targets, got: %s", body)
+	}
+	if !strings.Contains(body, `id="vm-name"`) || !strings.Contains(body, `name="name"`) {
+		t.Errorf("new VM page missing Display name input the derivation JS targets, got: %s", body)
+	}
+}
+
 // TestServer_NewVMPage_ShowsCloneSources confirms the create-VM form's
 // clone-from-snapshot dropdown lists an existing VM that has at least
 // one snapshot (ADR-0095).
