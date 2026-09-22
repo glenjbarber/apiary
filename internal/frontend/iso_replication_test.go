@@ -132,6 +132,9 @@ func TestCurrentClusterISOs_MergesPresentAndMissing(t *testing.T) {
 	if !equalStrSlices(a.PresentNodes, []string{"apiarium"}) || !equalStrSlices(a.MissingNodes, []string{"freebsd-apiary"}) {
 		t.Errorf("a.iso: present=%v missing=%v, want present=[apiarium] missing=[freebsd-apiary]", a.PresentNodes, a.MissingNodes)
 	}
+	if a.Size == "" || a.SHA256Short == "" {
+		t.Errorf("a.iso: Size=%q SHA256Short=%q, want both formatted display fields populated", a.Size, a.SHA256Short)
+	}
 	b := byName["b.iso"]
 	if !equalStrSlices(b.PresentNodes, []string{"apiarium", "freebsd-apiary"}) || len(b.MissingNodes) != 0 {
 		t.Errorf("b.iso: present=%v missing=%v, want present on both, missing none", b.PresentNodes, b.MissingNodes)
@@ -139,6 +142,40 @@ func TestCurrentClusterISOs_MergesPresentAndMissing(t *testing.T) {
 	c := byName["c.iso"]
 	if !equalStrSlices(c.PresentNodes, []string{"freebsd-apiary"}) || !equalStrSlices(c.MissingNodes, []string{"apiarium"}) {
 		t.Errorf("c.iso: present=%v missing=%v, want present=[freebsd-apiary] missing=[apiarium]", c.PresentNodes, c.MissingNodes)
+	}
+}
+
+// TestCurrentClusterISOs_FormatsSizeAndShortensLongHash mirrors the
+// removed fromRPCISO-specific test now that currentClusterISOs builds
+// isoRowView rows directly (the Images page is now backed by this
+// cluster-wide function, not a local-only isoView list).
+func TestCurrentClusterISOs_FormatsSizeAndShortensLongHash(t *testing.T) {
+	fullHash := "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b85"
+	client := &fakeClient{
+		statusResp: &rpcpb.StatusResponse{ManagerNodeId: "node-a", KnownNodeIds: []string{"node-a"}},
+		listISOsResp: &rpcpb.ListISOsResponse{Isos: []*rpcpb.ISOInfo{
+			{Name: "freebsd.iso", SizeBytes: 5242880, Sha256: fullHash},
+		}},
+	}
+	s := newTestServer(t, client)
+
+	req := httptest.NewRequest(http.MethodGet, "/images", nil)
+	rows, errMsg := s.currentClusterISOs(req)
+	if errMsg != "" {
+		t.Fatalf("currentClusterISOs() error: %s", errMsg)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("got %d rows, want 1: %+v", len(rows), rows)
+	}
+	row := rows[0]
+	if row.Size != "5.00 MB" {
+		t.Errorf("Size = %q, want a human-readable size", row.Size)
+	}
+	if row.SHA256 != fullHash {
+		t.Errorf("SHA256 = %q, want the full digest preserved for copying", row.SHA256)
+	}
+	if row.SHA256Short == row.SHA256 {
+		t.Errorf("SHA256Short should be a shortened form of SHA256, got the same value")
 	}
 }
 

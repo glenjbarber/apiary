@@ -5,8 +5,9 @@
 <body class="app-layout">
   {{template "nav" .}}
   <main class="content" id="main-content">
-  {{template "page_header" (pageHeader "Images" "Verified installer media and raw base disks stored on this node.")}}
+  {{template "page_header" (pageHeader "Images" "Verified installer media and raw base disks across the whole Colony - which Combs already have a copy of each.")}}
   {{if .CanOperate}}<form id="iso-upload-form" class="form-grid panel" hx-post="/isos" hx-target="#iso-panel" hx-swap="innerHTML" hx-encoding="multipart/form-data">
+    <p class="muted full">Uploads land on this Comb ({{.LocalNodeID}}) only - internal/cluster's Reconciler fetches a copy to another node automatically when a VM/jail placed there actually needs it.</p>
     <label>Expected SHA-256
       <input type="text" id="iso-expected-sha256" name="expected_sha256" pattern="[0-9a-fA-F]{64}" title="64 hex characters. Checked against the file as it streams to disk - the upload is refused outright if the hash does not match, so an unverified image never lands in storage. Leave blank if pasting a MANIFEST below instead." size="64">
     </label>
@@ -74,7 +75,7 @@
 <div id="iso-success" class="banner-success">{{.ISOFormSuccess}}</div>
 <table>
   <thead>
-    <tr><th>Name</th><th>Size</th><th>SHA-256</th><th></th></tr>
+    <tr><th>Name</th><th>Size</th><th>SHA-256</th><th>Present on</th><th></th></tr>
   </thead>
   <tbody id="iso-rows">
     {{template "iso_rows" .}}

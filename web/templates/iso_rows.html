@@ -1,15 +1,19 @@
 {{define "iso_rows"}}
-{{if .Error}}<tr><td colspan="4" class="error">{{.Error}}</td></tr>{{end}}
-{{range .ISOs}}
+{{if .Error}}<tr><td colspan="5" class="error">{{.Error}}</td></tr>{{end}}
+{{range .ClusterISOs}}
 <tr>
   <td>{{.Name}}</td>
   <td>{{.Size}}</td>
   <td><code title="{{.SHA256}}">{{.SHA256Short}}</code> <button type="button" class="icon-button" data-copy="{{.SHA256}}" title="Copy full SHA-256" aria-label="Copy full SHA-256 for {{.Name}}">Copy</button></td>
   <td>
-    {{if $.CanOperate}}<button class="danger" hx-delete="/isos/{{.Name}}" hx-target="#iso-panel" hx-swap="innerHTML" hx-confirm="Delete {{.Name}}?">Delete</button>{{end}}
+    {{range $i, $node := .PresentNodes}}{{if $i}}, {{end}}{{$node}}{{end}}
+    {{if .MissingNodes}}<div class="muted">missing on {{range $i, $node := .MissingNodes}}{{if $i}}, {{end}}{{$node}}{{end}}</div>{{end}}
+  </td>
+  <td>
+    {{if and $.CanOperate .PresentLocally}}<button class="danger" hx-delete="/isos/{{.Name}}" hx-target="#iso-panel" hx-swap="innerHTML" hx-confirm="Delete {{.Name}} from this Comb ({{$.LocalNodeID}}) only? Other Combs' own copies, if any, are untouched.">Delete</button>{{end}}
   </td>
 </tr>
 {{else}}
-  {{if not .Error}}<tr><td colspan="4"><em>No images</em></td></tr>{{end}}
+  {{if not .Error}}<tr><td colspan="5"><em>No images</em></td></tr>{{end}}
 {{end}}
 {{end}}

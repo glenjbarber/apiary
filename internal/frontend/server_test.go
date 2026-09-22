@@ -1053,9 +1053,12 @@ func TestServer_HostPage_ColorsDownInterfaceRed(t *testing.T) {
 }
 
 func TestServer_ImagesPage(t *testing.T) {
-	client := &fakeClient{listISOsResp: &rpcpb.ListISOsResponse{
-		Isos: []*rpcpb.ISOInfo{{Name: "debian.iso", SizeBytes: 100, Sha256: "abc"}},
-	}}
+	client := &fakeClient{
+		statusResp: &rpcpb.StatusResponse{ManagerNodeId: "node-a", KnownNodeIds: []string{"node-a"}},
+		listISOsResp: &rpcpb.ListISOsResponse{
+			Isos: []*rpcpb.ISOInfo{{Name: "debian.iso", SizeBytes: 100, Sha256: "abc"}},
+		},
+	}
 	s := newTestServer(t, client)
 
 	req := httptest.NewRequest(http.MethodGet, "/images", nil)
@@ -1071,6 +1074,58 @@ func TestServer_ImagesPage(t *testing.T) {
 	}
 	if !strings.Contains(body, `id="iso-upload-form"`) {
 		t.Errorf("images page missing upload form, got: %s", body)
+	}
+}
+
+// TestServer_ImagesPage_ClusterWide confirms the Images page itself
+// (not just the create-VM/create-jail pickers) shows every known
+// Comb's own copy of each image, and that Delete is only ever offered
+// for a copy present on the locally-viewed Comb - DeleteISO has no
+// remote-node concept, so offering it for a copy that only exists
+// elsewhere would silently do nothing useful.
+func TestServer_ImagesPage_ClusterWide(t *testing.T) {
+	client := &fakeClient{
+		statusResp: &rpcpb.StatusResponse{ManagerNodeId: "apiarium", KnownNodeIds: []string{"apiarium", "freebsd-apiary"}},
+		listISOsResp: &rpcpb.ListISOsResponse{Isos: []*rpcpb.ISOInfo{
+			{Name: "local-only.iso", Sha256: "aaa", SizeBytes: 100},
+		}},
+	}
+	peers := &fakeISOPeerClient{listISOsByAddr: map[string]*rpcpb.ListISOsResponse{
+		"freebsd-apiary.apiary.work:17700": {Isos: []*rpcpb.ISOInfo{
+			{Name: "remote-only.iso", Sha256: "bbb", SizeBytes: 200},
+		}},
+	}}
+	s, err := NewServer(client, nil, nil, peers, ".apiary.work", "17700", nil, false)
+	if err != nil {
+		t.Fatalf("NewServer() error: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/images", nil)
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, req)
+
+	body := rec.Body.String()
+	if !strings.Contains(body, "local-only.iso") || !strings.Contains(body, "remote-only.iso") {
+		t.Fatalf("expected both Combs' own images listed, got: %s", body)
+	}
+
+	localRow := body[strings.Index(body, "local-only.iso"):strings.Index(body, "remote-only.iso")]
+	if !strings.Contains(localRow, "apiarium") {
+		t.Errorf("local-only.iso row missing its present node, got: %s", localRow)
+	}
+	if !strings.Contains(localRow, `hx-delete="/isos/local-only.iso"`) {
+		t.Errorf("local-only.iso (present on the viewing Comb) should offer Delete, got: %s", localRow)
+	}
+	if !strings.Contains(localRow, "missing on freebsd-apiary") {
+		t.Errorf("local-only.iso row should note it's missing on freebsd-apiary, got: %s", localRow)
+	}
+
+	remoteRow := body[strings.Index(body, "remote-only.iso"):]
+	if !strings.Contains(remoteRow, "freebsd-apiary") {
+		t.Errorf("remote-only.iso row missing its present node, got: %s", remoteRow)
+	}
+	if strings.Contains(remoteRow, `hx-delete="/isos/remote-only.iso"`) {
+		t.Errorf("remote-only.iso (not present on the viewing Comb) must not offer Delete, got: %s", remoteRow)
 	}
 }
 
@@ -2279,9 +2334,12 @@ func TestServer_DeleteVM_ErrorSetsHXTriggerNotBody(t *testing.T) {
 }
 
 func TestServer_ListISOs_ShowsStoredImages(t *testing.T) {
-	client := &fakeClient{listISOsResp: &rpcpb.ListISOsResponse{
-		Isos: []*rpcpb.ISOInfo{{Name: "debian.iso", SizeBytes: 12345, Sha256: "abc123"}},
-	}}
+	client := &fakeClient{
+		statusResp: &rpcpb.StatusResponse{ManagerNodeId: "node-a", KnownNodeIds: []string{"node-a"}},
+		listISOsResp: &rpcpb.ListISOsResponse{
+			Isos: []*rpcpb.ISOInfo{{Name: "debian.iso", SizeBytes: 12345, Sha256: "abc123"}},
+		},
+	}
 	s := newTestServer(t, client)
 
 	req := httptest.NewRequest(http.MethodGet, "/isos", nil)
