@@ -456,6 +456,7 @@ func run() error {
 	go runReconcileLoop(ctx, reconciler, cfg.ReconcileInterval)
 	go runAssumptionCheckLoop(ctx, assumptionChecker, cfg.AssumptionCheckInterval)
 	go runOriginCARenewalLoop(ctx, originCARenewer, cfg.OriginCARenewalCheckInterval)
+	go runPeerHostnameRefreshLoop(ctx, peers, raftClient, peerHostnameRefreshInterval)
 	go confirmPendingRestartOnStartup(ctx, srv, restartConfirm, id)
 
 	select {
@@ -539,6 +540,51 @@ func runOriginCARenewalLoop(ctx context.Context, renewer *origincert.Renewer, in
 			originCARenewalOnce(ctx, renewer)
 		}
 	}
+}
+
+// peerHostnameRefreshInterval controls how often runPeerHostnameRefreshLoop
+// re-derives PeerReporter's IP->hostname map from raft's own committed
+// configuration (ADR-0115). Not exposed as a config field: a raft
+// membership change (a new voter joining, an existing one's address
+// changing) is already rare and operator-driven, and DNS itself changing
+// underneath a stable hostname is rarer still, so a fixed interval this
+// short is already generous rather than a value anyone needs to tune per
+// deployment.
+const peerHostnameRefreshInterval = 30 * time.Second
+
+// runPeerHostnameRefreshLoop mirrors runReconcileLoop's own shape exactly
+// - an immediate first run, then one per tick of interval, until ctx is
+// done. A raftd query failure is logged, not fatal: peers.PeerHostnames
+// (the manual override) and whatever derived map is already cached both
+// keep working until the next successful tick.
+func runPeerHostnameRefreshLoop(ctx context.Context, peers *manager.PeerReporter, raftClient *manager.RaftClient, interval time.Duration) {
+	peerHostnameRefreshOnce(ctx, peers, raftClient)
+
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			peerHostnameRefreshOnce(ctx, peers, raftClient)
+		}
+	}
+}
+
+func peerHostnameRefreshOnce(ctx context.Context, peers *manager.PeerReporter, raftClient *manager.RaftClient) {
+	statusCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	status, err := raftClient.Status(statusCtx)
+	if err != nil {
+		log.Printf("managerd: peer TLS hostname refresh: querying raftd status: %v", err)
+		return
+	}
+	servers := make([]manager.KnownRaftServer, 0, len(status.GetServers()))
+	for _, s := range status.GetServers() {
+		servers = append(servers, manager.KnownRaftServer{Address: s.GetAddress()})
+	}
+	peers.RefreshDerivedHostnames(servers)
 }
 
 func originCARenewalOnce(ctx context.Context, renewer *origincert.Renewer) {

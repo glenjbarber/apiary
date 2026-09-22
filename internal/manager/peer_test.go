@@ -1117,3 +1117,200 @@ func TestPeerReporter_ListISONames_ExtractsNamesFromListISOs(t *testing.T) {
 		t.Errorf("ListISONames() = %v, want [a.iso b.iso]", names)
 	}
 }
+
+// The following tests cover ADR-0115's automatic derivation of
+// PeerReporter's IP->hostname map from raft's own known cluster
+// membership, added so an operator no longer has to hand-maintain
+// peer_tls_hostname_map for the normal case of a healthy Colony with
+// working DNS.
+
+// TestPeerReporter_RefreshDerivedHostnames_BasicDerivation confirms a
+// raft-bind hostname that resolves to one or more IPs produces a
+// derived entry for every one of those IPs.
+func TestPeerReporter_RefreshDerivedHostnames_BasicDerivation(t *testing.T) {
+	p := NewPeerReporter("", true, nil)
+	p.ResolveFunc = func(host string) ([]string, error) {
+		if host == "brood.lab3.home.arpa" {
+			return []string{"10.90.0.94", "10.90.0.95"}, nil
+		}
+		return nil, fmt.Errorf("no such host %s", host)
+	}
+
+	p.RefreshDerivedHostnames([]KnownRaftServer{{Address: "brood.lab3.home.arpa:17600"}})
+
+	for _, ip := range []string{"10.90.0.94", "10.90.0.95"} {
+		name, ok := p.serverNameFor(ip)
+		if !ok || name != "brood.lab3.home.arpa" {
+			t.Errorf("serverNameFor(%s) = (%q, %v), want (brood.lab3.home.arpa, true)", ip, name, ok)
+		}
+	}
+}
+
+// TestPeerReporter_RefreshDerivedHostnames_SkipsBareIPAddress confirms
+// a raft-bind address that is already a bare IP (no hostname to
+// derive) is never even passed to ResolveFunc.
+func TestPeerReporter_RefreshDerivedHostnames_SkipsBareIPAddress(t *testing.T) {
+	p := NewPeerReporter("", true, nil)
+	called := false
+	p.ResolveFunc = func(host string) ([]string, error) {
+		called = true
+		return nil, fmt.Errorf("ResolveFunc should not be called for a bare IP, got %s", host)
+	}
+
+	p.RefreshDerivedHostnames([]KnownRaftServer{{Address: "10.0.0.9:17600"}})
+
+	if called {
+		t.Error("ResolveFunc was called for a raft-bind address that was already a bare IP")
+	}
+}
+
+// TestPeerReporter_RefreshDerivedHostnames_SkipsUnresolvableHostGracefully
+// confirms a peer whose hostname fails to resolve is skipped rather
+// than aborting the whole refresh - a sibling peer that DOES resolve
+// still ends up in the derived map.
+func TestPeerReporter_RefreshDerivedHostnames_SkipsUnresolvableHostGracefully(t *testing.T) {
+	p := NewPeerReporter("", true, nil)
+	calls := 0
+	p.ResolveFunc = func(host string) ([]string, error) {
+		calls++
+		switch host {
+		case "bad.example":
+			return nil, fmt.Errorf("no such host")
+		case "good.example":
+			return []string{"10.0.0.5"}, nil
+		default:
+			return nil, fmt.Errorf("unexpected host %s", host)
+		}
+	}
+
+	p.RefreshDerivedHostnames([]KnownRaftServer{
+		{Address: "bad.example:17600"},
+		{Address: "good.example:17600"},
+	})
+
+	if calls != 2 {
+		t.Errorf("ResolveFunc called %d times, want 2", calls)
+	}
+	if name, ok := p.serverNameFor("10.0.0.5"); !ok || name != "good.example" {
+		t.Errorf("serverNameFor(10.0.0.5) = (%q, %v), want (good.example, true)", name, ok)
+	}
+	if _, ok := p.serverNameFor("10.0.0.6"); ok {
+		t.Error("serverNameFor(10.0.0.6) = ok, want not found (bad.example never resolved)")
+	}
+}
+
+// TestPeerReporter_ManualHostnameWinsOverDerived is ADR-0115's
+// precedence regression test: when both a manual PeerHostnames entry
+// and a derived entry exist for the same IP, the manual one must win.
+// Proven end-to-end over a real TLS handshake, not just by inspecting
+// the map: the derived entry names a hostname the peer's certificate
+// does NOT cover, so the dial only succeeds if the manual entry (which
+// does match the certificate) is actually the one used.
+func TestPeerReporter_ManualHostnameWinsOverDerived(t *testing.T) {
+	fake := &fakePeerServer{listVMsResp: &rpcpb.ListVMsResponse{}}
+	addr, certPath := newTestPeerServerTLSWithHostname(t, fake, "manual-name")
+	pool, err := LoadPeerCAPool(certPath)
+	if err != nil {
+		t.Fatalf("LoadPeerCAPool() error: %v", err)
+	}
+	host, _, err := net.SplitHostPort(addr)
+	if err != nil {
+		t.Fatalf("SplitHostPort(%q) error: %v", addr, err)
+	}
+
+	p := NewPeerReporter("", true, map[string]string{host: "manual-name"})
+	p.CAPool = pool
+	p.ResolveFunc = func(string) ([]string, error) { return []string{host}, nil }
+	// "wrong-name" is not in the certificate's DNSNames - if this ever
+	// wins over the manual entry, the handshake below fails.
+	p.RefreshDerivedHostnames([]KnownRaftServer{{Address: "wrong-name:17600"}})
+
+	if _, err := p.ListVMs(context.Background(), addr); err != nil {
+		t.Fatalf("ListVMs() error: %v, want success (manual PeerHostnames entry must win over derived)", err)
+	}
+}
+
+// TestPeerReporter_DerivedHostname_MakesTLSDialSucceed confirms the
+// actual point of ADR-0115: with NO manual peer_tls_hostname_map entry
+// at all, a peer whose raft-bind address is a hostname that resolves
+// to the dial target's IP still passes TLS ServerName verification,
+// purely from automatic derivation.
+func TestPeerReporter_DerivedHostname_MakesTLSDialSucceed(t *testing.T) {
+	fake := &fakePeerServer{listVMsResp: &rpcpb.ListVMsResponse{}}
+	addr, certPath := newTestPeerServerTLSWithHostname(t, fake, "brood.lab3.home.arpa")
+	pool, err := LoadPeerCAPool(certPath)
+	if err != nil {
+		t.Fatalf("LoadPeerCAPool() error: %v", err)
+	}
+	host, _, err := net.SplitHostPort(addr)
+	if err != nil {
+		t.Fatalf("SplitHostPort(%q) error: %v", addr, err)
+	}
+
+	p := NewPeerReporter("", true, nil)
+	p.CAPool = pool
+	p.ResolveFunc = func(h string) ([]string, error) {
+		if h == "brood.lab3.home.arpa" {
+			return []string{host}, nil
+		}
+		return nil, fmt.Errorf("no such host %s", h)
+	}
+	p.RefreshDerivedHostnames([]KnownRaftServer{{Address: "brood.lab3.home.arpa:17600"}})
+
+	if _, err := p.ListVMs(context.Background(), addr); err != nil {
+		t.Fatalf("ListVMs() error: %v, want success via automatically derived ServerName", err)
+	}
+}
+
+// newTestPeerServerTLSWithHostname mirrors newTestPeerServerTLS but
+// issues the certificate for hostname instead of "127.0.0.1" - needed
+// to prove a derived/manual ServerName override actually determines
+// whether a real TLS handshake succeeds, since a cert naming only
+// 127.0.0.1 would verify by coincidence even with no override at all.
+func newTestPeerServerTLSWithHostname(t *testing.T, fake *fakePeerServer, hostname string) (addr, certPath string) {
+	t.Helper()
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatalf("GenerateKey() error: %v", err)
+	}
+	tmpl := &x509.Certificate{
+		SerialNumber: big.NewInt(1),
+		Subject:      pkix.Name{Organization: []string{"apiary-test"}},
+		NotBefore:    time.Now().Add(-time.Hour),
+		NotAfter:     time.Now().Add(time.Hour),
+		KeyUsage:     x509.KeyUsageDigitalSignature | x509.KeyUsageCertSign,
+		IsCA:         true,
+		DNSNames:     []string{hostname},
+	}
+	der, err := x509.CreateCertificate(rand.Reader, tmpl, tmpl, &key.PublicKey, key)
+	if err != nil {
+		t.Fatalf("CreateCertificate() error: %v", err)
+	}
+	certPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der})
+	keyDER, err := x509.MarshalECPrivateKey(key)
+	if err != nil {
+		t.Fatalf("MarshalECPrivateKey() error: %v", err)
+	}
+	keyPEM := pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: keyDER})
+
+	cert, err := tls.X509KeyPair(certPEM, keyPEM)
+	if err != nil {
+		t.Fatalf("X509KeyPair() error: %v", err)
+	}
+	lis, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listening: %v", err)
+	}
+	creds := credentials.NewTLS(&tls.Config{Certificates: []tls.Certificate{cert}})
+	srv := grpc.NewServer(grpc.Creds(creds))
+	rpcpb.RegisterManagerServiceServer(srv, fake)
+	go srv.Serve(lis)
+	t.Cleanup(srv.Stop)
+
+	dir := t.TempDir()
+	certPath = filepath.Join(dir, "peer-ca.pem")
+	if err := os.WriteFile(certPath, certPEM, 0o644); err != nil {
+		t.Fatalf("WriteFile() error: %v", err)
+	}
+	return lis.Addr().String(), certPath
+}
