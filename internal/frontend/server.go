@@ -1417,6 +1417,10 @@ func (s *Server) handleCreateVM(w http.ResponseWriter, r *http.Request) {
 	if sourceVMID, snapshotName := r.FormValue("clone_source_vm_id"), r.FormValue("clone_snapshot_name"); sourceVMID != "" && snapshotName != "" {
 		cloneFromSnapshot = sourceVMID + "@" + snapshotName
 	}
+	if cloneFromSnapshot != "" && r.FormValue("replica_node_id") != "" {
+		s.renderCreateError(w, "clone source and replica node are mutually exclusive: a HAST-replicated VM cannot be cloned from a snapshot")
+		return
+	}
 
 	resp, err := s.client.CreateVM(r.Context(), &rpcpb.CreateVMRequest{
 		Vm: &rpcpb.VMDefinition{

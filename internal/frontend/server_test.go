@@ -1532,6 +1532,32 @@ func TestServer_CreateVM_CombinesCloneSourceFields(t *testing.T) {
 	}
 }
 
+func TestServer_CreateVM_RejectsCloneWithReplica(t *testing.T) {
+	client := &fakeClient{}
+	s := newTestServer(t, client)
+
+	form := url.Values{
+		"id":                  {"vm-2"},
+		"clone_source_vm_id":  {"vm-1"},
+		"clone_snapshot_name": {"before-upgrade"},
+		"replica_node_id":     {"node-b"},
+	}
+	req := httptest.NewRequest(http.MethodPost, "/vms", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "mutually exclusive") {
+		t.Errorf("response should explain the clone and replica conflict, got: %s", rec.Body.String())
+	}
+	if client.lastCreateReq != nil {
+		t.Fatal("CreateVM RPC should not be called for an invalid clone and replica combination")
+	}
+}
+
 // TestServer_CreateVM_CloneSourceRequiresBothFields confirms an
 // incomplete pair (only one of the two dropdowns set - shouldn't
 // normally happen given they cascade in JS, but the server must not

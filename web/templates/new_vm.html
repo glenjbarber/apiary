@@ -161,10 +161,25 @@
     var sourceSelect = document.getElementById('clone-source-vm');
     var snapshotSelect = document.getElementById('clone-source-snapshot');
     var nodeSelect2 = document.querySelector('select[name="node_id"], input[name="node_id"]');
+    var replicaSelect = document.querySelector('select[name="replica_node_id"], input[name="replica_node_id"]');
     if (!sourceSelect || !snapshotSelect) return;
 
     function refreshSnapshots() {
       var source = cloneSources[sourceSelect.value];
+      var hasReplica = replicaSelect && replicaSelect.value;
+      Array.prototype.forEach.call(sourceSelect.options, function(opt) {
+        opt.disabled = !!hasReplica && !!opt.value;
+      });
+      if (hasReplica && sourceSelect.value) {
+        sourceSelect.value = '';
+        source = null;
+      }
+      if (replicaSelect) {
+        Array.prototype.forEach.call(replicaSelect.options, function(opt) {
+          opt.disabled = !!source && !!opt.value;
+        });
+        if (source && replicaSelect.value) replicaSelect.value = '';
+      }
       snapshotSelect.innerHTML = '';
       if (!source) {
         var placeholder = document.createElement('option');
@@ -187,6 +202,7 @@
       });
     }
     sourceSelect.addEventListener('change', refreshSnapshots);
+    if (replicaSelect) replicaSelect.addEventListener('change', refreshSnapshots);
     if (nodeSelect2) nodeSelect2.addEventListener('change', refreshSnapshots);
     refreshSnapshots();
   })();
