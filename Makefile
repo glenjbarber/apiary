@@ -32,6 +32,8 @@ INSTALL_SRCS=	raftd \
 		frontend \
 		restshimd
 
+INSTALL_SRCS_FILTERED := $(filter-out raftd, $(INSTALL_SRCS))
+
 # install copies the four apiary daemons - not apiaryinstall, a
 # one-shot host-prep CLI meant to be run from this checkout and never
 # installed permanently - to the fixed path every etc/rc.d/apiary_*
@@ -215,6 +217,6 @@ setup-quick:
 .PHONY: update
 update: install
 	@set -e; \
-	for S in ${INSTALL_SRCS}; do \
+	for S in ${INSTALL_SRCS_FILTERED}; do \
 		service apiary_$$S restart; \
 	done
