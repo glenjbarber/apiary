@@ -1,4 +1,4 @@
-# ADR-0113: Remove the uplink admin down/up toggle (reverses ADR-0085)
+# ADR-0114: Remove the uplink admin down/up toggle (reverses ADR-0085)
 
 ## Status
 

@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted. Removed in [ADR-0113](0113-remove-uplink-takedown.md) along
+Accepted. Removed in [ADR-0114](0114-remove-uplink-takedown.md) along
 with the ADR-0085 uplink down/up toggle this NAT-pause behavior existed
 solely to serve (`Reconciler.NATUplink`/`PauseOutboundNAT`,
 `SetNATPauser`) - it had no other caller.
