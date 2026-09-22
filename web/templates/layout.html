@@ -279,7 +279,7 @@
       <div class="settings-items">
         {{if .CanOperate}}<a href="/machine"{{if eq .ActivePage "machine"}} class="active" aria-current="page"{{end}}>Machine</a>{{end}}
         <a href="/users"{{if eq .ActivePage "users"}} class="active" aria-current="page"{{end}}>Users</a>
-        {{if .CanAdmin}}<a href="/apikeys"{{if eq .ActivePage "apikeys"}} class="active" aria-current="page"{{end}}>API keys</a>{{end}}
+        {{if .CanAdmin}}<a href="/apikeys"{{if eq .ActivePage "apikeys"}} class="active" aria-current="page"{{end}}>API Keys</a>{{end}}
         {{if .AuthEnabled}}<form method="post" action="/logout"><button type="submit">Log out</button></form>{{end}}
       </div>
     </details>
@@ -292,7 +292,7 @@
       <a class="sidebar-link{{if eq .ActivePage "stats"}} active{{end}}" href="/"{{if eq .ActivePage "stats"}} aria-current="page"{{end}}>Combs</a>
       <div class="sidebar-tree">
         <span class="sidebar-tree-label">Cells</span>
-        <a class="sidebar-link cell-type{{if eq .ActivePage "vms"}} active{{end}}" href="/vms"{{if eq .ActivePage "vms"}} aria-current="page"{{end}}>Virtual machines</a>
+        <a class="sidebar-link cell-type{{if eq .ActivePage "vms"}} active{{end}}" href="/vms"{{if eq .ActivePage "vms"}} aria-current="page"{{end}}>Virtual Machines</a>
         <a class="sidebar-link cell-type{{if eq .ActivePage "jails"}} active{{end}}" href="/jails"{{if eq .ActivePage "jails"}} aria-current="page"{{end}}>Jails</a>
       </div>
     </section>
@@ -306,14 +306,14 @@
       <a class="sidebar-link{{if eq .ActivePage "assumptions"}} active{{end}}" href="/assumptions"{{if eq .ActivePage "assumptions"}} aria-current="page"{{end}}>Assumptions</a>
       <a class="sidebar-link{{if eq .ActivePage "assumption-register"}} active{{end}}" href="/assumption-register"{{if eq .ActivePage "assumption-register"}} aria-current="page"{{end}}>Assumption Register</a>
       <a class="sidebar-link{{if eq .ActivePage "simulate"}} active{{end}}" href="/simulate"{{if eq .ActivePage "simulate"}} aria-current="page"{{end}}>Simulations</a>
-      <a class="sidebar-link{{if eq .ActivePage "recovery-handbook"}} active{{end}}" href="/recovery-handbook"{{if eq .ActivePage "recovery-handbook"}} aria-current="page"{{end}}>Recovery handbook</a>
+      <a class="sidebar-link{{if eq .ActivePage "recovery-handbook"}} active{{end}}" href="/recovery-handbook"{{if eq .ActivePage "recovery-handbook"}} aria-current="page"{{end}}>Recovery Handbook</a>
       <a class="sidebar-link{{if eq .ActivePage "invariants"}} active{{end}}" href="/invariants"{{if eq .ActivePage "invariants"}} aria-current="page"{{end}}>Invariants</a>
       <a class="sidebar-link{{if eq .ActivePage "why-not"}} active{{end}}" href="/why-not"{{if eq .ActivePage "why-not"}} aria-current="page"{{end}}>Why Not</a>
       <a class="sidebar-link{{if eq .ActivePage "resilience-coverage"}} active{{end}}" href="/resilience-coverage"{{if eq .ActivePage "resilience-coverage"}} aria-current="page"{{end}}>Coverage Map</a>
     </section>
     <section class="sidebar-section" aria-labelledby="nav-media">
       <h2 class="sidebar-heading" id="nav-media">Media</h2>
-      <a class="sidebar-link{{if eq .ActivePage "images"}} active{{end}}" href="/images"{{if eq .ActivePage "images"}} aria-current="page"{{end}}>ISO and disk images</a>
+      <a class="sidebar-link{{if eq .ActivePage "images"}} active{{end}}" href="/images"{{if eq .ActivePage "images"}} aria-current="page"{{end}}>ISO and Disk Images</a>
     </section>
   </nav>
 </aside>
