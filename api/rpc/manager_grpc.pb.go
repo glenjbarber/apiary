@@ -64,8 +64,6 @@ const (
 	ManagerService_PreflightRestartNodeService_FullMethodName = "/apiary.rpc.v1.ManagerService/PreflightRestartNodeService"
 	ManagerService_ReserveRestartLease_FullMethodName         = "/apiary.rpc.v1.ManagerService/ReserveRestartLease"
 	ManagerService_ConfirmRestartCompleted_FullMethodName     = "/apiary.rpc.v1.ManagerService/ConfirmRestartCompleted"
-	ManagerService_GetUplinkStatus_FullMethodName             = "/apiary.rpc.v1.ManagerService/GetUplinkStatus"
-	ManagerService_SetUplinkState_FullMethodName              = "/apiary.rpc.v1.ManagerService/SetUplinkState"
 	ManagerService_CreateNetwork_FullMethodName               = "/apiary.rpc.v1.ManagerService/CreateNetwork"
 	ManagerService_ListNetworks_FullMethodName                = "/apiary.rpc.v1.ManagerService/ListNetworks"
 	ManagerService_DeleteNetwork_FullMethodName               = "/apiary.rpc.v1.ManagerService/DeleteNetwork"
@@ -354,15 +352,6 @@ type ManagerServiceClient interface {
 	// closing it.
 	ReserveRestartLease(ctx context.Context, in *ReserveRestartLeaseRequest, opts ...grpc.CallOption) (*ReserveRestartLeaseResponse, error)
 	ConfirmRestartCompleted(ctx context.Context, in *ConfirmRestartCompletedRequest, opts ...grpc.CallOption) (*ConfirmRestartCompletedResponse, error)
-	// GetUplinkStatus/SetUplinkState are the Machine page's uplink admin
-	// down/up toggle (ADR-0085) - strictly host-local physical state,
-	// never routed through raft, same reasoning as
-	// ListNodeServices/RestartNodeService above. SetUplinkState carries a
-	// genuine risk of severing this node's own network access if the
-	// caller's own path shares the uplink interface - see ADR-0085 and
-	// ADR-0022's own prior near-miss doing something adjacent.
-	GetUplinkStatus(ctx context.Context, in *GetUplinkStatusRequest, opts ...grpc.CallOption) (*GetUplinkStatusResponse, error)
-	SetUplinkState(ctx context.Context, in *SetUplinkStateRequest, opts ...grpc.CallOption) (*SetUplinkStateResponse, error)
 	// CreateNetwork/ListNetworks/DeleteNetwork manage NetworkDefinitions -
 	// VLAN/subnet/bridge segments a VM can attach to (see ADR-0022).
 	// CreateNetwork/DeleteNetwork just submit a Command through raft
@@ -1064,26 +1053,6 @@ func (c *managerServiceClient) ConfirmRestartCompleted(ctx context.Context, in *
 	return out, nil
 }
 
-func (c *managerServiceClient) GetUplinkStatus(ctx context.Context, in *GetUplinkStatusRequest, opts ...grpc.CallOption) (*GetUplinkStatusResponse, error) {
-	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(GetUplinkStatusResponse)
-	err := c.cc.Invoke(ctx, ManagerService_GetUplinkStatus_FullMethodName, in, out, cOpts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-func (c *managerServiceClient) SetUplinkState(ctx context.Context, in *SetUplinkStateRequest, opts ...grpc.CallOption) (*SetUplinkStateResponse, error) {
-	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(SetUplinkStateResponse)
-	err := c.cc.Invoke(ctx, ManagerService_SetUplinkState_FullMethodName, in, out, cOpts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
 func (c *managerServiceClient) CreateNetwork(ctx context.Context, in *CreateNetworkRequest, opts ...grpc.CallOption) (*CreateNetworkResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(CreateNetworkResponse)
@@ -1751,15 +1720,6 @@ type ManagerServiceServer interface {
 	// closing it.
 	ReserveRestartLease(context.Context, *ReserveRestartLeaseRequest) (*ReserveRestartLeaseResponse, error)
 	ConfirmRestartCompleted(context.Context, *ConfirmRestartCompletedRequest) (*ConfirmRestartCompletedResponse, error)
-	// GetUplinkStatus/SetUplinkState are the Machine page's uplink admin
-	// down/up toggle (ADR-0085) - strictly host-local physical state,
-	// never routed through raft, same reasoning as
-	// ListNodeServices/RestartNodeService above. SetUplinkState carries a
-	// genuine risk of severing this node's own network access if the
-	// caller's own path shares the uplink interface - see ADR-0085 and
-	// ADR-0022's own prior near-miss doing something adjacent.
-	GetUplinkStatus(context.Context, *GetUplinkStatusRequest) (*GetUplinkStatusResponse, error)
-	SetUplinkState(context.Context, *SetUplinkStateRequest) (*SetUplinkStateResponse, error)
 	// CreateNetwork/ListNetworks/DeleteNetwork manage NetworkDefinitions -
 	// VLAN/subnet/bridge segments a VM can attach to (see ADR-0022).
 	// CreateNetwork/DeleteNetwork just submit a Command through raft
@@ -2139,12 +2099,6 @@ func (UnimplementedManagerServiceServer) ReserveRestartLease(context.Context, *R
 }
 func (UnimplementedManagerServiceServer) ConfirmRestartCompleted(context.Context, *ConfirmRestartCompletedRequest) (*ConfirmRestartCompletedResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ConfirmRestartCompleted not implemented")
-}
-func (UnimplementedManagerServiceServer) GetUplinkStatus(context.Context, *GetUplinkStatusRequest) (*GetUplinkStatusResponse, error) {
-	return nil, status.Error(codes.Unimplemented, "method GetUplinkStatus not implemented")
-}
-func (UnimplementedManagerServiceServer) SetUplinkState(context.Context, *SetUplinkStateRequest) (*SetUplinkStateResponse, error) {
-	return nil, status.Error(codes.Unimplemented, "method SetUplinkState not implemented")
 }
 func (UnimplementedManagerServiceServer) CreateNetwork(context.Context, *CreateNetworkRequest) (*CreateNetworkResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method CreateNetwork not implemented")
@@ -3081,42 +3035,6 @@ func _ManagerService_ConfirmRestartCompleted_Handler(srv interface{}, ctx contex
 	return interceptor(ctx, in, info, handler)
 }
 
-func _ManagerService_GetUplinkStatus_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(GetUplinkStatusRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(ManagerServiceServer).GetUplinkStatus(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: ManagerService_GetUplinkStatus_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(ManagerServiceServer).GetUplinkStatus(ctx, req.(*GetUplinkStatusRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
-func _ManagerService_SetUplinkState_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(SetUplinkStateRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(ManagerServiceServer).SetUplinkState(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: ManagerService_SetUplinkState_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(ManagerServiceServer).SetUplinkState(ctx, req.(*SetUplinkStateRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
 func _ManagerService_CreateNetwork_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(CreateNetworkRequest)
 	if err := dec(in); err != nil {
@@ -4040,14 +3958,6 @@ var ManagerService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ConfirmRestartCompleted",
 			Handler:    _ManagerService_ConfirmRestartCompleted_Handler,
-		},
-		{
-			MethodName: "GetUplinkStatus",
-			Handler:    _ManagerService_GetUplinkStatus_Handler,
-		},
-		{
-			MethodName: "SetUplinkState",
-			Handler:    _ManagerService_SetUplinkState_Handler,
 		},
 		{
 			MethodName: "CreateNetwork",

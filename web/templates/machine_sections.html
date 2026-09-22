@@ -108,22 +108,6 @@
     </div>
   </div>
 
-  {{if .CanAdmin}}
-  <div class="panel">
-    <h3>Uplink maintenance</h3>
-    <p class="muted">
-      Administratively bring this Comb's own uplink interface down or
-      back up (see ADR-0085). This can disconnect this Comb's own
-      network access, possibly including this very browser session if
-      it shares the same NIC - recovery may then require physical or
-      out-of-band console access. No automatic revert.
-    </p>
-    <div id="uplink-panel">
-      {{template "uplink_panel" .}}
-    </div>
-  </div>
-  {{end}}
-
   <div class="panel">
     <h3>VM firewall overrides</h3>
     <p class="muted">

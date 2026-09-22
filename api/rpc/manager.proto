@@ -271,16 +271,6 @@ service ManagerService {
   rpc ReserveRestartLease(ReserveRestartLeaseRequest) returns (ReserveRestartLeaseResponse);
   rpc ConfirmRestartCompleted(ConfirmRestartCompletedRequest) returns (ConfirmRestartCompletedResponse);
 
-  // GetUplinkStatus/SetUplinkState are the Machine page's uplink admin
-  // down/up toggle (ADR-0085) - strictly host-local physical state,
-  // never routed through raft, same reasoning as
-  // ListNodeServices/RestartNodeService above. SetUplinkState carries a
-  // genuine risk of severing this node's own network access if the
-  // caller's own path shares the uplink interface - see ADR-0085 and
-  // ADR-0022's own prior near-miss doing something adjacent.
-  rpc GetUplinkStatus(GetUplinkStatusRequest) returns (GetUplinkStatusResponse);
-  rpc SetUplinkState(SetUplinkStateRequest) returns (SetUplinkStateResponse);
-
   // CreateNetwork/ListNetworks/DeleteNetwork manage NetworkDefinitions -
   // VLAN/subnet/bridge segments a VM can attach to (see ADR-0022).
   // CreateNetwork/DeleteNetwork just submit a Command through raft
@@ -1880,38 +1870,6 @@ message ConfirmRestartCompletedRequest {
 message ConfirmRestartCompletedResponse {
   string error = 1;
   string leader_hint = 2;
-}
-
-message GetUplinkStatusRequest {}
-
-message GetUplinkStatusResponse {
-  // configured is false when this node has no VLAN/uplink support at
-  // all (-vlan-uplink unset) - interface/up are meaningless in that
-  // case.
-  bool configured = 1;
-  string interface = 2;
-  bool up = 3;
-  string error = 4;
-}
-
-message SetUplinkStateRequest {
-  // down requests the uplink interface be administratively brought
-  // down (true) or back up (false).
-  bool down = 1;
-}
-
-message SetUplinkStateResponse {
-  // up reports the interface's resulting state - false after a
-  // successful down, true after a successful up.
-  bool up = 1;
-  string error = 2;
-
-  // nat_paused_networks (ADR-0088) lists the self-hosted networks
-  // whose outbound-NAT pf(8) anchor was flushed as a side effect of
-  // this down request, when the downed interface matches this node's
-  // own NAT-egress interface. Always empty for an "up" request - the
-  // next reconcile tick restores NAT on its own, nothing to report here.
-  repeated string nat_paused_networks = 3;
 }
 
 message CreateNetworkRequest {

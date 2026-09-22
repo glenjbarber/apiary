@@ -83,7 +83,6 @@ func (s *Server) renderMachinePageWithConvertJoiner(w http.ResponseWriter, r *ht
 	vms, vmErr := s.currentMachineVMs(r, nodeID)
 	cloudflareConfigured, _ := s.currentCloudflareStatus(r)
 	services, serviceErr := s.currentNodeServices(r)
-	uplinkStatus, uplinkErr := s.currentUplinkStatus(r)
 	originCerts, originErr := s.currentOriginCertificates(r)
 
 	s.render(w, "machine_page", s.withAuthFields(r, pageData{
@@ -100,8 +99,6 @@ func (s *Server) renderMachinePageWithConvertJoiner(w http.ResponseWriter, r *ht
 		CloudflareConfigured:     cloudflareConfigured,
 		NodeServices:             services,
 		ServiceFormError:         serviceErr,
-		UplinkStatus:             uplinkStatus,
-		UplinkFormError:          uplinkErr,
 		OriginCertificates:       originCerts,
 		OriginCAError:            originErr,
 		JoinColonyResult:         s.currentJoinColonyResult(r),

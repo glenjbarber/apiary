@@ -103,12 +103,6 @@ var requiredRole = map[string]Role{
 	"/apiary.rpc.v1.ManagerService/GetLocalNetworkBridgeStatus": RoleViewer,
 	"/apiary.rpc.v1.ManagerService/ListAssumptionResults":       RoleViewer,
 
-	// GetUplinkStatus (ADR-0085) is a read-only report of this node's
-	// own uplink interface state - Viewer, same tier as HostStats
-	// above. The paired write, SetUplinkState, is Admin-tier - see the
-	// Admin block below.
-	"/apiary.rpc.v1.ManagerService/GetUplinkStatus": RoleViewer,
-
 	// ListJailTemplateNames (ADR-0089) is a read-only report of this
 	// node's own local jail base templates - Viewer, same tier as
 	// ListISOs below (its direct analog).
@@ -191,7 +185,7 @@ var requiredRole = map[string]Role{
 	// ConvertStandaloneToJoiner (ADR-0105) stops/resets/restarts this
 	// node's own raftd and submits a Colony join request - a host-wide,
 	// only-narrowly-reversible physical change, same tier as
-	// SetUplinkState/UpdateManagerdBindAddress above.
+	// UpdateManagerdBindAddress above.
 	"/apiary.rpc.v1.ManagerService/ConvertStandaloneToJoiner": RoleAdmin,
 
 	// UpdateFrontendConfig/UpdateRestshimdConfig (ADR-0102): same tier
@@ -210,12 +204,6 @@ var requiredRole = map[string]Role{
 	// map stays a complete, honest reference of every RPC's tier rather
 	// than relying silently on the default for one of them.
 	"/apiary.rpc.v1.ManagerService/RestartNodeService": RoleAdmin,
-
-	// SetUplinkState (ADR-0085) administratively downs/ups this node's
-	// uplink interface - a host-wide physical change with a real risk
-	// of severing the node's own network access, the same tier as
-	// UpdateNodeConfig above.
-	"/apiary.rpc.v1.ManagerService/SetUplinkState": RoleAdmin,
 
 	// ListJoinRequests/ApproveJoinRequest/RejectJoinRequest/
 	// PurgeJoinRequest (ADR-0083): approving a request calls AddVoter
