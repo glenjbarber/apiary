@@ -326,7 +326,7 @@ func TestServer_ClusterEvidencePage_RendersDedicatedEvidence(t *testing.T) {
 		t.Fatalf("status = %d, want 200; body: %s", rec.Code, rec.Body.String())
 	}
 	body := rec.Body.String()
-	for _, want := range []string{"Comb evidence", "Observed signals", "Health verdict", "raft_membership"} {
+	for _, want := range []string{"Comb Evidence", "Observed signals", "Health verdict", "raft_membership"} {
 		if !strings.Contains(body, want) {
 			t.Errorf("dedicated evidence page missing %q, got: %s", want, body)
 		}

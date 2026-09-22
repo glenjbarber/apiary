@@ -5,7 +5,7 @@
 <body class="app-layout">
   {{template "nav" .}}
   <main class="content" id="main-content">
-  {{template "page_header" (pageHeader "Serial log" (vmSubtitle .SerialLogVMName .SerialLogVMID) "<a href='/vms'>Back to VMs</a>")}}
+  {{template "page_header" (pageHeader "Serial Log" (vmSubtitle .SerialLogVMName .SerialLogVMID) "<a href='/vms'>Back to VMs</a>")}}
   <p>
     <button type="button" id="serial-log-poll-toggle" aria-pressed="false">Stop refreshing</button>
     <span class="muted" id="serial-log-poll-status">Refreshing every 3s.</span>

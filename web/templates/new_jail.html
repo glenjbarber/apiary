@@ -5,7 +5,7 @@
 <body class="app-layout">
   {{template "nav" .}}
   <main class="content" id="main-content">
-  {{template "page_header" (pageHeader "Create jail" "Define a FreeBSD jail's identity and placement." "<a href='/jails'>Cancel</a>")}}
+  {{template "page_header" (pageHeader "Create Jail" "Define a FreeBSD jail's identity and placement." "<a href='/jails'>Cancel</a>")}}
   <div id="create-error" class="banner-error" role="alert" aria-live="polite"></div>
   <form class="create-vm panel" hx-post="/jails" hx-target="#create-error" hx-swap="innerHTML">
     <fieldset class="form-section">
@@ -61,7 +61,7 @@
     </label>
       </div>
     </fieldset>
-    <div class="form-actions"><a href="/jails">Cancel</a><button type="submit">Create jail</button></div>
+    <div class="form-actions"><a href="/jails">Cancel</a><button type="submit">Create Jail</button></div>
   </form>
   <script>
   (function() {

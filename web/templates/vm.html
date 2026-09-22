@@ -6,7 +6,7 @@
   {{template "nav" .}}
   <main class="content" id="main-content">
   {{if .Error}}
-    {{template "page_header" (pageHeader "Virtual machine" "The requested VM could not be loaded." "<a href='/vms'>Back to VMs</a>")}}
+    {{template "page_header" (pageHeader "Virtual Machine" "The requested VM could not be loaded." "<a href='/vms'>Back to VMs</a>")}}
     <div class="banner-error">{{.Error}}</div>
   {{else}}
     {{template "page_header" (pageHeader .VM.ID .VM.Name "<a href='/vms'>Back to VMs</a>")}}
