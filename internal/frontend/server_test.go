@@ -867,6 +867,35 @@ func TestServer_VMsPage(t *testing.T) {
 	}
 }
 
+func TestServer_VMsPage_CompactsPlacementAndResources(t *testing.T) {
+	client := &fakeClient{listResp: &rpcpb.ListVMsResponse{
+		Vms: []*rpcpb.VMDefinition{{
+			Id: "vm-1", Name: "vm-1", NodeId: "node-a", ReplicaNodeId: "node-b",
+			Vcpus: 2, MemoryMb: 4096, IpAddress: "10.0.0.2", MacAddress: "02:00:00:00:00:01",
+		}},
+	}}
+	s := newTestServer(t, client)
+
+	req := httptest.NewRequest(http.MethodGet, "/vms", nil)
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	body := rec.Body.String()
+	for _, header := range []string{"<th>Name</th>", "<th>vCPUs</th>", "<th>Memory</th>", "<th>Node</th>", "<th>Replica</th>", "<th>IP</th>", "<th>MAC</th>"} {
+		if strings.Contains(body, header) {
+			t.Errorf("VM page should not render duplicate column %s, got: %s", header, body)
+		}
+	}
+	for _, value := range []string{"2 vCPU · 4096 MB", "node-a", "replica: node-b", "10.0.0.2", "02:00:00:00:00:01"} {
+		if !strings.Contains(body, value) {
+			t.Errorf("VM page missing compact row value %q, got: %s", value, body)
+		}
+	}
+}
+
 // TestServer_VMsPage_MarksRemoteNodeVisually is the regression test for
 // a tracked follow-up feature: a Cell whose owning node differs from
 // the Hive answering this page should be styled as obviously remote,
@@ -1848,6 +1877,34 @@ func TestServer_JailsPage(t *testing.T) {
 	if !strings.Contains(body, `hx-get="/jails/panel" hx-trigger="every 3s"`) ||
 		!strings.Contains(body, `hx-sync="this:drop"`) || !strings.Contains(body, `hx-sync="#jail-panel:replace"`) {
 		t.Error("jail panel must poll without interrupting explicit deletion")
+	}
+}
+
+func TestServer_JailsPage_CompactsIdentityAndPlacement(t *testing.T) {
+	client := &fakeClient{listJailsResp: &rpcpb.ListJailsResponse{
+		Jails: []*rpcpb.JailDefinition{{
+			Id: "jail-1", Name: "jail-1", Hostname: "jail-1", NodeId: "node-a", ReplicaNodeId: "node-b",
+		}},
+	}}
+	s := newTestServer(t, client)
+
+	req := httptest.NewRequest(http.MethodGet, "/jails", nil)
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	body := rec.Body.String()
+	for _, header := range []string{"<th>ID</th>", "<th>Name</th>", "<th>Hostname</th>", "<th>Node</th>", "<th>Replica</th>"} {
+		if strings.Contains(body, header) {
+			t.Errorf("jail page should not render duplicate column %s, got: %s", header, body)
+		}
+	}
+	for _, value := range []string{"jail-1", "node-a", "replica: node-b"} {
+		if !strings.Contains(body, value) {
+			t.Errorf("jail page missing compact row value %q, got: %s", value, body)
+		}
 	}
 }
 
