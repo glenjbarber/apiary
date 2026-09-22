@@ -17,6 +17,31 @@ type Config struct {
 
 	// Hostname is the jail's host.hostname.
 	Hostname string
+
+	// VNET, if true, gives this jail its own network stack (jail(8)'s
+	// "vnet;" parameter) instead of ip4=inherit - see ADR-0117. Requires
+	// VNETInterface to be set; CreateJail rejects VNET without it.
+	VNET bool
+
+	// VNETInterface names the epair(4) "b" end (see
+	// internal/vlan.Manager.EnsureEpair) to hand to this jail as its
+	// vnet interface. Ignored unless VNET is true. jail(8) moves this
+	// interface into the jail's own vnet at creation time; it must not
+	// already be in use by another jail.
+	VNETInterface string
+
+	// IPAddress/IPPrefixLen, if set, are assigned to VNETInterface
+	// inside the jail's own network stack once it starts, via jexec(8)
+	// - jail(8) itself has no ip4.addr-style parameter for a vnet
+	// interface, unlike ip4=inherit's flat host-stack model, so this is
+	// a separate step rather than a jail(8) creation parameter. Ignored
+	// unless VNET is true.
+	IPAddress   string
+	IPPrefixLen int
+
+	// Gateway, if set, becomes this jail's default route once
+	// IPAddress is assigned. Ignored unless VNET and IPAddress are set.
+	Gateway string
 }
 
 // Info is a snapshot of a running jail's state, as reported by jls(8).
@@ -55,9 +80,31 @@ func (m *Manager) qualifiedName(name string) (string, error) {
 	return m.Prefix + name, nil
 }
 
+// createArgs builds the `jail -c` parameter list for cfg, given the
+// already-validated, already-prefixed jail name qname - split out from
+// CreateJail as a pure function so the ip4=inherit/vnet stanza choice
+// can be unit-tested directly without shelling out to a real jail(8)
+// (which requires root and a real FreeBSD host - see
+// integration_test.go).
+func createArgs(qname string, cfg Config) []string {
+	args := []string{
+		"name=" + qname,
+		"path=" + cfg.Path,
+		"host.hostname=" + cfg.Hostname,
+	}
+	if cfg.VNET {
+		args = append(args, "vnet", "vnet.interface="+cfg.VNETInterface)
+	} else {
+		args = append(args, "ip4=inherit")
+	}
+	return append(args, "persist")
+}
+
 // CreateJail creates and starts a new persistent jail. Networking is
-// ip4=inherit (sharing the host's network stack) for v1 - VNET/dedicated
-// IP allocation is a separate concern for later.
+// ip4=inherit (sharing the host's network stack) by default - opt into
+// dedicated VNET networking (ADR-0117) by setting cfg.VNET and
+// cfg.VNETInterface. Existing callers that never set VNET see no
+// behavior change: the ip4=inherit path below is untouched.
 func (m *Manager) CreateJail(ctx context.Context, name string, cfg Config) error {
 	qname, err := m.qualifiedName(name)
 	if err != nil {
@@ -66,15 +113,31 @@ func (m *Manager) CreateJail(ctx context.Context, name string, cfg Config) error
 	if cfg.Path == "" {
 		return fmt.Errorf("jail: Config.Path must be set")
 	}
+	if cfg.VNET && cfg.VNETInterface == "" {
+		return fmt.Errorf("jail: Config.VNETInterface must be set when VNET is true")
+	}
 
-	_, err = runCmd(ctx, "jail", "-c",
-		"name="+qname,
-		"path="+cfg.Path,
-		"host.hostname="+cfg.Hostname,
-		"ip4=inherit",
-		"persist",
-	)
-	return err
+	if _, err := runCmd(ctx, "jail", append([]string{"-c"}, createArgs(qname, cfg)...)...); err != nil {
+		return err
+	}
+
+	// A vnet jail's interface starts down with no address inside the
+	// jail's own network stack - jail(8) has no ip4.addr-style
+	// parameter for a vnet interface (unlike ip4=inherit's flat
+	// host-stack model), so this is a separate jexec(8) step, run only
+	// once, right after creation, not on every reconciler tick.
+	if cfg.VNET && cfg.IPAddress != "" {
+		if _, err := runCmd(ctx, "jexec", qname, "ifconfig", cfg.VNETInterface,
+			"inet", fmt.Sprintf("%s/%d", cfg.IPAddress, cfg.IPPrefixLen), "up"); err != nil {
+			return fmt.Errorf("jail: assigning %s to %s inside jail: %w", cfg.IPAddress, cfg.VNETInterface, err)
+		}
+		if cfg.Gateway != "" {
+			if _, err := runCmd(ctx, "jexec", qname, "route", "add", "default", cfg.Gateway); err != nil {
+				return fmt.Errorf("jail: setting default route %s inside jail: %w", cfg.Gateway, err)
+			}
+		}
+	}
+	return nil
 }
 
 // RemoveJail stops and removes a jail.

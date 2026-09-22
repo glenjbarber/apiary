@@ -1024,8 +1024,13 @@ type JailDefinition struct {
 	// original ADR-0083, which collided with the already-shipped
 	// ADR-0083, Mutually-authorized Colony join).
 	BaseArchiveName string `protobuf:"bytes,10,opt,name=base_archive_name,json=baseArchiveName,proto3" json:"base_archive_name,omitempty"`
-	unknownFields   protoimpl.UnknownFields
-	sizeCache       protoimpl.SizeCache
+	// network_id/ip_address/vnet mirror api/internalpb's JailDefinition
+	// fields of the same names - see ADR-0117.
+	NetworkId     string `protobuf:"bytes,11,opt,name=network_id,json=networkId,proto3" json:"network_id,omitempty"`
+	IpAddress     string `protobuf:"bytes,12,opt,name=ip_address,json=ipAddress,proto3" json:"ip_address,omitempty"`
+	Vnet          bool   `protobuf:"varint,13,opt,name=vnet,proto3" json:"vnet,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *JailDefinition) Reset() {
@@ -1126,6 +1131,27 @@ func (x *JailDefinition) GetBaseArchiveName() string {
 		return x.BaseArchiveName
 	}
 	return ""
+}
+
+func (x *JailDefinition) GetNetworkId() string {
+	if x != nil {
+		return x.NetworkId
+	}
+	return ""
+}
+
+func (x *JailDefinition) GetIpAddress() string {
+	if x != nil {
+		return x.IpAddress
+	}
+	return ""
+}
+
+func (x *JailDefinition) GetVnet() bool {
+	if x != nil {
+		return x.Vnet
+	}
+	return false
 }
 
 // FirewallRule mirrors api/internalpb's FirewallRule.
@@ -14539,7 +14565,7 @@ const file_api_rpc_manager_proto_rawDesc = "" +
 	"\x0ffirewall_paused\x18\x10 \x01(\bR\x0efirewallPaused\x12/\n" +
 	"\x13cloudflare_hostname\x18\x11 \x01(\tR\x12cloudflareHostname\x12'\n" +
 	"\x0fcloudflare_port\x18\x12 \x01(\rR\x0ecloudflarePort\x12.\n" +
-	"\x13clone_from_snapshot\x18\x13 \x01(\tR\x11cloneFromSnapshot\"\xf2\x02\n" +
+	"\x13clone_from_snapshot\x18\x13 \x01(\tR\x11cloneFromSnapshot\"\xc4\x03\n" +
 	"\x0eJailDefinition\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x1a\n" +
@@ -14552,7 +14578,12 @@ const file_api_rpc_manager_proto_rawDesc = "" +
 	"phaseError\x12#\n" +
 	"\rbase_template\x18\t \x01(\tR\fbaseTemplate\x12*\n" +
 	"\x11base_archive_name\x18\n" +
-	" \x01(\tR\x0fbaseArchiveName\"\x9b\x01\n" +
+	" \x01(\tR\x0fbaseArchiveName\x12\x1d\n" +
+	"\n" +
+	"network_id\x18\v \x01(\tR\tnetworkId\x12\x1d\n" +
+	"\n" +
+	"ip_address\x18\f \x01(\tR\tipAddress\x12\x12\n" +
+	"\x04vnet\x18\r \x01(\bR\x04vnet\"\x9b\x01\n" +
 	"\fFirewallRule\x12\x1c\n" +
 	"\tdirection\x18\x01 \x01(\tR\tdirection\x12\x16\n" +
 	"\x06action\x18\x02 \x01(\tR\x06action\x12\x1a\n" +

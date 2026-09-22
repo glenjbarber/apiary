@@ -146,6 +146,11 @@ type vlanManager interface {
 	DestroyBridge(ctx context.Context, name string) error
 	DestroyVLAN(ctx context.Context, vlanID uint32) error
 
+	// EnsureEpair/DestroyEpair are used only for VNET jail networking
+	// (ADR-0117) - see ensureJail in jail.go.
+	EnsureEpair(ctx context.Context, bridge string) (hostSide, jailSide string, err error)
+	DestroyEpair(ctx context.Context, hostSide string) error
+
 	// InterfaceStatus is used only for uplink_bridged networks (ADR-0101),
 	// to confirm this node's own uplink bridge already exists without
 	// creating or modifying it - see ensureUplinkBridgedNetwork.
@@ -281,6 +286,18 @@ type Reconciler struct {
 	// and NAT anchors that this reconciler created. Empty disables artifact
 	// cleanup, which keeps lightweight unit-test reconcilers side-effect free.
 	NetworkStatePath string
+
+	// JailEpairStatePath is the node-local record of which epair(4)
+	// pair (ADR-0117) this reconciler created for which VNET jail.
+	// Empty defaults to DefaultJailEpairStatePath - unlike
+	// NetworkStatePath, an empty value here does NOT disable cleanup:
+	// a jail either has VNET networking or it doesn't (ip4=inherit,
+	// today's unchanged default), so there is no equivalent "opt out of
+	// this whole subsystem for tests" need the way network artifact
+	// cleanup has for a lightweight test reconciler with no bridges at
+	// all - ensureJailEpair/destroyJailEpair simply read/write an empty
+	// map when nothing has ever used VNET jail networking.
+	JailEpairStatePath string
 
 	// HAST is optional (nil-able, same opt-in pattern as everything
 	// above): when set, a VM naming ReplicaNodeID gets its disk
@@ -577,6 +594,9 @@ func (r *Reconciler) RunOnce(ctx context.Context) (err error) {
 				ReplicaNodeID:   j.GetReplicaNodeId(),
 				BaseTemplate:    j.GetBaseTemplate(),
 				BaseArchiveName: j.GetBaseArchiveName(),
+				NetworkID:       j.GetNetworkId(),
+				IPAddress:       j.GetIpAddress(),
+				VNET:            j.GetVnet(),
 			})
 		}
 	}
@@ -648,7 +668,7 @@ func (r *Reconciler) RunOnce(ctx context.Context) (err error) {
 	}
 
 	for _, j := range plannedJails {
-		if err := r.reconcileJail(ctx, j, hastDevicePaths); err != nil && firstErr == nil {
+		if err := r.reconcileJail(ctx, j, networks, hastDevicePaths); err != nil && firstErr == nil {
 			firstErr = fmt.Errorf("cluster: reconciling jail %s: %w", j.ID, err)
 		}
 	}

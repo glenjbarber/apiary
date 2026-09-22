@@ -196,19 +196,20 @@ func run() error {
 
 	zfsMgr := zfs.New(cfg.ZFSBase)
 	reconciler := &cluster.Reconciler{
-		Raft:             raftClient,
-		ZFS:              zfsMgr,
-		LocalNodeID:      raftNodeID,
-		BootROM:          cfg.BhyveBootROM,
-		DiskSizeMB:       cfg.DiskSizeMB,
-		Bridge:           cfg.BhyveBridge,
-		ISOs:             isos,
-		JailArchives:     jailarchive.New(),
-		Peers:            peers,
-		PeerManagerdPort: resolvedPeerPort,
-		DNSServer:        cfg.DNSServer,
-		NetworkStatePath: cluster.DefaultNetworkStatePath,
-		Interval:         cfg.ReconcileInterval,
+		Raft:               raftClient,
+		ZFS:                zfsMgr,
+		LocalNodeID:        raftNodeID,
+		BootROM:            cfg.BhyveBootROM,
+		DiskSizeMB:         cfg.DiskSizeMB,
+		Bridge:             cfg.BhyveBridge,
+		ISOs:               isos,
+		JailArchives:       jailarchive.New(),
+		Peers:              peers,
+		PeerManagerdPort:   resolvedPeerPort,
+		DNSServer:          cfg.DNSServer,
+		NetworkStatePath:   cluster.DefaultNetworkStatePath,
+		JailEpairStatePath: cluster.DefaultJailEpairStatePath,
+		Interval:           cfg.ReconcileInterval,
 	}
 	// HAST is independent of bhyve support: a node holding only a HAST
 	// secondary replica (see ADR-0026) never runs the VM at all, so this

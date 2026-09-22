@@ -61,6 +61,19 @@
     </label>
       </div>
     </fieldset>
+    <fieldset class="form-section">
+      <legend>Networking</legend>
+      <p class="field-help">Default is ip4=inherit (this jail shares the owning Comb's own network stack directly, unchanged behavior). Naming a network and checking VNET below instead gives this jail its own dedicated network stack (ADR-0117), wired to that network's bridge via a private epair(4) pair, with a static address from that network's own subnet.</p>
+      <div class="form-grid">
+    <label>Network <span class="field-help">Optional. Required for VNET below.</span>
+      <select name="network_id" title="Managed network to wire this jail's dedicated VNET interface to. Leave as None for today's default ip4=inherit networking.">
+        <option value="">None (ip4=inherit)</option>
+        {{range .Networks}}<option value="{{.ID}}">{{.Name}} ({{.Subnet}})</option>{{end}}
+      </select>
+    </label>
+    <label><input type="checkbox" name="vnet" value="1" title="Give this jail its own network stack (vnet;) wired to the network selected above via a dedicated epair(4) pair, instead of sharing the owning Comb's own stack. Requires a network to be selected."> VNET (dedicated network stack)</label>
+      </div>
+    </fieldset>
     <div class="form-actions"><a href="/jails">Cancel</a><button type="submit">Create Jail</button></div>
   </form>
   <script>

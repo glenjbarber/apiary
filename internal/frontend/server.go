@@ -1907,7 +1907,8 @@ func (s *Server) handleNewJailPage(w http.ResponseWriter, r *http.Request) {
 	nodes, _ := s.knownNodes(r)
 	localNodeID := s.localNodeID(r)
 	clusterISOs, _ := s.currentClusterISOs(r)
-	s.render(w, "new_jail_page", s.withAuthFields(r, pageData{Nodes: nodes, LocalNodeID: localNodeID, ClusterISOs: clusterISOs, PlacementHives: s.currentPlacementHives(r, nodes, localNodeID), ActivePage: "jails"}))
+	networks, _ := s.currentNetworks(r)
+	s.render(w, "new_jail_page", s.withAuthFields(r, pageData{Nodes: nodes, LocalNodeID: localNodeID, ClusterISOs: clusterISOs, Networks: networks, PlacementHives: s.currentPlacementHives(r, nodes, localNodeID), ActivePage: "jails"}))
 }
 
 // handleCreateJail mirrors handleCreateVM exactly: redirect back to the
@@ -1929,6 +1930,12 @@ func (s *Server) handleCreateJail(w http.ResponseWriter, r *http.Request) {
 			ReplicaNodeId:   r.FormValue("replica_node_id"),
 			BaseTemplate:    r.FormValue("base_template"),
 			BaseArchiveName: r.FormValue("base_archive_name"),
+			NetworkId:       r.FormValue("network_id"),
+			// vnet is opt-in (ADR-0117): only true when both the network
+			// picker names a real network AND the checkbox is checked -
+			// naming a network alone (e.g. leaving vnet unchecked) does
+			// nothing today, matching ip4=inherit's unchanged default.
+			Vnet: r.FormValue("network_id") != "" && r.FormValue("vnet") != "",
 		},
 	})
 	if err != nil {

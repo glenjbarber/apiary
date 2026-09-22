@@ -112,6 +112,9 @@ type jail struct {
 	DesiredState    string `json:"desired_state,omitempty"`
 	BaseTemplate    string `json:"base_template,omitempty"`
 	BaseArchiveName string `json:"base_archive_name,omitempty"`
+	NetworkID       string `json:"network_id,omitempty"`
+	IPAddress       string `json:"ip_address,omitempty"`
+	VNET            bool   `json:"vnet,omitempty"`
 }
 
 // jailStateToRPC/jailStateFromRPC mirror stateToRPC/stateFromRPC, for
@@ -148,6 +151,8 @@ func toRPCJail(j jail) *rpcpb.JailDefinition {
 		DesiredState:    jailStateToRPC(j.DesiredState),
 		BaseTemplate:    j.BaseTemplate,
 		BaseArchiveName: j.BaseArchiveName,
+		NetworkId:       j.NetworkID,
+		Vnet:            j.VNET,
 	}
 }
 
@@ -164,6 +169,9 @@ func fromRPCJail(d *rpcpb.JailDefinition) jail {
 		DesiredState:    jailStateFromRPC(d.GetDesiredState()),
 		BaseTemplate:    d.GetBaseTemplate(),
 		BaseArchiveName: d.GetBaseArchiveName(),
+		NetworkID:       d.GetNetworkId(),
+		IPAddress:       d.GetIpAddress(),
+		VNET:            d.GetVnet(),
 	}
 }
 

@@ -12,7 +12,9 @@ package cluster
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"net"
 	"os"
 
 	"google.golang.org/protobuf/proto"
@@ -20,6 +22,14 @@ import (
 	internalpb "github.com/glenjbarber/apiary/api/internalpb"
 	"github.com/glenjbarber/apiary/internal/jail"
 )
+
+// DefaultJailEpairStatePath records only which epair(4) pair (ADR-0117)
+// this node created for which VNET jail - the jail equivalent of
+// internal/bhyve's own per-VM tapfile, except centralized in one file
+// (mirroring DefaultNetworkStatePath's own convention) rather than one
+// file per jail, since there's no existing per-jail run directory to
+// piggyback on the way bhyve.Manager.RunDir already exists for VMs.
+const DefaultJailEpairStatePath = "/var/db/apiary/jail-epairs.json"
 
 // jailManager is the subset of *jail.Manager the reconciler needs, for
 // the same reason as every other manager interface in this package.
@@ -62,11 +72,140 @@ func jailRootPath(jailBase, jailID string) string {
 	return jailBase + "/" + jailID
 }
 
+// jailEpairRecord is one jail's recorded epair(4) pair - both ends are
+// kept (not just hostSide) so a tick that created the pair but failed
+// before jail(8) actually started (e.g. an empty root, ADR-0098) can
+// hand jail(8) the exact same jailSide again next tick, instead of
+// leaking a fresh pair every retry.
+type jailEpairRecord struct {
+	HostSide string `json:"host_side"`
+	JailSide string `json:"jail_side"`
+}
+
+type jailEpairState struct {
+	Epairs map[string]jailEpairRecord `json:"epairs"`
+}
+
+func loadJailEpairState(path string) (jailEpairState, error) {
+	body, err := os.ReadFile(path)
+	if os.IsNotExist(err) {
+		return jailEpairState{Epairs: make(map[string]jailEpairRecord)}, nil
+	}
+	if err != nil {
+		return jailEpairState{}, fmt.Errorf("reading jail epair state: %w", err)
+	}
+	var state jailEpairState
+	if err := json.Unmarshal(body, &state); err != nil {
+		return jailEpairState{}, fmt.Errorf("parsing jail epair state: %w", err)
+	}
+	if state.Epairs == nil {
+		state.Epairs = make(map[string]jailEpairRecord)
+	}
+	return state, nil
+}
+
+func saveJailEpairState(path string, state jailEpairState) error {
+	body, err := json.MarshalIndent(state, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshaling jail epair state: %w", err)
+	}
+	if err := os.WriteFile(path, body, 0o644); err != nil {
+		return fmt.Errorf("writing jail epair state: %w", err)
+	}
+	return nil
+}
+
+// jailEpairStatePath returns Reconciler.JailEpairStatePath, defaulting
+// to DefaultJailEpairStatePath if unset - mirrors jailBase()'s own
+// default-if-unset convention.
+func (r *Reconciler) jailEpairStatePath() string {
+	if r.JailEpairStatePath == "" {
+		return DefaultJailEpairStatePath
+	}
+	return r.JailEpairStatePath
+}
+
+// ensureJailEpair returns the jail-side interface name for jailID's
+// VNET networking on bridge, creating a fresh epair(4) pair via
+// VLAN.EnsureEpair and persisting both ends only if none is already
+// recorded for jailID - idempotent across ticks/restarts the same way
+// EnsureVLAN/EnsureBridge are, even though EnsureEpair itself always
+// creates a brand new pair (see EnsureEpair's own doc comment for why
+// dedup has to happen at this layer instead).
+func (r *Reconciler) ensureJailEpair(ctx context.Context, jailID, bridge string) (jailSide string, err error) {
+	state, err := loadJailEpairState(r.jailEpairStatePath())
+	if err != nil {
+		return "", err
+	}
+	if rec, ok := state.Epairs[jailID]; ok {
+		return rec.JailSide, nil
+	}
+	hostSide, jailSide, err := r.VLAN.EnsureEpair(ctx, bridge)
+	if err != nil {
+		return "", fmt.Errorf("creating epair: %w", err)
+	}
+	state.Epairs[jailID] = jailEpairRecord{HostSide: hostSide, JailSide: jailSide}
+	if err := saveJailEpairState(r.jailEpairStatePath(), state); err != nil {
+		r.VLAN.DestroyEpair(ctx, hostSide)
+		return "", err
+	}
+	return jailSide, nil
+}
+
+// destroyJailEpair tears down jailID's recorded epair pair, if any, and
+// purges its record - best-effort and idempotent like every other
+// teardown helper in this package: a jail that never had VNET
+// networking (no recorded epair) is a silent no-op, not an error.
+func (r *Reconciler) destroyJailEpair(ctx context.Context, jailID string) error {
+	if r.VLAN == nil {
+		return nil
+	}
+	state, err := loadJailEpairState(r.jailEpairStatePath())
+	if err != nil {
+		return err
+	}
+	rec, ok := state.Epairs[jailID]
+	if !ok {
+		return nil
+	}
+	if err := r.VLAN.DestroyEpair(ctx, rec.HostSide); err != nil {
+		return err
+	}
+	delete(state.Epairs, jailID)
+	return saveJailEpairState(r.jailEpairStatePath(), state)
+}
+
+// jailSubnetAddressing derives the VNET interface's prefix length and
+// default gateway from network - the jail equivalent of
+// vlan.gatewayCIDR, except this needs the plain prefix length (for
+// jexec ifconfig, run inside the jail's own network stack) rather than
+// a ready-made "ip/prefixlen" string for ifconfig on the host side.
+// gateway is network.ExternalGateway if set (a real external router
+// already answers for this subnet), otherwise the subnet's own first
+// host address (".1") - the same address EnsureBridgeAddress assigns to
+// the bridge itself on this node.
+func jailSubnetAddressing(network *internalpb.NetworkDefinition) (prefixLen int, gateway string, err error) {
+	_, ipnet, err := net.ParseCIDR(network.GetSubnet())
+	if err != nil {
+		return 0, "", fmt.Errorf("network %q has an invalid subnet %q: %w", network.GetId(), network.GetSubnet(), err)
+	}
+	ones, _ := ipnet.Mask.Size()
+	if network.GetExternalGateway() != "" {
+		return ones, network.GetExternalGateway(), nil
+	}
+	base := ipnet.IP.To4()
+	if base == nil {
+		return 0, "", fmt.Errorf("network %q's subnet %q is not IPv4", network.GetId(), network.GetSubnet())
+	}
+	gw := net.IPv4(base[0], base[1], base[2], base[3]|1)
+	return ones, gw.String(), nil
+}
+
 // reconcileJail dispatches to teardownJail or ensureJail depending on
 // jailPlacement's tombstone state, mirroring reconcileVM's phase-
 // transition wrapping exactly (UpdateJailPhase instead of
 // UpdateVMPhase).
-func (r *Reconciler) reconcileJail(ctx context.Context, j JailPlacement, hastDevicePaths map[string]string) error {
+func (r *Reconciler) reconcileJail(ctx context.Context, j JailPlacement, networks map[string]*internalpb.NetworkDefinition, hastDevicePaths map[string]string) error {
 	if j.Deleting {
 		if err := r.teardownJail(ctx, j); err != nil {
 			r.applyJailPhase(ctx, j.ID, PhaseError, err.Error())
@@ -91,7 +230,7 @@ func (r *Reconciler) reconcileJail(ctx context.Context, j JailPlacement, hastDev
 	if j.Phase != PhaseReady && j.Phase != PhaseCreating {
 		r.applyJailPhase(ctx, j.ID, PhaseCreating, "")
 	}
-	if err := r.ensureJail(ctx, j, hastDevicePaths); err != nil {
+	if err := r.ensureJail(ctx, j, networks, hastDevicePaths); err != nil {
 		r.applyJailPhase(ctx, j.ID, PhaseError, err.Error())
 		return err
 	}
@@ -180,10 +319,15 @@ func (r *Reconciler) resolveJailTemplate(ctx context.Context, name string) error
 // (optionally cloned from a base_template on first creation, ADR-0084),
 // or, if ReplicaNodeID is set, a HAST-replicated device formatted and
 // mounted at this node's own jail root path (see hastDevicePaths/
-// ADR-0026) - then that its jail(8) process is running.
-func (r *Reconciler) ensureJail(ctx context.Context, j JailPlacement, hastDevicePaths map[string]string) error {
+// ADR-0026) - then that its jail(8) process is running. If j.VNET is
+// set (ADR-0117), it also provisions this jail's dedicated epair(4)
+// interface on j.NetworkID's bridge before creating the jail.
+func (r *Reconciler) ensureJail(ctx context.Context, j JailPlacement, networks map[string]*internalpb.NetworkDefinition, hastDevicePaths map[string]string) error {
 	if r.Jail == nil || r.JailProvisioningDisabled {
 		return fmt.Errorf("jail %q is assigned to this node but jail provisioning is disabled; enable -jail-enabled on the owning node or delete the jail", j.ID)
+	}
+	if j.VNET && j.NetworkID == "" {
+		return fmt.Errorf("jail %q: vnet requires network_id to be set", j.ID)
 	}
 
 	// Checked first, before any dataset/root work (ADR-0099): a jail
@@ -274,7 +418,37 @@ func (r *Reconciler) ensureJail(ctx context.Context, j JailPlacement, hastDevice
 		}
 	}
 
-	if err := r.Jail.CreateJail(ctx, j.ID, jail.Config{Path: rootPath, Hostname: j.Hostname}); err != nil {
+	cfg := jail.Config{Path: rootPath, Hostname: j.Hostname}
+	if j.VNET {
+		if r.VLAN == nil {
+			return fmt.Errorf("jail %q names network %q for VNET networking but no VLAN support is configured on this node", j.ID, j.NetworkID)
+		}
+		network, ok := networks[j.NetworkID]
+		if !ok {
+			return fmt.Errorf("network %q not found", j.NetworkID)
+		}
+		networkArtifact, err := r.ensureNetwork(ctx, network)
+		if err != nil {
+			return fmt.Errorf("provisioning network %q: %w", j.NetworkID, err)
+		}
+		jailSide, err := r.ensureJailEpair(ctx, j.ID, networkArtifact.Bridge)
+		if err != nil {
+			return fmt.Errorf("provisioning VNET interface: %w", err)
+		}
+		cfg.VNET = true
+		cfg.VNETInterface = jailSide
+		if j.IPAddress != "" {
+			prefixLen, gateway, err := jailSubnetAddressing(network)
+			if err != nil {
+				return fmt.Errorf("computing VNET addressing: %w", err)
+			}
+			cfg.IPAddress = j.IPAddress
+			cfg.IPPrefixLen = prefixLen
+			cfg.Gateway = gateway
+		}
+	}
+
+	if err := r.Jail.CreateJail(ctx, j.ID, cfg); err != nil {
 		return fmt.Errorf("creating jail: %w", err)
 	}
 	return nil
@@ -366,6 +540,10 @@ func (r *Reconciler) teardownJail(ctx context.Context, j JailPlacement) error {
 		}
 	}
 
+	if err := r.destroyJailEpair(ctx, j.ID); err != nil {
+		return fmt.Errorf("destroying VNET interface: %w", err)
+	}
+
 	if j.ReplicaNodeID != "" {
 		if r.Mount != nil {
 			if err := r.Mount.Unmount(ctx, jailRootPath(r.jailBase(), j.ID)); err != nil {
@@ -403,6 +581,10 @@ func (r *Reconciler) reclaimStaleJail(ctx context.Context, id string, isCurrentR
 				return fmt.Errorf("removing stale jail: %w", err)
 			}
 		}
+	}
+
+	if err := r.destroyJailEpair(ctx, id); err != nil {
+		return fmt.Errorf("destroying stale VNET interface: %w", err)
 	}
 
 	exists, err := r.ZFS.DatasetExists(ctx, id)

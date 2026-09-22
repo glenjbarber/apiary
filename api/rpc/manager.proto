@@ -671,6 +671,12 @@ message JailDefinition {
   // original ADR-0083, which collided with the already-shipped
   // ADR-0083, Mutually-authorized Colony join).
   string base_archive_name = 10;
+
+  // network_id/ip_address/vnet mirror api/internalpb's JailDefinition
+  // fields of the same names - see ADR-0117.
+  string network_id = 11;
+  string ip_address = 12;
+  bool vnet = 13;
 }
 
 // FirewallRule mirrors api/internalpb's FirewallRule.

@@ -137,6 +137,12 @@ type JailPlacement struct {
 	// already populated. A jail names BaseTemplate or BaseArchiveName,
 	// not both - see ensureJail. See ADR-0098.
 	BaseArchiveName string
+
+	// NetworkID/IPAddress/VNET mirror VMPlacement's own fields of the
+	// same names - see ADR-0117.
+	NetworkID string
+	IPAddress string
+	VNET      bool
 }
 
 // PlanJail mirrors Plan exactly, for jails instead of VMs.

@@ -1235,6 +1235,14 @@ type fakeVLANManager struct {
 	destroyedBridges []string
 	destroyedVLANs   []uint32
 
+	// epairs/destroyedEpairs/epairErr back EnsureEpair/DestroyEpair
+	// (ADR-0117, VNET jail networking) - epairSeq gives each created
+	// pair a distinct deterministic name for test assertions.
+	epairs          map[string]string // hostSide -> bridge
+	destroyedEpairs []string
+	epairErr        error
+	epairSeq        int
+
 	// existingInterfaces/interfaceStatusErr back InterfaceStatus, used
 	// only by ADR-0101's uplink_bridged path - a name not present here
 	// reports as not existing, matching ifaceExists's own real "does not
@@ -1244,7 +1252,7 @@ type fakeVLANManager struct {
 }
 
 func newFakeVLANManager() *fakeVLANManager {
-	return &fakeVLANManager{members: map[string][]string{}, addresses: map[string]string{}, existingInterfaces: map[string]bool{}}
+	return &fakeVLANManager{members: map[string][]string{}, addresses: map[string]string{}, existingInterfaces: map[string]bool{}, epairs: map[string]string{}}
 }
 
 func (f *fakeVLANManager) EnsureVLAN(_ context.Context, vlanID uint32) (string, bool, error) {
@@ -1289,6 +1297,23 @@ func (f *fakeVLANManager) DestroyBridge(_ context.Context, name string) error {
 
 func (f *fakeVLANManager) DestroyVLAN(_ context.Context, vlanID uint32) error {
 	f.destroyedVLANs = append(f.destroyedVLANs, vlanID)
+	return nil
+}
+
+func (f *fakeVLANManager) EnsureEpair(_ context.Context, bridge string) (hostSide, jailSide string, err error) {
+	if f.epairErr != nil {
+		return "", "", f.epairErr
+	}
+	f.epairSeq++
+	hostSide = fmt.Sprintf("epair%da", f.epairSeq)
+	jailSide = fmt.Sprintf("epair%db", f.epairSeq)
+	f.epairs[hostSide] = bridge
+	return hostSide, jailSide, nil
+}
+
+func (f *fakeVLANManager) DestroyEpair(_ context.Context, hostSide string) error {
+	delete(f.epairs, hostSide)
+	f.destroyedEpairs = append(f.destroyedEpairs, hostSide)
 	return nil
 }
 

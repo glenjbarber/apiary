@@ -262,6 +262,14 @@ func (f *FSM) allocateIP(network *internalpb.NetworkDefinition) (string, error) 
 			used[vm.GetIpAddress()] = true
 		}
 	}
+	// A jail (ADR-0117) can name the same NetworkDefinition a VM does,
+	// so its allocated addresses must be excluded here too - otherwise
+	// a jail and a VM on the same network could collide on IP.
+	for _, jail := range f.jails {
+		if jail.GetNetworkId() == network.GetId() && jail.GetIpAddress() != "" {
+			used[jail.GetIpAddress()] = true
+		}
+	}
 
 	base := ipnet.IP.To4()
 	if base == nil {
@@ -441,9 +449,10 @@ func (f *FSM) applyPurgeVM(index uint64, id string) *FSMApplyResult {
 	return &FSMApplyResult{Index: index, VM: vm}
 }
 
-// applyCreateJail adds a new JailDefinition, mirroring applyCreateVM
-// (minus the network-allocation step, since jails have no equivalent
-// yet - see JailDefinition's doc comment).
+// applyCreateJail adds a new JailDefinition, mirroring applyCreateVM -
+// including, since ADR-0117, the same network_id-driven IP allocation
+// step (jail.GetVnet() is this jail's opt-in into dedicated VNET
+// networking; see JailDefinition's own doc comment).
 func (f *FSM) applyCreateJail(index uint64, jail *internalpb.JailDefinition) *FSMApplyResult {
 	if jail.GetId() == "" {
 		return &FSMApplyResult{Index: index, Error: "CreateJail: id must be set"}
@@ -471,6 +480,28 @@ func (f *FSM) applyCreateJail(index uint64, jail *internalpb.JailDefinition) *FS
 	if jail.GetBaseTemplate() != "" && !validResourceID(jail.GetBaseTemplate()) {
 		return &FSMApplyResult{Index: index, Error: fmt.Sprintf("CreateJail: invalid base_template %q: only alphanumerics, '-', and '_' are allowed (max 64 chars)", jail.GetBaseTemplate())}
 	}
+	if jail.GetVnet() && jail.GetNetworkId() == "" {
+		return &FSMApplyResult{Index: index, Error: "CreateJail: vnet requires network_id to be set"}
+	}
+
+	jail = proto.Clone(jail).(*internalpb.JailDefinition)
+	if jail.GetNetworkId() != "" {
+		network, ok := f.networks[jail.GetNetworkId()]
+		if !ok {
+			return &FSMApplyResult{Index: index, Error: fmt.Sprintf("CreateJail: network %q does not exist", jail.GetNetworkId())}
+		}
+		// Mirrors applyCreateVM: an uplink_bridged network is served by
+		// the physical LAN's own DHCP, not Apiary's, so there is nothing
+		// for the FSM itself to allocate here.
+		if !network.GetUplinkBridged() {
+			ip, err := f.allocateIP(network)
+			if err != nil {
+				return &FSMApplyResult{Index: index, Error: fmt.Sprintf("CreateJail: %v", err)}
+			}
+			jail.IpAddress = ip
+		}
+	}
+
 	f.jails[jail.GetId()] = jail
 	return &FSMApplyResult{Index: index, Jail: jail}
 }
