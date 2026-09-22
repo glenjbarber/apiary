@@ -10,9 +10,15 @@
   <form class="create-vm panel" style="margin-top:1rem" hx-post="/vms" hx-target="#create-error" hx-swap="innerHTML">
     <fieldset class="form-section">
       <legend>Identity</legend>
+      <p class="field-help">Hostname is a convenience input, not stored by Apiary - it may be a full FQDN (e.g. <code>sting-vm-1.lab3.home.arpa</code>). The ID and display name below are derived from it automatically and can be overridden if needed.</p>
       <div class="form-grid">
-        <label>ID <input type="text" name="id" required autocomplete="off" placeholder="web-01" title="Stable identifier used by Apiary and bhyve - cannot be changed after creation."><span class="field-help">Stable identifier used by Apiary and bhyve.</span></label>
-        <label>Display name <input type="text" name="name" autocomplete="off" placeholder="Web server" title="Optional label shown in lists - has no effect on the VM itself."></label>
+        <label>Hostname <input type="text" id="vm-hostname" autocomplete="off" placeholder="sting-vm-1.lab3.home.arpa" title="Not stored by Apiary - a convenience for deriving the ID and Display name below. May be a full FQDN."></label>
+        <label>ID <span class="field-help" id="vm-id-help">Auto-derived from Hostname - edit to override.</span>
+          <input type="text" name="id" id="vm-id" required autocomplete="off" placeholder="web-01" title="Stable identifier used by Apiary and bhyve - cannot be changed after creation. Only alphanumerics, '-', and '_' are allowed, max 64 characters. Auto-derived from Hostname unless edited directly.">
+        </label>
+        <label>Display name <span class="field-help" id="vm-name-help">Auto-derived from Hostname - edit to override.</span>
+          <input type="text" name="name" id="vm-name" autocomplete="off" placeholder="Web server" title="Optional label shown in lists - has no effect on the VM itself. Auto-derived from Hostname unless edited directly.">
+        </label>
       </div>
     </fieldset>
     <fieldset class="form-section">
@@ -98,6 +104,55 @@
     <div class="form-actions"><a href="/vms">Cancel</a><button type="submit">Create Virtual Machine</button></div>
   </form>
   <script>
+  (function() {
+    // Mirrors new_jail.html's own Hostname -> ID/Name derivation exactly
+    // (see SHARED.md's 2026-09-22 00:37 EDT TODO): Hostname is a
+    // convenience field only, not part of VMDefinition (unlike jails,
+    // VMs have no persisted hostname), so it carries no name attribute
+    // and is never submitted. ID and Display name auto-derive from it
+    // live, each independently tracking a "dirty" (manually edited) flag
+    // so a deliberate override is never silently clobbered. The ID
+    // derivation enforces validResourceID's own character class
+    // server-side (internal/raft/fsm.go) - alphanumerics, '-', '_', max
+    // 64 chars - since a dotted FQDN hostname is not a valid ID as-is.
+    var hostnameInput = document.getElementById('vm-hostname');
+    var idInput = document.getElementById('vm-id');
+    var nameInput = document.getElementById('vm-name');
+    var idDirty = false;
+    var nameDirty = false;
+
+    function deriveID(hostname) {
+      var slug = hostname
+        .toLowerCase()
+        .replace(/[^a-z0-9_-]+/g, '-')
+        .replace(/-{2,}/g, '-')
+        .replace(/^-+|-+$/g, '')
+        .slice(0, 64)
+        .replace(/-+$/g, '');
+      return slug;
+    }
+
+    function refreshIdentity() {
+      if (!hostnameInput) return;
+      var hostname = hostnameInput.value;
+      if (!idDirty) {
+        idInput.value = deriveID(hostname);
+      }
+      if (!nameDirty) {
+        nameInput.value = hostname;
+      }
+    }
+
+    if (hostnameInput && idInput && nameInput) {
+      hostnameInput.addEventListener('input', refreshIdentity);
+      idInput.addEventListener('input', function() {
+        idDirty = idInput.value !== deriveID(hostnameInput.value);
+      });
+      nameInput.addEventListener('input', function() {
+        nameDirty = nameInput.value !== hostnameInput.value;
+      });
+    }
+  })();
   (function() {
     var rows = document.getElementById('firewall-rule-rows');
     document.getElementById('add-firewall-rule').addEventListener('click', function() {
