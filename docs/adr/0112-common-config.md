@@ -1,4 +1,4 @@
-# ADR-0111: Shared common.json config file
+# ADR-0112: Shared common.json config file
 
 ## Status
 
@@ -111,7 +111,7 @@ at all is unaffected, both covered by new tests.
   internal/raftdconfig/manager_test.go each gained four new cases:
   common.json fills in node_id when the service file leaves it unset;
   a node_id set in the service file wins over common.json; a missing
-  common.json is unaffected (identical to pre-ADR-0111 behavior); a
+  common.json is unaffected (identical to pre-ADR-0112 behavior); a
   malformed common.json is a real load error.
 - `go build ./...`, `go vet ./...`, `gofmt -l .`, and the full
   `go test ./...` all pass.
