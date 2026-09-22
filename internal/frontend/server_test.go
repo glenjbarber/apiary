@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
@@ -155,6 +156,7 @@ type fakeClient struct {
 	preflightApproveJoinRequestResp    *rpcpb.PreflightApproveJoinRequestResponse
 	lastPreflightApproveJoinRequestReq *rpcpb.PreflightApproveJoinRequestRequest
 	listJoinRequestsResp               *rpcpb.ListJoinRequestsResponse
+	lastApproveJoinRequestReq          *rpcpb.ApproveJoinRequestRequest
 
 	getUplinkStatusResp   *rpcpb.GetUplinkStatusResponse
 	setUplinkStateResp    *rpcpb.SetUplinkStateResponse
@@ -685,7 +687,19 @@ func (f *fakeClient) ListJoinRequests(context.Context, *rpcpb.ListJoinRequestsRe
 	return &rpcpb.ListJoinRequestsResponse{}, nil
 }
 
-func (f *fakeClient) ApproveJoinRequest(context.Context, *rpcpb.ApproveJoinRequestRequest, ...grpc.CallOption) (*rpcpb.ApproveJoinRequestResponse, error) {
+// ApproveJoinRequest mirrors the real RPC's own confirm_phrase gate
+// (ADR-0113, internal/manager/joincolony.go's approveJoinRequestConfirmPhrase)
+// well enough for a frontend-level test to exercise the handler's own
+// error-surfacing path without needing a full manager server - the real
+// gate itself is covered by internal/manager's own RPC-level tests.
+func (f *fakeClient) ApproveJoinRequest(_ context.Context, in *rpcpb.ApproveJoinRequestRequest, _ ...grpc.CallOption) (*rpcpb.ApproveJoinRequestResponse, error) {
+	f.lastApproveJoinRequestReq = in
+	const requiredPhrase = "yes-trust-new-comb"
+	if in.GetConfirmPhrase() != requiredPhrase {
+		return &rpcpb.ApproveJoinRequestResponse{Error: fmt.Sprintf(
+			"confirm_phrase %q does not match the required confirmation phrase %q - nothing was done",
+			in.GetConfirmPhrase(), requiredPhrase)}, nil
+	}
 	return &rpcpb.ApproveJoinRequestResponse{}, nil
 }
 
@@ -3236,6 +3250,121 @@ func TestServer_HandlePreflightJoinRequest_RedirectsWithVerdict(t *testing.T) {
 	}
 	if !strings.Contains(body, `action="/join-requests/jreq-abc123/approve"`) {
 		t.Errorf("landing page must still show the real Approve form, unaffected by the preview - got: %s", body)
+	}
+}
+
+// TestServer_ClusterOverviewPage_RendersJoinRequestTLSFingerprint is the
+// ADR-0113 regression test for the landing page's own side of the
+// feature: a pending request's tls_cert_fingerprint must actually be
+// rendered on the page (not just carried in the RPC response), and the
+// confirm_phrase field the Approve form now requires must be present
+// right alongside it - an Admin cannot reach the confirm field without
+// the fingerprint (or its explicit absence) already being on the page.
+func TestServer_ClusterOverviewPage_RendersJoinRequestTLSFingerprint(t *testing.T) {
+	client := &fakeClient{listJoinRequestsResp: &rpcpb.ListJoinRequestsResponse{Requests: []*rpcpb.PendingJoinRequest{
+		{RequestId: "jreq-abc123", NodeId: "node02", RaftBindAddress: "10.62.0.5:17600", Code: "482913", TlsCertFingerprint: "SHA256:AA:BB:CC"},
+		{RequestId: "jreq-noTLS", NodeId: "node03", RaftBindAddress: "10.62.0.6:17600", Code: "111222"},
+	}}}
+	s := newTestServer(t, client)
+
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, req)
+
+	body := rec.Body.String()
+	if !strings.Contains(body, "SHA256:AA:BB:CC") {
+		t.Errorf("landing page missing the rendered TLS fingerprint, got: %s", body)
+	}
+	if !strings.Contains(body, "no TLS certificate presented") {
+		t.Errorf("landing page missing the no-TLS fallback text for the request with no fingerprint, got: %s", body)
+	}
+	if !strings.Contains(body, `name="confirm_phrase"`) {
+		t.Errorf("landing page missing the confirm_phrase field on the Approve form, got: %s", body)
+	}
+}
+
+// TestServer_HandleApproveJoinRequest_WrongConfirmPhraseSurfacesError is
+// the ADR-0113 regression test for the RPC-facing half of the guard, as
+// seen through the frontend handler: a missing or wrong confirm_phrase
+// must redirect with ?join_request_error= (never a bare success
+// redirect to "/"), and a follow-up GET of that redirect must actually
+// render the error - a wrong/missing phrase re-renders the form with an
+// error rather than approving anything.
+func TestServer_HandleApproveJoinRequest_WrongConfirmPhraseSurfacesError(t *testing.T) {
+	client := &fakeClient{}
+	s := newTestServer(t, client)
+
+	form := url.Values{"confirm_phrase": {"wrong-phrase"}}
+	req := httptest.NewRequest(http.MethodPost, "/join-requests/jreq-abc123/approve", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusFound {
+		t.Fatalf("status = %d, want 302; body=%s", rec.Code, rec.Body.String())
+	}
+	if client.lastApproveJoinRequestReq.GetConfirmPhrase() != "wrong-phrase" {
+		t.Errorf("ApproveJoinRequest confirm_phrase = %q, want the submitted (wrong) value forwarded as-is", client.lastApproveJoinRequestReq.GetConfirmPhrase())
+	}
+	loc := rec.Header().Get("Location")
+	if !strings.Contains(loc, "join_request_error=") {
+		t.Fatalf("Location = %q, want it to carry join_request_error= - a wrong phrase must never redirect straight to \"/\"", loc)
+	}
+
+	followUp := httptest.NewRequest(http.MethodGet, loc, nil)
+	followRec := httptest.NewRecorder()
+	s.ServeHTTP(followRec, followUp)
+	body := followRec.Body.String()
+	if !strings.Contains(body, "does not match the required confirmation phrase") {
+		t.Errorf("landing page did not render the confirm_phrase mismatch error, got: %s", body)
+	}
+}
+
+// TestServer_HandleApproveJoinRequest_MissingConfirmPhraseSurfacesError
+// covers the "field left blank entirely" variant of the same guard - an
+// empty confirm_phrase must fail exactly like a wrong one, not be
+// treated as some kind of default-allow.
+func TestServer_HandleApproveJoinRequest_MissingConfirmPhraseSurfacesError(t *testing.T) {
+	client := &fakeClient{}
+	s := newTestServer(t, client)
+
+	req := httptest.NewRequest(http.MethodPost, "/join-requests/jreq-abc123/approve", nil)
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusFound {
+		t.Fatalf("status = %d, want 302; body=%s", rec.Code, rec.Body.String())
+	}
+	if got := client.lastApproveJoinRequestReq.GetConfirmPhrase(); got != "" {
+		t.Errorf("ApproveJoinRequest confirm_phrase = %q, want empty", got)
+	}
+	loc := rec.Header().Get("Location")
+	if !strings.Contains(loc, "join_request_error=") {
+		t.Fatalf("Location = %q, want it to carry join_request_error=", loc)
+	}
+}
+
+// TestServer_HandleApproveJoinRequest_CorrectPhraseApproves confirms the
+// success path still works: the exact required phrase reaches
+// ApproveJoinRequest and results in a plain "/" redirect with no error.
+func TestServer_HandleApproveJoinRequest_CorrectPhraseApproves(t *testing.T) {
+	client := &fakeClient{}
+	s := newTestServer(t, client)
+
+	form := url.Values{"confirm_phrase": {"yes-trust-new-comb"}}
+	req := httptest.NewRequest(http.MethodPost, "/join-requests/jreq-abc123/approve", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusFound {
+		t.Fatalf("status = %d, want 302; body=%s", rec.Code, rec.Body.String())
+	}
+	if got := rec.Header().Get("Location"); got != "/" {
+		t.Errorf("Location = %q, want /", got)
+	}
+	if client.lastApproveJoinRequestReq.GetConfirmPhrase() != "yes-trust-new-comb" {
+		t.Errorf("ApproveJoinRequest confirm_phrase = %q, want yes-trust-new-comb", client.lastApproveJoinRequestReq.GetConfirmPhrase())
 	}
 }
 

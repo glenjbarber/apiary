@@ -310,6 +310,7 @@ func (s *Server) handleClusterOverviewPage(w http.ResponseWriter, r *http.Reques
 		ClusterNodes:                nodes,
 		JoinRequests:                s.currentJoinRequests(r),
 		ActivePage:                  "stats",
+		JoinRequestError:            r.URL.Query().Get("join_request_error"),
 		JoinRequestPreflightID:      r.URL.Query().Get("preflight_request_id"),
 		JoinRequestPreflightVerdict: r.URL.Query().Get("preflight_verdict"),
 		JoinRequestPreflightDetail:  r.URL.Query().Get("preflight_detail"),

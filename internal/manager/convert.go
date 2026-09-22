@@ -158,13 +158,14 @@ func fromInternalPendingJoinRequest(r *internalpb.PendingJoinRequest) *rpcpb.Pen
 		return nil
 	}
 	return &rpcpb.PendingJoinRequest{
-		RequestId:       r.GetRequestId(),
-		NodeId:          r.GetNodeId(),
-		RaftBindAddress: r.GetRaftBindAddress(),
-		Code:            r.GetCode(),
-		RequestedAtUnix: r.GetRequestedAtUnix(),
-		ExpiresAtUnix:   r.GetExpiresAtUnix(),
-		Status:          rpcpb.JoinRequestStatus(r.GetStatus()),
+		RequestId:          r.GetRequestId(),
+		NodeId:             r.GetNodeId(),
+		RaftBindAddress:    r.GetRaftBindAddress(),
+		Code:               r.GetCode(),
+		RequestedAtUnix:    r.GetRequestedAtUnix(),
+		ExpiresAtUnix:      r.GetExpiresAtUnix(),
+		Status:             rpcpb.JoinRequestStatus(r.GetStatus()),
+		TlsCertFingerprint: r.GetTlsCertFingerprint(),
 	}
 }
 

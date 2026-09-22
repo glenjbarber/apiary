@@ -23,6 +23,14 @@ type joinRequestView struct {
 	Status          string
 	Error           string
 
+	// TLSFingerprint (ADR-0113) is the joining Comb's own TLS certificate
+	// fingerprint, or "" when it presented none (TLS remains opt-in) -
+	// the landing page's Approve form always renders this value (or an
+	// explicit "no TLS certificate presented" fallback) directly next to
+	// the confirm_phrase field, so an Admin cannot reach that field
+	// without having seen it.
+	TLSFingerprint string
+
 	// TargetAddress (ADR-0092) is NOT part of the underlying
 	// PendingJoinRequest record - it's the existing Colony member's
 	// address this request was forwarded to, carried in the page's own
@@ -48,6 +56,7 @@ func fromRPCJoinRequest(r *rpcpb.PendingJoinRequest) joinRequestView {
 		Code:            r.GetCode(),
 		RequestedAt:     time.Unix(r.GetRequestedAtUnix(), 0).Local().Format("2006-01-02 15:04 MST"),
 		Status:          status,
+		TLSFingerprint:  r.GetTlsCertFingerprint(),
 	}
 }
 
@@ -149,8 +158,24 @@ func (s *Server) currentJoinColonyResult(r *http.Request) *joinRequestView {
 // existing Colony's side of ADR-0083 - both Admin-only, both simply
 // redirect back to the landing page afterward so the panel reflects the
 // new state (or the failure, surfaced via ?join_request_error=).
+//
+// handleApproveJoinRequest additionally requires confirm_phrase (ADR-0113)
+// on the submitted form - the landing page's Approve form always renders
+// the pending request's tls_cert_fingerprint (or its absence) right next
+// to this field, so an Admin cannot reach Approve's own guardrail without
+// having seen it first. A missing or wrong phrase is rejected by
+// ApproveJoinRequest itself before any raft/AddVoter action is attempted;
+// this handler does not re-check it, it just forwards whatever the form
+// carried and lets the RPC's own fail-closed behavior do the work.
 func (s *Server) handleApproveJoinRequest(w http.ResponseWriter, r *http.Request) {
-	resp, err := s.client.ApproveJoinRequest(r.Context(), &rpcpb.ApproveJoinRequestRequest{RequestId: r.PathValue("id")})
+	if err := r.ParseForm(); err != nil {
+		s.redirectAfterJoinRequestAction(w, r, "", err)
+		return
+	}
+	resp, err := s.client.ApproveJoinRequest(r.Context(), &rpcpb.ApproveJoinRequestRequest{
+		RequestId:     r.PathValue("id"),
+		ConfirmPhrase: r.FormValue("confirm_phrase"),
+	})
 	s.redirectAfterJoinRequestAction(w, r, resp.GetError(), err)
 }
 

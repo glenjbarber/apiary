@@ -2,11 +2,22 @@ package manager
 
 import (
 	"context"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/sha256"
+	"crypto/x509"
+	"crypto/x509/pkix"
+	"encoding/pem"
+	"fmt"
+	"math/big"
+	"os"
 	"strings"
 	"testing"
 	"time"
 
 	rpcpb "github.com/glenjbarber/apiary/api/rpc"
+	"github.com/glenjbarber/apiary/internal/nodeconfig"
 )
 
 // fakeJoinColonyPeerForwarder embeds the (nil) PeerForwarder interface
@@ -320,4 +331,157 @@ func TestServer_CancelJoinRequest_TargetAddressForwardIsBounded(t *testing.T) {
 		t.Fatalf("CancelJoinRequest() error: %v", err)
 	}
 	assertBoundedForwardDeadline(t, peers.lastCtx)
+}
+
+// writeTestCertPEM generates a throwaway self-signed certificate and
+// writes it to a temp PEM file, returning its path - a real on-disk
+// tls_cert this file's own localTLSCertFingerprint can load, without
+// depending on any fixture checked into the repo.
+func writeTestCertPEM(t *testing.T) (path string, der []byte) {
+	t.Helper()
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatalf("generating test key: %v", err)
+	}
+	tmpl := &x509.Certificate{
+		SerialNumber: big.NewInt(1),
+		Subject:      pkix.Name{CommonName: "test-comb.example"},
+		NotBefore:    time.Now().Add(-time.Hour),
+		NotAfter:     time.Now().Add(time.Hour),
+	}
+	certDER, err := x509.CreateCertificate(rand.Reader, tmpl, tmpl, &key.PublicKey, key)
+	if err != nil {
+		t.Fatalf("creating test certificate: %v", err)
+	}
+	f, err := os.CreateTemp(t.TempDir(), "test-cert-*.pem")
+	if err != nil {
+		t.Fatalf("creating temp cert file: %v", err)
+	}
+	if err := pem.Encode(f, &pem.Block{Type: "CERTIFICATE", Bytes: certDER}); err != nil {
+		t.Fatalf("writing test cert PEM: %v", err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatalf("closing test cert file: %v", err)
+	}
+	return f.Name(), certDER
+}
+
+// TestServer_RequestJoinColony_FillsTLSFingerprintFromLocalTLSCert is
+// ADR-0113's own regression test for the forwarding side of the
+// feature: when target_address is set and the caller left
+// tls_cert_fingerprint empty, RequestJoinColony must compute it itself
+// from this managerd's own locally-configured tls_cert (never from
+// anything the caller supplied unauthenticated - there is no other
+// input here) and attach it to the forwarded copy, so the eventual
+// Admin reviewing the pending request sees real identity information,
+// not a value any unauthenticated caller could have spoofed.
+func TestServer_RequestJoinColony_FillsTLSFingerprintFromLocalTLSCert(t *testing.T) {
+	certPath, certDER := writeTestCertPEM(t)
+	wantSum := sha256.Sum256(certDER)
+	wantPairs := make([]string, len(wantSum))
+	for i, b := range wantSum {
+		wantPairs[i] = fmt.Sprintf("%02X", b)
+	}
+	want := "SHA256:" + strings.Join(wantPairs, ":")
+
+	peers := &fakeJoinColonyPeerForwarder{requestResp: &rpcpb.RequestJoinColonyResponse{RequestId: "jreq-1", Code: "482913"}}
+	nodeConfig := &fakeNodeConfigStore{cfg: nodeconfig.Config{TLSCert: certPath}}
+	s := NewServer(nil, "node-1", nil, nil, nil, nil, peers, "", nil, nodeConfig, nil, 0, nil)
+
+	resp, err := s.RequestJoinColony(context.Background(), &rpcpb.RequestJoinColonyRequest{
+		NodeId: "node-2", RaftBindAddress: "10.0.0.2:17600", TargetAddress: "10.0.0.1:17700",
+	})
+	if err != nil {
+		t.Fatalf("RequestJoinColony() error: %v", err)
+	}
+	if resp.GetError() != "" {
+		t.Fatalf("RequestJoinColony() returned error: %s", resp.GetError())
+	}
+	if peers.lastReq.GetTlsCertFingerprint() != want {
+		t.Errorf("forwarded tls_cert_fingerprint = %q, want %q", peers.lastReq.GetTlsCertFingerprint(), want)
+	}
+}
+
+// TestServer_RequestJoinColony_NoLocalTLSCertMeansEmptyFingerprint
+// confirms TLS remains opt-in (ADR-0087/ADR-0093): a joining Comb with
+// no tls_cert configured forwards with an empty tls_cert_fingerprint,
+// not an error and not a fabricated value - the eventual Admin then
+// sees "no TLS certificate presented" instead.
+func TestServer_RequestJoinColony_NoLocalTLSCertMeansEmptyFingerprint(t *testing.T) {
+	peers := &fakeJoinColonyPeerForwarder{requestResp: &rpcpb.RequestJoinColonyResponse{RequestId: "jreq-1", Code: "482913"}}
+	nodeConfig := &fakeNodeConfigStore{cfg: nodeconfig.Config{}}
+	s := NewServer(nil, "node-1", nil, nil, nil, nil, peers, "", nil, nodeConfig, nil, 0, nil)
+
+	if _, err := s.RequestJoinColony(context.Background(), &rpcpb.RequestJoinColonyRequest{
+		NodeId: "node-2", RaftBindAddress: "10.0.0.2:17600", TargetAddress: "10.0.0.1:17700",
+	}); err != nil {
+		t.Fatalf("RequestJoinColony() error: %v", err)
+	}
+	if got := peers.lastReq.GetTlsCertFingerprint(); got != "" {
+		t.Errorf("forwarded tls_cert_fingerprint = %q, want empty with no tls_cert configured", got)
+	}
+}
+
+// TestServer_ApproveJoinRequest_WrongConfirmPhraseRejectedNoAction is
+// the RPC-level guard's own regression test (ADR-0113), mirroring the
+// established convention for ConvertStandaloneToJoiner's own
+// confirm_phrase check: a wrong phrase must be rejected before this
+// function does anything else at all, including its own leadership
+// check. Passing a nil *RaftClient proves this directly - if the
+// confirm_phrase check were not first, s.raft.Status(ctx) below it
+// would be reached and panic on the nil receiver; this test failing to
+// panic (and instead returning a clean error with no Request in the
+// response) is the actual proof no action was taken.
+func TestServer_ApproveJoinRequest_WrongConfirmPhraseRejectedNoAction(t *testing.T) {
+	s := NewServer(nil, "node-1", nil, nil, nil, nil, nil, "", nil, nil, nil, 0, nil)
+	resp, err := s.ApproveJoinRequest(context.Background(), &rpcpb.ApproveJoinRequestRequest{
+		RequestId: "jreq-1", ConfirmPhrase: "not-the-right-phrase",
+	})
+	if err != nil {
+		t.Fatalf("ApproveJoinRequest() error: %v", err)
+	}
+	if !strings.Contains(resp.GetError(), "does not match the required confirmation phrase") {
+		t.Errorf("Error = %q, want a clear confirm_phrase mismatch message", resp.GetError())
+	}
+	if resp.GetRequest() != nil {
+		t.Errorf("Request = %+v, want nil - nothing should have been approved", resp.GetRequest())
+	}
+}
+
+// TestServer_ApproveJoinRequest_MissingConfirmPhraseRejectedNoAction
+// covers the "field left blank entirely" variant - an empty
+// confirm_phrase must fail exactly like a wrong one.
+func TestServer_ApproveJoinRequest_MissingConfirmPhraseRejectedNoAction(t *testing.T) {
+	s := NewServer(nil, "node-1", nil, nil, nil, nil, nil, "", nil, nil, nil, 0, nil)
+	resp, err := s.ApproveJoinRequest(context.Background(), &rpcpb.ApproveJoinRequestRequest{RequestId: "jreq-1"})
+	if err != nil {
+		t.Fatalf("ApproveJoinRequest() error: %v", err)
+	}
+	if !strings.Contains(resp.GetError(), "does not match the required confirmation phrase") {
+		t.Errorf("Error = %q, want a clear confirm_phrase mismatch message", resp.GetError())
+	}
+	if resp.GetRequest() != nil {
+		t.Errorf("Request = %+v, want nil - nothing should have been approved", resp.GetRequest())
+	}
+}
+
+// TestTLSCertFingerprint_FormatAndDeterminism is a plain unit test of
+// the pure formatting helper, independent of any file I/O or Server
+// state.
+func TestTLSCertFingerprint_FormatAndDeterminism(t *testing.T) {
+	der := []byte("not a real certificate, just some bytes to hash")
+	sum := sha256.Sum256(der)
+	wantPairs := make([]string, len(sum))
+	for i, b := range sum {
+		wantPairs[i] = fmt.Sprintf("%02X", b)
+	}
+	want := "SHA256:" + strings.Join(wantPairs, ":")
+
+	got := tlsCertFingerprint(der)
+	if got != want {
+		t.Errorf("tlsCertFingerprint() = %q, want %q", got, want)
+	}
+	if got2 := tlsCertFingerprint(der); got2 != got {
+		t.Errorf("tlsCertFingerprint() not deterministic: %q vs %q", got, got2)
+	}
 }

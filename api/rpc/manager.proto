@@ -2597,6 +2597,21 @@ message PendingJoinRequest {
   int64 requested_at_unix = 5;
   int64 expires_at_unix = 6;
   JoinRequestStatus status = 7;
+
+  // tls_cert_fingerprint (ADR-0113) is the joining Comb's own managerd
+  // TLS certificate fingerprint (SHA-256 over the DER-encoded cert,
+  // "SHA256:" plus colon-separated uppercase hex), computed by the
+  // joining Comb's own managerd from its locally-configured tls_cert at
+  // the moment RequestJoinColony forwards to target_address. Empty when
+  // the joining Comb has no tls_cert configured (TLS remains opt-in,
+  // ADR-0087/ADR-0093) - the Admin then sees "no TLS certificate
+  // presented" instead of a fingerprint, but still must acknowledge the
+  // join via ApproveJoinRequest's confirm_phrase either way. Best-effort
+  // and shown for the Admin's own visual comparison only - this is not
+  // an authentication mechanism and nothing yet validates the joiner's
+  // future peer_tls_ca setup against it (see the ADR's own explicit
+  // scope note).
+  string tls_cert_fingerprint = 8;
 }
 
 message RequestJoinColonyRequest {
@@ -2621,6 +2636,13 @@ message RequestJoinColonyRequest {
   // already set (the forwarded copy clears it) and by direct RPC
   // callers/tests that intend to record locally.
   string target_address = 4;
+
+  // tls_cert_fingerprint (ADR-0113): a direct caller (or a test) may set
+  // this explicitly. When target_address is set and this is left empty,
+  // RequestJoinColony fills it in automatically from this managerd's
+  // own locally-configured tls_cert before forwarding - see
+  // PendingJoinRequest's own field doc.
+  string tls_cert_fingerprint = 5;
 }
 
 message RequestJoinColonyResponse {
@@ -2664,6 +2686,19 @@ message ListJoinRequestsResponse {
 message ApproveJoinRequestRequest {
   string request_id = 1;
   uint32 timeout_ms = 2;
+
+  // confirm_phrase (ADR-0113) must exactly equal the server's own
+  // required phrase ("yes-trust-new-comb") or the whole call is refused
+  // with no action taken at all - not even a re-check of request_id -
+  // matching this codebase's existing exact-match confirmation-phrase
+  // convention (raftd's own -reset, apiaryinstall's -apply-network,
+  // ConvertStandaloneToJoiner's own confirm_phrase). Approving a join
+  // request is the moment this Comb starts trusting a brand new Comb's
+  // identity going forward; the Admin must have actually seen the
+  // pending request's tls_cert_fingerprint (or its absence) before
+  // typing this, which the UI enforces by only ever showing this field
+  // alongside that value.
+  string confirm_phrase = 3;
 }
 
 message ApproveJoinRequestResponse {

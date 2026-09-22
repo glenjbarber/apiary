@@ -113,13 +113,19 @@ type pageData struct {
 	// real page error.
 	JoinRequests []joinRequestView
 
+	// JoinRequestError surfaces a failed Approve/Reject/Purge action
+	// (redirectAfterJoinRequestAction's own ?join_request_error=) -
+	// notably including ApproveJoinRequest's own confirm_phrase mismatch
+	// (ADR-0113), so a wrong or missing phrase re-renders this page with
+	// a visible error instead of silently doing nothing.
+	JoinRequestError string
+
 	// JoinRequestPreflight* back the "Check reachability" preview button
 	// on each pending join request row (ADR-0103) - populated from the
-	// redirect query string after a POST /join-requests/{id}/preflight,
-	// the same pattern the pre-existing (if never actually rendered)
-	// ?join_request_error= carries. Never gates or disables the real
-	// Approve button - the operator checks themselves, matching ADR-0081's
-	// own "operator checks before acting, not a blocking wizard" precedent.
+	// redirect query string after a POST /join-requests/{id}/preflight.
+	// Never gates or disables the real Approve button - the operator
+	// checks themselves, matching ADR-0081's own "operator checks before
+	// acting, not a blocking wizard" precedent.
 	JoinRequestPreflightID      string
 	JoinRequestPreflightVerdict string
 	JoinRequestPreflightDetail  string

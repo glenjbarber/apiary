@@ -1461,7 +1461,7 @@ func TestIntegration_ApproveJoinRequest_AddsRealRaftVoter(t *testing.T) {
 		t.Fatalf("RequestJoinColony() = (%+v, %v)", reqResp, err)
 	}
 
-	approveResp, err := client.ApproveJoinRequest(ctx, &rpcpb.ApproveJoinRequestRequest{RequestId: reqResp.GetRequestId()})
+	approveResp, err := client.ApproveJoinRequest(ctx, &rpcpb.ApproveJoinRequestRequest{RequestId: reqResp.GetRequestId(), ConfirmPhrase: "yes-trust-new-comb"})
 	if err != nil {
 		t.Fatalf("ApproveJoinRequest() error: %v", err)
 	}
@@ -1564,12 +1564,12 @@ func TestIntegration_ApproveJoinRequest_DuplicateNodeIDRejected(t *testing.T) {
 		t.Fatalf("RequestJoinColony(B) = (%+v, %v) - a second pending request for a node_id that is not YET a voter must be allowed", reqB, err)
 	}
 
-	approveA, err := client.ApproveJoinRequest(ctx, &rpcpb.ApproveJoinRequestRequest{RequestId: reqA.GetRequestId()})
+	approveA, err := client.ApproveJoinRequest(ctx, &rpcpb.ApproveJoinRequestRequest{RequestId: reqA.GetRequestId(), ConfirmPhrase: "yes-trust-new-comb"})
 	if err != nil || approveA.GetError() != "" {
 		t.Fatalf("ApproveJoinRequest(A) = (%+v, %v)", approveA, err)
 	}
 
-	approveB, err := client.ApproveJoinRequest(ctx, &rpcpb.ApproveJoinRequestRequest{RequestId: reqB.GetRequestId()})
+	approveB, err := client.ApproveJoinRequest(ctx, &rpcpb.ApproveJoinRequestRequest{RequestId: reqB.GetRequestId(), ConfirmPhrase: "yes-trust-new-comb"})
 	if err != nil {
 		t.Fatalf("ApproveJoinRequest(B) error: %v", err)
 	}
@@ -1585,7 +1585,7 @@ func TestIntegration_ApproveJoinRequest_MissingIsError(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	resp, err := client.ApproveJoinRequest(ctx, &rpcpb.ApproveJoinRequestRequest{RequestId: "no-such-request"})
+	resp, err := client.ApproveJoinRequest(ctx, &rpcpb.ApproveJoinRequestRequest{RequestId: "no-such-request", ConfirmPhrase: "yes-trust-new-comb"})
 	if err != nil {
 		t.Fatalf("ApproveJoinRequest() error: %v", err)
 	}
@@ -1622,7 +1622,7 @@ func TestIntegration_ApproveJoinRequest_UnreachableNodeIsRefused(t *testing.T) {
 		t.Fatalf("RequestJoinColony() = (%+v, %v)", reqResp, err)
 	}
 
-	approveResp, err := client.ApproveJoinRequest(ctx, &rpcpb.ApproveJoinRequestRequest{RequestId: reqResp.GetRequestId()})
+	approveResp, err := client.ApproveJoinRequest(ctx, &rpcpb.ApproveJoinRequestRequest{RequestId: reqResp.GetRequestId(), ConfirmPhrase: "yes-trust-new-comb"})
 	if err != nil {
 		t.Fatalf("ApproveJoinRequest() error: %v", err)
 	}
@@ -1665,7 +1665,7 @@ func TestIntegration_ApproveJoinRequest_ReachableNodeStillWorks(t *testing.T) {
 		t.Fatalf("RequestJoinColony() = (%+v, %v)", reqResp, err)
 	}
 
-	approveResp, err := client.ApproveJoinRequest(ctx, &rpcpb.ApproveJoinRequestRequest{RequestId: reqResp.GetRequestId()})
+	approveResp, err := client.ApproveJoinRequest(ctx, &rpcpb.ApproveJoinRequestRequest{RequestId: reqResp.GetRequestId(), ConfirmPhrase: "yes-trust-new-comb"})
 	if err != nil {
 		t.Fatalf("ApproveJoinRequest() error: %v", err)
 	}
@@ -1701,7 +1701,7 @@ func TestIntegration_UpdateVoterAddress_UpdatesRealRaftVoterAddress(t *testing.T
 	if err != nil || reqResp.GetError() != "" {
 		t.Fatalf("RequestJoinColony() = (%+v, %v)", reqResp, err)
 	}
-	if approveResp, err := client.ApproveJoinRequest(ctx, &rpcpb.ApproveJoinRequestRequest{RequestId: reqResp.GetRequestId()}); err != nil || approveResp.GetError() != "" {
+	if approveResp, err := client.ApproveJoinRequest(ctx, &rpcpb.ApproveJoinRequestRequest{RequestId: reqResp.GetRequestId(), ConfirmPhrase: "yes-trust-new-comb"}); err != nil || approveResp.GetError() != "" {
 		t.Fatalf("ApproveJoinRequest() = (%+v, %v)", approveResp, err)
 	}
 
@@ -1789,7 +1789,7 @@ func TestIntegration_UpdateVoterAddress_UnreachableAddressRejected(t *testing.T)
 	if err != nil || reqResp.GetError() != "" {
 		t.Fatalf("RequestJoinColony() = (%+v, %v)", reqResp, err)
 	}
-	if approveResp, err := client.ApproveJoinRequest(ctx, &rpcpb.ApproveJoinRequestRequest{RequestId: reqResp.GetRequestId()}); err != nil || approveResp.GetError() != "" {
+	if approveResp, err := client.ApproveJoinRequest(ctx, &rpcpb.ApproveJoinRequestRequest{RequestId: reqResp.GetRequestId(), ConfirmPhrase: "yes-trust-new-comb"}); err != nil || approveResp.GetError() != "" {
 		t.Fatalf("ApproveJoinRequest() = (%+v, %v)", approveResp, err)
 	}
 
