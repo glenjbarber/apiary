@@ -158,6 +158,31 @@ func TestComputeQuorumImpact_UnknownVoterNotedExplicitly(t *testing.T) {
 	}
 }
 
+func TestComputeQuorumImpact_VotersListsEveryOtherVoterSortedByID(t *testing.T) {
+	servers := []ServerSuffrage{
+		{ID: "c", Suffrage: "Voter", Reachability: ReachabilityUnknown},
+		{ID: "a", Suffrage: "Voter", Reachability: ReachabilityUnreachable},
+		{ID: "target", Suffrage: "Voter", Reachability: ReachabilityReachable},
+		{ID: "b", Suffrage: "Voter", Reachability: ReachabilityReachable},
+		{ID: "not-a-voter", Suffrage: "Nonvoter", Reachability: ReachabilityReachable},
+	}
+	got := ComputeQuorumImpact(servers, "target")
+
+	want := []VoterReachability{
+		{ID: "a", Reachability: ReachabilityUnreachable},
+		{ID: "b", Reachability: ReachabilityReachable},
+		{ID: "c", Reachability: ReachabilityUnknown},
+	}
+	if len(got.Voters) != len(want) {
+		t.Fatalf("len(Voters) = %d, want %d (%+v)", len(got.Voters), len(want), got.Voters)
+	}
+	for i := range want {
+		if got.Voters[i] != want[i] {
+			t.Errorf("Voters[%d] = %+v, want %+v", i, got.Voters[i], want[i])
+		}
+	}
+}
+
 func TestComputeOwnedResourceImpacts_NoReplicaIsUnprotected(t *testing.T) {
 	resources := []OwnedResourcePlacement{{ID: "vm-1", Name: "web-01", NodeID: "target", Kind: ResourceKindVM}}
 	got := ComputeOwnedResourceImpacts(resources, "target")

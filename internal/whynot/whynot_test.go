@@ -121,6 +121,56 @@ func TestAnswerHiveReboot_SingleNodeExplainsTemporaryOutage(t *testing.T) {
 	}
 }
 
+func TestAnswerHiveReboot_QuorumBlockerCarriesVoterByVoterEvidence(t *testing.T) {
+	ans := AnswerHiveReboot("node-a", QuorumFact{
+		Survives:           false,
+		TotalVoters:        3,
+		QuorumSize:         2,
+		RemainingReachable: 0,
+		RemainingUnknown:   1,
+		Note:               "quorum is LOST - the confirmed-reachable remaining voters do not form a majority.",
+		Voters: []VoterFact{
+			{NodeID: "node-b", Reachability: "unreachable"},
+			{NodeID: "node-c", Reachability: "unknown"},
+		},
+	}, nil, nil)
+
+	if len(ans.Blockers) != 1 {
+		t.Fatalf("expected exactly one blocker, got %+v", ans.Blockers)
+	}
+	ev := ans.Blockers[0].Evidence
+	if len(ev) != 3 {
+		t.Fatalf("expected 1 summary + 2 per-voter evidence entries, got %d: %+v", len(ev), ev)
+	}
+	if !strings.Contains(ev[0].Detail, "3 total voter(s)") || !strings.Contains(ev[0].Detail, "majority requires 2") {
+		t.Errorf("summary evidence missing the raw counts: %q", ev[0].Detail)
+	}
+	if ev[0].ObservedAt.IsZero() {
+		t.Errorf("summary evidence must be stamped as freshly observed, not a permanent zero-ObservedAt caveat")
+	}
+	if ev[1].Detail != "node-b: unreachable" {
+		t.Errorf("ev[1].Detail = %q, want %q", ev[1].Detail, "node-b: unreachable")
+	}
+	if ev[2].Detail != "node-c: unknown" {
+		t.Errorf("ev[2].Detail = %q, want %q", ev[2].Detail, "node-c: unknown")
+	}
+	for i, e := range ev {
+		if e.ObservedAt.IsZero() {
+			t.Errorf("ev[%d] must be freshly observed (non-zero ObservedAt): %+v", i, e)
+		}
+	}
+}
+
+func TestAnswerHiveReboot_ClearQuorumHasNoQuorumBlockerOrEvidence(t *testing.T) {
+	ans := AnswerHiveReboot("node-a", QuorumFact{
+		Survives: true, TotalVoters: 3, QuorumSize: 2, RemainingReachable: 2,
+		Voters: []VoterFact{{NodeID: "node-b", Reachability: "reachable"}, {NodeID: "node-c", Reachability: "reachable"}},
+	}, nil, nil)
+	if hasBlockerInvariant(ans.Blockers, "quorum-tolerance") {
+		t.Errorf("expected no quorum-tolerance blocker when quorum survives, got %+v", ans.Blockers)
+	}
+}
+
 func TestAnswerHiveReboot_UnprotectedAndUnverifiedReplicaAreEquallySevere(t *testing.T) {
 	owned := []OwnedResourceFact{
 		{ID: "vm-1", Name: "web-1", Kind: "vm", Verdict: "unprotected"},

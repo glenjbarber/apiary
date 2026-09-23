@@ -2174,6 +2174,23 @@ message QuorumImpact {
   uint32 quorum_size = 6;
   bool survives = 7;
   string note = 8;
+
+  // voters lists every OTHER raft voter (never the simulated target
+  // itself, and never a non-voter) with its own live reachability, so
+  // an operator can see which specific voter(s) drove the verdict above
+  // instead of only the aggregate counts. Sorted by node_id.
+  repeated VoterReachability voters = 9;
+}
+
+// VoterReachability is one remaining raft voter's identity and live
+// reachability, as checked during this same SimulateNodeFailure call.
+message VoterReachability {
+  string node_id = 1;
+
+  // reachability is "reachable", "unreachable", or "unknown" (never
+  // silently folded into either of the other two - see
+  // internal/cluster.Reachability).
+  string reachability = 2;
 }
 
 enum ResourceKind {

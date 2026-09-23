@@ -27,6 +27,7 @@
 package whynot
 
 import (
+	"fmt"
 	"time"
 
 	"github.com/glenjbarber/apiary/internal/invariant"
@@ -220,6 +221,28 @@ type QuorumFact struct {
 	Survives    bool
 	TotalVoters uint32
 	Note        string
+
+	// QuorumSize/RemainingReachable/RemainingUnknown mirror
+	// internal/cluster.QuorumImpact's own aggregate counts - populated
+	// alongside Survives/TotalVoters/Note, not computed here.
+	QuorumSize         uint32
+	RemainingReachable uint32
+	RemainingUnknown   uint32
+
+	// Voters is every OTHER raft voter (never the comb being asked
+	// about) with its own live reachability at the time this fact was
+	// gathered, so a caller can show which specific voter(s) drove the
+	// verdict instead of only the aggregate counts above. May be empty
+	// even when Survives is false or true - a single-voter Colony has no
+	// other voters to list.
+	Voters []VoterFact
+}
+
+// VoterFact is one other raft voter's identity and live reachability,
+// as of this same quorum check.
+type VoterFact struct {
+	NodeID       string
+	Reachability string // "reachable" | "unreachable" | "unknown"
 }
 
 type OwnedResourceFact struct {
@@ -233,6 +256,40 @@ type ReplicaBackedFact struct {
 	ID, Name, Kind string
 	OwnerNodeID    string
 	Explanation    string
+}
+
+// quorumEvidence turns QuorumFact's per-voter reachability into the
+// same structured Evidence the rest of this package already uses,
+// rather than folding the detail into unstructured Detail prose (which
+// would make it unreadable and impossible for a caller to render as a
+// table). One summary entry with the raw counts, then one entry per
+// OTHER voter naming its own reachability - so an operator can tell a
+// genuine quorum loss (a majority of named voters are confirmed
+// unreachable) apart from a reachability/TLS problem answering the
+// question at all (voters present but "unknown", never silently
+// counted as either reachable or unreachable - see
+// internal/cluster.Reachability). ObservedAt is stamped now: this
+// evidence is fresh, gathered during the same SimulateNodeFailure call
+// that produced QuorumFact, not a permanent disclosed limitation like
+// this package's zero-ObservedAt Caveats.
+func quorumEvidence(quorum QuorumFact) []invariant.Evidence {
+	now := time.Now()
+	evidence := []invariant.Evidence{{
+		Source: "dependency-graph-simulator (quorum arithmetic)",
+		Detail: fmt.Sprintf(
+			"%d total voter(s), majority requires %d, %d confirmed reachable, %d unverified (unknown).",
+			quorum.TotalVoters, quorum.QuorumSize, quorum.RemainingReachable, quorum.RemainingUnknown,
+		),
+		ObservedAt: now,
+	}}
+	for _, v := range quorum.Voters {
+		evidence = append(evidence, invariant.Evidence{
+			Source:     "dependency-graph-simulator (voter reachability)",
+			Detail:     v.NodeID + ": " + v.Reachability,
+			ObservedAt: now,
+		})
+	}
+	return evidence
 }
 
 // AnswerHiveReboot reframes the Dependency Graph Simulator's existing
@@ -260,6 +317,7 @@ func AnswerHiveReboot(nodeID string, quorum QuorumFact, owned []OwnedResourceFac
 		ans.Blockers = append(ans.Blockers, Blocker{
 			Invariant: "quorum-tolerance",
 			Detail:    detail,
+			Evidence:  quorumEvidence(quorum),
 		})
 	}
 

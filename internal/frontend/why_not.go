@@ -252,10 +252,18 @@ func (s *Server) handleWhyNotPage(w http.ResponseWriter, r *http.Request) {
 		case resp.GetError() != "":
 			hiveErr = resp.GetError()
 		default:
+			var voters []whynot.VoterFact
+			for _, v := range resp.GetQuorum().GetVoters() {
+				voters = append(voters, whynot.VoterFact{NodeID: v.GetNodeId(), Reachability: v.GetReachability()})
+			}
 			quorum := whynot.QuorumFact{
-				Survives:    resp.GetQuorum().GetSurvives(),
-				TotalVoters: resp.GetQuorum().GetTotalVoters(),
-				Note:        resp.GetQuorum().GetNote(),
+				Survives:           resp.GetQuorum().GetSurvives(),
+				TotalVoters:        resp.GetQuorum().GetTotalVoters(),
+				Note:               resp.GetQuorum().GetNote(),
+				QuorumSize:         resp.GetQuorum().GetQuorumSize(),
+				RemainingReachable: resp.GetQuorum().GetRemainingReachableVoters(),
+				RemainingUnknown:   resp.GetQuorum().GetRemainingUnknownVoters(),
+				Voters:             voters,
 			}
 			var owned []whynot.OwnedResourceFact
 			for _, res := range resp.GetOwnedResources() {

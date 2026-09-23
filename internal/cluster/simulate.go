@@ -81,6 +81,20 @@ type QuorumImpact struct {
 	QuorumSize         uint32
 	Survives           bool
 	Note               string
+
+	// Voters is every OTHER raft voter (never the target itself, never a
+	// non-voter) with its own live reachability, sorted by ID. This is
+	// the same data RemainingReachable/RemainingUnknown already
+	// summarize as counts - kept here too so a caller can show which
+	// specific voter(s) drove the verdict, not just the aggregate.
+	Voters []VoterReachability
+}
+
+// VoterReachability is one remaining raft voter's identity and live
+// reachability.
+type VoterReachability struct {
+	ID           string
+	Reachability Reachability
 }
 
 // OwnedResourcePlacement is the minimal shape the simulator needs per
@@ -240,6 +254,7 @@ func IsKnownTarget(servers []ServerSuffrage, resources []OwnedResourcePlacement,
 // voter as survival.
 func ComputeQuorumImpact(servers []ServerSuffrage, targetNodeID string) QuorumImpact {
 	var total, remaining, remainingReachable, remainingUnknown uint32
+	var voters []VoterReachability
 	targetIsVoter := false
 	targetFound := false
 
@@ -255,6 +270,7 @@ func ComputeQuorumImpact(servers []ServerSuffrage, targetNodeID string) QuorumIm
 		}
 		total++
 		remaining++
+		voters = append(voters, VoterReachability{ID: s.ID, Reachability: s.Reachability})
 		switch s.Reachability {
 		case ReachabilityReachable:
 			remainingReachable++
@@ -262,6 +278,7 @@ func ComputeQuorumImpact(servers []ServerSuffrage, targetNodeID string) QuorumIm
 			remainingUnknown++
 		}
 	}
+	sort.Slice(voters, func(i, j int) bool { return voters[i].ID < voters[j].ID })
 	if targetIsVoter {
 		total++
 	}
@@ -293,6 +310,7 @@ func ComputeQuorumImpact(servers []ServerSuffrage, targetNodeID string) QuorumIm
 		QuorumSize:         quorumSize,
 		Survives:           survives,
 		Note:               note,
+		Voters:             voters,
 	}
 }
 
