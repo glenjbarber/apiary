@@ -3817,6 +3817,13 @@ func (s *Server) SimulateNetworkFailure(ctx context.Context, req *rpcpb.Simulate
 }
 
 func toRPCQuorumImpact(q cluster.QuorumImpact) *rpcpb.QuorumImpact {
+	voters := make([]*rpcpb.VoterReachability, 0, len(q.Voters))
+	for _, v := range q.Voters {
+		voters = append(voters, &rpcpb.VoterReachability{
+			NodeId:       v.ID,
+			Reachability: string(v.Reachability),
+		})
+	}
 	return &rpcpb.QuorumImpact{
 		TargetIsVoter:            q.TargetIsVoter,
 		TotalVoters:              q.TotalVoters,
@@ -3826,6 +3833,7 @@ func toRPCQuorumImpact(q cluster.QuorumImpact) *rpcpb.QuorumImpact {
 		QuorumSize:               q.QuorumSize,
 		Survives:                 q.Survives,
 		Note:                     q.Note,
+		Voters:                   voters,
 	}
 }
 
