@@ -966,6 +966,39 @@ func TestServer_VMsPage_ShowsMACAddress(t *testing.T) {
 	}
 }
 
+// A VM with no Apiary-allocated ip_address (not on a managed network)
+// must read "external DHCP", not "no IP": the guest may well hold a
+// lease from a DHCP server Apiary cannot see, so "no IP" would claim
+// something the page has no way to know. A VM with an allocated address
+// shows that address and never the external-DHCP label.
+func TestServer_VMsPage_LabelsUnallocatedIPAsExternalDHCP(t *testing.T) {
+	client := &fakeClient{listResp: &rpcpb.ListVMsResponse{
+		Vms: []*rpcpb.VMDefinition{
+			{Id: "vm-flat", Name: "flat-1"},
+			{Id: "vm-managed", Name: "managed-1", NetworkId: "net-1", IpAddress: "10.60.0.5"},
+		},
+	}}
+	s := newTestServer(t, client)
+
+	req := httptest.NewRequest(http.MethodGet, "/vms", nil)
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, req)
+	body := rec.Body.String()
+
+	if !strings.Contains(body, "external DHCP") {
+		t.Errorf("VMs page missing the external DHCP label for a VM with no allocated IP, got: %s", body)
+	}
+	if strings.Contains(body, "no IP") {
+		t.Errorf("VMs page still uses the misleading \"no IP\" label, got: %s", body)
+	}
+	if n := strings.Count(body, ">external DHCP</span>"); n != 1 {
+		t.Errorf("external DHCP label should render exactly once (only the unallocated VM), got %d", n)
+	}
+	if !strings.Contains(body, "10.60.0.5") {
+		t.Errorf("VMs page missing the allocated IP for the managed-network VM, got: %s", body)
+	}
+}
+
 // TestServer_ClusterOverviewPage_IsDefaultLandingPage checks the
 // lightweight, basic-status-per-node page ("/") - the verbose,
 // full-detail equivalent for one selected node lives on "/host/{id}"
