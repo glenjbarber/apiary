@@ -28,8 +28,25 @@ type resourceImpactView struct {
 	Name          string
 	Kind          string // "vm" or "jail"
 	ReplicaNodeID string
-	Verdict       string // "unprotected" or "unverified_replica"
-	Explanation   string
+	Verdict       string // "unprotected", "unverified_replica", "replica_in_sync",
+	// "replica_out_of_sync", "replica_unobserved", or "unknown" for an
+	// enum this build does not recognize.
+	Explanation string
+
+	// ReplicaSync is the live HAST evidence behind Verdict (ADR-0121),
+	// nil whenever no query was attempted. The template shows the fact
+	// itself, not only the conclusion drawn from it.
+	ReplicaSync *replicaSyncView
+}
+
+// replicaSyncView is one verbatim, node-local HAST observation.
+type replicaSyncView struct {
+	NodeID         string
+	Observed       bool
+	Role           string
+	ResourceStatus string
+	Replication    string
+	Detail         string
 }
 
 type replicaBackedImpactView struct {
@@ -85,11 +102,25 @@ func fromRPCResourceKind(k rpcpb.ResourceKind) string {
 	return "vm"
 }
 
+// fromRPCRecoveryVerdict maps every verdict explicitly and never
+// buckets an unrecognized value into a real one - an unknown enum must
+// not render as "unprotected" (which overstates risk) nor as any
+// evidence-backed verdict (which overstates safety).
 func fromRPCRecoveryVerdict(v rpcpb.RecoveryVerdict) string {
-	if v == rpcpb.RecoveryVerdict_RECOVERY_VERDICT_UNVERIFIED_REPLICA {
+	switch v {
+	case rpcpb.RecoveryVerdict_RECOVERY_VERDICT_UNPROTECTED:
+		return "unprotected"
+	case rpcpb.RecoveryVerdict_RECOVERY_VERDICT_UNVERIFIED_REPLICA:
 		return "unverified_replica"
+	case rpcpb.RecoveryVerdict_RECOVERY_VERDICT_REPLICA_IN_SYNC:
+		return "replica_in_sync"
+	case rpcpb.RecoveryVerdict_RECOVERY_VERDICT_REPLICA_OUT_OF_SYNC:
+		return "replica_out_of_sync"
+	case rpcpb.RecoveryVerdict_RECOVERY_VERDICT_REPLICA_UNOBSERVED:
+		return "replica_unobserved"
+	default:
+		return "unknown"
 	}
-	return "unprotected"
 }
 
 func fromRPCQuorumImpact(q *rpcpb.QuorumImpact) quorumImpactView {
@@ -106,7 +137,7 @@ func fromRPCQuorumImpact(q *rpcpb.QuorumImpact) quorumImpactView {
 }
 
 func fromRPCOwnedResourceImpact(i *rpcpb.OwnedResourceImpact) resourceImpactView {
-	return resourceImpactView{
+	view := resourceImpactView{
 		ID:            i.GetId(),
 		Name:          i.GetName(),
 		Kind:          fromRPCResourceKind(i.GetKind()),
@@ -114,6 +145,17 @@ func fromRPCOwnedResourceImpact(i *rpcpb.OwnedResourceImpact) resourceImpactView
 		Verdict:       fromRPCRecoveryVerdict(i.GetVerdict()),
 		Explanation:   i.GetExplanation(),
 	}
+	if sync := i.GetReplicaSync(); sync != nil {
+		view.ReplicaSync = &replicaSyncView{
+			NodeID:         sync.GetNodeId(),
+			Observed:       sync.GetObserved(),
+			Role:           sync.GetRole(),
+			ResourceStatus: sync.GetResourceStatus(),
+			Replication:    sync.GetReplication(),
+			Detail:         sync.GetDetail(),
+		}
+	}
+	return view
 }
 
 func fromRPCReplicaBackedImpact(i *rpcpb.ReplicaBackedImpact) replicaBackedImpactView {

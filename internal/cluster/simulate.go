@@ -24,12 +24,21 @@ const (
 )
 
 // RecoveryVerdict is deliberately limited to what raft configuration
-// data and node_id/replica_node_id placement alone can prove - see
-// ADR-0052 for why there is no confident "will recover cleanly"
-// verdict in v1: live HAST sync status has no RPC exposure anywhere in
-// this codebase (internal/hast.Manager.Status is called only
-// internally, by internal/cluster/hast.go, to self-verify a role
-// change it just made).
+// data, node_id/replica_node_id placement, and a direct read of the
+// configured replica's own HAST status can prove. ADR-0052 originally
+// capped every replica-backed resource at
+// RecoveryVerdictUnverifiedReplica because live HAST sync status had no
+// RPC exposure anywhere in this codebase; ADR-0121 closes that gap
+// using the per-node GetLocalHASTResourceStatus RPC, so the three
+// replica verdicts below now separate a confirmed-healthy replica from
+// a confirmed-unusable one and from one that could not be read at all.
+//
+// No verdict here - including the strongest, RecoveryVerdictReplicaInSync
+// - claims that recovery "will work cleanly". A sync observation is a
+// point-in-time fact about the replica's hastd worker; it cannot prove
+// the replica stays reachable, that the owning disk survives, or that
+// the Cell can actually be recreated from it. See the explanation
+// strings, which are part of the contract, not decoration.
 type RecoveryVerdict string
 
 const (
@@ -41,9 +50,85 @@ const (
 	RecoveryVerdictUnprotected RecoveryVerdict = "unprotected"
 
 	// RecoveryVerdictUnverifiedReplica means replica_node_id is set, but
-	// this package never queries live HAST sync status - the replica
-	// may or may not actually be caught up.
+	// no live observation was even attempted - e.g. this node has no
+	// peer forwarding configured, so the replica could not be queried
+	// at all. This is deliberately distinct from
+	// RecoveryVerdictReplicaUnobserved below, which means a query WAS
+	// attempted and did not return a usable answer.
 	RecoveryVerdictUnverifiedReplica RecoveryVerdict = "unverified_replica"
+
+	// RecoveryVerdictReplicaInSync means the configured replica was
+	// queried directly and its own hastd reported a real role (primary
+	// or secondary) with status "complete" (ADR-0121). This is the
+	// strongest verdict available, and it still is not a guarantee -
+	// see the type comment.
+	RecoveryVerdictReplicaInSync RecoveryVerdict = "replica_in_sync"
+
+	// RecoveryVerdictReplicaOutOfSync means the replica was queried
+	// directly and is confirmed NOT usable as-is: hastd reports role
+	// "init" (never initialized on that node), or a real role with a
+	// status other than "complete" (e.g. "degraded"). This is the
+	// verdict that should make an operator stop and investigate before
+	// assuming redundancy exists.
+	RecoveryVerdictReplicaOutOfSync RecoveryVerdict = "replica_out_of_sync"
+
+	// RecoveryVerdictReplicaUnobserved means the replica was queried but
+	// could not be read: the RPC returned an error, or hastd itself
+	// reported status "unknown". This is a real third state and must
+	// never be silently folded into either in-sync or out-of-sync -
+	// "we could not check" is not "checked and fine", and it is not
+	// "checked and broken" either.
+	RecoveryVerdictReplicaUnobserved RecoveryVerdict = "replica_unobserved"
+)
+
+// ReplicaSyncObservation is one directly-queried, node-local HAST
+// status for a resource's configured replica. It is a raw observation
+// gathered by the RPC handler (which does the I/O); this package only
+// interprets it. Observed=false means the replica's own status could not
+// be read - never that the replica is healthy, and never that it is not.
+type ReplicaSyncObservation struct {
+	ResourceID    string
+	Kind          ResourceKind
+	ReplicaNodeID string
+
+	// Observed is true only when the replica node answered with its own
+	// hastctl view. When false, Detail carries the reason.
+	Observed       bool
+	Role           string
+	ResourceStatus string
+	Replication    string
+	Detail         string
+}
+
+// replicaInSync classifies one observation. hastd's own `status` field
+// is the authority here (ADR-0057 recorded a real primary/secondary pair
+// both reporting "status: complete" on this project's FreeBSD 16.0
+// build), and role "init" means the resource was never initialized on
+// that node at all, which is a confirmed-unusable replica rather than an
+// unknown one. Only hastd's own "unknown" is treated as undeterminable.
+func replicaInSync(o ReplicaSyncObservation) (inSync bool, undeterminable bool) {
+	if !o.Observed {
+		return false, true
+	}
+	switch {
+	case strings.EqualFold(o.Role, hastRoleInit):
+		return false, false
+	case strings.EqualFold(o.ResourceStatus, hastStatusUnknown):
+		return false, true
+	case strings.EqualFold(o.ResourceStatus, hastStatusComplete) &&
+		(strings.EqualFold(o.Role, hastRolePrimary) || strings.EqualFold(o.Role, hastRoleSecondary)):
+		return true, false
+	default:
+		return false, false
+	}
+}
+
+const (
+	hastRoleInit       = "init"
+	hastRolePrimary    = "primary"
+	hastRoleSecondary  = "secondary"
+	hastStatusComplete = "complete"
+	hastStatusUnknown  = "unknown"
 )
 
 // Reachability is a real three-state result, not a bool: a remaining
@@ -116,6 +201,29 @@ type OwnedResourceImpact struct {
 	ReplicaNodeID string
 	Verdict       RecoveryVerdict
 	Explanation   string
+
+	// ReplicaSync is the raw evidence behind Verdict, present only when
+	// a replica is configured AND a direct query to that replica was
+	// actually attempted. nil means either "no replica configured" or
+	// "no query was possible" - in both cases the verdict must not be
+	// read as evidence-backed. Verdict and this field are always
+	// consistent: an in-sync/out-of-sync/unobserved verdict always
+	// carries the observation that produced it.
+	ReplicaSync *ReplicaSyncEvidence
+}
+
+// ReplicaSyncEvidence is the verbatim, node-local HAST observation a
+// recovery verdict was derived from, so an operator can see the fact
+// itself instead of only Apiary's conclusion drawn from it.
+type ReplicaSyncEvidence struct {
+	NodeID         string
+	Observed       bool
+	Role           string
+	ResourceStatus string
+	Replication    string
+
+	// Detail carries the failure reason when Observed is false.
+	Detail string
 }
 
 // ReplicaBackedImpact is one VM/jail owned by a DIFFERENT node, for
@@ -316,25 +424,65 @@ func ComputeQuorumImpact(servers []ServerSuffrage, targetNodeID string) QuorumIm
 
 // ComputeOwnedResourceImpacts returns a recovery verdict for every
 // resource owned by targetNodeID, sorted by ID for deterministic
-// ordering.
-func ComputeOwnedResourceImpacts(all []OwnedResourcePlacement, targetNodeID string) []OwnedResourceImpact {
+// ordering. syncObservations are the direct per-replica HAST reads the
+// RPC handler gathered; a resource whose replica could not be queried
+// at all still falls back to RecoveryVerdictUnverifiedReplica, so
+// dropping the observations entirely is safe and simply reproduces
+// ADR-0052's original placement-only behaviour.
+func ComputeOwnedResourceImpacts(all []OwnedResourcePlacement, syncObservations []ReplicaSyncObservation, targetNodeID string) []OwnedResourceImpact {
+	byResource := make(map[string]ReplicaSyncObservation, len(syncObservations))
+	for _, o := range syncObservations {
+		byResource[o.ResourceID] = o
+	}
+
 	var impacts []OwnedResourceImpact
 	for _, r := range all {
 		if r.NodeID != targetNodeID {
 			continue
 		}
 		impact := OwnedResourceImpact{ID: r.ID, Name: r.Name, Kind: r.Kind, ReplicaNodeID: r.ReplicaNodeID}
-		if r.ReplicaNodeID == "" {
+		switch {
+		case r.ReplicaNodeID == "":
 			impact.Verdict = RecoveryVerdictUnprotected
 			impact.Explanation = fmt.Sprintf("no HAST replica configured - Apiary has no redundancy path for this resource; recovery would depend on means outside its own tracking if %s is gone for good.", targetNodeID)
-		} else {
-			impact.Verdict = RecoveryVerdictUnverifiedReplica
-			impact.Explanation = fmt.Sprintf("a HAST replica is configured on %s, but this simulation does not check live sync status - confirm `hastctl status` on %s shows `status: complete` before attempting recovery.", r.ReplicaNodeID, r.ReplicaNodeID)
+		default:
+			observation, attempted := byResource[r.ID]
+			if !attempted {
+				impact.Verdict = RecoveryVerdictUnverifiedReplica
+				impact.Explanation = fmt.Sprintf("a HAST replica is configured on %s, but this simulation could not query its live HAST status at all - confirm `hastctl status` on %s shows `status: complete` before attempting recovery.", r.ReplicaNodeID, r.ReplicaNodeID)
+				break
+			}
+			impact.ReplicaSync = &ReplicaSyncEvidence{
+				NodeID: observation.ReplicaNodeID, Observed: observation.Observed,
+				Role: observation.Role, ResourceStatus: observation.ResourceStatus,
+				Replication: observation.Replication, Detail: observation.Detail,
+			}
+			inSync, undeterminable := replicaInSync(observation)
+			switch {
+			case inSync:
+				impact.Verdict = RecoveryVerdictReplicaInSync
+				impact.Explanation = fmt.Sprintf("a HAST replica is configured on %s and its own hastd reported role %q with status %q just now. This is the strongest evidence available, not a guarantee: it says nothing about whether that node stays reachable, or whether the Cell can be recreated from the replica.", observation.ReplicaNodeID, observation.Role, observation.ResourceStatus)
+			case undeterminable:
+				impact.Verdict = RecoveryVerdictReplicaUnobserved
+				impact.Explanation = fmt.Sprintf("a HAST replica is configured on %s, but its live HAST status could not be determined (%s) - this is 'could not check', not 'checked and fine'. Confirm `hastctl status` on %s by hand before attempting recovery.", observation.ReplicaNodeID, syncDetailOrUnknown(observation), observation.ReplicaNodeID)
+			default:
+				impact.Verdict = RecoveryVerdictReplicaOutOfSync
+				impact.Explanation = fmt.Sprintf("a HAST replica is configured on %s but is confirmed NOT usable as-is: hastd reported role %q with status %q. Treat this Cell as having no working redundancy until an operator resolves it on %s.", observation.ReplicaNodeID, observation.Role, observation.ResourceStatus, observation.ReplicaNodeID)
+			}
 		}
 		impacts = append(impacts, impact)
 	}
 	sort.Slice(impacts, func(i, j int) bool { return impacts[i].ID < impacts[j].ID })
 	return impacts
+}
+
+// syncDetailOrUnknown renders an observation's failure reason for an
+// explanation string, never leaving an empty parenthetical.
+func syncDetailOrUnknown(o ReplicaSyncObservation) string {
+	if o.Detail != "" {
+		return o.Detail
+	}
+	return "no reason reported"
 }
 
 // ComputeReplicaBackedImpacts returns every resource for which
@@ -358,11 +506,12 @@ func ComputeReplicaBackedImpacts(all []OwnedResourcePlacement, targetNodeID stri
 // SimulateNodeFailure is the single entry point the RPC handler calls
 // once IsKnownTarget has confirmed targetNodeID is real - a thin
 // composition of the three computations above, kept separate so each
-// is independently unit-testable.
-func SimulateNodeFailure(servers []ServerSuffrage, resources []OwnedResourcePlacement, targetNodeID string) NodeFailureReport {
+// is independently unit-testable. syncObservations is threaded straight
+// through to ComputeOwnedResourceImpacts.
+func SimulateNodeFailure(servers []ServerSuffrage, resources []OwnedResourcePlacement, syncObservations []ReplicaSyncObservation, targetNodeID string) NodeFailureReport {
 	return NodeFailureReport{
 		Quorum:                 ComputeQuorumImpact(servers, targetNodeID),
-		OwnedResources:         ComputeOwnedResourceImpacts(resources, targetNodeID),
+		OwnedResources:         ComputeOwnedResourceImpacts(resources, syncObservations, targetNodeID),
 		ReplicaBackedResources: ComputeReplicaBackedImpacts(resources, targetNodeID),
 	}
 }

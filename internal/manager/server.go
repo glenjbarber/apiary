@@ -3802,7 +3802,8 @@ func (s *Server) SimulateNodeFailure(ctx context.Context, req *rpcpb.SimulateNod
 		}, nil
 	}
 
-	report := cluster.SimulateNodeFailure(servers, resources, targetID)
+	syncObservations := s.replicaSyncObservations(ctx, raftStatus.GetServers(), resources, targetID, localNodeID)
+	report := cluster.SimulateNodeFailure(servers, resources, syncObservations, targetID)
 	requirements := make([]cluster.ImageRequirement, 0, len(vmsResp.GetVms())*2+len(jailsResp.GetJails()))
 	for _, vm := range vmsResp.GetVms() {
 		if vm.GetIsoName() != "" {
@@ -3867,6 +3868,94 @@ func (s *Server) imageInventoryObservations(ctx context.Context, raftServers []*
 		observations = append(observations, observation)
 	}
 	return observations
+}
+
+// replicaSyncObservations directly asks each owned, replica-backed
+// resource's configured HAST replica for its own live hastctl view
+// (ADR-0121), which is what upgrades the ADR-0052 placement-only
+// verdict. Read-only, one bounded call per resource per simulation.
+//
+// Two cases deliberately produce NO observation at all rather than a
+// failed one, so ComputeOwnedResourceImpacts reports them as
+// unverified_replica ("no query was possible") instead of unobserved
+// ("a query was attempted and did not answer"):
+//   - this node has no peer forwarding configured, so a non-local
+//     replica cannot be dialed at all; and
+//   - the replica is a node that is not in the raft configuration, so
+//     there is no address to dial (ADR-0052's placement-only Nodes).
+func (s *Server) replicaSyncObservations(ctx context.Context, raftServers []*internalpb.ServerInfo, resources []cluster.OwnedResourcePlacement, targetID, localNodeID string) []cluster.ReplicaSyncObservation {
+	addrByNode := make(map[string]string, len(raftServers))
+	for _, server := range raftServers {
+		addrByNode[server.GetId()] = server.GetAddress()
+	}
+
+	observations := make([]cluster.ReplicaSyncObservation, 0, len(resources))
+	for _, resource := range resources {
+		// Only the simulated node's own resources lose their host when
+		// it disappears; other owners' replicas are irrelevant to this
+		// report's recovery verdicts.
+		if resource.NodeID != targetID || resource.ReplicaNodeID == "" {
+			continue
+		}
+		observation := cluster.ReplicaSyncObservation{
+			ResourceID: resource.ID, Kind: resource.Kind, ReplicaNodeID: resource.ReplicaNodeID,
+		}
+
+		local := resource.ReplicaNodeID == localNodeID
+		if !local {
+			addr, known := addrByNode[resource.ReplicaNodeID]
+			if !known || s.peers == nil {
+				// No address, or no peer forwarding: skip entirely so
+				// the verdict reads as "not attempted".
+				continue
+			}
+			checkCtx, cancel := context.WithTimeout(ctx, reachabilityCheckTimeout)
+			resp, err := s.peers.GetLocalHASTResourceStatus(checkCtx, s.peerManagerdAddr(addr), hastResourceName(resource))
+			cancel()
+			if err != nil {
+				observation.Detail = "the replica node did not answer: " + err.Error()
+			} else if resp.GetError() != "" {
+				observation.Detail = resp.GetError()
+			} else {
+				observation.Observed = true
+				observation.Role = resp.GetRole()
+				observation.ResourceStatus = resp.GetResourceStatus()
+				observation.Replication = resp.GetReplication()
+			}
+			observations = append(observations, observation)
+			continue
+		}
+
+		if s.hastStatus == nil {
+			observation.Detail = "HAST status is not configured on this node"
+		} else {
+			observed, err := s.hastStatus.Status(ctx, hastResourceName(resource))
+			switch {
+			case err != nil:
+				observation.Detail = err.Error()
+			case observed == nil:
+				observation.Detail = "HAST status returned no observation"
+			default:
+				observation.Observed = true
+				observation.Role = observed.Role
+				observation.ResourceStatus = observed.ResourceStatus
+				observation.Replication = observed.Replication
+			}
+		}
+		observations = append(observations, observation)
+	}
+	return observations
+}
+
+// hastResourceName builds the HAST resource name for a VM/jail exactly
+// as the reconciler does (vmHASTResourceName/jailHASTResourceName in
+// internal/cluster, which are unexported). Mirrors validHASTResourceName
+// in this same file, which already encodes the same convention.
+func hastResourceName(resource cluster.OwnedResourcePlacement) string {
+	if resource.Kind == cluster.ResourceKindJail {
+		return "jail-" + resource.ID
+	}
+	return "vm-" + resource.ID
 }
 
 // SimulateNetworkFailure reports declared VM dependencies on one managed
@@ -3962,20 +4051,42 @@ func toRPCResourceKind(k cluster.ResourceKind) rpcpb.ResourceKind {
 	return rpcpb.ResourceKind_RESOURCE_KIND_VM
 }
 
+// toRPCVerdict maps every cluster verdict explicitly. It deliberately
+// does NOT bucket unknown values into a known verdict - a new or
+// mistyped verdict must surface as UNSPECIFIED rather than silently
+// claiming a Cell is unprotected.
 func toRPCVerdict(v cluster.RecoveryVerdict) rpcpb.RecoveryVerdict {
-	if v == cluster.RecoveryVerdictUnverifiedReplica {
+	switch v {
+	case cluster.RecoveryVerdictUnprotected:
+		return rpcpb.RecoveryVerdict_RECOVERY_VERDICT_UNPROTECTED
+	case cluster.RecoveryVerdictUnverifiedReplica:
 		return rpcpb.RecoveryVerdict_RECOVERY_VERDICT_UNVERIFIED_REPLICA
+	case cluster.RecoveryVerdictReplicaInSync:
+		return rpcpb.RecoveryVerdict_RECOVERY_VERDICT_REPLICA_IN_SYNC
+	case cluster.RecoveryVerdictReplicaOutOfSync:
+		return rpcpb.RecoveryVerdict_RECOVERY_VERDICT_REPLICA_OUT_OF_SYNC
+	case cluster.RecoveryVerdictReplicaUnobserved:
+		return rpcpb.RecoveryVerdict_RECOVERY_VERDICT_REPLICA_UNOBSERVED
+	default:
+		return rpcpb.RecoveryVerdict_RECOVERY_VERDICT_UNSPECIFIED
 	}
-	return rpcpb.RecoveryVerdict_RECOVERY_VERDICT_UNPROTECTED
 }
 
 func toRPCOwnedResourceImpacts(impacts []cluster.OwnedResourceImpact) []*rpcpb.OwnedResourceImpact {
 	out := make([]*rpcpb.OwnedResourceImpact, 0, len(impacts))
 	for _, i := range impacts {
-		out = append(out, &rpcpb.OwnedResourceImpact{
+		impact := &rpcpb.OwnedResourceImpact{
 			Id: i.ID, Name: i.Name, Kind: toRPCResourceKind(i.Kind),
 			ReplicaNodeId: i.ReplicaNodeID, Verdict: toRPCVerdict(i.Verdict), Explanation: i.Explanation,
-		})
+		}
+		if i.ReplicaSync != nil {
+			impact.ReplicaSync = &rpcpb.ReplicaSyncEvidence{
+				NodeId: i.ReplicaSync.NodeID, Observed: i.ReplicaSync.Observed,
+				Role: i.ReplicaSync.Role, ResourceStatus: i.ReplicaSync.ResourceStatus,
+				Replication: i.ReplicaSync.Replication, Detail: i.ReplicaSync.Detail,
+			}
+		}
+		out = append(out, impact)
 	}
 	return out
 }

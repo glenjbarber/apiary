@@ -67,7 +67,7 @@
 
   <div class="panel">
     <h3>Cells owned by {{.SimulateTargetNodeID}}</h3>
-    <p class="muted">These Cells run on this Comb - they stop if it disappears.</p>
+    <p class="muted">These Cells run on this Comb - they stop if it disappears. A replica verdict below is a live, point-in-time reading of that Comb's own <code>hastctl</code> state: it is evidence, not a guarantee that the replica stays reachable or that the Cell can be recreated from it.</p>
     <table>
       <thead><tr><th>ID</th><th>Name</th><th>Kind</th><th>Replica node</th><th>Verdict</th><th>Explanation</th></tr></thead>
       <tbody>
@@ -75,7 +75,21 @@
         <tr>
           <td>{{.ID}}</td><td>{{.Name}}</td><td>{{.Kind}}</td>
           <td>{{if .ReplicaNodeID}}{{.ReplicaNodeID}}{{else}}<em>none</em>{{end}}</td>
-          <td>{{if eq .Verdict "unprotected"}}<span class="error">unprotected</span>{{else}}<span class="muted">unverified replica</span>{{end}}</td>
+          <td>
+            {{if eq .Verdict "unprotected"}}<span class="error">unprotected</span>
+            {{else if eq .Verdict "replica_in_sync"}}<span class="success">replica in sync</span>
+            {{else if eq .Verdict "replica_out_of_sync"}}<span class="error">replica out of sync</span>
+            {{else if eq .Verdict "replica_unobserved"}}<span class="muted">replica unobserved</span>
+            {{else if eq .Verdict "unverified_replica"}}<span class="muted">unverified replica</span>
+            {{else}}<span class="muted">unknown</span>{{end}}
+            {{if .ReplicaSync}}
+              <br><span class="muted">
+                observed on {{.ReplicaSync.NodeID}}:
+                {{if .ReplicaSync.Observed}}role <code>{{.ReplicaSync.Role}}</code>, status <code>{{.ReplicaSync.ResourceStatus}}</code>{{if .ReplicaSync.Replication}}, <code>{{.ReplicaSync.Replication}}</code>{{end}}
+                {{else}}not readable - {{if .ReplicaSync.Detail}}{{.ReplicaSync.Detail}}{{else}}no reason reported{{end}}{{end}}
+              </span>
+            {{end}}
+          </td>
           <td>{{.Explanation}}</td>
         </tr>
         {{else}}
