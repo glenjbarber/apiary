@@ -137,6 +137,27 @@ service ManagerService {
   // owner and replica and retaining failures as unknown.
   rpc GetLocalHASTResourceStatus(GetLocalHASTResourceStatusRequest) returns (GetLocalHASTResourceStatusResponse);
 
+  // ClusterHealth returns the Evidence-Aware Health verdict for every
+  // known Comb, computed server-side (ADR-0122).
+  //
+  // ADR-0056 deliberately kept this computation inside the web UI, so
+  // Status/HostStats callers other than that page never paid a
+  // cluster-wide fan-out. This RPC is the sanctioned way for a
+  // non-HTML consumer (restshimd, a future CLI) to get the same computed
+  // five-state verdict the UI shows, instead of reimplementing
+  // internal/health's decision chain against the raw wire fields and
+  // risking the two paths drifting apart.
+  //
+  // It answers for whoever receives it, like HostStats: it is a
+  // cluster-wide read, but there is no leader concept to forward, and
+  // every node's evidence is gathered independently.
+  //
+  // Like every multi-source read in this service it is NOT an atomic
+  // snapshot: each node's HostStats and Status are separate sequential
+  // reads, so one node's verdict can reflect a slightly earlier moment
+  // than another's.
+  rpc ClusterHealth(ClusterHealthRequest) returns (ClusterHealthResponse);
+
   // GetVMConsole reports how to reach a running VM's VNC framebuffer,
   // for the web UI's noVNC-based console page (ADR-0020). Like HostStats,
   // this only answers for a VM actually running on *this* node - see
@@ -2789,4 +2810,54 @@ message UpdateVoterAddressRequest {
 message UpdateVoterAddressResponse {
   string error = 1;
   string leader_hint = 2;
+}
+
+// ClusterHealthRequest takes no parameters: the set of Combs to report is
+// whatever the answering node itself considers known, exactly as
+// StatusResponse.known_node_ids already defines it.
+message ClusterHealthRequest {}
+
+// ClusterNodeHealth is one Comb's verdict as seen from a cluster-wide
+// read. It deliberately mirrors GetLocalNodeHealthResponse field for
+// field, including keeping status a string rather than introducing a
+// second, parallel representation of the same five states on this wire.
+// A consumer that already handles GetLocalNodeHealthResponse's status
+// string therefore handles this one identically.
+//
+// status is one of "healthy", "degraded", "unknown", "stale", or
+// "contradictory" - or any other string if a newer managerd computes a
+// state this consumer has never heard of. Treat an unrecognized status
+// as unknown, never as healthy: that is the whole failure mode
+// Evidence-Aware Health exists to prevent, and the string contract cannot
+// enforce it on the consumer's behalf.
+message ClusterNodeHealth {
+  string node_id = 1;
+  string status = 2;
+  string explanation = 3;
+  repeated HealthObservation observations = 4;
+
+  // reachable_evidence records whether this node's reachability was
+  // actually established by a dial, established trivially because it
+  // answered the request itself, or never established at all. It is
+  // already implied by the observations; naming it here saves a consumer
+  // from having to infer it correctly from prose.
+  bool dialed = 5;
+}
+
+message ClusterHealthResponse {
+  // error is set when the answering node could not establish the shared
+  // anchor membership read at all. Every node's verdict would be capped
+  // at unknown in that case, so the cause is reported once here instead
+  // of being repeated, unexplained, on every row.
+  string error = 1;
+
+  // local_node_id is the answering managerd's own node ID. A consumer
+  // needs it to interpret per-node evidence, since the answering node's
+  // own reachability is true by definition rather than by observation.
+  string local_node_id = 2;
+
+  // nodes is one verdict per known Comb, sorted by node_id. A Comb whose
+  // evidence could not be gathered still appears, with a non-healthy
+  // status - an absent entry must never be read as a healthy one.
+  repeated ClusterNodeHealth nodes = 3;
 }

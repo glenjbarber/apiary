@@ -7,8 +7,10 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"google.golang.org/grpc/codes"
@@ -157,6 +159,14 @@ type PeerForwarder interface {
 	// (a successful call means the peer is up) rather than inventing a
 	// new ping.
 	HostStats(ctx context.Context, addr string) (*rpcpb.HostStatsResponse, error)
+
+	// Status reaches a specific peer's own Status RPC, answering only
+	// for that peer and never forwarded to a leader. ClusterHealth
+	// (ADR-0122) needs it to learn each remote Comb's own self-reported
+	// raft reachability and applied/last-log index, which HostStats
+	// deliberately does not carry.
+	Status(ctx context.Context, addr string) (*rpcpb.StatusResponse, error)
+
 	GetLocalHASTResourceStatus(ctx context.Context, addr, resourceName string) (*rpcpb.GetLocalHASTResourceStatusResponse, error)
 	GetLocalNetworkBridgeStatus(ctx context.Context, addr, networkID string) (*rpcpb.GetLocalNetworkBridgeStatusResponse, error)
 	ListAssumptionResults(ctx context.Context, addr string, req *rpcpb.ListAssumptionResultsRequest) (*rpcpb.ListAssumptionResultsResponse, error)
@@ -858,41 +868,44 @@ func (s *Server) GetLocalNodeHealth(ctx context.Context, _ *rpcpb.GetLocalNodeHe
 		return nil, err
 	}
 
-	signals := health.NodeSignals{
-		NodeID:               s.nodeID,
-		PeerReachability:     health.ReachabilityReachable,
-		HeartbeatObserved:    true,
-		HeartbeatOK:          status.GetRaftReachable(),
-		MembershipObserved:   status.GetRaftReachable(),
-		MembershipObservedAt: now,
+	// One Inputs, one SignalsFrom, one ComputeNodeHealth - the same
+	// derivation the cluster-wide ClusterHealth handler below runs, so
+	// this local answer and that cluster-wide one can never be
+	// computed by two different rule sets.
+	inputs := health.Inputs{
+		NodeID:                   s.nodeID,
+		IsLocal:                  true,
+		PeerForwardingConfigured: s.peers != nil,
+		MembershipObservedAt:     now,
+		HeartbeatObserved:        true,
+		HeartbeatOK:              status.GetRaftReachable(),
+		MembershipObserved:       status.GetRaftReachable(),
+		AppliedIndexObserved:     status.GetRaftReachable(),
+		AppliedIndex:             status.GetRaftAppliedIndex(),
+		LastLogIndex:             status.GetRaftLastLogIndex(),
+		IndicesObservedAt:        now,
+		ReconcileIntervalSeconds: stats.GetReconcileIntervalSeconds(),
+		ReconcileObservedAt:      now,
 	}
 	if status.GetRaftReachable() {
-		signals.AppliedIndexObserved = true
-		signals.AppliedIndex = status.GetRaftAppliedIndex()
-		signals.LastLogIndex = status.GetRaftLastLogIndex()
-		signals.IndicesObservedAt = now
 		for _, member := range status.GetMembers() {
 			if member.GetNodeId() == s.nodeID {
-				signals.IsRaftMember = true
-				signals.Suffrage = health.ParseSuffrage(member.GetSuffrage())
+				inputs.MemberFound = true
+				inputs.Suffrage = health.ParseSuffrage(member.GetSuffrage())
 				break
 			}
 		}
 	}
-
-	signals.ReconcileObservedAt = now
-	signals.ReconcileIntervalSeconds = stats.GetReconcileIntervalSeconds()
-	signals.ReconcilerConfigured = signals.ReconcileIntervalSeconds > 0
 	if unix := stats.GetLastReconcileAttemptUnix(); unix > 0 {
-		signals.ReconcileEverAttempted = true
-		signals.LastReconcileAttempt = time.Unix(unix, 0)
+		inputs.ReconcileEverAttempted = true
+		inputs.LastReconcileAttempt = time.Unix(unix, 0)
 	}
 	if unix := stats.GetLastReconcileSuccessUnix(); unix > 0 {
-		signals.ReconcileEverSucceeded = true
-		signals.LastReconcileSuccess = time.Unix(unix, 0)
+		inputs.ReconcileEverSucceeded = true
+		inputs.LastReconcileSuccess = time.Unix(unix, 0)
 	}
 
-	result := health.ComputeNodeHealth(signals, now)
+	result := health.ComputeNodeHealth(health.SignalsFrom(inputs), now)
 	response := &rpcpb.GetLocalNodeHealthResponse{
 		NodeId:      result.NodeID,
 		Status:      string(result.Status),
@@ -913,6 +926,190 @@ func (s *Server) GetLocalNodeHealth(ctx context.Context, _ *rpcpb.GetLocalNodeHe
 	}
 	response.RelevantClaims = s.relevantRegisterClaims(s.nodeID, now)
 	return response, nil
+}
+
+// ClusterHealth implements rpcpb.ManagerServiceServer (ADR-0122): the
+// cluster-wide Evidence-Aware Health verdict, computed here so a
+// non-HTML consumer gets the same answer the web UI shows instead of
+// reimplementing internal/health's decision chain against the raw wire
+// fields - the drift ADR-0056's own Consequences section warned about.
+//
+// It is deliberately NOT folded into Status or HostStats: those answer
+// for one node and are called on paths that must not acquire a
+// cluster-wide fan-out cost (ADR-0056's own scoping decision, kept
+// intact here).
+//
+// Like every multi-source read in this service it is not an atomic
+// snapshot - each node's Status and HostStats are separate sequential
+// reads, so one node's verdict can reflect a slightly earlier moment
+// than another's.
+func (s *Server) ClusterHealth(ctx context.Context, _ *rpcpb.ClusterHealthRequest) (*rpcpb.ClusterHealthResponse, error) {
+	now := time.Now()
+	anchor, err := s.Status(ctx, &rpcpb.StatusRequest{})
+	if err != nil {
+		return nil, err
+	}
+
+	membershipObserved := anchor.GetRaftReachable()
+	nodeIDs := anchor.GetKnownNodeIds()
+	if len(nodeIDs) == 0 && s.nodeID != "" {
+		nodeIDs = []string{s.nodeID}
+	}
+
+	response := &rpcpb.ClusterHealthResponse{LocalNodeId: s.nodeID}
+	if !membershipObserved {
+		// Every node's verdict is capped at unknown without membership,
+		// so report the single shared cause once rather than repeating
+		// it unexplained on every row.
+		response.Error = "raft membership could not be read from this node - every Comb's verdict is capped at unknown"
+	}
+
+	// Raft membership is a cluster-wide-consistent replicated fact, so
+	// it is read exactly once above and reused for every node below.
+	// RaftMember.address is the member's own raft transport address;
+	// peerManagerdAddr strips its port and applies this deployment's
+	// managerd port, the same conversion every other peer call uses.
+	memberByNode := make(map[string]*rpcpb.RaftMember, len(anchor.GetMembers()))
+	for _, member := range anchor.GetMembers() {
+		memberByNode[member.GetNodeId()] = member
+	}
+
+	type nodeResult struct {
+		verdict health.NodeHealth
+		dialed  bool
+	}
+	results := make([]nodeResult, len(nodeIDs))
+	var wg sync.WaitGroup
+	for i, nodeID := range nodeIDs {
+		wg.Add(1)
+		go func(i int, nodeID string) {
+			defer wg.Done()
+			dialed, verdict := s.clusterNodeHealth(ctx, nodeID, s.nodeID, anchor, membershipObserved, memberByNode, now)
+			results[i] = nodeResult{verdict: verdict, dialed: dialed}
+		}(i, nodeID)
+	}
+	wg.Wait()
+
+	sort.Slice(results, func(i, j int) bool { return results[i].verdict.NodeID < results[j].verdict.NodeID })
+	for _, result := range results {
+		response.Nodes = append(response.Nodes, &rpcpb.ClusterNodeHealth{
+			NodeId:       result.verdict.NodeID,
+			Status:       string(result.verdict.Status),
+			Explanation:  result.verdict.Explanation,
+			Observations: toRPCHealthObservations(result.verdict.Observations),
+			Dialed:       result.dialed,
+		})
+	}
+	return response, nil
+}
+
+// clusterNodeHealth gathers one node's evidence and computes its verdict.
+// It also reports whether the node was actually dialed, so a caller can
+// distinguish "established by a real call" from "true by definition,
+// because it answered this very request." All I/O is bounded by the
+// existing reachabilityCheckTimeout.
+func (s *Server) clusterNodeHealth(
+	ctx context.Context,
+	nodeID, localNodeID string,
+	anchor *rpcpb.StatusResponse,
+	membershipObserved bool,
+	memberByNode map[string]*rpcpb.RaftMember,
+	now time.Time,
+) (bool, health.NodeHealth) {
+	inputs := health.Inputs{
+		NodeID:                   nodeID,
+		IsLocal:                  nodeID == localNodeID,
+		PeerForwardingConfigured: s.peers != nil,
+		MembershipObserved:       membershipObserved,
+		MembershipObservedAt:     now,
+	}
+
+	if member, found := memberByNode[nodeID]; found && membershipObserved {
+		inputs.MemberFound = true
+		inputs.Suffrage = health.ParseSuffrage(member.GetSuffrage())
+	}
+
+	var stats *rpcpb.HostStatsResponse
+	dialed := false
+	if inputs.IsLocal {
+		// No dial is needed or wanted: this node is answering now, and
+		// self-dialing would be a pointless extra hop.
+		stats, _ = s.HostStats(ctx, &rpcpb.HostStatsRequest{})
+	} else if s.peers != nil {
+		if member, known := memberByNode[nodeID]; known && member.GetAddress() != "" {
+			addr := s.peerManagerdAddr(member.GetAddress())
+			dialed = true
+			inputs.PeerDialAttempted = true
+
+			checkCtx, cancel := context.WithTimeout(ctx, reachabilityCheckTimeout)
+			peerStats, statsErr := s.peers.HostStats(checkCtx, addr)
+			if statsErr == nil {
+				inputs.PeerDialSucceeded = true
+				stats = peerStats
+			}
+			// A separate, independent probe for the peer's own raft
+			// self-report and log position - deliberately NOT inferred
+			// from whether HostStats answered, which says nothing at
+			// all about that peer's own raftd.
+			if peerStatus, statusErr := s.peers.Status(checkCtx, addr); statusErr == nil {
+				inputs.HeartbeatObserved = true
+				inputs.HeartbeatOK = peerStatus.GetRaftReachable()
+				if peerStatus.GetRaftReachable() {
+					inputs.AppliedIndexObserved = true
+					inputs.AppliedIndex = peerStatus.GetRaftAppliedIndex()
+					inputs.LastLogIndex = peerStatus.GetRaftLastLogIndex()
+					inputs.IndicesObservedAt = now
+				}
+			}
+			cancel()
+		}
+	}
+
+	if inputs.IsLocal {
+		// The anchor Status call already answered for this node, so its
+		// own self-report and log position are already in hand - no
+		// redundant self-dial.
+		inputs.HeartbeatObserved = true
+		inputs.HeartbeatOK = anchor.GetRaftReachable()
+		inputs.AppliedIndexObserved = anchor.GetRaftReachable()
+		inputs.AppliedIndex = anchor.GetRaftAppliedIndex()
+		inputs.LastLogIndex = anchor.GetRaftLastLogIndex()
+		inputs.IndicesObservedAt = now
+	}
+
+	if stats != nil {
+		inputs.ReconcileObservedAt = now
+		inputs.ReconcileIntervalSeconds = stats.GetReconcileIntervalSeconds()
+		if unix := stats.GetLastReconcileAttemptUnix(); unix > 0 {
+			inputs.ReconcileEverAttempted = true
+			inputs.LastReconcileAttempt = time.Unix(unix, 0)
+		}
+		if unix := stats.GetLastReconcileSuccessUnix(); unix > 0 {
+			inputs.ReconcileEverSucceeded = true
+			inputs.LastReconcileSuccess = time.Unix(unix, 0)
+		}
+	}
+
+	return dialed, health.ComputeNodeHealth(health.SignalsFrom(inputs), now)
+}
+
+// toRPCHealthObservations converts computed observations for the wire.
+func toRPCHealthObservations(observations []health.Observation) []*rpcpb.HealthObservation {
+	out := make([]*rpcpb.HealthObservation, 0, len(observations))
+	for _, observation := range observations {
+		var observedUnix int64
+		if !observation.ObservedAt.IsZero() {
+			observedUnix = observation.ObservedAt.Unix()
+		}
+		out = append(out, &rpcpb.HealthObservation{
+			Source:                observation.Source,
+			ObservedUnix:          observedUnix,
+			FreshnessLimitSeconds: uint32(observation.FreshnessLimit / time.Second),
+			Value:                 observation.Value,
+			Detail:                observation.Detail,
+		})
+	}
+	return out
 }
 
 // applyCommand marshals cmd, submits it via raft, and decodes the result.
