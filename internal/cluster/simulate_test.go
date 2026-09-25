@@ -185,7 +185,7 @@ func TestComputeQuorumImpact_VotersListsEveryOtherVoterSortedByID(t *testing.T) 
 
 func TestComputeOwnedResourceImpacts_NoReplicaIsUnprotected(t *testing.T) {
 	resources := []OwnedResourcePlacement{{ID: "vm-1", Name: "web-01", NodeID: "target", Kind: ResourceKindVM}}
-	got := ComputeOwnedResourceImpacts(resources, "target")
+	got := ComputeOwnedResourceImpacts(resources, nil, "target")
 	if len(got) != 1 {
 		t.Fatalf("len(got) = %d, want 1", len(got))
 	}
@@ -199,7 +199,7 @@ func TestComputeOwnedResourceImpacts_NoReplicaIsUnprotected(t *testing.T) {
 
 func TestComputeOwnedResourceImpacts_WithReplicaIsUnverified(t *testing.T) {
 	resources := []OwnedResourcePlacement{{ID: "vm-1", Name: "web-01", NodeID: "target", ReplicaNodeID: "replica-node", Kind: ResourceKindVM}}
-	got := ComputeOwnedResourceImpacts(resources, "target")
+	got := ComputeOwnedResourceImpacts(resources, nil, "target")
 	if len(got) != 1 {
 		t.Fatalf("len(got) = %d, want 1", len(got))
 	}
@@ -213,7 +213,7 @@ func TestComputeOwnedResourceImpacts_WithReplicaIsUnverified(t *testing.T) {
 
 func TestComputeOwnedResourceImpacts_ZeroOwnedIsEmpty(t *testing.T) {
 	resources := []OwnedResourcePlacement{{ID: "vm-1", NodeID: "other-node"}}
-	got := ComputeOwnedResourceImpacts(resources, "target")
+	got := ComputeOwnedResourceImpacts(resources, nil, "target")
 	if len(got) != 0 {
 		t.Errorf("len(got) = %d, want 0", len(got))
 	}
@@ -224,7 +224,7 @@ func TestComputeOwnedResourceImpacts_SortedByID(t *testing.T) {
 		{ID: "vm-2", NodeID: "target"},
 		{ID: "vm-1", NodeID: "target"},
 	}
-	got := ComputeOwnedResourceImpacts(resources, "target")
+	got := ComputeOwnedResourceImpacts(resources, nil, "target")
 	if len(got) != 2 || got[0].ID != "vm-1" || got[1].ID != "vm-2" {
 		t.Errorf("got = %+v, want sorted by ID", got)
 	}
@@ -245,7 +245,7 @@ func TestComputeReplicaBackedImpacts_OwnershipAndReplicaAreSeparate(t *testing.T
 
 	// The same resource must NOT also appear as something "target" owns -
 	// ownership and replica-backing are genuinely separate consequences.
-	owned := ComputeOwnedResourceImpacts(resources, "target")
+	owned := ComputeOwnedResourceImpacts(resources, nil, "target")
 	if len(owned) != 0 {
 		t.Errorf("ComputeOwnedResourceImpacts(target) = %+v, want empty - vm-1 is owned by owner-node, not target", owned)
 	}
@@ -272,7 +272,7 @@ func TestSimulateNodeFailure_CombinesAllThree(t *testing.T) {
 		{ID: "vm-2", NodeID: "other", ReplicaNodeID: "target"},
 	}
 
-	report := SimulateNodeFailure(servers, resources, "target")
+	report := SimulateNodeFailure(servers, resources, nil, "target")
 	if len(report.OwnedResources) != 1 || report.OwnedResources[0].ID != "vm-1" {
 		t.Errorf("OwnedResources = %+v, want just vm-1", report.OwnedResources)
 	}
@@ -355,5 +355,206 @@ func TestComputeImageAvailability_UnavailableRequiresCompleteObservation(t *test
 	)
 	if len(got) != 1 || got[0].Verdict != ImageAvailabilityUnavailable {
 		t.Fatalf("ComputeImageAvailability() = %+v, want unavailable", got)
+	}
+}
+
+// --- ADR-0121: live HAST synchronization evidence ---
+
+// replicaObservation builds a successful observation for the tests below.
+func replicaObservation(role, status string) ReplicaSyncObservation {
+	return ReplicaSyncObservation{
+		ResourceID: "vm-1", Kind: ResourceKindVM, ReplicaNodeID: "replica-node",
+		Observed: true, Role: role, ResourceStatus: status, Replication: "memsync",
+	}
+}
+
+func TestComputeOwnedResourceImpacts_SyncObservedIsInSync(t *testing.T) {
+	resources := []OwnedResourcePlacement{{ID: "vm-1", Name: "web-01", NodeID: "target", ReplicaNodeID: "replica-node", Kind: ResourceKindVM}}
+	got := ComputeOwnedResourceImpacts(resources, []ReplicaSyncObservation{replicaObservation("secondary", "complete")}, "target")
+	if len(got) != 1 {
+		t.Fatalf("len(got) = %d, want 1", len(got))
+	}
+	if got[0].Verdict != RecoveryVerdictReplicaInSync {
+		t.Errorf("Verdict = %q, want %q", got[0].Verdict, RecoveryVerdictReplicaInSync)
+	}
+	if got[0].ReplicaSync == nil {
+		t.Fatal("ReplicaSync = nil, want the evidence that produced the verdict")
+	}
+	if !got[0].ReplicaSync.Observed || got[0].ReplicaSync.Role != "secondary" || got[0].ReplicaSync.ResourceStatus != "complete" {
+		t.Errorf("ReplicaSync = %+v, want the verbatim observation", got[0].ReplicaSync)
+	}
+	// The strongest verdict must still not promise a clean recovery.
+	lower := strings.ToLower(got[0].Explanation)
+	if strings.Contains(lower, "will recover") || strings.Contains(lower, "guaranteed") || strings.Contains(lower, "safe to lose") {
+		t.Errorf("Explanation must not promise recovery: %q", got[0].Explanation)
+	}
+}
+
+func TestComputeOwnedResourceImpacts_PrimaryRoleIsAlsoInSync(t *testing.T) {
+	resources := []OwnedResourcePlacement{{ID: "vm-1", NodeID: "target", ReplicaNodeID: "replica-node", Kind: ResourceKindVM}}
+	got := ComputeOwnedResourceImpacts(resources, []ReplicaSyncObservation{replicaObservation("primary", "complete")}, "target")
+	if got[0].Verdict != RecoveryVerdictReplicaInSync {
+		t.Errorf("Verdict = %q, want %q - a primary role with status complete is healthy", got[0].Verdict, RecoveryVerdictReplicaInSync)
+	}
+}
+
+func TestComputeOwnedResourceImpacts_InitRoleIsOutOfSync(t *testing.T) {
+	resources := []OwnedResourcePlacement{{ID: "vm-1", NodeID: "target", ReplicaNodeID: "replica-node", Kind: ResourceKindVM}}
+	got := ComputeOwnedResourceImpacts(resources, []ReplicaSyncObservation{replicaObservation("init", "complete")}, "target")
+	if got[0].Verdict != RecoveryVerdictReplicaOutOfSync {
+		t.Errorf("Verdict = %q, want %q - role init means never initialized on that node", got[0].Verdict, RecoveryVerdictReplicaOutOfSync)
+	}
+}
+
+func TestComputeOwnedResourceImpacts_DegradedIsOutOfSync(t *testing.T) {
+	resources := []OwnedResourcePlacement{{ID: "vm-1", NodeID: "target", ReplicaNodeID: "replica-node", Kind: ResourceKindVM}}
+	got := ComputeOwnedResourceImpacts(resources, []ReplicaSyncObservation{replicaObservation("secondary", "degraded")}, "target")
+	if got[0].Verdict != RecoveryVerdictReplicaOutOfSync {
+		t.Errorf("Verdict = %q, want %q", got[0].Verdict, RecoveryVerdictReplicaOutOfSync)
+	}
+}
+
+func TestComputeOwnedResourceImpacts_FailedQueryIsUnobservedNotInSync(t *testing.T) {
+	resources := []OwnedResourcePlacement{{ID: "vm-1", NodeID: "target", ReplicaNodeID: "replica-node", Kind: ResourceKindVM}}
+	observation := ReplicaSyncObservation{
+		ResourceID: "vm-1", Kind: ResourceKindVM, ReplicaNodeID: "replica-node",
+		Observed: false, Detail: "the replica node did not answer: context deadline exceeded",
+	}
+	got := ComputeOwnedResourceImpacts(resources, []ReplicaSyncObservation{observation}, "target")
+	if got[0].Verdict != RecoveryVerdictReplicaUnobserved {
+		t.Errorf("Verdict = %q, want %q - a failed query must never read as checked-and-fine", got[0].Verdict, RecoveryVerdictReplicaUnobserved)
+	}
+	if got[0].ReplicaSync == nil || got[0].ReplicaSync.Observed {
+		t.Errorf("ReplicaSync = %+v, want a present, unobserved evidence record", got[0].ReplicaSync)
+	}
+	if !strings.Contains(got[0].Explanation, "could not check") {
+		t.Errorf("Explanation = %q, want it to distinguish 'could not check'", got[0].Explanation)
+	}
+	if !strings.Contains(got[0].Explanation, "deadline exceeded") {
+		t.Errorf("Explanation = %q, want it to cite the actual reason", got[0].Explanation)
+	}
+}
+
+func TestComputeOwnedResourceImpacts_HastdUnknownStatusIsUnobserved(t *testing.T) {
+	resources := []OwnedResourcePlacement{{ID: "vm-1", NodeID: "target", ReplicaNodeID: "replica-node", Kind: ResourceKindVM}}
+	got := ComputeOwnedResourceImpacts(resources, []ReplicaSyncObservation{replicaObservation("secondary", "unknown")}, "target")
+	if got[0].Verdict != RecoveryVerdictReplicaUnobserved {
+		t.Errorf("Verdict = %q, want %q - hastd's own 'unknown' is undeterminable, not a healthy or broken answer", got[0].Verdict, RecoveryVerdictReplicaUnobserved)
+	}
+}
+
+func TestComputeOwnedResourceImpacts_NoReplicaHasNoEvidence(t *testing.T) {
+	resources := []OwnedResourcePlacement{{ID: "vm-1", NodeID: "target", Kind: ResourceKindVM}}
+	got := ComputeOwnedResourceImpacts(resources, nil, "target")
+	if got[0].Verdict != RecoveryVerdictUnprotected {
+		t.Errorf("Verdict = %q, want %q", got[0].Verdict, RecoveryVerdictUnprotected)
+	}
+	if got[0].ReplicaSync != nil {
+		t.Errorf("ReplicaSync = %+v, want nil - an unprotected Cell has no replica to observe", got[0].ReplicaSync)
+	}
+}
+
+func TestComputeOwnedResourceImpacts_ObservationForOtherResourceIsNotBorrowed(t *testing.T) {
+	resources := []OwnedResourcePlacement{
+		{ID: "vm-1", NodeID: "target", ReplicaNodeID: "replica-node", Kind: ResourceKindVM},
+		{ID: "vm-2", NodeID: "target", ReplicaNodeID: "replica-node", Kind: ResourceKindVM},
+	}
+	// Only vm-1 was observed; vm-2 must fall back to unverified_replica
+	// rather than inheriting vm-1's healthy observation.
+	observations := []ReplicaSyncObservation{replicaObservation("secondary", "complete")}
+	got := ComputeOwnedResourceImpacts(resources, observations, "target")
+	byID := map[string]OwnedResourceImpact{}
+	for _, i := range got {
+		byID[i.ID] = i
+	}
+	if byID["vm-1"].Verdict != RecoveryVerdictReplicaInSync {
+		t.Errorf("vm-1 verdict = %q, want in-sync", byID["vm-1"].Verdict)
+	}
+	if byID["vm-2"].Verdict != RecoveryVerdictUnverifiedReplica {
+		t.Errorf("vm-2 verdict = %q, want unverified-replica - one resource's evidence is never another's", byID["vm-2"].Verdict)
+	}
+	if byID["vm-2"].ReplicaSync != nil {
+		t.Errorf("vm-2 ReplicaSync = %+v, want nil when nothing was observed for it", byID["vm-2"].ReplicaSync)
+	}
+}
+
+func TestReplicasOnlyEverBackedBySimulatedNodeOrOther(t *testing.T) {
+	// The regression guard ADR-0052 correction 5 promised: a resource
+	// never appears as both owned and replica-backed for one target.
+	resources := []OwnedResourcePlacement{
+		{ID: "vm-1", NodeID: "target", ReplicaNodeID: "other"},
+	}
+	report := SimulateNodeFailure(nil, resources, []ReplicaSyncObservation{replicaObservation("secondary", "complete")}, "target")
+	if len(report.OwnedResources) != 1 || report.OwnedResources[0].ID != "vm-1" {
+		t.Errorf("OwnedResources = %+v, want just vm-1", report.OwnedResources)
+	}
+	if len(report.ReplicaBackedResources) != 0 {
+		t.Errorf("ReplicaBackedResources = %+v, want none - vm-1's replica is 'other', not the target", report.ReplicaBackedResources)
+	}
+}
+
+// TestComputeOwnedResourceImpacts_SilenceIsNotConfirmedFailure is the
+// regression guard for the ADR-0121 review finding that an absent
+// status or an unrecognized role was being reported as
+// replica_out_of_sync - i.e. "checked and broken" for evidence that
+// actually says only "could not check".
+func TestComputeOwnedResourceImpacts_SilenceIsNotConfirmedFailure(t *testing.T) {
+	tests := []struct {
+		name   string
+		role   string
+		status string
+	}{
+		{"absent status with a real role", "primary", ""},
+		{"whitespace-only status with a real role", "secondary", "   "},
+		{"unrecognized role despite a clean status", "promoted", "complete"},
+		{"both role and status unrecognized", "", ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			resources := []OwnedResourcePlacement{{ID: "vm-1", NodeID: "target", ReplicaNodeID: "replica-node", Kind: ResourceKindVM}}
+			got := ComputeOwnedResourceImpacts(resources, []ReplicaSyncObservation{replicaObservation(tt.role, tt.status)}, "target")
+			if got[0].Verdict != RecoveryVerdictReplicaUnobserved {
+				t.Fatalf("Verdict = %q, want %q - missing evidence must never be reported as a confirmed outage", got[0].Verdict, RecoveryVerdictReplicaUnobserved)
+			}
+			if got[0].ReplicaSync == nil {
+				t.Error("ReplicaSync = nil, want the evidence that produced the verdict")
+			}
+		})
+	}
+}
+
+// TestComputeOwnedResourceImpacts_PositiveBadnessIsStillOutOfSync
+// guards the other direction: a real role with a real, non-complete
+// status is a positive statement of badness and must NOT be softened
+// into "unobserved".
+func TestComputeOwnedResourceImpacts_PositiveBadnessIsStillOutOfSync(t *testing.T) {
+	resources := []OwnedResourcePlacement{{ID: "vm-1", NodeID: "target", ReplicaNodeID: "replica-node", Kind: ResourceKindVM}}
+	got := ComputeOwnedResourceImpacts(resources, []ReplicaSyncObservation{replicaObservation("secondary", "degraded")}, "target")
+	if got[0].Verdict != RecoveryVerdictReplicaOutOfSync {
+		t.Errorf("Verdict = %q, want %q - a real role reporting degraded is confirmed badness", got[0].Verdict, RecoveryVerdictReplicaOutOfSync)
+	}
+}
+
+// TestComputeOwnedResourceImpacts_EvidenceIsKeyedByKindAndID guards the
+// cross-contamination hole: vm-1 and jail-1 are different HAST
+// resources, so neither may be shown the other's evidence.
+func TestComputeOwnedResourceImpacts_EvidenceIsKeyedByKindAndID(t *testing.T) {
+	resources := []OwnedResourcePlacement{
+		{ID: "1", Name: "web-01", NodeID: "target", ReplicaNodeID: "replica-node", Kind: ResourceKindVM},
+		{ID: "1", Name: "app-01", NodeID: "target", ReplicaNodeID: "replica-node", Kind: ResourceKindJail},
+	}
+	vmObservation := ReplicaSyncObservation{
+		ResourceID: "1", Kind: ResourceKindVM, ReplicaNodeID: "replica-node",
+		Observed: true, Role: "secondary", ResourceStatus: "complete",
+	}
+	got := ComputeOwnedResourceImpacts(resources, []ReplicaSyncObservation{vmObservation}, "target")
+	if len(got) != 2 {
+		t.Fatalf("len(got) = %d, want 2", len(got))
+	}
+	if got[0].Kind != ResourceKindVM || got[0].Verdict != RecoveryVerdictReplicaInSync {
+		t.Errorf("VM impact = %+v, want the VM's own in-sync evidence", got[0])
+	}
+	if got[1].Kind != ResourceKindJail || got[1].Verdict != RecoveryVerdictUnverifiedReplica {
+		t.Errorf("jail impact = %+v, want unverified_replica - it must not borrow the VM's observation", got[1])
 	}
 }

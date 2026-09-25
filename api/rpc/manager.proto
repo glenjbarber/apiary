@@ -2251,11 +2251,11 @@ enum ResourceKind {
   RESOURCE_KIND_JAIL = 2;
 }
 
-// RecoveryVerdict is deliberately limited to what raft configuration
-// data and node_id/replica_node_id placement alone can prove - see
-// ADR-0052 for why there is no "will recover cleanly" verdict in v1
-// (live HAST sync status has no RPC exposure anywhere in this
-// codebase).
+// RecoveryVerdict says what Apiary can prove about a Cell's recovery
+// path. Placement-only verdicts come from raft configuration data and
+// node_id/replica_node_id alone (ADR-0052); the three replica_* verdicts
+// added by ADR-0121 additionally require a direct, live read of the
+// configured replica's own HAST status.
 enum RecoveryVerdict {
   RECOVERY_VERDICT_UNSPECIFIED = 0;
 
@@ -2266,9 +2266,48 @@ enum RecoveryVerdict {
   RECOVERY_VERDICT_UNPROTECTED = 1;
 
   // RECOVERY_VERDICT_UNVERIFIED_REPLICA: replica_node_id is set, but
-  // this RPC does not query live HAST sync status - the replica may or
+  // no live query was even attempted (e.g. this node has no peer
+  // forwarding configured, or the replica is not a current raft
+  // member and therefore has no address to dial). The replica may or
   // may not actually be caught up.
   RECOVERY_VERDICT_UNVERIFIED_REPLICA = 2;
+
+  // RECOVERY_VERDICT_REPLICA_IN_SYNC: the replica answered and its own
+  // hastd reported a real role (primary/secondary) with status
+  // "complete". Strongest available evidence - still NOT a guarantee
+  // that the replica stays reachable or that the Cell can be
+  // recreated from it.
+  RECOVERY_VERDICT_REPLICA_IN_SYNC = 3;
+
+  // RECOVERY_VERDICT_REPLICA_OUT_OF_SYNC: the replica answered and is
+  // confirmed NOT usable as-is (role "init", or a real role whose
+  // status is not "complete", e.g. "degraded").
+  RECOVERY_VERDICT_REPLICA_OUT_OF_SYNC = 4;
+
+  // RECOVERY_VERDICT_REPLICA_UNOBSERVED: the replica was queried but
+  // could not be read (RPC error, or hastd itself reported status
+  // "unknown"). This is "could not check" and is never folded into
+  // either in-sync or out-of-sync.
+  RECOVERY_VERDICT_REPLICA_UNOBSERVED = 5;
+}
+
+// ReplicaSyncEvidence is the verbatim, node-local HAST observation a
+// recovery verdict was derived from, so a consumer can see the fact
+// itself and not only Apiary's conclusion drawn from it. Populated only
+// when replica_node_id is set and a direct query was actually
+// attempted; absent otherwise, in which case the verdict is a
+// placement-only one and carries no evidence.
+message ReplicaSyncEvidence {
+  string node_id = 1;
+
+  // observed is true only when the replica answered with its own
+  // hastctl view. When false, detail carries the reason and role/
+  // resource_status are meaningless.
+  bool observed = 2;
+  string role = 3;
+  string resource_status = 4;
+  string replication = 5;
+  string detail = 6;
 }
 
 message OwnedResourceImpact {
@@ -2278,6 +2317,12 @@ message OwnedResourceImpact {
   string replica_node_id = 4;
   RecoveryVerdict verdict = 5;
   string explanation = 6;
+
+  // replica_sync is the live evidence behind verdict, set only when a
+  // replica is configured and a direct query to it was attempted
+  // (ADR-0121). An in-sync/out-of-sync/unobserved verdict always has
+  // it set; unprotected and unverified_replica never do.
+  ReplicaSyncEvidence replica_sync = 7;
 }
 
 // ReplicaBackedImpact is a resource actually owned by a DIFFERENT node,
