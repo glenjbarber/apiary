@@ -490,6 +490,12 @@ type nodeConfigStore interface {
 	Save(nodeconfig.Config) error
 }
 
+type nodeConfigHistoryStore interface {
+	History() ([]nodeconfig.ConfigChange, error)
+	SaveWithHistory(nodeconfig.Config, nodeconfig.ChangeOrigin, string, string) error
+	RecordCurrent(string, nodeconfig.ChangeOrigin, string, string) error
+}
+
 // frontendConfigStore/restshimdConfigStore/raftdConfigStore (ADR-0102)
 // are the subset of *frontendconfig.Manager/*restshimdconfig.Manager/
 // *raftdconfig.Manager the new Get*Config/Update*Config handlers need,
@@ -2333,6 +2339,19 @@ func (s *Server) GetNodeConfig(_ context.Context, _ *rpcpb.GetNodeConfigRequest)
 		OriginCaDirectory:               cfg.OriginCADirectory,
 		OriginCaRenewalCheckInterval:    durationString(cfg.OriginCARenewalCheckInterval),
 	}
+	if historyStore, ok := s.nodeConfig.(nodeConfigHistoryStore); ok {
+		changes, err := historyStore.History()
+		if err != nil {
+			return &rpcpb.GetNodeConfigResponse{Error: "reading configuration history: " + err.Error()}, nil
+		}
+		for _, change := range changes {
+			resp.ConfigChanges = append(resp.ConfigChanges, &rpcpb.ConfigChange{
+				Field: change.Field, Previous: change.Previous, Current: change.Current,
+				Origin: string(change.Origin), Rationale: change.Rationale,
+				Evidence: change.Evidence, ChangedAtUnix: change.ChangedAt.Unix(), Attested: change.Attested,
+			})
+		}
+	}
 	if s.listNetworkInterfaces != nil {
 		if interfaces, err := s.listNetworkInterfaces(); err == nil {
 			resp.AvailableInterfaces = make([]*rpcpb.NetworkInterface, 0, len(interfaces))
@@ -2376,7 +2395,21 @@ func (s *Server) UpdateManagerdBindAddress(_ context.Context, req *rpcpb.UpdateM
 		return &rpcpb.UpdateManagerdBindAddressResponse{Error: err.Error()}, nil
 	}
 	current.RPCAddr = addr
-	if err := s.nodeConfig.Save(current); err != nil {
+	origin := nodeconfig.ChangeOrigin(req.GetChangeOrigin())
+	if origin == "" {
+		origin = nodeconfig.OriginOperator
+	}
+	if err := nodeconfig.ValidateOrigin(origin); err != nil {
+		return &rpcpb.UpdateManagerdBindAddressResponse{Error: err.Error()}, nil
+	}
+	if len(req.GetChangeRationale()) > 2048 || len(req.GetChangeEvidence()) > 2048 {
+		return &rpcpb.UpdateManagerdBindAddressResponse{Error: "change rationale and evidence must be at most 2048 characters"}, nil
+	}
+	if historyStore, ok := s.nodeConfig.(nodeConfigHistoryStore); ok {
+		if err := historyStore.SaveWithHistory(current, origin, req.GetChangeRationale(), req.GetChangeEvidence()); err != nil {
+			return &rpcpb.UpdateManagerdBindAddressResponse{Error: err.Error()}, nil
+		}
+	} else if err := s.nodeConfig.Save(current); err != nil {
 		return &rpcpb.UpdateManagerdBindAddressResponse{Error: err.Error()}, nil
 	}
 	return &rpcpb.UpdateManagerdBindAddressResponse{RestartRequired: true}, nil
@@ -2570,7 +2603,31 @@ func (s *Server) UpdateNodeConfig(_ context.Context, req *rpcpb.UpdateNodeConfig
 	if cfg.PAMService != "" && (cfg.TLSCert == "" || cfg.TLSKey == "") {
 		return &rpcpb.UpdateNodeConfigResponse{Error: "pam_service requires tls_cert/tls_key to also be set - a login password must not travel to this RPC over a plaintext channel"}, nil
 	}
-	if err := s.nodeConfig.Save(cfg); err != nil {
+	origin := nodeconfig.ChangeOrigin(req.GetChangeOrigin())
+	if origin == "" {
+		origin = nodeconfig.OriginOperator
+	}
+	if err := nodeconfig.ValidateOrigin(origin); err != nil {
+		return &rpcpb.UpdateNodeConfigResponse{Error: err.Error()}, nil
+	}
+	if len(req.GetChangeRationale()) > 2048 || len(req.GetChangeEvidence()) > 2048 {
+		return &rpcpb.UpdateNodeConfigResponse{Error: "change rationale and evidence must be at most 2048 characters"}, nil
+	}
+	if req.GetAnnotateField() != "" {
+		historyStore, ok := s.nodeConfig.(nodeConfigHistoryStore)
+		if !ok {
+			return &rpcpb.UpdateNodeConfigResponse{Error: "this node does not support configuration history attestations"}, nil
+		}
+		if err := historyStore.RecordCurrent(req.GetAnnotateField(), origin, req.GetChangeRationale(), req.GetChangeEvidence()); err != nil {
+			return &rpcpb.UpdateNodeConfigResponse{Error: err.Error()}, nil
+		}
+		return &rpcpb.UpdateNodeConfigResponse{}, nil
+	}
+	if historyStore, ok := s.nodeConfig.(nodeConfigHistoryStore); ok {
+		if err := historyStore.SaveWithHistory(cfg, origin, req.GetChangeRationale(), req.GetChangeEvidence()); err != nil {
+			return &rpcpb.UpdateNodeConfigResponse{Error: err.Error()}, nil
+		}
+	} else if err := s.nodeConfig.Save(cfg); err != nil {
 		return &rpcpb.UpdateNodeConfigResponse{Error: err.Error()}, nil
 	}
 	return &rpcpb.UpdateNodeConfigResponse{}, nil

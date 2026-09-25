@@ -2,6 +2,7 @@ package manager
 
 import (
 	"context"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -15,6 +16,50 @@ import (
 	"github.com/glenjbarber/apiary/internal/raftdconfig"
 	"github.com/glenjbarber/apiary/internal/restshimdconfig"
 )
+
+func TestServer_UpdateNodeConfigRecordsLocalProvenance(t *testing.T) {
+	store := &nodeconfig.Manager{Path: filepath.Join(t.TempDir(), "managerd.json")}
+	s := NewServer(nil, "node-a", nil, nil, nil, nil, nil, "", nil, store, nil, 0, nil)
+	resp, err := s.UpdateNodeConfig(context.Background(), &rpcpb.UpdateNodeConfigRequest{
+		Uplink: "em0", ChangeOrigin: "incident", ChangeRationale: "Restore service after switch replacement", ChangeEvidence: "INC-42",
+	})
+	if err != nil || resp.GetError() != "" {
+		t.Fatalf("UpdateNodeConfig() = (%+v, %v)", resp, err)
+	}
+	got, err := s.GetNodeConfig(context.Background(), &rpcpb.GetNodeConfigRequest{})
+	if err != nil || got.GetError() != "" {
+		t.Fatalf("GetNodeConfig() = (%+v, %v)", got, err)
+	}
+	if got.GetUplink() != "em0" || len(got.GetConfigChanges()) != 1 {
+		t.Fatalf("config/history = uplink %q, changes %+v", got.GetUplink(), got.GetConfigChanges())
+	}
+	change := got.GetConfigChanges()[0]
+	if change.GetField() != "uplink" || change.GetOrigin() != "incident" || change.GetRationale() != "Restore service after switch replacement" || change.GetEvidence() != "INC-42" {
+		t.Fatalf("recorded change = %+v", change)
+	}
+}
+
+func TestServer_UpdateNodeConfigCanAttestExistingValueWithoutChangingIt(t *testing.T) {
+	store := &nodeconfig.Manager{Path: filepath.Join(t.TempDir(), "managerd.json")}
+	if err := store.Save(nodeconfig.Config{BhyveBridge: "bridge0"}); err != nil {
+		t.Fatal(err)
+	}
+	s := NewServer(nil, "node-a", nil, nil, nil, nil, nil, "", nil, store, nil, 0, nil)
+	resp, err := s.UpdateNodeConfig(context.Background(), &rpcpb.UpdateNodeConfigRequest{
+		AnnotateField: "bhyve_bridge", ChangeOrigin: "migration", ChangeRationale: "Preserve the previous host bridge choice", ChangeEvidence: "MIG-9",
+	})
+	if err != nil || resp.GetError() != "" {
+		t.Fatalf("UpdateNodeConfig(attestation) = (%+v, %v)", resp, err)
+	}
+	got, err := store.Load()
+	if err != nil || got.BhyveBridge != "bridge0" {
+		t.Fatalf("saved setting = %q, %v; want unchanged bridge0", got.BhyveBridge, err)
+	}
+	changes, err := store.History()
+	if err != nil || len(changes) != 1 || !changes[0].Attested || changes[0].Origin != nodeconfig.OriginMigration {
+		t.Fatalf("history = %+v, %v; want one marked migration attestation", changes, err)
+	}
+}
 
 // waitForRestart polls fake's restartName for up to a second -
 // scheduleServiceRestart deliberately restarts on a delayed goroutine
@@ -55,6 +100,34 @@ func TestServer_UpdateManagerdBindAddress_PersistsLocalAddressOnly(t *testing.T)
 	resp, err = s.UpdateManagerdBindAddress(context.Background(), &rpcpb.UpdateManagerdBindAddressRequest{RpcAddr: "10.90.0.99:17700"})
 	if err != nil || !strings.Contains(resp.GetError(), "not assigned") {
 		t.Fatalf("remote address = (%+v, %v), want local-address rejection", resp, err)
+	}
+}
+
+func TestServer_UpdateManagerdBindAddressRecordsProvenance(t *testing.T) {
+	store := &nodeconfig.Manager{Path: filepath.Join(t.TempDir(), "managerd.json")}
+	if err := store.Save(nodeconfig.Config{RPCAddr: "127.0.0.1:17700"}); err != nil {
+		t.Fatal(err)
+	}
+	s := NewServer(nil, "node-a", nil, nil, nil, nil, nil, "", nil, store, nil, 0, nil)
+	s.SetNetworkInterfaceLister(func() ([]netif.Interface, error) {
+		return []netif.Interface{{Name: "em0", Up: true, Addresses: []string{"10.90.0.12/24"}}}, nil
+	})
+	resp, err := s.UpdateManagerdBindAddress(context.Background(), &rpcpb.UpdateManagerdBindAddressRequest{
+		RpcAddr: "10.90.0.12:17700", ChangeOrigin: "migration", ChangeRationale: "Move managerd onto the Colony network", ChangeEvidence: "MIG-7",
+	})
+	if err != nil || resp.GetError() != "" {
+		t.Fatalf("UpdateManagerdBindAddress() = (%+v, %v)", resp, err)
+	}
+	config, err := s.GetNodeConfig(context.Background(), &rpcpb.GetNodeConfigRequest{})
+	if err != nil || config.GetError() != "" {
+		t.Fatalf("GetNodeConfig() = (%+v, %v)", config, err)
+	}
+	if len(config.GetConfigChanges()) != 1 {
+		t.Fatalf("config_changes = %+v, want one event", config.GetConfigChanges())
+	}
+	change := config.GetConfigChanges()[0]
+	if change.GetField() != "rpc_addr" || change.GetOrigin() != "migration" || change.GetRationale() != "Move managerd onto the Colony network" {
+		t.Fatalf("config change = %+v", change)
 	}
 }
 

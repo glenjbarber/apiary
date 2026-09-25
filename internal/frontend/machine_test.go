@@ -66,7 +66,7 @@ func TestServer_UpdateManagerdBindAddress_ForwardsEndpoint(t *testing.T) {
 	}
 	s := newTestServer(t, client)
 
-	form := url.Values{"rpc_host": {"10.90.0.12"}}
+	form := url.Values{"rpc_host": {"10.90.0.12"}, "change_origin": {"migration"}, "change_rationale": {"Move the listener to the Colony network"}, "change_evidence": {"change-123"}}
 	req := httptest.NewRequest(http.MethodPost, "/machine/managerd-bind", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	rec := httptest.NewRecorder()
@@ -77,6 +77,9 @@ func TestServer_UpdateManagerdBindAddress_ForwardsEndpoint(t *testing.T) {
 	// the form could influence.
 	if got := client.lastUpdateManagerdBindReq.GetRpcAddr(); got != "10.90.0.12:17700" {
 		t.Errorf("RPCAddr = %q, want the submitted host joined with the fixed managerd port 10.90.0.12:17700", got)
+	}
+	if client.lastUpdateManagerdBindReq.GetChangeOrigin() != "migration" || client.lastUpdateManagerdBindReq.GetChangeRationale() != "Move the listener to the Colony network" || client.lastUpdateManagerdBindReq.GetChangeEvidence() != "change-123" {
+		t.Errorf("endpoint provenance was not forwarded: %+v", client.lastUpdateManagerdBindReq)
 	}
 	if !strings.Contains(rec.Body.String(), "Restart apiary_managerd from Operations") {
 		t.Errorf("response missing explicit restart requirement, got: %s", rec.Body.String())
@@ -211,7 +214,7 @@ func TestServer_UpdateNodeConfig_ForwardsFormValues(t *testing.T) {
 	client := &fakeClient{updateNodeConfigResp: &rpcpb.UpdateNodeConfigResponse{}}
 	s := newTestServer(t, client)
 
-	form := url.Values{"uplink": {"em0"}, "nat_uplink": {"em0"}, "dhcp_dns_server": {"10.62.0.1"}, "jail_enabled": {"enabled"}}
+	form := url.Values{"uplink": {"em0"}, "nat_uplink": {"em0"}, "dhcp_dns_server": {"10.62.0.1"}, "jail_enabled": {"enabled"}, "change_origin": {"incident"}, "change_rationale": {"Restore after switch replacement"}, "change_evidence": {"INC-42"}}
 	req := httptest.NewRequest(http.MethodPost, "/machine/uplink", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	rec := httptest.NewRecorder()
@@ -222,6 +225,51 @@ func TestServer_UpdateNodeConfig_ForwardsFormValues(t *testing.T) {
 	}
 	if client.lastUpdateNodeConfigReq.GetUplink() != "em0" || client.lastUpdateNodeConfigReq.GetNatUplink() != "em0" || client.lastUpdateNodeConfigReq.GetDhcpDnsServer() != "10.62.0.1" || client.lastUpdateNodeConfigReq.JailEnabled == nil || !client.lastUpdateNodeConfigReq.GetJailEnabled() {
 		t.Errorf("forwarded request = %+v, want Uplink=em0 NatUplink=em0 DhcpDnsServer=10.62.0.1 JailEnabled=true", client.lastUpdateNodeConfigReq)
+	}
+	if client.lastUpdateNodeConfigReq.GetChangeOrigin() != "incident" || client.lastUpdateNodeConfigReq.GetChangeRationale() != "Restore after switch replacement" || client.lastUpdateNodeConfigReq.GetChangeEvidence() != "INC-42" {
+		t.Errorf("provenance = %q/%q/%q, want incident rationale and evidence forwarded", client.lastUpdateNodeConfigReq.GetChangeOrigin(), client.lastUpdateNodeConfigReq.GetChangeRationale(), client.lastUpdateNodeConfigReq.GetChangeEvidence())
+	}
+}
+
+func TestServer_ConfigProvenancePageShowsRecordedHistoryAndDependencies(t *testing.T) {
+	client := &fakeClient{
+		statusResp: &rpcpb.StatusResponse{ManagerNodeId: "node-a"},
+		getNodeConfigResp: &rpcpb.GetNodeConfigResponse{BhyveBridge: "bridge0", ConfigChanges: []*rpcpb.ConfigChange{{
+			Field: "bhyve_bridge", Previous: "", Current: `"bridge0"`, Origin: "operator", Rationale: "Keep flat guests on the isolated bridge", Evidence: "ADR-0101", ChangedAtUnix: time.Now().Add(-24 * time.Hour).Unix(),
+		}}},
+		listResp: &rpcpb.ListVMsResponse{Vms: []*rpcpb.VMDefinition{{Id: "flat-vm", NodeId: "node-a"}, {Id: "net-vm", NodeId: "node-a", NetworkId: "net-1"}}},
+	}
+	s := newTestServer(t, client)
+	req := httptest.NewRequest(http.MethodGet, "/machine/why-is-this-set?field=bhyve_bridge", nil)
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body=%s", rec.Code, rec.Body.String())
+	}
+	body := rec.Body.String()
+	for _, want := range []string{"Saved value:", "bridge0", "operator", "Keep flat guests on the isolated bridge", "ADR-0101", "flat-vm", "Add a retrospective explanation", "does not change the setting"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("provenance page missing %q: %s", want, body)
+		}
+	}
+	if strings.Contains(body, "net-vm (default flat bridge)") {
+		t.Errorf("network-attached VM should not be listed as a flat-bridge dependent: %s", body)
+	}
+}
+
+func TestServer_ConfigProvenanceAttestationIsExplicitAndRetrospective(t *testing.T) {
+	client := &fakeClient{updateNodeConfigResp: &rpcpb.UpdateNodeConfigResponse{}}
+	s := newTestServer(t, client)
+	form := url.Values{"field": {"bhyve_bridge"}, "change_origin": {"operator"}, "change_rationale": {"Keep legacy guests isolated"}, "change_evidence": {"OPS-8"}}
+	req := httptest.NewRequest(http.MethodPost, "/machine/why-is-this-set", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, req)
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("status = %d, want 303; body=%s", rec.Code, rec.Body.String())
+	}
+	if client.lastUpdateNodeConfigReq.GetAnnotateField() != "bhyve_bridge" || client.lastUpdateNodeConfigReq.GetChangeRationale() != "Keep legacy guests isolated" || client.lastUpdateNodeConfigReq.GetChangeEvidence() != "OPS-8" {
+		t.Fatalf("attestation request = %+v", client.lastUpdateNodeConfigReq)
 	}
 }
 

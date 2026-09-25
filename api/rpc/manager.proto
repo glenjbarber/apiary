@@ -1448,12 +1448,31 @@ message GetNodeConfigResponse {
   // returned so the Machine page can show every local service endpoint;
   // UpdateNodeConfig never changes it.
   string rpc_addr = 47;
+
+  // config_changes is the local, append-only provenance journal for
+  // managerd settings changed through UpdateNodeConfig. Existing values
+  // without an entry have unknown origin; the server never infers history.
+  repeated ConfigChange config_changes = 48;
+}
+
+message ConfigChange {
+  string field = 1;
+  string previous = 2;
+  string current = 3;
+  string origin = 4;
+  string rationale = 5;
+  string evidence = 6;
+  int64 changed_at_unix = 7;
+  bool attested = 8;
 }
 
 message UpdateManagerdBindAddressRequest {
   // rpc_addr must be a numeric address currently assigned to this Comb,
   // or an explicit wildcard/loopback address, followed by a valid port.
   string rpc_addr = 1;
+  string change_origin = 2;
+  string change_rationale = 3;
+  string change_evidence = 4;
 }
 
 message UpdateManagerdBindAddressResponse {
@@ -1594,6 +1613,17 @@ message UpdateNodeConfigRequest {
   // origin_ca_renewal_check_interval (ADR-0100) - see
   // GetNodeConfigResponse's own doc comment for its full semantics.
   string origin_ca_renewal_check_interval = 46;
+
+  // Provenance metadata applies to every changed field in this request.
+  // Valid values are default, operator, migration, incident, automation.
+  // Empty origin is treated as operator for backward compatibility.
+  string change_origin = 47;
+  string change_rationale = 48;
+  string change_evidence = 49;
+  // annotate_field records a retrospective explanation for the current
+  // value without changing configuration. The resulting history entry is
+  // explicitly marked as an operator attestation, not reconstructed history.
+  string annotate_field = 50;
 }
 
 message UpdateNodeConfigResponse {

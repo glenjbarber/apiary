@@ -57,6 +57,8 @@ type pageData struct {
 	// highlight it. Empty on the legacy full /machine page.
 	ActiveMachineSection string
 
+	ConfigProvenance configProvenancePageView
+
 	// Nodes lists known raft cluster member IDs, for the create-VM form's
 	// node picker. Only populated for the New VM page.
 	Nodes          []string
@@ -894,6 +896,8 @@ func (s *Server) routes() {
 	// viewer via .CanAdmin, the same defense-in-depth pattern the Users
 	// page already uses for its per-row password action.
 	s.mux.HandleFunc("GET /machine", s.requireRole(manager.RoleOperator, s.handleMachinePage))
+	s.mux.HandleFunc("GET /machine/why-is-this-set", s.requireRole(manager.RoleOperator, s.handleConfigProvenancePage))
+	s.mux.HandleFunc("POST /machine/why-is-this-set", s.requireRole(manager.RoleAdmin, s.handleConfigProvenanceAttest))
 	// Focused per-subsystem Machine pages (SHARED.md's 2026-09-17 12:34
 	// EDT TODO), additive alongside the full /machine page above - see
 	// machinePageData's doc comment in machine.go for why /machine
