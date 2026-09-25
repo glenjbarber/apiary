@@ -108,6 +108,28 @@ not name it.
   differ.
 - `ClusterHealth` itself is a multi-source sequential read, not an
   atomic snapshot. It is documented as such on the RPC.
+- **Each peer probe gets its own bounded context.** `HostStats` and
+  `Status` are two independent probes, so they are two independent
+  `reachabilityCheckTimeout` budgets. Sharing one budget across the two
+  sequential calls meant a slow-but-alive peer that spent all of it on
+  `HostStats` handed `Status` an already-expired context, so its
+  heartbeat evidence was lost to a timing accident rather than to
+  anything true about that peer - and the resulting verdict could differ
+  from a peer that failed fast. Distinguishing "could not check" from
+  "checked and not fine" is this feature's entire purpose; wall-clock
+  timing must not be allowed to decide which of the two a consumer sees.
+- **A failed probe states its reason.** A non-healthy verdict with no
+  stated cause is not actionable, so when a probe could not be
+  completed its reason is attached as a raw `peer_probe` observation
+  alongside the verdict, and returned separately for the caller's own
+  logging. This covers the cases where no dial was even attempted
+  (no peer forwarding configured, or a member with no address), not
+  just RPC errors.
+- **`ClusterNodeHealth.dialed` is true for the answering node.** The
+  field documents whether reachability was "established trivially
+  because it answered the request itself", so the node answering the
+  request reports `dialed: true` even though nothing was dialed. A
+  consumer must not read the field as "a socket was opened".
 - **Known sharp edge, not fixed here:** `status` is a string, so a
   consumer reading a `ClusterHealthResponse` from a newer managerd can
   see a sixth state it does not recognize. The correct handling is to
@@ -126,4 +148,8 @@ not name it.
   never-healthy-without-observation rules are covered against
   hand-built inputs. The live multi-node fan-out path is covered only by
   the existing single-node raft harness, not by a real two-node
-  cluster; it has not been exercised against running Combs.
+  cluster; it has not been exercised against running Combs. The
+  per-probe context budget IS covered, by a fake peer that is slow
+  rather than absent: it fails if `Status` is handed a context that
+  `HostStats` already exhausted, which is the exact failure the shared
+  budget produced.

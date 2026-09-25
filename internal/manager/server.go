@@ -975,8 +975,9 @@ func (s *Server) ClusterHealth(ctx context.Context, _ *rpcpb.ClusterHealthReques
 	}
 
 	type nodeResult struct {
-		verdict health.NodeHealth
-		dialed  bool
+		verdict  health.NodeHealth
+		dialed   bool
+		probeErr string
 	}
 	results := make([]nodeResult, len(nodeIDs))
 	var wg sync.WaitGroup
@@ -984,8 +985,8 @@ func (s *Server) ClusterHealth(ctx context.Context, _ *rpcpb.ClusterHealthReques
 		wg.Add(1)
 		go func(i int, nodeID string) {
 			defer wg.Done()
-			dialed, verdict := s.clusterNodeHealth(ctx, nodeID, s.nodeID, anchor, membershipObserved, memberByNode, now)
-			results[i] = nodeResult{verdict: verdict, dialed: dialed}
+			dialed, verdict, probeErr := s.clusterNodeHealth(ctx, nodeID, s.nodeID, anchor, membershipObserved, memberByNode, now)
+			results[i] = nodeResult{verdict: verdict, dialed: dialed, probeErr: probeErr}
 		}(i, nodeID)
 	}
 	wg.Wait()
@@ -1015,7 +1016,7 @@ func (s *Server) clusterNodeHealth(
 	membershipObserved bool,
 	memberByNode map[string]*rpcpb.RaftMember,
 	now time.Time,
-) (bool, health.NodeHealth) {
+) (bool, health.NodeHealth, string) {
 	inputs := health.Inputs{
 		NodeID:                   nodeID,
 		IsLocal:                  nodeID == localNodeID,
@@ -1031,19 +1032,39 @@ func (s *Server) clusterNodeHealth(
 
 	var stats *rpcpb.HostStatsResponse
 	dialed := false
+	var probeErr string
 	if inputs.IsLocal {
 		// No dial is needed or wanted: this node is answering now, and
-		// self-dialing would be a pointless extra hop.
-		stats, _ = s.HostStats(ctx, &rpcpb.HostStatsRequest{})
+		// self-dialing would be a pointless extra hop. It is still
+		// "dialed" in the sense ClusterNodeHealth.dialed documents -
+		// its reachability is established trivially, by answering.
+		dialed = true
+		var statsErr error
+		stats, statsErr = s.HostStats(ctx, &rpcpb.HostStatsRequest{})
+		if statsErr != nil {
+			probeErr = "this node's own HostStats could not be read: " + statsErr.Error()
+		}
 	} else if s.peers != nil {
 		if member, known := memberByNode[nodeID]; known && member.GetAddress() != "" {
 			addr := s.peerManagerdAddr(member.GetAddress())
 			dialed = true
 			inputs.PeerDialAttempted = true
 
-			checkCtx, cancel := context.WithTimeout(ctx, reachabilityCheckTimeout)
-			peerStats, statsErr := s.peers.HostStats(checkCtx, addr)
-			if statsErr == nil {
+			// Each probe gets its OWN bounded context. Sharing one
+			// three-second budget across two sequential calls meant a
+			// slow-but-alive peer that spent all of it on HostStats
+			// handed Status an already-expired context, so the
+			// heartbeat evidence was lost to a timing accident rather
+			// than to a real fact about that peer.
+			statsCtx, statsCancel := context.WithTimeout(ctx, reachabilityCheckTimeout)
+			peerStats, statsErr := s.peers.HostStats(statsCtx, addr)
+			statsCancel()
+			switch {
+			case statsErr != nil:
+				probeErr = "host stats could not be read from this node: " + statsErr.Error()
+			case peerStats == nil:
+				probeErr = "host stats could not be read from this node: the peer returned no response"
+			default:
 				inputs.PeerDialSucceeded = true
 				stats = peerStats
 			}
@@ -1051,7 +1072,14 @@ func (s *Server) clusterNodeHealth(
 			// self-report and log position - deliberately NOT inferred
 			// from whether HostStats answered, which says nothing at
 			// all about that peer's own raftd.
-			if peerStatus, statusErr := s.peers.Status(checkCtx, addr); statusErr == nil {
+			statusCtx, statusCancel := context.WithTimeout(ctx, reachabilityCheckTimeout)
+			peerStatus, statusErr := s.peers.Status(statusCtx, addr)
+			statusCancel()
+			if statusErr != nil {
+				if probeErr == "" {
+					probeErr = "raft status could not be read from this node: " + statusErr.Error()
+				}
+			} else {
 				inputs.HeartbeatObserved = true
 				inputs.HeartbeatOK = peerStatus.GetRaftReachable()
 				if peerStatus.GetRaftReachable() {
@@ -1061,8 +1089,16 @@ func (s *Server) clusterNodeHealth(
 					inputs.IndicesObservedAt = now
 				}
 			}
-			cancel()
+		} else {
+			probeErr = "this node could not be dialed: "
+			if !membershipObserved {
+				probeErr += "it is absent from a raft membership that could not be read"
+			} else {
+				probeErr += "it is in the raft membership but has no address to dial"
+			}
 		}
+	} else {
+		probeErr = "this node could not be dialed - the answering node has no peer forwarding configured"
 	}
 
 	if inputs.IsLocal {
@@ -1090,7 +1126,16 @@ func (s *Server) clusterNodeHealth(
 		}
 	}
 
-	return dialed, health.ComputeNodeHealth(health.SignalsFrom(inputs), now)
+	verdict := health.ComputeNodeHealth(health.SignalsFrom(inputs), now)
+	// A verdict with no stated reason is the one thing an operator
+	// cannot act on, so a failed probe is surfaced as a raw
+	// observation alongside the verdict rather than silently dropped.
+	if probeErr != "" {
+		verdict.Observations = append(verdict.Observations, health.Observation{
+			Source: "peer_probe", ObservedAt: now, Value: "failed", Detail: probeErr,
+		})
+	}
+	return dialed, verdict, probeErr
 }
 
 // toRPCHealthObservations converts computed observations for the wire.
