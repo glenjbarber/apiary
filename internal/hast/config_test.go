@@ -97,6 +97,9 @@ func TestParseStatus_Primary(t *testing.T) {
 	if s.ResourceStatus != "degraded" {
 		t.Errorf("ResourceStatus = %q, want %q", s.ResourceStatus, "degraded")
 	}
+	if s.Replication != "memsync" || s.ExtentSize != "2097152 (2.0MB)" || s.Dirty != "0 (0B)" {
+		t.Errorf("replication/extent/dirty = %q/%q/%q, want memsync/2097152 (2.0MB)/0 (0B)", s.Replication, s.ExtentSize, s.Dirty)
+	}
 }
 
 func TestParseStatus_Secondary(t *testing.T) {
@@ -120,5 +123,8 @@ func TestParseStatus_Secondary(t *testing.T) {
 	}
 	if s.ResourceStatus != "" {
 		t.Errorf("ResourceStatus = %q, want empty for a secondary", s.ResourceStatus)
+	}
+	if s.Replication != "memsync" || s.Dirty != "0 (0B)" {
+		t.Errorf("replication/dirty = %q/%q, want memsync/0 (0B)", s.Replication, s.Dirty)
 	}
 }

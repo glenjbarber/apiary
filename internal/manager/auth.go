@@ -62,15 +62,16 @@ func (have Role) Satisfies(want Role) bool {
 // ship unintentionally under-protected.
 var requiredRole = map[string]Role{
 	// Viewer: read-only.
-	"/apiary.rpc.v1.ManagerService/GetVM":          RoleViewer,
-	"/apiary.rpc.v1.ManagerService/ListVMs":        RoleViewer,
-	"/apiary.rpc.v1.ManagerService/GetJail":        RoleViewer,
-	"/apiary.rpc.v1.ManagerService/ListJails":      RoleViewer,
-	"/apiary.rpc.v1.ManagerService/ListISOs":       RoleViewer,
-	"/apiary.rpc.v1.ManagerService/ListNetworks":   RoleViewer,
-	"/apiary.rpc.v1.ManagerService/HostStats":      RoleViewer,
-	"/apiary.rpc.v1.ManagerService/GetVMSerialLog": RoleViewer,
-	"/apiary.rpc.v1.ManagerService/GetNodeConfig":  RoleViewer,
+	"/apiary.rpc.v1.ManagerService/GetVM":                      RoleViewer,
+	"/apiary.rpc.v1.ManagerService/ListVMs":                    RoleViewer,
+	"/apiary.rpc.v1.ManagerService/GetJail":                    RoleViewer,
+	"/apiary.rpc.v1.ManagerService/ListJails":                  RoleViewer,
+	"/apiary.rpc.v1.ManagerService/ListISOs":                   RoleViewer,
+	"/apiary.rpc.v1.ManagerService/ListNetworks":               RoleViewer,
+	"/apiary.rpc.v1.ManagerService/HostStats":                  RoleViewer,
+	"/apiary.rpc.v1.ManagerService/GetLocalHASTResourceStatus": RoleViewer,
+	"/apiary.rpc.v1.ManagerService/GetVMSerialLog":             RoleViewer,
+	"/apiary.rpc.v1.ManagerService/GetNodeConfig":              RoleViewer,
 
 	// GetFrontendConfig/GetRestshimdConfig/GetRaftdConfig (ADR-0102):
 	// read-only reports of a sibling daemon's own config, secrets

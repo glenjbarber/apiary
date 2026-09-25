@@ -42,8 +42,9 @@ type Authenticator interface {
 // an action failed, so the UI never shows a stale table alongside an
 // error.
 type pageData struct {
-	Error string
-	VMs   []vmView
+	Error            string
+	VMs              []vmView
+	ReplicaFreshness replicaFreshnessView
 
 	// ActivePage names the current page ("vms", "images", or "new_vm"),
 	// for the shared nav partial to bold/underline the matching link.
@@ -101,6 +102,10 @@ type pageData struct {
 	// ClusterNodes is the basic per-node summary row list for the
 	// default landing page ("/").
 	ClusterNodes []clusterNodeView
+
+	// MaintenanceWaves contains a read-only, one-Comb-at-a-time rehearsal
+	// based on the same node-failure simulation shown on /simulate.
+	MaintenanceWaves []maintenanceWaveView
 
 	// EvidenceNode is the selected node's evidence-backed summary for the
 	// dedicated per-node evidence page ("/host/{id}/evidence").
@@ -826,6 +831,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /jails/panel", s.handleJailPanel)
 	s.mux.HandleFunc("GET /jails/{id}", s.handleJailPage)
 	s.mux.HandleFunc("GET /simulate", s.handleSimulatePage)
+	s.mux.HandleFunc("GET /maintenance", s.handleMaintenancePage)
 	s.mux.HandleFunc("GET /assumptions", s.handleAssumptionsPage)
 	s.mux.HandleFunc("POST /assumptions/purge-stale", s.requireRole(manager.RoleOperator, s.handlePurgeStaleAssumptionResults))
 	s.mux.HandleFunc("GET /assumption-register", s.handleAssumptionRegisterPage)
@@ -1256,7 +1262,8 @@ func (s *Server) renderVMPage(w http.ResponseWriter, r *http.Request, id, cloudf
 	s.render(w, "vm_page", s.withAuthFields(r, pageData{
 		VM: vm, VMCloudflareFormError: cloudflareErr, VMFirewallFormError: firewallErr,
 		CloudflareConfigured: cloudflareConfigured, VMSnapshots: snapshots, VMSnapshotFormError: snapshotErr,
-		ActivePage: "vms",
+		ReplicaFreshness: s.replicaFreshness(r.Context(), "vm", vm.ID, vm.NodeID, vm.ReplicaNodeID),
+		ActivePage:       "vms",
 	}))
 }
 
@@ -1895,7 +1902,9 @@ func (s *Server) renderJailPage(w http.ResponseWriter, r *http.Request, id, host
 		return
 	}
 	s.render(w, "jail_page", s.withAuthFields(r, pageData{
-		Jail: fromRPCJail(resp.GetJail()), JailHostnameFormError: hostnameErr, ActivePage: "jails",
+		Jail: fromRPCJail(resp.GetJail()), JailHostnameFormError: hostnameErr,
+		ReplicaFreshness: s.replicaFreshness(r.Context(), "jail", resp.GetJail().GetId(), resp.GetJail().GetNodeId(), resp.GetJail().GetReplicaNodeId()),
+		ActivePage:       "jails",
 	}))
 }
 

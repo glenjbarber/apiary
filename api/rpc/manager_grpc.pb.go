@@ -42,6 +42,7 @@ const (
 	ManagerService_ListISOs_FullMethodName                    = "/apiary.rpc.v1.ManagerService/ListISOs"
 	ManagerService_DeleteISO_FullMethodName                   = "/apiary.rpc.v1.ManagerService/DeleteISO"
 	ManagerService_HostStats_FullMethodName                   = "/apiary.rpc.v1.ManagerService/HostStats"
+	ManagerService_GetLocalHASTResourceStatus_FullMethodName  = "/apiary.rpc.v1.ManagerService/GetLocalHASTResourceStatus"
 	ManagerService_GetVMConsole_FullMethodName                = "/apiary.rpc.v1.ManagerService/GetVMConsole"
 	ManagerService_ProxyVMConsole_FullMethodName              = "/apiary.rpc.v1.ManagerService/ProxyVMConsole"
 	ManagerService_GetVMSerialLog_FullMethodName              = "/apiary.rpc.v1.ManagerService/GetVMSerialLog"
@@ -225,6 +226,11 @@ type ManagerServiceClient interface {
 	// ISOs above, gathered locally by managerd (see internal/hoststats),
 	// never routed through raft.
 	HostStats(ctx context.Context, in *HostStatsRequest, opts ...grpc.CallOption) (*HostStatsResponse, error)
+	// GetLocalHASTResourceStatus reports this managerd's own read-only
+	// hastctl observation for one resource. It is deliberately node-local;
+	// cluster-wide freshness requires independently querying the configured
+	// owner and replica and retaining failures as unknown.
+	GetLocalHASTResourceStatus(ctx context.Context, in *GetLocalHASTResourceStatusRequest, opts ...grpc.CallOption) (*GetLocalHASTResourceStatusResponse, error)
 	// GetVMConsole reports how to reach a running VM's VNC framebuffer,
 	// for the web UI's noVNC-based console page (ADR-0020). Like HostStats,
 	// this only answers for a VM actually running on *this* node - see
@@ -824,6 +830,16 @@ func (c *managerServiceClient) HostStats(ctx context.Context, in *HostStatsReque
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(HostStatsResponse)
 	err := c.cc.Invoke(ctx, ManagerService_HostStats_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *managerServiceClient) GetLocalHASTResourceStatus(ctx context.Context, in *GetLocalHASTResourceStatusRequest, opts ...grpc.CallOption) (*GetLocalHASTResourceStatusResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetLocalHASTResourceStatusResponse)
+	err := c.cc.Invoke(ctx, ManagerService_GetLocalHASTResourceStatus_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -1593,6 +1609,11 @@ type ManagerServiceServer interface {
 	// ISOs above, gathered locally by managerd (see internal/hoststats),
 	// never routed through raft.
 	HostStats(context.Context, *HostStatsRequest) (*HostStatsResponse, error)
+	// GetLocalHASTResourceStatus reports this managerd's own read-only
+	// hastctl observation for one resource. It is deliberately node-local;
+	// cluster-wide freshness requires independently querying the configured
+	// owner and replica and retaining failures as unknown.
+	GetLocalHASTResourceStatus(context.Context, *GetLocalHASTResourceStatusRequest) (*GetLocalHASTResourceStatusResponse, error)
 	// GetVMConsole reports how to reach a running VM's VNC framebuffer,
 	// for the web UI's noVNC-based console page (ADR-0020). Like HostStats,
 	// this only answers for a VM actually running on *this* node - see
@@ -2033,6 +2054,9 @@ func (UnimplementedManagerServiceServer) DeleteISO(context.Context, *DeleteISORe
 }
 func (UnimplementedManagerServiceServer) HostStats(context.Context, *HostStatsRequest) (*HostStatsResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method HostStats not implemented")
+}
+func (UnimplementedManagerServiceServer) GetLocalHASTResourceStatus(context.Context, *GetLocalHASTResourceStatusRequest) (*GetLocalHASTResourceStatusResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetLocalHASTResourceStatus not implemented")
 }
 func (UnimplementedManagerServiceServer) GetVMConsole(context.Context, *GetVMConsoleRequest) (*GetVMConsoleResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetVMConsole not implemented")
@@ -2646,6 +2670,24 @@ func _ManagerService_HostStats_Handler(srv interface{}, ctx context.Context, dec
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(ManagerServiceServer).HostStats(ctx, req.(*HostStatsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ManagerService_GetLocalHASTResourceStatus_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetLocalHASTResourceStatusRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ManagerServiceServer).GetLocalHASTResourceStatus(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ManagerService_GetLocalHASTResourceStatus_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ManagerServiceServer).GetLocalHASTResourceStatus(ctx, req.(*GetLocalHASTResourceStatusRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -3874,6 +3916,10 @@ var ManagerService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "HostStats",
 			Handler:    _ManagerService_HostStats_Handler,
+		},
+		{
+			MethodName: "GetLocalHASTResourceStatus",
+			Handler:    _ManagerService_GetLocalHASTResourceStatus_Handler,
 		},
 		{
 			MethodName: "GetVMConsole",

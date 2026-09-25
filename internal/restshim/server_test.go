@@ -353,6 +353,10 @@ func (f *fakeClient) HostStats(context.Context, *rpcpb.HostStatsRequest, ...grpc
 	return &rpcpb.HostStatsResponse{}, nil
 }
 
+func (f *fakeClient) GetLocalHASTResourceStatus(context.Context, *rpcpb.GetLocalHASTResourceStatusRequest, ...grpc.CallOption) (*rpcpb.GetLocalHASTResourceStatusResponse, error) {
+	return &rpcpb.GetLocalHASTResourceStatusResponse{Error: "fake HAST status unavailable"}, nil
+}
+
 func (f *fakeClient) GetVMConsole(context.Context, *rpcpb.GetVMConsoleRequest, ...grpc.CallOption) (*rpcpb.GetVMConsoleResponse, error) {
 	return &rpcpb.GetVMConsoleResponse{}, nil
 }

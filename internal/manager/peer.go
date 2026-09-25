@@ -470,6 +470,18 @@ func (p *PeerReporter) HostStats(ctx context.Context, addr string) (*rpcpb.HostS
 	return client.HostStats(ctx, &rpcpb.HostStatsRequest{})
 }
 
+// GetLocalHASTResourceStatus reaches a specific node's local hastctl view.
+// Owner and replica are queried independently so transport failures stay
+// visible as unknown instead of being filled from another node's state.
+func (p *PeerReporter) GetLocalHASTResourceStatus(ctx context.Context, addr, resourceName string) (*rpcpb.GetLocalHASTResourceStatusResponse, error) {
+	conn, client, err := p.dial(addr)
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close()
+	return client.GetLocalHASTResourceStatus(ctx, &rpcpb.GetLocalHASTResourceStatusRequest{ResourceName: resourceName})
+}
+
 // Status forwards to a specific peer's own Status RPC - same "always
 // answers locally, dial addr directly" shape as HostStats above, not
 // leader-only-read forwarding (Status, like HostStats, has no leader

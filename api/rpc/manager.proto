@@ -131,6 +131,11 @@ service ManagerService {
   // ISOs above, gathered locally by managerd (see internal/hoststats),
   // never routed through raft.
   rpc HostStats(HostStatsRequest) returns (HostStatsResponse);
+  // GetLocalHASTResourceStatus reports this managerd's own read-only
+  // hastctl observation for one resource. It is deliberately node-local;
+  // cluster-wide freshness requires independently querying the configured
+  // owner and replica and retaining failures as unknown.
+  rpc GetLocalHASTResourceStatus(GetLocalHASTResourceStatusRequest) returns (GetLocalHASTResourceStatusResponse);
 
   // GetVMConsole reports how to reach a running VM's VNC framebuffer,
   // for the web UI's noVNC-based console page (ADR-0020). Like HostStats,
@@ -1199,6 +1204,23 @@ message HostStatsResponse {
   // connected to Cloudflare's edge, only that the feature is enabled on
   // this node at all.
   bool cloudflare_configured = 13;
+}
+
+message GetLocalHASTResourceStatusRequest {
+  // Resource name is the reconciler's fixed "vm-<id>" or "jail-<id>"
+  // HAST name, not a device path or arbitrary command argument.
+  string resource_name = 1;
+}
+
+message GetLocalHASTResourceStatusResponse {
+  string error = 1;
+  string resource_name = 2;
+  string role = 3;
+  string resource_status = 4;
+  string replication = 5;
+  string dirty = 6;
+  string extent_size = 7;
+  int64 observed_at_unix = 8;
 }
 
 message GetVMConsoleRequest {

@@ -1,0 +1,43 @@
+{{define "maintenance_page"}}
+<!DOCTYPE html>
+<html lang="en">
+{{template "head" .}}
+<body class="app-layout">
+  {{template "nav" .}}
+  <main class="content" id="main-content">
+    {{template "page_header" (pageHeader "Maintenance wave planner" "Read-only, evidence-backed rehearsal for taking one Comb out at a time." "<a href='/'>Back to command center</a>")}}
+    <section class="panel">
+      <h2>Before wave 1</h2>
+      <p>This planner evaluates each Comb independently using the current node-failure simulator. It is not a restart scheduler and does not restart, migrate, or change Colony membership.</p>
+      <p class="muted">Use one Comb per wave. After maintenance, wait for it to rejoin and obtain fresh healthy evidence before considering another. A quorum-preserved result is not proof that workloads have failover or that HAST replicas are current. Open each VM or jail detail page to inspect its replica freshness.</p>
+    </section>
+    {{if .MaintenanceWaves}}
+      {{range .MaintenanceWaves}}
+      <section class="panel">
+        <div class="cockpit-panel-head"><h2>Wave {{.Wave}} · {{.NodeID}}</h2><span class="badge {{.Verdict}}">{{.Verdict}}</span></div>
+        <p>{{.Explanation}}</p>
+        {{if .TotalVoters}}
+        <dl class="detail-list">
+          <div><dt>Raft voters</dt><dd>{{.TotalVoters}}</dd></div>
+          <div><dt>Majority required</dt><dd>{{.QuorumSize}}</dd></div>
+          <div><dt>Confirmed reachable after outage</dt><dd>{{.ReachableVoters}}</dd></div>
+          <div><dt>Reachability unknown</dt><dd>{{.UnknownVoters}}</dd></div>
+        </dl>
+        {{end}}
+        <p><strong>Owned workloads:</strong> {{len .OwnedResources}} · {{.UnprotectedCount}} without configured replica · {{.ReplicatedCount}} with configured replica. Configured replicas are not assumed fresh by this simulation.</p>
+        {{if .OwnedResources}}
+        <details><summary>Review affected workloads</summary>
+          <ul>{{range .OwnedResources}}<li>{{if eq .Kind "vm"}}<a href="/vms/{{.ID}}">{{.Name}}</a>{{else if eq .Kind "jail"}}<a href="/jails/{{.ID}}">{{.Name}}</a>{{else}}{{.Name}}{{end}}: {{.Verdict}}. {{.Explanation}}</li>{{end}}</ul>
+        </details>
+        {{end}}
+        <p><a href="/simulate?node_id={{.NodeID}}">Open full failure preview</a></p>
+      </section>
+      {{end}}
+    {{else}}
+      <section class="panel"><p class="muted">No Comb candidates were returned by the current topology view.</p></section>
+    {{end}}
+  </main>
+  {{template "footer" .}}
+</body>
+</html>
+{{end}}
