@@ -22,6 +22,7 @@ import (
 	"github.com/glenjbarber/apiary/internal/cluster"
 	"github.com/glenjbarber/apiary/internal/frontendconfig"
 	"github.com/glenjbarber/apiary/internal/guardrail"
+	"github.com/glenjbarber/apiary/internal/hast"
 	"github.com/glenjbarber/apiary/internal/health"
 	"github.com/glenjbarber/apiary/internal/hoststats"
 	"github.com/glenjbarber/apiary/internal/isostore"
@@ -81,6 +82,12 @@ type SerialLogLookup interface {
 // reason as isoManager.
 type VLANStatus interface {
 	InterfaceStatus(ctx context.Context, name string) (exists, up bool, err error)
+}
+
+// hastStatusReader is deliberately the read-only slice needed for node-local
+// HAST freshness evidence. It does not expose HAST role/config mutation.
+type hastStatusReader interface {
+	Status(ctx context.Context, name string) (*hast.Status, error)
 }
 
 // PeerForwarder is the subset of *PeerReporter the server needs to
@@ -150,6 +157,7 @@ type PeerForwarder interface {
 	// (a successful call means the peer is up) rather than inventing a
 	// new ping.
 	HostStats(ctx context.Context, addr string) (*rpcpb.HostStatsResponse, error)
+	GetLocalHASTResourceStatus(ctx context.Context, addr, resourceName string) (*rpcpb.GetLocalHASTResourceStatusResponse, error)
 	GetLocalNetworkBridgeStatus(ctx context.Context, addr, networkID string) (*rpcpb.GetLocalNetworkBridgeStatusResponse, error)
 	ListAssumptionResults(ctx context.Context, addr string, req *rpcpb.ListAssumptionResultsRequest) (*rpcpb.ListAssumptionResultsResponse, error)
 	PurgeStaleAssumptionResults(ctx context.Context, addr string, req *rpcpb.PurgeStaleAssumptionResultsRequest) (*rpcpb.PurgeStaleAssumptionResultsResponse, error)
@@ -286,6 +294,10 @@ type Server struct {
 	// cmd/managerd's own nil-able Reconciler.VLAN) - ListNetworks
 	// reports "unknown" bridge status rather than panicking in that case.
 	vlan VLANStatus
+
+	// hastStatus is this node's local hastctl reader. Replica freshness is
+	// derived by independently querying each configured replica endpoint.
+	hastStatus hastStatusReader
 
 	// statsGather defaults to hoststats.Gather in NewServer; overridable
 	// in tests so HostStats's RPC-translation logic can be exercised
@@ -478,6 +490,12 @@ type nodeConfigStore interface {
 	Save(nodeconfig.Config) error
 }
 
+type nodeConfigHistoryStore interface {
+	History() ([]nodeconfig.ConfigChange, error)
+	SaveWithHistory(nodeconfig.Config, nodeconfig.ChangeOrigin, string, string) error
+	RecordCurrent(string, nodeconfig.ChangeOrigin, string, string) error
+}
+
 // frontendConfigStore/restshimdConfigStore/raftdConfigStore (ADR-0102)
 // are the subset of *frontendconfig.Manager/*restshimdconfig.Manager/
 // *raftdconfig.Manager the new Get*Config/Update*Config handlers need,
@@ -537,6 +555,9 @@ func NewServer(raft *RaftClient, nodeID string, isos isoManager, vnc VNCLookup, 
 func (s *Server) SetNetworkInterfaceLister(lister func() ([]netif.Interface, error)) {
 	s.listNetworkInterfaces = lister
 }
+
+// SetHASTStatusReader wires local, read-only HAST status after construction.
+func (s *Server) SetHASTStatusReader(reader hastStatusReader) { s.hastStatus = reader }
 
 // SetAssumptionRegister wires the local, operator-authored register after
 // construction. It exists as a setter to keep the established NewServer
@@ -1218,6 +1239,52 @@ func (s *Server) GetLocalNetworkBridgeStatus(ctx context.Context, req *rpcpb.Get
 	return &rpcpb.GetLocalNetworkBridgeStatusResponse{
 		Error: fmt.Sprintf("network_id %q not found on this node's local FSM view", req.GetNetworkId()),
 	}, nil
+}
+
+// GetLocalHASTResourceStatus reports only this node's fresh hastctl view.
+// The strict resource-name validation prevents caller-controlled paths from
+// reaching hastctl; callers must query owner and replica independently.
+func (s *Server) GetLocalHASTResourceStatus(ctx context.Context, req *rpcpb.GetLocalHASTResourceStatusRequest) (*rpcpb.GetLocalHASTResourceStatusResponse, error) {
+	name := req.GetResourceName()
+	if !validHASTResourceName(name) {
+		return &rpcpb.GetLocalHASTResourceStatusResponse{Error: "resource_name must be vm-<id> or jail-<id>, with an alphanumeric, '-' or '_' id of 1-64 characters"}, nil
+	}
+	if s.hastStatus == nil {
+		return &rpcpb.GetLocalHASTResourceStatusResponse{Error: "HAST status is not configured on this node"}, nil
+	}
+	observed, err := s.hastStatus.Status(ctx, name)
+	if err != nil {
+		return &rpcpb.GetLocalHASTResourceStatusResponse{Error: err.Error(), ResourceName: name, ObservedAtUnix: time.Now().Unix()}, nil
+	}
+	if observed == nil {
+		return &rpcpb.GetLocalHASTResourceStatusResponse{Error: "HAST status returned no observation", ResourceName: name, ObservedAtUnix: time.Now().Unix()}, nil
+	}
+	return &rpcpb.GetLocalHASTResourceStatusResponse{
+		ResourceName: name, Role: observed.Role, ResourceStatus: observed.ResourceStatus,
+		Replication: observed.Replication, Dirty: observed.Dirty,
+		ExtentSize: observed.ExtentSize, ObservedAtUnix: time.Now().Unix(),
+	}, nil
+}
+
+func validHASTResourceName(name string) bool {
+	var id string
+	switch {
+	case strings.HasPrefix(name, "vm-"):
+		id = strings.TrimPrefix(name, "vm-")
+	case strings.HasPrefix(name, "jail-"):
+		id = strings.TrimPrefix(name, "jail-")
+	default:
+		return false
+	}
+	if len(id) == 0 || len(id) > 64 {
+		return false
+	}
+	for _, c := range id {
+		if !((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '-' || c == '_') {
+			return false
+		}
+	}
+	return true
 }
 
 // ListAssumptionResults implements rpcpb.ManagerServiceServer. Like
@@ -2272,6 +2339,19 @@ func (s *Server) GetNodeConfig(_ context.Context, _ *rpcpb.GetNodeConfigRequest)
 		OriginCaDirectory:               cfg.OriginCADirectory,
 		OriginCaRenewalCheckInterval:    durationString(cfg.OriginCARenewalCheckInterval),
 	}
+	if historyStore, ok := s.nodeConfig.(nodeConfigHistoryStore); ok {
+		changes, err := historyStore.History()
+		if err != nil {
+			return &rpcpb.GetNodeConfigResponse{Error: "reading configuration history: " + err.Error()}, nil
+		}
+		for _, change := range changes {
+			resp.ConfigChanges = append(resp.ConfigChanges, &rpcpb.ConfigChange{
+				Field: change.Field, Previous: change.Previous, Current: change.Current,
+				Origin: string(change.Origin), Rationale: change.Rationale,
+				Evidence: change.Evidence, ChangedAtUnix: change.ChangedAt.Unix(), Attested: change.Attested,
+			})
+		}
+	}
 	if s.listNetworkInterfaces != nil {
 		if interfaces, err := s.listNetworkInterfaces(); err == nil {
 			resp.AvailableInterfaces = make([]*rpcpb.NetworkInterface, 0, len(interfaces))
@@ -2315,7 +2395,21 @@ func (s *Server) UpdateManagerdBindAddress(_ context.Context, req *rpcpb.UpdateM
 		return &rpcpb.UpdateManagerdBindAddressResponse{Error: err.Error()}, nil
 	}
 	current.RPCAddr = addr
-	if err := s.nodeConfig.Save(current); err != nil {
+	origin := nodeconfig.ChangeOrigin(req.GetChangeOrigin())
+	if origin == "" {
+		origin = nodeconfig.OriginOperator
+	}
+	if err := nodeconfig.ValidateOrigin(origin); err != nil {
+		return &rpcpb.UpdateManagerdBindAddressResponse{Error: err.Error()}, nil
+	}
+	if len(req.GetChangeRationale()) > 2048 || len(req.GetChangeEvidence()) > 2048 {
+		return &rpcpb.UpdateManagerdBindAddressResponse{Error: "change rationale and evidence must be at most 2048 characters"}, nil
+	}
+	if historyStore, ok := s.nodeConfig.(nodeConfigHistoryStore); ok {
+		if err := historyStore.SaveWithHistory(current, origin, req.GetChangeRationale(), req.GetChangeEvidence()); err != nil {
+			return &rpcpb.UpdateManagerdBindAddressResponse{Error: err.Error()}, nil
+		}
+	} else if err := s.nodeConfig.Save(current); err != nil {
 		return &rpcpb.UpdateManagerdBindAddressResponse{Error: err.Error()}, nil
 	}
 	return &rpcpb.UpdateManagerdBindAddressResponse{RestartRequired: true}, nil
@@ -2509,7 +2603,31 @@ func (s *Server) UpdateNodeConfig(_ context.Context, req *rpcpb.UpdateNodeConfig
 	if cfg.PAMService != "" && (cfg.TLSCert == "" || cfg.TLSKey == "") {
 		return &rpcpb.UpdateNodeConfigResponse{Error: "pam_service requires tls_cert/tls_key to also be set - a login password must not travel to this RPC over a plaintext channel"}, nil
 	}
-	if err := s.nodeConfig.Save(cfg); err != nil {
+	origin := nodeconfig.ChangeOrigin(req.GetChangeOrigin())
+	if origin == "" {
+		origin = nodeconfig.OriginOperator
+	}
+	if err := nodeconfig.ValidateOrigin(origin); err != nil {
+		return &rpcpb.UpdateNodeConfigResponse{Error: err.Error()}, nil
+	}
+	if len(req.GetChangeRationale()) > 2048 || len(req.GetChangeEvidence()) > 2048 {
+		return &rpcpb.UpdateNodeConfigResponse{Error: "change rationale and evidence must be at most 2048 characters"}, nil
+	}
+	if req.GetAnnotateField() != "" {
+		historyStore, ok := s.nodeConfig.(nodeConfigHistoryStore)
+		if !ok {
+			return &rpcpb.UpdateNodeConfigResponse{Error: "this node does not support configuration history attestations"}, nil
+		}
+		if err := historyStore.RecordCurrent(req.GetAnnotateField(), origin, req.GetChangeRationale(), req.GetChangeEvidence()); err != nil {
+			return &rpcpb.UpdateNodeConfigResponse{Error: err.Error()}, nil
+		}
+		return &rpcpb.UpdateNodeConfigResponse{}, nil
+	}
+	if historyStore, ok := s.nodeConfig.(nodeConfigHistoryStore); ok {
+		if err := historyStore.SaveWithHistory(cfg, origin, req.GetChangeRationale(), req.GetChangeEvidence()); err != nil {
+			return &rpcpb.UpdateNodeConfigResponse{Error: err.Error()}, nil
+		}
+	} else if err := s.nodeConfig.Save(cfg); err != nil {
 		return &rpcpb.UpdateNodeConfigResponse{Error: err.Error()}, nil
 	}
 	return &rpcpb.UpdateNodeConfigResponse{}, nil

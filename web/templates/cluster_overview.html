@@ -129,12 +129,13 @@
         <a class="cockpit-subitem active" href="/">Summary</a>
         <a class="cockpit-subitem" href="/vms">Resources <span class="muted">›</span></a>
         <a class="cockpit-subitem" href="/simulate">Failure preview</a>
+        <a class="cockpit-subitem" href="/maintenance">Maintenance waves</a>
         <a class="cockpit-subitem" href="/invariants">Evidence</a>
         <a class="cockpit-subitem" href="/assumptions">Assumptions <span class="muted">›</span></a>
         <a class="cockpit-subitem" href="/recovery-handbook">Recovery</a>
       </nav>
       <section class="cockpit-main">
-        <div class="cockpit-topbar"><span><strong>Data Center</strong></span><div class="cockpit-actions"><a class="button secondary" href="/simulate">Failure preview</a>{{if .CanOperate}}<a class="button" href="/vms/new">Create</a>{{end}}</div></div>
+        <div class="cockpit-topbar"><span><strong>Data Center</strong></span><div class="cockpit-actions"><a class="button secondary" href="/simulate">Failure preview</a><a class="button secondary" href="/maintenance">Maintenance waves</a>{{if .CanOperate}}<a class="button" href="/vms/new">Create</a>{{end}}</div></div>
         <div class="cockpit-workspace">
           <div class="page-header cockpit-header"><div class="page-header-copy"><h2>Command center</h2><p>Current state, safe next actions, and the evidence behind every answer.</p></div><span class="badge ready">Live evidence</span></div>
           <div class="cockpit-top-grid">

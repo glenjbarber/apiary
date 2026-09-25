@@ -1,7 +1,10 @@
 package frontend
 
 import (
+	"encoding/json"
+	"fmt"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -32,7 +35,8 @@ func (s *Server) handleUpdateManagerdBindAddress(w http.ResponseWriter, r *http.
 		return
 	}
 	resp, err := s.client.UpdateManagerdBindAddress(r.Context(), &rpcpb.UpdateManagerdBindAddressRequest{
-		RpcAddr: withFixedPort(r.FormValue("rpc_host"), managerdListenerPort),
+		RpcAddr:      withFixedPort(r.FormValue("rpc_host"), managerdListenerPort),
+		ChangeOrigin: r.FormValue("change_origin"), ChangeRationale: strings.TrimSpace(r.FormValue("change_rationale")), ChangeEvidence: strings.TrimSpace(r.FormValue("change_evidence")),
 	})
 	if err != nil {
 		s.renderManagerdBindPanel(w, r, err.Error(), "")
@@ -194,6 +198,285 @@ func (s *Server) machinePageData(r *http.Request) pageData {
 // a separate, deliberately un-taken step.
 func (s *Server) handleMachinePage(w http.ResponseWriter, r *http.Request) {
 	s.render(w, "machine_page", s.withAuthFields(r, s.machinePageData(r)))
+}
+
+type configProvenancePageView struct {
+	Field, Label, Value, Origin, Rationale, Evidence, ChangedAt, Freshness, Dependency string
+	Dependents                                                                         []string
+	History                                                                            []configChangeView
+	Options                                                                            []configFieldOption
+	Unknown                                                                            bool
+}
+
+type configFieldSpec struct{ Field, Label, Dependency string }
+type configFieldOption struct{ Field, Label string }
+
+var configFieldSpecs = []configFieldSpec{
+	{"rpc_addr", "Managerd bind address", "Managerd gRPC clients and peer connections targeting this Comb. The new bind takes effect only after the guarded managerd restart."},
+	{"uplink", "Uplink", "VLAN-tagged managed networks and workloads using those networks. The network catalog is Colony-wide and does not identify which Comb physically hosts each network, so this dependency list is incomplete."},
+	{"nat_uplink", "NAT uplink", "Self-hosted managed-network outbound NAT on this Comb."},
+	{"dhcp_dns_server", "DHCP DNS server", "DHCP options advertised to clients on managed networks provisioned by this Comb."},
+	{"zfs_base", "ZFS base", "VM and jail datasets under this Comb's managed storage scope."},
+	{"bhyve_prefix", "Bhyve prefix", "VM resource names created by this Comb."},
+	{"iso_dir", "ISO directory", "ISO and base-image files stored locally on this Comb."},
+	{"jail_prefix", "Jail prefix", "Jail resource names created by this Comb."},
+	{"jail_mount_base", "Jail mount base", "Jail root mount paths on this Comb."},
+	{"reconcile_interval", "Reconcile interval", "All VM and jail reconciliation work performed by this Comb."},
+	{"assumption_check_interval", "Assumption check interval", "The local automated assumption-check schedule."},
+	{"assumption_heartbeat_interval", "Assumption heartbeat interval", "Periodic history refresh for unchanged assumption results."},
+	{"assumption_stale_after", "Assumption stale after", "How long local assumption results remain current."},
+	{"assumption_run_deadline", "Assumption run deadline", "Maximum runtime for each local assumption-check cycle."},
+	{"assumption_history_limit", "Assumption history limit", "Retained history per local assumption check."},
+	{"assumption_history_max_age", "Assumption history max age", "Maximum age of retained local assumption history."},
+	{"bhyve_bootrom", "Bhyve boot ROM", "VMs provisioned by this Comb. This path affects future VM starts/provisioning; it does not rewrite an existing VM's firmware configuration."},
+	{"bhyve_bridge", "Bhyve bridge", "VMs owned by this Comb that use the default flat bridge. Network-attached VMs select their managed network instead."},
+	{"disk_size_mb", "Default VM disk size", "New VMs provisioned by this Comb only; changing it does not resize existing disks."},
+	{"jail_disk_size_mb", "Default jail disk size", "New replicated jail roots provisioned by this Comb only."},
+	{"hast_enabled", "HAST support", "VMs and jails for which this Comb is the owner or configured replica."},
+	{"peer_tls", "Peer TLS", "Managerd-to-managerd peer connections involving this Comb."},
+	{"peer_managerd_port", "Peer managerd port", "Managerd peer connections targeting this Comb."},
+	{"peer_tls_hostname_map", "Peer TLS hostname map", "TLS hostname verification for peer managerd addresses on this Comb."},
+	{"peer_tls_ca", "Peer TLS CA", "TLS trust when this Comb dials peer managerd endpoints."},
+	{"known_peer_addresses", "Known peer addresses", "Join-flow target validation and forwarding from this Comb."},
+	{"tls_cert", "Managerd certificate path", "External TLS clients connecting to managerd on this Comb."},
+	{"tls_key", "Managerd key path", "External TLS clients connecting to managerd on this Comb. The key contents are never shown or recorded."},
+	{"pam_service", "PAM service", "Frontend logins served by this Comb."},
+	{"cloudflare_token_file", "Cloudflare token file path", "Cloudflare DNS changes for exposed Cells on this Comb. The token itself is never stored in provenance history."},
+	{"cloudflare_zone_id", "Cloudflare zone ID", "DNS records created for exposed Cells on this Comb."},
+	{"cloudflare_tunnel_id", "Cloudflare tunnel ID", "Public traffic for Cells exposed through this Comb's tunnel."},
+	{"cloudflare_tunnel_credentials_file", "Cloudflare tunnel credentials path", "cloudflared connections for exposed Cells on this Comb."},
+	{"origin_ca_token_file", "Origin CA token file path", "Explicit Cloudflare Origin CA issuance and renewal on this Comb."},
+	{"origin_ca_directory", "Origin CA certificate directory", "Locally issued Cloudflare Origin CA certificates on this Comb."},
+	{"origin_ca_renewal_check_interval", "Origin CA renewal interval", "Automatic Origin CA renewal checks on this Comb."},
+	{"peer_api_key", "Peer API key", "Authenticated peer managerd requests. Current and historical secret values are redacted."},
+	{"raftd_token", "Raftd token", "managerd authentication to this Comb's local raftd socket. Current and historical secret values are redacted."},
+}
+
+func (s *Server) handleConfigProvenancePage(w http.ResponseWriter, r *http.Request) {
+	resp, err := s.client.GetNodeConfig(r.Context(), &rpcpb.GetNodeConfigRequest{})
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadGateway)
+		return
+	}
+	if resp.GetError() != "" {
+		http.Error(w, resp.GetError(), http.StatusBadGateway)
+		return
+	}
+	field := r.URL.Query().Get("field")
+	if field == "" {
+		field = "uplink"
+	}
+	var spec *configFieldSpec
+	for i := range configFieldSpecs {
+		if configFieldSpecs[i].Field == field {
+			spec = &configFieldSpecs[i]
+			break
+		}
+	}
+	if spec == nil {
+		http.NotFound(w, r)
+		return
+	}
+	view := configProvenancePageView{Field: spec.Field, Label: spec.Label, Dependency: spec.Dependency, Value: configValueFromResponse(resp, field)}
+	for _, option := range configFieldSpecs {
+		view.Options = append(view.Options, configFieldOption{Field: option.Field, Label: option.Label})
+	}
+	var history []configChangeView
+	for _, change := range fromRPCNodeConfig(resp).ConfigChanges {
+		if change.Field == field {
+			change.Previous = displayHistoryValue(change.Previous)
+			change.Current = displayHistoryValue(change.Current)
+			history = append(history, change)
+		}
+	}
+	for i := len(history) - 1; i >= 0; i-- {
+		view.History = append(view.History, history[i])
+	}
+	if len(view.History) == 0 {
+		view.Unknown = true
+		view.Freshness = "No provenance event was recorded. This value predates this feature or was set outside the tracked Machine settings path; its origin cannot be inferred."
+	} else {
+		latest := view.History[0]
+		view.Origin, view.Rationale, view.Evidence, view.ChangedAt = latest.Origin, latest.Rationale, latest.Evidence, latest.ChangedAt
+		if latest.Attested {
+			view.Freshness = "Retrospective attestation: the origin and rationale were recorded now from an operator's current understanding; the original change event and date remain unknown."
+		}
+		if latest.Stale {
+			stale := "Review recommended: the recorded rationale is more than one year old."
+			if latest.Evidence != "" {
+				stale += " Its evidence reference may also be stale; Apiary does not revalidate linked evidence."
+			}
+			view.Freshness = strings.TrimSpace(view.Freshness + " " + stale)
+		}
+		if latest.MissingRationale {
+			view.Freshness = strings.TrimSpace(view.Freshness + " No rationale was recorded for this change.")
+		}
+		if displayHistoryValue(latest.Current) != view.Value {
+			view.Freshness = strings.TrimSpace(view.Freshness + " The current value differs from the latest recorded value. It may have changed outside this history path.")
+		}
+		if view.Freshness == "" {
+			view.Freshness = "Recorded rationale is current by recorded value and age; linked evidence is not revalidated automatically."
+		}
+	}
+	localID := s.localNodeID(r)
+	vms, vmErr := s.currentVMs(r, "id", "asc")
+	jails, jailErr := s.currentJails(r)
+	switch field {
+	case "bhyve_bridge":
+		for _, vm := range vms {
+			if vm.NodeID == localID && vm.NetworkID == "" {
+				view.Dependents = append(view.Dependents, "VM "+vm.ID+" (default flat bridge)")
+			}
+		}
+	case "bhyve_prefix":
+		for _, vm := range vms {
+			if vm.NodeID == localID {
+				view.Dependents = append(view.Dependents, "VM "+vm.ID)
+			}
+		}
+	case "jail_enabled", "jail_prefix", "jail_mount_base":
+		for _, jail := range jails {
+			if jail.NodeID == localID {
+				view.Dependents = append(view.Dependents, "Jail "+jail.ID)
+			}
+		}
+	case "zfs_base":
+		for _, vm := range vms {
+			if vm.NodeID == localID || vm.ReplicaNodeID == localID {
+				view.Dependents = append(view.Dependents, "VM "+vm.ID)
+			}
+		}
+		for _, jail := range jails {
+			if jail.NodeID == localID || jail.ReplicaNodeID == localID {
+				view.Dependents = append(view.Dependents, "Jail "+jail.ID)
+			}
+		}
+	case "hast_enabled":
+		for _, vm := range vms {
+			if vm.NodeID == localID || vm.ReplicaNodeID == localID {
+				view.Dependents = append(view.Dependents, "VM "+vm.ID)
+			}
+		}
+		for _, jail := range jails {
+			if jail.NodeID == localID || jail.ReplicaNodeID == localID {
+				view.Dependents = append(view.Dependents, "Jail "+jail.ID)
+			}
+		}
+	}
+	if vmErr != "" {
+		view.Dependents = append(view.Dependents, "VM dependency inventory unavailable: "+vmErr)
+	}
+	if jailErr != "" {
+		view.Dependents = append(view.Dependents, "Jail dependency inventory unavailable: "+jailErr)
+	}
+	if len(view.Dependents) == 0 {
+		view.Dependents = []string{"No direct dependent VM or jail definition was identified from the current inventory."}
+	}
+	s.render(w, "config_provenance_page", s.withAuthFields(r, pageData{ConfigProvenance: view, ActivePage: "machine"}))
+}
+
+// handleConfigProvenanceAttest records an operator-supplied explanation for
+// the current saved value. It is deliberately marked retrospective and does
+// not write managerd.json.
+func (s *Server) handleConfigProvenanceAttest(w http.ResponseWriter, r *http.Request) {
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "invalid form: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	field := r.FormValue("field")
+	known := false
+	for _, spec := range configFieldSpecs {
+		if spec.Field == field {
+			known = true
+			break
+		}
+	}
+	if !known {
+		http.Error(w, "unknown configuration field", http.StatusBadRequest)
+		return
+	}
+	req := &rpcpb.UpdateNodeConfigRequest{
+		AnnotateField: field, ChangeOrigin: r.FormValue("change_origin"),
+		ChangeRationale: strings.TrimSpace(r.FormValue("change_rationale")),
+		ChangeEvidence:  strings.TrimSpace(r.FormValue("change_evidence")),
+	}
+	if req.GetChangeRationale() == "" {
+		http.Error(w, "rationale is required for a retrospective attestation", http.StatusBadRequest)
+		return
+	}
+	resp, err := s.client.UpdateNodeConfig(r.Context(), req)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadGateway)
+		return
+	}
+	if resp.GetError() != "" {
+		http.Error(w, resp.GetError(), http.StatusBadRequest)
+		return
+	}
+	http.Redirect(w, r, "/machine/why-is-this-set?field="+url.QueryEscape(field), http.StatusSeeOther)
+}
+
+func configValueFromResponse(resp *rpcpb.GetNodeConfigResponse, field string) string {
+	if field == "peer_api_key" {
+		if resp.GetPeerApiKeySet() {
+			return "(set; value redacted)"
+		}
+		return "(unset)"
+	}
+	if field == "raftd_token" {
+		if resp.GetRaftdTokenSet() {
+			return "(set; value redacted)"
+		}
+		return "(unset)"
+	}
+	body, err := json.Marshal(resp)
+	if err != nil {
+		return "(unavailable)"
+	}
+	var fields map[string]json.RawMessage
+	if json.Unmarshal(body, &fields) != nil {
+		return "(unavailable)"
+	}
+	key := snakeToLowerCamel(field)
+	raw, ok := fields[key]
+	if !ok {
+		return "(unset; startup default or flag may apply)"
+	}
+	var value any
+	if json.Unmarshal(raw, &value) != nil {
+		return string(raw)
+	}
+	if value == "" || value == nil {
+		return "(unset; startup default or flag may apply)"
+	}
+	return fmt.Sprint(value)
+}
+
+func snakeToLowerCamel(field string) string {
+	var out strings.Builder
+	upper := false
+	for _, r := range field {
+		if r == '_' {
+			upper = true
+			continue
+		}
+		if upper {
+			if r >= 'a' && r <= 'z' {
+				r -= 'a' - 'A'
+			}
+			upper = false
+		}
+		out.WriteRune(r)
+	}
+	return out.String()
+}
+
+func displayHistoryValue(value string) string {
+	var decoded any
+	if json.Unmarshal([]byte(value), &decoded) == nil {
+		return fmt.Sprint(decoded)
+	}
+	return value
 }
 
 // machineSection describes one of the focused per-subsystem pages a
@@ -408,10 +691,13 @@ func (s *Server) handleUpdateMachineConfig(w http.ResponseWriter, r *http.Reques
 func (s *Server) nodeConfigUpdateRequest(r *http.Request) *rpcpb.UpdateNodeConfigRequest {
 	cfg, _ := s.currentNodeConfig(r)
 	req := &rpcpb.UpdateNodeConfigRequest{
-		Uplink:        cfg.Uplink,
-		NatUplink:     cfg.NATUplink,
-		DhcpDnsServer: cfg.DNSServer,
-		JailEnabled:   jailEnabledFromForm(cfg.JailEnabledMode),
+		ChangeOrigin:    r.FormValue("change_origin"),
+		ChangeRationale: strings.TrimSpace(r.FormValue("change_rationale")),
+		ChangeEvidence:  strings.TrimSpace(r.FormValue("change_evidence")),
+		Uplink:          cfg.Uplink,
+		NatUplink:       cfg.NATUplink,
+		DhcpDnsServer:   cfg.DNSServer,
+		JailEnabled:     jailEnabledFromForm(cfg.JailEnabledMode),
 
 		ZfsBase:       cfg.ZFSBase,
 		BhyvePrefix:   cfg.BhyvePrefix,

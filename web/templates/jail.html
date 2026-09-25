@@ -22,6 +22,18 @@
         </dl>
         {{if .Jail.PhaseError}}<div class="banner-error">{{.Jail.PhaseError}}</div>{{end}}
       </section>
+
+      <section class="panel detail-card">
+        <h3>Replica freshness</h3>
+        <p><span class="badge {{.ReplicaFreshness.Verdict}}">{{.ReplicaFreshness.Verdict}}</span></p>
+        <p>{{.ReplicaFreshness.Explanation}}</p>
+        {{if .ReplicaFreshness.Configured}}
+        <table class="compact-table"><thead><tr><th>Node</th><th>Role</th><th>HAST status</th><th>Mode</th><th>Dirty extents</th><th>Observed</th></tr></thead><tbody>
+          {{range .ReplicaFreshness.Observations}}<tr><td>{{.NodeID}}</td><td>{{if .Role}}{{.Role}}{{else}}unknown{{end}}</td><td>{{if .Error}}unknown: {{.Error}}{{else}}{{if .Status}}{{.Status}}{{else}}unknown{{end}}{{end}}</td><td>{{if .Replication}}{{.Replication}}{{else}}unknown{{end}}</td><td>{{if .Dirty}}{{.Dirty}}{{else}}unknown{{end}}</td><td>{{if .ObservedAt}}{{.ObservedAt}}{{else}}unknown{{end}}</td></tr>{{end}}
+        </tbody></table>
+        <p class="muted">Apiary does not derive a numeric RPO from dirty extents. HAST status is point-in-time evidence, not a failover guarantee.</p>
+        {{end}}
+      </section>
     </div>
 
     <section class="panel">

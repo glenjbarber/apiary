@@ -214,8 +214,10 @@ func run() error {
 	// HAST is independent of bhyve support: a node holding only a HAST
 	// secondary replica (see ADR-0026) never runs the VM at all, so this
 	// is set regardless of bhyve_bootrom, unlike VLAN/DHCP/PF below.
+	var hastMgr *hast.Manager
 	if cfg.HASTEnabled != nil && *cfg.HASTEnabled {
-		reconciler.HAST = hast.New()
+		hastMgr = hast.New()
+		reconciler.HAST = hastMgr
 	}
 	// Keep lifecycle inspection/teardown available even when provisioning
 	// is disabled, otherwise an explicit DeleteJail tombstone is stranded.
@@ -384,6 +386,7 @@ func run() error {
 	}
 
 	srv := manager.NewServer(raftClient, id, isos, vncArg, serialLogArg, vlanArg, peers, resolvedPeerPort, zfsMgr, nodeConfigMgr, assumptionsMgr, assumptionStaleAfter, reconciler)
+	srv.SetHASTStatusReader(hastMgr)
 	srv.SetAssumptionRegister(registerMgr)
 	srv.SetOriginCAIssuer(cloudflare.OriginCAIssuer{})
 	// ADR-0102: wired unconditionally, same posture as nodeConfigMgr

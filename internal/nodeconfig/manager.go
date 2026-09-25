@@ -40,6 +40,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 
 	"github.com/glenjbarber/apiary/internal/commonconfig"
@@ -268,6 +269,7 @@ type Manager struct {
 	// Path is where the config file is read from/written to. Defaults
 	// to DefaultPath if empty.
 	Path string
+	mu   sync.Mutex
 }
 
 func (m *Manager) path() string {
@@ -332,6 +334,12 @@ func applyCommonConfig(cfg Config, common commonconfig.Config) Config {
 // Rejects an unsafe value (validate) or a resource-scope-path change
 // that would conflict with an already-saved value (checkScopePathConflicts).
 func (m *Manager) Save(cfg Config) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.save(cfg)
+}
+
+func (m *Manager) save(cfg Config) error {
 	if err := validate(cfg); err != nil {
 		return err
 	}

@@ -19,9 +19,12 @@ const (
 // Status is a parsed snapshot of `hastctl list <name>`'s output for one
 // resource.
 type Status struct {
-	Role       string
-	LocalPath  string
-	RemoteAddr string
+	Role        string
+	LocalPath   string
+	RemoteAddr  string
+	Replication string
+	ExtentSize  string
+	Dirty       string
 
 	// ResourceStatus is hastd's own health assessment ("complete",
 	// "degraded", or "unknown"). Reported for a resource in EITHER role -
@@ -129,9 +132,9 @@ func (m *Manager) Status(ctx context.Context, name string) (*Status, error) {
 }
 
 // parseStatus parses `hastctl list <name>`'s output: a "<name>:" header
-// line followed by indented "key: value" lines. Only the fields Status
-// cares about are extracted; the rest (statistics, extentsize, etc.) are
-// ignored.
+// line followed by indented "key: value" lines. The parsed fields are
+// intentionally raw observations: callers must not reinterpret extent or
+// dirty counters as a numeric RPO.
 func parseStatus(out string) (*Status, error) {
 	s := &Status{}
 	found := false
@@ -153,6 +156,12 @@ func parseStatus(out string) (*Status, error) {
 			s.LocalPath = value
 		case "remoteaddr":
 			s.RemoteAddr = value
+		case "replication":
+			s.Replication = value
+		case "extentsize":
+			s.ExtentSize = value
+		case "dirty":
+			s.Dirty = value
 		case "status":
 			s.ResourceStatus = value
 		}

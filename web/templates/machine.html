@@ -16,6 +16,7 @@
     <a href="#machine-exposure">Service exposure</a>
   </nav>
   <p class="field-help">Each section above also has its own focused page: {{range machineSections}}<a href="/machine/{{.Slug}}">{{.Title}}</a> {{end}}</p>
+  <p><a href="/machine/why-is-this-set">Why is this set?</a> Trace managerd setting history, rationale, and known dependents.</p>
 
   <section class="settings-group" aria-labelledby="machine-operations">
   <h2 id="machine-operations">Operations</h2>
@@ -369,6 +370,86 @@
 </html>
 {{end}}
 
+{{define "config_change_fields"}}
+<details class="field-help">
+  <summary>Why is this set? Add change provenance</summary>
+  <label>Origin
+    <select name="change_origin">
+      <option value="operator" selected>Operator change</option>
+      <option value="default">Default</option>
+      <option value="migration">Migration</option>
+      <option value="incident">Incident</option>
+      <option value="automation">Automation</option>
+    </select>
+  </label>
+  <label>Rationale <input name="change_rationale" maxlength="2048" placeholder="Why this value is needed"></label>
+  <label>Evidence or reference <input name="change_evidence" maxlength="2048" placeholder="Ticket, incident, ADR, or URL"></label>
+  <small>Saved for each managerd setting changed by this form. Existing history is not inferred.</small>
+</details>
+{{end}}
+
+{{define "config_provenance_page"}}
+<!DOCTYPE html>
+<html lang="en">
+{{template "head" .}}
+<body class="app-layout">
+  {{template "nav" .}}
+  <main class="content" id="main-content">
+    {{template "page_header" (pageHeader "Why is this set?" "Managerd Machine settings: recorded origins, rationale, evidence, and known dependents.")}}
+    <p><a href="/machine">Back to Machine Configuration</a></p>
+    <div class="panel">
+      <form method="get" action="/machine/why-is-this-set">
+        <label>Setting
+          <select name="field">{{range .ConfigProvenance.Options}}<option value="{{.Field}}" {{if eq .Field $.ConfigProvenance.Field}}selected{{end}}>{{.Label}}</option>{{end}}</select>
+        </label>
+        <button type="submit">Show history</button>
+      </form>
+      <h2>{{.ConfigProvenance.Label}}</h2>
+      <p>Saved value: <code>{{.ConfigProvenance.Value}}</code></p>
+      <p class="muted">An unset field may still take an effective default or startup-flag value. This page shows saved configuration, not a complete runtime-resolution trace.</p>
+      {{if .ConfigProvenance.Unknown}}
+        <p class="banner-warning">{{.ConfigProvenance.Freshness}}</p>
+      {{else}}
+        {{if .ConfigProvenance.Freshness}}<p class="banner-warning">{{.ConfigProvenance.Freshness}}</p>{{end}}
+        <p>Latest origin: <strong>{{.ConfigProvenance.Origin}}</strong>{{if .ConfigProvenance.ChangedAt}} · {{.ConfigProvenance.ChangedAt}}{{end}}</p>
+        {{if .ConfigProvenance.Rationale}}<p>Rationale: {{.ConfigProvenance.Rationale}}</p>{{else}}<p class="banner-warning">No rationale was recorded for the latest change.</p>{{end}}
+        {{if .ConfigProvenance.Evidence}}<p>Evidence: {{.ConfigProvenance.Evidence}}</p>{{else}}<p>No evidence reference was recorded. Linked evidence is not automatically revalidated.</p>{{end}}
+      {{end}}
+    </div>
+    <div class="panel">
+      <h2>What depends on it</h2>
+      <p>{{.ConfigProvenance.Dependency}}</p>
+      <ul>{{range .ConfigProvenance.Dependents}}<li>{{.}}</li>{{end}}</ul>
+      <p class="muted">Dependents are matched from the current resource inventory where the data model permits. This is not a complete physical dependency graph.</p>
+    </div>
+    <div class="panel">
+      <h2>Change history</h2>
+      <table><thead><tr><th>When</th><th>Origin</th><th>Previous</th><th>Current</th><th>Rationale</th><th>Evidence</th></tr></thead><tbody>
+      {{range .ConfigProvenance.History}}<tr><td>{{.ChangedAt}}{{if .Stale}}<br><span class="badge unknown">Review due</span>{{end}}</td><td>{{.Origin}}{{if .Attested}}<br><span class="badge unknown">Retrospective attestation</span>{{end}}</td><td><code>{{.Previous}}</code></td><td><code>{{.Current}}</code></td><td>{{if .Rationale}}{{.Rationale}}{{else}}<em>not recorded</em>{{end}}</td><td>{{if .Evidence}}{{.Evidence}}{{else}}<em>none</em>{{end}}</td></tr>{{else}}<tr><td colspan="6"><em>No recorded changes for this setting.</em></td></tr>{{end}}
+      </tbody></table>
+      <p class="muted">History is local to this Comb. Values predating the feature are not reconstructed from Raft logs, config files, or Git blame. Secret values remain redacted.</p>
+      <details>
+        <summary>Add a retrospective explanation for the current value</summary>
+        <p>This records your current understanding now. It does not reconstruct who set the value or when, and it does not change the setting.</p>
+        <form method="post" action="/machine/why-is-this-set">
+          <input type="hidden" name="field" value="{{.ConfigProvenance.Field}}">
+          <label>Origin
+            <select name="change_origin" required>
+              <option value="">Choose an origin</option><option value="default">Default</option><option value="operator">Operator change</option><option value="migration">Migration</option><option value="incident">Incident</option><option value="automation">Automation</option>
+            </select>
+          </label>
+          <label>Rationale <input name="change_rationale" maxlength="2048" required></label>
+          <label>Evidence or reference <input name="change_evidence" maxlength="2048"></label>
+          <button type="submit">Record attestation</button>
+        </form>
+      </details>
+    </div>
+  </main>
+  {{template "footer" .}}
+</body>
+</html>
+{{end}}
+
 {{define "node_services_panel"}}
 <div id="node-services-error" class="banner-error">{{.ServiceFormError}}</div>
 {{if .ServiceFormSuccess}}<div class="banner-success">{{.ServiceFormSuccess}}</div>{{end}}
@@ -412,6 +493,7 @@
     <tr><th>apiary_managerd (gRPC)</th><td>
       {{if .CanAdmin}}
       <form hx-post="/machine/managerd-bind" hx-target="#managerd-bind-panel" hx-swap="innerHTML">
+        {{template "config_change_fields" .}}
         <span class="host-port"><input type="text" list="managerd-bind-addresses" name="rpc_host" value="{{hostOnly .NodeConfig.RPCAddr}}" title="Host managerd's gRPC listener binds to. Choose a local address suggestion or enter another valid local host. The port is always 17700 and cannot be changed here. Saving does not restart managerd." aria-label="Managerd bind host" required><span class="fixed-port">:17700</span></span>
         <datalist id="managerd-bind-addresses">{{range .NodeConfig.HostOptions}}<option value="{{.}}">{{end}}</datalist>
         <button type="submit">Save endpoint</button>
@@ -431,6 +513,7 @@
 {{if .CanAdmin}}
 {{if .NodeConfig.InterfaceInventoryError}}<div class="banner-error">Unable to discover host interfaces: {{.NodeConfig.InterfaceInventoryError}}. Saved values are still available to clear or correct.</div>{{end}}
 <form hx-post="/machine/uplink" hx-target="#nodeconfig-panel" hx-swap="innerHTML">
+  {{template "config_change_fields" .}}
   <table class="settings-table">
     <tbody>
       <tr><th>Uplink</th><td>
@@ -468,6 +551,7 @@
 <div id="jail-provisioning-error" class="banner-error">{{.NodeConfigFormError}}</div>
 {{if .CanAdmin}}
 <form hx-post="/machine/jail-provisioning" hx-target="#jail-provisioning-panel" hx-swap="innerHTML">
+  {{template "config_change_fields" .}}
   <input type="hidden" name="uplink" value="{{.NodeConfig.Uplink}}">
   <input type="hidden" name="nat_uplink" value="{{.NodeConfig.NATUplink}}">
   <input type="hidden" name="dhcp_dns_server" value="{{.NodeConfig.DNSServer}}">
@@ -540,6 +624,7 @@
 <div id="resource-scope-error" class="banner-error">{{.NodeConfigFormError}}</div>
 {{if .CanAdmin}}
 <form hx-post="/machine/resource-scope" hx-target="#resource-scope-panel" hx-swap="innerHTML">
+  {{template "config_change_fields" .}}
   <table class="settings-table">
     <tbody>
       <tr><th>ZFS base</th><td>{{if .NodeConfig.ZFSBase}}<code>{{.NodeConfig.ZFSBase}}</code>{{else}}<input type="text" name="zfs_base" placeholder="zroot/apiary" title="Base ZFS dataset this Comb creates VM/jail datasets under. Write-once: editable only while unset, since changing it later would orphan existing resources rather than move them." aria-label="ZFS base">{{end}}</td></tr>
@@ -572,6 +657,7 @@
 <div id="bhyve-config-error" class="banner-error">{{.NodeConfigFormError}}</div>
 {{if .CanAdmin}}
 <form hx-post="/machine/bhyve" hx-target="#bhyve-config-panel" hx-swap="innerHTML">
+  {{template "config_change_fields" .}}
   <table class="settings-table">
     <tbody>
       <tr><th>Boot ROM path</th><td><input type="text" name="bhyve_bootrom" placeholder="/usr/local/share/uefi-firmware/BHYVE_UEFI.fd" value="{{.NodeConfig.BhyveBootROM}}" title="Path to the UEFI firmware bhyve boots VMs with. Blank disables bhyve provisioning on this Comb entirely." aria-label="Boot ROM path"></td></tr>
@@ -598,6 +684,7 @@
 <div id="hast-error" class="banner-error">{{.NodeConfigFormError}}</div>
 {{if .CanAdmin}}
 <form hx-post="/machine/hast" hx-target="#hast-panel" hx-swap="innerHTML">
+  {{template "config_change_fields" .}}
   <table class="settings-table">
     <tbody>
       <tr><th>HAST support</th><td>
@@ -624,6 +711,7 @@
 <div id="peer-forwarding-error" class="banner-error">{{.NodeConfigFormError}}</div>
 {{if .CanAdmin}}
 <form hx-post="/machine/peer-forwarding" hx-target="#peer-forwarding-panel" hx-swap="innerHTML">
+  {{template "config_change_fields" .}}
   <table class="settings-table">
     <tbody>
       <tr><th>Peer managerd port</th><td><input type="number" min="1" max="65535" step="1" name="peer_managerd_port" placeholder="17700" value="{{.NodeConfig.PeerManagerdPort}}" title="TCP port other Combs' managerd dial when forwarding a request to this one. Blank uses this Comb's own rpc-addr port." aria-label="Peer managerd port"></td></tr>
@@ -663,6 +751,7 @@
 <div id="tls-error" class="banner-error">{{.NodeConfigFormError}}</div>
 {{if .CanAdmin}}
 <form hx-post="/machine/tls" hx-target="#tls-panel" hx-swap="innerHTML">
+  {{template "config_change_fields" .}}
   <table class="settings-table">
     <tbody>
       <tr><th>Certificate path</th><td><input type="text" name="tls_cert" placeholder="/home/claude/apiary-tls/fullchain.pem" value="{{.NodeConfig.TLSCert}}" title="Path to this Comb's own external gRPC API certificate. Leave both this and Key path blank to serve plaintext." aria-label="Certificate path"></td></tr>
@@ -689,6 +778,7 @@
 {{if .CanAdmin}}
 <p class="muted">Save a dedicated token-file path and certificate directory first. The token needs Cloudflare's <strong>Zone / SSL and Certificates / Edit</strong> permission for this zone. Apiary never displays or stores the token itself.</p>
 <form hx-post="/machine/origin-ca/config" hx-target="#origin-ca-panel" hx-swap="innerHTML">
+  {{template "config_change_fields" .}}
   <table class="settings-table"><tbody>
     <tr><th>Origin CA token file</th><td><input type="text" name="origin_ca_token_file" placeholder="/root/apiary-origin-ca.token" value="{{.NodeConfig.OriginCATokenFile}}" title="Path to a file containing only a Cloudflare Origin CA token. Never entered directly or displayed - only this path is stored." aria-label="Origin CA token file"></td></tr>
     <tr><th>Certificate directory</th><td><input type="text" name="origin_ca_directory" placeholder="/var/db/apiary/origin-ca" value="{{.NodeConfig.OriginCADirectory}}" title="Local directory issued certificate/key pairs are written into." aria-label="Certificate directory"></td></tr>
@@ -713,6 +803,7 @@
 <div id="cloudflare-config-error" class="banner-error">{{.NodeConfigFormError}}</div>
 {{if .CanAdmin}}
 <form hx-post="/machine/cloudflare-config" hx-target="#cloudflare-config-panel" hx-swap="innerHTML">
+  {{template "config_change_fields" .}}
   <table class="settings-table">
     <tbody>
       <tr><th>Token file path</th><td><input type="text" name="cloudflare_token_file" placeholder="/home/claude/cf-token" value="{{.NodeConfig.CloudflareTokenFile}}" title="Path to a file containing only a Cloudflare API token scoped to Zone:DNS:Edit. Leave blank to disable Cloudflare Tunnel exposure on this Comb entirely." aria-label="Token file path"></td></tr>
@@ -739,6 +830,7 @@
 <div id="assumption-tuning-error" class="banner-error">{{.NodeConfigFormError}}</div>
 {{if .CanAdmin}}
 <form hx-post="/machine/assumption-tuning" hx-target="#assumption-tuning-panel" hx-swap="innerHTML">
+  {{template "config_change_fields" .}}
   <table class="settings-table">
     <tbody>
       <tr><th>Check interval</th><td><input type="text" name="assumption_check_interval" placeholder="60s" value="{{.NodeConfig.AssumptionCheckInterval}}" title="How often the automated assumption-check loop runs on this Comb." aria-label="Check interval"></td></tr>
@@ -769,6 +861,7 @@
 <div id="internal-security-error" class="banner-error">{{.NodeConfigFormError}}</div>
 {{if .CanAdmin}}
 <form hx-post="/machine/internal-security" hx-target="#internal-security-panel" hx-swap="innerHTML">
+  {{template "config_change_fields" .}}
   <table class="settings-table">
     <tbody>
       <tr><th>Raftd token</th><td>

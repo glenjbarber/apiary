@@ -80,7 +80,8 @@ type firewallRuleView struct {
 // local settings (ADR-0049) - see api/rpc/manager.proto's
 // GetNodeConfigResponse.
 type nodeConfigView struct {
-	RPCAddr string
+	RPCAddr       string
+	ConfigChanges []configChangeView
 
 	Uplink                  string
 	NATUplink               string
@@ -166,6 +167,12 @@ type nodeConfigView struct {
 	HostOptions []string
 }
 
+type configChangeView struct {
+	Field, Previous, Current, Origin, Rationale, Evidence, ChangedAt string
+	Stale, MissingRationale                                          bool
+	Attested                                                         bool
+}
+
 // triState mirrors the JailEnabledMode/JailEnabledStatus convention
 // fromRPCNodeConfig already established for jail_enabled, generalized
 // for every other tri-state (nil/true/false) setting ADR-0070 added.
@@ -231,6 +238,16 @@ func fromRPCNodeConfig(d *rpcpb.GetNodeConfigResponse) nodeConfigView {
 		CloudflareTunnelCredentialsFile: d.GetCloudflareTunnelCredentialsFile(),
 		OriginCATokenFile:               d.GetOriginCaTokenFile(),
 		OriginCADirectory:               d.GetOriginCaDirectory(),
+	}
+	for _, change := range d.GetConfigChanges() {
+		changedAt := time.Unix(change.GetChangedAtUnix(), 0)
+		view.ConfigChanges = append(view.ConfigChanges, configChangeView{
+			Field: change.GetField(), Previous: change.GetPrevious(), Current: change.GetCurrent(),
+			Origin: change.GetOrigin(), Rationale: change.GetRationale(), Evidence: change.GetEvidence(),
+			ChangedAt: changedAt.Local().Format("2006-01-02 15:04 MST"), Attested: change.GetAttested(),
+			Stale:            time.Since(changedAt) > 365*24*time.Hour,
+			MissingRationale: strings.TrimSpace(change.GetRationale()) == "",
+		})
 	}
 	view.HASTEnabledMode, view.HASTEnabledStatus = triState(d.HastEnabled)
 	view.PeerTLSMode, view.PeerTLSStatus = triState(d.PeerTls)
