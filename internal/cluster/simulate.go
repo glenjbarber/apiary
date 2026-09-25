@@ -105,22 +105,50 @@ type ReplicaSyncObservation struct {
 // both reporting "status: complete" on this project's FreeBSD 16.0
 // build), and role "init" means the resource was never initialized on
 // that node at all, which is a confirmed-unusable replica rather than an
-// unknown one. Only hastd's own "unknown" is treated as undeterminable.
+// unknown one.
+//
+// Only a positive statement counts as evidence of badness. An ABSENT
+// status, hastd's own "unknown", and an unrecognized role are all
+// undeterminable, not out-of-sync: reporting "we could not check" as
+// "we checked and it is broken" is the exact inversion this feature
+// exists to prevent, and it is reachable in practice - internal/hast's
+// parser requires only a `role:` line, so `hastctl list` output that
+// carries a role but no `status:` line yields a non-error observation
+// with an empty status.
 func replicaInSync(o ReplicaSyncObservation) (inSync bool, undeterminable bool) {
 	if !o.Observed {
 		return false, true
 	}
+	role := strings.TrimSpace(o.Role)
+	status := strings.TrimSpace(o.ResourceStatus)
 	switch {
-	case strings.EqualFold(o.Role, hastRoleInit):
+	case strings.EqualFold(role, hastRoleInit):
+		// hastd positively reports the resource was never initialized
+		// on that node.
 		return false, false
-	case strings.EqualFold(o.ResourceStatus, hastStatusUnknown):
+	case status == "", strings.EqualFold(status, hastStatusUnknown):
+		// hastd gave us no usable statement about this resource.
 		return false, true
-	case strings.EqualFold(o.ResourceStatus, hastStatusComplete) &&
-		(strings.EqualFold(o.Role, hastRolePrimary) || strings.EqualFold(o.Role, hastRoleSecondary)):
+	case strings.EqualFold(status, hastStatusComplete) && isRealHASTRole(role):
 		return true, false
-	default:
+	case isRealHASTRole(role):
+		// A real role with a real, non-complete status (e.g.
+		// "degraded") IS a positive statement that it is unusable.
 		return false, false
+	default:
+		// An unrecognized role is not a real role, so nothing has been
+		// established either way - a new FreeBSD role must not be
+		// reported as a confirmed outage.
+		return false, true
 	}
+}
+
+// isRealHASTRole reports whether role is one of the two roles a usable
+// HAST replica actually runs in. Anything else (including "init", which
+// is handled separately, and any value a future FreeBSD release might
+// introduce) is not treated as a real role here.
+func isRealHASTRole(role string) bool {
+	return strings.EqualFold(role, hastRolePrimary) || strings.EqualFold(role, hastRoleSecondary)
 }
 
 const (
@@ -432,7 +460,7 @@ func ComputeQuorumImpact(servers []ServerSuffrage, targetNodeID string) QuorumIm
 func ComputeOwnedResourceImpacts(all []OwnedResourcePlacement, syncObservations []ReplicaSyncObservation, targetNodeID string) []OwnedResourceImpact {
 	byResource := make(map[string]ReplicaSyncObservation, len(syncObservations))
 	for _, o := range syncObservations {
-		byResource[o.ResourceID] = o
+		byResource[observationKey(o.Kind, o.ResourceID)] = o
 	}
 
 	var impacts []OwnedResourceImpact
@@ -446,7 +474,7 @@ func ComputeOwnedResourceImpacts(all []OwnedResourcePlacement, syncObservations 
 			impact.Verdict = RecoveryVerdictUnprotected
 			impact.Explanation = fmt.Sprintf("no HAST replica configured - Apiary has no redundancy path for this resource; recovery would depend on means outside its own tracking if %s is gone for good.", targetNodeID)
 		default:
-			observation, attempted := byResource[r.ID]
+			observation, attempted := byResource[observationKey(r.Kind, r.ID)]
 			if !attempted {
 				impact.Verdict = RecoveryVerdictUnverifiedReplica
 				impact.Explanation = fmt.Sprintf("a HAST replica is configured on %s, but this simulation could not query its live HAST status at all - confirm `hastctl status` on %s shows `status: complete` before attempting recovery.", r.ReplicaNodeID, r.ReplicaNodeID)
@@ -474,6 +502,14 @@ func ComputeOwnedResourceImpacts(all []OwnedResourcePlacement, syncObservations 
 	}
 	sort.Slice(impacts, func(i, j int) bool { return impacts[i].ID < impacts[j].ID })
 	return impacts
+}
+
+// observationKey identifies a resource by kind AND id, because HAST
+// resource names are vm-<id> and jail-<id> - a VM and a jail that happen
+// to share an id are two different HAST resources and must never be
+// shown each other's evidence.
+func observationKey(kind ResourceKind, id string) string {
+	return string(kind) + "/" + id
 }
 
 // syncDetailOrUnknown renders an observation's failure reason for an

@@ -3929,7 +3929,13 @@ func (s *Server) replicaSyncObservations(ctx context.Context, raftServers []*int
 		if s.hastStatus == nil {
 			observation.Detail = "HAST status is not configured on this node"
 		} else {
-			observed, err := s.hastStatus.Status(ctx, hastResourceName(resource))
+			// The local read shells out to `hastctl list` via
+			// exec.CommandContext, so an unbounded ctx here means a
+			// wedged hastctl could stall this whole RPC. Bound it the
+			// same way the remote path is bounded.
+			localCtx, localCancel := context.WithTimeout(ctx, reachabilityCheckTimeout)
+			observed, err := s.hastStatus.Status(localCtx, hastResourceName(resource))
+			localCancel()
 			switch {
 			case err != nil:
 				observation.Detail = err.Error()

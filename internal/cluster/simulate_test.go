@@ -417,7 +417,7 @@ func TestComputeOwnedResourceImpacts_DegradedIsOutOfSync(t *testing.T) {
 func TestComputeOwnedResourceImpacts_FailedQueryIsUnobservedNotInSync(t *testing.T) {
 	resources := []OwnedResourcePlacement{{ID: "vm-1", NodeID: "target", ReplicaNodeID: "replica-node", Kind: ResourceKindVM}}
 	observation := ReplicaSyncObservation{
-		ResourceID: "vm-1", ReplicaNodeID: "replica-node",
+		ResourceID: "vm-1", Kind: ResourceKindVM, ReplicaNodeID: "replica-node",
 		Observed: false, Detail: "the replica node did not answer: context deadline exceeded",
 	}
 	got := ComputeOwnedResourceImpacts(resources, []ReplicaSyncObservation{observation}, "target")
@@ -490,5 +490,71 @@ func TestReplicasOnlyEverBackedBySimulatedNodeOrOther(t *testing.T) {
 	}
 	if len(report.ReplicaBackedResources) != 0 {
 		t.Errorf("ReplicaBackedResources = %+v, want none - vm-1's replica is 'other', not the target", report.ReplicaBackedResources)
+	}
+}
+
+// TestComputeOwnedResourceImpacts_SilenceIsNotConfirmedFailure is the
+// regression guard for the ADR-0121 review finding that an absent
+// status or an unrecognized role was being reported as
+// replica_out_of_sync - i.e. "checked and broken" for evidence that
+// actually says only "could not check".
+func TestComputeOwnedResourceImpacts_SilenceIsNotConfirmedFailure(t *testing.T) {
+	tests := []struct {
+		name   string
+		role   string
+		status string
+	}{
+		{"absent status with a real role", "primary", ""},
+		{"whitespace-only status with a real role", "secondary", "   "},
+		{"unrecognized role despite a clean status", "promoted", "complete"},
+		{"both role and status unrecognized", "", ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			resources := []OwnedResourcePlacement{{ID: "vm-1", NodeID: "target", ReplicaNodeID: "replica-node", Kind: ResourceKindVM}}
+			got := ComputeOwnedResourceImpacts(resources, []ReplicaSyncObservation{replicaObservation(tt.role, tt.status)}, "target")
+			if got[0].Verdict != RecoveryVerdictReplicaUnobserved {
+				t.Fatalf("Verdict = %q, want %q - missing evidence must never be reported as a confirmed outage", got[0].Verdict, RecoveryVerdictReplicaUnobserved)
+			}
+			if got[0].ReplicaSync == nil {
+				t.Error("ReplicaSync = nil, want the evidence that produced the verdict")
+			}
+		})
+	}
+}
+
+// TestComputeOwnedResourceImpacts_PositiveBadnessIsStillOutOfSync
+// guards the other direction: a real role with a real, non-complete
+// status is a positive statement of badness and must NOT be softened
+// into "unobserved".
+func TestComputeOwnedResourceImpacts_PositiveBadnessIsStillOutOfSync(t *testing.T) {
+	resources := []OwnedResourcePlacement{{ID: "vm-1", NodeID: "target", ReplicaNodeID: "replica-node", Kind: ResourceKindVM}}
+	got := ComputeOwnedResourceImpacts(resources, []ReplicaSyncObservation{replicaObservation("secondary", "degraded")}, "target")
+	if got[0].Verdict != RecoveryVerdictReplicaOutOfSync {
+		t.Errorf("Verdict = %q, want %q - a real role reporting degraded is confirmed badness", got[0].Verdict, RecoveryVerdictReplicaOutOfSync)
+	}
+}
+
+// TestComputeOwnedResourceImpacts_EvidenceIsKeyedByKindAndID guards the
+// cross-contamination hole: vm-1 and jail-1 are different HAST
+// resources, so neither may be shown the other's evidence.
+func TestComputeOwnedResourceImpacts_EvidenceIsKeyedByKindAndID(t *testing.T) {
+	resources := []OwnedResourcePlacement{
+		{ID: "1", Name: "web-01", NodeID: "target", ReplicaNodeID: "replica-node", Kind: ResourceKindVM},
+		{ID: "1", Name: "app-01", NodeID: "target", ReplicaNodeID: "replica-node", Kind: ResourceKindJail},
+	}
+	vmObservation := ReplicaSyncObservation{
+		ResourceID: "1", Kind: ResourceKindVM, ReplicaNodeID: "replica-node",
+		Observed: true, Role: "secondary", ResourceStatus: "complete",
+	}
+	got := ComputeOwnedResourceImpacts(resources, []ReplicaSyncObservation{vmObservation}, "target")
+	if len(got) != 2 {
+		t.Fatalf("len(got) = %d, want 2", len(got))
+	}
+	if got[0].Kind != ResourceKindVM || got[0].Verdict != RecoveryVerdictReplicaInSync {
+		t.Errorf("VM impact = %+v, want the VM's own in-sync evidence", got[0])
+	}
+	if got[1].Kind != ResourceKindJail || got[1].Verdict != RecoveryVerdictUnverifiedReplica {
+		t.Errorf("jail impact = %+v, want unverified_replica - it must not borrow the VM's observation", got[1])
 	}
 }

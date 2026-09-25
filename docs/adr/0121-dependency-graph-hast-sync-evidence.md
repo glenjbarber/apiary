@@ -46,7 +46,9 @@ a three-way verdict in place of the old single `unverified_replica`:
   usable as-is: role `init` (never initialized on that node), or a real
   role whose status is not `complete` (e.g. `degraded`).
 - `replica_unobserved` - the replica was queried but could not be read:
-  RPC error, or hastd itself reported status `unknown`.
+  RPC error, hastd itself reported status `unknown`, **or hastd gave no
+  usable statement at all** (an absent status, or a role this build
+  does not recognize). See "Silence is not badness" below.
 
 `unverified_replica` is **retained** and remains distinct: it now means
 no query was even *attempted* - this node has no peer forwarding
@@ -58,10 +60,35 @@ and failed.
 The `unprotected` verdict is unchanged and never gains evidence, because
 it is a statement about absent configuration, not about observed state.
 
+### Silence is not badness
+
+`replica_out_of_sync` requires a **positive statement** that the replica
+is unusable. An absent status, hastd's own `unknown`, and any role value
+this build does not recognize are all `replica_unobserved`, never
+out-of-sync.
+
+This distinction is reachable, not theoretical: `internal/hast`'s parser
+treats a `role:` line as sufficient to parse successfully, so
+`hastctl list` output that carries a role but no `status:` line yields a
+non-error observation with an empty status. The first implementation of
+this ADR bucketed that - and any unrecognized role - into
+`replica_out_of_sync`, which would have stated "confirmed NOT usable
+as-is" on the strength of evidence that said only "could not check". That
+is the same inversion this feature exists to prevent, and it was caught
+in review. The same rule that makes a *real* role reporting `degraded`
+out-of-sync keeps an *unrecognized* role out of it: one is hastd
+reporting trouble, the other is Apiary not understanding hastd.
+
 Interpretation stays in `internal/cluster` as a pure function over
 already-fetched observations (`ComputeOwnedResourceImpacts`), preserving
-ADR-0052's no-I/O-in-`cluster` separation. All dialing stays in the RPC
-handler, bounded by the existing three-second `reachabilityCheckTimeout`.
+ADR-0052's no-I/O-in-`cluster` separation. Observations are keyed by
+**kind and id**, not id alone: HAST resource names are `vm-<id>` and
+`jail-<id>`, so a VM and a jail sharing an id are different resources
+and must never be shown each other's evidence. All dialing stays in the
+RPC handler, bounded by the existing three-second
+`reachabilityCheckTimeout` - including the local read, which shells out
+to `hastctl list` and would otherwise stall the whole RPC on a wedged
+hastd.
 
 The new `ReplicaSyncEvidence` message carries the verbatim observation
 (role, status, replication, or the failure detail) alongside every
