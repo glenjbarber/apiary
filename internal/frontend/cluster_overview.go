@@ -180,33 +180,39 @@ func summarizeClusterNode(nodeID string, stats statsView, fetchErr string) clust
 // Status() call supplies that node's own applied/last-log index and
 // heartbeat; for the local node these come from anchor itself, with no
 // second self-dial.
+// nodeHealthSignals gathers this node's fresh raw facts and hands them
+// to health.SignalsFrom, which owns the actual derivation rules (ADR-0122
+// moved them out of this file and into internal/health, so this UI path
+// and managerd's ClusterHealth RPC cannot compute the same verdict by
+// two different rule sets). This function still owns all of the I/O -
+// the frontend is a separate process from managerd and gathers its own
+// evidence, exactly as ADR-0056 designed.
 func (s *Server) nodeHealthSignals(ctx context.Context, nodeID, localNodeID string, anchor *rpcpb.StatusResponse, hostStats *rpcpb.HostStatsResponse, hostStatsErr error, now time.Time) health.NodeSignals {
-	sig := health.NodeSignals{NodeID: nodeID, MembershipObservedAt: now}
+	inputs := health.Inputs{
+		NodeID:                   nodeID,
+		IsLocal:                  nodeID == localNodeID,
+		PeerForwardingConfigured: s.peers != nil,
+		MembershipObserved:       anchor.GetRaftReachable(),
+		MembershipObservedAt:     now,
+	}
 
-	sig.MembershipObserved = anchor.GetRaftReachable()
-	if sig.MembershipObserved {
+	if inputs.MembershipObserved {
 		for _, m := range anchor.GetMembers() {
 			if m.GetNodeId() == nodeID {
-				sig.IsRaftMember = true
-				sig.Suffrage = health.ParseSuffrage(m.GetSuffrage())
+				inputs.MemberFound = true
+				inputs.Suffrage = health.ParseSuffrage(m.GetSuffrage())
 				break
 			}
 		}
 	}
 
-	switch {
-	case nodeID == localNodeID:
-		sig.PeerReachability = health.ReachabilityReachable
-	case s.peers == nil:
-		// No peer forwarding configured at all - fetchHostStats above
-		// silently fell back to this node's own local client (a
-		// pre-existing quirk, not introduced here), so its result says
-		// nothing trustworthy about the actual remote node.
-		sig.PeerReachability = health.ReachabilityUnknown
-	case hostStatsErr == nil:
-		sig.PeerReachability = health.ReachabilityReachable
-	default:
-		sig.PeerReachability = health.ReachabilityUnreachable
+	// fetchHostStats above silently falls back to this node's own local
+	// client when s.peers is nil, so in that case its result says nothing
+	// trustworthy about the actual remote node - attempt nothing and let
+	// reachability read as unknown, which is what it is.
+	if !inputs.IsLocal && s.peers != nil {
+		inputs.PeerDialAttempted = true
+		inputs.PeerDialSucceeded = hostStatsErr == nil
 	}
 
 	var peerStatus *rpcpb.StatusResponse
@@ -219,35 +225,35 @@ func (s *Server) nodeHealthSignals(ctx context.Context, nodeID, localNodeID stri
 		}
 	}
 	if peerStatus != nil {
-		sig.HeartbeatObserved = true
-		sig.HeartbeatOK = peerStatus.GetRaftReachable()
+		inputs.HeartbeatObserved = true
+		inputs.HeartbeatOK = peerStatus.GetRaftReachable()
 		if peerStatus.GetRaftReachable() {
-			sig.AppliedIndexObserved = true
-			sig.AppliedIndex = peerStatus.GetRaftAppliedIndex()
-			sig.LastLogIndex = peerStatus.GetRaftLastLogIndex()
-			sig.IndicesObservedAt = now
+			inputs.AppliedIndexObserved = true
+			inputs.AppliedIndex = peerStatus.GetRaftAppliedIndex()
+			inputs.LastLogIndex = peerStatus.GetRaftLastLogIndex()
+			inputs.IndicesObservedAt = now
 		}
 	}
 
 	if hostStatsErr == nil && hostStats != nil {
-		sig.ReconcileObservedAt = now
-		sig.ReconcileIntervalSeconds = hostStats.GetReconcileIntervalSeconds()
+		inputs.ReconcileObservedAt = now
+		inputs.ReconcileIntervalSeconds = hostStats.GetReconcileIntervalSeconds()
 		// reconcile_interval_seconds == 0 is the only reliable "no
 		// Reconciler configured on this node" signal - a 0 timestamp
 		// alone can't distinguish that from "configured but no tick yet"
-		// (see HostStatsResponse's own doc comment).
-		sig.ReconcilerConfigured = sig.ReconcileIntervalSeconds > 0
+		// (see HostStatsResponse's own doc comment). SignalsFrom derives
+		// ReconcilerConfigured from exactly this field.
 		if unix := hostStats.GetLastReconcileAttemptUnix(); unix > 0 {
-			sig.ReconcileEverAttempted = true
-			sig.LastReconcileAttempt = time.Unix(unix, 0)
+			inputs.ReconcileEverAttempted = true
+			inputs.LastReconcileAttempt = time.Unix(unix, 0)
 		}
 		if unix := hostStats.GetLastReconcileSuccessUnix(); unix > 0 {
-			sig.ReconcileEverSucceeded = true
-			sig.LastReconcileSuccess = time.Unix(unix, 0)
+			inputs.ReconcileEverSucceeded = true
+			inputs.LastReconcileSuccess = time.Unix(unix, 0)
 		}
 	}
 
-	return sig
+	return health.SignalsFrom(inputs)
 }
 
 // clusterNodeEvidence gathers the same host and Evidence-Aware Health facts

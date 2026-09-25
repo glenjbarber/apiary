@@ -120,6 +120,10 @@ func (f *fakeClient) GetLocalNodeHealth(context.Context, *rpcpb.GetLocalNodeHeal
 	return &rpcpb.GetLocalNodeHealthResponse{}, nil
 }
 
+func (f *fakeClient) ClusterHealth(context.Context, *rpcpb.ClusterHealthRequest, ...grpc.CallOption) (*rpcpb.ClusterHealthResponse, error) {
+	return &rpcpb.ClusterHealthResponse{}, nil
+}
+
 func (f *fakeClient) ListAssumptionClaims(context.Context, *rpcpb.ListAssumptionClaimsRequest, ...grpc.CallOption) (*rpcpb.ListAssumptionClaimsResponse, error) {
 	return &rpcpb.ListAssumptionClaimsResponse{}, nil
 }

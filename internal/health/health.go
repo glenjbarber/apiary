@@ -199,3 +199,118 @@ type NodeSignals struct {
 // node's own reported ReconcileIntervalSeconds, never one global
 // constant.
 const reconcileFreshnessMultiplier = 3
+
+// Inputs is the raw, per-node material a caller gathered by whatever
+// means it likes, reduced to plain Go values. It exists so the rules
+// that turn scattered observations into a NodeSignals live in exactly
+// one place instead of once per caller - ADR-0122 moved them here from
+// internal/frontend, which was then the only implementation, and
+// internal/manager's ClusterHealth RPC as a second consumer.
+//
+// A caller still owns all I/O. This type and SignalsFrom do no
+// gathering, no dialing, and hold no state: they exist to keep the
+// *derivation* from drifting between a UI path and an API path, which
+// would be the worst possible failure for a feature whose entire
+// promise is that one answer means the same thing everywhere.
+type Inputs struct {
+	NodeID string
+
+	// Membership comes from the one anchor read shared by every node
+	// being evaluated in a single request - raft membership is a
+	// cluster-wide-consistent replicated fact, so it is never fetched
+	// per-node. MemberFound false with MembershipObserved true means
+	// this node is genuinely not a raft member.
+	MembershipObserved   bool
+	MembershipObservedAt time.Time
+	MemberFound          bool
+	Suffrage             Suffrage
+
+	// IsLocal is the one caller-side fact that is true by definition
+	// rather than by observation: a node answering its own request needs
+	// no dial to be reachable.
+	IsLocal bool
+
+	// PeerForwardingConfigured records whether the answering node can
+	// dial peers at all. When false, no remote node's reachability is
+	// ever established by observation, and every one of them must read
+	// as Unknown rather than inheriting a local answer.
+	PeerForwardingConfigured bool
+
+	// PeerDialAttempted/PeerDialSucceeded describe an actual dial to
+	// this node. Attempted false means nothing was tried, which is
+	// different from tried-and-failed.
+	PeerDialAttempted bool
+	PeerDialSucceeded bool
+
+	// Heartbeat is this node's own self-report about its local raft.
+	// Meaningful only once the node is known reachable.
+	HeartbeatObserved bool
+	HeartbeatOK       bool
+
+	AppliedIndexObserved bool
+	AppliedIndex         uint64
+	LastLogIndex         uint64
+	IndicesObservedAt    time.Time
+
+	// ReconcilerConfigured is derived from a nonzero interval by the
+	// caller (see SignalsFrom) - a 0 interval is the only reliable
+	// "no Reconciler here" signal, since a 0 timestamp alone cannot
+	// distinguish that from "configured but never ticked."
+	ReconcileIntervalSeconds uint32
+	ReconcileObservedAt      time.Time
+	ReconcileEverAttempted   bool
+	LastReconcileAttempt     time.Time
+	ReconcileEverSucceeded   bool
+	LastReconcileSuccess     time.Time
+}
+
+// SignalsFrom applies the fixed derivation rules that turn gathered
+// observations into the exact NodeSignals ComputeNodeHealth expects. It
+// performs no evaluation of its own and never decides a verdict - it
+// only decides what was and was not observed, which is the part two
+// independent implementations would otherwise get subtly different.
+func SignalsFrom(in Inputs) NodeSignals {
+	s := NodeSignals{
+		NodeID:                   in.NodeID,
+		MembershipObserved:       in.MembershipObserved,
+		MembershipObservedAt:     in.MembershipObservedAt,
+		AppliedIndexObserved:     in.AppliedIndexObserved,
+		AppliedIndex:             in.AppliedIndex,
+		LastLogIndex:             in.LastLogIndex,
+		IndicesObservedAt:        in.IndicesObservedAt,
+		ReconcileIntervalSeconds: in.ReconcileIntervalSeconds,
+		ReconcileObservedAt:      in.ReconcileObservedAt,
+		ReconcileEverAttempted:   in.ReconcileEverAttempted,
+		LastReconcileAttempt:     in.LastReconcileAttempt,
+		ReconcileEverSucceeded:   in.ReconcileEverSucceeded,
+		LastReconcileSuccess:     in.LastReconcileSuccess,
+	}
+
+	if in.MembershipObserved && in.MemberFound {
+		s.IsRaftMember = true
+		s.Suffrage = in.Suffrage
+	} else if in.MemberFound {
+		// A member row was found but the shared anchor read itself did
+		// not confirm - membership must not be inferred from the row.
+		s.Suffrage = in.Suffrage
+	}
+
+	switch {
+	case in.IsLocal:
+		s.PeerReachability = ReachabilityReachable
+	case !in.PeerForwardingConfigured || !in.PeerDialAttempted:
+		// Nothing was dialed, so nothing was learned. This must never
+		// inherit the local node's trivially-true reachability.
+		s.PeerReachability = ReachabilityUnknown
+	case in.PeerDialSucceeded:
+		s.PeerReachability = ReachabilityReachable
+	default:
+		s.PeerReachability = ReachabilityUnreachable
+	}
+
+	s.HeartbeatObserved = in.HeartbeatObserved
+	s.HeartbeatOK = in.HeartbeatOK
+	s.ReconcilerConfigured = in.ReconcileIntervalSeconds > 0
+
+	return s
+}

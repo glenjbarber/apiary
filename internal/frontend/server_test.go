@@ -221,6 +221,10 @@ func (f *fakeClient) GetLocalNodeHealth(context.Context, *rpcpb.GetLocalNodeHeal
 	return &rpcpb.GetLocalNodeHealthResponse{}, nil
 }
 
+func (f *fakeClient) ClusterHealth(context.Context, *rpcpb.ClusterHealthRequest, ...grpc.CallOption) (*rpcpb.ClusterHealthResponse, error) {
+	return &rpcpb.ClusterHealthResponse{}, nil
+}
+
 func (f *fakeClient) CreateVM(_ context.Context, in *rpcpb.CreateVMRequest, _ ...grpc.CallOption) (*rpcpb.CreateVMResponse, error) {
 	f.lastCreateReq = in
 	return f.createResp, f.createErr

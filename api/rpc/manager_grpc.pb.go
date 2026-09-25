@@ -43,6 +43,7 @@ const (
 	ManagerService_DeleteISO_FullMethodName                   = "/apiary.rpc.v1.ManagerService/DeleteISO"
 	ManagerService_HostStats_FullMethodName                   = "/apiary.rpc.v1.ManagerService/HostStats"
 	ManagerService_GetLocalHASTResourceStatus_FullMethodName  = "/apiary.rpc.v1.ManagerService/GetLocalHASTResourceStatus"
+	ManagerService_ClusterHealth_FullMethodName               = "/apiary.rpc.v1.ManagerService/ClusterHealth"
 	ManagerService_GetVMConsole_FullMethodName                = "/apiary.rpc.v1.ManagerService/GetVMConsole"
 	ManagerService_ProxyVMConsole_FullMethodName              = "/apiary.rpc.v1.ManagerService/ProxyVMConsole"
 	ManagerService_GetVMSerialLog_FullMethodName              = "/apiary.rpc.v1.ManagerService/GetVMSerialLog"
@@ -231,6 +232,26 @@ type ManagerServiceClient interface {
 	// cluster-wide freshness requires independently querying the configured
 	// owner and replica and retaining failures as unknown.
 	GetLocalHASTResourceStatus(ctx context.Context, in *GetLocalHASTResourceStatusRequest, opts ...grpc.CallOption) (*GetLocalHASTResourceStatusResponse, error)
+	// ClusterHealth returns the Evidence-Aware Health verdict for every
+	// known Comb, computed server-side (ADR-0122).
+	//
+	// ADR-0056 deliberately kept this computation inside the web UI, so
+	// Status/HostStats callers other than that page never paid a
+	// cluster-wide fan-out. This RPC is the sanctioned way for a
+	// non-HTML consumer (restshimd, a future CLI) to get the same computed
+	// five-state verdict the UI shows, instead of reimplementing
+	// internal/health's decision chain against the raw wire fields and
+	// risking the two paths drifting apart.
+	//
+	// It answers for whoever receives it, like HostStats: it is a
+	// cluster-wide read, but there is no leader concept to forward, and
+	// every node's evidence is gathered independently.
+	//
+	// Like every multi-source read in this service it is NOT an atomic
+	// snapshot: each node's HostStats and Status are separate sequential
+	// reads, so one node's verdict can reflect a slightly earlier moment
+	// than another's.
+	ClusterHealth(ctx context.Context, in *ClusterHealthRequest, opts ...grpc.CallOption) (*ClusterHealthResponse, error)
 	// GetVMConsole reports how to reach a running VM's VNC framebuffer,
 	// for the web UI's noVNC-based console page (ADR-0020). Like HostStats,
 	// this only answers for a VM actually running on *this* node - see
@@ -840,6 +861,16 @@ func (c *managerServiceClient) GetLocalHASTResourceStatus(ctx context.Context, i
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(GetLocalHASTResourceStatusResponse)
 	err := c.cc.Invoke(ctx, ManagerService_GetLocalHASTResourceStatus_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *managerServiceClient) ClusterHealth(ctx context.Context, in *ClusterHealthRequest, opts ...grpc.CallOption) (*ClusterHealthResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ClusterHealthResponse)
+	err := c.cc.Invoke(ctx, ManagerService_ClusterHealth_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -1614,6 +1645,26 @@ type ManagerServiceServer interface {
 	// cluster-wide freshness requires independently querying the configured
 	// owner and replica and retaining failures as unknown.
 	GetLocalHASTResourceStatus(context.Context, *GetLocalHASTResourceStatusRequest) (*GetLocalHASTResourceStatusResponse, error)
+	// ClusterHealth returns the Evidence-Aware Health verdict for every
+	// known Comb, computed server-side (ADR-0122).
+	//
+	// ADR-0056 deliberately kept this computation inside the web UI, so
+	// Status/HostStats callers other than that page never paid a
+	// cluster-wide fan-out. This RPC is the sanctioned way for a
+	// non-HTML consumer (restshimd, a future CLI) to get the same computed
+	// five-state verdict the UI shows, instead of reimplementing
+	// internal/health's decision chain against the raw wire fields and
+	// risking the two paths drifting apart.
+	//
+	// It answers for whoever receives it, like HostStats: it is a
+	// cluster-wide read, but there is no leader concept to forward, and
+	// every node's evidence is gathered independently.
+	//
+	// Like every multi-source read in this service it is NOT an atomic
+	// snapshot: each node's HostStats and Status are separate sequential
+	// reads, so one node's verdict can reflect a slightly earlier moment
+	// than another's.
+	ClusterHealth(context.Context, *ClusterHealthRequest) (*ClusterHealthResponse, error)
 	// GetVMConsole reports how to reach a running VM's VNC framebuffer,
 	// for the web UI's noVNC-based console page (ADR-0020). Like HostStats,
 	// this only answers for a VM actually running on *this* node - see
@@ -2057,6 +2108,9 @@ func (UnimplementedManagerServiceServer) HostStats(context.Context, *HostStatsRe
 }
 func (UnimplementedManagerServiceServer) GetLocalHASTResourceStatus(context.Context, *GetLocalHASTResourceStatusRequest) (*GetLocalHASTResourceStatusResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetLocalHASTResourceStatus not implemented")
+}
+func (UnimplementedManagerServiceServer) ClusterHealth(context.Context, *ClusterHealthRequest) (*ClusterHealthResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ClusterHealth not implemented")
 }
 func (UnimplementedManagerServiceServer) GetVMConsole(context.Context, *GetVMConsoleRequest) (*GetVMConsoleResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetVMConsole not implemented")
@@ -2688,6 +2742,24 @@ func _ManagerService_GetLocalHASTResourceStatus_Handler(srv interface{}, ctx con
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(ManagerServiceServer).GetLocalHASTResourceStatus(ctx, req.(*GetLocalHASTResourceStatusRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ManagerService_ClusterHealth_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ClusterHealthRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ManagerServiceServer).ClusterHealth(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ManagerService_ClusterHealth_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ManagerServiceServer).ClusterHealth(ctx, req.(*ClusterHealthRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -3920,6 +3992,10 @@ var ManagerService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "GetLocalHASTResourceStatus",
 			Handler:    _ManagerService_GetLocalHASTResourceStatus_Handler,
+		},
+		{
+			MethodName: "ClusterHealth",
+			Handler:    _ManagerService_ClusterHealth_Handler,
 		},
 		{
 			MethodName: "GetVMConsole",
