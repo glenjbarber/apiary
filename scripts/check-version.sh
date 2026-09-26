@@ -42,7 +42,16 @@ done
 echo "=== ldflags the Makefile would use ==="
 scripts/build-ldflags.sh
 scripts/build-ldflags.sh --id
+scripts/build-ldflags.sh --why
 make check-ldflags
+echo
+
+# Which changes make a build dirty is a rule with a permissive failure
+# mode, so it gets its own tests rather than being trusted because it
+# looks right. They run against throwaway fixture repositories, so this
+# never modifies the checkout it is run from.
+echo "=== which worktree changes make a build dirty ==="
+scripts/test-worktree-state.sh
 echo
 
 for b in $BINS; do
