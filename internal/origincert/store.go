@@ -47,6 +47,21 @@ const (
 	ExpiryOK      ExpiryStatus = "ok"
 	ExpirySoon    ExpiryStatus = "soon"
 	ExpiryExpired ExpiryStatus = "expired"
+
+	// ExpiryUnknown is "the check could not be made" - the file was
+	// unreadable, the content would not parse, or nothing has ever
+	// observed this certificate. It is deliberately a value of this
+	// same type rather than a separate one so there is a single
+	// vocabulary for a certificate's lifetime across the renewal loop
+	// and every surface that renders one (ADR-0056, ADR-0118: an
+	// absent check is not a failed check, and never a passing one).
+	//
+	// Expiry() below can never return it: an InventoryEntry already
+	// holds a recorded expiry, so classifying one is a comparison, not
+	// an observation. ExpiryUnknown is produced only where a real
+	// check is attempted and cannot be completed - see
+	// internal/certmgr, which is the package that performs that check.
+	ExpiryUnknown ExpiryStatus = "unknown"
 )
 
 // Expiry classifies e's remaining lifetime as of now.

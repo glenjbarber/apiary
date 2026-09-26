@@ -1,0 +1,80 @@
+{{define "certificates_page"}}
+<!DOCTYPE html>
+<html lang="en">
+{{template "head" .}}
+<body class="app-layout">
+  {{template "nav" .}}
+  <main class="content" id="main-content">
+  {{template "page_header" (pageHeader "Certificates" "Which operator-facing certificates this Comb holds, when each one expires, and how close that is. Read-only: nothing on this page issues, renews, or restarts anything.")}}
+
+  {{if .CertificateError}}<div class="banner-error">{{.CertificateError}}</div>{{end}}
+
+  <div class="panel">
+    <h3>Scope</h3>
+    <p class="muted">
+      {{.CertificateScope}} only. This is a local inventory plus a local read of each
+      certificate file, not a Colony-wide view: there is no replicated certificate
+      inventory, and no other Comb's certificate is shown here. Reaching every Comb
+      means visiting each one. Certificate material itself is never displayed &mdash;
+      only the public facts about a certificate's lifetime.
+    </p>
+  </div>
+
+  <div class="panel">
+    <h3>Expiry</h3>
+    <p class="muted">{{.ExpiryWindowNote}}</p>
+    <table>
+      <thead>
+        <tr><th>Name</th><th>Service</th><th>Hostnames</th><th>Verdict</th><th>Expires (checked from the file)</th><th>Issued</th><th>Auto-renew</th></tr>
+      </thead>
+      <tbody id="certificate-rows">
+        {{range .Certificates}}
+        <tr>
+          <td>{{.Name}}</td>
+          <td>{{.Service}}</td>
+          <td>{{.Hostnames}}</td>
+          <td>
+            <span class="badge {{.BadgeClass}}" title="{{.StatusNote}}">{{.Status}}</span>
+            <div class="muted">{{.StatusNote}}</div>
+          </td>
+          <td>
+            {{if .Expires}}{{.Expires}}<div class="muted">{{.Remaining}}</div>{{else}}<span class="muted">not observed</span>{{end}}
+          </td>
+          <td>{{if .NotBefore}}{{.NotBefore}}<div class="muted">{{.ValidFor}}</div>{{else}}<span class="muted">&mdash;</span>{{end}}</td>
+          {{/* Auto-renew "off" is a disabled feature, not an unknown one, so it uses the muted "stopped" class. Giving it the grey "unknown" class would put a second meaning on the same colour a row above. */}}
+          <td>{{if .AutoRenew}}<span class="badge true">on</span>{{else}}<span class="badge stopped">off</span>{{end}}</td>
+        </tr>
+        <tr>
+          <td colspan="7" class="muted">
+            Certificate file <code>{{.CertPath}}</code> &middot;
+            recorded expiry {{.RecordedExpires}} &middot;
+            inventory last written {{.RecordedAt}}
+          </td>
+        </tr>
+        {{else}}
+        <tr><td colspan="7" class="muted"><em>No certificates are recorded in this Comb's inventory.</em> An absent inventory and an empty one are indistinguishable, and on a Comb with no Origin CA certificate directory configured - the unconfigured case - empty is the expected answer.</td></tr>
+        {{end}}
+      </tbody>
+    </table>
+  </div>
+
+  <div class="panel">
+    <h3>How to read the verdict</h3>
+    <ul>
+      <li><span class="badge ok">ok</span> &mdash; the certificate file was read and parsed just now, and has more than the window above left.</li>
+      <li><span class="badge soon">soon</span> &mdash; read and parsed just now, and inside the window above. A renewing Comb will attempt renewal on its own tick; one that is not renewing needs an operator.</li>
+      <li><span class="badge expired">expired</span> &mdash; read and parsed just now, and its own validity has already ended. The serving service is presenting a certificate that clients will reject.</li>
+      <li><span class="badge unknown">unknown</span> &mdash; the check did not complete: the file was missing, unreadable, or would not parse. This is neither healthy nor expired. It is also not a statement about this Comb's health or its quorum membership &mdash; a bad serving certificate and an unreachable Comb are separate facts, and this verdict can only ever be the first one.</li>
+    </ul>
+    <p class="muted">
+      &ldquo;Recorded expiry&rdquo; above is this Comb's own inventory copy, written when the
+      certificate was installed. It is shown as context, never as the verdict: it records
+      what a file was when Apiary put it there, and the verdict column is the only thing on
+      this page that has read the file since.
+    </p>
+  </div>
+  </main>
+  {{template "footer" .}}
+</body>
+</html>
+{{end}}

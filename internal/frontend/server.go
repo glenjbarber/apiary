@@ -459,6 +459,21 @@ type pageData struct {
 	OriginCertificates   []originCertificateView
 	OriginCAError        string
 	OriginCAOK           string
+
+	// Certificates backs the read-only Certificates page
+	// ("/certificates", see internal/frontend/certificates.go) - one
+	// row per certificate this Comb holds, each carrying its own
+	// checked expiry verdict. CertificateScope names the Comb those
+	// rows are about, so the page can say plainly that it is not a
+	// Colony-wide view. CertificateError is a failed inventory fetch
+	// (never a failed certificate check - that is per row).
+	// ExpiryWindowNote states the page's threshold policy in prose, so
+	// the number lives in one named Go constant rather than in a
+	// template.
+	Certificates     []certificateRow
+	CertificateScope string
+	CertificateError string
+	ExpiryWindowNote string
 }
 
 // userView is one row of the Users page's table.
@@ -929,6 +944,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /invariants", s.handleInvariantsPage)
 	s.mux.HandleFunc("GET /why-not", s.handleWhyNotPage)
 	s.mux.HandleFunc("GET /resilience-coverage", s.handleCoveragePage)
+	s.mux.HandleFunc("GET /certificates", s.handleCertificatesPage)
 
 	// The host package inventory page (internal/hostpkg). Read-only and
 	// Viewer-gated; see registerHostPkgRoutes' own comment for why there
