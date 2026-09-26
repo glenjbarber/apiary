@@ -22,6 +22,49 @@
       </div>
     </section>
 
+    {{/* Why is this Comb in the state it is in? Each row below is one REAL
+         observation, carrying the error text Apiary actually holds, the
+         resource it concerns, when that evidence was gathered, and how stale
+         it is. Three states are kept strictly apart - "never observed" is
+         neither healthy nor failed - and the never-observed state is styled
+         with the grey `unknown` badge, never with the green `ready` one. The
+         data-evidence-state attribute carries the same distinction in a form
+         a test (or a stylesheet) can read without guessing from a class
+         name. */}}
+    <section class="panel" id="comb-causes" data-evidence-state="{{.EvidenceNode.CauseState}}" style="margin-top:1rem">
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:1rem;flex-wrap:wrap">
+        <h3 style="margin:0">Why this Comb is in this state</h3>
+        <span class="badge {{.EvidenceNode.CauseBadgeClass}}">overall: {{.EvidenceNode.CauseBadgeLabel}}</span>
+      </div>
+      <p class="muted">Every row is a real observation. "not observed" means no evidence was collected at all - it is never treated as healthy, and it is never given invented error text.</p>
+      <div class="table-scroll">
+        <table>
+          <thead><tr><th>State</th><th>Source</th><th>What is wrong</th><th>Affected resource</th><th>Observed</th><th>Staleness</th></tr></thead>
+          <tbody>
+            {{range .EvidenceNode.Causes}}
+            <tr data-cause-state="{{.State}}">
+              <td><span class="badge {{.BadgeClass}}">{{.BadgeLabel}}</span><div class="muted"><code>{{.State}}</code></div></td>
+              <td><strong>{{.Source}}</strong></td>
+              <td>
+                {{.Detail}}
+                {{if .RelatedRefs}}<div class="muted">Also concerns: {{range $i, $r := .RelatedRefs}}{{if $i}}; {{end}}{{$r}}{{end}}</div>{{end}}
+                {{if .WrittenAtUnknown}}<div class="muted">Timestamp: {{.WrittenAtUnknown}}</div>{{end}}
+              </td>
+              <td>
+                {{if .ResourceName}}<strong>{{.ResourceName}}</strong> <span class="muted">({{.ResourceKind}})</span>{{else if .ResourceID}}<strong>{{.ResourceID}}</strong> <span class="muted">({{.ResourceKind}})</span>{{else}}<span class="muted">Comb-level - not tied to one resource</span>{{end}}
+                {{if .ResourceLink}}<div><a href="{{.ResourceLink}}">Open this {{.ResourceKind}}</a></div>{{end}}
+              </td>
+              <td>{{if .ObservedAtKnown}}{{if or (eq .State "never_observed") (eq .State "not_applicable")}}<em>checked {{.ObservedAt}} - nothing was observed</em>{{else}}{{.ObservedAt}}{{end}}{{else}}<em>never observed</em>{{end}}<div class="muted">{{.Age}}</div></td>
+              <td>{{if .Stale}}<span class="badge stale">stale</span>{{.StaleNote}}{{else if or (eq .State "never_observed") (eq .State "not_applicable")}}<span class="muted">no age - there is no observation to age</span>{{else}}<span class="muted">{{if .AgeSeconds}}age {{.AgeSeconds}}s{{else}}current{{end}}</span>{{end}}</td>
+            </tr>
+            {{else}}
+            <tr><td colspan="6"><em>No cause was observed for this Comb, and no evidence gap was reported either. That is not the same as healthy - read the observed signals below.</em></td></tr>
+            {{end}}
+          </tbody>
+        </table>
+      </div>
+    </section>
+
     <section class="panel">
       <h3>Observed signals</h3>
       <table>
