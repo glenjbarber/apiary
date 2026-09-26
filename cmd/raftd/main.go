@@ -25,6 +25,7 @@ import (
 	internalpb "github.com/glenjbarber/apiary/api/internalpb"
 	raftnode "github.com/glenjbarber/apiary/internal/raft"
 	"github.com/glenjbarber/apiary/internal/raftdconfig"
+	"github.com/glenjbarber/apiary/internal/restartplan"
 )
 
 const socketPerm = 0o660
@@ -165,8 +166,42 @@ func run() error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
+	// ADR-0125 §2: this process may BE the restarted one. If managerd
+	// reserved a restart-lease FSM lease for apiary_raftd on this node
+	// and wrote the pending-restart record before issuing
+	// `service apiary_raftd restart`, that record is on disk right now
+	// and only this new process can honestly say "I am back". The lease
+	// has no TTL, so a node that never confirms stays blocked
+	// cluster-wide forever.
+	//
+	// Launched as a goroutine, after the server is already serving, for
+	// two reasons. The confirmation is a loopback call to a process rc.d
+	// started before this one - there is no reason for raftd's own
+	// readiness to wait on it, and blocking startup on it would mean a
+	// missing or hung managerd delayed raftd coming up at all. And the
+	// hook is bounded (5 attempts, 3s apart) and non-fatal by
+	// construction; see confirm.go. It is also not redundant with
+	// anything: cmd/managerd has its own equivalent hook for
+	// apiary_managerd, and the two services have independent leases.
+	confirmCtx, cancelConfirm := context.WithCancel(ctx)
+	defer cancelConfirm()
+	go confirmPendingRestartOnStartup(confirmCtx, restartConfirmDeps{
+		NodeID:    resolvedNodeID,
+		Service:   restartplan.DefaultService,
+		Store:     restartplan.NewPendingStore(restartplan.DefaultStateDir),
+		Confirmer: newManagerdConfirmer(logf),
+		Clock:     restartplan.SystemClock{},
+		Logf:      logf,
+		Results:   restartplan.NewResultStore(restartplan.DefaultResultDir),
+	})
+
 	select {
 	case <-ctx.Done():
+		// Stop the confirmation hook as part of shutting down rather than
+		// leaving it to run its own budget out against a managerd that
+		// may itself be going away. It is bounded either way; this just
+		// makes the shutdown deterministic.
+		cancelConfirm()
 		log.Printf("raftd: shutting down")
 	case err := <-serveErrCh:
 		if err != nil {
