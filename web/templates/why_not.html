@@ -8,6 +8,23 @@
     <li>
       <span class="muted">[{{.Invariant}}]</span> {{.Detail}}
       {{if .Evidence}}
+      {{if eq .Invariant "quorum-tolerance"}}
+      {{with index .Evidence 0}}
+      <div class="quorum-summary" style="margin-top:.5rem; padding:.5rem; background:var(--wash); border:1px solid var(--line); border-radius:6px; font-family:ui-monospace, SFMono-Regular, Menlo, monospace; font-size:.85rem;">
+        <strong>Quorum arithmetic:</strong> {{.Detail}}
+      </div>
+      {{end}}
+      {{if gt (len .Evidence) 1}}
+      <details>
+        <summary class="muted" style="cursor:pointer; margin-top:.25rem;">Voter-by-voter reachability</summary>
+        <ul style="margin-top:.5rem; font-family:ui-monospace, SFMono-Regular, Menlo, monospace; font-size:.85rem;">
+          {{range $i, $ev := .Evidence}}{{if gt $i 0}}
+          <li><strong>{{$ev.Source}}:</strong> {{$ev.Detail}}{{if $ev.NeverObserved}} <em>(not runtime-observed)</em>{{else}} <span class="muted">observed {{$ev.ObservedAt}}</span>{{end}}</li>
+          {{end}}{{end}}
+        </ul>
+      </details>
+      {{end}}
+      {{else}}
       <details>
         <summary class="muted" style="cursor:pointer">Evidence</summary>
         <ul>
@@ -16,6 +33,7 @@
           {{end}}
         </ul>
       </details>
+      {{end}}
       {{end}}
     </li>
     {{end}}
