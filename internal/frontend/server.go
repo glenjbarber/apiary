@@ -166,6 +166,12 @@ type pageData struct {
 	CanOperate bool
 	CanAdmin   bool
 
+	// ColonyLeader is the header's current-Colony-leader indicator, derived
+	// from one live managerd Status call by withAuthFields so every page
+	// carries it without each handler repeating the lookup. See ADR-0123
+	// and internal/frontend/colony_leader.go.
+	ColonyLeader colonyLeaderView
+
 	// VM is the single virtual machine rendered by the detail page.
 	VM vmView
 
@@ -672,7 +678,58 @@ func (s *Server) currentSession(r *http.Request) (sessionInfo, bool) {
 // helper so every full-page render doesn't repeat the same three-line
 // lookup. Safe to call even when login is disabled or no session
 // exists; both leave Username/Role empty.
+//
+// It also fills in the header's Colony-leader indicator (ADR-0123), which
+// makes this the single place every full-page render passes through - the
+// indicator is therefore present on every page without each handler having
+// to remember it. The extra Status call is local (this Comb's own colocated
+// managerd) and cheap; a handler that already fetched a StatusResponse
+// should use withAuthFieldsFrom to hand it over instead of paying for a
+// second one.
 func (s *Server) withAuthFields(r *http.Request, pd pageData) pageData {
+	return s.withAuthFieldsFrom(r, pd, nil, nil)
+}
+
+// withAuthFieldsFrom is withAuthFields plus the ability to reuse a
+// StatusResponse the caller already holds. Passing both status and
+// statusErr supplies the leader indicator with no extra RPC; passing nils
+// for both makes it perform its own single Status call. Either way the
+// indicator is populated, so a caller can never accidentally render a page
+// with an empty leader field by using the wrong variant.
+//
+// A caller must pass the pair it actually received: handing a nil status with
+// a nil error is read as "no response", not as "no error", so a failed call
+// can never be laundered into a healthy-looking indicator.
+func (s *Server) withAuthFieldsFrom(r *http.Request, pd pageData, status *rpcpb.StatusResponse, statusErr error) pageData {
+	pd.HiveID, _ = os.Hostname()
+	pd.AuthEnabled = s.auth != nil
+	pd.CanOperate = s.auth == nil
+	pd.CanAdmin = s.auth == nil
+	if info, ok := s.currentSession(r); ok {
+		pd.Username = info.username
+		pd.Role = string(info.role)
+		pd.CanOperate = info.role.Satisfies(manager.RoleOperator)
+		pd.CanAdmin = info.role.Satisfies(manager.RoleAdmin)
+	}
+	if status == nil && statusErr == nil {
+		ctx, cancel := context.WithTimeout(r.Context(), colonyLeaderStatusTimeout)
+		defer cancel()
+		status, statusErr = s.client.Status(ctx, &rpcpb.StatusRequest{})
+	}
+	pd.ColonyLeader = colonyLeaderFromStatus(status, statusErr, time.Now())
+	return pd
+}
+
+// withAuthFieldsForFragment is withAuthFields for an htmx fragment render.
+//
+// A fragment does not include the shared header partial, so nothing in it can
+// ever display the Colony-leader indicator. Fetching it anyway would cost a
+// Status RPC per swap for a value that is silently thrown away, so this
+// variant fills in only the session/role fields a fragment actually uses.
+// Naming it separately (rather than adding a bool) keeps the choice visible
+// at the call site - a fragment author reaching for withAuthFields instead
+// gets the page-render behavior deliberately, not by accident.
+func (s *Server) withAuthFieldsForFragment(r *http.Request, pd pageData) pageData {
 	pd.HiveID, _ = os.Hostname()
 	pd.AuthEnabled = s.auth != nil
 	pd.CanOperate = s.auth == nil
@@ -1554,7 +1611,7 @@ func (s *Server) renderRowsWithError(w http.ResponseWriter, r *http.Request, msg
 // same pattern as handleListVMs/vm_rows.
 func (s *Server) handleListISOs(w http.ResponseWriter, r *http.Request) {
 	isos, errMsg := s.currentClusterISOs(r)
-	s.render(w, "iso_rows", s.withAuthFields(r, pageData{Error: errMsg, ClusterISOs: isos, LocalNodeID: s.localNodeID(r)}))
+	s.render(w, "iso_rows", s.withAuthFieldsForFragment(r, pageData{Error: errMsg, ClusterISOs: isos, LocalNodeID: s.localNodeID(r)}))
 }
 
 // handleUploadISO streams a multipart file upload directly into
@@ -1716,7 +1773,7 @@ func (s *Server) renderISOPanelResult(w http.ResponseWriter, r *http.Request, fo
 	if formErr == "" && successName != "" {
 		success = fmt.Sprintf("Uploaded %s successfully.", successName)
 	}
-	s.render(w, "iso_panel", s.withAuthFields(r, pageData{
+	s.render(w, "iso_panel", s.withAuthFieldsForFragment(r, pageData{
 		ISOFormError: formErr, ISOFormSuccess: success, ClusterISOs: isos, LocalNodeID: s.localNodeID(r),
 	}))
 }
@@ -1819,7 +1876,7 @@ func (s *Server) renderNetworkPanelResult(w http.ResponseWriter, r *http.Request
 			formErr += "; additionally failed to refresh list: " + fetchErr
 		}
 	}
-	s.render(w, "network_panel", s.withAuthFields(r, pageData{NetworkFormError: formErr, Networks: networks}))
+	s.render(w, "network_panel", s.withAuthFieldsForFragment(r, pageData{NetworkFormError: formErr, Networks: networks}))
 }
 
 // currentJails fetches the current list of jails, returning an error
@@ -2021,7 +2078,7 @@ func (s *Server) renderJailPanelResult(w http.ResponseWriter, r *http.Request, f
 			formErr += "; additionally failed to refresh list: " + fetchErr
 		}
 	}
-	s.render(w, "jail_panel", s.withAuthFields(r, pageData{JailFormError: formErr, Jails: jails, LocalNodeID: s.currentLocalNodeID(r)}))
+	s.render(w, "jail_panel", s.withAuthFieldsForFragment(r, pageData{JailFormError: formErr, Jails: jails, LocalNodeID: s.currentLocalNodeID(r)}))
 }
 
 // currentAPIKeys fetches the current list of API keys (metadata only),

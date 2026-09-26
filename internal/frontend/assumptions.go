@@ -203,7 +203,7 @@ func (s *Server) handleAssumptionsPage(w http.ResponseWriter, r *http.Request) {
 
 	sort.Slice(nodes, func(i, j int) bool { return nodes[i].NodeID < nodes[j].NodeID })
 
-	s.render(w, "assumptions_page", s.withAuthFields(r, pageData{AssumptionNodes: nodes, ActivePage: "assumptions"}))
+	s.render(w, "assumptions_page", s.withAuthFieldsFrom(r, pageData{AssumptionNodes: nodes, ActivePage: "assumptions"}, statusResp, nil))
 }
 
 // handlePurgeStaleAssumptionResults clears one node's own stale
@@ -257,5 +257,5 @@ func (s *Server) handlePurgeStaleAssumptionResults(w http.ResponseWriter, r *htt
 	wg.Wait()
 	sort.Slice(nodes, func(i, j int) bool { return nodes[i].NodeID < nodes[j].NodeID })
 
-	s.render(w, "assumptions_page", s.withAuthFields(r, pageData{AssumptionNodes: nodes, ActivePage: "assumptions", Error: purgeErr}))
+	s.render(w, "assumptions_page", s.withAuthFieldsFrom(r, pageData{AssumptionNodes: nodes, ActivePage: "assumptions", Error: purgeErr}, statusResp, nil))
 }

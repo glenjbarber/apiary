@@ -110,6 +110,14 @@ type clusterNodeView struct {
 	HealthStatus       health.Status
 	HealthExplanation  string
 	HealthObservations []health.Observation
+
+	// IsColonyLeader marks the node this Comb's own raftd currently reports
+	// as the Colony leader (ADR-0123). It comes from the same single anchor
+	// Status call every row already shares, so it costs no extra RPC, and it
+	// is deliberately only ever set on a row whose NodeID matches the
+	// observed leader - when the leader is unknown or unobserved, no row is
+	// marked rather than one row being guessed at.
+	IsColonyLeader bool
 }
 
 // peerAddr turns a node ID into the address its managerd should be
@@ -277,6 +285,12 @@ func (s *Server) clusterNodeEvidence(ctx context.Context, nodeID, localNodeID st
 	node.HealthStatus = result.Status
 	node.HealthExplanation = result.Explanation
 	node.HealthObservations = result.Observations
+	// Only an actually-observed leader marks a row (ADR-0123). An unknown,
+	// electing, or unobserved reading marks nothing, so the list can never
+	// imply a leader that was not seen. Derived once from the same anchor
+	// every row already shares, so it costs no extra RPC.
+	leader := colonyLeaderFromStatus(anchor, nil, now)
+	node.IsColonyLeader = leader.IsLeaderNode(nodeID)
 	return node
 }
 
@@ -289,7 +303,7 @@ func (s *Server) clusterNodeEvidence(ctx context.Context, nodeID, localNodeID st
 func (s *Server) handleClusterOverviewPage(w http.ResponseWriter, r *http.Request) {
 	statusResp, err := s.client.Status(r.Context(), &rpcpb.StatusRequest{})
 	if err != nil {
-		s.render(w, "cluster_overview_page", s.withAuthFields(r, pageData{Error: err.Error(), ActivePage: "stats"}))
+		s.render(w, "cluster_overview_page", s.withAuthFieldsFrom(r, pageData{Error: err.Error(), ActivePage: "stats"}, nil, err))
 		return
 	}
 
@@ -312,7 +326,7 @@ func (s *Server) handleClusterOverviewPage(w http.ResponseWriter, r *http.Reques
 
 	sort.Slice(nodes, func(i, j int) bool { return nodes[i].NodeID < nodes[j].NodeID })
 
-	s.render(w, "cluster_overview_page", s.withAuthFields(r, pageData{
+	s.render(w, "cluster_overview_page", s.withAuthFieldsFrom(r, pageData{
 		ClusterNodes:                nodes,
 		JoinRequests:                s.currentJoinRequests(r),
 		ActivePage:                  "stats",
@@ -320,7 +334,7 @@ func (s *Server) handleClusterOverviewPage(w http.ResponseWriter, r *http.Reques
 		JoinRequestPreflightID:      r.URL.Query().Get("preflight_request_id"),
 		JoinRequestPreflightVerdict: r.URL.Query().Get("preflight_verdict"),
 		JoinRequestPreflightDetail:  r.URL.Query().Get("preflight_detail"),
-	}))
+	}, statusResp, nil))
 }
 
 // handleClusterEvidencePage serves the evidence-backed health details for
@@ -340,10 +354,10 @@ func (s *Server) handleClusterEvidencePage(w http.ResponseWriter, r *http.Reques
 	}
 
 	node := s.clusterNodeEvidence(r.Context(), id, statusResp.GetManagerNodeId(), statusResp)
-	s.render(w, "cluster_evidence_page", s.withAuthFields(r, pageData{
+	s.render(w, "cluster_evidence_page", s.withAuthFieldsFrom(r, pageData{
 		EvidenceNode: node,
 		ActivePage:   "stats",
-	}))
+	}, statusResp, nil))
 }
 
 // handleHostPage serves the verbose per-node stats page
@@ -366,7 +380,7 @@ func (s *Server) handleHostPage(w http.ResponseWriter, r *http.Request) {
 	if stats.NodeID == "" {
 		stats.NodeID = id
 	}
-	s.render(w, "host_page", s.withAuthFields(r, pageData{Error: errMsg, Stats: stats, ActivePage: "stats"}))
+	s.render(w, "host_page", s.withAuthFieldsFrom(r, pageData{Error: errMsg, Stats: stats, ActivePage: "stats"}, statusResp, nil))
 }
 
 // knownColonyMember reports whether id is in the current raft membership

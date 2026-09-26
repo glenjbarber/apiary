@@ -119,6 +119,11 @@ type fakeClient struct {
 	getRaftdConfigResp *rpcpb.GetRaftdConfigResponse
 	statusErr          error
 
+	// statusCalls counts Status RPCs so a test can assert the header's
+	// Colony-leader indicator (ADR-0123) does not cost a page a second
+	// Status call on pages that already fetched one.
+	statusCalls int
+
 	setVMFirewallPausedResp    *rpcpb.SetVMFirewallPausedResponse
 	lastSetVMFirewallPausedReq *rpcpb.SetVMFirewallPausedRequest
 
@@ -204,6 +209,7 @@ func (f *fakeUploadClientStream) CloseAndRecv() (*rpcpb.UploadISOResponse, error
 }
 
 func (f *fakeClient) Status(context.Context, *rpcpb.StatusRequest, ...grpc.CallOption) (*rpcpb.StatusResponse, error) {
+	f.statusCalls++
 	if f.statusErr != nil {
 		return nil, f.statusErr
 	}

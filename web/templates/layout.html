@@ -68,6 +68,17 @@
     .account { display:flex; flex-direction:column; align-items:flex-end; min-width:0; line-height:1.2; }
     .account-user { font-size:.84rem; color:#f4f4f4; }
     .account-hive { margin-top:.18rem; color:#aeb4b6; font-size:.76rem; }
+    /* colony-leader: the header's current-Colony-leader indicator (ADR-0123).
+       Two stacked lines (what was asked, then which node answered) mirroring
+       .account, because both are "who is this page being served by" facts
+       rather than primary actions. max-width plus overflow-wrap keeps a long
+       hostname from pushing the theme and settings controls off the header on
+       a narrow viewport. */
+    .colony-leader { display:flex; flex-direction:column; align-items:flex-end; min-width:0; max-width:22rem; line-height:1.2; }
+    .colony-leader-label { font-size:.76rem; color:#aeb4b6; overflow-wrap:anywhere; }
+    .colony-leader .badge { margin-top:.22rem; overflow-wrap:anywhere; text-align:center; }
+    .colony-leader-here, .colony-leader-raft-state { margin-top:.2rem; font-size:.72rem; color:#aeb4b6; overflow-wrap:anywhere; }
+    .colony-leader-raft-state { font-family:ui-monospace, SFMono-Regular, Menlo, monospace; }
     .icon-button, .settings-menu > summary {
       display:grid; place-items:center; width:2.35rem; height:2.35rem;
       padding:0; border:1px solid #42484a; border-radius:8px;
@@ -247,6 +258,8 @@
     @media (max-width:620px) {
       .app-header { padding:.6rem .75rem; }
       .brand-name { display:none; }
+      .colony-leader { max-width:9rem; }
+      .colony-leader-label, .colony-leader-here, .colony-leader-raft-state { display:none; }
       .account-user { max-width:9rem; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
       form.upload-iso, form.inline-form { align-items:stretch; }
       form.upload-iso label, form.inline-form label { min-width:100%; }
@@ -273,6 +286,19 @@
   </div>
   <div class="header-actions">
     {{if .AuthEnabled}}{{if .Username}}<div class="account"><span class="account-user">{{.Username}} ({{.Role}})</span><span class="account-hive">Comb {{.HiveID}}</span></div>{{end}}{{else}}<span class="badge" title="No -pam-service is configured on this Comb's frontend - every page is fully accessible with no login, to anyone who can reach it. See docs/bootstrap.md's PAM step to enable real login.">Login disabled</span>{{end}}
+    {{/*
+      Colony leader indicator (ADR-0123). Every field comes from a single
+      live managerd Status call made by withAuthFields - nothing here is
+      remembered, cached, or configured. .ColonyLeader.Detail carries the
+      reason for every non-known state, including the unknown one, so the
+      title attribute can never promise more than the page actually proved.
+    */}}
+    <div class="colony-leader" title="{{with .ColonyLeader.Detail}}{{.}} {{end}}{{if .ColonyLeader.Observed}}Point-in-time read at {{.ColonyLeader.ObservedAt.Format "15:04:05"}}; leadership can change on the next election.{{end}}">
+      <span class="colony-leader-label">{{.ColonyLeader.SourceLine}}</span>
+      <span class="badge {{.ColonyLeader.BadgeClass}}">{{.ColonyLeader.Label}}</span>
+      {{if and .ColonyLeader.IsLocal (eq .ColonyLeader.State "known")}}<span class="colony-leader-here">this Comb</span>{{end}}
+      {{if and .ColonyLeader.RaftState (ne .ColonyLeader.State "known")}}<span class="colony-leader-raft-state">raft {{.ColonyLeader.RaftState}}</span>{{end}}
+    </div>
     <button class="icon-button" id="theme-toggle" type="button" aria-label="Switch color theme" title="Switch color theme"><span aria-hidden="true">&#9788;</span></button>
     <details class="settings-menu{{if or (eq .ActivePage "machine") (eq .ActivePage "apikeys") (eq .ActivePage "users")}} current{{end}}">
       <summary aria-label="Open settings" title="Settings">&#9881;</summary>

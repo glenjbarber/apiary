@@ -270,8 +270,14 @@ func TestHandleClusterOverviewPage_AnchorRaftUnreachableMakesEveryRowMembershipU
 	s.ServeHTTP(rec, req)
 
 	body := rec.Body.String()
-	if got := strings.Count(body, `class="badge unknown"`); got != 2 {
-		t.Errorf(`expected both rows' health to be unknown when the anchor's own raft is unreachable, got %d "badge unknown" occurrences in: %s`, got, body)
+	// Counted as the whole rendered row-state snippet, not as a bare
+	// `class="badge unknown"` anywhere in the document. The shared header now
+	// carries its own unknown badge for the Colony-leader indicator (ADR-0123)
+	// whenever the anchor's raft is unreachable - the same underlying cause -
+	// so a document-wide count could no longer distinguish "both rows unknown"
+	// from "both rows unknown, plus the header".
+	if got := strings.Count(body, `<span class="badge ready">Reachable</span><span class="badge unknown">unknown</span>`); got != 2 {
+		t.Errorf(`expected both rows' health to be unknown when the anchor's own raft is unreachable, got %d unknown rows in: %s`, got, body)
 	}
 }
 
