@@ -70,6 +70,8 @@ func run() error {
 	restorePhrase := flag.String("restore", "", fmt.Sprintf("restore ephemeral state from -restore-file into this node's own, currently-empty data directory, then exit, rather than starting the server - run -reset first if it isn't already empty. Must be exactly %q or nothing happens; the next normal start picks up the restored state automatically", restoreConfirmPhrase))
 	restoreFile := flag.String("restore-file", "", "path to a -export archive to load for -restore")
 	restoreDryRun := flag.String("restore-dry-run", "", "validate the archive at the given path (format version, checksum) and print a summary of what it contains, then exit - makes no changes at all, needs no confirmation phrase, and does not touch the data directory")
+	statusJSON := flag.Bool("status", false, "read this node's own persisted raft state (current term, log bounds, membership) straight from its data directory and exit - starts no server, takes no vote, contacts no peer, and writes nothing. Requires raftd to be stopped, since it holds an exclusive lock on the log; add -status-json for machine-readable output")
+	statusAsJSON := flag.Bool("status-json", false, "same read-only offline read as -status, rendered as a single JSON object for scripting. Implies -status")
 	flag.Parse()
 
 	// -reset/-export/-restore/-restore-dry-run are raftd's "break
@@ -78,7 +80,7 @@ func run() error {
 	// exactly the situation an operator most needs them for. Load()
 	// error here falls back to raftdconfig.Defaults() with a warning,
 	// rather than aborting; normal server startup below is stricter.
-	oneShot := *reset != "" || *exportPath != "" || *restorePhrase != "" || *restoreDryRun != ""
+	oneShot := *reset != "" || *exportPath != "" || *restorePhrase != "" || *restoreDryRun != "" || *statusJSON || *statusAsJSON
 	cfgMgr := &raftdconfig.Manager{}
 	rcfg, err := cfgMgr.Load()
 	if err != nil {
@@ -91,6 +93,14 @@ func run() error {
 
 	if *reset != "" {
 		return resetDataDir(*reset, rcfg.DataDir)
+	}
+
+	if *statusJSON || *statusAsJSON {
+		return printOfflineStatus(raftnode.Config{
+			NodeID:   rcfg.NodeID,
+			DataDir:  rcfg.DataDir,
+			BindAddr: rcfg.RaftBind,
+		}, *statusAsJSON)
 	}
 
 	if err := validateAwaitJoinFlags(rcfg.AwaitJoin, rcfg.Join); err != nil {
