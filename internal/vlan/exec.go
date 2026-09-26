@@ -31,3 +31,32 @@ func runCmd(ctx context.Context, name string, args ...string) (string, error) {
 	}
 	return strings.TrimSpace(stdout.String()), nil
 }
+
+// Runner executes a single host command. It exists so this package's own
+// decision logic (in particular the Bridge SVI logic in membership.go,
+// where getting a step wrong means refusing a working network or
+// building a silently dead one) can be exercised on a non-FreeBSD
+// development host against a fake, with no ifconfig, no network, and no
+// root - the same nil-able-injection seam internal/jailnet's own Runner
+// already uses for its ifconfig calls.
+type Runner interface {
+	Run(ctx context.Context, name string, args ...string) (string, error)
+}
+
+// execRunner is the production Runner, used when Manager.Runner is nil.
+// The real shell is the only correct setting in production, so a nil
+// Runner never degrades into a silent no-op.
+type execRunner struct{}
+
+func (execRunner) Run(ctx context.Context, name string, args ...string) (string, error) {
+	return runCmd(ctx, name, args...)
+}
+
+// run is every command this Manager issues, without exception, so there is
+// exactly one seam a test has to fake and no path that quietly bypasses it.
+func (m *Manager) run(ctx context.Context, name string, args ...string) (string, error) {
+	if m.Runner == nil {
+		return execRunner{}.Run(ctx, name, args...)
+	}
+	return m.Runner.Run(ctx, name, args...)
+}

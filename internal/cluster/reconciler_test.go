@@ -17,6 +17,7 @@ import (
 	"github.com/glenjbarber/apiary/internal/dhcpd"
 	"github.com/glenjbarber/apiary/internal/hast"
 	"github.com/glenjbarber/apiary/internal/pf"
+	"github.com/glenjbarber/apiary/internal/vlan"
 )
 
 // fakeRaftClient is a fake raftClient: ListVMs returns a fixed response,
@@ -1224,14 +1225,23 @@ func TestReconciler_RunOnce_ISONamedButNoStoreConfiguredIsError(t *testing.T) {
 // --- Network/DHCP/firewall fakes ---
 
 type fakeVLANManager struct {
-	ensuredVLANs     []uint32
-	ensuredBridges   []string
-	members          map[string][]string // bridge -> ifaces added
-	addresses        map[string]string   // bridge -> subnet
-	vlanErr          error
-	bridgeErr        error
-	memberErr        error
-	addressErr       error
+	ensuredVLANs   []uint32
+	ensuredBridges []string
+	members        map[string][]string // bridge -> ifaces added
+	addresses      map[string]string   // bridge -> subnet
+	vlanErr        error
+	bridgeErr      error
+	memberErr      error
+	addressErr     error
+
+	// memberState is what EnsureMember reports when memberErr is nil
+	// (ADR-0138: membership is a state, not a bool). The zero value is
+	// deliberately not MembershipAdded - a fake that says nothing must not
+	// look like a confirmed join, so the reconciler's
+	// unknown-is-not-a-join guard has to be reached deliberately.
+	memberState      vlan.MembershipState
+	memberSVIParent  string
+	memberCalls      int
 	destroyedBridges []string
 	destroyedVLANs   []uint32
 
@@ -1252,7 +1262,16 @@ type fakeVLANManager struct {
 }
 
 func newFakeVLANManager() *fakeVLANManager {
-	return &fakeVLANManager{members: map[string][]string{}, addresses: map[string]string{}, existingInterfaces: map[string]bool{}, epairs: map[string]string{}}
+	return &fakeVLANManager{
+		members:            map[string][]string{},
+		addresses:          map[string]string{},
+		existingInterfaces: map[string]bool{},
+		epairs:             map[string]string{},
+		// A working fake joins the interface, which is what every
+		// pre-ADR-0138 test here assumed. Tests that care about the
+		// state itself set it explicitly.
+		memberState: vlan.MembershipAdded,
+	}
 }
 
 func (f *fakeVLANManager) EnsureVLAN(_ context.Context, vlanID uint32) (string, bool, error) {
@@ -1274,12 +1293,17 @@ func (f *fakeVLANManager) EnsureBridge(_ context.Context, name string) (bool, er
 	return true, nil
 }
 
-func (f *fakeVLANManager) EnsureMember(_ context.Context, bridge, iface string) error {
+func (f *fakeVLANManager) EnsureMember(_ context.Context, bridge, iface string) (vlan.Membership, error) {
+	f.memberCalls++
+	membership := vlan.Membership{Bridge: bridge, Iface: iface, State: f.memberState, SVIParent: f.memberSVIParent}
 	if f.memberErr != nil {
-		return f.memberErr
+		return membership, f.memberErr
+	}
+	if membership.State == vlan.MembershipPresent {
+		return membership, nil
 	}
 	f.members[bridge] = append(f.members[bridge], iface)
-	return nil
+	return membership, nil
 }
 
 func (f *fakeVLANManager) EnsureBridgeAddress(_ context.Context, bridge, subnet string) error {

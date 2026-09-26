@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/glenjbarber/apiary/internal/jail"
+	"github.com/glenjbarber/apiary/internal/vlan"
 )
 
 // Verdict is what one reconcile pass concluded about one jail's VNET
@@ -205,7 +206,10 @@ type Reconciler struct {
 // against a fake, with no FreeBSD anywhere in sight.
 type Bridger interface {
 	EnsureBridge(ctx context.Context, name string) (created bool, err error)
-	EnsureMember(ctx context.Context, bridge, iface string) error
+	// EnsureMember now returns a membership state rather than a bare
+	// error (ADR-0138). This package's only use of it is an epair(4)
+	// host side, which can never be a Bridge SVI - see the call site.
+	EnsureMember(ctx context.Context, bridge, iface string) (vlan.Membership, error)
 	EnsureEpair(ctx context.Context, bridge string) (hostSide, jailSide string, err error)
 	DestroyEpair(ctx context.Context, hostSide string) error
 }
@@ -357,8 +361,20 @@ func (r *Reconciler) reconcileHost(ctx context.Context, jailID string, addr Addr
 				return out, fmt.Errorf("%w: removing %s from bridge %s: %s", errStateUnknown, rec.HostSide, host.MemberOf, err)
 			}
 		}
-		if err := r.Bridge.EnsureMember(ctx, addr.Bridge, rec.HostSide); err != nil {
+		// An epair(4) end is an ordinary Ethernet interface, so the
+		// Bridge SVI case EnsureMember can now report (ADR-0138) is
+		// unreachable for it. It is still treated as a failure rather
+		// than waved through: MembershipSVI means "no addm was issued",
+		// and continuing past that would record this jail's host side as
+		// joined to a bridge it is provably not on - the same
+		// silently-misplaced-network outcome the deletem above exists
+		// to prevent, arriving by a different route.
+		membership, err := r.Bridge.EnsureMember(ctx, addr.Bridge, rec.HostSide)
+		if err != nil {
 			return out, fmt.Errorf("%w: joining %s to bridge %s: %s", errStateUnknown, rec.HostSide, addr.Bridge, err)
+		}
+		if membership.State == vlan.MembershipUnknown || membership.State == vlan.MembershipSVI {
+			return out, fmt.Errorf("%w: joining %s to bridge %s: membership state %q, which is not a confirmed join", errStateUnknown, rec.HostSide, addr.Bridge, membership.State)
 		}
 		if !contains(out.findings, FindingBridgeMembershipWrong) {
 			out.findings = append(out.findings, FindingBridgeMembershipWrong)

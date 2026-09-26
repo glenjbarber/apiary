@@ -40,16 +40,53 @@ func TestVLANIfaceName(t *testing.T) {
 // TestEnsureVLAN_UntaggedIsANoOp asserts EnsureVLAN(0) (the
 // untagged/raw-uplink case, hit on every reconciler tick for any
 // untagged network) never issues an ifconfig call at all. No root
-// needed - this asserts the exact code path takes the early return,
-// not real interface state.
+// needed - the fake runner makes "no call" an assertion rather than an
+// inference from a code path, and it matters more since ADR-0138 added
+// an observation step ahead of the tagged path (ADR-0085's own
+// guarantee: the untagged early return happens before any observation,
+// so an administratively managed interface is never touched).
 func TestEnsureVLAN_UntaggedIsANoOp(t *testing.T) {
-	m := &Manager{Uplink: "em0"}
+	h := newFakeHost()
+	m := &Manager{Uplink: "em0", Runner: h, Bridges: h}
 	name, created, err := m.EnsureVLAN(context.Background(), 0)
 	if err != nil {
 		t.Fatalf("EnsureVLAN(0) error: %v", err)
 	}
 	if name != "em0" || created {
 		t.Errorf("EnsureVLAN(0) = (%q, %v), want (\"em0\", false)", name, created)
+	}
+	if len(h.calls) != 0 {
+		t.Errorf("EnsureVLAN(0) issued %v, want no commands at all", h.calls)
+	}
+}
+
+// A tagged VLAN with no uplink configured is a configuration error, and
+// it must not become a guess - in particular it must not fall through
+// into the Bridge SVI observation with an empty interface name.
+func TestEnsureVLAN_TaggedWithNoUplinkIsAnError(t *testing.T) {
+	h := newFakeHost()
+	m := &Manager{Runner: h, Bridges: h}
+	if _, _, err := m.EnsureVLAN(context.Background(), 2); err == nil {
+		t.Fatal("EnsureVLAN(2) with no uplink = nil error, want one")
+	}
+	if len(h.calls) != 0 {
+		t.Errorf("EnsureVLAN(2) issued %v before failing on the missing uplink, want no commands", h.calls)
+	}
+}
+
+// A failed tagging destroys the interface it just created rather than
+// leaving a half-made VLAN behind - the same no-leftovers rule the
+// reconciler applies to bridges it creates.
+func TestEnsureVLAN_FailedTaggingDestroysWhatItCreated(t *testing.T) {
+	h := newFakeHost().nic("em0")
+	h.failTag = "vlandev: Invalid argument" // the kernel refuses this parent
+	m := &Manager{Uplink: "em0", Runner: h, Bridges: h}
+
+	if _, _, err := m.EnsureVLAN(context.Background(), 2); err == nil {
+		t.Fatal("EnsureVLAN(2) with a refused vlandev = nil error, want one")
+	}
+	if !h.issued("vlan2 destroy") {
+		t.Errorf("commands issued: %v, want a destroy of the interface it created", h.calls)
 	}
 }
 

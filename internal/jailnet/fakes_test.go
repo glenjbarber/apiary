@@ -7,6 +7,7 @@ import (
 	"sync"
 
 	"github.com/glenjbarber/apiary/internal/jail"
+	"github.com/glenjbarber/apiary/internal/vlan"
 )
 
 // Aliases so the fakes below read as the jail package's own types
@@ -253,6 +254,14 @@ type fakeBridge struct {
 	failEp   string
 	failMem  string
 	failBr   string
+
+	// forceMemberState/memberState make EnsureMember report a state other
+	// than a confirmed join - MembershipSVI or MembershipUnknown - which an
+	// epair(4) host side can never legitimately be in (ADR-0138). Without
+	// forceMemberState the ordinary path runs.
+	forceMemberState bool
+	memberState      vlan.MembershipState
+	sviParent        string
 }
 
 type epairPair struct{ host, jail string }
@@ -293,11 +302,17 @@ func (b *fakeBridge) EnsureBridge(ctx context.Context, name string) (bool, error
 	return true, nil
 }
 
-func (b *fakeBridge) EnsureMember(ctx context.Context, bridge, iface string) error {
+func (b *fakeBridge) EnsureMember(ctx context.Context, bridge, iface string) (vlan.Membership, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	if b.failMem != "" {
-		return fmt.Errorf("fakeBridge: EnsureMember(%s, %s): %s", bridge, iface, b.failMem)
+		return vlan.Membership{Bridge: bridge, Iface: iface, State: vlan.MembershipUnknown},
+			fmt.Errorf("fakeBridge: EnsureMember(%s, %s): %s", bridge, iface, b.failMem)
+	}
+	if b.forceMemberState {
+		// A state a real epair(4) host side could never be in (ADR-0138).
+		// Only set deliberately, to drive this package's own guard.
+		return vlan.Membership{Bridge: bridge, Iface: iface, State: b.memberState, SVIParent: b.sviParent}, nil
 	}
 	b.mu.Unlock()
 	// A bridge membership is exclusive, so joining a new bridge implies
@@ -306,7 +321,7 @@ func (b *fakeBridge) EnsureMember(ctx context.Context, bridge, iface string) err
 	// reconciler's own commands.
 	b.runner.setIface(iface, b.runner.ifaceUp(iface), bridge)
 	b.mu.Lock()
-	return nil
+	return vlan.Membership{Bridge: bridge, Iface: iface, State: vlan.MembershipAdded}, nil
 }
 
 func (b *fakeBridge) EnsureEpair(ctx context.Context, bridge string) (string, string, error) {

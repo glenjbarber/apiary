@@ -19,6 +19,7 @@ import (
 	"github.com/glenjbarber/apiary/internal/cloudflare"
 	"github.com/glenjbarber/apiary/internal/dhcpd"
 	"github.com/glenjbarber/apiary/internal/pf"
+	"github.com/glenjbarber/apiary/internal/vlan"
 )
 
 // deadManager is the subset of *deadman.Manager the reconciler needs, for
@@ -141,7 +142,7 @@ type isoResolver interface {
 type vlanManager interface {
 	EnsureVLAN(ctx context.Context, vlanID uint32) (name string, created bool, err error)
 	EnsureBridge(ctx context.Context, name string) (created bool, err error)
-	EnsureMember(ctx context.Context, bridge, iface string) error
+	EnsureMember(ctx context.Context, bridge, iface string) (vlan.Membership, error)
 	EnsureBridgeAddress(ctx context.Context, bridge, subnet string) error
 	DestroyBridge(ctx context.Context, name string) error
 	DestroyVLAN(ctx context.Context, vlanID uint32) error
@@ -1386,8 +1387,29 @@ func (r *Reconciler) ensureNetwork(ctx context.Context, network *internalpb.Netw
 		}
 		return networkArtifact{}, fmt.Errorf("%s: %w", step, err)
 	}
-	if err := r.VLAN.EnsureMember(ctx, bridge, iface); err != nil {
-		return failOwned("adding "+iface+" to bridge", err)
+	// The membership answer is a state, not a bool (ADR-0138). A Bridge
+	// SVI - a VLAN whose parent is a bridge - is never added to a bridge,
+	// and vlan.EnsureMember refuses that case itself: "skip the addm and
+	// carry on" would hand back a per-network bridge holding a gateway
+	// address and VM taps with no path to the network's own VLAN, which
+	// is a network that looks provisioned and is dead. Auto-selecting the
+	// SVI's own bridge instead would be ADR-0101's topology, which is
+	// deliberately behind an explicit per-node opt-in.
+	//
+	// failOwned still undoes the bridge if, and only if, this call created
+	// it, so every one of those outcomes - refusal, unreadable membership,
+	// failed addm - leaves the host exactly as it was found.
+	membership, err := r.VLAN.EnsureMember(ctx, bridge, iface)
+	if err != nil {
+		return failOwned("joining "+iface+" to bridge "+bridge, err)
+	}
+	if membership.State == vlan.MembershipUnknown {
+		// Defensive, and cheap: MembershipUnknown with a nil error would
+		// mean the membership call reported that it established nothing
+		// and yet claimed no failure. Nothing has shown this interface is
+		// on this bridge, so this pass must not act as if it were.
+		return failOwned("joining "+iface+" to bridge "+bridge,
+			fmt.Errorf("bridge membership is unknown, not confirmed: state %q with no error", membership.State))
 	}
 	artifact := networkArtifact{Bridge: bridge, VLANID: network.GetVlanId(), OwnBridge: bridgeCreated, OwnVLAN: vlanCreated}
 	// A network with ExternalGateway set already has a real router
