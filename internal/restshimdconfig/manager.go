@@ -34,7 +34,14 @@ type Config struct {
 	HTTPAddr string `json:"http_addr,omitempty"`
 
 	// ManagerTLS mirrors -manager-tls: dial managerd over TLS instead
-	// of plaintext.
+	// of plaintext. The default (false) deliberately tracks managerd's own
+	// default, which is plaintext too - TLS there is opt-in via its
+	// tls_cert/tls_key, and this file has no way to see that, so the two
+	// defaults are kept equal rather than one guessing at the other.
+	// Turning TLS on in managerd.json is therefore an operator action that
+	// must be mirrored here; Config.Validate rejects the half-finished
+	// versions of that, and internal/managerlink verifies the result
+	// against the live endpoint at startup rather than at first request.
 	ManagerTLS bool `json:"manager_tls,omitempty"`
 
 	// ManagerTLSCA mirrors -manager-tls-ca: PEM CA file to trust for
@@ -80,18 +87,32 @@ func (m *Manager) path() string {
 // like every flag's own former default for whatever it doesn't set.
 // A missing file is not an error (a fresh install with no config
 // written yet); a malformed one is, since there is no flag value left
-// to silently fall back to.
+// to silently fall back to. A well-formed but self-contradictory one is
+// also an error (Config.Validate), on the same reasoning: there is no
+// other value to fall back to, and starting with a config that cannot
+// work only moves the failure to the first request, where it is
+// unattributable.
 func (m *Manager) Load() (Config, error) {
 	cfg := defaults()
 	data, err := os.ReadFile(m.path())
 	if err != nil {
 		if os.IsNotExist(err) {
+			// Validated too, so Load's contract holds on every path: what
+			// it returns is either a config that can work or an error.
+			// defaults() is valid by construction today; this keeps it
+			// that way if it is ever edited.
+			if err := cfg.Validate(); err != nil {
+				return Config{}, err
+			}
 			return cfg, nil
 		}
 		return Config{}, err
 	}
 	if err := json.Unmarshal(data, &cfg); err != nil {
 		return Config{}, fmt.Errorf("restshimdconfig: parsing %s: %w", m.path(), err)
+	}
+	if err := cfg.Validate(); err != nil {
+		return Config{}, err
 	}
 	return cfg, nil
 }
@@ -103,7 +124,7 @@ func (m *Manager) Load() (Config, error) {
 // match every sibling config file's own convention, even though this
 // one holds no secret today.
 func (m *Manager) Save(cfg Config) error {
-	if err := validate(cfg); err != nil {
+	if err := cfg.Validate(); err != nil {
 		return err
 	}
 	body, err := json.MarshalIndent(cfg, "", "  ")
@@ -149,28 +170,98 @@ func atomicWriteFile(path string, body []byte) error {
 	return nil
 }
 
-// validate rejects a value that would be unsafe to interpolate or
-// otherwise malformed, without judging semantic correctness - the same
-// posture and reasoning as nodeconfig.validate's own doc comment.
-func validate(cfg Config) error {
-	if cfg.ManagerAddr != "" {
-		if _, _, err := net.SplitHostPort(cfg.ManagerAddr); err != nil {
-			return fmt.Errorf("restshimdconfig: invalid manager_addr %q: %w", cfg.ManagerAddr, err)
-		}
+// Validate rejects a config that cannot work, or that contradicts itself.
+//
+// It is deliberately confined to what the file itself can prove, with no
+// I/O: whether managerd actually speaks the scheme this file asks for is
+// a fact about another process on the network, and no config file can know
+// it. That half of the check lives in internal/managerlink, which asks the
+// live endpoint at startup and refuses to serve when the two disagree.
+// Keeping the two apart matters - this one says "these two lines of one
+// file contradict each other", that one says "this file and managerd
+// disagree" - and together they mean a wrong scheme is caught before the
+// first request instead of during it.
+func (c Config) Validate() error {
+	if c.ManagerAddr == "" {
+		return fmt.Errorf("restshimdconfig: manager_addr must be set - restshimd has no other way to reach managerd")
 	}
-	if cfg.HTTPAddr != "" {
-		if _, _, err := net.SplitHostPort(cfg.HTTPAddr); err != nil {
-			return fmt.Errorf("restshimdconfig: invalid http_addr %q: %w", cfg.HTTPAddr, err)
+	if err := validateHostPort("manager_addr", c.ManagerAddr); err != nil {
+		return err
+	}
+	if c.HTTPAddr != "" {
+		if err := validateHostPort("http_addr", c.HTTPAddr); err != nil {
+			return err
 		}
 	}
 	for _, f := range []struct{ name, value string }{
-		{"manager_tls_ca", cfg.ManagerTLSCA},
-		{"tls_cert", cfg.TLSCert},
-		{"tls_key", cfg.TLSKey},
+		{"manager_tls_ca", c.ManagerTLSCA},
+		{"manager_tls_server_name", c.ManagerTLSServerName},
+		{"tls_cert", c.TLSCert},
+		{"tls_key", c.TLSKey},
 	} {
 		if err := validateNoNewline(f.name, f.value); err != nil {
 			return err
 		}
+	}
+	if err := c.validateTLSConsistency(); err != nil {
+		return err
+	}
+	return c.validateTLSPair()
+}
+
+// validateTLSConsistency rejects trust settings that cannot be in effect.
+// manager_tls_ca and manager_tls_server_name are consulted only when
+// manager_tls is true - tlsdial.ManagerDialOption ignores the CA entirely
+// on a plaintext dial, by design - so setting either while manager_tls is
+// false means two settings in one file disagree about the same thing, and
+// one of them is wrong. That is precisely the shape of the live failure
+// this file now has to be able to catch (managerd was switched to TLS and
+// this file was left behind), so it is caught here at the point where the
+// two settings can still be named, rather than in a 502 afterwards.
+func (c Config) validateTLSConsistency() error {
+	if c.ManagerTLS {
+		return nil
+	}
+	for _, f := range []struct{ name, value string }{
+		{"manager_tls_ca", c.ManagerTLSCA},
+		{"manager_tls_server_name", c.ManagerTLSServerName},
+	} {
+		if f.value != "" {
+			return fmt.Errorf("restshimdconfig: %s is set to %q but manager_tls is false: "+
+				"%s only takes effect on a TLS dial, so either manager_tls should be true or "+
+				"%s should be empty - exactly one of the two is wrong", f.name, f.value, f.name, f.name)
+		}
+	}
+	return nil
+}
+
+// validateTLSPair rejects serving TLS with only one of tls_cert/tls_key.
+// cmd/restshimd checks this again at startup, where it turns into a
+// refusal to serve plaintext by accident; doing it here as well means a
+// config like that cannot be written in the first place, by hand or
+// through managerd's UpdateRestshimdConfig.
+func (c Config) validateTLSPair() error {
+	if (c.TLSCert == "") != (c.TLSKey == "") {
+		return fmt.Errorf("restshimdconfig: tls_cert and tls_key must be set together "+
+			"(tls_cert=%q, tls_key=%q) - serving HTTPS needs both, and serving plaintext because "+
+			"only one was set would be a confusing way to fail", c.TLSCert, c.TLSKey)
+	}
+	return nil
+}
+
+// validateHostPort rejects an address that could not be dialed or served
+// on, naming the field so a typo in a hand-edited file is obvious.
+func validateHostPort(field, addr string) error {
+	host, port, err := net.SplitHostPort(addr)
+	if err != nil {
+		return fmt.Errorf("restshimdconfig: invalid %s %q: %w", field, addr, err)
+	}
+	if port == "" {
+		return fmt.Errorf("restshimdconfig: invalid %s %q: no port", field, addr)
+	}
+	if host == "" && field == "manager_addr" {
+		return fmt.Errorf("restshimdconfig: invalid %s %q: no host - dial an explicit address, "+
+			"not a wildcard", field, addr)
 	}
 	return nil
 }

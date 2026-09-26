@@ -1224,3 +1224,98 @@ func TestServer_UploadISO_SendFailureSurfacesRealCloseAndRecvError(t *testing.T)
 		t.Errorf("response missing the real underlying error, got: %s", rec.Body.String())
 	}
 }
+
+// TestServer_DiagnosedTLSSchemeMismatchIsNotABare502 is requirement two
+// end to end at this layer: a permanent misconfiguration must be visibly
+// different from a transient outage, and must name its cause, rather than
+// arriving as the same anonymous 502.
+func TestServer_DiagnosedTLSSchemeMismatchIsNotABare502(t *testing.T) {
+	client := &fakeClient{createErr: errors.New(`rpc error: code = Unavailable desc = connection error: desc = "transport: error reading server preface: EOF"`)}
+	s := NewServer(client, WithDiagnosis(func(err error) LinkDiagnosis {
+		return LinkDiagnosis{
+			Class:     "manager_tls_scheme_mismatch",
+			Detail:    `managerd at 127.0.0.1:17700 speaks tls, but restshimd is configured manager_tls=false: set "manager_tls": true in /usr/local/etc/apiary/restshimd.json and restart restshimd`,
+			Permanent: true,
+		}
+	}))
+
+	rec := doRequest(t, s, http.MethodPost, "/v1/vms", vm{ID: "vm-1"})
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500 (a misconfiguration is not a gateway blip); body=%s", rec.Code, rec.Body.String())
+	}
+
+	var body errorBody
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("unmarshaling error body: %v", err)
+	}
+	if body.ErrorClass != "manager_tls_scheme_mismatch" {
+		t.Errorf("error_class = %q, want manager_tls_scheme_mismatch", body.ErrorClass)
+	}
+	if !strings.Contains(body.Hint, "manager_tls") {
+		t.Errorf("hint = %q, want it to name the setting to change", body.Hint)
+	}
+	// The raw gRPC error is still there: classifying a failure must never
+	// be a way of hiding what it actually was.
+	if !strings.Contains(body.Error, "error reading server preface") {
+		t.Errorf("error = %q, want the underlying gRPC error preserved", body.Error)
+	}
+}
+
+func TestServer_DiagnosedOutageStaysATransientBadGateway(t *testing.T) {
+	client := &fakeClient{createErr: errors.New("rpc error: code = Unavailable desc = connection refused")}
+	s := NewServer(client, WithDiagnosis(func(err error) LinkDiagnosis {
+		return LinkDiagnosis{Class: "manager_unreachable", Detail: "managerd's TLS posture is unverified: connect: connection refused"}
+	}))
+
+	rec := doRequest(t, s, http.MethodPost, "/v1/vms", vm{ID: "vm-1"})
+	if rec.Code != http.StatusBadGateway {
+		t.Fatalf("status = %d, want 502 for a failure that can clear up on its own; body=%s", rec.Code, rec.Body.String())
+	}
+	var body errorBody
+	json.Unmarshal(rec.Body.Bytes(), &body)
+	if body.ErrorClass != "manager_unreachable" {
+		t.Errorf("error_class = %q, want manager_unreachable", body.ErrorClass)
+	}
+	if body.Hint == "" {
+		t.Error("hint is empty, want the unverified-posture note")
+	}
+}
+
+// TestServer_UpstreamFailureWithoutADiagnoserIsUnchanged pins the
+// pre-existing behaviour for any caller that does not wire a diagnosis in:
+// still a 502, still carrying the raw error, no new fields invented.
+func TestServer_UpstreamFailureWithoutADiagnoserIsUnchanged(t *testing.T) {
+	client := &fakeClient{createErr: errors.New("rpc error: code = Unavailable desc = connection refused")}
+	s := NewServer(client)
+
+	rec := doRequest(t, s, http.MethodPost, "/v1/vms", vm{ID: "vm-1"})
+	if rec.Code != http.StatusBadGateway {
+		t.Fatalf("status = %d, want 502; body=%s", rec.Code, rec.Body.String())
+	}
+	var body errorBody
+	json.Unmarshal(rec.Body.Bytes(), &body)
+	if body.ErrorClass != "" || body.Hint != "" {
+		t.Errorf("error_class/hint = %q/%q, want both empty without a diagnoser", body.ErrorClass, body.Hint)
+	}
+}
+
+// TestServer_StatusReportsTheDiagnosedCause covers the one handler that had
+// its own hand-written 502, and the first request a caller is likely to
+// make - so it is the one that most needs to stop saying "bad gateway" for
+// a bad config file.
+func TestServer_StatusReportsTheDiagnosedCause(t *testing.T) {
+	client := &fakeClient{statusErr: errors.New("rpc error: code = Unavailable desc = error reading server preface: EOF")}
+	s := NewServer(client, WithDiagnosis(func(err error) LinkDiagnosis {
+		return LinkDiagnosis{Class: "manager_tls_scheme_mismatch", Detail: "manager_tls=false but managerd speaks TLS", Permanent: true}
+	}))
+
+	rec := doRequest(t, s, http.MethodGet, "/v1/status", nil)
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500; body=%s", rec.Code, rec.Body.String())
+	}
+	var body errorBody
+	json.Unmarshal(rec.Body.Bytes(), &body)
+	if body.ErrorClass != "manager_tls_scheme_mismatch" {
+		t.Errorf("error_class = %q, want manager_tls_scheme_mismatch", body.ErrorClass)
+	}
+}

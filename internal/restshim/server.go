@@ -19,18 +19,57 @@ import (
 // an internal ServeMux) so it can be mounted with http.ListenAndServe or
 // embedded under another handler.
 type Server struct {
-	client rpcpb.ManagerServiceClient
-	mux    *http.ServeMux
+	client   rpcpb.ManagerServiceClient
+	mux      *http.ServeMux
+	diagnose DiagnoseFunc
 }
 
 // NewServer returns a Server that answers REST requests using client.
 // rpcpb.ManagerServiceClient is the same interface managerd's own gRPC
 // client satisfies - restshim is just another client of ManagerService,
 // dialed the same way any other gRPC client would be.
-func NewServer(client rpcpb.ManagerServiceClient) *Server {
+func NewServer(client rpcpb.ManagerServiceClient, opts ...Option) *Server {
 	s := &Server{client: client, mux: http.NewServeMux()}
+	for _, opt := range opts {
+		opt(s)
+	}
 	s.routes()
 	return s
+}
+
+// Option customizes a Server at construction. Only one exists today; the
+// indirection is so that adding a second does not change NewServer's
+// signature for its existing callers.
+type Option func(*Server)
+
+// LinkDiagnosis is an honest, named account of one failed call to
+// managerd.
+type LinkDiagnosis struct {
+	// Class is a stable machine-readable token, safe to alert on
+	// ("manager_tls_scheme_mismatch", "manager_unreachable", ...).
+	Class string
+
+	// Detail is the human explanation of the cause and its fix.
+	Detail string
+
+	// Permanent is true for misconfigurations, which no amount of
+	// retrying will fix.
+	Permanent bool
+}
+
+// DiagnoseFunc turns a failed managerd call into a LinkDiagnosis.
+// cmd/restshimd supplies one backed by internal/managerlink, which can
+// observe what managerd actually speaks; without it every upstream
+// failure is reported as an unnamed 502, exactly as before.
+type DiagnoseFunc func(error) LinkDiagnosis
+
+// WithDiagnosis teaches a Server to name the cause of a failed upstream
+// call rather than reporting every one of them as a bare 502. A
+// misconfigured TLS scheme and a managerd outage are different problems,
+// and a caller that cannot tell them apart retries one of them forever
+// while sending an operator to fix the wrong thing.
+func WithDiagnosis(d DiagnoseFunc) Option {
+	return func(s *Server) { s.diagnose = d }
 }
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -90,11 +129,14 @@ func (s *Server) routes() {
 // errorBody is the JSON shape returned for any non-2xx response.
 type errorBody struct {
 	Error      string `json:"error"`
+	ErrorClass string `json:"error_class,omitempty"`
+	Hint       string `json:"hint,omitempty"`
 	LeaderHint string `json:"leader_hint,omitempty"`
 }
 
 // writeError picks a status code from (rpcErr, appErr, leaderHint):
-//   - rpcErr (a transport/gRPC-level failure calling managerd) -> 502
+//   - rpcErr (a transport/gRPC-level failure calling managerd) -> 502,
+//     or 500 when the failure is a diagnosed permanent misconfiguration
 //   - appErr with a leaderHint (this managerd's raftd isn't the leader) -> 503
 //   - appErr alone (an application-level rejection, e.g. duplicate/missing
 //     VM id) -> 400
@@ -105,15 +147,44 @@ type errorBody struct {
 // fragile string-matching on the message - a real error-code scheme is
 // a separate future improvement, not something to fake by guessing at
 // error text.
-func writeError(w http.ResponseWriter, rpcErr error, appErr, leaderHint string) {
+func (s *Server) writeError(w http.ResponseWriter, rpcErr error, appErr, leaderHint string) {
 	switch {
 	case rpcErr != nil:
-		writeJSON(w, http.StatusBadGateway, errorBody{Error: rpcErr.Error()})
+		s.writeUpstream(w, rpcErr)
 	case leaderHint != "":
 		writeJSON(w, http.StatusServiceUnavailable, errorBody{Error: appErr, LeaderHint: leaderHint})
 	default:
 		writeJSON(w, http.StatusBadRequest, errorBody{Error: appErr})
 	}
+}
+
+// writeUpstream reports a call to managerd that never produced a response.
+//
+// A 502 is only honest for a failure that could plausibly clear up on its
+// own (managerd restarting, a network blip), and a 500 is only honest for
+// one that cannot - and which of those this is depends entirely on
+// whether this process and managerd agree about the transport. With a
+// DiagnoseFunc wired in (cmd/restshimd does), a permanent misconfiguration
+// answers 500 with error_class and a hint naming the exact file and
+// setting to change, so it is visibly not a transient gateway blip and
+// not something to retry. Without one, every upstream failure stays a
+// 502 carrying only the raw gRPC error, exactly as before.
+//
+// The raw error is always still the "error" field: classifying a failure
+// must never be a way of hiding what it actually was.
+func (s *Server) writeUpstream(w http.ResponseWriter, rpcErr error) {
+	body := errorBody{Error: rpcErr.Error()}
+	code := http.StatusBadGateway
+	if s.diagnose != nil {
+		if d := s.diagnose(rpcErr); d.Class != "" {
+			body.ErrorClass = d.Class
+			body.Hint = d.Detail
+			if d.Permanent {
+				code = http.StatusInternalServerError
+			}
+		}
+	}
+	writeJSON(w, code, body)
 }
 
 func writeJSON(w http.ResponseWriter, status int, body interface{}) {
@@ -125,7 +196,11 @@ func writeJSON(w http.ResponseWriter, status int, body interface{}) {
 func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 	resp, err := s.client.Status(authContext(r), &rpcpb.StatusRequest{})
 	if err != nil {
-		writeJSON(w, http.StatusBadGateway, errorBody{Error: err.Error()})
+		// The one request most likely to be the caller's first, and the
+		// one most likely to be what a wrong transport scheme breaks
+		// first - so it reports the cause by the same rule as every
+		// other request rather than a bare 502.
+		s.writeUpstream(w, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]interface{}{
@@ -150,7 +225,7 @@ func (s *Server) handleCreateVM(w http.ResponseWriter, r *http.Request) {
 
 	resp, err := s.client.CreateVM(authContext(r), &rpcpb.CreateVMRequest{Vm: toRPCVM(body)})
 	if err != nil || resp.GetError() != "" {
-		writeError(w, err, resp.GetError(), resp.GetLeaderHint())
+		s.writeError(w, err, resp.GetError(), resp.GetLeaderHint())
 		return
 	}
 	writeJSON(w, http.StatusCreated, fromRPCVM(resp.GetVm()))
@@ -166,7 +241,7 @@ func (s *Server) handleUpdateVM(w http.ResponseWriter, r *http.Request) {
 
 	resp, err := s.client.UpdateVM(authContext(r), &rpcpb.UpdateVMRequest{Vm: toRPCVM(body)})
 	if err != nil || resp.GetError() != "" {
-		writeError(w, err, resp.GetError(), resp.GetLeaderHint())
+		s.writeError(w, err, resp.GetError(), resp.GetLeaderHint())
 		return
 	}
 	writeJSON(w, http.StatusOK, fromRPCVM(resp.GetVm()))
@@ -175,7 +250,7 @@ func (s *Server) handleUpdateVM(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleDeleteVM(w http.ResponseWriter, r *http.Request) {
 	resp, err := s.client.DeleteVM(authContext(r), &rpcpb.DeleteVMRequest{Id: r.PathValue("id")})
 	if err != nil || resp.GetError() != "" {
-		writeError(w, err, resp.GetError(), resp.GetLeaderHint())
+		s.writeError(w, err, resp.GetError(), resp.GetLeaderHint())
 		return
 	}
 	writeJSON(w, http.StatusOK, fromRPCVM(resp.GetVm()))
@@ -184,7 +259,7 @@ func (s *Server) handleDeleteVM(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleGetVM(w http.ResponseWriter, r *http.Request) {
 	resp, err := s.client.GetVM(authContext(r), &rpcpb.GetVMRequest{Id: r.PathValue("id")})
 	if err != nil || resp.GetError() != "" {
-		writeError(w, err, resp.GetError(), resp.GetLeaderHint())
+		s.writeError(w, err, resp.GetError(), resp.GetLeaderHint())
 		return
 	}
 	if !resp.GetFound() {
@@ -197,7 +272,7 @@ func (s *Server) handleGetVM(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleListVMs(w http.ResponseWriter, r *http.Request) {
 	resp, err := s.client.ListVMs(authContext(r), &rpcpb.ListVMsRequest{})
 	if err != nil || resp.GetError() != "" {
-		writeError(w, err, resp.GetError(), resp.GetLeaderHint())
+		s.writeError(w, err, resp.GetError(), resp.GetLeaderHint())
 		return
 	}
 
@@ -224,7 +299,7 @@ func (s *Server) handleMigrateVM(w http.ResponseWriter, r *http.Request) {
 		Id: r.PathValue("id"), TargetNodeId: body.TargetNodeID,
 	})
 	if err != nil || resp.GetError() != "" {
-		writeError(w, err, resp.GetError(), resp.GetLeaderHint())
+		s.writeError(w, err, resp.GetError(), resp.GetLeaderHint())
 		return
 	}
 	writeJSON(w, http.StatusOK, fromRPCVM(resp.GetVm()))
@@ -241,7 +316,7 @@ func (s *Server) handleMigrateJail(w http.ResponseWriter, r *http.Request) {
 		Id: r.PathValue("id"), TargetNodeId: body.TargetNodeID,
 	})
 	if err != nil || resp.GetError() != "" {
-		writeError(w, err, resp.GetError(), resp.GetLeaderHint())
+		s.writeError(w, err, resp.GetError(), resp.GetLeaderHint())
 		return
 	}
 	writeJSON(w, http.StatusOK, fromRPCJail(resp.GetJail()))
@@ -256,7 +331,7 @@ func (s *Server) handleCreateJail(w http.ResponseWriter, r *http.Request) {
 
 	resp, err := s.client.CreateJail(authContext(r), &rpcpb.CreateJailRequest{Jail: toRPCJail(body)})
 	if err != nil || resp.GetError() != "" {
-		writeError(w, err, resp.GetError(), resp.GetLeaderHint())
+		s.writeError(w, err, resp.GetError(), resp.GetLeaderHint())
 		return
 	}
 	writeJSON(w, http.StatusCreated, fromRPCJail(resp.GetJail()))
@@ -272,7 +347,7 @@ func (s *Server) handleUpdateJail(w http.ResponseWriter, r *http.Request) {
 
 	resp, err := s.client.UpdateJail(authContext(r), &rpcpb.UpdateJailRequest{Jail: toRPCJail(body)})
 	if err != nil || resp.GetError() != "" {
-		writeError(w, err, resp.GetError(), resp.GetLeaderHint())
+		s.writeError(w, err, resp.GetError(), resp.GetLeaderHint())
 		return
 	}
 	writeJSON(w, http.StatusOK, fromRPCJail(resp.GetJail()))
@@ -281,7 +356,7 @@ func (s *Server) handleUpdateJail(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleDeleteJail(w http.ResponseWriter, r *http.Request) {
 	resp, err := s.client.DeleteJail(authContext(r), &rpcpb.DeleteJailRequest{Id: r.PathValue("id")})
 	if err != nil || resp.GetError() != "" {
-		writeError(w, err, resp.GetError(), resp.GetLeaderHint())
+		s.writeError(w, err, resp.GetError(), resp.GetLeaderHint())
 		return
 	}
 	writeJSON(w, http.StatusOK, fromRPCJail(resp.GetJail()))
@@ -290,7 +365,7 @@ func (s *Server) handleDeleteJail(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleGetJail(w http.ResponseWriter, r *http.Request) {
 	resp, err := s.client.GetJail(authContext(r), &rpcpb.GetJailRequest{Id: r.PathValue("id")})
 	if err != nil || resp.GetError() != "" {
-		writeError(w, err, resp.GetError(), resp.GetLeaderHint())
+		s.writeError(w, err, resp.GetError(), resp.GetLeaderHint())
 		return
 	}
 	if !resp.GetFound() {
@@ -303,7 +378,7 @@ func (s *Server) handleGetJail(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleListJails(w http.ResponseWriter, r *http.Request) {
 	resp, err := s.client.ListJails(authContext(r), &rpcpb.ListJailsRequest{})
 	if err != nil || resp.GetError() != "" {
-		writeError(w, err, resp.GetError(), resp.GetLeaderHint())
+		s.writeError(w, err, resp.GetError(), resp.GetLeaderHint())
 		return
 	}
 
@@ -323,7 +398,7 @@ func (s *Server) handleCreateNetwork(w http.ResponseWriter, r *http.Request) {
 
 	resp, err := s.client.CreateNetwork(authContext(r), &rpcpb.CreateNetworkRequest{Network: toRPCNetwork(body)})
 	if err != nil || resp.GetError() != "" {
-		writeError(w, err, resp.GetError(), resp.GetLeaderHint())
+		s.writeError(w, err, resp.GetError(), resp.GetLeaderHint())
 		return
 	}
 	writeJSON(w, http.StatusCreated, fromRPCNetwork(resp.GetNetwork()))
@@ -332,7 +407,7 @@ func (s *Server) handleCreateNetwork(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleDeleteNetwork(w http.ResponseWriter, r *http.Request) {
 	resp, err := s.client.DeleteNetwork(authContext(r), &rpcpb.DeleteNetworkRequest{Id: r.PathValue("id")})
 	if err != nil || resp.GetError() != "" {
-		writeError(w, err, resp.GetError(), resp.GetLeaderHint())
+		s.writeError(w, err, resp.GetError(), resp.GetLeaderHint())
 		return
 	}
 	writeJSON(w, http.StatusOK, fromRPCNetwork(resp.GetNetwork()))
@@ -341,7 +416,7 @@ func (s *Server) handleDeleteNetwork(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleListNetworks(w http.ResponseWriter, r *http.Request) {
 	resp, err := s.client.ListNetworks(authContext(r), &rpcpb.ListNetworksRequest{})
 	if err != nil || resp.GetError() != "" {
-		writeError(w, err, resp.GetError(), resp.GetLeaderHint())
+		s.writeError(w, err, resp.GetError(), resp.GetLeaderHint())
 		return
 	}
 
@@ -418,7 +493,9 @@ func (s *Server) handleUploadISO(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, errorBody{Error: formErr.Error()})
 		return
 	case uploadErr != nil:
-		writeJSON(w, http.StatusBadGateway, errorBody{Error: uploadErr.Error()})
+		// An upload stream that dies on a scheme disagreement dies exactly
+		// the way a unary call does, so it is classified the same way.
+		s.writeUpstream(w, uploadErr)
 		return
 	case result == nil:
 		writeJSON(w, http.StatusBadRequest, errorBody{Error: "no file provided"})

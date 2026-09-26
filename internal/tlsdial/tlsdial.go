@@ -37,9 +37,27 @@ func ManagerDialOption(useTLS bool, caFile, serverName string) (grpc.DialOption,
 	if !useTLS {
 		return grpc.WithTransportCredentials(insecure.NewCredentials()), nil
 	}
+	cfg, err := ManagerTLSConfig(true, caFile, serverName)
+	if err != nil {
+		return nil, err
+	}
+	return grpc.WithTransportCredentials(credentials.NewTLS(cfg)), nil
+}
+
+// ManagerTLSConfig builds the exact *tls.Config ManagerDialOption would
+// use, or nil when useTLS is false. Split out because a caller that wants
+// to prove the TLS settings work *before* serving anything (see
+// internal/managerlink) has to perform a real handshake, and a handshake
+// built from a second copy of these rules could pass while the real dial
+// still fails - which would just move the same class of bug earlier in
+// the log. One function, one set of rules, both callers.
+func ManagerTLSConfig(useTLS bool, caFile, serverName string) (*tls.Config, error) {
+	if !useTLS {
+		return nil, nil
+	}
 	cfg := &tls.Config{ServerName: serverName}
 	if caFile == "" {
-		return grpc.WithTransportCredentials(credentials.NewTLS(cfg)), nil
+		return cfg, nil
 	}
 	pem, err := os.ReadFile(caFile)
 	if err != nil {
@@ -50,5 +68,5 @@ func ManagerDialOption(useTLS bool, caFile, serverName string) (grpc.DialOption,
 		return nil, fmt.Errorf("tlsdial: no valid certificates found in %s", caFile)
 	}
 	cfg.RootCAs = pool
-	return grpc.WithTransportCredentials(credentials.NewTLS(cfg)), nil
+	return cfg, nil
 }
