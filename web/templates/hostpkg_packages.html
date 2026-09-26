@@ -1,0 +1,149 @@
+{{/*
+  Host package inventory (internal/hostpkg).
+
+  Every verdict on this page is a value of a three-state type in
+  internal/hostpkg, and this template's single job is to render those
+  values without collapsing them. In particular "unknown" has its own
+  badge, its own colour, and its own list of reasons, and is never
+  rendered in the same visual register as "up to date". A reader must
+  be able to tell the difference at a glance, and must never have to
+  guess whether a quiet table means a healthy host or an unread one.
+*/}}
+{{define "hostpkg_packages_page"}}
+<!DOCTYPE html>
+<html lang="en">
+{{template "head" .}}
+<body class="app-layout">
+  {{template "nav" .}}
+  <main class="content" id="main-content">
+    {{template "page_header" (pageHeader "Host packages" "FreeBSD base system and installed Ports packages for this Comb." "<a href='/'>Back to command center</a>")}}
+
+    {{/*
+      An unavailable source is rendered as an explicit panel, not as an
+      empty inventory. An empty table would read as "no packages
+      installed", which is a completely different and wrong claim.
+    */}}
+    {{if .HostPkg.SourceError}}
+    <section class="panel">
+      <h2>Package state could not be read</h2>
+      <p class="error">{{.HostPkg.SourceError}}</p>
+      <p class="muted">This page never substitutes a default for a missing reading. An unavailable inventory is shown as unavailable, and is never rendered as an up-to-date host.</p>
+    </section>
+    {{else}}
+    <section class="panel">
+      <div class="page-header">
+        <div>
+          <h2>{{.HostPkg.HeadlineLabel}}</h2>
+          <div class="muted">Read from <strong>{{.HostPkg.NodeID}}</strong> at {{.HostPkg.ObservedAt}}</div>
+        </div>
+        <span class="badge {{.HostPkg.HeadlineBadge}}">{{.HostPkg.Headline}}</span>
+      </div>
+      <p>{{.HostPkg.HeadlineExplanation}}</p>
+      {{if .HostPkg.HeadlineWarning}}
+      <p class="banner-error">{{.HostPkg.HeadlineWarning}}</p>
+      {{end}}
+    </section>
+
+    <section class="panel">
+      <h2>FreeBSD base system</h2>
+      <dl class="detail-list">
+        <div><dt>Running kernel release (<code>uname -r</code>)</dt><dd>{{if .HostPkg.Base.Observed}}{{.HostPkg.Base.OSRelease}}{{else}}<span class="badge unknown">not observed</span>{{end}}</dd></div>
+        <div><dt>Version string (<code>uname -v</code>)</dt><dd>{{if .HostPkg.Base.OSVersion}}{{.HostPkg.Base.OSVersion}}{{else}}<span class="muted">not read</span>{{end}}</dd></div>
+        <div><dt>Base is a pkg-managed package</dt><dd>{{if .HostPkg.Base.PkgBasePackage}}yes{{else}}no{{end}}</dd></div>
+        <div><dt>Update status</dt><dd><span class="badge {{.HostPkg.Base.Badge}}">{{.HostPkg.Base.Status}}</span></dd></div>
+      </dl>
+      {{if .HostPkg.Base.Detail}}<p class="muted">{{.HostPkg.Base.Detail}}</p>{{end}}
+      {{if .HostPkg.Base.StatusRaw}}<details><summary>pkg version output, verbatim</summary><pre><code>{{.HostPkg.Base.StatusRaw}}</code></pre></details>{{end}}
+    </section>
+
+    <section class="panel">
+      <h2>Package catalogue</h2>
+      {{/*
+        The catalogue is what makes "up to date" a claim rather than a
+        silence, so it gets its own panel and its own reason. A host
+        whose catalogue is old can still say "up to date" as loudly as
+        ever - which is exactly why the age is shown next to the
+        verdict rather than in a footnote.
+      */}}
+      <p>
+        <span class="badge {{.HostPkg.Catalogue.Badge}}">{{.HostPkg.Catalogue.State}}</span>
+        <span class="muted">{{.HostPkg.Catalogue.Detail}}</span>
+      </p>
+      <p class="muted">This page never runs <code>pkg update</code>. Refreshing the catalogue is a state-changing operation the operator performs deliberately, and until they do, an old catalogue cannot support an "up to date" claim.</p>
+    </section>
+
+    {{if .HostPkg.Unknowns}}
+    <section class="panel">
+      <h2>What could not be determined</h2>
+      {{/*
+        Rendered above the package table on purpose: a table of
+        confident-looking rows is the thing most likely to be
+        misread as a complete picture, so the evidence gaps are the
+        first thing on the page after the headline.
+      */}}
+      <ul>
+        {{range .HostPkg.Unknowns}}<li><strong>{{.Subject}}</strong> &mdash; {{.Reason}}</li>{{end}}
+      </ul>
+    </section>
+    {{end}}
+
+    <section class="panel">
+      <h2>Installed packages</h2>
+      <p class="muted">
+        {{len .HostPkg.Ports}} installed &middot;
+        <strong>{{.HostPkg.OutdatedCount}}</strong> with an update available &middot;
+        <strong>{{.HostPkg.UnknownCount}}</strong> package(s) whose update status could not be determined.
+        A package shown as <span class="badge unknown">unknown</span> is one this build has no evidence about - it is neither current nor broken.
+      </p>
+      {{if .HostPkg.Ports}}
+      <div class="table-scroll">
+        <table class="resource-table">
+          <thead>
+            <tr><th>Package</th><th>Origin</th><th>Installed</th><th>Candidate</th><th>Status</th></tr>
+          </thead>
+          <tbody>
+            {{range .HostPkg.Ports}}
+            <tr>
+              <td><code>{{.Name}}</code></td>
+              <td>{{if .Origin}}<code>{{.Origin}}</code>{{else}}<span class="muted">not reported</span>{{end}}</td>
+              <td><code>{{.Version}}</code></td>
+              <td>{{if .Candidate}}<code>{{.Candidate}}</code>{{else}}<span class="muted">&mdash;</span>{{end}}</td>
+              <td>
+                <span class="badge {{.Badge}}">{{.Status}}</span>
+                {{if .Detail}}<div class="muted">{{.Detail}}</div>{{end}}
+              </td>
+            </tr>
+            {{end}}
+          </tbody>
+        </table>
+      </div>
+      {{else}}
+      <p class="muted">No installed packages were read. This is not a claim that the host has none &mdash; see the evidence gaps above, if any.</p>
+      {{end}}
+      {{if .HostPkg.RawOutdated}}
+      <details><summary>pkg outdated output, verbatim</summary><pre><code>{{.HostPkg.RawOutdated}}</code></pre></details>
+      {{end}}
+    </section>
+
+    <section class="panel">
+      <h2>Updating</h2>
+      {{/*
+        v1's limits are stated on the page itself rather than only in
+        the source. An operator deciding whether to use this feature
+        must be able to see, at the point of decision, that there is no
+        scheduled upgrade, no removal, and no base-system update.
+      */}}
+      <ul>
+        <li>Reading this page requires no privilege and changes nothing on the host.</li>
+        <li>Nothing on this page is ever updated automatically. There is no schedule, no timer, and no unattended upgrade path.</li>
+        <li>This version never removes a package, and never runs <code>pkg update</code> or <code>pkg upgrade</code> on its own.</li>
+        <li>This version does not perform base system updates. A base update is a reboot, and must be scheduled deliberately outside this workflow.</li>
+        <li>Applying an update requires a separately previewed plan, an exact typed confirmation phrase, root, and a fresh inventory read that proves the change landed. An outcome that cannot be established afterwards is recorded as unknown &mdash; never as success.</li>
+      </ul>
+    </section>
+    {{end}}
+  </main>
+  {{template "footer" .}}
+</body>
+</html>
+{{end}}
