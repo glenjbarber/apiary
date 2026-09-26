@@ -67,13 +67,11 @@
     .icon-button.sidebar-toggle { display:none; }
     .account { display:flex; flex-direction:column; align-items:flex-end; min-width:0; line-height:1.2; }
     .account-user { font-size:.84rem; color:#f4f4f4; }
-    .account-hive { margin-top:.18rem; color:#aeb4b6; font-size:.76rem; }
     /* colony-leader: the header's current-Colony-leader indicator (ADR-0123).
-       Two stacked lines (what was asked, then which node answered) mirroring
-       .account, because both are "who is this page being served by" facts
-       rather than primary actions. max-width plus overflow-wrap keeps a long
-       hostname from pushing the theme and settings controls off the header on
-       a narrow viewport. */
+       The label line names the node that produced the reading (raft or manager
+       node ID), so the operator always knows which Comb answered the Status
+       call. max-width plus overflow-wrap keeps a long hostname from pushing
+       the theme and settings controls off the header on a narrow viewport. */
     .colony-leader { display:flex; flex-direction:column; align-items:flex-end; min-width:0; max-width:22rem; line-height:1.2; }
     .colony-leader-label { font-size:.76rem; color:#aeb4b6; overflow-wrap:anywhere; }
     .colony-leader .badge { margin-top:.22rem; overflow-wrap:anywhere; text-align:center; }
@@ -285,7 +283,7 @@
     <a class="brand" href="/" aria-label="Apiary home"><img class="brand-logo" src="/static/apiary-mark.svg" alt=""><span class="brand-name">APIARY</span></a>
   </div>
   <div class="header-actions">
-    {{if .AuthEnabled}}{{if .Username}}<div class="account"><span class="account-user">{{.Username}} ({{.Role}})</span><span class="account-hive">Comb {{.HiveID}}</span></div>{{end}}{{else}}<span class="badge" title="No -pam-service is configured on this Comb's frontend - every page is fully accessible with no login, to anyone who can reach it. See docs/bootstrap.md's PAM step to enable real login.">Login disabled</span>{{end}}
+    {{if .AuthEnabled}}{{if .Username}}<div class="account"><span class="account-user">{{.Username}} ({{.Role}})</span></div>{{end}}{{else}}<span class="badge" title="No -pam-service is configured on this Comb's frontend - every page is fully accessible with no login, to anyone who can reach it. See docs/bootstrap.md's PAM step to enable real login.">Login disabled</span>{{end}}
     {{/*
       Colony leader indicator (ADR-0123). Every field comes from a single
       live managerd Status call made by withAuthFields - nothing here is
