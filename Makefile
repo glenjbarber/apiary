@@ -18,14 +18,51 @@ SRCS=		apiaryinstall \
 # BUILD_ID stamps every binary so a running daemon can name the build
 # it actually is, rather than the build that happens to sit next to it
 # on disk. Override on the command line to pin a build to a known id
-# (e.g. a release), otherwise it is derived from the commit and the
-# build time, which makes every build distinguishable.
-BUILD_ID?=	$(shell git rev-parse --short=12 HEAD 2>/dev/null || echo nogit)-$(shell date -u +%Y%m%dT%H%M%SZ)
+# (e.g. a release).
+#
+# The id is the commit and nothing else. There is deliberately no clock
+# in it, because the two properties an operator needs are in tension
+# and only one of them is real: a timestamp makes every rebuild look
+# like a different build even when the bytes are identical, while the
+# commit hash is a property of the source that holds forever. So the
+# hash goes in and the clock does not, and the same commit built twice
+# is the same build twice - which is what makes an artifact's sha256 a
+# checkable fact rather than a curiosity.
+#
+# A dirty worktree is the one case the commit cannot describe, because
+# the binary then is not the commit. It gets an explicit -dirty suffix
+# instead of a timestamp: -dirty says precisely what is true (the bytes
+# are not described by the commit) without claiming a new identity every
+# time the tree is touched. Untracked files count - an untracked file
+# compiles into the binary just as a modified one does.
+#
+# The consequence to be aware of: a -dirty build is NOT reproducible and
+# two of them can share an id while differing in bytes. That is why
+# buildinfo and versioncheck both report the -dirty case as weaker
+# evidence rather than as agreement.
+BUILD_ID?=	$(shell git rev-parse --short=12 HEAD 2>/dev/null || echo nogit)$(shell git status --porcelain 2>/dev/null | grep -q . && echo -dirty)
 
 BUILD_PKG=	github.com/glenjbarber/apiary/internal/buildinfo
+
+# BuildTime is the COMMIT's committer date, not the build's clock
+# reading. A date is worth having in a startup log - it dates the source,
+# which is what a reader of a stale daemon's log is asking - and the
+# commit date is as informative while being a fixed property of the
+# input, so it costs no reproducibility. SOURCE_DATE_EPOCH, if set,
+# overrides it, which is what a release build wants.
+BUILD_TIME?=	$(shell git log -1 --format=%cI 2>/dev/null || echo unknown)
+
 BUILD_LDFLAGS=	-X '$(BUILD_PKG).BuildID=$(BUILD_ID)' \
-			-X '$(BUILD_PKG).BuildTime=$(shell date -u +%Y-%m-%dT%H:%M:%SZ)' \
+			-X '$(BUILD_PKG).BuildTime=$(BUILD_TIME)' \
 			-X '$(BUILD_PKG).GitCommit=$(shell git rev-parse HEAD 2>/dev/null)'
+
+# -trimpath strips the build directory and module cache paths out of the
+# binary. Without it the same commit built in two checkouts produces
+# different bytes, so reproducibility would hold only for whoever happened
+# to build it first. -buildvcs=false because the Makefile injects the
+# revision explicitly and does not want Go stamping a dirty tree's
+# revision as though it described the binary.
+GO_BUILD?=	go build -trimpath -buildvcs=false
 
 # Check a binary's identity without starting it. A copy over a running
 # executable leaves new bytes on disk and old ones in memory, so this
@@ -40,8 +77,27 @@ PAM_SERVICE=	apiary
 
 build:
 	for S in ${SRCS} ; \
-		do go build -buildvcs=false -ldflags "$(BUILD_LDFLAGS)" -o $$S ./cmd/$$S ;\
+		do $(GO_BUILD) -ldflags "$(BUILD_LDFLAGS)" -o $$S ./cmd/$$S ;\
 	done
+
+# Prove the reproducibility claim instead of asserting it: build the
+# same commit twice and compare the bytes. This is the check that fails
+# if anyone reintroduces a clock, or drops -trimpath, or adds a stamp
+# that varies per build - all of which are invisible in code review and
+# only show up here.
+.PHONY: check-reproducible
+check-reproducible:
+	@$(GO_BUILD) -ldflags "$(BUILD_LDFLAGS)" -o /tmp/apiary-repro-a ./cmd/raftd
+	@sleep 1
+	@$(GO_BUILD) -ldflags "$(BUILD_LDFLAGS)" -o /tmp/apiary-repro-b ./cmd/raftd
+	@a=`sha256 -q /tmp/apiary-repro-a` ; b=`sha256 -q /tmp/apiary-repro-b` ; \
+		rm -f /tmp/apiary-repro-a /tmp/apiary-repro-b ; \
+		if [ "$$a" = "$$b" ] ; then \
+			echo "reproducible: raftd $$a" ; \
+		else \
+			echo "NOT reproducible: $$a != $$b" ; exit 1 ; \
+		fi
+	@echo "build id was: $(BUILD_ID)"
 
 clean:
 	for S in ${SRCS} ; \

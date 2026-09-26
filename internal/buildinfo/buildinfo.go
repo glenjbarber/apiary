@@ -17,11 +17,28 @@
 //
 //	go build -ldflags "-X github.com/glenjbarber/apiary/internal/buildinfo.BuildID=<id>"
 //
+// The identity is the commit and nothing else - no clock, no build
+// counter - so the same commit builds to the same bytes and the same
+// identifier, forever, and an artifact's sha256 becomes something an
+// operator can check. BuildTime is the commit's date rather than the
+// moment of the build, which dates the source without making the build
+// non-reproducible. See the Makefile for why the alternative was
+// rejected: a timestamp in the id makes every rebuild look like a
+// different build, which is a false alarm on every deploy.
+//
+// The one case the commit cannot describe is a dirty worktree, where
+// the binary is not the commit. That is carried in the id itself as a
+// -dirty suffix rather than papered over, so Dirty can report it and a
+// reader can tell a claim about source from a claim about bytes.
+//
 // With no injection (a plain `go build ./...`, or `go run`), every
 // value is empty and Uninjected is true. That is reported as
 // "unknown" rather than being papered over with a plausible-looking
 // placeholder, because a build ID that looks real but is not is worse
-// than one that admits it does not know.
+// than one that admits it does not know. Each field is judged
+// separately: a stamp carrying an id but no time renders
+// "built=unknown" rather than omitting the field, so a partial stamp
+// can never be mistaken for a complete one.
 package buildinfo
 
 import (
@@ -36,19 +53,29 @@ import (
 // Injected at link time by the Makefile's build target. Empty
 // otherwise; see the package comment.
 var (
-	// BuildID is a short, unique-per-build identifier. It is the value
-	// to compare between nodes when asking "are these all the same
-	// build?".
+	// BuildID identifies the source this binary was built from. It is
+	// the short commit, plus a "-dirty" suffix when the worktree was
+	// not clean, and never a timestamp. This is the value to compare
+	// between nodes when asking "are these all the same build?".
+	//
+	// It is a claim about SOURCE. Two builds of one commit from one
+	// clean checkout also produce identical bytes, but that is the
+	// Makefile's -trimpath doing its job, not a property of this
+	// string: a -dirty id, a different Go toolchain, or a different
+	// target platform can all produce different bytes behind the same
+	// id. Use the sha256 of the artifact when the question is about
+	// bytes.
 	BuildID = ""
 
-	// BuildTime is the UTC RFC3339 timestamp of the build.
+	// BuildTime is the RFC3339 date of the COMMIT, not of the build.
+	// Datable in a log line and reproducible, which a wall-clock
+	// reading is not.
 	BuildTime = ""
 
-	// GitCommit is the commit the binary was built from, when the
-	// build had a clean worktree. Empty for a dirty tree or a build
-	// made without VCS stamping, which is why -buildvcs=false must be
-	// paired with an explicit -X in the Makefile rather than relying
-	// on Go's automatic stamping.
+	// GitCommit is the full commit the binary was built from. Empty
+	// for a build made without stamping, which is why -buildvcs=false
+	// must be paired with an explicit -X in the Makefile rather than
+	// relying on Go's automatic stamping.
 	GitCommit = ""
 
 	// Version is a human-facing release or version label. Optional and
@@ -56,42 +83,65 @@ var (
 	Version = ""
 )
 
+// dirtySuffix marks a build id whose worktree was not clean. The bytes
+// of such a build are not described by the commit, so two -dirty builds
+// can share an id and still differ - which is why agreement between two
+// -dirty ids is weaker evidence than agreement between two clean ones.
+const dirtySuffix = "-dirty"
+
+// Dirty reports whether this binary was built from a worktree with
+// uncommitted or untracked changes, in which case the commit does not
+// describe the bytes. It is derived from the id rather than injected
+// separately so the id and this can never disagree.
+func Dirty() bool {
+	return IsDirtyID(BuildID)
+}
+
+// IsDirtyID reports whether an arbitrary build id carries the dirty
+// marker. Exported so a tool comparing ids it read out of someone
+// else's binaries - versioncheck - applies the same rule this package
+// does, rather than a second copy of the suffix that could drift.
+func IsDirtyID(id string) bool {
+	return strings.HasSuffix(id, dirtySuffix)
+}
+
 // Uninjected reports whether this binary carries no link-time stamp at
 // all. Callers should surface this rather than rendering empty fields
-// as though they were values.
+// as though they were values. A partial stamp returns false: the honest
+// answer there is per-field, not a single verdict.
 func Uninjected() bool {
 	return BuildID == "" && BuildTime == "" && GitCommit == "" && Version == ""
 }
 
 // String renders the build identity in a stable one-line form suitable
-// for a log line or a `-version` flag. The "uninjected" case is stated
-// plainly instead of being formatted as an empty value.
+// for a log line or a `-version` flag. Every field is always present
+// and never blank: a field with no value reads "unknown" rather than
+// being omitted, because an omitted field is indistinguishable from one
+// whose value the reader has not scrolled to see.
 func String() string {
 	var b strings.Builder
-	if Uninjected() {
+	if BuildID == "" {
 		b.WriteString("build=unknown (not stamped; built without " +
 			"-ldflags -X .../buildinfo.BuildID)")
 	} else {
 		b.WriteString("build=")
-		b.WriteString(orUnknown(BuildID))
+		b.WriteString(BuildID)
 		if Version != "" {
 			b.WriteString(" version=")
 			b.WriteString(Version)
 		}
-		if GitCommit != "" {
-			b.WriteString(" commit=")
-			b.WriteString(short(GitCommit))
-		}
-		if BuildTime != "" {
-			b.WriteString(" built=")
-			b.WriteString(BuildTime)
-		}
 	}
+	b.WriteString(" commit=")
+	b.WriteString(shortOrUnknown(GitCommit))
+	b.WriteString(" built=")
+	b.WriteString(orUnknown(BuildTime))
 	// The platform is appended unconditionally, including in the
 	// unstamped case: "I do not know which build this is" is still
 	// compatible with knowing what it was compiled for, and that is
 	// the fact that matters when a binary may have been
-	// cross-compiled from a Mac.
+	// cross-compiled from a Mac. It is also part of what the id does
+	// NOT cover - the same commit built for darwin and for freebsd
+	// carries the same id and is not the same binary.
 	fmt.Fprintf(&b, " go=%s/%s", runtime.GOOS, runtime.GOARCH)
 	return b.String()
 }
@@ -149,6 +199,15 @@ func Report(program string) string {
 	fmt.Fprintf(&b, "  go:        %s\n", Toolchain())
 	fmt.Fprintf(&b, "  module:    %s\n", orNone(ModuleVersion()))
 	fmt.Fprintf(&b, "  vcs:       %s\n", orNone(VCS()))
+	if Dirty() {
+		// Said here, in the report a human reads on purpose, because
+		// this build's id does not describe its bytes and anyone
+		// comparing two -dirty ids is being told less than they
+		// might assume they are being told.
+		fmt.Fprintf(&b, "  worktree:  DIRTY - the commit does not describe these bytes;\n"+
+			"             this build is not reproducible, and two builds sharing\n"+
+			"             this id may differ. Compare sha256 to compare artifacts.\n")
+	}
 	if bi, ok := debug.ReadBuildInfo(); ok {
 		// ReadBuildInfo also exposes the build settings Go recorded,
 		// which is where -trimpath and the GOOS/GOARCH the binary was
@@ -217,4 +276,13 @@ func short(rev string) string {
 		return rev[:12]
 	}
 	return rev
+}
+
+// shortOrUnknown shortens a commit for display, and keeps an absent one
+// visibly absent instead of collapsing it to an empty field.
+func shortOrUnknown(rev string) string {
+	if rev == "" {
+		return "unknown"
+	}
+	return short(rev)
 }

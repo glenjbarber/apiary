@@ -10,8 +10,8 @@ import (
 
 // A log line as a real daemon writes it, both the pre-stamping shape
 // and the post-stamping shape.
-const stampedLine = `2026/09/26 16:00:21 raftd: build=9c43262d358a-20260926T160021Z ` +
-	`commit=9c43262d358a built=2026-09-26T16:00:21Z go=freebsd/amd64 ` +
+const stampedLine = `2026/09/26 16:00:21 raftd: build=9c43262d358a ` +
+	`commit=9c43262d358a built=2026-09-26T11:52:03-04:00 go=freebsd/amd64 ` +
 	`listening on /var/run/apiary/raftd.sock (node-id=brood.lab3.home.arpa, raft-tls=false)`
 
 const unstampedLine = `2026/09/26 02:03:23 raftd: listening on ` +
@@ -31,7 +31,7 @@ func TestBuildLineRegex(t *testing.T) {
 	if m == nil {
 		t.Fatal("no match on a stamped line")
 	}
-	if want := "9c43262d358a-20260926T160021Z"; m[1] != want {
+	if want := "9c43262d358a"; m[1] != want {
 		t.Errorf("build id = %q, want %q", m[1], want)
 	}
 	// The critical negative: a pre-stamping line must NOT yield a
@@ -54,7 +54,7 @@ func TestRunningBuildTakesTheMostRecentLine(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := "9c43262d358a-20260926T160021Z"; got != want {
+	if want := "9c43262d358a"; got != want {
 		t.Errorf("runningBuild() = %q, want the most recent %q", got, want)
 	}
 }
@@ -114,7 +114,7 @@ func TestVerdictsAreDistinctValues(t *testing.T) {
 	// Guard against two verdicts collapsing to the same string, which
 	// would make the report silently lie.
 	all := map[verdict]bool{}
-	for _, v := range []verdict{agree, differ, unknown, notRunning, unstamped, noStampLine} {
+	for _, v := range []verdict{agree, differ, unknown, notRunning, unstamped, noStampLine, sameDirty} {
 		if all[v] {
 			t.Errorf("duplicate verdict %q", v)
 		}
@@ -159,7 +159,7 @@ func TestVerdictsRemainDistinct(t *testing.T) {
 	seen := map[verdict]bool{}
 	for _, v := range []verdict{
 		agree, differ, unknown, notRunning, unstamped, noStampLine,
-		missing, predatesFlag,
+		missing, predatesFlag, sameDirty,
 	} {
 		if seen[v] {
 			t.Errorf("duplicate verdict %q", v)
@@ -171,3 +171,70 @@ func TestVerdictsRemainDistinct(t *testing.T) {
 type errStr string
 
 func (e errStr) Error() string { return string(e) }
+
+func TestCompare(t *testing.T) {
+	// The whole decision table, because each row is a claim this tool
+	// makes to an operator about what is actually running.
+	cases := []struct {
+		name      string
+		disk, run string
+		want      verdict
+	}{
+		{"clean agreement", "9c43262d358a", "9c43262d358a", agree},
+		{"clean disagreement", "b8e74c328d9f", "9c43262d358a", differ},
+		{"running predates stamping", "b8e74c328d9f", "", noStampLine},
+		// The downgrade: matching -dirty ids agree about the commit and
+		// say nothing reliable about the bytes, so they must not render
+		// as a clean match.
+		{"dirty agreement is downgraded", "9c43262d358a-dirty", "9c43262d358a-dirty", sameDirty},
+		// ...but a dirty id that differs is still a plain mismatch.
+		{"dirty disagreement is still a mismatch", "9c43262d358a-dirty", "b8e74c328d9f", differ},
+		// A clean id on disk with a dirty one running is a mismatch,
+		// not a downgrade: the sources genuinely differ.
+		{"clean vs dirty is a mismatch", "9c43262d358a", "9c43262d358a-dirty", differ},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := compare(c.disk, c.run); got != c.want {
+				t.Errorf("compare(%q, %q) = %q, want %q", c.disk, c.run, got, c.want)
+			}
+		})
+	}
+}
+
+func TestDirtyAgreementSaysWhyItIsWeaker(t *testing.T) {
+	// A downgraded verdict that does not say what is missing is just a
+	// different string, not a more honest answer.
+	d := detail("raftd", sameDirty)
+	for _, want := range []string{"dirty", "sha256"} {
+		if !strings.Contains(d, want) {
+			t.Errorf("detail(sameDirty) = %q, want it to mention %q", d, want)
+		}
+	}
+	if d := detail("raftd", agree); d != "" {
+		t.Errorf("detail(agree) = %q, want empty", d)
+	}
+}
+
+func TestStampsReturnsADirtyIDWhole(t *testing.T) {
+	// The id must survive intact through the regex, suffix included. If
+	// a -dirty id were truncated or mangled, the downgrade would never
+	// trigger and two genuinely different dirty builds would report
+	// agreement.
+	dir := t.TempDir()
+	script := filepath.Join(dir, "fakerd")
+	body := "#!/bin/sh\necho 'raftd build=9c43262d358a-dirty commit=9c43262d358a built=2026-09-26T11:52:03-04:00 go=freebsd/amd64'\n"
+	if err := os.WriteFile(script, []byte(body), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	got, err := stamps(script)
+	if err != nil {
+		t.Fatalf("stamps() err = %v", err)
+	}
+	if want := "9c43262d358a-dirty"; got != want {
+		t.Errorf("stamps() = %q, want the full id %q including its -dirty suffix", got, want)
+	}
+	if compare(got, got) != sameDirty {
+		t.Error("a matching -dirty id did not produce the downgraded verdict")
+	}
+}

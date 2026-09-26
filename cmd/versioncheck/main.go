@@ -12,9 +12,15 @@
 // Comb that is not running at all are all reported as unknown, never
 // as agreement.
 //
+// SCOPE: this checks the host it runs on. The Comb names on the command
+// line are labels for the report, not remote targets - it reads this
+// host's /usr/local/libexec/apiary and /var/log/apiary and nothing
+// else. Run it on each Comb; do not read "same build" for brood as
+// applying to drone.
+//
 // Usage:
 //
-//	versioncheck [-raft-addr host:port] comb comb ...
+//	versioncheck [flags] comb comb ...
 //	versioncheck -list
 package main
 
@@ -28,6 +34,8 @@ import (
 	"regexp"
 	"strings"
 	"time"
+
+	"github.com/glenjbarber/apiary/internal/buildinfo"
 )
 
 const libexec = "/usr/local/libexec/apiary/"
@@ -39,7 +47,7 @@ const libexec = "/usr/local/libexec/apiary/"
 var services = []string{"raftd", "managerd", "frontend", "restshimd"}
 
 // buildLine matches the build identity a daemon prints on its startup
-// log line, e.g. "build=9c43262d358a-2026... go=darwin/arm64".
+// log line, e.g. "build=b8e74c328d9f commit=b8e74c328d9f built=... go=freebsd/amd64".
 var buildLine = regexp.MustCompile(`build=(\S+)`)
 
 // stamps extracts the build id a binary reports about itself.
@@ -136,7 +144,31 @@ const (
 	predatesFlag verdict = "pre-dates -version (build it first)"
 	unstamped    verdict = "unstamped (no -ldflags)"
 	noStampLine  verdict = "unknown (running build predates build stamping)"
+
+	// sameDirty is agreement that has been honestly downgraded. The two
+	// ids match, which normally means one commit and therefore one set
+	// of bytes - but a -dirty id means the binary is not the commit, and
+	// two dirty builds can share an id while differing. Reporting that
+	// as a plain "same build" would be a stronger claim than the
+	// evidence supports, which is the one thing this tool must not do.
+	sameDirty verdict = "same source (dirty build - bytes unverified)"
 )
+
+// compare is the pure core: given the id on disk and the id the running
+// process printed when it started, what can honestly be said? Split out
+// from check so the decision table is testable without a Comb.
+func compare(disk, run string) verdict {
+	switch {
+	case run == "":
+		return noStampLine
+	case run != disk:
+		return differ
+	case buildinfo.IsDirtyID(disk):
+		return sameDirty
+	default:
+		return agree
+	}
+}
 
 func check(prog string) verdict {
 	disk, err := stamps(libexec + prog)
@@ -175,14 +207,7 @@ func check(prog string) verdict {
 		}
 		return unknown
 	}
-	switch {
-	case run == "":
-		return noStampLine
-	case run != disk:
-		return differ
-	default:
-		return agree
-	}
+	return compare(disk, run)
 }
 
 func main() {
@@ -233,6 +258,10 @@ func detail(prog string, v verdict) string {
 		return "(built without -ldflags; use make build)"
 	case predatesFlag:
 		return "(this binary has no -version flag - it was built before build stamping existed)"
+	case sameDirty:
+		return "(both say the same commit, but a -dirty build's id does not " +
+			"describe its bytes - two of them can share this id and differ; " +
+			"compare sha256 to be sure)"
 	case notRunning:
 		return ""
 	}
@@ -244,6 +273,9 @@ func usage() {
 
 Reads each daemon's own startup log line and compares it against that
 binary's -version output. Read-only: starts nothing, stops nothing.
+
+This checks the host it is run on. The Comb names are labels for the
+report, not remote targets: run it once per Comb.
 
 Exit status is 1 if any service is running a different build than the
 one on disk, 0 otherwise - including when the answer is unknown, so an

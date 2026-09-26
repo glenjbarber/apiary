@@ -3,10 +3,15 @@ package buildinfo
 import (
 	"flag"
 	"io"
+	"regexp"
 	"runtime/debug"
 	"strings"
 	"testing"
 )
+
+// buildIDToken extracts the build id as a reader (or versioncheck) would
+// see it: the first whitespace-delimited token after build=.
+var buildIDToken = regexp.MustCompile(`build=(\S+)`)
 
 func TestUninjectedIsHonestAboutEmptyStamps(t *testing.T) {
 	// The package-level vars are empty in a plain `go test` run, which
@@ -67,6 +72,115 @@ func TestStringAlwaysNamesThePlatform(t *testing.T) {
 	// failure is being debugged.
 	if !strings.Contains(String(), "go=") {
 		t.Errorf("String() = %q, want it to name the platform", String())
+	}
+}
+
+func withStamps(t *testing.T, id, buildTime, commit, version string) {
+	origID, origTime, origCommit, origVersion := BuildID, BuildTime, GitCommit, Version
+	t.Cleanup(func() {
+		BuildID, BuildTime, GitCommit, Version = origID, origTime, origCommit, origVersion
+	})
+	BuildID, BuildTime, GitCommit, Version = id, buildTime, commit, version
+}
+
+func TestPartialStampNeverLooksComplete(t *testing.T) {
+	// The failure this guards: an id injected but not the time - a
+	// hand-rolled ldflags line, or a Makefile that dropped a field -
+	// used to render as an omitted "built=", which reads the same as a
+	// complete stamp to anyone skimming a startup log. Each field now
+	// reports on its own.
+	withStamps(t, "abc123def456", "", "", "")
+	got := String()
+
+	for _, want := range []string{"build=abc123def456", "built=unknown", "commit=unknown"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("String() = %q, want it to contain %q", got, want)
+		}
+	}
+	for _, blank := range []string{"built= ", "commit= ", "built=)", "commit=)"} {
+		if strings.Contains(got, blank) {
+			t.Errorf("String() = %q, want no empty %q field", got, blank)
+		}
+	}
+}
+
+func TestUnstampedNamesEveryFieldUnknown(t *testing.T) {
+	// Unstamped is the case that must be loud rather than tidy: all
+	// three identity fields say unknown, so a reader is told the whole
+	// truth at once instead of inferring it from a missing id.
+	withStamps(t, "", "", "", "")
+	got := String()
+	for _, want := range []string{"build=unknown", "commit=unknown", "built=unknown"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("String() = %q, want it to contain %q", got, want)
+		}
+	}
+}
+
+func TestDirtyIsDerivedFromTheID(t *testing.T) {
+	// Dirty is a property of the id, not a separately injected flag, so
+	// the two can never disagree about the same binary.
+	cases := map[string]bool{
+		"abc123def456":             false,
+		"abc123def456-dirty":       true,
+		"release-1.0":              false,
+		"":                         false,
+		"dirty-but-not-marked":     false, // the token alone is not the marker
+		"abc-dirty-but-not":        false, // only a TRAILING suffix marks it
+		"abc123def456-dirty-dirty": true,
+	}
+	for id, want := range cases {
+		withStamps(t, id, "2026-09-26T12:00:00Z", "abc123def4560123456789abcdef0123456789abcd", "")
+		if got := Dirty(); got != want {
+			t.Errorf("Dirty() with BuildID=%q = %v, want %v", id, got, want)
+		}
+	}
+}
+
+func TestReportWarnsWhenDirty(t *testing.T) {
+	// Agreement between two -dirty ids is weaker than agreement between
+	// two clean ones, and the report is where a human finds out.
+	withStamps(t, "abc123def456-dirty", "2026-09-26T12:00:00Z", "abc123def4560123456789abcdef0123456789abcd", "")
+	out := Report("raftd")
+	if !strings.Contains(out, "DIRTY") {
+		t.Errorf("Report() must warn that a dirty build's id does not describe its bytes:\n%s", out)
+	}
+	if !strings.Contains(out, "sha256") {
+		t.Errorf("Report() should say how to compare artifacts instead:\n%s", out)
+	}
+
+	withStamps(t, "abc123def456", "2026-09-26T12:00:00Z", "abc123def4560123456789abcdef0123456789abcd", "")
+	if clean := Report("raftd"); strings.Contains(clean, "DIRTY") {
+		t.Errorf("Report() warned DIRTY for a clean build:\n%s", clean)
+	}
+}
+
+func TestCommitStyleIDRendersWithoutAClock(t *testing.T) {
+	// The shape the Makefile now produces. Pinned explicitly so a
+	// future change to the id format shows up here rather than only in
+	// a diff of a log line nobody reads.
+	withStamps(t, "b8e74c328d9f", "2026-09-26T11:52:03-04:00", "b8e74c328d9f0123456789abcdef0123456789ab", "")
+	got := String()
+	for _, want := range []string{
+		"build=b8e74c328d9f",
+		"commit=b8e74c328d9f",
+		"built=2026-09-26T11:52:03-04:00",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("String() = %q, want it to contain %q", got, want)
+		}
+	}
+	// The property that makes the id comparable across machines: the
+	// build= token is exactly the id and nothing is appended to it, so
+	// nothing in it can vary with when the build ran. Asserted on the
+	// parsed token rather than with Contains, because Contains on a
+	// prefix would pass even if a timestamp had been re-appended.
+	m := buildIDToken.FindStringSubmatch(got)
+	if m == nil {
+		t.Fatalf("String() = %q, want a build= field", got)
+	}
+	if m[1] != "b8e74c328d9f" {
+		t.Errorf("build id token = %q, want exactly %q (a clock or counter in the id is the bug)", m[1], "b8e74c328d9f")
 	}
 }
 
