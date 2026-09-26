@@ -6,13 +6,13 @@ package freebsdimg
 import (
 	"crypto/sha256"
 	"encoding/hex"
-	
+
 	"fmt"
 	"io"
 	"net/http"
 	"os"
 	"path/filepath"
-	
+
 	"sync"
 )
 
@@ -102,11 +102,15 @@ func New(cacheDir string) *Manager {
 	return &Manager{CacheDir: cacheDir, HTTPClient: http.DefaultClient}
 }
 
-func (m *Manager) compressedDir() string  { return filepath.Join(m.CacheDir, "compressed") }
+func (m *Manager) compressedDir() string   { return filepath.Join(m.CacheDir, "compressed") }
 func (m *Manager) decompressedDir() string { return filepath.Join(m.CacheDir, "decompressed") }
 
-func (m *Manager) compressedPath(name string) string  { return filepath.Join(m.compressedDir(), name+".xz") }
-func (m *Manager) decompressedPath(name string) string { return filepath.Join(m.decompressedDir(), name) }
+func (m *Manager) compressedPath(name string) string {
+	return filepath.Join(m.compressedDir(), name+".xz")
+}
+func (m *Manager) decompressedPath(name string) string {
+	return filepath.Join(m.decompressedDir(), name)
+}
 
 // EnsureImage downloads (if needed), verifies, and decompresses the
 // named official image, returning the local path to the decompressed
