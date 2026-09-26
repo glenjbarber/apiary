@@ -38,6 +38,7 @@ const (
 	ManagerService_SetVMFirewallRules_FullMethodName          = "/apiary.rpc.v1.ManagerService/SetVMFirewallRules"
 	ManagerService_GetVM_FullMethodName                       = "/apiary.rpc.v1.ManagerService/GetVM"
 	ManagerService_ListVMs_FullMethodName                     = "/apiary.rpc.v1.ManagerService/ListVMs"
+	ManagerService_ListVMsLocal_FullMethodName                = "/apiary.rpc.v1.ManagerService/ListVMsLocal"
 	ManagerService_UploadISO_FullMethodName                   = "/apiary.rpc.v1.ManagerService/UploadISO"
 	ManagerService_ListISOs_FullMethodName                    = "/apiary.rpc.v1.ManagerService/ListISOs"
 	ManagerService_DeleteISO_FullMethodName                   = "/apiary.rpc.v1.ManagerService/DeleteISO"
@@ -80,6 +81,7 @@ const (
 	ManagerService_SetJailHostname_FullMethodName             = "/apiary.rpc.v1.ManagerService/SetJailHostname"
 	ManagerService_GetJail_FullMethodName                     = "/apiary.rpc.v1.ManagerService/GetJail"
 	ManagerService_ListJails_FullMethodName                   = "/apiary.rpc.v1.ManagerService/ListJails"
+	ManagerService_ListJailsLocal_FullMethodName              = "/apiary.rpc.v1.ManagerService/ListJailsLocal"
 	ManagerService_ForcePurgeJail_FullMethodName              = "/apiary.rpc.v1.ManagerService/ForcePurgeJail"
 	ManagerService_SimulateNodeFailure_FullMethodName         = "/apiary.rpc.v1.ManagerService/SimulateNodeFailure"
 	ManagerService_SimulateNetworkFailure_FullMethodName      = "/apiary.rpc.v1.ManagerService/SimulateNetworkFailure"
@@ -212,6 +214,10 @@ type ManagerServiceClient interface {
 	// read consistency model is deliberately as simple as its write model.
 	GetVM(ctx context.Context, in *GetVMRequest, opts ...grpc.CallOption) (*GetVMResponse, error)
 	ListVMs(ctx context.Context, in *ListVMsRequest, opts ...grpc.CallOption) (*ListVMsResponse, error)
+	// ListVMsLocal reads the local FSM state without requiring leadership.
+	// FSM state is Raft-replicated to all nodes, so any Comb can serve
+	// the cluster-wide list. Use for read-only listing; writes require ListVMs.
+	ListVMsLocal(ctx context.Context, in *ListVMsLocalRequest, opts ...grpc.CallOption) (*ListVMsLocalResponse, error)
 	// UploadISO, ListISOs, and DeleteISO manage installer images stored
 	// locally on *this* managerd's own node - unlike VM definitions,
 	// these are physical data (see CLAUDE.md's physical/ephemeral
@@ -417,6 +423,10 @@ type ManagerServiceClient interface {
 	SetJailHostname(ctx context.Context, in *SetJailHostnameRequest, opts ...grpc.CallOption) (*SetJailHostnameResponse, error)
 	GetJail(ctx context.Context, in *GetJailRequest, opts ...grpc.CallOption) (*GetJailResponse, error)
 	ListJails(ctx context.Context, in *ListJailsRequest, opts ...grpc.CallOption) (*ListJailsResponse, error)
+	// ListJailsLocal reads the local FSM state without requiring leadership.
+	// FSM state is Raft-replicated to all nodes, so any Comb can serve
+	// the cluster-wide list. Use for read-only listing; writes require ListJails.
+	ListJailsLocal(ctx context.Context, in *ListJailsLocalRequest, opts ...grpc.CallOption) (*ListJailsLocalResponse, error)
 	// ForcePurgeJail mirrors ForcePurgeVM exactly, for a jail tombstoned
 	// by DeleteJail whose owning node will never come back to reconcile
 	// it away. See ForcePurgeVM's own doc comment above for the full
@@ -808,6 +818,16 @@ func (c *managerServiceClient) ListVMs(ctx context.Context, in *ListVMsRequest, 
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(ListVMsResponse)
 	err := c.cc.Invoke(ctx, ManagerService_ListVMs_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *managerServiceClient) ListVMsLocal(ctx context.Context, in *ListVMsLocalRequest, opts ...grpc.CallOption) (*ListVMsLocalResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListVMsLocalResponse)
+	err := c.cc.Invoke(ctx, ManagerService_ListVMsLocal_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -1240,6 +1260,16 @@ func (c *managerServiceClient) ListJails(ctx context.Context, in *ListJailsReque
 	return out, nil
 }
 
+func (c *managerServiceClient) ListJailsLocal(ctx context.Context, in *ListJailsLocalRequest, opts ...grpc.CallOption) (*ListJailsLocalResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListJailsLocalResponse)
+	err := c.cc.Invoke(ctx, ManagerService_ListJailsLocal_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *managerServiceClient) ForcePurgeJail(ctx context.Context, in *ForcePurgeJailRequest, opts ...grpc.CallOption) (*ForcePurgeJailResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(ForcePurgeJailResponse)
@@ -1625,6 +1655,10 @@ type ManagerServiceServer interface {
 	// read consistency model is deliberately as simple as its write model.
 	GetVM(context.Context, *GetVMRequest) (*GetVMResponse, error)
 	ListVMs(context.Context, *ListVMsRequest) (*ListVMsResponse, error)
+	// ListVMsLocal reads the local FSM state without requiring leadership.
+	// FSM state is Raft-replicated to all nodes, so any Comb can serve
+	// the cluster-wide list. Use for read-only listing; writes require ListVMs.
+	ListVMsLocal(context.Context, *ListVMsLocalRequest) (*ListVMsLocalResponse, error)
 	// UploadISO, ListISOs, and DeleteISO manage installer images stored
 	// locally on *this* managerd's own node - unlike VM definitions,
 	// these are physical data (see CLAUDE.md's physical/ephemeral
@@ -1830,6 +1864,10 @@ type ManagerServiceServer interface {
 	SetJailHostname(context.Context, *SetJailHostnameRequest) (*SetJailHostnameResponse, error)
 	GetJail(context.Context, *GetJailRequest) (*GetJailResponse, error)
 	ListJails(context.Context, *ListJailsRequest) (*ListJailsResponse, error)
+	// ListJailsLocal reads the local FSM state without requiring leadership.
+	// FSM state is Raft-replicated to all nodes, so any Comb can serve
+	// the cluster-wide list. Use for read-only listing; writes require ListJails.
+	ListJailsLocal(context.Context, *ListJailsLocalRequest) (*ListJailsLocalResponse, error)
 	// ForcePurgeJail mirrors ForcePurgeVM exactly, for a jail tombstoned
 	// by DeleteJail whose owning node will never come back to reconcile
 	// it away. See ForcePurgeVM's own doc comment above for the full
@@ -2094,6 +2132,9 @@ func (UnimplementedManagerServiceServer) GetVM(context.Context, *GetVMRequest) (
 func (UnimplementedManagerServiceServer) ListVMs(context.Context, *ListVMsRequest) (*ListVMsResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ListVMs not implemented")
 }
+func (UnimplementedManagerServiceServer) ListVMsLocal(context.Context, *ListVMsLocalRequest) (*ListVMsLocalResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ListVMsLocal not implemented")
+}
 func (UnimplementedManagerServiceServer) UploadISO(grpc.ClientStreamingServer[UploadISORequest, UploadISOResponse]) error {
 	return status.Error(codes.Unimplemented, "method UploadISO not implemented")
 }
@@ -2219,6 +2260,9 @@ func (UnimplementedManagerServiceServer) GetJail(context.Context, *GetJailReques
 }
 func (UnimplementedManagerServiceServer) ListJails(context.Context, *ListJailsRequest) (*ListJailsResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ListJails not implemented")
+}
+func (UnimplementedManagerServiceServer) ListJailsLocal(context.Context, *ListJailsLocalRequest) (*ListJailsLocalResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ListJailsLocal not implemented")
 }
 func (UnimplementedManagerServiceServer) ForcePurgeJail(context.Context, *ForcePurgeJailRequest) (*ForcePurgeJailResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ForcePurgeJail not implemented")
@@ -2663,6 +2707,24 @@ func _ManagerService_ListVMs_Handler(srv interface{}, ctx context.Context, dec f
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(ManagerServiceServer).ListVMs(ctx, req.(*ListVMsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ManagerService_ListVMsLocal_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListVMsLocalRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ManagerServiceServer).ListVMsLocal(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ManagerService_ListVMsLocal_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ManagerServiceServer).ListVMsLocal(ctx, req.(*ListVMsLocalRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -3401,6 +3463,24 @@ func _ManagerService_ListJails_Handler(srv interface{}, ctx context.Context, dec
 	return interceptor(ctx, in, info, handler)
 }
 
+func _ManagerService_ListJailsLocal_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListJailsLocalRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ManagerServiceServer).ListJailsLocal(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ManagerService_ListJailsLocal_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ManagerServiceServer).ListJailsLocal(ctx, req.(*ListJailsLocalRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _ManagerService_ForcePurgeJail_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(ForcePurgeJailRequest)
 	if err := dec(in); err != nil {
@@ -3978,6 +4058,10 @@ var ManagerService_ServiceDesc = grpc.ServiceDesc{
 			Handler:    _ManagerService_ListVMs_Handler,
 		},
 		{
+			MethodName: "ListVMsLocal",
+			Handler:    _ManagerService_ListVMsLocal_Handler,
+		},
+		{
 			MethodName: "ListISOs",
 			Handler:    _ManagerService_ListISOs_Handler,
 		},
@@ -4136,6 +4220,10 @@ var ManagerService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ListJails",
 			Handler:    _ManagerService_ListJails_Handler,
+		},
+		{
+			MethodName: "ListJailsLocal",
+			Handler:    _ManagerService_ListJailsLocal_Handler,
 		},
 		{
 			MethodName: "ForcePurgeJail",

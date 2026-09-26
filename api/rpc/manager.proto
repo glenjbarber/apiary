@@ -115,6 +115,11 @@ service ManagerService {
   rpc GetVM(GetVMRequest) returns (GetVMResponse);
   rpc ListVMs(ListVMsRequest) returns (ListVMsResponse);
 
+  // ListVMsLocal reads the local FSM state without requiring leadership.
+  // FSM state is Raft-replicated to all nodes, so any Comb can serve
+  // the cluster-wide list. Use for read-only listing; writes require ListVMs.
+  rpc ListVMsLocal(ListVMsLocalRequest) returns (ListVMsLocalResponse);
+
   // UploadISO, ListISOs, and DeleteISO manage installer images stored
   // locally on *this* managerd's own node - unlike VM definitions,
   // these are physical data (see CLAUDE.md's physical/ephemeral
@@ -338,6 +343,11 @@ service ManagerService {
   rpc SetJailHostname(SetJailHostnameRequest) returns (SetJailHostnameResponse);
   rpc GetJail(GetJailRequest) returns (GetJailResponse);
   rpc ListJails(ListJailsRequest) returns (ListJailsResponse);
+
+  // ListJailsLocal reads the local FSM state without requiring leadership.
+  // FSM state is Raft-replicated to all nodes, so any Comb can serve
+  // the cluster-wide list. Use for read-only listing; writes require ListJails.
+  rpc ListJailsLocal(ListJailsLocalRequest) returns (ListJailsLocalResponse);
 
   // ForcePurgeJail mirrors ForcePurgeVM exactly, for a jail tombstoned
   // by DeleteJail whose owning node will never come back to reconcile
@@ -897,6 +907,17 @@ message ListVMsResponse {
   repeated VMDefinition vms = 1;
   string error = 2;
   string leader_hint = 3;
+}
+
+// ListVMsLocal reads all VM definitions from the local FSM state.
+// Unlike ListVMs, this is NOT leader-restricted - any Comb can serve
+// the cluster-wide VM list since FSM state is Raft-replicated.
+// Use this for read-only listing; writes still require ListVMs (leader).
+message ListVMsLocalRequest {}
+
+message ListVMsLocalResponse {
+  repeated VMDefinition vms = 1;
+  string error = 2;
 }
 
 message StatusRequest {}
@@ -2074,6 +2095,17 @@ message ListJailsResponse {
   repeated JailDefinition jails = 1;
   string error = 2;
   string leader_hint = 3;
+}
+
+// ListJailsLocal reads all Jail definitions from the local FSM state.
+// Unlike ListJails, this is NOT leader-restricted - any Comb can serve
+// the cluster-wide Jail list since FSM state is Raft-replicated.
+// Use this for read-only listing; writes still require ListJails (leader).
+message ListJailsLocalRequest {}
+
+message ListJailsLocalResponse {
+  repeated JailDefinition jails = 1;
+  string error = 2;
 }
 
 message ForcePurgeJailRequest {

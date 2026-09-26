@@ -3940,6 +3940,38 @@ func (s *Server) ListVMs(ctx context.Context, _ *rpcpb.ListVMsRequest) (*rpcpb.L
 	return &rpcpb.ListVMsResponse{Vms: vms}, nil
 }
 
+// ListVMsLocal implements rpcpb.ManagerServiceServer.
+// Unlike ListVMs, this reads from the local FSM state without
+// requiring leadership - FSM state is already Raft-replicated
+// to every node, so any Comb can serve the cluster-wide list.
+func (s *Server) ListVMsLocal(ctx context.Context, _ *rpcpb.ListVMsLocalRequest) (*rpcpb.ListVMsLocalResponse, error) {
+	resp, err := s.raft.ListVMsLocal(ctx)
+	if err != nil {
+		return &rpcpb.ListVMsLocalResponse{Error: err.Error()}, nil
+	}
+	vms := make([]*rpcpb.VMDefinition, 0, len(resp.GetVms()))
+	for _, vm := range resp.GetVms() {
+		vms = append(vms, fromInternalVM(vm))
+	}
+	return &rpcpb.ListVMsLocalResponse{Vms: vms}, nil
+}
+
+// ListJailsLocal implements rpcpb.ManagerServiceServer.
+// Unlike ListJails, this reads from the local FSM state without
+// requiring leadership - FSM state is already Raft-replicated
+// to every node, so any Comb can serve the cluster-wide list.
+func (s *Server) ListJailsLocal(ctx context.Context, _ *rpcpb.ListJailsLocalRequest) (*rpcpb.ListJailsLocalResponse, error) {
+	resp, err := s.raft.ListJailsLocal(ctx)
+	if err != nil {
+		return &rpcpb.ListJailsLocalResponse{Error: err.Error()}, nil
+	}
+	jails := make([]*rpcpb.JailDefinition, 0, len(resp.GetJails()))
+	for _, j := range resp.GetJails() {
+		jails = append(jails, fromInternalJail(j))
+	}
+	return &rpcpb.ListJailsLocalResponse{Jails: jails}, nil
+}
+
 // reachabilityCheckTimeout bounds each individual peer reachability
 // check SimulateNodeFailure performs - short enough that one
 // unreachable peer doesn't make the whole simulation feel hung, long

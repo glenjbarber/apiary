@@ -284,6 +284,11 @@ func (f *fakeClient) ListVMs(context.Context, *rpcpb.ListVMsRequest, ...grpc.Cal
 	return f.listResp, nil
 }
 
+// ListVMsLocal - not exposed over REST, stub for interface compliance
+func (f *fakeClient) ListVMsLocal(context.Context, *rpcpb.ListVMsLocalRequest, ...grpc.CallOption) (*rpcpb.ListVMsLocalResponse, error) {
+	return &rpcpb.ListVMsLocalResponse{Vms: f.listResp.GetVms()}, nil
+}
+
 // SimulateNodeFailure is not exposed over REST (restshim has no route
 // for it) - this stub exists only to satisfy rpcpb.ManagerServiceClient.
 func (f *fakeClient) SimulateNodeFailure(context.Context, *rpcpb.SimulateNodeFailureRequest, ...grpc.CallOption) (*rpcpb.SimulateNodeFailureResponse, error) {
@@ -501,6 +506,11 @@ func (f *fakeClient) ListJails(context.Context, *rpcpb.ListJailsRequest, ...grpc
 		return f.listJailsResp, nil
 	}
 	return &rpcpb.ListJailsResponse{}, nil
+}
+
+// ListJailsLocal - not exposed over REST, stub for interface compliance
+func (f *fakeClient) ListJailsLocal(context.Context, *rpcpb.ListJailsLocalRequest, ...grpc.CallOption) (*rpcpb.ListJailsLocalResponse, error) {
+	return &rpcpb.ListJailsLocalResponse{Jails: f.listJailsResp.GetJails()}, nil
 }
 
 func (f *fakeClient) CreateAPIKey(context.Context, *rpcpb.CreateAPIKeyRequest, ...grpc.CallOption) (*rpcpb.CreateAPIKeyResponse, error) {

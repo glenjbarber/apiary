@@ -33,7 +33,22 @@
   <td{{if and $.LocalNodeID (ne .NodeID $.LocalNodeID)}} class="remote-node" title="Owned by a different Comb than the one currently answering this page"{{end}}>{{.NodeID}}{{if .ReplicaNodeID}}<div class="muted">replica: {{.ReplicaNodeID}}</div>{{end}}</td>
   <td><span class="badge {{.Phase}}"{{if eq .Phase "error"}} title="{{.PhaseError}}"{{end}}>{{.Phase}}</span>{{if .PhaseError}}<div class="error">{{.PhaseError}}</div>{{end}}</td>
   <td>{{if .IPAddress}}{{.IPAddress}}{{else}}<span class="muted" title="Apiary did not allocate an address for this VM (it is not on an Apiary-managed network). The guest may still hold a lease from an external DHCP server, which Apiary cannot see.">external DHCP</span>{{end}}{{if .MACAddress}}<div class="muted"><code>{{.MACAddress}}</code></div>{{end}}</td>
-  <td>{{if $.CanOperate}}<button class="danger" hx-delete="/vms/{{.ID}}" hx-target="#vm-rows" hx-swap="innerHTML" hx-confirm="Delete {{.ID}}?">Delete</button>{{end}}</td>
+  <td>
+    {{if $.CanOperate}}
+      {{if and $.LocalNodeID (eq .NodeID $.LocalNodeID)}}
+        <!-- Local VM: all actions available -->
+        <div class="actions">
+          {{if ne .DesiredState "running"}}<button hx-post="/vms/{{.ID}}/lifecycle" hx-vals='{"action":"start"}' hx-target="#vm-rows" hx-swap="innerHTML" hx-confirm="Start {{.ID}}?">Start</button>{{end}}
+          {{if eq .DesiredState "running"}}<button hx-post="/vms/{{.ID}}/lifecycle" hx-vals='{"action":"stop"}' hx-target="#vm-rows" hx-swap="innerHTML" hx-confirm="Stop {{.ID}}?">Stop</button>{{end}}
+          {{if and .ReplicaNodeID (eq .DesiredState "stopped")}}<button hx-post="/vms/{{.ID}}/migrate" hx-target="#vm-rows" hx-swap="innerHTML" hx-confirm="Migrate {{.ID}} to replica?">Migrate</button>{{end}}
+          <button class="danger" hx-delete="/vms/{{.ID}}" hx-target="#vm-rows" hx-swap="innerHTML" hx-confirm="Delete {{.ID}}?">Delete</button>
+        </div>
+      {{else}}
+        <!-- Remote VM: read-only indicator -->
+        <span class="muted remote-node" title="Owned by {{.NodeID}}">Remote</span>
+      {{end}}
+    {{end}}
+  </td>
 </tr>
 {{else}}
   {{if not .Error}}<tr><td colspan="6"><em>No VMs</em></td></tr>{{end}}

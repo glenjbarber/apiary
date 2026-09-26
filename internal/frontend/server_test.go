@@ -492,6 +492,14 @@ func (f *fakeClient) ListVMs(context.Context, *rpcpb.ListVMsRequest, ...grpc.Cal
 	return f.listResp, f.listErr
 }
 
+// ListVMsLocal - not exposed over HTTP, stub for interface compliance
+func (f *fakeClient) ListVMsLocal(context.Context, *rpcpb.ListVMsLocalRequest, ...grpc.CallOption) (*rpcpb.ListVMsLocalResponse, error) {
+	if f.listResp != nil && f.listResp.GetError() != "" {
+		return &rpcpb.ListVMsLocalResponse{Error: f.listResp.GetError()}, f.listErr
+	}
+	return &rpcpb.ListVMsLocalResponse{Vms: f.listResp.GetVms()}, f.listErr
+}
+
 func (f *fakeClient) GetLocalNetworkBridgeStatus(context.Context, *rpcpb.GetLocalNetworkBridgeStatusRequest, ...grpc.CallOption) (*rpcpb.GetLocalNetworkBridgeStatusResponse, error) {
 	f.bridgeStatusCalls++
 	return f.bridgeStatusResp, f.bridgeStatusErr
@@ -780,6 +788,17 @@ func (f *fakeClient) ListJails(context.Context, *rpcpb.ListJailsRequest, ...grpc
 		return f.listJailsResp, nil
 	}
 	return &rpcpb.ListJailsResponse{}, nil
+}
+
+// ListJailsLocal - not exposed over HTTP, stub for interface compliance
+func (f *fakeClient) ListJailsLocal(context.Context, *rpcpb.ListJailsLocalRequest, ...grpc.CallOption) (*rpcpb.ListJailsLocalResponse, error) {
+	if f.listJailsResp != nil && f.listJailsResp.GetError() != "" {
+		return &rpcpb.ListJailsLocalResponse{Error: f.listJailsResp.GetError()}, nil
+	}
+	if f.listJailsResp != nil {
+		return &rpcpb.ListJailsLocalResponse{Jails: f.listJailsResp.GetJails()}, nil
+	}
+	return &rpcpb.ListJailsLocalResponse{}, nil
 }
 
 func (f *fakeClient) ListAPIKeys(context.Context, *rpcpb.ListAPIKeysRequest, ...grpc.CallOption) (*rpcpb.ListAPIKeysResponse, error) {
@@ -1944,9 +1963,12 @@ func TestServer_NetworksPage_NameIsAnEditableFormForOperator(t *testing.T) {
 }
 
 func TestServer_JailsPage(t *testing.T) {
-	client := &fakeClient{listJailsResp: &rpcpb.ListJailsResponse{
-		Jails: []*rpcpb.JailDefinition{{Id: "jail-1", Name: "web-1", Hostname: "web-1.local", NodeId: "node-a"}},
-	}}
+	client := &fakeClient{
+		statusResp: &rpcpb.StatusResponse{ManagerNodeId: "node-a"},
+		listJailsResp: &rpcpb.ListJailsResponse{
+			Jails: []*rpcpb.JailDefinition{{Id: "jail-1", Name: "web-1", Hostname: "web-1.local", NodeId: "node-a"}},
+		},
+	}
 	s := newTestServer(t, client)
 
 	req := httptest.NewRequest(http.MethodGet, "/jails", nil)

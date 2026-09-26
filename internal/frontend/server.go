@@ -1131,20 +1131,18 @@ func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
 // parseSort), returning an empty slice (not an error) if the fetch
 // fails - callers fold the failure into the page as an error message
 // instead, since a fetch failure shouldn't crash a human-facing page
-// render. ListVMs's own order is unspecified (backed by a Go map on the
-// FSM side), so sorting here - never leaving the caller's raw order -
-// is what actually makes the table's order stable and predictable.
+// render. ListVMsLocal reads from the local FSM state (non-leader),
+// so any Comb can serve the cluster-wide VM list. Order is
+// unspecified (backed by a Go map on the FSM side), so sorting here
+// - never leaving the caller's raw order - is what actually makes the
+// table's order stable and predictable.
 func (s *Server) currentVMs(r *http.Request, sortBy, dir string) ([]vmView, string) {
-	resp, err := s.client.ListVMs(r.Context(), &rpcpb.ListVMsRequest{})
+	resp, err := s.client.ListVMsLocal(r.Context(), &rpcpb.ListVMsLocalRequest{})
 	if err != nil {
 		return nil, err.Error()
 	}
 	if resp.GetError() != "" {
-		msg := resp.GetError()
-		if resp.GetLeaderHint() != "" {
-			msg += " (leader hint: " + resp.GetLeaderHint() + ")"
-		}
-		return nil, msg
+		return nil, resp.GetError()
 	}
 
 	vms := make([]vmView, 0, len(resp.GetVms()))
@@ -1883,7 +1881,7 @@ func (s *Server) renderNetworkPanelResult(w http.ResponseWriter, r *http.Request
 // string ("" on success) the same fail-soft convention currentNetworks
 // follows.
 func (s *Server) currentJails(r *http.Request) ([]jailView, string) {
-	resp, err := s.client.ListJails(r.Context(), &rpcpb.ListJailsRequest{})
+	resp, err := s.client.ListJailsLocal(r.Context(), &rpcpb.ListJailsLocalRequest{})
 	if err != nil {
 		return nil, err.Error()
 	}
