@@ -48,6 +48,7 @@ BUILD_TIME?=	# empty: the commit's date, likewise computed there
 
 BUILD_PKG=	github.com/glenjbarber/apiary/internal/buildinfo
 LDFLAGS_SH=	scripts/build-ldflags.sh
+VERDICT_SH=	scripts/stamp-verdict.sh
 
 # -trimpath strips the build directory and module cache paths out of the
 # binary. Without it the same commit built in two checkouts produces
@@ -98,12 +99,41 @@ check-ldflags:
 	esac ; \
 	echo "ldflags ok"
 
-# Refuse to let an unidentifiable binary reach /usr/local/libexec. This
-# exists because a stamp that silently fails to apply is worse than no
-# stamp: the build succeeds, the binary is installed, and every daemon
-# reports build=unknown while the whole toolchain looks like it is
-# working. That is not hypothetical - it is what BSD make's lack of
-# $(shell) did to every build on the testbed.
+# Refuse to let a binary that cannot name itself reach
+# /usr/local/libexec. This exists because a stamp that silently fails to
+# apply is worse than no stamp: the build succeeds, the binary is
+# installed, and every daemon reports build=unknown while the whole
+# toolchain looks like it is working. That is not hypothetical - it is
+# what BSD make's lack of $(shell) did to every build on the testbed.
+# The refusal is what turns the next occurrence into a failed `make
+# install` instead of another silent bad deploy.
+#
+# A -dirty build is NOT that, and refusing it was a second mistake with
+# a worse failure mode than the one it was fixing. A dirty binary says
+# exactly what is true: here is a commit, and here is the fact that the
+# worktree was not clean, so the commit does not describe these bytes.
+# That is more information than a clean build carries, not less. But it
+# is also completely ordinary - a scratch file in the checkout is enough
+# - so refusing it blocked routine deploys, and the only way through was
+# ALLOW_UNIDENTIFIED=1, which ALSO suppresses the unidentifiable case.
+# The sole remedy for a too-strict check was therefore to disable the
+# check that matters, which is how a guard gets disabled. A dirty build
+# now warns loudly and installs, and ALLOW_UNIDENTIFIED=1 means what it
+# says: accept a binary whose identity cannot be verified at all.
+#
+# scripts/stamp-verdict.sh owns the ok/dirty/fail decision so the
+# classification has one home instead of a case statement in a recipe
+# that a verification script has to re-implement in order to test it.
+#
+# The recipe's final case arm catches a verdict that is not one of the
+# three at all - the script missing, unreadable or broken - and refuses.
+# An unclassifiable id is an unusable id, and an if/elif chain with a
+# trailing else would have reported it as ok, which is the one result
+# that must never come from a broken guard.
+#
+# No # comments inside this recipe: a backslash continuation joins every
+# line into one, and a # then comments out the rest of it, silently
+# deleting the commands after it. It cost one wrong turn to find.
 #
 # Only a prerequisite of install, not of build, because it has to RUN
 # the binaries: a binary cross-compiled for FreeBSD on a Mac cannot
@@ -111,28 +141,47 @@ check-ldflags:
 # path rather than protect anything.
 .PHONY: check-stamped
 check-stamped:
-	@fail=0; \
+	@fail=0 ; dirty="" ; \
 	for S in ${SRCS} ; do \
 		id=`./$$S -version 2>&1 | grep -o 'build=[^ ]*' | head -1 | cut -d= -f2` ; \
-		why="" ; \
-		case "$$id" in \
-			"") why="it did not run; check-stamped only works on a binary built for this host" ;; \
-			unknown) why="not stamped - the -X link flags did not reach the build" ;; \
-			nogit) why="built outside a git checkout, or git could not read this one" ;; \
-			*-dirty) why="built from a dirty worktree; the commit does not describe these bytes" ;; \
+		verdict=`${VERDICT_SH} "$$id"` ; \
+		class=`echo "$$verdict" | cut -d' ' -f1` ; \
+		reason=`echo "$$verdict" | sed 's/^[^ ]* //'` ; \
+		case "$$class" in \
+		fail) \
+			echo "$$S: REFUSING - $$reason" >&2 ; fail=1 ;; \
+		dirty) \
+			dirty="$$dirty $$S=$$id" ; \
+			echo "$$S: WARNING - $$reason" >&2 ;; \
+		ok) \
+			echo "$$S: $$reason" ;; \
+		*) \
+			echo "$$S: REFUSING - $$id" >&2 ; \
+			echo "  ${VERDICT_SH} gave no verdict for it, so the stamp" >&2 ; \
+			echo "  cannot be trusted. Run 'make check-ldflags'." >&2 ; \
+			fail=1 ;; \
 		esac ; \
-		if [ -n "$$why" ] ; then \
-			echo "$$S: $$id - $$why" >&2 ; fail=1 ; \
-		else \
-			echo "$$S: $$id" ; \
-		fi ; \
 	done ; \
+	if [ -n "$$dirty" ] ; then \
+		echo "" >&2 ; \
+		echo "WARNING:$$dirty" >&2 ; \
+		echo "  Installed anyway. These binaries know their commit and know the" >&2 ; \
+		echo "  worktree was not clean; what they cannot do is tell you which" >&2 ; \
+		echo "  bytes they are, because two builds from two dirty worktrees" >&2 ; \
+		echo "  share an id. Only a hash compares artifacts:" >&2 ; \
+		printf '    sha256 %s\n' "$$(echo ${SRCS})" >&2 ; \
+		echo "    sha256 /usr/local/libexec/apiary/*" >&2 ; \
+		echo "  This worktree is not clean because of:" >&2 ; \
+		${LDFLAGS_SH} --why 2>&1 | sed -n '1,10s/^/    /p' >&2 ; \
+	fi ; \
 	if [ $$fail -ne 0 ] ; then \
 		if [ -n "$$ALLOW_UNIDENTIFIED" ] ; then \
 			echo "ALLOW_UNIDENTIFIED is set - installing anyway." >&2 ; \
 		else \
 			echo "Refusing to install a binary that cannot identify itself." >&2 ; \
 			echo "Fix the build, or set ALLOW_UNIDENTIFIED=1 to accept it." >&2 ; \
+			echo "(That override is for a binary with no usable id. A -dirty" >&2 ; \
+			echo "build is not one of those and never needed it.)" >&2 ; \
 			exit 1 ; \
 		fi ; \
 	fi
