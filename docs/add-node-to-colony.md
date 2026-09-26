@@ -91,54 +91,58 @@ verification to bypass this requirement.
 ## Guided-action path
 
 Use this path when this host already formed its own independent Comb (real
-Raft state already exists - this is not the case for a genuinely fresh
+Raft state already exists — this is not the case for a genuinely fresh
 host).
 
-Use the guided **"Convert this Comb to a joiner"** action on that Comb's own
-Machine Configuration page (ADR-0105) instead of hand-editing `raftd.json`.
-Make sure the trust configuration above is already in place on this Comb's
-own `managerd.json` first: the action's final step (submitting the join
-request) dials the target through that exact same TLS-respecting path, not a
-separate plaintext path.
+### Prerequisites (on the joining Comb)
 
-The action performs the entire stop/reset/reconfigure/restart/confirm/submit
-sequence by hand in one Admin-only action, with an exact typed confirmation
-phrase. It:
+1. **Trust configuration is already in place** in this Comb's `managerd.json`
+   (`peer_tls` and `peer_tls_ca` as described above). The action's final
+   step submits the join request through this exact TLS-respecting path.
 
-- stops local `apiary_raftd`
-- moves its existing state aside to a timestamped backup (reusing
-  `raftd -reset` itself, not a reimplementation of it)
-- rewrites only `raft_bind`/`await_join` in `raftd.json` while leaving
+2. **`managerd` and `frontend` are already running** from this Comb's prior
+   standalone bootstrap. The guided action is an RPC served by these
+   services; you reach the Machine page through them. Only `apiary_raftd`
+   gets stopped and restarted by the action itself.
+
+### Execute the guided action
+
+1. Open this Comb's Machine Configuration page in the frontend.
+2. Click **"Convert this Comb to a joiner"** (ADR-0105).
+3. Enter the target Colony member's managerd address when prompted.
+4. Type the exact confirmation phrase shown on the page.
+5. Submit the action.
+
+The action performs the following internally (fails closed on any error,
+leaving the Comb running exactly as it was):
+- Stops local `apiary_raftd`
+- Moves existing Raft state aside to a timestamped backup (via `raftd -reset`)
+- Rewrites only `raft_bind` and `await_join` in `raftd.json`, leaving
   `node_id`, `socket`, `internal_token`, and Raft TLS settings untouched
-- restarts `raftd`
-- confirms it is actually listening at the new address before doing
-  anything else
-- only then submits the join request against the target Colony member you
-  name - using this Comb's own real, current identity
+- Restarts `raftd`
+- Confirms it is listening at the new `raft_bind` address
+- Submits the join request against the target Colony member you named,
+  using this Comb's own real, current identity
 
-It fails closed (refuses and leaves the Comb running exactly as it already
-was) on an unreachable target, an invalid `raft_bind`, or no existing state
-to convert.
+On success, the action displays a short **confirmation code** and the join
+request is already submitted.
 
-Because this action is itself an RPC served by `managerd`/`frontend`, those
-two must already have been running (from this Comb's own prior standalone
-bootstrap) for you to reach its Machine page at all. Only `apiary_raftd`
-gets stopped and restarted by the action itself.
+### After the guided action completes
 
-Once the action completes, it displays a short confirmation code and the
-join request is already submitted. Continue to [Approve on the existing
-Colony](#approve-on-the-existing-colony) below with that confirmation code.
+1. Note the confirmation code shown by the action.
+2. Continue to [Approve on the existing Colony](#approve-on-the-existing-colony)
+   below with that confirmation code.
 
-If the action ever fails partway and you need to understand the current
-state by hand, see the manual path below - it documents exactly what the
-guided action does internally.
+> **Recovery note**: If the action fails partway and you need to understand
+> the current state by hand, see the [Manual path](#manual-path) below — it
+> documents exactly what the guided action does internally.
 
 ## Manual path
 
 Use this path for a genuinely fresh host, or when hand-recovering a guided
 conversion (above) that failed partway.
 
-### Configure Raft to wait for approval
+### 1. Configure Raft to wait for approval
 
 Create `/usr/local/etc/apiary/raftd.json` from its installed sample and set a
 stable node identity and a real routable Raft address:
@@ -218,7 +222,7 @@ tail -f /var/log/apiary/raftd.log
 Keep this node reachable at its configured `raft_bind` address. Do not approve
 the join until this is true.
 
-### Start the local services
+### 2. Start the local services
 
 Start managerd and the frontend after raftd is waiting:
 
@@ -227,6 +231,8 @@ service apiary_managerd start
 service apiary_frontend start
 service apiary_restshimd start
 ```
+
+### 3. Submit the join request
 
 Open the joining node's Machine Configuration page. In **Join a Colony**,
 provide:

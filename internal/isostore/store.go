@@ -1,5 +1,6 @@
-// Package isostore manages uploaded VM installer images (ISOs) as plain
-// files under a configured base directory, on the local node - physical
+// Package isostore manages uploaded VM installer images (ISOs) and
+// base images (including FreeBSD official VM images) as plain files
+// under a configured base directory, on the local node - physical
 // data, like a ZFS dataset or a bhyve disk image, never replicated
 // through raft (see CLAUDE.md's physical/ephemeral distinction).
 //
@@ -15,11 +16,15 @@ import (
 	"encoding/hex"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/glenjbarber/apiary/internal/freebsdimg"
 )
 
 // Info describes a stored ISO.
