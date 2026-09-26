@@ -159,6 +159,13 @@ message VMDefinition {
   // disk - only one can apply). Empty means today's behavior (a blank
   // disk, or base_image_name's own file copy if that's set instead).
   string clone_from_snapshot = 19;
+
+  // hostname, if set, is the VM's hostname (may be an FQDN). It is not
+  // used for any operational purpose by Apiary - the ID and display name
+  // are derived from it on the creation page for operator convenience,
+  // but the hostname itself is stored and returned for reference. See
+  // the jail hostname field for the analogous concept.
+  string hostname = 20;
 }
 
 // JailState is the desired run state of a jail, mirroring VMState.
