@@ -20,7 +20,10 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"time"
+
+	"github.com/glenjbarber/apiary/internal/freebsdimg"
 )
 
 // Info describes a stored ISO.
@@ -37,11 +40,42 @@ type Info struct {
 // outside Apiary's own management.
 type Manager struct {
 	Dir string
+
+	// fetchMu/fetchLocks serialize concurrent EnsureFreeBSDImage calls
+	// per image name, so two requests for the same official image
+	// download it once between them instead of racing each other onto
+	// the same destination. Deliberately not a single store-wide lock: a
+	// fetch runs for minutes, and holding one mutex across it would stall
+	// every other isostore operation on the node for the duration. See
+	// lockFetch.
+	fetchMu    sync.Mutex
+	fetchLocks map[string]*sync.Mutex
+
+	// freebsdImages is the official-image fetcher. nil means the real
+	// catalog over the default HTTP client; tests set it to a Manager
+	// pointed at an httptest server and a one-entry catalog, so no test
+	// in this repository can reach download.freebsd.org.
+	freebsdImages *freebsdimg.Manager
+
+	// freeSpace reports free bytes on the filesystem holding a
+	// directory, for the fetch preflight. nil means the platform
+	// statfs(2) wrapper; tests replace it to simulate a full disk on any
+	// platform, including ones with no statfs at all.
+	freeSpace func(dir string) (avail int64, err error)
 }
 
 // New returns a Manager storing ISOs under dir.
 func New(dir string) *Manager {
 	return &Manager{Dir: dir}
+}
+
+// diskFreeSpace reports free bytes on the filesystem holding dir, falling
+// back to the platform statfs(2) wrapper when a test hasn't replaced it.
+func (m *Manager) diskFreeSpace(dir string) (int64, error) {
+	if m.freeSpace != nil {
+		return m.freeSpace(dir)
+	}
+	return freeSpace(dir)
 }
 
 // validateName rejects anything that could escape Dir or isn't a
