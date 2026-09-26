@@ -15,12 +15,39 @@ import (
 // here, since zfs destroy is irreversible.
 type Manager struct {
 	Base string
+
+	// runner is the exec seam the replication primitives go through
+	// (see runner.go). The pre-existing methods above still call
+	// runZFS/exec directly, unchanged, so their behaviour and error
+	// text are exactly what they were; the replication methods added
+	// later use this field so they are testable without a pool.
+	runner CommandRunner
 }
 
 // New returns a Manager scoped to base (e.g. "zroot/apiary", or a test
 // pool like "apiarytest").
 func New(base string) *Manager {
-	return &Manager{Base: base}
+	return &Manager{Base: base, runner: defaultRunner()}
+}
+
+// NewWithRunner returns a Manager whose zfs(8) invocations go through
+// runner instead of the real binary. Intended for tests and for any
+// caller that wants to observe or fake the command stream; production
+// callers should use New.
+func NewWithRunner(base string, runner CommandRunner) *Manager {
+	if runner == nil {
+		runner = defaultRunner()
+	}
+	return &Manager{Base: base, runner: runner}
+}
+
+// runnerOrDefault keeps a Manager built as a bare struct literal (which
+// is legal, since Base is exported) working.
+func (m *Manager) runnerOrDefault() CommandRunner {
+	if m.runner == nil {
+		return defaultRunner()
+	}
+	return m.runner
 }
 
 // path validates name and returns the full dataset path (Base/name).
