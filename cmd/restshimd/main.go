@@ -11,7 +11,9 @@
 package main
 
 import (
+	"flag"
 	"fmt"
+	"github.com/glenjbarber/apiary/internal/buildinfo"
 	"log"
 	"net/http"
 
@@ -30,6 +32,17 @@ func main() {
 }
 
 func run() error {
+	// These two never had flags of their own, so they never called
+	// flag.Parse. Registering -version is what introduces the first
+	// one; the parse has to happen for it to take effect at all.
+	buildinfo.RegisterVersionFlag(flag.CommandLine)
+	flag.Parse()
+
+	if buildinfo.VersionRequested() {
+		fmt.Print(buildinfo.Report("restshimd"))
+		return nil
+	}
+
 	cfg, err := (&restshimdconfig.Manager{}).Load()
 	if err != nil {
 		return fmt.Errorf("reading %s: %w", restshimdconfig.DefaultPath, err)
@@ -47,7 +60,7 @@ func run() error {
 
 	srv := restshim.NewServer(rpcpb.NewManagerServiceClient(conn))
 
-	log.Printf("restshimd: listening on %s (manager-addr=%s, manager-tls=%v, tls=%v)", cfg.HTTPAddr, cfg.ManagerAddr, cfg.ManagerTLS, cfg.TLSCert != "")
+	log.Printf("restshimd: %s listening on %s (manager-addr=%s, manager-tls=%v, tls=%v)", buildinfo.String(), cfg.HTTPAddr, cfg.ManagerAddr, cfg.ManagerTLS, cfg.TLSCert != "")
 	if cfg.TLSCert != "" || cfg.TLSKey != "" {
 		if err := requireTLSPair(cfg.TLSCert, cfg.TLSKey); err != nil {
 			return err

@@ -7,6 +7,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"github.com/glenjbarber/apiary/internal/buildinfo"
 	"log"
 	"net"
 	"os"
@@ -75,7 +76,18 @@ func run() error {
 	factoryResetExtraJails := flag.String("factory-reset-extra-jails", "", "comma-separated jail names to destroy for real during -factory-reset, outside the normal jail_prefix scope (e.g. a jail you want gone that Apiary itself didn't create) - nothing here is ever auto-discovered, only what's named")
 	factoryResetExtraDatasets := flag.String("factory-reset-extra-datasets", "", "comma-separated ZFS dataset/pool names to destroy recursively during -factory-reset, outside the normal zfs_base scope - nothing here is ever auto-discovered, only what's named")
 	exportHostConfig := flag.String("export-host-config", "", "read-only: write a redacted snapshot of this Comb's /etc/rc.conf, /etc/pf.conf, and /etc/master.passwd into this directory, then exit, rather than starting the server - see internal/hostconfig's own doc comment for exactly what's redacted and why there is no matching restore/apply flag")
+	buildinfo.RegisterVersionFlag(flag.CommandLine)
 	flag.Parse()
+
+	// Checked before ANY other work, so `-version` answers on a
+	// machine with no /var/db/apiary, no config, and no
+	// privileges. That is the whole point: you want to ask a
+	// deployed binary what it is when it is the only thing left
+	// to ask.
+	if buildinfo.VersionRequested() {
+		fmt.Print(buildinfo.Report("managerd"))
+		return nil
+	}
 
 	if *exportHostConfig != "" {
 		return runExportHostConfig(hostconfig.Files{}, *exportHostConfig)
@@ -452,7 +464,7 @@ func run() error {
 		serveErrCh <- grpcServer.Serve(lis)
 	}()
 
-	log.Printf("managerd: listening on %s (node-id=%s, raftd-socket=%s, vlan-uplink=%s, hast-enabled=%v, jail-enabled=%v, peer-managerd-port=%s, tls=%v, cloudflare-enabled=%v, pam-service=%s)", cfg.RPCAddr, id, cfg.RaftdSocket, cfg.Uplink, cfg.HASTEnabled != nil && *cfg.HASTEnabled, jailEnabled, resolvedPeerPort, cfg.TLSCert != "", cfg.CloudflareTokenFile != "", cfg.PAMService)
+	log.Printf("managerd: %s listening on %s (node-id=%s, raftd-socket=%s, vlan-uplink=%s, hast-enabled=%v, jail-enabled=%v, peer-managerd-port=%s, tls=%v, cloudflare-enabled=%v, pam-service=%s)", buildinfo.String(), cfg.RPCAddr, id, cfg.RaftdSocket, cfg.Uplink, cfg.HASTEnabled != nil && *cfg.HASTEnabled, jailEnabled, resolvedPeerPort, cfg.TLSCert != "", cfg.CloudflareTokenFile != "", cfg.PAMService)
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()

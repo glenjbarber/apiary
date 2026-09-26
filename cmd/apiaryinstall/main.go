@@ -11,6 +11,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"github.com/glenjbarber/apiary/internal/buildinfo"
 	"log"
 	"os"
 	"strings"
@@ -47,7 +48,18 @@ func run() error {
 	pamService := flag.String("pam-service", "", "PAM service name cmd/frontend will use (ADR-0030) - report-only, Apiary never generates PAM/account configuration itself")
 	allowUplinkBridging := flag.String("allow-uplink-bridging", "", "report-only: check this node's -bhyve-bridge/-vlan-uplink are ready for managerd's own allow_uplink_bridging config setting (ADR-0101) - pass the same confirmation phrase managerd expects, or anything non-empty; Apiary never sets managerd's config itself")
 	jsonOutput := flag.Bool("json", false, "emit results as JSON instead of a table")
+	buildinfo.RegisterVersionFlag(flag.CommandLine)
 	flag.Parse()
+
+	// Checked before ANY other work, so `-version` answers on a
+	// machine with no /var/db/apiary, no config, and no
+	// privileges. That is the whole point: you want to ask a
+	// deployed binary what it is when it is the only thing left
+	// to ask.
+	if buildinfo.VersionRequested() {
+		fmt.Print(buildinfo.Report("apiaryinstall"))
+		return nil
+	}
 
 	opt := install.Options{
 		ZFSPool:             *zfsPool,

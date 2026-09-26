@@ -5,7 +5,9 @@ package main
 
 import (
 	"context"
+	"flag"
 	"fmt"
+	"github.com/glenjbarber/apiary/internal/buildinfo"
 	"log"
 	"net/http"
 	"time"
@@ -112,6 +114,17 @@ func main() {
 }
 
 func run() error {
+	// These two never had flags of their own, so they never called
+	// flag.Parse. Registering -version is what introduces the first
+	// one; the parse has to happen for it to take effect at all.
+	buildinfo.RegisterVersionFlag(flag.CommandLine)
+	flag.Parse()
+
+	if buildinfo.VersionRequested() {
+		fmt.Print(buildinfo.Report("frontend"))
+		return nil
+	}
+
 	cfg, err := (&frontendconfig.Manager{}).Load()
 	if err != nil {
 		return fmt.Errorf("reading %s: %w", frontendconfig.DefaultPath, err)
@@ -218,7 +231,7 @@ func run() error {
 		log.Printf("frontend: no login configured (set pam_service in managerd's own config to require one)")
 	}
 
-	log.Printf("frontend: listening on %s (manager-addr=%s, manager-tls=%v, tls=%v)", cfg.HTTPAddr, cfg.ManagerAddr, cfg.ManagerTLS, tlsEnabled)
+	log.Printf("frontend: %s listening on %s (manager-addr=%s, manager-tls=%v, tls=%v)", buildinfo.String(), cfg.HTTPAddr, cfg.ManagerAddr, cfg.ManagerTLS, tlsEnabled)
 	if tlsEnabled {
 		return http.ListenAndServeTLS(cfg.HTTPAddr, cfg.TLSCert, cfg.TLSKey, srv)
 	}

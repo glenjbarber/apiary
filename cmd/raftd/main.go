@@ -10,6 +10,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"github.com/glenjbarber/apiary/internal/buildinfo"
 	"log"
 	"net"
 	"os"
@@ -73,7 +74,18 @@ func run() error {
 	restoreDryRun := flag.String("restore-dry-run", "", "validate the archive at the given path (format version, checksum) and print a summary of what it contains, then exit - makes no changes at all, needs no confirmation phrase, and does not touch the data directory")
 	statusJSON := flag.Bool("status", false, "read this node's own persisted raft state (current term, log bounds, membership) straight from its data directory and exit - starts no server, takes no vote, contacts no peer, and writes nothing. Requires raftd to be stopped, since it holds an exclusive lock on the log; add -status-json for machine-readable output")
 	statusAsJSON := flag.Bool("status-json", false, "same read-only offline read as -status, rendered as a single JSON object for scripting. Implies -status")
+	buildinfo.RegisterVersionFlag(flag.CommandLine)
 	flag.Parse()
+
+	// Checked before ANY other work, so `-version` answers on a
+	// machine with no /var/db/apiary, no config, and no
+	// privileges. That is the whole point: you want to ask a
+	// deployed binary what it is when it is the only thing left
+	// to ask.
+	if buildinfo.VersionRequested() {
+		fmt.Print(buildinfo.Report("raftd"))
+		return nil
+	}
 
 	// -reset/-export/-restore/-restore-dry-run are raftd's "break
 	// glass" recovery tools - they must keep working even if
@@ -160,7 +172,8 @@ func run() error {
 		serveErrCh <- grpcServer.Serve(lis)
 	}()
 
-	log.Printf("raftd: listening on %s (node-id=%s, raft-bind=%s, data-dir=%s, raft-tls=%v)",
+	log.Printf("raftd: %s listening on %s (node-id=%s, raft-bind=%s, data-dir=%s, raft-tls=%v)",
+		buildinfo.String(),
 		rcfg.Socket, resolvedNodeID, rcfg.RaftBind, rcfg.DataDir, rcfg.RaftTLSCert != "")
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)

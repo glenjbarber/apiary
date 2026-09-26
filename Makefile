@@ -15,11 +15,32 @@ SRCS=		apiaryinstall \
 			frontend \
 			restshimd
 
+# BUILD_ID stamps every binary so a running daemon can name the build
+# it actually is, rather than the build that happens to sit next to it
+# on disk. Override on the command line to pin a build to a known id
+# (e.g. a release), otherwise it is derived from the commit and the
+# build time, which makes every build distinguishable.
+BUILD_ID?=	$(shell git rev-parse --short=12 HEAD 2>/dev/null || echo nogit)-$(shell date -u +%Y%m%dT%H%M%SZ)
+
+BUILD_PKG=	github.com/glenjbarber/apiary/internal/buildinfo
+BUILD_LDFLAGS=	-X '$(BUILD_PKG).BuildID=$(BUILD_ID)' \
+			-X '$(BUILD_PKG).BuildTime=$(shell date -u +%Y-%m-%dT%H:%M:%SZ)' \
+			-X '$(BUILD_PKG).GitCommit=$(shell git rev-parse HEAD 2>/dev/null)'
+
+# Check a binary's identity without starting it. A copy over a running
+# executable leaves new bytes on disk and old ones in memory, so this
+# is the only way to tell a deployed build from a running one.
+.PHONY: version
+version: build
+	@for S in ${SRCS} ; \
+		do printf '%-16s ' "$$S" ; ./$$S -version 2>&1 | head -1 ;\
+	done
+
 PAM_SERVICE=	apiary
 
 build:
 	for S in ${SRCS} ; \
-		do go build -buildvcs=false -o $$S ./cmd/$$S ;\
+		do go build -buildvcs=false -ldflags "$(BUILD_LDFLAGS)" -o $$S ./cmd/$$S ;\
 	done
 
 clean:
