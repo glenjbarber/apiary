@@ -70,7 +70,6 @@ func serveHostPkgPage(t *testing.T, src hostPkgSource, path string) string {
 		withHostPkgSource(t, nil)
 	}
 	s := newTestServer(t, &fakeClient{})
-	registerHostPkgRoutes(s)
 	rec := httptest.NewRecorder()
 	s.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
 	if rec.Code != http.StatusOK {
@@ -249,7 +248,6 @@ func TestHostPkgPageIsViewerReachable(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewServer() error: %v", err)
 	}
-	registerHostPkgRoutes(s)
 	rec := httptest.NewRecorder()
 	s.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/host/node-a/packages", nil))
 	if rec.Code != http.StatusOK {

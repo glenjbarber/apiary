@@ -26,6 +26,7 @@ import (
 	"github.com/glenjbarber/apiary/internal/guardrail"
 	"github.com/glenjbarber/apiary/internal/hast"
 	"github.com/glenjbarber/apiary/internal/health"
+	"github.com/glenjbarber/apiary/internal/hostpkg"
 	"github.com/glenjbarber/apiary/internal/hoststats"
 	"github.com/glenjbarber/apiary/internal/isostore"
 	"github.com/glenjbarber/apiary/internal/netif"
@@ -314,6 +315,12 @@ type Server struct {
 	// without shelling out to real system commands.
 	statsGather func(context.Context) *hoststats.Snapshot
 
+	// hostPkgCollect defaults to the real internal/hostpkg collector;
+	// overridable in tests for the same reason statsGather is - the
+	// translation from a hostpkg.Inventory to its wire form is the part
+	// worth testing, and it must be testable without pkg installed.
+	hostPkgCollect func(context.Context) (hostpkg.Inventory, error)
+
 	// peers is nil on a node with no peer forwarding configured (see
 	// cmd/managerd's own -peer-api-key) - a leader-only read rejected by
 	// this node's own raftd then just returns the LeaderHint error as
@@ -557,7 +564,7 @@ var _ rpcpb.ManagerServiceServer = (*Server)(nil)
 // the params above) specifically to keep every existing positional
 // NewServer(...) call site a mechanical one-line edit.
 func NewServer(raft *RaftClient, nodeID string, isos isoManager, vnc VNCLookup, serialLog SerialLogLookup, vlanMgr VLANStatus, peers PeerForwarder, peerManagerdPort string, zfsMgr quotaSetter, nodeConfig nodeConfigStore, assumptionStoreMgr assumptionStore, assumptionStaleAfter time.Duration, reconciler reconcilerStats) *Server {
-	return &Server{raft: raft, nodeID: nodeID, isos: isos, vnc: vnc, serialLog: serialLog, vlan: vlanMgr, statsGather: hoststats.Gather, peers: peers, peerManagerdPort: peerManagerdPort, zfs: zfsMgr, nodeConfig: nodeConfig, listNetworkInterfaces: netif.List, assumptions: assumptionStoreMgr, assumptionStaleAfter: assumptionStaleAfter, reconciler: reconciler, services: rcServiceController{}, pamLockouts: newPAMLockoutTracker(), reachabilityCheck: dialReachable, raftdConversion: rcRaftdConversionAdapter{}}
+	return &Server{raft: raft, nodeID: nodeID, isos: isos, vnc: vnc, serialLog: serialLog, vlan: vlanMgr, statsGather: hoststats.Gather, hostPkgCollect: hostpkg.NewCollector(hostpkg.Options{}).Collect, peers: peers, peerManagerdPort: peerManagerdPort, zfs: zfsMgr, nodeConfig: nodeConfig, listNetworkInterfaces: netif.List, assumptions: assumptionStoreMgr, assumptionStaleAfter: assumptionStaleAfter, reconciler: reconciler, services: rcServiceController{}, pamLockouts: newPAMLockoutTracker(), reachabilityCheck: dialReachable, raftdConversion: rcRaftdConversionAdapter{}}
 }
 
 // SetNetworkInterfaceLister overrides host interface discovery for tests.

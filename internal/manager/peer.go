@@ -470,8 +470,22 @@ func (p *PeerReporter) HostStats(ctx context.Context, addr string) (*rpcpb.HostS
 	return client.HostStats(ctx, &rpcpb.HostStatsRequest{})
 }
 
-// GetLocalHASTResourceStatus reaches a specific node's local hastctl view.
-// Owner and replica are queried independently so transport failures stay
+// HostPackages reaches a specific node's own package inventory.
+// Node-local for the same reason HostStats is - a package name is only
+// meaningful to the node that has it installed - so reaching another
+// node means dialing that node's managerd directly, and the caller must
+// check the returned NodeId rather than assume it got the node it
+// asked about.
+func (p *PeerReporter) HostPackages(ctx context.Context, addr string) (*rpcpb.HostPackagesResponse, error) {
+	conn, client, err := p.dial(addr)
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close()
+	return client.HostPackages(ctx, &rpcpb.HostPackagesRequest{})
+}
+
+// GetLocalHASTResourceStatus reaches a specific node's local hastctl view.// Owner and replica are queried independently so transport failures stay
 // visible as unknown instead of being filled from another node's state.
 func (p *PeerReporter) GetLocalHASTResourceStatus(ctx context.Context, addr, resourceName string) (*rpcpb.GetLocalHASTResourceStatusResponse, error) {
 	conn, client, err := p.dial(addr)

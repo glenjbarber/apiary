@@ -13,7 +13,9 @@ import (
 	"testing"
 
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
+	"google.golang.org/grpc/status"
 
 	rpcpb "github.com/glenjbarber/apiary/api/rpc"
 )
@@ -360,6 +362,16 @@ func (f *fakeClient) ReceiveJailTemplate(context.Context, ...grpc.CallOption) (g
 
 func (f *fakeClient) HostStats(context.Context, *rpcpb.HostStatsRequest, ...grpc.CallOption) (*rpcpb.HostStatsResponse, error) {
 	return &rpcpb.HostStatsResponse{}, nil
+}
+
+// HostPackages is unimplemented in this fake on purpose: the empty
+// response it returns carries Error "", which would read as "this host
+// has no unknown packages and therefore is up to date" to any caller
+// that checked only the headline. restshim does not use this RPC, so
+// the honest stub is one that reports an error rather than a
+// reassuring empty.
+func (f *fakeClient) HostPackages(context.Context, *rpcpb.HostPackagesRequest, ...grpc.CallOption) (*rpcpb.HostPackagesResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "not used by restshim")
 }
 
 func (f *fakeClient) GetLocalHASTResourceStatus(context.Context, *rpcpb.GetLocalHASTResourceStatusRequest, ...grpc.CallOption) (*rpcpb.GetLocalHASTResourceStatusResponse, error) {

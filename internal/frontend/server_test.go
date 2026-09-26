@@ -13,6 +13,8 @@ import (
 	"testing"
 
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	rpcpb "github.com/glenjbarber/apiary/api/rpc"
 	"github.com/glenjbarber/apiary/internal/manager"
@@ -56,6 +58,7 @@ type fakeClient struct {
 	lastDeleteISOReq *rpcpb.DeleteISORequest
 
 	hostStatsResp *rpcpb.HostStatsResponse
+	hostPkgsResp  *rpcpb.HostPackagesResponse
 
 	getVMConsoleResp *rpcpb.GetVMConsoleResponse
 	getVMConsoleErr  error
@@ -482,6 +485,19 @@ func (f *fakeClient) HostStats(context.Context, *rpcpb.HostStatsRequest, ...grpc
 		return f.hostStatsResp, nil
 	}
 	return &rpcpb.HostStatsResponse{}, nil
+}
+
+// HostPackages reports an error by default rather than an empty
+// response. An empty HostPackagesResponse has an empty Error, an empty
+// Unknown list, and therefore a headline of up_to_date - so a fake that
+// returned one would hand every test a silently reassuring "this host
+// is fully up to date" that no test asked for. Tests that need a
+// specific inventory set host hostPkgsResp instead.
+func (f *fakeClient) HostPackages(context.Context, *rpcpb.HostPackagesRequest, ...grpc.CallOption) (*rpcpb.HostPackagesResponse, error) {
+	if f.hostPkgsResp != nil {
+		return f.hostPkgsResp, nil
+	}
+	return nil, status.Error(codes.Unimplemented, "host packages not stubbed")
 }
 
 func (f *fakeClient) GetLocalHASTResourceStatus(context.Context, *rpcpb.GetLocalHASTResourceStatusRequest, ...grpc.CallOption) (*rpcpb.GetLocalHASTResourceStatusResponse, error) {

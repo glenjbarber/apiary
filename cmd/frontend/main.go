@@ -203,6 +203,11 @@ func run() error {
 		return fmt.Errorf("creating frontend server: %w", err)
 	}
 	srv.SetRoleMapStore(roleMapMgr)
+	// The host package page reads each Comb's inventory from that Comb's
+	// own managerd (node-local, like HostStats) and needs nothing beyond
+	// Viewer, so it is wired unconditionally rather than behind a flag:
+	// the page's write half does not exist, so there is nothing to gate.
+	srv.EnableHostPkgSource()
 	if auth != nil {
 		if len(roleMap) == 0 {
 			log.Printf("frontend: login enabled (managerd reports PAM configured), no accounts yet - the first successful login becomes Admin")

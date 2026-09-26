@@ -563,6 +563,25 @@ service ManagerService {
   // unreachable new address risks stranding the cluster exactly as an
   // unreachable new joiner does.
   rpc UpdateVoterAddress(UpdateVoterAddressRequest) returns (UpdateVoterAddressResponse);
+
+  // HostPackages reports *this* node's own host package inventory - the
+  // running base system, the state of the local pkg catalogue, and every
+  // installed Ports package with its update verdict. Physical, per-node,
+  // observational data like HostStats above, gathered locally by managerd
+  // (see internal/hostpkg), never routed through raft and never
+  // leader-forwarded: a package name is only ever meaningful to the one
+  // node that has it installed.
+  //
+  // It answers for whoever receives it, like HostStats: a caller wanting
+  // the whole cluster asks each node in turn, exactly as the Combs page
+  // already does for HostStats.
+  //
+  // READ-ONLY. There is deliberately no Apply/Upgrade RPC here. See
+  // HostPackagesResponse's own doc comment on catalogue staleness for
+  // why an "up to date" claim from this response is the one thing a
+  // caller must not make casually, and internal/hostpkg's own docs for
+  // why no unattended upgrade path exists at all.
+  rpc HostPackages(HostPackagesRequest) returns (HostPackagesResponse);
 }
 
 // VMState mirrors api/internalpb's VMState. Kept as a separate type
@@ -2944,4 +2963,193 @@ message ClusterHealthResponse {
   // evidence could not be gathered still appears, with a non-healthy
   // status - an absent entry must never be read as a healthy one.
   repeated ClusterNodeHealth nodes = 3;
+}
+
+// HOST_PACKAGE_UPDATE_STATUS_* mirrors internal/hostpkg's UpdateStatus.
+//
+// _UNSPECIFIED is 0 and means UNKNOWN, deliberately: the zero value of
+// this enum must never read as "current" or "up to date". A caller that
+// receives an enum value it does not recognise, or a message built by an
+// older peer, gets 0 - and 0 means "this build could not determine
+// whether an update is available", which is the safe and honest
+// reading. A protobuf field left unset therefore degrades to unknown,
+// never to healthy. This is the same discipline as
+// internal/cluster/simulate.go's replica_unobserved.
+enum HostPackageUpdateStatus {
+  // The answer could not be determined. NOT a synonym for "current" and
+  // NOT a synonym for "failed" - see HostPackageUpdateStatus's own
+  // reasoning above. Normally paired with a Detail naming the reason.
+  HOST_PACKAGE_UPDATE_STATUS_UNSPECIFIED = 0;
+
+  // A current, readable catalogue positively reported no newer version.
+  // Never produced from a stale or unreadable catalogue.
+  HOST_PACKAGE_UPDATE_STATUS_CURRENT = 1;
+
+  // pkg positively reported a newer version; candidate_version carries it.
+  HOST_PACKAGE_UPDATE_STATUS_OUTDATED = 2;
+}
+
+// HOST_PACKAGE_CATALOGUE_STATE_* mirrors internal/hostpkg's CatalogueState,
+// with the same 0-means-unknown rule as HostPackageUpdateStatus.
+//
+// The catalogue's age gates every verdict in this response: pkg cannot
+// know about an update that was never fetched, so a stale catalogue makes
+// every "current" verdict unknowable regardless of what pkg reported.
+enum HostPackageCatalogueState {
+  // The catalogue's modification time could not be read, or was not
+  // where this build expected it. No verdict is supported.
+  HOST_PACKAGE_CATALOGUE_STATE_UNSPECIFIED = 0;
+
+  // mtime was read and is within the configured maximum age.
+  HOST_PACKAGE_CATALOGUE_STATE_FRESH = 1;
+
+  // mtime was read and is older than the maximum age. Every update
+  // verdict from this host is downgraded to unknown.
+  HOST_PACKAGE_CATALOGUE_STATE_STALE = 2;
+}
+
+message HostPackagesRequest {}
+
+message HostBaseSystem {
+  // kernel_release is `uname -r` - the release string of the kernel
+  // actually running right now. This is the version a reboot would
+  // replace, which is why it is the running kernel and not whatever
+  // /etc/version claims. Empty means it could not be read - not that the
+  // host has no kernel.
+  string kernel_release = 1;
+
+  // version is `uname -v` - FreeBSD's own version string. Carried for
+  // display; it does not derive any verdict. Empty means it could not be
+  // read.
+  string version = 2;
+
+  // pkgbase is true iff this host is a pkgbase host, meaning `pkg
+  // upgrade` can update the base system itself. False means pkg
+  // positively reported that it is not - it is never a default, and on
+  // a non-pkgbase host the base is updated by some other mechanism that
+  // this RPC does not model or touch.
+  bool pkgbase = 3;
+
+  // update_status is the base system's own verdict. On a host whose base
+  // is outdated this is the signal that a REBOOT (not a package install)
+  // is required; internal/hostpkg's planner refuses to apply such a plan.
+  HostPackageUpdateStatus update_status = 4;
+
+  // observed is false when the base system could not be read at all. An
+  // unobserved base system has no verdict, and a caller must not read
+  // the zero-valued update_status as "current" in that case - which is
+  // exactly why that enum's 0 is UNKNOWN.
+  bool observed = 5;
+
+  // detail is pkg version's own output verbatim, so an operator can see
+  // the raw statement instead of only this build's reading of it. It
+  // also carries the reason for a downgrade to unknown.
+  string detail = 6;
+}
+
+message HostPackageCatalogue {
+  // path is the local catalogue database this reading came from
+  // (normally /var/db/pkg/local.sqlite). Informational: a host with a
+  // non-default SQLITE_PATH reports its real path here.
+  string path = 1;
+
+  // state is the trustworthiness of that catalogue, and it gates every
+  // update verdict in this response.
+  HostPackageCatalogueState state = 2;
+
+  // modified_at_unix is the catalogue's mtime. 0 means it could not be
+  // read - the same condition that makes state UNSPECIFIED.
+  int64 modified_at_unix = 3;
+
+  // age_seconds is how old that mtime is at the moment of this reading.
+  // 0 means unknown (same condition as above), NOT "brand new".
+  int64 age_seconds = 4;
+
+  // detail explains a non-fresh state and names `pkg update` as the only
+  // thing that fixes it - this package never runs it.
+  string detail = 5;
+}
+
+message HostInstalledPackage {
+  // name is the installed package's name as pkg reports it.
+  string name = 1;
+
+  // version is the currently installed version. Empty means it could not
+  // be read for this package.
+  string version = 2;
+
+  // origin is the Ports origin that provides this package. May be empty
+  // when the package has no origin (e.g. a meta-port).
+  string origin = 3;
+
+  // update_status is this package's own verdict. See
+  // HostPackageUpdateStatus for why its zero value is unknown.
+  HostPackageUpdateStatus update_status = 4;
+
+  // candidate_version is the newer version pkg named, present when
+  // update_status is OUTDATED. Empty otherwise - including when
+  // update_status is UNKNOWN, which is precisely when a caller most
+  // wants a version and must not be given a guess.
+  string candidate_version = 5;
+
+  // detail explains the verdict, and names the reason for a downgrade
+  // to unknown.
+  string detail = 6;
+}
+
+message HostPackageUnknown {
+  // subject names what could not be determined (a package name, the
+  // base system, the catalogue).
+  string subject = 1;
+
+  // reason is why it could not be determined. This exists so that
+  // "unknown" is always accompanied by its cause: an unexplained
+  // unknown is indistinguishable from a bug, and an operator cannot act
+  // on either.
+  string reason = 2;
+}
+
+message HostPackagesResponse {
+  // node_id is the node this reading is actually about - the node whose
+  // managerd answered. It is not a request parameter: this RPC answers
+  // for whoever receives it, like HostStats, so a caller must check this
+  // field rather than assume it got the node it asked about.
+  string node_id = 1;
+
+  HostBaseSystem base = 2;
+
+  HostPackageCatalogue catalogue = 3;
+
+  // ports is every installed Ports package, excluding the base system
+  // itself. internal/hostpkg excludes the base deliberately so an
+  // operator cannot be led to schedule the same reboot twice.
+  repeated HostInstalledPackage ports = 4;
+
+  // unknown lists EVERYTHING this reading could not determine, whether
+  // or not it also appears in base/ports with an unknown verdict. It is
+  // additive with the per-item verdict on purpose: a caller can render
+  // per-item state, or the collective reason, or both, and neither
+  // requires re-deriving the other.
+  repeated HostPackageUnknown unknown = 5;
+
+  // headline is the whole-host summary: "up_to_date" ONLY when there is
+  // not a single unknown. Any unknown at all - a stale catalogue, one
+  // unparseable line, an unreadable file - downgrades the headline to
+  // "unknown", which outranks "updates_available". A caller that renders
+  // a green "up to date" badge off a headline of anything other than
+  // the literal "up_to_date" is misreporting the host.
+  string headline = 6;
+
+  // observed_at_unix is when this reading was taken. 0 means the
+  // reading's own time could not be established, which makes every
+  // verdict in it unanchored in time.
+  int64 observed_at_unix = 7;
+
+  // error is set when the inventory could not be gathered AT ALL, in
+  // which case the fields above are empty and carry no verdict. Its
+  // presence is distinct from a populated response whose verdict is
+  // unknown: the first means "nothing was read", the second means
+  // "something was read and part of it is undetermined". A caller must
+  // not treat one as the other.
+  string error = 8;
 }

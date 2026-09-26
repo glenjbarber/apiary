@@ -110,6 +110,7 @@ const (
 	ManagerService_CancelJoinRequest_FullMethodName           = "/apiary.rpc.v1.ManagerService/CancelJoinRequest"
 	ManagerService_PurgeJoinRequest_FullMethodName            = "/apiary.rpc.v1.ManagerService/PurgeJoinRequest"
 	ManagerService_UpdateVoterAddress_FullMethodName          = "/apiary.rpc.v1.ManagerService/UpdateVoterAddress"
+	ManagerService_HostPackages_FullMethodName                = "/apiary.rpc.v1.ManagerService/HostPackages"
 )
 
 // ManagerServiceClient is the client API for ManagerService service.
@@ -624,6 +625,24 @@ type ManagerServiceClient interface {
 	// unreachable new address risks stranding the cluster exactly as an
 	// unreachable new joiner does.
 	UpdateVoterAddress(ctx context.Context, in *UpdateVoterAddressRequest, opts ...grpc.CallOption) (*UpdateVoterAddressResponse, error)
+	// HostPackages reports *this* node's own host package inventory - the
+	// running base system, the state of the local pkg catalogue, and every
+	// installed Ports package with its update verdict. Physical, per-node,
+	// observational data like HostStats above, gathered locally by managerd
+	// (see internal/hostpkg), never routed through raft and never
+	// leader-forwarded: a package name is only ever meaningful to the one
+	// node that has it installed.
+	//
+	// It answers for whoever receives it, like HostStats: a caller wanting
+	// the whole cluster asks each node in turn, exactly as the Combs page
+	// already does for HostStats.
+	//
+	// READ-ONLY. There is deliberately no Apply/Upgrade RPC here. See
+	// HostPackagesResponse's own doc comment on catalogue staleness for
+	// why an "up to date" claim from this response is the one thing a
+	// caller must not make casually, and internal/hostpkg's own docs for
+	// why no unattended upgrade path exists at all.
+	HostPackages(ctx context.Context, in *HostPackagesRequest, opts ...grpc.CallOption) (*HostPackagesResponse, error)
 }
 
 type managerServiceClient struct {
@@ -1553,6 +1572,16 @@ func (c *managerServiceClient) UpdateVoterAddress(ctx context.Context, in *Updat
 	return out, nil
 }
 
+func (c *managerServiceClient) HostPackages(ctx context.Context, in *HostPackagesRequest, opts ...grpc.CallOption) (*HostPackagesResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(HostPackagesResponse)
+	err := c.cc.Invoke(ctx, ManagerService_HostPackages_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // ManagerServiceServer is the server API for ManagerService service.
 // All implementations must embed UnimplementedManagerServiceServer
 // for forward compatibility.
@@ -2065,6 +2094,24 @@ type ManagerServiceServer interface {
 	// unreachable new address risks stranding the cluster exactly as an
 	// unreachable new joiner does.
 	UpdateVoterAddress(context.Context, *UpdateVoterAddressRequest) (*UpdateVoterAddressResponse, error)
+	// HostPackages reports *this* node's own host package inventory - the
+	// running base system, the state of the local pkg catalogue, and every
+	// installed Ports package with its update verdict. Physical, per-node,
+	// observational data like HostStats above, gathered locally by managerd
+	// (see internal/hostpkg), never routed through raft and never
+	// leader-forwarded: a package name is only ever meaningful to the one
+	// node that has it installed.
+	//
+	// It answers for whoever receives it, like HostStats: a caller wanting
+	// the whole cluster asks each node in turn, exactly as the Combs page
+	// already does for HostStats.
+	//
+	// READ-ONLY. There is deliberately no Apply/Upgrade RPC here. See
+	// HostPackagesResponse's own doc comment on catalogue staleness for
+	// why an "up to date" claim from this response is the one thing a
+	// caller must not make casually, and internal/hostpkg's own docs for
+	// why no unattended upgrade path exists at all.
+	HostPackages(context.Context, *HostPackagesRequest) (*HostPackagesResponse, error)
 	mustEmbedUnimplementedManagerServiceServer()
 }
 
@@ -2347,6 +2394,9 @@ func (UnimplementedManagerServiceServer) PurgeJoinRequest(context.Context, *Purg
 }
 func (UnimplementedManagerServiceServer) UpdateVoterAddress(context.Context, *UpdateVoterAddressRequest) (*UpdateVoterAddressResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method UpdateVoterAddress not implemented")
+}
+func (UnimplementedManagerServiceServer) HostPackages(context.Context, *HostPackagesRequest) (*HostPackagesResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method HostPackages not implemented")
 }
 func (UnimplementedManagerServiceServer) mustEmbedUnimplementedManagerServiceServer() {}
 func (UnimplementedManagerServiceServer) testEmbeddedByValue()                        {}
@@ -3974,6 +4024,24 @@ func _ManagerService_UpdateVoterAddress_Handler(srv interface{}, ctx context.Con
 	return interceptor(ctx, in, info, handler)
 }
 
+func _ManagerService_HostPackages_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(HostPackagesRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ManagerServiceServer).HostPackages(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ManagerService_HostPackages_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ManagerServiceServer).HostPackages(ctx, req.(*HostPackagesRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // ManagerService_ServiceDesc is the grpc.ServiceDesc for ManagerService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -4332,6 +4400,10 @@ var ManagerService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "UpdateVoterAddress",
 			Handler:    _ManagerService_UpdateVoterAddress_Handler,
+		},
+		{
+			MethodName: "HostPackages",
+			Handler:    _ManagerService_HostPackages_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{

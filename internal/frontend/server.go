@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"html"
 	"html/template"
 	"io"
 	"mime/multipart"
@@ -567,6 +568,28 @@ func pageHeader(title, subtitle string, extra ...string) pageHeaderData {
 	return pageHeaderData{Title: title, Subtitle: subtitle, Extra: e}
 }
 
+// hostPackagesLink builds host.html's header "Packages" link.
+//
+// It exists as a Go function rather than a printf inside the template
+// because pageHeader's extra slot is passed through as raw HTML (it takes
+// ...string and wraps extra[0] in template.HTML itself). Every existing
+// caller passes a literal, so nothing has needed escaping until now. A
+// node ID is operator- and join-request-supplied text that ends up inside
+// an href attribute, and interpolating it unescaped would let a crafted
+// node ID containing a quote or a space break out of that attribute.
+//
+// The return type is string, not template.HTML, because pageHeader's
+// variadic parameter is a string: returning template.HTML here would not
+// compile against it. The escaping happens before the return, which is
+// the only place it can safely happen - the moment pageHeader re-wraps
+// the value in template.HTML it is asserting the string is already safe,
+// so this function owes it that.
+func hostPackagesLink(nodeID string) string {
+	return fmt.Sprintf(
+		`<a href="/host/%s/packages">Packages</a> &middot; <a href="/">Back to overview</a>`,
+		html.EscapeString(nodeID))
+}
+
 // vmSubtitle/nodeSubtitle exist because the "page_header" template call
 // is a single expression - a template action has no if/else available
 // inside a function-call argument, so the two pages whose subtitle is
@@ -609,7 +632,7 @@ func NewServer(client rpcpb.ManagerServiceClient, auth Authenticator, roleMap ma
 		"machineSections":          func() []machineSection { return machineSections },
 		"hostOnly":                 hostOnly,
 		"placementUnavailable":     placementUnavailable,
-	}).ParseFS(web.FS, "templates/*.html")
+		"hostPackagesLink":         hostPackagesLink}).ParseFS(web.FS, "templates/*.html")
 	if err != nil {
 		return nil, fmt.Errorf("frontend: parsing templates: %w", err)
 	}
@@ -906,6 +929,11 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /invariants", s.handleInvariantsPage)
 	s.mux.HandleFunc("GET /why-not", s.handleWhyNotPage)
 	s.mux.HandleFunc("GET /resilience-coverage", s.handleCoveragePage)
+
+	// The host package inventory page (internal/hostpkg). Read-only and
+	// Viewer-gated; see registerHostPkgRoutes' own comment for why there
+	// is deliberately no write route alongside it.
+	registerHostPkgRoutes(s)
 
 	// Operator: VM/jail/network/ISO lifecycle - including the
 	// create-VM form's own GET, since a Viewer has nothing useful to do
