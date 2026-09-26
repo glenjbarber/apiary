@@ -1356,8 +1356,38 @@ func (r *Reconciler) ensureNetwork(ctx context.Context, network *internalpb.Netw
 	if err != nil {
 		return networkArtifact{}, fmt.Errorf("ensuring bridge: %w", err)
 	}
+	// Everything from here to the artifact's return is a step that can
+	// fail, and this reconcile pass's only durable record of what it
+	// created is the artifact value itself - which reconcileNetworkArtifacts
+	// persists, and whose OwnBridge flag is the ONLY thing that ever makes
+	// it destroy this bridge when the network goes away. Returning early
+	// from any of these steps therefore abandons a bridge this call just
+	// created with nothing on record that Apiary owns it: the network can
+	// be deleted, and reconcileNetworkArtifacts will find no OwnBridge to
+	// act on, leaving the interface on the host forever.
+	//
+	// Confirmed live on brood: a network whose vlan could not be added to
+	// its bridge left apnet-<hash> behind after the network was deleted.
+	//
+	// So each failure below undoes the bridge if - and only if - this call
+	// is what created it. A pre-existing bridge is never destroyed: it
+	// predates this network, and removing it would be a far worse outcome
+	// than the leak being fixed here.
+	failOwned := func(step string, err error) (networkArtifact, error) {
+		if bridgeCreated {
+			// Best-effort, and deliberately not allowed to replace the
+			// real cause: the operator needs the ifconfig/bridge error,
+			// not a cleanup error, so a failed teardown is appended
+			// rather than returned in its place.
+			if destroyErr := r.VLAN.DestroyBridge(ctx, bridge); destroyErr != nil {
+				return networkArtifact{}, fmt.Errorf("%s: %w (additionally, the bridge %s this call created could not be removed: %v - it will be left behind and must be removed by hand)",
+					step, err, bridge, destroyErr)
+			}
+		}
+		return networkArtifact{}, fmt.Errorf("%s: %w", step, err)
+	}
 	if err := r.VLAN.EnsureMember(ctx, bridge, iface); err != nil {
-		return networkArtifact{}, fmt.Errorf("adding %s to bridge: %w", iface, err)
+		return failOwned("adding "+iface+" to bridge", err)
 	}
 	artifact := networkArtifact{Bridge: bridge, VLANID: network.GetVlanId(), OwnBridge: bridgeCreated, OwnVLAN: vlanCreated}
 	// A network with ExternalGateway set already has a real router
@@ -1367,7 +1397,7 @@ func (r *Reconciler) ensureNetwork(ctx context.Context, network *internalpb.Netw
 	// was - a duplicate-IP conflict, not a firewall/routing bug).
 	if network.GetExternalGateway() == "" {
 		if err := r.VLAN.EnsureBridgeAddress(ctx, bridge, network.GetSubnet()); err != nil {
-			return networkArtifact{}, fmt.Errorf("assigning gateway address: %w", err)
+			return failOwned("assigning gateway address", err)
 		}
 		// Give this network real outbound internet access through this
 		// node's own uplink - see ADR-0048. Only meaningful when this
@@ -1376,7 +1406,7 @@ func (r *Reconciler) ensureNetwork(ctx context.Context, network *internalpb.Netw
 		// for its internet access instead.
 		if r.PF != nil && r.Uplink != "" {
 			if err := r.PF.ApplyNAT(ctx, natAnchor(network.GetId()), network.GetSubnet(), r.Uplink); err != nil {
-				return networkArtifact{}, fmt.Errorf("applying outbound NAT: %w", err)
+				return failOwned("applying outbound NAT", err)
 			}
 			artifact.OutboundNAT = true
 		}
