@@ -58,6 +58,12 @@ type Info struct {
 // is the only scoping mechanism available.
 type Manager struct {
 	Prefix string
+
+	// Runner overrides how this Manager executes jail(8)/jls(8)/jexec(8).
+	// nil means the real shell, which is the only correct setting in
+	// production; tests inject a fake so the whole package is
+	// exercisable off a FreeBSD host.
+	Runner CommandRunner
 }
 
 // New returns a Manager whose jails are all named Prefix+name (e.g.
@@ -117,7 +123,7 @@ func (m *Manager) CreateJail(ctx context.Context, name string, cfg Config) error
 		return fmt.Errorf("jail: Config.VNETInterface must be set when VNET is true")
 	}
 
-	if _, err := runCmd(ctx, "jail", append([]string{"-c"}, createArgs(qname, cfg)...)...); err != nil {
+	if _, err := m.run(ctx, "jail", append([]string{"-c"}, createArgs(qname, cfg)...)...); err != nil {
 		return err
 	}
 
@@ -126,15 +132,17 @@ func (m *Manager) CreateJail(ctx context.Context, name string, cfg Config) error
 	// parameter for a vnet interface (unlike ip4=inherit's flat
 	// host-stack model), so this is a separate jexec(8) step, run only
 	// once, right after creation, not on every reconciler tick.
+	//
+	// It goes through EnsureAddressing - the exact same observe/compare/
+	// repair sequence internal/jailnet's reconciler uses on every later
+	// tick - so a retry after a partially-successful creation (say the
+	// address landed and the route didn't) converges instead of failing
+	// forever on ifconfig's "File exists", and so creation-time and
+	// reconcile-time addressing can never diverge in behavior.
 	if cfg.VNET && cfg.IPAddress != "" {
-		if _, err := runCmd(ctx, "jexec", qname, "ifconfig", cfg.VNETInterface,
-			"inet", fmt.Sprintf("%s/%d", cfg.IPAddress, cfg.IPPrefixLen), "up"); err != nil {
-			return fmt.Errorf("jail: assigning %s to %s inside jail: %w", cfg.IPAddress, cfg.VNETInterface, err)
-		}
-		if cfg.Gateway != "" {
-			if _, err := runCmd(ctx, "jexec", qname, "route", "add", "default", cfg.Gateway); err != nil {
-				return fmt.Errorf("jail: setting default route %s inside jail: %w", cfg.Gateway, err)
-			}
+		addr := Address{IP: cfg.IPAddress, PrefixLen: cfg.IPPrefixLen}
+		if err := m.EnsureAddressing(ctx, qname, cfg.VNETInterface, addr, cfg.Gateway); err != nil {
+			return err
 		}
 	}
 	return nil
@@ -146,7 +154,7 @@ func (m *Manager) RemoveJail(ctx context.Context, name string) error {
 	if err != nil {
 		return err
 	}
-	_, err = runCmd(ctx, "jail", "-r", qname)
+	_, err = m.run(ctx, "jail", "-r", qname)
 	return err
 }
 
@@ -156,9 +164,9 @@ func (m *Manager) JailExists(ctx context.Context, name string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	_, err = runCmd(ctx, "jls", "-j", qname, "-n", "name")
+	_, err = m.run(ctx, "jls", "-j", qname, "-n", "name")
 	if err != nil {
-		if strings.Contains(err.Error(), "not found") {
+		if notFound(err, "jls") {
 			return false, nil
 		}
 		return false, err
@@ -173,7 +181,7 @@ func (m *Manager) JailInfo(ctx context.Context, name string) (*Info, error) {
 		return nil, err
 	}
 
-	out, err := runCmd(ctx, "jls", "-j", qname, "-n", "name", "path", "host.hostname", "jid")
+	out, err := m.run(ctx, "jls", "-j", qname, "-n", "name", "path", "host.hostname", "jid")
 	if err != nil {
 		return nil, err
 	}
@@ -196,7 +204,7 @@ func (m *Manager) JailInfo(ctx context.Context, name string) (*Info, error) {
 // running jails whose name starts with Prefix. Jails not created by this
 // Manager (no matching prefix) are not returned.
 func (m *Manager) ListJails(ctx context.Context) ([]string, error) {
-	out, err := runCmd(ctx, "jls", "-n", "name")
+	out, err := m.run(ctx, "jls", "-n", "name")
 	if err != nil {
 		return nil, err
 	}
