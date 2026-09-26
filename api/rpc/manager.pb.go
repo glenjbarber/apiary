@@ -5435,15 +5435,34 @@ func (x *NetIfaceStats) GetUp() bool {
 }
 
 // PFStats summarizes pf(8)'s current status, from `pfctl -s info` -
-// confirming the firewall (ADR-0022's per-VM rules) is actually enabled
-// and seeing traffic.
+// plus, since ADR-0140, what the host's own ruleset can actually do.
 type PFStats struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Enabled       bool                   `protobuf:"varint,1,opt,name=enabled,proto3" json:"enabled,omitempty"`
-	CurrentStates uint64                 `protobuf:"varint,2,opt,name=current_states,json=currentStates,proto3" json:"current_states,omitempty"`
-	Matches       uint64                 `protobuf:"varint,3,opt,name=matches,proto3" json:"matches,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// enabled is pfctl's Status line, verbatim: pf loaded a ruleset. It
+	// is NOT evidence that anything is filtered.
+	Enabled       bool   `protobuf:"varint,1,opt,name=enabled,proto3" json:"enabled,omitempty"`
+	CurrentStates uint64 `protobuf:"varint,2,opt,name=current_states,json=currentStates,proto3" json:"current_states,omitempty"`
+	Matches       uint64 `protobuf:"varint,3,opt,name=matches,proto3" json:"matches,omitempty"`
+	// host_firewall is the host's own main-ruleset filtering posture, from
+	// internal/pf's read-only assessment: "filtering", "unfiltered",
+	// "disabled" or "unknown". It is deliberately not a restatement of
+	// `enabled` above. Measured on a live four-node cluster before this
+	// field existed, every node reported enabled=true while /etc/pf.conf
+	// was the single line `anchor "apiary/*"`, the main ruleset held no
+	// block policy and no block rule, and pf - which passes any packet
+	// that matches no rule - was filtering nothing at all. A consumer that
+	// renders a green shield from `enabled` alone is rendering that defect.
+	// "unknown" means this node could not read pf; it is never the good
+	// case and must never be collapsed into one.
+	HostFirewall string `protobuf:"bytes,4,opt,name=host_firewall,json=hostFirewall,proto3" json:"host_firewall,omitempty"`
+	// apiary_anchor_reached is "present", "absent" or "unknown": whether
+	// the host's main ruleset contains an anchor rule that evaluates
+	// anything under `apiary/*`. "absent" means every pf rule Apiary has
+	// ever loaded is sitting in an anchor nothing reaches, so no Cell or
+	// jail firewall rule is enforced no matter what those anchors contain.
+	ApiaryAnchorReached string `protobuf:"bytes,5,opt,name=apiary_anchor_reached,json=apiaryAnchorReached,proto3" json:"apiary_anchor_reached,omitempty"`
+	unknownFields       protoimpl.UnknownFields
+	sizeCache           protoimpl.SizeCache
 }
 
 func (x *PFStats) Reset() {
@@ -5495,6 +5514,20 @@ func (x *PFStats) GetMatches() uint64 {
 		return x.Matches
 	}
 	return 0
+}
+
+func (x *PFStats) GetHostFirewall() string {
+	if x != nil {
+		return x.HostFirewall
+	}
+	return ""
+}
+
+func (x *PFStats) GetApiaryAnchorReached() string {
+	if x != nil {
+		return x.ApiaryAnchorReached
+	}
+	return ""
 }
 
 type HostStatsResponse struct {
@@ -16466,11 +16499,13 @@ const file_api_rpc_manager_proto_rawDesc = "" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x19\n" +
 	"\brx_bytes\x18\x02 \x01(\x04R\arxBytes\x12\x19\n" +
 	"\btx_bytes\x18\x03 \x01(\x04R\atxBytes\x12\x0e\n" +
-	"\x02up\x18\x04 \x01(\bR\x02up\"d\n" +
+	"\x02up\x18\x04 \x01(\bR\x02up\"\xbd\x01\n" +
 	"\aPFStats\x12\x18\n" +
 	"\aenabled\x18\x01 \x01(\bR\aenabled\x12%\n" +
 	"\x0ecurrent_states\x18\x02 \x01(\x04R\rcurrentStates\x12\x18\n" +
-	"\amatches\x18\x03 \x01(\x04R\amatches\"\xdb\x05\n" +
+	"\amatches\x18\x03 \x01(\x04R\amatches\x12#\n" +
+	"\rhost_firewall\x18\x04 \x01(\tR\fhostFirewall\x122\n" +
+	"\x15apiary_anchor_reached\x18\x05 \x01(\tR\x13apiaryAnchorReached\"\xdb\x05\n" +
 	"\x11HostStatsResponse\x12\x17\n" +
 	"\anode_id\x18\x01 \x01(\tR\x06nodeId\x12)\n" +
 	"\x03cpu\x18\x02 \x01(\v2\x17.apiary.rpc.v1.CPUStatsR\x03cpu\x12)\n" +

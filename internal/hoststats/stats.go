@@ -19,6 +19,8 @@ import (
 	"os/exec"
 	"strconv"
 	"strings"
+
+	"github.com/glenjbarber/apiary/internal/pf"
 )
 
 // CPUInfo reports processor count and system load averages.
@@ -76,10 +78,25 @@ type NetIface struct {
 }
 
 // PFInfo is a summary of pf(8)'s current status and counters, from
-// `pfctl -s info` - confirming the firewall is actually enabled and
-// doing something, for the host stats page (ADR-0022's network
-// management work is what first gave this project a reason to run pf
-// at all).
+// `pfctl -s info` - plus a read-only assessment of what the host's own
+// ruleset can actually do (ADR-0140).
+//
+// The two halves are deliberately kept apart, and the comment above used
+// to be a lie this struct made concrete. It said pfctl -s info was
+// "confirming the firewall is actually enabled and doing something", on
+// a live four-node cluster where every Comb's /etc/pf.conf was the single
+// line `anchor "apiary/*"`, `pfctl -sr` was a single rule, and pf was
+// filtering nothing at all - because pf passes any packet that matches
+// no rule, and `Status: Enabled` is a statement about pfctl, not about
+// filtering. `Enabled` below still says exactly what it says and nothing
+// more; Baseline is the part that answers "is anything being filtered?",
+// and it has an unknown state for a pfctl that could not be asked.
+//
+// A failed `pfctl -s info` used to render here as `Enabled: false`,
+// because parsePFInfo could not tell "pf is off" from "we could not
+// tell". Baseline.State separates those, and separates both from a
+// genuinely unfiltered host - three states that all look identical in a
+// bool.
 type PFInfo struct {
 	Enabled bool
 
@@ -90,6 +107,14 @@ type PFInfo struct {
 	// since pf was last enabled - a simple "is traffic actually hitting
 	// pf" signal, not broken down by rule/anchor.
 	Matches uint64
+
+	// Baseline is internal/pf's assessment of the host's own main
+	// ruleset: is there a default block policy, is there any block rule,
+	// is loopback skipped, and is the apiary/* namespace referenced at
+	// all. Populated on every gather, including the ones where
+	// pfctl -s info itself failed, and never used as a proxy for
+	// Enabled.
+	Baseline pf.Baseline
 }
 
 // Snapshot is a point-in-time view of the local host. Errors records
@@ -149,10 +174,16 @@ func Gather(ctx context.Context) *Snapshot {
 		s.Net = net
 	}
 
-	if pf, err := gatherPF(ctx); err != nil {
+	if pfInfo, err := gatherPF(ctx); err != nil {
 		s.Errors = append(s.Errors, "pf: "+err.Error())
+		// Deliberately not else: the returned PFInfo still carries the
+		// host baseline, which is exactly what a reader needs when
+		// pfctl -s info failed. Dropping it on error would make the
+		// one gather that could not read pf's counters also the one
+		// gather that says nothing about what pf is enforcing.
+		s.PF = *pfInfo
 	} else {
-		s.PF = *pf
+		s.PF = *pfInfo
 	}
 
 	return s
@@ -162,12 +193,30 @@ func Gather(ctx context.Context) *Snapshot {
 // missing, or pf not permitted to query, e.g. no root) is a real
 // failure, distinct from pf simply being disabled (which still
 // succeeds, just reports PFInfo.Enabled == false).
+//
+// It also reads `pfctl -s sr` - the main ruleset, no -a - and hands both
+// raw reads to internal/pf's pure classifier, because `pfctl -s info`
+// alone cannot distinguish "this host is filtering" from "pfctl started
+// and loaded a ruleset, and the ruleset passes everything". Both
+// commands are reads; nothing here can change what pf is enforcing.
+//
+// The PFInfo is returned even on error, so the baseline survives a
+// failed counter read.
 func gatherPF(ctx context.Context) (*PFInfo, error) {
-	out, err := runCmd(ctx, "pfctl", "-s", "info")
-	if err != nil {
-		return nil, err
+	infoOut, infoErr := runCmd(ctx, "pfctl", "-s", "info")
+	rulesOut, rulesErr := runCmd(ctx, "pfctl", "-sr")
+	baseline := pf.ClassifyHost(pf.HostReads{
+		Info:           infoOut,
+		InfoErr:        infoErr,
+		MainRuleset:    rulesOut,
+		MainRulesetErr: rulesErr,
+	})
+	if infoErr != nil {
+		return &PFInfo{Baseline: baseline}, infoErr
 	}
-	return parsePFInfo(out), nil
+	info := parsePFInfo(infoOut)
+	info.Baseline = baseline
+	return info, nil
 }
 
 // parsePFInfo extracts the fields hoststats cares about from `pfctl -s

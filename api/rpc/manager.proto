@@ -1216,12 +1216,33 @@ message NetIfaceStats {
 }
 
 // PFStats summarizes pf(8)'s current status, from `pfctl -s info` -
-// confirming the firewall (ADR-0022's per-VM rules) is actually enabled
-// and seeing traffic.
+// plus, since ADR-0140, what the host's own ruleset can actually do.
 message PFStats {
+  // enabled is pfctl's Status line, verbatim: pf loaded a ruleset. It
+  // is NOT evidence that anything is filtered.
   bool enabled = 1;
   uint64 current_states = 2;
   uint64 matches = 3;
+
+  // host_firewall is the host's own main-ruleset filtering posture, from
+  // internal/pf's read-only assessment: "filtering", "unfiltered",
+  // "disabled" or "unknown". It is deliberately not a restatement of
+  // `enabled` above. Measured on a live four-node cluster before this
+  // field existed, every node reported enabled=true while /etc/pf.conf
+  // was the single line `anchor "apiary/*"`, the main ruleset held no
+  // block policy and no block rule, and pf - which passes any packet
+  // that matches no rule - was filtering nothing at all. A consumer that
+  // renders a green shield from `enabled` alone is rendering that defect.
+  // "unknown" means this node could not read pf; it is never the good
+  // case and must never be collapsed into one.
+  string host_firewall = 4;
+
+  // apiary_anchor_reached is "present", "absent" or "unknown": whether
+  // the host's main ruleset contains an anchor rule that evaluates
+  // anything under `apiary/*`. "absent" means every pf rule Apiary has
+  // ever loaded is sitting in an anchor nothing reaches, so no Cell or
+  // jail firewall rule is enforced no matter what those anchors contain.
+  string apiary_anchor_reached = 5;
 }
 
 message HostStatsResponse {
