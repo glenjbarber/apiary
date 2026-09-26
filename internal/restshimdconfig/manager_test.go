@@ -1,8 +1,10 @@
 package restshimdconfig
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -251,5 +253,98 @@ func TestManager_SaveRejectsContradictoryTLSFields(t *testing.T) {
 	}
 	if err := m.Save(cfg); err == nil {
 		t.Error("Save() = nil for manager_tls=false with a CA set, want a validation rejection")
+	}
+}
+
+// TestLoadRejectsDuplicateKeys is the live case: buzz's and sting's
+// restshimd.json each carried manager_tls and manager_tls_server_name
+// twice after a hand-edit, and encoding/json took the last value with no
+// error, so the file read as though the operator's first intent had
+// never been typed. Load must refuse the file and name the key.
+func TestLoadRejectsDuplicateKeys(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "restshimd.json")
+	body := `{
+  "manager_addr": "brood.lab3.home.arpa:17700",
+  "manager_tls": true,
+  "manager_tls_server_name": "brood.lab3.home.arpa",
+  "manager_tls": false,
+  "http_addr": "127.0.0.1:8081"
+}`
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_, err := (&Manager{Path: path}).Load()
+	if err == nil {
+		t.Fatal("Load() accepted a file with a duplicated key; encoding/json would have silently used the last manager_tls")
+	}
+	// The operator has to be able to act on this: it must name the file
+	// they need to edit and the key they need to look at.
+	for _, want := range []string{path, "manager_tls"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error %q does not mention %q; an operator cannot act on it", err, want)
+		}
+	}
+}
+
+// A duplicate must never be silently resolved to a usable config. This
+// is the property that matters: today json.Unmarshal returns
+// manager_tls=false with no error at all.
+func TestLoadDoesNotSilentlyPickLastDuplicate(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "restshimd.json")
+	if err := os.WriteFile(path, []byte(`{"manager_tls": true, "manager_tls": false}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := (&Manager{Path: path}).Load()
+	if err == nil {
+		t.Fatalf("Load() = %+v, nil; a duplicated key must not resolve to a config", cfg)
+	}
+}
+
+// A nested duplicate is caught too, and the path says where it is.
+func TestLoadRejectsNestedDuplicateKey(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "restshimd.json")
+	if err := os.WriteFile(path, []byte(`{"tls": {"server_name": "a", "server_name": "b"}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_, err := (&Manager{Path: path}).Load()
+	if err == nil {
+		t.Fatal("Load() accepted a nested duplicate key")
+	}
+	if !strings.Contains(err.Error(), "server_name") {
+		t.Errorf("error %q does not name the nested key", err)
+	}
+}
+
+// A clean file must decode exactly as it always did. If this fails,
+// jsonstrict has changed behaviour for the common case, which would be
+// a far worse regression than the duplicate it was added to catch.
+func TestLoadCleanFileUnchanged(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "restshimd.json")
+	body := `{
+  "manager_addr": "brood.lab3.home.arpa:17700",
+  "manager_tls": true,
+  "manager_tls_ca": "/usr/local/etc/apiary/peer-ca.pem",
+  "manager_tls_server_name": "brood.lab3.home.arpa",
+  "http_addr": "127.0.0.1:8081",
+  "tls_cert": "/usr/local/etc/apiary/restshimd-cert.pem",
+  "tls_key": "/usr/local/etc/apiary/restshimd-key.pem"
+}`
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got, err := (&Manager{Path: path}).Load()
+	if err != nil {
+		t.Fatalf("Load() on a clean file: %v", err)
+	}
+	var want Config
+	if err := json.Unmarshal([]byte(body), &want); err != nil {
+		t.Fatalf("reference unmarshal: %v", err)
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("Load() = %+v\nwant  %+v", got, want)
 	}
 }

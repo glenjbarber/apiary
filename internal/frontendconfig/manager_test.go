@@ -1,8 +1,11 @@
 package frontendconfig
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
+	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -177,5 +180,59 @@ func TestManager_SaveTightensPermissionsOnExistingFile(t *testing.T) {
 	}
 	if perm := info.Mode().Perm(); perm != 0o600 {
 		t.Errorf("permissions after Save = %o, want 0600 even though the file pre-existed at 0644", perm)
+	}
+}
+
+// frontendconfig had the same silent-duplicate hole as restshimdconfig:
+// json.Unmarshal takes the last value of a repeated key with no error,
+// so a hand-edited file that reads one way can behave another.
+func TestLoadRejectsDuplicateKeys(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "frontend.json")
+	body := `{
+  "manager_addr": "brood.lab3.home.arpa:17700",
+  "manager_tls_server_name": "brood.lab3.home.arpa",
+  "manager_tls_server_name": "wrong.example"
+}`
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_, err := (&Manager{Path: path}).Load()
+	if err == nil {
+		t.Fatal("Load() accepted a file with a duplicated key; encoding/json would have silently used the last one")
+	}
+	for _, want := range []string{path, "manager_tls_server_name"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error %q does not mention %q; an operator cannot act on it", err, want)
+		}
+	}
+}
+
+// A clean frontend.json must decode exactly as it always did.
+func TestLoadCleanFileUnchanged(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "frontend.json")
+	body := `{
+  "manager_addr": "brood.lab3.home.arpa:17700",
+  "manager_tls_server_name": "brood.lab3.home.arpa",
+  "manager_api_key": "",
+  "http_addr": "0.0.0.0:8080"
+}`
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got, err := (&Manager{Path: path}).Load()
+	if err != nil {
+		t.Fatalf("Load() on a clean file: %v", err)
+	}
+	// Seeded with defaults(), exactly as Load does, so the comparison
+	// isolates the decode rather than measuring which fields Load
+	// pre-populates.
+	want := defaults()
+	if err := json.Unmarshal([]byte(body), &want); err != nil {
+		t.Fatalf("reference unmarshal: %v", err)
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("Load() = %+v\nwant  %+v", got, want)
 	}
 }
