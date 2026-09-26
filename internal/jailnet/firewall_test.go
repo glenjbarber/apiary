@@ -190,11 +190,16 @@ func TestFirewall_FlushWithoutSupportIsANoOp(t *testing.T) {
 // package takes really is identical to pf.Rule, so the eventual
 // JailDefinition.firewall_rules field is a call and not a translation
 // layer with a bug in it.
+//
+// Any: true in the expectation is ADR-0137's explicit opt-in for an
+// any-to-any rule, and it is not a fifth copied field: it is a decision
+// this package now has to make out loud instead of getting by leaving
+// the scope undeclared.
 func TestJailRulesIsAFieldForFieldCopy(t *testing.T) {
 	got := JailRules([]JailRule{
 		{Direction: "out", Action: "pass", Protocol: "udp", PortRange: "8000-9000"},
 	})
-	want := []pf.Rule{{Direction: "out", Action: "pass", Protocol: "udp", PortRange: "8000-9000"}}
+	want := []pf.Rule{{Direction: "out", Action: "pass", Protocol: "udp", PortRange: "8000-9000", Any: true}}
 	if len(got) != 1 || got[0] != want[0] {
 		t.Errorf("JailRules() = %+v, want %+v", got, want)
 	}
@@ -210,6 +215,11 @@ func TestJailRulesIsAFieldForFieldCopy(t *testing.T) {
 	// output to a VM's.
 	if !strings.Contains(rendered, "pass out proto udp") || !strings.Contains(rendered, "port 8000:9000") {
 		t.Errorf("rendered = %q, want the same pf syntax a VM's rules render to", rendered)
+	}
+	// ...which means the ADR-0137 opt-in must not have changed a single
+	// byte of what a VM's rules render to either.
+	if want := "pass out proto udp from any to any port 8000:9000\n"; rendered != want {
+		t.Errorf("rendered = %q, want %q: the opt-in is for the caller's intent, not for pf's output", rendered, want)
 	}
 }
 

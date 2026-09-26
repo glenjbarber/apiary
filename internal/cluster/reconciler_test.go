@@ -1945,6 +1945,36 @@ func TestToPFRules_StableForEqualPriority(t *testing.T) {
 	}
 }
 
+// TestToPFRules_ExplicitlyOptsIntoTheAnyToAnyScope pins ADR-0137's one
+// deliberate broadness in the per-VM path, so it cannot be deleted by
+// accident: a VM's FirewallRule carries no interface or address field
+// (api/internalpb's message has only direction/action/protocol/
+// port_range/priority), so internal/pf's renderer now refuses an
+// undeclared scope and toPFRules has to say out loud that these rules
+// are any-to-any until ADR-0129 adds the scope fields to the proto and
+// narrows them.
+//
+// The test asserts the two things that must both hold: the opt-in is
+// present (so every live deployment keeps the pf behaviour it has
+// today), and it is present *because the test says so* rather than by
+// default (so the moment the narrowing lands, this test fails and
+// someone has to make the change deliberate).
+func TestToPFRules_ExplicitlyOptsIntoTheAnyToAnyScope(t *testing.T) {
+	got := toPFRules([]FirewallRule{{Direction: "in", Action: "block", Protocol: "tcp", PortRange: "22"}})
+	if len(got) != 1 {
+		t.Fatalf("toPFRules() returned %d rules, want 1", len(got))
+	}
+	if !got[0].Any {
+		t.Error("toPFRules() did not set Rule.Any; internal/pf now refuses an undeclared scope, so this would fail every Apply in production")
+	}
+	// The scope fields themselves must stay empty: a per-VM rule is
+	// broad because Apiary cannot yet say which interface or address
+	// it means, not because it picked a wrong one.
+	if got[0].Interface != "" || got[0].Source != "" || got[0].Destination != "" {
+		t.Errorf("toPFRules() = %+v, want the scope's interface and addresses left empty", got[0])
+	}
+}
+
 // TestReconciler_RunOnce_AppliesFirewallRulesInPriorityOrder is the
 // same regression at the integration level: RunOnce's real end-to-end
 // path (raft -> VMPlacement -> effectivePFRules -> pf.Manager.Apply)

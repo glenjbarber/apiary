@@ -154,6 +154,14 @@ func JailRules(configured []JailRule) []pf.Rule {
 			Action:    r.Action,
 			Protocol:  r.Protocol,
 			PortRange: r.PortRange,
+			// ADR-0137's explicit opt-in for an any-to-any rule. A
+			// JailRule has no interface or address field to narrow
+			// with (JailRule is field-for-field api/internalpb's
+			// FirewallRule, and ADR-0129 owns adding the scope fields
+			// to that proto message), so the honest thing today is to
+			// say out loud that the rule is about everything rather
+			// than let an undeclared scope mean it by accident.
+			Any: true,
 		})
 	}
 	return out

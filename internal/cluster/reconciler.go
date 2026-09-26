@@ -1620,6 +1620,23 @@ func natAnchor(networkID string) string {
 // rules sharing a priority (0 is the default for every rule that
 // predates this field) keep their existing relative order rather than
 // being silently re-ranked.
+//
+// The Any: true below is the ADR-0137 opt-in, and it is spelled out
+// here rather than defaulted anywhere, because it is a real
+// over-broadness in a place that has a real fix coming: a per-VM rule
+// is loaded into that VM's own anchor but, until the renderer can
+// constrain it, matches any address to any address on the host. Every
+// VM rule in raft today carries no interface or address field at all
+// (api/internalpb's FirewallRule has only direction/action/protocol/
+// port_range/priority), so there is nothing to narrow *to* here without
+// a proto change. ADR-0129 owns that change - constraining a Cell rule
+// to the guest's own interface - and its own Context calls the
+// renderer fix mandatory before that scope is exposed, explicitly
+// because narrowing every live deployment's rendered rules is a
+// behaviour flip that needs a testbed rehearsal and a migration note,
+// not a quiet release. Until then the widening is at least explicit,
+// greppable, and confined to this one function, instead of being what
+// an undeclared scope silently meant.
 func toPFRules(rules []FirewallRule) []pf.Rule {
 	ordered := make([]FirewallRule, len(rules))
 	copy(ordered, rules)
@@ -1627,7 +1644,7 @@ func toPFRules(rules []FirewallRule) []pf.Rule {
 
 	out := make([]pf.Rule, len(ordered))
 	for i, r := range ordered {
-		out[i] = pf.Rule{Direction: r.Direction, Action: r.Action, Protocol: r.Protocol, PortRange: r.PortRange}
+		out[i] = pf.Rule{Direction: r.Direction, Action: r.Action, Protocol: r.Protocol, PortRange: r.PortRange, Any: true}
 	}
 	return out
 }
