@@ -494,7 +494,7 @@
       {{if .CanAdmin}}
       <form hx-post="/machine/managerd-bind" hx-target="#managerd-bind-panel" hx-swap="innerHTML">
         {{template "config_change_fields" .}}
-        <span class="host-port"><input type="text" list="managerd-bind-addresses" name="rpc_host" value="{{hostOnly .NodeConfig.RPCAddr}}" title="Host managerd's gRPC listener binds to. Choose a local address suggestion or enter another valid local host. The port is always 17700 and cannot be changed here. Saving does not restart managerd." aria-label="Managerd bind host" required><span class="fixed-port">:17700</span></span>
+        <span class="host-port"><input type="text" list="managerd-bind-addresses" name="rpc_host" value="{{hostOnly .NodeConfig.RPCAddr}}" title="Host managerd's gRPC listener binds to. Choose a local address suggestion, this Comb's own name, or enter another valid local host. Prefer a name: this Comb's certificate carries a DNS SAN for it and none for its LAN address, so a LAN address here cannot be verified by a peer. The port is always 17700 and cannot be changed here. Saving does not restart managerd." aria-label="Managerd bind host" required><span class="fixed-port">:17700</span></span>
         <datalist id="managerd-bind-addresses">{{range .NodeConfig.HostOptions}}<option value="{{.}}">{{end}}</datalist>
         <button type="submit">Save endpoint</button>
       </form>

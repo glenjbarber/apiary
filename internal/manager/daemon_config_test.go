@@ -103,6 +103,88 @@ func TestServer_UpdateManagerdBindAddress_PersistsLocalAddressOnly(t *testing.T)
 	}
 }
 
+// TestServer_UpdateManagerdBindAddressAcceptsThisCombsOwnName is the
+// bind-address half of the bind-vs-dial rule. rpc_addr is where
+// managerd's net.Listen address lives, so a DNS name is a legal - and on
+// a colony, the only verifiable - value for it: this check used to
+// demand a numeric address and therefore rejected the very address the
+// cluster's certificates carry a DNS SAN for, while accepting the
+// wildcard that the same guidance had documented.
+//
+// What it must keep doing is the anti-typo check on a NUMERIC
+// non-loopback address, which is the one part of this that is genuinely
+// about a property of the host rather than of the string.
+func TestServer_UpdateManagerdBindAddressAcceptsThisCombsOwnName(t *testing.T) {
+	newServer := func(t *testing.T) (*Server, *fakeNodeConfigStore) {
+		t.Helper()
+		store := &fakeNodeConfigStore{cfg: nodeconfig.Config{
+			NodeID: "node-a", RPCAddr: "127.0.0.1:17700", RaftdSocket: "/var/run/apiary/raftd.sock",
+		}}
+		s := NewServer(nil, "node-a", nil, nil, nil, nil, nil, "", nil, store, nil, 0, nil)
+		s.SetNetworkInterfaceLister(func() ([]netif.Interface, error) {
+			return []netif.Interface{{Name: "em0", Up: true, Addresses: []string{"10.90.0.12/24"}}}, nil
+		})
+		return s, store
+	}
+
+	accepted := map[string]string{
+		"this Comb's own FQDN":        "brood.lab3.home.arpa:17700",
+		"this Comb's short name":      "brood:17700",
+		"loopback":                    "127.0.0.1:17700",
+		"IPv4 wildcard":               "0.0.0.0:17700",
+		"IPv6 wildcard":               "[::]:17700",
+		"an address in the inventory": "10.90.0.12:17700",
+	}
+	for name, addr := range accepted {
+		t.Run("accepts "+name, func(t *testing.T) {
+			s, store := newServer(t)
+			resp, err := s.UpdateManagerdBindAddress(context.Background(), &rpcpb.UpdateManagerdBindAddressRequest{RpcAddr: addr})
+			if err != nil || resp.GetError() != "" {
+				t.Fatalf("UpdateManagerdBindAddress(%q) = (%+v, %v), want it saved", addr, resp, err)
+			}
+			if !resp.GetRestartRequired() || store.lastSave.RPCAddr != addr {
+				t.Fatalf("saved rpc_addr = %q (restart_required=%v), want %q", store.lastSave.RPCAddr, resp.GetRestartRequired(), addr)
+			}
+		})
+	}
+
+	rejected := map[string]string{
+		"an empty host":             ":17700",
+		"a typo in the last octet":  "10.90.0.999:17700",
+		"a CIDR pasted whole":       "10.90.0.12/24:17700",
+		"an underscore in the name": "brood_lab3:17700",
+		"a leading-hyphen label":    "-brood:17700",
+		"no port at all":            "brood.lab3.home.arpa",
+		"an out-of-range port":      "brood.lab3.home.arpa:70000",
+	}
+	for name, addr := range rejected {
+		t.Run("rejects "+name, func(t *testing.T) {
+			s, store := newServer(t)
+			resp, err := s.UpdateManagerdBindAddress(context.Background(), &rpcpb.UpdateManagerdBindAddressRequest{RpcAddr: addr})
+			if err != nil || resp.GetError() == "" {
+				t.Fatalf("UpdateManagerdBindAddress(%q) = (%+v, %v), want a rejection", addr, resp, err)
+			}
+			if !strings.Contains(resp.GetError(), "rpc_addr") {
+				t.Errorf("UpdateManagerdBindAddress(%q) error = %q, want it to name rpc_addr", addr, resp.GetError())
+			}
+			if store.lastSave.RPCAddr != "" {
+				t.Errorf("UpdateManagerdBindAddress(%q) saved %q, want nothing saved", addr, store.lastSave.RPCAddr)
+			}
+		})
+	}
+
+	// The anti-typo guard itself, unchanged: a numeric address on another
+	// machine is refused, and refusing it is the entire reason the
+	// numeric branch consults the interface inventory at all.
+	t.Run("still rejects a numeric address absent from the interface inventory", func(t *testing.T) {
+		s, _ := newServer(t)
+		resp, err := s.UpdateManagerdBindAddress(context.Background(), &rpcpb.UpdateManagerdBindAddressRequest{RpcAddr: "10.90.0.13:17700"})
+		if err != nil || !strings.Contains(resp.GetError(), "not assigned") {
+			t.Fatalf("UpdateManagerdBindAddress(10.90.0.13:17700) = (%+v, %v), want the unassigned-address rejection", resp, err)
+		}
+	})
+}
+
 func TestServer_UpdateManagerdBindAddressRecordsProvenance(t *testing.T) {
 	store := &nodeconfig.Manager{Path: filepath.Join(t.TempDir(), "managerd.json")}
 	if err := store.Save(nodeconfig.Config{RPCAddr: "127.0.0.1:17700"}); err != nil {

@@ -86,6 +86,91 @@ func TestServer_UpdateManagerdBindAddress_ForwardsEndpoint(t *testing.T) {
 	}
 }
 
+// TestServer_MachinePage_OffersThisCombsOwnName is the dropdown half of
+// the same rule. The host suggestion list used to be nothing but the
+// interface inventory plus two numerics, which quietly steered operators
+// toward the one form of address their own certificate cannot verify:
+// Apiary-issued serving certificates carry DNS SANs for the node's name
+// and IP:127.0.0.1, and no SAN for its LAN address.
+func TestServer_MachinePage_OffersThisCombsOwnName(t *testing.T) {
+	pinHostname := func(t *testing.T, name string) {
+		t.Helper()
+		old := localHostname
+		localHostname = func() (string, error) { return name, nil }
+		t.Cleanup(func() { localHostname = old })
+	}
+	pinHostname(t, "brood")
+
+	client := &fakeClient{
+		statusResp: &rpcpb.StatusResponse{ManagerNodeId: "node-a"},
+		getNodeConfigResp: &rpcpb.GetNodeConfigResponse{
+			RpcAddr: "brood.lab3.home.arpa:17700",
+			AvailableInterfaces: []*rpcpb.NetworkInterface{
+				{Name: "em0", Up: true, Addresses: []string{"10.90.0.94/24", "fe80::1/64"}},
+			},
+			// The map covers every node in the colony; only the entry for
+			// one of this host's own addresses is this Comb's name.
+			PeerTlsHostnameMap: "10.90.0.94=brood.lab3.home.arpa,10.90.0.95=drone.lab3.home.arpa",
+		},
+	}
+	s := newTestServer(t, client)
+
+	req := httptest.NewRequest(http.MethodGet, "/machine", nil)
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, req)
+
+	body := rec.Body.String()
+	for _, want := range []string{
+		`<option value="brood">`,                // this host's own name
+		`<option value="brood.lab3.home.arpa">`, // and the name its certificate carries a SAN for
+		`<option value="10.90.0.94">`,           // the inventory entry both map names key off
+		`<option value="0.0.0.0">`,              // still a legitimate bind
+		`<option value="127.0.0.1">`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("machine page host suggestions missing %s, got: %s", want, body)
+		}
+	}
+	if strings.Contains(body, `<option value="drone.lab3.home.arpa">`) {
+		t.Errorf("machine page suggests a peer Combs name, which cannot be bound on this host: %s", body)
+	}
+}
+
+// TestServer_UpdateManagerdBindAddress_RefusesABlankHost covers the one
+// value the form must not submit. withFixedPort turns a blank host into
+// an empty string, which is right for every other fixed-port field - it
+// clears the setting - but rpc_addr has no blank state to clear, and a
+// submitted "" comes back as an error naming a config file field rather
+// than the one the operator is looking at.
+func TestServer_UpdateManagerdBindAddress_RefusesABlankHost(t *testing.T) {
+	for _, form := range []url.Values{
+		{},
+		{"rpc_host": {""}},
+		{"rpc_host": {"   "}},
+	} {
+		client := &fakeClient{
+			getNodeConfigResp:      &rpcpb.GetNodeConfigResponse{RpcAddr: "127.0.0.1:17700"},
+			getFrontendConfigResp:  &rpcpb.GetFrontendConfigResponse{},
+			getRestshimdConfigResp: &rpcpb.GetRestshimdConfigResponse{},
+			getRaftdConfigResp:     &rpcpb.GetRaftdConfigResponse{},
+		}
+		s := newTestServer(t, client)
+
+		req := httptest.NewRequest(http.MethodPost, "/machine/managerd-bind", strings.NewReader(form.Encode()))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		rec := httptest.NewRecorder()
+		s.ServeHTTP(rec, req)
+
+		body := rec.Body.String()
+		if !strings.Contains(body, "rpc_host is required") {
+			t.Errorf("form %v: response does not refuse the blank host by name, got: %s", form, body)
+		}
+		if client.lastUpdateManagerdBindReq != nil {
+			t.Errorf("form %v: submitted %+v, want nothing sent to managerd at all", form, client.lastUpdateManagerdBindReq)
+		}
+	}
+}
+
 func TestServer_MachinePage_ShowsLocalServiceControls(t *testing.T) {
 	client := &fakeClient{listNodeServicesResp: &rpcpb.ListNodeServicesResponse{
 		Services: []*rpcpb.NodeService{

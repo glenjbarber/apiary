@@ -6845,8 +6845,14 @@ func (x *ConfigChange) GetAttested() bool {
 
 type UpdateManagerdBindAddressRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// rpc_addr must be a numeric address currently assigned to this Comb,
-	// or an explicit wildcard/loopback address, followed by a valid port.
+	// rpc_addr is managerd's BIND address, not a destination, followed by
+	// a valid port. The host may be a DNS hostname - which is what a
+	// multi-Comb colony actually runs, since a node's own name is the only
+	// host its serving certificate carries a DNS SAN for - or a numeric
+	// address currently assigned to this Comb, or an explicit
+	// wildcard/loopback address. A wildcard is a legal bind and an
+	// unusable dial target, so it must never be copied into a field
+	// something connects to (internal/addrpolicy).
 	RpcAddr         string `protobuf:"bytes,1,opt,name=rpc_addr,json=rpcAddr,proto3" json:"rpc_addr,omitempty"`
 	ChangeOrigin    string `protobuf:"bytes,2,opt,name=change_origin,json=changeOrigin,proto3" json:"change_origin,omitempty"`
 	ChangeRationale string `protobuf:"bytes,3,opt,name=change_rationale,json=changeRationale,proto3" json:"change_rationale,omitempty"`

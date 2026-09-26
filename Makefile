@@ -320,9 +320,71 @@ setup-tls:
 NODE_ZFS_POOL?=		zroot
 NODE_VLAN_UPLINK?=	vtnet0
 NODE_BHYVE_BRIDGE?=	bridge0
-NODE_RPC_ADDR?=		0.0.0.0:17700
+
+# NODE_RPC_ADDR is managerd's own BIND address (net.Listen), not a
+# destination, and the two roles take different values - see
+# internal/addrpolicy for the rule this default exists to stop
+# breaking. It defaults to loopback because that is cmd/managerd's own
+# startup default, so a single-node setup-quick writes exactly the value
+# managerd would have used with no config file at all.
+#
+# ON A MULTI-COMB COLONY YOU MUST OVERRIDE IT WITH THIS NODE'S OWN
+# RESOLVABLE NAME, whose DNS SAN its certificate carries:
+#
+#	make setup-quick NODE_RPC_ADDR=brood.lab3.home.arpa:17700
+#
+# A comb's peers - and its own raftd confirm hook - have to reach managerd
+# over TLS, and Go verifies whatever host was dialed against that
+# certificate's SANs. Apiary-issued serving certificates carry
+# DNS:<node>.<domain> and IP:127.0.0.1, and NO SAN for the node's LAN
+# address, so a numeric LAN rpc_addr here binds cleanly and then fails
+# verification for every caller that is not on loopback. The name is the
+# value a colony can actually run; a LAN address is not.
+#
+# The previous default was the wildcard 0.0.0.0, which is a perfectly
+# legal bind address and was shipped here as documented guidance. That is
+# what produced the incident this default now records: a wildcard binds
+# perfectly and then refuses every connection aimed at it, so as soon as
+# the same value was carried into the fields that DIAL managerd
+# (restshimd's and frontend's manager_addr, and raftd's confirm hook,
+# which reads rpc_addr out of this very file) those daemons logged, live
+# on a real node:
+#
+#	cannot reach managerd at 0.0.0.0:17700 (connecting to
+#	0.0.0.0:17700: dial tcp 0.0.0.0:17700: connect: connection
+#	refused)
+#
+# while managerd itself stayed healthy, because its listener really was
+# fine. Nothing crashes, nothing restarts, nothing points at the config
+# file - the only symptom is an unreachable address in a working config.
+# Choose 0.0.0.0 here only when something genuinely must reach managerd
+# from off-host, and with the consequences above in mind.
+NODE_RPC_ADDR?=		127.0.0.1:17700
+
+# NODE_HTTP_ADDR is the frontend's web UI, and the wildcard here is
+# DELIBERATE and must stay that way. The browser runs on the operator's
+# own machine, not on the Comb, so a loopback-only frontend serves nobody;
+# this is the operator-facing surface and is meant to be reachable from
+# the LAN. It is the one address in this block that is not loopback for a
+# real reason - do not "fix" it alongside the two around it.
 NODE_HTTP_ADDR?=	0.0.0.0:8080
-NODE_REST_ADDR?=	0.0.0.0:8081
+
+# NODE_REST_ADDR defaults to loopback, which is also internal/
+# restshimdconfig's own code default (Config.Defaults), so setup-quick and
+# a hand-written config agree. It is not exposed because restshimd is a
+# full read/write control API - create/update/delete VMs, jails and
+# networks, migrate, upload ISOs - and it has NO AUTHENTICATION OF ITS
+# OWN: it holds no key and checks none, it forwards each caller's
+# Authorization header straight through to managerd as gRPC metadata (see
+# authContext in internal/restshim/server.go). Anything that can open a
+# socket to 8081 can therefore drive the whole colony, as whoever it can
+# authenticate as. Nothing inside the colony calls it either; it exists
+# for external tooling (curl, Terraform, CI) that an operator points at
+# it on purpose. To use it from another machine, forward the port over
+# SSH rather than widening the bind:
+#
+#	ssh -L 8081:127.0.0.1:8081 <comb>
+NODE_REST_ADDR?=	127.0.0.1:8081
 
 # setup-quick is the whole docs/bootstrap.md preflight sequence
 # (Sections 2-9) collapsed into one target for a single-node bring-up

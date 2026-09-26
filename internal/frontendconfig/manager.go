@@ -17,9 +17,10 @@ package frontendconfig
 import (
 	"encoding/json"
 	"fmt"
-	"net"
 	"os"
 	"path/filepath"
+
+	"github.com/glenjbarber/apiary/internal/addrpolicy"
 )
 
 // DefaultPath is where this file lives by default on a pkg-installed
@@ -194,15 +195,36 @@ func atomicWriteFile(path string, body []byte) error {
 // otherwise malformed, without judging semantic correctness (e.g.
 // whether ManagerAddr is actually reachable) - the same posture and
 // reasoning as nodeconfig.validate's own doc comment.
+//
+// The one exception is which HOST ManagerAddr may name, and it is not
+// an exception to the posture above: it is a fact about the string
+// itself, provable with no I/O. ManagerAddr is where this process
+// CONNECTS, so the wildcard is never a legal value for it - net.Listen
+// treats 0.0.0.0 as "every interface" and net.Dial refuses it outright
+// (FreeBSD: dial tcp 0.0.0.0:17700: connect: connection refused). The
+// shipped guidance set managerd's own rpc_addr to that wildcard and
+// operators carried it here, and frontend then logged, live:
+//
+//	cannot reach managerd at 0.0.0.0:17700 (connecting to
+//	0.0.0.0:17700: dial tcp 0.0.0.0:17700: connect: connection
+//	refused)
+//
+// with managerd itself healthy throughout, because its listener really
+// was fine. Whether a permitted host is reachable or presents a
+// certificate that verifies is still out of scope and still belongs to
+// internal/managerlink's live probe. HTTPAddr is the mirror image - a
+// bind address - so it is checked as one, which keeps 0.0.0.0 legal
+// there: the web UI is genuinely meant to be reachable from the
+// operator's browser.
 func validate(cfg Config) error {
 	if cfg.ManagerAddr != "" {
-		if _, _, err := net.SplitHostPort(cfg.ManagerAddr); err != nil {
-			return fmt.Errorf("frontendconfig: invalid manager_addr %q: %w", cfg.ManagerAddr, err)
+		if err := addrpolicy.ValidateDialTarget("manager_addr", cfg.ManagerAddr); err != nil {
+			return err
 		}
 	}
 	if cfg.HTTPAddr != "" {
-		if _, _, err := net.SplitHostPort(cfg.HTTPAddr); err != nil {
-			return fmt.Errorf("frontendconfig: invalid http_addr %q: %w", cfg.HTTPAddr, err)
+		if err := addrpolicy.ValidateBindAddress("http_addr", cfg.HTTPAddr); err != nil {
+			return err
 		}
 	}
 	for _, f := range []struct{ name, value string }{

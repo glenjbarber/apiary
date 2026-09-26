@@ -1551,8 +1551,14 @@ message ConfigChange {
 }
 
 message UpdateManagerdBindAddressRequest {
-  // rpc_addr must be a numeric address currently assigned to this Comb,
-  // or an explicit wildcard/loopback address, followed by a valid port.
+  // rpc_addr is managerd's BIND address, not a destination, followed by
+  // a valid port. The host may be a DNS hostname - which is what a
+  // multi-Comb colony actually runs, since a node's own name is the only
+  // host its serving certificate carries a DNS SAN for - or a numeric
+  // address currently assigned to this Comb, or an explicit
+  // wildcard/loopback address. A wildcard is a legal bind and an
+  // unusable dial target, so it must never be copied into a field
+  // something connects to (internal/addrpolicy).
   string rpc_addr = 1;
   string change_origin = 2;
   string change_rationale = 3;

@@ -417,6 +417,88 @@ func TestResolveLocalManagerdEndpoint(t *testing.T) {
 	})
 }
 
+// TestResolveLocalManagerdEndpointNeverDialsABindAddress is the
+// wildcard half of the bind-vs-dial rule. rpc_addr is managerd's
+// net.Listen address, the shipped guidance set it to 0.0.0.0, and this
+// hook's only job is to dial it - so a wildcard is read, reported once,
+// and replaced with loopback. It is deliberately a fallback and not a
+// refusal: raftd starting is worth more than this one confirmation
+// landing, and raftd coming up at all is the precondition for any later
+// one.
+func TestResolveLocalManagerdEndpointNeverDialsABindAddress(t *testing.T) {
+	// writeConfig points managerdConfigPath at a temp file for one case,
+	// because the real path is only readable as root.
+	writeConfig := func(t *testing.T, body string) {
+		t.Helper()
+		old := managerdConfigPath
+		managerdConfigPath = filepath.Join(t.TempDir(), "managerd.json")
+		t.Cleanup(func() { managerdConfigPath = old })
+		if err := os.WriteFile(managerdConfigPath, []byte(body), 0o600); err != nil {
+			t.Fatalf("writing temp managerd.json: %v", err)
+		}
+	}
+
+	t.Run("a wildcard rpc_addr falls back to loopback and says so", func(t *testing.T) {
+		t.Setenv(confirmEnvVar, "")
+		writeConfig(t, `{"rpc_addr": "0.0.0.0:17700"}`)
+		var logs []string
+		ep := resolveLocalManagerdEndpoint(func(f string, a ...any) { logs = append(logs, fmt.Sprintf(f, a...)) })
+		if ep.addr != defaultLocalManagerdAddr {
+			t.Errorf("addr = %q, want %q - a wildcard is a bind address, not something to dial", ep.addr, defaultLocalManagerdAddr)
+		}
+		if len(logs) != 1 {
+			t.Fatalf("logged %d lines, want exactly one explaining the substitution: %q", len(logs), logs)
+		}
+		if !strings.Contains(logs[0], "0.0.0.0:17700") || !strings.Contains(logs[0], defaultLocalManagerdAddr) {
+			t.Errorf("log line = %q, want it to name both the rejected value and the fallback", logs[0])
+		}
+	})
+	t.Run("an empty-host rpc_addr falls back the same way", func(t *testing.T) {
+		t.Setenv(confirmEnvVar, "")
+		writeConfig(t, `{"rpc_addr": ":17700"}`)
+		if got := resolveLocalManagerdEndpoint(func(string, ...any) {}).addr; got != defaultLocalManagerdAddr {
+			t.Errorf("addr = %q, want %q", got, defaultLocalManagerdAddr)
+		}
+	})
+	t.Run("a hostname rpc_addr is used as configured, TLS posture and all", func(t *testing.T) {
+		t.Setenv(confirmEnvVar, "")
+		writeConfig(t, `{"rpc_addr": "brood.lab3.home.arpa:17700", "tls_cert": "/usr/local/etc/apiary/cert.pem", "peer_tls_ca": "/usr/local/etc/apiary/cert.pem"}`)
+		var logs []string
+		ep := resolveLocalManagerdEndpoint(func(f string, a ...any) { logs = append(logs, fmt.Sprintf(f, a...)) })
+		if ep.addr != "brood.lab3.home.arpa:17700" {
+			t.Errorf("addr = %q, want the configured per-node name - it is the only value the cluster's certificates verify", ep.addr)
+		}
+		if !ep.useTLS || ep.caFile != "/usr/local/etc/apiary/cert.pem" {
+			t.Errorf("TLS posture = (%v, %q), want it read from the same file regardless of the address used", ep.useTLS, ep.caFile)
+		}
+		if len(logs) != 0 {
+			t.Errorf("logged %q for a perfectly usable address, want silence", logs)
+		}
+	})
+	t.Run("a loopback rpc_addr is used as configured", func(t *testing.T) {
+		t.Setenv(confirmEnvVar, "")
+		writeConfig(t, `{"rpc_addr": "127.0.0.1:17700"}`)
+		if got := resolveLocalManagerdEndpoint(func(string, ...any) {}).addr; got != "127.0.0.1:17700" {
+			t.Errorf("addr = %q, want it used unchanged", got)
+		}
+	})
+	t.Run("a wildcard env override falls back and keeps its precedence", func(t *testing.T) {
+		// The env var is a dial target and nothing else, so it gets the
+		// same treatment - and the fallback is still the same default,
+		// so "the env var wins over everything" stays true about which
+		// value is read without becoming false about what is dialed.
+		t.Setenv(confirmEnvVar, "0.0.0.0:17700")
+		var logs []string
+		ep := resolveLocalManagerdEndpoint(func(f string, a ...any) { logs = append(logs, fmt.Sprintf(f, a...)) })
+		if ep.addr != defaultLocalManagerdAddr {
+			t.Errorf("addr = %q, want %q", ep.addr, defaultLocalManagerdAddr)
+		}
+		if len(logs) != 1 || !strings.Contains(logs[0], confirmEnvVar) {
+			t.Errorf("logged %q, want one line naming the env var", logs)
+		}
+	})
+}
+
 // TestResolveEndpointUsesTheEnvOverrideBecauseTheRealPathIsRootOnly is
 // a narrower, hermetic check of the config-file branch: this test process
 // cannot read /usr/local/etc/apiary/managerd.json, so the function must

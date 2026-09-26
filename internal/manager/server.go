@@ -2669,17 +2669,45 @@ func (s *Server) UpdateManagerdBindAddress(_ context.Context, req *rpcpb.UpdateM
 // addresses from GetNodeConfig's interface inventory, but RPC callers are not
 // trusted to have used that UI. Wildcard and loopback are retained for the
 // established single-node/default configurations.
+//
+// The host may be numeric or a DNS hostname, and the distinction is the
+// whole point of this change. This field is where managerd's net.Listen
+// address lives, so a NAME is legal here - net.Listen resolves it once, at
+// startup, and binds the result - and on a multi-Comb colony the name is
+// the value that actually works: every serving certificate Apiary issues
+// carries DNS SANs for the node names and an IP SAN for 127.0.0.1 only, so
+// a node's own numeric LAN address cannot verify against its own
+// certificate. Refusing hostnames here therefore refused the only value the
+// colony can actually run, while a wildcard, which the shipped guidance had
+// documented in this very field, was accepted - the bind/dial confusion
+// running in the opposite direction from the one it was meant to prevent
+// (see internal/addrpolicy).
+//
+// The interface-inventory check below is deliberately NOT applied to a
+// hostname, and must not grow to be: the inventory holds only numeric
+// addresses, so there is nothing in it to match a name against, and
+// resolving the name here to manufacture a comparison would make a
+// legitimate save depend on DNS being up at that instant. For a NUMERIC
+// non-loopback address the check stands exactly as it was, and it is a
+// real anti-typo guard rather than ceremony - a mistyped 10.90.0.12 on a
+// machine holding .13 produces a config that looks right, starts cleanly,
+// and is reachable by nobody. A name that does not resolve is not silently
+// accepted either: managerd's own listener fails loudly at startup, in
+// managerd, where the resolution error belongs.
 func (s *Server) validateLocalBindAddress(value string) error {
 	host, port, err := net.SplitHostPort(value)
 	if err != nil || host == "" {
-		return fmt.Errorf("rpc_addr must be an address and port, such as 10.90.0.12:17700")
+		return fmt.Errorf("rpc_addr must be an address and port, such as 10.90.0.12:17700, 127.0.0.1:17700, or <node>.<domain>:17700")
 	}
 	if n, err := strconv.Atoi(port); err != nil || n < 1 || n > 65535 {
 		return fmt.Errorf("rpc_addr has invalid port %q", port)
 	}
 	ip := net.ParseIP(host)
 	if ip == nil {
-		return fmt.Errorf("rpc_addr host %q must be a numeric address assigned to this Comb", host)
+		if !validBindHostname(host) {
+			return fmt.Errorf("rpc_addr host %q is neither an IP address nor a DNS hostname, such as 10.90.0.12, 127.0.0.1, or <node>.<domain>", host)
+		}
+		return nil
 	}
 	if ip.IsUnspecified() || ip.IsLoopback() {
 		return nil
@@ -2700,6 +2728,57 @@ func (s *Server) validateLocalBindAddress(value string) error {
 		}
 	}
 	return fmt.Errorf("rpc_addr host %q is not assigned to this Comb", host)
+}
+
+// validBindHostname is the one question asked of a non-numeric rpc_addr
+// host: is this a syntactically possible DNS name? It answers only that,
+// and answering only that is deliberate.
+//
+// It exists because "not an IP address" is not a useful thing to reject a
+// host for - a name is a perfectly good thing to bind on - so something
+// has to separate a real name from a typo such as a CIDR pasted whole
+// ("10.90.0.12/24") or a mistyped space ("brood lab3"). The rules are RFC
+// 1123's: dot-separated labels of letters, digits and hyphens, no label
+// starting or ending in a hyphen, and the traditional 63-per-label /
+// 253-total limits.
+//
+// The last label must not be entirely numeric, which is the RFC 1123 rule
+// for a top-level domain and is worth having here specifically: it is what
+// makes "10.90.0.999" a rejection rather than a plausible-looking hostname.
+// That value is exactly the shape of the anti-typo mistake the
+// interface-inventory check exists to catch, and a name-shaped field is
+// precisely where such a mistake would stop looking like one.
+func validBindHostname(host string) bool {
+	if len(host) == 0 || len(host) > 253 {
+		return false
+	}
+	labels := strings.Split(host, ".")
+	for i, label := range labels {
+		if len(label) == 0 || len(label) > 63 {
+			return false
+		}
+		if label[0] == '-' || label[len(label)-1] == '-' {
+			return false
+		}
+		numeric := true
+		for _, r := range label {
+			switch {
+			case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z':
+				numeric = false
+			case r >= '0' && r <= '9':
+			case r == '-':
+				numeric = false
+			default:
+				// Anything else - underscore, colon, slash, space, a
+				// non-ASCII rune - is not legal in a hostname.
+				return false
+			}
+		}
+		if i == len(labels)-1 && numeric {
+			return false
+		}
+	}
+	return true
 }
 
 // durationString formats a time.Duration for GetNodeConfigResponse -

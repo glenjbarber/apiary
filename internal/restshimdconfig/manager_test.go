@@ -87,6 +87,32 @@ func TestManager_SaveRejectsMalformedAddresses(t *testing.T) {
 	}
 }
 
+func TestManager_SaveRejectsAWildcardManagerAddr(t *testing.T) {
+	m := &Manager{Path: filepath.Join(t.TempDir(), "restshimd.json")}
+	// The live incident, verbatim: restshimd's log on a real node read
+	// "cannot reach managerd at 0.0.0.0:17700 (connecting to
+	// 0.0.0.0:17700: dial tcp 0.0.0.0:17700: connect: connection
+	// refused)" while managerd, whose rpc_addr that value was, stayed up
+	// the whole time - because as a bind address it was correct.
+	for _, addr := range []string{"0.0.0.0:17700", "[::]:17700", ":17700"} {
+		if err := m.Save(Config{ManagerAddr: addr}); err == nil {
+			t.Errorf("Save(ManagerAddr=%q) error = nil, want the dial-target rejection", addr)
+		}
+	}
+	// The per-node DNS name is the value the colony actually runs, and
+	// http_addr is a bind address, so the wildcard remains legal there.
+	for _, cfg := range []Config{
+		{ManagerAddr: "brood.lab3.home.arpa:17700"},
+		{ManagerAddr: "10.90.0.94:17700"},
+		{ManagerAddr: "127.0.0.1:17700"},
+		{ManagerAddr: "brood.lab3.home.arpa:17700", HTTPAddr: "0.0.0.0:8081"},
+	} {
+		if err := m.Save(cfg); err != nil {
+			t.Errorf("Save(%+v) = %v, want it accepted", cfg, err)
+		}
+	}
+}
+
 func TestManager_SaveIsFullReplaceNotMerge(t *testing.T) {
 	m := &Manager{Path: filepath.Join(t.TempDir(), "restshimd.json")}
 	// Every Save carries a manager_addr: Config.Validate now requires one

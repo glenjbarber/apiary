@@ -8,12 +8,19 @@ package frontend
 import (
 	"fmt"
 	"net"
+	"os"
 	"sort"
 	"strings"
 	"time"
 
 	rpcpb "github.com/glenjbarber/apiary/api/rpc"
 )
+
+// localHostname is a var purely so a test can pin the Comb's own name
+// without depending on the machine the suite happens to run on. It reads
+// the real OS hostname everywhere else; see ownHostNames below for what
+// it is for.
+var localHostname = os.Hostname
 
 // vmView is the template-facing shape for a VM. Kept as its own type
 // (rather than exposing api/rpc's generated struct to templates
@@ -158,12 +165,13 @@ type nodeConfigView struct {
 	OriginCADirectory               string
 
 	// HostOptions are bare host/IP suggestions (no port) constructed from
-	// managerd's own interface inventory, shared by every fixed-port
-	// endpoint field (managerd rpc_addr, frontend/restshimd http_addr) -
-	// the port each of those daemons listens on is fixed, never chosen
-	// here (see fixedport.go), so a suggestion list only ever needs to
-	// offer which host, not which host:port. Suggestions only; managerd
-	// validates a submitted bind address independently.
+	// managerd's own interface inventory, this Comb's own DNS names, and
+	// whatever is currently saved, shared by every fixed-port endpoint
+	// field (managerd rpc_addr, frontend/restshimd http_addr) - the port
+	// each of those daemons listens on is fixed, never chosen here (see
+	// fixedport.go), so a suggestion list only ever needs to offer which
+	// host, not which host:port. Suggestions only; managerd validates a
+	// submitted bind address independently.
 	HostOptions []string
 }
 
@@ -251,6 +259,7 @@ func fromRPCNodeConfig(d *rpcpb.GetNodeConfigResponse) nodeConfigView {
 	}
 	view.HASTEnabledMode, view.HASTEnabledStatus = triState(d.HastEnabled)
 	view.PeerTLSMode, view.PeerTLSStatus = triState(d.PeerTls)
+	localIPs := make([]string, 0, 8)
 	for _, iface := range d.GetAvailableInterfaces() {
 		label := iface.GetName()
 		if iface.GetUp() {
@@ -273,9 +282,21 @@ func fromRPCNodeConfig(d *rpcpb.GetNodeConfigResponse) nodeConfigView {
 				continue
 			}
 			view.HostOptions = append(view.HostOptions, ip.String())
+			localIPs = append(localIPs, ip.String())
 		}
 	}
 	view.HostOptions = append(view.HostOptions, "0.0.0.0", "127.0.0.1")
+	// The Comb's own names belong in this list, not just in the free-text
+	// field, because they are the values that actually work. A serving
+	// certificate carries DNS SANs for the node's name and an IP SAN for
+	// 127.0.0.1 only - never one for the node's own LAN address - so a
+	// comb whose peers (and its own frontend/restshimd) must verify its
+	// certificate has to be reached by name. Offering an inventory of bare
+	// numerics and a wildcard, with the name left to be typed from memory,
+	// pushed operators toward exactly the address that cannot verify.
+	// Suggestions only: the input is free text and managerd validates
+	// whatever is actually submitted.
+	view.HostOptions = append(view.HostOptions, ownHostNames(d.GetPeerTlsHostnameMap(), localIPs)...)
 	if rpcHost := hostOnly(view.RPCAddr); rpcHost != "" {
 		view.HostOptions = append(view.HostOptions, rpcHost)
 	}
@@ -285,6 +306,47 @@ func fromRPCNodeConfig(d *rpcpb.GetNodeConfigResponse) nodeConfigView {
 	view.NATUplinkOptions = withSavedInterface(view.NATUplinkOptions, view.NATUplink)
 	view.JailEnabledMode, view.JailEnabledStatus = triState(d.JailEnabled)
 	return view
+}
+
+// ownHostNames returns the DNS names this Comb itself answers to, for the
+// fixed-port host suggestion list: the OS hostname, plus every
+// peer_tls_hostname_map entry whose address is one of this host's own.
+//
+// Both sources are asked for and neither is required. The OS hostname is
+// the name `make setup-tls` puts in the generated certificate's SAN list
+// (subjectAltName=IP:127.0.0.1,DNS:$(hostname)), so on a node bootstrapped
+// by setup-quick it is verifiable by construction; the map is how a
+// colony records a node's fully-qualified name, and a Comb is the node
+// that can be certain which entries are its own. Names belonging to other
+// nodes are deliberately excluded - the suggestion list is for binds on
+// THIS Comb, and offering a peer's name here would be an address that
+// fails to bind at all.
+//
+// A malformed entry is skipped rather than surfaced: this list is
+// suggestions, it is fed from a field the nodeconfig package already
+// validates on save, and a rendering path that refused a page over a
+// cosmetic list would be the wrong place to start complaining.
+func ownHostNames(hostnameMap string, localIPs []string) []string {
+	names := make([]string, 0, 2)
+	if name, err := localHostname(); err == nil {
+		if trimmed := strings.TrimSpace(name); trimmed != "" {
+			names = append(names, trimmed)
+		}
+	}
+	for _, pair := range strings.Split(hostnameMap, ",") {
+		addr, name, ok := strings.Cut(strings.TrimSpace(pair), "=")
+		addr, name = strings.TrimSpace(addr), strings.TrimSpace(name)
+		if !ok || addr == "" || name == "" {
+			continue
+		}
+		for _, local := range localIPs {
+			if local == addr {
+				names = append(names, name)
+				break
+			}
+		}
+	}
+	return names
 }
 
 func compactStrings(values []string) []string {

@@ -70,6 +70,7 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 
 	rpcpb "github.com/glenjbarber/apiary/api/rpc"
+	"github.com/glenjbarber/apiary/internal/addrpolicy"
 	"github.com/glenjbarber/apiary/internal/restartplan"
 )
 
@@ -90,7 +91,12 @@ const restartGuardrailTokenPath = "/usr/local/etc/apiary/restart-guardrail-token
 // config is the only way to reach it correctly on a node where it is not
 // on the default address. Read-only, best-effort, and fully defaulted
 // when absent - see resolveLocalManagerdEndpoint.
-const managerdConfigPath = "/usr/local/etc/apiary/managerd.json"
+//
+// A var rather than a const purely so a test can point it at a temp
+// file: the wildcard fallback in resolveLocalManagerdEndpoint is the
+// whole point of the function and is untestable against a const path
+// only readable as root.
+var managerdConfigPath = "/usr/local/etc/apiary/managerd.json"
 
 // defaultLocalManagerdAddr is cmd/managerd's own "-rpc-addr" default,
 // applied when the node config leaves it empty. It is a fallback, not a
@@ -138,15 +144,35 @@ type managerdConfigPeek struct {
 // plaintext-serving one with TLS on would likewise fail - guessing wrong
 // in either direction is worse than reading the answer.
 //
-// Every failure path here is non-fatal and falls back to the defaults,
-// because a raftd that refuses to start because managerd's config file is
-// unreadable would be a far worse outcome than a confirmation that does
-// not land (which the retry budget and the durable record both report
-// honestly).
+// The one thing that value is NOT used for, however carefully it is
+// read, is a destination. rpc_addr is managerd's net.Listen address, and
+// the shipped guidance made that the wildcard 0.0.0.0:17700 - correct
+// for a listener, and a connection-refused error for everyone who dials
+// it. This function's whole job is to dial it, so a wildcard host is
+// unusable here AS A DIAL TARGET even though it is a perfectly legal
+// bind address, and the fix is to fall back to defaultLocalManagerdAddr
+// with one line saying so.
+//
+// Falling back rather than refusing is the deliberate choice, and it is
+// the same reasoning as every other non-fatal path in this file: a
+// raftd that will not start because another daemon's config file holds a
+// value that is legal for the field it is in is far worse than a
+// confirmation attempt that does not land. The lease stays held either
+// way and every failure is reported honestly, but a dead raftd stops
+// the node serving at all - and here managerd is on this very host, so
+// loopback is not a guess, it is where a listener bound to every
+// interface is reachable from. The same treatment applies to the
+// confirmEnvVar override, which is a dial target and nothing else.
+//
+// Every other failure path here is likewise non-fatal and falls back to
+// the defaults, because a raftd that refuses to start because
+// managerd's config file is unreadable would be a far worse outcome than
+// a confirmation that does not land (which the retry budget and the
+// durable record both report honestly).
 func resolveLocalManagerdEndpoint(logf func(format string, args ...any)) endpoint {
 	ep := endpoint{addr: defaultLocalManagerdAddr}
 	if env := strings.TrimSpace(os.Getenv(confirmEnvVar)); env != "" {
-		ep.addr = env
+		ep.addr = usableDialTarget(logf, confirmEnvVar, env, defaultLocalManagerdAddr)
 		return ep
 	}
 
@@ -163,13 +189,36 @@ func resolveLocalManagerdEndpoint(logf func(format string, args ...any)) endpoin
 		return ep
 	}
 	if addr := strings.TrimSpace(peek.RPCAddr); addr != "" {
-		ep.addr = addr
+		ep.addr = usableDialTarget(logf, managerdConfigPath+" rpc_addr", addr, defaultLocalManagerdAddr)
 	}
 	if strings.TrimSpace(peek.TLSCert) != "" {
 		ep.useTLS = true
 		ep.caFile = strings.TrimSpace(peek.PeerTLSCA)
 	}
 	return ep
+}
+
+// usableDialTarget returns addr when something could actually connect to
+// it, and fallback with one explanatory log line when it could not -
+// today, only when addr's host is the wildcard or empty, which is the
+// bind-address value this hook must never dial (see
+// resolveLocalManagerdEndpoint's own doc comment for why a fallback beats
+// a refusal, and internal/addrpolicy for why the two roles differ).
+//
+// The TLS posture read alongside addr is deliberately NOT reconsidered
+// here. It describes the same listener regardless of which address this
+// process reaches it on, and loopback versus a peer-resolvable name of
+// one managerd is the same certificate and the same CA; switching one
+// without the other would be inventing a second guess on top of the
+// one already made.
+func usableDialTarget(logf func(format string, args ...any), field, addr, fallback string) string {
+	if err := addrpolicy.ValidateDialTarget(field, addr); err != nil {
+		logf("%v - %s is a bind address, not a destination, so this confirmation is going to %s instead; "+
+			"the restart lease stays blocked until an operator sets a dialable rpc_addr, and nothing here "+
+			"reports success", err, field, fallback)
+		return fallback
+	}
+	return addr
 }
 
 // loadCAPool reads a PEM bundle into a cert pool. An unreadable or

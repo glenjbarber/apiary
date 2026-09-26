@@ -12,9 +12,10 @@ package restshimdconfig
 import (
 	"encoding/json"
 	"fmt"
-	"net"
 	"os"
 	"path/filepath"
+
+	"github.com/glenjbarber/apiary/internal/addrpolicy"
 )
 
 // DefaultPath is where this file lives by default on a pkg-installed
@@ -181,15 +182,36 @@ func atomicWriteFile(path string, body []byte) error {
 // file contradict each other", that one says "this file and managerd
 // disagree" - and together they mean a wrong scheme is caught before the
 // first request instead of during it.
+//
+// The same split applies to the ADDRESS, not just the scheme, and this is
+// where a real incident reached production. manager_addr is a destination
+// this process connects TO, so it is validated by
+// addrpolicy.ValidateDialTarget; http_addr is a destination this process
+// listens ON, so it is validated by addrpolicy.ValidateBindAddress. Those
+// are not interchangeable. The documented value for managerd's own
+// rpc_addr was the wildcard 0.0.0.0, operators copied it here, and
+// restshimd then logged, live on a real node:
+//
+//	cannot reach managerd at 0.0.0.0:17700 (connecting to
+//	0.0.0.0:17700: dial tcp 0.0.0.0:17700: connect: connection
+//	refused)
+//
+// The wildcard is exactly what net.Listen wants and exactly what
+// net.Dial refuses, so nothing about managerd looked broken while the one
+// process carrying this field could not talk to it at all. Whether the
+// host named here is reachable, resolves, and presents a certificate that
+// verifies is still not something this file can know - that stays in
+// internal/managerlink, which probes the live endpoint - but "this can
+// never be dialled" is knowable here, and is now refused here.
 func (c Config) Validate() error {
 	if c.ManagerAddr == "" {
 		return fmt.Errorf("restshimdconfig: manager_addr must be set - restshimd has no other way to reach managerd")
 	}
-	if err := validateHostPort("manager_addr", c.ManagerAddr); err != nil {
+	if err := addrpolicy.ValidateDialTarget("manager_addr", c.ManagerAddr); err != nil {
 		return err
 	}
 	if c.HTTPAddr != "" {
-		if err := validateHostPort("http_addr", c.HTTPAddr); err != nil {
+		if err := addrpolicy.ValidateBindAddress("http_addr", c.HTTPAddr); err != nil {
 			return err
 		}
 	}
@@ -245,23 +267,6 @@ func (c Config) validateTLSPair() error {
 		return fmt.Errorf("restshimdconfig: tls_cert and tls_key must be set together "+
 			"(tls_cert=%q, tls_key=%q) - serving HTTPS needs both, and serving plaintext because "+
 			"only one was set would be a confusing way to fail", c.TLSCert, c.TLSKey)
-	}
-	return nil
-}
-
-// validateHostPort rejects an address that could not be dialed or served
-// on, naming the field so a typo in a hand-edited file is obvious.
-func validateHostPort(field, addr string) error {
-	host, port, err := net.SplitHostPort(addr)
-	if err != nil {
-		return fmt.Errorf("restshimdconfig: invalid %s %q: %w", field, addr, err)
-	}
-	if port == "" {
-		return fmt.Errorf("restshimdconfig: invalid %s %q: no port", field, addr)
-	}
-	if host == "" && field == "manager_addr" {
-		return fmt.Errorf("restshimdconfig: invalid %s %q: no host - dial an explicit address, "+
-			"not a wildcard", field, addr)
 	}
 	return nil
 }

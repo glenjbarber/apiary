@@ -34,8 +34,23 @@ func (s *Server) handleUpdateManagerdBindAddress(w http.ResponseWriter, r *http.
 		s.renderManagerdBindPanel(w, r, "invalid form: "+err.Error(), "")
 		return
 	}
+	// An absent or blank rpc_host is refused here, before it becomes
+	// withFixedPort's empty string and an RPC whose error text names a
+	// config file field rather than the one the operator is looking at.
+	// withFixedPort's empty-means-empty contract (see fixedport.go) is
+	// right for every other field, where blank clears a setting; this one
+	// has no blank state to clear, so blanking it would otherwise leave
+	// managerd with no configured endpoint at all.
+	rpcAddr := withFixedPort(r.FormValue("rpc_host"), managerdListenerPort)
+	if rpcAddr == "" {
+		s.renderManagerdBindPanel(w, r, "rpc_host is required: managerd's bind address must name a host, "+
+			"on the fixed port "+managerdListenerPort+" - 127.0.0.1 for this node alone, 0.0.0.0 to listen on "+
+			"every interface, or this Comb's own name (its certificate carries a DNS SAN for that name, and "+
+			"none for its LAN address)", "")
+		return
+	}
 	resp, err := s.client.UpdateManagerdBindAddress(r.Context(), &rpcpb.UpdateManagerdBindAddressRequest{
-		RpcAddr:      withFixedPort(r.FormValue("rpc_host"), managerdListenerPort),
+		RpcAddr:      rpcAddr,
 		ChangeOrigin: r.FormValue("change_origin"), ChangeRationale: strings.TrimSpace(r.FormValue("change_rationale")), ChangeEvidence: strings.TrimSpace(r.FormValue("change_evidence")),
 	})
 	if err != nil {
