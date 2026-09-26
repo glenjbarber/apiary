@@ -1272,6 +1272,22 @@ message HostStatsResponse {
   // connected to Cloudflare's edge, only that the feature is enabled on
   // this node at all.
   bool cloudflare_configured = 13;
+
+  // last_reconcile_error / last_reconcile_error_unix carry the error
+  // internal/cluster.Reconciler.RunOnce returns and cmd/managerd
+  // currently discards. Without these, a UI asked "why is this Comb
+  // unhealthy?" can only say that it is unhealthy - it can name the
+  // failing resource but cannot show the failure itself.
+  //
+  // These are OBSERVATIONAL, like last_reconcile_success_unix above
+  // and for the same reason: physical per-node data read from this
+  // node's own reconciler. They are NOT raft state and are never
+  // leader-forwarded. 0 means "never observed" - a node that has
+  // completed a clean tick legitimately has no error to report, and a
+  // consumer must not render the absence of an error as proof that a
+  // tick ever ran (that is what last_reconcile_attempt_unix is for).
+  string last_reconcile_error = 14;
+  int64 last_reconcile_error_unix = 15;
 }
 
 message GetLocalHASTResourceStatusRequest {

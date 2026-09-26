@@ -166,6 +166,16 @@ message VMDefinition {
   // but the hostname itself is stored and returned for reference. See
   // the jail hostname field for the analogous concept.
   string hostname = 20;
+
+  // migration_fenced is set by the FSM while a migration record still
+  // holds this guest (ADR-0128). An ordinary reconciler must not
+  // start, stop, or reclaim a fenced guest.
+  //
+  // The DEFAULT MATTERS: false means "unfenced", because a default
+  // that failed closed would fence every VM that has ever existed.
+  // The fence therefore fails OPEN on absence and is instead kept
+  // honest by migrations_by_guest, which outlives the record itself.
+  bool migration_fenced = 21;
 }
 
 // JailState is the desired run state of a jail, mirroring VMState.
@@ -277,6 +287,10 @@ message JailDefinition {
   // epair(4) pair, instead of sharing the host's stack via
   // ip4=inherit. Requires network_id to be set. See ADR-0117.
   bool vnet = 13;
+
+  // migration_fenced mirrors VMDefinition.migration_fenced exactly -
+  // see that field's own comment for why the default is false.
+  bool migration_fenced = 14;
 }
 
 // FirewallRule is one pf(8) rule applied to a VM's per-VM anchor. See
@@ -480,6 +494,10 @@ message Command {
     // the full design.
     AcquireRestartLease acquire_restart_lease = 27;
     RecordRestartCompleted record_restart_completed = 28;
+
+    StartGuestMigration start_guest_migration = 29;
+    UpdateGuestMigrationPhase update_guest_migration_phase = 30;
+    FinishGuestMigration finish_guest_migration = 31;
   }
 }
 
@@ -663,6 +681,140 @@ message SetJailHostname {
 // exactly. Idempotent: not an error if the id is already gone.
 message PurgeJail {
   string id = 1;
+}
+
+// MigrationEvidence is one cited, timestamped basis for a
+// migration-record claim (ADR-0128). rule is a STABLE ID in the
+// internal/guardrail.Finding.Rule convention, never free text, so a
+// UI can key copy off it and so two Combs render the same finding
+// identically.
+message MigrationEvidence {
+  string rule = 1;
+  string detail = 2;
+  int64 observed_at_unix = 3;
+}
+
+// GuestMigration is the raft-journalled account of one guest migration
+// attempt (ADR-0128). It carries INTENT, PHASE, and the PROVENANCE of
+// the copy - never guest memory, open handles, in-flight I/O, or key
+// material. See internal/migration/statewire.go, which defines this
+// shape in plain Go and is the reference implementation.
+//
+// PHASE and OUTCOME are deliberately orthogonal. A record parked at
+// "cutover" is in-progress, failed, or unobserved, and the phase alone
+// does not say which - so every consumer must read outcome, and an
+// unobserved completion is never rendered as either success or
+// failure.
+message GuestMigration {
+  string id = 1;
+  string guest_kind = 2;              // "vm" | "jail" - WorkloadKind
+  string guest_id = 3;
+  string source_node_id = 4;
+  string target_node_id = 5;
+  string phase = 6;                   // migration phase name
+  string outcome = 7;                 // orthogonal to phase; see above
+  uint32 attempt = 8;
+  uint64 attempt_token = 9;           // strictly increasing per phase entry
+  string detail = 10;
+  int64 created_unix = 11;
+  int64 updated_unix = 12;
+  int64 settled_unix = 13;
+
+  // Per-phase first/last entry times. Flat scalars rather than a map:
+  // no attacker-chosen keys, and no map iteration inside an FSM apply.
+  int64 preflight_first_unix = 14;
+  int64 preflight_last_unix = 15;
+  int64 freeze_first_unix = 16;
+  int64 freeze_last_unix = 17;
+  int64 bulk_first_unix = 18;
+  int64 bulk_last_unix = 19;
+  int64 sync_first_unix = 20;
+  int64 sync_last_unix = 21;
+  int64 cutover_first_unix = 22;
+  int64 cutover_last_unix = 23;
+  int64 teardown_first_unix = 24;
+  int64 teardown_last_unix = 25;
+
+  uint64 bytes_required = 26;
+  uint64 bytes_moved = 27;
+  uint64 send_from_token = 28;
+  uint64 send_to_token = 29;
+  bool target_already_replica = 30;
+
+  // verified_* is the TARGET's observation, recorded by whoever
+  // performed the cutover. An unset verification is why a completion
+  // can be "never observed" rather than assumed successful.
+  bool verified_observed = 31;
+  bool verified_running = 32;
+  string observed_guid = 33;
+  string expected_guid = 34;
+  string observed_ip = 35;
+  string expected_ip = 36;
+  int64 verified_at_unix = 37;
+  string query_error = 38;
+  string observed_on_node_id = 39;
+
+  string stall_reason = 40;
+  string stall_detail = 41;
+  string stall_verdict = 42;
+  int64 stall_since_unix = 43;
+
+  repeated MigrationEvidence evidence = 44;
+  uint32 state_schema_version = 45;   // currently 1
+}
+
+// StartGuestMigration opens a record at "preflight" and nowhere else.
+// A start that also names a phase is asking for a record born
+// mid-protocol, and is rejected (internal/migration.ValidateCommand).
+message StartGuestMigration {
+  string id = 1;
+  string guest_kind = 2;
+  string guest_id = 3;
+  string source_node_id = 4;
+  string target_node_id = 5;
+  uint32 attempt = 6;
+  uint64 attempt_token = 7;          // zero is never valid
+}
+
+// UpdateGuestMigrationPhase advances an existing record. to_phase is
+// the phase being ENTERED; forward skips are legal, rewinds are not,
+// and a re-entry of the current phase requires retry = true.
+message UpdateGuestMigrationPhase {
+  string id = 1;
+  string to_phase = 2;
+  bool retry = 3;
+  uint64 attempt_token = 4;
+  uint64 bytes_required = 5;
+  uint64 bytes_moved = 6;
+  uint64 send_from_token = 7;
+  uint64 send_to_token = 8;
+  string detail = 9;
+}
+
+// FinishGuestMigration settles a record terminally, and carries BOTH
+// the caller-settable "abort" arm and the evidence-derived settle.
+// outcome is a claim, not a decision: the FSM re-derives the outcome
+// from the evidence and records a mismatch rather than silently
+// accepting it. quorum_unavailable NEVER means "the migration failed"
+// - it means the settle could not consult consensus, and the honest
+// result is an unverified completion.
+message FinishGuestMigration {
+  string id = 1;
+  string outcome = 2;                // including "aborted"
+  bool abort = 3;
+  string abort_reason = 4;
+  bool verified_observed = 5;
+  bool verified_running = 6;
+  string observed_guid = 7;
+  string expected_guid = 8;
+  string observed_ip = 9;
+  string expected_ip = 10;
+  int64 verified_at_unix = 11;
+  string query_error = 12;
+  string observed_on_node_id = 13;
+  string failure_detail = 14;
+  bool quorum_unavailable = 15;
+  repeated MigrationEvidence evidence = 16;
 }
 
 // JoinRequestStatus is a PendingJoinRequest's own lifecycle state -
@@ -854,6 +1006,20 @@ message FSMSnapshotState {
   // non-empty: revoking the last key must lock the cluster down, not
   // silently reopen it (see ADR-0023).
   bool auth_enabled = 5;
+
+  // migrations is the durable guest-migration record (ADR-0128),
+  // keyed by migration id. migrations_by_guest maps
+  // "<vm|jail>/<guest_id>" to that id and is the O(1) per-tick lookup
+  // an ordinary reconciler makes at the top of its per-guest work.
+  //
+  // THE INDEX ENTRY OUTLIVES THE RECORD. It is retained for as long
+  // as the record still FENCES its guest, not merely for as long as
+  // the record is in flight. A completion that was never observed
+  // keeps the fence - unfencing on an unknown is how one guest's disk
+  // ends up running on two kernels - and the index is what makes that
+  // fence findable in a single point read.
+  map<string, GuestMigration> migrations = 10;
+  map<string, string> migrations_by_guest = 11;
 }
 
 // ConfigArchive is the on-disk file format for raftd's -export/

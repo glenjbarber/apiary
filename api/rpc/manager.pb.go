@@ -5541,8 +5541,23 @@ type HostStatsResponse struct {
 	// connected to Cloudflare's edge, only that the feature is enabled on
 	// this node at all.
 	CloudflareConfigured bool `protobuf:"varint,13,opt,name=cloudflare_configured,json=cloudflareConfigured,proto3" json:"cloudflare_configured,omitempty"`
-	unknownFields        protoimpl.UnknownFields
-	sizeCache            protoimpl.SizeCache
+	// last_reconcile_error / last_reconcile_error_unix carry the error
+	// internal/cluster.Reconciler.RunOnce returns and cmd/managerd
+	// currently discards. Without these, a UI asked "why is this Comb
+	// unhealthy?" can only say that it is unhealthy - it can name the
+	// failing resource but cannot show the failure itself.
+	//
+	// These are OBSERVATIONAL, like last_reconcile_success_unix above
+	// and for the same reason: physical per-node data read from this
+	// node's own reconciler. They are NOT raft state and are never
+	// leader-forwarded. 0 means "never observed" - a node that has
+	// completed a clean tick legitimately has no error to report, and a
+	// consumer must not render the absence of an error as proof that a
+	// tick ever ran (that is what last_reconcile_attempt_unix is for).
+	LastReconcileError     string `protobuf:"bytes,14,opt,name=last_reconcile_error,json=lastReconcileError,proto3" json:"last_reconcile_error,omitempty"`
+	LastReconcileErrorUnix int64  `protobuf:"varint,15,opt,name=last_reconcile_error_unix,json=lastReconcileErrorUnix,proto3" json:"last_reconcile_error_unix,omitempty"`
+	unknownFields          protoimpl.UnknownFields
+	sizeCache              protoimpl.SizeCache
 }
 
 func (x *HostStatsResponse) Reset() {
@@ -5664,6 +5679,20 @@ func (x *HostStatsResponse) GetCloudflareConfigured() bool {
 		return x.CloudflareConfigured
 	}
 	return false
+}
+
+func (x *HostStatsResponse) GetLastReconcileError() string {
+	if x != nil {
+		return x.LastReconcileError
+	}
+	return ""
+}
+
+func (x *HostStatsResponse) GetLastReconcileErrorUnix() int64 {
+	if x != nil {
+		return x.LastReconcileErrorUnix
+	}
+	return 0
 }
 
 type GetLocalHASTResourceStatusRequest struct {
@@ -16435,7 +16464,7 @@ const file_api_rpc_manager_proto_rawDesc = "" +
 	"\aPFStats\x12\x18\n" +
 	"\aenabled\x18\x01 \x01(\bR\aenabled\x12%\n" +
 	"\x0ecurrent_states\x18\x02 \x01(\x04R\rcurrentStates\x12\x18\n" +
-	"\amatches\x18\x03 \x01(\x04R\amatches\"\xee\x04\n" +
+	"\amatches\x18\x03 \x01(\x04R\amatches\"\xdb\x05\n" +
 	"\x11HostStatsResponse\x12\x17\n" +
 	"\anode_id\x18\x01 \x01(\tR\x06nodeId\x12)\n" +
 	"\x03cpu\x18\x02 \x01(\v2\x17.apiary.rpc.v1.CPUStatsR\x03cpu\x12)\n" +
@@ -16450,7 +16479,9 @@ const file_api_rpc_manager_proto_rawDesc = "" +
 	" \x01(\x03R\x18lastReconcileSuccessUnix\x12=\n" +
 	"\x1blast_reconcile_attempt_unix\x18\v \x01(\x03R\x18lastReconcileAttemptUnix\x12<\n" +
 	"\x1areconcile_interval_seconds\x18\f \x01(\rR\x18reconcileIntervalSeconds\x123\n" +
-	"\x15cloudflare_configured\x18\r \x01(\bR\x14cloudflareConfigured\"H\n" +
+	"\x15cloudflare_configured\x18\r \x01(\bR\x14cloudflareConfigured\x120\n" +
+	"\x14last_reconcile_error\x18\x0e \x01(\tR\x12lastReconcileError\x129\n" +
+	"\x19last_reconcile_error_unix\x18\x0f \x01(\x03R\x16lastReconcileErrorUnix\"H\n" +
 	"!GetLocalHASTResourceStatusRequest\x12#\n" +
 	"\rresource_name\x18\x01 \x01(\tR\fresourceName\"\x9f\x02\n" +
 	"\"GetLocalHASTResourceStatusResponse\x12\x14\n" +

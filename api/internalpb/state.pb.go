@@ -433,9 +433,18 @@ type VMDefinition struct {
 	// are derived from it on the creation page for operator convenience,
 	// but the hostname itself is stored and returned for reference. See
 	// the jail hostname field for the analogous concept.
-	Hostname      string `protobuf:"bytes,20,opt,name=hostname,proto3" json:"hostname,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	Hostname string `protobuf:"bytes,20,opt,name=hostname,proto3" json:"hostname,omitempty"`
+	// migration_fenced is set by the FSM while a migration record still
+	// holds this guest (ADR-0128). An ordinary reconciler must not
+	// start, stop, or reclaim a fenced guest.
+	//
+	// The DEFAULT MATTERS: false means "unfenced", because a default
+	// that failed closed would fence every VM that has ever existed.
+	// The fence therefore fails OPEN on absence and is instead kept
+	// honest by migrations_by_guest, which outlives the record itself.
+	MigrationFenced bool `protobuf:"varint,21,opt,name=migration_fenced,json=migrationFenced,proto3" json:"migration_fenced,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
 }
 
 func (x *VMDefinition) Reset() {
@@ -608,6 +617,13 @@ func (x *VMDefinition) GetHostname() string {
 	return ""
 }
 
+func (x *VMDefinition) GetMigrationFenced() bool {
+	if x != nil {
+		return x.MigrationFenced
+	}
+	return false
+}
+
 // JailDefinition is a jail's ephemeral definition, deliberately minimal
 // compared to VMDefinition: no vcpus/memory/ISO/firewall fields, since
 // internal/jail's v1 scope is flat ip4=inherit networking with no
@@ -683,9 +699,12 @@ type JailDefinition struct {
 	// "vnet;" parameter) wired to network_id's bridge via a dedicated
 	// epair(4) pair, instead of sharing the host's stack via
 	// ip4=inherit. Requires network_id to be set. See ADR-0117.
-	Vnet          bool `protobuf:"varint,13,opt,name=vnet,proto3" json:"vnet,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	Vnet bool `protobuf:"varint,13,opt,name=vnet,proto3" json:"vnet,omitempty"`
+	// migration_fenced mirrors VMDefinition.migration_fenced exactly -
+	// see that field's own comment for why the default is false.
+	MigrationFenced bool `protobuf:"varint,14,opt,name=migration_fenced,json=migrationFenced,proto3" json:"migration_fenced,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
 }
 
 func (x *JailDefinition) Reset() {
@@ -805,6 +824,13 @@ func (x *JailDefinition) GetIpAddress() string {
 func (x *JailDefinition) GetVnet() bool {
 	if x != nil {
 		return x.Vnet
+	}
+	return false
+}
+
+func (x *JailDefinition) GetMigrationFenced() bool {
+	if x != nil {
+		return x.MigrationFenced
 	}
 	return false
 }
@@ -1070,6 +1096,9 @@ type Command struct {
 	//	*Command_SetJailHostname
 	//	*Command_AcquireRestartLease
 	//	*Command_RecordRestartCompleted
+	//	*Command_StartGuestMigration
+	//	*Command_UpdateGuestMigrationPhase
+	//	*Command_FinishGuestMigration
 	Op            isCommand_Op `protobuf_oneof:"op"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -1364,6 +1393,33 @@ func (x *Command) GetRecordRestartCompleted() *RecordRestartCompleted {
 	return nil
 }
 
+func (x *Command) GetStartGuestMigration() *StartGuestMigration {
+	if x != nil {
+		if x, ok := x.Op.(*Command_StartGuestMigration); ok {
+			return x.StartGuestMigration
+		}
+	}
+	return nil
+}
+
+func (x *Command) GetUpdateGuestMigrationPhase() *UpdateGuestMigrationPhase {
+	if x != nil {
+		if x, ok := x.Op.(*Command_UpdateGuestMigrationPhase); ok {
+			return x.UpdateGuestMigrationPhase
+		}
+	}
+	return nil
+}
+
+func (x *Command) GetFinishGuestMigration() *FinishGuestMigration {
+	if x != nil {
+		if x, ok := x.Op.(*Command_FinishGuestMigration); ok {
+			return x.FinishGuestMigration
+		}
+	}
+	return nil
+}
+
 type isCommand_Op interface {
 	isCommand_Op()
 }
@@ -1552,6 +1608,18 @@ type Command_RecordRestartCompleted struct {
 	RecordRestartCompleted *RecordRestartCompleted `protobuf:"bytes,28,opt,name=record_restart_completed,json=recordRestartCompleted,proto3,oneof"`
 }
 
+type Command_StartGuestMigration struct {
+	StartGuestMigration *StartGuestMigration `protobuf:"bytes,29,opt,name=start_guest_migration,json=startGuestMigration,proto3,oneof"`
+}
+
+type Command_UpdateGuestMigrationPhase struct {
+	UpdateGuestMigrationPhase *UpdateGuestMigrationPhase `protobuf:"bytes,30,opt,name=update_guest_migration_phase,json=updateGuestMigrationPhase,proto3,oneof"`
+}
+
+type Command_FinishGuestMigration struct {
+	FinishGuestMigration *FinishGuestMigration `protobuf:"bytes,31,opt,name=finish_guest_migration,json=finishGuestMigration,proto3,oneof"`
+}
+
 func (*Command_CreateVm) isCommand_Op() {}
 
 func (*Command_UpdateVm) isCommand_Op() {}
@@ -1607,6 +1675,12 @@ func (*Command_SetJailHostname) isCommand_Op() {}
 func (*Command_AcquireRestartLease) isCommand_Op() {}
 
 func (*Command_RecordRestartCompleted) isCommand_Op() {}
+
+func (*Command_StartGuestMigration) isCommand_Op() {}
+
+func (*Command_UpdateGuestMigrationPhase) isCommand_Op() {}
+
+func (*Command_FinishGuestMigration) isCommand_Op() {}
 
 // ApiKey is a cluster-wide credential for ManagerService's external
 // gRPC API (ADR-0023). Only hashed_key (a SHA-256 hex digest) is ever
@@ -2781,6 +2855,860 @@ func (x *PurgeJail) GetId() string {
 	return ""
 }
 
+// MigrationEvidence is one cited, timestamped basis for a
+// migration-record claim (ADR-0128). rule is a STABLE ID in the
+// internal/guardrail.Finding.Rule convention, never free text, so a
+// UI can key copy off it and so two Combs render the same finding
+// identically.
+type MigrationEvidence struct {
+	state          protoimpl.MessageState `protogen:"open.v1"`
+	Rule           string                 `protobuf:"bytes,1,opt,name=rule,proto3" json:"rule,omitempty"`
+	Detail         string                 `protobuf:"bytes,2,opt,name=detail,proto3" json:"detail,omitempty"`
+	ObservedAtUnix int64                  `protobuf:"varint,3,opt,name=observed_at_unix,json=observedAtUnix,proto3" json:"observed_at_unix,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
+}
+
+func (x *MigrationEvidence) Reset() {
+	*x = MigrationEvidence{}
+	mi := &file_api_internalpb_state_proto_msgTypes[27]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *MigrationEvidence) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*MigrationEvidence) ProtoMessage() {}
+
+func (x *MigrationEvidence) ProtoReflect() protoreflect.Message {
+	mi := &file_api_internalpb_state_proto_msgTypes[27]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use MigrationEvidence.ProtoReflect.Descriptor instead.
+func (*MigrationEvidence) Descriptor() ([]byte, []int) {
+	return file_api_internalpb_state_proto_rawDescGZIP(), []int{27}
+}
+
+func (x *MigrationEvidence) GetRule() string {
+	if x != nil {
+		return x.Rule
+	}
+	return ""
+}
+
+func (x *MigrationEvidence) GetDetail() string {
+	if x != nil {
+		return x.Detail
+	}
+	return ""
+}
+
+func (x *MigrationEvidence) GetObservedAtUnix() int64 {
+	if x != nil {
+		return x.ObservedAtUnix
+	}
+	return 0
+}
+
+// GuestMigration is the raft-journalled account of one guest migration
+// attempt (ADR-0128). It carries INTENT, PHASE, and the PROVENANCE of
+// the copy - never guest memory, open handles, in-flight I/O, or key
+// material. See internal/migration/statewire.go, which defines this
+// shape in plain Go and is the reference implementation.
+//
+// PHASE and OUTCOME are deliberately orthogonal. A record parked at
+// "cutover" is in-progress, failed, or unobserved, and the phase alone
+// does not say which - so every consumer must read outcome, and an
+// unobserved completion is never rendered as either success or
+// failure.
+type GuestMigration struct {
+	state        protoimpl.MessageState `protogen:"open.v1"`
+	Id           string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	GuestKind    string                 `protobuf:"bytes,2,opt,name=guest_kind,json=guestKind,proto3" json:"guest_kind,omitempty"` // "vm" | "jail" - WorkloadKind
+	GuestId      string                 `protobuf:"bytes,3,opt,name=guest_id,json=guestId,proto3" json:"guest_id,omitempty"`
+	SourceNodeId string                 `protobuf:"bytes,4,opt,name=source_node_id,json=sourceNodeId,proto3" json:"source_node_id,omitempty"`
+	TargetNodeId string                 `protobuf:"bytes,5,opt,name=target_node_id,json=targetNodeId,proto3" json:"target_node_id,omitempty"`
+	Phase        string                 `protobuf:"bytes,6,opt,name=phase,proto3" json:"phase,omitempty"`     // migration phase name
+	Outcome      string                 `protobuf:"bytes,7,opt,name=outcome,proto3" json:"outcome,omitempty"` // orthogonal to phase; see above
+	Attempt      uint32                 `protobuf:"varint,8,opt,name=attempt,proto3" json:"attempt,omitempty"`
+	AttemptToken uint64                 `protobuf:"varint,9,opt,name=attempt_token,json=attemptToken,proto3" json:"attempt_token,omitempty"` // strictly increasing per phase entry
+	Detail       string                 `protobuf:"bytes,10,opt,name=detail,proto3" json:"detail,omitempty"`
+	CreatedUnix  int64                  `protobuf:"varint,11,opt,name=created_unix,json=createdUnix,proto3" json:"created_unix,omitempty"`
+	UpdatedUnix  int64                  `protobuf:"varint,12,opt,name=updated_unix,json=updatedUnix,proto3" json:"updated_unix,omitempty"`
+	SettledUnix  int64                  `protobuf:"varint,13,opt,name=settled_unix,json=settledUnix,proto3" json:"settled_unix,omitempty"`
+	// Per-phase first/last entry times. Flat scalars rather than a map:
+	// no attacker-chosen keys, and no map iteration inside an FSM apply.
+	PreflightFirstUnix   int64  `protobuf:"varint,14,opt,name=preflight_first_unix,json=preflightFirstUnix,proto3" json:"preflight_first_unix,omitempty"`
+	PreflightLastUnix    int64  `protobuf:"varint,15,opt,name=preflight_last_unix,json=preflightLastUnix,proto3" json:"preflight_last_unix,omitempty"`
+	FreezeFirstUnix      int64  `protobuf:"varint,16,opt,name=freeze_first_unix,json=freezeFirstUnix,proto3" json:"freeze_first_unix,omitempty"`
+	FreezeLastUnix       int64  `protobuf:"varint,17,opt,name=freeze_last_unix,json=freezeLastUnix,proto3" json:"freeze_last_unix,omitempty"`
+	BulkFirstUnix        int64  `protobuf:"varint,18,opt,name=bulk_first_unix,json=bulkFirstUnix,proto3" json:"bulk_first_unix,omitempty"`
+	BulkLastUnix         int64  `protobuf:"varint,19,opt,name=bulk_last_unix,json=bulkLastUnix,proto3" json:"bulk_last_unix,omitempty"`
+	SyncFirstUnix        int64  `protobuf:"varint,20,opt,name=sync_first_unix,json=syncFirstUnix,proto3" json:"sync_first_unix,omitempty"`
+	SyncLastUnix         int64  `protobuf:"varint,21,opt,name=sync_last_unix,json=syncLastUnix,proto3" json:"sync_last_unix,omitempty"`
+	CutoverFirstUnix     int64  `protobuf:"varint,22,opt,name=cutover_first_unix,json=cutoverFirstUnix,proto3" json:"cutover_first_unix,omitempty"`
+	CutoverLastUnix      int64  `protobuf:"varint,23,opt,name=cutover_last_unix,json=cutoverLastUnix,proto3" json:"cutover_last_unix,omitempty"`
+	TeardownFirstUnix    int64  `protobuf:"varint,24,opt,name=teardown_first_unix,json=teardownFirstUnix,proto3" json:"teardown_first_unix,omitempty"`
+	TeardownLastUnix     int64  `protobuf:"varint,25,opt,name=teardown_last_unix,json=teardownLastUnix,proto3" json:"teardown_last_unix,omitempty"`
+	BytesRequired        uint64 `protobuf:"varint,26,opt,name=bytes_required,json=bytesRequired,proto3" json:"bytes_required,omitempty"`
+	BytesMoved           uint64 `protobuf:"varint,27,opt,name=bytes_moved,json=bytesMoved,proto3" json:"bytes_moved,omitempty"`
+	SendFromToken        uint64 `protobuf:"varint,28,opt,name=send_from_token,json=sendFromToken,proto3" json:"send_from_token,omitempty"`
+	SendToToken          uint64 `protobuf:"varint,29,opt,name=send_to_token,json=sendToToken,proto3" json:"send_to_token,omitempty"`
+	TargetAlreadyReplica bool   `protobuf:"varint,30,opt,name=target_already_replica,json=targetAlreadyReplica,proto3" json:"target_already_replica,omitempty"`
+	// verified_* is the TARGET's observation, recorded by whoever
+	// performed the cutover. An unset verification is why a completion
+	// can be "never observed" rather than assumed successful.
+	VerifiedObserved   bool                 `protobuf:"varint,31,opt,name=verified_observed,json=verifiedObserved,proto3" json:"verified_observed,omitempty"`
+	VerifiedRunning    bool                 `protobuf:"varint,32,opt,name=verified_running,json=verifiedRunning,proto3" json:"verified_running,omitempty"`
+	ObservedGuid       string               `protobuf:"bytes,33,opt,name=observed_guid,json=observedGuid,proto3" json:"observed_guid,omitempty"`
+	ExpectedGuid       string               `protobuf:"bytes,34,opt,name=expected_guid,json=expectedGuid,proto3" json:"expected_guid,omitempty"`
+	ObservedIp         string               `protobuf:"bytes,35,opt,name=observed_ip,json=observedIp,proto3" json:"observed_ip,omitempty"`
+	ExpectedIp         string               `protobuf:"bytes,36,opt,name=expected_ip,json=expectedIp,proto3" json:"expected_ip,omitempty"`
+	VerifiedAtUnix     int64                `protobuf:"varint,37,opt,name=verified_at_unix,json=verifiedAtUnix,proto3" json:"verified_at_unix,omitempty"`
+	QueryError         string               `protobuf:"bytes,38,opt,name=query_error,json=queryError,proto3" json:"query_error,omitempty"`
+	ObservedOnNodeId   string               `protobuf:"bytes,39,opt,name=observed_on_node_id,json=observedOnNodeId,proto3" json:"observed_on_node_id,omitempty"`
+	StallReason        string               `protobuf:"bytes,40,opt,name=stall_reason,json=stallReason,proto3" json:"stall_reason,omitempty"`
+	StallDetail        string               `protobuf:"bytes,41,opt,name=stall_detail,json=stallDetail,proto3" json:"stall_detail,omitempty"`
+	StallVerdict       string               `protobuf:"bytes,42,opt,name=stall_verdict,json=stallVerdict,proto3" json:"stall_verdict,omitempty"`
+	StallSinceUnix     int64                `protobuf:"varint,43,opt,name=stall_since_unix,json=stallSinceUnix,proto3" json:"stall_since_unix,omitempty"`
+	Evidence           []*MigrationEvidence `protobuf:"bytes,44,rep,name=evidence,proto3" json:"evidence,omitempty"`
+	StateSchemaVersion uint32               `protobuf:"varint,45,opt,name=state_schema_version,json=stateSchemaVersion,proto3" json:"state_schema_version,omitempty"` // currently 1
+	unknownFields      protoimpl.UnknownFields
+	sizeCache          protoimpl.SizeCache
+}
+
+func (x *GuestMigration) Reset() {
+	*x = GuestMigration{}
+	mi := &file_api_internalpb_state_proto_msgTypes[28]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GuestMigration) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GuestMigration) ProtoMessage() {}
+
+func (x *GuestMigration) ProtoReflect() protoreflect.Message {
+	mi := &file_api_internalpb_state_proto_msgTypes[28]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GuestMigration.ProtoReflect.Descriptor instead.
+func (*GuestMigration) Descriptor() ([]byte, []int) {
+	return file_api_internalpb_state_proto_rawDescGZIP(), []int{28}
+}
+
+func (x *GuestMigration) GetId() string {
+	if x != nil {
+		return x.Id
+	}
+	return ""
+}
+
+func (x *GuestMigration) GetGuestKind() string {
+	if x != nil {
+		return x.GuestKind
+	}
+	return ""
+}
+
+func (x *GuestMigration) GetGuestId() string {
+	if x != nil {
+		return x.GuestId
+	}
+	return ""
+}
+
+func (x *GuestMigration) GetSourceNodeId() string {
+	if x != nil {
+		return x.SourceNodeId
+	}
+	return ""
+}
+
+func (x *GuestMigration) GetTargetNodeId() string {
+	if x != nil {
+		return x.TargetNodeId
+	}
+	return ""
+}
+
+func (x *GuestMigration) GetPhase() string {
+	if x != nil {
+		return x.Phase
+	}
+	return ""
+}
+
+func (x *GuestMigration) GetOutcome() string {
+	if x != nil {
+		return x.Outcome
+	}
+	return ""
+}
+
+func (x *GuestMigration) GetAttempt() uint32 {
+	if x != nil {
+		return x.Attempt
+	}
+	return 0
+}
+
+func (x *GuestMigration) GetAttemptToken() uint64 {
+	if x != nil {
+		return x.AttemptToken
+	}
+	return 0
+}
+
+func (x *GuestMigration) GetDetail() string {
+	if x != nil {
+		return x.Detail
+	}
+	return ""
+}
+
+func (x *GuestMigration) GetCreatedUnix() int64 {
+	if x != nil {
+		return x.CreatedUnix
+	}
+	return 0
+}
+
+func (x *GuestMigration) GetUpdatedUnix() int64 {
+	if x != nil {
+		return x.UpdatedUnix
+	}
+	return 0
+}
+
+func (x *GuestMigration) GetSettledUnix() int64 {
+	if x != nil {
+		return x.SettledUnix
+	}
+	return 0
+}
+
+func (x *GuestMigration) GetPreflightFirstUnix() int64 {
+	if x != nil {
+		return x.PreflightFirstUnix
+	}
+	return 0
+}
+
+func (x *GuestMigration) GetPreflightLastUnix() int64 {
+	if x != nil {
+		return x.PreflightLastUnix
+	}
+	return 0
+}
+
+func (x *GuestMigration) GetFreezeFirstUnix() int64 {
+	if x != nil {
+		return x.FreezeFirstUnix
+	}
+	return 0
+}
+
+func (x *GuestMigration) GetFreezeLastUnix() int64 {
+	if x != nil {
+		return x.FreezeLastUnix
+	}
+	return 0
+}
+
+func (x *GuestMigration) GetBulkFirstUnix() int64 {
+	if x != nil {
+		return x.BulkFirstUnix
+	}
+	return 0
+}
+
+func (x *GuestMigration) GetBulkLastUnix() int64 {
+	if x != nil {
+		return x.BulkLastUnix
+	}
+	return 0
+}
+
+func (x *GuestMigration) GetSyncFirstUnix() int64 {
+	if x != nil {
+		return x.SyncFirstUnix
+	}
+	return 0
+}
+
+func (x *GuestMigration) GetSyncLastUnix() int64 {
+	if x != nil {
+		return x.SyncLastUnix
+	}
+	return 0
+}
+
+func (x *GuestMigration) GetCutoverFirstUnix() int64 {
+	if x != nil {
+		return x.CutoverFirstUnix
+	}
+	return 0
+}
+
+func (x *GuestMigration) GetCutoverLastUnix() int64 {
+	if x != nil {
+		return x.CutoverLastUnix
+	}
+	return 0
+}
+
+func (x *GuestMigration) GetTeardownFirstUnix() int64 {
+	if x != nil {
+		return x.TeardownFirstUnix
+	}
+	return 0
+}
+
+func (x *GuestMigration) GetTeardownLastUnix() int64 {
+	if x != nil {
+		return x.TeardownLastUnix
+	}
+	return 0
+}
+
+func (x *GuestMigration) GetBytesRequired() uint64 {
+	if x != nil {
+		return x.BytesRequired
+	}
+	return 0
+}
+
+func (x *GuestMigration) GetBytesMoved() uint64 {
+	if x != nil {
+		return x.BytesMoved
+	}
+	return 0
+}
+
+func (x *GuestMigration) GetSendFromToken() uint64 {
+	if x != nil {
+		return x.SendFromToken
+	}
+	return 0
+}
+
+func (x *GuestMigration) GetSendToToken() uint64 {
+	if x != nil {
+		return x.SendToToken
+	}
+	return 0
+}
+
+func (x *GuestMigration) GetTargetAlreadyReplica() bool {
+	if x != nil {
+		return x.TargetAlreadyReplica
+	}
+	return false
+}
+
+func (x *GuestMigration) GetVerifiedObserved() bool {
+	if x != nil {
+		return x.VerifiedObserved
+	}
+	return false
+}
+
+func (x *GuestMigration) GetVerifiedRunning() bool {
+	if x != nil {
+		return x.VerifiedRunning
+	}
+	return false
+}
+
+func (x *GuestMigration) GetObservedGuid() string {
+	if x != nil {
+		return x.ObservedGuid
+	}
+	return ""
+}
+
+func (x *GuestMigration) GetExpectedGuid() string {
+	if x != nil {
+		return x.ExpectedGuid
+	}
+	return ""
+}
+
+func (x *GuestMigration) GetObservedIp() string {
+	if x != nil {
+		return x.ObservedIp
+	}
+	return ""
+}
+
+func (x *GuestMigration) GetExpectedIp() string {
+	if x != nil {
+		return x.ExpectedIp
+	}
+	return ""
+}
+
+func (x *GuestMigration) GetVerifiedAtUnix() int64 {
+	if x != nil {
+		return x.VerifiedAtUnix
+	}
+	return 0
+}
+
+func (x *GuestMigration) GetQueryError() string {
+	if x != nil {
+		return x.QueryError
+	}
+	return ""
+}
+
+func (x *GuestMigration) GetObservedOnNodeId() string {
+	if x != nil {
+		return x.ObservedOnNodeId
+	}
+	return ""
+}
+
+func (x *GuestMigration) GetStallReason() string {
+	if x != nil {
+		return x.StallReason
+	}
+	return ""
+}
+
+func (x *GuestMigration) GetStallDetail() string {
+	if x != nil {
+		return x.StallDetail
+	}
+	return ""
+}
+
+func (x *GuestMigration) GetStallVerdict() string {
+	if x != nil {
+		return x.StallVerdict
+	}
+	return ""
+}
+
+func (x *GuestMigration) GetStallSinceUnix() int64 {
+	if x != nil {
+		return x.StallSinceUnix
+	}
+	return 0
+}
+
+func (x *GuestMigration) GetEvidence() []*MigrationEvidence {
+	if x != nil {
+		return x.Evidence
+	}
+	return nil
+}
+
+func (x *GuestMigration) GetStateSchemaVersion() uint32 {
+	if x != nil {
+		return x.StateSchemaVersion
+	}
+	return 0
+}
+
+// StartGuestMigration opens a record at "preflight" and nowhere else.
+// A start that also names a phase is asking for a record born
+// mid-protocol, and is rejected (internal/migration.ValidateCommand).
+type StartGuestMigration struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	GuestKind     string                 `protobuf:"bytes,2,opt,name=guest_kind,json=guestKind,proto3" json:"guest_kind,omitempty"`
+	GuestId       string                 `protobuf:"bytes,3,opt,name=guest_id,json=guestId,proto3" json:"guest_id,omitempty"`
+	SourceNodeId  string                 `protobuf:"bytes,4,opt,name=source_node_id,json=sourceNodeId,proto3" json:"source_node_id,omitempty"`
+	TargetNodeId  string                 `protobuf:"bytes,5,opt,name=target_node_id,json=targetNodeId,proto3" json:"target_node_id,omitempty"`
+	Attempt       uint32                 `protobuf:"varint,6,opt,name=attempt,proto3" json:"attempt,omitempty"`
+	AttemptToken  uint64                 `protobuf:"varint,7,opt,name=attempt_token,json=attemptToken,proto3" json:"attempt_token,omitempty"` // zero is never valid
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *StartGuestMigration) Reset() {
+	*x = StartGuestMigration{}
+	mi := &file_api_internalpb_state_proto_msgTypes[29]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *StartGuestMigration) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*StartGuestMigration) ProtoMessage() {}
+
+func (x *StartGuestMigration) ProtoReflect() protoreflect.Message {
+	mi := &file_api_internalpb_state_proto_msgTypes[29]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use StartGuestMigration.ProtoReflect.Descriptor instead.
+func (*StartGuestMigration) Descriptor() ([]byte, []int) {
+	return file_api_internalpb_state_proto_rawDescGZIP(), []int{29}
+}
+
+func (x *StartGuestMigration) GetId() string {
+	if x != nil {
+		return x.Id
+	}
+	return ""
+}
+
+func (x *StartGuestMigration) GetGuestKind() string {
+	if x != nil {
+		return x.GuestKind
+	}
+	return ""
+}
+
+func (x *StartGuestMigration) GetGuestId() string {
+	if x != nil {
+		return x.GuestId
+	}
+	return ""
+}
+
+func (x *StartGuestMigration) GetSourceNodeId() string {
+	if x != nil {
+		return x.SourceNodeId
+	}
+	return ""
+}
+
+func (x *StartGuestMigration) GetTargetNodeId() string {
+	if x != nil {
+		return x.TargetNodeId
+	}
+	return ""
+}
+
+func (x *StartGuestMigration) GetAttempt() uint32 {
+	if x != nil {
+		return x.Attempt
+	}
+	return 0
+}
+
+func (x *StartGuestMigration) GetAttemptToken() uint64 {
+	if x != nil {
+		return x.AttemptToken
+	}
+	return 0
+}
+
+// UpdateGuestMigrationPhase advances an existing record. to_phase is
+// the phase being ENTERED; forward skips are legal, rewinds are not,
+// and a re-entry of the current phase requires retry = true.
+type UpdateGuestMigrationPhase struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	ToPhase       string                 `protobuf:"bytes,2,opt,name=to_phase,json=toPhase,proto3" json:"to_phase,omitempty"`
+	Retry         bool                   `protobuf:"varint,3,opt,name=retry,proto3" json:"retry,omitempty"`
+	AttemptToken  uint64                 `protobuf:"varint,4,opt,name=attempt_token,json=attemptToken,proto3" json:"attempt_token,omitempty"`
+	BytesRequired uint64                 `protobuf:"varint,5,opt,name=bytes_required,json=bytesRequired,proto3" json:"bytes_required,omitempty"`
+	BytesMoved    uint64                 `protobuf:"varint,6,opt,name=bytes_moved,json=bytesMoved,proto3" json:"bytes_moved,omitempty"`
+	SendFromToken uint64                 `protobuf:"varint,7,opt,name=send_from_token,json=sendFromToken,proto3" json:"send_from_token,omitempty"`
+	SendToToken   uint64                 `protobuf:"varint,8,opt,name=send_to_token,json=sendToToken,proto3" json:"send_to_token,omitempty"`
+	Detail        string                 `protobuf:"bytes,9,opt,name=detail,proto3" json:"detail,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *UpdateGuestMigrationPhase) Reset() {
+	*x = UpdateGuestMigrationPhase{}
+	mi := &file_api_internalpb_state_proto_msgTypes[30]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *UpdateGuestMigrationPhase) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*UpdateGuestMigrationPhase) ProtoMessage() {}
+
+func (x *UpdateGuestMigrationPhase) ProtoReflect() protoreflect.Message {
+	mi := &file_api_internalpb_state_proto_msgTypes[30]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use UpdateGuestMigrationPhase.ProtoReflect.Descriptor instead.
+func (*UpdateGuestMigrationPhase) Descriptor() ([]byte, []int) {
+	return file_api_internalpb_state_proto_rawDescGZIP(), []int{30}
+}
+
+func (x *UpdateGuestMigrationPhase) GetId() string {
+	if x != nil {
+		return x.Id
+	}
+	return ""
+}
+
+func (x *UpdateGuestMigrationPhase) GetToPhase() string {
+	if x != nil {
+		return x.ToPhase
+	}
+	return ""
+}
+
+func (x *UpdateGuestMigrationPhase) GetRetry() bool {
+	if x != nil {
+		return x.Retry
+	}
+	return false
+}
+
+func (x *UpdateGuestMigrationPhase) GetAttemptToken() uint64 {
+	if x != nil {
+		return x.AttemptToken
+	}
+	return 0
+}
+
+func (x *UpdateGuestMigrationPhase) GetBytesRequired() uint64 {
+	if x != nil {
+		return x.BytesRequired
+	}
+	return 0
+}
+
+func (x *UpdateGuestMigrationPhase) GetBytesMoved() uint64 {
+	if x != nil {
+		return x.BytesMoved
+	}
+	return 0
+}
+
+func (x *UpdateGuestMigrationPhase) GetSendFromToken() uint64 {
+	if x != nil {
+		return x.SendFromToken
+	}
+	return 0
+}
+
+func (x *UpdateGuestMigrationPhase) GetSendToToken() uint64 {
+	if x != nil {
+		return x.SendToToken
+	}
+	return 0
+}
+
+func (x *UpdateGuestMigrationPhase) GetDetail() string {
+	if x != nil {
+		return x.Detail
+	}
+	return ""
+}
+
+// FinishGuestMigration settles a record terminally, and carries BOTH
+// the caller-settable "abort" arm and the evidence-derived settle.
+// outcome is a claim, not a decision: the FSM re-derives the outcome
+// from the evidence and records a mismatch rather than silently
+// accepting it. quorum_unavailable NEVER means "the migration failed"
+// - it means the settle could not consult consensus, and the honest
+// result is an unverified completion.
+type FinishGuestMigration struct {
+	state             protoimpl.MessageState `protogen:"open.v1"`
+	Id                string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	Outcome           string                 `protobuf:"bytes,2,opt,name=outcome,proto3" json:"outcome,omitempty"` // including "aborted"
+	Abort             bool                   `protobuf:"varint,3,opt,name=abort,proto3" json:"abort,omitempty"`
+	AbortReason       string                 `protobuf:"bytes,4,opt,name=abort_reason,json=abortReason,proto3" json:"abort_reason,omitempty"`
+	VerifiedObserved  bool                   `protobuf:"varint,5,opt,name=verified_observed,json=verifiedObserved,proto3" json:"verified_observed,omitempty"`
+	VerifiedRunning   bool                   `protobuf:"varint,6,opt,name=verified_running,json=verifiedRunning,proto3" json:"verified_running,omitempty"`
+	ObservedGuid      string                 `protobuf:"bytes,7,opt,name=observed_guid,json=observedGuid,proto3" json:"observed_guid,omitempty"`
+	ExpectedGuid      string                 `protobuf:"bytes,8,opt,name=expected_guid,json=expectedGuid,proto3" json:"expected_guid,omitempty"`
+	ObservedIp        string                 `protobuf:"bytes,9,opt,name=observed_ip,json=observedIp,proto3" json:"observed_ip,omitempty"`
+	ExpectedIp        string                 `protobuf:"bytes,10,opt,name=expected_ip,json=expectedIp,proto3" json:"expected_ip,omitempty"`
+	VerifiedAtUnix    int64                  `protobuf:"varint,11,opt,name=verified_at_unix,json=verifiedAtUnix,proto3" json:"verified_at_unix,omitempty"`
+	QueryError        string                 `protobuf:"bytes,12,opt,name=query_error,json=queryError,proto3" json:"query_error,omitempty"`
+	ObservedOnNodeId  string                 `protobuf:"bytes,13,opt,name=observed_on_node_id,json=observedOnNodeId,proto3" json:"observed_on_node_id,omitempty"`
+	FailureDetail     string                 `protobuf:"bytes,14,opt,name=failure_detail,json=failureDetail,proto3" json:"failure_detail,omitempty"`
+	QuorumUnavailable bool                   `protobuf:"varint,15,opt,name=quorum_unavailable,json=quorumUnavailable,proto3" json:"quorum_unavailable,omitempty"`
+	Evidence          []*MigrationEvidence   `protobuf:"bytes,16,rep,name=evidence,proto3" json:"evidence,omitempty"`
+	unknownFields     protoimpl.UnknownFields
+	sizeCache         protoimpl.SizeCache
+}
+
+func (x *FinishGuestMigration) Reset() {
+	*x = FinishGuestMigration{}
+	mi := &file_api_internalpb_state_proto_msgTypes[31]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *FinishGuestMigration) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*FinishGuestMigration) ProtoMessage() {}
+
+func (x *FinishGuestMigration) ProtoReflect() protoreflect.Message {
+	mi := &file_api_internalpb_state_proto_msgTypes[31]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use FinishGuestMigration.ProtoReflect.Descriptor instead.
+func (*FinishGuestMigration) Descriptor() ([]byte, []int) {
+	return file_api_internalpb_state_proto_rawDescGZIP(), []int{31}
+}
+
+func (x *FinishGuestMigration) GetId() string {
+	if x != nil {
+		return x.Id
+	}
+	return ""
+}
+
+func (x *FinishGuestMigration) GetOutcome() string {
+	if x != nil {
+		return x.Outcome
+	}
+	return ""
+}
+
+func (x *FinishGuestMigration) GetAbort() bool {
+	if x != nil {
+		return x.Abort
+	}
+	return false
+}
+
+func (x *FinishGuestMigration) GetAbortReason() string {
+	if x != nil {
+		return x.AbortReason
+	}
+	return ""
+}
+
+func (x *FinishGuestMigration) GetVerifiedObserved() bool {
+	if x != nil {
+		return x.VerifiedObserved
+	}
+	return false
+}
+
+func (x *FinishGuestMigration) GetVerifiedRunning() bool {
+	if x != nil {
+		return x.VerifiedRunning
+	}
+	return false
+}
+
+func (x *FinishGuestMigration) GetObservedGuid() string {
+	if x != nil {
+		return x.ObservedGuid
+	}
+	return ""
+}
+
+func (x *FinishGuestMigration) GetExpectedGuid() string {
+	if x != nil {
+		return x.ExpectedGuid
+	}
+	return ""
+}
+
+func (x *FinishGuestMigration) GetObservedIp() string {
+	if x != nil {
+		return x.ObservedIp
+	}
+	return ""
+}
+
+func (x *FinishGuestMigration) GetExpectedIp() string {
+	if x != nil {
+		return x.ExpectedIp
+	}
+	return ""
+}
+
+func (x *FinishGuestMigration) GetVerifiedAtUnix() int64 {
+	if x != nil {
+		return x.VerifiedAtUnix
+	}
+	return 0
+}
+
+func (x *FinishGuestMigration) GetQueryError() string {
+	if x != nil {
+		return x.QueryError
+	}
+	return ""
+}
+
+func (x *FinishGuestMigration) GetObservedOnNodeId() string {
+	if x != nil {
+		return x.ObservedOnNodeId
+	}
+	return ""
+}
+
+func (x *FinishGuestMigration) GetFailureDetail() string {
+	if x != nil {
+		return x.FailureDetail
+	}
+	return ""
+}
+
+func (x *FinishGuestMigration) GetQuorumUnavailable() bool {
+	if x != nil {
+		return x.QuorumUnavailable
+	}
+	return false
+}
+
+func (x *FinishGuestMigration) GetEvidence() []*MigrationEvidence {
+	if x != nil {
+		return x.Evidence
+	}
+	return nil
+}
+
 // PendingJoinRequest records one Comb's request to join this Colony
 // (ADR-0083). code is a short, human-readable value for visual
 // correlation between the joining Comb's own screen and the Admin
@@ -2804,7 +3732,7 @@ type PendingJoinRequest struct {
 
 func (x *PendingJoinRequest) Reset() {
 	*x = PendingJoinRequest{}
-	mi := &file_api_internalpb_state_proto_msgTypes[27]
+	mi := &file_api_internalpb_state_proto_msgTypes[32]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2816,7 +3744,7 @@ func (x *PendingJoinRequest) String() string {
 func (*PendingJoinRequest) ProtoMessage() {}
 
 func (x *PendingJoinRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_api_internalpb_state_proto_msgTypes[27]
+	mi := &file_api_internalpb_state_proto_msgTypes[32]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2829,7 +3757,7 @@ func (x *PendingJoinRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PendingJoinRequest.ProtoReflect.Descriptor instead.
 func (*PendingJoinRequest) Descriptor() ([]byte, []int) {
-	return file_api_internalpb_state_proto_rawDescGZIP(), []int{27}
+	return file_api_internalpb_state_proto_rawDescGZIP(), []int{32}
 }
 
 func (x *PendingJoinRequest) GetRequestId() string {
@@ -2901,7 +3829,7 @@ type CreatePendingJoinRequest struct {
 
 func (x *CreatePendingJoinRequest) Reset() {
 	*x = CreatePendingJoinRequest{}
-	mi := &file_api_internalpb_state_proto_msgTypes[28]
+	mi := &file_api_internalpb_state_proto_msgTypes[33]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2913,7 +3841,7 @@ func (x *CreatePendingJoinRequest) String() string {
 func (*CreatePendingJoinRequest) ProtoMessage() {}
 
 func (x *CreatePendingJoinRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_api_internalpb_state_proto_msgTypes[28]
+	mi := &file_api_internalpb_state_proto_msgTypes[33]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2926,7 +3854,7 @@ func (x *CreatePendingJoinRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CreatePendingJoinRequest.ProtoReflect.Descriptor instead.
 func (*CreatePendingJoinRequest) Descriptor() ([]byte, []int) {
-	return file_api_internalpb_state_proto_rawDescGZIP(), []int{28}
+	return file_api_internalpb_state_proto_rawDescGZIP(), []int{33}
 }
 
 func (x *CreatePendingJoinRequest) GetRequest() *PendingJoinRequest {
@@ -2950,7 +3878,7 @@ type ApprovePendingJoinRequest struct {
 
 func (x *ApprovePendingJoinRequest) Reset() {
 	*x = ApprovePendingJoinRequest{}
-	mi := &file_api_internalpb_state_proto_msgTypes[29]
+	mi := &file_api_internalpb_state_proto_msgTypes[34]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2962,7 +3890,7 @@ func (x *ApprovePendingJoinRequest) String() string {
 func (*ApprovePendingJoinRequest) ProtoMessage() {}
 
 func (x *ApprovePendingJoinRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_api_internalpb_state_proto_msgTypes[29]
+	mi := &file_api_internalpb_state_proto_msgTypes[34]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2975,7 +3903,7 @@ func (x *ApprovePendingJoinRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ApprovePendingJoinRequest.ProtoReflect.Descriptor instead.
 func (*ApprovePendingJoinRequest) Descriptor() ([]byte, []int) {
-	return file_api_internalpb_state_proto_rawDescGZIP(), []int{29}
+	return file_api_internalpb_state_proto_rawDescGZIP(), []int{34}
 }
 
 func (x *ApprovePendingJoinRequest) GetRequestId() string {
@@ -2996,7 +3924,7 @@ type RejectPendingJoinRequest struct {
 
 func (x *RejectPendingJoinRequest) Reset() {
 	*x = RejectPendingJoinRequest{}
-	mi := &file_api_internalpb_state_proto_msgTypes[30]
+	mi := &file_api_internalpb_state_proto_msgTypes[35]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3008,7 +3936,7 @@ func (x *RejectPendingJoinRequest) String() string {
 func (*RejectPendingJoinRequest) ProtoMessage() {}
 
 func (x *RejectPendingJoinRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_api_internalpb_state_proto_msgTypes[30]
+	mi := &file_api_internalpb_state_proto_msgTypes[35]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3021,7 +3949,7 @@ func (x *RejectPendingJoinRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RejectPendingJoinRequest.ProtoReflect.Descriptor instead.
 func (*RejectPendingJoinRequest) Descriptor() ([]byte, []int) {
-	return file_api_internalpb_state_proto_rawDescGZIP(), []int{30}
+	return file_api_internalpb_state_proto_rawDescGZIP(), []int{35}
 }
 
 func (x *RejectPendingJoinRequest) GetRequestId() string {
@@ -3042,7 +3970,7 @@ type CancelPendingJoinRequest struct {
 
 func (x *CancelPendingJoinRequest) Reset() {
 	*x = CancelPendingJoinRequest{}
-	mi := &file_api_internalpb_state_proto_msgTypes[31]
+	mi := &file_api_internalpb_state_proto_msgTypes[36]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3054,7 +3982,7 @@ func (x *CancelPendingJoinRequest) String() string {
 func (*CancelPendingJoinRequest) ProtoMessage() {}
 
 func (x *CancelPendingJoinRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_api_internalpb_state_proto_msgTypes[31]
+	mi := &file_api_internalpb_state_proto_msgTypes[36]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3067,7 +3995,7 @@ func (x *CancelPendingJoinRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CancelPendingJoinRequest.ProtoReflect.Descriptor instead.
 func (*CancelPendingJoinRequest) Descriptor() ([]byte, []int) {
-	return file_api_internalpb_state_proto_rawDescGZIP(), []int{31}
+	return file_api_internalpb_state_proto_rawDescGZIP(), []int{36}
 }
 
 func (x *CancelPendingJoinRequest) GetRequestId() string {
@@ -3089,7 +4017,7 @@ type PurgeJoinRequest struct {
 
 func (x *PurgeJoinRequest) Reset() {
 	*x = PurgeJoinRequest{}
-	mi := &file_api_internalpb_state_proto_msgTypes[32]
+	mi := &file_api_internalpb_state_proto_msgTypes[37]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3101,7 +4029,7 @@ func (x *PurgeJoinRequest) String() string {
 func (*PurgeJoinRequest) ProtoMessage() {}
 
 func (x *PurgeJoinRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_api_internalpb_state_proto_msgTypes[32]
+	mi := &file_api_internalpb_state_proto_msgTypes[37]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3114,7 +4042,7 @@ func (x *PurgeJoinRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PurgeJoinRequest.ProtoReflect.Descriptor instead.
 func (*PurgeJoinRequest) Descriptor() ([]byte, []int) {
-	return file_api_internalpb_state_proto_rawDescGZIP(), []int{32}
+	return file_api_internalpb_state_proto_rawDescGZIP(), []int{37}
 }
 
 func (x *PurgeJoinRequest) GetRequestId() string {
@@ -3161,7 +4089,7 @@ type RestartLease struct {
 
 func (x *RestartLease) Reset() {
 	*x = RestartLease{}
-	mi := &file_api_internalpb_state_proto_msgTypes[33]
+	mi := &file_api_internalpb_state_proto_msgTypes[38]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3173,7 +4101,7 @@ func (x *RestartLease) String() string {
 func (*RestartLease) ProtoMessage() {}
 
 func (x *RestartLease) ProtoReflect() protoreflect.Message {
-	mi := &file_api_internalpb_state_proto_msgTypes[33]
+	mi := &file_api_internalpb_state_proto_msgTypes[38]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3186,7 +4114,7 @@ func (x *RestartLease) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RestartLease.ProtoReflect.Descriptor instead.
 func (*RestartLease) Descriptor() ([]byte, []int) {
-	return file_api_internalpb_state_proto_rawDescGZIP(), []int{33}
+	return file_api_internalpb_state_proto_rawDescGZIP(), []int{38}
 }
 
 func (x *RestartLease) GetLeaseId() uint64 {
@@ -3241,7 +4169,7 @@ type RestartRecord struct {
 
 func (x *RestartRecord) Reset() {
 	*x = RestartRecord{}
-	mi := &file_api_internalpb_state_proto_msgTypes[34]
+	mi := &file_api_internalpb_state_proto_msgTypes[39]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3253,7 +4181,7 @@ func (x *RestartRecord) String() string {
 func (*RestartRecord) ProtoMessage() {}
 
 func (x *RestartRecord) ProtoReflect() protoreflect.Message {
-	mi := &file_api_internalpb_state_proto_msgTypes[34]
+	mi := &file_api_internalpb_state_proto_msgTypes[39]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3266,7 +4194,7 @@ func (x *RestartRecord) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RestartRecord.ProtoReflect.Descriptor instead.
 func (*RestartRecord) Descriptor() ([]byte, []int) {
-	return file_api_internalpb_state_proto_rawDescGZIP(), []int{34}
+	return file_api_internalpb_state_proto_rawDescGZIP(), []int{39}
 }
 
 func (x *RestartRecord) GetService() string {
@@ -3318,7 +4246,7 @@ type AcquireRestartLease struct {
 
 func (x *AcquireRestartLease) Reset() {
 	*x = AcquireRestartLease{}
-	mi := &file_api_internalpb_state_proto_msgTypes[35]
+	mi := &file_api_internalpb_state_proto_msgTypes[40]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3330,7 +4258,7 @@ func (x *AcquireRestartLease) String() string {
 func (*AcquireRestartLease) ProtoMessage() {}
 
 func (x *AcquireRestartLease) ProtoReflect() protoreflect.Message {
-	mi := &file_api_internalpb_state_proto_msgTypes[35]
+	mi := &file_api_internalpb_state_proto_msgTypes[40]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3343,7 +4271,7 @@ func (x *AcquireRestartLease) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AcquireRestartLease.ProtoReflect.Descriptor instead.
 func (*AcquireRestartLease) Descriptor() ([]byte, []int) {
-	return file_api_internalpb_state_proto_rawDescGZIP(), []int{35}
+	return file_api_internalpb_state_proto_rawDescGZIP(), []int{40}
 }
 
 func (x *AcquireRestartLease) GetService() string {
@@ -3411,7 +4339,7 @@ type RecordRestartCompleted struct {
 
 func (x *RecordRestartCompleted) Reset() {
 	*x = RecordRestartCompleted{}
-	mi := &file_api_internalpb_state_proto_msgTypes[36]
+	mi := &file_api_internalpb_state_proto_msgTypes[41]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3423,7 +4351,7 @@ func (x *RecordRestartCompleted) String() string {
 func (*RecordRestartCompleted) ProtoMessage() {}
 
 func (x *RecordRestartCompleted) ProtoReflect() protoreflect.Message {
-	mi := &file_api_internalpb_state_proto_msgTypes[36]
+	mi := &file_api_internalpb_state_proto_msgTypes[41]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3436,7 +4364,7 @@ func (x *RecordRestartCompleted) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RecordRestartCompleted.ProtoReflect.Descriptor instead.
 func (*RecordRestartCompleted) Descriptor() ([]byte, []int) {
-	return file_api_internalpb_state_proto_rawDescGZIP(), []int{36}
+	return file_api_internalpb_state_proto_rawDescGZIP(), []int{41}
 }
 
 func (x *RecordRestartCompleted) GetService() string {
@@ -3484,7 +4412,7 @@ type CommandResult struct {
 
 func (x *CommandResult) Reset() {
 	*x = CommandResult{}
-	mi := &file_api_internalpb_state_proto_msgTypes[37]
+	mi := &file_api_internalpb_state_proto_msgTypes[42]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3496,7 +4424,7 @@ func (x *CommandResult) String() string {
 func (*CommandResult) ProtoMessage() {}
 
 func (x *CommandResult) ProtoReflect() protoreflect.Message {
-	mi := &file_api_internalpb_state_proto_msgTypes[37]
+	mi := &file_api_internalpb_state_proto_msgTypes[42]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3509,7 +4437,7 @@ func (x *CommandResult) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CommandResult.ProtoReflect.Descriptor instead.
 func (*CommandResult) Descriptor() ([]byte, []int) {
-	return file_api_internalpb_state_proto_rawDescGZIP(), []int{37}
+	return file_api_internalpb_state_proto_rawDescGZIP(), []int{42}
 }
 
 func (x *CommandResult) GetVm() *VMDefinition {
@@ -3562,14 +4490,27 @@ type FSMSnapshotState struct {
 	// managerd's auth check gates on this, not on api_keys being
 	// non-empty: revoking the last key must lock the cluster down, not
 	// silently reopen it (see ADR-0023).
-	AuthEnabled   bool `protobuf:"varint,5,opt,name=auth_enabled,json=authEnabled,proto3" json:"auth_enabled,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	AuthEnabled bool `protobuf:"varint,5,opt,name=auth_enabled,json=authEnabled,proto3" json:"auth_enabled,omitempty"`
+	// migrations is the durable guest-migration record (ADR-0128),
+	// keyed by migration id. migrations_by_guest maps
+	// "<vm|jail>/<guest_id>" to that id and is the O(1) per-tick lookup
+	// an ordinary reconciler makes at the top of its per-guest work.
+	//
+	// THE INDEX ENTRY OUTLIVES THE RECORD. It is retained for as long
+	// as the record still FENCES its guest, not merely for as long as
+	// the record is in flight. A completion that was never observed
+	// keeps the fence - unfencing on an unknown is how one guest's disk
+	// ends up running on two kernels - and the index is what makes that
+	// fence findable in a single point read.
+	Migrations        map[string]*GuestMigration `protobuf:"bytes,10,rep,name=migrations,proto3" json:"migrations,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	MigrationsByGuest map[string]string          `protobuf:"bytes,11,rep,name=migrations_by_guest,json=migrationsByGuest,proto3" json:"migrations_by_guest,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	unknownFields     protoimpl.UnknownFields
+	sizeCache         protoimpl.SizeCache
 }
 
 func (x *FSMSnapshotState) Reset() {
 	*x = FSMSnapshotState{}
-	mi := &file_api_internalpb_state_proto_msgTypes[38]
+	mi := &file_api_internalpb_state_proto_msgTypes[43]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3581,7 +4522,7 @@ func (x *FSMSnapshotState) String() string {
 func (*FSMSnapshotState) ProtoMessage() {}
 
 func (x *FSMSnapshotState) ProtoReflect() protoreflect.Message {
-	mi := &file_api_internalpb_state_proto_msgTypes[38]
+	mi := &file_api_internalpb_state_proto_msgTypes[43]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3594,7 +4535,7 @@ func (x *FSMSnapshotState) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FSMSnapshotState.ProtoReflect.Descriptor instead.
 func (*FSMSnapshotState) Descriptor() ([]byte, []int) {
-	return file_api_internalpb_state_proto_rawDescGZIP(), []int{38}
+	return file_api_internalpb_state_proto_rawDescGZIP(), []int{43}
 }
 
 func (x *FSMSnapshotState) GetLastIndex() uint64 {
@@ -3660,6 +4601,20 @@ func (x *FSMSnapshotState) GetAuthEnabled() bool {
 	return false
 }
 
+func (x *FSMSnapshotState) GetMigrations() map[string]*GuestMigration {
+	if x != nil {
+		return x.Migrations
+	}
+	return nil
+}
+
+func (x *FSMSnapshotState) GetMigrationsByGuest() map[string]string {
+	if x != nil {
+		return x.MigrationsByGuest
+	}
+	return nil
+}
+
 // ConfigArchive is the on-disk file format for raftd's -export/
 // -restore (docs/adr/0051-raftd-config-save-restore.md) - a small
 // envelope around an unmodified FSMSnapshotState payload, versioned
@@ -3692,7 +4647,7 @@ type ConfigArchive struct {
 
 func (x *ConfigArchive) Reset() {
 	*x = ConfigArchive{}
-	mi := &file_api_internalpb_state_proto_msgTypes[39]
+	mi := &file_api_internalpb_state_proto_msgTypes[44]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3704,7 +4659,7 @@ func (x *ConfigArchive) String() string {
 func (*ConfigArchive) ProtoMessage() {}
 
 func (x *ConfigArchive) ProtoReflect() protoreflect.Message {
-	mi := &file_api_internalpb_state_proto_msgTypes[39]
+	mi := &file_api_internalpb_state_proto_msgTypes[44]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3717,7 +4672,7 @@ func (x *ConfigArchive) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ConfigArchive.ProtoReflect.Descriptor instead.
 func (*ConfigArchive) Descriptor() ([]byte, []int) {
-	return file_api_internalpb_state_proto_rawDescGZIP(), []int{39}
+	return file_api_internalpb_state_proto_rawDescGZIP(), []int{44}
 }
 
 func (x *ConfigArchive) GetFormatVersion() uint32 {
@@ -3766,7 +4721,7 @@ var File_api_internalpb_state_proto protoreflect.FileDescriptor
 
 const file_api_internalpb_state_proto_rawDesc = "" +
 	"\n" +
-	"\x1aapi/internalpb/state.proto\x12\x12apiary.internal.v1\"\xf6\x05\n" +
+	"\x1aapi/internalpb/state.proto\x12\x12apiary.internal.v1\"\xa1\x06\n" +
 	"\fVMDefinition\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x14\n" +
@@ -3792,7 +4747,8 @@ const file_api_internalpb_state_proto_rawDesc = "" +
 	"\x13cloudflare_hostname\x18\x11 \x01(\tR\x12cloudflareHostname\x12'\n" +
 	"\x0fcloudflare_port\x18\x12 \x01(\rR\x0ecloudflarePort\x12.\n" +
 	"\x13clone_from_snapshot\x18\x13 \x01(\tR\x11cloneFromSnapshot\x12\x1a\n" +
-	"\bhostname\x18\x14 \x01(\tR\bhostname\"\xce\x03\n" +
+	"\bhostname\x18\x14 \x01(\tR\bhostname\x12)\n" +
+	"\x10migration_fenced\x18\x15 \x01(\bR\x0fmigrationFenced\"\xf9\x03\n" +
 	"\x0eJailDefinition\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x1a\n" +
@@ -3810,7 +4766,8 @@ const file_api_internalpb_state_proto_rawDesc = "" +
 	"network_id\x18\v \x01(\tR\tnetworkId\x12\x1d\n" +
 	"\n" +
 	"ip_address\x18\f \x01(\tR\tipAddress\x12\x12\n" +
-	"\x04vnet\x18\r \x01(\bR\x04vnet\"\x9b\x01\n" +
+	"\x04vnet\x18\r \x01(\bR\x04vnet\x12)\n" +
+	"\x10migration_fenced\x18\x0e \x01(\bR\x0fmigrationFenced\"\x9b\x01\n" +
 	"\fFirewallRule\x12\x1c\n" +
 	"\tdirection\x18\x01 \x01(\tR\tdirection\x12\x16\n" +
 	"\x06action\x18\x02 \x01(\tR\x06action\x12\x1a\n" +
@@ -3826,7 +4783,7 @@ const file_api_internalpb_state_proto_rawDesc = "" +
 	"\vbridge_name\x18\x05 \x01(\tR\n" +
 	"bridgeName\x12)\n" +
 	"\x10external_gateway\x18\x06 \x01(\tR\x0fexternalGateway\x12%\n" +
-	"\x0euplink_bridged\x18\a \x01(\bR\ruplinkBridged\"\xb7\x12\n" +
+	"\x0euplink_bridged\x18\a \x01(\bR\ruplinkBridged\"\xea\x14\n" +
 	"\aCommand\x12;\n" +
 	"\tcreate_vm\x18\x01 \x01(\v2\x1c.apiary.internal.v1.CreateVMH\x00R\bcreateVm\x12;\n" +
 	"\tupdate_vm\x18\x02 \x01(\v2\x1c.apiary.internal.v1.UpdateVMH\x00R\bupdateVm\x12;\n" +
@@ -3860,7 +4817,10 @@ const file_api_internalpb_state_proto_rawDesc = "" +
 	"\x12purge_join_request\x18\x1a \x01(\v2$.apiary.internal.v1.PurgeJoinRequestH\x00R\x10purgeJoinRequest\x12Q\n" +
 	"\x11set_jail_hostname\x18\x18 \x01(\v2#.apiary.internal.v1.SetJailHostnameH\x00R\x0fsetJailHostname\x12]\n" +
 	"\x15acquire_restart_lease\x18\x1b \x01(\v2'.apiary.internal.v1.AcquireRestartLeaseH\x00R\x13acquireRestartLease\x12f\n" +
-	"\x18record_restart_completed\x18\x1c \x01(\v2*.apiary.internal.v1.RecordRestartCompletedH\x00R\x16recordRestartCompletedB\x04\n" +
+	"\x18record_restart_completed\x18\x1c \x01(\v2*.apiary.internal.v1.RecordRestartCompletedH\x00R\x16recordRestartCompleted\x12]\n" +
+	"\x15start_guest_migration\x18\x1d \x01(\v2'.apiary.internal.v1.StartGuestMigrationH\x00R\x13startGuestMigration\x12p\n" +
+	"\x1cupdate_guest_migration_phase\x18\x1e \x01(\v2-.apiary.internal.v1.UpdateGuestMigrationPhaseH\x00R\x19updateGuestMigrationPhase\x12`\n" +
+	"\x16finish_guest_migration\x18\x1f \x01(\v2(.apiary.internal.v1.FinishGuestMigrationH\x00R\x14finishGuestMigrationB\x04\n" +
 	"\x02op\"\x82\x01\n" +
 	"\x06ApiKey\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
@@ -3927,7 +4887,104 @@ const file_api_internalpb_state_proto_rawDesc = "" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x1a\n" +
 	"\bhostname\x18\x02 \x01(\tR\bhostname\"\x1b\n" +
 	"\tPurgeJail\x12\x0e\n" +
-	"\x02id\x18\x01 \x01(\tR\x02id\"\xd1\x02\n" +
+	"\x02id\x18\x01 \x01(\tR\x02id\"i\n" +
+	"\x11MigrationEvidence\x12\x12\n" +
+	"\x04rule\x18\x01 \x01(\tR\x04rule\x12\x16\n" +
+	"\x06detail\x18\x02 \x01(\tR\x06detail\x12(\n" +
+	"\x10observed_at_unix\x18\x03 \x01(\x03R\x0eobservedAtUnix\"\xd4\r\n" +
+	"\x0eGuestMigration\x12\x0e\n" +
+	"\x02id\x18\x01 \x01(\tR\x02id\x12\x1d\n" +
+	"\n" +
+	"guest_kind\x18\x02 \x01(\tR\tguestKind\x12\x19\n" +
+	"\bguest_id\x18\x03 \x01(\tR\aguestId\x12$\n" +
+	"\x0esource_node_id\x18\x04 \x01(\tR\fsourceNodeId\x12$\n" +
+	"\x0etarget_node_id\x18\x05 \x01(\tR\ftargetNodeId\x12\x14\n" +
+	"\x05phase\x18\x06 \x01(\tR\x05phase\x12\x18\n" +
+	"\aoutcome\x18\a \x01(\tR\aoutcome\x12\x18\n" +
+	"\aattempt\x18\b \x01(\rR\aattempt\x12#\n" +
+	"\rattempt_token\x18\t \x01(\x04R\fattemptToken\x12\x16\n" +
+	"\x06detail\x18\n" +
+	" \x01(\tR\x06detail\x12!\n" +
+	"\fcreated_unix\x18\v \x01(\x03R\vcreatedUnix\x12!\n" +
+	"\fupdated_unix\x18\f \x01(\x03R\vupdatedUnix\x12!\n" +
+	"\fsettled_unix\x18\r \x01(\x03R\vsettledUnix\x120\n" +
+	"\x14preflight_first_unix\x18\x0e \x01(\x03R\x12preflightFirstUnix\x12.\n" +
+	"\x13preflight_last_unix\x18\x0f \x01(\x03R\x11preflightLastUnix\x12*\n" +
+	"\x11freeze_first_unix\x18\x10 \x01(\x03R\x0ffreezeFirstUnix\x12(\n" +
+	"\x10freeze_last_unix\x18\x11 \x01(\x03R\x0efreezeLastUnix\x12&\n" +
+	"\x0fbulk_first_unix\x18\x12 \x01(\x03R\rbulkFirstUnix\x12$\n" +
+	"\x0ebulk_last_unix\x18\x13 \x01(\x03R\fbulkLastUnix\x12&\n" +
+	"\x0fsync_first_unix\x18\x14 \x01(\x03R\rsyncFirstUnix\x12$\n" +
+	"\x0esync_last_unix\x18\x15 \x01(\x03R\fsyncLastUnix\x12,\n" +
+	"\x12cutover_first_unix\x18\x16 \x01(\x03R\x10cutoverFirstUnix\x12*\n" +
+	"\x11cutover_last_unix\x18\x17 \x01(\x03R\x0fcutoverLastUnix\x12.\n" +
+	"\x13teardown_first_unix\x18\x18 \x01(\x03R\x11teardownFirstUnix\x12,\n" +
+	"\x12teardown_last_unix\x18\x19 \x01(\x03R\x10teardownLastUnix\x12%\n" +
+	"\x0ebytes_required\x18\x1a \x01(\x04R\rbytesRequired\x12\x1f\n" +
+	"\vbytes_moved\x18\x1b \x01(\x04R\n" +
+	"bytesMoved\x12&\n" +
+	"\x0fsend_from_token\x18\x1c \x01(\x04R\rsendFromToken\x12\"\n" +
+	"\rsend_to_token\x18\x1d \x01(\x04R\vsendToToken\x124\n" +
+	"\x16target_already_replica\x18\x1e \x01(\bR\x14targetAlreadyReplica\x12+\n" +
+	"\x11verified_observed\x18\x1f \x01(\bR\x10verifiedObserved\x12)\n" +
+	"\x10verified_running\x18  \x01(\bR\x0fverifiedRunning\x12#\n" +
+	"\robserved_guid\x18! \x01(\tR\fobservedGuid\x12#\n" +
+	"\rexpected_guid\x18\" \x01(\tR\fexpectedGuid\x12\x1f\n" +
+	"\vobserved_ip\x18# \x01(\tR\n" +
+	"observedIp\x12\x1f\n" +
+	"\vexpected_ip\x18$ \x01(\tR\n" +
+	"expectedIp\x12(\n" +
+	"\x10verified_at_unix\x18% \x01(\x03R\x0everifiedAtUnix\x12\x1f\n" +
+	"\vquery_error\x18& \x01(\tR\n" +
+	"queryError\x12-\n" +
+	"\x13observed_on_node_id\x18' \x01(\tR\x10observedOnNodeId\x12!\n" +
+	"\fstall_reason\x18( \x01(\tR\vstallReason\x12!\n" +
+	"\fstall_detail\x18) \x01(\tR\vstallDetail\x12#\n" +
+	"\rstall_verdict\x18* \x01(\tR\fstallVerdict\x12(\n" +
+	"\x10stall_since_unix\x18+ \x01(\x03R\x0estallSinceUnix\x12A\n" +
+	"\bevidence\x18, \x03(\v2%.apiary.internal.v1.MigrationEvidenceR\bevidence\x120\n" +
+	"\x14state_schema_version\x18- \x01(\rR\x12stateSchemaVersion\"\xea\x01\n" +
+	"\x13StartGuestMigration\x12\x0e\n" +
+	"\x02id\x18\x01 \x01(\tR\x02id\x12\x1d\n" +
+	"\n" +
+	"guest_kind\x18\x02 \x01(\tR\tguestKind\x12\x19\n" +
+	"\bguest_id\x18\x03 \x01(\tR\aguestId\x12$\n" +
+	"\x0esource_node_id\x18\x04 \x01(\tR\fsourceNodeId\x12$\n" +
+	"\x0etarget_node_id\x18\x05 \x01(\tR\ftargetNodeId\x12\x18\n" +
+	"\aattempt\x18\x06 \x01(\rR\aattempt\x12#\n" +
+	"\rattempt_token\x18\a \x01(\x04R\fattemptToken\"\xad\x02\n" +
+	"\x19UpdateGuestMigrationPhase\x12\x0e\n" +
+	"\x02id\x18\x01 \x01(\tR\x02id\x12\x19\n" +
+	"\bto_phase\x18\x02 \x01(\tR\atoPhase\x12\x14\n" +
+	"\x05retry\x18\x03 \x01(\bR\x05retry\x12#\n" +
+	"\rattempt_token\x18\x04 \x01(\x04R\fattemptToken\x12%\n" +
+	"\x0ebytes_required\x18\x05 \x01(\x04R\rbytesRequired\x12\x1f\n" +
+	"\vbytes_moved\x18\x06 \x01(\x04R\n" +
+	"bytesMoved\x12&\n" +
+	"\x0fsend_from_token\x18\a \x01(\x04R\rsendFromToken\x12\"\n" +
+	"\rsend_to_token\x18\b \x01(\x04R\vsendToToken\x12\x16\n" +
+	"\x06detail\x18\t \x01(\tR\x06detail\"\xf0\x04\n" +
+	"\x14FinishGuestMigration\x12\x0e\n" +
+	"\x02id\x18\x01 \x01(\tR\x02id\x12\x18\n" +
+	"\aoutcome\x18\x02 \x01(\tR\aoutcome\x12\x14\n" +
+	"\x05abort\x18\x03 \x01(\bR\x05abort\x12!\n" +
+	"\fabort_reason\x18\x04 \x01(\tR\vabortReason\x12+\n" +
+	"\x11verified_observed\x18\x05 \x01(\bR\x10verifiedObserved\x12)\n" +
+	"\x10verified_running\x18\x06 \x01(\bR\x0fverifiedRunning\x12#\n" +
+	"\robserved_guid\x18\a \x01(\tR\fobservedGuid\x12#\n" +
+	"\rexpected_guid\x18\b \x01(\tR\fexpectedGuid\x12\x1f\n" +
+	"\vobserved_ip\x18\t \x01(\tR\n" +
+	"observedIp\x12\x1f\n" +
+	"\vexpected_ip\x18\n" +
+	" \x01(\tR\n" +
+	"expectedIp\x12(\n" +
+	"\x10verified_at_unix\x18\v \x01(\x03R\x0everifiedAtUnix\x12\x1f\n" +
+	"\vquery_error\x18\f \x01(\tR\n" +
+	"queryError\x12-\n" +
+	"\x13observed_on_node_id\x18\r \x01(\tR\x10observedOnNodeId\x12%\n" +
+	"\x0efailure_detail\x18\x0e \x01(\tR\rfailureDetail\x12-\n" +
+	"\x12quorum_unavailable\x18\x0f \x01(\bR\x11quorumUnavailable\x12A\n" +
+	"\bevidence\x18\x10 \x03(\v2%.apiary.internal.v1.MigrationEvidenceR\bevidence\"\xd1\x02\n" +
 	"\x12PendingJoinRequest\x12\x1d\n" +
 	"\n" +
 	"request_id\x18\x01 \x01(\tR\trequestId\x12\x17\n" +
@@ -3978,8 +5035,7 @@ const file_api_internalpb_state_proto_rawDesc = "" +
 	"\x02vm\x18\x01 \x01(\v2 .apiary.internal.v1.VMDefinitionR\x02vm\x12\x14\n" +
 	"\x05error\x18\x02 \x01(\tR\x05error\x126\n" +
 	"\x04jail\x18\x03 \x01(\v2\".apiary.internal.v1.JailDefinitionR\x04jail\x12X\n" +
-	"\x14pending_join_request\x18\x04 \x01(\v2&.apiary.internal.v1.PendingJoinRequestR\x12pendingJoinRequest\"\xde\n" +
-	"\n" +
+	"\x14pending_join_request\x18\x04 \x01(\v2&.apiary.internal.v1.PendingJoinRequestR\x12pendingJoinRequest\"\xca\r\n" +
 	"\x10FSMSnapshotState\x12\x1d\n" +
 	"\n" +
 	"last_index\x18\x01 \x01(\x04R\tlastIndex\x12?\n" +
@@ -3990,7 +5046,12 @@ const file_api_internalpb_state_proto_rawDesc = "" +
 	"\x15pending_join_requests\x18\a \x03(\v2=.apiary.internal.v1.FSMSnapshotState.PendingJoinRequestsEntryR\x13pendingJoinRequests\x12^\n" +
 	"\x0erestart_leases\x18\b \x03(\v27.apiary.internal.v1.FSMSnapshotState.RestartLeasesEntryR\rrestartLeases\x12a\n" +
 	"\x0frestart_records\x18\t \x03(\v28.apiary.internal.v1.FSMSnapshotState.RestartRecordsEntryR\x0erestartRecords\x12!\n" +
-	"\fauth_enabled\x18\x05 \x01(\bR\vauthEnabled\x1aX\n" +
+	"\fauth_enabled\x18\x05 \x01(\bR\vauthEnabled\x12T\n" +
+	"\n" +
+	"migrations\x18\n" +
+	" \x03(\v24.apiary.internal.v1.FSMSnapshotState.MigrationsEntryR\n" +
+	"migrations\x12k\n" +
+	"\x13migrations_by_guest\x18\v \x03(\v2;.apiary.internal.v1.FSMSnapshotState.MigrationsByGuestEntryR\x11migrationsByGuest\x1aX\n" +
 	"\bVmsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x126\n" +
 	"\x05value\x18\x02 \x01(\v2 .apiary.internal.v1.VMDefinitionR\x05value:\x028\x01\x1ab\n" +
@@ -4012,7 +5073,13 @@ const file_api_internalpb_state_proto_rawDesc = "" +
 	"\x05value\x18\x02 \x01(\v2 .apiary.internal.v1.RestartLeaseR\x05value:\x028\x01\x1ad\n" +
 	"\x13RestartRecordsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x127\n" +
-	"\x05value\x18\x02 \x01(\v2!.apiary.internal.v1.RestartRecordR\x05value:\x028\x01\"\xe3\x01\n" +
+	"\x05value\x18\x02 \x01(\v2!.apiary.internal.v1.RestartRecordR\x05value:\x028\x01\x1aa\n" +
+	"\x0fMigrationsEntry\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x128\n" +
+	"\x05value\x18\x02 \x01(\v2\".apiary.internal.v1.GuestMigrationR\x05value:\x028\x01\x1aD\n" +
+	"\x16MigrationsByGuestEntry\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\xe3\x01\n" +
 	"\rConfigArchive\x12%\n" +
 	"\x0eformat_version\x18\x01 \x01(\rR\rformatVersion\x12#\n" +
 	"\rexported_unix\x18\x02 \x01(\x03R\fexportedUnix\x12\x17\n" +
@@ -4066,7 +5133,7 @@ func file_api_internalpb_state_proto_rawDescGZIP() []byte {
 }
 
 var file_api_internalpb_state_proto_enumTypes = make([]protoimpl.EnumInfo, 5)
-var file_api_internalpb_state_proto_msgTypes = make([]protoimpl.MessageInfo, 47)
+var file_api_internalpb_state_proto_msgTypes = make([]protoimpl.MessageInfo, 54)
 var file_api_internalpb_state_proto_goTypes = []any{
 	(VMState)(0),                      // 0: apiary.internal.v1.VMState
 	(VMPhase)(0),                      // 1: apiary.internal.v1.VMPhase
@@ -4100,26 +5167,33 @@ var file_api_internalpb_state_proto_goTypes = []any{
 	(*SetJailDesiredState)(nil),       // 29: apiary.internal.v1.SetJailDesiredState
 	(*SetJailHostname)(nil),           // 30: apiary.internal.v1.SetJailHostname
 	(*PurgeJail)(nil),                 // 31: apiary.internal.v1.PurgeJail
-	(*PendingJoinRequest)(nil),        // 32: apiary.internal.v1.PendingJoinRequest
-	(*CreatePendingJoinRequest)(nil),  // 33: apiary.internal.v1.CreatePendingJoinRequest
-	(*ApprovePendingJoinRequest)(nil), // 34: apiary.internal.v1.ApprovePendingJoinRequest
-	(*RejectPendingJoinRequest)(nil),  // 35: apiary.internal.v1.RejectPendingJoinRequest
-	(*CancelPendingJoinRequest)(nil),  // 36: apiary.internal.v1.CancelPendingJoinRequest
-	(*PurgeJoinRequest)(nil),          // 37: apiary.internal.v1.PurgeJoinRequest
-	(*RestartLease)(nil),              // 38: apiary.internal.v1.RestartLease
-	(*RestartRecord)(nil),             // 39: apiary.internal.v1.RestartRecord
-	(*AcquireRestartLease)(nil),       // 40: apiary.internal.v1.AcquireRestartLease
-	(*RecordRestartCompleted)(nil),    // 41: apiary.internal.v1.RecordRestartCompleted
-	(*CommandResult)(nil),             // 42: apiary.internal.v1.CommandResult
-	(*FSMSnapshotState)(nil),          // 43: apiary.internal.v1.FSMSnapshotState
-	(*ConfigArchive)(nil),             // 44: apiary.internal.v1.ConfigArchive
-	nil,                               // 45: apiary.internal.v1.FSMSnapshotState.VmsEntry
-	nil,                               // 46: apiary.internal.v1.FSMSnapshotState.NetworksEntry
-	nil,                               // 47: apiary.internal.v1.FSMSnapshotState.ApiKeysEntry
-	nil,                               // 48: apiary.internal.v1.FSMSnapshotState.JailsEntry
-	nil,                               // 49: apiary.internal.v1.FSMSnapshotState.PendingJoinRequestsEntry
-	nil,                               // 50: apiary.internal.v1.FSMSnapshotState.RestartLeasesEntry
-	nil,                               // 51: apiary.internal.v1.FSMSnapshotState.RestartRecordsEntry
+	(*MigrationEvidence)(nil),         // 32: apiary.internal.v1.MigrationEvidence
+	(*GuestMigration)(nil),            // 33: apiary.internal.v1.GuestMigration
+	(*StartGuestMigration)(nil),       // 34: apiary.internal.v1.StartGuestMigration
+	(*UpdateGuestMigrationPhase)(nil), // 35: apiary.internal.v1.UpdateGuestMigrationPhase
+	(*FinishGuestMigration)(nil),      // 36: apiary.internal.v1.FinishGuestMigration
+	(*PendingJoinRequest)(nil),        // 37: apiary.internal.v1.PendingJoinRequest
+	(*CreatePendingJoinRequest)(nil),  // 38: apiary.internal.v1.CreatePendingJoinRequest
+	(*ApprovePendingJoinRequest)(nil), // 39: apiary.internal.v1.ApprovePendingJoinRequest
+	(*RejectPendingJoinRequest)(nil),  // 40: apiary.internal.v1.RejectPendingJoinRequest
+	(*CancelPendingJoinRequest)(nil),  // 41: apiary.internal.v1.CancelPendingJoinRequest
+	(*PurgeJoinRequest)(nil),          // 42: apiary.internal.v1.PurgeJoinRequest
+	(*RestartLease)(nil),              // 43: apiary.internal.v1.RestartLease
+	(*RestartRecord)(nil),             // 44: apiary.internal.v1.RestartRecord
+	(*AcquireRestartLease)(nil),       // 45: apiary.internal.v1.AcquireRestartLease
+	(*RecordRestartCompleted)(nil),    // 46: apiary.internal.v1.RecordRestartCompleted
+	(*CommandResult)(nil),             // 47: apiary.internal.v1.CommandResult
+	(*FSMSnapshotState)(nil),          // 48: apiary.internal.v1.FSMSnapshotState
+	(*ConfigArchive)(nil),             // 49: apiary.internal.v1.ConfigArchive
+	nil,                               // 50: apiary.internal.v1.FSMSnapshotState.VmsEntry
+	nil,                               // 51: apiary.internal.v1.FSMSnapshotState.NetworksEntry
+	nil,                               // 52: apiary.internal.v1.FSMSnapshotState.ApiKeysEntry
+	nil,                               // 53: apiary.internal.v1.FSMSnapshotState.JailsEntry
+	nil,                               // 54: apiary.internal.v1.FSMSnapshotState.PendingJoinRequestsEntry
+	nil,                               // 55: apiary.internal.v1.FSMSnapshotState.RestartLeasesEntry
+	nil,                               // 56: apiary.internal.v1.FSMSnapshotState.RestartRecordsEntry
+	nil,                               // 57: apiary.internal.v1.FSMSnapshotState.MigrationsEntry
+	nil,                               // 58: apiary.internal.v1.FSMSnapshotState.MigrationsByGuestEntry
 }
 var file_api_internalpb_state_proto_depIdxs = []int32{
 	0,  // 0: apiary.internal.v1.VMDefinition.desired_state:type_name -> apiary.internal.v1.VMState
@@ -4147,49 +5221,57 @@ var file_api_internalpb_state_proto_depIdxs = []int32{
 	29, // 22: apiary.internal.v1.Command.set_jail_desired_state:type_name -> apiary.internal.v1.SetJailDesiredState
 	22, // 23: apiary.internal.v1.Command.set_vm_firewall_rules:type_name -> apiary.internal.v1.SetVMFirewallRules
 	23, // 24: apiary.internal.v1.Command.set_network_name:type_name -> apiary.internal.v1.SetNetworkName
-	33, // 25: apiary.internal.v1.Command.create_pending_join_request:type_name -> apiary.internal.v1.CreatePendingJoinRequest
-	34, // 26: apiary.internal.v1.Command.approve_pending_join_request:type_name -> apiary.internal.v1.ApprovePendingJoinRequest
-	35, // 27: apiary.internal.v1.Command.reject_pending_join_request:type_name -> apiary.internal.v1.RejectPendingJoinRequest
-	36, // 28: apiary.internal.v1.Command.cancel_pending_join_request:type_name -> apiary.internal.v1.CancelPendingJoinRequest
-	37, // 29: apiary.internal.v1.Command.purge_join_request:type_name -> apiary.internal.v1.PurgeJoinRequest
+	38, // 25: apiary.internal.v1.Command.create_pending_join_request:type_name -> apiary.internal.v1.CreatePendingJoinRequest
+	39, // 26: apiary.internal.v1.Command.approve_pending_join_request:type_name -> apiary.internal.v1.ApprovePendingJoinRequest
+	40, // 27: apiary.internal.v1.Command.reject_pending_join_request:type_name -> apiary.internal.v1.RejectPendingJoinRequest
+	41, // 28: apiary.internal.v1.Command.cancel_pending_join_request:type_name -> apiary.internal.v1.CancelPendingJoinRequest
+	42, // 29: apiary.internal.v1.Command.purge_join_request:type_name -> apiary.internal.v1.PurgeJoinRequest
 	30, // 30: apiary.internal.v1.Command.set_jail_hostname:type_name -> apiary.internal.v1.SetJailHostname
-	40, // 31: apiary.internal.v1.Command.acquire_restart_lease:type_name -> apiary.internal.v1.AcquireRestartLease
-	41, // 32: apiary.internal.v1.Command.record_restart_completed:type_name -> apiary.internal.v1.RecordRestartCompleted
-	10, // 33: apiary.internal.v1.CreateAPIKey.key:type_name -> apiary.internal.v1.ApiKey
-	8,  // 34: apiary.internal.v1.CreateNetwork.network:type_name -> apiary.internal.v1.NetworkDefinition
-	5,  // 35: apiary.internal.v1.CreateVM.vm:type_name -> apiary.internal.v1.VMDefinition
-	5,  // 36: apiary.internal.v1.UpdateVM.vm:type_name -> apiary.internal.v1.VMDefinition
-	1,  // 37: apiary.internal.v1.UpdateVMPhase.phase:type_name -> apiary.internal.v1.VMPhase
-	0,  // 38: apiary.internal.v1.SetVMDesiredState.desired_state:type_name -> apiary.internal.v1.VMState
-	7,  // 39: apiary.internal.v1.SetVMFirewallRules.firewall_rules:type_name -> apiary.internal.v1.FirewallRule
-	6,  // 40: apiary.internal.v1.CreateJail.jail:type_name -> apiary.internal.v1.JailDefinition
-	6,  // 41: apiary.internal.v1.UpdateJail.jail:type_name -> apiary.internal.v1.JailDefinition
-	3,  // 42: apiary.internal.v1.UpdateJailPhase.phase:type_name -> apiary.internal.v1.JailPhase
-	2,  // 43: apiary.internal.v1.SetJailDesiredState.desired_state:type_name -> apiary.internal.v1.JailState
-	4,  // 44: apiary.internal.v1.PendingJoinRequest.status:type_name -> apiary.internal.v1.JoinRequestStatus
-	32, // 45: apiary.internal.v1.CreatePendingJoinRequest.request:type_name -> apiary.internal.v1.PendingJoinRequest
-	5,  // 46: apiary.internal.v1.CommandResult.vm:type_name -> apiary.internal.v1.VMDefinition
-	6,  // 47: apiary.internal.v1.CommandResult.jail:type_name -> apiary.internal.v1.JailDefinition
-	32, // 48: apiary.internal.v1.CommandResult.pending_join_request:type_name -> apiary.internal.v1.PendingJoinRequest
-	45, // 49: apiary.internal.v1.FSMSnapshotState.vms:type_name -> apiary.internal.v1.FSMSnapshotState.VmsEntry
-	46, // 50: apiary.internal.v1.FSMSnapshotState.networks:type_name -> apiary.internal.v1.FSMSnapshotState.NetworksEntry
-	47, // 51: apiary.internal.v1.FSMSnapshotState.api_keys:type_name -> apiary.internal.v1.FSMSnapshotState.ApiKeysEntry
-	48, // 52: apiary.internal.v1.FSMSnapshotState.jails:type_name -> apiary.internal.v1.FSMSnapshotState.JailsEntry
-	49, // 53: apiary.internal.v1.FSMSnapshotState.pending_join_requests:type_name -> apiary.internal.v1.FSMSnapshotState.PendingJoinRequestsEntry
-	50, // 54: apiary.internal.v1.FSMSnapshotState.restart_leases:type_name -> apiary.internal.v1.FSMSnapshotState.RestartLeasesEntry
-	51, // 55: apiary.internal.v1.FSMSnapshotState.restart_records:type_name -> apiary.internal.v1.FSMSnapshotState.RestartRecordsEntry
-	5,  // 56: apiary.internal.v1.FSMSnapshotState.VmsEntry.value:type_name -> apiary.internal.v1.VMDefinition
-	8,  // 57: apiary.internal.v1.FSMSnapshotState.NetworksEntry.value:type_name -> apiary.internal.v1.NetworkDefinition
-	10, // 58: apiary.internal.v1.FSMSnapshotState.ApiKeysEntry.value:type_name -> apiary.internal.v1.ApiKey
-	6,  // 59: apiary.internal.v1.FSMSnapshotState.JailsEntry.value:type_name -> apiary.internal.v1.JailDefinition
-	32, // 60: apiary.internal.v1.FSMSnapshotState.PendingJoinRequestsEntry.value:type_name -> apiary.internal.v1.PendingJoinRequest
-	38, // 61: apiary.internal.v1.FSMSnapshotState.RestartLeasesEntry.value:type_name -> apiary.internal.v1.RestartLease
-	39, // 62: apiary.internal.v1.FSMSnapshotState.RestartRecordsEntry.value:type_name -> apiary.internal.v1.RestartRecord
-	63, // [63:63] is the sub-list for method output_type
-	63, // [63:63] is the sub-list for method input_type
-	63, // [63:63] is the sub-list for extension type_name
-	63, // [63:63] is the sub-list for extension extendee
-	0,  // [0:63] is the sub-list for field type_name
+	45, // 31: apiary.internal.v1.Command.acquire_restart_lease:type_name -> apiary.internal.v1.AcquireRestartLease
+	46, // 32: apiary.internal.v1.Command.record_restart_completed:type_name -> apiary.internal.v1.RecordRestartCompleted
+	34, // 33: apiary.internal.v1.Command.start_guest_migration:type_name -> apiary.internal.v1.StartGuestMigration
+	35, // 34: apiary.internal.v1.Command.update_guest_migration_phase:type_name -> apiary.internal.v1.UpdateGuestMigrationPhase
+	36, // 35: apiary.internal.v1.Command.finish_guest_migration:type_name -> apiary.internal.v1.FinishGuestMigration
+	10, // 36: apiary.internal.v1.CreateAPIKey.key:type_name -> apiary.internal.v1.ApiKey
+	8,  // 37: apiary.internal.v1.CreateNetwork.network:type_name -> apiary.internal.v1.NetworkDefinition
+	5,  // 38: apiary.internal.v1.CreateVM.vm:type_name -> apiary.internal.v1.VMDefinition
+	5,  // 39: apiary.internal.v1.UpdateVM.vm:type_name -> apiary.internal.v1.VMDefinition
+	1,  // 40: apiary.internal.v1.UpdateVMPhase.phase:type_name -> apiary.internal.v1.VMPhase
+	0,  // 41: apiary.internal.v1.SetVMDesiredState.desired_state:type_name -> apiary.internal.v1.VMState
+	7,  // 42: apiary.internal.v1.SetVMFirewallRules.firewall_rules:type_name -> apiary.internal.v1.FirewallRule
+	6,  // 43: apiary.internal.v1.CreateJail.jail:type_name -> apiary.internal.v1.JailDefinition
+	6,  // 44: apiary.internal.v1.UpdateJail.jail:type_name -> apiary.internal.v1.JailDefinition
+	3,  // 45: apiary.internal.v1.UpdateJailPhase.phase:type_name -> apiary.internal.v1.JailPhase
+	2,  // 46: apiary.internal.v1.SetJailDesiredState.desired_state:type_name -> apiary.internal.v1.JailState
+	32, // 47: apiary.internal.v1.GuestMigration.evidence:type_name -> apiary.internal.v1.MigrationEvidence
+	32, // 48: apiary.internal.v1.FinishGuestMigration.evidence:type_name -> apiary.internal.v1.MigrationEvidence
+	4,  // 49: apiary.internal.v1.PendingJoinRequest.status:type_name -> apiary.internal.v1.JoinRequestStatus
+	37, // 50: apiary.internal.v1.CreatePendingJoinRequest.request:type_name -> apiary.internal.v1.PendingJoinRequest
+	5,  // 51: apiary.internal.v1.CommandResult.vm:type_name -> apiary.internal.v1.VMDefinition
+	6,  // 52: apiary.internal.v1.CommandResult.jail:type_name -> apiary.internal.v1.JailDefinition
+	37, // 53: apiary.internal.v1.CommandResult.pending_join_request:type_name -> apiary.internal.v1.PendingJoinRequest
+	50, // 54: apiary.internal.v1.FSMSnapshotState.vms:type_name -> apiary.internal.v1.FSMSnapshotState.VmsEntry
+	51, // 55: apiary.internal.v1.FSMSnapshotState.networks:type_name -> apiary.internal.v1.FSMSnapshotState.NetworksEntry
+	52, // 56: apiary.internal.v1.FSMSnapshotState.api_keys:type_name -> apiary.internal.v1.FSMSnapshotState.ApiKeysEntry
+	53, // 57: apiary.internal.v1.FSMSnapshotState.jails:type_name -> apiary.internal.v1.FSMSnapshotState.JailsEntry
+	54, // 58: apiary.internal.v1.FSMSnapshotState.pending_join_requests:type_name -> apiary.internal.v1.FSMSnapshotState.PendingJoinRequestsEntry
+	55, // 59: apiary.internal.v1.FSMSnapshotState.restart_leases:type_name -> apiary.internal.v1.FSMSnapshotState.RestartLeasesEntry
+	56, // 60: apiary.internal.v1.FSMSnapshotState.restart_records:type_name -> apiary.internal.v1.FSMSnapshotState.RestartRecordsEntry
+	57, // 61: apiary.internal.v1.FSMSnapshotState.migrations:type_name -> apiary.internal.v1.FSMSnapshotState.MigrationsEntry
+	58, // 62: apiary.internal.v1.FSMSnapshotState.migrations_by_guest:type_name -> apiary.internal.v1.FSMSnapshotState.MigrationsByGuestEntry
+	5,  // 63: apiary.internal.v1.FSMSnapshotState.VmsEntry.value:type_name -> apiary.internal.v1.VMDefinition
+	8,  // 64: apiary.internal.v1.FSMSnapshotState.NetworksEntry.value:type_name -> apiary.internal.v1.NetworkDefinition
+	10, // 65: apiary.internal.v1.FSMSnapshotState.ApiKeysEntry.value:type_name -> apiary.internal.v1.ApiKey
+	6,  // 66: apiary.internal.v1.FSMSnapshotState.JailsEntry.value:type_name -> apiary.internal.v1.JailDefinition
+	37, // 67: apiary.internal.v1.FSMSnapshotState.PendingJoinRequestsEntry.value:type_name -> apiary.internal.v1.PendingJoinRequest
+	43, // 68: apiary.internal.v1.FSMSnapshotState.RestartLeasesEntry.value:type_name -> apiary.internal.v1.RestartLease
+	44, // 69: apiary.internal.v1.FSMSnapshotState.RestartRecordsEntry.value:type_name -> apiary.internal.v1.RestartRecord
+	33, // 70: apiary.internal.v1.FSMSnapshotState.MigrationsEntry.value:type_name -> apiary.internal.v1.GuestMigration
+	71, // [71:71] is the sub-list for method output_type
+	71, // [71:71] is the sub-list for method input_type
+	71, // [71:71] is the sub-list for extension type_name
+	71, // [71:71] is the sub-list for extension extendee
+	0,  // [0:71] is the sub-list for field type_name
 }
 
 func init() { file_api_internalpb_state_proto_init() }
@@ -4226,6 +5308,9 @@ func file_api_internalpb_state_proto_init() {
 		(*Command_SetJailHostname)(nil),
 		(*Command_AcquireRestartLease)(nil),
 		(*Command_RecordRestartCompleted)(nil),
+		(*Command_StartGuestMigration)(nil),
+		(*Command_UpdateGuestMigrationPhase)(nil),
+		(*Command_FinishGuestMigration)(nil),
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
@@ -4233,7 +5318,7 @@ func file_api_internalpb_state_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_api_internalpb_state_proto_rawDesc), len(file_api_internalpb_state_proto_rawDesc)),
 			NumEnums:      5,
-			NumMessages:   47,
+			NumMessages:   54,
 			NumExtensions: 0,
 			NumServices:   0,
 		},
