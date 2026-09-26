@@ -48,6 +48,28 @@ through so a `setup-quick` failure is legible rather than a black box.
 
 ## 0. Gotchas to know before you start
 
+**`managerd`'s `rpc_addr` is a per-node DNS hostname, not `0.0.0.0`, and
+the failure when you get it wrong looks exactly like a TLS fault.** This
+step used to tell you to write `"rpc_addr": "0.0.0.0:17700"`. That
+guidance is withdrawn (ADR-0139), because `rpc_addr` is not only the
+address `managerd` binds - it is also the address `raftd` *dials* on this
+same node to confirm a restart to its local `managerd` (ADR-0125), and on
+FreeBSD dialing `0.0.0.0:17700` is connection-refused. A four-node Colony
+configured that way logged, live and per-node:
+
+```
+cannot reach managerd at 0.0.0.0:17700 (connecting to 0.0.0.0:17700: dial tcp 0.0.0.0:17700: connect: connection refused)
+```
+
+which reads like a certificate or trust-anchor problem and is not one at
+all. Set it to this node's own DNS name instead - `brood.lab3.home.arpa`
+on `brood` - and give every Comb's `frontend`/`restshimd` the same name
+for their `manager_addr`. The hostname is not a style preference: this
+node's serving certificate carries SANs `IP:127.0.0.1` and
+`DNS:<node>.lab3.home.arpa` and no SAN for its LAN address, so the
+hostname is the only host it can be verified against. See Step 8 and
+ADR-0139 for the full reasoning.
+
 **`go build ./...` does not produce a binary.** With multiple `main`
 packages in this module, `go build ./...` only verifies everything
 compiles and discards the result - it will not leave `raftd`,
@@ -320,6 +342,14 @@ just omit the key:
 Replace `<this-host-address>` with this host's real, reachable address.
 Do not use `0.0.0.0`: Apiary also advertises this value to Raft peers.
 
+That warning applies to `raftd`'s `raft_bind` on **17600** and to nothing
+else in this document - Raft peer transport is a separate thing from
+`managerd`'s manager RPC on **17700**, and the two fields have different
+rules. Here the wildcard is wrong because the address is *advertised* to
+peers. `managerd`'s `rpc_addr` on 17700 has the opposite problem
+(Step 8): it is not advertised, but it is *dialed locally*, so the
+wildcard is wrong there too - for a completely different reason.
+
 Run it in the foreground once to confirm a clean single-node leader
 election in the output, `Ctrl-C`, then start it via rc.d (Step 6 must
 already have installed the binary to `/usr/local/libexec/apiary/raftd`
@@ -379,7 +409,7 @@ ${EDITOR:-vi} /usr/local/etc/apiary/managerd.json
 ```json
 {
   "raftd_socket": "/var/run/apiary/raftd.sock",
-  "rpc_addr": "0.0.0.0:17700",
+  "rpc_addr": "brood.lab3.home.arpa:17700",
   "node_id": "<this-node-id>",
   "zfs_base": "<your-pool-name>/apiary",
   "bhyve_bootrom": "/usr/local/share/uefi-firmware/BHYVE_UEFI.fd",
@@ -390,6 +420,40 @@ ${EDITOR:-vi} /usr/local/etc/apiary/managerd.json
   "tls_key": "/usr/local/etc/apiary-tls/key.pem"
 }
 ```
+
+**`rpc_addr` is this node's own DNS name, and that is not
+interchangeable with a wildcard or a LAN address** (ADR-0139). This field
+does three separate jobs:
+
+1. It is the address `managerd` binds with `net.Listen`, so peers can
+   reach this Comb's external RPC API.
+2. It is a **local dial target**: `cmd/raftd/confirm.go` reads this same
+   `rpc_addr` out of this file and dials it, on this node, to confirm a
+   pending `apiary_raftd` restart to this node's own `managerd`. An
+   unspecified address is a legal bind and an illegal dial target - it
+   binds fine and then refuses the connection - so `0.0.0.0` strands
+   every restart confirmation.
+3. It supplies the **port only** of the address other Combs use to reach
+   this one. The host half of that is derived independently, as
+   `node_id` + `peer_hostname_suffix` (`frontend.json`'s own field for
+   the cluster overview page's peer dials), so the host is never
+   advertised from this field.
+
+Use the node's DNS name rather than its numeric LAN address
+(`10.90.0.94`) because of what the certificate can verify. The serving
+certificate Step 6's `make setup`/`setup-tls` generated carries
+`subjectAltName=IP:127.0.0.1,DNS:$(hostname)` and nothing else.
+`cmd/raftd/confirm.go` leaves its TLS `serverName` empty, so Go verifies
+that certificate against whatever host was dialed - so neither a
+wildcard nor a bare `10.90.0.94` can verify, while
+`brood.lab3.home.arpa` verifies because it is the SAN that is there.
+Point `NODE_RPC_ADDR` at the same name if you use `make setup-quick`.
+
+One consequence worth knowing before you write Step 9: a listener bound
+to the node's own name resolves to that name's LAN address, so it serves
+LAN clients and **deliberately does not serve `127.0.0.1`**. `frontend`
+and `restshimd` must therefore name the same hostname in `manager_addr`,
+not loopback.
 
 **TLS is mandatory here, not an afterthought reserved for Step 11's
 PAM login** - `tls_cert`/`tls_key` above already point at the
@@ -441,8 +505,23 @@ cat /var/log/apiary/managerd.log
 ps auxww | grep managerd
 ```
 
-A clean log shows one line: `managerd: listening on 0.0.0.0:17700
-(node-id=..., raftd-socket=..., ...)` and nothing after it.
+A clean log shows one line: `managerd: listening on
+brood.lab3.home.arpa:17700 (node-id=..., raftd-socket=..., ...)` and
+nothing after it. The host in that line is whatever `rpc_addr` says, so
+if it reads `0.0.0.0:17700` you still have the withdrawn wildcard from
+this step's first warning, and a `raftd` log on this same node is
+already showing `cannot reach managerd at 0.0.0.0:17700 (connecting to
+0.0.0.0:17700: dial tcp 0.0.0.0:17700: connect: connection refused)`.
+That message is an address-role failure, not a TLS one: it is `raftd`
+trying to use the bind address as a dial target, and `0.0.0.0` is
+unroutable for a client. Fix `rpc_addr` and restart `managerd`; do not go
+looking at certificate trust.
+
+Note also that `listening on` is a bind confirmation only. The
+certificate check that actually bites is the one on the *client* side,
+so a `managerd` that starts cleanly can still leave `frontend`,
+`restshimd` and `raftd` unable to connect - which is why Step 9 uses the
+same hostname for `manager_addr` rather than `127.0.0.1`.
 
 ## 9. Start `frontend` and `restshimd`
 
@@ -467,7 +546,7 @@ ${EDITOR:-vi} /usr/local/etc/apiary/frontend.json
 
 ```json
 {
-  "manager_addr": "127.0.0.1:17700",
+  "manager_addr": "brood.lab3.home.arpa:17700",
   "http_addr": "0.0.0.0:8080",
   "manager_tls": true,
   "manager_tls_ca": "/usr/local/etc/apiary-tls/cert.pem",
@@ -475,6 +554,21 @@ ${EDITOR:-vi} /usr/local/etc/apiary/frontend.json
   "tls_key": "/usr/local/etc/apiary-tls/key.pem"
 }
 ```
+
+`manager_addr` is this node's own name and must match Step 8's
+`rpc_addr` host exactly. It is not `127.0.0.1` and it is not copied
+from a wildcard: a managerd listening on its own DNS name resolves to
+its LAN address and does not serve loopback (ADR-0139), and
+`manager_tls_ca` only establishes trust in the certificate - it does
+not tell Go which name the certificate has to match, so the dialed host
+still has to be a SAN.
+
+`http_addr` **is** deliberately `0.0.0.0`, and this is the one wildcard
+in these two services that is correct. The web UI is the operator's
+browser surface: it is meant to be reachable from a LAN, and Step 10
+opens it from another machine. Nothing inside the Colony dials
+`frontend` either, so - unlike `managerd` - this address has no
+dial-target role to break. Reach it at `https://<this-host-address>:8080`.
 
 `manager_tls`/`manager_tls_ca` are required here, not optional -
 `managerd` now always serves its external RPC API over TLS (Step 8),
@@ -502,8 +596,8 @@ ${EDITOR:-vi} /usr/local/etc/apiary/restshimd.json
 
 ```json
 {
-  "manager_addr": "127.0.0.1:17700",
-  "http_addr": "0.0.0.0:8081",
+  "manager_addr": "brood.lab3.home.arpa:17700",
+  "http_addr": "127.0.0.1:8081",
   "manager_tls": true,
   "manager_tls_ca": "/usr/local/etc/apiary-tls/cert.pem",
   "tls_cert": "/usr/local/etc/apiary-tls/cert.pem",
@@ -511,8 +605,47 @@ ${EDITOR:-vi} /usr/local/etc/apiary/restshimd.json
 }
 ```
 
-Same reasoning as `frontend` above - `manager_tls`/`manager_tls_ca`
-are required now that `managerd` always serves TLS, not optional.
+`manager_addr` and `manager_tls*` are for the same reasons as
+`frontend` above - same hostname as Step 8's `rpc_addr`, same mandatory
+TLS, same certificate-name requirement.
+
+**`http_addr` is `127.0.0.1:8081`, not `0.0.0.0:8081`.** This reverses
+what the shipped sample and this step used to say, and
+`internal/restshimdconfig`'s own built-in default is already
+`127.0.0.1:8081` - the documentation was contradicting the code. Four
+things make loopback the right answer, and none of them is "it is more
+secure in general":
+
+- **Nothing inside the Colony ever calls `restshimd`.** The web UI has
+  its own conversion path; `raftd`, `managerd` and `apiaryinstall`
+  never dial it. Its only intended clients are external tooling -
+  `curl`, a CI job, a future provider.
+- **It is a full read/write control API.** `/v1/vms`, `/v1/jails` and
+  `/v1/networks` all expose create, update, delete and migrate, and
+  `POST /v1/isos` uploads install media. Exposed on a LAN address that
+  is a colony-wide control surface, not a read-only status endpoint.
+- **It has no authentication of its own.** `restshim` deliberately holds
+  no static key: it forwards each caller's own `Authorization` header
+  through to `managerd` unchanged (ADR-0024). Its entire security
+  boundary is `managerd`'s per-key auth (ADR-0023), so on a Colony with
+  no API key configured yet the header is decorative and the port is
+  open to anyone who can reach it.
+- **Loopback is where its clients already are, or can cheaply be.**
+  Reach it remotely through an SSH local forward:
+
+  ```bash
+  ssh -L 8081:127.0.0.1:8081 brood.lab3.home.arpa
+  ```
+
+  then `curl` against `127.0.0.1:8081` locally, with the real API key
+  attached. Only consider a LAN bind for `8081` once `managerd` API
+  keys are genuinely configured and the keys are real credentials -
+  not placeholder text.
+
+Contrast `frontend` on `8080` immediately above: that one is meant to be
+LAN-exposed, because it is the browser UI a human actually uses. Same
+host, same software family, opposite exposure decisions, for that
+reason and no other.
 
 ```bash
 service apiary_restshimd start

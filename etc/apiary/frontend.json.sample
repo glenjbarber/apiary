@@ -8,10 +8,19 @@
 // a realistic default or an empty value you may fill in - not
 // commented out - so the stripped result is a complete, valid config.
 {
-  // TCP address of managerd's external RPC API.
-  "manager_addr": "127.0.0.1:17700",
+  // TCP address of managerd's external RPC API. Must match this
+  // node's own managerd.json rpc_addr exactly, hostname and all
+  // (ADR-0139) - 127.0.0.1 does not work once rpc_addr names the
+  // node's own DNS name, because such a listener deliberately does
+  // not serve loopback. The hostname is also the only host managerd's
+  // certificate carries a matching DNS SAN for; manager_tls_ca only
+  // establishes trust in the certificate, not which name it must
+  // match.
+  "manager_addr": "<this-node-hostname>:17700",
 
-  // Address to serve the web UI on.
+  // Address to serve the web UI on. 0.0.0.0 is deliberate and correct
+  // here: the web UI is the operator's browser-facing surface and is
+  // meant to be reachable from the LAN. The port is fixed (ADR-0108).
   "http_addr": "0.0.0.0:8080",
 
   // Dial managerd over TLS instead of plaintext. managerd always

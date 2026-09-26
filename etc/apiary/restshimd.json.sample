@@ -13,11 +13,33 @@
 // handler forwards unchanged to managerd. There is no field for that
 // here; it travels in each request's own Authorization header.
 {
-  // TCP address of managerd's external RPC API.
-  "manager_addr": "127.0.0.1:17700",
+  // TCP address of managerd's external RPC API. Must match this
+  // node's own managerd.json rpc_addr exactly, hostname and all
+  // (ADR-0139) - 127.0.0.1 does not work once rpc_addr names the
+  // node's own DNS name, because such a listener deliberately does
+  // not serve loopback. The hostname is also the only host managerd's
+  // certificate carries a matching DNS SAN for; manager_tls_ca only
+  // establishes trust in the certificate, not which name it must
+  // match.
+  "manager_addr": "<this-node-hostname>:17700",
 
-  // Address to serve the REST API on.
-  "http_addr": "0.0.0.0:8081",
+  // Address to serve the REST API on. 127.0.0.1, not 0.0.0.0, and
+  // that matches internal/restshimdconfig's own built-in default.
+  // Nothing inside the Colony ever dials restshimd - the web UI has
+  // its own conversion path, and raftd, managerd and apiaryinstall
+  // never call it - so its only intended clients are external
+  // tooling: curl, CI, a future provider. It is a full read/write
+  // control API (create/update/delete/migrate/ISO-upload across VMs,
+  // jails and networks) with no authentication of its own; it just
+  // forwards each caller's own Authorization header to managerd, so
+  // its entire security boundary is managerd's per-key auth. Remote
+  // callers use an SSH local forward, e.g.
+  //   ssh -L 8081:127.0.0.1:8081 <node>
+  // Exposing this on the LAN is only worth considering once real
+  // managerd API keys exist - before then the Authorization header is
+  // decorative and the port is an unauthenticated control surface.
+  // The port is fixed (ADR-0108).
+  "http_addr": "127.0.0.1:8081",
 
   // Dial managerd over TLS instead of plaintext. managerd always
   // serves TLS by default now (see managerd.json.sample's own

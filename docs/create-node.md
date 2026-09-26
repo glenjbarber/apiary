@@ -22,6 +22,10 @@ For the complete historical reference and troubleshooting notes, see
 - Decide the host's stable `node_id`, routable address, ZFS pool, and uplink
   interface before writing configuration. Do not use placeholder text as a
   real `node_id`: it can be committed to persistent Raft state.
+- Decide this host's **DNS name** before writing configuration. `managerd`'s
+  `rpc_addr` is that name, not a wildcard and not a LAN address, and every
+  Comb's `frontend` and `restshimd` use the same name for their
+  `manager_addr` — see Step 6 and ADR-0139.
 
 ## 1. Get the source and build
 
@@ -171,7 +175,7 @@ bridge, uplink, firmware, image directory, and local TLS paths:
 ```json
 {
   "raftd_socket": "/var/run/apiary/raftd.sock",
-  "rpc_addr": "0.0.0.0:17700",
+  "rpc_addr": "brood.lab3.home.arpa:17700",
   "node_id": "<stable-node-id>",
   "zfs_base": "<pool-name>/apiary",
   "bhyve_bootrom": "/usr/local/share/uefi-firmware/BHYVE_UEFI.fd",
@@ -182,6 +186,36 @@ bridge, uplink, firmware, image directory, and local TLS paths:
   "tls_key": "/usr/local/etc/apiary-tls/key.pem"
 }
 ```
+
+Replace `brood.lab3.home.arpa` with **this host's own DNS name**. Do not
+use `0.0.0.0` and do not use the numeric LAN address.
+
+`rpc_addr` does three jobs, not one (ADR-0139). It is what `managerd`
+binds with `net.Listen`; it is also the address `cmd/raftd/confirm.go`
+*dials*, on this host, to confirm a pending `raftd` restart to this
+node's own `managerd`; and it contributes only the port half of the
+address peers use to reach this Comb — their host half is built
+independently as `node_id` plus `peer_hostname_suffix`. An unspecified
+address is a legal bind and an illegal dial target, which is the entire
+reason the wildcard is wrong: `raftd` would bind its own managerd fine
+and then be refused every time it tried to connect, logging
+
+```
+cannot reach managerd at 0.0.0.0:17700 (connecting to 0.0.0.0:17700: dial tcp 0.0.0.0:17700: connect: connection refused)
+```
+
+which reads as a TLS fault and is not one.
+
+The numeric LAN address fails for a different reason. Step 4's
+certificate carries `subjectAltName=IP:127.0.0.1,DNS:$(hostname)` and
+no SAN for the LAN address, and `cmd/raftd/confirm.go` leaves its TLS
+`serverName` empty, so Go verifies that certificate against whatever host
+was dialed. The DNS name is the one host it can be verified against.
+
+A listener bound to the node's own name resolves to that name's LAN
+address, so it serves LAN clients but deliberately does not serve
+`127.0.0.1`. Step 7's `manager_addr` therefore repeats the hostname
+rather than pointing at loopback.
 
 ```bash
 service apiary_managerd start
@@ -213,7 +247,7 @@ Both services must trust managerd's certificate:
 
 ```json
 {
-  "manager_addr": "127.0.0.1:17700",
+  "manager_addr": "brood.lab3.home.arpa:17700",
   "http_addr": "0.0.0.0:8080",
   "manager_tls": true,
   "manager_tls_ca": "/usr/local/etc/apiary-tls/cert.pem",
@@ -222,7 +256,59 @@ Both services must trust managerd's certificate:
 }
 ```
 
-Use a different `http_addr` port for restshimd, normally `8081`.
+`manager_addr` repeats this node's own DNS name, matching Step 6's
+`rpc_addr` exactly. Not `127.0.0.1` — a managerd listening on its own
+name does not serve loopback (ADR-0139). Not a wildcard either:
+`manager_tls_ca` establishes trust in the certificate, not which name
+that certificate must match, so the dialed host still has to be a SAN.
+
+`http_addr` here is `0.0.0.0:8080` for `frontend`, and that wildcard is
+deliberate. The web UI is the operator's browser surface, reachable from
+a LAN, and Step 8 opens it from another machine.
+
+restshimd is configured separately, and differently:
+
+```json
+{
+  "manager_addr": "brood.lab3.home.arpa:17700",
+  "http_addr": "127.0.0.1:8081",
+  "manager_tls": true,
+  "manager_tls_ca": "/usr/local/etc/apiary-tls/cert.pem",
+  "tls_cert": "/usr/local/etc/apiary-tls/cert.pem",
+  "tls_key": "/usr/local/etc/apiary-tls/key.pem"
+}
+```
+
+**restshimd serves on `127.0.0.1:8081`, not `0.0.0.0:8081`** — which
+reverses what the shipped sample and this step used to say, and matches
+`internal/restshimdconfig`'s own built-in default, so the documentation
+had been contradicting the code. Same `manager_addr` and same
+`manager_tls` requirements as frontend; the different exposure is
+deliberate:
+
+- Nothing inside the Colony ever calls restshimd. The web UI has its own
+  conversion path, and raftd, managerd, and apiaryinstall never dial it.
+  Its only intended clients are external tooling such as `curl`, CI, or a
+  future provider.
+- It is a full read/write control API — create, update, delete, migrate,
+  and ISO upload across VMs, jails, and networks. Not a read-only status
+  endpoint.
+- It has no authentication of its own. It holds no static key; it
+  forwards each caller's own `Authorization` header through to managerd
+  unchanged (ADR-0024), so its entire security boundary is managerd's
+  per-key auth (ADR-0023).
+
+Remote callers use an SSH local forward rather than a LAN bind:
+
+```bash
+ssh -L 8081:127.0.0.1:8081 brood.lab3.home.arpa
+```
+
+Only consider LAN exposure for `8081` once managerd API keys are
+actually configured. Until then the `Authorization` header is decorative
+and the port is an unauthenticated control surface. `frontend` on `8080`
+is the opposite case: that one is meant to be LAN-exposed, because it is
+the UI a human uses.
 
 ```bash
 service apiary_frontend start

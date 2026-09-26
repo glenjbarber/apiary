@@ -58,3 +58,45 @@ unrelated identity/socket settings, rejection of a remote address, endpoint
 display, and the frontend request path. The normal repository-wide package
 tests also contain socket-listening integration tests that require a host
 where local TCP listeners are permitted.
+
+## Amendment (2026-09-26): the address this ADR validates is not the address that works
+
+The Decision section above is left exactly as written and as correct as it
+was when written. This section records a conflict between it and a later
+decision, rather than editing the original away.
+
+`validateLocalBindAddress` accepts three shapes: a wildcard, loopback, or
+a numeric address currently assigned to one of this Comb's interfaces. It
+rejects a hostname, with `rpc_addr host %q must be a numeric address
+assigned to this Comb`. ADR-0139 establishes that the per-node DNS
+hostname is the only value that works for `rpc_addr` in a real Colony,
+because `cmd/raftd/confirm.go` (ADR-0125) uses the same string as a local
+dial target and leaves its TLS `serverName` empty — so the dialed host has
+to be a SAN on the serving certificate, and this project's certificates
+carry `IP:127.0.0.1` and `DNS:<node>` and no LAN-address SAN.
+
+So the validator's "numeric address assigned to this Comb" clause, and
+even its explicit retention of wildcard, both accept values that cannot
+function as a dial target, while rejecting the one value that can. That
+is not an oversight in the original reasoning — at the time, wildcard and
+loopback genuinely were the established single-node configurations, as
+the comment above says — but the premise no longer holds once ADR-0125
+added the second role and ADR-0139 settled the certificate constraint.
+
+**Status: resolved by the change that accompanies this amendment**, on the
+same reasoning ADR-0139 records. `validateLocalBindAddress` now accepts a
+DNS hostname, skipping the interface-inventory clause for a name (the
+inventory holds only numeric addresses, so there is nothing in it to match
+a name against, and resolving the name here would make a legitimate save
+depend on DNS being up at that instant). A numeric non-loopback address
+still goes through the inventory check unchanged — that clause is a real
+anti-typo guard and is not weakened. The Machine page's `HostOptions` in
+`internal/frontend/convert.go` now seeds this Comb's own names, which are
+the values that verify. The wildcard remains a legal bind there; what
+changed is that it is no longer *the* documented default, and
+`internal/addrpolicy` now rejects it outright in the fields that dial.
+
+Note this amendment is documentation of a decision, not of a UI redesign.
+The broader `UpdateNodeConfig` Machine Configuration panel never carried
+`rpc_addr` at all (ADR-0100), so there is no second place that needs the
+same fix.
