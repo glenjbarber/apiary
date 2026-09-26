@@ -10,6 +10,14 @@
 #               describes the bytes, and -version has to say so
 #   partial   - an id with no date, i.e. a hand-rolled ldflags line; must
 #               read "built=unknown" rather than omitting the field
+#
+# PORTABILITY: no GNU-make-only flags. FreeBSD's /usr/bin/make is BSD
+# make, which rejects --no-print-directory (and every other GNU
+# long option) by printing its usage and exiting non-zero - so a
+# verification script that passes one fails on the platform it is
+# meant to be verifying, while passing on the Mac. That is the same
+# class of bug as the $(shell) stamp: verified in one place, broken
+# in the other.
 set -e
 cd "$(dirname "$0")/.."
 PKG=github.com/glenjbarber/apiary/internal/buildinfo
@@ -34,7 +42,7 @@ done
 echo "=== ldflags the Makefile would use ==="
 scripts/build-ldflags.sh
 scripts/build-ldflags.sh --id
-make --no-print-directory check-ldflags
+make check-ldflags
 echo
 
 for b in $BINS; do
@@ -69,4 +77,4 @@ fi
 
 echo
 echo "=== the same commit built twice must be the same bytes ==="
-make --no-print-directory check-reproducible
+make check-reproducible
