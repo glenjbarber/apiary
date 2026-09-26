@@ -16,15 +16,11 @@ import (
 	"encoding/hex"
 	"fmt"
 	"io"
-	"net/http"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
 	"time"
-
-	"github.com/glenjbarber/apiary/internal/freebsdimg"
 )
 
 // Info describes a stored ISO.

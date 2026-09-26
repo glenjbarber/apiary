@@ -6,13 +6,13 @@ package freebsdimg
 import (
 	"crypto/sha256"
 	"encoding/hex"
-	"errors"
+	
 	"fmt"
 	"io"
 	"net/http"
 	"os"
 	"path/filepath"
-	"strings"
+	
 	"sync"
 )
 
@@ -237,9 +237,8 @@ func (m *Manager) decompressXZ(src, dst string) error {
 	// Use the system's xz(1) utility for decompression - it's
 	// universally available on FreeBSD and handles streaming
 	// decompression efficiently without loading the whole file into memory.
-	cmd := []string{"xz", "-dc", src}
 	// We can't easily use runCmd here without importing internal/bhyve,
-	// so use os/exec directly.
+	// so use os/exec directly via decompressXZCommand.
 	// Note: This is a simple implementation; in production we might want
 	// a pure-Go xz decoder to avoid the external dependency.
 	return decompressXZCommand(src, dst)
