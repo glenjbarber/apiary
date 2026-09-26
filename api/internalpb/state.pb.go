@@ -428,8 +428,14 @@ type VMDefinition struct {
 	// disk - only one can apply). Empty means today's behavior (a blank
 	// disk, or base_image_name's own file copy if that's set instead).
 	CloneFromSnapshot string `protobuf:"bytes,19,opt,name=clone_from_snapshot,json=cloneFromSnapshot,proto3" json:"clone_from_snapshot,omitempty"`
-	unknownFields     protoimpl.UnknownFields
-	sizeCache         protoimpl.SizeCache
+	// hostname, if set, is the VM's hostname (may be an FQDN). It is not
+	// used for any operational purpose by Apiary - the ID and display name
+	// are derived from it on the creation page for operator convenience,
+	// but the hostname itself is stored and returned for reference. See
+	// the jail hostname field for the analogous concept.
+	Hostname      string `protobuf:"bytes,20,opt,name=hostname,proto3" json:"hostname,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *VMDefinition) Reset() {
@@ -591,6 +597,13 @@ func (x *VMDefinition) GetCloudflarePort() uint32 {
 func (x *VMDefinition) GetCloneFromSnapshot() string {
 	if x != nil {
 		return x.CloneFromSnapshot
+	}
+	return ""
+}
+
+func (x *VMDefinition) GetHostname() string {
+	if x != nil {
+		return x.Hostname
 	}
 	return ""
 }
@@ -3753,7 +3766,7 @@ var File_api_internalpb_state_proto protoreflect.FileDescriptor
 
 const file_api_internalpb_state_proto_rawDesc = "" +
 	"\n" +
-	"\x1aapi/internalpb/state.proto\x12\x12apiary.internal.v1\"\xda\x05\n" +
+	"\x1aapi/internalpb/state.proto\x12\x12apiary.internal.v1\"\xf6\x05\n" +
 	"\fVMDefinition\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x14\n" +
@@ -3778,7 +3791,8 @@ const file_api_internalpb_state_proto_rawDesc = "" +
 	"\x0ffirewall_paused\x18\x10 \x01(\bR\x0efirewallPaused\x12/\n" +
 	"\x13cloudflare_hostname\x18\x11 \x01(\tR\x12cloudflareHostname\x12'\n" +
 	"\x0fcloudflare_port\x18\x12 \x01(\rR\x0ecloudflarePort\x12.\n" +
-	"\x13clone_from_snapshot\x18\x13 \x01(\tR\x11cloneFromSnapshot\"\xce\x03\n" +
+	"\x13clone_from_snapshot\x18\x13 \x01(\tR\x11cloneFromSnapshot\x12\x1a\n" +
+	"\bhostname\x18\x14 \x01(\tR\bhostname\"\xce\x03\n" +
 	"\x0eJailDefinition\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x1a\n" +

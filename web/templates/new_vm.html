@@ -10,9 +10,9 @@
   <form class="create-vm panel" style="margin-top:1rem" hx-post="/vms" hx-target="#create-error" hx-swap="innerHTML">
     <fieldset class="form-section">
       <legend>Identity</legend>
-      <p class="field-help">Hostname is a convenience input, not stored by Apiary - it may be a full FQDN (e.g. <code>sting-vm-1.lab3.home.arpa</code>). The ID and display name below are derived from it automatically and can be overridden if needed.</p>
+      <p class="field-help">Hostname may be a full FQDN (e.g. <code>sting-vm-1.lab3.home.arpa</code>). The ID and display name below are derived from it automatically and can be overridden if needed. The hostname is stored with the VM for reference.</p>
       <div class="form-grid">
-        <label>Hostname <input type="text" id="vm-hostname" autocomplete="off" placeholder="sting-vm-1.lab3.home.arpa" title="Not stored by Apiary - a convenience for deriving the ID and Display name below. May be a full FQDN."></label>
+        <label>Hostname <input type="text" name="hostname" id="vm-hostname" autocomplete="off" placeholder="sting-vm-1.lab3.home.arpa" title="Stored with the VM for reference. May be a full FQDN. Drives the auto-derived ID and Display name below unless you override them."></label>
         <label>ID <span class="field-help" id="vm-id-help">Auto-derived from Hostname - edit to override.</span>
           <input type="text" name="id" id="vm-id" required autocomplete="off" placeholder="web-01" title="Stable identifier used by Apiary and bhyve - cannot be changed after creation. Only alphanumerics, '-', and '_' are allowed, max 64 characters. Auto-derived from Hostname unless edited directly.">
         </label>

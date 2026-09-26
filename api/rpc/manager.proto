@@ -646,6 +646,13 @@ message VMDefinition {
   // VMDefinition field - see its doc comment for the full semantics.
   // "<source_vm_id>@<snapshot_name>"; only consulted on first creation.
   string clone_from_snapshot = 19;
+
+  // hostname, if set, is the VM's hostname (may be an FQDN). It is not
+  // used for any operational purpose by Apiary - the ID and display name
+  // are derived from it on the creation page for operator convenience,
+  // but the hostname itself is stored and returned for reference. See
+  // ADR-0006 (jail hostname) for the analogous jail field.
+  string hostname = 20;
 }
 
 // JailState mirrors api/internalpb's JailState.
