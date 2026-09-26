@@ -274,6 +274,12 @@ type pageData struct {
 	// dropdowns - source VM, then one of its snapshots.
 	CloneSources []cloneSourceView
 
+	// Guided backs the one guided creation wizard (create_guided.html),
+	// which replaced the separate new-VM and new-Jail pages and is
+	// served from all three of /create, /vms/new and /jails/new. Only
+	// populated for that page - see create_guided.go.
+	Guided *guidedPageView
+
 	// NodeConfig/NodeConfigFormError back the Machine Configuration
 	// page's uplink section (ADR-0049) - GetNodeConfig's current
 	// snapshot and any Update error, rendered the same way
@@ -602,6 +608,7 @@ func NewServer(client rpcpb.ManagerServiceClient, auth Authenticator, roleMap ma
 		"cloneSourceSnapshotsJSON": cloneSourceSnapshotsJSON,
 		"machineSections":          func() []machineSection { return machineSections },
 		"hostOnly":                 hostOnly,
+		"placementUnavailable":     placementUnavailable,
 	}).ParseFS(web.FS, "templates/*.html")
 	if err != nil {
 		return nil, fmt.Errorf("frontend: parsing templates: %w", err)
@@ -900,9 +907,16 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /why-not", s.handleWhyNotPage)
 	s.mux.HandleFunc("GET /resilience-coverage", s.handleCoveragePage)
 
-	// Operator: VM/jail/network/ISO lifecycle - including the create-VM
-	// form's own GET, since a Viewer has nothing useful to do with a
-	// form whose POST it can't reach anyway.
+	// Operator: VM/jail/network/ISO lifecycle - including the
+	// create-VM form's own GET, since a Viewer has nothing useful to do
+	// with a form whose POST it can't reach anyway.
+	//
+	// The one guided creation wizard (create_guided.html) replaced the
+	// two separate create pages; all three GETs below render it, so
+	// every existing link, bookmark and test reaches the same flow
+	// with step 1 already answered. The POST endpoints and the RPCs
+	// behind them are unchanged.
+	s.mux.HandleFunc("GET /create", s.requireRole(manager.RoleOperator, s.handleCreateGuidedPage))
 	s.mux.HandleFunc("GET /vms/new", s.requireRole(manager.RoleOperator, s.handleNewVMPage))
 	s.mux.HandleFunc("POST /vms", s.requireRole(manager.RoleOperator, s.handleCreateVM))
 	s.mux.HandleFunc("DELETE /vms/{id}", s.requireRole(manager.RoleOperator, s.handleDeleteVM))
@@ -1350,19 +1364,15 @@ func (s *Server) handleImagesPage(w http.ResponseWriter, r *http.Request) {
 // fetches it automatically at provisioning time (ADR-0041) - and the
 // page's own JS uses each row's MissingNodes to show a "will be fetched
 // from a peer" cue as the Node ID picker changes.
+// handleNewVMPage is the create-VM entry point (/vms/new). It is a
+// wrapper over the one guided wizard rather than a page of its own:
+// the separate create pages were replaced by create_guided.html, and
+// this route survives unchanged so every existing "Create VM" link,
+// bookmark and test still lands on the flow with the kind already
+// chosen. The data it needs and the fail-soft conventions around each
+// fetch are renderGuidedCreatePage's (create_guided.go).
 func (s *Server) handleNewVMPage(w http.ResponseWriter, r *http.Request) {
-	var nodes []string
-	var localNodeID string
-	if statusResp, err := s.client.Status(r.Context(), &rpcpb.StatusRequest{}); err == nil {
-		nodes = statusResp.GetKnownNodeIds()
-		localNodeID = statusResp.GetManagerNodeId()
-	}
-	clusterISOs, _ := s.currentClusterISOs(r)
-	networks, _ := s.currentNetworks(r)
-	placements := s.currentPlacementHives(r, nodes, localNodeID)
-	existingVMs, _ := s.currentVMs(r, "id", "asc")
-	cloneSources := s.currentCloneSources(r, existingVMs)
-	s.render(w, "new_vm_page", s.withAuthFields(r, pageData{Nodes: nodes, LocalNodeID: localNodeID, ClusterISOs: clusterISOs, Networks: networks, PlacementHives: placements, CloneSources: cloneSources, ActivePage: "vms"}))
+	s.renderGuidedCreatePage(w, r, guidedKindVM)
 }
 
 // currentNetworks fetches the current list of networks, returning an
@@ -1455,17 +1465,28 @@ func (s *Server) renderVMRows(w http.ResponseWriter, errMsg string, vms []vmView
 	s.render(w, "vm_rows", pageData{Error: errMsg, VMs: vms, CanOperate: canOperate, LocalNodeID: localNodeID})
 }
 
-// handleCreateVM lives on its own page (/vms/new, see new_vm.html) now
-// that VMs/Images/New VM are separate pages - there's no VM table on
-// this page to refresh, so a validation/application error just renders
-// directly into the form's own #create-error target. On success, an
-// HX-Redirect tells htmx to navigate the browser to the VMs page
-// outright, where the new VM shows up (starting at "pending", per
-// ADR-0016's reconciliation phase) via that page's own normal render -
-// simpler and more honest than trying to fake a VMs-table view here.
+// handleCreateVM lives on the guided creation page (create_guided.html,
+// reached from both /create and /vms/new) now that VM and jail
+// creation share one wizard - there's no VM table on this page to
+// refresh, so a validation/application error just renders directly into
+// the form's own #create-error target. On success, an HX-Redirect tells
+// htmx to navigate the browser to the VMs page outright, where the new
+// VM shows up (starting at "pending", per ADR-0016's reconciliation
+// phase) via that page's own normal render - simpler and more honest
+// than trying to fake a VMs-table view here.
+//
+// validateGuidedCreateVM runs before anything else: every availability
+// rule the wizard's own disabled controls enforce is re-checked here
+// from the POST body alone, so a crafted, JS-less or replayed
+// submission is rejected with the same explanation the UI would have
+// shown rather than reaching managerd. See guided_create.go.
 func (s *Server) handleCreateVM(w http.ResponseWriter, r *http.Request) {
 	if err := r.ParseForm(); err != nil {
 		s.renderCreateError(w, "invalid form: "+err.Error())
+		return
+	}
+	if err := s.validateGuidedCreateVM(r); err != nil {
+		s.renderCreateError(w, err.Error())
 		return
 	}
 
@@ -1474,18 +1495,16 @@ func (s *Server) handleCreateVM(w http.ResponseWriter, r *http.Request) {
 
 	// cloneFromSnapshot combines the create form's two cascading
 	// dropdowns (clone_source_vm_id, clone_snapshot_name - see
-	// new_vm.html's own JS) into the single "<id>@<name>" form
+	// create_guided.html's own JS) into the single "<id>@<name>" form
 	// CloneFromSnapshot/internal/zfs.Manager already expect (ADR-0095).
 	// Either alone (a snapshot name with no VM chosen, or vice versa)
 	// is treated as "not requested" rather than a malformed value -
 	// the dropdowns are cascading, so this only happens if JS never ran.
+	// The pairing is re-validated by validateGuidedCreateVM above, which
+	// also rejects a clone combined with a replica node or a base image.
 	var cloneFromSnapshot string
 	if sourceVMID, snapshotName := r.FormValue("clone_source_vm_id"), r.FormValue("clone_snapshot_name"); sourceVMID != "" && snapshotName != "" {
 		cloneFromSnapshot = sourceVMID + "@" + snapshotName
-	}
-	if cloneFromSnapshot != "" && r.FormValue("replica_node_id") != "" {
-		s.renderCreateError(w, "clone source and replica node are mutually exclusive: a HAST-replicated VM cannot be cloned from a snapshot")
-		return
 	}
 
 	resp, err := s.client.CreateVM(r.Context(), &rpcpb.CreateVMRequest{
@@ -1967,25 +1986,28 @@ func (s *Server) renderJailPage(w http.ResponseWriter, r *http.Request, id, host
 	}))
 }
 
-// handleNewJailPage serves the create-jail form page ("/jails/new"),
-// mirroring handleNewVMPage's own separate-page pattern exactly - see
-// ADR-0018 for why a create form lives on its own page rather than
-// inline on the list.
+// handleNewJailPage is the create-jail entry point (/jails/new) - the
+// jail counterpart of handleNewVMPage, and for the same reason: one
+// guided wizard (create_guided.html) with step 1 pre-answered rather
+// than a page of its own. ADR-0018's own reason for a separate create
+// page still holds - it is simply one page now, covering both kinds.
 func (s *Server) handleNewJailPage(w http.ResponseWriter, r *http.Request) {
-	nodes, _ := s.knownNodes(r)
-	localNodeID := s.localNodeID(r)
-	clusterISOs, _ := s.currentClusterISOs(r)
-	networks, _ := s.currentNetworks(r)
-	s.render(w, "new_jail_page", s.withAuthFields(r, pageData{Nodes: nodes, LocalNodeID: localNodeID, ClusterISOs: clusterISOs, Networks: networks, PlacementHives: s.currentPlacementHives(r, nodes, localNodeID), ActivePage: "jails"}))
+	s.renderGuidedCreatePage(w, r, guidedKindJail)
 }
 
 // handleCreateJail mirrors handleCreateVM exactly: redirect back to the
 // list on success, render just the error message on failure - the
-// list page never sees this response directly (the form lives on its
-// own page now, not inline on the list).
+// list page never sees this response directly (the form lives on the
+// guided creation page now, not inline on the list). Like the VM path
+// it re-checks every availability rule from the POST body before any
+// CreateJail RPC is made; see guided_create.go.
 func (s *Server) handleCreateJail(w http.ResponseWriter, r *http.Request) {
 	if err := r.ParseForm(); err != nil {
 		s.renderCreateError(w, "invalid form: "+err.Error())
+		return
+	}
+	if err := s.validateGuidedCreateJail(r); err != nil {
+		s.renderCreateError(w, err.Error())
 		return
 	}
 

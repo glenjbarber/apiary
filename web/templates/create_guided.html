@@ -1,0 +1,598 @@
+{{define "create_guided_page"}}
+{{/*
+  The one guided creation flow, replacing the separate new-VM and
+  new-Jail pages. Served from all three of /create, /vms/new and
+  /jails/new, with step 1 pre-answered by the entry point
+  (see create_guided.go) - so an existing "Create VM" or "Create Jail"
+  link still works, and lands in the same wizard.
+
+  Three rules govern what this page is allowed to do:
+
+    1. An answer in an earlier step narrows what a later step can
+       offer. A Comb that cannot host the chosen workload, a replica
+       node that collides with a clone, an image whose type cannot
+       fill the field it was put in: each is offered disabled, with
+       the reason next to it, rather than offered and then rejected.
+    2. A control that is not applicable is disabled, not hidden and
+       not quietly ignored. Disabled controls are not submitted, so
+       the field is never silently dropped; the step's own note says
+       why it went away.
+    3. The same rules are re-checked server-side from the POST body
+       alone (guided_create.go), because a disabled control is a UI
+       affordance, not a guarantee. The image-role decisions are
+       rendered from that same Go code, so the two halves cannot
+       disagree.
+
+  Everything here is a form. The POST endpoints (POST /vms, POST
+  /jails) and the CreateVM/CreateJail RPCs behind them are unchanged.
+*/}}
+{{$vm := eq .Guided.Kind "vm"}}
+{{$jail := eq .Guided.Kind "jail"}}
+<!DOCTYPE html>
+<html lang="en">
+{{template "head" .}}
+<body class="app-layout">
+  {{template "nav" .}}
+  <main class="content" id="main-content">
+  {{template "page_header" (pageHeader "Create workload" "One guided flow for virtual machines and FreeBSD jails. Each answer narrows what the next step can offer." "<a href='/vms'>Cancel</a>")}}
+  <div id="create-error" class="banner-error" role="alert" aria-live="polite"></div>
+  <form class="create-vm panel" id="guided-form" style="margin-top:1rem" hx-post="{{.Guided.Action}}" hx-target="#create-error" hx-swap="innerHTML">
+
+    <fieldset class="form-section" id="step-kind">
+      <legend>What kind of workload</legend>
+      <p class="field-help">Step 1 of 5. This answer decides which of the steps below apply, and it is submitted with the form: a VM and a jail have different fields, and Apiary will not quietly ignore one you filled in for the other.</p>
+      <p>
+        <label><input type="radio" name="kind" id="kind-vm" value="vm"{{if $vm}} checked{{end}}> Virtual machine (bhyve guest)</label>
+        <label><input type="radio" name="kind" id="kind-jail" value="jail"{{if $jail}} checked{{end}}> FreeBSD jail</label>
+      </p>
+      <p class="field-help">A virtual machine is a bhyve guest with its own disk, vCPUs, memory, install media and firewall. A FreeBSD jail is a process-level jail(8) instance that shares its owning Comb's kernel, CPU, memory, network stack and pf ruleset - which is why most of the steps below simply do not apply to it.</p>
+    </fieldset>
+
+    <fieldset class="form-section" id="step-identity">
+      <legend>Identity</legend>
+      <p class="field-help">Step 2 of 5. Hostname is the canonical input and may be a full FQDN - a dotted hostname is not a valid resource ID (Apiary allows alphanumerics, <code>-</code> and <code>_</code>, up to 64 characters), so the ID below is derived from it. Edit either derived field to override it.</p>
+      <div class="form-grid">
+        {{if $jail}}
+        <label>Hostname <span class="field-help" id="hostname-kind-why">Set inside the jail by jail(8), and stored with it.</span>
+          <input type="text" name="hostname" id="jail-hostname" required autocomplete="off" placeholder="jail-brood-01.lab3.home.arpa" title="Hostname set inside the jail. May be a full FQDN. Drives the auto-derived ID and Name below unless you override them.">
+        </label>
+        {{else}}
+        <label>Hostname <span class="field-help" id="hostname-kind-why">Convenience only for a VM: a VM has no persisted hostname field, so this is never submitted - a VM's hostname comes from its image or DHCP. A jail does store one, which is why switching to a jail turns this into a real field.</span>
+          <input type="text" id="vm-hostname" autocomplete="off" placeholder="sting-vm-1.lab3.home.arpa" title="Convenience field for a VM, never submitted - a VM has no persisted hostname (its guest sets its own, by image or DHCP). Drives the auto-derived ID and Display name below unless you override them.">
+        </label>
+        {{end}}
+        <label>ID <span class="field-help" id="vm-id-help">Auto-derived from Hostname - edit to override.</span>
+          <input type="text" name="id" id="vm-id" required autocomplete="off" placeholder="web-01" title="Stable identifier used by Apiary, ZFS and bhyve - cannot be changed after creation. Only alphanumerics, '-', and '_' are allowed, max 64 characters. Auto-derived from Hostname unless edited directly.">
+        </label>
+        <label>Display name <span class="field-help" id="vm-name-help">Auto-derived from Hostname - edit to override.</span>
+          <input type="text" name="name" id="vm-name" autocomplete="off" placeholder="Web server" title="Optional label shown in lists - has no effect on the workload itself. Auto-derived from Hostname unless edited directly.">
+        </label>
+      </div>
+    </fieldset>
+
+    <fieldset class="form-section" id="step-placement">
+      <legend>Placement</legend>
+      <p class="field-help">Step 3 of 5. Apiary does not schedule: you choose the owning Comb, and the capability line above each name says what that Comb reports today.</p>
+      {{if .PlacementHives}}<ul class="field-help">{{range .PlacementHives}}<li>{{.NodeID}}: {{if .ProbeError}}<span class="error">unreachable</span> - not evidence either way, so this Comb stays selectable{{else if placementUnavailable . $.Guided.Kind}}<span class="error">{{if $jail}}jail provisioning disabled{{else}}no bhyve provisioning{{end}}</span> - not available for this workload type{{else if $jail}}{{if .JailKnown}}<span class="success">jail provisioning enabled</span>{{else}}<em>uses startup jail setting</em>{{end}}{{else}}<span class="success">VM-capable</span>{{end}}</li>{{end}}</ul>{{end}}
+      <div class="form-grid">
+        <label>Owner node
+      {{if .Nodes}}
+      <select name="node_id" title="The Comb that will own and run this workload." id="owner-node" required>
+        {{range .Nodes}}<option value="{{.}}"{{if eq . $.LocalNodeID}} selected{{end}}>{{.}}</option>{{end}}
+      </select>
+      {{else}}
+      <input type="text" name="node_id" id="owner-node" required title="The Comb that will own and run this workload.">
+      {{end}}
+        </label>
+        <label>Replica node <span class="field-help">Optional HAST replication target - a live copy of the disk (VM) or root (jail) on a second Comb. Data redundancy, not automatic failover.</span>
+      {{if .Nodes}}
+      <select name="replica_node_id" id="replica-node" title="A second Comb to keep a live HAST-replicated copy of this workload's disk on. Leave as None for no replica.">
+        <option value="">None</option>{{range .Nodes}}<option value="{{.}}">{{.}}</option>{{end}}
+      </select>
+      {{else}}
+      <input type="text" name="replica_node_id" id="replica-node" title="A second Comb to keep a live HAST-replicated copy of this workload's disk on. Leave blank for no replica.">
+      {{end}}
+        </label>
+      </div>
+      <p class="field-help" id="placement-why" aria-live="polite"></p>
+    </fieldset>
+
+    <div id="block-compute">
+      <p class="field-help" id="compute-unavailable"{{if $vm}} hidden{{end}}><strong>Compute is not available for a jail.</strong> A jail shares its owning Comb's kernel and CPU, so it has no vCPU count or memory limit of its own - Apiary's own jail placement carries neither field. Switch the answer in step 1 to a virtual machine to set them.</p>
+      <fieldset class="form-section" id="step-compute"{{if $jail}} hidden{{end}}>
+        <legend>Compute</legend>
+        <p class="field-help">Step 4 of 5, virtual machines only. bhyve allocates these to the guest; a jail has neither.</p>
+        <div class="form-grid">
+          <label>vCPUs <input type="number" name="vcpus" value="1" min="1"{{if $jail}} disabled{{end}} required title="Number of virtual CPUs bhyve allocates to this VM."></label>
+          <label>Memory (MB) <input type="number" name="memory_mb" value="512" min="1"{{if $jail}} disabled{{end}} required title="RAM in megabytes bhyve allocates to this VM."></label>
+        </div>
+      </fieldset>
+    </div>
+
+    <div id="block-storage">
+      <p class="field-help" id="storage-unavailable"{{if $vm}} hidden{{end}}><strong>Disk and boot media are not available for a jail.</strong> A jail's root is a directory tree populated by a base template or a base archive (step 5), not a disk image: `zfs clone` and bhyve have nothing to attach here. Switch the answer in step 1 to a virtual machine to use them.</p>
+      <fieldset class="form-section" id="step-storage"{{if $jail}} hidden{{end}}>
+        <legend>Disk and boot media</legend>
+        <p class="field-help">Step 4 of 5, virtual machines only. Exactly one of these decides how the VM's disk starts out: a base image copied in, a clone of another VM's snapshot, or a blank disk. Install media can be attached on top of any of them, to install onto a blank or freshly seeded disk.</p>
+        <div class="form-grid">
+          <label>Installer image <span class="field-help" id="installer-why">Attached as boot media on first launch. A real ISO is attached as a CD-ROM; a raw image is attached as a bootable install disk. Leave as None to boot straight from the base image or an empty disk.</span>
+            <select name="iso_name" id="iso-picker" class="image-picker"{{if $jail}} disabled{{end}} title="Boot media attached on first launch. Leave as None to boot straight from the base image or an empty disk.">
+              <option value="">None</option>
+              {{range .Guided.Installers}}<option value="{{.Value}}"{{if not .Available}} disabled{{end}}>{{.Label}}</option>{{end}}
+            </select>
+          </label>
+          <label>Base image <span class="field-help" id="base-image-why">A pre-built bootable disk (a cloud image, for instance), copied in as this VM's starting disk. Mutually exclusive with a clone source, and with a replica node: a HAST-replicated disk is the replicated device itself, and the base image is only ever copied onto a local one.</span>
+            <select name="base_image_name" id="base-image-picker" class="image-picker"{{if $jail}} disabled{{end}} title="Copied in as this VM's starting disk contents. Leave as None to start from an empty disk.">
+              <option value="">None</option>
+              {{range .Guided.BaseImages}}<option value="{{.Value}}"{{if not .Available}} disabled{{end}}>{{.Label}}</option>{{end}}
+            </select>
+          </label>
+        </div>
+        <div class="form-grid">
+          <label>Clone source VM <span class="field-help" id="clone-why">Only VMs with at least one snapshot are listed. A clone is a plain `zfs clone`: it is local to one node and never fetched across nodes, so a source on another Comb than the owner above cannot be used. Mutually exclusive with a base image and with a replica node.</span>
+            <select name="clone_source_vm_id" id="clone-source-vm"{{if $jail}} disabled{{end}} title="An existing VM to clone this VM's disk from - only VMs with at least one snapshot are listed.">
+              <option value="">None</option>
+              {{range .CloneSources}}<option value="{{.VMID}}" data-node-id="{{.NodeID}}">{{.VMID}}{{if .VMName}} ({{.VMName}}){{end}} — on {{.NodeID}}</option>{{end}}
+            </select>
+          </label>
+          <label>Clone snapshot
+            <select name="clone_snapshot_name" id="clone-source-snapshot"{{if $jail}} disabled{{end}} title="Which of the source VM's snapshots to clone from." disabled>
+              <option value="">Select a source VM first</option>
+            </select>
+          </label>
+        </div>
+        <p class="field-help" id="storage-cue" aria-live="polite"></p>
+        {{range .Guided.Installers}}{{if not .Available}}<p class="field-help">{{.Value}}: {{.Reason}}</p>{{end}}{{end}}
+        {{range .Guided.BaseImages}}{{if not .Available}}<p class="field-help">{{.Value}}: {{.Reason}}</p>{{end}}{{end}}
+      </fieldset>
+    </div>
+
+    <div id="block-rootfs">
+      <p class="field-help" id="rootfs-unavailable"{{if $jail}} hidden{{end}}><strong>Base template and base archive are not available for a virtual machine.</strong> A ZFS template or a userland archive populates a jail(8) root; a VM boots from a disk image (installer and base image above) and has no jail root. Switch the answer in step 1 to a jail to use them.</p>
+      <fieldset class="form-section" id="step-rootfs"{{if $vm}} hidden{{end}}>
+        <legend>Root filesystem</legend>
+        <p class="field-help">Step 4 of 5, jails only. A jail's root must be populated before jail(8) will start it: an empty root has no <code>/bin/sh</code> and the jail never becomes Ready (ADR-0098). Set exactly one of the two below, or populate the root yourself before starting the jail.</p>
+        <div class="form-grid">
+          <label>Base template <span class="field-help">Optional ZFS template name already present on the owning Comb (ADR-0084). Use a template or a base archive, not both, and not with a replica node.</span>
+            <input type="text" name="base_template" id="base-template"{{if $vm}} disabled{{end}} title="Name of a pre-populated ZFS template dataset already present on the owning Comb (&lt;zfs base&gt;/templates/&lt;name&gt;, snapshotted by an operator as &lt;name&gt;@apiary-template). Leave blank for an empty jail root you populate yourself. Not supported together with a replica node or a base archive.">
+          </label>
+          <label>Base archive <span class="field-help" id="base-archive-why">A base.txz-style FreeBSD userland archive extracted into this jail's root on first creation. Set at most one of this and the base template above. Unlike a template, a base archive can be combined with a replica node - the archive is extracted into whichever root the jail gets.</span>
+            <select name="base_archive_name" id="base-archive-picker" class="image-picker"{{if $vm}} disabled{{end}} title="Extracted into this jail's root the first time it's empty. Leave as None only if the root will be populated some other way, or a base template above is set instead.">
+              <option value="">None</option>
+              {{range .Guided.BaseArchives}}<option value="{{.Value}}"{{if not .Available}} disabled{{end}}>{{.Label}}</option>{{end}}
+            </select>
+          </label>
+        </div>
+        <p class="field-help" id="rootfs-cue" aria-live="polite"></p>
+        {{range .Guided.BaseArchives}}{{if not .Available}}<p class="field-help">{{.Value}}: {{.Reason}}</p>{{end}}{{end}}
+      </fieldset>
+    </div>
+
+    <fieldset class="form-section" id="step-network">
+      <legend>Network</legend>
+      <p class="field-help">Step 5 of 5. Both workload types attach to a managed network here; what differs is what the attachment gives them. A VM always gets its own tap interface on the named network's bridge. A jail by default shares its owning Comb's own network stack (ip4=inherit, unchanged behaviour) and can opt into a dedicated VNET stack instead (ADR-0117).</p>
+      <div class="form-grid">
+        <label>Network <span class="field-help" id="network-why">Optional for both. Required below for a jail that wants its own VNET stack.</span>
+      <select name="network_id" id="network-picker" title="Managed network to attach this workload to.">
+        <option value="">{{if $jail}}None (ip4=inherit){{else}}Default bridge{{end}}</option>
+        {{range .Networks}}<option value="{{.ID}}">{{.Name}} ({{.Subnet}})</option>{{end}}
+      </select>
+        </label>
+        <label id="vnet-label"{{if $vm}} hidden{{end}}><input type="checkbox" name="vnet" id="vnet-input" value="1"{{if $vm}} disabled{{end}} title="Give this jail its own network stack (vnet;) wired to the network selected above via a dedicated epair(4) pair, instead of sharing the owning Comb's own stack. Requires a network to be selected."> VNET (dedicated network stack)</label>
+      </div>
+      <p class="field-help" id="vnet-cue" aria-live="polite"{{if $vm}} hidden{{end}}>VNET is a jail option: a VM always gets its own tap interface on the selected network, so there is nothing for it to opt in to.</p>
+      <div id="block-vm-network">
+        <p class="field-help" id="initial-state-unavailable"{{if $vm}} hidden{{end}}><strong>Initial state is not available for a jail.</strong> A jail is created stopped and started from its own lifecycle control afterwards, so Apiary stores no desired state for it at creation.</p>
+        <div class="form-grid">
+          <label id="initial-state-label"{{if $jail}} hidden{{end}}>Initial state
+            <select name="desired_state" id="desired-state"{{if $jail}} disabled{{end}} title="Whether Apiary should launch this VM immediately after creating it, or leave it stopped for review first."><option value="stopped">Stopped</option><option value="running">Running</option></select>
+            <span class="field-help">Starting stopped allows configuration to be reviewed first.</span>
+          </label>
+        </div>
+      </div>
+    </fieldset>
+
+    <div id="block-firewall">
+      <p class="field-help" id="firewall-unavailable"{{if $vm}} hidden{{end}}><strong>Firewall rules are not available for a jail.</strong> A jail uses its owning Comb's own pf ruleset rather than a per-jail one, so there is nowhere for per-jail rules to go.</p>
+      <fieldset class="form-section" id="step-firewall"{{if $jail}} hidden{{end}}>
+        <legend>Firewall rules</legend>
+        <p class="muted">Step 5 of 5, virtual machines only. Optional. With no rules, traffic is allowed. Priority breaks ties when rules overlap - a higher number is evaluated later and wins (pf's own last-match-wins evaluation); leave at 0 if only one rule could ever match a given packet.</p>
+        <table id="firewall-rules">
+          <thead><tr><th>Direction</th><th>Action</th><th>Protocol</th><th>Port/range</th><th>Priority</th><th></th></tr></thead>
+          <tbody id="firewall-rule-rows"></tbody>
+        </table>
+        <button type="button" class="button secondary" id="add-firewall-rule">Add rule</button>
+      </fieldset>
+    </div>
+
+    <div class="form-actions"><a href="/vms">Cancel</a><button type="submit" id="guided-submit">Create Virtual Machine</button></div>
+  </form>
+  <script>
+  (function() {
+    'use strict';
+    var form = document.getElementById('guided-form');
+    if (!form) return;
+
+    // Every reason string in this script is the same one the server
+    // enforces (guided_create.go). The server is the authority - if the
+    // two ever disagree, the server wins and says so - but the point of
+    // restating them here is that an operator should never have to
+    // submit something only to be told it was impossible.
+
+    var hostnameInput = document.getElementById('vm-hostname') || document.getElementById('jail-hostname');
+    var idInput = document.getElementById('vm-id');
+    var nameInput = document.getElementById('vm-name');
+    var ownerNode = document.getElementById('owner-node');
+    var replicaNode = document.getElementById('replica-node');
+    var isoPicker = document.getElementById('iso-picker');
+    var baseImagePicker = document.getElementById('base-image-picker');
+    var sourceSelect = document.getElementById('clone-source-vm');
+    var snapshotSelect = document.getElementById('clone-source-snapshot');
+    var baseTemplate = document.getElementById('base-template');
+    var baseArchive = document.getElementById('base-archive-picker');
+    var networkPicker = document.getElementById('network-picker');
+    var vnetInput = document.getElementById('vnet-input');
+    var submitButton = document.getElementById('guided-submit');
+    var storageCue = document.getElementById('storage-cue');
+    var rootfsCue = document.getElementById('rootfs-cue');
+    var placementCue = document.getElementById('placement-why');
+    var vnetCue = document.getElementById('vnet-cue');
+    var networkWhy = document.getElementById('network-why');
+    var vnetLabel = document.getElementById('vnet-label');
+    var initialStateLabel = document.getElementById('initial-state-label');
+    var initialStateNote = document.getElementById('initial-state-unavailable');
+
+    // missingByNode: {"image name": ["node ids missing it"]} - see
+    // isoMissingByNode (ADR-0041). Drives a "will be fetched from a
+    // peer" cue on the image pickers whenever the currently selected
+    // image isn't already on the currently selected node -
+    // internal/cluster's Reconciler fetches it automatically at
+    // provisioning time, so this is informational only, never blocking.
+    var missingByNode = {{isoMissingByNode .ClusterISOs}};
+    // cloneSources: {"vm id": {name, node_id, snapshots: [...]}} - see
+    // cloneSourceSnapshotsJSON (ADR-0095).
+    var cloneSources = {{cloneSourceSnapshotsJSON .CloneSources}};
+
+    function setText(el, text) { if (el) el.textContent = text; }
+
+    function selectedValue(el) { return el ? el.value : ''; }
+
+    // show/hide a step, and keep its controls from being submitted
+    // while it is hidden. Hidden-but-enabled would be the worst of
+    // both: invisible to the operator, still posted as if it counted.
+    function setStepVisible(fieldsetId, noteId, visible) {
+      var fieldset = document.getElementById(fieldsetId);
+      var note = document.getElementById(noteId);
+      if (fieldset) fieldset.hidden = !visible;
+      if (note) note.hidden = visible;
+    }
+
+    function setControlAvailable(el, available, why) {
+      if (!el) return;
+      el.disabled = !available;
+      if (!available && why) {
+        el.setAttribute('title', why);
+      } else {
+        el.removeAttribute('title');
+      }
+    }
+
+    // ---- Step 1: what kind of workload ------------------------------
+    //
+    // The answer decides which steps exist at all. The controls inside
+    // the hidden steps are disabled rather than merely hidden, so a
+    // submission can never carry a field the chosen kind has nowhere to
+    // put - and the server rejects a cross-kind POST with the same
+    // explanation.
+    var vmRadio = document.getElementById('kind-vm');
+    var jailRadio = document.getElementById('kind-jail');
+    var hostnameKindWhy = document.getElementById('hostname-kind-why');
+
+    function isVM() { return !vmRadio || vmRadio.checked; }
+
+    function applyKind() {
+      var vm = isVM();
+      setStepVisible('step-compute', 'compute-unavailable', vm);
+      setStepVisible('step-storage', 'storage-unavailable', vm);
+      setStepVisible('step-rootfs', 'rootfs-unavailable', !vm);
+      setStepVisible('step-firewall', 'firewall-unavailable', vm);
+      if (initialStateLabel) initialStateLabel.hidden = !vm;
+      if (initialStateNote) initialStateNote.hidden = vm;
+      if (vnetLabel) vnetLabel.hidden = vm;
+      if (vnetCue) vnetCue.hidden = vm;
+
+      form.setAttribute('hx-post', vm ? '/vms' : '/jails');
+      if (submitButton) {
+        submitButton.textContent = vm ? 'Create Virtual Machine' : 'Create Jail';
+      }
+
+      // A VM has no persisted hostname field, so its convenience
+      // Hostname input must not be submitted at all; a jail does store
+      // one. The element is the same input either way - only its name,
+      // required flag and id change.
+      if (hostnameInput) {
+        if (vm) {
+          hostnameInput.removeAttribute('name');
+          hostnameInput.removeAttribute('required');
+          hostnameInput.id = 'vm-hostname';
+        } else {
+          hostnameInput.setAttribute('name', 'hostname');
+          hostnameInput.setAttribute('required', 'required');
+          hostnameInput.id = 'jail-hostname';
+        }
+      }
+      if (networkPicker && networkPicker.options.length > 0) {
+        networkPicker.options[0].textContent = vm ? 'Default bridge' : 'None (ip4=inherit)';
+      }
+      refreshAll();
+    }
+
+    [vmRadio, jailRadio].forEach(function(radio) {
+      if (radio) radio.addEventListener('change', applyKind);
+    });
+
+    // ---- Step 2: Hostname -> ID / display name ----------------------
+    //
+    // Ported unchanged from the two pages this flow replaced, both of
+    // which derived identically: Hostname is the field an operator
+    // types, and ID/Name follow it live. Each derived field tracks its
+    // own "dirty" (manually edited) flag, so a deliberate override is
+    // never silently clobbered. The ID derivation enforces
+    // validResourceID's own character class server-side
+    // (internal/raft/fsm.go) - alphanumerics, '-', '_', max 64
+    // characters - since a dotted FQDN hostname is not a valid ID
+    // as-is. deriveResourceID in guided_create.go is the same
+    // algorithm, and guided_create_test.go pins the two together.
+    function deriveID(hostname) {
+      var slug = hostname
+        .toLowerCase()
+        .replace(/[^a-z0-9_-]+/g, '-')
+        .replace(/-{2,}/g, '-')
+        .replace(/^-+|-+$/g, '')
+        .slice(0, 64)
+        .replace(/-+$/g, '');
+      return slug;
+    }
+
+    var idDirty = false;
+    var nameDirty = false;
+
+    function refreshIdentity() {
+      if (!hostnameInput) return;
+      var hostname = hostnameInput.value;
+      if (!idDirty && idInput) idInput.value = deriveID(hostname);
+      if (!nameDirty && nameInput) nameInput.value = hostname;
+    }
+
+    if (hostnameInput && idInput && nameInput) {
+      hostnameInput.addEventListener('input', refreshIdentity);
+      idInput.addEventListener('input', function() {
+        idDirty = idInput.value !== deriveID(hostnameInput.value);
+      });
+      nameInput.addEventListener('input', function() {
+        nameDirty = nameInput.value !== hostnameInput.value;
+      });
+    }
+
+    // ---- Step 3: placement ------------------------------------------
+    //
+    // A HAST replica is a second Comb holding a live copy, so it can
+    // never be the Comb already holding the original. The same-node
+    // option is disabled, and an already-selected value is cleared
+    // with the reason shown rather than quietly ignored.
+    function refreshPlacement() {
+      var owner = selectedValue(ownerNode);
+      var notes = [];
+      if (replicaNode) {
+        Array.prototype.forEach.call(replicaNode.options, function(opt) {
+          opt.disabled = !!opt.value && opt.value === owner;
+        });
+        if (replicaNode.value && replicaNode.value === owner) {
+          replicaNode.value = '';
+          notes.push('Replica node cleared: it was the same Comb as the owner node, and HAST replication runs between two different Combs.');
+        }
+      }
+      setText(placementCue, notes.join(' '));
+    }
+
+    // ---- Step 4a: VM disk and boot media ----------------------------
+    //
+    // The three ways to seed a disk are mutually exclusive, and a
+    // replica excludes two of them:
+    //   - a HAST-replicated disk is the replicated device itself, so
+    //     the base image (copied onto a local disk) and a clone (a
+    //     `zfs clone` of a ZFS dataset) can never apply to it;
+    //   - a clone already carries the source snapshot's contents, so
+    //     a base image could never be copied on top of it;
+    //   - a clone is a local operation, so its source VM has to live on
+    //     the same Comb as the VM being created.
+    // Install media is deliberately NOT excluded by any of these: it
+    // is attached on top of whatever the disk starts as, which is how
+    // you install onto a blank or freshly seeded disk.
+    function refreshStorage() {
+      if (!isVM()) { setText(storageCue, ''); return; }
+      var notes = [];
+      var replicating = !!selectedValue(replicaNode);
+      var cloning = !!selectedValue(sourceSelect);
+
+      if (replicating) {
+        if (baseImagePicker && baseImagePicker.value) {
+          baseImagePicker.value = '';
+          notes.push('Base image cleared: a HAST-replicated disk is the replicated device itself, and the base image is only ever copied onto a local one.');
+        }
+        if (sourceSelect && sourceSelect.value) {
+          sourceSelect.value = '';
+          notes.push('Clone source cleared: a HAST-replicated disk is a raw device, not a cloneable ZFS dataset.');
+        }
+      }
+      if (cloning) {
+        if (baseImagePicker && baseImagePicker.value) {
+          baseImagePicker.value = '';
+          notes.push('Base image cleared: a clone already has the source snapshot\'s contents, so a base image could never be copied in on top of it.');
+        }
+      }
+      setControlAvailable(baseImagePicker, !replicating && !cloning,
+        'Unavailable: a base image seeds a local disk only, and a HAST-replicated disk or an existing clone is not one.');
+      setControlAvailable(sourceSelect, !replicating,
+        'Unavailable: a HAST-replicated disk is a raw device, not a cloneable ZFS dataset.');
+      refreshSnapshots();
+      refreshImageCue();
+      setText(storageCue, notes.join(' '));
+    }
+
+    // The cascading snapshot dropdown, plus the node-locality warning:
+    // a source VM on another Comb cannot be cloned from, because a VM
+    // snapshot is local to the node it was taken on and `zfs clone`
+    // never fetches across nodes.
+    function refreshSnapshots() {
+      if (!sourceSelect || !snapshotSelect) return;
+      var owner = selectedValue(ownerNode);
+      var source = cloneSources[sourceSelect.value];
+      snapshotSelect.innerHTML = '';
+      if (!source) {
+        var placeholder = document.createElement('option');
+        placeholder.value = '';
+        placeholder.text = 'Select a source VM first';
+        snapshotSelect.appendChild(placeholder);
+        snapshotSelect.disabled = true;
+        return;
+      }
+      var crossNode = !!owner && owner !== source.node_id;
+      snapshotSelect.disabled = false;
+      source.snapshots.forEach(function(name) {
+        var opt = document.createElement('option');
+        opt.value = name;
+        var label = name;
+        if (crossNode) {
+          label += ' — unavailable: ' + source.node_id + ' is not the owner node, and a VM snapshot is local to one node';
+        }
+        opt.text = label;
+        opt.disabled = crossNode;
+        snapshotSelect.appendChild(opt);
+      });
+      if (crossNode) {
+        setText(storageCue, 'Clone source ' + sourceSelect.value + ' lives on ' + source.node_id +
+          ', not the owner node ' + owner + ': a VM snapshot is local to one node and `zfs clone` runs on one node only, with no cross-node fetch.');
+      }
+    }
+
+    function refreshImageCue() {
+      var owner = selectedValue(ownerNode);
+      [isoPicker, baseImagePicker].forEach(function(picker) {
+        if (!picker) return;
+        Array.prototype.forEach.call(picker.options, function(opt) {
+          if (!opt.value) return;
+          var missing = missingByNode[opt.value] || [];
+          var willFetch = missing.indexOf(owner) !== -1;
+          // Only this cue is recomputed. The availability suffix (and
+          // the disabled flag that goes with it) was decided by the
+          // server when this page was rendered, and must not be
+          // recomputed here or the two halves would drift - so the
+          // fetch cue is stripped from the tail rather than rebuilt
+          // from the bare filename.
+          var label = opt.text.replace(/ — will be fetched from a peer$/, '');
+          opt.text = willFetch ? label + ' — will be fetched from a peer' : label;
+        });
+      });
+    }
+
+    // ---- Step 4b: jail root filesystem ------------------------------
+    //
+    // A base template is a ZFS template dataset on the owning Comb that
+    // the jail root is cloned from; a base archive is a userland tarball
+    // extracted into an empty root. They are two ways to do the same
+    // job, so exactly one applies - and a template additionally cannot
+    // be combined with a replica, because a HAST-replicated root is a
+    // raw device with no template to clone from. (A base ARCHIVE with a
+    // replica is fine: the archive is extracted into whichever root the
+    // jail ends up with.)
+    function refreshRootfs() {
+      if (isVM()) { setText(rootfsCue, ''); return; }
+      var notes = [];
+      var templated = !!selectedValue(baseTemplate);
+      var replicating = !!selectedValue(replicaNode);
+      if (templated) {
+        if (baseArchive && baseArchive.value) {
+          baseArchive.value = '';
+          notes.push('Base archive cleared: a base template and a base archive are two ways to populate the same empty root, and only one can apply.');
+        }
+        if (replicaNode && replicaNode.value) {
+          replicaNode.value = '';
+          notes.push('Replica node cleared: a base template is a ZFS template dataset the root is cloned from, and a HAST-replicated root is a raw device with no template to clone from. A base archive can be used with a replica instead.');
+        }
+      }
+      if (baseArchive && baseArchive.value) {
+        if (baseTemplate && baseTemplate.value) {
+          baseTemplate.value = '';
+          notes.push('Base template cleared: a base template and a base archive are two ways to populate the same empty root, and only one can apply.');
+        }
+      }
+      setControlAvailable(baseArchive, !templated,
+        'Unavailable: the root is already populated from the base template, and only one way to populate it can apply.');
+      setControlAvailable(baseTemplate, !selectedValue(baseArchive),
+        'Unavailable: the root is already populated from the base archive, and only one way to populate it can apply.');
+      setText(rootfsCue, notes.join(' '));
+    }
+
+    // ---- Step 5: network, VNET, and the submit button ---------------
+    //
+    // VNET wires the jail's own network stack to a named managed
+    // network's bridge, so with no network named there is nothing for
+    // it to attach to. Rather than computing the choice away and
+    // submitting a jail that quietly isn't what was asked for, the
+    // checkbox is unavailable until a network is named.
+    function refreshNetwork() {
+      var jail = !isVM();
+      var hasNetwork = !!selectedValue(networkPicker);
+      if (vnetInput) {
+        if (!jail) {
+          setControlAvailable(vnetInput, false, 'VNET is a jail option: a VM always gets its own tap interface on the selected network.');
+          setText(vnetCue, 'VNET is a jail option: a VM always gets its own tap interface on the selected network, so there is nothing for it to opt in to.');
+        } else {
+          setControlAvailable(vnetInput, hasNetwork, 'VNET wires this jail\'s own network stack to a named managed network\'s bridge, so a network has to be named first.');
+          setText(networkWhy, hasNetwork
+            ? 'VNET below gives this jail its own network stack, wired to this network\'s bridge via a private epair(4) pair.'
+            : 'Pick a network to enable the VNET option below. With no network named, the jail keeps the default ip4=inherit networking.');
+        }
+      }
+    }
+
+    function refreshAll() {
+      refreshPlacement();
+      refreshStorage();
+      refreshRootfs();
+      refreshNetwork();
+      refreshImageCue();
+    }
+
+    [ownerNode, replicaNode, sourceSelect, baseTemplate, baseArchive, networkPicker].forEach(function(el) {
+      if (el) el.addEventListener('change', refreshAll);
+    });
+    if (vnetInput) vnetInput.addEventListener('change', refreshAll);
+
+    // ---- Firewall rule rows (ported from the old create-VM page) ----
+    var rows = document.getElementById('firewall-rule-rows');
+    var addRule = document.getElementById('add-firewall-rule');
+    if (rows && addRule) {
+      addRule.addEventListener('click', function() {
+        var tr = document.createElement('tr');
+        tr.innerHTML =
+          '<td><select name="fw_direction" title="Whether this rule matches traffic entering or leaving the VM. (unused) rows are ignored."><option value="">(unused)</option><option value="in">in</option><option value="out">out</option></select></td>' +
+          '<td><select name="fw_action" title="pass allows matching traffic through; block drops it."><option value="pass">pass</option><option value="block">block</option></select></td>' +
+          '<td><select name="fw_protocol" title="Restrict this rule to one protocol, or leave as any to match all of them."><option value="">any</option><option value="tcp">tcp</option><option value="udp">udp</option><option value="icmp">icmp</option></select></td>' +
+          '<td><input type="text" name="fw_port" placeholder="22 or 8000-9000" title="A single port or a port range this rule applies to. Leave blank to match any port."></td>' +
+          '<td><input type="number" name="fw_priority" value="0" step="1" title="Breaks ties when rules overlap - a higher number is evaluated later and wins (pf\'s last-match-wins evaluation). Leave at 0 if only one rule could ever match a given packet."></td>' +
+          '<td><button type="button" class="remove-firewall-rule">Remove</button></td>';
+        tr.querySelector('.remove-firewall-rule').addEventListener('click', function() { rows.removeChild(tr); });
+        rows.appendChild(tr);
+      });
+    }
+
+    applyKind();
+  })();
+  </script>
+  </main>
+  {{template "footer" .}}
+</body>
+</html>
+{{end}}
