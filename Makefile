@@ -15,10 +15,13 @@ SRCS=		apiaryinstall \
 			frontend \
 			restshimd
 
-# BUILD_ID stamps every binary so a running daemon can name the build
-# it actually is, rather than the build that happens to sit next to it
-# on disk. Override on the command line to pin a build to a known id
-# (e.g. a release).
+# BUILD_ID is the build's identity, and it is computed by
+# scripts/build-ldflags.sh rather than here. Override on the command
+# line to pin a build to a known id (e.g. a release); empty means "work
+# it out from the checkout". Either spelling works:
+#
+#	make build BUILD_ID=release-1.0
+#	BUILD_ID=release-1.0 make build
 #
 # The id is the commit and nothing else. There is deliberately no clock
 # in it, because the two properties an operator needs are in tension
@@ -40,28 +43,18 @@ SRCS=		apiaryinstall \
 # two of them can share an id while differing in bytes. That is why
 # buildinfo and versioncheck both report the -dirty case as weaker
 # evidence rather than as agreement.
-BUILD_ID?=	$(shell git rev-parse --short=12 HEAD 2>/dev/null || echo nogit)$(shell git status --porcelain 2>/dev/null | grep -q . && echo -dirty)
+BUILD_ID?=	# empty: computed by scripts/build-ldflags.sh
+BUILD_TIME?=	# empty: the commit's date, likewise computed there
 
 BUILD_PKG=	github.com/glenjbarber/apiary/internal/buildinfo
-
-# BuildTime is the COMMIT's committer date, not the build's clock
-# reading. A date is worth having in a startup log - it dates the source,
-# which is what a reader of a stale daemon's log is asking - and the
-# commit date is as informative while being a fixed property of the
-# input, so it costs no reproducibility. SOURCE_DATE_EPOCH, if set,
-# overrides it, which is what a release build wants.
-BUILD_TIME?=	$(shell git log -1 --format=%cI 2>/dev/null || echo unknown)
-
-BUILD_LDFLAGS=	-X '$(BUILD_PKG).BuildID=$(BUILD_ID)' \
-			-X '$(BUILD_PKG).BuildTime=$(BUILD_TIME)' \
-			-X '$(BUILD_PKG).GitCommit=$(shell git rev-parse HEAD 2>/dev/null)'
+LDFLAGS_SH=	scripts/build-ldflags.sh
 
 # -trimpath strips the build directory and module cache paths out of the
 # binary. Without it the same commit built in two checkouts produces
-# different bytes, so reproducibility would hold only for whoever happened
-# to build it first. -buildvcs=false because the Makefile injects the
-# revision explicitly and does not want Go stamping a dirty tree's
-# revision as though it described the binary.
+# different bytes, so reproducibility would hold only for whoever
+# happened to build it first. -buildvcs=false because the Makefile
+# injects the revision explicitly and does not want Go stamping a dirty
+# tree's revision as though it described the binary.
 GO_BUILD?=	go build -trimpath -buildvcs=false
 
 # Check a binary's identity without starting it. A copy over a running
@@ -76,9 +69,73 @@ version: build
 PAM_SERVICE=	apiary
 
 build:
+	set -e; \
 	for S in ${SRCS} ; \
-		do $(GO_BUILD) -ldflags "$(BUILD_LDFLAGS)" -o $$S ./cmd/$$S ;\
+		do ldflags=`BUILD_ID='$(BUILD_ID)' BUILD_TIME='$(BUILD_TIME)' ${LDFLAGS_SH}` ; \
+		$(GO_BUILD) -ldflags "$$ldflags" -o $$S ./cmd/$$S ;\
 	done
+
+# The stamp script is load-bearing for identity, and check-stamped only
+# notices a broken one after a full build of five binaries. This checks
+# its contract directly, and is the one that would have caught the BSD
+# make $(shell) problem in a second rather than after a deploy.
+.PHONY: check-ldflags
+check-ldflags:
+	@set -e; \
+	out=`${LDFLAGS_SH}` ; \
+	echo "raw: $$out" ; \
+	for V in BuildID BuildTime GitCommit ; do \
+		val=`echo "$$out" | tr ' ' '\n' | sed -n "s/.*\.$$V=//p"` ; \
+		if [ -z "$$val" ] ; then \
+			echo "$$V is empty or missing in: $$out" >&2 ; exit 1 ; \
+		fi ; \
+		echo "  $$V=$$val" ; \
+	done ; \
+	id=`${LDFLAGS_SH} --id` ; \
+	short=`git rev-parse --short=12 HEAD 2>/dev/null || echo nogit` ; \
+	case "$$id" in "$$short"|"$$short-dirty") ;; \
+		*) echo "id $$id does not derive from commit $$short" >&2 ; exit 1 ;; \
+	esac ; \
+	echo "ldflags ok"
+
+# Refuse to let an unidentifiable binary reach /usr/local/libexec. This
+# exists because a stamp that silently fails to apply is worse than no
+# stamp: the build succeeds, the binary is installed, and every daemon
+# reports build=unknown while the whole toolchain looks like it is
+# working. That is not hypothetical - it is what BSD make's lack of
+# $(shell) did to every build on the testbed.
+#
+# Only a prerequisite of install, not of build, because it has to RUN
+# the binaries: a binary cross-compiled for FreeBSD on a Mac cannot
+# answer -version here, and failing that would break the cross-build
+# path rather than protect anything.
+.PHONY: check-stamped
+check-stamped:
+	@fail=0; \
+	for S in ${SRCS} ; do \
+		id=`./$$S -version 2>&1 | grep -o 'build=[^ ]*' | head -1 | cut -d= -f2` ; \
+		why="" ; \
+		case "$$id" in \
+			"") why="it did not run; check-stamped only works on a binary built for this host" ;; \
+			unknown) why="not stamped - the -X link flags did not reach the build" ;; \
+			nogit) why="built outside a git checkout, or git could not read this one" ;; \
+			*-dirty) why="built from a dirty worktree; the commit does not describe these bytes" ;; \
+		esac ; \
+		if [ -n "$$why" ] ; then \
+			echo "$$S: $$id - $$why" >&2 ; fail=1 ; \
+		else \
+			echo "$$S: $$id" ; \
+		fi ; \
+	done ; \
+	if [ $$fail -ne 0 ] ; then \
+		if [ -n "$$ALLOW_UNIDENTIFIED" ] ; then \
+			echo "ALLOW_UNIDENTIFIED is set - installing anyway." >&2 ; \
+		else \
+			echo "Refusing to install a binary that cannot identify itself." >&2 ; \
+			echo "Fix the build, or set ALLOW_UNIDENTIFIED=1 to accept it." >&2 ; \
+			exit 1 ; \
+		fi ; \
+	fi
 
 # Prove the reproducibility claim instead of asserting it: build the
 # same commit twice and compare the bytes. This is the check that fails
@@ -87,17 +144,18 @@ build:
 # only show up here.
 .PHONY: check-reproducible
 check-reproducible:
-	@$(GO_BUILD) -ldflags "$(BUILD_LDFLAGS)" -o /tmp/apiary-repro-a ./cmd/raftd
-	@sleep 1
-	@$(GO_BUILD) -ldflags "$(BUILD_LDFLAGS)" -o /tmp/apiary-repro-b ./cmd/raftd
-	@a=`sha256 -q /tmp/apiary-repro-a` ; b=`sha256 -q /tmp/apiary-repro-b` ; \
-		rm -f /tmp/apiary-repro-a /tmp/apiary-repro-b ; \
-		if [ "$$a" = "$$b" ] ; then \
-			echo "reproducible: raftd $$a" ; \
-		else \
-			echo "NOT reproducible: $$a != $$b" ; exit 1 ; \
-		fi
-	@echo "build id was: $(BUILD_ID)"
+	@ldflags=`BUILD_ID='$(BUILD_ID)' BUILD_TIME='$(BUILD_TIME)' ${LDFLAGS_SH}` ; \
+	$(GO_BUILD) -ldflags "$$ldflags" -o /tmp/apiary-repro-a ./cmd/raftd ; \
+	sleep 1 ; \
+	$(GO_BUILD) -ldflags "$$ldflags" -o /tmp/apiary-repro-b ./cmd/raftd ; \
+	a=`sha256 -q /tmp/apiary-repro-a` ; b=`sha256 -q /tmp/apiary-repro-b` ; \
+	rm -f /tmp/apiary-repro-a /tmp/apiary-repro-b ; \
+	if [ "$$a" = "$$b" ] ; then \
+		echo "reproducible: raftd $$a" ; \
+	else \
+		echo "NOT reproducible: $$a != $$b" ; exit 1 ; \
+	fi
+	@echo "build id was: `BUILD_ID='$(BUILD_ID)' BUILD_TIME='$(BUILD_TIME)' ${LDFLAGS_SH} --id`"
 
 clean:
 	for S in ${SRCS} ; \
@@ -137,7 +195,7 @@ INSTALL_SRCS_FILTERED= ${INSTALL_SRCS:Nraftd}
 # "//" lines to use it (each is written so every comment stands on its
 # own line and never trails a value. The documented POSIX sed command
 # removes both those comment-only lines and the blank lines they leave).
-install: build setup-dirs
+install: build check-stamped setup-dirs
 	mkdir -p /usr/local/libexec/apiary /usr/local/etc/apiary
 	for S in ${INSTALL_SRCS} ; \
 		do cp -p $$S /usr/local/libexec/apiary/$$S.new ;\

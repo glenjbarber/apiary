@@ -26,17 +26,28 @@ for b in $BINS; do
   echo
 done
 
+# The shape the Makefile actually produces, computed the way the
+# Makefile computes it - through the script, not by hand - so this
+# exercises the same path a deploy takes. Before this script existed the
+# hand-written form below was the only thing tested, and it passed
+# happily while every real build on FreeBSD stamped nothing at all.
+echo "=== ldflags the Makefile would use ==="
+scripts/build-ldflags.sh
+scripts/build-ldflags.sh --id
+make --no-print-directory check-ldflags
+echo
+
 for b in $BINS; do
   echo "=== $b (clean stamp) ==="
-  go build -trimpath -buildvcs=false -ldflags "-X $PKG.BuildID=9c43262d358a -X $PKG.BuildTime=2026-09-26T11:52:03-04:00 -X $PKG.GitCommit=$COMMIT" -o "$OUT/$b" ./cmd/"$b"
-  "$OUT/$b" -version 2>&1 | head -8
+  go build -trimpath -buildvcs=false -ldflags "$(scripts/build-ldflags.sh)" -o "$OUT/$b" ./cmd/"$b"
+  "$OUT/$b" -version 2>&1 | head -3
   echo
 done
 
 for b in $BINS; do
   echo "=== $b (dirty stamp) ==="
   go build -trimpath -buildvcs=false -ldflags "-X $PKG.BuildID=9c43262d358a-dirty -X $PKG.BuildTime=2026-09-26T11:52:03-04:00 -X $PKG.GitCommit=$COMMIT" -o "$OUT/$b" ./cmd/"$b"
-  "$OUT/$b" -version 2>&1 | head -8
+  "$OUT/$b" -version 2>&1 | head -3
   echo
 done
 
@@ -47,5 +58,15 @@ for b in $BINS; do
   echo
 done
 
+echo "=== an unstamped build must be refused by check-stamped ==="
+go build -trimpath -buildvcs=false -o "$OUT/raftd" ./cmd/raftd
+if (cd "$OUT" && sh -c 'id=`./raftd -version 2>&1 | grep -o "build=[^ ]*" | head -1 | cut -d= -f2`; [ "$id" = unknown ] && echo "correctly detected: $id" || { echo "NOT detected, got $id"; exit 1; }'); then
+  echo
+else
+  echo "check-stamped would have shipped an unstamped binary" >&2
+  exit 1
+fi
+
+echo
 echo "=== the same commit built twice must be the same bytes ==="
 make --no-print-directory check-reproducible
