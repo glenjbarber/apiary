@@ -20,6 +20,7 @@ import (
 	"github.com/glenjbarber/apiary/api/internalpb"
 	rpcpb "github.com/glenjbarber/apiary/api/rpc"
 	"github.com/glenjbarber/apiary/internal/assumptions"
+	"github.com/glenjbarber/apiary/internal/netif"
 )
 
 // peerCheckTimeout bounds a single peer RPC - matches
@@ -42,11 +43,18 @@ const (
 	ReasonRouteCheckFailed       = "route_check_failed"
 	ReasonUplinkNotConfigured    = "uplink_not_configured"
 	ReasonUplinkMismatch         = "uplink_mismatch"
-	ReasonPeersNotConfigured     = "peers_not_configured"
-	ReasonAuthNotConfigured      = "auth_not_configured"
-	ReasonBhyveNotConfigured     = "bhyve_not_configured"
-	ReasonReplicaNodeUnknown     = "replica_node_unknown"
-	ReasonObservationFailed      = "observation_failed" // generic fallback for an unclassified error
+	// ReasonBridgeMembershipUnknown is the "we could not tell" case for
+	// NAT_UPLINK_DEFAULT_ROUTE: the default route names an interface
+	// that is neither the configured uplink nor provably a bridge
+	// containing it, and the membership lookup itself failed. Never a
+	// StatusFalse - an unread bridge is silence, not a mismatch, exactly
+	// as replica_unobserved/health unknown mean "no evidence" (ADR-0056).
+	ReasonBridgeMembershipUnknown = "bridge_membership_unknown"
+	ReasonPeersNotConfigured      = "peers_not_configured"
+	ReasonAuthNotConfigured       = "auth_not_configured"
+	ReasonBhyveNotConfigured      = "bhyve_not_configured"
+	ReasonReplicaNodeUnknown      = "replica_node_unknown"
+	ReasonObservationFailed       = "observation_failed" // generic fallback for an unclassified error
 )
 
 type raftReader interface {
@@ -65,6 +73,23 @@ type peerChecker interface {
 
 type routeChecker interface {
 	DefaultRouteInterface(ctx context.Context) (iface string, hasRoute bool, err error)
+}
+
+// bridgeChecker reports the current members of a bridge interface. The
+// isBridge return exists so a caller can tell "this is an ordinary NIC"
+// (a real fact) from "I could not read it" (no evidence at all) - the
+// same discipline internal/netroute.DefaultRouteInterface's hasRoute
+// return already encodes.
+type bridgeChecker interface {
+	BridgeMembers(ctx context.Context, bridge string) (members []string, isBridge bool, err error)
+}
+
+// netifBridgeChecker adapts internal/netif.BridgeMembers to
+// bridgeChecker. This is the default when Checker.Bridges is nil.
+type netifBridgeChecker struct{}
+
+func (netifBridgeChecker) BridgeMembers(ctx context.Context, bridge string) ([]string, bool, error) {
+	return netif.BridgeMembers(ctx, bridge)
 }
 
 // Checker runs one Automated Assumption Checks tick. All fields are
@@ -86,6 +111,21 @@ type Checker struct {
 	Peers            peerChecker // nil-able
 	PeerManagerdAddr func(raftAddress string) string
 	Route            routeChecker
+
+	// Bridges answers "is the configured uplink a member of the bridge
+	// that owns the default route?" - see checkNATUplink for why a
+	// bridged uplink satisfies NAT_UPLINK_DEFAULT_ROUTE at all.
+	//
+	// nil-able, and nil means "use the live internal/netif-backed
+	// implementation" rather than "no evidence available". That default
+	// is a deliberate choice over the alternative: reporting Unknown
+	// for every host that hasn't wired this field would silently
+	// downgrade a real, previously-reported mismatch to silence, and
+	// would make the fix depend on a wiring change in every caller. The
+	// shell-out only happens on the mismatched-interface path, so a
+	// host whose default route is already the configured uplink - the
+	// overwhelmingly common case - never pays for it.
+	Bridges bridgeChecker
 
 	// Uplink MUST be the already-resolved value (reconciler.Uplink,
 	// read after cmd/managerd's own nodeconfig-override application and
@@ -310,12 +350,89 @@ func (c *Checker) checkNATUplink(ctx context.Context, now time.Time) assumptions
 	case iface == c.Uplink:
 		return assumptions.Result{Key: key, ObservedStatus: assumptions.StatusTrue, LastObservedAt: now}
 	default:
+		// Not the configured uplink. Before calling that a mismatch,
+		// rule out the bridged-uplink topology this project's own
+		// installer produces: on the -bhyve-bridge path
+		// (internal/install/checks.go's bhyveBridgeCheck) the
+		// operator-named uplink NIC is enslaved to the bridge by
+		// `ifconfig <bridge> addm <uplink>`, and when DHCP is moved up
+		// to the bridge the member is deliberately left addressless
+		// ("The physical member stays addressless"). The bridge - not
+		// the NIC - then necessarily owns the default route.
+		// Comparing against the raw NIC name there reported a hard
+		// false for a correctly wired host. That is verbatim the
+		// symptom recorded in brood's own assumption journal on
+		// 2026-09-16T17:49:54Z: observed_status "false", reason_code
+		// "uplink_mismatch", detail `default route is via "bridge0",
+		// not the configured uplink "em0"`, with ifconfig(8) on that
+		// host showing `member: em0` and `groups: bridge` under
+		// bridge0 and no inet address on em0 at all.
+		//
+		// Membership is required as positive evidence, never inferred:
+		// if the interface owning the route isn't a bridge, or is a
+		// bridge without the uplink attached, the original mismatch
+		// verdict stands unchanged.
+		return c.classifyUplinkMismatch(ctx, key, iface, now)
+	}
+}
+
+// classifyUplinkMismatch decides the outcome for a default route owned
+// by an interface other than the configured uplink, consulting bridge
+// membership so a bridged uplink is not mistaken for a misconfigured
+// one. Every branch here preserves the project's meaning of silence: an
+// unreadable membership is StatusUnknown, never StatusFalse.
+func (c *Checker) classifyUplinkMismatch(
+	ctx context.Context, key assumptions.Key, routeIface string, now time.Time,
+) assumptions.Result {
+	mismatchDetail := fmt.Sprintf("default route is via %q, not the configured uplink %q", routeIface, c.Uplink)
+
+	bridges := c.Bridges
+	if bridges == nil {
+		bridges = netifBridgeChecker{}
+	}
+	members, isBridge, err := bridges.BridgeMembers(ctx, routeIface)
+	switch {
+	case err != nil:
+		return assumptions.Result{
+			Key: key, ObservedStatus: assumptions.StatusUnknown, ReasonCode: ReasonBridgeMembershipUnknown,
+			Detail: assumptions.ClampDetail(fmt.Sprintf(
+				"%s; cannot read %q's bridge membership to tell a bridged uplink from a mismatch: %v",
+				mismatchDetail, routeIface, err)),
+			LastObservedAt: now,
+		}
+	case !isBridge:
+		// An ordinary NIC owns the default route and the configured
+		// uplink is some other interface entirely - the plain,
+		// genuinely-wrong case the check was written for. Byte-identical
+		// detail to what this has always reported.
 		return assumptions.Result{
 			Key: key, ObservedStatus: assumptions.StatusFalse, ReasonCode: ReasonUplinkMismatch,
-			Detail:         fmt.Sprintf("default route is via %q, not the configured uplink %q", iface, c.Uplink),
+			Detail: mismatchDetail, LastObservedAt: now,
+		}
+	case containsString(members, c.Uplink):
+		return assumptions.Result{
+			Key: key, ObservedStatus: assumptions.StatusTrue,
+			Detail: fmt.Sprintf("default route is via %q, a bridge with the configured uplink %q attached as a member",
+				routeIface, c.Uplink),
+			LastObservedAt: now,
+		}
+	default:
+		return assumptions.Result{
+			Key: key, ObservedStatus: assumptions.StatusFalse, ReasonCode: ReasonUplinkMismatch,
+			Detail: assumptions.ClampDetail(fmt.Sprintf(
+				"%s; %q is a bridge and does not have %q attached as a member", mismatchDetail, routeIface, c.Uplink)),
 			LastObservedAt: now,
 		}
 	}
+}
+
+func containsString(haystack []string, needle string) bool {
+	for _, s := range haystack {
+		if s == needle {
+			return true
+		}
+	}
+	return false
 }
 
 // checkReplicaTargets produces REPLICA_BHYVE_CONFIGURED and (when the VM

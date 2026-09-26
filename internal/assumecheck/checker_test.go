@@ -91,6 +91,45 @@ func (f *fakeRoute) DefaultRouteInterface(ctx context.Context) (string, bool, er
 	return f.iface, f.hasRoute, f.err
 }
 
+type bridgeResult struct {
+	members  []string
+	isBridge bool
+	err      error
+}
+
+type fakeBridges struct {
+	mu      sync.Mutex
+	calls   []string
+	results map[string]bridgeResult
+}
+
+func newFakeBridges() *fakeBridges {
+	return &fakeBridges{results: map[string]bridgeResult{}}
+}
+
+// with configures the answer for one interface name and returns the fake, so
+// a table row reads as a single expression.
+func (f *fakeBridges) with(bridge string, r bridgeResult) *fakeBridges {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.results[bridge] = r
+	return f
+}
+
+func (f *fakeBridges) BridgeMembers(ctx context.Context, bridge string) ([]string, bool, error) {
+	f.mu.Lock()
+	f.calls = append(f.calls, bridge)
+	r := f.results[bridge]
+	f.mu.Unlock()
+	return r.members, r.isBridge, r.err
+}
+
+func (f *fakeBridges) callCount() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return len(f.calls)
+}
+
 func identityAddr(s string) string { return s }
 
 func newTestChecker(t *testing.T, raft raftReader, peers peerChecker, route routeChecker, store *assumptions.Manager) *Checker {
@@ -162,6 +201,112 @@ func TestRunOnce_NoDefaultRoute_IsFalse_ExecFailure_IsUnknown(t *testing.T) {
 				t.Errorf("got status=%v reason=%v, want %v/%v", r.ObservedStatus, r.ReasonCode, tt.wantStatus, tt.wantReason)
 			}
 		})
+	}
+}
+
+func TestRunOnce_NATUplink_BridgedUplinkIsNotAMismatch(t *testing.T) {
+	// The flat -bhyve-bridge topology: internal/install's bhyveBridgeCheck
+	// slaves the operator-named uplink to the bridge and leaves it
+	// addressless, so the bridge necessarily owns the default route. These
+	// cases pin all four outcomes of the mismatched-interface path, because
+	// "unreadable" collapsing into "false" is the failure mode this whole
+	// change exists to avoid.
+	tests := []struct {
+		name       string
+		routeIface string
+		bridges    *fakeBridges
+		wantStatus assumptions.Status
+		wantReason string
+		wantCalls  int
+	}{
+		{
+			name: "flat host, route via the configured NIC - passes and never consults bridges",
+			// An empty fake rather than nil: the real production default
+			// is a nil Bridges (the live ifconfig shell-out), and a test
+			// could not assert anything about it. If this case ever
+			// started shelling out it would also fail on a non-FreeBSD dev
+			// host, so wantCalls: 0 is a real regression guard, not a
+			// tautology.
+			routeIface: "em0", bridges: newFakeBridges(),
+			wantStatus: assumptions.StatusTrue, wantReason: "", wantCalls: 0,
+		},
+		{
+			name:       "bridged host, route via a bridge holding the uplink as a member - passes",
+			routeIface: "bridge0",
+			bridges: newFakeBridges().with("bridge0", bridgeResult{
+				members: []string{"em0", "vtnet0"}, isBridge: true,
+			}),
+			wantStatus: assumptions.StatusTrue, wantReason: "", wantCalls: 1,
+		},
+		{
+			name:       "genuinely mismatched host, route via an ordinary NIC - still false",
+			routeIface: "vtnet0",
+			bridges: newFakeBridges().with("vtnet0", bridgeResult{
+				members: nil, isBridge: false,
+			}),
+			wantStatus: assumptions.StatusFalse, wantReason: ReasonUplinkMismatch, wantCalls: 1,
+		},
+		{
+			name:       "route via a bridge that does not hold the uplink - still false",
+			routeIface: "bridge0",
+			bridges: newFakeBridges().with("bridge0", bridgeResult{
+				members: []string{"vtnet0"}, isBridge: true,
+			}),
+			wantStatus: assumptions.StatusFalse, wantReason: ReasonUplinkMismatch, wantCalls: 1,
+		},
+		{
+			name:       "membership unreadable - unknown, never false",
+			routeIface: "bridge0",
+			bridges: newFakeBridges().with("bridge0", bridgeResult{
+				err: errors.New("ifconfig: bridge0: not found"),
+			}),
+			wantStatus: assumptions.StatusUnknown, wantReason: ReasonBridgeMembershipUnknown, wantCalls: 1,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			store := &assumptions.Manager{Path: t.TempDir() + "/a.json"}
+			c := newTestChecker(t,
+				&fakeRaft{status: &internalpb.StatusResponse{NodeId: "node-a"}, vms: &internalpb.ListVMsResponse{}},
+				nil, &fakeRoute{iface: tt.routeIface, hasRoute: true}, store)
+			c.Uplink = "em0"
+			c.Bridges = tt.bridges
+
+			must(t, c.RunOnce(context.Background()))
+			snap, _, err := store.Load()
+			must(t, err)
+			r := findResult(t, snap, assumptions.KindNATUplinkDefaultRoute, "", "em0")
+			if r.ObservedStatus != tt.wantStatus || r.ReasonCode != tt.wantReason {
+				t.Errorf("got status=%v reason=%v, want %v/%v", r.ObservedStatus, r.ReasonCode, tt.wantStatus, tt.wantReason)
+			}
+			if got := tt.bridges.callCount(); got != tt.wantCalls {
+				t.Errorf("bridge membership looked up %d times, want %d", got, tt.wantCalls)
+			}
+			if tt.wantCalls == 1 && tt.bridges.calls[0] != tt.routeIface {
+				t.Errorf("asked about %q, want the interface owning the route %q", tt.bridges.calls[0], tt.routeIface)
+			}
+		})
+	}
+}
+
+// A genuinely misconfigured host must keep reporting exactly the detail it
+// always has. If this ever changes, dashboards and any operator grepping the
+// journal for the old string lose their anchor.
+func TestRunOnce_NATUplink_MismatchDetailIsUnchangedForOrdinaryNIC(t *testing.T) {
+	store := &assumptions.Manager{Path: t.TempDir() + "/a.json"}
+	c := newTestChecker(t,
+		&fakeRaft{status: &internalpb.StatusResponse{NodeId: "node-a"}, vms: &internalpb.ListVMsResponse{}},
+		nil, &fakeRoute{iface: "vtnet0", hasRoute: true}, store)
+	c.Uplink = "em0"
+	c.Bridges = newFakeBridges().with("vtnet0", bridgeResult{isBridge: false})
+
+	must(t, c.RunOnce(context.Background()))
+	snap, _, err := store.Load()
+	must(t, err)
+	r := findResult(t, snap, assumptions.KindNATUplinkDefaultRoute, "", "em0")
+	want := `default route is via "vtnet0", not the configured uplink "em0"`
+	if r.Detail != want {
+		t.Errorf("Detail = %q, want the pre-existing mismatch wording %q", r.Detail, want)
 	}
 }
 
