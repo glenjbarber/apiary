@@ -34,6 +34,13 @@ type Status struct {
 	AppliedIndex uint64
 	RaftState    string
 	Servers      []ServerInfo
+
+	// StateDigest is the canonical digest of this node's own FSM state
+	// (ADR-0143). It is read from the FSM rather than recomputed here,
+	// and AppliedIndex above is likewise the FSM's own view - the two
+	// describe the same point in this state machine's history, which is
+	// what makes them safe to read together.
+	StateDigest string
 }
 
 // ServerInfo describes one member of the cluster configuration.
@@ -185,6 +192,7 @@ func (n *Node) Status() Status {
 		AppliedIndex: n.fsm.AppliedIndex(),
 		RaftState:    n.raft.State().String(),
 		Servers:      servers,
+		StateDigest:  n.fsm.StateDigest(),
 	}
 }
 

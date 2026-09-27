@@ -24,7 +24,7 @@ func TestClusterNodeHealth_RemoteWithNoPeerForwardingIsNotHealthy(t *testing.T) 
 	s := NewServer(nil, "node-a", nil, nil, nil, nil, nil, "", nil, nil, nil, 0, nil)
 	now := time.Now()
 
-	dialed, verdict, probeErr := s.clusterNodeHealth(
+	dialed, verdict, probeErr, stateDigest, _ := s.clusterNodeHealth(
 		context.Background(), "node-b", "node-a",
 		anchorFor(&rpcpb.RaftMember{NodeId: "node-b", Address: "10.0.0.2:17700", Suffrage: "Voter"}),
 		true,
@@ -46,6 +46,12 @@ func TestClusterNodeHealth_RemoteWithNoPeerForwardingIsNotHealthy(t *testing.T) 
 	if !hasObservation(verdict.Observations, "peer_probe", probeErr) {
 		t.Errorf("Observations = %+v, want a peer_probe observation carrying the reason", verdict.Observations)
 	}
+	// Nothing was dialed, so no digest was read. It must be absent rather
+	// than defaulted to something, since the consumer's whole question
+	// is whether these nodes' state machines agree.
+	if stateDigest != "" {
+		t.Errorf("stateDigest = %q, want empty for a node that was never dialed", stateDigest)
+	}
 }
 
 // hasObservation reports whether observations contains a raw observation
@@ -66,7 +72,7 @@ func TestClusterNodeHealth_RemoteUnreachableVoterIsContradictory(t *testing.T) {
 	s := NewServer(nil, "node-a", nil, nil, nil, nil, nil, "", nil, nil, nil, 0, nil)
 	member := &rpcpb.RaftMember{NodeId: "node-b", Address: "", Suffrage: "Voter"}
 
-	dialed, verdict, probeErr := s.clusterNodeHealth(
+	dialed, verdict, probeErr, stateDigest, _ := s.clusterNodeHealth(
 		context.Background(), "node-b", "node-a",
 		anchorFor(member), true,
 		map[string]*rpcpb.RaftMember{"node-b": member},
@@ -83,6 +89,9 @@ func TestClusterNodeHealth_RemoteUnreachableVoterIsContradictory(t *testing.T) {
 	if probeErr == "" {
 		t.Error("probeErr = empty, want a stated reason this node was not observed")
 	}
+	if stateDigest != "" {
+		t.Errorf("stateDigest = %q, want empty for a node that could not be dialed", stateDigest)
+	}
 }
 
 // TestClusterNodeHealth_LocalNodeIsDialed covers the review finding
@@ -94,7 +103,7 @@ func TestClusterNodeHealth_RemoteUnreachableVoterIsContradictory(t *testing.T) {
 func TestClusterNodeHealth_LocalNodeIsDialed(t *testing.T) {
 	s := NewServer(nil, "node-a", nil, nil, nil, nil, nil, "", nil, nil, nil, 0, nil)
 
-	dialed, _, probeErr := s.clusterNodeHealth(
+	dialed, _, probeErr, _, _ := s.clusterNodeHealth(
 		context.Background(), "node-a", "node-a",
 		anchorFor(&rpcpb.RaftMember{NodeId: "node-a", Address: "", Suffrage: "Voter"}), true,
 		map[string]*rpcpb.RaftMember{"node-a": {NodeId: "node-a", Suffrage: "Voter"}},
@@ -115,7 +124,7 @@ func TestClusterNodeHealth_MemberWithoutAddressIsNeverDialed(t *testing.T) {
 	s := NewServer(nil, "node-a", nil, nil, nil, nil, nil, "", nil, nil, nil, 0, nil)
 	member := &rpcpb.RaftMember{NodeId: "node-b", Suffrage: "Nonvoter"}
 
-	dialed, _, _ := s.clusterNodeHealth(
+	dialed, _, _, _, _ := s.clusterNodeHealth(
 		context.Background(), "node-b", "node-a",
 		anchorFor(member), true,
 		map[string]*rpcpb.RaftMember{"node-b": member},
@@ -130,7 +139,7 @@ func TestClusterNodeHealth_UnknownSuffrageNeverReportsHealthy(t *testing.T) {
 	s := NewServer(nil, "node-a", nil, nil, nil, nil, nil, "", nil, nil, nil, 0, nil)
 	member := &rpcpb.RaftMember{NodeId: "node-a", Suffrage: "Unknown"}
 
-	_, verdict, _ := s.clusterNodeHealth(
+	_, verdict, _, _, _ := s.clusterNodeHealth(
 		context.Background(), "node-a", "node-a",
 		anchorFor(member), true,
 		map[string]*rpcpb.RaftMember{"node-a": member},
@@ -204,7 +213,7 @@ func TestClusterNodeHealth_SlowHostStatsDoesNotStarveTheStatusProbe(t *testing.T
 	s := NewServer(nil, "node-a", nil, nil, nil, nil, peers, "", nil, nil, nil, 0, nil)
 	member := &rpcpb.RaftMember{NodeId: "node-b", Address: "10.0.0.2:17700", Suffrage: "Voter"}
 
-	dialed, verdict, probeErr := s.clusterNodeHealth(
+	dialed, verdict, probeErr, stateDigest, _ := s.clusterNodeHealth(
 		context.Background(), "node-b", "node-a",
 		anchorFor(member), true,
 		map[string]*rpcpb.RaftMember{"node-b": member},
@@ -226,5 +235,84 @@ func TestClusterNodeHealth_SlowHostStatsDoesNotStarveTheStatusProbe(t *testing.T
 	// The slow HostStats must still be reported, with its reason.
 	if probeErr == "" {
 		t.Error("probeErr = empty, want the HostStats failure stated")
+	}
+	// The peer answered Status and reported raft reachable, but carries no
+	// digest - exactly what a raftd predating ADR-0143 looks like. That
+	// must read as "no digest observed", never as agreement.
+	if stateDigest != "" {
+		t.Errorf("stateDigest = %q, want empty from a peer reporting no digest", stateDigest)
+	}
+}
+
+// digestPeerForwarder answers Status with a caller-supplied response, so a
+// test can say precisely which digest (if any) a peer reported.
+type digestPeerForwarder struct {
+	PeerForwarder
+	response *rpcpb.StatusResponse
+}
+
+func (f *digestPeerForwarder) HostStats(context.Context, string) (*rpcpb.HostStatsResponse, error) {
+	return &rpcpb.HostStatsResponse{}, nil
+}
+
+func (f *digestPeerForwarder) Status(context.Context, string) (*rpcpb.StatusResponse, error) {
+	return f.response, nil
+}
+
+// TestClusterNodeHealth_DigestRidesTheStatusFanOut covers ADR-0143's claim
+// that the digest costs no extra RPC: both the local and the remote row
+// must get their digest out of the Status read that already happens.
+func TestClusterNodeHealth_DigestRidesTheStatusFanOut(t *testing.T) {
+	const localDigest, peerDigest = "aaaa", "bbbb"
+
+	// Local: the digest comes from the anchor Status the call already made.
+	s := NewServer(nil, "node-a", nil, nil, nil, nil, nil, "", nil, nil, nil, 0, nil)
+	anchor := anchorFor(&rpcpb.RaftMember{NodeId: "node-a", Suffrage: "Voter"})
+	anchor.RaftStateDigest = localDigest
+	_, _, _, digest, _ := s.clusterNodeHealth(
+		context.Background(), "node-a", "node-a", anchor, true,
+		map[string]*rpcpb.RaftMember{"node-a": {NodeId: "node-a", Suffrage: "Voter"}},
+		time.Now(),
+	)
+	if digest != localDigest {
+		t.Errorf("local stateDigest = %q, want %q from the anchor read", digest, localDigest)
+	}
+
+	// Remote: the digest comes from that peer's own Status.
+	peers := &digestPeerForwarder{response: &rpcpb.StatusResponse{
+		RaftReachable: true, RaftAppliedIndex: 42, RaftStateDigest: peerDigest,
+	}}
+	s = NewServer(nil, "node-a", nil, nil, nil, nil, peers, "", nil, nil, nil, 0, nil)
+	member := &rpcpb.RaftMember{NodeId: "node-b", Address: "10.0.0.2:17700", Suffrage: "Voter"}
+	_, _, _, digest, _ = s.clusterNodeHealth(
+		context.Background(), "node-b", "node-a",
+		anchorFor(member), true,
+		map[string]*rpcpb.RaftMember{"node-b": member},
+		time.Now(),
+	)
+	if digest != peerDigest {
+		t.Errorf("peer stateDigest = %q, want %q from the peer Status read", digest, peerDigest)
+	}
+}
+
+// TestClusterNodeHealth_UnreachableRaftdYieldsNoDigest pins the gate: a
+// digest is only believed when raft was actually reachable. A response
+// carrying both raft_reachable=false and a digest is contradictory, and
+// the honest reading of a node that could not reach its own raftd is that
+// nothing is known about its state - not that it agreed with anything.
+func TestClusterNodeHealth_UnreachableRaftdYieldsNoDigest(t *testing.T) {
+	peers := &digestPeerForwarder{response: &rpcpb.StatusResponse{
+		RaftReachable: false, RaftError: "socket gone", RaftStateDigest: "stale",
+	}}
+	s := NewServer(nil, "node-a", nil, nil, nil, nil, peers, "", nil, nil, nil, 0, nil)
+	member := &rpcpb.RaftMember{NodeId: "node-b", Address: "10.0.0.2:17700", Suffrage: "Voter"}
+	_, _, _, digest, _ := s.clusterNodeHealth(
+		context.Background(), "node-b", "node-a",
+		anchorFor(member), true,
+		map[string]*rpcpb.RaftMember{"node-b": member},
+		time.Now(),
+	)
+	if digest != "" {
+		t.Errorf("stateDigest = %q, want empty when this node's raftd was unreachable", digest)
 	}
 }

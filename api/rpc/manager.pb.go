@@ -2941,8 +2941,18 @@ type StatusResponse struct {
 	// uses this, not a flag of its own, to decide whether to enable
 	// login at all.
 	PamConfigured bool `protobuf:"varint,12,opt,name=pam_configured,json=pamConfigured,proto3" json:"pam_configured,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	// raft_state_digest is this Comb's own raftd's canonical FSM state
+	// digest, passed through from raftd's internal Status
+	// (ADR-0143). Empty when raft_reachable is false, or when the raftd
+	// answering is too old to report one - never a digest of empty
+	// state, so an empty value always means "no digest was observed".
+	//
+	// It describes ONE voter. It is not a cluster-wide verdict, and a
+	// consumer must compare it against other voters' digests rather than
+	// read it as a statement about the Colony.
+	RaftStateDigest string `protobuf:"bytes,13,opt,name=raft_state_digest,json=raftStateDigest,proto3" json:"raft_state_digest,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
 }
 
 func (x *StatusResponse) Reset() {
@@ -3057,6 +3067,13 @@ func (x *StatusResponse) GetPamConfigured() bool {
 		return x.PamConfigured
 	}
 	return false
+}
+
+func (x *StatusResponse) GetRaftStateDigest() string {
+	if x != nil {
+		return x.RaftStateDigest
+	}
+	return ""
 }
 
 type AuthenticatePasswordRequest struct {
@@ -15592,9 +15609,32 @@ type ClusterNodeHealth struct {
 	// answered the request itself, or never established at all. It is
 	// already implied by the observations; naming it here saves a consumer
 	// from having to infer it correctly from prose.
-	Dialed        bool `protobuf:"varint,5,opt,name=dialed,proto3" json:"dialed,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	Dialed bool `protobuf:"varint,5,opt,name=dialed,proto3" json:"dialed,omitempty"`
+	// raft_state_digest is the digest of THIS node's own FSM state
+	// (ADR-0143), collected by the same per-node Status fan-out that
+	// already gathers each node's applied and last log index, so it costs
+	// no extra RPC. Empty when this node's digest could not be read -
+	// it was never dialed, it did not answer, its raftd was unreachable,
+	// or its raftd predates the field. An absent digest is never evidence
+	// of agreement.
+	//
+	// The node's applied index is already carried in observations. Read
+	// it alongside this: a digest mismatch at the same applied index is a
+	// real disagreement, while a mismatch at different applied indexes
+	// may only be a sample taken while the cluster was still moving.
+	RaftStateDigest string `protobuf:"bytes,6,opt,name=raft_state_digest,json=raftStateDigest,proto3" json:"raft_state_digest,omitempty"`
+	// raft_applied_index is this node's own raft applied index, read at the
+	// same moment as the digest above. It is already implied by the
+	// raft_applied_index observation, and is named here for the same reason
+	// dialed is: a consumer comparing a digest to its neighbour's needs the
+	// index as a typed value from the same row, and a digest is meaningless
+	// without it. It pairs with raft_state_digest deliberately - a
+	// disagreement at equal indexes is real, and a disagreement at
+	// differing indexes is not yet distinguishable from a sample taken
+	// while the cluster moved.
+	RaftAppliedIndex uint64 `protobuf:"varint,7,opt,name=raft_applied_index,json=raftAppliedIndex,proto3" json:"raft_applied_index,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
 }
 
 func (x *ClusterNodeHealth) Reset() {
@@ -15660,6 +15700,20 @@ func (x *ClusterNodeHealth) GetDialed() bool {
 		return x.Dialed
 	}
 	return false
+}
+
+func (x *ClusterNodeHealth) GetRaftStateDigest() string {
+	if x != nil {
+		return x.RaftStateDigest
+	}
+	return ""
+}
+
+func (x *ClusterNodeHealth) GetRaftAppliedIndex() uint64 {
+	if x != nil {
+		return x.RaftAppliedIndex
+	}
+	return 0
 }
 
 type ClusterHealthResponse struct {
@@ -16414,7 +16468,7 @@ const file_api_rpc_manager_proto_rawDesc = "" +
 	"\x14ListVMsLocalResponse\x12-\n" +
 	"\x03vms\x18\x01 \x03(\v2\x1b.apiary.rpc.v1.VMDefinitionR\x03vms\x12\x14\n" +
 	"\x05error\x18\x02 \x01(\tR\x05error\"\x0f\n" +
-	"\rStatusRequest\"\xea\x03\n" +
+	"\rStatusRequest\"\x96\x04\n" +
 	"\x0eStatusResponse\x12&\n" +
 	"\x0fmanager_node_id\x18\x01 \x01(\tR\rmanagerNodeId\x12%\n" +
 	"\x0eraft_reachable\x18\x02 \x01(\bR\rraftReachable\x12\x1d\n" +
@@ -16431,7 +16485,8 @@ const file_api_rpc_manager_proto_rawDesc = "" +
 	"\x0eknown_node_ids\x18\n" +
 	" \x03(\tR\fknownNodeIds\x123\n" +
 	"\amembers\x18\v \x03(\v2\x19.apiary.rpc.v1.RaftMemberR\amembers\x12%\n" +
-	"\x0epam_configured\x18\f \x01(\bR\rpamConfigured\"U\n" +
+	"\x0epam_configured\x18\f \x01(\bR\rpamConfigured\x12*\n" +
+	"\x11raft_state_digest\x18\r \x01(\tR\x0fraftStateDigest\"U\n" +
 	"\x1bAuthenticatePasswordRequest\x12\x1a\n" +
 	"\busername\x18\x01 \x01(\tR\busername\x12\x1a\n" +
 	"\bpassword\x18\x02 \x01(\tR\bpassword\"D\n" +
@@ -17369,13 +17424,15 @@ const file_api_rpc_manager_proto_rawDesc = "" +
 	"\x05error\x18\x01 \x01(\tR\x05error\x12\x1f\n" +
 	"\vleader_hint\x18\x02 \x01(\tR\n" +
 	"leaderHint\"\x16\n" +
-	"\x14ClusterHealthRequest\"\xc4\x01\n" +
+	"\x14ClusterHealthRequest\"\x9e\x02\n" +
 	"\x11ClusterNodeHealth\x12\x17\n" +
 	"\anode_id\x18\x01 \x01(\tR\x06nodeId\x12\x16\n" +
 	"\x06status\x18\x02 \x01(\tR\x06status\x12 \n" +
 	"\vexplanation\x18\x03 \x01(\tR\vexplanation\x12D\n" +
 	"\fobservations\x18\x04 \x03(\v2 .apiary.rpc.v1.HealthObservationR\fobservations\x12\x16\n" +
-	"\x06dialed\x18\x05 \x01(\bR\x06dialed\"\x89\x01\n" +
+	"\x06dialed\x18\x05 \x01(\bR\x06dialed\x12*\n" +
+	"\x11raft_state_digest\x18\x06 \x01(\tR\x0fraftStateDigest\x12,\n" +
+	"\x12raft_applied_index\x18\a \x01(\x04R\x10raftAppliedIndex\"\x89\x01\n" +
 	"\x15ClusterHealthResponse\x12\x14\n" +
 	"\x05error\x18\x01 \x01(\tR\x05error\x12\"\n" +
 	"\rlocal_node_id\x18\x02 \x01(\tR\vlocalNodeId\x126\n" +

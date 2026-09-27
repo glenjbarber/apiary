@@ -832,6 +832,10 @@ func (s *Server) Status(ctx context.Context, _ *rpcpb.StatusRequest) (*rpcpb.Sta
 	resp.RaftLastLogIndex = raftStatus.GetLastLogIndex()
 	resp.RaftAppliedIndex = raftStatus.GetAppliedIndex()
 	resp.RaftState = raftStatus.GetRaftState()
+	// This Comb's own digest only, deliberately: it describes one voter
+	// and says nothing about whether the colony agrees. Cross-voter
+	// comparison is ClusterHealth's job, which already fans out per node.
+	resp.RaftStateDigest = raftStatus.GetStateDigest()
 	for _, server := range raftStatus.GetServers() {
 		resp.KnownNodeIds = append(resp.KnownNodeIds, server.GetId())
 		resp.Members = append(resp.Members, &rpcpb.RaftMember{
@@ -1002,6 +1006,13 @@ func (s *Server) ClusterHealth(ctx context.Context, _ *rpcpb.ClusterHealthReques
 		verdict  health.NodeHealth
 		dialed   bool
 		probeErr string
+		// stateDigest and appliedIndex are this node's own FSM state
+		// digest (ADR-0143) and the index it goes with, or "" / 0 when
+		// neither could be read. They are deliberately not part of
+		// health.NodeHealth: digest agreement is a colony-wide question,
+		// and a health verdict is a per-node one.
+		stateDigest  string
+		appliedIndex uint64
 	}
 	results := make([]nodeResult, len(nodeIDs))
 	var wg sync.WaitGroup
@@ -1009,8 +1020,11 @@ func (s *Server) ClusterHealth(ctx context.Context, _ *rpcpb.ClusterHealthReques
 		wg.Add(1)
 		go func(i int, nodeID string) {
 			defer wg.Done()
-			dialed, verdict, probeErr := s.clusterNodeHealth(ctx, nodeID, s.nodeID, anchor, membershipObserved, memberByNode, now)
-			results[i] = nodeResult{verdict: verdict, dialed: dialed, probeErr: probeErr}
+			dialed, verdict, probeErr, digest, applied := s.clusterNodeHealth(ctx, nodeID, s.nodeID, anchor, membershipObserved, memberByNode, now)
+			results[i] = nodeResult{
+				verdict: verdict, dialed: dialed, probeErr: probeErr,
+				stateDigest: digest, appliedIndex: applied,
+			}
 		}(i, nodeID)
 	}
 	wg.Wait()
@@ -1023,6 +1037,12 @@ func (s *Server) ClusterHealth(ctx context.Context, _ *rpcpb.ClusterHealthReques
 			Explanation:  result.verdict.Explanation,
 			Observations: toRPCHealthObservations(result.verdict.Observations),
 			Dialed:       result.dialed,
+			// ADR-0143: carried per row, uncompared. Deciding whether
+			// these agree is a colony-wide question, and answering it
+			// here would bake a verdict into a per-node RPC that several
+			// consumers read for unrelated reasons.
+			RaftStateDigest:  result.stateDigest,
+			RaftAppliedIndex: result.appliedIndex,
 		})
 	}
 	return response, nil
@@ -1031,8 +1051,17 @@ func (s *Server) ClusterHealth(ctx context.Context, _ *rpcpb.ClusterHealthReques
 // clusterNodeHealth gathers one node's evidence and computes its verdict.
 // It also reports whether the node was actually dialed, so a caller can
 // distinguish "established by a real call" from "true by definition,
-// because it answered this very request." All I/O is bounded by the
-// existing reachabilityCheckTimeout.
+// because it answered this very request," and that node's own FSM state
+// digest, or "" when no digest could be read, together with the applied
+// index read at that same instant, which is only meaningful beside it.
+// All I/O is bounded by the existing reachabilityCheckTimeout.
+//
+// The digest is returned rather than folded into the health verdict on
+// purpose. Whether a voter can be reached and whether every voter agrees
+// are different questions, and a health status that turned amber purely
+// because state machines disagreed would conflate them - a reachable node
+// with divergent state is a serious, real condition, but it is not an
+// unreachable one, and it must not be reported as though it were.
 func (s *Server) clusterNodeHealth(
 	ctx context.Context,
 	nodeID, localNodeID string,
@@ -1040,7 +1069,7 @@ func (s *Server) clusterNodeHealth(
 	membershipObserved bool,
 	memberByNode map[string]*rpcpb.RaftMember,
 	now time.Time,
-) (bool, health.NodeHealth, string) {
+) (bool, health.NodeHealth, string, string, uint64) {
 	inputs := health.Inputs{
 		NodeID:                   nodeID,
 		IsLocal:                  nodeID == localNodeID,
@@ -1057,6 +1086,13 @@ func (s *Server) clusterNodeHealth(
 	var stats *rpcpb.HostStatsResponse
 	dialed := false
 	var probeErr string
+	// ADR-0143's per-voter digest. Stays "" for every path that could
+	// not read it: not dialed, no answer, raftd unreachable, or a raftd
+	// old enough to predate the field. Those are genuinely different
+	// causes that happen to share one honest rendering, and each of them
+	// already appears as an observation or an explanation on the row.
+	var stateDigest string
+	var appliedIndex uint64
 	if inputs.IsLocal {
 		// No dial is needed or wanted: this node is answering now, and
 		// self-dialing would be a pointless extra hop. It is still
@@ -1111,6 +1147,13 @@ func (s *Server) clusterNodeHealth(
 					inputs.AppliedIndex = peerStatus.GetRaftAppliedIndex()
 					inputs.LastLogIndex = peerStatus.GetRaftLastLogIndex()
 					inputs.IndicesObservedAt = now
+					// Read at the same moment as this node's applied
+					// index above, deliberately: the two are only
+					// comparable as a pair, since a digest sampled at a
+					// different instant than its index could differ for
+					// reasons that have nothing to do with divergence.
+					stateDigest = peerStatus.GetRaftStateDigest()
+					appliedIndex = peerStatus.GetRaftAppliedIndex()
 				}
 			}
 		} else {
@@ -1135,6 +1178,12 @@ func (s *Server) clusterNodeHealth(
 		inputs.AppliedIndex = anchor.GetRaftAppliedIndex()
 		inputs.LastLogIndex = anchor.GetRaftLastLogIndex()
 		inputs.IndicesObservedAt = now
+		// The anchor read is this node's own Status, taken at the same
+		// moment as the index above, so no extra RPC is spent on it.
+		if anchor.GetRaftReachable() {
+			stateDigest = anchor.GetRaftStateDigest()
+			appliedIndex = anchor.GetRaftAppliedIndex()
+		}
 	}
 
 	if stats != nil {
@@ -1159,7 +1208,7 @@ func (s *Server) clusterNodeHealth(
 			Source: "peer_probe", ObservedAt: now, Value: "failed", Detail: probeErr,
 		})
 	}
-	return dialed, verdict, probeErr
+	return dialed, verdict, probeErr, stateDigest, appliedIndex
 }
 
 // toRPCHealthObservations converts computed observations for the wire.

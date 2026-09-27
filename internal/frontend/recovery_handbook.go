@@ -249,7 +249,7 @@ func (s *Server) fetchNodeContext(ctx context.Context, nodeID, localNodeID strin
 	defer healthCancel()
 	now := time.Now()
 	hostStats, hostStatsErr := s.fetchHostStats(healthCtx, nodeID, localNodeID)
-	signals := s.nodeHealthSignals(healthCtx, nodeID, localNodeID, anchor, hostStats, hostStatsErr, now)
+	signals, _, _ := s.nodeHealthSignals(healthCtx, nodeID, localNodeID, anchor, hostStats, hostStatsErr, now)
 	fact.Health = health.ComputeNodeHealth(signals, now)
 
 	assumeCtx, assumeCancel := context.WithTimeout(ctx, nodeContextTimeout)

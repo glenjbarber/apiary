@@ -142,6 +142,30 @@ type clusterNodeView struct {
 	// combCauseBadge stays the single authority.
 	CauseBadgeClass string
 	CauseBadgeLabel string
+
+	// StateDigest is this Comb's own canonical FSM state digest
+	// (ADR-0143), read from the same Status response the health evidence
+	// above already used, so it costs no extra RPC. Empty when no digest
+	// was observed, which is why the badge below is never derived from
+	// its presence alone - see stateDigestVerdicts.
+	StateDigest string
+
+	// AppliedIndex is the index StateDigest was read at, 0 when
+	// unobserved. It travels with the digest because the two are only
+	// comparable as a pair.
+	AppliedIndex uint64
+
+	// DigestState/DigestBadgeClass/DigestBadgeLabel/DigestDetail are the
+	// cross-voter verdict for this row (ADR-0143), stamped by the
+	// colony-wide comparison in handleClusterOverviewPage. They are
+	// populated with the unobserved verdict on every row even where no
+	// comparison was run, so no template can ever render a badge with an
+	// empty class - which would read as "nothing to report" rather than
+	// "not observed".
+	DigestState      string
+	DigestBadgeClass string
+	DigestBadgeLabel string
+	DigestDetail     string
 }
 
 // peerAddr turns a node ID into the address its managerd should be
@@ -219,7 +243,11 @@ func summarizeClusterNode(nodeID string, stats statsView, fetchErr string) clust
 // two different rule sets). This function still owns all of the I/O -
 // the frontend is a separate process from managerd and gathers its own
 // evidence, exactly as ADR-0056 designed.
-func (s *Server) nodeHealthSignals(ctx context.Context, nodeID, localNodeID string, anchor *rpcpb.StatusResponse, hostStats *rpcpb.HostStatsResponse, hostStatsErr error, now time.Time) health.NodeSignals {
+// It also returns this node's own FSM state digest and the applied index it was
+// read at (ADR-0143), both taken from the same Status response the heartbeat
+// evidence above already needed - never a second call - and "" / 0 when no
+// digest was observed.
+func (s *Server) nodeHealthSignals(ctx context.Context, nodeID, localNodeID string, anchor *rpcpb.StatusResponse, hostStats *rpcpb.HostStatsResponse, hostStatsErr error, now time.Time) (health.NodeSignals, string, uint64) {
 	inputs := health.Inputs{
 		NodeID:                   nodeID,
 		IsLocal:                  nodeID == localNodeID,
@@ -256,6 +284,8 @@ func (s *Server) nodeHealthSignals(ctx context.Context, nodeID, localNodeID stri
 			peerStatus = resp
 		}
 	}
+	var stateDigest string
+	var appliedIndex uint64
 	if peerStatus != nil {
 		inputs.HeartbeatObserved = true
 		inputs.HeartbeatOK = peerStatus.GetRaftReachable()
@@ -264,6 +294,11 @@ func (s *Server) nodeHealthSignals(ctx context.Context, nodeID, localNodeID stri
 			inputs.AppliedIndex = peerStatus.GetRaftAppliedIndex()
 			inputs.LastLogIndex = peerStatus.GetRaftLastLogIndex()
 			inputs.IndicesObservedAt = now
+			// Read here, in the same breath as the index above, because a
+			// digest and an index sampled at different moments cannot be
+			// compared and a badge built on that pair would be guessing.
+			stateDigest = peerStatus.GetRaftStateDigest()
+			appliedIndex = peerStatus.GetRaftAppliedIndex()
 		}
 	}
 
@@ -285,7 +320,7 @@ func (s *Server) nodeHealthSignals(ctx context.Context, nodeID, localNodeID stri
 		}
 	}
 
-	return health.SignalsFrom(inputs)
+	return health.SignalsFrom(inputs), stateDigest, appliedIndex
 }
 
 // clusterNodeEvidence gathers the same host and Evidence-Aware Health facts
@@ -323,7 +358,7 @@ func (s *Server) clusterNodeEvidence(ctx context.Context, nodeID, localNodeID st
 	}
 	node := summarizeClusterNode(nodeID, stats, errMsg)
 
-	signals := s.nodeHealthSignals(ctx, nodeID, localNodeID, anchor, hostStats, hostStatsErr, now)
+	signals, stateDigest, appliedIndex := s.nodeHealthSignals(ctx, nodeID, localNodeID, anchor, hostStats, hostStatsErr, now)
 	result := health.ComputeNodeHealth(signals, now)
 	node.HealthStatus = result.Status
 	node.HealthExplanation = result.Explanation
@@ -337,6 +372,20 @@ func (s *Server) clusterNodeEvidence(ctx context.Context, nodeID, localNodeID st
 	var causeStale bool
 	node.Causes, node.CauseState, node.CauseHeadline, causeStale = combCauses(nodeID, localNodeID, anchor, observedHostStats, hostStatsErr, result.Observations, index, now)
 	node.CauseBadgeClass, node.CauseBadgeLabel = combCauseBadge(node.CauseState, causeStale)
+
+	// Stamp the conservative single-Comb verdict now, so this row is never
+	// left with an empty badge class. The overview page overwrites it with
+	// the real cross-voter comparison once every row is in hand, which is
+	// the only place that can honestly compare them.
+	node.StateDigest = stateDigest
+	node.AppliedIndex = appliedIndex
+	digestView := stateDigestUnobservedView(stateDigestObservation{
+		NodeID: nodeID, Digest: stateDigest, AppliedIndex: appliedIndex,
+	}, 1)
+	node.DigestState = digestView.State
+	node.DigestBadgeClass = digestView.BadgeClass
+	node.DigestBadgeLabel = digestView.Label
+	node.DigestDetail = digestView.Detail
 	return node
 }
 
@@ -380,8 +429,34 @@ func (s *Server) handleClusterOverviewPage(w http.ResponseWriter, r *http.Reques
 
 	sort.Slice(nodes, func(i, j int) bool { return nodes[i].NodeID < nodes[j].NodeID })
 
+	// The digest verdict is the one thing on this page that cannot be
+	// decided per row: "these state machines agree" is a fact about the
+	// whole set. It is computed once here, from the digests the rows above
+	// already gathered, and stamped back onto them.
+	observations := make([]stateDigestObservation, len(nodes))
+	for i, node := range nodes {
+		observations[i] = stateDigestObservation{
+			NodeID: node.NodeID, Digest: node.StateDigest, AppliedIndex: node.AppliedIndex,
+		}
+	}
+	digestViews, digestColony := stateDigestVerdicts(observations)
+	for i := range nodes {
+		view, found := digestViews[nodes[i].NodeID]
+		if !found {
+			// Unreachable while both are built from the same rows, but an
+			// absent verdict must render as unobserved rather than as a
+			// blank badge if that ever stops holding.
+			view = stateDigestUnobservedView(stateDigestObservation{NodeID: nodes[i].NodeID}, len(nodes))
+		}
+		nodes[i].DigestState = view.State
+		nodes[i].DigestBadgeClass = view.BadgeClass
+		nodes[i].DigestBadgeLabel = view.Label
+		nodes[i].DigestDetail = view.Detail
+	}
+
 	s.render(w, "cluster_overview_page", s.withAuthFieldsFrom(r, pageData{
 		ClusterNodes:                nodes,
+		StateDigestColony:           digestColony,
 		JoinRequests:                s.currentJoinRequests(r),
 		ActivePage:                  "stats",
 		JoinRequestError:            r.URL.Query().Get("join_request_error"),

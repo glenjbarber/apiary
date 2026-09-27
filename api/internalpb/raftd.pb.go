@@ -189,7 +189,22 @@ type StatusResponse struct {
 	RaftState string `protobuf:"bytes,6,opt,name=raft_state,json=raftState,proto3" json:"raft_state,omitempty"`
 	// servers lists the current cluster configuration, as known to this
 	// node. Useful for verifying membership changes took effect.
-	Servers       []*ServerInfo `protobuf:"bytes,7,rep,name=servers,proto3" json:"servers,omitempty"`
+	Servers []*ServerInfo `protobuf:"bytes,7,rep,name=servers,proto3" json:"servers,omitempty"`
+	// state_digest is a canonical digest of this node's own FSM state
+	// (ADR-0143). It is a lowercase hex SHA-256, recomputed on every Apply
+	// and served from a cache, and is NEVER empty on a node whose raftd is
+	// up - an empty digest therefore means "not observed", not "empty
+	// state", which is what lets a consumer tell a readable node from an
+	// unreadable one without a separate flag.
+	//
+	// The applied_index above is deliberately NOT part of the digest: a
+	// digest that folded it in would differ on every voter at every
+	// instant a cluster is merely making progress, which is a sampling
+	// artifact rather than divergence. Pair the two instead - a mismatch
+	// at equal applied_index is a real disagreement, and a mismatch at
+	// differing applied_index may be nothing but the sample being taken
+	// while the cluster moved.
+	StateDigest   string `protobuf:"bytes,8,opt,name=state_digest,json=stateDigest,proto3" json:"state_digest,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -271,6 +286,13 @@ func (x *StatusResponse) GetServers() []*ServerInfo {
 		return x.Servers
 	}
 	return nil
+}
+
+func (x *StatusResponse) GetStateDigest() string {
+	if x != nil {
+		return x.StateDigest
+	}
+	return ""
 }
 
 type ServerInfo struct {
@@ -1849,7 +1871,7 @@ const file_api_internalpb_raftd_proto_rawDesc = "" +
 	"\x05error\x18\x02 \x01(\tR\x05error\x12\x1f\n" +
 	"\vleader_hint\x18\x03 \x01(\tR\n" +
 	"leaderHint\"\x0f\n" +
-	"\rStatusRequest\"\x87\x02\n" +
+	"\rStatusRequest\"\xaa\x02\n" +
 	"\x0eStatusResponse\x12\x1b\n" +
 	"\tis_leader\x18\x01 \x01(\bR\bisLeader\x12\x1b\n" +
 	"\tleader_id\x18\x02 \x01(\tR\bleaderId\x12\x17\n" +
@@ -1858,7 +1880,8 @@ const file_api_internalpb_raftd_proto_rawDesc = "" +
 	"\rapplied_index\x18\x05 \x01(\x04R\fappliedIndex\x12\x1d\n" +
 	"\n" +
 	"raft_state\x18\x06 \x01(\tR\traftState\x128\n" +
-	"\aservers\x18\a \x03(\v2\x1e.apiary.internal.v1.ServerInfoR\aservers\"R\n" +
+	"\aservers\x18\a \x03(\v2\x1e.apiary.internal.v1.ServerInfoR\aservers\x12!\n" +
+	"\fstate_digest\x18\b \x01(\tR\vstateDigest\"R\n" +
 	"\n" +
 	"ServerInfo\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x18\n" +

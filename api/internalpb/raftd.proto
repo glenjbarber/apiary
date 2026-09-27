@@ -166,6 +166,22 @@ message StatusResponse {
   // servers lists the current cluster configuration, as known to this
   // node. Useful for verifying membership changes took effect.
   repeated ServerInfo servers = 7;
+
+  // state_digest is a canonical digest of this node's own FSM state
+  // (ADR-0143). It is a lowercase hex SHA-256, recomputed on every Apply
+  // and served from a cache, and is NEVER empty on a node whose raftd is
+  // up - an empty digest therefore means "not observed", not "empty
+  // state", which is what lets a consumer tell a readable node from an
+  // unreadable one without a separate flag.
+  //
+  // The applied_index above is deliberately NOT part of the digest: a
+  // digest that folded it in would differ on every voter at every
+  // instant a cluster is merely making progress, which is a sampling
+  // artifact rather than divergence. Pair the two instead - a mismatch
+  // at equal applied_index is a real disagreement, and a mismatch at
+  // differing applied_index may be nothing but the sample being taken
+  // while the cluster moved.
+  string state_digest = 8;
 }
 
 message ServerInfo {

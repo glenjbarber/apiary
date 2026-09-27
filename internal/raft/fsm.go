@@ -63,13 +63,21 @@ type FSM struct {
 	// comment for why this must be a separate, one-way flag rather than
 	// just checking len(apiKeys) > 0.
 	authEnabled bool
+
+	// stateDigest caches the canonical digest of everything above, for
+	// ADR-0143's cross-voter comparison. It is recomputed on every Apply
+	// and on Restore rather than computed per Status call, because
+	// Status is on the health-check and colony-view path and
+	// serialising the whole state machine on every call would turn a
+	// diagnostic into a load problem. Read it only through StateDigest.
+	stateDigest string
 }
 
 var _ raft.FSM = (*FSM)(nil)
 
 // NewFSM returns an empty FSM.
 func NewFSM() *FSM {
-	return &FSM{
+	f := &FSM{
 		vms:                 make(map[string]*internalpb.VMDefinition),
 		networks:            make(map[string]*internalpb.NetworkDefinition),
 		apiKeys:             make(map[string]*internalpb.ApiKey),
@@ -78,6 +86,12 @@ func NewFSM() *FSM {
 		restartLeases:       make(map[string]*internalpb.RestartLease),
 		restartRecords:      make(map[string]*internalpb.RestartRecord),
 	}
+	// Seed the digest of the empty state. No lock is taken because the
+	// FSM has not been handed to anyone yet; recomputeStateDigestLocked
+	// is called from Apply and Restore with the lock held, which is the
+	// only other place it may run.
+	f.recomputeStateDigestLocked()
+	return f
 }
 
 // Apply implements raft.FSM. log.Data must be a marshaled
@@ -87,6 +101,13 @@ func NewFSM() *FSM {
 func (f *FSM) Apply(log *raft.Log) interface{} {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+
+	// Registered after the unlock above, so it runs BEFORE it: the
+	// digest is recomputed under the same lock that just applied the
+	// command, and no reader can observe a state whose digest predates
+	// it. lastIndex is deliberately not part of the digest, so setting
+	// it first does not perturb the result.
+	defer f.recomputeStateDigestLocked()
 
 	f.lastIndex = log.Index
 
@@ -1159,6 +1180,42 @@ func (f *FSM) AppliedIndex() uint64 {
 	return f.lastIndex
 }
 
+// StateDigest returns this node's canonical digest of its own FSM state
+// (ADR-0143), as lowercase hex. The value is cached and recomputed on
+// every Apply, so this is a field read under the lock rather than a
+// re-serialisation of the whole state machine.
+//
+// Two voters whose digests are equal hold identical state. Two voters
+// whose digests differ do not - which says the state machines
+// disagreed, and deliberately does not say which one is wrong. Pair the
+// digest with AppliedIndex above: a mismatch at equal indexes is a real
+// disagreement, while a mismatch at differing indexes may only be a
+// sample taken while the cluster was still applying entries.
+//
+// Never returns an empty string. "No state" is a state with a real
+// digest; an empty digest therefore means this method was not called at
+// all, and a caller can use "" to mean unobserved without a separate
+// flag.
+func (f *FSM) StateDigest() string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.stateDigest
+}
+
+// recomputeStateDigestLocked refreshes the cached digest from the FSM's
+// current state. The caller must hold f.mu, except in NewFSM where the
+// FSM is not yet shared.
+//
+// The cost is proportional to the total state, paid once per applied
+// command rather than once per Status call. That is the deliberate
+// trade ADR-0143 records: Status is polled by the health check and the
+// colony view, and making every poll re-serialise the state machine
+// would make a diagnostic a load problem on exactly the large colonies
+// that most need it.
+func (f *FSM) recomputeStateDigestLocked() {
+	f.stateDigest = stateDigestOf(f.snapshotStateLocked())
+}
+
 // VM returns the current definition for id, and whether it exists.
 func (f *FSM) VM(id string) (*internalpb.VMDefinition, bool) {
 	f.mu.Lock()
@@ -1197,6 +1254,17 @@ func (f *FSM) SnapshotState() *internalpb.FSMSnapshotState {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 
+	return f.snapshotStateLocked()
+}
+
+// snapshotStateLocked is SnapshotState's body without the locking, so the
+// digest recompute can reach it without taking the lock a second time. The
+// caller must hold f.mu. The returned message shares the FSM's value
+// pointers rather than deep-copying them, which is what Snapshot and
+// Restore have always relied on and is safe for both callers: each one
+// either encodes the message immediately or hands it to raft's own
+// Persist, and both happen under this lock.
+func (f *FSM) snapshotStateLocked() *internalpb.FSMSnapshotState {
 	state := &internalpb.FSMSnapshotState{
 		LastIndex:           f.lastIndex,
 		Vms:                 make(map[string]*internalpb.VMDefinition, len(f.vms)),
@@ -1277,6 +1345,10 @@ func (f *FSM) Restore(rc io.ReadCloser) error {
 		f.restartRecords = make(map[string]*internalpb.RestartRecord)
 	}
 	f.authEnabled = state.GetAuthEnabled()
+	// Recompute under the same lock: a Status call arriving after this
+	// returns must see a digest of the restored state, never one left
+	// over from the pre-restore state.
+	f.recomputeStateDigestLocked()
 	f.mu.Unlock()
 	return nil
 }
