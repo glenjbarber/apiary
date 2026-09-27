@@ -103,6 +103,7 @@ func (s *Server) Status(_ context.Context, _ *internalpb.StatusRequest) (*intern
 		AppliedIndex: status.AppliedIndex,
 		RaftState:    status.RaftState,
 		Servers:      servers,
+		StateDigest:  status.StateDigest,
 	}, nil
 }
 

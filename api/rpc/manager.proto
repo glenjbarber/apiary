@@ -980,6 +980,17 @@ message StatusResponse {
   // uses this, not a flag of its own, to decide whether to enable
   // login at all.
   bool pam_configured = 12;
+
+  // raft_state_digest is this Comb's own raftd's canonical FSM state
+  // digest, passed through from raftd's internal Status
+  // (ADR-0143). Empty when raft_reachable is false, or when the raftd
+  // answering is too old to report one - never a digest of empty
+  // state, so an empty value always means "no digest was observed".
+  //
+  // It describes ONE voter. It is not a cluster-wide verdict, and a
+  // consumer must compare it against other voters' digests rather than
+  // read it as a statement about the Colony.
+  string raft_state_digest = 13;
 }
 
 message AuthenticatePasswordRequest {
@@ -3022,6 +3033,31 @@ message ClusterNodeHealth {
   // already implied by the observations; naming it here saves a consumer
   // from having to infer it correctly from prose.
   bool dialed = 5;
+
+  // raft_state_digest is the digest of THIS node's own FSM state
+  // (ADR-0143), collected by the same per-node Status fan-out that
+  // already gathers each node's applied and last log index, so it costs
+  // no extra RPC. Empty when this node's digest could not be read -
+  // it was never dialed, it did not answer, its raftd was unreachable,
+  // or its raftd predates the field. An absent digest is never evidence
+  // of agreement.
+  //
+  // The node's applied index is already carried in observations. Read
+  // it alongside this: a digest mismatch at the same applied index is a
+  // real disagreement, while a mismatch at different applied indexes
+  // may only be a sample taken while the cluster was still moving.
+  string raft_state_digest = 6;
+
+  // raft_applied_index is this node's own raft applied index, read at the
+  // same moment as the digest above. It is already implied by the
+  // raft_applied_index observation, and is named here for the same reason
+  // dialed is: a consumer comparing a digest to its neighbour's needs the
+  // index as a typed value from the same row, and a digest is meaningless
+  // without it. It pairs with raft_state_digest deliberately - a
+  // disagreement at equal indexes is real, and a disagreement at
+  // differing indexes is not yet distinguishable from a sample taken
+  // while the cluster moved.
+  uint64 raft_applied_index = 7;
 }
 
 message ClusterHealthResponse {

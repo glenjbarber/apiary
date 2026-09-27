@@ -122,6 +122,12 @@ type pageData struct {
 	// default landing page ("/").
 	ClusterNodes []clusterNodeView
 
+	// StateDigestColony is the colony-wide FSM state agreement verdict the
+	// ClusterNodes badges above sit under (ADR-0143). It is a value, not
+	// a pointer, and its BadgeClass is always set, so the panel can render
+	// a verdict without any nil check of its own.
+	StateDigestColony stateDigestColony
+
 	// MaintenanceWaves contains a read-only, one-Comb-at-a-time rehearsal
 	// based on the same node-failure simulation shown on /simulate.
 	MaintenanceWaves []maintenanceWaveView
