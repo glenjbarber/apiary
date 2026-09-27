@@ -233,17 +233,27 @@ INSTALL_SRCS_FILTERED= ${INSTALL_SRCS:Nraftd}
 # the same fix this project's own live apiarium/apiverse deploys use.
 # Re-run this after every rebuild, then `service apiary_<name> restart`.
 #
-# Also installs each daemon's commented .json.sample reference file
+# Also installs each daemon's .json.sample reference file
 # (etc/apiary/<name>.json.sample) alongside its real config path, e.g.
-# /usr/local/etc/apiary/raftd.json.sample next to raftd.json. These are
-# pure documentation, never read by any daemon (JSON has no comment
-# syntax, and every daemon parses its config with plain encoding/json -
-# see docs/bootstrap.md Steps 7-9), so they are always refreshed on
-# every install, unlike the real config files they sit beside, which
-# this target never touches. Copy one to the real path and strip its
-# "//" lines to use it (each is written so every comment stands on its
-# own line and never trails a value. The documented POSIX sed command
-# removes both those comment-only lines and the blank lines they leave).
+# /usr/local/etc/apiary/raftd.json.sample next to raftd.json, plus
+# etc/apiary/README.md, which is where the guidance those samples used
+# to carry inline now lives. The samples are pure documentation, never
+# read by any daemon, and are valid strict JSON exactly as installed -
+# an operator can `cp` one straight onto its real path and have the
+# daemon parse it, with no editing step (they carry <placeholder> values
+# to substitute; see the README). Two of the loaders, frontend's and
+# restshimd's, parse through internal/jsonstrict, which rejects
+# duplicate object keys as well as comments, so a sample that
+# round-tripped under plain encoding/json is not automatically valid
+# for them either - internal/configsamples tests every shipped sample
+# through the loader that will actually read it.
+#
+# Because they are documentation they are always refreshed on every
+# install, unlike the real config files they sit beside, which this
+# target never touches. The README must be installed too: the samples
+# are now bare JSON, so an operator on a node with no README has no
+# access to the SAN requirements, the bind-versus-dial rule, or
+# restshimd's loopback posture.
 install: build check-stamped setup-dirs
 	mkdir -p /usr/local/libexec/apiary /usr/local/etc/apiary
 	for S in ${INSTALL_SRCS} ; \
@@ -255,6 +265,8 @@ install: build check-stamped setup-dirs
 		do cp -p etc/apiary/$$S.json.sample /usr/local/etc/apiary/$$S.json.sample ;\
 		chmod 644 /usr/local/etc/apiary/$$S.json.sample ;\
 	done
+	cp -p etc/apiary/README.md /usr/local/etc/apiary/README.md ;\
+	chmod 644 /usr/local/etc/apiary/README.md
 
 # setup installs the pieces a fresh host needs beyond the built binaries
 # themselves: the log/run/data directories every apiary_* rc.d script or

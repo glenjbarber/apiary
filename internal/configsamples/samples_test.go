@@ -528,3 +528,66 @@ func fieldByJSONName(v reflect.Value, name string) reflect.Value {
 	}
 	return reflect.Value{}
 }
+
+// TestEveryFileInEtcApiaryIsInstalled guards the seam between this
+// directory and `make install`. The install rule copies samples by
+// looping over INSTALL_SRCS and naming each one, so a file added here
+// that no rule names is silently never shipped: it exists in the
+// repository and on no node at all. That is not hypothetical - the
+// first version of this directory's README was exactly that, because
+// the samples became bare JSON and the guidance moved out of them while
+// the install rule still only knew about *.json.sample. An operator on
+// a node then had a sample with no documentation beside it.
+//
+// The check is deliberately coarse: it requires each file in this
+// directory to be named somewhere in the Makefile. It does not prove
+// the rule is correct, only that nothing here is forgotten, which is
+// the failure that actually happened and the one a new file invites.
+func TestEveryFileInEtcApiaryIsInstalled(t *testing.T) {
+	dir := sampleDir(t)
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatalf("ReadDir(%s) error: %v", dir, err)
+	}
+
+	// sampleDir is <root>/etc/apiary, so the module root is two levels up.
+	root := filepath.Dir(filepath.Dir(dir))
+	makefile, err := os.ReadFile(filepath.Join(root, "Makefile"))
+	if err != nil {
+		t.Fatalf("reading the Makefile to check it installs %s: %v", dir, err)
+	}
+
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		name := e.Name()
+		if isInstalled(makefile, name) {
+			continue
+		}
+		t.Errorf("%s/%s is not named in the Makefile, so `make install` never puts it on a node.\n"+
+			"Add it to the install rule, or move it out of this directory if it is not meant to ship.",
+			dir, name)
+	}
+}
+
+// isInstalled reports whether the Makefile puts name on a node, either by
+// naming it literally or by covering it through the templated loop that
+// copies every daemon's sample (`for S in ${INSTALL_SRCS} ... $$S.json.sample`).
+// A per-daemon sample is never named literally, so a literal-only check
+// reports all four as missing and the test is worthless.
+func isInstalled(makefile []byte, name string) bool {
+	haystack := string(makefile)
+	if strings.Contains(haystack, "etc/apiary/"+name) {
+		return true
+	}
+	if daemon, ok := strings.CutSuffix(name, ".json.sample"); ok && daemon != "" {
+		// The loop writes etc/apiary/<daemon>.json.sample from a
+		// template, so look for that template with the daemon's own
+		// name replaced by the loop variable.
+		if strings.Contains(haystack, "$$S.json.sample") || strings.Contains(haystack, "${INSTALL_SRCS}.json.sample") {
+			return true
+		}
+	}
+	return false
+}
