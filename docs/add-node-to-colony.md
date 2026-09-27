@@ -91,7 +91,7 @@ verification to bypass this requirement.
 ## Guided-action path
 
 Use this path when this host already formed its own independent Comb (real
-Raft state already exists — this is not the case for a genuinely fresh
+Raft state already exists - this is not the case for a genuinely fresh
 host).
 
 ### Prerequisites (on the joining Comb)
@@ -109,9 +109,13 @@ host).
 
 1. Open this Comb's Machine Configuration page in the frontend.
 2. Click **"Convert this Comb to a joiner"** (ADR-0105).
-3. Enter the target Colony member's managerd address when prompted.
-4. Type the exact confirmation phrase shown on the page.
-5. Submit the action.
+3. Enter the target Colony member's managerd address.
+4. Enter this Comb's new raft-bind address: the `host:port` other Combs will
+   dial to reach this one. It must be a real, routable address, never
+   `0.0.0.0`, `127.0.0.1` or `localhost`, for the same reason as `raft_bind`
+   in the [Manual path](#manual-path) below.
+5. Type the exact confirmation phrase shown on the page.
+6. Submit the action.
 
 The action performs the following internally (fails closed on any error,
 leaving the Comb running exactly as it was):
@@ -134,7 +138,7 @@ request is already submitted.
    below with that confirmation code.
 
 > **Recovery note**: If the action fails partway and you need to understand
-> the current state by hand, see the [Manual path](#manual-path) below — it
+> the current state by hand, see the [Manual path](#manual-path) below - it
 > documents exactly what the guided action does internally.
 
 ## Manual path
