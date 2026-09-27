@@ -104,22 +104,22 @@
     .sidebar {
       position:sticky; top:4.5rem; grid-column:1; grid-row:2 / 4;
       align-self:start; height:calc(100vh - 4.5rem); overflow-y:auto;
-      padding:1.1rem .85rem 2rem; color:var(--sidebar-ink);
+      padding:.8rem .7rem 1.25rem; color:var(--sidebar-ink);
       background:var(--sidebar); border-right:1px solid #2b3032;
       scrollbar-width:thin; scrollbar-color:#4a5052 transparent;
     }
     .sidebar::-webkit-scrollbar { width:8px; }
     .sidebar::-webkit-scrollbar-track { background:transparent; }
     .sidebar::-webkit-scrollbar-thumb { background:#4a5052; border-radius:999px; }
-    .sidebar-section { padding:.2rem 0 1rem; border-bottom:1px solid #303537; margin-bottom:.8rem; }
+    .sidebar-section { padding:.1rem 0 .55rem; border-bottom:1px solid #303537; margin-bottom:.5rem; }
     .sidebar-section:last-child { border-bottom:0; }
-    .sidebar-heading { margin:.2rem .7rem .45rem; color:var(--sidebar-muted); font-size:.68rem; font-weight:800; letter-spacing:.11em; text-transform:uppercase; }
-    .sidebar-link, .sidebar-tree-label { display:block; padding:.48rem .7rem; border-radius:7px; color:var(--sidebar-ink); font-size:.9rem; text-decoration:none; }
+    .sidebar-heading { margin:.1rem .65rem .25rem; color:var(--sidebar-muted); font-size:.66rem; font-weight:800; letter-spacing:.11em; text-transform:uppercase; }
+    .sidebar-link, .sidebar-tree-label { display:block; padding:.3rem .65rem; border-radius:6px; color:var(--sidebar-ink); font-size:.875rem; line-height:1.35; text-decoration:none; }
     .sidebar-link:hover { color:#fff; background:#272d2f; }
     .sidebar-link.active { color:#111; background:var(--yellow); font-weight:750; }
-    .sidebar-tree { margin:.1rem 0 0 .9rem; padding-left:.75rem; border-left:1px solid #42484a; }
-    .sidebar-tree-label { padding:.32rem .55rem; color:var(--sidebar-muted); font-size:.78rem; }
-    .sidebar-link.cell-type { margin-left:.45rem; }
+    .sidebar-tree { margin:0 0 0 .85rem; padding-left:.6rem; border-left:1px solid #42484a; }
+    .sidebar-tree-label { padding:.15rem .5rem; color:var(--sidebar-muted); font-size:.72rem; }
+    .sidebar-link.cell-type { margin-left:.3rem; }
     .content { grid-column:2; grid-row:2; min-width:0; width:100%; max-width:1500px; padding:2rem clamp(1rem, 2.5vw, 2.5rem) 3rem; }
     .app-footer { grid-column:2; grid-row:3; padding:1rem clamp(1rem, 2.5vw, 2.5rem) 1.5rem; color:var(--muted); font-size:.78rem; border-top:1px solid var(--line); }
     h1 { font-size:1.6rem; margin:0; letter-spacing:-.03em; }
