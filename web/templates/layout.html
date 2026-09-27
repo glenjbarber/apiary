@@ -249,6 +249,25 @@
     .health-card-stat { display:flex; align-items:center; gap:.4rem; }
     .health-card-stat[data-zero] { opacity:.55; }
     .health-card-stat-label { font-size:.82rem; color:var(--muted); }
+    /* Wizard: the VM/Jail creation flow's pane shell (docs/
+       web-ui-redesign.md Section B). max-width is narrower than the
+       page's own 1500px content column - a form read top to bottom is
+       the one layout here that benefits from a narrow measure. */
+    .wizard { display:grid; grid-template-columns:12rem minmax(0,1fr); gap:1.5rem; align-items:start; max-width:56rem; margin-top:1rem; }
+    .wizard-rail { display:flex; flex-direction:column; gap:.15rem; margin:0; padding:0; list-style:none; position:sticky; top:5.5rem; }
+    .wizard-rail-step { display:block; padding:.5rem .7rem; border-radius:6px; color:var(--muted); font-size:.88rem; font-weight:600; text-decoration:none; cursor:default; }
+    .wizard-rail-step.reachable { cursor:pointer; }
+    .wizard-rail-step.reachable:hover { background:var(--row-hover); }
+    .wizard-rail-step.done { color:var(--ink); }
+    .wizard-rail-step.current { color:#111; background:var(--yellow); font-weight:750; }
+    .wizard-form { min-width:0; }
+    .wizard-pane { min-width:0; }
+    .wizard-nav { display:flex; align-items:center; gap:.75rem; margin-top:1.5rem; padding-top:1rem; border-top:1px solid var(--line); }
+    .wizard-nav-primary { display:flex; gap:.6rem; margin-left:auto; }
+    @media (max-width:900px) {
+      .wizard { grid-template-columns:1fr; max-width:none; }
+      .wizard-rail { position:static; flex-direction:row; flex-wrap:wrap; gap:.3rem; }
+    }
     .cockpit-evidence-link { display:inline-block; margin-top:.25rem; font-size:.78rem; }
     /* remote-node marks a table cell whose Cell/resource is owned by a
        different Comb than the one currently answering this page - see
@@ -294,6 +313,12 @@
     .detail-list { margin:0; }
     .detail-list > div { display:flex; justify-content:space-between; gap:1rem; padding:.52rem 0; border-bottom:1px solid var(--line); }
     .detail-list > div:last-child { border-bottom:0; }
+    /* A plain [hidden] would lose to the rule above on specificity (one
+       class + one type beats one attribute), so a hidden row would
+       still render as an empty flex row instead of disappearing - the
+       Review pane (docs/web-ui-redesign.md Section B) is this file's
+       first case of toggling hidden on a .detail-list row. */
+    .detail-list > div[hidden] { display:none; }
     .detail-list dt { color:var(--muted); }
     .detail-list dd { margin:0; text-align:right; font-weight:650; overflow-wrap:anywhere; }
     .compact-table { margin-top:.25rem; }

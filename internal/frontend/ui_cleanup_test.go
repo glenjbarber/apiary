@@ -3,6 +3,7 @@ package frontend
 import (
 	"net/http"
 	"net/http/httptest"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -28,10 +29,20 @@ func TestNewJailFormSectionsAndReplicaChoices(t *testing.T) {
 			}
 		}
 		if known {
-			for _, want := range []string{`<select name="replica_node_id"`, `<option value="node-b" selected>node-b</option>`, `<option value="">None</option>`} {
+			for _, want := range []string{`<select name="replica_node_id"`, `<option value="">None</option>`} {
 				if !strings.Contains(body, want) {
 					t.Errorf("missing picker content %s", want)
 				}
+			}
+			// The owner-node option for the local node id is
+			// pre-selected. Matched by regexp rather than an exact
+			// string: this option also carries the ADR-0144
+			// data-unavailable-vm/data-unavailable-jail attributes
+			// (see create_guided.html), whose values are incidental to
+			// this fixture's HostStats/GetNodeConfig defaults and not
+			// what this assertion means to pin down.
+			if !regexp.MustCompile(`<option value="node-b"[^>]*\bselected\b`).MatchString(body) {
+				t.Errorf("missing pre-selected owner-node option for the local node, got: %s", body)
 			}
 		} else if !strings.Contains(body, `<input type="text" name="replica_node_id"`) {
 			t.Error("missing manual replica fallback when membership is unavailable")

@@ -147,3 +147,19 @@ func placementUnavailable(hive placementHiveView, kind guidedKind) bool {
 	}
 	return !hive.VMCapable
 }
+
+// placementUnavailableFor is placementUnavailable with a plain string
+// kind, for use directly from a template (docs/web-ui-redesign.md
+// Section B). The wizard's owner-node picker calls this once per known
+// kind ("vm" and "jail") for every hive at render time, embedding both
+// results as the option's own data attributes - see create_guided.html.
+// That is what lets a Kind switch made after the page has already
+// loaded (no round trip: the operator just clicks the other radio
+// button) re-evaluate which Combs are selectable using the exact same
+// server-computed truth this function returns, rather than the
+// template guessing or, worse, the JS silently keeping whichever
+// kind's answer happened to be pre-rendered - which is exactly how
+// this rule went unenforced in the first place (see ADR-0144).
+func placementUnavailableFor(hive placementHiveView, kind string) bool {
+	return placementUnavailable(hive, guidedKind(kind))
+}

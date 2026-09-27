@@ -1248,7 +1248,7 @@ func TestServer_NewVMPage(t *testing.T) {
 		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
 	}
 	body := rec.Body.String()
-	if !strings.Contains(body, `class="create-vm`) {
+	if !strings.Contains(body, `id="guided-form"`) {
 		t.Errorf("new VM page missing create form, got: %s", body)
 	}
 	if !strings.Contains(body, `id="create-error"`) {
@@ -1344,10 +1344,14 @@ func TestServer_NewVMPage_OwnerNodeDefaultsToLocalNode(t *testing.T) {
 	s.ServeHTTP(rec, req)
 
 	body := rec.Body.String()
-	if !strings.Contains(body, `<option value="apiverse" selected>apiverse</option>`) {
+	// Matched by regexp, not an exact string: the owner-node option also
+	// carries the ADR-0144 data-unavailable-vm/data-unavailable-jail
+	// attributes (create_guided.html), which are not what this
+	// assertion means to pin down.
+	if !regexp.MustCompile(`<option value="apiverse"[^>]*\bselected\b`).MatchString(body) {
 		t.Errorf("Owner Node picker should pre-select the local node (apiverse), got: %s", body)
 	}
-	if strings.Contains(body, `<option value="apiarium" selected>apiarium</option>`) {
+	if regexp.MustCompile(`<option value="apiarium"[^>]*\bselected\b`).MatchString(body) {
 		t.Errorf("Owner Node picker should not pre-select a non-local node, got: %s", body)
 	}
 }
@@ -1428,7 +1432,7 @@ func TestServer_NewJailPage(t *testing.T) {
 		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
 	}
 	body := rec.Body.String()
-	if !strings.Contains(body, `class="create-vm`) {
+	if !strings.Contains(body, `id="guided-form"`) {
 		t.Errorf("new jail page missing create form, got: %s", body)
 	}
 	if !strings.Contains(body, `id="create-error"`) {

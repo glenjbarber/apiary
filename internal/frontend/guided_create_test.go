@@ -694,3 +694,27 @@ func TestPlacementUnavailable(t *testing.T) {
 		}
 	}
 }
+
+// TestPlacementUnavailableFor pins the template-facing wrapper to
+// placementUnavailable itself for both string kinds - this is the one
+// function create_guided.html calls to compute BOTH kinds' answers at
+// once (for a hive it renders once), and a mismatch here is exactly
+// the class of drift ADR-0144 exists to close.
+func TestPlacementUnavailableFor(t *testing.T) {
+	hives := []placementHiveView{
+		{},
+		{VMCapable: true},
+		{JailKnown: true, JailCapable: true},
+		{JailKnown: true},
+		{ProbeError: "connection refused"},
+	}
+	for _, hive := range hives {
+		for _, kind := range []guidedKind{guidedKindVM, guidedKindJail} {
+			want := placementUnavailable(hive, kind)
+			got := placementUnavailableFor(hive, string(kind))
+			if got != want {
+				t.Errorf("placementUnavailableFor(%+v, %q) = %v, want %v (placementUnavailable's own answer)", hive, kind, got, want)
+			}
+		}
+	}
+}
