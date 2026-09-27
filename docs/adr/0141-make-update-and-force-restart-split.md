@@ -192,12 +192,25 @@ Two cases deliberately write nothing, and both say so loudly on stderr:
   that lease permanently - the daemon would confirm lease 0, the real
   lease would never match, and ADR-0103's leases have no TTL. The
   operator is told the cooldown will not learn about this restart.
-- **The `node_id` cannot be read** from `raftd.json` or `managerd.json`.
-  `applyAcquireRestartLease` counts a record toward the cooldown only
-  when its holder is a currently-known voter, so a record with an empty
-  or wrong `node_id` is written and never blocks anything - a silent
-  no-op indistinguishable, from the outside, from working. Writing
-  nothing and saying why is the honest option.
+- **The `node_id` cannot be determined at all.** `applyAcquireRestartLease`
+  counts a record toward the cooldown only when its holder is a
+  currently-known voter, so a record with an empty or wrong `node_id` is
+  written and never blocks anything - a silent no-op indistinguishable,
+  from the outside, from working. Writing nothing and saying why is the
+  honest option.
+
+  "Determined" deliberately means what it means for the daemons, not
+  what is convenient here. The script resolves `node_id` in the same
+  order `managerd` and `raftd` do - `raftd.json`, then `managerd.json`,
+  then ADR-0111's `common.json`, then `os.Hostname()` - because a
+  record only counts when its `node_id` equals a raft member id, and
+  those ids are the hostnames. Reading only the first two files looks
+  correct and is not: a live test on a Comb whose `raftd.json` and
+  `managerd.json` both omit `node_id` - which is what any Comb set up
+  before that field was written into its config looks like, and is not
+  hypothetical - declined to record anything at all, with a correct and
+  loud warning that the cooldown would not learn. A warning nobody reads
+  is not a substitute for a record.
 
 The script always exits 0. It is bookkeeping on an emergency path, and
 the one thing it must never do is stand between an operator and a
@@ -308,16 +321,19 @@ constrains this one. ADR-0125's clause remains unmet, and
 - `gofmt -l .` clean, `go build ./...` clean, `go vet ./...` clean,
   `go test -count=1 ./...` passes across the repository (60 packages,
   0 failures).
-- `scripts/test-record-forced-restart.sh` - 11 cases, all passing,
-  covering the two failure modes that would matter: that a record is
-  never written with an unreadable `node_id` (it would never block
-  anything, and would look like it worked), and that an existing pending
+- `scripts/test-record-forced-restart.sh` - 16 cases, all passing,
+  covering the failure modes that would matter: that a record is never
+  written with an undeterminable `node_id` (it would never block
+  anything, and would look like it worked), that an existing pending
   record is never overwritten (it would strand a real lease, which has
-  no TTL). It also pins the exact JSON bytes both Go stores parse, and
-  that the script exits 0 even when it cannot record anything. Wired
-  into `scripts/check-version.sh` beside `test-worktree-state.sh`; note
-  that CI runs only the Go steps, so this is a local gate unless a step
-  is added there.
+  no TTL), and that the `node_id` fallback follows the daemons' own
+  chain through to the hostname - the case a live multi-Comb colony
+  actually produced, which no macOS test on a host whose `raftd.json`
+  carries a `node_id` could have caught. It also pins the exact JSON
+  bytes both Go stores parse, and that the script exits 0 even when it
+  cannot record anything. Wired into `scripts/check-version.sh` beside
+  `test-worktree-state.sh`; note that CI runs only the Go steps, so
+  this is a local gate unless a step is added there.
 - The target was then run for real on one Comb of a live multi-Comb
   colony - a non-leader voter, with the rest of the colony healthy - and
   the result is recorded in `.local/SHARED.md` rather than here, since

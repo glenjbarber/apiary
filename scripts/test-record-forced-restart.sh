@@ -53,7 +53,8 @@ fresh() { # fresh -> empty guardrail dir and config paths under $TMP/caseN
 	APIARY_GUARDRAIL_DIR="$D/guardrail"
 	APIARY_RAFTD_JSON="$D/raftd.json"
 	APIARY_MANAGERD_JSON="$D/managerd.json"
-	export APIARY_GUARDRAIL_DIR APIARY_RAFTD_JSON APIARY_MANAGERD_JSON
+	APIARY_COMMON_JSON="$D/common.json"
+	export APIARY_GUARDRAIL_DIR APIARY_RAFTD_JSON APIARY_MANAGERD_JSON APIARY_COMMON_JSON
 }
 
 n=0
@@ -99,12 +100,41 @@ check "and the operator is told the cooldown will not learn" \
 	"$(sh "$here/record-forced-restart.sh" raftd 2>&1 | grep -q 'will NOT learn' && echo yes || echo no)"
 
 echo
-echo "== no readable node_id writes nothing, rather than a record that never blocks =="
+echo "== a Comb whose configs omit node_id falls back to the hostname, like the daemons do =="
 fresh
 sh "$here/record-forced-restart.sh" raftd >/dev/null 2>&1
+check "records under the hostname when no config file sets node_id" \
+	"{\"service\":\"apiary_raftd\",\"node_id\":\"$(hostname)\",\"lease_id\":0}" \
+	"$(cat "$APIARY_GUARDRAIL_DIR/pending-restart-apiary_raftd.json" 2>/dev/null)"
+check "the hostname fallback does not warn about learning nothing" \
+	"no" \
+	"$(sh "$here/record-forced-restart.sh" managerd 2>&1 | grep -q 'will NOT learn' && echo yes || echo no)"
+
+echo
+echo "== common.json is consulted before the hostname, as ADR-0111's chain requires =="
+fresh
+printf '{ "node_id": "sting" }\n' > "$APIARY_COMMON_JSON"
+sh "$here/record-forced-restart.sh" raftd >/dev/null 2>&1
+check "falls back to common.json's node_id" \
+	'{"service":"apiary_raftd","node_id":"sting","lease_id":0}' \
+	"$(cat "$APIARY_GUARDRAIL_DIR/pending-restart-apiary_raftd.json")"
+
+echo
+echo "== when even the hostname is unavailable, write nothing rather than a record that never blocks =="
+fresh
+mkdir -p "$D/bin"
+printf '#!/bin/sh\nexit 1\n' > "$D/bin/hostname"
+chmod +x "$D/bin/hostname"
+out=$(PATH="$D/bin:$PATH" sh "$here/record-forced-restart.sh" raftd 2>&1)
 check "no record file was created" \
 	"no" \
 	"$([ -e "$APIARY_GUARDRAIL_DIR/pending-restart-apiary_raftd.json" ] && echo yes || echo no)"
+check "it says the cooldown will not learn" \
+	"yes" \
+	"$(echo "$out" | grep -q 'will NOT learn' && echo yes || echo no)"
+check "it still exits 0, never blocking the emergency restart" \
+	"0" \
+	"$(PATH="$D/bin:$PATH" sh "$here/record-forced-restart.sh" raftd >/dev/null 2>&1; echo $?)"
 
 echo
 echo "== managerd.json is the fallback when raftd.json is unreadable =="

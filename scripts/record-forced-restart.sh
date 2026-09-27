@@ -65,6 +65,7 @@ set -u
 GUARDRAIL_DIR=${APIARY_GUARDRAIL_DIR:-/var/db/apiary/guardrail}
 RAFTD_JSON=${APIARY_RAFTD_JSON:-/usr/local/etc/apiary/raftd.json}
 MANAGERD_JSON=${APIARY_MANAGERD_JSON:-/usr/local/etc/apiary/managerd.json}
+COMMON_JSON=${APIARY_COMMON_JSON:-/usr/local/etc/apiary/common.json}
 
 warn() { echo "record-forced-restart: $*" >&2 ; }
 
@@ -97,11 +98,24 @@ node_id() {
 	sed -n 's/.*"node_id"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$1" 2>/dev/null | head -1
 }
 
+# This is the same resolution order the daemons themselves use, and it
+# has to be, because a record only counts toward the cooldown when its
+# node_id matches a raft member id. managerd and raftd fall back to
+# os.Hostname() when no config file sets one (cmd/managerd/main.go, and
+# raftd's own node.Status().NodeID default), and ADR-0111's common.json
+# sits between the per-daemon files and that fallback. A Comb whose
+# raftd.json and managerd.json both omit node_id - which is what a Comb
+# set up before that field was written into the config looks like - must
+# still produce a record, or this script silently declines to do its one
+# job on exactly those hosts.
 NODEID=$( node_id "$RAFTD_JSON" )
 [ -n "$NODEID" ] || NODEID=$( node_id "$MANAGERD_JSON" )
+[ -n "$NODEID" ] || NODEID=$( node_id "$COMMON_JSON" )
+if [ -z "$NODEID" ] ; then NODEID=$( hostname 2>/dev/null ) ; fi
 
 if [ -z "$NODEID" ] ; then
-	warn "could not read a node_id from $RAFTD_JSON or $MANAGERD_JSON."
+	warn "could not determine a node_id from $RAFTD_JSON,"
+	warn "$MANAGERD_JSON, $COMMON_JSON, or \`hostname\`."
 	warn "Writing nothing: the guardrail only counts a restart record"
 	warn "toward its cooldown when the holder is a known voter, so a"
 	warn "record with no node_id would never block anything."
