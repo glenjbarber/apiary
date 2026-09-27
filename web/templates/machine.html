@@ -197,7 +197,7 @@
         <div class="panel">
           <p><strong>Request status:</strong> {{.JoinColonyResult.Status}}</p>
           {{if eq .JoinColonyResult.Status "pending"}}
-          <p>Your code: <strong style="font-size:1.4em; letter-spacing:0.1em;">{{.JoinColonyResult.Code}}</strong></p>
+          <p>Your code: <strong class="confirmation-code">{{.JoinColonyResult.Code}}</strong></p>
           <p class="muted">Compare this against the code shown on <code>{{.JoinColonyResult.TargetAddress}}</code>'s own "Pending join requests" panel - but before they approve, get this Comb into the right state: wipe its own raft state (<code>raftd -reset yes-wipe-raft-state</code>) and restart <code>raftd</code> with <code>-await-join</code> so it is genuinely listening at the raft-bind address above but has not formed a cluster of its own. Confirm it is up, <em>then</em> have the Admin approve - approving while this Comb is still running its own standalone-bootstrapped cluster (or isn't listening yet) can destabilize the Colony's existing leadership.</p>
           <p class="muted"><a href="/machine?join_request_id={{.JoinColonyResult.RequestID}}&amp;join_target_address={{.JoinColonyResult.TargetAddress}}">Refresh status</a>.</p>
           <form method="post" action="/machine/join-colony/cancel">
@@ -244,7 +244,7 @@
     {{if .ConvertJoinerResult}}
     <div class="panel">
       <p><strong>Conversion succeeded.</strong> Existing state moved to <code>{{.ConvertJoinerResult.BackupDataDir}}</code>.</p>
-      <p>Your code: <strong style="font-size:1.4em; letter-spacing:0.1em;">{{.ConvertJoinerResult.JoinRequestCode}}</strong></p>
+      <p>Your code: <strong class="confirmation-code">{{.ConvertJoinerResult.JoinRequestCode}}</strong></p>
       <p class="muted">Relay this code to the target Colony's Admin - they compare it against their own "Pending join requests" panel before approving. Nothing about the target Colony changes until they do.</p>
     </div>
     {{else}}

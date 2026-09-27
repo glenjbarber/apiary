@@ -16,7 +16,7 @@
       <p>{{.Explanation}}</p>
       {{if .Evidence}}
       <details>
-        <summary class="muted" style="cursor:pointer">Evidence</summary>
+        <summary class="muted">Evidence</summary>
         <ul>
           {{range .Evidence}}
           <li><strong>{{.Source}}</strong>: {{.Detail}}{{if .NeverObserved}} <em>(not runtime-observed)</em>{{else}} <span class="muted">observed {{.ObservedAt}}</span>{{end}}</li>

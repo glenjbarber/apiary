@@ -89,7 +89,7 @@
     .icon-button, .settings-menu > summary {
       display:grid; place-items:center; width:2.35rem; height:2.35rem;
       padding:0; border:1px solid #42484a; border-radius:8px;
-      color:#f3f3f3; background:#1a1f21; cursor:pointer; text-decoration:none;
+      color:#f3f3f3; background:#1a1f21; text-decoration:none;
     }
     .icon-button:hover, .settings-menu > summary:hover,
     .settings-menu[open] > summary { background:#2b3234; }
@@ -151,6 +151,13 @@
     input, select, textarea { min-width:0; max-width:100%; min-height:2.4rem; border:1px solid var(--muted); border-radius:6px; background:var(--field); color:var(--ink); padding:.45rem .55rem; font:inherit; }
     textarea { resize:vertical; }
     input[type="checkbox"], input[type="radio"] { min-height:0; flex:none; }
+    summary { cursor:pointer; }
+    /* confirmation-code: a one-time code an operator reads off one page and
+       types or compares on another (join requests, colony-conversion flows).
+       Bigger and letter-spaced so it is easy to read aloud or copy correctly;
+       .compact trims it for a dense table cell. */
+    .confirmation-code { font-size:1.4em; letter-spacing:.1em; }
+    .confirmation-code.compact { font-size:1.2em; }
     input:focus, select:focus, textarea:focus { outline:3px solid var(--focus); outline-offset:1px; }
     button:focus-visible, a:focus-visible, summary:focus-visible { outline:3px solid var(--focus); outline-offset:2px; }
     input::placeholder, textarea::placeholder { color:var(--muted); opacity:.75; }
@@ -162,7 +169,7 @@
     .card-grid > .panel { margin-top:0; }
     .card-grid > .panel h3 { margin:.35rem 0; }
     .panel > h3:first-child { margin-top:0; }
-    .assumption-host > summary { cursor:pointer; padding:.25rem 0; overflow-wrap:anywhere; }
+    .assumption-host > summary { padding:.25rem 0; overflow-wrap:anywhere; }
     .assumption-host > summary .badge { margin-left:.75rem; vertical-align:middle; }
     .assumption-host-results { margin-top:1rem; overflow-x:auto; }
 

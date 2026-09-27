@@ -16,7 +16,7 @@
       {{end}}
       {{if gt (len .Evidence) 1}}
       <details>
-        <summary class="muted" style="cursor:pointer; margin-top:.25rem;">Voter-by-voter reachability</summary>
+        <summary class="muted" style="margin-top:.25rem;">Voter-by-voter reachability</summary>
         <ul style="margin-top:.5rem; font-family:ui-monospace, SFMono-Regular, Menlo, monospace; font-size:.85rem;">
           {{range $i, $ev := .Evidence}}{{if gt $i 0}}
           <li><strong>{{$ev.Source}}:</strong> {{$ev.Detail}}{{if $ev.NeverObserved}} <em>(not runtime-observed)</em>{{else}} <span class="muted">observed {{$ev.ObservedAt}}</span>{{end}}</li>
@@ -26,7 +26,7 @@
       {{end}}
       {{else}}
       <details>
-        <summary class="muted" style="cursor:pointer">Evidence</summary>
+        <summary class="muted">Evidence</summary>
         <ul>
           {{range .Evidence}}
           <li><strong>{{.Source}}</strong>: {{.Detail}}{{if .NeverObserved}} <em>(not runtime-observed)</em>{{else}} <span class="muted">observed {{.ObservedAt}}</span>{{end}}</li>
@@ -53,7 +53,7 @@
 
   {{if .Caveats}}
   <details>
-    <summary class="muted" style="cursor:pointer">Disclosed limitations</summary>
+    <summary class="muted">Disclosed limitations</summary>
     <ul>
       {{range .Caveats}}
       <li><strong>{{.Source}}</strong>: {{.Detail}}{{if .NeverObserved}} <em>(permanent, not runtime-observed)</em>{{end}}</li>
