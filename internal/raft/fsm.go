@@ -631,8 +631,26 @@ func (f *FSM) applyCreatePendingJoinRequest(index uint64, req *internalpb.Pendin
 	if req.GetRequestId() == "" || req.GetNodeId() == "" || req.GetRaftBindAddress() == "" || req.GetCode() == "" {
 		return &FSMApplyResult{Index: index, Error: "CreatePendingJoinRequest: request_id, node_id, raft_bind_address, and code must all be set"}
 	}
+	if err := ValidateJoinRequestFields(req.GetNodeId(), req.GetRaftBindAddress(), req.GetTlsCertFingerprint()); err != nil {
+		return &FSMApplyResult{Index: index, Error: "CreatePendingJoinRequest: " + err.Error()}
+	}
+	if len(req.GetCode()) > maxJoinCodeLen || !printableASCII(req.GetCode()) || len(req.GetRequestId()) > maxJoinNodeIDLen || !printableASCII(req.GetRequestId()) {
+		return &FSMApplyResult{Index: index, Error: "CreatePendingJoinRequest: request_id or code is malformed"}
+	}
 	if _, exists := f.pendingJoinRequests[req.GetRequestId()]; exists {
 		return &FSMApplyResult{Index: index, Error: fmt.Sprintf("CreatePendingJoinRequest: request_id %q already exists", req.GetRequestId())}
+	}
+	// Bound the state an unauthenticated caller can make every voter keep.
+	// Eviction is decided from the new request's own requested_at_unix (part
+	// of the replicated log entry), never from the wall clock, so every
+	// replica evicts exactly the same records when it applies this entry.
+	for id, old := range f.pendingJoinRequests {
+		if old.GetExpiresAtUnix()+joinRequestRetentionAfterExpiry < req.GetRequestedAtUnix() {
+			delete(f.pendingJoinRequests, id)
+		}
+	}
+	if len(f.pendingJoinRequests) >= MaxJoinRequests {
+		return &FSMApplyResult{Index: index, Error: fmt.Sprintf("CreatePendingJoinRequest: %d join requests are already recorded; an Admin must purge stale ones before more can be accepted", len(f.pendingJoinRequests))}
 	}
 	f.pendingJoinRequests[req.GetRequestId()] = req
 	return &FSMApplyResult{Index: index, PendingJoinRequest: req}

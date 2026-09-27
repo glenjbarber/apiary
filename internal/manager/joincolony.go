@@ -28,6 +28,7 @@ import (
 	internalpb "github.com/glenjbarber/apiary/api/internalpb"
 	rpcpb "github.com/glenjbarber/apiary/api/rpc"
 	"github.com/glenjbarber/apiary/internal/guardrail"
+	raftnode "github.com/glenjbarber/apiary/internal/raft"
 )
 
 // approveJoinRequestConfirmPhrase is ApproveJoinRequest's own exact-match
@@ -295,6 +296,18 @@ func (s *Server) applyJoinRequestCommand(ctx context.Context, cmd *internalpb.Co
 func (s *Server) RequestJoinColony(ctx context.Context, req *rpcpb.RequestJoinColonyRequest) (*rpcpb.RequestJoinColonyResponse, error) {
 	if req.GetNodeId() == "" || req.GetRaftBindAddress() == "" {
 		return &rpcpb.RequestJoinColonyResponse{Error: "node_id and raft_bind_address must both be set"}, nil
+	}
+	// This RPC is unauthenticated, and every accepted call becomes a record
+	// replicated to every voter. Reject malformed or oversized fields here so
+	// they never reach the Raft log, whether this call records the request or
+	// only relays it to another Colony member.
+	if err := raftnode.ValidateJoinRequestFields(req.GetNodeId(), req.GetRaftBindAddress(), req.GetTlsCertFingerprint()); err != nil {
+		return &rpcpb.RequestJoinColonyResponse{Error: err.Error()}, nil
+	}
+	if req.GetTargetAddress() == "" && s.raft != nil {
+		if pending, err := s.raft.ListPendingJoinRequestsLocal(ctx); err == nil && len(pending.GetRequests()) >= raftnode.MaxActionableJoinRequests {
+			return &rpcpb.RequestJoinColonyResponse{Error: fmt.Sprintf("too many join requests are pending (%d); an Admin must approve, reject, or purge some before more can be accepted", len(pending.GetRequests()))}, nil
+		}
 	}
 	// ADR-0106: a node_id that already names an existing raft voter is
 	// never accepted as a new join - it's either an accidental collision

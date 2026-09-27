@@ -485,3 +485,26 @@ func TestTLSCertFingerprint_FormatAndDeterminism(t *testing.T) {
 		t.Errorf("tlsCertFingerprint() not deterministic: %q vs %q", got, got2)
 	}
 }
+
+// RequestJoinColony is unauthenticated, so malformed or oversized fields
+// must be refused before anything reaches raft (a nil raft client here
+// proves the call returned before touching it).
+func TestServer_RequestJoinColony_RejectsMalformedFieldsBeforeRaft(t *testing.T) {
+	s := NewServer(nil, "node-1", nil, nil, nil, nil, nil, "", nil, nil, nil, 0, nil)
+	cases := []*rpcpb.RequestJoinColonyRequest{
+		{NodeId: strings.Repeat("n", 5000), RaftBindAddress: "10.0.0.2:17600"},
+		{NodeId: "node-2", RaftBindAddress: strings.Repeat("a", 5000) + ":1"},
+		{NodeId: "node-2", RaftBindAddress: "no-port"},
+		{NodeId: "bad id", RaftBindAddress: "10.0.0.2:17600"},
+		{NodeId: "node-2", RaftBindAddress: "10.0.0.2:17600", TlsCertFingerprint: strings.Repeat("F", 5000)},
+	}
+	for i, req := range cases {
+		resp, err := s.RequestJoinColony(context.Background(), req)
+		if err != nil {
+			t.Fatalf("case %d: RequestJoinColony() error: %v", i, err)
+		}
+		if resp.GetError() == "" {
+			t.Errorf("case %d: Error = empty, want a validation rejection", i)
+		}
+	}
+}
