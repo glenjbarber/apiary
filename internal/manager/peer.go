@@ -209,7 +209,7 @@ func (p *PeerReporter) dialUnauthenticated(addr string) (*grpc.ClientConn, rpcpb
 func (p *PeerReporter) dialRestartGuardrail(addr string) (*grpc.ClientConn, rpcpb.ManagerServiceClient, error) {
 	var opts []grpc.DialOption
 	if p.UseTLS {
-		cfg := &tls.Config{}
+		cfg := &tls.Config{MinVersion: tls.VersionTLS12}
 		if p.CAPool != nil {
 			cfg.RootCAs = p.CAPool
 		}
@@ -235,7 +235,7 @@ func (p *PeerReporter) dialRestartGuardrail(addr string) (*grpc.ClientConn, rpcp
 func (p *PeerReporter) dialOpts(addr string, attachAPIKey bool) (*grpc.ClientConn, rpcpb.ManagerServiceClient, error) {
 	var opts []grpc.DialOption
 	if p.UseTLS {
-		cfg := &tls.Config{}
+		cfg := &tls.Config{MinVersion: tls.VersionTLS12}
 		if p.CAPool != nil {
 			cfg.RootCAs = p.CAPool
 		}

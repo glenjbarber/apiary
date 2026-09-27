@@ -55,7 +55,7 @@ func ManagerTLSConfig(useTLS bool, caFile, serverName string) (*tls.Config, erro
 	if !useTLS {
 		return nil, nil
 	}
-	cfg := &tls.Config{ServerName: serverName}
+	cfg := &tls.Config{ServerName: serverName, MinVersion: tls.VersionTLS12}
 	if caFile == "" {
 		return cfg, nil
 	}

@@ -473,7 +473,7 @@ func newManagerdConfirmer(logf func(format string, args ...any)) restartplan.Con
 func dialManagerd(ctx context.Context, ep endpoint, token string) (restartCompletedCaller, func() error, error) {
 	var opts []grpc.DialOption
 	if ep.useTLS {
-		cfg := &tls.Config{}
+		cfg := &tls.Config{MinVersion: tls.VersionTLS12}
 		if pool := loadCAPool(ep.caFile); pool != nil {
 			cfg.RootCAs = pool
 		}
