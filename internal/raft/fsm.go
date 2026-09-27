@@ -443,8 +443,20 @@ func (f *FSM) applySetVMFirewallRules(index uint64, req *internalpb.SetVMFirewal
 // id that's already gone is not an error, since the reconciler that
 // submits this may retry after a partial failure (e.g. it purged
 // successfully but never saw the response).
+//
+// A VM that still exists must already be a DELETING tombstone. Every
+// legitimate caller (the owning node's teardown, and the Admin-only
+// ForcePurgeVM escape hatch) purges a resource that DeleteVM already
+// marked; refusing anything else here means a purge can never remove the
+// definition of a live VM, whichever RPC role submitted it.
 func (f *FSM) applyPurgeVM(index uint64, id string) *FSMApplyResult {
-	vm := f.vms[id]
+	vm, exists := f.vms[id]
+	if !exists {
+		return &FSMApplyResult{Index: index}
+	}
+	if vm.GetDesiredState() != internalpb.VMState_VM_STATE_DELETING {
+		return &FSMApplyResult{Index: index, Error: fmt.Sprintf("PurgeVM: VM %q is not marked for deletion - call DeleteVM first", id)}
+	}
 	delete(f.vms, id)
 	return &FSMApplyResult{Index: index, VM: vm}
 }
@@ -593,9 +605,16 @@ func (f *FSM) applySetJailHostname(index uint64, req *internalpb.SetJailHostname
 }
 
 // applyPurgeJail mirrors applyPurgeVM exactly: idempotent, not an
-// error if id is already gone.
+// error if id is already gone, and refused unless the jail is already a
+// DELETING tombstone.
 func (f *FSM) applyPurgeJail(index uint64, id string) *FSMApplyResult {
-	jail := f.jails[id]
+	jail, exists := f.jails[id]
+	if !exists {
+		return &FSMApplyResult{Index: index}
+	}
+	if jail.GetDesiredState() != internalpb.JailState_JAIL_STATE_DELETING {
+		return &FSMApplyResult{Index: index, Error: fmt.Sprintf("PurgeJail: jail %q is not marked for deletion - call DeleteJail first", id)}
+	}
 	delete(f.jails, id)
 	return &FSMApplyResult{Index: index, Jail: jail}
 }

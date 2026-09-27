@@ -418,15 +418,37 @@ func TestFSM_Apply_UpdateVMPhase_MissingIDIsError(t *testing.T) {
 func TestFSM_Apply_PurgeVM(t *testing.T) {
 	fsm := NewFSM()
 	fsm.Apply(&raft.Log{Index: 1, Data: mustMarshalCommand(t, createVMCmd("vm-1", "web-1"))})
+	fsm.Apply(&raft.Log{Index: 2, Data: mustMarshalCommand(t, &internalpb.Command{
+		Op: &internalpb.Command_DeleteVm{DeleteVm: &internalpb.DeleteVM{Id: "vm-1"}},
+	})})
 
 	cmd := &internalpb.Command{Op: &internalpb.Command_PurgeVm{PurgeVm: &internalpb.PurgeVM{Id: "vm-1"}}}
-	result := fsm.Apply(&raft.Log{Index: 2, Data: mustMarshalCommand(t, cmd)})
+	result := fsm.Apply(&raft.Log{Index: 3, Data: mustMarshalCommand(t, cmd)})
 
 	if result.(*FSMApplyResult).Error != "" {
 		t.Fatalf("Error = %q, want empty", result.(*FSMApplyResult).Error)
 	}
 	if _, ok := fsm.VM("vm-1"); ok {
 		t.Errorf("VM(vm-1) still present after PurgeVM")
+	}
+}
+
+// A purge must never remove the definition of a live VM: an Operator key
+// can reach the ReportVMTeardownComplete RPC that submits it, and the
+// Admin-only ForcePurgeVM guard (must already be DELETING) would otherwise
+// be bypassable through it.
+func TestFSM_Apply_PurgeVM_RefusedUnlessMarkedForDeletion(t *testing.T) {
+	fsm := NewFSM()
+	fsm.Apply(&raft.Log{Index: 1, Data: mustMarshalCommand(t, createVMCmd("vm-1", "web-1"))})
+
+	cmd := &internalpb.Command{Op: &internalpb.Command_PurgeVm{PurgeVm: &internalpb.PurgeVM{Id: "vm-1"}}}
+	result := fsm.Apply(&raft.Log{Index: 2, Data: mustMarshalCommand(t, cmd)})
+
+	if result.(*FSMApplyResult).Error == "" {
+		t.Fatalf("Error = empty, want a refusal to purge a VM that is not marked for deletion")
+	}
+	if _, ok := fsm.VM("vm-1"); !ok {
+		t.Errorf("VM(vm-1) was removed by a purge despite not being marked for deletion")
 	}
 }
 
@@ -1532,6 +1554,25 @@ func TestFSM_Apply_PurgeJail(t *testing.T) {
 	}
 	if _, ok := fsm.Jail("jail-1"); ok {
 		t.Errorf("Jail(jail-1) still present after PurgeJail")
+	}
+}
+
+func TestFSM_Apply_PurgeJail_RefusedUnlessMarkedForDeletion(t *testing.T) {
+	fsm := NewFSM()
+	fsm.Apply(&raft.Log{Index: 1, Data: mustMarshalCommand(t, &internalpb.Command{
+		Op: &internalpb.Command_CreateJail{CreateJail: &internalpb.CreateJail{
+			Jail: &internalpb.JailDefinition{Id: "jail-1", NodeId: "node-a"},
+		}},
+	})})
+
+	purgeCmd := &internalpb.Command{Op: &internalpb.Command_PurgeJail{PurgeJail: &internalpb.PurgeJail{Id: "jail-1"}}}
+	result := fsm.Apply(&raft.Log{Index: 2, Data: mustMarshalCommand(t, purgeCmd)})
+
+	if result.(*FSMApplyResult).Error == "" {
+		t.Fatalf("Error = empty, want a refusal to purge a jail that is not marked for deletion")
+	}
+	if _, ok := fsm.Jail("jail-1"); !ok {
+		t.Errorf("Jail(jail-1) was removed by a purge despite not being marked for deletion")
 	}
 }
 
