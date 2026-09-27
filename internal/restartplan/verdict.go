@@ -105,15 +105,22 @@ func IsFailure(o Outcome) bool { return o == OutcomeFailed }
 // no supporting reason - an unbacked OutcomeConfirmed is precisely the
 // bug this type's design is meant to make impossible to write down.
 type Result struct {
-	Service        string   `json:"service"`
-	NodeID         string   `json:"node_id"`
-	LeaseID        uint64   `json:"lease_id"`
-	Attempt        int      `json:"attempt"`
-	Outcome        Outcome  `json:"outcome"`
-	Detail         string   `json:"detail"`
-	Evidence       []string `json:"evidence,omitempty"`
-	StartedAtUnix  int64    `json:"started_at_unix"`
-	FinishedAtUnix int64    `json:"finished_at_unix"`
+	Service  string   `json:"service"`
+	NodeID   string   `json:"node_id"`
+	LeaseID  uint64   `json:"lease_id"`
+	Attempt  int      `json:"attempt"`
+	Outcome  Outcome  `json:"outcome"`
+	Detail   string   `json:"detail"`
+	Evidence []string `json:"evidence,omitempty"`
+	// StepAside is the ADR-0145 leadership step-aside trace, set only
+	// when a step-asider was actually configured and ran. A nil here
+	// means the step did not happen - which is a different fact from a
+	// step-aside that ran and found nothing to do, and is why the record
+	// carries its own Attempted flag rather than relying on nil-ness
+	// being read the same way twice.
+	StepAside      *StepAsideRecord `json:"step_aside,omitempty"`
+	StartedAtUnix  int64            `json:"started_at_unix"`
+	FinishedAtUnix int64            `json:"finished_at_unix"`
 }
 
 // Render produces the one-line human form of a result. An unknown

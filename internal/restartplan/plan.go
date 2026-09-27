@@ -78,6 +78,12 @@ import (
 type Step string
 
 const (
+	// StepStepAside is the confirmed leadership step-aside (ADR-0145):
+	// the node being restarted is not the raft leader by the time any
+	// other step runs. It is FIRST in the order, and that placement is
+	// the whole composition - see StepStepAside's own comment below.
+	StepStepAside Step = "step-aside"
+
 	// StepGatherFacts reads current raft membership and dials the other
 	// voters (ADR-0125 §3). The one step that talks to the network.
 	StepGatherFacts Step = "gather-facts"
@@ -109,6 +115,7 @@ const (
 // StepOrder is the canonical order, for callers and tests that want to
 // assert it rather than re-derive it.
 var StepOrder = []Step{
+	StepStepAside,
 	StepGatherFacts,
 	StepEvaluate,
 	StepReserveLease,
@@ -199,6 +206,68 @@ type FactGathererFunc func(ctx context.Context, service, nodeID string) QuorumFa
 // GatherQuorumFact implements FactGatherer.
 func (f FactGathererFunc) GatherQuorumFact(ctx context.Context, service, nodeID string) QuorumFact {
 	return f(ctx, service, nodeID)
+}
+
+// StepAsideRecord is the durable trace of one step-aside attempt, kept
+// beside the Result rather than flattened into its Evidence so a reader
+// can tell "this node gave up leadership" from "this node never had it".
+//
+// Every field is a fact about the attempt, not a licence. SafeToRestart
+// is the answer the engine acted on; Transferred true on its own is not,
+// which is the whole point of confirming a handover rather than assuming
+// one.
+type StepAsideRecord struct {
+	// Attempted is false when no step-asider was configured, so the
+	// record's absence of evidence is itself recorded rather than
+	// looking like a step-aside that trivially succeeded.
+	Attempted bool `json:"attempted"`
+
+	// WasLeader is whether the target held leadership when asked.
+	WasLeader bool `json:"was_leader"`
+
+	// Transferred is whether a handover was initiated and the library
+	// reported it succeeded.
+	Transferred bool `json:"transferred"`
+
+	// NewLeaderID is the voter leadership landed on, empty when no
+	// transfer happened.
+	NewLeaderID string `json:"new_leader_id,omitempty"`
+
+	// SafeToRestart is whether the node was confirmed to be a follower.
+	SafeToRestart bool `json:"safe_to_restart"`
+
+	// Detail is the operator-readable prose, never empty.
+	Detail string `json:"detail"`
+}
+
+// StepAsideOutcome is what one step-aside attempt reports back.
+type StepAsideOutcome struct {
+	SafeToRestart bool
+	WasLeader     bool
+	Transferred   bool
+	NewLeaderID   string
+	Detail        string
+}
+
+// StepAside is the confirmed leadership step-aside boundary (ADR-0145).
+// The production implementation is internal/raft's
+// Node.StepAsideForRestart, reached over the internal raftd RPC added in
+// 74b56ac; it is an interface here for the same reason every other
+// effect in this package is.
+//
+// SafeToRestart is the whole contract. A false must stop the workflow,
+// and unlike every other refusal in this package it must NOT be
+// overridable by Force - see the step's comment in Run.
+type StepAside interface {
+	StepAsideForRestart(ctx context.Context, nodeID string) (StepAsideOutcome, error)
+}
+
+// StepAsideFunc adapts a plain function to StepAside.
+type StepAsideFunc func(ctx context.Context, nodeID string) (StepAsideOutcome, error)
+
+// StepAsideForRestart implements StepAside.
+func (f StepAsideFunc) StepAsideForRestart(ctx context.Context, nodeID string) (StepAsideOutcome, error) {
+	return f(ctx, nodeID)
 }
 
 // Lease is a granted, cluster-wide restart lease.
@@ -392,6 +461,17 @@ type Engine struct {
 	Restarter Restarter
 	Confirmer Confirmer
 
+	// StepAsider is the ADR-0145 leadership step-aside, injected ahead of
+	// every other effect. It is nil by default, and a nil StepAsider is
+	// SAFE rather than merely permissive: with no step-aside, a target
+	// that is the leader is still caught by RuleLeaderRestart, which
+	// blocks by default and requires an operator acknowledgment to
+	// override. That fallback is the manual procedure this package
+	// already had; the step-aside is what lets ADR-0145 replace the
+	// operator acknowledgment with a confirmed handover. Injecting the
+	// step-aside therefore never removes a guardrail, it discharges one.
+	StepAsider StepAside
+
 	// Pending and Results are the two file-backed stores. Pending may be
 	// nil, in which case the workflow refuses to issue a restart (it
 	// cannot leave the discoverable trace that makes confirmation
@@ -412,12 +492,13 @@ type Engine struct {
 // Outcome reasons the state machine produces, kept as constants so a test
 // and an operator-facing record name the same thing.
 const (
-	reasonEvalNotAllow  = "the quorum-safety guardrail did not allow this restart"
-	reasonLeaseRefused  = "the cluster-wide restart lease was not granted"
-	reasonPendingFailed = "the pending-restart record could not be written, so a restart could not be safely confirmed afterwards"
-	reasonNoRestarter   = "no service restarter is configured, so the restart command could not be issued"
-	reasonNoConfirmer   = "no confirmer is configured, so the restarted process could not be asked to confirm itself"
-	reasonNoLeaseStore  = "no pending-restart store is configured, so no discoverable trace would be left for the restarted process"
+	reasonStepAsideFailed = "the node could not be confirmed to be out of leadership, so it was not restarted"
+	reasonEvalNotAllow    = "the quorum-safety guardrail did not allow this restart"
+	reasonLeaseRefused    = "the cluster-wide restart lease was not granted"
+	reasonPendingFailed   = "the pending-restart record could not be written, so a restart could not be safely confirmed afterwards"
+	reasonNoRestarter     = "no service restarter is configured, so the restart command could not be issued"
+	reasonNoConfirmer     = "no confirmer is configured, so the restarted process could not be asked to confirm itself"
+	reasonNoLeaseStore    = "no pending-restart store is configured, so no discoverable trace would be left for the restarted process"
 )
 
 // Run drives the workflow once and returns its durable Result.
@@ -435,6 +516,82 @@ func (e *Engine) Run(ctx context.Context) (Result, error) {
 		Service:       e.Service,
 		NodeID:        e.NodeID,
 		StartedAtUnix: started.Unix(),
+	}
+
+	// Step 0: the confirmed leadership step-aside (ADR-0145).
+	//
+	// It is FIRST, and the reason is specific to this codebase rather
+	// than a general preference. RuleLeaderRestart in quorum.go blocks a
+	// restart whose target is the current leader, and its only escape is
+	// Force - the operator acknowledging "yes, this will trigger an
+	// election". Its own wording, "restart followers first wherever the
+	// choice exists", is exactly the static leader-last plan ADR-0145
+	// rejects, and it is exactly what the operator must not be asked to
+	// reason about.
+	//
+	// Placing the step-aside after the evaluation would therefore make
+	// it unreachable for the case it exists for: a leader-target would
+	// Block at evaluate and never reach the handover. Placing it FIRST
+	// means the handover happens, leadership demonstrably moves, and the
+	// evaluation that follows reads a target that is genuinely a
+	// follower - so RuleLeaderRestart stops firing because its concern
+	// was discharged, not because anyone forced it. That is the
+	// composition ADR-0145 is for, and it is why this is a real step in
+	// the safety sequence rather than an extra check bolted on.
+	//
+	// Being first also means a failed step-aside strands nothing: no
+	// lease has been reserved and no pending record written, so there is
+	// no cluster-wide state to unwind.
+	//
+	// A nil StepAsider skips the step entirely, and the workflow then
+	// behaves exactly as it did before ADR-0145: RuleLeaderRestart
+	// still blocks a leader-target until an operator forces it. A
+	// caller that forgets to inject the step-aside gets the old,
+	// operator-gated behaviour, which is safe - it is strictly more
+	// conservative than the new one.
+	if e.StepAsider == nil {
+		e.step(StepStepAside, PhaseSkip, "no step-asider configured; a leader-target restart will still be caught by the leader-restart guardrail and require an operator acknowledgment")
+	} else {
+		aside, asideErr := e.StepAsider.StepAsideForRestart(ctx, e.NodeID)
+		if asideErr != nil || !aside.SafeToRestart {
+			detail := firstNonEmpty(aside.Detail, errString(asideErr))
+			detail = firstNonEmpty(detail, "the step-aside reported neither success nor a reason")
+			e.step(StepStepAside, PhaseFail, detail)
+			// Deliberately NOT overridable by Force, and this is the one
+			// place in the package that says so out loud. Force
+			// acknowledges a *known* cost: that restarting the leader
+			// triggers an election. An unconfirmed handover is not a
+			// known cost, it is an unknown state - this node may still
+			// be leading, and we have not established that it is not.
+			// Acknowledging your way past a fact nobody established is
+			// the same error in miniature as a force that rescued an
+			// Unknown verdict, which EvaluateQuorumSafety already
+			// refuses to do.
+			res.Outcome = OutcomeBlocked
+			res.Detail = reasonStepAsideFailed + ": " + detail
+			res.Evidence = append(res.Evidence, errString(asideErr))
+			res.StepAside = &StepAsideRecord{
+				Attempted:     true,
+				WasLeader:     aside.WasLeader,
+				Transferred:   aside.Transferred,
+				NewLeaderID:   aside.NewLeaderID,
+				SafeToRestart: false,
+				Detail:        detail,
+			}
+			e.skipFrom(StepGatherFacts)
+			return e.finish(res, started)
+		}
+		detail := firstNonEmpty(aside.Detail, "the node is not the raft leader, so it is safe to restart")
+		e.step(StepStepAside, PhaseEnter, detail)
+		res.Evidence = append(res.Evidence, "step-aside: "+detail)
+		res.StepAside = &StepAsideRecord{
+			Attempted:     true,
+			WasLeader:     aside.WasLeader,
+			Transferred:   aside.Transferred,
+			NewLeaderID:   aside.NewLeaderID,
+			SafeToRestart: true,
+			Detail:        detail,
+		}
 	}
 
 	// Step 1: gather the facts the decision needs. A gatherer that
@@ -483,7 +640,14 @@ func (e *Engine) Run(ctx context.Context) (Result, error) {
 	// override leaves behind - is evidence for whatever happens next, and
 	// a later step must not silently drop it by assigning over it. Every
 	// evidence assignment below this line therefore appends.
-	res.Evidence = evidenceOf(report)
+	//
+	// This one used to assign, and was correct only because it was the
+	// first thing to write. It no longer is: the step-aside above records
+	// what it observed, and a leader-target that stepped aside is exactly
+	// the case whose evidence matters most afterwards. It appends now,
+	// which is a no-op for a run with no step-asider since res.Evidence
+	// is still nil at this point.
+	res.Evidence = append(res.Evidence, evidenceOf(report)...)
 
 	// Step 3: the real, raft-replicated serialization point.
 	if e.Leaser == nil {
