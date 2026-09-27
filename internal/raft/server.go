@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync"
 	"time"
 
 	"google.golang.org/protobuf/proto"
@@ -20,6 +21,11 @@ type Server struct {
 	internalpb.UnimplementedRaftInternalServer
 
 	node *Node
+
+	// stepAsideMu guards StepAsideForRestartLocal against a second
+	// concurrent caller. See that method for why the refusal is
+	// reported as a field rather than a gRPC error.
+	stepAsideMu sync.Mutex
 }
 
 var _ internalpb.RaftInternalServer = (*Server)(nil)
@@ -226,6 +232,68 @@ func (s *Server) ListPendingJoinRequestsLocal(_ context.Context, _ *internalpb.L
 func (s *Server) GetRestartLeaseStateLocal(_ context.Context, req *internalpb.GetRestartLeaseStateRequest) (*internalpb.GetRestartLeaseStateResponse, error) {
 	lease, record := s.node.RestartLeaseStateLocal(req.GetService())
 	return &internalpb.GetRestartLeaseStateResponse{Lease: lease, Record: record}, nil
+}
+
+// StepAsideForRestartLocal implements internalpb.RaftInternalServer
+// (ADR-0145). It is the wire form of Node.StepAsideForRestart, and the
+// whole answer is safe_to_restart: everything else is evidence for
+// whoever reads detail.
+//
+// Failures are reported in the response's error field rather than as a
+// gRPC status, matching every other RPC in this service and for a
+// concrete reason. A caller that only sees a transport error cannot tell
+// "this node was the leader and could not hand over, do not restart it"
+// from "the socket is down" - and those two demand opposite responses.
+// Here both arrive together, in one answer, with the evidence attached.
+func (s *Server) StepAsideForRestartLocal(ctx context.Context, req *internalpb.StepAsideForRestartRequest) (*internalpb.StepAsideForRestartResponse, error) {
+	// One step-aside per node at a time. A second caller has to be told
+	// the node is busy rather than left to collide with the first inside
+	// the raft library, where the failure surfaces as a leadership
+	// transfer already in progress - which reads like a cluster fault
+	// rather than what it actually is, two coordinators asking at once.
+	//
+	// This is a per-node latch, not the colony-wide single-flight of
+	// ADR-0145; that guarantee belongs to the update coordinator and is
+	// not implemented yet. All this prevents is two callers knocking on
+	// the same door.
+	if !s.stepAsideMu.TryLock() {
+		status := s.node.Status()
+		return &internalpb.StepAsideForRestartResponse{
+			NodeId:    status.NodeID,
+			WasLeader: status.IsLeader,
+			Detail: fmt.Sprintf(
+				"%s already has a step-aside in flight, so this request was refused without touching raft state; "+
+					"ask again once the first finishes", status.NodeID),
+			Error: "step-aside already in progress on this node",
+		}, nil
+	}
+	defer s.stepAsideMu.Unlock()
+
+	timeout := DefaultStepAsideTimeout
+	if req.GetTimeoutMs() > 0 {
+		timeout = time.Duration(req.GetTimeoutMs()) * time.Millisecond
+	}
+
+	result, err := s.node.StepAsideForRestart(ctx, timeout)
+
+	resp := &internalpb.StepAsideForRestartResponse{
+		NodeId:        s.node.Status().NodeID,
+		WasLeader:     result.WasLeader,
+		Transferred:   result.Transferred,
+		NewLeaderId:   result.NewLeaderID,
+		SafeToRestart: result.SafeToRestart,
+		Detail:        result.Detail,
+	}
+	if err != nil {
+		resp.Error = err.Error()
+		// Node.StepAsideForRestart already answers false on every error
+		// path. Assert it again at the wire boundary: a response that
+		// said "safe" and carried an error would be a licence to kill a
+		// node that is still leading, and no future change to the node
+		// method should be able to produce one.
+		resp.SafeToRestart = false
+	}
+	return resp, nil
 }
 
 // GetJail implements internalpb.RaftInternalServer.

@@ -38,6 +38,7 @@ const (
 	RaftInternal_GetPendingJoinRequestLocal_FullMethodName   = "/apiary.internal.v1.RaftInternal/GetPendingJoinRequestLocal"
 	RaftInternal_ListPendingJoinRequestsLocal_FullMethodName = "/apiary.internal.v1.RaftInternal/ListPendingJoinRequestsLocal"
 	RaftInternal_GetRestartLeaseStateLocal_FullMethodName    = "/apiary.internal.v1.RaftInternal/GetRestartLeaseStateLocal"
+	RaftInternal_StepAsideForRestartLocal_FullMethodName     = "/apiary.internal.v1.RaftInternal/StepAsideForRestartLocal"
 )
 
 // RaftInternalClient is the client API for RaftInternal service.
@@ -150,6 +151,34 @@ type RaftInternalClient interface {
 	// this is a plain read of already-replicated FSM state, safe to
 	// answer from any node's own local copy.
 	GetRestartLeaseStateLocal(ctx context.Context, in *GetRestartLeaseStateRequest, opts ...grpc.CallOption) (*GetRestartLeaseStateResponse, error)
+	// StepAsideForRestartLocal is the confirmed leadership step-aside
+	// ADR-0145's controlled Colony update performs before a Comb's services
+	// are restarted. It is deliberately named ...Local and deliberately NOT
+	// leader-only, and those are one decision: this RPC acts on, and reports
+	// about, THIS node only. It is never forwarded to the leader. A caller
+	// that reaches the wrong Comb gets a truthful no-op for that Comb, never
+	// a remote effect - which is why the response carries node_id.
+	//
+	// Ask it of a follower and the answer is immediate and free: it is not
+	// the leader, so there is no leadership to move and it is already safe
+	// to restart. Ask it of a leader and it steps that node aside, handing
+	// leadership to a peer chosen by the raft library rather than nominated
+	// by the caller, so the coordinator needs no membership knowledge and
+	// the operator needs no knowledge of who leads.
+	//
+	// It confirms rather than assumes. The library's future reporting that
+	// the transfer routine finished is not the same claim as "another voter
+	// is now leading", so this requires an observed, different, non-empty
+	// leader before it will answer safe_to_restart, and it never answers
+	// true on a handover it could not verify. A node that was leading and
+	// could not hand over is told safe_to_restart = false and must stay up.
+	//
+	// This is the preflight half ADR-0142 refuses to provide for
+	// apiary_managerd. It is NOT a substitute for ADR-0103's restart lease:
+	// a Comb is only safe to restart once it has ALSO taken a real lease
+	// and passed the quorum preflight. Passing this RPC on its own is
+	// necessary, never sufficient.
+	StepAsideForRestartLocal(ctx context.Context, in *StepAsideForRestartRequest, opts ...grpc.CallOption) (*StepAsideForRestartResponse, error)
 }
 
 type raftInternalClient struct {
@@ -350,6 +379,16 @@ func (c *raftInternalClient) GetRestartLeaseStateLocal(ctx context.Context, in *
 	return out, nil
 }
 
+func (c *raftInternalClient) StepAsideForRestartLocal(ctx context.Context, in *StepAsideForRestartRequest, opts ...grpc.CallOption) (*StepAsideForRestartResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(StepAsideForRestartResponse)
+	err := c.cc.Invoke(ctx, RaftInternal_StepAsideForRestartLocal_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // RaftInternalServer is the server API for RaftInternal service.
 // All implementations must embed UnimplementedRaftInternalServer
 // for forward compatibility.
@@ -460,6 +499,34 @@ type RaftInternalServer interface {
 	// this is a plain read of already-replicated FSM state, safe to
 	// answer from any node's own local copy.
 	GetRestartLeaseStateLocal(context.Context, *GetRestartLeaseStateRequest) (*GetRestartLeaseStateResponse, error)
+	// StepAsideForRestartLocal is the confirmed leadership step-aside
+	// ADR-0145's controlled Colony update performs before a Comb's services
+	// are restarted. It is deliberately named ...Local and deliberately NOT
+	// leader-only, and those are one decision: this RPC acts on, and reports
+	// about, THIS node only. It is never forwarded to the leader. A caller
+	// that reaches the wrong Comb gets a truthful no-op for that Comb, never
+	// a remote effect - which is why the response carries node_id.
+	//
+	// Ask it of a follower and the answer is immediate and free: it is not
+	// the leader, so there is no leadership to move and it is already safe
+	// to restart. Ask it of a leader and it steps that node aside, handing
+	// leadership to a peer chosen by the raft library rather than nominated
+	// by the caller, so the coordinator needs no membership knowledge and
+	// the operator needs no knowledge of who leads.
+	//
+	// It confirms rather than assumes. The library's future reporting that
+	// the transfer routine finished is not the same claim as "another voter
+	// is now leading", so this requires an observed, different, non-empty
+	// leader before it will answer safe_to_restart, and it never answers
+	// true on a handover it could not verify. A node that was leading and
+	// could not hand over is told safe_to_restart = false and must stay up.
+	//
+	// This is the preflight half ADR-0142 refuses to provide for
+	// apiary_managerd. It is NOT a substitute for ADR-0103's restart lease:
+	// a Comb is only safe to restart once it has ALSO taken a real lease
+	// and passed the quorum preflight. Passing this RPC on its own is
+	// necessary, never sufficient.
+	StepAsideForRestartLocal(context.Context, *StepAsideForRestartRequest) (*StepAsideForRestartResponse, error)
 	mustEmbedUnimplementedRaftInternalServer()
 }
 
@@ -526,6 +593,9 @@ func (UnimplementedRaftInternalServer) ListPendingJoinRequestsLocal(context.Cont
 }
 func (UnimplementedRaftInternalServer) GetRestartLeaseStateLocal(context.Context, *GetRestartLeaseStateRequest) (*GetRestartLeaseStateResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetRestartLeaseStateLocal not implemented")
+}
+func (UnimplementedRaftInternalServer) StepAsideForRestartLocal(context.Context, *StepAsideForRestartRequest) (*StepAsideForRestartResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method StepAsideForRestartLocal not implemented")
 }
 func (UnimplementedRaftInternalServer) mustEmbedUnimplementedRaftInternalServer() {}
 func (UnimplementedRaftInternalServer) testEmbeddedByValue()                      {}
@@ -890,6 +960,24 @@ func _RaftInternal_GetRestartLeaseStateLocal_Handler(srv interface{}, ctx contex
 	return interceptor(ctx, in, info, handler)
 }
 
+func _RaftInternal_StepAsideForRestartLocal_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(StepAsideForRestartRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(RaftInternalServer).StepAsideForRestartLocal(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: RaftInternal_StepAsideForRestartLocal_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(RaftInternalServer).StepAsideForRestartLocal(ctx, req.(*StepAsideForRestartRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // RaftInternal_ServiceDesc is the grpc.ServiceDesc for RaftInternal service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -972,6 +1060,10 @@ var RaftInternal_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "GetRestartLeaseStateLocal",
 			Handler:    _RaftInternal_GetRestartLeaseStateLocal_Handler,
+		},
+		{
+			MethodName: "StepAsideForRestartLocal",
+			Handler:    _RaftInternal_StepAsideForRestartLocal_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

@@ -126,6 +126,35 @@ service RaftInternal {
   // this is a plain read of already-replicated FSM state, safe to
   // answer from any node's own local copy.
   rpc GetRestartLeaseStateLocal(GetRestartLeaseStateRequest) returns (GetRestartLeaseStateResponse);
+
+  // StepAsideForRestartLocal is the confirmed leadership step-aside
+  // ADR-0145's controlled Colony update performs before a Comb's services
+  // are restarted. It is deliberately named ...Local and deliberately NOT
+  // leader-only, and those are one decision: this RPC acts on, and reports
+  // about, THIS node only. It is never forwarded to the leader. A caller
+  // that reaches the wrong Comb gets a truthful no-op for that Comb, never
+  // a remote effect - which is why the response carries node_id.
+  //
+  // Ask it of a follower and the answer is immediate and free: it is not
+  // the leader, so there is no leadership to move and it is already safe
+  // to restart. Ask it of a leader and it steps that node aside, handing
+  // leadership to a peer chosen by the raft library rather than nominated
+  // by the caller, so the coordinator needs no membership knowledge and
+  // the operator needs no knowledge of who leads.
+  //
+  // It confirms rather than assumes. The library's future reporting that
+  // the transfer routine finished is not the same claim as "another voter
+  // is now leading", so this requires an observed, different, non-empty
+  // leader before it will answer safe_to_restart, and it never answers
+  // true on a handover it could not verify. A node that was leading and
+  // could not hand over is told safe_to_restart = false and must stay up.
+  //
+  // This is the preflight half ADR-0142 refuses to provide for
+  // apiary_managerd. It is NOT a substitute for ADR-0103's restart lease:
+  // a Comb is only safe to restart once it has ALSO taken a real lease
+  // and passed the quorum preflight. Passing this RPC on its own is
+  // necessary, never sufficient.
+  rpc StepAsideForRestartLocal(StepAsideForRestartRequest) returns (StepAsideForRestartResponse);
 }
 
 message ApplyRequest {
@@ -294,6 +323,54 @@ message GetRestartLeaseStateResponse {
   // complete on this node's own view of replicated state.
   RestartRecord record = 2;
   string error = 3;
+}
+
+message StepAsideForRestartRequest {
+  // timeout_ms bounds the whole step-aside, the confirmation wait
+  // included. 0 selects raft.DefaultStepAsideTimeout. The caller's own
+  // gRPC deadline still applies, and when it is the shorter of the two it
+  // is what actually bounds the wait - a caller about to kill this
+  // process wants an answer, not a hang.
+  uint64 timeout_ms = 1;
+}
+
+message StepAsideForRestartResponse {
+  // node_id is the Comb this answer is about: the node that served the
+  // request, which is not necessarily the Comb the caller meant to ask
+  // about. Carried so a misplaced call is visible rather than silently
+  // answered for the wrong machine.
+  string node_id = 1;
+
+  // was_leader is whether THIS node held leadership when asked. False in
+  // the common case, three steps out of four in a sweep.
+  bool was_leader = 2;
+
+  // transferred is whether a handover was actually initiated and
+  // reported successful by the raft library. A true here is not a licence
+  // on its own; safe_to_restart is what was actually confirmed.
+  bool transferred = 3;
+
+  // new_leader_id is the voter leadership landed on, empty when no
+  // transfer happened.
+  string new_leader_id = 4;
+
+  // safe_to_restart is the answer, and the only field a caller should act
+  // on. True only when this node is not the leader, either because it
+  // never was or because leadership demonstrably moved elsewhere first.
+  bool safe_to_restart = 5;
+
+  // detail is operator-readable prose carrying the evidence for that
+  // answer. Never empty, on any path, including failures.
+  string detail = 6;
+
+  // error is set when the step-aside did not complete: a deadline, a
+  // cancelled context, a transfer the library refused, or a second
+  // concurrent step-aside already in flight on this node. It is a field
+  // rather than a gRPC status, matching every other RPC in this service,
+  // so a caller reads safe_to_restart, was_leader and the evidence
+  // together instead of inferring them from a transport error. Whenever
+  // it is set, safe_to_restart is false.
+  string error = 7;
 }
 
 message GetJailRequest {
