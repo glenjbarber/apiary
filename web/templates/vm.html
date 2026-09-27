@@ -32,7 +32,25 @@
           <div><dt>Base image</dt><dd>{{if .VM.BaseImageName}}{{.VM.BaseImageName}}{{else}}<span class="muted">none</span>{{end}}</dd></div>
         </dl>
       </section>
+    </div>
 
+    <section class="panel vm-controls">
+      <div><h3>Access</h3><p class="muted">Open the graphical console or inspect launch and serial evidence.</p></div>
+      <div class="actions"><a class="button" href="/vms/{{.VM.ID}}/console">Console</a><a class="button secondary" href="/vms/{{.VM.ID}}/serial">Serial log and evidence</a></div>
+    </section>
+
+    {{if and .CanOperate (ne .VM.DesiredState "deleting")}}
+    <section class="panel vm-controls">
+      <div><h3>Lifecycle</h3><p class="muted">Stop preserves this VM's storage and definition. Restart waits for the owning Comb to stop it before starting it again.</p></div>
+      <form method="post" action="/vms/{{.VM.ID}}/lifecycle" class="actions">
+        {{if ne .VM.DesiredState "stopped"}}<button name="action" value="stop" class="secondary" type="submit">Stop</button>{{end}}
+        {{if ne .VM.DesiredState "running"}}<button name="action" value="start" type="submit">Start</button>{{end}}
+        {{if eq .VM.DesiredState "running"}}<button name="action" value="restart" type="submit">Restart</button>{{end}}
+      </form>
+    </section>
+    {{end}}
+
+    <div class="detail-grid">
       <section class="panel detail-card">
         <h3>Network</h3>
         <dl class="detail-list">
@@ -137,11 +155,6 @@
     </script>
     {{end}}
 
-    <section class="panel vm-controls">
-      <div><h3>Access</h3><p class="muted">Open the graphical console or inspect launch and serial evidence.</p></div>
-      <div class="actions"><a class="button" href="/vms/{{.VM.ID}}/console">Console</a><a class="button secondary" href="/vms/{{.VM.ID}}/serial">Serial log and evidence</a></div>
-    </section>
-
     <section class="panel">
       <h3>Snapshots</h3>
       <p class="muted">A ZFS checkpoint of this VM's entire disk. Restoring rolls the disk back to exactly that point - anything written since is lost. See ADR-0090.</p>
@@ -177,17 +190,6 @@
       </form>
       {{end}}
     </section>
-
-    {{if and .CanOperate (ne .VM.DesiredState "deleting")}}
-    <section class="panel vm-controls">
-      <div><h3>Lifecycle</h3><p class="muted">Stop preserves this VM's storage and definition. Restart waits for the owning Comb to stop it before starting it again.</p></div>
-      <form method="post" action="/vms/{{.VM.ID}}/lifecycle" class="actions">
-        {{if ne .VM.DesiredState "stopped"}}<button name="action" value="stop" class="secondary" type="submit">Stop</button>{{end}}
-        {{if ne .VM.DesiredState "running"}}<button name="action" value="start" type="submit">Start</button>{{end}}
-        {{if eq .VM.DesiredState "running"}}<button name="action" value="restart" type="submit">Restart</button>{{end}}
-      </form>
-    </section>
-    {{end}}
 
     <section class="panel">
       <h3>Public exposure</h3>
