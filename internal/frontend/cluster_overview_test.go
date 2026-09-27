@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 
 	rpcpb "github.com/glenjbarber/apiary/api/rpc"
@@ -16,6 +17,11 @@ import (
 // cluster overview/host pages' cross-node fetch logic without a real
 // peer managerd.
 type fakePeerHostStatsClient struct {
+	// mu guards every field below. The code under test fans HostStats and
+	// friends out across goroutines (one per voter), so the fake is called
+	// concurrently and its recorded fields must not race.
+	mu sync.Mutex
+
 	lastAddr string
 	resp     *rpcpb.HostStatsResponse
 	err      error
@@ -45,6 +51,8 @@ type fakePeerHostStatsClient struct {
 }
 
 func (f *fakePeerHostStatsClient) GetNetworkTeardownStatus(_ context.Context, addr, networkID string) (*rpcpb.GetNetworkTeardownStatusResponse, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.lastTeardownAddr = addr
 	f.lastTeardownNetwork = networkID
 	if f.teardownErr != nil {
@@ -57,6 +65,8 @@ func (f *fakePeerHostStatsClient) GetNetworkTeardownStatus(_ context.Context, ad
 }
 
 func (f *fakePeerHostStatsClient) HostStats(_ context.Context, addr string) (*rpcpb.HostStatsResponse, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.lastAddr = addr
 	if f.err != nil {
 		return nil, f.err
@@ -68,6 +78,8 @@ func (f *fakePeerHostStatsClient) HostStats(_ context.Context, addr string) (*rp
 }
 
 func (f *fakePeerHostStatsClient) ListISOs(_ context.Context, addr string) (*rpcpb.ListISOsResponse, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.lastAddr = addr
 	if f.err != nil {
 		return nil, f.err
@@ -76,6 +88,8 @@ func (f *fakePeerHostStatsClient) ListISOs(_ context.Context, addr string) (*rpc
 }
 
 func (f *fakePeerHostStatsClient) ListAssumptionResults(_ context.Context, addr string, _ *rpcpb.ListAssumptionResultsRequest) (*rpcpb.ListAssumptionResultsResponse, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.lastAddr = addr
 	if f.err != nil {
 		return nil, f.err
@@ -84,6 +98,8 @@ func (f *fakePeerHostStatsClient) ListAssumptionResults(_ context.Context, addr 
 }
 
 func (f *fakePeerHostStatsClient) PurgeStaleAssumptionResults(_ context.Context, addr string, _ *rpcpb.PurgeStaleAssumptionResultsRequest) (*rpcpb.PurgeStaleAssumptionResultsResponse, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.lastPurgeStaleAddr = addr
 	if f.purgeStaleErr != nil {
 		return nil, f.purgeStaleErr
@@ -95,6 +111,8 @@ func (f *fakePeerHostStatsClient) PurgeStaleAssumptionResults(_ context.Context,
 }
 
 func (f *fakePeerHostStatsClient) Status(_ context.Context, addr string) (*rpcpb.StatusResponse, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.lastStatusAddr = addr
 	f.statusCalls++
 	if f.statusErr != nil {
@@ -107,6 +125,8 @@ func (f *fakePeerHostStatsClient) Status(_ context.Context, addr string) (*rpcpb
 }
 
 func (f *fakePeerHostStatsClient) GetLocalNetworkBridgeStatus(_ context.Context, addr, networkID string) (*rpcpb.GetLocalNetworkBridgeStatusResponse, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.lastBridgeAddr = addr
 	f.lastBridgeNetwork = networkID
 	if f.bridgeErr != nil {
@@ -119,6 +139,8 @@ func (f *fakePeerHostStatsClient) GetLocalNetworkBridgeStatus(_ context.Context,
 }
 
 func (f *fakePeerHostStatsClient) GetVMSerialLog(_ context.Context, addr, _ string) (*rpcpb.GetVMSerialLogResponse, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.lastSerialAddr = addr
 	if f.serialErr != nil {
 		return nil, f.serialErr
@@ -130,34 +152,50 @@ func (f *fakePeerHostStatsClient) GetVMSerialLog(_ context.Context, addr, _ stri
 }
 
 func (f *fakePeerHostStatsClient) GetVMConsole(_ context.Context, addr, _ string) (*rpcpb.GetVMConsoleResponse, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	return &rpcpb.GetVMConsoleResponse{}, nil
 }
 
 func (f *fakePeerHostStatsClient) OpenVMConsole(_ context.Context, addr, _ string) (io.ReadWriteCloser, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	return nil, errors.New("test peer console unavailable")
 }
 
 func (f *fakePeerHostStatsClient) CreateVMSnapshot(context.Context, string, string, string) (*rpcpb.CreateVMSnapshotResponse, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	return &rpcpb.CreateVMSnapshotResponse{}, nil
 }
 
 func (f *fakePeerHostStatsClient) ListVMSnapshots(context.Context, string, string) (*rpcpb.ListVMSnapshotsResponse, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	return &rpcpb.ListVMSnapshotsResponse{}, nil
 }
 
 func (f *fakePeerHostStatsClient) RestoreVMSnapshot(context.Context, string, string, string) (*rpcpb.RestoreVMSnapshotResponse, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	return &rpcpb.RestoreVMSnapshotResponse{}, nil
 }
 
 func (f *fakePeerHostStatsClient) DeleteVMSnapshot(context.Context, string, string, string) (*rpcpb.DeleteVMSnapshotResponse, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	return &rpcpb.DeleteVMSnapshotResponse{}, nil
 }
 
 func (f *fakePeerHostStatsClient) GetJoinRequestStatus(context.Context, string, string) (*rpcpb.GetJoinRequestStatusResponse, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	return &rpcpb.GetJoinRequestStatusResponse{}, nil
 }
 
 func (f *fakePeerHostStatsClient) GetNodeConfig(_ context.Context, addr string) (*rpcpb.GetNodeConfigResponse, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	return &rpcpb.GetNodeConfigResponse{}, nil
 }
 
