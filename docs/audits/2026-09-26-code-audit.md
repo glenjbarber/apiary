@@ -13,7 +13,7 @@ Nothing was run against a live Colony. No exploit testing was done.
 | A1  | Medium | managerd | Operator API keys can purge any VM or jail definition (Codex #1, confirmed) |
 | A2  | Medium | raft/join | Unauthenticated join requests grow Raft state without bound (Codex #2, confirmed) |
 | A3  | Medium | login | Lockout trackers grow without bound and scan the whole map per failure (Codex #3, confirmed; worse than reported) |
-| A4  | Medium | dependency | grpc-go v1.84.0 GO-2026-6443: pre-auth server panic, reachable from managerd |
+| A4  | Info | dependency | grpc-go v1.84.0 GO-2026-6443 flagged by govulncheck; not exploitable here (needs xDS, which is not compiled in). Corrected after triage |
 | A5  | Medium | auth | New `*Local` list RPCs have no auth role, and the change bypasses leader-only reads |
 | A6  | Low | frontend | Frontend and restshimd use `http.ListenAndServe` with no timeouts |
 | A7  | Low | join | Join forwarding dials caller-chosen addresses when no allowlist is set (Codex #4, confirmed) |
@@ -24,11 +24,35 @@ Nothing was run against a live Colony. No exploit testing was done.
 | A12 | Low | tests/CI | `go test -race` fails in `internal/frontend`; CI does not run with `-race` |
 | A13 | Info | docs | `add-node-to-colony.md` rewrite adds em dashes and omits the `raft_bind_host` field |
 | A14 | Info | hardening | Several smaller hardening notes (see the end) |
+| A15 | Medium | raft/join | FSM read the wall clock when applying join-request resolutions, so replays could diverge (found while fixing A2) |
 
 Analyzer results: gitleaks found no real secrets in 463 commits (10 hits, all
-false positives). govulncheck found 1 reachable vulnerability (A4). staticcheck
+false positives). govulncheck flagged 1 vulnerability, which triage showed is not exploitable here (A4). staticcheck
 found only style issues and dead code. gosec reported 252 issues; the ones that
 looked real are covered below, the rest are noise or accepted.
+
+## Fix status
+
+All fixes are on this branch, one commit per finding (or per closely related
+group), each with tests. Nothing is merged or pushed.
+
+| ID | Status | Commit | Notes |
+|----|--------|--------|-------|
+| A1 | Fixed | `cbc622d` | FSM refuses to purge a resource that is not DELETING. RPC roles left as they were: the peer credential the reconciler uses is Operator-tier and raising the role would break live teardown reporting. An Operator can still hasten teardown of a resource that is already deleting, which is no more than DeleteVM plus waiting. |
+| A2 | Fixed | `eb4d921` | Field validation at RPC and FSM, 25 pending / 100 total caps, deterministic eviction of records expired for over an hour. |
+| A3 | Fixed | `ad2ccbc` | Both trackers capped at 10000, sweep no longer per-request, username limit 256, login body limit 64 KB. |
+| A4 | No change | (none) | Not exploitable in Apiary; see the corrected section. |
+| A5 | Fixed, with one accepted tradeoff | `42e3c93` | Roles added and proto comments corrected. The frontend still reads a follower's local state, so a just-made change can briefly not appear; that is now documented and is a design decision for the owner, not changed here. |
+| A6 | Fixed | `292a52d` | Header and idle timeouts. ReadTimeout and WriteTimeout deliberately not set. |
+| A7 | Mitigated | `6b80eb9` | Startup warning only. The behavior stays opt-in; requiring the allowlist would break single-node Colonies. |
+| A8 | Fixed | `42e3c93` | Six roles assigned; `TestRequiredRole_CoversEveryRPC` enforces it. |
+| A9 | Fixed | `63fb6d5` | Only signals a pid whose executable is `daemon`. |
+| A10 | Mitigated | `6b80eb9` | Startup warning only. Generating a token needs coordinated raftd.json and managerd.json changes and is left to the owner. |
+| A11 | Fixed | `e2ae418` | Field removed and reserved; the create page it contradicted was already replaced. |
+| A12 | Fixed | `3c289ab`, `3ae9861` | Fake guarded by a mutex; CI now runs `go test -race ./...`. Full suite passed under -race before enabling. |
+| A13 | Fixed | `d8eb396` | This doc only. About 850 added lines elsewhere still contain an em dash; a sweep across other authors' files was not attempted. |
+| A14 | Partly fixed | `8012ba0`, `2a82600`, `778794c` | Interface-name validation in deadman, explicit TLS 1.2 minimum plus a guard test, broader rc.conf redaction. Not changed: no CSRF token (SameSite=Lax is the sole defense), and the unused `MigrationState.normalize` in the unwired migration package. |
+| A15 | Fixed | `33b17d4` | Expiry check moved out of the FSM into the manager. |
 
 ## Findings
 
@@ -86,21 +110,23 @@ account, which is a design tradeoff worth stating.
 Fix: cap the map size and username length, evict the oldest entries, and add
 `http.MaxBytesReader` to the login handler.
 
-### A4. grpc-go GO-2026-6443 (Medium)
+### A4. grpc-go GO-2026-6443 (Info, corrected)
 
-govulncheck: `google.golang.org/grpc@v1.84.0` has a server panic triggered by
-missing `:authority` or Host headers, reachable through
+govulncheck reports `google.golang.org/grpc@v1.84.0` as affected through
 `cmd/managerd/main.go:516` (`grpc.Server.Serve` -> `http2Server.HandleStreams`).
-The fix is only in a v1.85 development pseudo-version, not a release.
+The first version of this report rated that Medium and described a pre-auth
+crash. That was wrong. Reading the advisory: the panic is in the xDS server
+routing interceptor (`RouteAndProcess`), which indexes an empty authority when a
+request lacks both `:authority` and Host headers. The transport symbol
+govulncheck matched only accepts such a request. Apiary uses no xDS code, and
+`go list -deps ./cmd/managerd` shows no xDS package is compiled in, so the
+vulnerable interceptor is not present and the crash cannot occur.
 
-Impact: a client that can complete a TLS handshake to managerd can crash it
-before authentication. Raft consensus runs in raftd, so the Colony keeps its
-state, but the management plane is down until managerd is restarted. A handler
-recovery interceptor does not help, because the panic is in the transport layer.
-
-Mitigation: track for a release containing the fix (or pin the fix commit if
-managerd is exposed beyond trusted hosts), and limit access to the managerd
-port with PF to Comb peers and the frontend.
+No code change. Downgrading to v1.83.2 (a patched release) would silence the
+scanner, but for a finding that cannot be triggered it is not worth moving off
+the current release line; Dependabot would only re-propose 1.84.0. Re-run
+govulncheck when a v1.84.x or v1.85 release containing the fix ships, and treat
+its output for this ID as a known false positive until then.
 
 ### A5. `ListVMsLocal` and `ListJailsLocal` (Medium)
 
@@ -206,6 +232,17 @@ takes `target_managerd_host`, `raft_bind_host`, and `confirm_phrase`). The commi
 is titled "Multiple improvements:" and bundles unrelated work
 (`internal/freebsdimg`, ADR-0127), which makes review and revert harder.
 About 850 added lines across 58 recent commits contain an em dash.
+
+### A15. FSM read the wall clock on join-request resolution (Medium)
+
+Found while fixing A2. `applyResolvePendingJoinRequest` called
+`time.Now()` to decide whether a request had expired. The FSM runs on every
+replica and again on every log replay (restart, snapshot catch-up), so
+replaying an approve, reject, or cancel after the request's 15 minute TTL
+returned an "expired" error and left the request Pending, while nodes that
+applied it live had it Approved. Replicas could disagree about the status.
+Expiry is now enforced in `internal/manager` before submitting, and the FSM
+no longer reads the clock (it was the only such read in the FSM apply path).
 
 ### A14. Hardening notes (Info)
 
