@@ -37,7 +37,7 @@
         <h3>Network</h3>
         <dl class="detail-list">
           <div><dt>Network</dt><dd>{{if .VM.NetworkID}}{{.VM.NetworkID}}{{else}}<span class="muted">default bridge</span>{{end}}</dd></div>
-          <div><dt>IP address</dt><dd>{{if .VM.IPAddress}}{{.VM.IPAddress}}{{else}}<span class="muted">not assigned</span>{{end}}</dd></div>
+          <div><dt>IP address</dt><dd>{{if .VM.IPAddress}}{{.VM.IPAddress}}{{else}}<span class="muted" title="Apiary did not allocate an address for this VM (it is not on an Apiary-managed network). The guest may still hold a lease from an external DHCP server, which Apiary cannot see.">external DHCP</span>{{end}}</dd></div>
           <div><dt>MAC address</dt><dd>{{if .VM.MACAddress}}<code>{{.VM.MACAddress}}</code>{{else}}<span class="muted">not assigned</span>{{end}}</dd></div>
         </dl>
       </section>
