@@ -6,6 +6,13 @@ Accepted (decision). Implemented in the `Makefile`, with two doc comments
 corrected in `cmd/versioncheck` and `internal/buildinfo` that described
 the old variable's meaning. No daemon behaviour changes.
 
+**Amended 2026-09-27** to close the cooldown gap this ADR left open, and
+to state the gap in the Scope boundary below rather than leave it
+implied. The amendment adds `scripts/record-forced-restart.sh` and one
+line in the `force-restart` loop. It still takes no lease and still
+changes no daemon code; what it adds is the record the cooldown reads.
+See "The cooldown must still learn" under Decision.
+
 ## Context
 
 ADR-0125 put a restart guardrail in front of `apiary_raftd` and, in the
@@ -152,6 +159,51 @@ is broken" into a loud stop instead of a silently half-restarted
 managerd/raftd pair, and the error message says why stopping matters
 rather than just that something failed.
 
+### The cooldown must still learn: a record, not a lease
+
+Taking no lease is the point of this target, and it stays that way. But
+the ADR-0103 cooldown is not fed by leases. It is fed by
+`RestartRecord` entries in the FSM, and the only thing that writes one
+is the confirm path - the restarted daemon's own next startup, reading a
+pending-restart record. A `force-restart` never wrote that record, so the
+guardrail went on believing no restart had happened: an operator could
+force-restart `raftd` on one Comb and be granted a coordinated `raftd`
+restart on another seconds later, which is the concurrent-restart window
+the 600s cooldown exists to close.
+
+So the loop now calls `scripts/record-forced-restart.sh` immediately
+before each `service` restart. It writes the same pending-restart record
+`RestartNodeService` writes - same directory, same file name, same three
+JSON fields, all of which `internal/manager` and `internal/restartplan`
+already hold a test asserting are byte-identical - with **`lease_id` 0**.
+
+Zero is the whole mechanism. `applyRecordRestartCompleted` writes the
+cooldown record unconditionally, on the stated grounds that a real
+restart really did complete regardless of whether the lease below still
+matches, and releases a lease only on an exact `lease_id` **and**
+`holder_node_id` match. So `lease_id` 0 informs the cooldown and cannot
+release anyone's lease, including this node's own real one. Nothing in
+the confirm path rejects a zero lease id.
+
+Two cases deliberately write nothing, and both say so loudly on stderr:
+
+- **A pending record already exists.** That is a real lease in flight,
+  and `Save` overwrites. Replacing it with `lease_id` 0 would strand
+  that lease permanently - the daemon would confirm lease 0, the real
+  lease would never match, and ADR-0103's leases have no TTL. The
+  operator is told the cooldown will not learn about this restart.
+- **The `node_id` cannot be read** from `raftd.json` or `managerd.json`.
+  `applyAcquireRestartLease` counts a record toward the cooldown only
+  when its holder is a currently-known voter, so a record with an empty
+  or wrong `node_id` is written and never blocks anything - a silent
+  no-op indistinguishable, from the outside, from working. Writing
+  nothing and saying why is the honest option.
+
+The script always exits 0. It is bookkeeping on an emergency path, and
+the one thing it must never do is stand between an operator and a
+restart they need during an incident. Every failure is a message on
+stderr instead.
+
 ## Consequences
 
 - **`make update` can no longer restart `managerd`.** An operator who
@@ -226,6 +278,14 @@ deploy-shaped command can be made safe by subtraction while the
 client-shaped work is a larger change with credential questions this
 ADR does not answer.
 
+The 2026-09-27 amendment does not move that boundary. Writing a restart
+record is not coordination: nothing is reserved, nothing is checked
+against the other Combs, and no node waits on any other node. It makes
+this target *tell the truth after the fact* rather than stay silent, and
+a record that informs a later decision is not the same as a lease that
+constrains this one. ADR-0125's clause remains unmet, and
+`force-restart` remains the uncoordinated act it has always been.
+
 ## Relationship to existing decisions
 
 - **ADR-0125** - the guardrail and the original exclusion. This ADR
@@ -246,7 +306,18 @@ ADR does not answer.
   Combs run; the `${VAR:Nraftd}` modifier this ADR removes was a BSD
   make extension and the file is now portable to both makes.
 - `gofmt -l .` clean, `go build ./...` clean, `go vet ./...` clean,
-  `go test ./...` passes across the repository.
+  `go test -count=1 ./...` passes across the repository (60 packages,
+  0 failures).
+- `scripts/test-record-forced-restart.sh` - 11 cases, all passing,
+  covering the two failure modes that would matter: that a record is
+  never written with an unreadable `node_id` (it would never block
+  anything, and would look like it worked), and that an existing pending
+  record is never overwritten (it would strand a real lease, which has
+  no TTL). It also pins the exact JSON bytes both Go stores parse, and
+  that the script exits 0 even when it cannot record anything. Wired
+  into `scripts/check-version.sh` beside `test-worktree-state.sh`; note
+  that CI runs only the Go steps, so this is a local gate unless a step
+  is added there.
 - The target was then run for real on one Comb of a live multi-Comb
   colony - a non-leader voter, with the rest of the colony healthy - and
   the result is recorded in `.local/SHARED.md` rather than here, since

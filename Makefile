@@ -563,10 +563,17 @@ force-restart:
 	echo "  once, or on the current leader, can cost the cluster its" >&2 ; \
 	echo "  quorum. For a coordinated restart use the Machine page's" >&2 ; \
 	echo "  per-service control, which reserves a real cluster-wide lease." >&2 ; \
+	echo "" >&2 ; \
+	echo "  It does still leave a record: each service gets the same" >&2 ; \
+	echo "  pending-restart note a leased restart would, with lease_id 0," >&2 ; \
+	echo "  so the guardrail's 600s cooldown learns a restart happened" >&2 ; \
+	echo "  here and blocks a second one on another Comb. It never takes" >&2 ; \
+	echo "  a lease and never releases one." >&2 ; \
 	echo "" >&2
 	@set -e; \
 	for S in ${FORCE_RESTART_SRCS}; do \
 		echo "restarting apiary_$$S ..." ; \
+		sh scripts/record-forced-restart.sh "$$S" ; \
 		service apiary_$$S restart ; \
 		i=0 ; \
 		while [ $$i -lt 15 ] ; do \
