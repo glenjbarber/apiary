@@ -1,0 +1,16 @@
+{{/* Gauge - a radial reading, inline SVG, no JS. Takes a gaugeView
+     (internal/frontend/gauge.go) as its dot. See docs/web-ui-redesign.md
+     Section 1. The ring is drawn as a full-circumference dash whose
+     offset reveals only the filled fraction - see gauge.go's own
+     comments for the arithmetic; this template does none of it. */}}
+{{define "gauge"}}<div class="gauge" data-state="{{.State}}">
+  <svg class="gauge-svg" viewBox="0 0 40 40" role="img" aria-label="{{.Label}}: {{if eq .State "unknown"}}no data{{else}}{{.Percent}} percent{{end}}">
+    <circle class="gauge-track" cx="20" cy="20" r="16"></circle>
+    {{if ne .State "unknown"}}<circle class="gauge-fill gauge-fill-{{.State}}" cx="20" cy="20" r="16" stroke-dasharray="{{.Dash}}" stroke-dashoffset="{{.DashOffset}}" transform="rotate(-90 20 20)"></circle>{{end}}
+    <text class="gauge-value" x="20" y="24" text-anchor="middle">{{if eq .State "unknown"}}-{{else}}{{.Percent}}{{end}}</text>
+  </svg>
+  <div class="gauge-caption">
+    <span class="gauge-label">{{.Label}}</span>
+    {{if .Detail}}<span class="evidence-note">{{.Detail}}</span>{{end}}
+  </div>
+</div>{{end}}

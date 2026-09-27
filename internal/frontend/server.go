@@ -52,6 +52,22 @@ type pageData struct {
 	// Empty for fragment renders, which don't include the nav.
 	ActivePage string
 
+	// KnownCombs lists known raft cluster member IDs for the sidebar's
+	// Colony tree (docs/web-ui-redesign.md Section 1's CombTree),
+	// letting each one link straight to its own "/host/{id}" evidence
+	// page instead of Combs being a single flat link. Populated by
+	// withAuthFieldsFrom from the same Status call every full-page
+	// render already makes for the Colony-leader indicator - not a
+	// second RPC - and left empty (degrading to today's single "Combs"
+	// link, handled entirely in the template) when that call fails, so
+	// a managerd that cannot reach raft never renders a broken sidebar.
+	// Deliberately does NOT carry per-Comb health: that would cost one
+	// HostStats/GetNodeConfig probe per other Comb on every single page
+	// view across the whole app, not just the dashboard where that cost
+	// is already paid today - see the redesign spec's Section C for
+	// where a real per-Comb StateChip belongs instead.
+	KnownCombs []string
+
 	// ActiveMachineSection names the current page's slug ("operations",
 	// "networking", ...) among the focused per-subsystem Machine pages
 	// (machineSections in machine.go), so machine_section_nav can
@@ -762,6 +778,11 @@ func (s *Server) withAuthFieldsFrom(r *http.Request, pd pageData, status *rpcpb.
 		status, statusErr = s.client.Status(ctx, &rpcpb.StatusRequest{})
 	}
 	pd.ColonyLeader = colonyLeaderFromStatus(status, statusErr, time.Now())
+	if status != nil {
+		combs := append([]string(nil), status.GetKnownNodeIds()...)
+		sort.Strings(combs)
+		pd.KnownCombs = combs
+	}
 	return pd
 }
 

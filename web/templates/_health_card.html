@@ -1,0 +1,19 @@
+{{/* HealthCard - the top-of-dashboard single-glance summary. Takes a
+     healthCardView (internal/frontend/health_card.go) as its dot. Every
+     one of the seven vocabulary states is always rendered, including a
+     zero count - see health_card.go's own comment for why an absent
+     line is not the same claim as a checked, all-clear line.
+     See docs/web-ui-redesign.md Section 1. */}}
+{{define "health_card"}}<section class="panel health-card">
+  <div class="health-card-top">
+    <div class="health-card-reachable">
+      <strong>{{.ReachableCombs}}<span class="muted">/{{.TotalCombs}}</span></strong>
+      <span class="muted">Combs reachable</span>
+    </div>
+    {{if .GuardrailHolds}}<div class="health-card-cause"><span class="badge warn">{{.GuardrailHolds}} restart guardrail hold{{if ne .GuardrailHolds 1}}s{{end}}</span></div>{{end}}
+    {{if .PendingJoins}}<div class="health-card-cause"><span class="badge warn">{{.PendingJoins}} pending join request{{if ne .PendingJoins 1}}s{{end}}</span></div>{{end}}
+  </div>
+  <ul class="health-card-stats">
+    {{range .Stats}}<li class="health-card-stat" data-state="{{.State}}"{{if eq .Count 0}} data-zero{{end}}><span class="badge {{.State}}">{{.Count}}</span><span class="health-card-stat-label">{{.Label}}</span></li>{{end}}
+  </ul>
+</section>{{end}}
