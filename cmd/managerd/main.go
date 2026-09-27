@@ -201,7 +201,26 @@ func run() error {
 	restartGuardrailToken := ""
 	if data, err := os.ReadFile(restartGuardrailTokenPath); err == nil {
 		restartGuardrailToken = strings.TrimSpace(string(data))
-	} else if !os.IsNotExist(err) {
+		if restartGuardrailToken == "" {
+			// An empty file is the same operational situation as no file
+			// at all - nothing to present - and it is just as likely to
+			// be a mistake (a truncated heredoc, an editor that saved
+			// nothing) as an intentional choice. Staying silent about
+			// it is how a node ends up looking configured while being
+			// unable to forward a single guarded restart.
+			log.Printf("managerd: %s is empty - this node can act on its own restart guardrail but cannot forward one to the leader; the cluster stays blocked for every other node until the file holds the same token everywhere", restartGuardrailTokenPath)
+		}
+	} else if os.IsNotExist(err) {
+		// Same reasoning, and this is the case that actually occurred in
+		// live verification: the file was written seconds AFTER this
+		// managerd started, so this process cached an empty token and
+		// the failure did not surface until an operator tried a
+		// follower-initiated restart and was told - with no hint that
+		// the local node was at fault - that the "restart-guardrail
+		// token" was invalid. cmd/raftd has always warned in this
+		// situation; managerd now does too.
+		log.Printf("managerd: no %s on this node - guarded restarts initiated here cannot be forwarded to the leader, and any lease this node grants it cannot be confirmed; the token is read once at startup, so provision the file and restart this service", restartGuardrailTokenPath)
+	} else {
 		log.Printf("managerd: reading %s: %v - the action-preflight restart guardrail will refuse every forwarded call until this is fixed", restartGuardrailTokenPath, err)
 	}
 	peers.RestartGuardrailToken = restartGuardrailToken

@@ -136,32 +136,46 @@ func forceDowngradedBlock(report guardrail.Report) bool {
 // drifting apart, and the only way to guarantee that is for there to be
 // exactly one implementation they both call.
 //
-// The target is always THIS node (s.nodeID). The check only ever asks
-// "is it safe to restart the raftd on the machine running this code",
-// which is what RestartNodeService and PreflightRestartNodeService both
-// mean - neither is a cluster-wide "restart node X" RPC, and neither
-// should be able to become one by accident.
+// targetNodeID is the node whose raftd is actually being judged, and it
+// is a parameter rather than an implicit s.nodeID because the enforcing
+// call site is NOT always running on the target. A follower forwards
+// ReserveRestartLease to the leader, and the leader then evaluates the
+// request - for the follower's raftd, not its own. An earlier revision
+// hardcoded s.nodeID here on the reasoning that "neither RPC is a
+// cluster-wide restart-node-X call"; live verification on a real
+// four-voter cluster disproved that. The leader really is being asked
+// about another node, and hardcoding s.nodeID made every
+// follower-initiated raftd restart fail with a message naming the
+// leader as the node being protected - safe, but wrong, and it blocked
+// the feature on every node except the current one.
+//
+// There is deliberately no "empty means this node" fallback. Both local
+// callers pass their own node id explicitly, so the fallback would only
+// ever fire for a forwarded request that lost its node_id in transit -
+// and silently answering such a request about the leader is precisely
+// the confusion this parameter exists to remove. An empty target is
+// reported below as a target that is not a member, which is Unknown.
 //
 // Caller posture differs by call site and is load-bearing:
 //
 //   - Enforcement (reserveRestartLease's leader branch) calls this on
-//     the leader, where the membership read is authoritative. This is
-//     the only call that can block a restart.
-//   - Advisory (PreflightRestartNodeService) may call it on a follower.
-//     A follower's raft status can lag the leader's on membership, so
-//     its answer is honest but not necessarily current - which is
-//     acceptable for a preview, and is exactly why the enforcing call
-//     is not made from a follower.
+//     the leader, where the membership read is authoritative, passing
+//     the target from the request. This is the only call that can block
+//     a restart.
+//   - Advisory (PreflightRestartNodeService) may call it on a follower,
+//     for this node. A follower's raft status can lag the leader's on
+//     membership, so its answer is honest but not necessarily current -
+//     which is acceptable for a preview, and is exactly why the
+//     enforcing call is not made from a follower.
 //
-// "Am I the leader?" is deliberately read from local status rather than
-// asked of the leader. It is a question about this node's own role, and
-// every raft member knows its own role from local state, so a follower
-// answering it is not guessing. Only the membership list is the part
-// that can lag, and it is called out in the caller's own doc comment.
-func (s *Server) evaluateRaftdQuorumSafety(ctx context.Context, service string, force bool) guardrail.Report {
+// Leadership is read as "is the target the node raft says is leader",
+// not as "is this node the leader". Only the former is the question
+// ADR-0125 asks, and on the enforcing path the two differ by
+// construction.
+func (s *Server) evaluateRaftdQuorumSafety(ctx context.Context, service, targetNodeID string, force bool) guardrail.Report {
 	fact := restartplan.QuorumFact{
 		Service:      service,
-		TargetNodeID: s.nodeID,
+		TargetNodeID: targetNodeID,
 		Force:        force,
 		ObservedAt:   time.Now(),
 	}
@@ -179,25 +193,60 @@ func (s *Server) evaluateRaftdQuorumSafety(ctx context.Context, service string, 
 		return restartplan.EvaluateQuorumSafety(fact)
 	}
 	fact.ProbeReadOK = true
-	fact.IsTargetLeader = status.GetIsLeader()
+
+	// Leadership is a question about the TARGET, asked of the raft
+	// status this node just read. An empty leader_id means nobody knows
+	// who the leader is right now (an election is in progress, or this
+	// node has not yet learned of one) - which is not the same as
+	// "the target is not the leader", and must not be read as
+	// permission. It is reported as an unreadable fact so the verdict
+	// is Unknown, which Force cannot rescue.
+	if status.GetLeaderId() == "" {
+		fact.ProbeReadOK = false
+		fact.ProbeError = "raft status reports no current leader, so it cannot be established whether the target is the leader"
+		return restartplan.EvaluateQuorumSafety(fact)
+	}
+	fact.IsTargetLeader = status.GetLeaderId() == targetNodeID
 
 	// Per ADR-0103's own "only actual Raft voters count" rule, and
 	// because a non-voter's address is not something a quorum argument
 	// is about: split the membership into the target and the peers that
 	// actually have a stake.
+	//
+	// The target is looked up by its own id, which on the enforcing
+	// path is a node other than this one.
+	targetIsMember := false
 	var others []restartplan.Voter
 	for _, srv := range status.GetServers() {
-		if srv.GetSuffrage() != "Voter" {
+		if srv.GetId() == targetNodeID {
+			targetIsMember = true
+			if srv.GetSuffrage() == "Voter" {
+				fact.IsTargetVoter = true
+			}
 			continue
 		}
-		if srv.GetId() == s.nodeID {
-			fact.IsTargetVoter = true
+		if srv.GetSuffrage() != "Voter" {
 			continue
 		}
 		others = append(others, restartplan.Voter{
 			NodeID:          srv.GetId(),
 			RaftBindAddress: srv.GetAddress(),
 		})
+	}
+
+	// A target that is not in the membership at all is NOT the same
+	// fact as a target that is a member with no vote. EvaluateQuorumSafety
+	// reads !IsTargetVoter as "a non-voter carries no quorum risk, Allow"
+	// (ADR-0125 §4 rule 2), which is correct for a real non-voter and
+	// dangerously wrong for a node id nobody has heard of - including an
+	// empty or misspelled one arriving over the forwarded RPC. Rather
+	// than let an unrecognised target borrow the non-voter's exemption,
+	// this is reported as a fact that could not be established, so the
+	// verdict is Unknown and Force cannot rescue it.
+	if !targetIsMember {
+		fact.ProbeReadOK = false
+		fact.ProbeError = fmt.Sprintf("target node %q is not a member of the cluster as this node knows it, so its quorum standing cannot be established", targetNodeID)
+		return restartplan.EvaluateQuorumSafety(fact)
 	}
 
 	// A single-voter cluster legitimately probes nobody. ProbeVoters

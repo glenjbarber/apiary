@@ -89,6 +89,18 @@ func addUnreachableVoter(t *testing.T, node *raftnode.Node) string {
 	return addr
 }
 
+// addNonvoter adds a member that genuinely carries no vote, so the
+// "a non-voter has no quorum standing" rule can be exercised against a
+// real membership entry rather than against a node id that is merely
+// absent from the cluster.
+func addNonvoter(t *testing.T, node *raftnode.Node, id string) {
+	t.Helper()
+	eventually(t, 5*time.Second, func() bool { return node.Status().IsLeader })
+	if err := node.AddNonvoter(id, freeLoopbackAddr(t), 0, 5*time.Second); err != nil {
+		t.Fatalf("AddNonvoter(%s) error: %v", id, err)
+	}
+}
+
 func newQuorumTestServer(t *testing.T, socket, nodeID string) *Server {
 	t.Helper()
 	raftClient, err := Dial(socket, "")
@@ -109,7 +121,7 @@ func TestEvaluateRaftdQuorumSafety_SoleVoterIsBlocked(t *testing.T) {
 	socket, _ := newQuorumTestRaftd(t)
 	s := newQuorumTestServer(t, socket, "raftd-1")
 
-	report := s.evaluateRaftdQuorumSafety(context.Background(), raftdServiceName, false)
+	report := s.evaluateRaftdQuorumSafety(context.Background(), raftdServiceName, "raftd-1", false)
 
 	if report.Verdict != guardrail.Block {
 		t.Fatalf("verdict = %q, want %q; restarting the only voter of a one-voter cluster must be blocked", report.Verdict, guardrail.Block)
@@ -135,7 +147,7 @@ func TestEvaluateRaftdQuorumSafety_DeadPeerBlocksQuorum(t *testing.T) {
 	addUnreachableVoter(t, node)
 	s := newQuorumTestServer(t, socket, "raftd-1")
 
-	report := s.evaluateRaftdQuorumSafety(context.Background(), raftdServiceName, false)
+	report := s.evaluateRaftdQuorumSafety(context.Background(), raftdServiceName, "raftd-1", false)
 
 	if report.Verdict != guardrail.Block {
 		t.Fatalf("verdict = %q, want %q; 2 voters with 1 down, quorum is 2, so restarting the survivor loses quorum", report.Verdict, guardrail.Block)
@@ -159,22 +171,132 @@ func TestEvaluateRaftdQuorumSafety_DeadPeerBlocksQuorum(t *testing.T) {
 
 // TestEvaluateRaftdQuorumSafety_NonVoterIsAllowedBecauseItHasNoStake
 // pins the escape hatch that keeps the guardrail from being
-// unusable: a node that is not a voter can be restarted freely, because
-// its restart cannot change what quorum remains.
+// unusable: a member that is not a voter can be restarted freely,
+// because its restart cannot change what quorum remains.
+//
+// The target here is a genuine Nonvoter ENTRY in the membership. An
+// earlier version of this test used a node id that was simply absent
+// from the cluster, which is a different fact entirely - see
+// TestEvaluateRaftdQuorumSafety_UnknownTargetIsNotBorrowedFromTheNonVoterExemption
+// - and let the implementation conflate the two.
 func TestEvaluateRaftdQuorumSafety_NonVoterIsAllowedBecauseItHasNoStake(t *testing.T) {
-	socket, _ := newQuorumTestRaftd(t)
-	// The Server's nodeID deliberately does not match the raft member,
-	// so status contains one Voter that is not the target.
-	s := newQuorumTestServer(t, socket, "some-non-member")
+	socket, node := newQuorumTestRaftd(t)
+	addNonvoter(t, node, "observer-1")
+	// This node is the leader and the only voter; the observer is the
+	// target, so its restart costs the cluster nothing.
+	s := newQuorumTestServer(t, socket, "raftd-1")
 
-	report := s.evaluateRaftdQuorumSafety(context.Background(), raftdServiceName, false)
+	report := s.evaluateRaftdQuorumSafety(context.Background(), raftdServiceName, "observer-1", false)
 
 	if report.Verdict != guardrail.Allow {
-		t.Errorf("verdict = %q, want %q; a non-voter's restart carries no quorum risk", report.Verdict, guardrail.Allow)
+		t.Errorf("verdict = %q, want %q; a non-voter's restart carries no quorum risk (findings: %+v)", report.Verdict, guardrail.Allow, report.Findings)
 	}
 	// And the question must be recorded as asked, not skipped silently.
 	if len(report.Caveats) == 0 {
 		t.Errorf("no caveat recorded; an operator cannot tell 'checked, not a voter' from 'never checked'")
+	}
+}
+
+// TestEvaluateRaftdQuorumSafety_UnknownTargetIsNotBorrowedFromTheNonVoterExemption
+// is the fail-closed half of the rule above. "The target is a member
+// with no vote" and "the target is not a member at all" both leave
+// IsTargetVoter false, and EvaluateQuorumSafety reads that as Allow -
+// correctly for the first, dangerously for the second, because an empty
+// or misspelled node_id arriving over the forwarded ReserveRestartLease
+// RPC is exactly the shape a caller can send. An unrecognised target
+// must be Unknown, which Force cannot rescue.
+func TestEvaluateRaftdQuorumSafety_UnknownTargetIsNotBorrowedFromTheNonVoterExemption(t *testing.T) {
+	socket, _ := newQuorumTestRaftd(t)
+	s := newQuorumTestServer(t, socket, "raftd-1")
+
+	for _, target := range []string{"", "no-such-node", "raftd-1 "} {
+		report := s.evaluateRaftdQuorumSafety(context.Background(), raftdServiceName, target, true)
+		if report.Verdict != guardrail.Unknown {
+			t.Errorf("target %q: verdict = %q, want %q; an unrecognised target has no established quorum standing, and force must not manufacture one", target, report.Verdict, guardrail.Unknown)
+		}
+	}
+}
+
+// TestEvaluateRaftdQuorumSafety_JudgesTheTargetNotTheAskingNode is the
+// regression test for a defect found in live verification on a real
+// four-voter cluster, not in review.
+//
+// A follower forwards ReserveRestartLease to the leader, so the leader
+// is evaluating a node that is not itself. The implementation used to
+// hardcode s.nodeID as the target and read leadership as "am I the
+// leader", so on the enforcing path it answered "is it safe to restart
+// the LEADER's raftd" to a follower asking about its own. Every
+// follower-initiated raftd restart was then refused, citing the leader
+// as the node being protected - safe, but wrong, and it made the
+// feature unusable on every node except the current one.
+//
+// The two subtests below differ only in the target. Same membership,
+// same node, same everything else.
+func TestEvaluateRaftdQuorumSafety_JudgesTheTargetNotTheAskingNode(t *testing.T) {
+	// A single-voter cluster stays led by its one member, which is what
+	// makes "this node is the leader AND the target is something else"
+	// expressible at all. A second, fake voter cannot be built here: a
+	// plain listening socket completes TCP but never answers raft, so
+	// adding one costs this node its leadership outright and there is
+	// then no leader for the bug to be confused with.
+	newCluster := func(t *testing.T) *Server {
+		t.Helper()
+		socket, node := newQuorumTestRaftd(t)
+		addNonvoter(t, node, "observer-1")
+		return newQuorumTestServer(t, socket, "raftd-1")
+	}
+
+	t.Run("non-voter target is allowed even though this node is the leader", func(t *testing.T) {
+		s := newCluster(t)
+
+		report := s.evaluateRaftdQuorumSafety(context.Background(), raftdServiceName, "observer-1", false)
+
+		if report.Verdict != guardrail.Allow {
+			t.Fatalf("verdict = %q, want %q; this node is the leader but observer-1 is the target, and a non-voter target carries no quorum risk (findings: %+v)", report.Verdict, guardrail.Allow, report.Findings)
+		}
+		for _, f := range report.Findings {
+			if f.Rule == restartplan.RuleLeaderRestart {
+				t.Errorf("a leader-restart finding was raised for target observer-1 while this node happens to be the leader; the rule must be about the target, not the asker")
+			}
+		}
+	})
+
+	t.Run("leader target is still blocked on the same cluster", func(t *testing.T) {
+		s := newCluster(t)
+
+		report := s.evaluateRaftdQuorumSafety(context.Background(), raftdServiceName, "raftd-1", false)
+
+		if report.Verdict != guardrail.Block {
+			t.Fatalf("verdict = %q, want %q; the target here IS the leader and must be blocked (findings: %+v)", report.Verdict, guardrail.Block, report.Findings)
+		}
+		found := false
+		for _, f := range report.Findings {
+			if f.Rule == restartplan.RuleLeaderRestart {
+				found = true
+			}
+		}
+		if !found {
+			t.Errorf("no %s finding for a leader target; rules present = %+v", restartplan.RuleLeaderRestart, report.Findings)
+		}
+	})
+}
+
+// TestEvaluateRaftdQuorumSafety_JudgesANonAskerVoterTargetOnItsOwnMerits
+// is the other half of the same fix. A voter target that is NOT the
+// asking node must be judged by its own quorum standing - here, a
+// two-voter cluster where the other voter is gone, so restarting this
+// target drops the cluster below its majority. Reading the asker's
+// standing instead would let this through whenever the asker happened
+// to be somewhere safer.
+func TestEvaluateRaftdQuorumSafety_JudgesANonAskerVoterTargetOnItsOwnMerits(t *testing.T) {
+	socket, node := newQuorumTestRaftd(t)
+	addUnreachableVoter(t, node)
+	s := newQuorumTestServer(t, socket, "raftd-1")
+
+	report := s.evaluateRaftdQuorumSafety(context.Background(), raftdServiceName, "raftd-2", false)
+
+	if report.Verdict != guardrail.Block {
+		t.Fatalf("verdict = %q, want %q; 2 voters with 1 down means quorum 2, so restarting either one loses it", report.Verdict, guardrail.Block)
 	}
 }
 
@@ -186,7 +308,7 @@ func TestEvaluateRaftdQuorumSafety_NonVoterIsAllowedBecauseItHasNoStake(t *testi
 func TestEvaluateRaftdQuorumSafety_ForceCannotRescueAnUnknown(t *testing.T) {
 	s := NewServer(nil, "raftd-1", nil, nil, nil, nil, nil, "", nil, nil, nil, 0, nil)
 
-	report := s.evaluateRaftdQuorumSafety(context.Background(), raftdServiceName, true)
+	report := s.evaluateRaftdQuorumSafety(context.Background(), raftdServiceName, "raftd-1", true)
 
 	if report.Verdict != guardrail.Unknown {
 		t.Fatalf("verdict = %q, want %q; no raft client means membership is unknown, and force must not turn that into an allow", report.Verdict, guardrail.Unknown)
@@ -360,6 +482,35 @@ func TestPreflightRestartNodeService_ForceIsThreadedThrough(t *testing.T) {
 	}
 	if forced.GetVerdict() != string(guardrail.Allow) {
 		t.Errorf("forced verdict = %q, want allow; the preview must answer the question actually being asked", forced.GetVerdict())
+	}
+}
+
+// TestPreflightRestartNodeService_ServiceThatCannotBeRestartedIsBlocked
+// closes the preview/enforcement gap found in live verification.
+//
+// The preflight used to answer "allow" for anything outside the
+// guardrail set, which included every service the inventory does not
+// offer to restart and every name that is simply a typo. An operator
+// previewing "sshd" was told the restart was safe; the real
+// RestartNodeService then refused it with a bare error and no
+// explanation of the disagreement. A preview that cannot be wrong is
+// worth more than a permissive one.
+func TestPreflightRestartNodeService_ServiceThatCannotBeRestartedIsBlocked(t *testing.T) {
+	socket, _ := newQuorumTestRaftd(t)
+	client, _ := newManagerdRPCClientAndServer(t, socket, "raftd-1")
+	ctx := context.Background()
+
+	for _, name := range []string{"sshd", "apiary_unknown", "apiary_raftdd", ""} {
+		resp, err := client.PreflightRestartNodeService(ctx, preflightReq(name, false))
+		if err != nil {
+			t.Fatalf("PreflightRestartNodeService(%q) error: %v", name, err)
+		}
+		if resp.GetVerdict() != string(guardrail.Block) {
+			t.Errorf("preflight(%q) verdict = %q, want block; a service that cannot be restarted is a definite refusal, not an unconstrained allow", name, resp.GetVerdict())
+		}
+		if resp.GetError() == "" {
+			t.Errorf("preflight(%q) returned a block with no explanation", name)
+		}
 	}
 }
 

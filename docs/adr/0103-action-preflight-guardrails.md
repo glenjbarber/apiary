@@ -133,6 +133,20 @@ the reason the final shape looks the way it does:
    node must reject unconditionally rather than let two empty values pass
    as equal (`TestRestartGuardrailTokenValid_RequiresNonEmptyConfigured`).
 
+   **"Read once at startup" is an operational requirement, not an
+   implementation detail.** A node whose token file is written *after* its
+   last `managerd` start holds an empty token in memory and cannot forward
+   a guarded restart, even though the file is present and correct on
+   disk. This was observed live: on one Comb the file was written 16
+   seconds after `managerd` started, and the only symptom — appearing much
+   later, on a follower-initiated restart — was
+   `PermissionDenied: invalid or missing restart-guardrail token`, a
+   message that points at the caller while the local node is what is
+   actually wrong. `managerd` now logs a warning at startup when the
+   file is absent or empty, matching what `cmd/raftd` has always done.
+   **After provisioning or changing the token, restart `managerd` on every
+   Comb and confirm the warning is gone.**
+
 **Final shape.** New Raft-replicated FSM state (`api/internalpb/state.proto`):
 `RestartLease{lease_id, service, holder_node_id, requested_at_unix, force}`
 (no TTL - `lease_id` is simply the granting command's own raft log index,

@@ -209,6 +209,17 @@ func (n *Node) AddVoter(id, address string, prevIndex uint64, timeout time.Durat
 	return translateMembershipErr(future.Error())
 }
 
+// AddNonvoter adds a new non-voting server to the cluster. It is
+// AddVoter's exact counterpart - same leader-only requirement, same
+// prevIndex guard - and exists because a cluster can legitimately hold
+// members that carry no vote (ADR-0056's "Staging"/"Nonvoter"
+// suffrage), so the membership API needs to be able to build that shape
+// as well as the all-voter one.
+func (n *Node) AddNonvoter(id, address string, prevIndex uint64, timeout time.Duration) error {
+	future := n.raft.AddNonvoter(raft.ServerID(id), raft.ServerAddress(address), prevIndex, timeout)
+	return translateMembershipErr(future.Error())
+}
+
 // RemoveServer removes a server from the cluster, whether voter or
 // non-voter. It only succeeds when this node is the current leader.
 func (n *Node) RemoveServer(id string, prevIndex uint64, timeout time.Duration) error {

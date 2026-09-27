@@ -3574,6 +3574,19 @@ func voterNodeIDs(status *internalpb.StatusResponse) []string {
 // It is never persisted here: this RPC grants nothing.
 func (s *Server) PreflightRestartNodeService(ctx context.Context, req *rpcpb.PreflightRestartNodeServiceRequest) (*rpcpb.PreflightRestartNodeServiceResponse, error) {
 	name := req.GetName()
+	// A service that cannot be restarted at all is a definite refusal,
+	// not an unconstrained Allow. Reporting Allow here - which is what
+	// falling through to the guardrail set would do for every service
+	// outside it - tells an operator who mistyped a name, or previewed a
+	// service the inventory does not offer, that the restart is safe,
+	// and the real RestartNodeService then refuses it with a plain error
+	// and no explanation of why the preview disagreed.
+	if !restartableService(name) {
+		return &rpcpb.PreflightRestartNodeServiceResponse{
+			Verdict: string(guardrail.Block),
+			Error:   fmt.Sprintf("service %q cannot be restarted from Apiary, so there is nothing to preflight", name),
+		}, nil
+	}
 	if !guardrailService(name) {
 		return &rpcpb.PreflightRestartNodeServiceResponse{Verdict: string(guardrail.Allow)}, nil
 	}
@@ -3588,7 +3601,7 @@ func (s *Server) PreflightRestartNodeService(ctx context.Context, req *rpcpb.Pre
 	// is not safe, with the two rule families kept distinct by Rule so
 	// the frontend can tell which check produced which reason.
 	if isRaftdGuardrailed(name) {
-		quorum := s.evaluateRaftdQuorumSafety(ctx, name, req.GetForce())
+		quorum := s.evaluateRaftdQuorumSafety(ctx, name, s.nodeID, req.GetForce())
 		report = mergeGuardrailReports(report, quorum)
 	}
 
@@ -3753,7 +3766,13 @@ func (s *Server) reserveRestartLease(ctx context.Context, req *rpcpb.ReserveRest
 	// decided here.
 	quorumOverridden := false
 	if isRaftdGuardrailed(req.GetService()) {
-		report := s.evaluateRaftdQuorumSafety(ctx, req.GetService(), req.GetForce())
+		// The target is the node that asked, carried in the request -
+		// which on this leader-side branch is a DIFFERENT node from this
+		// one whenever a follower forwarded it. Judging s.nodeID here
+		// instead would answer "is it safe to restart the leader's raftd"
+		// to a follower that asked about its own, and block every safe
+		// follower restart with a reason naming the wrong node.
+		report := s.evaluateRaftdQuorumSafety(ctx, req.GetService(), req.GetNodeId(), req.GetForce())
 		// Anything other than Allow is refused, and the two refusals are
 		// deliberately not the same message: a Block is a real "this
 		// would cost quorum" answer that force can acknowledge, while an

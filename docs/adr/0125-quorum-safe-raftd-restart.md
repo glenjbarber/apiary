@@ -2,12 +2,15 @@
 
 ## Status
 
-Accepted, partially deployed. The server-side guardrail is implemented and
-unit/integration tested; the cluster-wide token provisioning and the live
-verification below are not yet done, so the guarded raftd restart path is
-not yet live. See "Implementation status" at the end of this document for
-exactly which steps are done and which are not — the design sections below
-are unchanged, and this status line plus that section are the only edits.
+Accepted, partially deployed. The server-side guardrail is implemented,
+unit/integration tested, and partly verified against a live four-voter
+cluster; the live verification found two real defects, both since fixed
+and documented under "Live verification". A raftd restart has not yet
+completed through this path, so it is still not live. See
+"Implementation status" and "Live verification" at the end of this
+document for exactly which steps are done and which are not — the design
+sections below are unchanged, and this status line plus those two
+sections are the only edits.
 
 ## Context
 
@@ -349,3 +352,112 @@ election window.
 - ADR-0097 / ADR-0103 — `dialReachable`, `evaluateJoinReachability`, leader-only probe rationale.
 - ADR-0052 — `SimulateNodeFailure` / `ComputeQuorumImpact` quorum arithmetic (reused here).
 - ADR-0124 — `cmd/raftd` process boundary confirmation (confirms the startup hook location).
+## Live verification (2026-09-27)
+
+The token is now provisioned: one identical 45-byte
+`/usr/local/etc/apiary/restart-guardrail-token` (mode 0600, root-owned)
+on all four Combs, byte-identical by SHA-256, and every service is
+running build `1972a8600851`. §6's verification was then run against the
+real four-voter cluster, and it found two defects that no amount of
+in-process testing had. Both are fixed; the fixes are described here
+because the reasoning, not just the diff, is what should survive.
+
+### What was verified, and what it proves
+
+| Check | Result |
+| --- | --- |
+| `apiary_raftd` is `restartable` in the service inventory | true |
+| Preflight `apiary_raftd` on a follower, healthy cluster | allow |
+| Preflight `apiary_raftd` on the **leader** | block, citing `raftd-leader-restart` with evidence |
+| Same, with `force` | allow — force downgrades a known Block, as §4 requires |
+| Token-gated exported `ReserveRestartLease` against the leader | accepted, and the request then reached the real guardrail |
+| Lease granted through raft (`apiary_managerd`, target `brood`) | lease 143 |
+| Second reserve while 143 was held | refused, naming the holder and request time |
+| `ConfirmRestartCompleted` | released it |
+| Reserve immediately after release | refused by the 600s cooldown, proving the completion was replicated and read back |
+| Cluster after all of the above | leader unchanged, 4 voters, no lease held |
+
+The cooldown result in particular is the one that shows the whole loop
+is real: the refusal is generated from replicated FSM state written by a
+different node, not from anything local to the caller.
+
+### Defect 1: the leader was judging its own raftd, not the target's
+
+`evaluateRaftdQuorumSafety` hardcoded `s.nodeID` as the target and read
+leadership as `status.GetIsLeader()`. Both are correct only when the
+evaluating node is also the target. On the enforcing path it never is: a
+follower forwards `ReserveRestartLease` to the leader, and the leader
+then evaluates the request — for the follower's raftd.
+
+Live symptom, from the real cluster: reserving a lease for
+`node_id=brood` against the leader returned
+
+> refusing to restart: **drone** is the current raft leader
+
+The leader was blocking a follower's restart by describing itself. This
+is safe but wrong, and it made the feature unusable on every node except
+the current leader — which moves. The advisory preflight runs locally on
+the node the operator clicked, so it evaluated the right node and said
+`allow`; the two answers could not agree, which is the exact drift
+ADR-0125 §4 forbids and which the shared-implementation design was meant
+to prevent. Sharing one implementation is necessary but not sufficient
+when the two callers disagree about *whose* raftd is at stake.
+
+Fixed by making the target an explicit parameter, reading leadership as
+"is the target the node raft names as leader", and dropping the target —
+not the local node — from the probed voter set.
+
+### Defect 2: an unrecognised target inherited the non-voter exemption
+
+Threading the target through exposed a second, latent problem.
+`EvaluateQuorumSafety` reads `!IsTargetVoter` as "a non-voter carries no
+quorum risk, Allow" (§4 rule 2). With the target taken from the request,
+a node id that is not in the membership at all — including an empty or
+misspelled one arriving over the forwarded RPC — satisfies the same
+condition and would have been waved through. That is a fail-open on a
+path a caller controls.
+
+Fixed by distinguishing the two facts: a member present with non-voter
+suffrage still gets Allow, and a target absent from the membership is
+reported as a fact that could not be established, which is Unknown.
+Unknown is not rescuable by `force`, so the refusal is fail-closed.
+
+### Also fixed, found in the same pass
+
+**Preflight reported `allow` for services that cannot be restarted.**
+Anything outside the guardrail set short-circuited to Allow, so
+previewing `sshd` or a typo said the restart was safe, and the real
+`RestartNodeService` then refused it with no explanation of the
+disagreement. A preview that cannot be wrong is worth more than a
+permissive one; the preflight now blocks with a reason.
+
+**managerd said nothing when it had no token.** The token is read once at
+startup, and a missing file was explicitly treated as "not an error".
+That is exactly what bit this deployment: on one Comb the token was
+written 16 seconds *after* managerd started, so the process cached an
+empty token, and the failure surfaced much later as a follower-initiated
+restart refused with "invalid or missing restart-guardrail token" — a
+message that points at the caller when the local node is what is wrong.
+`cmd/raftd` has always warned in this situation; `cmd/managerd` now does
+too, for both a missing and an empty file.
+
+The operational lesson is worth stating plainly: **provisioning the
+token is not enough, because managerd caches it at startup.** A node
+whose file was written after its last managerd start is silently unable
+to forward a guarded restart, and the error it produces does not say so.
+Restart `managerd` on every Comb after provisioning, and check the
+startup log line.
+
+### Still not verified
+
+**No raftd restart has yet completed through this path**, because
+Defect 1 blocked the follower case on the deployed build. What remains
+is: a real guarded `RestartNodeService` on a follower, the new `raftd`
+confirming its lease on startup with the token, a second simultaneous
+request refused by the replicated lease, and a leader restart
+deliberately forced. The leader-restart *rule* is verified live (§6 row
+2 above) but has not been executed.
+
+**`make update` still cannot restart raftd,** and nothing here changes
+that. `INSTALL_SRCS_FILTERED` stays until `update` has a client that can
+acquire a guarded lease; see "Not done" above.
