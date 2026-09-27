@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -1276,8 +1277,14 @@ func TestServer_NewVMPage_HasHostnameDrivenIdentity(t *testing.T) {
 	if !strings.Contains(body, `id="vm-hostname"`) {
 		t.Errorf("new VM page missing Hostname input, got: %s", body)
 	}
-	if strings.Contains(body, `id="vm-hostname" name=`) {
-		t.Errorf("Hostname input must not be submitted (no VMDefinition hostname field exists), got: %s", body)
+	// The VM Hostname input must carry no name attribute, in either attribute
+	// order: a VMDefinition has no hostname field, so submitting one would be
+	// silently ignored. (The jail Hostname input on the same page does have
+	// one, which is why this matches the VM input's own tag.)
+	if tag := regexp.MustCompile(`<input[^>]*id="vm-hostname"[^>]*>`).FindString(body); tag == "" {
+		t.Errorf("could not find the VM Hostname input tag, got: %s", body)
+	} else if regexp.MustCompile(`\sname=`).MatchString(tag) {
+		t.Errorf("VM Hostname input must not be submitted (no VMDefinition hostname field exists), got tag: %s", tag)
 	}
 	if !strings.Contains(body, `id="vm-id"`) || !strings.Contains(body, `name="id"`) {
 		t.Errorf("new VM page missing ID input the derivation JS targets, got: %s", body)

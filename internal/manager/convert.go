@@ -60,7 +60,6 @@ func toInternalVM(vm *rpcpb.VMDefinition) *internalpb.VMDefinition {
 		ReplicaNodeId:     vm.GetReplicaNodeId(),
 		BaseImageName:     vm.GetBaseImageName(),
 		CloneFromSnapshot: vm.GetCloneFromSnapshot(),
-		Hostname:          vm.GetHostname(),
 		// IpAddress/MacAddress are assigned by the FSM itself, never set
 		// by an external caller.
 		FirewallRules: rules,
@@ -115,7 +114,6 @@ func fromInternalVM(vm *internalpb.VMDefinition) *rpcpb.VMDefinition {
 		// dedicated command may set them (ADR-0063).
 		CloudflareHostname: vm.GetCloudflareHostname(),
 		CloudflarePort:     vm.GetCloudflarePort(),
-		Hostname:           vm.GetHostname(),
 	}
 }
 

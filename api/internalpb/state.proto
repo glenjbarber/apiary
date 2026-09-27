@@ -160,12 +160,11 @@ message VMDefinition {
   // disk, or base_image_name's own file copy if that's set instead).
   string clone_from_snapshot = 19;
 
-  // hostname, if set, is the VM's hostname (may be an FQDN). It is not
-  // used for any operational purpose by Apiary - the ID and display name
-  // are derived from it on the creation page for operator convenience,
-  // but the hostname itself is stored and returned for reference. See
-  // the jail hostname field for the analogous concept.
-  string hostname = 20;
+  // Field 20 was a VM hostname that nothing ever wrote or read (the create
+  // page never submitted it, and a VM's hostname comes from its image or
+  // DHCP). Reserved so the number cannot be reused with a different meaning.
+  reserved 20;
+  reserved "hostname";
 
   // migration_fenced is set by the FSM while a migration record still
   // holds this guest (ADR-0128). An ordinary reconciler must not
