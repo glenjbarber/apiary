@@ -2,7 +2,12 @@
 
 ## Status
 
-Proposed
+Accepted, partially deployed. The server-side guardrail is implemented and
+unit/integration tested; the cluster-wide token provisioning and the live
+verification below are not yet done, so the guarded raftd restart path is
+not yet live. See "Implementation status" at the end of this document for
+exactly which steps are done and which are not — the design sections below
+are unchanged, and this status line plus that section are the only edits.
 
 ## Context
 
@@ -223,7 +228,121 @@ This is sufficient for safe hand-driven rolling maintenance. A fully automated r
 5. **Frontend**: Verify template renders new rule strings correctly (likely no change needed).
 6. **Run full verification suite** above.
 
-## References
+## Implementation status
+
+Recorded 2026-09-26, after implementing the server-side wiring. This
+appends to the ADR rather than editing its design sections, so the
+reasoning above stays as written.
+
+### Done
+
+**The quorum-safety evaluator, and its home.** §4 above names
+`guardrail.EvaluateRaftdQuorumSafety`. It actually landed in
+`internal/restartplan` as `EvaluateQuorumSafety`, not in
+`internal/guardrail` — a deliberate relocation, because
+`internal/restartplan` is the package that owns the `FactGatherer`,
+`Prober`, `Leaser`, `Confirmer` and `Restarter` seams the evaluator is
+defined against, and putting it in `guardrail` would have meant either
+importing `restartplan` from `guardrail` or duplicating those types.
+`internal/guardrail` remains the shared vocabulary (`Verdict`,
+`Finding`, `Report`, and `EvaluateConcurrentManagerRestart`), which is
+what lets a merged report need no translation. The rule ids
+`raftd-quorum-safety` and `raftd-leader-restart` and the fail-closed
+semantics are exactly as §4 specifies.
+
+**Fact gathering (`internal/manager/raftdquorum.go`).**
+`Server.evaluateRaftdQuorumSafety` reads local raft status, filters
+`Suffrage == "Voter"`, drops the target from the probe list, TCP-dials
+every remaining voter through `restartplan.ProbeVoters` with ADR-0125 §7's
+3s/10s budgets, and hands the result to `EvaluateQuorumSafety`. It is the
+only production caller of that function outside `restartplan`'s own
+tests.
+
+**Enforcement placement.** The evaluation gates the `AcquireRestartLease`
+apply inside `reserveRestartLease`, and therefore runs **on the leader** —
+`reserveRestartLease` already forwards to the leader before doing any
+leader-only work, so a follower's possibly-stale membership view never
+decides the cluster's quorum. §6's "real enforcement" requirement is met
+by this placement rather than by a check inside `RestartNodeService`,
+which runs on whichever node the operator clicked.
+
+**`apiary_raftd` is now restartable** (`internal/manager/services.go`).
+It was deliberately excluded before, and three tests encoded that
+judgment; all three now encode the new one. The Machine page's existing
+`POST /machine/services/{name}/restart` route needed no change — its
+restart button is rendered from the `Restartable` flag, so the guarded
+control appears as a consequence of this flag alone.
+
+**One guardrail set, two services.** `name == restartGuardrailService`
+became `guardrailService(name)` over a `restartGuardrailServices` map, so
+`apiary_managerd` and `apiary_raftd` are both leased. `frontend` and
+`restshimd` stay deliberately outside it: separate processes, and neither
+can cost quorum.
+
+**Preflight and enforcement share one implementation.** Both call
+`EvaluateQuorumSafety`, and the two independent reports (ADR-0103's
+lease/cooldown, ADR-0125's quorum) are merged so one preview shows every
+reason. The merge ranks `Unknown` as never softer than `Allow` and never
+softer than `Block` — a naive `max()` over the verdict strings would let
+an `Allow` beat an `Unknown`, which is the fail-open this whole mechanism
+exists to prevent.
+
+**`Force` on `PreflightRestartNodeServiceRequest`** (field 2, the one
+proto change). Without it a preflight always reports the un-forced
+verdict, so an operator who has already chosen to force sees a `Block`
+that their actual restart would sail past — which reads as "force will
+not help" and is false. §9's claim that no new proto *message* is needed
+still holds; this is a new *field* on an existing one.
+
+**A pre-existing crash, found and fixed.** `reserveRestartLease`
+dereferenced `s.raft` unconditionally, so a `Server` with no raft client
+panicked rather than returning an error — and gRPC does not recover a
+panicking handler, so it killed managerd. A new nil-safe
+`Server.raftStatus` now backs the four restart-guardrail call sites and
+fails closed. This was unreachable while raftd was un-restartable, which
+is why it had gone unnoticed; the new test
+`TestServer_RestartNodeService_RaftdIsRejectedBeforeAnyRestart` pins it.
+
+**Tests.** `internal/manager/raftdquorum_test.go` covers the fact-gathering
+against a *real* raft (sole voter blocked on both rules; a second voter
+bound to a closed port blocking on quorum; a non-voter allowed; force
+unable to rescue an `Unknown`), the merge ranking pairwise, and two
+end-to-end preflight cases that prove the wiring rather than the
+arithmetic. `internal/manager/restartplan_agreement_test.go` holds the two
+cross-package agreement tests, which had to move out of
+`internal/restartplan` because `internal/manager` now imports it and a
+test importing back would be an import cycle Go rejects outright.
+
+### Not done
+
+**The guardrail token is still unprovisioned on every Comb.** ADR-0125 §6
+opens its live verification with "Provision identical
+`restart-guardrail-token` on all Combs"; that has not happened, and
+`make install` does not create it. This matters more than it looks, and
+the reason is not simply "one more step": the token gates
+`apiary_managerd` too, so provisioning it flips a guardrail that is
+currently inert on a service being restarted today. It must be done on all
+four at once, never partially — a partial rollout makes whether a lease
+can be granted depend on which node happens to be leader.
+
+**The live verification in §6 has not been run.** Everything above is
+tested against an in-process raft on a developer machine. That
+establishes the logic; it does not establish FreeBSD rc.d behaviour, real
+cross-node forwarding, or a real 4-voter cluster's timing.
+
+**`make update` still cannot restart raftd.** `INSTALL_SRCS_FILTERED` is
+unchanged, and the reason is now structural rather than temporary: `update`
+runs `service apiary_raftd restart` directly, with no lease and no
+cross-node coordination, so running it on all four Combs would take all
+four voters down at once. The lease is what prevents that, and `update`
+has no way to acquire one. Giving `update` a guarded client is separate
+work with its own credential-handling questions.
+
+**A leader restart is still untested even here.** §4's
+`raftd-leader-restart` rule is implemented and unit-tested, but no live
+cluster has had its leader bounced through this path. Quorum survives
+(3 of 4 voters remain, so a successor is elected), at the cost of an
+election window.
 
 - ADR-0116 — original design (not implemented), gaps identified here.
 - ADR-0103 — restart-lease FSM, `RestartLease`/`RestartRecord`, `AcquireRestartLease`/`RecordRestartCompleted`, `EvaluateConcurrentManagerRestart`, confirm-on-startup pattern.

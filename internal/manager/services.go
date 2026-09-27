@@ -10,17 +10,26 @@ import (
 )
 
 // apiaryServices is the full status inventory for this Machine page.
-// raftd stays excluded - consensus-critical, and its own config write
-// path (UpdateRaftdConfig, ADR-0102) deliberately never auto-restarts
-// it either, the same judgment applied consistently in two places.
-// restshimd is now restartable (ADR-0102): it's stateless and
+// restshimd is restartable (ADR-0102): it's stateless and
 // non-consensus, and UpdateRestshimdConfig needs to be able to trigger
 // a restart after a successful config save.
+//
+// apiary_raftd became restartable in ADR-0125, which is what finally
+// made it safe to expose: restarting it is now the single most
+// consequential restart in this inventory, so it is also the one most
+// heavily guarded. RestartNodeService routes it through the same
+// cluster-wide Raft lease as apiary_managerd, and additionally through
+// the quorum-safety evaluation that decides whether the remaining
+// voters would still form a majority (internal/manager/raftdquorum.go).
+// It stays out of the auto-restart-on-config-write path for the same
+// reason it always did: UpdateRaftdConfig writing a new value is not an
+// operator asking to bounce consensus, and the config's own save flow
+// must never be able to trigger that implicitly.
 var apiaryServices = []struct {
 	name        string
 	restartable bool
 }{
-	{name: "apiary_raftd"},
+	{name: "apiary_raftd", restartable: true},
 	{name: "apiary_managerd", restartable: true},
 	{name: "apiary_frontend", restartable: true},
 	{name: "apiary_restshimd", restartable: true},

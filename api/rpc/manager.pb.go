@@ -9475,8 +9475,19 @@ func (x *PreflightApproveJoinRequestResponse) GetLeaderHint() string {
 }
 
 type PreflightRestartNodeServiceRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	Name  string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	// force mirrors RestartNodeServiceRequest.force so a preview answers
+	// the question actually being asked. An operator who has "force"
+	// ticked is asking "what happens if I go ahead?", and a preflight
+	// that ignored the flag would answer a different question - showing
+	// a Block that the restart they intend would actually sail past,
+	// which reads as "force will not help me here" and is simply false.
+	//
+	// It grants nothing and is never persisted: this RPC is read-only,
+	// and the only thing that can release a lease remains the
+	// raft-replicated AcquireRestartLease in ReserveRestartLease.
+	Force         bool `protobuf:"varint,2,opt,name=force,proto3" json:"force,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -9516,6 +9527,13 @@ func (x *PreflightRestartNodeServiceRequest) GetName() string {
 		return x.Name
 	}
 	return ""
+}
+
+func (x *PreflightRestartNodeServiceRequest) GetForce() bool {
+	if x != nil {
+		return x.Force
+	}
+	return false
 }
 
 type PreflightRestartNodeServiceResponse struct {
@@ -16821,9 +16839,10 @@ const file_api_rpc_manager_proto_rawDesc = "" +
 	"\bfindings\x18\x02 \x03(\v2\x1f.apiary.rpc.v1.GuardrailFindingR\bfindings\x12\x14\n" +
 	"\x05error\x18\x03 \x01(\tR\x05error\x12\x1f\n" +
 	"\vleader_hint\x18\x04 \x01(\tR\n" +
-	"leaderHint\"8\n" +
+	"leaderHint\"N\n" +
 	"\"PreflightRestartNodeServiceRequest\x12\x12\n" +
-	"\x04name\x18\x01 \x01(\tR\x04name\"\x92\x01\n" +
+	"\x04name\x18\x01 \x01(\tR\x04name\x12\x14\n" +
+	"\x05force\x18\x02 \x01(\bR\x05force\"\x92\x01\n" +
 	"#PreflightRestartNodeServiceResponse\x12\x18\n" +
 	"\averdict\x18\x01 \x01(\tR\averdict\x12;\n" +
 	"\bfindings\x18\x02 \x03(\v2\x1f.apiary.rpc.v1.GuardrailFindingR\bfindings\x12\x14\n" +

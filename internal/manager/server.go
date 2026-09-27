@@ -28,6 +28,7 @@ import (
 	"github.com/glenjbarber/apiary/internal/health"
 	"github.com/glenjbarber/apiary/internal/hostpkg"
 	"github.com/glenjbarber/apiary/internal/hoststats"
+	"github.com/glenjbarber/apiary/internal/invariant"
 	"github.com/glenjbarber/apiary/internal/isostore"
 	"github.com/glenjbarber/apiary/internal/netif"
 	"github.com/glenjbarber/apiary/internal/nodeconfig"
@@ -3428,13 +3429,13 @@ func (s *Server) ListNodeServices(ctx context.Context, _ *rpcpb.ListNodeServices
 	return &rpcpb.ListNodeServicesResponse{Services: services}, nil
 }
 
-// restartGuardrailService is the one service the action-preflight
-// restart guardrail (ADR-0103) applies to - the real cross-node quorum
-// risk the guardrail exists for. frontend/restshimd restarts never kill
-// the process handling the RestartNodeService call itself (they're
-// separate processes), so neither needs the guardrail's lease/confirm
+// restartGuardrailServices (in raftdquorum.go) is the set of services
+// whose restart goes through the action-preflight restart guardrail
+// (ADR-0103) - the ones carrying a cluster-wide risk, and therefore
+// needing a cluster-wide Raft lease reserved first. frontend/restshimd
+// restarts never kill the process handling the RestartNodeService call
+// itself and can never cost quorum, so neither needs the lease/confirm
 // machinery at all.
-const restartGuardrailService = "apiary_managerd"
 
 // restartLeaseCooldownSeconds is the minimum time between confirmed
 // apiary_managerd restarts on any Raft voter - "do not restart both
@@ -3470,7 +3471,7 @@ func (s *Server) RestartNodeService(ctx context.Context, req *rpcpb.RestartNodeS
 
 	var guardrailOverridden bool
 	var leaseID uint64
-	if name == restartGuardrailService {
+	if guardrailService(name) {
 		reserveResp, err := s.reserveRestartLease(ctx, &rpcpb.ReserveRestartLeaseRequest{
 			Service: name,
 			NodeId:  s.nodeID,
@@ -3512,11 +3513,14 @@ func (s *Server) RestartNodeService(ctx context.Context, req *rpcpb.RestartNodeS
 		if err := s.services.Restart(restartCtx, name); err != nil {
 			fmt.Fprintf(os.Stderr, "apiary: restarting %s: %v\n", name, err)
 		}
-		// No further action here for restartGuardrailService: this
+		// No further action here for a guardrailed service: this
 		// process cannot reliably confirm its own replacement's outcome
 		// (ADR-0103) - confirmation happens from the NEW process's own
 		// startup, which reads back the pending-restart record this
-		// handler already wrote above.
+		// handler already wrote above. That applies to apiary_raftd
+		// exactly as it does to apiary_managerd, for the same reason:
+		// raftd's own startup hook is cmd/raftd's confirmPendingRe-
+		// startOnStartup, launched by its own main.go.
 	}()
 	return &rpcpb.RestartNodeServiceResponse{Scheduled: true, GuardrailOverridden: guardrailOverridden}, nil
 }
@@ -3550,22 +3554,63 @@ func voterNodeIDs(status *internalpb.StatusResponse) []string {
 }
 
 // PreflightRestartNodeService previews the action-preflight restart
-// guardrail (ADR-0103) for apiary_managerd - Viewer-tier, read-only, no
-// live dial to a caller-influenced address (only a local raft-internal
-// state read, unlike PreflightApproveJoinRequest). Always Allow for
-// every other service, which carries no quorum stake.
+// guardrail (ADR-0103) for every service in restartGuardrailServices -
+// Viewer-tier, read-only, no live dial to a caller-influenced address
+// (the probe dials only the addresses raft itself reports as voters, not
+// anything in the request). Always Allow for every other service, which
+// carries no quorum stake.
+//
+// For apiary_raftd it additionally runs the ADR-0125 quorum-safety
+// evaluation, calling the SAME function reserveRestartLease's leader
+// branch calls. That shared call is the mechanism behind ADR-0125's
+// "the preview and the enforcement cannot drift apart" requirement -
+// there is exactly one implementation, so a preview that said Allow
+// while the real check said Block is not merely unlikely, it is
+// unreachable.
+//
+// force is threaded through so an operator previewing with "force"
+// checked sees the same verdict the restart would get, rather than a
+// Block the force they already intend to use would have overridden.
+// It is never persisted here: this RPC grants nothing.
 func (s *Server) PreflightRestartNodeService(ctx context.Context, req *rpcpb.PreflightRestartNodeServiceRequest) (*rpcpb.PreflightRestartNodeServiceResponse, error) {
 	name := req.GetName()
-	if name != restartGuardrailService {
+	if !guardrailService(name) {
 		return &rpcpb.PreflightRestartNodeServiceResponse{Verdict: string(guardrail.Allow)}, nil
 	}
 
+	// ADR-0103's concurrent-restart / cooldown check, unchanged and
+	// still evaluated for both guarded services.
+	existing := s.evaluateRestartCooldown(ctx, name)
+	report := *existing
+
+	// ADR-0125's quorum-safety check, for raftd only. Merged into the
+	// same response so one preview shows every reason a restart is or
+	// is not safe, with the two rule families kept distinct by Rule so
+	// the frontend can tell which check produced which reason.
+	if isRaftdGuardrailed(name) {
+		quorum := s.evaluateRaftdQuorumSafety(ctx, name, req.GetForce())
+		report = mergeGuardrailReports(report, quorum)
+	}
+
+	return &rpcpb.PreflightRestartNodeServiceResponse{
+		Verdict:  string(report.Verdict),
+		Findings: toRPCGuardrailFindings(report.Findings),
+	}, nil
+}
+
+// evaluateRestartCooldown is ADR-0103's own concurrent-restart and
+// cooldown evaluation, split out of PreflightRestartNodeService so the
+// raftd preflight can run it and the quorum check as two independently
+// testable steps rather than one long handler.
+//
+// The fail-closed posture on a failed lease read is preserved exactly:
+// when the local raft state cannot be read, IsLocalNodeVoter is assumed
+// true so the failure is actually consulted, rather than the read
+// failing open into a quiet Allow.
+func (s *Server) evaluateRestartCooldown(ctx context.Context, name string) *guardrail.Report {
 	fact := guardrail.RestartCooldownFact{TargetService: name}
-	raftStatus, err := s.raft.Status(ctx)
+	raftStatus, err := s.raftStatus(ctx)
 	if err != nil {
-		// Can't determine voter status either - assume this node could
-		// be a voter so the read failure below is actually consulted,
-		// rather than silently short-circuiting to Allow.
 		fact.IsLocalNodeVoter = true
 		fact.ReadOK = false
 	} else {
@@ -3590,12 +3635,63 @@ func (s *Server) PreflightRestartNodeService(ctx context.Context, req *rpcpb.Pre
 			}
 		}
 	}
-
 	report := guardrail.EvaluateConcurrentManagerRestart(fact)
-	return &rpcpb.PreflightRestartNodeServiceResponse{
-		Verdict:  string(report.Verdict),
-		Findings: toRPCGuardrailFindings(report.Findings),
-	}, nil
+	return &report
+}
+
+// mergeGuardrailReports combines two independent evaluations into one
+// Report, taking the MORE RESTRICTIVE verdict and carrying both sets of
+// findings and caveats.
+//
+// The ordering is not cosmetic. guardrail.Allow < guardrail.Block and
+// Unknown is not comparable by string, so a naive max() would treat
+// "unknown" and "block" as unordered and could let an Allow win over an
+// Unknown - which is precisely the fail-open this package exists to
+// prevent. Unknown is therefore always at least as restrictive as
+// Allow, and never softer than Block.
+func mergeGuardrailReports(a, b guardrail.Report) guardrail.Report {
+	out := guardrail.Report{
+		Intent:   firstNonEmptyString(a.Intent, b.Intent),
+		Verdict:  moreRestrictiveVerdict(a.Verdict, b.Verdict),
+		Findings: append(append([]guardrail.Finding{}, a.Findings...), b.Findings...),
+		Caveats:  append(append([]invariant.Evidence{}, a.Caveats...), b.Caveats...),
+	}
+	return out
+}
+
+func moreRestrictiveVerdict(a, b guardrail.Verdict) guardrail.Verdict {
+	rank := func(v guardrail.Verdict) int {
+		switch v {
+		case guardrail.Allow:
+			return 0
+		case guardrail.Unknown:
+			// Never softer than Block: an unestablished fact is at
+			// least as bad as a negative one, and must never be
+			// ranked as "nothing to see".
+			return 2
+		case guardrail.Block:
+			return 1
+		default:
+			// An unrecognised verdict string is somebody else's
+			// future addition. Ranking it below Allow would be
+			// fail-open on a value this code has never seen, so it
+			// is treated as maximally restrictive instead.
+			return 3
+		}
+	}
+	if rank(b) > rank(a) {
+		return b
+	}
+	return a
+}
+
+func firstNonEmptyString(vals ...string) string {
+	for _, v := range vals {
+		if v != "" {
+			return v
+		}
+	}
+	return ""
 }
 
 // ReserveRestartLease is the external RPC form, gRPC-reachable by a
@@ -3623,7 +3719,7 @@ func (s *Server) ReserveRestartLease(ctx context.Context, req *rpcpb.ReserveRest
 // RestartNodeService (the same trusted process calling itself directly,
 // never over the wire).
 func (s *Server) reserveRestartLease(ctx context.Context, req *rpcpb.ReserveRestartLeaseRequest) (*rpcpb.ReserveRestartLeaseResponse, error) {
-	raftStatus, err := s.raft.Status(ctx)
+	raftStatus, err := s.raftStatus(ctx)
 	if err != nil {
 		return &rpcpb.ReserveRestartLeaseResponse{Error: err.Error()}, nil
 	}
@@ -3640,6 +3736,38 @@ func (s *Server) reserveRestartLease(ctx context.Context, req *rpcpb.ReserveRest
 			return &rpcpb.ReserveRestartLeaseResponse{Error: augmentForwardError("not leader", hint, ferr)}, nil
 		}
 		return &rpcpb.ReserveRestartLeaseResponse{Error: "not leader and no reachable leader hint for the restart-guardrail lease"}, nil
+	}
+
+	// ADR-0125: a raftd restart additionally has to survive the
+	// quorum-safety evaluation, and it is checked HERE - on the leader,
+	// before the Apply - rather than in RestartNodeService, because
+	// RestartNodeService runs on whichever node the operator clicked,
+	// and only the leader has a membership view authoritative enough
+	// to answer "would the rest of the cluster still form a majority".
+	// Checking it on the caller's node would let a follower's
+	// possibly-stale view decide the fate of the cluster's quorum.
+	//
+	// This is a pre-Apply gate, not a replacement for the Apply: the
+	// raft-replicated AcquireRestartLease below is still what actually
+	// enforces the concurrent-restart rule, and it outranks anything
+	// decided here.
+	quorumOverridden := false
+	if isRaftdGuardrailed(req.GetService()) {
+		report := s.evaluateRaftdQuorumSafety(ctx, req.GetService(), req.GetForce())
+		// Anything other than Allow is refused, and the two refusals are
+		// deliberately not the same message: a Block is a real "this
+		// would cost quorum" answer that force can acknowledge, while an
+		// Unknown is "nobody established whether it is safe" and force
+		// cannot rescue it, because there is no fact to acknowledge.
+		// Both are refused - "could not check" is never "checked and
+		// safe" - but only the first is overridable.
+		if report.Verdict != guardrail.Allow {
+			return &rpcpb.ReserveRestartLeaseResponse{
+				Error: describeGuardrailBlock(report),
+			}, nil
+		}
+		// Allow, having arrived from a Block: force was exercised.
+		quorumOverridden = forceDowngradedBlock(report)
 	}
 
 	// The leader authors both the voter snapshot and the timestamp
@@ -3675,7 +3803,7 @@ func (s *Server) reserveRestartLease(ctx context.Context, req *rpcpb.ReserveRest
 	}
 	return &rpcpb.ReserveRestartLeaseResponse{
 		Granted:             true,
-		GuardrailOverridden: lease.GetForce(),
+		GuardrailOverridden: lease.GetForce() || quorumOverridden,
 		LeaseId:             lease.GetLeaseId(),
 	}, nil
 }
@@ -3707,7 +3835,7 @@ func (s *Server) ConfirmRestartCompletedLocal(ctx context.Context, service, node
 // revision note #16) - carries no token check of its own, mirroring
 // reserveRestartLease's identical split above.
 func (s *Server) confirmRestartCompleted(ctx context.Context, req *rpcpb.ConfirmRestartCompletedRequest) (*rpcpb.ConfirmRestartCompletedResponse, error) {
-	raftStatus, err := s.raft.Status(ctx)
+	raftStatus, err := s.raftStatus(ctx)
 	if err != nil {
 		return &rpcpb.ConfirmRestartCompletedResponse{Error: err.Error()}, nil
 	}

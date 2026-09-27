@@ -2,12 +2,21 @@ package manager
 
 import "testing"
 
-// TestRestartableService_Allowlist confirms ADR-0102's allowlist
-// change: restshimd is now restartable (stateless, non-consensus,
-// UpdateRestshimdConfig needs to trigger it after a config save), and
-// raftd remains excluded (consensus-critical) - UpdateRaftdConfig
-// deliberately never auto-restarts it either, the same judgment
-// applied consistently in two places.
+// TestRestartableService_Allowlist confirms the allowlist is exactly the
+// four Apiary rc.d services and nothing else - the property that keeps
+// RestartNodeService from ever being talked into running an arbitrary
+// `service X restart` by a name off the wire.
+//
+// ADR-0102 made restshimd restartable (stateless, non-consensus,
+// UpdateRestshimdConfig needs to trigger it after a config save) while
+// leaving raftd excluded as consensus-critical. ADR-0125 then reversed
+// that half of the judgment: raftd became restartable precisely because
+// the quorum-safety guardrail now exists to make exposing it safe, so a
+// restart of it reserves a cluster-wide lease and is refused outright
+// when the remaining voters would not form a majority. What did NOT
+// change is the other half - UpdateRaftdConfig still never auto-restarts
+// raftd on a config write, and "restartable on request" must never drift
+// into "restarted as a side effect of saving a value".
 func TestRestartableService_Allowlist(t *testing.T) {
 	cases := []struct {
 		name string
@@ -16,8 +25,13 @@ func TestRestartableService_Allowlist(t *testing.T) {
 		{"apiary_managerd", true},
 		{"apiary_frontend", true},
 		{"apiary_restshimd", true},
-		{"apiary_raftd", false},
+		{"apiary_raftd", true},
 		{"apiary_unknown", false},
+		// Near-misses that must stay false: a name that merely contains
+		// a guardrailed service, and a plausible rc.d name from another
+		// project, are both outside the closed set.
+		{"apiary_managerd_extra", false},
+		{"sshd", false},
 	}
 	for _, c := range cases {
 		if got := restartableService(c.name); got != c.want {

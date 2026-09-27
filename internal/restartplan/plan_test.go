@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/glenjbarber/apiary/internal/cluster"
-	"github.com/glenjbarber/apiary/internal/guardrail"
 )
 
 // --- engine fixtures -----------------------------------------------------
@@ -832,31 +831,6 @@ func TestDefaultConfirmOptions(t *testing.T) {
 	custom := ConfirmOptions{Attempts: 2, Backoff: time.Second}
 	if custom.WithDefaults() != custom {
 		t.Errorf("WithDefaults overwrote a value the caller set: %+v", custom.WithDefaults())
-	}
-}
-
-// TestDefaultServiceMatchesManagerServices keeps this package's service
-// key honest against the real internal/manager list, which is where the
-// rc.d name an operator actually restarts comes from. A rename there
-// without a rename here would silently target nothing.
-func TestDefaultServiceMatchesManagerServices(t *testing.T) {
-	if DefaultService != "apiary_raftd" {
-		t.Errorf("DefaultService = %q, want %q (ADR-0125 §1: the existing rc.d name, not a new string)", DefaultService, "apiary_raftd")
-	}
-	if ManagerService != "apiary_managerd" {
-		t.Errorf("ManagerService = %q, want %q", ManagerService, "apiary_managerd")
-	}
-	if DefaultService == ManagerService {
-		t.Errorf("the two lease keys must differ; they gate independent leases")
-	}
-	// The verdict vocabulary this package reports must be the one
-	// internal/guardrail already defines, so a merged Report needs no
-	// translation.
-	if guardrail.Allow != "allow" || guardrail.Block != "block" || guardrail.Unknown != "unknown" {
-		t.Errorf("guardrail's own vocabulary changed underneath this package")
-	}
-	if RuleQuorumSafety != "raftd-quorum-safety" || RuleLeaderRestart != "raftd-leader-restart" {
-		t.Errorf("the rule ids must stay the strings ADR-0125 §4 and the frontend's copy key off: %q, %q", RuleQuorumSafety, RuleLeaderRestart)
 	}
 }
 

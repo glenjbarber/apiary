@@ -1543,12 +1543,54 @@ func TestServer_RestartNodeService_RejectsNonRestartableService(t *testing.T) {
 	s := NewServer(nil, "node-1", nil, nil, nil, nil, nil, "", nil, nil, nil, 0, nil)
 	s.services = controller
 
-	resp, err := s.RestartNodeService(context.Background(), &rpcpb.RestartNodeServiceRequest{Name: "apiary_raftd"})
+	// "sshd" rather than an apiary service: it is genuinely absent from
+	// apiaryServices, so the rejection is testing the allowlist rather
+	// than a table's current contents. This test used to name
+	// apiary_raftd here, back when raftd was deliberately NOT
+	// restartable; ADR-0125 made it restartable precisely because the
+	// quorum guardrail now makes exposing it safe, so raftd can no
+	// longer stand in for "not allowed" - asking to restart it now
+	// legitimately proceeds to the guardrail.
+	resp, err := s.RestartNodeService(context.Background(), &rpcpb.RestartNodeServiceRequest{Name: "sshd"})
 	if err != nil {
 		t.Fatalf("RestartNodeService() error: %v", err)
 	}
 	if resp.GetError() == "" || controller.restartName != "" {
 		t.Errorf("response = %+v; restart called for %q, want rejection without restart", resp, controller.restartName)
+	}
+}
+
+// TestServer_RestartNodeService_RaftdIsRejectedBeforeAnyRestart pins the
+// ADR-0125 property that matters most about exposing raftd as
+// restartable: an unprovisioned guardrail (no restart-guardrail-token on
+// this node) must fail the restart CLOSED, and must not fall through to
+// the service controller.
+//
+// The failure this guards against is subtle and severe. raftd is now in
+// the restartable inventory, so this call no longer stops at the
+// allowlist. If the lease reservation were ever treated as best-effort,
+// or if a nil raft client were allowed to read as "no reason to object",
+// a raftd restart would proceed with no cluster-wide lease - and a second
+// node doing the same thing concurrently would take the cluster's
+// quorum with it. A panic or a silent success here would both be that
+// same bug wearing a different hat.
+func TestServer_RestartNodeService_RaftdIsRejectedBeforeAnyRestart(t *testing.T) {
+	controller := &fakeNodeServiceController{}
+	// No raft client wired: if the guardrail did not refuse first, this
+	// is what it would hit, and a panic is a test failure rather than a
+	// silent pass.
+	s := NewServer(nil, "node-1", nil, nil, nil, nil, nil, "", nil, nil, nil, 0, nil)
+	s.services = controller
+
+	resp, err := s.RestartNodeService(context.Background(), &rpcpb.RestartNodeServiceRequest{Name: raftdServiceName})
+	if err != nil {
+		t.Fatalf("RestartNodeService() error: %v", err)
+	}
+	if resp.GetError() == "" {
+		t.Errorf("restarting %s with no guardrail state was not refused; response = %+v", raftdServiceName, resp)
+	}
+	if controller.restartName != "" {
+		t.Errorf("the service controller was called for %q despite the guardrail refusing", controller.restartName)
 	}
 }
 

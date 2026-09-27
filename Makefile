@@ -216,6 +216,32 @@ INSTALL_SRCS=	raftd \
 		frontend \
 		restshimd
 
+# INSTALL_SRCS_FILTERED is INSTALL_SRCS minus raftd, and the `update`
+# target below restarts only what is left in it. raftd is excluded on
+# purpose, and the reason is structural rather than temporary:
+#
+#   `update` runs `service apiary_raftd restart` directly, on whichever
+#   Comb you happen to run it on, with no lease, no quorum preflight and
+#   no cross-node coordination of any kind. Running it on all four Combs
+#   - the obvious thing to do after a deploy - restarts all four raft
+#   voters at once and the cluster loses its quorum.
+#
+# The safe path for raftd now exists and is the one to use: the Machine
+# page's per-service restart control, which goes through managerd's
+# RestartNodeService and therefore reserves a cluster-wide Raft lease and
+# runs ADR-0125's quorum-safety evaluation first. The lease is
+# raft-replicated, so a second Comb asking to restart raftd while the
+# first still holds an unconfirmed lease is refused cluster-wide - that
+# coordination is exactly what this Makefile loop cannot do, and is why
+# raftd cannot simply be added back here.
+#
+# The exclusion is therefore not waiting on a fix to `update`. Making
+# `update` able to restart raftd means giving it a client that speaks
+# the guarded RPCs and holds an Admin credential, which is a different
+# piece of work with its own credential-handling questions. Until that
+# exists, `update` deliberately updates raftd's binary and leaves the
+# running process alone - so raftd can go stale relative to everything
+# else, and restarting it is a separate, deliberate act.
 INSTALL_SRCS_FILTERED= ${INSTALL_SRCS:Nraftd}
 
 # install copies the four apiary daemons - not apiaryinstall, a

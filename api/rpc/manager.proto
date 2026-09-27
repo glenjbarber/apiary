@@ -1998,6 +1998,17 @@ message PreflightApproveJoinRequestResponse {
 
 message PreflightRestartNodeServiceRequest {
   string name = 1;
+  // force mirrors RestartNodeServiceRequest.force so a preview answers
+  // the question actually being asked. An operator who has "force"
+  // ticked is asking "what happens if I go ahead?", and a preflight
+  // that ignored the flag would answer a different question - showing
+  // a Block that the restart they intend would actually sail past,
+  // which reads as "force will not help me here" and is simply false.
+  //
+  // It grants nothing and is never persisted: this RPC is read-only,
+  // and the only thing that can release a lease remains the
+  // raft-replicated AcquireRestartLease in ReserveRestartLease.
+  bool force = 2;
 }
 
 message PreflightRestartNodeServiceResponse {

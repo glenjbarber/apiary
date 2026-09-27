@@ -1,126 +1,12 @@
 package restartplan
 
 import (
-	"encoding/json"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
-
-	"github.com/glenjbarber/apiary/internal/manager"
 )
-
-// TestPendingStoreMatchesManagerRestartConfirmStore is the check that
-// makes having two writers to the pending-restart file safe rather than
-// merely convenient.
-//
-// internal/manager.RestartConfirmStore is the writer in production today;
-// PendingStore is the reader cmd/raftd uses, and the writer Engine uses.
-// If those two ever disagree about the file name, the JSON field names or
-// the encoding, the restarted raftd silently finds nothing to confirm and
-// a raft-replicated lease is stranded forever with no TTL to release it -
-// a failure that no unit test inside either package could catch, because
-// each would be testing only its own half. So this test writes through one
-// type and reads through the other, both ways, and compares the bytes on
-// disk as well as the decoded values.
-func TestPendingStoreMatchesManagerRestartConfirmStore(t *testing.T) {
-	dir := t.TempDir()
-	mine := NewPendingStore(dir)
-	theirs := manager.NewRestartConfirmStore(dir)
-	want := PendingRestart{Service: DefaultService, NodeID: "comb-a", LeaseID: 4242}
-
-	t.Run("what I write, managerd reads", func(t *testing.T) {
-		if err := mine.Save(want); err != nil {
-			t.Fatalf("PendingStore.Save: %v", err)
-		}
-		got, found, err := theirs.Load(DefaultService)
-		if err != nil {
-			t.Fatalf("manager.RestartConfirmStore.Load: %v", err)
-		}
-		if !found {
-			t.Fatalf("manager.RestartConfirmStore.Load found nothing; the two stores disagree about the path")
-		}
-		if got.Service != want.Service || got.NodeID != want.NodeID || got.LeaseID != want.LeaseID {
-			t.Errorf("managerd read %+v, want %+v", got, want)
-		}
-	})
-
-	t.Run("what managerd writes, I read", func(t *testing.T) {
-		if err := os.RemoveAll(dir); err != nil {
-			t.Fatal(err)
-		}
-		theirRec := manager.PendingRestart{Service: DefaultService, NodeID: "comb-b", LeaseID: 99}
-		if err := theirs.Save(theirRec); err != nil {
-			t.Fatalf("manager.RestartConfirmStore.Save: %v", err)
-		}
-		got, found, err := mine.Load(DefaultService)
-		if err != nil {
-			t.Fatalf("PendingStore.Load: %v", err)
-		}
-		if !found {
-			t.Fatalf("PendingStore.Load found nothing; the two stores disagree about the path")
-		}
-		if got.Service != theirRec.Service || got.NodeID != theirRec.NodeID || got.LeaseID != theirRec.LeaseID {
-			t.Errorf("I read %+v, want %+v", got, theirRec)
-		}
-	})
-
-	t.Run("the on-disk encoding is byte-for-byte identical", func(t *testing.T) {
-		if err := os.RemoveAll(dir); err != nil {
-			t.Fatal(err)
-		}
-		if err := mine.Save(want); err != nil {
-			t.Fatal(err)
-		}
-		mineBytes, err := os.ReadFile(filepath.Join(dir, "pending-restart-"+DefaultService+".json"))
-		if err != nil {
-			t.Fatal(err)
-		}
-		if err := os.RemoveAll(dir); err != nil {
-			t.Fatal(err)
-		}
-		if err := theirs.Save(manager.PendingRestart(want)); err != nil {
-			t.Fatal(err)
-		}
-		theirBytes, err := os.ReadFile(filepath.Join(dir, "pending-restart-"+DefaultService+".json"))
-		if err != nil {
-			t.Fatal(err)
-		}
-		if string(mineBytes) != string(theirBytes) {
-			t.Errorf("encodings differ:\n  restartplan: %s\n  manager:    %s", mineBytes, theirBytes)
-		}
-		// A var (not :=) so this stays true even if the encoding above
-		// somehow became identical for a different reason.
-		var decodedA, decodedB map[string]any
-		if err := json.Unmarshal(mineBytes, &decodedA); err != nil {
-			t.Fatal(err)
-		}
-		if err := json.Unmarshal(theirBytes, &decodedB); err != nil {
-			t.Fatal(err)
-		}
-		for _, key := range []string{"service", "node_id", "lease_id"} {
-			if _, ok := decodedA[key]; !ok {
-				t.Errorf("key %q missing; the on-disk contract cmd/raftd depends on has drifted", key)
-			}
-		}
-	})
-
-	t.Run("clear is symmetric too", func(t *testing.T) {
-		if err := os.RemoveAll(dir); err != nil {
-			t.Fatal(err)
-		}
-		if err := mine.Save(want); err != nil {
-			t.Fatal(err)
-		}
-		if err := theirs.Clear(DefaultService); err != nil {
-			t.Fatalf("manager RestartConfirmStore.Clear: %v", err)
-		}
-		if _, found, err := mine.Load(DefaultService); err != nil || found {
-			t.Errorf("after managerd cleared it, Load = (found=%v, err=%v), want found=false", found, err)
-		}
-	})
-}
 
 // TestPendingStoreLifecycle covers the read/clear contract cmd/raftd's
 // startup hook depends on.
