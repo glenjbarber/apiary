@@ -5,9 +5,10 @@
 // the filesystem alone cannot tell you which one happened. A binary
 // copied over a running executable leaves the new bytes on disk and
 // the old ones resident in the process, so an mtime proves nothing
-// about what is executing. On a Combs where raftd is deliberately
-// excluded from install (see Makefile INSTALL_SRCS_FILTERED) the two
-// can stay different indefinitely and still look deployed.
+// about what is executing. On a Comb where raftd's binary is installed
+// but its process is deliberately left alone by `make update` (see the
+// Makefile's FORCE_RESTART_SRCS) the two can stay different indefinitely
+// and still look deployed.
 //
 // Every daemon prints its build ID on startup, so the running process
 // states its own identity, and -version prints the same values for a

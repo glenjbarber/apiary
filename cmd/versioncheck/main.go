@@ -41,9 +41,11 @@ import (
 const libexec = "/usr/local/libexec/apiary/"
 
 // The four daemons that are installed on a Comb. raftd is here on
-// purpose: it is the one INSTALL_SRCS_FILTERED excludes from install,
-// so it is the one most likely to be running an older build than the
-// one sitting next to it.
+// purpose: `make install` puts a new binary there for it, but
+// `make update` deliberately does not restart the process (raftd lives
+// in the Makefile's FORCE_RESTART_SRCS, not UPDATE_RESTART_SRCS), so it
+// is the one most likely to be running an older build than the binary
+// sitting next to it.
 var services = []string{"raftd", "managerd", "frontend", "restshimd"}
 
 // buildLine matches the build identity a daemon prints on its startup

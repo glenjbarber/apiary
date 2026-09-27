@@ -216,33 +216,55 @@ INSTALL_SRCS=	raftd \
 		frontend \
 		restshimd
 
-# INSTALL_SRCS_FILTERED is INSTALL_SRCS minus raftd, and the `update`
-# target below restarts only what is left in it. raftd is excluded on
-# purpose, and the reason is structural rather than temporary:
+# `update` and `force-restart` between them restart every daemon `install`
+# puts on disk, and they deliberately do not overlap:
 #
-#   `update` runs `service apiary_raftd restart` directly, on whichever
-#   Comb you happen to run it on, with no lease, no quorum preflight and
-#   no cross-node coordination of any kind. Running it on all four Combs
-#   - the obvious thing to do after a deploy - restarts all four raft
-#   voters at once and the cluster loses its quorum.
+#   update          frontend, restshimd
+#   force-restart   managerd, raftd
 #
-# The safe path for raftd now exists and is the one to use: the Machine
-# page's per-service restart control, which goes through managerd's
-# RestartNodeService and therefore reserves a cluster-wide Raft lease and
-# runs ADR-0125's quorum-safety evaluation first. The lease is
-# raft-replicated, so a second Comb asking to restart raftd while the
-# first still holds an unconfirmed lease is refused cluster-wide - that
-# coordination is exactly what this Makefile loop cannot do, and is why
-# raftd cannot simply be added back here.
+# The split is the design, not a convenience. `update` is the target an
+# operator (or a deploy loop) runs across every Comb without thinking, so
+# nothing in it may be able to cost the colony its quorum. Everything that
+# can is in `force-restart`, which is named for what it does to the
+# guardrail: it restarts a daemon by handing `service` a restart directly,
+# with no lease, no ADR-0125 quorum preflight and no cross-node
+# coordination, because this Makefile has no client that speaks the guarded
+# RPCs. The Machine page's per-service control (ADR-0125), or `apiaryctl`
+# (ADR-0136), remains the path that does coordinate. This is the named
+# escape hatch, deliberately per-Comb, not the recommended default.
 #
-# The exclusion is therefore not waiting on a fix to `update`. Making
-# `update` able to restart raftd means giving it a client that speaks
-# the guarded RPCs and holds an Admin credential, which is a different
-# piece of work with its own credential-handling questions. Until that
-# exists, `update` deliberately updates raftd's binary and leaves the
-# running process alone - so raftd can go stale relative to everything
-# else, and restarting it is a separate, deliberate act.
-INSTALL_SRCS_FILTERED= ${INSTALL_SRCS:Nraftd}
+# raftd is in `force-restart` and out of `update` for the reason ADR-0125
+# records: `update` across all four Combs is the obvious thing to do after
+# a deploy, and restarting all four raft voters at once costs the cluster
+# its quorum. Keeping raftd out of `update` means that mistake is no
+# longer available to make by accident. Bringing one Comb's raftd onto a
+# new build is now a named, per-Comb act. It is not forbidden - an
+# operator who knows they are on one Comb and mean to restart it can and
+# should - but it is no longer something a deploy does behind you.
+#
+# The cost is real and worth stating plainly: `update` still installs
+# raftd's binary and leaves the process alone, so raftd can go stale
+# relative to every other daemon on the box. That is not hypothetical, it
+# is the shape of the bug this split was built after: three of four raftd
+# processes sat on a build days older than the rest, while the on-disk
+# binary's mtime claimed the node was deployed. `cmd/versioncheck` is
+# what tells a running process apart from the binary sitting beside it.
+UPDATE_RESTART_SRCS=	frontend \
+			restshimd
+
+# Order is load-bearing: managerd first, raftd second. raftd's
+# confirm-on-startup hook dials managerd over TLS to release the restart
+# lease it is holding, on a bounded 5-attempt x 3s budget, and a lease has
+# no TTL. Burning that budget against a managerd that is not up yet does
+# not degrade the node - it blocks the cluster until an operator forces
+# the lease clear, which is the exact failure the guardrail exists to
+# prevent. Restarting raftd while managerd is down is the one way this
+# target could cause it.
+#
+# The reverse order carries no such risk: managerd tolerates raftd being
+# unavailable and reconnects, so the safe order is also the natural one.
+FORCE_RESTART_SRCS=	managerd \
+			raftd
 
 # install copies the four apiary daemons - not apiaryinstall, a
 # one-shot host-prep CLI meant to be run from this checkout and never
@@ -498,9 +520,72 @@ setup-quick:
 	printf '{\n  "manager_addr": "127.0.0.1:%s",\n  "http_addr": "%s",\n  "manager_tls": true,\n  "manager_tls_ca": "%s/cert.pem"\n}\n' "$$RPCPORT" "${NODE_HTTP_ADDR}" "${NODE_TLS_DIR}" > /usr/local/etc/apiary/frontend.json ;\
 	printf '{\n  "manager_addr": "127.0.0.1:%s",\n  "http_addr": "%s",\n  "manager_tls": true,\n  "manager_tls_ca": "%s/cert.pem"\n}\n' "$$RPCPORT" "${NODE_REST_ADDR}" "${NODE_TLS_DIR}" > /usr/local/etc/apiary/restshimd.json
 	@echo "/usr/local/etc/apiary/{raftd,managerd,frontend,restshimd}.json written, including real login (pam_service=${PAM_SERVICE}) and TLS. Start the services (service apiary_raftd start && service apiary_managerd start && service apiary_frontend start && service apiary_restshimd start), then log in with any existing UNIX account right away: whoever logs in first on a Comb with no role map yet becomes Admin automatically (ADR-0086)."
+# update installs every binary, then restarts only the two daemons that
+# cannot cost the colony its quorum. It is the target that is safe to run
+# on every Comb in a row without thinking, which is exactly why managerd
+# and raftd are not in it. See the split above and ADR-0141.
 .PHONY: update
 update: install
 	@set -e; \
-	for S in ${INSTALL_SRCS_FILTERED}; do \
+	for S in ${UPDATE_RESTART_SRCS}; do \
 		service apiary_$$S restart; \
 	done
+	@echo "" ; \
+	echo "update: frontend and restshimd restarted on `hostname`." ; \
+	echo "  managerd and raftd were installed but deliberately NOT" ; \
+	echo "  restarted. Run 'make force-restart' here to restart them -" ; \
+	echo "  one Comb at a time, and never on the leader as part of a sweep."
+
+# force-restart restarts the two daemons `update` leaves alone, and it is
+# named for what it gives up to do that: it hands `service` a restart
+# directly, so the ADR-0125 guardrail is bypassed completely. No lease is
+# reserved, no quorum-safety evaluation runs, and nothing coordinates with
+# the other Combs - this Makefile has no client that speaks the guarded
+# RPCs, and adding one is the other answer to the same problem (ADR-0125).
+#
+# That is only safe because it is a separate, named, per-Comb act. Running
+# it across the colony in one sweep is the failure this target is shaped to
+# make inconvenient, not impossible: nothing in a Makefile can know what
+# the other Combs are doing. So the recipe says so, out loud, every time.
+#
+# The post-restart assertion is not ceremony. managerd is restarted first
+# precisely so that raftd's confirm-on-startup hook has something to talk
+# to, and if managerd fails to come back the loop stops there rather than
+# restarting raftd into a node whose managerd is down - which is how a
+# restart lease would fail to confirm and, having no TTL, block the
+# cluster until an operator forced it clear.
+.PHONY: force-restart
+force-restart:
+	@echo "force-restart: about to restart ${FORCE_RESTART_SRCS} on `hostname`" >&2 ; \
+	echo "  by handing 'service' a restart directly. This acquires NO" >&2 ; \
+	echo "  restart lease, runs NO quorum preflight, and coordinates" >&2 ; \
+	echo "  with NO other Comb. Restarting raftd on more than one Comb at" >&2 ; \
+	echo "  once, or on the current leader, can cost the cluster its" >&2 ; \
+	echo "  quorum. For a coordinated restart use the Machine page's" >&2 ; \
+	echo "  per-service control, which reserves a real cluster-wide lease." >&2 ; \
+	echo "" >&2
+	@set -e; \
+	for S in ${FORCE_RESTART_SRCS}; do \
+		echo "restarting apiary_$$S ..." ; \
+		service apiary_$$S restart ; \
+		i=0 ; \
+		while [ $$i -lt 15 ] ; do \
+			service apiary_$$S status >/dev/null 2>&1 && break ; \
+			i=$$((i+1)) ; sleep 1 ; \
+		done ; \
+		if [ $$i -ge 15 ] ; then \
+			echo "apiary_$$S did not report running after 15s." >&2 ; \
+			echo "  Stopping here rather than restarting the next" >&2 ; \
+			echo "  service: a half-restarted managerd/raftd pair is" >&2 ; \
+			echo "  exactly the state that strands a restart lease." >&2 ; \
+			echo "  See /var/log/apiary/$$S.log" >&2 ; \
+			exit 1 ; \
+		fi ; \
+		echo "  apiary_$$S is running" ; \
+	done
+	@echo "" ; \
+	echo "force-restart: done on `hostname`." ; \
+	echo "  Confirm the running build, not the one on disk:" ; \
+	echo "    grep build= /var/log/apiary/{managerd,raftd}.log | tail -2" ; \
+	echo "  and check the Machine page's colony view before moving on to" ; \
+	echo "  the next Comb."
