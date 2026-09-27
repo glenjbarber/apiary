@@ -1,6 +1,9 @@
 package manager
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 // TestRestartableService_Allowlist confirms the allowlist is exactly the
 // four Apiary rc.d services and nothing else - the property that keeps
@@ -22,7 +25,7 @@ func TestRestartableService_Allowlist(t *testing.T) {
 		name string
 		want bool
 	}{
-		{"apiary_managerd", true},
+		{"apiary_managerd", false},
 		{"apiary_frontend", true},
 		{"apiary_restshimd", true},
 		{"apiary_raftd", true},
@@ -37,5 +40,28 @@ func TestRestartableService_Allowlist(t *testing.T) {
 		if got := restartableService(c.name); got != c.want {
 			t.Errorf("restartableService(%q) = %v, want %v", c.name, got, c.want)
 		}
+	}
+}
+
+// TestManagerdSelfRestartRefused covers the predicate that guards the
+// refusal, including the near-miss that must not trip it: a service
+// whose name merely contains "apiary_managerd" is a different service
+// and must reach the normal allowlist check instead.
+func TestManagerdSelfRestartRefused(t *testing.T) {
+	if !managerdSelfRestartRefused("apiary_managerd") {
+		t.Error("apiary_managerd must be refused a self-restart")
+	}
+	for _, name := range []string{"apiary_raftd", "apiary_frontend", "apiary_restshimd", "apiary_managerd_extra", ""} {
+		if managerdSelfRestartRefused(name) {
+			t.Errorf("managerdSelfRestartRefused(%q) = true, want false", name)
+		}
+	}
+	// The message must name a way forward. An operator reading only
+	// this string is the entire audience for it.
+	if !strings.Contains(managerdSelfRestartRefusal, "make force-restart") {
+		t.Error("the refusal message must point the operator at make force-restart")
+	}
+	if !strings.Contains(managerdSelfRestartRefusal, "service apiary_managerd restart") {
+		t.Error("the refusal message must also offer the managerd-only alternative")
 	}
 }

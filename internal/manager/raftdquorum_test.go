@@ -5,6 +5,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -518,4 +519,65 @@ func TestPreflightRestartNodeService_ServiceThatCannotBeRestartedIsBlocked(t *te
 // two fields the raftd preflight path reads.
 func preflightReq(name string, force bool) *rpcpb.PreflightRestartNodeServiceRequest {
 	return &rpcpb.PreflightRestartNodeServiceRequest{Name: name, Force: force}
+}
+
+// TestPreflightRestartNodeService_ReportsForcedCaveat is the regression
+// test for a drift found live rather than in review: forcing a raftd
+// restart on the leader returned a bare {"verdict":"allow"} with no
+// record that anything had been overridden.
+//
+// forceDowngradedBlock has always attached "operator acknowledged this
+// and restarted anyway" to the internal report's Caveats, but
+// PreflightRestartNodeServiceResponse carried only verdict/findings/
+// error, so the caveat was dropped at the RPC boundary. ADR-0125
+// requires the preview and the enforcement to be incapable of drifting
+// apart; the enforcement path reported guardrail_overridden correctly
+// while the preview an operator reads first could not say anything at
+// all. This asserts the preview now carries it.
+func TestPreflightRestartNodeService_ReportsForcedCaveat(t *testing.T) {
+	raftdSocket := newRaftdUDSSocket(t)
+	client, srv := newManagerdRPCClientAndServer(t, raftdSocket, "raftd-1")
+	srv.SetRestartGuardrailToken("the-real-token")
+	srv.services = &fakeNodeServiceController{}
+
+	ctx := context.Background()
+
+	// Unforced: the single-voter test cluster is the leader, so this
+	// must block and carry the leader finding. No caveat - nothing was
+	// overridden.
+	blocked, err := client.PreflightRestartNodeService(ctx, &rpcpb.PreflightRestartNodeServiceRequest{Name: raftdServiceName})
+	if err != nil {
+		t.Fatalf("PreflightRestartNodeService() error: %v", err)
+	}
+	if blocked.GetVerdict() != "block" {
+		t.Fatalf("unforced verdict = %q, want block for the leader of a single-voter cluster", blocked.GetVerdict())
+	}
+	if len(blocked.GetCaveats()) != 0 {
+		t.Errorf("unforced preflight carried %d caveats, want none", len(blocked.GetCaveats()))
+	}
+	if len(blocked.GetFindings()) == 0 {
+		t.Error("unforced block carried no findings; a block with no stated reason is not actionable")
+	}
+
+	// Forced: same underlying block, downgraded to allow, and the reason
+	// must survive as a caveat naming what was acknowledged.
+	forced, err := client.PreflightRestartNodeService(ctx, &rpcpb.PreflightRestartNodeServiceRequest{Name: raftdServiceName, Force: true})
+	if err != nil {
+		t.Fatalf("forced PreflightRestartNodeService() error: %v", err)
+	}
+	if forced.GetVerdict() != "allow" {
+		t.Fatalf("forced verdict = %q, want allow - force downgrades a Block", forced.GetVerdict())
+	}
+	if len(forced.GetCaveats()) == 0 {
+		t.Fatal("forced preflight carried no caveats; a forced Allow that looks identical to an unforced one is indistinguishable from a clean one")
+	}
+	var acknowledged bool
+	for _, c := range forced.GetCaveats() {
+		if strings.Contains(c.GetDetail(), "operator acknowledged") {
+			acknowledged = true
+		}
+	}
+	if !acknowledged {
+		t.Errorf("forced caveats = %+v, want one recording the operator's acknowledgment", forced.GetCaveats())
+	}
 }

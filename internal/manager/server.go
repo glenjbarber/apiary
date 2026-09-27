@@ -670,10 +670,23 @@ func (s *Server) IssueOriginCertificate(ctx context.Context, req *rpcpb.IssueOri
 	if err != nil {
 		return &rpcpb.IssueOriginCertificateResponse{Error: err.Error()}, nil
 	}
-	if err := s.services.Restart(ctx, "apiary_managerd"); err != nil {
-		return &rpcpb.IssueOriginCertificateResponse{Certificate: originCertificateInfo(entry), Error: "certificate installed but managerd restart failed: " + err.Error()}, nil
-	}
-	return &rpcpb.IssueOriginCertificateResponse{Certificate: originCertificateInfo(entry), RestartScheduled: true}, nil
+	// Deliberately NOT restarting managerd here. This used to call
+	// s.services.Restart synchronously, which is the same self-restart
+	// failure RestartNodeService now refuses: the call blocks inside
+	// `service apiary_managerd restart`, the stop half kills this
+	// process, and the RPC never returns - the caller sees a dropped
+	// connection and a downed control plane rather than an error.
+	//
+	// The certificate is installed either way, so the honest report is
+	// that it is installed and a restart is still required, naming the
+	// command that does it safely. restart_scheduled stays false because
+	// nothing was scheduled; that field is the caller's signal that no
+	// operator action is required, and here one is.
+	return &rpcpb.IssueOriginCertificateResponse{
+		Certificate:        originCertificateInfo(entry),
+		RestartScheduled:   false,
+		RestartRequiredMsg: "certificate installed; restart managerd to load it (`make force-restart` or `service apiary_managerd restart`)",
+	}, nil
 }
 
 func toRPCAssumptionClaim(claim assumptionregister.Claim) *rpcpb.AssumptionClaim {
@@ -3468,6 +3481,9 @@ func (s *Server) RestartNodeService(ctx context.Context, req *rpcpb.RestartNodeS
 		return &rpcpb.RestartNodeServiceResponse{Error: "this node has no service controller configured"}, nil
 	}
 	name := req.GetName()
+	if managerdSelfRestartRefused(name) {
+		return &rpcpb.RestartNodeServiceResponse{Error: managerdSelfRestartRefusal}, nil
+	}
 	if !restartableService(name) {
 		return &rpcpb.RestartNodeServiceResponse{Error: fmt.Sprintf("service %q cannot be restarted from Apiary", name)}, nil
 	}
@@ -3544,6 +3560,18 @@ func toRPCGuardrailFindings(findings []guardrail.Finding) []*rpcpb.GuardrailFind
 	return out
 }
 
+// toRPCGuardrailCaveats converts the report's caveats - the reasons a
+// restart proceeded anyway - into their own RPC type. Kept separate from
+// toRPCGuardrailFindings because a caveat is not a reason to hold off:
+// it is the record of an override the operator already chose.
+func toRPCGuardrailCaveats(caveats []invariant.Evidence) []*rpcpb.GuardrailCaveat {
+	out := make([]*rpcpb.GuardrailCaveat, 0, len(caveats))
+	for _, c := range caveats {
+		out = append(out, &rpcpb.GuardrailCaveat{Rule: c.Source, Detail: c.Detail})
+	}
+	return out
+}
+
 // voterNodeIDs returns the node ids of every currently-Voter server in
 // status, per ADR-0103's own "only actual Raft voters count" rule.
 func voterNodeIDs(status *internalpb.StatusResponse) []string {
@@ -3585,9 +3613,17 @@ func (s *Server) PreflightRestartNodeService(ctx context.Context, req *rpcpb.Pre
 	// and the real RestartNodeService then refuses it with a plain error
 	// and no explanation of why the preview disagreed.
 	if !restartableService(name) {
+		msg := fmt.Sprintf("service %q cannot be restarted from Apiary, so there is nothing to preflight", name)
+		if managerdSelfRestartRefused(name) {
+			// Same explanation the restart itself returns, so the two
+			// cannot disagree about why. An operator who preflights,
+			// reads a Block, and then restarts to find out why must
+			// land on the same sentence both times.
+			msg = managerdSelfRestartRefusal
+		}
 		return &rpcpb.PreflightRestartNodeServiceResponse{
 			Verdict: string(guardrail.Block),
-			Error:   fmt.Sprintf("service %q cannot be restarted from Apiary, so there is nothing to preflight", name),
+			Error:   msg,
 		}, nil
 	}
 	if !guardrailService(name) {
@@ -3611,6 +3647,7 @@ func (s *Server) PreflightRestartNodeService(ctx context.Context, req *rpcpb.Pre
 	return &rpcpb.PreflightRestartNodeServiceResponse{
 		Verdict:  string(report.Verdict),
 		Findings: toRPCGuardrailFindings(report.Findings),
+		Caveats:  toRPCGuardrailCaveats(report.Caveats),
 	}, nil
 }
 

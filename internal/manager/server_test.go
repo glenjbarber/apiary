@@ -630,17 +630,28 @@ func TestServer_IssueOriginCertificateInstallsAndRestartsManagerd(t *testing.T) 
 	if err != nil {
 		t.Fatalf("IssueOriginCertificate() error: %v", err)
 	}
-	if resp.GetError() != "" || !resp.GetRestartScheduled() {
-		t.Fatalf("IssueOriginCertificate() = %+v, want success and restart", resp)
+	if resp.GetError() != "" || resp.GetRestartScheduled() {
+		t.Fatalf("IssueOriginCertificate() = %+v, want success and NO scheduled restart", resp)
+	}
+	// The whole point: managerd must NOT be restarted from here. The
+	// old code called s.services.Restart synchronously, which stopped
+	// this very process and never started it again, so the caller saw a
+	// dropped connection instead of a response. Asserting the negative is
+	// the regression test for that.
+	if services.restartName != "" {
+		t.Fatalf("restart service = %q, want no restart at all - a synchronous managerd self-restart kills the caller", services.restartName)
+	}
+	// And the operator must be told a restart is still outstanding, and
+	// how to perform it, rather than being left with a cert that has not
+	// taken effect and no indication of that.
+	if !strings.Contains(resp.GetRestartRequiredMsg(), "make force-restart") {
+		t.Errorf("restart_required_msg = %q, want it to name make force-restart", resp.GetRestartRequiredMsg())
 	}
 	if issuer.token != "token-value" || issuer.validityDays != 365 {
 		t.Fatalf("issuer received token=%q validity=%d", issuer.token, issuer.validityDays)
 	}
 	if got := issuer.hostnames; len(got) != 1 || got[0] != "apiary.example.com" {
 		t.Fatalf("issuer hostnames = %q", got)
-	}
-	if services.restartName != "apiary_managerd" {
-		t.Fatalf("restart service = %q, want apiary_managerd", services.restartName)
 	}
 	if _, err := os.Stat(filepath.Join(dir, "managerd.crt")); err != nil {
 		t.Fatalf("certificate was not installed: %v", err)

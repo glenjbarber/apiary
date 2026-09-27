@@ -198,6 +198,22 @@ func TestGuardrailServicesMatchTheRealInventory(t *testing.T) {
 			}
 			t.Errorf("%s is restartable but not guardrailed; either it is safe (say why here) or it needs a lease", entry.name)
 		case guardrailed && !entry.restartable:
+			// managerd is the one deliberate exception, and it is
+			// still guarded so that the reasoning below keeps holding
+			// rather than decaying into "managerd isn't special".
+			//
+			// The hazard this case normally guards against is a lease
+			// that can be reserved for a service that can then never be
+			// restarted, stranding it forever with no TTL. managerd
+			// cannot strand anything, because RestartNodeService refuses
+			// it BEFORE reserveRestartLease is ever called - the refusal
+			// and the reservation are ordered, not merely both absent.
+			// TestRestartNodeService_RefusesManagerdSelfRestart asserts
+			// that ordering; if it ever inverts, that test fails and
+			// this exception must be revisited.
+			if entry.name == managerdServiceName {
+				continue
+			}
 			t.Errorf("%s is guardrailed but not restartable; its lease can be reserved and then never released", entry.name)
 		}
 	}
@@ -213,5 +229,16 @@ func TestGuardrailServicesMatchTheRealInventory(t *testing.T) {
 	if raftdServiceName != restartplan.DefaultService {
 		t.Errorf("raftdServiceName = %q but restartplan.DefaultService = %q; cmd/raftd's confirmation hook keys off the latter, so a divergence would strand the lease",
 			raftdServiceName, restartplan.DefaultService)
+	}
+	// managerd is guardrailed but must not be restartable: a restart
+	// orchestrated from inside the managerd being restarted stops it
+	// and can never start it again. Asserted here as well as in the
+	// allowlist test because this is the invariant that protects the
+	// cluster's control plane, not merely a UI detail.
+	if restartableService(managerdServiceName) {
+		t.Errorf("%s must not be restartable; the restart would stop managerd and never start it", managerdServiceName)
+	}
+	if !guardrailService(managerdServiceName) {
+		t.Errorf("%s must stay guardrailed so the cluster's view of a manager restart is unchanged", managerdServiceName)
 	}
 }

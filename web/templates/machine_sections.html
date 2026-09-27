@@ -352,7 +352,7 @@
 
   <div class="panel">
     <h3>Cloudflare Origin CA certificates</h3>
-    <p class="muted">For Cloudflare-proxied managerd TLS only. This creates a local ECC key, sends only its CSR to Cloudflare, and restarts managerd after a successful replacement. Do not use for DNS-only or direct client traffic.</p>
+    <p class="muted">For Cloudflare-proxied managerd TLS only. This creates a local ECC key and sends only its CSR to Cloudflare. The certificate is installed immediately, but it is <strong>not</strong> loaded until managerd is restarted - which you must do yourself, with <code>make force-restart</code> or <code>service apiary_managerd restart</code>. Apiary will not restart managerd on your behalf, because a restart issued from inside managerd stops it and cannot start it again. Do not use for DNS-only or direct client traffic.</p>
     <div id="origin-ca-panel">{{template "origin_ca_panel" .}}</div>
   </div>
 

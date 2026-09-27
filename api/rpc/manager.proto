@@ -1060,7 +1060,7 @@ message OriginCertificateInfo {
 message ListOriginCertificatesRequest {}
 message ListOriginCertificatesResponse { repeated OriginCertificateInfo certificates = 1; string error = 2; }
 message IssueOriginCertificateRequest { string name = 1; repeated string hostnames = 2; int32 validity_days = 3; bool auto_renew = 4; }
-message IssueOriginCertificateResponse { OriginCertificateInfo certificate = 1; string error = 2; bool restart_scheduled = 3; }
+message IssueOriginCertificateResponse { OriginCertificateInfo certificate = 1; string error = 2; bool restart_scheduled = 3; string restart_required_msg = 4; }
 
 // RaftMember mirrors api/internalpb's ServerInfo, kept as a separate
 // external type for the same reason StatusResponse itself is (ADR-0002):
@@ -1987,6 +1987,18 @@ message GuardrailFinding {
   repeated string evidence = 3;
 }
 
+// GuardrailCaveat carries a reason a restart proceeded despite a rule
+// that would otherwise have blocked it - most importantly the
+// operator-acknowledgment produced by force=true. It is deliberately a
+// separate type from GuardrailFinding: a finding is a reason the system
+// is telling you NOT to proceed, a caveat is a reason it proceeded
+// anyway and you should know why. Collapsing the two would lose exactly
+// the information a forced restart produces.
+message GuardrailCaveat {
+  string rule = 1;
+  string detail = 2;
+}
+
 message PreflightApproveJoinRequestRequest {
   string request_id = 1;
 }
@@ -2018,6 +2030,14 @@ message PreflightRestartNodeServiceResponse {
   string verdict = 1;
   repeated GuardrailFinding findings = 2;
   string error = 3;
+  // caveats carries what force=true overrode. Without this field a
+  // forced preflight returns a bare {"verdict":"allow"} with no record
+  // that the operator acknowledged a leader restart - the finding that
+  // force downgraded is simply absent, so the preview reads as though
+  // nothing was overridden. ADR-0125 requires the preview and the
+  // enforcement to be incapable of drifting apart, and they had: the
+  // enforcement path reports guardrail_overridden, this one could not.
+  repeated GuardrailCaveat caveats = 4;
 }
 
 // ReserveRestartLeaseRequest/Response and ConfirmRestartCompletedRequest/
