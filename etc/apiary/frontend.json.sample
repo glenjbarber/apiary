@@ -1,70 +1,14 @@
-// frontend sample configuration (ADR-0100).
-//
-// JSON has no comment syntax - frontend's own parser will reject this
-// file as-is. Copy it to /usr/local/etc/apiary/frontend.json and
-// remove comment-only and blank lines first (see docs/create-node.md).
-// Every comment here stands on its own line and never trails a value.
-// Every field below is present with either
-// a realistic default or an empty value you may fill in - not
-// commented out - so the stripped result is a complete, valid config.
 {
-  // TCP address of managerd's external RPC API. Must match this
-  // node's own managerd.json rpc_addr exactly, hostname and all
-  // (ADR-0139) - 127.0.0.1 does not work once rpc_addr names the
-  // node's own DNS name, because such a listener deliberately does
-  // not serve loopback. The hostname is also the only host managerd's
-  // certificate carries a matching DNS SAN for; manager_tls_ca only
-  // establishes trust in the certificate, not which name it must
-  // match.
   "manager_addr": "<this-node-hostname>:17700",
-
-  // Address to serve the web UI on. 0.0.0.0 is deliberate and correct
-  // here: the web UI is the operator's browser-facing surface and is
-  // meant to be reachable from the LAN. The port is fixed (ADR-0108).
   "http_addr": "0.0.0.0:8080",
-
-  // Dial managerd over TLS instead of plaintext. managerd always
-  // serves TLS by default now (see managerd.json.sample's own
-  // tls_cert/tls_key) - leave this true unless managerd was
-  // specifically reconfigured without TLS.
   "manager_tls": true,
-
-  // PEM CA file to trust for managerd's certificate; empty trusts the
-  // system pool. Points at the same self-signed certificate Step 6's
-  // "make setup"/setup-tls generated - managerd has no public CA to
-  // verify against otherwise.
   "manager_tls_ca": "/usr/local/etc/apiary-tls/cert.pem",
-
-  // Hostname to verify managerd's certificate against, if different
-  // from manager_addr's own host.
   "manager_tls_server_name": "",
-
-  // Serve the web UI over HTTPS using Step 6's
-  // "make setup"/setup-tls output by default.
   "tls_cert": "/usr/local/etc/apiary-tls/cert.pem",
   "tls_key": "/usr/local/etc/apiary-tls/key.pem",
-
-  // Dial other cluster nodes' managerd over TLS when fetching their
-  // host stats for the cluster overview page.
   "peer_tls": false,
-
-  // A PEM file trusted instead of the system certificate pool when
-  // dialing a peer over TLS (ADR-0093). Only consulted when peer_tls
-  // is set.
   "peer_tls_ca": "",
-
-  // Appended to a node ID to form its managerd hostname for the
-  // cluster overview page. Leave unset if node IDs are already fully
-  // qualified hostnames.
   "peer_hostname_suffix": "",
-
-  // Port assumed for a peer node's managerd external API when
-  // fetching its host stats.
   "peer_manager_port": "17700",
-
-  // The API key frontend attaches to every call it makes to managerd
-  // on the logged-in user's behalf, once managerd has API-key auth
-  // enabled (ADR-0023). A real credential if set - this file must
-  // then be root-owned, mode 0600.
   "manager_api_key": ""
 }
