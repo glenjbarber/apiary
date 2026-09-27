@@ -16,7 +16,7 @@ Nothing was run against a live Colony. No exploit testing was done.
 | A4  | Info | dependency | grpc-go v1.84.0 GO-2026-6443 flagged by govulncheck; not exploitable here (needs xDS, which is not compiled in). Corrected after triage |
 | A5  | Medium | auth | New `*Local` list RPCs have no auth role, and the change bypasses leader-only reads |
 | A6  | Low | frontend | Frontend and restshimd use `http.ListenAndServe` with no timeouts |
-| A7  | Low | join | Join forwarding dials caller-chosen addresses when no allowlist is set (Codex #4, confirmed) |
+| A7  | Low | join | Three unauthenticated join RPCs (`RequestJoinColony`, `GetJoinRequestStatus`, `CancelJoinRequest`) dial caller-chosen addresses when no allowlist is set (Codex #4, confirmed) |
 | A8  | Low | auth | Four more read RPCs also lack a role entry; no test enforces role coverage |
 | A9  | Low | bhyve | `kill <pid>` from a pidfile with no check that the pid is still ours |
 | A10 | Low | raftd | `internal_token` is empty by default, so the internal RPC relies on filesystem permissions alone |
@@ -44,10 +44,10 @@ group), each with tests. Nothing is merged or pushed.
 | A4 | No change | (none) | Not exploitable in Apiary; see the corrected section. |
 | A5 | Fixed, with one accepted tradeoff | `42e3c93` | Roles added and proto comments corrected. The frontend still reads a follower's local state, so a just-made change can briefly not appear; that is now documented and is a design decision for the owner, not changed here. |
 | A6 | Fixed | `292a52d` | Header and idle timeouts. ReadTimeout and WriteTimeout deliberately not set. |
-| A7 | Mitigated | `6b80eb9` | Startup warning only. The behavior stays opt-in; requiring the allowlist would break single-node Colonies. |
+| A7 | Warning added; allowlist not set | `6b80eb9` | The startup warning landed. `known_peer_addresses` is not configured by this branch, so the exposure remains on every Comb until it is set. The warning prints only when managerd starts, so a managerd started before this change has not printed it, and setting the allowlist also needs a managerd restart. The behavior stays opt-in; requiring the allowlist would break single-node Colonies. |
 | A8 | Fixed | `42e3c93` | Six roles assigned; `TestRequiredRole_CoversEveryRPC` enforces it. |
 | A9 | Fixed | `63fb6d5` | Only signals a pid whose executable is `daemon`. |
-| A10 | Mitigated | `6b80eb9` | Startup warning only. Generating a token needs coordinated raftd.json and managerd.json changes and is left to the owner. |
+| A10 | Warning added; token not generated | `6b80eb9` | The startup warning in raftd landed. Generating a token did not: it needs coordinated raftd.json and managerd.json changes and is left to the owner. `internal_token` is still empty wherever it was empty before. |
 | A11 | Fixed | `e2ae418` | Field removed and reserved; the create page it contradicted was already replaced. |
 | A12 | Fixed | `3c289ab`, `3ae9861` | Fake guarded by a mutex; CI now runs `go test -race ./...`. Full suite passed under -race before enabling. |
 | A13 | Fixed | `d8eb396` | This doc only. About 850 added lines elsewhere still contain an em dash; a sweep across other authors' files was not attempted. |
@@ -161,14 +161,21 @@ long-lived.
 
 ### A7. Join forwarding dials caller-chosen targets (Low)
 
-With no `known_peer_addresses` configured, `RequestJoinColony` dials any
-caller-supplied `target_address` and returns the error text
-(`internal/manager/joincolony.go`). This is a limited reachability oracle. It is
-timeout-bounded and does not send the peer API key. The code documents it as an
-accepted residual risk (ADR-0096/0097).
+With no `known_peer_addresses` configured, three unauthenticated RPCs dial any
+caller-supplied `target_address` and return the error text:
+`RequestJoinColony`, `GetJoinRequestStatus` and `CancelJoinRequest`
+(`internal/manager/joincolony.go`, each guarded by `checkTargetAddressAllowed`,
+which allows everything when the allowlist is unset). This is a limited
+reachability oracle. It is timeout-bounded and does not send the peer API key.
+The code documents it as an accepted residual risk (ADR-0096/0097).
 
-Fix: configure `known_peer_addresses` on every Comb; consider making it
-required or warning when it is empty.
+Fix, in two separable parts:
+- Warn at startup when the allowlist is empty: done (`6b80eb9`).
+- Configure `known_peer_addresses` on every Comb: not done. Entries are matched
+  as exact `host:port` strings, so they must be spelled the way callers write
+  `target_address`, and the setting is read at managerd startup.
+
+Until the second part is done, the exposure is unchanged.
 
 ### A8. More RPCs without a role, and no coverage test (Low)
 
@@ -198,7 +205,12 @@ is empty, and neither the installer nor the Makefile generates one, and
 nothing warns. raftd's socket is mode 0660 (`cmd/raftd/main.go:32`). The
 directory is root-only per the project notes, so this is defense in depth.
 
-Fix: generate a token at setup and warn at startup when it is empty.
+Fix, in two separable parts:
+- Warn at startup when the token is empty: done (`6b80eb9`, in raftd).
+- Generate a token at setup: not done.
+
+Until the second part is done, the internal RPC is protected by filesystem
+permissions alone.
 
 ### A11. Dead `VMDefinition.hostname` field (Low)
 
