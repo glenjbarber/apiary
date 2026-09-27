@@ -38,21 +38,21 @@ group), each with tests. Nothing is merged or pushed.
 
 | ID | Status | Commit | Notes |
 |----|--------|--------|-------|
-| A1 | Fixed | `cbc622d` | FSM refuses to purge a resource that is not DELETING. RPC roles left as they were: the peer credential the reconciler uses is Operator-tier and raising the role would break live teardown reporting. An Operator can still hasten teardown of a resource that is already deleting, which is no more than DeleteVM plus waiting. |
-| A2 | Fixed | `eb4d921` | Field validation at RPC and FSM, 25 pending / 100 total caps, deterministic eviction of records expired for over an hour. |
-| A3 | Fixed | `ad2ccbc` | Both trackers capped at 10000, sweep no longer per-request, username limit 256, login body limit 64 KB. |
+| A1 | Fixed | `1af45c7` | FSM refuses to purge a resource that is not DELETING. RPC roles left as they were: the peer credential the reconciler uses is Operator-tier and raising the role would break live teardown reporting. An Operator can still hasten teardown of a resource that is already deleting, which is no more than DeleteVM plus waiting. |
+| A2 | Fixed | `e7f59fd` | Field validation at RPC and FSM, 25 pending / 100 total caps, deterministic eviction of records expired for over an hour. |
+| A3 | Fixed | `23f4a3d` | Both trackers capped at 10000, sweep no longer per-request, username limit 256, login body limit 64 KB. |
 | A4 | No change | (none) | Not exploitable in Apiary; see the corrected section. |
-| A5 | Fixed, with one accepted tradeoff | `42e3c93` | Roles added and proto comments corrected. The frontend still reads a follower's local state, so a just-made change can briefly not appear; that is now documented and is a design decision for the owner, not changed here. |
-| A6 | Fixed | `292a52d` | Header and idle timeouts. ReadTimeout and WriteTimeout deliberately not set. |
-| A7 | Warning added; allowlist not set | `6b80eb9` | The startup warning landed. `known_peer_addresses` is not configured by this branch, so the exposure remains on every Comb until it is set. The warning prints only when managerd starts, so a managerd started before this change has not printed it, and setting the allowlist also needs a managerd restart. The behavior stays opt-in; requiring the allowlist would break single-node Colonies. |
-| A8 | Fixed | `42e3c93` | Six roles assigned; `TestRequiredRole_CoversEveryRPC` enforces it. |
-| A9 | Fixed | `63fb6d5` | Only signals a pid whose executable is `daemon`. |
-| A10 | Warning added; token not generated | `6b80eb9` | The startup warning in raftd landed. Generating a token did not: it needs coordinated raftd.json and managerd.json changes and is left to the owner. `internal_token` is still empty wherever it was empty before. |
-| A11 | Fixed | `e2ae418` | Field removed and reserved; the create page it contradicted was already replaced. |
-| A12 | Fixed | `3c289ab`, `3ae9861` | Fake guarded by a mutex; CI now runs `go test -race ./...`. Full suite passed under -race before enabling. |
-| A13 | Fixed | `d8eb396` | This doc only. About 850 added lines elsewhere still contain an em dash; a sweep across other authors' files was not attempted. |
-| A14 | Partly fixed | `8012ba0`, `2a82600`, `778794c` | Interface-name validation in deadman, explicit TLS 1.2 minimum plus a guard test, broader rc.conf redaction. Not changed: no CSRF token (SameSite=Lax is the sole defense), and the unused `MigrationState.normalize` in the unwired migration package. |
-| A15 | Fixed | `33b17d4` | Expiry check moved out of the FSM into the manager. |
+| A5 | Fixed, with one accepted tradeoff | `ef54032` | Roles added and proto comments corrected. The frontend still reads a follower's local state, so a just-made change can briefly not appear; that is now documented and is a design decision for the owner, not changed here. |
+| A6 | Fixed | `8af80a1` | Header and idle timeouts. ReadTimeout and WriteTimeout deliberately not set. |
+| A7 | Warning added; allowlist not set | `f6437b9` | The startup warning landed. `known_peer_addresses` is not configured by this branch, so the exposure remains on every Comb until it is set. The warning prints only when managerd starts, so a managerd started before this change has not printed it, and setting the allowlist also needs a managerd restart. The behavior stays opt-in; requiring the allowlist would break single-node Colonies. |
+| A8 | Fixed | `ef54032` | Six roles assigned; `TestRequiredRole_CoversEveryRPC` enforces it. |
+| A9 | Fixed | `df1a930` | Only signals a pid whose executable is `daemon`. |
+| A10 | Warning added; token not generated | `f6437b9` | The startup warning in raftd landed. Generating a token did not: it needs coordinated raftd.json and managerd.json changes and is left to the owner. `internal_token` is still empty wherever it was empty before. |
+| A11 | Fixed | `4ac3ed4` | Field removed and reserved; the create page it contradicted was already replaced. |
+| A12 | Fixed | `661e378`, `49d232c` | Fake guarded by a mutex; CI now runs `go test -race ./...`. Full suite passed under -race before enabling. |
+| A13 | Fixed | `63d92ec` | This doc only. About 850 added lines elsewhere still contain an em dash; a sweep across other authors' files was not attempted. |
+| A14 | Partly fixed | `43374a8`, `3d7b317`, `d6642fa` | Interface-name validation in deadman, explicit TLS 1.2 minimum plus a guard test, broader rc.conf redaction. Not changed: no CSRF token (SameSite=Lax is the sole defense), and the unused `MigrationState.normalize` in the unwired migration package. |
+| A15 | Fixed | `a6823e8` | Expiry check moved out of the FSM into the manager. |
 
 ## Findings
 
@@ -170,7 +170,7 @@ reachability oracle. It is timeout-bounded and does not send the peer API key.
 The code documents it as an accepted residual risk (ADR-0096/0097).
 
 Fix, in two separable parts:
-- Warn at startup when the allowlist is empty: done (`6b80eb9`).
+- Warn at startup when the allowlist is empty: done (`f6437b9`).
 - Configure `known_peer_addresses` on every Comb: not done. Entries are matched
   as exact `host:port` strings, so they must be spelled the way callers write
   `target_address`, and the setting is read at managerd startup.
@@ -206,7 +206,7 @@ nothing warns. raftd's socket is mode 0660 (`cmd/raftd/main.go:32`). The
 directory is root-only per the project notes, so this is defense in depth.
 
 Fix, in two separable parts:
-- Warn at startup when the token is empty: done (`6b80eb9`, in raftd).
+- Warn at startup when the token is empty: done (`f6437b9`, in raftd).
 - Generate a token at setup: not done.
 
 Until the second part is done, the internal RPC is protected by filesystem
