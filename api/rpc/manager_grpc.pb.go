@@ -215,9 +215,12 @@ type ManagerServiceClient interface {
 	// read consistency model is deliberately as simple as its write model.
 	GetVM(ctx context.Context, in *GetVMRequest, opts ...grpc.CallOption) (*GetVMResponse, error)
 	ListVMs(ctx context.Context, in *ListVMsRequest, opts ...grpc.CallOption) (*ListVMsResponse, error)
-	// ListVMsLocal reads the local FSM state without requiring leadership.
-	// FSM state is Raft-replicated to all nodes, so any Comb can serve
-	// the cluster-wide list. Use for read-only listing; writes require ListVMs.
+	// ListVMsLocal reads the local FSM state without requiring leadership,
+	// so any Comb can answer even when it cannot reach the leader. The trade
+	// is freshness: a follower applies committed entries slightly after the
+	// leader, so this can briefly omit a VM that was just created or still
+	// list one that was just deleted. A caller that has just written and needs
+	// to see its own change should use ListVMs, which is served by the leader.
 	ListVMsLocal(ctx context.Context, in *ListVMsLocalRequest, opts ...grpc.CallOption) (*ListVMsLocalResponse, error)
 	// UploadISO, ListISOs, and DeleteISO manage installer images stored
 	// locally on *this* managerd's own node - unlike VM definitions,
@@ -424,9 +427,10 @@ type ManagerServiceClient interface {
 	SetJailHostname(ctx context.Context, in *SetJailHostnameRequest, opts ...grpc.CallOption) (*SetJailHostnameResponse, error)
 	GetJail(ctx context.Context, in *GetJailRequest, opts ...grpc.CallOption) (*GetJailResponse, error)
 	ListJails(ctx context.Context, in *ListJailsRequest, opts ...grpc.CallOption) (*ListJailsResponse, error)
-	// ListJailsLocal reads the local FSM state without requiring leadership.
-	// FSM state is Raft-replicated to all nodes, so any Comb can serve
-	// the cluster-wide list. Use for read-only listing; writes require ListJails.
+	// ListJailsLocal reads the local FSM state without requiring leadership,
+	// so any Comb can answer even when it cannot reach the leader. The trade
+	// is freshness, exactly as for ListVMsLocal: use ListJails, which is
+	// served by the leader, when a caller needs to see its own just-made change.
 	ListJailsLocal(ctx context.Context, in *ListJailsLocalRequest, opts ...grpc.CallOption) (*ListJailsLocalResponse, error)
 	// ForcePurgeJail mirrors ForcePurgeVM exactly, for a jail tombstoned
 	// by DeleteJail whose owning node will never come back to reconcile
@@ -1684,9 +1688,12 @@ type ManagerServiceServer interface {
 	// read consistency model is deliberately as simple as its write model.
 	GetVM(context.Context, *GetVMRequest) (*GetVMResponse, error)
 	ListVMs(context.Context, *ListVMsRequest) (*ListVMsResponse, error)
-	// ListVMsLocal reads the local FSM state without requiring leadership.
-	// FSM state is Raft-replicated to all nodes, so any Comb can serve
-	// the cluster-wide list. Use for read-only listing; writes require ListVMs.
+	// ListVMsLocal reads the local FSM state without requiring leadership,
+	// so any Comb can answer even when it cannot reach the leader. The trade
+	// is freshness: a follower applies committed entries slightly after the
+	// leader, so this can briefly omit a VM that was just created or still
+	// list one that was just deleted. A caller that has just written and needs
+	// to see its own change should use ListVMs, which is served by the leader.
 	ListVMsLocal(context.Context, *ListVMsLocalRequest) (*ListVMsLocalResponse, error)
 	// UploadISO, ListISOs, and DeleteISO manage installer images stored
 	// locally on *this* managerd's own node - unlike VM definitions,
@@ -1893,9 +1900,10 @@ type ManagerServiceServer interface {
 	SetJailHostname(context.Context, *SetJailHostnameRequest) (*SetJailHostnameResponse, error)
 	GetJail(context.Context, *GetJailRequest) (*GetJailResponse, error)
 	ListJails(context.Context, *ListJailsRequest) (*ListJailsResponse, error)
-	// ListJailsLocal reads the local FSM state without requiring leadership.
-	// FSM state is Raft-replicated to all nodes, so any Comb can serve
-	// the cluster-wide list. Use for read-only listing; writes require ListJails.
+	// ListJailsLocal reads the local FSM state without requiring leadership,
+	// so any Comb can answer even when it cannot reach the leader. The trade
+	// is freshness, exactly as for ListVMsLocal: use ListJails, which is
+	// served by the leader, when a caller needs to see its own just-made change.
 	ListJailsLocal(context.Context, *ListJailsLocalRequest) (*ListJailsLocalResponse, error)
 	// ForcePurgeJail mirrors ForcePurgeVM exactly, for a jail tombstoned
 	// by DeleteJail whose owning node will never come back to reconcile

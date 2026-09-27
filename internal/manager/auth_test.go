@@ -3,8 +3,10 @@ package manager
 import (
 	"context"
 	"errors"
+	"sort"
 	"testing"
 
+	rpcpb "github.com/glenjbarber/apiary/api/rpc"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
@@ -440,6 +442,61 @@ func TestRequiredRoleFor_VMSnapshotWritesAreOperator(t *testing.T) {
 	} {
 		if got := requiredRoleFor(method); got != RoleOperator {
 			t.Errorf("requiredRoleFor(%q) = %q, want %q", method, got, RoleOperator)
+		}
+	}
+}
+
+// Every RPC in the service must have a deliberate entry in requiredRole.
+// A missing entry fails closed to Admin, which is safe but silent: two
+// read RPCs (ListVMsLocal, ListJailsLocal) shipped that way and quietly
+// demanded Admin from callers that only ever needed Viewer. This makes an
+// omission a test failure instead. It also catches stale entries that name
+// an RPC no longer in the service.
+func TestRequiredRole_CoversEveryRPC(t *testing.T) {
+	desc := rpcpb.ManagerService_ServiceDesc
+	prefix := "/" + desc.ServiceName + "/"
+
+	inService := map[string]bool{}
+	for _, m := range desc.Methods {
+		inService[prefix+m.MethodName] = true
+	}
+	for _, st := range desc.Streams {
+		inService[prefix+st.StreamName] = true
+	}
+
+	var missing, stale []string
+	for name := range inService {
+		if _, ok := requiredRole[name]; !ok && !authExemptMethods[name] {
+			missing = append(missing, name)
+		}
+	}
+	for name := range requiredRole {
+		if !inService[name] {
+			stale = append(stale, name)
+		}
+	}
+	for name := range authExemptMethods {
+		if !inService[name] {
+			stale = append(stale, name)
+		}
+	}
+	sort.Strings(missing)
+	sort.Strings(stale)
+	if len(missing) > 0 {
+		t.Errorf("RPCs with no explicit role in requiredRole (they would silently default to Admin): %v", missing)
+	}
+	if len(stale) > 0 {
+		t.Errorf("requiredRole entries naming an RPC that is not in the service: %v", stale)
+	}
+}
+
+func TestRequiredRole_LocalListRPCsMatchTheirLeaderVariants(t *testing.T) {
+	pairs := [][2]string{{"ListVMsLocal", "ListVMs"}, {"ListJailsLocal", "ListJails"}}
+	for _, p := range pairs {
+		local := requiredRoleFor("/apiary.rpc.v1.ManagerService/" + p[0])
+		leader := requiredRoleFor("/apiary.rpc.v1.ManagerService/" + p[1])
+		if local != leader {
+			t.Errorf("%s requires %v but %s requires %v; a local read must not demand more than the leader read", p[0], local, p[1], leader)
 		}
 	}
 }

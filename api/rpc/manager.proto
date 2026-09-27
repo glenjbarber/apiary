@@ -115,9 +115,12 @@ service ManagerService {
   rpc GetVM(GetVMRequest) returns (GetVMResponse);
   rpc ListVMs(ListVMsRequest) returns (ListVMsResponse);
 
-  // ListVMsLocal reads the local FSM state without requiring leadership.
-  // FSM state is Raft-replicated to all nodes, so any Comb can serve
-  // the cluster-wide list. Use for read-only listing; writes require ListVMs.
+  // ListVMsLocal reads the local FSM state without requiring leadership,
+  // so any Comb can answer even when it cannot reach the leader. The trade
+  // is freshness: a follower applies committed entries slightly after the
+  // leader, so this can briefly omit a VM that was just created or still
+  // list one that was just deleted. A caller that has just written and needs
+  // to see its own change should use ListVMs, which is served by the leader.
   rpc ListVMsLocal(ListVMsLocalRequest) returns (ListVMsLocalResponse);
 
   // UploadISO, ListISOs, and DeleteISO manage installer images stored
@@ -344,9 +347,10 @@ service ManagerService {
   rpc GetJail(GetJailRequest) returns (GetJailResponse);
   rpc ListJails(ListJailsRequest) returns (ListJailsResponse);
 
-  // ListJailsLocal reads the local FSM state without requiring leadership.
-  // FSM state is Raft-replicated to all nodes, so any Comb can serve
-  // the cluster-wide list. Use for read-only listing; writes require ListJails.
+  // ListJailsLocal reads the local FSM state without requiring leadership,
+  // so any Comb can answer even when it cannot reach the leader. The trade
+  // is freshness, exactly as for ListVMsLocal: use ListJails, which is
+  // served by the leader, when a caller needs to see its own just-made change.
   rpc ListJailsLocal(ListJailsLocalRequest) returns (ListJailsLocalResponse);
 
   // ForcePurgeJail mirrors ForcePurgeVM exactly, for a jail tombstoned

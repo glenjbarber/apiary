@@ -86,6 +86,18 @@ var requiredRole = map[string]Role{
 	"/apiary.rpc.v1.ManagerService/ListOrphanedHASTResources": RoleViewer,
 	"/apiary.rpc.v1.ManagerService/GetNetworkTeardownStatus":  RoleViewer,
 
+	// Plain reads that were added without an entry and so silently defaulted
+	// to Admin. ListVMsLocal/ListJailsLocal are the local-FSM variants of
+	// ListVMs/ListJails; ClusterHealth, HostPackages, and ListNodeServices
+	// are read-only reports of the same kind as HostStats and
+	// GetLocalNodeHealth. TestRequiredRole_CoversEveryRPC now fails if an
+	// RPC is added without a deliberate role.
+	"/apiary.rpc.v1.ManagerService/ListVMsLocal":     RoleViewer,
+	"/apiary.rpc.v1.ManagerService/ListJailsLocal":   RoleViewer,
+	"/apiary.rpc.v1.ManagerService/ClusterHealth":    RoleViewer,
+	"/apiary.rpc.v1.ManagerService/HostPackages":     RoleViewer,
+	"/apiary.rpc.v1.ManagerService/ListNodeServices": RoleViewer,
+
 	// The Dependency Graph Simulator RPCs are read-only reports - Viewer,
 	// the same tier as every other plain read
 	// above. Mandatory, not optional: this map fails closed to
@@ -164,6 +176,11 @@ var requiredRole = map[string]Role{
 	"/apiary.rpc.v1.ManagerService/ReportVMTeardownComplete":    RoleOperator,
 	"/apiary.rpc.v1.ManagerService/ReportJailPhase":             RoleOperator,
 	"/apiary.rpc.v1.ManagerService/ReportJailTeardownComplete":  RoleOperator,
+
+	// PushISOTo is peer-only, like the Report* RPCs above and
+	// PushJailTemplateTo below: a node asks a peer to push it a file the
+	// peer already has. Same Operator tier, for the same reason.
+	"/apiary.rpc.v1.ManagerService/PushISOTo": RoleOperator,
 
 	// PushJailTemplateTo/ReceiveJailTemplate (ADR-0089) are the jail
 	// base-template equivalents of UploadISO/PushISOTo above - same
@@ -423,6 +440,21 @@ const authenticatePasswordMethod = "/apiary.rpc.v1.ManagerService/AuthenticatePa
 const reserveRestartLeaseMethod = "/apiary.rpc.v1.ManagerService/ReserveRestartLease"
 const confirmRestartCompletedMethod = "/apiary.rpc.v1.ManagerService/ConfirmRestartCompleted"
 
+// authExemptMethods is every RPC that skips checkAuth's API-key role check,
+// each for the specific reason documented on its constant above. It is the
+// single definition AuthUnaryInterceptor consults, and TestRequiredRole_
+// CoversEveryRPC treats these as the only RPCs allowed to have no entry in
+// requiredRole.
+var authExemptMethods = map[string]bool{
+	statusMethod:                  true,
+	requestJoinColonyMethod:       true,
+	getJoinRequestStatusMethod:    true,
+	cancelJoinRequestMethod:       true,
+	authenticatePasswordMethod:    true,
+	reserveRestartLeaseMethod:     true,
+	confirmRestartCompletedMethod: true,
+}
+
 // restartGuardrailTokenValid reports whether presented matches configured
 // exactly, in constant time - and, critically, only when configured is
 // non-empty. subtle.ConstantTimeCompare on two empty byte slices returns
@@ -452,7 +484,7 @@ func restartGuardrailTokenValid(presented, configured string) bool {
 // reachability/leader info only), so letting it bypass auth entirely
 // is an acceptable, narrow carve-out - not a precedent for adding more.
 func (s *Server) AuthUnaryInterceptor(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
-	if info.FullMethod != statusMethod && info.FullMethod != requestJoinColonyMethod && info.FullMethod != getJoinRequestStatusMethod && info.FullMethod != cancelJoinRequestMethod && info.FullMethod != authenticatePasswordMethod && info.FullMethod != reserveRestartLeaseMethod && info.FullMethod != confirmRestartCompletedMethod {
+	if !authExemptMethods[info.FullMethod] {
 		if err := checkAuth(ctx, info.FullMethod, raftAPIKeyValidator{s.raft}); err != nil {
 			return nil, err
 		}
