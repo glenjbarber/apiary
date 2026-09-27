@@ -160,3 +160,42 @@ func mustRead(t *testing.T, path string) string {
 	}
 	return string(body)
 }
+
+func TestRedactRcConf_RedactsOtherCredentialShapedFlagsAndVariables(t *testing.T) {
+	cases := []struct{ name, input, secret string }{
+		{"internal token flag", `apiary_raftd_args="-internal-token tok_SECRETVALUE1 -x"`, "tok_SECRETVALUE1"},
+		{"manager api key flag", `apiary_frontend_args="-manager-api-key apk_SECRETVALUE2"`, "apk_SECRETVALUE2"},
+		{"equals form", `apiary_x_args="-api-key=apk_SECRETVALUE3"`, "apk_SECRETVALUE3"},
+		{"password flag", `foo_args="-db-password hunter2SECRET"`, "hunter2SECRET"},
+		{"secret flag, upper case", `foo_args="-CLIENT-SECRET S3CR3TVALUE"`, "S3CR3TVALUE"},
+		{"token variable, double quoted", `cloudflared_token="eyJhbGciOiSECRETVALUE4"`, "eyJhbGciOiSECRETVALUE4"},
+		{"token variable, single quoted", `cloudflared_token='eyJhbGciOiSECRETVALUE5'`, "eyJhbGciOiSECRETVALUE5"},
+		{"token variable, bare", "some_api_key=BARESECRETVALUE6\nother=1", "BARESECRETVALUE6"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got, err := RedactRcConf(strings.NewReader(c.input))
+			if err != nil {
+				t.Fatalf("RedactRcConf() error: %v", err)
+			}
+			if strings.Contains(string(got), c.secret) {
+				t.Errorf("secret %q leaked into output: %s", c.secret, got)
+			}
+			if !strings.Contains(string(got), "REDACTED") {
+				t.Errorf("output has no REDACTED marker: %s", got)
+			}
+		})
+	}
+}
+
+// Redaction must not eat values that are only file paths or ordinary settings.
+func TestRedactRcConf_LeavesPathsAndOrdinarySettingsAlone(t *testing.T) {
+	input := "apiary_frontend_args=\"-tls-cert /p/fullchain.pem -tls-key /p/key.pem\"\nsshd_enable=\"YES\"\napiary_managerd_args=\"-vlan-uplink re0 -peer-tls\"\n"
+	got, err := RedactRcConf(strings.NewReader(input))
+	if err != nil {
+		t.Fatalf("RedactRcConf() error: %v", err)
+	}
+	if string(got) != input {
+		t.Errorf("RedactRcConf() changed non-secret content:\n got: %q\nwant: %q", got, input)
+	}
+}

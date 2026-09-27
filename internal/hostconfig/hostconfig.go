@@ -92,27 +92,31 @@ func RedactMasterPasswd(r io.Reader) ([]byte, error) {
 	return out.Bytes(), nil
 }
 
-// peerAPIKeyPattern matches "-peer-api-key <value>" inside rc.conf's
-// own quoted args string (e.g. apiary_managerd_args="... -peer-api-key
-// apk_XXXX ..."), the one live secret confirmed to appear in this
-// project's own rc.conf (ADR-0067's finding 8: it was found
-// world-readable there). [^\s"]+ (not \S+) stops at a closing quote
-// too, so a flag placed last inside the quoted string is still
-// redacted correctly, not left with a dangling '"' consumed into the
-// match.
-var peerAPIKeyPattern = regexp.MustCompile(`(-peer-api-key )([^\s"]+)`)
+// rcSecretFlagPattern matches "-<name>-api-key <value>" and the same for names
+// ending in token, secret, or password, given as a flag inside an rc.conf
+// *_args string (for example "-peer-api-key apk_..." or "-internal-token
+// ..."), with the value separated by a space or "=". It deliberately does not
+// match "-tls-key /path/key.pem": that value is a file path, not a secret.
+var rcSecretFlagPattern = regexp.MustCompile(`(?i)(-[a-z0-9_-]*(?:api-key|apikey|token|secret|password)[ =])([^\s"']+)`)
 
-// RedactRcConf redacts every known-sensitive flag value from rc.conf's
-// content. This is a small, explicit, necessarily-incomplete allowlist
-// (currently just -peer-api-key) - not a general secret scanner - so
-// any future flag that carries a live secret needs to be added here
-// deliberately.
+// rcSecretAssignmentPattern matches a whole-line rc.conf assignment whose
+// variable name says it holds a credential (for example
+// cloudflared_token="...").
+var rcSecretAssignmentPattern = regexp.MustCompile(`(?im)^(\s*[a-z0-9_]*(?:token|secret|password|api_key|apikey)[a-z0-9_]*\s*=\s*)("[^"\n]*"|'[^'\n]*'|[^\s#]+)`)
+
+// RedactRcConf redacts every credential-looking value from rc.conf's content:
+// flags and variables whose name ends in api-key, token, secret, or password.
+// This is pattern based, not a general secret scanner, so a credential under a
+// name that does not say what it is can still get through; the exported file
+// is written 0600 for that reason.
 func RedactRcConf(r io.Reader) ([]byte, error) {
 	body, err := io.ReadAll(r)
 	if err != nil {
 		return nil, fmt.Errorf("hostconfig: reading rc.conf: %w", err)
 	}
-	return peerAPIKeyPattern.ReplaceAll(body, []byte("${1}REDACTED")), nil
+	body = rcSecretFlagPattern.ReplaceAll(body, []byte("${1}REDACTED"))
+	body = rcSecretAssignmentPattern.ReplaceAll(body, []byte(`${1}"REDACTED"`))
+	return body, nil
 }
 
 // Export reads files' rc.conf/pf.conf/master.passwd, redacts the two
