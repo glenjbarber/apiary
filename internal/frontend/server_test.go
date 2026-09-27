@@ -977,19 +977,17 @@ func TestServer_AppShellUsesHierarchicalSidebar(t *testing.T) {
 		`class="table-scroll" role="region" aria-label="Virtual machines table" tabindex="0"`,
 		`<table class="resource-table">`,
 		`class="settings-menu`,
+		`>Resources</h2>`,
+		`>Topology</h2>`,
 		`>Colony</h2>`,
-		`>Combs</a>`,
-		`>Cells</span>`,
-		`>Network</h2>`,
-		`>Status</h2>`,
-		`>Media</h2>`,
+		`>Command Center</a>`,
 		`class="app-footer"`,
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("application shell missing %q", want)
 		}
 	}
-	if !strings.Contains(body, `class="sidebar-link cell-type active" href="/vms" aria-current="page"`) {
+	if !strings.Contains(body, `class="sidebar-link active" href="/vms" aria-current="page"`) {
 		t.Errorf("VMs page should mark its sidebar entry current, got: %s", body)
 	}
 }
@@ -1079,8 +1077,8 @@ func TestServer_ClusterOverviewPage_IsDefaultLandingPage(t *testing.T) {
 			t.Errorf("cluster overview page missing %q, got: %s", want, body)
 		}
 	}
-	if !strings.Contains(body, `class="sidebar-link active" href="/" aria-current="page">Combs</a>`) {
-		t.Errorf("Colony overview should mark Combs active, got: %s", body)
+	if !strings.Contains(body, `class="sidebar-link active" href="/" aria-current="page">Command Center</a>`) {
+		t.Errorf("Colony overview should mark Command Center active, got: %s", body)
 	}
 }
 

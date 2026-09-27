@@ -148,12 +148,9 @@
     .sidebar-section { padding:.1rem 0 .55rem; border-bottom:1px solid var(--sidebar-rule); margin-bottom:.5rem; }
     .sidebar-section:last-child { border-bottom:0; }
     .sidebar-heading { margin:.1rem .65rem .25rem; color:var(--sidebar-muted); font-size:.66rem; font-weight:800; letter-spacing:.11em; text-transform:uppercase; }
-    .sidebar-link, .sidebar-tree-label { display:block; padding:.3rem .65rem; border-radius:6px; color:var(--sidebar-ink); font-size:.875rem; line-height:1.35; text-decoration:none; }
+    .sidebar-link { display:block; padding:.3rem .65rem; border-radius:6px; color:var(--sidebar-ink); font-size:.875rem; line-height:1.35; text-decoration:none; }
     .sidebar-link:hover { color:#fff; background:var(--sidebar-hover); }
     .sidebar-link.active { color:#111; background:var(--yellow); font-weight:750; }
-    .sidebar-tree { margin:0 0 0 .85rem; padding-left:.6rem; border-left:1px solid #42484a; }
-    .sidebar-tree-label { padding:.15rem .5rem; color:var(--sidebar-muted); font-size:.72rem; }
-    .sidebar-link.cell-type { margin-left:.3rem; }
     .content { grid-column:2; grid-row:2; min-width:0; width:100%; max-width:1500px; padding:2rem clamp(1rem, 2.5vw, 2.5rem) 3rem; }
     .app-footer { grid-column:2; grid-row:3; padding:1rem clamp(1rem, 2.5vw, 2.5rem) 1.5rem; color:var(--muted); font-size:.78rem; border-top:1px solid var(--line); }
     h1 { font-size:1.6rem; margin:0; letter-spacing:-.03em; }
@@ -425,27 +422,31 @@
 </header>
 <aside class="sidebar" id="primary-navigation">
   <nav class="sidebar-nav" aria-label="Primary navigation">
-    <section class="sidebar-section" aria-labelledby="nav-colony">
-      <h2 class="sidebar-heading" id="nav-colony">Colony</h2>
-      <a class="sidebar-link{{if eq .ActivePage "stats"}} active{{end}}" href="/"{{if eq .ActivePage "stats"}} aria-current="page"{{end}}>Combs</a>
-      {{if .KnownCombs}}
-      <div class="sidebar-tree combs">
-        {{range .KnownCombs}}<a class="sidebar-link comb-link" href="/host/{{.}}" title="Comb detail and evidence for {{.}}">{{.}}</a>{{end}}
-      </div>
-      {{end}}
-      <div class="sidebar-tree">
-        <span class="sidebar-tree-label">Cells</span>
-        <a class="sidebar-link cell-type{{if eq .ActivePage "vms"}} active{{end}}" href="/vms"{{if eq .ActivePage "vms"}} aria-current="page"{{end}}>Virtual Machines</a>
-        <a class="sidebar-link cell-type{{if eq .ActivePage "jails"}} active{{end}}" href="/jails"{{if eq .ActivePage "jails"}} aria-current="page"{{end}}>Jails</a>
-      </div>
+    {{/*
+      Four functional sections, not the product hierarchy (Apiary >
+      Colony > Comb > Cell) verbatim: Resources is what runs or is
+      stored (Cells and media together, since an operator reaching for
+      a VM/jail/ISO is doing the same kind of task regardless of which
+      one); Topology is the network layer these resources attach to;
+      Colony is cluster-wide evidence and planning tools that never
+      name one Comb; Combs is the one section that is genuinely
+      per-node, linking each known Comb to its own evidence page. See
+      docs/web-ui-redesign.md's Section D.
+    */}}
+    <section class="sidebar-section" aria-labelledby="nav-resources">
+      <h2 class="sidebar-heading" id="nav-resources">Resources</h2>
+      <a class="sidebar-link{{if eq .ActivePage "vms"}} active{{end}}" href="/vms"{{if eq .ActivePage "vms"}} aria-current="page"{{end}}>Virtual Machines</a>
+      <a class="sidebar-link{{if eq .ActivePage "jails"}} active{{end}}" href="/jails"{{if eq .ActivePage "jails"}} aria-current="page"{{end}}>Jails</a>
+      <a class="sidebar-link{{if eq .ActivePage "images"}} active{{end}}" href="/images"{{if eq .ActivePage "images"}} aria-current="page"{{end}}>ISO and Disk Images</a>
     </section>
-    <section class="sidebar-section" aria-labelledby="nav-network">
-      <h2 class="sidebar-heading" id="nav-network">Network</h2>
+    <section class="sidebar-section" aria-labelledby="nav-topology">
+      <h2 class="sidebar-heading" id="nav-topology">Topology</h2>
       <a class="sidebar-link{{if eq .ActivePage "networks"}} active{{end}}" href="/networks"{{if eq .ActivePage "networks"}} aria-current="page"{{end}}>Networks</a>
       <a class="sidebar-link{{if eq .ActivePage "trace"}} active{{end}}" href="/trace"{{if eq .ActivePage "trace"}} aria-current="page"{{end}}>Path Trace</a>
     </section>
-    <section class="sidebar-section" aria-labelledby="nav-status">
-      <h2 class="sidebar-heading" id="nav-status">Status</h2>
+    <section class="sidebar-section" aria-labelledby="nav-colony">
+      <h2 class="sidebar-heading" id="nav-colony">Colony</h2>
+      <a class="sidebar-link{{if eq .ActivePage "stats"}} active{{end}}" href="/"{{if eq .ActivePage "stats"}} aria-current="page"{{end}}>Command Center</a>
       <a class="sidebar-link{{if eq .ActivePage "assumptions"}} active{{end}}" href="/assumptions"{{if eq .ActivePage "assumptions"}} aria-current="page"{{end}}>Assumptions</a>
       <a class="sidebar-link{{if eq .ActivePage "assumption-register"}} active{{end}}" href="/assumption-register"{{if eq .ActivePage "assumption-register"}} aria-current="page"{{end}}>Assumption Register</a>
       <a class="sidebar-link{{if eq .ActivePage "simulate"}} active{{end}}" href="/simulate"{{if eq .ActivePage "simulate"}} aria-current="page"{{end}}>Simulations</a>
@@ -455,10 +456,12 @@
       <a class="sidebar-link{{if eq .ActivePage "resilience-coverage"}} active{{end}}" href="/resilience-coverage"{{if eq .ActivePage "resilience-coverage"}} aria-current="page"{{end}}>Coverage Map</a>
       <a class="sidebar-link{{if eq .ActivePage "certificates"}} active{{end}}" href="/certificates"{{if eq .ActivePage "certificates"}} aria-current="page"{{end}}>Certificates</a>
     </section>
-    <section class="sidebar-section" aria-labelledby="nav-media">
-      <h2 class="sidebar-heading" id="nav-media">Media</h2>
-      <a class="sidebar-link{{if eq .ActivePage "images"}} active{{end}}" href="/images"{{if eq .ActivePage "images"}} aria-current="page"{{end}}>ISO and Disk Images</a>
+    {{if .KnownCombs}}
+    <section class="sidebar-section" aria-labelledby="nav-combs">
+      <h2 class="sidebar-heading" id="nav-combs">Combs</h2>
+      {{range .KnownCombs}}<a class="sidebar-link comb-link" href="/host/{{.}}" title="Comb detail and evidence for {{.}}">{{.}}</a>{{end}}
     </section>
+    {{end}}
   </nav>
 </aside>
 {{end}}
