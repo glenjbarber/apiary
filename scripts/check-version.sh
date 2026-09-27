@@ -54,6 +54,15 @@ echo "=== which worktree changes make a build dirty ==="
 scripts/test-worktree-state.sh
 echo
 
+# The force-restart recorder is the one piece of shell this project runs
+# on the emergency path, where a wrong record is worse than no record:
+# it can strand a raft-replicated restart lease, which has no TTL. Its
+# tests are fixture-based and need neither root nor a Comb, so they are
+# cheap enough to belong here with the other script tests.
+echo "=== what a force-restart records for the guardrail cooldown ==="
+scripts/test-record-forced-restart.sh
+echo
+
 for b in $BINS; do
   echo "=== $b (clean stamp) ==="
   go build -trimpath -buildvcs=false -ldflags "$(scripts/build-ldflags.sh)" -o "$OUT/$b" ./cmd/"$b"
