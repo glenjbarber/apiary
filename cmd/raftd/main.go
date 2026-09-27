@@ -156,6 +156,10 @@ func run() error {
 		return err
 	}
 
+	if w := internalTokenWarning(rcfg.InternalToken, rcfg.Socket); w != "" {
+		log.Print(w)
+	}
+
 	lis, err := listenUnix(rcfg.Socket)
 	if err != nil {
 		return fmt.Errorf("listening on socket: %w", err)
@@ -515,4 +519,16 @@ func listenUnix(path string) (net.Listener, error) {
 	}
 
 	return lis, nil
+}
+
+// internalTokenWarning returns a startup warning when internal_token is
+// empty, or "" when it is set. With no token, raftd's internal RPC accepts
+// any caller that can open its unix socket, so it relies entirely on the
+// socket's filesystem permissions. Nothing generates a token by default, so
+// this makes that state visible instead of silent.
+func internalTokenWarning(token, socket string) string {
+	if token != "" {
+		return ""
+	}
+	return "raftd: WARNING: internal_token is not set, so the internal RPC on " + socket + " accepts any caller that can open the socket and is protected only by filesystem permissions; set the same internal_token in raftd.json and managerd.json to require a shared secret"
 }

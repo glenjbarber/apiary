@@ -139,3 +139,15 @@ func TestSplitCommaList(t *testing.T) {
 		}
 	}
 }
+
+func TestKnownPeersWarning(t *testing.T) {
+	if w := knownPeersWarning(nil); !strings.Contains(w, "known_peer_addresses is not set") {
+		t.Errorf("empty allowlist: warning = %q, want it to say the option is unset", w)
+	}
+	if w := knownPeersWarning([]string{}); w == "" {
+		t.Errorf("an empty (non-nil) allowlist must also warn")
+	}
+	if w := knownPeersWarning([]string{"brood.lab3.home.arpa:17700"}); w != "" {
+		t.Errorf("a configured allowlist must not warn, got %q", w)
+	}
+}

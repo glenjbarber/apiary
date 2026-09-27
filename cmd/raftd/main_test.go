@@ -5,6 +5,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -402,4 +403,14 @@ func TestStartupJoinOrBootstrap_HadStateTakesPriorityOverAwaitJoin(t *testing.T)
 	}
 
 	eventually(t, 5*time.Second, func() bool { return resumed.Status().IsLeader })
+}
+
+func TestInternalTokenWarning(t *testing.T) {
+	w := internalTokenWarning("", "/var/run/apiary/raftd.sock")
+	if !strings.Contains(w, "internal_token is not set") || !strings.Contains(w, "/var/run/apiary/raftd.sock") {
+		t.Errorf("empty token: warning = %q, want it to name the option and the socket", w)
+	}
+	if w := internalTokenWarning("s3cret", "/x"); w != "" {
+		t.Errorf("a configured token must not warn, got %q", w)
+	}
 }

@@ -462,7 +462,11 @@ func run() error {
 	srv.SetRestshimdConfig(&restshimdconfig.Manager{})
 	srv.SetRaftdConfig(&raftdconfig.Manager{})
 	srv.SetRaftdConversionConfig(&raftdconfig.Manager{})
-	srv.SetKnownPeerAddresses(splitCommaList(cfg.KnownPeerAddresses))
+	knownPeers := splitCommaList(cfg.KnownPeerAddresses)
+	srv.SetKnownPeerAddresses(knownPeers)
+	if w := knownPeersWarning(knownPeers); w != "" {
+		log.Print(w)
+	}
 	srv.SetRestartGuardrailToken(restartGuardrailToken)
 	restartConfirm := manager.NewRestartConfirmStore("/var/db/apiary/guardrail")
 	srv.SetRestartConfirmStore(restartConfirm)
@@ -903,4 +907,17 @@ func applyManagerdDefaults(cfg *nodeconfig.Config) {
 	if cfg.OriginCARenewalCheckInterval == 0 {
 		cfg.OriginCARenewalCheckInterval = time.Hour
 	}
+}
+
+// knownPeersWarning returns a startup warning when known_peer_addresses is
+// empty, or "" when it is set. With it empty, the unauthenticated
+// RequestJoinColony, GetJoinRequestStatus and CancelJoinRequest RPCs dial
+// whatever target_address a caller supplies and return the error text, which
+// is a limited reachability oracle. That is a documented, accepted default
+// (ADR-0096, ADR-0097), but it should never be silent.
+func knownPeersWarning(known []string) string {
+	if len(known) > 0 {
+		return ""
+	}
+	return "managerd: WARNING: known_peer_addresses is not set, so the unauthenticated join RPCs (RequestJoinColony, GetJoinRequestStatus, CancelJoinRequest) will dial any address a caller supplies and report whether it answered; set known_peer_addresses to every Comb's managerd address to restrict them"
 }
