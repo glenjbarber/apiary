@@ -665,7 +665,7 @@ func (m *Manager) DestroyVM(ctx context.Context, name string) error {
 	pidPath := m.pidfile(qname)
 	if data, err := os.ReadFile(pidPath); err == nil {
 		if pid, err := strconv.Atoi(strings.TrimSpace(string(data))); err == nil {
-			runCmd(ctx, "kill", strconv.Itoa(pid))
+			signalIfSupervisor(ctx, pid, runCmd)
 		}
 		os.Remove(pidPath)
 	}
@@ -675,6 +675,29 @@ func (m *Manager) DestroyVM(ctx context.Context, name string) error {
 
 	m.stopSerialLogger(ctx, qname)
 	return nil
+}
+
+// supervisorComm is the executable name of the process both pidfiles record.
+// bhyve and the serial reader are each started under daemon(8) with -p, so the
+// pid on disk is daemon(8)'s own supervisor, which exits when its child does.
+const supervisorComm = "daemon"
+
+// signalIfSupervisor sends SIGTERM to pid only if it is still a daemon(8)
+// process. The pid comes from a pidfile, and a pidfile can outlive its process
+// (a supervisor that was SIGKILLed or crashed never removes it); by the time
+// teardown runs, that pid may belong to an unrelated process, and this runs as
+// root. ps -o comm= reports the executable name, which daemon(8) does not
+// rewrite the way it rewrites the process title, so it is a stable check. If
+// ps fails the process is already gone and there is nothing to signal.
+func signalIfSupervisor(ctx context.Context, pid int, run func(context.Context, string, ...string) (string, error)) {
+	if pid <= 1 {
+		return
+	}
+	comm, err := run(ctx, "ps", "-o", "comm=", "-p", strconv.Itoa(pid))
+	if err != nil || filepath.Base(strings.TrimSpace(comm)) != supervisorComm {
+		return
+	}
+	run(ctx, "kill", strconv.Itoa(pid))
 }
 
 // stopSerialLogger kills the detached reader process startSerialLogger
@@ -688,7 +711,7 @@ func (m *Manager) DestroyVM(ctx context.Context, name string) error {
 func (m *Manager) stopSerialLogger(ctx context.Context, qname string) {
 	if data, err := os.ReadFile(m.serialpidfile(qname)); err == nil {
 		if pid, err := strconv.Atoi(strings.TrimSpace(string(data))); err == nil {
-			runCmd(ctx, "kill", strconv.Itoa(pid))
+			signalIfSupervisor(ctx, pid, runCmd)
 		}
 	}
 	os.Remove(m.serialpidfile(qname))
