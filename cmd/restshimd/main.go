@@ -15,10 +15,10 @@ import (
 	"flag"
 	"fmt"
 	"log"
-	"net/http"
 	"time"
 
 	"github.com/glenjbarber/apiary/internal/buildinfo"
+	"github.com/glenjbarber/apiary/internal/httpserver"
 
 	"google.golang.org/grpc"
 
@@ -126,9 +126,9 @@ func run() error {
 		if err := requireTLSPair(cfg.TLSCert, cfg.TLSKey); err != nil {
 			return err
 		}
-		return http.ListenAndServeTLS(cfg.HTTPAddr, cfg.TLSCert, cfg.TLSKey, srv)
+		return httpserver.New(cfg.HTTPAddr, srv).ListenAndServeTLS(cfg.TLSCert, cfg.TLSKey)
 	}
-	return http.ListenAndServe(cfg.HTTPAddr, srv)
+	return httpserver.New(cfg.HTTPAddr, srv).ListenAndServe()
 }
 
 // checkManagerLink turns the startup check's answer into a decision.

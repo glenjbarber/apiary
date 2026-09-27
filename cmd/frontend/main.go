@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"github.com/glenjbarber/apiary/internal/buildinfo"
 	"log"
-	"net/http"
 	"time"
 
 	"google.golang.org/grpc"
@@ -17,6 +16,7 @@ import (
 	rpcpb "github.com/glenjbarber/apiary/api/rpc"
 	"github.com/glenjbarber/apiary/internal/frontend"
 	"github.com/glenjbarber/apiary/internal/frontendconfig"
+	"github.com/glenjbarber/apiary/internal/httpserver"
 	"github.com/glenjbarber/apiary/internal/loginconfig"
 	"github.com/glenjbarber/apiary/internal/manager"
 	"github.com/glenjbarber/apiary/internal/tlsdial"
@@ -232,8 +232,9 @@ func run() error {
 	}
 
 	log.Printf("frontend: %s listening on %s (manager-addr=%s, manager-tls=%v, tls=%v)", buildinfo.String(), cfg.HTTPAddr, cfg.ManagerAddr, cfg.ManagerTLS, tlsEnabled)
+	httpSrv := httpserver.New(cfg.HTTPAddr, srv)
 	if tlsEnabled {
-		return http.ListenAndServeTLS(cfg.HTTPAddr, cfg.TLSCert, cfg.TLSKey, srv)
+		return httpSrv.ListenAndServeTLS(cfg.TLSCert, cfg.TLSKey)
 	}
-	return http.ListenAndServe(cfg.HTTPAddr, srv)
+	return httpSrv.ListenAndServe()
 }
