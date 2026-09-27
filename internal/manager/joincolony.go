@@ -252,6 +252,27 @@ func generateJoinCode() (string, error) {
 	return fmt.Sprintf("%06d", n.Int64()), nil
 }
 
+// expiredJoinRequestMessage returns a non-empty error when requestID exists
+// and has passed its TTL. Expiry is checked here, against the wall clock,
+// before a resolve command is submitted - never inside the FSM, which must
+// stay deterministic across replicas and log replays (see
+// applyResolvePendingJoinRequest). A missing request or a failed read returns
+// "" so the FSM's own does-not-exist and already-resolved errors still apply.
+func (s *Server) expiredJoinRequestMessage(ctx context.Context, requestID, opName string) string {
+	resp, err := s.raft.GetPendingJoinRequestLocal(ctx, requestID)
+	if err != nil || resp.GetError() != "" || resp.GetRequest() == nil {
+		return ""
+	}
+	if joinRequestExpired(resp.GetRequest()) {
+		return fmt.Sprintf("%s: request_id %q has expired", opName, requestID)
+	}
+	return ""
+}
+
+func joinRequestExpired(req *internalpb.PendingJoinRequest) bool {
+	return time.Now().Unix() >= req.GetExpiresAtUnix()
+}
+
 // applyJoinRequestCommand mirrors applyNetworkCommand/applyJailCommand
 // exactly (server.go/jail.go's own identical per-type Apply wrappers),
 // unmarshaling raftd's ApplyResponse.Result as a PendingJoinRequest.
@@ -507,6 +528,9 @@ func (s *Server) ApproveJoinRequest(ctx context.Context, req *rpcpb.ApproveJoinR
 		return &rpcpb.ApproveJoinRequestResponse{Error: getResp.GetError()}, nil
 	}
 	pending := getResp.GetRequest()
+	if joinRequestExpired(pending) {
+		return &rpcpb.ApproveJoinRequestResponse{Error: fmt.Sprintf("ApprovePendingJoinRequest: request_id %q has expired", req.GetRequestId())}, nil
+	}
 
 	if report := s.evaluateJoinReachability(ctx, pending.GetRaftBindAddress()); report.Verdict != guardrail.Allow {
 		return &rpcpb.ApproveJoinRequestResponse{Error: fmt.Sprintf(
@@ -670,6 +694,9 @@ func (s *Server) PreflightApproveJoinRequest(ctx context.Context, req *rpcpb.Pre
 // the symmetric decline action. Never touches raft membership at all -
 // just marks the record Rejected.
 func (s *Server) RejectJoinRequest(ctx context.Context, req *rpcpb.RejectJoinRequestRequest) (*rpcpb.RejectJoinRequestResponse, error) {
+	if msg := s.expiredJoinRequestMessage(ctx, req.GetRequestId(), "RejectPendingJoinRequest"); msg != "" {
+		return &rpcpb.RejectJoinRequestResponse{Error: msg}, nil
+	}
 	cmd := &internalpb.Command{
 		Op: &internalpb.Command_RejectPendingJoinRequest{
 			RejectPendingJoinRequest: &internalpb.RejectPendingJoinRequest{RequestId: req.GetRequestId()},
@@ -717,6 +744,9 @@ func (s *Server) CancelJoinRequest(ctx context.Context, req *rpcpb.CancelJoinReq
 			return &rpcpb.CancelJoinRequestResponse{Error: fmt.Sprintf("reaching %s: %v", target, err)}, nil
 		}
 		return resp, nil
+	}
+	if msg := s.expiredJoinRequestMessage(ctx, req.GetRequestId(), "CancelPendingJoinRequest"); msg != "" {
+		return &rpcpb.CancelJoinRequestResponse{Error: msg}, nil
 	}
 	cmd := &internalpb.Command{
 		Op: &internalpb.Command_CancelPendingJoinRequest{

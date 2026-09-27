@@ -657,12 +657,12 @@ func (f *FSM) applyCreatePendingJoinRequest(index uint64, req *internalpb.Pendin
 }
 
 // applyApprovePendingJoinRequest and applyRejectPendingJoinRequest both
-// require the request to currently be Pending and not yet expired - an
-// Admin approving/rejecting a request that some other Admin (on a
-// different Colony member's UI, since this is raft-replicated) already
-// resolved, or that expired in the meantime, is a real error, not a
-// silent no-op, so a stale browser tab's second click surfaces clearly
-// rather than double-applying.
+// require the request to currently be Pending - an Admin approving/
+// rejecting a request that some other Admin (on a different Colony
+// member's UI, since this is raft-replicated) already resolved is a real
+// error, not a silent no-op, so a stale browser tab's second click
+// surfaces clearly rather than double-applying. Expiry is enforced by
+// internal/manager before the command is submitted, not here.
 func (f *FSM) applyApprovePendingJoinRequest(index uint64, requestID string) *FSMApplyResult {
 	return f.applyResolvePendingJoinRequest(index, requestID, internalpb.JoinRequestStatus_JOIN_REQUEST_STATUS_APPROVED, "ApprovePendingJoinRequest")
 }
@@ -690,9 +690,12 @@ func (f *FSM) applyResolvePendingJoinRequest(index uint64, requestID string, sta
 	if req.GetStatus() != internalpb.JoinRequestStatus_JOIN_REQUEST_STATUS_PENDING {
 		return &FSMApplyResult{Index: index, Error: fmt.Sprintf("%s: request_id %q is already %s", opName, requestID, req.GetStatus())}
 	}
-	if pendingJoinRequestExpired(req) {
-		return &FSMApplyResult{Index: index, Error: fmt.Sprintf("%s: request_id %q has expired", opName, requestID)}
-	}
+	// Expiry is deliberately NOT checked here. This runs on every replica and
+	// again whenever the log is replayed (restart, snapshot catch-up), so
+	// consulting the wall clock would let a replay after the TTL reject an
+	// entry that originally succeeded and leave replicas disagreeing about
+	// the request's status. internal/manager checks expiry against the clock
+	// before submitting the command instead.
 	updated := proto.Clone(req).(*internalpb.PendingJoinRequest)
 	updated.Status = status
 	f.pendingJoinRequests[requestID] = updated

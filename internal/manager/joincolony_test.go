@@ -16,6 +16,9 @@ import (
 	"testing"
 	"time"
 
+	"google.golang.org/protobuf/proto"
+
+	internalpb "github.com/glenjbarber/apiary/api/internalpb"
 	rpcpb "github.com/glenjbarber/apiary/api/rpc"
 	"github.com/glenjbarber/apiary/internal/nodeconfig"
 )
@@ -506,5 +509,48 @@ func TestServer_RequestJoinColony_RejectsMalformedFieldsBeforeRaft(t *testing.T)
 		if resp.GetError() == "" {
 			t.Errorf("case %d: Error = empty, want a validation rejection", i)
 		}
+	}
+}
+
+// Expiry is enforced here (against the wall clock, before submitting), not
+// in the FSM, which must stay deterministic across replicas and replays.
+// This drives a real single-node raft: an already-expired request must be
+// refused by Reject, Cancel and Approve, and left Pending in the FSM.
+func TestIntegration_ResolveExpiredJoinRequest_RefusedBeforeSubmitting(t *testing.T) {
+	raftdSocket := newRaftdUDSSocket(t)
+	_, srv := newManagerdRPCClientAndServer(t, raftdSocket, "raftd-1")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	create := &internalpb.Command{Op: &internalpb.Command_CreatePendingJoinRequest{CreatePendingJoinRequest: &internalpb.CreatePendingJoinRequest{
+		Request: &internalpb.PendingJoinRequest{
+			RequestId: "jreq-old", NodeId: "node-2", RaftBindAddress: "10.0.0.2:17600", Code: "123456",
+			RequestedAtUnix: time.Now().Add(-time.Hour).Unix(), ExpiresAtUnix: time.Now().Add(-time.Minute).Unix(),
+			Status: internalpb.JoinRequestStatus_JOIN_REQUEST_STATUS_PENDING,
+		},
+	}}}
+	payload, err := proto.Marshal(create)
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	if resp, err := srv.raft.Apply(ctx, payload, defaultApplyTimeout); err != nil || resp.GetError() != "" {
+		t.Fatalf("seeding an expired request: err=%v resp=%v", err, resp.GetError())
+	}
+
+	rej, err := srv.RejectJoinRequest(ctx, &rpcpb.RejectJoinRequestRequest{RequestId: "jreq-old"})
+	if err != nil || !strings.Contains(rej.GetError(), "has expired") {
+		t.Errorf("RejectJoinRequest: err=%v Error=%q, want an expiry refusal", err, rej.GetError())
+	}
+	can, err := srv.CancelJoinRequest(ctx, &rpcpb.CancelJoinRequestRequest{RequestId: "jreq-old"})
+	if err != nil || !strings.Contains(can.GetError(), "has expired") {
+		t.Errorf("CancelJoinRequest: err=%v Error=%q, want an expiry refusal", err, can.GetError())
+	}
+	app, err := srv.ApproveJoinRequest(ctx, &rpcpb.ApproveJoinRequestRequest{RequestId: "jreq-old", ConfirmPhrase: approveJoinRequestConfirmPhrase})
+	if err != nil || !strings.Contains(app.GetError(), "has expired") {
+		t.Errorf("ApproveJoinRequest: err=%v Error=%q, want an expiry refusal", err, app.GetError())
+	}
+	if got, err := srv.raft.GetPendingJoinRequestLocal(ctx, "jreq-old"); err != nil || got.GetRequest().GetStatus() != internalpb.JoinRequestStatus_JOIN_REQUEST_STATUS_PENDING {
+		t.Errorf("an expired request must be left Pending, got err=%v status=%v", err, got.GetRequest().GetStatus())
 	}
 }

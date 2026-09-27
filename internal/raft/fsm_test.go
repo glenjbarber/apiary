@@ -1843,15 +1843,23 @@ func TestFSM_Apply_ApprovePendingJoinRequestMissingIsError(t *testing.T) {
 // regression test for lazy expiry: an Admin approving a request that
 // expired since it was listed must fail, not silently approve a stale
 // join.
-func TestFSM_Apply_ApproveExpiredPendingJoinRequestRejected(t *testing.T) {
+// The FSM must not consult the wall clock when applying a resolve command:
+// it runs on every replica and again on every log replay, so an entry that
+// originally applied must apply identically later, even after the request's
+// TTL has passed. Expiry is enforced in internal/manager before submitting.
+func TestFSM_Apply_ResolvePendingJoinRequest_IsIndependentOfWallClock(t *testing.T) {
 	fsm := NewFSM()
 	alreadyExpired := time.Now().Add(-1 * time.Minute).Unix()
 	fsm.Apply(&raft.Log{Index: 1, Data: mustMarshalCommand(t, createPendingJoinRequestCmd("jreq-1", "node02", "10.62.0.5:17600", "482913", alreadyExpired))})
 
 	result := fsm.Apply(&raft.Log{Index: 2, Data: mustMarshalCommand(t, approvePendingJoinRequestCmd("jreq-1"))})
 
-	if result.(*FSMApplyResult).Error == "" {
-		t.Fatalf("Error = empty, want a rejection for approving an expired request")
+	if got := result.(*FSMApplyResult).Error; got != "" {
+		t.Fatalf("Error = %q, want the same outcome a replay before the TTL would produce", got)
+	}
+	req, ok := fsm.PendingJoinRequest("jreq-1")
+	if !ok || req.GetStatus() != internalpb.JoinRequestStatus_JOIN_REQUEST_STATUS_APPROVED {
+		t.Errorf("request status = %v, want APPROVED", req.GetStatus())
 	}
 }
 
