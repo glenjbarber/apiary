@@ -1090,6 +1090,9 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/", http.StatusFound)
 		return
 	}
+	// The login form is reachable without authenticating; without this cap
+	// ParseForm accepts up to 10 MB from any client.
+	r.Body = http.MaxBytesReader(w, r.Body, maxLoginFormBytes)
 	if err := r.ParseForm(); err != nil {
 		s.render(w, "login_page", pageData{LoginError: "invalid form: " + err.Error()})
 		return
@@ -1097,6 +1100,10 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	user := r.FormValue("username")
 	pass := r.FormValue("password")
 	next := r.FormValue("next")
+	if user == "" || len(user) > maxLoginUsernameLen {
+		s.render(w, "login_page", pageData{LoginError: "invalid username or password", NextURL: next, BootstrapPending: s.roleMapEmpty()})
+		return
+	}
 
 	// Checked before ever calling s.auth.Authenticate - a locked-out
 	// username shouldn't cost a real PAM round-trip on every retry, and

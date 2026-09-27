@@ -1,6 +1,11 @@
 package frontend
 
 import (
+	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
+	"strings"
 	"testing"
 	"time"
 )
@@ -72,5 +77,81 @@ func TestLoginAttemptTracker_LockExpiresAfterDuration(t *testing.T) {
 	time.Sleep(20 * time.Millisecond)
 	if locked, _ := tr.Locked("alice"); locked {
 		t.Errorf("Locked() = true after the lock duration elapsed, want false")
+	}
+}
+
+func TestLoginAttemptTracker_MapIsBoundedByDistinctUsernames(t *testing.T) {
+	tr := newLoginAttemptTracker(5, time.Hour, time.Hour)
+	for i := 0; i < maxTrackedUsernames+500; i++ {
+		tr.RecordFailure(fmt.Sprintf("user-%d", i))
+	}
+	if n := len(tr.attempts); n > maxTrackedUsernames {
+		t.Errorf("tracked %d usernames, want at most %d", n, maxTrackedUsernames)
+	}
+}
+
+func TestLoginAttemptTracker_EvictionNeverDropsALockedAccount(t *testing.T) {
+	tr := newLoginAttemptTracker(2, time.Hour, time.Hour)
+	tr.RecordFailure("victim")
+	tr.RecordFailure("victim")
+	if locked, _ := tr.Locked("victim"); !locked {
+		t.Fatalf("victim should be locked after 2 failures")
+	}
+	for i := 0; i < maxTrackedUsernames+500; i++ {
+		tr.RecordFailure(fmt.Sprintf("junk-%d", i))
+	}
+	if locked, _ := tr.Locked("victim"); !locked {
+		t.Errorf("a locked account was evicted by a flood of other usernames")
+	}
+}
+
+func TestLoginAttemptTracker_DoesNotSweepOnEveryFailure(t *testing.T) {
+	tr := newLoginAttemptTracker(5, time.Minute, time.Minute)
+	tr.RecordFailure("a")
+	swept := tr.lastSweep
+	tr.RecordFailure("b")
+	tr.RecordFailure("c")
+	if !tr.lastSweep.Equal(swept) {
+		t.Errorf("lastSweep changed between back-to-back failures; the whole map is being rescanned on every failure")
+	}
+}
+
+func TestLoginAttemptTracker_OversizedUsernameIsKeyedByItsPrefix(t *testing.T) {
+	tr := newLoginAttemptTracker(2, time.Minute, time.Minute)
+	long := strings.Repeat("x", 100000)
+	tr.RecordFailure(long)
+	tr.RecordFailure(long + "different-tail")
+	for k := range tr.attempts {
+		if len(k) > maxLoginUsernameLen {
+			t.Errorf("tracker stored a %d byte key, want at most %d", len(k), maxLoginUsernameLen)
+		}
+	}
+	if locked, _ := tr.Locked(long); !locked {
+		t.Errorf("two failures with the same %d byte prefix should share one lockout key", maxLoginUsernameLen)
+	}
+}
+
+func TestHandleLogin_RejectsOversizedUsernameAndBodyWithoutTracking(t *testing.T) {
+	s := newTestServerWithAuth(t, &fakeClient{}, "admin", "secret")
+
+	form := url.Values{"username": {strings.Repeat("u", maxLoginUsernameLen+1)}, "password": {"x"}}
+	req := httptest.NewRequest(http.MethodPost, "/login", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, req)
+	if !strings.Contains(rec.Body.String(), "invalid username or password") {
+		t.Errorf("oversized username: want the generic invalid-credentials message, got: %s", rec.Body.String())
+	}
+	if n := len(s.lockouts.attempts); n != 0 {
+		t.Errorf("an oversized username was tracked (%d entries), want none", n)
+	}
+
+	big := url.Values{"username": {"admin"}, "password": {strings.Repeat("p", maxLoginFormBytes*2)}}
+	req = httptest.NewRequest(http.MethodPost, "/login", strings.NewReader(big.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec = httptest.NewRecorder()
+	s.ServeHTTP(rec, req)
+	if !strings.Contains(rec.Body.String(), "invalid form") {
+		t.Errorf("oversized body: want the form to be refused, got: %s", rec.Body.String())
 	}
 }

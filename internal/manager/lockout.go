@@ -27,6 +27,7 @@ type pamLockoutTracker struct {
 	window       time.Duration
 	lockDuration time.Duration
 	attempts     map[string]*pamAttemptState
+	lastSweep    time.Time
 }
 
 type pamAttemptState struct {
@@ -43,7 +44,25 @@ const (
 	defaultPAMMaxFailedAttempts = 5
 	defaultPAMAttemptWindow     = 15 * time.Minute
 	defaultPAMLockDuration      = 15 * time.Minute
+
+	// maxTrackedUsernames bounds the tracker. AuthenticatePassword is
+	// unauthenticated by design, so without a bound every distinct username
+	// anyone submits would add an entry that lives for a full window.
+	maxTrackedUsernames = 10000
+
+	// maxLockoutUsernameLen is the longest username tracked or authenticated.
+	// No real account name is anywhere near this long.
+	maxLockoutUsernameLen = 256
 )
+
+// lockoutKey caps how much of a username is used as a map key, as a second
+// line of defense behind the length check in AuthenticatePassword.
+func lockoutKey(username string) string {
+	if len(username) > maxLockoutUsernameLen {
+		return username[:maxLockoutUsernameLen]
+	}
+	return username
+}
 
 func newPAMLockoutTracker() *pamLockoutTracker {
 	return &pamLockoutTracker{
@@ -59,7 +78,7 @@ func newPAMLockoutTracker() *pamLockoutTracker {
 func (t *pamLockoutTracker) Locked(username string) (locked bool, remaining time.Duration) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	st, ok := t.attempts[username]
+	st, ok := t.attempts[lockoutKey(username)]
 	if !ok {
 		return false, 0
 	}
@@ -79,6 +98,7 @@ func (t *pamLockoutTracker) RecordFailure(username string) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	now := time.Now()
+	username = lockoutKey(username)
 
 	st, ok := t.attempts[username]
 	if !ok || now.Sub(st.windowStart) > t.window {
@@ -90,13 +110,43 @@ func (t *pamLockoutTracker) RecordFailure(username string) {
 		st.lockedUntil = now.Add(t.lockDuration)
 	}
 
+	t.sweepLocked(now, username)
+}
+
+// sweepLocked drops entries whose window and lock have both elapsed, but
+// only when the map is at its cap or a quarter of a window has passed since
+// the last sweep - not on every failure, which let an attacker with many
+// distinct usernames make each request scan the whole map under the lock. If
+// the map is still over its cap, the oldest unlocked entries are evicted.
+// Locked entries are never evicted.
+func (t *pamLockoutTracker) sweepLocked(now time.Time, keep string) {
+	if len(t.attempts) <= maxTrackedUsernames && now.Sub(t.lastSweep) < t.window/4 {
+		return
+	}
+	t.lastSweep = now
 	for u, s := range t.attempts {
-		if u == username {
+		if u == keep {
 			continue
 		}
 		if now.Sub(s.windowStart) > t.window && now.After(s.lockedUntil) {
 			delete(t.attempts, u)
 		}
+	}
+	for len(t.attempts) > maxTrackedUsernames {
+		oldest := ""
+		var oldestStart time.Time
+		for u, s := range t.attempts {
+			if u == keep || now.Before(s.lockedUntil) {
+				continue
+			}
+			if oldest == "" || s.windowStart.Before(oldestStart) {
+				oldest, oldestStart = u, s.windowStart
+			}
+		}
+		if oldest == "" {
+			return
+		}
+		delete(t.attempts, oldest)
 	}
 }
 
@@ -104,5 +154,5 @@ func (t *pamLockoutTracker) RecordFailure(username string) {
 func (t *pamLockoutTracker) RecordSuccess(username string) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	delete(t.attempts, username)
+	delete(t.attempts, lockoutKey(username))
 }

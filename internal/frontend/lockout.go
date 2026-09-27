@@ -26,6 +26,7 @@ type loginAttemptTracker struct {
 	window       time.Duration
 	lockDuration time.Duration
 	attempts     map[string]*attemptState
+	lastSweep    time.Time
 }
 
 type attemptState struct {
@@ -41,7 +42,27 @@ const (
 	defaultMaxFailedAttempts = 5
 	defaultAttemptWindow     = 15 * time.Minute
 	defaultLockDuration      = 15 * time.Minute
+
+	// maxTrackedUsernames bounds the tracker: the login form is reachable
+	// without authenticating, so every distinct username anyone submits would
+	// otherwise add an entry that lives for a full window.
+	maxTrackedUsernames = 10000
+
+	// maxLoginUsernameLen is the longest username tracked or authenticated.
+	maxLoginUsernameLen = 256
+
+	// maxLoginFormBytes caps the login form body. Without it ParseForm accepts
+	// up to 10 MB from an unauthenticated client.
+	maxLoginFormBytes = 64 << 10
 )
+
+// lockoutKey caps how much of a username is used as a map key.
+func lockoutKey(username string) string {
+	if len(username) > maxLoginUsernameLen {
+		return username[:maxLoginUsernameLen]
+	}
+	return username
+}
 
 func newLoginAttemptTracker(maxAttempts int, window, lockDuration time.Duration) *loginAttemptTracker {
 	return &loginAttemptTracker{
@@ -57,7 +78,7 @@ func newLoginAttemptTracker(maxAttempts int, window, lockDuration time.Duration)
 func (t *loginAttemptTracker) Locked(username string) (locked bool, remaining time.Duration) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	st, ok := t.attempts[username]
+	st, ok := t.attempts[lockoutKey(username)]
 	if !ok {
 		return false, 0
 	}
@@ -78,6 +99,7 @@ func (t *loginAttemptTracker) RecordFailure(username string) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	now := time.Now()
+	username = lockoutKey(username)
 
 	st, ok := t.attempts[username]
 	if !ok || now.Sub(st.windowStart) > t.window {
@@ -89,13 +111,43 @@ func (t *loginAttemptTracker) RecordFailure(username string) {
 		st.lockedUntil = now.Add(t.lockDuration)
 	}
 
+	t.sweepLocked(now, username)
+}
+
+// sweepLocked drops entries whose window and lock have both elapsed, but only
+// when the map is at its cap or a quarter of a window has passed since the
+// last sweep - not on every failure, which let a client submitting many
+// distinct usernames make each request scan the whole map under the lock. If
+// the map is still over its cap, the oldest unlocked entries are evicted.
+// Locked entries are never evicted.
+func (t *loginAttemptTracker) sweepLocked(now time.Time, keep string) {
+	if len(t.attempts) <= maxTrackedUsernames && now.Sub(t.lastSweep) < t.window/4 {
+		return
+	}
+	t.lastSweep = now
 	for u, s := range t.attempts {
-		if u == username {
+		if u == keep {
 			continue
 		}
 		if now.Sub(s.windowStart) > t.window && now.After(s.lockedUntil) {
 			delete(t.attempts, u)
 		}
+	}
+	for len(t.attempts) > maxTrackedUsernames {
+		oldest := ""
+		var oldestStart time.Time
+		for u, s := range t.attempts {
+			if u == keep || now.Before(s.lockedUntil) {
+				continue
+			}
+			if oldest == "" || s.windowStart.Before(oldestStart) {
+				oldest, oldestStart = u, s.windowStart
+			}
+		}
+		if oldest == "" {
+			return
+		}
+		delete(t.attempts, oldest)
 	}
 }
 
@@ -106,5 +158,5 @@ func (t *loginAttemptTracker) RecordFailure(username string) {
 func (t *loginAttemptTracker) RecordSuccess(username string) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	delete(t.attempts, username)
+	delete(t.attempts, lockoutKey(username))
 }

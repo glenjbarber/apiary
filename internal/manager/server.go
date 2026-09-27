@@ -846,6 +846,9 @@ func (s *Server) AuthenticatePassword(_ context.Context, req *rpcpb.Authenticate
 		return &rpcpb.AuthenticatePasswordResponse{Error: "this node has no PAM login configured"}, nil
 	}
 	user := req.GetUsername()
+	if user == "" || len(user) > maxLockoutUsernameLen {
+		return &rpcpb.AuthenticatePasswordResponse{Ok: false}, nil
+	}
 	if locked, remaining := s.pamLockouts.Locked(user); locked {
 		return &rpcpb.AuthenticatePasswordResponse{Error: fmt.Sprintf("account temporarily locked after repeated failed attempts; try again in %s", remaining.Round(time.Second))}, nil
 	}
