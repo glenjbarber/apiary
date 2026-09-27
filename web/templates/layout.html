@@ -18,13 +18,15 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <style>
     :root {
-      color-scheme:light;
+      color-scheme:light; accent-color:var(--yellow);
       --ink:#171717; --muted:#686868; --line:#dedede; --panel:#fff;
       --wash:#f6f5f1; --yellow:#ffc928; --danger:#a62020;
       --success:#166534; --header:#0e1112; --sidebar:#171a1b;
       --sidebar-ink:#ececec; --sidebar-muted:#92999c;
       --table-head:#fafafa; --row-hover:#fffdf4; --field:#fff;
       --shadow:0 1px 2px rgba(0,0,0,.04);
+      --link:#2450c4; --link-hover:#163a99; --focus:rgba(255,201,40,.55);
+      --sidebar-hover:#272d2f; --sidebar-rule:#303537;
     }
     :root[data-theme="dark"] {
       color-scheme:dark;
@@ -33,6 +35,7 @@
       --header:#080b0c; --sidebar:#111516; --sidebar-ink:#eeeeec;
       --sidebar-muted:#9ba2a5; --table-head:#191f21; --row-hover:#1b2224;
       --field:#111618; --shadow:0 1px 2px rgba(0,0,0,.35);
+      --link:#9db6ff; --link-hover:#c6d4ff;
     }
     * { box-sizing:border-box; }
     html, body { min-height:100%; }
@@ -40,7 +43,11 @@
       margin:0; color:var(--ink); background:var(--wash);
       font-family:Inter, ui-sans-serif, system-ui, -apple-system, sans-serif;
       line-height:1.45;
+      -webkit-font-smoothing:antialiased; text-rendering:optimizeLegibility;
     }
+    ::selection { background:rgba(255,201,40,.4); color:inherit; }
+    a { color:var(--link); text-underline-offset:.18em; text-decoration-thickness:1px; }
+    a:hover { color:var(--link-hover); text-decoration-thickness:2px; }
     .app-layout {
       display:grid; min-height:100vh;
       grid-template-columns:16rem minmax(0, 1fr);
@@ -74,7 +81,9 @@
        the theme and settings controls off the header on a narrow viewport. */
     .colony-leader { display:flex; flex-direction:column; align-items:flex-end; min-width:0; max-width:22rem; line-height:1.2; }
     .colony-leader-label { font-size:.76rem; color:#aeb4b6; overflow-wrap:anywhere; }
-    .colony-leader .badge { margin-top:.22rem; overflow-wrap:anywhere; text-align:center; }
+    .colony-leader .badge { margin-top:.22rem; overflow-wrap:normal; white-space:nowrap; text-align:center; }
+    .app-header .badge { white-space:nowrap; }
+    .app-header .badge:not(.ready):not(.error):not(.degraded) { color:#d7dbdc; background:transparent; border:1px solid #42484a; font-weight:600; }
     .colony-leader-here, .colony-leader-raft-state { margin-top:.2rem; font-size:.72rem; color:#aeb4b6; overflow-wrap:anywhere; }
     .colony-leader-raft-state { font-family:ui-monospace, SFMono-Regular, Menlo, monospace; }
     .icon-button, .settings-menu > summary {
@@ -111,11 +120,11 @@
     .sidebar::-webkit-scrollbar { width:8px; }
     .sidebar::-webkit-scrollbar-track { background:transparent; }
     .sidebar::-webkit-scrollbar-thumb { background:#4a5052; border-radius:999px; }
-    .sidebar-section { padding:.1rem 0 .55rem; border-bottom:1px solid #303537; margin-bottom:.5rem; }
+    .sidebar-section { padding:.1rem 0 .55rem; border-bottom:1px solid var(--sidebar-rule); margin-bottom:.5rem; }
     .sidebar-section:last-child { border-bottom:0; }
     .sidebar-heading { margin:.1rem .65rem .25rem; color:var(--sidebar-muted); font-size:.66rem; font-weight:800; letter-spacing:.11em; text-transform:uppercase; }
     .sidebar-link, .sidebar-tree-label { display:block; padding:.3rem .65rem; border-radius:6px; color:var(--sidebar-ink); font-size:.875rem; line-height:1.35; text-decoration:none; }
-    .sidebar-link:hover { color:#fff; background:#272d2f; }
+    .sidebar-link:hover { color:#fff; background:var(--sidebar-hover); }
     .sidebar-link.active { color:#111; background:var(--yellow); font-weight:750; }
     .sidebar-tree { margin:0 0 0 .85rem; padding-left:.6rem; border-left:1px solid #42484a; }
     .sidebar-tree-label { padding:.15rem .5rem; color:var(--sidebar-muted); font-size:.72rem; }
@@ -126,33 +135,46 @@
     h2 { font-size:1.55rem; margin:2rem 0 1rem; letter-spacing:-.02em; }
     h3 { margin-top:1.75rem; }
     table { border-collapse:collapse; width:100%; margin-top:1rem; }
-    th, td { text-align:left; padding:.7rem .65rem; border-bottom:1px solid var(--line); vertical-align:middle; }
+    th, td { text-align:left; padding:.6rem .65rem; border-bottom:1px solid var(--line); vertical-align:middle; font-variant-numeric:tabular-nums; }
     th { color:var(--muted); font-size:.74rem; text-transform:uppercase; letter-spacing:.06em; background:var(--table-head); }
     th a { color:inherit; }
     tbody tr:hover { background:var(--row-hover); }
     button, .button { border:1px solid var(--ink); border-radius:6px; background:var(--ink); color:var(--wash); padding:.5rem .75rem; font:inherit; font-weight:650; cursor:pointer; text-decoration:none; }
+    button, .button { transition:opacity .12s ease, background-color .12s ease, border-color .12s ease; }
     button:hover, .button:hover { opacity:.86; }
+    button:active, .button:active { opacity:.72; }
+    button:disabled, .button[aria-disabled="true"] { opacity:.45; cursor:not-allowed; }
+    td button, td .button { padding:.3rem .65rem; font-size:.85rem; }
     button.danger { border-color:#a65b5b; background:var(--panel); color:var(--danger); }
     .button.secondary { background:var(--panel); color:var(--ink); border-color:var(--muted); }
     .button.secondary:hover { background:var(--row-hover); }
     input, select, textarea { min-width:0; max-width:100%; min-height:2.4rem; border:1px solid var(--muted); border-radius:6px; background:var(--field); color:var(--ink); padding:.45rem .55rem; font:inherit; }
     textarea { resize:vertical; }
     input[type="checkbox"], input[type="radio"] { min-height:0; flex:none; }
-    input:focus, select:focus, textarea:focus, button:focus, a:focus, summary:focus { outline:3px solid rgba(255,201,40,.45); outline-offset:2px; }
+    input:focus, select:focus, textarea:focus { outline:3px solid var(--focus); outline-offset:1px; }
+    button:focus-visible, a:focus-visible, summary:focus-visible { outline:3px solid var(--focus); outline-offset:2px; }
+    input::placeholder, textarea::placeholder { color:var(--muted); opacity:.75; }
     .panel { background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:1.1rem; box-shadow:var(--shadow); }
     .panel + .panel { margin-top:1rem; }
+    /* card-grid: a row of equal panels. The sibling margin above is for stacked
+       panels; inside a grid it would push every card after the first down. */
+    .card-grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(220px, 1fr)); gap:1rem; margin-top:1rem; }
+    .card-grid > .panel { margin-top:0; }
+    .card-grid > .panel h3 { margin:.35rem 0; }
     .panel > h3:first-child { margin-top:0; }
     .assumption-host > summary { cursor:pointer; padding:.25rem 0; overflow-wrap:anywhere; }
     .assumption-host > summary .badge { margin-left:.75rem; vertical-align:middle; }
     .assumption-host-results { margin-top:1rem; overflow-x:auto; }
 
-    .section-nav { display:flex; flex-wrap:wrap; gap:.5rem 1rem; margin:1rem 0; }
-    .section-nav a { color:var(--ink); text-underline-offset:.2em; }
+    .section-nav { display:flex; flex-wrap:wrap; gap:.4rem; margin:1rem 0; }
+    .section-nav a { padding:.3rem .7rem; color:var(--ink); background:var(--panel); border:1px solid var(--line); border-radius:999px; font-size:.875rem; text-decoration:none; }
+    .section-nav a:hover { background:var(--row-hover); border-color:var(--muted); }
     .settings-group > h2 { scroll-margin-top:5.5rem; font-size:1.2rem; }
     .page-header { display:flex; align-items:center; justify-content:space-between; gap:1rem; margin-bottom:1rem; }
     .page-header h2 { margin:0; }
+    .page-header-extra { display:flex; align-items:center; flex-wrap:wrap; gap:.4rem .6rem; }
     .muted { color:var(--muted); }
-    .badge { display:inline-flex; align-items:center; border-radius:999px; padding:.18rem .55rem; font-size:.76rem; font-weight:700; background:#e8e8e8; color:#333; }
+    .badge { display:inline-flex; align-items:center; border-radius:999px; padding:.18rem .55rem; font-size:.76rem; font-weight:700; line-height:1.3; background:#e8e8e8; color:#333; white-space:nowrap; }
     .badge.ready, .badge.running, .badge.up, .badge.true, .badge.healthy, .badge.clear, .badge.ok { color:var(--success); background:color-mix(in srgb, var(--success) 17%, var(--panel)); }
     .badge.error, .badge.down, .badge.deleting, .badge.false, .badge.blocked, .badge.expired { color:var(--danger); background:color-mix(in srgb, var(--danger) 17%, var(--panel)); }
     .badge.creating, .badge.pending, .badge.degraded, .badge.soon { color:#765600; background:#fff1b8; }
@@ -243,7 +265,7 @@
     .upload-progress span { font-size:.85em; min-width:3em; }
     .upload-progress[hidden] { display:none; }
     @media (max-width:900px) {
-      .app-layout { grid-template-columns:1fr; }
+      .app-layout { grid-template-columns:minmax(0, 1fr); }
       .icon-button.sidebar-toggle { display:inline-grid; }
       .sidebar { position:fixed; z-index:90; top:4.5rem; bottom:0; left:0; width:min(18rem, 86vw); height:auto; transform:translateX(-105%); transition:transform .18s ease; box-shadow:8px 0 24px rgba(0,0,0,.32); }
       .nav-open .sidebar { transform:translateX(0); }
@@ -256,6 +278,9 @@
     @media (max-width:620px) {
       .app-header { padding:.6rem .75rem; }
       .brand-name { display:none; }
+      .icon-button, .settings-menu > summary { flex:none; }
+      .header-actions { gap:.4rem; }
+      .header-actions > .badge { display:inline-block; max-width:6.5rem; overflow:hidden; text-overflow:ellipsis; }
       .colony-leader { max-width:9rem; }
       .colony-leader-label, .colony-leader-here, .colony-leader-raft-state { display:none; }
       .account-user { max-width:9rem; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
@@ -384,4 +409,4 @@
 </script>
 {{end}}
 
-{{define "page_header"}}<div class="page-header"><div><h2>{{.Title}}</h2><div class="muted">{{.Subtitle}}</div></div>{{if .Extra}}{{.Extra}}{{end}}</div>{{end}}
+{{define "page_header"}}<div class="page-header"><div><h2>{{.Title}}</h2><div class="muted">{{.Subtitle}}</div></div>{{if .Extra}}<div class="page-header-extra">{{.Extra}}</div>{{end}}</div>{{end}}

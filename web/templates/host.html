@@ -8,10 +8,10 @@
   {{template "page_header" (pageHeader "Host Detail" (nodeSubtitle .Stats.NodeID) (hostPackagesLink .Stats.NodeID))}}  {{if .Error}}<div class="banner-error">{{.Error}}</div>{{end}}
   {{range .Stats.Errors}}<div class="error">{{.}}</div>{{end}}
 
-  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:1rem;margin-top:1rem">
-    <section class="panel"><div class="muted">CPU load</div><h3 style="margin:.35rem 0">{{printf "%.2f" .Stats.LoadAvg1}}</h3><div>{{.Stats.Cores}} cores · 1 minute average</div><div class="muted">5m {{printf "%.2f" .Stats.LoadAvg5}} · 15m {{printf "%.2f" .Stats.LoadAvg15}}</div></section>
-    <section class="panel"><div class="muted">Memory used</div><h3 style="margin:.35rem 0">{{printf "%.1f" .Stats.MemUsedPct}}%</h3><div>{{.Stats.MemFree}} free of {{.Stats.MemTotal}}</div></section>
-    <section class="panel"><div class="muted">Packet filter</div><h3 style="margin:.35rem 0">{{if .Stats.PF.Enabled}}<span class="badge ready">Enabled</span>{{else}}<span class="badge error">Disabled</span>{{end}}</h3><div>{{.Stats.PF.CurrentStates}} active state{{if ne .Stats.PF.CurrentStates 1}}s{{end}} · {{.Stats.PF.Matches}} rule match{{if ne .Stats.PF.Matches 1}}es{{end}}</div></section>
+  <div class="card-grid">
+    <section class="panel"><div class="muted">CPU load</div><h3>{{printf "%.2f" .Stats.LoadAvg1}}</h3><div>{{.Stats.Cores}} cores · 1 minute average</div><div class="muted">5m {{printf "%.2f" .Stats.LoadAvg5}} · 15m {{printf "%.2f" .Stats.LoadAvg15}}</div></section>
+    <section class="panel"><div class="muted">Memory used</div><h3>{{printf "%.1f" .Stats.MemUsedPct}}%</h3><div>{{.Stats.MemFree}} free of {{.Stats.MemTotal}}</div></section>
+    <section class="panel"><div class="muted">Packet filter</div><h3>{{if .Stats.PF.Enabled}}<span class="badge ready">Enabled</span>{{else}}<span class="badge error">Disabled</span>{{end}}</h3><div>{{.Stats.PF.CurrentStates}} active state{{if ne .Stats.PF.CurrentStates 1}}s{{end}} · {{.Stats.PF.Matches}} rule match{{if ne .Stats.PF.Matches 1}}es{{end}}</div></section>
   </div>
 
   <h3>ZFS Pools</h3>

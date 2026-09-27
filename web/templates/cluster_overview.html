@@ -72,14 +72,14 @@
       .cockpit-workspace .cockpit-header { margin-bottom:1rem; }
       .cockpit-top-grid { display:grid; grid-template-columns:minmax(0,1.35fr) minmax(16rem,.85fr); gap:1rem; }
       .cockpit-top-grid > .panel { margin-top:0; min-width:0; }
-      .cockpit-kpis { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); padding:0; overflow:hidden; }
-      .cockpit-kpi { padding:.9rem; border-right:1px solid var(--line); }
-      .cockpit-kpi:last-child { border-right:0; }
-      .cockpit-kpi small { display:block; color:var(--muted); }
-      .cockpit-kpi strong { display:block; margin-top:.2rem; font-size:1.2rem; }
-      .cockpit-kpi em { display:block; margin-top:.15rem; color:var(--muted); font-size:.72rem; font-style:normal; }
+      .cockpit-kpis { display:grid; grid-template-columns:1fr; grid-auto-rows:1fr; padding:0; overflow:hidden; }
+      .cockpit-kpi { display:grid; grid-template-columns:1fr auto; align-content:center; align-items:baseline; column-gap:1rem; padding:.7rem 1rem; border-bottom:1px solid var(--line); }
+      .cockpit-kpi:last-child { border-bottom:0; }
+      .cockpit-kpi small { grid-column:1; grid-row:1; color:var(--muted); font-size:.78rem; }
+      .cockpit-kpi strong { grid-column:2; grid-row:1; font-size:1.1rem; text-align:right; overflow-wrap:normal; }
+      .cockpit-kpi em { grid-column:1 / -1; grid-row:2; margin-top:.1rem; color:var(--muted); font-size:.72rem; font-style:normal; }
       .cockpit-topology { grid-column:1 / -1; }
-      .cockpit-topology-list { display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:.75rem; margin-top:.8rem; }
+      .cockpit-topology-list { display:grid; grid-template-columns:repeat(auto-fit,minmax(200px,1fr)); gap:.75rem; margin-top:.8rem; }
       .cockpit-topology-node { position:relative; display:block; padding:.85rem; color:var(--ink); background:var(--field); border:1px solid var(--line); border-radius:7px; text-decoration:none; }
       .cockpit-topology-node:hover { background:var(--row-hover); }
       .cockpit-topology-node::before { content:""; display:block; width:.55rem; height:.55rem; margin-bottom:.45rem; border-radius:50%; background:var(--success); box-shadow:0 0 0 4px color-mix(in srgb, var(--success) 16%, transparent); }
@@ -93,8 +93,8 @@
       .cockpit-topology-node a { color:inherit; text-decoration:none; }
       .cockpit-topology-node a:hover { text-decoration:underline; }
       .cockpit-topology-node small { display:block; margin-top:.25rem; color:var(--muted); }
-      .cockpit-topology-state { display:flex; align-items:center; gap:.4rem; margin-top:.65rem; }
-      .cockpit-topology-state .badge { font-size:.7rem; }
+      .cockpit-topology-state { display:flex; align-items:center; flex-wrap:wrap; gap:.35rem; margin-top:.65rem; }
+      .cockpit-topology-state .badge { font-size:.68rem; padding:.14rem .45rem; }
       /* The one-line "why" under each Comb card. The wording says which of
          the three observation states produced it, so a card whose Comb was
          never observed can never be read as a card whose Comb is fine. */
@@ -124,11 +124,8 @@
         .cockpit-node-table { min-width:62rem; }
         .cockpit-shell { display:block; min-height:0; }
         .cockpit-subnav { display:none; }
-        .cockpit-topbar { padding:.65rem .8rem; }
+        .cockpit-topbar { flex-wrap:wrap; padding:.65rem .8rem; }
         .cockpit-workspace { padding:.8rem; }
-        .cockpit-kpis { grid-template-columns:1fr; }
-        .cockpit-kpi { border-right:0; border-bottom:1px solid var(--line); }
-        .cockpit-kpi:last-child { border-bottom:0; }
       }
     </style>
 
