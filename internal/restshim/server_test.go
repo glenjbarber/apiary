@@ -541,6 +541,16 @@ func (f *fakeClient) TraceCellPath(context.Context, *rpcpb.TraceCellPathRequest,
 	return &rpcpb.TraceCellPathResponse{}, nil
 }
 
+// StepAsideForRestart is ADR-0145's managerd-side step-aside. Nothing
+// in this package's request path calls it - the controlled update
+// workflow is server-side, not a UI read - so this satisfies the
+// generated client interface and nothing more. A call reaching it would
+// mean this fake were being used somewhere it has no answers for, and
+// an empty response is a safe, obviously-fake answer to that.
+func (f *fakeClient) StepAsideForRestart(context.Context, *rpcpb.StepAsideForRestartRequest, ...grpc.CallOption) (*rpcpb.StepAsideForRestartResponse, error) {
+	return &rpcpb.StepAsideForRestartResponse{}, nil
+}
+
 var _ rpcpb.ManagerServiceClient = (*fakeClient)(nil)
 
 func doRequest(t *testing.T, s *Server, method, path string, body interface{}) *httptest.ResponseRecorder {

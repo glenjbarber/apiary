@@ -226,6 +226,14 @@ type PeerForwarder interface {
 	// every other forwarded RPC here uses.
 	ReserveRestartLease(ctx context.Context, addr string, req *rpcpb.ReserveRestartLeaseRequest) (*rpcpb.ReserveRestartLeaseResponse, error)
 	ConfirmRestartCompleted(ctx context.Context, addr string, req *rpcpb.ConfirmRestartCompletedRequest) (*rpcpb.ConfirmRestartCompletedResponse, error)
+
+	// StepAsideForRestart carries ADR-0145's step-aside to the Comb that
+	// is actually about to be restarted. It is NOT leader-forwarded -
+	// the receiving node acts on its own raftd, because the whole point
+	// is to make THAT node stand down, not the leader - and it
+	// authenticates with the restart-guardrail token, for the same
+	// reason ReserveRestartLease/ConfirmRestartCompleted above do.
+	StepAsideForRestart(ctx context.Context, addr string, req *rpcpb.StepAsideForRestartRequest) (*rpcpb.StepAsideForRestartResponse, error)
 }
 
 // reconcilerStats is the subset of *cluster.Reconciler the server needs
@@ -445,6 +453,14 @@ type Server struct {
 	// back by cmd/managerd's own startup path to self-confirm (ADR-0103) -
 	// nil on a node with no restart-confirmation state directory wired up.
 	restartConfirm *RestartConfirmStore
+
+	// stepAsideRaft is the subset of raft above that ADR-0145's
+	// step-aside uses, behind its own field so a test can exercise the
+	// handler without a real raftd - the same
+	// setter-for-optional-dependency shape restartConfirm above already
+	// follows. nil in production, where s.raft is used instead; see
+	// stepAsideClient.
+	stepAsideRaft stepAsideRaft
 }
 
 // SetPAMAuthenticator wires PAM login support after construction (ADR-
@@ -778,13 +794,22 @@ func (s *Server) DeleteAssumptionClaim(_ context.Context, req *rpcpb.DeleteAssum
 // reasoning), duplicated across the package boundary for the same
 // reason defaultPeerManagerdPort is.
 func (s *Server) peerManagerdAddr(leaderHint string) string {
-	port := s.peerManagerdPort
+	return peerManagerdAddrOf(leaderHint, s.peerManagerdPort)
+}
+
+// peerManagerdAddrOf is that same transformation as a free function, so
+// a caller holding only a port string (restartStepAsider, which resolves
+// a member's address from raft membership rather than from a leader
+// hint) uses one implementation of it rather than a second copy that
+// could drift.
+func peerManagerdAddrOf(raftAddr, managerdPort string) string {
+	port := managerdPort
 	if port == "" {
 		port = defaultPeerManagerdPort
 	}
-	host, _, err := net.SplitHostPort(leaderHint)
+	host, _, err := net.SplitHostPort(raftAddr)
 	if err != nil {
-		host = leaderHint
+		host = raftAddr
 	}
 	return net.JoinHostPort(host, port)
 }

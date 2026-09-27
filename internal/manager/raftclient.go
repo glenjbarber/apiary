@@ -149,6 +149,15 @@ func (c *RaftClient) ListPendingJoinRequestsLocal(ctx context.Context) (*interna
 	return c.client.ListPendingJoinRequestsLocal(ctx, &internalpb.ListPendingJoinRequestsRequest{})
 }
 
+// StepAsideForRestartLocal is ADR-0145's confirmed leadership
+// step-aside, reached over this node's own raftd socket. It is
+// deliberately not leader-only and deliberately not forwarded: it acts
+// on whichever node serves the request, and the answer names that node
+// (see raftd.proto's own doc comment on the same RPC).
+func (c *RaftClient) StepAsideForRestartLocal(ctx context.Context, timeoutMs uint64) (*internalpb.StepAsideForRestartResponse, error) {
+	return c.client.StepAsideForRestartLocal(ctx, &internalpb.StepAsideForRestartRequest{TimeoutMs: timeoutMs})
+}
+
 // Close closes the underlying connection to raftd.
 func (c *RaftClient) Close() error {
 	return c.conn.Close()

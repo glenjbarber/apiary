@@ -440,6 +440,19 @@ const authenticatePasswordMethod = "/apiary.rpc.v1.ManagerService/AuthenticatePa
 const reserveRestartLeaseMethod = "/apiary.rpc.v1.ManagerService/ReserveRestartLease"
 const confirmRestartCompletedMethod = "/apiary.rpc.v1.ManagerService/ConfirmRestartCompleted"
 
+// stepAsideForRestartMethod (ADR-0145) is exempted from checkAuth for
+// the identical reason as the two above: it is not meant to be
+// reachable by any CreateAPIKey-issued credential at all, Admin or
+// otherwise. It exists so a coordinator can make an arbitrary Comb in
+// the Colony give up raft leadership, which is a step in a
+// cluster-wide restart - exactly the class of operation the dedicated
+// root-owned token was introduced for. The real boundary is again
+// entirely inside the handler (restartGuardrailTokenValid against
+// Server.restartGuardrailToken), and the response carries only what
+// this node observed about its own leadership; no Colony API key is
+// read, created, or required to reach it.
+const stepAsideForRestartMethod = "/apiary.rpc.v1.ManagerService/StepAsideForRestart"
+
 // authExemptMethods is every RPC that skips checkAuth's API-key role check,
 // each for the specific reason documented on its constant above. It is the
 // single definition AuthUnaryInterceptor consults, and TestRequiredRole_
@@ -453,6 +466,7 @@ var authExemptMethods = map[string]bool{
 	authenticatePasswordMethod:    true,
 	reserveRestartLeaseMethod:     true,
 	confirmRestartCompletedMethod: true,
+	stepAsideForRestartMethod:     true,
 }
 
 // restartGuardrailTokenValid reports whether presented matches configured

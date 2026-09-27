@@ -67,6 +67,7 @@ const (
 	ManagerService_PreflightRestartNodeService_FullMethodName = "/apiary.rpc.v1.ManagerService/PreflightRestartNodeService"
 	ManagerService_ReserveRestartLease_FullMethodName         = "/apiary.rpc.v1.ManagerService/ReserveRestartLease"
 	ManagerService_ConfirmRestartCompleted_FullMethodName     = "/apiary.rpc.v1.ManagerService/ConfirmRestartCompleted"
+	ManagerService_StepAsideForRestart_FullMethodName         = "/apiary.rpc.v1.ManagerService/StepAsideForRestart"
 	ManagerService_CreateNetwork_FullMethodName               = "/apiary.rpc.v1.ManagerService/CreateNetwork"
 	ManagerService_ListNetworks_FullMethodName                = "/apiary.rpc.v1.ManagerService/ListNetworks"
 	ManagerService_DeleteNetwork_FullMethodName               = "/apiary.rpc.v1.ManagerService/DeleteNetwork"
@@ -389,6 +390,28 @@ type ManagerServiceClient interface {
 	// closing it.
 	ReserveRestartLease(ctx context.Context, in *ReserveRestartLeaseRequest, opts ...grpc.CallOption) (*ReserveRestartLeaseResponse, error)
 	ConfirmRestartCompleted(ctx context.Context, in *ConfirmRestartCompletedRequest, opts ...grpc.CallOption) (*ConfirmRestartCompletedResponse, error)
+	// StepAsideForRestart asks THIS node to give up raft leadership (if it
+	// holds any) and report whether it is confirmed safe to restart
+	// (ADR-0145). It is the managerd-side reach for raftd's own local-only
+	// StepAsideForRestartLocal, and it exists because of a locality fact:
+	// raftd's internal RPC is a Unix socket, so a managerd on coordinator
+	// node X cannot call it on node Y. Without this forwarding surface the
+	// controlled update workflow can only ever step aside the node it is
+	// running on.
+	//
+	// It is deliberately NOT leader-forwarded, unlike every Apply-backed
+	// write above: the whole point is to act on the node that received the
+	// call, and forwarding to the leader would ask the wrong machine to
+	// stand down. A call naming a target_node_id other than this node is
+	// refused rather than honoured, so a misplaced call is visible instead
+	// of silently stepping aside somebody else. An empty target_node_id
+	// means "this node", which is what a same-node caller sends.
+	//
+	// Authorization matches ReserveRestartLease/ConfirmRestartCompleted
+	// exactly - a dedicated root-owned token comparison, NOT the
+	// Viewer/Admin role hierarchy, and NOT ordinary peer APIKey auth. It
+	// must not be reachable by any CreateAPIKey-issued credential.
+	StepAsideForRestart(ctx context.Context, in *StepAsideForRestartRequest, opts ...grpc.CallOption) (*StepAsideForRestartResponse, error)
 	// CreateNetwork/ListNetworks/DeleteNetwork manage NetworkDefinitions -
 	// VLAN/subnet/bridge segments a VM can attach to (see ADR-0022).
 	// CreateNetwork/DeleteNetwork just submit a Command through raft
@@ -1143,6 +1166,16 @@ func (c *managerServiceClient) ConfirmRestartCompleted(ctx context.Context, in *
 	return out, nil
 }
 
+func (c *managerServiceClient) StepAsideForRestart(ctx context.Context, in *StepAsideForRestartRequest, opts ...grpc.CallOption) (*StepAsideForRestartResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(StepAsideForRestartResponse)
+	err := c.cc.Invoke(ctx, ManagerService_StepAsideForRestart_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *managerServiceClient) CreateNetwork(ctx context.Context, in *CreateNetworkRequest, opts ...grpc.CallOption) (*CreateNetworkResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(CreateNetworkResponse)
@@ -1862,6 +1895,28 @@ type ManagerServiceServer interface {
 	// closing it.
 	ReserveRestartLease(context.Context, *ReserveRestartLeaseRequest) (*ReserveRestartLeaseResponse, error)
 	ConfirmRestartCompleted(context.Context, *ConfirmRestartCompletedRequest) (*ConfirmRestartCompletedResponse, error)
+	// StepAsideForRestart asks THIS node to give up raft leadership (if it
+	// holds any) and report whether it is confirmed safe to restart
+	// (ADR-0145). It is the managerd-side reach for raftd's own local-only
+	// StepAsideForRestartLocal, and it exists because of a locality fact:
+	// raftd's internal RPC is a Unix socket, so a managerd on coordinator
+	// node X cannot call it on node Y. Without this forwarding surface the
+	// controlled update workflow can only ever step aside the node it is
+	// running on.
+	//
+	// It is deliberately NOT leader-forwarded, unlike every Apply-backed
+	// write above: the whole point is to act on the node that received the
+	// call, and forwarding to the leader would ask the wrong machine to
+	// stand down. A call naming a target_node_id other than this node is
+	// refused rather than honoured, so a misplaced call is visible instead
+	// of silently stepping aside somebody else. An empty target_node_id
+	// means "this node", which is what a same-node caller sends.
+	//
+	// Authorization matches ReserveRestartLease/ConfirmRestartCompleted
+	// exactly - a dedicated root-owned token comparison, NOT the
+	// Viewer/Admin role hierarchy, and NOT ordinary peer APIKey auth. It
+	// must not be reachable by any CreateAPIKey-issued credential.
+	StepAsideForRestart(context.Context, *StepAsideForRestartRequest) (*StepAsideForRestartResponse, error)
 	// CreateNetwork/ListNetworks/DeleteNetwork manage NetworkDefinitions -
 	// VLAN/subnet/bridge segments a VM can attach to (see ADR-0022).
 	// CreateNetwork/DeleteNetwork just submit a Command through raft
@@ -2273,6 +2328,9 @@ func (UnimplementedManagerServiceServer) ReserveRestartLease(context.Context, *R
 }
 func (UnimplementedManagerServiceServer) ConfirmRestartCompleted(context.Context, *ConfirmRestartCompletedRequest) (*ConfirmRestartCompletedResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ConfirmRestartCompleted not implemented")
+}
+func (UnimplementedManagerServiceServer) StepAsideForRestart(context.Context, *StepAsideForRestartRequest) (*StepAsideForRestartResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method StepAsideForRestart not implemented")
 }
 func (UnimplementedManagerServiceServer) CreateNetwork(context.Context, *CreateNetworkRequest) (*CreateNetworkResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method CreateNetwork not implemented")
@@ -3269,6 +3327,24 @@ func _ManagerService_ConfirmRestartCompleted_Handler(srv interface{}, ctx contex
 	return interceptor(ctx, in, info, handler)
 }
 
+func _ManagerService_StepAsideForRestart_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(StepAsideForRestartRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ManagerServiceServer).StepAsideForRestart(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ManagerService_StepAsideForRestart_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ManagerServiceServer).StepAsideForRestart(ctx, req.(*StepAsideForRestartRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _ManagerService_CreateNetwork_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(CreateNetworkRequest)
 	if err := dec(in); err != nil {
@@ -4240,6 +4316,10 @@ var ManagerService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ConfirmRestartCompleted",
 			Handler:    _ManagerService_ConfirmRestartCompleted_Handler,
+		},
+		{
+			MethodName: "StepAsideForRestart",
+			Handler:    _ManagerService_StepAsideForRestart_Handler,
 		},
 		{
 			MethodName: "CreateNetwork",

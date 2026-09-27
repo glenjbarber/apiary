@@ -900,6 +900,27 @@ func (p *PeerReporter) ConfirmRestartCompleted(ctx context.Context, addr string,
 	return client.ConfirmRestartCompleted(ctx, req)
 }
 
+// StepAsideForRestart reaches the target Comb's own managerd StepAside-
+// ForRestart RPC, which performs the step on that node's own raftd
+// (ADR-0145). It is the one RPC above that is deliberately NOT
+// leader-forwarded - forwarding it would ask the leader to stand down on
+// another node's behalf, which is the opposite of the intent - so this
+// method dials the target directly and does no leader-hint retry.
+//
+// It dials with dialRestartGuardrail (p.RestartGuardrailToken), like
+// ReserveRestartLease/ConfirmRestartCompleted above and for the same
+// reason: the receiving handler authorizes it by the dedicated token
+// comparison, not by the API-key role hierarchy. Using p.dial here would
+// attach p.APIKey and be rejected.
+func (p *PeerReporter) StepAsideForRestart(ctx context.Context, addr string, req *rpcpb.StepAsideForRestartRequest) (*rpcpb.StepAsideForRestartResponse, error) {
+	conn, client, err := p.dialRestartGuardrail(addr)
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close()
+	return client.StepAsideForRestart(ctx, req)
+}
+
 func (p *PeerReporter) RejectJoinRequest(ctx context.Context, addr string, req *rpcpb.RejectJoinRequestRequest) (*rpcpb.RejectJoinRequestResponse, error) {
 	conn, client, err := p.dial(addr)
 	if err != nil {
