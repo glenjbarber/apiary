@@ -289,3 +289,38 @@ func TestManager_StatePath_IsScopedPerBridgeAndTap(t *testing.T) {
 		t.Errorf("statePath() = %q, want %q", got, want)
 	}
 }
+
+// The bridge and tap names are interpolated into a shell script at(1) runs as
+// root, and joined into a state-file path. The package must refuse anything
+// that is not a plain interface name, without depending on its callers.
+func TestArmTapRevert_RefusesUnsafeInterfaceNames(t *testing.T) {
+	bad := []string{
+		"", "bridge0; reboot", "bridge0 || true", "$(id)", "`id`", "a b", "a\nb",
+		"../etc/passwd", "a/b", "-x", "aaaaaaaaaaaaaaaa", "bridge0'", "bridge0\"",
+	}
+	for _, name := range bad {
+		for _, pair := range [][2]string{{name, "tap0"}, {"bridge0", name}} {
+			fake := newFakeAtRunner()
+			m := newTestManager(t, fake)
+			if err := m.ArmTapRevert(context.Background(), pair[0], pair[1]); err == nil {
+				t.Errorf("ArmTapRevert(%q, %q) succeeded, want a refusal", pair[0], pair[1])
+			}
+			if len(fake.scheduled) != 0 {
+				t.Errorf("ArmTapRevert(%q, %q) scheduled a root job: %v", pair[0], pair[1], fake.scheduled)
+			}
+			if err := m.ConfirmBridgeHealthy(context.Background(), pair[0], pair[1]); err == nil {
+				t.Errorf("ConfirmBridgeHealthy(%q, %q) succeeded, want a refusal", pair[0], pair[1])
+			}
+		}
+	}
+}
+
+func TestArmTapRevert_AcceptsRealInterfaceNames(t *testing.T) {
+	for _, name := range []string{"bridge0", "tap12", "em0.90", "vlan_100", "epair0a", "apiary-br0"} {
+		fake := newFakeAtRunner()
+		m := newTestManager(t, fake)
+		if err := m.ArmTapRevert(context.Background(), name, "tap0"); err != nil {
+			t.Errorf("ArmTapRevert(%q, tap0) = %v, want it accepted", name, err)
+		}
+	}
+}

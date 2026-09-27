@@ -91,6 +91,35 @@ func (m *Manager) statePath(bridge, tap string) string {
 	return filepath.Join(m.StateDir, "deadman-"+bridge+"-"+tap+".json")
 }
 
+// validIfaceName reports whether name is safe to use as a network interface
+// name here: it is interpolated unquoted into a shell script that at(1) runs
+// as root, and joined into a state-file path. A real FreeBSD interface name is
+// at most 15 characters of letters, digits, '.', '_' and '-'. A leading '-' is
+// refused because ifconfig would read it as an option. The callers validate
+// their own configuration first (nodeconfig checks bhyve_bridge), but this
+// package must not depend on that to stay safe.
+func validIfaceName(name string) bool {
+	if name == "" || len(name) > 15 || name[0] == '-' {
+		return false
+	}
+	for i := 0; i < len(name); i++ {
+		c := name[i]
+		switch {
+		case c >= 'a' && c <= 'z', c >= 'A' && c <= 'Z', c >= '0' && c <= '9', c == '.', c == '_', c == '-':
+		default:
+			return false
+		}
+	}
+	return true
+}
+
+func checkIfaceNames(bridge, tap string) error {
+	if !validIfaceName(bridge) || !validIfaceName(tap) {
+		return fmt.Errorf("deadman: refusing invalid interface name (bridge %q, tap %q): each must be at most 15 characters of letters, digits, '.', '_' or '-', not starting with '-'", bridge, tap)
+	}
+	return nil
+}
+
 // ArmTapRevert schedules (via at(8)) a job that removes tap from bridge
 // unless ConfirmBridgeHealthy cancels it first - a no-op if a job is
 // already pending for this exact (bridge, tap) pair, checked against
@@ -100,6 +129,9 @@ func (m *Manager) statePath(bridge, tap string) string {
 func (m *Manager) ArmTapRevert(ctx context.Context, bridge, tap string) error {
 	if m.StateDir == "" {
 		return fmt.Errorf("deadman: StateDir must be set")
+	}
+	if err := checkIfaceNames(bridge, tap); err != nil {
+		return err
 	}
 	state, err := m.load(bridge, tap)
 	if err != nil {
@@ -133,6 +165,9 @@ func (m *Manager) ArmTapRevert(ctx context.Context, bridge, tap string) error {
 // later new tap join on the same bridge re-arms a fresh job independently
 // - confirming one tap says nothing about a different one.
 func (m *Manager) ConfirmBridgeHealthy(ctx context.Context, bridge, tap string) error {
+	if err := checkIfaceNames(bridge, tap); err != nil {
+		return err
+	}
 	state, err := m.load(bridge, tap)
 	if err != nil {
 		return err
