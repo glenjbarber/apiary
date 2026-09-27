@@ -356,11 +356,28 @@ election window.
 
 The token is now provisioned: one identical 45-byte
 `/usr/local/etc/apiary/restart-guardrail-token` (mode 0600, root-owned)
-on all four Combs, byte-identical by SHA-256, and every service is
-running build `1972a8600851`. §6's verification was then run against the
-real four-voter cluster, and it found two defects that no amount of
-in-process testing had. Both are fixed; the fixes are described here
-because the reasoning, not just the diff, is what should survive.
+on all four Combs, byte-identical by SHA-256. §6's verification was
+then run against the real four-voter cluster, and it found two defects
+that no amount of in-process testing had. Both are fixed; the fixes
+are described here because the reasoning, not just the diff, is what
+should survive.
+
+### A correction to the build claim in this section's first draft
+
+An earlier revision of this section said "every service is running build
+`1972a8600851`". That was wrong, and the error is instructive enough to
+record rather than quietly edit. `make update` installs the full
+`INSTALL_SRCS` (so the on-disk `raftd` binary *was* replaced) but
+restarts only `INSTALL_SRCS_FILTERED`, which excludes `raftd` by
+design. So the binaries on disk said `1972a86` while the `raftd`
+*processes* were still the older build. Reading a binary's `-version`
+and concluding that the running service is that build conflates the
+artifact with the process; only the process answers the question. The
+rule is: the artifact identity proves what is on disk, and process
+inspection proves what is running. Until `INSTALL_SRCS_FILTERED` can be
+removed (see below), they are different builds after every deploy, and
+evidence that needs "the running binary is X" must come from the
+process.
 
 ### What was verified, and what it proves
 

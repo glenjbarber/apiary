@@ -197,8 +197,41 @@ func run() error {
 	// not an error: it just means this node can never grant/forward
 	// these two calls until an operator provisions one identically
 	// across every node.
+	//
+	// The warning below is written against what actually needs the token
+	// rather than against "the guardrail" in general, because the honest
+	// blast radius is narrower than it first looks and a broader claim
+	// would be its own kind of lie. Precisely, on a node with no token:
+	//
+	//   - RestartNodeService's own reservation (reserveRestartLease) is
+	//     in-process and unchecked, so this node can still GRANT a lease.
+	//   - A reservation on a non-leader FORWARDS to the leader, and that
+	//     forward presents the token. No token here means the leader
+	//     refuses the forward, so a follower cannot start a guarded
+	//     restart at all.
+	//   - The restarted service confirms by presenting the token over the
+	//     wire: cmd/raftd calls the exported ConfirmRestartCompleted, so a
+	//     raftd lease granted here can never be confirmed. The lease has
+	//     no TTL, so it stays held and blocks every later attempt.
+	//   - cmd/managerd's own restart is the exception: it calls
+	//     ConfirmRestartCompletedLocal, which skips the token check
+	//     entirely, because it is the same process confirming on its own
+	//     behalf.
 	const restartGuardrailTokenPath = "/usr/local/etc/apiary/restart-guardrail-token"
 	restartGuardrailToken := ""
+	// tokenAbsent is the operator-facing consequence, worded once and
+	// reused for "no file", "empty file" and "unreadable file", which are
+	// the same operational situation by different causes.
+	tokenAbsent := func(cause string) string {
+		return fmt.Sprintf("managerd: %s - no usable restart-guardrail token on this node (%s). "+
+			"A guarded restart of apiary_raftd can still be GRANTED here but can never be CONFIRMED, "+
+			"because the restarted raftd presents this token to managerd when it starts, and the lease "+
+			"has no TTL, so it stays held and blocks every later restart attempt. "+
+			"A guarded restart requested at this node also cannot be forwarded to the leader, because the "+
+			"forward presents the same token. managerd's own restart is unaffected: it confirms in-process "+
+			"with no token. The token is read ONCE at startup, so provision the file on every Comb and "+
+			"then restart this service", restartGuardrailTokenPath, cause)
+	}
 	if data, err := os.ReadFile(restartGuardrailTokenPath); err == nil {
 		restartGuardrailToken = strings.TrimSpace(string(data))
 		if restartGuardrailToken == "" {
@@ -207,8 +240,8 @@ func run() error {
 			// be a mistake (a truncated heredoc, an editor that saved
 			// nothing) as an intentional choice. Staying silent about
 			// it is how a node ends up looking configured while being
-			// unable to forward a single guarded restart.
-			log.Printf("managerd: %s is empty - this node can act on its own restart guardrail but cannot forward one to the leader; the cluster stays blocked for every other node until the file holds the same token everywhere", restartGuardrailTokenPath)
+			// unable to forward or confirm a single guarded restart.
+			log.Print(tokenAbsent("the file is empty"))
 		}
 	} else if os.IsNotExist(err) {
 		// Same reasoning, and this is the case that actually occurred in
@@ -219,9 +252,9 @@ func run() error {
 		// the local node was at fault - that the "restart-guardrail
 		// token" was invalid. cmd/raftd has always warned in this
 		// situation; managerd now does too.
-		log.Printf("managerd: no %s on this node - guarded restarts initiated here cannot be forwarded to the leader, and any lease this node grants it cannot be confirmed; the token is read once at startup, so provision the file and restart this service", restartGuardrailTokenPath)
+		log.Print(tokenAbsent("no such file"))
 	} else {
-		log.Printf("managerd: reading %s: %v - the action-preflight restart guardrail will refuse every forwarded call until this is fixed", restartGuardrailTokenPath, err)
+		log.Print(tokenAbsent("reading it failed: " + err.Error()))
 	}
 	peers.RestartGuardrailToken = restartGuardrailToken
 
