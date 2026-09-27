@@ -102,6 +102,59 @@ func TestStateDigestBadgeCarriesItsExplanation(t *testing.T) {
 	}
 }
 
+// TestStateDigestBadgeRendersProvenDivergence closes the gap the
+// HTTP-level tests above cannot: this test server has no peer
+// forwarding, so no two differing digests can arrive through a real
+// request. It renders the template directly with the node set the
+// colony-wide comparison produced, which is the one path where the
+// diverged badge - the badge that matters - reaches real HTML.
+func TestStateDigestBadgeRendersProvenDivergence(t *testing.T) {
+	nodes := []clusterNodeView{
+		{NodeID: "brood.lab3.home.arpa", Reachable: true, HealthStatus: "healthy", StateDigest: "aaaa", AppliedIndex: 181},
+		{NodeID: "drone.lab3.home.arpa", Reachable: true, HealthStatus: "healthy", StateDigest: "aaaa", AppliedIndex: 181},
+		{NodeID: "buzz.lab3.home.arpa", Reachable: true, HealthStatus: "healthy", StateDigest: "aaaa", AppliedIndex: 181},
+		{NodeID: "sting.lab3.home.arpa", Reachable: true, HealthStatus: "healthy", StateDigest: "bbbb", AppliedIndex: 181},
+	}
+	views, colony := stateDigestVerdicts([]stateDigestObservation{
+		observed("brood.lab3.home.arpa", "aaaa", 181),
+		observed("drone.lab3.home.arpa", "aaaa", 181),
+		observed("buzz.lab3.home.arpa", "aaaa", 181),
+		observed("sting.lab3.home.arpa", "bbbb", 181),
+	})
+	for i := range nodes {
+		view := views[nodes[i].NodeID]
+		nodes[i].DigestState = view.State
+		nodes[i].DigestBadgeClass = view.BadgeClass
+		nodes[i].DigestBadgeLabel = view.Label
+		nodes[i].DigestDetail = view.Detail
+	}
+
+	s := newTestServer(t, &fakeClient{})
+	rec := httptest.NewRecorder()
+	s.render(rec, "cluster_overview_page", pageData{ClusterNodes: nodes, StateDigestColony: colony, ActivePage: "stats"})
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	body := rec.Body.String()
+
+	if !strings.Contains(body, "State differs") {
+		t.Errorf("page has no State differs badge for a proven divergence, got: %s", colonyExcerpt(body))
+	}
+	if strings.Contains(body, "State matches") {
+		t.Error("page shows a match badge on a colony whose state machines have diverged")
+	}
+	if !strings.Contains(body, colonyDivergedLabel) {
+		t.Errorf("page lacks the colony-level %q badge, got: %s", colonyDivergedLabel, colonyExcerpt(body))
+	}
+	// The rendered page must still carry the limitation, not just the
+	// alarm: an operator reading this must not conclude a named Comb is
+	// at fault.
+	if !strings.Contains(body, "does not say which side is wrong") {
+		t.Error("page renders the divergence without stating that the digest cannot identify the wrong side")
+	}
+}
+
 // colonyExcerpt returns the topology panel's digest sentence, or a short
 // marker when it is absent, so a failure message shows what was rendered
 // without dumping a whole page.
