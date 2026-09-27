@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"os"
 	"path/filepath"
 	"strings"
@@ -12,6 +13,9 @@ import (
 	"time"
 
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/metadata"
+	"google.golang.org/grpc/status"
 
 	rpcpb "github.com/glenjbarber/apiary/api/rpc"
 	"github.com/glenjbarber/apiary/internal/restartplan"
@@ -552,7 +556,7 @@ func (f *fakeConfirmCaller) ConfirmRestartCompleted(_ context.Context, in *rpcpb
 
 func newTestConfirmer(caller *fakeConfirmCaller) *managerdConfirmer {
 	c := &managerdConfirmer{callTimeout: time.Second}
-	c.newConn = func(context.Context, endpoint) (restartCompletedCaller, func() error, error) {
+	c.newConn = func(context.Context, endpoint, string) (restartCompletedCaller, func() error, error) {
 		return caller, func() error { return nil }, nil
 	}
 	return c
@@ -630,7 +634,7 @@ func TestManagerdConfirmerRefusalIsAnError(t *testing.T) {
 // listening at all.
 func TestManagerdConfirmerDialFailureIsAnError(t *testing.T) {
 	c := &managerdConfirmer{callTimeout: time.Second}
-	c.newConn = func(context.Context, endpoint) (restartCompletedCaller, func() error, error) {
+	c.newConn = func(context.Context, endpoint, string) (restartCompletedCaller, func() error, error) {
 		return nil, nil, errors.New("dialing local managerd at 127.0.0.1:17700: connect: connection refused")
 	}
 	err := c.ConfirmRestartCompleted(context.Background(), "apiary_raftd", "comb-a", 1)
@@ -647,7 +651,7 @@ func TestManagerdConfirmerClosesTheConnection(t *testing.T) {
 	var closed int
 	caller := &fakeConfirmCaller{resp: &rpcpb.ConfirmRestartCompletedResponse{Error: "not leader"}}
 	c := &managerdConfirmer{callTimeout: time.Second}
-	c.newConn = func(context.Context, endpoint) (restartCompletedCaller, func() error, error) {
+	c.newConn = func(context.Context, endpoint, string) (restartCompletedCaller, func() error, error) {
 		return caller, func() error { closed++; return nil }, nil
 	}
 	_ = c.ConfirmRestartCompleted(context.Background(), "apiary_raftd", "comb-a", 1)
@@ -673,5 +677,102 @@ func TestBearerToken(t *testing.T) {
 	// the gRPC layer would refuse to attach it at all.
 	if bearerToken("x").RequireTransportSecurity() {
 		t.Errorf("RequireTransportSecurity = true; this would prevent the credential being attached to a plaintext loopback dial")
+	}
+}
+
+// tokenCheckingManagerd is a real gRPC server standing in for managerd,
+// enforcing the one thing managerd's own exported ConfirmRestartCompleted
+// enforces: the restart-guardrail bearer token, compared byte for byte
+// the way internal/manager's restartGuardrailTokenValid does. It exists
+// so the production dial path can be tested against something that
+// actually refuses an uncredentialed call.
+type tokenCheckingManagerd struct {
+	rpcpb.UnimplementedManagerServiceServer
+
+	want string
+	got  string
+}
+
+func (t *tokenCheckingManagerd) ConfirmRestartCompleted(ctx context.Context, in *rpcpb.ConfirmRestartCompletedRequest) (*rpcpb.ConfirmRestartCompletedResponse, error) {
+	md, _ := metadata.FromIncomingContext(ctx)
+	// Joined rather than indexed: a tokenless call sends no header at
+	// all, and an absent header is a case this double has to report
+	// rather than panic on.
+	t.got = strings.Join(md.Get("authorization"), ",")
+	if t.got != "Bearer "+t.want {
+		return nil, status.Error(codes.PermissionDenied, "invalid or missing restart-guardrail token")
+	}
+	return &rpcpb.ConfirmRestartCompletedResponse{}, nil
+}
+
+// TestManagerdConfirmerPresentsTheTokenOverARealDial drives the real
+// dialManagerd - the function production actually uses - against a real
+// gRPC server, with no stub anywhere.
+//
+// It exists because of the bug it is named for. bearerToken was defined,
+// was correct, and had its own passing unit test asserting it produced
+// "Bearer s3cret", while dialManagerd never attached it to the dial. So
+// raftd presented no Authorization header, every confirmation attempt
+// came back "PermissionDenied: invalid or missing restart-guardrail
+// token" on a node whose token file was present and correct, and the
+// lease stayed held. Every other test in this file substitutes newConn,
+// so every one of them passed while the production path was broken. A
+// stubbed newConn cannot see a credential that is never handed to it;
+// only a real dial can.
+func TestManagerdConfirmerPresentsTheTokenOverARealDial(t *testing.T) {
+	const token = "guardrail-token-for-this-test"
+
+	srv := &tokenCheckingManagerd{want: token}
+	lis, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	gs := grpc.NewServer()
+	rpcpb.RegisterManagerServiceServer(gs, srv)
+	go func() { _ = gs.Serve(lis) }()
+	defer gs.Stop()
+
+	c := &managerdConfirmer{
+		ep:          endpoint{addr: lis.Addr().String()},
+		token:       token,
+		callTimeout: 5 * time.Second,
+		newConn:     dialManagerd,
+	}
+
+	if err := c.ConfirmRestartCompleted(context.Background(), "apiary_raftd", "comb-a", 7); err != nil {
+		t.Fatalf("ConfirmRestartCompleted over a real dial: %v", err)
+	}
+	if srv.got != "Bearer "+token {
+		t.Errorf("server saw authorization = %q, want %q - the token is not reaching the wire", srv.got, "Bearer "+token)
+	}
+}
+
+// TestManagerdConfirmerPresentsNoCredentialWithoutAToken is the other
+// half: a node with no token provisioned must present nothing rather than
+// an empty bearer, so the failure the operator sees is managerd's honest
+// "invalid or missing restart-guardrail token" rather than a header that
+// looks authenticated and is not.
+func TestManagerdConfirmerPresentsNoCredentialWithoutAToken(t *testing.T) {
+	srv := &tokenCheckingManagerd{want: "never-matches"}
+	lis, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	gs := grpc.NewServer()
+	rpcpb.RegisterManagerServiceServer(gs, srv)
+	go func() { _ = gs.Serve(lis) }()
+	defer gs.Stop()
+
+	c := &managerdConfirmer{
+		ep:          endpoint{addr: lis.Addr().String()},
+		callTimeout: 5 * time.Second,
+		newConn:     dialManagerd,
+	}
+	err = c.ConfirmRestartCompleted(context.Background(), "apiary_raftd", "comb-a", 7)
+	if err == nil {
+		t.Fatalf("a tokenless confirmation returned nil; the server should have refused it")
+	}
+	if srv.got != "" {
+		t.Errorf("server saw authorization = %q, want no header at all", srv.got)
 	}
 }

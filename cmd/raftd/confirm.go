@@ -432,8 +432,14 @@ type managerdConfirmer struct {
 
 	// newConn is a field so a test can exercise ConfirmRestartCompleted's
 	// response handling against a real in-process gRPC server without
-	// depending on the production dial path's transport setup.
-	newConn func(ctx context.Context, ep endpoint) (restartCompletedCaller, func() error, error)
+	// depending on the production dial path's transport setup - and,
+	// separately, so a test can drive the production dial path itself
+	// (TestManagerdConfirmerPresentsTheTokenOverARealDial). token is a
+	// parameter for the reason given on dialManagerd: the one bug this
+	// hook shipped with was a credential that existed and was never
+	// passed, and a signature that cannot be satisfied without it is
+	// cheaper than another live cluster to find it on.
+	newConn func(ctx context.Context, ep endpoint, token string) (restartCompletedCaller, func() error, error)
 }
 
 // restartCompletedCaller is the one RPC method this hook needs, named so
@@ -464,7 +470,7 @@ func newManagerdConfirmer(logf func(format string, args ...any)) restartplan.Con
 }
 
 // dialManagerd opens a gRPC connection to local managerd.
-func dialManagerd(ctx context.Context, ep endpoint) (restartCompletedCaller, func() error, error) {
+func dialManagerd(ctx context.Context, ep endpoint, token string) (restartCompletedCaller, func() error, error) {
 	var opts []grpc.DialOption
 	if ep.useTLS {
 		cfg := &tls.Config{}
@@ -477,6 +483,31 @@ func dialManagerd(ctx context.Context, ep endpoint) (restartCompletedCaller, fun
 		opts = append(opts, grpc.WithTransportCredentials(credentials.NewTLS(cfg)))
 	} else {
 		opts = append(opts, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	}
+	// The token is an explicit ARGUMENT here rather than something
+	// dialManagerd reaches for, and that is deliberate. It was not
+	// attached at all for one release: bearerToken existed, was correct,
+	// and was unit-tested in isolation, but no call site ever put it in
+	// these opts - so raftd dialled managerd, presented no Authorization
+	// header, and every confirmation attempt came back "PermissionDenied:
+	// invalid or missing restart-guardrail token". Live verification on
+	// a four-voter cluster caught it, five attempts in a row, leaving a
+	// lease held and a service that could not be restarted again.
+	//
+	// Nothing about that symptom points at this function: managerd
+	// reports a bad token on a node whose token file is present and
+	// provably correct, which reads like a provisioning fault and sends
+	// an operator to re-copy a token that was never wrong. Making the
+	// token a parameter means no future edit can quietly drop it, and
+	// TestManagerdConfirmerPresentsTheTokenOverARealDial drives this
+	// function against a real gRPC server rather than a stub, because a
+	// stub is exactly what let the omission through.
+	//
+	// An empty token attaches nothing, as internal/manager's own dialling
+	// does, so a node with no token provisioned still fails at the far
+	// end with the far end's own honest message.
+	if token != "" {
+		opts = append(opts, grpc.WithPerRPCCredentials(bearerToken(token)))
 	}
 	conn, err := grpc.NewClient(ep.addr, opts...)
 	if err != nil {
@@ -495,7 +526,7 @@ func dialManagerd(ctx context.Context, ep endpoint) (restartCompletedCaller, fun
 // still-held lease as released, which is precisely the failure this
 // whole mechanism exists to make impossible.
 func (c *managerdConfirmer) ConfirmRestartCompleted(ctx context.Context, service, nodeID string, leaseID uint64) error {
-	caller, closeConn, err := c.newConn(ctx, c.ep)
+	caller, closeConn, err := c.newConn(ctx, c.ep, c.token)
 	if err != nil {
 		return err
 	}

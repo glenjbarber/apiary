@@ -398,6 +398,29 @@ The cooldown result in particular is the one that shows the whole loop
 is real: the refusal is generated from replicated FSM state written by a
 different node, not from anything local to the caller.
 
+### The first real guarded raftd restart (2026-09-27, build `6697b92`)
+
+With Defects 1 and 2 fixed and deployed to a follower and the leader,
+`RestartNodeService("apiary_raftd")` on `brood` was run for real:
+
+| Check | Result |
+| --- | --- |
+| Preflight on a follower | `allow` |
+| Preflight on the leader | `block`, citing `raftd-leader-restart` with evidence |
+| Preflight on the leader, forced | `allow` — force downgrades a known Block |
+| Preflight of `sshd` | `block`, "cannot be restarted from Apiary" |
+| `RestartNodeService` on the follower | accepted, `scheduled=true` |
+| Second request 73ms later | **refused**: lease already held by `brood`, with the request time |
+| The restarted `raftd` | new process, new PID, build `6697b92` — the first raftd to run the new code |
+| Lease | granted as 149, and then **not** confirmed — see Defect 3 |
+
+The second row of that table is the concurrency proof, and it was caught
+by accident rather than by a synchronised test: the two requests were
+issued back to back from one shell and the second landed 73ms behind the
+first. That the guardrail refused on replicated FSM state, naming the
+holder and the request time, is the whole point of ADR-0103's cooldown
+and lease machinery, observed live.
+
 ### Defect 1: the leader was judging its own raftd, not the target's
 
 `evaluateRaftdQuorumSafety` hardcoded `s.nodeID` as the target and read
@@ -439,6 +462,56 @@ suffrage still gets Allow, and a target absent from the membership is
 reported as a fact that could not be established, which is Unknown.
 Unknown is not rescuable by `force`, so the refusal is fail-closed.
 
+### Defect 3: the confirmation never presented the token
+
+Found by the first real guarded `RestartNodeService` on a follower, which
+is the only way to reach it: the lease was granted, the pending record
+was written, the new `raftd` started, found its predecessor's record, and
+then failed all five confirmation attempts with
+
+> `PermissionDenied: invalid or missing restart-guardrail token`
+
+on a node whose token file was present, mode 0600, and byte-identical to
+the other three Combs' — and where the *reservation* had been accepted
+seconds earlier by the very same managerd, presenting the very same file.
+
+Both facts are true because the two paths read the file differently.
+`cmd/raftd`'s confirmer defined a `bearerToken` credential type, with a
+doc comment explaining that it mirrors `internal/manager`'s
+`extractBearerToken` contract, and `dialManagerd` simply never attached
+it to the dial. So `raftd` presented no `Authorization` header at all,
+and managerd's constant-time compare of `""` against a real token fails,
+which is the correct behaviour of the check and the wrong behaviour of
+the caller.
+
+The reason no test caught it is the part worth keeping. `bearerToken` had
+its own passing unit test asserting it produced `Bearer s3cret`.
+Everything else in `confirm_test.go` substitutes the `newConn` field with
+a stub, so every other test passed while the production dial path was
+broken — a stub cannot observe a credential that is never handed to it.
+The fix makes `token` an explicit parameter of the `newConn` signature,
+so the call site cannot be satisfied without it, and the regression test
+(`TestManagerdConfirmerPresentsTheTokenOverARealDial`) drives
+`dialManagerd` against a real in-process gRPC server that enforces the
+token the way managerd does. Reverting the fix turns that test red with
+the exact live error message.
+
+Two operational consequences, both now true the hard way:
+
+- **A failed confirmation is a stuck cluster, not a stuck node.** The
+  lease has no TTL, so a lease that is granted and never confirmed blocks
+  every subsequent `raftd` restart on every node until an operator forces
+  it. The node keeps serving perfectly throughout, which is precisely
+  what makes it easy to not notice. Recovery is `force` or a later
+  startup that succeeds.
+- **The durable result record is the only place the reason appears.**
+  The per-attempt errors go into
+  `/var/db/apiary/restart-plan/restart-result-<node>-<service>.json`
+  as `evidence`; the log line alone says only "could not confirm after 5
+  attempts". That is a deliberate consequence of §2's "report honestly,
+  never infer success", and it cost real time to read here. Anyone
+  debugging this should read the result file, not just the log.
+
 ### Also fixed, found in the same pass
 
 **Preflight reported `allow` for services that cannot be restarted.**
@@ -467,13 +540,10 @@ startup log line.
 
 ### Still not verified
 
-**No raftd restart has yet completed through this path**, because
-Defect 1 blocked the follower case on the deployed build. What remains
-is: a real guarded `RestartNodeService` on a follower, the new `raftd`
-confirming its lease on startup with the token, a second simultaneous
-request refused by the replicated lease, and a leader restart
-deliberately forced. The leader-restart *rule* is verified live (§6 row
-2 above) but has not been executed.
+**A leader restart is still untested.** The rule is verified live (§6
+rows 2 and 3) and a forced leader restart remains outstanding. A follower
+restart is now verified end to end, including the concurrency refusal
+and the cooldown that follows a confirmed release.
 
 **`make update` still cannot restart raftd,** and nothing here changes
 that. `INSTALL_SRCS_FILTERED` stays until `update` has a client that can
