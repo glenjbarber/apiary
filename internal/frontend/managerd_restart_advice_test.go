@@ -48,7 +48,7 @@ func TestMachineManagerdRow_NamesTheCheckoutForForceRestart(t *testing.T) {
 	// Scope the assertions to the managerd row itself, not the page. The
 	// Cloudflare panel on this same page names the same two commands, so a
 	// whole-page check passes on the other panel's words and stops testing
-	// the row at all. A mutation that deleted ~/apiary from the row and
+	// the row at all. A mutation that deleted the checkout wording from the row and
 	// left it in the panel survived exactly that way once already.
 	row := body[strings.Index(body, "Cannot be restarted from here"):]
 	if j := strings.Index(row, "</tr>"); j >= 0 {
@@ -57,7 +57,8 @@ func TestMachineManagerdRow_NamesTheCheckoutForForceRestart(t *testing.T) {
 	for _, want := range []string{
 		"service apiary_managerd restart",
 		"make force-restart",
-		"~/apiary",
+		"source checkout",
+		"Makefile",
 		"scripts/record-forced-restart.sh",
 		"also restarts raftd",
 	} {
@@ -116,7 +117,8 @@ func TestCloudflarePanel_NamesTheCheckoutForForceRestart(t *testing.T) {
 			for _, want := range []string{
 				"service apiary_managerd restart",
 				"make force-restart",
-				"~/apiary",
+				"source checkout",
+				"Makefile",
 				"also restarts raftd",
 			} {
 				if !strings.Contains(panel, want) {
