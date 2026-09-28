@@ -2,9 +2,12 @@ package raft
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/hashicorp/raft"
 )
 
 // threeNodeCluster builds a real three-voter raft cluster on loopback
@@ -221,5 +224,99 @@ func TestStepAside_ResultDetailIsNeverEmpty(t *testing.T) {
 	}
 	if strings.TrimSpace(lres.Detail) == "" {
 		t.Error("leader result has empty Detail")
+	}
+}
+
+// TestAwaitAnotherLeader_WillNotAcceptThisNodeOrANamelessLeader covers
+// the confirmation loop directly, which StepAsideForRestart only ever
+// reaches on a handover the library has already reported complete - so
+// no other test in this file enters it on a deliberately wrong state.
+//
+// The loop is the whole of ADR-0145's safety claim on the raft side:
+// "the transfer future finished" is not "another voter is leading", and
+// only a re-read of real state says so. It has three clauses, and this
+// test pins the middle one - the nameless-leader guard - which nothing
+// else in the package reaches.
+//
+// WHAT THIS DOES AND DOES NOT KILL, measured on 2026-09-27 against
+// hashicorp/raft v1.8.0 rather than assumed:
+//
+//   - Dropping `leaderID != ""` is caught, and clearly: with a quorum
+//     lost, this node steps down while naming no leader, and the loop
+//     would otherwise report a confirmed handover with an empty leader
+//     name. That is the failure this whole check exists to prevent.
+//   - Dropping `string(leaderID) != self` is NOT caught, and cannot be
+//     against a real cluster. This node names itself in LeaderWithID()
+//     only while it is in state Leader, and setState clears the known
+//     leader before it changes the state (raft.go's own comment says so,
+//     and its implementation calls setLeader("", "") first). A reader
+//     can therefore observe an unnamed leader while still leading, but
+//     never this node's own id while no longer leading - the surviving
+//     `State() != raft.Leader` clause covers every window the removed
+//     one did. The two are redundant against this library version, and
+//     separating them would take a fake, which is precisely what this
+//     file's other tests exist to avoid.
+//   - Dropping `n.raft.State() != raft.Leader` is NOT caught, for the
+//     mirror reason: while this node still names itself as leader it is
+//     by definition still in state Leader, so the `!= self` clause
+//     covers it. The first case below therefore pins the pair, not
+//     either half - it fails if both are removed, and on neither alone.
+//
+// The two clauses this test cannot separate are recorded here rather
+// than papered over with a stub: a test that passed against those
+// mutations by construction would be worse than an honest gap.
+func TestAwaitAnotherLeader_WillNotAcceptThisNodeOrANamelessLeader(t *testing.T) {
+	nodes := threeNodeCluster(t)
+	leader := leaderOf(t, nodes)
+	self := leader.config.NodeID
+
+	// A node that is still the leader names ITSELF as the leader. A
+	// loop that only checked "leaderID != ''" would return here
+	// immediately and report a completed handover that never happened.
+	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	defer cancel()
+	got, err := leader.awaitAnotherLeader(ctx, self)
+	if err == nil {
+		t.Fatalf("awaitAnotherLeader() on the current leader returned (%q, nil); it accepted this node as its own successor", got)
+	}
+	if got != "" {
+		t.Errorf("awaitAnotherLeader() = %q on a failed confirmation, want empty: naming a leader that was never confirmed is how a restart gets authorized on a node that is still leading", got)
+	}
+	if !errors.Is(err, ErrStepAsideIncomplete) {
+		t.Errorf("err = %v, want it to wrap ErrStepAsideIncomplete so a caller can tell \"not confirmed\" from \"stopped working\"", err)
+	}
+	if !leader.Status().IsLeader {
+		t.Fatal("this node stopped leading during a check that only waited; nothing in this test should have moved leadership")
+	}
+
+	// Now the second guard. Shutting the other two voters down leaves
+	// this node leading a cluster with no quorum, and it steps down on
+	// its own leader-lease timeout - at which point LeaderWithID() is
+	// briefly empty and there is no new leader to name. A loop that
+	// accepted a nameless leader would answer "safe" here, on a
+	// leaderless cluster, which is the failure this whole check exists
+	// to prevent.
+	for _, n := range nodes {
+		if n != leader {
+			n.Shutdown()
+		}
+	}
+	eventually(t, 10*time.Second, func() bool { return leader.raft.State() != raft.Leader })
+
+	// A fresh wait, and only once the node really is a follower with
+	// nothing to name: if the state has already settled onto some other
+	// value the test has nothing to assert, so it says so rather than
+	// passing vacuously.
+	if _, id := leader.raft.LeaderWithID(); id != "" {
+		t.Skipf("this node still names leader %q after the quorum was lost; the nameless-leader window has already closed and this test cannot reach it", id)
+	}
+	ctx2, cancel2 := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	defer cancel2()
+	got2, err2 := leader.awaitAnotherLeader(ctx2, self)
+	if err2 == nil {
+		t.Fatalf("awaitAnotherLeader() on a leaderless cluster returned (%q, nil); it accepted an unnamed leader as a confirmed handover", got2)
+	}
+	if got2 != "" {
+		t.Errorf("awaitAnotherLeader() = %q with no leader in the cluster, want empty", got2)
 	}
 }

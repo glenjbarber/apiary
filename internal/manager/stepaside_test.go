@@ -477,6 +477,159 @@ func TestStepAsiderDetailIsNeverEmpty(t *testing.T) {
 	}
 }
 
+// TestStepAsiderRemoteDetailFallbackIsNeverEmpty is the remote hop's
+// half of TestStepAsiderDetailIsNeverEmpty, which only ever sets a
+// local response and therefore leaves stepAsideOutcomeFromRPC's own
+// fallback unpinned: delete it and the local-hop test still passes.
+//
+// The three cases are exactly the three the fallback distinguishes, and
+// they are checked for exact equality rather than a substring, because
+// the whole point is that the prose an operator reads in a refused
+// restart's evidence names which of the three things actually happened.
+// A single generic "the step-aside did something" message satisfies
+// none of the claims the surrounding code makes about it.
+func TestStepAsiderRemoteDetailFallbackIsNeverEmpty(t *testing.T) {
+	cases := []struct {
+		name string
+		resp *rpcpb.StepAsideForRestartResponse
+		want string
+	}{
+		{
+			name: "not the leader",
+			resp: &rpcpb.StepAsideForRestartResponse{NodeId: "drone", SafeToRestart: true},
+			want: "drone was not the raft leader, so no leadership handover was needed",
+		},
+		{
+			name: "transferred to another voter",
+			resp: &rpcpb.StepAsideForRestartResponse{
+				NodeId:        "drone",
+				WasLeader:     true,
+				Transferred:   true,
+				NewLeaderId:   "buzz",
+				SafeToRestart: true,
+			},
+			want: "drone handed over leadership to buzz",
+		},
+		{
+			name: "leader with no confirmed handover",
+			resp: &rpcpb.StepAsideForRestartResponse{
+				NodeId:        "drone",
+				WasLeader:     true,
+				SafeToRestart: false,
+			},
+			want: "drone held raft leadership and reported no confirmed handover",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			peers := &fakeStepAsideForwarder{resp: tc.resp}
+			asider := &restartStepAsider{
+				localNodeID: "brood",
+				raft:        &fakeStepAsideRaft{servers: members()},
+				peers:       peers,
+			}
+
+			out, err := asider.StepAsideForRestart(context.Background(), "drone")
+			if err != nil {
+				t.Fatalf("StepAsideForRestart over the peer hop: %v", err)
+			}
+			if peers.callCount() != 1 {
+				t.Fatalf("the peer forwarder was called %d times, want exactly 1", peers.callCount())
+			}
+			// The fields have to be carried too, or the fallback could
+			// be producing the right sentence from the wrong answer.
+			if out.WasLeader != tc.resp.GetWasLeader() || out.Transferred != tc.resp.GetTransferred() ||
+				out.NewLeaderID != tc.resp.GetNewLeaderId() || out.SafeToRestart != tc.resp.GetSafeToRestart() {
+				t.Errorf("outcome = %+v, want it to carry the peer's own answer unchanged: %+v", out, tc.resp)
+			}
+			if out.Detail == "" {
+				t.Fatal("Detail is empty; a forwarded step-aside record with no prose cannot explain a restart later")
+			}
+			if out.Detail != tc.want {
+				t.Errorf("Detail = %q, want %q - a peer hop's fallback evidence has to name which of the three outcomes this was", out.Detail, tc.want)
+			}
+		})
+	}
+}
+
+// stepAsideWithoutPanicking calls the adapter and converts a panic into
+// a plain test failure. A nil raft client is a configuration state the
+// production code explicitly promises to refuse, and a nil-interface
+// dereference aborts the whole test binary rather than failing one test
+// - which would hide every other result in the package behind an
+// unrelated stack trace.
+func stepAsideWithoutPanicking(t *testing.T, asider *restartStepAsider, target string) (out restartplan.StepAsideOutcome, err error) {
+	t.Helper()
+	defer func() {
+		if r := recover(); r != nil {
+			t.Fatalf("StepAsideForRestart(%q) panicked with no raft client configured: %v\n"+
+				"the nil-raft guard must refuse rather than dereference: this panic is what a coordinator would see\n"+
+				"at the exact moment a Comb was about to be restarted", target, r)
+		}
+	}()
+	return asider.StepAsideForRestart(context.Background(), target)
+}
+
+// TestStepAsiderWithNoRaftClientRefusesWithoutTouchingIt is the
+// fail-closed guard itself, which no other test reaches: every existing
+// case here either has a raft client or never calls the adapter at all.
+// Delete the `a.raft == nil` half of the guard and this is what turns
+// from a clean refusal into a nil-interface panic.
+//
+// Both targets are covered because the guard is the only thing standing
+// between a nil client and two different dereferences - the local hop's
+// StepAsideForRestartLocal and the remote hop's membership read - and a
+// guard that only covers one of them covers the one a node is less
+// likely to hit.
+func TestStepAsiderWithNoRaftClientRefusesWithoutTouchingIt(t *testing.T) {
+	for _, target := range []string{"brood", "drone"} {
+		t.Run("target "+target, func(t *testing.T) {
+			// A peer forwarder and full membership are wired even
+			// though the raft client is absent: the point is that
+			// neither of them is consulted, not that the hop would
+			// otherwise work.
+			peers := &fakeStepAsideForwarder{resp: &rpcpb.StepAsideForRestartResponse{NodeId: "drone", SafeToRestart: true}}
+			asider := &restartStepAsider{
+				localNodeID:  "brood",
+				peers:        peers,
+				managerdPort: "17700",
+			}
+
+			out, err := stepAsideWithoutPanicking(t, asider, target)
+			if err == nil {
+				t.Error("err = nil, want a non-nil error: restartplan reads a nil error as a step that ran, and no step ran")
+			}
+			if out.SafeToRestart {
+				t.Error("SafeToRestart = true, want false: nothing was read about leadership, so nothing was confirmed")
+			}
+			if !strings.Contains(out.Detail, "no raft client configured") {
+				t.Errorf("Detail = %q, want it to name the missing raft client, since that is what an operator has to fix", out.Detail)
+			}
+			if n := peers.callCount(); n != 0 {
+				t.Errorf("with no raft client the adapter still made %d peer forward(s); the hop must be refused before any address is resolved", n)
+			}
+		})
+	}
+}
+
+// TestStepAsiderOnANilAdapterRefuses pins the other half of the same
+// guard. A nil StepAsider is a state restartplan documents as safe to
+// skip rather than call, so the method still owes a caller that does
+// call it a refusal rather than a dereference of the nil receiver.
+func TestStepAsiderOnANilAdapterRefuses(t *testing.T) {
+	var asider *restartStepAsider
+	out, err := stepAsideWithoutPanicking(t, asider, "drone")
+	if err == nil {
+		t.Error("err = nil on a nil adapter, want a refusal")
+	}
+	if out.SafeToRestart {
+		t.Error("SafeToRestart = true on a nil adapter, want false")
+	}
+	if !strings.Contains(out.Detail, "no raft client configured") {
+		t.Errorf("Detail = %q, want the same missing-raft-client refusal a non-nil adapter with no client gives", out.Detail)
+	}
+}
+
 // TestServerNewRestartStepAsiderDegradesSafely covers the wiring
 // decision. With a raft client there is a real reach; without one there
 // is nil, and nil is the safe degraded posture because restartplan then
@@ -625,6 +778,95 @@ func TestServerStepAsideForRestartHonoursACallerTimeout(t *testing.T) {
 	}
 	if got := raft.lastLocalTimeout(); got == 0 {
 		t.Error("with no caller timeout the wait must still be bounded, not unbounded")
+	}
+}
+
+// TestServerStepAsideForRestartReachesTheHandlerWithOnlyTheGuardrailToken
+// is the exemption in authExemptMethods, exercised through the real
+// AuthUnaryInterceptor over a real gRPC connection rather than by
+// calling the handler directly.
+//
+// Every other token test in this file and in restart_guardrail_test.go
+// calls Server.StepAsideForRestart (or the client stub) without ever
+// passing through the interceptor, so the authExemptMethods entry is
+// invisible to all of them: delete it and the whole file still passes.
+// In production that is not a no-op. A coordinator hops to a peer
+// presenting the restart-guardrail token and nothing else, by design
+// (see PeerReporter.StepAsideForRestart), and the moment that RPC
+// stops being exempt the hop is handed to checkAuth, which has never
+// heard of the guardrail token, and the cross-node step-aside fails
+// with a "missing or invalid API key" that names the wrong
+// credential entirely.
+//
+// The test therefore creates a real API key first. Without that,
+// checkAuth's own "no keys exist yet, so everything is open" branch
+// would let the call through whether or not the exemption existed,
+// and the test would prove nothing.
+func TestServerStepAsideForRestartReachesTheHandlerWithOnlyTheGuardrailToken(t *testing.T) {
+	raftdSocket := newRaftdUDSSocket(t)
+	client, srv := newManagerdRPCClientAndServer(t, raftdSocket, "raftd-1")
+	srv.SetRestartGuardrailToken("the-real-token")
+
+	ctx := context.Background()
+	createResp, err := client.CreateAPIKey(ctx, &rpcpb.CreateAPIKeyRequest{Name: "test-admin", Role: "admin"})
+	if err != nil || createResp.GetError() != "" {
+		t.Fatalf("CreateAPIKey() = (%+v, %v); auth must be enabled for this test to mean anything", createResp, err)
+	}
+
+	// Control: the guardrail token is not a Colony credential, so it
+	// must not open any ordinary RPC. If this ever passed, the
+	// assertion below would be vacuous.
+	if _, err := client.ListVMs(ctx, &rpcpb.ListVMsRequest{}); status.Code(err) != codes.Unauthenticated {
+		t.Fatalf("ListVMs with no credential = %v (code %v), want Unauthenticated: auth is on, and this is the control for the assertion below", err, status.Code(err))
+	}
+	guardrailCtx := metadata.NewOutgoingContext(ctx, metadata.Pairs("authorization", "Bearer the-real-token"))
+	if _, err := client.ListVMs(guardrailCtx, &rpcpb.ListVMsRequest{}); status.Code(err) != codes.Unauthenticated {
+		t.Fatalf("ListVMs with only the restart-guardrail token = %v (code %v), want Unauthenticated: the guardrail token must not authorize ordinary RPCs", err, status.Code(err))
+	}
+
+	resp, err := client.StepAsideForRestart(guardrailCtx, &rpcpb.StepAsideForRestartRequest{})
+	if err != nil {
+		t.Fatalf("StepAsideForRestart with only the restart-guardrail token: %v (code %v)\n"+
+			"the cross-node hop presents exactly this token and no API key, so an Unauthenticated here\n"+
+			"means the RPC is no longer exempt from checkAuth and every off-node step-aside is broken", err, status.Code(err))
+	}
+	// node_id is set by the handler itself and by nothing else, so it is
+	// the evidence that the call got past the interceptor rather than
+	// being answered by it.
+	if resp.GetNodeId() != "raftd-1" {
+		t.Errorf("NodeId = %q, want raftd-1: the handler names the node that answered, so this is how the call is attributed to the handler rather than the interceptor", resp.GetNodeId())
+	}
+
+	// The exemption must not have become a way to skip the handler's own
+	// boundary: the same request without the token is still refused, by
+	// the token check rather than by the interceptor.
+	if _, err := client.StepAsideForRestart(ctx, &rpcpb.StepAsideForRestartRequest{}); status.Code(err) != codes.PermissionDenied {
+		t.Errorf("StepAsideForRestart with no token = %v (code %v), want PermissionDenied from the handler's own guardrail-token check", err, status.Code(err))
+	}
+}
+
+// TestStepAsideForRestartIsExemptFromCheckAuth is the same claim at the
+// unit level, alongside the other exemptions in auth_test.go, and it
+// also pins the full-method string itself.
+//
+// The end-to-end test above would still pass if stepAsideForRestartMethod
+// were a typo that no RPC actually carries, because a method name that
+// is in the service descriptor and a constant that names it are two
+// separate facts. requiredRoleFor's own fail-closed default means a typo
+// would not open the RPC, it would make it Admin-only - so the
+// cross-node hop would break the same way, and for the same reason,
+// with nothing in the test suite noticing.
+func TestStepAsideForRestartIsExemptFromCheckAuth(t *testing.T) {
+	desc := rpcpb.ManagerService_ServiceDesc
+	want := "/" + desc.ServiceName + "/StepAsideForRestart"
+	if stepAsideForRestartMethod != want {
+		t.Errorf("stepAsideForRestartMethod = %q, want %q; a constant that does not name a real RPC exempts nothing", stepAsideForRestartMethod, want)
+	}
+	if !authExemptMethods[stepAsideForRestartMethod] {
+		t.Error("authExemptMethods has no entry for StepAsideForRestart; a guardrail-token-only peer hop would be sent to checkAuth and rejected for lacking an API key")
+	}
+	if _, listed := requiredRole[stepAsideForRestartMethod]; listed {
+		t.Error("StepAsideForRestart is in requiredRole as well as authExemptMethods; the two are alternative mechanisms and it should be exempt, not tiered")
 	}
 }
 
