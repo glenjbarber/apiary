@@ -452,6 +452,15 @@ func run() error {
 	srv := manager.NewServer(raftClient, id, isos, vncArg, serialLogArg, vlanArg, peers, resolvedPeerPort, zfsMgr, nodeConfigMgr, assumptionsMgr, assumptionStaleAfter, reconciler)
 	srv.SetHASTStatusReader(hastMgr)
 	srv.SetAssumptionRegister(registerMgr)
+	// ADR-0147 Part 4's join-window ceiling. Read straight off the
+	// already-validated cfg: nodeconfig refuses a present-but-non-
+	// positive colony_join_window_seconds at load time, so reaching
+	// here with nil means genuinely unset, and the managerd package's
+	// own DefaultColonyJoinWindowSeconds applies. Setter, not a
+	// NewServer parameter, for the same reason its neighbours are.
+	if cfg.ColonyJoinWindowSeconds != nil {
+		srv.SetColonyJoinWindowSeconds(*cfg.ColonyJoinWindowSeconds)
+	}
 	srv.SetOriginCAIssuer(cloudflare.OriginCAIssuer{})
 	// ADR-0102: wired unconditionally, same posture as nodeConfigMgr
 	// above - Load()/Save() on a missing file already behave correctly

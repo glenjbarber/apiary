@@ -24,6 +24,7 @@
   "peer_tls_hostname_map": "",
   "peer_tls_ca": "",
   "known_peer_addresses": "",
+  "colony_join_window_seconds": 900,
   "assumption_check_interval": 0,
   "assumption_heartbeat_interval": 0,
   "assumption_stale_after": 0,

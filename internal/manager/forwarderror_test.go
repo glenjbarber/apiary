@@ -115,6 +115,7 @@ func TestIntegration_CreateJail_ForwardingFailureSurfacedInError(t *testing.T) {
 	leaderSocket := newRaftdUDSSocket(t)
 	leaderClient := newManagerdRPCClient(t, leaderSocket)
 
+	openColonyJoinWindowForTest(t, leaderClient)
 	followerSocket := newJoinedFollowerRaftdSocket(t, leaderClient, "follower-1")
 	_, followerSrv := newManagerdRPCClientAndServer(t, followerSocket, "follower-1")
 

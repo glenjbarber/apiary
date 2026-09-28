@@ -684,6 +684,23 @@ func (f *fakeClient) SetNetworkName(_ context.Context, in *rpcpb.SetNetworkNameR
 	return &rpcpb.SetNetworkNameResponse{}, nil
 }
 
+// The three ADR-0147 Part 4 join-window methods are stubbed on this
+// fake rather than implemented: nothing in this package's tests
+// exercises a Colony join window, and a fake that stops satisfying
+// rpcpb.ManagerServiceClient is the intended compile-time signal that
+// the interface grew.
+func (f *fakeClient) OpenColonyJoinWindow(context.Context, *rpcpb.OpenColonyJoinWindowRequest, ...grpc.CallOption) (*rpcpb.OpenColonyJoinWindowResponse, error) {
+	return &rpcpb.OpenColonyJoinWindowResponse{}, nil
+}
+
+func (f *fakeClient) CloseColonyJoinWindow(context.Context, *rpcpb.CloseColonyJoinWindowRequest, ...grpc.CallOption) (*rpcpb.CloseColonyJoinWindowResponse, error) {
+	return &rpcpb.CloseColonyJoinWindowResponse{}, nil
+}
+
+func (f *fakeClient) GetColonyJoinWindow(context.Context, *rpcpb.GetColonyJoinWindowRequest, ...grpc.CallOption) (*rpcpb.GetColonyJoinWindowResponse, error) {
+	return &rpcpb.GetColonyJoinWindowResponse{}, nil
+}
+
 func (f *fakeClient) RequestJoinColony(_ context.Context, in *rpcpb.RequestJoinColonyRequest, _ ...grpc.CallOption) (*rpcpb.RequestJoinColonyResponse, error) {
 	f.lastRequestJoinColonyReq = in
 	if f.requestJoinColonyResp != nil {

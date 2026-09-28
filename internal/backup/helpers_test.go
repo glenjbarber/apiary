@@ -353,26 +353,48 @@ func populate(t *testing.T, v any, structName string) map[string]string {
 		if f.PkgPath != "" { // unexported
 			continue
 		}
-		fv := rv.Field(i)
-		switch fv.Kind() {
-		case reflect.String:
-			s := sentinelFor(structName, f.Name)
-			fv.SetString(s)
-			values[f.Name] = s
-		case reflect.Pointer:
-			b := true
-			p := reflect.New(fv.Type().Elem())
-			p.Elem().SetBool(b)
-			fv.Set(p)
-		case reflect.Bool:
-			fv.SetBool(true)
-		case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
-			fv.SetInt(4242)
-		case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
-			fv.SetUint(8484)
-		}
+		setSentinel(rv.Field(i), structName, f.Name, values)
 	}
 	return values
+}
+
+// setSentinel assigns v a distinctive, kind-appropriate value and records
+// string values in values so a caller can prove they did not survive.
+//
+// The pointer case recurses rather than assuming a bool, which is the
+// whole reason this is a function and not a loop. It used to do
+// `p.Elem().SetBool(true)` unconditionally, and that was a fixture that
+// lied: it only held while every pointer field in every config struct
+// happened to be a *bool. ADR-0147 Part 4 added
+// nodeconfig.Config.ColonyJoinWindowSeconds, a *int64 that is a pointer
+// precisely so that absent and zero are different claims, and the
+// fixture panicked on it with "reflect: call of
+// reflect.Value.SetBool on int64 Value" - a failure in the test
+// scaffolding, not in the code under test.
+//
+// The consequence of getting this wrong in the original direction is
+// worse than a panic, so it is worth stating: a *int64 set to 0 is
+// indistinguishable from an unset field to everything downstream, and a
+// nil pointer is a field the fixture never covered at all. Recursing
+// means a pointer field is populated the same way a value field is, so
+// a field cannot be silently skipped by being a pointer.
+func setSentinel(v reflect.Value, structName, fieldName string, values map[string]string) {
+	switch v.Kind() {
+	case reflect.String:
+		s := sentinelFor(structName, fieldName)
+		v.SetString(s)
+		values[fieldName] = s
+	case reflect.Pointer:
+		p := reflect.New(v.Type().Elem())
+		setSentinel(p.Elem(), structName, fieldName, values)
+		v.Set(p)
+	case reflect.Bool:
+		v.SetBool(true)
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+		v.SetInt(4242)
+	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+		v.SetUint(8484)
+	}
 }
 
 // fixtureOriginCerts returns an inventory entry whose key path is set,

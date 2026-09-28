@@ -101,6 +101,54 @@ func newManagerdRPCClient(t *testing.T, raftdSocket string) rpcpb.ManagerService
 	return newManagerdRPCClientWithVNC(t, raftdSocket, "manager-1", nil)
 }
 
+// openColonyJoinWindowForTest opens ADR-0147 Part 4's Colony join
+// window, which every join test needs before it can do anything at all.
+//
+// Part 4 inverted the default: the normal state of a Colony is CLOSED,
+// and a request arriving at a closed Colony is refused with a message
+// naming the fix. So a test that calls RequestJoinColony without
+// opening a window first is no longer testing the flow it was written
+// for - it is testing the closed-Colony refusal, once, accidentally.
+//
+// It is called explicitly in each test rather than folded into
+// newManagerdRPCClient, because the closed-Colony refusal is real
+// behavior that its own tests assert, and a harness that opened a
+// window for free would make that behavior untestable. The failure mode
+// this avoids is a harness that papers over a gate and then leaves the
+// gate with no coverage at all.
+//
+// No duration is requested, so the window opens at the configured
+// ceiling - the same value an operator gets by naming nothing, and the
+// default of 900 when managerd.json says nothing.
+//
+// It takes no context and opens its own. That is not a style choice: a
+// join request is bound to the window epoch it was created under, and a
+// request made while no window is open is invalid the moment one is
+// opened. So the window has to be open BEFORE the request exists, and a
+// helper that demanded the caller's context could only be called after
+// that caller had built its ctx - which in these tests is after the
+// request was seeded. Owning the context lets the call sit where the
+// ordering requires, rather than where the ctx happens to be declared.
+func openColonyJoinWindowForTest(t *testing.T, client rpcpb.ManagerServiceClient) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	resp, err := client.OpenColonyJoinWindow(ctx, &rpcpb.OpenColonyJoinWindowRequest{})
+	if err != nil {
+		t.Fatalf("OpenColonyJoinWindow() error: %v", err)
+	}
+	if resp.GetError() != "" {
+		t.Fatalf("OpenColonyJoinWindow() returned error: %s", resp.GetError())
+	}
+	w := resp.GetWindow()
+	if !w.GetEnabled() {
+		t.Fatalf("OpenColonyJoinWindow() = %+v, want an enabled window", resp)
+	}
+	if w.GetExpiresAtUnix() <= w.GetOpenedAtUnix() {
+		t.Fatalf("OpenColonyJoinWindow() = %+v, want a deadline strictly after the opening, not a zero-length window that would expire mid-test", resp)
+	}
+}
+
 // fakeVNCLookup is a fake VNCLookup for GetVMConsole tests, without any
 // real bhyve.Manager/RunDir involved.
 type fakeVNCLookup struct {
@@ -1307,6 +1355,7 @@ func TestIntegration_RequestJoinColony_NoCredentialNeeded(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
+	openColonyJoinWindowForTest(t, client)
 
 	resp, err := client.RequestJoinColony(ctx, &rpcpb.RequestJoinColonyRequest{NodeId: "node02", RaftBindAddress: "10.62.0.5:17600"})
 	if err != nil {
@@ -1418,6 +1467,7 @@ func TestIntegration_ApproveJoinRequest_AddsRealRaftVoter(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
+	openColonyJoinWindowForTest(t, client)
 
 	joiningNodeAddr := freeLoopbackAddr(t)
 	joiningNode, err := raftnode.New(raftnode.Config{NodeID: "node02", DataDir: t.TempDir(), BindAddr: joiningNodeAddr})
@@ -1505,6 +1555,7 @@ func TestIntegration_ApproveJoinRequest_DuplicateNodeIDRejected(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
+	openColonyJoinWindowForTest(t, client)
 
 	// Both node02 instances must be genuinely reachable (real raftnode.New
 	// listeners) - reqB's own address must pass ApproveJoinRequest's
@@ -1586,6 +1637,7 @@ func TestIntegration_ApproveJoinRequest_UnreachableNodeIsRefused(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
+	openColonyJoinWindowForTest(t, client)
 
 	reqResp, err := client.RequestJoinColony(ctx, &rpcpb.RequestJoinColonyRequest{NodeId: "node02", RaftBindAddress: "127.0.0.1:1"})
 	if err != nil || reqResp.GetError() != "" {
@@ -1622,6 +1674,7 @@ func TestIntegration_ApproveJoinRequest_ReachableNodeStillWorks(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
+	openColonyJoinWindowForTest(t, client)
 
 	joiningNodeAddr := freeLoopbackAddr(t)
 	joiningNode, err := raftnode.New(raftnode.Config{NodeID: "node02", DataDir: t.TempDir(), BindAddr: joiningNodeAddr})
@@ -1659,6 +1712,7 @@ func TestIntegration_UpdateVoterAddress_UpdatesRealRaftVoterAddress(t *testing.T
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
+	openColonyJoinWindowForTest(t, client)
 
 	firstAddr := freeLoopbackAddr(t)
 	firstNode, err := raftnode.New(raftnode.Config{NodeID: "node02", DataDir: t.TempDir(), BindAddr: firstAddr})
@@ -1747,6 +1801,7 @@ func TestIntegration_UpdateVoterAddress_UnreachableAddressRejected(t *testing.T)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
+	openColonyJoinWindowForTest(t, client)
 
 	joiningNodeAddr := freeLoopbackAddr(t)
 	joiningNode, err := raftnode.New(raftnode.Config{NodeID: "node02", DataDir: t.TempDir(), BindAddr: joiningNodeAddr})
@@ -1815,6 +1870,7 @@ func TestIntegration_RejectJoinRequest_ExcludedFromListAfterward(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
+	openColonyJoinWindowForTest(t, client)
 
 	reqResp, err := client.RequestJoinColony(ctx, &rpcpb.RequestJoinColonyRequest{NodeId: "node03", RaftBindAddress: "10.62.0.6:17600"})
 	if err != nil || reqResp.GetError() != "" {
@@ -1849,6 +1905,7 @@ func TestIntegration_CancelJoinRequest_NoCredentialNeeded(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
+	openColonyJoinWindowForTest(t, client)
 
 	reqResp, err := client.RequestJoinColony(ctx, &rpcpb.RequestJoinColonyRequest{NodeId: "node04", RaftBindAddress: "10.62.0.7:17600"})
 	if err != nil || reqResp.GetError() != "" {
@@ -1885,6 +1942,7 @@ func TestIntegration_PurgeJoinRequest_RemovesRecordEntirely(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
+	openColonyJoinWindowForTest(t, client)
 
 	reqResp, err := client.RequestJoinColony(ctx, &rpcpb.RequestJoinColonyRequest{NodeId: "node05", RaftBindAddress: "10.62.0.8:17600"})
 	if err != nil || reqResp.GetError() != "" {

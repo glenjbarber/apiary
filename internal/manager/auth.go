@@ -246,6 +246,18 @@ var requiredRole = map[string]Role{
 	// reasoning as ApproveJoinRequest above, same tier.
 	"/apiary.rpc.v1.ManagerService/UpdateVoterAddress": RoleAdmin,
 
+	// OpenColonyJoinWindow/CloseColonyJoinWindow (ADR-0147 Part 4) open
+	// and close the Colony-wide window that decides whether this Colony
+	// will accept a new member at all. Admin, like every other entry in
+	// this block: the map fails closed to Admin for anything absent, so
+	// leaving these out would not open them - it would make the
+	// requirement accidental rather than stated, with no compile-time
+	// signal, which is exactly what TestRequiredRole_CoversEveryRPC
+	// exists to prevent. GetColonyJoinWindow is deliberately NOT here:
+	// it is exempt from checkAuth altogether, above.
+	"/apiary.rpc.v1.ManagerService/OpenColonyJoinWindow":  RoleAdmin,
+	"/apiary.rpc.v1.ManagerService/CloseColonyJoinWindow": RoleAdmin,
+
 	// PreflightApproveJoinRequest (ADR-0103) previews ApproveJoinRequest's
 	// own reachability gate - Admin-tier, matching ApproveJoinRequest
 	// itself exactly, since it makes managerd dial a caller-selected
@@ -413,6 +425,16 @@ const getJoinRequestStatusMethod = "/apiary.rpc.v1.ManagerService/GetJoinRequest
 // still with no Colony API key by definition. Knowledge of
 // request_id - already the only thing GetJoinRequestStatus requires
 // - is the sole credential this needs too.
+// getColonyJoinWindowMethod (ADR-0147 Part 4) is exempted for the
+// same reason requestJoinColonyMethod is, and it is the only other RPC
+// in this codebase with no alternative: a joining Comb has no Colony
+// API key, and it has to be able to learn who the Colony is before it
+// can become a member. What makes that safe is that this RPC is
+// read-only and refuses outright once no window is live, so the period
+// in which an unauthenticated caller learns anything is a period an
+// operator opened on purpose and can see in the UI.
+const getColonyJoinWindowMethod = "/apiary.rpc.v1.ManagerService/GetColonyJoinWindow"
+
 const cancelJoinRequestMethod = "/apiary.rpc.v1.ManagerService/CancelJoinRequest"
 
 // authenticatePasswordMethod (ADR-0087) is exempted for the same
@@ -497,6 +519,7 @@ var authExemptMethods = map[string]bool{
 	confirmRestartCompletedMethod: true,
 	stepAsideForRestartMethod:     true,
 	mutateColonyUpdateMethod:      true,
+	getColonyJoinWindowMethod:     true,
 
 	executeNodeRestartPlanMethod: true,
 }

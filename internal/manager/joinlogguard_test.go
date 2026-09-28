@@ -61,6 +61,19 @@ func seedPendingJoinRequest(t *testing.T, srv *Server, requestID, nodeID, raftBi
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
+	// Stamp the request with the epoch of the window that is live NOW.
+	// ADR-0147 Part 4 makes approval require the request and the window
+	// to share an opened_at_unix, so a request seeded without one is
+	// not approvable at all - and it is refused for exactly that reason
+	// before any log-guard rule is reached. That is correct behavior
+	// (a request predating the window must not be finished under it),
+	// and it means a seeder that omits the field is testing the epoch
+	// check while claiming to test the log guard.
+	window, live := srv.liveColonyJoinWindow(ctx)
+	if !live {
+		t.Fatal("seedPendingJoinRequest: no live Colony join window; the request would be created under no window and refused as stale, so the test would pass for the wrong reason")
+	}
+
 	create := &internalpb.Command{Op: &internalpb.Command_CreatePendingJoinRequest{
 		CreatePendingJoinRequest: &internalpb.CreatePendingJoinRequest{
 			Request: &internalpb.PendingJoinRequest{
@@ -69,6 +82,7 @@ func seedPendingJoinRequest(t *testing.T, srv *Server, requestID, nodeID, raftBi
 				Status:                 internalpb.JoinRequestStatus_JOIN_REQUEST_STATUS_PENDING,
 				JoinerLogStateObserved: observed,
 				JoinerLastLogIndex:     lastIndex,
+				WindowOpenedAtUnix:     window.GetOpenedAtUnix(),
 			},
 		},
 	}}
@@ -109,6 +123,7 @@ func isRaftMember(t *testing.T, srv *Server, nodeID string) bool {
 // the configuration afterwards.
 func TestIntegration_ApproveJoinRequest_NonEmptyJoinerLogRefusedAndNeverAdded(t *testing.T) {
 	client, srv := newJoinLogGuardServer(t)
+	openColonyJoinWindowForTest(t, client)
 	seedPendingJoinRequest(t, srv, "jreq-bad", "node02", "10.62.0.5:17600", true, 4096)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -142,6 +157,7 @@ func TestIntegration_ApproveJoinRequest_NonEmptyJoinerLogRefusedAndNeverAdded(t 
 // action the check exists to prevent.
 func TestIntegration_ApproveJoinRequest_UnobservedJoinerLogRefused(t *testing.T) {
 	client, srv := newJoinLogGuardServer(t)
+	openColonyJoinWindowForTest(t, client)
 	seedPendingJoinRequest(t, srv, "jreq-old", "node03", "10.62.0.5:17600", false, 0)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -185,6 +201,7 @@ func TestIntegration_ApproveJoinRequest_ObservedEmptyLogStillApproved(t *testing
 	}
 	t.Cleanup(func() { joiningNode.Shutdown() })
 
+	openColonyJoinWindowForTest(t, client)
 	seedPendingJoinRequest(t, srv, "jreq-good", "node04", joiningAddr, true, 0)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -213,6 +230,7 @@ func TestIntegration_RequestJoinColony_NonEmptyLogRefusedAtRequestTime(t *testin
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
+	openColonyJoinWindowForTest(t, client)
 
 	resp, err := client.RequestJoinColony(ctx, &rpcpb.RequestJoinColonyRequest{
 		NodeId: "node05", RaftBindAddress: "10.62.0.5:17600",
@@ -241,6 +259,7 @@ func TestIntegration_RequestJoinColony_ObservedEmptyLogRecordsEvidence(t *testin
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
+	openColonyJoinWindowForTest(t, client)
 
 	resp, err := client.RequestJoinColony(ctx, &rpcpb.RequestJoinColonyRequest{
 		NodeId: "node06", RaftBindAddress: "10.62.0.5:17600",
@@ -291,6 +310,7 @@ func TestIntegration_PreflightAndApproveAgreeOnTheLogGuard(t *testing.T) {
 				t.Fatalf("raftnode.New(node07) error: %v", err)
 			}
 			t.Cleanup(func() { joiningNode.Shutdown() })
+			openColonyJoinWindowForTest(t, client)
 			seedPendingJoinRequest(t, srv, "jreq-pf", "node07", joiningAddr, tc.observed, tc.index)
 
 			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)

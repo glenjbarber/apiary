@@ -35,6 +35,7 @@ type FSMApplyResult struct {
 	RestartLease       *internalpb.RestartLease
 	RestartRecord      *internalpb.RestartRecord
 	ColonyUpdate       *internalpb.ColonyUpdate
+	ColonyJoinWindow   *internalpb.ColonyJoinWindow
 	Error              string
 }
 
@@ -67,6 +68,12 @@ type FSM struct {
 	// record are deliberately the same object rather than two things
 	// that could disagree.
 	colonyUpdates map[string]*internalpb.ColonyUpdate
+
+	// colonyJoinWindow is ADR-0147 Part 4's single Colony-wide join
+	// window. nil until one is first opened, which is the same thing as
+	// "closed" to every caller - see internal/raft/colonyjoinwindow.go,
+	// which owns the semantics and the reasoning.
+	colonyJoinWindow *internalpb.ColonyJoinWindow
 
 	// authEnabled is set permanently, forever, the first time any
 	// CreateAPIKey command ever succeeds - it never reverts to false
@@ -193,6 +200,10 @@ func (f *FSM) Apply(log *raft.Log) interface{} {
 		return f.applyReleaseColonyUpdate(log.Index, op.ReleaseColonyUpdate)
 	case *internalpb.Command_HandoverColonyUpdate:
 		return f.applyHandoverColonyUpdate(log.Index, op.HandoverColonyUpdate)
+	case *internalpb.Command_OpenColonyJoinWindow:
+		return f.applyOpenColonyJoinWindow(log.Index, op.OpenColonyJoinWindow)
+	case *internalpb.Command_CloseColonyJoinWindow:
+		return f.applyCloseColonyJoinWindow(log.Index, op.CloseColonyJoinWindow)
 	default:
 		return &FSMApplyResult{Index: log.Index, Error: "command has no op set"}
 	}
@@ -1781,6 +1792,7 @@ func (f *FSM) snapshotStateLocked() *internalpb.FSMSnapshotState {
 		RestartLeases:       make(map[string]*internalpb.RestartLease, len(f.restartLeases)),
 		RestartRecords:      make(map[string]*internalpb.RestartRecord, len(f.restartRecords)),
 		ColonyUpdates:       make(map[string]*internalpb.ColonyUpdate, len(f.colonyUpdates)),
+		ColonyJoinWindow:    cloneColonyJoinWindow(f.colonyJoinWindow),
 		AuthEnabled:         f.authEnabled,
 	}
 	for id, vm := range f.vms {
@@ -1858,6 +1870,7 @@ func (f *FSM) Restore(rc io.ReadCloser) error {
 	if f.colonyUpdates == nil {
 		f.colonyUpdates = make(map[string]*internalpb.ColonyUpdate)
 	}
+	f.colonyJoinWindow = cloneColonyJoinWindow(state.GetColonyJoinWindow())
 	f.authEnabled = state.GetAuthEnabled()
 	// Recompute under the same lock: a Status call arriving after this
 	// returns must see a digest of the restored state, never one left

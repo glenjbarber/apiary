@@ -878,6 +878,43 @@ func (p *PeerReporter) PreflightApproveJoinRequest(ctx context.Context, addr str
 	return client.PreflightApproveJoinRequest(ctx, req)
 }
 
+// OpenColonyJoinWindow/CloseColonyJoinWindow forward on a leader-hint
+// rejection, mirroring ApproveJoinRequest above exactly (ADR-0147
+// Part 4). addr is this node's own trusted, internally-derived notion
+// of who leads - never a caller-supplied address.
+func (p *PeerReporter) OpenColonyJoinWindow(ctx context.Context, addr string, req *rpcpb.OpenColonyJoinWindowRequest) (*rpcpb.OpenColonyJoinWindowResponse, error) {
+	conn, client, err := p.dial(addr)
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close()
+	return client.OpenColonyJoinWindow(ctx, req)
+}
+
+func (p *PeerReporter) CloseColonyJoinWindow(ctx context.Context, addr string, req *rpcpb.CloseColonyJoinWindowRequest) (*rpcpb.CloseColonyJoinWindowResponse, error) {
+	conn, client, err := p.dial(addr)
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close()
+	return client.CloseColonyJoinWindow(ctx, req)
+}
+
+// GetColonyJoinWindowUnauthenticated dials WITHOUT this node's own
+// -peer-api-key attached, for the same reason
+// RequestJoinColonyUnauthenticated above does: GetColonyJoinWindow is
+// exempt from checkAuth (a Comb that has not joined has no Colony API
+// key by definition), so the target_address inside it is caller-chosen
+// and must not be dialed with a credential an attacker could ride.
+func (p *PeerReporter) GetColonyJoinWindowUnauthenticated(ctx context.Context, addr string, req *rpcpb.GetColonyJoinWindowRequest) (*rpcpb.GetColonyJoinWindowResponse, error) {
+	conn, client, err := p.dialUnauthenticated(addr)
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close()
+	return client.GetColonyJoinWindow(ctx, req)
+}
+
 // ReserveRestartLease/ConfirmRestartCompleted forward on a leader-hint
 // rejection like every other Apply-backed write, but dial with
 // dialRestartGuardrail (p.RestartGuardrailToken), not p.dial (p.APIKey) -
