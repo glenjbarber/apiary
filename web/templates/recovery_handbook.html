@@ -5,7 +5,7 @@
 <style>
   .recovery-step { border:1px solid var(--line); border-radius:6px; padding:.75rem 1rem; margin:.75rem 0; break-inside: avoid; page-break-inside: avoid; }
   .recovery-step.irreversible { border-color:var(--danger); }
-  .recovery-stop { margin-top:.5rem; padding:.5rem .75rem; background:#fde3e3; border:1px dashed var(--danger); border-radius:4px; }
+  .recovery-stop { margin-top:.5rem; padding:.5rem .75rem; background:color-mix(in srgb, var(--danger) 17%, var(--panel)); border:1px dashed var(--danger); border-radius:4px; }
   .recovery-label { font-weight:800; }
   .fencing-record { border:1px dashed #999; border-radius:4px; padding:.6rem .8rem; margin-top:.6rem; font-size:.9rem; }
   .fencing-record div { margin:.3rem 0; }
@@ -50,11 +50,128 @@
     </p>
     <p class="muted">
       <strong>Not covered by this or any current edition</strong>: management-network (control-plane)
-      failure - distinct from the already-built managed tenant-network failure simulator; total
-      control-plane loss (every raft voter gone at once - see <code>raftd -export</code>'s own
-      config-archive mechanism instead); rebuilding from surviving storage; and the online Guided
-      Recovery Mode, both of which depend on a Flight Plan execution engine that does not exist yet.
+      failure - distinct from the already-built managed tenant-network failure simulator; and the
+      online Guided Recovery Mode, which depends on a Flight Plan execution engine that does not
+      exist yet. Total control-plane loss and rebuilding from surviving storage - both previously
+      unwritten here too - have static, hand-written procedures below instead: unlike the scenario
+      above, that case cannot be generated from live cluster state, because by definition there is
+      no live cluster state left to generate it from.
     </p>
+  </div>
+
+  <div class="panel">
+    <h3>Total control-plane loss (every raft voter gone)</h3>
+    <p class="muted">
+      Distinct from losing one comb above: every raft voter's own state is gone or unreadable, not
+      just one. This does <strong>not</strong> mean every VM/jail is gone - HAST-replicated and
+      locally-provisioned disk data on each surviving comb's own ZFS pools is untouched by raft
+      state loss. Only Apiary's own tracking of what existed is what this scenario threatens, and
+      whether that tracking comes back depends entirely on step 2 below.
+    </p>
+
+    <div class="recovery-step">
+      <h4>1. Confirm this is really total loss, not partial</h4>
+      <p>
+        On each comb, with <code>apiary_raftd</code> stopped, run <code>raftd -status-json</code>
+        (reads the on-disk raft state directly - starts no server, contacts no peer, writes
+        nothing). Any comb reporting a real term and log index is still <strong>intact</strong> -
+        treat that comb as the recovery target for "loss of one comb" above instead of this section.
+      </p>
+    </div>
+
+    <div class="recovery-step">
+      <h4>2. Locate a <code>raftd -export</code> archive</h4>
+      <p>
+        Apiary's own automated backup system explicitly excludes raft state (ADR-0131: "Backed up
+        separately, by the operator, on their own schedule. Backup never writes raft state.") -
+        recovery of the tracked VM/jail/network/API-key records depends entirely on whether an
+        operator manually ran <code>raftd -export &lt;path&gt;</code> at some point and saved the
+        result somewhere that survives every comb being gone at once. Check there now, before doing
+        anything else below.
+      </p>
+      <div class="recovery-stop"><span class="recovery-label">STOP:</span> If no archive can be
+        found, skip directly to step 5 below - steps 3 and 4 do not apply.</div>
+    </div>
+
+    <div class="recovery-step">
+      <h4>3. Validate the archive before trusting it</h4>
+      <p>
+        <code>raftd -restore-dry-run &lt;path&gt;</code> on any comb - read-only, no confirmation
+        phrase, makes no changes at all. Confirms the archive's format version and checksum, and
+        prints its export timestamp, source node ID, applied index, and record counts (VMs, jails,
+        networks, API keys). Read this before committing to step 4: anything created after the
+        export's own timestamp is not in the archive and will not come back.
+      </p>
+    </div>
+
+    <div class="recovery-step irreversible">
+      <h4>4. <span class="recovery-label">IRREVERSIBLE:</span> Restore onto one comb, then rejoin the rest</h4>
+      <p>
+        Restore is single-node-only (ADR-0051) - pick <strong>one</strong> surviving, healthy comb
+        to become the new sole voter.
+      </p>
+      <p>
+        (a) Stop raftd there: <code>service apiary_raftd stop</code>.<br>
+        (b) Wipe whatever raft state it has, even if none, so the data directory is genuinely empty:
+        <code>raftd -reset yes-wipe-raft-state</code>.<br>
+        (c) Restore: <code>raftd -restore yes-restore-raft-state -restore-file &lt;path&gt;</code> -
+        this refuses outright if the data directory is not empty, which is exactly why (b) runs
+        first.<br>
+        (d) Start it normally: <code>service apiary_raftd start</code> - it detects the restored
+        state automatically on this next start and does not bootstrap fresh.<br>
+        (e) Rejoin every other surviving comb to this one exactly as if adding a new node
+        (<code>docs/add-node-to-colony.md</code>) - the ordinary join path is unmodified by any of
+        this.<br>
+        (f) API keys restore as hash records only (ADR-0023) - any key an operator does not already
+        have saved in raw form elsewhere cannot be recovered even by this restore; expect to reissue
+        keys as needed afterward.
+      </p>
+      <div class="recovery-stop"><span class="recovery-label">STOP:</span> Do not run
+        <code>-restore</code> against a comb whose data directory might still hold something real -
+        confirm (a) and (b) completed, and that step 1's <code>-status</code> check showed nothing
+        worth keeping on it, first.</div>
+      <div class="fencing-record">
+        <strong>Restore record</strong> (fill in by hand before proceeding)
+        <div>Archive path and export timestamp: <span class="fencing-blank">&nbsp;</span></div>
+        <div>Target comb: <span class="fencing-blank">&nbsp;</span></div>
+        <div>Operator: <span class="fencing-blank">&nbsp;</span></div>
+        <div>Timestamp: <span class="fencing-blank">&nbsp;</span></div>
+      </div>
+    </div>
+
+    <div class="recovery-step">
+      <h4>5. No archive exists: rebuilding control-plane tracking from surviving storage</h4>
+      <p>
+        The raft-tracked records themselves - which VMs/jails/networks/API-keys existed, and their
+        configuration - are unrecoverable. This is not the same as losing the actual VMs/jails:
+        disk data on each surviving comb's own ZFS pools is untouched by raft state loss; only
+        Apiary's own bookkeeping of it is gone.
+      </p>
+      <p>
+        (a) Bring up a fresh, single-node control plane on one surviving comb by following
+        <code>docs/bootstrap.md</code>'s "Path A - independent single-node cluster" exactly.<br>
+        (b) On each comb, inventory what is actually still there before recreating anything:
+        <code>zfs list -r &lt;pool&gt;/apiary</code> for VM/jail datasets, <code>jls</code> for
+        running jails, the bhyve process list for running VMs.<br>
+        (c) For each real, still-present resource found in (b), recreate the matching Apiary record
+        by hand through the normal Create flow, using the discovered configuration rather than a
+        guess - this re-establishes Apiary's tracking without touching the underlying disk data at
+        all.<br>
+        (d) Rejoin every other surviving comb normally
+        (<code>docs/add-node-to-colony.md</code>).
+      </p>
+    </div>
+
+    <div class="recovery-step">
+      <h4>6. Prevent a repeat</h4>
+      <p>
+        The single biggest determinant of how bad this scenario turns out to be is whether step 2
+        found anything. <code>raftd -export</code> takes seconds, requires no downtime, and makes
+        no changes to the running cluster. Nothing in Apiary runs it automatically - ADR-0131
+        deliberately leaves this to the operator. Run it now, save the result somewhere that
+        survives every comb being gone at once, and repeat it on a schedule.
+      </p>
+    </div>
   </div>
 
   <div class="panel">
