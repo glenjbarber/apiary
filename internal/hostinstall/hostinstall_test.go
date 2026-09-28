@@ -725,3 +725,95 @@ func TestEverythingWrittenPassesItsOwnDaemonsLoader(t *testing.T) {
 		t.Errorf("raftd.json does not load through internal/raftdconfig: %v", err)
 	}
 }
+
+// An explicitly supplied rpc_addr is checked rather than trusted, and
+// the three refusals are the three ways ADR-0139 has already been got
+// wrong. A wildcard is a legal bind address and an illegal destination;
+// a numeric LAN address is not covered by any certificate this system
+// issues; a name the certificate does not carry cannot be verified by
+// any peer.
+func TestAnExplicitRPCAddrIsCheckedAgainstTheCertificate(t *testing.T) {
+	cases := []struct {
+		name    string
+		addr    string
+		want    string
+		refused bool
+	}{
+		{"a numeric LAN address", "10.62.0.2:17700", "no IP SAN for a LAN address", true},
+		{"the wildcard", "0.0.0.0:17700", "no IP SAN for a LAN address", true},
+		{"a name the certificate does not carry", "other.example.com:17700", "does not cover", true},
+		{"something that is not an address", "17700", "cannot be checked", true},
+		{"the host's own FQDN", "brood.lab3.home.arpa:17700", "", false},
+		{"the host's own short name", "brood:17700", "", false},
+		{"loopback, which the certificate does carry", "127.0.0.1:17700", "", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newFixture(t)
+			f.opts.RPCAddr = tc.addr
+			p := f.plan()
+			if tc.refused {
+				if p.RPCAddr != "" {
+					t.Errorf("RPCAddr = %q, want empty when the override was refused", p.RPCAddr)
+				}
+				if !strings.Contains(report(p), tc.want) {
+					t.Errorf("the refusal does not say %q:\n%s", tc.want, report(p))
+				}
+				return
+			}
+			if p.RPCAddr == "" {
+				t.Fatalf("a legal override was refused:\n%s", report(p))
+			}
+			if err := p.Apply(); err != nil {
+				t.Fatalf("Apply: %v", err)
+			}
+			if body := f.read(f.configPath("managerd.json")); !strings.Contains(body, `"rpc_addr": "`+p.RPCAddr+`"`) {
+				t.Errorf("managerd.json does not carry the checked override %q:\n%s", p.RPCAddr, body)
+			}
+		})
+	}
+}
+
+// An override of a PRESENT field is still not written, because an
+// override is a default, not an instruction to overwrite.
+func TestAnExplicitRPCAddrDoesNotOverwriteAFieldThatIsAlreadySet(t *testing.T) {
+	f := newFixture(t)
+	f.write(f.configPath("managerd.json"), `{"rpc_addr": "kept.lab3.home.arpa:17700"}`)
+	f.opts.RPCAddr = "brood.lab3.home.arpa:17700"
+	f.installed()
+	if body := f.read(f.configPath("managerd.json")); !strings.Contains(body, "kept.lab3.home.arpa:17700") {
+		t.Errorf("a present rpc_addr was replaced:\n%s", body)
+	}
+}
+
+// The web listeners are overridable, so `make setup-quick
+// NODE_HTTP_ADDR=...` keeps meaning what it meant, and the defaults
+// are still the Makefile's own.
+func TestTheWebListenersAreOverridable(t *testing.T) {
+	f := newFixture(t)
+	f.opts.FrontendHTTPAddr = "10.62.0.2:9090"
+	f.opts.RestshimdHTTPAddr = "127.0.0.1:9999"
+	f.installed()
+
+	if body := f.read(f.configPath("frontend.json")); !strings.Contains(body, `"http_addr": "10.62.0.2:9090"`) {
+		t.Errorf("the frontend override was ignored:\n%s", body)
+	}
+	if body := f.read(f.configPath("restshimd.json")); !strings.Contains(body, `"http_addr": "127.0.0.1:9999"`) {
+		t.Errorf("the restshimd override was ignored:\n%s", body)
+	}
+}
+
+func TestTheBootROMIsWrittenOnlyWhenSupplied(t *testing.T) {
+	f := newFixture(t)
+	f.installed()
+	if body := f.read(f.configPath("managerd.json")); strings.Contains(body, "bhyve_bootrom") {
+		t.Errorf("a bootrom path was written without being supplied:\n%s", body)
+	}
+
+	g := newFixture(t)
+	g.opts.BhyveBootROM = "/usr/local/share/uefi-firmware/BHYVE_UEFI.fd"
+	g.installed()
+	if body := g.read(g.configPath("managerd.json")); !strings.Contains(body, "/usr/local/share/uefi-firmware/BHYVE_UEFI.fd") {
+		t.Errorf("a supplied bootrom path was not written:\n%s", body)
+	}
+}

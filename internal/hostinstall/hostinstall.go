@@ -213,6 +213,26 @@ type Options struct {
 	Uplink      string
 	BhyveBridge string
 
+	// BhyveBootROM is the UEFI firmware file bhyve boots from. The
+	// package carrying it is sometimes the firmware package and
+	// sometimes edk2-bhyve, so locating it is a package question rather
+	// than a filesystem one: it is supplied or it is reported as a
+	// need.
+	BhyveBootROM string
+
+	// RPCAddr overrides the address managerd listens on. The override
+	// is checked against the certificate rather than trusted, because
+	// the whole subject of ADR-0139 is an operator copying a bind
+	// address into a field.
+	RPCAddr string
+
+	// FrontendHTTPAddr and RestshimdHTTPAddr override the two web
+	// listeners. They default to the values the Makefile's own
+	// variables defaulted to, so `make setup-quick NODE_HTTP_ADDR=...`
+	// keeps working and keeps meaning what it meant.
+	FrontendHTTPAddr  string
+	RestshimdHTTPAddr string
+
 	// Now overrides the clock, for tests.
 	Now time.Time
 }
@@ -755,6 +775,10 @@ func firstNonEmpty(vals ...string) string {
 // writing an address the certificate does not cover reproduces exactly
 // the incident this exists to make impossible.
 func (p *Plan) planRPCAddr() {
+	if override := strings.TrimSpace(p.opts.RPCAddr); override != "" {
+		p.planRPCAddrOverride(override)
+		return
+	}
 	if p.standalone() {
 		p.RPCAddr = loopbackHost + ":" + defaultManagerPort
 		p.add(ActionKeep, p.opts.Paths.managerdConfig(), "rpc_addr", p.RPCAddr,
@@ -771,6 +795,49 @@ func (p *Plan) planRPCAddr() {
 	p.RPCAddr = name + ":" + defaultManagerPort
 	p.add(ActionFill, p.opts.Paths.managerdConfig(), "rpc_addr", p.RPCAddr,
 		"a Colony member: the name is taken from this Comb's own certificate, never invented")
+}
+
+// planRPCAddrOverride handles an explicitly supplied rpc_addr, which
+// is what `make setup-quick NODE_RPC_ADDR=...` has always passed. The
+// override is checked rather than trusted, and the checks are the
+// reasons ADR-0139 exists:
+//
+//   - a numeric address that is not loopback is refused outright,
+//     because a Comb's certificate carries no IP SAN for its LAN
+//     address, so every peer that dialled it would fail verification
+//     for a reason that reads like a network fault;
+//   - a wildcard is refused, because it is a legal bind address and an
+//     illegal destination, and this value is read out of a config file
+//     that other daemons dial;
+//   - a name is accepted only if this Comb's own certificate covers it,
+//     so an operator cannot write a name that no peer will be able to
+//     verify.
+func (p *Plan) planRPCAddrOverride(override string) {
+	path := p.opts.Paths.managerdConfig()
+	host, port, err := net.SplitHostPort(override)
+	if err != nil {
+		p.add(ActionRefuse, path, "rpc_addr", override,
+			fmt.Sprintf("--rpc-addr %q is not a host:port, so it cannot be checked against anything: %v", override, err))
+		return
+	}
+	if port == "" {
+		port = defaultManagerPort
+	}
+	if ip := net.ParseIP(host); ip != nil {
+		if !ip.IsLoopback() {
+			p.add(ActionRefuse, path, "rpc_addr", override,
+				fmt.Sprintf("--rpc-addr is the numeric address %s, and this Comb's certificate carries no IP SAN for a LAN address, so every peer that dialled it would fail verification (ADR-0139); pass a name the certificate covers instead", host))
+			return
+		}
+	} else if !p.certHasDNS(host) {
+		p.add(ActionRefuse, path, "rpc_addr", override,
+			fmt.Sprintf("--rpc-addr names %q, which this Comb's certificate does not cover (it carries: %s), so no peer would be able to verify this Comb under that name", host, p.Cert.SANs()))
+		return
+	}
+	p.Colony = !isLoopbackHostPort(override)
+	p.RPCAddr = net.JoinHostPort(host, port)
+	p.add(ActionFill, path, "rpc_addr", p.RPCAddr,
+		"supplied with --rpc-addr and checked against this Comb's own certificate rather than trusted")
 }
 
 // standalone decides whether this Comb is on its own. Three signals,

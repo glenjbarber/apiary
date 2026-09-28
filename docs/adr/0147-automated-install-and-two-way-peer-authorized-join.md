@@ -2,19 +2,28 @@
 
 ## Status
 
-**Proposed.** Not implemented. No code in this repository reflects any
-of it yet. Two things are being decided together here because they are
-the same decision seen from two ends: a Comb that can configure itself
-is a Comb that can be joined, and the join has to work without a
-source checkout, exactly as the install does.
+**Accepted** on 2026-09-28. **Part 1 is implemented; Parts 2, 3 and
+4 are accepted and not yet built.** No code in this repository
+reflects any of Parts 2 to 4.
 
-This ADR is written to be reviewed before implementation. The
-"Open questions" section at the end records the points where a decision
-was made on the owner's behalf rather than by the owner, and each one
-was cheap to change in a paragraph and expensive to change in a schema.
-**Every question this ADR raised is now answered**, and each answer is
-recorded next to the question it answers. What remains is approval of
-the whole, followed by implementation.
+The owner's approval covered the whole document, including the three
+Part 3 questions (9, 10 and 11) that had been written as proposals
+rather than put to the owner individually. Those three are therefore
+approved **as proposed** - a 24-hour authorization-entry expiry, two
+keys that must be on two distinct Combs, and hand-editing of the
+authorization file honoured but undocumented. That is recorded here as
+what happened rather than presented as three decisions the owner made,
+because they were not: they were in the document the owner approved,
+and this note is what the record has to say about it. Each is a
+one-line change in the code and none of them is load-bearing for any
+other decision here, so if the owner would rather have chosen
+differently the change is cheap.
+
+Three places where implementing Part 1 required departing from the
+prose below are recorded in "Corrections found while implementing
+Part 1" at the end of this document. The largest is that one of the
+three signals for "this Comb is standalone" could not work as
+written, and was replaced with a better one.
 
 It has four parts, decided together. Part 1 is the source-free
 `apiaryctl install`. Part 2 is the two-way, peer-authorized join that
@@ -1869,3 +1878,82 @@ Both answered by the owner, and both are consequences of the design
 rather than additions to it: the length is a number the epoch rule
 already contains, and the payload is the fingerprint set the trust
 ordering already needed.
+
+## Corrections found while implementing Part 1
+
+Kept here rather than edited into the prose above, because each of
+these is my own overclaim or omission and the reasoning is the part
+worth having. The code is the decision; this is what changed and why.
+
+**1. The third standalone signal could not work, and was replaced.**
+Part 1's address selection named three signals for "this Comb is on
+its own": no `--colony-member`, no non-loopback `raft_bind` in
+raftd.json, and "the certificate carries a DNS SAN for a name that is
+not this host's short name". The third one is broken by Part 1's own
+TLS section, which puts the host's FQDN in the certificate's SANs. A
+single-node Comb whose hostname is an FQDN - the normal case on a
+real network, and the case on both brood and drone - therefore reads
+as a Colony member on its **second** run and rewrites `rpc_addr` from
+loopback to a name. That is the opposite of what the same document
+requires a few lines later, where the verification list says "a second
+run over its own output changes nothing at all", and the two
+requirements cannot both hold.
+
+The signal used instead is **managerd.json's own `rpc_addr` already
+naming a non-loopback host**. It is a fact about what was configured,
+rather than an inference from a certificate, it cannot be triggered by
+the installer writing the certificate, and it makes a second run a
+no-op in both directions: a standalone Comb keeps loopback, and a
+Colony member keeps the name it was given.
+
+**2. A file carrying an unknown field is refused, which is stronger
+than "does not parse".** The preservation rules above say a file that
+exists and does not parse is refused. `internal/nodeconfig` and
+`internal/raftdconfig` are lenient about unknown JSON keys, so a
+managerd.json written by a **newer** managerd - or one with a
+misspelled field - would load here perfectly well, and the installer's
+save would then silently delete the field it does not know about. That
+is precisely the failure the preservation rules exist to prevent, and
+it does not present as a parse error. The rule is therefore
+strengthened: a file whose JSON keys are not all in that config
+package's own `Config` type is refused, and the unknown keys are named.
+The key set is read from the type by reflection rather than written out
+again, so a field added to any config package is known to the next
+installer with nothing to remember.
+
+**3. A refusal about one field no longer blocks the whole file.** The
+first implementation treated "this file has a refusal somewhere in the
+report" as "this file may not be written", which meant a Comb whose
+certificate carried no usable DNS name got no managerd.json at all
+rather than a managerd.json with one field missing. Refusals are now
+split in two: a refusal about the **file** (it does not parse, it
+carries unknown fields, its node_id is in dispute) blocks every write
+to it, and a refusal about a **field** (an `rpc_addr` no certificate
+covers) is a line in the report and leaves the rest of the file alone.
+A Comb with a good config file and one address needing attention is
+much closer to running than a Comb with no config file at all.
+
+**4. The web listeners needed override flags after all, and
+`--rpc-addr` is checked rather than trusted.** The Makefile's
+`NODE_HTTP_ADDR`, `NODE_REST_ADDR` and `NODE_TLS_DIR` are real,
+documented, overrideable knobs, and simply dropping them when the
+`printf` statements went away would have been a silent capability loss
+on a fresh host that needed a non-default layout. They became
+`--frontend-http-addr`, `--restshimd-http-addr` and `--tls-dir`, with
+the same defaults the Makefile had. `NODE_RPC_ADDR` became `--rpc-addr`
+and is **validated against this Comb's own certificate**: a numeric
+non-loopback address is refused, a wildcard is refused, and a name the
+certificate does not carry is refused with the SANs it does carry
+printed. That is ADR-0139 enforced in code on the one field whose
+whole history is operators copying a bind address into a dial target.
+
+**5. `setup-tls` left the `setup` target.** Part 1 issues the
+certificate in Go as ECDSA P-256. Leaving `setup` still running
+`setup-tls` would give one path two issuers, and whichever ran first
+would win, which is how a document ends up saying P-256 while a fresh
+host gets RSA. `setup` is now directories, rc.d and PAM; the
+certificate is issued by `apiaryctl install`, which runs after `make
+install`. The `setup-tls` target itself stays, for an operator who
+wants openssl's output, and the installer keeps and reports whatever
+pair it finds there rather than replacing it - which is the same
+preservation contract every other part of Part 1 follows.

@@ -347,11 +347,15 @@ install: build check-stamped setup-dirs
 # manual walkthrough this mirrors, including why the PAM file is
 # written with printf rather than a pasted heredoc (tab corruption).
 # Safe to re-run: the directories/rc.d scripts/sysrc enables are always
-# refreshed to match this checkout, but the PAM file and TLS cert are
-# only written if absent, so a later hand-edited /etc/pam.d/apiary or a
-# real (non-self-signed) certificate dropped in NODE_TLS_DIR is never
-# clobbered by a re-run.
-setup: setup-dirs setup-rcd setup-pam setup-tls
+# refreshed to match this checkout, but the PAM file is only written if
+# absent, so a later hand-edited /etc/pam.d/apiary is never clobbered by
+# a re-run.
+# setup is directories, rc.d, and PAM. It no longer includes
+# setup-tls: the serving certificate is issued in Go by `apiaryctl install`
+# (ADR-0147 Part 1), which runs after `make install` and keeps and reports
+# any pair it finds already in place. setup-tls still exists below for an
+# operator who wants an openssl-issued certificate instead.
+setup: setup-dirs setup-rcd setup-pam
 
 # setup-dirs mirrors docs/bootstrap.md's own manual `mkdir -p` step.
 # /var/log/apiary is the one genuine gap: every apiary_* rc.d script's
@@ -380,7 +384,13 @@ setup-pam:
 NODE_TLS_DIR?=	/usr/local/etc/apiary-tls
 
 # setup-tls generates a self-signed certificate for managerd's external
-# API if NODE_TLS_DIR doesn't already have one - only written if
+# API if NODE_TLS_DIR doesn't already have one. NOT part of `setup` any
+# more: `apiaryctl install` issues the certificate in Go as ECDSA P-256,
+# and issues it on every Comb including a single-node one, because TLS
+# being on by default is ADR-0147 Part 4's decision rather than a
+# consequence of there being peers. This target stays for an operator who
+# wants openssl's output, and apiaryctl keeps whatever it finds here
+# rather than replacing it, RSA included. - only written if
 # absent, so a real (CA-issued) certificate placed there instead is
 # never clobbered by a re-run. Must carry a Subject Alternative Name,
 # not just a CN: Go's TLS client has ignored CN-only certs for
@@ -492,34 +502,61 @@ NODE_REST_ADDR?=	127.0.0.1:8081
 # SHARED.md) came from that literal placeholder getting copied verbatim
 # and committing itself into persistent raft state.
 #
-# Real login and TLS are both mandatory here, not optional: setup (a
-# prerequisite, via setup-tls/setup-pam) already provisions both a TLS
-# certificate and a PAM policy file unconditionally, so managerd.json
-# below always sets tls_cert/tls_key/pam_service together, and
+# Real login and TLS are both mandatory here, not optional, so
+# managerd.json always carries tls_cert/tls_key/pam_service together and
 # frontend.json/restshimd.json always set manager_tls/manager_tls_ca to
-# match, even for a pure loopback, single-node Comb - confirmed live,
-# working through this exact chain of TLS failures one at a time
-# (missing SAN, then unknown authority) before landing on this shape.
+# match. None of the three is a compatibility path here, and none may be
+# absent: a Comb with no serving certificate is a broken Comb, not a
+# supported configuration (ADR-0147 Part 4).
+#
+# The certificate itself is no longer provisioned by setup-tls on this
+# path. It is issued in Go by `apiaryctl install`, as ECDSA P-256 with
+# the host's short name, its FQDN and 127.0.0.1 as its SANs and no LAN
+# address at all. setup-tls remains as a target for an operator who
+# wants openssl's output instead, and apiaryctl install will keep and
+# report whatever pair it finds there rather than replacing it - which
+# is also why the old recipe's "written unconditionally" behaviour could
+# not simply be kept when the printf statements went away.
 #
 # No account-creation step here (removed - see SHARED.md's own dated
 # entry for why): PAM only needs some valid UNIX account with a
 # password, not specifically one Apiary creates. Whichever account is
 # already running this `make setup-quick` invocation (or any other
-# existing account) becomes Admin automatically on its first
-# successful login, since the role map on a fresh Comb starts out
-# genuinely empty (ADR-0086) - just start the services and log in.
+# existing account) becomes Admin automatically on its first successful
+# login, since the role map on a fresh Comb starts out genuinely empty
+# (ADR-0086) - just start the services and log in.
 #
-# The binary-install step (${MAKE} install, plus a separate copy for
-# apiaryinstall alone below - see the `install` target's own comment
-# for why apiaryinstall isn't part of `install` itself) uses the same
-# .new-then-mv atomic rename this project's own live apiarium/apiverse
-# deploys already rely on, so re-running setup-quick against an
-# already-running Comb never hits "Text file busy". The config files
-# below are written unconditionally on every run, matching a fresh
-# checkout's values - re-running this against a Comb with hand-edited
-# config will overwrite those edits (unlike setup-pam/setup-tls's own
-# "only if absent" contract, since these carry real per-host settings
-# that only setup-quick itself knows how to regenerate correctly).
+# THE CONFIG FILES ARE WRITTEN BY apiaryctl install, NOT BY THIS
+# MAKEFILE (ADR-0147 Part 1). The seven printf statements this target
+# used to carry are gone, and that is a deliberate change to this
+# target's contract in two directions:
+#
+#   - What it writes is now PRESERVED rather than replaced. A field that
+#     is already set is left alone, so re-running setup-quick against a
+#     Comb an operator has configured no longer silently reverts those
+#     edits. That was the one genuinely dangerous thing about the
+#     old recipe, and it is gone because the installer that replaced it
+#     refuses to overwrite.
+#   - What it writes is now CHECKED. The old recipe wrote whatever
+#     NODE_RPC_ADDR held, which is how a wildcard or a numeric LAN
+#     address reached a field other daemons dial. apiaryctl checks the
+#     address against this Comb's own certificate and refuses one it
+#     does not cover, naming the SANs it found (ADR-0139).
+#
+# The Makefile's own variables still mean what they always meant, and
+# they are passed straight through: NODE_RPC_ADDR, NODE_HTTP_ADDR,
+# NODE_REST_ADDR, NODE_TLS_DIR, NODE_ZFS_POOL, NODE_VLAN_UPLINK,
+# NODE_BHYVE_BRIDGE and PAM_SERVICE all land where an operator expects.
+# PAM_SERVICE is the one that no longer appears below, because
+# `apiaryctl install` writes the policy NAME into managerd.json and
+# deliberately does not create the policy file under /etc/pam.d, which
+# is setup-pam's job and which this target already ran as a
+# prerequisite.
+#
+# To see what an install would do before it does it, run it with no
+# --apply. It needs no privileges to do that:
+#
+#	/usr/local/libexec/apiary/apiaryctl install
 setup-quick:
 	pkg install -y go git
 	${MAKE} build
@@ -532,16 +569,16 @@ setup-quick:
 	mv /usr/local/libexec/apiary/apiaryinstall.new /usr/local/libexec/apiary/apiaryinstall
 	BOOTROM=$$(test -f /usr/local/share/uefi-firmware/BHYVE_UEFI.fd && echo /usr/local/share/uefi-firmware/BHYVE_UEFI.fd || pkg info -l edk2-bhyve 2>/dev/null | grep '\.fd$$' | head -1) ;\
 	test -n "$$BOOTROM" || { echo "could not locate a bhyve UEFI firmware .fd file - install bhyve-firmware/edk2-bhyve and re-run" >&2 ; exit 1 ; } ;\
-	NODEID=$$(hostname) ;\
-	RPCADDR="${NODE_RPC_ADDR}" ;\
-	RPCPORT=$${RPCADDR##*:} ;\
-	printf '{\n  "data_dir": "/var/db/apiary/raftd",\n  "socket": "/var/run/apiary/raftd.sock",\n  "node_id": "%s"\n}\n' "$$NODEID" > /usr/local/etc/apiary/raftd.json ;\
-	chmod 600 /usr/local/etc/apiary/raftd.json ;\
-	printf '{\n  "raftd_socket": "/var/run/apiary/raftd.sock",\n  "rpc_addr": "%s",\n  "node_id": "%s",\n  "zfs_base": "%s/apiary",\n  "bhyve_bootrom": "%s",\n  "bhyve_bridge": "%s",\n  "uplink": "%s",\n  "iso_dir": "/var/db/apiary/isos",\n  "tls_cert": "%s/cert.pem",\n  "tls_key": "%s/key.pem",\n  "pam_service": "%s"\n}\n' "${NODE_RPC_ADDR}" "$$NODEID" "${NODE_ZFS_POOL}" "$$BOOTROM" "${NODE_BHYVE_BRIDGE}" "${NODE_VLAN_UPLINK}" "${NODE_TLS_DIR}" "${NODE_TLS_DIR}" "${PAM_SERVICE}" > /usr/local/etc/apiary/managerd.json ;\
-	chmod 600 /usr/local/etc/apiary/managerd.json ;\
-	printf '{\n  "manager_addr": "127.0.0.1:%s",\n  "http_addr": "%s",\n  "manager_tls": true,\n  "manager_tls_ca": "%s/cert.pem"\n}\n' "$$RPCPORT" "${NODE_HTTP_ADDR}" "${NODE_TLS_DIR}" > /usr/local/etc/apiary/frontend.json ;\
-	printf '{\n  "manager_addr": "127.0.0.1:%s",\n  "http_addr": "%s",\n  "manager_tls": true,\n  "manager_tls_ca": "%s/cert.pem"\n}\n' "$$RPCPORT" "${NODE_REST_ADDR}" "${NODE_TLS_DIR}" > /usr/local/etc/apiary/restshimd.json
-	@echo "/usr/local/etc/apiary/{raftd,managerd,frontend,restshimd}.json written, including real login (pam_service=${PAM_SERVICE}) and TLS. Start the services (service apiary_raftd start && service apiary_managerd start && service apiary_frontend start && service apiary_restshimd start), then log in with any existing UNIX account right away: whoever logs in first on a Comb with no role map yet becomes Admin automatically (ADR-0086)."
+	/usr/local/libexec/apiary/apiaryctl install --apply \
+		--zfs-base "${NODE_ZFS_POOL}/apiary" \
+		--vlan-uplink "${NODE_VLAN_UPLINK}" \
+		--bhyve-bridge "${NODE_BHYVE_BRIDGE}" \
+		--bhyve-bootrom "$$BOOTROM" \
+		--rpc-addr "${NODE_RPC_ADDR}" \
+		--frontend-http-addr "${NODE_HTTP_ADDR}" \
+		--restshimd-http-addr "${NODE_REST_ADDR}" \
+		--tls-dir "${NODE_TLS_DIR}"
+	@echo "configuration written by apiaryctl install (ADR-0147): /usr/local/etc/apiary/{common,managerd,raftd,frontend,restshimd}.json and ${NODE_TLS_DIR}/{cert,key}.pem, preserving every field that was already set. Start the services (service apiary_raftd start && service apiary_managerd start && service apiary_frontend start && service apiary_rest_shimd start), then log in with any existing UNIX account right away: whoever logs in first on a Comb with no role map yet becomes Admin automatically (ADR-0086)."
 # update installs every binary, then restarts only the two daemons that
 # cannot cost the colony its quorum. It is the target that is safe to run
 # on every Comb in a row without thinking, which is exactly why managerd

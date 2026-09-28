@@ -15,11 +15,16 @@ import (
 // installer can make is a flag that lets an operator install something
 // they did not mean to.
 type installFlags struct {
-	apply        bool
-	colonyMember string
-	zfsBase      string
-	uplink       string
-	bhyveBridge  string
+	apply         bool
+	colonyMember  string
+	zfsBase       string
+	uplink        string
+	bhyveBridge   string
+	bhyveBootROM  string
+	rpcAddr       string
+	frontendHTTP  string
+	restshimdHTTP string
+	tlsDir        string
 }
 
 func runInstall(args []string) int {
@@ -31,9 +36,17 @@ func runInstall(args []string) int {
 	fs.StringVar(&f.zfsBase, "zfs-base", "", "the ZFS dataset VMs are created under, e.g. zroot/apiary; not written without it")
 	fs.StringVar(&f.uplink, "vlan-uplink", "", "the physical interface VLAN traffic is tagged on, e.g. em0; not written without it")
 	fs.StringVar(&f.bhyveBridge, "bhyve-bridge", "", "the bridge VMs attach to, e.g. bridge0; not written without it")
+	fs.StringVar(&f.bhyveBootROM, "bhyve-bootrom", "", "the UEFI firmware file bhyve boots from; not written without it")
+	fs.StringVar(&f.rpcAddr, "rpc-addr", "", "managerd's own listening address, checked against this Comb's certificate rather than trusted")
+	fs.StringVar(&f.frontendHTTP, "frontend-http-addr", "", "the web UI's address; defaults to 0.0.0.0:8080, which is deliberate")
+	fs.StringVar(&f.restshimdHTTP, "restshimd-http-addr", "", "the REST API's address; defaults to 127.0.0.1:8081")
+	fs.StringVar(&f.tlsDir, "tls-dir", "", "where the serving certificate and key live; defaults to /usr/local/etc/apiary-tls")
 	fs.Usage = func() {
 		fmt.Fprint(os.Stderr, `usage: apiaryctl install [--apply] [--colony-member host:port]
                             [--zfs-base dataset] [--vlan-uplink iface] [--bhyve-bridge iface]
+                            [--bhyve-bootrom path] [--rpc-addr host:port]
+                            [--frontend-http-addr host:port] [--restshimd-http-addr host:port]
+                            [--tls-dir dir]
 
 Generates configuration, a TLS serving certificate, and this Comb's
 identity, from an installed binary and a root shell. It needs no
@@ -47,7 +60,10 @@ it could not derive and needs from you.
 
 What it will not do, in either mode: overwrite a field that is already
 set, change a node_id, complete half a TLS pair, or write an address
-the certificate does not cover. A file that exists and does not parse,
+the certificate does not cover. --rpc-addr is the one address you can
+name yourself, and it is checked rather than trusted: a numeric
+non-loopback address is refused (ADR-0139) and a name the certificate
+does not carry is refused. A file that exists and does not parse,
 or that carries fields this binary does not know, is refused whole and
 named in the report.
 
@@ -67,12 +83,20 @@ everything else written, so a second run finishes the job.
 		return 1
 	}
 
-	plan, err := hostinstall.New(hostinstall.Options{
-		ColonyMember: f.colonyMember,
-		ZFSBase:      f.zfsBase,
-		Uplink:       f.uplink,
-		BhyveBridge:  f.bhyveBridge,
-	})
+	opts := hostinstall.Options{
+		ColonyMember:      f.colonyMember,
+		ZFSBase:           f.zfsBase,
+		Uplink:            f.uplink,
+		BhyveBridge:       f.bhyveBridge,
+		BhyveBootROM:      f.bhyveBootROM,
+		RPCAddr:           f.rpcAddr,
+		FrontendHTTPAddr:  f.frontendHTTP,
+		RestshimdHTTPAddr: f.restshimdHTTP,
+	}
+	if f.tlsDir != "" {
+		opts.Paths.TLSDir = f.tlsDir
+	}
+	plan, err := hostinstall.New(opts)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "apiaryctl install: %v\n", err)
 		return 1

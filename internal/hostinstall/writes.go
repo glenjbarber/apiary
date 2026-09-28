@@ -189,6 +189,8 @@ func (p *Plan) planManagerdWrites() {
 		"the physical interface VLAN traffic is tagged on. Only apiaryinstall can answer this, by asking the host, so nothing is written without --vlan-uplink") || changed
 	changed = p.needHostFact(path, "bhyve_bridge", p.managerOwn.BhyveBridge, &cfg.BhyveBridge, p.opts.BhyveBridge,
 		"the bridge VMs attach to. This is a host topology fact, and a bridge that does not exist is a silently wrong config, so nothing is written without --bhyve-bridge") || changed
+	changed = p.needHostFact(path, "bhyve_bootrom", p.managerOwn.BhyveBootROM, &cfg.BhyveBootROM, p.opts.BhyveBootROM,
+		"the UEFI firmware file bhyve boots from. The package that carries it is sometimes the firmware package and sometimes edk2-bhyve, so locating it is a package question, not a filesystem one, and nothing is written without --bhyve-bootrom") || changed
 
 	if p.tlsUsable() {
 		changed = p.fill(path, "tls_cert", p.managerOwn.TLSCert, &cfg.TLSCert, p.opts.Paths.certFile(), "this Comb's serving certificate") || changed
@@ -224,8 +226,6 @@ func (p *Plan) planManagerdWrites() {
 
 	p.add(ActionNeeds, path, "nat_uplink", cfg.NATUplink,
 		"the interface a self-hosted VM reaches the network through; not derivable here")
-	p.add(ActionNeeds, path, "bhyve_bootrom", cfg.BhyveBootROM,
-		"the UEFI firmware file bhyve boots from; the package that carries it is sometimes edk2-bhyve and sometimes the firmware package, so this is left to apiaryinstall and to the operator")
 
 	if !changed {
 		return
@@ -252,7 +252,7 @@ func (p *Plan) planFrontendWrites() {
 	changed := false
 	changed = p.fill(path, "manager_addr", p.frontOwn.ManagerAddr, &cfg.ManagerAddr, loopbackHost+":"+defaultManagerPort,
 		"a LOCAL dial: frontend runs on this Comb and always reaches managerd over loopback, which is the one address whose certificate SAN is present (ADR-0139)") || changed
-	changed = p.fill(path, "http_addr", p.frontOwn.HTTPAddr, &cfg.HTTPAddr, "0.0.0.0:"+defaultFrontendPort,
+	changed = p.fill(path, "http_addr", p.frontOwn.HTTPAddr, &cfg.HTTPAddr, p.frontendHTTPAddr(),
 		"the web UI, and the wildcard here is DELIBERATE: the browser is on the operator's machine, not on this Comb, so a loopback-only UI serves nobody") || changed
 	if p.tlsUsable() {
 		if !p.frontOwn.ManagerTLS {
@@ -280,7 +280,7 @@ func (p *Plan) planRestshimdWrites() {
 	changed := false
 	changed = p.fill(path, "manager_addr", p.restOwn.ManagerAddr, &cfg.ManagerAddr, loopbackHost+":"+defaultManagerPort,
 		"a LOCAL dial, and the loopback default is also what internal/restshimdconfig would have used with no config file at all") || changed
-	changed = p.fill(path, "http_addr", p.restOwn.HTTPAddr, &cfg.HTTPAddr, loopbackHost+":"+defaultRestshimPort,
+	changed = p.fill(path, "http_addr", p.restOwn.HTTPAddr, &cfg.HTTPAddr, p.restshimdHTTPAddr(),
 		"a full read/write control API - create, update and delete VMs, jails and networks, migrate, upload ISOs - with NO AUTHENTICATION OF ITS OWN, so it stays on loopback and is reached over an SSH forward") || changed
 	if p.tlsUsable() {
 		if !p.restOwn.ManagerTLS {
@@ -297,6 +297,23 @@ func (p *Plan) planRestshimdWrites() {
 	p.writes = append(p.writes, func() error {
 		return (&restshimdconfig.Manager{Path: path}).Save(cfg)
 	})
+}
+
+// frontendHTTPAddr and restshimdHTTPAddr are the overridable web
+// listeners. The defaults are the Makefile's own, so a host that
+// overrode NODE_HTTP_ADDR through setup-quick keeps the value it had.
+func (p *Plan) frontendHTTPAddr() string {
+	if v := strings.TrimSpace(p.opts.FrontendHTTPAddr); v != "" {
+		return v
+	}
+	return "0.0.0.0:" + defaultFrontendPort
+}
+
+func (p *Plan) restshimdHTTPAddr() string {
+	if v := strings.TrimSpace(p.opts.RestshimdHTTPAddr); v != "" {
+		return v
+	}
+	return loopbackHost + ":" + defaultRestshimPort
 }
 
 // tlsUsable reports whether this Comb ends the install with a serving
