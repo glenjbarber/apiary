@@ -31,7 +31,7 @@ MUTATIONS = [
      EV, "\tcase running != onDisk:\n\t\treturn RunningStale\n",
      "\tcase running == onDisk:\n\t\treturn RunningStale\n", GATE),
     ("Compare: stop downgrading a dirty pair",
-     EV, "\tcase buildinfo.IsDirtyID(onDisk) && false:", "\tcase buildinfo.IsDirtyID(onDisk):", GATE),
+     EV, "\tcase buildinfo.IsDirtyID(onDisk):", "\tcase buildinfo.IsDirtyID(onDisk) && false:", GATE),
 
     # --- the two policy predicates --------------------------------------
     ("Status.Confirms: confirm anything not down",
@@ -61,10 +61,11 @@ MUTATIONS = [
 
     # --- Report: the Comb-level answer ----------------------------------
     ("Report.Confirmed: skip the per-service check",
-     BG, "\t\tif !service.Status.Confirms() {", "\t\tif !service.Status.Confirms() && false {", GATE),
+     BG, "\tfor _, service := range r.Services {\n\t\tif !service.Status.Confirms() {\n\t\t\treturn false",
+     "\tfor _, service := range r.Services {\n\t\tif !service.Status.Confirms() && false {\n\t\t\treturn false", GATE),
     ("Report.Confirmed: only a stale daemon stops",
-     BG, "\t\tif !service.Status.Confirms() {",
-     "\t\tif service.Status == RunningStale {", GATE),
+     BG, "\tfor _, service := range r.Services {\n\t\tif !service.Status.Confirms() {\n\t\t\treturn false",
+     "\tfor _, service := range r.Services {\n\t\tif service.Status == RunningStale {\n\t\t\treturn false", GATE),
     ("Report.Confirmed: an empty report is confirmed",
      BG, "\tif len(r.Services) == 0 {", "\tif false {", GATE),
     ("Report.FirstStop: always reports nothing",
@@ -96,9 +97,9 @@ MUTATIONS = [
     ("check: a -dirty pair is reported as took-effect",
      BG, "\tstatus := Compare(disk, run)",
      "\tstatus := Compare(disk, run)\n\tif status == DirtyIDMatch {\n\t\tstatus = TookEffect\n\t}", GATE),
-    ("check: drop the 'restart it' evidence from a stale row",
-     BG, '\t\t\tDetail: name + " is running an older build than the binary on disk; " + summary(run, disk) +',
-     '\t\t\tDetail: name + " is stale; " + summary("", "") +', GATE),
+    ("check: drop the evidence from a stale row",
+     BG, '\t\tservice.Detail = name + " is running an older build than the binary on disk; " + summary(run, disk) +',
+     '\t\tservice.Detail = name + " is running an older build than the binary on disk; "', GATE),
 
     # --- the evidence readers --------------------------------------------
     ("runningBuild: never record a build id",
@@ -217,8 +218,8 @@ MUTATIONS = [
     ("stateDigestRow: reword the row's own verdict",
      FR, "\t\tState:        string(verdict.Verdict),", '\t\tState:        "state-ok",', FE),
     ("stateDigestRow: carry a blank badge class",
-     FR, "\t\tBadgeClass:  nodeBadgeClass(verdict.Verdict),",
-     '\t\tBadgeClass:  "",', FE),
+     FR, "\t\tBadgeClass:   nodeBadgeClass(verdict.Verdict),",
+     '\t\tBadgeClass:   "",', FE),
     ("stateDigestVerdicts: drop the colony detail",
      FR, "\t\tDetail:     colonyVerdict.Detail,", '\t\tDetail:     "",', FE),
 ]
