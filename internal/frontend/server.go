@@ -18,6 +18,7 @@ import (
 	"time"
 
 	rpcpb "github.com/glenjbarber/apiary/api/rpc"
+	"github.com/glenjbarber/apiary/internal/colonyupdate"
 	"github.com/glenjbarber/apiary/internal/isostore"
 	"github.com/glenjbarber/apiary/internal/loginconfig"
 	"github.com/glenjbarber/apiary/internal/manager"
@@ -496,6 +497,49 @@ type pageData struct {
 	CertificateScope string
 	CertificateError string
 	ExpiryWindowNote string
+
+	// ColonyUpdate and ColonyUpdateCombs back the controlled Colony
+	// update page ("/colony-update", ADR-0145; see
+	// internal/frontend/colony_update.go). ColonyUpdate is the
+	// colony-level answer - phase, detail, the single nominated target,
+	// and whether the backend actually enforces colony-wide
+	// single-flight - and ColonyUpdateCombs is one row per Comb, each
+	// carrying the evidence the command center already computed plus
+	// that Comb's own update verdict and whether its control is
+	// enabled.
+	//
+	// ColonyUpdate is a value rather than a pointer and its PhaseClass
+	// is always set, so the template can render a verdict without a nil
+	// check of its own - and an unpopulated page renders as unobserved,
+	// which is what an unpopulated page is.
+	ColonyUpdate      colonyUpdateStateView
+	ColonyUpdateCombs []colonyUpdateCombView
+	// ColonyUpdateEnabledControls is how many of the rows above have
+	// CanUpdate set. It is computed in Go from those same booleans
+	// rather than counted in the template, so the page's own
+	// "N of M controls enabled" sentence cannot drift away from the
+	// markup it is describing. It is 0 or 1 by construction.
+	ColonyUpdateEnabledControls int
+	// ColonyUpdate* below are the outcome of the update page's own POST,
+	// shown once on the re-render that follows it. They carry no
+	// success claim: whether an update started is decided by
+	// ColonyUpdate, re-read fresh, and never by the POST returning
+	// without an error.
+	//
+	// ColonyUpdateRequested is the Comb the operator clicked, so it is
+	// their input and is rendered as what they asked for, never as a
+	// target. It is echoed whether the request was accepted or refused,
+	// because a stale browser and a fresh one must be shown the same
+	// framing. ColonyUpdateRefused marks a backend refusal and carries
+	// its own words verbatim; ColonyUpdateRefusalHolder is whoever held
+	// the colony-wide update. ColonyUpdateActionError is a genuine
+	// failure to reach or act, which is a different thing from a
+	// refusal and is rendered differently.
+	ColonyUpdateRequested     string
+	ColonyUpdateRefused       bool
+	ColonyUpdateRefusal       string
+	ColonyUpdateRefusalHolder string
+	ColonyUpdateActionError   string
 }
 
 // userView is one row of the Users page's table.
@@ -571,6 +615,22 @@ type Server struct {
 	// tests. See password.go's canChangePassword for the authorization
 	// rule gating who may target whose account.
 	passwords PasswordSetter
+
+	// colonyUpdate is the controlled-Colony-update backend the
+	// "/colony-update" page reads from and asks (ADR-0145). It is
+	// nil-able and defaults to nil in every test and, right now, in
+	// cmd/frontend too, because the real adapter is a separate piece of
+	// unfinished work. When nil, colonyUpdateController returns
+	// colonyupdate.Inert, so the page renders an explicitly inert
+	// report - it cannot start an update and it says so - rather than
+	// either pretending an update system exists or failing to render at
+	// all.
+	//
+	// It is a post-construction setter (see SetColonyUpdateController)
+	// rather than a NewServer parameter, following the same precedent
+	// SetRoleMapStore set: this constructor is already long and every
+	// test in this package calls it positionally.
+	colonyUpdate colonyupdate.Controller
 
 	// tlsEnabled is true when cmd/frontend is serving over HTTPS
 	// (-tls-cert/-tls-key both set) - controls whether the session
@@ -712,6 +772,26 @@ type roleMapPersister interface {
 // updateRoleMap's own doc comment.
 func (s *Server) SetRoleMapStore(store roleMapPersister) {
 	s.roleMapStore = store
+}
+
+// SetColonyUpdateController wires the controlled-Colony-update backend
+// that the "/colony-update" page reads from and asks (ADR-0145).
+//
+// Leaving it unset - the default in every test, and in cmd/frontend as
+// of this commit - makes the page render colonyupdate.Inert, which
+// reports in words that no update system is attached and refuses every
+// request. That is deliberate: the real adapter does not exist yet, and a
+// page that quietly appeared to be live would be the more dangerous of
+// the two available mistakes.
+//
+// Passing nil is the same as not calling this at all, so a caller
+// cannot accidentally install a nil that panics on the page.
+func (s *Server) SetColonyUpdateController(controller colonyupdate.Controller) {
+	if controller == nil {
+		s.colonyUpdate = nil
+		return
+	}
+	s.colonyUpdate = controller
 }
 
 // ServeHTTP gates every request behind a valid session when login is
@@ -964,6 +1044,21 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /jails/{id}", s.handleJailPage)
 	s.mux.HandleFunc("GET /simulate", s.handleSimulatePage)
 	s.mux.HandleFunc("GET /maintenance", s.handleMaintenancePage)
+	// The controlled, one-at-a-time Colony update (ADR-0145). The page
+	// itself is Viewer-readable, so every session can see the truth
+	// about what the Colony is doing; the POST that asks for an update
+	// is Admin, matching POST /machine/services/{name}/restart, because
+	// an update restarts managerd and raftd and there is no lesser
+	// capability in this app that touches either.
+	//
+	// Read this route pairing carefully before weakening the gate: the
+	// Admin requirement is the frontend's own authorization, not the
+	// colony-wide single-flight, which is enforced by whatever
+	// implements colonyupdate.Controller and by nothing here. The
+	// greying-out of every other Comb is a courtesy and stays one.
+	s.mux.HandleFunc("GET /colony-update", s.handleColonyUpdatePage)
+	s.mux.HandleFunc("GET /colony-update/panel", s.handleColonyUpdatePanel)
+	s.mux.HandleFunc("POST /colony-update/request", s.requireRole(manager.RoleAdmin, s.handleColonyUpdateRequest))
 	s.mux.HandleFunc("GET /assumptions", s.handleAssumptionsPage)
 	s.mux.HandleFunc("POST /assumptions/purge-stale", s.requireRole(manager.RoleOperator, s.handlePurgeStaleAssumptionResults))
 	s.mux.HandleFunc("GET /assumption-register", s.handleAssumptionRegisterPage)

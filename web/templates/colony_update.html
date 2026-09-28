@@ -1,0 +1,250 @@
+{{/*
+  The controlled, one-at-a-time Colony update (ADR-0145).
+
+  Two templates in one file, deliberately: "colony_update_panel" is the
+  live region the page htmx-polls, and "colony_update_page" is the
+  document around it. They are the same view, so a poll and a reload can
+  never show different things - a failure mode worth ruling out by
+  construction rather than by remembering to keep two copies in step.
+
+  Everything the template knows about evidence has already been decided
+  in colony_update.go. There is no conditional here that infers a
+  verdict: the template chooses a branch on a boolean the Go code set,
+  and nothing else. In particular it never works out whether an update
+  is "really" running, and never decides which Comb's control is live -
+  .CanUpdate is that decision, already made from a fresh server read.
+*/}}
+{{define "colony_update_panel"}}
+<div id="colony-update-panel" class="panel" data-phase="{{.ColonyUpdate.Phase}}" data-observed="{{.ColonyUpdate.Observed}}" hx-get="/colony-update/panel" hx-trigger="every 4s" hx-swap="outerHTML">
+
+  {{if .ColonyUpdateActionError}}
+  <div class="banner-error"><strong>The update request could not be delivered.</strong> {{.ColonyUpdateActionError}} Nothing below describes a new update state: this is a failure to send the request, which is a different thing from a request that was refused. Re-read the panel for the Colony's actual state.</div>
+  {{end}}
+
+  {{if .ColonyUpdateRefused}}
+  <div class="banner-error">
+    <strong>The Colony update request was refused by the server, not by this page.</strong>
+    <div>{{.ColonyUpdateRefusal}}</div>
+    {{if .ColonyUpdateRefusalHolder}}<div>Already holding the Colony-wide update: <strong>{{.ColonyUpdateRefusalHolder}}</strong>.</div>{{end}}
+    <div>This page's own greyed-out controls did not cause this refusal, and would not have prevented it. Enforcing one update at a time is the server's job, and it is why a second tab or a direct request is refused just as this one was.</div>
+  </div>
+  {{end}}
+
+  {{/*
+    The operator's own request, echoed back, whether it was accepted or
+    refused. It is deliberately its own block rather than a line inside
+    either banner, because the framing has to be identical in both cases:
+    a browser may be holding a stale Comb, and the only thing this page
+    can honestly show as a target is what the server named above.
+  */}}
+  {{if .ColonyUpdateRequested}}
+  <div class="update-request-echo" data-requested="{{.ColonyUpdateRequested}}">You asked to update <strong>{{.ColonyUpdateRequested}}</strong>. That is your request, echoed back; it is not a target and nothing on this page will treat it as one. The target shown below is the one the server named.</div>
+  {{end}}
+
+  <div class="cockpit-panel-head">
+    <h2>Colony update</h2>
+    <span class="badge {{.ColonyUpdate.PhaseClass}}" data-outcome="{{.ColonyUpdate.Phase}}">{{.ColonyUpdate.PhaseLabel}}</span>
+  </div>
+
+  {{/*
+    The one sentence that says what is and is not protecting the Colony.
+    It is chosen by Go from what the update system actually reports about
+    its own enforcement, so a page with nothing attached cannot describe
+    itself as protected. See colonyUpdateEnforcedHeadline.
+  */}}
+  <p class="update-enforced" data-backend-enforced="{{.ColonyUpdate.BackendEnforced}}">{{.ColonyUpdate.EnforcedHeadline}}</p>
+
+  {{if not .ColonyUpdate.Observed}}
+  <div class="banner-error"><strong>Unobserved.</strong> {{.ColonyUpdate.UnavailableReason}} This is not evidence that the Colony is fine, and not evidence that anything is wrong: nothing was read. {{.ColonyUpdate.NominatedDetail}}.</div>
+  {{end}}
+
+  {{if .ColonyUpdate.Contradiction}}
+  <div class="banner-error"><strong>The update system's own reading is inconsistent.</strong> {{.ColonyUpdate.Contradiction}}</div>
+  {{end}}
+
+  <p>{{.ColonyUpdate.Detail}}</p>
+
+  {{if .ColonyUpdate.EnforcedDetail}}
+  <p class="muted">Single-flight enforcement: {{.ColonyUpdate.EnforcedDetail}}</p>
+  {{end}}
+
+  {{if .ColonyUpdate.SingleFlightHolder}}
+  <p class="muted">The Colony-wide update is currently held by <strong>{{.ColonyUpdate.SingleFlightHolder}}</strong>. Everything else waits, by the server's decision, not this page's.</p>
+  {{end}}
+
+  {{if .ColonyUpdate.OperationID}}
+  <dl class="detail-list">
+    <div><dt>Operation</dt><dd>{{.ColonyUpdate.OperationID}}</dd></div>
+    {{if .ColonyUpdate.RequestedBy}}<div><dt>Requested by</dt><dd>{{.ColonyUpdate.RequestedBy}}</dd></div>{{end}}
+    {{if .ColonyUpdate.HasStartedAt}}<div><dt>Started</dt><dd>{{.ColonyUpdate.StartedAt}}</dd></div>{{end}}
+    <div><dt>Phase</dt><dd><span class="badge {{.ColonyUpdate.PhaseClass}}">{{.ColonyUpdate.PhaseLabel}}</span></dd></div>
+  </dl>
+  {{end}}
+
+  {{if .ColonyUpdate.NominatedNodeID}}
+  <p class="update-nominated">The update system is offering <strong>{{.ColonyUpdate.NominatedNodeID}}</strong>. {{.ColonyUpdate.NominatedDetail}}</p>
+  {{else if .ColonyUpdate.Observed}}
+  <p class="update-nominated muted">No Comb is on offer right now. {{.ColonyUpdate.NominatedDetail}}</p>
+  {{end}}
+
+  {{if .ColonyUpdate.Steps}}
+  <h3>Steps</h3>
+  {{/*
+    Per-step outcomes. Each row names its outcome in words and carries
+    the raw evidence verbatim; the two inconclusive outcomes (Unknown,
+    Unobserved) are rendered by the Go code with their own labels and
+    their own badge classes, so they can never be mistaken here for
+    success or for failure. This template reasons about none of it.
+  */}}
+  <ol class="update-steps">
+    {{range .ColonyUpdate.Steps}}
+    <li data-outcome="{{.Outcome}}">
+      <div class="update-step-head"><strong>{{.Name}}</strong><span class="badge {{.OutcomeClass}}" data-step-outcome="{{.Outcome}}">{{.OutcomeLabel}}</span></div>
+      <div class="update-step-detail">{{.Detail}}</div>
+      {{if .Evidence}}<div class="update-step-evidence"><span class="muted">Evidence:</span> <code>{{.Evidence}}</code></div>{{end}}
+      {{if .HasObservedAt}}<div class="muted">Observed at {{.ObservedAt}}</div>{{else}}<div class="muted">No observation time was reported for this step.</div>{{end}}
+    </li>
+    {{end}}
+  </ol>
+  {{else if .ColonyUpdate.OperationID}}
+  <p class="muted">The update system reported an operation but no readable steps, so there is nothing here to show rather than nothing having happened.</p>
+  {{end}}
+
+  <p class="muted update-poll-note">This panel re-reads the server every four seconds and shows only what the server currently says. Reloading the page, opening a second tab, or clicking again on a stale page cannot change the answer - the server's answer is the only one this page can render.</p>
+</div>
+{{end}}
+
+{{define "colony_update_page"}}
+<!DOCTYPE html>
+<html lang="en">
+{{template "head" .}}
+<body class="app-layout">
+  {{template "nav" .}}
+  <main class="content" id="main-content">
+    <style>
+      .update-enforced { margin:.6rem 0 0; padding:.6rem .75rem; border-left:3px solid var(--line); background:var(--field); color:var(--muted); font-size:.86rem; }
+      .update-enforced[data-backend-enforced="true"] { border-left-color:var(--success); }
+      .update-enforced[data-backend-enforced="false"] { border-left-color:var(--danger); }
+      .update-nominated { margin:.7rem 0 0; }
+      .update-request-echo { margin:.6rem 0 0; padding:.5rem .7rem; border-left:3px solid var(--line); background:var(--field); font-size:.86rem; }
+      .update-steps { list-style:none; margin:.7rem 0 0; padding:0; counter-reset:update-step; }
+      .update-steps li { padding:.6rem 0; border-bottom:1px solid var(--line); }
+      .update-steps li:last-child { border-bottom:0; }
+      .update-step-head { display:flex; align-items:center; gap:.5rem; flex-wrap:wrap; }
+      .update-step-detail { margin-top:.25rem; font-size:.87rem; }
+      .update-step-evidence { margin-top:.25rem; font-size:.8rem; overflow-wrap:anywhere; }
+      .update-poll-note { margin-top:.9rem; font-size:.78rem; }
+      .update-table th, .update-table td { padding:.6rem .55rem; }
+      .update-comb-name { font-weight:700; overflow-wrap:anywhere; }
+      .update-role { margin-top:.15rem; color:var(--muted); font-size:.78rem; }
+      .update-state { margin-top:.35rem; }
+      .update-state .badge { font-size:.68rem; }
+      .update-state-detail { margin-top:.25rem; color:var(--muted); font-size:.78rem; }
+      .update-disabled-reason { margin-top:.3rem; color:var(--muted); font-size:.78rem; }
+      .update-inert-notice { border-left-color:var(--danger); }
+      @media (max-width:620px) { .update-table { min-width:58rem; } }
+    </style>
+
+    {{template "page_header" (pageHeader "Colony update" "One Comb at a time, with the operator supplying intent and the system deriving the order." "<a class='button secondary' href='/'>Back to command center</a>")}}
+
+    {{if .Error}}<div class="banner-error">{{.Error}}</div>{{end}}
+
+    {{/*
+      The live region, replaced wholesale by the poll. outerHTML rather
+      than innerHTML because the attribute carrying the poll trigger
+      lives on this element itself, so swapping the children would leave
+      it polling nothing after the first refresh.
+    */}}
+    {{template "colony_update_panel" .}}
+
+    <section class="panel">
+      <div class="cockpit-panel-head">
+        <h2>Every Comb in the Colony</h2>
+        <span class="badge {{.StateDigestColony.BadgeClass}}" title="{{.StateDigestColony.Detail}}">{{.StateDigestColony.BadgeLabel}}</span>
+      </div>
+      {{/*
+        At most one control on this page is ever enabled, and the reason
+        is spelled out in words rather than left to the greying-out. The
+        count is computed in Go from the same .CanUpdate booleans the
+        buttons use, so the sentence cannot disagree with the markup.
+      */}}
+      <p class="muted">Update controls enabled on this page: <strong data-enabled-controls="{{.ColonyUpdateEnabledControls}}">{{.ColonyUpdateEnabledControls}}</strong> of {{len .ColonyUpdateCombs}} — at most one, ever, because the update system derives which Comb goes next at the moment of use rather than the operator choosing an order. Which Comb is on offer, and why the others are waiting, is stated on each row.</p>
+      <p class="muted" data-state="{{.StateDigestColony.BadgeClass}}">FSM state agreement across the Colony (ADR-0143): {{.StateDigestColony.Detail}}</p>
+      <div class="table-scroll" role="region" aria-label="Colony update Combs" tabindex="0">
+        <table class="update-table">
+          <thead>
+            <tr>
+              <th>Comb</th>
+              <th>Role</th>
+              <th>Health and state</th>
+              <th>Update state</th>
+              <th>Update this Comb</th>
+            </tr>
+          </thead>
+          <tbody>
+            {{range .ColonyUpdateCombs}}
+            <tr data-comb="{{.NodeID}}" data-target="{{.IsTarget}}" data-can-update="{{.CanUpdate}}">
+              <td>
+                <div class="update-comb-name"><a href="/host/{{.NodeID}}">{{.NodeID}}</a></div>
+                {{if .IsTarget}}<div class="update-role">currently being updated</div>{{end}}
+              </td>
+              <td>{{.RoleLabel}}{{if .IsColonyLeader}} <span class="badge ready" title="This Comb's own raftd currently reports this node as the Colony leader. A point-in-time reading from one node's raftd, not a cluster-wide agreement (ADR-0123).">Colony leader</span>{{end}}</td>
+              <td>
+                {{if .Reachable}}<span class="badge ready">Reachable</span>{{else}}<span class="badge error">Unreachable</span>{{end}}
+                <span class="badge {{.HealthStatus}}" title="{{.HealthExplanation}}">{{.HealthStatus}}</span>
+                <span class="badge {{.DigestBadgeClass}}" title="{{.DigestDetail}}">{{.DigestBadgeLabel}}</span>
+              </td>
+              <td>
+                {{if .IsTarget}}<div class="update-state"><span class="badge {{.UpdateClass}}">{{.UpdateLabel}}</span> <span class="muted">being updated now</span></div>
+                {{else}}<div class="update-state"><span class="badge {{.UpdateClass}}">{{.UpdateLabel}}</span></div>{{end}}
+                <div class="update-state-detail">{{.UpdateDetail}}</div>
+              </td>
+              <td>
+                {{/*
+                  A plain form POST with a full page reload, and no
+                  htmx. Reloading is the point: after an action the
+                  browser re-reads the server from scratch, so a
+                  double-click, a replayed submit, or a stale page can
+                  only ever produce the truth. hx-boost or a silent swap
+                  would be strictly worse here, because they would keep
+                  showing the pre-click view until something else
+                  happened to refresh it.
+
+                  The disabled attribute is what the browser acts on, so
+                  it is the thing that makes the courtesy real; the
+                  reason beside it is what makes it honest. Both are
+                  rendered from Go (.CanUpdate, .DisabledReason), and
+                  this template infers neither.
+                */}}
+                <form method="post" action="/colony-update/request" class="update-form">
+                  <input type="hidden" name="node_id" value="{{.NodeID}}">
+                  <button type="submit" class="button{{if not .CanUpdate}} disabled{{end}}" data-comb-update="{{.NodeID}}"{{if not .CanUpdate}} disabled aria-disabled="true"{{end}} title="{{if .CanUpdate}}Ask the update system to update this Comb{{else}}{{.DisabledReason}}{{end}}">Update this Comb</button>
+                </form>
+                {{if not .CanUpdate}}<div class="update-disabled-reason">{{.DisabledReason}}</div>{{end}}
+              </td>
+            </tr>
+            {{else}}
+            <tr><td colspan="5"><em>No Comb candidates were returned by the current topology view, so this page is not listing every Comb and must not be read as though it were.</em></td></tr>
+            {{end}}
+          </tbody>
+        </table>
+      </div>
+      {{if not .CanOperate}}
+      <p class="muted">Your role does not permit starting a Colony update. Every control above is disabled for you, and each row says so. Reading this page is always allowed; asking for an update is not.</p>
+      {{end}}
+    </section>
+
+    <section class="panel">
+      <h2>What this page does not do</h2>
+      <ul>
+        <li>It does not decide the order. Leadership and eligibility are re-derived by the update system at the moment of use, so nothing here holds a plan that can go stale.</li>
+        <li>It does not know or care which Comb is the Raft leader. A leader is shown as information because it is useful context, never as a choice.</li>
+        <li>It does not enforce anything. The greying-out is a courtesy to the operator. One-at-a-time is enforced by the server, and a second tab or a direct request is refused there.</li>
+        <li>It does not run <code>make force-restart</code>, which stays a manual, per-Comb operator act (ADR-0141, ADR-0145). Nothing on this page issues a restart.</li>
+      </ul>
+    </section>
+  </main>
+  {{template "footer" .}}
+</body>
+</html>
+{{end}}

@@ -447,6 +447,16 @@
     <section class="sidebar-section" aria-labelledby="nav-colony">
       <h2 class="sidebar-heading" id="nav-colony">Colony</h2>
       <a class="sidebar-link{{if eq .ActivePage "stats"}} active{{end}}" href="/"{{if eq .ActivePage "stats"}} aria-current="page"{{end}}>Command Center</a>
+      {{/*
+        Colony update (ADR-0145). Placed in the Colony section rather
+        than the command center's own sub-navigation because it is a
+        separate page that polls its own live panel, not another panel
+        on the summary - see handleColonyUpdatePage's own comment for
+        why the cockpit-topology-list is deliberately not touched.
+        Visible to every role, because every role may read the truth
+        about what the Colony is doing; the control it gates is Admin.
+      */}}
+      <a class="sidebar-link{{if eq .ActivePage "colony-update"}} active{{end}}" href="/colony-update"{{if eq .ActivePage "colony-update"}} aria-current="page"{{end}}>Colony update</a>
       <a class="sidebar-link{{if eq .ActivePage "assumptions"}} active{{end}}" href="/assumptions"{{if eq .ActivePage "assumptions"}} aria-current="page"{{end}}>Assumptions</a>
       <a class="sidebar-link{{if eq .ActivePage "assumption-register"}} active{{end}}" href="/assumption-register"{{if eq .ActivePage "assumption-register"}} aria-current="page"{{end}}>Assumption Register</a>
       <a class="sidebar-link{{if eq .ActivePage "simulate"}} active{{end}}" href="/simulate"{{if eq .ActivePage "simulate"}} aria-current="page"{{end}}>Simulations</a>
