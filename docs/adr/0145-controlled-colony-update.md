@@ -224,3 +224,97 @@ fault.
   also blocks is presentation.
 - Whether an update in progress should block a second operator session, and
   how that is coordinated when the two operators are on different Combs.
+
+## Update 2026-09-27: one Comb, end to end
+
+`ManagerService.ExecuteNodeRestartPlan` now runs the sequence above for one
+named Comb, with every effect bound to the real one. The `## Status` line
+still reads "not yet implemented" and is left that way, per the decision
+recorded in SHARED.md for this ADR: the status follows the whole workflow, not
+the parts of it that have landed. This section is the record of what has.
+
+What is real now, and was previously reachable only from a test with a fake on
+every boundary:
+
+- `internal/manager/restartcaller.go` composes the real
+  `restartStepAsider` (so the real `LeadershipTransfer()` over the real raftd
+  socket), real quorum facts from real raft status and real peer dials, the
+  real raft-replicated restart lease applied on the real leader, the real
+  pending-restart record, the real `service apiary_raftd restart`, and the
+  restarted process's own confirmation.
+- `internal/manager/raftdquorum.go` gained `raftdQuorumFact`, the read-and-dial
+  split out of `evaluateRaftdQuorumSafety` so there is still exactly one
+  implementation of "go and find out the real facts". The preview and the
+  enforcement cannot drift because there is one function, not two that happen
+  to agree today.
+- `managerdAddrFromStatus` is the membership-to-address step, shared by the
+  step-aside's peer hop and this new forward, so there is one fail-closed
+  lookup rather than two.
+
+Three decisions in it are worth recording, because each could reasonably have
+gone the other way.
+
+**Execution is target-local.** The pending record is read back by the restarted
+raftd on its own next startup and the restart command runs on the machine whose
+raftd is stopping, so neither is visible from another node. A request naming
+another Comb is therefore forwarded to that member's own managerd, at an
+address resolved from this node's own raft membership and never from anything
+the caller supplied, and never to the leader.
+
+**The confirmation is not self-served.** ADR-0103's revision note #16 and §2
+above both require the restarted process to make it. The plan therefore reads
+the durable record `cmd/raftd`'s own startup hook writes rather than calling
+`ConfirmRestartCompleted` itself: a plan that confirmed for raftd would be
+letting a witness testify to its own resurrection. The lease id must match, so
+a stale `confirmed` left by an earlier restart on the same node can never be
+credited to this one.
+
+**One at a time is ADR-0103's lease, and nothing more.** A lease already held
+for another Comb refuses this call whatever `force` says, because a held lease
+is not a known cost an operator can acknowledge - it is evidence that somebody
+else's restart is in flight and unconfirmed. ADR-0103's force-override of a
+stuck lease stays on `ReserveRestartLease`/`RestartNodeService`, untouched, for
+an operator recovering one by hand. That is the whole of the guarantee here,
+and it is worth being blunt about its size: it is a per-service lease, not
+durable Raft-backed ownership of a Colony update. Two callers racing, or a
+caller whose read of the lease state lags the leader, are not closed by it.
+
+The framing from the table above survives: **passing the preflight is
+necessary and never sufficient.** The quorum evaluation is step three of
+eight, the lease that actually serializes the restart is step four, and the
+only thing that releases the lease is a confirmation from the process that was
+restarted. A clean `allow` from the preflight means the next step is permitted,
+not that the restart will happen or that it worked.
+
+Authorization is the dedicated root-owned restart-guardrail token, exempt from
+`checkAuth` like `ReserveRestartLease`, `ConfirmRestartCompleted` and
+`StepAsideForRestart`. This call composes all three, so if it were reachable
+by an ordinary Admin API key then an ordinary Admin API key could restart a
+quorum-critical daemon. There is no UI and no REST route for it, by design.
+
+Still missing, and none of it made smaller by this:
+
+- **Durable update-operation state, and the managerd self-restart handoff.** If
+  the managerd running a plan is itself restarted or dies mid-call, the plan is
+  over; there is nothing to resume from, and the pending record on disk is the
+  only trace. `apiary_managerd` is refused outright, unchanged from ADR-0142,
+  so this call can never restart the process it lives in - but the absent piece
+  is real, and it is the first open question above.
+- **Colony-wide single-flight**, in progress on another branch.
+- **The Colony view's Update control**, `versioncheck` as the per-step gate,
+  and the ADR-0143 verdicts as the per-step and end-of-sweep gates. None of
+  the three health checks in the table above is wired to anything yet.
+- **A sweep.** One call, one Comb, one service. Which Comb to touch first, and
+  in what order, is not derived by anything here.
+- **`make force-restart` is untouched** and remains a manual escape hatch. It
+  is not wired to this and must not be: the `lease_id: 0` receipt it writes is
+  evidence for an un-leased emergency restart, and the automated path must
+  never need the weaker record.
+
+What is *not* verified: this has never run on a FreeBSD host. The sequence is
+exercised against a real raft cluster on loopback with a real gRPC surface, but
+`service apiary_raftd restart`, rc.d's stop/start timing, and the real interval
+between raftd coming back and its startup hook running are macOS test fakes and
+nothing more. The production confirmation budget is deliberately larger than
+`cmd/raftd`'s own (10 attempts 3s apart against 5) for exactly that reason, and
+that sizing is reasoned rather than measured.
