@@ -554,6 +554,48 @@ update: install
 # restarting raftd into a node whose managerd is down - which is how a
 # restart lease would fail to confirm and, having no TTL, block the
 # cluster until an operator forced it clear.
+#
+# WHY sockstat(1) AND NOT `service <name> status`
+#
+# The assertion used to be `service apiary_<svc> status`, and on these
+# Combs that call is not a measurement. Measured on brood and drone,
+# `service apiary_managerd status`, `service apiary_raftd status`,
+# `service apiary_frontend status` and `service apiary_restshimd status`
+# all report not running, on every check, while all four daemons are
+# demonstrably up and listening. So the old check was guaranteed to
+# reach its own failure branch on the first service, every time: it
+# restarted managerd, burned the full 15s, printed the failure and
+# exited 1 having never touched raftd - producing by itself the exact
+# half-restarted managerd/raftd pair this target exists to prevent, and
+# leaving a pending-restart record for raftd that no restart ever
+# confirmed. (The rc.d scripts do declare a pidfile and pass it to
+# daemon(8) as -P; why status misreports is not this Makefile's problem,
+# and adding a pidfile test would only add a second way to be wrong.)
+#
+# sockstat(1) is the check measured to be truthful here: `sockstat -4 -l`
+# lists the daemon's own listening socket. Each service's port is fixed
+# by ADR-0108 and named in internal/frontend/fixedport.go (raftd 17600,
+# managerd 17700, frontend 8080, restshimd 8081), and the defaults in
+# internal/raft/config.go (DefaultBindAddr 127.0.0.1:17600) and
+# cmd/managerd/main.go (127.0.0.1:17700) agree with them. A wrong host
+# bind does not change the port, so the check is the port and only the
+# port. If it still never appears, that is a real failure and is
+# reported as one - including which services were already restarted,
+# because which build this Comb is now running depends on it.
+#
+# The port map is resolved for every service in FORCE_RESTART_SRCS
+# before the first restart rather than inside the loop, so a service
+# with no known port is refused having touched nothing. A third daemon
+# added to that list later would otherwise be discovered halfway
+# through, with the first daemon already restarted and no record
+# explaining why.
+#
+# The match is `:<port>` followed by whitespace, which does depend on
+# sockstat's column layout. If that layout ever changes, the failure
+# mode is a timeout and a loud refusal rather than a false pass, which
+# is the safe direction for the only confirmation this target has: a
+# check that cannot see the listener cannot confirm the restart, and
+# says so.
 .PHONY: force-restart
 force-restart:
 	@echo "force-restart: about to restart ${FORCE_RESTART_SRCS} on `hostname`" >&2 ; \
@@ -571,28 +613,56 @@ force-restart:
 	echo "  a lease and never releases one." >&2 ; \
 	echo "" >&2
 	@set -e; \
+	plan= ; \
 	for S in ${FORCE_RESTART_SRCS}; do \
-		echo "restarting apiary_$$S ..." ; \
+		case $$S in \
+		managerd) plan="$${plan:+$${plan} }managerd:17700" ;; \
+		raftd)    plan="$${plan:+$${plan} }raftd:17600" ;; \
+		*) \
+			echo "force-restart: no known listener port for apiary_$$S," >&2 ; \
+			echo "  and this target will not guess one. NOTHING has been" >&2 ; \
+			echo "  restarted: add the daemon's fixed port to the case" >&2 ; \
+			echo "  above (ADR-0108, internal/frontend/fixedport.go)." >&2 ; \
+			exit 1 ; \
+		esac ; \
+	done ; \
+	echo "  restart plan, each confirmed by its own listener port:" >&2 ; \
+	echo "    $$plan  (service:port, in this order)" >&2 ; \
+	restarted= ; \
+	for pair in $$plan ; do \
+		S=$${pair%%:*} ; port=$${pair#*:} ; \
+		echo "restarting apiary_$$S (waiting for port $$port) ..." ; \
 		sh scripts/record-forced-restart.sh "$$S" ; \
 		service apiary_$$S restart ; \
+		restarted="$${restarted:+$${restarted} }$$S" ; \
 		i=0 ; \
 		while [ $$i -lt 15 ] ; do \
-			service apiary_$$S status >/dev/null 2>&1 && break ; \
+			sockstat -4 -l 2>/dev/null | grep -q ":$$port[[:space:]]" && break ; \
 			i=$$((i+1)) ; sleep 1 ; \
 		done ; \
 		if [ $$i -ge 15 ] ; then \
-			echo "apiary_$$S did not report running after 15s." >&2 ; \
+			echo "apiary_$$S did not open its listener port $$port within 15s." >&2 ; \
+			echo "  That is a sockstat(1) port check, not a 'service" >&2 ; \
+			echo "  status' check - 'status' is not trustworthy on this" >&2 ; \
+			echo "  host, which is why the port is checked instead." >&2 ; \
 			echo "  Stopping here rather than restarting the next" >&2 ; \
 			echo "  service: a half-restarted managerd/raftd pair is" >&2 ; \
 			echo "  exactly the state that strands a restart lease." >&2 ; \
+			echo "  ALREADY RESTARTED on this Comb, this run:" >&2 ; \
+			echo "    $$restarted" >&2 ; \
+			echo "  NOT restarted: every service after apiary_$$S in" >&2 ; \
+			echo "  the plan above, so this Comb is now running a mix" >&2 ; \
+			echo "  of the old and the new build. Finish or roll back" >&2 ; \
+			echo "  before touching the next Comb." >&2 ; \
 			echo "  See /var/log/apiary/$$S.log" >&2 ; \
 			exit 1 ; \
 		fi ; \
-		echo "  apiary_$$S is running" ; \
+		echo "  apiary_$$S is listening on port $$port" ; \
 	done
 	@echo "" ; \
 	echo "force-restart: done on `hostname`." ; \
 	echo "  Confirm the running build, not the one on disk:" ; \
-	echo "    grep build= /var/log/apiary/{managerd,raftd}.log | tail -2" ; \
+	echo "    grep build= /var/log/apiary/managerd.log /var/log/apiary/raftd.log" ; \
+	echo "      | tail -2" ; \
 	echo "  and check the Machine page's colony view before moving on to" ; \
 	echo "  the next Comb."
