@@ -17,6 +17,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 )
 
 // DefaultPath is where this file lives by default on a pkg-installed
@@ -72,4 +73,59 @@ func (m *Manager) Load() (Config, error) {
 		return Config{}, fmt.Errorf("commonconfig: parsing %s: %w", m.path(), err)
 	}
 	return cfg, nil
+}
+
+// Save writes cfg, replacing whatever was there before in full (not a
+// merge) - the same convention nodeconfig.Manager.Save, SaveWithHistory
+// and the other three config packages already establish. A caller that
+// wants to change one field Loads first, exactly as the RPC handlers
+// do.
+//
+// This existed only as a reader until ADR-0147's `apiaryctl install`,
+// which writes node_id and hostname into this file rather than into
+// each of the four daemon files, because ADR-0112 makes this the right
+// home for values that are identical on every daemon of one Comb. The
+// atomic-write-then-rename is not an embellishment added with it: the
+// four sibling packages each carry their own copy of the same helper,
+// and a fifth variant that used a plain os.WriteFile would leave an
+// identity file world-readable for the window between the open and the
+// chmod on an already-existing file, which os.WriteFile's mode argument
+// does not cover because it only applies on creation.
+func (m *Manager) Save(cfg Config) error {
+	body, err := json.MarshalIndent(cfg, "", "  ")
+	if err != nil {
+		return fmt.Errorf("commonconfig: marshalling config: %w", err)
+	}
+	return atomicWriteFile(m.path(), body)
+}
+
+// atomicWriteFile writes body to path via a temp file in the same
+// directory, explicitly chmod 0600, then renames it into place,
+// mirroring internal/nodeconfig's own atomicWriteFile.
+func atomicWriteFile(path string, body []byte) error {
+	dir := filepath.Dir(path)
+	tmp, err := os.CreateTemp(dir, ".commonconfig-*.tmp")
+	if err != nil {
+		return fmt.Errorf("commonconfig: creating temp file: %w", err)
+	}
+	tmpPath := tmp.Name()
+	defer os.Remove(tmpPath) // no-op once successfully renamed
+	if _, err := tmp.Write(body); err != nil {
+		tmp.Close()
+		return fmt.Errorf("commonconfig: writing temp file: %w", err)
+	}
+	if err := tmp.Sync(); err != nil {
+		tmp.Close()
+		return fmt.Errorf("commonconfig: syncing temp file: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		return fmt.Errorf("commonconfig: closing temp file: %w", err)
+	}
+	if err := os.Chmod(tmpPath, 0o600); err != nil {
+		return fmt.Errorf("commonconfig: setting permissions: %w", err)
+	}
+	if err := os.Rename(tmpPath, path); err != nil {
+		return fmt.Errorf("commonconfig: renaming into place: %w", err)
+	}
+	return nil
 }
