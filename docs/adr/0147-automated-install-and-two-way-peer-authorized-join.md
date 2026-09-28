@@ -11,7 +11,12 @@ source checkout, exactly as the install does.
 This ADR is written to be reviewed before implementation. The
 "Open questions" section at the end lists the points where a decision
 was made on the owner's behalf rather than by the owner, and each one
-is cheap to change now and expensive later.
+is cheap to change now and expensive later. Questions 4, 7, 8, 12, and
+13 are answered and each answer is recorded next to its question.
+**1, 2, 3, 5, and 6 are still open**, and they are the ones to push
+back on: the certificate algorithm, the two code lengths, the
+second-PIN lifetime, the reissue policy, and whether an authorization
+value may sit in plaintext in replicated state.
 
 It has four parts, decided together. Part 1 is the source-free
 `apiaryctl install`. Part 2 is the two-way, peer-authorized join that
@@ -28,7 +33,10 @@ as decisions rather than proposals: TLS is on by default everywhere;
 the Colony side of the join is a deliberate operator toggle with a
 predictable expiry; and **approval requires a live window**, not merely
 request creation. The last is the stricter of the two options on the
-table and was chosen for that reason.
+table and was chosen for that reason. The two points I had left open in
+Part 4 are answered too: the window length is configurable and defaults
+to ten minutes, and the window publishes every member's managerd
+fingerprint.
 
 Amends ADR-0113 (removes `yes-trust-new-comb`). Touches ADR-0083,
 ADR-0092, ADR-0093, ADR-0096, ADR-0097, ADR-0100, ADR-0105, ADR-0112,
@@ -534,9 +542,9 @@ reader does not "consistency-fix" the other two.
 | `internalpb.PendingJoinRequest` | gains `stage`, `advertised_fingerprints`, `second_pin`, `first_code_attempts`, `second_pin_attempts`, `second_pin_expires_at_unix` |
 | `internalpb.Command` | gains `VerifyJoinIntroduction` and `ReissueJoinSecondPin` commands, so both are raft-replicated like every other join transition |
 | `PendingJoinRequest` (Part 3) | gains `authorization_id`, `consumed_at_unix`, and the two approving API key IDs, so consumption and authorship are both in the raft log rather than only in a file |
-| `OpenColonyJoinWindow` | Part 4. new. Admin. `{duration_seconds}` → the absolute deadline. Leader-only, forwarded like every other admin-side state change |
+| `OpenColonyJoinWindow` | Part 4. new. Admin. `{duration_seconds, 0 means configured default}` → the absolute deadline, the applied duration, and the epoch. Leader-only, forwarded like every other admin-side state change |
 | `CloseColonyJoinWindow` | Part 4. new. Admin. Ends the window early; expiry converges on the same state |
-| `GetColonyJoinWindowResponse` | Part 4. new. Unauthenticated, **only while the window is live**, and returns the public bootstrap fields and nothing else: `colony_name`, member managerd fingerprints, `opened_at_unix`, `expires_at_unix`, `colony_node_id`, `leader_node_id` |
+| `GetColonyJoinWindowResponse` | Part 4. new. Unauthenticated, **only while the window is live**, and returns the public bootstrap fields and nothing else: `colony_name`, **every member's** managerd fingerprint, `opened_at_unix`, `expires_at_unix`, `colony_node_id`, `leader_node_id` |
 | `PinPeerCertificate` | Part 4. new. Admin. The target's half of the trust step: evaluate the joiner's leaf, then record the pin. Called automatically by the introduction path, never by a page |
 | `UnpinPeerCertificate` | Part 4. new. Admin. Drops a pin held for a request that ended without becoming a voter |
 | `internalpb.ColonyJoinWindow` | Part 4. new. The replicated window, with an absolute `expires_at_unix` and `opened_at_unix` doubling as its epoch |
@@ -825,13 +833,43 @@ to a follower behaves identically to introducing it to the leader.
 
 ### Opening it, and what predictable has to mean
 
-`OpenColonyJoinWindow` takes a duration, proposes **30 minutes** (open
-question 12), and is **refused outright while a live window already
-exists** - there is no "or longer" case, because "or longer" is the
-extend operation this section exists to prevent. An operator who wants a
-longer window closes the current one and opens a new one, which is two
-visible acts rather than one silent one. Three properties, each closing
-a specific way a window becomes a permanent capability:
+`OpenColonyJoinWindow` takes an **optional** duration and is refused
+outright while a live window already exists - there is no "or longer"
+case, because "or longer" is the extend operation this section exists to
+prevent. An operator who wants a different length changes the
+configuration or closes the current window and opens a new one, which
+are visible acts rather than silent ones.
+
+**The duration is configurable, defaulting to 10 minutes.** The owner's
+decision, and the reason it is configurable is worth stating: 10
+minutes has to cover a two-human exchange across two machines, which is
+comfortable when the exchange is deliberate and tight when it is not,
+and the right length depends on the Colony and on the operator. A
+Colony where the two machines sit on the same desk and one where the
+operator has to walk somewhere are not the same number.
+
+- `managerd.json` gains `colony_join_window_seconds`, absent meaning
+  **600**. `apiaryctl install` writes it explicitly when it creates the
+  file, so the operator can see the number, and leaves it alone when the
+  file already exists, per Part 1's preservation rules.
+- The configured value is both the **default and the ceiling**.
+  `OpenColonyJoinWindow` may request anything shorter and nothing
+  longer, and a longer request is refused with a message naming the
+  configured ceiling and the file that holds it. Making the
+  configuration the only lever is what stops the RPC from being a way
+  around configured policy.
+- **The leader's value is authoritative**, because the leader computes
+  the deadline. Two Combs configured differently is a legitimate state
+  and the answer is not "they disagree, refuse", it is "the leader's
+  number wins and the response says which number was used". The
+  response carries the applied duration so no operator has to guess.
+- A **malformed or non-positive value is a startup error**, not a
+  fallback to 600. A window whose length is silently wrong is a window
+  nobody can reason about, and this is the same fail-closed rule
+  Part 1 applies to the files it writes.
+
+Three further properties, each closing a specific way a window becomes a
+permanent capability:
 
 - **The deadline is absolute and fixed once.** It is
   `opened_at + duration` computed on the leader and replicated. A
@@ -851,6 +889,24 @@ a specific way a window becomes a permanent capability:
   window lapse, reopen, and finish the half-done request from before"
   is not a path, and a request cannot be parked in one window and
   completed in the next.
+
+**Open the window last, not first.** With the epoch rule above, an
+expiry part-way through the exchange does not merely expire a PIN, it
+kills the request and the pair start again. The ordering that makes a
+ten-minute default comfortable is therefore:
+
+1. The joining Comb is installed and shows its own first code and
+   fingerprints. Nothing about this needs a window.
+2. The operator has **both** pages open and can see both.
+3. Only then does the operator open the window on the target, and the
+   exchange runs inside it.
+
+This is worth writing down because the failure is not obvious in
+advance. An operator who opens the window when they begin setting up
+the new Comb spends part of it walking to the other machine, and the
+window does not care. Both pages show the deadline and the remaining
+time, so the pressure is visible instead of surprising, and the
+recovery is stated on the refusal: open the window and start again.
 
 ### Both the request and the approval need a live window
 
@@ -893,9 +949,17 @@ fields, and refuses once the window is not live:
   Not the LAN address and not a wildcard, per ADR-0139.
 - `managerd_fingerprints` -- SHA-256 over the DER of the leader's and
   every member's managerd serving certificate, keyed by node ID.
-  Publishing all of them rather than the leader's alone is what lets
-  the joiner check that the member it was handed is a *member*, and not
-  a stranger that answered on that address.
+  Publishing all of them rather than just the leader's alone is what
+  lets the joiner check that the member it was handed is a *member*,
+  and not a stranger that answered on that address. The owner's
+  decision: **every managerd fingerprint**, with the leader not
+  privileged among them. Leaders-only was cheaper and left a hole
+  exactly where this ADR says behaviour must be identical, since a
+  joiner introduced to a follower would have had nothing to check that
+  follower against. The cost of the fuller list is that it grows with
+  the Colony, and that for the length of a window an operator opened,
+  the Colony publishes its own members' certificate digests to anyone
+  who asks. Both are accepted.
 - `opened_at_unix` and `expires_at_unix`, so a joiner refuses stale
   bootstrap instead of dialing a name it learned from a window that
   closed an hour ago.
@@ -903,9 +967,10 @@ fields, and refuses once the window is not live:
   Colony the same way and the operator can see they are looking at the
   same thing.
 
-Proposed default payload, and open question 13: the leader plus every
-member's managerd fingerprint. Not the frontend or raftd certificates,
-which are not what peers dial.
+That is the whole payload: the name, the fingerprints, the window's own
+timestamps, and the two node IDs. Not the frontend or raftd
+certificates, which are not what peers dial, and not the private keys,
+which are not in the Colony to publish.
 
 ### The order is trust first, then PINs
 
@@ -1068,16 +1133,20 @@ known peer, else operator-supplied CA, else refuse.
 
 - **On any member of a Colony:** a join-window control showing the
   state plainly. Closed by default, with the button that opens it, the
-  duration, and the resulting deadline rendered as an absolute local
-  time. While it is open the page shows a countdown and a "close now"
-  button, because a window the operator cannot see the end of is a
-  window they will not remember to close. The control is Admin-tier,
-  since it is a state change, and it forwards like the rest.
+  duration that will be used and where it came from, and the resulting
+  deadline rendered as an absolute local time. While it is open the page
+  shows a countdown and a "close now" button, because a window the
+  operator cannot see the end of is a window they will not remember to
+  close. The control is Admin-tier, since it is a state change, and it
+  forwards like the rest.
 - **On the requester:** the first step of the join is now "fetch the
   Colony's advertised name and fingerprints from the member you were
   given", and that result is displayed before the first code exists, so
   the operator can compare the Colony's advertisement on the two
   screens in the same deliberate pass as the requester's fingerprints.
+  The window's deadline is shown here too, in local time, because the
+  requester is the operator who is most likely to be mid-copy when it
+  runs out.
 - **On the target's pending-request panel:** a per-request line saying
   which window created it, whether that window is still live, and a
   refusal that reads "the Colony is not currently accepting joins; open
@@ -1539,7 +1608,27 @@ to earn.
   failure messages must not be identical.
 - Expiry passes with no leader activity at all: the window closes on
   time because the deadline is absolute, asserted with a shortened
-  duration in the test rather than a real 30 minutes.
+  duration in the test rather than a real ten minutes.
+- **The duration, all four ways.** Absent from `managerd.json` gives
+  600 seconds, asserted on the actual deadline and not on a constant.
+  A configured value is honored. An explicit shorter request is honored.
+  A request above the configured value is refused, and the refusal is
+  asserted to name both the ceiling and the file that holds it.
+- Two Combs configured differently, with the **leader's** value the one
+  that applies, and the response's applied duration asserted to be the
+  leader's. A test that only checks the window opened would pass a
+  mutant that reads a follower's config.
+- A zero, negative, or non-integer `colony_join_window_seconds` is a
+  **startup error**, asserted against the loader directly. A mutant
+  that falls back to 600 is killed here, not in a later test that
+  happens to use a valid config.
+- `apiaryctl install` writes the field when it creates `managerd.json`
+  and does not touch it when the file exists, asserted with a
+  hand-edited value in place.
+- The published set is **every member**, asserted by count against the
+  real voter list: a two-member Colony opened on the follower returns
+  two fingerprints, and a mutant that publishes the leader only is
+  killed on that count rather than on a substring.
 - `GetColonyJoinWindow` after expiry returns no fingerprints, not stale
   ones. Asserted on the absence of the field, not on an error alone.
 - **The trust ordering is asserted, not described.** A test in which the
@@ -1584,9 +1673,11 @@ force-restart work.
 ## Open questions for the owner
 
 The first six are points where a decision was made on your behalf. Each
-is a small edit here and a much larger one in code. The last two are
-scope questions added on review: they do not have a drafted answer, and
-picking either one changes how much of the above is worth building.
+is a small edit here and a much larger one in code. Questions 7 and 8
+were scope questions added on review, answered below; question 4 is
+retired by Part 4. **Questions 1, 2, 3, 5, and 6 remain open** and are
+the ones worth your attention, because each one is a number or a policy
+that is cheap in a paragraph and expensive in a schema.
 
 1. **ECDSA P-256 instead of RSA-2048** for generated serving
    certificates. Every consumer here is Go, and it is a visible change
@@ -1670,32 +1761,58 @@ directions. That is Part 3.
     still be honoured, since a root operator who insists is not an
     attacker.
 
-## Open questions added by Part 4
+## 12 and 13, now answered
 
-Both are points where a number or a payload was chosen on your behalf
-rather than by you. Neither is structural: the window mechanism, the
-epoch rule, and the trust ordering do not depend on either answer.
+Both were open questions in the Part 4 commit, both are the owner's, and
+neither moved anything structural: the window mechanism, the epoch rule,
+and the trust ordering were written so that neither answer could change
+them.
 
-12. **The default `await_colony_join` duration.** Proposed at 30
-    minutes. The constraint is real: the window has to cover the
-    *whole* flow, because approval needs a live one, and the flow is
-    two humans copying numbers between two machines. Too short and the
-    operator reopens mid-flow, which by the epoch rule invalidates the
-    request they are halfway through, and that is a confusing failure
-    to explain. Too long and a forgotten window is a standing
-    invitation that outlives its purpose. 30 minutes is comfortable
-    for a careful exchange and still expires on its own if everyone
-    walks away. 15 minutes is the shorter defensible answer, an hour is
-    the longer one, and I would argue against the hour.
-13. **The exact bootstrap payload.** Proposed: `colony_name` taken from
-    the leader's certificate SANs, plus the managerd SHA-256
-    fingerprint of the leader and of every member, plus the window's
-    `opened_at_unix` and `expires_at_unix`, plus the Colony and leader
-    node IDs. Publishing every member rather than the leader alone is
-    the part worth a decision, because it is what lets the joiner
-    confirm that the member the operator named is a member. The costs
-    are a fingerprint list that grows with the Colony, and a window
-    that is a small amount of public information while it is open.
-    Leaders-only is simpler and covers the common case, but a joiner
-    introduced to a follower is exactly the case this ADR says has to
-    behave identically, so leaders-only leaves a hole.
+12. **The window duration is configurable, and defaults to 10 minutes.**
+    Not a fixed number, because a ten-minute default has to cover a
+    two-human exchange across two machines, and whether that is
+    comfortable or tight depends on the Colony and on the operator. A
+    Colony whose two machines sit on one desk and one where the operator
+    has to walk between them are not the same number, and a value chosen
+    once for both would be wrong for at least one of them.
+
+    10 minutes was chosen over the 30 I proposed, and the shorter
+    number is the better one here: the epoch rule means an expiry
+    mid-exchange costs a restart, so the pressure should be on the
+    operator to open the window when they are ready rather than on a
+    generous timer. That is why the ordering is written down --
+    the joining Comb displays its code first, the operator opens both
+    pages, and the window is opened last, immediately before the
+    exchange. With that order, ten minutes is a comfortable amount of
+    time to copy two numbers and read a fingerprint.
+
+    The configured value is the default **and** the ceiling, and the
+    leader's copy is the one that applies. Making the configuration
+    the only lever is deliberate: an RPC parameter that could exceed
+    the configured value would be a way around the policy the
+    configuration states.
+
+13. **Every managerd fingerprint.** Not the leader's alone, and not the
+    leader plus a sample. Every current member's, keyed by node ID, with
+    the leader not privileged among them.
+
+    The reasoning is the one recorded in the design section and it did
+    not survive contact with the question: leaders-only leaves a joiner
+    introduced to a **follower** with nothing to check that follower
+    against, and follower introduction is a case this ADR exists to make
+    work identically. A smaller list would have quietly made the leader
+    the only Comb an operator could safely introduce through, which is
+    the requirement the owner removed when the joiner was allowed to
+    approach any member instead of the leader.
+
+    The cost is accepted: the list grows with the Colony, and for as
+    long as a window is open the Colony will hand its own members'
+    certificate digests to any caller that asks. That second one is a
+    disclosure, and it is a disclosure an operator creates on purpose
+    and for a fixed length, which is the property the window was built
+    to provide.
+
+**Questions 12 and 13 are answered, and nothing else is answered by
+this.** Questions 1, 2, 3, 5, and 6 from the section above are still
+open, and the remaining work is those five, then approval, then
+implementation.
