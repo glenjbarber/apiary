@@ -73,6 +73,43 @@ func TestGaugeFromUsedTotal(t *testing.T) {
 	})
 }
 
+func TestGaugeFromLoadAverage(t *testing.T) {
+	t.Run("zero cores is unknown, not a divide-by-zero zero percent", func(t *testing.T) {
+		g := gaugeFromLoadAverage("CPU", 1.5, 0, "no core count reported")
+		if g.State != "unknown" {
+			t.Errorf("State = %q, want %q", g.State, "unknown")
+		}
+	})
+	t.Run("negative cores (should never happen, but must not panic) is unknown", func(t *testing.T) {
+		g := gaugeFromLoadAverage("CPU", 1.5, -1, "")
+		if g.State != "unknown" {
+			t.Errorf("State = %q, want %q", g.State, "unknown")
+		}
+	})
+	t.Run("half the cores busy", func(t *testing.T) {
+		g := gaugeFromLoadAverage("CPU", 4, 8, "")
+		if g.Percent != 50 || g.State != "ok" {
+			t.Errorf("got Percent=%d State=%q, want 50/ok", g.Percent, g.State)
+		}
+	})
+	t.Run("load exceeding core count clamps to 100, does not overshoot the ring", func(t *testing.T) {
+		g := gaugeFromLoadAverage("CPU", 20, 8, "")
+		if g.Percent != 100 || g.State != "critical" {
+			t.Errorf("got Percent=%d State=%q, want 100/critical", g.Percent, g.State)
+		}
+	})
+	t.Run("the same load average means something different on more cores", func(t *testing.T) {
+		busy := gaugeFromLoadAverage("CPU", 4, 4, "")
+		idle := gaugeFromLoadAverage("CPU", 4, 16, "")
+		if busy.State != "critical" {
+			t.Errorf("4 load on 4 cores: State = %q, want critical", busy.State)
+		}
+		if idle.State != "ok" {
+			t.Errorf("4 load on 16 cores: State = %q, want ok", idle.State)
+		}
+	})
+}
+
 func TestGaugeDashArithmetic(t *testing.T) {
 	circumference := 2 * math.Pi * gaugeRadius
 

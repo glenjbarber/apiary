@@ -1,5 +1,7 @@
 package frontend
 
+import "github.com/glenjbarber/apiary/internal/health"
+
 // healthCardView and healthCardStat back the HealthCard component
 // (docs/web-ui-redesign.md Section 1). It replaces the Command
 // Center's former KPI strip - three fixed, always-identical labels
@@ -73,4 +75,41 @@ func newHealthCardView(reachable, total int, counts map[string]int, guardrailHol
 		GuardrailHolds: guardrailHolds,
 		PendingJoins:   pendingJoins,
 	}
+}
+
+// healthCardVocabFor maps internal/health's own Status values onto the
+// HealthCard vocabulary. health.Status has five values, not seven - it
+// has no "critical" tier of its own (only "degraded") and no
+// "not-applicable" (a Comb's own health is always evaluated; that state
+// exists for a resource with no reconciler configured, not for a Comb).
+// Those two vocabulary slots are therefore never incremented by a Comb's
+// HealthStatus and always render as zero - an honest reflection of what
+// this signal can say, not a gap.
+func healthCardVocabFor(s health.Status) string {
+	if s == health.StatusHealthy {
+		return "ok"
+	}
+	if s == health.StatusDegraded {
+		return "warn"
+	}
+	return string(s) // "unknown" / "stale" / "contradictory" already match
+}
+
+// newHealthCardViewFromNodes builds a HealthCard from the same
+// []clusterNodeView the Command Center's topology cards already render
+// (docs/web-ui-redesign.md Section C) - not a second fetch, so the two
+// can never disagree about which Combs are reachable or how many.
+// guardrailHolds is passed through rather than computed here, since no
+// existing RPC gives this function anywhere to get a real count from -
+// see pageData.HealthCard's own comment.
+func newHealthCardViewFromNodes(nodes []clusterNodeView, guardrailHolds, pendingJoins int) healthCardView {
+	reachable := 0
+	counts := make(map[string]int, len(healthCardStateOrder))
+	for _, n := range nodes {
+		if n.Reachable {
+			reachable++
+		}
+		counts[healthCardVocabFor(n.HealthStatus)]++
+	}
+	return newHealthCardView(reachable, len(nodes), counts, guardrailHolds, pendingJoins)
 }
