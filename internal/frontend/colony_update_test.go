@@ -1392,3 +1392,57 @@ func TestClusterOverviewTopologyListWrapperSurvives(t *testing.T) {
 		t.Error("the topology panel section is missing")
 	}
 }
+
+// TestColonyUpdateControlAndRouteAgreeOnTheRole is the test that keeps the
+// markup and the route from drifting apart.
+//
+// This action is Admin-gated, and requireRole on the route really does
+// refuse a lower role - unlike the single-flight greying-out, which is
+// only a courtesy. So a page that left the control enabled for an
+// Operator would be offering a button whose sole possible outcome is a
+// 403. Each role is checked twice: once for what the page enables, and
+// once for what the route actually does, in the same subtest, so a
+// mismatch cannot pass by only one side being examined.
+func TestColonyUpdateControlAndRouteAgreeOnTheRole(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		role        manager.Role
+		wantEnabled int
+		wantCode    int
+	}{
+		{name: "viewer", role: manager.RoleViewer, wantEnabled: 0, wantCode: http.StatusForbidden},
+		{name: "operator", role: manager.RoleOperator, wantEnabled: 0, wantCode: http.StatusForbidden},
+		{name: "admin", role: manager.RoleAdmin, wantEnabled: 1, wantCode: http.StatusOK},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s, err := NewServer(&fakeClient{statusResp: updateTestStatus()}, fakeAuthenticator{user: "gjb", pass: "pw"},
+				map[string]manager.Role{"gjb": tc.role}, nil, "", "", nil, false)
+			if err != nil {
+				t.Fatalf("NewServer() error: %v", err)
+			}
+			s.SetColonyUpdateController(&fakeColonyUpdate{state: idleNominatedState("brood.lab3.home.arpa")})
+			cookies := loginAs(t, s, "gjb", "pw")
+
+			// What the page offers.
+			getReq := httptest.NewRequest(http.MethodGet, "/colony-update", nil)
+			for _, c := range cookies {
+				getReq.AddCookie(c)
+			}
+			getRec := httptest.NewRecorder()
+			s.ServeHTTP(getRec, getReq)
+			if getRec.Code != http.StatusOK {
+				t.Fatalf("GET /colony-update as %s status = %d, want 200", tc.name, getRec.Code)
+			}
+			if got := colonyUpdateEnabledControls(getRec.Body.String()); got != tc.wantEnabled {
+				t.Errorf("page offers %d enabled controls to a %s, want %d", got, tc.name, tc.wantEnabled)
+			}
+
+			// What the route actually does when that control is used.
+			postRec := postColonyUpdateWith(t, s, "brood.lab3.home.arpa", cookies)
+			if postRec.Code != tc.wantCode {
+				t.Errorf("POST as %s status = %d, want %d - the page and the route disagree about who may act",
+					tc.name, postRec.Code, tc.wantCode)
+			}
+		})
+	}
+}

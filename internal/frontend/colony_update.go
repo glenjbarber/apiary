@@ -13,6 +13,7 @@ import (
 	rpcpb "github.com/glenjbarber/apiary/api/rpc"
 	"github.com/glenjbarber/apiary/internal/colonyupdate"
 	"github.com/glenjbarber/apiary/internal/health"
+	"github.com/glenjbarber/apiary/internal/manager"
 )
 
 // The controlled, one-at-a-time Colony update page (ADR-0145).
@@ -377,6 +378,14 @@ type colonyUpdateCombView struct {
 	// there is one: an Admin session, an observed system with a
 	// nomination, no operation in flight, and this Comb being the
 	// nominated one.
+	//
+	// The Admin clause is NOT a courtesy, unlike the rest of this
+	// function's conditions. requireRole on the POST route really does
+	// refuse a lower role, so a page that enabled the control for an
+	// Operator would be offering a button whose only possible outcome is
+	// a 403. Frontend authorization is real enforcement and is allowed to
+	// be reflected in the markup; colony-wide single-flight is not, and is
+	// nowhere in this clause.
 	CanUpdate bool
 
 	// DisabledReason is always set when CanUpdate is false and always
@@ -393,7 +402,7 @@ type colonyUpdateCombView struct {
 // verified, one per Comb) and state is a fresh colonyupdate.State. The
 // function is pure, so every combination - including the awkward ones -
 // is reachable by test without a live cluster.
-func colonyUpdateCombRows(combs []clusterNodeView, state colonyupdate.State, canOperate bool) []colonyUpdateCombView {
+func colonyUpdateCombRows(combs []clusterNodeView, state colonyupdate.State, mayRequest bool) []colonyUpdateCombView {
 	colony := colonyUpdateStateViewFrom(state)
 
 	rows := make([]colonyUpdateCombView, 0, len(combs))
@@ -411,7 +420,7 @@ func colonyUpdateCombRows(combs []clusterNodeView, state colonyupdate.State, can
 		}
 		row.IsTarget = state.Observed && state.TargetNodeID != "" && state.TargetNodeID == comb.NodeID
 		row.UpdateLabel, row.UpdateClass, row.UpdateDetail = combUpdateVerdict(comb.NodeID, state, row.IsTarget)
-		row.CanUpdate, row.DisabledReason = combControlAvailability(comb, state, colony, canOperate)
+		row.CanUpdate, row.DisabledReason = combControlAvailability(comb, state, colony, mayRequest)
 		rows = append(rows, row)
 	}
 	return rows
@@ -473,9 +482,11 @@ func combUpdateVerdict(nodeID string, state colonyupdate.State, isTarget bool) (
 // puts the health gate inside the update system, evaluated per step at
 // execution time, and a UI that second-guessed it would be a second,
 // disagreeing gate - and a stale one.
-func combControlAvailability(comb clusterNodeView, state colonyupdate.State, colony colonyUpdateStateView, canOperate bool) (enabled bool, reason string) {
-	if !canOperate {
-		return false, "your role does not permit starting a Colony update; this page is read-only for you"
+func combControlAvailability(comb clusterNodeView, state colonyupdate.State, colony colonyUpdateStateView, mayRequest bool) (enabled bool, reason string) {
+	if !mayRequest {
+		return false, "your role does not permit starting a Colony update; this page is read-only for you. The route " +
+			"itself refuses anyone below Admin, so this control is the page agreeing with the server rather than the " +
+			"page being polite"
 	}
 	if !state.Observed {
 		return false, "no Colony update system is attached, so this control would do nothing"
@@ -673,12 +684,17 @@ func (s *Server) colonyUpdateView(r *http.Request) colonyUpdateRender {
 			"is on offer until the update system re-reads membership"
 	}
 
-	_, canOperate := s.currentSession(r)
-	if s.auth == nil {
-		canOperate = true
+	// mayRequest mirrors the POST route's own requireRole(Admin) gate
+	// exactly, so the markup and the route can never disagree about who
+	// may act. It is derived here rather than reused from
+	// withAuthFieldsFrom's CanOperate, because that is the Operator-level
+	// flag every other page uses and this action is Admin.
+	mayRequest := true
+	if info, ok := s.currentSession(r); ok {
+		mayRequest = info.role.Satisfies(manager.RoleAdmin)
 	}
 
-	rows := colonyUpdateCombRows(combs, state, canOperate)
+	rows := colonyUpdateCombRows(combs, state, mayRequest)
 	enabled := 0
 	for _, row := range rows {
 		if row.CanUpdate {
