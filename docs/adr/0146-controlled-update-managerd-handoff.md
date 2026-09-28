@@ -139,7 +139,7 @@ handover, is the ADR-0142 failure. The handover makes the operation
 survivable; it does not make the process survive. Those are two separate
 problems and only one of them is solved by the state layer.
 
-Why the mechanism is plausible but unproven: `make force-restart`
+Why the mechanism is plausible but unproven: `apiaryctl force-restart`
 already performs both halves successfully from a process that is not
 managerd, verified live across all four Combs (ADR-0141). What has
 **never** been done is forking that process out of a live managerd at
@@ -285,7 +285,7 @@ load-bearing and can be wrong.
   any lease is taken, so no lease is ever held for a service that cannot
   be restarted, and the invariant test that asserts that ordering keeps
   asserting it.
-- **`make force-restart` remains manual only.** Nothing here automates
+- **`apiaryctl force-restart` remains manual only.** Nothing here automates
   it. The emergency path and the controlled path stay separate, and the
   controlled path is the one that carries the guardrail.
 - **The controlled path gains a failure mode the emergency path does

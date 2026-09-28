@@ -49,9 +49,9 @@ and a downed control plane rather than any error at all.
 by both `RestartNodeService` and `PreflightRestartNodeService`, with a
 message that names the working alternative:
 
-- `make force-restart`, which restarts managerd and then raftd from
-  rc.d, in a process that is not managerd (ADR-0141), deliberately
-  bypassing the restart lease and the quorum preflight;
+- `apiaryctl force-restart`, which restarts managerd and then raftd from
+  rc.d, in a process that is not managerd (ADR-0141, ADR-0136),
+  deliberately bypassing the restart lease and the quorum preflight;
 - `service apiary_managerd restart`, if only managerd is needed.
 
 `IssueOriginCertificate` no longer restarts anything. The certificate is
@@ -91,8 +91,9 @@ in the Origin CA flow. The correct general fix is for a supported config
 change to refresh the running server, or to say plainly that a restart
 is required. Neither is done here.
 
-**`make force-restart` is the only supported way to restart managerd,
-and it bypasses the guardrail entirely** (ADR-0141). That is a real cost
+**`apiaryctl force-restart` is the only supported way to restart
+managerd, and it bypasses the guardrail entirely** (ADR-0141). That is a
+real cost
 of this decision, and it is preferable to a guardrail that can stop the
 control plane and cannot start it again. An operator debugging a downed
 managerd is worse off than one reading a refusal.

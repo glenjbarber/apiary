@@ -8,10 +8,36 @@ the old variable's meaning. No daemon behaviour changes.
 
 **Amended 2026-09-27** to close the cooldown gap this ADR left open, and
 to state the gap in the Scope boundary below rather than leave it
-implied. The amendment adds `scripts/record-forced-restart.sh` and one
+implied. The amendment added `scripts/record-forced-restart.sh` and one
 line in the `force-restart` loop. It still takes no lease and still
-changes no daemon code; what it adds is the record the cooldown reads.
+changed no daemon code; what it added was the record the cooldown reads.
 See "The cooldown must still learn" under Decision.
+
+**Amended 2026-09-28** to move the command off the Makefile. Everything
+this ADR decides still holds - the split, the order, the absence of
+coordination, the deliberate pending-restart record with `lease_id` 0.
+What changed is where the command lives, and the reason is one fact
+about the deployment rather than about the design: **`force-restart` is
+an operation on a running Comb, so it has to be a file on the Comb, and
+a Comb has no source checkout to run a make target from.** It is now
+`apiaryctl force-restart` (ADR-0136, `internal/forcerestart`), installed
+to `/usr/local/libexec/apiary/apiaryctl` beside the daemons. The
+`make force-restart` target remains as a one-line convenience for a
+source checkout and is not the operational path.
+
+Two consequences for the text below, both recorded here rather than
+silently edited in place. The `scripts/record-forced-restart.sh` calls
+described in "The cooldown must still learn" are now
+`internal/forcerestart`'s own writer through `internal/restartplan` -
+same file, same field names, same `lease_id` 0, no clobbering of an
+existing pending record. And the node-id resolution is no longer a
+`sed`/`hostname` chain in shell: it goes through
+`internal/raftdconfig` and `internal/nodeconfig`, which resolves
+per-service through the loader the restarted daemon uses for itself,
+falling back to ADR-0111's `common.json` and then the hostname. That
+change is a small behavioural improvement rather than a port: a `raftd`
+restart is now recorded under the identity `raftd` itself would report,
+where the shell chain could record it under `managerd`'s.
 
 ## Context
 
@@ -171,8 +197,10 @@ force-restart `raftd` on one Comb and be granted a coordinated `raftd`
 restart on another seconds later, which is the concurrent-restart window
 the 600s cooldown exists to close.
 
-So the loop now calls `scripts/record-forced-restart.sh` immediately
-before each `service` restart. It writes the same pending-restart record
+So the loop writes that record immediately before each `service`
+restart. Since the 2026-09-28 amendment it does so from
+`internal/forcerestart`, through `internal/restartplan`, rather than
+through a shell script. It writes the same pending-restart record
 `RestartNodeService` writes - same directory, same file name, same three
 JSON fields, all of which `internal/manager` and `internal/restartplan`
 already hold a test asserting are byte-identical - with **`lease_id` 0**.
@@ -221,9 +249,10 @@ stderr instead.
 
 - **`make update` can no longer restart `managerd`.** An operator who
   expected it to will find a stale `managerd` after `update` and must run
-  `make force-restart`. The target's closing message says so explicitly,
-  on every run, because this is the change most likely to surprise
-  someone with an existing muscle memory.
+  `apiaryctl force-restart`. Both the update target's closing message and
+  force-restart's own say so explicitly, on every run, because this is
+  the change most likely to surprise someone with an existing muscle
+  memory.
 - **`raftd` can still go stale**, exactly as ADR-0125 predicted. This
   ADR reorganises who restarts it; it does not make the staleness go
   away. The mitigation is the same one `internal/buildinfo` and
@@ -314,26 +343,42 @@ constrains this one. ADR-0125's clause remains unmet, and
 ## Verification
 
 - `bmake -n update` expands the restart loop to exactly `frontend` and
-  `restshimd`; `bmake -n force-restart` expands it to `managerd` then
-  `raftd`, in that order. `bmake` specifically, since that is what the
-  Combs run; the `${VAR:Nraftd}` modifier this ADR removes was a BSD
-  make extension and the file is now portable to both makes.
+  `restshimd`. `bmake` specifically, since that is what the Combs run;
+  the `${VAR:Nraftd}` modifier this ADR removes was a BSD make extension
+  and the file is now portable to both makes. This was where the
+  `managerd` then `raftd` order was pinned; since 2026-09-28 the order
+  lives in `internal/forcerestart`'s `DefaultPlan`, and
+  `bmake -n force-restart` expands to a message naming it plus
+  `apiaryctl force-restart`.
 - `gofmt -l .` clean, `go build ./...` clean, `go vet ./...` clean,
-  `go test -count=1 ./...` passes across the repository (60 packages,
-  0 failures).
-- `scripts/test-record-forced-restart.sh` - 16 cases, all passing,
-  covering the failure modes that would matter: that a record is never
-  written with an undeterminable `node_id` (it would never block
-  anything, and would look like it worked), that an existing pending
-  record is never overwritten (it would strand a real lease, which has
-  no TTL), and that the `node_id` fallback follows the daemons' own
-  chain through to the hostname - the case a live multi-Comb colony
-  actually produced, which no macOS test on a host whose `raftd.json`
-  carries a `node_id` could have caught. It also pins the exact JSON
-  bytes both Go stores parse, and that the script exits 0 even when it
-  cannot record anything. Wired into `scripts/check-version.sh` beside
-  `test-worktree-state.sh`; note that CI runs only the Go steps, so
-  this is a local gate unless a step is added there.
+  `go test -count=1 ./...` passes across the repository.
+- `internal/forcerestart` - the behavioural suite, in Go, so CI runs it
+  rather than a developer having to remember. It executes the real
+  restart loop with the host commands replaced by a recording stand-in,
+  and the real record writer against fixture config files, so the bytes
+  asserted on are the bytes a Comb would get. The cases that matter:
+  that a restart is confirmed by its own listener port and never by
+  `service ... status`; that raftd's port cannot satisfy managerd's wait
+  or the reverse; that the wait is a bounded poll of exactly 15 probes;
+  that a `sockstat` which cannot be run is an error rather than an
+  answer; that a port number without its `host:` delimiter is not a
+  match; that a timeout stops before the next service and lists every
+  restart already issued; and that a plan entry with no known port is
+  refused before the first restart.
+- `TestForcedRecord_NamesTheVoterTheRestartedDaemonWouldReport` and
+  `TestForcedRecord_DoesNotOverwriteAPendingLease` cover the record: that
+  it names the identity the restarted daemon would report for itself,
+  that the chain reaches the hostname on a Comb whose configs name no
+  `node_id` (the case a live multi-Comb colony actually produced, which
+  no macOS test on a host whose `raftd.json` carries a `node_id` could
+  have caught), that an existing pending record is never overwritten
+  (it would strand a real lease, which has no TTL), that a corrupt one
+  is left for an operator to look at rather than replaced, and that
+  every failure to record is a warning rather than an error - a
+  bookkeeping failure must never stop a restart someone needs during an
+  incident. The exact JSON bytes and the 0600 mode are pinned too, since
+  `internal/restartplan` already holds a test asserting this writer
+  agrees with `internal/manager`'s on both.
 - The target was then run for real on one Comb of a live multi-Comb
   colony - a non-leader voter, with the rest of the colony healthy - and
   the result is recorded in `.local/SHARED.md` rather than here, since

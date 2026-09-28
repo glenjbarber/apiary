@@ -58,26 +58,44 @@ func TestManagerdSelfRestartRefused(t *testing.T) {
 	}
 	// The message must name a way forward. An operator reading only
 	// this string is the entire audience for it.
-	if !strings.Contains(managerdSelfRestartRefusal, "make force-restart") {
-		t.Error("the refusal message must point the operator at make force-restart")
+	if !strings.Contains(managerdSelfRestartRefusal, "apiaryctl force-restart") {
+		t.Error("the refusal message must point the operator at apiaryctl force-restart")
 	}
 	if !strings.Contains(managerdSelfRestartRefusal, "service apiary_managerd restart") {
 		t.Error("the refusal message must also offer the managerd-only alternative")
 	}
-	// Naming the target is not the same as telling the operator where to
-	// run it. make force-restart calls scripts/record-forced-restart.sh, so
-	// it only exists inside the checkout, and the message is read in a
-	// browser with no shell in sight. "make force-restart" on its own is
-	// what produced a report that the target had been removed.
-	for _, want := range []string{"source checkout", "Makefile", "scripts/record-forced-restart.sh"} {
+	// Naming the command is not the same as being able to run it. This
+	// message is read in a browser, possibly on a laptop, by someone who
+	// then has to type the next thing on a Comb - and a Comb has no
+	// source checkout on it. The command force-restart used to live in
+	// did need one, and naming the checkout was the honest fix at the
+	// time; the honest fix now is that the command is installed
+	// (ADR-0136) and this string must not send anyone looking for a
+	// Makefile. Every phrase below was true of this string once and is a
+	// defect now.
+	//
+	// A substring ban is a blunt instrument and the message has to be
+	// written around it: "neither needs a source checkout" tripped this
+	// check, and was the right thing to trip it, because an operator
+	// reading "needs a source checkout" skims past "no". The positive
+	// assertion below is the one that carries the meaning; the ban is
+	// only there to stop the old wording creeping back.
+	for _, forbidden := range []string{"make force-restart", "source checkout", "Makefile", "record-forced-restart"} {
+		if strings.Contains(managerdSelfRestartRefusal, forbidden) {
+			t.Errorf("the refusal message contains %q, which reads as pointing the operator at a checkout the Comb does not have: %q", forbidden, managerdSelfRestartRefusal)
+		}
+	}
+	// Said positively, because this is the fact that makes the next
+	// command the operator types actually work.
+	for _, want := range []string{"installed on every Comb", "root shell"} {
 		if !strings.Contains(managerdSelfRestartRefusal, want) {
-			t.Errorf("the refusal message must say where to run make force-restart; missing %q from %q", want, managerdSelfRestartRefusal)
+			t.Errorf("the refusal message must say %q, so the operator knows the next command works on this Comb; got %q", want, managerdSelfRestartRefusal)
 		}
 	}
 	// And the wider command has to be the second one named. Restarting
 	// managerd and raftd is a bigger act than the operator asked for.
 	plain := strings.Index(managerdSelfRestartRefusal, "service apiary_managerd restart")
-	forced := strings.Index(managerdSelfRestartRefusal, "make force-restart")
+	forced := strings.Index(managerdSelfRestartRefusal, "apiaryctl force-restart")
 	if plain < 0 || forced < 0 || plain > forced {
 		t.Errorf("the managerd-only alternative must come first, got plain=%d forced=%d in %q", plain, forced, managerdSelfRestartRefusal)
 	}

@@ -4,6 +4,13 @@ This directory holds one reference config file per daemon, installed by
 `make install` next to the real config path on a node
 (`/usr/local/etc/apiary/<name>.json.sample`).
 
+There is no `apiaryctl.json.sample`, and that is not an omission.
+`apiaryctl` - the operator command line, installed beside the daemons at
+`/usr/local/libexec/apiary/apiaryctl` - has no configuration of its own.
+It reads the daemons' config files above and the restart guardrail's
+record directory, and every value it needs from either is already
+documented where that value lives. A sample of nothing is not a document.
+
 Every file here is **valid JSON as shipped**. It has no `//` lines, no
 `/* */` blocks, and no trailing comments, because JSON has no comment
 syntax and both `encoding/json` and this project's `internal/jsonstrict`

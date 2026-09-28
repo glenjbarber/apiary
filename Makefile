@@ -10,6 +10,7 @@
 # access on the host), and it multiplies password prompts for no
 # benefit when the whole invocation is already privileged.
 SRCS=		apiaryinstall \
+			apiaryctl \
 			raftd \
 			managerd \
 			frontend \
@@ -214,7 +215,19 @@ clean:
 INSTALL_SRCS=	raftd \
 		managerd \
 		frontend \
-		restshimd
+		restshimd \
+		apiaryctl
+
+# Every installed binary except apiaryctl, because apiaryctl has no
+# configuration at all: it reads the daemons' own config files and the
+# guardrail's own record directory, and a sample of nothing is not a
+# document. The list is its own rather than derived from INSTALL_SRCS
+# minus one so that adding a daemon with no config is a one-line
+# decision instead of a conditional in the recipe.
+INSTALL_SAMPLE_SRCS=	raftd \
+			managerd \
+			frontend \
+			restshimd
 
 # `update` and `force-restart` between them restart every daemon `install`
 # puts on disk, and they deliberately do not overlap:
@@ -266,7 +279,7 @@ UPDATE_RESTART_SRCS=	frontend \
 FORCE_RESTART_SRCS=	managerd \
 			raftd
 
-# install copies the four apiary daemons - not apiaryinstall, a
+# install copies the five installed binaries - not apiaryinstall, a
 # one-shot host-prep CLI meant to be run from this checkout and never
 # installed permanently - to the fixed path every etc/rc.d/apiary_*
 # script execs, /usr/local/libexec/apiary/<name> (see docs/bootstrap.md
@@ -309,7 +322,7 @@ install: build check-stamped setup-dirs
 		chmod +x /usr/local/libexec/apiary/$$S.new ;\
 		mv /usr/local/libexec/apiary/$$S.new /usr/local/libexec/apiary/$$S ;\
 	done
-	for S in ${INSTALL_SRCS} ; \
+	for S in ${INSTALL_SAMPLE_SRCS} ; \
 		do cp -p etc/apiary/$$S.json.sample /usr/local/etc/apiary/$$S.json.sample ;\
 		chmod 644 /usr/local/etc/apiary/$$S.json.sample ;\
 	done
@@ -533,136 +546,68 @@ update: install
 	@echo "" ; \
 	echo "update: frontend and restshimd restarted on `hostname`." ; \
 	echo "  managerd and raftd were installed but deliberately NOT" ; \
-	echo "  restarted. Run 'make force-restart' here to restart them -" ; \
-	echo "  one Comb at a time, and never on the leader as part of a sweep."
+	echo "  restarted. Run 'apiaryctl force-restart' here to restart" ; \
+	echo "  them - one Comb at a time, and never on the leader as part" ; \
+	echo "  of a sweep."
 
-# force-restart restarts the two daemons `update` leaves alone, and it is
-# named for what it gives up to do that: it hands `service` a restart
-# directly, so the ADR-0125 guardrail is bypassed completely. No lease is
-# reserved, no quorum-safety evaluation runs, and nothing coordinates with
-# the other Combs - this Makefile has no client that speaks the guarded
-# RPCs, and adding one is the other answer to the same problem (ADR-0125).
+# force-restart is a one-line convenience for a source checkout. The
+# operational command is cmd/apiaryctl (ADR-0136), installed by `install`
+# to /usr/local/libexec/apiary/apiaryctl, and it works on a Comb that has
+# no checkout at all - which is the case that matters, because the Combs
+# are not development machines and there is no Makefile on them to run
+# this from. Run the installed command on a Comb; run this only from a
+# checkout you are already sitting in.
 #
-# That is only safe because it is a separate, named, per-Comb act. Running
-# it across the colony in one sweep is the failure this target is shaped to
-# make inconvenient, not impossible: nothing in a Makefile can know what
-# the other Combs are doing. So the recipe says so, out loud, every time.
+# FORCE_RESTART_SRCS exists purely so that one can see the plan and the
+# order without running anything, and so `bmake -n force-restart` stays
+# a useful check. It is not read by the command: the plan lives in
+# internal/forcerestart, next to the code that acts on it, because a
+# copy of it here would be a copy free to drift from the one that
+# actually restarts a daemon. `apiaryctl force-restart` prints its own
+# plan before it touches anything, which is the copy that counts.
+FORCE_RESTART_SRCS=	managerd \
+			raftd
+
+# The order is load-bearing and is not a preference. managerd first,
+# because raftd's confirm-on-startup hook dials managerd over TLS to
+# release the restart lease it is holding, on a bounded 5-attempt x 3s
+# budget, and a lease has no TTL. Burning that budget against a managerd
+# that is not up yet does not degrade the node - it blocks the cluster
+# until an operator forces the lease clear, which is the exact failure
+# the guardrail exists to prevent. Restarting raftd while managerd is
+# down is the one way this could cause it. The reverse order carries no
+# such risk: managerd tolerates raftd being unavailable and reconnects,
+# so the safe order is also the natural one.
 #
-# The post-restart assertion is not ceremony. managerd is restarted first
-# precisely so that raftd's confirm-on-startup hook has something to talk
-# to, and if managerd fails to come back the loop stops there rather than
-# restarting raftd into a node whose managerd is down - which is how a
-# restart lease would fail to confirm and, having no TTL, block the
-# cluster until an operator forced it clear.
+# What the command does, and why each of these is where it is, is
+# documented on internal/forcerestart and in docs/adr/0141. The parts
+# worth knowing before editing anything here:
 #
-# WHY sockstat(1) AND NOT `service <name> status`
-#
-# The assertion used to be `service apiary_<svc> status`, and on these
-# Combs that call is not a measurement. Measured on brood and drone,
-# `service apiary_managerd status`, `service apiary_raftd status`,
-# `service apiary_frontend status` and `service apiary_restshimd status`
-# all report not running, on every check, while all four daemons are
-# demonstrably up and listening. So the old check was guaranteed to
-# reach its own failure branch on the first service, every time: it
-# restarted managerd, burned the full 15s, printed the failure and
-# exited 1 having never touched raftd - producing by itself the exact
-# half-restarted managerd/raftd pair this target exists to prevent, and
-# leaving a pending-restart record for raftd that no restart ever
-# confirmed. (The rc.d scripts do declare a pidfile and pass it to
-# daemon(8) as -P; why status misreports is not this Makefile's problem,
-# and adding a pidfile test would only add a second way to be wrong.)
-#
-# sockstat(1) is the check measured to be truthful here: `sockstat -4 -l`
-# lists the daemon's own listening socket. Each service's port is fixed
-# by ADR-0108 and named in internal/frontend/fixedport.go (raftd 17600,
-# managerd 17700, frontend 8080, restshimd 8081), and the defaults in
-# internal/raft/config.go (DefaultBindAddr 127.0.0.1:17600) and
-# cmd/managerd/main.go (127.0.0.1:17700) agree with them. A wrong host
-# bind does not change the port, so the check is the port and only the
-# port. If it still never appears, that is a real failure and is
-# reported as one - including which services were already restarted,
-# because which build this Comb is now running depends on it.
-#
-# The port map is resolved for every service in FORCE_RESTART_SRCS
-# before the first restart rather than inside the loop, so a service
-# with no known port is refused having touched nothing. A third daemon
-# added to that list later would otherwise be discovered halfway
-# through, with the first daemon already restarted and no record
-# explaining why.
-#
-# The match is `:<port>` followed by whitespace, which does depend on
-# sockstat's column layout. If that layout ever changes, the failure
-# mode is a timeout and a loud refusal rather than a false pass, which
-# is the safe direction for the only confirmation this target has: a
-# check that cannot see the listener cannot confirm the restart, and
-# says so.
+#   - It confirms a restart with `sockstat -4 -l` and the daemon's own
+#     listener port, never with `service <name> status`. Measured on
+#     brood and drone, every apiary_* rc.d script reports not running
+#     while all four daemons are demonstrably up and listening, so a
+#     status check could only ever reach its own failure branch - on
+#     the first service, every time. Ports are fixed by ADR-0108 and
+#     named in internal/frontend/fixedport.go; they are in
+#     internal/forcerestart's DefaultPlan.
+#   - It writes the pending-restart record BEFORE the restart it
+#     describes, with lease_id 0, through internal/restartplan. The
+#     record is what feeds the guardrail's 600s cooldown, so a
+#     force-restart that wrote nothing would leave the guardrail
+#     believing no restart had happened. It never overwrites an
+#     existing pending record, because that would strand a real lease,
+#     which has no TTL.
+#   - It stops at the first service that does not come back, and says
+#     which restarts it had already issued, because a half-restarted
+#     managerd/raftd pair is running a mix of two builds and the
+#     operator has to know that from the output.
 .PHONY: force-restart
 force-restart:
-	@echo "force-restart: about to restart ${FORCE_RESTART_SRCS} on `hostname`" >&2 ; \
-	echo "  by handing 'service' a restart directly. This acquires NO" >&2 ; \
-	echo "  restart lease, runs NO quorum preflight, and coordinates" >&2 ; \
-	echo "  with NO other Comb. Restarting raftd on more than one Comb at" >&2 ; \
-	echo "  once, or on the current leader, can cost the cluster its" >&2 ; \
-	echo "  quorum. For a coordinated restart use the Machine page's" >&2 ; \
-	echo "  per-service control, which reserves a real cluster-wide lease." >&2 ; \
+	@echo "make force-restart: delegating to the installed apiaryctl." >&2 ; \
+	echo "  This target is a convenience for a source checkout. On a" >&2 ; \
+	echo "  Comb, run apiaryctl force-restart - it needs no Makefile," >&2 ; \
+	echo "  no checkout and no scripts, and it is the same command." >&2 ; \
 	echo "" >&2 ; \
-	echo "  It does still leave a record: each service gets the same" >&2 ; \
-	echo "  pending-restart note a leased restart would, with lease_id 0," >&2 ; \
-	echo "  so the guardrail's 600s cooldown learns a restart happened" >&2 ; \
-	echo "  here and blocks a second one on another Comb. It never takes" >&2 ; \
-	echo "  a lease and never releases one." >&2 ; \
-	echo "" >&2
-	@set -e; \
-	plan= ; \
-	for S in ${FORCE_RESTART_SRCS}; do \
-		case $$S in \
-		managerd) plan="$${plan:+$${plan} }managerd:17700" ;; \
-		raftd)    plan="$${plan:+$${plan} }raftd:17600" ;; \
-		*) \
-			echo "force-restart: no known listener port for apiary_$$S," >&2 ; \
-			echo "  and this target will not guess one. NOTHING has been" >&2 ; \
-			echo "  restarted: add the daemon's fixed port to the case" >&2 ; \
-			echo "  above (ADR-0108, internal/frontend/fixedport.go)." >&2 ; \
-			exit 1 ; \
-		esac ; \
-	done ; \
-	echo "  restart plan, each confirmed by its own listener port:" >&2 ; \
-	echo "    $$plan  (service:port, in this order)" >&2 ; \
-	restarted= ; \
-	for pair in $$plan ; do \
-		S=$${pair%%:*} ; port=$${pair#*:} ; \
-		echo "restarting apiary_$$S (waiting for port $$port) ..." ; \
-		sh scripts/record-forced-restart.sh "$$S" ; \
-		service apiary_$$S restart ; \
-		restarted="$${restarted:+$${restarted} }$$S" ; \
-		i=0 ; \
-		while [ $$i -lt 15 ] ; do \
-			sockstat -4 -l 2>/dev/null | grep -q ":$$port[[:space:]]" && break ; \
-			i=$$((i+1)) ; sleep 1 ; \
-		done ; \
-		if [ $$i -ge 15 ] ; then \
-			echo "apiary_$$S did not open its listener port $$port within 15s." >&2 ; \
-			echo "  That is a sockstat(1) port check, not a 'service" >&2 ; \
-			echo "  status' check - 'status' is not trustworthy on this" >&2 ; \
-			echo "  host, which is why the port is checked instead." >&2 ; \
-			echo "  Stopping here rather than restarting the next" >&2 ; \
-			echo "  service: a half-restarted managerd/raftd pair is" >&2 ; \
-			echo "  exactly the state that strands a restart lease." >&2 ; \
-			echo "  ALREADY RESTARTED on this Comb, this run:" >&2 ; \
-			echo "    $$restarted" >&2 ; \
-			echo "  NOT restarted: every service after apiary_$$S in" >&2 ; \
-			echo "  the plan above, so this Comb is now running a mix" >&2 ; \
-			echo "  of the old and the new build. Finish or roll back" >&2 ; \
-			echo "  before touching the next Comb." >&2 ; \
-			echo "  See /var/log/apiary/$$S.log" >&2 ; \
-			exit 1 ; \
-		fi ; \
-		echo "  apiary_$$S is listening on port $$port" ; \
-	done
-	@echo "" ; \
-	echo "force-restart: done on `hostname`." ; \
-	echo "  Confirm the running build, not the one on disk:" ; \
-	echo "    grep build= /var/log/apiary/managerd.log /var/log/apiary/raftd.log" ; \
-	echo "      | tail -2" ; \
-	echo "  and check the Machine page's colony view before moving on to" ; \
-	echo "  the next Comb."
+	echo "  restart plan: ${FORCE_RESTART_SRCS} (in this order)" >&2 ; \
+	apiaryctl force-restart

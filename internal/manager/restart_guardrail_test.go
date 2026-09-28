@@ -262,8 +262,8 @@ func TestRestartNodeService_RefusesManagerdSelfRestart(t *testing.T) {
 		if resp.GetError() == "" {
 			t.Fatalf("RestartNodeService(force=%v) = no error, want a refusal", force)
 		}
-		if !strings.Contains(resp.GetError(), "make force-restart") {
-			t.Errorf("force=%v refusal %q must name make force-restart", force, resp.GetError())
+		if !strings.Contains(resp.GetError(), "apiaryctl force-restart") {
+			t.Errorf("force=%v refusal %q must name apiaryctl force-restart", force, resp.GetError())
 		}
 		// force must not be an escape hatch here. Overriding a quorum
 		// block is acknowledging a known, understood risk; overriding
