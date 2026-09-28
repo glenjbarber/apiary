@@ -3,6 +3,7 @@ package buildgate
 import (
 	"bufio"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"regexp"
@@ -140,6 +141,20 @@ func runningBuild(logPath, prog string) (string, error) {
 		return "", err
 	}
 	defer f.Close()
+	return runningBuildFrom(f, prog)
+}
+
+// runningBuildFrom is runningBuild over an already-open reader.
+//
+// The split exists so the scanner's error can be provoked. A scanner that
+// fails mid-file - a read error, or a line past its buffer - returns an
+// empty id with a nil error if its error is dropped, and the gate then
+// reports "the running build predates build stamping", which is a FALSE
+// claim about a log it never finished reading. Distinguishing "I read the
+// log and it says nothing" from "I could not read the log" is the whole
+// point of the unobserved status, so that distinction needs to be
+// reachable from a test rather than only in production.
+func runningBuildFrom(r io.Reader, prog string) (string, error) {
 	// Walk forwards and keep the last match: the most recent "listening"
 	// line is the one that describes the process currently running.
 	// Scanning the whole file rather than stopping at the first match is
@@ -147,7 +162,7 @@ func runningBuild(logPath, prog string) (string, error) {
 	// with the LAST line, or a Comb restarted onto a new build reports
 	// the old one as still running.
 	last := ""
-	sc := bufio.NewScanner(f)
+	sc := bufio.NewScanner(r)
 	// A startup line with a long node list in it can exceed bufio's
 	// default 64 KiB, and a scanner that stops there would silently
 	// truncate the log at exactly the point where the answer is.

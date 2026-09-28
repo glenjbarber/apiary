@@ -178,7 +178,7 @@ MUTATIONS = [
      DG, '\t\tif fd.Name() == lastIndexFieldName {\n\t\t\tcontinue\n\t\t}', "", SD),
     ("canonicalMessage: replace the map buffer instead of appending",
      DG, "\t\t\tout = append(out, canonicalMap(mmap, fd)...)", "\t\t\tout = canonicalMap(mmap, fd)", SD),
-    ("canonicalMessage: emit fields in declaration order, not field order",
+    ("canonicalMessage: emit fields in declaration order, not field order [KNOWN-REDUNDANT]",
      DG, "\tsort.Slice(descs, func(i, j int) bool { return descs[i].Number() < descs[j].Number() })",
      "\tsort.Slice(descs, func(i, j int) bool { return i < j })", SD),
     ("canonicalMap: emit entries in hash order",

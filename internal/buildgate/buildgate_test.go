@@ -632,6 +632,20 @@ func TestConfirmUnobservedIsNotSuccessInAnyShape(t *testing.T) {
 		{"log missing", func(t *testing.T, c *comb, service string) {
 			c.install(t, service, "9c43262d358a")
 		}, NotRunning, ReasonLogMissing},
+		{"log unreadable", func(t *testing.T, c *comb, service string) {
+			c.install(t, service, "9c43262d358a")
+			c.start(t, service, "9c43262d358a")
+			// A root-owned log read by an unprivileged gate is the real
+			// case; a mode-000 file is the same thing seen from a test.
+			// Skipped when the suite runs as root, where the mode means
+			// nothing and the assertion would be a false claim.
+			if os.Geteuid() == 0 {
+				t.Skip("running as root: a mode-000 file is still readable")
+			}
+			if err := os.Chmod(c.paths.log(service), 0o000); err != nil {
+				t.Fatal(err)
+			}
+		}, Unobserved, ReasonLogUnreadable},
 	}
 
 	for _, shape := range shapes {
@@ -980,5 +994,61 @@ func TestRunningUnstampedIDIsAStaleBuildNotAnUnknown(t *testing.T) {
 	}
 	if report.Confirmed() {
 		t.Error("Confirmed() = true with a running process that is not the on-disk build")
+	}
+}
+
+// errAfter yields prefix and then fails, standing in for a log whose read
+// broke part way through - a truncated file on a full volume, a pipe that
+// closed, an I/O error from the filesystem.
+type errAfter struct {
+	prefix string
+	off    int
+}
+
+func (e *errAfter) Read(p []byte) (int, error) {
+	if e.off >= len(e.prefix) {
+		return 0, errors.New("simulated read failure")
+	}
+	n := copy(p, e.prefix[e.off:])
+	e.off += n
+	return n, nil
+}
+
+// TestRunningBuildReportsAScannerFailureNotAnEmptyAnswer is the case that
+// makes the io.Reader split worth having. A scanner that fails mid-log
+// has read SOME of the file and none of it is a complete answer, so
+// returning "" with a nil error would make the gate say "the running
+// build predates build stamping" - a claim about what the daemon is,
+// made by a log that was never finished reading. The two are different
+// answers and only one of them is a fact.
+func TestRunningBuildReportsAScannerFailureNotAnEmptyAnswer(t *testing.T) {
+	line := stampedLine + "\n"
+	r := &errAfter{prefix: line + "2026/09/26 17:00:00 raftd: listening on trunc", off: 0}
+
+	// The error is the load-bearing half and the only half a caller may
+	// rely on. A scanner yields the tokens it read before it failed, so a
+	// partial id comes back alongside the error; check returns on any
+	// non-nil error and never reads it, which is why the partial value is
+	// safe to hand back at all. Asserting the id is empty here would be
+	// asserting a property of bufio rather than of this gate.
+	if got, err := runningBuildFrom(r, "raftd"); err == nil {
+		t.Errorf("runningBuildFrom() = %q with err = nil, want the scanner's read error to surface", got)
+	}
+}
+
+// TestRunningBuildSurfacesAnOversizedLine proves the enlarged buffer is
+// load-bearing from the other direction: past the limit the scanner stops
+// with ErrTooLong, and a line shorter than 100 KiB must be readable
+// without the caller doing anything.
+func TestRunningBuildSurfacesAnOversizedLine(t *testing.T) {
+	huge := strings.Repeat("y", 2*1024*1024)
+	r := strings.NewReader(stampedLine + "\n" + huge + "\n")
+
+	// The error is the point: it is what stops check from treating the
+	// partial answer as a complete one. The id alongside it is the line
+	// read BEFORE the failure and the caller must ignore it, which check
+	// does by returning on any non-nil error.
+	if _, err := runningBuildFrom(r, "raftd"); err == nil {
+		t.Errorf("runningBuildFrom() err = nil for a %d-byte line, want ErrTooLong", len(huge))
 	}
 }
