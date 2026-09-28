@@ -63,6 +63,17 @@ echo "=== what a force-restart records for the guardrail cooldown ==="
 scripts/test-record-forced-restart.sh
 echo
 
+# force-restart's own post-restart assertion gets the same treatment,
+# and for a sharper reason: the check it replaced was a host command
+# that reports "not running" for daemons that are up and listening, so
+# a test that only read the Makefile would have called the old version
+# correct. These cases run the real target with `service`, `sockstat`
+# and `sh` replaced by stand-ins - one of which lies about status
+# exactly as the real one does on a Comb.
+echo "=== what force-restart does, with a service(8) that lies ==="
+scripts/test-force-restart-target.sh
+echo
+
 for b in $BINS; do
   echo "=== $b (clean stamp) ==="
   go build -trimpath -buildvcs=false -ldflags "$(scripts/build-ldflags.sh)" -o "$OUT/$b" ./cmd/"$b"
