@@ -1086,6 +1086,9 @@ type Command struct {
 	//	*Command_StartGuestMigration
 	//	*Command_UpdateGuestMigrationPhase
 	//	*Command_FinishGuestMigration
+	//	*Command_AcquireColonyUpdate
+	//	*Command_AdvanceColonyUpdate
+	//	*Command_ReleaseColonyUpdate
 	Op            isCommand_Op `protobuf_oneof:"op"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -1407,6 +1410,33 @@ func (x *Command) GetFinishGuestMigration() *FinishGuestMigration {
 	return nil
 }
 
+func (x *Command) GetAcquireColonyUpdate() *AcquireColonyUpdate {
+	if x != nil {
+		if x, ok := x.Op.(*Command_AcquireColonyUpdate); ok {
+			return x.AcquireColonyUpdate
+		}
+	}
+	return nil
+}
+
+func (x *Command) GetAdvanceColonyUpdate() *AdvanceColonyUpdate {
+	if x != nil {
+		if x, ok := x.Op.(*Command_AdvanceColonyUpdate); ok {
+			return x.AdvanceColonyUpdate
+		}
+	}
+	return nil
+}
+
+func (x *Command) GetReleaseColonyUpdate() *ReleaseColonyUpdate {
+	if x != nil {
+		if x, ok := x.Op.(*Command_ReleaseColonyUpdate); ok {
+			return x.ReleaseColonyUpdate
+		}
+	}
+	return nil
+}
+
 type isCommand_Op interface {
 	isCommand_Op()
 }
@@ -1607,6 +1637,29 @@ type Command_FinishGuestMigration struct {
 	FinishGuestMigration *FinishGuestMigration `protobuf:"bytes,31,opt,name=finish_guest_migration,json=finishGuestMigration,proto3,oneof"`
 }
 
+type Command_AcquireColonyUpdate struct {
+	// AcquireColonyUpdate/AdvanceColonyUpdate/ReleaseColonyUpdate back
+	// the colony-wide single-flight of ADR-0145's controlled update:
+	// at most ONE controlled update operation may exist in the Colony
+	// at a time, enforced here rather than by any in-process mutex,
+	// because the guarantee has to survive the managerd that is
+	// coordinating it being restarted, and because it has to hold
+	// across coordinators on different Combs. Raft's own serialized
+	// log-apply order is the serialization point, exactly as
+	// AcquireRestartLease above already is for the per-service
+	// restart lease (ADR-0103) - see ColonyUpdate's own doc comment
+	// and internal/raft/colonyupdate.go for the full argument.
+	AcquireColonyUpdate *AcquireColonyUpdate `protobuf:"bytes,32,opt,name=acquire_colony_update,json=acquireColonyUpdate,proto3,oneof"`
+}
+
+type Command_AdvanceColonyUpdate struct {
+	AdvanceColonyUpdate *AdvanceColonyUpdate `protobuf:"bytes,33,opt,name=advance_colony_update,json=advanceColonyUpdate,proto3,oneof"`
+}
+
+type Command_ReleaseColonyUpdate struct {
+	ReleaseColonyUpdate *ReleaseColonyUpdate `protobuf:"bytes,34,opt,name=release_colony_update,json=releaseColonyUpdate,proto3,oneof"`
+}
+
 func (*Command_CreateVm) isCommand_Op() {}
 
 func (*Command_UpdateVm) isCommand_Op() {}
@@ -1668,6 +1721,12 @@ func (*Command_StartGuestMigration) isCommand_Op() {}
 func (*Command_UpdateGuestMigrationPhase) isCommand_Op() {}
 
 func (*Command_FinishGuestMigration) isCommand_Op() {}
+
+func (*Command_AcquireColonyUpdate) isCommand_Op() {}
+
+func (*Command_AdvanceColonyUpdate) isCommand_Op() {}
+
+func (*Command_ReleaseColonyUpdate) isCommand_Op() {}
 
 // ApiKey is a cluster-wide credential for ManagerService's external
 // gRPC API (ADR-0023). Only hashed_key (a SHA-256 hex digest) is ever
@@ -4226,9 +4285,25 @@ type AcquireRestartLease struct {
 	// force grants the lease even over an existing block (an unconfirmed
 	// prior lease, or a recent voter RestartRecord within cooldown) - an
 	// explicit, logged operator override, never silent.
-	Force         bool `protobuf:"varint,6,opt,name=force,proto3" json:"force,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	Force bool `protobuf:"varint,6,opt,name=force,proto3" json:"force,omitempty"`
+	// colony_update_fence, when set, binds this lease to one controlled-
+	// update operation (ADR-0145). The FSM then requires an ACTIVE
+	// ColonyUpdate whose four fields match this one exactly, and refuses
+	// otherwise - which is the fence: a coordinator whose operation was
+	// taken over, or released, can no longer acquire the restart leases
+	// its own sweep depends on, no matter how many Combs it still has
+	// queued. An UNSET fence preserves today's behaviour exactly, so the
+	// ordinary operator-driven per-Comb restart path (the Machine page's
+	// restart button) is unaffected by the existence of this field.
+	//
+	// Deliberately empty-is-unfenced rather than required. Requiring it
+	// would break every existing RestartNodeService caller, and the
+	// property being bought is not "every restart is part of an update" -
+	// it is "a coordinator that has lost its update cannot keep
+	// restarting Combs on the strength of a stale record".
+	ColonyUpdateFence *ColonyUpdateFence `protobuf:"bytes,7,opt,name=colony_update_fence,json=colonyUpdateFence,proto3" json:"colony_update_fence,omitempty"`
+	unknownFields     protoimpl.UnknownFields
+	sizeCache         protoimpl.SizeCache
 }
 
 func (x *AcquireRestartLease) Reset() {
@@ -4301,6 +4376,13 @@ func (x *AcquireRestartLease) GetForce() bool {
 		return x.Force
 	}
 	return false
+}
+
+func (x *AcquireRestartLease) GetColonyUpdateFence() *ColonyUpdateFence {
+	if x != nil {
+		return x.ColonyUpdateFence
+	}
+	return nil
 }
 
 // RecordRestartCompleted is submitted by the restarted node's own next
@@ -4382,6 +4464,665 @@ func (x *RecordRestartCompleted) GetLeaseId() uint64 {
 	return 0
 }
 
+// ColonyUpdateFence is the four-part capability token a controlled-update
+// coordinator must present to keep acting. All four parts are required
+// and compared for exact equality:
+//
+//   - operation_id names which operation the caller believes it holds;
+//   - holder_node_id names the Comb that was granted it;
+//   - holder_incarnation distinguishes one managerd process from the next
+//     on that same Comb, so a replacement process can resume and a
+//     resurrected predecessor cannot;
+//   - fence_token is the raft log index of the granting AcquireColonyUpdate,
+//     which is unique and monotonic for free, exactly as RestartLease's
+//     lease_id is (ADR-0103).
+//
+// The fence_token is the part that makes failover safe. A takeover is a
+// NEW grant at a strictly higher index, so every outstanding token issued
+// before it is stale the instant the takeover commits - on every replica,
+// and therefore across a managerd process death, a coordinator move, and a
+// leader change alike. holder_incarnation alone could not do this: two
+// managerd processes on the same Comb would share a node_id, and a node
+// cannot be renamed to express "this is the second one".
+//
+// Deliberately no TTL, matching ADR-0103's RestartLease and ADR-0145's own
+// constraint. A lease that expires on a timer can lapse while the
+// underlying operation is still genuinely mid-flight, which is precisely
+// the window this exists to close. Recovery from a lost or wedged
+// coordinator is an EXPLICIT takeover (AcquireColonyUpdate.takeover),
+// which is safe in the conservative direction: a wrongful takeover can at
+// worst abandon an update, never cause two of them.
+type ColonyUpdateFence struct {
+	state             protoimpl.MessageState `protogen:"open.v1"`
+	OperationId       string                 `protobuf:"bytes,1,opt,name=operation_id,json=operationId,proto3" json:"operation_id,omitempty"`
+	HolderNodeId      string                 `protobuf:"bytes,2,opt,name=holder_node_id,json=holderNodeId,proto3" json:"holder_node_id,omitempty"`
+	FenceToken        uint64                 `protobuf:"varint,3,opt,name=fence_token,json=fenceToken,proto3" json:"fence_token,omitempty"`
+	HolderIncarnation string                 `protobuf:"bytes,4,opt,name=holder_incarnation,json=holderIncarnation,proto3" json:"holder_incarnation,omitempty"`
+	unknownFields     protoimpl.UnknownFields
+	sizeCache         protoimpl.SizeCache
+}
+
+func (x *ColonyUpdateFence) Reset() {
+	*x = ColonyUpdateFence{}
+	mi := &file_api_internalpb_state_proto_msgTypes[42]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ColonyUpdateFence) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ColonyUpdateFence) ProtoMessage() {}
+
+func (x *ColonyUpdateFence) ProtoReflect() protoreflect.Message {
+	mi := &file_api_internalpb_state_proto_msgTypes[42]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ColonyUpdateFence.ProtoReflect.Descriptor instead.
+func (*ColonyUpdateFence) Descriptor() ([]byte, []int) {
+	return file_api_internalpb_state_proto_rawDescGZIP(), []int{42}
+}
+
+func (x *ColonyUpdateFence) GetOperationId() string {
+	if x != nil {
+		return x.OperationId
+	}
+	return ""
+}
+
+func (x *ColonyUpdateFence) GetHolderNodeId() string {
+	if x != nil {
+		return x.HolderNodeId
+	}
+	return ""
+}
+
+func (x *ColonyUpdateFence) GetFenceToken() uint64 {
+	if x != nil {
+		return x.FenceToken
+	}
+	return 0
+}
+
+func (x *ColonyUpdateFence) GetHolderIncarnation() string {
+	if x != nil {
+		return x.HolderIncarnation
+	}
+	return ""
+}
+
+// ColonyUpdateStepRecord is one durable per-step outcome of a controlled
+// update, appended in order to ColonyUpdate.steps.
+//
+// The outcome vocabulary is internal/restartplan's, deliberately and
+// verbatim: "confirmed", "failed", "blocked", "unobserved", "unverified".
+// "Could not check" has its own names here for the same reason it has
+// them there (ADR-0052's own three-state convention) - a step that was
+// attempted and whose result never came back is NOT a failure and NOT a
+// success, and collapsing the two is how a node that vanished ends up
+// reported as one that came back.
+//
+// As in restartplan.Result.Validate, the two positive outcomes must cite
+// the evidence that makes them positive, and the FSM refuses to record a
+// step that does not. An unbacked "confirmed" is precisely the bug this
+// shape exists to make unrepresentable.
+type ColonyUpdateStepRecord struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// index is the ordinal position of this step in the operation's
+	// sequence, starting at 0. It is the record's own append guard: steps
+	// must be recorded in order, and a re-record of an existing position
+	// is accepted only as an exact replay (see internal/raft/colonyupdate.go).
+	Index uint32 `protobuf:"varint,1,opt,name=index,proto3" json:"index,omitempty"`
+	// step names the phase reached, using internal/restartplan's own Step
+	// constants (step-aside, gather-facts, evaluate, reserve-lease,
+	// record-pending, issue-restart, await-confirmation, record-outcome)
+	// for the per-Comb steps, and whatever the coordinator names for
+	// colony-wide ones.
+	Step string `protobuf:"bytes,2,opt,name=step,proto3" json:"step,omitempty"`
+	// outcome is one of restartplan's Outcome constants. Empty is never
+	// valid: a step that has not happened is not yet a record, and a step
+	// whose result is unknown has its own two names.
+	Outcome string `protobuf:"bytes,3,opt,name=outcome,proto3" json:"outcome,omitempty"`
+	// detail is operator-readable prose, never empty.
+	Detail string `protobuf:"bytes,4,opt,name=detail,proto3" json:"detail,omitempty"`
+	// evidence is the confirmation backing the outcome - the lines
+	// restartplan.Result carries, one per observation actually made.
+	Evidence []string `protobuf:"bytes,5,rep,name=evidence,proto3" json:"evidence,omitempty"`
+	// node_id is the Comb this step acted on, empty for a colony-wide step.
+	NodeId string `protobuf:"bytes,6,opt,name=node_id,json=nodeId,proto3" json:"node_id,omitempty"`
+	// recorded_at_unix is authored by whichever node applies the command
+	// (the leader), the same determinism reasoning as RestartLease's
+	// requested_at_unix - never accepted from the caller.
+	RecordedAtUnix int64 `protobuf:"varint,7,opt,name=recorded_at_unix,json=recordedAtUnix,proto3" json:"recorded_at_unix,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
+}
+
+func (x *ColonyUpdateStepRecord) Reset() {
+	*x = ColonyUpdateStepRecord{}
+	mi := &file_api_internalpb_state_proto_msgTypes[43]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ColonyUpdateStepRecord) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ColonyUpdateStepRecord) ProtoMessage() {}
+
+func (x *ColonyUpdateStepRecord) ProtoReflect() protoreflect.Message {
+	mi := &file_api_internalpb_state_proto_msgTypes[43]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ColonyUpdateStepRecord.ProtoReflect.Descriptor instead.
+func (*ColonyUpdateStepRecord) Descriptor() ([]byte, []int) {
+	return file_api_internalpb_state_proto_rawDescGZIP(), []int{43}
+}
+
+func (x *ColonyUpdateStepRecord) GetIndex() uint32 {
+	if x != nil {
+		return x.Index
+	}
+	return 0
+}
+
+func (x *ColonyUpdateStepRecord) GetStep() string {
+	if x != nil {
+		return x.Step
+	}
+	return ""
+}
+
+func (x *ColonyUpdateStepRecord) GetOutcome() string {
+	if x != nil {
+		return x.Outcome
+	}
+	return ""
+}
+
+func (x *ColonyUpdateStepRecord) GetDetail() string {
+	if x != nil {
+		return x.Detail
+	}
+	return ""
+}
+
+func (x *ColonyUpdateStepRecord) GetEvidence() []string {
+	if x != nil {
+		return x.Evidence
+	}
+	return nil
+}
+
+func (x *ColonyUpdateStepRecord) GetNodeId() string {
+	if x != nil {
+		return x.NodeId
+	}
+	return ""
+}
+
+func (x *ColonyUpdateStepRecord) GetRecordedAtUnix() int64 {
+	if x != nil {
+		return x.RecordedAtUnix
+	}
+	return 0
+}
+
+// ColonyUpdate is the durable record of one controlled-update operation,
+// keyed by operation_id in FSMSnapshotState.colony_updates.
+//
+// It is BOTH the lock and the progress record, deliberately, and that is
+// the whole design:
+//
+//   - At most one entry has active = true. That is the colony-wide
+//     single-flight, enforced by raft's serialized log-apply order.
+//   - An entry is never deleted on settle. A replacement managerd asking
+//     "what is the state of the controlled update?" has to be able to
+//     find both the one in flight and the one that just finished, and
+//     "has this operation id ever been used?" is answerable only from
+//     retained history.
+//
+// It lives in raft rather than on the coordinator's disk (see ADR-0145's
+// first open question, which asked exactly this) because splitting the
+// two would let them disagree: the lock must be replicated to be a
+// colony-wide guarantee, and a progress file that is not the lock is a
+// progress file a second managerd cannot see. internal/restartplan's
+// file-backed PendingStore/ResultStore remain the right home for the
+// node-local, single-writer, single-reader trace of one Comb's own
+// restart, which is a different thing with a different failure mode.
+type ColonyUpdate struct {
+	state             protoimpl.MessageState `protogen:"open.v1"`
+	OperationId       string                 `protobuf:"bytes,1,opt,name=operation_id,json=operationId,proto3" json:"operation_id,omitempty"`
+	HolderNodeId      string                 `protobuf:"bytes,2,opt,name=holder_node_id,json=holderNodeId,proto3" json:"holder_node_id,omitempty"`
+	HolderIncarnation string                 `protobuf:"bytes,3,opt,name=holder_incarnation,json=holderIncarnation,proto3" json:"holder_incarnation,omitempty"`
+	// fence_token is the raft log index of the AcquireColonyUpdate that
+	// most recently granted this record. See ColonyUpdateFence.
+	FenceToken    uint64 `protobuf:"varint,4,opt,name=fence_token,json=fenceToken,proto3" json:"fence_token,omitempty"`
+	GrantedAtUnix int64  `protobuf:"varint,5,opt,name=granted_at_unix,json=grantedAtUnix,proto3" json:"granted_at_unix,omitempty"`
+	// target_node_id is the Comb being worked on right now, empty between
+	// steps. It is here rather than inferred from the step records so a
+	// reader gets the answer in one read.
+	TargetNodeId string `protobuf:"bytes,6,opt,name=target_node_id,json=targetNodeId,proto3" json:"target_node_id,omitempty"`
+	// step is the most recent step entered.
+	Step string `protobuf:"bytes,7,opt,name=step,proto3" json:"step,omitempty"`
+	// active is the single-flight itself: false means this operation has
+	// been settled and is history.
+	Active bool `protobuf:"varint,8,opt,name=active,proto3" json:"active,omitempty"`
+	// outcome is empty while active, and otherwise one of restartplan's
+	// Outcome constants - the same three-plus-way vocabulary, for the same
+	// reason.
+	Outcome       string `protobuf:"bytes,9,opt,name=outcome,proto3" json:"outcome,omitempty"`
+	Detail        string `protobuf:"bytes,10,opt,name=detail,proto3" json:"detail,omitempty"`
+	SettledAtUnix int64  `protobuf:"varint,11,opt,name=settled_at_unix,json=settledAtUnix,proto3" json:"settled_at_unix,omitempty"`
+	// takeover is true iff this grant was taken over from a different
+	// holder without its explicit acknowledgment. It is recorded rather
+	// than treated as exceptional because a takeover is a normal part of
+	// coordinator failover, and an operator reading a stuck update needs
+	// to know one happened.
+	Takeover bool `protobuf:"varint,12,opt,name=takeover,proto3" json:"takeover,omitempty"`
+	// steps are the per-step outcomes, in order, each with its own
+	// evidence.
+	Steps []*ColonyUpdateStepRecord `protobuf:"bytes,14,rep,name=steps,proto3" json:"steps,omitempty"`
+	// updated_at_unix is the leader-authored time of the most recent
+	// accepted advance.
+	UpdatedAtUnix int64 `protobuf:"varint,15,opt,name=updated_at_unix,json=updatedAtUnix,proto3" json:"updated_at_unix,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ColonyUpdate) Reset() {
+	*x = ColonyUpdate{}
+	mi := &file_api_internalpb_state_proto_msgTypes[44]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ColonyUpdate) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ColonyUpdate) ProtoMessage() {}
+
+func (x *ColonyUpdate) ProtoReflect() protoreflect.Message {
+	mi := &file_api_internalpb_state_proto_msgTypes[44]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ColonyUpdate.ProtoReflect.Descriptor instead.
+func (*ColonyUpdate) Descriptor() ([]byte, []int) {
+	return file_api_internalpb_state_proto_rawDescGZIP(), []int{44}
+}
+
+func (x *ColonyUpdate) GetOperationId() string {
+	if x != nil {
+		return x.OperationId
+	}
+	return ""
+}
+
+func (x *ColonyUpdate) GetHolderNodeId() string {
+	if x != nil {
+		return x.HolderNodeId
+	}
+	return ""
+}
+
+func (x *ColonyUpdate) GetHolderIncarnation() string {
+	if x != nil {
+		return x.HolderIncarnation
+	}
+	return ""
+}
+
+func (x *ColonyUpdate) GetFenceToken() uint64 {
+	if x != nil {
+		return x.FenceToken
+	}
+	return 0
+}
+
+func (x *ColonyUpdate) GetGrantedAtUnix() int64 {
+	if x != nil {
+		return x.GrantedAtUnix
+	}
+	return 0
+}
+
+func (x *ColonyUpdate) GetTargetNodeId() string {
+	if x != nil {
+		return x.TargetNodeId
+	}
+	return ""
+}
+
+func (x *ColonyUpdate) GetStep() string {
+	if x != nil {
+		return x.Step
+	}
+	return ""
+}
+
+func (x *ColonyUpdate) GetActive() bool {
+	if x != nil {
+		return x.Active
+	}
+	return false
+}
+
+func (x *ColonyUpdate) GetOutcome() string {
+	if x != nil {
+		return x.Outcome
+	}
+	return ""
+}
+
+func (x *ColonyUpdate) GetDetail() string {
+	if x != nil {
+		return x.Detail
+	}
+	return ""
+}
+
+func (x *ColonyUpdate) GetSettledAtUnix() int64 {
+	if x != nil {
+		return x.SettledAtUnix
+	}
+	return 0
+}
+
+func (x *ColonyUpdate) GetTakeover() bool {
+	if x != nil {
+		return x.Takeover
+	}
+	return false
+}
+
+func (x *ColonyUpdate) GetSteps() []*ColonyUpdateStepRecord {
+	if x != nil {
+		return x.Steps
+	}
+	return nil
+}
+
+func (x *ColonyUpdate) GetUpdatedAtUnix() int64 {
+	if x != nil {
+		return x.UpdatedAtUnix
+	}
+	return 0
+}
+
+// AcquireColonyUpdate claims the colony-wide single-flight. Submitted only
+// by the current Raft leader (internal/manager's handler forwards first),
+// so granted_at_unix and every refusal message are authored where the
+// decision is actually made rather than by whichever Comb received the
+// request.
+type AcquireColonyUpdate struct {
+	state             protoimpl.MessageState `protogen:"open.v1"`
+	OperationId       string                 `protobuf:"bytes,1,opt,name=operation_id,json=operationId,proto3" json:"operation_id,omitempty"`
+	HolderNodeId      string                 `protobuf:"bytes,2,opt,name=holder_node_id,json=holderNodeId,proto3" json:"holder_node_id,omitempty"`
+	HolderIncarnation string                 `protobuf:"bytes,3,opt,name=holder_incarnation,json=holderIncarnation,proto3" json:"holder_incarnation,omitempty"`
+	RequestedAtUnix   int64                  `protobuf:"varint,4,opt,name=requested_at_unix,json=requestedAtUnix,proto3" json:"requested_at_unix,omitempty"`
+	// takeover is the EXPLICIT, logged override for an operation already in
+	// progress. It is the only way a second coordinator can ever take over,
+	// and it is deliberately loud: no TTL, no silent expiry, no automatic
+	// handover on a timeout. A wrongful takeover stops an update; it can
+	// never start a second one alongside it, because the losing holder is
+	// fenced out of the restart-lease path by the higher fence_token.
+	Takeover      bool `protobuf:"varint,5,opt,name=takeover,proto3" json:"takeover,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AcquireColonyUpdate) Reset() {
+	*x = AcquireColonyUpdate{}
+	mi := &file_api_internalpb_state_proto_msgTypes[45]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AcquireColonyUpdate) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AcquireColonyUpdate) ProtoMessage() {}
+
+func (x *AcquireColonyUpdate) ProtoReflect() protoreflect.Message {
+	mi := &file_api_internalpb_state_proto_msgTypes[45]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AcquireColonyUpdate.ProtoReflect.Descriptor instead.
+func (*AcquireColonyUpdate) Descriptor() ([]byte, []int) {
+	return file_api_internalpb_state_proto_rawDescGZIP(), []int{45}
+}
+
+func (x *AcquireColonyUpdate) GetOperationId() string {
+	if x != nil {
+		return x.OperationId
+	}
+	return ""
+}
+
+func (x *AcquireColonyUpdate) GetHolderNodeId() string {
+	if x != nil {
+		return x.HolderNodeId
+	}
+	return ""
+}
+
+func (x *AcquireColonyUpdate) GetHolderIncarnation() string {
+	if x != nil {
+		return x.HolderIncarnation
+	}
+	return ""
+}
+
+func (x *AcquireColonyUpdate) GetRequestedAtUnix() int64 {
+	if x != nil {
+		return x.RequestedAtUnix
+	}
+	return 0
+}
+
+func (x *AcquireColonyUpdate) GetTakeover() bool {
+	if x != nil {
+		return x.Takeover
+	}
+	return false
+}
+
+// AdvanceColonyUpdate records durable progress on the operation the
+// caller still holds, and moves its current step/target forward. Every
+// field of the fence must match the active record exactly; anything else
+// is refused by name, which is what makes a resurrected or displaced
+// coordinator unable to keep going.
+type AdvanceColonyUpdate struct {
+	state        protoimpl.MessageState `protogen:"open.v1"`
+	Fence        *ColonyUpdateFence     `protobuf:"bytes,1,opt,name=fence,proto3" json:"fence,omitempty"`
+	Step         string                 `protobuf:"bytes,2,opt,name=step,proto3" json:"step,omitempty"`
+	TargetNodeId string                 `protobuf:"bytes,3,opt,name=target_node_id,json=targetNodeId,proto3" json:"target_node_id,omitempty"`
+	Detail       string                 `protobuf:"bytes,4,opt,name=detail,proto3" json:"detail,omitempty"`
+	// step_record, when set, is appended to the operation's own durable
+	// step history. An unset record still advances step/target, which is
+	// how a coordinator records "about to begin X" before X has an outcome.
+	StepRecord    *ColonyUpdateStepRecord `protobuf:"bytes,5,opt,name=step_record,json=stepRecord,proto3" json:"step_record,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AdvanceColonyUpdate) Reset() {
+	*x = AdvanceColonyUpdate{}
+	mi := &file_api_internalpb_state_proto_msgTypes[46]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AdvanceColonyUpdate) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AdvanceColonyUpdate) ProtoMessage() {}
+
+func (x *AdvanceColonyUpdate) ProtoReflect() protoreflect.Message {
+	mi := &file_api_internalpb_state_proto_msgTypes[46]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AdvanceColonyUpdate.ProtoReflect.Descriptor instead.
+func (*AdvanceColonyUpdate) Descriptor() ([]byte, []int) {
+	return file_api_internalpb_state_proto_rawDescGZIP(), []int{46}
+}
+
+func (x *AdvanceColonyUpdate) GetFence() *ColonyUpdateFence {
+	if x != nil {
+		return x.Fence
+	}
+	return nil
+}
+
+func (x *AdvanceColonyUpdate) GetStep() string {
+	if x != nil {
+		return x.Step
+	}
+	return ""
+}
+
+func (x *AdvanceColonyUpdate) GetTargetNodeId() string {
+	if x != nil {
+		return x.TargetNodeId
+	}
+	return ""
+}
+
+func (x *AdvanceColonyUpdate) GetDetail() string {
+	if x != nil {
+		return x.Detail
+	}
+	return ""
+}
+
+func (x *AdvanceColonyUpdate) GetStepRecord() *ColonyUpdateStepRecord {
+	if x != nil {
+		return x.StepRecord
+	}
+	return nil
+}
+
+// ReleaseColonyUpdate settles the operation terminally, with the same
+// exact-fence requirement as AdvanceColonyUpdate. It does not DELETE the
+// record - a settled operation is history, and the answer to "what
+// happened to operation X" has to outlive the answer to "is anything
+// running".
+type ReleaseColonyUpdate struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	Fence *ColonyUpdateFence     `protobuf:"bytes,1,opt,name=fence,proto3" json:"fence,omitempty"`
+	// outcome must be one of restartplan's terminal-or-unknown constants;
+	// an empty outcome is refused, because "the update finished" is a claim
+	// like any other.
+	Outcome         string `protobuf:"bytes,2,opt,name=outcome,proto3" json:"outcome,omitempty"`
+	Detail          string `protobuf:"bytes,3,opt,name=detail,proto3" json:"detail,omitempty"`
+	CompletedAtUnix int64  `protobuf:"varint,4,opt,name=completed_at_unix,json=completedAtUnix,proto3" json:"completed_at_unix,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
+}
+
+func (x *ReleaseColonyUpdate) Reset() {
+	*x = ReleaseColonyUpdate{}
+	mi := &file_api_internalpb_state_proto_msgTypes[47]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ReleaseColonyUpdate) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ReleaseColonyUpdate) ProtoMessage() {}
+
+func (x *ReleaseColonyUpdate) ProtoReflect() protoreflect.Message {
+	mi := &file_api_internalpb_state_proto_msgTypes[47]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ReleaseColonyUpdate.ProtoReflect.Descriptor instead.
+func (*ReleaseColonyUpdate) Descriptor() ([]byte, []int) {
+	return file_api_internalpb_state_proto_rawDescGZIP(), []int{47}
+}
+
+func (x *ReleaseColonyUpdate) GetFence() *ColonyUpdateFence {
+	if x != nil {
+		return x.Fence
+	}
+	return nil
+}
+
+func (x *ReleaseColonyUpdate) GetOutcome() string {
+	if x != nil {
+		return x.Outcome
+	}
+	return ""
+}
+
+func (x *ReleaseColonyUpdate) GetDetail() string {
+	if x != nil {
+		return x.Detail
+	}
+	return ""
+}
+
+func (x *ReleaseColonyUpdate) GetCompletedAtUnix() int64 {
+	if x != nil {
+		return x.CompletedAtUnix
+	}
+	return 0
+}
+
 // CommandResult is the FSM's response to Apply, echoed back through
 // ApplyResponse. error is set (and vm left unset) if the command was
 // rejected at the application level (e.g. duplicate/missing id) - this is
@@ -4399,7 +5140,7 @@ type CommandResult struct {
 
 func (x *CommandResult) Reset() {
 	*x = CommandResult{}
-	mi := &file_api_internalpb_state_proto_msgTypes[42]
+	mi := &file_api_internalpb_state_proto_msgTypes[48]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4411,7 +5152,7 @@ func (x *CommandResult) String() string {
 func (*CommandResult) ProtoMessage() {}
 
 func (x *CommandResult) ProtoReflect() protoreflect.Message {
-	mi := &file_api_internalpb_state_proto_msgTypes[42]
+	mi := &file_api_internalpb_state_proto_msgTypes[48]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4424,7 +5165,7 @@ func (x *CommandResult) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CommandResult.ProtoReflect.Descriptor instead.
 func (*CommandResult) Descriptor() ([]byte, []int) {
-	return file_api_internalpb_state_proto_rawDescGZIP(), []int{42}
+	return file_api_internalpb_state_proto_rawDescGZIP(), []int{48}
 }
 
 func (x *CommandResult) GetVm() *VMDefinition {
@@ -4491,13 +5232,24 @@ type FSMSnapshotState struct {
 	// fence findable in a single point read.
 	Migrations        map[string]*GuestMigration `protobuf:"bytes,10,rep,name=migrations,proto3" json:"migrations,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
 	MigrationsByGuest map[string]string          `protobuf:"bytes,11,rep,name=migrations_by_guest,json=migrationsByGuest,proto3" json:"migrations_by_guest,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
-	unknownFields     protoimpl.UnknownFields
-	sizeCache         protoimpl.SizeCache
+	// colony_updates is the durable controlled-update record of ADR-0145:
+	// the colony-wide single-flight (at most one entry with active = true)
+	// and every settled operation's history, keyed by operation_id.
+	//
+	// Included in the snapshot for the same reason restart_leases is above
+	// - a raft snapshot restore, or a seeded recovery via raftd -restore,
+	// that silently dropped this would reopen the exact window it exists to
+	// close, and would do it invisibly. The digest (ADR-0143) is derived
+	// from this message's own descriptor, so it picks the new map up with
+	// no second list to forget.
+	ColonyUpdates map[string]*ColonyUpdate `protobuf:"bytes,12,rep,name=colony_updates,json=colonyUpdates,proto3" json:"colony_updates,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *FSMSnapshotState) Reset() {
 	*x = FSMSnapshotState{}
-	mi := &file_api_internalpb_state_proto_msgTypes[43]
+	mi := &file_api_internalpb_state_proto_msgTypes[49]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4509,7 +5261,7 @@ func (x *FSMSnapshotState) String() string {
 func (*FSMSnapshotState) ProtoMessage() {}
 
 func (x *FSMSnapshotState) ProtoReflect() protoreflect.Message {
-	mi := &file_api_internalpb_state_proto_msgTypes[43]
+	mi := &file_api_internalpb_state_proto_msgTypes[49]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4522,7 +5274,7 @@ func (x *FSMSnapshotState) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FSMSnapshotState.ProtoReflect.Descriptor instead.
 func (*FSMSnapshotState) Descriptor() ([]byte, []int) {
-	return file_api_internalpb_state_proto_rawDescGZIP(), []int{43}
+	return file_api_internalpb_state_proto_rawDescGZIP(), []int{49}
 }
 
 func (x *FSMSnapshotState) GetLastIndex() uint64 {
@@ -4602,6 +5354,13 @@ func (x *FSMSnapshotState) GetMigrationsByGuest() map[string]string {
 	return nil
 }
 
+func (x *FSMSnapshotState) GetColonyUpdates() map[string]*ColonyUpdate {
+	if x != nil {
+		return x.ColonyUpdates
+	}
+	return nil
+}
+
 // ConfigArchive is the on-disk file format for raftd's -export/
 // -restore (docs/adr/0051-raftd-config-save-restore.md) - a small
 // envelope around an unmodified FSMSnapshotState payload, versioned
@@ -4634,7 +5393,7 @@ type ConfigArchive struct {
 
 func (x *ConfigArchive) Reset() {
 	*x = ConfigArchive{}
-	mi := &file_api_internalpb_state_proto_msgTypes[44]
+	mi := &file_api_internalpb_state_proto_msgTypes[50]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4646,7 +5405,7 @@ func (x *ConfigArchive) String() string {
 func (*ConfigArchive) ProtoMessage() {}
 
 func (x *ConfigArchive) ProtoReflect() protoreflect.Message {
-	mi := &file_api_internalpb_state_proto_msgTypes[44]
+	mi := &file_api_internalpb_state_proto_msgTypes[50]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4659,7 +5418,7 @@ func (x *ConfigArchive) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ConfigArchive.ProtoReflect.Descriptor instead.
 func (*ConfigArchive) Descriptor() ([]byte, []int) {
-	return file_api_internalpb_state_proto_rawDescGZIP(), []int{44}
+	return file_api_internalpb_state_proto_rawDescGZIP(), []int{50}
 }
 
 func (x *ConfigArchive) GetFormatVersion() uint32 {
@@ -4769,7 +5528,7 @@ const file_api_internalpb_state_proto_rawDesc = "" +
 	"\vbridge_name\x18\x05 \x01(\tR\n" +
 	"bridgeName\x12)\n" +
 	"\x10external_gateway\x18\x06 \x01(\tR\x0fexternalGateway\x12%\n" +
-	"\x0euplink_bridged\x18\a \x01(\bR\ruplinkBridged\"\xea\x14\n" +
+	"\x0euplink_bridged\x18\a \x01(\bR\ruplinkBridged\"\x87\x17\n" +
 	"\aCommand\x12;\n" +
 	"\tcreate_vm\x18\x01 \x01(\v2\x1c.apiary.internal.v1.CreateVMH\x00R\bcreateVm\x12;\n" +
 	"\tupdate_vm\x18\x02 \x01(\v2\x1c.apiary.internal.v1.UpdateVMH\x00R\bupdateVm\x12;\n" +
@@ -4806,7 +5565,10 @@ const file_api_internalpb_state_proto_rawDesc = "" +
 	"\x18record_restart_completed\x18\x1c \x01(\v2*.apiary.internal.v1.RecordRestartCompletedH\x00R\x16recordRestartCompleted\x12]\n" +
 	"\x15start_guest_migration\x18\x1d \x01(\v2'.apiary.internal.v1.StartGuestMigrationH\x00R\x13startGuestMigration\x12p\n" +
 	"\x1cupdate_guest_migration_phase\x18\x1e \x01(\v2-.apiary.internal.v1.UpdateGuestMigrationPhaseH\x00R\x19updateGuestMigrationPhase\x12`\n" +
-	"\x16finish_guest_migration\x18\x1f \x01(\v2(.apiary.internal.v1.FinishGuestMigrationH\x00R\x14finishGuestMigrationB\x04\n" +
+	"\x16finish_guest_migration\x18\x1f \x01(\v2(.apiary.internal.v1.FinishGuestMigrationH\x00R\x14finishGuestMigration\x12]\n" +
+	"\x15acquire_colony_update\x18  \x01(\v2'.apiary.internal.v1.AcquireColonyUpdateH\x00R\x13acquireColonyUpdate\x12]\n" +
+	"\x15advance_colony_update\x18! \x01(\v2'.apiary.internal.v1.AdvanceColonyUpdateH\x00R\x13advanceColonyUpdate\x12]\n" +
+	"\x15release_colony_update\x18\" \x01(\v2'.apiary.internal.v1.ReleaseColonyUpdateH\x00R\x13releaseColonyUpdateB\x04\n" +
 	"\x02op\"\x82\x01\n" +
 	"\x06ApiKey\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
@@ -5004,24 +5766,74 @@ const file_api_internalpb_state_proto_rawDesc = "" +
 	"\rRestartRecord\x12\x18\n" +
 	"\aservice\x18\x01 \x01(\tR\aservice\x12\x17\n" +
 	"\anode_id\x18\x02 \x01(\tR\x06nodeId\x12*\n" +
-	"\x11completed_at_unix\x18\x03 \x01(\x03R\x0fcompletedAtUnix\"\xdb\x01\n" +
+	"\x11completed_at_unix\x18\x03 \x01(\x03R\x0fcompletedAtUnix\"\xb2\x02\n" +
 	"\x13AcquireRestartLease\x12\x18\n" +
 	"\aservice\x18\x01 \x01(\tR\aservice\x12\x17\n" +
 	"\anode_id\x18\x02 \x01(\tR\x06nodeId\x12*\n" +
 	"\x11requested_at_unix\x18\x03 \x01(\x03R\x0frequestedAtUnix\x12$\n" +
 	"\x0evoter_node_ids\x18\x04 \x03(\tR\fvoterNodeIds\x12)\n" +
 	"\x10cooldown_seconds\x18\x05 \x01(\x03R\x0fcooldownSeconds\x12\x14\n" +
-	"\x05force\x18\x06 \x01(\bR\x05force\"\x92\x01\n" +
+	"\x05force\x18\x06 \x01(\bR\x05force\x12U\n" +
+	"\x13colony_update_fence\x18\a \x01(\v2%.apiary.internal.v1.ColonyUpdateFenceR\x11colonyUpdateFence\"\x92\x01\n" +
 	"\x16RecordRestartCompleted\x12\x18\n" +
 	"\aservice\x18\x01 \x01(\tR\aservice\x12\x17\n" +
 	"\anode_id\x18\x02 \x01(\tR\x06nodeId\x12*\n" +
 	"\x11completed_at_unix\x18\x03 \x01(\x03R\x0fcompletedAtUnix\x12\x19\n" +
-	"\blease_id\x18\x04 \x01(\x04R\aleaseId\"\xe9\x01\n" +
+	"\blease_id\x18\x04 \x01(\x04R\aleaseId\"\xac\x01\n" +
+	"\x11ColonyUpdateFence\x12!\n" +
+	"\foperation_id\x18\x01 \x01(\tR\voperationId\x12$\n" +
+	"\x0eholder_node_id\x18\x02 \x01(\tR\fholderNodeId\x12\x1f\n" +
+	"\vfence_token\x18\x03 \x01(\x04R\n" +
+	"fenceToken\x12-\n" +
+	"\x12holder_incarnation\x18\x04 \x01(\tR\x11holderIncarnation\"\xd3\x01\n" +
+	"\x16ColonyUpdateStepRecord\x12\x14\n" +
+	"\x05index\x18\x01 \x01(\rR\x05index\x12\x12\n" +
+	"\x04step\x18\x02 \x01(\tR\x04step\x12\x18\n" +
+	"\aoutcome\x18\x03 \x01(\tR\aoutcome\x12\x16\n" +
+	"\x06detail\x18\x04 \x01(\tR\x06detail\x12\x1a\n" +
+	"\bevidence\x18\x05 \x03(\tR\bevidence\x12\x17\n" +
+	"\anode_id\x18\x06 \x01(\tR\x06nodeId\x12(\n" +
+	"\x10recorded_at_unix\x18\a \x01(\x03R\x0erecordedAtUnix\"\x81\x04\n" +
+	"\fColonyUpdate\x12!\n" +
+	"\foperation_id\x18\x01 \x01(\tR\voperationId\x12$\n" +
+	"\x0eholder_node_id\x18\x02 \x01(\tR\fholderNodeId\x12-\n" +
+	"\x12holder_incarnation\x18\x03 \x01(\tR\x11holderIncarnation\x12\x1f\n" +
+	"\vfence_token\x18\x04 \x01(\x04R\n" +
+	"fenceToken\x12&\n" +
+	"\x0fgranted_at_unix\x18\x05 \x01(\x03R\rgrantedAtUnix\x12$\n" +
+	"\x0etarget_node_id\x18\x06 \x01(\tR\ftargetNodeId\x12\x12\n" +
+	"\x04step\x18\a \x01(\tR\x04step\x12\x16\n" +
+	"\x06active\x18\b \x01(\bR\x06active\x12\x18\n" +
+	"\aoutcome\x18\t \x01(\tR\aoutcome\x12\x16\n" +
+	"\x06detail\x18\n" +
+	" \x01(\tR\x06detail\x12&\n" +
+	"\x0fsettled_at_unix\x18\v \x01(\x03R\rsettledAtUnix\x12\x1a\n" +
+	"\btakeover\x18\f \x01(\bR\btakeover\x12@\n" +
+	"\x05steps\x18\x0e \x03(\v2*.apiary.internal.v1.ColonyUpdateStepRecordR\x05steps\x12&\n" +
+	"\x0fupdated_at_unix\x18\x0f \x01(\x03R\rupdatedAtUnix\"\xd5\x01\n" +
+	"\x13AcquireColonyUpdate\x12!\n" +
+	"\foperation_id\x18\x01 \x01(\tR\voperationId\x12$\n" +
+	"\x0eholder_node_id\x18\x02 \x01(\tR\fholderNodeId\x12-\n" +
+	"\x12holder_incarnation\x18\x03 \x01(\tR\x11holderIncarnation\x12*\n" +
+	"\x11requested_at_unix\x18\x04 \x01(\x03R\x0frequestedAtUnix\x12\x1a\n" +
+	"\btakeover\x18\x05 \x01(\bR\btakeover\"\xf1\x01\n" +
+	"\x13AdvanceColonyUpdate\x12;\n" +
+	"\x05fence\x18\x01 \x01(\v2%.apiary.internal.v1.ColonyUpdateFenceR\x05fence\x12\x12\n" +
+	"\x04step\x18\x02 \x01(\tR\x04step\x12$\n" +
+	"\x0etarget_node_id\x18\x03 \x01(\tR\ftargetNodeId\x12\x16\n" +
+	"\x06detail\x18\x04 \x01(\tR\x06detail\x12K\n" +
+	"\vstep_record\x18\x05 \x01(\v2*.apiary.internal.v1.ColonyUpdateStepRecordR\n" +
+	"stepRecord\"\xb0\x01\n" +
+	"\x13ReleaseColonyUpdate\x12;\n" +
+	"\x05fence\x18\x01 \x01(\v2%.apiary.internal.v1.ColonyUpdateFenceR\x05fence\x12\x18\n" +
+	"\aoutcome\x18\x02 \x01(\tR\aoutcome\x12\x16\n" +
+	"\x06detail\x18\x03 \x01(\tR\x06detail\x12*\n" +
+	"\x11completed_at_unix\x18\x04 \x01(\x03R\x0fcompletedAtUnix\"\xe9\x01\n" +
 	"\rCommandResult\x120\n" +
 	"\x02vm\x18\x01 \x01(\v2 .apiary.internal.v1.VMDefinitionR\x02vm\x12\x14\n" +
 	"\x05error\x18\x02 \x01(\tR\x05error\x126\n" +
 	"\x04jail\x18\x03 \x01(\v2\".apiary.internal.v1.JailDefinitionR\x04jail\x12X\n" +
-	"\x14pending_join_request\x18\x04 \x01(\v2&.apiary.internal.v1.PendingJoinRequestR\x12pendingJoinRequest\"\xca\r\n" +
+	"\x14pending_join_request\x18\x04 \x01(\v2&.apiary.internal.v1.PendingJoinRequestR\x12pendingJoinRequest\"\x8e\x0f\n" +
 	"\x10FSMSnapshotState\x12\x1d\n" +
 	"\n" +
 	"last_index\x18\x01 \x01(\x04R\tlastIndex\x12?\n" +
@@ -5037,7 +5849,8 @@ const file_api_internalpb_state_proto_rawDesc = "" +
 	"migrations\x18\n" +
 	" \x03(\v24.apiary.internal.v1.FSMSnapshotState.MigrationsEntryR\n" +
 	"migrations\x12k\n" +
-	"\x13migrations_by_guest\x18\v \x03(\v2;.apiary.internal.v1.FSMSnapshotState.MigrationsByGuestEntryR\x11migrationsByGuest\x1aX\n" +
+	"\x13migrations_by_guest\x18\v \x03(\v2;.apiary.internal.v1.FSMSnapshotState.MigrationsByGuestEntryR\x11migrationsByGuest\x12^\n" +
+	"\x0ecolony_updates\x18\f \x03(\v27.apiary.internal.v1.FSMSnapshotState.ColonyUpdatesEntryR\rcolonyUpdates\x1aX\n" +
 	"\bVmsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x126\n" +
 	"\x05value\x18\x02 \x01(\v2 .apiary.internal.v1.VMDefinitionR\x05value:\x028\x01\x1ab\n" +
@@ -5065,7 +5878,10 @@ const file_api_internalpb_state_proto_rawDesc = "" +
 	"\x05value\x18\x02 \x01(\v2\".apiary.internal.v1.GuestMigrationR\x05value:\x028\x01\x1aD\n" +
 	"\x16MigrationsByGuestEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\xe3\x01\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\x1ab\n" +
+	"\x12ColonyUpdatesEntry\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x126\n" +
+	"\x05value\x18\x02 \x01(\v2 .apiary.internal.v1.ColonyUpdateR\x05value:\x028\x01\"\xe3\x01\n" +
 	"\rConfigArchive\x12%\n" +
 	"\x0eformat_version\x18\x01 \x01(\rR\rformatVersion\x12#\n" +
 	"\rexported_unix\x18\x02 \x01(\x03R\fexportedUnix\x12\x17\n" +
@@ -5119,7 +5935,7 @@ func file_api_internalpb_state_proto_rawDescGZIP() []byte {
 }
 
 var file_api_internalpb_state_proto_enumTypes = make([]protoimpl.EnumInfo, 5)
-var file_api_internalpb_state_proto_msgTypes = make([]protoimpl.MessageInfo, 54)
+var file_api_internalpb_state_proto_msgTypes = make([]protoimpl.MessageInfo, 61)
 var file_api_internalpb_state_proto_goTypes = []any{
 	(VMState)(0),                      // 0: apiary.internal.v1.VMState
 	(VMPhase)(0),                      // 1: apiary.internal.v1.VMPhase
@@ -5168,18 +5984,25 @@ var file_api_internalpb_state_proto_goTypes = []any{
 	(*RestartRecord)(nil),             // 44: apiary.internal.v1.RestartRecord
 	(*AcquireRestartLease)(nil),       // 45: apiary.internal.v1.AcquireRestartLease
 	(*RecordRestartCompleted)(nil),    // 46: apiary.internal.v1.RecordRestartCompleted
-	(*CommandResult)(nil),             // 47: apiary.internal.v1.CommandResult
-	(*FSMSnapshotState)(nil),          // 48: apiary.internal.v1.FSMSnapshotState
-	(*ConfigArchive)(nil),             // 49: apiary.internal.v1.ConfigArchive
-	nil,                               // 50: apiary.internal.v1.FSMSnapshotState.VmsEntry
-	nil,                               // 51: apiary.internal.v1.FSMSnapshotState.NetworksEntry
-	nil,                               // 52: apiary.internal.v1.FSMSnapshotState.ApiKeysEntry
-	nil,                               // 53: apiary.internal.v1.FSMSnapshotState.JailsEntry
-	nil,                               // 54: apiary.internal.v1.FSMSnapshotState.PendingJoinRequestsEntry
-	nil,                               // 55: apiary.internal.v1.FSMSnapshotState.RestartLeasesEntry
-	nil,                               // 56: apiary.internal.v1.FSMSnapshotState.RestartRecordsEntry
-	nil,                               // 57: apiary.internal.v1.FSMSnapshotState.MigrationsEntry
-	nil,                               // 58: apiary.internal.v1.FSMSnapshotState.MigrationsByGuestEntry
+	(*ColonyUpdateFence)(nil),         // 47: apiary.internal.v1.ColonyUpdateFence
+	(*ColonyUpdateStepRecord)(nil),    // 48: apiary.internal.v1.ColonyUpdateStepRecord
+	(*ColonyUpdate)(nil),              // 49: apiary.internal.v1.ColonyUpdate
+	(*AcquireColonyUpdate)(nil),       // 50: apiary.internal.v1.AcquireColonyUpdate
+	(*AdvanceColonyUpdate)(nil),       // 51: apiary.internal.v1.AdvanceColonyUpdate
+	(*ReleaseColonyUpdate)(nil),       // 52: apiary.internal.v1.ReleaseColonyUpdate
+	(*CommandResult)(nil),             // 53: apiary.internal.v1.CommandResult
+	(*FSMSnapshotState)(nil),          // 54: apiary.internal.v1.FSMSnapshotState
+	(*ConfigArchive)(nil),             // 55: apiary.internal.v1.ConfigArchive
+	nil,                               // 56: apiary.internal.v1.FSMSnapshotState.VmsEntry
+	nil,                               // 57: apiary.internal.v1.FSMSnapshotState.NetworksEntry
+	nil,                               // 58: apiary.internal.v1.FSMSnapshotState.ApiKeysEntry
+	nil,                               // 59: apiary.internal.v1.FSMSnapshotState.JailsEntry
+	nil,                               // 60: apiary.internal.v1.FSMSnapshotState.PendingJoinRequestsEntry
+	nil,                               // 61: apiary.internal.v1.FSMSnapshotState.RestartLeasesEntry
+	nil,                               // 62: apiary.internal.v1.FSMSnapshotState.RestartRecordsEntry
+	nil,                               // 63: apiary.internal.v1.FSMSnapshotState.MigrationsEntry
+	nil,                               // 64: apiary.internal.v1.FSMSnapshotState.MigrationsByGuestEntry
+	nil,                               // 65: apiary.internal.v1.FSMSnapshotState.ColonyUpdatesEntry
 }
 var file_api_internalpb_state_proto_depIdxs = []int32{
 	0,  // 0: apiary.internal.v1.VMDefinition.desired_state:type_name -> apiary.internal.v1.VMState
@@ -5218,46 +6041,56 @@ var file_api_internalpb_state_proto_depIdxs = []int32{
 	34, // 33: apiary.internal.v1.Command.start_guest_migration:type_name -> apiary.internal.v1.StartGuestMigration
 	35, // 34: apiary.internal.v1.Command.update_guest_migration_phase:type_name -> apiary.internal.v1.UpdateGuestMigrationPhase
 	36, // 35: apiary.internal.v1.Command.finish_guest_migration:type_name -> apiary.internal.v1.FinishGuestMigration
-	10, // 36: apiary.internal.v1.CreateAPIKey.key:type_name -> apiary.internal.v1.ApiKey
-	8,  // 37: apiary.internal.v1.CreateNetwork.network:type_name -> apiary.internal.v1.NetworkDefinition
-	5,  // 38: apiary.internal.v1.CreateVM.vm:type_name -> apiary.internal.v1.VMDefinition
-	5,  // 39: apiary.internal.v1.UpdateVM.vm:type_name -> apiary.internal.v1.VMDefinition
-	1,  // 40: apiary.internal.v1.UpdateVMPhase.phase:type_name -> apiary.internal.v1.VMPhase
-	0,  // 41: apiary.internal.v1.SetVMDesiredState.desired_state:type_name -> apiary.internal.v1.VMState
-	7,  // 42: apiary.internal.v1.SetVMFirewallRules.firewall_rules:type_name -> apiary.internal.v1.FirewallRule
-	6,  // 43: apiary.internal.v1.CreateJail.jail:type_name -> apiary.internal.v1.JailDefinition
-	6,  // 44: apiary.internal.v1.UpdateJail.jail:type_name -> apiary.internal.v1.JailDefinition
-	3,  // 45: apiary.internal.v1.UpdateJailPhase.phase:type_name -> apiary.internal.v1.JailPhase
-	2,  // 46: apiary.internal.v1.SetJailDesiredState.desired_state:type_name -> apiary.internal.v1.JailState
-	32, // 47: apiary.internal.v1.GuestMigration.evidence:type_name -> apiary.internal.v1.MigrationEvidence
-	32, // 48: apiary.internal.v1.FinishGuestMigration.evidence:type_name -> apiary.internal.v1.MigrationEvidence
-	4,  // 49: apiary.internal.v1.PendingJoinRequest.status:type_name -> apiary.internal.v1.JoinRequestStatus
-	37, // 50: apiary.internal.v1.CreatePendingJoinRequest.request:type_name -> apiary.internal.v1.PendingJoinRequest
-	5,  // 51: apiary.internal.v1.CommandResult.vm:type_name -> apiary.internal.v1.VMDefinition
-	6,  // 52: apiary.internal.v1.CommandResult.jail:type_name -> apiary.internal.v1.JailDefinition
-	37, // 53: apiary.internal.v1.CommandResult.pending_join_request:type_name -> apiary.internal.v1.PendingJoinRequest
-	50, // 54: apiary.internal.v1.FSMSnapshotState.vms:type_name -> apiary.internal.v1.FSMSnapshotState.VmsEntry
-	51, // 55: apiary.internal.v1.FSMSnapshotState.networks:type_name -> apiary.internal.v1.FSMSnapshotState.NetworksEntry
-	52, // 56: apiary.internal.v1.FSMSnapshotState.api_keys:type_name -> apiary.internal.v1.FSMSnapshotState.ApiKeysEntry
-	53, // 57: apiary.internal.v1.FSMSnapshotState.jails:type_name -> apiary.internal.v1.FSMSnapshotState.JailsEntry
-	54, // 58: apiary.internal.v1.FSMSnapshotState.pending_join_requests:type_name -> apiary.internal.v1.FSMSnapshotState.PendingJoinRequestsEntry
-	55, // 59: apiary.internal.v1.FSMSnapshotState.restart_leases:type_name -> apiary.internal.v1.FSMSnapshotState.RestartLeasesEntry
-	56, // 60: apiary.internal.v1.FSMSnapshotState.restart_records:type_name -> apiary.internal.v1.FSMSnapshotState.RestartRecordsEntry
-	57, // 61: apiary.internal.v1.FSMSnapshotState.migrations:type_name -> apiary.internal.v1.FSMSnapshotState.MigrationsEntry
-	58, // 62: apiary.internal.v1.FSMSnapshotState.migrations_by_guest:type_name -> apiary.internal.v1.FSMSnapshotState.MigrationsByGuestEntry
-	5,  // 63: apiary.internal.v1.FSMSnapshotState.VmsEntry.value:type_name -> apiary.internal.v1.VMDefinition
-	8,  // 64: apiary.internal.v1.FSMSnapshotState.NetworksEntry.value:type_name -> apiary.internal.v1.NetworkDefinition
-	10, // 65: apiary.internal.v1.FSMSnapshotState.ApiKeysEntry.value:type_name -> apiary.internal.v1.ApiKey
-	6,  // 66: apiary.internal.v1.FSMSnapshotState.JailsEntry.value:type_name -> apiary.internal.v1.JailDefinition
-	37, // 67: apiary.internal.v1.FSMSnapshotState.PendingJoinRequestsEntry.value:type_name -> apiary.internal.v1.PendingJoinRequest
-	43, // 68: apiary.internal.v1.FSMSnapshotState.RestartLeasesEntry.value:type_name -> apiary.internal.v1.RestartLease
-	44, // 69: apiary.internal.v1.FSMSnapshotState.RestartRecordsEntry.value:type_name -> apiary.internal.v1.RestartRecord
-	33, // 70: apiary.internal.v1.FSMSnapshotState.MigrationsEntry.value:type_name -> apiary.internal.v1.GuestMigration
-	71, // [71:71] is the sub-list for method output_type
-	71, // [71:71] is the sub-list for method input_type
-	71, // [71:71] is the sub-list for extension type_name
-	71, // [71:71] is the sub-list for extension extendee
-	0,  // [0:71] is the sub-list for field type_name
+	50, // 36: apiary.internal.v1.Command.acquire_colony_update:type_name -> apiary.internal.v1.AcquireColonyUpdate
+	51, // 37: apiary.internal.v1.Command.advance_colony_update:type_name -> apiary.internal.v1.AdvanceColonyUpdate
+	52, // 38: apiary.internal.v1.Command.release_colony_update:type_name -> apiary.internal.v1.ReleaseColonyUpdate
+	10, // 39: apiary.internal.v1.CreateAPIKey.key:type_name -> apiary.internal.v1.ApiKey
+	8,  // 40: apiary.internal.v1.CreateNetwork.network:type_name -> apiary.internal.v1.NetworkDefinition
+	5,  // 41: apiary.internal.v1.CreateVM.vm:type_name -> apiary.internal.v1.VMDefinition
+	5,  // 42: apiary.internal.v1.UpdateVM.vm:type_name -> apiary.internal.v1.VMDefinition
+	1,  // 43: apiary.internal.v1.UpdateVMPhase.phase:type_name -> apiary.internal.v1.VMPhase
+	0,  // 44: apiary.internal.v1.SetVMDesiredState.desired_state:type_name -> apiary.internal.v1.VMState
+	7,  // 45: apiary.internal.v1.SetVMFirewallRules.firewall_rules:type_name -> apiary.internal.v1.FirewallRule
+	6,  // 46: apiary.internal.v1.CreateJail.jail:type_name -> apiary.internal.v1.JailDefinition
+	6,  // 47: apiary.internal.v1.UpdateJail.jail:type_name -> apiary.internal.v1.JailDefinition
+	3,  // 48: apiary.internal.v1.UpdateJailPhase.phase:type_name -> apiary.internal.v1.JailPhase
+	2,  // 49: apiary.internal.v1.SetJailDesiredState.desired_state:type_name -> apiary.internal.v1.JailState
+	32, // 50: apiary.internal.v1.GuestMigration.evidence:type_name -> apiary.internal.v1.MigrationEvidence
+	32, // 51: apiary.internal.v1.FinishGuestMigration.evidence:type_name -> apiary.internal.v1.MigrationEvidence
+	4,  // 52: apiary.internal.v1.PendingJoinRequest.status:type_name -> apiary.internal.v1.JoinRequestStatus
+	37, // 53: apiary.internal.v1.CreatePendingJoinRequest.request:type_name -> apiary.internal.v1.PendingJoinRequest
+	47, // 54: apiary.internal.v1.AcquireRestartLease.colony_update_fence:type_name -> apiary.internal.v1.ColonyUpdateFence
+	48, // 55: apiary.internal.v1.ColonyUpdate.steps:type_name -> apiary.internal.v1.ColonyUpdateStepRecord
+	47, // 56: apiary.internal.v1.AdvanceColonyUpdate.fence:type_name -> apiary.internal.v1.ColonyUpdateFence
+	48, // 57: apiary.internal.v1.AdvanceColonyUpdate.step_record:type_name -> apiary.internal.v1.ColonyUpdateStepRecord
+	47, // 58: apiary.internal.v1.ReleaseColonyUpdate.fence:type_name -> apiary.internal.v1.ColonyUpdateFence
+	5,  // 59: apiary.internal.v1.CommandResult.vm:type_name -> apiary.internal.v1.VMDefinition
+	6,  // 60: apiary.internal.v1.CommandResult.jail:type_name -> apiary.internal.v1.JailDefinition
+	37, // 61: apiary.internal.v1.CommandResult.pending_join_request:type_name -> apiary.internal.v1.PendingJoinRequest
+	56, // 62: apiary.internal.v1.FSMSnapshotState.vms:type_name -> apiary.internal.v1.FSMSnapshotState.VmsEntry
+	57, // 63: apiary.internal.v1.FSMSnapshotState.networks:type_name -> apiary.internal.v1.FSMSnapshotState.NetworksEntry
+	58, // 64: apiary.internal.v1.FSMSnapshotState.api_keys:type_name -> apiary.internal.v1.FSMSnapshotState.ApiKeysEntry
+	59, // 65: apiary.internal.v1.FSMSnapshotState.jails:type_name -> apiary.internal.v1.FSMSnapshotState.JailsEntry
+	60, // 66: apiary.internal.v1.FSMSnapshotState.pending_join_requests:type_name -> apiary.internal.v1.FSMSnapshotState.PendingJoinRequestsEntry
+	61, // 67: apiary.internal.v1.FSMSnapshotState.restart_leases:type_name -> apiary.internal.v1.FSMSnapshotState.RestartLeasesEntry
+	62, // 68: apiary.internal.v1.FSMSnapshotState.restart_records:type_name -> apiary.internal.v1.FSMSnapshotState.RestartRecordsEntry
+	63, // 69: apiary.internal.v1.FSMSnapshotState.migrations:type_name -> apiary.internal.v1.FSMSnapshotState.MigrationsEntry
+	64, // 70: apiary.internal.v1.FSMSnapshotState.migrations_by_guest:type_name -> apiary.internal.v1.FSMSnapshotState.MigrationsByGuestEntry
+	65, // 71: apiary.internal.v1.FSMSnapshotState.colony_updates:type_name -> apiary.internal.v1.FSMSnapshotState.ColonyUpdatesEntry
+	5,  // 72: apiary.internal.v1.FSMSnapshotState.VmsEntry.value:type_name -> apiary.internal.v1.VMDefinition
+	8,  // 73: apiary.internal.v1.FSMSnapshotState.NetworksEntry.value:type_name -> apiary.internal.v1.NetworkDefinition
+	10, // 74: apiary.internal.v1.FSMSnapshotState.ApiKeysEntry.value:type_name -> apiary.internal.v1.ApiKey
+	6,  // 75: apiary.internal.v1.FSMSnapshotState.JailsEntry.value:type_name -> apiary.internal.v1.JailDefinition
+	37, // 76: apiary.internal.v1.FSMSnapshotState.PendingJoinRequestsEntry.value:type_name -> apiary.internal.v1.PendingJoinRequest
+	43, // 77: apiary.internal.v1.FSMSnapshotState.RestartLeasesEntry.value:type_name -> apiary.internal.v1.RestartLease
+	44, // 78: apiary.internal.v1.FSMSnapshotState.RestartRecordsEntry.value:type_name -> apiary.internal.v1.RestartRecord
+	33, // 79: apiary.internal.v1.FSMSnapshotState.MigrationsEntry.value:type_name -> apiary.internal.v1.GuestMigration
+	49, // 80: apiary.internal.v1.FSMSnapshotState.ColonyUpdatesEntry.value:type_name -> apiary.internal.v1.ColonyUpdate
+	81, // [81:81] is the sub-list for method output_type
+	81, // [81:81] is the sub-list for method input_type
+	81, // [81:81] is the sub-list for extension type_name
+	81, // [81:81] is the sub-list for extension extendee
+	0,  // [0:81] is the sub-list for field type_name
 }
 
 func init() { file_api_internalpb_state_proto_init() }
@@ -5297,6 +6130,9 @@ func file_api_internalpb_state_proto_init() {
 		(*Command_StartGuestMigration)(nil),
 		(*Command_UpdateGuestMigrationPhase)(nil),
 		(*Command_FinishGuestMigration)(nil),
+		(*Command_AcquireColonyUpdate)(nil),
+		(*Command_AdvanceColonyUpdate)(nil),
+		(*Command_ReleaseColonyUpdate)(nil),
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
@@ -5304,7 +6140,7 @@ func file_api_internalpb_state_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_api_internalpb_state_proto_rawDesc), len(file_api_internalpb_state_proto_rawDesc)),
 			NumEnums:      5,
-			NumMessages:   54,
+			NumMessages:   61,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

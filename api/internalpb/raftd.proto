@@ -127,6 +127,21 @@ service RaftInternal {
   // answer from any node's own local copy.
   rpc GetRestartLeaseStateLocal(GetRestartLeaseStateRequest) returns (GetRestartLeaseStateResponse);
 
+  // GetColonyUpdateStateLocal is the read side of ADR-0145's colony-wide
+  // controlled-update single-flight. It is deliberately named ...Local and
+  // deliberately NOT leader-only, for the same GetRestartLeaseStateLocal
+  // reason: the state is already raft-replicated, so any node can answer
+  // for itself.
+  //
+  // "Can answer for itself" is not "is authoritative", and the response
+  // says which one it is. A follower's copy of an applied record can lag
+  // the leader's by one commit, so authoritative is false there and
+  // applied_index travels beside the record. Nothing in the enforcement
+  // path reads this RPC - every grant, advance and release goes through
+  // Apply, which is only ever decided by committed consensus - so a
+  // stale local read can mislead a human but can never grant anything.
+  rpc GetColonyUpdateStateLocal(GetColonyUpdateStateRequest) returns (GetColonyUpdateStateResponse);
+
   // StepAsideForRestartLocal is the confirmed leadership step-aside
   // ADR-0145's controlled Colony update performs before a Comb's services
   // are restarted. It is deliberately named ...Local and deliberately NOT
@@ -323,6 +338,32 @@ message GetRestartLeaseStateResponse {
   // complete on this node's own view of replicated state.
   RestartRecord record = 2;
   string error = 3;
+}
+
+message GetColonyUpdateStateRequest {
+  // operation_id, when set, asks for one specific operation's record
+  // rather than the colony-wide answer. Empty asks "what is happening
+  // right now, and what has happened before".
+  string operation_id = 1;
+}
+
+message GetColonyUpdateStateResponse {
+  // active is the one in-flight operation, unset when nothing is running.
+  // Its presence IS the single-flight, as this node can see it.
+  ColonyUpdate active = 1;
+  // history is every settled operation, newest first, capped by the FSM
+  // (see internal/raft/colonyupdate.go's own cap constant for why an
+  // unbounded one would be a problem in replicated state).
+  repeated ColonyUpdate history = 2;
+  // authoritative is true only when this node is the raft leader, and
+  // therefore only when the answer above is this node's own most recent
+  // committed state rather than a copy that may still be catching up.
+  bool authoritative = 3;
+  // applied_index is this node's own applied index at the moment of the
+  // read, so a consumer can reason about how fresh the answer is even
+  // when authoritative is true.
+  uint64 applied_index = 4;
+  string error = 5;
 }
 
 message StepAsideForRestartRequest {

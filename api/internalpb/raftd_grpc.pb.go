@@ -38,6 +38,7 @@ const (
 	RaftInternal_GetPendingJoinRequestLocal_FullMethodName   = "/apiary.internal.v1.RaftInternal/GetPendingJoinRequestLocal"
 	RaftInternal_ListPendingJoinRequestsLocal_FullMethodName = "/apiary.internal.v1.RaftInternal/ListPendingJoinRequestsLocal"
 	RaftInternal_GetRestartLeaseStateLocal_FullMethodName    = "/apiary.internal.v1.RaftInternal/GetRestartLeaseStateLocal"
+	RaftInternal_GetColonyUpdateStateLocal_FullMethodName    = "/apiary.internal.v1.RaftInternal/GetColonyUpdateStateLocal"
 	RaftInternal_StepAsideForRestartLocal_FullMethodName     = "/apiary.internal.v1.RaftInternal/StepAsideForRestartLocal"
 )
 
@@ -151,6 +152,20 @@ type RaftInternalClient interface {
 	// this is a plain read of already-replicated FSM state, safe to
 	// answer from any node's own local copy.
 	GetRestartLeaseStateLocal(ctx context.Context, in *GetRestartLeaseStateRequest, opts ...grpc.CallOption) (*GetRestartLeaseStateResponse, error)
+	// GetColonyUpdateStateLocal is the read side of ADR-0145's colony-wide
+	// controlled-update single-flight. It is deliberately named ...Local and
+	// deliberately NOT leader-only, for the same GetRestartLeaseStateLocal
+	// reason: the state is already raft-replicated, so any node can answer
+	// for itself.
+	//
+	// "Can answer for itself" is not "is authoritative", and the response
+	// says which one it is. A follower's copy of an applied record can lag
+	// the leader's by one commit, so authoritative is false there and
+	// applied_index travels beside the record. Nothing in the enforcement
+	// path reads this RPC - every grant, advance and release goes through
+	// Apply, which is only ever decided by committed consensus - so a
+	// stale local read can mislead a human but can never grant anything.
+	GetColonyUpdateStateLocal(ctx context.Context, in *GetColonyUpdateStateRequest, opts ...grpc.CallOption) (*GetColonyUpdateStateResponse, error)
 	// StepAsideForRestartLocal is the confirmed leadership step-aside
 	// ADR-0145's controlled Colony update performs before a Comb's services
 	// are restarted. It is deliberately named ...Local and deliberately NOT
@@ -379,6 +394,16 @@ func (c *raftInternalClient) GetRestartLeaseStateLocal(ctx context.Context, in *
 	return out, nil
 }
 
+func (c *raftInternalClient) GetColonyUpdateStateLocal(ctx context.Context, in *GetColonyUpdateStateRequest, opts ...grpc.CallOption) (*GetColonyUpdateStateResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetColonyUpdateStateResponse)
+	err := c.cc.Invoke(ctx, RaftInternal_GetColonyUpdateStateLocal_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *raftInternalClient) StepAsideForRestartLocal(ctx context.Context, in *StepAsideForRestartRequest, opts ...grpc.CallOption) (*StepAsideForRestartResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(StepAsideForRestartResponse)
@@ -499,6 +524,20 @@ type RaftInternalServer interface {
 	// this is a plain read of already-replicated FSM state, safe to
 	// answer from any node's own local copy.
 	GetRestartLeaseStateLocal(context.Context, *GetRestartLeaseStateRequest) (*GetRestartLeaseStateResponse, error)
+	// GetColonyUpdateStateLocal is the read side of ADR-0145's colony-wide
+	// controlled-update single-flight. It is deliberately named ...Local and
+	// deliberately NOT leader-only, for the same GetRestartLeaseStateLocal
+	// reason: the state is already raft-replicated, so any node can answer
+	// for itself.
+	//
+	// "Can answer for itself" is not "is authoritative", and the response
+	// says which one it is. A follower's copy of an applied record can lag
+	// the leader's by one commit, so authoritative is false there and
+	// applied_index travels beside the record. Nothing in the enforcement
+	// path reads this RPC - every grant, advance and release goes through
+	// Apply, which is only ever decided by committed consensus - so a
+	// stale local read can mislead a human but can never grant anything.
+	GetColonyUpdateStateLocal(context.Context, *GetColonyUpdateStateRequest) (*GetColonyUpdateStateResponse, error)
 	// StepAsideForRestartLocal is the confirmed leadership step-aside
 	// ADR-0145's controlled Colony update performs before a Comb's services
 	// are restarted. It is deliberately named ...Local and deliberately NOT
@@ -593,6 +632,9 @@ func (UnimplementedRaftInternalServer) ListPendingJoinRequestsLocal(context.Cont
 }
 func (UnimplementedRaftInternalServer) GetRestartLeaseStateLocal(context.Context, *GetRestartLeaseStateRequest) (*GetRestartLeaseStateResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetRestartLeaseStateLocal not implemented")
+}
+func (UnimplementedRaftInternalServer) GetColonyUpdateStateLocal(context.Context, *GetColonyUpdateStateRequest) (*GetColonyUpdateStateResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetColonyUpdateStateLocal not implemented")
 }
 func (UnimplementedRaftInternalServer) StepAsideForRestartLocal(context.Context, *StepAsideForRestartRequest) (*StepAsideForRestartResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method StepAsideForRestartLocal not implemented")
@@ -960,6 +1002,24 @@ func _RaftInternal_GetRestartLeaseStateLocal_Handler(srv interface{}, ctx contex
 	return interceptor(ctx, in, info, handler)
 }
 
+func _RaftInternal_GetColonyUpdateStateLocal_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetColonyUpdateStateRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(RaftInternalServer).GetColonyUpdateStateLocal(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: RaftInternal_GetColonyUpdateStateLocal_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(RaftInternalServer).GetColonyUpdateStateLocal(ctx, req.(*GetColonyUpdateStateRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _RaftInternal_StepAsideForRestartLocal_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(StepAsideForRestartRequest)
 	if err := dec(in); err != nil {
@@ -1060,6 +1120,10 @@ var RaftInternal_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "GetRestartLeaseStateLocal",
 			Handler:    _RaftInternal_GetRestartLeaseStateLocal_Handler,
+		},
+		{
+			MethodName: "GetColonyUpdateStateLocal",
+			Handler:    _RaftInternal_GetColonyUpdateStateLocal_Handler,
 		},
 		{
 			MethodName: "StepAsideForRestartLocal",

@@ -497,6 +497,21 @@ message Command {
     StartGuestMigration start_guest_migration = 29;
     UpdateGuestMigrationPhase update_guest_migration_phase = 30;
     FinishGuestMigration finish_guest_migration = 31;
+
+    // AcquireColonyUpdate/AdvanceColonyUpdate/ReleaseColonyUpdate back
+    // the colony-wide single-flight of ADR-0145's controlled update:
+    // at most ONE controlled update operation may exist in the Colony
+    // at a time, enforced here rather than by any in-process mutex,
+    // because the guarantee has to survive the managerd that is
+    // coordinating it being restarted, and because it has to hold
+    // across coordinators on different Combs. Raft's own serialized
+    // log-apply order is the serialization point, exactly as
+    // AcquireRestartLease above already is for the per-service
+    // restart lease (ADR-0103) - see ColonyUpdate's own doc comment
+    // and internal/raft/colonyupdate.go for the full argument.
+    AcquireColonyUpdate acquire_colony_update = 32;
+    AdvanceColonyUpdate advance_colony_update = 33;
+    ReleaseColonyUpdate release_colony_update = 34;
   }
 }
 
@@ -949,6 +964,23 @@ message AcquireRestartLease {
   // prior lease, or a recent voter RestartRecord within cooldown) - an
   // explicit, logged operator override, never silent.
   bool force = 6;
+
+  // colony_update_fence, when set, binds this lease to one controlled-
+  // update operation (ADR-0145). The FSM then requires an ACTIVE
+  // ColonyUpdate whose four fields match this one exactly, and refuses
+  // otherwise - which is the fence: a coordinator whose operation was
+  // taken over, or released, can no longer acquire the restart leases
+  // its own sweep depends on, no matter how many Combs it still has
+  // queued. An UNSET fence preserves today's behaviour exactly, so the
+  // ordinary operator-driven per-Comb restart path (the Machine page's
+  // restart button) is unaffected by the existence of this field.
+  //
+  // Deliberately empty-is-unfenced rather than required. Requiring it
+  // would break every existing RestartNodeService caller, and the
+  // property being bought is not "every restart is part of an update" -
+  // it is "a coordinator that has lost its update cannot keep
+  // restarting Combs on the strength of a stale record".
+  ColonyUpdateFence colony_update_fence = 7;
 }
 
 // RecordRestartCompleted is submitted by the restarted node's own next
@@ -967,6 +999,194 @@ message RecordRestartCompleted {
   // unconditionally regardless of whether the lease matched, since a
   // real restart really did complete either way.
   uint64 lease_id = 4;
+}
+
+// ColonyUpdateFence is the four-part capability token a controlled-update
+// coordinator must present to keep acting. All four parts are required
+// and compared for exact equality:
+//
+//   - operation_id names which operation the caller believes it holds;
+//   - holder_node_id names the Comb that was granted it;
+//   - holder_incarnation distinguishes one managerd process from the next
+//     on that same Comb, so a replacement process can resume and a
+//     resurrected predecessor cannot;
+//   - fence_token is the raft log index of the granting AcquireColonyUpdate,
+//     which is unique and monotonic for free, exactly as RestartLease's
+//     lease_id is (ADR-0103).
+//
+// The fence_token is the part that makes failover safe. A takeover is a
+// NEW grant at a strictly higher index, so every outstanding token issued
+// before it is stale the instant the takeover commits - on every replica,
+// and therefore across a managerd process death, a coordinator move, and a
+// leader change alike. holder_incarnation alone could not do this: two
+// managerd processes on the same Comb would share a node_id, and a node
+// cannot be renamed to express "this is the second one".
+//
+// Deliberately no TTL, matching ADR-0103's RestartLease and ADR-0145's own
+// constraint. A lease that expires on a timer can lapse while the
+// underlying operation is still genuinely mid-flight, which is precisely
+// the window this exists to close. Recovery from a lost or wedged
+// coordinator is an EXPLICIT takeover (AcquireColonyUpdate.takeover),
+// which is safe in the conservative direction: a wrongful takeover can at
+// worst abandon an update, never cause two of them.
+message ColonyUpdateFence {
+  string operation_id = 1;
+  string holder_node_id = 2;
+  uint64 fence_token = 3;
+  string holder_incarnation = 4;
+}
+
+// ColonyUpdateStepRecord is one durable per-step outcome of a controlled
+// update, appended in order to ColonyUpdate.steps.
+//
+// The outcome vocabulary is internal/restartplan's, deliberately and
+// verbatim: "confirmed", "failed", "blocked", "unobserved", "unverified".
+// "Could not check" has its own names here for the same reason it has
+// them there (ADR-0052's own three-state convention) - a step that was
+// attempted and whose result never came back is NOT a failure and NOT a
+// success, and collapsing the two is how a node that vanished ends up
+// reported as one that came back.
+//
+// As in restartplan.Result.Validate, the two positive outcomes must cite
+// the evidence that makes them positive, and the FSM refuses to record a
+// step that does not. An unbacked "confirmed" is precisely the bug this
+// shape exists to make unrepresentable.
+message ColonyUpdateStepRecord {
+  // index is the ordinal position of this step in the operation's
+  // sequence, starting at 0. It is the record's own append guard: steps
+  // must be recorded in order, and a re-record of an existing position
+  // is accepted only as an exact replay (see internal/raft/colonyupdate.go).
+  uint32 index = 1;
+  // step names the phase reached, using internal/restartplan's own Step
+  // constants (step-aside, gather-facts, evaluate, reserve-lease,
+  // record-pending, issue-restart, await-confirmation, record-outcome)
+  // for the per-Comb steps, and whatever the coordinator names for
+  // colony-wide ones.
+  string step = 2;
+  // outcome is one of restartplan's Outcome constants. Empty is never
+  // valid: a step that has not happened is not yet a record, and a step
+  // whose result is unknown has its own two names.
+  string outcome = 3;
+  // detail is operator-readable prose, never empty.
+  string detail = 4;
+  // evidence is the confirmation backing the outcome - the lines
+  // restartplan.Result carries, one per observation actually made.
+  repeated string evidence = 5;
+  // node_id is the Comb this step acted on, empty for a colony-wide step.
+  string node_id = 6;
+  // recorded_at_unix is authored by whichever node applies the command
+  // (the leader), the same determinism reasoning as RestartLease's
+  // requested_at_unix - never accepted from the caller.
+  int64 recorded_at_unix = 7;
+}
+
+// ColonyUpdate is the durable record of one controlled-update operation,
+// keyed by operation_id in FSMSnapshotState.colony_updates.
+//
+// It is BOTH the lock and the progress record, deliberately, and that is
+// the whole design:
+//
+//   - At most one entry has active = true. That is the colony-wide
+//     single-flight, enforced by raft's serialized log-apply order.
+//   - An entry is never deleted on settle. A replacement managerd asking
+//     "what is the state of the controlled update?" has to be able to
+//     find both the one in flight and the one that just finished, and
+//     "has this operation id ever been used?" is answerable only from
+//     retained history.
+//
+// It lives in raft rather than on the coordinator's disk (see ADR-0145's
+// first open question, which asked exactly this) because splitting the
+// two would let them disagree: the lock must be replicated to be a
+// colony-wide guarantee, and a progress file that is not the lock is a
+// progress file a second managerd cannot see. internal/restartplan's
+// file-backed PendingStore/ResultStore remain the right home for the
+// node-local, single-writer, single-reader trace of one Comb's own
+// restart, which is a different thing with a different failure mode.
+message ColonyUpdate {
+  string operation_id = 1;
+  string holder_node_id = 2;
+  string holder_incarnation = 3;
+  // fence_token is the raft log index of the AcquireColonyUpdate that
+  // most recently granted this record. See ColonyUpdateFence.
+  uint64 fence_token = 4;
+  int64 granted_at_unix = 5;
+  // target_node_id is the Comb being worked on right now, empty between
+  // steps. It is here rather than inferred from the step records so a
+  // reader gets the answer in one read.
+  string target_node_id = 6;
+  // step is the most recent step entered.
+  string step = 7;
+  // active is the single-flight itself: false means this operation has
+  // been settled and is history.
+  bool active = 8;
+  // outcome is empty while active, and otherwise one of restartplan's
+  // Outcome constants - the same three-plus-way vocabulary, for the same
+  // reason.
+  string outcome = 9;
+  string detail = 10;
+  int64 settled_at_unix = 11;
+  // takeover is true iff this grant was taken over from a different
+  // holder without its explicit acknowledgment. It is recorded rather
+  // than treated as exceptional because a takeover is a normal part of
+  // coordinator failover, and an operator reading a stuck update needs
+  // to know one happened.
+  bool takeover = 12;
+  // steps are the per-step outcomes, in order, each with its own
+  // evidence.
+  repeated ColonyUpdateStepRecord steps = 14;
+  // updated_at_unix is the leader-authored time of the most recent
+  // accepted advance.
+  int64 updated_at_unix = 15;
+}
+
+// AcquireColonyUpdate claims the colony-wide single-flight. Submitted only
+// by the current Raft leader (internal/manager's handler forwards first),
+// so granted_at_unix and every refusal message are authored where the
+// decision is actually made rather than by whichever Comb received the
+// request.
+message AcquireColonyUpdate {
+  string operation_id = 1;
+  string holder_node_id = 2;
+  string holder_incarnation = 3;
+  int64 requested_at_unix = 4;
+  // takeover is the EXPLICIT, logged override for an operation already in
+  // progress. It is the only way a second coordinator can ever take over,
+  // and it is deliberately loud: no TTL, no silent expiry, no automatic
+  // handover on a timeout. A wrongful takeover stops an update; it can
+  // never start a second one alongside it, because the losing holder is
+  // fenced out of the restart-lease path by the higher fence_token.
+  bool takeover = 5;
+}
+
+// AdvanceColonyUpdate records durable progress on the operation the
+// caller still holds, and moves its current step/target forward. Every
+// field of the fence must match the active record exactly; anything else
+// is refused by name, which is what makes a resurrected or displaced
+// coordinator unable to keep going.
+message AdvanceColonyUpdate {
+  ColonyUpdateFence fence = 1;
+  string step = 2;
+  string target_node_id = 3;
+  string detail = 4;
+  // step_record, when set, is appended to the operation's own durable
+  // step history. An unset record still advances step/target, which is
+  // how a coordinator records "about to begin X" before X has an outcome.
+  ColonyUpdateStepRecord step_record = 5;
+}
+
+// ReleaseColonyUpdate settles the operation terminally, with the same
+// exact-fence requirement as AdvanceColonyUpdate. It does not DELETE the
+// record - a settled operation is history, and the answer to "what
+// happened to operation X" has to outlive the answer to "is anything
+// running".
+message ReleaseColonyUpdate {
+  ColonyUpdateFence fence = 1;
+  // outcome must be one of restartplan's terminal-or-unknown constants;
+  // an empty outcome is refused, because "the update finished" is a claim
+  // like any other.
+  string outcome = 2;
+  string detail = 3;
+  int64 completed_at_unix = 4;
 }
 
 // CommandResult is the FSM's response to Apply, echoed back through
@@ -1019,6 +1239,18 @@ message FSMSnapshotState {
   // fence findable in a single point read.
   map<string, GuestMigration> migrations = 10;
   map<string, string> migrations_by_guest = 11;
+
+  // colony_updates is the durable controlled-update record of ADR-0145:
+  // the colony-wide single-flight (at most one entry with active = true)
+  // and every settled operation's history, keyed by operation_id.
+  //
+  // Included in the snapshot for the same reason restart_leases is above
+  // - a raft snapshot restore, or a seeded recovery via raftd -restore,
+  // that silently dropped this would reopen the exact window it exists to
+  // close, and would do it invisibly. The digest (ADR-0143) is derived
+  // from this message's own descriptor, so it picks the new map up with
+  // no second list to forget.
+  map<string, ColonyUpdate> colony_updates = 12;
 }
 
 // ConfigArchive is the on-disk file format for raftd's -export/

@@ -81,6 +81,9 @@ func (s *Server) Apply(_ context.Context, req *internalpb.ApplyRequest) (*intern
 	if result.RestartRecord != nil {
 		payload = result.RestartRecord
 	}
+	if result.ColonyUpdate != nil {
+		payload = result.ColonyUpdate
+	}
 	resultBytes, err := proto.Marshal(payload)
 	if err != nil {
 		return &internalpb.ApplyResponse{Error: fmt.Sprintf("encoding result: %v", err)}, nil
@@ -232,6 +235,54 @@ func (s *Server) ListPendingJoinRequestsLocal(_ context.Context, _ *internalpb.L
 func (s *Server) GetRestartLeaseStateLocal(_ context.Context, req *internalpb.GetRestartLeaseStateRequest) (*internalpb.GetRestartLeaseStateResponse, error) {
 	lease, record := s.node.RestartLeaseStateLocal(req.GetService())
 	return &internalpb.GetRestartLeaseStateResponse{Lease: lease, Record: record}, nil
+}
+
+// GetColonyUpdateStateLocal implements internalpb.RaftInternalServer
+// (ADR-0145) - the read side of the controlled update's durable state.
+//
+// Deliberately not leader-only, on the same footing as
+// GetRestartLeaseStateLocal above. What differs is the honesty of the
+// answer rather than its availability: authoritative reports whether
+// this node is the leader, so a consumer is never handed a lagging
+// follower's copy while believing it is the leader's.
+//
+// It also never errors on "nothing is running". "No controlled update
+// is in progress" is the single most important answer this RPC gives -
+// it is what lets a coordinator decide to start one - so it is
+// active == nil, not an error. A caller that treated it as one would
+// have to guess, and guessing there is how two updates start.
+func (s *Server) GetColonyUpdateStateLocal(_ context.Context, req *internalpb.GetColonyUpdateStateRequest) (*internalpb.GetColonyUpdateStateResponse, error) {
+	status := s.node.Status()
+	resp := &internalpb.GetColonyUpdateStateResponse{AppliedIndex: status.AppliedIndex}
+
+	if id := req.GetOperationId(); id != "" {
+		// A read is served straight from the FSM rather than through the
+		// active/history split below, because an operation that is not
+		// running is, by construction, in the history.
+		rec, ok := s.node.fsm.ColonyUpdateByID(id)
+		if !ok {
+			// Not an error either. "This operation id is not one this
+			// colony has ever run" is an answer, and it is different from
+			// a transport failure in exactly the way that matters: a
+			// caller can start a NEW operation with that id, whereas a
+			// caller that could not read the state cannot do anything.
+			resp.Active = nil
+			return resp, nil
+		}
+		if rec.GetActive() {
+			resp.Active = rec
+		} else {
+			resp.History = []*internalpb.ColonyUpdate{rec}
+		}
+		resp.Authoritative = status.IsLeader
+		return resp, nil
+	}
+
+	active, history, authoritative := s.node.ColonyUpdateStateLocal()
+	resp.Active = active
+	resp.History = history
+	resp.Authoritative = authoritative
+	return resp, nil
 }
 
 // StepAsideForRestartLocal implements internalpb.RaftInternalServer

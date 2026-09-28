@@ -33,6 +33,7 @@ type FSMApplyResult struct {
 	PendingJoinRequest *internalpb.PendingJoinRequest
 	RestartLease       *internalpb.RestartLease
 	RestartRecord      *internalpb.RestartRecord
+	ColonyUpdate       *internalpb.ColonyUpdate
 	Error              string
 }
 
@@ -56,6 +57,15 @@ type FSM struct {
 	// comments in api/internalpb/state.proto.
 	restartLeases  map[string]*internalpb.RestartLease
 	restartRecords map[string]*internalpb.RestartRecord
+
+	// colonyUpdates is ADR-0145's colony-wide controlled-update
+	// single-flight AND its durable operation history, in one map keyed
+	// by operation id. At most one entry has active = true; settled
+	// entries are retained, bounded by maxSettledColonyUpdates - see
+	// internal/raft/colonyupdate.go for why the lock and the progress
+	// record are deliberately the same object rather than two things
+	// that could disagree.
+	colonyUpdates map[string]*internalpb.ColonyUpdate
 
 	// authEnabled is set permanently, forever, the first time any
 	// CreateAPIKey command ever succeeds - it never reverts to false
@@ -85,6 +95,7 @@ func NewFSM() *FSM {
 		pendingJoinRequests: make(map[string]*internalpb.PendingJoinRequest),
 		restartLeases:       make(map[string]*internalpb.RestartLease),
 		restartRecords:      make(map[string]*internalpb.RestartRecord),
+		colonyUpdates:       make(map[string]*internalpb.ColonyUpdate),
 	}
 	// Seed the digest of the empty state. No lock is taken because the
 	// FSM has not been handed to anyone yet; recomputeStateDigestLocked
@@ -173,6 +184,12 @@ func (f *FSM) Apply(log *raft.Log) interface{} {
 		return f.applyAcquireRestartLease(log.Index, op.AcquireRestartLease)
 	case *internalpb.Command_RecordRestartCompleted:
 		return f.applyRecordRestartCompleted(log.Index, op.RecordRestartCompleted)
+	case *internalpb.Command_AcquireColonyUpdate:
+		return f.applyAcquireColonyUpdate(log.Index, op.AcquireColonyUpdate)
+	case *internalpb.Command_AdvanceColonyUpdate:
+		return f.applyAdvanceColonyUpdate(log.Index, op.AdvanceColonyUpdate)
+	case *internalpb.Command_ReleaseColonyUpdate:
+		return f.applyReleaseColonyUpdate(log.Index, op.ReleaseColonyUpdate)
 	default:
 		return &FSMApplyResult{Index: log.Index, Error: "command has no op set"}
 	}
@@ -747,8 +764,41 @@ func (f *FSM) applyPurgeJoinRequest(index uint64, requestID string) *FSMApplyRes
 // this function never calls time.Now() or re-derives voter membership
 // itself, since every raft replica must reach the identical decision
 // from the identical command.
+//
+// ADR-0145's fence rides on this same command, deliberately, and this is
+// the load-bearing part of "a coordinator that has lost ownership can no
+// longer issue restarts". A ColonyUpdate record says who is running a
+// controlled update; without this check a displaced coordinator would
+// keep that record - correctly, it was the truth when it read it - and
+// could still acquire every per-Comb restart lease its sweep had queued,
+// which is the exact double-update the single-flight exists to prevent.
+// Checking it HERE, in the FSM, is what makes the fence survive process
+// death: the only thing that can invalidate a token is a committed
+// apply, and nothing local to any managerd can.
 func (f *FSM) applyAcquireRestartLease(index uint64, req *internalpb.AcquireRestartLease) *FSMApplyResult {
 	service := req.GetService()
+
+	// A fence, when present, must match the active operation EXACTLY.
+	// An empty fence is unconstrained and falls through - see
+	// AcquireRestartLease.colony_update_fence's own doc comment for why
+	// requiring one would break every existing operator-driven
+	// RestartNodeService caller.
+	//
+	// Note what force does and does not do here. A fence mismatch is
+	// NOT overridable, deliberately and for the same reason restartplan
+	// refuses to let Force rescue a failed step-aside: force
+	// acknowledges a KNOWN cost, and "you are not the coordinator
+	// anymore" is not a cost, it is the absence of permission. The
+	// consequence is that a takeover genuinely terminates the displaced
+	// coordinator rather than merely outranking it, which is what
+	// makes an explicit takeover safe enough to exist at all.
+	if fence := req.GetColonyUpdateFence(); fence.GetOperationId() != "" {
+		active := activeColonyUpdate(f.colonyUpdates)
+		if !fenceMatchesActive(fence, active) {
+			return &FSMApplyResult{Index: index, Error: fenceRefusal(
+				fmt.Sprintf("acquire the restart lease for %q on %q", service, req.GetNodeId()), fence, active)}
+		}
+	}
 
 	// An existing lease blocks unconditionally, regardless of age -
 	// deliberately no expiry check here. A time-based auto-clear was
@@ -831,6 +881,289 @@ func (f *FSM) applyRecordRestartCompleted(index uint64, req *internalpb.RecordRe
 	return &FSMApplyResult{Index: index, RestartRecord: record}
 }
 
+// applyAcquireColonyUpdate is the single-flight itself (ADR-0145): at
+// most one controlled update may exist in the Colony at a time.
+//
+// The exclusivity is raft's own serialized log-apply order and nothing
+// else - there is no lock anywhere in this file, and that is the entire
+// point. Two coordinators on two Combs, each having checked "is anything
+// running?" against its own possibly-stale view, still cannot both be
+// granted, because their two commands occupy two different positions in
+// one totally ordered log and this function is called once per position.
+// That is the same property ADR-0103 bought for the per-service restart
+// lease, and the same reasoning that killed the purely local-timestamp
+// design recorded there.
+//
+// Like applyAcquireRestartLease, every time-bearing field is authored by
+// the current leader immediately before submission and never read from
+// the request, so every replica reaches the identical decision from the
+// identical command.
+func (f *FSM) applyAcquireColonyUpdate(index uint64, req *internalpb.AcquireColonyUpdate) *FSMApplyResult {
+	if req.GetOperationId() == "" {
+		return &FSMApplyResult{Index: index, Error: "AcquireColonyUpdate: no operation id was given, so there is no operation to run and nothing a later reader could name"}
+	}
+	if req.GetHolderNodeId() == "" {
+		return &FSMApplyResult{Index: index, Error: "AcquireColonyUpdate: no holder node id was given, so the single-flight could not record who holds it"}
+	}
+	if req.GetHolderIncarnation() == "" {
+		// Not defensive padding. Without it a replacement managerd on the
+		// same Comb is indistinguishable from the predecessor it
+		// replaced, and the predecessor would keep a valid fence - which
+		// is precisely the resurrected-old-coordinator case the fence
+		// exists to defeat.
+		return &FSMApplyResult{Index: index, Error: "AcquireColonyUpdate: no holder incarnation was given, so a replacement managerd could not be told apart from the process it replaced"}
+	}
+
+	// Id reuse is a bug, not a re-acquire. A caller that wants to resume
+	// an operation already in flight must present its fence to
+	// Advance/Release, not to re-grant the id: re-granting would reset
+	// the fence token and silently un-fence whatever the old process
+	// still holds. A caller that wants to start a NEW operation must
+	// name a new id, which is what makes "has this operation ever run?"
+	// answerable from retained history.
+	if prior, used := f.colonyUpdates[req.GetOperationId()]; used {
+		settled := "still in progress"
+		if !prior.GetActive() {
+			settled = fmt.Sprintf("already settled (%q at %d)", prior.GetOutcome(), prior.GetSettledAtUnix())
+		}
+		return &FSMApplyResult{Index: index, Error: fmt.Sprintf(
+			"AcquireColonyUpdate: operation id %q has already been used (granted at fence token %d, %s); "+
+				"re-granting it would reset the fence and un-fence whatever its previous holder still holds, "+
+				"so resume it with AdvanceColonyUpdate/ReleaseColonyUpdate instead, or name a new operation id",
+			req.GetOperationId(), prior.GetFenceToken(), settled)}
+	}
+
+	active := activeColonyUpdate(f.colonyUpdates)
+	takeover := false
+	if active != nil {
+		if !req.GetTakeover() {
+			where := "no step recorded"
+			if active.GetStep() != "" {
+				where = "at step " + active.GetStep()
+			}
+			return &FSMApplyResult{Index: index, Error: fmt.Sprintf(
+				"AcquireColonyUpdate: controlled update %q is already in progress, held by node %q (incarnation %q) at fence token %d, %s; "+
+					"only one controlled update may exist in the Colony at a time - this request was refused, and a takeover must be an explicit, deliberate act by whoever takes responsibility",
+				active.GetOperationId(), active.GetHolderNodeId(), active.GetHolderIncarnation(),
+				active.GetFenceToken(), where)}
+		}
+		// Settle the displaced record as UNOBSERVED, not as failed and
+		// not as anything that reads like a conclusion. That is the
+		// honest verdict: the displaced holder may well still be running,
+		// nobody has looked, and the whole point of the higher fence
+		// token is that it does not need to be looked at - but "we did
+		// not check" is exactly what this word means, and
+		// internal/cluster's own convention insists it never be folded
+		// into either "fine" or "broken".
+		//
+		// It MUST be settled rather than left active, and that is not
+		// tidiness: two entries with active = true would break the
+		// single-flight invariant this whole mechanism rests on, and
+		// every later reader - including fenceMatchesActive - finds
+		// "the" active record by scanning for the first one it meets.
+		active.Active = false
+		active.Outcome = colonyOutcomeUnobserved
+		active.SettledAtUnix = req.GetRequestedAtUnix()
+		active.UpdatedAtUnix = req.GetRequestedAtUnix()
+		active.Detail = fmt.Sprintf(
+			"displaced by controlled update %q, granted to %q (incarnation %q) at fence token %d; "+
+				"this operation's fate is unobserved - its previous holder (%q, incarnation %q, fence token %d) is fenced out of both the update record and the restart-lease path, "+
+				"but nobody has looked at what it had already done, and it is not resumable",
+			req.GetOperationId(), req.GetHolderNodeId(), req.GetHolderIncarnation(), index,
+			active.GetHolderNodeId(), active.GetHolderIncarnation(), active.GetFenceToken())
+		takeover = true
+	}
+
+	rec := &internalpb.ColonyUpdate{
+		OperationId:       req.GetOperationId(),
+		HolderNodeId:      req.GetHolderNodeId(),
+		HolderIncarnation: req.GetHolderIncarnation(),
+		// The fence token is this command's own log index: unique and
+		// monotonic for free, exactly as RestartLease.lease_id is
+		// (ADR-0103), and strictly greater than every token issued
+		// before it, which is what makes the takeover above fence the
+		// displaced holder on every replica at the same instant.
+		FenceToken:    index,
+		GrantedAtUnix: req.GetRequestedAtUnix(),
+		Active:        true,
+		Takeover:      takeover,
+		UpdatedAtUnix: req.GetRequestedAtUnix(),
+	}
+	f.colonyUpdates[rec.OperationId] = rec
+
+	// Housekeeping, performed by the one command that legitimately
+	// creates history rather than by a background sweeper - see
+	// evictSettledColonyUpdates' own doc comment.
+	evictSettledColonyUpdates(f.colonyUpdates, maxSettledColonyUpdates)
+
+	return &FSMApplyResult{Index: index, ColonyUpdate: rec}
+}
+
+// applyAdvanceColonyUpdate records durable progress on the operation the
+// caller still holds. It is the durable half of "what is the state of the
+// controlled update?", and it is also how a replacement managerd's own
+// step records become readable by every other Comb rather than only by
+// the one that wrote them.
+//
+// Every field of the fence must match the active record exactly. A
+// mismatch - an old token, a superseded incarnation, somebody else's
+// operation - is refused BY NAME, naming what is actually held, and is
+// not overridable by anything: there is no force field on this command,
+// for the same reason there is none on the restart-lease fence.
+func (f *FSM) applyAdvanceColonyUpdate(index uint64, req *internalpb.AdvanceColonyUpdate) *FSMApplyResult {
+	active := activeColonyUpdate(f.colonyUpdates)
+	fence := req.GetFence()
+	if !fenceMatchesActive(fence, active) {
+		return &FSMApplyResult{Index: index, Error: fenceRefusal("advance the controlled update", fence, active)}
+	}
+
+	record := req.GetStepRecord()
+	if err := validateColonyUpdateStep(record); err != nil {
+		return &FSMApplyResult{Index: index, Error: fmt.Sprintf("refusing to advance controlled update %q: %v", active.GetOperationId(), err)}
+	}
+	if record != nil && !appendColonyUpdateStep(active, record) {
+		// appendColonyUpdateStep has already formed the precise refusal,
+		// naming the position and what is already there.
+		return &FSMApplyResult{Index: index, Error: fmt.Sprintf(
+			"refusing to advance controlled update %q: %s",
+			active.GetOperationId(), colonyUpdateStepRefusal(active, record))}
+	}
+	if req.GetStep() != "" {
+		active.Step = req.GetStep()
+	}
+	if req.GetTargetNodeId() != "" {
+		active.TargetNodeId = req.GetTargetNodeId()
+	}
+	if req.GetDetail() != "" {
+		active.Detail = req.GetDetail()
+	}
+	return &FSMApplyResult{Index: index, ColonyUpdate: active}
+}
+
+// appendColonyUpdateStep adds rec to rec_owner's step history at the
+// ordinal position rec itself names, and reports whether it did.
+//
+// Three cases, and the distinctions between them are the point:
+//
+//   - the next free position: appended, with recorded_at_unix STAMPED
+//     from the leader's own clock rather than accepted from the caller,
+//     for exactly the reason applyAcquireRestartLease stamps its own
+//     requested_at_unix - every replica must reach the identical value.
+//   - an occupied position carrying an IDENTICAL record: accepted as the
+//     no-op it is. A coordinator that crashed after its apply committed
+//     but before it read the response re-sends the same record on retry,
+//     and refusing that would wedge the operation on a lost response
+//     rather than on anything real.
+//   - anything else: refused. A gap means a reader could be shown a
+//     sequence with a hole it cannot explain; a differing record at an
+//     occupied position means a superseded holder is trying to rewrite
+//     history it no longer owns.
+func appendColonyUpdateStep(rec *internalpb.ColonyUpdate, step *internalpb.ColonyUpdateStepRecord) bool {
+	pos := int(step.GetIndex())
+	existing := rec.GetSteps()
+	switch {
+	case pos == len(existing):
+		// proto.Clone rather than a Go struct copy: a generated message
+		// carries an internal mutex and state pointer, and copying one
+		// by value is both a vet error and a real race waiting to happen.
+		stamped, ok := proto.Clone(step).(*internalpb.ColonyUpdateStepRecord)
+		if !ok {
+			return false
+		}
+		stamped.RecordedAtUnix = rec.GetUpdatedAtUnix()
+		rec.Steps = append(existing, stamped)
+		return true
+	case pos < len(existing):
+		e := existing[pos]
+		return e.GetStep() == step.GetStep() &&
+			e.GetOutcome() == step.GetOutcome() &&
+			e.GetDetail() == step.GetDetail() &&
+			e.GetNodeId() == step.GetNodeId() &&
+			equalStrings(e.GetEvidence(), step.GetEvidence())
+	default:
+		return false
+	}
+}
+
+// colonyUpdateStepRefusal explains why a step record was not appended,
+// naming the position and what is already there so the reader does not
+// have to go and look. It only ever describes a REJECTED record, so the
+// caller has already established that.
+func colonyUpdateStepRefusal(rec *internalpb.ColonyUpdate, step *internalpb.ColonyUpdateStepRecord) string {
+	pos := int(step.GetIndex())
+	existing := rec.GetSteps()
+	if pos > len(existing) {
+		return fmt.Sprintf("step position %d skips ahead of the %d step record(s) already written; steps are recorded in order so a reader can never be shown a gap it cannot explain",
+			pos, len(existing))
+	}
+	e := existing[pos]
+	return fmt.Sprintf("step position %d is already recorded as %q (%q on %q) and this request says %q (%q on %q); a step record is immutable once written, so a holder that has been superseded cannot rewrite one",
+		pos, e.GetStep(), e.GetOutcome(), e.GetNodeId(), step.GetStep(), step.GetOutcome(), step.GetNodeId())
+}
+
+// applyReleaseColonyUpdate settles the operation terminally.
+//
+// It MARKS the record settled rather than deleting it, and that is the
+// reason the record answers the question ADR-0145 asked. A replacement
+// managerd asking "what is the state of the controlled update?" has to
+// be able to find the answer both while it runs and after it is over;
+// "is anything running?" and "what happened to the one that was?" are
+// different questions and the same object answers both.
+//
+// The exact-fence requirement is identical to AdvanceColonyUpdate's, and
+// for the same reason: a displaced coordinator must not be able to
+// settle the operation that displaced it, which would leave the colony
+// believing an update finished when its replacement is still running.
+func (f *FSM) applyReleaseColonyUpdate(index uint64, req *internalpb.ReleaseColonyUpdate) *FSMApplyResult {
+	active := activeColonyUpdate(f.colonyUpdates)
+	fence := req.GetFence()
+	if !fenceMatchesActive(fence, active) {
+		return &FSMApplyResult{Index: index, Error: fenceRefusal("settle the controlled update", fence, active)}
+	}
+	if !validColonyUpdateOutcome(req.GetOutcome()) {
+		return &FSMApplyResult{Index: index, Error: fmt.Sprintf(
+			"refusing to settle controlled update %q with outcome %q, which is not one of the recognised outcomes (%q, %q, %q, %q, %q); "+
+				"\"the update finished\" is a claim like any other and is not the absence of one",
+			active.GetOperationId(), req.GetOutcome(),
+			colonyOutcomeConfirmed, colonyOutcomeFailed, colonyOutcomeBlocked,
+			colonyOutcomeUnobserved, colonyOutcomeUnverified)}
+	}
+	if req.GetDetail() == "" {
+		return &FSMApplyResult{Index: index, Error: fmt.Sprintf(
+			"refusing to settle controlled update %q as %q with no detail - an unbacked verdict is not a record",
+			active.GetOperationId(), req.GetOutcome())}
+	}
+
+	active.Active = false
+	active.Outcome = req.GetOutcome()
+	active.Detail = req.GetDetail()
+	active.SettledAtUnix = req.GetCompletedAtUnix()
+	active.UpdatedAtUnix = req.GetCompletedAtUnix()
+	// Housekeeping again, for the same reason acquire does it: the cap
+	// has to hold at every point a reader could look, not merely after
+	// the next grant. Leaving the bound to be re-established by a
+	// subsequent acquire would mean the state was over its cap for as
+	// long as nobody started anything - which, on a quiet colony, is
+	// forever.
+	evictSettledColonyUpdates(f.colonyUpdates, maxSettledColonyUpdates)
+	return &FSMApplyResult{Index: index, ColonyUpdate: active}
+}
+
+// equalStrings compares two string slices element-wise. A tiny helper
+// rather than slices.Equal so the comparison's intent reads as a replay
+// check at the call site.
+func equalStrings(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
 // voterListContains reports whether nodeID appears in voters - a plain
 // linear scan, since voters is always the small (single-digit) size of
 // this codebase's own raft membership, never worth indexing.
@@ -873,6 +1206,72 @@ func (f *FSM) RestartLeaseState(service string) (*internalpb.RestartLease, *inte
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.restartLeases[service], f.restartRecords[service]
+}
+
+// ColonyUpdateState returns a SNAPSHOT COPY of the one active
+// controlled-update record (nil when nothing is running) and of the
+// settled history, newest first - backing GetColonyUpdateStateLocal
+// (ADR-0145).
+//
+// A plain read of already-replicated FSM state, on the same
+// any-node-can-answer footing as RestartLeaseState above and for the
+// same reason. What it does NOT do is decide anything: every grant,
+// advance and settle goes through Apply, so a copy of this on a lagging
+// follower can mislead a reader but can never grant a lock. That gap is
+// the reason the wire response carries an explicit authoritative flag
+// rather than presenting a follower's copy as though it were the
+// leader's.
+//
+// The records are CLONED rather than handed out by pointer, and that is
+// not fastidiousness - it is a correctness requirement that the race
+// detector found the hard way. applyAdvanceColonyUpdate mutates the
+// active record in place (cheap, and correct under f.mu), so a caller
+// holding the FSM's own pointer would be reading fields the apply loop
+// is concurrently writing. ADR-0103's RestartLeaseState does not clone
+// because its records are always REPLACED rather than mutated, which
+// makes a handed-out pointer stable for the life of the object.
+//
+// A read that returns a live pointer into state that is still being
+// written is how "the record said step=issue-restart" becomes a
+// half-updated struct, so this clones.
+func (f *FSM) ColonyUpdateState() (active *internalpb.ColonyUpdate, history []*internalpb.ColonyUpdate) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	active = cloneColonyUpdate(activeColonyUpdate(f.colonyUpdates))
+	settled := settledColonyUpdates(f.colonyUpdates)
+	history = make([]*internalpb.ColonyUpdate, 0, len(settled))
+	for _, rec := range settled {
+		history = append(history, cloneColonyUpdate(rec))
+	}
+	return active, history
+}
+
+// ColonyUpdateByID returns a snapshot copy of one operation's record by
+// id, settled or not. It is what lets a replacement managerd ask about
+// the operation it was told about rather than only about whatever is
+// running now. Cloned for the same reason as ColonyUpdateState above.
+func (f *FSM) ColonyUpdateByID(operationID string) (*internalpb.ColonyUpdate, bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	rec, ok := f.colonyUpdates[operationID]
+	if !ok {
+		return nil, false
+	}
+	return cloneColonyUpdate(rec), true
+}
+
+// cloneColonyUpdate copies a record, nil in and nil out. A shallow Go
+// copy would be wrong twice over: generated messages carry an internal
+// mutex, and the nested Steps slice would still alias.
+func cloneColonyUpdate(rec *internalpb.ColonyUpdate) *internalpb.ColonyUpdate {
+	if rec == nil {
+		return nil
+	}
+	cloned, ok := proto.Clone(rec).(*internalpb.ColonyUpdate)
+	if !ok {
+		return nil
+	}
+	return cloned
 }
 
 // ListPendingJoinRequests returns every currently-Pending, not-yet-
@@ -1274,6 +1673,7 @@ func (f *FSM) snapshotStateLocked() *internalpb.FSMSnapshotState {
 		PendingJoinRequests: make(map[string]*internalpb.PendingJoinRequest, len(f.pendingJoinRequests)),
 		RestartLeases:       make(map[string]*internalpb.RestartLease, len(f.restartLeases)),
 		RestartRecords:      make(map[string]*internalpb.RestartRecord, len(f.restartRecords)),
+		ColonyUpdates:       make(map[string]*internalpb.ColonyUpdate, len(f.colonyUpdates)),
 		AuthEnabled:         f.authEnabled,
 	}
 	for id, vm := range f.vms {
@@ -1296,6 +1696,9 @@ func (f *FSM) snapshotStateLocked() *internalpb.FSMSnapshotState {
 	}
 	for service, record := range f.restartRecords {
 		state.RestartRecords[service] = record
+	}
+	for id, rec := range f.colonyUpdates {
+		state.ColonyUpdates[id] = rec
 	}
 	return state
 }
@@ -1343,6 +1746,10 @@ func (f *FSM) Restore(rc io.ReadCloser) error {
 	f.restartRecords = state.GetRestartRecords()
 	if f.restartRecords == nil {
 		f.restartRecords = make(map[string]*internalpb.RestartRecord)
+	}
+	f.colonyUpdates = state.GetColonyUpdates()
+	if f.colonyUpdates == nil {
+		f.colonyUpdates = make(map[string]*internalpb.ColonyUpdate)
 	}
 	f.authEnabled = state.GetAuthEnabled()
 	// Recompute under the same lock: a Status call arriving after this

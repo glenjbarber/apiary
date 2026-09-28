@@ -308,6 +308,34 @@ func (n *Node) RestartLeaseStateLocal(service string) (*internalpb.RestartLease,
 	return n.fsm.RestartLeaseState(service)
 }
 
+// ColonyUpdateStateLocal backs GetColonyUpdateStateLocal (ADR-0145) - the
+// same "any node can answer from its own FSM copy" posture as
+// RestartLeaseStateLocal above.
+//
+// The bool it returns alongside the record is whether THIS node is the
+// leader, and it is returned rather than inferred by the caller because
+// "can answer for itself" and "is authoritative" are different claims: a
+// follower's copy of an applied record can lag the leader's by one
+// commit. Nothing in the enforcement path reads this - every grant,
+// advance and settle goes through Apply, which only committed consensus
+// decides - so the flag exists for a human and a UI, not for a decision.
+func (n *Node) ColonyUpdateStateLocal() (active *internalpb.ColonyUpdate, history []*internalpb.ColonyUpdate, authoritative bool) {
+	active, history = n.fsm.ColonyUpdateState()
+	return active, history, n.raft.State() == raft.Leader
+}
+
+// ColonyUpdateByIDLocal is ColonyUpdateStateLocal's one-operation
+// variant, for the "what happened to the operation I was told about?"
+// question that the colony-wide answer cannot answer once it has
+// settled.
+func (n *Node) ColonyUpdateByIDLocal(operationID string) (*internalpb.ColonyUpdate, error) {
+	rec, ok := n.fsm.ColonyUpdateByID(operationID)
+	if !ok {
+		return nil, fmt.Errorf("no controlled update with operation id %q has ever been granted on this node's view of replicated state", operationID)
+	}
+	return rec, nil
+}
+
 // GetJail/ListJails mirror GetNetwork/ListNetworks exactly, for
 // JailDefinitions instead.
 func (n *Node) GetJail(id string) (jail *internalpb.JailDefinition, found bool, err error) {
