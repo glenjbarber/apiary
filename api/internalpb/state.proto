@@ -522,6 +522,17 @@ message Command {
     // AcquireColonyUpdate.takeover, and the distinction is the whole
     // point - see ColonyUpdateHandover's own doc comment.
     HandoverColonyUpdate handover_colony_update = 35;
+
+    // OpenColonyJoinWindow/CloseColonyJoinWindow are ADR-0147 Part 4's
+    // Colony-wide join window. Replicated rather than node-local for
+    // exactly the reason AcquireRestartLease above is: the guarantee
+    // has to survive an election, so "is this Colony accepting
+    // members right now" must not be a fact any single managerd holds
+    // in memory. The window's normal state is CLOSED, which inverts
+    // the pre-ADR-0147 default where RequestJoinColony was accepted at
+    // any moment by any member.
+    OpenColonyJoinWindow open_colony_join_window = 36;
+    CloseColonyJoinWindow close_colony_join_window = 37;
   }
 }
 
@@ -890,6 +901,18 @@ message PendingJoinRequest {
   // treats that as unobserved and refuses. Fail-closed is the point.
   bool joiner_log_state_observed = 9;
   uint64 joiner_last_log_index = 10;
+
+  // window_opened_at_unix records the opened_at_unix of the
+  // ColonyJoinWindow that was live when THIS request was created, and
+  // is what makes a window non-extendable by accident (ADR-0147
+  // Part 4). Zero means "created while no window was live", which is
+  // the shape a pre-ADR-0147 record already has in a Colony that
+  // upgraded - and approval refuses it, because approval requires the
+  // CURRENT window's opened_at_unix to equal this field. A request can
+  // therefore never be parked under one window and finished under the
+  // next: letting the window lapse, reopening, and completing the old
+  // request is not a path.
+  int64 window_opened_at_unix = 11;
 }
 
 // CreatePendingJoinRequest records a new join request. Fails if
@@ -926,6 +949,79 @@ message CancelPendingJoinRequest {
 // PurgeVM/PurgeJail - not an error if request_id is already gone.
 message PurgeJoinRequest {
   string request_id = 1;
+}
+
+// ColonyJoinWindow is ADR-0147 Part 4's Colony-wide, Raft-replicated
+// admission window: the only state in which this Colony will record a
+// new join request, and the only state in which one can be approved.
+//
+// There is exactly one of these per Colony, not one per member, and
+// there is deliberately no extend operation - see OpenColonyJoinWindow's
+// own doc comment for why "or longer" is refused rather than honoured.
+//
+// expires_at_unix is ABSOLUTE and set once, by the leader, at open time.
+// A leader change does not renew it and a managerd restart does not
+// renew it. opened_at_unix doubles as the window's epoch identity:
+// a request records the value that was live when it was created, and
+// reopening after an expiry changes it, which is what invalidates
+// everything created under the previous window.
+message ColonyJoinWindow {
+  // enabled is false for a Colony that has never had a window opened,
+  // and after a CloseColonyJoinWindow. expiry does NOT set it: a
+  // lapsed window is a window whose deadline has passed, and reading
+  // "enabled" is how callers decide whether to look at expires_at at
+  // all. The two together are what "is a window live right now" means,
+  // and every read of them is a function of the current time, never of
+  // when the state was written.
+  bool enabled = 1;
+
+  // opened_by is the node ID of the member the window was opened on
+  // and opened_by_key the API key ID of the Admin who did it. Both are
+  // replicated so the log of who opened a Colony to new members
+  // survives the managerd that was asked.
+  string opened_by      = 2;
+  string opened_by_key  = 3;
+
+  int64 opened_at_unix  = 4;
+  int64 expires_at_unix = 5;
+}
+
+// OpenColonyJoinWindow sets the window, and is the only way it is ever
+// extended - by a new window, never by touching an existing one.
+//
+// now_unix, duration_seconds and max_duration_seconds are all supplied
+// by the caller (managerd, which is where the leader's clock and the
+// operator's configured ceiling live) rather than read inside the FSM,
+// so the deadline is computed once, on the leader, from a value the
+// voter can see - the same posture AcquireRestartLease's own lease_id
+// takes. The FSM refuses rather than clamping: a request for a longer
+// window than the configured ceiling is a mistake an operator needs
+// told about, not something to silently shorten.
+message OpenColonyJoinWindow {
+  // opened_by / opened_by_key identify the Admin and the member they
+  // used; both are recorded so the audit trail is replicated, not
+  // local.
+  string opened_by     = 1;
+  string opened_by_key = 2;
+
+  // duration_seconds is the requested length. max_duration_seconds is
+  // the leader's configured ceiling; duration_seconds must be > 0 and
+  // <= max_duration_seconds.
+  int64 duration_seconds   = 3;
+  int64 max_duration_seconds = 4;
+
+  // now_unix is the leader's clock at the moment of the decision.
+  int64 now_unix = 5;
+}
+
+// CloseColonyJoinWindow closes a live or lapsed window early, because
+// an operator who changes their mind should not have to wait it out.
+// Expiry and an explicit close converge on the same state; the only
+// difference is who asked and what the log records.
+message CloseColonyJoinWindow {
+  string closed_by     = 1;
+  string closed_by_key = 2;
+  int64  now_unix      = 3;
 }
 
 // RestartLease is a cluster-wide, Raft-committed exclusive reservation
@@ -1325,6 +1421,16 @@ message FSMSnapshotState {
   map<string, ApiKey> api_keys = 4;
   map<string, JailDefinition> jails = 6;
   map<string, PendingJoinRequest> pending_join_requests = 7;
+
+  // colony_join_window is ADR-0147 Part 4's single Colony-wide join
+  // window. A message rather than a map entry because there is exactly
+  // one per Colony, and a map keyed by a constant would invite a second
+  // writer. Included here so a raft snapshot restore or a seeded
+  // recovery via raftd -restore never silently drops it: a dropped
+  // window would reopen the Colony to unauthenticated request creation
+  // on whichever voter restored last, which is the opposite of what
+  // this state exists to prevent.
+  ColonyJoinWindow colony_join_window = 14;
 
   // restart_leases/restart_records back the action-preflight restart
   // guardrail (ADR-0103) - included here so a raft snapshot restore or

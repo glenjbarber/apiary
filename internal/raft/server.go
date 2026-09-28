@@ -84,6 +84,20 @@ func (s *Server) Apply(_ context.Context, req *internalpb.ApplyRequest) (*intern
 	if result.ColonyUpdate != nil {
 		payload = result.ColonyUpdate
 	}
+	// ColonyJoinWindow is the arm most easily forgotten, and forgetting
+	// it fails open rather than loudly: with no arm, payload stays
+	// result.VM (nil), proto.Marshal(nil) yields zero bytes rather than
+	// an error, and the managerd side unmarshals those zero bytes into a
+	// zero-valued ColonyJoinWindow. It cannot unmarshal that as an
+	// error, so OpenColonyJoinWindow returns "success" carrying
+	// enabled=false - a window the operator believes they opened, which
+	// no join can then use, and no log line anywhere saying why. Every
+	// other arm here ends in a value the caller can act on; this one
+	// ends in a value that looks like a refusal the caller never asked
+	// for.
+	if result.ColonyJoinWindow != nil {
+		payload = result.ColonyJoinWindow
+	}
 	resultBytes, err := proto.Marshal(payload)
 	if err != nil {
 		return &internalpb.ApplyResponse{Error: fmt.Sprintf("encoding result: %v", err)}, nil
@@ -228,6 +242,17 @@ func (s *Server) GetPendingJoinRequestLocal(_ context.Context, req *internalpb.G
 
 func (s *Server) ListPendingJoinRequestsLocal(_ context.Context, _ *internalpb.ListPendingJoinRequestsRequest) (*internalpb.ListPendingJoinRequestsResponse, error) {
 	return &internalpb.ListPendingJoinRequestsResponse{Requests: s.node.ListPendingJoinRequestsLocal()}, nil
+}
+
+// GetColonyJoinWindowLocal implements RaftInternal - ADR-0147 Part 4's
+// read side. Deliberately NOT leader-only, for the same reason
+// GetPendingJoinRequestLocal above is not: the window is replicated
+// state and any node can answer for itself, which is what lets a
+// joining Comb introduced to a follower behave identically to one
+// introduced to the leader.
+func (s *Server) GetColonyJoinWindowLocal(_ context.Context, _ *internalpb.GetColonyJoinWindowRequest) (*internalpb.GetColonyJoinWindowResponse, error) {
+	window, live := s.node.ColonyJoinWindowLocal()
+	return &internalpb.GetColonyJoinWindowResponse{Window: window, Live: live}, nil
 }
 
 // GetRestartLeaseStateLocal implements internalpb.RaftInternalServer

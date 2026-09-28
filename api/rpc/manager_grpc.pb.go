@@ -112,6 +112,9 @@ const (
 	ManagerService_PreflightApproveJoinRequest_FullMethodName = "/apiary.rpc.v1.ManagerService/PreflightApproveJoinRequest"
 	ManagerService_CancelJoinRequest_FullMethodName           = "/apiary.rpc.v1.ManagerService/CancelJoinRequest"
 	ManagerService_PurgeJoinRequest_FullMethodName            = "/apiary.rpc.v1.ManagerService/PurgeJoinRequest"
+	ManagerService_OpenColonyJoinWindow_FullMethodName        = "/apiary.rpc.v1.ManagerService/OpenColonyJoinWindow"
+	ManagerService_CloseColonyJoinWindow_FullMethodName       = "/apiary.rpc.v1.ManagerService/CloseColonyJoinWindow"
+	ManagerService_GetColonyJoinWindow_FullMethodName         = "/apiary.rpc.v1.ManagerService/GetColonyJoinWindow"
 	ManagerService_UpdateVoterAddress_FullMethodName          = "/apiary.rpc.v1.ManagerService/UpdateVoterAddress"
 	ManagerService_HostPackages_FullMethodName                = "/apiary.rpc.v1.ManagerService/HostPackages"
 )
@@ -713,6 +716,29 @@ type ManagerServiceClient interface {
 	// this actually deletes it, for cleaning up a stale or erroneous
 	// entry. Admin-gated, the same tier as Approve/Reject/List.
 	PurgeJoinRequest(ctx context.Context, in *PurgeJoinRequestRequest, opts ...grpc.CallOption) (*PurgeJoinRequestResponse, error)
+	// OpenColonyJoinWindow/CloseColonyJoinWindow are ADR-0147 Part 4's
+	// Colony-wide admission window: the toggle that makes this Colony
+	// joinable at all, for a bounded time, with a visible end. Admin-tier
+	// because it is a state change that every member replicates, and
+	// because opening one is what an operator deliberately does before
+	// adding hardware - not a capability to hand out. Any member may be
+	// ASKED to open one; the call forwards to the leader exactly like
+	// every other admin-side state change, and only the leader mutates.
+	OpenColonyJoinWindow(ctx context.Context, in *OpenColonyJoinWindowRequest, opts ...grpc.CallOption) (*OpenColonyJoinWindowResponse, error)
+	CloseColonyJoinWindow(ctx context.Context, in *CloseColonyJoinWindowRequest, opts ...grpc.CallOption) (*CloseColonyJoinWindowResponse, error)
+	// GetColonyJoinWindow is the UNAUTHENTICATED read, and the only
+	// pre-join trust anchor in the system. A joining Comb has no Raft
+	// membership, so ADR-0115's automatic peer-hostname derivation has
+	// nothing to derive from and there is no other place the Colony
+	// could say who it is. It is exempt from checkAuth for the same
+	// reason RequestJoinColony is - a Comb that has not yet joined has
+	// no Colony API key by definition - and it is deliberately narrow
+	// for that reason: it returns only public bootstrap fields, only
+	// while a window is live, and nothing that could be used to change
+	// any state. A caller that can reach it can read a Colony's
+	// advertised name, its members' managerd certificate fingerprints,
+	// and its node IDs, and can do nothing else.
+	GetColonyJoinWindow(ctx context.Context, in *GetColonyJoinWindowRequest, opts ...grpc.CallOption) (*GetColonyJoinWindowResponse, error)
 	// UpdateVoterAddress (ADR-0106) re-points an EXISTING raft voter's
 	// address in place - the first-class replacement for resubmitting a
 	// RequestJoinColony/ApproveJoinRequest pair against an already-voting
@@ -1699,6 +1725,36 @@ func (c *managerServiceClient) PurgeJoinRequest(ctx context.Context, in *PurgeJo
 	return out, nil
 }
 
+func (c *managerServiceClient) OpenColonyJoinWindow(ctx context.Context, in *OpenColonyJoinWindowRequest, opts ...grpc.CallOption) (*OpenColonyJoinWindowResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(OpenColonyJoinWindowResponse)
+	err := c.cc.Invoke(ctx, ManagerService_OpenColonyJoinWindow_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *managerServiceClient) CloseColonyJoinWindow(ctx context.Context, in *CloseColonyJoinWindowRequest, opts ...grpc.CallOption) (*CloseColonyJoinWindowResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(CloseColonyJoinWindowResponse)
+	err := c.cc.Invoke(ctx, ManagerService_CloseColonyJoinWindow_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *managerServiceClient) GetColonyJoinWindow(ctx context.Context, in *GetColonyJoinWindowRequest, opts ...grpc.CallOption) (*GetColonyJoinWindowResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetColonyJoinWindowResponse)
+	err := c.cc.Invoke(ctx, ManagerService_GetColonyJoinWindow_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *managerServiceClient) UpdateVoterAddress(ctx context.Context, in *UpdateVoterAddressRequest, opts ...grpc.CallOption) (*UpdateVoterAddressResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(UpdateVoterAddressResponse)
@@ -2316,6 +2372,29 @@ type ManagerServiceServer interface {
 	// this actually deletes it, for cleaning up a stale or erroneous
 	// entry. Admin-gated, the same tier as Approve/Reject/List.
 	PurgeJoinRequest(context.Context, *PurgeJoinRequestRequest) (*PurgeJoinRequestResponse, error)
+	// OpenColonyJoinWindow/CloseColonyJoinWindow are ADR-0147 Part 4's
+	// Colony-wide admission window: the toggle that makes this Colony
+	// joinable at all, for a bounded time, with a visible end. Admin-tier
+	// because it is a state change that every member replicates, and
+	// because opening one is what an operator deliberately does before
+	// adding hardware - not a capability to hand out. Any member may be
+	// ASKED to open one; the call forwards to the leader exactly like
+	// every other admin-side state change, and only the leader mutates.
+	OpenColonyJoinWindow(context.Context, *OpenColonyJoinWindowRequest) (*OpenColonyJoinWindowResponse, error)
+	CloseColonyJoinWindow(context.Context, *CloseColonyJoinWindowRequest) (*CloseColonyJoinWindowResponse, error)
+	// GetColonyJoinWindow is the UNAUTHENTICATED read, and the only
+	// pre-join trust anchor in the system. A joining Comb has no Raft
+	// membership, so ADR-0115's automatic peer-hostname derivation has
+	// nothing to derive from and there is no other place the Colony
+	// could say who it is. It is exempt from checkAuth for the same
+	// reason RequestJoinColony is - a Comb that has not yet joined has
+	// no Colony API key by definition - and it is deliberately narrow
+	// for that reason: it returns only public bootstrap fields, only
+	// while a window is live, and nothing that could be used to change
+	// any state. A caller that can reach it can read a Colony's
+	// advertised name, its members' managerd certificate fingerprints,
+	// and its node IDs, and can do nothing else.
+	GetColonyJoinWindow(context.Context, *GetColonyJoinWindowRequest) (*GetColonyJoinWindowResponse, error)
 	// UpdateVoterAddress (ADR-0106) re-points an EXISTING raft voter's
 	// address in place - the first-class replacement for resubmitting a
 	// RequestJoinColony/ApproveJoinRequest pair against an already-voting
@@ -2641,6 +2720,15 @@ func (UnimplementedManagerServiceServer) CancelJoinRequest(context.Context, *Can
 }
 func (UnimplementedManagerServiceServer) PurgeJoinRequest(context.Context, *PurgeJoinRequestRequest) (*PurgeJoinRequestResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method PurgeJoinRequest not implemented")
+}
+func (UnimplementedManagerServiceServer) OpenColonyJoinWindow(context.Context, *OpenColonyJoinWindowRequest) (*OpenColonyJoinWindowResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method OpenColonyJoinWindow not implemented")
+}
+func (UnimplementedManagerServiceServer) CloseColonyJoinWindow(context.Context, *CloseColonyJoinWindowRequest) (*CloseColonyJoinWindowResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method CloseColonyJoinWindow not implemented")
+}
+func (UnimplementedManagerServiceServer) GetColonyJoinWindow(context.Context, *GetColonyJoinWindowRequest) (*GetColonyJoinWindowResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetColonyJoinWindow not implemented")
 }
 func (UnimplementedManagerServiceServer) UpdateVoterAddress(context.Context, *UpdateVoterAddressRequest) (*UpdateVoterAddressResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method UpdateVoterAddress not implemented")
@@ -4310,6 +4398,60 @@ func _ManagerService_PurgeJoinRequest_Handler(srv interface{}, ctx context.Conte
 	return interceptor(ctx, in, info, handler)
 }
 
+func _ManagerService_OpenColonyJoinWindow_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(OpenColonyJoinWindowRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ManagerServiceServer).OpenColonyJoinWindow(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ManagerService_OpenColonyJoinWindow_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ManagerServiceServer).OpenColonyJoinWindow(ctx, req.(*OpenColonyJoinWindowRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ManagerService_CloseColonyJoinWindow_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(CloseColonyJoinWindowRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ManagerServiceServer).CloseColonyJoinWindow(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ManagerService_CloseColonyJoinWindow_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ManagerServiceServer).CloseColonyJoinWindow(ctx, req.(*CloseColonyJoinWindowRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ManagerService_GetColonyJoinWindow_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetColonyJoinWindowRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ManagerServiceServer).GetColonyJoinWindow(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ManagerService_GetColonyJoinWindow_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ManagerServiceServer).GetColonyJoinWindow(ctx, req.(*GetColonyJoinWindowRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _ManagerService_UpdateVoterAddress_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(UpdateVoterAddressRequest)
 	if err := dec(in); err != nil {
@@ -4712,6 +4854,18 @@ var ManagerService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "PurgeJoinRequest",
 			Handler:    _ManagerService_PurgeJoinRequest_Handler,
+		},
+		{
+			MethodName: "OpenColonyJoinWindow",
+			Handler:    _ManagerService_OpenColonyJoinWindow_Handler,
+		},
+		{
+			MethodName: "CloseColonyJoinWindow",
+			Handler:    _ManagerService_CloseColonyJoinWindow_Handler,
+		},
+		{
+			MethodName: "GetColonyJoinWindow",
+			Handler:    _ManagerService_GetColonyJoinWindow_Handler,
 		},
 		{
 			MethodName: "UpdateVoterAddress",

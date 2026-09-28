@@ -308,6 +308,22 @@ func (n *Node) RestartLeaseStateLocal(service string) (*internalpb.RestartLease,
 	return n.fsm.RestartLeaseState(service)
 }
 
+// ColonyJoinWindowLocal backs GetColonyJoinWindowLocal (ADR-0147
+// Part 4) - the same "any node can answer from its own FSM copy"
+// posture as RestartLeaseStateLocal above, and the reason it is safe:
+// the window is already raft-replicated, and a joining Comb introduced
+// to a follower must see the same window one introduced to the leader
+// would see.
+//
+// The bool is whether this window is live at this node's own clock. It
+// is computed here rather than by the caller so that the liveness
+// answer and the window that answer was computed from can never be
+// two different reads.
+func (n *Node) ColonyJoinWindowLocal() (*internalpb.ColonyJoinWindow, bool) {
+	w := n.fsm.ColonyJoinWindowState()
+	return w, ColonyJoinWindowLive(w, time.Now().Unix())
+}
+
 // ColonyUpdateStateLocal backs GetColonyUpdateStateLocal (ADR-0145) - the
 // same "any node can answer from its own FSM copy" posture as
 // RestartLeaseStateLocal above.

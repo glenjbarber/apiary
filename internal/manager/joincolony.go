@@ -365,6 +365,30 @@ func (s *Server) RequestJoinColony(ctx context.Context, req *rpcpb.RequestJoinCo
 	if err := raftnode.ValidateJoinRequestFields(req.GetNodeId(), req.GetRaftBindAddress(), req.GetTlsCertFingerprint()); err != nil {
 		return &rpcpb.RequestJoinColonyResponse{Error: err.Error()}, nil
 	}
+	// ADR-0147 Part 4: the Colony's normal state is CLOSED. A request
+	// arriving at a closed Colony is refused with a message naming the
+	// fix, which inverts the pre-ADR-0147 default where this call was
+	// accepted at any moment by any member.
+	//
+	// This is checked before the pending-count cap below because it is
+	// the check the operator is most likely to be able to act on, and
+	// because on a closed Colony the cap is not the problem: a cap
+	// refusal says "an Admin must approve, reject, or purge some",
+	// which is a different instruction from the one that applies here.
+	//
+	// Only the local-recording path is gated. A request carrying
+	// target_address is this managerd relaying on a joining Comb's
+	// behalf, and the member that actually records it gates the same
+	// call on its own authoritative view - gating here as well would
+	// mean a follower could refuse on a stale window while the leader
+	// would have accepted, and the joiner would be told the Colony is
+	// closed when it is open.
+	if req.GetTargetAddress() == "" {
+		if _, live := s.liveColonyJoinWindow(ctx); !live {
+			return &rpcpb.RequestJoinColonyResponse{Error: fmt.Sprintf(
+				"refusing to record this join request: %s", colonyWindowClosedRefusal)}, nil
+		}
+	}
 	if req.GetTargetAddress() == "" && s.raft != nil {
 		if pending, err := s.raft.ListPendingJoinRequestsLocal(ctx); err == nil && len(pending.GetRequests()) >= raftnode.MaxActionableJoinRequests {
 			return &rpcpb.RequestJoinColonyResponse{Error: fmt.Sprintf("too many join requests are pending (%d); an Admin must approve, reject, or purge some before more can be accepted", len(pending.GetRequests()))}, nil
@@ -463,6 +487,16 @@ func (s *Server) RequestJoinColony(ctx context.Context, req *rpcpb.RequestJoinCo
 	}
 	code, err := generateJoinCode()
 
+	// Read the window a second time for the epoch to record, rather
+	// than reusing the liveness read above: the two answers are then
+	// independent observations, and a window that lapsed between them
+	// yields a request whose epoch the approval-time gate will reject,
+	// instead of a request stamped with an epoch that never existed.
+	epoch := int64(0)
+	if w, live := s.liveColonyJoinWindow(ctx); live {
+		epoch = w.GetOpenedAtUnix()
+	}
+
 	now := time.Now()
 	cmd := &internalpb.Command{
 		Op: &internalpb.Command_CreatePendingJoinRequest{
@@ -478,6 +512,12 @@ func (s *Server) RequestJoinColony(ctx context.Context, req *rpcpb.RequestJoinCo
 					TlsCertFingerprint:     req.GetTlsCertFingerprint(),
 					JoinerLogStateObserved: logState.Observed,
 					JoinerLastLogIndex:     logState.LastLogIndex,
+					// ADR-0147 Part 4: the window's epoch, recorded at
+					// creation so a later reopen cannot finish this
+					// request. The live-window check above guarantees
+					// there IS a live window here, so this is a
+					// non-zero opened_at_unix in practice.
+					WindowOpenedAtUnix: epoch,
 				},
 			},
 		},
@@ -579,6 +619,23 @@ func (s *Server) ApproveJoinRequest(ctx context.Context, req *rpcpb.ApproveJoinR
 		return &rpcpb.ApproveJoinRequestResponse{Error: fmt.Sprintf(
 			"confirm_phrase %q does not match the required confirmation phrase %q - nothing was done",
 			req.GetConfirmPhrase(), approveJoinRequestConfirmPhrase)}, nil
+	}
+
+	// ADR-0147 Part 4: the live-window check comes FIRST, before the
+	// PINs, before the authorization file, before the reachability
+	// dial. It is the cheapest check available and the one an operator
+	// most needs explained, and it is evaluated here on the leader
+	// rather than read when a form was rendered - a window that expires
+	// while an approval form sits in a browser must not be approvable on
+	// the strength of when the form was drawn.
+	//
+	// It runs after the confirm_phrase check above, which is
+	// deliberate and matches ADR-0113's own posture: a wrong or missing
+	// phrase must cause no action at all, not even a forwarded RPC, so
+	// the phrase stays first and the window is the first thing checked
+	// once the call is genuinely an approval attempt.
+	if err := s.requireLiveColonyJoinWindow(ctx, req.GetRequestId()); err != nil {
+		return &rpcpb.ApproveJoinRequestResponse{Error: err.Error()}, nil
 	}
 
 	// Check leadership BEFORE running the local reachability dial below -

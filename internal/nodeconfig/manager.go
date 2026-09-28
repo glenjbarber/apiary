@@ -51,6 +51,19 @@ import (
 // config file under /usr/local/etc/apiary (ADR-0100).
 const DefaultPath = "/usr/local/etc/apiary/managerd.json"
 
+// DefaultColonyJoinWindowSeconds is what a managerd uses when
+// managerd.json does not set colony_join_window_seconds at all
+// (ADR-0147 Part 4). It lives here, beside the field it defaults,
+// rather than in internal/manager, so the installed
+// `apiaryctl install` can write the same number it will later be held
+// to without importing the whole RPC server.
+//
+// It is a DEFAULT, not a fallback: a value that is present but
+// malformed or non-positive is a startup error in validate below,
+// never this constant. A window whose length is silently wrong is a
+// window nobody can reason about.
+const DefaultColonyJoinWindowSeconds int64 = 900
+
 // Config is the full set of node-local settings this package manages.
 // Every field's zero value means "use the hardcoded default" - see
 // applyManagerdDefaults in cmd/managerd/main.go. Grouped to mirror
@@ -181,6 +194,20 @@ type Config struct {
 	// the three unauthenticated join-colony RPCs. Empty preserves
 	// ADR-0092's original accept-any-target_address behavior.
 	KnownPeerAddresses string `json:"known_peer_addresses,omitempty"`
+
+	// ColonyJoinWindowSeconds is ADR-0147 Part 4's join-window ceiling,
+	// and is a POINTER because absent and zero are different claims
+	// here: absent means "use the built-in default", while a value that
+	// is present and non-positive is a startup error. A plain int would
+	// make the two indistinguishable and would have to treat an
+	// explicit 0 as "unset", which is precisely the silent fallback the
+	// ADR forbids.
+	//
+	// It is both the default and the ceiling: OpenColonyJoinWindow may
+	// request anything shorter and nothing longer, and the leader's
+	// value is the one that decides, because the leader computes the
+	// deadline.
+	ColonyJoinWindowSeconds *int64 `json:"colony_join_window_seconds,omitempty"`
 
 	// AssumptionCheckInterval/AssumptionHeartbeatInterval/
 	// AssumptionStaleAfter/AssumptionRunDeadline/AssumptionHistoryLimit/
@@ -508,6 +535,9 @@ func validate(cfg Config) error {
 	}
 	if err := validateDurationField("assumption_history_max_age", cfg.AssumptionHistoryMaxAge); err != nil {
 		return err
+	}
+	if cfg.ColonyJoinWindowSeconds != nil && *cfg.ColonyJoinWindowSeconds <= 0 {
+		return fmt.Errorf("nodeconfig: invalid colony_join_window_seconds %d: must be positive; a window whose length is silently wrong is a window nobody can reason about, so a present but non-positive value is refused at startup rather than replaced with the default", *cfg.ColonyJoinWindowSeconds)
 	}
 	if cfg.AssumptionHistoryLimit < 0 {
 		return fmt.Errorf("nodeconfig: invalid assumption_history_limit %d: must not be negative", cfg.AssumptionHistoryLimit)

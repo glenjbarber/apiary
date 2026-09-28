@@ -127,6 +127,15 @@ service RaftInternal {
   // answer from any node's own local copy.
   rpc GetRestartLeaseStateLocal(GetRestartLeaseStateRequest) returns (GetRestartLeaseStateResponse);
 
+  // GetColonyJoinWindowLocal is the read side of ADR-0147 Part 4's
+  // Colony join window. Deliberately NOT leader-only, for the same
+  // GetRestartLeaseStateLocal reason: the window is already
+  // raft-replicated, so any node can answer for itself, and that is
+  // the whole point of the design - a joining Comb introduced to a
+  // follower must see the same window a join introduced to the leader
+  // would see.
+  rpc GetColonyJoinWindowLocal(GetColonyJoinWindowRequest) returns (GetColonyJoinWindowResponse);
+
   // GetColonyUpdateStateLocal is the read side of ADR-0145's colony-wide
   // controlled-update single-flight. It is deliberately named ...Local and
   // deliberately NOT leader-only, for the same GetRestartLeaseStateLocal
@@ -481,4 +490,22 @@ message ExportStateResponse {
   string node_id = 3;
   string error = 4;
   string leader_hint = 5;
+}
+
+// GetColonyJoinWindowRequest/GetColonyJoinWindowResponse carry the
+// local FSM's copy of ADR-0147 Part 4's ColonyJoinWindow. The response
+// repeats the message rather than flattening it, so the raft-side
+// schema and the manager-side one cannot drift apart.
+message GetColonyJoinWindowRequest {}
+
+message GetColonyJoinWindowResponse {
+  // window is this node's own replicated copy, nil if the Colony has
+  // never had a window opened.
+  ColonyJoinWindow window = 1;
+
+  // live is whether that window is still open at this node's clock.
+  // It travels beside the window rather than being left to the caller
+  // to compute, so the liveness answer and the state it was computed
+  // from can never be two separate reads taken at different moments.
+  bool live = 2;
 }

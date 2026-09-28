@@ -38,6 +38,7 @@ const (
 	RaftInternal_GetPendingJoinRequestLocal_FullMethodName   = "/apiary.internal.v1.RaftInternal/GetPendingJoinRequestLocal"
 	RaftInternal_ListPendingJoinRequestsLocal_FullMethodName = "/apiary.internal.v1.RaftInternal/ListPendingJoinRequestsLocal"
 	RaftInternal_GetRestartLeaseStateLocal_FullMethodName    = "/apiary.internal.v1.RaftInternal/GetRestartLeaseStateLocal"
+	RaftInternal_GetColonyJoinWindowLocal_FullMethodName     = "/apiary.internal.v1.RaftInternal/GetColonyJoinWindowLocal"
 	RaftInternal_GetColonyUpdateStateLocal_FullMethodName    = "/apiary.internal.v1.RaftInternal/GetColonyUpdateStateLocal"
 	RaftInternal_StepAsideForRestartLocal_FullMethodName     = "/apiary.internal.v1.RaftInternal/StepAsideForRestartLocal"
 )
@@ -152,6 +153,14 @@ type RaftInternalClient interface {
 	// this is a plain read of already-replicated FSM state, safe to
 	// answer from any node's own local copy.
 	GetRestartLeaseStateLocal(ctx context.Context, in *GetRestartLeaseStateRequest, opts ...grpc.CallOption) (*GetRestartLeaseStateResponse, error)
+	// GetColonyJoinWindowLocal is the read side of ADR-0147 Part 4's
+	// Colony join window. Deliberately NOT leader-only, for the same
+	// GetRestartLeaseStateLocal reason: the window is already
+	// raft-replicated, so any node can answer for itself, and that is
+	// the whole point of the design - a joining Comb introduced to a
+	// follower must see the same window a join introduced to the leader
+	// would see.
+	GetColonyJoinWindowLocal(ctx context.Context, in *GetColonyJoinWindowRequest, opts ...grpc.CallOption) (*GetColonyJoinWindowResponse, error)
 	// GetColonyUpdateStateLocal is the read side of ADR-0145's colony-wide
 	// controlled-update single-flight. It is deliberately named ...Local and
 	// deliberately NOT leader-only, for the same GetRestartLeaseStateLocal
@@ -394,6 +403,16 @@ func (c *raftInternalClient) GetRestartLeaseStateLocal(ctx context.Context, in *
 	return out, nil
 }
 
+func (c *raftInternalClient) GetColonyJoinWindowLocal(ctx context.Context, in *GetColonyJoinWindowRequest, opts ...grpc.CallOption) (*GetColonyJoinWindowResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetColonyJoinWindowResponse)
+	err := c.cc.Invoke(ctx, RaftInternal_GetColonyJoinWindowLocal_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *raftInternalClient) GetColonyUpdateStateLocal(ctx context.Context, in *GetColonyUpdateStateRequest, opts ...grpc.CallOption) (*GetColonyUpdateStateResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(GetColonyUpdateStateResponse)
@@ -524,6 +543,14 @@ type RaftInternalServer interface {
 	// this is a plain read of already-replicated FSM state, safe to
 	// answer from any node's own local copy.
 	GetRestartLeaseStateLocal(context.Context, *GetRestartLeaseStateRequest) (*GetRestartLeaseStateResponse, error)
+	// GetColonyJoinWindowLocal is the read side of ADR-0147 Part 4's
+	// Colony join window. Deliberately NOT leader-only, for the same
+	// GetRestartLeaseStateLocal reason: the window is already
+	// raft-replicated, so any node can answer for itself, and that is
+	// the whole point of the design - a joining Comb introduced to a
+	// follower must see the same window a join introduced to the leader
+	// would see.
+	GetColonyJoinWindowLocal(context.Context, *GetColonyJoinWindowRequest) (*GetColonyJoinWindowResponse, error)
 	// GetColonyUpdateStateLocal is the read side of ADR-0145's colony-wide
 	// controlled-update single-flight. It is deliberately named ...Local and
 	// deliberately NOT leader-only, for the same GetRestartLeaseStateLocal
@@ -632,6 +659,9 @@ func (UnimplementedRaftInternalServer) ListPendingJoinRequestsLocal(context.Cont
 }
 func (UnimplementedRaftInternalServer) GetRestartLeaseStateLocal(context.Context, *GetRestartLeaseStateRequest) (*GetRestartLeaseStateResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetRestartLeaseStateLocal not implemented")
+}
+func (UnimplementedRaftInternalServer) GetColonyJoinWindowLocal(context.Context, *GetColonyJoinWindowRequest) (*GetColonyJoinWindowResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetColonyJoinWindowLocal not implemented")
 }
 func (UnimplementedRaftInternalServer) GetColonyUpdateStateLocal(context.Context, *GetColonyUpdateStateRequest) (*GetColonyUpdateStateResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetColonyUpdateStateLocal not implemented")
@@ -1002,6 +1032,24 @@ func _RaftInternal_GetRestartLeaseStateLocal_Handler(srv interface{}, ctx contex
 	return interceptor(ctx, in, info, handler)
 }
 
+func _RaftInternal_GetColonyJoinWindowLocal_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetColonyJoinWindowRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(RaftInternalServer).GetColonyJoinWindowLocal(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: RaftInternal_GetColonyJoinWindowLocal_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(RaftInternalServer).GetColonyJoinWindowLocal(ctx, req.(*GetColonyJoinWindowRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _RaftInternal_GetColonyUpdateStateLocal_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(GetColonyUpdateStateRequest)
 	if err := dec(in); err != nil {
@@ -1120,6 +1168,10 @@ var RaftInternal_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "GetRestartLeaseStateLocal",
 			Handler:    _RaftInternal_GetRestartLeaseStateLocal_Handler,
+		},
+		{
+			MethodName: "GetColonyJoinWindowLocal",
+			Handler:    _RaftInternal_GetColonyJoinWindowLocal_Handler,
 		},
 		{
 			MethodName: "GetColonyUpdateStateLocal",

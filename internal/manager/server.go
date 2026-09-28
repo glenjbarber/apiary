@@ -213,6 +213,21 @@ type PeerForwarder interface {
 	// mirroring ApproveJoinRequest above exactly (ADR-0103).
 	PreflightApproveJoinRequest(ctx context.Context, addr string, req *rpcpb.PreflightApproveJoinRequestRequest) (*rpcpb.PreflightApproveJoinRequestResponse, error)
 
+	// OpenColonyJoinWindow/CloseColonyJoinWindow forward on a
+	// leader-hint rejection, mirroring ApproveJoinRequest above
+	// exactly (ADR-0147 Part 4). Only the leader mutates the window;
+	// asking any member to open one is allowed precisely because the
+	// member forwards rather than deciding.
+	OpenColonyJoinWindow(ctx context.Context, addr string, req *rpcpb.OpenColonyJoinWindowRequest) (*rpcpb.OpenColonyJoinWindowResponse, error)
+	CloseColonyJoinWindow(ctx context.Context, addr string, req *rpcpb.CloseColonyJoinWindowRequest) (*rpcpb.CloseColonyJoinWindowResponse, error)
+
+	// GetColonyJoinWindowUnauthenticated dials a caller-supplied
+	// target_address for the same reason
+	// RequestJoinColonyUnauthenticated above does: this RPC is exempt
+	// from checkAuth, so a caller-chosen address must never be dialed
+	// with this node's own shared -peer-api-key attached (ADR-0096).
+	GetColonyJoinWindowUnauthenticated(ctx context.Context, addr string, req *rpcpb.GetColonyJoinWindowRequest) (*rpcpb.GetColonyJoinWindowResponse, error)
+
 	// UpdateVoterAddress forwards on a leader-hint rejection, mirroring
 	// ApproveJoinRequest above exactly (ADR-0106).
 	UpdateVoterAddress(ctx context.Context, addr string, req *rpcpb.UpdateVoterAddressRequest) (*rpcpb.UpdateVoterAddressResponse, error)
@@ -354,6 +369,16 @@ type Server struct {
 	// this node's own raftd then just returns the LeaderHint error as
 	// before (ADR-0035), rather than forwarding.
 	peers PeerForwarder
+
+	// colonyJoinWindowSecondsSet is the effective ceiling for ADR-0147
+	// Part 4's join window, wired from managerd.json's
+	// colony_join_window_seconds by SetColonyJoinWindowSeconds. Zero
+	// means "not configured", which colonyJoinWindowSeconds reads as
+	// DefaultColonyJoinWindowSeconds - a setter rather than a
+	// NewServer parameter, for the same reason SetAssumptionRegister
+	// and its neighbours are setters: NewServer's signature is load-
+	// bearing for every test in this package.
+	colonyJoinWindowSecondsSet int64
 
 	// peerManagerdPort mirrors internal/cluster's own field of the same
 	// name and purpose - empty uses defaultPeerManagerdPort.
@@ -646,6 +671,17 @@ var _ rpcpb.ManagerServiceServer = (*Server)(nil)
 // NewServer(...) call site a mechanical one-line edit.
 func NewServer(raft *RaftClient, nodeID string, isos isoManager, vnc VNCLookup, serialLog SerialLogLookup, vlanMgr VLANStatus, peers PeerForwarder, peerManagerdPort string, zfsMgr quotaSetter, nodeConfig nodeConfigStore, assumptionStoreMgr assumptionStore, assumptionStaleAfter time.Duration, reconciler reconcilerStats) *Server {
 	return &Server{raft: raft, nodeID: nodeID, isos: isos, vnc: vnc, serialLog: serialLog, vlan: vlanMgr, statsGather: hoststats.Gather, hostPkgCollect: hostpkg.NewCollector(hostpkg.Options{}).Collect, peers: peers, peerManagerdPort: peerManagerdPort, zfs: zfsMgr, nodeConfig: nodeConfig, listNetworkInterfaces: netif.List, assumptions: assumptionStoreMgr, assumptionStaleAfter: assumptionStaleAfter, reconciler: reconciler, services: rcServiceController{}, pamLockouts: newPAMLockoutTracker(), reachabilityCheck: dialReachable, raftdConversion: rcRaftdConversionAdapter{}, colonyUpdateIncarnation: ColonyUpdateIncarnation()}
+}
+
+// SetColonyJoinWindowSeconds wires the configured join-window ceiling
+// (ADR-0147 Part 4, colony_join_window_seconds in managerd.json).
+// Non-positive values are ignored rather than stored, because
+// internal/nodeconfig already refuses a present-but-non-positive value
+// at startup and the default is the only thing left to mean here.
+func (s *Server) SetColonyJoinWindowSeconds(seconds int64) {
+	if seconds > 0 {
+		s.colonyJoinWindowSecondsSet = seconds
+	}
 }
 
 // SetNetworkInterfaceLister overrides host interface discovery for tests.

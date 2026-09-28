@@ -518,16 +518,28 @@ func TestServer_RequestJoinColony_RejectsMalformedFieldsBeforeRaft(t *testing.T)
 // refused by Reject, Cancel and Approve, and left Pending in the FSM.
 func TestIntegration_ResolveExpiredJoinRequest_RefusedBeforeSubmitting(t *testing.T) {
 	raftdSocket := newRaftdUDSSocket(t)
-	_, srv := newManagerdRPCClientAndServer(t, raftdSocket, "raftd-1")
+	client, srv := newManagerdRPCClientAndServer(t, raftdSocket, "raftd-1")
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
+	openColonyJoinWindowForTest(t, client)
+	// The request is expired, and it must be refused for being expired -
+	// so it has to be a request the Colony would otherwise have
+	// accepted. That means carrying the live window's epoch
+	// (ADR-0147 Part 4); without it the epoch check refuses first and
+	// this test would assert an expiry message and get a stale-window
+	// one, passing for the wrong reason.
+	window, live := srv.liveColonyJoinWindow(ctx)
+	if !live {
+		t.Fatal("no live Colony join window; the request would be refused as stale rather than expired")
+	}
 	create := &internalpb.Command{Op: &internalpb.Command_CreatePendingJoinRequest{CreatePendingJoinRequest: &internalpb.CreatePendingJoinRequest{
 		Request: &internalpb.PendingJoinRequest{
 			RequestId: "jreq-old", NodeId: "node-2", RaftBindAddress: "10.0.0.2:17600", Code: "123456",
 			RequestedAtUnix: time.Now().Add(-time.Hour).Unix(), ExpiresAtUnix: time.Now().Add(-time.Minute).Unix(),
-			Status: internalpb.JoinRequestStatus_JOIN_REQUEST_STATUS_PENDING,
+			Status:             internalpb.JoinRequestStatus_JOIN_REQUEST_STATUS_PENDING,
+			WindowOpenedAtUnix: window.GetOpenedAtUnix(),
 		},
 	}}}
 	payload, err := proto.Marshal(create)

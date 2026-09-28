@@ -145,6 +145,13 @@ func (c *RaftClient) GetRestartLeaseStateLocal(ctx context.Context, service stri
 	return c.client.GetRestartLeaseStateLocal(ctx, &internalpb.GetRestartLeaseStateRequest{Service: service})
 }
 
+// GetColonyJoinWindowLocal backs GetColonyJoinWindow and
+// requireLiveColonyJoinWindow (ADR-0147 Part 4) - a plain read of this
+// node's own FSM copy, mirroring GetRestartLeaseStateLocal above.
+func (c *RaftClient) GetColonyJoinWindowLocal(ctx context.Context) (*internalpb.GetColonyJoinWindowResponse, error) {
+	return c.client.GetColonyJoinWindowLocal(ctx, &internalpb.GetColonyJoinWindowRequest{})
+}
+
 // GetColonyUpdateStateLocal is the read side of ADR-0145's durable
 // controlled-update state, reached over this node's own raftd socket.
 //

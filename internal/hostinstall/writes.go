@@ -7,6 +7,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/glenjbarber/apiary/internal/commonconfig"
@@ -204,6 +205,26 @@ func (p *Plan) planManagerdWrites() {
 			p.add(ActionNeeds, path, f.field, "",
 				"not written, because this Comb has no usable serving certificate and pointing managerd at a file that is not there would make it fail to start rather than fail to secure itself - see the certificate refusal above")
 		}
+	}
+
+	// colony_join_window_seconds is written EXPLICITLY, and only when
+	// this file does not already set it, so an operator can see the
+	// number rather than having to know it. It is not a host fact and
+	// has no flag: the built-in default is the right value, and the
+	// point of writing it is that the number is visible and editable,
+	// not that it was derived. An existing value is left exactly alone
+	// per the preservation rules above - changing a window ceiling an
+	// operator has already chosen is not this tool's business.
+	if p.managerOwn.ColonyJoinWindowSeconds != nil {
+		p.add(ActionKeep, path, "colony_join_window_seconds",
+			strconv.FormatInt(*p.managerOwn.ColonyJoinWindowSeconds, 10),
+			"already set in this file; left exactly as it is")
+	} else if cfg.ColonyJoinWindowSeconds == nil {
+		seconds := nodeconfig.DefaultColonyJoinWindowSeconds
+		cfg.ColonyJoinWindowSeconds = &seconds
+		changed = true
+		p.add(ActionFill, path, "colony_join_window_seconds", strconv.FormatInt(seconds, 10),
+			"ADR-0147 Part 4's Colony join-window ceiling, written explicitly so the number is visible and editable; the same value is the default and the maximum, and a value beyond it is refused by name")
 	}
 
 	if p.managerOwn.NodeID == "" && cfg.NodeID == "" && p.NodeID != "" {

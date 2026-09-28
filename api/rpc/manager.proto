@@ -651,6 +651,31 @@ service ManagerService {
   // entry. Admin-gated, the same tier as Approve/Reject/List.
   rpc PurgeJoinRequest(PurgeJoinRequestRequest) returns (PurgeJoinRequestResponse);
 
+  // OpenColonyJoinWindow/CloseColonyJoinWindow are ADR-0147 Part 4's
+  // Colony-wide admission window: the toggle that makes this Colony
+  // joinable at all, for a bounded time, with a visible end. Admin-tier
+  // because it is a state change that every member replicates, and
+  // because opening one is what an operator deliberately does before
+  // adding hardware - not a capability to hand out. Any member may be
+  // ASKED to open one; the call forwards to the leader exactly like
+  // every other admin-side state change, and only the leader mutates.
+  rpc OpenColonyJoinWindow(OpenColonyJoinWindowRequest) returns (OpenColonyJoinWindowResponse);
+  rpc CloseColonyJoinWindow(CloseColonyJoinWindowRequest) returns (CloseColonyJoinWindowResponse);
+
+  // GetColonyJoinWindow is the UNAUTHENTICATED read, and the only
+  // pre-join trust anchor in the system. A joining Comb has no Raft
+  // membership, so ADR-0115's automatic peer-hostname derivation has
+  // nothing to derive from and there is no other place the Colony
+  // could say who it is. It is exempt from checkAuth for the same
+  // reason RequestJoinColony is - a Comb that has not yet joined has
+  // no Colony API key by definition - and it is deliberately narrow
+  // for that reason: it returns only public bootstrap fields, only
+  // while a window is live, and nothing that could be used to change
+  // any state. A caller that can reach it can read a Colony's
+  // advertised name, its members' managerd certificate fingerprints,
+  // and its node IDs, and can do nothing else.
+  rpc GetColonyJoinWindow(GetColonyJoinWindowRequest) returns (GetColonyJoinWindowResponse);
+
   // UpdateVoterAddress (ADR-0106) re-points an EXISTING raft voter's
   // address in place - the first-class replacement for resubmitting a
   // RequestJoinColony/ApproveJoinRequest pair against an already-voting
@@ -3188,6 +3213,14 @@ message PendingJoinRequest {
   // be refused rather than assumed to mean "empty".
   bool joiner_log_state_observed = 9;
   uint64 joiner_last_log_index = 10;
+
+  // window_opened_at_unix mirrors internalpb.PendingJoinRequest's own
+  // field of the same name - see there for why a reopen invalidates
+  // every request created under the previous window. The Admin's
+  // pending-request panel renders it so an operator can see which
+  // window created a request and whether that window is still live,
+  // rather than learning it only from a refusal at approval time.
+  int64 window_opened_at_unix = 11;
 }
 
 message RequestJoinColonyRequest {
@@ -3294,6 +3327,94 @@ message ApproveJoinRequestResponse {
   PendingJoinRequest request = 1;
   string error = 2;
   string leader_hint = 3;
+}
+
+// ColonyJoinWindow mirrors internalpb.ColonyJoinWindow - the same
+// deliberate duplication as PendingJoinRequest's own doc comment
+// describes: apiary.rpc.v1 is the external API and does not import the
+// internal package. See there for what each field means and why the
+// deadline is absolute.
+message ColonyJoinWindow {
+  bool   enabled         = 1;
+  string opened_by       = 2;
+  string opened_by_key   = 3;
+  int64  opened_at_unix  = 4;
+  int64  expires_at_unix = 5;
+}
+
+message OpenColonyJoinWindowRequest {
+  // duration_seconds is OPTIONAL. Absent means "use the configured
+  // default", and the configured value is also the ceiling - a request
+  // for anything longer is refused by name, naming both the number
+  // applied and the file that holds the ceiling. There is no "or
+  // longer" case, because "or longer" is the extend operation this
+  // window exists to prevent: an operator who wants a different length
+  // closes the window and opens a new one, which is a second visible
+  // act rather than a silent one.
+  int64 duration_seconds = 1;
+  uint32 timeout_ms = 2;
+}
+
+message OpenColonyJoinWindowResponse {
+  // window is the window as replicated, including the absolute
+  // deadline. applied_duration_seconds echoes the length that was
+  // actually used, so an operator whose request was refused for
+  // exceeding the ceiling, or who named no duration at all, never has
+  // to guess which number won.
+  ColonyJoinWindow window = 1;
+  int64 applied_duration_seconds = 2;
+  string error = 3;
+  string leader_hint = 4;
+}
+
+message CloseColonyJoinWindowRequest {
+  uint32 timeout_ms = 1;
+}
+
+message CloseColonyJoinWindowResponse {
+  ColonyJoinWindow window = 1;
+  string error = 2;
+  string leader_hint = 3;
+}
+
+message GetColonyJoinWindowRequest {
+  // target_address (ADR-0092) mirrors RequestJoinColony's own field,
+  // for the case where this managerd is the JOINING Comb's and the
+  // operator named a remote member to ask. It is dialed without this
+  // node's peer API key attached, for the same reason and under the
+  // same bound, since a caller-supplied address is being dialed by a
+  // call that is itself unauthenticated.
+  string target_address = 1;
+  uint32 timeout_ms = 2;
+}
+
+message GetColonyJoinWindowResponse {
+  // window is set only while a window is live. enabled is true and
+  // expires_at_unix is in the future whenever window is populated.
+  ColonyJoinWindow window = 1;
+
+  // colony_name is the resolvable managerd dial name the Colony
+  // advertises for itself, taken from its serving certificate's SANs.
+  // Never a LAN address and never a wildcard, per ADR-0139: a dial
+  // target has to be a name that verifies.
+  string colony_name = 2;
+
+  // managerd_fingerprints maps node ID to the "SHA256:..." fingerprint
+  // of that member's own managerd serving certificate. EVERY current
+  // member is published, not just the leader's, and that is the
+  // owner's decision over a cheaper leaders-only list: a joiner
+  // introduced to a follower needs something to check that follower
+  // against, and "the leader says so" is not it.
+  map<string, string> managerd_fingerprints = 3;
+
+  // colony_node_id and leader_node_id let both pages name the Colony
+  // the same way, and let an operator see they are looking at the same
+  // thing.
+  string colony_node_id = 4;
+  string leader_node_id = 5;
+
+  string error = 6;
+  string leader_hint = 7;
 }
 
 message RejectJoinRequestRequest {

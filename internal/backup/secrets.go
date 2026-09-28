@@ -628,6 +628,20 @@ type NodeConfigRecord struct {
 	PeerTLSCA          string `json:"peer_tls_ca,omitempty"`
 	KnownPeerAddresses string `json:"known_peer_addresses,omitempty"`
 
+	// ColonyJoinWindowSeconds is ADR-0147 Part 4's join-window ceiling.
+	// It is an ordinary setting and not a credential, so it is recorded
+	// normally, as the decimal string this record uses for every other
+	// number.
+	//
+	// Absent is the empty string, not "0", and the distinction survives
+	// the round trip because nodeconfig's own validate refuses a present
+	// non-positive value at startup. So "" can only mean "the operator
+	// never set it" - a rebuilt Comb then uses the built-in default -
+	// while "900" is a decision the operator made and is restored as
+	// one. Recording 0 for the unset case would be a claim the config
+	// loader has to reject.
+	ColonyJoinWindowSeconds string `json:"colony_join_window_seconds,omitempty"`
+
 	AssumptionCheckInterval     string `json:"assumption_check_interval,omitempty"`
 	AssumptionHeartbeatInterval string `json:"assumption_heartbeat_interval,omitempty"`
 	AssumptionStaleAfter        string `json:"assumption_stale_after,omitempty"`
@@ -709,6 +723,8 @@ func BuildNodeConfigRecord(cfg nodeconfig.Config, peers []string) NodeConfigReco
 		PeerTLSCA:          cfg.PeerTLSCA,
 		KnownPeerAddresses: cfg.KnownPeerAddresses,
 
+		ColonyJoinWindowSeconds: optionalSeconds(cfg.ColonyJoinWindowSeconds),
+
 		AssumptionCheckInterval:     cfg.AssumptionCheckInterval.String(),
 		AssumptionHeartbeatInterval: cfg.AssumptionHeartbeatInterval.String(),
 		AssumptionStaleAfter:        cfg.AssumptionStaleAfter.String(),
@@ -732,6 +748,20 @@ func BuildNodeConfigRecord(cfg nodeconfig.Config, peers []string) NodeConfigReco
 
 		Peers: append([]string(nil), peers...),
 	}
+}
+
+// optionalSeconds renders a config field that is a POINTER because absent
+// and zero are different claims. Absent is the empty string, which
+// omitempty then drops from the JSON entirely, so a reader of the archive
+// can tell "the operator never said" from "the operator said a number".
+// It would return "0" for a nil pointer, and "0" is a value
+// nodeconfig.validate refuses, so an archive would describe a
+// configuration that cannot start.
+func optionalSeconds(v *int64) string {
+	if v == nil {
+		return ""
+	}
+	return fmt.Sprintf("%d", *v)
 }
 
 // RaftdConfigRecord is the backup-safe projection of a
