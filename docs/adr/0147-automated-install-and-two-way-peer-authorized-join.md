@@ -13,6 +13,13 @@ This ADR is written to be reviewed before implementation. The
 was made on the owner's behalf rather than by the owner, and each one
 is cheap to change now and expensive later.
 
+It has three parts, decided together. Part 1 is the source-free
+`apiaryctl install`. Part 2 is the two-way, peer-authorized join that
+replaces `yes-trust-new-comb`. Part 3 is the root-owned
+authorization-file mechanism that answers a hostile Colony Admin, which
+the owner confirmed is in scope; Part 2 alone does not stop that
+adversary and says so.
+
 Amends ADR-0113 (removes `yes-trust-new-comb`). Touches ADR-0083,
 ADR-0092, ADR-0096, ADR-0097, ADR-0100, ADR-0105, ADR-0111, ADR-0115,
 ADR-0139, and ADR-0141.
@@ -506,6 +513,15 @@ reader does not "consistency-fix" the other two.
 | `GetLocalJoinIdentity` | new. Admin on the *requesting* Comb. Its own `node_id`, `raft_bind`, first code, fingerprints, stage, and second PIN when it has one |
 | `internalpb.PendingJoinRequest` | gains `stage`, `advertised_fingerprints`, `second_pin`, `first_code_attempts`, `second_pin_attempts`, `second_pin_expires_at_unix` |
 | `internalpb.Command` | gains `VerifyJoinIntroduction` and `ReissueJoinSecondPin` commands, so both are raft-replicated like every other join transition |
+| `PendingJoinRequest` (Part 3) | gains `authorization_id`, `consumed_at_unix`, and the two approving API key IDs, so consumption and authorship are both in the raft log rather than only in a file |
+
+**No RPC is added that can create or modify an authorization entry.**
+That is the load-bearing negative of Part 3, and it is stated here
+because the RPC table is where a later implementer would add one by
+reflex. The only writer is the root-only installed `apiaryctl` binary,
+acting on a local file. Any future RPC that touches this file is a
+security regression even if it is Admin-tier, and should be treated as
+one in review.
 
 `internalpb/state.proto` change means a state-format concern: new fields
 on a raft-replicated message, and the canonical state digest (ADR-0143)
@@ -532,6 +548,153 @@ then the existing preflight and Approve. The second PIN is never
 rendered there. The `Preflight approval` button stays exactly where it
 is and gains a stage-appropriate message.
 
+**Part 3, on the same page.** The panel reports, per pending request,
+whether a matching authorization entry exists on this Comb, and the
+preflight lists both remaining gates: the authorization entry and the
+second distinct API key. It never offers a way to create an entry, and
+it never renders the entry list, because the page is served by a Comb a
+hostile Admin controls. What the operator is told is *that* a gate is
+unmet and what would satisfy it, never the contents of anything that
+would satisfy it.
+
+## Part 3: The authorization only the operator can give
+
+Part 2 as written stops unattended, uninformed, and injected approval.
+It does not stop a hostile Admin of the target Colony, and the owner
+confirmed that adversary is in scope. This part closes it, using the one
+authority that separates the operator from that Admin.
+
+### The boundary is file ownership, not a secret
+
+An Admin-tier caller can already do a great deal. `UpdateNodeConfig`,
+`UpdateFrontendConfig`, and `UpdateRestshimdConfig` write files as root
+(`internal/nodeconfig/manager.go:336`); `RestartNodeService` restarts
+services from a fixed allowlist and refuses managerd self-restart
+(`internal/manager/server.go:3625`, `internal/manager/services.go:115`);
+`ConvertStandaloneToJoiner` can reach `raftd -reset`
+(`internal/manager/raftdservice.go:75`).
+
+What an Admin-tier caller cannot do is read or write an arbitrary
+root-owned file, or run an arbitrary command. That gap is the entire
+basis of this part. It is why the mechanism is a file and not a key: a
+file the Admin cannot write is an authority they cannot assume, and it
+needs no secret to protect, no rotation story, and no new cryptography.
+
+### The file
+
+`/usr/local/etc/apiary/join-authorizations.json`, root-owned, mode 0600,
+holding a list of single-use entries:
+
+```
+{ "authorizations": [
+    { "id": "auth-...", "node_id": "comb-3",
+      "fingerprint": "sha256:ab12...", "expires_at_unix": 1789... }
+] }
+```
+
+Deliberately **not** one of the config files. No RPC writes it, and it
+is never a field of any proto, so the three `Update*Config` handlers
+cannot reach it. `apiaryctl install` creates it empty, 0600, alongside
+the other config files, so a fresh Comb has the store before it needs
+it.
+
+The operator creates an entry by reading the fingerprint on the
+requester's own page and running, on a Comb:
+
+```
+apiaryctl join-authorize --node-id comb-3 --fingerprint sha256:ab12...
+```
+
+which prints the pending request it matched against, so the deliberate
+comparison still happens in front of the operator, and then writes the
+entry atomically. `apiaryctl` is already the established root-only
+installed command and needs no checkout (it lives in
+`/usr/local/libexec/apiary/`), so this adds a subcommand, not a new
+tool.
+
+### What approval now requires
+
+All three, and the first is the one that matters:
+
+1. A **matching, unconsumed, unexpired entry** in the file, for that
+   `node_id` and that exact fingerprint. No entry means no voter,
+   whatever API key is presented.
+2. **Two distinct API keys, from two distinct Combs.** Both are
+   recorded on the request, so the Colony's own history says which keys
+   authorized which join. This is the same idea as a two-person rule
+   and it costs the operator nothing.
+3. Everything Part 2 already requires: the first code, the fingerprint
+   match, the second PIN, reachability, the join-log guardrail, and the
+   existing not-already-a-voter check.
+
+A refusal for a missing entry names the entry that is needed and which
+Comb to create it on, because "refusing" with no next step is how an
+operator ends up disabling the check.
+
+### Single use is replicated, not just local
+
+Only the leader calls `AddVoter`, so only the leader reads the file. If
+leadership moves, the new leader's copy of the file is what is checked,
+and a stale copy elsewhere in the Colony must not be able to authorize
+the same request a second time.
+
+So consumption is recorded in replicated state, not only in the file:
+`PendingJoinRequest` gains `authorization_id` and `consumed_at_unix`,
+written by the same FSM command that approves. A second Comb holding an
+unconsumed copy of the same entry is refused because the replicated
+request already records the consumption. The file is the *input*; the
+raft log is the *record of use*.
+
+This has an operational consequence worth stating plainly: the file
+must exist on every Comb, and an entry must be created on whichever
+Comb is currently the leader. That is why the refusal message names it
+rather than failing anonymously.
+
+### How the layers compose, and what each one alone misses
+
+- **The two-way PIN exchange alone** stops an uninformed or unattended
+  approval and a mis-paste. It does not stop an Admin who reads the PIN
+  off the page, or who runs the whole exchange themselves.
+- **The distinct-key rule alone** stops an Admin holding exactly one
+  key. It does not stop one holding two, and it never involves the
+  operator.
+- **The authorization file alone** is the only layer that requires the
+  operator's deliberate act. It is the layer that closes the hole.
+
+They are kept together because they fail differently, and because the
+first two are free.
+
+### What this still does not stop
+
+- **Impersonation.** An Admin can still present themselves as the
+  operator everywhere else in the UI. Nothing inside the Colony can fix
+  that, because impersonating the operator to the Colony is something
+  the Colony is itself asserting.
+- **Denial.** An Admin can delete an entry, refuse to forward, or
+  withhold a file. Denial is survivable and diagnosable, and it is the
+  correct asymmetry: the operator can admit a Comb, the Admin cannot
+  quietly admit one.
+- **Root on any Comb.** That is Level 2 and it is out of scope. Root on
+  the Comb holding an authorization file is root on the Colony's ability
+  to admit new members, which is a Level 2 consequence landing on a
+  Level 1 design, and is the reason this file is worth excluding from
+  backups.
+
+### Why nothing browser-based was used
+
+Recorded because it is the obvious next suggestion and it does not work.
+A non-extractable WebCrypto key in the operator's browser cannot be
+extracted, but the page is served by the target, and script in that
+origin can call `crypto.subtle.sign` with it. A confirm button on the
+target's own page is decided by the target. The operator's existing
+Admin key is readable through `ListAPIKeys` and mintable through
+`CreateAPIKey`. Signing off-band on the operator's own machine was
+proposed and **rejected by the owner**: nothing may live on an
+administrator's local machine, and everything must be built into Apiary.
+The file is what remains once that constraint is applied, and it is
+enough because the operator's authority over a Comb is root, which is
+exactly the authority an Admin key does not confer.
+
 ---
 
 ## What this does not claim
@@ -547,6 +710,10 @@ impressive one.
   it authorizes. "A hostile Admin" names two principals with two
   different answers; the next section separates them, because which one
   is in scope decides whether any of the remedies are worth building.
+  **This bullet describes Part 2 only.** Part 3 is what constrains a
+  Level 1 Admin: the operator's deliberate act, recorded in a file no
+  Admin-tier RPC can write, becomes a precondition for a voter. What
+  survives Part 3 is impersonation and denial, both named there.
 - **It does not survive an attacker who controls the requesting
   managerd.** If the requesting side is hostile end to end, it displays
   whatever it likes. The fingerprint comparison catches a *third* party
@@ -645,6 +812,23 @@ which is precisely the friction the two-way numeric flow was designed to
 remove. Choosing C means accepting that join authorization is a
 deliberate operator action with a key, not a copy and paste.
 
+**Superseded. C was proposed, then rejected by the owner, and Part 3
+replaces it.** The rejection was a hard constraint rather than a
+preference: nothing may live on an administrator's local machine, and
+everything must be built into Apiary. C put the signing step on the
+operator's own machine, so it is not available. Part 3 reaches the same
+place - the operator's act is the thing that cannot be forged - using a
+root-owned file instead of a signature, because the operator's authority
+over a Comb is root, and root is exactly what an Admin key does not
+confer.
+
+One correction to the paragraph above, kept rather than edited out: the
+target does **not** reduce to recording a signed approval. It still
+validates request binding, expiry, single use, reachability, and the
+join-log guardrail. What changes is that it can no longer *manufacture*
+authorization, so bypassing the flow requires forging something rather
+than holding an API key.
+
 **Also worth considering: quorum authorization for membership change.**
 Require k-of-n voters to approve an `AddVoter`. Membership changes are
 already single-copy on the leader, so this is comparatively cheap, and
@@ -668,6 +852,12 @@ for the stronger one later. Folding the join capability into the token
 project, or sequencing the token project ahead of the PIN's storage
 decision, avoids building the handling discipline twice. This is a
 sequencing recommendation; it does not reverse anything in Part 2.
+
+Narrowed by Part 3, which was written afterwards. The join capability
+that was going to be a secret is now a file, so it is not raftd-
+reachable and there is no second version of the machinery to build.
+What is left here is only the second PIN's storage discipline, which
+stays a Part 2 question and is open question 6 below.
 
 ## Rejected alternatives
 
@@ -726,7 +916,13 @@ This ADR does **not**:
 - touch the internal raftd/managerd token project, which stays deferred
   until a coordinated security effort covers secret matching, fail-closed
   mismatch behavior, rollout compatibility, startup validation, no
-  leakage, tests, and rotation;
+  leakage, tests, and rotation. The Part 3 authorization file does not
+  enter that project and does not narrow its scope: it is a managerd
+  policy input, never replicated, never a raftd credential, and never
+  checked by raftd. raftd keeps seeing an ordinary FSM command. What the
+  two share is the *handling discipline* - never replicated, never in a
+  log line, never on an RPC response, fail-closed on a malformed file -
+  not a mechanism, and so not a reason to sequence the two;
 - build a FreeBSD port or package. Binary delivery to a fresh host stays
   exactly as it is today - a checkout, or whatever the owner does;
 - remove or deprecate `apiaryinstall`, or move any `/etc`, PF, ZFS,
@@ -767,6 +963,16 @@ This ADR does **not**:
   to the installer, for the same reason and with the same argument.
 - **ADR-0143** - canonical state digest. New replicated fields change the
   digest; expected during rollout.
+- **ADR-0100, applied to a new file** - `join-authorizations.json` is
+  written by a program like every other config file, but it is not
+  config: nothing reads it as configuration, no RPC writes it, and it
+  carries a decision rather than a setting. It is the one file in the
+  project whose authority comes from its ownership rather than its
+  contents.
+- **ADR-0136 / ADR-0142** - `apiaryctl` as the one root-only installed
+  command. `join-authorize` is the same kind of thing as
+  `force-restart`: a root-only installed binary acting on the local
+  control plane, requiring no checkout, adding no new distribution.
 - **ADR-0113** - amended. `yes-trust-new-comb` is removed.
 
 ## Verification
@@ -826,6 +1032,35 @@ to earn.
 - Comparison is constant-time, asserted by a test that the comparison
   helper is `subtle.ConstantTimeCompare` and not `==`.
 
+**Part 3, and these are the tests that carry the security claim:**
+
+- An approval with a valid first code, valid fingerprints, and a valid
+  second PIN, but **no authorization entry, is refused**, and
+  `AddVoter` is never reached. This is the single most important
+  assertion in the ADR and it gets its own test with its own name.
+- The same, with an entry whose `node_id` matches but whose fingerprint
+  does not. Refused.
+- The same, with an expired entry. Refused.
+- A consumed `authorization_id` presented a second time, against a
+  Comb whose local file still lists the entry as unconsumed. Refused on
+  the **replicated** consumption, not on the local file.
+- Two approvals from the same API key, and two from two keys on the
+  same Comb. Both refused. Two keys on two distinct Combs succeed, and
+  the response names both key IDs.
+- A test that walks the `api/rpc` service descriptor and fails if any
+  method name matches the authorization store, so the "no RPC writes
+  this file" rule is enforced mechanically rather than by review.
+- The file is 0600 and root-owned after install, after an entry is
+  added, and after an entry is consumed. A malformed file fails closed
+  with its path and refuses every join, rather than falling back to
+  "no entries, so nothing is authorized anyway" by accident.
+- `apiaryctl join-authorize` with no checkout present, on a fixture
+  directory, asserting it writes atomically and prints the matched
+  request before writing.
+- The refusal message for a missing entry names the Comb that must
+  carry it, asserted by substring, so the operator is never left with a
+  refusal and no next step.
+
 **Both parts, then mutation testing** under the rules already used in
 this repository: every mutant applies exactly once, changes bytes, fails
 on an **assertion** rather than a compile error, and is restored
@@ -881,3 +1116,38 @@ picking either one changes how much of the above is worth building.
    Part 2 flow is already the right amount of machinery and both A and C
    should be left out. B is worth having either way, on the reasoning
    given above.
+
+### 7 and 8, now answered
+
+**Level 1 is in scope.** The owner confirmed it: a hostile Colony Admin
+holding manager API access is the adversary this ADR must address. Level
+2, root on a Comb, stays out of scope and is written down as
+unreachable from inside the protocol.
+
+**Neither A nor C, as written.** C was rejected on a hard constraint:
+nothing may live on an administrator's local machine, and everything
+must be built into Apiary. A was not chosen because a pasted Colony-wide
+secret is harvestable by the very Admin it is meant to stop, and because
+a capability configured once stops being a per-join human decision. The
+owner's decision was option 3, single use: the root-owned authorization
+file, plus the two-distinct-keys rule, plus everything Part 2 already
+does, all computed under the hood with mutual PIN verification in both
+directions. That is Part 3.
+
+9. **Authorization entry expiry.** Proposed at 24 hours. The entry is
+   created by the operator at a moment of their choosing, which is not
+   the same moment the second PIN is issued, so a five-minute TTL would
+   be unusable. The alternative is no expiry at all, which leaves a
+   long-lived unused entry sitting in a root-owned file on every Comb.
+10. **Two keys on two distinct Combs, or two distinct keys.** Part 3
+    writes the stricter rule, because a second key on the *same* Comb is
+    two credentials in one place and buys little. The looser rule is
+    easier to implement, since it needs no peer coordination and no
+    forwarding.
+11. **Whether hand-editing the file is supported.** Security-wise a
+    root-owned file edit is exactly as safe as the command. It also
+    skips the step where `apiaryctl` shows the operator the pending
+    request it matched, which is the deliberate comparison. The command
+    should be the only documented interface, and a file edit should
+    still be honoured, since a root operator who insists is not an
+    attacker.
