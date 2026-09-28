@@ -35,7 +35,7 @@ predictable expiry; and **approval requires a live window**, not merely
 request creation. The last is the stricter of the two options on the
 table and was chosen for that reason. The two points I had left open in
 Part 4 are answered too: the window length is configurable and defaults
-to ten minutes, and the window publishes every member's managerd
+to fifteen minutes, and the window publishes every member's managerd
 fingerprint.
 
 Amends ADR-0113 (removes `yes-trust-new-comb`). Touches ADR-0083,
@@ -840,16 +840,16 @@ prevent. An operator who wants a different length changes the
 configuration or closes the current window and opens a new one, which
 are visible acts rather than silent ones.
 
-**The duration is configurable, defaulting to 10 minutes.** The owner's
-decision, and the reason it is configurable is worth stating: 10
-minutes has to cover a two-human exchange across two machines, which is
+**The duration is configurable, defaulting to 15 minutes.** The owner's
+decision, and the reason it is configurable is worth stating: any
+default has to cover a two-human exchange across two machines, which is
 comfortable when the exchange is deliberate and tight when it is not,
 and the right length depends on the Colony and on the operator. A
 Colony where the two machines sit on the same desk and one where the
 operator has to walk somewhere are not the same number.
 
 - `managerd.json` gains `colony_join_window_seconds`, absent meaning
-  **600**. `apiaryctl install` writes it explicitly when it creates the
+  **900**. `apiaryctl install` writes it explicitly when it creates the
   file, so the operator can see the number, and leaves it alone when the
   file already exists, per Part 1's preservation rules.
 - The configured value is both the **default and the ceiling**.
@@ -864,7 +864,7 @@ operator has to walk somewhere are not the same number.
   number wins and the response says which number was used". The
   response carries the applied duration so no operator has to guess.
 - A **malformed or non-positive value is a startup error**, not a
-  fallback to 600. A window whose length is silently wrong is a window
+  fallback to 900. A window whose length is silently wrong is a window
   nobody can reason about, and this is the same fail-closed rule
   Part 1 applies to the files it writes.
 
@@ -893,7 +893,7 @@ permanent capability:
 **Open the window last, not first.** With the epoch rule above, an
 expiry part-way through the exchange does not merely expire a PIN, it
 kills the request and the pair start again. The ordering that makes a
-ten-minute default comfortable is therefore:
+fifteen-minute default comfortable is therefore:
 
 1. The joining Comb is installed and shows its own first code and
    fingerprints. Nothing about this needs a window.
@@ -1608,9 +1608,9 @@ to earn.
   failure messages must not be identical.
 - Expiry passes with no leader activity at all: the window closes on
   time because the deadline is absolute, asserted with a shortened
-  duration in the test rather than a real ten minutes.
+  duration in the test rather than a real fifteen minutes.
 - **The duration, all four ways.** Absent from `managerd.json` gives
-  600 seconds, asserted on the actual deadline and not on a constant.
+  900 seconds, asserted on the actual deadline and not on a constant.
   A configured value is honored. An explicit shorter request is honored.
   A request above the configured value is refused, and the refusal is
   asserted to name both the ceiling and the file that holds it.
@@ -1620,7 +1620,7 @@ to earn.
   mutant that reads a follower's config.
 - A zero, negative, or non-integer `colony_join_window_seconds` is a
   **startup error**, asserted against the loader directly. A mutant
-  that falls back to 600 is killed here, not in a later test that
+  that falls back to 900 is killed here, not in a later test that
   happens to use a valid config.
 - `apiaryctl install` writes the field when it creates `managerd.json`
   and does not touch it when the file exists, asserted with a
@@ -1768,23 +1768,28 @@ neither moved anything structural: the window mechanism, the epoch rule,
 and the trust ordering were written so that neither answer could change
 them.
 
-12. **The window duration is configurable, and defaults to 10 minutes.**
-    Not a fixed number, because a ten-minute default has to cover a
-    two-human exchange across two machines, and whether that is
-    comfortable or tight depends on the Colony and on the operator. A
-    Colony whose two machines sit on one desk and one where the operator
-    has to walk between them are not the same number, and a value chosen
-    once for both would be wrong for at least one of them.
+12. **The window duration is configurable, and defaults to 15 minutes.**
+    Not a fixed number, because any default has to cover a two-human
+    exchange across two machines, and whether that is comfortable or
+    tight depends on the Colony and on the operator. A Colony whose two
+    machines sit on one desk and one where the operator has to walk
+    between them are not the same number, and a value chosen once for
+    both would be wrong for at least one of them.
 
-    10 minutes was chosen over the 30 I proposed, and the shorter
-    number is the better one here: the epoch rule means an expiry
-    mid-exchange costs a restart, so the pressure should be on the
-    operator to open the window when they are ready rather than on a
-    generous timer. That is why the ordering is written down --
+    Fifteen minutes was settled on after ten and after the 30 I
+    proposed, and the progression is worth recording because it shows
+    the number is not a security parameter. The epoch rule is what
+    makes an expiry safe; the length only decides how often a careful
+    operator gets restarted, and the cost of a window that is too short
+    is a restart the operator has to begin again. Fifteen minutes
+    leaves room for a deliberate comparison of two fingerprint lists
+    without leaning on the ordering below being followed, and it is
+    still short enough that a window nobody remembered has not become a
+    standing invitation by the time anyone comes back to it. That is
+    why the ordering is written down anyway --
     the joining Comb displays its code first, the operator opens both
     pages, and the window is opened last, immediately before the
-    exchange. With that order, ten minutes is a comfortable amount of
-    time to copy two numbers and read a fingerprint.
+    exchange.
 
     The configured value is the default **and** the ceiling, and the
     leader's copy is the one that applies. Making the configuration
