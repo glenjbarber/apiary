@@ -13,16 +13,26 @@ This ADR is written to be reviewed before implementation. The
 was made on the owner's behalf rather than by the owner, and each one
 is cheap to change now and expensive later.
 
-It has three parts, decided together. Part 1 is the source-free
+It has four parts, decided together. Part 1 is the source-free
 `apiaryctl install`. Part 2 is the two-way, peer-authorized join that
 replaces `yes-trust-new-comb`. Part 3 is the root-owned
 authorization-file mechanism that answers a hostile Colony Admin, which
 the owner confirmed is in scope; Part 2 alone does not stop that
-adversary and says so.
+adversary and says so. Part 4 makes TLS the default on every Comb
+including a single-node one, and adds the Colony-side
+`await_colony_join` window that supplies the pre-join trust anchor and
+gates the flow.
+
+Three decisions in Part 4 are the owner's, not mine, and are recorded
+as decisions rather than proposals: TLS is on by default everywhere;
+the Colony side of the join is a deliberate operator toggle with a
+predictable expiry; and **approval requires a live window**, not merely
+request creation. The last is the stricter of the two options on the
+table and was chosen for that reason.
 
 Amends ADR-0113 (removes `yes-trust-new-comb`). Touches ADR-0083,
-ADR-0092, ADR-0096, ADR-0097, ADR-0100, ADR-0105, ADR-0111, ADR-0115,
-ADR-0139, and ADR-0141.
+ADR-0092, ADR-0093, ADR-0096, ADR-0097, ADR-0100, ADR-0105, ADR-0112,
+ADR-0115, ADR-0139, and ADR-0141.
 
 ## Context
 
@@ -114,7 +124,10 @@ the leader can be found at approve time, and the code already forwards.
 
 ## Decision
 
-Two decisions, plus the boundary between them.
+Four decisions, plus the boundary between them. Parts 1 to 3 are what
+was drafted first; Part 4 is the owner's later set, recorded as
+decided rather than proposed because the reasoning behind each one is
+not in doubt.
 
 ---
 
@@ -211,7 +224,7 @@ only place these tests can run.
 ### Identity
 
 `common.json` is the right home for `node_id` and `hostname`
-(ADR-0111), and `setup-quick` does not write it at all today, which is
+(ADR-0112), and `setup-quick` does not write it at all today, which is
 why every daemon carries its own copy of the same value.
 
 Derivation order, first non-empty wins, and every step is reported:
@@ -414,6 +427,13 @@ request can be stage `CODE_VERIFIED` and still be pending, which is
 exactly the window where the operator is copying a PIN between two
 machines.
 
+`PendingJoinRequest` also records `window_epoch`, the `opened_at_unix`
+of the Colony join window that was live when the request was created
+(Part 4). It is not a TTL and it is not a stage; it is the request's
+claim on one specific window, and approval checks that the live window
+is that window. It is the field that stops a request being parked
+through an expiry and finished during the next open window.
+
 Everything lives in raft, not in managerd memory. That is not a
 preference, it is what makes the rest work: **leadership can change at
 any point in this flow and the handshake continues**, because the new
@@ -514,6 +534,32 @@ reader does not "consistency-fix" the other two.
 | `internalpb.PendingJoinRequest` | gains `stage`, `advertised_fingerprints`, `second_pin`, `first_code_attempts`, `second_pin_attempts`, `second_pin_expires_at_unix` |
 | `internalpb.Command` | gains `VerifyJoinIntroduction` and `ReissueJoinSecondPin` commands, so both are raft-replicated like every other join transition |
 | `PendingJoinRequest` (Part 3) | gains `authorization_id`, `consumed_at_unix`, and the two approving API key IDs, so consumption and authorship are both in the raft log rather than only in a file |
+| `OpenColonyJoinWindow` | Part 4. new. Admin. `{duration_seconds}` → the absolute deadline. Leader-only, forwarded like every other admin-side state change |
+| `CloseColonyJoinWindow` | Part 4. new. Admin. Ends the window early; expiry converges on the same state |
+| `GetColonyJoinWindowResponse` | Part 4. new. Unauthenticated, **only while the window is live**, and returns the public bootstrap fields and nothing else: `colony_name`, member managerd fingerprints, `opened_at_unix`, `expires_at_unix`, `colony_node_id`, `leader_node_id` |
+| `PinPeerCertificate` | Part 4. new. Admin. The target's half of the trust step: evaluate the joiner's leaf, then record the pin. Called automatically by the introduction path, never by a page |
+| `UnpinPeerCertificate` | Part 4. new. Admin. Drops a pin held for a request that ended without becoming a voter |
+| `internalpb.ColonyJoinWindow` | Part 4. new. The replicated window, with an absolute `expires_at_unix` and `opened_at_unix` doubling as its epoch |
+| `internalpb.TrustedPeer` | Part 4. new. The replicated trust store, leaf PEM included |
+| `PendingJoinRequest` (Part 4) | gains `window_epoch`, so a request belongs to one window and cannot be finished in the next |
+| `internalpb.Command` (Part 4) | gains `OpenColonyJoinWindow`, `CloseColonyJoinWindow`, `PinPeerCertificate`, and `UnpinPeerCertificate` arms |
+
+**Two of these RPCs are deliberately unauthenticated**, and it is worth
+being explicit about why, because the instinct on reading the table
+will be to authenticate them. `RequestJoinColony` and
+`GetColonyJoinWindow` are reachable by a Comb that has no Colony
+credentials yet, which is the entire situation they exist to serve.
+`GetColonyJoinWindow` is safe to expose because while the window is
+live it is publishing what the operator has already decided to
+publish, and when the window is not live it returns nothing. The
+security of the join does not rest on either RPC; it rests on what the
+leader refuses to do without the operator's authorization file.
+
+**The same negative applies to `PinPeerCertificate` as to the
+authorization file, in weaker form.** A pin is written by an RPC, so an
+Admin can add one, and that is why the trust store is documented as a
+mechanism for honest operation rather than as a boundary. It must never
+be treated as a substitute for Part 3.
 
 **No RPC is added that can create or modify an authorization entry.**
 That is the load-bearing negative of Part 3, and it is stated here
@@ -627,6 +673,13 @@ All three, and the first is the one that matters:
    match, the second PIN, reachability, the join-log guardrail, and the
    existing not-already-a-voter check.
 
+And, ahead of all of them, Part 4's check that the Colony's join window
+is live and is the same window the request was created under. The order
+is deliberate: the window is the cheapest check, it is the one that
+explains the refusal the operator will most often hit, and a request
+that is dead on that ground should not also consume a second-PIN
+attempt.
+
 A refusal for a missing entry names the entry that is needed and which
 Comb to create it on, because "refusing" with no next step is how an
 operator ends up disabling the check.
@@ -697,6 +750,345 @@ exactly the authority an Admin key does not confer.
 
 ---
 
+## Part 4: TLS by default, and the window that makes a join possible
+
+The owner asked for a toggle on a managerd of an existing Colony that
+sets that Colony joinable, with a predictable timeout. It is worth
+being clear that this is more than a convenience switch, because the
+design below leans on it for three separate jobs: it is the Colony's
+answer to the unauthenticated request-creation surface, it is the only
+place a pre-join trust anchor can exist, and it is what makes
+`yes-trust-new-comb`'s replacement meaningful rather than ceremonial.
+
+### TLS is on by default, including a single-node Colony
+
+The owner's decision. It removes a compatibility path rather than
+adding a default.
+
+- **There is no longer a supported state in which a Comb has no usable
+  serving certificate.** The "no TLS certificate presented" fallback
+  in the join flow is removed, not deprecated. A Comb with no
+  certificate cannot be joined, and Part 1 is what guarantees it has
+  one.
+- **A single-node Colony is a TLS Colony.** Standalone is not a
+  plaintext mode. This costs nothing at one node and it is the case
+  that would otherwise discover the gap at the worst moment, when a
+  lone Comb is finally asked to join.
+- **Existing certificates are preserved, not replaced.** A Comb with a
+  working RSA-2048 pair from `setup-tls` keeps it, keeps serving it,
+  and joins with it. ECDSA is what the installer *generates*, not what
+  is *required*; the evaluation gate below accepts either.
+
+This also answers open question 4, which was written while TLS was
+still opt-in and therefore asked the wrong question.
+
+### `await_colony_join` is the Colony side, and it is not `await_join`
+
+Two flags with similar names and opposite meanings. The collision is
+close enough to be worth a table.
+
+| | `await_join` | `await_colony_join` |
+| --- | --- | --- |
+| Lives in | `raftd.json` on the Comb that is joining | managerd, as replicated Colony state |
+| Direction | The joining Comb waits for someone | An existing Colony admits |
+| Prevents | Self-bootstrapping onto an empty log | Nothing; it is the absence of the normal state |
+| Default | `false` | `false` |
+| Set by | the installer's join path, or `ConvertStandaloneToJoiner` | an operator, deliberately, on a member |
+| Ends | when the join succeeds | at an absolute deadline fixed when it was opened |
+
+The normal state of a Colony is **closed**. A request arriving at a
+closed Colony is refused with a message naming the fix. That inverts
+today's default, where `RequestJoinColony` is accepted at any moment by
+any member.
+
+### The window is Colony-wide and replicated
+
+Replicated, because otherwise an election would decide whether a join
+is possible at all. It is FSM state on the leader:
+
+```proto
+message ColonyJoinWindow {
+  bool   enabled         = 1;
+  string opened_by       = 2;  // node ID of the member it was opened on
+  string opened_by_key   = 3;  // API key ID of the caller
+  int64  opened_at_unix  = 4;  // also the window's epoch identity
+  int64  expires_at_unix = 5;  // absolute, set once, never extended
+}
+```
+
+with two command arms, `OPEN_COLONY_JOIN_WINDOW` and
+`CLOSE_COLONY_JOIN_WINDOW`. Any member may be *asked* to open it; the
+call is forwarded to the leader exactly like every other admin-side
+state change, and only the leader mutates. A follower answers
+`GetColonyJoinWindow` from its replicated copy, so introducing a Comb
+to a follower behaves identically to introducing it to the leader.
+
+### Opening it, and what predictable has to mean
+
+`OpenColonyJoinWindow` takes a duration, proposes **30 minutes** (open
+question 12), and is **refused outright while a live window already
+exists** - there is no "or longer" case, because "or longer" is the
+extend operation this section exists to prevent. An operator who wants a
+longer window closes the current one and opens a new one, which is two
+visible acts rather than one silent one. Three properties, each closing
+a specific way a window becomes a permanent capability:
+
+- **The deadline is absolute and fixed once.** It is
+  `opened_at + duration` computed on the leader and replicated. A
+  leader change does not renew it, a managerd restart does not renew
+  it, and there is no extend operation. A member that wants longer
+  opens a new window, which is a second deliberate act and shows up as
+  a second act in the log.
+- **Closing early is allowed**, because an operator who changes their
+  mind should not have to wait the window out. Expiry and an explicit
+  close converge on the same state; the only difference is who asked
+  and what the log records.
+- **A reopen invalidates every request created under the old window.**
+  This is the subtle one, and without it the window is extendable by
+  accident. Each `PendingJoinRequest` records the `opened_at_unix` of
+  the window that was live when it was created, and approval requires
+  the current window's `opened_at_unix` to equal it. So "let the
+  window lapse, reopen, and finish the half-done request from before"
+  is not a path, and a request cannot be parked in one window and
+  completed in the next.
+
+### Both the request and the approval need a live window
+
+The owner's decision, and the stricter of the two options. Gating only
+request creation would leave a request created inside a window
+approvable at any later moment, which makes the request the long-lived
+capability and the window the theatre. So both ends are checked:
+
+- **`RequestJoinColony` is refused when no window is live.** The
+  refusal names what to do -- no member of this Colony is currently
+  accepting new members, open the join window on a member -- because an
+  unauthenticated caller with no next step is a support problem. This
+  is the one place where the design takes away an unauthenticated
+  capability, and it is a real reduction: no unauthenticated caller can
+  create durable replicated state at will any more.
+- **Approval is refused when no window is live**, even with a valid
+  first code, valid pins, a fresh second PIN, a matching authorization
+  entry, and a request still inside its own TTL. The window is checked
+  first, before the PINs and before the authorization file, because it
+  is the cheapest check and the one the operator most needs explained.
+  The request is not deleted; it is dead, and the operator reopens and
+  the requester re-creates.
+- **The check is at approval time on the leader**, not at page render
+  time. A rendered approval form is not a promise, and a window that
+  expires while a form sits in a browser must not be approvable on the
+  strength of when the form was drawn.
+
+### What the Colony publishes while the window is live
+
+This is the piece that did not exist anywhere before there was a window.
+A joining Comb has no Raft membership, so ADR-0115's runtime derivation
+has nothing to derive from, and there is no pre-join trust anchor in
+the system at all. The window is where the Colony hands one over.
+
+`GetColonyJoinWindow` is unauthenticated, returns only public bootstrap
+fields, and refuses once the window is not live:
+
+- `colony_name` -- the resolvable managerd dial name the Colony
+  advertises for itself, taken from the serving certificate's SANs.
+  Not the LAN address and not a wildcard, per ADR-0139.
+- `managerd_fingerprints` -- SHA-256 over the DER of the leader's and
+  every member's managerd serving certificate, keyed by node ID.
+  Publishing all of them rather than the leader's alone is what lets
+  the joiner check that the member it was handed is a *member*, and not
+  a stranger that answered on that address.
+- `opened_at_unix` and `expires_at_unix`, so a joiner refuses stale
+  bootstrap instead of dialing a name it learned from a window that
+  closed an hour ago.
+- `colony_node_id` and `leader_node_id`, so both pages can name the
+  Colony the same way and the operator can see they are looking at the
+  same thing.
+
+Proposed default payload, and open question 13: the leader plus every
+member's managerd fingerprint. Not the frontend or raftd certificates,
+which are not what peers dial.
+
+### The order is trust first, then PINs
+
+The owner's `morethoughts.txt` puts certificate evaluation before PIN
+authentication, and the correct reading of that is an **ordering**, not
+an extra step. It matters, because a mutual fingerprint exchange is the
+thing that makes relay attacks impossible, and a PIN exchange carried
+out before the channel is verified hands both numbers to whatever is in
+the middle. So the sequence is:
+
+1. The joiner asks the member the operator named for the window, over
+   an unauthenticated dial, and receives the name and the fingerprints.
+2. The joiner **pins** that advertisement and from then on dials the
+   Colony by the advertised name, with `ServerName` set to it and
+   verification against the pinned set. A served certificate that
+   matches no advertised fingerprint is refused, and the joiner prints
+   what it expected.
+3. The target **evaluates** the joiner's certificate against the gate
+   below, then **pins** it into the replicated trust store. This is
+   Part 2's fingerprint handling with the pin kept rather than compared
+   and discarded.
+4. **Only now** do the first code, the second PIN, and the
+   authorization file run, over a channel that both ends have already
+   authenticated.
+
+By the time anyone is asked for anything, both ends of the channel are
+known to both ends. A PIN flow over an unverified channel is a
+man-in-the-middle with two numbers to relay, which is exactly the
+attack the mutual exchange is supposed to close, and pins-first is what
+makes it closed rather than nearly closed.
+
+### The certificate evaluation gate
+
+Fail-closed, and every check reported to the operator by name on the
+target's page with its verdict, the SANs, and the expiry. A failure is
+a refusal, not a warning, and the refusal says which check failed.
+
+- the PEM decodes, and to exactly one certificate;
+- `x509.ParseCertificate` succeeds;
+- `NotBefore <= now < NotAfter`, with both dates printed;
+- self-signed as Part 1 generates them: `cert.CheckSignatureFrom(cert)`
+  returns nil and the issuer matches the subject. This establishes that
+  the certificate is the Comb's own and says nothing about whether that
+  Comb is the one the operator meant, which is the fingerprint's job and
+  the reason both checks exist rather than one;
+- algorithm and strength are acceptable: no MD5 or SHA-1 signatures, no
+  RSA below 2048 bits, ECDSA at least P-256, Ed25519 accepted;
+- SANs include `IP:127.0.0.1` and at least one `DNS:` name, because a
+  certificate carrying only IP SANs is the ADR-0139 failure in
+  certificate form;
+- for a **local** certificate, the public key matches the private key
+  it will be served with.
+
+The last one is local only, and the scope matters enough to say twice.
+At install time a Comb confirms its own certificate against the private
+key it holds. For a remote joiner's leaf the target can check
+structure, dates, algorithm, and SANs, and nothing more: it does not
+hold the joiner's private key and must not be asked for one, so the
+remote side is recorded by fingerprint and the operator is the one asked
+to confirm it. A remote key-pair check written into this list would be
+a check nobody performs.
+
+### The replicated peer trust store
+
+A pin written to a page and then forgotten is not a trust store. Pins
+are replicated state, so they survive a leader change and a wiped
+managerd the same way a join stage does:
+
+```proto
+message TrustedPeer {
+  string node_id        = 1;
+  string comb_name      = 2;
+  string fingerprint    = 3;  // "sha256:..." lowercase hex
+  string cert_pem       = 4;  // the leaf, so a wiped Comb can rebuild
+  int64  not_after_unix = 5;
+  int64  pinned_at_unix = 6;
+  string pinned_by      = 7;  // node ID of the member that accepted it
+  bool   is_voter       = 8;  // false while the pin is held for a request
+}
+```
+
+- **The leaf is stored, not only its digest.** A digest cannot rebuild
+  a PEM bundle, and a Comb that has been reinstalled still has to dial
+  the Colony it belongs to.
+- **`is_voter` is separate from the pin.** A pin is written when the
+  target accepts the certificate, which is *before* authorization, and
+  `AddVoter` promotes it. Conflating the two would mean either a
+  refused request leaving a permanent pin or a pin implying
+  membership. A pin held for a request that reaches a terminal state
+  without becoming a voter is dropped with it, so the store does not
+  accumulate one entry per Comb that ever asked.
+- **Removal is real.** `RemoveServer` drops the entry, and
+  `UpdateVoterAddress` replaces the name. A store that can only grow
+  accumulates dead certificates until one expires by accident.
+- This is replicated state, so it moves the canonical state digest
+  (ADR-0143) and is part of the mixed-version rollout already recorded
+  below.
+
+### Materializing `/usr/local/etc/apiary/peer-ca.pem`
+
+Every Comb runs managerd, so every Comb writes the file from its
+replicated copy, on every change and once at startup. Sorted by node ID
+so the bytes are the same everywhere and an operator can diff two
+hosts.
+
+- Atomic write, temp file plus rename, **0600, root-owned**, the same
+  discipline as every other file here. The directory is 0700.
+- **managerd is the only writer**, and the file is a **derived cache**:
+  delete it and the next managerd start recreates it correctly, so it
+  never has to be in a backup and never has to be restored.
+- It becomes the default value of `peer_tls_ca` in all three daemon
+  configs and in raftd's replacement-confirmation path. `managerd`,
+  `frontend`, and `cmd/raftd/confirm.go` already read that field and
+  already use `LoadPeerCAPool`; what changes is that the file now has a
+  writer, not that the read path moves.
+
+### `peer_tls_ca` is retired as a manual step, not as a concept
+
+The owner proposed retiring `peer_tls_ca` on the reasoning that TLS is
+now on by default everywhere and a CA path is therefore unnecessary.
+That reasoning does not hold, and the correction is recorded here
+rather than quietly dropped, because the reason is the useful part:
+
+**Enabling TLS everywhere does not create a trust anchor.** A
+self-signed serving certificate proves its identity to a party that
+already trusts it. Turning TLS on everywhere changes "nothing is
+encrypted and nothing is verified" into "everything is encrypted and
+nothing is trusted yet", which is a large improvement and a different
+thing. The specific gap is step 2 of the sequence above: the joiner's
+*first* contact, with the member the operator named, happens before the
+joiner has read any advertisement, so the Colony cannot have told it in
+advance what to expect. Exactly two things anchor that contact -- the
+operator comparing what the joiner displays against what the member
+displays, and an operator-supplied `peer_tls_ca` if one is configured.
+
+So the field stays, with a changed default:
+
+- `peer_tls_ca` remains in all three configs and in raftd's confirm
+  path;
+- its **default** becomes the derived
+  `/usr/local/etc/apiary/peer-ca.pem`;
+- an operator who sets a real path still wins, and that path then
+  covers exactly the contact the derived file cannot reach on its own.
+
+What is retired is the **manual distribution step** in
+`docs/add-node-to-colony.md`: copying a CA PEM between hosts by hand.
+That is now the writer's job. Dial-time precedence is pinned leaf for a
+known peer, else operator-supplied CA, else refuse.
+
+### What Part 4 changes in the earlier parts
+
+- Part 1 gains a fail-closed rule: a Comb with no usable serving
+  certificate is never reported as ready, in standalone mode too.
+- Part 2's fingerprint comparison becomes a pin. Same pages, same
+  deliberate operator copy and paste, different lifetime.
+- Part 3 is unchanged. The authorization file gates the same approval,
+  one precondition further out.
+
+### The two pages, again
+
+- **On any member of a Colony:** a join-window control showing the
+  state plainly. Closed by default, with the button that opens it, the
+  duration, and the resulting deadline rendered as an absolute local
+  time. While it is open the page shows a countdown and a "close now"
+  button, because a window the operator cannot see the end of is a
+  window they will not remember to close. The control is Admin-tier,
+  since it is a state change, and it forwards like the rest.
+- **On the requester:** the first step of the join is now "fetch the
+  Colony's advertised name and fingerprints from the member you were
+  given", and that result is displayed before the first code exists, so
+  the operator can compare the Colony's advertisement on the two
+  screens in the same deliberate pass as the requester's fingerprints.
+- **On the target's pending-request panel:** a per-request line saying
+  which window created it, whether that window is still live, and a
+  refusal that reads "the Colony is not currently accepting joins; open
+  the join window and have the requester start again" rather than
+  reading as a failed authorization. The distinction matters, because
+  the two failures have completely different fixes, and an operator
+  told the wrong one goes looking for a second PIN that was never the
+  problem.
+
+---
+
 ## What this does not claim
 
 Being explicit, because the honest version is more useful than the
@@ -729,6 +1121,25 @@ impressive one.
   who could already approve the request outright, so replication widens
   nobody's authority - but the value is not a secret from them, and no
   part of this ADR should be read as claiming it is.
+- **Part 4's trust store is not a boundary against a hostile Admin
+  either.** A pin is written by an RPC on a managerd, which means an
+  Admin can add one. The replicated store and the derived
+  `peer-ca.pem` are what make honest operation automatic and remove
+  hand distribution; they are not a credential a hostile Admin lacks,
+  and the layer that does require a credential the Admin does not hold
+  is still Part 3's file.
+- **The window reduces the unauthenticated surface; it does not close
+  it.** While a window is live, any unauthenticated caller can create a
+  request against it, and a public host's whole job at that moment is to
+  be reachable. What the window changes is that the surface exists only
+  when an operator opened it, on a deadline they set, and that every
+  request created in it dies with the window.
+- **The first pre-join contact is still the operator's eyes.** Pinning
+  starts after the joiner has read the Colony's advertisement, and
+  reading it means an unauthenticated dial to a member the operator
+  named. That is narrowed by publishing every member's fingerprint and
+  by an operator-supplied `peer_tls_ca`, and it is not eliminated by
+  anything in this ADR.
 
 ## The hostile-Admin case is two problems, not one
 
@@ -909,6 +1320,35 @@ Compatibility with what? A Comb with no certificate is a Comb whose
 serving identity was never verifiable, and Part 1 makes sure that is no
 longer a normal state.
 
+**Retire `peer_tls_ca` because TLS is on by default.** The owner's own
+proposal, recorded with the correction rather than as a rejection of the
+intent. TLS being on everywhere is not the same as anything being
+trusted, and the first pre-join contact is the case where the Colony
+has had no opportunity to say what to expect. What is retired is the
+hand-copying of the file between hosts; the field survives as a derived
+default and as the operator-supplied anchor for exactly that first
+contact.
+
+**Gate only request creation on the window, not approval.** The looser
+option, and it was the one on the table until the owner chose the
+stricter. A request created inside a window and approved a week later
+makes the request the capability and the window the decoration.
+
+**Let a live window be extended on request.** It has to be a new window,
+because an extension is invisible in the state and in the log. Making it
+a new window with a new epoch is also what makes the "lapse, reopen,
+finish the old request" hole impossible.
+
+**Publish only the leader's fingerprint in the window.** Cheaper, and it
+fails the case the ADR is built around: a joiner introduced to a follower
+would have no way to tell a member from a stranger that answered on that
+address.
+
+**Let the joiner dial a numeric LAN address and skip the name
+advertisement.** ADR-0139 is the ADR about why that fails. Part 4 is the
+code that makes the rule hold at the moment it matters, which is the
+first dial.
+
 ## Scope boundary
 
 This ADR does **not**:
@@ -931,10 +1371,16 @@ This ADR does **not**:
   add anything to `make update`;
 - automate anything about `raftd -reset`, the restart guardrail
   (ADR-0103), or the controlled update (ADR-0145, ADR-0146);
-- distribute `peer_tls_ca` certificates between Combs. That is a real
-  remaining manual step in `docs/add-node-to-colony.md` and it is a
-  separate problem - it is a trust-establishment question, not a
-  configuration-generation one.
+- distribute `peer_tls_ca` certificates between Combs by hand. That
+  is a real remaining manual step in `docs/add-node-to-colony.md`
+  today, and Part 4 removes it by giving the file a writer, which is a
+  different change from changing a field. What it does **not** do is
+  make the first pre-join contact verifiable, and that contact still
+  rests on the operator's comparison or on an operator-supplied
+  `peer_tls_ca`;
+- add renewal for serving certificates. A 3650-day certificate that
+  expires is a visible condition, not a silent one, and a renewal path
+  belongs in its own ADR rather than inside an installer;
 
 ## Relationship to existing decisions
 
@@ -952,11 +1398,13 @@ This ADR does **not**:
   from a program for the first time.
 - **ADR-0105** - `ConvertStandaloneToJoiner`. Keeps its own phrase; its
   join submission becomes the same first-code flow.
-- **ADR-0111** - `common.json`. Becomes the home `setup-quick` never gave
+- **ADR-0112** - `common.json`. Becomes the home `setup-quick` never gave
   it.
 - **ADR-0115** - automatic `peer_tls_hostname_map`. Not duplicated. This
   ADR fills the one window it cannot cover: before a Comb has joined, it
-  has no membership to derive from.
+  has no membership to derive from. Part 4 is where that window gets
+  filled, with the Colony publishing the name its members can be
+  reached at instead of a joining Comb guessing one.
 - **ADR-0139** - `rpc_addr` is a dial target too. This ADR turns its
   comment block into the code that enforces it.
 - **ADR-0141** - the installed-binary rule. This ADR is that rule applied
@@ -974,6 +1422,11 @@ This ADR does **not**:
   `force-restart`: a root-only installed binary acting on the local
   control plane, requiring no checkout, adding no new distribution.
 - **ADR-0113** - amended. `yes-trust-new-comb` is removed.
+- **ADR-0093** - peer-forwarding TLS needs its own CA trust. Not
+  contradicted, and the shape of the answer changes: the CA file
+  becomes a derived artifact of replicated pins rather than something
+  copied between hosts, while the field stays for the one contact pins
+  cannot cover. This ADR is what gives that file a writer.
 
 ## Verification
 
@@ -1061,9 +1514,69 @@ to earn.
   carry it, asserted by substring, so the operator is never left with a
   refusal and no next step.
 
-**Both parts, then mutation testing** under the rules already used in
-this repository: every mutant applies exactly once, changes bytes, fails
-on an **assertion** rather than a compile error, and is restored
+**Part 4, the window, the trust, and their order:**
+
+- **The window, in state, not in a mock.** A real Raft group. Open on a
+  follower, assert the record replicates, assert the deadline is the
+  absolute one computed on the leader.
+- A leader change with the window open: the new leader answers
+  `GetColonyJoinWindow` with the **original** `expires_at_unix`, not a
+  fresh one. A test that only checks "the window is still open" passes
+  this bug; asserting the exact deadline does not.
+- `RequestJoinColony` with no window live is refused, and the message
+  names the join window.
+- **The central Part 4 assertion, with its own test and its own name:**
+  a request with a valid first code, valid pins, a fresh second PIN, a
+  matching authorization entry, distinct keys, and a clean join-log
+  verdict, whose window has since expired, is refused and `AddVoter` is
+  never reached. Every other gate passing is the point of the test.
+- The same, where the window was closed early and then **reopened**:
+  the request predates the new window and is refused on the epoch
+  mismatch. This is the test that proves the window is not extendable by
+  lapse-and-reopen.
+- A request created inside window A, approved during window B, refused.
+  The same test viewed from the other side, kept because the two
+  failure messages must not be identical.
+- Expiry passes with no leader activity at all: the window closes on
+  time because the deadline is absolute, asserted with a shortened
+  duration in the test rather than a real 30 minutes.
+- `GetColonyJoinWindow` after expiry returns no fingerprints, not stale
+  ones. Asserted on the absence of the field, not on an error alone.
+- **The trust ordering is asserted, not described.** A test in which the
+  joiner is pointed at a member whose served certificate matches no
+  advertised fingerprint fails at step 2, before any code is requested,
+  and no `PendingJoinRequest` is ever created. A test that lets the
+  flow proceed to the PINs in that situation fails.
+- Every gate check, each with a name and a verdict in the message: a
+  truncated PEM, two certificates in one PEM, an expired leaf, a leaf
+  not yet valid, a certificate whose issuer differs from its subject, a
+  self-signed certificate with a bad self-signature, an RSA-1024 key, a
+  SHA-1 signature, a certificate with no `127.0.0.1` SAN, a certificate
+  with IP SANs and no DNS name. Each refused by name.
+- A locally generated pair whose certificate does not match its private
+  key is refused by install, and the remote case is asserted *not* to
+  claim that check: a test that a remote leaf is accepted on structure
+  alone, with the fingerprint recorded, so the boundary is pinned by a
+  test rather than by prose.
+- **The derived file, as a file.** Written from a fixture replicated
+  set: 0600, root-owned, sorted by node ID, byte-identical on two
+  simulated Combs holding the same state. Deleting it and re-running
+  the materializer recreates it byte for byte. A test that a hand-edited
+  `peer-ca.pem` is replaced on the next start rather than trusted.
+- The wire: an operator-set `peer_tls_ca` beats the derived default, and
+  the default is used when it is unset. Asserted through the same
+  `LoadPeerCAPool` call the daemons make.
+- A pin for a request that is rejected is removed; a pin promoted by a
+  real `AddVoter` becomes `is_voter`; `RemoveServer` drops the entry.
+  All three against real Raft, so the store is asserted to shrink as
+  well as grow.
+- TLS-by-default: a Comb whose install finds no usable certificate is
+  not reported ready, with or without `--colony-member`, and the
+  "no TLS certificate presented" path is gone from the templates.
+
+**All four parts, then mutation testing** under the rules already used
+in this repository: every mutant applies exactly once, changes bytes,
+fails on an **assertion** rather than a compile error, and is restored
 byte for byte. A mutant that dies at build time is rejected as evidence
 and replaced, as was done for the two build-failure kills in the
 force-restart work.
@@ -1086,10 +1599,15 @@ picking either one changes how much of the above is worth building.
 3. **Five minutes for the second PIN**, against the request's existing
    fifteen. Long enough for a careful copy between two machines, short
    enough that a PIN left on a screen stops being useful.
-4. **A request with no fingerprints is refused.** TLS stays opt-in today
-   and this makes a Comb with no serving certificate unable to join at
-   all until the installer gives it one. Correct, but it is a real
-   compatibility change for any host that skipped TLS.
+4. ~~**A request with no fingerprints is refused.**~~ **Answered, and
+   the question is retired.** It was written while TLS was opt-in, so
+   it was really asking whether requiring a certificate is a
+   compatibility break. The owner made TLS the default on every Comb,
+   Part 1 gives every Comb a certificate, and the compatibility path is
+   removed rather than deprecated, so a Comb with no certificate is
+   now a broken Comb instead of a supported configuration. The
+   fingerprints are still mandatory, and now for a reason that is
+   structural rather than cautionary.
 5. **Reissuing the second PIN is allowed, three times.** The alternative
    is that a mistyped PIN kills the request outright, which is safer and
    much more annoying.
@@ -1151,3 +1669,33 @@ directions. That is Part 3.
     should be the only documented interface, and a file edit should
     still be honoured, since a root operator who insists is not an
     attacker.
+
+## Open questions added by Part 4
+
+Both are points where a number or a payload was chosen on your behalf
+rather than by you. Neither is structural: the window mechanism, the
+epoch rule, and the trust ordering do not depend on either answer.
+
+12. **The default `await_colony_join` duration.** Proposed at 30
+    minutes. The constraint is real: the window has to cover the
+    *whole* flow, because approval needs a live one, and the flow is
+    two humans copying numbers between two machines. Too short and the
+    operator reopens mid-flow, which by the epoch rule invalidates the
+    request they are halfway through, and that is a confusing failure
+    to explain. Too long and a forgotten window is a standing
+    invitation that outlives its purpose. 30 minutes is comfortable
+    for a careful exchange and still expires on its own if everyone
+    walks away. 15 minutes is the shorter defensible answer, an hour is
+    the longer one, and I would argue against the hour.
+13. **The exact bootstrap payload.** Proposed: `colony_name` taken from
+    the leader's certificate SANs, plus the managerd SHA-256
+    fingerprint of the leader and of every member, plus the window's
+    `opened_at_unix` and `expires_at_unix`, plus the Colony and leader
+    node IDs. Publishing every member rather than the leader alone is
+    the part worth a decision, because it is what lets the joiner
+    confirm that the member the operator named is a member. The costs
+    are a fingerprint list that grows with the Colony, and a window
+    that is a small amount of public information while it is open.
+    Leaders-only is simpler and covers the common case, but a joiner
+    introduced to a follower is exactly the case this ADR says has to
+    behave identically, so leaders-only leaves a hole.
