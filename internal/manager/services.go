@@ -65,9 +65,11 @@ var apiaryServices = []struct {
 // daemon and no next step.
 const managerdSelfRestartRefusal = "apiary_managerd cannot be restarted through the API: the restart is " +
 	"orchestrated from inside the managerd being restarted, so stopping it kills the process that was " +
-	"about to start it, and the daemon does not come back. Restart it on the node instead, with " +
-	"`make force-restart` (restarts managerd and then raftd, deliberately bypassing the restart " +
-	"lease and quorum preflight) or `service apiary_managerd restart` if you only need managerd."
+	"about to start it, and the daemon does not come back. Restart it on the node instead: " +
+	"`service apiary_managerd restart` is enough if you only need managerd, and `make force-restart` " +
+	"restarts managerd and then raftd, deliberately bypassing the restart lease and quorum preflight. " +
+	"Run that one from the apiary checkout (~/apiary), not from /usr/local/libexec/apiary, because " +
+	"it calls scripts/record-forced-restart.sh from there."
 
 // managerdSelfRestartRefused reports whether name is managerd itself, the
 // one service in the inventory that must never be restarted from inside

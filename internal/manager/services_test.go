@@ -64,4 +64,21 @@ func TestManagerdSelfRestartRefused(t *testing.T) {
 	if !strings.Contains(managerdSelfRestartRefusal, "service apiary_managerd restart") {
 		t.Error("the refusal message must also offer the managerd-only alternative")
 	}
+	// Naming the target is not the same as telling the operator where to
+	// run it. make force-restart calls scripts/record-forced-restart.sh, so
+	// it only exists inside the checkout, and the message is read in a
+	// browser with no shell in sight. "make force-restart" on its own is
+	// what produced a report that the target had been removed.
+	for _, want := range []string{"~/apiary", "scripts/record-forced-restart.sh"} {
+		if !strings.Contains(managerdSelfRestartRefusal, want) {
+			t.Errorf("the refusal message must say where to run make force-restart; missing %q from %q", want, managerdSelfRestartRefusal)
+		}
+	}
+	// And the wider command has to be the second one named. Restarting
+	// managerd and raftd is a bigger act than the operator asked for.
+	plain := strings.Index(managerdSelfRestartRefusal, "service apiary_managerd restart")
+	forced := strings.Index(managerdSelfRestartRefusal, "make force-restart")
+	if plain < 0 || forced < 0 || plain > forced {
+		t.Errorf("the managerd-only alternative must come first, got plain=%d forced=%d in %q", plain, forced, managerdSelfRestartRefusal)
+	}
 }

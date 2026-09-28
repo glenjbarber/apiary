@@ -647,6 +647,12 @@ func TestServer_IssueOriginCertificateInstallsAndRestartsManagerd(t *testing.T) 
 	if !strings.Contains(resp.GetRestartRequiredMsg(), "make force-restart") {
 		t.Errorf("restart_required_msg = %q, want it to name make force-restart", resp.GetRestartRequiredMsg())
 	}
+	// Same requirement as the self-restart refusal: the target lives in the
+	// checkout, so the message has to say where it is. This string reaches
+	// the operator through the Cloudflare panel on the Machine page.
+	if !strings.Contains(resp.GetRestartRequiredMsg(), "~/apiary") {
+		t.Errorf("restart_required_msg = %q, want it to name the apiary checkout ~/apiary", resp.GetRestartRequiredMsg())
+	}
 	if issuer.token != "token-value" || issuer.validityDays != 365 {
 		t.Fatalf("issuer received token=%q validity=%d", issuer.token, issuer.validityDays)
 	}
