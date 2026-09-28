@@ -78,6 +78,23 @@ def main():
         print(sh("git status --porcelain").stdout)
         return 2
 
+    # Pre-flight: every anchor must appear exactly once before anything is
+    # applied. A mutation whose anchor is wrong would otherwise be counted
+    # as a survivor, and a survivor is a claim about the tests.
+    broken = []
+    for entry in mutations:
+        label, path, old = entry[0], entry[1], entry[2]
+        with open(os.path.join(REPO, path)) as f:
+            n = f.read().count(old)
+        if n != 1:
+            broken.append(f"{label}: anchor matches {n} times in {path}, need exactly 1")
+    if broken:
+        print("PRE-FLIGHT FAILED - the manifest is wrong and proves nothing as written:")
+        for b in broken:
+            print("  " + b)
+        return 2
+    print(f"  pre-flight: all {len(mutations)} anchors match exactly once")
+
     tally = {"BUILD-ERROR": 0, "TEST-FAIL": 0, "PASS": 0}
     survivors = []
     rows = []
@@ -87,11 +104,6 @@ def main():
         full = os.path.join(REPO, path)
         with open(full) as f:
             src = f.read()
-        n = src.count(old)
-        if n != 1:
-            rows.append((label, "ANCHOR-MISS", f"anchor matched {n} times in {path}, need exactly 1"))
-            tally["ANCHOR-MISS"] = tally.get("ANCHOR-MISS", 0) + 1
-            continue
         with open(full, "w") as f:
             f.write(src.replace(old, new, 1))
         bucket, out = run(pkg)
