@@ -188,6 +188,35 @@ func TestMakefile_ForceRestartIsOnlyAWrapper(t *testing.T) {
 	if !strings.Contains(recipe, "apiaryctl force-restart") {
 		t.Errorf("the force-restart recipe does not run apiaryctl force-restart:\n%s", recipe)
 	}
+	// And it has to be the last line, not merely present somewhere in
+	// the recipe. The recipe's earlier lines are the message telling the
+	// operator what the command is called, and that message contains the
+	// same string - so a `Contains` on the whole recipe is satisfied by
+	// prose about the command rather than by the command. That is the
+	// shape of a mutation that replaces the exec with `true` and
+	// survives: the advice still reads correctly while the target stops
+	// doing anything at all.
+	lines := strings.Split(strings.TrimRight(recipe, "\n"), "\n")
+	last := strings.TrimSpace(lines[len(lines)-1])
+	if last != "apiaryctl force-restart" {
+		t.Errorf("the last line of the force-restart recipe is %q, want %q.\n"+
+			"The command has to be what the target runs, not something its own "+
+			"message mentions.\n--- recipe ---\n%s", last, "apiaryctl force-restart", recipe)
+	}
+	// Every line but the last is a continuation of the message, so
+	// nothing else may be a command. A target that printed its advice
+	// and then did nothing else is the failure above; one that printed
+	// its advice and then restarted something by hand is the failure
+	// this whole check exists to prevent, and it would hide behind the
+	// last-line assertion above.
+	for _, line := range lines[:len(lines)-1] {
+		trimmed := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(line), "@"))
+		if trimmed == "" || strings.HasPrefix(trimmed, "echo ") {
+			continue
+		}
+		t.Errorf("the force-restart recipe runs %q before the command itself; the "+
+			"target is a wrapper and holds no logic:\n%s", trimmed, recipe)
+	}
 }
 
 // TestApiaryctlIsSourceFree is the direct statement of the requirement
