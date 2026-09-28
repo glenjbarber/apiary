@@ -327,7 +327,7 @@
 {{end}}
 
 {{define "origin_ca_advice"}}
-    <p class="muted">For Cloudflare-proxied managerd TLS only. This creates a local ECC key and sends only its CSR to Cloudflare. The certificate is installed immediately, but it is <strong>not</strong> loaded until managerd is restarted - which you must do yourself: <code>service apiary_managerd restart</code> on the node is enough for managerd alone, and <code>make force-restart</code> also restarts raftd, so run that one from the apiary checkout (<code>~/apiary</code>), where its <code>scripts/record-forced-restart.sh</code> lives. Apiary will not restart managerd on your behalf, because a restart issued from inside managerd stops it and cannot start it again. Do not use for DNS-only or direct client traffic.</p>
+    <p class="muted">For Cloudflare-proxied managerd TLS only. This creates a local ECC key and sends only its CSR to Cloudflare. The certificate is installed immediately, but it is <strong>not</strong> loaded until managerd is restarted - which you must do yourself: <code>service apiary_managerd restart</code> on the node is enough for managerd alone, and <code>make force-restart</code> also restarts raftd, so that one needs the apiary source checkout: run it from the directory containing the Makefile, because it calls <code>scripts/record-forced-restart.sh</code> from there. Apiary will not restart managerd on your behalf, because a restart issued from inside managerd stops it and cannot start it again. Do not use for DNS-only or direct client traffic.</p>
 {{end}}
 
 {{define "machine_security_page"}}

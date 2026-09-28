@@ -68,8 +68,8 @@ const managerdSelfRestartRefusal = "apiary_managerd cannot be restarted through 
 	"about to start it, and the daemon does not come back. Restart it on the node instead: " +
 	"`service apiary_managerd restart` is enough if you only need managerd, and `make force-restart` " +
 	"restarts managerd and then raftd, deliberately bypassing the restart lease and quorum preflight. " +
-	"Run that one from the apiary checkout (~/apiary), not from /usr/local/libexec/apiary, because " +
-	"it calls scripts/record-forced-restart.sh from there."
+	"Run that one from the apiary source checkout, the directory containing the Makefile, not from " +
+	"/usr/local/libexec/apiary, because it calls scripts/record-forced-restart.sh from there."
 
 // managerdSelfRestartRefused reports whether name is managerd itself, the
 // one service in the inventory that must never be restarted from inside

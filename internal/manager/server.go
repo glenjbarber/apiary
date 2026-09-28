@@ -765,7 +765,7 @@ func (s *Server) IssueOriginCertificate(ctx context.Context, req *rpcpb.IssueOri
 	return &rpcpb.IssueOriginCertificateResponse{
 		Certificate:        originCertificateInfo(entry),
 		RestartScheduled:   false,
-		RestartRequiredMsg: "certificate installed; restart managerd to load it (`service apiary_managerd restart` on the node is enough, or `make force-restart` from the apiary checkout ~/apiary, which also restarts raftd)",
+		RestartRequiredMsg: "certificate installed; restart managerd to load it (`service apiary_managerd restart` on the node is enough, or `make force-restart` from the apiary source checkout, the directory containing the Makefile, which also restarts raftd)",
 	}, nil
 }
 
