@@ -14,6 +14,7 @@ import (
 	"github.com/glenjbarber/apiary/internal/colonyupdate"
 	"github.com/glenjbarber/apiary/internal/health"
 	"github.com/glenjbarber/apiary/internal/manager"
+	"github.com/glenjbarber/apiary/internal/statedigest"
 )
 
 // The controlled, one-at-a-time Colony update page (ADR-0145).
@@ -654,9 +655,9 @@ func (s *Server) colonyUpdateView(r *http.Request) colonyUpdateRender {
 	wg.Wait()
 	sort.Slice(combs, func(i, j int) bool { return combs[i].NodeID < combs[j].NodeID })
 
-	observations := make([]stateDigestObservation, len(combs))
+	observations := make([]statedigest.Observation, len(combs))
 	for i, comb := range combs {
-		observations[i] = stateDigestObservation{NodeID: comb.NodeID, Digest: comb.StateDigest, AppliedIndex: comb.AppliedIndex}
+		observations[i] = statedigest.Observation{NodeID: comb.NodeID, Digest: comb.StateDigest, AppliedIndex: comb.AppliedIndex}
 	}
 	digestViews, digestColony := stateDigestVerdicts(observations)
 	for i := range combs {
@@ -665,7 +666,7 @@ func (s *Server) colonyUpdateView(r *http.Request) colonyUpdateRender {
 			// Unreachable while both are built from the same rows, but an
 			// absent verdict must render as unobserved rather than as a
 			// blank badge if that ever stops holding.
-			view = stateDigestUnobservedView(stateDigestObservation{NodeID: combs[i].NodeID}, len(combs))
+			view = stateDigestUnobservedView(statedigest.Observation{NodeID: combs[i].NodeID}, len(combs))
 		}
 		combs[i].DigestState = view.State
 		combs[i].DigestBadgeClass = view.BadgeClass
