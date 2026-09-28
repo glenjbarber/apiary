@@ -31,17 +31,37 @@ rediscover any of it.
 one command for a single-node Path A bring-up on a genuinely fresh
 checkout - packages, building every binary, `apiaryinstall`'s safe
 fixes plus its one risky network step, installing binaries where the
-rc.d scripts expect them, and setting each daemon's listen-address
-args, with real login and TLS enabled by default - log in with
-whichever UNIX account ran this command (see Step 11's own note on
-why no separate account-creation step exists). This whole document
+rc.d scripts expect them, and then handing the whole configuration job
+to `apiaryctl install --apply`, the installed binary that writes every
+daemon's config, issues this Comb's TLS serving certificate in Go, and
+works out its node_id (ADR-0147 Part 1). Log in with whichever UNIX
+account ran this command (see Step 11's own note on why no separate
+account-creation step exists). This whole document
 assumes you are operating as root throughout, the same way a fresh
 FreeBSD install typically drops you at a root shell - no command
 anywhere here, including `make setup-quick` itself, calls `sudo`;
 become root first (`su -`, or log in as root directly) if you aren't
 already. Override its `NODE_*` variables for a host that doesn't match the
 defaults, e.g. `make setup-quick NODE_VLAN_UPLINK=em0
-NODE_HTTP_ADDR=10.62.0.2:8080`. It does not cover Path B (joining an
+NODE_HTTP_ADDR=10.62.0.2:8080`. They are passed straight through to
+`apiaryctl install` as its own flags.
+
+**What the installer will not do**, and this is the thing to know
+before running it on anything you have already configured: it never
+overwrites a field that is already set, never changes a `node_id`,
+never completes half a TLS pair, and refuses to write an address the
+certificate does not cover. It also refuses a config file that does not
+parse, and one carrying a field the installed binary does not know
+about. Run it with no `--apply` first to see the whole plan - it needs
+no privileges to do that, and the plan names every field it would
+leave alone and why:
+
+```bash
+/usr/local/libexec/apiary/apiaryctl install
+```
+
+A run that refuses anything still does everything else, and exits
+non-zero, so a second run finishes the job. It does not cover Path B (joining an
 existing Colony) or Step 12/13 (creating a network, VM, or jail) -
 read on for those regardless, and read on generally the first time
 through so a `setup-quick` failure is legible rather than a black box.
@@ -249,14 +269,18 @@ re-runnable if you only need to redo one piece:
 - `setup-pam` - writes a fresh `/etc/pam.d/apiary` only if one isn't
   already present, so a later hand-edited policy file is never
   clobbered by a re-run (see Step 11 for what this is for).
-- `setup-tls` - generates a self-signed certificate/key pair at
+- `setup-tls` - **not part of `make setup` any more.** It generates a
+  self-signed RSA certificate/key pair at
   `/usr/local/etc/apiary-tls/{cert.pem,key.pem}` (override the
-  directory with `NODE_TLS_DIR`) only if that path doesn't already
-  have one, so a real CA-issued certificate dropped there instead is
-  never overwritten. This is the certificate Step 11's `tls_cert`/
-  `tls_key` config values come from.
+  directory with `NODE_TLS_DIR`) only if that path doesn't already have
+  one, and it is kept only for an operator who wants openssl's output.
+  The certificate this document's Path A actually gets is issued in Go
+  by `apiaryctl install`, as ECDSA P-256, and that installer keeps and
+  reports whatever pair it finds already in place rather than replacing
+  it - so running `make setup-tls` first is safe, and the RSA pair it
+  writes is the one the Comb keeps. See ADR-0147 Part 1.
 
-Run all four together:
+Run the three together:
 
 ```bash
 make setup
@@ -284,13 +308,15 @@ permanently.
 
 `apiaryctl` is the exception to the "this checkout is where the source
 is" rule that the rest of this document assumes, and the reason is worth
-stating once. `apiaryctl force-restart` is an operation on a running
-Comb, so it has to be a file on the Comb; a Comb does not have this
-checkout on it, which is why a `make` target could never be the
-operational path for it (ADR-0136, ADR-0141). It is the one thing here
-you type by name rather than by `make`, and it needs nothing but a root
-shell. If `apiaryctl` is missing after an install, the install did not
-run to completion.
+stating once. Both of its subcommands are operations on a Comb rather
+than on a checkout: `force-restart` restarts two running daemons, and
+`install` configures a host. Both therefore have to be files on the
+Comb; a Comb does not have this checkout on it, which is why a `make`
+target could never be the operational path for either (ADR-0136,
+ADR-0141, ADR-0147). They are the only things here you type by name
+rather than by `make`, and they need nothing but a root shell. If
+`apiaryctl` is missing after an install, the install did not run to
+completion.
 
 From here on, every "start the daemon" step below means `service
 apiary_<name> start`, never a direct `daemon`/`./<binary>` invocation -
@@ -454,8 +480,11 @@ does three separate jobs:
 
 Use the node's DNS name rather than its numeric LAN address
 (`10.90.0.94`) because of what the certificate can verify. The serving
-certificate Step 6's `make setup`/`setup-tls` generated carries
-`subjectAltName=IP:127.0.0.1,DNS:$(hostname)` and nothing else.
+certificate `apiaryctl install` issued carries `IP:127.0.0.1` plus a
+DNS SAN for the short hostname and another for the FQDN, and no IP SAN
+for the LAN address (ADR-0139, and the certificate Step 6's `setup-tls`
+still generates if you ran it carries `IP:127.0.0.1,DNS:$(hostname)`
+only).
 `cmd/raftd/confirm.go` leaves its TLS `serverName` empty, so Go verifies
 that certificate against whatever host was dialed - so neither a
 wildcard nor a bare `10.90.0.94` can verify, while
@@ -468,9 +497,15 @@ LAN clients and **deliberately does not serve `127.0.0.1`**. `frontend`
 and `restshimd` must therefore name the same hostname in `manager_addr`,
 not loopback.
 
+`apiaryctl install` derives both of those `manager_addr` values from
+the `rpc_addr` it is giving managerd, so this cannot be got wrong by
+hand and then forgotten. If you are writing the config by hand instead,
+it is the one field in this document that has to be read together with
+`rpc_addr` rather than on its own.
+
 **TLS is mandatory here, not an afterthought reserved for Step 11's
 PAM login** - `tls_cert`/`tls_key` above already point at the
-certificate Step 6's `make setup`/`setup-tls` generated
+certificate `apiaryctl install` issued
 (`/usr/local/etc/apiary-tls/cert.pem`/`key.pem` by default, or your
 own `NODE_TLS_DIR` if overridden). managerd's external RPC API is
 encrypted from this point on regardless of whether real login is ever
