@@ -13,7 +13,7 @@ separate ways to get it wrong.
 The operator runs `git pull && make update` on every Comb. Per ADR-0141 that
 installs all four binaries but restarts only frontend and restshimd, so
 managerd and raftd are left running their previous build. The operator then
-runs `make force-restart` on every Comb to bring those two across. Both steps
+runs `apiaryctl force-restart` on every Comb to bring those two across. Both steps
 look identical from the outside, and the intermediate state is not obviously
 wrong: the binaries on disk are new, so anything that checks mtime or a
 checksum reports success.
@@ -27,7 +27,7 @@ Makefile's own closing advice is a hand-written `grep build=` against the log.
 
 Three further problems sit on top:
 
-- **The operator must know who the leader is.** `make force-restart` says out
+- **The operator must know who the leader is.** `apiaryctl force-restart` says out
   loud, every time, that restarting the leader can cost the cluster its
   quorum. The only mitigation offered is "never on the leader as part of a
   sweep", which transfers a piece of distributed-systems knowledge onto
@@ -57,7 +57,7 @@ choice. Leadership is a derived fact, re-derived at execution time.
 
 ### The leader steps aside instead of being scheduled last
 
-`make force-restart` gives up the guardrail entirely: no lease, no quorum
+`apiaryctl force-restart` gives up the guardrail entirely: no lease, no quorum
 preflight, no cross-Comb coordination. That is tolerable only because it is a
 named, per-Comb, operator-driven act. An automated sweep that calls it would
 surrender every property that made it tolerable and gain none of the
@@ -174,7 +174,7 @@ currently express.
 
 So the controlled path takes a **real lease** per Comb, which is what gives it
 the quorum preflight it needs to answer "is it safe to restart *this* one right
-now". `make force-restart` keeps its current meaning exactly: the operator's
+now". `apiaryctl force-restart` keeps its current meaning exactly: the operator's
 manual escape hatch, and the path the `lease_id: 0` cooldown receipt was built
 for. The two are not merged.
 
@@ -208,7 +208,7 @@ fault.
   to know who the leader is.
 - **A persistent raftd "step aside" flag.** Silently demotes a healthy leader
   whenever the restart does not follow, with nothing recording why.
-- **Reusing `make force-restart` for the automated sweep.** Surrenders the
+- **Reusing `apiaryctl force-restart` for the automated sweep.** Surrenders the
   guardrail and gains no coordination.
 - **A new digest RPC.** ADR-0143 deliberately added none; `ClusterHealth`
   already carries what is needed.
@@ -306,7 +306,7 @@ Still missing, and none of it made smaller by this:
   the three health checks in the table above is wired to anything yet.
 - **A sweep.** One call, one Comb, one service. Which Comb to touch first, and
   in what order, is not derived by anything here.
-- **`make force-restart` is untouched** and remains a manual escape hatch. It
+- **`apiaryctl force-restart` is untouched** and remains a manual escape hatch. It
   is not wired to this and must not be: the `lease_id: 0` receipt it writes is
   evidence for an un-leased emergency restart, and the automated path must
   never need the weaker record.

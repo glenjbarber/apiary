@@ -4,6 +4,62 @@
 
 Proposed
 
+## Amendment 2026-09-28: first slice, `force-restart`
+
+The first slice of this ADR is built. It is much smaller than the design
+below, and it does not implement any of it. Read this section before
+reading the rest: the rest is still `Proposed`, and nothing in it
+should be read as describing something that exists.
+
+**What was built.** One subcommand, `apiaryctl force-restart`, in a new
+`cmd/apiaryctl`. It restarts managerd and then raftd on this Comb,
+confirming each by its own listener port, and leaving the same
+pending-restart record a leased restart leaves. It is root-only and
+installed to `/usr/local/libexec/apiary/apiaryctl` alongside the
+daemons. There is no socket, no TUI, no command group, and no
+managerd-backed client. Those come later, if they come at all.
+
+**Why it had to be this narrow, and why now.** The operational
+requirement that produced it is not a feature request. `make
+force-restart` could not run on a Comb at all, because it needed the
+Makefile and `scripts/record-forced-restart.sh` from a source checkout
+and the Combs do not have one. An operation performed *because* a Comb
+is running has to be a file on the host. Everything else about this
+slice is downstream of that one fact.
+
+**How it relates to the design below.** Two of the commitments here
+still hold and are worth stating, because they are what make the slice
+acceptable to ship before the rest of this ADR is:
+
+- It does not import `api/internalpb` or `internal/raft`, and it never
+  opens `/var/run/apiary/raftd.sock`. It holds no internal token. The
+  import-boundary commitment in D1 is upheld; `internal/forcerestart`
+  is importable from a build with both packages excluded, and adding a
+  dependency on either is the change this ADR's test would catch.
+- It cannot write to raft. It shells out to `service(8)` and reads
+  `sockstat(8)`. It is not a path to Raft writes, which is the
+  structural concern this ADR exists to address, so it does not
+  introduce the hazard the rest of this design is shaped around.
+
+One commitment is **suspended, not satisfied**, and the reason is
+structural rather than a shortcut. D1 makes `apiaryctl` a client of
+managerd's external gRPC API on loopback. A client of managerd cannot
+be the thing that restarts managerd: the process would be killing the
+server it is talking to, which is the same impossibility ADR-0146
+states as "managerd must never restart itself". So the first slice
+bypasses managerd entirely and talks to `service(8)` directly. That is a
+real departure from the design below, it is why this slice is separate
+from the socket client rather than the first command inside it, and it
+should be reconciled when the rest of this ADR is built - most likely
+by having the socket client own every command except the one that
+destroys the server it depends on.
+
+**Where the behaviour is specified.** `internal/forcerestart`, with the
+design rationale on the code. ADR-0141 records the `update` versus
+`force-restart` split, the managerd-before-raftd order, and the
+deliberate absence of coordination; its amendment covers the move off
+the Makefile.
+
 ## Context
 
 ADR-0127 ("Sylve.io feature set") names a local root-only CLI and

@@ -263,7 +263,7 @@ make setup
 ```
 
 Each rc.d script runs a fixed binary path, `/usr/local/libexec/apiary/<name>`
-- not the copy sitting in this checkout - so install the four daemons
+- not the copy sitting in this checkout - so install the daemons
 there too, every time you rebuild them:
 
 ```bash
@@ -271,13 +271,26 @@ make install
 ```
 
 `make install` builds the four daemons (`raftd`/`managerd`/`frontend`/
-`restshimd` - not `apiaryinstall`, which is a one-shot CLI meant to be
-run from this checkout, never installed permanently), makes sure the
-runtime directories from Step 6 exist first, then copies each binary
-to `/usr/local/libexec/apiary/<name>.new` and atomically renames it
-into place - `cp` over a binary a live process still has open fails
+`restshimd`) plus `apiaryctl`, the operator command line, and makes
+sure the runtime directories from Step 6 exist first, then copies each
+binary to `/usr/local/libexec/apiary/<name>.new` and atomically renames
+it into place - `cp` over a binary a live process still has open fails
 with "Text file busy," but `mv`'s atomic rename doesn't disturb the
 running process's already-open file descriptor at all.
+
+`apiaryinstall` is deliberately **not** installed. It is a one-shot
+host-prep CLI meant to be run from this checkout, never installed
+permanently.
+
+`apiaryctl` is the exception to the "this checkout is where the source
+is" rule that the rest of this document assumes, and the reason is worth
+stating once. `apiaryctl force-restart` is an operation on a running
+Comb, so it has to be a file on the Comb; a Comb does not have this
+checkout on it, which is why a `make` target could never be the
+operational path for it (ADR-0136, ADR-0141). It is the one thing here
+you type by name rather than by `make`, and it needs nothing but a root
+shell. If `apiaryctl` is missing after an install, the install did not
+run to completion.
 
 From here on, every "start the daemon" step below means `service
 apiary_<name> start`, never a direct `daemon`/`./<binary>` invocation -

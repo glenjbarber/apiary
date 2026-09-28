@@ -25,7 +25,7 @@ COMMIT=0123456789abcdef0123456789abcdef01234567
 OUT=/tmp/apibuild
 mkdir -p "$OUT"
 
-BINS="raftd managerd frontend restshimd apiaryinstall"
+BINS="raftd managerd frontend restshimd apiaryinstall apiaryctl"
 
 for b in $BINS; do
   echo "=== $b (unstamped) ==="
@@ -52,26 +52,6 @@ echo
 # never modifies the checkout it is run from.
 echo "=== which worktree changes make a build dirty ==="
 scripts/test-worktree-state.sh
-echo
-
-# The force-restart recorder is the one piece of shell this project runs
-# on the emergency path, where a wrong record is worse than no record:
-# it can strand a raft-replicated restart lease, which has no TTL. Its
-# tests are fixture-based and need neither root nor a Comb, so they are
-# cheap enough to belong here with the other script tests.
-echo "=== what a force-restart records for the guardrail cooldown ==="
-scripts/test-record-forced-restart.sh
-echo
-
-# force-restart's own post-restart assertion gets the same treatment,
-# and for a sharper reason: the check it replaced was a host command
-# that reports "not running" for daemons that are up and listening, so
-# a test that only read the Makefile would have called the old version
-# correct. These cases run the real target with `service`, `sockstat`
-# and `sh` replaced by stand-ins - one of which lies about status
-# exactly as the real one does on a Comb.
-echo "=== what force-restart does, with a service(8) that lies ==="
-scripts/test-force-restart-target.sh
 echo
 
 for b in $BINS; do

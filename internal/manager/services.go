@@ -39,9 +39,10 @@ import (
 // There is no ordering trick that fixes it, because the failure is
 // structural rather than a race: any in-process orchestration of your own
 // death has the same problem. So the honest response is to refuse, and to
-// point the operator at the path that does work - `make force-restart`,
-// which restarts managerd from rc.d in a process that is not managerd,
-// and is documented in ADR-0141. Failing safe is the right call here
+// point the operator at the path that does work - `apiaryctl
+// force-restart`, which restarts managerd from rc.d in a process that is
+// not managerd, and is documented in ADR-0141 and ADR-0136. Failing safe
+// is the right call here
 // even though the guarded RPC path is strictly better than bare
 // `service`: a guardrail that stops a daemon and cannot start it again is
 // worse than one that declines to act, because the operator is now
@@ -63,13 +64,17 @@ var apiaryServices = []struct {
 // working alternative rather than only the failure, because "cannot be
 // restarted from Apiary" on its own would leave the operator with a dead
 // daemon and no next step.
+// The two commands it names are both on the node, and neither needs a
+// source checkout. That is the point of naming them this way: the
+// operator reading this has just been told managerd will not come back,
+// and the next thing they type has to work on a machine that has no
+// Makefile on it.
 const managerdSelfRestartRefusal = "apiary_managerd cannot be restarted through the API: the restart is " +
 	"orchestrated from inside the managerd being restarted, so stopping it kills the process that was " +
-	"about to start it, and the daemon does not come back. Restart it on the node instead: " +
-	"`service apiary_managerd restart` is enough if you only need managerd, and `make force-restart` " +
-	"restarts managerd and then raftd, deliberately bypassing the restart lease and quorum preflight. " +
-	"Run that one from the apiary source checkout, the directory containing the Makefile, not from " +
-	"/usr/local/libexec/apiary, because it calls scripts/record-forced-restart.sh from there."
+	"about to start it, and the daemon does not come back. Restart it on the node instead, from a root " +
+	"shell: `service apiary_managerd restart` is enough if you only need managerd, and " +
+	"`apiaryctl force-restart` restarts managerd and then raftd, deliberately bypassing the restart " +
+	"lease and quorum preflight. Both are installed on every Comb and need only a root shell."
 
 // managerdSelfRestartRefused reports whether name is managerd itself, the
 // one service in the inventory that must never be restarted from inside

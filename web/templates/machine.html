@@ -476,7 +476,7 @@
           <button hx-post="/machine/services/{{.Name}}/restart" hx-target="#node-services-panel" hx-swap="innerHTML" hx-confirm="Restart {{.Name}} on this Comb?">Restart</button>
           {{end}}
         {{else if eq .Name "apiary_managerd"}}
-          <span class="muted">Cannot be restarted from here. A restart issued from inside managerd stops it and cannot start it again. On the node, <code>service apiary_managerd restart</code> is enough for managerd alone. <code>make force-restart</code> also restarts raftd, so it is a two-daemon act, and it needs the apiary source checkout: run it from the directory containing the Makefile, because it calls <code>scripts/record-forced-restart.sh</code> from there.</span>
+          <span class="muted">Cannot be restarted from here. A restart issued from inside managerd stops it and cannot start it again. On the node, <code>service apiary_managerd restart</code> is enough for managerd alone. <code>apiaryctl force-restart</code> also restarts raftd, so it is a two-daemon act; it is installed on every Comb and needs nothing but a root shell.</span>
         {{end}}
       </td>
     </tr>

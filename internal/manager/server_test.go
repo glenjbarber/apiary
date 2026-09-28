@@ -644,14 +644,19 @@ func TestServer_IssueOriginCertificateInstallsAndRestartsManagerd(t *testing.T) 
 	// And the operator must be told a restart is still outstanding, and
 	// how to perform it, rather than being left with a cert that has not
 	// taken effect and no indication of that.
-	if !strings.Contains(resp.GetRestartRequiredMsg(), "make force-restart") {
-		t.Errorf("restart_required_msg = %q, want it to name make force-restart", resp.GetRestartRequiredMsg())
+	if !strings.Contains(resp.GetRestartRequiredMsg(), "apiaryctl force-restart") {
+		t.Errorf("restart_required_msg = %q, want it to name apiaryctl force-restart", resp.GetRestartRequiredMsg())
 	}
-	// Same requirement as the self-restart refusal: the target lives in the
-	// checkout, so the message has to say where it is. This string reaches
-	// the operator through the Cloudflare panel on the Machine page.
-	if !strings.Contains(resp.GetRestartRequiredMsg(), "source checkout") {
-		t.Errorf("restart_required_msg = %q, want it to name the apiary source checkout", resp.GetRestartRequiredMsg())
+	// The inverse requirement, and the reason it is asserted here as well
+	// as in the self-restart refusal test. This string used to have to
+	// name the source checkout, because the command then needed one. It
+	// does not, and a Comb has no checkout, so naming one is advice the
+	// operator cannot act on. This string reaches the operator through the
+	// Cloudflare panel on the Machine page, read in a browser.
+	for _, forbidden := range []string{"make force-restart", "source checkout", "Makefile"} {
+		if strings.Contains(resp.GetRestartRequiredMsg(), forbidden) {
+			t.Errorf("restart_required_msg contains %q, which points the operator at a checkout the Comb does not have: %q", forbidden, resp.GetRestartRequiredMsg())
+		}
 	}
 	if issuer.token != "token-value" || issuer.validityDays != 365 {
 		t.Fatalf("issuer received token=%q validity=%d", issuer.token, issuer.validityDays)

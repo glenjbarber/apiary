@@ -1446,3 +1446,49 @@ func TestColonyUpdateControlAndRouteAgreeOnTheRole(t *testing.T) {
 		})
 	}
 }
+
+// TestColonyUpdateNamesAnInstalledForceRestart pins the one sentence on
+// this page that tells an operator where the manual per-Comb restart
+// lives.
+//
+// It is worth its own case because this page is the one place an
+// operator is told that a coordinated update is deliberately not the
+// same thing as force-restart, and so it is where they are most likely
+// to read the name and go looking for it. When the command lived in the
+// Makefile, that sentence named a target - and a target is not something
+// you can run on a Comb, because a Comb has no checkout. Naming the
+// installed command instead is the difference between advice and a dead
+// end, and nothing else on this page covers it.
+func TestColonyUpdateNamesAnInstalledForceRestart(t *testing.T) {
+	body := renderColonyUpdate(t, newColonyUpdateTestServer(t, &fakeColonyUpdate{state: idleNominatedState("drone.lab3.home.arpa")}))
+
+	// Scoped to the list item that makes the claim. The whole page
+	// mentions nothing else about force-restart, but scoping it means a
+	// future sentence elsewhere cannot satisfy this by accident - which
+	// is how a mutation that rewrites this one line survives.
+	i := strings.Index(body, "What this page does not do")
+	if i < 0 {
+		t.Fatalf("the page has no \"What this page does not do\" section; body=%s", body)
+	}
+	section := body[i:]
+	if j := strings.Index(section, "</section>"); j >= 0 {
+		section = section[:j]
+	}
+
+	if !strings.Contains(section, "apiaryctl force-restart") {
+		t.Errorf("the page does not name the installed force-restart command; body=%s", section)
+	}
+	// The Makefile target is not a way to run this on a Comb, and a
+	// sentence pointing at it is worse than no sentence: it looks like
+	// the manual path and is not one.
+	for _, forbidden := range []string{"make force-restart", "source checkout", "Makefile"} {
+		if strings.Contains(section, forbidden) {
+			t.Errorf("the page names %q, which is not runnable on a Comb: %s", forbidden, section)
+		}
+	}
+	// The reason it is named at all is that this page does not do it,
+	// and the operator needs to know where the manual act actually is.
+	if !strings.Contains(section, "Nothing on this page issues a restart") {
+		t.Errorf("the page must say what it does not do, or the command name has nothing to contrast with: %s", section)
+	}
+}

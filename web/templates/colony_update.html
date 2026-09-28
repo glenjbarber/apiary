@@ -240,7 +240,7 @@
         <li>It does not decide the order. Leadership and eligibility are re-derived by the update system at the moment of use, so nothing here holds a plan that can go stale.</li>
         <li>It does not know or care which Comb is the Raft leader. A leader is shown as information because it is useful context, never as a choice.</li>
         <li>It does not enforce anything. The greying-out is a courtesy to the operator. One-at-a-time is enforced by the server, and a second tab or a direct request is refused there.</li>
-        <li>It does not run <code>make force-restart</code>, which stays a manual, per-Comb operator act (ADR-0141, ADR-0145). Nothing on this page issues a restart.</li>
+        <li>It does not run <code>apiaryctl force-restart</code>, which stays a manual, per-Comb operator act (ADR-0141, ADR-0145). Nothing on this page issues a restart.</li>
       </ul>
     </section>
   </main>
