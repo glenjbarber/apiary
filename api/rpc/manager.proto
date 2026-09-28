@@ -2190,6 +2190,13 @@ message MutateColonyUpdateRequest {
     AcquireColonyUpdate acquire = 1;
     AdvanceColonyUpdate advance = 2;
     ReleaseColonyUpdate release = 3;
+    // handover is the PLANNED, cooperative transfer of an operation that
+    // is already in progress, and it is deliberately a separate variant
+    // rather than a flag on acquire. See api/internalpb/state.proto's
+    // HandoverColonyUpdate for why routing a normal end-of-sweep
+    // handover through acquire's takeover flag would destroy that flag's
+    // only purpose.
+    HandoverColonyUpdate handover = 4;
   }
 }
 
@@ -2245,6 +2252,47 @@ message ReleaseColonyUpdate {
   string detail = 3;
 }
 
+// HandoverColonyUpdate is a planned, cooperative transfer of an operation
+// that is already in progress. It is the normal way a colony-wide sweep
+// finishes: when the only Comb left to update is the holder's own, the
+// operation moves to another Comb first (ADR-0146 rule 2), because the
+// holder cannot restart itself.
+//
+// It is NOT the takeover path, and the difference is load-bearing. A
+// takeover is a contested seizure of a live operation from a coordinator
+// that is not answering; a handover is cooperation between two coordinators
+// that both know what is happening. Presenting one as the other would make
+// a healthy sweep look like a cluster fight in the durable record.
+//
+// from_fence is the OUTGOING holder's, and the FSM requires it to match the
+// active record exactly, so a displaced coordinator cannot give away an
+// operation it has already lost.
+message HandoverColonyUpdate {
+  ColonyUpdateFence from_fence = 1;
+  string to_node_id = 2;
+  string to_holder_incarnation = 3;
+  // reason is required and is not decorative: "who gave this away, and why"
+  // is the first question an operator asks when a sweep stops near its
+  // end.
+  string reason = 4;
+}
+
+// ColonyUpdateHandover is the durable evidence of one cooperative change of
+// holder, naming both coordinators and both fence tokens. This mirrors
+// api/internalpb/state.proto's ColonyUpdateHandover field for field, minus
+// the leader-authored handed_over_at_unix, for the same reason
+// ColonyUpdateStepRecord here omits recorded_at_unix: a time authored by
+// the applying leader is never accepted from a caller.
+message ColonyUpdateHandover {
+  string from_node_id = 1;
+  string from_incarnation = 2;
+  uint64 from_fence_token = 3;
+  string to_node_id = 4;
+  string to_incarnation = 5;
+  uint64 to_fence_token = 6;
+  string reason = 7;
+}
+
 // ColonyUpdateFence is the four-part token a coordinator must present to
 // keep acting. See api/internalpb/state.proto's own ColonyUpdateFence for
 // why all four are required; this mirrors it field for field so no
@@ -2288,6 +2336,10 @@ message ColonyUpdate {
   bool takeover = 12;
   repeated ColonyUpdateStepRecord steps = 13;
   int64 updated_at_unix = 14;
+  // handovers is every cooperative change of holder this operation has
+  // been through. It is kept apart from steps for the same reason it is
+  // there: a handover has no outcome and cites no confirmation evidence.
+  repeated ColonyUpdateHandover handovers = 15;
 }
 
 message MutateColonyUpdateResponse {

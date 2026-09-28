@@ -512,6 +512,16 @@ message Command {
     AcquireColonyUpdate acquire_colony_update = 32;
     AdvanceColonyUpdate advance_colony_update = 33;
     ReleaseColonyUpdate release_colony_update = 34;
+
+    // HandoverColonyUpdate transfers an operation that is ALREADY in
+    // progress from the coordinator that currently holds it to another,
+    // cooperatively and without settling it. It is the normal last step
+    // of a colony-wide sweep: when the only Comb left to update is the
+    // holder's own, ownership must move before that Comb is touched
+    // (ADR-0146 rule 2). It is deliberately a distinct command from
+    // AcquireColonyUpdate.takeover, and the distinction is the whole
+    // point - see ColonyUpdateHandover's own doc comment.
+    HandoverColonyUpdate handover_colony_update = 35;
   }
 }
 
@@ -1135,8 +1145,15 @@ message ColonyUpdate {
   // evidence.
   repeated ColonyUpdateStepRecord steps = 14;
   // updated_at_unix is the leader-authored time of the most recent
-  // accepted advance.
+  // accepted advance or handover.
   int64 updated_at_unix = 15;
+  // handovers records every cooperative change of holder this operation
+  // has been through, in order. It is deliberately NOT part of steps: a
+  // handover is not a phase of the plan, has no outcome and cites no
+  // confirmation evidence, and folding it into the step history would put
+  // an entry with no verdict into the same list a reader scans to answer
+  // "how far did it get".
+  repeated ColonyUpdateHandover handovers = 16;
 }
 
 // AcquireColonyUpdate claims the colony-wide single-flight. Submitted only
@@ -1187,6 +1204,85 @@ message ReleaseColonyUpdate {
   string outcome = 2;
   string detail = 3;
   int64 completed_at_unix = 4;
+}
+
+// HandoverColonyUpdate is a PLANNED, cooperative transfer of an operation
+// that is already in progress, from the coordinator that holds it to
+// another. It exists because AcquireColonyUpdate's takeover flag cannot
+// express it honestly, and mislabelling it is not a cosmetic problem.
+//
+// A colony-wide update names every Comb, so eventually the only Comb left
+// is the holder's own (ADR-0146 rule 2). Ownership must move before that
+// Comb is touched, because the holder cannot restart itself - ADR-0142
+// refuses that outright. That transfer is COOPERATIVE and EXPECTED: it is
+// how a healthy sweep finishes. Routing it through AcquireColonyUpdate
+// with takeover = true would set the takeover flag on the common path,
+// settle the outgoing record as "unobserved", and destroy the flag's only
+// purpose - an operator reading a stopped update could no longer tell a
+// normal handover from a second coordinator seizing a live operation from
+// an unresponsive one.
+//
+// Three properties make it a handover rather than a way around the fence:
+//
+//   - The OUTGOING holder's exact fence must still match the active
+//     record. A coordinator that has already been displaced, or whose
+//     record has been taken over, cannot hand over an operation it no
+//     longer holds, and is refused by name. This is the same
+//     fenceMatchesActive rule Advance and Release already use.
+//   - The record is NOT settled. The operation keeps its operation_id, its
+//     step history, its target and its progress; only the holder changes.
+//     A handover that created a new record would lose the progress the
+//     whole feature exists to make durable.
+//   - The fence token is minted higher, because it is this command's own
+//     log index, exactly as on acquire. The incoming holder therefore
+//     faces the identical exact-match requirement as any other, and the
+//     outgoing holder's old token is stale the instant this commits, on
+//     every replica. A handover relocates the operation; it never relaxes
+//     what is required to keep moving it.
+message HandoverColonyUpdate {
+  // from_fence is the OUTGOING holder's fence, and it is what makes this
+  // a handover rather than a seizure: only the process that currently and
+  // exactly holds the operation can give it away.
+  ColonyUpdateFence from_fence = 1;
+  // to_node_id is the Comb that will coordinate from here on. It may be
+  // the same Comb as the outgoing holder - a managerd handing to its own
+  // replacement process is a real case - but to_holder_incarnation must
+  // then differ, or the command is a no-op that mints a fence token for
+  // nothing.
+  string to_node_id = 2;
+  // to_holder_incarnation is the incoming managerd PROCESS, and it plays
+  // the same role here as it does on acquire: it is what distinguishes one
+  // process from the next on the same Comb.
+  string to_holder_incarnation = 3;
+  // reason is never empty, and is not free text for its own sake. "Who
+  // gave this away, and why" is the first question an operator asks when a
+  // sweep stops near its end, and the record has to answer it without the
+  // reader reconstructing it from timestamps.
+  string reason = 4;
+  // requested_at_unix is the outgoing holder's own reading, kept for the
+  // same reason AcquireColonyUpdate keeps requested_at_unix. It is NOT
+  // used to author the record's time: handed_over_at_unix on the emitted
+  // ColonyUpdateHandover is stamped by the leader that applied this, for
+  // the same determinism reason every other authored time here is.
+  int64 requested_at_unix = 5;
+}
+
+// ColonyUpdateHandover is the durable evidence of one cooperative change of
+// holder, appended to ColonyUpdate.handovers. It names BOTH holders, both
+// incarnations, both fence tokens and the reason, because a record that
+// only says "the holder changed" forces the reader to reconstruct who from
+// an index it cannot see.
+message ColonyUpdateHandover {
+  string from_node_id = 1;
+  string from_incarnation = 2;
+  uint64 from_fence_token = 3;
+  string to_node_id = 4;
+  string to_incarnation = 5;
+  uint64 to_fence_token = 6;
+  string reason = 7;
+  // handed_over_at_unix is authored by the node that applied the command
+  // (the leader), never accepted from the caller.
+  int64 handed_over_at_unix = 8;
 }
 
 // CommandResult is the FSM's response to Apply, echoed back through

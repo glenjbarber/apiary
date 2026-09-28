@@ -1089,6 +1089,7 @@ type Command struct {
 	//	*Command_AcquireColonyUpdate
 	//	*Command_AdvanceColonyUpdate
 	//	*Command_ReleaseColonyUpdate
+	//	*Command_HandoverColonyUpdate
 	Op            isCommand_Op `protobuf_oneof:"op"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -1437,6 +1438,15 @@ func (x *Command) GetReleaseColonyUpdate() *ReleaseColonyUpdate {
 	return nil
 }
 
+func (x *Command) GetHandoverColonyUpdate() *HandoverColonyUpdate {
+	if x != nil {
+		if x, ok := x.Op.(*Command_HandoverColonyUpdate); ok {
+			return x.HandoverColonyUpdate
+		}
+	}
+	return nil
+}
+
 type isCommand_Op interface {
 	isCommand_Op()
 }
@@ -1660,6 +1670,18 @@ type Command_ReleaseColonyUpdate struct {
 	ReleaseColonyUpdate *ReleaseColonyUpdate `protobuf:"bytes,34,opt,name=release_colony_update,json=releaseColonyUpdate,proto3,oneof"`
 }
 
+type Command_HandoverColonyUpdate struct {
+	// HandoverColonyUpdate transfers an operation that is ALREADY in
+	// progress from the coordinator that currently holds it to another,
+	// cooperatively and without settling it. It is the normal last step
+	// of a colony-wide sweep: when the only Comb left to update is the
+	// holder's own, ownership must move before that Comb is touched
+	// (ADR-0146 rule 2). It is deliberately a distinct command from
+	// AcquireColonyUpdate.takeover, and the distinction is the whole
+	// point - see ColonyUpdateHandover's own doc comment.
+	HandoverColonyUpdate *HandoverColonyUpdate `protobuf:"bytes,35,opt,name=handover_colony_update,json=handoverColonyUpdate,proto3,oneof"`
+}
+
 func (*Command_CreateVm) isCommand_Op() {}
 
 func (*Command_UpdateVm) isCommand_Op() {}
@@ -1727,6 +1749,8 @@ func (*Command_AcquireColonyUpdate) isCommand_Op() {}
 func (*Command_AdvanceColonyUpdate) isCommand_Op() {}
 
 func (*Command_ReleaseColonyUpdate) isCommand_Op() {}
+
+func (*Command_HandoverColonyUpdate) isCommand_Op() {}
 
 // ApiKey is a cluster-wide credential for ManagerService's external
 // gRPC API (ADR-0023). Only hashed_key (a SHA-256 hex digest) is ever
@@ -4742,8 +4766,15 @@ type ColonyUpdate struct {
 	// evidence.
 	Steps []*ColonyUpdateStepRecord `protobuf:"bytes,14,rep,name=steps,proto3" json:"steps,omitempty"`
 	// updated_at_unix is the leader-authored time of the most recent
-	// accepted advance.
+	// accepted advance or handover.
 	UpdatedAtUnix int64 `protobuf:"varint,15,opt,name=updated_at_unix,json=updatedAtUnix,proto3" json:"updated_at_unix,omitempty"`
+	// handovers records every cooperative change of holder this operation
+	// has been through, in order. It is deliberately NOT part of steps: a
+	// handover is not a phase of the plan, has no outcome and cites no
+	// confirmation evidence, and folding it into the step history would put
+	// an entry with no verdict into the same list a reader scans to answer
+	// "how far did it get".
+	Handovers     []*ColonyUpdateHandover `protobuf:"bytes,16,rep,name=handovers,proto3" json:"handovers,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -4874,6 +4905,13 @@ func (x *ColonyUpdate) GetUpdatedAtUnix() int64 {
 		return x.UpdatedAtUnix
 	}
 	return 0
+}
+
+func (x *ColonyUpdate) GetHandovers() []*ColonyUpdateHandover {
+	if x != nil {
+		return x.Handovers
+	}
+	return nil
 }
 
 // AcquireColonyUpdate claims the colony-wide single-flight. Submitted only
@@ -5123,6 +5161,242 @@ func (x *ReleaseColonyUpdate) GetCompletedAtUnix() int64 {
 	return 0
 }
 
+// HandoverColonyUpdate is a PLANNED, cooperative transfer of an operation
+// that is already in progress, from the coordinator that holds it to
+// another. It exists because AcquireColonyUpdate's takeover flag cannot
+// express it honestly, and mislabelling it is not a cosmetic problem.
+//
+// A colony-wide update names every Comb, so eventually the only Comb left
+// is the holder's own (ADR-0146 rule 2). Ownership must move before that
+// Comb is touched, because the holder cannot restart itself - ADR-0142
+// refuses that outright. That transfer is COOPERATIVE and EXPECTED: it is
+// how a healthy sweep finishes. Routing it through AcquireColonyUpdate
+// with takeover = true would set the takeover flag on the common path,
+// settle the outgoing record as "unobserved", and destroy the flag's only
+// purpose - an operator reading a stopped update could no longer tell a
+// normal handover from a second coordinator seizing a live operation from
+// an unresponsive one.
+//
+// Three properties make it a handover rather than a way around the fence:
+//
+//   - The OUTGOING holder's exact fence must still match the active
+//     record. A coordinator that has already been displaced, or whose
+//     record has been taken over, cannot hand over an operation it no
+//     longer holds, and is refused by name. This is the same
+//     fenceMatchesActive rule Advance and Release already use.
+//   - The record is NOT settled. The operation keeps its operation_id, its
+//     step history, its target and its progress; only the holder changes.
+//     A handover that created a new record would lose the progress the
+//     whole feature exists to make durable.
+//   - The fence token is minted higher, because it is this command's own
+//     log index, exactly as on acquire. The incoming holder therefore
+//     faces the identical exact-match requirement as any other, and the
+//     outgoing holder's old token is stale the instant this commits, on
+//     every replica. A handover relocates the operation; it never relaxes
+//     what is required to keep moving it.
+type HandoverColonyUpdate struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// from_fence is the OUTGOING holder's fence, and it is what makes this
+	// a handover rather than a seizure: only the process that currently and
+	// exactly holds the operation can give it away.
+	FromFence *ColonyUpdateFence `protobuf:"bytes,1,opt,name=from_fence,json=fromFence,proto3" json:"from_fence,omitempty"`
+	// to_node_id is the Comb that will coordinate from here on. It may be
+	// the same Comb as the outgoing holder - a managerd handing to its own
+	// replacement process is a real case - but to_holder_incarnation must
+	// then differ, or the command is a no-op that mints a fence token for
+	// nothing.
+	ToNodeId string `protobuf:"bytes,2,opt,name=to_node_id,json=toNodeId,proto3" json:"to_node_id,omitempty"`
+	// to_holder_incarnation is the incoming managerd PROCESS, and it plays
+	// the same role here as it does on acquire: it is what distinguishes one
+	// process from the next on the same Comb.
+	ToHolderIncarnation string `protobuf:"bytes,3,opt,name=to_holder_incarnation,json=toHolderIncarnation,proto3" json:"to_holder_incarnation,omitempty"`
+	// reason is never empty, and is not free text for its own sake. "Who
+	// gave this away, and why" is the first question an operator asks when a
+	// sweep stops near its end, and the record has to answer it without the
+	// reader reconstructing it from timestamps.
+	Reason string `protobuf:"bytes,4,opt,name=reason,proto3" json:"reason,omitempty"`
+	// requested_at_unix is the outgoing holder's own reading, kept for the
+	// same reason AcquireColonyUpdate keeps requested_at_unix. It is NOT
+	// used to author the record's time: handed_over_at_unix on the emitted
+	// ColonyUpdateHandover is stamped by the leader that applied this, for
+	// the same determinism reason every other authored time here is.
+	RequestedAtUnix int64 `protobuf:"varint,5,opt,name=requested_at_unix,json=requestedAtUnix,proto3" json:"requested_at_unix,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
+}
+
+func (x *HandoverColonyUpdate) Reset() {
+	*x = HandoverColonyUpdate{}
+	mi := &file_api_internalpb_state_proto_msgTypes[48]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *HandoverColonyUpdate) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*HandoverColonyUpdate) ProtoMessage() {}
+
+func (x *HandoverColonyUpdate) ProtoReflect() protoreflect.Message {
+	mi := &file_api_internalpb_state_proto_msgTypes[48]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use HandoverColonyUpdate.ProtoReflect.Descriptor instead.
+func (*HandoverColonyUpdate) Descriptor() ([]byte, []int) {
+	return file_api_internalpb_state_proto_rawDescGZIP(), []int{48}
+}
+
+func (x *HandoverColonyUpdate) GetFromFence() *ColonyUpdateFence {
+	if x != nil {
+		return x.FromFence
+	}
+	return nil
+}
+
+func (x *HandoverColonyUpdate) GetToNodeId() string {
+	if x != nil {
+		return x.ToNodeId
+	}
+	return ""
+}
+
+func (x *HandoverColonyUpdate) GetToHolderIncarnation() string {
+	if x != nil {
+		return x.ToHolderIncarnation
+	}
+	return ""
+}
+
+func (x *HandoverColonyUpdate) GetReason() string {
+	if x != nil {
+		return x.Reason
+	}
+	return ""
+}
+
+func (x *HandoverColonyUpdate) GetRequestedAtUnix() int64 {
+	if x != nil {
+		return x.RequestedAtUnix
+	}
+	return 0
+}
+
+// ColonyUpdateHandover is the durable evidence of one cooperative change of
+// holder, appended to ColonyUpdate.handovers. It names BOTH holders, both
+// incarnations, both fence tokens and the reason, because a record that
+// only says "the holder changed" forces the reader to reconstruct who from
+// an index it cannot see.
+type ColonyUpdateHandover struct {
+	state           protoimpl.MessageState `protogen:"open.v1"`
+	FromNodeId      string                 `protobuf:"bytes,1,opt,name=from_node_id,json=fromNodeId,proto3" json:"from_node_id,omitempty"`
+	FromIncarnation string                 `protobuf:"bytes,2,opt,name=from_incarnation,json=fromIncarnation,proto3" json:"from_incarnation,omitempty"`
+	FromFenceToken  uint64                 `protobuf:"varint,3,opt,name=from_fence_token,json=fromFenceToken,proto3" json:"from_fence_token,omitempty"`
+	ToNodeId        string                 `protobuf:"bytes,4,opt,name=to_node_id,json=toNodeId,proto3" json:"to_node_id,omitempty"`
+	ToIncarnation   string                 `protobuf:"bytes,5,opt,name=to_incarnation,json=toIncarnation,proto3" json:"to_incarnation,omitempty"`
+	ToFenceToken    uint64                 `protobuf:"varint,6,opt,name=to_fence_token,json=toFenceToken,proto3" json:"to_fence_token,omitempty"`
+	Reason          string                 `protobuf:"bytes,7,opt,name=reason,proto3" json:"reason,omitempty"`
+	// handed_over_at_unix is authored by the node that applied the command
+	// (the leader), never accepted from the caller.
+	HandedOverAtUnix int64 `protobuf:"varint,8,opt,name=handed_over_at_unix,json=handedOverAtUnix,proto3" json:"handed_over_at_unix,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
+}
+
+func (x *ColonyUpdateHandover) Reset() {
+	*x = ColonyUpdateHandover{}
+	mi := &file_api_internalpb_state_proto_msgTypes[49]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ColonyUpdateHandover) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ColonyUpdateHandover) ProtoMessage() {}
+
+func (x *ColonyUpdateHandover) ProtoReflect() protoreflect.Message {
+	mi := &file_api_internalpb_state_proto_msgTypes[49]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ColonyUpdateHandover.ProtoReflect.Descriptor instead.
+func (*ColonyUpdateHandover) Descriptor() ([]byte, []int) {
+	return file_api_internalpb_state_proto_rawDescGZIP(), []int{49}
+}
+
+func (x *ColonyUpdateHandover) GetFromNodeId() string {
+	if x != nil {
+		return x.FromNodeId
+	}
+	return ""
+}
+
+func (x *ColonyUpdateHandover) GetFromIncarnation() string {
+	if x != nil {
+		return x.FromIncarnation
+	}
+	return ""
+}
+
+func (x *ColonyUpdateHandover) GetFromFenceToken() uint64 {
+	if x != nil {
+		return x.FromFenceToken
+	}
+	return 0
+}
+
+func (x *ColonyUpdateHandover) GetToNodeId() string {
+	if x != nil {
+		return x.ToNodeId
+	}
+	return ""
+}
+
+func (x *ColonyUpdateHandover) GetToIncarnation() string {
+	if x != nil {
+		return x.ToIncarnation
+	}
+	return ""
+}
+
+func (x *ColonyUpdateHandover) GetToFenceToken() uint64 {
+	if x != nil {
+		return x.ToFenceToken
+	}
+	return 0
+}
+
+func (x *ColonyUpdateHandover) GetReason() string {
+	if x != nil {
+		return x.Reason
+	}
+	return ""
+}
+
+func (x *ColonyUpdateHandover) GetHandedOverAtUnix() int64 {
+	if x != nil {
+		return x.HandedOverAtUnix
+	}
+	return 0
+}
+
 // CommandResult is the FSM's response to Apply, echoed back through
 // ApplyResponse. error is set (and vm left unset) if the command was
 // rejected at the application level (e.g. duplicate/missing id) - this is
@@ -5140,7 +5414,7 @@ type CommandResult struct {
 
 func (x *CommandResult) Reset() {
 	*x = CommandResult{}
-	mi := &file_api_internalpb_state_proto_msgTypes[48]
+	mi := &file_api_internalpb_state_proto_msgTypes[50]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5152,7 +5426,7 @@ func (x *CommandResult) String() string {
 func (*CommandResult) ProtoMessage() {}
 
 func (x *CommandResult) ProtoReflect() protoreflect.Message {
-	mi := &file_api_internalpb_state_proto_msgTypes[48]
+	mi := &file_api_internalpb_state_proto_msgTypes[50]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5165,7 +5439,7 @@ func (x *CommandResult) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CommandResult.ProtoReflect.Descriptor instead.
 func (*CommandResult) Descriptor() ([]byte, []int) {
-	return file_api_internalpb_state_proto_rawDescGZIP(), []int{48}
+	return file_api_internalpb_state_proto_rawDescGZIP(), []int{50}
 }
 
 func (x *CommandResult) GetVm() *VMDefinition {
@@ -5249,7 +5523,7 @@ type FSMSnapshotState struct {
 
 func (x *FSMSnapshotState) Reset() {
 	*x = FSMSnapshotState{}
-	mi := &file_api_internalpb_state_proto_msgTypes[49]
+	mi := &file_api_internalpb_state_proto_msgTypes[51]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5261,7 +5535,7 @@ func (x *FSMSnapshotState) String() string {
 func (*FSMSnapshotState) ProtoMessage() {}
 
 func (x *FSMSnapshotState) ProtoReflect() protoreflect.Message {
-	mi := &file_api_internalpb_state_proto_msgTypes[49]
+	mi := &file_api_internalpb_state_proto_msgTypes[51]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5274,7 +5548,7 @@ func (x *FSMSnapshotState) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FSMSnapshotState.ProtoReflect.Descriptor instead.
 func (*FSMSnapshotState) Descriptor() ([]byte, []int) {
-	return file_api_internalpb_state_proto_rawDescGZIP(), []int{49}
+	return file_api_internalpb_state_proto_rawDescGZIP(), []int{51}
 }
 
 func (x *FSMSnapshotState) GetLastIndex() uint64 {
@@ -5393,7 +5667,7 @@ type ConfigArchive struct {
 
 func (x *ConfigArchive) Reset() {
 	*x = ConfigArchive{}
-	mi := &file_api_internalpb_state_proto_msgTypes[50]
+	mi := &file_api_internalpb_state_proto_msgTypes[52]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5405,7 +5679,7 @@ func (x *ConfigArchive) String() string {
 func (*ConfigArchive) ProtoMessage() {}
 
 func (x *ConfigArchive) ProtoReflect() protoreflect.Message {
-	mi := &file_api_internalpb_state_proto_msgTypes[50]
+	mi := &file_api_internalpb_state_proto_msgTypes[52]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5418,7 +5692,7 @@ func (x *ConfigArchive) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ConfigArchive.ProtoReflect.Descriptor instead.
 func (*ConfigArchive) Descriptor() ([]byte, []int) {
-	return file_api_internalpb_state_proto_rawDescGZIP(), []int{50}
+	return file_api_internalpb_state_proto_rawDescGZIP(), []int{52}
 }
 
 func (x *ConfigArchive) GetFormatVersion() uint32 {
@@ -5528,7 +5802,7 @@ const file_api_internalpb_state_proto_rawDesc = "" +
 	"\vbridge_name\x18\x05 \x01(\tR\n" +
 	"bridgeName\x12)\n" +
 	"\x10external_gateway\x18\x06 \x01(\tR\x0fexternalGateway\x12%\n" +
-	"\x0euplink_bridged\x18\a \x01(\bR\ruplinkBridged\"\x87\x17\n" +
+	"\x0euplink_bridged\x18\a \x01(\bR\ruplinkBridged\"\xe9\x17\n" +
 	"\aCommand\x12;\n" +
 	"\tcreate_vm\x18\x01 \x01(\v2\x1c.apiary.internal.v1.CreateVMH\x00R\bcreateVm\x12;\n" +
 	"\tupdate_vm\x18\x02 \x01(\v2\x1c.apiary.internal.v1.UpdateVMH\x00R\bupdateVm\x12;\n" +
@@ -5568,7 +5842,8 @@ const file_api_internalpb_state_proto_rawDesc = "" +
 	"\x16finish_guest_migration\x18\x1f \x01(\v2(.apiary.internal.v1.FinishGuestMigrationH\x00R\x14finishGuestMigration\x12]\n" +
 	"\x15acquire_colony_update\x18  \x01(\v2'.apiary.internal.v1.AcquireColonyUpdateH\x00R\x13acquireColonyUpdate\x12]\n" +
 	"\x15advance_colony_update\x18! \x01(\v2'.apiary.internal.v1.AdvanceColonyUpdateH\x00R\x13advanceColonyUpdate\x12]\n" +
-	"\x15release_colony_update\x18\" \x01(\v2'.apiary.internal.v1.ReleaseColonyUpdateH\x00R\x13releaseColonyUpdateB\x04\n" +
+	"\x15release_colony_update\x18\" \x01(\v2'.apiary.internal.v1.ReleaseColonyUpdateH\x00R\x13releaseColonyUpdate\x12`\n" +
+	"\x16handover_colony_update\x18# \x01(\v2(.apiary.internal.v1.HandoverColonyUpdateH\x00R\x14handoverColonyUpdateB\x04\n" +
 	"\x02op\"\x82\x01\n" +
 	"\x06ApiKey\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
@@ -5793,7 +6068,7 @@ const file_api_internalpb_state_proto_rawDesc = "" +
 	"\x06detail\x18\x04 \x01(\tR\x06detail\x12\x1a\n" +
 	"\bevidence\x18\x05 \x03(\tR\bevidence\x12\x17\n" +
 	"\anode_id\x18\x06 \x01(\tR\x06nodeId\x12(\n" +
-	"\x10recorded_at_unix\x18\a \x01(\x03R\x0erecordedAtUnix\"\x81\x04\n" +
+	"\x10recorded_at_unix\x18\a \x01(\x03R\x0erecordedAtUnix\"\xc9\x04\n" +
 	"\fColonyUpdate\x12!\n" +
 	"\foperation_id\x18\x01 \x01(\tR\voperationId\x12$\n" +
 	"\x0eholder_node_id\x18\x02 \x01(\tR\fholderNodeId\x12-\n" +
@@ -5810,7 +6085,8 @@ const file_api_internalpb_state_proto_rawDesc = "" +
 	"\x0fsettled_at_unix\x18\v \x01(\x03R\rsettledAtUnix\x12\x1a\n" +
 	"\btakeover\x18\f \x01(\bR\btakeover\x12@\n" +
 	"\x05steps\x18\x0e \x03(\v2*.apiary.internal.v1.ColonyUpdateStepRecordR\x05steps\x12&\n" +
-	"\x0fupdated_at_unix\x18\x0f \x01(\x03R\rupdatedAtUnix\"\xd5\x01\n" +
+	"\x0fupdated_at_unix\x18\x0f \x01(\x03R\rupdatedAtUnix\x12F\n" +
+	"\thandovers\x18\x10 \x03(\v2(.apiary.internal.v1.ColonyUpdateHandoverR\thandovers\"\xd5\x01\n" +
 	"\x13AcquireColonyUpdate\x12!\n" +
 	"\foperation_id\x18\x01 \x01(\tR\voperationId\x12$\n" +
 	"\x0eholder_node_id\x18\x02 \x01(\tR\fholderNodeId\x12-\n" +
@@ -5828,7 +6104,26 @@ const file_api_internalpb_state_proto_rawDesc = "" +
 	"\x05fence\x18\x01 \x01(\v2%.apiary.internal.v1.ColonyUpdateFenceR\x05fence\x12\x18\n" +
 	"\aoutcome\x18\x02 \x01(\tR\aoutcome\x12\x16\n" +
 	"\x06detail\x18\x03 \x01(\tR\x06detail\x12*\n" +
-	"\x11completed_at_unix\x18\x04 \x01(\x03R\x0fcompletedAtUnix\"\xe9\x01\n" +
+	"\x11completed_at_unix\x18\x04 \x01(\x03R\x0fcompletedAtUnix\"\xf2\x01\n" +
+	"\x14HandoverColonyUpdate\x12D\n" +
+	"\n" +
+	"from_fence\x18\x01 \x01(\v2%.apiary.internal.v1.ColonyUpdateFenceR\tfromFence\x12\x1c\n" +
+	"\n" +
+	"to_node_id\x18\x02 \x01(\tR\btoNodeId\x122\n" +
+	"\x15to_holder_incarnation\x18\x03 \x01(\tR\x13toHolderIncarnation\x12\x16\n" +
+	"\x06reason\x18\x04 \x01(\tR\x06reason\x12*\n" +
+	"\x11requested_at_unix\x18\x05 \x01(\x03R\x0frequestedAtUnix\"\xbf\x02\n" +
+	"\x14ColonyUpdateHandover\x12 \n" +
+	"\ffrom_node_id\x18\x01 \x01(\tR\n" +
+	"fromNodeId\x12)\n" +
+	"\x10from_incarnation\x18\x02 \x01(\tR\x0ffromIncarnation\x12(\n" +
+	"\x10from_fence_token\x18\x03 \x01(\x04R\x0efromFenceToken\x12\x1c\n" +
+	"\n" +
+	"to_node_id\x18\x04 \x01(\tR\btoNodeId\x12%\n" +
+	"\x0eto_incarnation\x18\x05 \x01(\tR\rtoIncarnation\x12$\n" +
+	"\x0eto_fence_token\x18\x06 \x01(\x04R\ftoFenceToken\x12\x16\n" +
+	"\x06reason\x18\a \x01(\tR\x06reason\x12-\n" +
+	"\x13handed_over_at_unix\x18\b \x01(\x03R\x10handedOverAtUnix\"\xe9\x01\n" +
 	"\rCommandResult\x120\n" +
 	"\x02vm\x18\x01 \x01(\v2 .apiary.internal.v1.VMDefinitionR\x02vm\x12\x14\n" +
 	"\x05error\x18\x02 \x01(\tR\x05error\x126\n" +
@@ -5935,7 +6230,7 @@ func file_api_internalpb_state_proto_rawDescGZIP() []byte {
 }
 
 var file_api_internalpb_state_proto_enumTypes = make([]protoimpl.EnumInfo, 5)
-var file_api_internalpb_state_proto_msgTypes = make([]protoimpl.MessageInfo, 61)
+var file_api_internalpb_state_proto_msgTypes = make([]protoimpl.MessageInfo, 63)
 var file_api_internalpb_state_proto_goTypes = []any{
 	(VMState)(0),                      // 0: apiary.internal.v1.VMState
 	(VMPhase)(0),                      // 1: apiary.internal.v1.VMPhase
@@ -5990,19 +6285,21 @@ var file_api_internalpb_state_proto_goTypes = []any{
 	(*AcquireColonyUpdate)(nil),       // 50: apiary.internal.v1.AcquireColonyUpdate
 	(*AdvanceColonyUpdate)(nil),       // 51: apiary.internal.v1.AdvanceColonyUpdate
 	(*ReleaseColonyUpdate)(nil),       // 52: apiary.internal.v1.ReleaseColonyUpdate
-	(*CommandResult)(nil),             // 53: apiary.internal.v1.CommandResult
-	(*FSMSnapshotState)(nil),          // 54: apiary.internal.v1.FSMSnapshotState
-	(*ConfigArchive)(nil),             // 55: apiary.internal.v1.ConfigArchive
-	nil,                               // 56: apiary.internal.v1.FSMSnapshotState.VmsEntry
-	nil,                               // 57: apiary.internal.v1.FSMSnapshotState.NetworksEntry
-	nil,                               // 58: apiary.internal.v1.FSMSnapshotState.ApiKeysEntry
-	nil,                               // 59: apiary.internal.v1.FSMSnapshotState.JailsEntry
-	nil,                               // 60: apiary.internal.v1.FSMSnapshotState.PendingJoinRequestsEntry
-	nil,                               // 61: apiary.internal.v1.FSMSnapshotState.RestartLeasesEntry
-	nil,                               // 62: apiary.internal.v1.FSMSnapshotState.RestartRecordsEntry
-	nil,                               // 63: apiary.internal.v1.FSMSnapshotState.MigrationsEntry
-	nil,                               // 64: apiary.internal.v1.FSMSnapshotState.MigrationsByGuestEntry
-	nil,                               // 65: apiary.internal.v1.FSMSnapshotState.ColonyUpdatesEntry
+	(*HandoverColonyUpdate)(nil),      // 53: apiary.internal.v1.HandoverColonyUpdate
+	(*ColonyUpdateHandover)(nil),      // 54: apiary.internal.v1.ColonyUpdateHandover
+	(*CommandResult)(nil),             // 55: apiary.internal.v1.CommandResult
+	(*FSMSnapshotState)(nil),          // 56: apiary.internal.v1.FSMSnapshotState
+	(*ConfigArchive)(nil),             // 57: apiary.internal.v1.ConfigArchive
+	nil,                               // 58: apiary.internal.v1.FSMSnapshotState.VmsEntry
+	nil,                               // 59: apiary.internal.v1.FSMSnapshotState.NetworksEntry
+	nil,                               // 60: apiary.internal.v1.FSMSnapshotState.ApiKeysEntry
+	nil,                               // 61: apiary.internal.v1.FSMSnapshotState.JailsEntry
+	nil,                               // 62: apiary.internal.v1.FSMSnapshotState.PendingJoinRequestsEntry
+	nil,                               // 63: apiary.internal.v1.FSMSnapshotState.RestartLeasesEntry
+	nil,                               // 64: apiary.internal.v1.FSMSnapshotState.RestartRecordsEntry
+	nil,                               // 65: apiary.internal.v1.FSMSnapshotState.MigrationsEntry
+	nil,                               // 66: apiary.internal.v1.FSMSnapshotState.MigrationsByGuestEntry
+	nil,                               // 67: apiary.internal.v1.FSMSnapshotState.ColonyUpdatesEntry
 }
 var file_api_internalpb_state_proto_depIdxs = []int32{
 	0,  // 0: apiary.internal.v1.VMDefinition.desired_state:type_name -> apiary.internal.v1.VMState
@@ -6044,53 +6341,56 @@ var file_api_internalpb_state_proto_depIdxs = []int32{
 	50, // 36: apiary.internal.v1.Command.acquire_colony_update:type_name -> apiary.internal.v1.AcquireColonyUpdate
 	51, // 37: apiary.internal.v1.Command.advance_colony_update:type_name -> apiary.internal.v1.AdvanceColonyUpdate
 	52, // 38: apiary.internal.v1.Command.release_colony_update:type_name -> apiary.internal.v1.ReleaseColonyUpdate
-	10, // 39: apiary.internal.v1.CreateAPIKey.key:type_name -> apiary.internal.v1.ApiKey
-	8,  // 40: apiary.internal.v1.CreateNetwork.network:type_name -> apiary.internal.v1.NetworkDefinition
-	5,  // 41: apiary.internal.v1.CreateVM.vm:type_name -> apiary.internal.v1.VMDefinition
-	5,  // 42: apiary.internal.v1.UpdateVM.vm:type_name -> apiary.internal.v1.VMDefinition
-	1,  // 43: apiary.internal.v1.UpdateVMPhase.phase:type_name -> apiary.internal.v1.VMPhase
-	0,  // 44: apiary.internal.v1.SetVMDesiredState.desired_state:type_name -> apiary.internal.v1.VMState
-	7,  // 45: apiary.internal.v1.SetVMFirewallRules.firewall_rules:type_name -> apiary.internal.v1.FirewallRule
-	6,  // 46: apiary.internal.v1.CreateJail.jail:type_name -> apiary.internal.v1.JailDefinition
-	6,  // 47: apiary.internal.v1.UpdateJail.jail:type_name -> apiary.internal.v1.JailDefinition
-	3,  // 48: apiary.internal.v1.UpdateJailPhase.phase:type_name -> apiary.internal.v1.JailPhase
-	2,  // 49: apiary.internal.v1.SetJailDesiredState.desired_state:type_name -> apiary.internal.v1.JailState
-	32, // 50: apiary.internal.v1.GuestMigration.evidence:type_name -> apiary.internal.v1.MigrationEvidence
-	32, // 51: apiary.internal.v1.FinishGuestMigration.evidence:type_name -> apiary.internal.v1.MigrationEvidence
-	4,  // 52: apiary.internal.v1.PendingJoinRequest.status:type_name -> apiary.internal.v1.JoinRequestStatus
-	37, // 53: apiary.internal.v1.CreatePendingJoinRequest.request:type_name -> apiary.internal.v1.PendingJoinRequest
-	47, // 54: apiary.internal.v1.AcquireRestartLease.colony_update_fence:type_name -> apiary.internal.v1.ColonyUpdateFence
-	48, // 55: apiary.internal.v1.ColonyUpdate.steps:type_name -> apiary.internal.v1.ColonyUpdateStepRecord
-	47, // 56: apiary.internal.v1.AdvanceColonyUpdate.fence:type_name -> apiary.internal.v1.ColonyUpdateFence
-	48, // 57: apiary.internal.v1.AdvanceColonyUpdate.step_record:type_name -> apiary.internal.v1.ColonyUpdateStepRecord
-	47, // 58: apiary.internal.v1.ReleaseColonyUpdate.fence:type_name -> apiary.internal.v1.ColonyUpdateFence
-	5,  // 59: apiary.internal.v1.CommandResult.vm:type_name -> apiary.internal.v1.VMDefinition
-	6,  // 60: apiary.internal.v1.CommandResult.jail:type_name -> apiary.internal.v1.JailDefinition
-	37, // 61: apiary.internal.v1.CommandResult.pending_join_request:type_name -> apiary.internal.v1.PendingJoinRequest
-	56, // 62: apiary.internal.v1.FSMSnapshotState.vms:type_name -> apiary.internal.v1.FSMSnapshotState.VmsEntry
-	57, // 63: apiary.internal.v1.FSMSnapshotState.networks:type_name -> apiary.internal.v1.FSMSnapshotState.NetworksEntry
-	58, // 64: apiary.internal.v1.FSMSnapshotState.api_keys:type_name -> apiary.internal.v1.FSMSnapshotState.ApiKeysEntry
-	59, // 65: apiary.internal.v1.FSMSnapshotState.jails:type_name -> apiary.internal.v1.FSMSnapshotState.JailsEntry
-	60, // 66: apiary.internal.v1.FSMSnapshotState.pending_join_requests:type_name -> apiary.internal.v1.FSMSnapshotState.PendingJoinRequestsEntry
-	61, // 67: apiary.internal.v1.FSMSnapshotState.restart_leases:type_name -> apiary.internal.v1.FSMSnapshotState.RestartLeasesEntry
-	62, // 68: apiary.internal.v1.FSMSnapshotState.restart_records:type_name -> apiary.internal.v1.FSMSnapshotState.RestartRecordsEntry
-	63, // 69: apiary.internal.v1.FSMSnapshotState.migrations:type_name -> apiary.internal.v1.FSMSnapshotState.MigrationsEntry
-	64, // 70: apiary.internal.v1.FSMSnapshotState.migrations_by_guest:type_name -> apiary.internal.v1.FSMSnapshotState.MigrationsByGuestEntry
-	65, // 71: apiary.internal.v1.FSMSnapshotState.colony_updates:type_name -> apiary.internal.v1.FSMSnapshotState.ColonyUpdatesEntry
-	5,  // 72: apiary.internal.v1.FSMSnapshotState.VmsEntry.value:type_name -> apiary.internal.v1.VMDefinition
-	8,  // 73: apiary.internal.v1.FSMSnapshotState.NetworksEntry.value:type_name -> apiary.internal.v1.NetworkDefinition
-	10, // 74: apiary.internal.v1.FSMSnapshotState.ApiKeysEntry.value:type_name -> apiary.internal.v1.ApiKey
-	6,  // 75: apiary.internal.v1.FSMSnapshotState.JailsEntry.value:type_name -> apiary.internal.v1.JailDefinition
-	37, // 76: apiary.internal.v1.FSMSnapshotState.PendingJoinRequestsEntry.value:type_name -> apiary.internal.v1.PendingJoinRequest
-	43, // 77: apiary.internal.v1.FSMSnapshotState.RestartLeasesEntry.value:type_name -> apiary.internal.v1.RestartLease
-	44, // 78: apiary.internal.v1.FSMSnapshotState.RestartRecordsEntry.value:type_name -> apiary.internal.v1.RestartRecord
-	33, // 79: apiary.internal.v1.FSMSnapshotState.MigrationsEntry.value:type_name -> apiary.internal.v1.GuestMigration
-	49, // 80: apiary.internal.v1.FSMSnapshotState.ColonyUpdatesEntry.value:type_name -> apiary.internal.v1.ColonyUpdate
-	81, // [81:81] is the sub-list for method output_type
-	81, // [81:81] is the sub-list for method input_type
-	81, // [81:81] is the sub-list for extension type_name
-	81, // [81:81] is the sub-list for extension extendee
-	0,  // [0:81] is the sub-list for field type_name
+	53, // 39: apiary.internal.v1.Command.handover_colony_update:type_name -> apiary.internal.v1.HandoverColonyUpdate
+	10, // 40: apiary.internal.v1.CreateAPIKey.key:type_name -> apiary.internal.v1.ApiKey
+	8,  // 41: apiary.internal.v1.CreateNetwork.network:type_name -> apiary.internal.v1.NetworkDefinition
+	5,  // 42: apiary.internal.v1.CreateVM.vm:type_name -> apiary.internal.v1.VMDefinition
+	5,  // 43: apiary.internal.v1.UpdateVM.vm:type_name -> apiary.internal.v1.VMDefinition
+	1,  // 44: apiary.internal.v1.UpdateVMPhase.phase:type_name -> apiary.internal.v1.VMPhase
+	0,  // 45: apiary.internal.v1.SetVMDesiredState.desired_state:type_name -> apiary.internal.v1.VMState
+	7,  // 46: apiary.internal.v1.SetVMFirewallRules.firewall_rules:type_name -> apiary.internal.v1.FirewallRule
+	6,  // 47: apiary.internal.v1.CreateJail.jail:type_name -> apiary.internal.v1.JailDefinition
+	6,  // 48: apiary.internal.v1.UpdateJail.jail:type_name -> apiary.internal.v1.JailDefinition
+	3,  // 49: apiary.internal.v1.UpdateJailPhase.phase:type_name -> apiary.internal.v1.JailPhase
+	2,  // 50: apiary.internal.v1.SetJailDesiredState.desired_state:type_name -> apiary.internal.v1.JailState
+	32, // 51: apiary.internal.v1.GuestMigration.evidence:type_name -> apiary.internal.v1.MigrationEvidence
+	32, // 52: apiary.internal.v1.FinishGuestMigration.evidence:type_name -> apiary.internal.v1.MigrationEvidence
+	4,  // 53: apiary.internal.v1.PendingJoinRequest.status:type_name -> apiary.internal.v1.JoinRequestStatus
+	37, // 54: apiary.internal.v1.CreatePendingJoinRequest.request:type_name -> apiary.internal.v1.PendingJoinRequest
+	47, // 55: apiary.internal.v1.AcquireRestartLease.colony_update_fence:type_name -> apiary.internal.v1.ColonyUpdateFence
+	48, // 56: apiary.internal.v1.ColonyUpdate.steps:type_name -> apiary.internal.v1.ColonyUpdateStepRecord
+	54, // 57: apiary.internal.v1.ColonyUpdate.handovers:type_name -> apiary.internal.v1.ColonyUpdateHandover
+	47, // 58: apiary.internal.v1.AdvanceColonyUpdate.fence:type_name -> apiary.internal.v1.ColonyUpdateFence
+	48, // 59: apiary.internal.v1.AdvanceColonyUpdate.step_record:type_name -> apiary.internal.v1.ColonyUpdateStepRecord
+	47, // 60: apiary.internal.v1.ReleaseColonyUpdate.fence:type_name -> apiary.internal.v1.ColonyUpdateFence
+	47, // 61: apiary.internal.v1.HandoverColonyUpdate.from_fence:type_name -> apiary.internal.v1.ColonyUpdateFence
+	5,  // 62: apiary.internal.v1.CommandResult.vm:type_name -> apiary.internal.v1.VMDefinition
+	6,  // 63: apiary.internal.v1.CommandResult.jail:type_name -> apiary.internal.v1.JailDefinition
+	37, // 64: apiary.internal.v1.CommandResult.pending_join_request:type_name -> apiary.internal.v1.PendingJoinRequest
+	58, // 65: apiary.internal.v1.FSMSnapshotState.vms:type_name -> apiary.internal.v1.FSMSnapshotState.VmsEntry
+	59, // 66: apiary.internal.v1.FSMSnapshotState.networks:type_name -> apiary.internal.v1.FSMSnapshotState.NetworksEntry
+	60, // 67: apiary.internal.v1.FSMSnapshotState.api_keys:type_name -> apiary.internal.v1.FSMSnapshotState.ApiKeysEntry
+	61, // 68: apiary.internal.v1.FSMSnapshotState.jails:type_name -> apiary.internal.v1.FSMSnapshotState.JailsEntry
+	62, // 69: apiary.internal.v1.FSMSnapshotState.pending_join_requests:type_name -> apiary.internal.v1.FSMSnapshotState.PendingJoinRequestsEntry
+	63, // 70: apiary.internal.v1.FSMSnapshotState.restart_leases:type_name -> apiary.internal.v1.FSMSnapshotState.RestartLeasesEntry
+	64, // 71: apiary.internal.v1.FSMSnapshotState.restart_records:type_name -> apiary.internal.v1.FSMSnapshotState.RestartRecordsEntry
+	65, // 72: apiary.internal.v1.FSMSnapshotState.migrations:type_name -> apiary.internal.v1.FSMSnapshotState.MigrationsEntry
+	66, // 73: apiary.internal.v1.FSMSnapshotState.migrations_by_guest:type_name -> apiary.internal.v1.FSMSnapshotState.MigrationsByGuestEntry
+	67, // 74: apiary.internal.v1.FSMSnapshotState.colony_updates:type_name -> apiary.internal.v1.FSMSnapshotState.ColonyUpdatesEntry
+	5,  // 75: apiary.internal.v1.FSMSnapshotState.VmsEntry.value:type_name -> apiary.internal.v1.VMDefinition
+	8,  // 76: apiary.internal.v1.FSMSnapshotState.NetworksEntry.value:type_name -> apiary.internal.v1.NetworkDefinition
+	10, // 77: apiary.internal.v1.FSMSnapshotState.ApiKeysEntry.value:type_name -> apiary.internal.v1.ApiKey
+	6,  // 78: apiary.internal.v1.FSMSnapshotState.JailsEntry.value:type_name -> apiary.internal.v1.JailDefinition
+	37, // 79: apiary.internal.v1.FSMSnapshotState.PendingJoinRequestsEntry.value:type_name -> apiary.internal.v1.PendingJoinRequest
+	43, // 80: apiary.internal.v1.FSMSnapshotState.RestartLeasesEntry.value:type_name -> apiary.internal.v1.RestartLease
+	44, // 81: apiary.internal.v1.FSMSnapshotState.RestartRecordsEntry.value:type_name -> apiary.internal.v1.RestartRecord
+	33, // 82: apiary.internal.v1.FSMSnapshotState.MigrationsEntry.value:type_name -> apiary.internal.v1.GuestMigration
+	49, // 83: apiary.internal.v1.FSMSnapshotState.ColonyUpdatesEntry.value:type_name -> apiary.internal.v1.ColonyUpdate
+	84, // [84:84] is the sub-list for method output_type
+	84, // [84:84] is the sub-list for method input_type
+	84, // [84:84] is the sub-list for extension type_name
+	84, // [84:84] is the sub-list for extension extendee
+	0,  // [0:84] is the sub-list for field type_name
 }
 
 func init() { file_api_internalpb_state_proto_init() }
@@ -6133,6 +6433,7 @@ func file_api_internalpb_state_proto_init() {
 		(*Command_AcquireColonyUpdate)(nil),
 		(*Command_AdvanceColonyUpdate)(nil),
 		(*Command_ReleaseColonyUpdate)(nil),
+		(*Command_HandoverColonyUpdate)(nil),
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
@@ -6140,7 +6441,7 @@ func file_api_internalpb_state_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_api_internalpb_state_proto_rawDesc), len(file_api_internalpb_state_proto_rawDesc)),
 			NumEnums:      5,
-			NumMessages:   61,
+			NumMessages:   63,
 			NumExtensions: 0,
 			NumServices:   0,
 		},
