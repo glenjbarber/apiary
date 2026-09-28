@@ -190,6 +190,8 @@ func (f *FSM) Apply(log *raft.Log) interface{} {
 		return f.applyAdvanceColonyUpdate(log.Index, op.AdvanceColonyUpdate)
 	case *internalpb.Command_ReleaseColonyUpdate:
 		return f.applyReleaseColonyUpdate(log.Index, op.ReleaseColonyUpdate)
+	case *internalpb.Command_HandoverColonyUpdate:
+		return f.applyHandoverColonyUpdate(log.Index, op.HandoverColonyUpdate)
 	default:
 		return &FSMApplyResult{Index: log.Index, Error: "command has no op set"}
 	}
@@ -1146,6 +1148,110 @@ func (f *FSM) applyReleaseColonyUpdate(index uint64, req *internalpb.ReleaseColo
 	// long as nobody started anything - which, on a quiet colony, is
 	// forever.
 	evictSettledColonyUpdates(f.colonyUpdates, maxSettledColonyUpdates)
+	return &FSMApplyResult{Index: index, ColonyUpdate: active}
+}
+
+// applyHandoverColonyUpdate is the PLANNED, cooperative transfer of an
+// operation that is already in progress (ADR-0146 rule 2). It is the
+// normal way a colony-wide sweep finishes: the operation names every
+// Comb, so eventually the only one left is the holder's own, and the
+// holder cannot restart itself - ADR-0142 refuses that outright - so
+// ownership moves to another Comb before that Comb is touched.
+//
+// It is a separate command from AcquireColonyUpdate's takeover flag, and
+// the separation is the entire point. Takeover is a contested seizure of a
+// live operation from a coordinator that has stopped answering; a handover
+// is cooperation between two coordinators that both know what is
+// happening. Routing the second through the first would set takeover=true
+// on the common path, settle the outgoing record as "unobserved", and
+// leave a healthy sweep indistinguishable in the durable record from a
+// cluster fight. That destroys the flag's only purpose, which is to tell
+// an operator that something went wrong.
+//
+// Three properties keep this a handover rather than a way around the
+// fence:
+//
+//  1. The OUTGOING holder's exact fence must match the active record. A
+//     coordinator that has already been displaced, or whose operation was
+//     taken over, cannot hand over an operation it no longer holds. Same
+//     fenceMatchesActive rule Advance and Release use, and the refusal is
+//     the same named refusal.
+//  2. The record is NOT settled. Operation id, step history, target and
+//     progress all survive; only the holder changes. A handover that
+//     created a new record would discard exactly the durable progress
+//     this whole mechanism exists to preserve.
+//  3. The fence token is minted higher, because it is this command's own
+//     log index, exactly as on acquire. The incoming holder faces the
+//     identical exact-match requirement as any other holder, and the
+//     outgoing token is stale the instant this commits, on every replica.
+//     A handover relocates an operation; it never relaxes what is required
+//     to keep moving it.
+//
+// Note what is deliberately NOT here. There is no force, and no override
+// of any kind: a handover is a thing two coordinators agree on, and if the
+// outgoing one cannot be reached then what the operator needs is an
+// explicit takeover, which is loud and is recorded as such. There is also
+// no membership check on to_node_id. The FSM has no authoritative view of
+// Colony membership - applyAcquireRestartLease takes its voter list from
+// the caller for the same reason - so validating the target Comb is the
+// resolving managerd's job, not this one's, and inventing a partial check
+// here would be a check that could be wrong.
+func (f *FSM) applyHandoverColonyUpdate(index uint64, req *internalpb.HandoverColonyUpdate) *FSMApplyResult {
+	active := activeColonyUpdate(f.colonyUpdates)
+	from := req.GetFromFence()
+	if !fenceMatchesActive(from, active) {
+		return &FSMApplyResult{Index: index, Error: fenceRefusal("hand over the controlled update", from, active)}
+	}
+	if err := validateColonyUpdateHandover(req); err != nil {
+		return &FSMApplyResult{Index: index, Error: fmt.Sprintf(
+			"refusing to hand over controlled update %q: %v", active.GetOperationId(), err)}
+	}
+
+	// A handover to the identity it already has would mint a higher fence
+	// token and append a record, changing nothing. That is refused rather
+	// than tolerated because the whole point of the handovers list is that
+	// every entry in it is a real change of coordinator, and a list that
+	// can fill with no-ops is a list nobody can read.
+	if req.GetToNodeId() == active.GetHolderNodeId() &&
+		req.GetToHolderIncarnation() == active.GetHolderIncarnation() {
+		return &FSMApplyResult{Index: index, Error: fmt.Sprintf(
+			"refusing to hand over controlled update %q to node %q (incarnation %q): that is the coordinator that already holds it, "+
+				"so the handover would change nothing while still minting a higher fence token and recording a change of holder that did not happen",
+			active.GetOperationId(), active.GetHolderNodeId(), active.GetHolderIncarnation())}
+	}
+
+	// Authored here, on the leader, and never taken from the request -
+	// req.GetRequestedAtUnix() is deliberately not used for this, exactly
+	// as applyAcquireColonyUpdate ignores its own for the record it
+	// writes. Every replica must be able to agree on the record's contents
+	// from the log alone.
+	handedOver := &internalpb.ColonyUpdateHandover{
+		FromNodeId:       active.GetHolderNodeId(),
+		FromIncarnation:  active.GetHolderIncarnation(),
+		FromFenceToken:   active.GetFenceToken(),
+		ToNodeId:         req.GetToNodeId(),
+		ToIncarnation:    req.GetToHolderIncarnation(),
+		ToFenceToken:     index,
+		Reason:           req.GetReason(),
+		HandedOverAtUnix: req.GetRequestedAtUnix(),
+	}
+
+	// active.Takeover is deliberately left alone. It is sticky on purpose:
+	// if this operation was ever seized rather than handed over, an
+	// operator reading it later must still be able to see that, however
+	// many cooperative handovers followed.
+	active.HolderNodeId = req.GetToNodeId()
+	active.HolderIncarnation = req.GetToHolderIncarnation()
+	active.FenceToken = index
+	active.UpdatedAtUnix = req.GetRequestedAtUnix()
+	active.Handovers = append(active.Handovers, handedOver)
+	// Detail is deliberately NOT rewritten. It is the current step's own
+	// description, and overwriting it with a sentence about the handover
+	// would erase the thing a reader is most likely to be looking for.
+	// The handover is in Handovers, where a reader can find it by name.
+
+	// No eviction: a handover creates no settled record, so it cannot
+	// push the history past its cap.
 	return &FSMApplyResult{Index: index, ColonyUpdate: active}
 }
 

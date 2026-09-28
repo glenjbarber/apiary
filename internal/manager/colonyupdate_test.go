@@ -260,7 +260,7 @@ func TestMutateColonyUpdate_RefusesMalformedRequestsBeforeProposing(t *testing.T
 		{
 			name:    "no op at all",
 			req:     &rpcpb.MutateColonyUpdateRequest{},
-			wantSay: "carried no acquire, advance or release",
+			wantSay: "carried no acquire, advance, release or handover",
 		},
 		{
 			name:    "an acquire with no operation id",

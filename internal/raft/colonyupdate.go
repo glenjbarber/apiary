@@ -216,6 +216,32 @@ func fenceRefusal(verb string, fence *internalpb.ColonyUpdateFence, active *inte
 		fence.GetOperationId(), fence.GetHolderNodeId(), fence.GetHolderIncarnation(), fence.GetFenceToken())
 }
 
+// validateColonyUpdateHandover enforces the self-contained parts of a
+// handover: that it names a coordinator to hand to, and says why.
+//
+// The membership of to_node_id is deliberately NOT checked here. The FSM
+// has no authoritative view of Colony membership - applyAcquireRestartLease
+// takes its voter list from the calling command for the same reason - so a
+// check written in this file could only be a guess. Deciding whether the
+// named Comb is a real voter is the resolving managerd's job, on facts it
+// actually has, and a half-check in the consensus layer would be worse
+// than none: it would be a check that looks load-bearing and can be wrong.
+func validateColonyUpdateHandover(req *internalpb.HandoverColonyUpdate) error {
+	if req.GetToNodeId() == "" {
+		return fmt.Errorf("no receiving node was named, so there is no coordinator to hand the operation to")
+	}
+	if req.GetToHolderIncarnation() == "" {
+		// Same reason acquire demands one: without it the incoming
+		// coordinator is not distinguishable from the outgoing one, and
+		// the fence it receives could not fence it.
+		return fmt.Errorf("no receiving incarnation was named, so the incoming coordinator could not be told apart from the process it replaces")
+	}
+	if req.GetReason() == "" {
+		return fmt.Errorf("no reason was given - \"who gave this away, and why\" is the first question an operator asks when a sweep stops near its end, and the record has to answer it")
+	}
+	return nil
+}
+
 // activeColonyUpdate returns the one active record, or nil.
 //
 // The map is keyed by operation_id and at most one entry is active, so

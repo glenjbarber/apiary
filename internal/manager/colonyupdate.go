@@ -183,8 +183,28 @@ func (s *Server) colonyUpdateCommand(req *rpcpb.MutateColonyUpdateRequest) (*int
 			},
 		}}, nil
 
+	case *rpcpb.MutateColonyUpdateRequest_Handover:
+		h := op.Handover
+		// The OUTGOING fence is validated for completeness here for the
+		// same reason advance and release are: an incomplete fence can
+		// never match exactly, and letting one through to be refused by
+		// the FSM would replace a precise local explanation with a
+		// leader-forwarded round trip that still says nothing useful.
+		if err := checkColonyUpdateFence(h.GetFromFence()); err != nil {
+			return nil, err
+		}
+		return &internalpb.Command{Op: &internalpb.Command_HandoverColonyUpdate{
+			HandoverColonyUpdate: &internalpb.HandoverColonyUpdate{
+				FromFence:           toInternalColonyUpdateFence(h.GetFromFence()),
+				ToNodeId:            h.GetToNodeId(),
+				ToHolderIncarnation: h.GetToHolderIncarnation(),
+				Reason:              h.GetReason(),
+				RequestedAtUnix:     time.Now().Unix(),
+			},
+		}}, nil
+
 	default:
-		return nil, fmt.Errorf("the request carried no acquire, advance or release, so nothing was asked for")
+		return nil, fmt.Errorf("the request carried no acquire, advance, release or handover, so nothing was asked for")
 	}
 }
 
@@ -293,6 +313,22 @@ func fromInternalColonyUpdate(rec *internalpb.ColonyUpdate) *rpcpb.ColonyUpdate 
 			NodeId:   s.GetNodeId(),
 		})
 	}
+	// Handovers are carried whole, and a copy rather than an alias: the
+	// record here comes from a snapshot the FSM will keep mutating in
+	// place, so handing out its slices would be the same live-pointer bug
+	// ColonyUpdateState already had to be fixed for.
+	handovers := make([]*rpcpb.ColonyUpdateHandover, 0, len(rec.GetHandovers()))
+	for _, h := range rec.GetHandovers() {
+		handovers = append(handovers, &rpcpb.ColonyUpdateHandover{
+			FromNodeId:      h.GetFromNodeId(),
+			FromIncarnation: h.GetFromIncarnation(),
+			FromFenceToken:  h.GetFromFenceToken(),
+			ToNodeId:        h.GetToNodeId(),
+			ToIncarnation:   h.GetToIncarnation(),
+			ToFenceToken:    h.GetToFenceToken(),
+			Reason:          h.GetReason(),
+		})
+	}
 	return &rpcpb.ColonyUpdate{
 		OperationId:       rec.GetOperationId(),
 		HolderNodeId:      rec.GetHolderNodeId(),
@@ -308,6 +344,7 @@ func fromInternalColonyUpdate(rec *internalpb.ColonyUpdate) *rpcpb.ColonyUpdate 
 		Takeover:          rec.GetTakeover(),
 		Steps:             steps,
 		UpdatedAtUnix:     rec.GetUpdatedAtUnix(),
+		Handovers:         handovers,
 	}
 }
 
