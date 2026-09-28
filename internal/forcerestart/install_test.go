@@ -86,6 +86,33 @@ func contains(list []string, want string) bool {
 	return false
 }
 
+// TestGitignore_CoversApiaryctl closes a gap the merge that introduced
+// apiaryctl left open. `make build` writes its binaries straight into
+// the repo root, where they share a name with their cmd/<name>
+// directory, so the four pre-existing ones are listed in .gitignore by
+// path. apiaryctl was not, and the failure is silent and permanent: the
+// binary sits there untracked, a `git add -A` in the root commits a
+// 30MB executable, and nothing anywhere reports it. Found by running
+// scripts/check-version.sh, which builds everything, and then reading
+// git status.
+//
+// Listed by path like the others rather than by a pattern, because the
+// general patterns above do not catch it and the reason they do not is
+// the reason the whole list exists: these files have no extension.
+func TestGitignore_CoversApiaryctl(t *testing.T) {
+	body, err := os.ReadFile(filepath.Join(repoRoot(t), ".gitignore"))
+	if err != nil {
+		t.Fatalf("reading .gitignore: %v", err)
+	}
+	if !regexp.MustCompile(`(?m)^/apiaryctl\s*$`).Match(body) {
+		t.Errorf(".gitignore does not list /apiaryctl.\n" +
+			"`make build` writes it into the repo root, and an untracked binary " +
+			"there is picked up by `git add -A` and committed with no warning " +
+			"anywhere. The other four installed binaries are listed for the same " +
+			"reason; apiaryctl was missed when it was added.")
+	}
+}
+
 func TestMakefile_BuildsApiaryctl(t *testing.T) {
 	// Not installed without being built: `install` copies binaries out
 	// of the working directory, and a name in INSTALL_SRCS that is not
@@ -142,118 +169,142 @@ func TestMakefile_SampleLoopSkipsApiaryctl(t *testing.T) {
 	}
 }
 
-// TestMakefile_ForceRestartIsOnlyAWrapper pins the shape the move was
-// made for. The Makefile target must exec the installed command and hold
-// no restart logic of its own, because the moment it holds logic again
-// there are two implementations of a command that restarts a quorum
-// voter, and the one an operator actually types is whichever they can
-// reach.
+// targetRecipe returns the recipe lines of the named make target - the
+// tab-prefixed lines that follow its `name:` header, up to the next
+// header, comment or blank line.
 //
-// The check is on the recipe body only. The comment block above the
-// target discusses what the command does and why, and that discussion is
-// worth keeping; what must not come back is a `service` invocation, a
-// `sockstat` pipeline, or a call to a script in this tree.
-func TestMakefile_ForceRestartIsOnlyAWrapper(t *testing.T) {
-	makefile := readMakefile(t)
-	// Start past the target line itself: the slice has to begin on the
-	// first recipe line, or the target name itself reads as a
-	// non-tab-prefixed line and ends the recipe before it starts.
-	header := "\nforce-restart:\n"
-	start := strings.Index(makefile, header)
-	if start < 0 {
-		t.Fatal("no force-restart target in the Makefile")
-	}
-	recipe := makefile[start+len(header):]
-	// The recipe ends at the next target definition, a blank line
-	// followed by a non-tab line.
-	if end := regexp.MustCompile(`(?m)^[^\t\n#]`).FindStringIndex(recipe); end != nil {
-		recipe = recipe[:end[0]]
-	}
-
-	for _, forbidden := range []string{
-		"service apiary_",
-		"service apiary_$",
-		"service apiary_$$",
-		"sockstat",
-		"scripts/",
-		"record-forced-restart",
-	} {
-		if strings.Contains(recipe, forbidden) {
-			t.Errorf("the force-restart recipe contains %q.\n"+
-				"It must be a thin wrapper around the installed command. Any restart logic here "+
-				"is a second implementation of a quorum-voter restart, free to drift from the one "+
-				"an operator can reach on a Comb.\n--- recipe ---\n%s", forbidden, recipe)
-		}
-	}
-	if !strings.Contains(recipe, "apiaryctl force-restart") {
-		t.Errorf("the force-restart recipe does not run apiaryctl force-restart:\n%s", recipe)
-	}
-	// And it has to be the last line, not merely present somewhere in
-	// the recipe. The recipe's earlier lines are the message telling the
-	// operator what the command is called, and that message contains the
-	// same string - so a `Contains` on the whole recipe is satisfied by
-	// prose about the command rather than by the command. That is the
-	// shape of a mutation that replaces the exec with `true` and
-	// survives: the advice still reads correctly while the target stops
-	// doing anything at all.
-	lines := strings.Split(strings.TrimRight(recipe, "\n"), "\n")
-	last := strings.TrimSpace(lines[len(lines)-1])
-	if last != "apiaryctl force-restart" {
-		t.Errorf("the last line of the force-restart recipe is %q, want %q.\n"+
-			"The command has to be what the target runs, not something its own "+
-			"message mentions.\n--- recipe ---\n%s", last, "apiaryctl force-restart", recipe)
-	}
-	// Every line but the last is a continuation of the message, so
-	// nothing else may be a command. A target that printed its advice
-	// and then did nothing else is the failure above; one that printed
-	// its advice and then restarted something by hand is the failure
-	// this whole check exists to prevent, and it would hide behind the
-	// last-line assertion above.
-	for _, line := range lines[:len(lines)-1] {
-		trimmed := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(line), "@"))
-		if trimmed == "" || strings.HasPrefix(trimmed, "echo ") {
+// Scoping matters here in both directions, and getting it wrong is what
+// the earlier version of this file got wrong twice. A check over the
+// whole file cannot distinguish a command from a comment about the
+// command, because a comment is text in the file exactly as a recipe
+// line is. A check over a recipe slice cannot see a target that was
+// added elsewhere. So the negatives are whole-file and line-shaped, and
+// the positives are scoped to the one target that is allowed to
+// mention the command at all.
+func targetRecipe(t *testing.T, makefile, target string) []string {
+	t.Helper()
+	lines := strings.Split(makefile, "\n")
+	var recipe []string
+	inRecipe := false
+	for _, line := range lines {
+		if !inRecipe {
+			if line == target+":" || strings.HasPrefix(line, target+":") && !strings.HasPrefix(line, "\t") {
+				inRecipe = true
+			}
 			continue
 		}
-		t.Errorf("the force-restart recipe runs %q before the command itself; the "+
-			"target is a wrapper and holds no logic:\n%s", trimmed, recipe)
+		if !strings.HasPrefix(line, "\t") {
+			break
+		}
+		recipe = append(recipe, line)
+	}
+	if recipe == nil {
+		t.Fatalf("no %s target in the Makefile", target)
+	}
+	return recipe
+}
+
+// TestMakefile_HasNoForceRestartTarget is the regression for deleting
+// the make target, and it is the strong form of the rule the move off
+// the Makefile was made for.
+//
+// The wrapper it replaces was wrong not because it ran the wrong thing
+// but because it existed. A target named `force-restart` on a machine
+// with no Makefile is a name an operator can read in make output, in a
+// build log, or out of muscle memory, and cannot type where they are
+// standing. Within one merge of it being introduced it was quoted as a
+// fallback in the SHARED.md, in managerd's own advice, and on the
+// Colony update page, each time as the thing to reach for when the
+// installed command was not yet deployed. A shim is a thing to quote;
+// its absence is not. So the target and FORCE_RESTART_SRCS are deleted,
+// and this test is what stops either coming back.
+func TestMakefile_HasNoForceRestartTarget(t *testing.T) {
+	makefile := readMakefile(t)
+
+	// Whole-file, line-anchored negatives. Anchoring to the start of a
+	// line matters: an unanchored `force-restart:` is also matched by a
+	// sentence of prose that happens to end a clause with it, and a
+	// test that fails on a comment is a test whose next fix is to weaken
+	// the comment.
+	for _, forbidden := range []string{
+		"FORCE_RESTART_SRCS",
+		"^force-restart:",
+		`^\.PHONY:.*force-restart`,
+		"^FORCE_RESTART",
+	} {
+		// These are literal-ish patterns written out above, so a
+		// compile failure would be a bug in this list rather than in
+		// the Makefile, and MustCompile is the right response to it.
+		if m := regexp.MustCompile("(?m)" + forbidden).FindString(makefile); m != "" {
+			t.Errorf("the Makefile still has %q at the start of a line.\n"+
+				"force-restart is an operation on a running Comb, so it is the installed "+
+				"apiaryctl at /usr/local/libexec/apiary/apiaryctl. A make target runs only "+
+				"where there is a checkout, and a Comb has none, so the target is a name "+
+				"that reads like an option and cannot be typed where it is needed. See "+
+				"ADR-0136 and ADR-0141.", m)
+		}
 	}
 }
 
-// TestApiaryctlIsSourceFree is the direct statement of the requirement
-// this whole change exists for: the operational command must not need
-// anything from a checkout. The package under test is what it runs, so
-// this is checked on its imports.
-//
-// A dependency on internal/raft or api/internalpb would also break the
-// import-boundary commitment ADR-0136 makes about apiaryctl, so one
-// check covers two rules.
-func TestApiaryctlIsSourceFree(t *testing.T) {
-	forbidden := []string{
-		// ADR-0136's import boundary: apiaryctl is not a path to Raft
-		// writes, and it does not talk to raftd at all.
-		"apiary/api/internalpb",
-		"apiary/internal/raft",
-		// Nothing from this tree is available on a Comb, so a dependency
-		// on a file rather than on a Go package would be invisible to
-		// the compiler and fatal at run time.
-		"scripts/",
-		"Makefile",
+// TestUpdate_RestartsOnlyTheNonVotingDaemons is the other half, and it
+// is the half that caught the mutation this file's first version of
+// this test let through. Deleting the force-restart target is only
+// safe while nothing else in the Makefile can reach the command, and
+// `update` is the one place that restarts services automatically: a
+// line added to its recipe that runs the command would put managerd
+// and raftd back in a sweep run on every Comb, which is the entire
+// failure ADR-0141 exists to make unavailable.
+func TestUpdate_RestartsOnlyTheNonVotingDaemons(t *testing.T) {
+	makefile := readMakefile(t)
+	recipe := targetRecipe(t, makefile, "update")
+
+	// The list the restart loop iterates is the load-bearing half of
+	// `update`, and it is a variable rather than a line of the recipe,
+	// so checking the recipe alone cannot see a daemon added to it.
+	// ADR-0141's Verification section pins this with `bmake -n update`;
+	// this is the same pin as an assertion that runs in CI.
+	got := makeVar(t, makefile, "UPDATE_RESTART_SRCS")
+	want := []string{"frontend", "restshimd"}
+	if len(got) != len(want) {
+		t.Errorf("UPDATE_RESTART_SRCS = %v, want exactly %v. update runs on every Comb in a "+
+			"deploy sweep; a daemon in this list is a daemon whose restart is no longer a "+
+			"deliberate per-Comb act (ADR-0141).", got, want)
 	}
-	body, err := os.ReadFile(filepath.Join(repoRoot(t), "internal", "forcerestart", "forcerestart.go"))
-	if err != nil {
-		t.Fatalf("reading forcerestart.go: %v", err)
-	}
-	// Only the import block matters; a mention in a comment is not a
-	// dependency.
-	imports := string(body)
-	if i := strings.Index(imports, ")"); i > 0 {
-		imports = imports[:i]
-	}
-	for _, bad := range forbidden {
-		if strings.Contains(imports, bad) {
-			t.Errorf("internal/forcerestart imports something containing %q.\n"+
-				"The command has to work on a Comb with no source on it, and ADR-0136's "+
-				"import boundary keeps it away from Raft entirely.\n--- imports ---\n%s", bad, imports)
+	for _, w := range want {
+		if !contains(got, w) {
+			t.Errorf("UPDATE_RESTART_SRCS = %v, want it to include %s", got, w)
 		}
+	}
+
+	named := false
+	for _, line := range recipe {
+		trimmed := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(line), "@"))
+		if trimmed == "" {
+			continue
+		}
+		// Echoing the command is the point of the closing message: the
+		// operator has just installed binaries without restarting the
+		// two daemons that hold cluster state, and has to be told what
+		// to type instead. So `echo` is allowed and only echo.
+		if strings.HasPrefix(trimmed, "echo ") {
+			if strings.Contains(trimmed, "apiaryctl force-restart") {
+				named = true
+			}
+			continue
+		}
+		if strings.Contains(trimmed, "force-restart") {
+			t.Errorf("the update target runs %q.\n"+
+				"update is the target a deploy runs across every Comb without thinking, so "+
+				"nothing in it may restart a quorum voter. Restarting managerd and raftd is "+
+				"a deliberate per-Comb act, and the whole point of this command being a "+
+				"separate installed binary is that an operator names it themselves.\n"+
+				"--- update recipe ---\n%s", trimmed, strings.Join(recipe, "\n"))
+		}
+	}
+	if !named {
+		t.Error("the update target's closing message no longer names apiaryctl force-restart.\n" +
+			"With the make target gone, that message is the only place the Makefile tells an " +
+			"operator how to restart managerd and raftd, and it is printed at exactly the " +
+			"moment they have just deployed and found those two stale.")
 	}
 }

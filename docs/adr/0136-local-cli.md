@@ -27,6 +27,13 @@ and the Combs do not have one. An operation performed *because* a Comb
 is running has to be a file on the host. Everything else about this
 slice is downstream of that one fact.
 
+That `make` target has since been deleted outright rather than left as
+a shim, on the reasoning recorded in ADR-0141's second amendment: a
+correct shim is still a name an operator can read and cannot type where
+it matters, and within one merge it had been quoted as a fallback in
+three operator-facing places. The command on a Comb is the installed
+binary and nothing else.
+
 **How it relates to the design below.** Two of the commitments here
 still hold and are worth stating, because they are what make the slice
 acceptable to ship before the rest of this ADR is:

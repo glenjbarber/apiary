@@ -21,9 +21,51 @@ about the deployment rather than about the design: **`force-restart` is
 an operation on a running Comb, so it has to be a file on the Comb, and
 a Comb has no source checkout to run a make target from.** It is now
 `apiaryctl force-restart` (ADR-0136, `internal/forcerestart`), installed
-to `/usr/local/libexec/apiary/apiaryctl` beside the daemons. The
-`make force-restart` target remains as a one-line convenience for a
-source checkout and is not the operational path.
+to `/usr/local/libexec/apiary/apiaryctl` beside the daemons.
+
+**Amended 2026-09-28, later the same day: the make target is deleted,
+not retained as a convenience.** The paragraph above is superseded on
+its last two sentences. `make force-restart` no longer exists, in this
+ADR's text and in the Makefile.
+
+The reasoning for keeping it was that a shim which runs the installed
+command cannot mislead anyone. That was wrong in a way the shim's own
+output demonstrated. A target named `force-restart` is a name an
+operator can read in `make` output, in a build log, or out of habit,
+and it cannot be typed on the machine that matters, because the machine
+that matters has no Makefile. It does not have to be wrong to be
+harmful: it only has to be *present*. Within one merge of being
+introduced it was quoted as a fallback in the SHARED.md, in managerd's
+own advice to an operator, and on the Colony update page - each time as
+the thing to fall back on when the installed command was not yet there.
+A shim is a thing to quote; its absence is not.
+
+So the target, and `FORCE_RESTART_SRCS` with it, are gone. Three things
+in the body below now describe a Makefile that no longer has them, and
+are history rather than instructions: the `force-restart` target in
+"Decision" and its table, the two-list argument that follows it, and
+`bmake -n force-restart` in "Verification". The split, the order and
+the record are unchanged and now live in `internal/forcerestart` -
+`DefaultPlan` holds the order, `internal/restartplan` holds the record,
+both tested there.
+
+Where the rest of the body says "the target", read "the command",
+`apiaryctl force-restart`, unless the sentence is one of the three
+listed above. Two are worth naming because they read as claims about
+the implementation rather than as history. "No Makefile knows what the
+other Combs are doing" is now understated: no `apiaryctl` process does
+either, and the conclusion is unchanged. And the closing-message
+argument, that the command prints the hazard on every invocation, is
+carried by `apiaryctl`'s own banner and timeout diagnostic rather than
+by make output.
+
+`TestMakefile_HasNoForceRestartTarget` in `internal/forcerestart` is the
+regression, and it is a negative over the whole file rather than a check
+on a recipe body. That is deliberate and it is a correction: the test
+it replaced sliced out the recipe and asserted the forbidden strings
+were absent from it, while the prose in the comment above the target
+contained the very command string the test was trying to prove the
+target ran. A `Contains` over prose is satisfied by prose.
 
 Two consequences for the text below, both recorded here rather than
 silently edited in place. The `scripts/record-forced-restart.sh` calls

@@ -229,24 +229,37 @@ INSTALL_SAMPLE_SRCS=	raftd \
 			frontend \
 			restshimd
 
-# `update` and `force-restart` between them restart every daemon `install`
-# puts on disk, and they deliberately do not overlap:
+# `update` and the installed `apiaryctl force-restart` between them
+# restart every daemon `install` puts on disk, and they deliberately do
+# not overlap:
 #
-#   update          frontend, restshimd
-#   force-restart   managerd, raftd
+#   update                    frontend, restshimd
+#   apiaryctl force-restart   managerd, raftd
+#
+# One of those is a target in this file. The other is not, and is not
+# reachable from here: `apiaryctl force-restart` is a separate installed
+# binary, built by this file and copied by `install` to
+# /usr/local/libexec/apiary/apiaryctl, and then run by name on the Comb.
+# It was a target here until 2026-09-28 and was removed, because a Comb
+# has no checkout to run a make target from, and an operation performed
+# *because* a Comb is running has to be a file on the Comb (ADR-0136,
+# ADR-0141). There is deliberately no convenience alias pointing at it
+# from this file. A proxy for an operation that restarts a quorum voter
+# is a second name an operator can type that works in the one place they
+# will not be standing and fails in the place they are.
 #
 # The split is the design, not a convenience. `update` is the target an
 # operator (or a deploy loop) runs across every Comb without thinking, so
 # nothing in it may be able to cost the colony its quorum. Everything that
-# can is in `force-restart`, which is named for what it does to the
+# can is in force-restart, which is named for what it does to the
 # guardrail: it restarts a daemon by handing `service` a restart directly,
 # with no lease, no ADR-0125 quorum preflight and no cross-node
-# coordination, because this Makefile has no client that speaks the guarded
-# RPCs. The Machine page's per-service control (ADR-0125), or `apiaryctl`
-# (ADR-0136), remains the path that does coordinate. This is the named
+# coordination, because neither this Makefile nor the command has a client
+# that speaks the guarded RPCs. The Machine page's per-service control
+# (ADR-0125) remains the path that does coordinate. This is the named
 # escape hatch, deliberately per-Comb, not the recommended default.
 #
-# raftd is in `force-restart` and out of `update` for the reason ADR-0125
+# raftd is in force-restart and out of `update` for the reason ADR-0125
 # records: `update` across all four Combs is the obvious thing to do after
 # a deploy, and restarting all four raft voters at once costs the cluster
 # its quorum. Keeping raftd out of `update` means that mistake is no
@@ -265,19 +278,15 @@ INSTALL_SAMPLE_SRCS=	raftd \
 UPDATE_RESTART_SRCS=	frontend \
 			restshimd
 
-# Order is load-bearing: managerd first, raftd second. raftd's
-# confirm-on-startup hook dials managerd over TLS to release the restart
-# lease it is holding, on a bounded 5-attempt x 3s budget, and a lease has
-# no TTL. Burning that budget against a managerd that is not up yet does
-# not degrade the node - it blocks the cluster until an operator forces
-# the lease clear, which is the exact failure the guardrail exists to
-# prevent. Restarting raftd while managerd is down is the one way this
-# target could cause it.
-#
-# The reverse order carries no such risk: managerd tolerates raftd being
-# unavailable and reconnects, so the safe order is also the natural one.
-FORCE_RESTART_SRCS=	managerd \
-			raftd
+# The list of daemons force-restart touches, and the order it touches
+# them in, are not here. That order is load-bearing - managerd first,
+# raftd second, because raftd's confirm-on-startup hook dials managerd to
+# resolve a restart record it has no TTL on - and it is written down
+# where the code that acts on it lives, in internal/forcerestart's
+# DefaultPlan, with the argument beside it. A daemon list written in two
+# places is a list free to drift from the one that actually restarts a
+# quorum voter. `apiaryctl force-restart` prints its own plan before it
+# touches anything, and that is the copy an operator reads.
 
 # install copies the five installed binaries - not apiaryinstall, a
 # one-shot host-prep CLI meant to be run from this checkout and never
@@ -549,65 +558,3 @@ update: install
 	echo "  restarted. Run 'apiaryctl force-restart' here to restart" ; \
 	echo "  them - one Comb at a time, and never on the leader as part" ; \
 	echo "  of a sweep."
-
-# force-restart is a one-line convenience for a source checkout. The
-# operational command is cmd/apiaryctl (ADR-0136), installed by `install`
-# to /usr/local/libexec/apiary/apiaryctl, and it works on a Comb that has
-# no checkout at all - which is the case that matters, because the Combs
-# are not development machines and there is no Makefile on them to run
-# this from. Run the installed command on a Comb; run this only from a
-# checkout you are already sitting in.
-#
-# FORCE_RESTART_SRCS exists purely so that one can see the plan and the
-# order without running anything, and so `bmake -n force-restart` stays
-# a useful check. It is not read by the command: the plan lives in
-# internal/forcerestart, next to the code that acts on it, because a
-# copy of it here would be a copy free to drift from the one that
-# actually restarts a daemon. `apiaryctl force-restart` prints its own
-# plan before it touches anything, which is the copy that counts.
-FORCE_RESTART_SRCS=	managerd \
-			raftd
-
-# The order is load-bearing and is not a preference. managerd first,
-# because raftd's confirm-on-startup hook dials managerd over TLS to
-# release the restart lease it is holding, on a bounded 5-attempt x 3s
-# budget, and a lease has no TTL. Burning that budget against a managerd
-# that is not up yet does not degrade the node - it blocks the cluster
-# until an operator forces the lease clear, which is the exact failure
-# the guardrail exists to prevent. Restarting raftd while managerd is
-# down is the one way this could cause it. The reverse order carries no
-# such risk: managerd tolerates raftd being unavailable and reconnects,
-# so the safe order is also the natural one.
-#
-# What the command does, and why each of these is where it is, is
-# documented on internal/forcerestart and in docs/adr/0141. The parts
-# worth knowing before editing anything here:
-#
-#   - It confirms a restart with `sockstat -4 -l` and the daemon's own
-#     listener port, never with `service <name> status`. Measured on
-#     brood and drone, every apiary_* rc.d script reports not running
-#     while all four daemons are demonstrably up and listening, so a
-#     status check could only ever reach its own failure branch - on
-#     the first service, every time. Ports are fixed by ADR-0108 and
-#     named in internal/frontend/fixedport.go; they are in
-#     internal/forcerestart's DefaultPlan.
-#   - It writes the pending-restart record BEFORE the restart it
-#     describes, with lease_id 0, through internal/restartplan. The
-#     record is what feeds the guardrail's 600s cooldown, so a
-#     force-restart that wrote nothing would leave the guardrail
-#     believing no restart had happened. It never overwrites an
-#     existing pending record, because that would strand a real lease,
-#     which has no TTL.
-#   - It stops at the first service that does not come back, and says
-#     which restarts it had already issued, because a half-restarted
-#     managerd/raftd pair is running a mix of two builds and the
-#     operator has to know that from the output.
-.PHONY: force-restart
-force-restart:
-	@echo "make force-restart: delegating to the installed apiaryctl." >&2 ; \
-	echo "  This target is a convenience for a source checkout. On a" >&2 ; \
-	echo "  Comb, run apiaryctl force-restart - it needs no Makefile," >&2 ; \
-	echo "  no checkout and no scripts, and it is the same command." >&2 ; \
-	echo "" >&2 ; \
-	echo "  restart plan: ${FORCE_RESTART_SRCS} (in this order)" >&2 ; \
-	apiaryctl force-restart

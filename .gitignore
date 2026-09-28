@@ -26,6 +26,7 @@ profile.cov
 /managerd
 /frontend
 /restshimd
+/apiaryctl
 
 # Dependency directories (remove the comment below to include it)
 # vendor/
