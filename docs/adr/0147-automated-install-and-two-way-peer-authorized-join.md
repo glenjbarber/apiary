@@ -9,14 +9,12 @@ is a Comb that can be joined, and the join has to work without a
 source checkout, exactly as the install does.
 
 This ADR is written to be reviewed before implementation. The
-"Open questions" section at the end lists the points where a decision
+"Open questions" section at the end records the points where a decision
 was made on the owner's behalf rather than by the owner, and each one
-is cheap to change now and expensive later. Questions 4, 7, 8, 12, and
-13 are answered and each answer is recorded next to its question.
-**1, 2, 3, 5, and 6 are still open**, and they are the ones to push
-back on: the certificate algorithm, the two code lengths, the
-second-PIN lifetime, the reissue policy, and whether an authorization
-value may sit in plaintext in replicated state.
+was cheap to change in a paragraph and expensive to change in a schema.
+**Every question this ADR raised is now answered**, and each answer is
+recorded next to the question it answers. What remains is approval of
+the whole, followed by implementation.
 
 It has four parts, decided together. Part 1 is the source-free
 `apiaryctl install`. Part 2 is the two-way, peer-authorized join that
@@ -475,7 +473,7 @@ deterministic across replicas and log replays.
 - **The second PIN is cleared** the moment `ApproveJoinRequest` consumes
   it, before `AddVoter` is called. A failed `AddVoter` does not put it
   back: the operator re-arms with an explicit reissue, which is visible
-  and rate-limited to 3.
+  and rate-limited to **2**.
 - **Replay is refused by construction.** Both values are bound to one
   `request_id`, single-use, and expiring. A captured form post is worth
   nothing after the request is approved, rejected, failed, expired, or
@@ -535,7 +533,7 @@ reader does not "consistency-fix" the other two.
 | --- | --- |
 | `RequestJoinColonyRequest` | gains `introduction_code` and `advertised_fingerprints` |
 | `VerifyJoinIntroduction` | new. Admin. `{request_id, introduction_code, fingerprints}` → new stage |
-| `ReissueJoinSecondPin` | new. Admin. Regenerates, invalidating the previous PIN, max 3 |
+| `ReissueJoinSecondPin` | new. Admin. Regenerates, invalidating the previous PIN, max **2**, then the request is `FAILED` |
 | `ApproveJoinRequestRequest` | `confirm_phrase` reserved; gains `second_pin` |
 | `GetJoinRequestStatusResponse` | carries the second PIN, only in stage `CODE_VERIFIED`, only to the holder of the `request_id` |
 | `GetLocalJoinIdentity` | new. Admin on the *requesting* Comb. Its own `node_id`, `raft_bind`, first code, fingerprints, stage, and second PIN when it has one |
@@ -1541,6 +1539,8 @@ to earn.
   with a message that names what did not match, and each incrementing the
   replicated counter.
 - Five wrong attempts, then `FAILED`, then a re-issue is required.
+- Two second-PIN reissues, then `FAILED`, so a mistyped PIN cannot be
+  retried indefinitely inside a live window.
 - Expiry of the second PIN at 5 minutes while the request itself is
   still inside its 15.
 - Replay: a captured approve form post after the request is approved
@@ -1674,10 +1674,10 @@ force-restart work.
 
 The first six are points where a decision was made on your behalf. Each
 is a small edit here and a much larger one in code. Questions 7 and 8
-were scope questions added on review, answered below; question 4 is
-retired by Part 4. **Questions 1, 2, 3, 5, and 6 remain open** and are
-the ones worth your attention, because each one is a number or a policy
-that is cheap in a paragraph and expensive in a schema.
+were scope questions added on review, and question 4 is retired by
+Part 4. **All are answered**, in the sections that follow each group,
+so this section is kept as the record of what was asked and is no
+longer a list of pending decisions.
 
 1. **ECDSA P-256 instead of RSA-2048** for generated serving
    certificates. Every consumer here is Go, and it is a visible change
@@ -1761,6 +1761,54 @@ directions. That is Part 3.
     still be honoured, since a root operator who insists is not an
     attacker.
 
+## 1, 2, 3, 5, and 6, now answered
+
+The owner answered all five. Each keeps the value that was proposed,
+with one change: the second-PIN reissue limit is **two**, not three.
+
+1. **ECDSA P-256.** Approved, for generated certificates only. The
+   distinction matters and is preserved from the Part 1 text: RSA-2048
+   pairs produced by `setup-tls` are still valid, still evaluated as
+   acceptable by the gate, and a Comb carrying one is not forced to
+   replace it. This is a decision about what the installer *writes*,
+   not about what the Colony *accepts*.
+2. **Six digits for the first code, eight for the second.** Approved as
+   proposed. The reasoning is worth keeping: the first value is read
+   aloud and correlated, so six is the right length for a human
+   repeating it, and the second is copy-pasted, where length is free
+   and the extra digits cost nothing but keystrokes.
+3. **Five minutes for the second PIN.** Approved as proposed, and
+   explicitly with the window at 15 minutes rather than 10. That pairing
+   is deliberate: the PIN's five minutes has to be a copy that starts
+   and finishes inside the window, and the window has to be long enough
+   that reaching the copy does not consume most of it. Fifteen minutes
+   against a five-minute PIN is a workable margin, and it is worth
+   naming the asymmetry - a PIN issued late in a window can outlive that
+   window, which is harmless because the window is checked first, but
+   the reverse would not be.
+5. **Two second-PIN reissues, then `FAILED`.** The owner's change, from
+   the three I proposed, and it is the stricter answer. Two is enough
+   for a mistyped PIN and a misread screen; a third retry is where a
+   convenient retry stops being a correction and starts being a way to
+   keep trying a request that should be abandoned and re-issued. The
+   counter is replicated, so it cannot be reset by waiting for a leader
+   change, and the window cannot be used to buy more attempts, because
+   a reopen invalidates the request outright.
+6. **Plaintext second PIN in the replicated record.** Accepted. The
+   justification stays as written and stays narrow: the audience for
+   the record is the set of principals who could already approve the
+   request outright, so confidentiality of the record grants nobody new
+   authority. What is *not* claimed is that the value is secret from
+   the Admins who can read it. The handling discipline - never
+   replicated beyond the record, never in a log line, never on an RPC
+   response to anyone but the requester, cleared on consumption - is
+   what this ADR commits to, and it is the same discipline the
+   deferred internal-token work needs, which is why that project is
+   worth revisiting with this decision already taken.
+
+**Nothing is open now.** Every question this ADR raised is answered,
+and what remains is approval of the whole followed by implementation.
+
 ## 12 and 13, now answered
 
 Both were open questions in the Part 4 commit, both are the owner's, and
@@ -1817,7 +1865,7 @@ them.
     and for a fixed length, which is the property the window was built
     to provide.
 
-**Questions 12 and 13 are answered, and nothing else is answered by
-this.** Questions 1, 2, 3, 5, and 6 from the section above are still
-open, and the remaining work is those five, then approval, then
-implementation.
+Both answered by the owner, and both are consequences of the design
+rather than additions to it: the length is a number the epoch rule
+already contains, and the payload is the fingerprint set the trust
+ordering already needed.
