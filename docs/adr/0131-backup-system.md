@@ -2,7 +2,7 @@
 
 **Date:** 2026-09-26
 **Status:** Proposed
-**Author:** Goose (subagent)
+**Author:** Goose (Space Bunny)
 
 ## Context
 

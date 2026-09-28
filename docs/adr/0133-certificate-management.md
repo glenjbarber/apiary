@@ -5,7 +5,8 @@
 Proposed
 
 **Date:** 2026-09-26
-**Author:** Goose (subagent 20260926_31)
+**Author:** Goose (Space Bunny)
+**Delegate:** 20260926_31
 **Phase:** 3 of ADR-0127 (`docs/adr/0127-sylve-io-features.md`)
 
 ## Context
