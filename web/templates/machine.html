@@ -276,7 +276,7 @@
 
   <div class="panel">
     <h3>Cloudflare Origin CA certificates</h3>
-    <p class="muted">For Cloudflare-proxied managerd TLS only. This creates a local ECC key, sends only its CSR to Cloudflare, and restarts managerd after a successful replacement. Do not use for DNS-only or direct client traffic.</p>
+    {{template "origin_ca_advice" .}}
     <div id="origin-ca-panel">{{template "origin_ca_panel" .}}</div>
   </div>
 
@@ -476,7 +476,7 @@
           <button hx-post="/machine/services/{{.Name}}/restart" hx-target="#node-services-panel" hx-swap="innerHTML" hx-confirm="Restart {{.Name}} on this Comb?">Restart</button>
           {{end}}
         {{else if eq .Name "apiary_managerd"}}
-          <span class="muted">Cannot be restarted from here. A restart issued from inside managerd stops it and cannot start it again. Use <code>make force-restart</code> or <code>service apiary_managerd restart</code> on the node.</span>
+          <span class="muted">Cannot be restarted from here. A restart issued from inside managerd stops it and cannot start it again. On the node, <code>service apiary_managerd restart</code> is enough for managerd alone. <code>make force-restart</code> also restarts raftd, so it is a two-daemon act; run it from the apiary checkout (<code>~/apiary</code>), where its <code>scripts/record-forced-restart.sh</code> lives.</span>
         {{end}}
       </td>
     </tr>
