@@ -68,6 +68,7 @@ const (
 	ManagerService_ReserveRestartLease_FullMethodName         = "/apiary.rpc.v1.ManagerService/ReserveRestartLease"
 	ManagerService_ConfirmRestartCompleted_FullMethodName     = "/apiary.rpc.v1.ManagerService/ConfirmRestartCompleted"
 	ManagerService_StepAsideForRestart_FullMethodName         = "/apiary.rpc.v1.ManagerService/StepAsideForRestart"
+	ManagerService_MutateColonyUpdate_FullMethodName          = "/apiary.rpc.v1.ManagerService/MutateColonyUpdate"
 	ManagerService_CreateNetwork_FullMethodName               = "/apiary.rpc.v1.ManagerService/CreateNetwork"
 	ManagerService_ListNetworks_FullMethodName                = "/apiary.rpc.v1.ManagerService/ListNetworks"
 	ManagerService_DeleteNetwork_FullMethodName               = "/apiary.rpc.v1.ManagerService/DeleteNetwork"
@@ -412,6 +413,40 @@ type ManagerServiceClient interface {
 	// Viewer/Admin role hierarchy, and NOT ordinary peer APIKey auth. It
 	// must not be reachable by any CreateAPIKey-issued credential.
 	StepAsideForRestart(ctx context.Context, in *StepAsideForRestartRequest, opts ...grpc.CallOption) (*StepAsideForRestartResponse, error)
+	// MutateColonyUpdate is the backend enforcement of ADR-0145's
+	// colony-wide single-flight: at most ONE controlled update operation
+	// may exist in the Colony at a time, and that is decided in raft (see
+	// api/internalpb/state.proto's ColonyUpdate and
+	// internal/raft/colonyupdate.go), never in any managerd's memory. A
+	// greyed-out button is not enforcement; this is.
+	//
+	// It is one RPC carrying a oneof rather than three, because the three
+	// operations are three states of the same state machine and the FSM
+	// already models them that way - acquire, then advance, then release -
+	// and because the oneof makes it structurally impossible to send an
+	// advance with no fence, or a release naming a different operation
+	// from the one being advanced.
+	//
+	// The op is always resolved on the Raft LEADER: a coordinator on a
+	// follower Comb is forwarded there, exactly as ReserveRestartLease is
+	// (ADR-0103). A follower never decides whether the Colony is free.
+	//
+	// Authorization matches ReserveRestartLease/ConfirmRestartCompleted/
+	// StepAsideForRestart exactly - a dedicated root-owned token
+	// comparison, NOT the Viewer/Admin role hierarchy, and NOT ordinary
+	// peer API-key auth. It must not be reachable by any
+	// CreateAPIKey-issued credential: claiming the Colony's single
+	// controlled update is a step in a cluster-wide restart, which is the
+	// exact class the dedicated token was introduced for.
+	//
+	// There is deliberately NO read RPC here. A replacement managerd
+	// answers "what is the state of the controlled update?" from its own
+	// raftd over the internal, non-forwarded GetColonyUpdateStateLocal,
+	// and the write path below never needs a read: a refused acquire names
+	// the current holder, so "is anything running?" is answered by the
+	// refusal itself. An authoritative cross-node read belongs with the UI
+	// that will consume it, not here.
+	MutateColonyUpdate(ctx context.Context, in *MutateColonyUpdateRequest, opts ...grpc.CallOption) (*MutateColonyUpdateResponse, error)
 	// CreateNetwork/ListNetworks/DeleteNetwork manage NetworkDefinitions -
 	// VLAN/subnet/bridge segments a VM can attach to (see ADR-0022).
 	// CreateNetwork/DeleteNetwork just submit a Command through raft
@@ -1176,6 +1211,16 @@ func (c *managerServiceClient) StepAsideForRestart(ctx context.Context, in *Step
 	return out, nil
 }
 
+func (c *managerServiceClient) MutateColonyUpdate(ctx context.Context, in *MutateColonyUpdateRequest, opts ...grpc.CallOption) (*MutateColonyUpdateResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(MutateColonyUpdateResponse)
+	err := c.cc.Invoke(ctx, ManagerService_MutateColonyUpdate_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *managerServiceClient) CreateNetwork(ctx context.Context, in *CreateNetworkRequest, opts ...grpc.CallOption) (*CreateNetworkResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(CreateNetworkResponse)
@@ -1917,6 +1962,40 @@ type ManagerServiceServer interface {
 	// Viewer/Admin role hierarchy, and NOT ordinary peer APIKey auth. It
 	// must not be reachable by any CreateAPIKey-issued credential.
 	StepAsideForRestart(context.Context, *StepAsideForRestartRequest) (*StepAsideForRestartResponse, error)
+	// MutateColonyUpdate is the backend enforcement of ADR-0145's
+	// colony-wide single-flight: at most ONE controlled update operation
+	// may exist in the Colony at a time, and that is decided in raft (see
+	// api/internalpb/state.proto's ColonyUpdate and
+	// internal/raft/colonyupdate.go), never in any managerd's memory. A
+	// greyed-out button is not enforcement; this is.
+	//
+	// It is one RPC carrying a oneof rather than three, because the three
+	// operations are three states of the same state machine and the FSM
+	// already models them that way - acquire, then advance, then release -
+	// and because the oneof makes it structurally impossible to send an
+	// advance with no fence, or a release naming a different operation
+	// from the one being advanced.
+	//
+	// The op is always resolved on the Raft LEADER: a coordinator on a
+	// follower Comb is forwarded there, exactly as ReserveRestartLease is
+	// (ADR-0103). A follower never decides whether the Colony is free.
+	//
+	// Authorization matches ReserveRestartLease/ConfirmRestartCompleted/
+	// StepAsideForRestart exactly - a dedicated root-owned token
+	// comparison, NOT the Viewer/Admin role hierarchy, and NOT ordinary
+	// peer API-key auth. It must not be reachable by any
+	// CreateAPIKey-issued credential: claiming the Colony's single
+	// controlled update is a step in a cluster-wide restart, which is the
+	// exact class the dedicated token was introduced for.
+	//
+	// There is deliberately NO read RPC here. A replacement managerd
+	// answers "what is the state of the controlled update?" from its own
+	// raftd over the internal, non-forwarded GetColonyUpdateStateLocal,
+	// and the write path below never needs a read: a refused acquire names
+	// the current holder, so "is anything running?" is answered by the
+	// refusal itself. An authoritative cross-node read belongs with the UI
+	// that will consume it, not here.
+	MutateColonyUpdate(context.Context, *MutateColonyUpdateRequest) (*MutateColonyUpdateResponse, error)
 	// CreateNetwork/ListNetworks/DeleteNetwork manage NetworkDefinitions -
 	// VLAN/subnet/bridge segments a VM can attach to (see ADR-0022).
 	// CreateNetwork/DeleteNetwork just submit a Command through raft
@@ -2331,6 +2410,9 @@ func (UnimplementedManagerServiceServer) ConfirmRestartCompleted(context.Context
 }
 func (UnimplementedManagerServiceServer) StepAsideForRestart(context.Context, *StepAsideForRestartRequest) (*StepAsideForRestartResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method StepAsideForRestart not implemented")
+}
+func (UnimplementedManagerServiceServer) MutateColonyUpdate(context.Context, *MutateColonyUpdateRequest) (*MutateColonyUpdateResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method MutateColonyUpdate not implemented")
 }
 func (UnimplementedManagerServiceServer) CreateNetwork(context.Context, *CreateNetworkRequest) (*CreateNetworkResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method CreateNetwork not implemented")
@@ -3345,6 +3427,24 @@ func _ManagerService_StepAsideForRestart_Handler(srv interface{}, ctx context.Co
 	return interceptor(ctx, in, info, handler)
 }
 
+func _ManagerService_MutateColonyUpdate_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(MutateColonyUpdateRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ManagerServiceServer).MutateColonyUpdate(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ManagerService_MutateColonyUpdate_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ManagerServiceServer).MutateColonyUpdate(ctx, req.(*MutateColonyUpdateRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _ManagerService_CreateNetwork_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(CreateNetworkRequest)
 	if err := dec(in); err != nil {
@@ -4320,6 +4420,10 @@ var ManagerService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "StepAsideForRestart",
 			Handler:    _ManagerService_StepAsideForRestart_Handler,
+		},
+		{
+			MethodName: "MutateColonyUpdate",
+			Handler:    _ManagerService_MutateColonyUpdate_Handler,
 		},
 		{
 			MethodName: "CreateNetwork",

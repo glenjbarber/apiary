@@ -921,6 +921,27 @@ func (p *PeerReporter) StepAsideForRestart(ctx context.Context, addr string, req
 	return client.StepAsideForRestart(ctx, req)
 }
 
+// MutateColonyUpdate carries ADR-0145's acquire/advance/release to the
+// raft LEADER's own managerd, which is the only node that can commit
+// them. Unlike StepAsideForRestart above it is a genuine forward - the
+// single-flight is a consensus decision, and a follower's opinion about
+// it is worth nothing - so the receiving handler acts on its own raftd
+// and the caller's own node never sees the effect twice.
+//
+// It dials with dialRestartGuardrail (p.RestartGuardrailToken) for the
+// same reason ReserveRestartLease/ConfirmRestartCompleted above do: the
+// receiving handler authorizes it by the dedicated token comparison, not
+// by the API-key role hierarchy, and p.dial would attach p.APIKey and be
+// rejected.
+func (p *PeerReporter) MutateColonyUpdate(ctx context.Context, addr string, req *rpcpb.MutateColonyUpdateRequest) (*rpcpb.MutateColonyUpdateResponse, error) {
+	conn, client, err := p.dialRestartGuardrail(addr)
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close()
+	return client.MutateColonyUpdate(ctx, req)
+}
+
 func (p *PeerReporter) RejectJoinRequest(ctx context.Context, addr string, req *rpcpb.RejectJoinRequestRequest) (*rpcpb.RejectJoinRequestResponse, error) {
 	conn, client, err := p.dial(addr)
 	if err != nil {

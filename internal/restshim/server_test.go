@@ -551,6 +551,17 @@ func (f *fakeClient) StepAsideForRestart(context.Context, *rpcpb.StepAsideForRes
 	return &rpcpb.StepAsideForRestartResponse{}, nil
 }
 
+// MutateColonyUpdate is ADR-0145's colony-wide controlled-update
+// single-flight, and has no REST route here for the same reason
+// StepAsideForRestart above has none - restshim translates a fixed set
+// of resources and this is not one of them. It is gated by the
+// restart-guardrail token rather than by any request credential, so
+// there is nothing here to forward. This stub exists only to satisfy
+// rpcpb.ManagerServiceClient, mirroring the stubs above.
+func (f *fakeClient) MutateColonyUpdate(context.Context, *rpcpb.MutateColonyUpdateRequest, ...grpc.CallOption) (*rpcpb.MutateColonyUpdateResponse, error) {
+	return &rpcpb.MutateColonyUpdateResponse{}, nil
+}
+
 var _ rpcpb.ManagerServiceClient = (*fakeClient)(nil)
 
 func doRequest(t *testing.T, s *Server, method, path string, body interface{}) *httptest.ResponseRecorder {

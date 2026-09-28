@@ -851,6 +851,17 @@ func (f *fakeClient) StepAsideForRestart(context.Context, *rpcpb.StepAsideForRes
 	return &rpcpb.StepAsideForRestartResponse{}, nil
 }
 
+// MutateColonyUpdate is ADR-0145's colony-wide controlled-update
+// single-flight. Nothing in this package's request path calls it - the
+// update workflow is server-side, not a UI read, and it is gated by the
+// restart-guardrail token rather than by any UI credential - so this
+// satisfies the generated client interface and nothing more. An empty
+// response is a safe, obviously-fake answer: accepted is false and error
+// is empty, and no caller in this package exists to read either.
+func (f *fakeClient) MutateColonyUpdate(context.Context, *rpcpb.MutateColonyUpdateRequest, ...grpc.CallOption) (*rpcpb.MutateColonyUpdateResponse, error) {
+	return &rpcpb.MutateColonyUpdateResponse{}, nil
+}
+
 var _ rpcpb.ManagerServiceClient = (*fakeClient)(nil)
 
 // fakeAuthenticator implements pam.Authenticator with a single fixed

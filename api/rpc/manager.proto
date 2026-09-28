@@ -328,6 +328,40 @@ service ManagerService {
   // must not be reachable by any CreateAPIKey-issued credential.
   rpc StepAsideForRestart(StepAsideForRestartRequest) returns (StepAsideForRestartResponse);
 
+  // MutateColonyUpdate is the backend enforcement of ADR-0145's
+  // colony-wide single-flight: at most ONE controlled update operation
+  // may exist in the Colony at a time, and that is decided in raft (see
+  // api/internalpb/state.proto's ColonyUpdate and
+  // internal/raft/colonyupdate.go), never in any managerd's memory. A
+  // greyed-out button is not enforcement; this is.
+  //
+  // It is one RPC carrying a oneof rather than three, because the three
+  // operations are three states of the same state machine and the FSM
+  // already models them that way - acquire, then advance, then release -
+  // and because the oneof makes it structurally impossible to send an
+  // advance with no fence, or a release naming a different operation
+  // from the one being advanced.
+  //
+  // The op is always resolved on the Raft LEADER: a coordinator on a
+  // follower Comb is forwarded there, exactly as ReserveRestartLease is
+  // (ADR-0103). A follower never decides whether the Colony is free.
+  //
+  // Authorization matches ReserveRestartLease/ConfirmRestartCompleted/
+  // StepAsideForRestart exactly - a dedicated root-owned token
+  // comparison, NOT the Viewer/Admin role hierarchy, and NOT ordinary
+  // peer API-key auth. It must not be reachable by any
+  // CreateAPIKey-issued credential: claiming the Colony's single
+  // controlled update is a step in a cluster-wide restart, which is the
+  // exact class the dedicated token was introduced for.
+  //
+  // There is deliberately NO read RPC here. A replacement managerd
+  // answers "what is the state of the controlled update?" from its own
+  // raftd over the internal, non-forwarded GetColonyUpdateStateLocal,
+  // and the write path below never needs a read: a refused acquire names
+  // the current holder, so "is anything running?" is answered by the
+  // refusal itself. An authoritative cross-node read belongs with the UI
+  // that will consume it, not here.
+  rpc MutateColonyUpdate(MutateColonyUpdateRequest) returns (MutateColonyUpdateResponse);
   // CreateNetwork/ListNetworks/DeleteNetwork manage NetworkDefinitions -
   // VLAN/subnet/bridge segments a VM can attach to (see ADR-0022).
   // CreateNetwork/DeleteNetwork just submit a Command through raft
@@ -2146,6 +2180,136 @@ message StepAsideForRestartResponse {
   // leader and cannot hand over" and "I could not be reached" are
   // different operational facts and must not collapse into one.
   string error = 7;
+}
+
+// MutateColonyUpdateRequest carries exactly one of the three operations
+// of ADR-0145's controlled-update state machine. The oneof is what makes
+// "advance with no fence" unrepresentable rather than merely rejected.
+message MutateColonyUpdateRequest {
+  oneof op {
+    AcquireColonyUpdate acquire = 1;
+    AdvanceColonyUpdate advance = 2;
+    ReleaseColonyUpdate release = 3;
+  }
+}
+
+// AcquireColonyUpdate claims the colony-wide single-flight. It is refused
+// while another operation is in progress, and the refusal names that
+// operation's id, holder node, holder incarnation and fence token, so a
+// second operator is told who to ask rather than merely being told no.
+message AcquireColonyUpdate {
+  // operation_id is the caller's own unique name for this run. It is
+  // never re-usable: a settled operation's id stays reserved, so "has
+  // this operation ever run?" is answerable and a re-grant cannot reset
+  // a fence.
+  string operation_id = 1;
+  // holder_incarnation distinguishes this managerd PROCESS from the one
+  // that preceded it on the same Comb. A replacement process generates a
+  // new one; the predecessor's is then permanently fenced.
+  string holder_incarnation = 2;
+  // takeover is the explicit, deliberate override for an operation
+  // already in progress. There is no TTL and no automatic handover, by
+  // design: a lease that lapses on a timer can lapse while the operation
+  // it describes is still mid-flight, which is the window this exists to
+  // close.
+  bool takeover = 3;
+}
+
+// AdvanceColonyUpdate records durable progress. Every part of the fence
+// must match the active operation exactly; anything else is refused by
+// name, and cannot be overridden, because "you are not the coordinator
+// any more" is the absence of permission rather than a cost to
+// acknowledge.
+message AdvanceColonyUpdate {
+  ColonyUpdateFence fence = 1;
+  string step = 2;
+  string target_node_id = 3;
+  string detail = 4;
+  // step_record, when set, is appended to the operation's own durable
+  // step history - the per-step outcome and its confirmation evidence
+  // that a replacement managerd reads back.
+  ColonyUpdateStepRecord step_record = 5;
+}
+
+// ReleaseColonyUpdate settles the operation terminally. The record is
+// marked settled, never deleted: "is anything running?" and "what
+// happened to the one that was?" are different questions and the same
+// durable object has to answer both.
+message ReleaseColonyUpdate {
+  ColonyUpdateFence fence = 1;
+  // outcome is one of internal/restartplan's Outcome constants -
+  // confirmed / failed / blocked / unobserved / unverified. There is no
+  // "finished" and no default: an unrecognised or empty value is
+  // refused, because "the update finished" is a claim like any other.
+  string outcome = 2;
+  string detail = 3;
+}
+
+// ColonyUpdateFence is the four-part token a coordinator must present to
+// keep acting. See api/internalpb/state.proto's own ColonyUpdateFence for
+// why all four are required; this mirrors it field for field so no
+// translation sits between the wire and the FSM.
+message ColonyUpdateFence {
+  string operation_id = 1;
+  string holder_node_id = 2;
+  uint64 fence_token = 3;
+  string holder_incarnation = 4;
+}
+
+// ColonyUpdateStepRecord is one durable per-step outcome. The outcome
+// vocabulary is internal/restartplan's, verbatim, including the two
+// honest "could not check" states: a step that was attempted and never
+// reported back is neither a success nor a failure.
+message ColonyUpdateStepRecord {
+  uint32 index = 1;
+  string step = 2;
+  string outcome = 3;
+  string detail = 4;
+  repeated string evidence = 5;
+  string node_id = 6;
+}
+
+// ColonyUpdate is the durable record of one controlled-update operation:
+// the lock (active) and the progress (step, target_node_id, steps) in one
+// object, because splitting them would let the two disagree - and a
+// disagreement there is not a degraded view, it is two updates.
+message ColonyUpdate {
+  string operation_id = 1;
+  string holder_node_id = 2;
+  string holder_incarnation = 3;
+  uint64 fence_token = 4;
+  int64 granted_at_unix = 5;
+  string target_node_id = 6;
+  string step = 7;
+  bool active = 8;
+  string outcome = 9;
+  string detail = 10;
+  int64 settled_at_unix = 11;
+  bool takeover = 12;
+  repeated ColonyUpdateStepRecord steps = 13;
+  int64 updated_at_unix = 14;
+}
+
+message MutateColonyUpdateResponse {
+  // accepted is true only when the FSM actually granted or recorded the
+  // operation. A refusal is accepted=false WITH an error naming the
+  // cause, never a silent false: "somebody else holds it" and "nobody
+  // could be asked" demand opposite responses.
+  bool accepted = 1;
+  // update is the resulting record, present whenever the FSM returned
+  // one. On a refusal it carries the CURRENTLY active operation, which
+  // is what lets a caller render "held by X" without a second read.
+  ColonyUpdate update = 2;
+  // error is set on every refusal and is never empty when
+  // accepted=false.
+  string error = 3;
+  // leader_hint is this node's best knowledge of where the raft leader
+  // is, for the caller to retry against - never an instruction the
+  // caller must supply, and never something the operator is asked about.
+  string leader_hint = 4;
+  // takeover is true when this grant displaced another operation. It is
+  // echoed so the displaced-operation record and the log line agree.
+  bool takeover = 5;
 }
 
 message CreateNetworkRequest {

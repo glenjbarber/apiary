@@ -145,6 +145,19 @@ func (c *RaftClient) GetRestartLeaseStateLocal(ctx context.Context, service stri
 	return c.client.GetRestartLeaseStateLocal(ctx, &internalpb.GetRestartLeaseStateRequest{Service: service})
 }
 
+// GetColonyUpdateStateLocal is the read side of ADR-0145's durable
+// controlled-update state, reached over this node's own raftd socket.
+//
+// Deliberately local and never forwarded, so a replacement managerd on
+// this Comb can answer "what is the state of the controlled update?"
+// from its own raftd without depending on a network hop that may be
+// exactly what just failed. The response says whether this node is the
+// leader, so a caller is never handed a lagging follower's copy while
+// believing it is authoritative.
+func (c *RaftClient) GetColonyUpdateStateLocal(ctx context.Context, operationID string) (*internalpb.GetColonyUpdateStateResponse, error) {
+	return c.client.GetColonyUpdateStateLocal(ctx, &internalpb.GetColonyUpdateStateRequest{OperationId: operationID})
+}
+
 func (c *RaftClient) ListPendingJoinRequestsLocal(ctx context.Context) (*internalpb.ListPendingJoinRequestsResponse, error) {
 	return c.client.ListPendingJoinRequestsLocal(ctx, &internalpb.ListPendingJoinRequestsRequest{})
 }

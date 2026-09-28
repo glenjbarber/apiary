@@ -453,6 +453,17 @@ const confirmRestartCompletedMethod = "/apiary.rpc.v1.ManagerService/ConfirmRest
 // read, created, or required to reach it.
 const stepAsideForRestartMethod = "/apiary.rpc.v1.ManagerService/StepAsideForRestart"
 
+// mutateColonyUpdateMethod (ADR-0145) is exempted from checkAuth for
+// the identical reason as the three above: it is not meant to be
+// reachable by any CreateAPIKey-issued credential at all, Admin or
+// otherwise. Claiming the Colony's single controlled update is a step
+// in a cluster-wide restart - the exact class the dedicated root-owned
+// token was introduced for - and an ordinary Admin who could reach it
+// could stop a sweep other operators are watching. The real boundary is
+// again entirely inside the handler (restartGuardrailTokenValid against
+// Server.restartGuardrailToken).
+const mutateColonyUpdateMethod = "/apiary.rpc.v1.ManagerService/MutateColonyUpdate"
+
 // authExemptMethods is every RPC that skips checkAuth's API-key role check,
 // each for the specific reason documented on its constant above. It is the
 // single definition AuthUnaryInterceptor consults, and TestRequiredRole_
@@ -467,6 +478,7 @@ var authExemptMethods = map[string]bool{
 	reserveRestartLeaseMethod:     true,
 	confirmRestartCompletedMethod: true,
 	stepAsideForRestartMethod:     true,
+	mutateColonyUpdateMethod:      true,
 }
 
 // restartGuardrailTokenValid reports whether presented matches configured

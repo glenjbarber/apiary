@@ -234,6 +234,14 @@ type PeerForwarder interface {
 	// authenticates with the restart-guardrail token, for the same
 	// reason ReserveRestartLease/ConfirmRestartCompleted above do.
 	StepAsideForRestart(ctx context.Context, addr string, req *rpcpb.StepAsideForRestartRequest) (*rpcpb.StepAsideForRestartResponse, error)
+
+	// MutateColonyUpdate carries ADR-0145's acquire/advance/release to
+	// the raft leader. Unlike StepAsideForRestart above this IS
+	// leader-forwarded - the decision is a consensus decision, and only
+	// the leader can make one - and it authenticates with the
+	// restart-guardrail token for the same reason every other
+	// cluster-wide-restart RPC here does.
+	MutateColonyUpdate(ctx context.Context, addr string, req *rpcpb.MutateColonyUpdateRequest) (*rpcpb.MutateColonyUpdateResponse, error)
 }
 
 // reconcilerStats is the subset of *cluster.Reconciler the server needs
@@ -461,7 +469,26 @@ type Server struct {
 	// follows. nil in production, where s.raft is used instead; see
 	// stepAsideClient.
 	stepAsideRaft stepAsideRaft
+
+	// colonyUpdateIncarnation is THIS managerd PROCESS's own identity in
+	// ADR-0145's controlled-update fence, generated fresh at every
+	// startup by ColonyUpdateIncarnation and never persisted.
+	//
+	// It is per process rather than per node precisely because a Comb's
+	// node_id is the same before and after its managerd is replaced. A
+	// fence keyed on node_id alone would still be satisfied by the
+	// process it replaced, which is the resurrected-old-coordinator
+	// case the fence exists to defeat. Empty disables acquisition
+	// rather than issuing a fence that does not fence - see
+	// Server.colonyUpdateCommand.
+	colonyUpdateIncarnation string
 }
+
+// SetPAMAuthenticator wires PAM login support after construction (ADR-
+// 0087), the same setter-for-optional-dependency pattern as
+// SetOriginCAIssuer above - production wires a real pam.PAMAuthenticator
+// here from cmd/managerd's own -pam-service flag; tests may supply a
+// fake implementing the same small interface.
 
 // SetPAMAuthenticator wires PAM login support after construction (ADR-
 // 0087), the same setter-for-optional-dependency pattern as
@@ -581,7 +608,7 @@ var _ rpcpb.ManagerServiceServer = (*Server)(nil)
 // the params above) specifically to keep every existing positional
 // NewServer(...) call site a mechanical one-line edit.
 func NewServer(raft *RaftClient, nodeID string, isos isoManager, vnc VNCLookup, serialLog SerialLogLookup, vlanMgr VLANStatus, peers PeerForwarder, peerManagerdPort string, zfsMgr quotaSetter, nodeConfig nodeConfigStore, assumptionStoreMgr assumptionStore, assumptionStaleAfter time.Duration, reconciler reconcilerStats) *Server {
-	return &Server{raft: raft, nodeID: nodeID, isos: isos, vnc: vnc, serialLog: serialLog, vlan: vlanMgr, statsGather: hoststats.Gather, hostPkgCollect: hostpkg.NewCollector(hostpkg.Options{}).Collect, peers: peers, peerManagerdPort: peerManagerdPort, zfs: zfsMgr, nodeConfig: nodeConfig, listNetworkInterfaces: netif.List, assumptions: assumptionStoreMgr, assumptionStaleAfter: assumptionStaleAfter, reconciler: reconciler, services: rcServiceController{}, pamLockouts: newPAMLockoutTracker(), reachabilityCheck: dialReachable, raftdConversion: rcRaftdConversionAdapter{}}
+	return &Server{raft: raft, nodeID: nodeID, isos: isos, vnc: vnc, serialLog: serialLog, vlan: vlanMgr, statsGather: hoststats.Gather, hostPkgCollect: hostpkg.NewCollector(hostpkg.Options{}).Collect, peers: peers, peerManagerdPort: peerManagerdPort, zfs: zfsMgr, nodeConfig: nodeConfig, listNetworkInterfaces: netif.List, assumptions: assumptionStoreMgr, assumptionStaleAfter: assumptionStaleAfter, reconciler: reconciler, services: rcServiceController{}, pamLockouts: newPAMLockoutTracker(), reachabilityCheck: dialReachable, raftdConversion: rcRaftdConversionAdapter{}, colonyUpdateIncarnation: ColonyUpdateIncarnation()}
 }
 
 // SetNetworkInterfaceLister overrides host interface discovery for tests.
@@ -3846,6 +3873,27 @@ func (s *Server) ReserveRestartLease(ctx context.Context, req *rpcpb.ReserveRest
 // RestartNodeService (the same trusted process calling itself directly,
 // never over the wire).
 func (s *Server) reserveRestartLease(ctx context.Context, req *rpcpb.ReserveRestartLeaseRequest) (*rpcpb.ReserveRestartLeaseResponse, error) {
+	return s.reserveRestartLeaseFenced(ctx, req, nil)
+}
+
+// reserveRestartLeaseFenced is reserveRestartLease with ADR-0145's
+// controlled-update fence optionally bound to the lease.
+//
+// A nil fence preserves today's behaviour byte for byte: the command
+// carries no fence, the FSM's fence test is skipped, and the ordinary
+// operator-driven per-Comb restart (the Machine page's restart button)
+// is entirely unaffected by any of this existing. That is why the fence
+// is optional rather than required - the property being bought is "a
+// coordinator that has lost its update cannot keep restarting Combs",
+// not "every restart is part of an update".
+//
+// A non-nil fence is what makes that property real. The check happens in
+// the FSM, on the leader, inside the same apply that grants the lease -
+// not here, and not in any coordinator - because the only thing that can
+// invalidate a fence token is a committed apply, and nothing local to
+// any managerd can. See AcquireRestartLease.colony_update_fence's own
+// doc comment.
+func (s *Server) reserveRestartLeaseFenced(ctx context.Context, req *rpcpb.ReserveRestartLeaseRequest, fence *internalpb.ColonyUpdateFence) (*rpcpb.ReserveRestartLeaseResponse, error) {
 	raftStatus, err := s.raftStatus(ctx)
 	if err != nil {
 		return &rpcpb.ReserveRestartLeaseResponse{Error: err.Error()}, nil
@@ -3916,6 +3964,9 @@ func (s *Server) reserveRestartLease(ctx context.Context, req *rpcpb.ReserveRest
 				VoterNodeIds:    voterNodeIDs(raftStatus),
 				CooldownSeconds: restartLeaseCooldownSeconds,
 				Force:           req.GetForce(),
+				// ADR-0145's fence, when this call is part of a
+				// controlled update. Nil for every existing caller.
+				ColonyUpdateFence: fence,
 			},
 		},
 	}
