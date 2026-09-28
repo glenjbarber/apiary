@@ -544,7 +544,9 @@ impressive one.
   flow and call `AddVoter` through any other path. The flow raises the
   cost of *unattended, uninformed, or injected* approval. It is not an
   authorization boundary against someone who already holds the authority
-  it authorizes.
+  it authorizes. "A hostile Admin" names two principals with two
+  different answers; the next section separates them, because which one
+  is in scope decides whether any of the remedies are worth building.
 - **It does not survive an attacker who controls the requesting
   managerd.** If the requesting side is hostile end to end, it displays
   whatever it likes. The fingerprint comparison catches a *third* party
@@ -560,6 +562,112 @@ impressive one.
   who could already approve the request outright, so replication widens
   nobody's authority - but the value is not a secret from them, and no
   part of this ADR should be read as claiming it is.
+
+## The hostile-Admin case is two problems, not one
+
+Added on review, when it became clear that the phrase names two
+principals with materially different answers. The distinction decides
+everything below, so it is made first. Nothing in this section is
+decided; it is the analysis behind open questions 7 and 8.
+
+| Adversary | What they hold | Fixable inside the Colony protocol? |
+| --- | --- | --- |
+| **Level 1: the Colony Admin** | An Admin-tier manager API key, or an operator session. Replicated state, the web UI, and the ability to approve, reject, or purge a request. | Yes. The remedy is a credential this principal does not hold. |
+| **Level 2: root on a target Comb** | The host. The Raft log, the binaries, raftd's socket, the ability to serve a forged leader. | No. The trust root would have to live off the machine. |
+
+Level 2 is not fixable by anything in this ADR, and it is worth being
+precise about why rather than leaving it as an omission. Raft
+signatures do not help, because a compromised leader signs correctly
+and any quorum containing it will accept that signature. Replacing the
+binary is worse still, because the state digest and the build gate are
+then computed by the attacker's own code. The answer for Level 2 is a
+trust root that leaves the machine -- TPM-sealed identity, or remote
+attestation -- which is a different project at a different cost and is
+not proposed here.
+
+### The structural reason Level 1 wins today
+
+It is not that the second PIN is too short, or stored too plainly, or
+not bound tightly enough to its request. It is that **the target
+generates the second PIN and then verifies it**. A party that generates
+a secret and subsequently validates it has demonstrated nothing. The
+second PIN is a real human-attention device -- it stops an unattended
+approval, a mis-paste, and a request nobody ever read -- and against a
+target that has already decided to say yes, it is decorative.
+
+So the limitation is about *who decides*, not about *how many numbers
+are typed*. A longer PIN, a more careful store, and a tighter request
+binding all leave the decision exactly where the hostile Admin can
+reach it.
+
+### Three classes of remedy, none of them selected here
+
+**A. Require a credential the target's Admins do not hold.** A
+Colony-wide join capability, created at formation, held by the operator
+out of band, and required on every join. The machinery already exists:
+`generateAPIKey` in `internal/manager/auth.go` stores only a SHA-256
+digest and never writes the raw form anywhere, and `ApiKey` records
+already live in the Raft FSM. A join capability checked the same way is
+small work. The property it buys is asymmetric on purpose: a hostile
+Admin can **deny** joins -- delete the capability, refuse to forward,
+withhold it -- but cannot **forge** one. Denial is survivable and
+diagnosable. Forgery is the thing that has to be impossible.
+
+**B. Make the fingerprint mean something.** ADR-0113 already records
+that the fingerprint is self-reported text from an unauthenticated
+requester. If the joining Comb generates a keypair at install and
+answers a nonce challenge from the target, the fingerprint names a key
+rather than a string, and the operator's comparison becomes a
+possession check. That stops replay of an old request and stops an
+attacker fabricating a request from a machine they control, which is
+the injection case the two-way flow is already aimed at. It does nothing
+against a hostile Admin talking to a genuine Comb, and it is additive:
+the requester proves possession, and still does not get to skip the
+human.
+
+Worth doing regardless of how A and C go, because it is what justifies
+open question 4. Requiring a fingerprint is a security control only if
+the fingerprint is bound to something the requester has to prove;
+otherwise it is a stricter version of a self-reported string.
+
+**C. Move the decision off the target.** The hostile Admin wins
+because there is a decision left for them to override. If the operator
+authorizes out of band -- an approval signed by a key the Colony
+trusts, produced on the operator's own machine, or on a page the target
+Colony does not serve -- and the requester presents that signed
+approval, the target's only remaining job is to record it. There is no
+longer a thing to bypass. This is the structural fix, and the only one
+that closes the hole rather than narrowing it.
+
+The cost is real, which is why it is a question and not a decision: the
+operator needs a signing key and somewhere to run the signing step,
+which is precisely the friction the two-way numeric flow was designed to
+remove. Choosing C means accepting that join authorization is a
+deliberate operator action with a key, not a copy and paste.
+
+**Also worth considering: quorum authorization for membership change.**
+Require k-of-n voters to approve an `AddVoter`. Membership changes are
+already single-copy on the leader, so this is comparatively cheap, and
+it converts the blast radius from one host to a majority. It is not a
+substitute for A, and a hostile leader can still stall, so the residual
+damage is availability rather than integrity -- the more tolerable of
+the two.
+
+### Sequencing: this and the deferred internal-token work are one problem
+
+A join capability and the second PIN have identical handling
+requirements: never stored in plaintext, bound to a request, single use,
+expiring, attempt-limited, fail-closed on mismatch, absent from logs and
+pages, and rotatable. That is the deferred internal-token project
+almost verbatim.
+
+It matters here because open question 6 proposes replicated
+*plaintext* storage for the second PIN. Taken on its own, that ships
+the weaker of two versions of the same machinery first and then asks
+for the stronger one later. Folding the join capability into the token
+project, or sequencing the token project ahead of the PIN's storage
+decision, avoids building the handling discipline twice. This is a
+sequencing recommendation; it does not reverse anything in Part 2.
 
 ## Rejected alternatives
 
@@ -727,8 +835,10 @@ force-restart work.
 
 ## Open questions for the owner
 
-Six points where a decision was made on your behalf. Each is a small
-edit here and a much larger one in code.
+The first six are points where a decision was made on your behalf. Each
+is a small edit here and a much larger one in code. The last two are
+scope questions added on review: they do not have a drafted answer, and
+picking either one changes how much of the above is worth building.
 
 1. **ECDSA P-256 instead of RSA-2048** for generated serving
    certificates. Every consumer here is Go, and it is a visible change
@@ -754,3 +864,20 @@ edit here and a much larger one in code.
    uncomfortable the alternative is a short-lived managerd-local copy
    with an explicit reissue after any leader change - which costs the
    property the owner asked for, that the flow survives a leader moving.
+   See the sequencing note above: a join capability would need exactly
+   this handling discipline, so 6 and the hostile-Admin remedy are
+   easier decided together than apart.
+7. **Which adversary level is in scope.** Level 1, a Colony Admin with
+   manager API access, and Level 2, root on a target Comb, want two
+   different projects. The answer decides whether remedies A and B are
+   worth building now or whether the effort belongs in an attestation
+   design instead. This ADR as written addresses Level 1.
+8. **Whether to move the decision off the target.** If Level 1 is in
+   scope, the real choice is between A, a credential the Admins do not
+   hold with the target still deciding, and C, the operator signing
+   off-band with the target only recording. C is the one that closes
+   the hole; A narrows it. If the answer to 7 is that Level 1 does not
+   matter and this is an operator-convenience and typo-catch, then the
+   Part 2 flow is already the right amount of machinery and both A and C
+   should be left out. B is worth having either way, on the reasoning
+   given above.
