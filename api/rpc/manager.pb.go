@@ -15617,8 +15617,14 @@ type PendingJoinRequest struct {
 	// future peer_tls_ca setup against it (see the ADR's own explicit
 	// scope note).
 	TlsCertFingerprint string `protobuf:"bytes,8,opt,name=tls_cert_fingerprint,json=tlsCertFingerprint,proto3" json:"tls_cert_fingerprint,omitempty"`
-	unknownFields      protoimpl.UnknownFields
-	sizeCache          protoimpl.SizeCache
+	// joiner_log_state_observed / joiner_last_log_index mirror
+	// internalpb.PendingJoinRequest's own two fields of the same name - see
+	// there for the full reasoning, and for why an unobserved value has to
+	// be refused rather than assumed to mean "empty".
+	JoinerLogStateObserved bool   `protobuf:"varint,9,opt,name=joiner_log_state_observed,json=joinerLogStateObserved,proto3" json:"joiner_log_state_observed,omitempty"`
+	JoinerLastLogIndex     uint64 `protobuf:"varint,10,opt,name=joiner_last_log_index,json=joinerLastLogIndex,proto3" json:"joiner_last_log_index,omitempty"`
+	unknownFields          protoimpl.UnknownFields
+	sizeCache              protoimpl.SizeCache
 }
 
 func (x *PendingJoinRequest) Reset() {
@@ -15707,6 +15713,20 @@ func (x *PendingJoinRequest) GetTlsCertFingerprint() string {
 	return ""
 }
 
+func (x *PendingJoinRequest) GetJoinerLogStateObserved() bool {
+	if x != nil {
+		return x.JoinerLogStateObserved
+	}
+	return false
+}
+
+func (x *PendingJoinRequest) GetJoinerLastLogIndex() uint64 {
+	if x != nil {
+		return x.JoinerLastLogIndex
+	}
+	return 0
+}
+
 type RequestJoinColonyRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// node_id/raft_bind_address are the JOINING Comb's own identity - the
@@ -15735,8 +15755,20 @@ type RequestJoinColonyRequest struct {
 	// own locally-configured tls_cert before forwarding - see
 	// PendingJoinRequest's own field doc.
 	TlsCertFingerprint string `protobuf:"bytes,5,opt,name=tls_cert_fingerprint,json=tlsCertFingerprint,proto3" json:"tls_cert_fingerprint,omitempty"`
-	unknownFields      protoimpl.UnknownFields
-	sizeCache          protoimpl.SizeCache
+	// joiner_log_state_observed / joiner_last_log_index are the JOINING
+	// Comb's own evidence about its local raft log - see
+	// internalpb.PendingJoinRequest's own doc comment for the full
+	// reasoning and for why the observed flag is separate.
+	//
+	// The joining managerd fills both in from its own local raftd before
+	// forwarding, exactly as it does tls_cert_fingerprint above. A caller
+	// that sets them explicitly is trusted as-is, which is what lets a
+	// test drive a real approval against a real single-node raft without
+	// needing a second live raftd.
+	JoinerLogStateObserved bool   `protobuf:"varint,6,opt,name=joiner_log_state_observed,json=joinerLogStateObserved,proto3" json:"joiner_log_state_observed,omitempty"`
+	JoinerLastLogIndex     uint64 `protobuf:"varint,7,opt,name=joiner_last_log_index,json=joinerLastLogIndex,proto3" json:"joiner_last_log_index,omitempty"`
+	unknownFields          protoimpl.UnknownFields
+	sizeCache              protoimpl.SizeCache
 }
 
 func (x *RequestJoinColonyRequest) Reset() {
@@ -15802,6 +15834,20 @@ func (x *RequestJoinColonyRequest) GetTlsCertFingerprint() string {
 		return x.TlsCertFingerprint
 	}
 	return ""
+}
+
+func (x *RequestJoinColonyRequest) GetJoinerLogStateObserved() bool {
+	if x != nil {
+		return x.JoinerLogStateObserved
+	}
+	return false
+}
+
+func (x *RequestJoinColonyRequest) GetJoinerLastLogIndex() uint64 {
+	if x != nil {
+		return x.JoinerLastLogIndex
+	}
+	return 0
 }
 
 type RequestJoinColonyResponse struct {
@@ -18917,7 +18963,7 @@ const file_api_rpc_manager_proto_rawDesc = "" +
 	"own_bridge\x18\x03 \x01(\bR\townBridge\x12\x19\n" +
 	"\bown_vlan\x18\x04 \x01(\bR\aownVlan\x12!\n" +
 	"\foutbound_nat\x18\x05 \x01(\bR\voutboundNat\x12\x14\n" +
-	"\x05error\x18\x06 \x01(\tR\x05error\"\xcc\x02\n" +
+	"\x05error\x18\x06 \x01(\tR\x05error\"\xba\x03\n" +
 	"\x12PendingJoinRequest\x12\x1d\n" +
 	"\n" +
 	"request_id\x18\x01 \x01(\tR\trequestId\x12\x17\n" +
@@ -18927,14 +18973,19 @@ const file_api_rpc_manager_proto_rawDesc = "" +
 	"\x11requested_at_unix\x18\x05 \x01(\x03R\x0frequestedAtUnix\x12&\n" +
 	"\x0fexpires_at_unix\x18\x06 \x01(\x03R\rexpiresAtUnix\x128\n" +
 	"\x06status\x18\a \x01(\x0e2 .apiary.rpc.v1.JoinRequestStatusR\x06status\x120\n" +
-	"\x14tls_cert_fingerprint\x18\b \x01(\tR\x12tlsCertFingerprint\"\xd7\x01\n" +
+	"\x14tls_cert_fingerprint\x18\b \x01(\tR\x12tlsCertFingerprint\x129\n" +
+	"\x19joiner_log_state_observed\x18\t \x01(\bR\x16joinerLogStateObserved\x121\n" +
+	"\x15joiner_last_log_index\x18\n" +
+	" \x01(\x04R\x12joinerLastLogIndex\"\xc5\x02\n" +
 	"\x18RequestJoinColonyRequest\x12\x17\n" +
 	"\anode_id\x18\x01 \x01(\tR\x06nodeId\x12*\n" +
 	"\x11raft_bind_address\x18\x02 \x01(\tR\x0fraftBindAddress\x12\x1d\n" +
 	"\n" +
 	"timeout_ms\x18\x03 \x01(\rR\ttimeoutMs\x12%\n" +
 	"\x0etarget_address\x18\x04 \x01(\tR\rtargetAddress\x120\n" +
-	"\x14tls_cert_fingerprint\x18\x05 \x01(\tR\x12tlsCertFingerprint\"\x85\x01\n" +
+	"\x14tls_cert_fingerprint\x18\x05 \x01(\tR\x12tlsCertFingerprint\x129\n" +
+	"\x19joiner_log_state_observed\x18\x06 \x01(\bR\x16joinerLogStateObserved\x121\n" +
+	"\x15joiner_last_log_index\x18\a \x01(\x04R\x12joinerLastLogIndex\"\x85\x01\n" +
 	"\x19RequestJoinColonyResponse\x12\x1d\n" +
 	"\n" +
 	"request_id\x18\x01 \x01(\tR\trequestId\x12\x12\n" +

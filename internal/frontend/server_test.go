@@ -3467,7 +3467,7 @@ func TestServer_HandlePreflightJoinRequest_RedirectsWithVerdict(t *testing.T) {
 	followRec := httptest.NewRecorder()
 	s.ServeHTTP(followRec, followUp)
 	body := followRec.Body.String()
-	if !strings.Contains(body, "Reachability check") || !strings.Contains(body, "block") || !strings.Contains(body, "not reachable: connection refused") {
+	if !strings.Contains(body, "Approval preflight") || !strings.Contains(body, "block") || !strings.Contains(body, "not reachable: connection refused") {
 		t.Errorf("landing page missing the rendered preflight verdict, got: %s", body)
 	}
 	if !strings.Contains(body, `action="/join-requests/jreq-abc123/approve"`) {

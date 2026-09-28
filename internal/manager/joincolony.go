@@ -180,6 +180,46 @@ func (s *Server) evaluateJoinReachability(ctx context.Context, addr string) guar
 	return guardrail.EvaluateJoinReachability(fact)
 }
 
+// localJoinerLogState reads THIS managerd's own local raftd for the one
+// number the join-log guardrail needs, and returns it as a fact ready for
+// guardrail.EvaluateJoinLogState.
+//
+// It reads its own raftd, not the joiner's, and that is the whole design
+// constraint. When RequestJoinColony is submitted from the joining Comb's
+// own Machine page - the normal path - the managerd receiving this call IS
+// the joining Comb's managerd, so its local raftd is the joiner's raftd
+// and raftd's own last_log_index is authoritative there. A Comb that has
+// never been in a cluster has no log entries and reports 0; one that was
+// previously a member, or that bootstrapped on its own, reports the index
+// it reached.
+//
+// The approver cannot do this check itself later, and that is not an
+// oversight. raftd holds bbolt's exclusive lock on raft.db for as long as
+// it is running, which on an -await-join node is exactly when a join
+// request is being made, so any second open of that file would block
+// instead of answering. The evidence has to be gathered here, on the node
+// that can gather it, and carried on the wire.
+//
+// A read that fails, or a managerd with no local raft at all, returns an
+// UNOBSERVED fact rather than a false zero. ApproveJoinRequest refuses
+// that, deliberately: "this build cannot tell" is not grounds for
+// performing the one irreversible action the check exists to prevent.
+func (s *Server) localJoinerLogState(ctx context.Context) guardrail.JoinerLogStateFact {
+	fact := guardrail.JoinerLogStateFact{}
+	if s.raft == nil {
+		fact.ReadError = "this node has no local raft client"
+		return fact
+	}
+	status, err := s.raft.Status(ctx)
+	if err != nil {
+		fact.ReadError = err.Error()
+		return fact
+	}
+	fact.Observed = true
+	fact.LastLogIndex = status.GetLastLogIndex()
+	return fact
+}
+
 // localTLSCertFingerprint reads this managerd's own configured tls_cert
 // (ADR-0087/ADR-0093) and returns its SHA-256 fingerprint in the same
 // "SHA256:AA:BB:..." shape openssl/ssh tooling commonly uses, so an
@@ -345,6 +385,29 @@ func (s *Server) RequestJoinColony(ctx context.Context, req *rpcpb.RequestJoinCo
 				req.GetNodeId(), existing.GetAddress())}, nil
 		}
 	}
+	// The joiner's own raft log state, gathered once here and used for both
+	// the forwarded request and the locally-recorded record, so the two
+	// paths cannot disagree about what the joiner claimed.
+	//
+	// Three cases, in this order:
+	//
+	//  1. The caller set it explicitly. Trusted as-is - this is what lets a
+	//     test drive a real approval against a real single-node raft.
+	//  2. target_address is set, meaning this managerd is being called by
+	//     the JOINING Comb's own frontend and so IS the joiner. Its local
+	//     raftd's last_log_index is then the authoritative number. This is
+	//     the normal path - the joining Comb's own Machine page always
+	//     names a target member.
+	//  3. Neither. The legacy "record directly on whichever managerd
+	//     receives the call" shape, where this managerd may be an existing
+	//     Colony MEMBER rather than the joiner. Its own log index would be
+	//     evidence about the wrong machine entirely, so nothing is derived
+	//     and the record stays unobserved, which ApproveJoinRequest
+	//     refuses. A fabricated zero would be worse than no evidence.
+	logState := s.localJoinerLogState(ctx)
+	if req.GetJoinerLogStateObserved() || req.GetTargetAddress() == "" {
+		logState.Observed, logState.LastLogIndex = req.GetJoinerLogStateObserved(), req.GetJoinerLastLogIndex()
+	}
 	if target := req.GetTargetAddress(); target != "" {
 		if s.peers == nil {
 			return &rpcpb.RequestJoinColonyResponse{Error: "no peer forwarding is configured on this node; cannot reach the named Colony member"}, nil
@@ -372,7 +435,9 @@ func (s *Server) RequestJoinColony(ctx context.Context, req *rpcpb.RequestJoinCo
 		}
 		resp, err := s.peers.RequestJoinColonyUnauthenticated(fctx, target, &rpcpb.RequestJoinColonyRequest{
 			NodeId: req.GetNodeId(), RaftBindAddress: req.GetRaftBindAddress(), TimeoutMs: req.GetTimeoutMs(),
-			TlsCertFingerprint: fingerprint,
+			TlsCertFingerprint:     fingerprint,
+			JoinerLogStateObserved: logState.Observed,
+			JoinerLastLogIndex:     logState.LastLogIndex,
 		})
 		if err != nil {
 			return &rpcpb.RequestJoinColonyResponse{Error: fmt.Sprintf("reaching %s: %v", target, err)}, nil
@@ -383,24 +448,36 @@ func (s *Server) RequestJoinColony(ctx context.Context, req *rpcpb.RequestJoinCo
 	if err != nil {
 		return &rpcpb.RequestJoinColonyResponse{Error: fmt.Sprintf("generating request id: %v", err)}, nil
 	}
-	code, err := generateJoinCode()
-	if err != nil {
-		return &rpcpb.RequestJoinColonyResponse{Error: fmt.Sprintf("generating verification code: %v", err)}, nil
+	// Refused here only on a KNOWN-BAD reading, not on an absent one, so the
+	// operator gets the reason at the moment they can still act on it. An
+	// unobserved reading is deliberately still recorded: the legacy direct
+	// path below can never produce evidence, and refusing to record there
+	// would change that path's behaviour for no safety gain, since
+	// ApproveJoinRequest refuses anything that is not Allow regardless.
+	// What that path now gets instead is a request the Admin can see and a
+	// preflight that explains why it cannot be approved.
+	if report := guardrail.EvaluateJoinLogState(logState); report.Verdict == guardrail.Block {
+		return &rpcpb.RequestJoinColonyResponse{Error: fmt.Sprintf(
+			"refusing to record this join request: %s - wipe this Comb's raft state and request again",
+			report.Findings[0].Detail)}, nil
 	}
+	code, err := generateJoinCode()
 
 	now := time.Now()
 	cmd := &internalpb.Command{
 		Op: &internalpb.Command_CreatePendingJoinRequest{
 			CreatePendingJoinRequest: &internalpb.CreatePendingJoinRequest{
 				Request: &internalpb.PendingJoinRequest{
-					RequestId:          requestID,
-					NodeId:             req.GetNodeId(),
-					RaftBindAddress:    req.GetRaftBindAddress(),
-					Code:               code,
-					RequestedAtUnix:    now.Unix(),
-					ExpiresAtUnix:      now.Add(defaultJoinRequestTTL).Unix(),
-					Status:             internalpb.JoinRequestStatus_JOIN_REQUEST_STATUS_PENDING,
-					TlsCertFingerprint: req.GetTlsCertFingerprint(),
+					RequestId:              requestID,
+					NodeId:                 req.GetNodeId(),
+					RaftBindAddress:        req.GetRaftBindAddress(),
+					Code:                   code,
+					RequestedAtUnix:        now.Unix(),
+					ExpiresAtUnix:          now.Add(defaultJoinRequestTTL).Unix(),
+					Status:                 internalpb.JoinRequestStatus_JOIN_REQUEST_STATUS_PENDING,
+					TlsCertFingerprint:     req.GetTlsCertFingerprint(),
+					JoinerLogStateObserved: logState.Observed,
+					JoinerLastLogIndex:     logState.LastLogIndex,
 				},
 			},
 		},
@@ -549,6 +626,41 @@ func (s *Server) ApproveJoinRequest(ctx context.Context, req *rpcpb.ApproveJoinR
 			pending.GetNodeId(), existing.GetAddress())}, nil
 	}
 
+	// The join-log guardrail (guardrail.EvaluateJoinLogState), applied to
+	// the EVIDENCE RECORDED ON THE PENDING REQUEST rather than to anything
+	// read here. This runs on the approving member, whose own raft knows
+	// nothing about the joiner's log, and it is deliberately the last check
+	// before AddVoter.
+	//
+	// Two things it is worth being precise about.
+	//
+	// The evidence is a snapshot taken when the request was created, not a
+	// lock held across the approval, so there is a real race here: a joiner
+	// could in principle acquire a log between the two. That race is
+	// accepted rather than closed, because closing it needs the joiner to
+	// hold some token across the whole window, which is a protocol this
+	// codebase does not have. What bounds it in practice is that the only
+	// way the joiner gains a non-empty log is by being made a voter, which
+	// is the very call this check precedes - so on the path that matters,
+	// the log cannot change underneath the check. Wiping the joiner's
+	// state in the meantime only makes the join safer, and the operator
+	// would have to deliberately re-image a Comb mid-approval to exploit
+	// the gap.
+	//
+	// Unobserved is refused, not allowed. A pending request created by an
+	// older managerd, or one recorded through the legacy direct path where
+	// this member is not the joiner, carries no evidence at all, and
+	// approving it would be performing the irreversible action on the
+	// strength of an absence.
+	if report := guardrail.EvaluateJoinLogState(guardrail.JoinerLogStateFact{
+		NodeID:       pending.GetNodeId(),
+		Observed:     pending.GetJoinerLogStateObserved(),
+		LastLogIndex: pending.GetJoinerLastLogIndex(),
+	}); report.Verdict != guardrail.Allow {
+		return &rpcpb.ApproveJoinRequestResponse{Error: fmt.Sprintf(
+			"refusing to approve: %s", report.Findings[0].Detail)}, nil
+	}
+
 	timeout := defaultApplyTimeout
 	if req.GetTimeoutMs() > 0 {
 		timeout = time.Duration(req.GetTimeoutMs()) * time.Millisecond
@@ -683,7 +795,20 @@ func (s *Server) PreflightApproveJoinRequest(ctx context.Context, req *rpcpb.Pre
 	}
 	pending := getResp.GetRequest()
 
-	report := s.evaluateJoinReachability(ctx, pending.GetRaftBindAddress())
+	// Both of ApproveJoinRequest's own pre-AddVoter checks, evaluated here
+	// through the same two functions it uses, so the preview cannot drift
+	// from the enforcement - which is the entire reason this RPC exists
+	// (ADR-0103). Combined rather than reported separately, because the
+	// question the UI asks is one question. Evaluated once, since
+	// evaluateJoinReachability dials the joiner and this is a preview.
+	report := guardrail.Combine(
+		s.evaluateJoinReachability(ctx, pending.GetRaftBindAddress()),
+		guardrail.EvaluateJoinLogState(guardrail.JoinerLogStateFact{
+			NodeID:       pending.GetNodeId(),
+			Observed:     pending.GetJoinerLogStateObserved(),
+			LastLogIndex: pending.GetJoinerLastLogIndex(),
+		}),
+	)
 	return &rpcpb.PreflightApproveJoinRequestResponse{
 		Verdict:  string(report.Verdict),
 		Findings: toRPCGuardrailFindings(report.Findings),

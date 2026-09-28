@@ -871,6 +871,25 @@ message PendingJoinRequest {
   // tls_cert_fingerprint (ADR-0113) mirrors rpcpb.PendingJoinRequest's
   // own field of the same name - see there for the full doc comment.
   string tls_cert_fingerprint = 8;
+
+  // joiner_log_state_observed / joiner_last_log_index are the JOINING
+  // Comb's own evidence about its local raft log, captured by the
+  // joining managerd from its own raftd's StatusResponse.last_log_index
+  // at the moment RequestJoinColony was made.
+  //
+  // AddVoter on a joiner whose log is already non-empty is the one way
+  // this codebase can lose committed history: raft cannot reconcile two
+  // divergent committed logs, and the only recovery here is a full state
+  // wipe. These two fields are what let ApproveJoinRequest refuse that
+  // before the point of no return.
+  //
+  // joiner_log_state_observed is the presence flag and is deliberately
+  // NOT an implied value: a false means "nobody said", which is not the
+  // same claim as "somebody said zero". An older managerd, or any other
+  // writer of this record, leaves both fields zero, and the guardrail
+  // treats that as unobserved and refuses. Fail-closed is the point.
+  bool joiner_log_state_observed = 9;
+  uint64 joiner_last_log_index = 10;
 }
 
 // CreatePendingJoinRequest records a new join request. Fails if

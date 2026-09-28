@@ -1426,7 +1426,7 @@ func TestIntegration_ApproveJoinRequest_AddsRealRaftVoter(t *testing.T) {
 	}
 	t.Cleanup(func() { joiningNode.Shutdown() })
 
-	reqResp, err := client.RequestJoinColony(ctx, &rpcpb.RequestJoinColonyRequest{NodeId: "node02", RaftBindAddress: joiningNodeAddr})
+	reqResp, err := client.RequestJoinColony(ctx, &rpcpb.RequestJoinColonyRequest{NodeId: "node02", RaftBindAddress: joiningNodeAddr, JoinerLogStateObserved: true})
 	if err != nil || reqResp.GetError() != "" {
 		t.Fatalf("RequestJoinColony() = (%+v, %v)", reqResp, err)
 	}
@@ -1525,7 +1525,7 @@ func TestIntegration_ApproveJoinRequest_DuplicateNodeIDRejected(t *testing.T) {
 	}
 	t.Cleanup(func() { nodeB.Shutdown() })
 
-	reqA, err := client.RequestJoinColony(ctx, &rpcpb.RequestJoinColonyRequest{NodeId: "node02", RaftBindAddress: nodeAAddr})
+	reqA, err := client.RequestJoinColony(ctx, &rpcpb.RequestJoinColonyRequest{NodeId: "node02", RaftBindAddress: nodeAAddr, JoinerLogStateObserved: true})
 	if err != nil || reqA.GetError() != "" {
 		t.Fatalf("RequestJoinColony(A) = (%+v, %v)", reqA, err)
 	}
@@ -1630,7 +1630,7 @@ func TestIntegration_ApproveJoinRequest_ReachableNodeStillWorks(t *testing.T) {
 	}
 	t.Cleanup(func() { joiningNode.Shutdown() })
 
-	reqResp, err := client.RequestJoinColony(ctx, &rpcpb.RequestJoinColonyRequest{NodeId: "node02", RaftBindAddress: joiningNodeAddr})
+	reqResp, err := client.RequestJoinColony(ctx, &rpcpb.RequestJoinColonyRequest{NodeId: "node02", RaftBindAddress: joiningNodeAddr, JoinerLogStateObserved: true})
 	if err != nil || reqResp.GetError() != "" {
 		t.Fatalf("RequestJoinColony() = (%+v, %v)", reqResp, err)
 	}
@@ -1667,7 +1667,7 @@ func TestIntegration_UpdateVoterAddress_UpdatesRealRaftVoterAddress(t *testing.T
 	}
 	t.Cleanup(func() { firstNode.Shutdown() })
 
-	reqResp, err := client.RequestJoinColony(ctx, &rpcpb.RequestJoinColonyRequest{NodeId: "node02", RaftBindAddress: firstAddr})
+	reqResp, err := client.RequestJoinColony(ctx, &rpcpb.RequestJoinColonyRequest{NodeId: "node02", RaftBindAddress: firstAddr, JoinerLogStateObserved: true})
 	if err != nil || reqResp.GetError() != "" {
 		t.Fatalf("RequestJoinColony() = (%+v, %v)", reqResp, err)
 	}
@@ -1755,7 +1755,7 @@ func TestIntegration_UpdateVoterAddress_UnreachableAddressRejected(t *testing.T)
 	}
 	t.Cleanup(func() { joiningNode.Shutdown() })
 
-	reqResp, err := client.RequestJoinColony(ctx, &rpcpb.RequestJoinColonyRequest{NodeId: "node02", RaftBindAddress: joiningNodeAddr})
+	reqResp, err := client.RequestJoinColony(ctx, &rpcpb.RequestJoinColonyRequest{NodeId: "node02", RaftBindAddress: joiningNodeAddr, JoinerLogStateObserved: true})
 	if err != nil || reqResp.GetError() != "" {
 		t.Fatalf("RequestJoinColony() = (%+v, %v)", reqResp, err)
 	}
