@@ -862,6 +862,17 @@ func (f *fakeClient) MutateColonyUpdate(context.Context, *rpcpb.MutateColonyUpda
 	return &rpcpb.MutateColonyUpdateResponse{}, nil
 }
 
+// ExecuteNodeRestartPlan is ADR-0145's controlled one-at-a-time Comb
+// restart: the whole guardrail sequence, composed. Nothing in this
+// package's request path calls it - it is server-side plumbing with no
+// UI and no REST route, by design - so this satisfies the generated
+// client interface and nothing more. A call reaching it would mean this
+// fake were being used somewhere it has no answers for, and an empty
+// response is a safe, obviously-fake answer to that.
+func (f *fakeClient) ExecuteNodeRestartPlan(context.Context, *rpcpb.ExecuteNodeRestartPlanRequest, ...grpc.CallOption) (*rpcpb.ExecuteNodeRestartPlanResponse, error) {
+	return &rpcpb.ExecuteNodeRestartPlanResponse{}, nil
+}
+
 var _ rpcpb.ManagerServiceClient = (*fakeClient)(nil)
 
 // fakeAuthenticator implements pam.Authenticator with a single fixed

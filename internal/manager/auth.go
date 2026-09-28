@@ -464,6 +464,24 @@ const stepAsideForRestartMethod = "/apiary.rpc.v1.ManagerService/StepAsideForRes
 // Server.restartGuardrailToken).
 const mutateColonyUpdateMethod = "/apiary.rpc.v1.ManagerService/MutateColonyUpdate"
 
+// executeNodeRestartPlanMethod (ADR-0145) is exempted from checkAuth for
+// the identical reason as the three above. It is the composition of all
+// three: it asks a Comb to step aside, reserves the cluster-wide restart
+// lease, restarts the service, and waits for the restarted process to
+// confirm itself. If any part of that is reachable by an ordinary
+// Admin API key, then an ordinary Admin API key can restart a
+// quorum-critical daemon in the Colony, which is exactly what ADR-0103's
+// dedicated root-owned token exists to prevent.
+//
+// It is guardrail plumbing, not an operator control. There is no UI for
+// it (ADR-0145's UI is deliberately a later step) and no REST route in
+// restshimd, so today the only callers are a peer managerd forwarding
+// with the guardrail token, and an operator on the node itself
+// presenting the root-owned token. That is a narrower reach than
+// RestartNodeService's Admin-tier RPC on purpose: this call composes
+// every step of a guarded restart rather than one of them.
+const executeNodeRestartPlanMethod = "/apiary.rpc.v1.ManagerService/ExecuteNodeRestartPlan"
+
 // authExemptMethods is every RPC that skips checkAuth's API-key role check,
 // each for the specific reason documented on its constant above. It is the
 // single definition AuthUnaryInterceptor consults, and TestRequiredRole_
@@ -479,6 +497,8 @@ var authExemptMethods = map[string]bool{
 	confirmRestartCompletedMethod: true,
 	stepAsideForRestartMethod:     true,
 	mutateColonyUpdateMethod:      true,
+
+	executeNodeRestartPlanMethod: true,
 }
 
 // restartGuardrailTokenValid reports whether presented matches configured

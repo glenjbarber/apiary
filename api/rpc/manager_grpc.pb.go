@@ -69,6 +69,7 @@ const (
 	ManagerService_ConfirmRestartCompleted_FullMethodName     = "/apiary.rpc.v1.ManagerService/ConfirmRestartCompleted"
 	ManagerService_StepAsideForRestart_FullMethodName         = "/apiary.rpc.v1.ManagerService/StepAsideForRestart"
 	ManagerService_MutateColonyUpdate_FullMethodName          = "/apiary.rpc.v1.ManagerService/MutateColonyUpdate"
+	ManagerService_ExecuteNodeRestartPlan_FullMethodName      = "/apiary.rpc.v1.ManagerService/ExecuteNodeRestartPlan"
 	ManagerService_CreateNetwork_FullMethodName               = "/apiary.rpc.v1.ManagerService/CreateNetwork"
 	ManagerService_ListNetworks_FullMethodName                = "/apiary.rpc.v1.ManagerService/ListNetworks"
 	ManagerService_DeleteNetwork_FullMethodName               = "/apiary.rpc.v1.ManagerService/DeleteNetwork"
@@ -447,6 +448,50 @@ type ManagerServiceClient interface {
 	// refusal itself. An authoritative cross-node read belongs with the UI
 	// that will consume it, not here.
 	MutateColonyUpdate(ctx context.Context, in *MutateColonyUpdateRequest, opts ...grpc.CallOption) (*MutateColonyUpdateResponse, error)
+	// ExecuteNodeRestartPlan runs the whole ADR-0125 restart sequence for
+	// ONE named Comb's apiary_raftd, in the order that sequence is safe in,
+	// and returns a verdict about what actually happened:
+	//
+	//   step aside -> gather facts -> evaluate quorum -> reserve the real
+	//   cluster-wide lease -> write the pending record -> issue the restart
+	//   -> await the restarted process's own confirmation -> record the
+	//   outcome
+	//
+	// It is the real caller ADR-0145 needed. StepAsideForRestart above is
+	// reachable and real; the lease machinery behind
+	// RestartNodeService/ReserveRestartLease is reachable and real; the
+	// quorum evaluation is real. Nothing composed them, so nothing
+	// exercised them together outside a test.
+	//
+	// EXECUTION IS TARGET-LOCAL. The restart, the pending record, and the
+	// confirmation all have to happen on the machine whose raftd is
+	// stopping, because the pending record is read back by that machine's
+	// own raftd on its next startup (cmd/raftd) and nothing else can see
+	// it. A request naming a node_id other than the receiving node is
+	// therefore FORWARDED to that member's own managerd, over the
+	// restart-guardrail token, at an address resolved from this node's own
+	// raft membership and never from anything the caller supplied - the
+	// same posture StepAsideForRestart's peer hop takes. It is never
+	// forwarded to the raft leader: the leader has no special business
+	// restarting another Comb's raftd, and asking it to would put the
+	// execution on the wrong machine.
+	//
+	// AUTHORIZATION matches StepAsideForRestart/ReserveRestartLease/
+	// ConfirmRestartCompleted exactly: the dedicated root-owned
+	// restart-guardrail token, not the Viewer/Admin hierarchy, and not any
+	// CreateAPIKey-issued credential. This is guardrail plumbing, not an
+	// operator button; ADR-0145's UI is deliberately not built and is a
+	// separate step.
+	//
+	// SCOPE. Only "apiary_raftd" is accepted, and "apiary_managerd" is
+	// refused for exactly the reason ADR-0142 refuses it: the restart
+	// would be orchestrated from inside the managerd being restarted.
+	// Restoring that needs a managerd self-restart handoff and durable
+	// update-operation state, neither of which exists yet. There is
+	// deliberately no colony-wide sweep here - one Comb, one call - and no
+	// colony-wide single-flight beyond the one real restart lease, which
+	// does serialize one guarded restart across the whole Colony.
+	ExecuteNodeRestartPlan(ctx context.Context, in *ExecuteNodeRestartPlanRequest, opts ...grpc.CallOption) (*ExecuteNodeRestartPlanResponse, error)
 	// CreateNetwork/ListNetworks/DeleteNetwork manage NetworkDefinitions -
 	// VLAN/subnet/bridge segments a VM can attach to (see ADR-0022).
 	// CreateNetwork/DeleteNetwork just submit a Command through raft
@@ -1215,6 +1260,16 @@ func (c *managerServiceClient) MutateColonyUpdate(ctx context.Context, in *Mutat
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(MutateColonyUpdateResponse)
 	err := c.cc.Invoke(ctx, ManagerService_MutateColonyUpdate_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *managerServiceClient) ExecuteNodeRestartPlan(ctx context.Context, in *ExecuteNodeRestartPlanRequest, opts ...grpc.CallOption) (*ExecuteNodeRestartPlanResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ExecuteNodeRestartPlanResponse)
+	err := c.cc.Invoke(ctx, ManagerService_ExecuteNodeRestartPlan_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -1996,6 +2051,50 @@ type ManagerServiceServer interface {
 	// refusal itself. An authoritative cross-node read belongs with the UI
 	// that will consume it, not here.
 	MutateColonyUpdate(context.Context, *MutateColonyUpdateRequest) (*MutateColonyUpdateResponse, error)
+	// ExecuteNodeRestartPlan runs the whole ADR-0125 restart sequence for
+	// ONE named Comb's apiary_raftd, in the order that sequence is safe in,
+	// and returns a verdict about what actually happened:
+	//
+	//   step aside -> gather facts -> evaluate quorum -> reserve the real
+	//   cluster-wide lease -> write the pending record -> issue the restart
+	//   -> await the restarted process's own confirmation -> record the
+	//   outcome
+	//
+	// It is the real caller ADR-0145 needed. StepAsideForRestart above is
+	// reachable and real; the lease machinery behind
+	// RestartNodeService/ReserveRestartLease is reachable and real; the
+	// quorum evaluation is real. Nothing composed them, so nothing
+	// exercised them together outside a test.
+	//
+	// EXECUTION IS TARGET-LOCAL. The restart, the pending record, and the
+	// confirmation all have to happen on the machine whose raftd is
+	// stopping, because the pending record is read back by that machine's
+	// own raftd on its next startup (cmd/raftd) and nothing else can see
+	// it. A request naming a node_id other than the receiving node is
+	// therefore FORWARDED to that member's own managerd, over the
+	// restart-guardrail token, at an address resolved from this node's own
+	// raft membership and never from anything the caller supplied - the
+	// same posture StepAsideForRestart's peer hop takes. It is never
+	// forwarded to the raft leader: the leader has no special business
+	// restarting another Comb's raftd, and asking it to would put the
+	// execution on the wrong machine.
+	//
+	// AUTHORIZATION matches StepAsideForRestart/ReserveRestartLease/
+	// ConfirmRestartCompleted exactly: the dedicated root-owned
+	// restart-guardrail token, not the Viewer/Admin hierarchy, and not any
+	// CreateAPIKey-issued credential. This is guardrail plumbing, not an
+	// operator button; ADR-0145's UI is deliberately not built and is a
+	// separate step.
+	//
+	// SCOPE. Only "apiary_raftd" is accepted, and "apiary_managerd" is
+	// refused for exactly the reason ADR-0142 refuses it: the restart
+	// would be orchestrated from inside the managerd being restarted.
+	// Restoring that needs a managerd self-restart handoff and durable
+	// update-operation state, neither of which exists yet. There is
+	// deliberately no colony-wide sweep here - one Comb, one call - and no
+	// colony-wide single-flight beyond the one real restart lease, which
+	// does serialize one guarded restart across the whole Colony.
+	ExecuteNodeRestartPlan(context.Context, *ExecuteNodeRestartPlanRequest) (*ExecuteNodeRestartPlanResponse, error)
 	// CreateNetwork/ListNetworks/DeleteNetwork manage NetworkDefinitions -
 	// VLAN/subnet/bridge segments a VM can attach to (see ADR-0022).
 	// CreateNetwork/DeleteNetwork just submit a Command through raft
@@ -2413,6 +2512,9 @@ func (UnimplementedManagerServiceServer) StepAsideForRestart(context.Context, *S
 }
 func (UnimplementedManagerServiceServer) MutateColonyUpdate(context.Context, *MutateColonyUpdateRequest) (*MutateColonyUpdateResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method MutateColonyUpdate not implemented")
+}
+func (UnimplementedManagerServiceServer) ExecuteNodeRestartPlan(context.Context, *ExecuteNodeRestartPlanRequest) (*ExecuteNodeRestartPlanResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ExecuteNodeRestartPlan not implemented")
 }
 func (UnimplementedManagerServiceServer) CreateNetwork(context.Context, *CreateNetworkRequest) (*CreateNetworkResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method CreateNetwork not implemented")
@@ -3445,6 +3547,24 @@ func _ManagerService_MutateColonyUpdate_Handler(srv interface{}, ctx context.Con
 	return interceptor(ctx, in, info, handler)
 }
 
+func _ManagerService_ExecuteNodeRestartPlan_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ExecuteNodeRestartPlanRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ManagerServiceServer).ExecuteNodeRestartPlan(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ManagerService_ExecuteNodeRestartPlan_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ManagerServiceServer).ExecuteNodeRestartPlan(ctx, req.(*ExecuteNodeRestartPlanRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _ManagerService_CreateNetwork_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(CreateNetworkRequest)
 	if err := dec(in); err != nil {
@@ -4424,6 +4544,10 @@ var ManagerService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "MutateColonyUpdate",
 			Handler:    _ManagerService_MutateColonyUpdate_Handler,
+		},
+		{
+			MethodName: "ExecuteNodeRestartPlan",
+			Handler:    _ManagerService_ExecuteNodeRestartPlan_Handler,
 		},
 		{
 			MethodName: "CreateNetwork",

@@ -362,6 +362,52 @@ service ManagerService {
   // refusal itself. An authoritative cross-node read belongs with the UI
   // that will consume it, not here.
   rpc MutateColonyUpdate(MutateColonyUpdateRequest) returns (MutateColonyUpdateResponse);
+
+  // ExecuteNodeRestartPlan runs the whole ADR-0125 restart sequence for
+  // ONE named Comb's apiary_raftd, in the order that sequence is safe in,
+  // and returns a verdict about what actually happened:
+  //
+  //   step aside -> gather facts -> evaluate quorum -> reserve the real
+  //   cluster-wide lease -> write the pending record -> issue the restart
+  //   -> await the restarted process's own confirmation -> record the
+  //   outcome
+  //
+  // It is the real caller ADR-0145 needed. StepAsideForRestart above is
+  // reachable and real; the lease machinery behind
+  // RestartNodeService/ReserveRestartLease is reachable and real; the
+  // quorum evaluation is real. Nothing composed them, so nothing
+  // exercised them together outside a test.
+  //
+  // EXECUTION IS TARGET-LOCAL. The restart, the pending record, and the
+  // confirmation all have to happen on the machine whose raftd is
+  // stopping, because the pending record is read back by that machine's
+  // own raftd on its next startup (cmd/raftd) and nothing else can see
+  // it. A request naming a node_id other than the receiving node is
+  // therefore FORWARDED to that member's own managerd, over the
+  // restart-guardrail token, at an address resolved from this node's own
+  // raft membership and never from anything the caller supplied - the
+  // same posture StepAsideForRestart's peer hop takes. It is never
+  // forwarded to the raft leader: the leader has no special business
+  // restarting another Comb's raftd, and asking it to would put the
+  // execution on the wrong machine.
+  //
+  // AUTHORIZATION matches StepAsideForRestart/ReserveRestartLease/
+  // ConfirmRestartCompleted exactly: the dedicated root-owned
+  // restart-guardrail token, not the Viewer/Admin hierarchy, and not any
+  // CreateAPIKey-issued credential. This is guardrail plumbing, not an
+  // operator button; ADR-0145's UI is deliberately not built and is a
+  // separate step.
+  //
+  // SCOPE. Only "apiary_raftd" is accepted, and "apiary_managerd" is
+  // refused for exactly the reason ADR-0142 refuses it: the restart
+  // would be orchestrated from inside the managerd being restarted.
+  // Restoring that needs a managerd self-restart handoff and durable
+  // update-operation state, neither of which exists yet. There is
+  // deliberately no colony-wide sweep here - one Comb, one call - and no
+  // colony-wide single-flight beyond the one real restart lease, which
+  // does serialize one guarded restart across the whole Colony.
+  rpc ExecuteNodeRestartPlan(ExecuteNodeRestartPlanRequest) returns (ExecuteNodeRestartPlanResponse);
+
   // CreateNetwork/ListNetworks/DeleteNetwork manage NetworkDefinitions -
   // VLAN/subnet/bridge segments a VM can attach to (see ADR-0022).
   // CreateNetwork/DeleteNetwork just submit a Command through raft
@@ -3543,4 +3589,107 @@ message HostPackagesResponse {
   // "something was read and part of it is undetermined". A caller must
   // not treat one as the other.
   string error = 8;
+}
+
+// ExecuteNodeRestartPlanRequest/Response and the two result messages
+// back ADR-0145's controlled, one-at-a-time Comb restart. The request
+// carries intent only - which Comb, which service, whether the operator
+// acknowledges a known cost - and never an order, a leader identity, or
+// an address to act on.
+message ExecuteNodeRestartPlanRequest {
+  // node_id names the Comb to restart. Empty means this node. A
+  // non-empty value naming another member is forwarded to that member's
+  // own managerd; a value naming nobody this node has heard of is
+  // refused, never guessed at.
+  string node_id = 1;
+
+  // service is the rc.d service to restart. Only "apiary_raftd" is
+  // accepted today. "apiary_managerd" is refused with a specific reason
+  // (ADR-0142), not silently treated as a typo.
+  string service = 2;
+
+  // force is the operator acknowledgment of a KNOWN cost, and only of a
+  // known cost: it can downgrade a quorum or leader-election Block into
+  // a cited caveat. It cannot rescue an unconfirmed step-aside, and it
+  // cannot rescue an Unknown - a fact nobody established is not
+  // something an operator can acknowledge.
+  //
+  // It also cannot wave through a restart lease that is already held for
+  // another Comb, because that is not a known cost but evidence that
+  // somebody else's restart is genuinely in flight. ADR-0103's
+  // force-override of a held lease remains available on
+  // RestartNodeService/ReserveRestartLease, unchanged, for an operator
+  // recovering a stuck lease by hand.
+  bool force = 3;
+}
+
+message ExecuteNodeRestartPlanResponse {
+  // result is present whenever the plan actually ran. It is the durable
+  // record's own content, including its outcome, its reason, and every
+  // line of evidence - and it is present for a refusal too, because
+  // "blocked" is a real answer and not an absence of one.
+  NodeRestartPlanResult result = 1;
+
+  // error is set only when the plan could not be run at all: the request
+  // was refused before any step executed, or the record could not be
+  // written. It is never a substitute for result.outcome, and a caller
+  // must not read its presence as "the restart failed" - the four
+  // outcomes in result.outcome are the honest vocabulary and are
+  // genuinely four different things.
+  string error = 2;
+}
+
+// NodeRestartPlanResult mirrors internal/restartplan.Result - the
+// durable record of one attempt, returned in the response so a caller
+// learns what happened without having to go and read a file.
+message NodeRestartPlanResult {
+  string service = 1;
+  string node_id = 2;
+  uint64 lease_id = 3;
+  int32 attempt = 4;
+
+  // outcome is "confirmed", "failed", "blocked", "unobserved" or
+  // "unverified" - see internal/restartplan.Outcome. They are NOT
+  // synonyms and must not be collapsed:
+  //
+  //   confirmed   the restart completed AND the restarted process
+  //               reported itself back healthy
+  //   failed      positive evidence the restart did not complete
+  //   blocked     the workflow deliberately refused; nothing was tried
+  //   unobserved  something was tried and the answer was unusable - the
+  //               restarted process never confirmed. NOT a failure, and
+  //               emphatically not a success
+  //   unverified  no observation was even possible
+  string outcome = 5;
+
+  // detail is never empty: every outcome states its reason, and an
+  // outcome with no reason is refused rather than written down.
+  string detail = 6;
+
+  // evidence is the cited record behind the outcome, oldest first. An
+  // unknown outcome always carries what was tried, never a bare shrug.
+  repeated string evidence = 7;
+
+  // step_aside is ADR-0145's leadership step-aside trace. Unset means no
+  // step-asider was configured and the step did not run, which is a
+  // different fact from a step-aside that ran and found nothing to do -
+  // hence its own attempted flag rather than relying on nil-ness.
+  NodeRestartPlanStepAside step_aside = 8;
+
+  int64 started_at_unix = 9;
+  int64 finished_at_unix = 10;
+}
+
+message NodeRestartPlanStepAside {
+  // attempted is false when no step-asider was configured.
+  bool attempted = 1;
+  bool was_leader = 2;
+  bool transferred = 3;
+  string new_leader_id = 4;
+  // safe_to_restart is the answer the workflow acted on, and the only
+  // permission field here. transferred on its own is not permission: the
+  // point is confirming a handover, not asking for one.
+  bool safe_to_restart = 5;
+  // detail is operator-readable prose, never empty.
+  string detail = 6;
 }
