@@ -16,10 +16,12 @@
     <a href="#machine-exposure">Service exposure</a>
   </nav>
   <p class="field-help">Each section above also has its own focused page: {{range machineSections}}<a href="/machine/{{.Slug}}">{{.Title}}</a> {{end}}</p>
-  <p><a href="/machine/why-is-this-set">Why is this set?</a> Trace managerd setting history, rationale, and known dependents.</p>
 
   <section class="settings-group" aria-labelledby="machine-operations">
-  <h2 id="machine-operations">Operations</h2>
+  <div class="page-header">
+    <h2 id="machine-operations">Operations</h2>
+    <a class="button secondary" href="/machine/why-is-this-set" title="Trace managerd setting history, rationale, and known dependents.">Why is this set?</a>
+  </div>
   <div class="panel">
     <h3>Apiary services</h3>
     <p class="muted">
