@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	rpcpb "github.com/glenjbarber/apiary/api/rpc"
+	"github.com/glenjbarber/apiary/internal/statedigest"
 )
 
 // These check that ADR-0143's badge actually reaches the rendered HTML,
@@ -115,11 +116,11 @@ func TestStateDigestBadgeRendersProvenDivergence(t *testing.T) {
 		{NodeID: "buzz.lab3.home.arpa", Reachable: true, HealthStatus: "healthy", StateDigest: "aaaa", AppliedIndex: 181},
 		{NodeID: "sting.lab3.home.arpa", Reachable: true, HealthStatus: "healthy", StateDigest: "bbbb", AppliedIndex: 181},
 	}
-	views, colony := stateDigestVerdicts([]stateDigestObservation{
-		observed("brood.lab3.home.arpa", "aaaa", 181),
-		observed("drone.lab3.home.arpa", "aaaa", 181),
-		observed("buzz.lab3.home.arpa", "aaaa", 181),
-		observed("sting.lab3.home.arpa", "bbbb", 181),
+	views, colony := stateDigestVerdicts([]statedigest.Observation{
+		renderObservation("brood.lab3.home.arpa", "aaaa", 181),
+		renderObservation("drone.lab3.home.arpa", "aaaa", 181),
+		renderObservation("buzz.lab3.home.arpa", "aaaa", 181),
+		renderObservation("sting.lab3.home.arpa", "bbbb", 181),
 	})
 	for i := range nodes {
 		view := views[nodes[i].NodeID]

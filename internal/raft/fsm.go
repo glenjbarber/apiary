@@ -15,6 +15,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	internalpb "github.com/glenjbarber/apiary/api/internalpb"
+	"github.com/glenjbarber/apiary/internal/statedigest"
 )
 
 // FSMApplyResult is returned from Node.Apply, echoing back the FSM's
@@ -1213,7 +1214,7 @@ func (f *FSM) StateDigest() string {
 // would make a diagnostic a load problem on exactly the large colonies
 // that most need it.
 func (f *FSM) recomputeStateDigestLocked() {
-	f.stateDigest = stateDigestOf(f.snapshotStateLocked())
+	f.stateDigest = statedigest.Of(f.snapshotStateLocked())
 }
 
 // VM returns the current definition for id, and whether it exists.

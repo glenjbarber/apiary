@@ -1,6 +1,5 @@
-package raft
-
-// Canonical FSM state digest (ADR-0143).
+// The canonical digest of a voter's own FSM state (ADR-0143), computed
+// by the voter because it is the only process that can see it.
 //
 // The problem this exists to solve: a matching last_log_index and
 // applied_index on every voter proves the raft LOGS agree, not that the
@@ -24,6 +23,8 @@ package raft
 // digest built on proto.Marshal output over Go maps would differ between
 // processes on identical state, and would be worse than useless: it
 // would report divergence on a perfectly healthy colony.
+
+package statedigest
 
 import (
 	"crypto/sha256"
@@ -64,8 +65,14 @@ const (
 // index travels beside it, so a consumer can reason about sampling.
 const lastIndexFieldName = "last_index"
 
-// stateDigestOf returns a lowercase hex SHA-256 over a canonical encoding
-// of state, excluding last_index.
+// Of returns a lowercase hex SHA-256 over a canonical encoding of state,
+// excluding last_index.
+//
+// It is exported because a voter computes it, but the ANSWER belongs to
+// whoever compares voters: Verdicts in verdict.go is the only thing in
+// this repository entitled to turn a digest into a claim, and a caller
+// that needs one of these should reach for Verdicts rather than
+// comparing two strings itself.
 //
 // The empty state has a real, non-empty digest. An empty RETURN value is
 // therefore never produced here, which is what lets raftd's StatusResponse
@@ -78,7 +85,7 @@ const lastIndexFieldName = "last_index"
 // necessarily knows the field and includes it in its own digest - which
 // is exactly the mismatch this exists to surface. A state differing only
 // in a field no build understands cannot be produced by any build at all.
-func stateDigestOf(state *internalpb.FSMSnapshotState) string {
+func Of(state *internalpb.FSMSnapshotState) string {
 	var buf []byte
 	if state != nil {
 		buf = canonicalMessage(state.ProtoReflect())

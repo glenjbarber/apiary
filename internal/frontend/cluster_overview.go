@@ -12,6 +12,7 @@ import (
 
 	rpcpb "github.com/glenjbarber/apiary/api/rpc"
 	"github.com/glenjbarber/apiary/internal/health"
+	"github.com/glenjbarber/apiary/internal/statedigest"
 )
 
 // peerHostStatsClient is the subset of *manager.PeerReporter the
@@ -147,7 +148,7 @@ type clusterNodeView struct {
 	// (ADR-0143), read from the same Status response the health evidence
 	// above already used, so it costs no extra RPC. Empty when no digest
 	// was observed, which is why the badge below is never derived from
-	// its presence alone - see stateDigestVerdicts.
+	// its presence alone - see internal/statedigest.Verdicts.
 	StateDigest string
 
 	// AppliedIndex is the index StateDigest was read at, 0 when
@@ -379,7 +380,7 @@ func (s *Server) clusterNodeEvidence(ctx context.Context, nodeID, localNodeID st
 	// the only place that can honestly compare them.
 	node.StateDigest = stateDigest
 	node.AppliedIndex = appliedIndex
-	digestView := stateDigestUnobservedView(stateDigestObservation{
+	digestView := stateDigestUnobservedView(statedigest.Observation{
 		NodeID: nodeID, Digest: stateDigest, AppliedIndex: appliedIndex,
 	}, 1)
 	node.DigestState = digestView.State
@@ -433,9 +434,9 @@ func (s *Server) handleClusterOverviewPage(w http.ResponseWriter, r *http.Reques
 	// decided per row: "these state machines agree" is a fact about the
 	// whole set. It is computed once here, from the digests the rows above
 	// already gathered, and stamped back onto them.
-	observations := make([]stateDigestObservation, len(nodes))
+	observations := make([]statedigest.Observation, len(nodes))
 	for i, node := range nodes {
-		observations[i] = stateDigestObservation{
+		observations[i] = statedigest.Observation{
 			NodeID: node.NodeID, Digest: node.StateDigest, AppliedIndex: node.AppliedIndex,
 		}
 	}
@@ -446,7 +447,7 @@ func (s *Server) handleClusterOverviewPage(w http.ResponseWriter, r *http.Reques
 			// Unreachable while both are built from the same rows, but an
 			// absent verdict must render as unobserved rather than as a
 			// blank badge if that ever stops holding.
-			view = stateDigestUnobservedView(stateDigestObservation{NodeID: nodes[i].NodeID}, len(nodes))
+			view = stateDigestUnobservedView(statedigest.Observation{NodeID: nodes[i].NodeID}, len(nodes))
 		}
 		nodes[i].DigestState = view.State
 		nodes[i].DigestBadgeClass = view.BadgeClass
