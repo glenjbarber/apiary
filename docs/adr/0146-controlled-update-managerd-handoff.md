@@ -2,14 +2,18 @@
 
 ## Status
 
-Accepted in discussion, not yet implemented.
+Accepted in discussion, **not yet implemented**. The mechanism in
+section "The gap in the current state model" below is now designed and
+coded, but everything else here - the peer-issued restart, the detached
+process, the replacement confirmation - is still unbuilt, and the
+detached-restart mechanism in particular is asserted rather than
+measured.
 
-Depends on work that is in flight and **not yet merged**: the durable
-`ColonyUpdate` record and its `ColonyUpdateFence`, on
-`feature/colony-update-singleflight`. This ADR states the requirements
-that record must satisfy and identifies one gap in its current shape. It
-does not presume that branch's design is final, and nothing in it is a
-substitute for reading that code.
+Depends on the durable `ColonyUpdate` record and its `ColonyUpdateFence`
+on `feature/colony-update-singleflight`, which additionally now carries
+`HandoverColonyUpdate` specifically to close the gap this ADR identified.
+Section "The gap in the current state model" has been rewritten to record
+how that was closed.
 
 Amends ADR-0142. Implements the second open question of ADR-0145.
 
@@ -178,9 +182,9 @@ that things are probably fine.
 
 ## The gap in the current state model
 
-The in-flight `AcquireColonyUpdate` has a `takeover` flag, documented as
-the explicit, logged override for an operation already in progress, with
-no TTL and no silent expiry, and with `takeover = true` recorded on the
+`AcquireColonyUpdate` has a `takeover` flag, documented as the
+explicit, logged override for an operation already in progress, with no
+TTL and no silent expiry, and with `takeover = true` recorded on the
 resulting grant so an operator reading a stuck update can see that one
 happened.
 
@@ -191,19 +195,46 @@ and leave a properly running colony-wide update indistinguishable, in the
 record, from a second coordinator having seized a live operation from an
 unresponsive one. That destroys the flag's only purpose.
 
-So a first-class handover is needed. Either a distinct
-`HandoverColonyUpdate` command carrying the outgoing holder's fence and
-the incoming holder's identity, or a mode on the acquire that separates
-cooperative transfer from contested takeover. Whichever is chosen:
+### Closed: `HandoverColonyUpdate`
 
-- the outgoing holder's exact fence must still match, so a displaced
-  coordinator cannot hand over an operation it has already lost;
-- the record must name both holders and the reason, because "who gave this
-  away, and when" is the first question an operator asks when a sweep
-  stops near the end;
-- a handover must not be a way to escape fencing. It changes the holder
-  and mints a higher `fence_token`; it does not relax the exact-match
-  requirement on the new holder either.
+The first of the two options above was taken. `HandoverColonyUpdate` is
+a distinct command carrying the outgoing holder's fence and the incoming
+holder's identity, and the three requirements this section set out are
+how it meets them:
+
+- **The outgoing holder's exact fence must still match.** It goes through
+  the same `fenceMatchesActive` rule as `AdvanceColonyUpdate` and
+  `ReleaseColonyUpdate`, and gets the same named refusal. A coordinator
+  that has already been displaced, or whose operation was taken over,
+  cannot hand over an operation it no longer holds.
+- **The record names both holders and the reason.** Each handover appends
+  a `ColonyUpdateHandover` carrying the outgoing node, incarnation and
+  fence token, the incoming node and incarnation, the new fence token,
+  and the reason, stamped by the applying leader. It is kept in its own
+  `ColonyUpdate.handovers` list rather than folded into `steps`, because
+  a handover is not a phase of the plan and has no outcome to record.
+- **A handover is not a way to escape fencing.** It does not settle the
+  record: the operation keeps its id, its step history, its target and
+  its progress, and only the holder changes. It mints a higher
+  `fence_token` from its own log index, exactly as an acquire does, so
+  the incoming holder faces the identical exact-match requirement as any
+  other and the outgoing token is stale the instant it commits.
+
+Two details that are easy to get wrong and were not left to chance.
+`takeover` is left untouched by a handover and stays sticky, because it
+is a record of what happened rather than a description of the current
+holder: an operation that was seized and later handed over twice is still
+an operation that was seized. And a handover to the identity it already
+holds is refused outright, because minting a higher fence token and
+appending a record for a change of coordinator that did not happen would
+fill the one list an operator reads precisely because it is trustworthy.
+
+Membership of the receiving Comb is deliberately **not** checked in the
+FSM. It has no authoritative view of Colony membership - ADR-0103's own
+`AcquireRestartLease` takes its voter list from the calling command for
+the same reason - so a check written in the consensus layer could only be
+a guess. A half-check there is worse than none, because it looks
+load-bearing and can be wrong.
 
 ## Open questions
 
