@@ -78,7 +78,7 @@ package buildgate
 
 import (
 	"errors"
-	"os"
+	"io/fs"
 	"path/filepath"
 )
 
@@ -462,7 +462,7 @@ func check(name string, paths Paths) Service {
 
 	run, err := runningBuild(paths.log(name), name)
 	if err != nil {
-		if os.IsNotExist(err) {
+		if errors.Is(err, fs.ErrNotExist) {
 			// A log with no startup line at all means nothing has
 			// logged a start from where this gate can see, which is a
 			// different fact from "I could not read it" and from "it
@@ -521,6 +521,16 @@ func check(name string, paths Paths) Service {
 // -version cannot ever answer, a binary that is missing is a deployment
 // gap, and a binary that ran and failed for some other reason says
 // nothing about stamping either way.
+//
+// The not-exist test is errors.Is against fs.ErrNotExist rather than
+// os.IsNotExist, and the difference is not cosmetic. os.IsNotExist
+// inspects the concrete error type and does not unwrap, so a missing
+// executable - whose error arrives from runCapture already wrapped -
+// was classified as "could not be read" and the "not installed here"
+// answer was unreachable. The same bug was in cmd/versioncheck before the
+// extraction and was inherited with it; a Comb with a genuinely absent
+// binary read "unknown" there, which is a thing to go and look at rather
+// than the thing to go and install.
 func unobservedBinary(name, disk string, err error, paths Paths) Service {
 	service := Service{
 		Name:        name,
@@ -537,7 +547,7 @@ func unobservedBinary(name, disk string, err error, paths Paths) Service {
 		service.Reason = ReasonBinaryUnstamped
 		service.Detail = name + "'s binary at " + paths.binary(name) + " answered -version with no build id; " +
 			"it was built without -ldflags"
-	case os.IsNotExist(err):
+	case errors.Is(err, fs.ErrNotExist):
 		service.Reason = ReasonBinaryMissing
 		service.Detail = name + " is not installed at " + paths.binary(name)
 	default:

@@ -2,6 +2,7 @@ package buildgate
 
 import (
 	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -157,16 +158,37 @@ func TestRunningBuildTakesTheMostRecentLine(t *testing.T) {
 	// A log with a restart in it: the answer must be the LAST line, or a
 	// Comb restarted with a new build and the gate reports the old one as
 	// still running.
-	p := writeLog(t,
-		"2026/09/26 02:03:23 raftd: listening on /var/run/apiary/raftd.sock (node-id=brood)",
-		stampedLine,
-	)
+	//
+	// BOTH lines carry a build id, deliberately. A first line without one
+	// would leave the loop with a single write to last, and an
+	// implementation that kept the FIRST line instead would produce the
+	// same answer - so the earlier version of this test could not tell
+	// the two apart, which is exactly what a mutation of this line
+	// showed.
+	older := `2026/09/26 02:03:23 raftd: build=a9879963600c ` +
+		`commit=a9879963600c built=2026-09-26T09:14:00-04:00 go=freebsd/amd64 ` +
+		`listening on /var/run/apiary/raftd.sock (node-id=brood)`
+	p := writeLog(t, older, stampedLine)
 	got, err := runningBuild(p, "raftd")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if want := "9c43262d358a"; got != want {
-		t.Errorf("runningBuild() = %q, want the most recent %q", got, want)
+		t.Errorf("runningBuild() = %q, want the most recent %q, not the first", got, want)
+	}
+
+	// The same log with the lines the other way round, to be sure the
+	// answer tracks POSITION and not the value: both ids are stamped, so
+	// a comparison that happened to prefer the newer id would pass the
+	// case above by luck.
+	reversed := writeLog(t, stampedLine, older)
+	got, err = runningBuild(reversed, "raftd")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := "a9879963600c"; got != want {
+		t.Errorf("runningBuild() = %q, want the last line's %q - the answer follows position, not the value",
+			got, want)
 	}
 }
 
@@ -185,16 +207,29 @@ func TestRunningBuildIgnoresOtherServices(t *testing.T) {
 	// managerd's line must not be mistaken for raftd's. Both appear in
 	// their own separate files in production, but a combined log is
 	// exactly the kind of thing a future -log flag would produce.
-	p := writeLog(t,
-		"2026/09/26 16:00:21 managerd: build=managerd-build listening on 0.0.0.0:17700 (node-id=brood)",
-		stampedLine,
-	)
+	// The other service's line comes LAST. With it first, the raftd line
+	// overwrote it and the filter was never exercised - an
+	// implementation that ignored the service name entirely produced the
+	// same answer, which is what a mutation of this filter showed.
+	managerdLine := `2026/09/26 16:00:21 managerd: build=managerd-build ` +
+		`listening on 0.0.0.0:17700 (node-id=brood)`
+	p := writeLog(t, stampedLine, managerdLine)
 	got, err := runningBuild(p, "raftd")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(got, "managerd-build") {
-		t.Errorf("runningBuild(raftd) = %q, picked up another service's line", got)
+	if got != "9c43262d358a" {
+		t.Errorf("runningBuild(raftd) = %q, want %q - the last line is managerd's and must not be read as raftd's",
+			got, "9c43262d358a")
+	}
+	// And the mirror: asking for managerd out of the same combined log
+	// must find managerd's line, not raftd's.
+	got, err = runningBuild(p, "managerd")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != "managerd-build" {
+		t.Errorf("runningBuild(managerd) = %q, want %q", got, "managerd-build")
 	}
 }
 
@@ -206,7 +241,7 @@ func TestRunningBuildMissingFileIsAnError(t *testing.T) {
 	if err == nil {
 		t.Fatal("err = nil for a missing log, want an error so the status is not-running")
 	}
-	if !os.IsNotExist(err) {
+	if !errors.Is(err, fs.ErrNotExist) {
 		t.Errorf("err = %v, want a not-exist error so the caller can tell 'not running' from 'cannot read'", err)
 	}
 }
@@ -565,37 +600,38 @@ func TestConfirmSeparatesNoEvidenceFromNoEffect(t *testing.T) {
 // most and the one a fail-open implementation loses first.
 func TestConfirmUnobservedIsNotSuccessInAnyShape(t *testing.T) {
 	shapes := []struct {
-		name  string
-		setup func(t *testing.T, c *comb, service string)
-		want  Status
+		name       string
+		setup      func(t *testing.T, c *comb, service string)
+		want       Status
+		wantReason Reason
 	}{
 		{"binary missing", func(t *testing.T, c *comb, service string) {
 			c.start(t, service, "9c43262d358a")
-		}, Unobserved},
+		}, Unobserved, ReasonBinaryMissing},
 		{"binary predates -version", func(t *testing.T, c *comb, service string) {
 			c.script = "#!/bin/sh\necho 'flag provided but not defined: -version' >&2\nexit 2\n"
 			c.install(t, service, "")
 			c.script = "#!/bin/sh\n"
 			c.start(t, service, "9c43262d358a")
-		}, Unobserved},
+		}, Unobserved, ReasonBinaryPredatesVersionFlag},
 		{"binary unstamped", func(t *testing.T, c *comb, service string) {
 			c.install(t, service, "")
 			c.start(t, service, "9c43262d358a")
-		}, Unobserved},
+		}, Unobserved, ReasonBinaryUnstamped},
 		{"binary not executable", func(t *testing.T, c *comb, service string) {
 			c.install(t, service, "9c43262d358a")
 			if err := os.Chmod(c.paths.binary(service), 0o600); err != nil {
 				t.Fatal(err)
 			}
 			c.start(t, service, "9c43262d358a")
-		}, Unobserved},
+		}, Unobserved, ReasonBinaryUnreadable},
 		{"log predates stamping", func(t *testing.T, c *comb, service string) {
 			c.install(t, service, "9c43262d358a")
 			c.start(t, service, "")
-		}, Unobserved},
+		}, Unobserved, ReasonLogPredatesStamping},
 		{"log missing", func(t *testing.T, c *comb, service string) {
 			c.install(t, service, "9c43262d358a")
-		}, NotRunning},
+		}, NotRunning, ReasonLogMissing},
 	}
 
 	for _, shape := range shapes {
@@ -621,6 +657,15 @@ func TestConfirmUnobservedIsNotSuccessInAnyShape(t *testing.T) {
 				}
 				if got.Status != shape.want {
 					t.Errorf("Status = %q, want %q", got.Status, shape.want)
+				}
+				// The exact reason, not merely "some reason". Two causes
+				// of unobserved need different fixes - rebuild the binary
+				// against a git checkout that is not read-only, versus
+				// find the pid - and a test that accepted any non-empty
+				// reason let a mutation that swapped one for another pass
+				// untouched.
+				if got.Reason != shape.wantReason {
+					t.Errorf("Reason = %q, want %q", got.Reason, shape.wantReason)
 				}
 				if got.Status.Confirms() {
 					t.Errorf("Status %q confirms on a Comb with no readable evidence", got.Status)
@@ -696,6 +741,48 @@ func TestConfirmNeverReadsTheNetwork(t *testing.T) {
 	report := Report{NodeID: "brood", Paths: d}
 	if report.Paths != d {
 		t.Errorf("Report.Paths = %+v, want %+v", report.Paths, d)
+	}
+}
+
+// TestServiceConfirmsTracksItsStatus exists because the method is a
+// one-line delegation and a delegation is exactly the kind of thing a
+// test that only ever sees the happy path leaves unpinned. An earlier
+// version of this file confirmed every service on a fully deployed Comb,
+// where the correct answer and "always true" are the same value.
+func TestServiceConfirmsTracksItsStatus(t *testing.T) {
+	c := newComb(t)
+	c.deployAll(t, "9c43262d358a")
+	c.start(t, "managerd", "a9879963600c")
+
+	report := Confirm("brood.lab3.home.arpa", c.paths)
+	for _, service := range report.Services {
+		if got, want := service.Confirms(), service.Status == TookEffect; got != want {
+			t.Errorf("%s: Confirms() = %v with status %q, want %v", service.Name, got, service.Status, want)
+		}
+		if service.Confirms() != service.Status.Confirms() {
+			t.Errorf("%s: Confirms() and Status.Confirms() disagree, want the method to be a faithful delegation",
+				service.Name)
+		}
+	}
+	// Named explicitly too, so the shape of the argument is obvious: a
+	// Service with no status at all is not a confirmation.
+	if (Service{}).Confirms() {
+		t.Error("the zero Service confirms")
+	}
+	if (Service{Status: Unobserved}).Confirms() {
+		t.Error("a Service with status unobserved confirms")
+	}
+	if (Service{Status: NotRunning}).Confirms() {
+		t.Error("a Service with status not-running confirms")
+	}
+	if (Service{Status: RunningStale}).Confirms() {
+		t.Error("a Service with status running-stale confirms")
+	}
+	if (Service{Status: DirtyIDMatch}).Confirms() {
+		t.Error("a Service with status dirty-id-match confirms")
+	}
+	if !(Service{Status: TookEffect}).Confirms() {
+		t.Error("a Service with status took-effect does not confirm")
 	}
 }
 
@@ -815,7 +902,7 @@ func TestEvidenceErrSurvivesWhereThereIsOne(t *testing.T) {
 	raftd, _ := report.Service("raftd")
 	if raftd.EvidenceErr == nil {
 		t.Error("raftd: EvidenceErr is nil for a missing log, want the underlying not-exist error")
-	} else if !os.IsNotExist(raftd.EvidenceErr) {
+	} else if !errors.Is(raftd.EvidenceErr, fs.ErrNotExist) {
 		t.Errorf("raftd: EvidenceErr = %v, want a not-exist error", raftd.EvidenceErr)
 	}
 	frontend, _ := report.Service("frontend")
