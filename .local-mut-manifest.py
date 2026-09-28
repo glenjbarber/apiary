@@ -99,7 +99,13 @@ MUTATIONS = [
      "\tstatus := Compare(disk, run)\n\tif status == DirtyIDMatch {\n\t\tstatus = TookEffect\n\t}", GATE),
     ("check: drop the evidence from a stale row",
      BG, '\t\tservice.Detail = name + " is running an older build than the binary on disk; " + summary(run, disk) +',
-     '\t\tservice.Detail = name + " is running an older build than the binary on disk; "', GATE),
+     '\t\tservice.Detail = name + " is running an older build than the binary on disk; " + summary("", "") +', GATE),
+    ("check: drop the 'restart it' advice from a stale row",
+     BG, '" - the process predates this file, so it was installed but not restarted"',
+     '" - the process predates this file"', GATE),
+    ("check: swap the running and on-disk ids in the evidence",
+     BG, '\treturn "(running " + orNone(running) + ", on disk " + orNone(onDisk) + ")"',
+     '\treturn "(running " + orNone(onDisk) + ", on disk " + orNone(running) + ")"', GATE),
 
     # --- the evidence readers --------------------------------------------
     ("runningBuild: never record a build id",
