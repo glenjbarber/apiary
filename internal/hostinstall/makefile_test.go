@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strings"
 	"testing"
 )
@@ -150,4 +151,77 @@ func TestTheRPCAddrGuidanceSurvives(t *testing.T) {
 	if !strings.Contains(mk, "0.0.0.0:17700") {
 		t.Error("the Makefile no longer records that the wildcard was the default that caused the incident")
 	}
+}
+
+// The four service names the install tells an operator to start have to
+// be the four rc.d scripts that actually exist. They are spelled the
+// same way in the Makefile's closing message and in apiaryctl's, and
+// getting one wrong is a message that names a service FreeBSD does not
+// have - which reads as "the install failed" rather than "the message is
+// wrong".
+func TestTheServiceNamesTheInstallNamesAreTheScriptsThatExist(t *testing.T) {
+	_, thisFile, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("runtime.Caller(0) failed: cannot locate this test file")
+	}
+	root := filepath.Clean(filepath.Join(filepath.Dir(thisFile), "..", ".."))
+	scripts, err := filepath.Glob(filepath.Join(root, "etc", "rc.d", "apiary_*"))
+	if err != nil || len(scripts) == 0 {
+		t.Fatalf("no rc.d scripts found under etc/rc.d: %v", err)
+	}
+	want := map[string]bool{}
+	for _, s := range scripts {
+		want[filepath.Base(s)] = true
+	}
+	for _, path := range []string{
+		filepath.Join(root, "Makefile"),
+		filepath.Join(root, "cmd", "apiaryctl", "install.go"),
+	} {
+		body, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, name := range namedServices(string(body)) {
+			if !want[name] {
+				t.Errorf("%s tells the operator to start %q, which is not an rc.d script (have: %v)", filepath.Base(path), name, keys(want))
+			}
+		}
+	}
+}
+
+// namedServices extracts every `service apiary_<name>` a file names.
+func namedServices(body string) []string {
+	var out []string
+	for _, line := range strings.Split(body, "\n") {
+		for i := 0; i+1 < len(line); i++ {
+			if strings.HasPrefix(line[i:], "service apiary_") {
+				rest := line[i+len("service apiary_"):]
+				end := strings.IndexAny(rest, " \t")
+				if end < 0 {
+					end = len(rest)
+				}
+				name := "apiary_" + rest[:end]
+				// A placeholder in prose - `service apiary_<name>` in a
+				// comment, `service apiary_$$S` in the update loop - is
+				// not a service name and cannot be wrong. Only a real
+				// one is checked.
+				if strings.ContainsAny(name, "<$") {
+					i += len("service apiary_") + end
+					continue
+				}
+				out = append(out, name)
+				i += len("service apiary_") + end
+			}
+		}
+	}
+	return out
+}
+
+func keys(m map[string]bool) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
 }

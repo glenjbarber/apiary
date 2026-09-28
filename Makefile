@@ -578,7 +578,7 @@ setup-quick:
 		--frontend-http-addr "${NODE_HTTP_ADDR}" \
 		--restshimd-http-addr "${NODE_REST_ADDR}" \
 		--tls-dir "${NODE_TLS_DIR}"
-	@echo "configuration written by apiaryctl install (ADR-0147): /usr/local/etc/apiary/{common,managerd,raftd,frontend,restshimd}.json and ${NODE_TLS_DIR}/{cert,key}.pem, preserving every field that was already set. Start the services (service apiary_raftd start && service apiary_managerd start && service apiary_frontend start && service apiary_rest_shimd start), then log in with any existing UNIX account right away: whoever logs in first on a Comb with no role map yet becomes Admin automatically (ADR-0086)."
+	@echo "configuration written by apiaryctl install (ADR-0147): /usr/local/etc/apiary/{common,managerd,raftd,frontend,restshimd}.json and ${NODE_TLS_DIR}/{cert,key}.pem, preserving every field that was already set. Start the services (service apiary_raftd start && service apiary_managerd start && service apiary_frontend start && service apiary_restshimd start), then log in with any existing UNIX account right away: whoever logs in first on a Comb with no role map yet becomes Admin automatically (ADR-0086)."
 # update installs every binary, then restarts only the two daemons that
 # cannot cost the colony its quorum. It is the target that is safe to run
 # on every Comb in a row without thinking, which is exactly why managerd

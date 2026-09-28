@@ -115,6 +115,6 @@ everything else written, so a second run finishes the job.
 		}
 		return 1
 	}
-	fmt.Fprintln(os.Stdout, "\nStart the services with: service apiary_raftd start && service apiary_managerd start && service apiary_frontend start && service apiary_rest_shimd start")
+	fmt.Fprintln(os.Stdout, "\nStart the services with: service apiary_raftd start && service apiary_managerd start && service apiary_frontend start && service apiary_restshimd start")
 	return 0
 }
