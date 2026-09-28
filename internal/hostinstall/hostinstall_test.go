@@ -817,3 +817,60 @@ func TestTheBootROMIsWrittenOnlyWhenSupplied(t *testing.T) {
 		t.Errorf("a supplied bootrom path was not written:\n%s", body)
 	}
 }
+
+// The last line of the report is the one an operator acts on, and it
+// must never describe a refused Comb as configured. The other tests
+// here check that refusals happen; this one checks that the summary
+// cannot paper over one, which is the failure mode a mutation of the
+// summary itself would produce and nothing else would catch.
+func TestASummaryNeverClaimsAConfiguredCombAfterARefusal(t *testing.T) {
+	cases := []struct {
+		name  string
+		seed  func(f *fixture)
+		colon string
+	}{
+		{
+			name: "a file that does not parse",
+			seed: func(f *fixture) { f.write(f.configPath("frontend.json"), `{"manager_addr":`) },
+		},
+		{
+			name: "a file with a field this binary does not know",
+			seed: func(f *fixture) { f.write(f.configPath("managerd.json"), `{"uplnk": "em0"}`) },
+		},
+		{
+			name: "two different node_ids",
+			seed: func(f *fixture) {
+				f.write(f.configPath("common.json"), `{"node_id": "one"}`)
+				f.write(f.configPath("raftd.json"), `{"node_id": "two"}`)
+			},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newFixture(t)
+			tc.seed(f)
+			p := f.plan()
+			if len(p.Refusals()) == 0 {
+				t.Fatalf("the fixture produced no refusal at all:\n%s", report(p))
+			}
+			if got := p.summary(); strings.HasPrefix(got, "configured") {
+				t.Errorf("summary() = %q, which reads as a configured Comb after a refusal", got)
+			}
+		})
+	}
+}
+
+// A Comb with a usable certificate and nothing refused but values
+// still missing is the one case that may say "configured", and it has
+// to say what is still outstanding rather than stop at the word.
+func TestASummaryNamesWhatIsStillNeeded(t *testing.T) {
+	f := newFixture(t)
+	p := f.installed()
+	got := p.summary()
+	if !strings.HasPrefix(got, "configured") {
+		t.Fatalf("summary() = %q, want a configured Comb with outstanding values", got)
+	}
+	if !strings.Contains(got, "needing a human") {
+		t.Errorf("summary() = %q, want it to say that values are still needed", got)
+	}
+}
