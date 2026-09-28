@@ -242,6 +242,17 @@ type PeerForwarder interface {
 	// restart-guardrail token for the same reason every other
 	// cluster-wide-restart RPC here does.
 	MutateColonyUpdate(ctx context.Context, addr string, req *rpcpb.MutateColonyUpdateRequest) (*rpcpb.MutateColonyUpdateResponse, error)
+
+	// ExecuteNodeRestartPlan carries ADR-0145's whole controlled
+	// restart - step-aside, quorum preflight, real lease, pending
+	// record, restart, confirmation - to the Comb it is about. Like
+	// StepAsideForRestart above it is NOT leader-forwarded, because the
+	// execution has to happen on the target: its raftd reads the
+	// pending record back on its own next startup, and the restart
+	// command runs on its own host. It authenticates with the
+	// restart-guardrail token, as every other method in this tail of
+	// the interface does.
+	ExecuteNodeRestartPlan(ctx context.Context, addr string, req *rpcpb.ExecuteNodeRestartPlanRequest) (*rpcpb.ExecuteNodeRestartPlanResponse, error)
 }
 
 // reconcilerStats is the subset of *cluster.Reconciler the server needs
@@ -482,6 +493,32 @@ type Server struct {
 	// rather than issuing a fence that does not fence - see
 	// Server.colonyUpdateCommand.
 	colonyUpdateIncarnation string
+
+	// planConfirmAttempts / planConfirmBackoff override the budget
+	// ExecuteNodeRestartPlan waits for the restarted process to report
+	// itself back. Zero means planConfirmAttempts/planConfirmBackoff's
+	// own production values (see restartcaller.go). Split into two
+	// scalars rather than a restartplan.ConfirmOptions so server.go
+	// needs no import for a test seam.
+	//
+	// The reason they exist at all is that a test of the honest
+	// "unobserved" outcome would otherwise have to sit through the real
+	// 27-second production budget, and a check that is only ever run
+	// with the budget turned down is a check whose timing was never
+	// verified. So they are settable, and the production values are
+	// what production uses.
+	planConfirmAttempts int
+	planConfirmBackoff  time.Duration
+
+	// planCoordinatorDir and planSelfReportDir override where
+	// ExecuteNodeRestartPlan reads and writes the two durable restart
+	// records: its own (the coordinator's) and the restarted process's.
+	// Empty means the production paths in restartcaller.go. Two
+	// separate overrides, because the two records are written by two
+	// different processes and a test that collapsed them would be
+	// testing the collision rather than the flow.
+	planCoordinatorDir string
+	planSelfReportDir  string
 }
 
 // SetPAMAuthenticator wires PAM login support after construction (ADR-

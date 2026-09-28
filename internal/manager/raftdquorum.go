@@ -173,6 +173,33 @@ func forceDowngradedBlock(report guardrail.Report) bool {
 // ADR-0125 asks, and on the enforcing path the two differ by
 // construction.
 func (s *Server) evaluateRaftdQuorumSafety(ctx context.Context, service, targetNodeID string, force bool) guardrail.Report {
+	return restartplan.EvaluateQuorumSafety(s.raftdQuorumFact(ctx, service, targetNodeID, force))
+}
+
+// raftdQuorumFact is ADR-0125 §3's read-and-dial, split out of
+// evaluateRaftdQuorumSafety above so there is exactly ONE implementation
+// of "go and find out the real facts", and so a caller that needs the
+// facts rather than the verdict can have them.
+//
+// It exists because ADR-0145's controlled restart needs the verdict plus
+// ADR-0103's own concurrent-restart check merged into a single report,
+// and the merge takes place inside restartplan.EvaluateQuorumSafety
+// through QuorumFact.Existing. Threading an Existing report into a
+// function that only returns a verdict is impossible, so the fact has to
+// be obtainable on its own. The split is a pure refactor: every
+// early-return above is now an early-return here, and
+// evaluateRaftdQuorumSafety is one call, so the two cannot answer
+// differently.
+//
+// force is accepted and ignored. It is the Engine's job to apply the
+// operator's acknowledgment to the gathered fact (restartplan.Engine.Run
+// does exactly that, with `fact.Force = fact.Force || e.Force`), and
+// passing it in here as well would create two places that think they own
+// it. The parameter is kept on the signature so the two entry points
+// still read the same way, and so a caller that wants the enforced
+// verdict - the leader-side branch of reserveRestartLease - keeps passing
+// what it is actually enforcing.
+func (s *Server) raftdQuorumFact(ctx context.Context, service, targetNodeID string, force bool) restartplan.QuorumFact {
 	fact := restartplan.QuorumFact{
 		Service:      service,
 		TargetNodeID: targetNodeID,
@@ -190,7 +217,7 @@ func (s *Server) evaluateRaftdQuorumSafety(ctx context.Context, service, targetN
 		// ADR-0125 §8 requires.
 		fact.ProbeReadOK = false
 		fact.ProbeError = err.Error()
-		return restartplan.EvaluateQuorumSafety(fact)
+		return fact
 	}
 	fact.ProbeReadOK = true
 
@@ -204,7 +231,7 @@ func (s *Server) evaluateRaftdQuorumSafety(ctx context.Context, service, targetN
 	if status.GetLeaderId() == "" {
 		fact.ProbeReadOK = false
 		fact.ProbeError = "raft status reports no current leader, so it cannot be established whether the target is the leader"
-		return restartplan.EvaluateQuorumSafety(fact)
+		return fact
 	}
 	fact.IsTargetLeader = status.GetLeaderId() == targetNodeID
 
@@ -246,7 +273,7 @@ func (s *Server) evaluateRaftdQuorumSafety(ctx context.Context, service, targetN
 	if !targetIsMember {
 		fact.ProbeReadOK = false
 		fact.ProbeError = fmt.Sprintf("target node %q is not a member of the cluster as this node knows it, so its quorum standing cannot be established", targetNodeID)
-		return restartplan.EvaluateQuorumSafety(fact)
+		return fact
 	}
 
 	// A single-voter cluster legitimately probes nobody. ProbeVoters
@@ -265,9 +292,9 @@ func (s *Server) evaluateRaftdQuorumSafety(ctx context.Context, service, targetN
 		// that must never be manufactured here.
 		fact.ProbeReadOK = false
 		fact.ProbeError = probe.Error
-		return restartplan.EvaluateQuorumSafety(fact)
+		return fact
 	}
 	fact.OtherVoters = probe.Voters
 
-	return restartplan.EvaluateQuorumSafety(fact)
+	return fact
 }

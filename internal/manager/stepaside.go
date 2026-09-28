@@ -250,17 +250,30 @@ func (a *restartStepAsider) stepAsideRemote(ctx context.Context, nodeID string) 
 }
 
 // managerdAddrFor resolves a member's managerd address from this node's
-// own view of raft membership.
-//
-// An unreadable membership and a member this node has never heard of are
-// both refusals, and they are reported differently because they mean
-// different things operationally: the first is this node's raftd being
-// unreachable, the second is a genuinely unknown Comb.
+// own view of raft membership, and hands the lookup itself to
+// managerdAddrFromStatus below so the step-aside and
+// ExecuteNodeRestartPlan's forward share one fail-closed implementation.
 func (a *restartStepAsider) managerdAddrFor(ctx context.Context, nodeID string) (string, error) {
 	st, err := a.raft.Status(ctx)
 	if err != nil {
 		return "", fmt.Errorf("cluster membership could not be read, so the target's address is unknown: %w", err)
 	}
+	return managerdAddrFromStatus(st, nodeID, a.managerdPort)
+}
+
+// managerdAddrFromStatus is the membership-to-address step on its own, so
+// that both the step-aside's peer hop above and ExecuteNodeRestartPlan's
+// forward (ADR-0145) resolve a member's managerd address the one way.
+// Two copies of a fail-closed lookup are two places to get the fail-closed
+// cases wrong, and these cases - a member with no transport address, a
+// member nobody has heard of - are exactly the ones that must be
+// refusals rather than a dial to a guessed host.
+//
+// An unreadable membership and a member this node has never heard of are
+// reported differently because they mean different things operationally:
+// the first is this node's raftd being unreachable, the second is a
+// genuinely unknown Comb.
+func managerdAddrFromStatus(st *internalpb.StatusResponse, nodeID, managerdPort string) (string, error) {
 	for _, srv := range st.GetServers() {
 		if srv.GetId() != nodeID {
 			continue
@@ -268,7 +281,7 @@ func (a *restartStepAsider) managerdAddrFor(ctx context.Context, nodeID string) 
 		if srv.GetAddress() == "" {
 			return "", fmt.Errorf("cluster membership lists %s with no raft transport address, so its managerd address cannot be derived", nodeID)
 		}
-		return peerManagerdAddrOf(srv.GetAddress(), a.managerdPort), nil
+		return peerManagerdAddrOf(srv.GetAddress(), managerdPort), nil
 	}
 	return "", fmt.Errorf("cluster membership does not list %s as a member", nodeID)
 }

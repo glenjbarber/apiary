@@ -942,6 +942,30 @@ func (p *PeerReporter) MutateColonyUpdate(ctx context.Context, addr string, req 
 	return client.MutateColonyUpdate(ctx, req)
 }
 
+// ExecuteNodeRestartPlan carries ADR-0145's whole controlled restart to
+// the Comb that is actually about to be restarted, and is not
+// leader-forwarded for the same reason StepAsideForRestart above is not:
+// the execution has to happen on the target, because the pending record
+// is read back by that machine's own raftd on its next startup and the
+// restart command is `service apiary_raftd restart` on that machine. A
+// leader asked to do it for another node would put the execution on the
+// wrong host, and no amount of forwarding would make the confirmation
+// mean anything.
+//
+// It dials with dialRestartGuardrail (p.RestartGuardrailToken), like
+// every other restart-guardrail RPC here, and for the same reason: the
+// receiving handler authorizes it by the dedicated token comparison, and
+// using p.dial would attach an ordinary Colony API key that the far end
+// rejects.
+func (p *PeerReporter) ExecuteNodeRestartPlan(ctx context.Context, addr string, req *rpcpb.ExecuteNodeRestartPlanRequest) (*rpcpb.ExecuteNodeRestartPlanResponse, error) {
+	conn, client, err := p.dialRestartGuardrail(addr)
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close()
+	return client.ExecuteNodeRestartPlan(ctx, req)
+}
+
 func (p *PeerReporter) RejectJoinRequest(ctx context.Context, addr string, req *rpcpb.RejectJoinRequestRequest) (*rpcpb.RejectJoinRequestResponse, error) {
 	conn, client, err := p.dial(addr)
 	if err != nil {
