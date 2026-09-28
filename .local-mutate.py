@@ -98,7 +98,7 @@ def main():
     tally = {"BUILD-ERROR": 0, "TEST-FAIL": 0, "PASS": 0}
     survivors = []
     rows = []
-    for entry in mutations:
+    for n_done, entry in enumerate(mutations, 1):
         label, path, old, new = entry[:4]
         pkg = entry[4] if len(entry) > 4 else default_pkg
         full = os.path.join(REPO, path)
@@ -118,6 +118,16 @@ def main():
         elif bucket == "PASS":
             survivors.append(label)
         rows.append((label, bucket, detail))
+        # Durable per-mutation record. This harness used to print its whole
+        # table only after the loop finished, so a run that was killed part-way
+        # through produced no output at all and every verdict it had already
+        # computed was discarded. That is what happened on 2026-09-27: the run
+        # was orphaned by a session restart, its stdout went to a pipe with no
+        # reader, and twenty-odd completed mutations left no trace. Each row is
+        # now flushed as it is produced, so an interrupted run still leaves the
+        # evidence for the mutations that did finish, and the run's own progress
+        # is visible while it is in flight.
+        print(f"  [{n_done}/{len(mutations)}] {label}  {bucket}  {detail}", flush=True)
 
     w = max(len(r[0]) for r in rows)
     print()
