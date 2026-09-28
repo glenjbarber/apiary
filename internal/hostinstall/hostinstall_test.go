@@ -874,3 +874,32 @@ func TestASummaryNamesWhatIsStillNeeded(t *testing.T) {
 		t.Errorf("summary() = %q, want it to say that values are still needed", got)
 	}
 }
+
+// A listener bound to this host's own NAME does not serve 127.0.0.1, so
+// on a Colony member frontend and restshimd must dial that same name.
+// Dialing loopback there produces a web UI that cannot reach the API it
+// exists to show, while managerd's own listener looks perfectly healthy
+// - which is exactly what the listener being up hides.
+func TestLocalDialsFollowTheAddressManagerdIsActuallyGiven(t *testing.T) {
+	standalone := newFixture(t)
+	standalone.installed()
+	if got := standalone.read(standalone.configPath("frontend.json")); !strings.Contains(got, `"manager_addr": "127.0.0.1:17700"`) {
+		t.Errorf("a standalone Comb should dial loopback:\n%s", got)
+	}
+	if got := standalone.read(standalone.configPath("restshimd.json")); !strings.Contains(got, `"manager_addr": "127.0.0.1:17700"`) {
+		t.Errorf("a standalone Comb should dial loopback:\n%s", got)
+	}
+
+	colony := newFixture(t)
+	colony.opts.ColonyMember = "drone.lab3.home.arpa:17700"
+	colony.installed()
+	for _, name := range []string{"frontend.json", "restshimd.json"} {
+		body := colony.read(colony.configPath(name))
+		if !strings.Contains(body, `"manager_addr": "brood.lab3.home.arpa:17700"`) {
+			t.Errorf("%s does not dial the address managerd is actually bound to:\n%s", name, body)
+		}
+		if strings.Contains(body, `"manager_addr": "127.0.0.1`) {
+			t.Errorf("%s dials loopback, which a listener bound to this host's own name does not serve:\n%s", name, body)
+		}
+	}
+}

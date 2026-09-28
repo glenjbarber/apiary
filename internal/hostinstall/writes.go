@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"os"
 	"path/filepath"
 	"strings"
@@ -250,8 +251,8 @@ func (p *Plan) planFrontendWrites() {
 	}
 	cfg := p.frontCfg
 	changed := false
-	changed = p.fill(path, "manager_addr", p.frontOwn.ManagerAddr, &cfg.ManagerAddr, loopbackHost+":"+defaultManagerPort,
-		"a LOCAL dial: frontend runs on this Comb and always reaches managerd over loopback, which is the one address whose certificate SAN is present (ADR-0139)") || changed
+	changed = p.fill(path, "manager_addr", p.frontOwn.ManagerAddr, &cfg.ManagerAddr, p.localManagerAddr(),
+		"a LOCAL dial: frontend runs on this Comb, so it has to name whatever managerd is actually listening on - loopback when rpc_addr is loopback, and the same name when it is not, because a listener bound to a name does not serve 127.0.0.1") || changed
 	changed = p.fill(path, "http_addr", p.frontOwn.HTTPAddr, &cfg.HTTPAddr, p.frontendHTTPAddr(),
 		"the web UI, and the wildcard here is DELIBERATE: the browser is on the operator's machine, not on this Comb, so a loopback-only UI serves nobody") || changed
 	if p.tlsUsable() {
@@ -278,8 +279,8 @@ func (p *Plan) planRestshimdWrites() {
 	}
 	cfg := p.restCfg
 	changed := false
-	changed = p.fill(path, "manager_addr", p.restOwn.ManagerAddr, &cfg.ManagerAddr, loopbackHost+":"+defaultManagerPort,
-		"a LOCAL dial, and the loopback default is also what internal/restshimdconfig would have used with no config file at all") || changed
+	changed = p.fill(path, "manager_addr", p.restOwn.ManagerAddr, &cfg.ManagerAddr, p.localManagerAddr(),
+		"a LOCAL dial, and it has to name whatever managerd is actually listening on: a listener bound to this host's own name does not serve 127.0.0.1, so loopback would be unreachable here") || changed
 	changed = p.fill(path, "http_addr", p.restOwn.HTTPAddr, &cfg.HTTPAddr, p.restshimdHTTPAddr(),
 		"a full read/write control API - create, update and delete VMs, jails and networks, migrate, upload ISOs - with NO AUTHENTICATION OF ITS OWN, so it stays on loopback and is reached over an SSH forward") || changed
 	if p.tlsUsable() {
@@ -297,6 +298,38 @@ func (p *Plan) planRestshimdWrites() {
 	p.writes = append(p.writes, func() error {
 		return (&restshimdconfig.Manager{Path: path}).Save(cfg)
 	})
+}
+
+// localManagerAddr is what frontend and restshimd should dial to reach
+// managerd ON THIS COMB. It is not always loopback, and getting that
+// wrong is the single most confusing failure this installer could ship.
+//
+// A listener bound to 127.0.0.1 serves loopback. A listener bound to
+// this host's own NAME resolves that name to its LAN address and
+// serves LAN clients - and deliberately does NOT serve 127.0.0.1. So
+// on a Colony member, where rpc_addr is a name because that is the
+// only thing a peer can verify (ADR-0139), frontend and restshimd must
+// dial that same name, and telling them to dial loopback produces a
+// web UI that cannot reach the API it exists to show while managerd's
+// own listener looks perfectly healthy - the listener being up is
+// exactly what hides this class of mistake.
+//
+// The Makefile's setup-quick wrote loopback unconditionally, with the
+// same latent conflict, which is why docs/bootstrap.md has to warn
+// about it by name. Here it is derived from the same rpc_addr the
+// managerd config is getting, so the two cannot disagree.
+func (p *Plan) localManagerAddr() string {
+	if p.RPCAddr == "" {
+		return loopbackHost + ":" + defaultManagerPort
+	}
+	host, port, err := net.SplitHostPort(p.RPCAddr)
+	if err != nil {
+		return loopbackHost + ":" + defaultManagerPort
+	}
+	if isLoopbackHostPort(p.RPCAddr) {
+		return loopbackHost + ":" + port
+	}
+	return net.JoinHostPort(host, port)
 }
 
 // frontendHTTPAddr and restshimdHTTPAddr are the overridable web

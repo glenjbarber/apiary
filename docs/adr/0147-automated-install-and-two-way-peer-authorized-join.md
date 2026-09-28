@@ -278,9 +278,12 @@ that it can no longer happen by accident.
 The rest of the address block, unchanged and for the same reasons the
 Makefile gives today:
 
-- `frontend.json` / `restshimd.json` `manager_addr` is always
-  `127.0.0.1:17700` - it is a local dial, and ADR-0139's whole subject
-  is a bind address being carried into a dial field.
+- `frontend.json` / `restshimd.json` `manager_addr` is a local dial,
+  and it is **derived from the `rpc_addr` above rather than fixed at
+  `127.0.0.1:17700`.** The correction is recorded in "Corrections
+  found while implementing Part 1", item 6, and it is the one place
+  where this section was actively wrong rather than merely
+  incomplete.
 - `frontend.json` `http_addr` stays `0.0.0.0:8080`. The browser is not
   on the Comb.
 - `restshimd.json` `http_addr` stays `127.0.0.1:8081`. It is a full
@@ -1957,3 +1960,26 @@ install`. The `setup-tls` target itself stays, for an operator who
 wants openssl's output, and the installer keeps and reports whatever
 pair it finds there rather than replacing it - which is the same
 preservation contract every other part of Part 1 follows.
+
+**6. The local dials are derived from `rpc_addr`, not fixed at
+loopback.** This section originally said frontend's and restshimd's
+`manager_addr` is *always* `127.0.0.1:17700`. That is right for a
+standalone Comb and **wrong for a Colony member**, and the reason is
+one sentence of Go behaviour that this section had not connected: a
+listener bound to `127.0.0.1` serves loopback, and a listener bound to
+this host's own NAME resolves that name to its LAN address and serves
+LAN clients - and does not serve `127.0.0.1` at all. So on a Comb
+whose `rpc_addr` is `brood.lab3.home.arpa:17700`, frontend dialing
+`127.0.0.1:17700` cannot reach managerd, and the symptom is a web UI
+with no data while managerd's own listener is provably up, because the
+listener being up is exactly what hides this class of mistake.
+`docs/bootstrap.md` already warned about it in as many words and told
+the operator to name the hostname in `manager_addr` instead; the
+Makefile's `setup-quick` wrote loopback anyway.
+
+`apiaryctl install` derives both local dials from the same `rpc_addr`
+it is giving managerd, so the two cannot disagree, and a mutation that
+made it always dial loopback is killed by a test. The invariant worth
+keeping is the general one, not the number: **every field that DIALS
+managerd locally must name the address managerd is actually LISTENING
+on**, and a bind address is not automatically the answer.
