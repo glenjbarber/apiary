@@ -8,6 +8,7 @@ import (
 	"google.golang.org/protobuf/reflect/protodesc"
 	"google.golang.org/protobuf/reflect/protoreflect"
 	"google.golang.org/protobuf/types/descriptorpb"
+	"google.golang.org/protobuf/types/dynamicpb"
 	"google.golang.org/protobuf/types/known/structpb"
 )
 
@@ -97,7 +98,7 @@ func TestCanonicalMessageDistinguishesTwoOrdinaryFloats(t *testing.T) {
 // fieldKinds builds one message with a field of every protobuf scalar
 // shape, so the kind tag each shape is written with can be read off a
 // real descriptor rather than assumed.
-func fieldKinds(t *testing.T) map[string]protoreflect.FieldDescriptor {
+func kindKinds(t *testing.T) (map[string]protoreflect.FieldDescriptor, protoreflect.MessageDescriptor) {
 	t.Helper()
 	str := func(s string) *string { return &s }
 	kind := func(k descriptorpb.FieldDescriptorProto_Type) *descriptorpb.FieldDescriptorProto_Type { return &k }
@@ -113,6 +114,7 @@ func fieldKinds(t *testing.T) map[string]protoreflect.FieldDescriptor {
 				{Name: str("f_string"), Number: proto.Int32(2), Label: &optional, Type: kind(descriptorpb.FieldDescriptorProto_TYPE_STRING)},
 				{Name: str("f_bytes"), Number: proto.Int32(3), Label: &optional, Type: kind(descriptorpb.FieldDescriptorProto_TYPE_BYTES)},
 				{Name: str("f_int64"), Number: proto.Int32(4), Label: &optional, Type: kind(descriptorpb.FieldDescriptorProto_TYPE_INT64)},
+				{Name: str("f_float"), Number: proto.Int32(7), Label: &optional, Type: kind(descriptorpb.FieldDescriptorProto_TYPE_FLOAT)},
 				{Name: str("f_double"), Number: proto.Int32(5), Label: &optional, Type: kind(descriptorpb.FieldDescriptorProto_TYPE_DOUBLE)},
 				{Name: str("f_inner"), Number: proto.Int32(6), Label: &optional, Type: kind(descriptorpb.FieldDescriptorProto_TYPE_MESSAGE), TypeName: str(".kindkinds.Inner")},
 			},
@@ -130,7 +132,57 @@ func fieldKinds(t *testing.T) map[string]protoreflect.FieldDescriptor {
 	for i := 0; i < fields.Len(); i++ {
 		out[string(fields.Get(i).Name())] = fields.Get(i)
 	}
+	return out, md
+}
+
+func fieldKinds(t *testing.T) map[string]protoreflect.FieldDescriptor {
+	t.Helper()
+	out, _ := kindKinds(t)
 	return out
+}
+
+// dynamicWith builds a message of the Every type above carrying a single
+// set field, so the encoding can be read off a real float32 field.
+func dynamicWith(t *testing.T, md protoreflect.MessageDescriptor, field string, value protoreflect.Value) protoreflect.Message {
+	t.Helper()
+	msg := dynamicpb.NewMessage(md)
+	fd := md.Fields().ByName(protoreflect.Name(field))
+	if fd == nil {
+		t.Fatalf("%s is missing from the descriptor", field)
+	}
+	msg.Set(fd, value)
+	return msg
+}
+
+// TestCanonicalMessageDistinguishesFloat32ByBits is the float32 half of
+// the property above. It is a separate test because canonFixedBits has a
+// separate branch for FloatKind, and a suite that only exercised double
+// left that branch completely uncovered - a mutation turning it into
+// uint64(v.Float()) passed the whole run, since uint64 of any float32
+// above 1 truncates and any two small positive floats collide.
+func TestCanonicalMessageDistinguishesFloat32ByBits(t *testing.T) {
+	kinds, md := kindKinds(t)
+
+	nan1 := dynamicWith(t, md, "f_float", protoreflect.ValueOfFloat32(float32(math.Float32frombits(0x7fc00001))))
+	nan2 := dynamicWith(t, md, "f_float", protoreflect.ValueOfFloat32(float32(math.Float32frombits(0x7fc00002))))
+	if string(canonicalMessage(nan1)) == string(canonicalMessage(nan2)) {
+		t.Error("two float32 NaNs differing only in payload encoded identically, want them to differ")
+	}
+
+	// The truncation case, which is the one a value comparison actually
+	// gets wrong on ordinary numbers.
+	onePointFive := dynamicWith(t, md, "f_float", protoreflect.ValueOfFloat32(1.5))
+	onePointNine := dynamicWith(t, md, "f_float", protoreflect.ValueOfFloat32(1.9))
+	if string(canonicalMessage(onePointFive)) == string(canonicalMessage(onePointNine)) {
+		t.Error("the float32 values 1.5 and 1.9 encoded identically, want them to differ - a value-to-integer " +
+			"conversion truncates both to 1, which is a false match between two diverged state machines")
+	}
+
+	// And the kind tag for a float32 is the fixed-width one, like every
+	// other numeric.
+	if got := canonSingularKind(kinds["f_float"]); got != canonKindFixed {
+		t.Errorf("canonSingularKind(f_float) = %d, want %d", got, canonKindFixed)
+	}
 }
 
 // TestCanonSingularKindSeparatesTheShapes pins the tag each kind is
@@ -154,6 +206,7 @@ func TestCanonSingularKindSeparatesTheShapes(t *testing.T) {
 		"f_string": canonKindBytes,
 		"f_bytes":  canonKindBytes,
 		"f_int64":  canonKindFixed,
+		"f_float":  canonKindFixed,
 		"f_double": canonKindFixed,
 		"f_inner":  canonKindMessage,
 	}
