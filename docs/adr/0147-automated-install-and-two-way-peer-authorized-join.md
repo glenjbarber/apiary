@@ -2,9 +2,18 @@
 
 ## Status
 
-**Accepted** on 2026-09-28. **Part 1 is implemented; Parts 2, 3 and
-4 are accepted and not yet built.** No code in this repository
-reflects any of Parts 2 to 4.
+**Accepted** on 2026-09-28. **Implemented: Part 1 in full, and Part 4's
+Colony join-window backend** - the window as replicated FSM state, the
+three RPCs (`Get`/`Open`/`Close`), the closed-Colony gate that refuses
+a join, and the epoch binding that invalidates a request when the
+window reopens. **Accepted but not yet built: all of Part 2, all of
+Part 3, and the rest of Part 4** - specifically the window's two pages
+(`peer_tls` still defaults to false, the replicated peer trust store
+is absent, and the `yes-trust-new-comb` approve phrase is still the
+Part 2 flow in both `internal/manager` and `web/templates`). The single
+sentence this status line replaces, "Parts 2, 3 and 4 are accepted and
+not yet built", was true when it was written and no longer describes
+the tree.
 
 The owner's approval covered the whole document, including the three
 Part 3 questions (9, 10 and 11) that had been written as proposals
