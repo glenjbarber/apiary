@@ -1,86 +1,36 @@
 package frontend
 
-import "strconv"
-
-// Cross-voter FSM state agreement, rendered as a badge on the colony
-// view (ADR-0143).
+// Presentation of ADR-0143's cross-voter FSM state verdicts on the
+// colony view.
 //
-// This is the consumer half of the digest raftd now computes. raftd and
-// managerd only ever report ONE voter's digest; nothing in either of
-// them claims the colony agrees, because neither can know that from a
-// single state machine. Deciding whether the digests agree is a
-// colony-wide question, and this file is where it is answered - once,
-// from the whole set, with the answer written the same way the rest of
-// this package writes verdicts: an observation and a conclusion kept
-// visibly separate, and silence never rendered as health.
+// The verdicts themselves - what `match`, `mismatch`, `unsettled` and
+// `unobserved` mean, which of them permit a caller to proceed, and the
+// sentence behind each - live in internal/statedigest, because they are
+// not a rendering concern. A controller taking one Comb at a time has to
+// read the same four and be held to the same meanings, and a controller
+// cannot import a web template package to get them.
 //
-// The three failure modes this has to refuse to commit:
-//
-//   - A single observation. One node always agrees with itself, so
-//     "everyone observed agrees" is TRUE of a one-node sample. Reporting
-//     it as agreement would turn the absence of evidence into a green
-//     badge, which is the exact mistake ADR-0056 exists to prevent.
-//   - A digest with no index beside it. Sampling a moving cluster
-//     produces mismatches that are not divergence, so a mismatch is only
-//     reported as proven when the Combs involved agree on their applied
-//     index.
-//   - Localising the fault. Two Combs with different state means one of
-//     them applied something differently. Which one is a question this
-//     evidence cannot answer, so no verdict here ever implies it.
+// What is left here is exactly the part that is this package's own: which
+// badge class in layout.html's palette each verdict renders as, and the
+// short label it carries. Both are chosen here rather than in the
+// templates so no two templates can disagree about which colour means
+// what, and both are derived from the verdict by an exhaustive switch -
+// there is no default arm, so a fifth verdict added to statedigest is a
+// compile error here rather than a row that silently renders unstyled.
 
-// stateDigestObservation is one Comb's raw reading: the digest of its own
-// FSM state, and the applied index it was read at. An empty Digest means
-// no digest was observed - the Comb could not be dialed, did not answer,
-// could not reach its own raftd, or runs a raftd predating ADR-0143 -
-// which are different causes that share one honest rendering, and each
-// already appears in that row's own health observations.
-type stateDigestObservation struct {
-	NodeID string
-
-	// Digest is lowercase hex, or "" when unobserved.
-	Digest string
-
-	// AppliedIndex is the index Digest was read at. It is meaningful
-	// only when Digest is non-empty: there is no index to compare when
-	// there is no digest, and a zero index beside a real digest would be
-	// a fabricated reading.
-	AppliedIndex uint64
-}
-
-// Badge states. Each is a distinct claim about what was observed, and the
-// distinction between the last two is the whole reason AppliedIndex
-// travels with the digest.
-const (
-	// stateDigestMatch means every Comb that reported a digest reported
-	// the same one.
-	stateDigestMatch = "match"
-
-	// stateDigestMismatch means the digests differ AND the Combs
-	// involved agreed on their applied index, so no sampling artifact
-	// can explain it. This is the strongest statement the evidence
-	// supports: these state machines really do hold different state.
-	stateDigestMismatch = "mismatch"
-
-	// stateDigestUnsettled means the digests differ, but at least one
-	// involved Comb was at a different applied index, so the difference
-	// may be nothing more than the sample being taken while the colony
-	// moved. Deliberately NOT a mismatch: the colony is not known to
-	// have diverged, and saying so would be reading a conclusion into
-	// an unsettled reading.
-	stateDigestUnsettled = "unsettled"
-
-	// stateDigestUnobserved means this Comb's own digest could not be
-	// read. It is never folded into the match count and never rendered
-	// as agreement, no matter what the other Combs reported.
-	stateDigestUnobserved = "unobserved"
+import (
+	"github.com/glenjbarber/apiary/internal/statedigest"
 )
 
-// stateDigestView is one row's verdict. Like colonyLeaderView, the raw
-// reading (StateDigest, AppliedIndex) is kept apart from the conclusion
-// (State, Label, Detail) so a template renders a verdict it was handed
-// and never reasons about evidence itself.
+// stateDigestView is one row's rendered verdict. The verdict and its
+// sentence come from statedigest; State, Label and BadgeClass are added
+// here, so a template renders what it was handed and never reasons about
+// evidence itself.
 type stateDigestView struct {
-	// State is one of the stateDigest* constants above.
+	// State is one of statedigest's four verdicts, as a string, for the
+	// template. It is the verdict itself rather than a separate
+	// presentation label, so a row can never show a green badge beside a
+	// mismatch verdict.
 	State string
 
 	// StateDigest is this Comb's own digest, or "" when unobserved.
@@ -97,9 +47,9 @@ type stateDigestView struct {
 	Label string
 
 	// Detail is the operator-readable sentence behind the verdict,
-	// always non-empty. An unexplained badge is the one thing an
-	// operator cannot act on, so every state carries a reason - and the
-	// reason for a mismatch never names a culprit.
+	// carried through from statedigest rather than reworded here, so
+	// the limitation on a mismatch - that the digest does not say which
+	// side is wrong - is the same sentence a controller reads.
 	Detail string
 
 	// BadgeClass maps State to the badge vocabulary in layout.html,
@@ -109,15 +59,15 @@ type stateDigestView struct {
 }
 
 // stateDigestColony is the colony-wide conclusion the per-row badges sit
-// under. It is kept separate from the rows because "the colony's state
-// machines do not all agree" is a fact about the SET, and no single row
-// can state it.
+// under, rendered. It is kept separate from the rows because "the
+// colony's state machines do not all agree" is a fact about the SET, and
+// no single row can state it.
 type stateDigestColony struct {
-	// Agreed is true only when at least two Combs reported a digest and
-	// every one of them reported the same one. It is false both for
-	// proven disagreement and for a sample too small or too incomplete
-	// to conclude anything - Agreed false means "not established",
-	// which Detail always distinguishes for the reader.
+	// Agreed mirrors statedigest's own Agreed, kept as a bool for the
+	// template. It is false both for proven disagreement and for a
+	// sample too small or too incomplete to conclude anything - Agreed
+	// false means "not established", which Detail always distinguishes
+	// for the reader.
 	Agreed bool
 
 	// Observed and Total count Combs whose digest was read, and Combs
@@ -140,68 +90,89 @@ type stateDigestColony struct {
 	BadgeLabel string
 }
 
-// stateDigestVerdicts compares a whole set of per-Comb readings at once.
-//
-// It is pure: no I/O, no clock, no ordering dependence beyond the input
-// slice. That is deliberate and matches colonyLeaderFromStatus - every
-// state above is reachable by test without a live cluster, so the
-// one-observation and unsettled cases in particular cannot regress
-// silently into a green badge.
-func stateDigestVerdicts(observations []stateDigestObservation) (map[string]stateDigestView, stateDigestColony) {
-	views := make(map[string]stateDigestView, len(observations))
+// stateDigestVerdicts renders ADR-0143's verdicts for a page. It is a
+// thin map from statedigest's answer onto this package's vocabulary; the
+// classification, the refusals and the sentences are all upstream.
+func stateDigestVerdicts(observations []statedigest.Observation) (map[string]stateDigestView, stateDigestColony) {
+	verdicts, colonyVerdict := statedigest.Verdicts(observations)
 
-	observed := make([]stateDigestObservation, 0, len(observations))
-	for _, observation := range observations {
-		if observation.Digest == "" {
-			views[observation.NodeID] = stateDigestUnobservedView(observation, len(observations))
-			continue
-		}
-		observed = append(observed, observation)
+	views := make(map[string]stateDigestView, len(verdicts))
+	for nodeID, verdict := range verdicts {
+		views[nodeID] = stateDigestRow(verdict)
 	}
-
-	colony := stateDigestColony{Observed: len(observed), Total: len(observations)}
-
-	switch {
-	case len(observed) == 0:
-		colony.Detail = "no Comb reported an FSM state digest, so colony-wide state agreement is unobserved"
-		colony.BadgeClass = "unknown"
-		colony.BadgeLabel = "State unobserved"
-	case len(observed) == 1:
-		colony.Detail = "only one Comb reported an FSM state digest, so agreement cannot be established - " +
-			"a single voter always agrees with itself"
-		colony.BadgeClass = "unknown"
-		colony.BadgeLabel = "State unobserved"
-	default:
-		colony.Agreed, colony.Detail, colony.BadgeClass = colonyAgreement(observed, colony.Total)
-		colony.BadgeLabel = colonyAgreedLabel
-		if !colony.Agreed {
-			colony.BadgeLabel = colonyDivergedLabel
-			if colony.BadgeClass == "degraded" {
-				colony.BadgeLabel = colonyUnsettledLabel
-			}
-		}
+	return views, stateDigestColony{
+		Agreed:     colonyVerdict.Agreed,
+		Observed:   colonyVerdict.Observed,
+		Total:      colonyVerdict.Total,
+		Detail:     colonyVerdict.Detail,
+		BadgeClass: colonyBadgeClass(colonyVerdict.Verdict),
+		BadgeLabel: colonyBadgeLabel(colonyVerdict.Verdict),
 	}
-
-	// The one-observation case rewrites even the observed row: with
-	// nothing to compare it against, its own digest is not evidence of
-	// anything, and a green badge beside one green node would be the
-	// single most misleading thing this badge could render.
-	if len(observed) < 2 {
-		for _, observation := range observed {
-			views[observation.NodeID] = stateDigestUnobservedView(observation, len(observations))
-		}
-		return views, colony
-	}
-
-	for _, observation := range observed {
-		views[observation.NodeID] = stateDigestVerdictFor(observation, observed, colony)
-	}
-	return views, colony
 }
 
-// Colony-level badge labels. Kept beside the comparison rather than
-// written in the template so the wording that claims agreement and the
-// wording that refuses it are decided in one place, by the same code that
+// stateDigestUnobservedView is the rendered row for a Comb that cannot
+// be compared with anything. Used where a single Comb's digest is known
+// but no set is, so the row is never left with an empty badge class -
+// which would read as "nothing to report" rather than "not observed".
+func stateDigestUnobservedView(observation statedigest.Observation, total int) stateDigestView {
+	return stateDigestRow(statedigest.UnobservedNode(observation, total))
+}
+
+func stateDigestRow(verdict statedigest.NodeVerdict) stateDigestView {
+	return stateDigestView{
+		State:        string(verdict.Verdict),
+		StateDigest:  verdict.Digest,
+		AppliedIndex: verdict.AppliedIndex,
+		Label:        nodeBadgeLabel(verdict.Verdict),
+		Detail:       verdict.Detail,
+		BadgeClass:   nodeBadgeClass(verdict.Verdict),
+	}
+}
+
+// Badge classes, drawn from layout.html's palette. "ready" is green,
+// "error" is red, "degraded" is amber, "unknown" is the neutral state
+// this project reserves for no evidence - never for health.
+const (
+	badgeReady    = "ready"
+	badgeError    = "error"
+	badgeDegraded = "degraded"
+	badgeUnknown  = "unknown"
+)
+
+func nodeBadgeClass(verdict statedigest.Verdict) string {
+	switch verdict {
+	case statedigest.Match:
+		return badgeReady
+	case statedigest.Mismatch:
+		return badgeError
+	case statedigest.Unsettled:
+		return badgeDegraded
+	case statedigest.Unobserved:
+		return badgeUnknown
+	}
+	// No default arm. statedigest is the only place a verdict is
+	// defined, and a fifth one added there must break this build rather
+	// than render an unstyled row that reads as a plain label.
+	panic("unhandled FSM state verdict: " + string(verdict))
+}
+
+func nodeBadgeLabel(verdict statedigest.Verdict) string {
+	switch verdict {
+	case statedigest.Match:
+		return "State matches"
+	case statedigest.Mismatch:
+		return "State differs"
+	case statedigest.Unsettled:
+		return "State unsettled"
+	case statedigest.Unobserved:
+		return "State unobserved"
+	}
+	panic("unhandled FSM state verdict: " + string(verdict))
+}
+
+// Colony-level badge labels. Kept beside the mapping rather than written
+// in the template so the wording that claims agreement and the wording
+// that refuses it are decided in one place, by the same code that
 // decides which applies.
 const (
 	colonyAgreedLabel    = "State agreed"
@@ -209,121 +180,30 @@ const (
 	colonyUnsettledLabel = "State unsettled"
 )
 
-// colonyAgreement decides the set-level question: do all observed digests
-// match, and if not, is the difference proven or merely unsettled?
-func colonyAgreement(observed []stateDigestObservation, total int) (agreed bool, detail, badgeClass string) {
-	first := observed[0].Digest
-	uniform := true
-	uniformIndex := true
-	for _, observation := range observed[1:] {
-		if observation.Digest != first {
-			uniform = false
-		}
-		if observation.AppliedIndex != observed[0].AppliedIndex {
-			uniformIndex = false
-		}
+func colonyBadgeClass(verdict statedigest.Verdict) string {
+	switch verdict {
+	case statedigest.Match:
+		return badgeReady
+	case statedigest.Mismatch:
+		return badgeError
+	case statedigest.Unsettled:
+		return badgeDegraded
+	case statedigest.Unobserved:
+		return badgeUnknown
 	}
-	// Never let "all of the ones we could read agree" read as "the colony
-	// agrees". A Comb whose digest was unreadable is not evidence of
-	// anything, and saying so in the colony sentence as well as on that
-	// Comb's own row is the difference between an honest summary and an
-	// overstatement.
-	excluded := ""
-	if len(observed) < total {
-		excluded = ", but " + strconv.Itoa(total-len(observed)) + " of " + strconv.Itoa(total) +
-			" Combs reported no digest and were excluded from the comparison"
-	}
-
-	if uniform {
-		return true, "all " + strconv.Itoa(len(observed)) +
-			" Combs that reported a digest report the same FSM state" + excluded, "ready"
-	}
-	if !uniformIndex {
-		return false, "the Combs that reported a digest are at different applied indexes, so the difference " +
-			"may be only this sample being taken while the colony moved" + excluded, "degraded"
-	}
-	return false, "all " + strconv.Itoa(len(observed)) + " Combs report applied index " +
-		strconv.FormatUint(observed[0].AppliedIndex, 10) +
-		" and still hold different FSM state - the state machines have diverged" + excluded, "error"
+	panic("unhandled FSM state verdict: " + string(verdict))
 }
 
-// stateDigestVerdictFor is one row's verdict, given the whole observed
-// set. It counts how many OTHER Combs share this row's digest, purely to
-// make the sentence specific; it never uses that count to imply which side
-// is correct.
-func stateDigestVerdictFor(observation stateDigestObservation, observed []stateDigestObservation, colony stateDigestColony) stateDigestView {
-	view := stateDigestView{
-		State:        stateDigestMatch,
-		StateDigest:  observation.Digest,
-		AppliedIndex: observation.AppliedIndex,
-		BadgeClass:   "ready",
-		Label:        "State matches",
+func colonyBadgeLabel(verdict statedigest.Verdict) string {
+	switch verdict {
+	case statedigest.Match:
+		return colonyAgreedLabel
+	case statedigest.Mismatch:
+		return colonyDivergedLabel
+	case statedigest.Unsettled:
+		return colonyUnsettledLabel
+	case statedigest.Unobserved:
+		return "State unobserved"
 	}
-
-	if colony.Agreed {
-		view.Detail = "this Comb's FSM state digest matches the " + strconv.Itoa(len(observed)) +
-			" other Combs that reported one, all at applied index " + strconv.FormatUint(observation.AppliedIndex, 10)
-		return view
-	}
-
-	agreeing, others := 0, 0
-	for _, other := range observed {
-		if other.NodeID == observation.NodeID {
-			continue
-		}
-		if other.Digest == observation.Digest {
-			agreeing++
-		} else {
-			others++
-		}
-	}
-
-	if colony.BadgeClass == "degraded" {
-		view.State = stateDigestUnsettled
-		view.BadgeClass = "degraded"
-		view.Label = "State unsettled"
-		view.Detail = "this Comb's FSM state digest differs from " + strconv.Itoa(others) + " of the " +
-			strconv.Itoa(len(observed)-1) + " other Combs that reported one, but those Combs are at different applied " +
-			"indexes, so this may be a sample of a moving colony rather than a divergence"
-		return view
-	}
-
-	// Proven disagreement: every involved Comb is at the same applied
-	// index, so nothing about the timing can explain it. The wording is
-	// deliberately symmetric - it says how many agree and how many do
-	// not, and never which side is wrong, because a digest cannot tell
-	// that and a badge that appears to would be lying.
-	view.State = stateDigestMismatch
-	view.BadgeClass = "error"
-	view.Label = "State differs"
-	view.Detail = "this Comb's FSM state digest matches " + strconv.Itoa(agreeing) + " of the " + strconv.Itoa(len(observed)-1) +
-		" other Combs that reported one and differs from " + strconv.Itoa(others) +
-		", all at applied index " + strconv.FormatUint(observation.AppliedIndex, 10) +
-		" - the state machines have diverged, and the digest does not say which side is wrong"
-	return view
-}
-
-// stateDigestUnobservedView is the verdict for a row that cannot be
-// compared at all, whether because its own digest was unreadable or
-// because there was nothing to compare it against.
-func stateDigestUnobservedView(observation stateDigestObservation, total int) stateDigestView {
-	view := stateDigestView{
-		State:        stateDigestUnobserved,
-		StateDigest:  observation.Digest,
-		AppliedIndex: observation.AppliedIndex,
-		BadgeClass:   "unknown",
-		Label:        "State unobserved",
-	}
-	if observation.Digest != "" {
-		// Its digest was read, but there was no second reading to
-		// compare it with. Saying so is more useful than implying the
-		// digest was unreadable, and the difference matters to anyone
-		// deciding whether to go looking for a missing voter.
-		view.Detail = "this Comb reported an FSM state digest, but no other Comb did, so this reading cannot be " +
-			"compared with anything"
-		return view
-	}
-	view.Detail = "this Comb's FSM state digest could not be read, so it is excluded from the colony-wide " +
-		"comparison of " + strconv.Itoa(total) + " Combs"
-	return view
+	panic("unhandled FSM state verdict: " + string(verdict))
 }

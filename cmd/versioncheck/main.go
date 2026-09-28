@@ -12,6 +12,15 @@
 // Comb that is not running at all are all reported as unknown, never
 // as agreement.
 //
+// The comparison itself now lives in internal/buildgate, because
+// ADR-0145's controlled update needs the same answers as a per-step
+// confirmation gate and a second copy of this table would be free to
+// drift. This command is the operator-facing view of it, and its output
+// is unchanged: same flags, same columns, same verdict strings, same
+// detail sentences, same exit status. The one thing it does not carry
+// over is the gate's stricter reading of a -dirty pair, which is
+// deliberate and is explained at versioncheckOf below.
+//
 // SCOPE: this checks the host it runs on. The Comb names on the command
 // line are labels for the report, not remote targets - it reads this
 // host's /usr/local/libexec/apiary and /var/log/apiary and nothing
@@ -25,116 +34,24 @@
 package main
 
 import (
-	"bufio"
-	"errors"
 	"flag"
 	"fmt"
 	"os"
-	"os/exec"
-	"regexp"
-	"strings"
 	"time"
 
-	"github.com/glenjbarber/apiary/internal/buildinfo"
+	"github.com/glenjbarber/apiary/internal/buildgate"
 )
 
-const libexec = "/usr/local/libexec/apiary/"
+// services is the gate's own list, so the two cannot disagree about
+// which daemons matter.
+var services = buildgate.Services
 
-// The four daemons that are installed on a Comb. raftd is here on
-// purpose: `make install` puts a new binary there for it, but
-// `make update` deliberately does not restart the process (raftd lives
-// in the Makefile's FORCE_RESTART_SRCS, not UPDATE_RESTART_SRCS), so it
-// is the one most likely to be running an older build than the binary
-// sitting next to it.
-var services = []string{"raftd", "managerd", "frontend", "restshimd"}
-
-// buildLine matches the build identity a daemon prints on its startup
-// log line, e.g. "build=b8e74c328d9f commit=b8e74c328d9f built=... go=freebsd/amd64".
-var buildLine = regexp.MustCompile(`build=(\S+)`)
-
-// stamps extracts the build id a binary reports about itself.
-func stamps(bin string) (string, error) {
-	out, err := runCapture(bin, "-version")
-	// The OUTPUT is the reliable signal, not the exit status, and the
-	// reason is worth recording: a pre-stamping binary behaves two
-	// different ways depending on whether its author ever called
-	// flag.Parse. One rejects the flag ("flag provided but not
-	// defined") and exits 2; the other had no flag handling at all,
-	// ignores -version, and carries straight on to reading its config
-	// or binding its port. Both predate stamping, they fail
-	// differently, and neither prints a build id - so the ABSENCE of
-	// one in the output is what identifies them, and it has to be
-	// checked before the error is allowed to short-circuit the whole
-	// classification.
-	if m := buildLine.FindStringSubmatch(out); m != nil {
-		return m[1], nil
-	}
-	if isUndefinedFlagText(out) {
-		return "", errUndefinedFlag
-	}
-	if err != nil {
-		if isUndefinedFlagText(err.Error()) {
-			return "", errUndefinedFlag
-		}
-		// It ran and produced no build id, but failed for some other
-		// reason. On a Comb where the config is root-only that is the
-		// common case when run unprivileged, and it says nothing
-		// about stamping either way - so it stays unknown rather than
-		// being guessed at.
-		return "", err
-	}
-	// Ran, exited cleanly, no build id: a stamped build with no id
-	// injected, i.e. built without -ldflags.
-	return "", errNoBuildID
-}
-
-// Sentinel errors, so the caller distinguishes the cases by identity
-// rather than by matching on message text at a second site.
-var (
-	errUndefinedFlag = errors.New("binary has no -version flag")
-	errNoBuildID     = errors.New("no build id in -version output")
-)
-
-// isUndefinedFlagText is the output-side counterpart of
-// isUndefinedFlag: the flag package writes its rejection to stderr,
-// which exec merges into the captured output.
-func isUndefinedFlagText(out string) bool {
-	return strings.Contains(out, "flag provided but not defined") ||
-		strings.Contains(out, "not defined: -version")
-}
-
-// runningBuild returns the build id a process printed when it started,
-// read from its log. An empty string with nil error means the log line
-// predates build stamping, which is a real and reportable state, not a
-// failure to read.
-func runningBuild(logPath, prog string) (string, error) {
-	f, err := os.Open(logPath)
-	if err != nil {
-		return "", err
-	}
-	defer f.Close()
-	// Walk backwards: the most recent "listening" line is the one that
-	// describes the process currently running. Scanning the whole file
-	// forwards and keeping the last match is equivalent and simpler to
-	// get right on a log that may be large.
-	last := ""
-	sc := bufio.NewScanner(f)
-	sc.Buffer(make([]byte, 0, 64*1024), 1024*1024)
-	for sc.Scan() {
-		line := sc.Text()
-		if !strings.Contains(line, prog+":") || !strings.Contains(line, "listening on") {
-			continue
-		}
-		if m := buildLine.FindStringSubmatch(line); m != nil {
-			last = m[1]
-		}
-	}
-	return last, sc.Err()
-}
-
-// verdict is the honest three-way answer. Agreement, disagreement, and
-// "cannot tell" are all distinct, and conflating the third with the
-// first is precisely the bug this tool exists to prevent.
+// verdict is this command's own report vocabulary. It is wider than
+// buildgate.Status on purpose: a status says whether a step is
+// confirmed, and a human report also has to say WHY not, which is a
+// diagnostic. The two are mapped explicitly at versioncheckOf rather
+// than by deriving one from the other, so adding a status to the gate
+// cannot silently repaint this tool's output.
 type verdict string
 
 const (
@@ -156,60 +73,43 @@ const (
 	sameDirty verdict = "same source (dirty build - bytes unverified)"
 )
 
-// compare is the pure core: given the id on disk and the id the running
-// process printed when it started, what can honestly be said? Split out
-// from check so the decision table is testable without a Comb.
-func compare(disk, run string) verdict {
-	switch {
-	case run == "":
-		return noStampLine
-	case run != disk:
-		return differ
-	case buildinfo.IsDirtyID(disk):
-		return sameDirty
-	default:
+// versioncheckOf maps one gate answer onto this command's report. The
+// only interesting case is DirtyIDMatch.
+//
+// The gate calls a matching pair of -dirty ids a NON-confirmation, on the
+// grounds that a -dirty id describes source and not bytes. This command
+// reports it as agreement-that-is-downgraded and still exits zero, which
+// is what it has always done and what an operator reading a one-shot
+// report expects: the two builds do agree about the commit. The
+// difference is real, it is a difference of QUESTION - "did the new
+// build take effect" versus "do these two agree" - and it is stated here
+// rather than being left for a reader to infer from two sources that
+// disagree.
+func versioncheckOf(service buildgate.Service) verdict {
+	switch service.Status {
+	case buildgate.TookEffect:
 		return agree
-	}
-}
-
-func check(prog string) verdict {
-	disk, err := stamps(libexec + prog)
-	if err != nil {
+	case buildgate.DirtyIDMatch:
+		return sameDirty
+	case buildgate.RunningStale:
+		return differ
+	case buildgate.NotRunning:
+		return notRunning
+	case buildgate.Unobserved:
 		// Three genuinely different situations, which must not be
-		// collapsed into one "unknown":
-		//
-		//  1. the binary exists but predates -version, so it cannot
-		//     answer the question at all (every Comb deployed before
-		//     build stamping landed);
-		//  2. the binary is missing or not executable here;
-		//  3. it answered, but with nothing that parses.
-		switch {
-		case errors.Is(err, errUndefinedFlag):
+		// collapsed into one "unknown", because they have different
+		// fixes and this report is what an operator reads to choose one.
+		switch service.Reason {
+		case buildgate.ReasonBinaryPredatesVersionFlag:
 			return predatesFlag
-		case errors.Is(err, errNoBuildID):
+		case buildgate.ReasonBinaryUnstamped:
 			return unstamped
-		case os.IsNotExist(err):
+		case buildgate.ReasonBinaryMissing:
 			return missing
 		}
 		return unknown
 	}
-	if disk == "unknown" {
-		return unstamped
-	}
-
-	run, err := runningBuild("/var/log/apiary/"+prog+".log", prog)
-	if err != nil {
-		// A log with no "listening" line at all means the service is
-		// not currently running, which is a distinct fact from "I
-		// could not read it" and from "it is running something
-		// older". Reported as its own verdict so a reader can tell
-		// "not deployed here" from "deployed but stale".
-		if os.IsNotExist(err) {
-			return notRunning
-		}
-		return unknown
-	}
-	return compare(disk, run)
+	return unknown
 }
 
 func main() {
@@ -234,12 +134,16 @@ func main() {
 	now := time.Now().Format(time.RFC3339)
 	for _, comb := range combs {
 		fmt.Printf("%s  %s\n", now, comb)
-		for _, s := range services {
-			v := check(s)
+		// One read per Comb, covering all four daemons: the gate already
+		// has the whole set, and reading each daemon separately would be
+		// four chances to answer from four different instants.
+		report := buildgate.Confirm(comb, buildgate.DefaultPaths())
+		for _, s := range report.Services {
+			v := versioncheckOf(s)
 			if *quiet && v == agree {
 				continue
 			}
-			fmt.Printf("    %-10s %-38s %s\n", s, string(v), detail(s, v))
+			fmt.Printf("    %-10s %-38s %s\n", s.Name, string(v), detail(v, s))
 			if v == differ {
 				rc = 1
 			}
@@ -249,13 +153,16 @@ func main() {
 }
 
 // detail adds the evidence for anything that is not a clean match, so
-// the reader does not have to go and re-derive it.
-func detail(prog string, v verdict) string {
+// the reader does not have to go and re-derive it. The ids now travel
+// with the verdict instead of being re-read here, which is the one
+// substantive difference from the pre-extraction version: there used to
+// be a second, independent read of both files to fill this column in,
+// and it could disagree with the verdict printed beside it.
+func detail(v verdict, service buildgate.Service) string {
 	switch v {
 	case differ:
-		disk, _ := stamps(libexec + prog)
-		run, _ := runningBuild("/var/log/apiary/"+prog+".log", prog)
-		return fmt.Sprintf("(running %s, on disk %s - the process predates this file; restart it)", run, disk)
+		return fmt.Sprintf("(running %s, on disk %s - the process predates this file; restart it)",
+			service.Running, service.OnDisk)
 	case unstamped:
 		return "(built without -ldflags; use make build)"
 	case predatesFlag:
@@ -285,15 +192,4 @@ inconclusive check never fails a deploy by accident.
 
 %s
 `, os.Args[0])
-}
-
-// runCapture runs a binary and returns its combined output. A binary
-// that cannot be executed at all is an error, not an empty string -
-// "it would not run" and "it ran and said nothing" are different facts.
-func runCapture(bin string, args ...string) (string, error) {
-	out, err := exec.Command(bin, args...).CombinedOutput()
-	if err != nil {
-		return string(out), fmt.Errorf("running %s %s: %w", bin, strings.Join(args, " "), err)
-	}
-	return string(out), nil
 }

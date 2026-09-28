@@ -3,273 +3,79 @@ package frontend
 import (
 	"strings"
 	"testing"
+
+	"github.com/glenjbarber/apiary/internal/statedigest"
 )
 
-// These cover the consumer half of ADR-0143: what the colony view claims
-// about cross-voter FSM state agreement, and - at least as importantly -
-// what it refuses to claim. The states that matter are the ones a naive
-// implementation gets wrong: a single observation, a sample taken while
-// the colony moved, and a Comb that could not be read at all.
+// The verdicts themselves are tested in internal/statedigest, where they
+// now live. What is here is the half that is this package's own: that
+// every verdict reaches a rendered row, that it lands in
+// layout.html's palette, and that no verdict renders as an unstyled row
+// that would read as a plain label instead of a conclusion.
 
-func observed(nodeID, digest string, index uint64) stateDigestObservation {
-	return stateDigestObservation{NodeID: nodeID, Digest: digest, AppliedIndex: index}
+func renderObservation(nodeID, digest string, index uint64) statedigest.Observation {
+	return statedigest.Observation{NodeID: nodeID, Digest: digest, AppliedIndex: index}
 }
 
-func unobservedDigest(nodeID string) stateDigestObservation {
-	return stateDigestObservation{NodeID: nodeID}
+func renderUnobserved(nodeID string) statedigest.Observation {
+	return statedigest.Observation{NodeID: nodeID}
 }
 
-func TestStateDigestVerdictsAllAgree(t *testing.T) {
-	views, colony := stateDigestVerdicts([]stateDigestObservation{
-		observed("brood", "aaaa", 181),
-		observed("drone", "aaaa", 181),
-		observed("buzz", "aaaa", 181),
-		observed("sting", "aaaa", 181),
-	})
-
-	if !colony.Agreed {
-		t.Errorf("Agreed = false, want true - every reported digest is identical")
-	}
-	if colony.Observed != 4 || colony.Total != 4 {
-		t.Errorf("Observed/Total = %d/%d, want 4/4", colony.Observed, colony.Total)
-	}
-	if colony.BadgeClass != "ready" || colony.BadgeLabel != colonyAgreedLabel {
-		t.Errorf("BadgeClass/BadgeLabel = %q/%q, want ready/%q", colony.BadgeClass, colony.BadgeLabel, colonyAgreedLabel)
-	}
-	for _, nodeID := range []string{"brood", "drone", "buzz", "sting"} {
-		view := views[nodeID]
-		if view.State != stateDigestMatch || view.BadgeClass != "ready" {
-			t.Errorf("%s: State/BadgeClass = %q/%q, want %q/ready", nodeID, view.State, view.BadgeClass, stateDigestMatch)
-		}
-		if view.Label == "" || view.Detail == "" {
-			t.Errorf("%s: Label = %q, Detail = %q, want both populated - an unexplained badge is not actionable", nodeID, view.Label, view.Detail)
-		}
-	}
-}
-
-// TestStateDigestVerdictsProvenDivergence is the case the whole mechanism
-// exists for: every Comb at the SAME applied index, holding different
-// state. Nothing about timing can explain that away, so it must read as
-// divergence rather than as unsettled.
-func TestStateDigestVerdictsProvenDivergence(t *testing.T) {
-	views, colony := stateDigestVerdicts([]stateDigestObservation{
-		observed("brood", "aaaa", 181),
-		observed("drone", "aaaa", 181),
-		observed("buzz", "aaaa", 181),
-		observed("sting", "bbbb", 181),
-	})
-
-	if colony.Agreed {
-		t.Error("Agreed = true, want false - sting holds different state at the same applied index")
-	}
-	if colony.BadgeClass != "error" || colony.BadgeLabel != colonyDivergedLabel {
-		t.Errorf("BadgeClass/BadgeLabel = %q/%q, want error/%q", colony.BadgeClass, colony.BadgeLabel, colonyDivergedLabel)
-	}
-	if !strings.Contains(colony.Detail, "diverged") {
-		t.Errorf("Detail = %q, want it to say the state machines have diverged", colony.Detail)
+// everyVerdict reaches all four ADR-0143 verdicts through real
+// comparisons and returns one representative rendered row per verdict.
+//
+// It takes four comparisons rather than one because a comparison produces
+// a single SET-level verdict: no single set of observations can contain
+// all four at once. Building the verdicts by hand instead would test the
+// mapping against values the comparison cannot actually produce, which is
+// exactly the mistake a rendering layer invites once the classification
+// lives somewhere else.
+func everyVerdict() map[statedigest.Verdict]stateDigestView {
+	comparisons := [][]statedigest.Observation{
+		// equal digests, equal indexes
+		{
+			renderObservation("brood", "aaaa", 181),
+			renderObservation("drone", "aaaa", 181),
+		},
+		// differing digests, equal indexes
+		{
+			renderObservation("brood", "aaaa", 181),
+			renderObservation("drone", "aaaa", 181),
+			renderObservation("buzz", "bbbb", 181),
+		},
+		// differing digests, differing indexes
+		{
+			renderObservation("brood", "aaaa", 181),
+			renderObservation("drone", "aaaa", 181),
+			renderObservation("buzz", "bbbb", 181),
+			renderObservation("sting", "cccc", 182),
+		},
+		// one reading, and nothing to compare it against
+		{
+			renderObservation("brood", "aaaa", 181),
+			renderUnobserved("drone"),
+			renderUnobserved("comb"),
+		},
 	}
 
-	// EVERY observed row is marked, not just the odd one out. A green
-	// badge beside three red ones would read as "this Comb is fine", and
-	// nothing here supports that: the colony has diverged, and which side
-	// is wrong is not something a digest can say.
-	for _, nodeID := range []string{"brood", "drone", "buzz", "sting"} {
-		if views[nodeID].State != stateDigestMismatch {
-			t.Errorf("%s: State = %q, want %q - a majority row must not be shown as agreeing while the colony has diverged",
-				nodeID, views[nodeID].State, stateDigestMismatch)
-		}
-		if views[nodeID].BadgeClass != "error" {
-			t.Errorf("%s: BadgeClass = %q, want error", nodeID, views[nodeID].BadgeClass)
-		}
-	}
-	// The minority row names its own position precisely.
-	if detail := views["sting"].Detail; !strings.Contains(detail, "matches 0 of the 3") {
-		t.Errorf("sting: Detail = %q, want it to state that it matches none of the other three", detail)
-	}
-	// And a majority row says the same in its own terms, rather than
-	// claiming to be correct.
-	if detail := views["brood"].Detail; !strings.Contains(detail, "matches 2 of the 3") {
-		t.Errorf("brood: Detail = %q, want it to state that it matches two of the other three", detail)
-	}
-}
-
-// TestStateDigestVerdictsDoNotLocaliseTheFault pins the ADR's own
-// limitation as a test. A digest says the state machines differ; it
-// cannot say which is wrong, so no row's detail may name another Comb or
-// assert that any Comb is at fault.
-func TestStateDigestVerdictsDoNotLocaliseTheFault(t *testing.T) {
-	views, _ := stateDigestVerdicts([]stateDigestObservation{
-		observed("brood", "aaaa", 181),
-		observed("drone", "aaaa", 181),
-		observed("buzz", "bbbb", 181),
-	})
-	for nodeID, view := range views {
-		for _, other := range []string{"brood", "drone", "buzz"} {
-			if other != nodeID && strings.Contains(view.Detail, other) {
-				t.Errorf("%s: Detail = %q, names %s - the digest cannot say which side is wrong", nodeID, view.Detail, other)
+	// Rows are walked in SLICE order, not in map order. stateDigestVerdicts
+	// returns a map, so iterating it would pick an arbitrary row for each
+	// verdict and two of the four Unobserved rows below say different
+	// (equally honest) things - which would make this test pass or fail on
+	// Go's map iteration randomization.
+	out := map[statedigest.Verdict]stateDigestView{}
+	for _, observations := range comparisons {
+		views, _ := stateDigestVerdicts(observations)
+		for _, observation := range observations {
+			view := views[observation.NodeID]
+			verdict := statedigest.Verdict(view.State)
+			if _, already := out[verdict]; already {
+				continue
 			}
-		}
-		// Assertive claims the evidence cannot support. "wrong" on its own
-		// is deliberately not in this list: the detail's own disclaimer
-		// says the digest does not say which side is wrong, and the
-		// presence of that disclaimer is asserted below.
-		for _, claim := range []string{"is incorrect", "should be", "is stale", "is behind", "is faulty", "culprit", "diverged because"} {
-			if strings.Contains(view.Detail, claim) {
-				t.Errorf("%s: Detail = %q, asserts %q - that is a conclusion the evidence does not support", nodeID, view.Detail, claim)
-			}
-		}
-		// And the disclaimer itself is required on every diverged row, so
-		// the limitation cannot be quietly dropped from the rendering.
-		if !strings.Contains(view.Detail, "does not say which side is wrong") {
-			t.Errorf("%s: Detail = %q, want the explicit statement that the digest cannot identify the wrong side", nodeID, view.Detail)
+			out[verdict] = view
 		}
 	}
-}
-
-// TestStateDigestVerdictsMovingColonyIsUnsettled covers the sampling race
-// the ADR names. A mismatch at differing applied indexes may be nothing
-// but the sample being taken while entries were still being applied, and
-// reporting it as divergence would be a false alarm on a healthy colony.
-func TestStateDigestVerdictsMovingColonyIsUnsettled(t *testing.T) {
-	views, colony := stateDigestVerdicts([]stateDigestObservation{
-		observed("brood", "aaaa", 181),
-		observed("drone", "aaaa", 181),
-		observed("buzz", "bbbb", 182),
-	})
-
-	if colony.Agreed {
-		t.Error("Agreed = true, want false - the digests are not all equal")
-	}
-	if colony.BadgeClass != "degraded" {
-		t.Errorf("BadgeClass = %q, want degraded - differing applied indexes make this unsettled, not divergence", colony.BadgeClass)
-	}
-	if !strings.Contains(colony.Detail, "different applied indexes") {
-		t.Errorf("Detail = %q, want it to name the differing applied indexes as the reason", colony.Detail)
-	}
-	for _, nodeID := range []string{"brood", "drone", "buzz"} {
-		view := views[nodeID]
-		if view.State != stateDigestUnsettled {
-			t.Errorf("%s: State = %q, want %q", nodeID, view.State, stateDigestUnsettled)
-		}
-		if view.BadgeClass != "degraded" {
-			t.Errorf("%s: BadgeClass = %q, want degraded", nodeID, view.BadgeClass)
-		}
-		if !strings.Contains(view.Detail, "moving") {
-			t.Errorf("%s: Detail = %q, want it to say this may be a sample of a moving colony", nodeID, view.Detail)
-		}
-	}
-}
-
-// TestStateDigestVerdictsSingleObservationIsNeverAgreement is the most
-// important negative case. One node always agrees with itself, so a
-// one-node sample satisfies "all observed digests match" trivially. A
-// green badge there would be the absence of evidence rendered as health,
-// which is the exact mistake this package's health work exists to prevent.
-func TestStateDigestVerdictsSingleObservationIsNeverAgreement(t *testing.T) {
-	views, colony := stateDigestVerdicts([]stateDigestObservation{
-		observed("brood", "aaaa", 181),
-		unobservedDigest("drone"),
-		unobservedDigest("buzz"),
-	})
-
-	if colony.Agreed {
-		t.Error("Agreed = true from a single observation, want false - one voter always agrees with itself")
-	}
-	if colony.BadgeClass != "unknown" {
-		t.Errorf("BadgeClass = %q, want unknown, not ready", colony.BadgeClass)
-	}
-	if colony.Observed != 1 || colony.Total != 3 {
-		t.Errorf("Observed/Total = %d/%d, want 1/3", colony.Observed, colony.Total)
-	}
-	brood := views["brood"]
-	if brood.State != stateDigestUnobserved || brood.BadgeClass != "unknown" {
-		t.Errorf("brood: State/BadgeClass = %q/%q, want %q/unknown - its own digest is not evidence of agreement",
-			brood.State, brood.BadgeClass, stateDigestUnobserved)
-	}
-	if !strings.Contains(brood.Detail, "no other Comb did") {
-		t.Errorf("brood: Detail = %q, want it to say there was nothing to compare against", brood.Detail)
-	}
-}
-
-func TestStateDigestVerdictsNoObservationsAtAll(t *testing.T) {
-	views, colony := stateDigestVerdicts([]stateDigestObservation{
-		unobservedDigest("brood"),
-		unobservedDigest("drone"),
-	})
-
-	if colony.Agreed || colony.BadgeClass != "unknown" || colony.BadgeLabel == "" {
-		t.Errorf("colony = %+v, want no agreement, unknown class and a populated label", colony)
-	}
-	if !strings.Contains(colony.Detail, "no Comb reported") {
-		t.Errorf("Detail = %q, want it to state that nothing was observed", colony.Detail)
-	}
-	for nodeID, view := range views {
-		if view.State != stateDigestUnobserved {
-			t.Errorf("%s: State = %q, want %q", nodeID, view.State, stateDigestUnobserved)
-		}
-		if !strings.Contains(view.Detail, "could not be read") {
-			t.Errorf("%s: Detail = %q, want it to say the digest could not be read", nodeID, view.Detail)
-		}
-	}
-}
-
-// TestStateDigestVerdictsUnobservedCombIsExcludedFromAgreement covers the
-// half-heard case: two Combs agree and a third could not be read. The two
-// may match, but the colony sentence must not imply all three were
-// compared.
-func TestStateDigestVerdictsUnobservedCombIsExcludedFromAgreement(t *testing.T) {
-	views, colony := stateDigestVerdicts([]stateDigestObservation{
-		observed("brood", "aaaa", 181),
-		observed("drone", "aaaa", 181),
-		unobservedDigest("sting"),
-	})
-
-	if !colony.Agreed {
-		t.Error("Agreed = false, want true - both digests that were read are identical")
-	}
-	if !strings.Contains(colony.Detail, "excluded from the comparison") {
-		t.Errorf("Detail = %q, want it to say one Comb was excluded", colony.Detail)
-	}
-	if colony.Observed != 2 || colony.Total != 3 {
-		t.Errorf("Observed/Total = %d/%d, want 2/3", colony.Observed, colony.Total)
-	}
-	if views["sting"].State != stateDigestUnobserved {
-		t.Errorf("sting: State = %q, want %q - an unread digest is never folded into the match", views["sting"].State, stateDigestUnobserved)
-	}
-	if !strings.Contains(views["sting"].Detail, "3 Combs") {
-		t.Errorf("sting: Detail = %q, want it to name the size of the comparison it was excluded from", views["sting"].Detail)
-	}
-}
-
-// TestStateDigestVerdictsAreOrderIndependent guards the one assumption the
-// rows depend on: a Combs position in the input must not change its
-// verdict, or the badge would flicker with Go's map and slice ordering.
-func TestStateDigestVerdictsAreOrderIndependent(t *testing.T) {
-	forward := []stateDigestObservation{
-		observed("brood", "aaaa", 181),
-		observed("drone", "aaaa", 181),
-		observed("buzz", "bbbb", 181),
-		unobservedDigest("sting"),
-	}
-	reversed := []stateDigestObservation{
-		unobservedDigest("sting"),
-		observed("buzz", "bbbb", 181),
-		observed("drone", "aaaa", 181),
-		observed("brood", "aaaa", 181),
-	}
-
-	firstViews, firstColony := stateDigestVerdicts(forward)
-	secondViews, secondColony := stateDigestVerdicts(reversed)
-
-	if firstColony != secondColony {
-		t.Errorf("colony verdict differs by input order:\n%+v\n%+v", firstColony, secondColony)
-	}
-	for nodeID, want := range firstViews {
-		got := secondViews[nodeID]
-		if got != want {
-			t.Errorf("%s: verdict differs by input order:\n got %+v\nwant %+v", nodeID, got, want)
-		}
-	}
+	return out
 }
 
 // TestStateDigestVerdictsUseOnlyTheKnownBadgeVocabulary keeps the badge
@@ -279,12 +85,12 @@ func TestStateDigestVerdictsAreOrderIndependent(t *testing.T) {
 func TestStateDigestVerdictsUseOnlyTheKnownBadgeVocabulary(t *testing.T) {
 	known := map[string]bool{"ready": true, "degraded": true, "error": true, "unknown": true}
 
-	cases := [][]stateDigestObservation{
-		{observed("brood", "aaaa", 181), observed("drone", "aaaa", 181)},
-		{observed("brood", "aaaa", 181), observed("drone", "bbbb", 181)},
-		{observed("brood", "aaaa", 181), observed("drone", "bbbb", 182)},
-		{observed("brood", "aaaa", 181), unobservedDigest("drone")},
-		{unobservedDigest("brood"), unobservedDigest("drone")},
+	cases := [][]statedigest.Observation{
+		{renderObservation("brood", "aaaa", 181), renderObservation("drone", "aaaa", 181)},
+		{renderObservation("brood", "aaaa", 181), renderObservation("drone", "bbbb", 181)},
+		{renderObservation("brood", "aaaa", 181), renderObservation("drone", "bbbb", 182)},
+		{renderObservation("brood", "aaaa", 181), renderUnobserved("drone")},
+		{renderUnobserved("brood"), renderUnobserved("drone")},
 		{},
 	}
 	for _, observations := range cases {
@@ -309,18 +115,151 @@ func TestStateDigestVerdictsUseOnlyTheKnownBadgeVocabulary(t *testing.T) {
 	}
 }
 
-// TestStateDigestVerdictsEmptyInputNamesItself covers the degenerate call,
-// so a page with no Combs at all renders a stated verdict rather than an
-// empty one.
-func TestStateDigestVerdictsEmptyInput(t *testing.T) {
-	views, colony := stateDigestVerdicts(nil)
-	if len(views) != 0 {
-		t.Errorf("views = %+v, want empty", views)
+// TestStateDigestBadgeClassDistinguishesEveryVerdict is the reason the
+// badge class is chosen by an exhaustive switch rather than derived. All
+// four verdicts must be visually distinct, and specifically a Mismatch
+// must never be able to render as the same colour as a Match: a
+// diverged colony shown in the same green as an agreed one is the exact
+// failure the badge exists to prevent.
+func TestStateDigestBadgeClassDistinguishesEveryVerdict(t *testing.T) {
+	views := everyVerdict()
+
+	want := map[statedigest.Verdict]string{
+		statedigest.Match:      "ready",
+		statedigest.Mismatch:   "error",
+		statedigest.Unsettled:  "degraded",
+		statedigest.Unobserved: "unknown",
 	}
-	if colony.Agreed || colony.Observed != 0 || colony.Total != 0 {
-		t.Errorf("colony = %+v, want no agreement and no observations", colony)
+	for verdict, wantClass := range want {
+		view, found := views[verdict]
+		if !found {
+			t.Errorf("verdict %q never appeared in a comparison, so its badge is unpinned", verdict)
+			continue
+		}
+		if view.BadgeClass != wantClass {
+			t.Errorf("verdict %q rendered as %q, want %q", verdict, view.BadgeClass, wantClass)
+		}
+		if view.Label == "" {
+			t.Errorf("verdict %q rendered with an empty label, want it always populated", verdict)
+		}
 	}
-	if colony.BadgeClass != "unknown" || colony.Detail == "" {
-		t.Errorf("colony = %+v, want an unknown class and a stated reason", colony)
+	if len(views) != len(want) {
+		t.Errorf("everyVerdict() produced %d verdicts, want exactly the %d ADR-0143 defines", len(views), len(want))
+	}
+}
+
+// TestStateDigestRowStateCarriesTheVerdictNotAPresentationValue checks
+// that State is the verdict itself. A template keying off State, or a
+// test asserting on it, must be reading the upstream answer rather than
+// a second opinion formed here.
+func TestStateDigestRowStateCarriesTheVerdictNotAPresentationValue(t *testing.T) {
+	for verdict, view := range everyVerdict() {
+		if view.State != string(verdict) {
+			t.Errorf("verdict %q rendered with State = %q, want the row's State to BE the verdict", verdict, view.State)
+		}
+		if view.Label == view.State {
+			t.Errorf("verdict %q: Label and State are both %q, want a short badge text distinct from the verdict",
+				verdict, view.Label)
+		}
+	}
+}
+
+// TestStateDigestDetailIsCarriedThroughNotReworded guards the split made
+// when the verdicts moved: the sentence behind a verdict is the same
+// sentence a controller reads, so this package must not restate it. In
+// particular the mismatch row's disclaimer - that a digest cannot say
+// which side is wrong - is a correctness property of the evidence, not a
+// phrasing choice.
+func TestStateDigestDetailIsCarriedThroughNotReworded(t *testing.T) {
+	views := everyVerdict()
+	for verdict, view := range views {
+		if view.Detail == "" {
+			t.Errorf("verdict %q: Detail is empty, want the sentence carried through from internal/statedigest", verdict)
+		}
+	}
+	if d := views[statedigest.Mismatch].Detail; !strings.Contains(d, "does not say which side is wrong") {
+		t.Errorf("mismatch Detail = %q, want the disclaimer that the digest cannot identify the wrong side, carried through unchanged", d)
+	}
+	if d := views[statedigest.Unsettled].Detail; !strings.Contains(d, "moving") {
+		t.Errorf("unsettled Detail = %q, want the moving-colony wording carried through unchanged", d)
+	}
+	// The representative unobserved row is the only Comb that reported a
+	// digest in a one-reading comparison, so its wording is the
+	// "nothing to compare it against" one. The other unobserved wording -
+	// a digest that was never read - is asserted below.
+	if d := views[statedigest.Unobserved].Detail; !strings.Contains(d, "no other Comb did") {
+		t.Errorf("unobserved Detail = %q, want the incomparable wording carried through unchanged", d)
+	}
+}
+
+// TestStateDigestUnobservedViewIsNeverBlank covers the single-Comb path
+// used while a page's rows are still being gathered, before any
+// comparison exists. The row must already carry a class and a label, or
+// the template renders an element with no badge vocabulary at all - which
+// reads as "nothing to report" rather than "not observed".
+func TestStateDigestUnobservedViewIsNeverBlank(t *testing.T) {
+	view := stateDigestUnobservedView(statedigest.Observation{
+		NodeID: "brood.lab3.home.arpa", Digest: "aaaa", AppliedIndex: 181,
+	}, 1)
+	if view.State != string(statedigest.Unobserved) {
+		t.Errorf("State = %q, want %q", view.State, statedigest.Unobserved)
+	}
+	if view.BadgeClass == "" || view.Label == "" || view.Detail == "" {
+		t.Errorf("view = %+v, want class, label and detail all populated", view)
+	}
+	if view.StateDigest != "aaaa" || view.AppliedIndex != 181 {
+		t.Errorf("StateDigest/AppliedIndex = %q/%d, want the reading carried through - a real digest beside a "+
+			"fabricated zero index is worse than no row at all", view.StateDigest, view.AppliedIndex)
+	}
+	// The other unobserved wording, reached through the same path: a
+	// digest that was never read. It is the wording that tells an
+	// operator to go looking, and it must be carried through too.
+	neverRead := stateDigestUnobservedView(statedigest.Observation{
+		NodeID: "drone.lab3.home.arpa",
+	}, 1)
+	if !strings.Contains(neverRead.Detail, "could not be read") {
+		t.Errorf("Detail = %q, want the unread wording carried through unchanged", neverRead.Detail)
+	}
+}
+
+// TestStateDigestColonyBadgeLabelIsDistinctPerVerdict checks the colony
+// panel's own label, which is a different vocabulary from the per-row
+// one: a colony is "agreed" or "diverged", where a row "matches" or
+// "differs". Collapsing them would let a reader see "State agreed" under
+// a column of red rows.
+func TestStateDigestColonyBadgeLabelIsDistinctPerVerdict(t *testing.T) {
+	cases := []struct {
+		name         string
+		observations []statedigest.Observation
+		wantClass    string
+		wantLabel    string
+	}{
+		{"match", []statedigest.Observation{
+			renderObservation("brood", "aaaa", 181), renderObservation("drone", "aaaa", 181),
+		}, "ready", colonyAgreedLabel},
+		{"mismatch", []statedigest.Observation{
+			renderObservation("brood", "aaaa", 181), renderObservation("drone", "bbbb", 181),
+		}, "error", colonyDivergedLabel},
+		{"unsettled", []statedigest.Observation{
+			renderObservation("brood", "aaaa", 181), renderObservation("drone", "bbbb", 182),
+		}, "degraded", colonyUnsettledLabel},
+		{"unobserved", []statedigest.Observation{
+			renderObservation("brood", "aaaa", 181), renderUnobserved("drone"),
+		}, "unknown", "State unobserved"},
+	}
+	seen := map[string]string{}
+	for _, c := range cases {
+		_, colony := stateDigestVerdicts(c.observations)
+		if colony.BadgeClass != c.wantClass {
+			t.Errorf("%s: BadgeClass = %q, want %q", c.name, colony.BadgeClass, c.wantClass)
+		}
+		if colony.BadgeLabel != c.wantLabel {
+			t.Errorf("%s: BadgeLabel = %q, want %q", c.name, colony.BadgeLabel, c.wantLabel)
+		}
+		if previous, duplicate := seen[colony.BadgeLabel]; duplicate {
+			t.Errorf("%s and %s both render the colony badge %q, so the panel head cannot tell them apart",
+				previous, c.name, colony.BadgeLabel)
+		}
+		seen[colony.BadgeLabel] = c.name
 	}
 }
