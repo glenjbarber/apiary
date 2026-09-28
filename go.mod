@@ -8,7 +8,7 @@ require (
 	github.com/hashicorp/raft v1.8.0
 	github.com/hashicorp/raft-boltdb/v2 v2.4.2
 	github.com/msteinert/pam/v2 v2.1.0
-	go.etcd.io/bbolt v1.4.1
+	go.etcd.io/bbolt v1.5.0
 	google.golang.org/grpc v1.84.0
 	google.golang.org/protobuf v1.36.12
 )
