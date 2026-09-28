@@ -6,6 +6,7 @@
 package frontend
 
 import (
+	"fmt"
 	"net/http"
 	"net/url"
 	"time"
@@ -31,12 +32,37 @@ type joinRequestView struct {
 	// without having seen it.
 	TLSFingerprint string
 
+	// JoinerLogState is the joining Comb's own reported raft log state, as
+	// ready-to-render text. It is shown in the pending list rather than
+	// only in the preflight result because it is the one piece of evidence
+	// an Admin needs BEFORE clicking anything: a joiner carrying a
+	// non-empty log cannot be approved at all, and finding that out by
+	// typing the confirmation phrase is a poor way to learn it.
+	//
+	// "not reported" is deliberately its own state and not folded into
+	// "empty". A request with no evidence is refused at approval, and
+	// rendering it as though it were safe would be the UI version of the
+	// same fail-open mistake the guardrail exists to prevent.
+	JoinerLogState string
+
 	// TargetAddress (ADR-0092) is NOT part of the underlying
 	// PendingJoinRequest record - it's the existing Colony member's
 	// address this request was forwarded to, carried in the page's own
 	// query string so a later Refresh/Cancel action on this same
 	// request knows where to reach it again.
 	TargetAddress string
+}
+
+// joinerLogStateText renders the join-log evidence for the pending list.
+func joinerLogStateText(observed bool, lastIndex uint64) string {
+	switch {
+	case !observed:
+		return "not reported - approval will be refused until this Comb re-requests with evidence"
+	case lastIndex == 0:
+		return "empty (index 0) - safe to approve"
+	default:
+		return fmt.Sprintf("NOT empty (index %d) - this Comb carries a previous log and cannot be approved until it is wiped", lastIndex)
+	}
 }
 
 func fromRPCJoinRequest(r *rpcpb.PendingJoinRequest) joinRequestView {
@@ -57,6 +83,7 @@ func fromRPCJoinRequest(r *rpcpb.PendingJoinRequest) joinRequestView {
 		RequestedAt:     time.Unix(r.GetRequestedAtUnix(), 0).Local().Format("2006-01-02 15:04 MST"),
 		Status:          status,
 		TLSFingerprint:  r.GetTlsCertFingerprint(),
+		JoinerLogState:  joinerLogStateText(r.GetJoinerLogStateObserved(), r.GetJoinerLastLogIndex()),
 	}
 }
 

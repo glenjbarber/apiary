@@ -3181,6 +3181,13 @@ message PendingJoinRequest {
   // future peer_tls_ca setup against it (see the ADR's own explicit
   // scope note).
   string tls_cert_fingerprint = 8;
+
+  // joiner_log_state_observed / joiner_last_log_index mirror
+  // internalpb.PendingJoinRequest's own two fields of the same name - see
+  // there for the full reasoning, and for why an unobserved value has to
+  // be refused rather than assumed to mean "empty".
+  bool joiner_log_state_observed = 9;
+  uint64 joiner_last_log_index = 10;
 }
 
 message RequestJoinColonyRequest {
@@ -3212,6 +3219,19 @@ message RequestJoinColonyRequest {
   // own locally-configured tls_cert before forwarding - see
   // PendingJoinRequest's own field doc.
   string tls_cert_fingerprint = 5;
+
+  // joiner_log_state_observed / joiner_last_log_index are the JOINING
+  // Comb's own evidence about its local raft log - see
+  // internalpb.PendingJoinRequest's own doc comment for the full
+  // reasoning and for why the observed flag is separate.
+  //
+  // The joining managerd fills both in from its own local raftd before
+  // forwarding, exactly as it does tls_cert_fingerprint above. A caller
+  // that sets them explicitly is trusted as-is, which is what lets a
+  // test drive a real approval against a real single-node raft without
+  // needing a second live raftd.
+  bool joiner_log_state_observed = 6;
+  uint64 joiner_last_log_index = 7;
 }
 
 message RequestJoinColonyResponse {

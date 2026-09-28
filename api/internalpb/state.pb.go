@@ -3796,8 +3796,26 @@ type PendingJoinRequest struct {
 	// tls_cert_fingerprint (ADR-0113) mirrors rpcpb.PendingJoinRequest's
 	// own field of the same name - see there for the full doc comment.
 	TlsCertFingerprint string `protobuf:"bytes,8,opt,name=tls_cert_fingerprint,json=tlsCertFingerprint,proto3" json:"tls_cert_fingerprint,omitempty"`
-	unknownFields      protoimpl.UnknownFields
-	sizeCache          protoimpl.SizeCache
+	// joiner_log_state_observed / joiner_last_log_index are the JOINING
+	// Comb's own evidence about its local raft log, captured by the
+	// joining managerd from its own raftd's StatusResponse.last_log_index
+	// at the moment RequestJoinColony was made.
+	//
+	// AddVoter on a joiner whose log is already non-empty is the one way
+	// this codebase can lose committed history: raft cannot reconcile two
+	// divergent committed logs, and the only recovery here is a full state
+	// wipe. These two fields are what let ApproveJoinRequest refuse that
+	// before the point of no return.
+	//
+	// joiner_log_state_observed is the presence flag and is deliberately
+	// NOT an implied value: a false means "nobody said", which is not the
+	// same claim as "somebody said zero". An older managerd, or any other
+	// writer of this record, leaves both fields zero, and the guardrail
+	// treats that as unobserved and refuses. Fail-closed is the point.
+	JoinerLogStateObserved bool   `protobuf:"varint,9,opt,name=joiner_log_state_observed,json=joinerLogStateObserved,proto3" json:"joiner_log_state_observed,omitempty"`
+	JoinerLastLogIndex     uint64 `protobuf:"varint,10,opt,name=joiner_last_log_index,json=joinerLastLogIndex,proto3" json:"joiner_last_log_index,omitempty"`
+	unknownFields          protoimpl.UnknownFields
+	sizeCache              protoimpl.SizeCache
 }
 
 func (x *PendingJoinRequest) Reset() {
@@ -3884,6 +3902,20 @@ func (x *PendingJoinRequest) GetTlsCertFingerprint() string {
 		return x.TlsCertFingerprint
 	}
 	return ""
+}
+
+func (x *PendingJoinRequest) GetJoinerLogStateObserved() bool {
+	if x != nil {
+		return x.JoinerLogStateObserved
+	}
+	return false
+}
+
+func (x *PendingJoinRequest) GetJoinerLastLogIndex() uint64 {
+	if x != nil {
+		return x.JoinerLastLogIndex
+	}
+	return 0
 }
 
 // CreatePendingJoinRequest records a new join request. Fails if
@@ -6007,7 +6039,7 @@ const file_api_internalpb_state_proto_rawDesc = "" +
 	"\x13observed_on_node_id\x18\r \x01(\tR\x10observedOnNodeId\x12%\n" +
 	"\x0efailure_detail\x18\x0e \x01(\tR\rfailureDetail\x12-\n" +
 	"\x12quorum_unavailable\x18\x0f \x01(\bR\x11quorumUnavailable\x12A\n" +
-	"\bevidence\x18\x10 \x03(\v2%.apiary.internal.v1.MigrationEvidenceR\bevidence\"\xd1\x02\n" +
+	"\bevidence\x18\x10 \x03(\v2%.apiary.internal.v1.MigrationEvidenceR\bevidence\"\xbf\x03\n" +
 	"\x12PendingJoinRequest\x12\x1d\n" +
 	"\n" +
 	"request_id\x18\x01 \x01(\tR\trequestId\x12\x17\n" +
@@ -6017,7 +6049,10 @@ const file_api_internalpb_state_proto_rawDesc = "" +
 	"\x11requested_at_unix\x18\x05 \x01(\x03R\x0frequestedAtUnix\x12&\n" +
 	"\x0fexpires_at_unix\x18\x06 \x01(\x03R\rexpiresAtUnix\x12=\n" +
 	"\x06status\x18\a \x01(\x0e2%.apiary.internal.v1.JoinRequestStatusR\x06status\x120\n" +
-	"\x14tls_cert_fingerprint\x18\b \x01(\tR\x12tlsCertFingerprint\"\\\n" +
+	"\x14tls_cert_fingerprint\x18\b \x01(\tR\x12tlsCertFingerprint\x129\n" +
+	"\x19joiner_log_state_observed\x18\t \x01(\bR\x16joinerLogStateObserved\x121\n" +
+	"\x15joiner_last_log_index\x18\n" +
+	" \x01(\x04R\x12joinerLastLogIndex\"\\\n" +
 	"\x18CreatePendingJoinRequest\x12@\n" +
 	"\arequest\x18\x01 \x01(\v2&.apiary.internal.v1.PendingJoinRequestR\arequest\":\n" +
 	"\x19ApprovePendingJoinRequest\x12\x1d\n" +
