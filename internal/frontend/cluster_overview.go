@@ -129,6 +129,9 @@ type clusterNodeView struct {
 	// across them - what the overview card's badge shows - and
 	// CauseHeadline is that one cause in a single line, so the command
 	// center answers "what is wrong with this Comb" without a click.
+	// It names the CAUSE, never the verdict: the verdict is the badge's
+	// text, and a headline that restated it printed the same finding
+	// twice on one line.
 	//
 	// All three are zero-valued when the only honest answer is "not
 	// observed"; see combCauseNeverObserved's own doc comment - a Comb
@@ -1322,6 +1325,17 @@ func gapCause(source string, now time.Time, detail string) combCauseView {
 // in the list, which is built in a fixed order (reachability, membership,
 // reconcile, subsystems, resources, gaps) so the most fundamental problem
 // wins rather than whichever happened to be appended last.
+//
+// The returned headline is the CAUSE and nothing else. The verdict is the
+// badge's job, and the badge is already rendered from the (state, stale)
+// pair returned here, so prefixing the headline with the same label made
+// every card speak its verdict twice - "observed healthy observed healthy
+// - reconciler_last_tick: ..." - which reads as two findings and is one.
+// The two layers have separate jobs and stay separate: combCauseBadge owns
+// which state may look green, and the summary names the source of that
+// verdict in prose. See reconcileTickSummary, whose wording is
+// state-specific precisely so the prose stands on its own without the
+// label repeated in front of it.
 func worstCombCause(causes []combCauseView) (state combCauseState, stale bool, headline string) {
 	if len(causes) == 0 {
 		// No causes at all means nothing was wrong AND nothing was
@@ -1341,14 +1355,15 @@ func worstCombCause(causes []combCauseView) (state combCauseState, stale bool, h
 	// overall badge is derived from (state, stale) together. Collapsing it
 	// to state alone is how a 3-hour-old success ends up with a green
 	// header badge above a correctly-greyed row.
-	_, label := combCauseBadge(best.State, best.Stale)
-	return best.State, best.Stale, fmt.Sprintf("%s - %s", label, best.Summary)
+	return best.State, best.Stale, best.Summary
 }
 
 // reconcileTickSummary is the card-length description of a Comb's own
 // reconcile evidence. It deliberately says WHICH of the three states it is,
 // because a card that just said "reconciler_last_tick: ..." would leave an
-// operator to guess whether silence meant health.
+// operator to guess whether silence meant health. The badge beside it
+// carries the verdict label; this carries the state-specific prose, and
+// neither restates the other.
 func reconcileTickSummary(e combReconcileEvidence) string {
 	switch e.State {
 	case combCauseObservedHealthy:
