@@ -2,30 +2,79 @@
 
 ## Status
 
-Accepted. **Implemented and merged: the state model.** The durable
-`ColonyUpdate` record, the `ColonyUpdateFence` that binds a restart
-lease to the operation actually running, and `HandoverColonyUpdate` as
-a distinct command over that record are all in the tree and tested, and
-that is the whole of section "The gap in the current state model"
-below. **Accepted but not yet built: the peer-issued restart (rule 3),
-the detached restart process (rule 4), and the replacement managerd's
-own confirmation (rule 5).** Nothing in this repository yet restarts
-`apiary_managerd` on a controlled update: `colonyupdate.Inert` is the
-only `Controller` implementation and it starts nothing,
-`ExecuteNodeRestartPlan` refuses `apiary_managerd` outright, and rule
-4's detached restart is still asserted rather than measured.
+Accepted. **The state model was implemented first and is merged.** The
+durable `ColonyUpdate` record, the `ColonyUpdateFence` that binds a
+restart lease to the operation actually running, and
+`HandoverColonyUpdate` as a distinct command over that record are all
+in the tree and tested, and that is the whole of section "The gap in the
+current state model" below.
 
-What is unbuilt here is the mechanical half only. The restart this ADR
-hands over is not a generic managerd self-restart control and none is
-added by it: ADR-0142's refusal stands in the service machinery, and
-the Machine page's managerd row is status only. The controlled update
-path (ADR-0145) is the only thing that will ever perform that restart,
-and it is unbuilt too.
+**The mechanical half is now implemented too.** All six rules are in
+`internal/manager/handoff.go`, reachable only over the dedicated
+root-owned restart-guardrail token, with no operator surface:
+
+- **Rule 1** is enforced twice, in
+  `Server.RequestManagerdRestart` and again on the target. A managerd
+  that names its own Comb as the target is refused by name, and so is a
+  target that the presented fence says is the operation's holder. The
+  second check is not redundancy: the first is on the other side of a
+  network hop, and a check that exists on one side of a hop can be aimed
+  around by a caller who reaches the other side directly.
+- **Rule 2** is `HandoverColonyUpdate`, reached from the target-side
+  handler. A target that is the operation's holder moves the operation
+  to a named successor before it arranges its own death, and refuses
+  outright when no successor is named rather than inventing one.
+- **Rule 3** is two RPCs, `RequestManagerdRestart` on the coordinator
+  and `IssueManagerdRestart` on the target, both target-local in
+  execution and never leader-forwarded. The self-restart refusal is
+  preserved with no `force` field to override it, because there is no
+  version of force that turns "the process that would perform the start
+  is the process being stopped" into a known cost.
+- **Rule 4** is `setsidServiceRestarter`: a child in its own session,
+  started from a background context, waiting inside the child and then
+  `exec`ing `service apiary_managerd restart`. **It is still asserted
+  rather than measured.** The three failure modes the rule names are each
+  closed by a specific property - a new session so the child is not in
+  managerd's process group, a background context so nothing cancels it
+  when the handler returns, the delay inside the child rather than in a
+  parent that is about to be killed - and those properties are pinned by
+  tests. What no macOS test can supply is the reproduction on a real
+  Comb, and that remains outstanding.
+- **Rule 5** is `Server.ConfirmManagerdRestartHandoff`, run by
+  cmd/managerd on this process's own next startup. It runs the real
+  `internal/buildgate` over the real installed binary and the real
+  startup log, confirms the restart lease through the existing
+  `ConfirmRestartCompletedLocal`, and appends the step outcome to the
+  operation's durable history. It never runs for anyone else, which is
+  the entire point.
+- **Rule 6** is the failure handling of that same path. No marker is an
+  ordinary startup and is silent. A marker that exists and cannot be
+  read, a marker for a different Comb, a marker with no recorded
+  expected build, and a marker whose step could not be recorded are all
+  `unobserved`, all keep the record, and none of them is a success. A
+  Comb that comes back on a build nobody asked for is `failed`, not
+  `unknown`, because that is positive evidence.
+
+**What is still not built is the sweep, and it belongs to ADR-0145.**
+Nothing yet decides which Comb to update, in what order, or when to
+stop, and `colonyupdate.Inert` is still the only `Controller`
+implementation, so no operator request reaches any of this. That is the
+same boundary `ExecuteNodeRestartPlan` was delivered under: the guarded
+mechanism is real and reachable, the coordinator that drives it is a
+later step.
+
+**Two boundaries this implementation deliberately did not cross.** No
+UI control, route or template was added: ADR-0142's refusal stands in
+`RestartNodeService`, and the Machine page's managerd row is status
+only, because the handoff is a step of a controlled update and not a
+general "bounce the daemon" control. And the detached restart is not
+automated anywhere: `apiaryctl force-restart` remains the manual path,
+and the controlled path is the only one that carries the guardrail.
 
 Depends on the durable `ColonyUpdate` record and its `ColonyUpdateFence`,
-now merged into `main`, which carries `HandoverColonyUpdate` specifically
+merged into `main`, which carries `HandoverColonyUpdate` specifically
 to close the gap this ADR identified. Section "The gap in the current
-state model" has been rewritten to record how that was closed.
+state model" records how that was closed.
 
 Amends ADR-0142. Implements the second open question of ADR-0145.
 
@@ -179,6 +228,26 @@ rules already in place: exact service, exact holder, exact lease, and a
 cooldown driven by the RestartRecord rather than by a timestamp anyone
 edits. Lease zero remains the emergency path and remains manual.
 
+What the replacement contributes is the confirmation and nothing else.
+Continuing the sweep is the coordinator's work, not this process's: a
+replacement managerd is not the coordinator, and under rule 1 it is
+almost never the holder either. `ConfirmManagerdRestartHandoff`
+therefore records the step and stops. It does not decide what happens
+next, and the ADR-0143 question at the end of this section - whether a
+replacement whose colony disagrees may continue at all - is exactly the
+question a coordinator has to answer, which is another reason the answer
+does not belong in the process that just came up.
+
+The fence it records against is read back from its own raftd rather than
+taken from the marker, and that does not weaken the fencing. A
+replacement has no fence of its own to present - it is not the
+coordinator - so what it presents is a claim that "this is the operation
+my durable marker names, as this node's raftd currently has it". The
+FSM re-checks the same four fields against the active record by exact
+match, so a follower's copy lagging the leader by a commit produces a
+precise refusal rather than a step record attached to the wrong
+operation.
+
 ### 6. Absent evidence is `unobserved`, and it stops
 
 If a replacement managerd comes up and cannot find the record it expects,
@@ -250,6 +319,24 @@ load-bearing and can be wrong.
 
 ## Open questions
 
+- **Rule 1 and who the acquire names as holder.** A verified tension,
+  not a design preference, and it is worth stating precisely because
+  rule 1 and one of the rejected alternatives below point opposite
+  ways. `AcquireColonyUpdate` is authored by the node that applies it,
+  and after the leader forward every acquire performs, that is the raft
+  leader - so a freshly acquired operation is always held by the leader,
+  whatever Comb asked for it. "Make the coordinator always the Raft
+  leader" is rejected in this ADR, precisely because leadership moves
+  for reasons of its own. The two are reconciled today only by rule 1's
+  check being a constraint the coordinator re-derives per step: the
+  leader simply must not be the Comb being updated, and at the end of a
+  sweep the operation is handed over (which does accept a non-leader
+  holder, and does so explicitly). What that costs is not yet
+  established, and whether the acquire should carry the requesting
+  Comb's own identity instead of the applying node's is a decision about
+  ADR-0145's fence rather than about this handoff. It is recorded here
+  rather than changed, because changing it is an architecture decision
+  and this implementation is a mechanism, not a redesign.
 - **Who may take over.** As designed, `takeover: true` is the only route
   to a second coordinator, and it is deliberate. If any operator session
   can set it, a second browser tab can kill a running colony update. It
