@@ -122,10 +122,14 @@ func (s *Server) handleDeleteVMSnapshot(w http.ResponseWriter, r *http.Request) 
 
 // cloneSourceView is one VM eligible to be a clone-from-snapshot source
 // (ADR-0095) for the create-VM form's cascading dropdowns - a VM with
-// at least one snapshot. Snapshots are node-local (ADR-0090's own
-// design), so NodeID is included for the form's own JS to warn the
-// operator when the chosen target Node ID differs from the source's -
-// cloning across nodes isn't supported (see ensureVM's own error).
+// at least one snapshot. NodeID is included for the form's own JS to
+// tell the operator when the chosen target Node ID differs from the
+// source's: the clone still works then, because internal/cluster's
+// reconciler fetches the snapshot from the source's Comb before
+// cloning (ADR-0090's cross-node follow-up, closing ADR-0095's
+// disclosed node-local limitation), but it is worth saying so, exactly
+// the way the ISO pickers already say a missing image "will be
+// fetched from a peer".
 type cloneSourceView struct {
 	VMID      string
 	VMName    string

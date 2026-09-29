@@ -146,6 +146,15 @@ type PeerForwarder interface {
 	// UploadISO above, used by PushJailTemplateTo (ADR-0089).
 	PushJailTemplate(ctx context.Context, addr, name string, r io.Reader) error
 
+	// PushVMSnapshot streams a local `zfs send` of one VM's checkpoint
+	// to addr's own ReceiveVMSnapshot RPC - the VM-snapshot equivalent
+	// of PushJailTemplate above, used by PushVMSnapshotTo (ADR-0090's
+	// cross-node follow-up, see internal/manager/vmsnapshotsend.go).
+	// The id and snapshot name travel as the stream's metadata message
+	// and are re-validated on the receiving end, because the sender is
+	// not trusted to have checked them.
+	PushVMSnapshot(ctx context.Context, addr, vmID, snapshotName string, r io.Reader) error
+
 	// SimulateNodeFailure forwards the entire original request to addr's
 	// own SimulateNodeFailure RPC - see ADR-0052, and this file's own
 	// SimulateNodeFailure handler for why the whole request (not just

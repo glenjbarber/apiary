@@ -444,13 +444,7 @@ func (f vmCreateForm) cloneFromSnapshot() string {
 // failure wins; the message is written to be shown verbatim in the
 // form's own error banner, so it names the offending field and says
 // why the combination cannot work.
-//
-// cloneSourceNodeID is the node the source VM actually lives on,
-// resolved by the caller from the cluster's own VM list. Empty means
-// "could not be determined" - the node-locality rule is then skipped
-// rather than guessed at, and internal/cluster's reconciler still
-// rejects the clone at provisioning time with its own message.
-func (f vmCreateForm) validateVMCreateForm(cloneSourceNodeID string) error {
+func (f vmCreateForm) validateVMCreateForm() error {
 	if err := checkSubmittedKind(f.Kind, guidedKindVM); err != nil {
 		return err
 	}
@@ -510,14 +504,14 @@ func (f vmCreateForm) validateVMCreateForm(cloneSourceNodeID string) error {
 			return fmt.Errorf("Clone source and base image are mutually exclusive: a clone already has the source snapshot's contents, so %q could never be copied in on top of it. "+
 				"Pick one way to seed this VM's disk - a clone, a base image, or a blank disk", f.BaseImageName)
 		}
-		// ADR-0090/ADR-0095: a VM snapshot is node-local and
-		// `zfs clone` is a local operation, so the source VM must
-		// live on the same node as this one. Unlike the image
-		// pickers, there is no cross-node fetch to fall back on.
-		if f.NodeID != "" && cloneSourceNodeID != "" && cloneSourceNodeID != f.NodeID {
-			return fmt.Errorf("Clone source %q lives on node %q but this VM is being created on %q: a VM snapshot is node-local (ADR-0090) and `zfs clone` runs on one node only, with no cross-node fetch. "+
-				"Either create this VM on %q, or clear the clone source", f.CloneSourceVMID, cloneSourceNodeID, f.NodeID, cloneSourceNodeID)
-		}
+		// No locality rule: a source VM on another Comb is not a
+		// refusal, it is a fetch. The reconciler asks whichever peer
+		// reports holding that snapshot to `zfs send` it here, and
+		// clones from it locally (ADR-0090's cross-node follow-up,
+		// closing ADR-0095's disclosed node-local limitation). This is
+		// the same treatment the ISO and base-image pickers below
+		// already get, which is why the form's dropdown annotation is a
+		// "will be fetched from a peer" cue rather than a block.
 	}
 
 	// The two image pickers take different roles from the same store

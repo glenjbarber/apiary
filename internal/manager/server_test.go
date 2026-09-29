@@ -1260,11 +1260,15 @@ type fakeQuotaSetter struct {
 	lastDestroyed  string
 	existsOverride map[string]bool
 
-	// sendData/sendErr, receivedInto/receiveErr, templateNames/
-	// templateNamesErr back Send/Receive/ListTemplateNames' tests
-	// (ADR-0089) - the jail base-template peer-fetch primitives.
-	sendData map[string]string
-	sendErr  error
+	// sendData/sendErr/sentSnapshots, receivedInto/receiveErr,
+	// templateNames/templateNamesErr back Send/Receive/
+	// ListTemplateNames' tests (ADR-0089) - the jail base-template
+	// peer-fetch primitives. sentSnapshots records every name Send was
+	// asked for, so a test can assert a rejected request never reached
+	// `zfs send` at all rather than merely that the transfer stopped.
+	sendData      map[string]string
+	sendErr       error
+	sentSnapshots []string
 
 	receivedInto map[string]string // destName -> received bytes
 	receiveErr   error
@@ -1283,6 +1287,18 @@ type fakeQuotaSetter struct {
 	destroySnapshotErr  error
 	listSnapshotsErr    error
 	lastRolledBack      string
+
+	// forceReceivedInto/receiveForceErr/receiveForceHook back
+	// ReceiveVMSnapshot's `zfs receive -F` half (vmSnapshotStore,
+	// vmsnapshotsend.go). The hook is the interesting one: a real
+	// `zfs receive` publishes the snapshot as the stream lands, so a
+	// test needs to flip the fake's snapshot table at that exact
+	// moment - after the pre-receive "does it already exist here"
+	// check has already said no, and before the post-receive
+	// confirmation checks that it does.
+	forceReceivedInto map[string]string
+	receiveForceErr   error
+	receiveForceHook  func(destName string)
 }
 
 func (f *fakeQuotaSetter) SetProperty(_ context.Context, name, prop, value string) error {
@@ -1325,6 +1341,7 @@ func (f *fakeQuotaSetter) DestroyDataset(_ context.Context, name string) error {
 }
 
 func (f *fakeQuotaSetter) Send(_ context.Context, snapshot string) (io.ReadCloser, error) {
+	f.sentSnapshots = append(f.sentSnapshots, snapshot)
 	if f.sendErr != nil {
 		return nil, f.sendErr
 	}
@@ -1348,6 +1365,33 @@ func (f *fakeQuotaSetter) Receive(_ context.Context, destName string, r io.Reade
 	}
 	f.receivedInto[destName] = string(data)
 	return nil
+}
+
+// ReceiveForce is vmSnapshotStore's half - the `zfs receive -F` a
+// ReceiveVMSnapshot stream is piped into. Recorded separately from
+// Receive so a test can tell which primitive ran.
+func (f *fakeQuotaSetter) ReceiveForce(_ context.Context, destName string, r io.Reader) error {
+	if f.receiveForceHook != nil {
+		f.receiveForceHook(destName)
+	}
+	if f.receiveForceErr != nil {
+		return f.receiveForceErr
+	}
+	data, err := io.ReadAll(r)
+	if err != nil {
+		return err
+	}
+	if f.forceReceivedInto == nil {
+		f.forceReceivedInto = map[string]string{}
+	}
+	f.forceReceivedInto[destName] = string(data)
+	return nil
+}
+
+// SnapshotExists is vmSnapshotStore's other half, backed by the same
+// "dataset@snapshot" keyed table the CreateVMSnapshot tests use.
+func (f *fakeQuotaSetter) SnapshotExists(_ context.Context, name string) (bool, error) {
+	return f.snapshots[name], nil
 }
 
 func (f *fakeQuotaSetter) ListTemplateNames(context.Context) ([]string, error) {
@@ -1527,6 +1571,272 @@ func TestServer_RestoreVMSnapshot_NotConfiguredIsError(t *testing.T) {
 	}
 	if resp.GetError() == "" {
 		t.Fatal("RestoreVMSnapshot() with no ZFS configured = no error, want a clear rejection")
+	}
+}
+
+// fakeReceiveVMSnapshotStream mirrors fakeReceiveJailTemplateStream
+// exactly, for Server.ReceiveVMSnapshot (vmsnapshotsend.go). The nil
+// raft client on the Server these drive is deliberate and matches
+// TestServer_RestoreVMSnapshot_NilRaftSkipsRunningCheck above: the
+// VM-exists and running-VM halves of the receive preconditions are
+// best effort against raft and are skipped when there is no raft
+// client at all, which leaves the halves that are NOT best effort -
+// name validation, the already-have-this-snapshot refusal, and the
+// post-receive confirmation - reachable here. Those three are the
+// ones that decide whether a hostile or broken peer can do damage,
+// and the integration tests in vmsnapshot_replication_test.go cover
+// the raft-backed halves against a real managerd.
+type fakeReceiveVMSnapshotStream struct {
+	grpc.ServerStream
+	reqs []*rpcpb.ReceiveVMSnapshotRequest
+	idx  int
+	resp *rpcpb.ReceiveVMSnapshotResponse
+}
+
+func (f *fakeReceiveVMSnapshotStream) Recv() (*rpcpb.ReceiveVMSnapshotRequest, error) {
+	if f.idx >= len(f.reqs) {
+		return nil, io.EOF
+	}
+	req := f.reqs[f.idx]
+	f.idx++
+	return req, nil
+}
+
+func (f *fakeReceiveVMSnapshotStream) SendAndClose(resp *rpcpb.ReceiveVMSnapshotResponse) error {
+	f.resp = resp
+	return nil
+}
+
+func (f *fakeReceiveVMSnapshotStream) Context() context.Context { return context.Background() }
+
+func vmSnapshotMetadataMsg(id, name string) *rpcpb.ReceiveVMSnapshotRequest {
+	return &rpcpb.ReceiveVMSnapshotRequest{Data: &rpcpb.ReceiveVMSnapshotRequest_Metadata{
+		Metadata: &rpcpb.VMSnapshotMetadata{Id: id, SnapshotName: name},
+	}}
+}
+
+func vmSnapshotChunkMsg(data string) *rpcpb.ReceiveVMSnapshotRequest {
+	return &rpcpb.ReceiveVMSnapshotRequest{Data: &rpcpb.ReceiveVMSnapshotRequest_Chunk{Chunk: []byte(data)}}
+}
+
+// TestServer_ReceiveVMSnapshot_StreamsChunksIntoReceiveForce is the
+// happy path: the chunks land in `zfs receive -F` (not the plain
+// Receive, which refuses an existing destination outright and is the
+// wrong primitive for a VM's own dataset), and the response names the
+// snapshot only once the fake has confirmed it exists locally.
+func TestServer_ReceiveVMSnapshot_StreamsChunksIntoReceiveForce(t *testing.T) {
+	zfsMgr := &fakeQuotaSetter{snapshots: map[string]bool{}}
+	zfsMgr.receiveForceHook = func(destName string) { zfsMgr.snapshots[destName+"@nightly"] = true }
+	s := NewServer(nil, "node-1", nil, nil, nil, nil, nil, "", zfsMgr, nil, nil, 0, nil)
+
+	stream := &fakeReceiveVMSnapshotStream{reqs: []*rpcpb.ReceiveVMSnapshotRequest{
+		vmSnapshotMetadataMsg("1", "nightly"),
+		vmSnapshotChunkMsg("hello "),
+		vmSnapshotChunkMsg("world"),
+	}}
+
+	if err := s.ReceiveVMSnapshot(stream); err != nil {
+		t.Fatalf("ReceiveVMSnapshot() error: %v", err)
+	}
+	if zfsMgr.forceReceivedInto["1"] != "hello world" {
+		t.Errorf("received data = %q, want %q", zfsMgr.forceReceivedInto["1"], "hello world")
+	}
+	if zfsMgr.receivedInto != nil {
+		t.Errorf("plain Receive called with %v, want none - a VM snapshot arrives for a dataset that already exists", zfsMgr.receivedInto)
+	}
+	if stream.resp.GetError() != "" {
+		t.Errorf("response error = %q, want empty", stream.resp.GetError())
+	}
+	if stream.resp.GetId() != "1" || stream.resp.GetSnapshotName() != "nightly" {
+		t.Errorf("response names = %q/%q, want 1/nightly", stream.resp.GetId(), stream.resp.GetSnapshotName())
+	}
+}
+
+// TestServer_ReceiveVMSnapshot_MissingMetadataFirstIsError mirrors
+// TestServer_ReceiveJailTemplate_MissingMetadataFirstIsError: a
+// leading chunk is a protocol error, not a nameless transfer.
+func TestServer_ReceiveVMSnapshot_MissingMetadataFirstIsError(t *testing.T) {
+	s := NewServer(nil, "node-1", nil, nil, nil, nil, nil, "", &fakeQuotaSetter{}, nil, nil, 0, nil)
+	stream := &fakeReceiveVMSnapshotStream{reqs: []*rpcpb.ReceiveVMSnapshotRequest{vmSnapshotChunkMsg("oops")}}
+
+	if err := s.ReceiveVMSnapshot(stream); err == nil {
+		t.Fatal("ReceiveVMSnapshot() = nil error, want rejection when metadata isn't first")
+	}
+}
+
+// TestServer_ReceiveVMSnapshot_RejectsUnusableNameBeforeAnyReceive
+// confirms the sender is not trusted to have checked: the id becomes
+// both a dataset path and a `zfs receive -F` argument on this node, so
+// a traversal, an absolute path, or a shell metacharacter has to be
+// refused before a single byte is read, and before any subprocess
+// could be started.
+//
+// Note what is NOT in this list: a snapshot name beginning with a
+// dash is legal and is admitted on purpose. validVMSnapshotName
+// allows '-', and no layer underneath ever sees that name as the
+// first character of an argument - it is always interpolated as
+// "<vm-id>@<snapshot>", and the id has already been validated. The
+// leading-dash hazard would be a name the *id* could produce, and
+// validVMResourceID does refuse that.
+func TestServer_ReceiveVMSnapshot_RejectsUnusableNameBeforeAnyReceive(t *testing.T) {
+	for _, tc := range []struct {
+		name         string
+		id           string
+		snapshotName string
+	}{
+		{"path traversal in the id", "../../etc/passwd", "nightly"},
+		{"absolute path in the id", "/etc/passwd", "nightly"},
+		{"dot-dot segment in the id", "..", "nightly"},
+		{"shell metacharacter in the snapshot name", "1", "nightly; rm -rf /"},
+		{"path separator in the snapshot name", "1", "nightly/nightly"},
+		{"space in the snapshot name", "1", "nightly nightly"},
+		{"over-long snapshot name", "1", strings.Repeat("a", 65)},
+		{"empty id", "", "nightly"},
+		{"empty snapshot name", "1", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			zfsMgr := &fakeQuotaSetter{}
+			s := NewServer(nil, "node-1", nil, nil, nil, nil, nil, "", zfsMgr, nil, nil, 0, nil)
+			stream := &fakeReceiveVMSnapshotStream{reqs: []*rpcpb.ReceiveVMSnapshotRequest{
+				vmSnapshotMetadataMsg(tc.id, tc.snapshotName),
+				vmSnapshotChunkMsg("payload"),
+			}}
+
+			if err := s.ReceiveVMSnapshot(stream); err != nil {
+				t.Fatalf("ReceiveVMSnapshot() error: %v, want a response-level refusal instead", err)
+			}
+			if stream.resp.GetError() == "" {
+				t.Fatal("ReceiveVMSnapshot() with an unusable name = no error, want a refusal")
+			}
+			if zfsMgr.forceReceivedInto != nil {
+				t.Errorf("ReceiveForce called with %v, want none - the name was refused before any transfer", zfsMgr.forceReceivedInto)
+			}
+		})
+	}
+}
+
+// TestServer_ReceiveVMSnapshot_NotConfiguredIsError mirrors
+// TestServer_ReceiveJailTemplate_NoZFSConfiguredIsError.
+func TestServer_ReceiveVMSnapshot_NotConfiguredIsError(t *testing.T) {
+	s := NewServer(nil, "node-1", nil, nil, nil, nil, nil, "", nil, nil, nil, 0, nil)
+	stream := &fakeReceiveVMSnapshotStream{reqs: []*rpcpb.ReceiveVMSnapshotRequest{vmSnapshotMetadataMsg("1", "nightly")}}
+
+	if err := s.ReceiveVMSnapshot(stream); err != nil {
+		t.Fatalf("ReceiveVMSnapshot() error: %v, want a response-level error instead", err)
+	}
+	if stream.resp.GetError() == "" {
+		t.Error("response error = empty, want the no-ZFS-configured error surfaced")
+	}
+}
+
+// TestServer_ReceiveVMSnapshot_AlreadyHasSnapshotIsRefused confirms
+// the one non-best-effort precondition: a -F receive over a dataset
+// that already holds a checkpoint of that name would silently replace
+// it, and an operator's earlier checkpoint is exactly what a
+// transfer must never quietly destroy. The refusal happens before
+// the stream is read, not partway through.
+func TestServer_ReceiveVMSnapshot_AlreadyHasSnapshotIsRefused(t *testing.T) {
+	zfsMgr := &fakeQuotaSetter{snapshots: map[string]bool{"1@nightly": true}}
+	s := NewServer(nil, "node-1", nil, nil, nil, nil, nil, "", zfsMgr, nil, nil, 0, nil)
+	stream := &fakeReceiveVMSnapshotStream{reqs: []*rpcpb.ReceiveVMSnapshotRequest{
+		vmSnapshotMetadataMsg("1", "nightly"),
+		vmSnapshotChunkMsg("payload"),
+	}}
+
+	if err := s.ReceiveVMSnapshot(stream); err != nil {
+		t.Fatalf("ReceiveVMSnapshot() error: %v, want a response-level error instead", err)
+	}
+	if !strings.Contains(stream.resp.GetError(), "already has a snapshot") {
+		t.Errorf("response error = %q, want the existing-snapshot refusal", stream.resp.GetError())
+	}
+	if !zfsMgr.snapshots["1@nightly"] {
+		t.Error("the operator's existing snapshot was destroyed by a refused receive")
+	}
+	if zfsMgr.forceReceivedInto != nil {
+		t.Errorf("ReceiveForce called with %v, want none - refused before any transfer", zfsMgr.forceReceivedInto)
+	}
+}
+
+// TestServer_ReceiveVMSnapshot_FailedReceiveDiscardsPartialSnapshot
+// is the fail-closed half. Per zfs(8) a failed `zfs receive -F` does
+// not roll back, so it can leave a snapshot of exactly the requested
+// name published on a partially received dataset. Left alone, that
+// would be listed by ListVMSnapshots and then handed to a later
+// RestoreVMSnapshot as though it were complete, so it is destroyed and
+// the response says so.
+func TestServer_ReceiveVMSnapshot_FailedReceiveDiscardsPartialSnapshot(t *testing.T) {
+	zfsMgr := &fakeQuotaSetter{receiveForceErr: errors.New("stream was truncated"), snapshots: map[string]bool{}}
+	// A real -F receive publishes the snapshot before it fails.
+	zfsMgr.receiveForceHook = func(destName string) { zfsMgr.snapshots[destName+"@nightly"] = true }
+	s := NewServer(nil, "node-1", nil, nil, nil, nil, nil, "", zfsMgr, nil, nil, 0, nil)
+	stream := &fakeReceiveVMSnapshotStream{reqs: []*rpcpb.ReceiveVMSnapshotRequest{
+		vmSnapshotMetadataMsg("1", "nightly"),
+		vmSnapshotChunkMsg("half a stream"),
+	}}
+
+	if err := s.ReceiveVMSnapshot(stream); err != nil {
+		t.Fatalf("ReceiveVMSnapshot() error: %v, want a response-level error instead", err)
+	}
+	if !strings.Contains(stream.resp.GetError(), "truncated") {
+		t.Errorf("response error = %q, want the receive failure surfaced", stream.resp.GetError())
+	}
+	if !strings.Contains(stream.resp.GetError(), "partially received snapshot") {
+		t.Errorf("response error = %q, want the cleanup named rather than hidden", stream.resp.GetError())
+	}
+	if zfsMgr.snapshots["1@nightly"] {
+		t.Error("a partially received snapshot was left behind for a later RestoreVMSnapshot to find")
+	}
+}
+
+// TestServer_ReceiveVMSnapshot_FailedReceiveCleanupFailureIsReported
+// covers the case ZFS itself creates: a dataset with an unfinished
+// receive refuses to destroy its snapshots. Hiding that would report
+// a clean failure for a dataset that still needs `zfs receive -A`, so
+// the error carries the fact and names what has to be done.
+func TestServer_ReceiveVMSnapshot_FailedReceiveCleanupFailureIsReported(t *testing.T) {
+	zfsMgr := &fakeQuotaSetter{
+		receiveForceErr:    errors.New("stream was truncated"),
+		destroySnapshotErr: errors.New("destination dataset has a resumed receive"),
+		snapshots:          map[string]bool{},
+	}
+	zfsMgr.receiveForceHook = func(destName string) { zfsMgr.snapshots[destName+"@nightly"] = true }
+	s := NewServer(nil, "node-1", nil, nil, nil, nil, nil, "", zfsMgr, nil, nil, 0, nil)
+	stream := &fakeReceiveVMSnapshotStream{reqs: []*rpcpb.ReceiveVMSnapshotRequest{
+		vmSnapshotMetadataMsg("1", "nightly"),
+		vmSnapshotChunkMsg("half a stream"),
+	}}
+
+	if err := s.ReceiveVMSnapshot(stream); err != nil {
+		t.Fatalf("ReceiveVMSnapshot() error: %v, want a response-level error instead", err)
+	}
+	if !strings.Contains(stream.resp.GetError(), "operator attention") {
+		t.Errorf("response error = %q, want the undestroyable partial snapshot reported rather than hidden", stream.resp.GetError())
+	}
+}
+
+// TestServer_ReceiveVMSnapshot_ReceiveSucceededButSnapshotMissingIsError
+// is the other end of the same posture: a stream that merely ended
+// proves nothing, so success is claimed only after the snapshot has
+// been confirmed to exist locally. Without this check a truncated or
+// entirely bogus stream would be reported to the pusher as a
+// completed transfer, and the pusher's reconciler would then clone
+// from a snapshot that is not there.
+func TestServer_ReceiveVMSnapshot_ReceiveSucceededButSnapshotMissingIsError(t *testing.T) {
+	zfsMgr := &fakeQuotaSetter{} // ReceiveForce succeeds, publishes nothing
+	s := NewServer(nil, "node-1", nil, nil, nil, nil, nil, "", zfsMgr, nil, nil, 0, nil)
+	stream := &fakeReceiveVMSnapshotStream{reqs: []*rpcpb.ReceiveVMSnapshotRequest{
+		vmSnapshotMetadataMsg("1", "nightly"),
+		vmSnapshotChunkMsg("payload"),
+	}}
+
+	if err := s.ReceiveVMSnapshot(stream); err != nil {
+		t.Fatalf("ReceiveVMSnapshot() error: %v, want a response-level error instead", err)
+	}
+	if !strings.Contains(stream.resp.GetError(), "not present") {
+		t.Errorf("response error = %q, want a refused success claim when the snapshot is absent", stream.resp.GetError())
+	}
+	if stream.resp.GetSnapshotName() != "" {
+		t.Errorf("response named snapshot %q, want none on a refused transfer", stream.resp.GetSnapshotName())
 	}
 }
 

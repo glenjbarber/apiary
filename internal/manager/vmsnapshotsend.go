@@ -29,19 +29,18 @@ import (
 
 // vmSnapshotTransfer is the *PeerReporter method PushVMSnapshotTo needs
 // to open a client stream on the target node's own ReceiveVMSnapshot
-// RPC - PeerForwarder cannot be widened from this file (it is declared
-// in server.go, which other branches own), so it is asserted for
-// structurally instead. See the report on this branch: internal/manager's
-// PeerForwarder needs
+// RPC. PeerForwarder declares it (see server.go), so a real
+// *PeerReporter satisfies it and the assertion below holds in
+// production; it is still asserted for structurally rather than
+// assumed, so a narrower PeerForwarder in a test or a future
+// refactor gets a named error naming exactly what is missing rather
+// than a success with no transfer behind it.
 //
-//	PushVMSnapshot(ctx context.Context, addr, vmID, snapshotName string, r io.Reader) error
-//
-// and *PeerReporter needs the matching method beside its own
-// PushJailTemplate, or this handler always refuses at the assertion
-// below. The refusal is explicit and not a silent no-op: an operator
-// asking for a snapshot transfer gets a named error saying exactly
-// which capability is missing, never a success with no transfer behind
-// it.
+// The client half lives in peer.go beside PushJailTemplate, and its
+// production caller is internal/cluster's Reconciler, which asks the
+// peer that already holds a named VM checkpoint to push it here before
+// cloning from it (ADR-0095's disclosed node-local limitation, closed
+// the same way ADR-0089 closed the identical one for jail templates).
 type vmSnapshotTransfer interface {
 	PushVMSnapshot(ctx context.Context, addr, vmID, snapshotName string, r io.Reader) error
 }
@@ -159,10 +158,13 @@ func (s *Server) PushVMSnapshotTo(ctx context.Context, req *rpcpb.PushVMSnapshot
 //     checked; either end can be the wrong or hostile one.
 //   - the VM must exist here. A snapshot for a VM this node has never
 //     heard of would otherwise create a dataset nobody can attach to.
-//   - the VM must not be desired to be running, for exactly the
-//     reason RestoreVMSnapshot refuses: a -F receive rolls the dataset
-//     back and rewrites it underneath the file a bhyve process has
-//     open.
+//   - a VM this node still holds a dataset for must not be desired to
+//     be running, for exactly the reason RestoreVMSnapshot refuses: a
+//     -F receive rolls the dataset back and rewrites it underneath the
+//     file a bhyve process has open. The "this node still holds it"
+//     half is what makes that true - the danger is local, and a VM
+//     living entirely on another Comb has no local disk here to
+//     rewrite, which is precisely the case this pair exists to serve.
 //   - the snapshot must not already exist here. A -F receive over a
 //     dataset that already holds a checkpoint of that name would
 //     silently replace it, and an operator's earlier checkpoint is
@@ -263,10 +265,27 @@ func (s *Server) vmsnapshotReceivePreconditions(ctx context.Context, meta *rpcpb
 	if s.raft != nil {
 		vmResp, err := s.GetVM(ctx, &rpcpb.GetVMRequest{Id: meta.GetId()})
 		if err == nil && !vmResp.GetFound() {
-			return fmt.Errorf("VM %q does not exist on this node", meta.GetId())
+			return fmt.Errorf("VM %q has no replicated definition on this node, so a snapshot for it would create a dataset nothing could ever attach to", meta.GetId())
 		}
+		// The running check is about a LOCAL disk, not about the
+		// cluster-wide desired state GetVM reports. A `-F` receive is
+		// only dangerous where it rewrites a dataset a bhyve process on
+		// THIS node has open, and a VM this node has never held has no
+		// such process and no such dataset - `zfs receive -F` would
+		// create the dataset, not roll one back. Refusing on the
+		// replicated desired state alone would make the cross-Comb
+		// clone-source fetch impossible for every source VM that is
+		// running on its own Comb, which is the ordinary case, while
+		// protecting nothing: the running VM's disk is on the other
+		// node. The local-dataset half is what actually closes the
+		// window it was written for, including the migration window
+		// where this node's raft view has already moved the VM
+		// elsewhere but its bhyve process and dataset are still here.
 		if err == nil && vmResp.GetVm().GetDesiredState() == rpcpb.VMState_VM_STATE_RUNNING {
-			return fmt.Errorf("VM %q must be stopped before receiving a snapshot for it", meta.GetId())
+			held, heldErr := s.zfs.DatasetExists(ctx, meta.GetId())
+			if heldErr == nil && held {
+				return fmt.Errorf("VM %q must be stopped before receiving a snapshot for it: this node still holds its dataset", meta.GetId())
+			}
 		}
 	}
 	store, ok := s.zfs.(vmSnapshotStore)
