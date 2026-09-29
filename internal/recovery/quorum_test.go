@@ -136,10 +136,19 @@ func TestClassifyQuorumFromVantage_UnnamedVantageFailsClosed(t *testing.T) {
 
 func TestClassifyQuorumFromVantage_LostIsNeverDowngradedFromEitherVantage(t *testing.T) {
 	// A count-based Lost is a voter-count fact independent of
-	// reachability, so no vantage point can soften it.
+	// reachability, so no vantage point can soften it. The fixture has
+	// to be one where even crediting every unknown voter as reachable
+	// still cannot reach quorum: 5 voters, quorum 3, and the target
+	// removed leaves 4 with only 1 confirmed reachable and 1 unknown -
+	// 1+1 = 2, short of 3. (A smaller fixture where the unknowns add up
+	// to quorum is genuinely QuorumUnknown, not Lost, which is the
+	// distinction this whole three-state vocabulary exists to keep.)
 	f := QuorumFact{
-		TargetIsVoter: true, TotalVoters: 3, RemainingVoters: 2,
-		RemainingReachable: 0, RemainingUnknown: 2, QuorumSize: 2,
+		TargetIsVoter: true, TotalVoters: 5, RemainingVoters: 4,
+		RemainingReachable: 1, RemainingUnknown: 1, QuorumSize: 3,
+	}
+	if !ValidQuorumFact(f) {
+		t.Fatalf("fixture is not a valid QuorumFact, so this test would pass for the wrong reason")
 	}
 	for _, vantage := range []QuorumVantage{VantageFromLeader, VantageFromNonLeader, QuorumVantage("")} {
 		if got := ClassifyQuorumFromVantage(f, true, vantage); got != QuorumLost {

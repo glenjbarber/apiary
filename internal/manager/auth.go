@@ -188,6 +188,14 @@ var requiredRole = map[string]Role{
 	"/apiary.rpc.v1.ManagerService/PushJailTemplateTo":  RoleOperator,
 	"/apiary.rpc.v1.ManagerService/ReceiveJailTemplate": RoleOperator,
 
+	// PushVMSnapshotTo/ReceiveVMSnapshot are the VM-snapshot equivalents
+	// of the jail-template pair above (ADR-0090's cross-node follow-up):
+	// same Operator tier, same peer-to-peer-only reasoning, for the same
+	// reason - a node asks a peer to push it storage the peer already
+	// holds, which is not something a Viewer should be able to start.
+	"/apiary.rpc.v1.ManagerService/PushVMSnapshotTo":  RoleOperator,
+	"/apiary.rpc.v1.ManagerService/ReceiveVMSnapshot": RoleOperator,
+
 	// Admin: API-key/administration and the ForcePurge* escape hatches
 	// (a human-triggered override of a reconciler's own normal
 	// teardown sequence - deliberately not something Operator can do

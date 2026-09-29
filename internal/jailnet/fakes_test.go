@@ -392,6 +392,17 @@ type fakeJail struct {
 	failDHCPO string
 	failDHCPX string
 	dhcpRuns  []string
+
+	// addressWrites records every address this fake was asked to impose
+	// on a jail, so a test can assert that a jail Apiary has no
+	// authority over never had one written at all.
+	addressWrites []fakeAddressWrite
+}
+
+// fakeAddressWrite is one recorded EnsureAddressing call.
+type fakeAddressWrite struct {
+	id   string
+	addr string
 }
 
 // jailNet is one modelled jail's own network stack. clients are the
@@ -510,6 +521,7 @@ func (j *fakeJail) EnsureAddressing(ctx context.Context, id, iface string, addr 
 	}
 	state.addrs = kept
 	j.net[id] = state
+	j.addressWrites = append(j.addressWrites, fakeAddressWrite{id: id, addr: want})
 	return nil
 }
 
@@ -517,6 +529,35 @@ func (j *fakeJail) fixCount() int {
 	j.mu.Lock()
 	defer j.mu.Unlock()
 	return len(j.fixes)
+}
+
+// addressWrittenFor reports the last address this fake was asked to
+// impose on a jail, or "" if it was never asked to impose one. It is
+// the "was the carve-out respected" check, kept separate from
+// fixCount because fixCount also counts gateway and DHCP writes, which
+// an unallocated jail is allowed to have.
+func (j *fakeJail) addressWrittenFor(id string) string {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	for i := len(j.addressWrites) - 1; i >= 0; i-- {
+		if j.addressWrites[i].id == id {
+			return j.addressWrites[i].addr
+		}
+	}
+	return ""
+}
+
+// containsFinding is a small membership helper for the finding
+// vocabulary, so a test that cares about one finding does not have to
+// assert on the whole set and break whenever an unrelated finding is
+// added.
+func containsFinding(findings []Finding, want Finding) bool {
+	for _, f := range findings {
+		if f == want {
+			return true
+		}
+	}
+	return false
 }
 
 // failDHCP makes every DHCP observation fail, which is how a test says

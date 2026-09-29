@@ -506,8 +506,16 @@ func TestEnsure_NotRunningIsNotUnknown(t *testing.T) {
 
 // TestEnsure_UnallocatedJailIsLeftAlone confirms the ADR-0117
 // uplink_bridged carve-out: a jail on a network that skips allocation
-// manages its own addressing, so the reconciler must not observe a
+// manages its own ADDRESSING, so the reconciler must not observe a
 // "wrong" address and delete it.
+//
+// What it no longer asserts is that the reconciler does nothing at all
+// for such a jail. The carve-out covers the address, not the client: a
+// jail whose interface has no DHCP client running is not on the network
+// at all, and starting one inside the jail is the half ADR-0117 later
+// named as deferred. The address is still untouchable, which is what
+// this test now pins - the jail's own 169.254.x address survives, and
+// no addressing write happened.
 func TestEnsure_UnallocatedJailIsLeftAlone(t *testing.T) {
 	r, _, _, j, _ := converged(t)
 	// The jail configured itself something completely unlike the
@@ -516,14 +524,23 @@ func TestEnsure_UnallocatedJailIsLeftAlone(t *testing.T) {
 	j.up("web", "epair0b", []string{"169.254.7.7/16"}, "")
 
 	res := r.Ensure(t.Context(), "web", Addressing{Bridge: "bridge1", Interface: "epair0b"})
-	if res.Verdict != VerdictInSync {
-		t.Errorf("Verdict = %q, want %q (%s)", res.Verdict, VerdictInSync, res.Detail)
-	}
-	if len(res.Findings) != 0 {
-		t.Errorf("Findings = %v, want none: an unallocated jail's addressing is not Apiary's to judge", res.Findings)
-	}
 	if j.fixCount() != 0 {
-		t.Errorf("in-jail addressing was written %d times, want 0", j.fixCount())
+		t.Errorf("in-jail addressing was written %d times, want 0: the carve-out is about the address, and this jail's own address is not Apiary's to judge", j.fixCount())
+	}
+	// The jail's own address is still what it was. The fake records
+	// every address it was asked to set; none of them may be this jail's
+	// existing lease.
+	if j.addressWrittenFor("web") != "" {
+		t.Errorf("address was written for this jail (%q), want none written", j.addressWrittenFor("web"))
+	}
+	// The DHCP client is the part Apiary IS responsible for on this
+	// network, so its absence is a real finding rather than a reason to
+	// leave the jail alone.
+	if !containsFinding(res.Findings, FindingDHCPClientNotRunning) {
+		t.Errorf("Findings = %v, want %q: a jail with no DHCP client is not asking the LAN for an address", res.Findings, FindingDHCPClientNotRunning)
+	}
+	if res.Verdict != VerdictRepaired && res.Verdict != VerdictInSync {
+		t.Errorf("Verdict = %q, want repaired or in_sync (%s)", res.Verdict, res.Detail)
 	}
 }
 
