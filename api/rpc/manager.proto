@@ -1206,8 +1206,11 @@ message GetLocalNodeHealthResponse {
   string explanation = 3;
   repeated HealthObservation observations = 4;
 
-  // relevant_claims are unexpired local register entries scoped to this Hive
-  // or the Colony. They are context, not input to status.
+  // relevant_claims are local register entries scoped to this Hive
+  // or the Colony, INCLUDING expired ones - an expired claim is
+  // reported with state "stale" rather than dropped, so a conclusion
+  // resting on it cannot quietly stay proven. They are context, not
+  // input to status.
   repeated AssumptionClaim relevant_claims = 5;
 }
 
@@ -1221,6 +1224,33 @@ message AssumptionClaim {
   int64 expires_at_unix = 7;
   int64 created_at_unix = 8;
   int64 updated_at_unix = 9;
+
+  // consequence_if_false states what becomes unsafe, unknown, or
+  // unverified when this claim does not hold.
+  string consequence_if_false = 10;
+
+  // last_verified_unix is when this claim's supporting evidence was
+  // last confirmed. Zero means it never has been.
+  int64 last_verified_unix = 11;
+
+  // evidence_status is the RECORDED outcome of the last check of this
+  // claim's supporting evidence: unobserved (the default), supported,
+  // contradicted, or not_applicable. It is a raw observation, not a
+  // verdict, and it is deliberately not the same field as state below.
+  string evidence_status = 12;
+
+  // state is the DERIVED evaluation of this claim right now, computed
+  // by the reporting node against its own clock on every read and
+  // never persisted: supported, contradicted, unknown, stale, or
+  // not_applicable. It is empty only for a claim that no node has
+  // evaluated. supported is the sole affirmative state - an expired,
+  // unobserved, or unrecognized claim can never produce it.
+  string state = 13;
+
+  // state_detail says in words why state is what it is, so a consumer
+  // reading only the wire never has to infer a verdict's cause, and
+  // never has to convey it by color or a bare enum alone.
+  string state_detail = 14;
 }
 
 message ListAssumptionClaimsRequest {}
