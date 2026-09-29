@@ -2,18 +2,30 @@
 
 ## Status
 
-Accepted in discussion, **not yet implemented**. The mechanism in
-section "The gap in the current state model" below is now designed and
-coded, but everything else here - the peer-issued restart, the detached
-process, the replacement confirmation - is still unbuilt, and the
-detached-restart mechanism in particular is asserted rather than
-measured.
+Accepted. **Implemented and merged: the state model.** The durable
+`ColonyUpdate` record, the `ColonyUpdateFence` that binds a restart
+lease to the operation actually running, and `HandoverColonyUpdate` as
+a distinct command over that record are all in the tree and tested, and
+that is the whole of section "The gap in the current state model"
+below. **Accepted but not yet built: the peer-issued restart (rule 3),
+the detached restart process (rule 4), and the replacement managerd's
+own confirmation (rule 5).** Nothing in this repository yet restarts
+`apiary_managerd` on a controlled update: `colonyupdate.Inert` is the
+only `Controller` implementation and it starts nothing,
+`ExecuteNodeRestartPlan` refuses `apiary_managerd` outright, and rule
+4's detached restart is still asserted rather than measured.
 
-Depends on the durable `ColonyUpdate` record and its `ColonyUpdateFence`
-on `feature/colony-update-singleflight`, which additionally now carries
-`HandoverColonyUpdate` specifically to close the gap this ADR identified.
-Section "The gap in the current state model" has been rewritten to record
-how that was closed.
+What is unbuilt here is the mechanical half only. The restart this ADR
+hands over is not a generic managerd self-restart control and none is
+added by it: ADR-0142's refusal stands in the service machinery, and
+the Machine page's managerd row is status only. The controlled update
+path (ADR-0145) is the only thing that will ever perform that restart,
+and it is unbuilt too.
+
+Depends on the durable `ColonyUpdate` record and its `ColonyUpdateFence`,
+now merged into `main`, which carries `HandoverColonyUpdate` specifically
+to close the gap this ADR identified. Section "The gap in the current
+state model" has been rewritten to record how that was closed.
 
 Amends ADR-0142. Implements the second open question of ADR-0145.
 
