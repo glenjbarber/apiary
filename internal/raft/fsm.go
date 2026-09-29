@@ -1507,10 +1507,18 @@ func voterListContains(voters []string, nodeID string) bool {
 	return false
 }
 
-// pendingJoinRequestExpired checks expiry lazily, at read/apply time -
-// this codebase's one existing precedent (the Assumption Register's own
-// ExpiresAt handling) works the same way, and nothing anywhere in it
-// runs a background sweep/purge goroutine.
+// pendingJoinRequestExpired reports whether req is past its TTL, and is
+// called only from ListPendingJoinRequests below, to keep an expired
+// request out of the Admin's actionable list without deleting it. It is
+// on the READ path and deliberately not on the apply path: it reads the
+// wall clock, and an apply that consulted it would let a replay after
+// the TTL settle differently from the node that applied the entry live
+// (finding A15 in docs/audits/2026-09-26-code-audit.md, and the reason
+// applyResolvePendingJoinRequest no longer checks expiry itself). The
+// TTL itself is enforced by internal/manager, which checks the clock
+// before submitting the command, so what the command carries is the
+// decision rather than a question for the FSM. Nothing anywhere runs a
+// background sweep/purge goroutine over expired records.
 func pendingJoinRequestExpired(req *internalpb.PendingJoinRequest) bool {
 	return time.Now().Unix() >= req.GetExpiresAtUnix()
 }
