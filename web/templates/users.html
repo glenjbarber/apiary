@@ -41,7 +41,12 @@
           <button type="submit">Save role</button>
         </form>
         {{else}}
-        {{.Role}}
+        {{/* Role is a permission tier, not an evidence/health signal - a
+             neutral badge (no ok/warn/critical class) for visual
+             consistency with the rest of the redesign, without
+             fabricating a "good/bad" meaning admin/operator/viewer do
+             not have. */}}
+        <span class="badge">{{.Role}}</span>
         {{end}}
       </td>
       <td>

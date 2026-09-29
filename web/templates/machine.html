@@ -508,8 +508,12 @@
     {{range .NodeServices}}
     <tr>
       <td><code>{{.Name}}</code></td>
-      <td>{{if eq .Status "running"}}<span class="success">running</span>{{else if eq .Status "stopped"}}<span class="error">stopped</span>{{else}}<span class="badge unknown">unknown</span>{{end}}</td>
-      <td>{{if .Enabled}}<span class="success">enabled</span>{{else}}<span class="muted">disabled</span>{{end}}</td>
+      <td>{{if eq .Status "running"}}<span class="badge ready">running</span>{{else if eq .Status "stopped"}}<span class="badge critical">stopped</span>{{else}}<span class="badge unknown">unknown</span>{{end}}</td>
+      {{/* Boot-disabled is a deliberate setting, not an evidence gap - the
+           muted "stopped" class, matching certificates.html's own
+           auto-renew-off precedent, not "unknown" (that would put a
+           second meaning on the same grey used for a real gap above). */}}
+      <td>{{if .Enabled}}<span class="badge ready">enabled</span>{{else}}<span class="badge stopped">disabled</span>{{end}}</td>
       <td>{{.Detail}}</td>
       <td>
         {{if and .Restartable $.CanAdmin}}

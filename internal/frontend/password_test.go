@@ -79,6 +79,31 @@ func TestServer_UsersPage_ListsEveryKnownAccount(t *testing.T) {
 	}
 }
 
+// TestServer_UsersPage_ViewerSeesRoleAsABadgeNotASelect confirms a
+// non-admin visitor (RoleViewer can reach /users too - see the route's
+// own RoleViewer gate) sees each account's role as a read-only badge,
+// not the admin-only editable <select>, and that the badge carries no
+// ok/warn/critical class - a permission tier is not a health verdict,
+// so StateChip here means "give it a chip," not "color it."
+func TestServer_UsersPage_ViewerSeesRoleAsABadgeNotASelect(t *testing.T) {
+	roleMap := map[string]manager.Role{"admin": manager.RoleAdmin, "viewer": manager.RoleViewer}
+	s := newTestServerWithRoles(t, roleMap, fakeAuthenticator{user: "viewer", pass: "secret"}, &fakePasswordSetter{})
+	token, _ := s.sessions.Create("viewer", manager.RoleViewer)
+
+	req := httptest.NewRequest(http.MethodGet, "/users", nil)
+	req.AddCookie(&http.Cookie{Name: sessionCookieName, Value: token})
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, req)
+
+	body := rec.Body.String()
+	if !strings.Contains(body, `<span class="badge">admin</span>`) {
+		t.Errorf("Users page missing a plain role badge for admin, got: %s", body)
+	}
+	if strings.Contains(body, `name="role"`) {
+		t.Errorf("a viewer should not see the role-editing <select>, got: %s", body)
+	}
+}
+
 func TestServer_UsersPage_AdminSeesChangeActionForEveryRow(t *testing.T) {
 	roleMap := map[string]manager.Role{"admin": manager.RoleAdmin, "ops": manager.RoleOperator, "viewer": manager.RoleViewer}
 	s := newTestServerWithRoles(t, roleMap, fakeAuthenticator{user: "admin", pass: "secret"}, &fakePasswordSetter{})

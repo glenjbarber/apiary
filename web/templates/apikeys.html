@@ -52,7 +52,7 @@
     <tr>
       <td>{{.ID}}</td>
       <td>{{.Name}}</td>
-      <td>{{.Role}}</td>
+      <td><span class="badge">{{.Role}}</span></td>
       <td>{{.Created}}</td>
       <td>
         <button hx-delete="/apikeys/{{.ID}}" hx-target="#apikey-panel" hx-swap="innerHTML" hx-confirm="Revoke key {{.Name}}? This cannot be undone.">Revoke</button>
