@@ -705,6 +705,222 @@ func TestEtcServicesCheckPortConflictFailsClosed(t *testing.T) {
 	}
 }
 
+// TestManagerdNodeIDCheckRejectsSamplePlaceholder is the regression
+// test for the failure mode etc/apiary/README.md already warns about
+// in prose: an operator who copied managerd.json.sample verbatim got
+// "<this-node-id>" committed into raft state on first start, and no
+// later edit could take it back out. Until this check existed the
+// warning was documentation only - nothing between "cp the sample" and
+// "raftd boots" looked at the value at all.
+func TestManagerdNodeIDCheckRejectsSamplePlaceholder(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "managerd.json")
+	old := managerdConfigPath
+	managerdConfigPath = path
+	defer func() { managerdConfigPath = old }()
+
+	// managerd.json.sample's opening block, verbatim: the placeholder
+	// under test plus three neighbouring fields that also ship
+	// angle-bracketed, so this also proves the check stays on node_id.
+	sample := `{
+  "node_id": "<this-node-id>",
+  "rpc_addr": "<this-node-hostname>:17700",
+  "uplink": "<uplink-ifname>",
+  "zfs_base": "<your-pool-name>/apiary"
+}
+`
+	if err := os.WriteFile(path, []byte(sample), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	res := managerdNodeIDCheck.Probe(ctx, newFakeRunner(), Options{})
+	if res.Status != StatusMisconfigured {
+		t.Fatalf("status = %v, want misconfigured for the sample's literal placeholder", res.Status)
+	}
+	// The message has to name the field, the file, and the value the
+	// operator actually has on their disk, or it is not actionable.
+	for _, want := range []string{"node_id", path, "<this-node-id>"} {
+		if !strings.Contains(res.Detail, want) {
+			t.Errorf("Detail should name %q so the operator can see what to change, got: %s", want, res.Detail)
+		}
+	}
+	if !strings.Contains(res.FixHint, path) {
+		t.Errorf("FixHint should name the file to edit, got: %s", res.FixHint)
+	}
+	if managerdNodeIDCheck.Apply != nil {
+		t.Error("Apiary must never pick a raft node id on an operator's behalf: Apply must stay nil")
+	}
+	if managerdNodeIDCheck.Risk != RiskManualOnly {
+		t.Errorf("Risk = %v, want manual-only (it is a report-only fact about a file)", managerdNodeIDCheck.Risk)
+	}
+}
+
+// TestManagerdNodeIDCheckAcceptsRealNodeID is the other half: the
+// check must stay quiet on every config an operator legitimately
+// produces, or it is a check people learn to skip.
+func TestManagerdNodeIDCheckAcceptsRealNodeID(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "managerd.json")
+	old := managerdConfigPath
+	managerdConfigPath = path
+	defer func() { managerdConfigPath = old }()
+
+	cases := []struct {
+		name    string
+		body    string
+		wantSub string
+	}{
+		{
+			// What docs/bootstrap.md Step 8 tells the operator to
+			// write once the sample's placeholders are substituted.
+			name:    "substituted id alongside substituted neighbours",
+			body:    `{"node_id": "node1", "uplink": "igb0", "zfs_base": "zroot/apiary"}`,
+			wantSub: "node1",
+		},
+		{
+			// Only the whole-value-wrapped pattern is a placeholder.
+			// Brackets anywhere else are a legitimate id.
+			name:    "angle brackets inside a real id",
+			body:    `{"node_id": "node<1>"}`,
+			wantSub: "node<1>",
+		},
+		{
+			// README's documented alternative to setting the key: leave
+			// it out entirely and managerd falls back to os.Hostname().
+			name: "key absent",
+			body: `{"rpc_addr": "node1.example.lab:17700"}`,
+		},
+		{
+			name: "key present but empty",
+			body: `{"node_id": ""}`,
+		},
+		{
+			// A leading bracket that is not a placeholder pair must not
+			// trip an anchored pattern.
+			name:    "id that only starts with a bracket",
+			body:    `{"node_id": "<node1"}`,
+			wantSub: "<node1",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if err := os.WriteFile(path, []byte(tc.body), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			res := managerdNodeIDCheck.Probe(ctx, newFakeRunner(), Options{})
+			if res.Status != StatusOK {
+				t.Fatalf("status = %v, want ok (detail: %s)", res.Status, res.Detail)
+			}
+			if tc.wantSub != "" && !strings.Contains(res.Detail, tc.wantSub) {
+				t.Errorf("Detail should report the accepted node_id %q, got: %s", tc.wantSub, res.Detail)
+			}
+		})
+	}
+}
+
+// TestManagerdNodeIDCheckIgnoresOtherPlaceholderFields pins the scope
+// of the check. managerd.json.sample ships three other
+// angle-bracketed placeholders (rpc_addr, uplink, zfs_base), and
+// refusing those would be a different, much broader validation the
+// project has not asked for - one that would bury the single finding
+// that cannot be undone.
+func TestManagerdNodeIDCheckIgnoresOtherPlaceholderFields(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "managerd.json")
+	old := managerdConfigPath
+	managerdConfigPath = path
+	defer func() { managerdConfigPath = old }()
+
+	body := `{
+  "node_id": "node1",
+  "rpc_addr": "<this-node-hostname>:17700",
+  "uplink": "<uplink-ifname>",
+  "zfs_base": "<your-pool-name>/apiary"
+}
+`
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if res := managerdNodeIDCheck.Probe(ctx, newFakeRunner(), Options{}); res.Status != StatusOK {
+		t.Fatalf("status = %v, want ok: only node_id is in this check's scope (detail: %s)", res.Status, res.Detail)
+	}
+}
+
+// TestManagerdNodeIDCheckMissingFile covers the documented bootstrap
+// order: docs/bootstrap.md runs this installer at Step 3, but
+// managerd.json is only created at Step 8. Reporting a host as not
+// ready because it has not been configured yet would make the check
+// unusable on a fresh host for no gain - an absent file holds no
+// placeholder.
+func TestManagerdNodeIDCheckMissingFile(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "managerd.json") // deliberately never created
+	old := managerdConfigPath
+	managerdConfigPath = path
+	defer func() { managerdConfigPath = old }()
+
+	res := managerdNodeIDCheck.Probe(ctx, newFakeRunner(), Options{})
+	if res.Status != StatusOK {
+		t.Fatalf("status = %v, want ok when managerd.json does not exist yet (detail: %s)", res.Status, res.Detail)
+	}
+	if !strings.Contains(res.Detail, path) {
+		t.Errorf("Detail should name the path it looked at, got: %s", res.Detail)
+	}
+}
+
+// TestManagerdNodeIDCheckUnreadableOrMalformed covers the case where
+// the probe cannot observe the field at all. It reports Unknown rather
+// than inventing a verdict: this check has no opinion about JSON
+// well-formedness (managerd refuses the same file for the same
+// reason) and must never report a node_id as clean when it could not
+// read one.
+func TestManagerdNodeIDCheckUnreadableOrMalformed(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "managerd.json")
+	old := managerdConfigPath
+	managerdConfigPath = path
+	defer func() { managerdConfigPath = old }()
+
+	if err := os.WriteFile(path, []byte(`{"node_id": `), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	res := managerdNodeIDCheck.Probe(ctx, newFakeRunner(), Options{})
+	if res.Status != StatusUnknown {
+		t.Fatalf("status = %v, want unknown for unparseable JSON (detail: %s)", res.Status, res.Detail)
+	}
+	if res.FixHint == "" {
+		t.Error("expected a fix hint when the file could not be parsed")
+	}
+}
+
+// TestManagerdNodeIDCheckRegistered pins the registration itself: a
+// check that is defined but never added to the registry reports
+// nothing, which is the exact failure this change exists to close.
+func TestManagerdNodeIDCheckRegistered(t *testing.T) {
+	idx := -1
+	for i, c := range All() {
+		if c.ID == "managerd-node-id" {
+			idx = i
+			break
+		}
+	}
+	if idx < 0 {
+		t.Fatal("managerd-node-id is not in the registry: it would never run")
+	}
+	if idx != 0 {
+		t.Errorf("managerd-node-id is at index %d, want 0 - the one unrecoverable finding should be reported before host provisioning is proposed", idx)
+	}
+	if All()[0].ID != "managerd-node-id" {
+		t.Errorf("All()[0] = %q, want managerd-node-id", All()[0].ID)
+	}
+}
+
 func TestManualOnlyChecksHaveNoApply(t *testing.T) {
 	for _, c := range All() {
 		if c.Risk == RiskManualOnly && c.Apply != nil {
