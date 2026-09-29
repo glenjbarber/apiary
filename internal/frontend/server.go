@@ -638,6 +638,12 @@ type Server struct {
 	sessions     *sessionStore
 	lockouts     *loginAttemptTracker
 
+	// consoleTunnels bounds handleConsoleWS's concurrency, globally and
+	// per caller (2026-09-29 security audit, "console WebSocket accepts
+	// unbounded messages and connections") - always initialized, the
+	// same "never nil" convention lockouts above follows.
+	consoleTunnels *consoleTunnelLimiter
+
 	// peers is nil-able (see cmd/frontend's -peer-tls/-peer-hostname-suffix/
 	// -peer-manager-port) - the cluster overview page ("/") falls back to
 	// reporting only this frontend's own colocated node when unset,
@@ -800,6 +806,7 @@ func NewServer(client rpcpb.ManagerServiceClient, auth Authenticator, roleMap ma
 		client:             client,
 		tmpl:               tmpl,
 		lockouts:           newLoginAttemptTracker(defaultMaxFailedAttempts, defaultAttemptWindow, defaultLockDuration),
+		consoleTunnels:     newConsoleTunnelLimiter(),
 		mux:                http.NewServeMux(),
 		auth:               auth,
 		roleMap:            roleMap,
