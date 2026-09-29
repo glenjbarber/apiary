@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 )
 
@@ -107,5 +108,68 @@ func TestManager_Save_FileModeIs0600(t *testing.T) {
 	}
 	if got := info.Mode().Perm(); got != 0o600 {
 		t.Errorf("file mode = %o, want 0600", got)
+	}
+}
+
+// TestManager_LoadRejectsDuplicateKeys pins the same incident
+// restshimdconfig and frontendconfig already guard against:
+// encoding/json takes the last value of a repeated key with no error,
+// so a hand-edited file that reads one way behaves another. The role
+// map is the live authorization data for a Hive's web UI, which makes
+// a silent last-one-wins resolution the wrong answer in a way that is
+// hard to notice and expensive to discover.
+func TestManager_LoadRejectsDuplicateKeys(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "role-map.json")
+	body := `{
+  "role_map": {
+    "alice": "admin",
+    "alice": "viewer"
+  }
+}`
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatalf("writing role-map.json: %v", err)
+	}
+
+	cfg, exists, err := (&Manager{Path: path}).Load()
+	if err == nil {
+		t.Fatalf("Load() = %+v (exists=%v), nil; a duplicated key must not resolve to a config", cfg, exists)
+	}
+	if exists {
+		t.Errorf("Load() exists = true alongside an error; a rejected file must not be reported as loaded")
+	}
+	// The operator has to be able to act on this: it must name the file
+	// to edit and the key to look at.
+	for _, want := range []string{path, "alice"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error %q does not mention %q; an operator cannot act on it", err, want)
+		}
+	}
+}
+
+// A clean role-map file must decode exactly as it always did. If this
+// fails, jsonstrict has changed behaviour for the common case, which
+// would be a far worse regression than the duplicate it catches.
+func TestManager_LoadCleanFileUnchanged(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "role-map.json")
+	body := `{"role_map": {"alice": "admin", "bob": "operator", "carol": "viewer"}}`
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatalf("writing role-map.json: %v", err)
+	}
+
+	got, exists, err := (&Manager{Path: path}).Load()
+	if err != nil {
+		t.Fatalf("Load() on a clean file: %v", err)
+	}
+	if !exists {
+		t.Errorf("Load() exists = false, want true for a file that is present")
+	}
+	want := map[string]string{"alice": "admin", "bob": "operator", "carol": "viewer"}
+	if len(got.RoleMap) != len(want) {
+		t.Fatalf("Load() RoleMap = %+v, want %+v", got.RoleMap, want)
+	}
+	for user, role := range want {
+		if got.RoleMap[user] != role {
+			t.Errorf("Load() RoleMap[%q] = %q, want %q", user, got.RoleMap[user], role)
+		}
 	}
 }
