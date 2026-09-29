@@ -4,14 +4,19 @@
      zero count - see health_card.go's own comment for why an absent
      line is not the same claim as a checked, all-clear line.
      See docs/web-ui-redesign.md Section 1. */}}
-{{define "health_card"}}<section class="panel health-card">
+{{define "health_card"}}<section class="panel health-card" data-state="{{.Colony.State}}">
   <div class="health-card-top">
-    {{/* The reachable box is outlined in the Colony's own state - red for a
+    {{/* The card is outlined in the Colony's own state - red for a
          Comb that is down, yellow for an outstanding non-outage issue, green
          when everything is good - in the same treatment the topology card's
-         Colony leader already uses. The badge beside the count is the same
-         statement in words, so the outline is never the only cue. */}}
-    <div class="health-card-reachable" data-state="{{.Colony.State}}" title="{{.Colony.Detail}}">
+         Colony leader already uses. The outline is on this outer box rather
+         than on the reachable count inside it, so the whole card carries
+         the state at a glance and the count box reads as content within it;
+         the count box keeps its own neutral border. The badge beside the
+         count is the same statement in words, so the outline is never the
+         only cue. The title explaining the verdict stays on the count box,
+         because a tooltip on a box this large is worse than useless. */}}
+    <div class="health-card-reachable" title="{{.Colony.Detail}}">
       <div class="health-card-reachable-count">
         <strong>{{.ReachableCombs}}<span class="muted">/{{.TotalCombs}}</span></strong>
         <span class="muted">Combs reachable</span>

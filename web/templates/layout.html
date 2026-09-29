@@ -240,18 +240,21 @@
     /* HealthCard: the top-of-dashboard summary (Section 1). */
     .health-card { display:flex; flex-direction:column; gap:.9rem; }
     .health-card-top { display:flex; flex-wrap:wrap; align-items:center; gap:.6rem 1rem; }
-    /* The reachable box carries the Colony's three-way state as an outline,
-       in the same treatment the topology card's Colony leader already uses
-       (cluster_overview.html's .is-leader): a colored border plus a 1px
-       inset ring, so the outline reads at a glance without changing the
-       box's size. The badge inside says the same thing in words - the
-       outline is never the only cue, and the state is not color alone. */
+    /* The card carries the Colony's three-way state as an outline on the
+       panel itself, in the same treatment the topology card's Colony leader
+       already uses (cluster_overview.html's .is-leader): a colored border
+       plus a 1px inset ring, so the outline reads at a glance without
+       changing the box's size. It sits one level out from the reachable
+       count, which keeps the plain --line border below, so the whole card
+       states the verdict and the count reads as content inside it. The
+       badge inside says the same thing in words - the outline is never the
+       only cue, and the state is not color alone. */
     .health-card-reachable { display:flex; align-items:center; gap:.8rem; padding:.5rem .8rem; border:1px solid var(--line); border-radius:7px; }
     .health-card-reachable-count { display:flex; align-items:baseline; gap:.5rem; }
     .health-card-reachable strong { font-size:1.6rem; font-variant-numeric:tabular-nums; }
-    .health-card-reachable[data-state="ok"] { border-color:var(--status-ok); box-shadow:inset 0 0 0 1px var(--status-ok); }
-    .health-card-reachable[data-state="warn"] { border-color:var(--status-warn); box-shadow:inset 0 0 0 1px var(--status-warn); }
-    .health-card-reachable[data-state="critical"] { border-color:var(--status-critical); box-shadow:inset 0 0 0 1px var(--status-critical); }
+    .health-card[data-state="ok"] { border-color:var(--status-ok); box-shadow:inset 0 0 0 1px var(--status-ok); }
+    .health-card[data-state="warn"] { border-color:var(--status-warn); box-shadow:inset 0 0 0 1px var(--status-warn); }
+    .health-card[data-state="critical"] { border-color:var(--status-critical); box-shadow:inset 0 0 0 1px var(--status-critical); }
     .health-card-stats { display:flex; flex-wrap:wrap; gap:.5rem 1rem; margin:0; padding:0; list-style:none; }
     .health-card-stat { display:flex; align-items:center; gap:.4rem; }
     .health-card-stat[data-zero] { opacity:.55; }

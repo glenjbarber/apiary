@@ -248,10 +248,17 @@ func TestColonyVerdictFor(t *testing.T) {
 	}
 }
 
-// The box's outline state must reach the browser as the data-state token
+// The card's outline state must reach the browser as the data-state token
 // the stylesheet has a rule for - an unstyled state would fall back to the
 // neutral --line border, which reads as "no news" for what the badge
 // beside it calls an outage.
+//
+// The token belongs on the card, the outer box, and not on the reachable
+// count nested inside it: the operator asked for the highlight one level
+// out, so the count box is content within a card that states the verdict.
+// Both halves of that are pinned - the card carries the token the
+// stylesheet colors, and the count box carries none at all, which is what
+// keeps a later edit from quietly putting the highlight back inside.
 func TestColonyStateTokensReachTheRenderedBox(t *testing.T) {
 	partial, err := web.FS.ReadFile("templates/_health_card.html")
 	if err != nil {
@@ -286,9 +293,15 @@ func TestColonyStateTokensReachTheRenderedBox(t *testing.T) {
 			t.Fatalf("render health_card: %v", err)
 		}
 		html := buf.String()
-		wantAttr := `class="health-card-reachable" data-state="` + string(c.want) + `"`
+		wantAttr := `class="panel health-card" data-state="` + string(c.want) + `"`
 		if !strings.Contains(html, wantAttr) {
-			t.Errorf("rendered box is missing %s:\n%s", wantAttr, html)
+			t.Errorf("rendered card is missing %s:\n%s", wantAttr, html)
+		}
+		// The nested count box must not take the token back. If it does,
+		// the outline is inside the card again, which is the placement
+		// this was changed away from.
+		if strings.Contains(html, `class="health-card-reachable" data-state=`) {
+			t.Errorf("the reachable count box is carrying the state token again; it belongs on the card:\n%s", html)
 		}
 		// The state must also be in words, not carried by the outline
 		// alone - the same reason the leader Comb pairs its outline with
@@ -296,8 +309,8 @@ func TestColonyStateTokensReachTheRenderedBox(t *testing.T) {
 		if !strings.Contains(html, view.Colony.Label) {
 			t.Errorf("rendered box does not state the state in words (%q):\n%s", view.Colony.Label, html)
 		}
-		if !strings.Contains(string(layout), `.health-card-reachable[data-state="`+string(c.want)+`"]`) {
-			t.Errorf("no layout.html rule for .health-card-reachable[data-state=%q]", c.want)
+		if !strings.Contains(string(layout), `.health-card[data-state="`+string(c.want)+`"]`) {
+			t.Errorf("no layout.html rule for .health-card[data-state=%q]", c.want)
 		}
 	}
 	if len(covered) != 3 {
