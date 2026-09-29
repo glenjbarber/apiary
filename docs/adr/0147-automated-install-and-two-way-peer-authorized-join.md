@@ -9,8 +9,11 @@ a join, and the epoch binding that invalidates a request when the
 window reopens. **Accepted but not yet built: all of Part 2, all of
 Part 3, and the rest of Part 4** - specifically the window's two pages
 (`peer_tls` still defaults to false, the replicated peer trust store
-is absent, and the `yes-trust-new-comb` approve phrase is still the
-Part 2 flow in both `internal/manager` and `web/templates`). The single
+is absent, and the join approval in both `internal/manager` and
+`web/templates` is still today's `yes-trust-new-comb` phrase with no
+first code, no fingerprint check and no second PIN. The phrase is where
+it is because the 2026-09-28 amendment keeps it there; it is not a
+temporary state on the way to being removed). The single
 sentence this status line replaces, "Parts 2, 3 and 4 are accepted and
 not yet built", was true when it was written and no longer describes
 the tree.
@@ -28,6 +31,19 @@ one-line change in the code and none of them is load-bearing for any
 other decision here, so if the owner would rather have chosen
 differently the change is cheap.
 
+**Amended 2026-09-28: `yes-trust-new-comb` is KEPT, alongside the second
+PIN.** This reverses one decision in Part 2 and nothing else. The
+removal was proposed here and rejected by the owner on review. The
+phrase stays exactly where it is, required first, before every other
+check; `confirm_phrase` keeps its field number and is not reserved; the
+rest of Part 2 - the requester's own first code, the advertised
+fingerprints, the fail-closed certificate evaluation gate, the pin into
+the replicated trust store, and the second PIN - proceeds exactly as
+written below. "What this does not claim" and the Verification list
+are amended with it. The reasoning, including the objection that
+motivated the removal and why it no longer decides the question, is in
+"`yes-trust-new-comb` is kept, as well as the second PIN" under Part 2.
+
 Three places where implementing Part 1 required departing from the
 prose below are recorded in "Corrections found while implementing
 Part 1" at the end of this document. The largest is that one of the
@@ -36,7 +52,9 @@ written, and was replaced with a better one.
 
 It has four parts, decided together. Part 1 is the source-free
 `apiaryctl install`. Part 2 is the two-way, peer-authorized join that
-replaces `yes-trust-new-comb`. Part 3 is the root-owned
+hardens the approval `yes-trust-new-comb` already gates, and - since
+the 2026-09-28 amendment - keeps that phrase as one step within it
+rather than replacing it. Part 3 is the root-owned
 authorization-file mechanism that answers a hostile Colony Admin, which
 the owner confirmed is in scope; Part 2 alone does not stop that
 adversary and says so. Part 4 makes TLS the default on every Comb
@@ -54,7 +72,8 @@ Part 4 are answered too: the window length is configurable and defaults
 to fifteen minutes, and the window publishes every member's managerd
 fingerprint.
 
-Amends ADR-0113 (removes `yes-trust-new-comb`). Touches ADR-0083,
+Amends ADR-0113 (retains `yes-trust-new-comb`; the removal originally
+specified here was withdrawn by the owner on 2026-09-28). Touches ADR-0083,
 ADR-0092, ADR-0093, ADR-0096, ADR-0097, ADR-0100, ADR-0105, ADR-0112,
 ADR-0115, ADR-0139, and ADR-0141.
 
@@ -532,21 +551,49 @@ on the forward path. Under this ADR a locally-recorded request must
 carry the joiner's real fingerprints, or the operator is comparing
 against nothing.
 
-### `yes-trust-new-comb` is removed
+### `yes-trust-new-comb` is kept, as well as the second PIN
 
-The field is `reserved` in the proto rather than deleted, and
-`second_pin` takes a new field number. Every call site, template, and
-test that used the phrase is updated. ADR-0113 is amended with a dated
-section saying what replaced it and why, in the same style as
-ADR-0141's own amendments.
+**Amended 2026-09-28. The owner reversed the removal this section
+originally specified**, having reviewed it against the finished Part 2
+design. The phrase is retained: `ApproveJoinRequest` requires it
+exactly as it does today, checked first, before the join window, before
+the leadership check, before any forwarded RPC. `confirm_phrase` keeps
+its field number and is **not** reserved. No call site, template or test
+that uses the phrase changes, and ADR-0113 is relied on rather than
+amended.
 
-What stays: `ConvertStandaloneToJoiner`'s `yes-convert-to-joiner`
-(ADR-0105) and `raftd`'s `-reset` phrase. Both guard *local, destructive,
-single-machine* actions - wiping this Comb's raft state. The join phrase
-guarded a *membership* change and is the only one of the three whose
-value was published to strangers. The distinction is the whole basis for
-removing one and keeping two, and it is worth writing down so a later
-reader does not "consistency-fix" the other two.
+The objection is the owner's own and it is recorded in "Rejected
+alternatives" below: a fixed phrase in a public repository is not a
+confirmation, it is a constant. That is still true, and the amendment
+does not deny it. What the reversal changes is what the phrase is
+carrying. Today it is the **only** operator confirmation between an
+unauthenticated injected request and a new raft voter, and being a
+constant is fatal in that position - the Context section above says so
+in as many words. Once Part 2 lands, the same approval also requires a
+first code the requester generated and the operator transcribed off its
+own screen, an advertised fingerprint matched against what the request
+carried, a certificate that passed the fail-closed evaluation gate, that
+certificate pinned into the replicated trust store, and a second PIN
+displayed only on the requester and never rendered on the target. With
+those in place the phrase is one deliberate act among several rather
+than the whole of the gate, and a constant that adds a step is a speed
+bump rather than a hole.
+
+The cost is real and is accepted knowingly: anyone who has read this
+repository can satisfy the phrase. What such a reader still cannot do
+is satisfy the second PIN, which exists on the requesting Comb's screen
+and in the replicated record, or present a certificate that evaluates
+and pins. The phrase is a mistake-catcher, and this ADR now has enough
+real checks that it can afford one.
+
+`ConvertStandaloneToJoiner`'s `yes-convert-to-joiner` (ADR-0105) and
+`raftd`'s `-reset` phrase are untouched, as they were before any removal
+was proposed. All three now guard the same kind of act - a deliberate,
+typed, destructive or trust-extending one - so the earlier distinction
+that separated the join phrase from the other two is withdrawn along
+with the removal it justified. Recorded here so a later reader does not
+"consistency-fix" one of the other two on the strength of a rationale
+that no longer exists.
 
 ### New and changed RPCs
 
@@ -555,7 +602,7 @@ reader does not "consistency-fix" the other two.
 | `RequestJoinColonyRequest` | gains `introduction_code` and `advertised_fingerprints` |
 | `VerifyJoinIntroduction` | new. Admin. `{request_id, introduction_code, fingerprints}` → new stage |
 | `ReissueJoinSecondPin` | new. Admin. Regenerates, invalidating the previous PIN, max **2**, then the request is `FAILED` |
-| `ApproveJoinRequestRequest` | `confirm_phrase` reserved; gains `second_pin` |
+| `ApproveJoinRequestRequest` | `confirm_phrase` **retained unchanged** (2026-09-28 amendment); gains `second_pin` |
 | `GetJoinRequestStatusResponse` | carries the second PIN, only in stage `CODE_VERIFIED`, only to the holder of the `request_id` |
 | `GetLocalJoinIdentity` | new. Admin on the *requesting* Comb. Its own `node_id`, `raft_bind`, first code, fingerprints, stage, and second PIN when it has one |
 | `internalpb.PendingJoinRequest` | gains `stage`, `advertised_fingerprints`, `second_pin`, `first_code_attempts`, `second_pin_attempts`, `second_pin_expires_at_unix` |
@@ -697,8 +744,9 @@ All three, and the first is the one that matters:
    authorized which join. This is the same idea as a two-person rule
    and it costs the operator nothing.
 3. Everything Part 2 already requires: the first code, the fingerprint
-   match, the second PIN, reachability, the join-log guardrail, and the
-   existing not-already-a-voter check.
+   match, the second PIN, the `yes-trust-new-comb` confirm phrase,
+   reachability, the join-log guardrail, and the existing
+   not-already-a-voter check.
 
 And, ahead of all of them, Part 4's check that the Colony's join window
 is live and is the same window the request was created under. The order
@@ -784,8 +832,8 @@ sets that Colony joinable, with a predictable timeout. It is worth
 being clear that this is more than a convenience switch, because the
 design below leans on it for three separate jobs: it is the Colony's
 answer to the unauthenticated request-creation surface, it is the only
-place a pre-join trust anchor can exist, and it is what makes
-`yes-trust-new-comb`'s replacement meaningful rather than ceremonial.
+place a pre-join trust anchor can exist, and it is what makes the
+approval's second factor meaningful rather than ceremonial.
 
 ### TLS is on by default, including a single-node Colony
 
@@ -1011,9 +1059,11 @@ the middle. So the sequence is:
    below, then **pins** it into the replicated trust store. This is
    Part 2's fingerprint handling with the pin kept rather than compared
    and discarded.
-4. **Only now** do the first code, the second PIN, and the
-   authorization file run, over a channel that both ends have already
-   authenticated.
+4. **Only now** do the first code, the second PIN, the
+   `yes-trust-new-comb` confirm phrase, and the authorization file run,
+   over a channel that both ends have already authenticated. The phrase
+   is the operator's deliberate act on top of a comparison that has
+   already been made for them; it is not the comparison.
 
 By the time anyone is asked for anything, both ends of the channel are
 known to both ends. A PIN flow over an unverified channel is a
@@ -1203,6 +1253,15 @@ impressive one.
   comparing a fingerprint across two machines is a real check against a
   real class of mistake, and it is still a human check. Nothing here
   replaces the internal-token work that is separately deferred.
+- **It does not make the kept confirm phrase a secret, and it was never
+  meant to be.** `yes-trust-new-comb` is in this public repository, so
+  anyone who has read it can type it. Keeping it (the 2026-09-28
+  amendment) is a decision to accept that and to require it anyway, as a
+  deliberate-act speed bump sitting behind the first code, the
+  fingerprint match, the certificate evaluation gate, the pin, and the
+  second PIN. The defense of this design is the sum of those checks, not
+  the phrase, and it would be a mistake to later describe the approval as
+  gated by a secret.
 - **It does not make the second PIN secret from the target's own
   Admins.** The record is replicated and the Admins are its readers. The
   justification is that this audience is exactly the set of principals
@@ -1366,6 +1425,15 @@ worth keeping: a fixed phrase in a public repository is not a
 confirmation, it is a constant. Adding a second factor next to it does
 not remove it, it just makes the weak factor optional-looking.
 
+**No longer rejected. Adopted 2026-09-28**, after the owner weighed
+this objection against the whole Part 2 design rather than against the
+phrase alone. The objection still holds - the phrase is a constant, and
+it always was - and what changed is that it would no longer be the only
+gate. See "`yes-trust-new-comb` is kept, as well as the second PIN" for
+what the phrase is now carrying and what it is not. The alternative is
+kept here rather than deleted so that the reason the owner overrode it
+stays attached to the decision.
+
 **Generate both codes on the target.** Simpler, and it would have kept
 `RequestJoinColony` unchanged. It is also a one-way flow: the requester
 would have no value of its own to display, so the operator at the target
@@ -1509,7 +1577,9 @@ This ADR does **not**:
   command. `join-authorize` is the same kind of thing as
   `force-restart`: a root-only installed binary acting on the local
   control plane, requiring no checkout, adding no new distribution.
-- **ADR-0113** - amended. `yes-trust-new-comb` is removed.
+- **ADR-0113** - relied on rather than amended. Since the 2026-09-28
+  amendment `yes-trust-new-comb` is kept, so ADR-0113's confirm-phrase
+  convention continues to govern this RPC unchanged.
 - **ADR-0093** - peer-forwarding TLS needs its own CA trust. Not
   contradicted, and the shape of the answer changes: the CA file
   becomes a derived artifact of replicated pins rather than something
@@ -1559,6 +1629,11 @@ to earn.
 - Wrong first code, wrong fingerprint, wrong second PIN, each refused
   with a message that names what did not match, and each incrementing the
   replicated counter.
+- A wrong `confirm_phrase` still refused first, ahead of the window
+  check and ahead of any forwarded RPC, and a correct phrase with no
+  second PIN still refused: the phrase is necessary and not sufficient.
+  This is the test the 2026-09-28 amendment requires, because keeping
+  the phrase is only defensible while it is one gate among several.
 - Five wrong attempts, then `FAILED`, then a re-issue is required.
 - Two second-PIN reissues, then `FAILED`, so a mistyped PIN cannot be
   retried indefinitely inside a live window.
