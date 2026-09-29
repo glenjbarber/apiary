@@ -278,6 +278,42 @@ func (m *Manager) Receive(ctx context.Context, destName string, r io.Reader) err
 	return nil
 }
 
+// ReceiveForce is Receive above with `zfs receive -F`, the same
+// stream and the same destination validation - the only difference is
+// that the destination dataset may already exist, in which case ZFS
+// rolls it back to its most recent snapshot before receiving over it.
+// This is the classic replication receive (the same flag HAST's own
+// standby role uses), and it exists here for the cross-node VM
+// snapshot transfer RPC pair, where the receiving node already holds
+// the VM's own dataset and still needs the peer's snapshot of it.
+//
+// Its failure mode is deliberately NOT softened here: per zfs(8), a
+// -F receive that fails does not roll back, and can leave the dataset
+// partially received. Callers must therefore treat a non-nil error as
+// "this dataset's state is now unknown" rather than "nothing
+// happened", and must never report the transfer as successful on the
+// strength of the send side's own optimism - see
+// internal/manager/vmsnapshotsend.go's receiveVMSnapshot handler,
+// which confirms the resulting snapshot exists before answering.
+func (m *Manager) ReceiveForce(ctx context.Context, destName string, r io.Reader) error {
+	full, err := m.path(destName)
+	if err != nil {
+		return err
+	}
+	cmd := exec.CommandContext(ctx, "zfs", "receive", "-F", full)
+	cmd.Stdin = r
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		msg := strings.TrimSpace(stderr.String())
+		if msg == "" {
+			msg = err.Error()
+		}
+		return fmt.Errorf("zfs receive -F %s: %s", full, msg)
+	}
+	return nil
+}
+
 // CreateSnapshot creates a new snapshot named "dataset@snapshot"
 // (relative to Base) of an existing dataset - e.g. "vm-1@before-migration"
 // to checkpoint a VM's own dataset (which holds its disk.img, see
