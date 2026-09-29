@@ -3,6 +3,7 @@ package manager
 import (
 	"context"
 	"fmt"
+	"net"
 	"sync"
 
 	"google.golang.org/grpc/peer"
@@ -24,16 +25,16 @@ const (
 
 // isoUploadLimiter bounds concurrent UploadISO streams globally and per
 // caller, mirroring pamLockoutTracker's mutex-plus-map shape. Callers
-// are identified by remote network address rather than API key id:
-// UploadISO is reached over AuthStreamInterceptor, which (unlike
+// are identified by remote host rather than API key id: UploadISO is
+// reached over AuthStreamInterceptor, which (unlike
 // AuthUnaryInterceptor) does not thread callerAPIKeyIDContextKey onto
-// the stream's context, and a deployment with API-key auth never
-// enabled - ADR-0023's explicitly supported "opt-in, non-breaking"
-// state - has no key id to key on at all. Remote address is available
+// the stream's context, and a deployment with API-key auth never enabled
+// - ADR-0023's explicitly supported "opt-in, non-breaking" state - has
+// no key id to key on at all. The remote host is available
 // unconditionally and degrades safely: distinct real callers are almost
-// always distinct addresses, and callers that do share one (behind a
-// NAT, say) only end up sharing a tighter effective limit, never a
-// looser one.
+// always distinct hosts, and callers that do share one (behind a NAT, or
+// one operator on one machine) only end up sharing a tighter effective
+// limit, never a looser one.
 type isoUploadLimiter struct {
 	mu     sync.Mutex
 	total  int
@@ -73,13 +74,25 @@ func (l *isoUploadLimiter) release(caller string) {
 }
 
 // isoUploadCaller identifies UploadISO's caller for isoUploadLimiter,
-// from the stream context's grpc/peer address. Missing peer info (no
-// real network connection - a same-process test harness, chiefly) falls
-// back to a single shared bucket rather than panicking or disabling the
-// limit.
+// from the stream context's grpc/peer address.
+//
+// The port is deliberately dropped. A TCP peer address is host:port, and
+// every upload from one machine gets a fresh ephemeral source port, so
+// keying on the whole address would give each concurrent upload its own
+// private bucket and the per-caller cap could never fire. Keying on the
+// host matches internal/frontend's consoleTunnelCaller, and it makes the
+// doc comment's claim true in the right direction: callers that share a
+// host (a NAT, or one operator's own machine) also share the cap.
 func isoUploadCaller(ctx context.Context) string {
-	if p, ok := peer.FromContext(ctx); ok && p.Addr != nil {
-		return p.Addr.String()
+	p, ok := peer.FromContext(ctx)
+	if !ok || p.Addr == nil {
+		// No real network connection - a same-process test harness,
+		// chiefly. One shared bucket rather than panicking or
+		// disabling the limit.
+		return unknownISOUploadCaller
 	}
-	return unknownISOUploadCaller
+	if host, _, err := net.SplitHostPort(p.Addr.String()); err == nil {
+		return host
+	}
+	return p.Addr.String()
 }
