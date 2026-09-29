@@ -632,6 +632,18 @@ setup-quick:
 #     Letting 1 through would make `make update` fail on every Comb in
 #     every sweep, which is how a guard gets ignored.
 #
+# The report's status is captured in an `if` condition, not by
+# assigning it and reading `$?` on the next line. Both are ordinary
+# shell and only the first survives in practice: the Combs' bmake runs
+# every recipe line as `/bin/sh -e -c`, so errexit is already on before
+# this recipe asks for it. A bare `report=$(...)` returning 1 kills the
+# shell at that assignment, and since nothing is printed before it, the
+# target dies silently with a bare "Error code 1" and no report. A
+# command in an `if` condition is exempt from errexit, which is the only
+# reason it is written that way. This is not a preference - on a real
+# Comb it is the difference between `update` working and failing every
+# time managerd or raftd is left stale on purpose, which is every time.
+#
 # A daemon it could not read is printed as unknown, which is neither
 # confirmed nor failed, and the closing lines say so. The report is
 # emitted from a scratch run of the binary built just above, so a report
@@ -644,8 +656,11 @@ update: install
 		service apiary_$$S restart; \
 	done
 	@host=`hostname` ; \
-	report=`./versioncheck -advice "$$host"` ; \
-	rc=$$? ; \
+	if report=`./versioncheck -advice "$$host"` ; then \
+		rc=0 ; \
+	else \
+		rc=$$? ; \
+	fi ; \
 	echo "" ; \
 	echo "update: frontend and restshimd restarted on $$host." ; \
 	echo "  managerd and raftd were installed but deliberately NOT" ; \
