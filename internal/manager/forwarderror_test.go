@@ -194,11 +194,15 @@ func TestIntegration_RequestJoinColony_ForwardingFailureSurfacedInError(t *testi
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	resp, err := followerClient.RequestJoinColony(ctx, &rpcpb.RequestJoinColonyRequest{
+	// ADR-0147 Part 2 requires a first code and the advertised
+	// fingerprints, and refuses the call before it ever reaches the raft
+	// apply where the leadership hint comes from. Without them this test
+	// was measuring the refusal, not the forwarding failure.
+	resp, err := followerClient.RequestJoinColony(ctx, withIntroduction(&rpcpb.RequestJoinColonyRequest{
 		NodeId:                 "joiner-2",
 		RaftBindAddress:        freeLoopbackAddr(t),
 		JoinerLogStateObserved: true,
-	})
+	}, t))
 	if err != nil {
 		t.Fatalf("RequestJoinColony() error: %v", err)
 	}
