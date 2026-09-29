@@ -1108,11 +1108,15 @@ type fakeQuotaSetter struct {
 	lastDestroyed  string
 	existsOverride map[string]bool
 
-	// sendData/sendErr, receivedInto/receiveErr, templateNames/
-	// templateNamesErr back Send/Receive/ListTemplateNames' tests
-	// (ADR-0089) - the jail base-template peer-fetch primitives.
-	sendData map[string]string
-	sendErr  error
+	// sendData/sendErr/sentSnapshots, receivedInto/receiveErr,
+	// templateNames/templateNamesErr back Send/Receive/
+	// ListTemplateNames' tests (ADR-0089) - the jail base-template
+	// peer-fetch primitives. sentSnapshots records every name Send was
+	// asked for, so a test can assert a rejected request never reached
+	// `zfs send` at all rather than merely that the transfer stopped.
+	sendData      map[string]string
+	sendErr       error
+	sentSnapshots []string
 
 	receivedInto map[string]string // destName -> received bytes
 	receiveErr   error
@@ -1185,6 +1189,7 @@ func (f *fakeQuotaSetter) DestroyDataset(_ context.Context, name string) error {
 }
 
 func (f *fakeQuotaSetter) Send(_ context.Context, snapshot string) (io.ReadCloser, error) {
+	f.sentSnapshots = append(f.sentSnapshots, snapshot)
 	if f.sendErr != nil {
 		return nil, f.sendErr
 	}
