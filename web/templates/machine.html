@@ -374,7 +374,7 @@
 {{define "node_services_panel"}}
 <div id="node-services-error" class="banner-error">{{.ServiceFormError}}</div>
 {{if .ServiceFormSuccess}}<div class="banner-success">{{.ServiceFormSuccess}}</div>{{end}}
-<table>
+<table class="service-table">
   <thead>
     <tr><th>Service</th><th>Status</th><th>Boot enabled</th><th>Detail</th><th></th></tr>
   </thead>
