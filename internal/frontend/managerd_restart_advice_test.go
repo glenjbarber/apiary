@@ -9,28 +9,48 @@ import (
 	rpcpb "github.com/glenjbarber/apiary/api/rpc"
 )
 
-// TestMachineManagerdRow_NamesASourceFreeCommand pins the advice the
-// Machine page gives for the one service the UI refuses to restart.
+// TestMachineManagerdRow_OffersNoRestartAndNoProse pins the Machine
+// page's service row for the one daemon the UI refuses to restart.
 //
-// The gap this exists to close was found the hard way, in two rounds.
-// The row first said "use make force-restart or service apiary_managerd
-// restart on the node" and named neither the directory nor the
-// consequence; advice read in a browser, at a distance from any shell,
-// that omits both produces a "no rule to make target" on a node that has
-// no checkout to have that target in. The second round was the deeper
-// one: the honest fix at the time was to name the checkout, and naming a
-// checkout only helps if there is one. There is not. force-restart is an
-// installed command now (ADR-0136), so the row names that - and the
-// assertions below treat checkout language as a defect rather than a
-// clarification, because on a Comb every way of naming one is a way of
-// sending an operator to a directory that is not there.
-func TestMachineManagerdRow_NamesASourceFreeCommand(t *testing.T) {
+// This test used to assert the opposite, and the change is the owner's
+// decision rather than a repair. The row used to carry a paragraph
+// explaining that managerd cannot restart itself, that
+// `service apiary_managerd restart` is enough on the node, and that
+// `apiaryctl force-restart` also takes raftd down. That text was
+// written over two rounds to fix a real defect - it had once named a
+// source checkout, which does not exist on a Comb - and the fix was
+// correct as advice. It is still correct, and the owner read it and
+// judged it worthless in the place it sat: a cell in a status table,
+// read at a glance, by someone who had not decided to restart
+// anything. Prose nobody asked for is still noise, however true it
+// is, and a table cell that renders three sentences of narrative for
+// one row and nothing for the others is a table whose column no longer
+// means what its header says.
+//
+// So the advice is gone from the ROW, and what remains here is the part
+// that is a real invariant rather than a copy of the manual:
+//
+//   - the row still offers no restart control, which is a safety
+//     property and not an editorial one. A control here would let an
+//     operator stop the daemon that is serving them this page, and
+//     nothing on this page would bring it back.
+//   - the row renders no prose at all, so the deleted text cannot
+//     creep back in a reworded form.
+//
+// The guidance itself is not lost, deliberately. It is still on the
+// page, in the Cloudflare Origin CA panel, which is the one place an
+// operator is actually told to go and restart managerd, and it is
+// still asserted by TestCloudflarePanel_NamesASourceFreeCommand in
+// this same file. That test failing is how a deletion that actually
+// lost the advice would be caught; this one failing is how a
+// reintroduction would be.
+func TestMachineManagerdRow_OffersNoRestartAndNoProse(t *testing.T) {
 	client := &fakeClient{
 		statusResp: &rpcpb.StatusResponse{ManagerNodeId: "node-a"},
 		listNodeServicesResp: &rpcpb.ListNodeServicesResponse{Services: []*rpcpb.NodeService{
 			{Name: "apiary_raftd", Status: "running", Enabled: true, Restartable: true},
 			// managerd is the one service RestartNodeService will not
-			// accept, which is what selects the refusal branch.
+			// accept, which is what makes this the row under test.
 			{Name: "apiary_managerd", Status: "running", Enabled: true, Restartable: false},
 		}},
 	}
@@ -42,60 +62,43 @@ func TestMachineManagerdRow_NamesASourceFreeCommand(t *testing.T) {
 	}
 	body := rec.Body.String()
 
-	if !strings.Contains(body, "Cannot be restarted from here") {
-		t.Fatalf("machine page missing the managerd self-restart refusal, got: %s", body)
+	// Scope to the managerd row itself. The Cloudflare panel on this same
+	// page names these same commands, so a whole-page check would pass on
+	// the other panel's words and stop testing this row at all - a
+	// mutation that deleted the wording from the row and left it in the
+	// panel has already survived exactly that once.
+	i := strings.Index(body, "<code>apiary_managerd</code>")
+	if i < 0 {
+		t.Fatalf("machine page has no managerd service row, got: %s", body)
 	}
-	if strings.Contains(body, `hx-post="/machine/services/apiary_managerd/restart"`) {
-		t.Error("the managerd row must not offer a restart button; the service is not restartable from inside itself")
-	}
-
-	// Scope the assertions to the managerd row itself, not the page. The
-	// Cloudflare panel on this same page names the same two commands, so a
-	// whole-page check passes on the other panel's words and stops testing
-	// the row at all. A mutation that deleted the wording from the row and
-	// left it in the panel survived exactly that way once already.
-	row := body[strings.Index(body, "Cannot be restarted from here"):]
+	row := body[i:]
 	if j := strings.Index(row, "</tr>"); j >= 0 {
 		row = row[:j]
 	}
-	for _, want := range []string{
+
+	if strings.Contains(row, `hx-post="/machine/services/apiary_managerd/restart"`) {
+		t.Errorf("the managerd row must not offer a restart control; the service is not restartable from inside itself, and acting here would stop the daemon serving this page. Got row: %s", row)
+	}
+	for _, forbidden := range []string{
+		"Cannot be restarted from here",
 		"service apiary_managerd restart",
 		"apiaryctl force-restart",
-		// The consequence, which the row must not omit: this is a
-		// two-daemon act, not the one the operator asked for.
-		"also restarts raftd",
-		// And that it needs nothing but a shell, which is what makes the
-		// advice actionable on a machine with no checkout on it.
-		"needs nothing but a root shell",
-	} {
-		if !strings.Contains(row, want) {
-			t.Errorf("managerd row advice missing %q, got: %s", want, row)
-		}
-	}
-
-	// The regression this half exists for. Every one of these names a way
-	// of running the command that does not exist on a Comb, and every one
-	// of them was true of this row at some point.
-	for _, forbidden := range []string{
-		"make force-restart",
-		"source checkout",
-		"Makefile",
-		"record-forced-restart",
-		"scripts/",
+		"two-daemon",
+		"root shell",
 	} {
 		if strings.Contains(row, forbidden) {
-			t.Errorf("managerd row advice contains %q: force-restart is installed on the Comb now, and the row must not send an operator looking for a checkout", forbidden)
+			t.Errorf("the managerd row carries prose again (%q); the action cell is for controls, and the restart guidance belongs on the one panel that tells an operator to go and do it. Got row: %s", forbidden, row)
 		}
 	}
 
-	// The narrower command has to come first. This row exists because an
-	// operator wants managerd restarted, and force-restart takes raftd
-	// down with it, which is a bigger commitment than the one they asked
-	// for. Naming the two in the other order invites the larger action.
-	plain := strings.Index(row, "service apiary_managerd restart")
-	forced := strings.Index(row, "apiaryctl force-restart")
-	if plain < 0 || forced < 0 || plain > forced {
-		t.Errorf("the managerd-only command must be offered before force-restart, got offsets plain=%d forced=%d", plain, forced)
+	// The row must still be a row. A deletion that took the service
+	// name, or the whole table, with it would satisfy every assertion
+	// above and leave an operator unable to see that managerd is even
+	// running, which is the one thing this table is for.
+	for _, want := range []string{"running", "enabled"} {
+		if !strings.Contains(row, want) {
+			t.Errorf("managerd row lost its %q status badge, got: %s", want, row)
+		}
 	}
 }
 

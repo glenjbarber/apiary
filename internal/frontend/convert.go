@@ -494,6 +494,62 @@ type nodeServiceView struct {
 	GuardrailDetail  string
 }
 
+// nodeServiceDisplayRanks is the fixed order the Machine page shows the
+// four known Apiary daemons in, and it lives here rather than in
+// internal/manager on purpose.
+//
+// The manager's own apiaryServices list (internal/manager/services.go)
+// is ordered raftd, managerd, frontend, restshimd. That is an
+// implementation detail - it reflects the order the manager starts or
+// supervises them in, and it is not something an operator should be
+// shown. Worse, it is not a fixed contract at all: a refactor of the
+// manager's slice, or a machine whose list came back in a different
+// order, would silently reshuffle the service table on a page whose
+// only job is to be the thing you can read at a glance under pressure.
+// A UI that renders "whatever order the RPC returned" is a UI whose
+// layout is a function of a backend detail the UI does not own, so the
+// ordering is pinned here instead.
+//
+// The order is managerd, frontend, restshimd, raftd and is not
+// alphabetical, which is the other thing worth stating: raftd sorts
+// early among the "apiary_r*" names and last is a deliberate editorial
+// choice. raftd is the substrate every other daemon here depends on;
+// listing it last keeps the one row whose restart genuinely tears the
+// cluster's coordination out from under the UI below the three daemons
+// the operator is actually reasoning about, so the eye reaches it last.
+// The Ranks are distinct precisely so that this editorial order is
+// expressed and not re-derived by a comparison - see
+// nodeServiceDisplayOrder's caller.
+var nodeServiceDisplayRanks = map[string]int{
+	"apiary_managerd":  0,
+	"apiary_frontend":  1,
+	"apiary_restshimd": 2,
+	"apiary_raftd":     3,
+}
+
+// nodeServiceUnranked is the rank for any service name not in
+// nodeServiceDisplayRanks - a daemon shipped by a newer manager than
+// this build knows about, or a name that is not an Apiary daemon at all.
+//
+// It is 99 rather than math.MaxInt so that the known ranks stay readable
+// as small integers above, and it is a single shared constant so there
+// is exactly one "not one of ours" rank: two different sentinels would
+// make unknown names sort against each other by a value the caller
+// never intended. Unknown names are placed after every known one, never
+// dropped, because a daemon this build has never heard of is exactly
+// the row an operator needs to see most.
+const nodeServiceUnranked = 99
+
+// nodeServiceDisplayOrder ranks a service name for the Machine page's
+// service table: a low, distinct rank for the four known daemons, and
+// nodeServiceUnranked for anything else.
+func nodeServiceDisplayOrder(name string) int {
+	if rank, ok := nodeServiceDisplayRanks[name]; ok {
+		return rank
+	}
+	return nodeServiceUnranked
+}
+
 func fromRPCNodeServices(resp *rpcpb.ListNodeServicesResponse) []nodeServiceView {
 	services := make([]nodeServiceView, 0, len(resp.GetServices()))
 	for _, service := range resp.GetServices() {
@@ -503,6 +559,34 @@ func fromRPCNodeServices(resp *rpcpb.ListNodeServicesResponse) []nodeServiceView
 			Restartable: service.GetRestartable(),
 		})
 	}
+
+	// Sort at the END, on the built view slice, so display order is a
+	// property of this mapping rather than of the manager's input order.
+	//
+	// The two comparisons are deliberately separate statements and the
+	// name tiebreak is reachable ONLY when the ranks are equal. A single
+	// fused comparison - "rank, then name", as a tuple - looks
+	// equivalent and is not: the day two known services are given the
+	// same rank, or the day a new known daemon is added with a rank that
+	// collides, a tuple comparison falls through to the name and
+	// silently reshuffles the known four into alphabetical order. That
+	// would put apiary_raftd second, directly under managerd, and
+	// nothing would fail: no test errors, no compile error, just a
+	// service table that reads as though raftd were one peer among
+	// several. Comparing rank first and returning on inequality means
+	// the name is only ever consulted between two names this build
+	// genuinely does not know, where alphabetical is the honest
+	// deterministic fallback, and between two copies of the SAME name,
+	// where the comparison is false either way and sort.SliceStable
+	// keeps them in input order.
+	sort.SliceStable(services, func(i, j int) bool {
+		ri, rj := nodeServiceDisplayOrder(services[i].Name), nodeServiceDisplayOrder(services[j].Name)
+		if ri != rj {
+			return ri < rj
+		}
+		return services[i].Name < services[j].Name
+	})
+
 	return services
 }
 

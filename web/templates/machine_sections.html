@@ -37,36 +37,21 @@
   <section class="settings-group" aria-labelledby="machine-operations">
   <h2 id="machine-operations">Operations</h2>
   <div class="panel">
-    <h3>Apiary services</h3>
-    <p class="muted">
-      Status is local to this Comb. Restarting <code>apiary_managerd</code>
-      applies saved Machine settings such as jail provisioning, read from
-      <code>/usr/local/etc/apiary/managerd.json</code> (ADR-0100).
-    </p>
+    <h3>Apiary services {{hint "Status is local to this Comb. Restarting apiary_managerd applies saved Machine settings such as jail provisioning, read from /usr/local/etc/apiary/managerd.json (ADR-0100)."}}</h3>
     <div id="node-services-panel">
       {{template "node_services_panel" .}}
     </div>
   </div>
 
   <div class="panel">
-    <h3>Local service endpoints</h3>
-    <p class="muted">
-      Configured local bind addresses for Apiary services. Changing
-      managerd's endpoint is saved first and only takes effect after the
-      existing guarded managerd restart. The address suggestions below are
-      currently assigned to this Comb.
-    </p>
+    <h3>Local service endpoints {{hint "Configured local bind addresses for Apiary services. Changing managerd's endpoint is saved first and only takes effect after the existing guarded managerd restart. The address suggestions below are currently assigned to this Comb."}}</h3>
     <div id="managerd-bind-panel">
       {{template "managerd_bind_panel" .}}
     </div>
   </div>
 
   <div class="panel">
-    <h3>Automated Assumption Checks tuning</h3>
-    <p class="muted">
-      Timing and retention for the continuously re-evaluated assumption
-      checks (ADR-0055). Pure tuning knobs - safe to change any time.
-    </p>
+    <h3>Automated Assumption Checks tuning {{hint "Timing and retention for the continuously re-evaluated assumption checks (ADR-0055). Pure tuning knobs - safe to change any time."}}</h3>
     <div id="assumption-tuning-panel">
       {{template "assumption_tuning_panel" .}}
     </div>
@@ -92,30 +77,14 @@
   <section class="settings-group" aria-labelledby="machine-networking">
   <h2 id="machine-networking">Networking</h2>
   <div class="panel">
-    <h3>Network interface</h3>
-    <p class="muted">
-      Which physical interface VLAN tagging and outbound NAT (ADR-0048)
-      use on this node, and which resolver Apiary advertises to Cells.
-      Changes here take effect the next time this node's managerd
-      restarts, not live. Blank NAT uplink means use Uplink. Blank DNS
-      means use the startup flag value, if one was supplied. Interface
-      choices are discovered from this Comb; a saved interface that is no
-      longer present is retained as an unavailable choice so it can be
-      cleared safely.
-    </p>
+    <h3>Network interface {{hint "Which physical interface VLAN tagging and outbound NAT (ADR-0048) use on this node, and which resolver Apiary advertises to Cells. Changes here take effect the next time this node's managerd restarts, not live. Blank NAT uplink means use Uplink. Blank DNS means use the startup flag value, if one was supplied. Interface choices are discovered from this Comb; a saved interface that is no longer present is retained as an unavailable choice so it can be cleared safely."}}</h3>
     <div id="nodeconfig-panel">
       {{template "nodeconfig_panel" .}}
     </div>
   </div>
 
   <div class="panel">
-    <h3>VM firewall overrides</h3>
-    <p class="muted">
-      Temporarily suspend enforcement of a VM's firewall rules
-      (everything allowed) without discarding them - useful for
-      troubleshooting connectivity. Only VMs assigned to this node are
-      shown.
-    </p>
+    <h3>VM firewall overrides {{hint "Temporarily suspend enforcement of a VM's firewall rules (everything allowed) without discarding them - useful for troubleshooting connectivity. Only VMs assigned to this node are shown."}}</h3>
     <div id="machine-vms-panel">
       {{template "machine_vms_panel" .}}
     </div>
@@ -141,66 +110,35 @@
   <section class="settings-group" aria-labelledby="machine-workloads">
   <h2 id="machine-workloads">Storage and provisioning</h2>
   <div class="panel">
-    <h3>Resource scope paths</h3>
-    <p class="muted">
-      Where this Comb looks for its own existing VM storage, jail
-      images, and installer images. <strong>Write-once through this
-      page</strong>: changing one of these after real resources already
-      exist under the old value does not move them - it just makes the
-      reconciler stop seeing them, silently orphaning real VMs, jails,
-      or ISOs. Once a value below is set, it can only be changed by
-      editing it directly in <code>/usr/local/etc/apiary/managerd.json</code>
-      (ADR-0100) and restarting.
-    </p>
+    <h3>Resource scope paths {{hint "Where this Comb looks for its own existing VM storage, jail images, and installer images. Write-once through this page: changing one of these after real resources already exist under the old value does not move them - it just makes the reconciler stop seeing them, silently orphaning real VMs, jails, or ISOs. Once a value below is set, it can only be changed by editing it directly in /usr/local/etc/apiary/managerd.json (ADR-0100) and restarting."}}</h3>
     <div id="resource-scope-panel">
       {{template "resource_scope_panel" .}}
     </div>
   </div>
 
   <div class="panel">
-    <h3>Bhyve / VM provisioning</h3>
-    <p class="muted">
-      Blank boot ROM disables bhyve provisioning on this node entirely;
-      blank bridge disables VM networking. Disk size and reconcile
-      interval only affect newly created VMs/ticks, never an existing
-      one.
-    </p>
+    <h3>Bhyve / VM provisioning {{hint "Blank boot ROM disables bhyve provisioning on this node entirely; blank bridge disables VM networking. Disk size and reconcile interval only affect newly created VMs/ticks, never an existing one."}}</h3>
     <div id="bhyve-config-panel">
       {{template "bhyve_config_panel" .}}
     </div>
   </div>
 
   <div class="panel">
-    <h3>Jail provisioning</h3>
-    <p class="muted">
-      Controls whether this Comb provisions jails assigned to it. If a
-      jail row says provisioning is disabled on the owning node, enable
-      it here on that owning Comb.
-    </p>
+    <h3>Jail provisioning {{hint "Controls whether this Comb provisions jails assigned to it. If a jail row says provisioning is disabled on the owning node, enable it here on that owning Comb."}}</h3>
     <div id="jail-provisioning-panel">
       {{template "jail_provisioning_panel" .}}
     </div>
   </div>
 
   <div class="panel">
-    <h3>HAST-backed disk replication</h3>
-    <p class="muted">
-      Enables HAST support on this node (ADR-0026) - needed on both a
-      replicated VM's owning node and its replica node, regardless of
-      bhyve support. Requires a real, patched <code>hastd</code>.
-    </p>
+    <h3>HAST-backed disk replication {{hint "Enables HAST support on this node (ADR-0026) - needed on both a replicated VM's owning node and its replica node, regardless of bhyve support. Requires a real, patched hastd."}}</h3>
     <div id="hast-panel">
       {{template "hast_panel" .}}
     </div>
   </div>
 
   <div class="panel">
-    <h3>Dataset quota</h3>
-    <p class="muted">
-      Set a ZFS quota on a dataset under this node's own storage scope
-      (e.g. a VM or jail id). The base dataset itself can't be
-      targeted directly.
-    </p>
+    <h3>Dataset quota {{hint "Set a ZFS quota on a dataset under this node's own storage scope (e.g. a VM or jail id). The base dataset itself can't be targeted directly."}}</h3>
     <div id="quota-panel">
       {{template "quota_panel" .}}
     </div>
@@ -225,14 +163,7 @@
   <section class="settings-group" aria-labelledby="machine-cluster">
   <h2 id="machine-cluster">Colony membership and peers</h2>
   <div class="panel">
-    <h3>Peer-to-peer forwarding</h3>
-    <p class="muted">
-      Used when this node forwards a raft write/read to the leader's
-      managerd (ADR-0029/ADR-0035), or dials another Comb for a
-      cross-Comb console/serial-log request. The peer API key is
-      write-only - it is never shown once saved, only whether one is
-      set.
-    </p>
+    <h3>Peer-to-peer forwarding {{hint "Used when this node forwards a raft write/read to the leader's managerd (ADR-0029/ADR-0035), or dials another Comb for a cross-Comb console/serial-log request. The peer API key is write-only - it is never shown once saved, only whether one is set."}}</h3>
     <div id="peer-forwarding-panel">
       {{template "peer_forwarding_panel" .}}
     </div>
@@ -240,16 +171,7 @@
 
   {{if .CanAdmin}}
   <div class="panel">
-    <h3>Join a Colony</h3>
-    <p class="muted">
-      Join this Comb to an existing multi-node Colony instead of running
-      standalone. Fill in the address of any current member of that
-      Colony below - this Comb asks it directly to record the request.
-      An Admin there compares the code shown below against the one
-      their own "Pending join requests" panel shows (see ADR-0083) -
-      nothing changes about this Comb's own cluster membership until
-      they approve it.
-    </p>
+    <h3>Join a Colony {{hint "Join this Comb to an existing multi-node Colony instead of running standalone. Fill in the address of any current member of that Colony below - this Comb asks it directly to record the request. An Admin there compares the code shown below against the one their own Pending join requests panel shows (see ADR-0083) - nothing changes about this Comb's own cluster membership until they approve it."}}</h3>
     {{if .JoinColonyFormError}}<div class="banner-error">{{.JoinColonyFormError}}</div>{{end}}
     {{if .JoinColonyResult}}
       {{if .JoinColonyResult.Error}}
@@ -286,21 +208,7 @@
   </div>
 
   <div class="panel">
-    <h3>Convert this Comb to a joiner</h3>
-    <p class="muted">
-      For a Comb that already has its own standalone raft state (unlike
-      "Join a Colony" above, which is for a genuinely fresh node) - this
-      guards and automates the same manual sequence that panel's own
-      text describes by hand: stop <code>raftd</code>, move its existing
-      state aside to a timestamped backup, reconfigure it to await a
-      join, restart it, confirm it is actually listening, then submit
-      the join request. This Comb's current raft data directory is
-      <code>{{.RaftdConfig.DataDir}}</code> and its currently configured
-      raft-bind address is <code>{{.RaftdConfig.RaftBind}}</code> - the
-      raft-bind address below replaces that value once this completes.
-      This does not merge history with the target Colony; the target's
-      own Admin still separately approves the resulting request.
-    </p>
+    <h3>Convert this Comb to a joiner {{hint (printf "For a Comb that already has its own standalone raft state (unlike the Join a Colony panel above, which is for a genuinely fresh node) - this guards and automates the same manual sequence that panel's own text describes by hand: stop raftd, move its existing state aside to a timestamped backup, reconfigure it to await a join, restart it, confirm it is actually listening, then submit the join request. This Comb's current raft data directory is %s and its currently configured raft-bind address is %s - the raft-bind address below replaces that value once this completes. This does not merge history with the target Colony; the target's own Admin still separately approves the resulting request." .RaftdConfig.DataDir .RaftdConfig.RaftBind)}}</h3>
     {{if .ConvertJoinerFormError}}<div class="banner-error">{{.ConvertJoinerFormError}}</div>{{end}}
     {{if .ConvertJoinerResult}}
     <div class="panel">
@@ -343,12 +251,7 @@
   <section class="settings-group" aria-labelledby="machine-security">
   <h2 id="machine-security">TLS and security</h2>
   <div class="panel">
-    <h3>TLS</h3>
-    <p class="muted">
-      Certificate/key paths for this node's own external gRPC API
-      (managerd) - not the certificate content itself, which stays on
-      disk. Leave both blank to serve plaintext.
-    </p>
+    <h3>TLS {{hint "Certificate/key paths for this node's own external gRPC API (managerd) - not the certificate content itself, which stays on disk. Leave both blank to serve plaintext."}}</h3>
     <div id="tls-panel">
       {{template "tls_panel" .}}
     </div>
@@ -361,51 +264,28 @@
   </div>
 
   <div class="panel">
-    <h3>Internal security</h3>
-    <p class="muted">
-      Shared secret this node presents to raftd's own internal socket
-      (ADR-0033) - must match raftd's own <code>-internal-token</code>.
-      Write-only, like the peer API key in Colony membership and peers.
-    </p>
+    <h3>Internal security {{hint "Shared secret this node presents to raftd's own internal socket (ADR-0033) - must match raftd's own -internal-token. Write-only, like the peer API key in Colony membership and peers."}}</h3>
     <div id="internal-security-panel">
       {{template "internal_security_panel" .}}
     </div>
   </div>
 
   <div class="panel">
-    <h3>Frontend configuration</h3>
-    <p class="muted">
-      Settings for the co-located <code>frontend</code> web server
-      (<code>/usr/local/etc/apiary/frontend.json</code>, ADR-0100/ADR-0102).
-      Saving restarts frontend automatically to apply the change - this
-      may briefly interrupt the page you're viewing right now.
-    </p>
+    <h3>Frontend configuration {{hint "Settings for the co-located frontend web server (/usr/local/etc/apiary/frontend.json, ADR-0100/ADR-0102). Saving restarts frontend automatically to apply the change - this may briefly interrupt the page you're viewing right now."}}</h3>
     <div id="frontend-config-panel">
       {{template "frontend_config_panel" .}}
     </div>
   </div>
 
   <div class="panel">
-    <h3>Restshimd configuration</h3>
-    <p class="muted">
-      Settings for the co-located <code>restshimd</code> REST API
-      (<code>/usr/local/etc/apiary/restshimd.json</code>, ADR-0100/ADR-0102).
-      Saving restarts restshimd automatically to apply the change.
-    </p>
+    <h3>Restshimd configuration {{hint "Settings for the co-located restshimd REST API (/usr/local/etc/apiary/restshimd.json, ADR-0100/ADR-0102). Saving restarts restshimd automatically to apply the change."}}</h3>
     <div id="restshimd-config-panel">
       {{template "restshimd_config_panel" .}}
     </div>
   </div>
 
   <div class="panel">
-    <h3>Raftd configuration</h3>
-    <p class="muted">
-      Read-only view of the co-located <code>raftd</code>'s own settings
-      (<code>/usr/local/etc/apiary/raftd.json</code>, ADR-0100). Every
-      field here - including raft-transport TLS and the internal token -
-      must be hand-edited in the file directly and applied with a manual
-      <code>apiary_raftd</code> restart; see the panel below for why.
-    </p>
+    <h3>Raftd configuration {{hint "Read-only view of the co-located raftd's own settings (/usr/local/etc/apiary/raftd.json, ADR-0100). Every field here - including raft-transport TLS and the internal token - must be hand-edited in the file directly and applied with a manual apiary_raftd restart; see the panel below for why."}}</h3>
     <div id="raftd-config-panel">
       {{template "raftd_config_panel" .}}
     </div>
@@ -431,14 +311,7 @@
   <section class="settings-group" aria-labelledby="machine-exposure">
   <h2 id="machine-exposure">Service exposure</h2>
   <div class="panel">
-    <h3>Cloudflare Tunnel exposure</h3>
-    <p class="muted">
-      Lets a Cell's own HTTP service be reached at a public hostname
-      through a Cloudflare Tunnel, without opening any inbound port on
-      this Comb - see <code>docs/adr/0063-cloudflare-tunnel-exposure-v1.md</code>
-      in the repository. Set per-Cell on each VM's own detail page, once
-      configured here.
-    </p>
+    <h3>Cloudflare Tunnel exposure {{hint "Lets a Cell's own HTTP service be reached at a public hostname through a Cloudflare Tunnel, without opening any inbound port on this Comb - see docs/adr/0063-cloudflare-tunnel-exposure-v1.md in the repository. Set per-Cell on each VM's own detail page, once configured here."}}</h3>
     {{if .CloudflareConfigured}}
     <p><span class="badge true">configured</span> This Comb's managerd has Cloudflare Tunnel exposure enabled.</p>
     {{else}}
