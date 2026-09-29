@@ -366,6 +366,18 @@
       .resource-table th, .resource-table td, .resource-table code { white-space:normal; overflow-wrap:anywhere; }
       .resource-table td:nth-child(2) { min-width:0; }
     }
+    /* service-table: the Machine page's Apiary services table. The service
+       name is the one cell in a row that says which daemon the row is
+       about, but the global code { word-break:break-all } above lets the
+       auto table layout squeeze the column and break apiary_managerd
+       across lines once the viewport narrows. min-width holds the column
+       at the widest name plus its cell padding, the same 10rem floor
+       .resource-table already puts under its own long-code column, and
+       nowrap stops the name from breaking to fit inside whatever width is
+       left. Scoped to the first column, so Status, Boot enabled and Detail
+       keep wrapping exactly as they do now. */
+    .service-table th:first-child, .service-table td:first-child { min-width:10rem; }
+    .service-table td:first-child code { word-break:normal; white-space:nowrap; }
     .upload-progress { display:flex; align-items:center; gap:.5rem; margin-top:.5rem; }
     #iso-upload-form { margin-bottom:1rem; }
     .upload-progress progress { flex:1; max-width:20rem; height:1rem; }
