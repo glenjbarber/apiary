@@ -90,6 +90,47 @@ func TestHandleRecoveryHandbookPage_CleanResponseRendersStepsAndAppendix(t *test
 	}
 }
 
+// TestHandleRecoveryHandbookPage_EvidenceAppendixNamesEveryRecoveryVerdict
+// guards a real bug found while giving this page's own evidence appendix
+// the same StateChip pass simulate.html already had: the appendix table
+// only ever distinguished "unprotected" from a blanket "unverified
+// replica" fallback, so a resource whose replica was actually confirmed
+// IN SYNC - a genuinely good finding - rendered as merely "unverified",
+// understating it. Both templates read the same Verdict string set
+// (fromRPCOwnedResourceImpact, shared with simulate.go), so this appendix
+// must name all five states simulate.html already does.
+func TestHandleRecoveryHandbookPage_EvidenceAppendixNamesEveryRecoveryVerdict(t *testing.T) {
+	client := &fakeClient{
+		statusResp: &rpcpb.StatusResponse{
+			ManagerNodeId: "node-a", RaftReachable: true, RaftLeaderId: "node-c",
+			Members: []*rpcpb.RaftMember{{NodeId: "node-a", Suffrage: "Voter"}},
+		},
+		simulateResp: &rpcpb.SimulateNodeFailureResponse{
+			Quorum: validQuorumImpact(true),
+			OwnedResources: []*rpcpb.OwnedResourceImpact{
+				{Id: "vm-1", Name: "in-sync-vm", Kind: rpcpb.ResourceKind_RESOURCE_KIND_VM, ReplicaNodeId: "node-b", Verdict: rpcpb.RecoveryVerdict_RECOVERY_VERDICT_REPLICA_IN_SYNC},
+				{Id: "vm-2", Name: "out-of-sync-vm", Kind: rpcpb.ResourceKind_RESOURCE_KIND_VM, ReplicaNodeId: "node-b", Verdict: rpcpb.RecoveryVerdict_RECOVERY_VERDICT_REPLICA_OUT_OF_SYNC},
+			},
+		},
+	}
+	s := newTestServer(t, client)
+
+	req := httptest.NewRequest(http.MethodGet, "/recovery-handbook?node_id=node-a", nil)
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, req)
+
+	body := rec.Body.String()
+	if !strings.Contains(body, `<span class="badge ready">replica in sync</span>`) {
+		t.Errorf("evidence appendix did not name the in-sync replica as such, got: %s", body)
+	}
+	if !strings.Contains(body, `<span class="badge critical">replica out of sync</span>`) {
+		t.Errorf("evidence appendix did not name the out-of-sync replica as such, got: %s", body)
+	}
+	if strings.Contains(body, "in-sync-vm") && strings.Count(body, "unverified replica") > 0 {
+		t.Errorf("a confirmed in-sync replica must never render as merely unverified, got: %s", body)
+	}
+}
+
 func TestHandleRecoveryHandbookPage_SimulateTransportErrorRendersBanner(t *testing.T) {
 	client := &fakeClient{
 		statusResp:  &rpcpb.StatusResponse{ManagerNodeId: "node-a", RaftReachable: true},

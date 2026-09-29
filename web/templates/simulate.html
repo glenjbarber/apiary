@@ -59,7 +59,7 @@
         <tr><th>Remaining voters (configured)</th><td>{{.SimulateQuorum.RemainingVoters}} of {{.SimulateQuorum.TotalVoters}} total (quorum needs {{.SimulateQuorum.QuorumSize}})</td></tr>
         <tr><th>Remaining voters (confirmed reachable)</th><td>{{.SimulateQuorum.Reachable}}</td></tr>
         <tr><th>Remaining voters (reachability unverified)</th><td>{{.SimulateQuorum.Unknown}}</td></tr>
-        <tr><th>Verdict</th><td>{{if .SimulateQuorum.Survives}}<span class="success">quorum survives</span>{{else}}<span class="error">quorum LOST</span>{{end}}</td></tr>
+        <tr><th>Verdict</th><td>{{if .SimulateQuorum.Survives}}<span class="badge ready">quorum survives</span>{{else}}<span class="badge critical">quorum LOST</span>{{end}}</td></tr>
         <tr><th>Note</th><td>{{.SimulateQuorum.Note}}</td></tr>
       </tbody>
     </table>
@@ -76,12 +76,12 @@
           <td>{{.ID}}</td><td>{{.Name}}</td><td>{{.Kind}}</td>
           <td>{{if .ReplicaNodeID}}{{.ReplicaNodeID}}{{else}}<em>none</em>{{end}}</td>
           <td>
-            {{if eq .Verdict "unprotected"}}<span class="error">unprotected</span>
-            {{else if eq .Verdict "replica_in_sync"}}<span class="success">replica in sync</span>
-            {{else if eq .Verdict "replica_out_of_sync"}}<span class="error">replica out of sync</span>
-            {{else if eq .Verdict "replica_unobserved"}}<span class="muted">replica unobserved</span>
-            {{else if eq .Verdict "unverified_replica"}}<span class="muted">unverified replica</span>
-            {{else}}<span class="muted">unknown</span>{{end}}
+            {{if eq .Verdict "unprotected"}}<span class="badge critical">unprotected</span>
+            {{else if eq .Verdict "replica_in_sync"}}<span class="badge ready">replica in sync</span>
+            {{else if eq .Verdict "replica_out_of_sync"}}<span class="badge critical">replica out of sync</span>
+            {{else if eq .Verdict "replica_unobserved"}}<span class="badge unknown">replica unobserved</span>
+            {{else if eq .Verdict "unverified_replica"}}<span class="badge unknown">unverified replica</span>
+            {{else}}<span class="badge unknown">unknown</span>{{end}}
             {{if .ReplicaSync}}
               <br><span class="muted">
                 observed on {{.ReplicaSync.NodeID}}:
@@ -127,10 +127,13 @@
         <tr>
           <td>{{.ResourceName}} ({{.ResourceID}})</td>
           <td>{{.ImageName}}</td><td>{{.Role}}</td>
-          <td>{{if eq .Verdict "available"}}<span class="success">available</span>{{else if eq .Verdict "unavailable"}}<span class="error">unavailable</span>{{else}}<span class="muted">unknown</span>{{end}}</td>
+          <td>{{if eq .Verdict "available"}}<span class="badge ready">available</span>{{else if eq .Verdict "unavailable"}}<span class="badge critical">unavailable</span>{{else}}<span class="badge unknown">unknown</span>{{end}}</td>
           <td>
             {{.Explanation}}
-            {{if .SourceNodes}}<br><span class="success">reported by {{range $i, $node := .SourceNodes}}{{if $i}}, {{end}}{{$node}}{{end}}</span>{{end}}
+            {{/* Attribution, not a second verdict - never colored green
+                 independent of the verdict above it, which would read as
+                 a contradiction next to a critical/unknown finding. */}}
+            {{if .SourceNodes}}<br><span class="muted">reported by {{range $i, $node := .SourceNodes}}{{if $i}}, {{end}}{{$node}}{{end}}</span>{{end}}
             {{if .UnknownNodes}}<br><span class="muted">not observed on {{range $i, $node := .UnknownNodes}}{{if $i}}, {{end}}{{$node}}{{end}}</span>{{end}}
           </td>
         </tr>

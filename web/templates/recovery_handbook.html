@@ -302,7 +302,14 @@
         <tr>
           <td>{{.ID}}</td><td>{{.Name}}</td><td>{{.Kind}}</td>
           <td>{{if .ReplicaNodeID}}{{.ReplicaNodeID}}{{else}}<em>none</em>{{end}}</td>
-          <td>{{if eq .Verdict "unprotected"}}<span class="error">unprotected</span>{{else}}<span class="muted">unverified replica</span>{{end}}</td>
+          <td>
+            {{if eq .Verdict "unprotected"}}<span class="badge critical">unprotected</span>
+            {{else if eq .Verdict "replica_in_sync"}}<span class="badge ready">replica in sync</span>
+            {{else if eq .Verdict "replica_out_of_sync"}}<span class="badge critical">replica out of sync</span>
+            {{else if eq .Verdict "replica_unobserved"}}<span class="badge unknown">replica unobserved</span>
+            {{else if eq .Verdict "unverified_replica"}}<span class="badge unknown">unverified replica</span>
+            {{else}}<span class="badge unknown">unknown</span>{{end}}
+          </td>
         </tr>
         {{else}}
         <tr><td colspan="5"><em>No resources owned by this node</em></td></tr>
@@ -325,7 +332,7 @@
         {{range .RecoveryImageAvailability}}
         <tr>
           <td>{{.ResourceName}} ({{.ResourceID}})</td><td>{{.ImageName}}</td>
-          <td>{{if eq .Verdict "available"}}<span class="success">available</span>{{else if eq .Verdict "unavailable"}}<span class="error">unavailable</span>{{else}}<span class="muted">unknown</span>{{end}}</td>
+          <td>{{if eq .Verdict "available"}}<span class="badge ready">available</span>{{else if eq .Verdict "unavailable"}}<span class="badge critical">unavailable</span>{{else}}<span class="badge unknown">unknown</span>{{end}}</td>
         </tr>
         {{else}}
         <tr><td colspan="3"><em>No resources reference stored images</em></td></tr>
