@@ -2,8 +2,10 @@ package install
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
+	"regexp"
 	"strings"
 )
 
@@ -83,6 +85,14 @@ func servicesLinePortConflict(line, port, proto string) string {
 }
 
 var registry = []Check{
+	// managerd-node-id first: it is a pure file read with no host
+	// dependency, and it is the one check whose failure mode is
+	// unrecoverable - a placeholder node_id is committed into raft
+	// state on first start and no later edit can take it back out.
+	// Reporting it above host provisioning rather than below means an
+	// operator who ran the sample through verbatim is told before
+	// anything else is proposed.
+	managerdNodeIDCheck,
 	zfsPoolCheck,
 	zfsBaseDatasetCheck,
 	vmmLoadedCheck,
@@ -152,6 +162,92 @@ func setRcVar(ctx context.Context, r Runner, assignment string) error {
 		return fmt.Errorf("sysrc %s: %s", assignment, firstNonEmpty(stderr, err))
 	}
 	return nil
+}
+
+// ---- managerd node identity ----
+
+// managerdConfigPath is managerd's own node config - the same default
+// internal/nodeconfig.DefaultPath and cmd/raftd's confirm.go read. A
+// var, not a const, for the same reason pfConfPath and etcServicesPath
+// are: purely so a test can point it at a temp file instead of reading
+// a real host's own config.
+var managerdConfigPath = "/usr/local/etc/apiary/managerd.json"
+
+// placeholderNodeIDRe is the one value shape this check refuses: the
+// whole value wrapped in angle brackets, which is how every
+// placeholder etc/apiary's samples ship reads ("<this-node-id>",
+// "<this-node-hostname>", "<your-pool-name>"). Whole-value and
+// anchored on purpose. A substring test would also reject legitimate
+// ids, and this check's authority is exactly one narrow fact about
+// one field, so it is kept to the shape the samples actually produce.
+var placeholderNodeIDRe = regexp.MustCompile(`^<.*>$`)
+
+// managerdNodeIDPeek is the minimal shape of managerd.json this check
+// reads: node_id and nothing else, decoded with the same plain
+// encoding/json internal/nodeconfig itself loads this file with. Every
+// other key in the file is deliberately not named here, which is what
+// makes it structurally impossible for another field's placeholder
+// (rpc_addr's "<this-node-hostname>:17700", zfs_base's
+// "<your-pool-name>/apiary") to trip this check.
+type managerdNodeIDPeek struct {
+	NodeID string `json:"node_id"`
+}
+
+// managerdNodeIDCheck refuses a managerd.json whose node_id is still
+// the literal sample placeholder. etc/apiary/README.md warns that
+// leaving it in place has already committed "<this-node-id>" into raft
+// state permanently, but until now that warning was documentation
+// only: nothing between "cp the sample" and "raftd boots" looked at
+// the value, and raft identity is fixed at first start. An operator who
+// copied the sample verbatim was told what had happened only by the
+// damage.
+//
+// RiskManualOnly with no Apply, permanently: which id a node calls
+// itself is the operator's decision, exactly as the ZFS pool's vdev
+// layout is. Apiary will not invent a raft identity for someone.
+//
+// A managerd.json that does not exist yet is StatusOK, not a finding.
+// docs/bootstrap.md runs this installer at Step 3 and the operator
+// creates managerd.json at Step 8, so on a host following its own
+// documented order the file legitimately is not there, and an absent
+// key holds no placeholder to refuse.
+var managerdNodeIDCheck = Check{
+	ID:          "managerd-node-id",
+	Description: "managerd.json's node_id is a real node id, not the sample's literal placeholder",
+	Risk:        RiskManualOnly,
+	Applicable:  always,
+	Probe: func(ctx context.Context, r Runner, opt Options) Result {
+		body, err := os.ReadFile(managerdConfigPath)
+		if os.IsNotExist(err) {
+			return Result{ID: "managerd-node-id", Status: StatusOK,
+				Detail: managerdConfigPath + " does not exist yet, so no node_id has been written to check"}
+		}
+		if err != nil {
+			return Result{ID: "managerd-node-id", Status: StatusUnknown, Detail: err.Error(),
+				FixHint: "make " + managerdConfigPath + " readable by this user, then re-run - Apiary will not report a node_id it could not read"}
+		}
+		var peek managerdNodeIDPeek
+		if err := json.Unmarshal(body, &peek); err != nil {
+			// Not this check's finding to report: managerd will refuse
+			// to start on the same file for the same reason, and this
+			// check has no opinion about JSON well-formedness. Unknown
+			// is the status pf-anchor already uses for a read it could
+			// not complete.
+			return Result{ID: "managerd-node-id", Status: StatusUnknown, Detail: err.Error(),
+				FixHint: "fix the JSON in " + managerdConfigPath + " - managerd loads the same file and will not start on it either"}
+		}
+		if placeholderNodeIDRe.MatchString(peek.NodeID) {
+			return Result{ID: "managerd-node-id", Status: StatusMisconfigured,
+				Detail:  fmt.Sprintf("node_id in %s is the unsubstituted sample placeholder %q - raft identity is committed on first start and cannot be corrected afterwards", managerdConfigPath, peek.NodeID),
+				FixHint: fmt.Sprintf("edit %s and set \"node_id\" to this node's own stable id (e.g. \"node1\"), or delete the key entirely so managerd falls back to os.Hostname() - Apiary will not choose a raft node id on an operator's behalf", managerdConfigPath)}
+		}
+		if peek.NodeID == "" {
+			return Result{ID: "managerd-node-id", Status: StatusOK,
+				Detail: "node_id is absent or empty, so managerd falls back to os.Hostname()"}
+		}
+		return Result{ID: "managerd-node-id", Status: StatusOK,
+			Detail: fmt.Sprintf("node_id is %q", peek.NodeID)}
+	},
 }
 
 // ---- ZFS ----
