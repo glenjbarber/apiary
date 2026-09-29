@@ -598,6 +598,7 @@ func (r *Reconciler) RunOnce(ctx context.Context) (err error) {
 				NetworkID:       j.GetNetworkId(),
 				IPAddress:       j.GetIpAddress(),
 				VNET:            j.GetVnet(),
+				FirewallRules:   internalFirewallRules(j.GetFirewallRules()),
 			})
 		}
 	}
@@ -1659,6 +1660,39 @@ func effectivePFRules(vm VMPlacement) []pf.Rule {
 		return nil
 	}
 	return toPFRules(vm.FirewallRules)
+}
+
+// effectiveJailPFRules returns j's firewall rules to apply this tick.
+// There is no paused equivalent for a jail - JailDefinition carries no
+// firewall_paused field, and a jail's rules are opt-in from creation
+// rather than a temporary override of something already enforcing, so
+// there is nothing to suspend. The conversion is toPFRules, the same
+// one a VM uses, so the two kinds of resource compile through one
+// renderer and one ordering rule.
+func effectiveJailPFRules(j JailPlacement) []pf.Rule {
+	return toPFRules(j.FirewallRules)
+}
+
+// internalFirewallRules converts replicated jail rules into this
+// package's own neutral type, mirroring how a VM's are converted at the
+// ListJails boundary. A jail and a VM share one FirewallRule type on
+// the wire (ADR-0117), so this is the same conversion with the same
+// result rather than a translation.
+func internalFirewallRules(rules []*internalpb.FirewallRule) []FirewallRule {
+	if len(rules) == 0 {
+		return nil
+	}
+	out := make([]FirewallRule, 0, len(rules))
+	for _, r := range rules {
+		out = append(out, FirewallRule{
+			Direction: r.GetDirection(),
+			Action:    r.GetAction(),
+			Protocol:  r.GetProtocol(),
+			PortRange: r.GetPortRange(),
+			Priority:  r.GetPriority(),
+		})
+	}
+	return out
 }
 
 // reconcileDHCP aggregates every local, non-deleting VM's network

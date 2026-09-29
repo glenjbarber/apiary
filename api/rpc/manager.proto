@@ -870,6 +870,11 @@ message JailDefinition {
   string network_id = 11;
   string ip_address = 12;
   bool vnet = 13;
+
+  // firewall_rules mirrors api/internalpb's JailDefinition field of the
+  // same name, reusing this file's own FirewallRule exactly as
+  // VMDefinition does - see ADR-0117.
+  repeated FirewallRule firewall_rules = 30;
 }
 
 // FirewallRule mirrors api/internalpb's FirewallRule.

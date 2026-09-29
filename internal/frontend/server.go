@@ -302,6 +302,12 @@ type pageData struct {
 	// mirroring VM above.
 	Jail jailView
 
+	// JailFirewallFormError carries a failed firewall-rules edit form's
+	// own error, kept separate from JailHostnameFormError so one form's
+	// failure does not blank the other form's current values on the
+	// page. Mirrors VMFirewallFormError exactly (ADR-0117).
+	JailFirewallFormError string
+
 	// JailHostnameFormError carries a failed hostname-edit form's own
 	// error on the jail detail page, mirroring VMCloudflareFormError.
 	JailHostnameFormError string
@@ -1161,6 +1167,10 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("DELETE /jails/{id}", s.requireRole(manager.RoleOperator, s.handleDeleteJail))
 	s.mux.HandleFunc("POST /jails/{id}/lifecycle", s.requireRole(manager.RoleOperator, s.handleSetJailDesiredState))
 	s.mux.HandleFunc("POST /jails/{id}/hostname", s.requireRole(manager.RoleOperator, s.handleSetJailHostname))
+	// ADR-0117's jail firewall stage, gated exactly like the VM's own
+	// firewall-rules form: rules are enforcement, so editing them is an
+	// Operator action, never a Viewer one.
+	s.mux.HandleFunc("POST /jails/{id}/firewall-rules", s.requireRole(manager.RoleOperator, s.handleSetJailFirewallRules))
 	s.mux.HandleFunc("POST /assumption-register", s.requireRole(manager.RoleOperator, s.handleSaveAssumptionClaim))
 	s.mux.HandleFunc("DELETE /assumption-register/{id}", s.requireRole(manager.RoleOperator, s.handleDeleteAssumptionClaim))
 
@@ -2206,11 +2216,66 @@ func (s *Server) handleSetJailHostname(w http.ResponseWriter, r *http.Request) {
 	s.renderJailPage(w, r, id, "")
 }
 
+// handleSetJailFirewallRules replaces a jail's firewall rules
+// wholesale - the jail counterpart of handleSetVMFirewallRules, and the
+// jail half of ADR-0117's firewalling stage.
+//
+// It submits a whole JailDefinition rather than a narrow
+// SetJailFirewallRules command, because UpdateJail already carries the
+// full definition and JailDefinition has no firewall_paused field to
+// protect the way VMDefinition's did. ADR-0079 chose a dedicated
+// command for VMs to avoid a read-modify-write race against a
+// concurrent UpdateVM; the handler below reads the current jail first
+// and changes only the rules on that copy, so the same race cannot
+// arise here either, and a second command would be a second thing to
+// keep in step for no gain.
+func (s *Server) handleSetJailFirewallRules(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if err := r.ParseForm(); err != nil {
+		s.renderJailPageWithErrors(w, r, id, "", "invalid form: "+err.Error())
+		return
+	}
+	current, err := s.client.GetJail(r.Context(), &rpcpb.GetJailRequest{Id: id})
+	if err != nil {
+		s.renderJailPageWithErrors(w, r, id, "", err.Error())
+		return
+	}
+	if current.GetError() != "" || !current.GetFound() {
+		msg := current.GetError()
+		if msg == "" {
+			msg = "jail not found"
+		}
+		s.renderJailPageWithErrors(w, r, id, "", msg)
+		return
+	}
+	jail := current.GetJail()
+	jail.FirewallRules = parseFirewallRuleRows(r)
+	resp, err := s.client.UpdateJail(r.Context(), &rpcpb.UpdateJailRequest{Jail: jail})
+	if err != nil {
+		s.renderJailPageWithErrors(w, r, id, "", err.Error())
+		return
+	}
+	if resp.GetError() != "" {
+		s.renderJailPageWithErrors(w, r, id, "", resp.GetError())
+		return
+	}
+	s.renderJailPageWithErrors(w, r, id, "", "")
+}
+
 // renderJailPage re-fetches and renders the jail detail page, with an
 // optional form-specific error - shared by handleSetJailHostname so a
 // failed form submission still shows the rest of the page's own
 // current state, not just a bare error. Mirrors renderVMPage exactly.
 func (s *Server) renderJailPage(w http.ResponseWriter, r *http.Request, id, hostnameErr string) {
+	s.renderJailPageWithErrors(w, r, id, hostnameErr, "")
+}
+
+// renderJailPageWithErrors is renderJailPage with a second, independent
+// form error, so a failed firewall-rules save still shows the hostname
+// field's current value and a failed hostname save still shows the
+// rules. One shared error slot would make the two forms overwrite each
+// other's state on every failure. Mirrors the VM page's own split.
+func (s *Server) renderJailPageWithErrors(w http.ResponseWriter, r *http.Request, id, hostnameErr, firewallErr string) {
 	resp, err := s.client.GetJail(r.Context(), &rpcpb.GetJailRequest{Id: id})
 	if err != nil {
 		s.render(w, "jail_page", s.withAuthFields(r, pageData{Error: err.Error(), ActivePage: "jails"}))
@@ -2227,8 +2292,9 @@ func (s *Server) renderJailPage(w http.ResponseWriter, r *http.Request, id, host
 	}
 	s.render(w, "jail_page", s.withAuthFields(r, pageData{
 		Jail: fromRPCJail(resp.GetJail()), JailHostnameFormError: hostnameErr,
-		ReplicaFreshness: s.replicaFreshness(r.Context(), "jail", resp.GetJail().GetId(), resp.GetJail().GetNodeId(), resp.GetJail().GetReplicaNodeId()),
-		ActivePage:       "jails",
+		JailFirewallFormError: firewallErr,
+		ReplicaFreshness:      s.replicaFreshness(r.Context(), "jail", resp.GetJail().GetId(), resp.GetJail().GetNodeId(), resp.GetJail().GetReplicaNodeId()),
+		ActivePage:            "jails",
 	}))
 }
 
