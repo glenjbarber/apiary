@@ -9,9 +9,11 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"strings"
 	"time"
 
 	rpcpb "github.com/glenjbarber/apiary/api/rpc"
+	raftnode "github.com/glenjbarber/apiary/internal/raft"
 )
 
 // joinRequestView is the template-facing shape of a PendingJoinRequest.
@@ -19,10 +21,48 @@ type joinRequestView struct {
 	RequestID       string
 	NodeID          string
 	RaftBindAddress string
-	Code            string
-	RequestedAt     string
-	Status          string
-	Error           string
+	// Code is the FIRST CODE - the REQUESTING Comb's own 6-digit value
+	// (ADR-0147 Part 2), and on the target's panel it is what the
+	// operator compares a paste against. It is empty on a request that
+	// has already been through stage one, because the code is CLEARED
+	// from replicated state the moment it is accepted: a spent value is
+	// not left lying around for a later reader.
+	Code        string
+	RequestedAt string
+	Status      string
+	Stage       string
+	Error       string
+
+	// Fingerprints (ADR-0147 Part 2) is every certificate the joining
+	// Comb advertised, in the hostcert.Fingerprint format. Rendered as
+	// the comparison list next to the first-code form, and rendered
+	// ALWAYS - including when it is empty, which is a refusal state
+	// rather than a "nothing to see here".
+	//
+	// The pre-ADR-0147 panel rendered an explicit "no TLS certificate
+	// presented" fallback and let approval proceed on it. That fallback
+	// was the defect: with nothing to compare, the fingerprint check -
+	// the only thing binding a request to a machine - was vacuous.
+	Fingerprints []string
+
+	// FirstCodeAttempts / SecondPinAttempts are the replicated
+	// per-stage counters, shown so an operator about to use the last of
+	// five knows it is the last.
+	FirstCodeAttempts uint32
+	SecondPinAttempts uint32
+	AttemptsMax       uint32
+
+	// SecondPinExpires is when the target's second PIN lapses, as
+	// ready-to-render text, or "" when there is no PIN. The VALUE is
+	// never on this struct: the second PIN is released to the
+	// requesting Comb and only there, and a field here would be one
+	// template edit away from rendering it on the page an operator who
+	// could complete the handshake alone reads.
+	SecondPinExpires string
+
+	// SecondPinReissues is how many of the two permitted re-arms have
+	// been used.
+	SecondPinReissues uint32
 
 	// TLSFingerprint (ADR-0113) is the joining Comb's own TLS certificate
 	// fingerprint, or "" when it presented none (TLS remains opt-in) -
@@ -74,17 +114,42 @@ func fromRPCJoinRequest(r *rpcpb.PendingJoinRequest) joinRequestView {
 		status = "rejected"
 	case rpcpb.JoinRequestStatus_JOIN_REQUEST_STATUS_CANCELLED:
 		status = "cancelled"
+	case rpcpb.JoinRequestStatus_JOIN_REQUEST_STATUS_FAILED:
+		// ADR-0147 Part 2. FAILED is TERMINAL, like approved and
+		// rejected: the record stays so the joiner's own poll resolves,
+		// and Purge is how it goes away. It is deliberately not
+		// rendered as "pending with 5 attempts used", because a request
+		// something has been guessing at is not one more paste away
+		// from being approved.
+		status = "failed"
 	}
-	return joinRequestView{
-		RequestID:       r.GetRequestId(),
-		NodeID:          r.GetNodeId(),
-		RaftBindAddress: r.GetRaftBindAddress(),
-		Code:            r.GetCode(),
-		RequestedAt:     time.Unix(r.GetRequestedAtUnix(), 0).Local().Format("2006-01-02 15:04 MST"),
-		Status:          status,
-		TLSFingerprint:  r.GetTlsCertFingerprint(),
-		JoinerLogState:  joinerLogStateText(r.GetJoinerLogStateObserved(), r.GetJoinerLastLogIndex()),
+	stage := "introduced"
+	switch r.GetStage() {
+	case rpcpb.JoinRequestStage_JOIN_REQUEST_STAGE_CODE_VERIFIED:
+		stage = "code verified - the second PIN is waiting to be read off the requesting Comb"
+	case rpcpb.JoinRequestStage_JOIN_REQUEST_STAGE_AUTHORIZED:
+		stage = "authorized"
 	}
+	view := joinRequestView{
+		RequestID:         r.GetRequestId(),
+		NodeID:            r.GetNodeId(),
+		RaftBindAddress:   r.GetRaftBindAddress(),
+		Code:              r.GetCode(),
+		RequestedAt:       time.Unix(r.GetRequestedAtUnix(), 0).Local().Format("2006-01-02 15:04 MST"),
+		Status:            status,
+		Stage:             stage,
+		Fingerprints:      r.GetAdvertisedFingerprints(),
+		FirstCodeAttempts: r.GetFirstCodeAttempts(),
+		SecondPinAttempts: r.GetSecondPinAttempts(),
+		AttemptsMax:       raftnode.MaxJoinStageAttempts,
+		SecondPinReissues: r.GetSecondPinReissues(),
+		TLSFingerprint:    r.GetTlsCertFingerprint(),
+		JoinerLogState:    joinerLogStateText(r.GetJoinerLogStateObserved(), r.GetJoinerLastLogIndex()),
+	}
+	if r.GetSecondPinExpiresAtUnix() > 0 && r.GetStage() == rpcpb.JoinRequestStage_JOIN_REQUEST_STAGE_CODE_VERIFIED {
+		view.SecondPinExpires = time.Unix(r.GetSecondPinExpiresAtUnix(), 0).Local().Format("15:04:05 MST")
+	}
+	return view
 }
 
 // currentJoinRequests fetches the Admin-only pending-request list for
@@ -118,29 +183,71 @@ func (s *Server) currentJoinRequests(r *http.Request) []joinRequestView {
 // silently record a request on THIS Comb's own Colony instead of the
 // one actually being joined.
 func (s *Server) handleRequestJoinColony(w http.ResponseWriter, r *http.Request) {
+	s.renderMachinePageWithJoinColonyError(w, r, retiredJoinFormMessage)
+}
+
+// retiredJoinFormMessage is what the retired form says, in the place an
+// operator who has a stale browser tab or a bookmark will actually see
+// it. It names the command and says why the page is gone, because
+// "this form no longer works" with no alternative is how an operator
+// concludes the whole feature was removed.
+const retiredJoinFormMessage = "This page no longer starts a Colony join. ADR-0147 Part 2 requires the first code to be generated by the JOINING Comb and read by the target's Admin off the joiner's own screen, which is something a form on the joiner cannot honestly do - it would satisfy the check without a person. Run `apiaryctl join-introduce --target HOST:PORT` on this Comb instead; it prints the first code and this Comb's certificate fingerprints for the target's Admin to paste, and it submits nothing on your behalf."
+
+// handleVerifyJoinIntroduction implements the TARGET's side of stage
+// one - POST /join-requests/{id}/verify, Admin-only, same tier as
+// Approve/Reject/Purge.
+//
+// It forwards exactly what the operator pasted and derives nothing: the
+// first code and every fingerprint go on the wire as typed, and the
+// comparison happens in the FSM against what the request actually
+// carried. A page that computed a verdict itself would be a second
+// implementation of the one check that matters, and the two would
+// eventually disagree.
+//
+// The response does not carry, and this handler does not render, the
+// second PIN. The PIN goes to the requesting Comb and only there.
+func (s *Server) handleVerifyJoinRequest(w http.ResponseWriter, r *http.Request) {
 	if err := r.ParseForm(); err != nil {
-		s.renderMachinePageWithJoinColonyError(w, r, err.Error())
+		s.redirectAfterJoinRequestAction(w, r, err.Error(), nil)
 		return
 	}
-	targetAddress := withFixedPort(r.FormValue("target_host"), managerdListenerPort)
-	if targetAddress == "" {
-		s.renderMachinePageWithJoinColonyError(w, r, "the existing Colony member's address is required")
-		return
-	}
-	resp, err := s.client.RequestJoinColony(r.Context(), &rpcpb.RequestJoinColonyRequest{
-		NodeId:          r.FormValue("node_id"),
-		RaftBindAddress: withFixedPort(r.FormValue("raft_bind_host"), raftdListenerPort),
-		TargetAddress:   targetAddress,
+	fingerprints := fingerprintListFromForm(r.FormValue("fingerprints"))
+	resp, err := s.client.VerifyJoinIntroduction(r.Context(), &rpcpb.VerifyJoinIntroductionRequest{
+		RequestId:        r.PathValue("id"),
+		IntroductionCode: strings.TrimSpace(r.FormValue("introduction_code")),
+		Fingerprints:     fingerprints,
 	})
-	if err != nil {
-		s.renderMachinePageWithJoinColonyError(w, r, err.Error())
-		return
+	s.redirectAfterJoinRequestAction(w, r, resp.GetError(), err)
+}
+
+// fingerprintListFromForm splits a pasted fingerprint block into one
+// value per line, dropping blanks.
+//
+// Line-separated rather than comma-separated because that is what
+// `apiaryctl join-introduce --field fingerprints` prints and what a
+// terminal selection pastes. Whitespace inside a line is left alone:
+// a fingerprint is a fixed-format string, so silently "tidying" one
+// would mean the operator is no longer comparing what they read.
+func fingerprintListFromForm(raw string) []string {
+	out := []string{}
+	for _, line := range strings.Split(raw, "\n") {
+		if v := strings.TrimSpace(line); v != "" {
+			out = append(out, v)
+		}
 	}
-	if resp.GetError() != "" {
-		s.renderMachinePageWithJoinColonyError(w, r, resp.GetError())
-		return
-	}
-	http.Redirect(w, r, "/machine?join_request_id="+url.QueryEscape(resp.GetRequestId())+"&join_target_address="+url.QueryEscape(targetAddress), http.StatusFound)
+	return out
+}
+
+// handleReissueJoinSecondPin re-arms an expired or spent second PIN -
+// POST /join-requests/{id}/reissue-pin, Admin-only.
+//
+// It is a separate button rather than something the verify form does
+// automatically because re-arming invalidates a PIN the requesting
+// Comb may be reading right now, and because it is capped at 2. An
+// operator should have to say so.
+func (s *Server) handleReissueJoinSecondPin(w http.ResponseWriter, r *http.Request) {
+	resp, err := s.client.ReissueJoinSecondPin(r.Context(), &rpcpb.ReissueJoinSecondPinRequest{RequestId: r.PathValue("id")})
+	s.redirectAfterJoinRequestAction(w, r, resp.GetError(), err)
 }
 
 func (s *Server) renderMachinePageWithJoinColonyError(w http.ResponseWriter, r *http.Request, formErr string) {
@@ -199,9 +306,16 @@ func (s *Server) handleApproveJoinRequest(w http.ResponseWriter, r *http.Request
 		s.redirectAfterJoinRequestAction(w, r, "", err)
 		return
 	}
+	// second_pin is the 8-digit value the TARGET generated, which the
+	// operator read off the REQUESTING Comb's own screen. It travels
+	// with the confirmation phrase and is checked by the same call; the
+	// phrase alone is a constant anyone can read out of this repository,
+	// which is why Part 2 kept it but stopped letting it be the whole
+	// of the gate.
 	resp, err := s.client.ApproveJoinRequest(r.Context(), &rpcpb.ApproveJoinRequestRequest{
 		RequestId:     r.PathValue("id"),
 		ConfirmPhrase: r.FormValue("confirm_phrase"),
+		SecondPin:     strings.TrimSpace(r.FormValue("second_pin")),
 	})
 	s.redirectAfterJoinRequestAction(w, r, resp.GetError(), err)
 }

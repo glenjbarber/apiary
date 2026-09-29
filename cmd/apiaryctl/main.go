@@ -15,9 +15,9 @@
 // other side - managerd must never restart itself - is why this cannot
 // be folded into managerd either.
 //
-// SCOPE, deliberately narrow. Three subcommands, force-restart, install
-// and join-authorize, and no socket, no terminal UI, and no command
-// group that has not been asked for: a command that is present and wrong
+// SCOPE, deliberately narrow. Four subcommands, force-restart, install,
+// join-authorize and join-introduce, and no socket, no terminal UI, and
+// no command group that has not been asked for: a command that is present and wrong
 // is worse than one that is absent, and the larger design in ADR-0136
 // stays proposed until it is built.
 //
@@ -32,6 +32,7 @@
 //
 //	apiaryctl install [--apply]
 //	apiaryctl join-authorize --node-id ID --fingerprint FP
+//	apiaryctl join-introduce --target HOST:PORT
 //	apiaryctl force-restart
 //	apiaryctl help
 package main
@@ -54,6 +55,10 @@ Usage:
   apiaryctl join-authorize authorize one Comb to join this Colony, by
                             writing a single-use entry into the
                             root-owned store. Root only, no checkout
+  apiaryctl join-introduce start or poll a two-way Colony join. PRINTS
+                            the first code, this Comb's fingerprints
+                            and the target's second PIN, and submits
+                            nothing to the target on your behalf
   apiaryctl force-restart   restart managerd then raftd on this Comb,
                             confirming each by its own listener port
   apiaryctl -version        report this binary's build identity
@@ -95,6 +100,8 @@ func main() {
 		os.Exit(runInstall(args[1:]))
 	case "join-authorize":
 		os.Exit(runJoinAuthorize(args[1:]))
+	case "join-introduce":
+		os.Exit(runJoinIntroduce(args[1:]))
 	case "force-restart":
 		os.Exit(runForceRestart(args[1:]))
 	case "help", "-h", "--help":

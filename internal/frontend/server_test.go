@@ -48,8 +48,16 @@ type fakeClient struct {
 	// from getWindowResp carrying an Error string (the manager's own
 	// closed-window refusal) - the view has to be able to tell them
 	// apart, and these two fields are how a test says which it means.
-	getWindowResp      *rpcpb.GetColonyJoinWindowResponse
-	getWindowErr       error
+	getWindowResp *rpcpb.GetColonyJoinWindowResponse
+	getWindowErr  error
+	// ADR-0147 Part 2: the landing page's first-code and second-PIN
+	// forms, recorded so a test can assert the page forwards what the
+	// operator pasted rather than deriving anything itself.
+	lastVerifyJoinReq *rpcpb.VerifyJoinIntroductionRequest
+	verifyJoinResp    *rpcpb.VerifyJoinIntroductionResponse
+	lastReissuePinReq *rpcpb.ReissueJoinSecondPinRequest
+	reissuePinResp    *rpcpb.ReissueJoinSecondPinResponse
+
 	lastGetWindowReq   *rpcpb.GetColonyJoinWindowRequest
 	openWindowResp     *rpcpb.OpenColonyJoinWindowResponse
 	openWindowErr      error
@@ -736,6 +744,34 @@ func (f *fakeClient) CloseColonyJoinWindow(_ context.Context, in *rpcpb.CloseCol
 		return f.closeWindowResp, nil
 	}
 	return &rpcpb.CloseColonyJoinWindowResponse{}, nil
+}
+
+// The ADR-0147 Part 2 methods, on the generated fake. They record what
+// the landing page's new first-code and second-PIN forms submitted, so a
+// test can assert the page forwards the operator's pasted values rather
+// than deriving them itself.
+func (f *fakeClient) VerifyJoinIntroduction(_ context.Context, in *rpcpb.VerifyJoinIntroductionRequest, _ ...grpc.CallOption) (*rpcpb.VerifyJoinIntroductionResponse, error) {
+	f.lastVerifyJoinReq = in
+	if f.verifyJoinResp != nil {
+		return f.verifyJoinResp, nil
+	}
+	return &rpcpb.VerifyJoinIntroductionResponse{Request: &rpcpb.PendingJoinRequest{RequestId: in.GetRequestId()}}, nil
+}
+
+func (f *fakeClient) ReissueJoinSecondPin(_ context.Context, in *rpcpb.ReissueJoinSecondPinRequest, _ ...grpc.CallOption) (*rpcpb.ReissueJoinSecondPinResponse, error) {
+	f.lastReissuePinReq = in
+	if f.reissuePinResp != nil {
+		return f.reissuePinResp, nil
+	}
+	return &rpcpb.ReissueJoinSecondPinResponse{Request: &rpcpb.PendingJoinRequest{RequestId: in.GetRequestId()}}, nil
+}
+
+func (f *fakeClient) PinPeerCertificate(_ context.Context, in *rpcpb.PinPeerCertificateRequest, _ ...grpc.CallOption) (*rpcpb.PinPeerCertificateResponse, error) {
+	return &rpcpb.PinPeerCertificateResponse{Peer: in.GetPeer()}, nil
+}
+
+func (f *fakeClient) UnpinPeerCertificate(_ context.Context, in *rpcpb.UnpinPeerCertificateRequest, _ ...grpc.CallOption) (*rpcpb.UnpinPeerCertificateResponse, error) {
+	return &rpcpb.UnpinPeerCertificateResponse{}, nil
 }
 
 func (f *fakeClient) GetColonyJoinWindow(_ context.Context, in *rpcpb.GetColonyJoinWindowRequest, _ ...grpc.CallOption) (*rpcpb.GetColonyJoinWindowResponse, error) {
