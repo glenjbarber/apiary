@@ -551,6 +551,61 @@ on the forward path. Under this ADR a locally-recorded request must
 carry the joiner's real fingerprints, or the operator is comparing
 against nothing.
 
+### `UpdateVoterAddress` moves a member; it never adds one
+
+The flow above is the only path in this system that turns a `node_id`
+into a raft voter, and the RPC that sits beside it on the wire is
+worth stating separately, because the two are routinely read as
+interchangeable and they are exact opposites.
+
+`UpdateVoterAddress` (ADR-0106) changes the raft address of a member
+that **already exists**. That is the whole of it.
+
+- It **requires** `node_id` to already name a current voter. The
+  lookup is the mirror image of `ApproveJoinRequest`'s
+  not-already-a-voter check, so the pair refuses the two cases
+  against each other and no `node_id` can be both.
+- It is therefore **not** a way to add a new member, and cannot be
+  used as one. `RequestJoinColony` and `ApproveJoinRequest` are the
+  only path, and nothing in this ADR relaxes that. A new Comb still
+  runs the live window, the first code, the fingerprint match, the
+  second PIN, `yes-trust-new-comb`, and Part 3's authorization entry,
+  in the order Part 3 sets out.
+- It is Admin-tier, the same tier as `ApproveJoinRequest`, for the
+  same reason: it calls `AddVoter` against this node's own raft
+  cluster.
+- The **ordering is leadership-first**, identical to
+  `ApproveJoinRequest`'s and for the same reason: only the leader can
+  call `AddVoter`, and only the leader's own network vantage point
+  decides whether the new address is reachable. A follower forwards
+  the whole request to the leader over the authenticated `s.peers`
+  dial before it reads membership or dials anything, and a
+  leadership loss that the `AddVoter` itself reports is forwarded the
+  same way a second time.
+- The **reachability guardrail (ADR-0097) runs against the NEW
+  address**, not the old one, and its refusal says why: an address
+  no voter can dial strands the cluster exactly as an unreachable new
+  joiner does, and the recovery is a raft state wipe. Refusing before
+  the call is the point; there is no "try it and see".
+- Deliberately **no address format check**. A Comb validating its own
+  bind address is `ConvertStandaloneToJoiner`'s job (ADR-0105), where
+  a loopback value is always a self-inflicted misconfiguration. This
+  RPC is approving *another* Comb's claimed address, which is what
+  `ApproveJoinRequest` already does without a format check, and a
+  stricter rule here than there would make the two inconsistent for
+  no safety gain.
+
+Every refusal comes back in the response's `error` field rather than
+as a transport error, with a `leader_hint` beside it where a forward
+happened. The two an operator is most likely to hit each name the RPC
+to use instead - "not a current Colony member; use
+RequestJoinColony/ApproveJoinRequest to add a new member" here, and
+the mirror of that on the join side - so the ambiguous case the pair
+exists to resolve resolves itself at the call site. There is no Colony
+overview UI for it; it is called directly on the manager RPC, which is
+what `docs/add-node-to-colony.md` tells an operator recovering a stale
+address to do.
+
 ### `yes-trust-new-comb` is kept, as well as the second PIN
 
 **Amended 2026-09-28. The owner reversed the removal this section
@@ -1131,9 +1186,18 @@ message TrustedPeer {
   membership. A pin held for a request that reaches a terminal state
   without becoming a voter is dropped with it, so the store does not
   accumulate one entry per Comb that ever asked.
-- **Removal is real.** `RemoveServer` drops the entry, and
-  `UpdateVoterAddress` replaces the name. A store that can only grow
-  accumulates dead certificates until one expires by accident.
+- **Removal is real.** `RemoveServer` drops the entry. A store that
+  can only grow accumulates dead certificates until one expires by
+  accident. An address change is not a removal and is not handled
+  here either: `UpdateVoterAddress` moves a member's raft address
+  and leaves its pin exactly as it is, because the pin records a
+  certificate and an address change neither rotates a certificate nor
+  unmakes a member. A Comb whose certificate really was replaced is
+  the case the store does act on, and it is refused in place rather
+  than overwritten - `PinTrustedPeer` on a `node_id` that is already
+  pinned is rejected with "unpin it first", so replacing a pinned
+  certificate is two visible acts in the log rather than one
+  invisible one.
 - This is replicated state, so it moves the canonical state digest
   (ADR-0143) and is part of the mixed-version rollout already recorded
   below.
