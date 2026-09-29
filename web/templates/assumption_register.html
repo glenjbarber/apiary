@@ -19,18 +19,27 @@
           <option value="colony">colony (Whole Colony)</option>
           {{range .Nodes}}<option value="hive:{{.}}">hive:{{.}} (Comb {{.}})</option>{{end}}
         </select>
-      </label><label>Expires at (RFC 3339)<input name="expires_at" placeholder="2026-12-31T23:59:59Z" required title="Timestamp after which this claim is treated as expired and stops appearing as context, even though it stays listed below until deleted."></label>
+      </label><label>Expires at (RFC 3339)<input name="expires_at" placeholder="2026-12-31T23:59:59Z" required title="Timestamp after which this claim stops being current. It is not deleted then: it stays listed below, reported as Stale, so a conclusion resting on it cannot quietly stay proven."></label>
+      <label>Evidence status recorded
+        <select name="evidence_status" title="What the last check of this claim's supporting evidence found. This is a recorded observation, not a verdict - the State column is Apiary's own conclusion, computed on every read and never stored. Choosing supported without a last-verified time is refused.">
+          {{range .AssumptionEvidenceStatuses}}<option value="{{.Value}}">{{.Label}}</option>{{end}}
+        </select>
+      </label><label>Last verified (RFC 3339)<input name="last_verified" placeholder="2026-09-29T09:00:00Z" title="When this claim's evidence was last confirmed. Leave blank if it has never been checked - a blank is reported as never verified, which is not the same as verified. Required whenever the evidence status above is supported."></label>
       <label class="full-width">Statement<input name="statement" required title="The claim itself, in plain language (e.g. &quot;route is stable&quot;)."></label>
       <label class="full-width">Evidence<input name="evidence" required title="What supports this claim - a command, observation, or reference another operator could check (e.g. &quot;route -n get default&quot;)."></label>
       <label class="full-width">Verification method (optional)<input name="verification_method" title="How this claim could be re-checked later, such as a command to run. Shown alongside the evidence but never required."></label>
+      <label class="full-width">If false (optional)<input name="consequence_if_false" title="What becomes unsafe, unknown, or unverified if this claim turns out not to hold - for example &quot;NAT hairpin is silently absent, so peers cannot reach each other&quot;. Shown next to every state so the cost of the claim is visible before it is trusted, not only when it is contradicted. Optional, so a claim recorded before this field existed is not rejected."></label>
       <div class="form-actions"><button type="submit">Save claim</button></div>
     </form>
   </div>
   {{end}}
   <div class="panel">
     <h3>Local claims</h3>
-    <table><thead><tr><th>ID</th><th>Statement</th><th>Owner</th><th>Scope</th><th>Evidence</th><th>Expires</th><th></th></tr></thead><tbody>
-    {{range .AssumptionClaims}}<tr><td>{{.ID}}</td><td>{{.Statement}}</td><td>{{.Owner}}</td><td>{{.Scope}}</td><td>{{.Evidence}}{{if .VerificationMethod}}<br><span class="muted">{{.VerificationMethod}}</span>{{end}}</td><td>{{if .Expired}}<span class="badge critical">expired</span> {{end}}{{.ExpiresAt}}</td><td>{{if $.CanOperate}}<button hx-delete="/assumption-register/{{.ID}}" hx-target="main" hx-swap="outerHTML">Delete</button>{{end}}</td></tr>{{else}}<tr><td colspan="7"><em>No local claims recorded.</em></td></tr>{{end}}
+    <p class="muted">State is Apiary's own conclusion, computed on every read against this Comb's clock and never stored. <strong>Supported is the only affirmative state</strong>: a claim that is stale, unobserved, or unrecognized reads as not supported, never as a pass.</p>
+    <table><thead><tr><th>ID</th><th>Statement</th><th>Owner</th><th>Scope</th><th>Evidence</th><th>State</th><th>Expires</th><th></th></tr></thead><tbody>
+    {{range .AssumptionClaims}}<tr><td>{{.ID}}</td><td>{{.Statement}}{{if .ConsequenceIfFalse}}<br><span class="muted">If false: {{.ConsequenceIfFalse}}</span>{{end}}</td><td>{{.Owner}}</td><td>{{.Scope}}</td><td>{{.Evidence}}{{if .VerificationMethod}}<br><span class="muted">{{.VerificationMethod}}</span>{{end}}<br><span class="muted">Recorded: {{.EvidenceStatusLabel}} &middot; last verified: {{.LastVerified}}</span></td>
+      <td class="claim-state" data-state="{{.State}}"><span class="badge {{.StateBadge}}">{{.StateShort}}</span><br>{{.StateLabel}}<br><span class="muted">{{.StateDetail}}</span></td>
+      <td>{{if .Expired}}<span class="badge stale">expired</span> {{end}}{{.ExpiresAt}}</td><td>{{if $.CanOperate}}<button hx-delete="/assumption-register/{{.ID}}" hx-target="main" hx-swap="outerHTML">Delete</button>{{end}}</td></tr>{{else}}<tr><td colspan="8"><em>No local claims recorded.</em></td></tr>{{end}}
     </tbody></table>
   </div>
   </main>{{template "footer" .}}
