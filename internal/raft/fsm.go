@@ -36,6 +36,7 @@ type FSMApplyResult struct {
 	RestartRecord      *internalpb.RestartRecord
 	ColonyUpdate       *internalpb.ColonyUpdate
 	ColonyJoinWindow   *internalpb.ColonyJoinWindow
+	TrustedPeer        *internalpb.TrustedPeer
 	Error              string
 }
 
@@ -75,6 +76,16 @@ type FSM struct {
 	// which owns the semantics and the reasoning.
 	colonyJoinWindow *internalpb.ColonyJoinWindow
 
+	// trustedPeers is ADR-0147 Part 4's replicated peer trust store,
+	// keyed by TrustedPeer.node_id. Replicated for the same reason
+	// colonyJoinWindow above is: a pin held in one managerd's memory is
+	// a pin that vanishes when that Comb steps aside, which would make
+	// "which certificate does this Colony trust" change with leadership
+	// for no reason an operator did anything. See internal/raft/peers.go
+	// for the pin lifecycle and why it is kept separate from raft
+	// membership.
+	trustedPeers map[string]*internalpb.TrustedPeer
+
 	// authEnabled is set permanently, forever, the first time any
 	// CreateAPIKey command ever succeeds - it never reverts to false
 	// even if every key is later revoked. See AuthEnabled's own doc
@@ -104,6 +115,7 @@ func NewFSM() *FSM {
 		restartLeases:       make(map[string]*internalpb.RestartLease),
 		restartRecords:      make(map[string]*internalpb.RestartRecord),
 		colonyUpdates:       make(map[string]*internalpb.ColonyUpdate),
+		trustedPeers:        make(map[string]*internalpb.TrustedPeer),
 	}
 	// Seed the digest of the empty state. No lock is taken because the
 	// FSM has not been handed to anyone yet; recomputeStateDigestLocked
@@ -204,6 +216,12 @@ func (f *FSM) Apply(log *raft.Log) interface{} {
 		return f.applyOpenColonyJoinWindow(log.Index, op.OpenColonyJoinWindow)
 	case *internalpb.Command_CloseColonyJoinWindow:
 		return f.applyCloseColonyJoinWindow(log.Index, op.CloseColonyJoinWindow)
+	case *internalpb.Command_PinTrustedPeer:
+		return f.applyPinTrustedPeer(log.Index, op.PinTrustedPeer.GetPeer())
+	case *internalpb.Command_SetTrustedPeerVoter:
+		return f.applySetTrustedPeerVoter(log.Index, op.SetTrustedPeerVoter)
+	case *internalpb.Command_UnpinTrustedPeer:
+		return f.applyUnpinTrustedPeer(log.Index, op.UnpinTrustedPeer.GetNodeId())
 	default:
 		return &FSMApplyResult{Index: log.Index, Error: "command has no op set"}
 	}
@@ -751,6 +769,24 @@ func (f *FSM) applyResolvePendingJoinRequest(index uint64, requestID string, sta
 	updated := proto.Clone(req).(*internalpb.PendingJoinRequest)
 	updated.Status = status
 	f.pendingJoinRequests[requestID] = updated
+	// ADR-0147 Part 4's pin lifecycle, inside the same log entry that
+	// settles the request rather than as a command a caller has to
+	// remember to send. The ordering matters: the pin is written when
+	// the certificate is accepted, which is BEFORE this point, so a
+	// store whose cleanup were a separate call would be a store an
+	// interrupted or half-completed approval could leave a dead
+	// certificate in forever. Doing it here means "approved" and "the
+	// pin is now a member pin" are one replicated fact, and "rejected"
+	// and "the pin is gone" are one replicated fact.
+	//
+	// Approve promotes; Reject and Cancel drop, because a request that
+	// reached a terminal state without becoming a voter must not leave
+	// a standing trust anchor behind. See peers.go.
+	if status == internalpb.JoinRequestStatus_JOIN_REQUEST_STATUS_APPROVED {
+		f.promotePin(updated.GetNodeId())
+	} else {
+		f.dropUnpromotedPin(updated.GetNodeId())
+	}
 	return &FSMApplyResult{Index: index, PendingJoinRequest: updated}
 }
 
@@ -764,6 +800,17 @@ func (f *FSM) applyResolvePendingJoinRequest(index uint64, requestID string, sta
 func (f *FSM) applyPurgeJoinRequest(index uint64, requestID string) *FSMApplyResult {
 	req := f.pendingJoinRequests[requestID]
 	delete(f.pendingJoinRequests, requestID)
+	// A purge is an Admin cleaning up, so it is the last chance to drop
+	// a pin for a request that never became a voter - including a
+	// request that simply expired without ever being resolved, which is
+	// the shape most of these records actually have. A pin that IS a
+	// voter pin is deliberately kept: the request is a stale record, the
+	// member is not, and dropping a live member's trust anchor because
+	// someone tidied up an old row would be a far worse outcome than an
+	// entry outliving its request.
+	if req != nil {
+		f.dropUnpromotedPin(req.GetNodeId())
+	}
 	return &FSMApplyResult{Index: index, PendingJoinRequest: req}
 }
 
@@ -1794,6 +1841,7 @@ func (f *FSM) snapshotStateLocked() *internalpb.FSMSnapshotState {
 		ColonyUpdates:       make(map[string]*internalpb.ColonyUpdate, len(f.colonyUpdates)),
 		ColonyJoinWindow:    cloneColonyJoinWindow(f.colonyJoinWindow),
 		AuthEnabled:         f.authEnabled,
+		TrustedPeers:        make(map[string]*internalpb.TrustedPeer, len(f.trustedPeers)),
 	}
 	for id, vm := range f.vms {
 		state.Vms[id] = vm
@@ -1818,6 +1866,9 @@ func (f *FSM) snapshotStateLocked() *internalpb.FSMSnapshotState {
 	}
 	for id, rec := range f.colonyUpdates {
 		state.ColonyUpdates[id] = rec
+	}
+	for id, peer := range f.trustedPeers {
+		state.TrustedPeers[id] = peer
 	}
 	return state
 }
@@ -1871,6 +1922,10 @@ func (f *FSM) Restore(rc io.ReadCloser) error {
 		f.colonyUpdates = make(map[string]*internalpb.ColonyUpdate)
 	}
 	f.colonyJoinWindow = cloneColonyJoinWindow(state.GetColonyJoinWindow())
+	f.trustedPeers = state.GetTrustedPeers()
+	if f.trustedPeers == nil {
+		f.trustedPeers = make(map[string]*internalpb.TrustedPeer)
+	}
 	f.authEnabled = state.GetAuthEnabled()
 	// Recompute under the same lock: a Status call arriving after this
 	// returns must see a digest of the restored state, never one left

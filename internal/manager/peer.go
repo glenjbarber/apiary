@@ -5,8 +5,10 @@ import (
 	"context"
 	"crypto/tls"
 	"crypto/x509"
+	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"net"
 	"os"
 	"sync"
@@ -16,6 +18,7 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 
 	rpcpb "github.com/glenjbarber/apiary/api/rpc"
+	"github.com/glenjbarber/apiary/internal/peerca"
 )
 
 // PeerReporter implements internal/cluster's peerReporter interface,
@@ -181,6 +184,44 @@ func LoadPeerCAPool(caFile string) (*x509.CertPool, error) {
 	pool := x509.NewCertPool()
 	if !pool.AppendCertsFromPEM(pem) {
 		return nil, fmt.Errorf("no valid certificates found in %s", caFile)
+	}
+	return pool, nil
+}
+
+// ResolvePeerCAPool is what a daemon should call to get its trust
+// anchor, and is LoadPeerCAPool plus ADR-0147 Part 4's changed default.
+//
+// The rule, in two parts, and the split is the whole point:
+//
+//   - An operator-supplied path wins and behaves exactly as
+//     LoadPeerCAPool always has. Unreadable is fatal, because an
+//     operator who named a file expects to be told when it is broken.
+//   - An empty setting means the DERIVED file
+//     (/usr/local/etc/apiary/peer-ca.pem), which every managerd writes
+//     from its own replicated copy of the peer trust store. A derived
+//     file that does not exist is NOT an error: it means this Colony
+//     has pinned nothing yet, and returning a nil pool leaves the
+//     dialer on the system pool - which is exactly what it did before
+//     this default existed. A file that exists but cannot be read IS an
+//     error, because that is a real fault on a host that has pins.
+//
+// What this deliberately does not do is make peer_tls default on. TLS
+// on with a self-signed certificate and no trust anchor is "encrypted
+// and unverified", which is a different state from "not encrypted" and
+// a much worse one to discover during a failure. The trust anchor has
+// to be in place first, and that ordering is the ADR's own.
+func ResolvePeerCAPool(configured string) (*x509.CertPool, error) {
+	path := configured
+	derived := configured == ""
+	if derived {
+		path = peerca.DefaultPath
+	}
+	pool, err := LoadPeerCAPool(path)
+	if err != nil {
+		if derived && errors.Is(err, fs.ErrNotExist) {
+			return nil, nil
+		}
+		return nil, err
 	}
 	return pool, nil
 }

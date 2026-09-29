@@ -152,6 +152,18 @@ func (c *RaftClient) GetColonyJoinWindowLocal(ctx context.Context) (*internalpb.
 	return c.client.GetColonyJoinWindowLocal(ctx, &internalpb.GetColonyJoinWindowRequest{})
 }
 
+// ListTrustedPeersLocal is the read side of ADR-0147 Part 4's
+// replicated peer trust store, and the only input the derived
+// /usr/local/etc/apiary/peer-ca.pem writer has.
+//
+// Deliberately local and never forwarded: every Comb writes that file
+// from its OWN replicated copy, because the file is a per-host
+// artifact and a copy of some other node's view of the trust store
+// would be a lie about this host's own dialer.
+func (c *RaftClient) ListTrustedPeersLocal(ctx context.Context) (*internalpb.ListTrustedPeersResponse, error) {
+	return c.client.ListTrustedPeersLocal(ctx, &internalpb.ListTrustedPeersRequest{})
+}
+
 // GetColonyUpdateStateLocal is the read side of ADR-0145's durable
 // controlled-update state, reached over this node's own raftd socket.
 //

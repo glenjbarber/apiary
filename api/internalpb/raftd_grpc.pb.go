@@ -39,6 +39,7 @@ const (
 	RaftInternal_ListPendingJoinRequestsLocal_FullMethodName = "/apiary.internal.v1.RaftInternal/ListPendingJoinRequestsLocal"
 	RaftInternal_GetRestartLeaseStateLocal_FullMethodName    = "/apiary.internal.v1.RaftInternal/GetRestartLeaseStateLocal"
 	RaftInternal_GetColonyJoinWindowLocal_FullMethodName     = "/apiary.internal.v1.RaftInternal/GetColonyJoinWindowLocal"
+	RaftInternal_ListTrustedPeersLocal_FullMethodName        = "/apiary.internal.v1.RaftInternal/ListTrustedPeersLocal"
 	RaftInternal_GetColonyUpdateStateLocal_FullMethodName    = "/apiary.internal.v1.RaftInternal/GetColonyUpdateStateLocal"
 	RaftInternal_StepAsideForRestartLocal_FullMethodName     = "/apiary.internal.v1.RaftInternal/StepAsideForRestartLocal"
 )
@@ -161,6 +162,22 @@ type RaftInternalClient interface {
 	// follower must see the same window a join introduced to the leader
 	// would see.
 	GetColonyJoinWindowLocal(ctx context.Context, in *GetColonyJoinWindowRequest, opts ...grpc.CallOption) (*GetColonyJoinWindowResponse, error)
+	// ListTrustedPeersLocal is the read side of ADR-0147 Part 4's
+	// replicated peer trust store, and the input to the derived
+	// /usr/local/etc/apiary/peer-ca.pem every managerd writes on its own
+	// replicated copy.
+	//
+	// Deliberately NOT leader-only, for the same
+	// GetColonyJoinWindowLocal reason: the pins are already
+	// raft-replicated, so any node can answer for itself, and that is
+	// exactly what a derived per-host file needs - it must be written by
+	// every Comb from its own copy, not only by whichever one happens to
+	// be leading.
+	//
+	// The returned list is sorted by node ID, so the bytes managerd
+	// writes are the same on every Comb and an operator can diff two
+	// hosts.
+	ListTrustedPeersLocal(ctx context.Context, in *ListTrustedPeersRequest, opts ...grpc.CallOption) (*ListTrustedPeersResponse, error)
 	// GetColonyUpdateStateLocal is the read side of ADR-0145's colony-wide
 	// controlled-update single-flight. It is deliberately named ...Local and
 	// deliberately NOT leader-only, for the same GetRestartLeaseStateLocal
@@ -413,6 +430,16 @@ func (c *raftInternalClient) GetColonyJoinWindowLocal(ctx context.Context, in *G
 	return out, nil
 }
 
+func (c *raftInternalClient) ListTrustedPeersLocal(ctx context.Context, in *ListTrustedPeersRequest, opts ...grpc.CallOption) (*ListTrustedPeersResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListTrustedPeersResponse)
+	err := c.cc.Invoke(ctx, RaftInternal_ListTrustedPeersLocal_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *raftInternalClient) GetColonyUpdateStateLocal(ctx context.Context, in *GetColonyUpdateStateRequest, opts ...grpc.CallOption) (*GetColonyUpdateStateResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(GetColonyUpdateStateResponse)
@@ -551,6 +578,22 @@ type RaftInternalServer interface {
 	// follower must see the same window a join introduced to the leader
 	// would see.
 	GetColonyJoinWindowLocal(context.Context, *GetColonyJoinWindowRequest) (*GetColonyJoinWindowResponse, error)
+	// ListTrustedPeersLocal is the read side of ADR-0147 Part 4's
+	// replicated peer trust store, and the input to the derived
+	// /usr/local/etc/apiary/peer-ca.pem every managerd writes on its own
+	// replicated copy.
+	//
+	// Deliberately NOT leader-only, for the same
+	// GetColonyJoinWindowLocal reason: the pins are already
+	// raft-replicated, so any node can answer for itself, and that is
+	// exactly what a derived per-host file needs - it must be written by
+	// every Comb from its own copy, not only by whichever one happens to
+	// be leading.
+	//
+	// The returned list is sorted by node ID, so the bytes managerd
+	// writes are the same on every Comb and an operator can diff two
+	// hosts.
+	ListTrustedPeersLocal(context.Context, *ListTrustedPeersRequest) (*ListTrustedPeersResponse, error)
 	// GetColonyUpdateStateLocal is the read side of ADR-0145's colony-wide
 	// controlled-update single-flight. It is deliberately named ...Local and
 	// deliberately NOT leader-only, for the same GetRestartLeaseStateLocal
@@ -662,6 +705,9 @@ func (UnimplementedRaftInternalServer) GetRestartLeaseStateLocal(context.Context
 }
 func (UnimplementedRaftInternalServer) GetColonyJoinWindowLocal(context.Context, *GetColonyJoinWindowRequest) (*GetColonyJoinWindowResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetColonyJoinWindowLocal not implemented")
+}
+func (UnimplementedRaftInternalServer) ListTrustedPeersLocal(context.Context, *ListTrustedPeersRequest) (*ListTrustedPeersResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ListTrustedPeersLocal not implemented")
 }
 func (UnimplementedRaftInternalServer) GetColonyUpdateStateLocal(context.Context, *GetColonyUpdateStateRequest) (*GetColonyUpdateStateResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetColonyUpdateStateLocal not implemented")
@@ -1050,6 +1096,24 @@ func _RaftInternal_GetColonyJoinWindowLocal_Handler(srv interface{}, ctx context
 	return interceptor(ctx, in, info, handler)
 }
 
+func _RaftInternal_ListTrustedPeersLocal_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListTrustedPeersRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(RaftInternalServer).ListTrustedPeersLocal(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: RaftInternal_ListTrustedPeersLocal_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(RaftInternalServer).ListTrustedPeersLocal(ctx, req.(*ListTrustedPeersRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _RaftInternal_GetColonyUpdateStateLocal_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(GetColonyUpdateStateRequest)
 	if err := dec(in); err != nil {
@@ -1172,6 +1236,10 @@ var RaftInternal_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "GetColonyJoinWindowLocal",
 			Handler:    _RaftInternal_GetColonyJoinWindowLocal_Handler,
+		},
+		{
+			MethodName: "ListTrustedPeersLocal",
+			Handler:    _RaftInternal_ListTrustedPeersLocal_Handler,
 		},
 		{
 			MethodName: "GetColonyUpdateStateLocal",

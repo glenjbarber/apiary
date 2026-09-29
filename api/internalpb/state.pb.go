@@ -1092,6 +1092,9 @@ type Command struct {
 	//	*Command_HandoverColonyUpdate
 	//	*Command_OpenColonyJoinWindow
 	//	*Command_CloseColonyJoinWindow
+	//	*Command_PinTrustedPeer
+	//	*Command_SetTrustedPeerVoter
+	//	*Command_UnpinTrustedPeer
 	Op            isCommand_Op `protobuf_oneof:"op"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -1467,6 +1470,33 @@ func (x *Command) GetCloseColonyJoinWindow() *CloseColonyJoinWindow {
 	return nil
 }
 
+func (x *Command) GetPinTrustedPeer() *PinTrustedPeer {
+	if x != nil {
+		if x, ok := x.Op.(*Command_PinTrustedPeer); ok {
+			return x.PinTrustedPeer
+		}
+	}
+	return nil
+}
+
+func (x *Command) GetSetTrustedPeerVoter() *SetTrustedPeerVoter {
+	if x != nil {
+		if x, ok := x.Op.(*Command_SetTrustedPeerVoter); ok {
+			return x.SetTrustedPeerVoter
+		}
+	}
+	return nil
+}
+
+func (x *Command) GetUnpinTrustedPeer() *UnpinTrustedPeer {
+	if x != nil {
+		if x, ok := x.Op.(*Command_UnpinTrustedPeer); ok {
+			return x.UnpinTrustedPeer
+		}
+	}
+	return nil
+}
+
 type isCommand_Op interface {
 	isCommand_Op()
 }
@@ -1718,6 +1748,24 @@ type Command_CloseColonyJoinWindow struct {
 	CloseColonyJoinWindow *CloseColonyJoinWindow `protobuf:"bytes,37,opt,name=close_colony_join_window,json=closeColonyJoinWindow,proto3,oneof"`
 }
 
+type Command_PinTrustedPeer struct {
+	// PinTrustedPeer/SetTrustedPeerVoter/UnpinTrustedPeer are
+	// ADR-0147 Part 4's replicated peer trust store. Oneof rather than
+	// three fields, for the same reason as everything else in here:
+	// every mutation of replicated state is a command, applied
+	// identically by every voter, so there is one place where "what
+	// does this command do" is decided.
+	PinTrustedPeer *PinTrustedPeer `protobuf:"bytes,38,opt,name=pin_trusted_peer,json=pinTrustedPeer,proto3,oneof"`
+}
+
+type Command_SetTrustedPeerVoter struct {
+	SetTrustedPeerVoter *SetTrustedPeerVoter `protobuf:"bytes,39,opt,name=set_trusted_peer_voter,json=setTrustedPeerVoter,proto3,oneof"`
+}
+
+type Command_UnpinTrustedPeer struct {
+	UnpinTrustedPeer *UnpinTrustedPeer `protobuf:"bytes,40,opt,name=unpin_trusted_peer,json=unpinTrustedPeer,proto3,oneof"`
+}
+
 func (*Command_CreateVm) isCommand_Op() {}
 
 func (*Command_UpdateVm) isCommand_Op() {}
@@ -1791,6 +1839,12 @@ func (*Command_HandoverColonyUpdate) isCommand_Op() {}
 func (*Command_OpenColonyJoinWindow) isCommand_Op() {}
 
 func (*Command_CloseColonyJoinWindow) isCommand_Op() {}
+
+func (*Command_PinTrustedPeer) isCommand_Op() {}
+
+func (*Command_SetTrustedPeerVoter) isCommand_Op() {}
+
+func (*Command_UnpinTrustedPeer) isCommand_Op() {}
 
 // ApiKey is a cluster-wide credential for ManagerService's external
 // gRPC API (ADR-0023). Only hashed_key (a SHA-256 hex digest) is ever
@@ -4471,6 +4525,322 @@ func (x *CloseColonyJoinWindow) GetNowUnix() int64 {
 	return 0
 }
 
+// TrustedPeer is one Comb's serving certificate, pinned by this Colony
+// (ADR-0147 Part 4). A pin written to a page and then forgotten is not
+// a trust store: this is replicated state, so it survives a leader
+// change and a wiped managerd exactly the way a join stage does.
+//
+// It is a PIN, not a membership record. Membership is raft's own
+// configuration (AddVoter/RemoveServer) and is deliberately not
+// mirrored here - see is_voter below for why the one bit that
+// connects the two is separated from everything else.
+type TrustedPeer struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// node_id is the raft server ID this pin belongs to, and the map key
+	// of trusted_peers below. It is a raft identity, not a hostname: it
+	// is what AddVoter/RemoveServer are given, so it is the only value
+	// here that can be joined to actual membership without a lookup.
+	NodeId string `protobuf:"bytes,1,opt,name=node_id,json=nodeId,proto3" json:"node_id,omitempty"`
+	// comb_name is the operator-facing label ("brood", "drone") the pin
+	// was accepted under. Purely descriptive: no caller may refuse,
+	// route, or authenticate on it, because a name is not an identity and
+	// the same name can legitimately be reused by a re-imaged Comb.
+	CombName string `protobuf:"bytes,2,opt,name=comb_name,json=combName,proto3" json:"comb_name,omitempty"`
+	// fingerprint is the pin's own key: hostcert.Fingerprint(cert.Raw),
+	// which is the "SHA256:" + colon-separated UPPERCASE hex format
+	// internal/manager already publishes on PendingJoinRequest.
+	// tls_cert_fingerprint and ADR-0113's join flow. Deliberately NOT the
+	// lowercase "sha256:..." spelling ADR-0147's sketch comment used:
+	// internal/hostcert owns that format in exactly one place, and a
+	// second spelling here would be a wire-compatibility bug waiting for
+	// the day the two disagree. The FSM re-derives it from cert_pem and
+	// refuses a pin whose fingerprint does not match, so a mismatch is
+	// impossible to store rather than merely discouraged.
+	Fingerprint string `protobuf:"bytes,3,opt,name=fingerprint,proto3" json:"fingerprint,omitempty"`
+	// cert_pem is the LEAF certificate, not only its digest. A digest
+	// cannot rebuild a PEM bundle, and a Comb that has been re-imaged
+	// still has to dial the Colony it belongs to - which is the whole
+	// reason this store exists at all once TLS is on by default.
+	CertPem string `protobuf:"bytes,4,opt,name=cert_pem,json=certPem,proto3" json:"cert_pem,omitempty"`
+	// not_after_unix is the leaf's own expiry, copied in at pin time
+	// rather than re-parsed by every reader. Replicated so every Comb
+	// expires the pin at the same instant; see internal/raft/peers.go
+	// for why the entry is KEPT after that instant rather than swept
+	// (a silently dropped pin turns a clear "this certificate has
+	// expired" into an opaque TLS handshake failure).
+	NotAfterUnix int64 `protobuf:"varint,5,opt,name=not_after_unix,json=notAfterUnix,proto3" json:"not_after_unix,omitempty"`
+	// pinned_at_unix is when the pin was written, in whole Unix seconds.
+	// Absolute, like every other timestamp in this file and never
+	// timezone- or locale-formatted: this is replicated state that has
+	// to be byte-identical on every voter, and a rendered local time
+	// would not be.
+	PinnedAtUnix int64 `protobuf:"varint,6,opt,name=pinned_at_unix,json=pinnedAtUnix,proto3" json:"pinned_at_unix,omitempty"`
+	// pinned_by is the node ID of the member whose operator accepted this
+	// certificate - the attribution that makes the log answer "who
+	// trusted this", which is the question an incident review actually
+	// asks. A node ID rather than an API key ID on purpose: the pin
+	// outlives any single key, and the operator identity behind a rotated
+	// or revoked key is not reliably recoverable, whereas which member
+	// accepted the certificate is replicated, durable, and true.
+	PinnedBy string `protobuf:"bytes,7,opt,name=pinned_by,json=pinnedBy,proto3" json:"pinned_by,omitempty"`
+	// is_voter is separate from the pin itself, and is the reason this
+	// message exists rather than a bool on PendingJoinRequest. A pin is
+	// written when the target accepts the certificate, which is BEFORE
+	// authorization, and AddVoter promotes it afterwards. Conflating the
+	// two would mean either a refused request leaving a permanent pin or a
+	// pin implying membership. A pin whose request reaches a terminal
+	// state without ever becoming a voter is dropped with it, so the
+	// store does not accumulate one entry per Comb that ever asked.
+	IsVoter       bool `protobuf:"varint,8,opt,name=is_voter,json=isVoter,proto3" json:"is_voter,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *TrustedPeer) Reset() {
+	*x = TrustedPeer{}
+	mi := &file_api_internalpb_state_proto_msgTypes[41]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *TrustedPeer) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*TrustedPeer) ProtoMessage() {}
+
+func (x *TrustedPeer) ProtoReflect() protoreflect.Message {
+	mi := &file_api_internalpb_state_proto_msgTypes[41]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use TrustedPeer.ProtoReflect.Descriptor instead.
+func (*TrustedPeer) Descriptor() ([]byte, []int) {
+	return file_api_internalpb_state_proto_rawDescGZIP(), []int{41}
+}
+
+func (x *TrustedPeer) GetNodeId() string {
+	if x != nil {
+		return x.NodeId
+	}
+	return ""
+}
+
+func (x *TrustedPeer) GetCombName() string {
+	if x != nil {
+		return x.CombName
+	}
+	return ""
+}
+
+func (x *TrustedPeer) GetFingerprint() string {
+	if x != nil {
+		return x.Fingerprint
+	}
+	return ""
+}
+
+func (x *TrustedPeer) GetCertPem() string {
+	if x != nil {
+		return x.CertPem
+	}
+	return ""
+}
+
+func (x *TrustedPeer) GetNotAfterUnix() int64 {
+	if x != nil {
+		return x.NotAfterUnix
+	}
+	return 0
+}
+
+func (x *TrustedPeer) GetPinnedAtUnix() int64 {
+	if x != nil {
+		return x.PinnedAtUnix
+	}
+	return 0
+}
+
+func (x *TrustedPeer) GetPinnedBy() string {
+	if x != nil {
+		return x.PinnedBy
+	}
+	return ""
+}
+
+func (x *TrustedPeer) GetIsVoter() bool {
+	if x != nil {
+		return x.IsVoter
+	}
+	return false
+}
+
+// PinTrustedPeer writes one entry into the trust store, and is refused
+// if node_id is already pinned.
+//
+// Create-only, deliberately: an update path here would be a silent
+// replacement of a certificate, which is exactly the act the
+// fingerprint comparison an operator performs by hand exists to make
+// visible. Rotating a Comb's certificate is UnpinTrustedPeer (with its
+// own logged reason) followed by a fresh PinTrustedPeer, so it is two
+// visible acts in the log rather than one invisible one.
+type PinTrustedPeer struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Peer          *TrustedPeer           `protobuf:"bytes,1,opt,name=peer,proto3" json:"peer,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *PinTrustedPeer) Reset() {
+	*x = PinTrustedPeer{}
+	mi := &file_api_internalpb_state_proto_msgTypes[42]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *PinTrustedPeer) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*PinTrustedPeer) ProtoMessage() {}
+
+func (x *PinTrustedPeer) ProtoReflect() protoreflect.Message {
+	mi := &file_api_internalpb_state_proto_msgTypes[42]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use PinTrustedPeer.ProtoReflect.Descriptor instead.
+func (*PinTrustedPeer) Descriptor() ([]byte, []int) {
+	return file_api_internalpb_state_proto_rawDescGZIP(), []int{42}
+}
+
+func (x *PinTrustedPeer) GetPeer() *TrustedPeer {
+	if x != nil {
+		return x.Peer
+	}
+	return nil
+}
+
+// SetTrustedPeerVoter moves the pin between "held for a request" and
+// "this Comb is a member". AddVoter sets it true; nothing in this
+// codebase demotes a voter (raft has no such operation), so is_voter =
+// false exists to make the promotion explicit rather than implied by
+// the command that performed it.
+type SetTrustedPeerVoter struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	NodeId        string                 `protobuf:"bytes,1,opt,name=node_id,json=nodeId,proto3" json:"node_id,omitempty"`
+	IsVoter       bool                   `protobuf:"varint,2,opt,name=is_voter,json=isVoter,proto3" json:"is_voter,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SetTrustedPeerVoter) Reset() {
+	*x = SetTrustedPeerVoter{}
+	mi := &file_api_internalpb_state_proto_msgTypes[43]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SetTrustedPeerVoter) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SetTrustedPeerVoter) ProtoMessage() {}
+
+func (x *SetTrustedPeerVoter) ProtoReflect() protoreflect.Message {
+	mi := &file_api_internalpb_state_proto_msgTypes[43]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SetTrustedPeerVoter.ProtoReflect.Descriptor instead.
+func (*SetTrustedPeerVoter) Descriptor() ([]byte, []int) {
+	return file_api_internalpb_state_proto_rawDescGZIP(), []int{43}
+}
+
+func (x *SetTrustedPeerVoter) GetNodeId() string {
+	if x != nil {
+		return x.NodeId
+	}
+	return ""
+}
+
+func (x *SetTrustedPeerVoter) GetIsVoter() bool {
+	if x != nil {
+		return x.IsVoter
+	}
+	return false
+}
+
+// UnpinTrustedPeer drops the entry. Used by RemoveServer, and by the
+// terminal-state cleanup for a request that never became a voter.
+//
+// Refuses a node_id that is not pinned, so "remove this" cannot be a
+// silent no-op that an operator reads as "it is gone".
+type UnpinTrustedPeer struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	NodeId        string                 `protobuf:"bytes,1,opt,name=node_id,json=nodeId,proto3" json:"node_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *UnpinTrustedPeer) Reset() {
+	*x = UnpinTrustedPeer{}
+	mi := &file_api_internalpb_state_proto_msgTypes[44]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *UnpinTrustedPeer) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*UnpinTrustedPeer) ProtoMessage() {}
+
+func (x *UnpinTrustedPeer) ProtoReflect() protoreflect.Message {
+	mi := &file_api_internalpb_state_proto_msgTypes[44]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use UnpinTrustedPeer.ProtoReflect.Descriptor instead.
+func (*UnpinTrustedPeer) Descriptor() ([]byte, []int) {
+	return file_api_internalpb_state_proto_rawDescGZIP(), []int{44}
+}
+
+func (x *UnpinTrustedPeer) GetNodeId() string {
+	if x != nil {
+		return x.NodeId
+	}
+	return ""
+}
+
 // RestartLease is a cluster-wide, Raft-committed exclusive reservation
 // for restarting one service (in practice, only ever "apiary_managerd" -
 // see ADR-0103). Deliberately has NO expiry/TTL field: a granted lease
@@ -4508,7 +4878,7 @@ type RestartLease struct {
 
 func (x *RestartLease) Reset() {
 	*x = RestartLease{}
-	mi := &file_api_internalpb_state_proto_msgTypes[41]
+	mi := &file_api_internalpb_state_proto_msgTypes[45]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4520,7 +4890,7 @@ func (x *RestartLease) String() string {
 func (*RestartLease) ProtoMessage() {}
 
 func (x *RestartLease) ProtoReflect() protoreflect.Message {
-	mi := &file_api_internalpb_state_proto_msgTypes[41]
+	mi := &file_api_internalpb_state_proto_msgTypes[45]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4533,7 +4903,7 @@ func (x *RestartLease) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RestartLease.ProtoReflect.Descriptor instead.
 func (*RestartLease) Descriptor() ([]byte, []int) {
-	return file_api_internalpb_state_proto_rawDescGZIP(), []int{41}
+	return file_api_internalpb_state_proto_rawDescGZIP(), []int{45}
 }
 
 func (x *RestartLease) GetLeaseId() uint64 {
@@ -4588,7 +4958,7 @@ type RestartRecord struct {
 
 func (x *RestartRecord) Reset() {
 	*x = RestartRecord{}
-	mi := &file_api_internalpb_state_proto_msgTypes[42]
+	mi := &file_api_internalpb_state_proto_msgTypes[46]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4600,7 +4970,7 @@ func (x *RestartRecord) String() string {
 func (*RestartRecord) ProtoMessage() {}
 
 func (x *RestartRecord) ProtoReflect() protoreflect.Message {
-	mi := &file_api_internalpb_state_proto_msgTypes[42]
+	mi := &file_api_internalpb_state_proto_msgTypes[46]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4613,7 +4983,7 @@ func (x *RestartRecord) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RestartRecord.ProtoReflect.Descriptor instead.
 func (*RestartRecord) Descriptor() ([]byte, []int) {
-	return file_api_internalpb_state_proto_rawDescGZIP(), []int{42}
+	return file_api_internalpb_state_proto_rawDescGZIP(), []int{46}
 }
 
 func (x *RestartRecord) GetService() string {
@@ -4681,7 +5051,7 @@ type AcquireRestartLease struct {
 
 func (x *AcquireRestartLease) Reset() {
 	*x = AcquireRestartLease{}
-	mi := &file_api_internalpb_state_proto_msgTypes[43]
+	mi := &file_api_internalpb_state_proto_msgTypes[47]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4693,7 +5063,7 @@ func (x *AcquireRestartLease) String() string {
 func (*AcquireRestartLease) ProtoMessage() {}
 
 func (x *AcquireRestartLease) ProtoReflect() protoreflect.Message {
-	mi := &file_api_internalpb_state_proto_msgTypes[43]
+	mi := &file_api_internalpb_state_proto_msgTypes[47]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4706,7 +5076,7 @@ func (x *AcquireRestartLease) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AcquireRestartLease.ProtoReflect.Descriptor instead.
 func (*AcquireRestartLease) Descriptor() ([]byte, []int) {
-	return file_api_internalpb_state_proto_rawDescGZIP(), []int{43}
+	return file_api_internalpb_state_proto_rawDescGZIP(), []int{47}
 }
 
 func (x *AcquireRestartLease) GetService() string {
@@ -4781,7 +5151,7 @@ type RecordRestartCompleted struct {
 
 func (x *RecordRestartCompleted) Reset() {
 	*x = RecordRestartCompleted{}
-	mi := &file_api_internalpb_state_proto_msgTypes[44]
+	mi := &file_api_internalpb_state_proto_msgTypes[48]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4793,7 +5163,7 @@ func (x *RecordRestartCompleted) String() string {
 func (*RecordRestartCompleted) ProtoMessage() {}
 
 func (x *RecordRestartCompleted) ProtoReflect() protoreflect.Message {
-	mi := &file_api_internalpb_state_proto_msgTypes[44]
+	mi := &file_api_internalpb_state_proto_msgTypes[48]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4806,7 +5176,7 @@ func (x *RecordRestartCompleted) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RecordRestartCompleted.ProtoReflect.Descriptor instead.
 func (*RecordRestartCompleted) Descriptor() ([]byte, []int) {
-	return file_api_internalpb_state_proto_rawDescGZIP(), []int{44}
+	return file_api_internalpb_state_proto_rawDescGZIP(), []int{48}
 }
 
 func (x *RecordRestartCompleted) GetService() string {
@@ -4877,7 +5247,7 @@ type ColonyUpdateFence struct {
 
 func (x *ColonyUpdateFence) Reset() {
 	*x = ColonyUpdateFence{}
-	mi := &file_api_internalpb_state_proto_msgTypes[45]
+	mi := &file_api_internalpb_state_proto_msgTypes[49]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4889,7 +5259,7 @@ func (x *ColonyUpdateFence) String() string {
 func (*ColonyUpdateFence) ProtoMessage() {}
 
 func (x *ColonyUpdateFence) ProtoReflect() protoreflect.Message {
-	mi := &file_api_internalpb_state_proto_msgTypes[45]
+	mi := &file_api_internalpb_state_proto_msgTypes[49]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4902,7 +5272,7 @@ func (x *ColonyUpdateFence) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ColonyUpdateFence.ProtoReflect.Descriptor instead.
 func (*ColonyUpdateFence) Descriptor() ([]byte, []int) {
-	return file_api_internalpb_state_proto_rawDescGZIP(), []int{45}
+	return file_api_internalpb_state_proto_rawDescGZIP(), []int{49}
 }
 
 func (x *ColonyUpdateFence) GetOperationId() string {
@@ -4982,7 +5352,7 @@ type ColonyUpdateStepRecord struct {
 
 func (x *ColonyUpdateStepRecord) Reset() {
 	*x = ColonyUpdateStepRecord{}
-	mi := &file_api_internalpb_state_proto_msgTypes[46]
+	mi := &file_api_internalpb_state_proto_msgTypes[50]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4994,7 +5364,7 @@ func (x *ColonyUpdateStepRecord) String() string {
 func (*ColonyUpdateStepRecord) ProtoMessage() {}
 
 func (x *ColonyUpdateStepRecord) ProtoReflect() protoreflect.Message {
-	mi := &file_api_internalpb_state_proto_msgTypes[46]
+	mi := &file_api_internalpb_state_proto_msgTypes[50]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5007,7 +5377,7 @@ func (x *ColonyUpdateStepRecord) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ColonyUpdateStepRecord.ProtoReflect.Descriptor instead.
 func (*ColonyUpdateStepRecord) Descriptor() ([]byte, []int) {
-	return file_api_internalpb_state_proto_rawDescGZIP(), []int{46}
+	return file_api_internalpb_state_proto_rawDescGZIP(), []int{50}
 }
 
 func (x *ColonyUpdateStepRecord) GetIndex() uint32 {
@@ -5130,7 +5500,7 @@ type ColonyUpdate struct {
 
 func (x *ColonyUpdate) Reset() {
 	*x = ColonyUpdate{}
-	mi := &file_api_internalpb_state_proto_msgTypes[47]
+	mi := &file_api_internalpb_state_proto_msgTypes[51]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5142,7 +5512,7 @@ func (x *ColonyUpdate) String() string {
 func (*ColonyUpdate) ProtoMessage() {}
 
 func (x *ColonyUpdate) ProtoReflect() protoreflect.Message {
-	mi := &file_api_internalpb_state_proto_msgTypes[47]
+	mi := &file_api_internalpb_state_proto_msgTypes[51]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5155,7 +5525,7 @@ func (x *ColonyUpdate) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ColonyUpdate.ProtoReflect.Descriptor instead.
 func (*ColonyUpdate) Descriptor() ([]byte, []int) {
-	return file_api_internalpb_state_proto_rawDescGZIP(), []int{47}
+	return file_api_internalpb_state_proto_rawDescGZIP(), []int{51}
 }
 
 func (x *ColonyUpdate) GetOperationId() string {
@@ -5287,7 +5657,7 @@ type AcquireColonyUpdate struct {
 
 func (x *AcquireColonyUpdate) Reset() {
 	*x = AcquireColonyUpdate{}
-	mi := &file_api_internalpb_state_proto_msgTypes[48]
+	mi := &file_api_internalpb_state_proto_msgTypes[52]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5299,7 +5669,7 @@ func (x *AcquireColonyUpdate) String() string {
 func (*AcquireColonyUpdate) ProtoMessage() {}
 
 func (x *AcquireColonyUpdate) ProtoReflect() protoreflect.Message {
-	mi := &file_api_internalpb_state_proto_msgTypes[48]
+	mi := &file_api_internalpb_state_proto_msgTypes[52]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5312,7 +5682,7 @@ func (x *AcquireColonyUpdate) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AcquireColonyUpdate.ProtoReflect.Descriptor instead.
 func (*AcquireColonyUpdate) Descriptor() ([]byte, []int) {
-	return file_api_internalpb_state_proto_rawDescGZIP(), []int{48}
+	return file_api_internalpb_state_proto_rawDescGZIP(), []int{52}
 }
 
 func (x *AcquireColonyUpdate) GetOperationId() string {
@@ -5371,7 +5741,7 @@ type AdvanceColonyUpdate struct {
 
 func (x *AdvanceColonyUpdate) Reset() {
 	*x = AdvanceColonyUpdate{}
-	mi := &file_api_internalpb_state_proto_msgTypes[49]
+	mi := &file_api_internalpb_state_proto_msgTypes[53]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5383,7 +5753,7 @@ func (x *AdvanceColonyUpdate) String() string {
 func (*AdvanceColonyUpdate) ProtoMessage() {}
 
 func (x *AdvanceColonyUpdate) ProtoReflect() protoreflect.Message {
-	mi := &file_api_internalpb_state_proto_msgTypes[49]
+	mi := &file_api_internalpb_state_proto_msgTypes[53]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5396,7 +5766,7 @@ func (x *AdvanceColonyUpdate) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AdvanceColonyUpdate.ProtoReflect.Descriptor instead.
 func (*AdvanceColonyUpdate) Descriptor() ([]byte, []int) {
-	return file_api_internalpb_state_proto_rawDescGZIP(), []int{49}
+	return file_api_internalpb_state_proto_rawDescGZIP(), []int{53}
 }
 
 func (x *AdvanceColonyUpdate) GetFence() *ColonyUpdateFence {
@@ -5454,7 +5824,7 @@ type ReleaseColonyUpdate struct {
 
 func (x *ReleaseColonyUpdate) Reset() {
 	*x = ReleaseColonyUpdate{}
-	mi := &file_api_internalpb_state_proto_msgTypes[50]
+	mi := &file_api_internalpb_state_proto_msgTypes[54]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5466,7 +5836,7 @@ func (x *ReleaseColonyUpdate) String() string {
 func (*ReleaseColonyUpdate) ProtoMessage() {}
 
 func (x *ReleaseColonyUpdate) ProtoReflect() protoreflect.Message {
-	mi := &file_api_internalpb_state_proto_msgTypes[50]
+	mi := &file_api_internalpb_state_proto_msgTypes[54]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5479,7 +5849,7 @@ func (x *ReleaseColonyUpdate) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReleaseColonyUpdate.ProtoReflect.Descriptor instead.
 func (*ReleaseColonyUpdate) Descriptor() ([]byte, []int) {
-	return file_api_internalpb_state_proto_rawDescGZIP(), []int{50}
+	return file_api_internalpb_state_proto_rawDescGZIP(), []int{54}
 }
 
 func (x *ReleaseColonyUpdate) GetFence() *ColonyUpdateFence {
@@ -5576,7 +5946,7 @@ type HandoverColonyUpdate struct {
 
 func (x *HandoverColonyUpdate) Reset() {
 	*x = HandoverColonyUpdate{}
-	mi := &file_api_internalpb_state_proto_msgTypes[51]
+	mi := &file_api_internalpb_state_proto_msgTypes[55]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5588,7 +5958,7 @@ func (x *HandoverColonyUpdate) String() string {
 func (*HandoverColonyUpdate) ProtoMessage() {}
 
 func (x *HandoverColonyUpdate) ProtoReflect() protoreflect.Message {
-	mi := &file_api_internalpb_state_proto_msgTypes[51]
+	mi := &file_api_internalpb_state_proto_msgTypes[55]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5601,7 +5971,7 @@ func (x *HandoverColonyUpdate) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HandoverColonyUpdate.ProtoReflect.Descriptor instead.
 func (*HandoverColonyUpdate) Descriptor() ([]byte, []int) {
-	return file_api_internalpb_state_proto_rawDescGZIP(), []int{51}
+	return file_api_internalpb_state_proto_rawDescGZIP(), []int{55}
 }
 
 func (x *HandoverColonyUpdate) GetFromFence() *ColonyUpdateFence {
@@ -5662,7 +6032,7 @@ type ColonyUpdateHandover struct {
 
 func (x *ColonyUpdateHandover) Reset() {
 	*x = ColonyUpdateHandover{}
-	mi := &file_api_internalpb_state_proto_msgTypes[52]
+	mi := &file_api_internalpb_state_proto_msgTypes[56]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5674,7 +6044,7 @@ func (x *ColonyUpdateHandover) String() string {
 func (*ColonyUpdateHandover) ProtoMessage() {}
 
 func (x *ColonyUpdateHandover) ProtoReflect() protoreflect.Message {
-	mi := &file_api_internalpb_state_proto_msgTypes[52]
+	mi := &file_api_internalpb_state_proto_msgTypes[56]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5687,7 +6057,7 @@ func (x *ColonyUpdateHandover) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ColonyUpdateHandover.ProtoReflect.Descriptor instead.
 func (*ColonyUpdateHandover) Descriptor() ([]byte, []int) {
-	return file_api_internalpb_state_proto_rawDescGZIP(), []int{52}
+	return file_api_internalpb_state_proto_rawDescGZIP(), []int{56}
 }
 
 func (x *ColonyUpdateHandover) GetFromNodeId() string {
@@ -5763,7 +6133,7 @@ type CommandResult struct {
 
 func (x *CommandResult) Reset() {
 	*x = CommandResult{}
-	mi := &file_api_internalpb_state_proto_msgTypes[53]
+	mi := &file_api_internalpb_state_proto_msgTypes[57]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5775,7 +6145,7 @@ func (x *CommandResult) String() string {
 func (*CommandResult) ProtoMessage() {}
 
 func (x *CommandResult) ProtoReflect() protoreflect.Message {
-	mi := &file_api_internalpb_state_proto_msgTypes[53]
+	mi := &file_api_internalpb_state_proto_msgTypes[57]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5788,7 +6158,7 @@ func (x *CommandResult) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CommandResult.ProtoReflect.Descriptor instead.
 func (*CommandResult) Descriptor() ([]byte, []int) {
-	return file_api_internalpb_state_proto_rawDescGZIP(), []int{53}
+	return file_api_internalpb_state_proto_rawDescGZIP(), []int{57}
 }
 
 func (x *CommandResult) GetVm() *VMDefinition {
@@ -5875,13 +6245,27 @@ type FSMSnapshotState struct {
 	// from this message's own descriptor, so it picks the new map up with
 	// no second list to forget.
 	ColonyUpdates map[string]*ColonyUpdate `protobuf:"bytes,12,rep,name=colony_updates,json=colonyUpdates,proto3" json:"colony_updates,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	// trusted_peers is ADR-0147 Part 4's replicated peer trust store,
+	// keyed by TrustedPeer.node_id (its own raft server ID, so the key is
+	// joinable to real membership with no second index to keep in step).
+	//
+	// In this snapshot for the same reason restart_leases is above: a
+	// raft snapshot restore, or a seeded recovery via raftd -restore,
+	// that silently dropped it would leave the Colony with pinned
+	// certificates nobody holds and no record of which Comb presented
+	// which - i.e. peer TLS with a trust anchor that no longer exists,
+	// which is a failure an operator cannot diagnose from any page.
+	// The digest (ADR-0143) is derived from this message's own
+	// descriptor, so it picks the new map up with no second list to
+	// forget.
+	TrustedPeers  map[string]*TrustedPeer `protobuf:"bytes,15,rep,name=trusted_peers,json=trustedPeers,proto3" json:"trusted_peers,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *FSMSnapshotState) Reset() {
 	*x = FSMSnapshotState{}
-	mi := &file_api_internalpb_state_proto_msgTypes[54]
+	mi := &file_api_internalpb_state_proto_msgTypes[58]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5893,7 +6277,7 @@ func (x *FSMSnapshotState) String() string {
 func (*FSMSnapshotState) ProtoMessage() {}
 
 func (x *FSMSnapshotState) ProtoReflect() protoreflect.Message {
-	mi := &file_api_internalpb_state_proto_msgTypes[54]
+	mi := &file_api_internalpb_state_proto_msgTypes[58]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5906,7 +6290,7 @@ func (x *FSMSnapshotState) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FSMSnapshotState.ProtoReflect.Descriptor instead.
 func (*FSMSnapshotState) Descriptor() ([]byte, []int) {
-	return file_api_internalpb_state_proto_rawDescGZIP(), []int{54}
+	return file_api_internalpb_state_proto_rawDescGZIP(), []int{58}
 }
 
 func (x *FSMSnapshotState) GetLastIndex() uint64 {
@@ -6000,6 +6384,13 @@ func (x *FSMSnapshotState) GetColonyUpdates() map[string]*ColonyUpdate {
 	return nil
 }
 
+func (x *FSMSnapshotState) GetTrustedPeers() map[string]*TrustedPeer {
+	if x != nil {
+		return x.TrustedPeers
+	}
+	return nil
+}
+
 // ConfigArchive is the on-disk file format for raftd's -export/
 // -restore (docs/adr/0051-raftd-config-save-restore.md) - a small
 // envelope around an unmodified FSMSnapshotState payload, versioned
@@ -6032,7 +6423,7 @@ type ConfigArchive struct {
 
 func (x *ConfigArchive) Reset() {
 	*x = ConfigArchive{}
-	mi := &file_api_internalpb_state_proto_msgTypes[55]
+	mi := &file_api_internalpb_state_proto_msgTypes[59]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6044,7 +6435,7 @@ func (x *ConfigArchive) String() string {
 func (*ConfigArchive) ProtoMessage() {}
 
 func (x *ConfigArchive) ProtoReflect() protoreflect.Message {
-	mi := &file_api_internalpb_state_proto_msgTypes[55]
+	mi := &file_api_internalpb_state_proto_msgTypes[59]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6057,7 +6448,7 @@ func (x *ConfigArchive) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ConfigArchive.ProtoReflect.Descriptor instead.
 func (*ConfigArchive) Descriptor() ([]byte, []int) {
-	return file_api_internalpb_state_proto_rawDescGZIP(), []int{55}
+	return file_api_internalpb_state_proto_rawDescGZIP(), []int{59}
 }
 
 func (x *ConfigArchive) GetFormatVersion() uint32 {
@@ -6167,7 +6558,7 @@ const file_api_internalpb_state_proto_rawDesc = "" +
 	"\vbridge_name\x18\x05 \x01(\tR\n" +
 	"bridgeName\x12)\n" +
 	"\x10external_gateway\x18\x06 \x01(\tR\x0fexternalGateway\x12%\n" +
-	"\x0euplink_bridged\x18\a \x01(\bR\ruplinkBridged\"\xb2\x19\n" +
+	"\x0euplink_bridged\x18\a \x01(\bR\ruplinkBridged\"\xb8\x1b\n" +
 	"\aCommand\x12;\n" +
 	"\tcreate_vm\x18\x01 \x01(\v2\x1c.apiary.internal.v1.CreateVMH\x00R\bcreateVm\x12;\n" +
 	"\tupdate_vm\x18\x02 \x01(\v2\x1c.apiary.internal.v1.UpdateVMH\x00R\bupdateVm\x12;\n" +
@@ -6210,7 +6601,10 @@ const file_api_internalpb_state_proto_rawDesc = "" +
 	"\x15release_colony_update\x18\" \x01(\v2'.apiary.internal.v1.ReleaseColonyUpdateH\x00R\x13releaseColonyUpdate\x12`\n" +
 	"\x16handover_colony_update\x18# \x01(\v2(.apiary.internal.v1.HandoverColonyUpdateH\x00R\x14handoverColonyUpdate\x12a\n" +
 	"\x17open_colony_join_window\x18$ \x01(\v2(.apiary.internal.v1.OpenColonyJoinWindowH\x00R\x14openColonyJoinWindow\x12d\n" +
-	"\x18close_colony_join_window\x18% \x01(\v2).apiary.internal.v1.CloseColonyJoinWindowH\x00R\x15closeColonyJoinWindowB\x04\n" +
+	"\x18close_colony_join_window\x18% \x01(\v2).apiary.internal.v1.CloseColonyJoinWindowH\x00R\x15closeColonyJoinWindow\x12N\n" +
+	"\x10pin_trusted_peer\x18& \x01(\v2\".apiary.internal.v1.PinTrustedPeerH\x00R\x0epinTrustedPeer\x12^\n" +
+	"\x16set_trusted_peer_voter\x18' \x01(\v2'.apiary.internal.v1.SetTrustedPeerVoterH\x00R\x13setTrustedPeerVoter\x12T\n" +
+	"\x12unpin_trusted_peer\x18( \x01(\v2$.apiary.internal.v1.UnpinTrustedPeerH\x00R\x10unpinTrustedPeerB\x04\n" +
 	"\x02op\"\x82\x01\n" +
 	"\x06ApiKey\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
@@ -6418,7 +6812,23 @@ const file_api_internalpb_state_proto_rawDesc = "" +
 	"\x15CloseColonyJoinWindow\x12\x1b\n" +
 	"\tclosed_by\x18\x01 \x01(\tR\bclosedBy\x12\"\n" +
 	"\rclosed_by_key\x18\x02 \x01(\tR\vclosedByKey\x12\x19\n" +
-	"\bnow_unix\x18\x03 \x01(\x03R\anowUnix\"\xab\x01\n" +
+	"\bnow_unix\x18\x03 \x01(\x03R\anowUnix\"\x84\x02\n" +
+	"\vTrustedPeer\x12\x17\n" +
+	"\anode_id\x18\x01 \x01(\tR\x06nodeId\x12\x1b\n" +
+	"\tcomb_name\x18\x02 \x01(\tR\bcombName\x12 \n" +
+	"\vfingerprint\x18\x03 \x01(\tR\vfingerprint\x12\x19\n" +
+	"\bcert_pem\x18\x04 \x01(\tR\acertPem\x12$\n" +
+	"\x0enot_after_unix\x18\x05 \x01(\x03R\fnotAfterUnix\x12$\n" +
+	"\x0epinned_at_unix\x18\x06 \x01(\x03R\fpinnedAtUnix\x12\x1b\n" +
+	"\tpinned_by\x18\a \x01(\tR\bpinnedBy\x12\x19\n" +
+	"\bis_voter\x18\b \x01(\bR\aisVoter\"E\n" +
+	"\x0ePinTrustedPeer\x123\n" +
+	"\x04peer\x18\x01 \x01(\v2\x1f.apiary.internal.v1.TrustedPeerR\x04peer\"I\n" +
+	"\x13SetTrustedPeerVoter\x12\x17\n" +
+	"\anode_id\x18\x01 \x01(\tR\x06nodeId\x12\x19\n" +
+	"\bis_voter\x18\x02 \x01(\bR\aisVoter\"+\n" +
+	"\x10UnpinTrustedPeer\x12\x17\n" +
+	"\anode_id\x18\x01 \x01(\tR\x06nodeId\"\xab\x01\n" +
 	"\fRestartLease\x12\x19\n" +
 	"\blease_id\x18\x01 \x01(\x04R\aleaseId\x12\x18\n" +
 	"\aservice\x18\x02 \x01(\tR\aservice\x12$\n" +
@@ -6515,7 +6925,7 @@ const file_api_internalpb_state_proto_rawDesc = "" +
 	"\x02vm\x18\x01 \x01(\v2 .apiary.internal.v1.VMDefinitionR\x02vm\x12\x14\n" +
 	"\x05error\x18\x02 \x01(\tR\x05error\x126\n" +
 	"\x04jail\x18\x03 \x01(\v2\".apiary.internal.v1.JailDefinitionR\x04jail\x12X\n" +
-	"\x14pending_join_request\x18\x04 \x01(\v2&.apiary.internal.v1.PendingJoinRequestR\x12pendingJoinRequest\"\xe2\x0f\n" +
+	"\x14pending_join_request\x18\x04 \x01(\v2&.apiary.internal.v1.PendingJoinRequestR\x12pendingJoinRequest\"\xa1\x11\n" +
 	"\x10FSMSnapshotState\x12\x1d\n" +
 	"\n" +
 	"last_index\x18\x01 \x01(\x04R\tlastIndex\x12?\n" +
@@ -6533,7 +6943,8 @@ const file_api_internalpb_state_proto_rawDesc = "" +
 	" \x03(\v24.apiary.internal.v1.FSMSnapshotState.MigrationsEntryR\n" +
 	"migrations\x12k\n" +
 	"\x13migrations_by_guest\x18\v \x03(\v2;.apiary.internal.v1.FSMSnapshotState.MigrationsByGuestEntryR\x11migrationsByGuest\x12^\n" +
-	"\x0ecolony_updates\x18\f \x03(\v27.apiary.internal.v1.FSMSnapshotState.ColonyUpdatesEntryR\rcolonyUpdates\x1aX\n" +
+	"\x0ecolony_updates\x18\f \x03(\v27.apiary.internal.v1.FSMSnapshotState.ColonyUpdatesEntryR\rcolonyUpdates\x12[\n" +
+	"\rtrusted_peers\x18\x0f \x03(\v26.apiary.internal.v1.FSMSnapshotState.TrustedPeersEntryR\ftrustedPeers\x1aX\n" +
 	"\bVmsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x126\n" +
 	"\x05value\x18\x02 \x01(\v2 .apiary.internal.v1.VMDefinitionR\x05value:\x028\x01\x1ab\n" +
@@ -6564,7 +6975,10 @@ const file_api_internalpb_state_proto_rawDesc = "" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\x1ab\n" +
 	"\x12ColonyUpdatesEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x126\n" +
-	"\x05value\x18\x02 \x01(\v2 .apiary.internal.v1.ColonyUpdateR\x05value:\x028\x01\"\xe3\x01\n" +
+	"\x05value\x18\x02 \x01(\v2 .apiary.internal.v1.ColonyUpdateR\x05value:\x028\x01\x1a`\n" +
+	"\x11TrustedPeersEntry\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x125\n" +
+	"\x05value\x18\x02 \x01(\v2\x1f.apiary.internal.v1.TrustedPeerR\x05value:\x028\x01\"\xe3\x01\n" +
 	"\rConfigArchive\x12%\n" +
 	"\x0eformat_version\x18\x01 \x01(\rR\rformatVersion\x12#\n" +
 	"\rexported_unix\x18\x02 \x01(\x03R\fexportedUnix\x12\x17\n" +
@@ -6618,7 +7032,7 @@ func file_api_internalpb_state_proto_rawDescGZIP() []byte {
 }
 
 var file_api_internalpb_state_proto_enumTypes = make([]protoimpl.EnumInfo, 5)
-var file_api_internalpb_state_proto_msgTypes = make([]protoimpl.MessageInfo, 66)
+var file_api_internalpb_state_proto_msgTypes = make([]protoimpl.MessageInfo, 71)
 var file_api_internalpb_state_proto_goTypes = []any{
 	(VMState)(0),                      // 0: apiary.internal.v1.VMState
 	(VMPhase)(0),                      // 1: apiary.internal.v1.VMPhase
@@ -6666,31 +7080,36 @@ var file_api_internalpb_state_proto_goTypes = []any{
 	(*ColonyJoinWindow)(nil),          // 43: apiary.internal.v1.ColonyJoinWindow
 	(*OpenColonyJoinWindow)(nil),      // 44: apiary.internal.v1.OpenColonyJoinWindow
 	(*CloseColonyJoinWindow)(nil),     // 45: apiary.internal.v1.CloseColonyJoinWindow
-	(*RestartLease)(nil),              // 46: apiary.internal.v1.RestartLease
-	(*RestartRecord)(nil),             // 47: apiary.internal.v1.RestartRecord
-	(*AcquireRestartLease)(nil),       // 48: apiary.internal.v1.AcquireRestartLease
-	(*RecordRestartCompleted)(nil),    // 49: apiary.internal.v1.RecordRestartCompleted
-	(*ColonyUpdateFence)(nil),         // 50: apiary.internal.v1.ColonyUpdateFence
-	(*ColonyUpdateStepRecord)(nil),    // 51: apiary.internal.v1.ColonyUpdateStepRecord
-	(*ColonyUpdate)(nil),              // 52: apiary.internal.v1.ColonyUpdate
-	(*AcquireColonyUpdate)(nil),       // 53: apiary.internal.v1.AcquireColonyUpdate
-	(*AdvanceColonyUpdate)(nil),       // 54: apiary.internal.v1.AdvanceColonyUpdate
-	(*ReleaseColonyUpdate)(nil),       // 55: apiary.internal.v1.ReleaseColonyUpdate
-	(*HandoverColonyUpdate)(nil),      // 56: apiary.internal.v1.HandoverColonyUpdate
-	(*ColonyUpdateHandover)(nil),      // 57: apiary.internal.v1.ColonyUpdateHandover
-	(*CommandResult)(nil),             // 58: apiary.internal.v1.CommandResult
-	(*FSMSnapshotState)(nil),          // 59: apiary.internal.v1.FSMSnapshotState
-	(*ConfigArchive)(nil),             // 60: apiary.internal.v1.ConfigArchive
-	nil,                               // 61: apiary.internal.v1.FSMSnapshotState.VmsEntry
-	nil,                               // 62: apiary.internal.v1.FSMSnapshotState.NetworksEntry
-	nil,                               // 63: apiary.internal.v1.FSMSnapshotState.ApiKeysEntry
-	nil,                               // 64: apiary.internal.v1.FSMSnapshotState.JailsEntry
-	nil,                               // 65: apiary.internal.v1.FSMSnapshotState.PendingJoinRequestsEntry
-	nil,                               // 66: apiary.internal.v1.FSMSnapshotState.RestartLeasesEntry
-	nil,                               // 67: apiary.internal.v1.FSMSnapshotState.RestartRecordsEntry
-	nil,                               // 68: apiary.internal.v1.FSMSnapshotState.MigrationsEntry
-	nil,                               // 69: apiary.internal.v1.FSMSnapshotState.MigrationsByGuestEntry
-	nil,                               // 70: apiary.internal.v1.FSMSnapshotState.ColonyUpdatesEntry
+	(*TrustedPeer)(nil),               // 46: apiary.internal.v1.TrustedPeer
+	(*PinTrustedPeer)(nil),            // 47: apiary.internal.v1.PinTrustedPeer
+	(*SetTrustedPeerVoter)(nil),       // 48: apiary.internal.v1.SetTrustedPeerVoter
+	(*UnpinTrustedPeer)(nil),          // 49: apiary.internal.v1.UnpinTrustedPeer
+	(*RestartLease)(nil),              // 50: apiary.internal.v1.RestartLease
+	(*RestartRecord)(nil),             // 51: apiary.internal.v1.RestartRecord
+	(*AcquireRestartLease)(nil),       // 52: apiary.internal.v1.AcquireRestartLease
+	(*RecordRestartCompleted)(nil),    // 53: apiary.internal.v1.RecordRestartCompleted
+	(*ColonyUpdateFence)(nil),         // 54: apiary.internal.v1.ColonyUpdateFence
+	(*ColonyUpdateStepRecord)(nil),    // 55: apiary.internal.v1.ColonyUpdateStepRecord
+	(*ColonyUpdate)(nil),              // 56: apiary.internal.v1.ColonyUpdate
+	(*AcquireColonyUpdate)(nil),       // 57: apiary.internal.v1.AcquireColonyUpdate
+	(*AdvanceColonyUpdate)(nil),       // 58: apiary.internal.v1.AdvanceColonyUpdate
+	(*ReleaseColonyUpdate)(nil),       // 59: apiary.internal.v1.ReleaseColonyUpdate
+	(*HandoverColonyUpdate)(nil),      // 60: apiary.internal.v1.HandoverColonyUpdate
+	(*ColonyUpdateHandover)(nil),      // 61: apiary.internal.v1.ColonyUpdateHandover
+	(*CommandResult)(nil),             // 62: apiary.internal.v1.CommandResult
+	(*FSMSnapshotState)(nil),          // 63: apiary.internal.v1.FSMSnapshotState
+	(*ConfigArchive)(nil),             // 64: apiary.internal.v1.ConfigArchive
+	nil,                               // 65: apiary.internal.v1.FSMSnapshotState.VmsEntry
+	nil,                               // 66: apiary.internal.v1.FSMSnapshotState.NetworksEntry
+	nil,                               // 67: apiary.internal.v1.FSMSnapshotState.ApiKeysEntry
+	nil,                               // 68: apiary.internal.v1.FSMSnapshotState.JailsEntry
+	nil,                               // 69: apiary.internal.v1.FSMSnapshotState.PendingJoinRequestsEntry
+	nil,                               // 70: apiary.internal.v1.FSMSnapshotState.RestartLeasesEntry
+	nil,                               // 71: apiary.internal.v1.FSMSnapshotState.RestartRecordsEntry
+	nil,                               // 72: apiary.internal.v1.FSMSnapshotState.MigrationsEntry
+	nil,                               // 73: apiary.internal.v1.FSMSnapshotState.MigrationsByGuestEntry
+	nil,                               // 74: apiary.internal.v1.FSMSnapshotState.ColonyUpdatesEntry
+	nil,                               // 75: apiary.internal.v1.FSMSnapshotState.TrustedPeersEntry
 }
 var file_api_internalpb_state_proto_depIdxs = []int32{
 	0,  // 0: apiary.internal.v1.VMDefinition.desired_state:type_name -> apiary.internal.v1.VMState
@@ -6724,67 +7143,73 @@ var file_api_internalpb_state_proto_depIdxs = []int32{
 	41, // 28: apiary.internal.v1.Command.cancel_pending_join_request:type_name -> apiary.internal.v1.CancelPendingJoinRequest
 	42, // 29: apiary.internal.v1.Command.purge_join_request:type_name -> apiary.internal.v1.PurgeJoinRequest
 	30, // 30: apiary.internal.v1.Command.set_jail_hostname:type_name -> apiary.internal.v1.SetJailHostname
-	48, // 31: apiary.internal.v1.Command.acquire_restart_lease:type_name -> apiary.internal.v1.AcquireRestartLease
-	49, // 32: apiary.internal.v1.Command.record_restart_completed:type_name -> apiary.internal.v1.RecordRestartCompleted
+	52, // 31: apiary.internal.v1.Command.acquire_restart_lease:type_name -> apiary.internal.v1.AcquireRestartLease
+	53, // 32: apiary.internal.v1.Command.record_restart_completed:type_name -> apiary.internal.v1.RecordRestartCompleted
 	34, // 33: apiary.internal.v1.Command.start_guest_migration:type_name -> apiary.internal.v1.StartGuestMigration
 	35, // 34: apiary.internal.v1.Command.update_guest_migration_phase:type_name -> apiary.internal.v1.UpdateGuestMigrationPhase
 	36, // 35: apiary.internal.v1.Command.finish_guest_migration:type_name -> apiary.internal.v1.FinishGuestMigration
-	53, // 36: apiary.internal.v1.Command.acquire_colony_update:type_name -> apiary.internal.v1.AcquireColonyUpdate
-	54, // 37: apiary.internal.v1.Command.advance_colony_update:type_name -> apiary.internal.v1.AdvanceColonyUpdate
-	55, // 38: apiary.internal.v1.Command.release_colony_update:type_name -> apiary.internal.v1.ReleaseColonyUpdate
-	56, // 39: apiary.internal.v1.Command.handover_colony_update:type_name -> apiary.internal.v1.HandoverColonyUpdate
+	57, // 36: apiary.internal.v1.Command.acquire_colony_update:type_name -> apiary.internal.v1.AcquireColonyUpdate
+	58, // 37: apiary.internal.v1.Command.advance_colony_update:type_name -> apiary.internal.v1.AdvanceColonyUpdate
+	59, // 38: apiary.internal.v1.Command.release_colony_update:type_name -> apiary.internal.v1.ReleaseColonyUpdate
+	60, // 39: apiary.internal.v1.Command.handover_colony_update:type_name -> apiary.internal.v1.HandoverColonyUpdate
 	44, // 40: apiary.internal.v1.Command.open_colony_join_window:type_name -> apiary.internal.v1.OpenColonyJoinWindow
 	45, // 41: apiary.internal.v1.Command.close_colony_join_window:type_name -> apiary.internal.v1.CloseColonyJoinWindow
-	10, // 42: apiary.internal.v1.CreateAPIKey.key:type_name -> apiary.internal.v1.ApiKey
-	8,  // 43: apiary.internal.v1.CreateNetwork.network:type_name -> apiary.internal.v1.NetworkDefinition
-	5,  // 44: apiary.internal.v1.CreateVM.vm:type_name -> apiary.internal.v1.VMDefinition
-	5,  // 45: apiary.internal.v1.UpdateVM.vm:type_name -> apiary.internal.v1.VMDefinition
-	1,  // 46: apiary.internal.v1.UpdateVMPhase.phase:type_name -> apiary.internal.v1.VMPhase
-	0,  // 47: apiary.internal.v1.SetVMDesiredState.desired_state:type_name -> apiary.internal.v1.VMState
-	7,  // 48: apiary.internal.v1.SetVMFirewallRules.firewall_rules:type_name -> apiary.internal.v1.FirewallRule
-	6,  // 49: apiary.internal.v1.CreateJail.jail:type_name -> apiary.internal.v1.JailDefinition
-	6,  // 50: apiary.internal.v1.UpdateJail.jail:type_name -> apiary.internal.v1.JailDefinition
-	3,  // 51: apiary.internal.v1.UpdateJailPhase.phase:type_name -> apiary.internal.v1.JailPhase
-	2,  // 52: apiary.internal.v1.SetJailDesiredState.desired_state:type_name -> apiary.internal.v1.JailState
-	32, // 53: apiary.internal.v1.GuestMigration.evidence:type_name -> apiary.internal.v1.MigrationEvidence
-	32, // 54: apiary.internal.v1.FinishGuestMigration.evidence:type_name -> apiary.internal.v1.MigrationEvidence
-	4,  // 55: apiary.internal.v1.PendingJoinRequest.status:type_name -> apiary.internal.v1.JoinRequestStatus
-	37, // 56: apiary.internal.v1.CreatePendingJoinRequest.request:type_name -> apiary.internal.v1.PendingJoinRequest
-	50, // 57: apiary.internal.v1.AcquireRestartLease.colony_update_fence:type_name -> apiary.internal.v1.ColonyUpdateFence
-	51, // 58: apiary.internal.v1.ColonyUpdate.steps:type_name -> apiary.internal.v1.ColonyUpdateStepRecord
-	57, // 59: apiary.internal.v1.ColonyUpdate.handovers:type_name -> apiary.internal.v1.ColonyUpdateHandover
-	50, // 60: apiary.internal.v1.AdvanceColonyUpdate.fence:type_name -> apiary.internal.v1.ColonyUpdateFence
-	51, // 61: apiary.internal.v1.AdvanceColonyUpdate.step_record:type_name -> apiary.internal.v1.ColonyUpdateStepRecord
-	50, // 62: apiary.internal.v1.ReleaseColonyUpdate.fence:type_name -> apiary.internal.v1.ColonyUpdateFence
-	50, // 63: apiary.internal.v1.HandoverColonyUpdate.from_fence:type_name -> apiary.internal.v1.ColonyUpdateFence
-	5,  // 64: apiary.internal.v1.CommandResult.vm:type_name -> apiary.internal.v1.VMDefinition
-	6,  // 65: apiary.internal.v1.CommandResult.jail:type_name -> apiary.internal.v1.JailDefinition
-	37, // 66: apiary.internal.v1.CommandResult.pending_join_request:type_name -> apiary.internal.v1.PendingJoinRequest
-	61, // 67: apiary.internal.v1.FSMSnapshotState.vms:type_name -> apiary.internal.v1.FSMSnapshotState.VmsEntry
-	62, // 68: apiary.internal.v1.FSMSnapshotState.networks:type_name -> apiary.internal.v1.FSMSnapshotState.NetworksEntry
-	63, // 69: apiary.internal.v1.FSMSnapshotState.api_keys:type_name -> apiary.internal.v1.FSMSnapshotState.ApiKeysEntry
-	64, // 70: apiary.internal.v1.FSMSnapshotState.jails:type_name -> apiary.internal.v1.FSMSnapshotState.JailsEntry
-	65, // 71: apiary.internal.v1.FSMSnapshotState.pending_join_requests:type_name -> apiary.internal.v1.FSMSnapshotState.PendingJoinRequestsEntry
-	43, // 72: apiary.internal.v1.FSMSnapshotState.colony_join_window:type_name -> apiary.internal.v1.ColonyJoinWindow
-	66, // 73: apiary.internal.v1.FSMSnapshotState.restart_leases:type_name -> apiary.internal.v1.FSMSnapshotState.RestartLeasesEntry
-	67, // 74: apiary.internal.v1.FSMSnapshotState.restart_records:type_name -> apiary.internal.v1.FSMSnapshotState.RestartRecordsEntry
-	68, // 75: apiary.internal.v1.FSMSnapshotState.migrations:type_name -> apiary.internal.v1.FSMSnapshotState.MigrationsEntry
-	69, // 76: apiary.internal.v1.FSMSnapshotState.migrations_by_guest:type_name -> apiary.internal.v1.FSMSnapshotState.MigrationsByGuestEntry
-	70, // 77: apiary.internal.v1.FSMSnapshotState.colony_updates:type_name -> apiary.internal.v1.FSMSnapshotState.ColonyUpdatesEntry
-	5,  // 78: apiary.internal.v1.FSMSnapshotState.VmsEntry.value:type_name -> apiary.internal.v1.VMDefinition
-	8,  // 79: apiary.internal.v1.FSMSnapshotState.NetworksEntry.value:type_name -> apiary.internal.v1.NetworkDefinition
-	10, // 80: apiary.internal.v1.FSMSnapshotState.ApiKeysEntry.value:type_name -> apiary.internal.v1.ApiKey
-	6,  // 81: apiary.internal.v1.FSMSnapshotState.JailsEntry.value:type_name -> apiary.internal.v1.JailDefinition
-	37, // 82: apiary.internal.v1.FSMSnapshotState.PendingJoinRequestsEntry.value:type_name -> apiary.internal.v1.PendingJoinRequest
-	46, // 83: apiary.internal.v1.FSMSnapshotState.RestartLeasesEntry.value:type_name -> apiary.internal.v1.RestartLease
-	47, // 84: apiary.internal.v1.FSMSnapshotState.RestartRecordsEntry.value:type_name -> apiary.internal.v1.RestartRecord
-	33, // 85: apiary.internal.v1.FSMSnapshotState.MigrationsEntry.value:type_name -> apiary.internal.v1.GuestMigration
-	52, // 86: apiary.internal.v1.FSMSnapshotState.ColonyUpdatesEntry.value:type_name -> apiary.internal.v1.ColonyUpdate
-	87, // [87:87] is the sub-list for method output_type
-	87, // [87:87] is the sub-list for method input_type
-	87, // [87:87] is the sub-list for extension type_name
-	87, // [87:87] is the sub-list for extension extendee
-	0,  // [0:87] is the sub-list for field type_name
+	47, // 42: apiary.internal.v1.Command.pin_trusted_peer:type_name -> apiary.internal.v1.PinTrustedPeer
+	48, // 43: apiary.internal.v1.Command.set_trusted_peer_voter:type_name -> apiary.internal.v1.SetTrustedPeerVoter
+	49, // 44: apiary.internal.v1.Command.unpin_trusted_peer:type_name -> apiary.internal.v1.UnpinTrustedPeer
+	10, // 45: apiary.internal.v1.CreateAPIKey.key:type_name -> apiary.internal.v1.ApiKey
+	8,  // 46: apiary.internal.v1.CreateNetwork.network:type_name -> apiary.internal.v1.NetworkDefinition
+	5,  // 47: apiary.internal.v1.CreateVM.vm:type_name -> apiary.internal.v1.VMDefinition
+	5,  // 48: apiary.internal.v1.UpdateVM.vm:type_name -> apiary.internal.v1.VMDefinition
+	1,  // 49: apiary.internal.v1.UpdateVMPhase.phase:type_name -> apiary.internal.v1.VMPhase
+	0,  // 50: apiary.internal.v1.SetVMDesiredState.desired_state:type_name -> apiary.internal.v1.VMState
+	7,  // 51: apiary.internal.v1.SetVMFirewallRules.firewall_rules:type_name -> apiary.internal.v1.FirewallRule
+	6,  // 52: apiary.internal.v1.CreateJail.jail:type_name -> apiary.internal.v1.JailDefinition
+	6,  // 53: apiary.internal.v1.UpdateJail.jail:type_name -> apiary.internal.v1.JailDefinition
+	3,  // 54: apiary.internal.v1.UpdateJailPhase.phase:type_name -> apiary.internal.v1.JailPhase
+	2,  // 55: apiary.internal.v1.SetJailDesiredState.desired_state:type_name -> apiary.internal.v1.JailState
+	32, // 56: apiary.internal.v1.GuestMigration.evidence:type_name -> apiary.internal.v1.MigrationEvidence
+	32, // 57: apiary.internal.v1.FinishGuestMigration.evidence:type_name -> apiary.internal.v1.MigrationEvidence
+	4,  // 58: apiary.internal.v1.PendingJoinRequest.status:type_name -> apiary.internal.v1.JoinRequestStatus
+	37, // 59: apiary.internal.v1.CreatePendingJoinRequest.request:type_name -> apiary.internal.v1.PendingJoinRequest
+	46, // 60: apiary.internal.v1.PinTrustedPeer.peer:type_name -> apiary.internal.v1.TrustedPeer
+	54, // 61: apiary.internal.v1.AcquireRestartLease.colony_update_fence:type_name -> apiary.internal.v1.ColonyUpdateFence
+	55, // 62: apiary.internal.v1.ColonyUpdate.steps:type_name -> apiary.internal.v1.ColonyUpdateStepRecord
+	61, // 63: apiary.internal.v1.ColonyUpdate.handovers:type_name -> apiary.internal.v1.ColonyUpdateHandover
+	54, // 64: apiary.internal.v1.AdvanceColonyUpdate.fence:type_name -> apiary.internal.v1.ColonyUpdateFence
+	55, // 65: apiary.internal.v1.AdvanceColonyUpdate.step_record:type_name -> apiary.internal.v1.ColonyUpdateStepRecord
+	54, // 66: apiary.internal.v1.ReleaseColonyUpdate.fence:type_name -> apiary.internal.v1.ColonyUpdateFence
+	54, // 67: apiary.internal.v1.HandoverColonyUpdate.from_fence:type_name -> apiary.internal.v1.ColonyUpdateFence
+	5,  // 68: apiary.internal.v1.CommandResult.vm:type_name -> apiary.internal.v1.VMDefinition
+	6,  // 69: apiary.internal.v1.CommandResult.jail:type_name -> apiary.internal.v1.JailDefinition
+	37, // 70: apiary.internal.v1.CommandResult.pending_join_request:type_name -> apiary.internal.v1.PendingJoinRequest
+	65, // 71: apiary.internal.v1.FSMSnapshotState.vms:type_name -> apiary.internal.v1.FSMSnapshotState.VmsEntry
+	66, // 72: apiary.internal.v1.FSMSnapshotState.networks:type_name -> apiary.internal.v1.FSMSnapshotState.NetworksEntry
+	67, // 73: apiary.internal.v1.FSMSnapshotState.api_keys:type_name -> apiary.internal.v1.FSMSnapshotState.ApiKeysEntry
+	68, // 74: apiary.internal.v1.FSMSnapshotState.jails:type_name -> apiary.internal.v1.FSMSnapshotState.JailsEntry
+	69, // 75: apiary.internal.v1.FSMSnapshotState.pending_join_requests:type_name -> apiary.internal.v1.FSMSnapshotState.PendingJoinRequestsEntry
+	43, // 76: apiary.internal.v1.FSMSnapshotState.colony_join_window:type_name -> apiary.internal.v1.ColonyJoinWindow
+	70, // 77: apiary.internal.v1.FSMSnapshotState.restart_leases:type_name -> apiary.internal.v1.FSMSnapshotState.RestartLeasesEntry
+	71, // 78: apiary.internal.v1.FSMSnapshotState.restart_records:type_name -> apiary.internal.v1.FSMSnapshotState.RestartRecordsEntry
+	72, // 79: apiary.internal.v1.FSMSnapshotState.migrations:type_name -> apiary.internal.v1.FSMSnapshotState.MigrationsEntry
+	73, // 80: apiary.internal.v1.FSMSnapshotState.migrations_by_guest:type_name -> apiary.internal.v1.FSMSnapshotState.MigrationsByGuestEntry
+	74, // 81: apiary.internal.v1.FSMSnapshotState.colony_updates:type_name -> apiary.internal.v1.FSMSnapshotState.ColonyUpdatesEntry
+	75, // 82: apiary.internal.v1.FSMSnapshotState.trusted_peers:type_name -> apiary.internal.v1.FSMSnapshotState.TrustedPeersEntry
+	5,  // 83: apiary.internal.v1.FSMSnapshotState.VmsEntry.value:type_name -> apiary.internal.v1.VMDefinition
+	8,  // 84: apiary.internal.v1.FSMSnapshotState.NetworksEntry.value:type_name -> apiary.internal.v1.NetworkDefinition
+	10, // 85: apiary.internal.v1.FSMSnapshotState.ApiKeysEntry.value:type_name -> apiary.internal.v1.ApiKey
+	6,  // 86: apiary.internal.v1.FSMSnapshotState.JailsEntry.value:type_name -> apiary.internal.v1.JailDefinition
+	37, // 87: apiary.internal.v1.FSMSnapshotState.PendingJoinRequestsEntry.value:type_name -> apiary.internal.v1.PendingJoinRequest
+	50, // 88: apiary.internal.v1.FSMSnapshotState.RestartLeasesEntry.value:type_name -> apiary.internal.v1.RestartLease
+	51, // 89: apiary.internal.v1.FSMSnapshotState.RestartRecordsEntry.value:type_name -> apiary.internal.v1.RestartRecord
+	33, // 90: apiary.internal.v1.FSMSnapshotState.MigrationsEntry.value:type_name -> apiary.internal.v1.GuestMigration
+	56, // 91: apiary.internal.v1.FSMSnapshotState.ColonyUpdatesEntry.value:type_name -> apiary.internal.v1.ColonyUpdate
+	46, // 92: apiary.internal.v1.FSMSnapshotState.TrustedPeersEntry.value:type_name -> apiary.internal.v1.TrustedPeer
+	93, // [93:93] is the sub-list for method output_type
+	93, // [93:93] is the sub-list for method input_type
+	93, // [93:93] is the sub-list for extension type_name
+	93, // [93:93] is the sub-list for extension extendee
+	0,  // [0:93] is the sub-list for field type_name
 }
 
 func init() { file_api_internalpb_state_proto_init() }
@@ -6830,6 +7255,9 @@ func file_api_internalpb_state_proto_init() {
 		(*Command_HandoverColonyUpdate)(nil),
 		(*Command_OpenColonyJoinWindow)(nil),
 		(*Command_CloseColonyJoinWindow)(nil),
+		(*Command_PinTrustedPeer)(nil),
+		(*Command_SetTrustedPeerVoter)(nil),
+		(*Command_UnpinTrustedPeer)(nil),
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
@@ -6837,7 +7265,7 @@ func file_api_internalpb_state_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_api_internalpb_state_proto_rawDesc), len(file_api_internalpb_state_proto_rawDesc)),
 			NumEnums:      5,
-			NumMessages:   66,
+			NumMessages:   71,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

@@ -136,6 +136,23 @@ service RaftInternal {
   // would see.
   rpc GetColonyJoinWindowLocal(GetColonyJoinWindowRequest) returns (GetColonyJoinWindowResponse);
 
+  // ListTrustedPeersLocal is the read side of ADR-0147 Part 4's
+  // replicated peer trust store, and the input to the derived
+  // /usr/local/etc/apiary/peer-ca.pem every managerd writes on its own
+  // replicated copy.
+  //
+  // Deliberately NOT leader-only, for the same
+  // GetColonyJoinWindowLocal reason: the pins are already
+  // raft-replicated, so any node can answer for itself, and that is
+  // exactly what a derived per-host file needs - it must be written by
+  // every Comb from its own copy, not only by whichever one happens to
+  // be leading.
+  //
+  // The returned list is sorted by node ID, so the bytes managerd
+  // writes are the same on every Comb and an operator can diff two
+  // hosts.
+  rpc ListTrustedPeersLocal(ListTrustedPeersRequest) returns (ListTrustedPeersResponse);
+
   // GetColonyUpdateStateLocal is the read side of ADR-0145's colony-wide
   // controlled-update single-flight. It is deliberately named ...Local and
   // deliberately NOT leader-only, for the same GetRestartLeaseStateLocal
@@ -508,4 +525,18 @@ message GetColonyJoinWindowResponse {
   // to compute, so the liveness answer and the state it was computed
   // from can never be two separate reads taken at different moments.
   bool live = 2;
+}
+
+// ListTrustedPeersRequest is deliberately empty. There is no filter and
+// no pagination: the store holds one entry per Comb this Colony has
+// ever pinned, which is a small number bounded by the size of the
+// Colony itself.
+message ListTrustedPeersRequest {}
+
+message ListTrustedPeersResponse {
+  // peers repeats the FSM's own message rather than flattening it, so
+  // the raft-side schema and the one api/internalpb/state.proto owns
+  // cannot drift apart - the same reasoning GetColonyJoinWindowResponse
+  // records. Sorted by TrustedPeer.node_id.
+  repeated TrustedPeer peers = 1;
 }

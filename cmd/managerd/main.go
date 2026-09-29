@@ -40,6 +40,7 @@ import (
 	"github.com/glenjbarber/apiary/internal/nodeconfig"
 	"github.com/glenjbarber/apiary/internal/origincert"
 	"github.com/glenjbarber/apiary/internal/pam"
+	"github.com/glenjbarber/apiary/internal/peerca"
 	"github.com/glenjbarber/apiary/internal/pf"
 	"github.com/glenjbarber/apiary/internal/raftdconfig"
 	"github.com/glenjbarber/apiary/internal/resetutil"
@@ -180,11 +181,11 @@ func run() error {
 	// to the same leader managerd over the same authenticated API, so
 	// there's no reason for two separate peer clients/credentials.
 	peers := manager.NewPeerReporter(cfg.PeerAPIKey, peerTLS, peerHostnames)
-	if cfg.PeerTLSCA != "" {
-		pool, err := manager.LoadPeerCAPool(cfg.PeerTLSCA)
-		if err != nil {
-			return fmt.Errorf("managerd: %w", err)
-		}
+	pool, err := manager.ResolvePeerCAPool(cfg.PeerTLSCA)
+	if err != nil {
+		return fmt.Errorf("managerd: %w", err)
+	}
+	if pool != nil {
 		peers.CAPool = pool
 	}
 
@@ -538,6 +539,7 @@ func run() error {
 	go runAssumptionCheckLoop(ctx, assumptionChecker, cfg.AssumptionCheckInterval)
 	go runOriginCARenewalLoop(ctx, originCARenewer, cfg.OriginCARenewalCheckInterval)
 	go runPeerHostnameRefreshLoop(ctx, peers, raftClient, peerHostnameRefreshInterval)
+	go runPeerCAWriteLoop(ctx, raftClient, peerCAWriteInterval)
 	go confirmPendingRestartOnStartup(ctx, srv, restartConfirm, id)
 
 	select {
@@ -671,6 +673,57 @@ func peerHostnameRefreshOnce(ctx context.Context, peers *manager.PeerReporter, r
 func originCARenewalOnce(ctx context.Context, renewer *origincert.Renewer) {
 	if err := renewer.RunOnce(ctx); err != nil {
 		log.Printf("managerd: origin-ca renewal: %v", err)
+	}
+}
+
+// peerCAWriteInterval controls how often the derived
+// /usr/local/etc/apiary/peer-ca.pem is rewritten from this node's own
+// replicated copy of the peer trust store.
+//
+// A tick rather than an event, deliberately. The alternative - having
+// every pin, promotion, and unpin call a writer directly - would mean
+// the file's contents depended on which process happened to observe a
+// change, and a trust anchor that differs between two Combs in the same
+// Colony is the exact state the replicated store was introduced to
+// end. A tick costs one small local read and one atomic write.
+//
+// The interval is not a config field for the same reason
+// peerHostnameRefreshInterval is not: a pin changes when a Comb joins,
+// which is rare and operator-driven, and being a minute late about a
+// file nothing dials until peer TLS is enabled is not a tunable.
+const peerCAWriteInterval = 30 * time.Second
+
+// runPeerCAWriteLoop mirrors runReconcileLoop's own shape exactly - an
+// immediate first run, then one per tick of interval, until ctx is
+// done. Errors are logged, not fatal: a raftd read failure here is the
+// same routine condition a non-leader sees everywhere else, and the
+// previous contents of a derived cache are not invalidated by failing
+// to refresh them.
+func runPeerCAWriteLoop(ctx context.Context, raftClient *manager.RaftClient, interval time.Duration) {
+	peerCAWriteOnce(ctx, raftClient)
+
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			peerCAWriteOnce(ctx, raftClient)
+		}
+	}
+}
+
+func peerCAWriteOnce(ctx context.Context, raftClient *manager.RaftClient) {
+	readCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	resp, err := raftClient.ListTrustedPeersLocal(readCtx)
+	if err != nil {
+		log.Printf("managerd: peer CA write: reading the peer trust store: %v", err)
+		return
+	}
+	if err := peerca.Write(peerca.DefaultPath, resp.GetPeers()); err != nil {
+		log.Printf("managerd: peer CA write: %v", err)
 	}
 }
 

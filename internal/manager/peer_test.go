@@ -24,6 +24,7 @@ import (
 	"google.golang.org/grpc/metadata"
 
 	rpcpb "github.com/glenjbarber/apiary/api/rpc"
+	"github.com/glenjbarber/apiary/internal/peerca"
 )
 
 // fakePeerServer implements just enough of rpcpb.ManagerServiceServer
@@ -775,6 +776,60 @@ func TestLoadPeerCAPool_MalformedFileErrors(t *testing.T) {
 	}
 	if _, err := LoadPeerCAPool(path); err == nil {
 		t.Error("LoadPeerCAPool(malformed file) = nil error, want an error")
+	}
+}
+
+// ADR-0147 Part 4's changed default, in its two halves.
+//
+// The first is the one that could have broken every fresh install: an
+// empty setting now means the derived file, and a Colony that has
+// pinned nothing has no such file. That must NOT be fatal, because
+// fatal would mean managerd refuses to start on a freshly installed
+// Comb - and a nil pool is exactly what it did before this default
+// existed.
+func TestResolvePeerCAPool_EmptySettingWithNoDerivedFileIsNotAnError(t *testing.T) {
+	if _, err := os.Stat(peerca.DefaultPath); err == nil {
+		t.Skipf("%s exists on this machine, so this case cannot be exercised here", peerca.DefaultPath)
+	}
+	pool, err := ResolvePeerCAPool("")
+	if err != nil {
+		t.Fatalf("ResolvePeerCAPool(\"\") error: %v - a fresh install has no pins, which is a state, not a fault", err)
+	}
+	if pool != nil {
+		t.Error("ResolvePeerCAPool(\"\") returned a pool with no derived file present, want nil so the dialer keeps the system pool it had before this default existed")
+	}
+}
+
+// The second half: an operator who named a file expects to be told when
+// it is broken, and that must not change because a default now exists.
+func TestResolvePeerCAPool_AnOperatorSuppliedPathIsStillFatalWhenBroken(t *testing.T) {
+	if _, err := ResolvePeerCAPool("/nonexistent/peer-ca.pem"); err == nil {
+		t.Error("ResolvePeerCAPool(missing operator path) = nil error, want an error")
+	}
+	bad := filepath.Join(t.TempDir(), "peer-ca.pem")
+	if err := os.WriteFile(bad, []byte("not a real certificate"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ResolvePeerCAPool(bad); err == nil {
+		t.Error("ResolvePeerCAPool(malformed operator path) = nil error, want an error")
+	}
+}
+
+// And the case the default exists for: a real derived file is loaded
+// like any other, so the trust anchor actually changes once pins
+// exist.
+func TestResolvePeerCAPool_AnOperatorSuppliedFileIsLoaded(t *testing.T) {
+	certPEM, _ := genSelfSignedCert(t)
+	path := filepath.Join(t.TempDir(), "peer-ca.pem")
+	if err := os.WriteFile(path, certPEM, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	pool, err := ResolvePeerCAPool(path)
+	if err != nil {
+		t.Fatalf("ResolvePeerCAPool() error: %v", err)
+	}
+	if pool == nil {
+		t.Fatal("ResolvePeerCAPool() = nil pool for a readable PEM file, want the file's pool")
 	}
 }
 
