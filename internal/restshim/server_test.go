@@ -45,6 +45,10 @@ type fakeClient struct {
 
 	lastStatusCtx context.Context
 
+	clusterHealthResp    *rpcpb.ClusterHealthResponse
+	clusterHealthErr     error
+	lastClusterHealthCtx context.Context
+
 	createJailResp *rpcpb.CreateJailResponse
 	updateJailResp *rpcpb.UpdateJailResponse
 	deleteJailResp *rpcpb.DeleteJailResponse
@@ -122,8 +126,9 @@ func (f *fakeClient) GetLocalNodeHealth(context.Context, *rpcpb.GetLocalNodeHeal
 	return &rpcpb.GetLocalNodeHealthResponse{}, nil
 }
 
-func (f *fakeClient) ClusterHealth(context.Context, *rpcpb.ClusterHealthRequest, ...grpc.CallOption) (*rpcpb.ClusterHealthResponse, error) {
-	return &rpcpb.ClusterHealthResponse{}, nil
+func (f *fakeClient) ClusterHealth(ctx context.Context, _ *rpcpb.ClusterHealthRequest, _ ...grpc.CallOption) (*rpcpb.ClusterHealthResponse, error) {
+	f.lastClusterHealthCtx = ctx
+	return f.clusterHealthResp, f.clusterHealthErr
 }
 
 func (f *fakeClient) ListAssumptionClaims(context.Context, *rpcpb.ListAssumptionClaimsRequest, ...grpc.CallOption) (*rpcpb.ListAssumptionClaimsResponse, error) {
@@ -1366,5 +1371,305 @@ func TestServer_StatusReportsTheDiagnosedCause(t *testing.T) {
 	json.Unmarshal(rec.Body.Bytes(), &body)
 	if body.ErrorClass != "manager_tls_scheme_mismatch" {
 		t.Errorf("error_class = %q, want manager_tls_scheme_mismatch", body.ErrorClass)
+	}
+}
+
+// TestServer_ClusterHealth covers GET /v1/health: the ADR-0122 verdict
+// relayed verbatim, evidence and all, with no field invented or dropped.
+func TestServer_ClusterHealth(t *testing.T) {
+	client := &fakeClient{clusterHealthResp: &rpcpb.ClusterHealthResponse{
+		LocalNodeId: "manager-1",
+		Nodes: []*rpcpb.ClusterNodeHealth{{
+			NodeId:      "comb-1",
+			Status:      "healthy",
+			Explanation: "all observed evidence agrees",
+			Dialed:      true,
+			Observations: []*rpcpb.HealthObservation{{
+				Source:                "raft_membership_observed",
+				ObservedUnix:          1750000000,
+				FreshnessLimitSeconds: 30,
+				Value:                 "3 members",
+			}},
+			RaftStateDigest:  "abc123",
+			RaftAppliedIndex: 42,
+		}},
+	}}
+	s := NewServer(client)
+
+	rec := doRequest(t, s, http.MethodGet, "/v1/health", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+
+	var got clusterHealth
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decoding response: %v", err)
+	}
+	if got.LocalNodeID != "manager-1" {
+		t.Errorf("local_node_id = %q, want manager-1", got.LocalNodeID)
+	}
+	if got.Error != "" {
+		t.Errorf("error = %q, want empty", got.Error)
+	}
+	if len(got.Nodes) != 1 {
+		t.Fatalf("nodes = %d, want 1; body=%s", len(got.Nodes), rec.Body.String())
+	}
+	node := got.Nodes[0]
+	if node.NodeID != "comb-1" || node.Status != "healthy" {
+		t.Errorf("node = %+v, want comb-1/healthy", node)
+	}
+	if !node.Dialed {
+		t.Error("dialed = false, want true (the answering node reports trivially-true reachability)")
+	}
+	if node.RaftStateDigest != "abc123" || node.RaftAppliedIndex != 42 {
+		t.Errorf("digest/index = %q/%d, want abc123/42", node.RaftStateDigest, node.RaftAppliedIndex)
+	}
+	if len(node.Observations) != 1 {
+		t.Fatalf("observations = %d, want 1", len(node.Observations))
+	}
+	obs := node.Observations[0]
+	if obs.Source != "raft_membership_observed" || obs.Value != "3 members" ||
+		obs.ObservedUnix != 1750000000 || obs.FreshnessLimitSeconds != 30 {
+		t.Errorf("observation = %+v, want the raw evidence relayed intact", obs)
+	}
+}
+
+// TestServer_ClusterHealth_StatusIsTheStringManagerdComputed pins the
+// contract ADR-0122's decision 3 chose on purpose: status stays a string,
+// and an unrecognized one is relayed verbatim rather than normalized,
+// dropped, or guessed at. The shim supplies known_statuses so a consumer
+// can discharge the "unrecognized means not healthy" obligation
+// mechanically, but it does not make that call on the consumer's behalf
+// - and it certainly does not let an unknown string read as a pass.
+func TestServer_ClusterHealth_StatusIsTheStringManagerdComputed(t *testing.T) {
+	client := &fakeClient{clusterHealthResp: &rpcpb.ClusterHealthResponse{
+		Nodes: []*rpcpb.ClusterNodeHealth{
+			{NodeId: "comb-1", Status: "healthy"},
+			// A state from a newer managerd that this build has never
+			// heard of.
+			{NodeId: "comb-2", Status: "quiescing"},
+		},
+	}}
+	s := NewServer(client)
+
+	rec := doRequest(t, s, http.MethodGet, "/v1/health", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+
+	var got clusterHealth
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decoding response: %v", err)
+	}
+	want := []string{"healthy", "degraded", "unknown", "stale", "contradictory"}
+	if len(got.KnownStatuses) != len(want) {
+		t.Fatalf("known_statuses = %v, want %v", got.KnownStatuses, want)
+	}
+	for i, status := range want {
+		if got.KnownStatuses[i] != status {
+			t.Errorf("known_statuses[%d] = %q, want %q", i, got.KnownStatuses[i], status)
+		}
+	}
+	if len(got.Nodes) != 2 {
+		t.Fatalf("nodes = %d, want 2", len(got.Nodes))
+	}
+	if got.Nodes[0].Status != "healthy" {
+		t.Errorf("comb-1 status = %q, want healthy", got.Nodes[0].Status)
+	}
+	if got.Nodes[1].Status != "quiescing" {
+		t.Errorf("comb-2 status = %q, want it relayed verbatim rather than rewritten", got.Nodes[1].Status)
+	}
+	// The unrecognized state is not on the list, which is the whole
+	// mechanism: a consumer checking membership sees comb-2 as something
+	// it has never heard of, and must read that as not healthy.
+	for _, known := range got.KnownStatuses {
+		if known == "quiescing" {
+			t.Error("an unrecognized state appeared in known_statuses, want only the five this build recognizes")
+		}
+	}
+}
+
+// TestServer_ClusterHealth_UnobservedNodeStillAppearsWithANonHealthyStatus
+// guards ADR-0122's "an absent entry must never be readable as a healthy
+// one" at the layer where it could actually be broken: a shim that
+// filtered rows would turn a Comb it could not gather evidence for into
+// a Comb that is simply not in the answer.
+func TestServer_ClusterHealth_UnobservedNodeStillAppearsWithANonHealthyStatus(t *testing.T) {
+	client := &fakeClient{clusterHealthResp: &rpcpb.ClusterHealthResponse{
+		LocalNodeId: "manager-1",
+		Nodes: []*rpcpb.ClusterNodeHealth{
+			{NodeId: "comb-1", Status: "healthy", Dialed: true},
+			{
+				NodeId:      "comb-2",
+				Status:      "unknown",
+				Explanation: "comb-2 could not be reached; reachability was never established",
+				Observations: []*rpcpb.HealthObservation{{
+					Source: "peer_probe",
+					Detail: "dial tcp 10.90.0.97:17700: i/o timeout",
+				}},
+			},
+		},
+	}}
+	s := NewServer(client)
+
+	rec := doRequest(t, s, http.MethodGet, "/v1/health", nil)
+	var got clusterHealth
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decoding response: %v", err)
+	}
+	if len(got.Nodes) != 2 {
+		t.Fatalf("nodes = %d, want 2 - a Comb with no gathered evidence must still appear", len(got.Nodes))
+	}
+	unobserved := got.Nodes[1]
+	if unobserved.NodeID != "comb-2" {
+		t.Fatalf("second node = %q, want comb-2", unobserved.NodeID)
+	}
+	if unobserved.Status == "healthy" {
+		t.Error("the unreachable Comb reports healthy, want a non-healthy status")
+	}
+	if unobserved.Dialed {
+		t.Error("dialed = true, want false for a node that was never reached")
+	}
+	if len(unobserved.Observations) != 1 || unobserved.Observations[0].Source != "peer_probe" {
+		t.Errorf("observations = %+v, want the failed probe's stated reason carried through", unobserved.Observations)
+	}
+	if unobserved.Explanation == "" {
+		t.Error("explanation is empty, want the reason the verdict is unknown")
+	}
+}
+
+// TestServer_ClusterHealth_MembershipFailureIsReportedInBand pins the one
+// deliberate departure from this shim's usual error convention. Every
+// other in-band error is a rejection and becomes a 4xx; this one is not.
+// The RPC succeeded, the rows below it are real verdicts capped at
+// unknown, and discarding them to return a 400 would remove the only
+// evidence a caller has of what the colony looks like.
+func TestServer_ClusterHealth_MembershipFailureIsReportedInBand(t *testing.T) {
+	client := &fakeClient{clusterHealthResp: &rpcpb.ClusterHealthResponse{
+		LocalNodeId: "manager-1",
+		Error:       "raft membership could not be read from this node - every Comb's verdict is capped at unknown",
+		Nodes: []*rpcpb.ClusterNodeHealth{
+			{NodeId: "comb-1", Status: "unknown"},
+			{NodeId: "comb-2", Status: "unknown"},
+		},
+	}}
+	s := NewServer(client)
+
+	rec := doRequest(t, s, http.MethodGet, "/v1/health", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 - the call succeeded, the evidence is capped; body=%s", rec.Code, rec.Body.String())
+	}
+
+	var got clusterHealth
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decoding response: %v", err)
+	}
+	if !strings.Contains(got.Error, "raft membership could not be read") {
+		t.Errorf("error = %q, want managerd's shared cause preserved", got.Error)
+	}
+	if len(got.Nodes) != 2 {
+		t.Fatalf("nodes = %d, want 2 - the capped rows are the point of the response", len(got.Nodes))
+	}
+	for _, n := range got.Nodes {
+		if n.Status == "healthy" {
+			t.Errorf("%s reports healthy, want unknown while membership is unreadable", n.NodeID)
+		}
+	}
+}
+
+// TestServer_ClusterHealth_NoKnownCombsIsAnEmptyArray covers the shape a
+// client is most likely to get wrong. An absent row reads as "not
+// mentioned", which is exactly how a missing Comb becomes an invisible
+// one - so the list is always present, and empty is [] rather than null,
+// and no row in it claims to be healthy.
+func TestServer_ClusterHealth_NoKnownCombsIsAnEmptyArray(t *testing.T) {
+	client := &fakeClient{clusterHealthResp: &rpcpb.ClusterHealthResponse{LocalNodeId: "manager-1"}}
+	s := NewServer(client)
+
+	rec := doRequest(t, s, http.MethodGet, "/v1/health", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	if body := rec.Body.String(); !strings.Contains(body, `"nodes":[]`) {
+		t.Errorf("body = %s, want nodes serialized as [] so a client cannot read absence as health", body)
+	}
+	if body := rec.Body.String(); !strings.Contains(body, `"known_statuses":`) {
+		t.Errorf("body = %s, want the recognized-status list present even with no rows", body)
+	}
+}
+
+// TestServer_ClusterHealth_NodeWithNoEvidenceSerializesObservationsAsEmpty
+// pins the same []-not-null rule one level down: a Comb that was never
+// dialed has no observations, and that is a fact about evidence, not an
+// absence the client has to guess at.
+func TestServer_ClusterHealth_NodeWithNoEvidenceSerializesObservationsAsEmpty(t *testing.T) {
+	client := &fakeClient{clusterHealthResp: &rpcpb.ClusterHealthResponse{
+		Nodes: []*rpcpb.ClusterNodeHealth{{NodeId: "comb-2", Status: "unknown"}},
+	}}
+	s := NewServer(client)
+
+	rec := doRequest(t, s, http.MethodGet, "/v1/health", nil)
+	if body := rec.Body.String(); !strings.Contains(body, `"observations":[]`) {
+		t.Errorf("body = %s, want observations serialized as [] on a node with no evidence", body)
+	}
+}
+
+// TestServer_ClusterHealth_ForwardsAuthorizationHeaderToManagerd
+// confirms the new route rides the same auth path as every other one: the
+// caller's own key is forwarded as gRPC metadata and never intercepted,
+// so managerd's own auth decides, with no new concept introduced here.
+func TestServer_ClusterHealth_ForwardsAuthorizationHeaderToManagerd(t *testing.T) {
+	client := &fakeClient{clusterHealthResp: &rpcpb.ClusterHealthResponse{}}
+	s := NewServer(client)
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/health", nil)
+	req.Header.Set("Authorization", "Bearer apk_test123")
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	md, ok := metadata.FromOutgoingContext(client.lastClusterHealthCtx)
+	if !ok {
+		t.Fatal("no outgoing gRPC metadata attached to the context passed to managerd")
+	}
+	got := md.Get("authorization")
+	if len(got) != 1 || got[0] != "Bearer apk_test123" {
+		t.Errorf("forwarded authorization metadata = %v, want [Bearer apk_test123]", got)
+	}
+}
+
+// TestServer_ClusterHealth_TransportErrorIsBadGateway confirms a failure
+// to reach managerd takes the same writeUpstream path every other route
+// does, and is reported by the same rule - including the diagnosed
+// permanent-misconfiguration case, which must not read as a transient
+// gateway blip a caller retries forever.
+func TestServer_ClusterHealth_TransportErrorIsBadGateway(t *testing.T) {
+	client := &fakeClient{clusterHealthErr: errors.New("rpc error: code = Unavailable desc = connection refused")}
+	s := NewServer(client)
+
+	rec := doRequest(t, s, http.MethodGet, "/v1/health", nil)
+	if rec.Code != http.StatusBadGateway {
+		t.Fatalf("status = %d, want 502; body=%s", rec.Code, rec.Body.String())
+	}
+	var body errorBody
+	json.Unmarshal(rec.Body.Bytes(), &body)
+	if !strings.Contains(body.Error, "connection refused") {
+		t.Errorf("error = %q, want the underlying gRPC error preserved", body.Error)
+	}
+
+	diagnosed := &fakeClient{clusterHealthErr: errors.New(`rpc error: code = Unavailable desc = error reading server preface: EOF`)}
+	s2 := NewServer(diagnosed, WithDiagnosis(func(error) LinkDiagnosis {
+		return LinkDiagnosis{Class: "manager_tls_scheme_mismatch", Detail: "manager_tls=false but managerd speaks TLS", Permanent: true}
+	}))
+	rec2 := doRequest(t, s2, http.MethodGet, "/v1/health", nil)
+	if rec2.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500 for a permanent misconfiguration; body=%s", rec2.Code, rec2.Body.String())
+	}
+	var body2 errorBody
+	json.Unmarshal(rec2.Body.Bytes(), &body2)
+	if body2.ErrorClass != "manager_tls_scheme_mismatch" {
+		t.Errorf("error_class = %q, want manager_tls_scheme_mismatch", body2.ErrorClass)
 	}
 }
