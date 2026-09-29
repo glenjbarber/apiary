@@ -15,6 +15,7 @@
 package invariant
 
 import (
+	"strings"
 	"time"
 
 	"github.com/glenjbarber/apiary/internal/recovery"
@@ -76,36 +77,10 @@ type VoterReachability struct {
 	Reachability Reachability
 }
 
-// hastGapDetail is the disclosed, permanent reason both the HAST
-// dual-primary invariant and cell-recoverability's own sync half can
-// never resolve better than Unknown - live HAST sync/role status has
-// no RPC exposure anywhere in this codebase (internal/hast.Manager's
-// SetRole/Status only ever shell out to hastctl locally; the only
-// caller, internal/cluster/hast.go's ensureHASTResourceAndRole, re-reads
-// local status purely to self-verify a role change it just made).
-const hastGapDetail = "live HAST role/sync status has no RPC exposure anywhere in this codebase - a node cannot learn another node's current HAST role or sync state, only its own."
-
-// EvaluateHASTDualPrimary is always Unknown - one evaluation per
-// resource ID that has a replica configured - citing the permanent
-// no-RPC-exposure gap above. "No HAST resource has two writable
-// primaries" is structurally unverifiable in v1, never silently
-// promoted to a passing check.
-func EvaluateHASTDualPrimary(resourceIDs []string) []Evaluation {
-	evals := make([]Evaluation, 0, len(resourceIDs))
-	for _, id := range resourceIDs {
-		evals = append(evals, Evaluation{
-			Name:        "hast-dual-primary",
-			Scope:       id,
-			Result:      ResultUnknown,
-			Explanation: "Cannot confirm this resource has exactly one writable HAST primary.",
-			Evidence: []Evidence{{
-				Source: "internal/hast (no cluster-wide role RPC)",
-				Detail: hastGapDetail,
-			}},
-		})
-	}
-	return evals
-}
+// EvaluateHASTDualPrimary lives in hast.go: it resolves from the
+// per-node HAST role observations ADR-0119's
+// GetLocalHASTResourceStatus makes reachable, and reports Unknown -
+// never a pass - for either configured end that stayed silent.
 
 // EvaluateOwnershipGatedDeletion is a single, cluster-wide, static
 // True evaluation - unlike every other invariant in this package, it
@@ -295,44 +270,106 @@ type ResourceFact struct {
 	// unconfirmed case.
 	DestinationCapable       Result
 	DestinationCapableDetail string
+
+	// ReplicaSync is the configured replica node's OWN live HAST
+	// observation for this resource - the sync half of CODEX's
+	// conjunction, which ADR-0060 could never confirm because no
+	// observation of another node's HAST state was reachable. ADR-0119
+	// added it (GetLocalHASTResourceStatus) and ADR-0121 already
+	// consumed the identical fact. The zero value is honest, not
+	// optimistic: Attempted false means no query was made, which is
+	// silence and can never satisfy the conjunction.
+	ReplicaSync HASTObservation
 }
 
-// EvaluateCellRecoverability never returns ResultTrue: CODEX's own
-// definition is conjunctive - "a cell called recoverable has A
-// SYNCHRONIZED REPLICA AND a capable destination" - and live HAST sync
-// status is never confirmable (the same gap EvaluateHASTDualPrimary
-// names). A resource whose destination is confirmed capable is still
-// only Unknown overall, never True, because the sync half of the
-// conjunction was never actually confirmed - collapsing that to True
-// would be exactly the "missing observation treated as a passed safety
-// check" CODEX's own text warns against.
+// EvaluateCellRecoverability answers CODEX's own conjunctive
+// definition - "a cell called recoverable has A SYNCHRONIZED REPLICA
+// AND a capable destination" - from both halves now that the first is
+// observable.
+//
+// True requires BOTH: the replica node's own hastd reported a real
+// role with status "complete" (readHAST's hastInSync, ADR-0121's
+// replica_in_sync), and the destination was separately confirmed
+// capable. False only for a confirmed-incapable destination, as
+// before. Everything else - a replica that could not be read, a role
+// this build does not recognize, an absent or "unknown" status, a
+// jail (no capability signal exists for jails anywhere) - is Unknown.
+// Collapsing any of those into True is exactly the "missing
+// observation treated as a passed safety check" CODEX's own text warns
+// against, and is why the conjunction is evaluated as a conjunction
+// rather than either half alone.
+//
+// No explanation here claims the Cell will recover: a sync
+// observation is a point-in-time fact about the replica's hastd
+// worker, and says nothing about whether that node stays reachable or
+// whether the Cell can be recreated from the replica (ADR-0121's own
+// standing constraint).
 func EvaluateCellRecoverability(facts []ResourceFact) []Evaluation {
 	now := time.Now()
 	evals := make([]Evaluation, 0, len(facts))
 	for _, f := range facts {
 		eval := Evaluation{Name: "cell-recoverability", Scope: f.ID}
-		syncEvidence := Evidence{
-			Source:     "internal/hast (no cluster-wide sync-status RPC)",
-			Detail:     hastGapDetail,
-			ObservedAt: time.Time{}, // never observed - the point of this evidence entry
-		}
+		syncEvidence := replicaSyncEvidence(f, now)
 		destEvidence := Evidence{
 			Source:     "HostStats for " + f.ReplicaNodeID,
 			Detail:     f.DestinationCapableDetail,
 			ObservedAt: now,
 		}
+		syncVerdict := readHAST(f.ReplicaSync)
 		switch {
 		case f.DestinationCapable == ResultFalse:
 			eval.Result = ResultFalse
 			eval.Explanation = f.Name + " (" + f.Kind + ") is not recoverable: its replica target " + f.ReplicaNodeID + " is confirmed incapable of running it."
-		default: // ResultTrue or ResultUnknown for DestinationCapable - overall never True
+		case f.DestinationCapable == ResultTrue && syncVerdict == hastInSync:
+			eval.Result = ResultTrue
+			eval.Explanation = f.Name + " (" + f.Kind + ") has a synchronized HAST replica on " + f.ReplicaNodeID + " (its own hastd reported " + roleSummary(f.ReplicaSync) + " with status " + quoted(strings.TrimSpace(f.ReplicaSync.Status)) + ", and that node is separately confirmed capable) - both halves of the conjunction were actually confirmed. This is a point-in-time observation of one node's hastd, not a guarantee: it does not prove the replica stays reachable, that the owning disk survives, or that the Cell can be recreated from the replica."
+		case f.DestinationCapable == ResultTrue && syncVerdict == hastOutOfSync:
 			eval.Result = ResultUnknown
-			eval.Explanation = f.Name + " (" + f.Kind + ") cannot be confirmed recoverable: its replica's sync status is never verifiable in v1, regardless of destination capability."
+			eval.Explanation = f.Name + " (" + f.Kind + ") has a capable replica target, but its replica on " + f.ReplicaNodeID + " is confirmed NOT usable as-is - treat it as having no working redundancy until an operator resolves it."
+		default:
+			eval.Result = ResultUnknown
+			eval.Explanation = f.Name + " (" + f.Kind + ") cannot be confirmed recoverable: at least one half of the conjunction is unconfirmed - " + unverifiedHalves(f, syncVerdict) + "."
 		}
 		eval.Evidence = []Evidence{destEvidence, syncEvidence}
 		evals = append(evals, eval)
 	}
 	return evals
+}
+
+// unverifiedHalves names, in the caller's words, which half of the
+// conjunction is missing - so an Unknown never reads as though both
+// halves were checked and one merely came out badly.
+func unverifiedHalves(f ResourceFact, syncVerdict hastVerdict) string {
+	missing := make([]string, 0, 2)
+	if f.DestinationCapable != ResultTrue {
+		missing = append(missing, "destination capability on "+f.ReplicaNodeID+" is unconfirmed ("+f.DestinationCapableDetail+")")
+	}
+	if syncVerdict != hastInSync {
+		switch {
+		case !f.ReplicaSync.Attempted:
+			missing = append(missing, "no live HAST status was queried for the replica on "+f.ReplicaNodeID)
+		case !f.ReplicaSync.Observed:
+			missing = append(missing, "the replica on "+f.ReplicaNodeID+" did not answer: "+nonEmpty(f.ReplicaSync.Detail, "no reason reported"))
+		default:
+			missing = append(missing, "the replica on "+f.ReplicaNodeID+" gave no usable synchronization statement ("+hastVerdictReason(f.ReplicaSync, syncVerdict)+")")
+		}
+	}
+	return strings.Join(missing, "; ")
+}
+
+// hastVerdictReason renders why a readable observation did not read as
+// in-sync, in the same "only a positive statement is badness" language
+// ADR-0121 uses.
+func hastVerdictReason(o HASTObservation, v hastVerdict) string {
+	switch v {
+	case hastOutOfSync:
+		if strings.EqualFold(strings.TrimSpace(o.Role), hastRoleInit) {
+			return "hastd reports role \"init\", so the resource was never initialized there"
+		}
+		return "hastd reports role " + roleSummary(o) + " with status " + quoted(strings.TrimSpace(o.Status))
+	default:
+		return "status " + quoted(strings.TrimSpace(o.Status)) + " or role " + roleSummary(o) + " is not a statement this build can act on"
+	}
 }
 
 // BridgeObservation is one node's own reported bridge state for one

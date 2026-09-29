@@ -91,7 +91,9 @@ func TestEvaluateQuorumTolerance_LeaderVoterGetsDowngrade(t *testing.T) {
 	}
 }
 
-func TestEvaluateHASTDualPrimary_AlwaysUnknown(t *testing.T) {
+func TestEvaluateHASTDualPrimary_UnknownWithoutObservations(t *testing.T) {
+	// No live role observation for either end: the answer is Unknown,
+	// because silence is never folded into "not a primary".
 	evals := EvaluateHASTDualPrimary([]string{"vm-1", "jail-2"})
 	if len(evals) != 2 {
 		t.Fatalf("len(evals) = %d, want 2", len(evals))
@@ -106,6 +108,54 @@ func TestEvaluateHASTDualPrimary_AlwaysUnknown(t *testing.T) {
 	}
 }
 
+func TestEvaluateHASTDualPrimary_FalseWhenBothEndsReportPrimary(t *testing.T) {
+	evals := EvaluateHASTDualPrimary(nil,
+		HASTPrimarySpec{
+			ID: "vm-1", Name: "web-1", Kind: "vm", OwnerNodeID: "node-a", ReplicaNodeID: "node-b",
+			Owner:   HASTObservation{NodeID: "node-a", Attempted: true, Observed: true, Role: "primary", Status: "complete"},
+			Replica: HASTObservation{NodeID: "node-b", Attempted: true, Observed: true, Role: "primary", Status: "complete"},
+		})
+	if len(evals) != 1 || evals[0].Result != ResultFalse {
+		t.Fatalf("evals = %+v, want one False evaluation for a dual primary", evals)
+	}
+}
+
+func TestEvaluateHASTDualPrimary_TrueWhenExactlyOneEndIsPrimary(t *testing.T) {
+	evals := EvaluateHASTDualPrimary(nil,
+		HASTPrimarySpec{
+			ID: "vm-1", Name: "web-1", Kind: "vm", OwnerNodeID: "node-a", ReplicaNodeID: "node-b",
+			Owner:   HASTObservation{NodeID: "node-a", Attempted: true, Observed: true, Role: "primary", Status: "complete"},
+			Replica: HASTObservation{NodeID: "node-b", Attempted: true, Observed: true, Role: "secondary", Status: "complete"},
+		})
+	if len(evals) != 1 || evals[0].Result != ResultTrue {
+		t.Fatalf("evals = %+v, want one True evaluation when exactly one end is the writable primary", evals)
+	}
+}
+
+func TestEvaluateHASTDualPrimary_UnknownWhenAnEndIsSilent(t *testing.T) {
+	// A missing observation is never treated as a non-primary role, so
+	// it cannot produce the True that "exactly one primary" requires.
+	evals := EvaluateHASTDualPrimary(nil,
+		HASTPrimarySpec{
+			ID: "vm-1", Name: "web-1", Kind: "vm", OwnerNodeID: "node-a", ReplicaNodeID: "node-b",
+			Owner: HASTObservation{NodeID: "node-a", Attempted: true, Observed: true, Role: "primary", Status: "complete"},
+		})
+	if len(evals) != 1 || evals[0].Result != ResultUnknown {
+		t.Fatalf("evals = %+v, want Unknown when the replica never reported a role", evals)
+	}
+}
+
+func TestEvaluateHASTDualPrimary_UnknownWhenOneNodeIsBothEnds(t *testing.T) {
+	evals := EvaluateHASTDualPrimary(nil,
+		HASTPrimarySpec{
+			ID: "vm-1", Name: "web-1", Kind: "vm", OwnerNodeID: "node-a", ReplicaNodeID: "node-a",
+			Owner: HASTObservation{NodeID: "node-a", Attempted: true, Observed: true, Role: "primary", Status: "complete"},
+		})
+	if len(evals) != 1 || evals[0].Result != ResultUnknown {
+		t.Fatalf("evals = %+v, want Unknown when one node is configured as both ends", evals)
+	}
+}
+
 func TestEvaluateCellRecoverability_FalseForIncapableDestination(t *testing.T) {
 	facts := []ResourceFact{
 		{ID: "vm-1", Name: "web-1", Kind: "vm", ReplicaNodeID: "node-b", DestinationCapable: ResultFalse, DestinationCapableDetail: "node-b: bhyve not configured"},
@@ -116,13 +166,64 @@ func TestEvaluateCellRecoverability_FalseForIncapableDestination(t *testing.T) {
 	}
 }
 
-func TestEvaluateCellRecoverability_NeverTrueEvenWhenDestinationCapable(t *testing.T) {
+func TestEvaluateCellRecoverability_CapableDestinationAloneIsNeverTrue(t *testing.T) {
+	// A capable destination is one half of the conjunction. With no
+	// live HAST observation for the replica - the zero value, which is
+	// silence rather than a passed check - the whole is Unknown.
 	facts := []ResourceFact{
 		{ID: "vm-1", Name: "web-1", Kind: "vm", ReplicaNodeID: "node-b", DestinationCapable: ResultTrue, DestinationCapableDetail: "node-b: bhyve configured"},
 	}
 	evals := EvaluateCellRecoverability(facts)
 	if len(evals) != 1 || evals[0].Result != ResultUnknown {
-		t.Fatalf("evals = %+v, want Unknown (never True) even for a capable destination", evals)
+		t.Fatalf("evals = %+v, want Unknown - a capable destination alone never satisfies the conjunction", evals)
+	}
+}
+
+func TestEvaluateCellRecoverability_TrueWhenBothHalvesConfirmed(t *testing.T) {
+	facts := []ResourceFact{{
+		ID: "vm-1", Name: "web-1", Kind: "vm", ReplicaNodeID: "node-b",
+		DestinationCapable: ResultTrue, DestinationCapableDetail: "node-b: bhyve configured",
+		ReplicaSync: HASTObservation{
+			NodeID: "node-b", Attempted: true, Observed: true,
+			Role: "secondary", Status: "complete", Replication: "load-balanced",
+		},
+	}}
+	evals := EvaluateCellRecoverability(facts)
+	if len(evals) != 1 || evals[0].Result != ResultTrue {
+		t.Fatalf("evals = %+v, want True when the replica is in sync and the destination is capable", evals)
+	}
+}
+
+func TestEvaluateCellRecoverability_UnknownWhenReplicaConfirmedOutOfSync(t *testing.T) {
+	// A confirmed "init" role is a positive statement that the replica
+	// is not usable as-is, but it is not a statement that the Cell is
+	// unrecoverable - so the conjunction is unconfirmed, not False.
+	facts := []ResourceFact{{
+		ID: "vm-1", Name: "web-1", Kind: "vm", ReplicaNodeID: "node-b",
+		DestinationCapable: ResultTrue, DestinationCapableDetail: "node-b: bhyve configured",
+		ReplicaSync: HASTObservation{
+			NodeID: "node-b", Attempted: true, Observed: true, Role: "init",
+		},
+	}}
+	evals := EvaluateCellRecoverability(facts)
+	if len(evals) != 1 || evals[0].Result != ResultUnknown {
+		t.Fatalf("evals = %+v, want Unknown when the replica is confirmed not usable as-is", evals)
+	}
+}
+
+func TestEvaluateCellRecoverability_UnknownForUnrecognisedHASTRole(t *testing.T) {
+	// A role this build does not recognize is Apiary not understanding
+	// hastd, which is silence rather than a confirmed outage.
+	facts := []ResourceFact{{
+		ID: "vm-1", Name: "web-1", Kind: "vm", ReplicaNodeID: "node-b",
+		DestinationCapable: ResultTrue, DestinationCapableDetail: "node-b: bhyve configured",
+		ReplicaSync: HASTObservation{
+			NodeID: "node-b", Attempted: true, Observed: true, Role: "promoted", Status: "complete",
+		},
+	}}
+	evals := EvaluateCellRecoverability(facts)
+	if len(evals) != 1 || evals[0].Result != ResultUnknown {
+		t.Fatalf("evals = %+v, want Unknown for a role this build does not recognize", evals)
 	}
 }
 
