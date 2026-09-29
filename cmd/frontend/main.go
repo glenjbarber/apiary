@@ -19,6 +19,7 @@ import (
 	"github.com/glenjbarber/apiary/internal/httpserver"
 	"github.com/glenjbarber/apiary/internal/loginconfig"
 	"github.com/glenjbarber/apiary/internal/manager"
+	"github.com/glenjbarber/apiary/internal/managerlink"
 	"github.com/glenjbarber/apiary/internal/tlsdial"
 )
 
@@ -28,7 +29,24 @@ import (
 const (
 	statusRetryAttempts = 5
 	statusRetryDelay    = time.Second
+
+	// managerCheckGrace bounds how long startup waits for managerd to
+	// answer the transport-scheme check before serving anyway. Same
+	// value, and the same reasoning, as cmd/restshimd: long enough to
+	// cover managerd starting a moment later (the two are co-located
+	// and either can win the race), short enough that a frontend
+	// restart never hangs on a managerd that is not coming back. A
+	// managerd that does answer - the normal case - is one loopback
+	// connect and is done in well under a millisecond.
+	managerCheckGrace = 5 * time.Second
 )
+
+// verifier is the startup check cmd/frontend depends on, as an interface
+// so the decision it makes - refuse to start, or start degraded and say
+// so - can be tested without a live managerd and without a real socket.
+type verifier interface {
+	Verify(ctx context.Context, grace time.Duration) error
+}
 
 // apiKeyCredentials attaches an API key to every outgoing managerd call
 // as gRPC metadata, matching the "authorization: Bearer <key>"
@@ -153,6 +171,26 @@ func run() error {
 	}
 	defer conn.Close()
 
+	// grpc.NewClient is lazy - it resolves the target and returns a
+	// ClientConn without ever opening a socket - so a disagreement
+	// between this file's manager_tls setting and what managerd actually
+	// speaks cannot possibly show up at the construction above. Left
+	// unchecked it surfaces on the very first RPC below, as "error
+	// reading server preface: EOF", with nothing in either daemon's log
+	// saying the two config files disagreed. Ask managerd what it speaks
+	// before authenticating against it, and long before serving anything.
+	link := managerlink.New(managerlink.Config{
+		Addr:        cfg.ManagerAddr,
+		UseTLS:      cfg.ManagerTLS,
+		CAFile:      cfg.ManagerTLSCA,
+		ServerName:  cfg.ManagerTLSServerName,
+		ProcessName: "frontend",
+		ConfigPath:  frontendconfig.DefaultPath,
+	})
+	if err := checkManagerLink(context.Background(), link, managerCheckGrace, log.Printf); err != nil {
+		return err
+	}
+
 	// The persisted role map (see internal/loginconfig, wired to the
 	// Users page's Admin-only add/change-role/remove actions) is the
 	// sole source of who may log in - physical, per-node state, never
@@ -237,4 +275,29 @@ func run() error {
 		return httpSrv.ListenAndServeTLS(cfg.TLSCert, cfg.TLSKey)
 	}
 	return httpSrv.ListenAndServe()
+}
+
+// checkManagerLink turns the startup check's answer into a decision.
+//
+// A permanent failure - the two files disagree about the transport
+// scheme, or the certificate does not verify - refuses to start. Serving
+// anyway would mean serving 100% failures, and worse, a caller retrying a
+// 500 that no retry can fix. Everything else (managerd not up yet, a PF
+// rule in the way) is not evidence of a misconfiguration, so it starts
+// degraded and says so loudly: the TLS setting is UNVERIFIED, every call
+// will fail until managerd answers, and neither of those is a statement
+// about whether the config is right.
+func checkManagerLink(ctx context.Context, v verifier, grace time.Duration, logf func(string, ...any)) error {
+	err := v.Verify(ctx, grace)
+	if err == nil {
+		return nil
+	}
+	if managerlink.IsPermanent(err) {
+		return err
+	}
+	logf("frontend: WARNING: %v", err)
+	logf("frontend: WARNING: starting in a DEGRADED state: every call to managerd will fail until it is " +
+		"reachable, and the manager_tls setting is UNVERIFIED until then - this is not a statement that the " +
+		"config is wrong, only that nothing has been able to check it")
+	return nil
 }
