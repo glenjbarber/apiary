@@ -166,7 +166,7 @@
               </label>
             </div>
             <div class="form-grid">
-              <label>Clone source VM <span class="field-help" id="clone-why">Only VMs with at least one snapshot are listed. A clone is a plain `zfs clone`: it is local to one node and never fetched across nodes, so a source on another Comb than the owner above cannot be used. Mutually exclusive with a base image and with a replica node.</span>
+              <label>Clone source VM <span class="field-help" id="clone-why">Only VMs with at least one snapshot are listed. A clone is a plain `zfs clone` of a ZFS snapshot, and a source on another Comb than the owner above is fetched from that Comb first, the same way a base image this node lacks is. Mutually exclusive with a base image and with a replica node.</span>
                 <select name="clone_source_vm_id" id="clone-source-vm"{{if $jail}} disabled{{end}} title="An existing VM to clone this VM's disk from - only VMs with at least one snapshot are listed.">
                   <option value="">None</option>
                   {{range .CloneSources}}<option value="{{.VMID}}" data-node-id="{{.NodeID}}">{{.VMID}}{{if .VMName}} ({{.VMName}}){{end}} - on {{.NodeID}}</option>{{end}}
@@ -690,8 +690,9 @@
     //     `zfs clone` of a ZFS dataset) can never apply to it;
     //   - a clone already carries the source snapshot's contents, so
     //     a base image could never be copied on top of it;
-    //   - a clone is a local operation, so its source VM has to live on
-    //     the same Comb as the VM being created.
+    //   - a clone is local in the sense that the `zfs clone` itself runs
+    //     on one node; a source snapshot on another Comb is transferred
+    //     here first, so it is a fetch and not a conflict.
     // Install media is deliberately NOT excluded by any of these: it
     // is attached on top of whatever the disk starts as, which is how
     // you install onto a blank or freshly seeded disk.
@@ -726,10 +727,11 @@
       setText(storageCue, notes.join(' '));
     }
 
-    // The cascading snapshot dropdown, plus the node-locality warning:
-    // a source VM on another Comb cannot be cloned from, because a VM
-    // snapshot is local to the node it was taken on and `zfs clone`
-    // never fetches across nodes.
+    // The cascading snapshot dropdown, plus the cross-node fetch cue:
+    // a source VM on another Comb does not block the choice - its
+    // checkpoint is `zfs send`ed here by the Comb that holds it and
+    // cloned from locally, exactly the way a base image this node
+    // lacks is fetched from a peer.
     function refreshSnapshots() {
       if (!sourceSelect || !snapshotSelect) return;
       var owner = selectedValue(ownerNode);
@@ -748,17 +750,12 @@
       source.snapshots.forEach(function(name) {
         var opt = document.createElement('option');
         opt.value = name;
-        var label = name;
-        if (crossNode) {
-          label += ' - unavailable: ' + source.node_id + ' is not the owner node, and a VM snapshot is local to one node';
-        }
-        opt.text = label;
-        opt.disabled = crossNode;
+        opt.text = crossNode ? name + ' - will be fetched from ' + source.node_id : name;
         snapshotSelect.appendChild(opt);
       });
       if (crossNode) {
         setText(storageCue, 'Clone source ' + sourceSelect.value + ' lives on ' + source.node_id +
-          ', not the owner node ' + owner + ': a VM snapshot is local to one node and `zfs clone` runs on one node only, with no cross-node fetch.');
+          ', not the owner node ' + owner + ': its snapshot will be transferred here and the clone made locally.');
       }
     }
 

@@ -312,18 +312,6 @@ func TestServer_CreateVM_RejectsUnsupportedCombinations(t *testing.T) {
 			contains: "VNET is a jail field",
 		},
 		{
-			// A VM snapshot is local to one node; `zfs clone` never
-			// fetches across nodes, so a cross-node clone cannot work.
-			name: "clone source on another node",
-			form: url.Values{
-				"id":                  {"vm-1"},
-				"node_id":             {"node-a"},
-				"clone_source_vm_id":  {"vm-9"},
-				"clone_snapshot_name": {"nightly"},
-			},
-			contains: "node-local",
-		},
-		{
 			name: "replica node is the owner node",
 			form: url.Values{
 				"id":              {"vm-1"},
@@ -489,6 +477,42 @@ func TestServer_CreateJail_BaseArchiveWithReplicaIsAllowed(t *testing.T) {
 // reconciler genuinely supports, including the ones the old form
 // accepted and this flow now also offers (a clone, a base image, a
 // replica, install media on top of a base image).
+// TestServer_CreateVM_CloneSourceOnAnotherCombIsAccepted is the direct
+// counterpart of the cross-node clone refusal this file used to
+// assert. A source VM on a different Comb is no longer a rejected
+// combination: internal/cluster's reconciler fetches the snapshot from
+// the Comb that holds it (a real `zfs send`/`zfs receive` between the
+// two managerds, ADR-0090's cross-node follow-up) and clones from it
+// locally, the same way a base image this node lacks is fetched from a
+// peer. The form must therefore forward the combined
+// clone_from_snapshot rather than refuse.
+func TestServer_CreateVM_CloneSourceOnAnotherCombIsAccepted(t *testing.T) {
+	client := &fakeClient{
+		createResp: &rpcpb.CreateVMResponse{Vm: &rpcpb.VMDefinition{Id: "vm-1"}},
+		listResp:   &rpcpb.ListVMsResponse{Vms: []*rpcpb.VMDefinition{{Id: "vm-9", NodeId: "node-z"}}},
+	}
+	s := newTestServer(t, client)
+	rec := postCreate(t, s, "/vms", url.Values{
+		"id":                  {"vm-1"},
+		"kind":                {"vm"},
+		"node_id":             {"node-a"},
+		"clone_source_vm_id":  {"vm-9"},
+		"clone_snapshot_name": {"nightly"},
+	})
+	if got := rec.Header().Get("HX-Redirect"); got != "/vms" {
+		t.Fatalf("a cross-Comb clone source was refused: HX-Redirect = %q, body = %s", got, rec.Body.String())
+	}
+	if client.lastCreateReq == nil {
+		t.Fatal("CreateVM should have been called")
+	}
+	if got := client.lastCreateReq.GetVm().GetCloneFromSnapshot(); got != "vm-9@nightly" {
+		t.Errorf("forwarded clone_from_snapshot = %q, want %q", got, "vm-9@nightly")
+	}
+}
+
+// TestServer_CreateVM_ValidCombinationStillWorks guards the whole
+// accept path: a supported combination is still forwarded, with every
+// field preserved.
 func TestServer_CreateVM_ValidCombinationStillWorks(t *testing.T) {
 	client := &fakeClient{createResp: &rpcpb.CreateVMResponse{Vm: &rpcpb.VMDefinition{Id: "vm-1"}}}
 	s := newTestServer(t, client)

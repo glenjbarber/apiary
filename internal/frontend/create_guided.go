@@ -113,7 +113,7 @@ type guidedPageView struct {
 // one restates.
 func (s *Server) validateGuidedCreateVM(r *http.Request) error {
 	form := vmCreateFormFromRequest(r)
-	return form.validateVMCreateForm(s.cloneSourceNodeID(r, form.CloneSourceVMID, form.CloneSnapshotName))
+	return form.validateVMCreateForm()
 }
 
 // validateGuidedCreateJail is validateGuidedCreateVM for POST /jails.
