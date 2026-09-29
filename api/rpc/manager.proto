@@ -2793,9 +2793,13 @@ message SimulateNodeFailureResponse {
   repeated ReplicaBackedImpact replica_backed_resources = 5;
   repeated ImageAvailabilityImpact image_availability = 6;
 
-  // relevant_claims are unexpired claims from the reporting Hive's local
-  // register, scoped to the Colony or the simulated Hive. They provide
-  // operator context only and do not change any simulator verdict.
+  // relevant_claims are claims from the reporting Hive's local
+  // register, scoped to the Colony or the simulated Hive, INCLUDING
+  // expired ones - an expired claim is reported with state "stale"
+  // rather than dropped, so a simulation reading this does not lose
+  // the fact that it is resting on something no longer current. They
+  // provide operator context only and do not change any simulator
+  // verdict.
   repeated AssumptionClaim relevant_claims = 7;
 }
 

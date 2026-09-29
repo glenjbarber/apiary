@@ -146,14 +146,14 @@
 
   <div class="panel">
     <h3>Local Assumption Register context</h3>
-    <p class="muted">Unexpired claims from the reporting Comb whose scope is this Comb or the Colony. They are operator context only and do not change this simulation's verdicts.</p>
+    <p class="muted">Local claims from the reporting Comb whose scope is this Comb or the Colony, <strong>expired ones included</strong> - an expired claim is reported as Stale rather than hidden, so a conclusion resting on one is visibly resting on something no longer current. They are operator context only and do not change this simulation's verdicts.</p>
     <table>
-      <thead><tr><th>ID</th><th>Statement</th><th>Owner</th><th>Scope</th><th>Evidence</th><th>Expires</th></tr></thead>
+      <thead><tr><th>ID</th><th>Statement</th><th>Owner</th><th>Scope</th><th>Evidence</th><th>State</th><th>Expires</th></tr></thead>
       <tbody>
         {{range .SimulateClaims}}
-        <tr><td>{{.ID}}</td><td>{{.Statement}}</td><td>{{.Owner}}</td><td>{{.Scope}}</td><td>{{.Evidence}}</td><td>{{.ExpiresAt}}</td></tr>
+        <tr><td>{{.ID}}</td><td>{{.Statement}}{{if .ConsequenceIfFalse}}<br><span class="muted">If false: {{.ConsequenceIfFalse}}</span>{{end}}</td><td>{{.Owner}}</td><td>{{.Scope}}</td><td>{{.Evidence}}<br><span class="muted">Recorded: {{.EvidenceStatusLabel}} &middot; last verified: {{.LastVerified}}</span></td><td class="claim-state" data-state="{{.State}}"><span class="badge {{.StateBadge}}">{{.StateShort}}</span><br>{{.StateLabel}}<br><span class="muted">{{.StateDetail}}</span></td><td>{{if .Expired}}<span class="badge stale">expired</span> {{end}}{{.ExpiresAt}}</td></tr>
         {{else}}
-        <tr><td colspan="6"><em>No applicable local Register claims.</em></td></tr>
+        <tr><td colspan="7"><em>No applicable local Register claims.</em></td></tr>
         {{end}}
       </tbody>
     </table>

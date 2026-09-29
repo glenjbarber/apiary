@@ -13606,9 +13606,13 @@ type SimulateNodeFailureResponse struct {
 	OwnedResources         []*OwnedResourceImpact     `protobuf:"bytes,4,rep,name=owned_resources,json=ownedResources,proto3" json:"owned_resources,omitempty"`
 	ReplicaBackedResources []*ReplicaBackedImpact     `protobuf:"bytes,5,rep,name=replica_backed_resources,json=replicaBackedResources,proto3" json:"replica_backed_resources,omitempty"`
 	ImageAvailability      []*ImageAvailabilityImpact `protobuf:"bytes,6,rep,name=image_availability,json=imageAvailability,proto3" json:"image_availability,omitempty"`
-	// relevant_claims are unexpired claims from the reporting Hive's local
-	// register, scoped to the Colony or the simulated Hive. They provide
-	// operator context only and do not change any simulator verdict.
+	// relevant_claims are claims from the reporting Hive's local
+	// register, scoped to the Colony or the simulated Hive, INCLUDING
+	// expired ones - an expired claim is reported with state "stale"
+	// rather than dropped, so a simulation reading this does not lose
+	// the fact that it is resting on something no longer current. They
+	// provide operator context only and do not change any simulator
+	// verdict.
 	RelevantClaims []*AssumptionClaim `protobuf:"bytes,7,rep,name=relevant_claims,json=relevantClaims,proto3" json:"relevant_claims,omitempty"`
 	unknownFields  protoimpl.UnknownFields
 	sizeCache      protoimpl.SizeCache
