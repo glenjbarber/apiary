@@ -81,6 +81,15 @@ func operatorAuthorizedApprovalForTest(t *testing.T, client rpcpb.ManagerService
 
 	writeAuthorizationEntryForTest(t, srv.joinAuthorizationFile(), target.GetNodeId(), target.GetTlsCertFingerprint())
 
+	// ADR-0147 Part 2: the two-way handshake has to have completed
+	// before any approval is possible, and this helper is what most
+	// approval tests call, so stage one happens HERE rather than in
+	// each of them. The second PIN is then carried on both authorizing
+	// calls, and read out of replicated state because the RPC layer
+	// deliberately never returns it to the target - which is the
+	// property being relied on, not a shortcut around it.
+	secondPin := completeJoinHandshakeForTest(t, srv, requestID)
+
 	firstCtx, cancelFirst := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancelFirst()
 	if len(bootstrap) > 0 && bootstrap[0] != "" {
@@ -110,7 +119,7 @@ func operatorAuthorizedApprovalForTest(t *testing.T, client rpcpb.ManagerService
 	// complete: one authorization is not two.
 	actOne, err := client.ApproveJoinRequest(metadata.NewOutgoingContext(
 		context.Background(), metadata.Pairs("authorization", "Bearer "+keyOne.GetRawKey())),
-		&rpcpb.ApproveJoinRequestRequest{RequestId: requestID, ConfirmPhrase: approveJoinRequestConfirmPhrase})
+		&rpcpb.ApproveJoinRequestRequest{RequestId: requestID, ConfirmPhrase: approveJoinRequestConfirmPhrase, SecondPin: secondPin})
 	if err != nil {
 		t.Fatalf("first authorizing ApproveJoinRequest() error: %v", err)
 	}
@@ -131,6 +140,7 @@ func operatorAuthorizedApprovalForTest(t *testing.T, client rpcpb.ManagerService
 		&rpcpb.ApproveJoinRequestRequest{
 			RequestId:       requestID,
 			ConfirmPhrase:   approveJoinRequestConfirmPhrase,
+			SecondPin:       secondPin,
 			ApprovingNodeId: secondCombNodeID,
 		})
 	if err != nil {

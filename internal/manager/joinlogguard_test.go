@@ -77,8 +77,18 @@ func seedPendingJoinRequest(t *testing.T, srv *Server, requestID, nodeID, raftBi
 	create := &internalpb.Command{Op: &internalpb.Command_CreatePendingJoinRequest{
 		CreatePendingJoinRequest: &internalpb.CreatePendingJoinRequest{
 			Request: &internalpb.PendingJoinRequest{
-				RequestId: requestID, NodeId: nodeID, RaftBindAddress: raftBindAddress, Code: "123456",
-				RequestedAtUnix: time.Now().Unix(), ExpiresAtUnix: time.Now().Add(time.Hour).Unix(),
+				RequestId: requestID, NodeId: nodeID, RaftBindAddress: raftBindAddress,
+				// ADR-0147 Part 2: seeded by hand, so it carries what
+				// RequestJoinColony would have put there - the joiner's
+				// own first code, its advertised fingerprints, and the
+				// INTRODUCED stage. Without them this is the request the
+				// flow exists to refuse, and the join-log guardrail
+				// under test would never be reached.
+				Code:                   testIntroductionCode,
+				Stage:                  internalpb.JoinRequestStage_JOIN_REQUEST_STAGE_INTRODUCED,
+				AdvertisedFingerprints: testCombFingerprintList(t),
+				RequestedAtUnix:        time.Now().Unix(),
+				ExpiresAtUnix:          time.Now().Add(time.Hour).Unix(),
 				Status:                 internalpb.JoinRequestStatus_JOIN_REQUEST_STATUS_PENDING,
 				JoinerLogStateObserved: observed,
 				JoinerLastLogIndex:     lastIndex,
@@ -217,10 +227,10 @@ func TestIntegration_RequestJoinColony_NonEmptyLogRefusedAtRequestTime(t *testin
 	defer cancel()
 	openColonyJoinWindowForTest(t, client)
 
-	resp, err := client.RequestJoinColony(ctx, &rpcpb.RequestJoinColonyRequest{
+	resp, err := client.RequestJoinColony(ctx, withIntroduction(&rpcpb.RequestJoinColonyRequest{
 		NodeId: "node05", RaftBindAddress: "10.62.0.5:17600",
 		JoinerLogStateObserved: true, JoinerLastLogIndex: 12,
-	})
+	}, t))
 	if err != nil {
 		t.Fatalf("RequestJoinColony() error: %v", err)
 	}
@@ -246,10 +256,10 @@ func TestIntegration_RequestJoinColony_ObservedEmptyLogRecordsEvidence(t *testin
 	defer cancel()
 	openColonyJoinWindowForTest(t, client)
 
-	resp, err := client.RequestJoinColony(ctx, &rpcpb.RequestJoinColonyRequest{
+	resp, err := client.RequestJoinColony(ctx, withIntroduction(&rpcpb.RequestJoinColonyRequest{
 		NodeId: "node06", RaftBindAddress: "10.62.0.5:17600",
 		JoinerLogStateObserved: true,
-	})
+	}, t))
 	if err != nil {
 		t.Fatalf("RequestJoinColony() error: %v", err)
 	}

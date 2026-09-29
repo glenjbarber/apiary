@@ -202,6 +202,12 @@ func (f *FSM) Apply(log *raft.Log) interface{} {
 		return f.applyCancelPendingJoinRequest(log.Index, op.CancelPendingJoinRequest.GetRequestId())
 	case *internalpb.Command_PurgeJoinRequest:
 		return f.applyPurgeJoinRequest(log.Index, op.PurgeJoinRequest.GetRequestId())
+	case *internalpb.Command_VerifyJoinIntroduction:
+		return f.applyVerifyJoinIntroduction(log.Index, op.VerifyJoinIntroduction)
+	case *internalpb.Command_ReissueJoinSecondPin:
+		return f.applyReissueJoinSecondPin(log.Index, op.ReissueJoinSecondPin)
+	case *internalpb.Command_ConsumeJoinSecondPin:
+		return f.applyConsumeJoinSecondPin(log.Index, op.ConsumeJoinSecondPin)
 	case *internalpb.Command_AcquireRestartLease:
 		return f.applyAcquireRestartLease(log.Index, op.AcquireRestartLease)
 	case *internalpb.Command_RecordRestartCompleted:
@@ -223,7 +229,7 @@ func (f *FSM) Apply(log *raft.Log) interface{} {
 	case *internalpb.Command_SetTrustedPeerVoter:
 		return f.applySetTrustedPeerVoter(log.Index, op.SetTrustedPeerVoter)
 	case *internalpb.Command_UnpinTrustedPeer:
-		return f.applyUnpinTrustedPeer(log.Index, op.UnpinTrustedPeer.GetNodeId())
+		return f.applyUnpinTrustedPeer(log.Index, op.UnpinTrustedPeer)
 	default:
 		return &FSMApplyResult{Index: log.Index, Error: "command has no op set"}
 	}
@@ -724,8 +730,25 @@ func (f *FSM) applyCreatePendingJoinRequest(index uint64, req *internalpb.Pendin
 	if len(f.pendingJoinRequests) >= MaxJoinRequests {
 		return &FSMApplyResult{Index: index, Error: fmt.Sprintf("CreatePendingJoinRequest: %d join requests are already recorded; an Admin must purge stale ones before more can be accepted", len(f.pendingJoinRequests))}
 	}
-	f.pendingJoinRequests[req.GetRequestId()] = req
-	return &FSMApplyResult{Index: index, PendingJoinRequest: req}
+	// ADR-0147 Part 2: a request is INTRODUCED the moment it is
+	// recorded. Normalized here rather than left to the caller so the
+	// field has exactly one meaning no matter who wrote the record -
+	// including a record written by a pre-ADR-0147 build, whose stage
+	// is UNSPECIFIED and which would otherwise be permanently stuck in
+	// a state the verify arm refuses by name.
+	//
+	// Deliberately NOT normalizing the fingerprints: an empty list is a
+	// real, reachable state on a record an older writer produced, and
+	// the verify arm refuses it by name with a message that says what
+	// to do about it. Inventing a fingerprint here would be a store
+	// trusting a certificate nobody compared.
+	stored := req
+	if stored.GetStage() == internalpb.JoinRequestStage_JOIN_REQUEST_STAGE_UNSPECIFIED {
+		stored = proto.Clone(req).(*internalpb.PendingJoinRequest)
+		stored.Stage = internalpb.JoinRequestStage_JOIN_REQUEST_STAGE_INTRODUCED
+	}
+	f.pendingJoinRequests[req.GetRequestId()] = stored
+	return &FSMApplyResult{Index: index, PendingJoinRequest: stored}
 }
 
 // applyApprovePendingJoinRequest and applyRejectPendingJoinRequest both
@@ -862,6 +885,13 @@ func (f *FSM) applyApprovePendingJoinRequest(index uint64, cmd *internalpb.Appro
 		func(updated *internalpb.PendingJoinRequest) {
 			updated.AuthorizationId = cmd.GetAuthorizationId()
 			updated.ConsumedAtUnix = cmd.GetConsumedAtUnix()
+			// ADR-0147 Part 2: APPROVED is the only transition that
+			// reaches AUTHORIZED, and this command is the one that
+			// runs after AddVoter actually succeeded. The second PIN was
+			// already spent and cleared by its own command BEFORE
+			// AddVoter, so "authorized" here means the membership change
+			// happened, not merely that a value was typed correctly.
+			updated.Stage = internalpb.JoinRequestStage_JOIN_REQUEST_STAGE_AUTHORIZED
 		})
 }
 

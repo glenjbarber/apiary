@@ -570,6 +570,23 @@ message Command {
     // already shipped; this one is renumbered onto the next free slot
     // instead.
     RecordJoinApproval record_join_approval = 41;
+
+    // VerifyJoinIntroduction/ReissueJoinSecondPin/ConsumeJoinSecondPin
+    // are ADR-0147 Part 2's remaining join transitions, and they are
+    // raft commands rather than managerd memory for the same reason
+    // the rest of this oneof is: leadership can change at any point
+    // in this handshake, and a new leader must hold the same stage,
+    // the same attempt counters, the same consumed flag and the same
+    // second PIN, or the flow breaks at exactly the moment it most
+    // needs to survive.
+    //
+    // Fields 42/43/44 rather than reusing anything. VerifyJoinIntroduction
+    // is deliberately NOT a PinTrustedPeer command issued alongside it -
+    // see its own message comment for why the pin rides inside this one
+    // entry instead.
+    VerifyJoinIntroduction verify_join_introduction = 42;
+    ReissueJoinSecondPin reissue_join_second_pin = 43;
+    ConsumeJoinSecondPin consume_join_second_pin = 44;
   }
 }
 
@@ -900,6 +917,55 @@ enum JoinRequestStatus {
   JOIN_REQUEST_STATUS_APPROVED = 2;
   JOIN_REQUEST_STATUS_REJECTED = 3;
   JOIN_REQUEST_STATUS_CANCELLED = 4;
+
+  // JOIN_REQUEST_STATUS_FAILED is ADR-0147 Part 2's terminal state for
+  // a request killed by too many failed authorization attempts. It is
+  // terminal in the same way APPROVED/REJECTED/CANCELLED are: the
+  // record is kept so a poll still resolves, and PurgeJoinRequest is
+  // how it is removed.
+  //
+  // It is deliberately NOT "pending again with a fresh counter". A
+  // request that has attracted five wrong codes is a request something
+  // is guessing at, and handing it a fresh counter would let guessing
+  // continue indefinitely on a record the operator already saw.
+  JOIN_REQUEST_STATUS_FAILED = 5;
+}
+
+// JoinRequestStage is ADR-0147 Part 2's second axis on a
+// PendingJoinRequest. A STAGE and a STATUS are different things and
+// the two are deliberately separate fields rather than one enum with
+// every combination in it: status is the operator's decision
+// (pending/approved/rejected/cancelled/failed), and stage is how far
+// the two-way handshake itself has got.
+//
+// The state that makes the separation necessary is stage
+// CODE_VERIFIED + status PENDING: the first code and the fingerprints
+// were accepted, the second PIN exists in replicated state, and the
+// operator is copying that PIN off the requesting Comb and into this
+// page. That is neither "pending" in the sense of "nothing has
+// happened" nor any kind of resolution, and folding it into the
+// status enum would have made the PIN's own release condition
+// (stage) and the request's own fate (status) the same bit.
+enum JoinRequestStage {
+  JOIN_REQUEST_STAGE_UNSPECIFIED = 0;
+
+  // JOIN_REQUEST_STAGE_INTRODUCED: recorded and replicated, waiting
+  // for the target's operator to paste the first code and the
+  // fingerprints. This is where a request arrives and it is the only
+  // stage at which the first code is still held in state.
+  JOIN_REQUEST_STAGE_INTRODUCED = 1;
+
+  // JOIN_REQUEST_STAGE_CODE_VERIFIED: the first code matched what the
+  // request carried, the fingerprints matched, the joiner's leaf
+  // passed the fail-closed evaluation gate and is pinned, and the
+  // target's second PIN now exists - waiting to be polled by the
+  // requester and pasted back here. The first code has been cleared.
+  JOIN_REQUEST_STAGE_CODE_VERIFIED = 2;
+
+  // JOIN_REQUEST_STAGE_AUTHORIZED: the second PIN was accepted,
+  // AddVoter succeeded, and the second PIN was cleared before the
+  // membership change was attempted. Terminal.
+  JOIN_REQUEST_STAGE_AUTHORIZED = 3;
 }
 
 // PendingJoinRequest records one Comb's request to join this Colony
@@ -911,6 +977,22 @@ message PendingJoinRequest {
   string request_id = 1;
   string node_id = 2;
   string raft_bind_address = 3;
+
+  // code is the FIRST CODE, and since ADR-0147 Part 2 it is the
+  // REQUESTING Comb's own, generated locally with crypto/rand before
+  // it ever dialled. That inversion is what makes the handshake
+  // work: the value proves the target's operator read it off the
+  // requester's own screen, rather than both operators comparing two
+  // renderings of the same server's state.
+  //
+  // Six digits, deliberately. It is a correlation value whose
+  // strength comes from the transcription, and a longer string makes
+  // the transcription worse. The authorization-bearing value is the
+  // target's SECOND PIN, which is 8 digits.
+  //
+  // It is CLEARED the moment it is accepted. A spent value is not
+  // left in replicated state for a later reader to find, and the
+  // request then carries stage CODE_VERIFIED with no code at all.
   string code = 4;
   int64 requested_at_unix = 5;
   int64 expires_at_unix = 6;
@@ -981,6 +1063,98 @@ message PendingJoinRequest {
   // use for the restart guardrail.
   string authorization_id = 14;
   int64 consumed_at_unix = 15;
+
+  // stage is ADR-0147 Part 2's handshake progress - see
+  // JoinRequestStage above. Introduced at creation, advanced by
+  // VerifyJoinIntroduction, re-armed by ReissueJoinSecondPin, and
+  // finished by the consume of the second PIN.
+  //
+  // Replicated, because leadership can change at any point in this
+  // flow: a new leader holds this same record, the second PIN is in
+  // it, and the requester is polling by request_id rather than by
+  // leader. A stage held in managerd memory would end the handshake
+  // at exactly the moment the flow most needs it to survive.
+  JoinRequestStage stage = 16;
+
+  // advertised_fingerprints is every certificate the joining Comb
+  // ACTUALLY HOLDS, as hostcert.Fingerprint(cert.Raw) - its tls_cert
+  // always, its raft_tls_cert when Raft transport TLS is configured.
+  //
+  // Read from the certificate files themselves rather than from the
+  // config strings that name them, so a path that names a missing
+  // file produces no fingerprint rather than a fingerprint of
+  // nothing. hostcert.Fingerprint owns the "SHA256:" + uppercase
+  // colon-hex format in exactly one place and this is the same value
+  // the operator reads off the joiner.
+  //
+  // FAIL-CLOSED, and this list is the whole reason. A request
+  // carrying no fingerprints cannot be approved: the operator's
+  // comparison has nothing to compare against, so the fingerprint
+  // check - the only thing binding a request to a machine - would be
+  // vacuous. The pre-ADR-0147 "no TLS certificate presented" fallback
+  // rendered in the UI and then approved anyway is the defect
+  // ADR-0113 identified and did not fix.
+  repeated string advertised_fingerprints = 17;
+
+  // second_pin is the 8-digit value the TARGET generated once the
+  // first code and fingerprints were accepted. It is released to the
+  // REQUESTING Comb, and only there, on that Comb's own
+  // GetJoinRequestStatus poll. It is never rendered on this Colony's
+  // own page: an operator who can read it here would be able to
+  // complete the flow alone, which collapses a two-party handshake
+  // into one.
+  //
+  // It is NOT secret in transit and is not intended to be - it
+  // arrives over the same unauthenticated poll, on the same wire, as
+  // everything else. What it proves is that a human read one screen
+  // and typed into another. Do not "fix" that by adding
+  // confidentiality it cannot have.
+  //
+  // Cleared the moment ApproveJoinRequest consumes it, BEFORE
+  // AddVoter, on its own raft command (ConsumeJoinSecondPin). A failed
+  // AddVoter does not put it back: re-arming is an explicit
+  // ReissueJoinSecondPin, which is visible in the log and capped.
+  string second_pin = 18;
+
+  // first_code_attempts / second_pin_attempts are the per-stage
+  // attempt counters, capped at 5 each. Replicated, so a leader
+  // change or a managerd restart cannot hand out a fresh allowance,
+  // and so two operators cannot each get five guesses by racing
+  // across a failover. Exhaustion is terminal FAILED.
+  uint32 first_code_attempts = 19;
+  uint32 second_pin_attempts = 20;
+
+  // second_pin_expires_at_unix is the second PIN's own 5-minute
+  // deadline, shorter than the request's 15 because the PIN is the
+  // value that actually authorizes something and only has to survive
+  // one copy-and-paste. Checked lazily, at read and approve time,
+  // against the wall clock - never inside the FSM.
+  int64 second_pin_expires_at_unix = 21;
+
+  // second_pin_reissues counts explicit re-arms, capped at 2. It is
+  // replicated so the cap cannot be reset by a leader change, and it
+  // is a field rather than an in-memory counter precisely so that
+  // "this PIN was reissued" is visible in the Colony's own history.
+  uint32 second_pin_reissues = 22;
+
+  // accepted_introduction_code_sha256 is the SHA-256 digest of the
+  // first code, written when that code was accepted and cleared when
+  // the second PIN is spent.
+  //
+  // It exists because ADR-0147 Part 2 changed the poll. The first code
+  // is CLEARED on acceptance, which is right - a spent value is not one
+  // to leave in replicated state - but it left the joiner's later poll
+  // with nothing to be checked against, and the ADR's own revision adds
+  // the first code to GetJoinRequestStatus precisely so the
+  // request-id-guessing path is closed.
+  //
+  // A digest closes that path without reintroducing the value. It is
+  // one-way, so nothing here can be pasted into a form, and it lives
+  // only as long as the second PIN it protects: spent PIN and spent
+  // digest are cleared in the same log entry. An attacker who reaches
+  // the poll with a guessed request_id has a 64-bit id and a 6-digit
+  // code to be wrong about rather than a 64-bit id alone.
+  string accepted_introduction_code_sha256 = 23;
 }
 
 // JoinApprovalAttestation is one recorded "I am authorizing this join"
@@ -1061,6 +1235,109 @@ message RecordJoinApproval {
   string key_id = 2;
   string node_id = 3;
   int64 at_unix = 4;
+}
+
+// VerifyJoinIntroduction is ADR-0147 Part 2's stage one: the target's
+// operator pastes the first code the REQUESTER generated, plus the
+// fingerprints the request carried, and this command decides whether
+// they match.
+//
+// The comparison happens HERE, in the FSM, not in the manager that
+// received the call, and that is the point of the whole command
+// rather than an implementation detail. The first code is already in
+// replicated state, so the FSM can check what the operator pasted
+// against what the request actually carried - constant-time, on the
+// hash of each value - and every replica reaches the identical
+// decision from the identical log entry. A manager-side comparison
+// followed by a "yes it matched" command would put the deciding
+// value behind a byte the FSM has no way to check, and the attempt
+// counter would then be counting whatever that manager chose to send.
+//
+// THE PIN IS WRITTEN INSIDE THIS ONE ENTRY. peer is evaluated and
+// pinned by this same Apply, not by a second command submitted
+// afterwards. A handshake where "the certificate was accepted" and
+// "the certificate is pinned" are two log entries has a window
+// between them, and a window in which a request is CODE_VERIFIED with
+// no trust anchor behind it is precisely the state the trust store
+// was introduced to make impossible. peer may be nil, in which case
+// no pin is written and the stage still advances - that is the
+// pre-ADR-0147 "nothing to pin" shape, and the approval path refuses
+// a request whose fingerprints were never pinned.
+message VerifyJoinIntroduction {
+  string request_id = 1;
+
+  // introduction_code is what the operator pasted, verbatim, as the
+  // requesting Comb's own screen rendered it. Compared in constant
+  // time against PendingJoinRequest.code.
+  string introduction_code = 2;
+
+  // fingerprints is what the operator pasted as the joiner's
+  // advertised fingerprints. Compared, also in constant time, against
+  // PendingJoinRequest.advertised_fingerprints - a mismatch in EITHER
+  // direction (one the request carried and the operator did not paste,
+  // or one pasted that the request never carried) is the refusal. An
+  // empty list against a request that carried some is not a partial
+  // success, and a request that carried none can never be verified
+  // at all.
+  repeated string fingerprints = 3;
+
+  // second_pin is the value the TARGET generates for this attempt. It
+  // is an INPUT to this command, not something the FSM derives,
+  // because the FSM must stay deterministic across replicas and log
+  // replays: crypto/rand inside an Apply would hand every replica a
+  // different PIN. It is written only if the comparison above
+  // succeeds; on a failure the value supplied here is discarded, so
+  // a caller that generated one speculatively has leaked nothing.
+  string second_pin = 4;
+
+  // second_pin_expires_at_unix is the caller's own clock reading for
+  // the PIN's 5-minute deadline, for exactly the determinism reason
+  // second_pin itself is an input. The wall clock is consulted once,
+  // by the manager, and only as this field.
+  int64 second_pin_expires_at_unix = 5;
+
+  // peer is the pin to write on success, already evaluated by the
+  // manager and re-evaluated here (applyPinTrustedPeer does the
+  // fail-closed hostcert.Evaluate and re-derives the fingerprint, so
+  // a peer whose fingerprint disagrees with its own PEM cannot be
+  // stored rather than merely discouraged).
+  TrustedPeer peer = 6;
+
+  // at_unix is the caller's clock reading for this attempt. It is
+  // carried rather than derived for the same reason as every other
+  // timestamp on a command in this file: the FSM must reach the same
+  // answer on a replay years later that it reached the first time.
+  int64 at_unix = 7;
+}
+
+// ReissueJoinSecondPin generates a NEW second PIN, invalidating the
+// previous one, and counts the re-arm. It exists because a failed
+// AddVoter must NOT restore the PIN that was spent - restoring would
+// be a free retry of a value the operator has already typed once, on a
+// request that has already been acted on. Re-arming is therefore
+// explicit, visible in the log, and capped at 2; the third request
+// makes the request FAILED.
+message ReissueJoinSecondPin {
+  string request_id = 1;
+  string second_pin = 2;
+  int64 second_pin_expires_at_unix = 3;
+  int64 at_unix = 4;
+}
+
+// ConsumeJoinSecondPin spends the second PIN, and is a separate command
+// from ApprovePendingJoinRequest for the reason ADR-0147 Part 2 is
+// explicit about: the PIN is cleared BEFORE AddVoter is called, so a
+// membership change that then fails does not leave a live PIN behind
+// on a request that has already been acted on once.
+//
+// The comparison is here rather than in the manager for the same
+// reason VerifyJoinIntroduction's is. On success the PIN is cleared
+// from replicated state in this same entry; on failure the attempt
+// counter advances and exhaustion is terminal FAILED.
+message ConsumeJoinSecondPin {
+  string request_id = 1;
+  string second_pin = 2;
+  int64 at_unix = 3;
 }
 
 // RejectPendingJoinRequest mirrors ApprovePendingJoinRequest exactly,
@@ -1260,6 +1537,18 @@ message SetTrustedPeerVoter {
 // silent no-op that an operator reads as "it is gone".
 message UnpinTrustedPeer {
   string node_id = 1;
+
+  // reason is the operator's own account of why this certificate is
+  // being dropped, and it is replicated with the removal.
+  //
+  // A pin is a trust anchor somebody compared by hand; an incident
+  // review asking "who dropped this, and why" can only be answered
+  // from the log, and an empty reason is an answer of "someone, for
+  // no recorded reason". The terminal-state cleanup inside
+  // applyResolvePendingJoinRequest passes a fixed reason naming the
+  // request that settled, which is why this field is not required
+  // there but IS required on the manual RPC.
+  string reason = 2;
 }
 
 // RestartLease is a cluster-wide, Raft-committed exclusive reservation

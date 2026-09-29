@@ -12,15 +12,12 @@ package manager
 import (
 	"context"
 	"crypto/rand"
-	"crypto/sha256"
 	"crypto/x509"
 	"encoding/hex"
 	"encoding/pem"
 	"fmt"
-	"math/big"
 	"net"
 	"os"
-	"strings"
 	"time"
 
 	"google.golang.org/protobuf/proto"
@@ -28,6 +25,7 @@ import (
 	internalpb "github.com/glenjbarber/apiary/api/internalpb"
 	rpcpb "github.com/glenjbarber/apiary/api/rpc"
 	"github.com/glenjbarber/apiary/internal/guardrail"
+	"github.com/glenjbarber/apiary/internal/hostcert"
 	raftnode "github.com/glenjbarber/apiary/internal/raft"
 )
 
@@ -253,17 +251,20 @@ func (s *Server) localTLSCertFingerprint() string {
 	return tlsCertFingerprint(cert.Raw)
 }
 
-// tlsCertFingerprint formats a DER-encoded certificate's SHA-256 digest
-// as colon-separated uppercase hex pairs prefixed "SHA256:" - a plain,
-// deterministic function of the raw bytes so it's independently
-// testable without needing a real on-disk cert/nodeConfig.
+// tlsCertFingerprint is a DELEGATION to hostcert.Fingerprint and no
+// longer a second definition of the format.
+//
+// It used to compute "SHA256:" + colon-separated uppercase hex here,
+// which meant the tree had two places that could spell a fingerprint
+// and one of them was only exercised by a test. ADR-0147 Part 2 makes
+// that a wire-compatibility bug rather than a tidiness matter: the
+// operator compares a value the JOINER printed against a value the
+// TARGET compares, and those two have to be the same string. The
+// helper is kept as a one-line forwarding function because several
+// call sites and an existing test name it, and deleting a name costs
+// more than the indirection does.
 func tlsCertFingerprint(der []byte) string {
-	sum := sha256.Sum256(der)
-	pairs := make([]string, len(sum))
-	for i, b := range sum {
-		pairs[i] = fmt.Sprintf("%02X", b)
-	}
-	return "SHA256:" + strings.Join(pairs, ":")
+	return hostcert.Fingerprint(der)
 }
 
 // generateJoinRequestID returns a random, non-secret identifier for a
@@ -276,20 +277,6 @@ func generateJoinRequestID() (string, error) {
 		return "", err
 	}
 	return "jreq-" + hex.EncodeToString(buf), nil
-}
-
-// generateJoinCode returns a 6-digit numeric code for visual
-// correlation between the joining Comb's own screen and the Admin
-// reviewing ListJoinRequests - not a secret (see ADR-0083's own
-// disclosed trust model), so crypto/rand is used here purely to avoid
-// a predictable sequence an operator might mistake for meaningful,
-// not because the code needs to resist a determined attacker.
-func generateJoinCode() (string, error) {
-	n, err := rand.Int(rand.Reader, big.NewInt(1000000))
-	if err != nil {
-		return "", err
-	}
-	return fmt.Sprintf("%06d", n.Int64()), nil
 }
 
 // expiredJoinRequestMessage returns a non-empty error when requestID exists
@@ -432,6 +419,38 @@ func (s *Server) RequestJoinColony(ctx context.Context, req *rpcpb.RequestJoinCo
 	if req.GetJoinerLogStateObserved() || req.GetTargetAddress() == "" {
 		logState.Observed, logState.LastLogIndex = req.GetJoinerLogStateObserved(), req.GetJoinerLastLogIndex()
 	}
+	// ADR-0147 Part 2: the FIRST CODE is the joiner's own, generated
+	// locally before it dialed anything, and it is required. Generating
+	// one here instead would restore the pre-ADR-0147 shape exactly -
+	// both operators reading a value out of the same server's state -
+	// and the whole two-way flow exists to stop that being what the
+	// check means.
+	if req.GetIntroductionCode() == "" {
+		return &rpcpb.RequestJoinColonyResponse{Error: "introduction_code is required. It is the 6-digit value the JOINING Comb generated for itself before dialing - run `apiaryctl join-introduce`, which prints it. This Colony does not generate it: a code both sides could read out of the same server is not the check this flow is for"}, nil
+	}
+	// The joiner's real fingerprints, resolved ONCE, here, BEFORE any
+	// forwarding and before the local-record path is chosen.
+	//
+	// This is the fix the ADR calls out as the one that matters most and
+	// that was previously wrong: the local-record path used to read the
+	// caller's field directly and only the forward path filled anything
+	// in, so a request recorded here carried whatever the caller sent -
+	// usually nothing. Under Part 2 the operator compares a value off
+	// the joiner's own screen against what the request carried, and a
+	// request that carried nothing is compared against nothing.
+	//
+	// An empty list is refused rather than recorded. A request with no
+	// fingerprints can never be approved, so recording one only produces
+	// a row certain to be refused later; saying so here is at the moment
+	// the operator can still go and fix the joining Comb.
+	advertisedFingerprints := req.GetAdvertisedFingerprints()
+	if len(advertisedFingerprints) == 0 {
+		own, err := s.localAdvertisedFingerprints()
+		if err != nil {
+			return &rpcpb.RequestJoinColonyResponse{Error: fmt.Sprintf("refusing to record this join request: %v", err)}, nil
+		}
+		advertisedFingerprints = own
+	}
 	if target := req.GetTargetAddress(); target != "" {
 		if s.peers == nil {
 			return &rpcpb.RequestJoinColonyResponse{Error: "no peer forwarding is configured on this node; cannot reach the named Colony member"}, nil
@@ -462,6 +481,13 @@ func (s *Server) RequestJoinColony(ctx context.Context, req *rpcpb.RequestJoinCo
 			TlsCertFingerprint:     fingerprint,
 			JoinerLogStateObserved: logState.Observed,
 			JoinerLastLogIndex:     logState.LastLogIndex,
+			// ADR-0147 Part 2: the first code and the REAL fingerprints
+			// travel with the forward. The fingerprints are the ones
+			// resolved above from this Comb's own certificate files, not
+			// the caller's field, and the leader compares the operator's
+			// paste against them.
+			IntroductionCode:       req.GetIntroductionCode(),
+			AdvertisedFingerprints: advertisedFingerprints,
 		})
 		if err != nil {
 			return &rpcpb.RequestJoinColonyResponse{Error: fmt.Sprintf("reaching %s: %v", target, err)}, nil
@@ -485,7 +511,12 @@ func (s *Server) RequestJoinColony(ctx context.Context, req *rpcpb.RequestJoinCo
 			"refusing to record this join request: %s - wipe this Comb's raft state and request again",
 			report.Findings[0].Detail)}, nil
 	}
-	code, err := generateJoinCode()
+	// The FIRST CODE is the joiner's own value, carried through
+	// unchanged. The target does not generate it and does not compare
+	// it against its own; it compares the value its operator pasted
+	// against the value on this line.
+	code := req.GetIntroductionCode()
+	_ = err
 
 	// Read the window a second time for the epoch to record, rather
 	// than reusing the liveness read above: the two answers are then
@@ -502,10 +533,18 @@ func (s *Server) RequestJoinColony(ctx context.Context, req *rpcpb.RequestJoinCo
 		Op: &internalpb.Command_CreatePendingJoinRequest{
 			CreatePendingJoinRequest: &internalpb.CreatePendingJoinRequest{
 				Request: &internalpb.PendingJoinRequest{
-					RequestId:              requestID,
-					NodeId:                 req.GetNodeId(),
-					RaftBindAddress:        req.GetRaftBindAddress(),
-					Code:                   code,
+					RequestId:       requestID,
+					NodeId:          req.GetNodeId(),
+					RaftBindAddress: req.GetRaftBindAddress(),
+					Code:            code,
+					// ADR-0147 Part 2: a request is INTRODUCED the
+					// moment it is recorded, and it carries the
+					// fingerprints the operator is about to compare
+					// against. Both are set on THIS path as well as on
+					// the forward above - the asymmetry the ADR names
+					// as the defect is exactly this line missing.
+					Stage:                  internalpb.JoinRequestStage_JOIN_REQUEST_STAGE_INTRODUCED,
+					AdvertisedFingerprints: advertisedFingerprints,
 					RequestedAtUnix:        now.Unix(),
 					ExpiresAtUnix:          now.Add(defaultJoinRequestTTL).Unix(),
 					Status:                 internalpb.JoinRequestStatus_JOIN_REQUEST_STATUS_PENDING,
@@ -569,7 +608,55 @@ func (s *Server) GetJoinRequestStatus(ctx context.Context, req *rpcpb.GetJoinReq
 	if resp.GetError() != "" {
 		return &rpcpb.GetJoinRequestStatusResponse{Error: resp.GetError()}, nil
 	}
-	return &rpcpb.GetJoinRequestStatusResponse{Request: fromInternalPendingJoinRequest(resp.GetRequest())}, nil
+	pending := resp.GetRequest()
+	// ADR-0147 Part 2: the SECOND PIN is released here and only here,
+	// and it is released on TWO values rather than the request_id alone.
+	//
+	// The ADR specified request_id on its own, which is defensible -
+	// 64 bits of crypto/rand is unguessable - but this poll is
+	// unauthenticated and reachable by anyone who can reach the port,
+	// and reaching the port is not the hurdle Part 2 exists to raise.
+	// Requiring the first code as well closes the guessing path for the
+	// cost of one field, and it is nearly free: the first code is the
+	// REQUESTER's own, single-use, already replicated, already capped at
+	// 5 attempts, and already CLEARED the moment it was accepted. The
+	// value that authorizes the release is therefore the same value
+	// whose absence from the record is what the request itself
+	// demonstrates.
+	//
+	// Compared in constant time, through the same helper the FSM uses,
+	// so there is one comparison in the tree and not a second one that
+	// could be less careful.
+	out := &rpcpb.GetJoinRequestStatusResponse{Request: fromInternalPendingJoinRequest(pending)}
+	if pending.GetStage() != internalpb.JoinRequestStage_JOIN_REQUEST_STAGE_CODE_VERIFIED || pending.GetSecondPin() == "" {
+		return out, nil
+	}
+	if secondPinExpired(pending) {
+		// Reported, not released. The requesting Comb's operator needs to
+		// know the PIN they are watching for is never going to arrive,
+		// rather than watching a poll that silently returns nothing
+		// until the request's own 15 minutes run out.
+		out.Error = fmt.Sprintf("the second PIN for this request expired at %s and has not been reissued. The target Colony's Admin has to reissue it on their own page (`apiaryctl` on the joiner keeps polling; nothing has failed)",
+			time.Unix(pending.GetSecondPinExpiresAtUnix(), 0).UTC().Format(time.RFC3339))
+		return out, nil
+	}
+	if !raftnode.ConstantTimeValueEqual(hashJoinValue(req.GetIntroductionCode()), pending.GetAcceptedIntroductionCodeSha256()) || pending.GetAcceptedIntroductionCodeSha256() == "" {
+		return out, nil
+	}
+	out.SecondPin = pending.GetSecondPin()
+	out.SecondPinExpiresAtUnix = pending.GetSecondPinExpiresAtUnix()
+	return out, nil
+}
+
+// hashJoinValue is the SHA-256 of one human-entered value, hex-encoded.
+//
+// A digest rather than the value, so the post-acceptance poll can be
+// checked against something without the accepted first code sitting in
+// replicated state - which is the whole point of clearing it there.
+// Compared through raftnode.ConstantTimeValueEqual, so the comparison
+// discipline is the same one the FSM applies to all three values.
+func hashJoinValue(v string) string {
+	return raftnode.HashJoinValue(v)
 }
 
 // ListJoinRequests implements rpcpb.ManagerServiceServer - Admin-only
@@ -681,6 +768,30 @@ func (s *Server) ApproveJoinRequest(ctx context.Context, req *rpcpb.ApproveJoinR
 		return &rpcpb.ApproveJoinRequestResponse{Error: fmt.Sprintf("ApprovePendingJoinRequest: request_id %q has expired", req.GetRequestId())}, nil
 	}
 
+	// ADR-0147 Part 2: the second PIN gate is a PRECONDITION check
+	// here, and it is deliberately NOT the point at which the PIN is
+	// spent - see the ConsumeJoinSecondPin submission immediately
+	// before AddVoter for why.
+	//
+	// This check refuses the call before anything downstream runs, and
+	// it costs no attempt, because "this request cannot be approved
+	// yet" and "this request is not the one you think it is" are
+	// different answers. A request that has not been introduced, or
+	// whose PIN has lapsed, is not a failed guess; it is a request that
+	// has not reached the step the operator is at. Counting that as an
+	// attempt would let an operator burn five tries by clicking Approve
+	// in the wrong order.
+	//
+	// Every one of these is evaluated on the LEADER at the moment of
+	// the approval, never when a form was drawn, so a PIN that expired
+	// or was reissued while a browser sat open is refused rather than
+	// spent.
+	if msg := joinRequestNotActionable(pending, "ApprovePendingJoinRequest"); msg != "" {
+		return &rpcpb.ApproveJoinRequestResponse{Error: msg}, nil
+	}
+	if req.GetSecondPin() == "" {
+		return &rpcpb.ApproveJoinRequestResponse{Error: "second_pin is required. It is the 8-digit value this Colony generated and showed on the REQUESTING Comb's own screen; paste it here alongside the confirmation phrase. The confirmation phrase alone is a constant anyone can read out of this repository, and it is not the whole of the gate"}, nil
+	}
 	// ADR-0147 Part 3, in the ADR's own order: the live join window
 	// (checked above, before this) is the cheapest gate and the one an
 	// operator most needs explained; the authorization entry is next;
@@ -759,6 +870,28 @@ func (s *Server) ApproveJoinRequest(ctx context.Context, req *rpcpb.ApproveJoinR
 			"refusing to approve: %s", report.Findings[0].Detail)}, nil
 	}
 
+	// The PIN is SPENT here, by its own raft command, and this is the
+	// last thing that happens before AddVoter. Two placement decisions
+	// are in it and both are deliberate.
+	//
+	// It is before AddVoter because ADR-0147 Part 2 says so: a failed
+	// AddVoter must not leave a live PIN behind on a request that has
+	// already been acted on once. Re-arming is ReissueJoinSecondPin,
+	// which is visible in the log and capped at 2.
+	//
+	// It is AFTER every non-mutating gate above - reachability, the
+	// already-a-voter check, the join-log guardrail, and the Part 3
+	// authorization read. Those can all fail on facts an operator fixes
+	// by fixing a Comb and clicking again, and none of them is a wrong
+	// guess. Spending the PIN before them would turn the most common
+	// recoverable failure in this flow (a joiner whose raftd is not up
+	// yet, which has stranded this project's own cluster more than once)
+	// into one that also burns a reissue from a cap of two. The
+	// ADR's rule is "cleared before AddVoter"; this is before AddVoter.
+	if _, appErr, _ := s.consumeJoinSecondPin(ctx, req.GetRequestId(), req.GetSecondPin(), 0); appErr != "" {
+		return &rpcpb.ApproveJoinRequestResponse{Error: appErr}, nil
+	}
+
 	timeout := defaultApplyTimeout
 	if req.GetTimeoutMs() > 0 {
 		timeout = time.Duration(req.GetTimeoutMs()) * time.Millisecond
@@ -806,6 +939,33 @@ func (s *Server) ApproveJoinRequest(ctx context.Context, req *rpcpb.ApproveJoinR
 		return &rpcpb.ApproveJoinRequestResponse{Error: appErr, LeaderHint: leaderHint}, nil
 	}
 	return &rpcpb.ApproveJoinRequestResponse{Request: fromInternalPendingJoinRequest(result)}, nil
+}
+
+// consumeJoinSecondPin spends a request's second PIN, through the
+// replicated command that both compares it and clears it.
+//
+// The comparison lives in the FSM for the same reason the first code's
+// does: the PIN is already in replicated state, so every replica can
+// reach the identical answer, and a manager-side check followed by a
+// "yes it matched" command would put the deciding value behind a byte
+// the FSM cannot check.
+//
+// A failure here is NOT free to retry: the attempt counter advanced in
+// the same entry, and the fifth failure is terminal FAILED. That is the
+// point of the cap - an approval form that can be submitted five times
+// is a six-digit-or-eight-digit oracle on this Colony's own pending
+// list.
+func (s *Server) consumeJoinSecondPin(ctx context.Context, requestID, pin string, timeoutMs uint32) (*internalpb.PendingJoinRequest, string, string) {
+	cmd := &internalpb.Command{
+		Op: &internalpb.Command_ConsumeJoinSecondPin{
+			ConsumeJoinSecondPin: &internalpb.ConsumeJoinSecondPin{
+				RequestId: requestID,
+				SecondPin: pin,
+				AtUnix:    time.Now().Unix(),
+			},
+		},
+	}
+	return s.applyJoinRequestCommand(ctx, cmd, timeoutMs)
 }
 
 // UpdateVoterAddress implements rpcpb.ManagerServiceServer (ADR-0106) -

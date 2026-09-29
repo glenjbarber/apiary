@@ -1258,6 +1258,12 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /machine/join-colony/cancel", s.requireRole(manager.RoleAdmin, s.handleCancelJoinRequest))
 	s.mux.HandleFunc("POST /machine/convert-to-joiner", s.requireRole(manager.RoleAdmin, s.handleConvertStandaloneToJoiner))
 	s.mux.HandleFunc("POST /join-requests/{id}/preflight", s.requireRole(manager.RoleAdmin, s.handlePreflightJoinRequest))
+	// ADR-0147 Part 2: stage one's form, and the PIN re-arm. Both
+	// Admin-gated, same tier as Approve, because VerifyJoinIntroduction
+	// is the call that pins the joiner's certificate into the replicated
+	// trust store.
+	s.mux.HandleFunc("POST /join-requests/{id}/verify", s.requireRole(manager.RoleAdmin, s.handleVerifyJoinRequest))
+	s.mux.HandleFunc("POST /join-requests/{id}/reissue-pin", s.requireRole(manager.RoleAdmin, s.handleReissueJoinSecondPin))
 	s.mux.HandleFunc("POST /join-requests/{id}/approve", s.requireRole(manager.RoleAdmin, s.handleApproveJoinRequest))
 	s.mux.HandleFunc("POST /join-requests/{id}/reject", s.requireRole(manager.RoleAdmin, s.handleRejectJoinRequest))
 	s.mux.HandleFunc("POST /join-requests/{id}/purge", s.requireRole(manager.RoleAdmin, s.handlePurgeJoinRequest))

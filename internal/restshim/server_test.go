@@ -607,6 +607,26 @@ func (f *fakeClient) ExecuteNodeRestartPlan(context.Context, *rpcpb.ExecuteNodeR
 	return &rpcpb.ExecuteNodeRestartPlanResponse{}, nil
 }
 
+// ADR-0147 Part 2's four new RPCs. restshim exposes none of them, so
+// each is an obviously-fake answer that cannot be reached - present only
+// because the generated client interface grew and this fake asserts it
+// implements all of it.
+func (f *fakeClient) VerifyJoinIntroduction(context.Context, *rpcpb.VerifyJoinIntroductionRequest, ...grpc.CallOption) (*rpcpb.VerifyJoinIntroductionResponse, error) {
+	return &rpcpb.VerifyJoinIntroductionResponse{}, nil
+}
+
+func (f *fakeClient) ReissueJoinSecondPin(context.Context, *rpcpb.ReissueJoinSecondPinRequest, ...grpc.CallOption) (*rpcpb.ReissueJoinSecondPinResponse, error) {
+	return &rpcpb.ReissueJoinSecondPinResponse{}, nil
+}
+
+func (f *fakeClient) PinPeerCertificate(context.Context, *rpcpb.PinPeerCertificateRequest, ...grpc.CallOption) (*rpcpb.PinPeerCertificateResponse, error) {
+	return &rpcpb.PinPeerCertificateResponse{}, nil
+}
+
+func (f *fakeClient) UnpinPeerCertificate(context.Context, *rpcpb.UnpinPeerCertificateRequest, ...grpc.CallOption) (*rpcpb.UnpinPeerCertificateResponse, error) {
+	return &rpcpb.UnpinPeerCertificateResponse{}, nil
+}
+
 var _ rpcpb.ManagerServiceClient = (*fakeClient)(nil)
 
 func doRequest(t *testing.T, s *Server, method, path string, body interface{}) *httptest.ResponseRecorder {

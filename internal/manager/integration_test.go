@@ -231,6 +231,13 @@ func newManagerdRPCClientFull(t *testing.T, raftdSocket, nodeID string, vnc VNCL
 	}
 
 	srv := NewServer(raftClient, nodeID, isostore.New(t.TempDir()), vnc, serialLog, vlanMgr, nil, "", nil, nil, assumptionStoreMgr, assumptionStaleAfter, nil)
+	// ADR-0147 Part 2: a join request now carries the joiner's real
+	// certificate fingerprints and its own first code, both required, so
+	// every managerd under test holds a real serving certificate. The
+	// tests' request literals advertise the SAME digest, which is what
+	// the pin step needs - in a single-process test the joiner and the
+	// target are the same managerd.
+	attachTestCombCertificate(t, srv)
 	// ADR-0147 Part 3: every test managerd gets its own authorization
 	// store, inside t.TempDir(). Without this a test that reaches the
 	// gate reads - and an operator-shaped refusal reports - the real
@@ -283,6 +290,8 @@ func newManagerdRPCClientAndServer(t *testing.T, raftdSocket, nodeID string) (rp
 	}
 
 	srv := NewServer(raftClient, nodeID, isostore.New(t.TempDir()), nil, nil, nil, nil, "", nil, nil, nil, 0, nil)
+	// ADR-0147 Part 2, as in newManagerdRPCClientFull above.
+	attachTestCombCertificate(t, srv)
 	// ADR-0147 Part 3: as in newManagerdRPCClientFull above.
 	srv.setJoinAuthorizationPath(filepath.Join(t.TempDir(), "join-authorizations.json"))
 	grpcServer := grpc.NewServer(
@@ -1364,7 +1373,7 @@ func TestIntegration_RequestJoinColony_NoCredentialNeeded(t *testing.T) {
 	defer cancel()
 	openColonyJoinWindowForTest(t, client)
 
-	resp, err := client.RequestJoinColony(ctx, &rpcpb.RequestJoinColonyRequest{NodeId: "node02", RaftBindAddress: "10.62.0.5:17600"})
+	resp, err := client.RequestJoinColony(ctx, withIntroduction(&rpcpb.RequestJoinColonyRequest{NodeId: "node02", RaftBindAddress: "10.62.0.5:17600"}, t))
 	if err != nil {
 		t.Fatalf("RequestJoinColony() error: %v", err)
 	}
@@ -1441,7 +1450,7 @@ func TestIntegration_RequestJoinColony_MissingFieldsIsError(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	resp, err := client.RequestJoinColony(ctx, &rpcpb.RequestJoinColonyRequest{NodeId: "node02"})
+	resp, err := client.RequestJoinColony(ctx, withIntroduction(&rpcpb.RequestJoinColonyRequest{NodeId: "node02"}, t))
 	if err != nil {
 		t.Fatalf("RequestJoinColony() error: %v", err)
 	}
@@ -1483,7 +1492,7 @@ func TestIntegration_ApproveJoinRequest_AddsRealRaftVoter(t *testing.T) {
 	}
 	t.Cleanup(func() { joiningNode.Shutdown() })
 
-	reqResp, err := client.RequestJoinColony(ctx, &rpcpb.RequestJoinColonyRequest{NodeId: "node02", RaftBindAddress: joiningNodeAddr, JoinerLogStateObserved: true})
+	reqResp, err := client.RequestJoinColony(ctx, withIntroduction(&rpcpb.RequestJoinColonyRequest{NodeId: "node02", RaftBindAddress: joiningNodeAddr, JoinerLogStateObserved: true}, t))
 	if err != nil || reqResp.GetError() != "" {
 		t.Fatalf("RequestJoinColony() = (%+v, %v)", reqResp, err)
 	}
@@ -1528,7 +1537,7 @@ func TestIntegration_RequestJoinColony_DuplicateNodeIDRejected(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	resp, err := client.RequestJoinColony(ctx, &rpcpb.RequestJoinColonyRequest{NodeId: "raftd-1", RaftBindAddress: "127.0.0.1:1"})
+	resp, err := client.RequestJoinColony(ctx, withIntroduction(&rpcpb.RequestJoinColonyRequest{NodeId: "raftd-1", RaftBindAddress: "127.0.0.1:1"}, t))
 	if err != nil {
 		t.Fatalf("RequestJoinColony() error: %v", err)
 	}
@@ -1584,7 +1593,7 @@ func TestIntegration_ApproveJoinRequest_DuplicateNodeIDRejected(t *testing.T) {
 	}
 	t.Cleanup(func() { nodeB.Shutdown() })
 
-	reqA, err := client.RequestJoinColony(ctx, &rpcpb.RequestJoinColonyRequest{NodeId: "node02", RaftBindAddress: nodeAAddr, JoinerLogStateObserved: true})
+	reqA, err := client.RequestJoinColony(ctx, withIntroduction(&rpcpb.RequestJoinColonyRequest{NodeId: "node02", RaftBindAddress: nodeAAddr, JoinerLogStateObserved: true}, t))
 	if err != nil || reqA.GetError() != "" {
 		t.Fatalf("RequestJoinColony(A) = (%+v, %v)", reqA, err)
 	}
@@ -1592,9 +1601,9 @@ func TestIntegration_ApproveJoinRequest_DuplicateNodeIDRejected(t *testing.T) {
 	// join: with B identical to A, presenting A's spent entry is the
 	// single-use refusal, and this test would pass by being stopped at
 	// the wrong check.
-	reqB, err := client.RequestJoinColony(ctx, &rpcpb.RequestJoinColonyRequest{
+	reqB, err := client.RequestJoinColony(ctx, withIntroduction(&rpcpb.RequestJoinColonyRequest{
 		NodeId: "node02", RaftBindAddress: nodeBAddr, TlsCertFingerprint: "SHA256:BB:CC:DD:EE:FF:00:11:22:33",
-	})
+	}, t))
 	if err != nil || reqB.GetError() != "" {
 		t.Fatalf("RequestJoinColony(B) = (%+v, %v) - a second pending request for a node_id that is not YET a voter must be allowed", reqB, err)
 	}
@@ -1659,7 +1668,7 @@ func TestIntegration_ApproveJoinRequest_UnreachableNodeIsRefused(t *testing.T) {
 	defer cancel()
 	openColonyJoinWindowForTest(t, client)
 
-	reqResp, err := client.RequestJoinColony(ctx, &rpcpb.RequestJoinColonyRequest{NodeId: "node02", RaftBindAddress: "127.0.0.1:1"})
+	reqResp, err := client.RequestJoinColony(ctx, withIntroduction(&rpcpb.RequestJoinColonyRequest{NodeId: "node02", RaftBindAddress: "127.0.0.1:1"}, t))
 	if err != nil || reqResp.GetError() != "" {
 		t.Fatalf("RequestJoinColony() = (%+v, %v)", reqResp, err)
 	}
@@ -1704,7 +1713,7 @@ func TestIntegration_ApproveJoinRequest_ReachableNodeStillWorks(t *testing.T) {
 	}
 	t.Cleanup(func() { joiningNode.Shutdown() })
 
-	reqResp, err := client.RequestJoinColony(ctx, &rpcpb.RequestJoinColonyRequest{NodeId: "node02", RaftBindAddress: joiningNodeAddr, JoinerLogStateObserved: true})
+	reqResp, err := client.RequestJoinColony(ctx, withIntroduction(&rpcpb.RequestJoinColonyRequest{NodeId: "node02", RaftBindAddress: joiningNodeAddr, JoinerLogStateObserved: true}, t))
 	if err != nil || reqResp.GetError() != "" {
 		t.Fatalf("RequestJoinColony() = (%+v, %v)", reqResp, err)
 	}
@@ -1743,7 +1752,7 @@ func TestIntegration_UpdateVoterAddress_UpdatesRealRaftVoterAddress(t *testing.T
 	}
 	t.Cleanup(func() { firstNode.Shutdown() })
 
-	reqResp, err := client.RequestJoinColony(ctx, &rpcpb.RequestJoinColonyRequest{NodeId: "node02", RaftBindAddress: firstAddr, JoinerLogStateObserved: true})
+	reqResp, err := client.RequestJoinColony(ctx, withIntroduction(&rpcpb.RequestJoinColonyRequest{NodeId: "node02", RaftBindAddress: firstAddr, JoinerLogStateObserved: true}, t))
 	if err != nil || reqResp.GetError() != "" {
 		t.Fatalf("RequestJoinColony() = (%+v, %v)", reqResp, err)
 	}
@@ -1841,7 +1850,7 @@ func TestIntegration_UpdateVoterAddress_UnreachableAddressRejected(t *testing.T)
 	}
 	t.Cleanup(func() { joiningNode.Shutdown() })
 
-	reqResp, err := client.RequestJoinColony(ctx, &rpcpb.RequestJoinColonyRequest{NodeId: "node02", RaftBindAddress: joiningNodeAddr, JoinerLogStateObserved: true})
+	reqResp, err := client.RequestJoinColony(ctx, withIntroduction(&rpcpb.RequestJoinColonyRequest{NodeId: "node02", RaftBindAddress: joiningNodeAddr, JoinerLogStateObserved: true}, t))
 	if err != nil || reqResp.GetError() != "" {
 		t.Fatalf("RequestJoinColony() = (%+v, %v)", reqResp, err)
 	}
@@ -1912,7 +1921,7 @@ func TestIntegration_RejectJoinRequest_ExcludedFromListAfterward(t *testing.T) {
 	defer cancel()
 	openColonyJoinWindowForTest(t, client)
 
-	reqResp, err := client.RequestJoinColony(ctx, &rpcpb.RequestJoinColonyRequest{NodeId: "node03", RaftBindAddress: "10.62.0.6:17600"})
+	reqResp, err := client.RequestJoinColony(ctx, withIntroduction(&rpcpb.RequestJoinColonyRequest{NodeId: "node03", RaftBindAddress: "10.62.0.6:17600"}, t))
 	if err != nil || reqResp.GetError() != "" {
 		t.Fatalf("RequestJoinColony() = (%+v, %v)", reqResp, err)
 	}
@@ -1947,7 +1956,7 @@ func TestIntegration_CancelJoinRequest_NoCredentialNeeded(t *testing.T) {
 	defer cancel()
 	openColonyJoinWindowForTest(t, client)
 
-	reqResp, err := client.RequestJoinColony(ctx, &rpcpb.RequestJoinColonyRequest{NodeId: "node04", RaftBindAddress: "10.62.0.7:17600"})
+	reqResp, err := client.RequestJoinColony(ctx, withIntroduction(&rpcpb.RequestJoinColonyRequest{NodeId: "node04", RaftBindAddress: "10.62.0.7:17600"}, t))
 	if err != nil || reqResp.GetError() != "" {
 		t.Fatalf("RequestJoinColony() = (%+v, %v)", reqResp, err)
 	}
@@ -1984,7 +1993,7 @@ func TestIntegration_PurgeJoinRequest_RemovesRecordEntirely(t *testing.T) {
 	defer cancel()
 	openColonyJoinWindowForTest(t, client)
 
-	reqResp, err := client.RequestJoinColony(ctx, &rpcpb.RequestJoinColonyRequest{NodeId: "node05", RaftBindAddress: "10.62.0.8:17600"})
+	reqResp, err := client.RequestJoinColony(ctx, withIntroduction(&rpcpb.RequestJoinColonyRequest{NodeId: "node05", RaftBindAddress: "10.62.0.8:17600"}, t))
 	if err != nil || reqResp.GetError() != "" {
 		t.Fatalf("RequestJoinColony() = (%+v, %v)", reqResp, err)
 	}

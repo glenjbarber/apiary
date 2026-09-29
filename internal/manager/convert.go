@@ -173,6 +173,38 @@ func fromInternalPendingJoinRequest(r *internalpb.PendingJoinRequest) *rpcpb.Pen
 		Approval_2:             fromInternalJoinApproval(r.GetApproval_2()),
 		AuthorizationId:        r.GetAuthorizationId(),
 		ConsumedAtUnix:         r.GetConsumedAtUnix(),
+		// ADR-0147 Part 2. The SECOND PIN is deliberately absent here,
+		// and there is no field for it: this message is what the
+		// TARGET's own operator reads (ListJoinRequests, and the
+		// request body of a poll response), and a value they can read
+		// here is a value they can complete the handshake with alone,
+		// which collapses a two-party flow into one. The PIN travels on
+		// GetJoinRequestStatus's own response, to the holder of the
+		// request_id AND the first code.
+		Stage:                  rpcpb.JoinRequestStage(r.GetStage()),
+		AdvertisedFingerprints: r.GetAdvertisedFingerprints(),
+		FirstCodeAttempts:      r.GetFirstCodeAttempts(),
+		SecondPinAttempts:      r.GetSecondPinAttempts(),
+		SecondPinExpiresAtUnix: r.GetSecondPinExpiresAtUnix(),
+		SecondPinReissues:      r.GetSecondPinReissues(),
+	}
+}
+
+// toRPCTustedPeer mirrors internalpb.TrustedPeer onto the external
+// message PinPeerCertificate/UnpinPeerCertificate carry.
+func toRPCTustedPeer(p *internalpb.TrustedPeer) *rpcpb.TrustedPeer {
+	if p == nil {
+		return nil
+	}
+	return &rpcpb.TrustedPeer{
+		NodeId:       p.GetNodeId(),
+		CombName:     p.GetCombName(),
+		Fingerprint:  p.GetFingerprint(),
+		CertPem:      p.GetCertPem(),
+		NotAfterUnix: p.GetNotAfterUnix(),
+		PinnedAtUnix: p.GetPinnedAtUnix(),
+		PinnedBy:     p.GetPinnedBy(),
+		IsVoter:      p.GetIsVoter(),
 	}
 }
 

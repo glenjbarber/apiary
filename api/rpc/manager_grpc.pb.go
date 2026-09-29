@@ -111,6 +111,10 @@ const (
 	ManagerService_ListJoinRequests_FullMethodName            = "/apiary.rpc.v1.ManagerService/ListJoinRequests"
 	ManagerService_ApproveJoinRequest_FullMethodName          = "/apiary.rpc.v1.ManagerService/ApproveJoinRequest"
 	ManagerService_RejectJoinRequest_FullMethodName           = "/apiary.rpc.v1.ManagerService/RejectJoinRequest"
+	ManagerService_VerifyJoinIntroduction_FullMethodName      = "/apiary.rpc.v1.ManagerService/VerifyJoinIntroduction"
+	ManagerService_ReissueJoinSecondPin_FullMethodName        = "/apiary.rpc.v1.ManagerService/ReissueJoinSecondPin"
+	ManagerService_PinPeerCertificate_FullMethodName          = "/apiary.rpc.v1.ManagerService/PinPeerCertificate"
+	ManagerService_UnpinPeerCertificate_FullMethodName        = "/apiary.rpc.v1.ManagerService/UnpinPeerCertificate"
 	ManagerService_PreflightApproveJoinRequest_FullMethodName = "/apiary.rpc.v1.ManagerService/PreflightApproveJoinRequest"
 	ManagerService_CancelJoinRequest_FullMethodName           = "/apiary.rpc.v1.ManagerService/CancelJoinRequest"
 	ManagerService_PurgeJoinRequest_FullMethodName            = "/apiary.rpc.v1.ManagerService/PurgeJoinRequest"
@@ -715,6 +719,52 @@ type ManagerServiceClient interface {
 	ListJoinRequests(ctx context.Context, in *ListJoinRequestsRequest, opts ...grpc.CallOption) (*ListJoinRequestsResponse, error)
 	ApproveJoinRequest(ctx context.Context, in *ApproveJoinRequestRequest, opts ...grpc.CallOption) (*ApproveJoinRequestResponse, error)
 	RejectJoinRequest(ctx context.Context, in *RejectJoinRequestRequest, opts ...grpc.CallOption) (*RejectJoinRequestResponse, error)
+	// VerifyJoinIntroduction/ReissueJoinSecondPin are ADR-0147 Part 2's
+	// two new Admin-side steps between a request being recorded and it
+	// being approvable.
+	//
+	// VerifyJoinIntroduction takes the first code the REQUESTING Comb
+	// generated plus the fingerprints that request carried, and on
+	// success the target generates a second PIN that is released only to
+	// the requester. ReissueJoinSecondPin re-arms that PIN, capped at 2,
+	// for the case where AddVoter failed and the spent PIN was
+	// deliberately not restored.
+	//
+	// Both are state-changing, so both are Admin-tier, and both forward
+	// to the leader the same way ApproveJoinRequest does - using the
+	// AUTHENTICATED peer dial with the API key attached, never the
+	// unauthenticated one. The forward carries the whole request,
+	// including the pasted values, so the leader checks exactly what the
+	// operator typed.
+	//
+	// Neither renders anything. VerifyJoinIntroduction's response
+	// deliberately does NOT carry the second PIN: the value goes to the
+	// requesting Comb and only the requesting Comb.
+	VerifyJoinIntroduction(ctx context.Context, in *VerifyJoinIntroductionRequest, opts ...grpc.CallOption) (*VerifyJoinIntroductionResponse, error)
+	ReissueJoinSecondPin(ctx context.Context, in *ReissueJoinSecondPinRequest, opts ...grpc.CallOption) (*ReissueJoinSecondPinResponse, error)
+	// PinPeerCertificate/UnpinPeerCertificate are ADR-0147 Part 4's
+	// replicated peer trust store, which until now had no writer
+	// anywhere in the tree: the command arm existed, the FSM applied it,
+	// and nothing on any path ever constructed one, so the store was
+	// always empty and the derived peer-ca.pem it feeds had nothing in
+	// it.
+	//
+	// PinPeerCertificate is the store's intended writer and is called
+	// automatically by the introduction path above - it is not a button
+	// on a page, and it is never a page's own action. It is exposed
+	// because an operator can also pin a certificate out of band, and
+	// because an Admin CAN add a pin, which is exactly why the store is
+	// documented as a mechanism for honest operation rather than as a
+	// security boundary. A pin is not a substitute for the root-owned
+	// authorization entry, and nothing authenticates by presenting one.
+	//
+	// Neither is capable of creating or modifying an authorization
+	// entry. That is ADR-0147 Part 3's load-bearing negative: the only
+	// writer is the root-only apiaryctl binary acting on a local file,
+	// and any future RPC that touches that file is a security regression
+	// even if it is Admin-tier.
+	PinPeerCertificate(ctx context.Context, in *PinPeerCertificateRequest, opts ...grpc.CallOption) (*PinPeerCertificateResponse, error)
+	UnpinPeerCertificate(ctx context.Context, in *UnpinPeerCertificateRequest, opts ...grpc.CallOption) (*UnpinPeerCertificateResponse, error)
 	// PreflightApproveJoinRequest previews ApproveJoinRequest's own
 	// reachability gate (ADR-0097/ADR-0103) without ever calling AddVoter -
 	// Admin-tier, not Viewer, because it makes managerd dial a
@@ -1740,6 +1790,46 @@ func (c *managerServiceClient) RejectJoinRequest(ctx context.Context, in *Reject
 	return out, nil
 }
 
+func (c *managerServiceClient) VerifyJoinIntroduction(ctx context.Context, in *VerifyJoinIntroductionRequest, opts ...grpc.CallOption) (*VerifyJoinIntroductionResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(VerifyJoinIntroductionResponse)
+	err := c.cc.Invoke(ctx, ManagerService_VerifyJoinIntroduction_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *managerServiceClient) ReissueJoinSecondPin(ctx context.Context, in *ReissueJoinSecondPinRequest, opts ...grpc.CallOption) (*ReissueJoinSecondPinResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ReissueJoinSecondPinResponse)
+	err := c.cc.Invoke(ctx, ManagerService_ReissueJoinSecondPin_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *managerServiceClient) PinPeerCertificate(ctx context.Context, in *PinPeerCertificateRequest, opts ...grpc.CallOption) (*PinPeerCertificateResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(PinPeerCertificateResponse)
+	err := c.cc.Invoke(ctx, ManagerService_PinPeerCertificate_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *managerServiceClient) UnpinPeerCertificate(ctx context.Context, in *UnpinPeerCertificateRequest, opts ...grpc.CallOption) (*UnpinPeerCertificateResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(UnpinPeerCertificateResponse)
+	err := c.cc.Invoke(ctx, ManagerService_UnpinPeerCertificate_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *managerServiceClient) PreflightApproveJoinRequest(ctx context.Context, in *PreflightApproveJoinRequestRequest, opts ...grpc.CallOption) (*PreflightApproveJoinRequestResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(PreflightApproveJoinRequestResponse)
@@ -2414,6 +2504,52 @@ type ManagerServiceServer interface {
 	ListJoinRequests(context.Context, *ListJoinRequestsRequest) (*ListJoinRequestsResponse, error)
 	ApproveJoinRequest(context.Context, *ApproveJoinRequestRequest) (*ApproveJoinRequestResponse, error)
 	RejectJoinRequest(context.Context, *RejectJoinRequestRequest) (*RejectJoinRequestResponse, error)
+	// VerifyJoinIntroduction/ReissueJoinSecondPin are ADR-0147 Part 2's
+	// two new Admin-side steps between a request being recorded and it
+	// being approvable.
+	//
+	// VerifyJoinIntroduction takes the first code the REQUESTING Comb
+	// generated plus the fingerprints that request carried, and on
+	// success the target generates a second PIN that is released only to
+	// the requester. ReissueJoinSecondPin re-arms that PIN, capped at 2,
+	// for the case where AddVoter failed and the spent PIN was
+	// deliberately not restored.
+	//
+	// Both are state-changing, so both are Admin-tier, and both forward
+	// to the leader the same way ApproveJoinRequest does - using the
+	// AUTHENTICATED peer dial with the API key attached, never the
+	// unauthenticated one. The forward carries the whole request,
+	// including the pasted values, so the leader checks exactly what the
+	// operator typed.
+	//
+	// Neither renders anything. VerifyJoinIntroduction's response
+	// deliberately does NOT carry the second PIN: the value goes to the
+	// requesting Comb and only the requesting Comb.
+	VerifyJoinIntroduction(context.Context, *VerifyJoinIntroductionRequest) (*VerifyJoinIntroductionResponse, error)
+	ReissueJoinSecondPin(context.Context, *ReissueJoinSecondPinRequest) (*ReissueJoinSecondPinResponse, error)
+	// PinPeerCertificate/UnpinPeerCertificate are ADR-0147 Part 4's
+	// replicated peer trust store, which until now had no writer
+	// anywhere in the tree: the command arm existed, the FSM applied it,
+	// and nothing on any path ever constructed one, so the store was
+	// always empty and the derived peer-ca.pem it feeds had nothing in
+	// it.
+	//
+	// PinPeerCertificate is the store's intended writer and is called
+	// automatically by the introduction path above - it is not a button
+	// on a page, and it is never a page's own action. It is exposed
+	// because an operator can also pin a certificate out of band, and
+	// because an Admin CAN add a pin, which is exactly why the store is
+	// documented as a mechanism for honest operation rather than as a
+	// security boundary. A pin is not a substitute for the root-owned
+	// authorization entry, and nothing authenticates by presenting one.
+	//
+	// Neither is capable of creating or modifying an authorization
+	// entry. That is ADR-0147 Part 3's load-bearing negative: the only
+	// writer is the root-only apiaryctl binary acting on a local file,
+	// and any future RPC that touches that file is a security regression
+	// even if it is Admin-tier.
+	PinPeerCertificate(context.Context, *PinPeerCertificateRequest) (*PinPeerCertificateResponse, error)
+	UnpinPeerCertificate(context.Context, *UnpinPeerCertificateRequest) (*UnpinPeerCertificateResponse, error)
 	// PreflightApproveJoinRequest previews ApproveJoinRequest's own
 	// reachability gate (ADR-0097/ADR-0103) without ever calling AddVoter -
 	// Admin-tier, not Viewer, because it makes managerd dial a
@@ -2782,6 +2918,18 @@ func (UnimplementedManagerServiceServer) ApproveJoinRequest(context.Context, *Ap
 }
 func (UnimplementedManagerServiceServer) RejectJoinRequest(context.Context, *RejectJoinRequestRequest) (*RejectJoinRequestResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method RejectJoinRequest not implemented")
+}
+func (UnimplementedManagerServiceServer) VerifyJoinIntroduction(context.Context, *VerifyJoinIntroductionRequest) (*VerifyJoinIntroductionResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method VerifyJoinIntroduction not implemented")
+}
+func (UnimplementedManagerServiceServer) ReissueJoinSecondPin(context.Context, *ReissueJoinSecondPinRequest) (*ReissueJoinSecondPinResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ReissueJoinSecondPin not implemented")
+}
+func (UnimplementedManagerServiceServer) PinPeerCertificate(context.Context, *PinPeerCertificateRequest) (*PinPeerCertificateResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method PinPeerCertificate not implemented")
+}
+func (UnimplementedManagerServiceServer) UnpinPeerCertificate(context.Context, *UnpinPeerCertificateRequest) (*UnpinPeerCertificateResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method UnpinPeerCertificate not implemented")
 }
 func (UnimplementedManagerServiceServer) PreflightApproveJoinRequest(context.Context, *PreflightApproveJoinRequestRequest) (*PreflightApproveJoinRequestResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method PreflightApproveJoinRequest not implemented")
@@ -4440,6 +4588,78 @@ func _ManagerService_RejectJoinRequest_Handler(srv interface{}, ctx context.Cont
 	return interceptor(ctx, in, info, handler)
 }
 
+func _ManagerService_VerifyJoinIntroduction_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(VerifyJoinIntroductionRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ManagerServiceServer).VerifyJoinIntroduction(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ManagerService_VerifyJoinIntroduction_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ManagerServiceServer).VerifyJoinIntroduction(ctx, req.(*VerifyJoinIntroductionRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ManagerService_ReissueJoinSecondPin_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ReissueJoinSecondPinRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ManagerServiceServer).ReissueJoinSecondPin(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ManagerService_ReissueJoinSecondPin_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ManagerServiceServer).ReissueJoinSecondPin(ctx, req.(*ReissueJoinSecondPinRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ManagerService_PinPeerCertificate_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(PinPeerCertificateRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ManagerServiceServer).PinPeerCertificate(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ManagerService_PinPeerCertificate_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ManagerServiceServer).PinPeerCertificate(ctx, req.(*PinPeerCertificateRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ManagerService_UnpinPeerCertificate_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(UnpinPeerCertificateRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ManagerServiceServer).UnpinPeerCertificate(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ManagerService_UnpinPeerCertificate_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ManagerServiceServer).UnpinPeerCertificate(ctx, req.(*UnpinPeerCertificateRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _ManagerService_PreflightApproveJoinRequest_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(PreflightApproveJoinRequestRequest)
 	if err := dec(in); err != nil {
@@ -4942,6 +5162,22 @@ var ManagerService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "RejectJoinRequest",
 			Handler:    _ManagerService_RejectJoinRequest_Handler,
+		},
+		{
+			MethodName: "VerifyJoinIntroduction",
+			Handler:    _ManagerService_VerifyJoinIntroduction_Handler,
+		},
+		{
+			MethodName: "ReissueJoinSecondPin",
+			Handler:    _ManagerService_ReissueJoinSecondPin_Handler,
+		},
+		{
+			MethodName: "PinPeerCertificate",
+			Handler:    _ManagerService_PinPeerCertificate_Handler,
+		},
+		{
+			MethodName: "UnpinPeerCertificate",
+			Handler:    _ManagerService_UnpinPeerCertificate_Handler,
 		},
 		{
 			MethodName: "PreflightApproveJoinRequest",

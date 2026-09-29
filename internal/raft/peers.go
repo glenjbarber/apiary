@@ -160,7 +160,8 @@ func (f *FSM) applySetTrustedPeerVoter(index uint64, req *internalpb.SetTrustedP
 // silent success here would read in the operator's terminal as "it is
 // gone" for an entry that was never there, which is the one case where
 // the operator most needs to be told.
-func (f *FSM) applyUnpinTrustedPeer(index uint64, nodeID string) *FSMApplyResult {
+func (f *FSM) applyUnpinTrustedPeer(index uint64, cmd *internalpb.UnpinTrustedPeer) *FSMApplyResult {
+	nodeID := cmd.GetNodeId()
 	if nodeID == "" {
 		return &FSMApplyResult{Index: index, Error: "UnpinTrustedPeer: node_id must be set"}
 	}

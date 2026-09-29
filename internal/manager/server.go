@@ -183,6 +183,18 @@ type PeerForwarder interface {
 	// original unauthenticated caller.
 	RequestJoinColony(ctx context.Context, addr string, req *rpcpb.RequestJoinColonyRequest) (*rpcpb.RequestJoinColonyResponse, error)
 	ApproveJoinRequest(ctx context.Context, addr string, req *rpcpb.ApproveJoinRequestRequest) (*rpcpb.ApproveJoinRequestResponse, error)
+
+	// VerifyJoinIntroduction/ReissueJoinSecondPin/PinPeerCertificate/
+	// UnpinPeerCertificate (ADR-0147 Part 2 and Part 4's trust store)
+	// forward on a leader-hint rejection exactly as
+	// ApproveJoinRequest above does, and for the same reason: the
+	// member that received the click may be a follower, and only the
+	// leader can apply the command. addr is always this node's own
+	// internally-derived notion of who leads.
+	VerifyJoinIntroduction(ctx context.Context, addr string, req *rpcpb.VerifyJoinIntroductionRequest) (*rpcpb.VerifyJoinIntroductionResponse, error)
+	ReissueJoinSecondPin(ctx context.Context, addr string, req *rpcpb.ReissueJoinSecondPinRequest) (*rpcpb.ReissueJoinSecondPinResponse, error)
+	PinPeerCertificate(ctx context.Context, addr string, req *rpcpb.PinPeerCertificateRequest) (*rpcpb.PinPeerCertificateResponse, error)
+	UnpinPeerCertificate(ctx context.Context, addr string, req *rpcpb.UnpinPeerCertificateRequest) (*rpcpb.UnpinPeerCertificateResponse, error)
 	RejectJoinRequest(ctx context.Context, addr string, req *rpcpb.RejectJoinRequestRequest) (*rpcpb.RejectJoinRequestResponse, error)
 
 	// CancelJoinRequest/PurgeJoinRequest mirror RequestJoinColony/

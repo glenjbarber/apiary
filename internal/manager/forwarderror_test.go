@@ -95,7 +95,7 @@ func newJoinedFollowerRaftdSocket(t *testing.T, leaderSocket string, nodeID stri
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	reqResp, err := leaderClient.RequestJoinColony(ctx, &rpcpb.RequestJoinColonyRequest{NodeId: nodeID, RaftBindAddress: addr, JoinerLogStateObserved: true})
+	reqResp, err := leaderClient.RequestJoinColony(ctx, withIntroduction(&rpcpb.RequestJoinColonyRequest{NodeId: nodeID, RaftBindAddress: addr, JoinerLogStateObserved: true}, t))
 	if err != nil || reqResp.GetError() != "" {
 		t.Fatalf("RequestJoinColony() = (%+v, %v)", reqResp, err)
 	}

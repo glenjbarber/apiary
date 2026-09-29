@@ -646,6 +646,54 @@ service ManagerService {
   rpc ApproveJoinRequest(ApproveJoinRequestRequest) returns (ApproveJoinRequestResponse);
   rpc RejectJoinRequest(RejectJoinRequestRequest) returns (RejectJoinRequestResponse);
 
+  // VerifyJoinIntroduction/ReissueJoinSecondPin are ADR-0147 Part 2's
+  // two new Admin-side steps between a request being recorded and it
+  // being approvable.
+  //
+  // VerifyJoinIntroduction takes the first code the REQUESTING Comb
+  // generated plus the fingerprints that request carried, and on
+  // success the target generates a second PIN that is released only to
+  // the requester. ReissueJoinSecondPin re-arms that PIN, capped at 2,
+  // for the case where AddVoter failed and the spent PIN was
+  // deliberately not restored.
+  //
+  // Both are state-changing, so both are Admin-tier, and both forward
+  // to the leader the same way ApproveJoinRequest does - using the
+  // AUTHENTICATED peer dial with the API key attached, never the
+  // unauthenticated one. The forward carries the whole request,
+  // including the pasted values, so the leader checks exactly what the
+  // operator typed.
+  //
+  // Neither renders anything. VerifyJoinIntroduction's response
+  // deliberately does NOT carry the second PIN: the value goes to the
+  // requesting Comb and only the requesting Comb.
+  rpc VerifyJoinIntroduction(VerifyJoinIntroductionRequest) returns (VerifyJoinIntroductionResponse);
+  rpc ReissueJoinSecondPin(ReissueJoinSecondPinRequest) returns (ReissueJoinSecondPinResponse);
+
+  // PinPeerCertificate/UnpinPeerCertificate are ADR-0147 Part 4's
+  // replicated peer trust store, which until now had no writer
+  // anywhere in the tree: the command arm existed, the FSM applied it,
+  // and nothing on any path ever constructed one, so the store was
+  // always empty and the derived peer-ca.pem it feeds had nothing in
+  // it.
+  //
+  // PinPeerCertificate is the store's intended writer and is called
+  // automatically by the introduction path above - it is not a button
+  // on a page, and it is never a page's own action. It is exposed
+  // because an operator can also pin a certificate out of band, and
+  // because an Admin CAN add a pin, which is exactly why the store is
+  // documented as a mechanism for honest operation rather than as a
+  // security boundary. A pin is not a substitute for the root-owned
+  // authorization entry, and nothing authenticates by presenting one.
+  //
+  // Neither is capable of creating or modifying an authorization
+  // entry. That is ADR-0147 Part 3's load-bearing negative: the only
+  // writer is the root-only apiaryctl binary acting on a local file,
+  // and any future RPC that touches that file is a security regression
+  // even if it is Admin-tier.
+  rpc PinPeerCertificate(PinPeerCertificateRequest) returns (PinPeerCertificateResponse);
+  rpc UnpinPeerCertificate(UnpinPeerCertificateRequest) returns (UnpinPeerCertificateResponse);
+
   // PreflightApproveJoinRequest previews ApproveJoinRequest's own
   // reachability gate (ADR-0097/ADR-0103) without ever calling AddVoter -
   // Admin-tier, not Viewer, because it makes managerd dial a
@@ -3227,6 +3275,21 @@ enum JoinRequestStatus {
   JOIN_REQUEST_STATUS_APPROVED = 2;
   JOIN_REQUEST_STATUS_REJECTED = 3;
   JOIN_REQUEST_STATUS_CANCELLED = 4;
+  JOIN_REQUEST_STATUS_FAILED = 5;
+}
+
+// JoinRequestStage mirrors internalpb.JoinRequestStage (ADR-0147 Part
+// 2) - how far the two-way handshake has got, which is a DIFFERENT AXIS
+// from the status above. A request can be stage CODE_VERIFIED and
+// status PENDING, which is exactly the window where the operator is
+// copying the second PIN off the requesting Comb and into the target's
+// page; there is no single status value for that and there should not
+// be one.
+enum JoinRequestStage {
+  JOIN_REQUEST_STAGE_UNSPECIFIED = 0;
+  JOIN_REQUEST_STAGE_INTRODUCED = 1;
+  JOIN_REQUEST_STAGE_CODE_VERIFIED = 2;
+  JOIN_REQUEST_STAGE_AUTHORIZED = 3;
 }
 
 // PendingJoinRequest mirrors internalpb.PendingJoinRequest - see
@@ -3284,6 +3347,37 @@ message PendingJoinRequest {
   JoinApprovalAttestation approval_2 = 13;
   string authorization_id = 14;
   int64 consumed_at_unix = 15;
+
+  // stage mirrors internalpb.PendingJoinRequest's own field of the same
+  // name (ADR-0147 Part 2) - see there for what each stage means and
+  // why it is not part of the status enum.
+  JoinRequestStage stage = 16;
+
+  // advertised_fingerprints mirrors internalpb.PendingJoinRequest's own
+  // field of the same name: every certificate the joiner actually held
+  // when it made this request. The target's operator pastes these into
+  // the first-code form and the target compares them against this
+  // field, so a mismatch is a refusal showing both values.
+  repeated string advertised_fingerprints = 17;
+
+  // first_code_attempts / second_pin_attempts mirror the replicated
+  // per-stage attempt counters, capped at 5 each. They are on the wire
+  // so the target's panel can say "4 of 5 used" rather than letting an
+  // operator burn the last guess without knowing.
+  uint32 first_code_attempts = 18;
+  uint32 second_pin_attempts = 19;
+
+  // second_pin_expires_at_unix / second_pin_reissues mirror the
+  // internal fields of the same names.
+  //
+  // The second PIN ITSELF is deliberately NOT on this message, and not
+  // on ListJoinRequests either. It is released only to the requesting
+  // Comb, on that Comb's own GetJoinRequestStatus poll, which is a
+  // different response message entirely. An operator who could read the
+  // PIN here would be able to complete the handshake alone, which
+  // collapses a two-party flow into one.
+  int64 second_pin_expires_at_unix = 20;
+  uint32 second_pin_reissues = 21;
 }
 
 message RequestJoinColonyRequest {
@@ -3328,6 +3422,45 @@ message RequestJoinColonyRequest {
   // needing a second live raftd.
   bool joiner_log_state_observed = 6;
   uint64 joiner_last_log_index = 7;
+
+  // introduction_code is ADR-0147 Part 2's FIRST CODE, and the inversion
+  // that makes the two-way flow work: it is generated by the REQUESTING
+  // Comb, locally, with crypto/rand over 10^6 and rendered in 6 digits,
+  // BEFORE it ever dials. The target's operator reads it off the
+  // joiner's own screen and pastes it into the target's page, and the
+  // target compares it against what this request carried.
+  //
+  // What that proves is not "two people are looking at the same six
+  // digits" - it is "the operator at the target has just read this
+  // value off the requesting Comb's own page". The comparison is
+  // against the machine, not against another rendering of this
+  // server's own state.
+  //
+  // REQUIRED, and an empty value is refused rather than defaulted. The
+  // whole security of Part 2 rests on the target having something the
+  // requester generated for it to check; generating one here, on the
+  // target, would restore the pre-ADR-0147 shape where both operators
+  // are reading the same server.
+  string introduction_code = 8;
+
+  // advertised_fingerprints is every certificate the joiner ACTUALLY
+  // HOLDS, as hostcert.Fingerprint(cert.Raw): its tls_cert always and
+  // its raft_tls_cert when Raft transport TLS is configured. See
+  // internalpb.PendingJoinRequest's own field doc.
+  //
+  // The receiving member fills this in from this managerd's own
+  // certificate FILES before any forwarding, on every path including
+  // the path that records the request locally - a locally-recorded
+  // request must carry the joiner's real fingerprints or the operator
+  // is comparing against nothing. A caller (or a test) that already
+  // set it explicitly is trusted as-is.
+  //
+  // EMPTY IS REFUSED, not tolerated. A request carrying no
+  // fingerprints cannot be approved, so recording one is only
+  // producing a row that will certainly be refused later; saying so
+  // at the moment the operator can still act on it is the whole point
+  // of failing closed here.
+  repeated string advertised_fingerprints = 9;
 }
 
 message RequestJoinColonyResponse {
@@ -3350,11 +3483,56 @@ message GetJoinRequestStatusRequest {
   // Colony member reaches that member instead of failing "not found"
   // against this node's own (unrelated) local raft.
   string target_address = 2;
+
+  // introduction_code is ADR-0147 Part 2's SECOND requirement on this
+  // poll, and it is the one that changed the ADR's own design.
+  //
+  // The ADR released the target's second PIN on this poll keyed on the
+  // 64-bit request_id ALONE. request_id is unguessable, but the poll is
+  // unauthenticated and reachable by anyone who can reach the port, and
+  // the whole point of Part 2 is that reaching the port is not the
+  // hurdle. Requiring the first code as well closes the request-id
+  // guessing path for the cost of one field, and it is nearly free:
+  // the first code is the requester's own, already single-use, already
+  // replicated, already capped at 5 attempts, and already cleared the
+  // moment it was accepted - so the value that authorizes the release
+  // is the value whose absence the request already demonstrates.
+  //
+  // Knowledge of BOTH values is the credential. That is the same
+  // knowledge-is-the-credential shape CancelJoinRequest already uses,
+  // with a second factor attached, and no third concept is introduced.
+  string introduction_code = 3;
 }
 
 message GetJoinRequestStatusResponse {
   PendingJoinRequest request = 1;
   string error = 2;
+
+  // second_pin is the TARGET's second PIN, released HERE and only here.
+  // Never on PendingJoinRequest, never on ListJoinRequests, never on
+  // any message the target's own operator reads.
+  //
+  // It is populated only while the request is stage CODE_VERIFIED, and
+  // only when the caller supplied the matching introduction_code. An
+  // operator who can see this value everywhere has no reason to
+  // perform the comparison at all, and a target Admin who can read it
+  // can complete the flow alone, which would collapse the handshake
+  // back into one party.
+  //
+  // It is NOT secret in transit and is not meant to be: it travels the
+  // same unauthenticated wire as the request itself. What it proves is
+  // that a human read one screen and typed into another. Do not "fix"
+  // that by adding confidentiality this value cannot have - there is
+  // no shared secret to encrypt it with, and inventing one would turn
+  // a proof of human attention into a proof of key possession, which
+  // is a strictly weaker property for this flow.
+  string second_pin = 3;
+
+  // second_pin_expires_at_unix is when the value above stops being
+  // usable. Shorter than the request's own TTL on purpose: the PIN is
+  // the value that actually authorizes something and only has to
+  // survive one copy-and-paste.
+  int64 second_pin_expires_at_unix = 4;
 }
 
 message ListJoinRequestsRequest {}
@@ -3400,6 +3578,21 @@ message ApproveJoinRequestRequest {
   // Comb it is. The layer that closes a hostile Admin is the root-owned
   // authorization file, not this rule.
   string approving_node_id = 4;
+
+  // second_pin is ADR-0147 Part 2's second authorization-bearing value:
+  // the 8-digit PIN the TARGET generated, which the target's operator
+  // read off the REQUESTING Comb's own screen and typed here. It is
+  // compared in constant time against the PIN held in replicated
+  // state, and the PIN is spent by its own raft command BEFORE AddVoter
+  // is called.
+  //
+  // It is REQUIRED. Without it the call is refused before any
+  // reachability dial, any authorization read and any membership
+  // change - which is the entire reason this exists: the confirmation
+  // phrase below is a constant anyone can read out of this
+  // repository, and something an attacker can satisfy must not be the
+  // whole of the gate.
+  string second_pin = 5;
 }
 
 message ApproveJoinRequestResponse {
@@ -3416,6 +3609,90 @@ message ApproveJoinRequestResponse {
   // understand.
   bool awaiting_second_authorization = 4;
   string second_authorization_required = 5;
+}
+
+message VerifyJoinIntroductionRequest {
+  string request_id = 1;
+
+  // introduction_code is the FIRST CODE exactly as the requesting
+  // Comb's own screen rendered it. The target compares it against what
+  // the request carried, in constant time, inside the FSM.
+  string introduction_code = 2;
+
+  // fingerprints is what the operator pasted as the joiner's
+  // advertised fingerprints - read off the REQUESTING Comb's own
+  // screen, not off this Colony's page, which is what makes the
+  // comparison a check against a machine rather than a check against
+  // this server's own state.
+  repeated string fingerprints = 3;
+}
+
+message VerifyJoinIntroductionResponse {
+  PendingJoinRequest request = 1;
+  string error = 2;
+  string leader_hint = 3;
+
+  // second_pin_reissued is set when the request had already reached
+  // stage CODE_VERIFIED and this call re-armed the PIN rather than
+  // verifying an introduction. It is reported rather than being a
+  // separate RPC purely so the refusal message can be explicit about
+  // which of the two things the operator did.
+  bool second_pin_reissued = 4;
+}
+
+message ReissueJoinSecondPinRequest {
+  string request_id = 1;
+}
+
+message ReissueJoinSecondPinResponse {
+  PendingJoinRequest request = 1;
+  string error = 2;
+  string leader_hint = 3;
+
+  // reissues_remaining is how many explicit re-arms are still
+  // available, capped at 2 in total. An operator about to burn the
+  // last one deserves to know it is the last.
+  uint32 reissues_remaining = 4;
+}
+
+// TrustedPeer mirrors internalpb.TrustedPeer (ADR-0147 Part 4) - one
+// Comb's serving certificate, pinned by this Colony. See there for what
+// each field means and, in particular, for why is_voter is a separate
+// bit from the pin itself rather than a field on PendingJoinRequest.
+//
+// Exposed on the wire only because PinPeerCertificate below takes one.
+// It is a RECORD of what this Colony has decided to trust, not a
+// credential: nothing authenticates a caller by presenting one, and
+// no caller may refuse, route or authenticate on comb_name.
+message TrustedPeer {
+  string node_id = 1;
+  string comb_name = 2;
+  string fingerprint = 3;
+  string cert_pem = 4;
+  int64 not_after_unix = 5;
+  int64 pinned_at_unix = 6;
+  string pinned_by = 7;
+  bool is_voter = 8;
+}
+
+message PinPeerCertificateRequest {
+  TrustedPeer peer = 1;
+}
+message PinPeerCertificateResponse {
+  TrustedPeer peer = 1;
+  string error = 2;
+  string leader_hint = 3;
+}
+
+message UnpinPeerCertificateRequest {
+  string node_id = 1;
+  string reason = 2;
+}
+
+message UnpinPeerCertificateResponse {
+  TrustedPeer peer = 1;
+  string error = 2;
+  string leader_hint = 3;
 }
 
 // JoinApprovalAttestation mirrors internalpb.JoinApprovalAttestation -
