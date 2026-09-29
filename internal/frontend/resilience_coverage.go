@@ -213,11 +213,12 @@ func (s *Server) handleCoveragePage(w http.ResponseWriter, r *http.Request) {
 	} else {
 		voterReachability := s.gatherVoterReachability(r.Context(), statusResp, localNodeID)
 		leaderID := statusResp.GetRaftLeaderId()
+		vantage := quorumVantage(statusResp, localNodeID)
 
-		quorumEval := invariant.EvaluateQuorumTolerance(voterReachability, leaderID)
+		quorumEval := invariant.EvaluateQuorumTolerance(voterReachability, leaderID, vantage)
 		scenarios = append(scenarios, coverage.ClassifyQuorumTolerance(quorumEval, len(voterReachability)))
 
-		voterImpacts := invariant.ClassifyVoterQuorumImpacts(voterReachability, leaderID)
+		voterImpacts := invariant.ClassifyVoterQuorumImpacts(voterReachability, leaderID, vantage)
 		nodeIDs := s.simulateNodeChoices(r)
 		scenarios = append(scenarios, s.gatherHiveFailureScenarios(nodeIDs, voterImpacts, vms, jails)...)
 	}

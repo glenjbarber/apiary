@@ -101,3 +101,63 @@ func TestValidQuorumFact_AcceptsInternallyConsistentData(t *testing.T) {
 		}
 	}
 }
+
+func TestClassifyQuorumFromVantage_NonLeaderVantageSkipsTheLeaderDowngrade(t *testing.T) {
+	// Losing the leader from 3 reachable voters leaves 2 of 2 reachable
+	// against a quorum size of 2, so the raw verdict is Survives. Under
+	// leader-vantage that is downgraded to Unknown; under a non-leader
+	// vantage the downgrade's premise never applied, so it stands.
+	f := QuorumFact{
+		TargetIsVoter: true, TotalVoters: 3, RemainingVoters: 2,
+		RemainingReachable: 2, QuorumSize: 2,
+	}
+	if got := ClassifyQuorumFromVantage(f, true, VantageFromLeader); got != QuorumUnknown {
+		t.Errorf("leader vantage: got %v, want QuorumUnknown", got)
+	}
+	if got := ClassifyQuorumFromVantage(f, true, VantageFromNonLeader); got != QuorumSurvives {
+		t.Errorf("non-leader vantage: got %v, want QuorumSurvives", got)
+	}
+}
+
+func TestClassifyQuorumFromVantage_UnnamedVantageFailsClosed(t *testing.T) {
+	// The zero QuorumVantage is treated as leader-vantage: a caller
+	// that did not say where its data came from is handed the
+	// conservative reading rather than a stronger verdict it did not
+	// earn. This is what makes adding the parameter safe without
+	// auditing every caller of the older entry point at once.
+	f := QuorumFact{
+		TargetIsVoter: true, TotalVoters: 3, RemainingVoters: 2,
+		RemainingReachable: 2, QuorumSize: 2,
+	}
+	if got := ClassifyQuorumFromVantage(f, true, QuorumVantage("")); got != QuorumUnknown {
+		t.Errorf("unnamed vantage: got %v, want QuorumUnknown", got)
+	}
+}
+
+func TestClassifyQuorumFromVantage_LostIsNeverDowngradedFromEitherVantage(t *testing.T) {
+	// A count-based Lost is a voter-count fact independent of
+	// reachability, so no vantage point can soften it.
+	f := QuorumFact{
+		TargetIsVoter: true, TotalVoters: 3, RemainingVoters: 2,
+		RemainingReachable: 0, RemainingUnknown: 2, QuorumSize: 2,
+	}
+	for _, vantage := range []QuorumVantage{VantageFromLeader, VantageFromNonLeader, QuorumVantage("")} {
+		if got := ClassifyQuorumFromVantage(f, true, vantage); got != QuorumLost {
+			t.Errorf("vantage %q: got %v, want QuorumLost", vantage, got)
+		}
+	}
+}
+
+func TestClassifyQuorumFromVantage_NonLeaderTargetIsUnaffectedByEitherVantage(t *testing.T) {
+	// The downgrade is scoped to the leader's own loss. A non-leader
+	// target is classified identically from either vantage.
+	f := QuorumFact{
+		TargetIsVoter: true, TotalVoters: 3, RemainingVoters: 2,
+		RemainingReachable: 2, QuorumSize: 2,
+	}
+	for _, vantage := range []QuorumVantage{VantageFromLeader, VantageFromNonLeader} {
+		if got := ClassifyQuorumFromVantage(f, false, vantage); got != QuorumSurvives {
+			t.Errorf("vantage %q: got %v, want QuorumSurvives", vantage, got)
+		}
+	}
+}

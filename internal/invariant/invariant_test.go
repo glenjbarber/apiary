@@ -8,10 +8,10 @@ import (
 )
 
 // noLeader is a node ID never present in these tests' voter lists, so
-// the leader-loss downgrade in recovery.ClassifyQuorum never fires -
-// isolating each test's own condition from that separate behavior
-// (which TestEvaluateQuorumTolerance_LeaderVoterGetsDowngrade covers on
-// its own).
+// the leader-loss downgrade in recovery.ClassifyQuorumFromVantage
+// never fires - isolating each test's own condition from that separate
+// behavior (which TestEvaluateQuorumTolerance_LeaderVoterGetsDowngrade
+// covers on its own).
 const noLeader = "not-a-voter"
 
 func TestEvaluateQuorumTolerance_TrueWhenEveryVoterLossSurvives(t *testing.T) {
@@ -23,7 +23,7 @@ func TestEvaluateQuorumTolerance_TrueWhenEveryVoterLossSurvives(t *testing.T) {
 		{NodeID: "b", Reachability: ReachabilityReachable},
 		{NodeID: "c", Reachability: ReachabilityReachable},
 	}
-	got := EvaluateQuorumTolerance(voters, noLeader)
+	got := EvaluateQuorumTolerance(voters, noLeader, recovery.VantageFromLeader)
 	if got.Result != ResultTrue {
 		t.Errorf("Result = %v, want True; evidence=%+v", got.Result, got.Evidence)
 	}
@@ -38,7 +38,7 @@ func TestEvaluateQuorumTolerance_FalseWhenAnyVoterLossIsLost(t *testing.T) {
 		{NodeID: "b", Reachability: ReachabilityUnreachable},
 		{NodeID: "c", Reachability: ReachabilityReachable},
 	}
-	got := EvaluateQuorumTolerance(voters, noLeader)
+	got := EvaluateQuorumTolerance(voters, noLeader, recovery.VantageFromLeader)
 	if got.Result != ResultFalse {
 		t.Errorf("Result = %v, want False; evidence=%+v", got.Result, got.Evidence)
 	}
@@ -53,7 +53,7 @@ func TestEvaluateQuorumTolerance_UnknownWhenNoneLostButSomeUnknown(t *testing.T)
 		{NodeID: "b", Reachability: ReachabilityUnknown},
 		{NodeID: "c", Reachability: ReachabilityReachable},
 	}
-	got := EvaluateQuorumTolerance(voters, noLeader)
+	got := EvaluateQuorumTolerance(voters, noLeader, recovery.VantageFromLeader)
 	if got.Result != ResultUnknown {
 		t.Errorf("Result = %v, want Unknown; evidence=%+v", got.Result, got.Evidence)
 	}
@@ -73,7 +73,7 @@ func TestEvaluateQuorumTolerance_LeaderVoterGetsDowngrade(t *testing.T) {
 		{NodeID: "b", Reachability: ReachabilityReachable},
 		{NodeID: "c", Reachability: ReachabilityReachable},
 	}
-	got := EvaluateQuorumTolerance(voters, "a")
+	got := EvaluateQuorumTolerance(voters, "a", recovery.VantageFromLeader)
 	if got.Result != ResultUnknown {
 		t.Fatalf("Result = %v, want Unknown (leader-loss downgrade for voter a)", got.Result)
 	}
@@ -207,7 +207,7 @@ func TestClassifyVoterQuorumImpacts_SurvivesForEveryVoterWhenAllReachable(t *tes
 		{NodeID: "b", Reachability: ReachabilityReachable},
 		{NodeID: "c", Reachability: ReachabilityReachable},
 	}
-	impacts := ClassifyVoterQuorumImpacts(voters, noLeader)
+	impacts := ClassifyVoterQuorumImpacts(voters, noLeader, recovery.VantageFromLeader)
 	if len(impacts) != 3 {
 		t.Fatalf("len(impacts) = %d, want 3", len(impacts))
 	}
@@ -231,7 +231,7 @@ func TestClassifyVoterQuorumImpacts_LostOnlyForTheVotersWhoseLossBreaksQuorum(t 
 		{NodeID: "b", Reachability: ReachabilityUnreachable},
 		{NodeID: "c", Reachability: ReachabilityReachable},
 	}
-	impacts := ClassifyVoterQuorumImpacts(voters, noLeader)
+	impacts := ClassifyVoterQuorumImpacts(voters, noLeader, recovery.VantageFromLeader)
 	if got := impactFor(impacts, "a"); !got.Valid || got.Verdict != recovery.QuorumLost {
 		t.Errorf("impact for a = %+v, want Valid=true Verdict=Lost", got)
 	}
@@ -249,7 +249,7 @@ func TestClassifyVoterQuorumImpacts_LeaderLossDowngradesOnlyTheLeadersOwnImpact(
 		{NodeID: "b", Reachability: ReachabilityReachable},
 		{NodeID: "c", Reachability: ReachabilityReachable},
 	}
-	impacts := ClassifyVoterQuorumImpacts(voters, "a")
+	impacts := ClassifyVoterQuorumImpacts(voters, "a", recovery.VantageFromLeader)
 	if got := impactFor(impacts, "a"); !got.Valid || got.Verdict != recovery.QuorumUnknown {
 		t.Errorf("impact for leader a = %+v, want Valid=true Verdict=Unknown (leader-loss downgrade)", got)
 	}
@@ -272,8 +272,8 @@ func TestClassifyVoterQuorumImpacts_EvaluateQuorumToleranceStaysConsistentWithPe
 		{NodeID: "b", Reachability: ReachabilityUnreachable},
 		{NodeID: "c", Reachability: ReachabilityReachable},
 	}
-	eval := EvaluateQuorumTolerance(voters, noLeader)
-	impacts := ClassifyVoterQuorumImpacts(voters, noLeader)
+	eval := EvaluateQuorumTolerance(voters, noLeader, recovery.VantageFromLeader)
+	impacts := ClassifyVoterQuorumImpacts(voters, noLeader, recovery.VantageFromLeader)
 	anyLost := false
 	for _, impact := range impacts {
 		if impact.Valid && impact.Verdict == recovery.QuorumLost {
@@ -282,5 +282,70 @@ func TestClassifyVoterQuorumImpacts_EvaluateQuorumToleranceStaysConsistentWithPe
 	}
 	if anyLost && eval.Result != ResultFalse {
 		t.Fatalf("ClassifyVoterQuorumImpacts found a Lost voter but EvaluateQuorumTolerance.Result = %v, want False", eval.Result)
+	}
+}
+
+func TestEvaluateQuorumTolerance_NonLeaderVantageIsNotLeaderDowngraded(t *testing.T) {
+	// The same 3-voter all-reachable set and the same current leader as
+	// TestEvaluateQuorumTolerance_LeaderVoterGetsDowngrade above, but
+	// the reachability counts were gathered by this caller rather than
+	// by the leader. The leader-loss argument - that leader-to-voter
+	// reachability says nothing about voter-to-voter reachability - does
+	// not apply to data this caller produced itself, so the downgrade
+	// must not fire and the verdict must be True.
+	voters := []VoterReachability{
+		{NodeID: "a", Reachability: ReachabilityReachable},
+		{NodeID: "b", Reachability: ReachabilityReachable},
+		{NodeID: "c", Reachability: ReachabilityReachable},
+	}
+	got := EvaluateQuorumTolerance(voters, "a", recovery.VantageFromNonLeader)
+	if got.Result != ResultTrue {
+		t.Fatalf("Result = %v, want True: a non-leader vantage must not be downgraded for a reason that only describes the leader's own", got.Result)
+	}
+}
+
+func TestEvaluateQuorumTolerance_ZeroVantageFailsClosed(t *testing.T) {
+	// A caller that did not say where its data came from gets the
+	// conservative leader-vantage reading, never a stronger verdict than
+	// it earned. This is the property that makes the new parameter safe
+	// to add without auditing every existing caller at once.
+	voters := []VoterReachability{
+		{NodeID: "a", Reachability: ReachabilityReachable},
+		{NodeID: "b", Reachability: ReachabilityReachable},
+		{NodeID: "c", Reachability: ReachabilityReachable},
+	}
+	got := EvaluateQuorumTolerance(voters, "a", recovery.QuorumVantage(""))
+	if got.Result != ResultUnknown {
+		t.Fatalf("Result = %v, want Unknown for an unnamed vantage", got.Result)
+	}
+}
+
+func TestEvaluateQuorumTolerance_NonLeaderVantageStillReportsLost(t *testing.T) {
+	// The downgrade was never the only thing the leader-vantage path
+	// did. A count-based Lost is a voter-count fact independent of
+	// reachability, so it must be Lost from either vantage - a
+	// non-leader vantage must not soften it.
+	voters := []VoterReachability{
+		{NodeID: "a", Reachability: ReachabilityUnreachable},
+		{NodeID: "b", Reachability: ReachabilityUnreachable},
+		{NodeID: "c", Reachability: ReachabilityReachable},
+	}
+	for _, vantage := range []recovery.QuorumVantage{recovery.VantageFromLeader, recovery.VantageFromNonLeader} {
+		got := EvaluateQuorumTolerance(voters, "c", vantage)
+		if got.Result != ResultFalse {
+			t.Errorf("vantage %q: Result = %v, want False", vantage, got.Result)
+		}
+	}
+}
+
+func TestClassifyVoterQuorumImpacts_NonLeaderVantageKeepsLeaderSurvives(t *testing.T) {
+	voters := []VoterReachability{
+		{NodeID: "a", Reachability: ReachabilityReachable},
+		{NodeID: "b", Reachability: ReachabilityReachable},
+		{NodeID: "c", Reachability: ReachabilityReachable},
+	}
+	impacts := ClassifyVoterQuorumImpacts(voters, "a", recovery.VantageFromNonLeader)
+	if got := impactFor(impacts, "a"); !got.Valid || got.Verdict != recovery.QuorumSurvives {
+		t.Errorf("impact for leader a = %+v, want Survives from a non-leader vantage", got)
 	}
 }
