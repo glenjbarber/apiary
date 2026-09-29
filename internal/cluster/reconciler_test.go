@@ -2237,6 +2237,14 @@ func newFakeHASTManager() *fakeHASTManager {
 	return &fakeHASTManager{roleSet: map[string]hast.Role{}, statusKnown: map[string]bool{}}
 }
 
+// alwaysReadyHASTDeviceStat stubs Reconciler.HASTDeviceStat for tests
+// exercising a primary HAST role's bhyve/jail provisioning path - there
+// is no real devfs to poll against on a test machine, so this reports
+// every device node as already present, matching how a real hastd
+// worker normally finishes well within waitForHASTDevicePrimary's
+// default timeout.
+func alwaysReadyHASTDeviceStat(string) error { return nil }
+
 func (f *fakeHASTManager) WriteConfig(resources []hast.Resource) error {
 	f.writtenConfigs = append(f.writtenConfigs, resources)
 	return nil
@@ -2298,7 +2306,7 @@ func TestReconciler_RunOnce_ProvisionsHASTPrimaryForReplicatedVM(t *testing.T) {
 	vms := newFakeVMManager()
 	h := newFakeHASTManager()
 
-	r := &Reconciler{Raft: raft, ZFS: zfs, Bhyve: vms, HAST: h, HASTRestartSettleDelay: time.Millisecond, LocalNodeID: "node-a", BootROM: "/fw/UEFI.fd"}
+	r := &Reconciler{Raft: raft, ZFS: zfs, Bhyve: vms, HAST: h, HASTRestartSettleDelay: time.Millisecond, HASTDeviceStat: alwaysReadyHASTDeviceStat, LocalNodeID: "node-a", BootROM: "/fw/UEFI.fd"}
 	if err := r.RunOnce(context.Background()); err != nil {
 		t.Fatalf("RunOnce() error: %v", err)
 	}
@@ -2332,6 +2340,153 @@ func TestReconciler_RunOnce_ProvisionsHASTPrimaryForReplicatedVM(t *testing.T) {
 	// its whole disk, there's nothing useful for a dataset to hold.
 	if zfs.existing["vm-1"] {
 		t.Errorf("plain dataset vm-1 was created for a replicated VM, want none")
+	}
+}
+
+// TestReconciler_RunOnce_HASTDeviceAppearingAfterShortDelayStillSucceeds
+// is the regression test for the 2026-09-29 live incident: hastctl
+// confirming a role transition doesn't mean /dev/hast/<name> has
+// appeared in devfs yet. A stat that fails a couple of times before
+// succeeding - well within waitForHASTDevicePrimary's timeout - must
+// still result in a successfully created bhyve VM in the very same
+// RunOnce, not an error.
+func TestReconciler_RunOnce_HASTDeviceAppearingAfterShortDelayStillSucceeds(t *testing.T) {
+	raft := &fakeRaftClient{
+		resp: &internalpb.ListVMsResponse{
+			Vms: []*internalpb.VMDefinition{{Id: "vm-1", NodeId: "node-a", ReplicaNodeId: "node-b"}},
+		},
+		statusResp: statusResponseWithPeers("node-a", "10.0.0.1:17600", "node-b", "10.0.0.2:17600"),
+	}
+	zfs := newFakeDatasetManager()
+	zfs.mountpointFor["hast-vm-vm-1"] = t.TempDir()
+	vms := newFakeVMManager()
+	h := newFakeHASTManager()
+
+	var statCalls int
+	flakyStat := func(string) error {
+		statCalls++
+		if statCalls < 3 {
+			return os.ErrNotExist
+		}
+		return nil
+	}
+
+	r := &Reconciler{
+		Raft: raft, ZFS: zfs, Bhyve: vms, HAST: h,
+		HASTRestartSettleDelay: time.Millisecond, HASTDeviceStat: flakyStat,
+		HASTDeviceAppearTimeout: 2 * time.Second,
+		LocalNodeID:             "node-a", BootROM: "/fw/UEFI.fd",
+	}
+	if err := r.RunOnce(context.Background()); err != nil {
+		t.Fatalf("RunOnce() error: %v, want the delayed device to still resolve within this tick", err)
+	}
+	if statCalls < 3 {
+		t.Errorf("hastDeviceStat called %d times, want at least 3 (the flaky stat's own success point)", statCalls)
+	}
+	if _, ok := vms.lastCfg["vm-1"]; !ok {
+		t.Errorf("bhyve CreateVM was never called for vm-1, want it created once the device appeared")
+	}
+}
+
+// TestReconciler_RunOnce_HASTDeviceNeverAppearingDoesNotBlockOtherRoles
+// confirms that one resource's device never showing up (a real, if rare,
+// failure - not just a slow one) is reported as this tick's ordinary
+// "not provisioned this tick" per-VM error, not a hard failure of
+// reconcileHASTRoles that would also block every OTHER HAST role being
+// reconciled in the same tick.
+func TestReconciler_RunOnce_HASTDeviceNeverAppearingDoesNotBlockOtherRoles(t *testing.T) {
+	raft := &fakeRaftClient{
+		resp: &internalpb.ListVMsResponse{
+			Vms: []*internalpb.VMDefinition{
+				{Id: "vm-stuck", NodeId: "node-a", ReplicaNodeId: "node-b"},
+				{Id: "vm-fine", NodeId: "node-a", ReplicaNodeId: "node-b"},
+			},
+		},
+		statusResp: statusResponseWithPeers("node-a", "10.0.0.1:17600", "node-b", "10.0.0.2:17600"),
+	}
+	zfs := newFakeDatasetManager()
+	zfs.mountpointFor["hast-vm-vm-stuck"] = t.TempDir()
+	zfs.mountpointFor["hast-vm-vm-fine"] = t.TempDir()
+	vms := newFakeVMManager()
+	h := newFakeHASTManager()
+
+	stat := func(path string) error {
+		if path == "/dev/hast/vm-vm-stuck" {
+			return os.ErrNotExist // never appears
+		}
+		return nil
+	}
+
+	r := &Reconciler{
+		Raft: raft, ZFS: zfs, Bhyve: vms, HAST: h,
+		HASTRestartSettleDelay: time.Millisecond, HASTDeviceStat: stat,
+		HASTDeviceAppearTimeout: 200 * time.Millisecond,
+		LocalNodeID:             "node-a", BootROM: "/fw/UEFI.fd",
+	}
+	err := r.RunOnce(context.Background())
+	if err == nil {
+		t.Fatalf("RunOnce() error = nil, want vm-stuck's own missing-device error surfaced")
+	}
+	if !strings.Contains(err.Error(), "vm-stuck") || !strings.Contains(err.Error(), "not provisioned this tick") {
+		t.Errorf("RunOnce() error = %q, want a clear per-VM \"not provisioned this tick\" message naming vm-stuck", err)
+	}
+
+	if _, ok := vms.lastCfg["vm-stuck"]; ok {
+		t.Errorf("bhyve CreateVM was called for vm-stuck, want it withheld until its device actually appears")
+	}
+	if _, ok := vms.lastCfg["vm-fine"]; !ok {
+		t.Errorf("bhyve CreateVM was never called for vm-fine, want vm-stuck's stuck device to not block it")
+	}
+}
+
+func TestWaitForHASTDevicePrimary_ReturnsTrueAsSoonAsStatSucceeds(t *testing.T) {
+	var calls int
+	r := &Reconciler{
+		HASTDeviceAppearTimeout: time.Second,
+		HASTDeviceStat: func(string) error {
+			calls++
+			if calls < 3 {
+				return os.ErrNotExist
+			}
+			return nil
+		},
+	}
+	if !r.waitForHASTDevicePrimary("/dev/hast/vm-x") {
+		t.Fatalf("waitForHASTDevicePrimary() = false, want true once the stat starts succeeding")
+	}
+	if calls != 3 {
+		t.Errorf("stat called %d times, want exactly 3 (stop polling the instant it succeeds)", calls)
+	}
+}
+
+func TestWaitForHASTDevicePrimary_ReturnsFalseOnceTimeoutElapses(t *testing.T) {
+	r := &Reconciler{
+		HASTDeviceAppearTimeout: 150 * time.Millisecond,
+		HASTDeviceStat:          func(string) error { return os.ErrNotExist },
+	}
+	start := time.Now()
+	if r.waitForHASTDevicePrimary("/dev/hast/vm-x") {
+		t.Fatalf("waitForHASTDevicePrimary() = true, want false - the stat never succeeds")
+	}
+	if elapsed := time.Since(start); elapsed < 150*time.Millisecond {
+		t.Errorf("returned after %v, want it to have actually waited out the %v timeout", elapsed, 150*time.Millisecond)
+	}
+}
+
+func TestWaitForHASTDevicePrimary_DefaultHASTDeviceStatIsRealOsStat(t *testing.T) {
+	dir := t.TempDir()
+	missing := filepath.Join(dir, "does-not-exist")
+	present := filepath.Join(dir, "present")
+	if err := os.WriteFile(present, []byte("x"), 0o644); err != nil {
+		t.Fatalf("writing fixture file: %v", err)
+	}
+
+	r := &Reconciler{HASTDeviceAppearTimeout: 50 * time.Millisecond}
+	if r.waitForHASTDevicePrimary(missing) {
+		t.Errorf("waitForHASTDevicePrimary(%q) = true, want false for a path that was never created", missing)
+	}
+	if !r.waitForHASTDevicePrimary(present) {
+		t.Errorf("waitForHASTDevicePrimary(%q) = false, want true - HASTDeviceStat unset must fall back to a real os.Stat", present)
 	}
 }
 
@@ -2384,7 +2539,7 @@ func TestReconciler_RunOnce_PrimaryZvolSurvivesReplicaReclaimPass(t *testing.T) 
 	vms := newFakeVMManager()
 	h := newFakeHASTManager()
 
-	r := &Reconciler{Raft: raft, ZFS: zfs, Bhyve: vms, HAST: h, HASTRestartSettleDelay: time.Millisecond, LocalNodeID: "node-a", BootROM: "/fw/UEFI.fd"}
+	r := &Reconciler{Raft: raft, ZFS: zfs, Bhyve: vms, HAST: h, HASTRestartSettleDelay: time.Millisecond, HASTDeviceStat: alwaysReadyHASTDeviceStat, LocalNodeID: "node-a", BootROM: "/fw/UEFI.fd"}
 	if err := r.RunOnce(context.Background()); err != nil {
 		t.Fatalf("RunOnce() error: %v", err)
 	}
@@ -2520,7 +2675,7 @@ func TestReconciler_RunOnce_RestartsHASTdWhenLastResourceIsRemoved(t *testing.T)
 	vms := newFakeVMManager()
 	h := newFakeHASTManager()
 
-	r := &Reconciler{Raft: raft, ZFS: zfs, Bhyve: vms, HAST: h, HASTRestartSettleDelay: time.Millisecond, LocalNodeID: "node-a", BootROM: "/fw/UEFI.fd"}
+	r := &Reconciler{Raft: raft, ZFS: zfs, Bhyve: vms, HAST: h, HASTRestartSettleDelay: time.Millisecond, HASTDeviceStat: alwaysReadyHASTDeviceStat, LocalNodeID: "node-a", BootROM: "/fw/UEFI.fd"}
 	if err := r.RunOnce(context.Background()); err != nil {
 		t.Fatalf("RunOnce() (create) error: %v", err)
 	}

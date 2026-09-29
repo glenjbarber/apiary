@@ -67,6 +67,72 @@ func hastDevicePath(resourceName string) string {
 	return "/dev/hast/" + resourceName
 }
 
+// defaultHASTDeviceAppearTimeout bounds how long reconcileHASTRoles
+// polls for a primary role's /dev/hast/<name> device node to actually
+// appear after hastctl confirms the role itself - see
+// waitForHASTDevicePrimary's own doc comment. In practice this race
+// resolves in well under a second (devfs catching up with a worker
+// process hastd already started); this is a generous ceiling, not an
+// expected wait.
+const defaultHASTDeviceAppearTimeout = 5 * time.Second
+
+// hastDevicePollInterval is how often waitForHASTDevicePrimary re-checks
+// during hastDeviceAppearTimeout.
+const hastDevicePollInterval = 100 * time.Millisecond
+
+// hastDeviceAppearTimeout returns Reconciler.HASTDeviceAppearTimeout,
+// defaulting to defaultHASTDeviceAppearTimeout if unset.
+func (r *Reconciler) hastDeviceAppearTimeout() time.Duration {
+	if r.HASTDeviceAppearTimeout == 0 {
+		return defaultHASTDeviceAppearTimeout
+	}
+	return r.HASTDeviceAppearTimeout
+}
+
+// hastDeviceStat checks whether a device node exists, via
+// Reconciler.HASTDeviceStat if set (tests - there is no real devfs to
+// poll against on a test machine) or a real os.Stat otherwise.
+func (r *Reconciler) hastDeviceStat(path string) error {
+	if r.HASTDeviceStat != nil {
+		return r.HASTDeviceStat(path)
+	}
+	_, err := os.Stat(path)
+	return err
+}
+
+// waitForHASTDevicePrimary polls for path - a primary role's own device
+// node - to appear, up to hastDeviceAppearTimeout, before
+// reconcileHASTRoles reports the role as usable this tick.
+//
+// hastctl itself confirms a role transition (ensureHASTResourceAndRole's
+// own Status re-check, just before this is called) slightly before
+// hastd's worker process actually finishes creating the /dev/hast/<name>
+// devfs node - caught live (2026-09-29): a replicated VM's own bhyve
+// preflight failed to stat a device that role confirmation said should
+// already exist, because reconcileHASTRoles handed back the theoretical
+// path without ever checking it was actually there. A short bounded
+// poll resolves this within the same tick in the overwhelmingly common
+// case. If it still hasn't appeared once the timeout elapses, the
+// caller leaves this resource out of the tick's devicePaths rather than
+// treating it as fatal - see reconcileHASTRoles's own call site: doing
+// so lets ensureVM/ensureJail's own existing "not provisioned this
+// tick" error cover just this one resource, on this one tick, without
+// aborting every other role reconcileHASTRoles is processing at the
+// same time. The very next tick's ensureHASTResourceAndRole (already
+// primary, idempotent) plus another check normally succeeds.
+func (r *Reconciler) waitForHASTDevicePrimary(path string) bool {
+	deadline := time.Now().Add(r.hastDeviceAppearTimeout())
+	for {
+		if err := r.hastDeviceStat(path); err == nil {
+			return true
+		}
+		if time.Now().After(deadline) {
+			return false
+		}
+		time.Sleep(hastDevicePollInterval)
+	}
+}
+
 func hastProviderDatasetName(resourceName string) string {
 	return "hast-" + resourceName
 }
@@ -205,7 +271,15 @@ func (r *Reconciler) reconcileHASTRoles(ctx context.Context, roles []hastRole) (
 			return devicePaths, fmt.Errorf("provisioning %s: %w", rl.resourceName, err)
 		}
 		if rl.isPrimary {
-			devicePaths[rl.resourceName] = hastDevicePath(rl.resourceName)
+			path := hastDevicePath(rl.resourceName)
+			// See waitForHASTDevicePrimary's own doc comment: a resource
+			// that isn't ready yet is left out of devicePaths rather than
+			// failing this whole call - ensureVM/ensureJail's own "not
+			// provisioned this tick" error covers just this one resource,
+			// and every other role this tick still gets its path.
+			if r.waitForHASTDevicePrimary(path) {
+				devicePaths[rl.resourceName] = path
+			}
 		}
 	}
 	return devicePaths, nil

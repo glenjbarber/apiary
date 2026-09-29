@@ -315,6 +315,20 @@ type Reconciler struct {
 	// settle cost the live hastd startup race actually needs.
 	HASTRestartSettleDelay time.Duration
 
+	// HASTDeviceAppearTimeout overrides how long reconcileHASTRoles
+	// polls for a newly-primary resource's /dev/hast/<name> device node
+	// to actually appear before giving up for this tick (defaults to
+	// defaultHASTDeviceAppearTimeout if zero) - see
+	// waitForHASTDevicePrimary's own doc comment for the race this
+	// covers.
+	HASTDeviceAppearTimeout time.Duration
+
+	// HASTDeviceStat overrides how reconcileHASTRoles checks whether a
+	// primary role's device node exists (defaults to a real os.Stat
+	// against the path if nil). Tests set this to a fake, since there is
+	// no real devfs to poll against on a test machine.
+	HASTDeviceStat func(path string) error
+
 	// Cloudflare is optional (nil-able, same opt-in pattern as HAST/
 	// Bhyve/etc. above): when set, VMs naming CloudflareHostname have
 	// their public exposure reconciled into this node's own pre-

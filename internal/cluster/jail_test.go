@@ -811,7 +811,7 @@ func TestReconciler_RunOnce_ProvisionsHASTPrimaryForReplicatedJail(t *testing.T)
 
 	r := &Reconciler{
 		Raft: raft, ZFS: zfs, Jail: jm, Mount: mnt, HAST: h,
-		HASTRestartSettleDelay: time.Millisecond, LocalNodeID: "node-a", JailBase: jailBase,
+		HASTRestartSettleDelay: time.Millisecond, HASTDeviceStat: alwaysReadyHASTDeviceStat, LocalNodeID: "node-a", JailBase: jailBase,
 	}
 	if err := r.RunOnce(context.Background()); err != nil {
 		t.Fatalf("RunOnce() error: %v", err)
