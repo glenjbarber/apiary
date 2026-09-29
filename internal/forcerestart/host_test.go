@@ -87,10 +87,14 @@ func TestHost_UsesTheRealCommandsAndNeverAsksForStatus(t *testing.T) {
 	}
 	// The old confirmation was `service <name> status`, and on a Comb
 	// that answers "not running" for every apiary daemon that is up and
-	// listening. The Host interface has no method that can ask for it;
-	// this asserts the observable consequence as well, so a future
-	// method added for some other reason cannot quietly reintroduce the
-	// false measurement.
+	// listening. The Host interface has no method that can ask a SERVICE
+	// for its status; this asserts the observable consequence as well,
+	// so a future method added for some other reason cannot quietly
+	// reintroduce the false measurement. (It does have one that asks
+	// about leadership - a different question, answered by raftd itself
+	// and not by rc.d, which is why this runs at all: the production
+	// Host's restart and listener paths must not have started growing a
+	// status call alongside the leader check.)
 	if strings.Contains(got, "status") {
 		t.Errorf("a service status call was issued: %q", got)
 	}

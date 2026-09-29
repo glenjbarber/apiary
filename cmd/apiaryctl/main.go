@@ -60,13 +60,21 @@ Usage:
                             and the target's second PIN, and submits
                             nothing to the target on your behalf
   apiaryctl force-restart   restart managerd then raftd on this Comb,
-                            confirming each by its own listener port
+                            confirming each by its own listener port.
+                            Refuses to run on the Colony's current
+                            leader, and on a Comb whose leadership it
+                            cannot determine
   apiaryctl -version        report this binary's build identity
   apiaryctl help            this message
 
 force-restart is root-only and touches only this Comb. It takes no
 lease and coordinates with nothing; see the warning it prints, and use
-the Machine page's per-service control for a coordinated restart.
+the Machine page's per-service control for a coordinated restart. It
+asks this Comb's own raftd whether this Comb is the Colony's leader
+first, and refuses on yes, with no flag to get past it: restarting
+raftd on the leader is the one restart the Colony cannot absorb. A
+leadership check that cannot be answered refuses too, because an
+unanswered question is not a permission.
 
 join-authorize is root-only because the store it writes is root-owned,
 and that ownership is the security property rather than an incidental

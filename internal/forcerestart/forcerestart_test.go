@@ -72,6 +72,26 @@ const (
 	modeBroken
 )
 
+// leadership is what the fake local raftd answers. It is a separate
+// type from mode because it is a different question asked at a
+// different time: mode drives the listener poll after a restart, and
+// this one is asked once, before anything at all happens.
+type leadership int
+
+const (
+	// leadFollower: this Comb is a follower, which is the only answer
+	// that lets the run proceed. It is the default, because a fake that
+	// has to be told it is a follower before every existing case means
+	// every existing case is also asserting the leader check - and the
+	// cases below that are about the leader check would then be the
+	// only ones that are.
+	leadFollower leadership = iota
+	// leadLeader: this Comb is the Colony's leader.
+	leadLeader
+	// leadUnanswerable: raftd could not be asked at all.
+	leadUnanswerable
+)
+
 // fakeHost is the recording Host. Every call appends one line to log,
 // so "the record was written before the restart" and "raftd was never
 // touched after managerd timed out" are both read off a single ordered
@@ -80,6 +100,9 @@ type fakeHost struct {
 	t    *testing.T
 	log  *strings.Builder
 	mode mode
+
+	// leadership is what Host.Leadership answers.
+	leadership leadership
 
 	// listeningAfter, when non-nil, replaces mode: this function
 	// answers each Listening(port) call, which is how a case models a
@@ -134,6 +157,23 @@ func (h *fakeHost) Sleep(d time.Duration) {
 // count, so the failing cases do not spend fifteen seconds each.
 
 func (h *fakeHost) Hostname() (string, error) { return h.hostname, h.hostnameErr }
+
+// Leadership answers the leader check, and logs the call so the
+// ordering assertions can see that it happened before the first
+// restart rather than after it.
+func (h *fakeHost) Leadership() (forcerestart.Leadership, error) {
+	fmt.Fprintf(h.log, "raftd status\n")
+	switch h.leadership {
+	case leadFollower:
+		return forcerestart.Leadership{IsLeader: false, NodeID: "comb-under-test", RaftState: "Follower"}, nil
+	case leadLeader:
+		return forcerestart.Leadership{IsLeader: true, NodeID: "comb-under-test", RaftState: "Leader"}, nil
+	case leadUnanswerable:
+		return forcerestart.Leadership{}, fmt.Errorf("asking raftd for its status: rpc error: code = Unavailable desc = connection error: desc = %q", "transport: Error while dialing dial unix /var/run/apiary/raftd.sock: connect: no such file or directory")
+	}
+	h.t.Fatalf("fakeHost: unhandled leadership %d", h.leadership)
+	return forcerestart.Leadership{}, nil
+}
 
 // sockstatErrors is the mode in which the measurement itself is broken.
 // It is a separate function rather than a field so the failing case
@@ -225,9 +265,11 @@ func readRecord(t *testing.T, dir, rcName string) (string, bool) {
 // 1. The honest path, with `service status` lying the whole way.
 //
 // There is no way even to express that lie here: the Host interface has
-// no method that asks a service for its status. The structural absence
+// no method that asks a SERVICE for its status. The structural absence
 // is the regression, and the log assertion below is a backstop against
-// a future method being added that would reintroduce it.
+// a future method being added that would reintroduce it. (It does now
+// have a method that asks about leadership, which is a different
+// question from a different source - see case 8.)
 // ---------------------------------------------------------------------------
 
 func TestForceRestart_HonestPath(t *testing.T) {
@@ -254,6 +296,11 @@ func TestForceRestart_HonestPath(t *testing.T) {
 		"apiary_raftd is listening on port 17600",
 		"restart plan, each confirmed by its own listener port:",
 		"apiary_managerd:17700 apiary_raftd:17600  (service:port, in this order)",
+		// The leader check passed, and the transcript says so. A run
+		// that restarted anything without printing this either skipped
+		// the check or checked after the fact, and both are the same
+		// defect.
+		"leader check: this Comb is not the leader (raft state Follower, node comb-under-test).",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("output is missing %q\n---\n%s---", want, out)
@@ -267,10 +314,17 @@ func TestForceRestart_HonestPath(t *testing.T) {
 		t.Errorf("probes issued = %d, want 2 (one per service, no waiting)", got)
 	}
 
-	// No status call was issued - and the interface has no way to make
-	// one, which is the durable form of this assertion.
+	// No SERVICE status call was issued - and the interface still has
+	// no way to make one, which is the durable form of this assertion.
+	// The match is on `service <name> status` and not on the substring
+	// " status", because the leader check logs a line of its own that
+	// ends in the same two words, and an assertion loose enough to
+	// catch that one would be too loose to catch the defect it exists
+	// for. Leadership is a different measurement from a different
+	// source: raftd's own Status RPC, not rc.d's pidfile check, which
+	// lies on a live Comb.
 	for _, l := range h.lines() {
-		if strings.Contains(l, " status") {
+		if strings.HasPrefix(l, "service ") && strings.HasSuffix(l, " status") {
 			t.Errorf("a service status call was issued: %q; that measurement is known false on a Comb", l)
 		}
 	}
@@ -301,11 +355,16 @@ func TestForceRestart_HonestPath(t *testing.T) {
 	// startup, which would then confirm a restart already over.
 	//
 	// The whole log is asserted, not a prefix, because on the honest
-	// path it is four calls and nothing else. A wait that slept between
+	// path it is five calls and nothing else. A wait that slept between
 	// a service that was already up would show up here as an extra
 	// line, and that is a real defect: the wait costs a second per
-	// restart whether or not anything needs waiting for.
+	// restart whether or not anything needs waiting for. The leader
+	// check is in this list for the same reason and not as a
+	// footnote: it has to be the FIRST call, because a check made
+	// after managerd is already down has stopped a run rather than
+	// prevented one.
 	wantLog := []string{
+		"raftd status",
 		"service apiary_managerd restart",
 		"sockstat -4 -l",
 		"service apiary_raftd restart",
@@ -558,6 +617,14 @@ func TestForceRestart_UnknownPortIsRefusedBeforeAnythingIsRestarted(t *testing.T
 		t.Errorf("restarted %v, want nothing: the refusal has to come before the first restart, "+
 			"not halfway through with managerd already down", got)
 	}
+	// Stronger than "no restarts": the port preflight is the FIRST thing
+	// Run does, so on this path the host is not touched at all. That
+	// includes the leader check, which is the other preflight - a run
+	// that asked raftd for its status before checking the plan is
+	// asking this Comb a question it did not need to be asked.
+	if got := h.lines(); len(got) != 0 {
+		t.Errorf("host calls = %v, want none: a plan this build cannot carry out is refused before the Comb is contacted at all", got)
+	}
 	for _, want := range []string{
 		"no known listener port for apiary_restshimd",
 		"will not guess one",
@@ -568,5 +635,198 @@ func TestForceRestart_UnknownPortIsRefusedBeforeAnythingIsRestarted(t *testing.T
 	}
 	if _, ok := readRecord(t, guardrail, "apiary_managerd"); ok {
 		t.Error("a record was written for a restart that was never issued")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// 8. THE LEADER REFUSAL.
+//
+// Restarting raftd on the Colony's leader is the one restart the Colony
+// cannot absorb, and force-restart exists to be run by someone who is
+// not reading anything first. So the command asks this Comb's own raftd
+// who the leader is, and refuses on yes, before the first restart.
+//
+// Three cases, and the third is the one that would be easy to get
+// wrong. "Is this Comb the leader?" and "I could not find out whether
+// this Comb is the leader" are different answers, and only the second
+// one is what a dead raftd, a wrong socket path in raftd.json and a
+// mismatched internal token all look like from here. Treating any of
+// them as "no" makes the check decorative: it is exactly the state an
+// incident produces, and the one moment the check exists.
+// ---------------------------------------------------------------------------
+
+func TestForceRestart_RefusesOnTheLeader(t *testing.T) {
+	h := newFakeHost(t, modeAll)
+	h.leadership = leadLeader
+	res, out, guardrail := run(t, nil, h)
+
+	if res.Completed() {
+		t.Fatal("this Comb is the leader; the run must not report completion")
+	}
+	var isLeader *forcerestart.ErrIsLeader
+	if !errors.As(res.Err, &isLeader) {
+		t.Fatalf("Err = %T (%v), want *forcerestart.ErrIsLeader", res.Err, res.Err)
+	}
+	if isLeader.NodeID != "comb-under-test" {
+		t.Errorf("the refusal names node %q, want %q: an operator has to be told which voter said yes",
+			isLeader.NodeID, "comb-under-test")
+	}
+
+	// Nothing was restarted, and - the part a "refused early" message
+	// can get wrong - nothing was recorded either. A pending-restart
+	// record for a restart that never happened teaches the guardrail's
+	// cooldown that a voter is out of service when it is serving.
+	if got := h.restarts(); len(got) != 0 {
+		t.Errorf("restarted %v, want nothing: this is the whole refusal", got)
+	}
+	for _, rc := range []string{"apiary_managerd", "apiary_raftd"} {
+		if _, ok := readRecord(t, guardrail, rc); ok {
+			t.Errorf("a pending-restart record was written for %s on a run that restarted nothing", rc)
+		}
+	}
+	if !res.StoppedBeforeAnyRestart() {
+		t.Error("StoppedBeforeAnyRestart() = false, want true: this refusal touched nothing, and an operator's next action turns on that")
+	}
+
+	// The check has to have happened, and first. A run that restarts
+	// managerd and then discovers it was the leader has already done the
+	// one thing the check exists to prevent.
+	if got, want := h.lines(), []string{"raftd status"}; len(got) != 1 || got[0] != want[0] {
+		t.Errorf("host calls = %v, want exactly %v: the leader is asked about before anything is restarted, not after", got, want)
+	}
+
+	// The message has to carry its weight. "refusing" with no reason and
+	// no next step is the message an operator works around, so the words
+	// an operator acts on are asserted: what is protected, that the
+	// Comb is untouched, that the leader is a position rather than a
+	// machine, and that there is no flag to get past this.
+	for _, want := range []string{
+		"force-restart: refusing. This Comb is the Colony's current leader.",
+		"Comb `comb-under-test`, raft node `comb-under-test`, raft state Leader",
+		"quorum",
+		"NOTHING has been restarted",
+		"no pending-restart",
+		"The leader is a position, not a machine",
+		"there is no flag on this command",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("output is missing %q\n---\n%s---", want, out)
+		}
+	}
+
+	// The banner must NOT be here. It says "about to restart", and a
+	// refusal printed under it is a message contradicting itself.
+	if strings.Contains(out, "about to restart") {
+		t.Errorf("the about-to-restart banner was printed on a refused run\n---\n%s---", out)
+	}
+	if strings.Contains(out, "restart plan") {
+		t.Errorf("the restart plan was announced on a run that restarted nothing\n---\n%s---", out)
+	}
+	assertRefusalLinesFit(t, out)
+}
+
+// assertRefusalLinesFit checks the width of the prose in a pre-restart
+// refusal. Lines indented by four spaces are exempt, by the convention
+// stated above refuseLeader: those are interpolated facts and verbatim
+// error text, which are as long as they are, and are set apart from
+// the prose precisely so this rule can be applied to the prose alone.
+// Everything else wraps at 76, the width used throughout
+// internal/forcerestart and internal/manager, and asserted here rather
+// than trusted - the leader refusal interpolates two names and the
+// other one quotes a gRPC error, and both are the kind of line that
+// grows without anyone editing a sentence.
+func assertRefusalLinesFit(t *testing.T, out string) {
+	t.Helper()
+	for _, line := range strings.Split(strings.TrimRight(out, "\n"), "\n") {
+		if strings.HasPrefix(line, "    ") {
+			continue
+		}
+		if n := len(line); n > 76 {
+			t.Errorf("a line of prose in the refusal is %d columns, over the 76 this package wraps to: %q", n, line)
+		}
+	}
+}
+
+func TestForceRestart_RefusesWhenLeadershipCannotBeDetermined(t *testing.T) {
+	h := newFakeHost(t, modeAll)
+	h.leadership = leadUnanswerable
+	res, out, guardrail := run(t, nil, h)
+
+	if res.Completed() {
+		t.Fatal("a Comb whose leadership was never established is not a Comb to restart raftd on")
+	}
+	var unknown *forcerestart.ErrLeaderUnknown
+	if !errors.As(res.Err, &unknown) {
+		t.Fatalf("Err = %T (%v), want *forcerestart.ErrLeaderUnknown", res.Err, res.Err)
+	}
+	// Unwrapping to the real cause is what lets a caller that cares
+	// about grpc codes still see them; the refusal is a new fact, not a
+	// replacement for the error that caused it.
+	if unknown.Unwrap() == nil {
+		t.Error("ErrLeaderUnknown.Unwrap() = nil, want the underlying error: the cause is what the operator has to go and fix")
+	}
+
+	if got := h.restarts(); len(got) != 0 {
+		t.Errorf("restarted %v, want nothing", got)
+	}
+	if _, ok := readRecord(t, guardrail, "apiary_managerd"); ok {
+		t.Error("a pending-restart record was written on a run that restarted nothing")
+	}
+	if !res.StoppedBeforeAnyRestart() {
+		t.Error("StoppedBeforeAnyRestart() = false, want true")
+	}
+
+	for _, want := range []string{
+		"Could not tell whether this Comb is the",
+		"not the same answer as \"not the leader\"",
+		"NOTHING has been restarted",
+		"Check that apiary_raftd is running",
+		"is this Comb's own",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("output is missing %q\n---\n%s---", want, out)
+		}
+	}
+	// Every paragraph in this file is hard-wrapped, and this one embeds
+	// a path, so it is the one that can grow a line without anyone
+	// editing a sentence. A diagnostic an operator reads on a terminal
+	// is 76 columns by convention here, and the assertion is on that
+	// rather than on taste. It covers the whole refusal, both this one
+	// and the leader one, because they share a house style.
+	assertRefusalLinesFit(t, out)
+	// The two refusals are deliberately different messages, because
+	// their next actions are: this one is a broken or absent raftd to go
+	// and look at, not a leadership problem to wait out.
+	if strings.Contains(out, "position, not a machine") {
+		t.Errorf("an unanswerable leader check gave the operator the follower advice, which is advice for a different problem\n---\n%s---", out)
+	}
+}
+
+func TestForceRestart_AsksOnceAndOnlyOnce(t *testing.T) {
+	// A leader check that retried would be a leader check that takes
+	// longer to say no, on a command whose whole value is that it
+	// either says no immediately or does the work.
+	//
+	// The count is taken over a full successful run rather than a
+	// refusal, because a refusal returns before a retry loop could have
+	// had a second go: a second question placed inside the per-service
+	// loop would only ever be visible here. One is the number, because
+	// the answer can change between the start of a run and the restart
+	// of raftd four seconds later, and re-reading it mid-plan would
+	// either start a plan this Comb may no longer be allowed to finish
+	// or abandon one it is already halfway through.
+	h := newFakeHost(t, modeAll)
+	res, _, _ := run(t, nil, h)
+	if !res.Completed() {
+		t.Fatalf("this case is about a completed run, got %v", res.Err)
+	}
+	asked := 0
+	for _, l := range h.lines() {
+		if l == "raftd status" {
+			asked++
+		}
+	}
+	if asked != 1 {
+		t.Errorf("the leader check was asked %d times, want exactly 1", asked)
 	}
 }

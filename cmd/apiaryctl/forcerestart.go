@@ -16,9 +16,16 @@ import (
 // raft state and the operator API, on one node, with no lease, no
 // quorum preflight and no coordination with the rest of the Colony. An
 // operator who has the wrong Comb, the wrong privileges, or the wrong
-// idea of which daemons are up can do real damage with it, so the two
-// things that make it safe to hand to someone are that it insists on
-// root and that it prints what it is about to do before it does it.
+// idea of which daemons are up can do real damage with it, so the
+// three things that make it safe to hand to someone are that it insists
+// on root, that it refuses outright on the Colony's current leader, and
+// that it prints what it is about to do before it does it.
+//
+// The leader refusal is checked inside the package rather than here,
+// against this Comb's own raftd, and there is no flag to get past it.
+// That placement is the point: the property belongs to the restart, not
+// to this one way of asking for it, and an option a caller can pass is
+// a guard a caller can eventually forget to pass.
 //
 // The exit status is 1 for any failure and 0 only for a completed plan.
 // There is no third value, and no "partly succeeded" exit that a script
@@ -62,13 +69,16 @@ restart" does that and needs nothing but a root shell.
 		return 0
 	}
 
-	// A plan with a service this build has no port for is a refusal
-	// that touched nothing, and it gets its own line here rather than
-	// only the one inside the package: it is the message an operator
-	// is most likely to need to paste into a bug report, and it is the
-	// one case where the correct next step is not "retry".
-	var noPort *forcerestart.ErrNoKnownPort
-	if errors.As(err, &noPort) {
+	// A refusal that issued no restart command at all gets one line
+	// here, and it is driven by the Result rather than by the error's
+	// type. There are three of those refusals now - a plan entry with no
+	// known port, this Comb being the leader, and this Comb's leadership
+	// being unanswerable - and they differ in what the package had to
+	// say, which it has already printed, while being identical in the
+	// one thing that matters to the operator's next minute: nothing
+	// here was touched. Naming them one at a time is how a fourth gets
+	// added and reported as "stopped at ." with nothing restarted.
+	if res.StoppedBeforeAnyRestart() {
 		fmt.Fprintf(os.Stderr, "\napiaryctl force-restart: stopped before restarting anything.\n")
 		return 1
 	}

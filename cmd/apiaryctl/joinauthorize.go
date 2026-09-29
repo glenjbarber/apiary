@@ -8,12 +8,11 @@ import (
 	"time"
 
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials/insecure"
 
 	internalpb "github.com/glenjbarber/apiary/api/internalpb"
 	"github.com/glenjbarber/apiary/internal/joinauth"
-	raftnode "github.com/glenjbarber/apiary/internal/raft"
-	raftdconfig "github.com/glenjbarber/apiary/internal/raftdconfig"
+	"github.com/glenjbarber/apiary/internal/localraft"
+	"github.com/glenjbarber/apiary/internal/raftdconfig"
 )
 
 // runJoinAuthorize is `apiaryctl join-authorize`, the operator-facing
@@ -99,13 +98,14 @@ Colony will refuse the approval and name this command.
 		return 1
 	}
 
-	socketPath, err := localRaftdSocket(raftdConfig)
+	conn, err := localraft.Dial(raftdConfig)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "apiaryctl join-authorize: %v\n", err)
 		return 1
 	}
+	defer conn.Close()
 
-	pending, isLeader, err := listPendingJoinRequests(socketPath)
+	pending, isLeader, err := listPendingJoinRequests(conn)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, `apiaryctl join-authorize: could not read this Comb's pending join requests: %v
 
@@ -143,64 +143,42 @@ expecting the join to be approvable.
 	return 0
 }
 
-// localRaftdSocket resolves this Comb's raftd socket from its own
-// config, defaulting the way raftd itself does. A missing or unreadable
-// raftd.json is a refusal naming the path rather than a silent
-// substitution, because two plausible socket paths on one host is a
-// situation where guessing wrong reads the wrong Colony's state and
-// writes an entry into the wrong file.
-func localRaftdSocket(configPath string) (string, error) {
-	if configPath == "" {
-		configPath = raftdconfig.DefaultPath
-	}
-	cfg, err := (&raftdconfig.Manager{Path: configPath}).Load()
-	if err != nil {
-		return "", fmt.Errorf("reading %s: %w", configPath, err)
-	}
-	if cfg.Socket == "" {
-		return "", fmt.Errorf("%s names no socket for raftd, so there is no local raft to read pending requests from", configPath)
-	}
-	return cfg.Socket, nil
-}
-
+// localRaftdSocket, localRaftdToken and the dial itself moved to
+// internal/localraft, which apiaryctl force-restart now uses too. Two
+// copies of "read raftd.json, dial that socket, present that token" is
+// two places for the two commands to disagree about which socket this
+// Comb has, and a disagreement there is not a crash - it is the wrong
+// Colony's answer, read as confidently as the right one. The socket and
+// the token now come out of the same config load for both commands,
+// which is one more thing they can no longer get out of step.
+//
 // listPendingJoinRequests reads this Comb's own pending join requests,
 // and whether this Comb is currently the leader.
 //
-// The connection is built here rather than through internal/manager for
+// The connection is built by internal/localraft rather than here for
 // one reason worth stating: apiaryctl is a small root shell tool, and
-// importing the whole manager package to make one internal RPC would add
-// raft, bbolt and the cluster packages to a binary an operator runs
-// during an incident. cmd/raftd's own startup hook builds its connection
-// to managerd the same way, for the same reason.
+// dialing raftd by hand rather than through internal/manager is what
+// keeps raft, bbolt and the cluster packages out of a binary an
+// operator runs during an incident. cmd/raftd's own startup hook builds
+// its connection to managerd the same way, for the same reason.
 //
 // ListPendingJoinRequestsLocal rather than the leader-only ListVMs-style
 // read is deliberate: a follower can answer, and an entry created on a
 // follower is still the right entry for the leader once it is copied -
 // what the command reports is which Comb has to be told separately, not
 // a reason to refuse to write.
-func listPendingJoinRequests(socketPath string) (pending []joinauth.PendingRequest, isLeader bool, err error) {
-	token := localRaftdToken()
-	conn, err := grpc.NewClient(
-		"unix://"+socketPath,
-		grpc.WithTransportCredentials(insecure.NewCredentials()),
-		grpc.WithPerRPCCredentials(raftnode.TokenCredentials(token)),
-	)
-	if err != nil {
-		return nil, false, fmt.Errorf("dialing raftd at %s: %w", socketPath, err)
-	}
-	defer conn.Close()
-
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+func listPendingJoinRequests(conn *grpc.ClientConn) (pending []joinauth.PendingRequest, isLeader bool, err error) {
+	ctx, cancel := context.WithTimeout(context.Background(), localraft.DefaultTimeout)
 	defer cancel()
 	client := internalpb.NewRaftInternalClient(conn)
 
 	status, err := client.Status(ctx, &internalpb.StatusRequest{})
 	if err != nil {
-		return nil, false, fmt.Errorf("asking raftd at %s for its status: %w", socketPath, err)
+		return nil, false, fmt.Errorf("asking this Comb's raftd for its status: %w", err)
 	}
 	list, err := client.ListPendingJoinRequestsLocal(ctx, &internalpb.ListPendingJoinRequestsRequest{})
 	if err != nil {
-		return nil, false, fmt.Errorf("asking raftd at %s for its pending join requests: %w", socketPath, err)
+		return nil, false, fmt.Errorf("asking this Comb's raftd for its pending join requests: %w", err)
 	}
 	for _, r := range list.GetRequests() {
 		pending = append(pending, joinauth.PendingRequest{
@@ -214,15 +192,4 @@ func listPendingJoinRequests(socketPath string) (pending []joinauth.PendingReque
 		})
 	}
 	return pending, status.GetIsLeader(), nil
-}
-
-// localRaftdToken reads the same optional internal token managerd
-// presents, so this command works on a Combs configured with
-// -internal-token and is a no-op attachment on one that is not.
-func localRaftdToken() string {
-	cfg, err := (&raftdconfig.Manager{}).Load()
-	if err != nil {
-		return ""
-	}
-	return cfg.InternalToken
 }
