@@ -193,11 +193,11 @@ func run() error {
 	// grants) rather than needing a second, separately-configured
 	// credential.
 	peers := manager.NewPeerReporter(cfg.ManagerAPIKey, cfg.PeerTLS, nil)
-	if cfg.PeerTLSCA != "" {
-		pool, err := manager.LoadPeerCAPool(cfg.PeerTLSCA)
-		if err != nil {
-			return fmt.Errorf("frontend: %w", err)
-		}
+	pool, err := manager.ResolvePeerCAPool(cfg.PeerTLSCA)
+	if err != nil {
+		return fmt.Errorf("frontend: %w", err)
+	}
+	if pool != nil {
 		peers.CAPool = pool
 	}
 

@@ -324,6 +324,36 @@ func (n *Node) ColonyJoinWindowLocal() (*internalpb.ColonyJoinWindow, bool) {
 	return w, ColonyJoinWindowLive(w, time.Now().Unix())
 }
 
+// ListTrustedPeersLocal backs ListTrustedPeersLocal's RPC
+// (ADR-0147 Part 4) - the same "any node can answer from its own FSM
+// copy" posture as ColonyJoinWindowLocal above, and for the same
+// reason it is safe: the pins are already raft-replicated.
+//
+// It is deliberately not leader-restricted even though its only
+// consumer is the derived peer-ca.pem writer, because that writer runs
+// on every Comb. A follower that could not answer would leave the
+// derived file on a follower describing a store one node older than the
+// leader's, which is precisely the "members disagree about who they
+// trust" state the store exists to prevent.
+func (n *Node) ListTrustedPeersLocal() []*internalpb.TrustedPeer {
+	return n.fsm.ListTrustedPeers()
+}
+
+// TrustedPeerLocal reports whether a pin exists for nodeID. Used by
+// the RemoveServer hook below to ask whether there is anything to drop
+// before it drops it. Read-then-unpin rather than
+// unpin-and-ignore-the-error, because "this node was not pinned" is
+// not a failure of the membership change that preceded it and must not
+// be reported as one.
+func (n *Node) TrustedPeerPinnedLocal(nodeID string) bool {
+	for _, peer := range n.fsm.ListTrustedPeers() {
+		if peer.GetNodeId() == nodeID {
+			return true
+		}
+	}
+	return false
+}
+
 // ColonyUpdateStateLocal backs GetColonyUpdateStateLocal (ADR-0145) - the
 // same "any node can answer from its own FSM copy" posture as
 // RestartLeaseStateLocal above.

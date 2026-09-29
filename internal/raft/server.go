@@ -145,7 +145,44 @@ func (s *Server) AddVoter(_ context.Context, req *internalpb.AddVoterRequest) (*
 		}
 		return resp, nil
 	}
+	// ADR-0147 Part 4: AddVoter promotes the pin. The membership change
+	// has already committed at this point, so this is a follow-up
+	// record, not a precondition - and a failure here is reported
+	// without un-adding the voter, because the membership change really
+	// did happen and telling the caller otherwise would be a lie that
+	// leaves the Colony in a worse state than the one it is already in.
+	//
+	// The promotion is an assignment, not a toggle, so the FSM's own
+	// approve arm recording the same thing a moment later is idempotent
+	// rather than a double-apply.
+	if err := s.promotePin(req.GetId()); err != nil {
+		return &internalpb.AddVoterResponse{Error: fmt.Sprintf(
+			"adding %q as a raft voter succeeded, but recording it in the peer trust store did not: %v", req.GetId(), err)}, nil
+	}
 	return &internalpb.AddVoterResponse{}, nil
+}
+
+// promotePin applies SetTrustedPeerVoter for a node that has just
+// become a member. A node with no pin is left alone: that is a Colony
+// upgraded from a pre-ADR-0147 build, whose members' certificates were
+// never compared by anybody, and inventing a pin here would trust a
+// certificate nobody looked at. The absence stays visible in the store.
+func (s *Server) promotePin(nodeID string) error {
+	if !s.node.TrustedPeerPinnedLocal(nodeID) {
+		return nil
+	}
+	payload, err := proto.Marshal(&internalpb.Command{
+		Op: &internalpb.Command_SetTrustedPeerVoter{
+			SetTrustedPeerVoter: &internalpb.SetTrustedPeerVoter{NodeId: nodeID, IsVoter: true},
+		},
+	})
+	if err != nil {
+		return fmt.Errorf("marshaling SetTrustedPeerVoter: %w", err)
+	}
+	if _, err := s.node.Apply(payload, defaultApplyTimeout); err != nil {
+		return err
+	}
+	return nil
 }
 
 // RemoveServer implements internalpb.RaftInternalServer.
@@ -163,7 +200,47 @@ func (s *Server) RemoveServer(_ context.Context, req *internalpb.RemoveServerReq
 		}
 		return resp, nil
 	}
+	// ADR-0147 Part 4: "removal is real". RemoveServer drops the entry,
+	// here rather than in the FSM's join-request arms because this is
+	// the single choke point every membership removal goes through -
+	// ApproveJoinRequest's arms only ever see requests, and a member
+	// removed by any other route would otherwise leave its certificate
+	// standing in the trust store and in the derived peer-ca.pem
+	// forever.
+	//
+	// Read-then-unpin, for the same reason promotePin above is
+	// read-then-apply: a node that was never pinned (a pre-ADR-0147
+	// member) has nothing to drop, and UnpinTrustedPeer's own refusal
+	// of an unknown node would otherwise be reported as a failure of a
+	// membership change that in fact succeeded.
+	if s.node.TrustedPeerPinnedLocal(req.GetId()) {
+		payload, err := proto.Marshal(&internalpb.Command{
+			Op: &internalpb.Command_UnpinTrustedPeer{
+				UnpinTrustedPeer: &internalpb.UnpinTrustedPeer{NodeId: req.GetId()},
+			},
+		})
+		if err != nil {
+			return &internalpb.RemoveServerResponse{Error: fmt.Sprintf(
+				"removing %q from the cluster succeeded, but dropping it from the peer trust store could not even be prepared: %v", req.GetId(), err)}, nil
+		}
+		if _, err := s.node.Apply(payload, defaultApplyTimeout); err != nil {
+			return &internalpb.RemoveServerResponse{Error: fmt.Sprintf(
+				"removing %q from the cluster succeeded, but dropping it from the peer trust store did not: %v", req.GetId(), err)}, nil
+		}
+	}
 	return &internalpb.RemoveServerResponse{}, nil
+}
+
+// ListTrustedPeersLocal implements internalpb.RaftInternalServer - the
+// read side of ADR-0147 Part 4's peer trust store, and the input to the
+// derived /usr/local/etc/apiary/peer-ca.pem every managerd writes from
+// its own replicated copy.
+//
+// No leader check and no leader hint: the pins are already replicated,
+// so this node can answer for itself, which is exactly what a
+// per-host derived file needs.
+func (s *Server) ListTrustedPeersLocal(_ context.Context, _ *internalpb.ListTrustedPeersRequest) (*internalpb.ListTrustedPeersResponse, error) {
+	return &internalpb.ListTrustedPeersResponse{Peers: s.node.ListTrustedPeersLocal()}, nil
 }
 
 // GetVM implements internalpb.RaftInternalServer.

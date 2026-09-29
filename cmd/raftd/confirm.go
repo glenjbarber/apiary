@@ -71,6 +71,7 @@ import (
 
 	rpcpb "github.com/glenjbarber/apiary/api/rpc"
 	"github.com/glenjbarber/apiary/internal/addrpolicy"
+	"github.com/glenjbarber/apiary/internal/peerca"
 	"github.com/glenjbarber/apiary/internal/restartplan"
 )
 
@@ -226,9 +227,16 @@ func usableDialTarget(logf func(format string, args ...any), field, addr, fallba
 // dial outright, matching internal/manager's own LoadPeerCAPool posture -
 // a wrong trust anchor is a connection failure either way, and the system
 // pool is the only other thing that could possibly work.
+//
+// An empty path means the DERIVED file (ADR-0147 Part 4),
+// /usr/local/etc/apiary/peer-ca.pem, which managerd writes from its own
+// replicated copy of the peer trust store. A derived file that does not
+// exist yet is the same non-event as an unreadable one here: this dial
+// is a replacement confirmation to a node that is already a member, and
+// there being no pins to offer it is not a reason to refuse it.
 func loadCAPool(path string) *x509.CertPool {
 	if path == "" {
-		return nil
+		path = peerca.DefaultPath
 	}
 	data, err := os.ReadFile(path)
 	if err != nil {

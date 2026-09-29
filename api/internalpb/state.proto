@@ -533,6 +533,16 @@ message Command {
     // any moment by any member.
     OpenColonyJoinWindow open_colony_join_window = 36;
     CloseColonyJoinWindow close_colony_join_window = 37;
+
+    // PinTrustedPeer/SetTrustedPeerVoter/UnpinTrustedPeer are
+    // ADR-0147 Part 4's replicated peer trust store. Oneof rather than
+    // three fields, for the same reason as everything else in here:
+    // every mutation of replicated state is a command, applied
+    // identically by every voter, so there is one place where "what
+    // does this command do" is decided.
+    PinTrustedPeer pin_trusted_peer = 38;
+    SetTrustedPeerVoter set_trusted_peer_voter = 39;
+    UnpinTrustedPeer unpin_trusted_peer = 40;
   }
 }
 
@@ -1024,6 +1034,113 @@ message CloseColonyJoinWindow {
   int64  now_unix      = 3;
 }
 
+// TrustedPeer is one Comb's serving certificate, pinned by this Colony
+// (ADR-0147 Part 4). A pin written to a page and then forgotten is not
+// a trust store: this is replicated state, so it survives a leader
+// change and a wiped managerd exactly the way a join stage does.
+//
+// It is a PIN, not a membership record. Membership is raft's own
+// configuration (AddVoter/RemoveServer) and is deliberately not
+// mirrored here - see is_voter below for why the one bit that
+// connects the two is separated from everything else.
+message TrustedPeer {
+  // node_id is the raft server ID this pin belongs to, and the map key
+  // of trusted_peers below. It is a raft identity, not a hostname: it
+  // is what AddVoter/RemoveServer are given, so it is the only value
+  // here that can be joined to actual membership without a lookup.
+  string node_id = 1;
+
+  // comb_name is the operator-facing label ("brood", "drone") the pin
+  // was accepted under. Purely descriptive: no caller may refuse,
+  // route, or authenticate on it, because a name is not an identity and
+  // the same name can legitimately be reused by a re-imaged Comb.
+  string comb_name = 2;
+
+  // fingerprint is the pin's own key: hostcert.Fingerprint(cert.Raw),
+  // which is the "SHA256:" + colon-separated UPPERCASE hex format
+  // internal/manager already publishes on PendingJoinRequest.
+  // tls_cert_fingerprint and ADR-0113's join flow. Deliberately NOT the
+  // lowercase "sha256:..." spelling ADR-0147's sketch comment used:
+  // internal/hostcert owns that format in exactly one place, and a
+  // second spelling here would be a wire-compatibility bug waiting for
+  // the day the two disagree. The FSM re-derives it from cert_pem and
+  // refuses a pin whose fingerprint does not match, so a mismatch is
+  // impossible to store rather than merely discouraged.
+  string fingerprint = 3;
+
+  // cert_pem is the LEAF certificate, not only its digest. A digest
+  // cannot rebuild a PEM bundle, and a Comb that has been re-imaged
+  // still has to dial the Colony it belongs to - which is the whole
+  // reason this store exists at all once TLS is on by default.
+  string cert_pem = 4;
+
+  // not_after_unix is the leaf's own expiry, copied in at pin time
+  // rather than re-parsed by every reader. Replicated so every Comb
+  // expires the pin at the same instant; see internal/raft/peers.go
+  // for why the entry is KEPT after that instant rather than swept
+  // (a silently dropped pin turns a clear "this certificate has
+  // expired" into an opaque TLS handshake failure).
+  int64 not_after_unix = 5;
+
+  // pinned_at_unix is when the pin was written, in whole Unix seconds.
+  // Absolute, like every other timestamp in this file and never
+  // timezone- or locale-formatted: this is replicated state that has
+  // to be byte-identical on every voter, and a rendered local time
+  // would not be.
+  int64 pinned_at_unix = 6;
+
+  // pinned_by is the node ID of the member whose operator accepted this
+  // certificate - the attribution that makes the log answer "who
+  // trusted this", which is the question an incident review actually
+  // asks. A node ID rather than an API key ID on purpose: the pin
+  // outlives any single key, and the operator identity behind a rotated
+  // or revoked key is not reliably recoverable, whereas which member
+  // accepted the certificate is replicated, durable, and true.
+  string pinned_by = 7;
+
+  // is_voter is separate from the pin itself, and is the reason this
+  // message exists rather than a bool on PendingJoinRequest. A pin is
+  // written when the target accepts the certificate, which is BEFORE
+  // authorization, and AddVoter promotes it afterwards. Conflating the
+  // two would mean either a refused request leaving a permanent pin or a
+  // pin implying membership. A pin whose request reaches a terminal
+  // state without ever becoming a voter is dropped with it, so the
+  // store does not accumulate one entry per Comb that ever asked.
+  bool is_voter = 8;
+}
+
+// PinTrustedPeer writes one entry into the trust store, and is refused
+// if node_id is already pinned.
+//
+// Create-only, deliberately: an update path here would be a silent
+// replacement of a certificate, which is exactly the act the
+// fingerprint comparison an operator performs by hand exists to make
+// visible. Rotating a Comb's certificate is UnpinTrustedPeer (with its
+// own logged reason) followed by a fresh PinTrustedPeer, so it is two
+// visible acts in the log rather than one invisible one.
+message PinTrustedPeer {
+  TrustedPeer peer = 1;
+}
+
+// SetTrustedPeerVoter moves the pin between "held for a request" and
+// "this Comb is a member". AddVoter sets it true; nothing in this
+// codebase demotes a voter (raft has no such operation), so is_voter =
+// false exists to make the promotion explicit rather than implied by
+// the command that performed it.
+message SetTrustedPeerVoter {
+  string node_id = 1;
+  bool   is_voter = 2;
+}
+
+// UnpinTrustedPeer drops the entry. Used by RemoveServer, and by the
+// terminal-state cleanup for a request that never became a voter.
+//
+// Refuses a node_id that is not pinned, so "remove this" cannot be a
+// silent no-op that an operator reads as "it is gone".
+message UnpinTrustedPeer {
+  string node_id = 1;
+}
+
 // RestartLease is a cluster-wide, Raft-committed exclusive reservation
 // for restarting one service (in practice, only ever "apiary_managerd" -
 // see ADR-0103). Deliberately has NO expiry/TTL field: a granted lease
@@ -1472,6 +1589,21 @@ message FSMSnapshotState {
   // from this message's own descriptor, so it picks the new map up with
   // no second list to forget.
   map<string, ColonyUpdate> colony_updates = 12;
+
+  // trusted_peers is ADR-0147 Part 4's replicated peer trust store,
+  // keyed by TrustedPeer.node_id (its own raft server ID, so the key is
+  // joinable to real membership with no second index to keep in step).
+  //
+  // In this snapshot for the same reason restart_leases is above: a
+  // raft snapshot restore, or a seeded recovery via raftd -restore,
+  // that silently dropped it would leave the Colony with pinned
+  // certificates nobody holds and no record of which Comb presented
+  // which - i.e. peer TLS with a trust anchor that no longer exists,
+  // which is a failure an operator cannot diagnose from any page.
+  // The digest (ADR-0143) is derived from this message's own
+  // descriptor, so it picks the new map up with no second list to
+  // forget.
+  map<string, TrustedPeer> trusted_peers = 15;
 }
 
 // ConfigArchive is the on-disk file format for raftd's -export/

@@ -523,6 +523,12 @@ func TestResolveEndpointFallsBackWhenManagerdConfigIsUnreadable(t *testing.T) {
 // TestLoadCAPool covers the trust-anchor handling: an absent or malformed
 // CA file falls back to the system pool rather than failing the dial, so
 // a self-signed-peer deployment is not broken by a typo in a path.
+//
+// The empty-path case is ADR-0147 Part 4's derived default: it now means
+// /usr/local/etc/apiary/peer-ca.pem rather than "no anchor configured",
+// and this host has no such file, so the answer is still nil - for the
+// better reason that the Colony has pinned nothing, not the older one
+// that the field was unset.
 func TestLoadCAPool(t *testing.T) {
 	if got := loadCAPool(""); got != nil {
 		t.Errorf("loadCAPool(\"\") = %v, want nil", got)
