@@ -3,10 +3,10 @@
 </p>
 
 ![OS](https://img.shields.io/badge/OS-FreeBSD-red.svg?logo=freebsd&logoColor=white)
+[![License](https://img.shields.io/github/license/glenjbarber/apiary?color=blue)](LICENSE)
 ![Architecture](https://img.shields.io/badge/arch-amd64-blue)
 ![Architecture](https://img.shields.io/badge/arch-arm64-blue)
 ![Architecture](https://img.shields.io/badge/arch-aarch64-blue)
-[![License](https://img.shields.io/github/license/glenjbarber/apiary?color=blue)](LICENSE)
 
 ![Go Version](https://img.shields.io/github/go-mod/go-version/glenjbarber/apiary)
 [![Go Reference](https://pkg.go.dev/badge/github.com/glenjbarber/apiary.svg)](https://pkg.go.dev/github.com/glenjbarber/apiary)
