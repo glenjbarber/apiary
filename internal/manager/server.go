@@ -983,6 +983,12 @@ func (s *Server) Status(ctx context.Context, _ *rpcpb.StatusRequest) (*rpcpb.Sta
 	// and says nothing about whether the colony agrees. Cross-voter
 	// comparison is ClusterHealth's job, which already fans out per node.
 	resp.RaftStateDigest = raftStatus.GetStateDigest()
+	// raftd answered, so this is NOT the RaftError path above and never
+	// clears RaftReachable: it is raftd reporting that it could not read
+	// its own membership. Passing it through as its own field is what
+	// keeps an empty Members list from reading as "this node believes the
+	// Colony has no members" - see the proto field's own doc comment.
+	resp.RaftMembershipError = raftStatus.GetMembershipError()
 	for _, server := range raftStatus.GetServers() {
 		resp.KnownNodeIds = append(resp.KnownNodeIds, server.GetId())
 		resp.Members = append(resp.Members, &rpcpb.RaftMember{

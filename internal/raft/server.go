@@ -144,14 +144,15 @@ func (s *Server) Status(_ context.Context, _ *internalpb.StatusRequest) (*intern
 	}
 
 	return &internalpb.StatusResponse{
-		IsLeader:     status.IsLeader,
-		LeaderId:     status.LeaderID,
-		NodeId:       status.NodeID,
-		LastLogIndex: status.LastLogIndex,
-		AppliedIndex: status.AppliedIndex,
-		RaftState:    status.RaftState,
-		Servers:      servers,
-		StateDigest:  status.StateDigest,
+		IsLeader:        status.IsLeader,
+		LeaderId:        status.LeaderID,
+		NodeId:          status.NodeID,
+		LastLogIndex:    status.LastLogIndex,
+		AppliedIndex:    status.AppliedIndex,
+		RaftState:       status.RaftState,
+		Servers:         servers,
+		MembershipError: status.MembershipError,
+		StateDigest:     status.StateDigest,
 	}, nil
 }
 
