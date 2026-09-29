@@ -231,6 +231,11 @@ func newManagerdRPCClientFull(t *testing.T, raftdSocket, nodeID string, vnc VNCL
 	}
 
 	srv := NewServer(raftClient, nodeID, isostore.New(t.TempDir()), vnc, serialLog, vlanMgr, nil, "", nil, nil, assumptionStoreMgr, assumptionStaleAfter, nil)
+	// ADR-0147 Part 3: every test managerd gets its own authorization
+	// store, inside t.TempDir(). Without this a test that reaches the
+	// gate reads - and an operator-shaped refusal reports - the real
+	// /usr/local/etc path, which on a test machine does not exist.
+	srv.setJoinAuthorizationPath(filepath.Join(t.TempDir(), "join-authorizations.json"))
 	// Wired unconditionally, mirroring cmd/managerd/main.go exactly - this
 	// is a no-op for every pre-existing test here (none of them ever
 	// create an API key, so checkAuth's "zero keys = open" branch always
@@ -278,6 +283,8 @@ func newManagerdRPCClientAndServer(t *testing.T, raftdSocket, nodeID string) (rp
 	}
 
 	srv := NewServer(raftClient, nodeID, isostore.New(t.TempDir()), nil, nil, nil, nil, "", nil, nil, nil, 0, nil)
+	// ADR-0147 Part 3: as in newManagerdRPCClientFull above.
+	srv.setJoinAuthorizationPath(filepath.Join(t.TempDir(), "join-authorizations.json"))
 	grpcServer := grpc.NewServer(
 		grpc.UnaryInterceptor(srv.AuthUnaryInterceptor),
 		grpc.StreamInterceptor(srv.AuthStreamInterceptor),
@@ -1463,7 +1470,7 @@ func TestIntegration_RequestJoinColony_MissingFieldsIsError(t *testing.T) {
 // correct operational sequence.
 func TestIntegration_ApproveJoinRequest_AddsRealRaftVoter(t *testing.T) {
 	raftdSocket := newRaftdUDSSocket(t)
-	client := newManagerdRPCClient(t, raftdSocket)
+	client, srv := newManagerdRPCClientAndServer(t, raftdSocket, "manager-1")
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -1481,10 +1488,11 @@ func TestIntegration_ApproveJoinRequest_AddsRealRaftVoter(t *testing.T) {
 		t.Fatalf("RequestJoinColony() = (%+v, %v)", reqResp, err)
 	}
 
-	approveResp, err := client.ApproveJoinRequest(ctx, &rpcpb.ApproveJoinRequestRequest{RequestId: reqResp.GetRequestId(), ConfirmPhrase: "yes-trust-new-comb"})
-	if err != nil {
-		t.Fatalf("ApproveJoinRequest() error: %v", err)
-	}
+	// ADR-0147 Part 3: an approval now needs an operator authorization
+	// spent from two Combs with two keys before it gets anywhere, so
+	// the helper does the operator's half and this test stays being
+	// about the check it was written for.
+	approveResp, _ := operatorAuthorizedApprovalForTest(t, client, srv, reqResp.GetRequestId())
 	if approveResp.GetError() != "" {
 		t.Fatalf("ApproveJoinRequest() returned error: %s", approveResp.GetError())
 	}
@@ -1551,7 +1559,7 @@ func TestIntegration_RequestJoinColony_DuplicateNodeIDRejected(t *testing.T) {
 // AddVoter's own update-in-place behavior.
 func TestIntegration_ApproveJoinRequest_DuplicateNodeIDRejected(t *testing.T) {
 	raftdSocket := newRaftdUDSSocket(t)
-	client := newManagerdRPCClient(t, raftdSocket)
+	client, srv := newManagerdRPCClientAndServer(t, raftdSocket, "manager-1")
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -1580,17 +1588,29 @@ func TestIntegration_ApproveJoinRequest_DuplicateNodeIDRejected(t *testing.T) {
 	if err != nil || reqA.GetError() != "" {
 		t.Fatalf("RequestJoinColony(A) = (%+v, %v)", reqA, err)
 	}
-	reqB, err := client.RequestJoinColony(ctx, &rpcpb.RequestJoinColonyRequest{NodeId: "node02", RaftBindAddress: nodeBAddr})
+	// B presents a DIFFERENT certificate, because an entry authorizes one
+	// join: with B identical to A, presenting A's spent entry is the
+	// single-use refusal, and this test would pass by being stopped at
+	// the wrong check.
+	reqB, err := client.RequestJoinColony(ctx, &rpcpb.RequestJoinColonyRequest{
+		NodeId: "node02", RaftBindAddress: nodeBAddr, TlsCertFingerprint: "SHA256:BB:CC:DD:EE:FF:00:11:22:33",
+	})
 	if err != nil || reqB.GetError() != "" {
 		t.Fatalf("RequestJoinColony(B) = (%+v, %v) - a second pending request for a node_id that is not YET a voter must be allowed", reqB, err)
 	}
 
-	approveA, err := client.ApproveJoinRequest(ctx, &rpcpb.ApproveJoinRequestRequest{RequestId: reqA.GetRequestId(), ConfirmPhrase: "yes-trust-new-comb"})
-	if err != nil || approveA.GetError() != "" {
-		t.Fatalf("ApproveJoinRequest(A) = (%+v, %v)", approveA, err)
+	approveA, keyA := operatorAuthorizedApprovalForTest(t, client, srv, reqA.GetRequestId())
+	if approveA.GetError() != "" {
+		t.Fatalf("ApproveJoinRequest(A) = %+v", approveA)
 	}
 
-	approveB, err := client.ApproveJoinRequest(ctx, &rpcpb.ApproveJoinRequestRequest{RequestId: reqB.GetRequestId(), ConfirmPhrase: "yes-trust-new-comb"})
+	// B is a SECOND request, so it needs its OWN authorization. The
+	// entry A spent is single-use - the property every other test in
+	// this file now relies on - and reusing it here would have this test
+	// contradicting them.
+	// keyA, because that helper's first call created this Colony's first
+	// API key and authentication has been on ever since.
+	approveB, _ := operatorAuthorizedApprovalForTest(t, client, srv, reqB.GetRequestId(), keyA)
 	if err != nil {
 		t.Fatalf("ApproveJoinRequest(B) error: %v", err)
 	}
@@ -1644,10 +1664,11 @@ func TestIntegration_ApproveJoinRequest_UnreachableNodeIsRefused(t *testing.T) {
 		t.Fatalf("RequestJoinColony() = (%+v, %v)", reqResp, err)
 	}
 
-	approveResp, err := client.ApproveJoinRequest(ctx, &rpcpb.ApproveJoinRequestRequest{RequestId: reqResp.GetRequestId(), ConfirmPhrase: "yes-trust-new-comb"})
-	if err != nil {
-		t.Fatalf("ApproveJoinRequest() error: %v", err)
-	}
+	// ADR-0147 Part 3: an approval now needs an operator authorization
+	// spent from two Combs with two keys before it gets anywhere, so
+	// the helper does the operator's half and this test stays being
+	// about the check it was written for.
+	approveResp, _ := operatorAuthorizedApprovalForTest(t, client, srv, reqResp.GetRequestId())
 	if approveResp.GetError() == "" {
 		t.Fatal("ApproveJoinRequest() error = empty, want a refusal for an unreachable raft_bind_address")
 	}
@@ -1670,7 +1691,7 @@ func TestIntegration_ApproveJoinRequest_UnreachableNodeIsRefused(t *testing.T) {
 // same reachabilityCheck-bearing harness.
 func TestIntegration_ApproveJoinRequest_ReachableNodeStillWorks(t *testing.T) {
 	raftdSocket := newRaftdUDSSocket(t)
-	client, _ := newManagerdRPCClientAndServer(t, raftdSocket, "manager-1")
+	client, srv := newManagerdRPCClientAndServer(t, raftdSocket, "manager-1")
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -1688,10 +1709,11 @@ func TestIntegration_ApproveJoinRequest_ReachableNodeStillWorks(t *testing.T) {
 		t.Fatalf("RequestJoinColony() = (%+v, %v)", reqResp, err)
 	}
 
-	approveResp, err := client.ApproveJoinRequest(ctx, &rpcpb.ApproveJoinRequestRequest{RequestId: reqResp.GetRequestId(), ConfirmPhrase: "yes-trust-new-comb"})
-	if err != nil {
-		t.Fatalf("ApproveJoinRequest() error: %v", err)
-	}
+	// ADR-0147 Part 3: an approval now needs an operator authorization
+	// spent from two Combs with two keys before it gets anywhere, so
+	// the helper does the operator's half and this test stays being
+	// about the check it was written for.
+	approveResp, _ := operatorAuthorizedApprovalForTest(t, client, srv, reqResp.GetRequestId())
 	if approveResp.GetError() != "" {
 		t.Fatalf("ApproveJoinRequest() returned error: %s", approveResp.GetError())
 	}
@@ -1708,7 +1730,7 @@ func TestIntegration_ApproveJoinRequest_ReachableNodeStillWorks(t *testing.T) {
 // Status().Members reflects the new address afterward.
 func TestIntegration_UpdateVoterAddress_UpdatesRealRaftVoterAddress(t *testing.T) {
 	raftdSocket := newRaftdUDSSocket(t)
-	client := newManagerdRPCClient(t, raftdSocket)
+	client, srv := newManagerdRPCClientAndServer(t, raftdSocket, "manager-1")
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -1725,8 +1747,9 @@ func TestIntegration_UpdateVoterAddress_UpdatesRealRaftVoterAddress(t *testing.T
 	if err != nil || reqResp.GetError() != "" {
 		t.Fatalf("RequestJoinColony() = (%+v, %v)", reqResp, err)
 	}
-	if approveResp, err := client.ApproveJoinRequest(ctx, &rpcpb.ApproveJoinRequestRequest{RequestId: reqResp.GetRequestId(), ConfirmPhrase: "yes-trust-new-comb"}); err != nil || approveResp.GetError() != "" {
-		t.Fatalf("ApproveJoinRequest() = (%+v, %v)", approveResp, err)
+	approveResp, joinKey := operatorAuthorizedApprovalForTest(t, client, srv, reqResp.GetRequestId())
+	if approveResp.GetError() != "" {
+		t.Fatalf("ApproveJoinRequest() = %+v", approveResp)
 	}
 
 	secondAddr := freeLoopbackAddr(t)
@@ -1736,7 +1759,15 @@ func TestIntegration_UpdateVoterAddress_UpdatesRealRaftVoterAddress(t *testing.T
 	}
 	t.Cleanup(func() { secondNode.Shutdown() })
 
-	updateResp, err := client.UpdateVoterAddress(ctx, &rpcpb.UpdateVoterAddressRequest{NodeId: "node02", NewRaftBindAddress: secondAddr})
+	// The helper created this Colony's first API key, so authentication
+	// is now on and this call needs a credential. The key it returns is
+	// the completing one, and the completing one is the one that got
+	// here.
+	joinCtx, cancelJoin := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancelJoin()
+	joinCtx = metadata.NewOutgoingContext(joinCtx, metadata.Pairs("authorization", "Bearer "+joinKey))
+
+	updateResp, err := client.UpdateVoterAddress(joinCtx, &rpcpb.UpdateVoterAddressRequest{NodeId: "node02", NewRaftBindAddress: secondAddr})
 	if err != nil {
 		t.Fatalf("UpdateVoterAddress() error: %v", err)
 	}
@@ -1814,14 +1845,23 @@ func TestIntegration_UpdateVoterAddress_UnreachableAddressRejected(t *testing.T)
 	if err != nil || reqResp.GetError() != "" {
 		t.Fatalf("RequestJoinColony() = (%+v, %v)", reqResp, err)
 	}
-	if approveResp, err := client.ApproveJoinRequest(ctx, &rpcpb.ApproveJoinRequestRequest{RequestId: reqResp.GetRequestId(), ConfirmPhrase: "yes-trust-new-comb"}); err != nil || approveResp.GetError() != "" {
-		t.Fatalf("ApproveJoinRequest() = (%+v, %v)", approveResp, err)
+	// ADR-0147 Part 3: the operator's authorization. The completing key
+	// comes back because this helper created the Colony's first API key,
+	// and authentication is on for every call after that.
+	approveResp, joinKey := operatorAuthorizedApprovalForTest(t, client, srv, reqResp.GetRequestId())
+	if approveResp.GetError() != "" {
+		t.Fatalf("ApproveJoinRequest() = %+v", approveResp)
 	}
 
 	srv.reachabilityCheck = func(context.Context, string) error {
 		return fmt.Errorf("simulated: connection refused")
 	}
-	updateResp, err := client.UpdateVoterAddress(ctx, &rpcpb.UpdateVoterAddressRequest{NodeId: "node02", NewRaftBindAddress: "127.0.0.1:1"})
+	// As above: the helper created this Colony's first API key.
+	joinCtx, cancelJoin := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancelJoin()
+	joinCtx = metadata.NewOutgoingContext(joinCtx, metadata.Pairs("authorization", "Bearer "+joinKey))
+
+	updateResp, err := client.UpdateVoterAddress(joinCtx, &rpcpb.UpdateVoterAddressRequest{NodeId: "node02", NewRaftBindAddress: "127.0.0.1:1"})
 	if err != nil {
 		t.Fatalf("UpdateVoterAddress() error: %v", err)
 	}

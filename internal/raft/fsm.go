@@ -192,8 +192,10 @@ func (f *FSM) Apply(log *raft.Log) interface{} {
 		return f.applySetJailHostname(log.Index, op.SetJailHostname)
 	case *internalpb.Command_CreatePendingJoinRequest:
 		return f.applyCreatePendingJoinRequest(log.Index, op.CreatePendingJoinRequest.GetRequest())
+	case *internalpb.Command_RecordJoinApproval:
+		return f.applyRecordJoinApproval(log.Index, op.RecordJoinApproval)
 	case *internalpb.Command_ApprovePendingJoinRequest:
-		return f.applyApprovePendingJoinRequest(log.Index, op.ApprovePendingJoinRequest.GetRequestId())
+		return f.applyApprovePendingJoinRequest(log.Index, op.ApprovePendingJoinRequest)
 	case *internalpb.Command_RejectPendingJoinRequest:
 		return f.applyRejectPendingJoinRequest(log.Index, op.RejectPendingJoinRequest.GetRequestId())
 	case *internalpb.Command_CancelPendingJoinRequest:
@@ -733,12 +735,138 @@ func (f *FSM) applyCreatePendingJoinRequest(index uint64, req *internalpb.Pendin
 // error, not a silent no-op, so a stale browser tab's second click
 // surfaces clearly rather than double-applying. Expiry is enforced by
 // internal/manager before the command is submitted, not here.
-func (f *FSM) applyApprovePendingJoinRequest(index uint64, requestID string) *FSMApplyResult {
-	return f.applyResolvePendingJoinRequest(index, requestID, internalpb.JoinRequestStatus_JOIN_REQUEST_STATUS_APPROVED, "ApprovePendingJoinRequest")
+// applyRecordJoinApproval records ONE authorizing act against a
+// still-pending request (ADR-0147 Part 3's two-person rule) and resolves
+// nothing. It fills the first empty approval slot and fails once both
+// are full.
+//
+// Two slots rather than one, and a failure rather than an overwrite, is
+// the design. One slot would let a third call silently replace a record
+// an operator may still be reading; a list would grow without bound on a
+// value only ever read two deep. The FSM's serialized apply order is
+// what makes "the first approval" a total order every replica agrees
+// on, so a leadership change cannot change which act came first.
+//
+// The request must be PENDING: recording an authorizing act against a
+// request that has already resolved would be writing into a closed
+// record. Expiry is not consulted here and at_unix arrives on the
+// command, for the determinism reason applyResolvePendingJoinRequest
+// below gives in full.
+func (f *FSM) applyRecordJoinApproval(index uint64, cmd *internalpb.RecordJoinApproval) *FSMApplyResult {
+	req, exists := f.pendingJoinRequests[cmd.GetRequestId()]
+	if !exists {
+		return &FSMApplyResult{Index: index, Error: fmt.Sprintf("RecordJoinApproval: request_id %q does not exist", cmd.GetRequestId())}
+	}
+	if req.GetStatus() != internalpb.JoinRequestStatus_JOIN_REQUEST_STATUS_PENDING {
+		return &FSMApplyResult{Index: index, Error: fmt.Sprintf("RecordJoinApproval: request_id %q is already %s", cmd.GetRequestId(), req.GetStatus())}
+	}
+	// An absent identity is refused rather than recorded as an empty
+	// string. Two of these is exactly what the two-person rule counts,
+	// and an empty key id is precisely the "nobody authenticated" case
+	// - managerd with no API keys at all - which the rule must not be
+	// satisfiable by.
+	if cmd.GetKeyId() == "" || cmd.GetNodeId() == "" {
+		return &FSMApplyResult{Index: index, Error: "RecordJoinApproval: key_id and node_id must both be set - a managerd with no API keys cannot satisfy the two-authorization rule, which is deliberate rather than an oversight"}
+	}
+	if !printableASCII(cmd.GetKeyId()) || !printableASCII(cmd.GetNodeId()) {
+		return &FSMApplyResult{Index: index, Error: "RecordJoinApproval: key_id or node_id is malformed"}
+	}
+	updated := proto.Clone(req).(*internalpb.PendingJoinRequest)
+	attestation := &internalpb.JoinApprovalAttestation{
+		KeyId:  cmd.GetKeyId(),
+		NodeId: cmd.GetNodeId(),
+		AtUnix: cmd.GetAtUnix(),
+	}
+	first := updated.GetApproval_1()
+	switch {
+	case first == nil:
+		updated.Approval_1 = attestation
+
+	case updated.GetApproval_2() == nil:
+		updated.Approval_2 = attestation
+
+	case AuthorizationsDistinct(first, updated.GetApproval_2()):
+		// The rule is already satisfied, and a further act is IGNORED
+		// rather than recorded or refused.
+		//
+		// Ignored rather than recorded: the pair is the Colony's record
+		// of who admitted this Comb, and overwriting either half of it
+		// with a later click would rewrite that history.
+		//
+		// Ignored rather than refused, and that is the part worth being
+		// careful about. A request can hold two distinct authorizations
+		// and still be refused by a LATER check - a duplicate node_id, a
+		// reachability dial that failed. An operator who fixes that and
+		// approves again must get past this gate, or the gate has made
+		// its own success unrecoverable: every retry would stop here
+		// with a message about a rule the operator had already satisfied,
+		// pointing at nothing they can change. A rule that cannot be
+		// re-entered after a correctable failure is a trap.
+		return &FSMApplyResult{Index: index, PendingJoinRequest: req}
+
+	case AuthorizationsDistinct(first, attestation):
+		// The two recorded acts can never satisfy the two-person rule -
+		// one key twice, or two keys on one Comb - so the second slot is
+		// REPLACED rather than the request being left unapprovable. The
+		// first act is never touched: it is the one that made the pair
+		// unusable, and discarding it would let the same Comb keep
+		// rolling the record forward.
+		//
+		// This is the only overwrite in the FSM, and it overwrites only
+		// a value that has no approving power to lose.
+		updated.Approval_2 = attestation
+
+	default:
+		// Both recorded acts AND this one agree with each other, so
+		// there is nothing left to replace: the caller is repeating the
+		// first authorization and no arrangement of slots would ever be
+		// satisfiable from here. Named rather than silently dropped,
+		// because "refused with no reason" is how an operator ends up
+		// concluding the Colony is broken.
+		return &FSMApplyResult{Index: index, Error: fmt.Sprintf(
+			"RecordJoinApproval: request_id %q is already recorded twice over by key %q on %q, and this call is that same key on that same Comb - no arrangement of the two slots can satisfy ADR-0147 Part 3 from here. Approve it from a different Comb with a different API key, or reject this request and have the joining Comb request again",
+			cmd.GetRequestId(), first.GetKeyId(), first.GetNodeId())}
+	}
+	f.pendingJoinRequests[cmd.GetRequestId()] = updated
+	return &FSMApplyResult{Index: index, PendingJoinRequest: updated}
+}
+
+// AuthorizationsDistinct is ADR-0147 Part 3's two-person rule as a
+// single predicate: two different API keys, presented to two different
+// Combs.
+//
+// Exported, and used by internal/manager through this function rather
+// than by reimplementing it there, so the rule has exactly ONE
+// definition in the codebase. It has to: the FSM enforces it (and must
+// reach the identical decision on every replica) while the manager
+// layer reports on it, and two copies would be two chances for the
+// manager to refuse a pair the FSM considers valid, or the reverse.
+// A nil argument is never distinct from anything, because a missing
+// attestation is the absence of an authorization rather than a
+// different one.
+func AuthorizationsDistinct(a, b *internalpb.JoinApprovalAttestation) bool {
+	if a == nil || b == nil {
+		return false
+	}
+	return a.GetKeyId() != b.GetKeyId() && a.GetNodeId() != b.GetNodeId()
+}
+
+// The authorization fields arrive on the APPROVE command rather than
+// being written by a second command afterwards, because the record of
+// use and the approval it authorizes have to be one atomic fact: a log
+// entry that approved without recording which entry was spent would
+// leave single use resting entirely on a local file, which is the exact
+// failure the replicated record exists to prevent.
+func (f *FSM) applyApprovePendingJoinRequest(index uint64, cmd *internalpb.ApprovePendingJoinRequest) *FSMApplyResult {
+	return f.applyResolvePendingJoinRequest(index, cmd.GetRequestId(), internalpb.JoinRequestStatus_JOIN_REQUEST_STATUS_APPROVED, "ApprovePendingJoinRequest",
+		func(updated *internalpb.PendingJoinRequest) {
+			updated.AuthorizationId = cmd.GetAuthorizationId()
+			updated.ConsumedAtUnix = cmd.GetConsumedAtUnix()
+		})
 }
 
 func (f *FSM) applyRejectPendingJoinRequest(index uint64, requestID string) *FSMApplyResult {
-	return f.applyResolvePendingJoinRequest(index, requestID, internalpb.JoinRequestStatus_JOIN_REQUEST_STATUS_REJECTED, "RejectPendingJoinRequest")
+	return f.applyResolvePendingJoinRequest(index, requestID, internalpb.JoinRequestStatus_JOIN_REQUEST_STATUS_REJECTED, "RejectPendingJoinRequest", nil)
 }
 
 // applyCancelPendingJoinRequest is the requesting Comb's own withdrawal
@@ -749,10 +877,13 @@ func (f *FSM) applyRejectPendingJoinRequest(index uint64, requestID string) *FSM
 // credential trust model GetJoinRequestStatus already established
 // (ADR-0083), so no new authorization concept is introduced here.
 func (f *FSM) applyCancelPendingJoinRequest(index uint64, requestID string) *FSMApplyResult {
-	return f.applyResolvePendingJoinRequest(index, requestID, internalpb.JoinRequestStatus_JOIN_REQUEST_STATUS_CANCELLED, "CancelPendingJoinRequest")
+	return f.applyResolvePendingJoinRequest(index, requestID, internalpb.JoinRequestStatus_JOIN_REQUEST_STATUS_CANCELLED, "CancelPendingJoinRequest", nil)
 }
 
-func (f *FSM) applyResolvePendingJoinRequest(index uint64, requestID string, status internalpb.JoinRequestStatus, opName string) *FSMApplyResult {
+// stamp is how the approve path adds ADR-0147 Part 3's record of use to
+// the same atomic state change that flips the status; nil for the three
+// resolutions that carry nothing extra.
+func (f *FSM) applyResolvePendingJoinRequest(index uint64, requestID string, status internalpb.JoinRequestStatus, opName string, stamp func(*internalpb.PendingJoinRequest)) *FSMApplyResult {
 	req, exists := f.pendingJoinRequests[requestID]
 	if !exists {
 		return &FSMApplyResult{Index: index, Error: fmt.Sprintf("%s: request_id %q does not exist", opName, requestID)}
@@ -768,6 +899,9 @@ func (f *FSM) applyResolvePendingJoinRequest(index uint64, requestID string, sta
 	// before submitting the command instead.
 	updated := proto.Clone(req).(*internalpb.PendingJoinRequest)
 	updated.Status = status
+	if stamp != nil {
+		stamp(updated)
+	}
 	f.pendingJoinRequests[requestID] = updated
 	// ADR-0147 Part 4's pin lifecycle, inside the same log entry that
 	// settles the request rather than as a command a caller has to
@@ -788,6 +922,38 @@ func (f *FSM) applyResolvePendingJoinRequest(index uint64, requestID string, sta
 		f.dropUnpromotedPin(updated.GetNodeId())
 	}
 	return &FSMApplyResult{Index: index, PendingJoinRequest: updated}
+}
+
+// AuthorizationUse reports which request already SPENT a given
+// root-owned authorization entry, and when (ADR-0147 Part 3).
+//
+// This is the replicated half of single use, and it exists because the
+// file cannot be the record of it. Only the leader reads the
+// authorization file, so after a leadership change the new leader holds
+// a file that may still list an entry as available when a previous
+// leader already spent it. This scan is over replicated state and so
+// answers the same way on every Comb and in every election.
+//
+// The scan is a linear walk of a bounded map (MaxJoinRequests, 100),
+// reached only on the approval path immediately before a call that
+// commits a raft membership change. One limit is stated rather than
+// worked around: a request that was PURGED after its approval leaves the
+// map, and its entry becomes spendable again. The alternative is a
+// second replicated map whose entire purpose is to remember a bounded
+// amount of history forever, which is a worse trade than an explicit
+// Admin action - PurgeJoinRequest - being able to forget.
+func (f *FSM) AuthorizationUse(authorizationID string) (requestID string, consumedAtUnix int64, found bool) {
+	if authorizationID == "" {
+		return "", 0, false
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for id, req := range f.pendingJoinRequests {
+		if req.GetAuthorizationId() == authorizationID {
+			return id, req.GetConsumedAtUnix(), true
+		}
+	}
+	return "", 0, false
 }
 
 // applyPurgeJoinRequest mirrors applyPurgeJail exactly: idempotent,

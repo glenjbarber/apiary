@@ -554,11 +554,72 @@ func restartGuardrailTokenValid(presented, configured string) bool {
 // is an acceptable, narrow carve-out - not a precedent for adding more.
 func (s *Server) AuthUnaryInterceptor(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
 	if !authExemptMethods[info.FullMethod] {
-		if err := checkAuth(ctx, info.FullMethod, raftAPIKeyValidator{s.raft}); err != nil {
+		// The key ID is put into the context HERE rather than re-derived
+		// by each handler, for one reason: ADR-0147 Part 3's two-person
+		// rule records which API key authorized a join, and a handler
+		// that read the bearer token itself would be one refactor away
+		// from recording the token's hash or nothing at all. The value
+		// is whatever raftd's ValidateAPIKeyHash resolved this
+		// credential to, and the only thing derived from it is an id.
+		//
+		// It is set even when auth is DISABLED, in which case it is
+		// empty - see callerAPIKeyID's own doc comment for why an empty
+		// id is a refusal in Part 3 rather than a wildcard.
+		if keyID, err := s.authenticateAndIdentify(ctx, info.FullMethod); err != nil {
 			return nil, err
+		} else if keyID != "" {
+			ctx = context.WithValue(ctx, callerAPIKeyIDContextKey{}, keyID)
 		}
 	}
 	return handler(ctx, req)
+}
+
+// callerAPIKeyIDContextKey is the unexported context key the auth
+// interceptor stores the caller's validated API key id under. An
+// unexported zero-size type rather than a bare string, so nothing
+// outside this package can read or forge it: a handler that could set
+// this value could authorize a join on its own say-so, which is the
+// exact hole the two-person rule exists to close.
+type callerAPIKeyIDContextKey struct{}
+
+// callerAPIKeyID returns the id of the API key this call authenticated
+// as, or "" when the call was not authenticated by an API key at all.
+//
+// "" is a real and important case rather than an error: a managerd with
+// no API keys has checkAuth as a no-op (ADR-0023), so it authenticates
+// everyone and can authenticate no one in particular. ADR-0147 Part 3
+// refuses that rather than waving it through, because the whole point
+// of the two-person rule is to count two distinct credentials and a
+// Colony with no credentials has none to count.
+func callerAPIKeyID(ctx context.Context) string {
+	id, _ := ctx.Value(callerAPIKeyIDContextKey{}).(string)
+	return id
+}
+
+// authenticateAndIdentify is checkAuth plus the one fact handlers need
+// from it: which key the credential resolved to. checkAuth keeps its
+// existing signature and its existing callers because the only other
+// caller is the stream interceptor, which has no use for a key id.
+func (s *Server) authenticateAndIdentify(ctx context.Context, fullMethod string) (string, error) {
+	key, _ := extractBearerToken(ctx)
+	hash := ""
+	if key != "" {
+		hash = hashAPIKey(key)
+	}
+	valid, authEnabled, keyID, role, err := raftAPIKeyValidator{s.raft}.ValidateAPIKeyHash(ctx, hash)
+	if err != nil {
+		return "", status.Errorf(codes.Internal, "checking API key: %v", err)
+	}
+	if !authEnabled {
+		return "", nil
+	}
+	if key == "" || !valid {
+		return "", status.Error(codes.Unauthenticated, "missing or invalid API key")
+	}
+	if !role.Satisfies(requiredRoleFor(fullMethod)) {
+		return "", status.Errorf(codes.PermissionDenied, "this API key's role (%s) may not call %s", role, fullMethod)
+	}
+	return keyID, nil
 }
 
 func (s *Server) AuthStreamInterceptor(srv interface{}, ss grpc.ServerStream, info *grpc.StreamServerInfo, handler grpc.StreamHandler) error {

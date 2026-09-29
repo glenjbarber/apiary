@@ -484,6 +484,28 @@ type Server struct {
 	// pre-AddVoter check (ADR-0097).
 	reachabilityCheck func(ctx context.Context, addr string) error
 
+	// joinAuthorizationsPath is ADR-0147 Part 3's root-owned
+	// authorization store. Empty means joinauth.DefaultPath, which is
+	// where `apiaryctl install` creates it and where
+	// `apiaryctl join-authorize` writes it.
+	//
+	// It is a PATH and nothing more: no RPC reads this field, no proto
+	// carries it, and there is deliberately no setter an RPC handler
+	// could ever reach. That is not a convention this package follows
+	// by good behaviour, it is a property
+	// internal/manager/joinauthorization_test.go asserts mechanically
+	// by walking the ManagerService descriptor.
+	joinAuthorizationsPath string
+
+	// joinAuthorizationRead overrides how the store is loaded, so tests
+	// can drive every refusal - absent, unreadable, malformed, no
+	// entry, wrong fingerprint, expired - without a fixture directory
+	// and without the production reader's filesystem standing in for
+	// the thing under test. nil means read
+	// s.joinAuthorizationsPath, which is the production path and the
+	// only one a deployed managerd ever takes.
+	joinAuthorizationRead joinAuthorizationLoader
+
 	// restartGuardrailToken gates ReserveRestartLease/ConfirmRestartCompleted
 	// (ADR-0103) - loaded once from a root-owned local file at managerd
 	// startup (SetRestartGuardrailToken), never exposed through any RPC.

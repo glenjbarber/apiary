@@ -141,6 +141,23 @@ func (c *RaftClient) GetPendingJoinRequestLocal(ctx context.Context, requestID s
 // GetRestartLeaseStateLocal backs PreflightRestartNodeService (ADR-0103) -
 // a plain read of this node's own FSM copy, mirroring
 // GetPendingJoinRequestLocal above.
+// GetAuthorizationUse asks raftd which join request, if any, already
+// spent a given root-owned authorization entry (ADR-0147 Part 3).
+//
+// The replicated answer, not the local file: only the leader reads the
+// file, and this is the read that makes a spent entry stay spent across
+// a leadership change.
+func (c *RaftClient) GetAuthorizationUse(ctx context.Context, authorizationID string) (requestID string, consumedAtUnix int64, found bool, err error) {
+	resp, err := c.client.GetAuthorizationUse(ctx, &internalpb.GetAuthorizationUseRequest{AuthorizationId: authorizationID})
+	if err != nil {
+		return "", 0, false, err
+	}
+	if resp.GetError() != "" {
+		return "", 0, false, fmt.Errorf("%s", resp.GetError())
+	}
+	return resp.GetRequestId(), resp.GetConsumedAtUnix(), resp.GetFound(), nil
+}
+
 func (c *RaftClient) GetRestartLeaseStateLocal(ctx context.Context, service string) (*internalpb.GetRestartLeaseStateResponse, error) {
 	return c.client.GetRestartLeaseStateLocal(ctx, &internalpb.GetRestartLeaseStateRequest{Service: service})
 }

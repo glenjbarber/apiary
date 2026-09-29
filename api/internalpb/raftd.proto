@@ -153,6 +153,21 @@ service RaftInternal {
   // hosts.
   rpc ListTrustedPeersLocal(ListTrustedPeersRequest) returns (ListTrustedPeersResponse);
 
+  // GetAuthorizationUse reports which request, if any, has already
+  // SPENT a given root-owned authorization entry (ADR-0147 Part 3).
+  //
+  // Leader-only, and deliberately so. The question is only ever asked by
+  // ApproveJoinRequest, which only ever runs on the leader, and
+  // answering it from a follower's possibly-stale map would make a spent
+  // entry look unspent - failing open on the exact property the
+  // replicated record exists to provide.
+  //
+  // The root-owned authorization FILE cannot answer this question: only
+  // the leader reads it, and a copy on another Comb is a copy that may
+  // predate the approval. This read is why single use survives an
+  // election.
+  rpc GetAuthorizationUse(GetAuthorizationUseRequest) returns (GetAuthorizationUseResponse);
+
   // GetColonyUpdateStateLocal is the read side of ADR-0145's colony-wide
   // controlled-update single-flight. It is deliberately named ...Local and
   // deliberately NOT leader-only, for the same GetRestartLeaseStateLocal
@@ -539,4 +554,27 @@ message ListTrustedPeersResponse {
   // cannot drift apart - the same reasoning GetColonyJoinWindowResponse
   // records. Sorted by TrustedPeer.node_id.
   repeated TrustedPeer peers = 1;
+}
+
+// GetAuthorizationUseRequest asks who spent one authorization entry. An
+// empty authorization_id is refused rather than answered, so a caller
+// that failed to fill it in cannot read the whole table by accident.
+message GetAuthorizationUseRequest {
+  string authorization_id = 1;
+}
+
+// GetAuthorizationUseResponse names the request that spent the entry.
+// found = false is the ordinary answer for an entry nobody has spent
+// yet, and is not an error; only an unreachable FSM is.
+message GetAuthorizationUseResponse {
+  bool found = 1;
+  string request_id = 2;
+  int64 consumed_at_unix = 3;
+
+  // error and leader_hint are the two fields every other leader-only
+  // read in this file already carries, for the same reasons: a
+  // follower refuses rather than answering from a lagging map, and
+  // says which node to ask instead.
+  string error = 4;
+  string leader_hint = 5;
 }

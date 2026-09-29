@@ -12,6 +12,7 @@ import (
 
 	"github.com/glenjbarber/apiary/internal/commonconfig"
 	"github.com/glenjbarber/apiary/internal/frontendconfig"
+	"github.com/glenjbarber/apiary/internal/joinauth"
 	"github.com/glenjbarber/apiary/internal/nodeconfig"
 	"github.com/glenjbarber/apiary/internal/raftdconfig"
 	"github.com/glenjbarber/apiary/internal/restshimdconfig"
@@ -43,6 +44,7 @@ func (p *Plan) planWrites() {
 		p.add(ActionCreate, p.opts.Paths.TLSDir, "directory", "0700",
 			"created by the certificate write above; the private key lives here, and it is never re-chmodded on a later run")
 	}
+	p.planJoinAuthorizationStore()
 	p.planCommonWrites()
 	p.planRaftdWrites()
 	p.planManagerdWrites()
@@ -86,6 +88,63 @@ func (p *Plan) planDirectories() {
 		default:
 			p.add(ActionRefuse, dir.path, "directory", "", err.Error())
 		}
+	}
+}
+
+// planJoinAuthorizationStore accounts for ADR-0147 Part 3's
+// root-owned authorization store.
+//
+// Created empty at 0600 when absent, and left EXACTLY as it is when
+// present - including its mode, and including its contents. A second
+// run over a Comb that already has entries must not rewrite the file
+// even to identical bytes: rewriting it would replace an inode an
+// operator may be watching, and the "never rewrite what is already
+// there" rule this whole package is built on applies to this file more
+// than to any other, because this one is an authority rather than a
+// setting.
+//
+// It is deliberately NOT parsed for anything but report purposes. A
+// malformed store is a refusal ApproveJoinRequest reports by name (see
+// internal/joinauth.Load), and deciding what to do about it is not
+// this installer's job: the contents are the operator's deliberate
+// edits, and an installer that refused to run because of them would be
+// a second, weaker authority over the same bytes.
+func (p *Plan) planJoinAuthorizationStore() {
+	path := p.opts.Paths.joinAuthorizations()
+	info, err := os.Stat(path)
+	switch {
+	case err == nil:
+		entries, readErr := joinauth.Load(path)
+		switch {
+		case readErr != nil:
+			// Recorded as a refusal, but deliberately not through
+			// refuseFile: nothing is blocked, so every other write
+			// still runs and this file is still left exactly as it
+			// is either way. It is ActionRefuse rather than
+			// ActionNeeds because this is a fault and not a blank
+			// for a human to fill in, and the exit status has to say
+			// so: Refusals() lists the line, Apply returns a
+			// RefusedError, and the summary reports that this Comb
+			// is not fully configured. The line exists so an operator
+			// running the report learns that no join will be
+			// approvable until it is fixed.
+			p.add(ActionRefuse, path, "contents", "", readErr.Error()+
+				" - left exactly as it is; no join can be approved on this Comb while it stays this way, and `apiaryctl join-authorize` will refuse to write to it")
+		case info.Mode().Perm() != 0o600:
+			p.add(ActionRefuse, path, "mode", fmt.Sprintf("%04o", info.Mode().Perm()),
+				"this file's whole authority is that only root can write it, and that is not its mode; chmod 600 it by hand. It is deliberately not chmodded here: tightening permissions on a file an operator may be reading right now is an unrequested change")
+		default:
+			p.add(ActionKeep, path, "authorization entries", fmt.Sprintf("%d", len(entries.Authorizations)),
+				"already exists; every entry in it is left exactly as it is - this is the operator's authority over who may join, and re-running an installer must never rewrite it")
+		}
+	case os.IsNotExist(err):
+		p.add(ActionCreate, path, "authorization entries", "0",
+			"ADR-0147 Part 3's operator authorization store, created empty: no Comb is authorized to join until an operator runs `apiaryctl join-authorize` on the leader. No RPC writes this file, and that is what makes an entry in it worth something")
+		p.writes = append(p.writes, func() error {
+			return writeFileAtomic(path, []byte("{\n  \"authorizations\": []\n}\n"), 0o600)
+		})
+	default:
+		p.add(ActionRefuse, path, "authorization entries", "", err.Error())
 	}
 }
 

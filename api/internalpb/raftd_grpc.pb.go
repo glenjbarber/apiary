@@ -40,6 +40,7 @@ const (
 	RaftInternal_GetRestartLeaseStateLocal_FullMethodName    = "/apiary.internal.v1.RaftInternal/GetRestartLeaseStateLocal"
 	RaftInternal_GetColonyJoinWindowLocal_FullMethodName     = "/apiary.internal.v1.RaftInternal/GetColonyJoinWindowLocal"
 	RaftInternal_ListTrustedPeersLocal_FullMethodName        = "/apiary.internal.v1.RaftInternal/ListTrustedPeersLocal"
+	RaftInternal_GetAuthorizationUse_FullMethodName          = "/apiary.internal.v1.RaftInternal/GetAuthorizationUse"
 	RaftInternal_GetColonyUpdateStateLocal_FullMethodName    = "/apiary.internal.v1.RaftInternal/GetColonyUpdateStateLocal"
 	RaftInternal_StepAsideForRestartLocal_FullMethodName     = "/apiary.internal.v1.RaftInternal/StepAsideForRestartLocal"
 )
@@ -178,6 +179,20 @@ type RaftInternalClient interface {
 	// writes are the same on every Comb and an operator can diff two
 	// hosts.
 	ListTrustedPeersLocal(ctx context.Context, in *ListTrustedPeersRequest, opts ...grpc.CallOption) (*ListTrustedPeersResponse, error)
+	// GetAuthorizationUse reports which request, if any, has already
+	// SPENT a given root-owned authorization entry (ADR-0147 Part 3).
+	//
+	// Leader-only, and deliberately so. The question is only ever asked by
+	// ApproveJoinRequest, which only ever runs on the leader, and
+	// answering it from a follower's possibly-stale map would make a spent
+	// entry look unspent - failing open on the exact property the
+	// replicated record exists to provide.
+	//
+	// The root-owned authorization FILE cannot answer this question: only
+	// the leader reads it, and a copy on another Comb is a copy that may
+	// predate the approval. This read is why single use survives an
+	// election.
+	GetAuthorizationUse(ctx context.Context, in *GetAuthorizationUseRequest, opts ...grpc.CallOption) (*GetAuthorizationUseResponse, error)
 	// GetColonyUpdateStateLocal is the read side of ADR-0145's colony-wide
 	// controlled-update single-flight. It is deliberately named ...Local and
 	// deliberately NOT leader-only, for the same GetRestartLeaseStateLocal
@@ -440,6 +455,16 @@ func (c *raftInternalClient) ListTrustedPeersLocal(ctx context.Context, in *List
 	return out, nil
 }
 
+func (c *raftInternalClient) GetAuthorizationUse(ctx context.Context, in *GetAuthorizationUseRequest, opts ...grpc.CallOption) (*GetAuthorizationUseResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetAuthorizationUseResponse)
+	err := c.cc.Invoke(ctx, RaftInternal_GetAuthorizationUse_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *raftInternalClient) GetColonyUpdateStateLocal(ctx context.Context, in *GetColonyUpdateStateRequest, opts ...grpc.CallOption) (*GetColonyUpdateStateResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(GetColonyUpdateStateResponse)
@@ -594,6 +619,20 @@ type RaftInternalServer interface {
 	// writes are the same on every Comb and an operator can diff two
 	// hosts.
 	ListTrustedPeersLocal(context.Context, *ListTrustedPeersRequest) (*ListTrustedPeersResponse, error)
+	// GetAuthorizationUse reports which request, if any, has already
+	// SPENT a given root-owned authorization entry (ADR-0147 Part 3).
+	//
+	// Leader-only, and deliberately so. The question is only ever asked by
+	// ApproveJoinRequest, which only ever runs on the leader, and
+	// answering it from a follower's possibly-stale map would make a spent
+	// entry look unspent - failing open on the exact property the
+	// replicated record exists to provide.
+	//
+	// The root-owned authorization FILE cannot answer this question: only
+	// the leader reads it, and a copy on another Comb is a copy that may
+	// predate the approval. This read is why single use survives an
+	// election.
+	GetAuthorizationUse(context.Context, *GetAuthorizationUseRequest) (*GetAuthorizationUseResponse, error)
 	// GetColonyUpdateStateLocal is the read side of ADR-0145's colony-wide
 	// controlled-update single-flight. It is deliberately named ...Local and
 	// deliberately NOT leader-only, for the same GetRestartLeaseStateLocal
@@ -708,6 +747,9 @@ func (UnimplementedRaftInternalServer) GetColonyJoinWindowLocal(context.Context,
 }
 func (UnimplementedRaftInternalServer) ListTrustedPeersLocal(context.Context, *ListTrustedPeersRequest) (*ListTrustedPeersResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ListTrustedPeersLocal not implemented")
+}
+func (UnimplementedRaftInternalServer) GetAuthorizationUse(context.Context, *GetAuthorizationUseRequest) (*GetAuthorizationUseResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetAuthorizationUse not implemented")
 }
 func (UnimplementedRaftInternalServer) GetColonyUpdateStateLocal(context.Context, *GetColonyUpdateStateRequest) (*GetColonyUpdateStateResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetColonyUpdateStateLocal not implemented")
@@ -1114,6 +1156,24 @@ func _RaftInternal_ListTrustedPeersLocal_Handler(srv interface{}, ctx context.Co
 	return interceptor(ctx, in, info, handler)
 }
 
+func _RaftInternal_GetAuthorizationUse_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetAuthorizationUseRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(RaftInternalServer).GetAuthorizationUse(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: RaftInternal_GetAuthorizationUse_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(RaftInternalServer).GetAuthorizationUse(ctx, req.(*GetAuthorizationUseRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _RaftInternal_GetColonyUpdateStateLocal_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(GetColonyUpdateStateRequest)
 	if err := dec(in); err != nil {
@@ -1240,6 +1300,10 @@ var RaftInternal_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ListTrustedPeersLocal",
 			Handler:    _RaftInternal_ListTrustedPeersLocal_Handler,
+		},
+		{
+			MethodName: "GetAuthorizationUse",
+			Handler:    _RaftInternal_GetAuthorizationUse_Handler,
 		},
 		{
 			MethodName: "GetColonyUpdateStateLocal",

@@ -638,6 +638,21 @@ func (s *Server) ApproveJoinRequest(ctx context.Context, req *rpcpb.ApproveJoinR
 		return &rpcpb.ApproveJoinRequestResponse{Error: err.Error()}, nil
 	}
 
+	// ADR-0147 Part 3: this Comb stamps its OWN identity onto the call
+	// before it can be forwarded, and only if nothing has stamped it
+	// already. That "only if empty" is the whole mechanism: a forwarded
+	// approval must still name the Comb the operator actually presented
+	// it to, so a second forward must not overwrite the first Comb's
+	// stamp with this one's.
+	//
+	// The stamp is this managerd's own configuration, never anything
+	// the caller sent. Part 3's two-person rule counts DISTINCT Combs,
+	// and a caller-supplied value would make that count a claim about
+	// the caller rather than a fact about the Colony.
+	if req.GetApprovingNodeId() == "" {
+		req.ApprovingNodeId = s.localNodeID()
+	}
+
 	// Check leadership BEFORE running the local reachability dial below -
 	// only the leader's own network vantage point actually matters, since
 	// only the leader calls AddVoter. A follower with its own, different
@@ -664,6 +679,32 @@ func (s *Server) ApproveJoinRequest(ctx context.Context, req *rpcpb.ApproveJoinR
 	pending := getResp.GetRequest()
 	if joinRequestExpired(pending) {
 		return &rpcpb.ApproveJoinRequestResponse{Error: fmt.Sprintf("ApprovePendingJoinRequest: request_id %q has expired", req.GetRequestId())}, nil
+	}
+
+	// ADR-0147 Part 3, in the ADR's own order: the live join window
+	// (checked above, before this) is the cheapest gate and the one an
+	// operator most needs explained; the authorization entry is next;
+	// the two-person rule after that; and Part 2's reachability,
+	// not-already-a-voter and join-log checks run last, as they always
+	// did.
+	//
+	// Every one of these is checked on the LEADER, here, at the moment
+	// of the approval - never when a form was rendered, and never on
+	// the member that happened to receive the click. An authorization
+	// that expires while an approval sits in a browser must not be
+	// spendable on the strength of when the form was drawn, and a
+	// leader change between the click and here must not change which
+	// file is read.
+	authorization, err := s.authorizePendingJoin(ctx, pending, req)
+	if err != nil {
+		return &rpcpb.ApproveJoinRequestResponse{Error: err.Error()}, nil
+	}
+	if authorization.awaitingSecond {
+		return &rpcpb.ApproveJoinRequestResponse{
+			Request:                     fromInternalPendingJoinRequest(authorization.record),
+			AwaitingSecondAuthorization: true,
+			SecondAuthorizationRequired: authorization.awaitingMessage,
+		}, nil
 	}
 
 	if report := s.evaluateJoinReachability(ctx, pending.GetRaftBindAddress()); report.Verdict != guardrail.Allow {
@@ -735,9 +776,24 @@ func (s *Server) ApproveJoinRequest(ctx context.Context, req *rpcpb.ApproveJoinR
 		return &rpcpb.ApproveJoinRequestResponse{Error: addResp.GetError(), LeaderHint: addResp.GetLeaderHint()}, nil
 	}
 
+	// authorization.id is set by the only path that reaches AddVoter:
+	// authorizePendingJoin refuses every other case, and names the exact
+	// entry that authorized this approval so the raft log - not a local
+	// file - is the record of its use.
+	//
+	// It is written on the SAME command that approves rather than by a
+	// second one afterwards, because "this join was approved" and "this
+	// entry was spent" have to be a single atomic fact. A log entry that
+	// approved without recording the spend would leave single use
+	// resting on a file only the leader reads, which is precisely the
+	// gap ADR-0147 Part 3 exists to close.
 	cmd := &internalpb.Command{
 		Op: &internalpb.Command_ApprovePendingJoinRequest{
-			ApprovePendingJoinRequest: &internalpb.ApprovePendingJoinRequest{RequestId: req.GetRequestId()},
+			ApprovePendingJoinRequest: &internalpb.ApprovePendingJoinRequest{
+				RequestId:       req.GetRequestId(),
+				AuthorizationId: authorization.id,
+				ConsumedAtUnix:  authorization.consumedAt,
+			},
 		},
 	}
 	result, appErr, leaderHint := s.applyJoinRequestCommand(ctx, cmd, req.GetTimeoutMs())

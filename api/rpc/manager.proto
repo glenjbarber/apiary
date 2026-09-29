@@ -3221,6 +3221,18 @@ message PendingJoinRequest {
   // window created a request and whether that window is still live,
   // rather than learning it only from a refusal at approval time.
   int64 window_opened_at_unix = 11;
+
+  // approval_1 / approval_2 / authorization_id / consumed_at_unix mirror
+  // internalpb.PendingJoinRequest's own four fields of those names - see
+  // there for what each is, and for why single use is recorded in
+  // replicated state rather than in the root-owned file alone. They are
+  // carried here so an Admin reviewing a request can see which two keys,
+  // on which two Combs, have already authorized it, and which entry was
+  // spent - the Colony's own record of who admitted what.
+  JoinApprovalAttestation approval_1 = 12;
+  JoinApprovalAttestation approval_2 = 13;
+  string authorization_id = 14;
+  int64 consumed_at_unix = 15;
 }
 
 message RequestJoinColonyRequest {
@@ -3321,12 +3333,47 @@ message ApproveJoinRequestRequest {
   // typing this, which the UI enforces by only ever showing this field
   // alongside that value.
   string confirm_phrase = 3;
+
+  // approving_node_id is which Comb this approval was presented TO, and
+  // it is set by that Comb - never taken from the caller's request body
+  // over an already-set value. ApproveJoinRequest stamps it from its own
+  // configuration when it is empty, and forwards it unchanged when it is
+  // not, so a forwarded approval still names the Comb the operator
+  // actually used.
+  //
+  // This is ADR-0147 Part 3's two-person rule, and stamping rather than
+  // trusting is the reason it is worth anything: the rule counts
+  // DISTINCT Combs, and a caller-supplied value would make that count a
+  // claim. The honest limit is stated in the ADR and is unchanged here -
+  // a Comb whose own node_id an Admin can rewrite can lie about which
+  // Comb it is. The layer that closes a hostile Admin is the root-owned
+  // authorization file, not this rule.
+  string approving_node_id = 4;
 }
 
 message ApproveJoinRequestResponse {
   PendingJoinRequest request = 1;
   string error = 2;
   string leader_hint = 3;
+
+  // awaiting_second_authorization is set when this call recorded ONE
+  // authorizing act and deliberately admitted nobody. It is neither an
+  // error nor a success: the request is still PENDING, AddVoter was
+  // never reached, and second_authorization_required says exactly what
+  // is still needed. A UI that renders this as either a success or a
+  // failure is misreporting the one state an operator most needs to
+  // understand.
+  bool awaiting_second_authorization = 4;
+  string second_authorization_required = 5;
+}
+
+// JoinApprovalAttestation mirrors internalpb.JoinApprovalAttestation -
+// see there for what each field means, and for why an empty key_id is a
+// refusal rather than an unauthenticated success.
+message JoinApprovalAttestation {
+  string key_id = 1;
+  string node_id = 2;
+  int64 at_unix = 3;
 }
 
 // ColonyJoinWindow mirrors internalpb.ColonyJoinWindow - the same
