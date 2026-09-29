@@ -3410,39 +3410,24 @@ func TestServer_HandleCancelJoinRequest(t *testing.T) {
 	}
 }
 
-// TestServer_HandleRequestJoinColony_RequiresTargetAddress is ADR-0092's
-// own regression test for the confusing trap it closes: submitting the
-// "Join a Colony" form with no target address must be rejected with a
-// clear form error, never silently recorded on this Comb's own local
-// Colony (which is exactly the backwards, invisible-to-the-real-target
-// behavior that confused the operator this ADR is named for).
-func TestServer_HandleRequestJoinColony_RequiresTargetAddress(t *testing.T) {
+// TestServer_HandleRequestJoinColony_FormIsRetired is ADR-0147 Part 2's
+// regression test for the JOINER surface move. The "Join a Colony" form
+// is gone, and the route must say so rather than quietly doing a worse
+// version of the old thing.
+//
+// What it must NOT do is generate the first code server-side and hand it
+// to managerd in the same request. That would satisfy stage one with no
+// human having read anything, which is the exact failure the code's
+// inversion exists to prevent - so the assertion is that
+// RequestJoinColony is never called at all.
+//
+// This also retires TestServer_HandleRequestJoinColony_ThreadsTargetAddress,
+// which asserted the same route's 302 and fixed-port threading. ADR-0092's
+// behavior is not lost with it: the Machine page's own status panel still
+// threads target_address to the poll, and the test immediately below
+// covers exactly that.
+func TestServer_HandleRequestJoinColony_FormIsRetired(t *testing.T) {
 	client := &fakeClient{}
-	s := newTestServer(t, client)
-
-	form := url.Values{"node_id": {"node02"}, "raft_bind_host": {"10.62.0.3"}}
-	req := httptest.NewRequest(http.MethodPost, "/machine/join-colony", strings.NewReader(form.Encode()))
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	rec := httptest.NewRecorder()
-	s.ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200 (re-rendered form with error); body=%s", rec.Code, rec.Body.String())
-	}
-	if !strings.Contains(rec.Body.String(), "existing Colony member") || !strings.Contains(rec.Body.String(), "address is required") {
-		t.Errorf("expected a target-address-required form error, got: %s", rec.Body.String())
-	}
-	if client.lastRequestJoinColonyReq != nil {
-		t.Errorf("RequestJoinColony was called (%+v), want it never called without a target address", client.lastRequestJoinColonyReq)
-	}
-}
-
-// TestServer_HandleRequestJoinColony_ThreadsTargetAddress confirms a
-// submitted target_address reaches RequestJoinColony and is carried
-// forward into the redirect's own query string, so the subsequent
-// status poll knows where to look.
-func TestServer_HandleRequestJoinColony_ThreadsTargetAddress(t *testing.T) {
-	client := &fakeClient{requestJoinColonyResp: &rpcpb.RequestJoinColonyResponse{RequestId: "jreq-xyz", Code: "482913"}}
 	s := newTestServer(t, client)
 
 	form := url.Values{"node_id": {"node02"}, "raft_bind_host": {"10.62.0.3"}, "target_host": {"10.62.0.2"}}
@@ -3451,17 +3436,14 @@ func TestServer_HandleRequestJoinColony_ThreadsTargetAddress(t *testing.T) {
 	rec := httptest.NewRecorder()
 	s.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusFound {
-		t.Fatalf("status = %d, want 302; body=%s", rec.Code, rec.Body.String())
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (re-rendered page with the refusal); body=%s", rec.Code, rec.Body.String())
 	}
-	// The port is fixed server-side (fixedport.go) - the submitted host
-	// comes back joined with managerd's own fixed 17700.
-	if client.lastRequestJoinColonyReq.GetTargetAddress() != "10.62.0.2:17700" {
-		t.Errorf("RequestJoinColony target_address = %q, want the submitted host joined with the fixed managerd port 10.62.0.2:17700", client.lastRequestJoinColonyReq.GetTargetAddress())
+	if !strings.Contains(rec.Body.String(), "apiaryctl join-introduce") {
+		t.Errorf("expected the retired form to name apiaryctl join-introduce as the replacement, got: %s", rec.Body.String())
 	}
-	loc := rec.Header().Get("Location")
-	if !strings.Contains(loc, "join_request_id=jreq-xyz") || !strings.Contains(loc, "join_target_address=10.62.0.2%3A17700") {
-		t.Errorf("Location = %q, want both join_request_id and join_target_address query params", loc)
+	if client.lastRequestJoinColonyReq != nil {
+		t.Errorf("RequestJoinColony was called (%+v). The joiner surface is the CLI, and a page that generated the first code itself would satisfy stage one with nobody transcribing anything", client.lastRequestJoinColonyReq)
 	}
 }
 
@@ -3590,8 +3572,11 @@ func TestServer_HandlePreflightJoinRequest_RedirectsWithVerdict(t *testing.T) {
 // the fingerprint (or its explicit absence) already being on the page.
 func TestServer_ClusterOverviewPage_RendersJoinRequestTLSFingerprint(t *testing.T) {
 	client := &fakeClient{listJoinRequestsResp: &rpcpb.ListJoinRequestsResponse{Requests: []*rpcpb.PendingJoinRequest{
-		{RequestId: "jreq-abc123", NodeId: "node02", RaftBindAddress: "10.62.0.5:17600", Code: "482913", TlsCertFingerprint: "SHA256:AA:BB:CC"},
-		{RequestId: "jreq-noTLS", NodeId: "node03", RaftBindAddress: "10.62.0.6:17600", Code: "111222"},
+		{RequestId: "jreq-abc123", NodeId: "node02", RaftBindAddress: "10.62.0.5:17600", Code: "482913",
+			TlsCertFingerprint: "SHA256:AA:BB:CC", Stage: rpcpb.JoinRequestStage_JOIN_REQUEST_STAGE_INTRODUCED,
+			AdvertisedFingerprints: []string{"SHA256:AA:BB:CC"}},
+		{RequestId: "jreq-noTLS", NodeId: "node03", RaftBindAddress: "10.62.0.6:17600", Code: "111222",
+			Stage: rpcpb.JoinRequestStage_JOIN_REQUEST_STAGE_INTRODUCED},
 	}}}
 	s := newTestServer(t, client)
 
@@ -3601,13 +3586,28 @@ func TestServer_ClusterOverviewPage_RendersJoinRequestTLSFingerprint(t *testing.
 
 	body := rec.Body.String()
 	if !strings.Contains(body, "SHA256:AA:BB:CC") {
-		t.Errorf("landing page missing the rendered TLS fingerprint, got: %s", body)
+		t.Errorf("landing page missing the rendered advertised fingerprint, got: %s", body)
 	}
-	if !strings.Contains(body, "no TLS certificate presented") {
-		t.Errorf("landing page missing the no-TLS fallback text for the request with no fingerprint, got: %s", body)
+	// ADR-0147 Part 2: the "no TLS certificate presented" fallback is
+	// GONE, and so is approval on it. A request that advertised no
+	// fingerprints has nothing for the operator's screen to be compared
+	// against, so the page now says it cannot be approved - a different
+	// sentence and a different behaviour, asserted specifically so the
+	// old one cannot creep back.
+	if strings.Contains(body, "no TLS certificate presented") {
+		t.Errorf("landing page still renders the pre-ADR-0147 no-TLS fallback, which is the defect this change removes: %s", body)
+	}
+	if !strings.Contains(body, "no certificate fingerprints were advertised") {
+		t.Errorf("landing page missing the fail-closed explanation for a request that advertised no fingerprints, got: %s", body)
 	}
 	if !strings.Contains(body, `name="confirm_phrase"`) {
 		t.Errorf("landing page missing the confirm_phrase field on the Approve form, got: %s", body)
+	}
+	// The second PIN is an input on the Approve form, and its VALUE is
+	// nowhere on the page: an Admin who could read it here could finish
+	// the handshake alone.
+	if !strings.Contains(body, `name="second_pin"`) {
+		t.Errorf("landing page missing the second_pin field on the Approve form, got: %s", body)
 	}
 }
 
