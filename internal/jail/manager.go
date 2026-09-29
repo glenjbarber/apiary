@@ -42,6 +42,17 @@ type Config struct {
 	// Gateway, if set, becomes this jail's default route once
 	// IPAddress is assigned. Ignored unless VNET and IPAddress are set.
 	Gateway string
+
+	// DHCP, if true, has the jail configure its own VNETInterface by
+	// DHCP rather than have Apiary assign it a static address: the
+	// equivalent, for a jail, of an uplink_bridged VM skipping
+	// allocateIP (ADR-0117). This is the only networking mode in which
+	// the client is started *inside* the jail, because jail(8) has no
+	// creation parameter that could do it from outside - see dhcp.go.
+	// Requires VNET, and is rejected together with IPAddress, since an
+	// interface configured both ways is a fight between two owners.
+	// Ignored unless VNET is true.
+	DHCP bool
 }
 
 // Info is a snapshot of a running jail's state, as reported by jls(8).
@@ -64,6 +75,12 @@ type Manager struct {
 	// production; tests inject a fake so the whole package is
 	// exercisable off a FreeBSD host.
 	Runner CommandRunner
+
+	// DHCPClient overrides the DHCP client binary run inside a jail
+	// whose Config sets DHCP. Empty means DefaultDHCPClient. The jail
+	// root is the caller's, and nothing in a root is guaranteed - see
+	// dhcpClient's own comment.
+	DHCPClient string
 }
 
 // New returns a Manager whose jails are all named Prefix+name (e.g.
@@ -111,6 +128,13 @@ func createArgs(qname string, cfg Config) []string {
 // dedicated VNET networking (ADR-0117) by setting cfg.VNET and
 // cfg.VNETInterface. Existing callers that never set VNET see no
 // behavior change: the ip4=inherit path below is untouched.
+//
+// A VNET jail's own network stack is then addressed one of two ways, and
+// they are mutually exclusive because an interface cannot have both an
+// address Apiary assigned and one it asked a server for: cfg.IPAddress
+// for an Apiary-managed network, or cfg.DHCP for one that skips
+// allocation (an uplink_bridged network, where there is no Apiary
+// subnet for a static address to belong to).
 func (m *Manager) CreateJail(ctx context.Context, name string, cfg Config) error {
 	qname, err := m.qualifiedName(name)
 	if err != nil {
@@ -121,6 +145,12 @@ func (m *Manager) CreateJail(ctx context.Context, name string, cfg Config) error
 	}
 	if cfg.VNET && cfg.VNETInterface == "" {
 		return fmt.Errorf("jail: Config.VNETInterface must be set when VNET is true")
+	}
+	if cfg.DHCP && !cfg.VNET {
+		return fmt.Errorf("jail: Config.DHCP requires VNET: a jail sharing the host's network stack (ip4=inherit) has no interface of its own for a DHCP client to run on")
+	}
+	if cfg.DHCP && cfg.IPAddress != "" {
+		return fmt.Errorf("jail: Config.DHCP and Config.IPAddress are mutually exclusive: Apiary cannot both assign %s to %s and let a DHCP client on it ask a server for one", cfg.IPAddress, cfg.VNETInterface)
 	}
 
 	if _, err := m.run(ctx, "jail", append([]string{"-c"}, createArgs(qname, cfg)...)...); err != nil {
@@ -142,6 +172,18 @@ func (m *Manager) CreateJail(ctx context.Context, name string, cfg Config) error
 	if cfg.VNET && cfg.IPAddress != "" {
 		addr := Address{IP: cfg.IPAddress, PrefixLen: cfg.IPPrefixLen}
 		if err := m.EnsureAddressing(ctx, qname, cfg.VNETInterface, addr, cfg.Gateway); err != nil {
+			return err
+		}
+	}
+	// The DHCP counterpart of the same step, and for the same reason it
+	// is here and not on a later tick: a vnet interface comes up with no
+	// address and nothing asking for one, so a jail created on an
+	// uplink_bridged network is unreachable until this runs. It goes
+	// through EnsureDHCP - the same observe-first shape EnsureAddressing
+	// uses, against the same jexec(8) seam - so creation and the
+	// reconciler cannot diverge in behavior.
+	if cfg.VNET && cfg.DHCP {
+		if err := m.EnsureDHCP(ctx, qname, cfg.VNETInterface); err != nil {
 			return err
 		}
 	}
