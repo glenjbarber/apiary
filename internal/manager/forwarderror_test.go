@@ -148,3 +148,68 @@ func TestIntegration_CreateJail_ForwardingFailureSurfacedInError(t *testing.T) {
 		t.Errorf("Error = %q, want the real forwarding failure reason surfaced, not silently swallowed (this is the exact live 2026-09-21 buzz/brood bug)", resp.GetError())
 	}
 }
+
+// fakeFailingJoinPeerForwarder is the same device for the Colony join
+// RPCs: its RequestJoinColony always fails with a canned error,
+// simulating the same live TLS-verification failure the test below
+// reproduces with a real second raft node.
+type fakeFailingJoinPeerForwarder struct {
+	PeerForwarder
+	err error
+}
+
+func (f *fakeFailingJoinPeerForwarder) RequestJoinColony(context.Context, string, *rpcpb.RequestJoinColonyRequest) (*rpcpb.RequestJoinColonyResponse, error) {
+	return nil, f.err
+}
+
+// TestIntegration_RequestJoinColony_ForwardingFailureSurfacedInError is
+// the Colony-join counterpart of the CreateJail test above.
+// RequestJoinColony never received the same treatment, so a joining
+// Comb reaching a follower that could not forward to the leader was
+// told only that this node is not the leader: the forwarding failure
+// was discarded, and recovering the real reason needed live diagnosis
+// on the node. Two genuine raft nodes again, so the LeaderHint under
+// test is what a real Colony reports.
+func TestIntegration_RequestJoinColony_ForwardingFailureSurfacedInError(t *testing.T) {
+	leaderSocket := newRaftdUDSSocket(t)
+	leaderClient, _ := newManagerdRPCClientAndServer(t, leaderSocket, "manager-1")
+
+	// Opened before the follower joins, so the follower receives the
+	// window with the log it replicates on join. RequestJoinColony
+	// refuses a closed Colony before it ever reaches the forward, and
+	// GetColonyJoinWindow is exempt from checkAuth, so this reaches
+	// the follower's own local read.
+	openColonyJoinWindowForTest(t, leaderClient)
+	followerSocket := newJoinedFollowerRaftdSocket(t, leaderSocket, "follower-1")
+	followerClient, followerSrv := newManagerdRPCClientAndServer(t, followerSocket, "follower-1")
+	eventually(t, 5*time.Second, func() bool {
+		wctx, wcancel := context.WithTimeout(context.Background(), time.Second)
+		defer wcancel()
+		w, werr := followerClient.GetColonyJoinWindow(wctx, &rpcpb.GetColonyJoinWindowRequest{})
+		return werr == nil && w.GetError() == ""
+	})
+
+	simulatedErr := errors.New(`tls: failed to verify certificate: x509: certificate is valid for 127.0.0.1, not 10.90.0.94`)
+	followerSrv.peers = &fakeFailingJoinPeerForwarder{err: simulatedErr}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	resp, err := followerClient.RequestJoinColony(ctx, &rpcpb.RequestJoinColonyRequest{
+		NodeId:                 "joiner-2",
+		RaftBindAddress:        freeLoopbackAddr(t),
+		JoinerLogStateObserved: true,
+	})
+	if err != nil {
+		t.Fatalf("RequestJoinColony() error: %v", err)
+	}
+
+	if resp.GetLeaderHint() == "" {
+		t.Fatal("LeaderHint = empty, want the real leader's address - the forwarding attempt this test exercises never happens without one")
+	}
+	if !strings.Contains(resp.GetError(), "not the leader") {
+		t.Errorf("Error = %q, want the original raft error preserved", resp.GetError())
+	}
+	if !strings.Contains(resp.GetError(), "certificate is valid for 127.0.0.1") {
+		t.Errorf("Error = %q, want the real forwarding failure reason surfaced, not silently swallowed", resp.GetError())
+	}
+}
