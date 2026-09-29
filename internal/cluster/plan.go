@@ -143,6 +143,16 @@ type JailPlacement struct {
 	NetworkID string
 	IPAddress string
 	VNET      bool
+
+	// FirewallRules is a simple allow/block list applied via this
+	// jail's own pf(8) anchor, mirroring VMPlacement.FirewallRules
+	// field for field and using the same neutral type - see ADR-0117
+	// and internal/jailnet, which renders and loads it. Empty means
+	// unfiltered, which is the same posture an unfiltered VM has today
+	// and is NOT the same as "Apiary checked and found no firewall
+	// needed"; internal/jailnet's FirewallStatus reports those two
+	// differently for exactly that reason.
+	FirewallRules []FirewallRule
 }
 
 // PlanJail mirrors Plan exactly, for jails instead of VMs.

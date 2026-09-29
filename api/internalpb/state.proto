@@ -201,9 +201,9 @@ enum JailPhase {
 }
 
 // JailDefinition is a jail's ephemeral definition, deliberately minimal
-// compared to VMDefinition: no vcpus/memory/ISO/firewall fields, since
-// internal/jail's v1 scope is flat ip4=inherit networking with no
-// dedicated resource limits or attached media. Physical data (the
+// compared to VMDefinition: no vcpus, memory, or ISO fields, since
+// internal/jail's v1 scope has no dedicated resource limits or
+// attached media. Physical data (the
 // jail's root filesystem contents) stays local per node, replicated by
 // HAST when replica_node_id is set, never by raft - same split as
 // VMDefinition.
@@ -290,6 +290,18 @@ message JailDefinition {
   // migration_fenced mirrors VMDefinition.migration_fenced exactly -
   // see that field's own comment for why the default is false.
   bool migration_fenced = 14;
+
+  // firewall_rules is a simple allow/block list applied to this jail's
+  // traffic via a per-jail pf(8) anchor (internal/pf, rendered and
+  // loaded by internal/jailnet - ADR-0117). It is the same
+  // FirewallRule type a VM uses, compiled by the same renderer, so
+  // there is no second pf ruleset language anywhere in this project.
+  // No rules means today's unchanged behavior (everything allowed) -
+  // rules are opt-in restrictions, so an existing jail with none is
+  // unaffected. Only meaningful for a vnet jail: an ip4=inherit jail
+  // shares the host's stack, and there is no per-jail anchor to load
+  // rules into.
+  repeated FirewallRule firewall_rules = 30;
 }
 
 // FirewallRule is one pf(8) rule applied to a VM's per-VM anchor. See

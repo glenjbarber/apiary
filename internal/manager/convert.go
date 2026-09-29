@@ -188,6 +188,7 @@ func toInternalJail(j *rpcpb.JailDefinition) *internalpb.JailDefinition {
 		BaseArchiveName: j.GetBaseArchiveName(),
 		NetworkId:       j.GetNetworkId(),
 		Vnet:            j.GetVnet(),
+		FirewallRules:   toInternalFirewallRules(j.GetFirewallRules()),
 		// Phase/PhaseError are the reconciler's own observed state, never
 		// set by an external caller - CreateJail/UpdateJail requests
 		// never carry them through. IpAddress is likewise never set by
@@ -199,6 +200,15 @@ func toInternalJail(j *rpcpb.JailDefinition) *internalpb.JailDefinition {
 func fromInternalJail(j *internalpb.JailDefinition) *rpcpb.JailDefinition {
 	if j == nil {
 		return nil
+	}
+	rules := make([]*rpcpb.FirewallRule, 0, len(j.GetFirewallRules()))
+	for _, r := range j.GetFirewallRules() {
+		rules = append(rules, &rpcpb.FirewallRule{
+			Direction: r.GetDirection(),
+			Action:    r.GetAction(),
+			Protocol:  r.GetProtocol(),
+			PortRange: r.GetPortRange(),
+		})
 	}
 	return &rpcpb.JailDefinition{
 		Id:              j.GetId(),
@@ -214,6 +224,11 @@ func fromInternalJail(j *internalpb.JailDefinition) *rpcpb.JailDefinition {
 		NetworkId:       j.GetNetworkId(),
 		IpAddress:       j.GetIpAddress(),
 		Vnet:            j.GetVnet(),
+		// Non-nil even when empty, so the field marshals as [] rather
+		// than null - the same convention the VM conversion above uses,
+		// and the same reason: a jail with no rules is a definite
+		// "unfiltered", not an absent value.
+		FirewallRules: rules,
 	}
 }
 
