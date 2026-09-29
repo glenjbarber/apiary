@@ -34,6 +34,7 @@ import (
 	"path/filepath"
 
 	"github.com/glenjbarber/apiary/internal/commonconfig"
+	"github.com/glenjbarber/apiary/internal/jsonstrict"
 	raftnode "github.com/glenjbarber/apiary/internal/raft"
 )
 
@@ -145,7 +146,7 @@ func (m *Manager) Load() (Config, error) {
 		}
 		return Config{}, err
 	}
-	if err := json.Unmarshal(data, &cfg); err != nil {
+	if err := jsonstrict.Unmarshal(data, &cfg); err != nil {
 		return Config{}, fmt.Errorf("raftdconfig: parsing %s: %w", m.path(), err)
 	}
 	if cfg.InternalToken != "" {
