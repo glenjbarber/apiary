@@ -123,11 +123,22 @@ func fingerprintsMatch(carried, pasted []string) bool {
 	// int accumulator rather than a bool: a boolean short-circuits in
 	// the generated code, and the point of the scan is that it does
 	// not. Every comparison below runs, every time.
+	//
+	// The accumulator is per carried value, not one running total
+	// across the whole scan. A single OR counts the DISTINCT values
+	// that matched, not the number of advertised certificates that
+	// were answered, so with two fingerprints it reaches 2 only when
+	// some value matched twice - which for a set of distinct
+	// certificates means never. That form reports two identical lists
+	// as a mismatch, and the refusal it produces names the two lists
+	// it just failed to recognise.
 	covered := 0
 	for _, want := range carried {
+		matched := 0
 		for _, got := range pasted {
-			covered |= boolToInt(ConstantTimeValueEqual(want, got))
+			matched |= boolToInt(ConstantTimeValueEqual(want, got))
 		}
+		covered += matched
 	}
 	return covered == len(carried)
 }
