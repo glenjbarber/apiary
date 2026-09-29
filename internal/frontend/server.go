@@ -174,6 +174,32 @@ type pageData struct {
 	ConvertJoinerFormError string
 	ConvertJoinerResult    *convertJoinerResultView
 
+	// JoinWindowNotice/JoinWindowFormError/JoinColonyWindow back the
+	// Machine page's Colony-wide admission-window control (ADR-0147
+	// Part 4). The window is Colony-wide replicated state, read here
+	// through the UNAUTHENTICATED GetColonyJoinWindow so the control
+	// renders identically for a session that could not open one and
+	// for one that could - the read carries no more authority than the
+	// page already has, and gating the display of it would gate
+	// nothing. The two MUTATING routes, /machine/join-window/open and
+	// .../close, are Admin-tier (see the route table), because opening
+	// a window is a deliberate state change every member replicates.
+	//
+	// JoinWindowNotice is the outcome line carried back by
+	// redirectWithJoinWindowNotice after a successful open/close, and
+	// JoinWindowFormError is the refusal shown in place, so the two
+	// cannot be confused for a window state.
+	JoinWindowNotice    string
+	JoinWindowFormError string
+	JoinColonyWindow    colonyJoinWindowView
+
+	// ColonyAdvert back the REQUESTER's side of the window: what the
+	// Colony being asked to join advertises about itself, read from
+	// that Colony through this Comb (ADR-0147 Part 4's pre-join trust
+	// anchor). Nil when the requester has not named a target yet, which
+	// is the state the form is in on a fresh load.
+	ColonyAdvert *colonyAdvertView
+
 	// AuthEnabled reports whether login is required at all, so the nav
 	// partial only shows a "Log out" link when there's actually a
 	// session to log out of.
@@ -730,7 +756,9 @@ func NewServer(client rpcpb.ManagerServiceClient, auth Authenticator, roleMap ma
 		"hostOnly":                 hostOnly,
 		"placementUnavailable":     placementUnavailable,
 		"placementUnavailableFor":  placementUnavailableFor,
-		"hostPackagesLink":         hostPackagesLink}).ParseFS(web.FS, "templates/*.html")
+		"hostPackagesLink":         hostPackagesLink,
+		"deadlineLocal":            deadlineLocal,
+		"remainingText":            remainingText}).ParseFS(web.FS, "templates/*.html")
 	if err != nil {
 		return nil, fmt.Errorf("frontend: parsing templates: %w", err)
 	}
@@ -1183,6 +1211,17 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /join-requests/{id}/approve", s.requireRole(manager.RoleAdmin, s.handleApproveJoinRequest))
 	s.mux.HandleFunc("POST /join-requests/{id}/reject", s.requireRole(manager.RoleAdmin, s.handleRejectJoinRequest))
 	s.mux.HandleFunc("POST /join-requests/{id}/purge", s.requireRole(manager.RoleAdmin, s.handlePurgeJoinRequest))
+	// ADR-0147 Part 4's Colony-wide admission window. The two mutating
+	// routes are Admin-tier for the same reason OpenColonyJoinWindow
+	// itself is: opening a window is a deliberate, Colony-wide
+	// replicated state change, not a capability to hand around.
+	s.mux.HandleFunc("POST /machine/join-window/open", s.requireRole(manager.RoleAdmin, s.handleOpenColonyJoinWindow))
+	s.mux.HandleFunc("POST /machine/join-window/close", s.requireRole(manager.RoleAdmin, s.handleCloseColonyJoinWindow))
+	// The requester-side advert panel is a GET and is deliberately NOT
+	// role-gated: it performs the same unauthenticated read the RPC
+	// already permits, so gating the page would gate the display of
+	// something the caller can already fetch directly.
+	s.mux.HandleFunc("GET /machine/colony-advert", s.handleColonyAdvertPanel)
 }
 
 // handleLoginPage serves the login form. If login isn't enabled at all,

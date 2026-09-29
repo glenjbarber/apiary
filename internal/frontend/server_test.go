@@ -43,6 +43,21 @@ type fakeClient struct {
 	purgeJoinRequestResp    *rpcpb.PurgeJoinRequestResponse
 	lastPurgeJoinRequestReq *rpcpb.PurgeJoinRequestRequest
 
+	// ADR-0147 Part 4's Colony join window. getWindowErr is a
+	// transport-level failure, which is deliberately a different thing
+	// from getWindowResp carrying an Error string (the manager's own
+	// closed-window refusal) - the view has to be able to tell them
+	// apart, and these two fields are how a test says which it means.
+	getWindowResp      *rpcpb.GetColonyJoinWindowResponse
+	getWindowErr       error
+	lastGetWindowReq   *rpcpb.GetColonyJoinWindowRequest
+	openWindowResp     *rpcpb.OpenColonyJoinWindowResponse
+	openWindowErr      error
+	lastOpenWindowReq  *rpcpb.OpenColonyJoinWindowRequest
+	closeWindowResp    *rpcpb.CloseColonyJoinWindowResponse
+	closeWindowErr     error
+	lastCloseWindowReq *rpcpb.CloseColonyJoinWindowRequest
+
 	listResp *rpcpb.ListVMsResponse
 	listErr  error
 
@@ -689,16 +704,42 @@ func (f *fakeClient) SetNetworkName(_ context.Context, in *rpcpb.SetNetworkNameR
 // exercises a Colony join window, and a fake that stops satisfying
 // rpcpb.ManagerServiceClient is the intended compile-time signal that
 // the interface grew.
-func (f *fakeClient) OpenColonyJoinWindow(context.Context, *rpcpb.OpenColonyJoinWindowRequest, ...grpc.CallOption) (*rpcpb.OpenColonyJoinWindowResponse, error) {
+func (f *fakeClient) OpenColonyJoinWindow(_ context.Context, in *rpcpb.OpenColonyJoinWindowRequest, _ ...grpc.CallOption) (*rpcpb.OpenColonyJoinWindowResponse, error) {
+	f.lastOpenWindowReq = in
+	if f.openWindowErr != nil {
+		return nil, f.openWindowErr
+	}
+	if f.openWindowResp != nil {
+		return f.openWindowResp, nil
+	}
 	return &rpcpb.OpenColonyJoinWindowResponse{}, nil
 }
 
-func (f *fakeClient) CloseColonyJoinWindow(context.Context, *rpcpb.CloseColonyJoinWindowRequest, ...grpc.CallOption) (*rpcpb.CloseColonyJoinWindowResponse, error) {
+func (f *fakeClient) CloseColonyJoinWindow(_ context.Context, in *rpcpb.CloseColonyJoinWindowRequest, _ ...grpc.CallOption) (*rpcpb.CloseColonyJoinWindowResponse, error) {
+	f.lastCloseWindowReq = in
+	if f.closeWindowErr != nil {
+		return nil, f.closeWindowErr
+	}
+	if f.closeWindowResp != nil {
+		return f.closeWindowResp, nil
+	}
 	return &rpcpb.CloseColonyJoinWindowResponse{}, nil
 }
 
-func (f *fakeClient) GetColonyJoinWindow(context.Context, *rpcpb.GetColonyJoinWindowRequest, ...grpc.CallOption) (*rpcpb.GetColonyJoinWindowResponse, error) {
-	return &rpcpb.GetColonyJoinWindowResponse{}, nil
+func (f *fakeClient) GetColonyJoinWindow(_ context.Context, in *rpcpb.GetColonyJoinWindowRequest, _ ...grpc.CallOption) (*rpcpb.GetColonyJoinWindowResponse, error) {
+	f.lastGetWindowReq = in
+	if f.getWindowErr != nil {
+		return nil, f.getWindowErr
+	}
+	if f.getWindowResp != nil {
+		return f.getWindowResp, nil
+	}
+	// The default matches the real manager's steady state: a closed
+	// window is a refusal carrying its reason, not an empty success.
+	// A fake returning an empty success by default would make every
+	// unconfigured test render "neither a window nor a reason", and
+	// the ordinary closed case would go untested everywhere.
+	return &rpcpb.GetColonyJoinWindowResponse{Error: "this Colony is not currently accepting new members"}, nil
 }
 
 func (f *fakeClient) RequestJoinColony(_ context.Context, in *rpcpb.RequestJoinColonyRequest, _ ...grpc.CallOption) (*rpcpb.RequestJoinColonyResponse, error) {

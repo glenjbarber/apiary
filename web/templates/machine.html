@@ -182,6 +182,50 @@
   {{if .CanAdmin}}
   <div class="panel">
     <h3>Join a Colony</h3>
+    <div class="panel">
+      <h3>Join window</h3>
+      <p class="muted">
+        This Colony refuses join requests while its window is closed, and
+        that is the normal state - open it when you are about to add
+        hardware, and it closes on its own. A window the operator cannot
+        see the end of is a window they will not remember to close
+        (ADR-0147 Part 4). You may open one on any member; it applies
+        to the whole Colony and it forwards to the leader for you.
+      </p>
+      {{if .JoinWindowNotice}}<div class="banner-success">{{.JoinWindowNotice}}</div>{{end}}
+      {{if .JoinWindowFormError}}<div class="banner-error">{{.JoinWindowFormError}}</div>{{end}}
+      {{if .JoinColonyWindow.Live}}
+        {{if .JoinColonyWindow.Error}}<p class="muted">{{.JoinColonyWindow.Error}}</p>{{end}}
+        <p><strong>Open.</strong> Closes at <strong>{{deadlineLocal .JoinColonyWindow.ExpiresAtUnix}}</strong>
+          ({{remainingText .JoinColonyWindow}} left), opened by <code>{{if .JoinColonyWindow.OpenedBy}}{{.JoinColonyWindow.OpenedBy}}{{else}}an Admin{{end}}</code>{{if .JoinColonyWindow.OpenedByKey}} using key <code>{{.JoinColonyWindow.OpenedByKey}}</code>{{end}}.</p>
+        {{if .CanAdmin}}
+        <form class="inline-form" method="post" action="/machine/join-window/close">
+          <button type="submit" class="danger">Close now</button>
+        </form>
+        {{end}}
+      {{else if .JoinColonyWindow.ReadFailed}}
+        <div class="banner-error">{{.JoinColonyWindow.Error}}</div>
+        <p class="muted">
+          <strong>The window's state could not be read.</strong> That is
+          not the same as closed, and opening a window now would be
+          acting on no information. Fix whatever the message above names
+          and reload.
+        </p>
+      {{else}}
+        {{if .JoinColonyWindow.Error}}<div class="banner-error">{{.JoinColonyWindow.Error}}</div>{{end}}
+        <p><strong>Closed.</strong> This Colony is not accepting new members. Requests sent now will be refused by name.</p>
+        {{if .CanAdmin}}
+        <form class="inline-form" method="post" action="/machine/join-window/open">
+          <label>Duration <input type="text" name="duration_seconds" inputmode="numeric" placeholder="900" size="8" title="Optional. Leave blank to use the default configured in colony_join_window_seconds in managerd.json. A longer value than that configured maximum is refused by name rather than silently clamped - to join for longer, close the window and open a new one."></label>
+          <button type="submit">Open join window</button>
+        </form>
+        <p class="muted">Blank duration uses this Comb's configured default and ceiling (<code>colony_join_window_seconds</code> in <code>managerd.json</code>). A request longer than that ceiling is refused, not shortened.</p>
+        {{else}}
+        <p class="muted">Opening a window is an Admin action.</p>
+        {{end}}
+      {{end}}
+    </div>
+
     <p class="muted">
       Join this Comb to an existing multi-node Colony instead of running
       standalone. Fill in the address of any current member of that
@@ -217,6 +261,7 @@
         </div>
       {{end}}
     {{else}}
+    <p class="muted"><a href="/machine/colony-advert">See what an existing Colony advertises about itself</a> before requesting to join it.</p>
     <form class="inline-form" method="post" action="/machine/join-colony">
       <label>Existing Colony member's address <span class="host-port"><input type="text" name="target_host" required placeholder="10.62.0.2" title="The managerd host of any current member of the Colony you want to join - this Comb asks it directly to record the request. Find this on that Comb's own Machine page (its -rpc-addr host). The port is always 17700 and cannot be changed here."><span class="fixed-port">:17700</span></span></label>
       <label>This Comb's node id <input type="text" name="node_id" required title="This node's own raft node-id, matching the -node-id this Comb's raftd was started with."></label>

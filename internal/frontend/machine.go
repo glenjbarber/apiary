@@ -180,6 +180,10 @@ func (s *Server) machinePageData(r *http.Request) pageData {
 	services, serviceErr := s.currentNodeServices(r)
 	originCerts, originErr := s.currentOriginCertificates(r)
 
+	// One clock for the whole render, so the window's countdown and
+	// its "is it still live" decision are made against the same instant
+	// and cannot disagree with each other within a single page.
+	renderNow := time.Now()
 	return pageData{
 		NodeConfig:               cfg,
 		NodeConfigFormError:      cfgErr,
@@ -197,6 +201,8 @@ func (s *Server) machinePageData(r *http.Request) pageData {
 		OriginCertificates:       originCerts,
 		OriginCAError:            originErr,
 		JoinColonyResult:         s.currentJoinColonyResult(r),
+		JoinWindowNotice:         r.URL.Query().Get("join_window_notice"),
+		JoinColonyWindow:         s.currentColonyJoinWindow(r, renderNow),
 		ActivePage:               "machine",
 	}
 }
