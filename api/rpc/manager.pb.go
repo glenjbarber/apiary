@@ -2951,8 +2951,32 @@ type StatusResponse struct {
 	// consumer must compare it against other voters' digests rather than
 	// read it as a statement about the Colony.
 	RaftStateDigest string `protobuf:"bytes,13,opt,name=raft_state_digest,json=raftStateDigest,proto3" json:"raft_state_digest,omitempty"`
-	unknownFields   protoimpl.UnknownFields
-	sizeCache       protoimpl.SizeCache
+	// raft_membership_error is set (non-empty) when raftd answered, and
+	// its own answer says its membership read failed - so members and
+	// known_node_ids above are an absence of a view, not a view. Empty
+	// means raftd's read succeeded, which is what lets an empty members
+	// list mean "this node believes the Colony has no members" instead of
+	// "this node could not find out" (ADR-0056).
+	//
+	// It is deliberately NOT folded into raft_error above. That field
+	// means managerd could not reach raftd at all, and the two are
+	// different facts with different causes and different fixes: raft_error
+	// is a transport or socket problem between the two processes, while
+	// this is raftd itself reporting that it could not read its own
+	// cluster configuration. Conflating them would tell an operator the
+	// daemon is down when the daemon is up and answering, and would make
+	// raft_reachable - which is true here - look like a lie.
+	//
+	// A consumer that computes anything from membership (quorum, node
+	// pickers) must treat a set value as "not observed", the same way it
+	// already must treat an unreachable raftd.
+	//
+	// Field 30 rather than 14: this wave is adding several fields to
+	// this proto concurrently, and 30 keeps this one clear of the lower
+	// block being filled in by them.
+	RaftMembershipError string `protobuf:"bytes,30,opt,name=raft_membership_error,json=raftMembershipError,proto3" json:"raft_membership_error,omitempty"`
+	unknownFields       protoimpl.UnknownFields
+	sizeCache           protoimpl.SizeCache
 }
 
 func (x *StatusResponse) Reset() {
@@ -3072,6 +3096,13 @@ func (x *StatusResponse) GetPamConfigured() bool {
 func (x *StatusResponse) GetRaftStateDigest() string {
 	if x != nil {
 		return x.RaftStateDigest
+	}
+	return ""
+}
+
+func (x *StatusResponse) GetRaftMembershipError() string {
+	if x != nil {
+		return x.RaftMembershipError
 	}
 	return ""
 }
@@ -18648,7 +18679,7 @@ const file_api_rpc_manager_proto_rawDesc = "" +
 	"\x14ListVMsLocalResponse\x12-\n" +
 	"\x03vms\x18\x01 \x03(\v2\x1b.apiary.rpc.v1.VMDefinitionR\x03vms\x12\x14\n" +
 	"\x05error\x18\x02 \x01(\tR\x05error\"\x0f\n" +
-	"\rStatusRequest\"\x96\x04\n" +
+	"\rStatusRequest\"\xca\x04\n" +
 	"\x0eStatusResponse\x12&\n" +
 	"\x0fmanager_node_id\x18\x01 \x01(\tR\rmanagerNodeId\x12%\n" +
 	"\x0eraft_reachable\x18\x02 \x01(\bR\rraftReachable\x12\x1d\n" +
@@ -18666,7 +18697,8 @@ const file_api_rpc_manager_proto_rawDesc = "" +
 	" \x03(\tR\fknownNodeIds\x123\n" +
 	"\amembers\x18\v \x03(\v2\x19.apiary.rpc.v1.RaftMemberR\amembers\x12%\n" +
 	"\x0epam_configured\x18\f \x01(\bR\rpamConfigured\x12*\n" +
-	"\x11raft_state_digest\x18\r \x01(\tR\x0fraftStateDigest\"U\n" +
+	"\x11raft_state_digest\x18\r \x01(\tR\x0fraftStateDigest\x122\n" +
+	"\x15raft_membership_error\x18\x1e \x01(\tR\x13raftMembershipError\"U\n" +
 	"\x1bAuthenticatePasswordRequest\x12\x1a\n" +
 	"\busername\x18\x01 \x01(\tR\busername\x12\x1a\n" +
 	"\bpassword\x18\x02 \x01(\tR\bpassword\"D\n" +

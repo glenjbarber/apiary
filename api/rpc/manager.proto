@@ -1119,6 +1119,31 @@ message StatusResponse {
   // consumer must compare it against other voters' digests rather than
   // read it as a statement about the Colony.
   string raft_state_digest = 13;
+
+  // raft_membership_error is set (non-empty) when raftd answered, and
+  // its own answer says its membership read failed - so members and
+  // known_node_ids above are an absence of a view, not a view. Empty
+  // means raftd's read succeeded, which is what lets an empty members
+  // list mean "this node believes the Colony has no members" instead of
+  // "this node could not find out" (ADR-0056).
+  //
+  // It is deliberately NOT folded into raft_error above. That field
+  // means managerd could not reach raftd at all, and the two are
+  // different facts with different causes and different fixes: raft_error
+  // is a transport or socket problem between the two processes, while
+  // this is raftd itself reporting that it could not read its own
+  // cluster configuration. Conflating them would tell an operator the
+  // daemon is down when the daemon is up and answering, and would make
+  // raft_reachable - which is true here - look like a lie.
+  //
+  // A consumer that computes anything from membership (quorum, node
+  // pickers) must treat a set value as "not observed", the same way it
+  // already must treat an unreachable raftd.
+  //
+  // Field 30 rather than 14: this wave is adding several fields to
+  // this proto concurrently, and 30 keeps this one clear of the lower
+  // block being filled in by them.
+  string raft_membership_error = 30;
 }
 
 message AuthenticatePasswordRequest {

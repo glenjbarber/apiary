@@ -35,6 +35,23 @@ type Status struct {
 	RaftState    string
 	Servers      []ServerInfo
 
+	// MembershipError is the error from this node's own raft membership
+	// read, or "" when that read succeeded. It exists because an
+	// empty Servers above is otherwise ambiguous: it reads as "this node
+	// believes the Colony has no members" when it can equally mean "this
+	// node could not read the membership at all", and only the second of
+	// those is a fault. The zero value means "no error", so a genuinely
+	// empty configuration stays distinguishable from an unreadable one.
+	//
+	// It is a field on the snapshot rather than a second return value
+	// because everything else here is measured, not diagnosed: a caller
+	// that wants an answer still gets one, with the reason attached. See
+	// internal/recovery.ValidQuorumFact, which still rejects
+	// QuorumSize == 0 - a node that genuinely holds no configuration yet
+	// remains a real case, and this field makes the difference visible
+	// rather than making the guard unnecessary.
+	MembershipError string
+
 	// StateDigest is the canonical digest of this node's own FSM state
 	// (ADR-0143). It is read from the FSM rather than recomputed here,
 	// and AppliedIndex above is likewise the FSM's own view - the two
@@ -173,27 +190,46 @@ func (n *Node) LeaderHint() string {
 func (n *Node) Status() Status {
 	_, leaderID := n.raft.LeaderWithID()
 
-	var servers []ServerInfo
-	if cfgFuture := n.raft.GetConfiguration(); cfgFuture.Error() == nil {
-		for _, s := range cfgFuture.Configuration().Servers {
-			servers = append(servers, ServerInfo{
-				ID:       string(s.ID),
-				Address:  string(s.Address),
-				Suffrage: suffrageString(s.Suffrage),
-			})
-		}
-	}
+	servers, membershipErr := readServers(n.raft.GetConfiguration)
 
 	return Status{
-		IsLeader:     n.raft.State() == raft.Leader,
-		LeaderID:     string(leaderID),
-		NodeID:       n.config.NodeID,
-		LastLogIndex: n.raft.LastIndex(),
-		AppliedIndex: n.fsm.AppliedIndex(),
-		RaftState:    n.raft.State().String(),
-		Servers:      servers,
-		StateDigest:  n.fsm.StateDigest(),
+		IsLeader:        n.raft.State() == raft.Leader,
+		LeaderID:        string(leaderID),
+		NodeID:          n.config.NodeID,
+		LastLogIndex:    n.raft.LastIndex(),
+		AppliedIndex:    n.fsm.AppliedIndex(),
+		RaftState:       n.raft.State().String(),
+		Servers:         servers,
+		MembershipError: membershipErr,
+		StateDigest:     n.fsm.StateDigest(),
 	}
+}
+
+// readServers performs the membership read Status reports, returning the
+// member list and the read's error text side by side.
+//
+// A failed read used to be dropped here entirely, leaving Servers nil
+// with nothing anywhere in the returned Status to say so (ADR-0056). The
+// future is passed in as a function rather than taken from a *raft.Raft
+// directly for a testable reason: hashicorp/raft's GetConfiguration
+// answers from the in-memory latest configuration and reports its error
+// as nil, so there is no way to make it fail on demand from a test, and
+// the branch that actually matters here would otherwise never run.
+func readServers(getConfiguration func() raft.ConfigurationFuture) ([]ServerInfo, string) {
+	cfgFuture := getConfiguration()
+	if err := cfgFuture.Error(); err != nil {
+		return nil, err.Error()
+	}
+
+	var servers []ServerInfo
+	for _, s := range cfgFuture.Configuration().Servers {
+		servers = append(servers, ServerInfo{
+			ID:       string(s.ID),
+			Address:  string(s.Address),
+			Suffrage: suffrageString(s.Suffrage),
+		})
+	}
+	return servers, ""
 }
 
 func suffrageString(s raft.ServerSuffrage) string {
