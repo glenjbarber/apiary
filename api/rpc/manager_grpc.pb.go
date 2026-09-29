@@ -98,6 +98,8 @@ const (
 	ManagerService_ListJailTemplateNames_FullMethodName       = "/apiary.rpc.v1.ManagerService/ListJailTemplateNames"
 	ManagerService_PushJailTemplateTo_FullMethodName          = "/apiary.rpc.v1.ManagerService/PushJailTemplateTo"
 	ManagerService_ReceiveJailTemplate_FullMethodName         = "/apiary.rpc.v1.ManagerService/ReceiveJailTemplate"
+	ManagerService_PushVMSnapshotTo_FullMethodName            = "/apiary.rpc.v1.ManagerService/PushVMSnapshotTo"
+	ManagerService_ReceiveVMSnapshot_FullMethodName           = "/apiary.rpc.v1.ManagerService/ReceiveVMSnapshot"
 	ManagerService_GetLocalNetworkBridgeStatus_FullMethodName = "/apiary.rpc.v1.ManagerService/GetLocalNetworkBridgeStatus"
 	ManagerService_ListAssumptionResults_FullMethodName       = "/apiary.rpc.v1.ManagerService/ListAssumptionResults"
 	ManagerService_PurgeStaleAssumptionResults_FullMethodName = "/apiary.rpc.v1.ManagerService/PurgeStaleAssumptionResults"
@@ -613,6 +615,26 @@ type ManagerServiceClient interface {
 	ListJailTemplateNames(ctx context.Context, in *ListJailTemplateNamesRequest, opts ...grpc.CallOption) (*ListJailTemplateNamesResponse, error)
 	PushJailTemplateTo(ctx context.Context, in *PushJailTemplateToRequest, opts ...grpc.CallOption) (*PushJailTemplateToResponse, error)
 	ReceiveJailTemplate(ctx context.Context, opts ...grpc.CallOption) (grpc.ClientStreamingClient[ReceiveJailTemplateRequest, ReceiveJailTemplateResponse], error)
+	// PushVMSnapshotTo/ReceiveVMSnapshot (ADR-0090's follow-up, closing
+	// the cross-node gap SHARED.md records for VM snapshots) mirror
+	// PushJailTemplateTo/ReceiveJailTemplate above exactly, adapted for
+	// a VM's own checkpointed dataset (which holds its disk.img) instead
+	// of a jail base template: PushVMSnapshotTo (peer-only, same
+	// reasoning as PushISOTo above) has this node `zfs send` the
+	// snapshot of vm_id this node already has to target_node_id via a
+	// real ReceiveVMSnapshot client stream; ReceiveVMSnapshot pipes the
+	// incoming stream into a local `zfs receive`.
+	//
+	// `zfs send`/`zfs receive` is ZFS-only, so both ends refuse rather
+	// than silently attempting anything on a node whose local VM
+	// checkpoint store is not ZFS. Both ends also fail closed: the
+	// target never reports success without confirming the received
+	// snapshot exists locally, so a truncated stream cannot leave
+	// something that looks like a completed checkpoint behind. This pair
+	// never forwards - like PushJailTemplateTo above, it is a direct
+	// node-to-node transfer, not a leader-forwarded request.
+	PushVMSnapshotTo(ctx context.Context, in *PushVMSnapshotToRequest, opts ...grpc.CallOption) (*PushVMSnapshotToResponse, error)
+	ReceiveVMSnapshot(ctx context.Context, opts ...grpc.CallOption) (grpc.ClientStreamingClient[ReceiveVMSnapshotRequest, ReceiveVMSnapshotResponse], error)
 	// GetLocalNetworkBridgeStatus reports THIS node's own local bridge
 	// status for one network - built from RaftClient.ListNetworksLocal
 	// (the already-replicated network config, read locally, never leader-
@@ -1585,6 +1607,29 @@ func (c *managerServiceClient) ReceiveJailTemplate(ctx context.Context, opts ...
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
 type ManagerService_ReceiveJailTemplateClient = grpc.ClientStreamingClient[ReceiveJailTemplateRequest, ReceiveJailTemplateResponse]
 
+func (c *managerServiceClient) PushVMSnapshotTo(ctx context.Context, in *PushVMSnapshotToRequest, opts ...grpc.CallOption) (*PushVMSnapshotToResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(PushVMSnapshotToResponse)
+	err := c.cc.Invoke(ctx, ManagerService_PushVMSnapshotTo_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *managerServiceClient) ReceiveVMSnapshot(ctx context.Context, opts ...grpc.CallOption) (grpc.ClientStreamingClient[ReceiveVMSnapshotRequest, ReceiveVMSnapshotResponse], error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	stream, err := c.cc.NewStream(ctx, &ManagerService_ServiceDesc.Streams[3], ManagerService_ReceiveVMSnapshot_FullMethodName, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &grpc.GenericClientStream[ReceiveVMSnapshotRequest, ReceiveVMSnapshotResponse]{ClientStream: stream}
+	return x, nil
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type ManagerService_ReceiveVMSnapshotClient = grpc.ClientStreamingClient[ReceiveVMSnapshotRequest, ReceiveVMSnapshotResponse]
+
 func (c *managerServiceClient) GetLocalNetworkBridgeStatus(ctx context.Context, in *GetLocalNetworkBridgeStatusRequest, opts ...grpc.CallOption) (*GetLocalNetworkBridgeStatusResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(GetLocalNetworkBridgeStatusResponse)
@@ -2269,6 +2314,26 @@ type ManagerServiceServer interface {
 	ListJailTemplateNames(context.Context, *ListJailTemplateNamesRequest) (*ListJailTemplateNamesResponse, error)
 	PushJailTemplateTo(context.Context, *PushJailTemplateToRequest) (*PushJailTemplateToResponse, error)
 	ReceiveJailTemplate(grpc.ClientStreamingServer[ReceiveJailTemplateRequest, ReceiveJailTemplateResponse]) error
+	// PushVMSnapshotTo/ReceiveVMSnapshot (ADR-0090's follow-up, closing
+	// the cross-node gap SHARED.md records for VM snapshots) mirror
+	// PushJailTemplateTo/ReceiveJailTemplate above exactly, adapted for
+	// a VM's own checkpointed dataset (which holds its disk.img) instead
+	// of a jail base template: PushVMSnapshotTo (peer-only, same
+	// reasoning as PushISOTo above) has this node `zfs send` the
+	// snapshot of vm_id this node already has to target_node_id via a
+	// real ReceiveVMSnapshot client stream; ReceiveVMSnapshot pipes the
+	// incoming stream into a local `zfs receive`.
+	//
+	// `zfs send`/`zfs receive` is ZFS-only, so both ends refuse rather
+	// than silently attempting anything on a node whose local VM
+	// checkpoint store is not ZFS. Both ends also fail closed: the
+	// target never reports success without confirming the received
+	// snapshot exists locally, so a truncated stream cannot leave
+	// something that looks like a completed checkpoint behind. This pair
+	// never forwards - like PushJailTemplateTo above, it is a direct
+	// node-to-node transfer, not a leader-forwarded request.
+	PushVMSnapshotTo(context.Context, *PushVMSnapshotToRequest) (*PushVMSnapshotToResponse, error)
+	ReceiveVMSnapshot(grpc.ClientStreamingServer[ReceiveVMSnapshotRequest, ReceiveVMSnapshotResponse]) error
 	// GetLocalNetworkBridgeStatus reports THIS node's own local bridge
 	// status for one network - built from RaftClient.ListNetworksLocal
 	// (the already-replicated network config, read locally, never leader-
@@ -2678,6 +2743,12 @@ func (UnimplementedManagerServiceServer) PushJailTemplateTo(context.Context, *Pu
 }
 func (UnimplementedManagerServiceServer) ReceiveJailTemplate(grpc.ClientStreamingServer[ReceiveJailTemplateRequest, ReceiveJailTemplateResponse]) error {
 	return status.Error(codes.Unimplemented, "method ReceiveJailTemplate not implemented")
+}
+func (UnimplementedManagerServiceServer) PushVMSnapshotTo(context.Context, *PushVMSnapshotToRequest) (*PushVMSnapshotToResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method PushVMSnapshotTo not implemented")
+}
+func (UnimplementedManagerServiceServer) ReceiveVMSnapshot(grpc.ClientStreamingServer[ReceiveVMSnapshotRequest, ReceiveVMSnapshotResponse]) error {
+	return status.Error(codes.Unimplemented, "method ReceiveVMSnapshot not implemented")
 }
 func (UnimplementedManagerServiceServer) GetLocalNetworkBridgeStatus(context.Context, *GetLocalNetworkBridgeStatusRequest) (*GetLocalNetworkBridgeStatusResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetLocalNetworkBridgeStatus not implemented")
@@ -4146,6 +4217,31 @@ func _ManagerService_ReceiveJailTemplate_Handler(srv interface{}, stream grpc.Se
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
 type ManagerService_ReceiveJailTemplateServer = grpc.ClientStreamingServer[ReceiveJailTemplateRequest, ReceiveJailTemplateResponse]
 
+func _ManagerService_PushVMSnapshotTo_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(PushVMSnapshotToRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ManagerServiceServer).PushVMSnapshotTo(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ManagerService_PushVMSnapshotTo_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ManagerServiceServer).PushVMSnapshotTo(ctx, req.(*PushVMSnapshotToRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ManagerService_ReceiveVMSnapshot_Handler(srv interface{}, stream grpc.ServerStream) error {
+	return srv.(ManagerServiceServer).ReceiveVMSnapshot(&grpc.GenericServerStream[ReceiveVMSnapshotRequest, ReceiveVMSnapshotResponse]{ServerStream: stream})
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type ManagerService_ReceiveVMSnapshotServer = grpc.ClientStreamingServer[ReceiveVMSnapshotRequest, ReceiveVMSnapshotResponse]
+
 func _ManagerService_GetLocalNetworkBridgeStatus_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(GetLocalNetworkBridgeStatusRequest)
 	if err := dec(in); err != nil {
@@ -4800,6 +4896,10 @@ var ManagerService_ServiceDesc = grpc.ServiceDesc{
 			Handler:    _ManagerService_PushJailTemplateTo_Handler,
 		},
 		{
+			MethodName: "PushVMSnapshotTo",
+			Handler:    _ManagerService_PushVMSnapshotTo_Handler,
+		},
+		{
 			MethodName: "GetLocalNetworkBridgeStatus",
 			Handler:    _ManagerService_GetLocalNetworkBridgeStatus_Handler,
 		},
@@ -4891,6 +4991,11 @@ var ManagerService_ServiceDesc = grpc.ServiceDesc{
 		{
 			StreamName:    "ReceiveJailTemplate",
 			Handler:       _ManagerService_ReceiveJailTemplate_Handler,
+			ClientStreams: true,
+		},
+		{
+			StreamName:    "ReceiveVMSnapshot",
+			Handler:       _ManagerService_ReceiveVMSnapshot_Handler,
 			ClientStreams: true,
 		},
 	},
