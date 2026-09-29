@@ -2,8 +2,52 @@
 
 ## Status
 
-Accepted in discussion, not yet implemented. This records the design so the
-reasoning survives; the implementation lands in stages.
+**Accepted** on 2026-09-27. **Implemented and merged: the backend, and a
+page that is served but inert.** The backend is
+`ManagerService.ExecuteNodeRestartPlan`, which runs the sequence below for
+one named Comb and one service with every effect bound to the real one: the
+real `LeadershipTransfer()` over the real raftd socket, real quorum facts
+from real raft status and real peer dials, the real raft-replicated restart
+lease applied on the real leader, the real pending-restart record, the real
+`service apiary_raftd restart`, and the restarted process's own confirmation
+read from the durable record rather than self-served. The durable,
+raft-replicated colony-wide single-flight is merged with it: `ColonyUpdate`
+in the FSM holding the lock and the progress as one object, the four-part
+`ColonyUpdateFence` checked exactly, `MutateColonyUpdate` with acquire,
+advance, release and handover, and the optional
+`AcquireRestartLease.colony_update_fence` that stops a displaced coordinator
+from taking the restart leases its own work depends on.
+
+**Accepted but not yet built**, and no code in this repository reflects any
+of it:
+
+- **The adapter between the page and the backend.** `GET /colony-update`,
+  its panel poll and `POST /colony-update/request` are routed and
+  `web/templates/colony_update.html` renders, but `cmd/frontend` never calls
+  `SetColonyUpdateController`, so the only `colonyupdate.Controller` in the
+  tree is `colonyupdate.Inert`. A request from the page is refused and the
+  page says so. This is the Colony view's Update control in everything but
+  its ability to act.
+- **A sweep.** `ExecuteNodeRestartPlan` takes one `node_id` and one
+  `service`. Nothing derives which Comb to touch first or in what order, and
+  nothing drives the four Combs back to back.
+- **`versioncheck` as the per-step build-identity gate.** Neither
+  `internal/manager` nor `internal/restartplan` imports `internal/buildgate`,
+  so "what is RUNNING against what is ON DISK" is not checked per step.
+- **The ADR-0143 verdicts as the per-step and end-of-sweep gates.** The plan
+  imports neither `internal/health` nor reads `ClusterHealth`, so none of the
+  three health checks in the table above is wired to anything.
+- **A managerd self-restart handoff.** `apiary_managerd` is refused
+  outright, unchanged from ADR-0142, so this call can never restart the
+  process it lives in.
+
+**Not verified.** None of this has run on a FreeBSD host. The sequence is
+exercised against a real raft cluster on loopback with a real gRPC surface,
+but `service apiary_raftd restart`, rc.d's stop/start timing and the real
+interval between raftd coming back and its startup hook running are macOS
+test fakes and nothing more. The design sections below are unchanged, and
+the two entries in the "Update 2026-09-27" list at the end that said the
+single-flight and the page were unbuilt have been corrected there.
 
 ## Context
 
@@ -228,10 +272,11 @@ fault.
 ## Update 2026-09-27: one Comb, end to end
 
 `ManagerService.ExecuteNodeRestartPlan` now runs the sequence above for one
-named Comb, with every effect bound to the real one. The `## Status` line
-still reads "not yet implemented" and is left that way, per the decision
-recorded in SHARED.md for this ADR: the status follows the whole workflow, not
-the parts of it that have landed. This section is the record of what has.
+named Comb, with every effect bound to the real one. This section is the
+record of what had landed as of this date; the `## Status` line above was
+still reading "not yet implemented" when it was written, and was corrected
+once the colony-wide single-flight and the update page had merged behind
+it.
 
 What is real now, and was previously reachable only from a test with a fake on
 every boundary:
@@ -299,11 +344,20 @@ Still missing, and none of it made smaller by this:
   over; there is nothing to resume from, and the pending record on disk is the
   only trace. `apiary_managerd` is refused outright, unchanged from ADR-0142,
   so this call can never restart the process it lives in - but the absent piece
-  is real, and it is the first open question above.
-- **Colony-wide single-flight**, in progress on another branch.
+  is real, and it is the first open question above. The durable-operation half
+  of that bullet landed later the same day, as `ColonyUpdate` step records in
+  the FSM; the self-restart handoff has not, and nothing yet acquires that
+  state on a plan's behalf, because no coordinator drives one.
+- ~~**Colony-wide single-flight**, in progress on another branch.~~ Merged
+  on 2026-09-27, in `ColonyUpdate` as raft state, `MutateColonyUpdate`, the
+  four-part fence, the cooperative handover, and the optional
+  `AcquireRestartLease.colony_update_fence`.
 - **The Colony view's Update control**, `versioncheck` as the per-step gate,
-  and the ADR-0143 verdicts as the per-step and end-of-sweep gates. None of
-  the three health checks in the table above is wired to anything yet.
+  and the ADR-0143 verdicts as the per-step and end-of-sweep gates. The page
+  itself landed on 2026-09-27 and is served and linked, but the controller
+  behind it is `colonyupdate.Inert`, so it renders and refuses; it is a page
+  with no update system attached, not an Update control. None of the three
+  health checks in the table above is wired to anything yet.
 - **A sweep.** One call, one Comb, one service. Which Comb to touch first, and
   in what order, is not derived by anything here.
 - **`apiaryctl force-restart` is untouched** and remains a manual escape hatch. It
