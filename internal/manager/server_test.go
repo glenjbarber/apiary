@@ -473,6 +473,158 @@ func TestServer_AssumptionRegisterAPILocalOnly(t *testing.T) {
 	}
 }
 
+// TestServer_AssumptionClaimStateIsDerivedOnEveryRead covers the two
+// properties the wire contract for evaluation state has to hold.
+//
+// First, a state is computed against the reporting node's clock at read
+// time and is never carried as a stored value: the same claim is
+// rendered twice at two different instants and must come back
+// differently, with nothing written in between. Second, the recorded
+// fields survive a save untouched - consequence_if_false,
+// evidence_status, and last_verified are what a later read is evaluated
+// from, so losing one of them in transit would silently downgrade every
+// claim an operator had ever confirmed.
+func TestServer_AssumptionClaimStateIsDerivedOnEveryRead(t *testing.T) {
+	verified := time.Now().Add(-time.Hour)
+	register := &fakeAssumptionRegister{claims: []assumptionregister.Claim{{
+		ID: "claim-confirmed", Statement: "peer TLS identity is valid", Owner: "ops",
+		Scope: "hive:node-1", Evidence: "2026-09-29 TLS probe",
+		ConsequenceIfFalse: "cross-hive replication fails on the next connect",
+		EvidenceStatus:     assumptionregister.EvidenceSupported,
+		LastVerified:       verified,
+		ExpiresAt:          time.Now().Add(24 * time.Hour),
+	}}}
+	s := NewServer(nil, "node-1", &fakeISOManager{}, nil, nil, nil, nil, "", nil, nil, nil, 0, nil)
+	s.SetAssumptionRegister(register)
+
+	early := toRPCAssumptionClaim(register.claims[0], time.Now())
+	if got := early.GetState(); got != string(assumptionregister.StateSupported) {
+		t.Fatalf("state at a fresh read = %q, want supported", got)
+	}
+	if early.GetStateDetail() == "" {
+		t.Fatal("state_detail is empty; the wire must say why, not only what")
+	}
+	if early.GetEvidenceStatus() != "supported" {
+		t.Fatalf("evidence_status = %q, want supported", early.GetEvidenceStatus())
+	}
+	if early.GetLastVerifiedUnix() != verified.Unix() {
+		t.Fatalf("last_verified_unix = %d, want %d", early.GetLastVerifiedUnix(), verified.Unix())
+	}
+	if early.GetConsequenceIfFalse() == "" {
+		t.Fatal("consequence_if_false did not survive the trip to the wire")
+	}
+
+	// The same stored claim, read past its own expiry and with
+	// nothing rewritten: stale, never a carried-over supported.
+	later := toRPCAssumptionClaim(register.claims[0], register.claims[0].ExpiresAt.Add(time.Second))
+	if got := later.GetState(); got != string(assumptionregister.StateStale) {
+		t.Fatalf("state one second past expiry = %q, want stale", got)
+	}
+	if got := later.GetEvidenceStatus(); got != "supported" {
+		t.Fatalf("the recorded evidence_status changed with the clock: %q", got)
+	}
+
+	// And a save carries the recorded half up, not the derived half.
+	// Echoing state back would mean storing one node's verdict as
+	// though it were another's evidence.
+	carried := fromRPCAssumptionClaim(early)
+	if carried.ConsequenceIfFalse != early.GetConsequenceIfFalse() ||
+		carried.VerificationMethod != early.GetVerificationMethod() ||
+		carried.EvidenceStatus != assumptionregister.EvidenceSupported {
+		t.Fatalf("fromRPCAssumptionClaim() dropped a recorded field: %#v", carried)
+	}
+	if !carried.LastVerified.Equal(verified.Truncate(time.Second)) {
+		// The wire carries whole seconds, so sub-second precision is
+		// lost in transit by design. Losing it is fine; losing the time
+		// itself is not, and a claim that came back without one would
+		// silently evaluate as unknown from then on.
+		t.Fatalf("last_verified = %s, want %s", carried.LastVerified, verified)
+	}
+}
+
+// TestServer_AssumptionClaimNeverVerifiedIsNotRenderedAsChecked is the
+// wire-level version of the fail-closed rule. last_verified_unix zero
+// means "never checked"; a client that divides it by a second, or renders
+// it as a date, must not come to read 1970 as though the claim had been
+// confirmed at the epoch.
+func TestServer_AssumptionClaimNeverVerifiedIsNotRenderedAsChecked(t *testing.T) {
+	claim := assumptionregister.Claim{
+		ID: "claim-unchecked", Statement: "off-platform backup exists", Owner: "ops",
+		Scope: "hive:node-1", Evidence: "asked the operator",
+		ExpiresAt: time.Now().Add(24 * time.Hour),
+	}
+	wire := toRPCAssumptionClaim(claim, time.Now())
+	if wire.GetLastVerifiedUnix() != 0 {
+		t.Fatalf("last_verified_unix = %d, want 0 for a claim never verified", wire.GetLastVerifiedUnix())
+	}
+	if got := wire.GetState(); got != string(assumptionregister.StateUnknown) {
+		t.Fatalf("state = %q, want unknown", got)
+	}
+	// Round-tripping a never-verified claim must not invent a time.
+	back := fromRPCAssumptionClaim(wire)
+	if !back.LastVerified.IsZero() {
+		t.Fatalf("last_verified = %s after a round trip, want the zero time", back.LastVerified)
+	}
+}
+
+// TestServer_ExpiredClaimIsReportedNotDropped is the behaviour change
+// that motivated all of this. An expired claim used to be filtered out
+// of relevantRegisterClaims entirely, which left every conclusion
+// resting on it reading exactly as before with no visible cause. It must
+// now be reported, scoped, and marked stale.
+func TestServer_ExpiredClaimIsReportedNotDropped(t *testing.T) {
+	now := time.Date(2026, 9, 29, 12, 0, 0, 0, time.UTC)
+	register := &fakeAssumptionRegister{claims: []assumptionregister.Claim{
+		{
+			ID: "expired-colony", Statement: "external gateway is reachable", Owner: "ops",
+			Scope: "colony", Evidence: "2026-09-01 curl to the origin",
+			EvidenceStatus: assumptionregister.EvidenceSupported,
+			LastVerified:   now.Add(-30 * 24 * time.Hour),
+			ExpiresAt:      now.Add(-time.Hour),
+		},
+		{
+			ID: "live-colony", Statement: "peer managerd is reachable", Owner: "ops",
+			Scope: "colony", Evidence: "2026-09-29 peer probe",
+			EvidenceStatus: assumptionregister.EvidenceSupported,
+			LastVerified:   now.Add(-time.Hour),
+			ExpiresAt:      now.Add(time.Hour),
+		},
+		{
+			ID: "other-hive", Statement: "this hive has the images", Owner: "ops",
+			Scope: "hive:node-9", Evidence: "a peer said so",
+			ExpiresAt: now.Add(time.Hour),
+		},
+	}}
+	s := NewServer(nil, "node-1", &fakeISOManager{}, nil, nil, nil, nil, "", nil, nil, nil, 0, nil)
+	s.SetAssumptionRegister(register)
+
+	got := s.relevantRegisterClaims("node-1", now)
+	byID := map[string]*rpcpb.AssumptionClaim{}
+	for _, c := range got {
+		byID[c.GetId()] = c
+	}
+	if len(got) != 2 {
+		t.Fatalf("relevantRegisterClaims() returned %d claims, want 2 (the expired one must still be reported)", len(got))
+	}
+	if _, ok := byID["other-hive"]; ok {
+		t.Fatal("a claim scoped to another hive was reported here; the scope filter is unchanged")
+	}
+	expired, ok := byID["expired-colony"]
+	if !ok {
+		t.Fatal("the expired claim was dropped from the report instead of being marked stale")
+	}
+	if s := expired.GetState(); s != string(assumptionregister.StateStale) {
+		t.Fatalf("expired claim state = %q, want stale", s)
+	}
+	if expired.GetStateDetail() == "" {
+		t.Fatal("the expired claim has no state_detail")
+	}
+	live := byID["live-colony"]
+	if live.GetState() != string(assumptionregister.StateSupported) {
+		t.Fatalf("live claim state = %q, want supported", live.GetState())
+	}
+}
+
 func (f *fakeReconcilerStats) LastReconcileAttempt() (time.Time, bool) { return f.attempt, f.attemptOK }
 func (f *fakeReconcilerStats) LastReconcileSuccess() (time.Time, bool) { return f.success, f.successOK }
 func (f *fakeReconcilerStats) ReconcileInterval() time.Duration        { return f.interval }

@@ -3409,8 +3409,11 @@ type GetLocalNodeHealthResponse struct {
 	Status       string               `protobuf:"bytes,2,opt,name=status,proto3" json:"status,omitempty"`
 	Explanation  string               `protobuf:"bytes,3,opt,name=explanation,proto3" json:"explanation,omitempty"`
 	Observations []*HealthObservation `protobuf:"bytes,4,rep,name=observations,proto3" json:"observations,omitempty"`
-	// relevant_claims are unexpired local register entries scoped to this Hive
-	// or the Colony. They are context, not input to status.
+	// relevant_claims are local register entries scoped to this Hive
+	// or the Colony, INCLUDING expired ones - an expired claim is
+	// reported with state "stale" rather than dropped, so a conclusion
+	// resting on it cannot quietly stay proven. They are context, not
+	// input to status.
 	RelevantClaims []*AssumptionClaim `protobuf:"bytes,5,rep,name=relevant_claims,json=relevantClaims,proto3" json:"relevant_claims,omitempty"`
 	unknownFields  protoimpl.UnknownFields
 	sizeCache      protoimpl.SizeCache
@@ -3492,8 +3495,30 @@ type AssumptionClaim struct {
 	ExpiresAtUnix      int64                  `protobuf:"varint,7,opt,name=expires_at_unix,json=expiresAtUnix,proto3" json:"expires_at_unix,omitempty"`
 	CreatedAtUnix      int64                  `protobuf:"varint,8,opt,name=created_at_unix,json=createdAtUnix,proto3" json:"created_at_unix,omitempty"`
 	UpdatedAtUnix      int64                  `protobuf:"varint,9,opt,name=updated_at_unix,json=updatedAtUnix,proto3" json:"updated_at_unix,omitempty"`
-	unknownFields      protoimpl.UnknownFields
-	sizeCache          protoimpl.SizeCache
+	// consequence_if_false states what becomes unsafe, unknown, or
+	// unverified when this claim does not hold.
+	ConsequenceIfFalse string `protobuf:"bytes,10,opt,name=consequence_if_false,json=consequenceIfFalse,proto3" json:"consequence_if_false,omitempty"`
+	// last_verified_unix is when this claim's supporting evidence was
+	// last confirmed. Zero means it never has been.
+	LastVerifiedUnix int64 `protobuf:"varint,11,opt,name=last_verified_unix,json=lastVerifiedUnix,proto3" json:"last_verified_unix,omitempty"`
+	// evidence_status is the RECORDED outcome of the last check of this
+	// claim's supporting evidence: unobserved (the default), supported,
+	// contradicted, or not_applicable. It is a raw observation, not a
+	// verdict, and it is deliberately not the same field as state below.
+	EvidenceStatus string `protobuf:"bytes,12,opt,name=evidence_status,json=evidenceStatus,proto3" json:"evidence_status,omitempty"`
+	// state is the DERIVED evaluation of this claim right now, computed
+	// by the reporting node against its own clock on every read and
+	// never persisted: supported, contradicted, unknown, stale, or
+	// not_applicable. It is empty only for a claim that no node has
+	// evaluated. supported is the sole affirmative state - an expired,
+	// unobserved, or unrecognized claim can never produce it.
+	State string `protobuf:"bytes,13,opt,name=state,proto3" json:"state,omitempty"`
+	// state_detail says in words why state is what it is, so a consumer
+	// reading only the wire never has to infer a verdict's cause, and
+	// never has to convey it by color or a bare enum alone.
+	StateDetail   string `protobuf:"bytes,14,opt,name=state_detail,json=stateDetail,proto3" json:"state_detail,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *AssumptionClaim) Reset() {
@@ -3587,6 +3612,41 @@ func (x *AssumptionClaim) GetUpdatedAtUnix() int64 {
 		return x.UpdatedAtUnix
 	}
 	return 0
+}
+
+func (x *AssumptionClaim) GetConsequenceIfFalse() string {
+	if x != nil {
+		return x.ConsequenceIfFalse
+	}
+	return ""
+}
+
+func (x *AssumptionClaim) GetLastVerifiedUnix() int64 {
+	if x != nil {
+		return x.LastVerifiedUnix
+	}
+	return 0
+}
+
+func (x *AssumptionClaim) GetEvidenceStatus() string {
+	if x != nil {
+		return x.EvidenceStatus
+	}
+	return ""
+}
+
+func (x *AssumptionClaim) GetState() string {
+	if x != nil {
+		return x.State
+	}
+	return ""
+}
+
+func (x *AssumptionClaim) GetStateDetail() string {
+	if x != nil {
+		return x.StateDetail
+	}
+	return ""
 }
 
 type ListAssumptionClaimsRequest struct {
@@ -13608,9 +13668,13 @@ type SimulateNodeFailureResponse struct {
 	OwnedResources         []*OwnedResourceImpact     `protobuf:"bytes,4,rep,name=owned_resources,json=ownedResources,proto3" json:"owned_resources,omitempty"`
 	ReplicaBackedResources []*ReplicaBackedImpact     `protobuf:"bytes,5,rep,name=replica_backed_resources,json=replicaBackedResources,proto3" json:"replica_backed_resources,omitempty"`
 	ImageAvailability      []*ImageAvailabilityImpact `protobuf:"bytes,6,rep,name=image_availability,json=imageAvailability,proto3" json:"image_availability,omitempty"`
-	// relevant_claims are unexpired claims from the reporting Hive's local
-	// register, scoped to the Colony or the simulated Hive. They provide
-	// operator context only and do not change any simulator verdict.
+	// relevant_claims are claims from the reporting Hive's local
+	// register, scoped to the Colony or the simulated Hive, INCLUDING
+	// expired ones - an expired claim is reported with state "stale"
+	// rather than dropped, so a simulation reading this does not lose
+	// the fact that it is resting on something no longer current. They
+	// provide operator context only and do not change any simulator
+	// verdict.
 	RelevantClaims []*AssumptionClaim `protobuf:"bytes,7,rep,name=relevant_claims,json=relevantClaims,proto3" json:"relevant_claims,omitempty"`
 	unknownFields  protoimpl.UnknownFields
 	sizeCache      protoimpl.SizeCache
@@ -19903,7 +19967,7 @@ const file_api_rpc_manager_proto_rawDesc = "" +
 	"\x06status\x18\x02 \x01(\tR\x06status\x12 \n" +
 	"\vexplanation\x18\x03 \x01(\tR\vexplanation\x12D\n" +
 	"\fobservations\x18\x04 \x03(\v2 .apiary.rpc.v1.HealthObservationR\fobservations\x12G\n" +
-	"\x0frelevant_claims\x18\x05 \x03(\v2\x1e.apiary.rpc.v1.AssumptionClaimR\x0erelevantClaims\"\xb0\x02\n" +
+	"\x0frelevant_claims\x18\x05 \x03(\v2\x1e.apiary.rpc.v1.AssumptionClaimR\x0erelevantClaims\"\xf2\x03\n" +
 	"\x0fAssumptionClaim\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x1c\n" +
 	"\tstatement\x18\x02 \x01(\tR\tstatement\x12\x14\n" +
@@ -19913,7 +19977,13 @@ const file_api_rpc_manager_proto_rawDesc = "" +
 	"\x13verification_method\x18\x06 \x01(\tR\x12verificationMethod\x12&\n" +
 	"\x0fexpires_at_unix\x18\a \x01(\x03R\rexpiresAtUnix\x12&\n" +
 	"\x0fcreated_at_unix\x18\b \x01(\x03R\rcreatedAtUnix\x12&\n" +
-	"\x0fupdated_at_unix\x18\t \x01(\x03R\rupdatedAtUnix\"\x1d\n" +
+	"\x0fupdated_at_unix\x18\t \x01(\x03R\rupdatedAtUnix\x120\n" +
+	"\x14consequence_if_false\x18\n" +
+	" \x01(\tR\x12consequenceIfFalse\x12,\n" +
+	"\x12last_verified_unix\x18\v \x01(\x03R\x10lastVerifiedUnix\x12'\n" +
+	"\x0fevidence_status\x18\f \x01(\tR\x0eevidenceStatus\x12\x14\n" +
+	"\x05state\x18\r \x01(\tR\x05state\x12!\n" +
+	"\fstate_detail\x18\x0e \x01(\tR\vstateDetail\"\x1d\n" +
 	"\x1bListAssumptionClaimsRequest\"l\n" +
 	"\x1cListAssumptionClaimsResponse\x126\n" +
 	"\x06claims\x18\x01 \x03(\v2\x1e.apiary.rpc.v1.AssumptionClaimR\x06claims\x12\x14\n" +

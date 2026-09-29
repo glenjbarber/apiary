@@ -421,6 +421,12 @@ type pageData struct {
 	AssumptionRegisterErr string
 	AssumptionRegisterOK  string
 
+	// AssumptionEvidenceStatuses backs the evidence-status <select> on
+	// the register form. The (value, label) list is built in Go beside the
+	// vocabulary it describes, so the page and the words explaining each
+	// token cannot drift apart.
+	AssumptionEvidenceStatuses []assumptionEvidenceStatusOption
+
 	// Recovery* back the Offline Recovery Handbook page
 	// ("/recovery-handbook", ADR-0057). RecoveryNodes mirrors
 	// SimulateNodes exactly (same picker, same union of raft membership

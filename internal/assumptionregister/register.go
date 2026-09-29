@@ -1,6 +1,16 @@
 // Package assumptionregister persists operator-authored environmental claims.
 // It is deliberately separate from internal/assumptions: automated
 // observations must never silently overwrite a human-owned assertion.
+//
+// That separation is a boundary this package still enforces after
+// evaluation state was added. The two halves of the state model live on
+// opposite sides of it: EvidenceStatus and LastVerified are what a
+// human (or a future checker) RECORDS, and State is what this package
+// DERIVES from them on every read. Nothing that derives a verdict
+// writes one back, and nothing derived is ever persisted, so there is
+// no stored "true" for an automated observation to overwrite - and no
+// stored "true" to rot. TestAutomatedObservationNeverMutatesAnOperatorClaim
+// in evaluate_test.go holds that line.
 package assumptionregister
 
 import (
@@ -17,15 +27,38 @@ import (
 const DefaultPath = "/var/db/apiary/assumption-register.json"
 
 type Claim struct {
-	ID                 string    `json:"id"`
-	Statement          string    `json:"statement"`
-	Owner              string    `json:"owner"`
-	Scope              string    `json:"scope"`
-	Evidence           string    `json:"evidence"`
-	VerificationMethod string    `json:"verification_method,omitempty"`
-	ExpiresAt          time.Time `json:"expires_at"`
-	CreatedAt          time.Time `json:"created_at"`
-	UpdatedAt          time.Time `json:"updated_at"`
+	ID        string    `json:"id"`
+	Statement string    `json:"statement"`
+	Owner     string    `json:"owner"`
+	Scope     string    `json:"scope"`
+	Evidence  string    `json:"evidence"`
+	ExpiresAt time.Time `json:"expires_at"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+
+	// ConsequenceIfFalse states what becomes unsafe, unknown, or
+	// unverified when this claim turns out not to hold. The direction
+	// this register implements requires it to be recorded; it is not
+	// required on save, because the v1 scope's own required list is
+	// owner, scope, evidence, timestamps, and an optional verification
+	// method, and refusing an operator's existing claim over a field
+	// they were never asked for would be a worse failure than showing
+	// it empty.
+	ConsequenceIfFalse string `json:"consequence_if_false,omitempty"`
+
+	// VerificationMethod records HOW this claim could be re-checked.
+	// Nothing in this package runs it - deciding which checks are
+	// automated, and what observation backs each claim, is a separate
+	// decision this slice deliberately does not make. It is carried so
+	// a later checker has somewhere to record what it ran.
+	VerificationMethod string `json:"verification_method,omitempty"`
+
+	// EvidenceStatus is the recorded outcome of the last check of this
+	// claim's supporting evidence, and LastVerified is when that check
+	// happened. Both are raw facts an operator records; neither is
+	// this package's opinion. The opinion is Claim.Evaluate's State.
+	EvidenceStatus EvidenceStatus `json:"evidence_status,omitempty"`
+	LastVerified   time.Time      `json:"last_verified,omitempty"`
 }
 
 func (c Claim) Validate() error {
@@ -40,7 +73,35 @@ func (c Claim) Validate() error {
 	if c.ExpiresAt.IsZero() {
 		return fmt.Errorf("assumption register: expires_at is required")
 	}
+	// An unrecognized token is refused here rather than degrading to
+	// unknown at read time: a typo would otherwise be a silent
+	// downgrade the operator never sees the cause of.
+	if c.EvidenceStatus != "" && !knownEvidenceStatuses[c.EvidenceStatus] {
+		return fmt.Errorf("assumption register: evidence_status %q is not one of %s", c.EvidenceStatus, knownEvidenceStatusList())
+	}
+	// "supported" with no verification time is a claim of having
+	// checked, with nothing saying when. Evaluate would cap it at
+	// unknown anyway; refusing to store it says so at the moment the
+	// operator can still fix it.
+	if c.EvidenceStatus == EvidenceSupported && c.LastVerified.IsZero() {
+		return fmt.Errorf("assumption register: a claim recorded as supported must also record last_verified - a confirmation with no time is not evidence of anything current")
+	}
+	// A verification recorded at or after the claim's own expiry is
+	// incoherent: the claim had already stopped being current.
+	if !c.LastVerified.IsZero() && !c.LastVerified.Before(c.ExpiresAt) {
+		return fmt.Errorf("assumption register: last_verified (%s) must be before expires_at (%s)", c.LastVerified.UTC().Format(time.RFC3339), c.ExpiresAt.UTC().Format(time.RFC3339))
+	}
 	return nil
+}
+
+// knownEvidenceStatusList renders the accepted evidence_status tokens
+// for an error message, in the order they are defined.
+func knownEvidenceStatusList() string {
+	names := make([]string, 0, len(knownEvidenceStatuses))
+	for _, s := range []EvidenceStatus{EvidenceUnobserved, EvidenceSupported, EvidenceContradicted, EvidenceNotApplicable} {
+		names = append(names, string(s))
+	}
+	return strings.Join(names, ", ")
 }
 
 type Manager struct {
