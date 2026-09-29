@@ -221,6 +221,18 @@ func (s *Server) raftdQuorumFact(ctx context.Context, service, targetNodeID stri
 	}
 	fact.ProbeReadOK = true
 
+	// raftd answering is not the same as raftd having read its own
+	// configuration. When the membership read failed, this node knows
+	// nothing about the voter set - not even whether the target is a
+	// voter - so it takes the same fail-closed shape as the
+	// unreachable-raftd branch above: an unreadable fact, which
+	// EvaluateQuorumSafety turns into Unknown and Force cannot rescue.
+	if status.GetMembershipError() != "" {
+		fact.ProbeReadOK = false
+		fact.ProbeError = status.GetMembershipError()
+		return fact
+	}
+
 	// Leadership is a question about the TARGET, asked of the raft
 	// status this node just read. An empty leader_id means nobody knows
 	// who the leader is right now (an election is in progress, or this

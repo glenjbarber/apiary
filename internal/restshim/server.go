@@ -213,6 +213,16 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 		"raft_last_log_index": resp.GetRaftLastLogIndex(),
 		"raft_applied_index":  resp.GetRaftAppliedIndex(),
 		"raft_state":          resp.GetRaftState(),
+		// Additive alongside raft_error, and for the same reason that
+		// one is here: raft_reachable is true whenever raftd answered,
+		// including when it answered without being able to read its own
+		// configuration. Without this key a JSON consumer sees
+		// "raft_reachable": true, "raft_error": "" and concludes raft is
+		// fine, which is more confident than the evidence allows. The
+		// body already omits members and raft_state_digest, so this is
+		// not a claim that it is exhaustive - it is an error condition
+		// being kept, not a field being added for symmetry.
+		"raft_membership_error": resp.GetRaftMembershipError(),
 	})
 }
 

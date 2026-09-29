@@ -333,11 +333,18 @@ func (s *Server) handleInvariantsPage(w http.ResponseWriter, r *http.Request) {
 
 	var live []invariantEvaluationView
 
-	if statusErr != nil || !statusResp.GetRaftReachable() || statusResp.GetRaftError() != "" {
+	// RaftReachable is true whenever raftd answered at all, including
+	// when the answer was "I could not read my own configuration". A
+	// failed membership read is no evidence of a quorum, so it belongs
+	// in this guard: evaluating quorum tolerance against zero voters
+	// would report a tolerance the cluster never demonstrated.
+	if statusErr != nil || !statusResp.GetRaftReachable() || statusResp.GetRaftError() != "" || statusResp.GetRaftMembershipError() != "" {
 		reason := "raft status could not be confirmed"
 		switch {
 		case statusErr != nil:
 			reason = statusErr.Error()
+		case statusResp.GetRaftMembershipError() != "":
+			reason = "raft membership could not be read: " + statusResp.GetRaftMembershipError()
 		case statusResp.GetRaftError() != "":
 			reason = statusResp.GetRaftError()
 		}
