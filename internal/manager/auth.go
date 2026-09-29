@@ -543,6 +543,24 @@ const mutateColonyUpdateMethod = "/apiary.rpc.v1.ManagerService/MutateColonyUpda
 // every step of a guarded restart rather than one of them.
 const executeNodeRestartPlanMethod = "/apiary.rpc.v1.ManagerService/ExecuteNodeRestartPlan"
 
+// requestManagerdRestartMethod and issueManagerdRestartMethod (ADR-0146)
+// are exempted from checkAuth for the identical reason as the four above,
+// and the stakes here are the highest in this file: between them they
+// stop and start the managerd that is the Colony's entire control plane.
+// An ordinary Admin API key that could reach either would be able to take
+// the management daemon down on any Comb it can name, which is a larger
+// consequence than restarting a quorum-critical daemon and is exactly
+// what the dedicated root-owned token was introduced to prevent.
+//
+// Neither is an operator control. There is no UI control, no REST route
+// and no template for either, and none is being added: the Machine
+// page's managerd row is status-only and stays that way, because
+// ADR-0142's refusal is about the ORCHESTRATION, not about who may ask.
+// A managerd restart during a controlled update is a step of that
+// update, and the update is driven by a coordinator holding this token.
+const requestManagerdRestartMethod = "/apiary.rpc.v1.ManagerService/RequestManagerdRestart"
+const issueManagerdRestartMethod = "/apiary.rpc.v1.ManagerService/IssueManagerdRestart"
+
 // authExemptMethods is every RPC that skips checkAuth's API-key role check,
 // each for the specific reason documented on its constant above. It is the
 // single definition AuthUnaryInterceptor consults, and TestRequiredRole_
@@ -561,6 +579,9 @@ var authExemptMethods = map[string]bool{
 	getColonyJoinWindowMethod:     true,
 
 	executeNodeRestartPlanMethod: true,
+
+	requestManagerdRestartMethod: true,
+	issueManagerdRestartMethod:   true,
 }
 
 // restartGuardrailTokenValid reports whether presented matches configured

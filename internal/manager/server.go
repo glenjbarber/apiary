@@ -21,6 +21,7 @@ import (
 	rpcpb "github.com/glenjbarber/apiary/api/rpc"
 	"github.com/glenjbarber/apiary/internal/assumptionregister"
 	"github.com/glenjbarber/apiary/internal/assumptions"
+	"github.com/glenjbarber/apiary/internal/buildgate"
 	"github.com/glenjbarber/apiary/internal/cluster"
 	"github.com/glenjbarber/apiary/internal/frontendconfig"
 	"github.com/glenjbarber/apiary/internal/guardrail"
@@ -289,6 +290,24 @@ type PeerForwarder interface {
 	// restart-guardrail token, as every other method in this tail of
 	// the interface does.
 	ExecuteNodeRestartPlan(ctx context.Context, addr string, req *rpcpb.ExecuteNodeRestartPlanRequest) (*rpcpb.ExecuteNodeRestartPlanResponse, error)
+
+	// RequestManagerdRestart carries ADR-0146's managerd self-restart
+	// handoff to the Comb that will actually perform it. The coordinator
+	// side reserves the restart lease and re-derives the rule-1
+	// constraint; IssueManagerdRestart below is what lands on the
+	// target. Like StepAsideForRestart it is NOT leader-forwarded: the
+	// process that writes the durable marker is the process about to
+	// die, and the process that reads it back is its own replacement on
+	// the same machine. It authenticates with the restart-guardrail
+	// token, as every other method in this tail of the interface does.
+	RequestManagerdRestart(ctx context.Context, addr string, req *rpcpb.RequestManagerdRestartRequest) (*rpcpb.RequestManagerdRestartResponse, error)
+
+	// IssueManagerdRestart is the target-local half: it asks the node
+	// that received it to schedule its OWN restart as one step of a
+	// controlled update, and it is the only path in the system that may
+	// do that. It is never leader-forwarded, for the locality reason
+	// above, and it authenticates with the restart-guardrail token.
+	IssueManagerdRestart(ctx context.Context, addr string, req *rpcpb.IssueManagerdRestartRequest) (*rpcpb.IssueManagerdRestartResponse, error)
 }
 
 // reconcilerStats is the subset of *cluster.Reconciler the server needs
@@ -592,6 +611,30 @@ type Server struct {
 	// testing the collision rather than the flow.
 	planCoordinatorDir string
 	planSelfReportDir  string
+
+	// handoff is the durable "restart scheduled" marker store ADR-0146's
+	// peer-issued managerd restart writes before it ACKs the peer, and
+	// which this same process's replacement reads back on its own next
+	// startup to confirm the step. nil means this managerd refuses to
+	// restart itself at all, which is the only safe default: a managerd
+	// that arranged a restart it could not leave a record for would
+	// produce a Comb whose replacement cannot find out anything was
+	// intended, and silence is what rule 6 exists to prevent.
+	handoff *ManagerdHandoffStore
+
+	// detachedRestarter arranges the managerd restart itself, from a
+	// process that is not this one (ADR-0146 rule 4). nil means this
+	// managerd refuses to restart itself, and it never falls back to
+	// doing it in-process: that fallback is ADR-0142's recorded fault,
+	// where the stop half kills the process about to run the start half
+	// and the daemon does not come back.
+	detachedRestarter DetachedRestarter
+
+	// handoffBuildPaths overrides where the build-identity gate in the
+	// confirmation path reads its two independent readings from. The
+	// zero value means internal/buildgate.DefaultPaths; see
+	// buildGatePaths.
+	handoffBuildPaths buildgate.Paths
 }
 
 // SetPAMAuthenticator wires PAM login support after construction (ADR-

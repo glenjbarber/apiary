@@ -398,15 +398,95 @@ service ManagerService {
   // operator button; ADR-0145's UI is deliberately not built and is a
   // separate step.
   //
-  // SCOPE. Only "apiary_raftd" is accepted, and "apiary_managerd" is
-  // refused for exactly the reason ADR-0142 refuses it: the restart
-  // would be orchestrated from inside the managerd being restarted.
-  // Restoring that needs a managerd self-restart handoff and durable
-  // update-operation state, neither of which exists yet. There is
-  // deliberately no colony-wide sweep here - one Comb, one call - and no
-  // colony-wide single-flight beyond the one real restart lease, which
+  // SCOPE. Only "apiary_raftd" is accepted. "apiary_managerd" is
+  // refused, and the reason ADR-0142 gives is unchanged and still the
+  // reason: the restart would be orchestrated from inside the managerd
+  // being restarted. What ADR-0146 added is a different entry point for
+  // exactly that case - RequestManagerdRestart below, issued by a PEER
+  // managerd and performed by a process that is not the one being
+  // stopped - and deliberately nothing here. This RPC stays single-Comb
+  // and raftd-only, and there is no colony-wide sweep in it: one Comb,
+  // one call, no single-flight beyond the one real restart lease, which
   // does serialize one guarded restart across the whole Colony.
   rpc ExecuteNodeRestartPlan(ExecuteNodeRestartPlanRequest) returns (ExecuteNodeRestartPlanResponse);
+
+  // RequestManagerdRestart asks a PEER managerd to restart THIS node's
+  // own apiary_managerd, as one step of a controlled Colony update
+  // (ADR-0146 rules 1 and 3). It is the coordinator-side half of the
+  // handoff; IssueManagerdRestart below is the target-side half, and the
+  // two are separate on purpose.
+  //
+  // A managerd MAY NOT ASK ITSELF TO RESTART, and this RPC refuses that
+  // case outright, in the same shape and with the same non-overridable
+  // semantics ADR-0142 established. There is no force field on this
+  // message and there will not be one: acknowledging a quorum block is
+  // agreeing to a known cost, whereas "the process that would perform
+  // the start is the process being stopped" is not a cost at all, and
+  // presenting the two as the same lever would be a lie about what
+  // force can do. The working alternative is named in the refusal - ask
+  // a different Comb, or restart managerd on the host from a root shell.
+  //
+  // Rule 1 is enforced HERE and not only at the target: the operation
+  // must be held by a holder_node_id that is not the Comb about to be
+  // restarted, and this handler refuses when the presented fence says
+  // otherwise. The target re-checks it independently (ADR-0146 rule 4's
+  // handover step), because a check that exists on one side of a
+  // network hop is a check that can be aimed around by a caller who
+  // reaches the other side directly.
+  //
+  // Before the request is carried to the target this handler reserves the
+  // real cluster-wide ADR-0103 restart lease for "apiary_managerd" on
+  // that node, because the restarted process confirms the lease itself
+  // (ADR-0146 rule 5) and it can only confirm a lease that exists. The
+  // lease is NOT released on a failure below: there is no "the restart
+  // never happened" transition on a restart lease, and a lease that is
+  // released by a forward that failed would be a lease nobody ever held.
+  // It stays held and blocking until the target confirms itself or an
+  // operator clears it, which is ADR-0103's own deliberate posture.
+  //
+  // EXECUTION IS TARGET-LOCAL, exactly as ExecuteNodeRestartPlan above:
+  // the marker is written on the machine that is about to stop, and the
+  // process that reads it back on its next startup is that same machine's
+  // managerd. So the request is forwarded to the target member's own
+  // managerd at an address resolved from this node's own raft membership
+  // and never from anything the caller supplied. It is never forwarded
+  // to the raft leader.
+  //
+  // AUTHORIZATION matches StepAsideForRestart/MutateColonyUpdate/
+  // ExecuteNodeRestartPlan exactly: the dedicated root-owned
+  // restart-guardrail token, not the Viewer/Admin hierarchy, and not any
+  // CreateAPIKey-issued credential. This is guardrail plumbing reached by
+  // a controlled-update coordinator. It is deliberately NOT an operator
+  // control: there is no route, no template and no button for it, and
+  // ADR-0142's refusal in RestartNodeService stands unchanged.
+  rpc RequestManagerdRestart(RequestManagerdRestartRequest) returns (RequestManagerdRestartResponse);
+
+  // IssueManagerdRestart is the target-local half of ADR-0146: it asks
+  // THIS node's managerd to schedule its OWN restart, and it is the only
+  // path in the whole system that may do that.
+  //
+  // It is never leader-forwarded. The process that writes the durable
+  // "restart scheduled" marker is the process that is about to die, and
+  // the process that reads that marker back is its own replacement on
+  // the same machine; a leader-forwarded version would put both of those
+  // on a different Comb from the restart itself, where neither can be
+  // read.
+  //
+  // The order of operations inside the handler is ADR-0146 rule 4's and is
+  // load-bearing: durable handover if this node holds the operation,
+  // then the durable marker, then the ACK to the peer, and ONLY THEN the
+  // restart - arranged in a child process reparented out of managerd,
+  // because the in-process arrangement is precisely the ADR-0142 failure
+  // that killed a control plane on two Combs. A handler that returned
+  // before the marker was durable would let a peer believe a restart was
+  // scheduled for an operation no replacement could ever find.
+  //
+  // AUTHORIZATION is the same dedicated restart-guardrail token, and the
+  // request must additionally carry the coordinating managerd's exact
+  // ColonyUpdateFence: a restart with no operation behind it has no
+  // evidence to confirm and nothing to record, so it is refused rather
+  // than performed.
+  rpc IssueManagerdRestart(IssueManagerdRestartRequest) returns (IssueManagerdRestartResponse);
 
   // CreateNetwork/ListNetworks/DeleteNetwork manage NetworkDefinitions -
   // VLAN/subnet/bridge segments a VM can attach to (see ADR-0022).
@@ -4299,4 +4379,150 @@ message ReceiveVMSnapshotResponse {
   string id = 1;
   string snapshot_name = 2;
   string error = 3;
+}
+
+// RequestManagerdRestartRequest is the coordinator-side half of
+// ADR-0146's handoff: "restart this Comb's managerd as one step of the
+// controlled update I hold the fence for".
+//
+// It carries intent only. There is no address, no order, no delay an
+// operator chooses and no force flag, for the same reason
+// ExecuteNodeRestartPlanRequest carries none of those: the operator never
+// supplies anything the Colony can derive.
+message RequestManagerdRestartRequest {
+  // target_node_id is the Comb whose apiary_managerd is to be
+  // restarted. It is resolved from this node's own raft membership and
+  // is refused, never guessed at, when this node has never heard of it.
+  //
+  // Naming THIS node is refused: a managerd cannot ask itself to
+  // restart, and that refusal is the whole of ADR-0142's guarantee as
+  // it survives into this feature.
+  string target_node_id = 1;
+
+  // fence is the controlled update's exact four-part fence. It is what
+  // proves the caller still holds the operation, and it is re-checked
+  // exactly against the active record by the FSM rather than trusted
+  // because a caller presented it.
+  ColonyUpdateFence fence = 2;
+
+  // step is the step being entered on the target, recorded in the
+  // durable marker so the replacement process knows which step of which
+  // operation it is confirming. Empty is refused.
+  string step = 3;
+}
+
+message RequestManagerdRestartResponse {
+  // accepted is true only when the target actually scheduled its own
+  // restart. A refusal is accepted=false WITH an error naming the cause;
+  // there is no silent false anywhere in this response, because the two
+  // possible responses to "did you restart that Comb" - "yes" and
+  // "nobody could be asked" - demand opposite next steps.
+  bool accepted = 1;
+
+  // target_node_id is the Comb whose managerd was scheduled, echoed so a
+  // misroute is visible in the answer rather than only in a log.
+  string target_node_id = 2;
+
+  // lease_id is the cluster-wide restart lease reserved for the target's
+  // apiary_managerd before the request was carried over. The restarted
+  // process confirms exactly this lease, so it is carried back for the
+  // coordinator's own record.
+  uint64 lease_id = 3;
+
+  // issued is the target's own answer, verbatim. It is the far end's
+  // account of what it did - whether it performed a durable handover,
+  // what build it expected to come back on, where it wrote its marker -
+  // and it is passed back unedited because this node was not there.
+  IssueManagerdRestartResponse issued = 4;
+
+  // error is set on every refusal and is never empty when
+  // accepted=false.
+  string error = 5;
+}
+
+// IssueManagerdRestartRequest asks THIS node's managerd to schedule its
+// own restart. It is reached only through RequestManagerdRestart above,
+// from a peer managerd, and never from an operator.
+message IssueManagerdRestartRequest {
+  // target_node_id names the Comb being restarted. It is a guard against
+  // a misrouted call, not a routing instruction: the request is always
+  // acted on by the node that received it, and a non-empty value that is
+  // not this node is refused.
+  string target_node_id = 1;
+
+  // operation_id is the controlled update this restart is a step of. It
+  // is written into the durable marker so the replacement process can
+  // find the operation again, and it is required - a managerd restart
+  // with no operation behind it has no step to record and no evidence
+  // to confirm.
+  string operation_id = 2;
+
+  // fence is the COORDINATING managerd's exact fence. It is not held by
+  // this node and cannot be: the whole point of the peer-issued restart
+  // is that the node being restarted is not the coordinator. It travels
+  // in the request so the marker can name the operation it belongs to
+  // and so a caller cannot schedule a restart against an operation that
+  // does not exist.
+  ColonyUpdateFence fence = 3;
+
+  // step is the step being entered, recorded in the marker and in the
+  // step record the replacement appends.
+  string step = 4;
+
+  // lease_id is the cluster-wide ADR-0103 restart lease the coordinator
+  // reserved for this node's apiary_managerd. The replacement process
+  // confirms exactly this lease, and a zero lease is refused rather than
+  // confirmed against whatever happens to be held.
+  uint64 lease_id = 5;
+
+  // handover_to_node_id and handover_to_incarnation name the managerd
+  // PROCESS that will take the operation over if this node is the one
+  // holding it (ADR-0146 rules 2 and 4). They are required in exactly
+  // that case and refused otherwise: a handover to a guessed incarnation
+  // is a record of a change of coordinator that did not happen, which
+  // is the one thing the FSM refuses to write.
+  string handover_to_node_id = 6;
+  string handover_to_incarnation = 7;
+
+  // delay_ms is how long the detached child waits before issuing the
+  // restart, so the ACK to the peer has reached it first. It is bounded
+  // on both sides and is the only timing a caller may influence.
+  uint64 delay_ms = 8;
+}
+
+message IssueManagerdRestartResponse {
+  // accepted is true only when this node wrote its durable marker AND
+  // arranged the restart. A marker without an arranged restart is not
+  // an acceptance, and an arranged restart without a durable marker is
+  // refused before it happens rather than after.
+  bool accepted = 1;
+
+  // node_id is the node that actually answered, always present, so a
+  // caller can tell a misplaced call from a failed one.
+  string node_id = 2;
+
+  // handover_performed reports whether this node was the operation's
+  // holder and therefore moved the operation to another Comb before
+  // scheduling its own death. It is a separate flag rather than
+  // something to infer from accepted, because a normal end-of-sweep
+  // handover and an ordinary step are both successes and only the first
+  // one is worth an operator's attention.
+  bool handover_performed = 3;
+
+  // expected_build is the build id the binary on disk reported when the
+  // marker was written, and the build the replacement process must find
+  // itself running before it may confirm anything. It is empty when no
+  // id could be read, and an empty expected_build is not a match: the
+  // replacement reports the step as unobserved rather than confirmed.
+  string expected_build = 4;
+
+  // marker_path is where the durable marker was written, for an operator
+  // who wants to read it.
+  string marker_path = 5;
+
+  // detail is operator-readable prose, never empty on an acceptance.
+  string detail = 6;
+
+  // error is set on every refusal and is never empty when accepted=false.
+  string error = 7;
 }
