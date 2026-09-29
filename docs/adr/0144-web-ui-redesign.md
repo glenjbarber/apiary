@@ -2,8 +2,52 @@
 
 ## Status
 
-Proposed. First checkpoint (this ADR plus its companion spec) awaiting
-review before any implementation begins.
+Accepted and implemented. All six sections (A-F) are in `main`, each
+delivered as its own commit. A is the design-system primitives
+(`internal/frontend/gauge.go`, `internal/frontend/health_card.go`,
+`web/templates/_gauge.html`, `web/templates/_health_card.html`, the
+six `--status-*` tokens and the Comb tree in
+`web/templates/layout.html`). B is the creation wizard
+(`web/templates/create_guided.html`), with `placementUnavailable`
+applied as `disabled` on the owner-node `<option>` itself, which is
+the gap this ADR was written to close. C is the dashboard
+`HealthCard` and per-node gauges (`web/templates/cluster_overview.html`,
+`internal/frontend/cluster_overview.go`). D is the image-kind labels
+and bridge-health chips (`web/templates/images.html`,
+`web/templates/networks.html`). E is the service-status and role chips
+(`web/templates/machine.html`, `web/templates/users.html`,
+`web/templates/apikeys.html`). F is the verdict chips
+(`web/templates/simulate.html`,
+`web/templates/assumption_register.html`,
+`web/templates/recovery_handbook.html`).
+
+Two points where the code settled differently from the design text
+below, each recorded in its own delivery commit rather than here.
+Section B's panes are not HTMX round-trips: the Placement pane
+computes the server's verdict for both workload kinds once and
+serializes it as `data-unavailable-vm` and `data-unavailable-jail`, so
+the browser copies a precomputed answer and never derives a rule of
+its own. Section C's per-node gauge is a CPU and Memory pair, not a
+trio, because `clusterNodeView` carries a boolean pool rollup rather
+than a per-node disk-capacity percentage to draw a third arc from.
+
+A third point, about the vocabulary itself. The design text below
+specifies seven states, and the tokens for six of them -
+`--status-ok`, `--status-warn`, `--status-critical`, `--status-unknown`,
+`--status-not-applicable` and `--status-stale` - are all defined in
+`web/templates/layout.html:35-37` and specified in
+`docs/web-ui-redesign.md:116-121`. The seventh, `contradictory`, has no
+token of its own. It is not missing: `internal/health` produces it
+(`StatusContradictory`, for a reachable managerd whose own report says
+its raft is down, and for a voter marked unreachable),
+`internal/frontend/health_card.go` maps it to the `contradictory` state,
+and `.badge.contradictory` renders in `web/templates/layout.html:216` -
+borrowing `--status-critical` rather than defining its own. So the state
+is delivered and visible; what is owed is the token, which is a naming
+debt rather than a behaviour one.
+
+The design sections below are unchanged; this status line is the only
+edit.
 
 ## Context
 
