@@ -45,6 +45,12 @@
   <main class="content" id="main-content">
   {{template "page_header" (pageHeader "Create workload" "One guided flow for virtual machines and FreeBSD jails. Each answer narrows what the next step can offer." "<a href='/vms'>Cancel</a>")}}
   <div id="create-error" class="banner-error" role="alert" aria-live="polite"></div>
+  {{/* A VM or jail create blocks for seconds: the guest's disk is
+       provisioned and the jail's rootfs is fetched. The bar is fixed to
+       the bottom of the viewport (layout.html's .op-progress), so it is
+       in view next to the submit button on the Review step without
+       pushing the wizard around, and it is named by applyKind() below. */}}
+  {{template "op_progress" .}}
 
   <div class="wizard">
     <ol class="wizard-rail" aria-label="Creation steps">
@@ -443,6 +449,27 @@
       }
     });
 
+    // A create is the longest request in this UI, and the one an
+    // operator is most likely to press twice while it is still running
+    // - a second press is a second VM, or a second jail with the same
+    // ID. The button is held down for exactly the life of the request.
+    //
+    // A refused create comes back from renderCreateError with status
+    // 200 and the reason in #create-error, so the status cannot tell a
+    // refusal from a success; the HX-Redirect header is what says the
+    // page is on its way to /vms or /jails, and that is the one case
+    // where the button stays down.
+    form.addEventListener('htmx:beforeRequest', function() {
+      if (!submitButton) return;
+      submitButton.disabled = true;
+    });
+    form.addEventListener('htmx:afterRequest', function(e) {
+      if (!submitButton) return;
+      var xhr = e.detail.xhr;
+      if (xhr && xhr.getResponseHeader('HX-Redirect')) return;
+      submitButton.disabled = false;
+    });
+
     // ---- Review pane ---------------------------------------------------
     //
     // A read-back of the form's own current values, not a second
@@ -529,6 +556,10 @@
       if (submitButton) {
         submitButton.textContent = vm ? 'Create Virtual Machine' : 'Create Jail';
       }
+      // What the progress bar names while this create is in flight. The
+      // form is the element that issues the POST, so this is where the
+      // bar reads it from - see layout.html's op_progress.
+      form.setAttribute('data-progress', vm ? 'Creating virtual machine' : 'Creating jail');
 
       // A VM has no persisted hostname field, so its convenience
       // Hostname input must not be submitted at all; a jail does store
