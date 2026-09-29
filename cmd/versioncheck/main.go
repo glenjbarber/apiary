@@ -27,6 +27,15 @@
 // else. Run it on each Comb; do not read "same build" for brood as
 // applying to drone.
 //
+// -advice is a second rendering of the same read, one state word and one
+// sentence per daemon, written for the end of a deploy: `make update`
+// restarts two of the four daemons and installs all four (ADR-0141), and
+// the state it leaves behind is the state this tool exists to detect. It
+// is a narrower REPORT of one reading, not a narrower question - the
+// services, the evidence, the verdicts and the exit status are the same
+// either way. See adviceState for why it is not a second outcome
+// vocabulary.
+//
 // Usage:
 //
 //	versioncheck [flags] comb comb ...
@@ -40,6 +49,7 @@ import (
 	"time"
 
 	"github.com/glenjbarber/apiary/internal/buildgate"
+	"github.com/glenjbarber/apiary/internal/buildinfo"
 )
 
 // services is the gate's own list, so the two cannot disagree about
@@ -112,11 +122,114 @@ func versioncheckOf(service buildgate.Service) verdict {
 	return unknown
 }
 
+// The -advice rendering: one line per daemon, for the tail of an update.
+//
+// `make update` installs all four daemons and restarts two of them, so
+// it ends with a question it cannot answer about itself: which of the
+// four is actually running the bytes that were just installed. The
+// Makefile used to answer it from what it knew it had done, which is
+// intent rather than evidence, and ADR-0145 records what that cost on
+// 2026-09-27 - four Combs where the closing message was true about
+// what had been done and said nothing about what was running.
+//
+// These two functions are the second rendering. They are deliberately
+// not a second table: adviceState is a switch over the gate's own Status
+// with one catch-all, and every state word is derived from a status
+// rather than from the report vocabulary above. A new status nobody has
+// given a word therefore lands on "unknown", which is the safe landing
+// and NOT the same landing as TookEffect.
+
+// adviceState is the one word -advice prints for one daemon.
+//
+// The catch-all is the only fallback and it is deliberately "unknown":
+// buildgate.Unobserved means no evidence, and a status this file has
+// no word for is no better established than that. Neither may render
+// as "current", which is the single claim in this rendering that an
+// operator could act on by doing nothing.
+func adviceState(service buildgate.Service) string {
+	switch service.Status {
+	case buildgate.TookEffect:
+		return "current"
+	case buildgate.DirtyIDMatch:
+		return "unverified"
+	case buildgate.RunningStale:
+		return "stale"
+	case buildgate.NotRunning:
+		return "not running"
+	}
+	return "unknown"
+}
+
+// adviceSentence is what the state word means, in one line, carrying the
+// evidence the word was made from.
+//
+// Every row that is not TookEffect names what it is not. A daemon whose
+// build could not be read is the case a deploy report is most likely to
+// get quietly wrong, because it sits underneath two rows that are
+// genuinely fine and reads as the absence of a problem: "no news" is
+// not "good news", and the sentence says so in the same words every
+// time rather than leaving it to the reader.
+func adviceSentence(service buildgate.Service) string {
+	switch service.Status {
+	case buildgate.TookEffect:
+		return "running the build on disk (" + orNone(service.Running) + ")"
+	case buildgate.DirtyIDMatch:
+		return "running " + orNone(service.Running) + " and the binary on disk says " + orNone(service.OnDisk) +
+			", and a -dirty id names the source and not the bytes, so this is agreement about the commit" +
+			" only; sha256 is what compares the artifacts"
+	case buildgate.RunningStale:
+		return "installed but not restarted - running " + orNone(service.Running) +
+			", on disk " + orNone(service.OnDisk)
+	case buildgate.NotRunning:
+		return noEvidence(service) + ", so there is no process here for a new build to have reached"
+	}
+	return noEvidence(service) + " - neither confirmed nor failed"
+}
+
+// noEvidence renders why a daemon could not be read, so an unobserved
+// row is never a bare "unknown" with nothing behind it: an absent
+// binary, an unreadable log and a pre-stamping build all want a
+// different thing done about them.
+//
+// The gate always sets a reason on these rows, and the empty case is
+// handled anyway because a hand-built Service is one line away and a
+// sentence that opens with a semicolon is the kind of thing that ships.
+func noEvidence(service buildgate.Service) string {
+	if service.Reason == buildgate.ReasonNone {
+		return "no evidence was collected for this daemon"
+	}
+	return string(service.Reason)
+}
+
+// orNone is buildgate's, unexported there, and needed here because an
+// advice line prints both ids: a blank between the words reads as a
+// value rather than as a missing one.
+func orNone(id string) string {
+	if id == "" {
+		return "no id read"
+	}
+	return id
+}
+
 func main() {
 	list := flag.Bool("list", false, "list the Combs this tool checks and exit")
 	quiet := flag.Bool("quiet", false, "only report Combs whose verdict is not 'same build'")
+	advice := flag.Bool("advice", false,
+		"print one line per daemon - its observed state and what that state means - instead of the "+
+			"full report. Same evidence, same services, same exit status; written for the end of a deploy")
+	// versioncheck is built and stamped like every other binary the
+	// Makefile produces, and check-stamped runs each of them with
+	// -version before an install is allowed. Registering the flag is what
+	// keeps this command from being the one binary in the tree that
+	// cannot say what it is.
+	buildinfo.RegisterVersionFlag(flag.CommandLine)
 	flag.Usage = usage
 	flag.Parse()
+
+	if buildinfo.VersionRequested() {
+		fmt.Print(buildinfo.Report("versioncheck"))
+		return
+	}
 
 	if *list {
 		for _, s := range services {
@@ -133,23 +246,58 @@ func main() {
 	rc := 0
 	now := time.Now().Format(time.RFC3339)
 	for _, comb := range combs {
-		fmt.Printf("%s  %s\n", now, comb)
 		// One read per Comb, covering all four daemons: the gate already
 		// has the whole set, and reading each daemon separately would be
 		// four chances to answer from four different instants.
 		report := buildgate.Confirm(comb, buildgate.DefaultPaths())
+		if *advice {
+			printAdvice(comb, now, report, *quiet)
+		} else {
+			printReport(now, comb, report, *quiet)
+		}
+		// The exit status is the tool's own long-standing rule and is
+		// NOT restated per rendering: 1 when any daemon is running a
+		// different build from the one on disk, 0 otherwise, including
+		// every "cannot tell". It is written here against the gate's
+		// status rather than against the report's verdict word so that
+		// -advice cannot quietly inherit a different meaning for the
+		// same number - and `make update` needs the honest one, reading
+		// 1 as "the report ran and found a mixed Comb", which on that
+		// target is the designed outcome and not a fault.
 		for _, s := range report.Services {
-			v := versioncheckOf(s)
-			if *quiet && v == agree {
-				continue
-			}
-			fmt.Printf("    %-10s %-38s %s\n", s.Name, string(v), detail(v, s))
-			if v == differ {
+			if s.Status == buildgate.RunningStale {
 				rc = 1
 			}
 		}
 	}
 	os.Exit(rc)
+}
+
+// printReport is the full form: a verdict from the report vocabulary, a
+// detail column, and the ids the verdict was made from.
+func printReport(now, comb string, report buildgate.Report, quiet bool) {
+	fmt.Printf("%s  %s\n", now, comb)
+	for _, s := range report.Services {
+		v := versioncheckOf(s)
+		if quiet && v == agree {
+			continue
+		}
+		fmt.Printf("    %-10s %-38s %s\n", s.Name, string(v), detail(v, s))
+	}
+}
+
+// printAdvice is the deploy form. Every daemon is printed, including the
+// ones that took effect: this rendering is the tail of a message that
+// says which daemons still need work, and a daemon with no line in it
+// reads as a daemon nobody looked at.
+func printAdvice(comb, now string, report buildgate.Report, quiet bool) {
+	fmt.Printf("versioncheck %s %s\n", comb, now)
+	for _, s := range report.Services {
+		if quiet && s.Status == buildgate.TookEffect {
+			continue
+		}
+		fmt.Printf("  %-10s %-11s %s\n", s.Name, adviceState(s), adviceSentence(s))
+	}
 }
 
 // detail adds the evidence for anything that is not a clean match, so
@@ -186,9 +334,20 @@ binary's -version output. Read-only: starts nothing, stops nothing.
 This checks the host it is run on. The Comb names are labels for the
 report, not remote targets: run it once per Comb.
 
+  -advice   one line per daemon instead of the full report: its observed
+            state, and what that state means. Same evidence, same services,
+            same exit status. This is the form 'make update' prints, where
+            "stale" is the work an operator still has to do and "unknown"
+            is no evidence at all - neither confirmed nor failed.
+  -quiet    with -advice, print only the daemons that are not current.
+  -list     the daemons this checks, and exit.
+  -version  what this binary is, like every other one in the tree.
+
 Exit status is 1 if any service is running a different build than the
 one on disk, 0 otherwise - including when the answer is unknown, so an
-inconclusive check never fails a deploy by accident.
+inconclusive check never fails a deploy by accident. In -advice mode
+that 1 is the report working, not the report failing: a daemon left on
+an older build is what 'make update' is designed to leave behind.
 
 %s
 `, os.Args[0])
