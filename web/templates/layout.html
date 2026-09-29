@@ -358,6 +358,22 @@
     .upload-progress progress { flex:1; max-width:20rem; height:1rem; }
     .upload-progress span { font-size:.85em; min-width:3em; }
     .upload-progress[hidden] { display:none; }
+    /* op_progress (the {{template "op_progress"}} block at the foot of
+       this file) is the same .upload-progress bar, reused rather than
+       duplicated, for an operation with no byte count to divide: a VM
+       or jail create, a delete, a migrate, a snapshot restore. Fixed
+       to the bottom of the viewport because the control that starts
+       one of these is rarely near the top of the page - the Delete
+       button is at the foot of a long detail page, Migrate is the last
+       column of a table. z-index 85 keeps it under the navigation
+       drawer (90) and the app-header (100). */
+    .op-progress {
+      position:fixed; left:50%; bottom:1.25rem; transform:translateX(-50%);
+      z-index:85; max-width:min(30rem, calc(100vw - 2rem)); margin:0;
+      padding:.5rem .75rem; background:var(--panel);
+      border:1px solid var(--line); border-radius:10px;
+      box-shadow:0 6px 20px rgba(0,0,0,.28);
+    }
     @media (max-width:900px) {
       .app-layout { grid-template-columns:minmax(0, 1fr); }
       .icon-button.sidebar-toggle { display:inline-grid; }
@@ -525,3 +541,77 @@
 {{end}}
 
 {{define "page_header"}}<div class="page-header"><div><h2>{{.Title}}</h2><div class="muted">{{.Subtitle}}</div></div>{{if .Extra}}<div class="page-header-extra">{{.Extra}}</div>{{end}}</div>{{end}}
+
+{{/*
+  op_progress: the one progress bar every long operation uses.
+
+  The ISO upload on images.html had this problem solved first - a
+  .upload-progress bar (styled above) driven by htmx's beforeRequest /
+  afterRequest pair. This is that same bar and that same pair, for
+  operations with no byte count to divide: creating a VM or a jail,
+  deleting one, migrating one, restoring a snapshot. The <progress>
+  element here carries no value attribute, so it is indeterminate. The
+  text names the thing being waited on; how much longer it will take is
+  not something the browser knows, and Apiary does not print a
+  percentage it cannot measure.
+
+  A page opts in by calling this template, and by putting
+  data-progress="<what is being waited on>" on the element that starts
+  the operation. Anything without that attribute is ignored - the 3s row
+  polls included - so a bar never appears for an operation that answers
+  in milliseconds, which would only flash.
+
+  The bar is cleared by afterRequest, which htmx fires on the
+  request's own element for a 4xx, a 5xx, a network error, an abort and
+  a timeout alike. A failed operation therefore leaves the operator
+  looking at the error and no bar. The listener is attached to that
+  element rather than only to body, because the row poll can replace a
+  button mid-request and a detached event never reaches body.
+*/}}
+{{define "op_progress"}}
+<div id="op-progress" class="upload-progress op-progress" role="status" aria-live="polite" hidden>
+  <progress max="100"></progress>
+  <span id="op-progress-label"></span>
+</div>
+<script>
+(function() {
+  var bar = document.getElementById('op-progress');
+  if (!bar) return;
+  var label = document.getElementById('op-progress-label');
+  var shownFor = null;
+
+  function show(el, text) {
+    shownFor = el;
+    label.textContent = text;
+    bar.hidden = false;
+    el.addEventListener('htmx:afterRequest', function() { hide(el); }, { once: true });
+  }
+  function hide(el) {
+    if (shownFor !== el) return;
+    shownFor = null;
+    bar.hidden = true;
+  }
+  function progressOf(el) {
+    return el.getAttribute ? el.getAttribute('data-progress') : null;
+  }
+
+  document.body.addEventListener('htmx:beforeRequest', function(e) {
+    var text = progressOf(e.target);
+    if (text) show(e.target, text);
+  });
+  document.body.addEventListener('htmx:afterRequest', function(e) { hide(e.target); });
+  // A whole-page form post - a snapshot restore - has no htmx request
+  // to hang events on. It is shown on the way out; the page that comes
+  // back starts with the bar hidden, so a refused restore leaves its
+  // own error on the page and no bar. A submit something else already
+  // refused (a cancelled confirm, the guided form's Enter handling, a
+  // field that failed validation) never left the page, and shows
+  // nothing.
+  document.body.addEventListener('submit', function(e) {
+    if (e.defaultPrevented) return;
+    var text = progressOf(e.target);
+    if (text) show(e.target, text);
+  });
+})();
+</script>
+{{end}}
