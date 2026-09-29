@@ -4230,8 +4230,26 @@ type PendingJoinRequest struct {
 	// is a field rather than an in-memory counter precisely so that
 	// "this PIN was reissued" is visible in the Colony's own history.
 	SecondPinReissues uint32 `protobuf:"varint,22,opt,name=second_pin_reissues,json=secondPinReissues,proto3" json:"second_pin_reissues,omitempty"`
-	unknownFields     protoimpl.UnknownFields
-	sizeCache         protoimpl.SizeCache
+	// accepted_introduction_code_sha256 is the SHA-256 digest of the
+	// first code, written when that code was accepted and cleared when
+	// the second PIN is spent.
+	//
+	// It exists because ADR-0147 Part 2 changed the poll. The first code
+	// is CLEARED on acceptance, which is right - a spent value is not one
+	// to leave in replicated state - but it left the joiner's later poll
+	// with nothing to be checked against, and the ADR's own revision adds
+	// the first code to GetJoinRequestStatus precisely so the
+	// request-id-guessing path is closed.
+	//
+	// A digest closes that path without reintroducing the value. It is
+	// one-way, so nothing here can be pasted into a form, and it lives
+	// only as long as the second PIN it protects: spent PIN and spent
+	// digest are cleared in the same log entry. An attacker who reaches
+	// the poll with a guessed request_id has a 64-bit id and a 6-digit
+	// code to be wrong about rather than a 64-bit id alone.
+	AcceptedIntroductionCodeSha256 string `protobuf:"bytes,23,opt,name=accepted_introduction_code_sha256,json=acceptedIntroductionCodeSha256,proto3" json:"accepted_introduction_code_sha256,omitempty"`
+	unknownFields                  protoimpl.UnknownFields
+	sizeCache                      protoimpl.SizeCache
 }
 
 func (x *PendingJoinRequest) Reset() {
@@ -4416,6 +4434,13 @@ func (x *PendingJoinRequest) GetSecondPinReissues() uint32 {
 		return x.SecondPinReissues
 	}
 	return 0
+}
+
+func (x *PendingJoinRequest) GetAcceptedIntroductionCodeSha256() string {
+	if x != nil {
+		return x.AcceptedIntroductionCodeSha256
+	}
+	return ""
 }
 
 // JoinApprovalAttestation is one recorded "I am authorizing this join"
@@ -5668,8 +5693,19 @@ func (x *SetTrustedPeerVoter) GetIsVoter() bool {
 // Refuses a node_id that is not pinned, so "remove this" cannot be a
 // silent no-op that an operator reads as "it is gone".
 type UnpinTrustedPeer struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	NodeId        string                 `protobuf:"bytes,1,opt,name=node_id,json=nodeId,proto3" json:"node_id,omitempty"`
+	state  protoimpl.MessageState `protogen:"open.v1"`
+	NodeId string                 `protobuf:"bytes,1,opt,name=node_id,json=nodeId,proto3" json:"node_id,omitempty"`
+	// reason is the operator's own account of why this certificate is
+	// being dropped, and it is replicated with the removal.
+	//
+	// A pin is a trust anchor somebody compared by hand; an incident
+	// review asking "who dropped this, and why" can only be answered
+	// from the log, and an empty reason is an answer of "someone, for
+	// no recorded reason". The terminal-state cleanup inside
+	// applyResolvePendingJoinRequest passes a fixed reason naming the
+	// request that settled, which is why this field is not required
+	// there but IS required on the manual RPC.
+	Reason        string `protobuf:"bytes,2,opt,name=reason,proto3" json:"reason,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -5707,6 +5743,13 @@ func (*UnpinTrustedPeer) Descriptor() ([]byte, []int) {
 func (x *UnpinTrustedPeer) GetNodeId() string {
 	if x != nil {
 		return x.NodeId
+	}
+	return ""
+}
+
+func (x *UnpinTrustedPeer) GetReason() string {
+	if x != nil {
+		return x.Reason
 	}
 	return ""
 }
@@ -7643,7 +7686,7 @@ const file_api_internalpb_state_proto_rawDesc = "" +
 	"\x13observed_on_node_id\x18\r \x01(\tR\x10observedOnNodeId\x12%\n" +
 	"\x0efailure_detail\x18\x0e \x01(\tR\rfailureDetail\x12-\n" +
 	"\x12quorum_unavailable\x18\x0f \x01(\bR\x11quorumUnavailable\x12A\n" +
-	"\bevidence\x18\x10 \x03(\v2%.apiary.internal.v1.MigrationEvidenceR\bevidence\"\xbf\b\n" +
+	"\bevidence\x18\x10 \x03(\v2%.apiary.internal.v1.MigrationEvidenceR\bevidence\"\x8a\t\n" +
 	"\x12PendingJoinRequest\x12\x1d\n" +
 	"\n" +
 	"request_id\x18\x01 \x01(\tR\trequestId\x12\x17\n" +
@@ -7671,7 +7714,8 @@ const file_api_internalpb_state_proto_rawDesc = "" +
 	"\x13first_code_attempts\x18\x13 \x01(\rR\x11firstCodeAttempts\x12.\n" +
 	"\x13second_pin_attempts\x18\x14 \x01(\rR\x11secondPinAttempts\x12:\n" +
 	"\x1asecond_pin_expires_at_unix\x18\x15 \x01(\x03R\x16secondPinExpiresAtUnix\x12.\n" +
-	"\x13second_pin_reissues\x18\x16 \x01(\rR\x11secondPinReissues\"b\n" +
+	"\x13second_pin_reissues\x18\x16 \x01(\rR\x11secondPinReissues\x12I\n" +
+	"!accepted_introduction_code_sha256\x18\x17 \x01(\tR\x1eacceptedIntroductionCodeSha256\"b\n" +
 	"\x17JoinApprovalAttestation\x12\x15\n" +
 	"\x06key_id\x18\x01 \x01(\tR\x05keyId\x12\x17\n" +
 	"\anode_id\x18\x02 \x01(\tR\x06nodeId\x12\x17\n" +
@@ -7750,9 +7794,10 @@ const file_api_internalpb_state_proto_rawDesc = "" +
 	"\x04peer\x18\x01 \x01(\v2\x1f.apiary.internal.v1.TrustedPeerR\x04peer\"I\n" +
 	"\x13SetTrustedPeerVoter\x12\x17\n" +
 	"\anode_id\x18\x01 \x01(\tR\x06nodeId\x12\x19\n" +
-	"\bis_voter\x18\x02 \x01(\bR\aisVoter\"+\n" +
+	"\bis_voter\x18\x02 \x01(\bR\aisVoter\"C\n" +
 	"\x10UnpinTrustedPeer\x12\x17\n" +
-	"\anode_id\x18\x01 \x01(\tR\x06nodeId\"\xab\x01\n" +
+	"\anode_id\x18\x01 \x01(\tR\x06nodeId\x12\x16\n" +
+	"\x06reason\x18\x02 \x01(\tR\x06reason\"\xab\x01\n" +
 	"\fRestartLease\x12\x19\n" +
 	"\blease_id\x18\x01 \x01(\x04R\aleaseId\x12\x18\n" +
 	"\aservice\x18\x02 \x01(\tR\aservice\x12$\n" +

@@ -1136,6 +1136,25 @@ message PendingJoinRequest {
   // is a field rather than an in-memory counter precisely so that
   // "this PIN was reissued" is visible in the Colony's own history.
   uint32 second_pin_reissues = 22;
+
+  // accepted_introduction_code_sha256 is the SHA-256 digest of the
+  // first code, written when that code was accepted and cleared when
+  // the second PIN is spent.
+  //
+  // It exists because ADR-0147 Part 2 changed the poll. The first code
+  // is CLEARED on acceptance, which is right - a spent value is not one
+  // to leave in replicated state - but it left the joiner's later poll
+  // with nothing to be checked against, and the ADR's own revision adds
+  // the first code to GetJoinRequestStatus precisely so the
+  // request-id-guessing path is closed.
+  //
+  // A digest closes that path without reintroducing the value. It is
+  // one-way, so nothing here can be pasted into a form, and it lives
+  // only as long as the second PIN it protects: spent PIN and spent
+  // digest are cleared in the same log entry. An attacker who reaches
+  // the poll with a guessed request_id has a 64-bit id and a 6-digit
+  // code to be wrong about rather than a 64-bit id alone.
+  string accepted_introduction_code_sha256 = 23;
 }
 
 // JoinApprovalAttestation is one recorded "I am authorizing this join"
@@ -1518,6 +1537,18 @@ message SetTrustedPeerVoter {
 // silent no-op that an operator reads as "it is gone".
 message UnpinTrustedPeer {
   string node_id = 1;
+
+  // reason is the operator's own account of why this certificate is
+  // being dropped, and it is replicated with the removal.
+  //
+  // A pin is a trust anchor somebody compared by hand; an incident
+  // review asking "who dropped this, and why" can only be answered
+  // from the log, and an empty reason is an answer of "someone, for
+  // no recorded reason". The terminal-state cleanup inside
+  // applyResolvePendingJoinRequest passes a fixed reason naming the
+  // request that settled, which is why this field is not required
+  // there but IS required on the manual RPC.
+  string reason = 2;
 }
 
 // RestartLease is a cluster-wide, Raft-committed exclusive reservation

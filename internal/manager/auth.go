@@ -272,6 +272,37 @@ var requiredRole = map[string]Role{
 	// address (a Viewer could otherwise use it as a reachability oracle).
 	"/apiary.rpc.v1.ManagerService/PreflightApproveJoinRequest": RoleAdmin,
 
+	// VerifyJoinIntroduction/ReissueJoinSecondPin (ADR-0147 Part 2) are
+	// the two Admin-side steps between a request being recorded and it
+	// being approvable, and they are Admin for the same reason
+	// ApproveJoinRequest is: VerifyJoinIntroduction's success is what
+	// pins the joiner's certificate into the replicated trust store, so
+	// a Viewer able to call it could choose which certificate this
+	// Colony trusts. ReissueJoinSecondPin re-arms a live authorization
+	// value and is capped at 2 for the same reason that cap exists.
+	//
+	// GetJoinRequestStatus is deliberately NOT here, and is exempted
+	// below with RequestJoinColony instead - the joiner has no Colony
+	// credential, and the PIN it releases is gated on the first code
+	// rather than on a credential it does not have.
+	"/apiary.rpc.v1.ManagerService/VerifyJoinIntroduction": RoleAdmin,
+	"/apiary.rpc.v1.ManagerService/ReissueJoinSecondPin":   RoleAdmin,
+
+	// PinPeerCertificate/UnpinPeerCertificate (ADR-0147 Part 4) are the
+	// replicated trust store's only writers, and they are Admin for the
+	// obvious reason: a pin is a standing trust anchor, and this is the
+	// one call that can add one without a join request behind it.
+	//
+	// This is also why the store is documented as a mechanism for
+	// honest operation and NOT as a security boundary. An Admin can
+	// call PinPeerCertificate directly, so a pin cannot be a
+	// substitute for the root-owned authorization entry, and nothing
+	// authenticates a caller by presenting one. Neither RPC can create
+	// or modify an authorization entry; that negative is ADR-0147
+	// Part 3's load-bearing one and no future RPC may break it.
+	"/apiary.rpc.v1.ManagerService/PinPeerCertificate":   RoleAdmin,
+	"/apiary.rpc.v1.ManagerService/UnpinPeerCertificate": RoleAdmin,
+
 	// PreflightRestartNodeService (ADR-0103) is read-only and makes no
 	// live dial to a caller-influenced address (only a local raft-
 	// internal state read) - Viewer-tier, matching

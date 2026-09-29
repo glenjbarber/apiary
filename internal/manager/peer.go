@@ -919,6 +919,56 @@ func (p *PeerReporter) PreflightApproveJoinRequest(ctx context.Context, addr str
 	return client.PreflightApproveJoinRequest(ctx, req)
 }
 
+// VerifyJoinIntroduction/ReissueJoinSecondPin forward on a
+// leader-hint rejection, mirroring ApproveJoinRequest above exactly
+// (ADR-0147 Part 2). addr is this node's own trusted,
+// internally-derived notion of who leads - never a caller-supplied
+// address - and the forward is AUTHENTICATED, carrying this node's own
+// -peer-api-key, because these are Admin operations on the operator's
+// own Colony and not the unauthenticated joiner path.
+//
+// The whole request travels, including the pasted first code and
+// fingerprints, so the leader checks exactly the values the operator
+// typed rather than a summary of them.
+func (p *PeerReporter) VerifyJoinIntroduction(ctx context.Context, addr string, req *rpcpb.VerifyJoinIntroductionRequest) (*rpcpb.VerifyJoinIntroductionResponse, error) {
+	conn, client, err := p.dial(addr)
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close()
+	return client.VerifyJoinIntroduction(ctx, req)
+}
+
+func (p *PeerReporter) ReissueJoinSecondPin(ctx context.Context, addr string, req *rpcpb.ReissueJoinSecondPinRequest) (*rpcpb.ReissueJoinSecondPinResponse, error) {
+	conn, client, err := p.dial(addr)
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close()
+	return client.ReissueJoinSecondPin(ctx, req)
+}
+
+// PinPeerCertificate/UnpinPeerCertificate forward on a leader-hint
+// rejection, same reasons and same authentication as the two above
+// (ADR-0147 Part 4's trust store).
+func (p *PeerReporter) PinPeerCertificate(ctx context.Context, addr string, req *rpcpb.PinPeerCertificateRequest) (*rpcpb.PinPeerCertificateResponse, error) {
+	conn, client, err := p.dial(addr)
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close()
+	return client.PinPeerCertificate(ctx, req)
+}
+
+func (p *PeerReporter) UnpinPeerCertificate(ctx context.Context, addr string, req *rpcpb.UnpinPeerCertificateRequest) (*rpcpb.UnpinPeerCertificateResponse, error) {
+	conn, client, err := p.dial(addr)
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close()
+	return client.UnpinPeerCertificate(ctx, req)
+}
+
 // OpenColonyJoinWindow/CloseColonyJoinWindow forward on a leader-hint
 // rejection, mirroring ApproveJoinRequest above exactly (ADR-0147
 // Part 4). addr is this node's own trusted, internally-derived notion
