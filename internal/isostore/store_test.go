@@ -85,6 +85,104 @@ func TestSave_RejectsPathSeparatorsInName(t *testing.T) {
 	}
 }
 
+func TestSave_RejectsUploadOverMaxSizeAndCleansUp(t *testing.T) {
+	dir := t.TempDir()
+	m := New(dir)
+	m.maxUploadSize = 8 // tiny cap so the test writes only a few bytes
+	data := "way too much data for the cap"
+
+	_, err := m.Save("test.iso", strings.NewReader(data), sha256Hex(data))
+	if err == nil {
+		t.Fatalf("Save() = nil error, want rejection for exceeding the max upload size")
+	}
+	if !strings.Contains(err.Error(), "exceeds maximum size") {
+		t.Errorf("Save() error = %q, want it to mention the size limit", err)
+	}
+	if _, exists, _ := m.Path("test.iso"); exists {
+		t.Errorf("Path() = exists, want an over-cap upload to not be kept")
+	}
+	entries, _ := os.ReadDir(dir)
+	for _, e := range entries {
+		if strings.HasPrefix(e.Name(), ".upload-") {
+			t.Errorf("temp file %q left behind after rejected upload", e.Name())
+		}
+	}
+}
+
+func TestSave_AllowsUploadAtExactlyMaxSize(t *testing.T) {
+	m := New(t.TempDir())
+	m.maxUploadSize = 4
+	data := "abcd"
+
+	info, err := m.Save("test.iso", strings.NewReader(data), sha256Hex(data))
+	if err != nil {
+		t.Fatalf("Save() error at exactly the cap: %v", err)
+	}
+	if info.SizeBytes != 4 {
+		t.Errorf("Save() SizeBytes = %d, want 4", info.SizeBytes)
+	}
+}
+
+func TestSave_RefusesWhenFreeSpaceAlreadyAtReserve(t *testing.T) {
+	m := New(t.TempDir())
+	m.freeSpace = func(string) (int64, error) { return minFreeSpaceReserveBytes, nil }
+
+	_, err := m.Save("test.iso", strings.NewReader("data"), sha256Hex("data"))
+	if err == nil {
+		t.Fatalf("Save() = nil error, want refusal when free space is at the reserve")
+	}
+	if !strings.Contains(err.Error(), "refusing upload") {
+		t.Errorf("Save() error = %q, want it to mention refusing the upload", err)
+	}
+}
+
+func TestSave_ProceedsWhenFreeSpaceComfortablyAboveReserve(t *testing.T) {
+	m := New(t.TempDir())
+	m.freeSpace = func(string) (int64, error) { return minFreeSpaceReserveBytes * 10, nil }
+	data := "fake iso contents"
+
+	if _, err := m.Save("test.iso", strings.NewReader(data), sha256Hex(data)); err != nil {
+		t.Fatalf("Save() error with ample free space: %v", err)
+	}
+}
+
+func TestSave_AbortsMidStreamWhenFreeSpaceDropsBelowReserve(t *testing.T) {
+	dir := t.TempDir()
+	m := New(dir)
+	m.freeSpaceCheckInterval = 4 // re-check every 4 bytes written, not 256MiB
+
+	calls := 0
+	m.freeSpace = func(string) (int64, error) {
+		calls++
+		if calls == 1 {
+			return minFreeSpaceReserveBytes * 10, nil // passes Save's initial check
+		}
+		return 0, nil // "disk filled up" by the time the first chunk lands
+	}
+
+	data := "twelve bytes"
+	_, err := m.Save("test.iso", strings.NewReader(data), sha256Hex(data))
+	if err == nil {
+		t.Fatalf("Save() = nil error, want abort once free space drops below reserve mid-stream")
+	}
+	if calls < 2 {
+		t.Errorf("diskFreeSpace called %d times, want at least 2 (initial + mid-stream)", calls)
+	}
+	if _, exists, _ := m.Path("test.iso"); exists {
+		t.Errorf("Path() = exists, want an aborted upload to not be kept")
+	}
+}
+
+func TestSave_UnsupportedFreeSpacePlatformProceedsAnyway(t *testing.T) {
+	m := New(t.TempDir())
+	m.freeSpace = func(string) (int64, error) { return 0, errUnsupportedSpace }
+	data := "fake iso contents"
+
+	if _, err := m.Save("test.iso", strings.NewReader(data), sha256Hex(data)); err != nil {
+		t.Fatalf("Save() error on a platform with no statfs support: %v", err)
+	}
+}
+
 func TestList_ReturnsSortedWithoutSidecarsOrTempFiles(t *testing.T) {
 	m := New(t.TempDir())
 	m.Save("b.iso", strings.NewReader("b"), sha256Hex("b"))
