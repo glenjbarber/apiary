@@ -270,3 +270,261 @@ func TestReportColumnsHoldForEveryVerdict(t *testing.T) {
 	}
 
 }
+
+// The -advice rendering: the narrow form `make update` prints, over the
+// same read and the same four services. What is testable here is the
+// half that is this command's own and would rot silently - the state
+// word for every status the gate can produce, the rule that no evidence
+// never renders as health, and the columns holding.
+
+// TestAdviceStateCoversEveryGateStatus is the exhaustiveness check for
+// the second rendering, and it is the same guard the verdict table above
+// has. A status added to the gate with no state word would fall through
+// adviceState's catch-all to "unknown", which reports a new answer as "I
+// could not tell" - a lie, and the same lie in the same direction, which
+// is why it is pinned in both places.
+func TestAdviceStateCoversEveryGateStatus(t *testing.T) {
+	cases := []struct {
+		service buildgate.Service
+		want    string
+	}{
+		{buildgate.Service{Status: buildgate.TookEffect}, "current"},
+		{buildgate.Service{Status: buildgate.DirtyIDMatch}, "unverified"},
+		{buildgate.Service{Status: buildgate.RunningStale}, "stale"},
+		{buildgate.Service{Status: buildgate.NotRunning}, "not running"},
+		{buildgate.Service{Status: buildgate.Unobserved, Reason: buildgate.ReasonBinaryPredatesVersionFlag}, "unknown"},
+		{buildgate.Service{Status: buildgate.Unobserved, Reason: buildgate.ReasonBinaryUnstamped}, "unknown"},
+		{buildgate.Service{Status: buildgate.Unobserved, Reason: buildgate.ReasonBinaryMissing}, "unknown"},
+		{buildgate.Service{Status: buildgate.Unobserved, Reason: buildgate.ReasonLogPredatesStamping}, "unknown"},
+		{buildgate.Service{Status: buildgate.Unobserved, Reason: buildgate.ReasonLogUnreadable}, "unknown"},
+		{buildgate.Service{Status: buildgate.Unobserved, Reason: buildgate.ReasonBinaryUnreadable}, "unknown"},
+		{buildgate.Service{Status: buildgate.Unobserved}, "unknown"},
+		{buildgate.Service{Status: buildgate.NotRunning, Reason: buildgate.ReasonLogMissing}, "not running"},
+		{buildgate.Service{Status: buildgate.DirtyIDMatch, Reason: buildgate.ReasonDirtyBuild}, "unverified"},
+	}
+	for _, c := range cases {
+		if got := adviceState(c.service); got != c.want {
+			t.Errorf("adviceState(%+v) = %q, want %q", c.service, got, c.want)
+		}
+	}
+
+	// Every status and every reason the gate can produce has to appear
+	// above, or a new one is absorbed by the catch-all with nothing to
+	// notice.
+	seenStatus := map[buildgate.Status]bool{}
+	seenReason := map[buildgate.Reason]bool{}
+	for _, c := range cases {
+		seenStatus[c.service.Status] = true
+		seenReason[c.service.Reason] = true
+	}
+	for _, status := range []buildgate.Status{
+		buildgate.TookEffect, buildgate.DirtyIDMatch, buildgate.RunningStale,
+		buildgate.Unobserved, buildgate.NotRunning,
+	} {
+		if !seenStatus[status] {
+			t.Errorf("status %q has no state word, so it renders as whatever the catch-all says", status)
+		}
+	}
+	for _, reason := range []buildgate.Reason{
+		buildgate.ReasonNone, buildgate.ReasonDirtyBuild, buildgate.ReasonLogMissing,
+		buildgate.ReasonLogUnreadable, buildgate.ReasonLogPredatesStamping,
+		buildgate.ReasonBinaryMissing, buildgate.ReasonBinaryUnreadable,
+		buildgate.ReasonBinaryPredatesVersionFlag, buildgate.ReasonBinaryUnstamped,
+	} {
+		if !seenReason[reason] {
+			t.Errorf("reason %q is not covered by the state table, so its rendering is unpinned", reason)
+		}
+	}
+}
+
+// TestOnlyTookEffectIsCurrent is the one claim in the advice rendering
+// an operator can act on by doing nothing, so it is the one that must
+// have exactly one source. Unobserved in particular is the status this
+// project keeps insisting is neither health nor failure, and a report
+// that put it in the confirmed column would undo that at the one moment
+// somebody is reading a deploy's output.
+func TestOnlyTookEffectIsCurrent(t *testing.T) {
+	for _, status := range []buildgate.Status{
+		buildgate.DirtyIDMatch, buildgate.RunningStale, buildgate.NotRunning, buildgate.Unobserved,
+	} {
+		service := buildgate.Service{Status: status, Reason: buildgate.ReasonLogMissing}
+		if got := adviceState(service); got == "current" {
+			t.Errorf("status %q renders as %q; only TookEffect may", status, got)
+		}
+	}
+	if got := adviceState(buildgate.Service{Status: buildgate.TookEffect}); got != "current" {
+		t.Errorf("TookEffect renders as %q, want %q", got, "current")
+	}
+}
+
+// TestAdviceStatesAreDistinct guards two state words collapsing into one
+// string, which would make the report say the same thing about two
+// different states.
+func TestAdviceStatesAreDistinct(t *testing.T) {
+	all := map[string]bool{}
+	for _, s := range []buildgate.Status{
+		buildgate.TookEffect, buildgate.DirtyIDMatch, buildgate.RunningStale,
+		buildgate.NotRunning, buildgate.Unobserved,
+	} {
+		word := adviceState(buildgate.Service{Status: s})
+		if all[word] {
+			t.Errorf("two statuses render as %q", word)
+		}
+		all[word] = true
+		if word == "" {
+			t.Error("a state word is the empty string, which renders as a blank column")
+		}
+	}
+}
+
+// TestNoEvidenceIsNeverReportedAsHealthyOrFailed is the contract from the
+// other end: not only does an unobserved daemon get a state word that is
+// not "current", the sentence beside it says in words that nothing was
+// established. Silence in a deploy report reads as good news precisely
+// because the two daemons above it took the new build, so the sentence
+// has to make the gap explicit rather than leave it to the reader.
+func TestNoEvidenceIsNeverReportedAsHealthyOrFailed(t *testing.T) {
+	for _, reason := range []buildgate.Reason{
+		buildgate.ReasonNone, buildgate.ReasonLogMissing, buildgate.ReasonLogUnreadable,
+		buildgate.ReasonLogPredatesStamping, buildgate.ReasonBinaryMissing,
+		buildgate.ReasonBinaryUnreadable, buildgate.ReasonBinaryPredatesVersionFlag,
+		buildgate.ReasonBinaryUnstamped,
+	} {
+		service := buildgate.Service{
+			Name: "raftd", Status: buildgate.Unobserved, Reason: reason,
+		}
+		sentence := adviceSentence(service)
+		if !strings.Contains(sentence, "neither confirmed nor failed") {
+			t.Errorf("unobserved (%s) renders as %q, which does not say what no evidence means", reason, sentence)
+		}
+		if strings.Contains(sentence, "running the build on disk") {
+			t.Errorf("unobserved (%s) renders as %q, which claims the daemon is on the disk build", reason, sentence)
+		}
+		// The reason is what makes the row actionable - an absent binary
+		// and an unreadable log want opposite things done - so it travels
+		// with the row rather than being left in the gate.
+		if reason != buildgate.ReasonNone && !strings.Contains(sentence, string(reason)) {
+			t.Errorf("unobserved (%s) renders as %q, which drops the reason the operator needs", reason, sentence)
+		}
+	}
+	// A hand-built Service with no reason must not render a sentence that
+	// opens with a semicolon; the gate always sets one, and this is the
+	// line that keeps a hand-built one from shipping that way.
+	if s := adviceSentence(buildgate.Service{Status: buildgate.Unobserved}); !strings.Contains(s, "no evidence") {
+		t.Errorf("an unobserved row with no reason renders as %q, want the fallback spelled out", s)
+	}
+}
+
+// TestNotRunningIsNeitherCurrentNorStale: a daemon with no process is not
+// on the new build, and it is also not running the old one. Collapsing
+// it into "stale" would send an operator to force-restart a Comb whose
+// raftd is simply down, which is a different act with a different blast
+// radius.
+func TestNotRunningIsNeitherCurrentNorStale(t *testing.T) {
+	service := buildgate.Service{
+		Name: "raftd", Status: buildgate.NotRunning, Reason: buildgate.ReasonLogMissing,
+		OnDisk: "107fdf6b414a",
+	}
+	if got := adviceState(service); got != "not running" {
+		t.Errorf("adviceState() = %q, want %q", got, "not running")
+	}
+	sentence := adviceSentence(service)
+	for _, want := range []string{"no process", string(buildgate.ReasonLogMissing)} {
+		if !strings.Contains(sentence, want) {
+			t.Errorf("adviceSentence() = %q, want it to mention %q", sentence, want)
+		}
+	}
+	if strings.Contains(sentence, "installed but not restarted") {
+		t.Errorf("adviceSentence() = %q, which describes a daemon that is not running at all", sentence)
+	}
+}
+
+// TestAdviceCarriesTheIdsTheVerdictWasMadeFrom pins the one thing a
+// reader cannot reconstruct for themselves. "stale" says that two builds
+// disagree; which two is the whole content of the report, and it is read
+// once, in Confirm, so it is printed from the Service rather than read
+// again.
+func TestAdviceCarriesTheIdsTheVerdictWasMadeFrom(t *testing.T) {
+	service := buildgate.Service{
+		Name: "managerd", Status: buildgate.RunningStale,
+		Running: "a9879963600c", OnDisk: "107fdf6b414a",
+	}
+	sentence := adviceSentence(service)
+	for _, want := range []string{service.Running, service.OnDisk, "installed but not restarted"} {
+		if !strings.Contains(sentence, want) {
+			t.Errorf("adviceSentence() = %q, want it to mention %q", sentence, want)
+		}
+	}
+}
+
+// TestAdviceDirtyRowNamesTheByteGap: a -dirty pair is agreement about
+// the commit and nothing else, and the row has to say so. A row that
+// merely read "unverified" without the reason would be a different
+// string rather than a more honest answer.
+func TestAdviceDirtyRowNamesTheByteGap(t *testing.T) {
+	service := buildgate.Service{
+		Name: "frontend", Status: buildgate.DirtyIDMatch,
+		Running: "9c43262d358a-dirty", OnDisk: "9c43262d358a-dirty",
+	}
+	for _, want := range []string{"dirty", "sha256", service.Running, service.OnDisk} {
+		if !strings.Contains(adviceSentence(service), want) {
+			t.Errorf("adviceSentence() = %q, want it to mention %q", adviceSentence(service), want)
+		}
+	}
+}
+
+// TestAdviceColumnsHoldForEveryState is the row format, which is the
+// part of a report an operator skims rather than parses. Every state word
+// has to leave the sentence at the same offset, including "not running",
+// which is exactly as wide as the column - a word one over would push
+// the whole report's third column out by one and make the two blocks
+// this file prints look like different tools.
+func TestAdviceColumnsHoldForEveryState(t *testing.T) {
+	states := map[buildgate.Status]bool{}
+	for _, s := range []buildgate.Status{
+		buildgate.TookEffect, buildgate.DirtyIDMatch, buildgate.RunningStale,
+		buildgate.NotRunning, buildgate.Unobserved,
+	} {
+		states[s] = true
+	}
+	for status := range states {
+		service := buildgate.Service{Name: "restshimd", Status: status}
+		row := fmt.Sprintf("  %-10s %-11s %s", service.Name, adviceState(service), adviceSentence(service))
+		if want := "  restshimd  "; !strings.HasPrefix(row, want) {
+			t.Errorf("row = %q, want it to start with a two-space indent and a 10-wide name column", row)
+		}
+		if at := strings.Index(row, adviceSentence(service)); at != 25 {
+			t.Errorf("row = %q, sentence starts at %d, want 25 for every state", row, at)
+		}
+	}
+	// The widest state word fills its column exactly rather than
+	// overflowing it, which is asserted so that a longer word added later
+	// cannot quietly break the alignment the line above just checked.
+	if got := adviceState(buildgate.Service{Status: buildgate.NotRunning}); len(got) != 11 {
+		t.Errorf("the longest state word is %d wide (%q), so the 11-wide column this test assumes is wrong", len(got), got)
+	}
+}
+
+// TestTheTwoRenderingsAgreeOnWhatNeedsWork is the anti-drift guard
+// between the two reports this command prints. The full report's verdict
+// column and the advice form's state word are separate switches over the
+// same Status, and the exit status - which `make update` reads as "the
+// report ran" - is keyed on the Status a third time. Nothing stops the
+// three from disagreeing except this.
+func TestTheTwoRenderingsAgreeOnWhatNeedsWork(t *testing.T) {
+	for _, status := range []buildgate.Status{
+		buildgate.TookEffect, buildgate.DirtyIDMatch, buildgate.RunningStale,
+		buildgate.NotRunning, buildgate.Unobserved,
+	} {
+		service := buildgate.Service{Status: status}
+		stale := adviceState(service) == "stale"
+		if differ := versioncheckOf(service) == differ; stale != differ {
+			t.Errorf("status %q: -advice says stale=%v, the report says DIFFERENT BUILD=%v", status, stale, differ)
+		}
+		// TookEffect is the only status the exit status counts, and the
+		// only one a gate Confirms().
+		if confirms := service.Status.Confirms(); (adviceState(service) == "current") != confirms {
+			t.Errorf("status %q: -advice says current=%v, the gate confirms=%v", status, adviceState(service) == "current", confirms)
+		}
+	}
+}
