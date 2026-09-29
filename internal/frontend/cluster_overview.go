@@ -143,7 +143,21 @@ type clusterNodeView struct {
 	// CauseBadgeClass/CauseBadgeLabel render CauseState. They are carried
 	// on the view rather than chosen in the template so the overview card
 	// and the evidence page cannot disagree about which state is green -
-	// combCauseBadge stays the single authority.
+	// combCauseBadge stays the single authority for CauseBadgeClass and
+	// for every OTHER state's label.
+	//
+	// CauseBadgeLabel is the one exception, and only on this overview
+	// card: when CauseState is the fresh, non-stale combCauseObservedHealthy
+	// AND HealthStatus is also healthy, combCauseBadge's own "observed
+	// healthy" is overridden to "evidence current" here (see
+	// clusterNodeEvidence). Both readings are the SAME real finding -
+	// the state is unchanged, still combCauseObservedHealthy, still green
+	// - this only reworks how that one finding reads when it would
+	// otherwise print right under a badge that already says "healthy" in
+	// the same word. Every other state (stale success, never observed,
+	// observed failed, not applicable) keeps combCauseBadge's own label
+	// unchanged, because each of those is real information HealthStatus's
+	// badge does not carry on its own.
 	CauseBadgeClass string
 	CauseBadgeLabel string
 
@@ -376,6 +390,9 @@ func (s *Server) clusterNodeEvidence(ctx context.Context, nodeID, localNodeID st
 	var causeStale bool
 	node.Causes, node.CauseState, node.CauseHeadline, causeStale = combCauses(nodeID, localNodeID, anchor, observedHostStats, hostStatsErr, result.Observations, index, now)
 	node.CauseBadgeClass, node.CauseBadgeLabel = combCauseBadge(node.CauseState, causeStale)
+	if node.CauseState == combCauseObservedHealthy && !causeStale && node.HealthStatus == health.StatusHealthy {
+		node.CauseBadgeLabel = "evidence current"
+	}
 
 	// Stamp the conservative single-Comb verdict now, so this row is never
 	// left with an empty badge class. The overview page overwrites it with

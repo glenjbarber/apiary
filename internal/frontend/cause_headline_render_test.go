@@ -14,7 +14,7 @@ import (
 // This file covers the per-Comb cause line on the command-center node
 // status card - the line under a node's badge row that reads
 //
-//	observed healthy   reconciler_last_tick: the last reconcile tick succeeded   full evidence
+//	evidence current   reconciler_last_tick: the last reconcile tick succeeded   full evidence
 //
 // The property under test is that the VERDICT is spoken exactly once on
 // that line. The verdict and the cause are different layers with
@@ -23,6 +23,14 @@ import (
 // the headline restated the badge, every Comb rendered its verdict twice
 // - "observed healthy observed healthy" - which reads as two findings
 // and is one.
+//
+// Separately, when this cause badge would ALSO restate the card's own
+// HealthStatus badge one row up - both fresh, non-stale, and both
+// spelling "healthy" - clusterNodeEvidence relabels this one badge to
+// "evidence current" instead of combCauseBadge's own "observed healthy".
+// Same state, same green, same finding - only the word choice changes,
+// specifically to stop a healthy Comb's card from printing "healthy"
+// twice in two different rows for what reads as the same reason.
 
 // nodeCauseLine returns the visible text of one node's cause line, with
 // tags stripped and runs of whitespace collapsed, so an assertion is
@@ -110,7 +118,8 @@ func stripTags(s string) string {
 // with the rest of the Colony's FSM state digest (ADR-0143). All four of
 // those are separate, honest signals and every one of them must survive
 // the fix; what must not happen is the cause verdict being spelled out
-// twice on the same line.
+// twice on the same line, or the cause badge restating "healthy" a
+// second time right under the badge row that already says it.
 func TestNodeStatusCauseLine_SpeaksItsVerdictOnce(t *testing.T) {
 	now := time.Now()
 	const digest = "aaaa"
@@ -162,14 +171,18 @@ func TestNodeStatusCauseLine_SpeaksItsVerdictOnce(t *testing.T) {
 	}
 
 	got := nodeCauseLine(t, body, node)
-	want := "observed healthy reconciler_last_tick: the last reconcile tick succeeded full evidence"
+	want := "evidence current reconciler_last_tick: the last reconcile tick succeeded full evidence"
 	if got != want {
 		t.Errorf("cause line for a healthy Comb whose tick succeeded:\n got: %q\nwant: %q", got, want)
 	}
-	// Belt and braces, and the assertion that names the defect: the
-	// verdict must appear once on the line, not twice.
-	if n := strings.Count(got, "observed healthy"); n != 1 {
-		t.Errorf("cause line states its verdict %d times, want 1: %q", n, got)
+	// Belt and braces, and the assertion that names the defect this test
+	// guards against: the cause line must never say "healthy" itself when
+	// the badge row one line up already said it - that word appearing
+	// twice for the same Comb is exactly the duplication this relabeling
+	// exists to avoid, even though both rows would be equally correct on
+	// their own.
+	if strings.Contains(got, "healthy") {
+		t.Errorf("cause line restates \"healthy\" from the badge row above it: %q", got)
 	}
 }
 
