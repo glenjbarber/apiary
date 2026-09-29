@@ -150,7 +150,17 @@ func (s *Server) gatherVoterReachability(ctx context.Context, statusResp *rpcpb.
 // emits one cluster-scoped Unknown evaluation citing it - never a
 // silent empty list (an empty list must only ever mean "no protected
 // resources exist," never "the fetch failed").
-func (s *Server) gatherCellRecoverability(ctx context.Context, localNodeID string, r *http.Request) []invariant.Evaluation {
+//
+// syncByID, when non-nil, supplies each configured replica node's own
+// live HAST observation for a resource (the sync half of the
+// conjunction), gathered once by the caller via
+// gatherHASTInvariants. It is an optional input precisely so a caller
+// that has not gathered it renders the invariant exactly as it always
+// has - capability half only, sync half Unknown - rather than gaining a
+// second, separately-bounded fan-out of the identical RPCs here. A
+// resource with no entry in the map is not dropped and not upgraded:
+// the zero observation is silence, and silence is Unknown.
+func (s *Server) gatherCellRecoverability(ctx context.Context, localNodeID string, r *http.Request, syncByID map[string]invariant.HASTObservation) []invariant.Evaluation {
 	vms, vmErr := s.currentVMs(r, "id", "asc")
 	jails, jailErr := s.currentJails(r)
 	if vmErr != "" || jailErr != "" {
@@ -171,14 +181,25 @@ func (s *Server) gatherCellRecoverability(ctx context.Context, localNodeID strin
 		if vm.ReplicaNodeID == "" {
 			continue
 		}
-		facts = append(facts, invariant.ResourceFact{ID: vm.ID, Name: vm.Name, Kind: "vm", ReplicaNodeID: vm.ReplicaNodeID})
+		// Keyed by the HAST resource name, the same "vm-"+id form
+		// GetLocalHASTResourceStatus matches strictly on, so a
+		// mis-keyed observation is a missing key (silence, hence
+		// Unknown) rather than a wrong node's evidence attached to
+		// this resource.
+		facts = append(facts, invariant.ResourceFact{
+			ID: vm.ID, Name: vm.Name, Kind: "vm", ReplicaNodeID: vm.ReplicaNodeID,
+			ReplicaSync: syncByID["vm-"+vm.ID],
+		})
 		replicaNodes[vm.ReplicaNodeID] = struct{}{}
 	}
 	for _, j := range jails {
 		if j.ReplicaNodeID == "" {
 			continue
 		}
-		facts = append(facts, invariant.ResourceFact{ID: j.ID, Name: j.Name, Kind: "jail", ReplicaNodeID: j.ReplicaNodeID})
+		facts = append(facts, invariant.ResourceFact{
+			ID: j.ID, Name: j.Name, Kind: "jail", ReplicaNodeID: j.ReplicaNodeID,
+			ReplicaSync: syncByID["jail-"+j.ID],
+		})
 	}
 
 	// Bounded concurrent HostStats fan-out to each distinct VM
@@ -385,26 +406,39 @@ func (s *Server) handleInvariantsPage(w http.ResponseWriter, r *http.Request) {
 	vms, vmsErr := s.currentVMs(r, "id", "asc")
 	jails, jailsErr := s.currentJails(r)
 
-	var resourceIDs []string
-	if vmsErr == "" {
-		for _, vm := range vms {
-			if vm.ReplicaNodeID != "" {
-				resourceIDs = append(resourceIDs, vm.ID)
-			}
-		}
+	// The two HAST invariants read the same two ends of the same
+	// resources, so they are gathered in one bounded pass and
+	// evaluated from one snapshot. Before this was wired, the page
+	// named every replica-backed resource and called
+	// EvaluateHASTDualPrimary with no observations at all, which could
+	// only ever return Unknown with the reason "nobody asked anybody" -
+	// a fact about this codebase rather than about the colony. ADR-0119
+	// made the asking possible; the page now does it.
+	//
+	// gatherHASTInvariants never returns an error for an individual
+	// resource: a node that did not answer, or was never asked, is
+	// recorded as not observed inside the evaluations. The only error it
+	// can return is that the fan-out could not be set up at all (no
+	// local node identity to tell a local read from a peer one), and
+	// that must not blank the page: the fallback below names every
+	// replica-backed resource Unknown, with the true reason, instead.
+	hastResources := hastResourcesFromVMsJails(vms, vmsErr, jails, jailsErr)
+	dualPrimary, _, hastFacts, hastErr := s.gatherHASTInvariants(r.Context(), hastResources, localNodeID)
+	if hastErr != nil {
+		dualPrimary = invariant.EvaluateHASTDualPrimary(hastResourceIDs(hastResources))
 	}
-	if jailsErr == "" {
-		for _, j := range jails {
-			if j.ReplicaNodeID != "" {
-				resourceIDs = append(resourceIDs, j.ID)
-			}
-		}
-	}
-	for _, e := range invariant.EvaluateHASTDualPrimary(resourceIDs) {
+	for _, e := range dualPrimary {
 		live = append(live, fromInvariantEvaluation(e))
 	}
 
-	for _, e := range s.gatherCellRecoverability(r.Context(), localNodeID, r) {
+	// The same gathered facts supply cell-recoverability's sync half, so
+	// one fan-out serves both invariants instead of two asking the same
+	// nodes the same questions. The recoverability evaluations
+	// gatherHASTInvariants also returns are deliberately not used: they
+	// carry no DestinationCapable half (capability is a HostStats
+	// question, not a HAST one), so they can only ever resolve Unknown,
+	// where gathering that half too can reach True.
+	for _, e := range s.gatherCellRecoverability(r.Context(), localNodeID, r, hastSyncByID(hastFacts)) {
 		live = append(live, fromInvariantEvaluation(e))
 	}
 

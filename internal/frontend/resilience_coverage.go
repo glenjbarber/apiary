@@ -237,7 +237,10 @@ func (s *Server) handleCoveragePage(w http.ResponseWriter, r *http.Request) {
 		scenarios = append(scenarios, coverage.ClassifyNetworkConnectivity(e))
 	}
 
-	for _, e := range s.gatherCellRecoverability(r.Context(), localNodeID, r) {
+	// nil sync evidence: the Coverage Map has not gathered the HAST
+	// sync half, so this invariant's capability half stands alone and
+	// its sync half stays Unknown rather than being paid for twice.
+	for _, e := range s.gatherCellRecoverability(r.Context(), localNodeID, r, nil) {
 		scenarios = append(scenarios, coverage.ClassifyCellRecoverability(e))
 	}
 

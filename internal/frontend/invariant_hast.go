@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"sort"
 	"sync"
+	"time"
 
 	rpcpb "github.com/glenjbarber/apiary/api/rpc"
 	"github.com/glenjbarber/apiary/internal/invariant"
@@ -36,9 +37,20 @@ import (
 // replica_freshness.go rather than redeclared: both files dial the same
 // RPC, and two identical interfaces would be two contracts to keep in
 // step for no reason.
-var hastGatherOverallTimeout = nodeContextOverallTimeout
-
+//
+// The overall budget is read through a function rather than captured in
+// a var at init: nodeContextOverallTimeout is a var precisely so a
+// caller can bound the whole page (recovery_handbook_test.go,
+// invariants_test.go), and a snapshot taken once at package init would
+// silently ignore that bound and leave the HAST fan-out running at the
+// production 10s while the rest of the page runs at 50ms. The HAST
+// gather must not be the one gather on the page that escapes the page's
+// own deadline.
 const hastGatherLimit = nodeContextLimit
+
+// hastGatherOverallTimeout is this fan-out's share of the page's
+// overall node-context budget.
+func hastGatherOverallTimeout() time.Duration { return nodeContextOverallTimeout }
 
 // hastResource is one replica-backed resource to ask about, with the
 // two configured ends named exactly as raft state records them.
@@ -73,7 +85,7 @@ func (s *Server) gatherHASTResource(ctx context.Context, res hastResource, local
 		{res.ReplicaNodeID, &spec.Replica},
 	}
 
-	overallCtx, cancel := context.WithTimeout(ctx, hastGatherOverallTimeout)
+	overallCtx, cancel := context.WithTimeout(ctx, hastGatherOverallTimeout())
 	defer cancel()
 
 	var wg sync.WaitGroup
@@ -206,7 +218,7 @@ func (s *Server) gatherHASTInvariants(ctx context.Context, resources []hastResou
 		truncated = true
 	}
 
-	overallCtx, cancel := context.WithTimeout(ctx, hastGatherOverallTimeout)
+	overallCtx, cancel := context.WithTimeout(ctx, hastGatherOverallTimeout())
 	defer cancel()
 
 	specs := make([]invariant.HASTPrimarySpec, len(sorted))
@@ -253,4 +265,79 @@ func (s *Server) gatherHASTInvariants(ctx context.Context, resources []hastResou
 	dualPrimary := invariant.EvaluateHASTDualPrimary(unobserved, specs...)
 	recoverability := invariant.EvaluateCellRecoverability(facts)
 	return dualPrimary, recoverability, facts, nil
+}
+
+// hastResourcesFromVMsJails turns the raft-replicated VM/jail metadata
+// into the replica-backed resource list gatherHASTInvariants asks about.
+//
+// It is the structural half only: ReplicaNodeID decides whether a
+// resource is in scope at all (a resource with no replica has no HAST
+// pair and is not this invariant's business), and NodeID names the end
+// believed to hold the writable role. Neither is evidence - both are
+// what the Colony was told, not what any node's hastd currently says.
+// The evidence half is what askLocalHASTStatus goes and fetches.
+//
+// A list that could not be fetched contributes no resources at all,
+// rather than contributing the resources it might have: a VM list this
+// call never received is not an empty VM list, and treating it as one
+// would let a fetch failure look like a colony with nothing to check.
+func hastResourcesFromVMsJails(vms []vmView, vmsErr string, jails []jailView, jailsErr string) []hastResource {
+	var resources []hastResource
+	if vmsErr == "" {
+		for _, vm := range vms {
+			if vm.ReplicaNodeID == "" {
+				continue
+			}
+			resources = append(resources, hastResource{
+				// The RPC's resource name is the kind prefix plus the
+				// bare id (internal/manager's hastResourceName), not
+				// the bare id, and it is matched strictly.
+				ID: "vm-" + vm.ID, Name: vm.Name, Kind: "vm",
+				OwnerNodeID: vm.NodeID, ReplicaNodeID: vm.ReplicaNodeID,
+			})
+		}
+	}
+	if jailsErr == "" {
+		for _, j := range jails {
+			if j.ReplicaNodeID == "" {
+				continue
+			}
+			resources = append(resources, hastResource{
+				ID: "jail-" + j.ID, Name: j.Name, Kind: "jail",
+				OwnerNodeID: j.NodeID, ReplicaNodeID: j.ReplicaNodeID,
+			})
+		}
+	}
+	return resources
+}
+
+// hastResourceIDs names the same resources for the no-evidence path, so
+// a caller that cannot gather at all still reports one Unknown per
+// replica-backed resource rather than quietly showing nothing.
+func hastResourceIDs(resources []hastResource) []string {
+	ids := make([]string, 0, len(resources))
+	for _, res := range resources {
+		ids = append(ids, res.ID)
+	}
+	return ids
+}
+
+// hastSyncByID indexes the facts gatherHASTInvariants returned by
+// resource, so cell-recoverability's sync half can be filled in from the
+// evidence the HAST gather already fetched rather than from a second
+// fan-out of the identical RPCs to the identical nodes.
+//
+// The map is keyed by the same resource name those facts carry, and a
+// missing key is not an error: it means this resource was past the
+// fan-out bound, and the zero HASTObservation it stands for is silence,
+// which is what that resource's recoverability verdict must see.
+func hastSyncByID(facts []invariant.ResourceFact) map[string]invariant.HASTObservation {
+	if len(facts) == 0 {
+		return nil
+	}
+	byID := make(map[string]invariant.HASTObservation, len(facts))
+	for _, f := range facts {
+		byID[f.ID] = f.ReplicaSync
+	}
+	return byID
 }
