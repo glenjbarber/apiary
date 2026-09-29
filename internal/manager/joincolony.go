@@ -523,13 +523,15 @@ func (s *Server) RequestJoinColony(ctx context.Context, req *rpcpb.RequestJoinCo
 		},
 	}
 	result, appErr, leaderHint := s.applyJoinRequestCommand(ctx, cmd, req.GetTimeoutMs())
+	var ferr error
 	if leaderHint != "" && s.peers != nil {
-		if fwd, ferr := s.peers.RequestJoinColony(ctx, s.peerManagerdAddr(leaderHint), req); ferr == nil {
+		var fwd *rpcpb.RequestJoinColonyResponse
+		if fwd, ferr = s.peers.RequestJoinColony(ctx, s.peerManagerdAddr(leaderHint), req); ferr == nil {
 			return fwd, nil
 		}
 	}
 	if appErr != "" {
-		return &rpcpb.RequestJoinColonyResponse{Error: appErr, LeaderHint: leaderHint}, nil
+		return &rpcpb.RequestJoinColonyResponse{Error: augmentForwardError(appErr, leaderHint, ferr), LeaderHint: leaderHint}, nil
 	}
 	return &rpcpb.RequestJoinColonyResponse{RequestId: result.GetRequestId(), Code: result.GetCode()}, nil
 }
@@ -661,11 +663,23 @@ func (s *Server) ApproveJoinRequest(ctx context.Context, req *rpcpb.ApproveJoinR
 	// existing post-AddVoter-failure forward further down stays as a
 	// fallback for the race window where leadership changes between this
 	// check and the AddVoter call itself.
+
+	// forwardErr/forwardHint carry a failed forward out of the
+	// leadership check below, to the "not leader" error the local
+	// path ends on at AddVoter. The fall-through to that local
+	// path is deliberate - it is the race window described above
+	// - so a forwarding failure is reported in the text of the
+	// error the fall-through does return, not by returning early
+	// here and skipping an attempt that race still needs.
+	var forwardErr error
+	var forwardHint string
 	if status, statusErr := s.raft.Status(ctx); statusErr == nil && !status.GetIsLeader() {
 		if hint := currentLeaderRaftAddress(status); hint != "" && s.peers != nil {
-			if fwd, ferr := s.peers.ApproveJoinRequest(ctx, s.peerManagerdAddr(hint), req); ferr == nil {
+			var fwd *rpcpb.ApproveJoinRequestResponse
+			if fwd, forwardErr = s.peers.ApproveJoinRequest(ctx, s.peerManagerdAddr(hint), req); forwardErr == nil {
 				return fwd, nil
 			}
+			forwardHint = hint
 		}
 	}
 
@@ -769,11 +783,16 @@ func (s *Server) ApproveJoinRequest(ctx context.Context, req *rpcpb.ApproveJoinR
 	}
 	if addResp.GetError() != "" {
 		if addResp.GetLeaderHint() != "" && s.peers != nil {
-			if fwd, ferr := s.peers.ApproveJoinRequest(ctx, s.peerManagerdAddr(addResp.GetLeaderHint()), req); ferr == nil {
+			var fwd *rpcpb.ApproveJoinRequestResponse
+			if fwd, forwardErr = s.peers.ApproveJoinRequest(ctx, s.peerManagerdAddr(addResp.GetLeaderHint()), req); forwardErr == nil {
 				return fwd, nil
 			}
+			// The nearer of this RPC's two forwards, so its own
+			// failure is the one this error reports; it supersedes
+			// whatever the leadership check above already recorded.
+			forwardHint = addResp.GetLeaderHint()
 		}
-		return &rpcpb.ApproveJoinRequestResponse{Error: addResp.GetError(), LeaderHint: addResp.GetLeaderHint()}, nil
+		return &rpcpb.ApproveJoinRequestResponse{Error: augmentForwardError(addResp.GetError(), forwardHint, forwardErr), LeaderHint: addResp.GetLeaderHint()}, nil
 	}
 
 	// authorization.id is set by the only path that reaches AddVoter:
@@ -797,13 +816,15 @@ func (s *Server) ApproveJoinRequest(ctx context.Context, req *rpcpb.ApproveJoinR
 		},
 	}
 	result, appErr, leaderHint := s.applyJoinRequestCommand(ctx, cmd, req.GetTimeoutMs())
+	var ferr error
 	if leaderHint != "" && s.peers != nil {
-		if fwd, ferr := s.peers.ApproveJoinRequest(ctx, s.peerManagerdAddr(leaderHint), req); ferr == nil {
+		var fwd *rpcpb.ApproveJoinRequestResponse
+		if fwd, ferr = s.peers.ApproveJoinRequest(ctx, s.peerManagerdAddr(leaderHint), req); ferr == nil {
 			return fwd, nil
 		}
 	}
 	if appErr != "" {
-		return &rpcpb.ApproveJoinRequestResponse{Error: appErr, LeaderHint: leaderHint}, nil
+		return &rpcpb.ApproveJoinRequestResponse{Error: augmentForwardError(appErr, leaderHint, ferr), LeaderHint: leaderHint}, nil
 	}
 	return &rpcpb.ApproveJoinRequestResponse{Request: fromInternalPendingJoinRequest(result)}, nil
 }
@@ -836,11 +857,23 @@ func (s *Server) UpdateVoterAddress(ctx context.Context, req *rpcpb.UpdateVoterA
 	// Same leadership-first ordering as ApproveJoinRequest, and for the
 	// same reason: only the leader's own network vantage point matters,
 	// since only the leader can actually call AddVoter.
+
+	// forwardErr/forwardHint carry a failed forward out of the
+	// leadership check below, to the "not leader" error the local
+	// path ends on at AddVoter. The fall-through to that local
+	// path is deliberate - it is the race window described above
+	// - so a forwarding failure is reported in the text of the
+	// error the fall-through does return, not by returning early
+	// here and skipping an attempt that race still needs.
+	var forwardErr error
+	var forwardHint string
 	if status, statusErr := s.raft.Status(ctx); statusErr == nil && !status.GetIsLeader() {
 		if hint := currentLeaderRaftAddress(status); hint != "" && s.peers != nil {
-			if fwd, ferr := s.peers.UpdateVoterAddress(ctx, s.peerManagerdAddr(hint), req); ferr == nil {
+			var fwd *rpcpb.UpdateVoterAddressResponse
+			if fwd, forwardErr = s.peers.UpdateVoterAddress(ctx, s.peerManagerdAddr(hint), req); forwardErr == nil {
 				return fwd, nil
 			}
+			forwardHint = hint
 		}
 	}
 
@@ -873,11 +906,16 @@ func (s *Server) UpdateVoterAddress(ctx context.Context, req *rpcpb.UpdateVoterA
 	}
 	if addResp.GetError() != "" {
 		if addResp.GetLeaderHint() != "" && s.peers != nil {
-			if fwd, ferr := s.peers.UpdateVoterAddress(ctx, s.peerManagerdAddr(addResp.GetLeaderHint()), req); ferr == nil {
+			var fwd *rpcpb.UpdateVoterAddressResponse
+			if fwd, forwardErr = s.peers.UpdateVoterAddress(ctx, s.peerManagerdAddr(addResp.GetLeaderHint()), req); forwardErr == nil {
 				return fwd, nil
 			}
+			// The nearer of this RPC's two forwards, so its own
+			// failure is the one this error reports; it supersedes
+			// whatever the leadership check above already recorded.
+			forwardHint = addResp.GetLeaderHint()
 		}
-		return &rpcpb.UpdateVoterAddressResponse{Error: addResp.GetError(), LeaderHint: addResp.GetLeaderHint()}, nil
+		return &rpcpb.UpdateVoterAddressResponse{Error: augmentForwardError(addResp.GetError(), forwardHint, forwardErr), LeaderHint: addResp.GetLeaderHint()}, nil
 	}
 	return &rpcpb.UpdateVoterAddressResponse{}, nil
 }
@@ -941,13 +979,15 @@ func (s *Server) RejectJoinRequest(ctx context.Context, req *rpcpb.RejectJoinReq
 		},
 	}
 	result, appErr, leaderHint := s.applyJoinRequestCommand(ctx, cmd, req.GetTimeoutMs())
+	var ferr error
 	if leaderHint != "" && s.peers != nil {
-		if fwd, ferr := s.peers.RejectJoinRequest(ctx, s.peerManagerdAddr(leaderHint), req); ferr == nil {
+		var fwd *rpcpb.RejectJoinRequestResponse
+		if fwd, ferr = s.peers.RejectJoinRequest(ctx, s.peerManagerdAddr(leaderHint), req); ferr == nil {
 			return fwd, nil
 		}
 	}
 	if appErr != "" {
-		return &rpcpb.RejectJoinRequestResponse{Error: appErr, LeaderHint: leaderHint}, nil
+		return &rpcpb.RejectJoinRequestResponse{Error: augmentForwardError(appErr, leaderHint, ferr), LeaderHint: leaderHint}, nil
 	}
 	return &rpcpb.RejectJoinRequestResponse{Request: fromInternalPendingJoinRequest(result)}, nil
 }
@@ -992,13 +1032,15 @@ func (s *Server) CancelJoinRequest(ctx context.Context, req *rpcpb.CancelJoinReq
 		},
 	}
 	result, appErr, leaderHint := s.applyJoinRequestCommand(ctx, cmd, req.GetTimeoutMs())
+	var ferr error
 	if leaderHint != "" && s.peers != nil {
-		if fwd, ferr := s.peers.CancelJoinRequest(ctx, s.peerManagerdAddr(leaderHint), req); ferr == nil {
+		var fwd *rpcpb.CancelJoinRequestResponse
+		if fwd, ferr = s.peers.CancelJoinRequest(ctx, s.peerManagerdAddr(leaderHint), req); ferr == nil {
 			return fwd, nil
 		}
 	}
 	if appErr != "" {
-		return &rpcpb.CancelJoinRequestResponse{Error: appErr, LeaderHint: leaderHint}, nil
+		return &rpcpb.CancelJoinRequestResponse{Error: augmentForwardError(appErr, leaderHint, ferr), LeaderHint: leaderHint}, nil
 	}
 	return &rpcpb.CancelJoinRequestResponse{Request: fromInternalPendingJoinRequest(result)}, nil
 }
@@ -1016,13 +1058,15 @@ func (s *Server) PurgeJoinRequest(ctx context.Context, req *rpcpb.PurgeJoinReque
 		},
 	}
 	_, appErr, leaderHint := s.applyJoinRequestCommand(ctx, cmd, req.GetTimeoutMs())
+	var ferr error
 	if leaderHint != "" && s.peers != nil {
-		if fwd, ferr := s.peers.PurgeJoinRequest(ctx, s.peerManagerdAddr(leaderHint), req); ferr == nil {
+		var fwd *rpcpb.PurgeJoinRequestResponse
+		if fwd, ferr = s.peers.PurgeJoinRequest(ctx, s.peerManagerdAddr(leaderHint), req); ferr == nil {
 			return fwd, nil
 		}
 	}
 	if appErr != "" {
-		return &rpcpb.PurgeJoinRequestResponse{Error: appErr, LeaderHint: leaderHint}, nil
+		return &rpcpb.PurgeJoinRequestResponse{Error: augmentForwardError(appErr, leaderHint, ferr), LeaderHint: leaderHint}, nil
 	}
 	return &rpcpb.PurgeJoinRequestResponse{}, nil
 }
