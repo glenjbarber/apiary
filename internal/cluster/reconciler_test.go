@@ -600,7 +600,9 @@ type fakePeerReporter struct {
 	// vmSnapshotNamesByAddr/requestVMSnapshotPushCalls/onRequestVMSnapshotPush
 	// back fetchVMSnapshotFromPeer's tests - the VM-checkpoint
 	// equivalents of the jail-template fields above. Keyed by
-	// "addr vmID" because a VM's checkpoints are per-dataset.
+	// "addr vmID" because a VM's checkpoints are per-dataset, so unlike
+	// an ISO or a base template there is nothing to report for a peer
+	// that does not host the named VM.
 	vmSnapshotNamesByAddr map[string][]string
 
 	requestVMSnapshotPushCalls []string // "addr vmID snapshotName targetNodeID"
@@ -1054,6 +1056,102 @@ func TestReconciler_RunOnce_CloneFromSnapshotMissingIsError(t *testing.T) {
 	}
 	if len(zfs.created) != 0 || len(zfs.cloned) != 0 {
 		t.Fatal("no dataset should be created or cloned when the source snapshot is missing")
+	}
+}
+
+// TestReconciler_RunOnce_FetchesMissingCloneSourceSnapshotFromPeer
+// confirms the cross-Comb clone: a source snapshot missing locally is
+// fetched from the first peer reporting it, then cloned normally - the
+// VM-snapshot equivalent of ADR-0089's
+// TestReconciler_RunOnce_FetchesMissingJailTemplateFromPeerBeforeCloning,
+// and the production call site for PushVMSnapshotTo.
+func TestReconciler_RunOnce_FetchesMissingCloneSourceSnapshotFromPeer(t *testing.T) {
+	raft := &fakeRaftClient{
+		resp: &internalpb.ListVMsResponse{
+			Vms: []*internalpb.VMDefinition{{Id: "vm-2", NodeId: "node-a", CloneFromSnapshot: "vm-1@before-upgrade"}},
+		},
+		statusResp: statusResponseWithPeers("node-a", "10.0.0.1:17600", "node-b", "10.0.0.2:17600"),
+	}
+	zfs := newFakeDatasetManager()
+	zfs.mountpointFor["vm-2"] = t.TempDir()
+	vms := newFakeVMManager()
+	peers := &fakePeerReporter{
+		vmSnapshotNamesByAddr: map[string][]string{"10.0.0.2:17700 vm-1": {"nightly", "before-upgrade"}},
+		onRequestVMSnapshotPush: func(vmID, snapshotName string) {
+			zfs.snapshots[vmID+"@"+snapshotName] = true
+		},
+	}
+
+	r := &Reconciler{Raft: raft, ZFS: zfs, Bhyve: vms, Peers: peers, LocalNodeID: "node-a", BootROM: "/fw/UEFI.fd"}
+	if err := r.RunOnce(context.Background()); err != nil {
+		t.Fatalf("RunOnce() error: %v", err)
+	}
+
+	want := "10.0.0.2:17700 vm-1 before-upgrade node-a"
+	if len(peers.requestVMSnapshotPushCalls) != 1 || peers.requestVMSnapshotPushCalls[0] != want {
+		t.Errorf("RequestVMSnapshotPush calls = %v, want one call to %q", peers.requestVMSnapshotPushCalls, want)
+	}
+	wantClone := "vm-1@before-upgrade->vm-2"
+	if len(zfs.cloned) != 1 || zfs.cloned[0] != wantClone {
+		t.Errorf("Clone calls = %v, want [%q]", zfs.cloned, wantClone)
+	}
+	if len(zfs.created) != 0 {
+		t.Errorf("CreateDataset called = %v, want none - a fetched-then-cloned VM's dataset is cloned, not created blank", zfs.created)
+	}
+}
+
+// TestReconciler_RunOnce_CloneSourceSnapshotNotOnAnyPeerFailsWithoutCloning
+// mirrors TestReconciler_RunOnce_JailTemplateNotFoundOnAnyPeerFailsWithoutCloning,
+// for VM checkpoints: a source VM this node has never heard of, or one
+// no reachable peer reports a snapshot for, is a clear failure and
+// never a silently blank disk.
+func TestReconciler_RunOnce_CloneSourceSnapshotNotOnAnyPeerFailsWithoutCloning(t *testing.T) {
+	raft := &fakeRaftClient{
+		resp: &internalpb.ListVMsResponse{
+			Vms: []*internalpb.VMDefinition{{Id: "vm-2", NodeId: "node-a", CloneFromSnapshot: "vm-1@before-upgrade"}},
+		},
+		statusResp: statusResponseWithPeers("node-a", "10.0.0.1:17600", "node-b", "10.0.0.2:17600"),
+	}
+	zfs := newFakeDatasetManager()
+	zfs.mountpointFor["vm-2"] = t.TempDir()
+	peers := &fakePeerReporter{vmSnapshotNamesByAddr: map[string][]string{"10.0.0.2:17700": {"nightly"}}}
+
+	r := &Reconciler{Raft: raft, ZFS: zfs, Bhyve: newFakeVMManager(), Peers: peers, LocalNodeID: "node-a", BootROM: "/fw/UEFI.fd"}
+	if err := r.RunOnce(context.Background()); err == nil {
+		t.Fatal("RunOnce() = nil error, want a clear failure when no peer has the source snapshot either")
+	}
+	if len(zfs.cloned) != 0 || len(zfs.created) != 0 {
+		t.Errorf("Clone calls = %v, CreateDataset calls = %v, want neither when the source snapshot cannot be fetched", zfs.cloned, zfs.created)
+	}
+	if len(peers.requestVMSnapshotPushCalls) != 0 {
+		t.Errorf("RequestVMSnapshotPush calls = %v, want none (no peer reported having that snapshot)", peers.requestVMSnapshotPushCalls)
+	}
+}
+
+// TestReconciler_RunOnce_CloneSourceFetchFailureIsNotCloned confirms a
+// peer that agrees to push but then fails does not leave the reconciler
+// cloning against a snapshot that never arrived.
+func TestReconciler_RunOnce_CloneSourceFetchFailureIsNotCloned(t *testing.T) {
+	raft := &fakeRaftClient{
+		resp: &internalpb.ListVMsResponse{
+			Vms: []*internalpb.VMDefinition{{Id: "vm-2", NodeId: "node-a", CloneFromSnapshot: "vm-1@before-upgrade"}},
+		},
+		statusResp: statusResponseWithPeers("node-a", "10.0.0.1:17600", "node-b", "10.0.0.2:17600"),
+	}
+	zfs := newFakeDatasetManager()
+	zfs.mountpointFor["vm-2"] = t.TempDir()
+	peers := &fakePeerReporter{
+		vmSnapshotNamesByAddr:    map[string][]string{"10.0.0.2:17700 vm-1": {"before-upgrade"}},
+		requestVMSnapshotPushErr: errors.New("peer refused the push"),
+	}
+
+	r := &Reconciler{Raft: raft, ZFS: zfs, Bhyve: newFakeVMManager(), Peers: peers, LocalNodeID: "node-a", BootROM: "/fw/UEFI.fd"}
+	err := r.RunOnce(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "peer refused the push") {
+		t.Fatalf("RunOnce() error: %v, want the push failure surfaced", err)
+	}
+	if len(zfs.cloned) != 0 || len(zfs.created) != 0 {
+		t.Errorf("Clone calls = %v, CreateDataset calls = %v, want neither after a failed fetch", zfs.cloned, zfs.created)
 	}
 }
 

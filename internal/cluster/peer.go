@@ -186,7 +186,7 @@ func (r *Reconciler) fetchTemplateFromPeer(ctx context.Context, name string) err
 // does not host the VM simply reports nothing and is skipped.
 func (r *Reconciler) fetchVMSnapshotFromPeer(ctx context.Context, vmID, snapshotName string) error {
 	if r.Peers == nil {
-		return fmt.Errorf("VM snapshot %q of VM %q not found locally, and no peer forwarding is configured on this node to look elsewhere (expected on a single-node deployment - take the snapshot on the node that will host the clone)", snapshotName, vmID)
+		return fmt.Errorf("VM snapshot %q of VM %q does not exist locally, and no peer forwarding is configured on this node to look elsewhere (expected on a single-node deployment - take the snapshot on the node that will host the clone, or configure peer forwarding so it can be fetched)", snapshotName, vmID)
 	}
 	addrs, err := r.resolvePeerAddresses(ctx)
 	if err != nil {
@@ -212,5 +212,5 @@ func (r *Reconciler) fetchVMSnapshotFromPeer(ctx context.Context, vmID, snapshot
 			return nil
 		}
 	}
-	return fmt.Errorf("VM snapshot %q not found on any known cluster node holding VM %q", snapshotName, vmID)
+	return fmt.Errorf("VM snapshot %q of VM %q does not exist locally and was not found on any other known cluster node", snapshotName, vmID)
 }
