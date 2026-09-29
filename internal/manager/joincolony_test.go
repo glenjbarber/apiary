@@ -75,9 +75,9 @@ func (f *fakeJoinColonyPeerForwarder) CancelJoinRequestUnauthenticated(ctx conte
 // touches raft at all.
 func TestServer_RequestJoinColony_TargetAddressWithNilPeersErrors(t *testing.T) {
 	s := NewServer(nil, "node-1", nil, nil, nil, nil, nil, "", nil, nil, nil, 0, nil)
-	resp, err := s.RequestJoinColony(context.Background(), &rpcpb.RequestJoinColonyRequest{
+	resp, err := s.RequestJoinColony(context.Background(), withIntroduction(&rpcpb.RequestJoinColonyRequest{
 		NodeId: "node-2", RaftBindAddress: "10.0.0.2:17600", TargetAddress: "10.0.0.1:17700",
-	})
+	}, t))
 	if err != nil {
 		t.Fatalf("RequestJoinColony() error: %v", err)
 	}
@@ -93,9 +93,9 @@ func TestServer_RequestJoinColony_TargetAddressWithNilPeersErrors(t *testing.T) 
 func TestServer_RequestJoinColony_TargetAddressForwardsToPeer(t *testing.T) {
 	peers := &fakeJoinColonyPeerForwarder{requestResp: &rpcpb.RequestJoinColonyResponse{RequestId: "jreq-1", Code: "482913"}}
 	s := NewServer(nil, "node-1", nil, nil, nil, nil, peers, "", nil, nil, nil, 0, nil)
-	resp, err := s.RequestJoinColony(context.Background(), &rpcpb.RequestJoinColonyRequest{
+	resp, err := s.RequestJoinColony(context.Background(), withIntroduction(&rpcpb.RequestJoinColonyRequest{
 		NodeId: "node-2", RaftBindAddress: "10.0.0.2:17600", TargetAddress: "10.0.0.1:17700",
-	})
+	}, t))
 	if err != nil {
 		t.Fatalf("RequestJoinColony() error: %v", err)
 	}
@@ -123,9 +123,9 @@ func TestServer_RequestJoinColony_TargetAddressRejectedWhenNotAllowlisted(t *tes
 	s := NewServer(nil, "node-1", nil, nil, nil, nil, peers, "", nil, nil, nil, 0, nil)
 	s.SetKnownPeerAddresses([]string{"10.0.0.9:17700", "10.0.0.14:17700"})
 
-	resp, err := s.RequestJoinColony(context.Background(), &rpcpb.RequestJoinColonyRequest{
+	resp, err := s.RequestJoinColony(context.Background(), withIntroduction(&rpcpb.RequestJoinColonyRequest{
 		NodeId: "node-2", RaftBindAddress: "10.0.0.2:17600", TargetAddress: "10.0.0.1:17700",
-	})
+	}, t))
 	if err != nil {
 		t.Fatalf("RequestJoinColony() error: %v", err)
 	}
@@ -145,9 +145,9 @@ func TestServer_RequestJoinColony_TargetAddressAllowedWhenAllowlisted(t *testing
 	s := NewServer(nil, "node-1", nil, nil, nil, nil, peers, "", nil, nil, nil, 0, nil)
 	s.SetKnownPeerAddresses([]string{"10.0.0.1:17700"})
 
-	resp, err := s.RequestJoinColony(context.Background(), &rpcpb.RequestJoinColonyRequest{
+	resp, err := s.RequestJoinColony(context.Background(), withIntroduction(&rpcpb.RequestJoinColonyRequest{
 		NodeId: "node-2", RaftBindAddress: "10.0.0.2:17600", TargetAddress: "10.0.0.1:17700",
-	})
+	}, t))
 	if err != nil {
 		t.Fatalf("RequestJoinColony() error: %v", err)
 	}
@@ -169,9 +169,9 @@ func TestServer_SetKnownPeerAddresses_EmptyClearsAllowlist(t *testing.T) {
 	s.SetKnownPeerAddresses([]string{"10.0.0.9:17700"})
 	s.SetKnownPeerAddresses(nil)
 
-	resp, err := s.RequestJoinColony(context.Background(), &rpcpb.RequestJoinColonyRequest{
+	resp, err := s.RequestJoinColony(context.Background(), withIntroduction(&rpcpb.RequestJoinColonyRequest{
 		NodeId: "node-2", RaftBindAddress: "10.0.0.2:17600", TargetAddress: "10.0.0.1:17700",
-	})
+	}, t))
 	if err != nil {
 		t.Fatalf("RequestJoinColony() error: %v", err)
 	}
@@ -306,9 +306,9 @@ func assertBoundedForwardDeadline(t *testing.T, ctx context.Context) {
 func TestServer_RequestJoinColony_TargetAddressForwardIsBounded(t *testing.T) {
 	peers := &fakeJoinColonyPeerForwarder{}
 	s := NewServer(nil, "node-1", nil, nil, nil, nil, peers, "", nil, nil, nil, 0, nil)
-	if _, err := s.RequestJoinColony(context.Background(), &rpcpb.RequestJoinColonyRequest{
+	if _, err := s.RequestJoinColony(context.Background(), withIntroduction(&rpcpb.RequestJoinColonyRequest{
 		NodeId: "node-2", RaftBindAddress: "10.0.0.2:17600", TargetAddress: "10.0.0.1:17700",
-	}); err != nil {
+	}, t)); err != nil {
 		t.Fatalf("RequestJoinColony() error: %v", err)
 	}
 	assertBoundedForwardDeadline(t, peers.lastCtx)
@@ -391,9 +391,9 @@ func TestServer_RequestJoinColony_FillsTLSFingerprintFromLocalTLSCert(t *testing
 	nodeConfig := &fakeNodeConfigStore{cfg: nodeconfig.Config{TLSCert: certPath}}
 	s := NewServer(nil, "node-1", nil, nil, nil, nil, peers, "", nil, nodeConfig, nil, 0, nil)
 
-	resp, err := s.RequestJoinColony(context.Background(), &rpcpb.RequestJoinColonyRequest{
+	resp, err := s.RequestJoinColony(context.Background(), withIntroduction(&rpcpb.RequestJoinColonyRequest{
 		NodeId: "node-2", RaftBindAddress: "10.0.0.2:17600", TargetAddress: "10.0.0.1:17700",
-	})
+	}, t))
 	if err != nil {
 		t.Fatalf("RequestJoinColony() error: %v", err)
 	}
@@ -415,9 +415,9 @@ func TestServer_RequestJoinColony_NoLocalTLSCertMeansEmptyFingerprint(t *testing
 	nodeConfig := &fakeNodeConfigStore{cfg: nodeconfig.Config{}}
 	s := NewServer(nil, "node-1", nil, nil, nil, nil, peers, "", nil, nodeConfig, nil, 0, nil)
 
-	if _, err := s.RequestJoinColony(context.Background(), &rpcpb.RequestJoinColonyRequest{
+	if _, err := s.RequestJoinColony(context.Background(), withIntroduction(&rpcpb.RequestJoinColonyRequest{
 		NodeId: "node-2", RaftBindAddress: "10.0.0.2:17600", TargetAddress: "10.0.0.1:17700",
-	}); err != nil {
+	}, t)); err != nil {
 		t.Fatalf("RequestJoinColony() error: %v", err)
 	}
 	if got := peers.lastReq.GetTlsCertFingerprint(); got != "" {

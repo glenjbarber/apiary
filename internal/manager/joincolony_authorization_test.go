@@ -54,16 +54,24 @@ type authzComb struct {
 	apiKeys    []*rpcpb.APIKeyInfo
 	rawKeys    []string
 	pendingIDs []string
+
+	// secondPins caches the PIN each request's stage one produced, so
+	// approve can be called more than once against the same request.
+	// A second approval after the first was REFUSED at the authorization
+	// gate reuses the same still-live PIN: the gate sits before the
+	// spend, which is the whole reason it is ordered there.
+	secondPins map[string]string
 }
 
 func newAuthzComb(t *testing.T, socketPath, name string) *authzComb {
 	t.Helper()
 	client, srv := newManagerdRPCClientAndServer(t, socketPath, name)
 	c := &authzComb{
-		name:      name,
-		client:    client,
-		srv:       srv,
-		storePath: filepath.Join(t.TempDir(), "join-authorizations.json"),
+		name:       name,
+		client:     client,
+		srv:        srv,
+		storePath:  filepath.Join(t.TempDir(), "join-authorizations.json"),
+		secondPins: map[string]string{},
 	}
 	srv.setJoinAuthorizationPath(c.storePath)
 	// The reachability dial is the first thing AFTER this part's gates,
@@ -178,12 +186,20 @@ func (c *authzComb) seedRequestAt(t *testing.T, requestID, nodeID, raftBindAddre
 		CreatePendingJoinRequest: &internalpb.CreatePendingJoinRequest{
 			Request: &internalpb.PendingJoinRequest{
 				RequestId: requestID, NodeId: nodeID,
-				RaftBindAddress:    raftBindAddress,
-				Code:               "123456",
-				TlsCertFingerprint: fingerprint,
-				RequestedAtUnix:    time.Now().Unix(),
-				ExpiresAtUnix:      time.Now().Add(time.Hour).Unix(),
-				Status:             internalpb.JoinRequestStatus_JOIN_REQUEST_STATUS_PENDING,
+				RaftBindAddress: raftBindAddress,
+				// ADR-0147 Part 2: seeded by hand, so it has to carry
+				// what RequestJoinColony would have put there - the
+				// joiner's own first code, its advertised
+				// fingerprints, and the INTRODUCED stage. A seed
+				// without them is the request the flow is designed to
+				// refuse, not a convenient shortcut.
+				Code:                   testIntroductionCode,
+				Stage:                  internalpb.JoinRequestStage_JOIN_REQUEST_STAGE_INTRODUCED,
+				AdvertisedFingerprints: testCombFingerprintList(t),
+				TlsCertFingerprint:     fingerprint,
+				RequestedAtUnix:        time.Now().Unix(),
+				ExpiresAtUnix:          time.Now().Add(time.Hour).Unix(),
+				Status:                 internalpb.JoinRequestStatus_JOIN_REQUEST_STATUS_PENDING,
 				// Observed, empty: the join-log guardrail's own
 				// UNOBSERVED refusal would otherwise fire AFTER the
 				// authorization gate and mask a bug in it.
@@ -224,11 +240,27 @@ func (c *authzComb) authorize(t *testing.T, nodeID, fingerprint string) string {
 	return id
 }
 
+// approve is this Comb's approval call, and it completes ADR-0147
+// Part 2's stage one first so the test it serves is about whatever gate
+// it was written for rather than about the handshake.
+//
+// The PIN is read out of replicated state rather than from the
+// VerifyJoinIntroduction response, because that response deliberately
+// does not carry it: the PIN belongs to the requesting Comb. Doing it
+// this way means every Part 3 test exercises the real ordering - stage
+// one, then the authorization gates, then the second PIN - rather than a
+// shortcut through it.
 func (c *authzComb) approve(t *testing.T, requestID, rawKey string) *rpcpb.ApproveJoinRequestResponse {
 	t.Helper()
+	secondPin, done := c.secondPins[requestID]
+	if !done {
+		secondPin = stageOnePinForTest(t, c.srv, requestID)
+		c.secondPins[requestID] = secondPin
+	}
 	resp, err := c.client.ApproveJoinRequest(ctxFor(t, rawKey), &rpcpb.ApproveJoinRequestRequest{
 		RequestId:     requestID,
 		ConfirmPhrase: approveJoinRequestConfirmPhrase,
+		SecondPin:     secondPin,
 	})
 	if err != nil {
 		t.Fatalf("%s: ApproveJoinRequest(%q) error: %v", c.name, requestID, err)

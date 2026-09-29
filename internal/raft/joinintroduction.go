@@ -281,6 +281,21 @@ func (f *FSM) applyVerifyJoinIntroduction(index uint64, cmd *internalpb.VerifyJo
 	// to create.
 	if peer := cmd.GetPeer(); peer != nil {
 		pinned := f.applyPinTrustedPeer(index, peer)
+		// A pin that already exists for this node_id is a refusal from
+		// applyPinTrustedPeer, deliberately: replacing a pinned
+		// certificate is meant to be two visible acts in the log rather
+		// than one invisible one. It is NOT a refusal here when the
+		// existing pin records the SAME certificate and is already a
+		// member's - in that case there is nothing to change, and
+		// treating it as an error would make a re-joining member
+		// permanently unintroducible, which is the kind of unrecoverable
+		// gate this codebase has been bitten by before.
+		//
+		// A pin for a DIFFERENT certificate keeps the create-only
+		// refusal, which is the case the rule exists for.
+		if pinned.Error != "" && f.alreadyPinnedAsMember(peer.GetNodeId(), peer.GetFingerprint()) {
+			pinned = &FSMApplyResult{Index: index}
+		}
 		if pinned.Error != "" {
 			return &FSMApplyResult{Index: index, Error: fmt.Sprintf(
 				"VerifyJoinIntroduction: request_id %q is refused because the certificate it advertised did not pass the trust gate: %s",
@@ -289,6 +304,23 @@ func (f *FSM) applyVerifyJoinIntroduction(index uint64, cmd *internalpb.VerifyJo
 	}
 	f.pendingJoinRequests[cmd.GetRequestId()] = updated
 	return &FSMApplyResult{Index: index, PendingJoinRequest: updated}
+}
+
+// alreadyPinnedAsMember reports whether nodeID is already pinned for
+// exactly this fingerprint AND that pin has been promoted to a member.
+//
+// Both conditions, and the second is the load-bearing one. An existing
+// member's certificate is already trusted by definition, so a request
+// naming it has nothing to add. A pin that is NOT a member's belongs to
+// a request still in progress, and a second request for the same
+// node_id is a collision this flow has no way to interpret - so the
+// create-only refusal stands and the operator is told.
+func (f *FSM) alreadyPinnedAsMember(nodeID, fingerprint string) bool {
+	existing, ok := f.trustedPeers[nodeID]
+	if !ok || !existing.GetIsVoter() {
+		return false
+	}
+	return ConstantTimeValueEqual(existing.GetFingerprint(), fingerprint)
 }
 
 // applyReissueJoinSecondPin generates a new second PIN and counts the

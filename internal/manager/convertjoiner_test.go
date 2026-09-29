@@ -106,6 +106,12 @@ func newConvertJoinerTestServer(t *testing.T) (*Server, *fakeRaftdConversionConf
 	peers := &fakeJoinColonyPeerForwarder{}
 
 	s := NewServer(nil, "node-1", nil, nil, nil, nil, peers, "", nil, nil, nil, 0, nil)
+	// ADR-0147 Part 2: the conversion submits a join request, and a
+	// request now carries the joiner's real certificate fingerprints
+	// and its own first code, both required. A Comb with no serving
+	// certificate is refused by name - which is correct, and is why
+	// this harness gives it one.
+	attachTestCombCertificate(t, s)
 	s.raftdConversionConfig = cfgStore
 	s.raftdConversion = ctrl
 	s.reachabilityCheck = func(context.Context, string) error { return nil }
