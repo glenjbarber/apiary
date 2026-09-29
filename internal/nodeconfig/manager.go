@@ -44,6 +44,7 @@ import (
 	"time"
 
 	"github.com/glenjbarber/apiary/internal/commonconfig"
+	"github.com/glenjbarber/apiary/internal/jsonstrict"
 )
 
 // DefaultPath is where the settings file lives by default on a
@@ -328,8 +329,8 @@ func (m *Manager) Load() (Config, error) {
 		return Config{}, err
 	}
 	var cfg Config
-	if err := json.Unmarshal(body, &cfg); err != nil {
-		return Config{}, err
+	if err := jsonstrict.Unmarshal(body, &cfg); err != nil {
+		return Config{}, fmt.Errorf("nodeconfig: parsing %s: %w", m.path(), err)
 	}
 	return applyCommonConfig(cfg, common), nil
 }

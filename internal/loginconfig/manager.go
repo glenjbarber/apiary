@@ -11,6 +11,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+
+	"github.com/glenjbarber/apiary/internal/jsonstrict"
 )
 
 // DefaultPath is where the persisted role-map override lives by
@@ -55,7 +57,7 @@ func (m *Manager) Load() (cfg Config, exists bool, err error) {
 		}
 		return Config{}, false, err
 	}
-	if err := json.Unmarshal(data, &cfg); err != nil {
+	if err := jsonstrict.Unmarshal(data, &cfg); err != nil {
 		return Config{}, false, fmt.Errorf("loginconfig: parsing %s: %w", m.path(), err)
 	}
 	if cfg.RoleMap == nil {

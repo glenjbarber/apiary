@@ -402,3 +402,61 @@ func TestManager_LoadMalformedCommonConfigIsError(t *testing.T) {
 		t.Fatal("Load() expected error for malformed common.json, got nil")
 	}
 }
+
+// TestManager_LoadRejectsDuplicateKeys pins the incident restshimdconfig
+// and frontendconfig already guard against: encoding/json takes the
+// last value of a repeated key with no error, so a hand-edited file
+// that reads one way behaves another. managerd.json holds raft
+// identity and the peer credentials, so a duplicated key here is
+// cluster-membership configuration being decided silently.
+func TestManager_LoadRejectsDuplicateKeys(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "managerd.json")
+	if err := os.WriteFile(path, []byte(`{
+  "node_id": "apiverse",
+  "rpc_addr": "10.50.0.9:17700",
+  "raftd_socket": "/var/run/apiary/raftd.sock",
+  "raftd_socket": "/var/run/apiary/other.sock"
+}`), 0o600); err != nil {
+		t.Fatalf("writing managerd.json: %v", err)
+	}
+
+	cfg, err := (&Manager{Path: path}).Load()
+	if err == nil {
+		t.Fatalf("Load() = %+v, nil; a duplicated key must not resolve to a config", cfg)
+	}
+	// The operator has to be able to act on this: it must name the file
+	// to edit and the key to look at.
+	for _, want := range []string{path, "raftd_socket"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error %q does not mention %q; an operator cannot act on it", err, want)
+		}
+	}
+}
+
+// A clean managerd.json must decode exactly as it always did. If this
+// fails, jsonstrict has changed behaviour for the common case, which
+// would be a far worse regression than the duplicate it catches.
+func TestManager_LoadCleanFileUnchanged(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "managerd.json")
+	body := `{
+  "node_id": "apiverse",
+  "rpc_addr": "10.50.0.9:17700",
+  "raftd_socket": "/var/run/apiary/raftd.sock",
+  "peer_managerd_port": "17700"
+}`
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatalf("writing managerd.json: %v", err)
+	}
+
+	got, err := (&Manager{Path: path}).Load()
+	if err != nil {
+		t.Fatalf("Load() on a clean file: %v", err)
+	}
+	var want Config
+	if err := json.Unmarshal([]byte(body), &want); err != nil {
+		t.Fatalf("reference unmarshal: %v", err)
+	}
+	if got != want {
+		t.Errorf("Load() = %+v, want %+v", got, want)
+	}
+}

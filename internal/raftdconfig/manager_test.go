@@ -3,6 +3,7 @@ package raftdconfig
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -231,5 +232,66 @@ func TestManager_LoadMalformedCommonConfigIsError(t *testing.T) {
 
 	if _, err := m.Load(); err == nil {
 		t.Fatal("Load() expected error for malformed common.json, got nil")
+	}
+}
+
+// TestManager_LoadRejectsDuplicateKeys pins the incident restshimdconfig
+// and frontendconfig already guard against: encoding/json takes the
+// last value of a repeated key with no error, so a hand-edited file
+// that reads one way behaves another. raftd.json holds internal_token
+// and the raft TLS material, so a duplicated key here is consensus
+// configuration being decided silently.
+func TestManager_LoadRejectsDuplicateKeys(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "raftd.json")
+	if err := os.WriteFile(path, []byte(`{
+  "data_dir": "/var/db/apiary/raftd",
+  "node_id": "apiverse",
+  "raft_bind": "0.0.0.0:17701",
+  "raft_bind": "127.0.0.1:17701"
+}`), 0o600); err != nil {
+		t.Fatalf("writing test file: %v", err)
+	}
+
+	cfg, err := (&Manager{Path: path}).Load()
+	if err == nil {
+		t.Fatalf("Load() = %+v, nil; a duplicated key must not resolve to a config", cfg)
+	}
+	// The operator has to be able to act on this: it must name the file
+	// to edit and the key to look at.
+	for _, want := range []string{path, "raft_bind"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error %q does not mention %q; an operator cannot act on it", err, want)
+		}
+	}
+}
+
+// A clean raftd.json must decode exactly as it always did. If this
+// fails, jsonstrict has changed behaviour for the common case, which
+// would be a far worse regression than the duplicate it catches.
+func TestManager_LoadCleanFileUnchanged(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "raftd.json")
+	if err := os.WriteFile(path, []byte(`{
+  "data_dir": "/var/db/apiary/raftd",
+  "socket": "/var/run/apiary/raftd.sock",
+  "node_id": "apiverse",
+  "raft_bind": "10.50.0.9:17701",
+  "internal_token": "shh"
+}`), 0o600); err != nil {
+		t.Fatalf("writing test file: %v", err)
+	}
+
+	got, err := (&Manager{Path: path}).Load()
+	if err != nil {
+		t.Fatalf("Load() on a clean file: %v", err)
+	}
+	want := Config{
+		DataDir:       "/var/db/apiary/raftd",
+		Socket:        "/var/run/apiary/raftd.sock",
+		NodeID:        "apiverse",
+		RaftBind:      "10.50.0.9:17701",
+		InternalToken: "shh",
+	}
+	if got != want {
+		t.Errorf("Load() = %+v, want %+v", got, want)
 	}
 }

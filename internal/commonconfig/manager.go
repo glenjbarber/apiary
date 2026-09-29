@@ -18,6 +18,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+
+	"github.com/glenjbarber/apiary/internal/jsonstrict"
 )
 
 // DefaultPath is where this file lives by default on a pkg-installed
@@ -69,7 +71,7 @@ func (m *Manager) Load() (Config, error) {
 		return Config{}, err
 	}
 	var cfg Config
-	if err := json.Unmarshal(data, &cfg); err != nil {
+	if err := jsonstrict.Unmarshal(data, &cfg); err != nil {
 		return Config{}, fmt.Errorf("commonconfig: parsing %s: %w", m.path(), err)
 	}
 	return cfg, nil
