@@ -190,14 +190,21 @@ type VoterQuorumImpact struct {
 // per-voter loop EvaluateQuorumTolerance uses internally, extracted so
 // a caller needing the per-node detail (not just the aggregated worst-
 // case Evaluation) doesn't have to re-derive it or parse prose.
-func ClassifyVoterQuorumImpacts(voters []VoterReachability, leaderID string) []VoterQuorumImpact {
+//
+// vantage is the vantage point the shared snapshot was actually
+// gathered from, passed through to recovery.ClassifyQuorumFromVantage.
+// A caller that dialled each voter itself must say so
+// (recovery.VantageFromNonLeader); only a caller whose data came from
+// the current leader (recovery.VantageFromLeader) is entitled to the
+// leader-loss downgrade for the leader's own verdict.
+func ClassifyVoterQuorumImpacts(voters []VoterReachability, leaderID string, vantage recovery.QuorumVantage) []VoterQuorumImpact {
 	impacts := make([]VoterQuorumImpact, 0, len(voters))
 	for _, v := range voters {
 		fact := quorumFactFromVoters(voters, v)
 		valid := recovery.ValidQuorumFact(fact)
 		var verdict recovery.QuorumVerdict
 		if valid {
-			verdict = recovery.ClassifyQuorum(fact, v.NodeID == leaderID)
+			verdict = recovery.ClassifyQuorumFromVantage(fact, v.NodeID == leaderID, vantage)
 		}
 		impacts = append(impacts, VoterQuorumImpact{NodeID: v.NodeID, Verdict: verdict, Valid: valid})
 	}
@@ -215,13 +222,34 @@ func ClassifyVoterQuorumImpacts(voters []VoterReachability, leaderID string) []V
 // already-gathered Reachability - this function makes no further
 // observations and issues no RPCs. leaderID identifies the current
 // raft leader so each voter's own leader-loss downgrade
-// (recovery.ClassifyQuorum's own isCurrentLeader parameter) is
+// (recovery.ClassifyQuorumFromVantage's targetIsLeader) is
 // recomputed correctly per voter, not hoisted out of the loop.
-func EvaluateQuorumTolerance(voters []VoterReachability, leaderID string) Evaluation {
-	impacts := ClassifyVoterQuorumImpacts(voters, leaderID)
+//
+// vantage is the vantage point the caller actually gathered those
+// reachabilities from, and it is load-bearing rather than decorative:
+// the leader-loss downgrade is only applied to data the leader itself
+// produced. A caller that dialled each voter itself (internal/
+// frontend's bounded HostStats fan-out) passes
+// recovery.VantageFromNonLeader, and then a healthy multi-voter colony
+// whose only gap is "losing the leader" resolves to a real verdict
+// instead of being downgraded to unknown on a premise that was never
+// true for that caller's data.
+func EvaluateQuorumTolerance(voters []VoterReachability, leaderID string, vantage recovery.QuorumVantage) Evaluation {
+	impacts := ClassifyVoterQuorumImpacts(voters, leaderID, vantage)
 	evidence := make([]Evidence, 0, len(impacts))
 	worst := ResultTrue // Survives < Unknown < Lost in severity; start optimistic, only downgrade
 	now := time.Now()
+
+	// The leader-vantage clause is only ever true when the caller's
+	// data actually came from the leader. Citing it unconditionally
+	// told the reader that losing the leader is unknown "because
+	// reachability was only checked from the leader's own vantage
+	// point" on pages where no such vantage existed - an explanation
+	// for a data property the evidence does not have.
+	unknownWhy := "unverified voter reachability"
+	if vantage == recovery.VantageFromLeader {
+		unknownWhy += ", or this voter is the current leader and reachability was only checked from the leader's own vantage point"
+	}
 
 	for _, impact := range impacts {
 		switch {
@@ -244,7 +272,7 @@ func EvaluateQuorumTolerance(voters []VoterReachability, leaderID string) Evalua
 		case impact.Verdict == recovery.QuorumUnknown:
 			evidence = append(evidence, Evidence{
 				Source:     "raft membership + HostStats reachability for " + impact.NodeID,
-				Detail:     "Losing " + impact.NodeID + " has an UNKNOWN quorum outcome - see internal/recovery.ClassifyQuorum for why (unverified voter reachability, or this voter is the current leader and reachability was only checked from the leader's own vantage point).",
+				Detail:     "Losing " + impact.NodeID + " has an UNKNOWN quorum outcome - see internal/recovery.ClassifyQuorum for why (" + unknownWhy + ").",
 				ObservedAt: now,
 			})
 			if worst == ResultTrue {
