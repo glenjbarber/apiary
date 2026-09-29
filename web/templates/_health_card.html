@@ -6,9 +6,17 @@
      See docs/web-ui-redesign.md Section 1. */}}
 {{define "health_card"}}<section class="panel health-card">
   <div class="health-card-top">
-    <div class="health-card-reachable">
-      <strong>{{.ReachableCombs}}<span class="muted">/{{.TotalCombs}}</span></strong>
-      <span class="muted">Combs reachable</span>
+    {{/* The reachable box is outlined in the Colony's own state - red for a
+         Comb that is down, yellow for an outstanding non-outage issue, green
+         when everything is good - in the same treatment the topology card's
+         Colony leader already uses. The badge beside the count is the same
+         statement in words, so the outline is never the only cue. */}}
+    <div class="health-card-reachable" data-state="{{.Colony.State}}" title="{{.Colony.Detail}}">
+      <div class="health-card-reachable-count">
+        <strong>{{.ReachableCombs}}<span class="muted">/{{.TotalCombs}}</span></strong>
+        <span class="muted">Combs reachable</span>
+      </div>
+      <span class="badge {{.Colony.BadgeClass}}">{{.Colony.Label}}</span>
     </div>
     {{if .GuardrailHolds}}<div class="health-card-cause"><span class="badge warn">{{.GuardrailHolds}} restart guardrail hold{{if ne .GuardrailHolds 1}}s{{end}}</span></div>{{end}}
     {{if .PendingJoins}}<div class="health-card-cause"><span class="badge warn">{{.PendingJoins}} pending join request{{if ne .PendingJoins 1}}s{{end}}</span></div>{{end}}
