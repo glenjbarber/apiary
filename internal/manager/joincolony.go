@@ -352,38 +352,6 @@ func (s *Server) RequestJoinColony(ctx context.Context, req *rpcpb.RequestJoinCo
 	if err := raftnode.ValidateJoinRequestFields(req.GetNodeId(), req.GetRaftBindAddress(), req.GetTlsCertFingerprint()); err != nil {
 		return &rpcpb.RequestJoinColonyResponse{Error: err.Error()}, nil
 	}
-	// ADR-0147 Part 2: the FIRST CODE is the joiner's own, generated
-	// locally before it dialed anything, and it is required. Generating
-	// one here instead would restore the pre-ADR-0147 shape exactly -
-	// both operators reading a value out of the same server's state -
-	// and the whole two-way flow exists to stop that being what the
-	// check means.
-	if req.GetIntroductionCode() == "" {
-		return &rpcpb.RequestJoinColonyResponse{Error: "introduction_code is required. It is the 6-digit value the JOINING Comb generated for itself before dialing - run `apiaryctl join-introduce`, which prints it. This Colony does not generate it: a code both sides could read out of the same server is not the check this flow is for"}, nil
-	}
-	// The joiner's real fingerprints, resolved ONCE, here, BEFORE any
-	// forwarding and before the local-record path is chosen.
-	//
-	// This is the fix the ADR calls out as the one that matters most and
-	// that was previously wrong: the local-record path used to read the
-	// caller's field directly and only the forward path filled anything
-	// in, so a request recorded here carried whatever the caller sent -
-	// usually nothing. Under Part 2 the operator compares a value off
-	// the joiner's own screen against what the request carried, and a
-	// request that carried nothing is compared against nothing.
-	//
-	// An empty list is refused rather than recorded. A request with no
-	// fingerprints can never be approved, so recording one only produces
-	// a row certain to be refused later; saying so here is at the moment
-	// the operator can still go and fix the joining Comb.
-	advertisedFingerprints := req.GetAdvertisedFingerprints()
-	if len(advertisedFingerprints) == 0 {
-		own, err := s.localAdvertisedFingerprints()
-		if err != nil {
-			return &rpcpb.RequestJoinColonyResponse{Error: fmt.Sprintf("refusing to record this join request: %v", err)}, nil
-		}
-		advertisedFingerprints = own
-	}
 	// ADR-0147 Part 4: the Colony's normal state is CLOSED. A request
 	// arriving at a closed Colony is refused with a message naming the
 	// fix, which inverts the pre-ADR-0147 default where this call was
@@ -450,6 +418,38 @@ func (s *Server) RequestJoinColony(ctx context.Context, req *rpcpb.RequestJoinCo
 	logState := s.localJoinerLogState(ctx)
 	if req.GetJoinerLogStateObserved() || req.GetTargetAddress() == "" {
 		logState.Observed, logState.LastLogIndex = req.GetJoinerLogStateObserved(), req.GetJoinerLastLogIndex()
+	}
+	// ADR-0147 Part 2: the FIRST CODE is the joiner's own, generated
+	// locally before it dialed anything, and it is required. Generating
+	// one here instead would restore the pre-ADR-0147 shape exactly -
+	// both operators reading a value out of the same server's state -
+	// and the whole two-way flow exists to stop that being what the
+	// check means.
+	if req.GetIntroductionCode() == "" {
+		return &rpcpb.RequestJoinColonyResponse{Error: "introduction_code is required. It is the 6-digit value the JOINING Comb generated for itself before dialing - run `apiaryctl join-introduce`, which prints it. This Colony does not generate it: a code both sides could read out of the same server is not the check this flow is for"}, nil
+	}
+	// The joiner's real fingerprints, resolved ONCE, here, BEFORE any
+	// forwarding and before the local-record path is chosen.
+	//
+	// This is the fix the ADR calls out as the one that matters most and
+	// that was previously wrong: the local-record path used to read the
+	// caller's field directly and only the forward path filled anything
+	// in, so a request recorded here carried whatever the caller sent -
+	// usually nothing. Under Part 2 the operator compares a value off
+	// the joiner's own screen against what the request carried, and a
+	// request that carried nothing is compared against nothing.
+	//
+	// An empty list is refused rather than recorded. A request with no
+	// fingerprints can never be approved, so recording one only produces
+	// a row certain to be refused later; saying so here is at the moment
+	// the operator can still go and fix the joining Comb.
+	advertisedFingerprints := req.GetAdvertisedFingerprints()
+	if len(advertisedFingerprints) == 0 {
+		own, err := s.localAdvertisedFingerprints()
+		if err != nil {
+			return &rpcpb.RequestJoinColonyResponse{Error: fmt.Sprintf("refusing to record this join request: %v", err)}, nil
+		}
+		advertisedFingerprints = own
 	}
 	if target := req.GetTargetAddress(); target != "" {
 		if s.peers == nil {
