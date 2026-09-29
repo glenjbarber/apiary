@@ -4,6 +4,8 @@
 
 ![OS](https://img.shields.io/badge/OS-FreeBSD-red.svg?logo=freebsd&logoColor=white)
 ![Architecture](https://img.shields.io/badge/arch-amd64-blue)
+![Architecture](https://img.shields.io/badge/arch-arm64-blue)
+![Architecture](https://img.shields.io/badge/arch-aarch64-blue)
 [![License](https://img.shields.io/github/license/glenjbarber/apiary?color=blue)](LICENSE)
 
 ![Go Version](https://img.shields.io/github/go-mod/go-version/glenjbarber/apiary)
