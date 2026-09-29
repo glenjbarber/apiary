@@ -543,6 +543,21 @@ message Command {
     PinTrustedPeer pin_trusted_peer = 38;
     SetTrustedPeerVoter set_trusted_peer_voter = 39;
     UnpinTrustedPeer unpin_trusted_peer = 40;
+
+    // RecordJoinApproval is ADR-0147 Part 3's two-person rule: one
+    // authorizing act, recorded in replicated state, that resolves
+    // nothing. Replicated rather than node-local for the same reason
+    // OpenColonyJoinWindow above is - the two authorizing calls almost
+    // always land on different members, and a rule only one of them
+    // could see would not be a rule at all.
+    //
+    // Field 41, not 38. ADR-0147 Part 4's peer trust store landed
+    // 38/39/40 on main first, and protobuf field numbers are a
+    // permanent wire contract: two commands cannot share one. Part 4's
+    // numbers are not moved, because they are already replicated and
+    // already shipped; this one is renumbered onto the next free slot
+    // instead.
+    RecordJoinApproval record_join_approval = 41;
   }
 }
 
@@ -923,6 +938,62 @@ message PendingJoinRequest {
   // next: letting the window lapse, reopening, and completing the old
   // request is not a path.
   int64 window_opened_at_unix = 11;
+
+  // approval_1 / approval_2 are ADR-0147 Part 3's two-person rule,
+  // recorded here rather than anywhere local. Each is one authorizing
+  // act - an API key id, the Comb that act was presented to, and when -
+  // written by a separate raft command that resolves nothing and admits
+  // nobody. A single call fills the first empty slot; two calls from the
+  // same key, or two calls presented to the same Comb, fill both slots
+  // and are then refused by name, so the rule is visible in the Colony's
+  // own replicated history rather than being a claim about who an Admin
+  // says they are.
+  //
+  // ORDER IS RAFT'S, not the caller's. Slots fill in log-apply order,
+  // which is a total order every replica agrees on, so "the first
+  // approval" means the same thing on every member and survives a
+  // leadership change.
+  JoinApprovalAttestation approval_1 = 12;
+  JoinApprovalAttestation approval_2 = 13;
+
+  // authorization_id / consumed_at_unix are Part 3's record of use.
+  // authorization_id names the entry in the root-owned authorization
+  // file that authorized THIS approval, and consumed_at_unix is when
+  // that entry was spent.
+  //
+  // The file is the input; this is the record. Single use is enforced
+  // here rather than by editing the file, because only the leader reads
+  // the file and a stale copy of it on another Comb would otherwise be
+  // able to spend the same entry a second time after a leadership
+  // change. Same reasoning restart_leases and restart_records already
+  // use for the restart guardrail.
+  string authorization_id = 14;
+  int64 consumed_at_unix = 15;
+}
+
+// JoinApprovalAttestation is one recorded "I am authorizing this join"
+// act: the id of the API key the caller's credential validated to, the
+// Comb that call was presented to, and when. It resolves nothing on its
+// own - see RecordJoinApproval - and exists so the Colony's own
+// replicated record says which two keys, on which two Combs, admitted a
+// given Comb.
+message JoinApprovalAttestation {
+  // key_id is the ApiKey record's own generated id, never key material.
+  // Empty means "nobody authenticated": a managerd with no API keys at
+  // all, where checkAuth is a no-op and therefore cannot supply a second
+  // distinct credential. Part 3 refuses that rather than waving it
+  // through - a Colony with no credentials is not one that can show two
+  // of them.
+  string key_id = 1;
+
+  // node_id is the Comb the authorizing call was presented to, as that
+  // Comb's own configuration states it - never as the caller claimed it.
+  // See ManagerService.ApproveJoinRequest's own approving_node_id for
+  // why that distinction is the reason the two-person rule is worth
+  // anything at all.
+  string node_id = 2;
+
+  int64 at_unix = 3;
 }
 
 // CreatePendingJoinRequest records a new join request. Fails if
@@ -940,6 +1011,44 @@ message CreatePendingJoinRequest {
 // applying the same log entry reaches the identical decision.
 message ApprovePendingJoinRequest {
   string request_id = 1;
+
+  // authorization_id / consumed_at_unix are ADR-0147 Part 3's record of
+  // use, written by the very command that approves so the two cannot
+  // disagree. The leader has already checked that the entry matched, was
+  // unexpired, and had not been spent by an earlier approval; recording
+  // which entry was spent, and when, is what makes that check survive a
+  // leadership change.
+  string authorization_id = 2;
+  int64 consumed_at_unix = 3;
+}
+
+// RecordJoinApproval records ONE authorizing act for a request without
+// resolving it (ADR-0147 Part 3's two-person rule). It fills
+// PendingJoinRequest's first empty approval slot and fails once both
+// are full, so a third call cannot overwrite a record an operator may
+// still be reading.
+//
+// It is a separate command from ApprovePendingJoinRequest rather than a
+// flag on it because the two genuinely differ in consequence: this one
+// admits nobody, and a Colony whose first approval has just been
+// recorded is exactly as closed to new members as it was a moment
+// earlier. That separation is what makes the rule visible - an Admin
+// who approves once sees a request that is still PENDING and a message
+// naming what is still missing, not a success that quietly did less than
+// it said.
+message RecordJoinApproval {
+  string request_id = 1;
+
+  // key_id and node_id are written by the member that received the
+  // authorizing call, from its own authenticated context and its own
+  // configuration respectively - never from anything the caller sent.
+  // at_unix is the caller's own clock reading, for the same reason
+  // request.requested_at_unix is (see applyCreatePendingJoinRequest):
+  // the FSM must stay deterministic, so the time is an input to the
+  // command and not something the FSM derives.
+  string key_id = 2;
+  string node_id = 3;
+  int64 at_unix = 4;
 }
 
 // RejectPendingJoinRequest mirrors ApprovePendingJoinRequest exactly,

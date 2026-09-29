@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/glenjbarber/apiary/internal/hostcert"
+	"github.com/glenjbarber/apiary/internal/joinauth"
 	"github.com/glenjbarber/apiary/internal/nodeconfig"
 	"github.com/glenjbarber/apiary/internal/raftdconfig"
 )
@@ -901,5 +902,272 @@ func TestLocalDialsFollowTheAddressManagerdIsActuallyGiven(t *testing.T) {
 		if strings.Contains(body, `"manager_addr": "127.0.0.1`) {
 			t.Errorf("%s dials loopback, which a listener bound to this host's own name does not serve:\n%s", name, body)
 		}
+	}
+}
+
+// ADR-0147 Part 3's authorization store is the one file in this
+// package that is an authority rather than a setting, so the rule that
+// governs it is the strictest form of the rule the rest of the package
+// runs on: a file that is already there is left exactly as it is, mode
+// and bytes both, and a file that is there but wrong is refused by name
+// rather than corrected. The cases below are the four branches
+// planJoinAuthorizationStore actually has, plus a fifth - a stat that
+// fails for any reason other than "not there" - because "leave it
+// alone" has to hold for a file this program cannot even look at.
+//
+// The mode is asserted on the file after Apply rather than on the plan
+// line, because a create line carries no mode: the mode lives in the
+// write the plan registered, so the only honest way to check it is to
+// apply and look. Ownership is not asserted at all, and cannot be: the
+// fixture is owned by whoever runs the test, and "root-owned" on a real
+// Comb is a consequence of --apply refusing to run without an effective
+// uid of 0, which is ErrNotRoot's job rather than this function's.
+func TestPlanJoinAuthorizationStore(t *testing.T) {
+	populated := `{
+  "authorizations": [
+    {
+      "id": "auth-0123456789abcdef",
+      "node_id": "drone.lab3.home.arpa",
+      "fingerprint": "SHA256:AA:BB",
+      "expires_at_unix": 1790000000
+    },
+    {
+      "id": "auth-fedcba9876543210",
+      "node_id": "wasp.lab3.home.arpa",
+      "fingerprint": "SHA256:CC:DD",
+      "expires_at_unix": 1790000001
+    }
+  ]
+}
+`
+
+	// storeLines returns every line the plan recorded about the store,
+	// which is the whole of what this function contributes to the
+	// report. Filtering to the path keeps a failure pointing at the
+	// store rather than at the twenty other lines around it.
+	storeLines := func(p *Plan, path string) []Action {
+		var out []Action
+		for _, a := range p.Actions() {
+			if a.Path == path {
+				out = append(out, a)
+			}
+		}
+		return out
+	}
+
+	for _, tc := range []struct {
+		name string
+		// seed puts the store on disk. It returns the mode the file
+		// must still have after Apply, and whether to check a mode at
+		// all - the unstatable case has none worth checking.
+		seed func(t *testing.T, f *fixture, path string) (os.FileMode, bool)
+		// want is the one line about the store the plan must record.
+		wantKind   ActionKind
+		wantField  string
+		wantValue  string
+		wantReason []string
+		// wantWritten is whether Apply must have created the file.
+		wantWritten bool
+		// wantApplyErr is whether Apply must have failed. A refusal
+		// makes the whole install exit non-zero, which is asserted
+		// rather than left to a summary test: for this one file the
+		// exit status is most of what an operator learns.
+		wantApplyErr bool
+	}{
+		{
+			// The happy path: a fresh Comb has the store before it
+			// needs one, empty, so "no Comb is authorized yet" is a
+			// fact about a file that exists rather than about a file
+			// that is missing.
+			name:        "absent",
+			wantKind:    ActionCreate,
+			wantField:   "authorization entries",
+			wantValue:   "0",
+			wantReason:  []string{"join-authorize", "created empty"},
+			wantWritten: true,
+		},
+		{
+			// The second run over this install's own output. The file
+			// is already there and correct, so it is kept and nothing
+			// is registered to write it.
+			name: "already present and correct",
+			seed: func(t *testing.T, f *fixture, path string) (os.FileMode, bool) {
+				f.write(path, "{\n  \"authorizations\": []\n}\n")
+				return 0o600, true
+			},
+			wantKind:   ActionKeep,
+			wantField:  "authorization entries",
+			wantValue:  "0",
+			wantReason: []string{"already exists", "never rewrite it"},
+		},
+		{
+			// The same file with an operator's entries in it. The count
+			// is reported, because an operator reading the report has
+			// to be able to see that the file was read at all.
+			name: "already present with entries",
+			seed: func(t *testing.T, f *fixture, path string) (os.FileMode, bool) {
+				f.write(path, populated)
+				return 0o600, true
+			},
+			wantKind:   ActionKeep,
+			wantField:  "authorization entries",
+			wantValue:  "2",
+			wantReason: []string{"already exists", "never rewrite it"},
+		},
+		{
+			// Present, but not readable by root alone. The installer
+			// refuses and says so by name rather than chmodding it,
+			// because the whole authority claim of this file is that
+			// only root can write it, and silently tightening a file an
+			// operator may be reading is the class of unrequested
+			// change this package exists to avoid.
+			name: "present with the wrong mode",
+			seed: func(t *testing.T, f *fixture, path string) (os.FileMode, bool) {
+				f.write(path, "{\n  \"authorizations\": []\n}\n")
+				if err := os.Chmod(path, 0o644); err != nil {
+					t.Fatal(err)
+				}
+				return 0o644, true
+			},
+			wantKind:     ActionRefuse,
+			wantField:    "mode",
+			wantValue:    "0644",
+			wantReason:   []string{"only root can write it", "not chmodded here"},
+			wantApplyErr: true,
+		},
+		{
+			// Present, readable only by its owner, and unparseable. It
+			// is reported rather than fixed, because the contents are
+			// the operator's deliberate edits and becoming a second
+			// authority over the same bytes is what this package
+			// refuses to do. The file is still left exactly as it is,
+			// which is the whole point.
+			name: "present and malformed",
+			seed: func(t *testing.T, f *fixture, path string) (os.FileMode, bool) {
+				f.write(path, `{"authorizations": [`)
+				return 0o600, true
+			},
+			wantKind:     ActionRefuse,
+			wantField:    "contents",
+			wantReason:   []string{"left exactly as it is", "join-authorize"},
+			wantApplyErr: true,
+		},
+		{
+			// A path this program cannot stat at all: a symlink pointing
+			// at itself is ELOOP, not ENOENT, so it must not be
+			// mistaken for an absent store and created over.
+			name: "not statable",
+			seed: func(t *testing.T, f *fixture, path string) (os.FileMode, bool) {
+				if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Symlink(filepath.Base(path), path); err != nil {
+					t.Fatal(err)
+				}
+				return 0, false
+			},
+			wantKind:     ActionRefuse,
+			wantField:    "authorization entries",
+			wantReason:   []string{"join-authorizations.json"},
+			wantApplyErr: true,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newFixture(t)
+			path := f.opts.Paths.joinAuthorizations()
+
+			var seededMode os.FileMode
+			var checkMode bool
+			if tc.seed != nil {
+				seededMode, checkMode = tc.seed(t, f, path)
+			}
+			// The inode before the plan runs, so "not rewritten" can be
+			// asserted as a fact about the file rather than as a claim
+			// about a list of internal closures. writeFileAtomic always
+			// renames into place, so a rewrite necessarily replaces the
+			// inode; an unchanged one is a rewrite that did not happen.
+			// Lstat rather than Stat, because the unstatable case is a
+			// symlink and os.Stat on it is the very failure under test.
+			var before os.FileInfo
+			if tc.seed != nil {
+				var err error
+				if before, err = os.Lstat(path); err != nil {
+					t.Fatalf("lstat %s: %v", path, err)
+				}
+			}
+
+			p := f.plan()
+			got := storeLines(p, path)
+			if len(got) != 1 {
+				t.Fatalf("the plan recorded %d lines about %s, want exactly 1: %v", len(got), path, got)
+			}
+			if got[0].Kind != tc.wantKind {
+				t.Errorf("kind = %q, want %q (reason %q)", got[0].Kind, tc.wantKind, got[0].Reason)
+			}
+			if got[0].Field != tc.wantField {
+				t.Errorf("field = %q, want %q", got[0].Field, tc.wantField)
+			}
+			if got[0].Value != tc.wantValue {
+				t.Errorf("value = %q, want %q", got[0].Value, tc.wantValue)
+			}
+			for _, want := range tc.wantReason {
+				if !strings.Contains(got[0].Reason, want) {
+					t.Errorf("reason = %q, want it to mention %q", got[0].Reason, want)
+				}
+			}
+			if tc.wantKind == ActionRefuse {
+				if len(p.Refusals()) == 0 {
+					t.Errorf("Refusals() is empty; a store that is wrong is a refusal the operator has to see")
+				}
+			} else if len(p.Refusals()) != 0 {
+				t.Errorf("Refusals() = %v, want none from a store that was created or kept", p.Refusals())
+			}
+			for _, n := range p.Needs() {
+				if n.Path == path {
+					t.Errorf("the store is recorded as a need (%q); it is created empty, so there is nothing for a human to supply", n.Reason)
+				}
+			}
+
+			// Create means Apply must produce the file. Every other case
+			// means Apply must not touch it, and Apply is expected to
+			// fail on the refusals.
+			err := p.Apply()
+			if (err != nil) != tc.wantApplyErr {
+				t.Errorf("Apply returned %v, wantApplyErr = %v", err, tc.wantApplyErr)
+			}
+			if tc.wantWritten {
+				if !f.exists(path) {
+					t.Fatalf("Apply did not create %s", path)
+				}
+				// The intended mode, checked on the file the plan's
+				// write actually produced rather than on the plan line,
+				// because the line does not carry it.
+				assertMode(t, path, 0o600)
+				// The bytes the installer writes have to be a store
+				// joinauth.Load accepts, or the very first
+				// `apiaryctl join-authorize` would be refused against a
+				// file this tool created.
+				store, loadErr := joinauth.Load(path)
+				if loadErr != nil {
+					t.Fatalf("the store the installer wrote does not load through internal/joinauth: %v", loadErr)
+				}
+				if len(store.Authorizations) != 0 {
+					t.Errorf("the store the installer wrote holds %d entries, want an empty one: no Comb is authorized to join until an operator says so", len(store.Authorizations))
+				}
+				return
+			}
+			after, statErr := os.Lstat(path)
+			if statErr != nil {
+				t.Fatalf("lstat %s after Apply: %v", path, statErr)
+			}
+			if !os.SameFile(before, after) {
+				t.Errorf("Apply replaced %s; a store that was already on disk must not be rewritten, not even to identical bytes", path)
+			}
+			if checkMode {
+				if got := after.Mode().Perm(); got != seededMode {
+					t.Errorf("%s mode = %04o after Apply, want the %04o it was seeded with", path, got, seededMode)
+				}
+			}
+		})
 	}
 }

@@ -120,6 +120,18 @@ func (p Paths) restshimdConfig() string { return filepath.Join(p.ConfigDir, "res
 func (p Paths) certFile() string        { return filepath.Join(p.TLSDir, "cert.pem") }
 func (p Paths) keyFile() string         { return filepath.Join(p.TLSDir, "key.pem") }
 
+// joinAuthorizations is ADR-0147 Part 3's root-owned authorization
+// store. It lives in the config directory because that is where root
+// already keeps everything else on this Comb, and it is deliberately
+// NOT one of the daemon config files: no RPC names it, no proto field
+// carries a path to it, and nothing in this package parses or rewrites
+// it. The installer creates it EMPTY and 0600 so a fresh Comb has the
+// store before it needs one, and a second run over its own output
+// changes nothing.
+func (p Paths) joinAuthorizations() string {
+	return filepath.Join(p.ConfigDir, "join-authorizations.json")
+}
+
 // The default listening addresses. They are the same values the
 // Makefile's setup-quick writes, and each one is here for a stated
 // reason rather than by inheritance:

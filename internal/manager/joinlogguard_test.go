@@ -126,15 +126,11 @@ func TestIntegration_ApproveJoinRequest_NonEmptyJoinerLogRefusedAndNeverAdded(t 
 	openColonyJoinWindowForTest(t, client)
 	seedPendingJoinRequest(t, srv, "jreq-bad", "node02", "10.62.0.5:17600", true, 4096)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-
-	resp, err := client.ApproveJoinRequest(ctx, &rpcpb.ApproveJoinRequestRequest{
-		RequestId: "jreq-bad", ConfirmPhrase: approveJoinRequestConfirmPhrase,
-	})
-	if err != nil {
-		t.Fatalf("ApproveJoinRequest() error: %v", err)
-	}
+	// ADR-0147 Part 3: the operator's authorization is done FIRST, so the
+	// refusal this test is about is the log guard's and not the new
+	// gate's. A test that passes by being refused two checks earlier
+	// looks green while asserting something else entirely.
+	resp, _ := operatorAuthorizedApprovalForTest(t, client, srv, "jreq-bad")
 	if resp.GetError() == "" {
 		t.Fatal("ApproveJoinRequest() approved a joiner with a non-empty raft log, want a refusal")
 	}
@@ -160,15 +156,10 @@ func TestIntegration_ApproveJoinRequest_UnobservedJoinerLogRefused(t *testing.T)
 	openColonyJoinWindowForTest(t, client)
 	seedPendingJoinRequest(t, srv, "jreq-old", "node03", "10.62.0.5:17600", false, 0)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-
-	resp, err := client.ApproveJoinRequest(ctx, &rpcpb.ApproveJoinRequestRequest{
-		RequestId: "jreq-old", ConfirmPhrase: approveJoinRequestConfirmPhrase,
-	})
-	if err != nil {
-		t.Fatalf("ApproveJoinRequest() error: %v", err)
-	}
+	// ADR-0147 Part 3: as in the sibling test above - the operator's
+	// authorization is done first, so the refusal under test is the
+	// log guard's and not the two-person gate's.
+	resp, _ := operatorAuthorizedApprovalForTest(t, client, srv, "jreq-old")
 	if resp.GetError() == "" {
 		t.Fatal("ApproveJoinRequest() approved a joiner with NO evidence about its log, want a refusal")
 	}
@@ -204,15 +195,9 @@ func TestIntegration_ApproveJoinRequest_ObservedEmptyLogStillApproved(t *testing
 	openColonyJoinWindowForTest(t, client)
 	seedPendingJoinRequest(t, srv, "jreq-good", "node04", joiningAddr, true, 0)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-
-	resp, err := client.ApproveJoinRequest(ctx, &rpcpb.ApproveJoinRequestRequest{
-		RequestId: "jreq-good", ConfirmPhrase: approveJoinRequestConfirmPhrase,
-	})
-	if err != nil {
-		t.Fatalf("ApproveJoinRequest() error: %v", err)
-	}
+	// ADR-0147 Part 3: the operator's authorization, from two Combs with
+	// two keys, before the log guard is even consulted.
+	resp, _ := operatorAuthorizedApprovalForTest(t, client, srv, "jreq-good")
 	if resp.GetError() != "" {
 		t.Fatalf("ApproveJoinRequest() refused a joiner whose log is genuinely empty: %s", resp.GetError())
 	}
@@ -328,12 +313,11 @@ func TestIntegration_PreflightAndApproveAgreeOnTheLogGuard(t *testing.T) {
 				t.Error("preflight refused but reported no findings, so the operator is told nothing about why")
 			}
 
-			app, err := client.ApproveJoinRequest(ctx, &rpcpb.ApproveJoinRequestRequest{
-				RequestId: "jreq-pf", ConfirmPhrase: approveJoinRequestConfirmPhrase,
-			})
-			if err != nil {
-				t.Fatalf("ApproveJoinRequest() error: %v", err)
-			}
+			// ADR-0147 Part 3: the operator's authorization, so that the
+			// agreement this test is about is between preflight and the
+			// log-guard check rather than between preflight and a refusal
+			// from a gate that did not exist when preflight was written.
+			app, _ := operatorAuthorizedApprovalForTest(t, client, srv, "jreq-pf")
 			if approved := app.GetError() == ""; approved != allowed {
 				t.Errorf("preflight said allowed=%v but approval said approved=%v, want the two to agree", allowed, approved)
 			}

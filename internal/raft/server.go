@@ -105,6 +105,31 @@ func (s *Server) Apply(_ context.Context, req *internalpb.ApplyRequest) (*intern
 	return &internalpb.ApplyResponse{Result: resultBytes}, nil
 }
 
+// GetAuthorizationUse implements internalpb.RaftInternalServer
+// (ADR-0147 Part 3) - the read side of an authorization entry's
+// replicated record of use.
+func (s *Server) GetAuthorizationUse(_ context.Context, req *internalpb.GetAuthorizationUseRequest) (*internalpb.GetAuthorizationUseResponse, error) {
+	// An empty id is a caller bug rather than a question, and answering
+	// it would be answering "has anything ever been spent" - so it is
+	// refused instead.
+	if req.GetAuthorizationId() == "" {
+		return &internalpb.GetAuthorizationUseResponse{Error: "GetAuthorizationUse: authorization_id must be set"}, nil
+	}
+	requestID, consumedAt, found, err := s.node.AuthorizationUse(req.GetAuthorizationId())
+	if err != nil {
+		resp := &internalpb.GetAuthorizationUseResponse{Error: err.Error()}
+		if errors.Is(err, ErrNotLeader) {
+			resp.LeaderHint = s.node.LeaderHint()
+		}
+		return resp, nil
+	}
+	return &internalpb.GetAuthorizationUseResponse{
+		Found:          found,
+		RequestId:      requestID,
+		ConsumedAtUnix: consumedAt,
+	}, nil
+}
+
 // Status implements internalpb.RaftInternalServer.
 func (s *Server) Status(_ context.Context, _ *internalpb.StatusRequest) (*internalpb.StatusResponse, error) {
 	status := s.node.Status()

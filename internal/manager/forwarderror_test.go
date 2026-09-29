@@ -57,8 +57,15 @@ func (f *fakeFailingPeerForwarder) CreateJail(context.Context, string, *rpcpb.Cr
 // node is guaranteed to be a follower, never the leader, since a
 // 2-voter cluster's original leader keeps its term on an uncontested
 // AddVoter.
-func newJoinedFollowerRaftdSocket(t *testing.T, leaderClient rpcpb.ManagerServiceClient, nodeID string) string {
+func newJoinedFollowerRaftdSocket(t *testing.T, leaderSocket string, nodeID string) string {
 	t.Helper()
+
+	// This helper approves a join, so it builds the leader's managerd
+	// itself rather than taking a client: ADR-0147 Part 3 requires an
+	// operator authorization - an entry in a root-owned file, spent from
+	// two Combs with two keys - before an approval gets anywhere, and
+	// that needs the leader's *Server as well as its client.
+	leaderClient, leaderSrv := newManagerdRPCClientAndServer(t, leaderSocket, "manager-1")
 
 	addr := freeLoopbackAddr(t)
 	cfg := raftnode.Config{NodeID: nodeID, DataDir: t.TempDir(), BindAddr: addr}
@@ -92,7 +99,7 @@ func newJoinedFollowerRaftdSocket(t *testing.T, leaderClient rpcpb.ManagerServic
 	if err != nil || reqResp.GetError() != "" {
 		t.Fatalf("RequestJoinColony() = (%+v, %v)", reqResp, err)
 	}
-	approveResp, err := leaderClient.ApproveJoinRequest(ctx, &rpcpb.ApproveJoinRequestRequest{RequestId: reqResp.GetRequestId(), ConfirmPhrase: "yes-trust-new-comb"})
+	approveResp, _ := operatorAuthorizedApprovalForTest(t, leaderClient, leaderSrv, reqResp.GetRequestId())
 	if err != nil || approveResp.GetError() != "" {
 		t.Fatalf("ApproveJoinRequest() = (%+v, %v)", approveResp, err)
 	}
@@ -113,10 +120,10 @@ func newJoinedFollowerRaftdSocket(t *testing.T, leaderClient rpcpb.ManagerServic
 // not a stubbed value.
 func TestIntegration_CreateJail_ForwardingFailureSurfacedInError(t *testing.T) {
 	leaderSocket := newRaftdUDSSocket(t)
-	leaderClient := newManagerdRPCClient(t, leaderSocket)
+	leaderClient, _ := newManagerdRPCClientAndServer(t, leaderSocket, "manager-1")
 
 	openColonyJoinWindowForTest(t, leaderClient)
-	followerSocket := newJoinedFollowerRaftdSocket(t, leaderClient, "follower-1")
+	followerSocket := newJoinedFollowerRaftdSocket(t, leaderSocket, "follower-1")
 	_, followerSrv := newManagerdRPCClientAndServer(t, followerSocket, "follower-1")
 
 	simulatedErr := errors.New(`tls: failed to verify certificate: x509: certificate is valid for 127.0.0.1, not 10.90.0.94`)

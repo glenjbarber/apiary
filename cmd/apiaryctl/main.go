@@ -15,11 +15,11 @@
 // other side - managerd must never restart itself - is why this cannot
 // be folded into managerd either.
 //
-// SCOPE, deliberately narrow. Two subcommands, force-restart and
-// install, and no socket, no terminal UI, and no command group that
-// has not been asked for: a command that is present and wrong is worse
-// than one that is absent, and the larger design in ADR-0136 stays
-// proposed until it is built.
+// SCOPE, deliberately narrow. Three subcommands, force-restart, install
+// and join-authorize, and no socket, no terminal UI, and no command
+// group that has not been asked for: a command that is present and wrong
+// is worse than one that is absent, and the larger design in ADR-0136
+// stays proposed until it is built.
 //
 // install is the second, and it exists for the same reason force-restart
 // does: both are things an operator has to type on a Comb that has no
@@ -31,6 +31,7 @@
 // Usage:
 //
 //	apiaryctl install [--apply]
+//	apiaryctl join-authorize --node-id ID --fingerprint FP
 //	apiaryctl force-restart
 //	apiaryctl help
 package main
@@ -50,6 +51,9 @@ Usage:
                             serving certificate and identity. Report
                             only unless --apply. Needs a root shell and
                             no checkout.
+  apiaryctl join-authorize authorize one Comb to join this Colony, by
+                            writing a single-use entry into the
+                            root-owned store. Root only, no checkout
   apiaryctl force-restart   restart managerd then raftd on this Comb,
                             confirming each by its own listener port
   apiaryctl -version        report this binary's build identity
@@ -58,6 +62,10 @@ Usage:
 force-restart is root-only and touches only this Comb. It takes no
 lease and coordinates with nothing; see the warning it prints, and use
 the Machine page's per-service control for a coordinated restart.
+
+join-authorize is root-only because the store it writes is root-owned,
+and that ownership is the security property rather than an incidental
+detail: it is the one thing an Admin of this Colony cannot do.
 
 install is root-only with --apply and needs no privileges without it.
 It never overwrites a field that is already set, and a run that refuses
@@ -85,6 +93,8 @@ func main() {
 	switch args[0] {
 	case "install":
 		os.Exit(runInstall(args[1:]))
+	case "join-authorize":
+		os.Exit(runJoinAuthorize(args[1:]))
 	case "force-restart":
 		os.Exit(runForceRestart(args[1:]))
 	case "help", "-h", "--help":

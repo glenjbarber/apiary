@@ -168,6 +168,11 @@ func fromInternalPendingJoinRequest(r *internalpb.PendingJoinRequest) *rpcpb.Pen
 		TlsCertFingerprint:     r.GetTlsCertFingerprint(),
 		JoinerLogStateObserved: r.GetJoinerLogStateObserved(),
 		JoinerLastLogIndex:     r.GetJoinerLastLogIndex(),
+		WindowOpenedAtUnix:     r.GetWindowOpenedAtUnix(),
+		Approval_1:             fromInternalJoinApproval(r.GetApproval_1()),
+		Approval_2:             fromInternalJoinApproval(r.GetApproval_2()),
+		AuthorizationId:        r.GetAuthorizationId(),
+		ConsumedAtUnix:         r.GetConsumedAtUnix(),
 	}
 }
 

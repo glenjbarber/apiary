@@ -301,6 +301,24 @@ func (n *Node) ListPendingJoinRequestsLocal() []*internalpb.PendingJoinRequest {
 	return n.fsm.ListPendingJoinRequests()
 }
 
+// AuthorizationUse backs GetAuthorizationUse (ADR-0147 Part 3) - the
+// replicated record of which request spent which root-owned
+// authorization entry.
+//
+// Leader-only, exactly like GetVM and for a sharper reason: the answer
+// decides whether an irreversible membership change proceeds, and a
+// follower answering from its own possibly-stale map would report an
+// already-spent entry as unspent. Failing OPEN on the record of use is
+// the precise bug the replicated record was added to prevent, so a
+// follower refuses rather than guesses.
+func (n *Node) AuthorizationUse(authorizationID string) (requestID string, consumedAtUnix int64, found bool, err error) {
+	if n.raft.State() != raft.Leader {
+		return "", 0, false, ErrNotLeader
+	}
+	requestID, consumedAtUnix, found = n.fsm.AuthorizationUse(authorizationID)
+	return requestID, consumedAtUnix, found, nil
+}
+
 // RestartLeaseStateLocal backs GetRestartLeaseStateLocal (ADR-0103) - a
 // plain read of this node's own FSM copy, mirroring
 // GetPendingJoinRequestLocal's own "any node can answer" posture.
