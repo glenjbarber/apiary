@@ -1,6 +1,10 @@
 package frontend
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/glenjbarber/apiary/internal/health"
+)
 
 func TestNewHealthCardView(t *testing.T) {
 	v := newHealthCardView(3, 4, map[string]int{
@@ -54,5 +58,56 @@ func TestNewHealthCardView(t *testing.T) {
 	}
 	if criticalIdx == -1 || okIdx == -1 || criticalIdx > okIdx {
 		t.Errorf("expected critical (index %d) to sort before ok (index %d)", criticalIdx, okIdx)
+	}
+}
+
+func TestHealthCardVocabFor(t *testing.T) {
+	cases := []struct {
+		status health.Status
+		want   string
+	}{
+		{health.StatusHealthy, "ok"},
+		{health.StatusDegraded, "warn"},
+		{health.StatusUnknown, "unknown"},
+		{health.StatusStale, "stale"},
+		{health.StatusContradictory, "contradictory"},
+	}
+	for _, c := range cases {
+		if got := healthCardVocabFor(c.status); got != c.want {
+			t.Errorf("healthCardVocabFor(%q) = %q, want %q", c.status, got, c.want)
+		}
+	}
+}
+
+func TestNewHealthCardViewFromNodes(t *testing.T) {
+	nodes := []clusterNodeView{
+		{NodeID: "a", Reachable: true, HealthStatus: health.StatusHealthy},
+		{NodeID: "b", Reachable: true, HealthStatus: health.StatusHealthy},
+		{NodeID: "c", Reachable: false, HealthStatus: health.StatusUnknown},
+		{NodeID: "d", Reachable: true, HealthStatus: health.StatusContradictory},
+	}
+	v := newHealthCardViewFromNodes(nodes, 0, 3)
+
+	if v.ReachableCombs != 3 || v.TotalCombs != 4 {
+		t.Fatalf("got ReachableCombs=%d TotalCombs=%d, want 3/4", v.ReachableCombs, v.TotalCombs)
+	}
+	if v.PendingJoins != 3 {
+		t.Errorf("PendingJoins = %d, want 3 (passed through unchanged)", v.PendingJoins)
+	}
+	byState := map[string]int{}
+	for _, s := range v.Stats {
+		byState[s.State] = s.Count
+	}
+	want := map[string]int{"ok": 2, "unknown": 1, "contradictory": 1, "critical": 0, "warn": 0, "stale": 0, "not-applicable": 0}
+	for state, count := range want {
+		if byState[state] != count {
+			t.Errorf("state %q count = %d, want %d", state, byState[state], count)
+		}
+	}
+	// The unreachable node (c) still counts toward TotalCombs and still
+	// contributes its own HealthStatus (unknown) to the grid - being
+	// unreachable does not erase it from the count of what was seen.
+	if v.TotalCombs-v.ReachableCombs != 1 {
+		t.Errorf("expected exactly one unreachable Comb accounted for")
 	}
 }

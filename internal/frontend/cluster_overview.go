@@ -107,6 +107,17 @@ type clusterNodeView struct {
 	PoolsOK    bool
 	PFEnabled  bool
 
+	// CPUGauge/MemGauge (docs/web-ui-redesign.md Section C) render the
+	// same LoadAvg1/MemUsedPct above as a radial reading on the Command
+	// Center's topology cards - both fields already existed and were
+	// computed on every row, just never rendered anywhere. Zero-valued
+	// (State "") on an unreachable row, which the template guards with
+	// the same {{if .Reachable}} every other per-node reading already
+	// uses, rather than this file inventing an "unreachable" gauge state
+	// gauge.go has no notion of.
+	CPUGauge gaugeView
+	MemGauge gaugeView
+
 	// HealthStatus/HealthExplanation/HealthObservations are Evidence-
 	// Aware Health's (ADR-0056) computed verdict for this node - additive
 	// alongside the fields above, which are left untouched.
@@ -239,6 +250,8 @@ func summarizeClusterNode(nodeID string, stats statsView, fetchErr string) clust
 		MemUsedPct: stats.MemUsedPct,
 		PoolsOK:    poolsOK,
 		PFEnabled:  stats.PF.Enabled,
+		CPUGauge:   gaugeFromLoadAverage("CPU", stats.LoadAvg1, stats.Cores, fmt.Sprintf("%.2f load, %d cores", stats.LoadAvg1, stats.Cores)),
+		MemGauge:   gaugeFromPercent("Memory", stats.MemUsedPct, stats.MemFree+" free"),
 	}
 }
 
@@ -475,10 +488,14 @@ func (s *Server) handleClusterOverviewPage(w http.ResponseWriter, r *http.Reques
 		nodes[i].DigestDetail = view.Detail
 	}
 
+	joinRequests := s.currentJoinRequests(r)
 	s.render(w, "cluster_overview_page", s.withAuthFieldsFrom(r, pageData{
-		ClusterNodes:                nodes,
+		ClusterNodes: nodes,
+		// GuardrailHolds is 0 - see pageData.HealthCard's own comment on
+		// why this constructor has no real count to pass here yet.
+		HealthCard:                  newHealthCardViewFromNodes(nodes, 0, len(joinRequests)),
 		StateDigestColony:           digestColony,
-		JoinRequests:                s.currentJoinRequests(r),
+		JoinRequests:                joinRequests,
 		ActivePage:                  "stats",
 		JoinRequestError:            r.URL.Query().Get("join_request_error"),
 		JoinRequestPreflightID:      r.URL.Query().Get("preflight_request_id"),

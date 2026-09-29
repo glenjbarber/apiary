@@ -129,6 +129,17 @@ type pageData struct {
 	// a verdict without any nil check of its own.
 	StateDigestColony stateDigestColony
 
+	// HealthCard (docs/web-ui-redesign.md Section C) is the Command
+	// Center's top-of-page summary, built from the same ClusterNodes
+	// this render already computed - see newHealthCardViewFromNodes.
+	// Its GuardrailHolds is always 0 here: no existing RPC reports a
+	// colony-wide count of active restart-guardrail leases, only a
+	// per-service preflight for one node at a time. The template only
+	// renders that line when the count is positive, so this does not
+	// assert "zero holds" - it renders nothing, same as "not measured."
+	// Wiring a real count is future work once that RPC exists.
+	HealthCard healthCardView
+
 	// MaintenanceWaves contains a read-only, one-Comb-at-a-time rehearsal
 	// based on the same node-failure simulation shown on /simulate.
 	MaintenanceWaves []maintenanceWaveView

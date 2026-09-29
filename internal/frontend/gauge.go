@@ -61,6 +61,20 @@ func gaugeFromUsedTotal(label string, used, total uint64, detail string) gaugeVi
 	return gaugeFromPercent(label, pct, detail)
 }
 
+// gaugeFromLoadAverage builds a Gauge for CPU load expressed against a
+// known core count - the one reading in this file with no natural
+// percentage of its own (a load average of 1.5 means something
+// different on 2 cores than on 16). cores<=0 is "unknown," not a
+// divide-by-zero guess: a HostStats read that came back with no core
+// count is missing evidence, not evidence of an idle machine.
+func gaugeFromLoadAverage(label string, loadAvg1 float64, cores int32, detail string) gaugeView {
+	if cores <= 0 {
+		return gaugeView{Label: label, State: "unknown", Detail: detail, Dash: gaugeDasharray(), DashOffset: gaugeDashOffset(0)}
+	}
+	pct := loadAvg1 / float64(cores) * 100
+	return gaugeFromPercent(label, pct, detail)
+}
+
 // gaugeFromPercent builds a Gauge directly from a percentage - for a
 // reading that has no natural used/total pair, such as CPU load
 // expressed as a fraction of cores.
