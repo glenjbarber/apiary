@@ -31,21 +31,35 @@ of it:
 - **A sweep.** `ExecuteNodeRestartPlan` takes one `node_id` and one
   `service`. Nothing derives which Comb to touch first or in what order, and
   nothing drives the four Combs back to back.
-- **`versioncheck` as the per-step build-identity gate.** Neither
-  `internal/manager` nor `internal/restartplan` imports `internal/buildgate`,
-  so "what is RUNNING against what is ON DISK" is not checked per step.
+- **`versioncheck` as the per-step build-identity gate.** The gate is
+  imported and run on exactly one path so far: the replacement managerd's own
+  confirmation in `internal/manager/handoff.go` (ADR-0146 rule 5), which
+  compares what is RUNNING against what is ON DISK on the Comb that just came
+  back. `ExecuteNodeRestartPlan` and `internal/restartplan` still import
+  neither `internal/buildgate`, so an ordinary raftd step is not gated on it.
 - **The ADR-0143 verdicts as the per-step and end-of-sweep gates.** The plan
   imports neither `internal/health` nor reads `ClusterHealth`, so none of the
   three health checks in the table above is wired to anything.
-- **A managerd self-restart handoff.** `apiary_managerd` is refused
-  outright, unchanged from ADR-0142, so this call can never restart the
-  process it lives in.
+- **A managerd self-restart handoff.** Built, in `internal/manager/handoff.go`
+  (ADR-0146): a peer managerd issues the restart over
+  `RequestManagerdRestart`/`IssueManagerdRestart`, the target arranges it in a
+  child reparented out of managerd, and the replacement confirms its own step
+  against the real build gate and the real restart lease on its next startup.
+  It is not wired into anything, because the coordinator that would call it is
+  the sweep above. `apiary_managerd` is still refused outright by this ADR's
+  own `ExecuteNodeRestartPlan` and by `RestartNodeService`, unchanged from
+  ADR-0142, and no operator control reaches any of it.
 
 **Not verified.** None of this has run on a FreeBSD host. The sequence is
 exercised against a real raft cluster on loopback with a real gRPC surface,
 but `service apiary_raftd restart`, rc.d's stop/start timing and the real
 interval between raftd coming back and its startup hook running are macOS
-test fakes and nothing more. The design sections below are unchanged, and
+test fakes and nothing more. The managerd handoff added since is in the same
+position and one step further out: its properties are pinned by tests, and
+forking the restart out of a live managerd at the exact moment managerd is
+being stopped has not been reproduced anywhere. ADR-0146 is explicit that
+this must be done on a real Comb before a Colony is trusted with it, and it
+has not been. The design sections below are unchanged, and
 the two entries in the "Update 2026-09-27" list at the end that said the
 single-flight and the page were unbuilt have been corrected there.
 
