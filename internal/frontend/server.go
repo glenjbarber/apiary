@@ -702,6 +702,27 @@ func pageHeader(title, subtitle string, extra ...string) pageHeaderData {
 	return pageHeaderData{Title: title, Subtitle: subtitle, Extra: e}
 }
 
+// hint renders a section's long description as a tool-tip attached to
+// a small affordance, instead of a permanent paragraph under the
+// heading. The heading stays scannable and the explanation is still
+// there for the operator who asks for it.
+//
+// The affordance is a focusable span rather than a decorative glyph
+// because a title attribute alone is unreachable by keyboard: focus is
+// what makes the tool-tip appear for someone not using a mouse, and
+// aria-label is what announces it to a screen reader. Its text is
+// escaped here rather than at the call site so a description carrying
+// a quote or an angle bracket cannot break out of either attribute.
+//
+// Return type is template.HTML, and it is safe for the same reason
+// pageHeaderData.Extra is: every caller is a template literal written
+// in this repository, never anything a user typed.
+func hint(text string) template.HTML {
+	escaped := html.EscapeString(text)
+	return template.HTML(`<span class="hint" tabindex="0" role="note" aria-label="` +
+		escaped + `" title="` + escaped + `">?</span>`)
+}
+
 // hostPackagesLink builds host.html's header "Packages" link.
 //
 // It exists as a Go function rather than a printf inside the template
@@ -758,6 +779,7 @@ func nodeSubtitle(nodeID string) string {
 // cookie's Secure flag.
 func NewServer(client rpcpb.ManagerServiceClient, auth Authenticator, roleMap map[string]manager.Role, peers peerHostStatsClient, peerHostnameSuffix, peerManagerPort string, passwords PasswordSetter, tlsEnabled bool) (*Server, error) {
 	tmpl, err := template.New("").Funcs(template.FuncMap{
+		"hint":                     hint,
 		"pageHeader":               pageHeader,
 		"vmSubtitle":               vmSubtitle,
 		"nodeSubtitle":             nodeSubtitle,

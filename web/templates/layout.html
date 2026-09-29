@@ -304,6 +304,14 @@
     .form-grid .full, .form-grid .full-width { grid-column:1 / -1; }
     .form-grid > .form-actions { grid-column:1 / -1; margin-top:.25rem; }
     .field-help { color:var(--muted); font-size:.78rem; font-weight:400; }
+    /* hint: a section's long description, held in a title attribute on a
+       focusable "?" rather than in a paragraph under the heading. Focusable
+       so the tool-tip is reachable by keyboard, not hover alone; the
+       focus-visible ring matches every other control on the page. */
+    .hint { display:inline-block; margin-left:.3rem; width:1.05rem; height:1.05rem; border:1px solid var(--line); border-radius:50%; color:var(--muted); background:var(--panel); font-size:.68rem; font-weight:700; line-height:1; text-align:center; cursor:help; vertical-align:baseline; }
+    .hint:hover { color:var(--ink); border-color:var(--muted); }
+    .hint:focus-visible { outline:3px solid var(--focus); outline-offset:2px; }
+    h2 .hint, h3 .hint { vertical-align:middle; }
     .form-actions { display:flex; justify-content:flex-end; align-items:center; gap:.75rem; margin-top:1.25rem; }
     .detail-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:1rem; margin-top:1rem; }
     .detail-card h3, .vm-controls h3, .danger-zone h3 { margin:0 0 .75rem; }
