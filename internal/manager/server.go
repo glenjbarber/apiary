@@ -832,28 +832,79 @@ func (s *Server) IssueOriginCertificate(ctx context.Context, req *rpcpb.IssueOri
 	}, nil
 }
 
-func toRPCAssumptionClaim(claim assumptionregister.Claim) *rpcpb.AssumptionClaim {
+// toRPCAssumptionClaim renders a stored claim for the wire against now.
+//
+// The split is deliberate and one-directional. The first block is what
+// was RECORDED: the operator's words, the evidence they cited, and the
+// raw outcome and time of the last check. The second block is what is
+// DERIVED, computed here, against this node's own clock, on this read.
+// Nothing derived is ever written back to the register, so there is no
+// stored verdict that can expire unnoticed - and no stored verdict for
+// one node to hand another node as if it were the record.
+//
+// now is a parameter rather than a call to time.Now() so that a claim's
+// state is evaluated against exactly the same instant the caller
+// already chose, rather than a second reading of the clock a few
+// microseconds later that could disagree with it at a boundary.
+func toRPCAssumptionClaim(claim assumptionregister.Claim, now time.Time) *rpcpb.AssumptionClaim {
+	evaluation := claim.Evaluate(now)
+	// Zero means "never verified", not the epoch. The zero time's own
+	// Unix() is -62135596800, and a client rendering that as a date
+	// would show a claim being confirmed on 1 January 1 - worse than
+	// showing nothing, because it looks like evidence.
+	var lastVerifiedUnix int64
+	if !claim.LastVerified.IsZero() {
+		lastVerifiedUnix = claim.LastVerified.Unix()
+	}
 	return &rpcpb.AssumptionClaim{
 		Id: claim.ID, Statement: claim.Statement, Owner: claim.Owner,
 		Scope: claim.Scope, Evidence: claim.Evidence,
+		ConsequenceIfFalse: claim.ConsequenceIfFalse,
 		VerificationMethod: claim.VerificationMethod,
+		EvidenceStatus:     string(claim.EvidenceStatus),
 		ExpiresAtUnix:      claim.ExpiresAt.Unix(), CreatedAtUnix: claim.CreatedAt.Unix(),
-		UpdatedAtUnix: claim.UpdatedAt.Unix(),
+		UpdatedAtUnix:    claim.UpdatedAt.Unix(),
+		State:            string(evaluation.State),
+		StateDetail:      evaluation.Reason,
+		LastVerifiedUnix: lastVerifiedUnix,
 	}
 }
 
+// fromRPCAssumptionClaim takes the RECORDED half of a claim off the
+// wire. It deliberately ignores state and state_detail: those are the
+// reporting node's verdict about its own clock, and a client that
+// echoed one back to a save would be storing another node's expired
+// conclusion as if it were this node's evidence. Save re-derives on the
+// next read instead.
 func fromRPCAssumptionClaim(claim *rpcpb.AssumptionClaim) assumptionregister.Claim {
-	return assumptionregister.Claim{
+	recorded := assumptionregister.Claim{
 		ID: claim.GetId(), Statement: claim.GetStatement(), Owner: claim.GetOwner(),
 		Scope: claim.GetScope(), Evidence: claim.GetEvidence(),
+		ConsequenceIfFalse: claim.GetConsequenceIfFalse(),
 		VerificationMethod: claim.GetVerificationMethod(),
+		EvidenceStatus:     assumptionregister.EvidenceStatus(claim.GetEvidenceStatus()),
 		ExpiresAt:          time.Unix(claim.GetExpiresAtUnix(), 0),
 	}
+	if v := claim.GetLastVerifiedUnix(); v != 0 {
+		recorded.LastVerified = time.Unix(v, 0)
+	}
+	return recorded
 }
 
-// relevantRegisterClaims returns unexpired local claims scoped to either the
-// whole Colony or one Hive. It does not parse arbitrary prose scopes or treat
-// an operator claim as evidence used by health or recovery calculations.
+// relevantRegisterClaims returns local claims scoped to either the whole
+// Colony or one Hive, INCLUDING expired ones. It does not parse
+// arbitrary prose scopes or treat an operator claim as evidence used by
+// health or recovery calculations.
+//
+// Expired claims used to be skipped here, and that was wrong in a way
+// that could not be seen from the outside: a claim that quietly
+// disappeared from this list left every conclusion resting on it
+// reading exactly as it did before, which is the "stale or missing
+// evidence must not silently count as true" failure this register
+// exists to prevent. The expiry is not a reason to stop reporting a
+// claim, it is the reason to report it as stale - so the clock is used
+// only to derive each claim's state, never to decide whether the claim
+// is mentioned at all.
 func (s *Server) relevantRegisterClaims(nodeID string, now time.Time) []*rpcpb.AssumptionClaim {
 	if s.register == nil {
 		return nil
@@ -865,17 +916,14 @@ func (s *Server) relevantRegisterClaims(nodeID string, now time.Time) []*rpcpb.A
 	wantHive := "hive:" + nodeID
 	var out []*rpcpb.AssumptionClaim
 	for _, claim := range claims {
-		if !claim.ExpiresAt.After(now) {
-			continue
-		}
 		if claim.Scope == "colony" || claim.Scope == wantHive {
-			out = append(out, toRPCAssumptionClaim(claim))
+			out = append(out, toRPCAssumptionClaim(claim, now))
 		}
 	}
 	return out
 }
 
-func (s *Server) ListAssumptionClaims(context.Context, *rpcpb.ListAssumptionClaimsRequest) (*rpcpb.ListAssumptionClaimsResponse, error) {
+func (s *Server) ListAssumptionClaims(_ context.Context, _ *rpcpb.ListAssumptionClaimsRequest) (*rpcpb.ListAssumptionClaimsResponse, error) {
 	if s.register == nil {
 		return &rpcpb.ListAssumptionClaimsResponse{Error: "no assumption register configured on this node"}, nil
 	}
@@ -883,9 +931,15 @@ func (s *Server) ListAssumptionClaims(context.Context, *rpcpb.ListAssumptionClai
 	if err != nil {
 		return &rpcpb.ListAssumptionClaimsResponse{Error: err.Error()}, nil
 	}
+	// The whole register is listed, expired claims included, and each
+	// one is evaluated against one clock reading taken here rather than
+	// per claim: a list whose rows were each judged at a slightly
+	// different instant is a list that can show two rows straddling a
+	// boundary inconsistently.
+	now := time.Now()
 	resp := &rpcpb.ListAssumptionClaimsResponse{}
 	for _, claim := range claims {
-		resp.Claims = append(resp.Claims, toRPCAssumptionClaim(claim))
+		resp.Claims = append(resp.Claims, toRPCAssumptionClaim(claim, now))
 	}
 	return resp, nil
 }
