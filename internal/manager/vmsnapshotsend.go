@@ -29,19 +29,18 @@ import (
 
 // vmSnapshotTransfer is the *PeerReporter method PushVMSnapshotTo needs
 // to open a client stream on the target node's own ReceiveVMSnapshot
-// RPC - PeerForwarder cannot be widened from this file (it is declared
-// in server.go, which other branches own), so it is asserted for
-// structurally instead. See the report on this branch: internal/manager's
-// PeerForwarder needs
+// RPC. PeerForwarder declares it (see server.go), so a real
+// *PeerReporter satisfies it and the assertion below holds in
+// production; it is still asserted for structurally rather than
+// assumed, so a narrower PeerForwarder in a test or a future
+// refactor gets a named error naming exactly what is missing rather
+// than a success with no transfer behind it.
 //
-//	PushVMSnapshot(ctx context.Context, addr, vmID, snapshotName string, r io.Reader) error
-//
-// and *PeerReporter needs the matching method beside its own
-// PushJailTemplate, or this handler always refuses at the assertion
-// below. The refusal is explicit and not a silent no-op: an operator
-// asking for a snapshot transfer gets a named error saying exactly
-// which capability is missing, never a success with no transfer behind
-// it.
+// The client half lives in peer.go beside PushJailTemplate, and its
+// production caller is internal/cluster's Reconciler, which asks the
+// peer that already holds a named VM checkpoint to push it here before
+// cloning from it (ADR-0095's disclosed node-local limitation, closed
+// the same way ADR-0089 closed the identical one for jail templates).
 type vmSnapshotTransfer interface {
 	PushVMSnapshot(ctx context.Context, addr, vmID, snapshotName string, r io.Reader) error
 }

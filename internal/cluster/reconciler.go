@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"sync/atomic"
 	"time"
 
@@ -1112,6 +1113,65 @@ func (r *Reconciler) resolveLocalImagePath(ctx context.Context, name string) (st
 	return path, nil
 }
 
+// splitSnapshotRef splits a `clone_from_snapshot` value ("<source_vm_id>@<snapshot_name>")
+// into its two halves. internal/raft's FSM boundary already refuses
+// anything that is not exactly this shape (validSnapshotRef, ADR-0096's
+// correction), so the only check needed here is the one that keeps a
+// malformed value from reaching zfs(8) as two half-empty arguments if
+// this is ever reached from somewhere that skipped the FSM - the same
+// "the FSM is the boundary, the layer below is defense in depth"
+// posture ADR-0096 established.
+func splitSnapshotRef(ref string) (vmID, snapshotName string, err error) {
+	vmID, snapshotName, ok := strings.Cut(ref, "@")
+	if !ok || vmID == "" || snapshotName == "" || strings.Contains(snapshotName, "@") {
+		return "", "", fmt.Errorf("invalid snapshot reference %q: must be \"<source_vm_id>@<snapshot_name>\"", ref)
+	}
+	return vmID, snapshotName, nil
+}
+
+// resolveCloneSourceSnapshot ensures the snapshot named by
+// clone_from_snapshot exists as a local snapshot on this node before
+// ensureVM clones it, fetching it from whichever peer already holds it
+// (ADR-0090's cross-node follow-up) if this node's own ZFS doesn't - the
+// VM-snapshot equivalent of resolveJailTemplate/resolveLocalImagePath,
+// and the thing that closes ADR-0095's own disclosed "node-local only, no
+// cross-node fetch" limitation, exactly the way ADR-0089 closed the
+// identical one for jail base templates.
+//
+// The fetch is a real `zfs send`/`zfs receive` between two managerds
+// (PushVMSnapshotTo/ReceiveVMSnapshot): the peer that holds the
+// snapshot streams it here, where it lands as the very same
+// "<source_vm_id>@<snapshot_name>" the local `zfs clone` then reads. A
+// reported-successful fetch is re-checked against local ZFS before the
+// caller is allowed to proceed, for the same reason resolveJailTemplate
+// re-checks: "the RPC said it worked" is not evidence that the
+// snapshot is here, and a clone against a snapshot that did not land
+// would fail anyway with a far less actionable message.
+func (r *Reconciler) resolveCloneSourceSnapshot(ctx context.Context, ref string) error {
+	exists, err := r.ZFS.SnapshotExists(ctx, ref)
+	if err != nil {
+		return fmt.Errorf("checking source snapshot %q: %w", ref, err)
+	}
+	if exists {
+		return nil
+	}
+	vmID, snapshotName, err := splitSnapshotRef(ref)
+	if err != nil {
+		return err
+	}
+	if err := r.fetchVMSnapshotFromPeer(ctx, vmID, snapshotName); err != nil {
+		return err
+	}
+	exists, err = r.ZFS.SnapshotExists(ctx, ref)
+	if err != nil {
+		return fmt.Errorf("checking source snapshot %q after fetch: %w", ref, err)
+	}
+	if !exists {
+		return fmt.Errorf("source snapshot %q still not found locally after a reported-successful fetch from a peer", ref)
+	}
+	return nil
+}
+
 // ensureVM ensures vm's disk exists - a plain dataset-backed file, or,
 // if ReplicaNodeID is set, a HAST-replicated device instead (see
 // hastDevicePaths/ADR-0026; no dataset is created in that case, there's
@@ -1134,12 +1194,8 @@ func (r *Reconciler) ensureVM(ctx context.Context, vm VMPlacement, networks map[
 		}
 		if !exists {
 			if vm.CloneFromSnapshot != "" {
-				snapExists, err := r.ZFS.SnapshotExists(ctx, vm.CloneFromSnapshot)
-				if err != nil {
-					return fmt.Errorf("checking source snapshot %q: %w", vm.CloneFromSnapshot, err)
-				}
-				if !snapExists {
-					return fmt.Errorf("VM %q names source snapshot %q but it does not exist locally - a VM snapshot is node-local (ADR-0090/ADR-0095), so the source VM's snapshot must exist on this same node", vm.ID, vm.CloneFromSnapshot)
+				if err := r.resolveCloneSourceSnapshot(ctx, vm.CloneFromSnapshot); err != nil {
+					return fmt.Errorf("VM %q: %w", vm.ID, err)
 				}
 				if err := r.ZFS.Clone(ctx, vm.CloneFromSnapshot, vm.ID); err != nil {
 					return fmt.Errorf("cloning source snapshot %q: %w", vm.CloneFromSnapshot, err)

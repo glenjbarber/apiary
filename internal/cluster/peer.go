@@ -52,6 +52,15 @@ type peerReporter interface {
 	// PushISOTo transfer.
 	ListJailTemplateNames(ctx context.Context, addr string) ([]string, error)
 	RequestJailTemplatePush(ctx context.Context, addr, name, targetNodeID string) error
+
+	// ListVMSnapshotNames/RequestVMSnapshotPush are the VM-checkpoint
+	// equivalents of the pair above (ADR-0090's cross-node follow-up,
+	// closing ADR-0095's own disclosed "node-local only, no cross-node
+	// fetch" limitation) - same on-demand fetch shape, same
+	// first-peer-that-has-it wins, same peer-only request. Keyed by VM
+	// id as well as by peer because a VM's checkpoints are per-dataset.
+	ListVMSnapshotNames(ctx context.Context, addr, vmID string) ([]string, error)
+	RequestVMSnapshotPush(ctx context.Context, addr, vmID, snapshotName, targetNodeID string) error
 }
 
 // defaultPeerManagerdPort is used when Reconciler.PeerManagerdPort is
@@ -160,4 +169,48 @@ func (r *Reconciler) fetchTemplateFromPeer(ctx context.Context, name string) err
 		}
 	}
 	return fmt.Errorf("jail base template %q not found on any known cluster node", name)
+}
+
+// fetchVMSnapshotFromPeer mirrors fetchTemplateFromPeer exactly, for a
+// VM's own checkpoint instead of a jail base template (ADR-0095's
+// disclosed "node-local only, no cross-node fetch" limitation, closed
+// the same way ADR-0089 closed the identical one for templates) - same
+// peer-address resolution, same first-peer-that-has-it-wins semantics,
+// same every-unreachable-peer-is-skipped behavior, same error surface
+// when nothing has it.
+//
+// vmID names the source VM whose dataset holds the snapshot. Note the
+// asymmetry with the two calls above: those ask "do you have a file /
+// template by name", which is a property of the peer alone, whereas
+// this asks about one named VM's dataset on that peer, so a peer that
+// does not host the VM simply reports nothing and is skipped.
+func (r *Reconciler) fetchVMSnapshotFromPeer(ctx context.Context, vmID, snapshotName string) error {
+	if r.Peers == nil {
+		return fmt.Errorf("VM snapshot %q of VM %q not found locally, and no peer forwarding is configured on this node to look elsewhere (expected on a single-node deployment - take the snapshot on the node that will host the clone)", snapshotName, vmID)
+	}
+	addrs, err := r.resolvePeerAddresses(ctx)
+	if err != nil {
+		return fmt.Errorf("resolving peer addresses: %w", err)
+	}
+	port := r.peerManagerdPort()
+	for nodeID, host := range addrs {
+		if nodeID == r.LocalNodeID {
+			continue
+		}
+		addr := net.JoinHostPort(host, port)
+		names, err := r.Peers.ListVMSnapshotNames(ctx, addr, vmID)
+		if err != nil {
+			continue
+		}
+		for _, n := range names {
+			if n != snapshotName {
+				continue
+			}
+			if err := r.Peers.RequestVMSnapshotPush(ctx, addr, vmID, snapshotName, r.LocalNodeID); err != nil {
+				return fmt.Errorf("fetching VM snapshot %q from %s: %w", snapshotName, nodeID, err)
+			}
+			return nil
+		}
+	}
+	return fmt.Errorf("VM snapshot %q not found on any known cluster node holding VM %q", snapshotName, vmID)
 }

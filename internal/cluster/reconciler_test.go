@@ -596,6 +596,16 @@ type fakePeerReporter struct {
 	requestTemplatePushCalls []string // "addr name targetNodeID"
 	requestTemplatePushErr   error
 	onRequestTemplatePush    func(name string)
+
+	// vmSnapshotNamesByAddr/requestVMSnapshotPushCalls/onRequestVMSnapshotPush
+	// back fetchVMSnapshotFromPeer's tests - the VM-checkpoint
+	// equivalents of the jail-template fields above. Keyed by
+	// "addr vmID" because a VM's checkpoints are per-dataset.
+	vmSnapshotNamesByAddr map[string][]string
+
+	requestVMSnapshotPushCalls []string // "addr vmID snapshotName targetNodeID"
+	requestVMSnapshotPushErr   error
+	onRequestVMSnapshotPush    func(vmID, snapshotName string)
 }
 
 func (f *fakePeerReporter) ReportVMPhase(_ context.Context, addr, id, phase, phaseError string) error {
@@ -647,6 +657,21 @@ func (f *fakePeerReporter) RequestJailTemplatePush(_ context.Context, addr, name
 	}
 	if f.onRequestTemplatePush != nil {
 		f.onRequestTemplatePush(name)
+	}
+	return nil
+}
+
+func (f *fakePeerReporter) ListVMSnapshotNames(_ context.Context, addr, vmID string) ([]string, error) {
+	return f.vmSnapshotNamesByAddr[addr+" "+vmID], nil
+}
+
+func (f *fakePeerReporter) RequestVMSnapshotPush(_ context.Context, addr, vmID, snapshotName, targetNodeID string) error {
+	f.requestVMSnapshotPushCalls = append(f.requestVMSnapshotPushCalls, fmt.Sprintf("%s %s %s %s", addr, vmID, snapshotName, targetNodeID))
+	if f.requestVMSnapshotPushErr != nil {
+		return f.requestVMSnapshotPushErr
+	}
+	if f.onRequestVMSnapshotPush != nil {
+		f.onRequestVMSnapshotPush(vmID, snapshotName)
 	}
 	return nil
 }

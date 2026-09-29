@@ -1414,3 +1414,107 @@ func (p *PeerReporter) ListJailTemplateNames(ctx context.Context, addr string) (
 	}
 	return resp.GetNames(), nil
 }
+
+// PushVMSnapshot streams r (a running `zfs send` this node already
+// started) into addr's own ReceiveVMSnapshot RPC as a client - the
+// VM-checkpoint equivalent of PushJailTemplate above, same
+// metadata-then-chunks-then-CloseAndRecv shape and the same
+// never-buffer-the-whole-stream discipline (chunks are copied out of
+// a fixed 256 KiB buffer, so a multi-gigabyte disk image is never held
+// in memory).
+//
+// The VM id and snapshot name travel as the stream's first metadata
+// message and are deliberately NOT trusted on the far end:
+// ReceiveVMSnapshot re-validates both with the same helpers
+// PushVMSnapshotTo applied before Send, because either end of a
+// node-to-node transfer can be the wrong or hostile one.
+func (p *PeerReporter) PushVMSnapshot(ctx context.Context, addr, vmID, snapshotName string, r io.Reader) error {
+	conn, client, err := p.dial(addr)
+	if err != nil {
+		return err
+	}
+	defer conn.Close()
+
+	stream, err := client.ReceiveVMSnapshot(ctx)
+	if err != nil {
+		return fmt.Errorf("opening VM-snapshot stream to %s: %w", addr, err)
+	}
+	if err := stream.Send(&rpcpb.ReceiveVMSnapshotRequest{
+		Data: &rpcpb.ReceiveVMSnapshotRequest_Metadata{
+			Metadata: &rpcpb.VMSnapshotMetadata{Id: vmID, SnapshotName: snapshotName},
+		},
+	}); err != nil {
+		return fmt.Errorf("sending VM-snapshot metadata to %s: %w", addr, err)
+	}
+
+	buf := make([]byte, 256*1024)
+	for {
+		n, rerr := r.Read(buf)
+		if n > 0 {
+			chunk := make([]byte, n)
+			copy(chunk, buf[:n])
+			if serr := stream.Send(&rpcpb.ReceiveVMSnapshotRequest{Data: &rpcpb.ReceiveVMSnapshotRequest_Chunk{Chunk: chunk}}); serr != nil {
+				return fmt.Errorf("sending VM-snapshot data to %s: %w", addr, serr)
+			}
+		}
+		if rerr == io.EOF {
+			break
+		}
+		if rerr != nil {
+			return fmt.Errorf("reading zfs send stream for %s: %w", addr, rerr)
+		}
+	}
+
+	resp, err := stream.CloseAndRecv()
+	if err != nil {
+		return fmt.Errorf("closing VM-snapshot stream to %s: %w", addr, err)
+	}
+	if resp.GetError() != "" {
+		return fmt.Errorf("%s rejected the VM snapshot: %s", addr, resp.GetError())
+	}
+	return nil
+}
+
+// RequestVMSnapshotPush calls addr's own PushVMSnapshotTo RPC - used by
+// internal/cluster's Reconciler to ask a peer node that's already
+// confirmed (via ListVMSnapshotNames) to push a named VM checkpoint
+// to this node, mirroring RequestJailTemplatePush and RequestISOPush
+// exactly. Peer-only in the same way those two are: it is never aimed
+// at a leader on a caller's behalf, only asked for by a peer.
+func (p *PeerReporter) RequestVMSnapshotPush(ctx context.Context, addr, vmID, snapshotName, targetNodeID string) error {
+	conn, client, err := p.dial(addr)
+	if err != nil {
+		return err
+	}
+	defer conn.Close()
+	resp, err := client.PushVMSnapshotTo(ctx, &rpcpb.PushVMSnapshotToRequest{Id: vmID, SnapshotName: snapshotName, TargetNodeId: targetNodeID})
+	if err != nil {
+		return err
+	}
+	if resp.GetError() != "" {
+		return fmt.Errorf("%s", resp.GetError())
+	}
+	return nil
+}
+
+// ListVMSnapshotNames reports the snapshot names addr holds for one
+// named VM - internal/cluster's Reconciler's way to learn which known
+// peer, if any, has the checkpoint this node's own ZFS lacks for a
+// cross-Comb clone source (ADR-0095's disclosed node-local limitation),
+// mirroring ListISONames/ListJailTemplateNames exactly. A plain []string
+// rather than the rpcpb response for the same decoupling-from-wire-types
+// reason those two already establish. Unlike them, the lookup is keyed
+// by VM id as well as by peer: a VM's checkpoints are per-dataset, so
+// there is nothing to enumerate without naming the dataset.
+func (p *PeerReporter) ListVMSnapshotNames(ctx context.Context, addr, vmID string) ([]string, error) {
+	resp, err := p.ListVMSnapshots(ctx, addr, vmID)
+	if err != nil {
+		return nil, err
+	}
+	if resp.GetError() != "" {
+		return nil, fmt.Errorf("%s", resp.GetError())
+	}
+	names := make([]string, 0, len(resp.GetSnapshotNames()))
+	names = append(names, resp.GetSnapshotNames()...)
+	return names, nil
+}
