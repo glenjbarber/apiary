@@ -30,6 +30,13 @@ type isoRowView struct {
 	SHA256      string
 	SHA256Short string
 
+	// Kind is Name's imageKind classification, in the same prose
+	// classifyImageName already produces for the guided creation wizard
+	// (guided_create.go) - reused rather than a second classifier, so an
+	// operator browsing this list and the wizard's own image picker
+	// never see two different opinions about what the same file is.
+	Kind string
+
 	PresentNodes []string
 	MissingNodes []string
 
@@ -90,6 +97,7 @@ func (s *Server) currentClusterISOs(r *http.Request) ([]isoRowView, string) {
 				row = &isoRowView{
 					Name: info.GetName(), SizeBytes: info.GetSizeBytes(), Size: formatBytes(info.GetSizeBytes()),
 					SHA256: info.GetSha256(), SHA256Short: shortHash(info.GetSha256()),
+					Kind: classifyImageName(info.GetName()).String(),
 				}
 				rows[k] = row
 			}

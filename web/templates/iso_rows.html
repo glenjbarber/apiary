@@ -1,8 +1,9 @@
 {{define "iso_rows"}}
-{{if .Error}}<tr><td colspan="5" class="error">{{.Error}}</td></tr>{{end}}
+{{if .Error}}<tr><td colspan="6" class="error">{{.Error}}</td></tr>{{end}}
 {{range .ClusterISOs}}
 <tr>
   <td>{{.Name}}</td>
+  <td>{{.Kind}}</td>
   <td>{{.Size}}</td>
   <td><code title="{{.SHA256}}">{{.SHA256Short}}</code> <button type="button" class="icon-button" data-copy="{{.SHA256}}" title="Copy full SHA-256" aria-label="Copy full SHA-256 for {{.Name}}">Copy</button></td>
   <td>
@@ -14,6 +15,6 @@
   </td>
 </tr>
 {{else}}
-  {{if not .Error}}<tr><td colspan="5"><em>No images</em></td></tr>{{end}}
+  {{if not .Error}}<tr><td colspan="6"><em>No images</em></td></tr>{{end}}
 {{end}}
 {{end}}

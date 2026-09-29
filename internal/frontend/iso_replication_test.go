@@ -179,6 +179,45 @@ func TestCurrentClusterISOs_FormatsSizeAndShortensLongHash(t *testing.T) {
 	}
 }
 
+// TestCurrentClusterISOs_ClassifiesKindFromName confirms each row's Kind
+// reuses classifyImageName (guided_create.go) - the same classifier the
+// guided creation wizard already applies to the same file names - rather
+// than a second, possibly-disagreeing classification. See
+// docs/web-ui-redesign.md's Section D images.html bullet.
+func TestCurrentClusterISOs_ClassifiesKindFromName(t *testing.T) {
+	client := &fakeClient{
+		statusResp: &rpcpb.StatusResponse{ManagerNodeId: "node-a", KnownNodeIds: []string{"node-a"}},
+		listISOsResp: &rpcpb.ListISOsResponse{Isos: []*rpcpb.ISOInfo{
+			{Name: "FreeBSD-15.1-amd64-disc1.iso", Sha256: "aaa"},
+			{Name: "freebsd-15.1-zfs.raw.xz", Sha256: "bbb"},
+			{Name: "base.txz", Sha256: "ccc"},
+			{Name: "mystery-file", Sha256: "ddd"},
+		}},
+	}
+	s := newTestServer(t, client)
+
+	req := httptest.NewRequest(http.MethodGet, "/images", nil)
+	rows, errMsg := s.currentClusterISOs(req)
+	if errMsg != "" {
+		t.Fatalf("currentClusterISOs() error: %s", errMsg)
+	}
+	byName := map[string]string{}
+	for _, row := range rows {
+		byName[row.Name] = row.Kind
+	}
+	want := map[string]string{
+		"FreeBSD-15.1-amd64-disc1.iso": "installer image",
+		"freebsd-15.1-zfs.raw.xz":      "raw disk image",
+		"base.txz":                     "userland archive",
+		"mystery-file":                 "image of unrecognised type",
+	}
+	for name, wantKind := range want {
+		if got := byName[name]; got != wantKind {
+			t.Errorf("Kind for %q = %q, want %q", name, got, wantKind)
+		}
+	}
+}
+
 func equalStrSlices(a, b []string) bool {
 	if len(a) != len(b) {
 		return false

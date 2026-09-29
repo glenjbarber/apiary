@@ -1936,10 +1936,10 @@ func TestServer_NetworksPage_ShowsBridgeStatusByHive(t *testing.T) {
 	s.ServeHTTP(rec, req)
 
 	body := rec.Body.String()
-	if !strings.Contains(body, "apiarium") || !strings.Contains(body, `<span class="success">up</span>`) {
+	if !strings.Contains(body, "apiarium") || !strings.Contains(body, `<span class="badge up">up</span>`) {
 		t.Errorf("networks page missing local Hive status, got: %s", body)
 	}
-	if !strings.Contains(body, "apiverse") || !strings.Contains(body, `<span class="error">down</span>`) {
+	if !strings.Contains(body, "apiverse") || !strings.Contains(body, `<span class="badge down">down</span>`) {
 		t.Errorf("networks page missing peer Hive status, got: %s", body)
 	}
 	if peers.lastBridgeAddr != "apiverse.apiary.work:17700" {

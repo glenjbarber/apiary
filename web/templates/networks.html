@@ -56,12 +56,9 @@
   <td>{{if .ExternalGateway}}{{.ExternalGateway}}{{else}}<em>(this node's bridge)</em>{{end}}</td>
   <td>
     {{range .BridgeStatuses}}
-      <div><strong>{{.NodeID}}</strong>:
-      {{if eq .Status "up"}}<span class="success">up</span>
-      {{else if eq .Status "down"}}<span class="error">down</span>
-      {{else}}<em>unknown</em>{{end}}</div>
+      <div><strong>{{.NodeID}}</strong>: <span class="badge {{.Status}}">{{.Status}}</span></div>
     {{else}}
-      <em>unavailable</em>
+      <span class="badge unknown">unavailable</span>
     {{end}}
   </td>
   <td>
