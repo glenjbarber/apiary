@@ -590,6 +590,20 @@ func (f *fakeClient) ExecuteNodeRestartPlan(context.Context, *rpcpb.ExecuteNodeR
 	return &rpcpb.ExecuteNodeRestartPlanResponse{}, nil
 }
 
+// RequestManagerdRestart and IssueManagerdRestart are ADR-0146's
+// managerd self-restart handoff. Nothing in this package's request path
+// calls either - there is deliberately no UI control and no REST route
+// for a managerd restart, and none is being added - so this satisfies
+// the generated client interface and nothing more. A call reaching one
+// would mean this fake were being used somewhere it has no answers for.
+func (f *fakeClient) RequestManagerdRestart(context.Context, *rpcpb.RequestManagerdRestartRequest, ...grpc.CallOption) (*rpcpb.RequestManagerdRestartResponse, error) {
+	return &rpcpb.RequestManagerdRestartResponse{}, nil
+}
+
+func (f *fakeClient) IssueManagerdRestart(context.Context, *rpcpb.IssueManagerdRestartRequest, ...grpc.CallOption) (*rpcpb.IssueManagerdRestartResponse, error) {
+	return &rpcpb.IssueManagerdRestartResponse{}, nil
+}
+
 var _ rpcpb.ManagerServiceClient = (*fakeClient)(nil)
 
 func doRequest(t *testing.T, s *Server, method, path string, body interface{}) *httptest.ResponseRecorder {

@@ -125,10 +125,15 @@ func (s *Server) ExecuteNodeRestartPlan(ctx context.Context, req *rpcpb.ExecuteN
 	// ADR-0142's refusal, kept exactly where it is and for exactly the
 	// reason it gives. The lease path, the quorum preflight and the
 	// pending record all work for managerd today; what does not work is
-	// orchestrating the death of the process doing the orchestrating, and
-	// the fix for that is a managerd self-restart handoff plus durable
-	// update-operation state, neither of which exists. Re-implementing
-	// the refusal here rather than delegating to managerdSelfRestartRefused
+	// orchestrating the death of the process doing the orchestrating.
+	// ADR-0146 built that - a peer-issued restart, a detached child and a
+	// replacement that confirms itself - and it is reached through
+	// RequestManagerdRestart/IssueManagerdRestart in handoff.go, never
+	// through here. The reason this path still refuses is the structural
+	// one rather than an omission: everything below runs inside the
+	// managerd being restarted, and no amount of durable state changes
+	// which process would have to perform the start. Re-implementing the
+	// refusal here rather than delegating to managerdSelfRestartRefused
 	// would be a second copy that could drift from the first.
 	if managerdSelfRestartRefused(service) {
 		return &rpcpb.ExecuteNodeRestartPlanResponse{Error: managerdSelfRestartRefusal}, nil

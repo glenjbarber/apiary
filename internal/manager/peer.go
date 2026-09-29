@@ -1044,6 +1044,38 @@ func (p *PeerReporter) ExecuteNodeRestartPlan(ctx context.Context, addr string, 
 	return client.ExecuteNodeRestartPlan(ctx, req)
 }
 
+// RequestManagerdRestart and IssueManagerdRestart carry ADR-0146's
+// managerd self-restart handoff between Combs, and they dial with
+// dialRestartGuardrail (p.RestartGuardrailToken) like every other
+// restart-guardrail RPC here, for the same reason: the receiving handler
+// authorizes them by the dedicated token comparison, and using p.dial
+// would attach an ordinary Colony API key that the far end rejects.
+//
+// Two methods rather than one, matching the two halves on the wire. The
+// coordinator asks for a restart (RequestManagerdRestart) and the target
+// carries it out (IssueManagerdRestart); they are separate RPCs because
+// they run on different machines, and collapsing them would mean a
+// Comb's own managerd being asked to perform the coordinator's half on
+// its behalf - which is the same locality mistake the step-aside's
+// split exists to avoid.
+func (p *PeerReporter) RequestManagerdRestart(ctx context.Context, addr string, req *rpcpb.RequestManagerdRestartRequest) (*rpcpb.RequestManagerdRestartResponse, error) {
+	conn, client, err := p.dialRestartGuardrail(addr)
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close()
+	return client.RequestManagerdRestart(ctx, req)
+}
+
+func (p *PeerReporter) IssueManagerdRestart(ctx context.Context, addr string, req *rpcpb.IssueManagerdRestartRequest) (*rpcpb.IssueManagerdRestartResponse, error) {
+	conn, client, err := p.dialRestartGuardrail(addr)
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close()
+	return client.IssueManagerdRestart(ctx, req)
+}
+
 func (p *PeerReporter) RejectJoinRequest(ctx context.Context, addr string, req *rpcpb.RejectJoinRequestRequest) (*rpcpb.RejectJoinRequestResponse, error) {
 	conn, client, err := p.dial(addr)
 	if err != nil {

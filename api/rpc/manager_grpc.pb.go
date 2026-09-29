@@ -70,6 +70,8 @@ const (
 	ManagerService_StepAsideForRestart_FullMethodName         = "/apiary.rpc.v1.ManagerService/StepAsideForRestart"
 	ManagerService_MutateColonyUpdate_FullMethodName          = "/apiary.rpc.v1.ManagerService/MutateColonyUpdate"
 	ManagerService_ExecuteNodeRestartPlan_FullMethodName      = "/apiary.rpc.v1.ManagerService/ExecuteNodeRestartPlan"
+	ManagerService_RequestManagerdRestart_FullMethodName      = "/apiary.rpc.v1.ManagerService/RequestManagerdRestart"
+	ManagerService_IssueManagerdRestart_FullMethodName        = "/apiary.rpc.v1.ManagerService/IssueManagerdRestart"
 	ManagerService_CreateNetwork_FullMethodName               = "/apiary.rpc.v1.ManagerService/CreateNetwork"
 	ManagerService_ListNetworks_FullMethodName                = "/apiary.rpc.v1.ManagerService/ListNetworks"
 	ManagerService_DeleteNetwork_FullMethodName               = "/apiary.rpc.v1.ManagerService/DeleteNetwork"
@@ -486,15 +488,93 @@ type ManagerServiceClient interface {
 	// operator button; ADR-0145's UI is deliberately not built and is a
 	// separate step.
 	//
-	// SCOPE. Only "apiary_raftd" is accepted, and "apiary_managerd" is
-	// refused for exactly the reason ADR-0142 refuses it: the restart
-	// would be orchestrated from inside the managerd being restarted.
-	// Restoring that needs a managerd self-restart handoff and durable
-	// update-operation state, neither of which exists yet. There is
-	// deliberately no colony-wide sweep here - one Comb, one call - and no
-	// colony-wide single-flight beyond the one real restart lease, which
+	// SCOPE. Only "apiary_raftd" is accepted. "apiary_managerd" is
+	// refused, and the reason ADR-0142 gives is unchanged and still the
+	// reason: the restart would be orchestrated from inside the managerd
+	// being restarted. What ADR-0146 added is a different entry point for
+	// exactly that case - RequestManagerdRestart below, issued by a PEER
+	// managerd and performed by a process that is not the one being
+	// stopped - and deliberately nothing here. This RPC stays single-Comb
+	// and raftd-only, and there is no colony-wide sweep in it: one Comb,
+	// one call, no single-flight beyond the one real restart lease, which
 	// does serialize one guarded restart across the whole Colony.
 	ExecuteNodeRestartPlan(ctx context.Context, in *ExecuteNodeRestartPlanRequest, opts ...grpc.CallOption) (*ExecuteNodeRestartPlanResponse, error)
+	// RequestManagerdRestart asks a PEER managerd to restart THIS node's
+	// own apiary_managerd, as one step of a controlled Colony update
+	// (ADR-0146 rules 1 and 3). It is the coordinator-side half of the
+	// handoff; IssueManagerdRestart below is the target-side half, and the
+	// two are separate on purpose.
+	//
+	// A managerd MAY NOT ASK ITSELF TO RESTART, and this RPC refuses that
+	// case outright, in the same shape and with the same non-overridable
+	// semantics ADR-0142 established. There is no force field on this
+	// message and there will not be one: acknowledging a quorum block is
+	// agreeing to a known cost, whereas "the process that would perform
+	// the start is the process being stopped" is not a cost at all, and
+	// presenting the two as the same lever would be a lie about what
+	// force can do. The working alternative is named in the refusal - ask
+	// a different Comb, or restart managerd on the host from a root shell.
+	//
+	// Rule 1 is enforced HERE and not only at the target: the operation
+	// must be held by a holder_node_id that is not the Comb about to be
+	// restarted, and this handler refuses when the presented fence says
+	// otherwise. The target re-checks it independently (ADR-0146 rule 4's
+	// handover step), because a check that exists on one side of a
+	// network hop is a check that can be aimed around by a caller who
+	// reaches the other side directly.
+	//
+	// Before the request is carried to the target this handler reserves the
+	// real cluster-wide ADR-0103 restart lease for "apiary_managerd" on
+	// that node, because the restarted process confirms the lease itself
+	// (ADR-0146 rule 5) and it can only confirm a lease that exists. The
+	// lease is NOT released on a failure below: there is no "the restart
+	// never happened" transition on a restart lease, and a lease that is
+	// released by a forward that failed would be a lease nobody ever held.
+	// It stays held and blocking until the target confirms itself or an
+	// operator clears it, which is ADR-0103's own deliberate posture.
+	//
+	// EXECUTION IS TARGET-LOCAL, exactly as ExecuteNodeRestartPlan above:
+	// the marker is written on the machine that is about to stop, and the
+	// process that reads it back on its next startup is that same machine's
+	// managerd. So the request is forwarded to the target member's own
+	// managerd at an address resolved from this node's own raft membership
+	// and never from anything the caller supplied. It is never forwarded
+	// to the raft leader.
+	//
+	// AUTHORIZATION matches StepAsideForRestart/MutateColonyUpdate/
+	// ExecuteNodeRestartPlan exactly: the dedicated root-owned
+	// restart-guardrail token, not the Viewer/Admin hierarchy, and not any
+	// CreateAPIKey-issued credential. This is guardrail plumbing reached by
+	// a controlled-update coordinator. It is deliberately NOT an operator
+	// control: there is no route, no template and no button for it, and
+	// ADR-0142's refusal in RestartNodeService stands unchanged.
+	RequestManagerdRestart(ctx context.Context, in *RequestManagerdRestartRequest, opts ...grpc.CallOption) (*RequestManagerdRestartResponse, error)
+	// IssueManagerdRestart is the target-local half of ADR-0146: it asks
+	// THIS node's managerd to schedule its OWN restart, and it is the only
+	// path in the whole system that may do that.
+	//
+	// It is never leader-forwarded. The process that writes the durable
+	// "restart scheduled" marker is the process that is about to die, and
+	// the process that reads that marker back is its own replacement on
+	// the same machine; a leader-forwarded version would put both of those
+	// on a different Comb from the restart itself, where neither can be
+	// read.
+	//
+	// The order of operations inside the handler is ADR-0146 rule 4's and is
+	// load-bearing: durable handover if this node holds the operation,
+	// then the durable marker, then the ACK to the peer, and ONLY THEN the
+	// restart - arranged in a child process reparented out of managerd,
+	// because the in-process arrangement is precisely the ADR-0142 failure
+	// that killed a control plane on two Combs. A handler that returned
+	// before the marker was durable would let a peer believe a restart was
+	// scheduled for an operation no replacement could ever find.
+	//
+	// AUTHORIZATION is the same dedicated restart-guardrail token, and the
+	// request must additionally carry the coordinating managerd's exact
+	// ColonyUpdateFence: a restart with no operation behind it has no
+	// evidence to confirm and nothing to record, so it is refused rather
+	// than performed.
+	IssueManagerdRestart(ctx context.Context, in *IssueManagerdRestartRequest, opts ...grpc.CallOption) (*IssueManagerdRestartResponse, error)
 	// CreateNetwork/ListNetworks/DeleteNetwork manage NetworkDefinitions -
 	// VLAN/subnet/bridge segments a VM can attach to (see ADR-0022).
 	// CreateNetwork/DeleteNetwork just submit a Command through raft
@@ -1296,6 +1376,26 @@ func (c *managerServiceClient) ExecuteNodeRestartPlan(ctx context.Context, in *E
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(ExecuteNodeRestartPlanResponse)
 	err := c.cc.Invoke(ctx, ManagerService_ExecuteNodeRestartPlan_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *managerServiceClient) RequestManagerdRestart(ctx context.Context, in *RequestManagerdRestartRequest, opts ...grpc.CallOption) (*RequestManagerdRestartResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(RequestManagerdRestartResponse)
+	err := c.cc.Invoke(ctx, ManagerService_RequestManagerdRestart_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *managerServiceClient) IssueManagerdRestart(ctx context.Context, in *IssueManagerdRestartRequest, opts ...grpc.CallOption) (*IssueManagerdRestartResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(IssueManagerdRestartResponse)
+	err := c.cc.Invoke(ctx, ManagerService_IssueManagerdRestart_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -2142,15 +2242,93 @@ type ManagerServiceServer interface {
 	// operator button; ADR-0145's UI is deliberately not built and is a
 	// separate step.
 	//
-	// SCOPE. Only "apiary_raftd" is accepted, and "apiary_managerd" is
-	// refused for exactly the reason ADR-0142 refuses it: the restart
-	// would be orchestrated from inside the managerd being restarted.
-	// Restoring that needs a managerd self-restart handoff and durable
-	// update-operation state, neither of which exists yet. There is
-	// deliberately no colony-wide sweep here - one Comb, one call - and no
-	// colony-wide single-flight beyond the one real restart lease, which
+	// SCOPE. Only "apiary_raftd" is accepted. "apiary_managerd" is
+	// refused, and the reason ADR-0142 gives is unchanged and still the
+	// reason: the restart would be orchestrated from inside the managerd
+	// being restarted. What ADR-0146 added is a different entry point for
+	// exactly that case - RequestManagerdRestart below, issued by a PEER
+	// managerd and performed by a process that is not the one being
+	// stopped - and deliberately nothing here. This RPC stays single-Comb
+	// and raftd-only, and there is no colony-wide sweep in it: one Comb,
+	// one call, no single-flight beyond the one real restart lease, which
 	// does serialize one guarded restart across the whole Colony.
 	ExecuteNodeRestartPlan(context.Context, *ExecuteNodeRestartPlanRequest) (*ExecuteNodeRestartPlanResponse, error)
+	// RequestManagerdRestart asks a PEER managerd to restart THIS node's
+	// own apiary_managerd, as one step of a controlled Colony update
+	// (ADR-0146 rules 1 and 3). It is the coordinator-side half of the
+	// handoff; IssueManagerdRestart below is the target-side half, and the
+	// two are separate on purpose.
+	//
+	// A managerd MAY NOT ASK ITSELF TO RESTART, and this RPC refuses that
+	// case outright, in the same shape and with the same non-overridable
+	// semantics ADR-0142 established. There is no force field on this
+	// message and there will not be one: acknowledging a quorum block is
+	// agreeing to a known cost, whereas "the process that would perform
+	// the start is the process being stopped" is not a cost at all, and
+	// presenting the two as the same lever would be a lie about what
+	// force can do. The working alternative is named in the refusal - ask
+	// a different Comb, or restart managerd on the host from a root shell.
+	//
+	// Rule 1 is enforced HERE and not only at the target: the operation
+	// must be held by a holder_node_id that is not the Comb about to be
+	// restarted, and this handler refuses when the presented fence says
+	// otherwise. The target re-checks it independently (ADR-0146 rule 4's
+	// handover step), because a check that exists on one side of a
+	// network hop is a check that can be aimed around by a caller who
+	// reaches the other side directly.
+	//
+	// Before the request is carried to the target this handler reserves the
+	// real cluster-wide ADR-0103 restart lease for "apiary_managerd" on
+	// that node, because the restarted process confirms the lease itself
+	// (ADR-0146 rule 5) and it can only confirm a lease that exists. The
+	// lease is NOT released on a failure below: there is no "the restart
+	// never happened" transition on a restart lease, and a lease that is
+	// released by a forward that failed would be a lease nobody ever held.
+	// It stays held and blocking until the target confirms itself or an
+	// operator clears it, which is ADR-0103's own deliberate posture.
+	//
+	// EXECUTION IS TARGET-LOCAL, exactly as ExecuteNodeRestartPlan above:
+	// the marker is written on the machine that is about to stop, and the
+	// process that reads it back on its next startup is that same machine's
+	// managerd. So the request is forwarded to the target member's own
+	// managerd at an address resolved from this node's own raft membership
+	// and never from anything the caller supplied. It is never forwarded
+	// to the raft leader.
+	//
+	// AUTHORIZATION matches StepAsideForRestart/MutateColonyUpdate/
+	// ExecuteNodeRestartPlan exactly: the dedicated root-owned
+	// restart-guardrail token, not the Viewer/Admin hierarchy, and not any
+	// CreateAPIKey-issued credential. This is guardrail plumbing reached by
+	// a controlled-update coordinator. It is deliberately NOT an operator
+	// control: there is no route, no template and no button for it, and
+	// ADR-0142's refusal in RestartNodeService stands unchanged.
+	RequestManagerdRestart(context.Context, *RequestManagerdRestartRequest) (*RequestManagerdRestartResponse, error)
+	// IssueManagerdRestart is the target-local half of ADR-0146: it asks
+	// THIS node's managerd to schedule its OWN restart, and it is the only
+	// path in the whole system that may do that.
+	//
+	// It is never leader-forwarded. The process that writes the durable
+	// "restart scheduled" marker is the process that is about to die, and
+	// the process that reads that marker back is its own replacement on
+	// the same machine; a leader-forwarded version would put both of those
+	// on a different Comb from the restart itself, where neither can be
+	// read.
+	//
+	// The order of operations inside the handler is ADR-0146 rule 4's and is
+	// load-bearing: durable handover if this node holds the operation,
+	// then the durable marker, then the ACK to the peer, and ONLY THEN the
+	// restart - arranged in a child process reparented out of managerd,
+	// because the in-process arrangement is precisely the ADR-0142 failure
+	// that killed a control plane on two Combs. A handler that returned
+	// before the marker was durable would let a peer believe a restart was
+	// scheduled for an operation no replacement could ever find.
+	//
+	// AUTHORIZATION is the same dedicated restart-guardrail token, and the
+	// request must additionally carry the coordinating managerd's exact
+	// ColonyUpdateFence: a restart with no operation behind it has no
+	// evidence to confirm and nothing to record, so it is refused rather
+	// than performed.
+	IssueManagerdRestart(context.Context, *IssueManagerdRestartRequest) (*IssueManagerdRestartResponse, error)
 	// CreateNetwork/ListNetworks/DeleteNetwork manage NetworkDefinitions -
 	// VLAN/subnet/bridge segments a VM can attach to (see ADR-0022).
 	// CreateNetwork/DeleteNetwork just submit a Command through raft
@@ -2594,6 +2772,12 @@ func (UnimplementedManagerServiceServer) MutateColonyUpdate(context.Context, *Mu
 }
 func (UnimplementedManagerServiceServer) ExecuteNodeRestartPlan(context.Context, *ExecuteNodeRestartPlanRequest) (*ExecuteNodeRestartPlanResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ExecuteNodeRestartPlan not implemented")
+}
+func (UnimplementedManagerServiceServer) RequestManagerdRestart(context.Context, *RequestManagerdRestartRequest) (*RequestManagerdRestartResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method RequestManagerdRestart not implemented")
+}
+func (UnimplementedManagerServiceServer) IssueManagerdRestart(context.Context, *IssueManagerdRestartRequest) (*IssueManagerdRestartResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method IssueManagerdRestart not implemented")
 }
 func (UnimplementedManagerServiceServer) CreateNetwork(context.Context, *CreateNetworkRequest) (*CreateNetworkResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method CreateNetwork not implemented")
@@ -3653,6 +3837,42 @@ func _ManagerService_ExecuteNodeRestartPlan_Handler(srv interface{}, ctx context
 	return interceptor(ctx, in, info, handler)
 }
 
+func _ManagerService_RequestManagerdRestart_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(RequestManagerdRestartRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ManagerServiceServer).RequestManagerdRestart(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ManagerService_RequestManagerdRestart_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ManagerServiceServer).RequestManagerdRestart(ctx, req.(*RequestManagerdRestartRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ManagerService_IssueManagerdRestart_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(IssueManagerdRestartRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ManagerServiceServer).IssueManagerdRestart(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ManagerService_IssueManagerdRestart_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ManagerServiceServer).IssueManagerdRestart(ctx, req.(*IssueManagerdRestartRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _ManagerService_CreateNetwork_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(CreateNetworkRequest)
 	if err := dec(in); err != nil {
@@ -4690,6 +4910,14 @@ var ManagerService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ExecuteNodeRestartPlan",
 			Handler:    _ManagerService_ExecuteNodeRestartPlan_Handler,
+		},
+		{
+			MethodName: "RequestManagerdRestart",
+			Handler:    _ManagerService_RequestManagerdRestart_Handler,
+		},
+		{
+			MethodName: "IssueManagerdRestart",
+			Handler:    _ManagerService_IssueManagerdRestart_Handler,
 		},
 		{
 			MethodName: "CreateNetwork",

@@ -480,6 +480,26 @@ func run() error {
 	srv.SetRestartGuardrailToken(restartGuardrailToken)
 	restartConfirm := manager.NewRestartConfirmStore("/var/db/apiary/guardrail")
 	srv.SetRestartConfirmStore(restartConfirm)
+	// ADR-0146's managerd self-restart handoff. Wired here, beside the
+	// guardrail store above and in the same root-owned directory, because
+	// the two records answer the same question from the two ends of one
+	// restart: this one is written by the managerd that is about to die
+	// and read by its own replacement, and the difference from the file
+	// above is a file name, not a different kind of state.
+	//
+	// The detached restarter is wired unconditionally and with the real
+	// one. A managerd that could not arrange its own restart refuses
+	// every request for one (see internal/manager's IssueManagerdRestart),
+	// and refusing is the correct behaviour for a node that was never
+	// given the mechanism - never a fallback to restarting itself
+	// in-process, which is the fault ADR-0142 reproduced on two Combs.
+	//
+	// Nothing on the Machine page reaches any of this. There is no
+	// control, no route and no template, and none is being added.
+	srv.SetColonyUpdateHandoffStore(
+		manager.NewManagerdHandoffStore("/var/db/apiary/guardrail"),
+		manager.DefaultDetachedRestarter(),
+	)
 	if cfg.PAMService != "" {
 		srv.SetPAMAuthenticator(pam.PAMAuthenticator{ServiceName: cfg.PAMService})
 	}
@@ -541,6 +561,7 @@ func run() error {
 	go runPeerHostnameRefreshLoop(ctx, peers, raftClient, peerHostnameRefreshInterval)
 	go runPeerCAWriteLoop(ctx, raftClient, peerCAWriteInterval)
 	go confirmPendingRestartOnStartup(ctx, srv, restartConfirm, id)
+	go confirmColonyUpdateHandoffOnStartup(ctx, srv, id)
 
 	select {
 	case <-ctx.Done():
@@ -784,6 +805,70 @@ func confirmPendingRestartOnStartup(ctx context.Context, srv *manager.Server, st
 // this project's existing convention already accepts this kind of small
 // duplication across independent binaries/packages.
 const restartGuardrailService = "apiary_managerd"
+
+// confirmColonyUpdateHandoffOnStartup is ADR-0146 rules 5 and 6, and it
+// is this process's own account of a restart a PEER managerd scheduled
+// for it.
+//
+// It is a separate goroutine from confirmPendingRestartOnStartup above
+// on purpose, and the two records are separate files for the same
+// reason: that path is ADR-0103's pending-restart record, this one is
+// ADR-0146's controlled-update handoff record, and one file with two
+// writers would be two processes' evidence overwriting each other's. Only
+// one of them confirms a lease for any given restart, and for a
+// controlled update that one is this path.
+//
+// It retries, because the two things it needs - a leader and this Comb's
+// own raftd - are not necessarily ready the instant the process starts.
+// A refusal it does not retry is a refusal nothing will ever revisit:
+// the marker is deliberately not cleared on failure, so a later attempt,
+// a later startup, or an operator still finds it. The bound is per boot
+// rather than indefinite for the reason restartGuardrailConfirmRetries
+// above gives.
+//
+// A missing marker is silence, and silence is correct: the overwhelming
+// majority of managerd startups were not scheduled by anything.
+func confirmColonyUpdateHandoffOnStartup(ctx context.Context, srv *manager.Server, nodeID string) {
+	var confirmation manager.HandoffConfirmation
+	var err error
+	for attempt := 1; attempt <= restartGuardrailConfirmRetries; attempt++ {
+		confirmation, err = srv.ConfirmManagerdRestartHandoff(ctx)
+		if err == nil {
+			break
+		}
+		log.Printf("managerd: confirming the controlled-update managerd restart on %s (attempt %d/%d): %v", nodeID, attempt, restartGuardrailConfirmRetries, err)
+		if confirmation.Found {
+			log.Printf("managerd: %s", confirmation.Detail)
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(restartGuardrailConfirmBackoff):
+		}
+	}
+	if err != nil {
+		// RULE 6, and the loudest path in this file. The marker is
+		// still on disk and the step is still unrecorded, so the
+		// controlled update this Comb belongs to has a step whose
+		// outcome is unknown and must stop. It is not cleared, it is
+		// not treated as success, and it is not a routine startup
+		// message.
+		log.Printf("managerd: a controlled-update managerd restart was scheduled for %s and could not be confirmed after %d attempts: %v", nodeID, restartGuardrailConfirmRetries, err)
+		log.Printf("managerd: the handoff record has been left in place under /var/db/apiary/guardrail. The controlled update this Comb belongs to has a step that cannot be confirmed and must not be treated as complete; the restart lease for that step may still be held and still blocking")
+		return
+	}
+	if !confirmation.Found {
+		return
+	}
+	log.Printf("managerd: confirming controlled update %q step %q for %s (%s)", confirmation.OperationID, confirmation.Step, confirmation.NodeID, confirmation.Outcome)
+	log.Printf("managerd: %s", confirmation.Detail)
+	for _, line := range confirmation.Evidence {
+		log.Printf("managerd:   %s", line)
+	}
+	if !confirmation.LeaseReleased {
+		log.Printf("managerd: the restart lease for this step is still held, so it still blocks other guarded restarts of that service in the Colony until this Comb confirms itself or an operator clears it")
+	}
+}
 
 // peerManagerdAddrFunc mirrors internal/manager.Server's own unexported
 // peerManagerdAddr method (and internal/cluster's resolvePeerManagerdAddr)
