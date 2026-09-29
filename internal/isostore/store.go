@@ -14,6 +14,7 @@ import (
 	"bufio"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -25,6 +26,37 @@ import (
 
 	"github.com/glenjbarber/apiary/internal/freebsdimg"
 )
+
+// MaxUploadSizeBytes bounds a single Save call's input (an operator
+// upload, not a FreeBSD official-image fetch - see EnsureFreeBSDImage's
+// own preflightFreeSpace for that path). 16 GiB comfortably covers real
+// install media this project actually expects (FreeBSD/Linux ISOs,
+// memstick images, even a dual-layer Windows ISO) while still bounding
+// how much an unauthenticated-during-bootstrap or otherwise misbehaving
+// caller (2026-09-29 security audit, "ISO upload can exhaust host disk
+// space") can force onto the host in one request. Exported so a UI can
+// state the limit up front rather than a caller discovering it only
+// after a rejected upload.
+const MaxUploadSizeBytes = 16 << 30 // 16 GiB
+
+// minFreeSpaceReserveBytes is kept free on the store's filesystem at all
+// times during a Save - checked once before the first byte is written,
+// and again every freeSpaceCheckIntervalBytes thereafter. Save cannot
+// preflight against the upload's total size the way
+// EnsureFreeBSDImage's preflightFreeSpace does (an operator upload's
+// size is whatever the caller's browser decided to send, unknown until
+// the stream ends), so a reserve plus periodic re-checks is the
+// equivalent guard for a size that isn't known up front: it stops an
+// upload from ever running the disk down to zero, even though it can't
+// rule out a full disk before starting the way the fetch path can.
+const minFreeSpaceReserveBytes = 1 << 30 // 1 GiB
+
+// freeSpaceCheckIntervalBytes is how often, in bytes written, Save
+// re-checks minFreeSpaceReserveBytes during a long upload. Frequent
+// enough to catch a filling disk within a fraction of a gigabyte,
+// infrequent enough that statfs(2) overhead is negligible against
+// writing a multi-gigabyte file.
+const freeSpaceCheckIntervalBytes = 256 << 20 // 256 MiB
 
 // Info describes a stored ISO.
 type Info struct {
@@ -58,10 +90,34 @@ type Manager struct {
 	freebsdImages *freebsdimg.Manager
 
 	// freeSpace reports free bytes on the filesystem holding a
-	// directory, for the fetch preflight. nil means the platform
-	// statfs(2) wrapper; tests replace it to simulate a full disk on any
-	// platform, including ones with no statfs at all.
+	// directory, for the fetch preflight and Save's own reserve check.
+	// nil means the platform statfs(2) wrapper; tests replace it to
+	// simulate a full disk on any platform, including ones with no
+	// statfs at all.
 	freeSpace func(dir string) (avail int64, err error)
+
+	// maxUploadSize/freeSpaceCheckInterval override
+	// MaxUploadSizeBytes/freeSpaceCheckIntervalBytes when non-zero -
+	// tests use this to exercise Save's size cap and its mid-stream
+	// free-space re-check with a few bytes of test data instead of
+	// gigabytes of real I/O. Zero (the default) means the real
+	// production constants.
+	maxUploadSize          int64
+	freeSpaceCheckInterval int64
+}
+
+func (m *Manager) maxUploadSizeBytes() int64 {
+	if m.maxUploadSize > 0 {
+		return m.maxUploadSize
+	}
+	return MaxUploadSizeBytes
+}
+
+func (m *Manager) freeSpaceCheckIntervalBytes() int64 {
+	if m.freeSpaceCheckInterval > 0 {
+		return m.freeSpaceCheckInterval
+	}
+	return freeSpaceCheckIntervalBytes
 }
 
 // New returns a Manager storing ISOs under dir.
@@ -96,6 +152,57 @@ func (m *Manager) path(name string) string {
 	return filepath.Join(m.Dir, name)
 }
 
+// checkFreeSpaceReserve refuses to continue when free space on m.Dir's
+// filesystem has dropped to or below minFreeSpaceReserveBytes. A
+// platform with no statfs(2) support (errUnsupportedSpace) is not
+// guessed at here either, matching preflightFreeSpace's own "cannot
+// ask, must not guess" stance.
+func (m *Manager) checkFreeSpaceReserve() error {
+	avail, err := m.diskFreeSpace(m.Dir)
+	if err != nil {
+		if errors.Is(err, errUnsupportedSpace) {
+			return nil
+		}
+		return fmt.Errorf("isostore: checking free space in %s: %w", m.Dir, err)
+	}
+	if avail <= minFreeSpaceReserveBytes {
+		return fmt.Errorf("isostore: refusing upload: only %d bytes free in %s, must keep at least %d free", avail, m.Dir, minFreeSpaceReserveBytes)
+	}
+	return nil
+}
+
+// limitedWriter wraps Save's tmp-file-plus-hash writer to enforce
+// MaxUploadSizeBytes and to re-check minFreeSpaceReserveBytes as bytes
+// arrive, since Save (unlike EnsureFreeBSDImage) never knows the
+// upload's total size up front. A short write with a non-nil error is
+// the same contract every io.Writer implementation gives when it can't
+// accept more - Save's own copy loop is a plain io.Copy against this,
+// so nothing beyond an ordinary "writing upload" error path is needed
+// to handle either rejection.
+type limitedWriter struct {
+	dst        io.Writer
+	m          *Manager
+	total      int64
+	sinceCheck int64
+}
+
+func (w *limitedWriter) Write(p []byte) (int, error) {
+	max := w.m.maxUploadSizeBytes()
+	if w.total+int64(len(p)) > max {
+		return 0, fmt.Errorf("isostore: upload exceeds maximum size of %d bytes", max)
+	}
+	n, err := w.dst.Write(p)
+	w.total += int64(n)
+	w.sinceCheck += int64(n)
+	if err == nil && w.sinceCheck >= w.m.freeSpaceCheckIntervalBytes() {
+		w.sinceCheck = 0
+		if cerr := w.m.checkFreeSpaceReserve(); cerr != nil {
+			return n, cerr
+		}
+	}
+	return n, err
+}
+
 // Save streams r into the store under name, computing its SHA-256 as it
 // writes. If the computed hash doesn't match expectedSHA256 (case-
 // insensitive hex), the partially-written file is removed and an error
@@ -116,6 +223,10 @@ func (m *Manager) Save(name string, r io.Reader, expectedSHA256 string) (*Info, 
 		return nil, fmt.Errorf("isostore: creating store dir: %w", err)
 	}
 
+	if err := m.checkFreeSpaceReserve(); err != nil {
+		return nil, err
+	}
+
 	// Write to a temp file first so a verification failure never leaves
 	// a partial or wrongly-named file behind under the real name, and
 	// so a concurrent Save of the same name can't observe a half-written
@@ -128,7 +239,8 @@ func (m *Manager) Save(name string, r io.Reader, expectedSHA256 string) (*Info, 
 	defer os.Remove(tmpPath) // no-op once successfully renamed
 
 	h := sha256.New()
-	size, err := io.Copy(io.MultiWriter(tmp, h), r)
+	lw := &limitedWriter{dst: io.MultiWriter(tmp, h), m: m}
+	size, err := io.Copy(lw, r)
 	closeErr := tmp.Close()
 	if err != nil {
 		return nil, fmt.Errorf("isostore: writing upload: %w", err)

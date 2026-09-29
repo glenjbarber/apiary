@@ -108,6 +108,14 @@ func (f *fakeUploadStream) SendAndClose(resp *rpcpb.UploadISOResponse) error {
 	return nil
 }
 
+// Context overrides the embedded (nil) grpc.ServerStream's Context - this
+// fake never carries a real network connection, so it has no peer
+// address to report, exercising isoUploadLimiter's unknownISOUploadCaller
+// fallback the same way a non-network test harness would in production.
+func (f *fakeUploadStream) Context() context.Context {
+	return context.Background()
+}
+
 func metadataMsg(name, hash string) *rpcpb.UploadISORequest {
 	return &rpcpb.UploadISORequest{Data: &rpcpb.UploadISORequest_Metadata{
 		Metadata: &rpcpb.ISOUploadMetadata{Name: name, ExpectedSha256: hash},

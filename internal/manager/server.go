@@ -469,6 +469,11 @@ type Server struct {
 	// internal/frontend's identical tracker.
 	pamLockouts *pamLockoutTracker
 
+	// isoUploads bounds UploadISO's concurrency, globally and per caller
+	// (2026-09-29 security audit, "ISO upload can exhaust host disk
+	// space") - always initialized, mirroring pamLockouts above.
+	isoUploads *isoUploadLimiter
+
 	// knownPeerAddresses (ADR-0097), when non-empty, is the sole
 	// allowlist RequestJoinColony/GetJoinRequestStatus/CancelJoinRequest
 	// check target_address against before dialing it - see
@@ -692,7 +697,7 @@ var _ rpcpb.ManagerServiceServer = (*Server)(nil)
 // the params above) specifically to keep every existing positional
 // NewServer(...) call site a mechanical one-line edit.
 func NewServer(raft *RaftClient, nodeID string, isos isoManager, vnc VNCLookup, serialLog SerialLogLookup, vlanMgr VLANStatus, peers PeerForwarder, peerManagerdPort string, zfsMgr quotaSetter, nodeConfig nodeConfigStore, assumptionStoreMgr assumptionStore, assumptionStaleAfter time.Duration, reconciler reconcilerStats) *Server {
-	return &Server{raft: raft, nodeID: nodeID, isos: isos, vnc: vnc, serialLog: serialLog, vlan: vlanMgr, statsGather: hoststats.Gather, hostPkgCollect: hostpkg.NewCollector(hostpkg.Options{}).Collect, peers: peers, peerManagerdPort: peerManagerdPort, zfs: zfsMgr, nodeConfig: nodeConfig, listNetworkInterfaces: netif.List, assumptions: assumptionStoreMgr, assumptionStaleAfter: assumptionStaleAfter, reconciler: reconciler, services: rcServiceController{}, pamLockouts: newPAMLockoutTracker(), reachabilityCheck: dialReachable, raftdConversion: rcRaftdConversionAdapter{}, colonyUpdateIncarnation: ColonyUpdateIncarnation()}
+	return &Server{raft: raft, nodeID: nodeID, isos: isos, vnc: vnc, serialLog: serialLog, vlan: vlanMgr, statsGather: hoststats.Gather, hostPkgCollect: hostpkg.NewCollector(hostpkg.Options{}).Collect, peers: peers, peerManagerdPort: peerManagerdPort, zfs: zfsMgr, nodeConfig: nodeConfig, listNetworkInterfaces: netif.List, assumptions: assumptionStoreMgr, assumptionStaleAfter: assumptionStaleAfter, reconciler: reconciler, services: rcServiceController{}, pamLockouts: newPAMLockoutTracker(), isoUploads: newISOUploadLimiter(), reachabilityCheck: dialReachable, raftdConversion: rcRaftdConversionAdapter{}, colonyUpdateIncarnation: ColonyUpdateIncarnation()}
 }
 
 // SetColonyJoinWindowSeconds wires the configured join-window ceiling
@@ -2202,7 +2207,19 @@ func (s *Server) GetVM(ctx context.Context, req *rpcpb.GetVMRequest) (*rpcpb.Get
 // directly into isostore.Save as they arrive - the whole upload is
 // never buffered in memory, and Save's own hash verification runs
 // concurrently with receiving the stream rather than after it.
+//
+// s.isoUploads bounds how many of these can run at once, globally and
+// per caller (2026-09-29 security audit) - acquired before Recv'ing
+// even the metadata message, so a caller already at its limit is
+// rejected before this stream does any work at all, not partway
+// through.
 func (s *Server) UploadISO(stream rpcpb.ManagerService_UploadISOServer) error {
+	caller := isoUploadCaller(stream.Context())
+	if err := s.isoUploads.acquire(caller); err != nil {
+		return err
+	}
+	defer s.isoUploads.release(caller)
+
 	first, err := stream.Recv()
 	if err != nil {
 		return fmt.Errorf("manager: UploadISO: receiving metadata: %w", err)
