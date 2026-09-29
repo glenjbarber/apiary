@@ -26,6 +26,15 @@ import (
 // restart that never happened. The listener is the measurement, and
 // leaving the ability to make the wrong measurement out of the
 // interface is stronger than documenting that it should not be made.
+// Leadership IS asked for, and that is not the same mistake. It is not
+// `service status`: it is this Comb's own raftd answering Status for
+// itself, which is a measurement raftd cannot get wrong about its own
+// role the way a wrapper script can get a pidfile wrong. It is also the
+// one question whose wrong answer is unrecoverable - a listener check
+// that fails leaves a daemon that is not up, which the next attempt
+// fixes, while a leader check that is quietly skipped does the
+// restart. So the interface carries the question, and carries nothing
+// that could answer it wrongly. See leadership.go.
 type Host interface {
 	// RestartService hands rc.d a restart and returns when it is done.
 	// A non-nil error means the restart command itself failed; it says
@@ -47,10 +56,22 @@ type Host interface {
 	// Hostname is this Comb's own name, used only in the operator-facing
 	// banner.
 	Hostname() (string, error)
+
+	// Leadership reports whether this Comb is the Colony's current
+	// leader, from this Comb's own raftd.
+	//
+	// It is asked once, before anything is restarted, and it refuses
+	// the run on yes. An error is a refusal too and is not the same
+	// answer as a no: an unanswerable question is an unestablished
+	// Comb, and force-restart restarts raftd. See leadership.go for why
+	// there is no retry and no override.
+	Leadership() (Leadership, error)
 }
 
-// hostCommand is the production Host: it shells out to the same three
-// commands an operator would type.
+// hostCommand is the production Host: for a restart, a listener and a
+// name, it shells out to the same three commands an operator would
+// type. For leadership it does not, because no such command exists -
+// see the Leadership method below.
 //
 // It execs by bare name and relies on PATH, deliberately. The point of
 // this command is that it works on a host with no source checkout, and
@@ -59,11 +80,11 @@ type Host interface {
 // to fail on the machines this is for.
 type hostCommand struct{}
 
-// NewHost returns the real Host: service(8), sockstat(8), a sleep and
-// this machine's name. Exported so a test can drive the production
-// implementation with stand-ins for those two commands on PATH, which
-// exercises the exec and the parsing together rather than stubbing
-// either one out.
+// NewHost returns the real Host: service(8), sockstat(8), a sleep,
+// this machine's name, and this Comb's own raftd. Exported so a test
+// can drive the production implementation with stand-ins for those two
+// commands on PATH, which exercises the exec and the parsing together
+// rather than stubbing either one out.
 func NewHost() Host { return hostCommand{} }
 
 func (hostCommand) RestartService(rcName string) error {
@@ -91,3 +112,11 @@ func (hostCommand) Listening(port int) (bool, error) {
 func (hostCommand) Sleep(d time.Duration) { time.Sleep(d) }
 
 func (hostCommand) Hostname() (string, error) { return os.Hostname() }
+
+// Leadership asks this Comb's own raftd. Unlike the three commands
+// above it is not a shell-out, and it is not on PATH: there is no
+// host command that answers "is this Comb the leader", and the nearest
+// things that do - rc.d's status line, a log file, the Machine page -
+// are all either false on a live Comb (the status line) or derived
+// from something other than raft's own state.
+func (h hostCommand) Leadership() (Leadership, error) { return newLeadershipProbe().Leadership() }

@@ -59,6 +59,15 @@ argument, that the command prints the hazard on every invocation, is
 carried by `apiaryctl`'s own banner and timeout diagnostic rather than
 by make output.
 
+**Amended 2026-09-29: the command now refuses on the leader, and on
+its own inability to tell.** Everything above is unchanged. What is new
+is one more preflight, asked once against this Comb's own raftd before
+the banner and before the first restart, and a third refusal. It is
+recorded at length under "The leader check" below because the reason it
+is a refusal and not a warning is the substance, and because the case
+that decides the design - the check that could not be answered - is the
+one a reader would otherwise assume away.
+
 `TestMakefile_HasNoForceRestartTarget` in `internal/forcerestart` is the
 regression, and it is a negative over the whole file rather than a check
 on a recipe body. That is deliberate and it is a correction: the test
@@ -227,6 +236,71 @@ is broken" into a loud stop instead of a silently half-restarted
 managerd/raftd pair, and the error message says why stopping matters
 rather than just that something failed.
 
+### The leader check: a refusal, asked of this Comb's own raftd
+
+The banner has always said not to restart `raftd` on the current
+leader. That was a sentence and an assumption, and the assumption is
+the kind this command is not allowed to have: `force-restart` exists to
+be run by an operator whose attention is on a daemon that is down,
+which is exactly the state in which "and which Comb is the leader" is
+the one thing not being held in mind. So the command asks, and refuses
+on the answer.
+
+**It asks this Comb's own raftd, over the socket `raftd.json` names.**
+Not a peer, not a managerd, not rc.d. "Is some *other* Comb the leader"
+is not the question; the question is whether *this* Comb is, and only
+this Comb's own raftd can answer it. That also makes it a
+measurement rather than an inference, in a package whose `Host`
+interface exists precisely because the obvious inference - rc.d's
+`service <name> status` - reports "not running" for every apiary daemon
+on a Comb where all of them are up and listening.
+
+**An unanswered question refuses too, and that is the half of this
+that matters.** "Is this Comb the leader?" and "I could not find out
+whether this Comb is the leader" are different answers, and from here a
+dead `raftd`, a socket path in `raftd.json` naming some other Comb's
+socket, and an internal token that does not match all look like the
+second one. Treating any of them as "no" would make the check
+decorative, because an unanswerable check passes - and an unanswerable
+check is what an incident produces. A Comb whose leadership is not
+established is a Comb this command will not restart `raftd` on. The
+two refusals print different messages on purpose, because their next
+actions are entirely different: one is a leadership problem to wait
+out, the other is a broken or absent `raftd` to go and look at.
+
+**There is no flag and no prompt.** A prompt is answered by reflex
+under pressure, a flag is passed by a script written once, and a
+command whose dangerous mode is a word on a command line will
+eventually have that word in a script. The refusal is unconditional,
+and the message says so explicitly, so that an operator who has
+legitimately concluded they must restart the leader knows this is a
+decision to make elsewhere rather than a step they are missing.
+
+**Where the check lives.** In `internal/forcerestart.Run`, as a
+preflight beside the existing unknown-port refusal, not in
+`cmd/apiaryctl`. The property belongs to the restart rather than to
+one way of asking for it, and a check a caller can decline to make is a
+check that eventually is not made. `Run`'s zero `Options` therefore
+remains a production configuration, which is the property that makes
+the safety unconditional.
+
+The dial itself is `internal/localraft`, extracted so that
+`apiaryctl force-restart` and `apiaryctl join-authorize` cannot
+disagree about which socket this Comb has. Two copies of "read
+`raftd.json`, dial that socket, present that token" is two places for
+the two to get out of step, and a disagreement there is not a crash -
+it is the wrong Colony's answer, read as confidently as the right one.
+The extraction also fixed a real inconsistency: `join-authorize`
+resolved the socket from its `-raftd-config` flag and the internal
+token from the *default* path, so on a Comb with a non-default
+`raftd.json` the two could name different files.
+
+This is **not** coordination, and it does not move the Scope boundary
+below. It learns one fact about one Comb and stops. It takes no lease,
+reserves nothing, waits on no other node, and the two Combs an operator
+runs it on are as uncoordinated with respect to each other as they were
+before it existed.
+
 ### The cooldown must still learn: a record, not a lease
 
 Taking no lease is the point of this target, and it stays that way. But
@@ -370,6 +444,15 @@ a record that informs a later decision is not the same as a lease that
 constrains this one. ADR-0125's clause remains unmet, and
 `force-restart` remains the uncoordinated act it has always been.
 
+The 2026-09-29 leader check does not move that boundary either. It is
+one read of one Comb's own raft state, and a refusal: it reserves
+nothing, checks nothing about the other Combs, and makes the two
+Combs an operator runs it on no more coordinated with respect to each
+other than they were. What it changes is that one Comb - the one that
+was going to be hurt by the restart, and only that one - now refuses to
+be restarted by this command. That is subtraction, like the split
+itself, not the client ADR-0125 asks for.
+
 ## Relationship to existing decisions
 
 - **ADR-0125** - the guardrail and the original exclusion. This ADR
@@ -407,6 +490,41 @@ constrains this one. ADR-0125's clause remains unmet, and
   match; that a timeout stops before the next service and lists every
   restart already issued; and that a plan entry with no known port is
   refused before the first restart.
+- The leader check, since 2026-09-29, in the same suite and the same
+  style: it executes `Run` against a fake that answers the leadership
+  question, and the cases are the three answers. On yes, the run does
+  not complete, `Err` is `*forcerestart.ErrIsLeader`, no restart
+  command and no pending-restart record exists afterwards, the *only*
+  host call in the whole run is the status query, and the about-to-
+  restart banner is absent. On unanswerable, the same, with
+  `*forcerestart.ErrLeaderUnknown` and a different message - and a case
+  asserting the two messages do not drift into each other, because the
+  operator's next action is different for each. On no, the run
+  proceeds, and the honest-path case asserts the status query is the
+  *first* host call, so a check made after `managerd` is already down
+  cannot pass.
+  - Those three were checked by mutation rather than by reading them:
+    making `IsLeader` not refuse, making an unanswerable check count as
+    a no, and moving the check below the restart loop each produce a
+    failing test, and the last produces three.
+  - `internal/localraft` - the dial, against a real gRPC server on a
+    real unix socket with the real token interceptor, not a mocked
+    client. It asserts that a leader is reported as one, that a
+    follower's knowledge of the leader is carried through rather than
+    dropped, that the internal token is read from the *same* config
+    that named the socket, and - the case the whole refusal rests on -
+    that an unreachable `raftd` and a rejected token both return an
+    error with a zero `Status` rather than a `Status` with
+    `IsLeader: false` and no error. It also pins that a `raftd.json`
+    naming no socket resolves to `raftd`'s own default through
+    `raftd`'s own loader, which is what the loader does today and what
+    a reader would otherwise have to take on trust.
+  - `cmd/apiaryctl` - the operator-facing text, built and run rather
+    than matched against the source: `apiaryctl help` and a bare
+    `apiaryctl` both name the leader refusal and the unanswered-check
+    refusal, and `apiaryctl force-restart <arg>` still reports the
+    argument error, which is what proves the subcommand is still
+    dispatched.
 - `TestForcedRecord_NamesTheVoterTheRestartedDaemonWouldReport` and
   `TestForcedRecord_DoesNotOverwriteAPendingLease` cover the record: that
   it names the identity the restarted daemon would report for itself,
