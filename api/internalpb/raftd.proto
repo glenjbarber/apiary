@@ -267,6 +267,26 @@ message StatusResponse {
   // differing applied_index may be nothing but the sample being taken
   // while the cluster moved.
   string state_digest = 8;
+
+  // membership_error is set (non-empty) when raftd's own membership read
+  // failed, so servers above is not a view of the Colony - it is an
+  // absence of one. Empty means the read succeeded, which is what makes
+  // an empty servers list on this response mean "this node believes the
+  // Colony has no members" rather than "this node could not find out".
+  //
+  // The response is still returned normally rather than as a gRPC error:
+  // a caller asking about raft state can still be told everything that
+  // WAS observable (leadership, applied index, state digest) alongside
+  // the reason this one part is missing.
+  //
+  // This closes ADR-0056's already-disclosed gap, where a failed read
+  // silently produced an empty membership list that downstream
+  // arithmetic read as "0 total voters".
+  //
+  // Field 20 rather than 9: 1-8 are the original Status contract, and
+  // jumping ahead leaves room for a future membership-shaped addition
+  // without renumbering anything already on the wire.
+  string membership_error = 20;
 }
 
 message ServerInfo {

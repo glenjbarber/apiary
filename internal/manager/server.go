@@ -988,6 +988,12 @@ func (s *Server) Status(ctx context.Context, _ *rpcpb.StatusRequest) (*rpcpb.Sta
 	// and says nothing about whether the colony agrees. Cross-voter
 	// comparison is ClusterHealth's job, which already fans out per node.
 	resp.RaftStateDigest = raftStatus.GetStateDigest()
+	// raftd answered, so this is NOT the RaftError path above and never
+	// clears RaftReachable: it is raftd reporting that it could not read
+	// its own membership. Passing it through as its own field is what
+	// keeps an empty Members list from reading as "this node believes the
+	// Colony has no members" - see the proto field's own doc comment.
+	resp.RaftMembershipError = raftStatus.GetMembershipError()
 	for _, server := range raftStatus.GetServers() {
 		resp.KnownNodeIds = append(resp.KnownNodeIds, server.GetId())
 		resp.Members = append(resp.Members, &rpcpb.RaftMember{
@@ -1048,6 +1054,15 @@ func (s *Server) GetLocalNodeHealth(ctx context.Context, _ *rpcpb.GetLocalNodeHe
 		return nil, err
 	}
 
+	// Membership was observed only if raftd read its own configuration
+	// and reported it. A raftd that answered without a membership read
+	// returned no evidence about the voter set, so this input stays
+	// false and the derivation below is free to say unknown rather than
+	// inferring a verdict from the fact that raftd is up. HeartbeatOK
+	// and AppliedIndexObserved are separate questions about raftd's own
+	// liveness and progress, so they stay on RaftReachable alone.
+	membershipObserved := status.GetRaftReachable() && status.GetRaftMembershipError() == ""
+
 	// One Inputs, one SignalsFrom, one ComputeNodeHealth - the same
 	// derivation the cluster-wide ClusterHealth handler below runs, so
 	// this local answer and that cluster-wide one can never be
@@ -1059,7 +1074,7 @@ func (s *Server) GetLocalNodeHealth(ctx context.Context, _ *rpcpb.GetLocalNodeHe
 		MembershipObservedAt:     now,
 		HeartbeatObserved:        true,
 		HeartbeatOK:              status.GetRaftReachable(),
-		MembershipObserved:       status.GetRaftReachable(),
+		MembershipObserved:       membershipObserved,
 		AppliedIndexObserved:     status.GetRaftReachable(),
 		AppliedIndex:             status.GetRaftAppliedIndex(),
 		LastLogIndex:             status.GetRaftLastLogIndex(),
@@ -1130,7 +1145,11 @@ func (s *Server) ClusterHealth(ctx context.Context, _ *rpcpb.ClusterHealthReques
 		return nil, err
 	}
 
-	membershipObserved := anchor.GetRaftReachable()
+	// A reachable raftd that failed its own configuration read has not
+	// observed membership, only answered. Treating it as observed would
+	// let every Comb's verdict below be computed against an empty voter
+	// set and stated as if it were measured.
+	membershipObserved := anchor.GetRaftReachable() && anchor.GetRaftMembershipError() == ""
 	nodeIDs := anchor.GetKnownNodeIds()
 	if len(nodeIDs) == 0 && s.nodeID != "" {
 		nodeIDs = []string{s.nodeID}

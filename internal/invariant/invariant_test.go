@@ -8,10 +8,10 @@ import (
 )
 
 // noLeader is a node ID never present in these tests' voter lists, so
-// the leader-loss downgrade in recovery.ClassifyQuorum never fires -
-// isolating each test's own condition from that separate behavior
-// (which TestEvaluateQuorumTolerance_LeaderVoterGetsDowngrade covers on
-// its own).
+// the leader-loss downgrade in recovery.ClassifyQuorumFromVantage
+// never fires - isolating each test's own condition from that separate
+// behavior (which TestEvaluateQuorumTolerance_LeaderVoterGetsDowngrade
+// covers on its own).
 const noLeader = "not-a-voter"
 
 func TestEvaluateQuorumTolerance_TrueWhenEveryVoterLossSurvives(t *testing.T) {
@@ -23,7 +23,7 @@ func TestEvaluateQuorumTolerance_TrueWhenEveryVoterLossSurvives(t *testing.T) {
 		{NodeID: "b", Reachability: ReachabilityReachable},
 		{NodeID: "c", Reachability: ReachabilityReachable},
 	}
-	got := EvaluateQuorumTolerance(voters, noLeader)
+	got := EvaluateQuorumTolerance(voters, noLeader, recovery.VantageFromLeader)
 	if got.Result != ResultTrue {
 		t.Errorf("Result = %v, want True; evidence=%+v", got.Result, got.Evidence)
 	}
@@ -38,7 +38,7 @@ func TestEvaluateQuorumTolerance_FalseWhenAnyVoterLossIsLost(t *testing.T) {
 		{NodeID: "b", Reachability: ReachabilityUnreachable},
 		{NodeID: "c", Reachability: ReachabilityReachable},
 	}
-	got := EvaluateQuorumTolerance(voters, noLeader)
+	got := EvaluateQuorumTolerance(voters, noLeader, recovery.VantageFromLeader)
 	if got.Result != ResultFalse {
 		t.Errorf("Result = %v, want False; evidence=%+v", got.Result, got.Evidence)
 	}
@@ -53,7 +53,7 @@ func TestEvaluateQuorumTolerance_UnknownWhenNoneLostButSomeUnknown(t *testing.T)
 		{NodeID: "b", Reachability: ReachabilityUnknown},
 		{NodeID: "c", Reachability: ReachabilityReachable},
 	}
-	got := EvaluateQuorumTolerance(voters, noLeader)
+	got := EvaluateQuorumTolerance(voters, noLeader, recovery.VantageFromLeader)
 	if got.Result != ResultUnknown {
 		t.Errorf("Result = %v, want Unknown; evidence=%+v", got.Result, got.Evidence)
 	}
@@ -73,7 +73,7 @@ func TestEvaluateQuorumTolerance_LeaderVoterGetsDowngrade(t *testing.T) {
 		{NodeID: "b", Reachability: ReachabilityReachable},
 		{NodeID: "c", Reachability: ReachabilityReachable},
 	}
-	got := EvaluateQuorumTolerance(voters, "a")
+	got := EvaluateQuorumTolerance(voters, "a", recovery.VantageFromLeader)
 	if got.Result != ResultUnknown {
 		t.Fatalf("Result = %v, want Unknown (leader-loss downgrade for voter a)", got.Result)
 	}
@@ -91,7 +91,9 @@ func TestEvaluateQuorumTolerance_LeaderVoterGetsDowngrade(t *testing.T) {
 	}
 }
 
-func TestEvaluateHASTDualPrimary_AlwaysUnknown(t *testing.T) {
+func TestEvaluateHASTDualPrimary_UnknownWithoutObservations(t *testing.T) {
+	// No live role observation for either end: the answer is Unknown,
+	// because silence is never folded into "not a primary".
 	evals := EvaluateHASTDualPrimary([]string{"vm-1", "jail-2"})
 	if len(evals) != 2 {
 		t.Fatalf("len(evals) = %d, want 2", len(evals))
@@ -106,6 +108,54 @@ func TestEvaluateHASTDualPrimary_AlwaysUnknown(t *testing.T) {
 	}
 }
 
+func TestEvaluateHASTDualPrimary_FalseWhenBothEndsReportPrimary(t *testing.T) {
+	evals := EvaluateHASTDualPrimary(nil,
+		HASTPrimarySpec{
+			ID: "vm-1", Name: "web-1", Kind: "vm", OwnerNodeID: "node-a", ReplicaNodeID: "node-b",
+			Owner:   HASTObservation{NodeID: "node-a", Attempted: true, Observed: true, Role: "primary", Status: "complete"},
+			Replica: HASTObservation{NodeID: "node-b", Attempted: true, Observed: true, Role: "primary", Status: "complete"},
+		})
+	if len(evals) != 1 || evals[0].Result != ResultFalse {
+		t.Fatalf("evals = %+v, want one False evaluation for a dual primary", evals)
+	}
+}
+
+func TestEvaluateHASTDualPrimary_TrueWhenExactlyOneEndIsPrimary(t *testing.T) {
+	evals := EvaluateHASTDualPrimary(nil,
+		HASTPrimarySpec{
+			ID: "vm-1", Name: "web-1", Kind: "vm", OwnerNodeID: "node-a", ReplicaNodeID: "node-b",
+			Owner:   HASTObservation{NodeID: "node-a", Attempted: true, Observed: true, Role: "primary", Status: "complete"},
+			Replica: HASTObservation{NodeID: "node-b", Attempted: true, Observed: true, Role: "secondary", Status: "complete"},
+		})
+	if len(evals) != 1 || evals[0].Result != ResultTrue {
+		t.Fatalf("evals = %+v, want one True evaluation when exactly one end is the writable primary", evals)
+	}
+}
+
+func TestEvaluateHASTDualPrimary_UnknownWhenAnEndIsSilent(t *testing.T) {
+	// A missing observation is never treated as a non-primary role, so
+	// it cannot produce the True that "exactly one primary" requires.
+	evals := EvaluateHASTDualPrimary(nil,
+		HASTPrimarySpec{
+			ID: "vm-1", Name: "web-1", Kind: "vm", OwnerNodeID: "node-a", ReplicaNodeID: "node-b",
+			Owner: HASTObservation{NodeID: "node-a", Attempted: true, Observed: true, Role: "primary", Status: "complete"},
+		})
+	if len(evals) != 1 || evals[0].Result != ResultUnknown {
+		t.Fatalf("evals = %+v, want Unknown when the replica never reported a role", evals)
+	}
+}
+
+func TestEvaluateHASTDualPrimary_UnknownWhenOneNodeIsBothEnds(t *testing.T) {
+	evals := EvaluateHASTDualPrimary(nil,
+		HASTPrimarySpec{
+			ID: "vm-1", Name: "web-1", Kind: "vm", OwnerNodeID: "node-a", ReplicaNodeID: "node-a",
+			Owner: HASTObservation{NodeID: "node-a", Attempted: true, Observed: true, Role: "primary", Status: "complete"},
+		})
+	if len(evals) != 1 || evals[0].Result != ResultUnknown {
+		t.Fatalf("evals = %+v, want Unknown when one node is configured as both ends", evals)
+	}
+}
+
 func TestEvaluateCellRecoverability_FalseForIncapableDestination(t *testing.T) {
 	facts := []ResourceFact{
 		{ID: "vm-1", Name: "web-1", Kind: "vm", ReplicaNodeID: "node-b", DestinationCapable: ResultFalse, DestinationCapableDetail: "node-b: bhyve not configured"},
@@ -116,13 +166,64 @@ func TestEvaluateCellRecoverability_FalseForIncapableDestination(t *testing.T) {
 	}
 }
 
-func TestEvaluateCellRecoverability_NeverTrueEvenWhenDestinationCapable(t *testing.T) {
+func TestEvaluateCellRecoverability_CapableDestinationAloneIsNeverTrue(t *testing.T) {
+	// A capable destination is one half of the conjunction. With no
+	// live HAST observation for the replica - the zero value, which is
+	// silence rather than a passed check - the whole is Unknown.
 	facts := []ResourceFact{
 		{ID: "vm-1", Name: "web-1", Kind: "vm", ReplicaNodeID: "node-b", DestinationCapable: ResultTrue, DestinationCapableDetail: "node-b: bhyve configured"},
 	}
 	evals := EvaluateCellRecoverability(facts)
 	if len(evals) != 1 || evals[0].Result != ResultUnknown {
-		t.Fatalf("evals = %+v, want Unknown (never True) even for a capable destination", evals)
+		t.Fatalf("evals = %+v, want Unknown - a capable destination alone never satisfies the conjunction", evals)
+	}
+}
+
+func TestEvaluateCellRecoverability_TrueWhenBothHalvesConfirmed(t *testing.T) {
+	facts := []ResourceFact{{
+		ID: "vm-1", Name: "web-1", Kind: "vm", ReplicaNodeID: "node-b",
+		DestinationCapable: ResultTrue, DestinationCapableDetail: "node-b: bhyve configured",
+		ReplicaSync: HASTObservation{
+			NodeID: "node-b", Attempted: true, Observed: true,
+			Role: "secondary", Status: "complete", Replication: "load-balanced",
+		},
+	}}
+	evals := EvaluateCellRecoverability(facts)
+	if len(evals) != 1 || evals[0].Result != ResultTrue {
+		t.Fatalf("evals = %+v, want True when the replica is in sync and the destination is capable", evals)
+	}
+}
+
+func TestEvaluateCellRecoverability_UnknownWhenReplicaConfirmedOutOfSync(t *testing.T) {
+	// A confirmed "init" role is a positive statement that the replica
+	// is not usable as-is, but it is not a statement that the Cell is
+	// unrecoverable - so the conjunction is unconfirmed, not False.
+	facts := []ResourceFact{{
+		ID: "vm-1", Name: "web-1", Kind: "vm", ReplicaNodeID: "node-b",
+		DestinationCapable: ResultTrue, DestinationCapableDetail: "node-b: bhyve configured",
+		ReplicaSync: HASTObservation{
+			NodeID: "node-b", Attempted: true, Observed: true, Role: "init",
+		},
+	}}
+	evals := EvaluateCellRecoverability(facts)
+	if len(evals) != 1 || evals[0].Result != ResultUnknown {
+		t.Fatalf("evals = %+v, want Unknown when the replica is confirmed not usable as-is", evals)
+	}
+}
+
+func TestEvaluateCellRecoverability_UnknownForUnrecognisedHASTRole(t *testing.T) {
+	// A role this build does not recognize is Apiary not understanding
+	// hastd, which is silence rather than a confirmed outage.
+	facts := []ResourceFact{{
+		ID: "vm-1", Name: "web-1", Kind: "vm", ReplicaNodeID: "node-b",
+		DestinationCapable: ResultTrue, DestinationCapableDetail: "node-b: bhyve configured",
+		ReplicaSync: HASTObservation{
+			NodeID: "node-b", Attempted: true, Observed: true, Role: "promoted", Status: "complete",
+		},
+	}}
+	evals := EvaluateCellRecoverability(facts)
+	if len(evals) != 1 || evals[0].Result != ResultUnknown {
+		t.Fatalf("evals = %+v, want Unknown for a role this build does not recognize", evals)
 	}
 }
 
@@ -207,7 +308,7 @@ func TestClassifyVoterQuorumImpacts_SurvivesForEveryVoterWhenAllReachable(t *tes
 		{NodeID: "b", Reachability: ReachabilityReachable},
 		{NodeID: "c", Reachability: ReachabilityReachable},
 	}
-	impacts := ClassifyVoterQuorumImpacts(voters, noLeader)
+	impacts := ClassifyVoterQuorumImpacts(voters, noLeader, recovery.VantageFromLeader)
 	if len(impacts) != 3 {
 		t.Fatalf("len(impacts) = %d, want 3", len(impacts))
 	}
@@ -231,7 +332,7 @@ func TestClassifyVoterQuorumImpacts_LostOnlyForTheVotersWhoseLossBreaksQuorum(t 
 		{NodeID: "b", Reachability: ReachabilityUnreachable},
 		{NodeID: "c", Reachability: ReachabilityReachable},
 	}
-	impacts := ClassifyVoterQuorumImpacts(voters, noLeader)
+	impacts := ClassifyVoterQuorumImpacts(voters, noLeader, recovery.VantageFromLeader)
 	if got := impactFor(impacts, "a"); !got.Valid || got.Verdict != recovery.QuorumLost {
 		t.Errorf("impact for a = %+v, want Valid=true Verdict=Lost", got)
 	}
@@ -249,7 +350,7 @@ func TestClassifyVoterQuorumImpacts_LeaderLossDowngradesOnlyTheLeadersOwnImpact(
 		{NodeID: "b", Reachability: ReachabilityReachable},
 		{NodeID: "c", Reachability: ReachabilityReachable},
 	}
-	impacts := ClassifyVoterQuorumImpacts(voters, "a")
+	impacts := ClassifyVoterQuorumImpacts(voters, "a", recovery.VantageFromLeader)
 	if got := impactFor(impacts, "a"); !got.Valid || got.Verdict != recovery.QuorumUnknown {
 		t.Errorf("impact for leader a = %+v, want Valid=true Verdict=Unknown (leader-loss downgrade)", got)
 	}
@@ -272,8 +373,8 @@ func TestClassifyVoterQuorumImpacts_EvaluateQuorumToleranceStaysConsistentWithPe
 		{NodeID: "b", Reachability: ReachabilityUnreachable},
 		{NodeID: "c", Reachability: ReachabilityReachable},
 	}
-	eval := EvaluateQuorumTolerance(voters, noLeader)
-	impacts := ClassifyVoterQuorumImpacts(voters, noLeader)
+	eval := EvaluateQuorumTolerance(voters, noLeader, recovery.VantageFromLeader)
+	impacts := ClassifyVoterQuorumImpacts(voters, noLeader, recovery.VantageFromLeader)
 	anyLost := false
 	for _, impact := range impacts {
 		if impact.Valid && impact.Verdict == recovery.QuorumLost {
@@ -282,5 +383,70 @@ func TestClassifyVoterQuorumImpacts_EvaluateQuorumToleranceStaysConsistentWithPe
 	}
 	if anyLost && eval.Result != ResultFalse {
 		t.Fatalf("ClassifyVoterQuorumImpacts found a Lost voter but EvaluateQuorumTolerance.Result = %v, want False", eval.Result)
+	}
+}
+
+func TestEvaluateQuorumTolerance_NonLeaderVantageIsNotLeaderDowngraded(t *testing.T) {
+	// The same 3-voter all-reachable set and the same current leader as
+	// TestEvaluateQuorumTolerance_LeaderVoterGetsDowngrade above, but
+	// the reachability counts were gathered by this caller rather than
+	// by the leader. The leader-loss argument - that leader-to-voter
+	// reachability says nothing about voter-to-voter reachability - does
+	// not apply to data this caller produced itself, so the downgrade
+	// must not fire and the verdict must be True.
+	voters := []VoterReachability{
+		{NodeID: "a", Reachability: ReachabilityReachable},
+		{NodeID: "b", Reachability: ReachabilityReachable},
+		{NodeID: "c", Reachability: ReachabilityReachable},
+	}
+	got := EvaluateQuorumTolerance(voters, "a", recovery.VantageFromNonLeader)
+	if got.Result != ResultTrue {
+		t.Fatalf("Result = %v, want True: a non-leader vantage must not be downgraded for a reason that only describes the leader's own", got.Result)
+	}
+}
+
+func TestEvaluateQuorumTolerance_ZeroVantageFailsClosed(t *testing.T) {
+	// A caller that did not say where its data came from gets the
+	// conservative leader-vantage reading, never a stronger verdict than
+	// it earned. This is the property that makes the new parameter safe
+	// to add without auditing every existing caller at once.
+	voters := []VoterReachability{
+		{NodeID: "a", Reachability: ReachabilityReachable},
+		{NodeID: "b", Reachability: ReachabilityReachable},
+		{NodeID: "c", Reachability: ReachabilityReachable},
+	}
+	got := EvaluateQuorumTolerance(voters, "a", recovery.QuorumVantage(""))
+	if got.Result != ResultUnknown {
+		t.Fatalf("Result = %v, want Unknown for an unnamed vantage", got.Result)
+	}
+}
+
+func TestEvaluateQuorumTolerance_NonLeaderVantageStillReportsLost(t *testing.T) {
+	// The downgrade was never the only thing the leader-vantage path
+	// did. A count-based Lost is a voter-count fact independent of
+	// reachability, so it must be Lost from either vantage - a
+	// non-leader vantage must not soften it.
+	voters := []VoterReachability{
+		{NodeID: "a", Reachability: ReachabilityUnreachable},
+		{NodeID: "b", Reachability: ReachabilityUnreachable},
+		{NodeID: "c", Reachability: ReachabilityReachable},
+	}
+	for _, vantage := range []recovery.QuorumVantage{recovery.VantageFromLeader, recovery.VantageFromNonLeader} {
+		got := EvaluateQuorumTolerance(voters, "c", vantage)
+		if got.Result != ResultFalse {
+			t.Errorf("vantage %q: Result = %v, want False", vantage, got.Result)
+		}
+	}
+}
+
+func TestClassifyVoterQuorumImpacts_NonLeaderVantageKeepsLeaderSurvives(t *testing.T) {
+	voters := []VoterReachability{
+		{NodeID: "a", Reachability: ReachabilityReachable},
+		{NodeID: "b", Reachability: ReachabilityReachable},
+		{NodeID: "c", Reachability: ReachabilityReachable},
+	}
+	impacts := ClassifyVoterQuorumImpacts(voters, "a", recovery.VantageFromNonLeader)
+	if got := impactFor(impacts, "a"); !got.Valid || got.Verdict != recovery.QuorumSurvives {
+		t.Errorf("impact for leader a = %+v, want Survives from a non-leader vantage", got)
 	}
 }

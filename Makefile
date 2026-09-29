@@ -11,10 +11,26 @@
 # benefit when the whole invocation is already privileged.
 SRCS=		apiaryinstall \
 			apiaryctl \
+			versioncheck \
 			raftd \
 			managerd \
 			frontend \
 			restshimd
+
+# versioncheck is in SRCS and is NOT in INSTALL_SRCS, for the same reason
+# apiaryinstall is not: it is a tool an operator runs FROM this checkout
+# and never leaves on the Comb. It is here rather than in a target of its
+# own so that `make build` produces it, `make clean` removes it and
+# check-stamped holds it to the same stamping contract as everything
+# else - and because `update` needs it on the host to produce its closing
+# report. Nothing reads versioncheck's own build id, so the stamp is
+# provenance rather than evidence: it says which checkout produced the
+# report, which is a real question once a report is pasted into an
+# incident note.
+#
+# Its -version flag exists for check-stamped, which runs every binary in
+# SRCS before an install is allowed, and for the same reason every other
+# binary has one.
 
 # BUILD_ID is the build's identity, and it is computed by
 # scripts/build-ldflags.sh rather than here. Override on the command
@@ -275,6 +291,17 @@ INSTALL_SAMPLE_SRCS=	raftd \
 # processes sat on a build days older than the rest, while the on-disk
 # binary's mtime claimed the node was deployed. `cmd/versioncheck` is
 # what tells a running process apart from the binary sitting beside it.
+#
+# So `update` now calls it. It did not used to, and the gap was not
+# theoretical: on 2026-09-27 all four Combs were updated from 107fdf6 and
+# frontend and restshimd came up on it while managerd and raftd stayed on
+# a9879963600c, and nothing in the update path noticed because the closing
+# message described what the target had DONE rather than what was
+# RUNNING (ADR-0145). The advice below is still printed in full and is
+# still true - it is a statement of intent and holds whatever the
+# evidence says - but it is no longer the only thing at the end of the
+# output, and on its own it could not tell an operator which of the four
+# daemons they actually still had work to do.
 UPDATE_RESTART_SRCS=	frontend \
 			restshimd
 
@@ -583,15 +610,60 @@ setup-quick:
 # cannot cost the colony its quorum. It is the target that is safe to run
 # on every Comb in a row without thinking, which is exactly why managerd
 # and raftd are not in it. See the split above and ADR-0141.
+#
+# What it prints at the end is now versioncheck's answer rather than this
+# file's, because the two are different questions. "managerd and raftd
+# were installed but deliberately NOT restarted" says what this target
+# did; it cannot say what is running, and a message that only ever
+# describes intent is a message that reads identically on a Comb where
+# managerd took the new bytes and one where it did not.
+#
+# Two things this deliberately does not do:
+#
+#   - It does not restart managerd or raftd. The split is the design
+#     (ADR-0141), and a report that quietly repaired the thing it was
+#     reporting on would be a different target with a different blast
+#     radius. The advice to run apiaryctl force-restart is unchanged,
+#     on every run, and is not conditional on what the report found.
+#   - It does not fail because managerd and raftd came back stale, since
+#     on THIS target that is the designed outcome rather than a fault.
+#     versioncheck exits 1 for it, so the status is captured and only a
+#     status above 1 - the tool itself missing or broken - is passed on.
+#     Letting 1 through would make `make update` fail on every Comb in
+#     every sweep, which is how a guard gets ignored.
+#
+# A daemon it could not read is printed as unknown, which is neither
+# confirmed nor failed, and the closing lines say so. The report is
+# emitted from a scratch run of the binary built just above, so a report
+# that cannot be produced is a loud failure rather than a silent gap in
+# the middle of the four daemons.
 .PHONY: update
 update: install
 	@set -e; \
 	for S in ${UPDATE_RESTART_SRCS}; do \
 		service apiary_$$S restart; \
 	done
-	@echo "" ; \
-	echo "update: frontend and restshimd restarted on `hostname`." ; \
+	@host=`hostname` ; \
+	report=`./versioncheck -advice "$$host"` ; \
+	rc=$$? ; \
+	echo "" ; \
+	echo "update: frontend and restshimd restarted on $$host." ; \
 	echo "  managerd and raftd were installed but deliberately NOT" ; \
 	echo "  restarted. Run 'apiaryctl force-restart' here to restart" ; \
 	echo "  them - one Comb at a time, and never on the leader as part" ; \
-	echo "  of a sweep."
+	echo "  of a sweep." ; \
+	echo "" ; \
+	echo "  What is actually running, read from each daemon's own startup" ; \
+	echo "  line against the binary sitting beside it:" ; \
+	echo "$$report" ; \
+	echo "" ; \
+	echo "  'stale' is the force-restart work described above and is what" ; \
+	echo "  update is designed to leave behind. 'unknown' is no evidence at" ; \
+	echo "  all: not confirmed, and not failed either. Re-read it yourself" ; \
+	echo "  with 'versioncheck $$host'." ; \
+	if [ $$rc -gt 1 ] ; then \
+		echo "" ; \
+		echo "versioncheck exited $$rc and the report above is missing or" >&2 ; \
+		echo "incomplete. Nothing in it has been confirmed." >&2 ; \
+		exit $$rc ; \
+	fi

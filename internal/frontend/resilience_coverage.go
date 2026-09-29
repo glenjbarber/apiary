@@ -199,11 +199,17 @@ func (s *Server) handleCoveragePage(w http.ResponseWriter, r *http.Request) {
 
 	var scenarios []coverage.Scenario
 
-	if statusErr != nil || !statusResp.GetRaftReachable() || statusResp.GetRaftError() != "" {
+	// Same rule as the invariants page: a raftd that answered while
+	// failing to read its own configuration has returned no membership,
+	// and a scenario classified against zero voters is a verdict
+	// fabricated out of absent evidence rather than a measured one.
+	if statusErr != nil || !statusResp.GetRaftReachable() || statusResp.GetRaftError() != "" || statusResp.GetRaftMembershipError() != "" {
 		reason := "raft status could not be confirmed"
 		switch {
 		case statusErr != nil:
 			reason = statusErr.Error()
+		case statusResp.GetRaftMembershipError() != "":
+			reason = "raft membership could not be read: " + statusResp.GetRaftMembershipError()
 		case statusResp.GetRaftError() != "":
 			reason = statusResp.GetRaftError()
 		}
@@ -213,11 +219,12 @@ func (s *Server) handleCoveragePage(w http.ResponseWriter, r *http.Request) {
 	} else {
 		voterReachability := s.gatherVoterReachability(r.Context(), statusResp, localNodeID)
 		leaderID := statusResp.GetRaftLeaderId()
+		vantage := quorumVantage(statusResp, localNodeID)
 
-		quorumEval := invariant.EvaluateQuorumTolerance(voterReachability, leaderID)
+		quorumEval := invariant.EvaluateQuorumTolerance(voterReachability, leaderID, vantage)
 		scenarios = append(scenarios, coverage.ClassifyQuorumTolerance(quorumEval, len(voterReachability)))
 
-		voterImpacts := invariant.ClassifyVoterQuorumImpacts(voterReachability, leaderID)
+		voterImpacts := invariant.ClassifyVoterQuorumImpacts(voterReachability, leaderID, vantage)
 		nodeIDs := s.simulateNodeChoices(r)
 		scenarios = append(scenarios, s.gatherHiveFailureScenarios(nodeIDs, voterImpacts, vms, jails)...)
 	}

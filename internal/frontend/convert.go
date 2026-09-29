@@ -645,13 +645,27 @@ type jailView struct {
 	// ReplicaNodeID, if set, names the node this jail's root filesystem
 	// is HAST-replicated to (ADR-0026) - data redundancy, not failover.
 	ReplicaNodeID string
+
+	// FirewallRules are this jail's pf rules, carried in the exact same
+	// shape as a VM's (ADR-0117) - one type, one renderer, one ordering
+	// rule for both kinds of resource. Empty means unfiltered, which is
+	// the same posture an unfiltered VM has today and is NOT the same
+	// as "Apiary checked and found no firewall needed".
+	FirewallRules []firewallRuleView
+
+	// VNET reports whether this jail has its own network stack. Rules
+	// are only enforceable on a vnet jail: an ip4=inherit jail shares
+	// the host's stack and has no per-jail interface for pf to filter,
+	// so the page says so rather than offering a form that could not
+	// take effect.
+	VNET bool
 }
 
 func fromRPCJail(j *rpcpb.JailDefinition) jailView {
 	if j == nil {
 		return jailView{}
 	}
-	return jailView{
+	v := jailView{
 		ID:            j.GetId(),
 		Name:          j.GetName(),
 		Hostname:      j.GetHostname(),
@@ -660,7 +674,18 @@ func fromRPCJail(j *rpcpb.JailDefinition) jailView {
 		Phase:         jailPhaseFromRPC(j.GetPhase()),
 		PhaseError:    j.GetPhaseError(),
 		ReplicaNodeID: j.GetReplicaNodeId(),
+		VNET:          j.GetVnet(),
 	}
+	for _, r := range j.GetFirewallRules() {
+		v.FirewallRules = append(v.FirewallRules, firewallRuleView{
+			Direction: r.GetDirection(),
+			Action:    r.GetAction(),
+			Protocol:  r.GetProtocol(),
+			PortRange: r.GetPortRange(),
+			Priority:  r.GetPriority(),
+		})
+	}
+	return v
 }
 
 // jailStateFromRPC/jailPhaseFromRPC mirror stateFromRPC/phaseFromRPC

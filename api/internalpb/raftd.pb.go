@@ -204,9 +204,28 @@ type StatusResponse struct {
 	// at equal applied_index is a real disagreement, and a mismatch at
 	// differing applied_index may be nothing but the sample being taken
 	// while the cluster moved.
-	StateDigest   string `protobuf:"bytes,8,opt,name=state_digest,json=stateDigest,proto3" json:"state_digest,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	StateDigest string `protobuf:"bytes,8,opt,name=state_digest,json=stateDigest,proto3" json:"state_digest,omitempty"`
+	// membership_error is set (non-empty) when raftd's own membership read
+	// failed, so servers above is not a view of the Colony - it is an
+	// absence of one. Empty means the read succeeded, which is what makes
+	// an empty servers list on this response mean "this node believes the
+	// Colony has no members" rather than "this node could not find out".
+	//
+	// The response is still returned normally rather than as a gRPC error:
+	// a caller asking about raft state can still be told everything that
+	// WAS observable (leadership, applied index, state digest) alongside
+	// the reason this one part is missing.
+	//
+	// This closes ADR-0056's already-disclosed gap, where a failed read
+	// silently produced an empty membership list that downstream
+	// arithmetic read as "0 total voters".
+	//
+	// Field 20 rather than 9: 1-8 are the original Status contract, and
+	// jumping ahead leaves room for a future membership-shaped addition
+	// without renumbering anything already on the wire.
+	MembershipError string `protobuf:"bytes,20,opt,name=membership_error,json=membershipError,proto3" json:"membership_error,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
 }
 
 func (x *StatusResponse) Reset() {
@@ -291,6 +310,13 @@ func (x *StatusResponse) GetServers() []*ServerInfo {
 func (x *StatusResponse) GetStateDigest() string {
 	if x != nil {
 		return x.StateDigest
+	}
+	return ""
+}
+
+func (x *StatusResponse) GetMembershipError() string {
+	if x != nil {
+		return x.MembershipError
 	}
 	return ""
 }
@@ -2485,7 +2511,7 @@ const file_api_internalpb_raftd_proto_rawDesc = "" +
 	"\x05error\x18\x02 \x01(\tR\x05error\x12\x1f\n" +
 	"\vleader_hint\x18\x03 \x01(\tR\n" +
 	"leaderHint\"\x0f\n" +
-	"\rStatusRequest\"\xaa\x02\n" +
+	"\rStatusRequest\"\xd5\x02\n" +
 	"\x0eStatusResponse\x12\x1b\n" +
 	"\tis_leader\x18\x01 \x01(\bR\bisLeader\x12\x1b\n" +
 	"\tleader_id\x18\x02 \x01(\tR\bleaderId\x12\x17\n" +
@@ -2495,7 +2521,8 @@ const file_api_internalpb_raftd_proto_rawDesc = "" +
 	"\n" +
 	"raft_state\x18\x06 \x01(\tR\traftState\x128\n" +
 	"\aservers\x18\a \x03(\v2\x1e.apiary.internal.v1.ServerInfoR\aservers\x12!\n" +
-	"\fstate_digest\x18\b \x01(\tR\vstateDigest\"R\n" +
+	"\fstate_digest\x18\b \x01(\tR\vstateDigest\x12)\n" +
+	"\x10membership_error\x18\x14 \x01(\tR\x0fmembershipError\"R\n" +
 	"\n" +
 	"ServerInfo\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x18\n" +

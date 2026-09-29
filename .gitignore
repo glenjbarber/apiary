@@ -27,6 +27,7 @@ profile.cov
 /frontend
 /restshimd
 /apiaryctl
+/versioncheck
 
 # Dependency directories (remove the comment below to include it)
 # vendor/

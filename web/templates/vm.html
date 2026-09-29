@@ -10,6 +10,13 @@
     <div class="banner-error">{{.Error}}</div>
   {{else}}
     {{template "page_header" (pageHeader .VM.ID .VM.Name "<a href='/vms'>Back to VMs</a>")}}
+    {{/* Teardown and a snapshot rollback are the two things on this page
+         that take seconds: a delete runs through reconciliation, and a
+         restore replaces the VM's disk contents. Start, Stop, Restart
+         and the firewall and Cloudflare saves set fields and return at
+         once, and a bar that flashes for them would be worse than
+         nothing. */}}
+    {{template "op_progress" .}}
 
     <div class="detail-grid">
       <section class="panel detail-card">
@@ -169,7 +176,7 @@
           <td><code>{{.}}</code></td>
           <td class="actions">
             {{if $.CanOperate}}
-            <form method="post" action="/vms/{{$.VM.ID}}/snapshots/{{.}}/restore" class="inline-form" onsubmit="return confirm('Restore {{$.VM.ID}} to snapshot {{.}}? Stop the VM first - this replaces its current disk contents and cannot be undone.');">
+            <form method="post" action="/vms/{{$.VM.ID}}/snapshots/{{.}}/restore" class="inline-form" data-progress="Restoring {{$.VM.ID}} to snapshot {{.}}" onsubmit="return confirm('Restore {{$.VM.ID}} to snapshot {{.}}? Stop the VM first - this replaces its current disk contents and cannot be undone.');">
               <button type="submit" class="secondary">Restore</button>
             </form>
             <form method="post" action="/vms/{{$.VM.ID}}/snapshots/{{.}}/delete" class="inline-form" onsubmit="return confirm('Delete snapshot {{.}}? This cannot be undone.');">
@@ -227,7 +234,7 @@
     {{if .CanOperate}}
     <section class="panel danger-zone">
       <div><h3>Danger zone</h3><p class="muted">Deletion tears down this VM through normal reconciliation.</p></div>
-      <button class="danger" hx-delete="/vms/{{.VM.ID}}" hx-target="#vm-detail-error" hx-swap="innerHTML" hx-confirm="Delete {{.VM.ID}}?">Delete VM</button>
+      <button class="danger" hx-delete="/vms/{{.VM.ID}}" hx-target="#vm-detail-error" hx-swap="innerHTML" hx-confirm="Delete {{.VM.ID}}?" data-progress="Deleting {{.VM.ID}}">Delete VM</button>
     </section>
     <div id="vm-detail-error" class="banner-error" role="alert" aria-live="polite"></div>
     {{end}}

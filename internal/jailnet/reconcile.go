@@ -112,6 +112,27 @@ const (
 	// FindingRouteWrong means the jail's default route is not the one
 	// intended.
 	FindingRouteWrong Finding = "route_wrong"
+
+	// FindingDHCPClientNotRunning means the jail's vnet interface has no
+	// DHCP client running for it, which on a network that skips
+	// allocation means nothing at all is asking the physical LAN for an
+	// address. This is the repairable one: starting the client is the
+	// whole fix, and it has to be started inside the jail because
+	// jail(8) has no parameter that could do it from the host.
+	FindingDHCPClientNotRunning Finding = "dhcp_client_not_running"
+
+	// FindingDHCPNoAddress means the jail's vnet interface carries no
+	// IPv4 address, so on a network that skips allocation the jail is
+	// not on the network at all. It is reported separately from
+	// FindingDHCPClientNotRunning because the two call for opposite
+	// responses: a missing client is Apiary's to start, whereas a
+	// client that is running and still has no lease is the LAN's DHCP
+	// server not having answered (or not yet having answered), which
+	// nothing on this node can force. It is also the one finding that
+	// can be established before the DHCP client's own state could be
+	// read, which is what makes an unobservable client actionable
+	// rather than merely unknown.
+	FindingDHCPNoAddress Finding = "dhcp_no_address"
 )
 
 // Result is one pass's evidence for one jail. It is a snapshot, not a
@@ -221,6 +242,8 @@ type JailDriver interface {
 	JailExists(ctx context.Context, name string) (bool, error)
 	ObserveNet(ctx context.Context, jail, iface string) (jail.JailNetState, error)
 	EnsureAddressing(ctx context.Context, jail, iface string, addr jail.Address, gw string) error
+	ObserveDHCP(ctx context.Context, jail, iface string) (jail.DHCPState, error)
+	EnsureDHCP(ctx context.Context, jail, iface string) error
 }
 
 // defaultRunner is the production Runner, used when Reconciler.Runner
@@ -455,16 +478,18 @@ func (r *Reconciler) reconcileJail(ctx context.Context, jailID string, addr Addr
 		return notRunning(ready)
 	}
 
-	// A jail with no assigned address manages its own. Observing and
-	// then "repairing" it would mean deleting whatever it configured
-	// for itself - which is the entire point of ADR-0117's
-	// uplink_bridged carve-out, and is exactly the same carve-out
-	// internal/raft's allocator already makes for VMs.
+	// A jail with no assigned address is on a network that skips
+	// allocation - the raft FSM's uplink_bridged carve-out, identical to
+	// the one it makes for a VM. There is no Apiary-managed subnet for a
+	// static address to belong to, so this is not a case where Apiary
+	// knows the right answer: the physical LAN's own DHCP server does.
+	// Observing and "repairing" the address itself would mean deleting
+	// whatever the jail legitimately got from that server, so the two
+	// are deliberately not touched - but the jail must still be made to
+	// ask for one, which is the half ADR-0117 left out and the reason
+	// this carve-out was not independently useful before.
 	if !addr.HasAddress() {
-		res.Observed = true
-		res.Verdict = settled(res)
-		res.Detail = fmt.Sprintf("jail %q has no Apiary-assigned address (its network skips allocation), so its in-jail addressing is its own business and was deliberately left alone", jailID)
-		return res
+		return r.reconcileDHCP(ctx, jailID, host, res)
 	}
 
 	observed, err := r.Jail.ObserveNet(ctx, jailID, host.jailSide)
@@ -479,6 +504,7 @@ func (r *Reconciler) reconcileJail(ctx context.Context, jailID string, addr Addr
 	}
 	if !observed.InterfacePresent {
 		res.Verdict = VerdictDrifted
+		res.Observed = true
 		res.Findings = append(res.Findings, FindingRestartRequired)
 		res.Detail = fmt.Sprintf("jail %q is running but interface %s is not present inside it; jail(8) cannot add a vnet interface to an already-running jail, so this jail must be restarted", jailID, host.jailSide)
 		return res
@@ -529,6 +555,125 @@ func (r *Reconciler) reconcileJail(ctx context.Context, jailID string, addr Addr
 	res.Observed = true
 	res.Detail = fmt.Sprintf("jail %q: repaired %s", jailID, strings.Join(findingStrings(res.Findings), ", "))
 	return res
+}
+
+// reconcileDHCP makes sure a jail on a network that skips allocation
+// is actually asking the physical LAN for an address, and reports what
+// it found.
+//
+// Nothing here judges the address itself. The LAN's DHCP server hands
+// that out, Apiary does not know what it will be, and a pass that
+// "corrected" it would be deleting a legitimate lease - so the address
+// is read as evidence and left alone. What Apiary does own is the
+// client: a vnet jail whose interface has no DHCP client on it is a jail
+// that asked for nothing and will be given nothing, and that is a state
+// this node can leave.
+//
+// The client has to be started *inside* the jail, and that is not a
+// choice made here. jail(8) has no creation parameter that makes a
+// vnet interface run DHCP, so the only place the client can run is the
+// jail's own network stack - the same jexec(8) seam, and the same
+// observe-first shape, that EnsureAddressing uses for the static case.
+//
+// The repair is deliberately narrow. A missing client is started, once,
+// and never over a running one. A client that is running and still has
+// no address is reported as drift rather than repaired, because the
+// remaining cause is a DHCP server on the segment that has not
+// answered, and a second client would not make it answer sooner. That
+// verdict is transient in the ordinary case - a jail that has just been
+// created reports it for the few seconds between starting the client
+// and the server's offer arriving - and it is preferred over in_sync
+// because this package does not report green on the strength of a state
+// it has not seen.
+func (r *Reconciler) reconcileDHCP(ctx context.Context, jailID string, host hostOutcome, res Result) Result {
+	state, err := r.Jail.ObserveDHCP(ctx, jailID, host.jailSide)
+	if err != nil {
+		if errors.Is(err, jail.ErrJailNotFound) {
+			// It was running a moment ago and is not now. A definite,
+			// different answer from unknown: the next tick creates the
+			// jail with a good pair already waiting for it.
+			res.Verdict = VerdictNotRunning
+			res.Observed = true
+			res.Detail = fmt.Sprintf("jail %q stopped while its DHCP state was being observed, so there was nothing to reconcile inside it; its epair %s/%s is ready for it", jailID, host.hostSide, host.jailSide)
+			return res
+		}
+		// No Finding is added here, and that is the contract rather than
+		// an omission: what could not be established is not something
+		// that was found to be wrong. What the operator gets instead is
+		// a Detail naming the exact question that went unanswered, in
+		// this jail's own terms, with the tool's own wording attached -
+		// which is what they act on.
+		return unknown(res, fmt.Sprintf("%v: establishing whether a DHCP client is running on %s inside jail %q: %s", errStateUnknown, host.jailSide, jailID, err))
+	}
+	if !state.InterfacePresent {
+		// The same, and for the same reason, as a jail on an allocated
+		// network: a vnet interface cannot be added to a running jail,
+		// so nothing about its DHCP is fixable from here. Observed is
+		// true because the answer is definite - the jail's own ifconfig
+		// said so - rather than because anything was repaired.
+		res.Verdict = VerdictDrifted
+		res.Observed = true
+		res.Findings = append(res.Findings, FindingRestartRequired)
+		res.Detail = fmt.Sprintf("jail %q is running but interface %s is not present inside it; jail(8) cannot add a vnet interface to an already-running jail, so this jail must be restarted, and it has no interface for a DHCP client to run on", jailID, host.jailSide)
+		return res
+	}
+
+	if !state.Addressed() {
+		res.Findings = append(res.Findings, FindingDHCPNoAddress)
+	}
+	running := state.ClientRunning(host.jailSide)
+	if !running {
+		res.Findings = append(res.Findings, FindingDHCPClientNotRunning)
+	}
+	evidence := fmt.Sprintf("jail %q: epair %s/%s is up, joined to bridge %s, and inside the jail %s carries %s", jailID, host.hostSide, host.jailSide, res.Bridge, host.jailSide, joinAddresses(state.Addresses))
+
+	if len(res.Findings) == 0 {
+		res.Observed = true
+		res.Verdict = settled(res)
+		res.Detail = evidence + ", and a DHCP client is running on it, which is the physical LAN's own DHCP doing its job"
+		return res
+	}
+
+	if running {
+		res.Observed = true
+		res.Verdict = VerdictDrifted
+		res.Detail = fmt.Sprintf("%s, and a DHCP client is running on it but the segment's DHCP server has not offered it an address; Apiary did not start a second client over a running one, and a lease that has not been offered is not something this node can force", evidence)
+		return res
+	}
+
+	if err := r.Jail.EnsureDHCP(ctx, jailID, host.jailSide); err != nil {
+		// Observed, and the repair failed: the finding stands because it
+		// is still true, the verdict is drifted because the jail is
+		// still not on the network, and the failed attempt goes in
+		// Detail rather than in Repairs. The error is the tool's own
+		// wording, so whether this is a jail root with no DHCP client
+		// and a segment with no DHCP server stays something the operator
+		// reads rather than something Apiary guesses at.
+		res.Observed = true
+		res.Verdict = VerdictDrifted
+		res.Detail = fmt.Sprintf("%s, and no DHCP client was running on it (%s); starting one failed: %s", evidence, strings.Join(findingStrings(res.Findings), ", "), err)
+		return res
+	}
+	res.Observed = true
+	res.Verdict = VerdictRepaired
+	res.Repairs = append(res.Repairs, fmt.Sprintf("started a DHCP client on %s inside jail %q", host.jailSide, jailID))
+	res.Detail = fmt.Sprintf("%s; started a DHCP client on it, so the physical LAN's own DHCP server can now offer it an address", evidence)
+	return res
+}
+
+// joinAddresses renders an observed address list for a Detail, with the
+// empty case spelled out rather than left as a blank - "no IPv4
+// address" is the single most consequential thing a Detail on this
+// path can say, and it must not read like a formatting accident.
+func joinAddresses(addrs []jail.Address) string {
+	if len(addrs) == 0 {
+		return "no IPv4 address"
+	}
+	parts := make([]string, 0, len(addrs))
+	for _, a := range addrs {
+		parts = append(parts, a.String())
+	}
+	return strings.Join(parts, ", ")
 }
 
 // settled picks between the two success verdicts once a pass has

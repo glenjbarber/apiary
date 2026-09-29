@@ -9,6 +9,7 @@ import (
 
 	rpcpb "github.com/glenjbarber/apiary/api/rpc"
 	"github.com/glenjbarber/apiary/internal/invariant"
+	"github.com/glenjbarber/apiary/internal/recovery"
 )
 
 // invariantEvidenceView is the template-facing shape for one
@@ -58,6 +59,30 @@ func invariantVoters(statusResp *rpcpb.StatusResponse) []string {
 	return voters
 }
 
+// quorumVantage names whose vantage point gatherVoterReachability's
+// HostStats fan-out was actually made from, for the quorum
+// classification to take as an explicit input.
+//
+// The fan-out dials each voter directly (s.peers.HostStats against
+// s.peerAddr(id)) from THIS frontend's own node - HostStats is a
+// node-local read answered by whichever managerd receives it
+// (internal/manager/peer.go says so explicitly), never a
+// leader-forwarded one. So the leader-vantage premise behind
+// recovery's leader-loss downgrade does not hold here, and the vantage
+// must be reported as such or a healthy multi-voter colony reports
+// "unknown" for losing its leader on a premise its own data never
+// satisfied.
+//
+// The one case where the premise does hold is a frontend colocated
+// with the leader itself: then the probes really are the leader's, and
+// the downgrade is kept rather than assumed away.
+func quorumVantage(statusResp *rpcpb.StatusResponse, localNodeID string) recovery.QuorumVantage {
+	if localNodeID != "" && localNodeID == statusResp.GetRaftLeaderId() {
+		return recovery.VantageFromLeader
+	}
+	return recovery.VantageFromNonLeader
+}
+
 // gatherQuorumTolerance fetches each current voter's real reachability
 // (a single bounded, concurrent HostStats fan-out - never a per-voter
 // SimulateNodeFailure call, which would cost O(voters^2) reachability
@@ -65,7 +90,7 @@ func invariantVoters(statusResp *rpcpb.StatusResponse) []string {
 // hypothetical loss locally from that one shared snapshot.
 func (s *Server) gatherQuorumTolerance(ctx context.Context, statusResp *rpcpb.StatusResponse, localNodeID string) invariant.Evaluation {
 	voters := s.gatherVoterReachability(ctx, statusResp, localNodeID)
-	return invariant.EvaluateQuorumTolerance(voters, statusResp.GetRaftLeaderId())
+	return invariant.EvaluateQuorumTolerance(voters, statusResp.GetRaftLeaderId(), quorumVantage(statusResp, localNodeID))
 }
 
 // gatherVoterReachability builds the one shared []invariant.VoterReachability
@@ -333,11 +358,18 @@ func (s *Server) handleInvariantsPage(w http.ResponseWriter, r *http.Request) {
 
 	var live []invariantEvaluationView
 
-	if statusErr != nil || !statusResp.GetRaftReachable() || statusResp.GetRaftError() != "" {
+	// RaftReachable is true whenever raftd answered at all, including
+	// when the answer was "I could not read my own configuration". A
+	// failed membership read is no evidence of a quorum, so it belongs
+	// in this guard: evaluating quorum tolerance against zero voters
+	// would report a tolerance the cluster never demonstrated.
+	if statusErr != nil || !statusResp.GetRaftReachable() || statusResp.GetRaftError() != "" || statusResp.GetRaftMembershipError() != "" {
 		reason := "raft status could not be confirmed"
 		switch {
 		case statusErr != nil:
 			reason = statusErr.Error()
+		case statusResp.GetRaftMembershipError() != "":
+			reason = "raft membership could not be read: " + statusResp.GetRaftMembershipError()
 		case statusResp.GetRaftError() != "":
 			reason = statusResp.GetRaftError()
 		}

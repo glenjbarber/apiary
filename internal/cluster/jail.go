@@ -21,6 +21,7 @@ import (
 
 	internalpb "github.com/glenjbarber/apiary/api/internalpb"
 	"github.com/glenjbarber/apiary/internal/jail"
+	"github.com/glenjbarber/apiary/internal/jailnet"
 )
 
 // DefaultJailEpairStatePath records only which epair(4) pair (ADR-0117)
@@ -451,6 +452,70 @@ func (r *Reconciler) ensureJail(ctx context.Context, j JailPlacement, networks m
 	if err := r.Jail.CreateJail(ctx, j.ID, cfg); err != nil {
 		return fmt.Errorf("creating jail: %w", err)
 	}
+
+	// Firewall rules are not a jail(8) parameter - they are pf rules in
+	// this jail's own anchor, so they are applied after the jail exists
+	// rather than as part of its configuration, exactly as a VM's are
+	// applied after bhyve has the VM. Only a vnet jail has an anchor to
+	// load them into: an ip4=inherit jail shares the host's stack, so
+	// there is no per-jail interface for pf to filter, and the rules are
+	// reported as unapplied rather than silently accepted.
+	//
+	// A failure here is returned, not swallowed, so a jail whose rules
+	// could not be loaded does not reach PhaseReady looking filtered
+	// when it is not. That is the same posture as a VM's rule failure.
+	if len(j.FirewallRules) > 0 || j.VNET {
+		if err := r.applyJailFirewall(ctx, j); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// applyJailFirewall renders j's configured rules through
+// internal/jailnet into this jail's own pf anchor, and flushes that
+// anchor for a jail that has no rules at all.
+//
+// The flush is the part that is easy to get wrong. A jail whose rules
+// were removed must not keep enforcing the last set that loaded: an
+// anchor left behind is a filter nothing in Apiary's state accounts
+// for, which is the same orphaning shape as any other resource this
+// reconciler fails to clean up. So a VNET jail with zero rules gets an
+// explicit Flush, and only a jail with rules gets an Apply.
+//
+// Everything goes through internal/jailnet.Firewall rather than being
+// applied here, so the anchor name, the rendering, and the unfiltered
+// versus unchecked distinction all live in one place (ADR-0117).
+func (r *Reconciler) applyJailFirewall(ctx context.Context, j JailPlacement) error {
+	if r.PF == nil {
+		// No pf support configured on this node. A jail with no rules
+		// needs nothing and must not be reported as broken; a jail WITH
+		// rules cannot be filtered, and saying so beats reporting it
+		// converged.
+		if len(j.FirewallRules) == 0 {
+			return nil
+		}
+		return fmt.Errorf("jail %q has firewall rules but no pf support is configured on this node", j.ID)
+	}
+
+	fw := &jailnet.Firewall{PF: r.PF}
+	if len(j.FirewallRules) == 0 {
+		if err := fw.Flush(ctx, j.ID); err != nil {
+			return fmt.Errorf("flushing jail firewall rules: %w", err)
+		}
+		return nil
+	}
+
+	status, err := fw.Apply(ctx, j.ID, toPFRules(j.FirewallRules))
+	if err != nil {
+		return fmt.Errorf("applying jail firewall rules: %w", err)
+	}
+	// A status that is not loaded means pfctl accepted the command but
+	// the anchor is not enforcing, and the operator needs to know which
+	// of the two it was.
+	if status == jailnet.FirewallStatusUnknown {
+		return fmt.Errorf("jail %q firewall rules are %s", j.ID, jailnet.DescribeFirewall(j.ID, status))
+	}
 	return nil
 }
 
@@ -542,6 +607,17 @@ func (r *Reconciler) teardownJail(ctx context.Context, j JailPlacement) error {
 
 	if err := r.destroyJailEpair(ctx, j.ID); err != nil {
 		return fmt.Errorf("destroying VNET interface: %w", err)
+	}
+
+	// The jail's pf anchor outlives the jail it filtered, so it is
+	// flushed here rather than left behind: an anchor named for a jail
+	// that no longer exists is a filter nothing in Apiary's state
+	// accounts for. Best-effort in the same way the epair teardown
+	// above is, and only when pf is actually configured.
+	if r.PF != nil {
+		if err := (&jailnet.Firewall{PF: r.PF}).Flush(ctx, j.ID); err != nil {
+			return fmt.Errorf("flushing jail firewall rules: %w", err)
+		}
 	}
 
 	if j.ReplicaNodeID != "" {

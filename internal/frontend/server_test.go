@@ -496,6 +496,18 @@ func (f *fakeClient) ReceiveJailTemplate(context.Context, ...grpc.CallOption) (g
 	return nil, errors.New("fakeClient: ReceiveJailTemplate is not implemented by this test double")
 }
 
+// The cross-node VM snapshot pair is unreachable from this double on
+// purpose: no test in this package calls it, and a test double that
+// silently succeeded would be a false "it works" for a transfer that
+// has never been exercised end to end.
+func (f *fakeClient) PushVMSnapshotTo(context.Context, *rpcpb.PushVMSnapshotToRequest, ...grpc.CallOption) (*rpcpb.PushVMSnapshotToResponse, error) {
+	return nil, errors.New("fakeClient: PushVMSnapshotTo is not implemented by this test double")
+}
+
+func (f *fakeClient) ReceiveVMSnapshot(context.Context, ...grpc.CallOption) (grpc.ClientStreamingClient[rpcpb.ReceiveVMSnapshotRequest, rpcpb.ReceiveVMSnapshotResponse], error) {
+	return nil, errors.New("fakeClient: ReceiveVMSnapshot is not implemented by this test double")
+}
+
 func (f *fakeClient) HostStats(context.Context, *rpcpb.HostStatsRequest, ...grpc.CallOption) (*rpcpb.HostStatsResponse, error) {
 	if f.hostStatsResp != nil {
 		return f.hostStatsResp, nil

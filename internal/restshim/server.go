@@ -96,6 +96,26 @@ func authContext(r *http.Request) context.Context {
 
 func (s *Server) routes() {
 	s.mux.HandleFunc("GET /v1/status", s.handleStatus)
+	// GET /v1/health is managerd's ClusterHealth (ADR-0122) verbatim: the
+	// same five-state verdict the web UI shows, computed server-side by
+	// the one implementation in internal/health. It is named health, not
+	// cluster-health, because every other route here is already
+	// colony-scoped - GET /v1/vms returns VMs from across the colony, not
+	// just the answering node - so the cluster- prefix would distinguish
+	// nothing. It is a singular noun for the same reason /v1/status is:
+	// the response is one colony-wide read with a per-node array inside
+	// it, not a collection of addressable resources. The scope is visible
+	// in the body instead, which names the answering managerd in
+	// local_node_id and carries one row per Comb.
+	//
+	// Without this route the consequence ADR-0122 promised was
+	// unrealized: the RPC existed, and the non-HTML consumer it was
+	// written for still had to derive "healthy" by some simpler rule -
+	// which is the membership-arithmetic-as-availability-proof failure
+	// ADR-0122 exists to prevent, on the surface most likely to be
+	// automated against.
+	s.mux.HandleFunc("GET /v1/health", s.handleClusterHealth)
+
 	s.mux.HandleFunc("POST /v1/vms", s.handleCreateVM)
 	s.mux.HandleFunc("GET /v1/vms", s.handleListVMs)
 	s.mux.HandleFunc("GET /v1/vms/{id}", s.handleGetVM)
@@ -213,7 +233,40 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 		"raft_last_log_index": resp.GetRaftLastLogIndex(),
 		"raft_applied_index":  resp.GetRaftAppliedIndex(),
 		"raft_state":          resp.GetRaftState(),
+		// Additive alongside raft_error, and for the same reason that
+		// one is here: raft_reachable is true whenever raftd answered,
+		// including when it answered without being able to read its own
+		// configuration. Without this key a JSON consumer sees
+		// "raft_reachable": true, "raft_error": "" and concludes raft is
+		// fine, which is more confident than the evidence allows. The
+		// body already omits members and raft_state_digest, so this is
+		// not a claim that it is exhaustive - it is an error condition
+		// being kept, not a field being added for symmetry.
+		"raft_membership_error": resp.GetRaftMembershipError(),
 	})
+}
+
+// handleClusterHealth relays managerd's colony-wide Evidence-Aware
+// Health verdict (ADR-0122) to a REST caller. The decision chain stays
+// where it is - in internal/health, behind the RPC - so this handler
+// translates a response and decides nothing about it, which is the whole
+// reason the route exists: a caller reaching for a verdict must get the
+// one the UI got, not a cheaper approximation of it.
+//
+// Unlike the other in-band errors in this shim, a ClusterHealthResponse
+// carrying an error is still a 200. See clusterHealth's doc comment: the
+// RPC succeeded, and the rows it returned are real verdicts capped at
+// unknown because raft membership could not be read. Only a failure to
+// reach managerd at all is an error status, and that takes the same
+// writeUpstream path every other route uses, because the causes and the
+// fixes are identical.
+func (s *Server) handleClusterHealth(w http.ResponseWriter, r *http.Request) {
+	resp, err := s.client.ClusterHealth(authContext(r), &rpcpb.ClusterHealthRequest{})
+	if err != nil {
+		s.writeUpstream(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, fromRPCClusterHealth(resp))
 }
 
 func (s *Server) handleCreateVM(w http.ResponseWriter, r *http.Request) {

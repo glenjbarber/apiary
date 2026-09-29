@@ -16,6 +16,7 @@ import (
 type (
 	jailNetState = jail.JailNetState
 	jailAddress  = jail.Address
+	jailDHCP     = jail.DHCPState
 )
 
 // errJailGone is the real sentinel, aliased so the fake models the
@@ -381,20 +382,38 @@ func (f *fakeRunner) ifaceUp(name string) bool {
 // fakeJail is an in-memory JailDriver: which jails are running, and what
 // each one's own interface currently looks like from the inside.
 type fakeJail struct {
-	mu       sync.Mutex
-	running  map[string]bool
-	net      map[string]jailNet
-	failList string
-	failObs  string
-	failFix  string
-	fixes    []string
+	mu        sync.Mutex
+	running   map[string]bool
+	net       map[string]jailNet
+	failList  string
+	failObs   string
+	failFix   string
+	fixes     []string
+	failDHCPO string
+	failDHCPX string
+	dhcpRuns  []string
+
+	// addressWrites records every address this fake was asked to impose
+	// on a jail, so a test can assert that a jail Apiary has no
+	// authority over never had one written at all.
+	addressWrites []fakeAddressWrite
 }
 
+// fakeAddressWrite is one recorded EnsureAddressing call.
+type fakeAddressWrite struct {
+	id   string
+	addr string
+}
+
+// jailNet is one modelled jail's own network stack. clients are the
+// interfaces a running DHCP client is bound to, which is what the
+// uplink_bridged path asks about.
 type jailNet struct {
 	iface   string
 	present bool
 	addrs   []string // "ip/len"
 	route   string
+	clients []string
 }
 
 func newFakeJail() *fakeJail {
@@ -408,6 +427,18 @@ func (j *fakeJail) up(id, iface string, addrs []string, route string) *fakeJail 
 	defer j.mu.Unlock()
 	j.running[id] = true
 	j.net[id] = jailNet{iface: iface, present: true, addrs: addrs, route: route}
+	return j
+}
+
+// upWithDHCP marks a jail running whose interface is present and
+// carries addrs, with clients (the interfaces a DHCP client is bound
+// to) as given. An empty clients is a jail nothing has configured at
+// all, which is the uplink_bridged cold-start state.
+func (j *fakeJail) upWithDHCP(id, iface string, addrs []string, clients []string) *fakeJail {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	j.running[id] = true
+	j.net[id] = jailNet{iface: iface, present: true, addrs: addrs, clients: clients}
 	return j
 }
 
@@ -490,6 +521,7 @@ func (j *fakeJail) EnsureAddressing(ctx context.Context, id, iface string, addr 
 	}
 	state.addrs = kept
 	j.net[id] = state
+	j.addressWrites = append(j.addressWrites, fakeAddressWrite{id: id, addr: want})
 	return nil
 }
 
@@ -497,6 +529,117 @@ func (j *fakeJail) fixCount() int {
 	j.mu.Lock()
 	defer j.mu.Unlock()
 	return len(j.fixes)
+}
+
+// addressWrittenFor reports the last address this fake was asked to
+// impose on a jail, or "" if it was never asked to impose one. It is
+// the "was the carve-out respected" check, kept separate from
+// fixCount because fixCount also counts gateway and DHCP writes, which
+// an unallocated jail is allowed to have.
+func (j *fakeJail) addressWrittenFor(id string) string {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	for i := len(j.addressWrites) - 1; i >= 0; i-- {
+		if j.addressWrites[i].id == id {
+			return j.addressWrites[i].addr
+		}
+	}
+	return ""
+}
+
+// containsFinding is a small membership helper for the finding
+// vocabulary, so a test that cares about one finding does not have to
+// assert on the whole set and break whenever an unrelated finding is
+// added.
+func containsFinding(findings []Finding, want Finding) bool {
+	for _, f := range findings {
+		if f == want {
+			return true
+		}
+	}
+	return false
+}
+
+// failDHCP makes every DHCP observation fail, which is how a test says
+// "this jail's client state cannot be read right now" and must
+// therefore expect unknown rather than a verdict about the client.
+func (j *fakeJail) failDHCP(msg string) *fakeJail {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	j.failDHCPO = msg
+	return j
+}
+
+// failDHCPStart makes starting a DHCP client fail, which is how a test
+// says "the client is absent and starting one did not work either".
+func (j *fakeJail) failDHCPStart(msg string) *fakeJail {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	j.failDHCPX = msg
+	return j
+}
+
+func (j *fakeJail) ObserveDHCP(ctx context.Context, id, iface string) (jailDHCP, error) {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	if j.failDHCPO != "" {
+		return jailDHCP{}, fmt.Errorf("fakeJail: ObserveDHCP(%s): %s", id, j.failDHCPO)
+	}
+	state, ok := j.net[id]
+	if !ok {
+		return jailDHCP{}, fmt.Errorf("fakeJail: %s: %w", id, errJailGone)
+	}
+	if !state.present {
+		return jailDHCP{InterfacePresent: false}, nil
+	}
+	out := jailDHCP{InterfacePresent: true, Clients: state.clients}
+	for _, a := range state.addrs {
+		ip, prefix, _ := strings.Cut(a, "/")
+		n := 0
+		fmt.Sscanf(prefix, "%d", &n)
+		out.Addresses = append(out.Addresses, jailAddress{IP: ip, PrefixLen: n})
+	}
+	return out, nil
+}
+
+func (j *fakeJail) EnsureDHCP(ctx context.Context, id, iface string) error {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	if j.failDHCPX != "" {
+		return fmt.Errorf("fakeJail: EnsureDHCP(%s): %s", id, j.failDHCPX)
+	}
+	state, ok := j.net[id]
+	if !ok {
+		return fmt.Errorf("fakeJail: %s: %w", id, errJailGone)
+	}
+	if !state.present {
+		return fmt.Errorf("interface %s is not present inside jail %q", state.iface, id)
+	}
+	j.dhcpRuns = append(j.dhcpRuns, fmt.Sprintf("%s %s", id, iface))
+	// Modelled with real effect, like the addressing above, so a test
+	// can assert the jail ended up with a client rather than only that
+	// one was asked for. No address is invented: a lease is the
+	// segment's to offer, and a test that needs one seeds it.
+	for _, c := range state.clients {
+		if c == iface {
+			return nil
+		}
+	}
+	state.clients = append(state.clients, iface)
+	j.net[id] = state
+	return nil
+}
+
+func (j *fakeJail) dhcpStartCount() int {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	return len(j.dhcpRuns)
+}
+
+func (j *fakeJail) clients(id string) []string {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	return j.net[id].clients
 }
 
 func (j *fakeJail) addresses(id string) []string {

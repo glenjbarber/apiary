@@ -539,6 +539,27 @@ service ManagerService {
   rpc PushJailTemplateTo(PushJailTemplateToRequest) returns (PushJailTemplateToResponse);
   rpc ReceiveJailTemplate(stream ReceiveJailTemplateRequest) returns (ReceiveJailTemplateResponse);
 
+  // PushVMSnapshotTo/ReceiveVMSnapshot (ADR-0090's follow-up, closing
+  // the cross-node gap SHARED.md records for VM snapshots) mirror
+  // PushJailTemplateTo/ReceiveJailTemplate above exactly, adapted for
+  // a VM's own checkpointed dataset (which holds its disk.img) instead
+  // of a jail base template: PushVMSnapshotTo (peer-only, same
+  // reasoning as PushISOTo above) has this node `zfs send` the
+  // snapshot of vm_id this node already has to target_node_id via a
+  // real ReceiveVMSnapshot client stream; ReceiveVMSnapshot pipes the
+  // incoming stream into a local `zfs receive`.
+  //
+  // `zfs send`/`zfs receive` is ZFS-only, so both ends refuse rather
+  // than silently attempting anything on a node whose local VM
+  // checkpoint store is not ZFS. Both ends also fail closed: the
+  // target never reports success without confirming the received
+  // snapshot exists locally, so a truncated stream cannot leave
+  // something that looks like a completed checkpoint behind. This pair
+  // never forwards - like PushJailTemplateTo above, it is a direct
+  // node-to-node transfer, not a leader-forwarded request.
+  rpc PushVMSnapshotTo(PushVMSnapshotToRequest) returns (PushVMSnapshotToResponse);
+  rpc ReceiveVMSnapshot(stream ReceiveVMSnapshotRequest) returns (ReceiveVMSnapshotResponse);
+
   // GetLocalNetworkBridgeStatus reports THIS node's own local bridge
   // status for one network - built from RaftClient.ListNetworksLocal
   // (the already-replicated network config, read locally, never leader-
@@ -870,6 +891,11 @@ message JailDefinition {
   string network_id = 11;
   string ip_address = 12;
   bool vnet = 13;
+
+  // firewall_rules mirrors api/internalpb's JailDefinition field of the
+  // same name, reusing this file's own FirewallRule exactly as
+  // VMDefinition does - see ADR-0117.
+  repeated FirewallRule firewall_rules = 30;
 }
 
 // FirewallRule mirrors api/internalpb's FirewallRule.
@@ -1119,6 +1145,31 @@ message StatusResponse {
   // consumer must compare it against other voters' digests rather than
   // read it as a statement about the Colony.
   string raft_state_digest = 13;
+
+  // raft_membership_error is set (non-empty) when raftd answered, and
+  // its own answer says its membership read failed - so members and
+  // known_node_ids above are an absence of a view, not a view. Empty
+  // means raftd's read succeeded, which is what lets an empty members
+  // list mean "this node believes the Colony has no members" instead of
+  // "this node could not find out" (ADR-0056).
+  //
+  // It is deliberately NOT folded into raft_error above. That field
+  // means managerd could not reach raftd at all, and the two are
+  // different facts with different causes and different fixes: raft_error
+  // is a transport or socket problem between the two processes, while
+  // this is raftd itself reporting that it could not read its own
+  // cluster configuration. Conflating them would tell an operator the
+  // daemon is down when the daemon is up and answering, and would make
+  // raft_reachable - which is true here - look like a lie.
+  //
+  // A consumer that computes anything from membership (quorum, node
+  // pickers) must treat a set value as "not observed", the same way it
+  // already must treat an unreachable raftd.
+  //
+  // Field 30 rather than 14: this wave is adding several fields to
+  // this proto concurrently, and 30 keeps this one clear of the lower
+  // block being filled in by them.
+  string raft_membership_error = 30;
 }
 
 message AuthenticatePasswordRequest {
@@ -3880,4 +3931,61 @@ message NodeRestartPlanStepAside {
   bool safe_to_restart = 5;
   // detail is operator-readable prose, never empty.
   string detail = 6;
+}
+
+// PushVMSnapshotTo/ReceiveVMSnapshot (ADR-0090's follow-up, closing
+// the cross-node gap SHARED.md records for VM snapshots) mirror
+// PushJailTemplateTo/ReceiveJailTemplate above exactly, adapted for a
+// VM's own checkpointed dataset (which holds its disk.img) instead of a
+// jail base template: PushVMSnapshotTo (peer-only, same reasoning as
+// PushISOTo) has this node `zfs send` the snapshot of vm_id this node
+// already has to target_node_id via a real ReceiveVMSnapshot client
+// stream; ReceiveVMSnapshot pipes the incoming stream into a local
+// `zfs receive -F`.
+//
+// `zfs send`/`zfs receive` is ZFS-only, so both ends refuse rather
+// than silently attempting anything on a node whose local VM
+// checkpoint store is not ZFS. Both ends also fail closed: the target
+// never reports success without confirming the received snapshot exists
+// locally, so a truncated stream cannot leave behind something that
+// looks like a completed checkpoint. This pair never forwards, by
+// construction, exactly like the jail-template pair above.
+//
+// Appended at the end of this file rather than beside the messages it
+// mirrors, so the generated .pb.go diff for this change is purely
+// additive: protoc-gen-go indexes messages by position, and inserting
+// four of them mid-file would renumber every message after them for no
+// wire-level reason.
+message PushVMSnapshotToRequest {
+  string id = 1;
+  string snapshot_name = 2;
+  string target_node_id = 3;
+}
+
+message PushVMSnapshotToResponse {
+  string error = 1;
+}
+
+// VMSnapshotMetadata is the first (and only non-chunk) message on a
+// ReceiveVMSnapshot stream: the VM whose dataset the stream carries,
+// and the snapshot name within it. Both are validated on the receiving
+// end exactly as PushVMSnapshotTo validates them on the sending end -
+// the sender is not trusted to have checked, since either end can be
+// the one that is wrong or malicious.
+message VMSnapshotMetadata {
+  string id = 1;
+  string snapshot_name = 2;
+}
+
+message ReceiveVMSnapshotRequest {
+  oneof data {
+    VMSnapshotMetadata metadata = 1;
+    bytes chunk = 2;
+  }
+}
+
+message ReceiveVMSnapshotResponse {
+  string id = 1;
+  string snapshot_name = 2;
+  string error = 3;
 }
