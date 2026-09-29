@@ -1,0 +1,98 @@
+{{define "colony_advert_panel"}}
+<!DOCTYPE html>
+<html lang="en">
+{{template "head" .}}
+<body class="app-layout">
+  {{template "nav" .}}
+  <main class="content" id="main-content">
+    {{template "page_header" (pageHeader "Colony join advertisement" (nodeSubtitle "") "<a href='/machine'>Back to this Comb</a>")}}
+    <p class="muted">
+      What an existing Colony advertises about itself, read from that
+      Colony through this Comb. This is the first step of a join
+      (ADR-0147 Part 4): a joining Comb has no Raft membership yet, so
+      there is no other place it could learn who it is being asked to
+      join. Nothing here changes any state, and this page is readable
+      without a Colony API key - the same way the underlying read is.
+    </p>
+
+    {{with .ColonyAdvert}}
+      {{if not .ColonyTargetAddress}}
+        <div class="banner-warning">Name the Colony member you were given, below, to see what it advertises.</div>
+      {{else}}
+        <p class="muted">Asked <code>{{.ColonyTargetAddress}}</code>.</p>
+
+        {{if .Closed}}
+          <div class="banner-warning">
+            {{.Closed}}
+            <br>
+            <strong>That is not an authorization failure.</strong> A
+            closed window and a wrong PIN need completely different
+            fixes, so this is the one case where the answer is to have
+            an Admin open the join window on a member and start again
+            - not to look for a second PIN, which was never the
+            problem.
+          </div>
+        {{else if .ReadFailed}}
+          <div class="banner-error">{{.Error}}</div>
+          <p class="muted">
+            <strong>This is not the same as a closed Colony.</strong> The
+            member above could not be asked, so nothing is known about
+            whether it is accepting joins. Fix whatever the message names
+            - a network fault, or a target address this Comb's
+            allowlist will not dial - and read it again, rather than
+            concluding the window is shut.
+          </p>
+        {{end}}
+
+        {{if .Reachable}}
+          <section class="panel" style="margin-top:1rem">
+            <h3>Advertised identity</h3>
+            <table>
+              <tr><th>Colony node id</th><td><code>{{if .ColonyNodeID}}{{.ColonyNodeID}}{{else}}<em>not published</em>{{end}}</code></td></tr>
+              <tr><th>Leader node id</th><td><code>{{if .LeaderNodeID}}{{.LeaderNodeID}}{{else}}<em>not published</em>{{end}}</code></td></tr>
+              <tr><th>Resolvable name</th><td><code>{{if .ColonyName}}{{.ColonyName}}{{else}}<em>not published</em>{{end}}</code></td></tr>
+              <tr><th>Window closes</th><td>{{if .Window.Live}}<strong>{{deadlineLocal .Window.ExpiresAtUnix}}</strong> ({{remainingText .Window}} left){{else}}<em>not open</em>{{end}}</td></tr>
+            </table>
+          </section>
+
+          <section class="panel" style="margin-top:1rem">
+            <h3>managerd certificate fingerprints</h3>
+            {{if .ManagerdFingerprints}}
+              <p class="muted">
+                Compare each of these against the fingerprint the member
+                shows on its own page, in the same deliberate pass. This
+                is the check that the Colony really is who it says it
+                is - a name alone proves nothing (ADR-0113).
+              </p>
+              <table>
+                <tr><th>Node id</th><th>Fingerprint</th></tr>
+                {{range $nodeID, $fp := .ManagerdFingerprints}}
+                  <tr><td><code>{{$nodeID}}</code></td><td><code>{{$fp}}</code></td></tr>
+                {{end}}
+              </table>
+            {{else}}
+              <p class="muted">
+                <strong>None published.</strong> The Colony is open for
+                joins, but it is not yet advertising its name or
+                fingerprints. That publication is part of ADR-0147
+                Part 4's trust store, which is not built, so there is
+                nothing to compare here yet - an empty list means
+                "not implemented", not "nothing to check".
+              </p>
+            {{end}}
+          </section>
+        {{end}}
+
+        <section class="panel" style="margin-top:1rem">
+          <h3>Check another member</h3>
+          <form class="inline-form" method="get" action="/machine/colony-advert">
+            <label>Colony member's address <span class="host-port"><input type="text" name="colony_target_address" value="{{.ColonyTargetAddress}}" placeholder="10.62.0.2"><span class="fixed-port">:17700</span></span></label>
+            <button type="submit">Read advertisement</button>
+          </form>
+        </section>
+      {{end}}
+    {{end}}
+  </main>
+</body>
+</html>
+{{end}}

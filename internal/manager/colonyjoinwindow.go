@@ -75,6 +75,36 @@ func (s *Server) liveColonyJoinWindow(ctx context.Context) (*internalpb.ColonyJo
 // refusals already follow).
 const colonyWindowClosedRefusal = "this Colony is not currently accepting new members: open the join window on a member (an Admin, on any member, 15 minutes by default) and have the joining Comb start again"
 
+// ColonyWindowClosedRefusal returns the exact refusal this package sends
+// when a window is not open. It is exported so a caller - notably the
+// frontend, which must tell "closed" from "failed to read" - can obtain
+// the real string rather than paraphrasing it. A paraphrase would
+// compare unequal to IsColonyWindowClosedRefusal and be classified as a
+// failed read, which is a different branch entirely.
+func ColonyWindowClosedRefusal() string { return colonyWindowClosedRefusal }
+
+// IsColonyWindowClosedRefusal reports whether err is the closed-window
+// refusal above, as opposed to some other reason a read did not produce
+// a window.
+//
+// This exists for a caller that has to tell the two apart rather than
+// render them identically. GetColonyJoinWindow returns its refusals in
+// one field, and they are NOT the same event: a closed window is a
+// statement about the Colony's state with a next step ("open the
+// window"), while "no peer forwarding is configured", "reaching <addr>:
+// <dial error>", and a disallowed target are failures to find out at
+// all. A UI that collapsed them would tell an operator to open a window
+// that may already be open, and hide a real network fault behind a
+// state change that cannot fix it.
+//
+// The comparison is against the whole string, not a prefix, so a
+// message that merely starts similarly is not mistaken for the
+// refusal. A forwarded response carries the LEADER's identical refusal
+// string, so this holds for the ADR-0092 forwarded case too.
+func IsColonyWindowClosedRefusal(err string) bool {
+	return err == colonyWindowClosedRefusal
+}
+
 // callerAPIKeyID returns the caller's API key ID, or "" when auth is
 // disabled or no key was presented. It is recorded on the window so
 // "who opened this Colony to new members" is replicated state rather
