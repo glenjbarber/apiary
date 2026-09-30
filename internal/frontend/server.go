@@ -598,16 +598,23 @@ type userView struct {
 	CanChange bool
 }
 
-// parseSort reads sort/dir query parameters. The default operational view
-// keeps ready Cells first, grouped by Hive and then alphabetically by name.
-// Explicit table-header sorts remain available. Any unrecognized sort value
-// falls back to the operational view rather than erroring.
+// parseSort reads sort/dir query parameters. With no sort parameter (the
+// state a user lands on, and the state every polling tick and row action
+// re-renders from) it returns an empty sortBy, which sortVMs reads as
+// "group by Hive, then name, then ID" - see sortVMs. That order depends
+// only on data the list already displays, so rows keep their place when
+// a VM's phase or desired state changes and the next poll lands.
+//
+// The empty string, rather than a named sort key, is the default on
+// purpose: a named key would make the table's arrangement a function of
+// the sort parameter the URL happened to carry, so the same cluster
+// would render differently depending on how the page was reached. An
+// unrecognized sort value falls back to the same default rather than
+// erroring.
 func parseSort(r *http.Request) (sortBy, dir string) {
 	switch r.URL.Query().Get("sort") {
 	case "id", "node", "state":
 		sortBy = r.URL.Query().Get("sort")
-	default:
-		sortBy = "running"
 	}
 	if r.URL.Query().Get("dir") == "desc" {
 		dir = "desc"
@@ -1424,7 +1431,11 @@ func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
 // so any Comb can serve the cluster-wide VM list. Order is
 // unspecified (backed by a Go map on the FSM side), so sorting here
 // - never leaving the caller's raw order - is what actually makes the
-// table's order stable and predictable.
+// table's order stable and predictable. The sort is a total order over
+// data the rows already show (Hive, name, ID), so re-sorting the same
+// state yields the same order on every one of this list's many renders:
+// the initial page load, each three-second htmx poll, and the re-render
+// after every row action.
 func (s *Server) currentVMs(r *http.Request, sortBy, dir string) ([]vmView, string) {
 	resp, err := s.client.ListVMsLocal(r.Context(), &rpcpb.ListVMsLocalRequest{})
 	if err != nil {
