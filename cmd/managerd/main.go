@@ -5,6 +5,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"github.com/glenjbarber/apiary/internal/buildinfo"
@@ -14,6 +15,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -721,7 +723,8 @@ const peerCAWriteInterval = 30 * time.Second
 // previous contents of a derived cache are not invalidated by failing
 // to refresh them.
 func runPeerCAWriteLoop(ctx context.Context, raftClient *manager.RaftClient, interval time.Duration) {
-	peerCAWriteOnce(ctx, raftClient)
+	state := &peerCAWriteState{}
+	peerCAWriteOnce(ctx, raftClient, state)
 
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
@@ -730,22 +733,72 @@ func runPeerCAWriteLoop(ctx context.Context, raftClient *manager.RaftClient, int
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			peerCAWriteOnce(ctx, raftClient)
+			peerCAWriteOnce(ctx, raftClient, state)
 		}
 	}
 }
 
-func peerCAWriteOnce(ctx context.Context, raftClient *manager.RaftClient) {
+// peerCAWriteState de-duplicates what the writer says.
+//
+// The writer runs every 30 seconds against a trust store that can be
+// in a standing condition for as long as nobody acts on it - a Colony
+// whose members predate the store has no pins and will not grow any
+// until an operator backfills them. Logging the identical line on
+// every tick buries the log in a condition that is not changing, and
+// the line that matters is the one that says what to do about it. So
+// what is logged is the TRANSITION: the first occurrence, and again
+// the moment the message differs, which is how both a cleared
+// condition and a new fault get reported. An empty last is the
+// "nothing reported yet" state; a successful write clears it, so a
+// resolved condition is not re-logged every cycle until the next
+// change.
+type peerCAWriteState struct {
+	mu   sync.Mutex
+	last string
+}
+
+// report logs msg unless it is identical to the previous one.
+func (s *peerCAWriteState) report(msg string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.last == msg {
+		return
+	}
+	s.last = msg
+	log.Print(msg)
+}
+
+// resolved records a clean tick, so that a condition which has gone
+// away is re-logged if it ever comes back.
+func (s *peerCAWriteState) resolved() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.last = ""
+}
+
+func peerCAWriteOnce(ctx context.Context, raftClient *manager.RaftClient, state *peerCAWriteState) {
 	readCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 	resp, err := raftClient.ListTrustedPeersLocal(readCtx)
 	if err != nil {
-		log.Printf("managerd: peer CA write: reading the peer trust store: %v", err)
+		state.report(fmt.Sprintf("managerd: peer CA write: reading the peer trust store: %v", err))
 		return
 	}
 	if err := peerca.Write(peerca.DefaultPath, resp.GetPeers()); err != nil {
-		log.Printf("managerd: peer CA write: %v", err)
+		// The empty-store refusal is called out separately because it
+		// is the one that leaves the file deliberately unchanged, and
+		// an operator who has just hand-restored the bundle needs to
+		// know it will now survive rather than assume it was lost
+		// again. It is not a fault in anything running, which is
+		// exactly why it must not read like one.
+		if errors.Is(err, peerca.ErrEmptyTrustStore) {
+			state.report(fmt.Sprintf("managerd: peer CA write: %s; %s is left exactly as it is, and peer TLS keeps using the trust already in it", err, peerca.DefaultPath))
+			return
+		}
+		state.report(fmt.Sprintf("managerd: peer CA write: %v", err))
+		return
 	}
+	state.resolved()
 }
 
 // restartGuardrailConfirmRetries/-Backoff bound how hard this startup

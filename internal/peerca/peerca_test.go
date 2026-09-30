@@ -1,8 +1,11 @@
 package peerca
 
 import (
+	"bytes"
 	"crypto/x509"
 	"encoding/pem"
+	"errors"
+	"io/fs"
 	"net"
 	"os"
 	"path/filepath"
@@ -133,16 +136,139 @@ func TestRenderRefusesAPinWithNoCertificate(t *testing.T) {
 	}
 }
 
-// An empty store renders an empty file rather than an error. A Colony
-// that has pinned nothing is a real state - a fresh install, or one
-// whose members predate the store - and it is not an error to record.
-func TestRenderOfAnEmptyStoreIsAnEmptyFile(t *testing.T) {
-	body, err := Render(nil)
-	if err != nil {
-		t.Fatalf("Render(nil) error: %v", err)
+// An empty store is a refusal, not an empty file. This is the
+// outage: a Colony whose members predate the store has no pins, and
+// rendering that as zero bytes let the writer atomically replace a
+// good hand-distributed bundle with a file the reader cannot load.
+func TestRenderOfAnEmptyStoreIsARefusal(t *testing.T) {
+	for name, peers := range map[string][]*internalpb.TrustedPeer{
+		"nil":   nil,
+		"empty": {},
+	} {
+		t.Run(name, func(t *testing.T) {
+			body, err := Render(peers)
+			if err == nil {
+				t.Fatalf("Render(%s) = %q, want a refusal", name, body)
+			}
+			if !errors.Is(err, ErrEmptyTrustStore) {
+				t.Errorf("Render(%s) error = %v, want ErrEmptyTrustStore", name, err)
+			}
+			if body != nil {
+				t.Errorf("Render(%s) returned %q alongside its refusal; a caller that ignored the error would publish it", name, body)
+			}
+		})
 	}
-	if len(body) != 0 {
-		t.Errorf("Render(nil) = %q, want an empty file", body)
+}
+
+// The refusal has to name the remedy, because the operator reading
+// it is looking at a crash loop and has no other way to learn that
+// the fix is to pin certificates rather than to restart anything.
+func TestTheEmptyStoreRefusalSaysHowToBackfill(t *testing.T) {
+	_, err := Render(nil)
+	if err == nil {
+		t.Fatal("Render(nil) succeeded")
+	}
+	for _, want := range []string{"empty", "pin"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("refusal %q does not mention %q", err, want)
+		}
+	}
+}
+
+// The regression, end to end: a good operator-distributed bundle is in
+// place, managerd starts, the writer ticks with a store that has no
+// pins in it, and the bundle must survive byte-for-byte and still
+// load. The old code truncated it to zero on this exact path.
+func TestWriteOfAnEmptyStoreDoesNotDamageAGoodBundle(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "peer-ca.pem")
+
+	// What the operator distributed: every member of the Colony.
+	good := []*internalpb.TrustedPeer{testCert(t, "brood"), testCert(t, "drone"), testCert(t, "buzz")}
+	want, err := Render(good)
+	if err != nil {
+		t.Fatalf("Render(good): %v", err)
+	}
+	if err := os.WriteFile(path, want, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	// The writer ticks, and the replicated store has nothing in it.
+	if err := Write(path, nil); err == nil {
+		t.Fatal("Write(path, nil) succeeded; the empty store must be refused")
+	} else if !errors.Is(err, ErrEmptyTrustStore) {
+		t.Fatalf("Write(path, nil) error = %v, want ErrEmptyTrustStore", err)
+	}
+
+	after, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("the bundle is gone: %v", err)
+	}
+	if !bytes.Equal(after, want) {
+		t.Errorf("the bundle was rewritten by an empty trust store: %d bytes, want %d", len(after), len(want))
+	}
+	if len(after) == 0 {
+		t.Fatal("the bundle is zero bytes, which is the outage")
+	}
+	// Still loadable, which is the property that matters: managerd
+	// must be able to start off the preserved bytes.
+	if !x509.NewCertPool().AppendCertsFromPEM(after) {
+		t.Error("the preserved bundle no longer parses as certificates")
+	}
+
+	// And no stray temp file from the refused attempt.
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 {
+		t.Errorf("directory holds %d entries, want only peer-ca.pem", len(entries))
+	}
+}
+
+// The same refusal, on a Comb that never had the file: publish
+// nothing rather than creating the zero-byte file that managerd's
+// reader treats as a fatal fault. A missing derived file already means
+// "this Colony has pinned nothing" to ResolvePeerCAPool; an empty one
+// means "something is broken", and a writer that creates the second
+// out of the first is manufacturing an outage.
+func TestWriteOfAnEmptyStoreCreatesNoFile(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "peer-ca.pem")
+
+	if err := Write(path, nil); err == nil {
+		t.Fatal("Write(path, nil) succeeded; the empty store must be refused")
+	}
+	if _, err := os.Stat(path); !errors.Is(err, fs.ErrNotExist) {
+		entries, _ := os.ReadDir(dir)
+		names := make([]string, 0, len(entries))
+		for _, e := range entries {
+			names = append(names, e.Name())
+		}
+		t.Errorf("Write(path, nil) left %v behind, want nothing", names)
+	}
+}
+
+// Once pins exist the file is a real derived cache again, so the
+// refusal must not become a permanent block: a genuine pin after the
+// empty-store period still publishes.
+func TestWritePublishesOnceTheStoreHasPins(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "peer-ca.pem")
+
+	if err := Write(path, nil); err == nil {
+		t.Fatal("Write(path, nil) succeeded")
+	}
+	peers := []*internalpb.TrustedPeer{testCert(t, "drone")}
+	if err := Write(path, peers); err != nil {
+		t.Fatalf("Write after backfill: %v", err)
+	}
+	body, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if names := commonNamesInOrder(t, body); len(names) != 1 || names[0] != "drone.lab3.home.arpa" {
+		t.Errorf("bundle holds %v, want [drone.lab3.home.arpa]", names)
 	}
 }
 

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -149,5 +150,60 @@ func TestKnownPeersWarning(t *testing.T) {
 	}
 	if w := knownPeersWarning([]string{"brood.lab3.home.arpa:17700"}); w != "" {
 		t.Errorf("a configured allowlist must not warn, got %q", w)
+	}
+}
+
+// The writer ticks every 30s and an empty trust store is a standing
+// condition until an operator pins something, so an identical line
+// must be logged once rather than every tick. What has to survive is
+// the first occurrence and every CHANGE: a condition that clears, and
+// one that recurs, both have to be visible again.
+func TestPeerCAWriteStateLogsOnceAndAgainOnChange(t *testing.T) {
+	var out strings.Builder
+	log.SetOutput(&out)
+	log.SetFlags(0)
+	t.Cleanup(func() { log.SetOutput(os.Stderr); log.SetFlags(log.LstdFlags) })
+
+	state := &peerCAWriteState{}
+	state.report("empty trust store")
+	state.report("empty trust store")
+	state.report("empty trust store")
+	if got := strings.Count(out.String(), "empty trust store"); got != 1 {
+		t.Errorf("three identical reports produced %d lines, want 1", got)
+	}
+
+	// A different condition is new information and must be logged.
+	out.Reset()
+	state.report("reading the peer trust store: connection refused")
+	if got := strings.Count(out.String(), "connection refused"); got != 1 {
+		t.Errorf("a changed message was logged %d times, want 1", got)
+	}
+
+	// Returning to the earlier condition is a change too - the empty
+	// store is back, and saying nothing would leave the operator
+	// believing it had been resolved.
+	out.Reset()
+	state.report("empty trust store")
+	if got := strings.Count(out.String(), "empty trust store"); got != 1 {
+		t.Errorf("a recurring condition was logged %d times, want 1", got)
+	}
+}
+
+// A clean tick clears the record, so a condition that went away and
+// later came back is reported again rather than being suppressed
+// forever by a stale duplicate.
+func TestPeerCAWriteStateForgetsAResolvedCondition(t *testing.T) {
+	var out strings.Builder
+	log.SetOutput(&out)
+	log.SetFlags(0)
+	t.Cleanup(func() { log.SetOutput(os.Stderr); log.SetFlags(log.LstdFlags) })
+
+	state := &peerCAWriteState{}
+	state.report("empty trust store")
+	state.resolved()
+	out.Reset()
+	state.report("empty trust store")
+	if got := strings.Count(out.String(), "empty trust store"); got != 1 {
+		t.Errorf("a condition returning after a clean tick was logged %d times, want 1", got)
 	}
 }

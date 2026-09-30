@@ -20,10 +20,24 @@
 //     on every host and an operator can diff two Combs. A writer that
 //     emitted map order would produce a different file on every write
 //     and make that diff useless.
-//   - IT IS A DERIVED CACHE. Delete it and the next managerd start
-//     recreates it correctly, so it never has to be in a backup and
-//     never has to be restored. That is why this package refuses to
-//     treat a missing file as an error.
+//   - IT IS A DERIVED CACHE, FOR A TRUST STORE THAT HAS PINS. Delete
+//     it and the next managerd start recreates it correctly, so it
+//     never has to be in a backup and never has to be restored. That
+//     is why this package refuses to treat a missing file as an error.
+//
+// The second half of that property is the one that was wrong, and it
+// cost an outage. "Recreates it correctly" holds only when the
+// replicated store is non-empty. A Colony inherited from a build that
+// predates the store has no pins in it, and an earlier version of
+// Render turned that absence of pins into a zero-byte file and renamed
+// it over whatever was there - destroying a hand-distributed bundle
+// that every member of the Colony was using, and leaving behind a
+// file that managerd's own reader then refuses to load, which is a
+// crash loop rather than an outage. So an empty trust store is a
+// REFUSAL (ErrEmptyTrustStore) rather than a publishable truth: the
+// writer leaves the file on disk untouched and reports why. A derived
+// cache must never be the thing that destroys the only copy of the
+// operator's trust.
 //   - ONE WRITER. managerd, and only managerd, on this Comb. A second
 //     writer would be a second source of truth about trust, which is
 //     the thing the replicated store was introduced to end.
@@ -39,6 +53,7 @@ package peerca
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -46,6 +61,26 @@ import (
 
 	internalpb "github.com/glenjbarber/apiary/api/internalpb"
 )
+
+// ErrEmptyTrustStore is what Render and Write report when the
+// replicated peer trust store holds no pins at all.
+//
+// It is exported and sentinel-checkable because the caller needs to
+// tell this apart from every other failure: an unreadable file or a
+// corrupt pin is a fault to investigate, whereas an empty store is a
+// known, documented state - a fresh install, or a Colony whose
+// members were admitted before the store existed and were never
+// backfilled - that needs a deliberate operator action (pin the
+// members' certificates) rather than a repair. Collapsing the two
+// into one error is what would leave an operator reading a crash loop
+// with no idea that the file is empty on purpose.
+//
+// It is deliberately NOT a success. A Colony that trusts no peers and
+// a Colony that has not yet recorded which peers it trusts are
+// different states, and reporting the second as the first is how peer
+// TLS ends up encrypted-but-unverified - a worse outcome to discover
+// during a failure than having no encryption at all.
+var ErrEmptyTrustStore = errors.New("peerca: the peer trust store is empty; an empty bundle is not a trust set, so it is not published over a file that has one - pin the members' certificates to backfill this Colony")
 
 // DefaultPath is the derived file's location. Stated once, here, next
 // to the writer: the ADR, the config default, and the installer's
@@ -66,7 +101,16 @@ const DefaultPath = "/usr/local/etc/apiary/peer-ca.pem"
 // believes is in the store, and the failure would surface later as a
 // handshake against a host nobody can explain - which is the exact
 // diagnosis the derived file exists to make possible.
+//
+// So is an entry-count of zero, for the same reason and with a worse
+// consequence. Skipping every entry would write an empty file, and an
+// empty file replaces a good one atomically; the reader then refuses
+// to start. The one thing a derived cache must never do is remove the
+// trust it was derived from.
 func Render(peers []*internalpb.TrustedPeer) ([]byte, error) {
+	if len(peers) == 0 {
+		return nil, ErrEmptyTrustStore
+	}
 	ordered := make([]*internalpb.TrustedPeer, len(peers))
 	copy(ordered, peers)
 	sort.Slice(ordered, func(i, j int) bool {
@@ -101,6 +145,16 @@ func Render(peers []*internalpb.TrustedPeer) ([]byte, error) {
 // list of which peers this Colony has decided to trust, and every
 // entry in it is one an operator went to the trouble of comparing by
 // hand. A world-readable trust list is a target.
+//
+// Write NEVER damages an existing file. Every failure path returns
+// before the rename, so a file already on disk is left byte-for-byte
+// as it was - including the empty-store refusal, which is the whole
+// reason Render rejects a zero-length trust store. A writer for a
+// trust anchor has to be safe to run on a tick against a Colony whose
+// store it does not yet understand, and the only way to be safe on a
+// tick is to refuse rather than to clobber. The temporary file is
+// created only after the render has succeeded, so a refusal does not
+// even leave a stray .peer-ca-*.tmp behind.
 func Write(path string, peers []*internalpb.TrustedPeer) error {
 	body, err := Render(peers)
 	if err != nil {
