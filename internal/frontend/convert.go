@@ -801,22 +801,60 @@ func phaseFromRPC(p rpcpb.VMPhase) string {
 	}
 }
 
-// sortVMs sorts vms in place by sortBy ("running", "id", "node", or
-// "state" - state meaning Phase, the real-time column). "running" keeps
-// active Cells first, grouped by Hive and then alphabetically by name. Other
-// values fall back to "id", case-insensitively, ascending unless dir is
-// "desc". Ties
-// within the requested key fall back to ID, so the order stays stable
-// and predictable across repeated calls (e.g. every polling tick)
-// rather than shuffling equal-Phase rows relative to each other.
+// cellListRow is the sort-key projection shared by the VM and jail Cell
+// lists. Both are ordered by exactly the same three fields, so they share
+// one comparator rather than each keeping their own copy of it.
+type cellListRow struct {
+	node string
+	name string
+	id   string
+}
+
+// cellListOrder groups a Cell list by Hive, then orders alphabetically by
+// name, then by ID. The ID tiebreak is what makes the order total: two
+// Cells on one Hive can carry the same Name (or an empty one, which every
+// VM created before names existed still does), and without a final
+// tiebreak those rows would keep whatever relative order the fetch
+// happened to return - which is unspecified, and backed by a Go map on
+// the FSM side. So a poll that fetched the same state twice could show
+// the same two rows in a different order.
+//
+// Every component is lower-cased so a mixed-case Name cannot sort
+// differently from the all-lowercase ones, and so neither the VM nor the
+// jail list disagrees with the case-insensitive ID/node/state sorts in
+// sortVMs.
+func cellListOrder(a, b cellListRow) bool {
+	if x, y := strings.ToLower(a.node), strings.ToLower(b.node); x != y {
+		return x < y
+	}
+	if x, y := strings.ToLower(a.name), strings.ToLower(b.name); x != y {
+		return x < y
+	}
+	return strings.ToLower(a.id) < strings.ToLower(b.id)
+}
+
+// sortVMs sorts vms in place by sortBy ("id", "node", or "state" - state
+// meaning Phase, the real-time column), ascending unless dir is "desc".
+//
+// With no sort (parseSort's default) the VM list is grouped by Hive, then
+// ordered alphabetically by name and ID - the same order cellListOrder
+// gives the jail list, so the two Cell pages stay consistent. dir is
+// deliberately ignored on that default: it is a consequence of state,
+// not something the operator picked, and honouring ?dir= on a list whose
+// sort key is "whatever the poll just reported" is what made the table
+// jump around between refreshes. The explicit id/node/state header sorts
+// still honour it.
+//
+// Every comparator here ends in a total tiebreak, so the order is stable
+// across repeated calls (e.g. every polling tick) rather than shuffling
+// equal-key rows relative to each other.
 func sortVMs(vms []vmView, sortBy, dir string) {
-	if sortBy == "running" {
+	if sortBy == "" {
 		sort.SliceStable(vms, func(i, j int) bool {
-			a, b := vmIsRunning(vms[i]), vmIsRunning(vms[j])
-			if a != b {
-				return a
-			}
-			return compareCellListOrder(vms[i].NodeID, vms[i].Name, vms[i].ID, vms[j].NodeID, vms[j].Name, vms[j].ID)
+			return cellListOrder(
+				cellListRow{node: vms[i].NodeID, name: vms[i].Name, id: vms[i].ID},
+				cellListRow{node: vms[j].NodeID, name: vms[j].Name, id: vms[j].ID},
+			)
 		})
 		return
 	}
@@ -845,34 +883,15 @@ func sortVMs(vms []vmView, sortBy, dir string) {
 	})
 }
 
-// sortJails gives the jail list the same stable operational order as the VM
-// list: Cells actually reported ready appear first, then Hive, name, and ID.
+// sortJails gives the jail list the same Hive-then-name order as the VM
+// list, so the two Cell pages read the same way.
 func sortJails(jails []jailView) {
 	sort.SliceStable(jails, func(i, j int) bool {
-		a, b := jailIsRunning(jails[i]), jailIsRunning(jails[j])
-		if a != b {
-			return a
-		}
-		return compareCellListOrder(jails[i].NodeID, jails[i].Name, jails[i].ID, jails[j].NodeID, jails[j].Name, jails[j].ID)
+		return cellListOrder(
+			cellListRow{node: jails[i].NodeID, name: jails[i].Name, id: jails[i].ID},
+			cellListRow{node: jails[j].NodeID, name: jails[j].Name, id: jails[j].ID},
+		)
 	})
-}
-
-func vmIsRunning(vm vmView) bool {
-	return vm.Phase == "ready" && vm.DesiredState != "stopped" && vm.DesiredState != "restarting" && vm.DesiredState != "deleting"
-}
-
-func jailIsRunning(jail jailView) bool {
-	return jail.Phase == "ready" && jail.DesiredState != "stopped" && jail.DesiredState != "restarting" && jail.DesiredState != "deleting"
-}
-
-func compareCellListOrder(nodeA, nameA, idA, nodeB, nameB, idB string) bool {
-	for _, pair := range [][2]string{{nodeA, nodeB}, {nameA, nameB}, {idA, idB}} {
-		a, b := strings.ToLower(pair[0]), strings.ToLower(pair[1])
-		if a != b {
-			return a < b
-		}
-	}
-	return false
 }
 
 func fromRPCVM(d *rpcpb.VMDefinition) vmView {

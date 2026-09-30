@@ -1707,6 +1707,80 @@ func TestServer_ListVMs_DefaultsToSortedByID(t *testing.T) {
 	}
 }
 
+// The VM list re-renders on every three-second poll, so the order the
+// operator sees must be a function of the data, not of the state that
+// happened to be current. Two fetches of the same Cells, one with a phase
+// and desired state that has since moved on, must produce the same row
+// order - otherwise rows jump around on a page nobody is reloading.
+func TestServer_ListVMs_OrderIsStableAcrossRefreshes(t *testing.T) {
+	client := &fakeClient{listResp: &rpcpb.ListVMsResponse{
+		Vms: []*rpcpb.VMDefinition{
+			{Id: "web-1", Name: "web", NodeId: "apiarium", DesiredState: rpcpb.VMState_VM_STATE_RUNNING},
+			{Id: "db-1", Name: "db", NodeId: "apiarium", DesiredState: rpcpb.VMState_VM_STATE_STOPPED},
+			{Id: "cache-1", Name: "cache", NodeId: "apiverse", DesiredState: rpcpb.VMState_VM_STATE_RUNNING},
+		},
+	}}
+	s := newTestServer(t, client)
+
+	fetch := func() string {
+		req := httptest.NewRequest(http.MethodGet, "/vms/rows", nil)
+		rec := httptest.NewRecorder()
+		s.ServeHTTP(rec, req)
+		return rec.Body.String()
+	}
+	first := fetch()
+
+	// db-1 starts, and web-1 goes back to creating: both are state-only
+	// changes, neither touches a Hive, name, or ID.
+	client.listResp = &rpcpb.ListVMsResponse{
+		Vms: []*rpcpb.VMDefinition{
+			{Id: "web-1", Name: "web", NodeId: "apiarium", DesiredState: rpcpb.VMState_VM_STATE_RUNNING},
+			{Id: "db-1", Name: "db", NodeId: "apiarium", DesiredState: rpcpb.VMState_VM_STATE_RUNNING},
+			{Id: "cache-1", Name: "cache", NodeId: "apiverse", DesiredState: rpcpb.VMState_VM_STATE_RUNNING},
+		},
+	}
+	second := fetch()
+
+	// apiarium sorts before apiverse, so its two Cells (db, then web)
+	// lead, and the apiverse Cell trails.
+	if i, j, k := strings.Index(first, "db-1"), strings.Index(first, "web-1"), strings.Index(first, "cache-1"); !(i < j && j < k) {
+		t.Errorf("rows not grouped by Hive then name, got: %s", first)
+	}
+	if second != first {
+		t.Errorf("row order changed after a state-only change:\n first: %s\nsecond: %s", first, second)
+	}
+}
+
+// With no ?sort=, the list is grouped by Hive then name then ID, and a
+// ?dir= on its own must not invert that - otherwise the same cluster
+// renders differently depending on how the page was reached.
+func TestServer_ListVMs_DefaultGroupsByHiveAndIgnoresDir(t *testing.T) {
+	client := &fakeClient{listResp: &rpcpb.ListVMsResponse{
+		Vms: []*rpcpb.VMDefinition{
+			{Id: "web-1", Name: "web", NodeId: "apiarium"},
+			{Id: "cache-1", Name: "cache", NodeId: "apiverse"},
+			{Id: "db-1", Name: "db", NodeId: "apiarium"},
+		},
+	}}
+	s := newTestServer(t, client)
+
+	fetch := func(url string) string {
+		req := httptest.NewRequest(http.MethodGet, url, nil)
+		rec := httptest.NewRecorder()
+		s.ServeHTTP(rec, req)
+		return rec.Body.String()
+	}
+	plain := fetch("/vms/rows")
+	desc := fetch("/vms/rows?dir=desc")
+
+	if i, j, k := strings.Index(plain, "db-1"), strings.Index(plain, "web-1"), strings.Index(plain, "cache-1"); !(i < j && j < k) {
+		t.Errorf("rows not in Hive-then-name order, got: %s", plain)
+	}
+	if desc != plain {
+		t.Errorf("dir=desc changed the default order:\n asc:  %s\n desc: %s", plain, desc)
+	}
+}
+
 func TestServer_ListVMs_SortByNodeDescending(t *testing.T) {
 	client := &fakeClient{listResp: &rpcpb.ListVMsResponse{
 		Vms: []*rpcpb.VMDefinition{
