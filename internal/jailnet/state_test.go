@@ -176,3 +176,149 @@ func TestState_DefaultPathIsStage1sPath(t *testing.T) {
 // imported because importing internal/cluster from this package would
 // invert the dependency this package exists to avoid.
 const clusterJailEpairStatePath = "/var/db/apiary/jail-epairs.json"
+
+// TestLoadState_ExistingEmptyFileIsEmptyState is the unit half of the
+// zero-length-file regression. os.ReadFile on an existing zero-byte file
+// returns an empty slice and a nil error, and errors.Is(err,
+// os.ErrNotExist) is false for it, so it used to reach json.Unmarshal,
+// which rejects an empty document with "unexpected end of JSON input" -
+// and reconcileHost turns that into errStateUnknown, so every VNET jail
+// on the node became unprovisionable. A whitespace-only file is the same
+// self-block with a different byte count.
+func TestLoadState_ExistingEmptyFileIsEmptyState(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		body string
+	}{
+		{"zero length", ""},
+		{"single space", " "},
+		{"single newline", "\n"},
+		{"mixed whitespace", "\t\n  "},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "jail-epairs.json")
+			if err := os.WriteFile(path, []byte(tc.body), 0o644); err != nil {
+				t.Fatalf("seeding: %v", err)
+			}
+
+			state, err := LoadState(path)
+			if err != nil {
+				t.Fatalf("LoadState() error for %q = %v, want nil - a file holding no JSON records nothing owned", tc.body, err)
+			}
+			if state.Epairs == nil {
+				t.Fatal("LoadState() Epairs = nil, want an empty non-nil map so provision can record into it")
+			}
+			if len(state.Epairs) != 0 {
+				t.Errorf("LoadState() Epairs = %v, want empty", state.Epairs)
+			}
+			// A usable empty state must be writable, which means it
+			// carried its path through the load. Without this the next
+			// pass would get a State it cannot Save, and the file would
+			// stay empty forever.
+			if err := state.Save(); err != nil {
+				t.Fatalf("Save() on a state loaded from an empty file error = %v, want nil - the recovered state must be immediately writable", err)
+			}
+		})
+	}
+}
+
+// TestLoadState_CorruptFileIsStillAnError guards the other side of the
+// change. Only a file carrying no JSON is read as empty state.
+// TestState_CorruptFileIsALoudError above covers the truncated-body case
+// and the naming of the file in the error; the wrong-shape cases are
+// here, because valid JSON that is not an object is a different refusal
+// and must not be quietly accepted as an empty record.
+func TestLoadState_CorruptFileIsStillAnError(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		body string
+	}{
+		{"truncated to an opening brace", "{"},
+		{"not json at all", "this is not json"},
+		{"json array rather than object", "[]"},
+		{"bare string rather than object", `"nope"`},
+		{"epairs of the wrong type", `{"epairs": []}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "jail-epairs.json")
+			if err := os.WriteFile(path, []byte(tc.body), 0o644); err != nil {
+				t.Fatalf("seeding: %v", err)
+			}
+
+			_, err := LoadState(path)
+			if err == nil {
+				t.Fatalf("LoadState() error = nil for %q, want a parse error - unknown ownership must block, not read as clear", tc.body)
+			}
+			if !strings.Contains(err.Error(), path) {
+				t.Errorf("error = %v, want it to name the file so an operator knows which one to look at", err)
+			}
+		})
+	}
+}
+
+// TestEnsure_ExistingEmptyStateFileSelfHeals is the live half of the
+// regression: the self-block. reconcileHost loads this file and provision
+// saves it, so a load failure on an existing empty file meant the one
+// routine that could rewrite it never reached its own save path, and the
+// same error repeated on every tick for every jail. Here the empty file
+// must reconcile to a definite verdict, must be left holding valid
+// canonical JSON, and must reload.
+func TestEnsure_ExistingEmptyStateFileSelfHeals(t *testing.T) {
+	statePath := filepath.Join(t.TempDir(), "jail-epairs.json")
+	if err := os.WriteFile(statePath, nil, 0o644); err != nil {
+		t.Fatalf("seeding state file: %v", err)
+	}
+	runner := newFakeRunner()
+	bridge := newFakeBridge(runner).withBridge("bridge1")
+	j := newFakeJail().up("web", "epair0b", []string{"10.0.1.5/24"}, "10.0.1.1")
+	r := &Reconciler{Bridge: bridge, Jail: j, Runner: runner, StatePath: statePath}
+
+	addr := testAddressing()
+	addr.Interface = ""
+	res := r.Ensure(t.Context(), "web", addr)
+	if res.Verdict == VerdictUnknown {
+		t.Fatalf("Ensure() = %+v, want a definite verdict - an existing zero-length state file records no ownership, which is not unknown ownership", res)
+	}
+	if !res.Observed {
+		t.Errorf("Observed = false (%s), want true", res.Detail)
+	}
+	// Nothing was recorded, so exactly one fresh pair is the right
+	// answer, and it is recorded rather than leaked.
+	if got := bridge.pairCount(); got != 1 {
+		t.Errorf("node has %d epairs, want 1: an empty record file means cold start, not a reason to make none", got)
+	}
+
+	body, err := os.ReadFile(statePath)
+	if err != nil {
+		t.Fatalf("ReadFile() error: %v", err)
+	}
+	if len(body) == 0 {
+		t.Fatal("state file is still zero bytes - the pass returned without repairing it, so the next load would block again")
+	}
+	// Save marshals with a two-space indent, so the file is canonical
+	// the moment it is rewritten rather than only parseable.
+	if want := "{\n  \"epairs\": {\n    \"web\": {"; !strings.HasPrefix(string(body), want) {
+		t.Errorf("state file = %q, want it rewritten as canonical JSON by Save", string(body))
+	}
+
+	state, err := LoadState(statePath)
+	if err != nil {
+		t.Fatalf("reloading state: %v", err)
+	}
+	rec, present, usable := state.Lookup("web")
+	if !present || !usable {
+		t.Fatalf("Lookup(web) = %+v, present=%v, usable=%v, want a usable record for the pair just provisioned", rec, present, usable)
+	}
+	if rec.HostSide != res.HostSide {
+		t.Errorf("recorded host side = %q, want %q (the one just created)", rec.HostSide, res.HostSide)
+	}
+	// And a second pass must be a clean, idempotent one, which is the
+	// point of the repair: the loop that was running forever is over.
+	res2 := r.Ensure(t.Context(), "web", addr)
+	if res2.Verdict == VerdictUnknown {
+		t.Errorf("second pass Verdict = %q (%s), want a definite verdict", res2.Verdict, res2.Detail)
+	}
+	if got := bridge.pairCount(); got != 1 {
+		t.Errorf("node has %d epairs after the second pass, want 1: the repaired record must be reused rather than re-allocated", got)
+	}
+}

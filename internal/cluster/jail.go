@@ -16,6 +16,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"strings"
 
 	"google.golang.org/protobuf/proto"
 
@@ -87,9 +88,42 @@ type jailEpairState struct {
 	Epairs map[string]jailEpairRecord `json:"epairs"`
 }
 
+// loadJailEpairState reads this node's record of which epair(4) pair
+// (ADR-0117) it created for which VNET jail. A file that does not exist
+// and a file that exists but holds no JSON at all - zero bytes, or only
+// whitespace - are the same answer, which is that nothing was ever
+// recorded, and both come back as an empty, writable state.
+//
+// The no-JSON case is a recovery, not a tolerance, and it is the same
+// judgement loadNetworkArtifactState already makes about the network
+// artifact file (f2664ab). This file is the more likely one to be found
+// that way: its writer is a plain os.WriteFile, so a writer stopped
+// between the truncate and the write - a full disk, a crash, a signal -
+// leaves a zero-length file behind, whereas the artifact file is
+// installed through a temp file and a rename and never does. Both
+// ensureJailEpair and destroyJailEpair load this file and both save it,
+// so the parse error came back before either could reach its own write:
+// the routines whose job is to repair the file were what blocked the
+// repair, and every tick after that repeated it. Reading the empty file
+// as empty state lets the next pass install a canonical file and end
+// the loop.
+//
+// No-JSON means empty state is safe here because ownership is recorded
+// and never inferred. Teardown looks up one jail id in the map and
+// destroys nothing when the id is absent, and provisioning only ever
+// acts on a name it has just been handed, so an empty map cannot name a
+// bridge, a VLAN, an epair or a firewall anchor to act on and cannot
+// guess one either. The worst an empty file can lead to is a fresh
+// pair, allocated and recorded in the same pass, which is precisely the
+// cold-start path this loader already took for a missing file. A file
+// that does carry JSON and still does not parse stays a hard error,
+// because there the recorded ownership is exactly what is unknown: a
+// real interface this node created and can no longer name is one that
+// will never be torn down, and that leak is the whole reason the file
+// exists. Valid JSON of the wrong shape is refused for the same reason.
 func loadJailEpairState(path string) (jailEpairState, error) {
 	body, err := os.ReadFile(path)
-	if os.IsNotExist(err) {
+	if os.IsNotExist(err) || (err == nil && len(strings.TrimSpace(string(body))) == 0) {
 		return jailEpairState{Epairs: make(map[string]jailEpairRecord)}, nil
 	}
 	if err != nil {
@@ -105,6 +139,18 @@ func loadJailEpairState(path string) (jailEpairState, error) {
 	return state, nil
 }
 
+// saveJailEpairState writes the whole file in one os.WriteFile, with
+// no temp file and no rename. The comment is here because "add a
+// rename" is the obvious next thing someone will suggest: the write is
+// still whole-file, and a torn one is recoverable in two different
+// ways depending on how far it got. A torn write that left partial
+// non-empty JSON stays a loud parse error on the next load, which is
+// the signal to look at the file. A torn write that left zero bytes is
+// self-healing instead - loadJailEpairState reads it as empty state and
+// the next pass rewrites it as canonical JSON - because there is
+// nothing in an empty file to be wrong about. The reconciler is the
+// only writer and runs one pass at a time per node, which is what makes
+// the whole-file write safe enough to keep.
 func saveJailEpairState(path string, state jailEpairState) error {
 	body, err := json.MarshalIndent(state, "", "  ")
 	if err != nil {

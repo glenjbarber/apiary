@@ -89,12 +89,33 @@ type State struct {
 // jail, and it must come back as an empty, writable state rather than
 // an error, or the very first reconcile of the very first VNET jail
 // could never bootstrap itself.
+//
+// A file that exists but carries no JSON at all - zero bytes, or only
+// whitespace - is the same definite answer, and is treated the same
+// way. Save is a plain os.WriteFile, so a write stopped between the
+// truncate and the data - a full disk, a crash, a signal - can leave a
+// zero-length file here, and reconcileHost would then fail on "unexpected
+// end of JSON input" before provision ever reached its own Save, so
+// every jail on the node stayed unprovisionable and the record could
+// never be rewritten. This is the same recovery
+// internal/cluster's loadNetworkArtifactState makes for the network
+// artifact file, reached here by the same reasoning: teardown and drift
+// repair work from recorded entries only, so an empty map names no
+// epair, no bridge and no firewall anchor to act on, and cannot
+// manufacture one. All it can produce is a fresh pair, allocated and
+// recorded in the same pass.
+//
+// A file that does carry JSON and still does not parse remains a hard
+// error, as does JSON of the wrong shape. That is the case worth
+// stopping for: there this node's recorded ownership is unknown, so an
+// interface it created and can no longer name is one that will never be
+// torn down, which is exactly the leak the file exists to prevent.
 func LoadState(path string) (State, error) {
 	if path == "" {
 		path = DefaultStatePath
 	}
 	body, err := os.ReadFile(path)
-	if errors.Is(err, os.ErrNotExist) {
+	if errors.Is(err, os.ErrNotExist) || (err == nil && len(strings.TrimSpace(string(body))) == 0) {
 		return State{Epairs: make(map[string]EpairRecord), path: path}, nil
 	}
 	if err != nil {
@@ -112,12 +133,16 @@ func LoadState(path string) (State, error) {
 
 // Save writes the state back, creating the containing directory if it
 // does not exist. It is deliberately whole-file and not atomic via
-// rename: the only writer is this reconciler, single-threaded per node,
-// and a torn write here is recoverable (the next load reports a parse
-// error, which is a loud failure, not a silently wrong state) - the
-// same trade internal/cluster's own loadJailEpairState/saveJailEpairState
-// already makes. The comment is here because "add a rename" is the
-// obvious next thing someone will suggest.
+// rename: the only writer is this reconciler, single-threaded per node.
+// A torn write here is recoverable, in one of two ways depending on
+// how far it got. Left at zero bytes, LoadState reads it as empty state
+// and the next pass rewrites it as canonical JSON, so it heals itself.
+// Left holding partial non-empty JSON, the next load reports a parse
+// error naming the file, which is the loud failure that says a real
+// record was lost. The same trade internal/cluster's own
+// loadJailEpairState/saveJailEpairState already makes, and the comment
+// is here because "add a rename" is the obvious next thing someone will
+// suggest.
 func (s State) Save() error {
 	if s.path == "" {
 		return fmt.Errorf("saving jail epair state: no path was set (State was not loaded with LoadState)")

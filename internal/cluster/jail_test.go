@@ -936,3 +936,171 @@ func TestReconciler_RunOnce_DeletingReplicatedJailUnmountsAndReclaimsHASTNotData
 		t.Errorf("purged ids = %v, want [jail-1]", got)
 	}
 }
+
+// TestLoadJailEpairState_ExistingEmptyFileIsEmptyState is the unit half of
+// the zero-length-file regression. os.ReadFile on an existing zero-byte
+// file returns an empty slice and a nil error, and os.IsNotExist is false
+// for it, so it used to reach json.Unmarshal, which rejects an empty
+// document with "unexpected end of JSON input". A whitespace-only file is
+// the same self-block with a different byte count, so all four bodies are
+// checked here.
+func TestLoadJailEpairState_ExistingEmptyFileIsEmptyState(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		body string
+	}{
+		{"zero length", ""},
+		{"single space", " "},
+		{"single newline", "\n"},
+		{"mixed whitespace", "\t\n  "},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "jail-epairs.json")
+			if err := os.WriteFile(path, []byte(tc.body), 0o644); err != nil {
+				t.Fatalf("seeding: %v", err)
+			}
+
+			state, err := loadJailEpairState(path)
+			if err != nil {
+				t.Fatalf("loadJailEpairState() error for %q = %v, want nil - a file holding no JSON records nothing owned", tc.body, err)
+			}
+			if state.Epairs == nil {
+				t.Fatal("loadJailEpairState() Epairs = nil, want an empty non-nil map so ensureJailEpair can record into it")
+			}
+			if len(state.Epairs) != 0 {
+				t.Errorf("loadJailEpairState() Epairs = %v, want empty", state.Epairs)
+			}
+		})
+	}
+}
+
+// TestLoadJailEpairState_CorruptFileIsStillAnError guards the other side
+// of the change. Only a file carrying no JSON is read as empty state. A
+// truncated body, a body that is not JSON at all, and JSON of the wrong
+// shape all still fail, because in each of those cases this node's
+// recorded ownership is unknown, and a pair it created and can no longer
+// name is one that will never be torn down.
+func TestLoadJailEpairState_CorruptFileIsStillAnError(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		body string
+	}{
+		{"truncated mid-object", `{"epairs": {"web": {"host_side": "epair0a"`},
+		{"truncated to an opening brace", "{"},
+		{"not json at all", "this is not json"},
+		{"json array rather than object", "[]"},
+		{"bare string rather than object", `"nope"`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "jail-epairs.json")
+			if err := os.WriteFile(path, []byte(tc.body), 0o644); err != nil {
+				t.Fatalf("seeding: %v", err)
+			}
+
+			if _, err := loadJailEpairState(path); err == nil {
+				t.Fatalf("loadJailEpairState() error = nil for %q, want a parse error - unknown ownership must block, not read as clear", tc.body)
+			}
+		})
+	}
+}
+
+// TestReconciler_EnsureJailEpair_ExistingEmptyStateFileSelfHeals is the
+// live half of the regression: the self-block. ensureJailEpair loads this
+// file and saves this file, so a load failure on an existing empty file
+// meant the one routine that could rewrite it never reached its own save
+// path, and every tick after that repeated the same error forever. Here
+// the empty file must provision normally, must be left holding valid
+// canonical JSON, and must reload.
+func TestReconciler_EnsureJailEpair_ExistingEmptyStateFileSelfHeals(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "jail-epairs.json")
+	if err := os.WriteFile(path, nil, 0o644); err != nil {
+		t.Fatalf("seeding: %v", err)
+	}
+
+	vlan := newFakeVLANManager()
+	r := &Reconciler{VLAN: vlan, JailEpairStatePath: path}
+	jailSide, err := r.ensureJailEpair(context.Background(), "jail-1", "bridge1")
+	if err != nil {
+		t.Fatalf("ensureJailEpair() error: %v, want the existing zero-length state file recovered rather than blocking every future tick", err)
+	}
+	if jailSide == "" {
+		t.Error("ensureJailEpair() jailSide = empty, want the freshly created pair's jail side")
+	}
+
+	body, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile() error: %v", err)
+	}
+	if len(body) == 0 {
+		t.Fatal("state file is still zero bytes - the reconciler returned success without repairing it, so the next load would block again")
+	}
+	// saveJailEpairState marshals with a two-space indent, so the file is
+	// canonical the moment it is rewritten rather than only parseable.
+	// The fake names its first pair epair1a/epair1b, deterministically.
+	want := "{\n  \"epairs\": {\n    \"jail-1\": {\n      \"host_side\": \"epair1a\",\n      \"jail_side\": \"epair1b\"\n    }\n  }\n}"
+	if string(body) != want {
+		t.Errorf("state file = %q, want %q - the file must now hold valid canonical JSON", string(body), want)
+	}
+	if jailSide != "epair1b" {
+		t.Errorf("ensureJailEpair() jailSide = %q, want epair1b, the first pair the fake creates", jailSide)
+	}
+	if len(vlan.epairs) != 1 {
+		t.Errorf("created pairs = %v, want exactly one - an empty state file must not cause a second allocation on a retry", vlan.epairs)
+	}
+
+	state, err := loadJailEpairState(path)
+	if err != nil {
+		t.Fatalf("loadJailEpairState() error on the rewritten file: %v", err)
+	}
+	rec, ok := state.Epairs["jail-1"]
+	if !ok {
+		t.Fatalf("rewritten state Epairs = %v, want a record for jail-1", state.Epairs)
+	}
+	if rec.JailSide != jailSide {
+		t.Errorf("rewritten record JailSide = %q, want %q", rec.JailSide, jailSide)
+	}
+}
+
+// TestReconciler_RunOnce_ExistingEmptyJailEpairStateFileRecordsSuccess
+// ties the repair to the symptom it was found as. RunOnce records an
+// attempt unconditionally and a success only when the tick's first error
+// is nil, so a node whose epair record file had been truncated to zero
+// bytes recorded a fresh attempt every tick and never a fresh success -
+// which is exactly the condition internal/health reports as degraded. A
+// VNET jail is what pulls the epair path in, so this asserts the whole
+// tick is now a successful one.
+func TestReconciler_RunOnce_ExistingEmptyJailEpairStateFileRecordsSuccess(t *testing.T) {
+	raft := &fakeRaftClient{
+		jailsResp: &internalpb.ListJailsResponse{
+			Jails: []*internalpb.JailDefinition{{
+				Id: "jail-1", Name: "web-1", Hostname: "web-1.local", NodeId: "node-a",
+				NetworkId: "net-1", IpAddress: "10.60.0.2", Vnet: true,
+			}},
+		},
+		networksResp: &internalpb.ListNetworksResponse{Networks: []*internalpb.NetworkDefinition{
+			{Id: "net-1", Name: "prod", Subnet: "10.60.0.0/24"},
+		}},
+	}
+	zfs := newFakeDatasetManager()
+	root := t.TempDir()
+	writePlaceholderJailRoot(t, root)
+	zfs.mountpointFor["jail-1"] = root
+	epairStatePath := filepath.Join(t.TempDir(), "jail-epairs.json")
+	if err := os.WriteFile(epairStatePath, nil, 0o644); err != nil {
+		t.Fatalf("seeding: %v", err)
+	}
+
+	r := &Reconciler{
+		Raft: raft, ZFS: zfs, Jail: newFakeJailManager(), VLAN: newFakeVLANManager(),
+		LocalNodeID: "node-a", JailEpairStatePath: epairStatePath,
+	}
+	if err := r.RunOnce(context.Background()); err != nil {
+		t.Fatalf("RunOnce() error: %v, want a clean tick against an existing zero-length epair state file", err)
+	}
+	if _, ok := r.LastReconcileSuccess(); !ok {
+		t.Error("LastReconcileSuccess() ok = false, want a fresh success - without one this Hive reports degraded forever")
+	}
+	if _, err := loadJailEpairState(epairStatePath); err != nil {
+		t.Fatalf("loadJailEpairState() error after the successful tick: %v", err)
+	}
+}
