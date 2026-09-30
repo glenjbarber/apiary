@@ -1606,9 +1606,37 @@ func (r *Reconciler) reconcileNetworkArtifacts(ctx context.Context, planned []VM
 	return saveNetworkArtifactState(r.NetworkStatePath, networkArtifactState{Networks: next})
 }
 
+// loadNetworkArtifactState reads this node's local record of the vlan/bridge
+// interfaces and PF anchors Apiary owns. A file that does not exist, and a
+// file that exists but carries no JSON at all (zero bytes, or only
+// whitespace), are both "nothing has ever been recorded", and both come
+// back as an empty, writable state.
+//
+// The no-JSON case is a recovery, not a tolerance. This file's only
+// writer is saveNetworkArtifactState, which installs whole contents via a
+// temp file and a rename and therefore never leaves an empty file
+// behind, so one on disk can only have come from something else - a
+// truncated copy, a disk that filled mid-write, or a file created by
+// hand. Handing it to json.Unmarshal yields "unexpected end of JSON
+// input", which reconcileNetworkArtifacts returns before reaching its own
+// save path, so the one routine whose job is to rewrite this file can
+// never rewrite it: managerd records a fresh attempt every tick, no fresh
+// success ever, and the Hive reports degraded forever. Treating it as
+// empty state lets the very next pass install a canonical file and end
+// the loop.
+//
+// This cannot cause the failure that would be worth worrying about.
+// Every bridge, VLAN and NAT anchor this file protects is one it already
+// recorded; teardown in reconcileNetworkArtifacts iterates recorded
+// entries only, so an empty map destroys nothing, leaks nothing it was
+// not already leaking, and never acts on a guess. A file that does
+// contain JSON but does not parse is still an error, because there we do
+// not know what it recorded and an unrecorded owned bridge is exactly
+// what must eventually be torn down - see NetworkArtifactStatus for the
+// same reasoning at the read-only call site.</new>
 func loadNetworkArtifactState(path string) (networkArtifactState, error) {
 	body, err := os.ReadFile(path)
-	if os.IsNotExist(err) {
+	if os.IsNotExist(err) || (err == nil && len(strings.TrimSpace(string(body))) == 0) {
 		return networkArtifactState{Networks: make(map[string]networkArtifact)}, nil
 	}
 	if err != nil {
