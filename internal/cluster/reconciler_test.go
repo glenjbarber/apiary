@@ -2889,3 +2889,163 @@ func TestReconciler_ReconcileNetworkArtifacts_PreservesDefinedUnusedNetwork(t *t
 		t.Errorf("cleanup ran for defined unused network: bridges=%v vlans=%v anchors=%v", vlan.destroyedBridges, vlan.destroyedVLANs, pfMgr.flushed)
 	}
 }
+
+// TestLoadNetworkArtifactState_ExistingEmptyFileIsEmptyState is the unit
+// half of the zero-length-file regression. A zero-byte file reads without
+// an I/O error and os.IsNotExist is false for it, so it used to reach
+// json.Unmarshal, which rejects an empty document with "unexpected end of
+// JSON input". A whitespace-only file is the same self-block with a
+// different byte count, so both are checked here.
+func TestLoadNetworkArtifactState_ExistingEmptyFileIsEmptyState(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		body string
+	}{
+		{"zero length", ""},
+		{"single newline", "\n"},
+		{"whitespace only", "   \n\t\n"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "network-artifacts.json")
+			if err := os.WriteFile(path, []byte(tc.body), 0o644); err != nil {
+				t.Fatalf("WriteFile() error: %v", err)
+			}
+
+			state, err := loadNetworkArtifactState(path)
+			if err != nil {
+				t.Fatalf("loadNetworkArtifactState() error for %q: %v, want nil - a file with no JSON in it records nothing", tc.body, err)
+			}
+			if state.Networks == nil {
+				t.Fatal("loadNetworkArtifactState() Networks = nil, want an empty non-nil map so the caller can write to it")
+			}
+			if len(state.Networks) != 0 {
+				t.Errorf("loadNetworkArtifactState() Networks = %v, want empty", state.Networks)
+			}
+		})
+	}
+}
+
+// TestLoadNetworkArtifactState_CorruptFileIsStillAnError guards the other
+// side of the fix. Only a file carrying no JSON is treated as empty state.
+// A truncated or otherwise unparseable file still fails, because there we
+// do not know which bridges this node recorded owning, and a recorded but
+// unreconciled owned bridge is exactly what must eventually be torn down.
+func TestLoadNetworkArtifactState_CorruptFileIsStillAnError(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		body string
+	}{
+		{"truncated mid-object", `{"networks": {"a": {"bridge": "apnet-a"`},
+		{"truncated to an opening brace", "{"},
+		{"not json at all", "this is not json"},
+		{"json array rather than object", "[]"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "network-artifacts.json")
+			if err := os.WriteFile(path, []byte(tc.body), 0o644); err != nil {
+				t.Fatalf("WriteFile() error: %v", err)
+			}
+
+			if _, err := loadNetworkArtifactState(path); err == nil {
+				t.Fatalf("loadNetworkArtifactState() error = nil for %q, want a parse error - unknown state must block, not read as clear", tc.body)
+			}
+		})
+	}
+}
+
+// TestReconciler_ReconcileNetworkArtifacts_ExistingEmptyStateFileSelfHeals
+// is the live half of the regression: the self-block. reconcileNetworkArtifacts
+// loads this file and saves this file, so a load failure on an empty file
+// means the one routine that could rewrite it never reaches its own save
+// path, and every tick repeats the same error forever. Here the empty file
+// must reconcile cleanly, must be left holding valid canonical JSON, and
+// must cause no teardown at all.
+func TestReconciler_ReconcileNetworkArtifacts_ExistingEmptyStateFileSelfHeals(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "network-artifacts.json")
+	if err := os.WriteFile(path, nil, 0o644); err != nil {
+		t.Fatalf("WriteFile() error: %v", err)
+	}
+
+	vlan := newFakeVLANManager()
+	pfMgr := newFakePFManager()
+	r := &Reconciler{VLAN: vlan, PF: pfMgr, NetworkStatePath: path}
+	if err := r.reconcileNetworkArtifacts(context.Background(), nil, map[string]*internalpb.NetworkDefinition{}); err != nil {
+		t.Fatalf("reconcileNetworkArtifacts() error: %v, want the empty state file recovered rather than blocking every future tick", err)
+	}
+
+	// An empty ownership map must tear nothing down: it names no bridge,
+	// no VLAN and no NAT anchor, so there is nothing it may act on.
+	if len(vlan.destroyedBridges) != 0 || len(vlan.destroyedVLANs) != 0 || len(pfMgr.flushed) != 0 {
+		t.Errorf("teardown ran against an empty state file: bridges=%v vlans=%v anchors=%v, want none", vlan.destroyedBridges, vlan.destroyedVLANs, pfMgr.flushed)
+	}
+
+	body, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile() error: %v", err)
+	}
+	if len(body) == 0 {
+		t.Fatal("state file is still zero bytes - the reconciler returned success without repairing it, so the next load would block again")
+	}
+	want := "{\n  \"networks\": {}\n}"
+	if string(body) != want {
+		t.Errorf("state file = %q, want %q - the file must now hold valid canonical JSON", string(body), want)
+	}
+	state, err := loadNetworkArtifactState(path)
+	if err != nil {
+		t.Fatalf("loadNetworkArtifactState() error on the rewritten file: %v", err)
+	}
+	if len(state.Networks) != 0 {
+		t.Errorf("rewritten state Networks = %v, want empty", state.Networks)
+	}
+}
+
+// TestReconciler_RunOnce_ExistingEmptyNetworkArtifactFileRecordsSuccess ties
+// the repair to the symptom it was reported as. RunOnce records an attempt
+// unconditionally and a success only when the tick's first error is nil, so
+// a node with a zero-length artifact file recorded a fresh attempt every
+// 30 seconds and never a fresh success - which is exactly the condition
+// internal/health reports as degraded, and the reason the Hive looked
+// broken to an operator while Raft was perfectly healthy. This asserts the
+// other half: with the file empty the tick must now be a successful one.
+func TestReconciler_RunOnce_ExistingEmptyNetworkArtifactFileRecordsSuccess(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "network-artifacts.json")
+	if err := os.WriteFile(path, nil, 0o644); err != nil {
+		t.Fatalf("WriteFile() error: %v", err)
+	}
+
+	r := &Reconciler{
+		Raft:             &fakeRaftClient{resp: &internalpb.ListVMsResponse{}},
+		ZFS:              newFakeDatasetManager(),
+		VLAN:             newFakeVLANManager(),
+		PF:               newFakePFManager(),
+		NetworkStatePath: path,
+		LocalNodeID:      "node-a",
+	}
+	if err := r.RunOnce(context.Background()); err != nil {
+		t.Fatalf("RunOnce() error: %v, want a clean tick against an existing zero-length artifact file", err)
+	}
+	if _, ok := r.LastReconcileSuccess(); !ok {
+		t.Error("LastReconcileSuccess() ok = false, want a fresh success - without one this Hive reports degraded forever")
+	}
+}
+
+// TestReconciler_NetworkArtifactStatus_EmptyStateFileIsNotPresent covers
+// the read-only call site. ADR-0071's guided replacement workflow blocks a
+// recreate when the artifact state is unknown, but an empty file is not
+// unknown: it records no ownership at all, so "not present" is the definite
+// answer rather than a guess.
+func TestReconciler_NetworkArtifactStatus_EmptyStateFileIsNotPresent(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "network-artifacts.json")
+	if err := os.WriteFile(path, nil, 0o644); err != nil {
+		t.Fatalf("WriteFile() error: %v", err)
+	}
+	r := &Reconciler{NetworkStatePath: path}
+
+	present, _, _, _, _, err := r.NetworkArtifactStatus("net-1")
+	if err != nil {
+		t.Fatalf("NetworkArtifactStatus() error: %v, want nil for an existing zero-length artifact file", err)
+	}
+	if present {
+		t.Error("NetworkArtifactStatus() present = true, want false - an empty state file records no ownership")
+	}
+}
