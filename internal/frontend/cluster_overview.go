@@ -251,7 +251,11 @@ func summarizeClusterNode(nodeID string, stats statsView, fetchErr string) clust
 		PoolsOK:    poolsOK,
 		PFEnabled:  stats.PF.Enabled,
 		CPUGauge:   gaugeFromLoadAverage("CPU", stats.LoadAvg1, stats.Cores, fmt.Sprintf("%.2f load, %d cores", stats.LoadAvg1, stats.Cores)),
-		MemGauge:   gaugeFromPercent("Memory", stats.MemUsedPct, stats.MemFree+" free"),
+		// "Memory %" rather than "Memory": this gauge reads a percentage
+		// and its CPU neighbour reads a load average, so two adjacent
+		// labels reading "CPU" and "Memory" gave no hint which number was
+		// a percentage. The unit belongs in the label.
+		MemGauge: gaugeFromPercent("Memory %", stats.MemUsedPct, stats.MemFree+" free"),
 	}
 }
 
@@ -1113,6 +1117,21 @@ func combCauses(nodeID, localNodeID string, anchor *rpcpb.StatusResponse, hostSt
 // separate fields precisely because a card that repeats the whole detail
 // stops being scannable, and because a one-line summary is what an operator
 // actually reads first.
+// newCombCause builds one cause record. Its Summary is the headline the
+// command center renders beside the verdict badge, and it is the summary
+// ALONE - the machine-readable Source is not prefixed onto it.
+//
+// It used to be, and the card read
+//
+//	evidence current   reconciler_last_tick: the last reconcile tick succeeded   full evidence
+//
+// which is a log line, not a status line: a snake_case identifier, a colon,
+// and a sentence, wrapped around a link to the evidence that was already
+// one click away. Every summary passed in here is already English prose that
+// names its own subject, so the prefix added nothing an operator could read
+// and buried the verdict in front of it. Source is still carried on the
+// record and is still what the evidence page groups by, so nothing was lost -
+// it just stopped being the first thing on the card.
 func newCombCause(source string, state combCauseState, summary, detail string, now time.Time) combCauseView {
 	class, label := combCauseBadge(state, false)
 	return combCauseView{
@@ -1121,7 +1140,7 @@ func newCombCause(source string, state combCauseState, summary, detail string, n
 		BadgeClass:      class,
 		BadgeLabel:      label,
 		Detail:          detail,
-		Summary:         source + ": " + summary,
+		Summary:         summary,
 		ObservedAt:      now.Format("2006-01-02 15:04:05 MST"),
 		ObservedAtKnown: true,
 		Age:             "just now",
@@ -1399,24 +1418,37 @@ func worstCombCause(causes []combCauseView) (state combCauseState, stale bool, h
 // operator to guess whether silence meant health. The badge beside it
 // carries the verdict label; this carries the state-specific prose, and
 // neither restates the other.
+//
+// The prose is kept SHORT on purpose. It is the middle third of a line that
+// already reads "<verdict> <this> <link to full evidence>", and the operator
+// reading that line wants one thing from it: is this Comb okay or not, and
+// where do I go for the reasoning. Both of those are answers this sentence
+// is now small enough to give without burying the verdict it sits beside.
+//
+// "Stale" survives the shortening, and it is the one word here that earns
+// its place: a fresh success and a 3-hour-old success produce the same
+// three words otherwise, and reading "OK" off a Comb nobody has heard from
+// in three hours is exactly the false reassurance the staleness flag
+// exists to prevent. The age itself is on the evidence page, with Source,
+// Detail, ObservedAt and the rest of the cause list.
 func reconcileTickSummary(e combReconcileEvidence) string {
 	switch e.State {
 	case combCauseObservedHealthy:
 		if e.Stale {
-			return fmt.Sprintf("last successful tick was %s, past this Comb's freshness limit", formatObservationAge(e.Age))
+			return "last reconcile tick OK, but stale"
 		}
-		return "the last reconcile tick succeeded"
+		return "last reconcile tick OK"
 	case combCauseObservedFailed:
 		if e.Stale {
-			return fmt.Sprintf("the last observed reconcile attempt was %s, past this Comb's freshness limit", formatObservationAge(e.Age))
+			return "last reconcile tick failed, and stale"
 		}
-		return "the last reconcile tick did not complete cleanly"
+		return "last reconcile tick failed"
 	case combCauseNeverObserved:
-		return "no reconcile tick has ever been observed on this Comb"
+		return "no reconcile tick observed"
 	case combCauseNotApplicable:
-		return "no Reconciler is configured on this Comb"
+		return "no Reconciler configured"
 	default:
-		return "reconcile evidence state could not be determined"
+		return "reconcile state unknown"
 	}
 }
 

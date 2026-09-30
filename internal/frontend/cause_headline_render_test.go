@@ -1,7 +1,9 @@
 package frontend
 
 import (
+	"bytes"
 	"context"
+	"html/template"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -9,12 +11,13 @@ import (
 	"time"
 
 	rpcpb "github.com/glenjbarber/apiary/api/rpc"
+	"github.com/glenjbarber/apiary/web"
 )
 
 // This file covers the per-Comb cause line on the command-center node
 // status card - the line under a node's badge row that reads
 //
-//	evidence current   reconciler_last_tick: the last reconcile tick succeeded   full evidence
+//	evidence current   last reconcile tick OK   full evidence
 //
 // The property under test is that the VERDICT is spoken exactly once on
 // that line. The verdict and the cause are different layers with
@@ -23,6 +26,12 @@ import (
 // the headline restated the badge, every Comb rendered its verdict twice
 // - "observed healthy observed healthy" - which reads as two findings
 // and is one.
+//
+// It is ALSO the property that the line stays a line. The headline once
+// opened with the cause's snake_case Source ("reconciler_last_tick:"),
+// which made a status card read like a log tail and pushed the verdict
+// off to the right. The prose says its own subject, so the identifier is
+// the evidence page's business and not the card's.
 //
 // Separately, when this cause badge would ALSO restate the card's own
 // HealthStatus badge one row up - both fresh, non-stale, and both
@@ -171,7 +180,7 @@ func TestNodeStatusCauseLine_SpeaksItsVerdictOnce(t *testing.T) {
 	}
 
 	got := nodeCauseLine(t, body, node)
-	want := "evidence current reconciler_last_tick: the last reconcile tick succeeded full evidence"
+	want := "evidence current last reconcile tick OK full evidence"
 	if got != want {
 		t.Errorf("cause line for a healthy Comb whose tick succeeded:\n got: %q\nwant: %q", got, want)
 	}
@@ -276,7 +285,7 @@ func TestNodeStatusCauseLine_StaleSuccessIsNotRestatedAsGreen(t *testing.T) {
 	if n := strings.Count(line, "observed healthy (stale)"); n != 1 {
 		t.Errorf("cause line names the stale verdict %d times, want 1: %q", n, line)
 	}
-	if !strings.Contains(line, "past this Comb's freshness limit") {
+	if !strings.Contains(line, "stale") {
 		t.Errorf("stale cause line does not say the success is old: %q", line)
 	}
 }
@@ -289,5 +298,100 @@ func tickingCombHostStats(node string, now time.Time) *rpcpb.HostStatsResponse {
 		ReconcileIntervalSeconds: 300,
 		LastReconcileAttemptUnix: now.Add(-10 * time.Second).Unix(),
 		LastReconcileSuccessUnix: now.Add(-10 * time.Second).Unix(),
+	}
+}
+
+// TestCauseLineCarriesNoSourceIdentifier is the regression guard for the
+// headline being a status line rather than a log tail. combCauseView.Source
+// is a machine identifier ("reconciler_last_tick", "raft_membership") and
+// it used to be prefixed onto the Summary that the card renders, so every
+// Comb read
+//
+//	evidence current   reconciler_last_tick: the last reconcile tick succeeded
+//
+// The identifier is still on the record and still groups the evidence page;
+// what must not come back is the card leading with it, because a snake_case
+// token with a colon after it is a log line, and it is the one part of that
+// line an operator cannot read at a glance. The check is a pattern rather
+// than a fixed list, so a future cause that re-adds its own Source is caught
+// by this test rather than by someone noticing on the page.
+func TestCauseLineCarriesNoSourceIdentifier(t *testing.T) {
+	const node = "frame.lab3.home.arpa"
+	client := &fakeClient{
+		statusResp: &rpcpb.StatusResponse{
+			ManagerNodeId: node, RaftReachable: true, RaftState: "Follower",
+			RaftNodeId: node, RaftLeaderId: node, RaftAppliedIndex: 181,
+			RaftLastLogIndex: 181,
+			KnownNodeIds:     []string{node},
+			Members:          []*rpcpb.RaftMember{{NodeId: node, Suffrage: "Voter"}},
+		},
+		hostStatsResp: tickingCombHostStats(node, time.Now()),
+	}
+	peers := &fakePeerHostStatsClient{err: context.DeadlineExceeded}
+
+	s, err := NewServer(client, nil, nil, peers, ".apiary.work", "17700", nil, false)
+	if err != nil {
+		t.Fatalf("NewServer() error: %v", err)
+	}
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	line := nodeCauseLine(t, rec.Body.String(), node)
+
+	for _, ident := range []string{
+		"reconciler_last_tick", "manager_reachability", "raft_membership",
+		"host_subsystem", "reconcile_phase", "reconcile_transition",
+	} {
+		if strings.Contains(line, ident) {
+			t.Errorf("cause line carries the machine identifier %q: %q", ident, line)
+		}
+	}
+	// And the line it actually reads is short enough to be a status line.
+	// Eight words is what this one costs now; the identifier version it
+	// replaced cost eleven. A bound rather than an exact count, because the
+	// point is that prose cannot creep back onto the card, not that this
+	// particular Comb's sentence is frozen.
+	const wantAtMostWords = 8
+	if n := len(strings.Fields(line)); n > wantAtMostWords {
+		t.Errorf("cause line is %d words long, want at most %d for a verdict + short summary + link: %q", n, wantAtMostWords, line)
+	}
+}
+
+// TestMemoryGaugeLabelNamesItsUnit guards the other half of this change.
+// The CPU gauge beside it reads a load average and the memory gauge reads a
+// percentage, but both used to be labelled with a bare noun, so the number
+// in the middle of the memory dial had no unit attached to it anywhere on
+// the card. The label is the only place the unit appears, so the unit goes
+// in the label.
+func TestMemoryGaugeLabelNamesItsUnit(t *testing.T) {
+	if got := gaugeFromPercent("Memory %", 42, "1.2G free").Label; got != "Memory %" {
+		t.Errorf("gauge label = %q, want %q", got, "Memory %")
+	}
+	// The CPU gauge is a load average, not a percentage, so it must NOT
+	// acquire a "%" as a side effect of this. Load average is not a
+	// percentage and labelling it one would be a new false statement.
+	if got := gaugeFromLoadAverage("CPU", 0.5, 8, "0.50 load, 8 cores").Label; got != "CPU" {
+		t.Errorf("CPU gauge label = %q, want %q - a load average is not a percentage", got, "CPU")
+	}
+
+	// End to end: the label has to survive the template, not just the
+	// builder. This executes the real gauge partial, which is the only
+	// place the label is turned into markup.
+	partial, err := web.FS.ReadFile("templates/_gauge.html")
+	if err != nil {
+		t.Fatalf("read _gauge.html: %v", err)
+	}
+	tmpl, err := template.New("gauge").Parse(string(partial))
+	if err != nil {
+		t.Fatalf("parse _gauge.html: %v", err)
+	}
+	var buf bytes.Buffer
+	if err := tmpl.ExecuteTemplate(&buf, "gauge", gaugeFromPercent("Memory %", 42, "1.2G free")); err != nil {
+		t.Fatalf("execute gauge: %v", err)
+	}
+	if !strings.Contains(buf.String(), `<span class="gauge-label">Memory %</span>`) {
+		t.Errorf("rendered gauge has no \"Memory %%\" label: %s", buf.String())
 	}
 }
