@@ -266,6 +266,22 @@ var requiredRole = map[string]Role{
 	"/apiary.rpc.v1.ManagerService/OpenColonyJoinWindow":  RoleAdmin,
 	"/apiary.rpc.v1.ManagerService/CloseColonyJoinWindow": RoleAdmin,
 
+	// SetColonyDiskSize/GetColonyDiskSize (ADR-0148) are the Colony-wide
+	// VM disk-size floor. The write is Admin, like every other entry in
+	// this block: it is a state change every member replicates and that
+	// can never be undone, because the floor can only be raised and
+	// nothing resizes a disk that already exists. Stated here rather
+	// than inherited from the map's fail-closed default, which is the
+	// same reasoning as OpenColonyJoinWindow above - an accidental
+	// Admin requirement with no compile-time signal is what
+	// TestRequiredRole_CoversEveryRPC exists to prevent.
+	//
+	// The read is Viewer, with every other read-only RPC here: it
+	// exposes a capacity number this Colony already enforces, and the
+	// reconciler reads it on every Comb.
+	"/apiary.rpc.v1.ManagerService/SetColonyDiskSize": RoleAdmin,
+	"/apiary.rpc.v1.ManagerService/GetColonyDiskSize": RoleViewer,
+
 	// PreflightApproveJoinRequest (ADR-0103) previews ApproveJoinRequest's
 	// own reachability gate - Admin-tier, matching ApproveJoinRequest
 	// itself exactly, since it makes managerd dial a caller-selected
