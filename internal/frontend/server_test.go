@@ -34,6 +34,19 @@ type fakeClient struct {
 	cancelJoinRequestResp    *rpcpb.CancelJoinRequestResponse
 	lastCancelJoinRequestReq *rpcpb.CancelJoinRequestRequest
 
+	// ADR-0148's Colony-wide disk-size floor read. Recorded so a test
+	// can assert what the page asked for, and overridable so a test can
+	// drive a floor that is actually set rather than always unset.
+	getColonyDiskSizeResp    *rpcpb.GetColonyDiskSizeResponse
+	lastGetColonyDiskSizeReq *rpcpb.GetColonyDiskSizeRequest
+
+	// The Admin-tier write. Overridable so a test can drive the
+	// accepted and refused cases; unset means the fake refuses, which
+	// keeps a success from being inherited silently.
+	setColonyDiskSizeResp    *rpcpb.SetColonyDiskSizeResponse
+	setColonyDiskSizeErr     error
+	lastSetColonyDiskSizeReq *rpcpb.SetColonyDiskSizeRequest
+
 	requestJoinColonyResp    *rpcpb.RequestJoinColonyResponse
 	lastRequestJoinColonyReq *rpcpb.RequestJoinColonyRequest
 
@@ -788,6 +801,33 @@ func (f *fakeClient) GetColonyJoinWindow(_ context.Context, in *rpcpb.GetColonyJ
 	// unconfigured test render "neither a window nor a reason", and
 	// the ordinary closed case would go untested everywhere.
 	return &rpcpb.GetColonyJoinWindowResponse{Error: "this Colony is not currently accepting new members"}, nil
+}
+
+// GetColonyDiskSize is ADR-0148's Colony-wide disk-size floor read. The
+// fake reports no floor, which is the honest answer for a Comb whose log
+// holds no SetColonyDiskSize: absence is how "no floor recorded" is
+// expressed, so zero here means unset rather than a floor of zero.
+func (f *fakeClient) GetColonyDiskSize(_ context.Context, in *rpcpb.GetColonyDiskSizeRequest, _ ...grpc.CallOption) (*rpcpb.GetColonyDiskSizeResponse, error) {
+	f.lastGetColonyDiskSizeReq = in
+	if f.getColonyDiskSizeResp != nil {
+		return f.getColonyDiskSizeResp, nil
+	}
+	return &rpcpb.GetColonyDiskSizeResponse{}, nil
+}
+
+// SetColonyDiskSize is the Admin-tier write half. The fake refuses it by
+// default rather than accepting silently, so a test that exercises the
+// write path has to say so explicitly instead of inheriting a success
+// that proves nothing.
+func (f *fakeClient) SetColonyDiskSize(_ context.Context, in *rpcpb.SetColonyDiskSizeRequest, _ ...grpc.CallOption) (*rpcpb.SetColonyDiskSizeResponse, error) {
+	f.lastSetColonyDiskSizeReq = in
+	if f.setColonyDiskSizeResp != nil {
+		return f.setColonyDiskSizeResp, nil
+	}
+	if f.setColonyDiskSizeErr != nil {
+		return nil, f.setColonyDiskSizeErr
+	}
+	return nil, status.Error(codes.Unimplemented, "fakeClient does not implement SetColonyDiskSize")
 }
 
 func (f *fakeClient) RequestJoinColony(_ context.Context, in *rpcpb.RequestJoinColonyRequest, _ ...grpc.CallOption) (*rpcpb.RequestJoinColonyResponse, error) {

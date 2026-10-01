@@ -471,6 +471,22 @@ func (f *fakeClient) GetColonyJoinWindow(context.Context, *rpcpb.GetColonyJoinWi
 	return &rpcpb.GetColonyJoinWindowResponse{}, nil
 }
 
+// GetColonyDiskSize is ADR-0148's Colony-wide disk-size floor read. The
+// fake reports no floor, which is the honest answer for a Comb whose log
+// holds no SetColonyDiskSize: absence is how "no floor recorded" is
+// expressed, so zero here means unset rather than a floor of zero.
+func (f *fakeClient) GetColonyDiskSize(context.Context, *rpcpb.GetColonyDiskSizeRequest, ...grpc.CallOption) (*rpcpb.GetColonyDiskSizeResponse, error) {
+	return &rpcpb.GetColonyDiskSizeResponse{}, nil
+}
+
+// SetColonyDiskSize is the Admin-tier write half. The fake refuses it by
+// default rather than accepting silently, so a test that exercises the
+// write path has to say so explicitly instead of inheriting a success
+// that proves nothing.
+func (f *fakeClient) SetColonyDiskSize(context.Context, *rpcpb.SetColonyDiskSizeRequest, ...grpc.CallOption) (*rpcpb.SetColonyDiskSizeResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "fakeClient does not implement SetColonyDiskSize")
+}
+
 func (f *fakeClient) GetJoinRequestStatus(context.Context, *rpcpb.GetJoinRequestStatusRequest, ...grpc.CallOption) (*rpcpb.GetJoinRequestStatusResponse, error) {
 	return &rpcpb.GetJoinRequestStatusResponse{}, nil
 }
