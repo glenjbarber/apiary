@@ -37,6 +37,7 @@ type FSMApplyResult struct {
 	ColonyUpdate       *internalpb.ColonyUpdate
 	ColonyJoinWindow   *internalpb.ColonyJoinWindow
 	TrustedPeer        *internalpb.TrustedPeer
+	ColonyDiskSize     *internalpb.ColonyDiskSize
 	Error              string
 }
 
@@ -75,6 +76,15 @@ type FSM struct {
 	// "closed" to every caller - see internal/raft/colonyjoinwindow.go,
 	// which owns the semantics and the reasoning.
 	colonyJoinWindow *internalpb.ColonyJoinWindow
+
+	// colonyDiskSize is ADR-0148's single Colony-wide VM disk-size
+	// floor. nil until one is first set, which is NOT the same as a
+	// floor of zero: there is exactly one way to express "no floor
+	// recorded", and it is the absence of any SetColonyDiskSize in the
+	// log - which is why the apply function refuses floor_mb == 0
+	// rather than reading it as unset. See
+	// internal/raft/colonydisksize.go.
+	colonyDiskSize *internalpb.ColonyDiskSize
 
 	// trustedPeers is ADR-0147 Part 4's replicated peer trust store,
 	// keyed by TrustedPeer.node_id. Replicated for the same reason
@@ -230,6 +240,12 @@ func (f *FSM) Apply(log *raft.Log) interface{} {
 		return f.applySetTrustedPeerVoter(log.Index, op.SetTrustedPeerVoter)
 	case *internalpb.Command_UnpinTrustedPeer:
 		return f.applyUnpinTrustedPeer(log.Index, op.UnpinTrustedPeer)
+	case *internalpb.Command_SetColonyDiskSize:
+		// ADR-0148. The monotonicity check is inside the apply
+		// function, not in any handler, so every replica decides
+		// "never reduced" from the same committed log rather than
+		// being told - see internal/raft/colonydisksize.go.
+		return f.applySetColonyDiskSize(log.Index, op.SetColonyDiskSize)
 	default:
 		return &FSMApplyResult{Index: log.Index, Error: "command has no op set"}
 	}
@@ -290,6 +306,12 @@ func (f *FSM) applyCreateVM(index uint64, vm *internalpb.VMDefinition) *FSMApply
 	}
 
 	vm = proto.Clone(vm).(*internalpb.VMDefinition)
+	// ADR-0148: a per-VM disk_size_mb is an OVERRIDE of the Colony
+	// floor, so it may only go above it. Checked on the clone, so the
+	// caller's own message is never touched on the refusal path.
+	if res := f.checkPerVMDiskSize("CreateVM", vm.GetId(), vm.GetDiskSizeMb(), 0); res != nil {
+		return &FSMApplyResult{Index: index, Error: res.Error}
+	}
 	// MacAddress is derived for every VM, not just ones naming a
 	// NetworkDefinition - a flat-bridge VM (no network_id) previously
 	// got whatever random MAC bhyve's own virtio-net device generated,
@@ -393,6 +415,16 @@ func (f *FSM) applyUpdateVM(index uint64, vm *internalpb.VMDefinition) *FSMApply
 	}
 	if vm.GetCloneFromSnapshot() != "" && !validSnapshotRef(vm.GetCloneFromSnapshot()) {
 		return &FSMApplyResult{Index: index, Error: fmt.Sprintf("UpdateVM: invalid clone_from_snapshot %q: must be \"sourceid@snapshotname\" using only alphanumerics, '-', and '_'", vm.GetCloneFromSnapshot())}
+	}
+	// ADR-0148: UpdateVM is a FULL-RECORD REPLACE, so the per-VM floor
+	// check is deliberately narrow - it applies only to a disk_size_mb
+	// that DIFFERS from what the record already holds. Carrying an
+	// existing value forward is not a new request, and refusing it
+	// would make every VM whose size the Colony floor has since risen
+	// past un-updatable for a reason that has nothing to do with what
+	// was being updated.
+	if res := f.checkPerVMDiskSize("UpdateVM", vm.GetId(), vm.GetDiskSizeMb(), f.vms[vm.GetId()].GetDiskSizeMb()); res != nil {
+		return &FSMApplyResult{Index: index, Error: res.Error}
 	}
 	f.vms[vm.GetId()] = vm
 	return &FSMApplyResult{Index: index, VM: vm}
@@ -2046,6 +2078,11 @@ func (f *FSM) snapshotStateLocked() *internalpb.FSMSnapshotState {
 		ColonyJoinWindow:    cloneColonyJoinWindow(f.colonyJoinWindow),
 		AuthEnabled:         f.authEnabled,
 		TrustedPeers:        make(map[string]*internalpb.TrustedPeer, len(f.trustedPeers)),
+		// ADR-0148: the floor rides inside FSMSnapshotState so it is
+		// inside the ADR-0143 digest with no second list to forget, and
+		// so a restore cannot silently drop it and re-open this Colony
+		// to a lower default on whichever voter restored last.
+		ColonyDiskSize: cloneColonyDiskSize(f.colonyDiskSize),
 	}
 	for id, vm := range f.vms {
 		state.Vms[id] = vm
@@ -2126,6 +2163,10 @@ func (f *FSM) Restore(rc io.ReadCloser) error {
 		f.colonyUpdates = make(map[string]*internalpb.ColonyUpdate)
 	}
 	f.colonyJoinWindow = cloneColonyJoinWindow(state.GetColonyJoinWindow())
+	// ADR-0148. A nil here means the snapshot being restored predates
+	// the floor, which is the only honest reading: absence is the sole
+	// representation of "unset", so this does not invent a zero floor.
+	f.colonyDiskSize = cloneColonyDiskSize(state.GetColonyDiskSize())
 	f.trustedPeers = state.GetTrustedPeers()
 	if f.trustedPeers == nil {
 		f.trustedPeers = make(map[string]*internalpb.TrustedPeer)
