@@ -2,7 +2,6 @@
 // socket its raftd.json names, for the root-run tools that need to ask
 // the local raft a question while holding an incident.
 //
-// Two commands need exactly this and neither of them is raftd.
 // `apiaryctl force-restart` has to know whether this Comb is the
 // Colony's current leader before it restarts anything on it, and
 // `apiaryctl join-authorize` reads the same fact to warn that an
@@ -12,6 +11,11 @@
 // to disagree about which socket this Comb has, and a disagreement
 // there is not a crash: the wrong socket is a wrong Colony's answer,
 // read as confidently as the right one.
+//
+// `apiaryctl pin-trusted-peers` resolves the same socket and calls one
+// other read-only RPC, ListTrustedPeersLocal, for the reason its own
+// file states: there is no external RPC that lists the trust store, and
+// a root-run tool on a Comb should not need one to be written.
 //
 // The dependency is kept one level down deliberately. This package
 // imports internal/raft only for TokenCredentials, so a small operator
@@ -32,6 +36,7 @@ import (
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/protobuf/proto"
 
 	internalpb "github.com/glenjbarber/apiary/api/internalpb"
 	raftnode "github.com/glenjbarber/apiary/internal/raft"
@@ -120,6 +125,45 @@ type Status struct {
 	// cannot see a leader it is empty, and that is reported as what it
 	// is rather than as an error.
 	LeaderID string
+}
+
+// ListTrustedPeers returns ADR-0147 Part 4's replicated trust store as
+// this Comb's own raftd currently holds it, keyed by node ID.
+//
+// A read, like everything else here, and for the same reason
+// `apiaryctl pin-trusted-peers` cannot use the external API for it:
+// there is no ManagerService RPC that lists trusted peers at all, and
+// adding one would be adding a read of replicated state to the public
+// surface to serve a command that already has a root-owned socket on
+// the machine the read is about.
+//
+// The map is a copy, not the wire message's own map, and every
+// TrustedPeer in it is cloned, because a caller that mutates what it
+// got back would be editing raftd's snapshot of itself without a log
+// entry - which is the one thing the replicated store exists to
+// prevent. Sorted is raftd's own ordering and is not re-sorted here.
+func ListTrustedPeers(ctx context.Context, configPath string) (map[string]*internalpb.TrustedPeer, error) {
+	conn, err := Dial(configPath)
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close()
+
+	resp, err := internalpb.NewRaftInternalClient(conn).ListTrustedPeersLocal(ctx, &internalpb.ListTrustedPeersRequest{})
+	if err != nil {
+		return nil, fmt.Errorf("asking raftd for its trusted peers: %w", err)
+	}
+	peers := make(map[string]*internalpb.TrustedPeer, len(resp.GetPeers()))
+	for _, peer := range resp.GetPeers() {
+		if peer.GetNodeId() == "" {
+			// A record with no key is not in the store, whatever else
+			// it says, and silently dropping it here would hide a
+			// store this code cannot reason about.
+			return nil, fmt.Errorf("raftd returned a trusted peer with no node_id, so this Comb's trust store cannot be read as a set of members")
+		}
+		peers[peer.GetNodeId()] = proto.Clone(peer).(*internalpb.TrustedPeer)
+	}
+	return peers, nil
 }
 
 // Query asks this Comb's own raftd about itself over the local socket

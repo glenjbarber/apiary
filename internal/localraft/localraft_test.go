@@ -57,9 +57,26 @@ type stubRaftd struct {
 	// -internal-token is not used.
 	wantToken string
 
+	// peers is what ListTrustedPeersLocal answers with, held as the
+	// caller built them so a test can assert that what came back is a
+	// copy rather than the same object.
+	peers []*internalpb.TrustedPeer
+
 	mu       sync.Mutex
 	sawAuth  []string
 	callsFor int
+}
+
+// ListTrustedPeersLocal is the second RPC this package calls. It
+// returns s.peers itself rather than a clone on purpose: the caller is
+// supposed to clone what it gets, and a test that can prove it did
+// needs the server to still be holding the originals afterwards.
+func (s *stubRaftd) ListTrustedPeersLocal(ctx context.Context, _ *internalpb.ListTrustedPeersRequest) (*internalpb.ListTrustedPeersResponse, error) {
+	md, _ := metadata.FromIncomingContext(ctx)
+	s.mu.Lock()
+	s.sawAuth = append(s.sawAuth, strings.Join(md.Get("authorization"), ","))
+	s.mu.Unlock()
+	return &internalpb.ListTrustedPeersResponse{Peers: s.peers}, nil
 }
 
 func (s *stubRaftd) Status(ctx context.Context, _ *internalpb.StatusRequest) (*internalpb.StatusResponse, error) {
@@ -297,5 +314,119 @@ func TestDial_UnreadableConfigIsRefusedAndNamesThePath(t *testing.T) {
 				t.Errorf("error %q does not name the config path %q", err, path)
 			}
 		})
+	}
+}
+
+// ---------------------------------------------------------------------
+// ListTrustedPeers, the read apiaryctl pin-trusted-peers makes
+// ---------------------------------------------------------------------
+
+// There is no external RPC that lists the trust store, so this read is
+// the only way `apiaryctl pin-trusted-peers` can find out what a member
+// is already pinned to before it pins anything. The mapping it depends
+// on - every peer's node_id becoming its key - is checked here against a
+// real socket, because a key built from the wrong field would return an
+// empty map and look exactly like a Colony that has pinned nothing.
+func TestListTrustedPeers_KeysEveryPeerByItsNodeID(t *testing.T) {
+	s := &stubRaftd{peers: []*internalpb.TrustedPeer{
+		{NodeId: "brood.lab3.home.arpa", Fingerprint: "SHA256:AA"},
+		{NodeId: "drone.lab3.home.arpa", Fingerprint: "SHA256:BB"},
+	}}
+	raftdJSON, stop := serve(t, s)
+	defer stop()
+
+	peers, err := localraft.ListTrustedPeers(ctxWithTimeout(t), raftdJSON)
+	if err != nil {
+		t.Fatalf("ListTrustedPeers: %v", err)
+	}
+	if len(peers) != 2 {
+		t.Fatalf("got %d peers; want 2", len(peers))
+	}
+	if got := peers["brood.lab3.home.arpa"].GetFingerprint(); got != "SHA256:AA" {
+		t.Errorf("brood's fingerprint is %q; want the one the server sent", got)
+	}
+	if got := peers["drone.lab3.home.arpa"].GetFingerprint(); got != "SHA256:BB" {
+		t.Errorf("drone's fingerprint is %q; want the one the server sent", got)
+	}
+}
+
+// The map is a copy and the records in it are clones. A caller that
+// mutated what it got back would be editing raftd's snapshot of itself
+// with no log entry behind the change, which is the one thing a
+// replicated trust store exists to make impossible.
+func TestListTrustedPeers_ClonesWhatItReturns(t *testing.T) {
+	original := &internalpb.TrustedPeer{NodeId: "brood.lab3.home.arpa", Fingerprint: "SHA256:AA"}
+	s := &stubRaftd{peers: []*internalpb.TrustedPeer{original}}
+	raftdJSON, stop := serve(t, s)
+	defer stop()
+
+	peers, err := localraft.ListTrustedPeers(ctxWithTimeout(t), raftdJSON)
+	if err != nil {
+		t.Fatalf("ListTrustedPeers: %v", err)
+	}
+	peers["brood.lab3.home.arpa"].Fingerprint = "SHA256:EE"
+	if original.GetFingerprint() != "SHA256:AA" {
+		t.Errorf("mutating the returned record changed what the server is holding: %q", original.GetFingerprint())
+	}
+}
+
+// A record with no node_id is not a member, and dropping it silently
+// would turn a store this code cannot reason about into an empty map -
+// which reads as "nothing is pinned" and invites a second run that the
+// FSM would then refuse.
+func TestListTrustedPeers_RefusesAPeerWithNoNodeID(t *testing.T) {
+	s := &stubRaftd{peers: []*internalpb.TrustedPeer{
+		{NodeId: "brood.lab3.home.arpa"},
+		{Fingerprint: "SHA256:BB"},
+	}}
+	raftdJSON, stop := serve(t, s)
+	defer stop()
+
+	peers, err := localraft.ListTrustedPeers(ctxWithTimeout(t), raftdJSON)
+	if err == nil {
+		t.Fatalf("a peer with no node_id was accepted; got %v", peers)
+	}
+	if !strings.Contains(err.Error(), "node_id") {
+		t.Errorf("the refusal does not say what was wrong with the record: %v", err)
+	}
+	if peers != nil {
+		t.Errorf("a refused read returned %d peers alongside its error; it must return none", len(peers))
+	}
+}
+
+// An empty store is an answer, not a failure: it is precisely the state
+// `apiaryctl pin-trusted-peers` exists to serve.
+func TestListTrustedPeers_AnEmptyStoreIsNotAnError(t *testing.T) {
+	s := &stubRaftd{}
+	raftdJSON, stop := serve(t, s)
+	defer stop()
+
+	peers, err := localraft.ListTrustedPeers(ctxWithTimeout(t), raftdJSON)
+	if err != nil {
+		t.Fatalf("an empty store was refused: %v", err)
+	}
+	if len(peers) != 0 {
+		t.Errorf("got %d peers from an empty store", len(peers))
+	}
+}
+
+// The read is presented to the same raftd, over the same socket, with
+// the same token as the status read - one client, one credential, one
+// place where a Comb can disagree with itself about which raftd it is
+// talking to.
+func TestListTrustedPeers_PresentsTheInternalToken(t *testing.T) {
+	stub := &stubRaftd{wantToken: testToken, peers: []*internalpb.TrustedPeer{
+		{NodeId: "brood.lab3.home.arpa"},
+	}}
+	raftdJSON, stop := serve(t, stub)
+	defer stop()
+
+	if _, err := localraft.ListTrustedPeers(ctxWithTimeout(t), raftdJSON); err != nil {
+		t.Fatalf("ListTrustedPeers with the right token: %v", err)
+	}
+	stub.mu.Lock()
+	defer stub.mu.Unlock()
+	if len(stub.sawAuth) != 1 || stub.sawAuth[0] != "Bearer "+testToken {
+		t.Errorf("authorization metadata seen = %q, want exactly one call carrying %q", stub.sawAuth, "Bearer "+testToken)
 	}
 }

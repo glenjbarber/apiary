@@ -15,11 +15,11 @@
 // other side - managerd must never restart itself - is why this cannot
 // be folded into managerd either.
 //
-// SCOPE, deliberately narrow. Four subcommands, force-restart, install,
-// join-authorize and join-introduce, and no socket, no terminal UI, and
-// no command group that has not been asked for: a command that is present and wrong
-// is worse than one that is absent, and the larger design in ADR-0136
-// stays proposed until it is built.
+// SCOPE, deliberately narrow. Five subcommands, force-restart, install,
+// join-authorize, join-introduce and pin-trusted-peers, and no socket, no
+// terminal UI, and no command group that has not been asked for: a command
+// that is present and wrong is worse than one that is absent, and the larger
+// design in ADR-0136 stays proposed until it is built.
 //
 // install is the second, and it exists for the same reason force-restart
 // does: both are things an operator has to type on a Comb that has no
@@ -28,12 +28,19 @@
 // something that can be typed on a machine where the only Apiary files
 // are the installed binaries. See ADR-0147 Part 1.
 //
+// pin-trusted-peers is the fifth and is also from ADR-0147, for the same
+// reason: a Colony built before the replicated peer trust store has members
+// with no pins in it and no other way to get them. See
+// cmd/apiaryctl/pintrustedpeers.go, which states the four refusals it is
+// built around.
+//
 // Usage:
 //
 //	apiaryctl install [--apply]
 //	apiaryctl join-authorize --node-id ID --fingerprint FP
 //	apiaryctl join-introduce --target HOST:PORT
 //	apiaryctl force-restart
+//	apiaryctl pin-trusted-peers --target HOST:PORT --bundle FILE
 //	apiaryctl help
 package main
 
@@ -64,6 +71,13 @@ Usage:
                             Refuses to run on the Colony's current
                             leader, and on a Comb whose leadership it
                             cannot determine
+  apiaryctl pin-trusted-peers
+                            backfill the replicated peer trust store on a
+                            Colony built before it had one, by pinning
+                            each member's own serving certificate.
+                            Root only, run on a member of the Colony,
+                            and every input is checked before the
+                            first pin is sent
   apiaryctl -version        report this binary's build identity
   apiaryctl help            this message
 
@@ -79,6 +93,13 @@ unanswered question is not a permission.
 join-authorize is root-only because the store it writes is root-owned,
 and that ownership is the security property rather than an incidental
 detail: it is the one thing an Admin of this Colony cannot do.
+
+pin-trusted-peers is root-only for the same reason it reads this Comb's
+own raftd socket, which is 0660 inside a 0700 directory, and because
+writing the Colony's trust anchors is an operation an Admin of the
+Colony is not the one who should be doing unattended. It pins
+certificates and never adds, removes or alters raft membership: a
+Comb's voter state is raft's configuration, not this command's business.
 
 install is root-only with --apply and needs no privileges without it.
 It never overwrites a field that is already set, and a run that refuses
@@ -112,6 +133,8 @@ func main() {
 		os.Exit(runJoinIntroduce(args[1:]))
 	case "force-restart":
 		os.Exit(runForceRestart(args[1:]))
+	case "pin-trusted-peers":
+		os.Exit(runPinTrustedPeers(args[1:]))
 	case "help", "-h", "--help":
 		fmt.Print(usage)
 		os.Exit(0)
