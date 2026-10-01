@@ -175,6 +175,25 @@ message VMDefinition {
   // The fence therefore fails OPEN on absence and is instead kept
   // honest by migrations_by_guest, which outlives the record itself.
   bool migration_fenced = 21;
+
+  // disk_size_mb is ADR-0148's per-VM override of the Colony-wide
+  // disk-size floor, in MiB. Zero means "no override": a VM that says
+  // nothing about its size gets the Colony floor, which is what makes
+  // a VM created before this field existed keep working untouched.
+  //
+  // It is recorded here rather than resolved at call time for the same
+  // reason ip_address and mac_address are assigned by the FSM: if the
+  // size lived only in a caller or a reconciler's memory, two Combs
+  // reconciling the same log entry would disagree about how big the
+  // disk is, and every disk a VM has was created at.
+  //
+  // A non-zero value below the Colony floor is REFUSED at apply time,
+  // so the floor is a floor rather than a recommendation. On
+  // UpdateVM - a full-record replace - the check applies only to a
+  // value that DIFFERS from what the record already holds, so raising
+  // the Colony floor does not make every older VM un-updatable for an
+  // unrelated reason. See applyUpdateVM's own comment.
+  uint64 disk_size_mb = 22;
 }
 
 // JailState is the desired run state of a jail, mirroring VMState.
@@ -587,7 +606,67 @@ message Command {
     VerifyJoinIntroduction verify_join_introduction = 42;
     ReissueJoinSecondPin reissue_join_second_pin = 43;
     ConsumeJoinSecondPin consume_join_second_pin = 44;
+
+    // SetColonyDiskSize is ADR-0148's Colony-wide VM disk-size floor.
+    // Replicated rather than a per-node config for exactly the reason
+    // OpenColonyJoinWindow above is: a floor held in one managerd's
+    // JSON file is a number every Comb can disagree about, and two
+    // Combs sizing the SAME VMDefinition's disk differently is the one
+    // thing this architecture forbids outright. The monotonicity
+    // check lives in the apply function, not in any handler, so
+    // "never reduced" is decided identically on every replica from the
+    // same log rather than asked for by one process - see
+    // internal/raft/colonydisksize.go.
+    SetColonyDiskSize set_colony_disk_size = 45;
   }
+}
+
+// ColonyDiskSize is ADR-0148's Colony-wide, Raft-replicated VM
+// disk-size floor: the minimum size, in MiB, every VM disk image in
+// this Colony is created at.
+//
+// There is exactly one of these per Colony. "No floor recorded" is the
+// ABSENCE of any SetColonyDiskSize entry in the log - the same shape
+// ColonyJoinWindow uses, where "never opened" and "closed" are the
+// same case for every caller - which is why a zero floor_mb is refused
+// rather than treated as unset.
+message ColonyDiskSize {
+  // floor_mb is the minimum, in MiB, at which any VM disk image is
+  // created. Never reduced once raised: the apply function refuses
+  // any value below what state already holds, by name.
+  uint64 floor_mb = 1;
+
+  // set_by is the node ID of the member the raise was submitted
+  // through, set_by_key the API key ID of the Admin who did it, and
+  // set_at_unix the leader's clock at the moment it was applied. All
+  // three are replicated so "who raised this and when" survives the
+  // managerd that was asked, exactly as the join window's own
+  // opened_by does.
+  string set_by     = 2;
+  string set_by_key = 3;
+  int64  set_at_unix = 4;
+}
+
+// SetColonyDiskSize raises the Colony-wide floor. It is the ONLY way
+// the floor is ever changed, and it can only ever move upward.
+//
+// floor_mb must be strictly positive and strictly greater than any
+// floor already in state. Both refusals name the two numbers rather
+// than clamping, because a clamp would silently override operator
+// intent and make the log lie about what was submitted - see
+// applySetColonyDiskSize for the full reasoning.
+message SetColonyDiskSize {
+  // set_by / set_by_key identify the member and the Admin; both are
+  // recorded so the audit trail is replicated, not local.
+  string set_by     = 1;
+  string set_by_key = 2;
+
+  // floor_mb is the requested new floor, in MiB. Must be > 0 and must
+  // exceed the floor already in state.
+  uint64 floor_mb = 3;
+
+  // now_unix is the leader's clock at the moment of the decision.
+  int64 now_unix = 4;
 }
 
 // ApiKey is a cluster-wide credential for ManagerService's external
@@ -2014,6 +2093,18 @@ message FSMSnapshotState {
   // descriptor, so it picks the new map up with no second list to
   // forget.
   map<string, TrustedPeer> trusted_peers = 15;
+
+  // colony_disk_size is ADR-0148's Colony-wide VM disk-size floor. A
+  // message rather than a map entry because there is exactly one per
+  // Colony, and a map keyed by a constant would invite a second
+  // writer. Included here so a raft snapshot restore or a seeded
+  // recovery via raftd -restore never silently drops it: a dropped
+  // floor would re-open this Colony to a lower default on whichever
+  // voter restored last, which is precisely the guarantee this state
+  // exists to provide. The digest (ADR-0143) is derived from this
+  // message's own descriptor, so it picks the field up with no second
+  // list to forget.
+  ColonyDiskSize colony_disk_size = 16;
 }
 
 // ConfigArchive is the on-disk file format for raftd's -export/

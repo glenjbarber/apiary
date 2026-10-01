@@ -2279,6 +2279,94 @@ func (x *GetColonyJoinWindowResponse) GetLive() bool {
 	return false
 }
 
+// GetColonyDiskSizeRequest is deliberately empty: there is one floor
+// per Colony, so there is nothing to select. A message rather than an
+// existing request type is kept because every ...Local RPC here takes
+// exactly one.
+type GetColonyDiskSizeRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetColonyDiskSizeRequest) Reset() {
+	*x = GetColonyDiskSizeRequest{}
+	mi := &file_api_internalpb_raftd_proto_msgTypes[39]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetColonyDiskSizeRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetColonyDiskSizeRequest) ProtoMessage() {}
+
+func (x *GetColonyDiskSizeRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_api_internalpb_raftd_proto_msgTypes[39]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetColonyDiskSizeRequest.ProtoReflect.Descriptor instead.
+func (*GetColonyDiskSizeRequest) Descriptor() ([]byte, []int) {
+	return file_api_internalpb_raftd_proto_rawDescGZIP(), []int{39}
+}
+
+// GetColonyDiskSizeResponse carries this node's OWN replicated copy of
+// the floor. A nil colony_disk_size means this Colony has never had a
+// SetColonyDiskSize applied - which is not the same as a floor of
+// zero, and is deliberately representable as absence.
+type GetColonyDiskSizeResponse struct {
+	state          protoimpl.MessageState `protogen:"open.v1"`
+	ColonyDiskSize *ColonyDiskSize        `protobuf:"bytes,1,opt,name=colony_disk_size,json=colonyDiskSize,proto3" json:"colony_disk_size,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
+}
+
+func (x *GetColonyDiskSizeResponse) Reset() {
+	*x = GetColonyDiskSizeResponse{}
+	mi := &file_api_internalpb_raftd_proto_msgTypes[40]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetColonyDiskSizeResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetColonyDiskSizeResponse) ProtoMessage() {}
+
+func (x *GetColonyDiskSizeResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_api_internalpb_raftd_proto_msgTypes[40]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetColonyDiskSizeResponse.ProtoReflect.Descriptor instead.
+func (*GetColonyDiskSizeResponse) Descriptor() ([]byte, []int) {
+	return file_api_internalpb_raftd_proto_rawDescGZIP(), []int{40}
+}
+
+func (x *GetColonyDiskSizeResponse) GetColonyDiskSize() *ColonyDiskSize {
+	if x != nil {
+		return x.ColonyDiskSize
+	}
+	return nil
+}
+
 // ListTrustedPeersRequest is deliberately empty. There is no filter and
 // no pagination: the store holds one entry per Comb this Colony has
 // ever pinned, which is a small number bounded by the size of the
@@ -2291,7 +2379,7 @@ type ListTrustedPeersRequest struct {
 
 func (x *ListTrustedPeersRequest) Reset() {
 	*x = ListTrustedPeersRequest{}
-	mi := &file_api_internalpb_raftd_proto_msgTypes[39]
+	mi := &file_api_internalpb_raftd_proto_msgTypes[41]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2303,7 +2391,7 @@ func (x *ListTrustedPeersRequest) String() string {
 func (*ListTrustedPeersRequest) ProtoMessage() {}
 
 func (x *ListTrustedPeersRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_api_internalpb_raftd_proto_msgTypes[39]
+	mi := &file_api_internalpb_raftd_proto_msgTypes[41]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2316,7 +2404,7 @@ func (x *ListTrustedPeersRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListTrustedPeersRequest.ProtoReflect.Descriptor instead.
 func (*ListTrustedPeersRequest) Descriptor() ([]byte, []int) {
-	return file_api_internalpb_raftd_proto_rawDescGZIP(), []int{39}
+	return file_api_internalpb_raftd_proto_rawDescGZIP(), []int{41}
 }
 
 type ListTrustedPeersResponse struct {
@@ -2332,7 +2420,7 @@ type ListTrustedPeersResponse struct {
 
 func (x *ListTrustedPeersResponse) Reset() {
 	*x = ListTrustedPeersResponse{}
-	mi := &file_api_internalpb_raftd_proto_msgTypes[40]
+	mi := &file_api_internalpb_raftd_proto_msgTypes[42]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2344,7 +2432,7 @@ func (x *ListTrustedPeersResponse) String() string {
 func (*ListTrustedPeersResponse) ProtoMessage() {}
 
 func (x *ListTrustedPeersResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_api_internalpb_raftd_proto_msgTypes[40]
+	mi := &file_api_internalpb_raftd_proto_msgTypes[42]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2357,7 +2445,7 @@ func (x *ListTrustedPeersResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListTrustedPeersResponse.ProtoReflect.Descriptor instead.
 func (*ListTrustedPeersResponse) Descriptor() ([]byte, []int) {
-	return file_api_internalpb_raftd_proto_rawDescGZIP(), []int{40}
+	return file_api_internalpb_raftd_proto_rawDescGZIP(), []int{42}
 }
 
 func (x *ListTrustedPeersResponse) GetPeers() []*TrustedPeer {
@@ -2379,7 +2467,7 @@ type GetAuthorizationUseRequest struct {
 
 func (x *GetAuthorizationUseRequest) Reset() {
 	*x = GetAuthorizationUseRequest{}
-	mi := &file_api_internalpb_raftd_proto_msgTypes[41]
+	mi := &file_api_internalpb_raftd_proto_msgTypes[43]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2391,7 +2479,7 @@ func (x *GetAuthorizationUseRequest) String() string {
 func (*GetAuthorizationUseRequest) ProtoMessage() {}
 
 func (x *GetAuthorizationUseRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_api_internalpb_raftd_proto_msgTypes[41]
+	mi := &file_api_internalpb_raftd_proto_msgTypes[43]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2404,7 +2492,7 @@ func (x *GetAuthorizationUseRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetAuthorizationUseRequest.ProtoReflect.Descriptor instead.
 func (*GetAuthorizationUseRequest) Descriptor() ([]byte, []int) {
-	return file_api_internalpb_raftd_proto_rawDescGZIP(), []int{41}
+	return file_api_internalpb_raftd_proto_rawDescGZIP(), []int{43}
 }
 
 func (x *GetAuthorizationUseRequest) GetAuthorizationId() string {
@@ -2434,7 +2522,7 @@ type GetAuthorizationUseResponse struct {
 
 func (x *GetAuthorizationUseResponse) Reset() {
 	*x = GetAuthorizationUseResponse{}
-	mi := &file_api_internalpb_raftd_proto_msgTypes[42]
+	mi := &file_api_internalpb_raftd_proto_msgTypes[44]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2446,7 +2534,7 @@ func (x *GetAuthorizationUseResponse) String() string {
 func (*GetAuthorizationUseResponse) ProtoMessage() {}
 
 func (x *GetAuthorizationUseResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_api_internalpb_raftd_proto_msgTypes[42]
+	mi := &file_api_internalpb_raftd_proto_msgTypes[44]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2459,7 +2547,7 @@ func (x *GetAuthorizationUseResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetAuthorizationUseResponse.ProtoReflect.Descriptor instead.
 func (*GetAuthorizationUseResponse) Descriptor() ([]byte, []int) {
-	return file_api_internalpb_raftd_proto_rawDescGZIP(), []int{42}
+	return file_api_internalpb_raftd_proto_rawDescGZIP(), []int{44}
 }
 
 func (x *GetAuthorizationUseResponse) GetFound() bool {
@@ -2653,7 +2741,10 @@ const file_api_internalpb_raftd_proto_rawDesc = "" +
 	"\x1aGetColonyJoinWindowRequest\"o\n" +
 	"\x1bGetColonyJoinWindowResponse\x12<\n" +
 	"\x06window\x18\x01 \x01(\v2$.apiary.internal.v1.ColonyJoinWindowR\x06window\x12\x12\n" +
-	"\x04live\x18\x02 \x01(\bR\x04live\"\x19\n" +
+	"\x04live\x18\x02 \x01(\bR\x04live\"\x1a\n" +
+	"\x18GetColonyDiskSizeRequest\"i\n" +
+	"\x19GetColonyDiskSizeResponse\x12L\n" +
+	"\x10colony_disk_size\x18\x01 \x01(\v2\".apiary.internal.v1.ColonyDiskSizeR\x0ecolonyDiskSize\"\x19\n" +
 	"\x17ListTrustedPeersRequest\"Q\n" +
 	"\x18ListTrustedPeersResponse\x125\n" +
 	"\x05peers\x18\x01 \x03(\v2\x1f.apiary.internal.v1.TrustedPeerR\x05peers\"G\n" +
@@ -2666,7 +2757,7 @@ const file_api_internalpb_raftd_proto_rawDesc = "" +
 	"\x10consumed_at_unix\x18\x03 \x01(\x03R\x0econsumedAtUnix\x12\x14\n" +
 	"\x05error\x18\x04 \x01(\tR\x05error\x12\x1f\n" +
 	"\vleader_hint\x18\x05 \x01(\tR\n" +
-	"leaderHint2\xc0\x13\n" +
+	"leaderHint2\xb7\x14\n" +
 	"\fRaftInternal\x12L\n" +
 	"\x05Apply\x12 .apiary.internal.v1.ApplyRequest\x1a!.apiary.internal.v1.ApplyResponse\x12O\n" +
 	"\x06Status\x12!.apiary.internal.v1.StatusRequest\x1a\".apiary.internal.v1.StatusResponse\x12U\n" +
@@ -2688,7 +2779,8 @@ const file_api_internalpb_raftd_proto_rawDesc = "" +
 	"\x1aGetPendingJoinRequestLocal\x120.apiary.internal.v1.GetPendingJoinRequestRequest\x1a1.apiary.internal.v1.GetPendingJoinRequestResponse\x12\x87\x01\n" +
 	"\x1cListPendingJoinRequestsLocal\x122.apiary.internal.v1.ListPendingJoinRequestsRequest\x1a3.apiary.internal.v1.ListPendingJoinRequestsResponse\x12~\n" +
 	"\x19GetRestartLeaseStateLocal\x12/.apiary.internal.v1.GetRestartLeaseStateRequest\x1a0.apiary.internal.v1.GetRestartLeaseStateResponse\x12{\n" +
-	"\x18GetColonyJoinWindowLocal\x12..apiary.internal.v1.GetColonyJoinWindowRequest\x1a/.apiary.internal.v1.GetColonyJoinWindowResponse\x12r\n" +
+	"\x18GetColonyJoinWindowLocal\x12..apiary.internal.v1.GetColonyJoinWindowRequest\x1a/.apiary.internal.v1.GetColonyJoinWindowResponse\x12u\n" +
+	"\x16GetColonyDiskSizeLocal\x12,.apiary.internal.v1.GetColonyDiskSizeRequest\x1a-.apiary.internal.v1.GetColonyDiskSizeResponse\x12r\n" +
 	"\x15ListTrustedPeersLocal\x12+.apiary.internal.v1.ListTrustedPeersRequest\x1a,.apiary.internal.v1.ListTrustedPeersResponse\x12v\n" +
 	"\x13GetAuthorizationUse\x12..apiary.internal.v1.GetAuthorizationUseRequest\x1a/.apiary.internal.v1.GetAuthorizationUseResponse\x12~\n" +
 	"\x19GetColonyUpdateStateLocal\x12/.apiary.internal.v1.GetColonyUpdateStateRequest\x1a0.apiary.internal.v1.GetColonyUpdateStateResponse\x12{\n" +
@@ -2706,7 +2798,7 @@ func file_api_internalpb_raftd_proto_rawDescGZIP() []byte {
 	return file_api_internalpb_raftd_proto_rawDescData
 }
 
-var file_api_internalpb_raftd_proto_msgTypes = make([]protoimpl.MessageInfo, 43)
+var file_api_internalpb_raftd_proto_msgTypes = make([]protoimpl.MessageInfo, 45)
 var file_api_internalpb_raftd_proto_goTypes = []any{
 	(*ApplyRequest)(nil),                    // 0: apiary.internal.v1.ApplyRequest
 	(*ApplyResponse)(nil),                   // 1: apiary.internal.v1.ApplyResponse
@@ -2747,91 +2839,97 @@ var file_api_internalpb_raftd_proto_goTypes = []any{
 	(*ExportStateResponse)(nil),             // 36: apiary.internal.v1.ExportStateResponse
 	(*GetColonyJoinWindowRequest)(nil),      // 37: apiary.internal.v1.GetColonyJoinWindowRequest
 	(*GetColonyJoinWindowResponse)(nil),     // 38: apiary.internal.v1.GetColonyJoinWindowResponse
-	(*ListTrustedPeersRequest)(nil),         // 39: apiary.internal.v1.ListTrustedPeersRequest
-	(*ListTrustedPeersResponse)(nil),        // 40: apiary.internal.v1.ListTrustedPeersResponse
-	(*GetAuthorizationUseRequest)(nil),      // 41: apiary.internal.v1.GetAuthorizationUseRequest
-	(*GetAuthorizationUseResponse)(nil),     // 42: apiary.internal.v1.GetAuthorizationUseResponse
-	(*VMDefinition)(nil),                    // 43: apiary.internal.v1.VMDefinition
-	(*NetworkDefinition)(nil),               // 44: apiary.internal.v1.NetworkDefinition
-	(*PendingJoinRequest)(nil),              // 45: apiary.internal.v1.PendingJoinRequest
-	(*RestartLease)(nil),                    // 46: apiary.internal.v1.RestartLease
-	(*RestartRecord)(nil),                   // 47: apiary.internal.v1.RestartRecord
-	(*ColonyUpdate)(nil),                    // 48: apiary.internal.v1.ColonyUpdate
-	(*JailDefinition)(nil),                  // 49: apiary.internal.v1.JailDefinition
-	(*ApiKey)(nil),                          // 50: apiary.internal.v1.ApiKey
-	(*ColonyJoinWindow)(nil),                // 51: apiary.internal.v1.ColonyJoinWindow
-	(*TrustedPeer)(nil),                     // 52: apiary.internal.v1.TrustedPeer
+	(*GetColonyDiskSizeRequest)(nil),        // 39: apiary.internal.v1.GetColonyDiskSizeRequest
+	(*GetColonyDiskSizeResponse)(nil),       // 40: apiary.internal.v1.GetColonyDiskSizeResponse
+	(*ListTrustedPeersRequest)(nil),         // 41: apiary.internal.v1.ListTrustedPeersRequest
+	(*ListTrustedPeersResponse)(nil),        // 42: apiary.internal.v1.ListTrustedPeersResponse
+	(*GetAuthorizationUseRequest)(nil),      // 43: apiary.internal.v1.GetAuthorizationUseRequest
+	(*GetAuthorizationUseResponse)(nil),     // 44: apiary.internal.v1.GetAuthorizationUseResponse
+	(*VMDefinition)(nil),                    // 45: apiary.internal.v1.VMDefinition
+	(*NetworkDefinition)(nil),               // 46: apiary.internal.v1.NetworkDefinition
+	(*PendingJoinRequest)(nil),              // 47: apiary.internal.v1.PendingJoinRequest
+	(*RestartLease)(nil),                    // 48: apiary.internal.v1.RestartLease
+	(*RestartRecord)(nil),                   // 49: apiary.internal.v1.RestartRecord
+	(*ColonyUpdate)(nil),                    // 50: apiary.internal.v1.ColonyUpdate
+	(*JailDefinition)(nil),                  // 51: apiary.internal.v1.JailDefinition
+	(*ApiKey)(nil),                          // 52: apiary.internal.v1.ApiKey
+	(*ColonyJoinWindow)(nil),                // 53: apiary.internal.v1.ColonyJoinWindow
+	(*ColonyDiskSize)(nil),                  // 54: apiary.internal.v1.ColonyDiskSize
+	(*TrustedPeer)(nil),                     // 55: apiary.internal.v1.TrustedPeer
 }
 var file_api_internalpb_raftd_proto_depIdxs = []int32{
 	4,  // 0: apiary.internal.v1.StatusResponse.servers:type_name -> apiary.internal.v1.ServerInfo
-	43, // 1: apiary.internal.v1.GetVMResponse.vm:type_name -> apiary.internal.v1.VMDefinition
-	43, // 2: apiary.internal.v1.ListVMsResponse.vms:type_name -> apiary.internal.v1.VMDefinition
-	44, // 3: apiary.internal.v1.GetNetworkResponse.network:type_name -> apiary.internal.v1.NetworkDefinition
-	44, // 4: apiary.internal.v1.ListNetworksResponse.networks:type_name -> apiary.internal.v1.NetworkDefinition
-	45, // 5: apiary.internal.v1.GetPendingJoinRequestResponse.request:type_name -> apiary.internal.v1.PendingJoinRequest
-	45, // 6: apiary.internal.v1.ListPendingJoinRequestsResponse.requests:type_name -> apiary.internal.v1.PendingJoinRequest
-	46, // 7: apiary.internal.v1.GetRestartLeaseStateResponse.lease:type_name -> apiary.internal.v1.RestartLease
-	47, // 8: apiary.internal.v1.GetRestartLeaseStateResponse.record:type_name -> apiary.internal.v1.RestartRecord
-	48, // 9: apiary.internal.v1.GetColonyUpdateStateResponse.active:type_name -> apiary.internal.v1.ColonyUpdate
-	48, // 10: apiary.internal.v1.GetColonyUpdateStateResponse.history:type_name -> apiary.internal.v1.ColonyUpdate
-	49, // 11: apiary.internal.v1.GetJailResponse.jail:type_name -> apiary.internal.v1.JailDefinition
-	49, // 12: apiary.internal.v1.ListJailsResponse.jails:type_name -> apiary.internal.v1.JailDefinition
-	50, // 13: apiary.internal.v1.ListAPIKeysResponse.keys:type_name -> apiary.internal.v1.ApiKey
-	51, // 14: apiary.internal.v1.GetColonyJoinWindowResponse.window:type_name -> apiary.internal.v1.ColonyJoinWindow
-	52, // 15: apiary.internal.v1.ListTrustedPeersResponse.peers:type_name -> apiary.internal.v1.TrustedPeer
-	0,  // 16: apiary.internal.v1.RaftInternal.Apply:input_type -> apiary.internal.v1.ApplyRequest
-	2,  // 17: apiary.internal.v1.RaftInternal.Status:input_type -> apiary.internal.v1.StatusRequest
-	5,  // 18: apiary.internal.v1.RaftInternal.AddVoter:input_type -> apiary.internal.v1.AddVoterRequest
-	7,  // 19: apiary.internal.v1.RaftInternal.RemoveServer:input_type -> apiary.internal.v1.RemoveServerRequest
-	9,  // 20: apiary.internal.v1.RaftInternal.GetVM:input_type -> apiary.internal.v1.GetVMRequest
-	11, // 21: apiary.internal.v1.RaftInternal.ListVMs:input_type -> apiary.internal.v1.ListVMsRequest
-	13, // 22: apiary.internal.v1.RaftInternal.GetNetwork:input_type -> apiary.internal.v1.GetNetworkRequest
-	15, // 23: apiary.internal.v1.RaftInternal.ListNetworks:input_type -> apiary.internal.v1.ListNetworksRequest
-	11, // 24: apiary.internal.v1.RaftInternal.ListVMsLocal:input_type -> apiary.internal.v1.ListVMsRequest
-	15, // 25: apiary.internal.v1.RaftInternal.ListNetworksLocal:input_type -> apiary.internal.v1.ListNetworksRequest
-	31, // 26: apiary.internal.v1.RaftInternal.ValidateAPIKeyHash:input_type -> apiary.internal.v1.ValidateAPIKeyHashRequest
-	33, // 27: apiary.internal.v1.RaftInternal.ListAPIKeys:input_type -> apiary.internal.v1.ListAPIKeysRequest
-	27, // 28: apiary.internal.v1.RaftInternal.GetJail:input_type -> apiary.internal.v1.GetJailRequest
-	29, // 29: apiary.internal.v1.RaftInternal.ListJails:input_type -> apiary.internal.v1.ListJailsRequest
-	29, // 30: apiary.internal.v1.RaftInternal.ListJailsLocal:input_type -> apiary.internal.v1.ListJailsRequest
-	35, // 31: apiary.internal.v1.RaftInternal.ExportState:input_type -> apiary.internal.v1.ExportStateRequest
-	17, // 32: apiary.internal.v1.RaftInternal.GetPendingJoinRequestLocal:input_type -> apiary.internal.v1.GetPendingJoinRequestRequest
-	19, // 33: apiary.internal.v1.RaftInternal.ListPendingJoinRequestsLocal:input_type -> apiary.internal.v1.ListPendingJoinRequestsRequest
-	21, // 34: apiary.internal.v1.RaftInternal.GetRestartLeaseStateLocal:input_type -> apiary.internal.v1.GetRestartLeaseStateRequest
-	37, // 35: apiary.internal.v1.RaftInternal.GetColonyJoinWindowLocal:input_type -> apiary.internal.v1.GetColonyJoinWindowRequest
-	39, // 36: apiary.internal.v1.RaftInternal.ListTrustedPeersLocal:input_type -> apiary.internal.v1.ListTrustedPeersRequest
-	41, // 37: apiary.internal.v1.RaftInternal.GetAuthorizationUse:input_type -> apiary.internal.v1.GetAuthorizationUseRequest
-	23, // 38: apiary.internal.v1.RaftInternal.GetColonyUpdateStateLocal:input_type -> apiary.internal.v1.GetColonyUpdateStateRequest
-	25, // 39: apiary.internal.v1.RaftInternal.StepAsideForRestartLocal:input_type -> apiary.internal.v1.StepAsideForRestartRequest
-	1,  // 40: apiary.internal.v1.RaftInternal.Apply:output_type -> apiary.internal.v1.ApplyResponse
-	3,  // 41: apiary.internal.v1.RaftInternal.Status:output_type -> apiary.internal.v1.StatusResponse
-	6,  // 42: apiary.internal.v1.RaftInternal.AddVoter:output_type -> apiary.internal.v1.AddVoterResponse
-	8,  // 43: apiary.internal.v1.RaftInternal.RemoveServer:output_type -> apiary.internal.v1.RemoveServerResponse
-	10, // 44: apiary.internal.v1.RaftInternal.GetVM:output_type -> apiary.internal.v1.GetVMResponse
-	12, // 45: apiary.internal.v1.RaftInternal.ListVMs:output_type -> apiary.internal.v1.ListVMsResponse
-	14, // 46: apiary.internal.v1.RaftInternal.GetNetwork:output_type -> apiary.internal.v1.GetNetworkResponse
-	16, // 47: apiary.internal.v1.RaftInternal.ListNetworks:output_type -> apiary.internal.v1.ListNetworksResponse
-	12, // 48: apiary.internal.v1.RaftInternal.ListVMsLocal:output_type -> apiary.internal.v1.ListVMsResponse
-	16, // 49: apiary.internal.v1.RaftInternal.ListNetworksLocal:output_type -> apiary.internal.v1.ListNetworksResponse
-	32, // 50: apiary.internal.v1.RaftInternal.ValidateAPIKeyHash:output_type -> apiary.internal.v1.ValidateAPIKeyHashResponse
-	34, // 51: apiary.internal.v1.RaftInternal.ListAPIKeys:output_type -> apiary.internal.v1.ListAPIKeysResponse
-	28, // 52: apiary.internal.v1.RaftInternal.GetJail:output_type -> apiary.internal.v1.GetJailResponse
-	30, // 53: apiary.internal.v1.RaftInternal.ListJails:output_type -> apiary.internal.v1.ListJailsResponse
-	30, // 54: apiary.internal.v1.RaftInternal.ListJailsLocal:output_type -> apiary.internal.v1.ListJailsResponse
-	36, // 55: apiary.internal.v1.RaftInternal.ExportState:output_type -> apiary.internal.v1.ExportStateResponse
-	18, // 56: apiary.internal.v1.RaftInternal.GetPendingJoinRequestLocal:output_type -> apiary.internal.v1.GetPendingJoinRequestResponse
-	20, // 57: apiary.internal.v1.RaftInternal.ListPendingJoinRequestsLocal:output_type -> apiary.internal.v1.ListPendingJoinRequestsResponse
-	22, // 58: apiary.internal.v1.RaftInternal.GetRestartLeaseStateLocal:output_type -> apiary.internal.v1.GetRestartLeaseStateResponse
-	38, // 59: apiary.internal.v1.RaftInternal.GetColonyJoinWindowLocal:output_type -> apiary.internal.v1.GetColonyJoinWindowResponse
-	40, // 60: apiary.internal.v1.RaftInternal.ListTrustedPeersLocal:output_type -> apiary.internal.v1.ListTrustedPeersResponse
-	42, // 61: apiary.internal.v1.RaftInternal.GetAuthorizationUse:output_type -> apiary.internal.v1.GetAuthorizationUseResponse
-	24, // 62: apiary.internal.v1.RaftInternal.GetColonyUpdateStateLocal:output_type -> apiary.internal.v1.GetColonyUpdateStateResponse
-	26, // 63: apiary.internal.v1.RaftInternal.StepAsideForRestartLocal:output_type -> apiary.internal.v1.StepAsideForRestartResponse
-	40, // [40:64] is the sub-list for method output_type
-	16, // [16:40] is the sub-list for method input_type
-	16, // [16:16] is the sub-list for extension type_name
-	16, // [16:16] is the sub-list for extension extendee
-	0,  // [0:16] is the sub-list for field type_name
+	45, // 1: apiary.internal.v1.GetVMResponse.vm:type_name -> apiary.internal.v1.VMDefinition
+	45, // 2: apiary.internal.v1.ListVMsResponse.vms:type_name -> apiary.internal.v1.VMDefinition
+	46, // 3: apiary.internal.v1.GetNetworkResponse.network:type_name -> apiary.internal.v1.NetworkDefinition
+	46, // 4: apiary.internal.v1.ListNetworksResponse.networks:type_name -> apiary.internal.v1.NetworkDefinition
+	47, // 5: apiary.internal.v1.GetPendingJoinRequestResponse.request:type_name -> apiary.internal.v1.PendingJoinRequest
+	47, // 6: apiary.internal.v1.ListPendingJoinRequestsResponse.requests:type_name -> apiary.internal.v1.PendingJoinRequest
+	48, // 7: apiary.internal.v1.GetRestartLeaseStateResponse.lease:type_name -> apiary.internal.v1.RestartLease
+	49, // 8: apiary.internal.v1.GetRestartLeaseStateResponse.record:type_name -> apiary.internal.v1.RestartRecord
+	50, // 9: apiary.internal.v1.GetColonyUpdateStateResponse.active:type_name -> apiary.internal.v1.ColonyUpdate
+	50, // 10: apiary.internal.v1.GetColonyUpdateStateResponse.history:type_name -> apiary.internal.v1.ColonyUpdate
+	51, // 11: apiary.internal.v1.GetJailResponse.jail:type_name -> apiary.internal.v1.JailDefinition
+	51, // 12: apiary.internal.v1.ListJailsResponse.jails:type_name -> apiary.internal.v1.JailDefinition
+	52, // 13: apiary.internal.v1.ListAPIKeysResponse.keys:type_name -> apiary.internal.v1.ApiKey
+	53, // 14: apiary.internal.v1.GetColonyJoinWindowResponse.window:type_name -> apiary.internal.v1.ColonyJoinWindow
+	54, // 15: apiary.internal.v1.GetColonyDiskSizeResponse.colony_disk_size:type_name -> apiary.internal.v1.ColonyDiskSize
+	55, // 16: apiary.internal.v1.ListTrustedPeersResponse.peers:type_name -> apiary.internal.v1.TrustedPeer
+	0,  // 17: apiary.internal.v1.RaftInternal.Apply:input_type -> apiary.internal.v1.ApplyRequest
+	2,  // 18: apiary.internal.v1.RaftInternal.Status:input_type -> apiary.internal.v1.StatusRequest
+	5,  // 19: apiary.internal.v1.RaftInternal.AddVoter:input_type -> apiary.internal.v1.AddVoterRequest
+	7,  // 20: apiary.internal.v1.RaftInternal.RemoveServer:input_type -> apiary.internal.v1.RemoveServerRequest
+	9,  // 21: apiary.internal.v1.RaftInternal.GetVM:input_type -> apiary.internal.v1.GetVMRequest
+	11, // 22: apiary.internal.v1.RaftInternal.ListVMs:input_type -> apiary.internal.v1.ListVMsRequest
+	13, // 23: apiary.internal.v1.RaftInternal.GetNetwork:input_type -> apiary.internal.v1.GetNetworkRequest
+	15, // 24: apiary.internal.v1.RaftInternal.ListNetworks:input_type -> apiary.internal.v1.ListNetworksRequest
+	11, // 25: apiary.internal.v1.RaftInternal.ListVMsLocal:input_type -> apiary.internal.v1.ListVMsRequest
+	15, // 26: apiary.internal.v1.RaftInternal.ListNetworksLocal:input_type -> apiary.internal.v1.ListNetworksRequest
+	31, // 27: apiary.internal.v1.RaftInternal.ValidateAPIKeyHash:input_type -> apiary.internal.v1.ValidateAPIKeyHashRequest
+	33, // 28: apiary.internal.v1.RaftInternal.ListAPIKeys:input_type -> apiary.internal.v1.ListAPIKeysRequest
+	27, // 29: apiary.internal.v1.RaftInternal.GetJail:input_type -> apiary.internal.v1.GetJailRequest
+	29, // 30: apiary.internal.v1.RaftInternal.ListJails:input_type -> apiary.internal.v1.ListJailsRequest
+	29, // 31: apiary.internal.v1.RaftInternal.ListJailsLocal:input_type -> apiary.internal.v1.ListJailsRequest
+	35, // 32: apiary.internal.v1.RaftInternal.ExportState:input_type -> apiary.internal.v1.ExportStateRequest
+	17, // 33: apiary.internal.v1.RaftInternal.GetPendingJoinRequestLocal:input_type -> apiary.internal.v1.GetPendingJoinRequestRequest
+	19, // 34: apiary.internal.v1.RaftInternal.ListPendingJoinRequestsLocal:input_type -> apiary.internal.v1.ListPendingJoinRequestsRequest
+	21, // 35: apiary.internal.v1.RaftInternal.GetRestartLeaseStateLocal:input_type -> apiary.internal.v1.GetRestartLeaseStateRequest
+	37, // 36: apiary.internal.v1.RaftInternal.GetColonyJoinWindowLocal:input_type -> apiary.internal.v1.GetColonyJoinWindowRequest
+	39, // 37: apiary.internal.v1.RaftInternal.GetColonyDiskSizeLocal:input_type -> apiary.internal.v1.GetColonyDiskSizeRequest
+	41, // 38: apiary.internal.v1.RaftInternal.ListTrustedPeersLocal:input_type -> apiary.internal.v1.ListTrustedPeersRequest
+	43, // 39: apiary.internal.v1.RaftInternal.GetAuthorizationUse:input_type -> apiary.internal.v1.GetAuthorizationUseRequest
+	23, // 40: apiary.internal.v1.RaftInternal.GetColonyUpdateStateLocal:input_type -> apiary.internal.v1.GetColonyUpdateStateRequest
+	25, // 41: apiary.internal.v1.RaftInternal.StepAsideForRestartLocal:input_type -> apiary.internal.v1.StepAsideForRestartRequest
+	1,  // 42: apiary.internal.v1.RaftInternal.Apply:output_type -> apiary.internal.v1.ApplyResponse
+	3,  // 43: apiary.internal.v1.RaftInternal.Status:output_type -> apiary.internal.v1.StatusResponse
+	6,  // 44: apiary.internal.v1.RaftInternal.AddVoter:output_type -> apiary.internal.v1.AddVoterResponse
+	8,  // 45: apiary.internal.v1.RaftInternal.RemoveServer:output_type -> apiary.internal.v1.RemoveServerResponse
+	10, // 46: apiary.internal.v1.RaftInternal.GetVM:output_type -> apiary.internal.v1.GetVMResponse
+	12, // 47: apiary.internal.v1.RaftInternal.ListVMs:output_type -> apiary.internal.v1.ListVMsResponse
+	14, // 48: apiary.internal.v1.RaftInternal.GetNetwork:output_type -> apiary.internal.v1.GetNetworkResponse
+	16, // 49: apiary.internal.v1.RaftInternal.ListNetworks:output_type -> apiary.internal.v1.ListNetworksResponse
+	12, // 50: apiary.internal.v1.RaftInternal.ListVMsLocal:output_type -> apiary.internal.v1.ListVMsResponse
+	16, // 51: apiary.internal.v1.RaftInternal.ListNetworksLocal:output_type -> apiary.internal.v1.ListNetworksResponse
+	32, // 52: apiary.internal.v1.RaftInternal.ValidateAPIKeyHash:output_type -> apiary.internal.v1.ValidateAPIKeyHashResponse
+	34, // 53: apiary.internal.v1.RaftInternal.ListAPIKeys:output_type -> apiary.internal.v1.ListAPIKeysResponse
+	28, // 54: apiary.internal.v1.RaftInternal.GetJail:output_type -> apiary.internal.v1.GetJailResponse
+	30, // 55: apiary.internal.v1.RaftInternal.ListJails:output_type -> apiary.internal.v1.ListJailsResponse
+	30, // 56: apiary.internal.v1.RaftInternal.ListJailsLocal:output_type -> apiary.internal.v1.ListJailsResponse
+	36, // 57: apiary.internal.v1.RaftInternal.ExportState:output_type -> apiary.internal.v1.ExportStateResponse
+	18, // 58: apiary.internal.v1.RaftInternal.GetPendingJoinRequestLocal:output_type -> apiary.internal.v1.GetPendingJoinRequestResponse
+	20, // 59: apiary.internal.v1.RaftInternal.ListPendingJoinRequestsLocal:output_type -> apiary.internal.v1.ListPendingJoinRequestsResponse
+	22, // 60: apiary.internal.v1.RaftInternal.GetRestartLeaseStateLocal:output_type -> apiary.internal.v1.GetRestartLeaseStateResponse
+	38, // 61: apiary.internal.v1.RaftInternal.GetColonyJoinWindowLocal:output_type -> apiary.internal.v1.GetColonyJoinWindowResponse
+	40, // 62: apiary.internal.v1.RaftInternal.GetColonyDiskSizeLocal:output_type -> apiary.internal.v1.GetColonyDiskSizeResponse
+	42, // 63: apiary.internal.v1.RaftInternal.ListTrustedPeersLocal:output_type -> apiary.internal.v1.ListTrustedPeersResponse
+	44, // 64: apiary.internal.v1.RaftInternal.GetAuthorizationUse:output_type -> apiary.internal.v1.GetAuthorizationUseResponse
+	24, // 65: apiary.internal.v1.RaftInternal.GetColonyUpdateStateLocal:output_type -> apiary.internal.v1.GetColonyUpdateStateResponse
+	26, // 66: apiary.internal.v1.RaftInternal.StepAsideForRestartLocal:output_type -> apiary.internal.v1.StepAsideForRestartResponse
+	42, // [42:67] is the sub-list for method output_type
+	17, // [17:42] is the sub-list for method input_type
+	17, // [17:17] is the sub-list for extension type_name
+	17, // [17:17] is the sub-list for extension extendee
+	0,  // [0:17] is the sub-list for field type_name
 }
 
 func init() { file_api_internalpb_raftd_proto_init() }
@@ -2846,7 +2944,7 @@ func file_api_internalpb_raftd_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_api_internalpb_raftd_proto_rawDesc), len(file_api_internalpb_raftd_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   43,
+			NumMessages:   45,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

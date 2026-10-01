@@ -122,6 +122,8 @@ const (
 	ManagerService_PurgeJoinRequest_FullMethodName            = "/apiary.rpc.v1.ManagerService/PurgeJoinRequest"
 	ManagerService_OpenColonyJoinWindow_FullMethodName        = "/apiary.rpc.v1.ManagerService/OpenColonyJoinWindow"
 	ManagerService_CloseColonyJoinWindow_FullMethodName       = "/apiary.rpc.v1.ManagerService/CloseColonyJoinWindow"
+	ManagerService_SetColonyDiskSize_FullMethodName           = "/apiary.rpc.v1.ManagerService/SetColonyDiskSize"
+	ManagerService_GetColonyDiskSize_FullMethodName           = "/apiary.rpc.v1.ManagerService/GetColonyDiskSize"
 	ManagerService_GetColonyJoinWindow_FullMethodName         = "/apiary.rpc.v1.ManagerService/GetColonyJoinWindow"
 	ManagerService_UpdateVoterAddress_FullMethodName          = "/apiary.rpc.v1.ManagerService/UpdateVoterAddress"
 	ManagerService_HostPackages_FullMethodName                = "/apiary.rpc.v1.ManagerService/HostPackages"
@@ -878,6 +880,24 @@ type ManagerServiceClient interface {
 	// every other admin-side state change, and only the leader mutates.
 	OpenColonyJoinWindow(ctx context.Context, in *OpenColonyJoinWindowRequest, opts ...grpc.CallOption) (*OpenColonyJoinWindowResponse, error)
 	CloseColonyJoinWindow(ctx context.Context, in *CloseColonyJoinWindowRequest, opts ...grpc.CallOption) (*CloseColonyJoinWindowResponse, error)
+	// SetColonyDiskSize/GetColonyDiskSize are ADR-0148's Colony-wide VM
+	// disk-size floor: one raft-replicated minimum, in MiB, that every
+	// VM disk image in this Colony is created at and that can only ever
+	// go up.
+	//
+	// Admin-tier on the write, because it is a state change every member
+	// replicates and can never be undone. The read is Viewer-tier: it
+	// exposes a capacity number this Colony already enforces, and the
+	// reconciler reads it on every Comb. Any member may be ASKED to set
+	// it; the call forwards to the leader exactly like every other
+	// admin-side state change, and only the leader mutates.
+	//
+	// A request for a value at or below the floor is REFUSED by the FSM,
+	// naming both numbers - not clamped, because a clamp would silently
+	// override what the operator asked for and leave the log saying
+	// something that did not happen. See internal/raft/colonydisksize.go.
+	SetColonyDiskSize(ctx context.Context, in *SetColonyDiskSizeRequest, opts ...grpc.CallOption) (*SetColonyDiskSizeResponse, error)
+	GetColonyDiskSize(ctx context.Context, in *GetColonyDiskSizeRequest, opts ...grpc.CallOption) (*GetColonyDiskSizeResponse, error)
 	// GetColonyJoinWindow is the UNAUTHENTICATED read, and the only
 	// pre-join trust anchor in the system. A joining Comb has no Raft
 	// membership, so ADR-0115's automatic peer-hostname derivation has
@@ -1980,6 +2000,26 @@ func (c *managerServiceClient) CloseColonyJoinWindow(ctx context.Context, in *Cl
 	return out, nil
 }
 
+func (c *managerServiceClient) SetColonyDiskSize(ctx context.Context, in *SetColonyDiskSizeRequest, opts ...grpc.CallOption) (*SetColonyDiskSizeResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(SetColonyDiskSizeResponse)
+	err := c.cc.Invoke(ctx, ManagerService_SetColonyDiskSize_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *managerServiceClient) GetColonyDiskSize(ctx context.Context, in *GetColonyDiskSizeRequest, opts ...grpc.CallOption) (*GetColonyDiskSizeResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetColonyDiskSizeResponse)
+	err := c.cc.Invoke(ctx, ManagerService_GetColonyDiskSize_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *managerServiceClient) GetColonyJoinWindow(ctx context.Context, in *GetColonyJoinWindowRequest, opts ...grpc.CallOption) (*GetColonyJoinWindowResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(GetColonyJoinWindowResponse)
@@ -2761,6 +2801,24 @@ type ManagerServiceServer interface {
 	// every other admin-side state change, and only the leader mutates.
 	OpenColonyJoinWindow(context.Context, *OpenColonyJoinWindowRequest) (*OpenColonyJoinWindowResponse, error)
 	CloseColonyJoinWindow(context.Context, *CloseColonyJoinWindowRequest) (*CloseColonyJoinWindowResponse, error)
+	// SetColonyDiskSize/GetColonyDiskSize are ADR-0148's Colony-wide VM
+	// disk-size floor: one raft-replicated minimum, in MiB, that every
+	// VM disk image in this Colony is created at and that can only ever
+	// go up.
+	//
+	// Admin-tier on the write, because it is a state change every member
+	// replicates and can never be undone. The read is Viewer-tier: it
+	// exposes a capacity number this Colony already enforces, and the
+	// reconciler reads it on every Comb. Any member may be ASKED to set
+	// it; the call forwards to the leader exactly like every other
+	// admin-side state change, and only the leader mutates.
+	//
+	// A request for a value at or below the floor is REFUSED by the FSM,
+	// naming both numbers - not clamped, because a clamp would silently
+	// override what the operator asked for and leave the log saying
+	// something that did not happen. See internal/raft/colonydisksize.go.
+	SetColonyDiskSize(context.Context, *SetColonyDiskSizeRequest) (*SetColonyDiskSizeResponse, error)
+	GetColonyDiskSize(context.Context, *GetColonyDiskSizeRequest) (*GetColonyDiskSizeResponse, error)
 	// GetColonyJoinWindow is the UNAUTHENTICATED read, and the only
 	// pre-join trust anchor in the system. A joining Comb has no Raft
 	// membership, so ADR-0115's automatic peer-hostname derivation has
@@ -3129,6 +3187,12 @@ func (UnimplementedManagerServiceServer) OpenColonyJoinWindow(context.Context, *
 }
 func (UnimplementedManagerServiceServer) CloseColonyJoinWindow(context.Context, *CloseColonyJoinWindowRequest) (*CloseColonyJoinWindowResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method CloseColonyJoinWindow not implemented")
+}
+func (UnimplementedManagerServiceServer) SetColonyDiskSize(context.Context, *SetColonyDiskSizeRequest) (*SetColonyDiskSizeResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method SetColonyDiskSize not implemented")
+}
+func (UnimplementedManagerServiceServer) GetColonyDiskSize(context.Context, *GetColonyDiskSizeRequest) (*GetColonyDiskSizeResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetColonyDiskSize not implemented")
 }
 func (UnimplementedManagerServiceServer) GetColonyJoinWindow(context.Context, *GetColonyJoinWindowRequest) (*GetColonyJoinWindowResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetColonyJoinWindow not implemented")
@@ -4970,6 +5034,42 @@ func _ManagerService_CloseColonyJoinWindow_Handler(srv interface{}, ctx context.
 	return interceptor(ctx, in, info, handler)
 }
 
+func _ManagerService_SetColonyDiskSize_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SetColonyDiskSizeRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ManagerServiceServer).SetColonyDiskSize(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ManagerService_SetColonyDiskSize_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ManagerServiceServer).SetColonyDiskSize(ctx, req.(*SetColonyDiskSizeRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ManagerService_GetColonyDiskSize_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetColonyDiskSizeRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ManagerServiceServer).GetColonyDiskSize(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ManagerService_GetColonyDiskSize_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ManagerServiceServer).GetColonyDiskSize(ctx, req.(*GetColonyDiskSizeRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _ManagerService_GetColonyJoinWindow_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(GetColonyJoinWindowRequest)
 	if err := dec(in); err != nil {
@@ -5426,6 +5526,14 @@ var ManagerService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "CloseColonyJoinWindow",
 			Handler:    _ManagerService_CloseColonyJoinWindow_Handler,
+		},
+		{
+			MethodName: "SetColonyDiskSize",
+			Handler:    _ManagerService_SetColonyDiskSize_Handler,
+		},
+		{
+			MethodName: "GetColonyDiskSize",
+			Handler:    _ManagerService_GetColonyDiskSize_Handler,
 		},
 		{
 			MethodName: "GetColonyJoinWindow",

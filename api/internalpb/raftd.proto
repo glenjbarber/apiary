@@ -136,6 +136,16 @@ service RaftInternal {
   // would see.
   rpc GetColonyJoinWindowLocal(GetColonyJoinWindowRequest) returns (GetColonyJoinWindowResponse);
 
+  // GetColonyDiskSizeLocal is the read side of ADR-0148's Colony-wide
+  // VM disk-size floor. Deliberately NOT leader-only, for the same
+  // GetColonyJoinWindowLocal reason: the floor is already
+  // raft-replicated, so any node can answer for itself. That is not
+  // tidiness here, it is the requirement - the reconciler reads the
+  // floor on EVERY Comb as it sizes each VM's disk, and a follower
+  // that refused would size a disk from local state instead, which is
+  // the divergence ADR-0148 exists to remove.
+  rpc GetColonyDiskSizeLocal(GetColonyDiskSizeRequest) returns (GetColonyDiskSizeResponse);
+
   // ListTrustedPeersLocal is the read side of ADR-0147 Part 4's
   // replicated peer trust store, and the input to the derived
   // /usr/local/etc/apiary/peer-ca.pem every managerd writes on its own
@@ -560,6 +570,20 @@ message GetColonyJoinWindowResponse {
   // to compute, so the liveness answer and the state it was computed
   // from can never be two separate reads taken at different moments.
   bool live = 2;
+}
+
+// GetColonyDiskSizeRequest is deliberately empty: there is one floor
+// per Colony, so there is nothing to select. A message rather than an
+// existing request type is kept because every ...Local RPC here takes
+// exactly one.
+message GetColonyDiskSizeRequest {}
+
+// GetColonyDiskSizeResponse carries this node's OWN replicated copy of
+// the floor. A nil colony_disk_size means this Colony has never had a
+// SetColonyDiskSize applied - which is not the same as a floor of
+// zero, and is deliberately representable as absence.
+message GetColonyDiskSizeResponse {
+  ColonyDiskSize colony_disk_size = 1;
 }
 
 // ListTrustedPeersRequest is deliberately empty. There is no filter and
