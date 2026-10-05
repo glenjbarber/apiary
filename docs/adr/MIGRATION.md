@@ -192,3 +192,72 @@ for all 148 records, including this structurally converted batch.
 | [ADR-0147](0147-automated-install-and-two-way-peer-authorized-join.md) | Unresolved | Pending Glen allocation | Remaining |
 | [ADR-0148](0148-colony-disk-size-floor.md) | Unresolved | Pending Glen allocation | Remaining |
 | [ADR-0149](0149-durable-colony-work-queue.md) | Unresolved | Pending Glen allocation | Remaining |
+
+## Section review backlog
+
+These source records lack the exact required heading; equivalent content may
+exist under another heading and needs manual review before conversion.
+
+- [ADR-0022](0022-network-management.md): Decision.
+- [ADR-0023](0023-api-key-authentication.md): Decision.
+- [ADR-0024](0024-restshimd-binary.md): Decision.
+- [ADR-0025](0025-resource-reclaim.md): Decision.
+- [ADR-0026](0026-hast-vm-disk-replication.md): Decision.
+- [ADR-0027](0027-jail-orchestration.md): Decision.
+- [ADR-0028](0028-migrate-vm-and-jail.md): Decision.
+- [ADR-0029](0029-cross-node-write-forwarding.md): Decision.
+- [ADR-0030](0030-tiered-rbac-pam-login.md): Decision.
+- [ADR-0031](0031-vm-base-images.md): Decision.
+- [ADR-0032](0032-bhyve-serial-console-log.md): Decision.
+- [ADR-0033](0033-internal-transport-security.md): Decision.
+- [ADR-0034](0034-remote-serial-log-viewing.md): Decision.
+- [ADR-0035](0035-leader-only-read-forwarding.md): Decision.
+- [ADR-0036](0036-cluster-overview-and-per-node-host-page.md): Decision.
+- [ADR-0037](0037-write-rpc-forwarding-to-leader.md): Decision.
+- [ADR-0038](0038-tiered-reset-cli.md): Decision.
+- [ADR-0039](0039-per-role-password-change.md): Decision.
+- [ADR-0040](0040-iso-copy-on-demand.md): Decision.
+- [ADR-0041](0041-image-fetching-at-vm-creation-time.md): Decision.
+- [ADR-0042](0042-serial-console-echo-loop-fix.md): Decision, Consequences.
+- [ADR-0043](0043-vmexists-checks-real-process-not-just-vmm-context.md): Decision, Consequences.
+- [ADR-0044](0044-deterministic-mac-for-every-vm.md): Decision, Consequences.
+- [ADR-0045](0045-kubernetes-ready-base-image-and-first-real-kubeadm-init.md): Decision, Consequences.
+- [ADR-0046](0046-vm-table-polling-corruption-from-oob-swap.md): Decision, Consequences.
+- [ADR-0047](0047-external-gateway-networks.md): Consequences.
+- [ADR-0048](0048-self-hosted-outbound-nat.md): Consequences.
+- [ADR-0049](0049-machine-configuration-page.md): Consequences.
+- [ADR-0050](0050-dnsmasq-tag-not-interface-scoping.md): Decision, Consequences.
+- [ADR-0051](0051-raftd-config-save-restore.md): Decision.
+- [ADR-0052](0052-dependency-graph-simulator.md): Decision.
+- [ADR-0055](0055-automated-assumption-checks-v1.md): Decision.
+- [ADR-0056](0056-evidence-aware-health-v1.md): Decision.
+- [ADR-0057](0057-offline-recovery-handbook-v1.md): Decision.
+- [ADR-0060](0060-operational-invariants-v1.md): Decision.
+- [ADR-0061](0061-why-not-engine-v1.md): Decision.
+- [ADR-0062](0062-resilience-coverage-map-v1.md): Decision.
+- [ADR-0063](0063-cloudflare-tunnel-exposure-v1.md): Decision.
+- [ADR-0064](0064-disabled-jail-lifecycle.md): Consequences.
+- [ADR-0066](0066-host-default-egress-contract.md): Consequences.
+- [ADR-0067](0067-config-injection-hardening.md): Consequences.
+- [ADR-0068](0068-jexec-jail-console.md): Consequences.
+- [ADR-0069](0069-host-config-export.md): Consequences.
+- [ADR-0070](0070-system-settings-expansion.md): Consequences.
+- [ADR-0073](0073-orphaned-hast-resource-cleanup.md): Consequences.
+- [ADR-0074](0074-role-map-editing-ui.md): Consequences.
+- [ADR-0075](0075-firewall-rule-priority.md): Consequences.
+- [ADR-0081](0081-guided-network-replacement-workflow.md): Consequences.
+- [ADR-0084](0084-jail-base-images.md): Decision.
+- [ADR-0085](0085-uplink-admin-toggle.md): Decision.
+- [ADR-0086](0086-first-login-bootstrap-admin.md): Decision.
+- [ADR-0087](0087-pam-in-managerd.md): Decision.
+- [ADR-0088](0088-pause-nat-on-uplink-down.md): Decision.
+- [ADR-0089](0089-jail-template-peer-fetch.md): Decision.
+- [ADR-0097](0097-join-flow-hardening.md): Consequences.
+- [ADR-0098](0098-jail-base-archives.md): Decision.
+- [ADR-0101](0101-uplink-bridged-networks.md): Consequences.
+- [ADR-0103](0103-action-preflight-guardrails.md): Consequences.
+- [ADR-0120](0120-config-rationale-history.md): Consequences.
+- [ADR-0127](0127-sylve-io-features.md): Decision, Consequences.
+- [ADR-0138](0138-bridge-svi-vlan-uplink.md): Consequences.
+- [ADR-0147](0147-automated-install-and-two-way-peer-authorized-join.md): Consequences.
+- [ADR-0148](0148-colony-disk-size-floor.md): Context, Decision, Consequences.
