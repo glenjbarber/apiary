@@ -471,3 +471,17 @@ design and not a cure, and it is the honest limit of this shape.
 6. **Does an abandoned item need a reason, on the item or only in the
    log?** ADR-0146 makes `HandoverColonyUpdate.reason` mandatory for
    exactly this reason. Probably yes; not decided.
+
+## Owner clarification (2026-10-05)
+
+Glen corrected the requirement's terminology to "delivered", not
+"replicated", and confirmed that queue contents are delivered to every
+member. This resolves the content-recipient part of historical question 2
+and open question 1 above. The earlier unanswered response remains history.
+
+This clarification does not decide which members consume work. Leader-only
+consumption remains a proposal awaiting confirmation. Delivery to every
+member does not by itself specify storage, persistence, transport, ordering,
+or a delivery guarantee. The earlier replicated-FSM design remains a
+provisional design and must be reviewed against this clarified requirement.
+The record remains Unconfirmed; the other open questions remain outstanding.
