@@ -19,7 +19,22 @@ type hastObservationView struct {
 	Replication string
 	Dirty       string
 	ObservedAt  string
-	Error       string
+
+	// ObservedAgo is the same instant as ObservedAt, rendered as the
+	// relative age an operator actually acts on. It is deliberately a
+	// second field rather than a re-parse of ObservedAt in the template:
+	// the two are formatted from one clock reading and one duration, and
+	// a template that recomputed either could not tell a genuine age
+	// from a mis-parsed timestamp.
+	//
+	// It is empty when there is no observation to age - a transport
+	// error, a node that reported none, or a response carrying no
+	// timestamp at all. That is the unknown case and the template renders
+	// it as unknown; it is never a zero age, which would read as "just
+	// observed" for a node that was never reached.
+	ObservedAgo string
+
+	Error string
 }
 
 type replicaFreshnessView struct {
@@ -77,7 +92,13 @@ func (s *Server) replicaFreshness(ctx context.Context, resourceType, id, owner, 
 			observation.Replication = response.GetReplication()
 			observation.Dirty = response.GetDirty()
 			if response.GetObservedAtUnix() > 0 {
-				observation.ObservedAt = time.Unix(response.GetObservedAtUnix(), 0).UTC().Format(time.RFC3339)
+				observed := time.Unix(response.GetObservedAtUnix(), 0).UTC()
+				observation.ObservedAt = observed.Format(time.RFC3339)
+				// Relative to the moment both ends have been asked and
+				// answered, not to the start of the gather: an operator
+				// reads this as "how old is what is on this page", and
+				// the page finishes rendering after the slow end does.
+				observation.ObservedAgo = formatObservationAge(time.Since(observed))
 			}
 			observation.Error = response.GetError()
 		}

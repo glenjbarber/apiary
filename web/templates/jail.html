@@ -28,10 +28,10 @@
         <p><span class="badge {{.ReplicaFreshness.Verdict}}">{{.ReplicaFreshness.Verdict}}</span></p>
         <p>{{.ReplicaFreshness.Explanation}}</p>
         {{if .ReplicaFreshness.Configured}}
-        <table class="compact-table"><thead><tr><th>Node</th><th>Role</th><th>HAST status</th><th>Mode</th><th>Dirty extents</th><th>Observed</th></tr></thead><tbody>
-          {{range .ReplicaFreshness.Observations}}<tr><td>{{.NodeID}}</td><td>{{if .Role}}{{.Role}}{{else}}unknown{{end}}</td><td>{{if .Error}}unknown: {{.Error}}{{else}}{{if .Status}}{{.Status}}{{else}}unknown{{end}}{{end}}</td><td>{{if .Replication}}{{.Replication}}{{else}}unknown{{end}}</td><td>{{if .Dirty}}{{.Dirty}}{{else}}unknown{{end}}</td><td>{{if .ObservedAt}}{{.ObservedAt}}{{else}}unknown{{end}}</td></tr>{{end}}
+        <table class="compact-table"><thead><tr><th>Node</th><th>Role</th><th>HAST status</th><th>Mode</th><th>Dirty extents</th><th>Observed</th><th>Last updated</th></tr></thead><tbody>
+          {{range .ReplicaFreshness.Observations}}<tr><td>{{.NodeID}}</td><td>{{if .Role}}{{.Role}}{{else}}unknown{{end}}</td><td>{{if .Error}}unknown: {{.Error}}{{else}}{{if .Status}}{{.Status}}{{else}}unknown{{end}}{{end}}</td><td>{{if .Replication}}{{.Replication}}{{else}}unknown{{end}}</td><td>{{if .Dirty}}{{.Dirty}}{{else}}unknown{{end}}</td><td>{{if .ObservedAt}}{{.ObservedAt}}{{else}}unknown{{end}}</td><td>{{if .ObservedAgo}}{{.ObservedAgo}}{{else}}unknown{{end}}</td></tr>{{end}}
         </tbody></table>
-        <p class="muted">Apiary does not derive a numeric RPO from dirty extents. HAST status is point-in-time evidence, not a failover guarantee.</p>
+        <p class="muted">Apiary does not derive a numeric RPO from dirty extents. HAST status is point-in-time evidence, not a failover guarantee. "Last updated" is how long ago each node was actually observed, measured against this page's own clock; it stays unknown for a node that could not be reached rather than reading as current.</p>
         {{end}}
       </section>
     </div>
