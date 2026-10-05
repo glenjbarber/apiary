@@ -485,3 +485,14 @@ member does not by itself specify storage, persistence, transport, ordering,
 or a delivery guarantee. The earlier replicated-FSM design remains a
 provisional design and must be reviewed against this clarified requirement.
 The record remains Unconfirmed; the other open questions remain outstanding.
+
+## Owner clarification: consumption (2026-10-05)
+
+Glen confirmed that only the leader consumes work. Together with the preceding
+clarification, the requirement is: queue contents are delivered to every
+member, and only the leader consumes the work. Historical question 2 and
+open question 1 are now resolved at the requirement level. This supersedes
+the preceding clarification's statement that consumption awaits confirmation.
+
+The remaining design questions stay open. This confirmation does not accept
+the entire ADR or establish implementation; its status remains Unconfirmed.
