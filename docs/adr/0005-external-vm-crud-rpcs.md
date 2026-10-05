@@ -1,8 +1,11 @@
 # ADR-0005: real CreateVM/UpdateVM/DeleteVM on ManagerService
 
-## Status
-
-Accepted
+Status: Accepted
+Supersedes: None
+Superseded by: None
+Affected projects: Apiary
+Legacy identifier: ADR-0005 (Apiary)
+Loreloom identifier: Pending allocation by Glen
 
 ## Context
 
@@ -16,7 +19,7 @@ bhyve/jail/zfs backend — but the definitions themselves are now real,
 replicated, and persisted, which is everything that doesn't require a
 FreeBSD host to build and verify.
 
-## Decisions
+## Decision
 
 ### The external API defines its own `VMDefinition`/`VMState`, not reusing `api/internalpb`'s
 

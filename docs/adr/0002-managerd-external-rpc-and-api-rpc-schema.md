@@ -1,8 +1,11 @@
 # ADR-0002: managerd external RPC transport and api/rpc schema
 
-## Status
-
-Accepted
+Status: Accepted
+Supersedes: None
+Superseded by: None
+Affected projects: Apiary
+Legacy identifier: ADR-0002 (Apiary)
+Loreloom identifier: Pending allocation by Glen
 
 ## Context
 
@@ -13,7 +16,7 @@ full external-client -> managerd -> raftd chain — before any real
 VM/container backend exists to give operations like `CreateVM` actual
 meaning.
 
-## Decisions
+## Decision
 
 ### managerd's external API is gRPC over TCP, not another Unix socket
 

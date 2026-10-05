@@ -1,8 +1,11 @@
 # ADR-0007: internal/jail lifecycle
 
-## Status
-
-Accepted
+Status: Accepted
+Supersedes: None
+Superseded by: None
+Affected projects: Apiary
+Legacy identifier: ADR-0007 (Apiary)
+Loreloom identifier: Pending allocation by Glen
 
 ## Context
 
@@ -11,7 +14,7 @@ same pattern `internal/zfs` established: shell out to the real system
 tool (`jail(8)`/`jls(8)`), scope operations so Apiary can't affect
 resources it didn't create, and verify against the real VM.
 
-## Decisions
+## Decision
 
 ### Jails are scoped by name prefix, not a hierarchical namespace
 

@@ -1,8 +1,11 @@
 # ADR-0001: raftd process split, UDS protocol, and proto tooling
 
-## Status
-
-Accepted
+Status: Accepted
+Supersedes: None
+Superseded by: None
+Affected projects: Apiary
+Legacy identifier: ADR-0001 (Apiary)
+Loreloom identifier: Pending allocation by Glen
 
 ## Context
 
@@ -13,7 +16,7 @@ hard-to-reverse choices had to be made to write this slice at all, and
 none were previously recorded anywhere. This ADR captures them before
 they're forgotten or silently relied upon.
 
-## Decisions
+## Decision
 
 ### raftd is a separate OS process, not an in-process library
 

@@ -1,8 +1,11 @@
 # ADR-0004: typed ephemeral-state schema (VMDefinition, Command)
 
-## Status
-
-Accepted
+Status: Accepted
+Supersedes: None
+Superseded by: None
+Affected projects: Apiary
+Legacy identifier: ADR-0004 (Apiary)
+Loreloom identifier: Pending allocation by Glen
 
 ## Context
 
@@ -13,7 +16,7 @@ That schema is designed now: `Apply` needs to carry something real before
 managerd's future `CreateVM`/`MigrateVM` RPCs have anything meaningful to
 submit through it.
 
-## Decisions
+## Decision
 
 ### The schema models VM definitions and node ownership, not cluster membership
 
