@@ -496,3 +496,21 @@ the preceding clarification's statement that consumption awaits confirmation.
 
 The remaining design questions stay open. This confirmation does not accept
 the entire ADR or establish implementation; its status remains Unconfirmed.
+
+## Owner clarification: dispatch and notification scope (2026-10-05)
+
+Glen answered no to replacing ADR-0134's proposed in-memory notification
+pending set. Historical question 3 and open question 2 are resolved: this
+queue does not replace that pending set and does not supersede ADR-0134.
+
+Glen specified: "The leader should dispatch any tasks to available workers."
+The leader consumes the queue to dispatch tasks; available workers execute
+the dispatched tasks. The preceding leader-only consumption clarification
+must therefore not be read as requiring the leader to execute every task.
+Queue contents are still delivered to every member, as previously confirmed.
+
+Worker availability, selection, dispatch acknowledgement, and recovery after
+leader or worker loss remain unspecified. The earlier provisional single-Comb
+execution and claim design needs review against this dispatch requirement;
+no new scheduling or recovery mechanism is accepted by this clarification.
+The ADR remains Unconfirmed and no implementation is claimed.
