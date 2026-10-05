@@ -514,3 +514,16 @@ leader or worker loss remain unspecified. The earlier provisional single-Comb
 execution and claim design needs review against this dispatch requirement;
 no new scheduling or recovery mechanism is accepted by this clarification.
 The ADR remains Unconfirmed and no implementation is claimed.
+
+## Owner clarification: worker scope (2026-10-05)
+
+Glen confirmed that "workers" includes both Apiary member nodes and AI
+workers. The leader dispatches tasks to available workers from either group.
+This establishes the worker scope without deciding how availability,
+capabilities, identity, permissions, or dispatch transport are represented.
+It does not establish that every worker can execute every task, or that AI
+workers are Raft members. The preceding delivery-to-every-member requirement
+and the separation from ADR-0134 remain unchanged.
+
+The ADR remains Unconfirmed; this clarification does not establish an
+implemented worker integration or accept the provisional design as a whole.
