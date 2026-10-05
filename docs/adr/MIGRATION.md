@@ -191,7 +191,7 @@ for all 148 records, including this structurally converted batch.
 | [ADR-0146](0146-controlled-update-managerd-handoff.md) | Accepted | Pending Glen allocation | Remaining |
 | [ADR-0147](0147-automated-install-and-two-way-peer-authorized-join.md) | Unresolved | Pending Glen allocation | Remaining |
 | [ADR-0148](0148-colony-disk-size-floor.md) | Unresolved | Pending Glen allocation | Remaining |
-| [ADR-0149](0149-durable-colony-work-queue.md) | Unresolved | Pending Glen allocation | Remaining |
+| [ADR-0149](0149-durable-colony-work-queue.md) | Unconfirmed | Pending Glen allocation | Converted |
 
 ## Section review backlog
 
@@ -261,3 +261,13 @@ exist under another heading and needs manual review before conversion.
 - [ADR-0138](0138-bridge-svi-vlan-uplink.md): Consequences.
 - [ADR-0147](0147-automated-install-and-two-way-peer-authorized-join.md): Consequences.
 - [ADR-0148](0148-colony-disk-size-floor.md): Context, Decision, Consequences.
+
+## ADR-0149 follow-up
+
+ADR-0149 is structurally converted in a follow-up batch. Its explicit
+Unconfirmed status, status qualifications, provisional decision, and open
+questions remain unchanged. It does not supersede ADR-0134: replacement
+of that notification design remains an unanswered question. All historical
+implementation claims remain source claims, not new verification. The initial
+batch remains seven records; eight records are now structurally converted
+and 140 remain. Global number allocation remains outstanding.

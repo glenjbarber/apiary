@@ -1,6 +1,13 @@
 # ADR-0149: A durable, Raft-replicated work queue
 
-## Status
+Status: Unconfirmed
+Supersedes: None
+Superseded by: None
+Affected projects: Apiary
+Legacy identifier: ADR-0149 (Apiary)
+Loreloom identifier: Pending allocation by Glen
+
+## Status qualifications
 
 **UNCONFIRMED. Not accepted, not implemented, not reviewed.**
 
