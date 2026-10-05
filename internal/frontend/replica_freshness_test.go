@@ -89,9 +89,9 @@ func vmDetailFreshnessPage(t *testing.T, client rpcpb.ManagerServiceClient, peer
 
 // freshnessRow returns the one replica-freshness table row naming this
 // node, as a list of its cell values. Scoping to the row rather than
-// counting <td>unknown</td> across the page matters: the page is full of
-// other "unknown" cells belonging to other panels, so a page-wide count
-// passes on a table that renders nothing at all.
+// counting "unknown" cells across the page matters: the page is full of
+// other unknown cells belonging to other panels, so a page-wide count
+// passes against a table that renders nothing at all.
 func freshnessRow(t *testing.T, body, nodeID string) []string {
 	t.Helper()
 	idx := strings.Index(body, "<td>"+nodeID+"</td>")
@@ -103,7 +103,15 @@ func freshnessRow(t *testing.T, body, nodeID string) []string {
 		row = row[:end]
 	}
 	var cells []string
-	for _, chunk := range strings.Split(row, "<td>")[1:] {
+	// Split on the tag NAME rather than a bare "<td>", because the age
+	// cell carries a data-age-of attribute and is therefore not a bare
+	// tag. Attributes are then stripped so each value is the cell's text
+	// and nothing else. The helper stays correct whether or not a cell
+	// has attributes, which is the whole reason that one has one.
+	for _, chunk := range strings.Split(row, "<td")[1:] {
+		if gt := strings.Index(chunk, ">"); gt != -1 {
+			chunk = chunk[gt+1:]
+		}
 		if end := strings.Index(chunk, "</td>"); end != -1 {
 			cells = append(cells, chunk[:end])
 		}

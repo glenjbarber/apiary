@@ -1,0 +1,84 @@
+{{/* Replica freshness - the one HAST-evidence panel both the VM and the
+     jail detail pages render. It was duplicated verbatim in vm.html and
+     jail.html before this partial existed; it lives here now because the
+     staleness tick's script has to be identical on both pages, and three
+     copies of a timer is two more to forget to update.
+
+     Dot is pageData. The panel carries no role gating - a Viewer reads
+     exactly the evidence an Operator does - so both pages pass the same
+     dot and neither needs anything extra. */}}
+{{define "replica_freshness_panel"}}
+<section class="panel detail-card">
+  <h3>Replica freshness</h3>
+  <p><span class="badge {{.ReplicaFreshness.Verdict}}">{{.ReplicaFreshness.Verdict}}</span></p>
+  <p>{{.ReplicaFreshness.Explanation}}</p>
+  {{if .ReplicaFreshness.Configured}}
+  <table class="compact-table"><thead><tr><th>Node</th><th>Role</th><th>HAST status</th><th>Mode</th><th>Dirty extents</th><th>Observed</th><th>Last updated</th></tr></thead><tbody>
+    {{range .ReplicaFreshness.Observations}}<tr><td>{{.NodeID}}</td><td>{{if .Role}}{{.Role}}{{else}}unknown{{end}}</td><td>{{if .Error}}unknown: {{.Error}}{{else}}{{if .Status}}{{.Status}}{{else}}unknown{{end}}{{end}}</td><td>{{if .Replication}}{{.Replication}}{{else}}unknown{{end}}</td><td>{{if .Dirty}}{{.Dirty}}{{else}}unknown{{end}}</td><td>{{if .ObservedAt}}{{.ObservedAt}}{{else}}unknown{{end}}</td><td data-age-of="{{if .ObservedAtUnix}}{{.ObservedAtUnix}}{{end}}">{{if .ObservedAgo}}{{.ObservedAgo}}{{else}}unknown{{end}}</td></tr>{{end}}
+  </tbody></table>
+  <p class="muted">Apiary does not derive a numeric RPO from dirty extents. HAST status is point-in-time evidence, not a failover guarantee. "Last updated" is how long ago each node was actually observed, measured against this page's own clock; it stays unknown for a node that could not be reached rather than reading as current.</p>
+  {{/* The tick below advances only the AGE of evidence this page already
+       holds. It does not re-ask either node: the observation is fixed at
+       page load, and a reload is what fetches a new one. The two are kept
+       visibly distinct in the note above, because an age that keeps
+       counting up is not new evidence arriving.
+
+       The age is recomputed in JS rather than re-fetched because the
+       server has nothing to add - the answer is arithmetic on a timestamp
+       already in the DOM - and re-fetching would dial both nodes' HAST
+       again on every tick.
+
+       formatAge here MIRRORS formatObservationAge in
+       internal/frontend/cluster_overview.go. That duplication is real and
+       is the one thing that can drift: change a bucket boundary there and
+       a page open long enough will disagree with a freshly rendered one.
+       The mirroring is pinned by TestReplicaFreshnessPanelTickMirrorsTheServerFormatter. */}}
+  <script>
+    (function () {
+      var REFRESH_MS = 10000;
+      var MINUTE_MS = 60000;
+      var HOUR_MS = 3600000;
+      var DAY_MS = 86400000;
+
+      function formatAge(ms) {
+        // A negative age means the two clocks disagree, and the server
+        // has already rendered that as unknown. Leave the cell alone:
+        // there is no honest age to compute from two disagreeing clocks.
+        if (ms < 0) { return null; }
+        if (ms < MINUTE_MS) { return Math.floor(ms / 1000) + "s ago"; }
+        if (ms < HOUR_MS) { return Math.floor(ms / MINUTE_MS) + "m ago"; }
+        if (ms < DAY_MS) {
+          return Math.floor(ms / HOUR_MS) + "h " + Math.floor((ms % HOUR_MS) / MINUTE_MS) + "m ago";
+        }
+        return Math.floor(ms / DAY_MS) + "d " + Math.floor((ms % DAY_MS) / HOUR_MS) + "h ago";
+      }
+
+      var cells = document.querySelectorAll("[data-age-of]");
+      if (!cells.length) { return; }
+
+      function tick() {
+        var now = Date.now();
+        cells.forEach(function (cell) {
+          var raw = cell.getAttribute("data-age-of");
+          // An unobserved node carries an empty attribute and keeps its
+          // server-rendered unknown. A node that was never reached must
+          // not acquire an age here, or silence starts reading as current.
+          if (!raw) { return; }
+          var text = formatAge(now - (parseInt(raw, 10) * 1000));
+          if (text !== null) { cell.textContent = text; }
+        });
+      }
+
+      // No aria-live on the ticking cell, deliberately: a counter that
+      // changes every ten seconds inside a live region is noise a screen
+      // reader user cannot silence and did not ask for.
+      document.addEventListener("visibilitychange", function () {
+        if (!document.hidden) { tick(); }
+      });
+      tick();
+      setInterval(tick, REFRESH_MS);
+    })();
+  </script>
+  {{end}}
+</section>
+{{end}}

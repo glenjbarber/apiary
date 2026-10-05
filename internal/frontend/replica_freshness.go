@@ -34,6 +34,19 @@ type hastObservationView struct {
 	// observed" for a node that was never reached.
 	ObservedAgo string
 
+	// ObservedAtUnix is the raw instant behind ObservedAt and ObservedAgo,
+	// carried so the page's staleness tick can recompute the age in the
+	// browser without re-fetching. Zero when there is no observation, and
+	// the template writes that as an EMPTY data attribute rather than as
+	// 0 - 0 is a real epoch instant, and an attribute holding it would
+	// render as a fifty-year-old observation rather than as unknown.
+	//
+	// It is third because it is genuinely a third thing: the other two are
+	// what the operator reads, and this one exists only to let a rendered
+	// age keep up with the clock. Removing it is the way to remove the
+	// tick without touching either rendered value.
+	ObservedAtUnix int64
+
 	Error string
 }
 
@@ -91,8 +104,9 @@ func (s *Server) replicaFreshness(ctx context.Context, resourceType, id, owner, 
 			observation.Status = response.GetResourceStatus()
 			observation.Replication = response.GetReplication()
 			observation.Dirty = response.GetDirty()
-			if response.GetObservedAtUnix() > 0 {
-				observed := time.Unix(response.GetObservedAtUnix(), 0).UTC()
+			if unix := response.GetObservedAtUnix(); unix > 0 {
+				observed := time.Unix(unix, 0).UTC()
+				observation.ObservedAtUnix = unix
 				observation.ObservedAt = observed.Format(time.RFC3339)
 				// Relative to the moment both ends have been asked and
 				// answered, not to the start of the gather: an operator
