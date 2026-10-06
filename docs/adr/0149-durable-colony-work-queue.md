@@ -527,3 +527,14 @@ and the separation from ADR-0134 remain unchanged.
 
 The ADR remains Unconfirmed; this clarification does not establish an
 implemented worker integration or accept the provisional design as a whole.
+
+## Owner clarification: capability-based selection (2026-10-05)
+
+Glen confirmed that the leader selects available workers according to the
+capabilities each task requires. This applies to both Apiary member nodes
+and AI workers. Availability alone does not establish suitability for a task.
+
+Capability representation, how capabilities are established and kept current,
+and selection among multiple suitable available workers remain unspecified.
+This confirmation does not define a capability registry or change worker
+permissions. The ADR remains Unconfirmed and no implementation is claimed.
