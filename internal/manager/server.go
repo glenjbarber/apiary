@@ -53,7 +53,7 @@ type pamAuthenticator interface {
 }
 
 // defaultApplyTimeout is used when a request doesn't specify one.
-const defaultApplyTimeout = 10 * time.Second
+const defaultApplyTimeout = 6 * time.Second
 
 // isoManager is the subset of *isostore.Manager the server needs,
 // defined locally so tests can supply a fake - the same reasoning

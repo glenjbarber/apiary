@@ -13,7 +13,7 @@ import (
 )
 
 // defaultApplyTimeout is used when an ApplyRequest doesn't specify one.
-const defaultApplyTimeout = 10 * time.Second
+const defaultApplyTimeout = 6 * time.Second
 
 // Server implements the generated RaftInternalServer interface, translating
 // between Node/FSM types and the api/internal/raftd.proto messages.

@@ -45,9 +45,9 @@ import (
 
 // DefaultTimeout bounds every call this package makes. It is generous
 // for a unix socket on the same machine and short enough that a raftd
-// which has wedged is a ten-second pause in a command that was about
+// which has wedged is a six-second pause in a command that was about
 // to be refused anyway, rather than a hang an operator has to Ctrl-C.
-const DefaultTimeout = 10 * time.Second
+const DefaultTimeout = 6 * time.Second
 
 // Dial opens a client connection to this Comb's own raftd.
 //
