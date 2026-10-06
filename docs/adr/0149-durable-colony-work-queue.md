@@ -554,3 +554,16 @@ exclude its original worker from reconsideration.
 The mechanism for recalculation and the handling of an existing dispatch
 or claim remain unspecified. This requirement does not authorize duplicate
 execution. The ADR remains Unconfirmed and no implementation is claimed.
+
+## Owner clarification: failure after task start (2026-10-05)
+
+Glen confirmed that worker failure after starting a task also triggers
+worker-selection recalculation. The preceding recalculation requirement
+applies: include the original worker among candidates, subject to availability
+and required capabilities, while the leader selects the next queued task.
+
+Failure after task start does not establish whether the task produced effects
+or completed. This confirmation does not decide whether another worker resumes
+or restarts the task, how an existing claim is resolved, or how duplicate
+execution is prevented. Those recovery details remain open. The ADR remains
+Unconfirmed and no implementation is claimed.
