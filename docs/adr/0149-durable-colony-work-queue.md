@@ -581,3 +581,15 @@ not establish whether an interrupted operation completed or authorize
 repeating effects of uncertain outcome. Existing claim resolution and
 prevention of duplicate execution remain open. The ADR remains Unconfirmed
 and no implementation is claimed.
+
+## Owner clarification: safe restart fallback (2026-10-05)
+
+Glen confirmed that, when saved progress cannot be resumed, the task may
+restart only when repeating it is known to be safe. This resolves the
+preceding clarification's fallback question at the requirement level.
+Worker failure alone does not establish that restarting is safe.
+
+How repeat safety is established, and how tasks are handled when it cannot
+be established, remain unspecified. Claim resolution and prevention of
+duplicate execution also remain open. The ADR remains Unconfirmed and
+no implementation is claimed.
