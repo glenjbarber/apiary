@@ -567,3 +567,17 @@ or completed. This confirmation does not decide whether another worker resumes
 or restarts the task, how an existing claim is resolved, or how duplicate
 execution is prevented. Those recovery details remain open. The ADR remains
 Unconfirmed and no implementation is claimed.
+
+## Owner clarification: resume saved progress (2026-10-05)
+
+Glen confirmed that, after a worker fails following task start, its
+replacement should resume from saved progress where possible. This resolves
+the preceding clarification's resume-versus-restart question for cases where
+resumption is possible.
+
+The checkpoint format, how progress is verified and transferred, and the
+handling of tasks that cannot resume remain unspecified. Resumption does
+not establish whether an interrupted operation completed or authorize
+repeating effects of uncertain outcome. Existing claim resolution and
+prevention of duplicate execution remain open. The ADR remains Unconfirmed
+and no implementation is claimed.
