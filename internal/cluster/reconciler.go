@@ -53,7 +53,7 @@ const (
 // makes on its own initiative (as opposed to in direct response to an
 // external RPC, which sets its own timeout). These are best-effort
 // status updates - see applyPhase - so a short, fixed timeout is enough.
-const phaseApplyTimeout = 5 * time.Second
+const phaseApplyTimeout = 6 * time.Second
 
 // Phase string constants mirror api/internalpb's VMPhase enum, kept as
 // plain strings on VMPlacement so this package's core types don't need
