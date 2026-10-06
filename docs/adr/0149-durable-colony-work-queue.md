@@ -666,3 +666,28 @@ leader-transition reconciliation, and operator-review mechanics still need
 design. No code or wire fields are added by this clarification batch. Earlier
 open questions about payload structure, retention, and abandoned-task reasons
 are resolved only to the extent stated above.
+
+## Owner clarification: assignment safety batch (2026-10-06)
+
+Glen confirmed the following requirements during the next Q/A batch, then
+approved the remaining proposed default and requested an end to this batch
+of questioning. These requirements supplement the preceding batch.
+
+- If the leader cannot confirm revocation of the previous worker's execution
+  authority, hold that task for operator review while other tasks continue.
+- Worker authorization comes from trusted configuration, not from the
+  worker's own report.
+- A newly elected leader reconciles outstanding assignments before
+  dispatching those same tasks again.
+- Task identity remains stable across retries and reassignments. Record
+  each execution attempt separately.
+- Workers reject dispatches from a former leader once a new leader has
+  taken authority.
+- The six-attempt limit includes the initial execution: one initial attempt
+  and up to five retries. This clarifies the execution-attempt bound in this
+  ADR; the separate cross-project default-retry TODO remains distinct.
+
+The leader-identity and authority mechanism, revocation evidence, trusted
+configuration representation, and reconciliation algorithm remain design
+work. Approval of this Q/A batch does not establish implementation or accept
+unspecified mechanisms. The ADR remains Unconfirmed as a whole.
