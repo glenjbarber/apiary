@@ -1,8 +1,11 @@
 # ADR-0006: internal/zfs dataset lifecycle
 
-## Status
-
-Accepted
+Status: Accepted
+Supersedes: None
+Superseded by: None
+Affected projects: Apiary
+Legacy identifier: ADR-0006 (Apiary)
+Loreloom identifier: Pending allocation by Glen
 
 ## Context
 
@@ -12,7 +15,7 @@ than something portable to macOS/Linux dev machines. It will eventually
 back VM disk images and jail root filesystems with real ZFS datasets;
 this slice proves the dataset lifecycle primitives against real `zfs(8)`.
 
-## Decisions
+## Decision
 
 ### Every operation is scoped under a configured `Base` path, with strict name validation
 

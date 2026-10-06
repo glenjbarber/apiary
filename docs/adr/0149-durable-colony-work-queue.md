@@ -1,6 +1,13 @@
 # ADR-0149: A durable, Raft-replicated work queue
 
-## Status
+Status: Unconfirmed
+Supersedes: None
+Superseded by: None
+Affected projects: Apiary
+Legacy identifier: ADR-0149 (Apiary)
+Loreloom identifier: Pending allocation by Glen
+
+## Status qualifications
 
 **UNCONFIRMED. Not accepted, not implemented, not reviewed.**
 
@@ -464,3 +471,99 @@ design and not a cure, and it is the honest limit of this shape.
 6. **Does an abandoned item need a reason, on the item or only in the
    log?** ADR-0146 makes `HandoverColonyUpdate.reason` mandatory for
    exactly this reason. Probably yes; not decided.
+
+## Owner clarification (2026-10-05)
+
+Glen corrected the requirement's terminology to "delivered", not
+"replicated", and confirmed that queue contents are delivered to every
+member. This resolves the content-recipient part of historical question 2
+and open question 1 above. The earlier unanswered response remains history.
+
+This clarification does not decide which members consume work. Leader-only
+consumption remains a proposal awaiting confirmation. Delivery to every
+member does not by itself specify storage, persistence, transport, ordering,
+or a delivery guarantee. The earlier replicated-FSM design remains a
+provisional design and must be reviewed against this clarified requirement.
+The record remains Unconfirmed; the other open questions remain outstanding.
+
+## Owner clarification: consumption (2026-10-05)
+
+Glen confirmed that only the leader consumes work. Together with the preceding
+clarification, the requirement is: queue contents are delivered to every
+member, and only the leader consumes the work. Historical question 2 and
+open question 1 are now resolved at the requirement level. This supersedes
+the preceding clarification's statement that consumption awaits confirmation.
+
+The remaining design questions stay open. This confirmation does not accept
+the entire ADR or establish implementation; its status remains Unconfirmed.
+
+## Owner clarification: dispatch and notification scope (2026-10-05)
+
+Glen answered no to replacing ADR-0134's proposed in-memory notification
+pending set. Historical question 3 and open question 2 are resolved: this
+queue does not replace that pending set and does not supersede ADR-0134.
+
+Glen specified: "The leader should dispatch any tasks to available workers."
+The leader consumes the queue to dispatch tasks; available workers execute
+the dispatched tasks. The preceding leader-only consumption clarification
+must therefore not be read as requiring the leader to execute every task.
+Queue contents are still delivered to every member, as previously confirmed.
+
+Worker availability, selection, dispatch acknowledgement, and recovery after
+leader or worker loss remain unspecified. The earlier provisional single-Comb
+execution and claim design needs review against this dispatch requirement;
+no new scheduling or recovery mechanism is accepted by this clarification.
+The ADR remains Unconfirmed and no implementation is claimed.
+
+## Owner clarification: worker scope (2026-10-05)
+
+Glen confirmed that "workers" includes both Apiary member nodes and AI
+workers. The leader dispatches tasks to available workers from either group.
+This establishes the worker scope without deciding how availability,
+capabilities, identity, permissions, or dispatch transport are represented.
+It does not establish that every worker can execute every task, or that AI
+workers are Raft members. The preceding delivery-to-every-member requirement
+and the separation from ADR-0134 remain unchanged.
+
+The ADR remains Unconfirmed; this clarification does not establish an
+implemented worker integration or accept the provisional design as a whole.
+
+## Owner clarification: capability-based selection (2026-10-05)
+
+Glen confirmed that the leader selects available workers according to the
+capabilities each task requires. This applies to both Apiary member nodes
+and AI workers. Availability alone does not establish suitability for a task.
+
+Capability representation, how capabilities are established and kept current,
+and selection among multiple suitable available workers remain unspecified.
+This confirmation does not define a capability registry or change worker
+permissions. The ADR remains Unconfirmed and no implementation is claimed.
+
+## Owner clarification: selection recalculation (2026-10-05)
+
+When worker selection for a task needs recalculation, the leader includes
+the original worker among the candidates. The original worker remains
+subject to the same availability and task-capability requirements as the
+other candidates; inclusion does not guarantee selection.
+
+While that recalculation happens, the leader selects the next queued task.
+Recalculation for the original task therefore does not block selection of
+the next task. This clarification does not cancel the original task or
+exclude its original worker from reconsideration.
+
+The mechanism for recalculation and the handling of an existing dispatch
+or claim remain unspecified. This requirement does not authorize duplicate
+execution. The ADR remains Unconfirmed and no implementation is claimed.
+
+## Owner clarification: failure after task start (2026-10-05)
+
+Glen confirmed that worker failure after starting a task also triggers
+worker-selection recalculation. The preceding recalculation requirement
+applies: include the original worker among candidates, subject to availability
+and required capabilities, while the leader selects the next queued task.
+
+Failure after task start does not establish whether the task produced effects
+or completed. This confirmation does not decide whether another worker resumes
+or restarts the task, how an existing claim is resolved, or how duplicate
+execution is prevented. Those recovery details remain open. The ADR remains
+Unconfirmed and no implementation is claimed.

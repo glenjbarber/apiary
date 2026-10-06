@@ -1,8 +1,11 @@
 # ADR-0003: raftd multi-node clustering (join/remove)
 
-## Status
-
-Accepted
+Status: Accepted
+Supersedes: None
+Superseded by: None
+Affected projects: Apiary
+Legacy identifier: ADR-0003 (Apiary)
+Loreloom identifier: Pending allocation by Glen
 
 ## Context
 
@@ -14,7 +17,7 @@ flag so a real `raftd` process can join an existing cluster on its own
 rather than requiring an external orchestrator to drive membership
 changes by hand.
 
-## Decisions
+## Decision
 
 ### Membership changes are exposed as new RaftInternal RPCs, not a separate service
 
