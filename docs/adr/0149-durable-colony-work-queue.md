@@ -538,3 +538,19 @@ Capability representation, how capabilities are established and kept current,
 and selection among multiple suitable available workers remain unspecified.
 This confirmation does not define a capability registry or change worker
 permissions. The ADR remains Unconfirmed and no implementation is claimed.
+
+## Owner clarification: selection recalculation (2026-10-05)
+
+When worker selection for a task needs recalculation, the leader includes
+the original worker among the candidates. The original worker remains
+subject to the same availability and task-capability requirements as the
+other candidates; inclusion does not guarantee selection.
+
+While that recalculation happens, the leader selects the next queued task.
+Recalculation for the original task therefore does not block selection of
+the next task. This clarification does not cancel the original task or
+exclude its original worker from reconsideration.
+
+The mechanism for recalculation and the handling of an existing dispatch
+or claim remain unspecified. This requirement does not authorize duplicate
+execution. The ADR remains Unconfirmed and no implementation is claimed.
