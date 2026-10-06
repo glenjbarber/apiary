@@ -47,3 +47,19 @@ fresh healthy evidence after one maintenance event before considering another.
 - The planner can inform sequencing but does not coordinate or execute it.
 - Numeric RPO and automated maintenance remain future work requiring stronger
   measurements and explicit action guardrails.
+
+## Implementation note: 2026-10-06
+
+Commits `18d6120` and `261e915`, present in the primary checkout's history,
+add relative observation ages to the VM and jail replica-freshness tables.
+The shared `_replica_freshness.html` panel advances those displayed ages
+every ten seconds using the observation timestamps already on the page.
+Returning to a visible browser tab also updates the ages.
+
+The counter does not fetch new HAST observations or recompute the health
+verdict. Reloading the page fetches new evidence. Missing timestamps remain
+unknown, and a negative age caused by clock disagreement is not clamped to
+zero. These changes do not establish automatic failover or failover readiness.
+
+Verification for this note: inspected the commit diffs and existing tests.
+No runtime tests or live cluster checks were performed during this update.
