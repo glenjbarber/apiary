@@ -1247,6 +1247,19 @@ func TestManagerdRestartHandoff_TheStepIndexIsTheOperationsOwn(t *testing.T) {
 		}
 	}
 
+	// Confirmation reads the target's local Raft state. The coordinator's
+	// successful advances do not imply that this follower has applied them.
+	// Wait for the exact history this test asks the replacement to extend.
+	eventually(t, 10*time.Second, func() bool {
+		state, err := c.servers[target].raft.GetColonyUpdateStateLocal(context.Background(), "op-handoff-4")
+		if err != nil || state.GetError() != "" || state.GetActive() == nil {
+			return false
+		}
+		steps := state.GetActive().GetSteps()
+		return state.GetActive().GetOperationId() == "op-handoff-4" && len(steps) == 2 &&
+			steps[0].GetStep() == "step-aside" && steps[1].GetStep() == "gather-facts"
+	})
+
 	if err := NewManagerdHandoffStore(c.dirs[target]).Save(ManagerdHandoffRecord{
 		OperationID: "op-handoff-4", NodeID: c.ids[target], Step: "issue-restart",
 		Service: managerdServiceName, LeaseID: 88, ExpectedBuild: "comb-build-1",
@@ -1302,6 +1315,15 @@ func TestManagerdRestartHandoff_WrongBuildIsFailedNotConfirmed(t *testing.T) {
 	c := newHandoffCluster(t, 3)
 	coordIdx, target := coordinatorAndTarget(t, c)
 	acquireOperation(t, c, c.ids[coordIdx], "op-handoff-5")
+
+	// The wrong-build assertion requires the replacement to know which
+	// operation is active. A leader-side grant alone does not establish
+	// that the target follower has applied it yet.
+	eventually(t, 10*time.Second, func() bool {
+		state, err := c.servers[target].raft.GetColonyUpdateStateLocal(context.Background(), "op-handoff-5")
+		return err == nil && state.GetError() == "" && state.GetActive() != nil &&
+			state.GetActive().GetOperationId() == "op-handoff-5"
+	})
 
 	// The marker says the restart was scheduled against the build that
 	// was on disk; the log now claims a different one is running, which

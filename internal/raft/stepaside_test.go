@@ -18,17 +18,16 @@ import (
 func threeNodeCluster(t *testing.T) []*Node {
 	t.Helper()
 
-	cfgs := make([]Config, 3)
-	for i := range cfgs {
-		cfgs[i] = Config{
+	// Bind each node before selecting the next address. Selecting all
+	// addresses first closes every temporary listener, so the OS can give
+	// two nodes the same port before either Raft listener claims it.
+	nodes := make([]*Node, 3)
+	for i := range nodes {
+		cfg := Config{
 			NodeID:   "n" + string(rune('1'+i)),
 			DataDir:  t.TempDir(),
 			BindAddr: freeLoopbackAddr(t),
 		}
-	}
-
-	nodes := make([]*Node, len(cfgs))
-	for i, cfg := range cfgs {
 		n, err := New(cfg)
 		if err != nil {
 			t.Fatalf("New(%s) error: %v", cfg.NodeID, err)
