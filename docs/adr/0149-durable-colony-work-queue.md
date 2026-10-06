@@ -567,3 +567,127 @@ or completed. This confirmation does not decide whether another worker resumes
 or restarts the task, how an existing claim is resolved, or how duplicate
 execution is prevented. Those recovery details remain open. The ADR remains
 Unconfirmed and no implementation is claimed.
+
+## Owner clarification: resume saved progress (2026-10-05)
+
+Glen confirmed that, after a worker fails following task start, its
+replacement should resume from saved progress where possible. This resolves
+the preceding clarification's resume-versus-restart question for cases where
+resumption is possible.
+
+The checkpoint format, how progress is verified and transferred, and the
+handling of tasks that cannot resume remain unspecified. Resumption does
+not establish whether an interrupted operation completed or authorize
+repeating effects of uncertain outcome. Existing claim resolution and
+prevention of duplicate execution remain open. The ADR remains Unconfirmed
+and no implementation is claimed.
+
+## Owner clarification: safe restart fallback (2026-10-05)
+
+Glen confirmed that, when saved progress cannot be resumed, the task may
+restart only when repeating it is known to be safe. This resolves the
+preceding clarification's fallback question at the requirement level.
+Worker failure alone does not establish that restarting is safe.
+
+How repeat safety is established, and how tasks are handled when it cannot
+be established, remain unspecified. Claim resolution and prevention of
+duplicate execution also remain open. The ADR remains Unconfirmed and
+no implementation is claimed.
+
+## Owner clarification: queued Q/A batch (2026-10-05 through 2026-10-06)
+
+Glen requested that updates be queued until the Q/A was complete. The
+following confirmed requirements are recorded together. They refine the
+provisional design and earlier open questions; the earlier text remains
+history. The ADR remains Unconfirmed as a whole.
+
+### Recovery and execution authority
+
+- If a task cannot resume and restarting cannot be established as safe,
+  it waits for operator review while the leader continues dispatching other
+  tasks. This resolves the earlier unspecified handling of unknown repeat
+  safety at the requirement level.
+- A replacement worker verifies saved progress before resuming.
+- Before reassigning a task, revoke the previous worker's authority to
+  execute it. How revocation is enforced remains to be designed.
+- An abandoned task requires a recorded reason.
+
+### Task structure and history
+
+- Each task type has a defined payload schema. This supersedes the earlier
+  proposal of unrestricted opaque payloads at the requirement level; the
+  encoding and schema-versioning mechanism remain open.
+- Finished tasks are retained for history, subject to a configurable
+  retention limit. Its default is decided later.
+- Record each dispatch, acceptance, reassignment, and completion in the
+  task's history.
+- Each task declares the checks required to verify its completion. A
+  worker's completion report remains unverified until those checks pass.
+
+### Worker selection and dispatch
+
+- Workers report availability and capabilities through a shared registry.
+  Capabilities must be verified before the leader relies on them for
+  assignment.
+- Workers must be authorized to perform a task, as well as available and
+  capable. Matching capabilities does not grant permission.
+- Stale worker reports make a worker unavailable for new assignments, but
+  retain that worker in the recalculation pool for retry. Being a candidate
+  does not waive availability, capability, or authorization requirements.
+- A worker acknowledges accepting a task before the leader marks it assigned.
+- An acceptance timeout triggers selection recalculation while the leader
+  continues selecting the next queued task.
+- Select tasks in FIFO order, skipping tasks that currently have no suitable
+  available worker.
+- A newly elected leader recovers pending tasks and outstanding assignments
+  from the durable queue. Recovery must respect the confirmed authority and
+  repeat-safety requirements; it does not itself authorize duplicate execution.
+
+### Retry bound and related TODO
+
+The provisional execution-attempt limit remains six. Glen briefly requested
+seven, then explicitly corrected that answer to six. No seven-attempt limit
+is adopted.
+
+Glen separately requested a cross-project Notion TODO to make default retry
+counts 6 and default timeouts 6 seconds where appropriate, in memory of Ken
+Smith, the FreeBSD Release Engineering Lead before him. Glen stated that
+FreeBSD 6.2 was his first FreeBSD OS. The TODO is recorded at
+https://app.notion.com/p/3f1f5fa187af81f7a68eeed13279d207.
+This is a separate pending task, not an implemented default change. A count
+of retries must not silently be equated with total execution attempts.
+
+### Remaining design work
+
+The first concrete task type to use this queue remains undecided. Delivery
+transport, persistence design, schema encoding, registry verification and
+freshness rules, checkpoint verification, enforceable authority revocation,
+leader-transition reconciliation, and operator-review mechanics still need
+design. No code or wire fields are added by this clarification batch. Earlier
+open questions about payload structure, retention, and abandoned-task reasons
+are resolved only to the extent stated above.
+
+## Owner clarification: assignment safety batch (2026-10-06)
+
+Glen confirmed the following requirements during the next Q/A batch, then
+approved the remaining proposed default and requested an end to this batch
+of questioning. These requirements supplement the preceding batch.
+
+- If the leader cannot confirm revocation of the previous worker's execution
+  authority, hold that task for operator review while other tasks continue.
+- Worker authorization comes from trusted configuration, not from the
+  worker's own report.
+- A newly elected leader reconciles outstanding assignments before
+  dispatching those same tasks again.
+- Task identity remains stable across retries and reassignments. Record
+  each execution attempt separately.
+- Workers reject dispatches from a former leader once a new leader has
+  taken authority.
+- The six-attempt limit includes the initial execution: one initial attempt
+  and up to five retries. This clarifies the execution-attempt bound in this
+  ADR; the separate cross-project default-retry TODO remains distinct.
+
+The leader-identity and authority mechanism, revocation evidence, trusted
+configuration representation, and reconciliation algorithm remain design
+work. Approval of this Q/A batch does not establish implementation or accept
+unspecified mechanisms. The ADR remains Unconfirmed as a whole.
