@@ -5,7 +5,7 @@ Supersedes: None
 Superseded by: None
 Affected projects: Apiary
 Legacy identifier: ADR-0149 (Apiary)
-Loreloom identifier: Pending allocation by Glen
+Shared register identifier: Pending allocation by Glen
 
 ## Status qualifications
 
