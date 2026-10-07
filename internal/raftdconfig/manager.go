@@ -90,6 +90,17 @@ type Config struct {
 	RaftTLSCert string `json:"raft_tls_cert,omitempty"`
 	RaftTLSKey  string `json:"raft_tls_key,omitempty"`
 	RaftTLSCA   string `json:"raft_tls_ca,omitempty"`
+
+	// PreferredLeaderID, if set, names the node_id that should hold
+	// raft leadership whenever it can be given to them safely (see
+	// raftnode.Config.PreferredLeaderID and ADR-0150). Empty - the
+	// default - means no preference: leadership is left entirely to
+	// raft's own election process, unchanged from before this field
+	// existed. Safe to set to a node that has not joined yet, or to
+	// leave set after that node is later removed; see
+	// raftnode.Node.PreferredLeaderTransfer's own doc comment for why
+	// both are treated as "nothing to do" rather than an error.
+	PreferredLeaderID string `json:"preferred_leader_id,omitempty"`
 }
 
 // Defaults matches every flag's own former default value exactly, so
@@ -269,6 +280,7 @@ func validate(cfg Config) error {
 		{"raft_tls_key", cfg.RaftTLSKey},
 		{"raft_tls_ca", cfg.RaftTLSCA},
 		{"internal_token", cfg.InternalToken},
+		{"preferred_leader_id", cfg.PreferredLeaderID},
 	} {
 		if err := validateNoNewline(f.name, f.value); err != nil {
 			return err
