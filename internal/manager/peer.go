@@ -742,6 +742,17 @@ func (p *PeerReporter) PurgeStaleAssumptionResults(ctx context.Context, addr str
 // above, since a Create/Update/Delete response carries the resulting
 // record the caller needs (e.g. the web UI redirecting on a newly
 // created VM's id).
+// CreateCell mirrors CreateVM/CreateJail's own forwarding exactly -
+// see ADR-0150.
+func (p *PeerReporter) CreateCell(ctx context.Context, addr string, req *rpcpb.CreateCellRequest) (*rpcpb.CreateCellResponse, error) {
+	conn, client, err := p.dial(addr)
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close()
+	return client.CreateCell(ctx, req)
+}
+
 func (p *PeerReporter) CreateVM(ctx context.Context, addr string, req *rpcpb.CreateVMRequest) (*rpcpb.CreateVMResponse, error) {
 	conn, client, err := p.dial(addr)
 	if err != nil {

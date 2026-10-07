@@ -22,6 +22,7 @@ import (
 	"github.com/glenjbarber/apiary/internal/assumptionregister"
 	"github.com/glenjbarber/apiary/internal/assumptions"
 	"github.com/glenjbarber/apiary/internal/buildgate"
+	"github.com/glenjbarber/apiary/internal/cellrecommend"
 	"github.com/glenjbarber/apiary/internal/cluster"
 	"github.com/glenjbarber/apiary/internal/frontendconfig"
 	"github.com/glenjbarber/apiary/internal/guardrail"
@@ -112,6 +113,7 @@ type PeerForwarder interface {
 	ListNetworks(ctx context.Context, addr string) (*rpcpb.ListNetworksResponse, error)
 	ListISOs(ctx context.Context, addr string) (*rpcpb.ListISOsResponse, error)
 
+	CreateCell(ctx context.Context, addr string, req *rpcpb.CreateCellRequest) (*rpcpb.CreateCellResponse, error)
 	CreateVM(ctx context.Context, addr string, req *rpcpb.CreateVMRequest) (*rpcpb.CreateVMResponse, error)
 	UpdateVM(ctx context.Context, addr string, req *rpcpb.UpdateVMRequest) (*rpcpb.UpdateVMResponse, error)
 	DeleteVM(ctx context.Context, addr string, req *rpcpb.DeleteVMRequest) (*rpcpb.DeleteVMResponse, error)
@@ -4339,6 +4341,115 @@ func (s *Server) applyJailCommand(ctx context.Context, cmd *internalpb.Command, 
 
 // CreateJail implements rpcpb.ManagerServiceServer. See CreateNetwork's
 // doc comment for the forwarding rationale, identical here.
+// RecommendCellType implements rpcpb.ManagerServiceServer (ADR-0150).
+// Pure computation (internal/cellrecommend) - no raft Apply, no leader
+// forwarding, answerable by any node, exactly like HostStats/
+// ClusterHealth/whynot's own RPCs.
+func (s *Server) RecommendCellType(ctx context.Context, req *rpcpb.RecommendCellTypeRequest) (*rpcpb.RecommendCellTypeResponse, error) {
+	return cellrecommend.Recommend(req.GetWorkload()), nil
+}
+
+// CreateCell implements rpcpb.ManagerServiceServer (ADR-0150). It
+// resolves cell_type via the same internal/cellrecommend evaluation
+// RecommendCellType exposes, builds the corresponding VMDefinition or
+// JailDefinition from the request's kind-agnostic fields, and from
+// there proceeds exactly as CreateVM/CreateJail already do - no new FSM
+// command kind exists for this; it issues the existing
+// Command_CreateVm/Command_CreateJail internally (see ADR-0150's own
+// "Server-side flow" section).
+func (s *Server) CreateCell(ctx context.Context, req *rpcpb.CreateCellRequest) (*rpcpb.CreateCellResponse, error) {
+	if req.GetId() == "" {
+		return &rpcpb.CreateCellResponse{Error: "CreateCell: id must be set"}, nil
+	}
+	if req.GetNodeId() == "" {
+		// v1 decision: node_id is required - see CreateCell's own doc
+		// comment in manager.proto for why this deviates from ADR-0150's
+		// "optional, Apiary picks" proposal (no placement/scheduling logic
+		// exists anywhere in this codebase today).
+		return &rpcpb.CreateCellResponse{Error: "CreateCell: node_id must be set"}, nil
+	}
+	if req.GetWorkloadHint() == nil {
+		// v1 decision: workload_hint is required, not merely optional as
+		// ADR-0150 proposed - CreateCell's whole point is Apiary deciding
+		// vm vs. jail, and there is no other signal in this request to
+		// decide from. A caller that doesn't want to describe a workload
+		// should call CreateVM/CreateJail directly instead.
+		return &rpcpb.CreateCellResponse{Error: "CreateCell: workload_hint must be set"}, nil
+	}
+
+	rec := cellrecommend.Recommend(req.GetWorkloadHint())
+	cellType := rec.GetRecommendedCellType()
+
+	switch cellType {
+	case rpcpb.CellType_CELL_TYPE_VM:
+		vm := &rpcpb.VMDefinition{
+			Id:            req.GetId(),
+			Name:          req.GetName(),
+			NodeId:        req.GetNodeId(),
+			Vcpus:         req.GetResourceProfile().GetVcpus(),
+			MemoryMb:      req.GetResourceProfile().GetMemoryMb(),
+			DiskSizeMb:    req.GetResourceProfile().GetDiskSizeMb(),
+			NetworkId:     req.GetNetworkId(),
+			FirewallRules: req.GetFirewallRules(),
+		}
+		cmd := &internalpb.Command{
+			Op: &internalpb.Command_CreateVm{CreateVm: &internalpb.CreateVM{Vm: toInternalVM(vm)}},
+		}
+		result, appErr, leaderHint := s.applyCommand(ctx, cmd, req.GetTimeoutMs())
+		var ferr error
+		if leaderHint != "" && s.peers != nil {
+			var fwd *rpcpb.CreateCellResponse
+			if fwd, ferr = s.peers.CreateCell(ctx, s.peerManagerdAddr(leaderHint), req); ferr == nil {
+				return fwd, nil
+			}
+		}
+		return &rpcpb.CreateCellResponse{
+			CellId:     req.GetId(),
+			CellType:   rpcpb.CellType_CELL_TYPE_VM,
+			Vm:         fromInternalVM(result),
+			Error:      augmentForwardError(appErr, leaderHint, ferr),
+			LeaderHint: leaderHint,
+		}, nil
+
+	case rpcpb.CellType_CELL_TYPE_JAIL:
+		jail := &rpcpb.JailDefinition{
+			Id:            req.GetId(),
+			Name:          req.GetName(),
+			NodeId:        req.GetNodeId(),
+			NetworkId:     req.GetNetworkId(),
+			FirewallRules: req.GetFirewallRules(),
+			// resource_profile.vcpus/memory_mb have no JailDefinition
+			// counterpart and are silently dropped here - see
+			// CreateCellRequest.resource_profile's own doc comment.
+		}
+		cmd := &internalpb.Command{
+			Op: &internalpb.Command_CreateJail{CreateJail: &internalpb.CreateJail{Jail: toInternalJail(jail)}},
+		}
+		result, appErr, leaderHint := s.applyJailCommand(ctx, cmd, req.GetTimeoutMs())
+		var ferr error
+		if leaderHint != "" && s.peers != nil {
+			var fwd *rpcpb.CreateCellResponse
+			if fwd, ferr = s.peers.CreateCell(ctx, s.peerManagerdAddr(leaderHint), req); ferr == nil {
+				return fwd, nil
+			}
+		}
+		return &rpcpb.CreateCellResponse{
+			CellId:     req.GetId(),
+			CellType:   rpcpb.CellType_CELL_TYPE_JAIL,
+			Jail:       fromInternalJail(result),
+			Error:      augmentForwardError(appErr, leaderHint, ferr),
+			LeaderHint: leaderHint,
+		}, nil
+
+	default:
+		// cellrecommend.Recommend never actually returns
+		// CELL_TYPE_UNSPECIFIED (every path picks VM or JAIL), but this
+		// stays fail-closed rather than assuming that invariant holds
+		// forever.
+		return &rpcpb.CreateCellResponse{Error: fmt.Sprintf("CreateCell: could not resolve a cell type for this workload (got %v)", cellType)}, nil
+	}
+}
+
 func (s *Server) CreateJail(ctx context.Context, req *rpcpb.CreateJailRequest) (*rpcpb.CreateJailResponse, error) {
 	cmd := &internalpb.Command{
 		Op: &internalpb.Command_CreateJail{CreateJail: &internalpb.CreateJail{Jail: toInternalJail(req.GetJail())}},

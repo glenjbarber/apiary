@@ -162,20 +162,28 @@ var requiredRole = map[string]Role{
 	"/apiary.rpc.v1.ManagerService/PurgeStaleAssumptionResults": RoleOperator,
 	"/apiary.rpc.v1.ManagerService/IssueOriginCertificate":      RoleAdmin,
 	"/apiary.rpc.v1.ManagerService/CreateJail":                  RoleOperator,
-	"/apiary.rpc.v1.ManagerService/UpdateJail":                  RoleOperator,
-	"/apiary.rpc.v1.ManagerService/DeleteJail":                  RoleOperator,
-	"/apiary.rpc.v1.ManagerService/MigrateJail":                 RoleOperator,
-	"/apiary.rpc.v1.ManagerService/SetJailDesiredState":         RoleOperator,
-	"/apiary.rpc.v1.ManagerService/SetJailHostname":             RoleOperator,
-	"/apiary.rpc.v1.ManagerService/CreateNetwork":               RoleOperator,
-	"/apiary.rpc.v1.ManagerService/DeleteNetwork":               RoleOperator,
-	"/apiary.rpc.v1.ManagerService/SetNetworkName":              RoleOperator,
-	"/apiary.rpc.v1.ManagerService/UploadISO":                   RoleOperator,
-	"/apiary.rpc.v1.ManagerService/DeleteISO":                   RoleOperator,
-	"/apiary.rpc.v1.ManagerService/ReportVMPhase":               RoleOperator,
-	"/apiary.rpc.v1.ManagerService/ReportVMTeardownComplete":    RoleOperator,
-	"/apiary.rpc.v1.ManagerService/ReportJailPhase":             RoleOperator,
-	"/apiary.rpc.v1.ManagerService/ReportJailTeardownComplete":  RoleOperator,
+	// CreateCell/RecommendCellType (ADR-0150). CreateCell mirrors
+	// CreateVM/CreateJail's own Operator tier exactly - it is a write,
+	// just one that resolves cell_type internally first.
+	// RecommendCellType is Viewer-tier, matching every other read-only
+	// advisory RPC (e.g. ClusterHealth) - it mutates nothing and
+	// consults no cluster state.
+	"/apiary.rpc.v1.ManagerService/CreateCell":                 RoleOperator,
+	"/apiary.rpc.v1.ManagerService/RecommendCellType":          RoleViewer,
+	"/apiary.rpc.v1.ManagerService/UpdateJail":                 RoleOperator,
+	"/apiary.rpc.v1.ManagerService/DeleteJail":                 RoleOperator,
+	"/apiary.rpc.v1.ManagerService/MigrateJail":                RoleOperator,
+	"/apiary.rpc.v1.ManagerService/SetJailDesiredState":        RoleOperator,
+	"/apiary.rpc.v1.ManagerService/SetJailHostname":            RoleOperator,
+	"/apiary.rpc.v1.ManagerService/CreateNetwork":              RoleOperator,
+	"/apiary.rpc.v1.ManagerService/DeleteNetwork":              RoleOperator,
+	"/apiary.rpc.v1.ManagerService/SetNetworkName":             RoleOperator,
+	"/apiary.rpc.v1.ManagerService/UploadISO":                  RoleOperator,
+	"/apiary.rpc.v1.ManagerService/DeleteISO":                  RoleOperator,
+	"/apiary.rpc.v1.ManagerService/ReportVMPhase":              RoleOperator,
+	"/apiary.rpc.v1.ManagerService/ReportVMTeardownComplete":   RoleOperator,
+	"/apiary.rpc.v1.ManagerService/ReportJailPhase":            RoleOperator,
+	"/apiary.rpc.v1.ManagerService/ReportJailTeardownComplete": RoleOperator,
 
 	// PushISOTo is peer-only, like the Report* RPCs above and
 	// PushJailTemplateTo below: a node asks a peer to push it a file the

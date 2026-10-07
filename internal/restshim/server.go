@@ -123,6 +123,15 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("DELETE /v1/vms/{id}", s.handleDeleteVM)
 	s.mux.HandleFunc("POST /v1/vms/{id}/migrate", s.handleMigrateVM)
 
+	// CreateCell/RecommendCellType (ADR-0150). POST /v1/cells/recommend
+	// is a read-only advisory call, not a resource creation, but uses
+	// POST rather than GET because the request body (WorkloadDescription)
+	// is a structured object, not something that fits cleanly in query
+	// parameters - the same reasoning every other structured-body route
+	// here already follows.
+	s.mux.HandleFunc("POST /v1/cells", s.handleCreateCell)
+	s.mux.HandleFunc("POST /v1/cells/recommend", s.handleRecommendCellType)
+
 	s.mux.HandleFunc("POST /v1/jails", s.handleCreateJail)
 	s.mux.HandleFunc("GET /v1/jails", s.handleListJails)
 	s.mux.HandleFunc("GET /v1/jails/{id}", s.handleGetJail)
@@ -282,6 +291,45 @@ func (s *Server) handleCreateVM(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusCreated, fromRPCVM(resp.GetVm()))
+}
+
+// handleCreateCell implements POST /v1/cells (ADR-0150) - mirrors
+// handleCreateVM's own shape exactly.
+func (s *Server) handleCreateCell(w http.ResponseWriter, r *http.Request) {
+	var body cell
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeJSON(w, http.StatusBadRequest, errorBody{Error: "invalid JSON body: " + err.Error()})
+		return
+	}
+
+	resp, err := s.client.CreateCell(authContext(r), toRPCCreateCellRequest(body))
+	if err != nil || resp.GetError() != "" {
+		s.writeError(w, err, resp.GetError(), resp.GetLeaderHint())
+		return
+	}
+	writeJSON(w, http.StatusCreated, fromRPCCreateCellResponse(resp))
+}
+
+// handleRecommendCellType implements POST /v1/cells/recommend
+// (ADR-0150). Read-only: a transport-level failure or an empty-but-
+// present error string both report through writeError exactly as every
+// other route does, even though RecommendCellType itself can presently
+// never set CreateCellResponse.Error (there is nothing to reject - see
+// cellrecommend.Recommend) - this keeps the handler honest if that ever
+// changes, rather than assuming the RPC can't fail.
+func (s *Server) handleRecommendCellType(w http.ResponseWriter, r *http.Request) {
+	var body workloadDescription
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeJSON(w, http.StatusBadRequest, errorBody{Error: "invalid JSON body: " + err.Error()})
+		return
+	}
+
+	resp, err := s.client.RecommendCellType(authContext(r), &rpcpb.RecommendCellTypeRequest{Workload: toRPCWorkload(&body)})
+	if err != nil {
+		s.writeError(w, err, "", "")
+		return
+	}
+	writeJSON(w, http.StatusOK, fromRPCRecommendation(resp))
 }
 
 func (s *Server) handleUpdateVM(w http.ResponseWriter, r *http.Request) {
