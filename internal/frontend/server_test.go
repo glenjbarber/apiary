@@ -928,6 +928,14 @@ func (f *fakeClient) UpdateJail(context.Context, *rpcpb.UpdateJailRequest, ...gr
 	return &rpcpb.UpdateJailResponse{}, nil
 }
 
+func (f *fakeClient) CreateCell(context.Context, *rpcpb.CreateCellRequest, ...grpc.CallOption) (*rpcpb.CreateCellResponse, error) {
+	return &rpcpb.CreateCellResponse{}, nil
+}
+
+func (f *fakeClient) RecommendCellType(context.Context, *rpcpb.RecommendCellTypeRequest, ...grpc.CallOption) (*rpcpb.RecommendCellTypeResponse, error) {
+	return &rpcpb.RecommendCellTypeResponse{}, nil
+}
+
 func (f *fakeClient) DeleteJail(_ context.Context, in *rpcpb.DeleteJailRequest, _ ...grpc.CallOption) (*rpcpb.DeleteJailResponse, error) {
 	f.lastDeleteJailReq = in
 	if f.deleteJailResp != nil {

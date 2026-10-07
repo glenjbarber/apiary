@@ -329,3 +329,167 @@ func fromRPCClusterHealth(r *rpcpb.ClusterHealthResponse) clusterHealth {
 	}
 	return out
 }
+
+// workloadDescription is the REST-facing JSON shape for ADR-0150's
+// WorkloadDescription, mirroring vm/jail's own decoupling reasoning.
+type workloadDescription struct {
+	Description                    string `json:"description,omitempty"`
+	NeedsFullIsolation             bool   `json:"needs_full_isolation,omitempty"`
+	NeedsCustomKernelOrOS          bool   `json:"needs_custom_kernel_or_os,omitempty"`
+	EstimatedVCPUs                 uint32 `json:"estimated_vcpus,omitempty"`
+	EstimatedMemoryMB              uint64 `json:"estimated_memory_mb,omitempty"`
+	EstimatedDiskMB                uint64 `json:"estimated_disk_mb,omitempty"`
+	ExpectsLiveMigrationOrSnapshot bool   `json:"expects_live_migration_or_snapshot,omitempty"`
+	DensityPriority                bool   `json:"density_priority,omitempty"`
+}
+
+func toRPCWorkload(w *workloadDescription) *rpcpb.WorkloadDescription {
+	if w == nil {
+		return nil
+	}
+	return &rpcpb.WorkloadDescription{
+		Description:                    w.Description,
+		NeedsFullIsolation:             w.NeedsFullIsolation,
+		NeedsCustomKernelOrOs:          w.NeedsCustomKernelOrOS,
+		EstimatedVcpus:                 w.EstimatedVCPUs,
+		EstimatedMemoryMb:              w.EstimatedMemoryMB,
+		EstimatedDiskMb:                w.EstimatedDiskMB,
+		ExpectsLiveMigrationOrSnapshot: w.ExpectsLiveMigrationOrSnapshot,
+		DensityPriority:                w.DensityPriority,
+	}
+}
+
+// cellTypeFromRPC translates ADR-0150's CellType enum to the REST API's
+// plain string, mirroring stateFromRPC's own reasoning.
+func cellTypeFromRPC(t rpcpb.CellType) string {
+	switch t {
+	case rpcpb.CellType_CELL_TYPE_VM:
+		return "vm"
+	case rpcpb.CellType_CELL_TYPE_JAIL:
+		return "jail"
+	default:
+		return ""
+	}
+}
+
+// resourceProfile is the REST-facing JSON shape for ADR-0150's
+// ResourceProfile.
+type resourceProfile struct {
+	VCPUs      uint32 `json:"vcpus,omitempty"`
+	MemoryMB   uint64 `json:"memory_mb,omitempty"`
+	DiskSizeMB uint64 `json:"disk_size_mb,omitempty"`
+}
+
+func toRPCResourceProfile(p *resourceProfile) *rpcpb.ResourceProfile {
+	if p == nil {
+		return nil
+	}
+	return &rpcpb.ResourceProfile{
+		Vcpus:      p.VCPUs,
+		MemoryMb:   p.MemoryMB,
+		DiskSizeMb: p.DiskSizeMB,
+	}
+}
+
+// cell is the REST-facing JSON body for POST /v1/cells (ADR-0150).
+type cell struct {
+	ID              string               `json:"id"`
+	Name            string               `json:"name,omitempty"`
+	NodeID          string               `json:"node_id"`
+	WorkloadHint    *workloadDescription `json:"workload_hint"`
+	ResourceProfile *resourceProfile     `json:"resource_profile,omitempty"`
+	NetworkID       string               `json:"network_id,omitempty"`
+}
+
+func toRPCCreateCellRequest(c cell) *rpcpb.CreateCellRequest {
+	return &rpcpb.CreateCellRequest{
+		Id:              c.ID,
+		Name:            c.Name,
+		NodeId:          c.NodeID,
+		WorkloadHint:    toRPCWorkload(c.WorkloadHint),
+		ResourceProfile: toRPCResourceProfile(c.ResourceProfile),
+		NetworkId:       c.NetworkID,
+	}
+}
+
+// cellResult is the REST-facing JSON response for a successful
+// POST /v1/cells - the resolved cell_type plus whichever of vm/jail
+// below actually applies, mirroring CreateCellResponse's own "exactly
+// one of vm/jail is set" shape (ADR-0150 open question 3: there is no
+// unified "cell" read shape in v1, so the caller is told which of
+// GetVM/GetJail - i.e. which of vm/jail here - to look at next).
+type cellResult struct {
+	CellID   string `json:"cell_id"`
+	CellType string `json:"cell_type"`
+	VM       *vm    `json:"vm,omitempty"`
+	Jail     *jail  `json:"jail,omitempty"`
+}
+
+func fromRPCCreateCellResponse(r *rpcpb.CreateCellResponse) cellResult {
+	out := cellResult{
+		CellID:   r.GetCellId(),
+		CellType: cellTypeFromRPC(r.GetCellType()),
+	}
+	if r.GetVm() != nil {
+		v := fromRPCVM(r.GetVm())
+		out.VM = &v
+	}
+	if r.GetJail() != nil {
+		j := fromRPCJail(r.GetJail())
+		out.Jail = &j
+	}
+	return out
+}
+
+// recommendationReason is the REST-facing JSON shape for one
+// RecommendationReason - factor/favors stay closed, lowercase strings
+// (the agent-facing contract), detail stays free text.
+type recommendationReason struct {
+	Factor string `json:"factor"`
+	Favors string `json:"favors"`
+	Detail string `json:"detail,omitempty"`
+}
+
+var factorNames = map[rpcpb.RecommendationFactor]string{
+	rpcpb.RecommendationFactor_FACTOR_UNSPECIFIED:            "unspecified",
+	rpcpb.RecommendationFactor_FACTOR_ISOLATION_REQUIRED:     "isolation_required",
+	rpcpb.RecommendationFactor_FACTOR_CUSTOM_KERNEL_REQUIRED: "custom_kernel_required",
+	rpcpb.RecommendationFactor_FACTOR_MIGRATION_SUPPORT:      "migration_support",
+	rpcpb.RecommendationFactor_FACTOR_DENSITY_PRIORITY:       "density_priority",
+	rpcpb.RecommendationFactor_FACTOR_RESOURCE_PROFILE:       "resource_profile",
+}
+
+var confidenceNames = map[rpcpb.RecommendationConfidence]string{
+	rpcpb.RecommendationConfidence_CONFIDENCE_UNSPECIFIED: "unspecified",
+	rpcpb.RecommendationConfidence_CONFIDENCE_LOW:         "low",
+	rpcpb.RecommendationConfidence_CONFIDENCE_MEDIUM:      "medium",
+	rpcpb.RecommendationConfidence_CONFIDENCE_HIGH:        "high",
+}
+
+// recommendation is the REST-facing JSON response for
+// POST /v1/cells/recommend (ADR-0150) - the "concrete, unambiguous for
+// a calling AI to parse" shape the ADR called for: every field a
+// program would branch on is a fixed string, not prose.
+type recommendation struct {
+	RecommendedCellType string                 `json:"recommended_cell_type"`
+	Confidence          string                 `json:"confidence"`
+	Reasons             []recommendationReason `json:"reasons"`
+	AlternativeCellType string                 `json:"alternative_cell_type,omitempty"`
+}
+
+func fromRPCRecommendation(r *rpcpb.RecommendCellTypeResponse) recommendation {
+	out := recommendation{
+		RecommendedCellType: cellTypeFromRPC(r.GetRecommendedCellType()),
+		Confidence:          confidenceNames[r.GetConfidence()],
+		Reasons:             make([]recommendationReason, 0, len(r.GetReasons())),
+		AlternativeCellType: cellTypeFromRPC(r.GetAlternativeCellType()),
+	}
+	for _, reason := range r.GetReasons() {
+		out.Reasons = append(out.Reasons, recommendationReason{
+			Factor: factorNames[reason.GetFactor()],
+			Favors: cellTypeFromRPC(reason.GetFavors()),
+			Detail: reason.GetDetail(),
+		})
+	}
+	return out
+}

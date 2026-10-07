@@ -75,6 +75,14 @@ type fakeClient struct {
 	uploadStream *fakeUploadClientStream
 	uploadErr    error
 	uploadCalls  int
+
+	createCellResp    *rpcpb.CreateCellResponse
+	createCellErr     error
+	lastCreateCellReq *rpcpb.CreateCellRequest
+
+	recommendCellTypeResp    *rpcpb.RecommendCellTypeResponse
+	recommendCellTypeErr     error
+	lastRecommendCellTypeReq *rpcpb.RecommendCellTypeRequest
 }
 
 // fakeUploadClientStream is a fake grpc.ClientStreamingClient for
@@ -537,6 +545,28 @@ func (f *fakeClient) CreateJail(_ context.Context, in *rpcpb.CreateJailRequest, 
 		return f.createJailResp, nil
 	}
 	return &rpcpb.CreateJailResponse{}, nil
+}
+
+func (f *fakeClient) CreateCell(_ context.Context, in *rpcpb.CreateCellRequest, _ ...grpc.CallOption) (*rpcpb.CreateCellResponse, error) {
+	f.lastCreateCellReq = in
+	if f.createCellErr != nil {
+		return nil, f.createCellErr
+	}
+	if f.createCellResp != nil {
+		return f.createCellResp, nil
+	}
+	return &rpcpb.CreateCellResponse{}, nil
+}
+
+func (f *fakeClient) RecommendCellType(_ context.Context, in *rpcpb.RecommendCellTypeRequest, _ ...grpc.CallOption) (*rpcpb.RecommendCellTypeResponse, error) {
+	f.lastRecommendCellTypeReq = in
+	if f.recommendCellTypeErr != nil {
+		return nil, f.recommendCellTypeErr
+	}
+	if f.recommendCellTypeResp != nil {
+		return f.recommendCellTypeResp, nil
+	}
+	return &rpcpb.RecommendCellTypeResponse{}, nil
 }
 
 func (f *fakeClient) UpdateJail(_ context.Context, in *rpcpb.UpdateJailRequest, _ ...grpc.CallOption) (*rpcpb.UpdateJailResponse, error) {
@@ -1733,5 +1763,109 @@ func TestServer_ClusterHealth_TransportErrorIsBadGateway(t *testing.T) {
 	json.Unmarshal(rec2.Body.Bytes(), &body2)
 	if body2.ErrorClass != "manager_tls_scheme_mismatch" {
 		t.Errorf("error_class = %q, want manager_tls_scheme_mismatch", body2.ErrorClass)
+	}
+}
+
+// TestServer_CreateCell is POST /v1/cells' own REST translation test
+// (ADR-0150), mirroring TestServer_CreateVM's own shape.
+func TestServer_CreateCell(t *testing.T) {
+	client := &fakeClient{createCellResp: &rpcpb.CreateCellResponse{
+		CellId:   "cell-1",
+		CellType: rpcpb.CellType_CELL_TYPE_VM,
+		Vm:       &rpcpb.VMDefinition{Id: "cell-1", Name: "untrusted-tenant", DesiredState: rpcpb.VMState_VM_STATE_RUNNING},
+	}}
+	s := NewServer(client)
+
+	rec := doRequest(t, s, http.MethodPost, "/v1/cells", cell{
+		ID: "cell-1", Name: "untrusted-tenant", NodeID: "node-1",
+		WorkloadHint: &workloadDescription{NeedsFullIsolation: true},
+	})
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want 201; body=%s", rec.Code, rec.Body.String())
+	}
+
+	if client.lastCreateCellReq.GetNodeId() != "node-1" {
+		t.Errorf("request forwarded node_id = %q, want node-1", client.lastCreateCellReq.GetNodeId())
+	}
+	if !client.lastCreateCellReq.GetWorkloadHint().GetNeedsFullIsolation() {
+		t.Errorf("request forwarded workload_hint.needs_full_isolation = false, want true")
+	}
+
+	var got cellResult
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decoding response: %v", err)
+	}
+	if got.CellType != "vm" {
+		t.Errorf("response cell_type = %q, want vm", got.CellType)
+	}
+	if got.VM == nil || got.VM.ID != "cell-1" {
+		t.Errorf("response vm = %+v, want id cell-1", got.VM)
+	}
+	if got.Jail != nil {
+		t.Errorf("response jail = %+v, want nil when cell_type is vm", got.Jail)
+	}
+}
+
+// TestServer_CreateCell_AppErrorIsBadRequest proves an application-level
+// rejection (e.g. missing node_id) reports the same way every other
+// write route's rejection does.
+func TestServer_CreateCell_AppErrorIsBadRequest(t *testing.T) {
+	client := &fakeClient{createCellResp: &rpcpb.CreateCellResponse{Error: "CreateCell: node_id must be set"}}
+	s := NewServer(client)
+
+	rec := doRequest(t, s, http.MethodPost, "/v1/cells", cell{ID: "cell-1", WorkloadHint: &workloadDescription{DensityPriority: true}})
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400; body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+// TestServer_RecommendCellType is POST /v1/cells/recommend's own REST
+// translation test (ADR-0150) - the "concrete, unambiguous for a
+// calling AI to parse" response shape: fixed lowercase strings, not
+// prose.
+func TestServer_RecommendCellType(t *testing.T) {
+	client := &fakeClient{recommendCellTypeResp: &rpcpb.RecommendCellTypeResponse{
+		RecommendedCellType: rpcpb.CellType_CELL_TYPE_VM,
+		Confidence:          rpcpb.RecommendationConfidence_CONFIDENCE_HIGH,
+		Reasons: []*rpcpb.RecommendationReason{
+			{Factor: rpcpb.RecommendationFactor_FACTOR_ISOLATION_REQUIRED, Favors: rpcpb.CellType_CELL_TYPE_VM, Detail: "needs full isolation"},
+		},
+	}}
+	s := NewServer(client)
+
+	rec := doRequest(t, s, http.MethodPost, "/v1/cells/recommend", workloadDescription{NeedsFullIsolation: true})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+
+	if !client.lastRecommendCellTypeReq.GetWorkload().GetNeedsFullIsolation() {
+		t.Errorf("request forwarded workload.needs_full_isolation = false, want true")
+	}
+
+	var got recommendation
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decoding response: %v", err)
+	}
+	if got.RecommendedCellType != "vm" {
+		t.Errorf("response recommended_cell_type = %q, want vm", got.RecommendedCellType)
+	}
+	if got.Confidence != "high" {
+		t.Errorf("response confidence = %q, want high", got.Confidence)
+	}
+	if len(got.Reasons) != 1 || got.Reasons[0].Factor != "isolation_required" || got.Reasons[0].Favors != "vm" {
+		t.Errorf("response reasons = %+v, want one isolation_required entry favoring vm", got.Reasons)
+	}
+}
+
+// TestServer_RecommendCellType_UpstreamFailureIs502 proves a transport-
+// level failure calling managerd reports the same way every other
+// route's does.
+func TestServer_RecommendCellType_UpstreamFailureIs502(t *testing.T) {
+	client := &fakeClient{recommendCellTypeErr: status.Error(codes.Unavailable, "no connection")}
+	s := NewServer(client)
+
+	rec := doRequest(t, s, http.MethodPost, "/v1/cells/recommend", workloadDescription{DensityPriority: true})
+	if rec.Code != http.StatusBadGateway {
+		t.Fatalf("status = %d, want 502; body=%s", rec.Code, rec.Body.String())
 	}
 }

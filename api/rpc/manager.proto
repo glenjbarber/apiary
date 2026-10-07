@@ -536,6 +536,42 @@ service ManagerService {
   // served by the leader, when a caller needs to see its own just-made change.
   rpc ListJailsLocal(ListJailsLocalRequest) returns (ListJailsLocalResponse);
 
+  // CreateCell (ADR-0150) lets a caller - typically an AI agent such as
+  // orcli - ask for a cell (Apiary's kind-agnostic term for a VM or a
+  // jail) without choosing which kind itself. The handler resolves
+  // cell_type using the same rule evaluation RecommendCellType exposes
+  // (internal/cellrecommend, called directly - not a second RPC round
+  // trip), builds the corresponding VMDefinition or JailDefinition from
+  // the request's kind-agnostic fields, and from there proceeds exactly
+  // as CreateVM/CreateJail already do: same Raft forward, same FSM
+  // validation, same reconciler provisioning. No new FSM command kind
+  // exists for this - CreateCell issues the existing Command_CreateVm/
+  // Command_CreateJail internally, so the Raft log and the FSM's replay
+  // determinism are unaffected.
+  //
+  // node_id is REQUIRED in v1, unlike ADR-0150's own proposal that it be
+  // optional with "Apiary picks a node" - this codebase has no node-
+  // placement/scheduling logic anywhere (CreateVM/CreateJail both
+  // require the caller to already know node_id, and the Dependency
+  // Graph Simulator / reconciler assume placement was already decided
+  // upstream). Inventing a first scheduler as a side effect of this ADR
+  // would be guessing at a policy (bin-packing? spread? HAST-awareness?)
+  // nobody asked for, so v1 keeps placement exactly where every other
+  // creation path already puts it: the caller's choice.
+  rpc CreateCell(CreateCellRequest) returns (CreateCellResponse);
+
+  // RecommendCellType (ADR-0150) answers "which cell type suits this
+  // workload" as data a calling AI agent can branch on, not prose.
+  // Stateless, pure computation (internal/cellrecommend) over the
+  // request's own WorkloadDescription - no cluster state is consulted,
+  // so it never forwards to the leader and is answerable by any node,
+  // the same posture as HostStats/ClusterHealth/whynot. ADR-0150's own
+  // open question about a node_id-scoped input (base-image/template
+  // availability) is deliberately NOT implemented in v1: no such lookup
+  // exists in the request, keeping the "answerable by any node" property
+  // actually true rather than conditionally true.
+  rpc RecommendCellType(RecommendCellTypeRequest) returns (RecommendCellTypeResponse);
+
   // ForcePurgeJail mirrors ForcePurgeVM exactly, for a jail tombstoned
   // by DeleteJail whose owning node will never come back to reconcile
   // it away. See ForcePurgeVM's own doc comment above for the full
@@ -2721,6 +2757,196 @@ message CreateJailResponse {
   JailDefinition jail = 1;
   string error = 2;
   string leader_hint = 3;
+}
+
+// CellType names Apiary's choice of underlying cell kind for a
+// CreateCell call, or RecommendCellType's recommendation - see
+// ADR-0150. Kept as its own enum rather than reusing a kind-specific
+// state/phase enum, since this is a kind SELECTION, orthogonal to
+// either kind's own lifecycle vocabulary.
+enum CellType {
+  CELL_TYPE_UNSPECIFIED = 0;
+  CELL_TYPE_VM = 1;
+  CELL_TYPE_JAIL = 2;
+}
+
+// ResourceProfile (ADR-0150) is a kind-agnostic resource ask: the same
+// three numbers CreateVM/CreateJail already understand under different
+// names (VMDefinition.vcpus/memory_mb/disk_size_mb; JailDefinition has
+// no such fields at all today), expressed once so a caller using
+// CreateCell never has to know which of those two shapes it's really
+// asking for. Dropped entirely (not just zeroed) for whichever fields
+// the resolved cell_type doesn't support.
+message ResourceProfile {
+  uint32 vcpus = 1;
+  uint64 memory_mb = 2;
+  uint64 disk_size_mb = 3;
+}
+
+// RecommendationFactor (ADR-0150 open question 5) is a closed,
+// enumerated reason code a calling AI agent can branch on, rather than
+// a free-text string it would have to pattern-match. FACTOR_UNSPECIFIED
+// is reserved as the proto3 zero value and is never produced by
+// RecommendCellType itself; a caller that receives a factor value it
+// does not recognize (a future addition) must treat it the same as
+// FACTOR_UNSPECIFIED - informational evidence it can log or display,
+// never a value it refuses to proceed over. This is the only
+// forward-compatibility rule v1 establishes; nothing in this schema
+// enforces it mechanically.
+enum RecommendationFactor {
+  FACTOR_UNSPECIFIED = 0;
+  FACTOR_ISOLATION_REQUIRED = 1;
+  FACTOR_CUSTOM_KERNEL_REQUIRED = 2;
+  FACTOR_MIGRATION_SUPPORT = 3;
+  FACTOR_DENSITY_PRIORITY = 4;
+  FACTOR_RESOURCE_PROFILE = 5;
+}
+
+// RecommendationConfidence is deliberately an enum, not a float - see
+// ADR-0150's own reasoning: "what does 0.73 mean" is never a question a
+// calling agent has to answer.
+enum RecommendationConfidence {
+  CONFIDENCE_UNSPECIFIED = 0;
+  CONFIDENCE_LOW = 1;
+  CONFIDENCE_MEDIUM = 2;
+  CONFIDENCE_HIGH = 3;
+}
+
+// WorkloadDescription (ADR-0150) is the one input shape shared by
+// RecommendCellType and CreateCell's own workload_hint field, so a
+// caller that already described a workload for a recommendation can
+// reuse that description verbatim for creation without a second
+// round trip to get the same choice applied (see CreateCellRequest).
+// Every field past description is optional; absence means "unknown,"
+// never "zero" or "false" as a real signal - internal/cellrecommend
+// treats an absent bool as not contributing evidence either way.
+message WorkloadDescription {
+  // description is free-text, for logging/audit only. Nothing in
+  // internal/cellrecommend parses it; it is not a machine-parsable
+  // input, only the eight structured fields below are.
+  string description = 1;
+
+  // needs_full_isolation true is the strongest signal toward
+  // CELL_TYPE_VM - kernel-level isolation from the host that a jail,
+  // sharing the host kernel, cannot provide.
+  bool needs_full_isolation = 2;
+
+  // needs_custom_kernel_or_os true means the workload cannot run under
+  // the host's own FreeBSD kernel at all (a different OS, or FreeBSD
+  // features a jail can't provide) - this and needs_full_isolation are
+  // the two hard requirements internal/cellrecommend checks first and
+  // treats as decisive.
+  bool needs_custom_kernel_or_os = 3;
+
+  uint32 estimated_vcpus = 4;
+  uint64 estimated_memory_mb = 5;
+  uint64 estimated_disk_mb = 6;
+
+  // expects_live_migration_or_snapshot signals toward CELL_TYPE_VM:
+  // VM snapshot/restore and migration (ADR-0090/ADR-0028) are more
+  // mature than the jail equivalents.
+  bool expects_live_migration_or_snapshot = 7;
+
+  // density_priority true signals toward CELL_TYPE_JAIL: many
+  // lightweight instances per node over per-instance isolation.
+  bool density_priority = 8;
+}
+
+// RecommendCellTypeRequest carries only the workload description.
+// ADR-0150 proposed an optional node_id to scope the recommendation to
+// node-local image/template availability; this is deliberately NOT
+// implemented in v1 (see RecommendCellType's own doc comment in the
+// service above) - adding it later is backward compatible.
+message RecommendCellTypeRequest {
+  WorkloadDescription workload = 1;
+}
+
+// RecommendationReason is one piece of evidence RecommendCellType's
+// rule evaluation considered, in the fixed order internal/cellrecommend
+// evaluates factors - not a ranked or scored list.
+message RecommendationReason {
+  RecommendationFactor factor = 1;
+  CellType favors = 2;
+  // detail is a human-readable explanation of this one factor, for a
+  // UI or log line. The agent-facing contract is factor/favors, both
+  // closed enums; detail is never meant to be parsed.
+  string detail = 3;
+}
+
+message RecommendCellTypeResponse {
+  // recommended_cell_type is the single answer - a caller that wants
+  // exactly one bit of information reads exactly this field.
+  CellType recommended_cell_type = 1;
+  RecommendationConfidence confidence = 2;
+  repeated RecommendationReason reasons = 3;
+  // alternative_cell_type is set only when the decision was close
+  // (confidence is CONFIDENCE_LOW) - CELL_TYPE_UNSPECIFIED otherwise, so
+  // a caller doesn't have to infer "the other one" itself.
+  CellType alternative_cell_type = 4;
+}
+
+// CreateCellRequest (ADR-0150) mirrors CreateVMRequest/CreateJailRequest's
+// own shape, but speaks in kind-agnostic terms: the caller supplies
+// identity, placement, and resources, and Apiary - not the caller -
+// decides vm vs. jail.
+message CreateCellRequest {
+  // id/name carry the same identity contract as
+  // VMDefinition.id/JailDefinition.id and .name - caller-supplied,
+  // alphanumeric/'-'/'_', <=64 chars, must not already exist (checked by
+  // the same applyCreateVM/applyCreateJail validation CreateCell builds
+  // on, not duplicated here).
+  string id = 1;
+  string name = 2;
+
+  // node_id is REQUIRED in v1 - see CreateCell's own doc comment in the
+  // service above for why this deviates from ADR-0150's "optional,
+  // Apiary picks" proposal.
+  string node_id = 3;
+
+  // workload_hint, when set, is what Apiary uses to choose cell_type -
+  // the same WorkloadDescription shape RecommendCellType takes, run
+  // through the identical internal/cellrecommend evaluation. Required
+  // in v1: CreateCell's whole point is Apiary deciding the kind, and
+  // there is no other signal in this request it could decide from.
+  WorkloadDescription workload_hint = 4;
+
+  // resource_profile is a kind-agnostic resource ask, applied to
+  // whichever of VMDefinition.vcpus/memory_mb/disk_size_mb or (for a
+  // jail) nothing exists on the resolved kind - a jail has no such
+  // fields today, so vcpus/memory_mb are silently dropped when
+  // cell_type resolves to CELL_TYPE_JAIL. disk_size_mb is validated
+  // against the Colony-wide floor (ADR-0148) using the existing
+  // per-kind check, AFTER cell_type is resolved - see ADR-0150 open
+  // question 6; this is the ordering decision made for v1.
+  ResourceProfile resource_profile = 5;
+
+  // network_id/firewall_rules are already identical in meaning between
+  // VMDefinition and JailDefinition, so they pass straight through
+  // regardless of which kind is chosen.
+  string network_id = 6;
+  repeated FirewallRule firewall_rules = 7;
+
+  uint32 timeout_ms = 8;
+}
+
+message CreateCellResponse {
+  // cell_id echoes the request id.
+  string cell_id = 1;
+  // cell_type states Apiary's choice - the one piece of information a
+  // caller must get back even though it didn't ask for the distinction,
+  // so it knows whether to look at vm or jail below, and which of
+  // GetVM/GetJail to call later (see ADR-0150 open question 3; v1 does
+  // not add a unified GetCell/ListCells, so the caller still needs this
+  // to know which existing read RPC applies).
+  CellType cell_type = 2;
+  // Exactly one of vm/jail is set, matching cell_type - the full
+  // existing message, not a merged "cell" shape, so every field a
+  // caller might need (phase, phase_error, assigned IP, etc.) is
+  // already defined.
+  VMDefinition vm = 3;
+  JailDefinition jail = 4;
+  string error = 5;
+  string leader_hint = 6;
 }
 
 message UpdateJailRequest {
