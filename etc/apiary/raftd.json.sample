@@ -8,5 +8,6 @@
   "internal_token": "",
   "raft_tls_cert": "",
   "raft_tls_key": "",
-  "raft_tls_ca": ""
+  "raft_tls_ca": "",
+  "preferred_leader_id": ""
 }
