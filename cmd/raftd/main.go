@@ -121,12 +121,13 @@ func run() error {
 	}
 
 	cfg := raftnode.Config{
-		NodeID:   rcfg.NodeID,
-		DataDir:  rcfg.DataDir,
-		BindAddr: rcfg.RaftBind,
-		TLSCert:  rcfg.RaftTLSCert,
-		TLSKey:   rcfg.RaftTLSKey,
-		TLSCA:    rcfg.RaftTLSCA,
+		NodeID:            rcfg.NodeID,
+		DataDir:           rcfg.DataDir,
+		BindAddr:          rcfg.RaftBind,
+		TLSCert:           rcfg.RaftTLSCert,
+		TLSKey:            rcfg.RaftTLSKey,
+		TLSCA:             rcfg.RaftTLSCA,
+		PreferredLeaderID: rcfg.PreferredLeaderID,
 	}
 
 	if *exportPath != "" {
@@ -211,6 +212,16 @@ func run() error {
 		Logf:      logf,
 		Results:   restartplan.NewResultStore(restartplan.DefaultResultDir),
 	})
+
+	// Preferred-leader biasing (issue #20, ADR-0150): only started when
+	// a preference is actually configured, so a Colony with no
+	// preference pays nothing extra - not even an idle ticker. Runs for
+	// the lifetime of the process, same ctx as everything else above;
+	// PreferredLeaderTransfer itself is the no-op fast path on every
+	// tick where this node is not the leader, which is the common case.
+	if cfg.PreferredLeaderID != "" {
+		go runPreferredLeaderLoop(ctx, node, cfg.PreferredLeaderID)
+	}
 
 	select {
 	case <-ctx.Done():

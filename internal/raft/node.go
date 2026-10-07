@@ -58,6 +58,15 @@ type Status struct {
 	// describe the same point in this state machine's history, which is
 	// what makes them safe to read together.
 	StateDigest string
+
+	// PreferredLeaderID is this node's own configured
+	// Config.PreferredLeaderID (ADR-0150), empty when none is set. It
+	// is included here, alongside LeaderID, so that "who is leading"
+	// and "who is supposed to be leading" are visible together on the
+	// same status snapshot rather than requiring a caller to separately
+	// know each node's configuration to tell whether LeaderID matches
+	// the Colony's declared preference.
+	PreferredLeaderID string
 }
 
 // ServerInfo describes one member of the cluster configuration.
@@ -74,6 +83,10 @@ type Node struct {
 	fsm    *FSM
 	config Config
 	store  *raftboltdb.BoltStore
+
+	// preferredLeader is PreferredLeaderTransfer's own cooldown
+	// bookkeeping. Zero value is ready to use.
+	preferredLeader preferredLeaderState
 }
 
 // New constructs a Node backed by BoltDB log/stable stores and a file
@@ -193,15 +206,16 @@ func (n *Node) Status() Status {
 	servers, membershipErr := readServers(n.raft.GetConfiguration)
 
 	return Status{
-		IsLeader:        n.raft.State() == raft.Leader,
-		LeaderID:        string(leaderID),
-		NodeID:          n.config.NodeID,
-		LastLogIndex:    n.raft.LastIndex(),
-		AppliedIndex:    n.fsm.AppliedIndex(),
-		RaftState:       n.raft.State().String(),
-		Servers:         servers,
-		MembershipError: membershipErr,
-		StateDigest:     n.fsm.StateDigest(),
+		IsLeader:          n.raft.State() == raft.Leader,
+		LeaderID:          string(leaderID),
+		NodeID:            n.config.NodeID,
+		LastLogIndex:      n.raft.LastIndex(),
+		AppliedIndex:      n.fsm.AppliedIndex(),
+		RaftState:         n.raft.State().String(),
+		Servers:           servers,
+		MembershipError:   membershipErr,
+		StateDigest:       n.fsm.StateDigest(),
+		PreferredLeaderID: n.config.PreferredLeaderID,
 	}
 }
 

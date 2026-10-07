@@ -36,6 +36,19 @@ type Config struct {
 	TLSCert string
 	TLSKey  string
 	TLSCA   string
+
+	// PreferredLeaderID, if set, names the NodeID that should hold raft
+	// leadership whenever the cluster can safely give it to them (see
+	// PreferredLeaderTransfer and ADR-0150). Empty means no preference
+	// at all - the default - and leaves leadership entirely to raft's
+	// own election process, exactly as before this field existed.
+	//
+	// Naming a node that never joins, or that is later removed, is not
+	// a configuration error: PreferredLeaderTransfer treats "preferred
+	// node not found in the current configuration" as nothing to do,
+	// the same as "already leading," rather than failing startup over
+	// a value that may simply describe a node that has not joined yet.
+	PreferredLeaderID string
 }
 
 // DefaultBindAddr is used when Config.BindAddr is empty.
