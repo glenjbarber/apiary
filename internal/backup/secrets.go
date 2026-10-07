@@ -773,6 +773,11 @@ type RaftdConfigRecord struct {
 	Socket   string `json:"socket,omitempty"`
 	NodeID   string `json:"node_id,omitempty"`
 	RaftBind string `json:"raft_bind,omitempty"`
+	// PreferredLeaderID names which Comb's node_id should hold leadership
+	// when the Colony is healthy (ADR-0150). It is public topology, the
+	// same class as NodeID above, not a credential, so it is recorded
+	// normally.
+	PreferredLeaderID string `json:"preferred_leader_id,omitempty"`
 	// Join and AwaitJoin are startup-time behaviour on a fresh, empty
 	// DataDir. A rebuilt Comb does not have a fresh empty DataDir any
 	// more by the time anyone would read this, and re-arming a join on a
@@ -793,15 +798,16 @@ type RaftdConfigRecord struct {
 // InternalToken.
 func BuildRaftdConfigRecord(cfg raftdconfig.Config) RaftdConfigRecord {
 	return RaftdConfigRecord{
-		DataDir:     cfg.DataDir,
-		Socket:      cfg.Socket,
-		NodeID:      cfg.NodeID,
-		RaftBind:    cfg.RaftBind,
-		Join:        cfg.Join,
-		AwaitJoin:   cfg.AwaitJoin,
-		RaftTLSCert: cfg.RaftTLSCert,
-		RaftTLSKey:  cfg.RaftTLSKey,
-		RaftTLSCA:   cfg.RaftTLSCA,
+		DataDir:           cfg.DataDir,
+		Socket:            cfg.Socket,
+		NodeID:            cfg.NodeID,
+		RaftBind:          cfg.RaftBind,
+		Join:              cfg.Join,
+		AwaitJoin:         cfg.AwaitJoin,
+		RaftTLSCert:       cfg.RaftTLSCert,
+		RaftTLSKey:        cfg.RaftTLSKey,
+		RaftTLSCA:         cfg.RaftTLSCA,
+		PreferredLeaderID: cfg.PreferredLeaderID,
 	}
 }
 
