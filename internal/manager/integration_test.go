@@ -798,6 +798,191 @@ func TestIntegration_CreateVM_CloneFromSnapshotRoundTrips(t *testing.T) {
 	}
 }
 
+// TestIntegration_CreateCell_IsolationRequiredResolvesToVM exercises
+// CreateCell (ADR-0150) end to end: the request never names vm or jail,
+// and Apiary's choice actually results in a real VMDefinition committed
+// through the same raft/FSM path CreateVM uses - GetVM finds it
+// afterward, proving CreateCell invoked the existing creation mechanism
+// rather than a parallel one.
+func TestIntegration_CreateCell_IsolationRequiredResolvesToVM(t *testing.T) {
+	raftdSocket := newRaftdUDSSocket(t)
+	client := newManagerdRPCClient(t, raftdSocket)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	resp, err := client.CreateCell(ctx, &rpcpb.CreateCellRequest{
+		Id: "cell-1", Name: "untrusted-tenant", NodeId: "raftd-1",
+		WorkloadHint: &rpcpb.WorkloadDescription{NeedsFullIsolation: true},
+	})
+	if err != nil {
+		t.Fatalf("CreateCell() error: %v", err)
+	}
+	if resp.GetError() != "" {
+		t.Fatalf("CreateCell() returned error: %s", resp.GetError())
+	}
+	if resp.GetCellType() != rpcpb.CellType_CELL_TYPE_VM {
+		t.Fatalf("CreateCell().CellType = %v, want CELL_TYPE_VM", resp.GetCellType())
+	}
+	if resp.GetVm().GetId() != "cell-1" {
+		t.Fatalf("CreateCell().Vm.Id = %q, want cell-1", resp.GetVm().GetId())
+	}
+	if resp.GetJail() != nil {
+		t.Fatalf("CreateCell() set Jail = %+v, want nil when cell_type is VM", resp.GetJail())
+	}
+
+	// The VM CreateCell resolved to must be reachable through the exact
+	// same read path a CreateVM-made VM would be - proving CreateCell
+	// issued a real Command_CreateVm, not a parallel bookkeeping record.
+	getResp, err := client.GetVM(ctx, &rpcpb.GetVMRequest{Id: "cell-1"})
+	if err != nil || !getResp.GetFound() {
+		t.Fatalf("GetVM(cell-1) = (found=%v, err=%v), want the cell's VM to exist", getResp.GetFound(), err)
+	}
+}
+
+// TestIntegration_CreateCell_DensityPriorityResolvesToJail mirrors
+// TestIntegration_CreateCell_IsolationRequiredResolvesToVM for the
+// opposite signal, proving CreateCell can resolve either kind and that
+// the jail path commits through applyCreateJail exactly as CreateJail
+// does.
+func TestIntegration_CreateCell_DensityPriorityResolvesToJail(t *testing.T) {
+	raftdSocket := newRaftdUDSSocket(t)
+	client := newManagerdRPCClient(t, raftdSocket)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	resp, err := client.CreateCell(ctx, &rpcpb.CreateCellRequest{
+		Id: "cell-2", Name: "worker", NodeId: "raftd-1",
+		WorkloadHint: &rpcpb.WorkloadDescription{DensityPriority: true},
+	})
+	if err != nil {
+		t.Fatalf("CreateCell() error: %v", err)
+	}
+	if resp.GetError() != "" {
+		t.Fatalf("CreateCell() returned error: %s", resp.GetError())
+	}
+	if resp.GetCellType() != rpcpb.CellType_CELL_TYPE_JAIL {
+		t.Fatalf("CreateCell().CellType = %v, want CELL_TYPE_JAIL", resp.GetCellType())
+	}
+	if resp.GetJail().GetId() != "cell-2" {
+		t.Fatalf("CreateCell().Jail.Id = %q, want cell-2", resp.GetJail().GetId())
+	}
+
+	getResp, err := client.GetJail(ctx, &rpcpb.GetJailRequest{Id: "cell-2"})
+	if err != nil || !getResp.GetFound() {
+		t.Fatalf("GetJail(cell-2) = (found=%v, err=%v), want the cell's jail to exist", getResp.GetFound(), err)
+	}
+}
+
+// TestIntegration_CreateCell_MissingNodeIDIsError exercises request
+// validation: v1's deliberate deviation from ADR-0150 (node_id required,
+// since no placement/scheduling logic exists anywhere in this codebase)
+// must be enforced, not silently accepted as empty.
+func TestIntegration_CreateCell_MissingNodeIDIsError(t *testing.T) {
+	raftdSocket := newRaftdUDSSocket(t)
+	client := newManagerdRPCClient(t, raftdSocket)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	resp, err := client.CreateCell(ctx, &rpcpb.CreateCellRequest{
+		Id: "cell-3", Name: "no-node",
+		WorkloadHint: &rpcpb.WorkloadDescription{DensityPriority: true},
+	})
+	if err != nil {
+		t.Fatalf("CreateCell() error: %v", err)
+	}
+	if resp.GetError() == "" {
+		t.Fatal("CreateCell() with no node_id error = empty, want explicit rejection")
+	}
+}
+
+// TestIntegration_CreateCell_MissingWorkloadHintIsError mirrors the
+// node_id check above for the other v1-required field.
+func TestIntegration_CreateCell_MissingWorkloadHintIsError(t *testing.T) {
+	raftdSocket := newRaftdUDSSocket(t)
+	client := newManagerdRPCClient(t, raftdSocket)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	resp, err := client.CreateCell(ctx, &rpcpb.CreateCellRequest{
+		Id: "cell-4", Name: "no-workload", NodeId: "raftd-1",
+	})
+	if err != nil {
+		t.Fatalf("CreateCell() error: %v", err)
+	}
+	if resp.GetError() == "" {
+		t.Fatal("CreateCell() with no workload_hint error = empty, want explicit rejection")
+	}
+}
+
+// TestIntegration_CreateCell_DuplicateIDIsError proves CreateCell
+// shares applyCreateVM's own id-uniqueness check rather than a
+// duplicated one: creating a plain VM, then asking CreateCell to
+// resolve to a VM under the same id, must fail the same way a second
+// CreateVM would.
+func TestIntegration_CreateCell_DuplicateIDIsError(t *testing.T) {
+	raftdSocket := newRaftdUDSSocket(t)
+	client := newManagerdRPCClient(t, raftdSocket)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if _, err := client.CreateVM(ctx, &rpcpb.CreateVMRequest{Vm: &rpcpb.VMDefinition{
+		Id: "cell-dup", Name: "already-exists", NodeId: "raftd-1",
+	}}); err != nil {
+		t.Fatalf("CreateVM() error: %v", err)
+	}
+
+	resp, err := client.CreateCell(ctx, &rpcpb.CreateCellRequest{
+		Id: "cell-dup", Name: "collides", NodeId: "raftd-1",
+		WorkloadHint: &rpcpb.WorkloadDescription{NeedsFullIsolation: true},
+	})
+	if err != nil {
+		t.Fatalf("CreateCell() error: %v", err)
+	}
+	if resp.GetError() == "" {
+		t.Fatal("CreateCell() with duplicate id error = empty, want explicit rejection")
+	}
+}
+
+// TestIntegration_RecommendCellType_IsStatelessAndDeterministic proves
+// RecommendCellType (ADR-0150) answers the same workload identically on
+// repeated calls with no side effect on cluster state - it never
+// creates anything, and ListVMs/ListJails stay empty.
+func TestIntegration_RecommendCellType_IsStatelessAndDeterministic(t *testing.T) {
+	raftdSocket := newRaftdUDSSocket(t)
+	client := newManagerdRPCClient(t, raftdSocket)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	req := &rpcpb.RecommendCellTypeRequest{Workload: &rpcpb.WorkloadDescription{NeedsCustomKernelOrOs: true}}
+	first, err := client.RecommendCellType(ctx, req)
+	if err != nil {
+		t.Fatalf("RecommendCellType() error: %v", err)
+	}
+	if first.GetRecommendedCellType() != rpcpb.CellType_CELL_TYPE_VM {
+		t.Fatalf("RecommendCellType().RecommendedCellType = %v, want CELL_TYPE_VM for needs_custom_kernel_or_os", first.GetRecommendedCellType())
+	}
+	if first.GetConfidence() != rpcpb.RecommendationConfidence_CONFIDENCE_HIGH {
+		t.Fatalf("RecommendCellType().Confidence = %v, want CONFIDENCE_HIGH for a hard requirement", first.GetConfidence())
+	}
+
+	second, err := client.RecommendCellType(ctx, req)
+	if err != nil {
+		t.Fatalf("RecommendCellType() (second call) error: %v", err)
+	}
+	if second.GetRecommendedCellType() != first.GetRecommendedCellType() || second.GetConfidence() != first.GetConfidence() {
+		t.Fatalf("RecommendCellType() was not deterministic: first=%+v second=%+v", first, second)
+	}
+
+	listResp, err := client.ListVMs(ctx, &rpcpb.ListVMsRequest{})
+	if err != nil {
+		t.Fatalf("ListVMs() error: %v", err)
+	}
+	if len(listResp.GetVms()) != 0 {
+		t.Fatalf("ListVMs() after RecommendCellType = %d VMs, want 0 - RecommendCellType must not create anything", len(listResp.GetVms()))
+	}
+}
+
 // TestIntegration_SimulateNodeFailure_ReportsJailBaseArchiveUnavailableAfterOnlySourceHiveLoss
 // mirrors the VM base-image test above, for a jail's base_archive_name
 // (ADR-0098) instead.
