@@ -30,7 +30,7 @@ invent it. Superseded records remain available.
 
 Every destination below requires Glen's central allocation before a global
 identifier is assigned. ADR-0000000 and ADR-0000001 are already reserved for
-Loreloom coordination policy and Worker exit-code registry. Apiary ADR-0001
+shared coordination policy and Worker exit-code registry. Apiary ADR-0001
 is a legacy project identifier, not ADR-0000001. Do not pad existing numbers
 or assume any offset. Preserve each old filename as a provenance link when
 allocated numbers are introduced, and update reciprocal supersession links
@@ -42,7 +42,7 @@ in the linked record. Unresolved means the source needs review before mapping
 it to Unconfirmed, Proposed, Accepted, or Superseded. Allocation is outstanding
 for all 148 records, including this structurally converted batch.
 
-| Legacy record | Source status label | Loreloom destination | Structure |
+| Legacy record | Source status label | Shared register destination | Structure |
 | --- | --- | --- | --- |
 | [ADR-0001](0001-raftd-process-split-and-uds-protocol.md) | Accepted | Pending Glen allocation | Converted |
 | [ADR-0002](0002-managerd-external-rpc-and-api-rpc-schema.md) | Accepted | Pending Glen allocation | Converted |
