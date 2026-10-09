@@ -45,13 +45,3 @@ go.work.sum
 
 .DS_Store
 *.swp
-CLAUDE.md
-CODEX.md
-TASKS.md
-.claude
-.codex
-SHARED.md
-.aider*
-.local
-.goose/
-AGENTS.md
