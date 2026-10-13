@@ -174,6 +174,10 @@ type fakeClient struct {
 	issueOriginCertificateResp    *rpcpb.IssueOriginCertificateResponse
 	lastIssueOriginCertificateReq *rpcpb.IssueOriginCertificateRequest
 
+	listLetsEncryptCertificatesResp    *rpcpb.ListLetsEncryptCertificatesResponse
+	issueLetsEncryptCertificateResp    *rpcpb.IssueLetsEncryptCertificateResponse
+	lastIssueLetsEncryptCertificateReq *rpcpb.IssueLetsEncryptCertificateRequest
+
 	setVMCloudflareExposureResp    *rpcpb.SetVMCloudflareExposureResponse
 	lastSetVMCloudflareExposureReq *rpcpb.SetVMCloudflareExposureRequest
 
@@ -616,6 +620,21 @@ func (f *fakeClient) IssueOriginCertificate(_ context.Context, req *rpcpb.IssueO
 		return f.issueOriginCertificateResp, nil
 	}
 	return &rpcpb.IssueOriginCertificateResponse{}, nil
+}
+
+func (f *fakeClient) ListLetsEncryptCertificates(context.Context, *rpcpb.ListLetsEncryptCertificatesRequest, ...grpc.CallOption) (*rpcpb.ListLetsEncryptCertificatesResponse, error) {
+	if f.listLetsEncryptCertificatesResp != nil {
+		return f.listLetsEncryptCertificatesResp, nil
+	}
+	return &rpcpb.ListLetsEncryptCertificatesResponse{}, nil
+}
+
+func (f *fakeClient) IssueLetsEncryptCertificate(_ context.Context, req *rpcpb.IssueLetsEncryptCertificateRequest, _ ...grpc.CallOption) (*rpcpb.IssueLetsEncryptCertificateResponse, error) {
+	f.lastIssueLetsEncryptCertificateReq = req
+	if f.issueLetsEncryptCertificateResp != nil {
+		return f.issueLetsEncryptCertificateResp, nil
+	}
+	return &rpcpb.IssueLetsEncryptCertificateResponse{}, nil
 }
 
 func (f *fakeClient) SaveAssumptionClaim(context.Context, *rpcpb.SaveAssumptionClaimRequest, ...grpc.CallOption) (*rpcpb.SaveAssumptionClaimResponse, error) {

@@ -135,17 +135,60 @@ func describeCertificateValidity(leaf certmgr.Leaf) string {
 // a fetch that fails yields no rows plus a message, and the page still
 // renders. This surface is read-only, so there is no action that could
 // fail and no state that could be left half-applied.
+// originCertLike is the subset of OriginCertificateInfo/
+// LetsEncryptCertificateInfo this page actually reads - the two wire
+// messages are field-for-field identical (ADR-0133's
+// LetsEncryptCertificateInfo doc comment), so one loop below builds
+// rows from either without caring which issuer produced them.
+type originCertLike interface {
+	GetName() string
+	GetService() string
+	GetHostnames() []string
+	GetCertPath() string
+	GetAutoRenew() bool
+	GetExpiresAtUnix() int64
+	GetUpdatedAtUnix() int64
+}
+
+// currentCertificates builds the page's rows from this Comb's own
+// certificate inventories - both Origin CA and, if configured, Let's
+// Encrypt (ADR-0133) - plus a local read of each certificate file. A
+// failure fetching one store does not hide rows from the other: each
+// is fetched and appended independently, and only an error with no
+// rows from either source is surfaced as the page-level failure.
 func (s *Server) currentCertificates(r *http.Request, now time.Time) ([]certificateRow, string) {
-	resp, err := s.client.ListOriginCertificates(r.Context(), &rpcpb.ListOriginCertificatesRequest{})
-	if err != nil {
-		return nil, err.Error()
+	var all []originCertLike
+	var errs []string
+
+	originResp, err := s.client.ListOriginCertificates(r.Context(), &rpcpb.ListOriginCertificatesRequest{})
+	switch {
+	case err != nil:
+		errs = append(errs, err.Error())
+	case originResp.GetError() != "":
+		errs = append(errs, originResp.GetError())
+	default:
+		for _, cert := range originResp.GetCertificates() {
+			all = append(all, cert)
+		}
 	}
-	if resp.GetError() != "" {
-		return nil, resp.GetError()
+
+	acmeResp, err := s.client.ListLetsEncryptCertificates(r.Context(), &rpcpb.ListLetsEncryptCertificatesRequest{})
+	switch {
+	case err != nil:
+		errs = append(errs, err.Error())
+	case acmeResp.GetError() != "":
+		errs = append(errs, acmeResp.GetError())
+	default:
+		for _, cert := range acmeResp.GetCertificates() {
+			all = append(all, cert)
+		}
 	}
-	certs := resp.GetCertificates()
-	out := make([]certificateRow, 0, len(certs))
-	for _, cert := range certs {
+
+	if len(all) == 0 && len(errs) > 0 {
+		return nil, strings.Join(errs, "; ")
+	}
+	out := make([]certificateRow, 0, len(all))
+	for _, cert := range all {
 		// The inventory entry is rebuilt here purely as the identity
 		// and file path the check needs. Its recorded ExpiresAt is
 		// deliberately not carried into certmgr.Observe, which would

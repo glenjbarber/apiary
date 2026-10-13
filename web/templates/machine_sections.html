@@ -234,6 +234,10 @@
     <p class="muted">For Cloudflare-proxied managerd TLS only. This creates a local ECC key and sends only its CSR to Cloudflare. The certificate is installed immediately, but it is <strong>not</strong> loaded until managerd is restarted - which you must do yourself: <code>service apiary_managerd restart</code> on the node is enough for managerd alone, and <code>apiaryctl force-restart</code> also restarts raftd; that one is installed on every Comb and needs nothing but a root shell. Apiary will not restart managerd on your behalf, because a restart issued from inside managerd stops it and cannot start it again. Do not use for DNS-only or direct client traffic.</p>
 {{end}}
 
+{{define "acme_advice"}}
+    <p class="muted">A publicly trusted certificate from Let's Encrypt (ADR-0133), issued without an external ACME client, cron entry, or manual renewal. Apiary proves control of each hostname with a short-lived Cloudflare DNS TXT record under <code>_acme-challenge.&lt;hostname&gt;</code> on the zone below, then removes it. Requires the same Cloudflare zone and DNS token already configured for Cloudflare Tunnel exposure (Zone / DNS / Edit permission) - Let's Encrypt itself never sees that token. The certificate is installed immediately but, like Origin CA above, is <strong>not</strong> loaded until managerd is restarted.</p>
+{{end}}
+
 {{define "machine_security_page"}}
 <!DOCTYPE html>
 <html lang="en">
@@ -257,6 +261,12 @@
     <h3>Cloudflare Origin CA certificates</h3>
     {{template "origin_ca_advice" .}}
     <div id="origin-ca-panel">{{template "origin_ca_panel" .}}</div>
+  </div>
+
+  <div class="panel">
+    <h3>Let's Encrypt certificates</h3>
+    {{template "acme_advice" .}}
+    <div id="acme-panel">{{template "acme_panel" .}}</div>
   </div>
 
   <div class="panel">

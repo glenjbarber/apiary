@@ -179,6 +179,7 @@ func (s *Server) machinePageData(r *http.Request) pageData {
 	cloudflareConfigured, _ := s.currentCloudflareStatus(r)
 	services, serviceErr := s.currentNodeServices(r)
 	originCerts, originErr := s.currentOriginCertificates(r)
+	acmeCerts, acmeErr := s.currentLetsEncryptCertificates(r)
 
 	// One clock for the whole render, so the window's countdown and
 	// its "is it still live" decision are made against the same instant
@@ -200,6 +201,8 @@ func (s *Server) machinePageData(r *http.Request) pageData {
 		ServiceFormError:         serviceErr,
 		OriginCertificates:       originCerts,
 		OriginCAError:            originErr,
+		LetsEncryptCertificates:  acmeCerts,
+		ACMEError:                acmeErr,
 		JoinColonyResult:         s.currentJoinColonyResult(r),
 		JoinWindowNotice:         r.URL.Query().Get("join_window_notice"),
 		JoinColonyWindow:         s.currentColonyJoinWindow(r, renderNow),
@@ -269,6 +272,10 @@ var configFieldSpecs = []configFieldSpec{
 	{"origin_ca_token_file", "Origin CA token file path", "Explicit Cloudflare Origin CA issuance and renewal on this Comb."},
 	{"origin_ca_directory", "Origin CA certificate directory", "Locally issued Cloudflare Origin CA certificates on this Comb."},
 	{"origin_ca_renewal_check_interval", "Origin CA renewal interval", "Automatic Origin CA renewal checks on this Comb."},
+	{"acme_directory", "Let's Encrypt certificate directory", "Locally issued Let's Encrypt certificates on this Comb."},
+	{"acme_account_key_file", "Let's Encrypt account key path", "This Comb's own ACME account registration. The key contents are never shown or recorded."},
+	{"acme_directory_url", "Let's Encrypt ACME directory URL", "Which ACME server this Comb issues Let's Encrypt certificates from."},
+	{"acme_email", "Let's Encrypt contact email", "The contact address this Comb registers its ACME account with."},
 	{"peer_api_key", "Peer API key", "Authenticated peer managerd requests. Current and historical secret values are redacted."},
 	{"raftd_token", "Raftd token", "managerd authentication to this Comb's local raftd socket. Current and historical secret values are redacted."},
 }
@@ -605,6 +612,69 @@ func (s *Server) renderOriginCAPanel(w http.ResponseWriter, r *http.Request, for
 		CanAdmin: true})
 }
 
+// currentLetsEncryptCertificates mirrors currentOriginCertificates
+// exactly, against ListLetsEncryptCertificates (ADR-0133).
+func (s *Server) currentLetsEncryptCertificates(r *http.Request) ([]originCertificateView, string) {
+	resp, err := s.client.ListLetsEncryptCertificates(r.Context(), &rpcpb.ListLetsEncryptCertificatesRequest{})
+	if err != nil {
+		return nil, err.Error()
+	}
+	if resp.GetError() != "" {
+		return nil, resp.GetError()
+	}
+	now := time.Now()
+	var out []originCertificateView
+	for _, cert := range resp.GetCertificates() {
+		expiresAt := time.Unix(cert.GetExpiresAtUnix(), 0)
+		out = append(out, originCertificateView{
+			Name: cert.GetName(), Service: cert.GetService(), Hostnames: strings.Join(cert.GetHostnames(), ", "),
+			ExpiresAt: expiresAt.Local().Format("2006-01-02 15:04 MST"),
+			AutoRenew: cert.GetAutoRenew(),
+			Expiry:    string(origincert.InventoryEntry{ExpiresAt: expiresAt}.Expiry(now)),
+		})
+	}
+	return out, ""
+}
+
+// handleIssueLetsEncryptCertificate mirrors handleIssueOriginCertificate
+// exactly, minus the validity_days field a public ACME CA does not accept.
+func (s *Server) handleIssueLetsEncryptCertificate(w http.ResponseWriter, r *http.Request) {
+	if err := r.ParseForm(); err != nil {
+		s.renderACMEPanel(w, r, err.Error(), "")
+		return
+	}
+	var hostnames []string
+	for _, host := range strings.Split(r.FormValue("hostnames"), ",") {
+		if host = strings.TrimSpace(host); host != "" {
+			hostnames = append(hostnames, host)
+		}
+	}
+	resp, err := s.client.IssueLetsEncryptCertificate(r.Context(), &rpcpb.IssueLetsEncryptCertificateRequest{Name: strings.TrimSpace(r.FormValue("name")), Hostnames: hostnames, AutoRenew: r.Form.Has("auto_renew")})
+	if err != nil {
+		s.renderACMEPanel(w, r, err.Error(), "")
+		return
+	}
+	if resp.GetError() != "" {
+		s.renderACMEPanel(w, r, resp.GetError(), "")
+		return
+	}
+	s.renderACMEPanel(w, r, "", resp.GetRestartRequiredMsg())
+}
+
+func (s *Server) renderACMEPanel(w http.ResponseWriter, r *http.Request, formErr, success string) {
+	certs, err := s.currentLetsEncryptCertificates(r)
+	if err != "" && formErr == "" {
+		formErr = err
+	}
+	cfg, cfgErr := s.currentNodeConfig(r)
+	if cfgErr != "" && formErr == "" {
+		formErr = cfgErr
+	}
+	s.render(w, "acme_panel", pageData{NodeConfig: cfg,
+		LetsEncryptCertificates: certs, ACMEError: formErr, ACMEOK: success,
+		CanAdmin: true})
+}
+
 // currentNodeServices fetches the fixed set of Apiary rc.d services from
 // this Hive's managerd. The result is intentionally local, like node config.
 // apiary_managerd's own row is additionally annotated with the action-
@@ -757,6 +827,10 @@ func (s *Server) nodeConfigUpdateRequest(r *http.Request) *rpcpb.UpdateNodeConfi
 		CloudflareTunnelCredentialsFile: cfg.CloudflareTunnelCredentialsFile,
 		OriginCaTokenFile:               cfg.OriginCATokenFile,
 		OriginCaDirectory:               cfg.OriginCADirectory,
+		AcmeDirectory:                   cfg.AcmeDirectory,
+		AcmeAccountKeyFile:              cfg.AcmeAccountKeyFile,
+		AcmeDirectoryUrl:                cfg.AcmeDirectoryURL,
+		AcmeEmail:                       cfg.AcmeEmail,
 	}
 	if r.Form.Has("uplink") {
 		req.Uplink = r.FormValue("uplink")
@@ -880,6 +954,18 @@ func (s *Server) nodeConfigUpdateRequest(r *http.Request) *rpcpb.UpdateNodeConfi
 	}
 	if r.Form.Has("origin_ca_directory") {
 		req.OriginCaDirectory = r.FormValue("origin_ca_directory")
+	}
+	if r.Form.Has("acme_directory") {
+		req.AcmeDirectory = r.FormValue("acme_directory")
+	}
+	if r.Form.Has("acme_account_key_file") {
+		req.AcmeAccountKeyFile = r.FormValue("acme_account_key_file")
+	}
+	if r.Form.Has("acme_directory_url") {
+		req.AcmeDirectoryUrl = r.FormValue("acme_directory_url")
+	}
+	if r.Form.Has("acme_email") {
+		req.AcmeEmail = r.FormValue("acme_email")
 	}
 	return req
 }
@@ -1134,6 +1220,25 @@ func (s *Server) handleUpdateOriginCAConfig(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	s.renderOriginCAPanel(w, r, "", "Origin CA configuration saved.")
+}
+
+// handleUpdateACMEConfig mirrors handleUpdateOriginCAConfig exactly,
+// against the acme_* fields (ADR-0133).
+func (s *Server) handleUpdateACMEConfig(w http.ResponseWriter, r *http.Request) {
+	if err := r.ParseForm(); err != nil {
+		s.renderACMEPanel(w, r, "invalid form: "+err.Error(), "")
+		return
+	}
+	resp, err := s.client.UpdateNodeConfig(r.Context(), s.nodeConfigUpdateRequest(r))
+	if err != nil {
+		s.renderACMEPanel(w, r, err.Error(), "")
+		return
+	}
+	if resp.GetError() != "" {
+		s.renderACMEPanel(w, r, resp.GetError(), "")
+		return
+	}
+	s.renderACMEPanel(w, r, "", "Let's Encrypt configuration saved.")
 }
 
 // handleUpdateAssumptionTuning updates the six Automated Assumption

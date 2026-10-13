@@ -29,13 +29,38 @@ type Renewer struct {
 	RestartService func(service string)
 	// Now defaults to time.Now; overridable for tests.
 	Now func() time.Time
+
+	// ACMEConfig/ACMEIssuer mirror Config/Issuer for a second,
+	// independent local certificate store used by the ACME issuer
+	// (ADR-0133 D2/D3, internal/acme). Renewal logic against this store
+	// is identical to Config/Issuer's own, just run against a different
+	// directory/token file and a different Issuer - nil ACMEConfig (the
+	// default, and every pre-existing Renewer value) means this Comb has
+	// no ACME certificates to renew, and Origin CA renewal above is
+	// completely unaffected either way.
+	ACMEConfig func() (directory, tokenFile string, err error)
+	ACMEIssuer Issuer
 }
 
-// RunOnce checks every locally recorded certificate and renews the ones
-// due for it. A failure renewing one certificate does not block the
-// others - all failures are joined into the returned error.
+// RunOnce checks every locally recorded certificate, in both the Origin
+// CA and (if configured) the ACME stores, and renews the ones due for
+// it. A failure renewing one certificate, or one whole store, does not
+// block any other - all failures are joined into the returned error.
 func (r *Renewer) RunOnce(ctx context.Context) error {
-	directory, tokenFile, err := r.Config()
+	var errs []error
+	if err := r.renewStore(ctx, r.Config, r.Issuer); err != nil {
+		errs = append(errs, err)
+	}
+	if r.ACMEConfig != nil {
+		if err := r.renewStore(ctx, r.ACMEConfig, r.ACMEIssuer); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	return errors.Join(errs...)
+}
+
+func (r *Renewer) renewStore(ctx context.Context, config func() (directory, tokenFile string, err error), issuer Issuer) error {
+	directory, tokenFile, err := config()
 	if err != nil {
 		return fmt.Errorf("origincert: loading node config: %w", err)
 	}
@@ -60,7 +85,7 @@ func (r *Renewer) RunOnce(ctx context.Context) error {
 			errs = append(errs, fmt.Errorf("origincert: reading token file for %q: %w", entry.Name, err))
 			continue
 		}
-		if _, err := Issue(ctx, r.Issuer, IssueRequest{
+		if _, err := Issue(ctx, issuer, IssueRequest{
 			Directory: directory, Name: entry.Name, Service: entry.Service,
 			Hostnames: entry.Hostnames, ValidityDays: entry.ValidityDays,
 			Token: strings.TrimSpace(string(token)), AutoRenew: true,

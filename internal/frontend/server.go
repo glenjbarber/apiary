@@ -532,6 +532,13 @@ type pageData struct {
 	OriginCAError        string
 	OriginCAOK           string
 
+	// LetsEncryptCertificates/ACMEError/ACMEOK mirror
+	// OriginCertificates/OriginCAError/OriginCAOK exactly, for the
+	// separate Let's Encrypt panel (ADR-0133).
+	LetsEncryptCertificates []originCertificateView
+	ACMEError               string
+	ACMEOK                  string
+
 	// Certificates backs the read-only Certificates page
 	// ("/certificates", see internal/frontend/certificates.go) - one
 	// row per certificate this Comb holds, each carrying its own
@@ -1254,6 +1261,8 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /machine/tls", s.requireRole(manager.RoleAdmin, s.handleUpdateTLSConfig))
 	s.mux.HandleFunc("POST /machine/origin-ca", s.requireRole(manager.RoleAdmin, s.handleIssueOriginCertificate))
 	s.mux.HandleFunc("POST /machine/origin-ca/config", s.requireRole(manager.RoleAdmin, s.handleUpdateOriginCAConfig))
+	s.mux.HandleFunc("POST /machine/acme", s.requireRole(manager.RoleAdmin, s.handleIssueLetsEncryptCertificate))
+	s.mux.HandleFunc("POST /machine/acme/config", s.requireRole(manager.RoleAdmin, s.handleUpdateACMEConfig))
 	s.mux.HandleFunc("POST /machine/cloudflare-config", s.requireRole(manager.RoleAdmin, s.handleUpdateCloudflareConfig))
 	s.mux.HandleFunc("POST /machine/assumption-tuning", s.requireRole(manager.RoleAdmin, s.handleUpdateAssumptionTuning))
 	s.mux.HandleFunc("POST /machine/internal-security", s.requireRole(manager.RoleAdmin, s.handleUpdateInternalSecurity))

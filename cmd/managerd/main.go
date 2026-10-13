@@ -23,6 +23,7 @@ import (
 	"google.golang.org/grpc/credentials"
 
 	rpcpb "github.com/glenjbarber/apiary/api/rpc"
+	"github.com/glenjbarber/apiary/internal/acme"
 	"github.com/glenjbarber/apiary/internal/assumecheck"
 	"github.com/glenjbarber/apiary/internal/assumptionregister"
 	"github.com/glenjbarber/apiary/internal/assumptions"
@@ -465,6 +466,20 @@ func run() error {
 		srv.SetColonyJoinWindowSeconds(*cfg.ColonyJoinWindowSeconds)
 	}
 	srv.SetOriginCAIssuer(cloudflare.OriginCAIssuer{})
+	// ADR-0133: like PAMService below, Acme* config is read once here
+	// at startup rather than live on every call - a change through the
+	// Machine Configuration page takes effect on managerd's next
+	// restart, the same posture every other non-directory/token-file
+	// nodeconfig field already has (see nodeconfig's own package
+	// comment). Only AcmeDirectory and the Cloudflare DNS token file
+	// path are re-read fresh on every renewal tick, via ACMEConfig
+	// below - exactly mirroring Origin CA's own Config closure.
+	srv.SetACMEIssuer(acme.Issuer{
+		DirectoryURL:   cfg.AcmeDirectoryURL,
+		AccountKeyFile: cfg.AcmeAccountKeyFile,
+		Email:          cfg.AcmeEmail,
+		ZoneID:         cfg.CloudflareZoneID,
+	})
 	// ADR-0102: wired unconditionally, same posture as nodeConfigMgr
 	// above - Load()/Save() on a missing file already behave correctly
 	// (missing is not an error), and frontend/restshimd/raftd are
@@ -514,9 +529,28 @@ func run() error {
 			return cfg.OriginCADirectory, cfg.OriginCATokenFile, nil
 		},
 		Issuer: cloudflare.OriginCAIssuer{},
+		// ACMEConfig mirrors Config, against the separate Let's Encrypt
+		// store and the Cloudflare DNS token (not a dedicated ACME
+		// secret - see internal/acme's own package comment). ACMEIssuer
+		// is the same value SetACMEIssuer was given above; held here as
+		// well because Renewer.RunOnce, unlike manager.Server's RPC
+		// handlers, has no access to srv's own private fields.
+		ACMEConfig: func() (string, string, error) {
+			cfg, err := nodeConfigMgr.Load()
+			if err != nil {
+				return "", "", err
+			}
+			return cfg.AcmeDirectory, cfg.CloudflareTokenFile, nil
+		},
+		ACMEIssuer: acme.Issuer{
+			DirectoryURL:   cfg.AcmeDirectoryURL,
+			AccountKeyFile: cfg.AcmeAccountKeyFile,
+			Email:          cfg.AcmeEmail,
+			ZoneID:         cfg.CloudflareZoneID,
+		},
 		RestartService: func(service string) {
 			if _, err := srv.RestartNodeService(context.Background(), &rpcpb.RestartNodeServiceRequest{Name: service}); err != nil {
-				log.Printf("managerd: origin-ca renewal: restarting %s: %v", service, err)
+				log.Printf("managerd: certificate renewal: restarting %s: %v", service, err)
 			}
 		},
 	}

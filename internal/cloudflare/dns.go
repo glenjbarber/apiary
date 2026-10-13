@@ -32,6 +32,18 @@ const apiBaseURL = "https://api.cloudflare.com/client/v4"
 
 var baseURL = apiBaseURL
 
+// SetBaseURLForTest overrides the Cloudflare API base URL for the
+// duration of a test, returning a func that restores it. It exists so
+// that tests of packages that call into this one (internal/acme, whose
+// DNS-01 challenge publishing calls CreateTXT/DeleteTXT) can point this
+// package at a local httptest.Server without this package exporting its
+// HTTP client or transport. Production code must never call this.
+func SetBaseURLForTest(url string) (reset func()) {
+	old := baseURL
+	baseURL = url
+	return func() { baseURL = old }
+}
+
 type dnsRecord struct {
 	ID      string `json:"id,omitempty"`
 	Type    string `json:"type"`
@@ -149,6 +161,49 @@ func EnsureCNAME(ctx context.Context, token, zoneID, hostname, target string) er
 	path := fmt.Sprintf("/zones/%s/dns_records/%s", url.PathEscape(zoneID), url.PathEscape(existing.ID))
 	if _, err := doRequest(ctx, http.MethodPut, path, token, rec); err != nil {
 		return fmt.Errorf("updating CNAME for %s: %w", hostname, err)
+	}
+	return nil
+}
+
+// CreateTXT creates a new TXT record and returns its Cloudflare record
+// ID. Used by ACME's DNS-01 challenge (ADR-0133, internal/acme) to
+// publish a challenge value under _acme-challenge.<hostname>.
+//
+// Unlike EnsureCNAME, this always creates a new record rather than
+// checking for an existing one first: a DNS-01 challenge value is
+// short-lived and specific to one issuance attempt, so there is nothing
+// to idempotently converge toward. The caller always deletes the record
+// it created (via the returned ID) once validation finishes, whether or
+// not it succeeded.
+func CreateTXT(ctx context.Context, token, zoneID, name, value string) (string, error) {
+	path := fmt.Sprintf("/zones/%s/dns_records", url.PathEscape(zoneID))
+	resp, err := doRequest(ctx, http.MethodPost, path, token, dnsRecord{Type: "TXT", Name: name, Content: value, TTL: 60})
+	if err != nil {
+		return "", fmt.Errorf("creating TXT record for %s: %w", name, err)
+	}
+	var created dnsRecord
+	if err := json.Unmarshal(resp.Result, &created); err != nil {
+		return "", fmt.Errorf("decoding created TXT record for %s: %w", name, err)
+	}
+	return created.ID, nil
+}
+
+// DeleteTXT idempotently removes a TXT record by its Cloudflare record
+// ID, mirroring DeleteCNAME's not-found-is-success posture. An empty
+// recordID is a no-op, not an error, so a cleanup path that never
+// learned an ID (because creation itself failed) can call this
+// unconditionally.
+func DeleteTXT(ctx context.Context, token, zoneID, recordID string) error {
+	if recordID == "" {
+		return nil
+	}
+	path := fmt.Sprintf("/zones/%s/dns_records/%s", url.PathEscape(zoneID), url.PathEscape(recordID))
+	if _, err := doRequest(ctx, http.MethodDelete, path, token, nil); err != nil {
+		var apiErr *apiErrorResult
+		if errors.As(err, &apiErr) && apiErr.Code == notFoundErrorCode {
+			return nil
+		}
+		return fmt.Errorf("deleting TXT record %s: %w", recordID, err)
 	}
 	return nil
 }

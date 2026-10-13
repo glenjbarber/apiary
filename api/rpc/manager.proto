@@ -38,6 +38,16 @@ service ManagerService {
   rpc ListOriginCertificates(ListOriginCertificatesRequest) returns (ListOriginCertificatesResponse);
   rpc IssueOriginCertificate(IssueOriginCertificateRequest) returns (IssueOriginCertificateResponse);
 
+  // Let's Encrypt (ACME, ADR-0133) issuance mirrors Origin CA issuance
+  // exactly: a local, Admin-only operation that never forwards,
+  // replicates a credential, or runs from reconciliation. It is a
+  // separate pair of RPCs rather than a type field on the Origin CA ones
+  // because the two local certificate stores, and the secrets each
+  // reads, are kept independent (internal/origincert.Renewer's
+  // ACMEConfig/ACMEIssuer).
+  rpc ListLetsEncryptCertificates(ListLetsEncryptCertificatesRequest) returns (ListLetsEncryptCertificatesResponse);
+  rpc IssueLetsEncryptCertificate(IssueLetsEncryptCertificateRequest) returns (IssueLetsEncryptCertificateResponse);
+
   rpc CreateVM(CreateVMRequest) returns (CreateVMResponse);
   rpc UpdateVM(UpdateVMRequest) returns (UpdateVMResponse);
   rpc DeleteVM(DeleteVMRequest) returns (DeleteVMResponse);
@@ -1472,6 +1482,25 @@ message ListOriginCertificatesResponse { repeated OriginCertificateInfo certific
 message IssueOriginCertificateRequest { string name = 1; repeated string hostnames = 2; int32 validity_days = 3; bool auto_renew = 4; }
 message IssueOriginCertificateResponse { OriginCertificateInfo certificate = 1; string error = 2; bool restart_scheduled = 3; string restart_required_msg = 4; }
 
+// LetsEncryptCertificateInfo mirrors OriginCertificateInfo field for
+// field (ADR-0133) - no validity_days, because a public ACME CA decides
+// a certificate's lifetime unilaterally rather than accepting one.
+message LetsEncryptCertificateInfo {
+  string name = 1;
+  string service = 2;
+  repeated string hostnames = 3;
+  string id = 4;
+  int64 expires_at_unix = 5;
+  string cert_path = 6;
+  string key_path = 7;
+  int64 updated_at_unix = 8;
+  bool auto_renew = 9;
+}
+message ListLetsEncryptCertificatesRequest {}
+message ListLetsEncryptCertificatesResponse { repeated LetsEncryptCertificateInfo certificates = 1; string error = 2; }
+message IssueLetsEncryptCertificateRequest { string name = 1; repeated string hostnames = 2; bool auto_renew = 3; }
+message IssueLetsEncryptCertificateResponse { LetsEncryptCertificateInfo certificate = 1; string error = 2; bool restart_scheduled = 3; string restart_required_msg = 4; }
+
 // RaftMember mirrors api/internalpb's ServerInfo, kept as a separate
 // external type for the same reason StatusResponse itself is (ADR-0002):
 // the external schema doesn't couple to the internal protocol's
@@ -1971,6 +2000,17 @@ message GetNodeConfigResponse {
   // managerd settings changed through UpdateNodeConfig. Existing values
   // without an entry have unknown origin; the server never infers history.
   repeated ConfigChange config_changes = 48;
+
+  // acme_directory/acme_account_key_file/acme_directory_url/acme_email
+  // (ADR-0133) configure the separate, independent local certificate
+  // store and account key the Let's Encrypt issuer uses - see
+  // nodeconfig.Config's own doc comments for their full semantics.
+  // Neither acme_directory nor acme_account_key_file is raft-replicated
+  // or ever carries secret material itself.
+  string acme_directory          = 51;
+  string acme_account_key_file   = 52;
+  string acme_directory_url      = 53;
+  string acme_email              = 54;
 }
 
 message ConfigChange {
@@ -2148,6 +2188,14 @@ message UpdateNodeConfigRequest {
   // value without changing configuration. The resulting history entry is
   // explicitly marked as an operator attestation, not reconstructed history.
   string annotate_field = 50;
+
+  // acme_directory/acme_account_key_file/acme_directory_url/acme_email
+  // (ADR-0133) - see GetNodeConfigResponse's own doc comment for their
+  // full semantics.
+  string acme_directory        = 51;
+  string acme_account_key_file = 52;
+  string acme_directory_url    = 53;
+  string acme_email            = 54;
 }
 
 message UpdateNodeConfigResponse {

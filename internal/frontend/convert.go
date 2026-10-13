@@ -163,6 +163,10 @@ type nodeConfigView struct {
 	CloudflareTunnelCredentialsFile string
 	OriginCATokenFile               string
 	OriginCADirectory               string
+	AcmeDirectory                   string
+	AcmeAccountKeyFile              string
+	AcmeDirectoryURL                string
+	AcmeEmail                       string
 
 	// HostOptions are bare host/IP suggestions (no port) constructed from
 	// managerd's own interface inventory, this Comb's own DNS names, and
@@ -246,6 +250,10 @@ func fromRPCNodeConfig(d *rpcpb.GetNodeConfigResponse) nodeConfigView {
 		CloudflareTunnelCredentialsFile: d.GetCloudflareTunnelCredentialsFile(),
 		OriginCATokenFile:               d.GetOriginCaTokenFile(),
 		OriginCADirectory:               d.GetOriginCaDirectory(),
+		AcmeDirectory:                   d.GetAcmeDirectory(),
+		AcmeAccountKeyFile:              d.GetAcmeAccountKeyFile(),
+		AcmeDirectoryURL:                d.GetAcmeDirectoryUrl(),
+		AcmeEmail:                       d.GetAcmeEmail(),
 	}
 	for _, change := range d.GetConfigChanges() {
 		changedAt := time.Unix(change.GetChangedAtUnix(), 0)

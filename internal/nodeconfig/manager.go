@@ -259,7 +259,37 @@ type Config struct {
 	// here as part of ADR-0100, fixing a plain oversight (this flag
 	// was never added to this struct before now, unlike every other
 	// tuning duration).
+	//
+	// The same tick now also drives Let's Encrypt renewal checks below
+	// (ADR-0133) - one renewal loop, one interval, matching
+	// origincert.Renewer.RunOnce's own single entry point.
 	OriginCARenewalCheckInterval time.Duration `json:"origin_ca_renewal_check_interval,omitempty"`
+
+	// AcmeDirectory is the separate, independent local certificate
+	// store the Let's Encrypt issuer (ADR-0133, internal/acme) uses -
+	// deliberately not shared with OriginCADirectory above, mirroring
+	// origincert.Renewer's own ACMEConfig/Config split. Like
+	// OriginCADirectory, it never contains a raw token or private key
+	// outside the files origincert.WritePair itself manages there.
+	AcmeDirectory string `json:"acme_directory,omitempty"`
+
+	// AcmeAccountKeyFile is where this Comb's own ACME account private
+	// key is persisted (internal/acme.Issuer.AccountKeyFile) - 0600, in
+	// a 0700 directory, generated on first use if the path does not yet
+	// exist. Never replicated through raft: one account key per Comb,
+	// not a Colony-wide shared one (ADR-0133's resolution of its own
+	// open question on account-key custody).
+	AcmeAccountKeyFile string `json:"acme_account_key_file,omitempty"`
+
+	// AcmeDirectoryURL is the ACME server's directory endpoint. Empty
+	// defaults to Let's Encrypt's production directory - set this to a
+	// staging endpoint while testing, so a mistake does not consume
+	// Let's Encrypt's production rate limit.
+	AcmeDirectoryURL string `json:"acme_directory_url,omitempty"`
+
+	// AcmeEmail is an optional contact address passed at ACME account
+	// registration. Let's Encrypt does not require one.
+	AcmeEmail string `json:"acme_email,omitempty"`
 
 	// RaftdToken mirrors -raftd-token - a live credential (ADR-0033),
 	// write-only, same posture as PeerAPIKey above.
@@ -494,6 +524,12 @@ func validate(cfg Config) error {
 		return err
 	}
 	if err := validatePathField("origin_ca_directory", cfg.OriginCADirectory); err != nil {
+		return err
+	}
+	if err := validatePathField("acme_directory", cfg.AcmeDirectory); err != nil {
+		return err
+	}
+	if err := validatePathField("acme_account_key_file", cfg.AcmeAccountKeyFile); err != nil {
 		return err
 	}
 	if err := validateDatasetOrPrefix("zfs_base", cfg.ZFSBase); err != nil {
