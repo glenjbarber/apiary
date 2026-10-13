@@ -280,6 +280,24 @@ re-runnable if you only need to redo one piece:
   it - so running `make setup-tls` first is safe, and the RSA pair it
   writes is the one the Comb keeps. See ADR-0147 Part 1.
 
+  **A publicly trusted certificate (Let's Encrypt or any other public
+  CA) works the same way, without ever running `setup-tls` at all.**
+  Place the certificate chain and key at `${NODE_TLS_DIR}/cert.pem` and
+  `${NODE_TLS_DIR}/key.pem` (the same default
+  `/usr/local/etc/apiary-tls`, or wherever `NODE_TLS_DIR` points) before
+  running `make setup` or `make setup-quick` - `apiaryctl install` keeps
+  whatever it finds there, self-signed material never enters the
+  picture, and the rest of `make setup`/`setup-quick` proceeds exactly
+  as documented below. This is the one step `setup-quick`'s own
+  self-signed default skips silently, so do it first if a public
+  certificate is the goal.
+
+  A node run this way does not look like Path A below in every field,
+  though - see "Profile: every certificate from a public CA" after
+  Step 9, which lists the exact `node_id`/`rpc_addr`/`tls_*`/`peer_tls`/
+  `raft_bind` values that differ once no certificate on the node is
+  self-signed.
+
 Run the three together:
 
 ```bash
@@ -712,6 +730,47 @@ to anyone who can reach the port - fine for initial verification, but
 add real login (ADR-0030/ADR-0087) before this host is reachable from
 anywhere untrusted. `frontend` itself has no login-related config field
 at all - it asks `managerd`'s own `Status` RPC whether PAM is configured.
+
+## Profile: every certificate from a public CA
+
+Everything above assumes the self-signed pair `apiaryctl install`
+generates - SANs `IP:127.0.0.1` plus the short hostname, which is why
+`manager_addr`/`rpc_addr` stay loopback or a bare LAN name throughout
+this document. A node whose `tls_cert`/`tls_key` instead point at a
+certificate from Let's Encrypt or any other public CA (per Step 6's
+own callout above, place the pair at `NODE_TLS_DIR` before running
+`make setup`/`setup-quick`) looks different in exactly these fields,
+and nowhere else:
+
+| Field | File | Self-signed (Path A, above) | Public CA |
+| --- | --- | --- | --- |
+| `node_id` | `raftd.json` | short hostname | the node's own FQDN |
+| `rpc_addr` | `managerd.json` | loopback or LAN name | the node's own FQDN |
+| `manager_addr` | `frontend.json`, `restshimd.json` | matches `rpc_addr` above | the node's own FQDN |
+| `tls_cert`/`tls_key` | `managerd.json`, `frontend.json` | the self-signed pair | the public certificate/key |
+| `manager_tls_ca` | `frontend.json`, `restshimd.json` | the self-signed cert (own CA) | empty - the system trust store already has the public CA |
+| `peer_tls_ca` | `managerd.json`, `frontend.json` | the self-signed cert | empty, same reason |
+| `manager_tls_server_name` | `frontend.json`, `restshimd.json` | empty or the short name | empty - the dialed host is already the name the certificate carries |
+| `peer_tls` | `managerd.json`, `frontend.json` | `true` once peer TLS is configured (ADR-0093) | `true` |
+| `raft_bind` | `raftd.json` | a routable LAN address or hostname | the node's own FQDN, not a bare IP (ADR-0115 derives `peer_tls_hostname_map` from this at the other end only when it resolves to a real host) |
+| `peer_hostname_suffix` | `frontend.json` | often set, to turn short peer IDs into dialable names | empty - `node_id` is already the FQDN, so there is nothing to append |
+
+Why each one changes: the certificate's own SANs are the node's FQDN
+and nothing else (Let's Encrypt never issues for `127.0.0.1` or a bare
+LAN name), so every field that is dialed or compared against those
+SANs has to be the FQDN too (ADR-0139), and every field that exists
+only to trust or rename a self-signed certificate has nothing left to
+do (ADR-0093, `internal/tlsdial`'s own doc comment on `serverName`).
+
+Getting this wrong produces a handshake failure with no obvious cause:
+setting `manager_tls_server_name` to the public name while `tls_cert`
+still serves the old self-signed pair fails with `x509: certificate is
+valid for <short-name>, <short-name>.<domain>, not <fqdn>`, and nothing
+about it reaches `/var/log/messages` - `apiary_frontend`'s own log is
+at `/var/log/apiary/frontend.log` (`etc/rc.d/apiary_frontend`'s
+`daemon(8)` invocation writes there, never to syslog), and the
+`managerlink` startup check now names both the certificate's own SANs
+and that log path in its refusal, rather than only the raw x509 error.
 
 ## 10. Verify
 

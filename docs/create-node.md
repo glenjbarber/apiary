@@ -105,6 +105,17 @@ local TLS certificate unless one is already present. `make install` copies the
 daemon binaries and their commented JSON samples into the locations used by
 the rc.d scripts.
 
+To use a publicly trusted certificate (Let's Encrypt or any other
+public CA) instead of a self-signed one, place its certificate chain
+and key at `NODE_TLS_DIR` (`/usr/local/etc/apiary-tls` by default)
+before running `make setup` - the installer keeps whatever pair it
+finds there rather than replacing it. That profile changes several of
+the JSON fields below (`node_id`/`rpc_addr`/`manager_addr` become the
+node's own FQDN, `manager_tls_ca`/`peer_tls_ca`/
+`manager_tls_server_name` go empty, `peer_hostname_suffix` goes
+empty); see docs/bootstrap.md's "Profile: every certificate from a
+public CA" for the full table and why each field changes.
+
 Find the installed bhyve UEFI firmware before writing `managerd.json`:
 
 ```bash

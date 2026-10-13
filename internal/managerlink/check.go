@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"strings"
 	"sync"
 	"time"
 )
@@ -221,7 +222,8 @@ func (c *Checker) compare(ctx context.Context, scheme Scheme) error {
 		tctx, cancel := context.WithTimeout(ctx, timeout)
 		defer cancel()
 		if err := verifyTrust(tctx, c.cfg.Addr, c.cfg.CAFile, c.cfg.ServerName); err != nil {
-			return &UntrustedError{Addr: c.cfg.Addr, Err: err, ConfigPath: c.cfg.ConfigPath, ProcessName: c.cfg.ProcessName}
+			servedNames, _ := servedCertificateNames(err)
+			return &UntrustedError{Addr: c.cfg.Addr, Err: err, ConfigPath: c.cfg.ConfigPath, ProcessName: c.cfg.ProcessName, ServedNames: servedNames}
 		}
 	}
 	return nil
@@ -309,15 +311,46 @@ type UntrustedError struct {
 	Err         error
 	ConfigPath  string
 	ProcessName string
+
+	// ServedNames is the certificate's own DNS/IP names, extracted from
+	// Err when it is a *x509.HostnameError (the "certificate is valid
+	// for X, not Y" case this package exists to make less mysterious -
+	// see the observed failure in ADR-0133's public-CA profile). Empty
+	// for every other verification failure (unknown CA, expired, and so
+	// on), where the certificate itself was never reached.
+	ServedNames []string
 }
 
 func (e *UntrustedError) isPermanent() bool { return true }
 func (e *UntrustedError) Unwrap() error     { return e.Err }
 
 func (e *UntrustedError) Error() string {
-	return fmt.Sprintf("managerd at %s speaks TLS, as configured, but its certificate does not verify: %v. "+
+	msg := fmt.Sprintf("managerd at %s speaks TLS, as configured, but its certificate does not verify: %v. "+
 		"Fix: check \"manager_tls_ca\" and \"manager_tls_server_name\" in %s against managerd's own tls_cert",
 		e.Addr, e.Err, e.ConfigPath)
+	if len(e.ServedNames) > 0 {
+		msg += fmt.Sprintf(". The certificate actually served names: %s", strings.Join(e.ServedNames, ", "))
+	}
+	return msg + fmt.Sprintf(". %s's own logs are at %s", e.process(), logPathFor(e.ProcessName))
+}
+
+func (e *UntrustedError) process() string {
+	if e.ProcessName != "" {
+		return e.ProcessName
+	}
+	return "this process"
+}
+
+// logPathFor is where daemon(8) redirects a named daemon's stdout/
+// stderr under this project's own rc.d scripts (etc/rc.d/apiary_*) -
+// never syslog, so an operator checking /var/log/messages for a
+// startup refusal (as ADR-0133's observed public-CA failure did) finds
+// nothing there no matter how loud the refusal was.
+func logPathFor(processName string) string {
+	if processName == "" {
+		processName = "managerd"
+	}
+	return "/var/log/apiary/" + processName + ".log"
 }
 
 // UnreachableError says the endpoint could not be reached, so its scheme is
