@@ -34,6 +34,16 @@ const (
 	StatusMisconfigured Status = "misconfigured"
 	StatusManual        Status = "manual"
 	StatusUnknown       Status = "unknown"
+
+	// StatusInformational is a finding worth naming but never worth
+	// acting on, and never worth counting as a failure: the host state
+	// observed is not what this project would have set up itself, but
+	// it is also not a problem - there is nothing an operator needs to
+	// resolve, unlike StatusMisconfigured's own "resolve this by hand"
+	// contract. Introduced for etcServicesCheck's http-alt/apiary-
+	// frontend port-8080 case (ADR-0108): a report or exit code must
+	// treat this the same as StatusOK, never the same as a failure.
+	StatusInformational Status = "informational"
 )
 
 // Result is one check's outcome. FixHint is always populated when Status

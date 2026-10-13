@@ -89,7 +89,12 @@ func run() error {
 		shouldApply := (*apply && c.Risk == install.RiskSafe) || (networkConfirmed && c.Risk == install.RiskNetwork)
 		if shouldApply && c.Apply != nil {
 			res := c.Probe(ctx, runner, opt)
-			if res.Status != install.StatusOK {
+			// StatusInformational is deliberately treated like StatusOK
+			// here, same as the failed/ok bookkeeping below: there is
+			// nothing to apply, and calling Apply anyway would hit the
+			// same non-conflict it already reported and refuse, turning
+			// a non-issue into an apparent "apply failed" one.
+			if res.Status != install.StatusOK && res.Status != install.StatusInformational {
 				if err := c.Apply(ctx, runner, opt); err != nil {
 					res.Detail = fmt.Sprintf("apply failed: %v", err)
 				} else {
@@ -100,7 +105,7 @@ func run() error {
 		} else {
 			results = append(results, c.Probe(ctx, runner, opt))
 		}
-		if len(results) > 0 && results[len(results)-1].Status != install.StatusOK {
+		if last := results[len(results)-1].Status; last != install.StatusOK && last != install.StatusInformational {
 			failed = true
 		}
 	}
@@ -126,7 +131,11 @@ func printTable(results []install.Result) {
 	fmt.Fprintln(w, "ID\tSTATUS\tDETAIL\tFIX HINT")
 	ok, total := 0, len(results)
 	for _, r := range results {
-		if r.Status == install.StatusOK {
+		// StatusInformational counts toward "ok" in this summary line,
+		// same as the failed/apply bookkeeping in run() above: it is
+		// never a problem for an operator to resolve, just a fact worth
+		// naming - see StatusInformational's own doc comment.
+		if r.Status == install.StatusOK || r.Status == install.StatusInformational {
 			ok++
 		}
 		hints := strings.Split(r.FixHint, "\n")

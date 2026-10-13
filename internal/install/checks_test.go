@@ -705,6 +705,52 @@ func TestEtcServicesCheckPortConflictFailsClosed(t *testing.T) {
 	}
 }
 
+// TestEtcServicesCheckHTTPAltIsInformational is this issue's own
+// regression test: port 8080/tcp already registered to the standard
+// IANA name "http-alt" (the common real-world case, since that
+// registration predates Apiary on most hosts) must be reported
+// StatusInformational, not StatusMisconfigured - there is nothing for
+// an operator to resolve, since frontend binds 8080 by fixed port
+// number regardless of either name. Apply must still refuse to touch
+// the file, same as a genuine conflict: this only changes the
+// severity reported, not whether Apiary will add a second, duplicate
+// entry for the same port.
+func TestEtcServicesCheckHTTPAltIsInformational(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "services")
+	old := etcServicesPath
+	etcServicesPath = path
+	defer func() { etcServicesPath = old }()
+
+	original := "http-alt\t8080/tcp\t\t#HTTP Alternate\n"
+	if err := os.WriteFile(path, []byte(original), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	res := etcServicesCheck.Probe(ctx, newFakeRunner(), Options{})
+	if res.Status != StatusInformational {
+		t.Fatalf("status = %v, want informational when 8080/tcp is already registered to http-alt", res.Status)
+	}
+	if !strings.Contains(res.Detail, "http-alt") {
+		t.Errorf("Detail should name http-alt, got: %s", res.Detail)
+	}
+	if res.FixHint == "" {
+		t.Error("FixHint = \"\", want a non-empty hint even for an informational result (Result's own doc comment)")
+	}
+
+	if err := etcServicesCheck.Apply(ctx, newFakeRunner(), Options{}); err == nil {
+		t.Fatal("Apply() error = nil, want a refusal: Apiary must not add a second, duplicate entry for 8080/tcp")
+	}
+	body, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(body) != original {
+		t.Fatalf("file must be left untouched, got: %s", body)
+	}
+}
+
 // TestManagerdNodeIDCheckRejectsSamplePlaceholder is the regression
 // test for the failure mode etc/apiary/README.md already warns about
 // in prose: an operator who copied managerd.json.sample verbatim got

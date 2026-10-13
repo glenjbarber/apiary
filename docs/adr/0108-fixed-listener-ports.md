@@ -55,6 +55,15 @@ name, the check reports Misconfigured and Apply refuses to touch the
 file at all, rather than silently duplicating or overwriting an
 existing registration.
 
+**Later addition**: the common real case for port 8080/tcp is
+`http-alt`, IANA's own long-registered name for that port, predating
+Apiary on most hosts - not a mistake anyone needs to resolve. The
+check now reports this one case `Informational` rather than
+`Misconfigured` (a new `Status` value, treated the same as `ok` in
+both the exit code and the summary count): Apply still refuses to add
+a second, duplicate entry for the port, but there is nothing left for
+an operator to do about it, so it no longer reads as a failure.
+
 ## Consequences
 
 - An operator can no longer misconfigure a daemon's own listener or

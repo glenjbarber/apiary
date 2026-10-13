@@ -35,12 +35,26 @@ type apiaryServiceEntry struct {
 	Port    string
 	Proto   string
 	Comment string
+
+	// InformationalOwners lists other names already commonly registered
+	// to Port/Proto that are never a real conflict for this entry -
+	// Apiary's own daemons bind by fixed port number (see
+	// internal/frontend/fixedport.go), never by looking the port up
+	// under either name, so the choice between the two names has no
+	// effect on anything this project does. A port already claimed by
+	// one of these is reported StatusInformational rather than
+	// StatusMisconfigured, since there is nothing here for an operator
+	// to resolve.
+	InformationalOwners []string
 }
 
 var apiaryServiceEntries = []apiaryServiceEntry{
 	{Name: "apiary-raftd", Port: "17600", Proto: "tcp", Comment: "Apiary raftd Raft consensus"},
 	{Name: "apiary-managerd", Port: "17700", Proto: "tcp", Comment: "Apiary managerd RPC"},
-	{Name: "apiary-frontend", Port: "8080", Proto: "tcp", Comment: "Apiary frontend web UI"},
+	// 8080/tcp is IANA's own long-registered "http-alt" - an existing
+	// http-alt entry there predates Apiary on most hosts and is not a
+	// mistake to fix; see InformationalOwners' own doc comment.
+	{Name: "apiary-frontend", Port: "8080", Proto: "tcp", Comment: "Apiary frontend web UI", InformationalOwners: []string{"http-alt"}},
 	{Name: "apiary-restshimd", Port: "8081", Proto: "tcp", Comment: "Apiary restshimd REST API"},
 }
 
@@ -82,6 +96,18 @@ func servicesLinePortConflict(line, port, proto string) string {
 		return ""
 	}
 	return fields[0]
+}
+
+// isInformationalOwner reports whether owner is one of e's own
+// InformationalOwners - a port already claimed by a name that is known
+// not to be a real conflict for e (see that field's own doc comment).
+func isInformationalOwner(e apiaryServiceEntry, owner string) bool {
+	for _, name := range e.InformationalOwners {
+		if owner == name {
+			return true
+		}
+	}
+	return false
 }
 
 var registry = []Check{
@@ -627,6 +653,12 @@ var etcServicesCheck = Check{
 					break
 				}
 				if owner := servicesLinePortConflict(line, e.Port, e.Proto); owner != "" && owner != e.Name {
+					if isInformationalOwner(e, owner) {
+						return Result{ID: "etc-services", Status: StatusInformational,
+							Detail: fmt.Sprintf("%s/%s is registered to the standard name %q, not %q - this is not a conflict to resolve: Apiary's own daemons bind by fixed port number, never by looking the port up under either name, so %s does not need this registration to work",
+								e.Port, e.Proto, owner, e.Name, e.Name),
+							FixHint: "no action needed"}
+					}
 					return Result{ID: "etc-services", Status: StatusMisconfigured,
 						Detail:  fmt.Sprintf("%s/%s is already registered to %q, not %q", e.Port, e.Proto, owner, e.Name),
 						FixHint: fmt.Sprintf("resolve the conflicting %s/%s entry in %s by hand - Apiary will not overwrite an existing service registration", e.Port, e.Proto, etcServicesPath)}
