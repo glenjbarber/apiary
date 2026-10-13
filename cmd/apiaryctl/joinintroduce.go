@@ -262,6 +262,38 @@ so --field fingerprints prints digests and nothing else.
 	return startJoinIntroduction(target, field, nodeID, raftBind, nodeConfigArg, plaintext, caFile)
 }
 
+// buildJoinRequest assembles the request this Comb sends to the target.
+//
+// This command dials the TARGET's managerd directly, and a request that
+// names a target_address is treated there as coming from the joiner's own
+// frontend. Any field of the joiner's own state that the request leaves
+// empty is therefore filled in by the target from ITS OWN state and
+// recorded as the joiner's. That is how a joiner was refused for the
+// target's raft log index, and how a pending request came to carry the
+// target's certificate fingerprint under the joiner's node ID. So every
+// field whose true value only this Comb knows is set here, in one place,
+// and a test pins the set.
+//
+// fingerprints is localCertificates' list, serving certificate first, and
+// the serving certificate is the one tls_cert_fingerprint has always
+// meant (ADR-0113). The caller guarantees it is non-empty, since
+// localCertificates refuses a Comb with no tls_cert.
+func buildJoinRequest(identity joinIdentity, target, firstCode string, fingerprints []string, lastLogIndex uint64) *rpcpb.RequestJoinColonyRequest {
+	req := &rpcpb.RequestJoinColonyRequest{
+		NodeId:                 identity.nodeID,
+		RaftBindAddress:        identity.raftBind,
+		TargetAddress:          target,
+		IntroductionCode:       firstCode,
+		AdvertisedFingerprints: fingerprints,
+		JoinerLogStateObserved: true,
+		JoinerLastLogIndex:     lastLogIndex,
+	}
+	if len(fingerprints) > 0 {
+		req.TlsCertFingerprint = fingerprints[0]
+	}
+	return req
+}
+
 // startJoinIntroduction generates the first code, reads this Comb's own
 // certificates, and records the request on the named member.
 func startJoinIntroduction(target, field, nodeID, raftBind, nodeConfigArg string, plaintext bool, caFile string) int {
@@ -334,15 +366,7 @@ apiary_raftd is running and that raftd.json names the right socket.
 	// API key yet, by definition, and attaching a local credential to a
 	// target an operator named would send it to whatever address the
 	// operator typed.
-	resp, err := client.RequestJoinColony(ctx, &rpcpb.RequestJoinColonyRequest{
-		NodeId:                 identity.nodeID,
-		RaftBindAddress:        identity.raftBind,
-		TargetAddress:          target,
-		IntroductionCode:       firstCode,
-		AdvertisedFingerprints: fingerprints,
-		JoinerLogStateObserved: true,
-		JoinerLastLogIndex:     local.LastLogIndex,
-	})
+	resp, err := client.RequestJoinColony(ctx, buildJoinRequest(identity, target, firstCode, fingerprints, local.LastLogIndex))
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "apiaryctl join-introduce: %v\n", translateDialErr(target, plaintext, err))
 		return 1
