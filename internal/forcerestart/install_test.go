@@ -145,6 +145,26 @@ func TestMakefile_InstallsApiaryctl(t *testing.T) {
 	}
 }
 
+// TestMakefile_InstallsApiaryinstall pins issue #49's fix: `install`
+// used to copy every binary except apiaryinstall, on the theory that it
+// was a one-shot host-prep CLI never meant to leave the checkout it was
+// built in - a theory `setup-quick`'s own recipe already contradicted by
+// copying it to /usr/local/libexec/apiary permanently, because
+// `-apply-network` and the other RiskNetwork fixes are exactly the kind
+// of thing an operator re-runs later. A host installed through the plain
+// `build`+`install` path, rather than `setup-quick`, ended up with no
+// apiaryinstall binary and therefore no way to create the bhyve bridge
+// short of rebuilding from source.
+func TestMakefile_InstallsApiaryinstall(t *testing.T) {
+	install := makeVar(t, readMakefile(t), "INSTALL_SRCS")
+	if !contains(install, "apiaryinstall") {
+		t.Errorf("INSTALL_SRCS = %v, want it to include apiaryinstall.\n"+
+			"Without it `make install` leaves no apiaryinstall on the node, and "+
+			"-apply-network (the bridge-creation step) becomes unreachable without "+
+			"a source checkout.", install)
+	}
+}
+
 // TestMakefile_SampleLoopSkipsApiaryctl pins the other half of the same
 // change. apiaryctl has no configuration file, so it has no
 // etc/apiary/apiaryctl.json.sample, and the sample-copying loop cannot
@@ -157,6 +177,9 @@ func TestMakefile_SampleLoopSkipsApiaryctl(t *testing.T) {
 
 	if contains(samples, "apiaryctl") {
 		t.Errorf("INSTALL_SAMPLE_SRCS = %v, want it to exclude apiaryctl: it has no config file", samples)
+	}
+	if contains(samples, "apiaryinstall") {
+		t.Errorf("INSTALL_SAMPLE_SRCS = %v, want it to exclude apiaryinstall: it takes its settings as CLI flags and has no config file", samples)
 	}
 	if !strings.Contains(makefile, "for S in ${INSTALL_SAMPLE_SRCS} ; \\") {
 		t.Error("the sample install rule does not iterate ${INSTALL_SAMPLE_SRCS}")

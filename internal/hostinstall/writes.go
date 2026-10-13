@@ -305,8 +305,8 @@ func (p *Plan) planManagerdWrites() {
 	p.add(ActionKeep, path, "peer_tls_hostname_map", p.managerOwn.PeerTLSHostnameMap,
 		"not written by design: ADR-0115 derives this from raft membership at runtime and manual entries take precedence, so an installer-written list would be a second source that goes stale; a Comb that has not joined has no membership to derive one from, and the join flow supplies it")
 
-	p.add(ActionNeeds, path, "nat_uplink", cfg.NATUplink,
-		"the interface a self-hosted VM reaches the network through; not derivable here")
+	changed = p.needHostFact(path, "nat_uplink", p.managerOwn.NATUplink, &cfg.NATUplink, p.opts.NATUplink,
+		"the interface a self-hosted VM reaches the network through (ADR-0048). Only apiaryinstall can confirm NAT/gateway settings are ready for it, so nothing is written without --nat-uplink") || changed
 
 	if !changed {
 		return
