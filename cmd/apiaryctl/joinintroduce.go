@@ -42,6 +42,7 @@ import (
 
 	rpcpb "github.com/glenjbarber/apiary/api/rpc"
 	"github.com/glenjbarber/apiary/internal/hostcert"
+	"github.com/glenjbarber/apiary/internal/localraft"
 	"github.com/glenjbarber/apiary/internal/nodeconfig"
 	"github.com/glenjbarber/apiary/internal/raftdconfig"
 	"github.com/glenjbarber/apiary/internal/tlsdial"
@@ -293,6 +294,33 @@ func startJoinIntroduction(target, field, nodeID, raftBind, nodeConfigArg string
 		return 1
 	}
 
+	// THIS Comb's own raft log state, read from its own raftd, and sent
+	// with the request.
+	//
+	// This command dials the TARGET's managerd directly, so the target is
+	// the one that receives the request. A request that names a
+	// target_address is treated by the receiving managerd as coming from
+	// the joiner's own frontend, so when it carries no log state the
+	// receiver reads ITS OWN raft status and reports that as the joiner's.
+	// Against a Colony member with a non-empty log (every real one) that
+	// produced "the joining Comb reports raft log index N" for a joiner
+	// whose log was empty, and no amount of wiping the joiner changed N.
+	// The joiner is the only machine that can say what its own log holds,
+	// so it says so here. If it cannot find out, it refuses rather than
+	// send nothing and let the receiver measure the wrong machine.
+	lctx, lcancel := context.WithTimeout(context.Background(), localraft.DefaultTimeout)
+	local, err := localraft.Query(lctx, "")
+	lcancel()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, `apiaryctl join-introduce: could not read this Comb's own raft log state from its local raftd: %v
+
+The Colony needs to know that THIS Comb's log is empty before it will add it
+as a voter, and only this Comb's own raftd can say so. Check that
+apiary_raftd is running and that raftd.json names the right socket.
+`, err)
+		return 1
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	client, closeFn, err := dialTargetManager(ctx, target, plaintext, caFile)
@@ -312,6 +340,8 @@ func startJoinIntroduction(target, field, nodeID, raftBind, nodeConfigArg string
 		TargetAddress:          target,
 		IntroductionCode:       firstCode,
 		AdvertisedFingerprints: fingerprints,
+		JoinerLogStateObserved: true,
+		JoinerLastLogIndex:     local.LastLogIndex,
 	})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "apiaryctl join-introduce: %v\n", translateDialErr(target, plaintext, err))

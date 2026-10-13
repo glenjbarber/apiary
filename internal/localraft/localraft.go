@@ -125,6 +125,16 @@ type Status struct {
 	// cannot see a leader it is empty, and that is reported as what it
 	// is rather than as an error.
 	LeaderID string
+
+	// LastLogIndex is the highest index in this Comb's own raft log,
+	// including entries written but not yet committed. It is carried for
+	// exactly one caller, `apiaryctl join-introduce`, which has to tell the
+	// Colony it is joining what THIS Comb's log holds: a joiner whose log
+	// is not empty cannot be added as a voter. It is not a commit index
+	// and nothing should treat it as one. Zero is a real answer (an empty
+	// log, which is what a Comb waiting to be joined reports), so it must
+	// only be trusted when Query returned no error.
+	LastLogIndex uint64
 }
 
 // ListTrustedPeers returns ADR-0147 Part 4's replicated trust store as
@@ -190,5 +200,7 @@ func Query(ctx context.Context, configPath string) (Status, error) {
 		NodeID:    resp.GetNodeId(),
 		RaftState: resp.GetRaftState(),
 		LeaderID:  resp.GetLeaderId(),
+
+		LastLogIndex: resp.GetLastLogIndex(),
 	}, nil
 }

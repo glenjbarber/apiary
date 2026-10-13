@@ -52,6 +52,9 @@ type stubRaftd struct {
 	raftState string
 	leaderID  string
 
+	// lastLogIndex is what Status answers for last_log_index.
+	lastLogIndex uint64
+
 	// wantToken is the token the server requires. An empty string
 	// disables the check, which is the real raftd's behaviour when
 	// -internal-token is not used.
@@ -90,6 +93,8 @@ func (s *stubRaftd) Status(ctx context.Context, _ *internalpb.StatusRequest) (*i
 		NodeId:    s.nodeID,
 		RaftState: s.raftState,
 		LeaderId:  s.leaderID,
+
+		LastLogIndex: s.lastLogIndex,
 	}, nil
 }
 
@@ -158,6 +163,26 @@ func TestQuery_ReportsARealAnswer(t *testing.T) {
 	}
 	if got.NodeID != "brood" || got.RaftState != "Leader" || got.LeaderID != "brood" {
 		t.Errorf("Query = %+v, want node brood, state Leader, leader brood", got)
+	}
+}
+
+// The last log index is what `apiaryctl join-introduce` attests to the
+// Colony it is joining. It has to come through unchanged, and an empty
+// log (a Comb waiting to be joined) has to come through as a real zero
+// with no error, not as a failure.
+func TestQuery_ReportsTheLastLogIndex(t *testing.T) {
+	for _, want := range []uint64{0, 7} {
+		stub := &stubRaftd{nodeID: "brood", raftState: "Follower", lastLogIndex: want}
+		raftdJSON, stop := serve(t, stub)
+
+		got, err := localraft.Query(ctxWithTimeout(t), raftdJSON)
+		stop()
+		if err != nil {
+			t.Fatalf("Query with last_log_index %d: %v", want, err)
+		}
+		if got.LastLogIndex != want {
+			t.Errorf("LastLogIndex = %d, want %d", got.LastLogIndex, want)
+		}
 	}
 }
 
