@@ -134,6 +134,25 @@ derivation cannot be trusted.
   derivation to frontend would need its own design (likely: ask its local
   managerd for the same raft `Servers` list over the existing RPC
   connection) and is a reasonable follow-up, not bundled in here.
+
+  **Follow-up landed**: `frontend.Server.RefreshPeerHosts`
+  (internal/frontend/cluster_overview.go) does exactly this - it calls
+  this frontend's local managerd's existing `Status` RPC (the same one
+  frontend already dials elsewhere) and derives a `node_id ->
+  raft_bind host` map from `StatusResponse.Members`, on a 30-second
+  background tick started from cmd/frontend's own `run`
+  (`runPeerHostRefreshLoop`, mirroring `runPeerHostnameRefreshLoop`
+  above). `peerAddr` consults it only when `peer_hostname_suffix` is
+  unset, preserving this ADR's own "manual always wins over derived"
+  precedence - a configured suffix still wins outright, matching the
+  precedent `peer_tls_hostname_map` sets for managerd's own derivation.
+  There is no frontend-side `peer_tls_hostname_map` equivalent, and none
+  was needed: unlike managerd's leader-forwarding path, which dials by
+  the bare IP a raft leader hint reports and must therefore override
+  `tls.Config.ServerName` separately, frontend dials the derived
+  *hostname* itself directly, so the dialed address and the TLS
+  ServerName grpc-go verifies against are the same value with nothing
+  left to override.
 - No new raft membership-change signal is added to internal/raft; see
   Refresh timing above.
 - No proto/wire changes: `peer_tls_hostname_map` stays a plain config

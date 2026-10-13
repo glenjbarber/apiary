@@ -685,6 +685,19 @@ type Server struct {
 	peerHostnameSuffix string
 	peerManagerPort    string
 
+	// derivedPeerHosts is ADR-0115's explicitly out-of-scope follow-up
+	// (ADR-0115's own "Out of scope" section) now wired up: node_id ->
+	// the host part of that voter's raft_bind address, refreshed from
+	// this frontend's local managerd's own Status RPC (see
+	// RefreshPeerHosts) rather than node_id + peerHostnameSuffix, which
+	// only works when every node ID is a short name and one suffix fits
+	// every node. peerHostnameSuffix, when set, still wins outright -
+	// same "manual always wins over derived" precedence ADR-0115
+	// established for managerd's own peer_tls_hostname_map. Always
+	// initialized (never nil), the same "never nil" convention
+	// consoleTunnels/lockouts above follow.
+	derivedPeerHosts *peerHostCache
+
 	// passwords implements the actual UNIX-account password change
 	// (ADR-0039) - real pw(8) by default in cmd/frontend, faked in
 	// tests. See password.go's canChangePassword for the authorization
@@ -846,6 +859,7 @@ func NewServer(client rpcpb.ManagerServiceClient, auth Authenticator, roleMap ma
 		peers:              peers,
 		peerHostnameSuffix: peerHostnameSuffix,
 		peerManagerPort:    peerManagerPort,
+		derivedPeerHosts:   newPeerHostCache(),
 		passwords:          passwords,
 		tlsEnabled:         tlsEnabled,
 	}

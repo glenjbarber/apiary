@@ -309,8 +309,13 @@ current, safe flow uses `await_join` — see `docs/add-node-to-colony.md`.
   pool when dialing a peer over TLS (ADR-0093). Only consulted when
   `peer_tls` is set.
 - `peer_hostname_suffix` — appended to a node ID to form its managerd
-  hostname for the cluster overview page. Leave unset if node IDs are
-  already fully qualified hostnames.
+  hostname for the cluster overview page, same as before. Leave unset
+  to use this frontend's own raft-membership-derived host instead
+  (each voter's own `raft_bind` host, refreshed every 30s from this
+  node's local managerd's `Status` RPC - see ADR-0115's own "Follow-up
+  landed" note), which works even when node IDs are not short names
+  with one suffix in common, or when a node is renamed. Set this
+  explicitly only to override that derivation - it always wins over it.
 - `peer_manager_port` — port assumed for a peer node's managerd external
   API when fetching its host stats.
 - `manager_api_key` — the API key frontend attaches to every call it makes
