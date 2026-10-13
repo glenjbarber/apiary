@@ -227,6 +227,12 @@
   </div>
 
   <div class="panel">
+    <h3>Let's Encrypt certificates</h3>
+    {{template "acme_advice" .}}
+    <div id="acme-panel">{{template "acme_panel" .}}</div>
+  </div>
+
+  <div class="panel">
     <h3>Internal security {{hint "Shared secret this node presents to raftd's own internal socket (ADR-0033) - must match raftd's own -internal-token. Write-only, like the peer API key in Colony membership and peers."}}</h3>
     <div id="internal-security-panel">
       {{template "internal_security_panel" .}}
@@ -716,6 +722,34 @@
 {{end}}
 <table><thead><tr><th>Name</th><th>Service</th><th>Hostnames</th><th>Expires</th><th>Auto-renew</th></tr></thead><tbody>
 {{range .OriginCertificates}}<tr><td>{{.Name}}</td><td>{{.Service}}</td><td>{{.Hostnames}}</td><td><span class="badge {{.Expiry}}" title="{{if eq .Expiry "expired"}}This certificate has already expired.{{else if eq .Expiry "soon"}}Expires within 30 days.{{else}}Not due for renewal yet.{{end}}">{{.ExpiresAt}}</span></td><td>{{if .AutoRenew}}<span class="badge true">on</span>{{else}}<span class="badge unknown">off</span>{{end}}</td></tr>{{else}}<tr><td colspan="5"><em>No local Origin CA certificates recorded.</em></td></tr>{{end}}
+</tbody></table>
+{{end}}
+
+{{define "acme_panel"}}
+{{if .ACMEError}}<div class="banner-error">{{.ACMEError}}</div>{{end}}
+{{if .ACMEOK}}<div class="banner-success">{{.ACMEOK}}</div>{{end}}
+{{if .CanAdmin}}
+<p class="muted">Save a certificate directory, an account key path, and optionally a contact email first. DNS-01 challenges are published using the Cloudflare zone and token already configured above in Cloudflare Tunnel exposure. Leave the ACME directory URL blank for Let's Encrypt's production service, or point it at a staging endpoint while testing.</p>
+<form hx-post="/machine/acme/config" hx-target="#acme-panel" hx-swap="innerHTML">
+  {{template "config_change_fields" .}}
+  <table class="settings-table"><tbody>
+    <tr><th>Certificate directory</th><td><input type="text" name="acme_directory" placeholder="/var/db/apiary/acme" value="{{.NodeConfig.AcmeDirectory}}" title="Local directory issued certificate/key pairs are written into. Independent of the Origin CA directory above." aria-label="Certificate directory"></td></tr>
+    <tr><th>Account key path</th><td><input type="text" name="acme_account_key_file" placeholder="/var/db/apiary/acme/account.key" value="{{.NodeConfig.AcmeAccountKeyFile}}" title="Where this Comb's own ACME account private key is kept. Generated automatically the first time it is needed; never displayed." aria-label="Account key path"></td></tr>
+    <tr><th>ACME directory URL</th><td><input type="text" name="acme_directory_url" placeholder="(blank for Let's Encrypt production)" value="{{.NodeConfig.AcmeDirectoryURL}}" title="Which ACME server to use. Leave blank for Let's Encrypt's production directory; use a staging endpoint while testing to avoid its production rate limit." aria-label="ACME directory URL"></td></tr>
+    <tr><th>Contact email</th><td><input type="text" name="acme_email" placeholder="(optional)" value="{{.NodeConfig.AcmeEmail}}" title="Optional contact address registered with the ACME account." aria-label="Contact email"></td></tr>
+  </tbody></table>
+  <div class="form-actions"><button type="submit">Save Let's Encrypt configuration</button></div>
+</form>
+<p class="muted">Before issuance, save TLS paths in the TLS section above as <code>directory/name.crt</code> and <code>directory/name.key</code>, using the ACME certificate directory above rather than the Origin CA one. The successful request installs that pair and restarts <code>apiary_managerd</code>.</p>
+<form hx-post="/machine/acme" hx-target="#acme-panel" hx-swap="innerHTML">
+  <label>Certificate name <input name="name" placeholder="managerd" required title="Matches the file names TLS paths above point at, e.g. managerd for managerd.crt/managerd.key."></label>
+  <label>Hostnames, comma-separated <input name="hostnames" placeholder="api.example.com" required title="Every hostname this certificate should cover, comma-separated. Each one is validated by a Cloudflare DNS TXT record on the zone configured above."></label>
+  <label class="checkbox-label"><input type="checkbox" name="auto_renew" value="true" title="Automatically re-issue this certificate once it enters its last 30 days, using the same hostnames. Requires the Cloudflare DNS token file to remain valid and readable."> Auto-renew</label>
+  <button type="submit">Issue or renew managerd certificate</button>
+</form>
+{{end}}
+<table><thead><tr><th>Name</th><th>Service</th><th>Hostnames</th><th>Expires</th><th>Auto-renew</th></tr></thead><tbody>
+{{range .LetsEncryptCertificates}}<tr><td>{{.Name}}</td><td>{{.Service}}</td><td>{{.Hostnames}}</td><td><span class="badge {{.Expiry}}" title="{{if eq .Expiry "expired"}}This certificate has already expired.{{else if eq .Expiry "soon"}}Expires within 30 days.{{else}}Not due for renewal yet.{{end}}">{{.ExpiresAt}}</span></td><td>{{if .AutoRenew}}<span class="badge true">on</span>{{else}}<span class="badge unknown">off</span>{{end}}</td></tr>{{else}}<tr><td colspan="5"><em>No local Let's Encrypt certificates recorded.</em></td></tr>{{end}}
 </tbody></table>
 {{end}}
 

@@ -159,6 +159,14 @@ func (f *fakeClient) IssueOriginCertificate(context.Context, *rpcpb.IssueOriginC
 	return &rpcpb.IssueOriginCertificateResponse{}, nil
 }
 
+func (f *fakeClient) ListLetsEncryptCertificates(context.Context, *rpcpb.ListLetsEncryptCertificatesRequest, ...grpc.CallOption) (*rpcpb.ListLetsEncryptCertificatesResponse, error) {
+	return &rpcpb.ListLetsEncryptCertificatesResponse{}, nil
+}
+
+func (f *fakeClient) IssueLetsEncryptCertificate(context.Context, *rpcpb.IssueLetsEncryptCertificateRequest, ...grpc.CallOption) (*rpcpb.IssueLetsEncryptCertificateResponse, error) {
+	return &rpcpb.IssueLetsEncryptCertificateResponse{}, nil
+}
+
 func (f *fakeClient) CreateVM(_ context.Context, in *rpcpb.CreateVMRequest, _ ...grpc.CallOption) (*rpcpb.CreateVMResponse, error) {
 	f.lastCreateReq = in
 	return f.createResp, f.createErr

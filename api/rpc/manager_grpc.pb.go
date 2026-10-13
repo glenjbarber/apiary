@@ -27,6 +27,8 @@ const (
 	ManagerService_DeleteAssumptionClaim_FullMethodName       = "/apiary.rpc.v1.ManagerService/DeleteAssumptionClaim"
 	ManagerService_ListOriginCertificates_FullMethodName      = "/apiary.rpc.v1.ManagerService/ListOriginCertificates"
 	ManagerService_IssueOriginCertificate_FullMethodName      = "/apiary.rpc.v1.ManagerService/IssueOriginCertificate"
+	ManagerService_ListLetsEncryptCertificates_FullMethodName = "/apiary.rpc.v1.ManagerService/ListLetsEncryptCertificates"
+	ManagerService_IssueLetsEncryptCertificate_FullMethodName = "/apiary.rpc.v1.ManagerService/IssueLetsEncryptCertificate"
 	ManagerService_CreateVM_FullMethodName                    = "/apiary.rpc.v1.ManagerService/CreateVM"
 	ManagerService_UpdateVM_FullMethodName                    = "/apiary.rpc.v1.ManagerService/UpdateVM"
 	ManagerService_DeleteVM_FullMethodName                    = "/apiary.rpc.v1.ManagerService/DeleteVM"
@@ -164,6 +166,15 @@ type ManagerServiceClient interface {
 	// replicates a credential, or runs from reconciliation.
 	ListOriginCertificates(ctx context.Context, in *ListOriginCertificatesRequest, opts ...grpc.CallOption) (*ListOriginCertificatesResponse, error)
 	IssueOriginCertificate(ctx context.Context, in *IssueOriginCertificateRequest, opts ...grpc.CallOption) (*IssueOriginCertificateResponse, error)
+	// Let's Encrypt (ACME, ADR-0133) issuance mirrors Origin CA issuance
+	// exactly: a local, Admin-only operation that never forwards,
+	// replicates a credential, or runs from reconciliation. It is a
+	// separate pair of RPCs rather than a type field on the Origin CA ones
+	// because the two local certificate stores, and the secrets each
+	// reads, are kept independent (internal/origincert.Renewer's
+	// ACMEConfig/ACMEIssuer).
+	ListLetsEncryptCertificates(ctx context.Context, in *ListLetsEncryptCertificatesRequest, opts ...grpc.CallOption) (*ListLetsEncryptCertificatesResponse, error)
+	IssueLetsEncryptCertificate(ctx context.Context, in *IssueLetsEncryptCertificateRequest, opts ...grpc.CallOption) (*IssueLetsEncryptCertificateResponse, error)
 	CreateVM(ctx context.Context, in *CreateVMRequest, opts ...grpc.CallOption) (*CreateVMResponse, error)
 	UpdateVM(ctx context.Context, in *UpdateVMRequest, opts ...grpc.CallOption) (*UpdateVMResponse, error)
 	DeleteVM(ctx context.Context, in *DeleteVMRequest, opts ...grpc.CallOption) (*DeleteVMResponse, error)
@@ -1068,6 +1079,26 @@ func (c *managerServiceClient) IssueOriginCertificate(ctx context.Context, in *I
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(IssueOriginCertificateResponse)
 	err := c.cc.Invoke(ctx, ManagerService_IssueOriginCertificate_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *managerServiceClient) ListLetsEncryptCertificates(ctx context.Context, in *ListLetsEncryptCertificatesRequest, opts ...grpc.CallOption) (*ListLetsEncryptCertificatesResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListLetsEncryptCertificatesResponse)
+	err := c.cc.Invoke(ctx, ManagerService_ListLetsEncryptCertificates_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *managerServiceClient) IssueLetsEncryptCertificate(ctx context.Context, in *IssueLetsEncryptCertificateRequest, opts ...grpc.CallOption) (*IssueLetsEncryptCertificateResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(IssueLetsEncryptCertificateResponse)
+	err := c.cc.Invoke(ctx, ManagerService_IssueLetsEncryptCertificate_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -2139,6 +2170,15 @@ type ManagerServiceServer interface {
 	// replicates a credential, or runs from reconciliation.
 	ListOriginCertificates(context.Context, *ListOriginCertificatesRequest) (*ListOriginCertificatesResponse, error)
 	IssueOriginCertificate(context.Context, *IssueOriginCertificateRequest) (*IssueOriginCertificateResponse, error)
+	// Let's Encrypt (ACME, ADR-0133) issuance mirrors Origin CA issuance
+	// exactly: a local, Admin-only operation that never forwards,
+	// replicates a credential, or runs from reconciliation. It is a
+	// separate pair of RPCs rather than a type field on the Origin CA ones
+	// because the two local certificate stores, and the secrets each
+	// reads, are kept independent (internal/origincert.Renewer's
+	// ACMEConfig/ACMEIssuer).
+	ListLetsEncryptCertificates(context.Context, *ListLetsEncryptCertificatesRequest) (*ListLetsEncryptCertificatesResponse, error)
+	IssueLetsEncryptCertificate(context.Context, *IssueLetsEncryptCertificateRequest) (*IssueLetsEncryptCertificateResponse, error)
 	CreateVM(context.Context, *CreateVMRequest) (*CreateVMResponse, error)
 	UpdateVM(context.Context, *UpdateVMRequest) (*UpdateVMResponse, error)
 	DeleteVM(context.Context, *DeleteVMRequest) (*DeleteVMResponse, error)
@@ -2993,6 +3033,12 @@ func (UnimplementedManagerServiceServer) ListOriginCertificates(context.Context,
 func (UnimplementedManagerServiceServer) IssueOriginCertificate(context.Context, *IssueOriginCertificateRequest) (*IssueOriginCertificateResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method IssueOriginCertificate not implemented")
 }
+func (UnimplementedManagerServiceServer) ListLetsEncryptCertificates(context.Context, *ListLetsEncryptCertificatesRequest) (*ListLetsEncryptCertificatesResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ListLetsEncryptCertificates not implemented")
+}
+func (UnimplementedManagerServiceServer) IssueLetsEncryptCertificate(context.Context, *IssueLetsEncryptCertificateRequest) (*IssueLetsEncryptCertificateResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method IssueLetsEncryptCertificate not implemented")
+}
 func (UnimplementedManagerServiceServer) CreateVM(context.Context, *CreateVMRequest) (*CreateVMResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method CreateVM not implemented")
 }
@@ -3460,6 +3506,42 @@ func _ManagerService_IssueOriginCertificate_Handler(srv interface{}, ctx context
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(ManagerServiceServer).IssueOriginCertificate(ctx, req.(*IssueOriginCertificateRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ManagerService_ListLetsEncryptCertificates_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListLetsEncryptCertificatesRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ManagerServiceServer).ListLetsEncryptCertificates(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ManagerService_ListLetsEncryptCertificates_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ManagerServiceServer).ListLetsEncryptCertificates(ctx, req.(*ListLetsEncryptCertificatesRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ManagerService_IssueLetsEncryptCertificate_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(IssueLetsEncryptCertificateRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ManagerServiceServer).IssueLetsEncryptCertificate(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ManagerService_IssueLetsEncryptCertificate_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ManagerServiceServer).IssueLetsEncryptCertificate(ctx, req.(*IssueLetsEncryptCertificateRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -5294,6 +5376,14 @@ var ManagerService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "IssueOriginCertificate",
 			Handler:    _ManagerService_IssueOriginCertificate_Handler,
+		},
+		{
+			MethodName: "ListLetsEncryptCertificates",
+			Handler:    _ManagerService_ListLetsEncryptCertificates_Handler,
+		},
+		{
+			MethodName: "IssueLetsEncryptCertificate",
+			Handler:    _ManagerService_IssueLetsEncryptCertificate_Handler,
 		},
 		{
 			MethodName: "CreateVM",

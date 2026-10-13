@@ -495,6 +495,7 @@ type Server struct {
 	// intentionally local rather than a peer-forwarded or raft operation.
 	services nodeServiceController
 	originCA origincert.Issuer
+	acme     origincert.Issuer
 
 	// authPAM is nil on a node with no -pam-service configured -
 	// AuthenticatePassword reports an explicit "not configured" error
@@ -797,6 +798,11 @@ func (s *Server) SetAssumptionRegister(register assumptionRegisterStore) {
 // wires Cloudflare's client here; tests may supply a non-networking issuer.
 func (s *Server) SetOriginCAIssuer(issuer origincert.Issuer) { s.originCA = issuer }
 
+// SetACMEIssuer enables explicit local Let's Encrypt issuance (ADR-0133).
+// Production wires internal/acme.Issuer here; tests may supply a
+// non-networking issuer, exactly like SetOriginCAIssuer.
+func (s *Server) SetACMEIssuer(issuer origincert.Issuer) { s.acme = issuer }
+
 // SetFrontendConfig/SetRestshimdConfig/SetRaftdConfig (ADR-0102) wire
 // this managerd's ability to read/write the three sibling daemons' own
 // config files, co-located on this same host - nil (the default)
@@ -893,6 +899,75 @@ func (s *Server) IssueOriginCertificate(ctx context.Context, req *rpcpb.IssueOri
 	// operator action is required, and here one is.
 	return &rpcpb.IssueOriginCertificateResponse{
 		Certificate:        originCertificateInfo(entry),
+		RestartScheduled:   false,
+		RestartRequiredMsg: "certificate installed; restart managerd to load it (`service apiary_managerd restart` on the node is enough, or `apiaryctl force-restart`, which also restarts raftd - both are installed on the Comb and need only a root shell)",
+	}, nil
+}
+
+func letsEncryptCertificateInfo(entry origincert.InventoryEntry) *rpcpb.LetsEncryptCertificateInfo {
+	return &rpcpb.LetsEncryptCertificateInfo{Name: entry.Name, Service: entry.Service,
+		Hostnames: append([]string(nil), entry.Hostnames...), Id: entry.ID,
+		ExpiresAtUnix: entry.ExpiresAt.Unix(), CertPath: entry.CertPath,
+		KeyPath: entry.KeyPath, UpdatedAtUnix: entry.UpdatedAt.Unix(),
+		AutoRenew: entry.AutoRenew}
+}
+
+// ListLetsEncryptCertificates mirrors ListOriginCertificates exactly,
+// against the separate local store ADR-0133's ACME issuer uses
+// (internal/acme, nodeconfig's AcmeDirectory).
+func (s *Server) ListLetsEncryptCertificates(_ context.Context, _ *rpcpb.ListLetsEncryptCertificatesRequest) (*rpcpb.ListLetsEncryptCertificatesResponse, error) {
+	if s.nodeConfig == nil {
+		return &rpcpb.ListLetsEncryptCertificatesResponse{Error: "this node has no node-config store configured"}, nil
+	}
+	cfg, err := s.nodeConfig.Load()
+	if err != nil {
+		return &rpcpb.ListLetsEncryptCertificatesResponse{Error: err.Error()}, nil
+	}
+	if cfg.AcmeDirectory == "" {
+		return &rpcpb.ListLetsEncryptCertificatesResponse{}, nil
+	}
+	entries, err := origincert.LoadInventory(cfg.AcmeDirectory)
+	if err != nil {
+		return &rpcpb.ListLetsEncryptCertificatesResponse{Error: err.Error()}, nil
+	}
+	resp := &rpcpb.ListLetsEncryptCertificatesResponse{}
+	for _, entry := range entries {
+		resp.Certificates = append(resp.Certificates, letsEncryptCertificateInfo(entry))
+	}
+	return resp, nil
+}
+
+// IssueLetsEncryptCertificate mirrors IssueOriginCertificate exactly,
+// including the deliberate choice not to restart managerd synchronously
+// (see the comment on that handler) and the same welded requirement that
+// managerd's own tls_cert/tls_key already name this certificate's
+// output path - the token read here is the Cloudflare DNS API token
+// (cloudflare_token_file, ADR-0063), not a dedicated ACME secret: DNS-01
+// validation is the only thing this issuer calls Cloudflare for.
+func (s *Server) IssueLetsEncryptCertificate(ctx context.Context, req *rpcpb.IssueLetsEncryptCertificateRequest) (*rpcpb.IssueLetsEncryptCertificateResponse, error) {
+	if s.nodeConfig == nil || s.acme == nil {
+		return &rpcpb.IssueLetsEncryptCertificateResponse{Error: "Let's Encrypt issuance is not configured on this Comb"}, nil
+	}
+	cfg, err := s.nodeConfig.Load()
+	if err != nil {
+		return &rpcpb.IssueLetsEncryptCertificateResponse{Error: err.Error()}, nil
+	}
+	if cfg.CloudflareTokenFile == "" || cfg.AcmeDirectory == "" {
+		return &rpcpb.IssueLetsEncryptCertificateResponse{Error: "configure the Cloudflare DNS token file and the ACME certificate directory first"}, nil
+	}
+	if cfg.TLSCert != filepath.Join(cfg.AcmeDirectory, req.GetName()+".crt") || cfg.TLSKey != filepath.Join(cfg.AcmeDirectory, req.GetName()+".key") {
+		return &rpcpb.IssueLetsEncryptCertificateResponse{Error: "managerd TLS certificate and key paths must match this Let's Encrypt certificate name"}, nil
+	}
+	token, err := os.ReadFile(cfg.CloudflareTokenFile)
+	if err != nil {
+		return &rpcpb.IssueLetsEncryptCertificateResponse{Error: "reading Cloudflare DNS token file: " + err.Error()}, nil
+	}
+	entry, err := origincert.Issue(ctx, s.acme, origincert.IssueRequest{Directory: cfg.AcmeDirectory, Name: req.GetName(), Service: "apiary_managerd", Hostnames: req.GetHostnames(), Token: strings.TrimSpace(string(token)), AutoRenew: req.GetAutoRenew()})
+	if err != nil {
+		return &rpcpb.IssueLetsEncryptCertificateResponse{Error: err.Error()}, nil
+	}
+	return &rpcpb.IssueLetsEncryptCertificateResponse{
+		Certificate:        letsEncryptCertificateInfo(entry),
 		RestartScheduled:   false,
 		RestartRequiredMsg: "certificate installed; restart managerd to load it (`service apiary_managerd restart` on the node is enough, or `apiaryctl force-restart`, which also restarts raftd - both are installed on the Comb and need only a root shell)",
 	}, nil
@@ -2956,6 +3031,10 @@ func (s *Server) GetNodeConfig(_ context.Context, _ *rpcpb.GetNodeConfigRequest)
 		OriginCaTokenFile:               cfg.OriginCATokenFile,
 		OriginCaDirectory:               cfg.OriginCADirectory,
 		OriginCaRenewalCheckInterval:    durationString(cfg.OriginCARenewalCheckInterval),
+		AcmeDirectory:                   cfg.AcmeDirectory,
+		AcmeAccountKeyFile:              cfg.AcmeAccountKeyFile,
+		AcmeDirectoryUrl:                cfg.AcmeDirectoryURL,
+		AcmeEmail:                       cfg.AcmeEmail,
 	}
 	if historyStore, ok := s.nodeConfig.(nodeConfigHistoryStore); ok {
 		changes, err := historyStore.History()
@@ -3289,6 +3368,10 @@ func (s *Server) UpdateNodeConfig(_ context.Context, req *rpcpb.UpdateNodeConfig
 		OriginCATokenFile:               req.GetOriginCaTokenFile(),
 		OriginCADirectory:               req.GetOriginCaDirectory(),
 		OriginCARenewalCheckInterval:    originCARenewalCheckInterval,
+		AcmeDirectory:                   req.GetAcmeDirectory(),
+		AcmeAccountKeyFile:              req.GetAcmeAccountKeyFile(),
+		AcmeDirectoryURL:                req.GetAcmeDirectoryUrl(),
+		AcmeEmail:                       req.GetAcmeEmail(),
 
 		RaftdToken: raftdToken,
 	}
