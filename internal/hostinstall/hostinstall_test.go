@@ -559,6 +559,72 @@ func TestACertificateWithNoUsableNameIsRefusedAndPrintsItsSANs(t *testing.T) {
 	}
 }
 
+// A DNS-only certificate (no IP:127.0.0.1 SAN at all - the shape a
+// publicly trusted CA like Let's Encrypt actually issues, since no
+// public CA will sign for a loopback address) is accepted for a
+// Colony-member profile, which ADR-0139 says dials by DNS name and
+// never presents this certificate to a loopback dial at all. Partial
+// coverage of issue #48: the loopback SAN requirement is not what a
+// Colony member's own certificate needs, so demanding it here was
+// refusing a certificate for a check this profile does not exercise.
+//
+// This does not, by itself, accept an actual Let's Encrypt pair -
+// hostcert.Evaluate also requires the certificate to be self-signed,
+// which every publicly-issued certificate by definition is not, and
+// relaxing that is a separate, larger decision this fix does not make.
+func TestADNSOnlyCertificateIsAcceptedForAColonyMember(t *testing.T) {
+	f := newFixture(t)
+	certPEM, keyPEM, err := hostcert.Generate(hostcert.GenerateOptions{
+		CommonName: "brood.lab3.home.arpa",
+		DNSNames:   []string{"brood.lab3.home.arpa"},
+		Now:        fixtureNow,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.write(filepath.Join(f.opts.Paths.TLSDir, "cert.pem"), string(certPEM))
+	f.write(filepath.Join(f.opts.Paths.TLSDir, "key.pem"), string(keyPEM))
+	f.opts.RPCAddr = "brood.lab3.home.arpa:17700"
+
+	p := f.plan()
+	r := report(p)
+	if strings.Contains(r, "no IP:127.0.0.1") {
+		t.Errorf("a DNS-only certificate was refused over the loopback SAN it does not need:\n%s", r)
+	}
+	if p.RPCAddr != "brood.lab3.home.arpa:17700" {
+		t.Errorf("RPCAddr = %q, want the checked override:\n%s", p.RPCAddr, r)
+	}
+	if err := p.Apply(); err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+}
+
+// The same DNS-only certificate is still refused for a standalone
+// profile (no --rpc-addr, no --colony-member, no non-loopback
+// raftd_bind/rpc_addr already on disk): a standalone Comb's own
+// daemons dial it at 127.0.0.1 (ADR-0139), so the loopback SAN is not
+// optional there, and this proves certNeedsLoopbackSAN did not just
+// turn the check off everywhere.
+func TestADNSOnlyCertificateIsStillRefusedWhenStandalone(t *testing.T) {
+	f := newFixture(t)
+	certPEM, keyPEM, err := hostcert.Generate(hostcert.GenerateOptions{
+		CommonName: "brood.lab3.home.arpa",
+		DNSNames:   []string{"brood.lab3.home.arpa"},
+		Now:        fixtureNow,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.write(filepath.Join(f.opts.Paths.TLSDir, "cert.pem"), string(certPEM))
+	f.write(filepath.Join(f.opts.Paths.TLSDir, "key.pem"), string(keyPEM))
+
+	p := f.plan()
+	r := report(p)
+	if !strings.Contains(r, "no IP:127.0.0.1") {
+		t.Errorf("a standalone profile accepted a certificate with no loopback SAN:\n%s", r)
+	}
+}
+
 // The idempotence property, stated as bytes: a second run over this
 // install's own output changes nothing at all. Not "the same values" -
 // nothing, so the test can catch a rewrite of identical bytes.

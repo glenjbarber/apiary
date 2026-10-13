@@ -588,6 +588,7 @@ func (p *Plan) planTLS() error {
 	if err != nil {
 		return err
 	}
+	requireLoopback := p.certNeedsLoopbackSAN()
 
 	switch {
 	case certExists && keyExists:
@@ -601,7 +602,7 @@ func (p *Plan) planTLS() error {
 		}
 		info, err := hostcert.Evaluate(certPEM, hostcert.EvaluateOptions{
 			Now:                p.opts.Now,
-			RequireLoopbackSAN: true,
+			RequireLoopbackSAN: requireLoopback,
 			RequireDNSSAN:      true,
 			KeyPEM:             keyPEM,
 		})
@@ -877,6 +878,48 @@ func (p *Plan) standalone() bool {
 		return false
 	}
 	return true
+}
+
+// certNeedsLoopbackSAN reports whether this install's own profile
+// actually dials managerd over loopback, which is the only case
+// IP:127.0.0.1 in the certificate is for (issue #48).
+//
+// ADR-0139's table is the reason this exists as its own check rather
+// than a blanket `true`: a standalone Comb dials rpc_addr at
+// 127.0.0.1 and needs the loopback SAN to verify that dial, but a
+// Colony member dials its own certificate's DNS name instead and
+// never presents 127.0.0.1 to anything, so demanding a loopback SAN
+// from its certificate was refusing a correctly-scoped, publicly
+// trusted Let's Encrypt pair (which cannot carry one at all - a
+// public CA will not issue for 127.0.0.1) over a check that profile
+// was never going to exercise.
+//
+// An explicit --rpc-addr is checked first and, if given, decides this
+// alone: it is read before planRPCAddr itself runs (this function is
+// called from planTLS, which runs first so the certificate it accepts
+// is on hand for planRPCAddr's own SAN check), so this is the same
+// value planRPCAddrOverride will validate moments later, and the two
+// must agree on what "this profile" means. A host:port that fails to
+// parse, or a non-loopback override, falls through to planRPCAddr's
+// own refusal rather than this function's; defaulting to "required"
+// for anything this function cannot confidently read as non-loopback
+// is the fail-closed choice ADR-0139 and this package both take
+// everywhere else. With no override, the pre-existing on-disk
+// signals standalone() already uses answer the same question for the
+// same reason: they are facts about what is actually configured, not
+// a guess.
+func (p *Plan) certNeedsLoopbackSAN() bool {
+	if override := strings.TrimSpace(p.opts.RPCAddr); override != "" {
+		host, _, err := net.SplitHostPort(override)
+		if err != nil {
+			return true
+		}
+		if ip := net.ParseIP(host); ip != nil {
+			return ip.IsLoopback()
+		}
+		return false
+	}
+	return p.standalone()
 }
 
 // colonyName picks the name peers will dial, from this Comb's own
