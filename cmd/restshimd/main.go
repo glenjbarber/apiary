@@ -12,6 +12,7 @@ package main
 
 import (
 	"context"
+	"crypto/tls"
 	"flag"
 	"fmt"
 	"log"
@@ -26,6 +27,7 @@ import (
 	"github.com/glenjbarber/apiary/internal/managerlink"
 	"github.com/glenjbarber/apiary/internal/restshim"
 	"github.com/glenjbarber/apiary/internal/restshimdconfig"
+	"github.com/glenjbarber/apiary/internal/tlscache"
 	"github.com/glenjbarber/apiary/internal/tlsdial"
 )
 
@@ -126,7 +128,17 @@ func run() error {
 		if err := requireTLSPair(cfg.TLSCert, cfg.TLSKey); err != nil {
 			return err
 		}
-		return httpserver.New(cfg.HTTPAddr, srv).ListenAndServeTLS(cfg.TLSCert, cfg.TLSKey)
+		// Loaded through tlscache rather than passing the paths
+		// straight to ListenAndServeTLS, so a certificate renewed on
+		// disk is picked up on the next handshake with no restshimd
+		// restart.
+		certs, err := tlscache.New(cfg.TLSCert, cfg.TLSKey, nil)
+		if err != nil {
+			return fmt.Errorf("loading TLS cert/key: %w", err)
+		}
+		httpSrv := httpserver.New(cfg.HTTPAddr, srv)
+		httpSrv.TLSConfig = &tls.Config{GetCertificate: certs.GetCertificate, MinVersion: tls.VersionTLS12}
+		return httpSrv.ListenAndServeTLS("", "")
 	}
 	return httpserver.New(cfg.HTTPAddr, srv).ListenAndServe()
 }

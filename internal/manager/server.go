@@ -885,22 +885,17 @@ func (s *Server) IssueOriginCertificate(ctx context.Context, req *rpcpb.IssueOri
 	if err != nil {
 		return &rpcpb.IssueOriginCertificateResponse{Error: err.Error()}, nil
 	}
-	// Deliberately NOT restarting managerd here. This used to call
-	// s.services.Restart synchronously, which is the same self-restart
-	// failure RestartNodeService now refuses: the call blocks inside
-	// `service apiary_managerd restart`, the stop half kills this
-	// process, and the RPC never returns - the caller sees a dropped
-	// connection and a downed control plane rather than an error.
-	//
-	// The certificate is installed either way, so the honest report is
-	// that it is installed and a restart is still required, naming the
-	// command that does it safely. restart_scheduled stays false because
-	// nothing was scheduled; that field is the caller's signal that no
-	// operator action is required, and here one is.
+	// No restart to schedule or ask for any more (ADR-0133's hot-reload
+	// fix, internal/tlscache): managerd's own gRPC listener, and
+	// frontend's/restshimd's web listeners if their tls_cert/tls_key
+	// point at this same path (the documented convention), all re-read
+	// the certificate file on their next TLS handshake. The welded
+	// check above guarantees cfg.TLSCert/TLSKey already name exactly
+	// this file, so there is nothing further for the caller to do.
 	return &rpcpb.IssueOriginCertificateResponse{
 		Certificate:        originCertificateInfo(entry),
 		RestartScheduled:   false,
-		RestartRequiredMsg: "certificate installed; restart managerd to load it (`service apiary_managerd restart` on the node is enough, or `apiaryctl force-restart`, which also restarts raftd - both are installed on the Comb and need only a root shell)",
+		RestartRequiredMsg: "certificate installed and already live: managerd (and frontend/restshimd, if their tls_cert/tls_key name this same path) reload a renewed certificate on their next TLS handshake, with no restart",
 	}, nil
 }
 
@@ -969,7 +964,7 @@ func (s *Server) IssueLetsEncryptCertificate(ctx context.Context, req *rpcpb.Iss
 	return &rpcpb.IssueLetsEncryptCertificateResponse{
 		Certificate:        letsEncryptCertificateInfo(entry),
 		RestartScheduled:   false,
-		RestartRequiredMsg: "certificate installed; restart managerd to load it (`service apiary_managerd restart` on the node is enough, or `apiaryctl force-restart`, which also restarts raftd - both are installed on the Comb and need only a root shell)",
+		RestartRequiredMsg: "certificate installed and already live: managerd (and frontend/restshimd, if their tls_cert/tls_key name this same path) reload a renewed certificate on their next TLS handshake, with no restart",
 	}, nil
 }
 

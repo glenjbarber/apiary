@@ -595,7 +595,7 @@ func (s *Server) handleIssueOriginCertificate(w http.ResponseWriter, r *http.Req
 		s.renderOriginCAPanel(w, r, resp.GetError(), "")
 		return
 	}
-	s.renderOriginCAPanel(w, r, "", "Certificate installed; apiary_managerd restart scheduled.")
+	s.renderOriginCAPanel(w, r, "", resp.GetRestartRequiredMsg())
 }
 
 func (s *Server) renderOriginCAPanel(w http.ResponseWriter, r *http.Request, formErr, success string) {

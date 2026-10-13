@@ -801,21 +801,18 @@ func TestServer_IssueOriginCertificateInstallsAndRestartsManagerd(t *testing.T) 
 	if services.restartName != "" {
 		t.Fatalf("restart service = %q, want no restart at all - a synchronous managerd self-restart kills the caller", services.restartName)
 	}
-	// And the operator must be told a restart is still outstanding, and
-	// how to perform it, rather than being left with a cert that has not
-	// taken effect and no indication of that.
-	if !strings.Contains(resp.GetRestartRequiredMsg(), "apiaryctl force-restart") {
-		t.Errorf("restart_required_msg = %q, want it to name apiaryctl force-restart", resp.GetRestartRequiredMsg())
+	// And the operator must be told the certificate is already live,
+	// not merely installed - internal/tlscache means managerd reloads
+	// it on its own next TLS handshake, so there is no outstanding step
+	// to name, only the fact that none is needed.
+	if !strings.Contains(resp.GetRestartRequiredMsg(), "already live") {
+		t.Errorf("restart_required_msg = %q, want it to say the certificate is already live", resp.GetRestartRequiredMsg())
 	}
-	// The inverse requirement, and the reason it is asserted here as well
-	// as in the self-restart refusal test. This string used to have to
-	// name the source checkout, because the command then needed one. It
-	// does not, and a Comb has no checkout, so naming one is advice the
-	// operator cannot act on. This string reaches the operator through the
-	// Cloudflare panel on the Machine page, read in a browser.
-	for _, forbidden := range []string{"make force-restart", "source checkout", "Makefile"} {
+	// The inverse requirement: nothing here should send the operator
+	// off to run a restart command any more, because none is needed.
+	for _, forbidden := range []string{"make force-restart", "source checkout", "Makefile", "apiaryctl force-restart", "service apiary_managerd restart"} {
 		if strings.Contains(resp.GetRestartRequiredMsg(), forbidden) {
-			t.Errorf("restart_required_msg contains %q, which points the operator at a checkout the Comb does not have: %q", forbidden, resp.GetRestartRequiredMsg())
+			t.Errorf("restart_required_msg contains %q, but no restart is needed any more: %q", forbidden, resp.GetRestartRequiredMsg())
 		}
 	}
 	if issuer.token != "token-value" || issuer.validityDays != 365 {

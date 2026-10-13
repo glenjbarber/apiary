@@ -37,13 +37,13 @@ import (
 //   - the row renders no prose at all, so the deleted text cannot
 //     creep back in a reworded form.
 //
-// The guidance itself is not lost, deliberately. It is still on the
-// page, in the Cloudflare Origin CA panel, which is the one place an
-// operator is actually told to go and restart managerd, and it is
-// still asserted by TestCloudflarePanel_NamesASourceFreeCommand in
-// this same file. That test failing is how a deletion that actually
-// lost the advice would be caught; this one failing is how a
-// reintroduction would be.
+// The Cloudflare Origin CA panel is still the one place this advice
+// lives, and it is still asserted by TestCloudflarePanel_NamesNoRestart
+// in this same file - though as of ADR-0133's hot-reload fix
+// (internal/tlscache) the advice itself now says no restart is needed,
+// not how to run one. That test failing is how a regression in that
+// text would be caught; this one failing is how the deleted restart
+// control or prose reintroducing itself on this row would be.
 func TestMachineManagerdRow_OffersNoRestartAndNoProse(t *testing.T) {
 	client := &fakeClient{
 		statusResp: &rpcpb.StatusResponse{ManagerNodeId: "node-a"},
@@ -102,23 +102,19 @@ func TestMachineManagerdRow_OffersNoRestartAndNoProse(t *testing.T) {
 	}
 }
 
-// TestCloudflarePanel_NamesASourceFreeCommand is the same defect on the
-// second surface, and it is where a worse one turned up.
+// TestCloudflarePanel_NamesNoRestart is the same surface
+// TestCloudflarePanel_NamesASourceFreeCommand used to pin, updated for
+// ADR-0133's hot-reload fix (internal/tlscache): managerd no longer
+// needs restarting to load a renewed certificate, because its gRPC
+// listener (and frontend's/restshimd's own, if they name the same
+// path) re-reads the file on its next TLS handshake. The advice text
+// saying otherwise was accurate when written and is wrong now that the
+// behavior it described has changed - this test moved the pin rather
+// than silently losing it.
 //
-// The Origin CA advice exists twice, once in machine.html for the main
-// Machine page and once in machine_sections.html for /machine/security, and
-// the two had drifted. The main page's copy claimed the panel "restarts
-// managerd after a successful replacement". Nothing does that:
-// IssueOriginCertificate sets RestartScheduled false on purpose, and the
-// comment above it records that the old automatic restart was removed
-// because a self-restart kills the process issuing it. So the page an
-// operator is most likely to be looking at told them the restart was taken
-// care of, the certificate did not take effect, and nothing said why.
-//
-// The advice is now one named template used by both pages, so the two
-// cannot drift again, and this test pins what it says and, just as
-// importantly, what it must not say.
-func TestCloudflarePanel_NamesASourceFreeCommand(t *testing.T) {
+// The advice is one named template used by both the main Machine page
+// and /machine/security, so the two cannot drift from each other.
+func TestCloudflarePanel_NamesNoRestart(t *testing.T) {
 	for _, path := range []string{"/machine", "/machine/security"} {
 		t.Run(path, func(t *testing.T) {
 			client := &fakeClient{statusResp: &rpcpb.StatusResponse{ManagerNodeId: "node-a"}}
@@ -138,43 +134,27 @@ func TestCloudflarePanel_NamesASourceFreeCommand(t *testing.T) {
 			if j := strings.Index(panel, "</p>"); j >= 0 {
 				panel = panel[:j]
 			}
-			for _, want := range []string{
+			if !strings.Contains(panel, "no restart") {
+				t.Errorf("%s Cloudflare advice no longer says no restart is needed, got: %s", path, panel)
+			}
+			// A panel that tells an operator to go run a restart command
+			// is wrong now - nothing needs one - and a panel that names
+			// a checkout is advice that cannot be followed on the
+			// machine it is read on, because a Comb has no checkout.
+			// Both were true of this text at some point.
+			for _, forbidden := range []string{
 				"service apiary_managerd restart",
 				"apiaryctl force-restart",
-				"also restarts raftd",
-				"needs nothing but a root shell",
-			} {
-				if !strings.Contains(panel, want) {
-					t.Errorf("%s Cloudflare advice missing %q, got: %s", path, want, panel)
-				}
-			}
-			// Two regressions this test exists for.
-			//
-			// A panel that says managerd restarts itself is worse than
-			// one that says nothing: the operator stops looking for the
-			// step that never happened.
-			//
-			// And a panel that names a checkout is advice that cannot be
-			// followed on the machine it is read on, because a Comb has
-			// no checkout. Both were true of this text at some point, and
-			// both read as help.
-			for _, forbidden := range []string{
-				"restarts managerd",
+				"restart managerd",
 				"will be restarted",
-				"automatically",
 				"make force-restart",
 				"source checkout",
 				"Makefile",
 				"record-forced-restart",
 			} {
 				if strings.Contains(panel, forbidden) {
-					t.Errorf("%s Cloudflare advice contains %q; nothing restarts managerd on the operator's behalf, and the command it names is installed on the Comb", path, forbidden)
+					t.Errorf("%s Cloudflare advice contains %q; no restart is needed any more, and this text tells the operator to run one anyway", path, forbidden)
 				}
-			}
-			plain := strings.Index(panel, "service apiary_managerd restart")
-			forced := strings.Index(panel, "apiaryctl force-restart")
-			if plain < 0 || forced < 0 || plain > forced {
-				t.Errorf("%s: the managerd-only command must be offered before force-restart, got offsets plain=%d forced=%d", path, plain, forced)
 			}
 		})
 	}
