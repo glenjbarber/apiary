@@ -6,7 +6,6 @@
   "manager_tls_server_name": "",
   "tls_cert": "/usr/local/etc/apiary-tls/cert.pem",
   "tls_key": "/usr/local/etc/apiary-tls/key.pem",
-  "peer_tls": false,
   "peer_tls_ca": "",
   "peer_hostname_suffix": "",
   "peer_manager_port": "17700",

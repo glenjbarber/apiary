@@ -87,7 +87,7 @@ func TestServer_UpdateFrontendConfig_ForwardsFieldsAndSecret(t *testing.T) {
 	}
 	s := newTestServer(t, client)
 
-	form := url.Values{"http_host": {"0.0.0.0"}, "peer_tls": {"true"}, "manager_api_key": {"new-secret-key"}}
+	form := url.Values{"http_host": {"0.0.0.0"}, "peer_tls": {"enabled"}, "manager_api_key": {"new-secret-key"}}
 	req := httptest.NewRequest(http.MethodPost, "/machine/frontend-config", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	rec := httptest.NewRecorder()
@@ -106,8 +106,8 @@ func TestServer_UpdateFrontendConfig_ForwardsFieldsAndSecret(t *testing.T) {
 	if got.GetHttpAddr() != "0.0.0.0:8080" {
 		t.Errorf("HttpAddr = %q, want the submitted host joined with the fixed frontend port 0.0.0.0:8080", got.GetHttpAddr())
 	}
-	if !got.GetPeerTls() {
-		t.Error("PeerTls = false, want true from the submitted form")
+	if got.PeerTls == nil || !got.GetPeerTls() {
+		t.Error("PeerTls = unset/false, want true from the submitted form")
 	}
 	if got.GetManagerApiKey() != "new-secret-key" {
 		t.Errorf("ManagerApiKey = %q, want new-secret-key", got.GetManagerApiKey())

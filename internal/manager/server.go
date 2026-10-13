@@ -3483,7 +3483,7 @@ func (s *Server) UpdateFrontendConfig(_ context.Context, req *rpcpb.UpdateFronte
 		ManagerTLSServerName: req.GetManagerTlsServerName(),
 		TLSCert:              req.GetTlsCert(),
 		TLSKey:               req.GetTlsKey(),
-		PeerTLS:              req.GetPeerTls(),
+		PeerTLS:              req.PeerTls,
 		PeerTLSCA:            req.GetPeerTlsCa(),
 		PeerHostnameSuffix:   req.GetPeerHostnameSuffix(),
 		PeerManagerPort:      req.GetPeerManagerPort(),

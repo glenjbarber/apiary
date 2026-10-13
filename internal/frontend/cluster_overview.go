@@ -223,9 +223,38 @@ func (s *Server) fetchHostStats(ctx context.Context, nodeID, localNodeID string)
 func (s *Server) nodeHostStats(ctx context.Context, nodeID, localNodeID string) (statsView, string) {
 	resp, err := s.fetchHostStats(ctx, nodeID, localNodeID)
 	if err != nil {
-		return statsView{}, err.Error()
+		return statsView{}, explainPeerLinkError(err)
 	}
 	return fromRPCStats(resp), ""
+}
+
+// peerServerPrefaceEOF is grpc-go's message when a plaintext client is
+// answered by a TLS-only listener - the exact symptom ADR-0113/
+// docs/add-node-to-colony.md record for a peer_tls mismatch between two
+// Combs' managerd (and, before PeerTLS defaulted to ManagerTLS/this
+// node's own tls_cert/tls_key, between a Comb's own managerd.json and
+// frontend.json). Kept as its own copy rather than imported from
+// internal/managerlink: that package's Checker diagnoses this frontend's
+// link to its OWN local managerd (manager_tls), a different link than
+// the peer-to-peer one diagnosed here, and the two must never be
+// conflated into one Checker that could name the wrong config file.
+const peerServerPrefaceEOF = "error reading server preface: EOF"
+
+// explainPeerLinkError translates fetchHostStats's raw error into one
+// that names the likely cause and the exact fields to check, when that
+// cause is a peer_tls mismatch - otherwise it is passed through
+// unchanged. Every other failure (the peer unreachable, an auth error)
+// is left as the honest default: the raw error, same as before this
+// existed.
+func explainPeerLinkError(err error) string {
+	msg := err.Error()
+	if !strings.Contains(msg, peerServerPrefaceEOF) {
+		return msg
+	}
+	return fmt.Sprintf("%s - this means a plaintext client dialed a TLS-only managerd. "+
+		"Check peer_tls in both managerd.json and frontend.json on the host reporting this error, "+
+		"and peer_tls/tls_cert/tls_key on the host being dialed: all must agree on whether peer "+
+		"traffic uses TLS (see docs/add-node-to-colony.md)", msg)
 }
 
 // summarizeClusterNode reduces a full statsView down to the cluster
@@ -387,7 +416,7 @@ func (s *Server) clusterNodeEvidence(ctx context.Context, nodeID, localNodeID st
 	var stats statsView
 	var errMsg string
 	if hostStatsErr != nil {
-		errMsg = hostStatsErr.Error()
+		errMsg = explainPeerLinkError(hostStatsErr)
 	} else {
 		stats = fromRPCStats(hostStats)
 	}

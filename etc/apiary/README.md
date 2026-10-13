@@ -171,7 +171,11 @@ has real state under the old value.
 - `hast_enabled`, `jail_enabled`, `peer_tls` — tri-state: omit the key
   entirely to use managerd's own startup default; `true`/`false` are
   explicit local overrides. `peer_tls: true` dials peer managerd instances
-  over TLS.
+  over TLS. Omitted, `peer_tls` defaults to this Comb's own `tls_cert`/
+  `tls_key`: on when both are set, off otherwise - a TLS-only managerd
+  defaulting to a plaintext peer client would otherwise die on "error
+  reading server preface: EOF" for every peer call (ADR-0113's
+  follow-up).
 - `jail_prefix`, `jail_mount_base` — WRITE-ONCE, same reasoning as
   `zfs_base`.
 - `jail_disk_size_mb` — only affects newly created replicated jail roots,
@@ -295,8 +299,12 @@ current, safe flow uses `await_join` — see `docs/add-node-to-colony.md`.
   against, if different from `manager_addr`'s own host.
 - `tls_cert` / `tls_key` — serve the web UI over HTTPS, using Step 6's
   `make setup`/`setup-tls` output by default.
-- `peer_tls` — dial other cluster nodes' managerd over TLS when fetching
-  their host stats for the cluster overview page.
+- `peer_tls` — tri-state, same convention as managerd.json's own
+  `peer_tls` above: dial other cluster nodes' managerd over TLS when
+  fetching their host stats for the cluster overview page. Omit the key
+  entirely to default to `manager_tls` above - every node in a Colony is
+  expected to be configured the same way - or set `true`/`false`
+  explicitly to override that default.
 - `peer_tls_ca` — a PEM file trusted instead of the system certificate
   pool when dialing a peer over TLS (ADR-0093). Only consulted when
   `peer_tls` is set.

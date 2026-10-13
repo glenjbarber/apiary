@@ -485,3 +485,21 @@ func TestServer_HostPage_StatusFailureDoesNotDialPeer(t *testing.T) {
 		t.Errorf("peer dial address = %q, want none after a Status failure", peers.lastAddr)
 	}
 }
+
+func TestExplainPeerLinkError_TranslatesServerPrefaceEOF(t *testing.T) {
+	raw := `rpc error: code = Unavailable desc = connection error: desc = "error reading server preface: EOF"`
+	got := explainPeerLinkError(errors.New(raw))
+	if !strings.Contains(got, raw) {
+		t.Errorf("explainPeerLinkError() = %q, want it to still contain the raw error", got)
+	}
+	if !strings.Contains(got, "peer_tls") || !strings.Contains(got, "managerd.json") || !strings.Contains(got, "frontend.json") {
+		t.Errorf("explainPeerLinkError() = %q, want it to name peer_tls and both config files", got)
+	}
+}
+
+func TestExplainPeerLinkError_PassesOtherErrorsThrough(t *testing.T) {
+	raw := "connection refused"
+	if got := explainPeerLinkError(errors.New(raw)); got != raw {
+		t.Errorf("explainPeerLinkError() = %q, want the unchanged raw error %q for a non-EOF failure", got, raw)
+	}
+}

@@ -179,7 +179,7 @@ func run() error {
 		}
 	}
 
-	peerTLS := cfg.PeerTLS != nil && *cfg.PeerTLS
+	peerTLS := effectivePeerTLS(cfg.PeerTLS, cfg.TLSCert, cfg.TLSKey)
 
 	// Shared between the reconciler's own write-forwarding (ADR-0029)
 	// and the server's read-forwarding (ADR-0035) - both are forwarding
@@ -1158,6 +1158,18 @@ func applyManagerdDefaults(cfg *nodeconfig.Config) {
 // whatever target_address a caller supplies and return the error text, which
 // is a limited reachability oracle. That is a documented, accepted default
 // (ADR-0096, ADR-0097), but it should never be silent.
+// effectivePeerTLS resolves nodeconfig.Config.PeerTLS's tri-state:
+// explicit true/false always wins, and nil defaults to whether this
+// node's own tls_cert/tls_key are both set - see the field's own doc
+// comment in internal/nodeconfig/manager.go for why a TLS-only managerd
+// must not silently default to a plaintext peer client.
+func effectivePeerTLS(configured *bool, tlsCert, tlsKey string) bool {
+	if configured != nil {
+		return *configured
+	}
+	return tlsCert != "" && tlsKey != ""
+}
+
 func knownPeersWarning(known []string) string {
 	if len(known) > 0 {
 		return ""

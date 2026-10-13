@@ -296,7 +296,7 @@ func TestServer_GetFrontendConfig_NotConfiguredIsError(t *testing.T) {
 
 func TestServer_GetFrontendConfig(t *testing.T) {
 	store := &fakeFrontendConfigStore{cfg: frontendconfig.Config{
-		ManagerAddr: "10.50.0.9:17700", HTTPAddr: "0.0.0.0:8080", PeerTLS: true,
+		ManagerAddr: "10.50.0.9:17700", HTTPAddr: "0.0.0.0:8080", PeerTLS: boolPtr(true),
 	}}
 	s := NewServer(nil, "node-1", nil, nil, nil, nil, nil, "", nil, nil, nil, 0, nil)
 	s.SetFrontendConfig(store)
@@ -355,7 +355,7 @@ func TestServer_UpdateFrontendConfig(t *testing.T) {
 	s.services = services
 
 	resp, err := s.UpdateFrontendConfig(context.Background(), &rpcpb.UpdateFrontendConfigRequest{
-		ManagerAddr: "10.50.0.9:17700", HttpAddr: "0.0.0.0:8080", PeerTls: true,
+		ManagerAddr: "10.50.0.9:17700", HttpAddr: "0.0.0.0:8080", PeerTls: boolPtr(true),
 	})
 	if err != nil {
 		t.Fatalf("UpdateFrontendConfig() error: %v", err)
@@ -363,7 +363,7 @@ func TestServer_UpdateFrontendConfig(t *testing.T) {
 	if resp.GetError() != "" || !resp.GetScheduled() {
 		t.Fatalf("UpdateFrontendConfig() = %+v, want success and scheduled restart", resp)
 	}
-	if store.lastSave.ManagerAddr != "10.50.0.9:17700" || store.lastSave.HTTPAddr != "0.0.0.0:8080" || !store.lastSave.PeerTLS {
+	if store.lastSave.ManagerAddr != "10.50.0.9:17700" || store.lastSave.HTTPAddr != "0.0.0.0:8080" || store.lastSave.PeerTLS == nil || !*store.lastSave.PeerTLS {
 		t.Errorf("saved config = %+v, want ManagerAddr/HTTPAddr/PeerTLS as submitted", store.lastSave)
 	}
 }

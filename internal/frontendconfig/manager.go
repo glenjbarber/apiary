@@ -59,10 +59,13 @@ type Config struct {
 	TLSCert string `json:"tls_cert,omitempty"`
 	TLSKey  string `json:"tls_key,omitempty"`
 
-	// PeerTLS mirrors -peer-tls: dial other cluster nodes' managerd
-	// over TLS when fetching their host stats for the cluster
-	// overview page.
-	PeerTLS bool `json:"peer_tls,omitempty"`
+	// PeerTLS is tri-state, same convention as nodeconfig.Config.PeerTLS:
+	// nil defaults to ManagerTLS (whether this host's own local managerd
+	// is configured for TLS), since every node dialed here is expected
+	// to be configured the same way as that one; explicit true/false
+	// always wins. Dials other cluster nodes' managerd over TLS when
+	// fetching their host stats for the cluster overview page.
+	PeerTLS *bool `json:"peer_tls,omitempty"`
 
 	// PeerTLSCA mirrors -peer-tls-ca (ADR-0093): a PEM file trusted
 	// instead of the system certificate pool when dialing a peer over
