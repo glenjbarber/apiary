@@ -81,8 +81,8 @@ func TestServer_UpdateManagerdBindAddress_ForwardsEndpoint(t *testing.T) {
 	if client.lastUpdateManagerdBindReq.GetChangeOrigin() != "migration" || client.lastUpdateManagerdBindReq.GetChangeRationale() != "Move the listener to the Colony network" || client.lastUpdateManagerdBindReq.GetChangeEvidence() != "change-123" {
 		t.Errorf("endpoint provenance was not forwarded: %+v", client.lastUpdateManagerdBindReq)
 	}
-	if !strings.Contains(rec.Body.String(), "Restart apiary_managerd from Operations") {
-		t.Errorf("response missing explicit restart requirement, got: %s", rec.Body.String())
+	if !strings.Contains(rec.Body.String(), "apiary_managerd restarts") || !strings.Contains(rec.Body.String(), "apiaryctl force-restart") {
+		t.Errorf("response missing explicit restart requirement naming the working alternatives, got: %s", rec.Body.String())
 	}
 }
 

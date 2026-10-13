@@ -26,9 +26,14 @@ func (s *Server) currentNodeConfig(r *http.Request) (nodeConfigView, string) {
 }
 
 // handleUpdateManagerdBindAddress saves managerd's next external RPC bind
-// address. The RPC deliberately does not restart managerd: the existing
-// Operations-panel restart action has the cluster restart guardrail and makes
-// the endpoint change explicit to the operator.
+// address. The RPC deliberately does not restart managerd, and there is no
+// Operations-panel restart action for it to point to: ADR-0142 refuses
+// apiary_managerd's own restart through RestartNodeService entirely, since
+// the restart is orchestrated from inside the very managerd being
+// restarted, so stopping it kills the process that was about to start it
+// again, and the daemon does not come back. The success message below
+// names the two alternatives that actually work, matching
+// managerdSelfRestartRefusal's own wording (internal/manager/services.go).
 func (s *Server) handleUpdateManagerdBindAddress(w http.ResponseWriter, r *http.Request) {
 	if err := r.ParseForm(); err != nil {
 		s.renderManagerdBindPanel(w, r, "invalid form: "+err.Error(), "")
@@ -61,7 +66,11 @@ func (s *Server) handleUpdateManagerdBindAddress(w http.ResponseWriter, r *http.
 		s.renderManagerdBindPanel(w, r, resp.GetError(), "")
 		return
 	}
-	success := "Saved. Restart apiary_managerd from Operations to apply this endpoint."
+	success := "Saved. This does not take effect until apiary_managerd restarts, and that cannot be done " +
+		"from this UI (ADR-0142): restarting managerd from inside managerd's own request kills the process " +
+		"that was about to start it again. From a root shell on this Comb, run `service apiary_managerd " +
+		"restart` (managerd alone), or `apiaryctl force-restart` (managerd then raftd, bypassing the restart " +
+		"lease and quorum preflight)."
 	s.renderManagerdBindPanel(w, r, "", success)
 }
 
@@ -236,7 +245,7 @@ type configFieldSpec struct{ Field, Label, Dependency string }
 type configFieldOption struct{ Field, Label string }
 
 var configFieldSpecs = []configFieldSpec{
-	{"rpc_addr", "Managerd bind address", "Managerd gRPC clients and peer connections targeting this Comb. The new bind takes effect only after the guarded managerd restart."},
+	{"rpc_addr", "Managerd bind address", "Managerd gRPC clients and peer connections targeting this Comb. The new bind takes effect only after apiary_managerd restarts - not from this UI (ADR-0142): use `service apiary_managerd restart` or `apiaryctl force-restart` on this Comb."},
 	{"uplink", "Uplink", "VLAN-tagged managed networks and workloads using those networks. The network catalog is Colony-wide and does not identify which Comb physically hosts each network, so this dependency list is incomplete."},
 	{"nat_uplink", "NAT uplink", "Self-hosted managed-network outbound NAT on this Comb."},
 	{"dhcp_dns_server", "DHCP DNS server", "DHCP options advertised to clients on managed networks provisioned by this Comb."},
