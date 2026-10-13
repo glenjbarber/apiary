@@ -503,3 +503,109 @@ func TestExplainPeerLinkError_PassesOtherErrorsThrough(t *testing.T) {
 		t.Errorf("explainPeerLinkError() = %q, want the unchanged raw error %q for a non-EOF failure", got, raw)
 	}
 }
+
+// TestPeerAddr_ExplicitSuffixAlwaysWins is the regression test for
+// ADR-0115's "manual always wins over derived" precedence, applied to
+// frontend's own peer_hostname_suffix: a configured suffix must win
+// even when RefreshPeerHosts has also derived an entry for the same
+// node ID, the same way a manual peer_tls_hostname_map entry always
+// wins over managerd's own derived one.
+func TestPeerAddr_ExplicitSuffixAlwaysWins(t *testing.T) {
+	s, err := NewServer(&fakeClient{}, nil, nil, nil, ".apiary.work", "17700", nil, false)
+	if err != nil {
+		t.Fatalf("NewServer() error: %v", err)
+	}
+	s.derivedPeerHosts.replace(map[string]string{"comb-2": "comb-2.lab3.home.arpa"})
+
+	if got, want := s.peerAddr("comb-2"), "comb-2.apiary.work:17700"; got != want {
+		t.Errorf("peerAddr() = %q, want the suffix form %q even though a derived entry exists", got, want)
+	}
+}
+
+// TestPeerAddr_UsesDerivedHostWhenNoSuffixConfigured is this issue's own
+// acceptance criterion: a joined node with peer_hostname_suffix unset
+// and no manual hostname map still gets a dialable address, derived
+// from raft membership rather than the bare, brittle node ID alone.
+func TestPeerAddr_UsesDerivedHostWhenNoSuffixConfigured(t *testing.T) {
+	s, err := NewServer(&fakeClient{}, nil, nil, nil, "", "17700", nil, false)
+	if err != nil {
+		t.Fatalf("NewServer() error: %v", err)
+	}
+	s.derivedPeerHosts.replace(map[string]string{"comb-2": "comb-2.lab3.home.arpa"})
+
+	if got, want := s.peerAddr("comb-2"), "comb-2.lab3.home.arpa:17700"; got != want {
+		t.Errorf("peerAddr() = %q, want the raft-derived host %q", got, want)
+	}
+}
+
+// TestPeerAddr_FallsBackToBareNodeIDWithNoDerivationAvailable preserves
+// this function's pre-ADR-0115-follow-up behavior exactly for a node ID
+// RefreshPeerHosts never derived anything for (never refreshed yet, or
+// not a current raft voter) - no suffix, no derived entry.
+func TestPeerAddr_FallsBackToBareNodeIDWithNoDerivationAvailable(t *testing.T) {
+	s, err := NewServer(&fakeClient{}, nil, nil, nil, "", "17700", nil, false)
+	if err != nil {
+		t.Fatalf("NewServer() error: %v", err)
+	}
+
+	if got, want := s.peerAddr("comb-2"), "comb-2:17700"; got != want {
+		t.Errorf("peerAddr() = %q, want the bare node ID fallback %q", got, want)
+	}
+}
+
+func TestRefreshPeerHosts_DerivesHostFromRaftMembers(t *testing.T) {
+	client := &fakeClient{statusResp: &rpcpb.StatusResponse{
+		RaftReachable: true,
+		Members: []*rpcpb.RaftMember{
+			{NodeId: "comb-1", Address: "comb-1.lab3.home.arpa:17600"},
+			{NodeId: "comb-2", Address: "comb-2.lab3.home.arpa:17600"},
+			// A malformed/portless address on one voter must not abort
+			// deriving every other voter's own entry.
+			{NodeId: "comb-3", Address: "not-a-valid-address"},
+		},
+	}}
+	s, err := NewServer(client, nil, nil, nil, "", "17700", nil, false)
+	if err != nil {
+		t.Fatalf("NewServer() error: %v", err)
+	}
+
+	if err := s.RefreshPeerHosts(context.Background()); err != nil {
+		t.Fatalf("RefreshPeerHosts() error: %v", err)
+	}
+	if got, want := s.peerAddr("comb-1"), "comb-1.lab3.home.arpa:17700"; got != want {
+		t.Errorf("peerAddr(comb-1) = %q, want %q", got, want)
+	}
+	if got, want := s.peerAddr("comb-2"), "comb-2.lab3.home.arpa:17700"; got != want {
+		t.Errorf("peerAddr(comb-2) = %q, want %q", got, want)
+	}
+	if got, want := s.peerAddr("comb-3"), "comb-3:17700"; got != want {
+		t.Errorf("peerAddr(comb-3) = %q, want the bare node ID fallback %q since its address was malformed", got, want)
+	}
+}
+
+// TestRefreshPeerHosts_UnreachableRaftLeavesExistingMapInPlace is the
+// regression test for ADR-0115's own "a query failure just leaves the
+// previously-derived map in place until the next successful tick" rule,
+// applied to this follow-up: a tick where the local managerd reports
+// raft unreachable must not wipe out a previously good derivation.
+func TestRefreshPeerHosts_UnreachableRaftLeavesExistingMapInPlace(t *testing.T) {
+	client := &fakeClient{statusResp: &rpcpb.StatusResponse{
+		RaftReachable: true,
+		Members:       []*rpcpb.RaftMember{{NodeId: "comb-2", Address: "comb-2.lab3.home.arpa:17600"}},
+	}}
+	s, err := NewServer(client, nil, nil, nil, "", "17700", nil, false)
+	if err != nil {
+		t.Fatalf("NewServer() error: %v", err)
+	}
+	if err := s.RefreshPeerHosts(context.Background()); err != nil {
+		t.Fatalf("RefreshPeerHosts() first call error: %v", err)
+	}
+
+	client.statusResp = &rpcpb.StatusResponse{RaftReachable: false, RaftError: "raftd socket unreachable"}
+	if err := s.RefreshPeerHosts(context.Background()); err == nil {
+		t.Error("RefreshPeerHosts() error = nil, want an error when raft is unreachable")
+	}
+	if got, want := s.peerAddr("comb-2"), "comb-2.lab3.home.arpa:17700"; got != want {
+		t.Errorf("peerAddr(comb-2) = %q after a failed refresh, want the previously-derived %q kept in place", got, want)
+	}
+}

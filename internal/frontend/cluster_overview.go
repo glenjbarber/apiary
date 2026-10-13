@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"sort"
 	"strings"
@@ -197,11 +198,93 @@ type clusterNodeView struct {
 	DigestDetail     string
 }
 
+// peerHostCache is derivedPeerHosts' concurrency-safe storage: node_id
+// -> the host part of that voter's raft_bind address, as last reported
+// by this frontend's local managerd's Status RPC (see RefreshPeerHosts).
+// A plain map guarded by its own mutex, the same shape
+// internal/manager.PeerReporter's own derived-hostname map uses
+// (ADR-0115), kept independent of it since frontend has no equivalent
+// PeerReporter of its own to extend.
+type peerHostCache struct {
+	mu    sync.RWMutex
+	hosts map[string]string
+}
+
+func newPeerHostCache() *peerHostCache {
+	return &peerHostCache{hosts: map[string]string{}}
+}
+
+func (c *peerHostCache) get(nodeID string) (string, bool) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	host, ok := c.hosts[nodeID]
+	return host, ok
+}
+
+// replace swaps in a freshly-derived map wholesale, the same "the
+// rebuilt map fully replaces the previous one on every refresh" rule
+// ADR-0115 established for RefreshDerivedHostnames: a voter removed
+// from raft's configuration, or renamed, stops being derived on the
+// very next refresh rather than leaking a stale mapping.
+func (c *peerHostCache) replace(hosts map[string]string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.hosts = hosts
+}
+
 // peerAddr turns a node ID into the address its managerd should be
-// reachable at - see cmd/frontend's own -peer-hostname-suffix/
-// -peer-manager-port flags.
+// reachable at. peerHostnameSuffix, when configured, always wins
+// (cmd/frontend's own -peer-hostname-suffix/-peer-manager-port flags) -
+// an operator who set it did so for a reason, the same "manual always
+// wins over derived" precedence ADR-0115 established for managerd's own
+// peer_tls_hostname_map. Otherwise, RefreshPeerHosts' raft-membership
+// derivation is used when it has an entry for nodeID; failing that,
+// nodeID itself is dialed bare, the same fallback this function always
+// used before ADR-0115's follow-up existed.
 func (s *Server) peerAddr(nodeID string) string {
-	return nodeID + s.peerHostnameSuffix + ":" + s.peerManagerPort
+	if s.peerHostnameSuffix != "" {
+		return nodeID + s.peerHostnameSuffix + ":" + s.peerManagerPort
+	}
+	if host, ok := s.derivedPeerHosts.get(nodeID); ok && host != "" {
+		return host + ":" + s.peerManagerPort
+	}
+	return nodeID + ":" + s.peerManagerPort
+}
+
+// RefreshPeerHosts asks this frontend's local managerd for its current
+// Raft membership (the same Status RPC frontend already calls
+// elsewhere, e.g. localNodeID) and rebuilds derivedPeerHosts from each
+// voter's raft_bind address - ADR-0115's own "Out of scope" section
+// named this exact approach as frontend's reasonable follow-up, since
+// frontend has no local raftd of its own to query the way managerd
+// does. A raft_reachable=false response, or a Status RPC error, leaves
+// the previously-derived map in place rather than clearing it - the
+// same "a query failure just leaves the previously-derived map in
+// place until the next successful tick" rule ADR-0115 established for
+// managerd's own refresh loop. Exported so cmd/frontend can drive this
+// on a periodic tick, mirroring runPeerHostnameRefreshLoop there.
+func (s *Server) RefreshPeerHosts(ctx context.Context) error {
+	resp, err := s.client.Status(ctx, &rpcpb.StatusRequest{})
+	if err != nil {
+		return err
+	}
+	if !resp.GetRaftReachable() {
+		return fmt.Errorf("frontend: local managerd's raft is unreachable: %s", resp.GetRaftError())
+	}
+	hosts := make(map[string]string, len(resp.GetMembers()))
+	for _, m := range resp.GetMembers() {
+		host, _, err := net.SplitHostPort(m.GetAddress())
+		if err != nil || host == "" {
+			// A malformed or portless raft_bind on one voter must never
+			// abort the whole refresh - every other voter's own entry is
+			// still good, the same "one bad peer is skipped, not fatal"
+			// rule ADR-0115 established for RefreshDerivedHostnames.
+			continue
+		}
+		hosts[m.GetNodeId()] = host
+	}
+	s.derivedPeerHosts.replace(hosts)
+	return nil
 }
 
 // fetchHostStats dials nodeID's own managerd for a fresh HostStats

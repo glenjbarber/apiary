@@ -10,6 +10,9 @@ import (
 	"fmt"
 	"github.com/glenjbarber/apiary/internal/buildinfo"
 	"log"
+	"os"
+	"os/signal"
+	"syscall"
 	"time"
 
 	"google.golang.org/grpc"
@@ -272,6 +275,11 @@ func run() error {
 	}
 
 	log.Printf("frontend: %s listening on %s (manager-addr=%s, manager-tls=%v, tls=%v)", buildinfo.String(), cfg.HTTPAddr, cfg.ManagerAddr, cfg.ManagerTLS, tlsEnabled)
+
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	go runPeerHostRefreshLoop(ctx, srv, peerHostRefreshInterval)
+
 	httpSrv := httpserver.New(cfg.HTTPAddr, srv)
 	if tlsEnabled {
 		// Loaded through tlscache rather than passing the paths
@@ -287,6 +295,44 @@ func run() error {
 		return httpSrv.ListenAndServeTLS("", "")
 	}
 	return httpSrv.ListenAndServe()
+}
+
+// peerHostRefreshInterval controls how often runPeerHostRefreshLoop
+// re-derives frontend.Server's node_id->raft_bind-host map from this
+// node's local managerd's own Status RPC (ADR-0115's own "Out of
+// scope" section named this exact approach as frontend's reasonable
+// follow-up). Matches cmd/managerd's own peerHostnameRefreshInterval:
+// a raft membership change is already rare and operator-driven, so a
+// fixed interval this short is already generous.
+const peerHostRefreshInterval = 30 * time.Second
+
+// runPeerHostRefreshLoop mirrors cmd/managerd's own
+// runPeerHostnameRefreshLoop shape exactly - an immediate first run,
+// then one per tick of interval, until ctx is done. A failed refresh is
+// logged, not fatal: peerHostnameSuffix (the manual override) and
+// whatever derived map is already cached both keep working until the
+// next successful tick.
+func runPeerHostRefreshLoop(ctx context.Context, srv *frontend.Server, interval time.Duration) {
+	peerHostRefreshOnce(ctx, srv)
+
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			peerHostRefreshOnce(ctx, srv)
+		}
+	}
+}
+
+func peerHostRefreshOnce(ctx context.Context, srv *frontend.Server) {
+	statusCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	if err := srv.RefreshPeerHosts(statusCtx); err != nil {
+		log.Printf("frontend: peer host refresh: %v", err)
+	}
 }
 
 // checkManagerLink turns the startup check's answer into a decision.
