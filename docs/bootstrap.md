@@ -618,6 +618,14 @@ opens it from another machine. Nothing inside the Colony dials
 `frontend` either, so - unlike `managerd` - this address has no
 dial-target role to break. Reach it at `https://<this-host-address>:8080`.
 
+Serving HTTPS here does not make the certificate *trusted* - it is the
+same self-signed certificate `apiaryctl install` issued for `managerd`,
+and no browser or OS ships it as a root CA. The first visit still shows
+an untrusted-certificate warning; clicking through it is fine for a lab
+Comb, or add `/usr/local/etc/apiary-tls/cert.pem` to the operator's
+trust store (on macOS, double-click it into Keychain Access and mark it
+"Always Trust") to clear the warning for good.
+
 `manager_tls`/`manager_tls_ca` are required here, not optional -
 `managerd` now always serves its external RPC API over TLS (Step 8),
 so a plaintext dial from `frontend` would fail the handshake outright.
