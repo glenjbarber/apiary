@@ -5,6 +5,7 @@ package main
 
 import (
 	"context"
+	"crypto/tls"
 	"errors"
 	"flag"
 	"fmt"
@@ -48,6 +49,7 @@ import (
 	"github.com/glenjbarber/apiary/internal/raftdconfig"
 	"github.com/glenjbarber/apiary/internal/resetutil"
 	"github.com/glenjbarber/apiary/internal/restshimdconfig"
+	"github.com/glenjbarber/apiary/internal/tlscache"
 	"github.com/glenjbarber/apiary/internal/ufsmount"
 	"github.com/glenjbarber/apiary/internal/vlan"
 	"github.com/glenjbarber/apiary/internal/zfs"
@@ -572,11 +574,18 @@ func run() error {
 		if cfg.TLSCert == "" || cfg.TLSKey == "" {
 			return fmt.Errorf("both tls_cert and tls_key must be set together")
 		}
-		creds, err := credentials.NewServerTLSFromFile(cfg.TLSCert, cfg.TLSKey)
+		// Loaded through tlscache rather than
+		// credentials.NewServerTLSFromFile's own one-time read, so a
+		// certificate renewed on disk (by any issuer - origincert's
+		// Origin CA and Let's Encrypt renewal loops included) is
+		// picked up on the next TLS handshake, with no managerd
+		// restart (ADR-0133's own issue on this: renewal used to
+		// always need one).
+		certs, err := tlscache.New(cfg.TLSCert, cfg.TLSKey, nil)
 		if err != nil {
 			return fmt.Errorf("loading TLS cert/key: %w", err)
 		}
-		serverOpts = append(serverOpts, grpc.Creds(creds))
+		serverOpts = append(serverOpts, grpc.Creds(credentials.NewTLS(&tls.Config{GetCertificate: certs.GetCertificate})))
 	}
 	grpcServer := grpc.NewServer(serverOpts...)
 	rpcpb.RegisterManagerServiceServer(grpcServer, srv)
