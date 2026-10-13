@@ -337,6 +337,13 @@ func TestColonyAdvert_NoTargetRendersAPromptNotAFailure(t *testing.T) {
 	if !strings.Contains(body, "Name the Colony member") {
 		t.Errorf("empty target did not render a prompt; operator sees a blank page")
 	}
+	// Issue #47: the form lived only inside the branch that renders after
+	// a target address is already known, so the empty-state prompt above
+	// had no way to submit one. An operator landing here cold has nothing
+	// else to click.
+	if !strings.Contains(body, `name="colony_target_address"`) {
+		t.Errorf("empty target rendered no form to submit an address with: %s", body)
+	}
 }
 
 // TestColonyAdvert_SaysFingerprintsUnpublishedWhenThereAreNone is the

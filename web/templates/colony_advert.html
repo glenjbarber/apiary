@@ -20,6 +20,9 @@
         <div class="banner-warning">Name the Colony member you were given, below, to see what it advertises.</div>
       {{else}}
         <p class="muted">Asked <code>{{.ColonyTargetAddress}}</code>.</p>
+      {{end}}
+
+      {{if .ColonyTargetAddress}}
 
         {{if .Closed}}
           <div class="banner-warning">
@@ -82,15 +85,15 @@
             {{end}}
           </section>
         {{end}}
-
-        <section class="panel" style="margin-top:1rem">
-          <h3>Check another member</h3>
-          <form class="inline-form" method="get" action="/machine/colony-advert">
-            <label>Colony member's address <span class="host-port"><input type="text" name="colony_target_address" value="{{.ColonyTargetAddress}}" placeholder="10.62.0.2"><span class="fixed-port">:17700</span></span></label>
-            <button type="submit">Read advertisement</button>
-          </form>
-        </section>
       {{end}}
+
+      <section class="panel" style="margin-top:1rem">
+        <h3>{{if .ColonyTargetAddress}}Check another member{{else}}Read an advertisement{{end}}</h3>
+        <form class="inline-form" method="get" action="/machine/colony-advert">
+          <label>Colony member's address <span class="host-port"><input type="text" name="colony_target_address" value="{{.ColonyTargetAddress}}" placeholder="10.62.0.2"><span class="fixed-port">:17700</span></span></label>
+          <button type="submit">Read advertisement</button>
+        </form>
+      </section>
     {{end}}
   </main>
 </body>
