@@ -39,12 +39,12 @@ import (
 	"time"
 
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials/insecure"
 
 	rpcpb "github.com/glenjbarber/apiary/api/rpc"
 	"github.com/glenjbarber/apiary/internal/hostcert"
 	"github.com/glenjbarber/apiary/internal/nodeconfig"
 	"github.com/glenjbarber/apiary/internal/raftdconfig"
+	"github.com/glenjbarber/apiary/internal/tlsdial"
 )
 
 // joinFirstCodeDigits and joinSecondPinDigits match
@@ -204,6 +204,8 @@ func runJoinIntroduce(args []string) int {
 		nodeID        string
 		raftBind      string
 		nodeConfigArg string
+		plaintext     bool
+		caFile        string
 	)
 	fs.StringVar(&target, "target", "", "host:port of ANY member of the Colony being joined, not only its leader (required to start a request)")
 	fs.StringVar(&requestID, "request-id", "", "poll an existing request for its second PIN instead of starting a new one")
@@ -212,6 +214,8 @@ func runJoinIntroduce(args []string) int {
 	fs.StringVar(&nodeID, "node-id", "", "this Comb's raft identity; defaults to its own configured node_id")
 	fs.StringVar(&raftBind, "raft-bind", "", "this Comb's raft bind address; defaults to its own configured raft bind")
 	fs.StringVar(&nodeConfigArg, "node-config", "", "path to managerd.json; defaults to "+nodeconfig.DefaultPath)
+	fs.BoolVar(&plaintext, "plaintext", false, "dial --target without TLS, for a Colony whose members do not serve TLS; the default dials with TLS, trusting the system CA pool")
+	fs.StringVar(&caFile, "ca-file", "", "trust this CA file instead of the system pool when dialing --target with TLS; ignored with --plaintext")
 	fs.Usage = func() {
 		fmt.Fprint(os.Stderr, `usage: apiaryctl join-introduce --target HOST:PORT [--field FIELD]
        apiaryctl join-introduce --request-id ID --first-code CODE [--target HOST:PORT] [--field FIELD]
@@ -230,6 +234,10 @@ that transcription is the check.
                          target         the --target value, to paste
   --request-id ID      poll that request instead of starting a new one
   --first-code CODE    the first code, required with --request-id
+  --plaintext          dial --target without TLS (only for a Colony that
+                        does not serve TLS); default dials with TLS
+  --ca-file FILE       trust this CA instead of the system pool; ignored
+                        with --plaintext
 
 The fingerprints are read from this Comb's own certificate FILES, not
 from the config strings naming them. A fingerprint mismatch is a refusal,
@@ -248,14 +256,14 @@ so --field fingerprints prints digests and nothing else.
 	}
 
 	if requestID != "" {
-		return pollJoinIntroduction(target, requestID, firstCode, field)
+		return pollJoinIntroduction(target, requestID, firstCode, field, plaintext, caFile)
 	}
-	return startJoinIntroduction(target, field, nodeID, raftBind, nodeConfigArg)
+	return startJoinIntroduction(target, field, nodeID, raftBind, nodeConfigArg, plaintext, caFile)
 }
 
 // startJoinIntroduction generates the first code, reads this Comb's own
 // certificates, and records the request on the named member.
-func startJoinIntroduction(target, field, nodeID, raftBind, nodeConfigArg string) int {
+func startJoinIntroduction(target, field, nodeID, raftBind, nodeConfigArg string, plaintext bool, caFile string) int {
 	if target == "" {
 		fmt.Fprintln(os.Stderr, "apiaryctl join-introduce: --target is required. Name ANY member of the Colony you are joining - the request is replicated to all of them, and this command does not need the leader.")
 		return 2
@@ -287,7 +295,7 @@ func startJoinIntroduction(target, field, nodeID, raftBind, nodeConfigArg string
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	client, closeFn, err := dialTargetManager(ctx, target)
+	client, closeFn, err := dialTargetManager(ctx, target, plaintext, caFile)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "apiaryctl join-introduce: %v\n", err)
 		return 1
@@ -306,7 +314,7 @@ func startJoinIntroduction(target, field, nodeID, raftBind, nodeConfigArg string
 		AdvertisedFingerprints: fingerprints,
 	})
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "apiaryctl join-introduce: reaching %s: %v\n", target, err)
+		fmt.Fprintf(os.Stderr, "apiaryctl join-introduce: %v\n", translateDialErr(target, plaintext, err))
 		return 1
 	}
 	if resp.GetError() != "" {
@@ -355,7 +363,7 @@ func startJoinIntroduction(target, field, nodeID, raftBind, nodeConfigArg string
 // target after acceptance and the operator already has it - this
 // command cannot recover it, and saying so is more useful than printing
 // an empty field.
-func pollJoinIntroduction(target, requestID, firstCode, field string) int {
+func pollJoinIntroduction(target, requestID, firstCode, field string, plaintext bool, caFile string) int {
 	if firstCode == "" {
 		fmt.Fprintln(os.Stderr, "apiaryctl join-introduce: --first-code is required with --request-id. It is the 6-digit value `apiaryctl join-introduce` printed when the request was made; the target needs it to release the second PIN.")
 		return 2
@@ -366,7 +374,7 @@ func pollJoinIntroduction(target, requestID, firstCode, field string) int {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	client, closeFn, err := dialTargetManager(ctx, target)
+	client, closeFn, err := dialTargetManager(ctx, target, plaintext, caFile)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "apiaryctl join-introduce: %v\n", err)
 		return 1
@@ -378,7 +386,7 @@ func pollJoinIntroduction(target, requestID, firstCode, field string) int {
 		IntroductionCode: firstCode,
 	})
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "apiaryctl join-introduce: reaching %s: %v\n", target, err)
+		fmt.Fprintf(os.Stderr, "apiaryctl join-introduce: %v\n", translateDialErr(target, plaintext, err))
 		return 1
 	}
 	if field != "" {
@@ -446,14 +454,52 @@ func printField(field string, values map[string][]string) int {
 // to a target address the operator typed would send a credential to
 // whatever that address happens to be.
 //
+// TLS by default (trusting the system CA pool, like
+// tlsdial.ManagerTLSConfig already does for the frontend and restshimd),
+// because pam_service being set makes managerd serve TLS and a plaintext
+// dial against it fails during the handshake rather than at the RPC
+// layer - see translateDialErr. --plaintext is opt-in, for a Colony whose
+// members genuinely serve no TLS. serverName is left empty: --target is
+// the address actually dialed, and the default grpc-go behavior of
+// verifying the certificate against it is exactly right here, unlike
+// managerd's own loopback-only case that tlsdial.ManagerDialOption's doc
+// comment describes.
+//
 // Not routed through internal/manager for the reason
 // listPendingJoinRequests states: apiaryctl is a small root shell tool
 // and importing the manager package would drag raft, bbolt and the
 // cluster packages into a binary an operator runs during an incident.
-func dialTargetManager(ctx context.Context, target string) (rpcpb.ManagerServiceClient, func(), error) {
-	conn, err := grpc.NewClient(target, grpc.WithTransportCredentials(insecure.NewCredentials()))
+func dialTargetManager(ctx context.Context, target string, plaintext bool, caFile string) (rpcpb.ManagerServiceClient, func(), error) {
+	dialOpt, err := tlsdial.ManagerDialOption(!plaintext, caFile, "")
+	if err != nil {
+		return nil, nil, fmt.Errorf("configuring TLS for %s: %w", target, err)
+	}
+	conn, err := grpc.NewClient(target, dialOpt)
 	if err != nil {
 		return nil, nil, fmt.Errorf("dialing %s: %w", target, err)
 	}
 	return rpcpb.NewManagerServiceClient(conn), func() { conn.Close() }, nil
+}
+
+// translateDialErrPrefaceHint is the substring grpc-go's client surfaces
+// when a plaintext client speaks to a TLS-only server: the server's TLS
+// handshake bytes do not look like an HTTP/2 preface to a client that
+// never offered TLS, so it reads as a bare EOF instead of a clear
+// rejection. Matched as a substring, not parsed, because this is
+// grpc-go's own wrapped error text, not a typed error this package
+// controls.
+const translateDialErrPrefaceHint = "error reading server preface"
+
+// translateDialErr rewrites that specific EOF into the sentence an
+// operator actually needs: this Comb dialed in plaintext and the target
+// is TLS-only. Every other error is returned unchanged - this is a
+// translation for one known failure shape, not a catch-all.
+func translateDialErr(target string, plaintext bool, err error) error {
+	if err == nil || !plaintext {
+		return err
+	}
+	if !strings.Contains(err.Error(), translateDialErrPrefaceHint) {
+		return err
+	}
+	return fmt.Errorf("reaching %s: the connection closed during the handshake - this looks like a plaintext client dialing a TLS-only server. Drop --plaintext and retry (the default dials with TLS): %w", target, err)
 }
