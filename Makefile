@@ -17,16 +17,31 @@ SRCS=		apiaryinstall \
 			frontend \
 			restshimd
 
-# versioncheck is in SRCS and is NOT in INSTALL_SRCS, for the same reason
-# apiaryinstall is not: it is a tool an operator runs FROM this checkout
-# and never leaves on the Comb. It is here rather than in a target of its
-# own so that `make build` produces it, `make clean` removes it and
-# check-stamped holds it to the same stamping contract as everything
-# else - and because `update` needs it on the host to produce its closing
-# report. Nothing reads versioncheck's own build id, so the stamp is
-# provenance rather than evidence: it says which checkout produced the
-# report, which is a real question once a report is pasted into an
-# incident note.
+# versioncheck is in SRCS and is NOT in INSTALL_SRCS: it is a tool an
+# operator runs FROM this checkout and never leaves on the Comb. It is
+# here rather than in a target of its own so that `make build` produces
+# it, `make clean` removes it and check-stamped holds it to the same
+# stamping contract as everything else - and because `update` needs it
+# on the host to produce its closing report. Nothing reads versioncheck's
+# own build id, so the stamp is provenance rather than evidence: it says
+# which checkout produced the report, which is a real question once a
+# report is pasted into an incident note.
+#
+# apiaryinstall WAS excluded from INSTALL_SRCS on the same reasoning
+# (issue #49) - it looked like a one-shot host-prep CLI meant to be run
+# from this checkout and never left behind. That was never actually
+# true: `setup-quick` already copied it to
+# /usr/local/libexec/apiary/apiaryinstall permanently in its own recipe,
+# because `-apply-network yes-modify-network` and the other RiskNetwork
+# fixes are exactly the kind of thing an operator re-runs later, after
+# the checkout that built the binary may be long gone - and `make
+# install` not doing what `setup-quick` already relied on meant a host
+# installed via the plain `build`+`install` path (rather than
+# `setup-quick`) was missing the binary entirely, with no bridge and no
+# way to create one short of rebuilding from source. apiaryinstall is in
+# INSTALL_SRCS now so both paths agree, and setup-quick's own separate
+# copy of it below is gone with this change - one copy of this logic,
+# not two that can drift.
 #
 # Its -version flag exists for check-stamped, which runs every binary in
 # SRCS before an install is allowed, and for the same reason every other
@@ -242,14 +257,17 @@ INSTALL_SRCS=	raftd \
 		managerd \
 		frontend \
 		restshimd \
-		apiaryctl
+		apiaryctl \
+		apiaryinstall
 
-# Every installed binary except apiaryctl, because apiaryctl has no
-# configuration at all: it reads the daemons' own config files and the
-# guardrail's own record directory, and a sample of nothing is not a
-# document. The list is its own rather than derived from INSTALL_SRCS
-# minus one so that adding a daemon with no config is a one-line
-# decision instead of a conditional in the recipe.
+# Every installed binary except apiaryctl and apiaryinstall, because
+# neither has configuration of its own: apiaryctl reads the daemons' own
+# config files and the guardrail's own record directory, and
+# apiaryinstall takes its settings as CLI flags and never reads or
+# writes a file of its own. A sample of nothing is not a document. The
+# list is its own rather than derived from INSTALL_SRCS minus two so
+# that adding a daemon with no config is a one-line decision instead of
+# a conditional in the recipe.
 INSTALL_SAMPLE_SRCS=	raftd \
 			managerd \
 			frontend \
@@ -325,10 +343,10 @@ UPDATE_RESTART_SRCS=	frontend \
 # quorum voter. `apiaryctl force-restart` prints its own plan before it
 # touches anything, and that is the copy an operator reads.
 
-# install copies the five installed binaries - not apiaryinstall, a
-# one-shot host-prep CLI meant to be run from this checkout and never
-# installed permanently - to the fixed path every etc/rc.d/apiary_*
-# script execs, /usr/local/libexec/apiary/<name> (see docs/bootstrap.md
+# install copies the six installed binaries, apiaryinstall included
+# (issue #49 - see INSTALL_SRCS's own comment above for why it is no
+# longer excluded), to the fixed path every etc/rc.d/apiary_* script
+# execs, /usr/local/libexec/apiary/<name> (see docs/bootstrap.md
 # Step 6 for the manual equivalent this mirrors exactly). Depends on
 # setup-dirs so /var/log/apiary, /var/run/apiary, etc. already exist -
 # a first `service apiary_raftd start` on a truly fresh host fails
@@ -601,9 +619,6 @@ setup-quick:
 	./apiaryinstall -apply -apply-network yes-modify-network -zfs-pool ${NODE_ZFS_POOL} \
 		-vlan-uplink ${NODE_VLAN_UPLINK} -bhyve-bridge ${NODE_BHYVE_BRIDGE}
 	${MAKE} install
-	cp -p apiaryinstall /usr/local/libexec/apiary/apiaryinstall.new
-	chmod +x /usr/local/libexec/apiary/apiaryinstall.new
-	mv /usr/local/libexec/apiary/apiaryinstall.new /usr/local/libexec/apiary/apiaryinstall
 	BOOTROM=$$(test -f /usr/local/share/uefi-firmware/BHYVE_UEFI.fd && echo /usr/local/share/uefi-firmware/BHYVE_UEFI.fd || pkg info -l edk2-bhyve 2>/dev/null | grep '\.fd$$' | head -1) ;\
 	test -n "$$BOOTROM" || { echo "could not locate a bhyve UEFI firmware .fd file - install bhyve-firmware/edk2-bhyve and re-run" >&2 ; exit 1 ; } ;\
 	/usr/local/libexec/apiary/apiaryctl install --apply \

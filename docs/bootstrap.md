@@ -235,6 +235,13 @@ Confirm everything is clean:
 
 Every check should now read `ok`.
 
+**This is the only step that creates the bridge (issue #49).** Later,
+`apiaryctl install --bhyve-bridge bridge0` only records that name into
+`managerd.json` - it never checks whether `bridge0` exists and never
+creates it. Run this step, with `-apply-network`, before `apiaryctl
+install`, every time; skipping it leaves a Comb that reports itself
+configured and has no working bridge at all.
+
 ## 5. Find the bhyve firmware path
 
 `bhyve-firmware`'s package may only carry license files, with the actual
@@ -320,9 +327,14 @@ it into place - `cp` over a binary a live process still has open fails
 with "Text file busy," but `mv`'s atomic rename doesn't disturb the
 running process's already-open file descriptor at all.
 
-`apiaryinstall` is deliberately **not** installed. It is a one-shot
-host-prep CLI meant to be run from this checkout, never installed
-permanently.
+`apiaryinstall` is installed too (issue #49), to
+`/usr/local/libexec/apiary/apiaryinstall`, the same as the five binaries
+above - it used to be excluded on the theory that it was a one-shot
+host-prep CLI meant to be run from this checkout and never left behind,
+but `-apply-network` and its other `RiskNetwork` fixes are exactly the
+kind of thing re-run later, after the checkout that built it may be
+long gone, which `make setup-quick`'s own recipe already assumed by
+copying it there itself.
 
 `apiaryctl` is the exception to the "this checkout is where the source
 is" rule that the rest of this document assumes, and the reason is worth

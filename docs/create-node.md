@@ -201,6 +201,13 @@ bridge, uplink, firmware, image directory, and local TLS paths:
 Replace `brood.lab3.home.arpa` with **this host's own DNS name**. Do not
 use `0.0.0.0` and do not use the numeric LAN address.
 
+`bhyve_bridge` here only *records* the bridge's name for managerd to use;
+writing it does not create anything (issue #49). The bridge interface
+itself has to already exist, created by Step 3's `apiaryinstall
+-apply-network yes-modify-network`, before this is useful - a `bhyve_bridge`
+value with no matching interface produces a Comb that reports itself
+configured and has no working bridge at all.
+
 `rpc_addr` does three jobs, not one (ADR-0139). It is what `managerd`
 binds with `net.Listen`; it is also the address `cmd/raftd/confirm.go`
 *dials*, on this host, to confirm a pending `raftd` restart to this

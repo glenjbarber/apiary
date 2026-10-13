@@ -216,14 +216,22 @@ type Options struct {
 	// can reason about afterwards.
 	FQDN string
 
-	// ZFSBase, Uplink and BhyveBridge are host facts this program
-	// cannot see. Absent, they are reported as needing a human rather
-	// than guessed, because a plausible default written into a valid
-	// config file is the failure mode this whole package is built
+	// ZFSBase, Uplink, BhyveBridge and NATUplink are host facts this
+	// program cannot see. Absent, they are reported as needing a human
+	// rather than guessed, because a plausible default written into a
+	// valid config file is the failure mode this whole package is built
 	// against.
 	ZFSBase     string
 	Uplink      string
 	BhyveBridge string
+
+	// NATUplink is the interface a self-hosted outbound NAT (ADR-0048)
+	// reaches the network through. Optional, the same as the others
+	// above: a Comb with no self-hosted NAT needs nothing here, and one
+	// that does gets it supplied exactly like --vlan-uplink/
+	// --bhyve-bridge rather than left as a value only hand-editing
+	// managerd.json could ever set (issue #49).
+	NATUplink string
 
 	// BhyveBootROM is the UEFI firmware file bhyve boots from. The
 	// package carrying it is sometimes the firmware package and

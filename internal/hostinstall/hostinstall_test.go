@@ -716,13 +716,32 @@ func TestSuppliedHostFactsAreWritten(t *testing.T) {
 	f.opts.ZFSBase = "zroot/apiary"
 	f.opts.Uplink = "em0"
 	f.opts.BhyveBridge = "bridge0"
+	f.opts.NATUplink = "em1"
 	f.installed()
 
 	body := f.read(f.configPath("managerd.json"))
-	for _, want := range []string{`"zfs_base": "zroot/apiary"`, `"uplink": "em0"`, `"bhyve_bridge": "bridge0"`} {
+	for _, want := range []string{`"zfs_base": "zroot/apiary"`, `"uplink": "em0"`, `"bhyve_bridge": "bridge0"`, `"nat_uplink": "em1"`} {
 		if !strings.Contains(body, want) {
 			t.Errorf("a supplied host fact was not written (%s):\n%s", want, body)
 		}
+	}
+}
+
+// Issue #49: nat_uplink used to have no flag at all, so it was reported
+// as a need on every install regardless of whether an operator could
+// have answered it. --nat-uplink now works exactly like
+// --vlan-uplink/--bhyve-bridge.
+func TestNATUplinkIsSuppliedThroughItsOwnFlag(t *testing.T) {
+	f := newFixture(t)
+	f.opts.NATUplink = "em1"
+	p := f.installed()
+
+	if !strings.Contains(report(p), `nat_uplink`) {
+		t.Fatalf("the report does not mention nat_uplink at all:\n%s", report(p))
+	}
+	body := f.read(f.configPath("managerd.json"))
+	if !strings.Contains(body, `"nat_uplink": "em1"`) {
+		t.Errorf("a supplied --nat-uplink was not written:\n%s", body)
 	}
 }
 

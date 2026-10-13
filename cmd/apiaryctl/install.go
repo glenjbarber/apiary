@@ -21,6 +21,7 @@ type installFlags struct {
 	uplink        string
 	bhyveBridge   string
 	bhyveBootROM  string
+	natUplink     string
 	rpcAddr       string
 	frontendHTTP  string
 	restshimdHTTP string
@@ -37,6 +38,7 @@ func runInstall(args []string) int {
 	fs.StringVar(&f.uplink, "vlan-uplink", "", "the physical interface VLAN traffic is tagged on, e.g. em0; not written without it")
 	fs.StringVar(&f.bhyveBridge, "bhyve-bridge", "", "the bridge VMs attach to, e.g. bridge0; not written without it")
 	fs.StringVar(&f.bhyveBootROM, "bhyve-bootrom", "", "the UEFI firmware file bhyve boots from; not written without it")
+	fs.StringVar(&f.natUplink, "nat-uplink", "", "the interface a self-hosted outbound NAT reaches the network through (ADR-0048); not written without it, and not needed at all without self-hosted NAT")
 	fs.StringVar(&f.rpcAddr, "rpc-addr", "", "managerd's own listening address, checked against this Comb's certificate rather than trusted")
 	fs.StringVar(&f.frontendHTTP, "frontend-http-addr", "", "the web UI's address; defaults to 0.0.0.0:8080, which is deliberate")
 	fs.StringVar(&f.restshimdHTTP, "restshimd-http-addr", "", "the REST API's address; defaults to 127.0.0.1:8081")
@@ -44,7 +46,7 @@ func runInstall(args []string) int {
 	fs.Usage = func() {
 		fmt.Fprint(os.Stderr, `usage: apiaryctl install [--apply] [--colony-member host:port]
                             [--zfs-base dataset] [--vlan-uplink iface] [--bhyve-bridge iface]
-                            [--bhyve-bootrom path] [--rpc-addr host:port]
+                            [--bhyve-bootrom path] [--nat-uplink iface] [--rpc-addr host:port]
                             [--frontend-http-addr host:port] [--restshimd-http-addr host:port]
                             [--tls-dir dir]
 
@@ -89,6 +91,7 @@ everything else written, so a second run finishes the job.
 		Uplink:            f.uplink,
 		BhyveBridge:       f.bhyveBridge,
 		BhyveBootROM:      f.bhyveBootROM,
+		NATUplink:         f.natUplink,
 		RPCAddr:           f.rpcAddr,
 		FrontendHTTPAddr:  f.frontendHTTP,
 		RestshimdHTTPAddr: f.restshimdHTTP,
