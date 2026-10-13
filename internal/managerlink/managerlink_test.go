@@ -622,3 +622,45 @@ func TestVerify_TLSConfigWithUnreadableCAFileFailsAtStartup(t *testing.T) {
 		t.Errorf("Verify() error %q does not name the unreadable CA file %q", err.Error(), missing)
 	}
 }
+
+// TestVerify_HostnameMismatchNamesTheServedCertificateAndTheLogPath is
+// ADR-0133's own observed failure, reproduced without a live network:
+// manager_tls_server_name names a public hostname the served
+// certificate does not carry, which is exactly what happens when a
+// node is mid-migration from a self-signed pair to a publicly trusted
+// one. The error must name the certificate's own SANs (not just repeat
+// Go's x509 error text, which an operator reading the log already has)
+// and where to find this process's own log, since the observed failure
+// found nothing in /var/log/messages.
+func TestVerify_HostnameMismatchNamesTheServedCertificateAndTheLogPath(t *testing.T) {
+	certPEM, keyPEM := selfSignedFor(t) // DNSNames: ["localhost"], IP 127.0.0.1
+	srv := startGRPCServer(t, certPEM, keyPEM)
+	caFile := writePEM(t, "ca.pem", certPEM) // trust the cert's own (self-signed) CA
+
+	c := New(Config{
+		Addr:        srv.addr,
+		UseTLS:      true,
+		CAFile:      caFile,
+		ServerName:  "sting.lab3.apiary.work", // not in the cert's SANs
+		ProcessName: "frontend",
+		ConfigPath:  "/usr/local/etc/apiary/frontend.json",
+		Timeout:     2 * time.Second,
+	})
+
+	err := c.Verify(context.Background(), 0)
+	var untrusted *UntrustedError
+	if !errors.As(err, &untrusted) {
+		t.Fatalf("Verify() error = %T (%v), want *UntrustedError", err, err)
+	}
+	for _, want := range []string{"localhost", "127.0.0.1"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("Verify() error %q does not name the certificate's own %q SAN", err.Error(), want)
+		}
+	}
+	if !strings.Contains(err.Error(), "/var/log/apiary/frontend.log") {
+		t.Errorf("Verify() error %q does not name frontend's own log path", err.Error())
+	}
+	if len(untrusted.ServedNames) != 2 {
+		t.Errorf("ServedNames = %v, want the certificate's DNS name and IP address", untrusted.ServedNames)
+	}
+}

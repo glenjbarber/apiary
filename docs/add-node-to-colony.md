@@ -47,6 +47,13 @@ that certificate and configure `peer_tls` and `peer_tls_ca` on the joining
 host before continuing. Both the guided-action path and the manual path rely
 on this being configured before the join request is submitted.
 
+**None of this section applies when every Comb's certificate comes
+from a public CA** (Let's Encrypt or similar) - leave `peer_tls_ca`
+empty on both sides, the system trust store already has the public
+CA, and skip straight to setting `peer_tls: true` on both `managerd.json`
+and `frontend.json` (see docs/bootstrap.md's "Profile: every
+certificate from a public CA" for the rest of that profile's fields).
+
 For example, copy the existing Comb's self-signed certificate into a
 root-readable trust bundle on the joining host:
 

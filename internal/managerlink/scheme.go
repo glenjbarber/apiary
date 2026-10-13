@@ -21,6 +21,7 @@ package managerlink
 import (
 	"context"
 	"crypto/tls"
+	"crypto/x509"
 	"errors"
 	"fmt"
 	"io"
@@ -252,4 +253,23 @@ func verifyTrust(ctx context.Context, addr, caFile, serverName string) error {
 	}
 	defer conn.Close()
 	return conn.(*tls.Conn).HandshakeContext(ctx)
+}
+
+// servedCertificateNames pulls the DNS/IP names the served certificate
+// actually carries out of a verification failure, when the failure
+// itself names the certificate - a *x509.HostnameError, exactly the
+// shape Go returns for "certificate is valid for X, not Y" (the case
+// this package exists to make less mysterious; see UntrustedError).
+// Returns ok=false for every other error shape (unknown CA, expired,
+// and so on), where the certificate itself was never reached.
+func servedCertificateNames(err error) (names []string, ok bool) {
+	var hostErr x509.HostnameError
+	if !errors.As(err, &hostErr) || hostErr.Certificate == nil {
+		return nil, false
+	}
+	names = append(names, hostErr.Certificate.DNSNames...)
+	for _, ip := range hostErr.Certificate.IPAddresses {
+		names = append(names, ip.String())
+	}
+	return names, len(names) > 0
 }
