@@ -151,6 +151,24 @@ each design decision, in order.
   `managerd` the same way `frontend` does. Each caller's own
   `Authorization` header is forwarded straight through to `managerd`'s
   API-key check, rather than the binary holding one shared credential.
+- **AI-agent cell API** — `CreateCell`/`RecommendCellType` RPCs
+  (`internal/manager`), exposed via REST as `POST /v1/cells` and
+  `POST /v1/cells/recommend` (`internal/restshim`). `CreateCell`
+  requires `node_id` and `workload_hint` on `CreateCellRequest` in this
+  v1 - there is no scheduler-driven node placement in this codebase to
+  pick a node automatically, and `CreateCell`'s whole point is Apiary
+  deciding vm-vs-jail, so a caller unwilling to describe a workload can
+  call `CreateVM`/`CreateJail` directly instead. `CreateCell` requires
+  Operator role (matching `CreateVM`/`CreateJail`); `RecommendCellType`
+  requires only Viewer role, matching every other read-only advisory
+  RPC. There is no unified `GetCell`/`ListCells` in v1 either -
+  `CreateCellResponse` already tells the caller which of `GetVM`/`GetJail`
+  to call next. See [ADR-0150](docs/adr/0150-ai-agent-cell-api.md) (the
+  design proposal; its own Status still reads Unconfirmed - take it as a
+  record of the reasoning, not as what shipped) and
+  [ADR-0151](docs/adr/0151-ai-agent-cell-api-implementation.md) (amends
+  ADR-0150, Status: Implemented - the two decisions above are v1's own
+  departures from what ADR-0150 proposed).
 - **Session-based login** — an optional gate on the web UI
   (`APIARY_UI_USER`/`APIARY_UI_PASSWORD`, off by default): a real HTML
   login form, an in-memory session cookie (24-hour TTL, `HttpOnly` +
