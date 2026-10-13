@@ -56,9 +56,10 @@ func TestIntegration_ReconcilerProvisionsRealDataset(t *testing.T) {
 
 	// Real raft.Node + raftd-side gRPC server on a temp UDS socket.
 	nodeCfg := raftnode.Config{
-		NodeID:   "node-a",
-		DataDir:  t.TempDir(),
-		BindAddr: freeLoopbackAddr(t),
+		NodeID:             "node-a",
+		DataDir:            t.TempDir(),
+		BindAddr:           freeLoopbackAddr(t),
+		FastElectionTiming: true,
 	}
 	node, err := raftnode.New(nodeCfg)
 	if err != nil {
@@ -159,7 +160,7 @@ func TestIntegration_ReconcilerProvisionsRealBhyveVM(t *testing.T) {
 		exec.Command("zfs", "destroy", "-r", base).Run()
 	})
 
-	nodeCfg := raftnode.Config{NodeID: "node-a", DataDir: t.TempDir(), BindAddr: freeLoopbackAddr(t)}
+	nodeCfg := raftnode.Config{NodeID: "node-a", DataDir: t.TempDir(), BindAddr: freeLoopbackAddr(t), FastElectionTiming: true}
 	node, err := raftnode.New(nodeCfg)
 	if err != nil {
 		t.Fatalf("raftnode.New() error: %v", err)

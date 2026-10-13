@@ -77,14 +77,15 @@ var requiredRole = map[string]Role{
 	// read-only reports of a sibling daemon's own config, secrets
 	// redacted to a `_set` boolean - same tier as GetNodeConfig above,
 	// which the Machine Configuration page already shows to viewers.
-	"/apiary.rpc.v1.ManagerService/GetFrontendConfig":         RoleViewer,
-	"/apiary.rpc.v1.ManagerService/GetRestshimdConfig":        RoleViewer,
-	"/apiary.rpc.v1.ManagerService/GetRaftdConfig":            RoleViewer,
-	"/apiary.rpc.v1.ManagerService/GetLocalNodeHealth":        RoleViewer,
-	"/apiary.rpc.v1.ManagerService/ListAssumptionClaims":      RoleViewer,
-	"/apiary.rpc.v1.ManagerService/ListOriginCertificates":    RoleViewer,
-	"/apiary.rpc.v1.ManagerService/ListOrphanedHASTResources": RoleViewer,
-	"/apiary.rpc.v1.ManagerService/GetNetworkTeardownStatus":  RoleViewer,
+	"/apiary.rpc.v1.ManagerService/GetFrontendConfig":           RoleViewer,
+	"/apiary.rpc.v1.ManagerService/GetRestshimdConfig":          RoleViewer,
+	"/apiary.rpc.v1.ManagerService/GetRaftdConfig":              RoleViewer,
+	"/apiary.rpc.v1.ManagerService/GetLocalNodeHealth":          RoleViewer,
+	"/apiary.rpc.v1.ManagerService/ListAssumptionClaims":        RoleViewer,
+	"/apiary.rpc.v1.ManagerService/ListOriginCertificates":      RoleViewer,
+	"/apiary.rpc.v1.ManagerService/ListLetsEncryptCertificates": RoleViewer,
+	"/apiary.rpc.v1.ManagerService/ListOrphanedHASTResources":   RoleViewer,
+	"/apiary.rpc.v1.ManagerService/GetNetworkTeardownStatus":    RoleViewer,
 
 	// Plain reads that were added without an entry and so silently defaulted
 	// to Admin. ListVMsLocal/ListJailsLocal are the local-FSM variants of
@@ -161,6 +162,7 @@ var requiredRole = map[string]Role{
 	"/apiary.rpc.v1.ManagerService/DeleteAssumptionClaim":       RoleOperator,
 	"/apiary.rpc.v1.ManagerService/PurgeStaleAssumptionResults": RoleOperator,
 	"/apiary.rpc.v1.ManagerService/IssueOriginCertificate":      RoleAdmin,
+	"/apiary.rpc.v1.ManagerService/IssueLetsEncryptCertificate": RoleAdmin,
 	"/apiary.rpc.v1.ManagerService/CreateJail":                  RoleOperator,
 	// CreateCell/RecommendCellType (ADR-0150). CreateCell mirrors
 	// CreateVM/CreateJail's own Operator tier exactly - it is a write,

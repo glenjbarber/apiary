@@ -58,6 +58,17 @@ func newRaftdUDSSocket(t *testing.T) string {
 		NodeID:   "raftd-1",
 		DataDir:  t.TempDir(),
 		BindAddr: freeLoopbackAddr(t),
+		// This package's integration tests bootstrap a fresh single-
+		// node raft instance per test, well over a hundred in the
+		// package - raft.DefaultConfig's 1-second-scale election
+		// timeout, multiplied across all of them under go test
+		// -race's scheduling overhead, intermittently pushed one
+		// election past the eventually() wait below with no specific
+		// failing test in common (CI: internal/manager failing at
+		// ~335s with no --- FAIL line, just raft election log noise,
+		// reproduced identically across several unrelated PRs). See
+		// Config.FastElectionTiming's own doc comment.
+		FastElectionTiming: true,
 	}
 	node, err := raftnode.New(cfg)
 	if err != nil {

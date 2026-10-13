@@ -148,7 +148,7 @@ func TestResetDataDir_MissingDataDirStillRecreatesEmpty(t *testing.T) {
 }
 
 func TestRestoreDataDir_WrongPhraseDoesNothing(t *testing.T) {
-	cfg := raftnode.Config{NodeID: "node-1", DataDir: filepath.Join(t.TempDir(), "raftd"), BindAddr: "127.0.0.1:0"}
+	cfg := raftnode.Config{NodeID: "node-1", DataDir: filepath.Join(t.TempDir(), "raftd"), BindAddr: "127.0.0.1:0", FastElectionTiming: true}
 	archive := writeTestArchive(t)
 
 	if err := restoreDataDir("not-the-phrase", archive, cfg); err == nil {
@@ -162,7 +162,7 @@ func TestRestoreDataDir_WrongPhraseDoesNothing(t *testing.T) {
 
 func TestRestoreDataDir_RejectsNonEmptyDataDir(t *testing.T) {
 	dataDir := filepath.Join(t.TempDir(), "raftd")
-	cfg := raftnode.Config{NodeID: "node-1", DataDir: dataDir, BindAddr: "127.0.0.1:0"}
+	cfg := raftnode.Config{NodeID: "node-1", DataDir: dataDir, BindAddr: "127.0.0.1:0", FastElectionTiming: true}
 	node, err := raftnode.New(cfg)
 	if err != nil {
 		t.Fatalf("raftnode.New() error: %v", err)
@@ -199,7 +199,7 @@ func TestRestoreDataDir_ChecksumMismatchRejected(t *testing.T) {
 		t.Fatalf("writing test archive: %v", err)
 	}
 
-	cfg := raftnode.Config{NodeID: "node-1", DataDir: filepath.Join(t.TempDir(), "raftd"), BindAddr: "127.0.0.1:0"}
+	cfg := raftnode.Config{NodeID: "node-1", DataDir: filepath.Join(t.TempDir(), "raftd"), BindAddr: "127.0.0.1:0", FastElectionTiming: true}
 	if err := restoreDataDir(restoreConfirmPhrase, path, cfg); err == nil {
 		t.Fatal("restoreDataDir() with a bad checksum succeeded, want a rejection")
 	}
@@ -245,7 +245,7 @@ func TestDryRunRestore_ChecksumMismatchRejected(t *testing.T) {
 }
 
 func TestRestoreDataDir_CorrectPhraseSeedsSnapshot(t *testing.T) {
-	cfg := raftnode.Config{NodeID: "node-1", DataDir: filepath.Join(t.TempDir(), "raftd"), BindAddr: "127.0.0.1:0"}
+	cfg := raftnode.Config{NodeID: "node-1", DataDir: filepath.Join(t.TempDir(), "raftd"), BindAddr: "127.0.0.1:0", FastElectionTiming: true}
 
 	if err := restoreDataDir(restoreConfirmPhrase, writeTestArchive(t), cfg); err != nil {
 		t.Fatalf("restoreDataDir() error: %v", err)
@@ -287,9 +287,10 @@ func TestValidateAwaitJoinFlags_AllowsEitherAlone(t *testing.T) {
 // actually runs) rather than the bare library.
 func TestStartupJoinOrBootstrap_AwaitJoinDoesNotBootstrap(t *testing.T) {
 	cfg := raftnode.Config{
-		NodeID:   "await-node",
-		DataDir:  t.TempDir(),
-		BindAddr: freeLoopbackAddr(t),
+		NodeID:             "await-node",
+		DataDir:            t.TempDir(),
+		BindAddr:           freeLoopbackAddr(t),
+		FastElectionTiming: true,
 	}
 	node, err := raftnode.New(cfg)
 	if err != nil {
@@ -319,9 +320,10 @@ func TestStartupJoinOrBootstrap_AwaitJoinDoesNotBootstrap(t *testing.T) {
 // RaftClient.AddVoter.
 func TestStartupJoinOrBootstrap_AwaitJoinThenAddVoterFormsCluster(t *testing.T) {
 	leaderCfg := raftnode.Config{
-		NodeID:   "leader",
-		DataDir:  t.TempDir(),
-		BindAddr: freeLoopbackAddr(t),
+		NodeID:             "leader",
+		DataDir:            t.TempDir(),
+		BindAddr:           freeLoopbackAddr(t),
+		FastElectionTiming: true,
 	}
 	leader, err := raftnode.New(leaderCfg)
 	if err != nil {
@@ -334,9 +336,10 @@ func TestStartupJoinOrBootstrap_AwaitJoinThenAddVoterFormsCluster(t *testing.T) 
 	eventually(t, 5*time.Second, func() bool { return leader.Status().IsLeader })
 
 	joinerCfg := raftnode.Config{
-		NodeID:   "joiner",
-		DataDir:  t.TempDir(),
-		BindAddr: freeLoopbackAddr(t),
+		NodeID:             "joiner",
+		DataDir:            t.TempDir(),
+		BindAddr:           freeLoopbackAddr(t),
+		FastElectionTiming: true,
 	}
 	joiner, err := raftnode.New(joinerCfg)
 	if err != nil {
@@ -365,9 +368,10 @@ func TestStartupJoinOrBootstrap_AwaitJoinThenAddVoterFormsCluster(t *testing.T) 
 
 func TestStartupJoinOrBootstrap_HadStateTakesPriorityOverAwaitJoin(t *testing.T) {
 	cfg := raftnode.Config{
-		NodeID:   "resumed-node",
-		DataDir:  t.TempDir(),
-		BindAddr: freeLoopbackAddr(t),
+		NodeID:             "resumed-node",
+		DataDir:            t.TempDir(),
+		BindAddr:           freeLoopbackAddr(t),
+		FastElectionTiming: true,
 	}
 	node, err := raftnode.New(cfg)
 	if err != nil {

@@ -20,6 +20,7 @@
   "jail_disk_size_mb": 0,
   "peer_api_key": "",
   "peer_managerd_port": "17700",
+  "peer_tls": false,
   "peer_tls_hostname_map": "",
   "peer_tls_ca": "",
   "known_peer_addresses": "",
@@ -40,5 +41,9 @@
   "origin_ca_token_file": "",
   "origin_ca_directory": "",
   "origin_ca_renewal_check_interval": 0,
+  "acme_directory": "",
+  "acme_account_key_file": "",
+  "acme_directory_url": "",
+  "acme_email": "",
   "raftd_token": ""
 }

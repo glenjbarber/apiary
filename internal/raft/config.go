@@ -49,6 +49,19 @@ type Config struct {
 	// the same as "already leading," rather than failing startup over
 	// a value that may simply describe a node that has not joined yet.
 	PreferredLeaderID string
+
+	// FastElectionTiming shrinks raft's own heartbeat/election/leader-
+	// lease timeouts from raft.DefaultConfig's 1-second-scale defaults
+	// down to tens of milliseconds. False (the default) leaves
+	// production timing exactly as it always was - this exists only for
+	// tests that bootstrap many short-lived single-node raft instances
+	// in one process (internal/manager's integration tests bootstrap
+	// one per test, well over a hundred in the package) and were timing
+	// out waiting for a 1-second-scale election to complete under
+	// go test -race's scheduling overhead, intermittently and without a
+	// specific failing test in common - see the regression test for
+	// this field for the full diagnosis.
+	FastElectionTiming bool
 }
 
 // DefaultBindAddr is used when Config.BindAddr is empty.

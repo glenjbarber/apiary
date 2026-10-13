@@ -68,7 +68,7 @@ func newJoinedFollowerRaftdSocket(t *testing.T, leaderSocket string, nodeID stri
 	leaderClient, leaderSrv := newManagerdRPCClientAndServer(t, leaderSocket, "manager-1")
 
 	addr := freeLoopbackAddr(t)
-	cfg := raftnode.Config{NodeID: nodeID, DataDir: t.TempDir(), BindAddr: addr}
+	cfg := raftnode.Config{NodeID: nodeID, DataDir: t.TempDir(), BindAddr: addr, FastElectionTiming: true}
 	node, err := raftnode.New(cfg)
 	if err != nil {
 		t.Fatalf("raftnode.New() error: %v", err)
