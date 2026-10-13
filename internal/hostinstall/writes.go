@@ -343,6 +343,10 @@ func (p *Plan) planFrontendWrites() {
 		}
 		changed = p.fill(path, "manager_tls_ca", p.frontOwn.ManagerTLSCA, &cfg.ManagerTLSCA, p.opts.Paths.certFile(),
 			"managerd's certificate is self-signed, so the dial needs the certificate itself as its trust anchor") || changed
+		changed = p.fill(path, "tls_cert", p.frontOwn.TLSCert, &cfg.TLSCert, p.opts.Paths.certFile(),
+			"this Comb's serving certificate - same path as managerd's, so the web UI serves HTTPS by default too") || changed
+		changed = p.fill(path, "tls_key", p.frontOwn.TLSKey, &cfg.TLSKey, p.opts.Paths.keyFile(),
+			"this Comb's serving key - same path as managerd's, so the web UI serves HTTPS by default too") || changed
 	}
 	if !changed {
 		return
