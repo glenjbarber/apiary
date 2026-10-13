@@ -1087,13 +1087,31 @@ Ephemeral state is what raft actually replicates across the cluster.
 
 ## Repository layout
 
-- `cmd/` — entry points for each binary (`raftd`, `managerd`, `frontend`,
-  `restshimd`)
+- `cmd/` — entry points for each binary: `raftd` (consensus agent),
+  `managerd` (management daemon), `frontend` (HTMX web UI),
+  `restshimd` (REST/JSON translation of the external gRPC API),
+  `apiaryctl` (operator-facing CLI on a Comb), `apiaryinstall` (host
+  preflight/provisioning tool), `versioncheck` (running-vs-on-disk
+  binary drift check)
 - `api/` — protobuf schema definitions: `api/internalpb` (internal raft
   socket protocol) and `api/rpc` (external RPC API)
-- `internal/` — core logic: `bhyve`, `jail`, `zfs`, `hast`, `ufsmount`,
-  `cluster`, `raft`, `manager`, `restshim`, `frontend`, `isostore`,
-  `hoststats`, `vlan`, `dhcpd`, `pf`, `pam`, `tlsdial`, `resetutil`
+- `internal/` — core logic. The packages named directly in the Status
+  section above (`bhyve`, `jail`, `zfs`, `hast`, `ufsmount`, `cluster`,
+  `raft`, `manager`, `restshim`, `frontend`, `isostore`, `hoststats`,
+  `vlan`, `dhcpd`, `pf`, `pam`, `tlsdial`, `resetutil`) are joined by a
+  much larger set of supporting packages, one per feature or ADR:
+  `acme`, `addrpolicy`, `assumecheck`, `assumptionregister`,
+  `assumptions`, `backup`, `buildgate`, `buildinfo`, `cellrecommend`,
+  `certmgr`, `cloudflare`, `colonyupdate`, `commonconfig`,
+  `configsamples`, `coverage`, `deadman`, `forcerestart`, `freebsdimg`,
+  `frontendconfig`, `guardrail`, `health`, `hostcert`, `hostconfig`,
+  `hostinstall`, `hostpkg`, `httpserver`, `install`, `invariant`,
+  `jailarchive`, `jailnet`, `joinauth`, `jsonstrict`, `localraft`,
+  `loginconfig`, `managerlink`, `migration`, `netif`, `netroute`,
+  `nodeconfig`, `origincert`, `pathtrace`, `peerca`, `raftdconfig`,
+  `recovery`, `restartplan`, `restshimdconfig`, `statedigest`,
+  `tlscache`, `whynot`. See each package's own doc comment, or the ADR
+  it names, for what it does.
 - `web/` — HTML templates and static assets for the frontend, embedded
   into the `frontend` binary at build time
 - `docs/adr/` — architecture decision records; start here for why things
