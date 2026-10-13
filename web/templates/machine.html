@@ -30,7 +30,7 @@
   </div>
 
   <div class="panel">
-    <h3>Local service endpoints {{hint "Configured local bind addresses for Apiary services. Changing managerd's endpoint is saved first and only takes effect after the existing guarded managerd restart. The address suggestions below are currently assigned to this Comb."}}</h3>
+    <h3>Local service endpoints {{hint "Configured local bind addresses for Apiary services. Changing managerd's endpoint is saved first and only takes effect after apiary_managerd restarts - there is no restart button for it in this UI (ADR-0142); use \"service apiary_managerd restart\" or \"apiaryctl force-restart\" on this Comb. The address suggestions below are currently assigned to this Comb."}}</h3>
     <div id="managerd-bind-panel">
       {{template "managerd_bind_panel" .}}
     </div>
