@@ -283,7 +283,7 @@ func run() error {
 		if err != nil {
 			return fmt.Errorf("loading TLS cert/key: %w", err)
 		}
-		httpSrv.TLSConfig = &tls.Config{GetCertificate: certs.GetCertificate}
+		httpSrv.TLSConfig = &tls.Config{GetCertificate: certs.GetCertificate, MinVersion: tls.VersionTLS12}
 		return httpSrv.ListenAndServeTLS("", "")
 	}
 	return httpSrv.ListenAndServe()

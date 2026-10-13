@@ -585,7 +585,7 @@ func run() error {
 		if err != nil {
 			return fmt.Errorf("loading TLS cert/key: %w", err)
 		}
-		serverOpts = append(serverOpts, grpc.Creds(credentials.NewTLS(&tls.Config{GetCertificate: certs.GetCertificate})))
+		serverOpts = append(serverOpts, grpc.Creds(credentials.NewTLS(&tls.Config{GetCertificate: certs.GetCertificate, MinVersion: tls.VersionTLS12})))
 	}
 	grpcServer := grpc.NewServer(serverOpts...)
 	rpcpb.RegisterManagerServiceServer(grpcServer, srv)
