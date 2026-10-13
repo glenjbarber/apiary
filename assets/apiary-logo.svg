@@ -1,12 +1,14 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1500 720" role="img" aria-labelledby="title desc">
   <title id="title">Apiary logo</title>
-  <desc id="desc">The Apiary connected hexagonal mark with solid black centers and wordmark on a transparent canvas.</desc>
+  <desc id="desc">The Apiary connected hexagonal mark with solid black centers and wordmark on a warm cream background.</desc>
   <defs>
     <g id="cell">
       <path d="M0-64 55.43-32 55.43 32 0 64-55.43 32-55.43-32Z"/>
-      <path d="M0-34 29.45-17 29.45 17 0 34-29.45 17-29.45-17Z" fill="#111111" stroke="none"/>
+      <path d="M0-34 29.45-17 29.45 17 0 34-29.45 17-29.45-17Z" fill="currentColor" stroke="none"/>
     </g>
   </defs>
+
+  <rect width="1500" height="720" fill="#f7f2e7"/>
 
   <g transform="translate(0)">
     <g fill="none" stroke="#111111" stroke-width="20" stroke-linecap="round" stroke-linejoin="round">
