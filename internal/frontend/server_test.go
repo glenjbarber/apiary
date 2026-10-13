@@ -147,6 +147,7 @@ type fakeClient struct {
 
 	convertStandaloneToJoinerResp    *rpcpb.ConvertStandaloneToJoinerResponse
 	lastConvertStandaloneToJoinerReq *rpcpb.ConvertStandaloneToJoinerRequest
+	convertStandaloneToJoinerCalls   int
 
 	updateVoterAddressResp    *rpcpb.UpdateVoterAddressResponse
 	updateVoterAddressErr     error
@@ -384,6 +385,7 @@ func (f *fakeClient) UpdateManagerdBindAddress(_ context.Context, in *rpcpb.Upda
 
 func (f *fakeClient) ConvertStandaloneToJoiner(_ context.Context, in *rpcpb.ConvertStandaloneToJoinerRequest, _ ...grpc.CallOption) (*rpcpb.ConvertStandaloneToJoinerResponse, error) {
 	f.lastConvertStandaloneToJoinerReq = in
+	f.convertStandaloneToJoinerCalls++
 	if f.convertStandaloneToJoinerResp != nil {
 		return f.convertStandaloneToJoinerResp, nil
 	}

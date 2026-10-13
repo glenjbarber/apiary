@@ -194,6 +194,7 @@ func (s *Server) machinePageData(r *http.Request) pageData {
 	// its "is it still live" decision are made against the same instant
 	// and cannot disagree with each other within a single page.
 	renderNow := time.Now()
+	convertJoinerResult, convertJoinerErr := s.currentConvertJoinerResult(r)
 	return pageData{
 		NodeConfig:               cfg,
 		NodeConfigFormError:      cfgErr,
@@ -204,10 +205,10 @@ func (s *Server) machinePageData(r *http.Request) pageData {
 		RaftdConfig:              raftdCfg,
 		RaftdConfigFormError:     raftdCfgErr,
 		MachineVMs:               vms,
-		MachineFirewallError:     vmErr,
+		MachineFirewallError:     raftdRestartingNotice(vmErr),
 		CloudflareConfigured:     cloudflareConfigured,
 		NodeServices:             services,
-		ServiceFormError:         serviceErr,
+		ServiceFormError:         raftdRestartingNotice(serviceErr),
 		OriginCertificates:       originCerts,
 		OriginCAError:            originErr,
 		LetsEncryptCertificates:  acmeCerts,
@@ -215,6 +216,8 @@ func (s *Server) machinePageData(r *http.Request) pageData {
 		JoinColonyResult:         s.currentJoinColonyResult(r),
 		JoinWindowNotice:         r.URL.Query().Get("join_window_notice"),
 		JoinColonyWindow:         s.currentColonyJoinWindow(r, renderNow),
+		ConvertJoinerResult:      convertJoinerResult,
+		ConvertJoinerFormError:   convertJoinerErr,
 		ActivePage:               "machine",
 	}
 }
