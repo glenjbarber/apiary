@@ -166,7 +166,7 @@ func (c *authzComb) seedRequest(t *testing.T, requestID, nodeID, fingerprint str
 func (c *authzComb) seedRequestWithRealJoiner(t *testing.T, requestID, nodeID, fingerprint string) {
 	t.Helper()
 	addr := freeLoopbackAddr(t)
-	node, err := raftnode.New(raftnode.Config{NodeID: nodeID, DataDir: t.TempDir(), BindAddr: addr})
+	node, err := raftnode.New(raftnode.Config{NodeID: nodeID, DataDir: t.TempDir(), BindAddr: addr, FastElectionTiming: true})
 	if err != nil {
 		t.Fatalf("%s: creating the joining raft node: %v", c.name, err)
 	}

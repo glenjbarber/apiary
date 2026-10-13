@@ -275,7 +275,7 @@ func newPlanHarness(t *testing.T, n int) *planHarness {
 	for i := 0; i < n; i++ {
 		ids[i] = fmt.Sprintf("comb-%d", i+1)
 		bindAddrs[i] = freeLoopbackAddr(t)
-		node, err := raftnode.New(raftnode.Config{NodeID: ids[i], DataDir: t.TempDir(), BindAddr: bindAddrs[i]})
+		node, err := raftnode.New(raftnode.Config{NodeID: ids[i], DataDir: t.TempDir(), BindAddr: bindAddrs[i], FastElectionTiming: true})
 		if err != nil {
 			t.Fatalf("raftnode.New(%s): %v", ids[i], err)
 		}
@@ -519,6 +519,14 @@ func TestExecuteNodeRestartPlan_RefusesWhatItCannotDo(t *testing.T) {
 	client, srv := newManagerdRPCClientAndServer(t, raftdSocket, "raftd-1")
 	srv.SetRestartGuardrailToken(planHarnessToken)
 	srv.services = &fakeNodeServiceController{}
+	// The empty-Service case below actually runs the real raftd plan,
+	// including persisting its durable record - unlike every other
+	// case in this test, which is refused before reaching that point.
+	// restartplan.DefaultResultDir is a real root path
+	// (/var/db/apiary/restart-plan), not writable by this test's own
+	// user, so this needs the same test-only override
+	// coordinatorResultDir's own doc comment describes.
+	srv.planCoordinatorDir = t.TempDir()
 	ctx := tokenCtx()
 
 	resp, err := client.ExecuteNodeRestartPlan(ctx, &rpcpb.ExecuteNodeRestartPlanRequest{NodeId: "raftd-1", Service: managerdServiceName})
@@ -532,7 +540,7 @@ func TestExecuteNodeRestartPlan_RefusesWhatItCannotDo(t *testing.T) {
 		t.Errorf("ExecuteNodeRestartPlan(apiary_managerd) returned a result as well as an error: %+v; a refusal that never ran must not carry a verdict", resp.GetResult())
 	}
 
-	for _, service := range []string{"apiary_frontend", "apiary_restshimd", "sshd", ""} {
+	for _, service := range []string{"apiary_frontend", "apiary_restshimd", "sshd"} {
 		resp, err := client.ExecuteNodeRestartPlan(ctx, &rpcpb.ExecuteNodeRestartPlanRequest{NodeId: "raftd-1", Service: service})
 		if err != nil {
 			t.Fatalf("ExecuteNodeRestartPlan(%q): %v", service, err)
@@ -540,9 +548,24 @@ func TestExecuteNodeRestartPlan_RefusesWhatItCannotDo(t *testing.T) {
 		if resp.GetError() == "" {
 			t.Errorf("ExecuteNodeRestartPlan(%q) was not refused", service)
 		}
-		if service != "" && !strings.Contains(resp.GetError(), raftdServiceName) {
+		if !strings.Contains(resp.GetError(), raftdServiceName) {
 			t.Errorf("ExecuteNodeRestartPlan(%q) error does not name the one service this plan covers: %q", service, resp.GetError())
 		}
+	}
+
+	// An empty Service is deliberately NOT one of the refused values
+	// above: restartcaller.go's own ExecuteNodeRestartPlan defaults it
+	// to raftdServiceName before any refusal check runs ("service :=
+	// req.GetService(); if service == \"\" { service = raftdServiceName
+	// }"), preserving the plan's original raftd-only behavior from
+	// before the Service field existed. So it runs the real plan here,
+	// the same as an explicit "apiary_raftd" would.
+	emptyResp, err := client.ExecuteNodeRestartPlan(ctx, &rpcpb.ExecuteNodeRestartPlanRequest{NodeId: "raftd-1", Service: ""})
+	if err != nil {
+		t.Fatalf("ExecuteNodeRestartPlan(\"\"): %v", err)
+	}
+	if emptyResp.GetError() != "" {
+		t.Errorf("ExecuteNodeRestartPlan(\"\") error = %q, want it to run as raftd (the documented default) rather than being refused", emptyResp.GetError())
 	}
 }
 

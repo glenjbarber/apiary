@@ -93,6 +93,16 @@ build:
 		$(GO_BUILD) -ldflags "$$ldflags" -o $$S ./cmd/$$S ;\
 	done
 
+# Mirrors .github/workflows/go-ci.yml's own four steps exactly (same
+# order, same commands), so a failure here is a failure there - run
+# this before every commit rather than finding out from CI.
+.PHONY: test
+test:
+	test -z "$$(gofmt -l .)"
+	go vet ./...
+	go test -race ./...
+	go build ./...
+
 # The stamp script is load-bearing for identity, and check-stamped only
 # notices a broken one after a full build of five binaries. This checks
 # its contract directly, and is the one that would have caught the BSD

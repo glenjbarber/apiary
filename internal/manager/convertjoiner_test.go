@@ -19,7 +19,7 @@ import (
 func newExistingRaftStateDir(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
-	node, err := raftnode.New(raftnode.Config{NodeID: "node-1", DataDir: dir, BindAddr: "127.0.0.1:0"})
+	node, err := raftnode.New(raftnode.Config{NodeID: "node-1", DataDir: dir, BindAddr: "127.0.0.1:0", FastElectionTiming: true})
 	if err != nil {
 		t.Fatalf("raftnode.New() error: %v", err)
 	}

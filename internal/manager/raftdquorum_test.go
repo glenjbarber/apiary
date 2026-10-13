@@ -43,9 +43,10 @@ func newQuorumTestRaftd(t *testing.T) (socket string, node *raftnode.Node) {
 	t.Helper()
 
 	cfg := raftnode.Config{
-		NodeID:   "raftd-1",
-		DataDir:  t.TempDir(),
-		BindAddr: freeLoopbackAddr(t),
+		NodeID:             "raftd-1",
+		DataDir:            t.TempDir(),
+		BindAddr:           freeLoopbackAddr(t),
+		FastElectionTiming: true,
 	}
 	node, err := raftnode.New(cfg)
 	if err != nil {

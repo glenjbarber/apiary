@@ -106,6 +106,15 @@ func New(cfg Config) (*Node, error) {
 
 	raftConfig := raft.DefaultConfig()
 	raftConfig.LocalID = raft.ServerID(cfg.NodeID)
+	if cfg.FastElectionTiming {
+		// Scaled down together, preserving raft's own required
+		// LeaderLeaseTimeout <= HeartbeatTimeout <= ElectionTimeout
+		// relationship - see Config.FastElectionTiming's own doc
+		// comment for why this exists at all.
+		raftConfig.HeartbeatTimeout = 50 * time.Millisecond
+		raftConfig.ElectionTimeout = 50 * time.Millisecond
+		raftConfig.LeaderLeaseTimeout = 25 * time.Millisecond
+	}
 
 	boltPath := filepath.Join(cfg.DataDir, boltFileName)
 	boltStore, err := raftboltdb.New(raftboltdb.Options{Path: boltPath})

@@ -196,7 +196,7 @@ func TestIntegration_ApproveJoinRequest_ObservedEmptyLogStillApproved(t *testing
 	// reported as a refusal by this test, which is exactly the wrong lesson
 	// to teach - it is ADR-0097's hazard, not the log guard's.
 	joiningAddr := freeLoopbackAddr(t)
-	joiningNode, err := raftnode.New(raftnode.Config{NodeID: "node04", DataDir: t.TempDir(), BindAddr: joiningAddr})
+	joiningNode, err := raftnode.New(raftnode.Config{NodeID: "node04", DataDir: t.TempDir(), BindAddr: joiningAddr, FastElectionTiming: true})
 	if err != nil {
 		t.Fatalf("raftnode.New(node04) error: %v", err)
 	}
@@ -300,7 +300,7 @@ func TestIntegration_PreflightAndApproveAgreeOnTheLogGuard(t *testing.T) {
 			// between preflight and approval that has nothing to do with
 			// either of them.
 			joiningAddr := freeLoopbackAddr(t)
-			joiningNode, err := raftnode.New(raftnode.Config{NodeID: "node07", DataDir: t.TempDir(), BindAddr: joiningAddr})
+			joiningNode, err := raftnode.New(raftnode.Config{NodeID: "node07", DataDir: t.TempDir(), BindAddr: joiningAddr, FastElectionTiming: true})
 			if err != nil {
 				t.Fatalf("raftnode.New(node07) error: %v", err)
 			}
