@@ -405,6 +405,24 @@ apiary_raftd is running and that raftd.json names the right socket.
 	return 0
 }
 
+// buildJoinStatusRequest assembles the poll for the second PIN.
+//
+// It deliberately leaves target_address UNSET. This command already dials
+// the target's managerd directly, so the target should answer from its own
+// replicated state. A request that names a target_address is instead
+// forwarded onward by the receiving managerd, and that forward carries
+// only the request_id: the first code is dropped. Since this command dials
+// the target itself, the forward lands back on the same managerd, which
+// then sees an empty first code, refuses to release the second PIN, and
+// returns a response with no PIN and no error. The poll looked like
+// "no PIN yet" for a request that was already in CODE_VERIFIED.
+func buildJoinStatusRequest(requestID, firstCode string) *rpcpb.GetJoinRequestStatusRequest {
+	return &rpcpb.GetJoinRequestStatusRequest{
+		RequestId:        requestID,
+		IntroductionCode: firstCode,
+	}
+}
+
 // pollJoinIntroduction reads this Comb's own request back from the
 // target and prints the second PIN when the target has released one.
 //
@@ -434,11 +452,7 @@ func pollJoinIntroduction(target, requestID, firstCode, field string, plaintext 
 		return 1
 	}
 	defer closeFn()
-	resp, err := client.GetJoinRequestStatus(ctx, &rpcpb.GetJoinRequestStatusRequest{
-		RequestId:        requestID,
-		TargetAddress:    target,
-		IntroductionCode: firstCode,
-	})
+	resp, err := client.GetJoinRequestStatus(ctx, buildJoinStatusRequest(requestID, firstCode))
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "apiaryctl join-introduce: %v\n", translateDialErr(target, plaintext, err))
 		return 1
