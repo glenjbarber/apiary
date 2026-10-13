@@ -367,6 +367,12 @@ type pageData struct {
 	RaftdConfig              raftdConfigView
 	RaftdConfigFormError     string
 
+	// UpdateVoterAddressError/OK are handleUpdateVoterAddress's own
+	// form result (ADR-0106), rendered back into the raftd config
+	// panel exactly like every other admin-only machine.go form.
+	UpdateVoterAddressError string
+	UpdateVoterAddressOK    string
+
 	// MachineVMs lists VMs assigned to this node (filtered client-side
 	// from ListVMs, which already exists and already forwards to the
 	// leader when needed - ADR-0035), for the Machine Configuration
@@ -1268,10 +1274,15 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /machine/internal-security", s.requireRole(manager.RoleAdmin, s.handleUpdateInternalSecurity))
 	// ADR-0102: config editing for the two sibling daemons co-located on
 	// this host that can safely auto-restart, same tier as every write
-	// above. raftd has no write route at all - see GetRaftdConfig's own
-	// doc comment in internal/manager/server.go.
+	// above. raftd itself has no general write route - see
+	// GetRaftdConfig's own doc comment in internal/manager/server.go -
+	// except for the one ADR-0106 recovery action below.
 	s.mux.HandleFunc("POST /machine/frontend-config", s.requireRole(manager.RoleAdmin, s.handleUpdateFrontendConfig))
 	s.mux.HandleFunc("POST /machine/restshimd-config", s.requireRole(manager.RoleAdmin, s.handleUpdateRestshimdConfig))
+	// ADR-0106: correct a stale voter address already committed to the
+	// Raft configuration (typically the loopback-default first-run
+	// mistake) without calling the manager RPC directly.
+	s.mux.HandleFunc("POST /machine/raftd/update-voter-address", s.requireRole(manager.RoleAdmin, s.handleUpdateVoterAddress))
 	// ADR-0083: join-colony is the joining Comb's own side, on the
 	// Machine page (Admin-only, same tier as UpdateNodeConfig - this
 	// changes the Comb's own cluster identity). approve/reject are the

@@ -454,10 +454,21 @@ type raftdConfigView struct {
 	// saved - the raw value is never sent to the browser (see
 	// GetRaftdConfigResponse's own doc comment).
 	InternalTokenSet bool
+
+	// SingleNode mirrors raftdconfig.Config.SingleNode - when true, a
+	// loopback RaftBind is deliberate and LoopbackWarning stays empty.
+	SingleNode bool
+
+	// LoopbackWarning is non-empty when RaftBind's host is loopback
+	// and SingleNode is false - the same first-run mistake
+	// loopbackRaftBindWarning logs at raftd startup (cmd/raftd/main.go),
+	// surfaced here too since an operator reading the Machine page may
+	// never see raftd's own log.
+	LoopbackWarning string
 }
 
 func fromRPCRaftdConfig(d *rpcpb.GetRaftdConfigResponse) raftdConfigView {
-	return raftdConfigView{
+	v := raftdConfigView{
 		DataDir:          d.GetDataDir(),
 		Socket:           d.GetSocket(),
 		RaftBind:         d.GetRaftBind(),
@@ -465,7 +476,26 @@ func fromRPCRaftdConfig(d *rpcpb.GetRaftdConfigResponse) raftdConfigView {
 		RaftTLSKey:       d.GetRaftTlsKey(),
 		RaftTLSCA:        d.GetRaftTlsCa(),
 		InternalTokenSet: d.GetInternalTokenSet(),
+		SingleNode:       d.GetSingleNode(),
 	}
+	if !v.SingleNode && raftBindIsLoopback(v.RaftBind) {
+		v.LoopbackWarning = "raft_bind (" + v.RaftBind + ") is a loopback address - another host can never reach this Comb at it, " +
+			"and the first voter added to this cluster will strand it permanently unable to win an election. " +
+			"Set raft_bind to a routable hostname or address, or set \"single_node\": true in raftd.json if this Comb will never have peers."
+	}
+	return v
+}
+
+// raftBindIsLoopback mirrors cmd/raftd's own loopbackRaftBindWarning
+// check exactly, so the Machine page and raftd's own startup log never
+// disagree about which addresses count.
+func raftBindIsLoopback(raftBind string) bool {
+	host, _, err := net.SplitHostPort(raftBind)
+	if err != nil {
+		return false
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
 }
 
 func withSavedInterface(options []networkInterfaceOption, selected string) []networkInterfaceOption {

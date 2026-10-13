@@ -160,6 +160,9 @@ func run() error {
 	if w := internalTokenWarning(rcfg.InternalToken, rcfg.Socket); w != "" {
 		log.Print(w)
 	}
+	if w := loopbackRaftBindWarning(rcfg.RaftBind, rcfg.SingleNode); w != "" {
+		log.Print(w)
+	}
 
 	lis, err := listenUnix(rcfg.Socket)
 	if err != nil {
@@ -542,4 +545,28 @@ func internalTokenWarning(token, socket string) string {
 		return ""
 	}
 	return "raftd: WARNING: internal_token is not set, so the internal RPC on " + socket + " accepts any caller that can open the socket and is protected only by filesystem permissions; set the same internal_token in raftd.json and managerd.json to require a shared secret"
+}
+
+// loopbackRaftBindWarning returns a startup warning when raftBind's host
+// is loopback and singleNode is not explicitly set, or "" otherwise. A
+// first bootstrap that leaves raft_bind at its loopback default records
+// its own address as unreachable in the committed Raft configuration -
+// confirmed live (docs/add-node-to-colony.md): a Comb in that state "sat
+// permanently unable to win an election the moment a second voter was
+// added," since no other host can ever reach it at that address.
+// single_node in raftd.json silences this for the one legitimate case,
+// a Comb that will never join or be joined.
+func loopbackRaftBindWarning(raftBind string, singleNode bool) string {
+	if singleNode {
+		return ""
+	}
+	host, _, err := net.SplitHostPort(raftBind)
+	if err != nil {
+		return ""
+	}
+	ip := net.ParseIP(host)
+	if ip == nil || !ip.IsLoopback() {
+		return ""
+	}
+	return "raftd: WARNING: raft_bind (" + raftBind + ") is a loopback address - another host can never reach this Comb at it, and the first voter added to this cluster will strand it permanently unable to win an election. Set raft_bind to a routable hostname or address before joining or being joined, or set \"single_node\": true in raftd.json if this Comb will never have peers"
 }

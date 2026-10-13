@@ -9,5 +9,6 @@
   "raft_tls_cert": "",
   "raft_tls_key": "",
   "raft_tls_ca": "",
-  "preferred_leader_id": ""
+  "preferred_leader_id": "",
+  "single_node": false
 }

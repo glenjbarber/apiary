@@ -2332,6 +2332,12 @@ message GetRaftdConfigResponse {
   // the same posture as GetNodeConfigResponse's own raftd_token_set.
   bool internal_token_set = 7;
 
+  // single_node records that raft_bind's loopback address is
+  // deliberate on this Comb (see raftdconfig.Config.SingleNode) -
+  // read-only here, same as data_dir/socket above: hand-edit
+  // raftd.json and restart raftd to change it.
+  bool single_node = 9;
+
   string error = 8;
 }
 

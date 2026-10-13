@@ -76,6 +76,7 @@ func TestManager_SaveThenLoadRoundTripsEveryField(t *testing.T) {
 		RaftTLSCert:   "/usr/local/etc/apiary/tls/raft-cert.pem",
 		RaftTLSKey:    "/usr/local/etc/apiary/tls/raft-key.pem",
 		RaftTLSCA:     "/usr/local/etc/apiary/tls/raft-ca.pem",
+		SingleNode:    true,
 	}
 
 	if err := m.Save(want); err != nil {
