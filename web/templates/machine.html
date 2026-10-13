@@ -902,6 +902,7 @@
 
 {{define "raftd_config_panel"}}
 <div id="raftd-config-error" class="banner-error">{{.RaftdConfigFormError}}</div>
+{{if .RaftdConfig.LoopbackWarning}}<div class="banner-error">{{.RaftdConfig.LoopbackWarning}}</div>{{end}}
 <p class="muted">
   Read-only. A 2026-09-15 review found that editing the internal token
   or raft TLS material through a plain per-host save form is unsafe for
@@ -922,6 +923,26 @@
     <tr><th>Raft TLS key</th><td>{{if .RaftdConfig.RaftTLSKey}}<code>{{.RaftdConfig.RaftTLSKey}}</code>{{else}}<em>(unset)</em>{{end}}</td></tr>
     <tr><th>Raft TLS CA</th><td>{{if .RaftdConfig.RaftTLSCA}}<code>{{.RaftdConfig.RaftTLSCA}}</code>{{else}}<em>(unset)</em>{{end}}</td></tr>
     <tr><th>Internal token</th><td>{{if .RaftdConfig.InternalTokenSet}}<span class="badge true">set</span>{{else}}<span class="badge unknown">not set</span>{{end}}</td></tr>
+    <tr><th>Single-node</th><td>{{if .RaftdConfig.SingleNode}}<span class="badge true">yes</span>{{else}}<span class="badge unknown">no</span>{{end}}</td></tr>
   </tbody>
 </table>
+{{if .CanAdmin}}
+<h4>Correct a stale voter address</h4>
+<p class="muted">
+  Use this only to fix a voter's own address already recorded in the
+  committed Raft configuration - typically the loopback-default mistake
+  above, caught after a second voter was already added and this Comb
+  could no longer win an election. This does not add a new voter; the
+  node ID must already be one (ADR-0106). Admin only, and the new
+  address is reachability-checked before it is committed, the same
+  guardrail a join approval applies to a joiner's address.
+</p>
+{{if .UpdateVoterAddressError}}<div class="banner-error">{{.UpdateVoterAddressError}}</div>{{end}}
+{{if .UpdateVoterAddressOK}}<div class="banner-success">{{.UpdateVoterAddressOK}}</div>{{end}}
+<form hx-post="/machine/raftd/update-voter-address" hx-target="#raftd-config-panel" hx-swap="innerHTML" class="inline-form">
+  <label>Node ID <input name="node_id" placeholder="sting" required title="Must already be a known voter in this Colony's Raft configuration."></label>
+  <label>New raft_bind address <input name="new_raft_bind_address" placeholder="sting.lab3.home.arpa:17600" required title="Routable host:port other Combs can reach this voter at."></label>
+  <button type="submit">Correct voter address</button>
+</form>
+{{end}}
 {{end}}

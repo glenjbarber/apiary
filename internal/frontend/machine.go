@@ -1153,13 +1153,60 @@ func (s *Server) renderRestshimdConfigPanel(w http.ResponseWriter, r *http.Reque
 	s.render(w, "restshimd_config_panel", pageData{NodeConfig: nodeCfg, RestshimdConfig: cfg, RestshimdConfigFormError: formErr, CanAdmin: true})
 }
 
-// raftd_config_panel (web/templates/machine.html) is read-only only -
-// there is no handleUpdateRaftdConfig/raftdConfigUpdateRequest/
-// renderRaftdConfigPanel at all. A 2026-09-15 audit found that a
+// raftd_config_panel (web/templates/machine.html) is otherwise
+// read-only - there is no handleUpdateRaftdConfig/
+// raftdConfigUpdateRequest at all. A 2026-09-15 audit found that a
 // per-host save form is unsafe for raftd's internal_token/raft TLS
 // material (see GetRaftdConfig's own doc comment in
-// internal/manager/server.go) - the panel only ever calls
-// currentRaftdConfig (a plain Get) from handleMachinePage.
+// internal/manager/server.go). UpdateVoterAddress below is the one
+// exception: it never touches those fields, and ADR-0106 already
+// gates and reachability-checks it server-side the same as a join
+// approval, so exposing it here adds no new risk.
+
+// renderRaftdConfigPanel re-fetches RaftdConfig and renders the panel
+// with a form result, mirroring renderOriginCAPanel exactly.
+func (s *Server) renderRaftdConfigPanel(w http.ResponseWriter, r *http.Request, formErr, success string) {
+	cfg, cfgErr := s.currentRaftdConfig(r)
+	if cfgErr != "" && formErr == "" {
+		formErr = cfgErr
+	}
+	s.render(w, "raftd_config_panel", pageData{RaftdConfig: cfg,
+		UpdateVoterAddressError: formErr, UpdateVoterAddressOK: success,
+		CanAdmin: true})
+}
+
+// handleUpdateVoterAddress is the web UI for ADR-0106's UpdateVoterAddress
+// RPC - the recovery path for a voter (typically the first node in a
+// Colony, bootstrapped with raft_bind left at its loopback default) whose
+// own address, already committed to the Raft configuration, no other
+// host can reach. node_id must already name an existing voter; the RPC
+// itself applies the same reachability guardrail against the new address
+// that ApproveJoinRequest applies against a joiner's, and is Admin-only.
+func (s *Server) handleUpdateVoterAddress(w http.ResponseWriter, r *http.Request) {
+	if err := r.ParseForm(); err != nil {
+		s.renderRaftdConfigPanel(w, r, "invalid form: "+err.Error(), "")
+		return
+	}
+	nodeID := r.FormValue("node_id")
+	newAddr := r.FormValue("new_raft_bind_address")
+	resp, err := s.client.UpdateVoterAddress(r.Context(), &rpcpb.UpdateVoterAddressRequest{
+		NodeId:             nodeID,
+		NewRaftBindAddress: newAddr,
+	})
+	if err != nil {
+		s.renderRaftdConfigPanel(w, r, err.Error(), "")
+		return
+	}
+	if resp.GetError() != "" {
+		formErr := resp.GetError()
+		if hint := resp.GetLeaderHint(); hint != "" {
+			formErr += " (leader: " + hint + ")"
+		}
+		s.renderRaftdConfigPanel(w, r, formErr, "")
+		return
+	}
+	s.renderRaftdConfigPanel(w, r, "", "Voter address for "+nodeID+" updated to "+newAddr+".")
+}
 
 // handleUpdateResourceScope updates the five write-once resource-scope
 // paths (ADR-0070) - a dedicated panel/handler since these need the

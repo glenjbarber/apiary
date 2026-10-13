@@ -732,6 +732,46 @@ func TestServer_UpdateOriginCAConfig_ForwardsFormValues(t *testing.T) {
 	}
 }
 
+func TestServer_UpdateVoterAddress_ForwardsFormValues(t *testing.T) {
+	client := &fakeClient{}
+	s := newTestServer(t, client)
+
+	form := url.Values{"node_id": {"sting"}, "new_raft_bind_address": {"sting.lab3.home.arpa:17600"}}
+	req := httptest.NewRequest(http.MethodPost, "/machine/raftd/update-voter-address", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	got := client.lastUpdateVoterAddressReq
+	if got.GetNodeId() != "sting" || got.GetNewRaftBindAddress() != "sting.lab3.home.arpa:17600" {
+		t.Errorf("forwarded request = %+v, want node_id/new_raft_bind_address set", got)
+	}
+}
+
+func TestServer_UpdateVoterAddress_SurfacesRPCErrorAndLeaderHint(t *testing.T) {
+	client := &fakeClient{updateVoterAddressResp: &rpcpb.UpdateVoterAddressResponse{
+		Error:      "node_id is not a known voter",
+		LeaderHint: "apiarium",
+	}}
+	s := newTestServer(t, client)
+
+	form := url.Values{"node_id": {"unknown"}, "new_raft_bind_address": {"x:17600"}}
+	req := httptest.NewRequest(http.MethodPost, "/machine/raftd/update-voter-address", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	if body := rec.Body.String(); !strings.Contains(body, "node_id is not a known voter") || !strings.Contains(body, "apiarium") {
+		t.Errorf("body = %q, want the RPC error and leader hint", body)
+	}
+}
+
 func TestServer_IssueOriginCertificate_ForwardsAutoRenewCheckbox(t *testing.T) {
 	client := &fakeClient{issueOriginCertificateResp: &rpcpb.IssueOriginCertificateResponse{RestartScheduled: true}}
 	s := newTestServer(t, client)

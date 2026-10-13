@@ -3573,6 +3573,8 @@ func (s *Server) GetRaftdConfig(_ context.Context, _ *rpcpb.GetRaftdConfigReques
 
 		// internal_token is never returned - only whether one is set.
 		InternalTokenSet: cfg.InternalToken != "",
+
+		SingleNode: cfg.SingleNode,
 	}, nil
 }
 

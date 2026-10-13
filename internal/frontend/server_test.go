@@ -148,6 +148,10 @@ type fakeClient struct {
 	convertStandaloneToJoinerResp    *rpcpb.ConvertStandaloneToJoinerResponse
 	lastConvertStandaloneToJoinerReq *rpcpb.ConvertStandaloneToJoinerRequest
 
+	updateVoterAddressResp    *rpcpb.UpdateVoterAddressResponse
+	updateVoterAddressErr     error
+	lastUpdateVoterAddressReq *rpcpb.UpdateVoterAddressRequest
+
 	getFrontendConfigResp       *rpcpb.GetFrontendConfigResponse
 	updateFrontendConfigResp    *rpcpb.UpdateFrontendConfigResponse
 	lastUpdateFrontendConfigReq *rpcpb.UpdateFrontendConfigRequest
@@ -888,7 +892,14 @@ func (f *fakeClient) ApproveJoinRequest(_ context.Context, in *rpcpb.ApproveJoin
 	return &rpcpb.ApproveJoinRequestResponse{}, nil
 }
 
-func (f *fakeClient) UpdateVoterAddress(context.Context, *rpcpb.UpdateVoterAddressRequest, ...grpc.CallOption) (*rpcpb.UpdateVoterAddressResponse, error) {
+func (f *fakeClient) UpdateVoterAddress(_ context.Context, in *rpcpb.UpdateVoterAddressRequest, _ ...grpc.CallOption) (*rpcpb.UpdateVoterAddressResponse, error) {
+	f.lastUpdateVoterAddressReq = in
+	if f.updateVoterAddressErr != nil {
+		return nil, f.updateVoterAddressErr
+	}
+	if f.updateVoterAddressResp != nil {
+		return f.updateVoterAddressResp, nil
+	}
 	return &rpcpb.UpdateVoterAddressResponse{}, nil
 }
 

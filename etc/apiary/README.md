@@ -262,6 +262,13 @@ current, safe flow uses `await_join` — see `docs/add-node-to-colony.md`.
   root-owned, mode 0600 (already the default from `make setup`).
 - `raft_tls_cert`, `raft_tls_key`, `raft_tls_ca` — Raft transport mutual
   TLS (ADR-0078). Leave all three empty for plain TCP, the common case.
+- `single_node` — set `true` only on a Comb that will never join or be
+  joined, to confirm a loopback `raft_bind` is deliberate rather than the
+  unset-default mistake (ADR-0106). Leave `false` on every node bound for
+  a multi-node Colony, even the first: with `raft_bind` left loopback and
+  this unset, raftd warns at startup and the Machine Configuration page
+  shows the same warning, because that address becomes unreachable to
+  every other host the moment a second voter is added.
 
 ## `frontend.json.sample`
 

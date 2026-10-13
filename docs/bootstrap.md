@@ -398,6 +398,14 @@ just omit the key:
 
 Replace `<this-host-address>` with this host's real, reachable address.
 Do not use `0.0.0.0`: Apiary also advertises this value to Raft peers.
+Do not leave it at a loopback address either, even though this node is
+standalone for now: a first voter bootstrapped that way records its own
+address as unreachable in the committed Raft configuration, and sits
+permanently unable to win an election the moment a second voter is ever
+added (see `docs/add-node-to-colony.md`). `raftd` warns loudly at startup
+and the Machine Configuration page warns too if `raft_bind` is loopback
+here. If this node genuinely will never have peers, set `"single_node":
+true` in `raftd.json` to confirm that and silence the warning.
 
 That warning applies to `raftd`'s `raft_bind` on **17600** and to nothing
 else in this document - Raft peer transport is a separate thing from

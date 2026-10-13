@@ -101,6 +101,17 @@ type Config struct {
 	// raftnode.Node.PreferredLeaderTransfer's own doc comment for why
 	// both are treated as "nothing to do" rather than an error.
 	PreferredLeaderID string `json:"preferred_leader_id,omitempty"`
+
+	// SingleNode records that this Comb's own raft_bind is loopback
+	// deliberately - a single-node Comb never joined to anything else,
+	// for which a loopback address is correct and permanent, not a
+	// first-run mistake left uncorrected. Without it, raftd and the
+	// Machine Configuration page have no way to tell that case apart
+	// from the far more common one: a fresh bootstrap that left
+	// raft_bind at its loopback default and will strand the first
+	// voter added to it, unreachable by any other host (see
+	// docs/add-node-to-colony.md's own account of exactly that).
+	SingleNode bool `json:"single_node,omitempty"`
 }
 
 // Defaults matches every flag's own former default value exactly, so

@@ -6,6 +6,23 @@ import (
 	rpcpb "github.com/glenjbarber/apiary/api/rpc"
 )
 
+func TestFromRPCRaftdConfig_LoopbackRaftBindWarnsUnlessSingleNode(t *testing.T) {
+	loopback := fromRPCRaftdConfig(&rpcpb.GetRaftdConfigResponse{RaftBind: "127.0.0.1:17600"})
+	if loopback.LoopbackWarning == "" {
+		t.Error("loopback raft_bind, not single-node: want a LoopbackWarning, got none")
+	}
+
+	singleNode := fromRPCRaftdConfig(&rpcpb.GetRaftdConfigResponse{RaftBind: "127.0.0.1:17600", SingleNode: true})
+	if singleNode.LoopbackWarning != "" {
+		t.Errorf("single_node must silence the warning, got %q", singleNode.LoopbackWarning)
+	}
+
+	routable := fromRPCRaftdConfig(&rpcpb.GetRaftdConfigResponse{RaftBind: "sting.lab3.home.arpa:17600"})
+	if routable.LoopbackWarning != "" {
+		t.Errorf("a routable raft_bind must not warn, got %q", routable.LoopbackWarning)
+	}
+}
+
 func TestFromRPCNodeConfig_RetainsUnavailableSelections(t *testing.T) {
 	view := fromRPCNodeConfig(&rpcpb.GetNodeConfigResponse{
 		Uplink:    "bridge999",

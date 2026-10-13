@@ -414,3 +414,19 @@ func TestInternalTokenWarning(t *testing.T) {
 		t.Errorf("a configured token must not warn, got %q", w)
 	}
 }
+
+func TestLoopbackRaftBindWarning(t *testing.T) {
+	w := loopbackRaftBindWarning("127.0.0.1:17600", false)
+	if !strings.Contains(w, "127.0.0.1:17600") || !strings.Contains(w, "single_node") {
+		t.Errorf("loopback, not single-node: warning = %q, want it to name the address and single_node", w)
+	}
+	if w := loopbackRaftBindWarning("127.0.0.1:17600", true); w != "" {
+		t.Errorf("single_node must silence the loopback warning, got %q", w)
+	}
+	if w := loopbackRaftBindWarning("sting.lab3.home.arpa:17600", false); w != "" {
+		t.Errorf("a routable address must not warn, got %q", w)
+	}
+	if w := loopbackRaftBindWarning("::1", false); w != "" {
+		t.Errorf("an address with no port must not warn (SplitHostPort fails), got %q", w)
+	}
+}

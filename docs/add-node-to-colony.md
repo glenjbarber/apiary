@@ -197,7 +197,9 @@ is the dedicated replacement - it requires `node_id` to already be a
 known voter (the opposite of `RequestJoinColony`'s new check), applies
 the same reachability guardrail against the new address that
 `ApproveJoinRequest` applies against a joiner's, and is Admin-only. It
-has no Colony overview UI yet; call it directly via the manager RPC.
+is available from the "Correct a stale voter address" form in the
+Machine Configuration page's raftd panel (Admin only), or can still be
+called directly via the manager RPC.
 
 **If Raft transport mutual TLS (`raft_tls_cert`/`raft_tls_key`/
 `raft_tls_ca`, ADR-0078) is used anywhere in this Colony, every voter must

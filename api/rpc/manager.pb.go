@@ -9193,10 +9193,15 @@ type GetRaftdConfigResponse struct {
 	// internal_token_set reports only whether a value is currently saved
 	// - the raw value itself is never returned here or anywhere else,
 	// the same posture as GetNodeConfigResponse's own raftd_token_set.
-	InternalTokenSet bool   `protobuf:"varint,7,opt,name=internal_token_set,json=internalTokenSet,proto3" json:"internal_token_set,omitempty"`
-	Error            string `protobuf:"bytes,8,opt,name=error,proto3" json:"error,omitempty"`
-	unknownFields    protoimpl.UnknownFields
-	sizeCache        protoimpl.SizeCache
+	InternalTokenSet bool `protobuf:"varint,7,opt,name=internal_token_set,json=internalTokenSet,proto3" json:"internal_token_set,omitempty"`
+	// single_node records that raft_bind's loopback address is
+	// deliberate on this Comb (see raftdconfig.Config.SingleNode) -
+	// read-only here, same as data_dir/socket above: hand-edit
+	// raftd.json and restart raftd to change it.
+	SingleNode    bool   `protobuf:"varint,9,opt,name=single_node,json=singleNode,proto3" json:"single_node,omitempty"`
+	Error         string `protobuf:"bytes,8,opt,name=error,proto3" json:"error,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *GetRaftdConfigResponse) Reset() {
@@ -9274,6 +9279,13 @@ func (x *GetRaftdConfigResponse) GetRaftTlsCa() string {
 func (x *GetRaftdConfigResponse) GetInternalTokenSet() bool {
 	if x != nil {
 		return x.InternalTokenSet
+	}
+	return false
+}
+
+func (x *GetRaftdConfigResponse) GetSingleNode() bool {
+	if x != nil {
+		return x.SingleNode
 	}
 	return false
 }
@@ -22306,7 +22318,7 @@ const file_api_rpc_manager_proto_rawDesc = "" +
 	"\x1dUpdateRestshimdConfigResponse\x12\x1c\n" +
 	"\tscheduled\x18\x01 \x01(\bR\tscheduled\x12\x14\n" +
 	"\x05error\x18\x02 \x01(\tR\x05error\"\x17\n" +
-	"\x15GetRaftdConfigRequest\"\x92\x02\n" +
+	"\x15GetRaftdConfigRequest\"\xb3\x02\n" +
 	"\x16GetRaftdConfigResponse\x12\x19\n" +
 	"\bdata_dir\x18\x01 \x01(\tR\adataDir\x12\x16\n" +
 	"\x06socket\x18\x02 \x01(\tR\x06socket\x12\x1b\n" +
@@ -22315,7 +22327,9 @@ const file_api_rpc_manager_proto_rawDesc = "" +
 	"\fraft_tls_key\x18\x05 \x01(\tR\n" +
 	"raftTlsKey\x12\x1e\n" +
 	"\vraft_tls_ca\x18\x06 \x01(\tR\traftTlsCa\x12,\n" +
-	"\x12internal_token_set\x18\a \x01(\bR\x10internalTokenSet\x12\x14\n" +
+	"\x12internal_token_set\x18\a \x01(\bR\x10internalTokenSet\x12\x1f\n" +
+	"\vsingle_node\x18\t \x01(\bR\n" +
+	"singleNode\x12\x14\n" +
 	"\x05error\x18\b \x01(\tR\x05error\"Q\n" +
 	"\x16SetDatasetQuotaRequest\x12!\n" +
 	"\fdataset_name\x18\x01 \x01(\tR\vdatasetName\x12\x14\n" +
