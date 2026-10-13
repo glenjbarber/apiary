@@ -642,8 +642,8 @@
     <tbody>
       <tr><th>Peer managerd port</th><td><input type="number" min="1" max="65535" step="1" name="peer_managerd_port" placeholder="17700" value="{{.NodeConfig.PeerManagerdPort}}" title="TCP port other Combs' managerd dial when forwarding a request to this one. Blank uses this Comb's own rpc-addr port." aria-label="Peer managerd port"></td></tr>
       <tr><th>Peer TLS</th><td>
-        <select name="peer_tls" title="Whether managerd-to-managerd peer forwarding (console/serial-log/raft-write forwarding) uses TLS. Use startup flag defers to -peer-tls." aria-label="Peer TLS">
-          <option value="default" {{if eq .NodeConfig.PeerTLSMode "default"}}selected{{end}}>Use startup flag</option>
+        <select name="peer_tls" title="Whether managerd-to-managerd peer forwarding (console/serial-log/raft-write forwarding) uses TLS. Default follows this Comb's own TLS certificate/key below: enabled when both are set, disabled otherwise." aria-label="Peer TLS">
+          <option value="default" {{if eq .NodeConfig.PeerTLSMode "default"}}selected{{end}}>Default (follows this Comb's own TLS certificate)</option>
           <option value="enabled" {{if eq .NodeConfig.PeerTLSMode "enabled"}}selected{{end}}>Enabled</option>
           <option value="disabled" {{if eq .NodeConfig.PeerTLSMode "disabled"}}selected{{end}}>Disabled</option>
         </select>
@@ -664,7 +664,7 @@
 <table>
   <tbody>
     <tr><th>Peer managerd port</th><td>{{if .NodeConfig.PeerManagerdPort}}{{.NodeConfig.PeerManagerdPort}}{{else}}<em>(uses this node's own rpc-addr port)</em>{{end}}</td></tr>
-    <tr><th>Peer TLS</th><td>{{.NodeConfig.PeerTLSStatus}}</td></tr>
+    <tr><th>Peer TLS</th><td>{{if eq .NodeConfig.PeerTLSMode "default"}}default (follows this Comb's own TLS certificate, below){{else}}{{.NodeConfig.PeerTLSStatus}}{{end}}</td></tr>
     <tr><th>Peer TLS hostname map</th><td>{{if .NodeConfig.PeerTLSHostnameMap}}<code>{{.NodeConfig.PeerTLSHostnameMap}}</code>{{else}}<em>(unset)</em>{{end}}</td></tr>
     <tr><th>Peer TLS CA</th><td>{{if .NodeConfig.PeerTLSCA}}<code>{{.NodeConfig.PeerTLSCA}}</code>{{else}}<em>(trusts the system pool)</em>{{end}}</td></tr>
     <tr><th>Peer API key</th><td>{{if .NodeConfig.PeerAPIKeySet}}<span class="badge true">set</span>{{else}}<span class="badge unknown">not set</span>{{end}}</td></tr>
@@ -849,7 +849,13 @@
       <tr><th>Manager TLS server name</th><td><input type="text" name="manager_tls_server_name" value="{{.FrontendConfig.ManagerTLSServerName}}" title="Hostname to verify managerd's certificate against, if different from Manager address's own host." aria-label="Manager TLS server name"></td></tr>
       <tr><th>Certificate path</th><td><input type="text" name="tls_cert" value="{{.FrontendConfig.TLSCert}}" title="Path to frontend's own web UI certificate. Leave both this and Key path blank to serve plaintext." aria-label="Certificate path"></td></tr>
       <tr><th>Key path</th><td><input type="text" name="tls_key" value="{{.FrontendConfig.TLSKey}}" title="Path to the private key matching Certificate path above." aria-label="Key path"></td></tr>
-      <tr><th>Peer TLS</th><td><label class="checkbox-label"><input type="checkbox" name="peer_tls" value="true" {{if .FrontendConfig.PeerTLS}}checked{{end}} title="Dial other Combs' managerd over TLS when fetching their host stats for the cluster overview page." aria-label="Peer TLS"> Enabled</label></td></tr>
+      <tr><th>Peer TLS</th><td>
+        <select name="peer_tls" title="Dial other Combs' managerd over TLS when fetching their host stats for the cluster overview page. Default follows Manager TLS above: every node in a Colony is expected to be configured the same way." aria-label="Peer TLS">
+          <option value="default" {{if eq .FrontendConfig.PeerTLSMode "default"}}selected{{end}}>Default (follows Manager TLS, above)</option>
+          <option value="enabled" {{if eq .FrontendConfig.PeerTLSMode "enabled"}}selected{{end}}>Enabled</option>
+          <option value="disabled" {{if eq .FrontendConfig.PeerTLSMode "disabled"}}selected{{end}}>Disabled</option>
+        </select>
+      </td></tr>
       <tr><th>Peer TLS CA</th><td><input type="text" name="peer_tls_ca" value="{{.FrontendConfig.PeerTLSCA}}" title="PEM file trusted instead of the system pool when dialing a peer over TLS. Only consulted when Peer TLS is set." aria-label="Peer TLS CA"></td></tr>
       <tr><th>Peer hostname suffix</th><td><input type="text" name="peer_hostname_suffix" placeholder=".apiary.work" value="{{.FrontendConfig.PeerHostnameSuffix}}" title="Appended to a node id to form its managerd hostname for the cluster overview page." aria-label="Peer hostname suffix"></td></tr>
       <tr><th>Peer manager port</th><td><input type="text" name="peer_manager_port" placeholder="17700" value="{{.FrontendConfig.PeerManagerPort}}" title="Port assumed for a peer node's managerd external API when fetching its host stats." aria-label="Peer manager port"></td></tr>

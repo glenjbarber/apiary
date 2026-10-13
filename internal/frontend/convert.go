@@ -381,10 +381,16 @@ type frontendConfigView struct {
 	ManagerTLSServerName string
 	TLSCert              string
 	TLSKey               string
-	PeerTLS              bool
-	PeerTLSCA            string
-	PeerHostnameSuffix   string
-	PeerManagerPort      string
+
+	// PeerTLSMode/PeerTLSStatus mirror nodeConfigView's own
+	// HASTEnabledMode/PeerTLSMode tri-state convention (see triState
+	// below): "default" means this value follows ManagerTLS above,
+	// not that it is off.
+	PeerTLSMode        string
+	PeerTLSStatus      string
+	PeerTLSCA          string
+	PeerHostnameSuffix string
+	PeerManagerPort    string
 
 	// ManagerAPIKeySet reports only whether a secret is currently
 	// saved - the raw value is never sent to the browser (see
@@ -393,7 +399,7 @@ type frontendConfigView struct {
 }
 
 func fromRPCFrontendConfig(d *rpcpb.GetFrontendConfigResponse) frontendConfigView {
-	return frontendConfigView{
+	v := frontendConfigView{
 		ManagerAddr:          d.GetManagerAddr(),
 		HTTPAddr:             d.GetHttpAddr(),
 		ManagerTLS:           d.GetManagerTls(),
@@ -401,12 +407,13 @@ func fromRPCFrontendConfig(d *rpcpb.GetFrontendConfigResponse) frontendConfigVie
 		ManagerTLSServerName: d.GetManagerTlsServerName(),
 		TLSCert:              d.GetTlsCert(),
 		TLSKey:               d.GetTlsKey(),
-		PeerTLS:              d.GetPeerTls(),
 		PeerTLSCA:            d.GetPeerTlsCa(),
 		PeerHostnameSuffix:   d.GetPeerHostnameSuffix(),
 		PeerManagerPort:      d.GetPeerManagerPort(),
 		ManagerAPIKeySet:     d.GetManagerApiKeySet(),
 	}
+	v.PeerTLSMode, v.PeerTLSStatus = triState(d.PeerTls)
+	return v
 }
 
 // restshimdConfigView is the template-facing shape for the co-located

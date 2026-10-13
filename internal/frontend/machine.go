@@ -1009,7 +1009,7 @@ func (s *Server) frontendConfigUpdateRequest(r *http.Request) *rpcpb.UpdateFront
 		ManagerTlsServerName: cfg.ManagerTLSServerName,
 		TlsCert:              cfg.TLSCert,
 		TlsKey:               cfg.TLSKey,
-		PeerTls:              cfg.PeerTLS,
+		PeerTls:              jailEnabledFromForm(cfg.PeerTLSMode),
 		PeerTlsCa:            cfg.PeerTLSCA,
 		PeerHostnameSuffix:   cfg.PeerHostnameSuffix,
 		PeerManagerPort:      cfg.PeerManagerPort,
@@ -1036,7 +1036,7 @@ func (s *Server) frontendConfigUpdateRequest(r *http.Request) *rpcpb.UpdateFront
 		req.TlsKey = r.FormValue("tls_key")
 	}
 	if r.Form.Has("peer_tls") {
-		req.PeerTls = r.FormValue("peer_tls") == "true"
+		req.PeerTls = jailEnabledFromForm(r.FormValue("peer_tls"))
 	}
 	if r.Form.Has("peer_tls_ca") {
 		req.PeerTlsCa = r.FormValue("peer_tls_ca")

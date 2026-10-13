@@ -2223,7 +2223,12 @@ message GetFrontendConfigResponse {
   string manager_tls_server_name = 5;
   string tls_cert = 6;
   string tls_key = 7;
-  bool peer_tls = 8;
+
+  // peer_tls is tri-state, same convention as GetNodeConfigResponse's
+  // own peer_tls (ADR-0113): unset means it defaults to manager_tls
+  // above rather than to false - see frontendconfig.Config.PeerTLS's
+  // own doc comment.
+  optional bool peer_tls = 8;
   string peer_tls_ca = 9;
   string peer_hostname_suffix = 10;
   string peer_manager_port = 11;
@@ -2246,7 +2251,13 @@ message UpdateFrontendConfigRequest {
   string manager_tls_server_name = 5;
   string tls_cert = 6;
   string tls_key = 7;
-  bool peer_tls = 8;
+
+  // peer_tls: see GetFrontendConfigResponse's own doc comment on the
+  // field of the same name. Absent means "leave whatever is currently
+  // saved unchanged" here, the same convention UpdateNodeConfigRequest
+  // already uses for its own tri-state fields - not "clear it back to
+  // the default."
+  optional bool peer_tls = 8;
   string peer_tls_ca = 9;
   string peer_hostname_suffix = 10;
   string peer_manager_port = 11;

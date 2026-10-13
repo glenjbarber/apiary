@@ -283,20 +283,32 @@ that was the very first, standalone-bootstrapped node in its Colony may
 have none of this set at all, not just an incomplete version of it).
 
 **`managerd.json` and `frontend.json` each have their own, separate
-`peer_tls`/`peer_tls_ca` fields, and both must be set on both roles -
-setting one without the other reproduces the exact same symptom on
-whichever role is still missing it.** `managerd`'s own peer settings cover
+`peer_tls`/`peer_tls_ca` fields.** `managerd`'s own peer settings cover
 managerd-to-managerd RPC forwarding (reconciliation writes/reads, ADR-0029).
 `frontend`'s own, independent peer settings (also `peer_tls`/`peer_tls_ca`,
 plus `peer_manager_port`) cover the Colony overview page's own direct
-host-stats fetch from every other Comb's managerd. Confirmed live: fixing
-only `managerd.json`'s peer TLS left the Colony overview still showing
-`rpc error: code = Unavailable desc = connection error: desc = "error
-reading server preface: EOF"` for the other Comb, because `frontend.json`
-on that same host still had no peer TLS configured at all. That exact
-error text means a plaintext client is dialing a TLS-only managerd -
-check both files' `peer_tls`/`peer_tls_ca` on the host reporting the
-error, not just one.
+host-stats fetch from every other Comb's managerd.
+
+As of ADR-0113's follow-up, leaving `peer_tls` unset on either file is no
+longer the same as setting it to `false`: `managerd.json`'s `peer_tls`
+defaults to on when that Comb's own `tls_cert`/`tls_key` are both set, and
+`frontend.json`'s `peer_tls` defaults to whatever its own `manager_tls` is
+set to. Joining two nodes that both use publicly trusted (or otherwise
+properly configured) TLS certificates needs no manual `peer_tls` edits at
+all any more - explicit `"peer_tls": true`/`false` in either file still
+overrides its own default. The historical failure mode below can now only
+happen from an explicit, mismatched override.
+
+Confirmed live (before that default existed): fixing only `managerd.json`'s
+peer TLS left the Colony overview still showing `rpc error: code =
+Unavailable desc = connection error: desc = "error reading server preface:
+EOF"` for the other Comb, because `frontend.json` on that same host still
+had no peer TLS configured at all. That exact error text means a plaintext
+client is dialing a TLS-only managerd. The Colony overview and the
+per-host page now translate that exact error into a message naming both
+files' `peer_tls`/`peer_tls_ca`/`tls_cert`/`tls_key` fields directly,
+rather than showing the bare gRPC text - but checking both files' settings
+on the host reporting the error, not just one, is still the fix.
 
 For self-signed node certificates, update each member's peer CA bundle so it
 contains every peer certificate it must trust, then configure the peer TLS CA

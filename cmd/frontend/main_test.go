@@ -337,3 +337,25 @@ func TestCheckManagerLink_VerifiedLinkIsSilent(t *testing.T) {
 		t.Errorf("logged %q, want silence", logged)
 	}
 }
+
+func TestEffectivePeerTLS(t *testing.T) {
+	trueVal, falseVal := true, false
+	cases := []struct {
+		name       string
+		configured *bool
+		managerTLS bool
+		want       bool
+	}{
+		{"unset follows manager_tls true", nil, true, true},
+		{"unset follows manager_tls false", nil, false, false},
+		{"explicit false overrides manager_tls true", &falseVal, true, false},
+		{"explicit true overrides manager_tls false", &trueVal, false, true},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := effectivePeerTLS(c.configured, c.managerTLS); got != c.want {
+				t.Errorf("effectivePeerTLS(%v, %v) = %v, want %v", c.configured, c.managerTLS, got, c.want)
+			}
+		})
+	}
+}

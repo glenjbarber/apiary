@@ -178,8 +178,12 @@ type Config struct {
 	// PeerManagerdPort mirrors -peer-managerd-port.
 	PeerManagerdPort string `json:"peer_managerd_port,omitempty"`
 
-	// PeerTLS mirrors -peer-tls. Tri-state, same convention as
-	// JailEnabled.
+	// PeerTLS is tri-state, same convention as JailEnabled: nil defaults
+	// to true when this node's own TLSCert/TLSKey are both set (a
+	// TLS-only managerd defaulting to a plaintext peer client would
+	// otherwise die on "error reading server preface: EOF" for every
+	// peer call - see cmd/managerd/main.go), false otherwise. Explicit
+	// true/false always wins over that default.
 	PeerTLS *bool `json:"peer_tls,omitempty"`
 
 	// PeerTLSHostnameMap mirrors -peer-tls-hostname-map.

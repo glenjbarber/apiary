@@ -232,7 +232,7 @@ func run() error {
 	// requires only RoleViewer, well within what that key already
 	// grants) rather than needing a second, separately-configured
 	// credential.
-	peers := manager.NewPeerReporter(cfg.ManagerAPIKey, cfg.PeerTLS, nil)
+	peers := manager.NewPeerReporter(cfg.ManagerAPIKey, effectivePeerTLS(cfg.PeerTLS, cfg.ManagerTLS), nil)
 	pool, err := manager.ResolvePeerCAPool(cfg.PeerTLSCA)
 	if err != nil {
 		return fmt.Errorf("frontend: %w", err)
@@ -312,4 +312,16 @@ func checkManagerLink(ctx context.Context, v verifier, grace time.Duration, logf
 		"reachable, and the manager_tls setting is UNVERIFIED until then - this is not a statement that the " +
 		"config is wrong, only that nothing has been able to check it")
 	return nil
+}
+
+// effectivePeerTLS resolves frontendconfig.Config.PeerTLS's tri-state:
+// explicit true/false always wins, and nil defaults to managerTLS (this
+// node's own manager_tls setting) - see the field's own doc comment in
+// internal/frontendconfig/manager.go for why an unset peer_tls must not
+// silently default to false.
+func effectivePeerTLS(configured *bool, managerTLS bool) bool {
+	if configured != nil {
+		return *configured
+	}
+	return managerTLS
 }

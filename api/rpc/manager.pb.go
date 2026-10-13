@@ -8510,10 +8510,14 @@ type GetFrontendConfigResponse struct {
 	ManagerTlsServerName string                 `protobuf:"bytes,5,opt,name=manager_tls_server_name,json=managerTlsServerName,proto3" json:"manager_tls_server_name,omitempty"`
 	TlsCert              string                 `protobuf:"bytes,6,opt,name=tls_cert,json=tlsCert,proto3" json:"tls_cert,omitempty"`
 	TlsKey               string                 `protobuf:"bytes,7,opt,name=tls_key,json=tlsKey,proto3" json:"tls_key,omitempty"`
-	PeerTls              bool                   `protobuf:"varint,8,opt,name=peer_tls,json=peerTls,proto3" json:"peer_tls,omitempty"`
-	PeerTlsCa            string                 `protobuf:"bytes,9,opt,name=peer_tls_ca,json=peerTlsCa,proto3" json:"peer_tls_ca,omitempty"`
-	PeerHostnameSuffix   string                 `protobuf:"bytes,10,opt,name=peer_hostname_suffix,json=peerHostnameSuffix,proto3" json:"peer_hostname_suffix,omitempty"`
-	PeerManagerPort      string                 `protobuf:"bytes,11,opt,name=peer_manager_port,json=peerManagerPort,proto3" json:"peer_manager_port,omitempty"`
+	// peer_tls is tri-state, same convention as GetNodeConfigResponse's
+	// own peer_tls (ADR-0113): unset means it defaults to manager_tls
+	// above rather than to false - see frontendconfig.Config.PeerTLS's
+	// own doc comment.
+	PeerTls            *bool  `protobuf:"varint,8,opt,name=peer_tls,json=peerTls,proto3,oneof" json:"peer_tls,omitempty"`
+	PeerTlsCa          string `protobuf:"bytes,9,opt,name=peer_tls_ca,json=peerTlsCa,proto3" json:"peer_tls_ca,omitempty"`
+	PeerHostnameSuffix string `protobuf:"bytes,10,opt,name=peer_hostname_suffix,json=peerHostnameSuffix,proto3" json:"peer_hostname_suffix,omitempty"`
+	PeerManagerPort    string `protobuf:"bytes,11,opt,name=peer_manager_port,json=peerManagerPort,proto3" json:"peer_manager_port,omitempty"`
 	// manager_api_key_set reports only whether a value is currently
 	// saved for manager_api_key - the raw value itself is never returned
 	// here or anywhere else, the same posture as GetNodeConfigResponse's
@@ -8605,8 +8609,8 @@ func (x *GetFrontendConfigResponse) GetTlsKey() string {
 }
 
 func (x *GetFrontendConfigResponse) GetPeerTls() bool {
-	if x != nil {
-		return x.PeerTls
+	if x != nil && x.PeerTls != nil {
+		return *x.PeerTls
 	}
 	return false
 }
@@ -8655,10 +8659,15 @@ type UpdateFrontendConfigRequest struct {
 	ManagerTlsServerName string                 `protobuf:"bytes,5,opt,name=manager_tls_server_name,json=managerTlsServerName,proto3" json:"manager_tls_server_name,omitempty"`
 	TlsCert              string                 `protobuf:"bytes,6,opt,name=tls_cert,json=tlsCert,proto3" json:"tls_cert,omitempty"`
 	TlsKey               string                 `protobuf:"bytes,7,opt,name=tls_key,json=tlsKey,proto3" json:"tls_key,omitempty"`
-	PeerTls              bool                   `protobuf:"varint,8,opt,name=peer_tls,json=peerTls,proto3" json:"peer_tls,omitempty"`
-	PeerTlsCa            string                 `protobuf:"bytes,9,opt,name=peer_tls_ca,json=peerTlsCa,proto3" json:"peer_tls_ca,omitempty"`
-	PeerHostnameSuffix   string                 `protobuf:"bytes,10,opt,name=peer_hostname_suffix,json=peerHostnameSuffix,proto3" json:"peer_hostname_suffix,omitempty"`
-	PeerManagerPort      string                 `protobuf:"bytes,11,opt,name=peer_manager_port,json=peerManagerPort,proto3" json:"peer_manager_port,omitempty"`
+	// peer_tls: see GetFrontendConfigResponse's own doc comment on the
+	// field of the same name. Absent means "leave whatever is currently
+	// saved unchanged" here, the same convention UpdateNodeConfigRequest
+	// already uses for its own tri-state fields - not "clear it back to
+	// the default."
+	PeerTls            *bool  `protobuf:"varint,8,opt,name=peer_tls,json=peerTls,proto3,oneof" json:"peer_tls,omitempty"`
+	PeerTlsCa          string `protobuf:"bytes,9,opt,name=peer_tls_ca,json=peerTlsCa,proto3" json:"peer_tls_ca,omitempty"`
+	PeerHostnameSuffix string `protobuf:"bytes,10,opt,name=peer_hostname_suffix,json=peerHostnameSuffix,proto3" json:"peer_hostname_suffix,omitempty"`
+	PeerManagerPort    string `protobuf:"bytes,11,opt,name=peer_manager_port,json=peerManagerPort,proto3" json:"peer_manager_port,omitempty"`
 	// manager_api_key, if non-empty, becomes the new saved value -
 	// write-only, mirroring UpdateNodeConfigRequest's own peer_api_key/
 	// clear_peer_api_key pattern. An empty value here means "leave
@@ -8750,8 +8759,8 @@ func (x *UpdateFrontendConfigRequest) GetTlsKey() string {
 }
 
 func (x *UpdateFrontendConfigRequest) GetPeerTls() bool {
-	if x != nil {
-		return x.PeerTls
+	if x != nil && x.PeerTls != nil {
+		return *x.PeerTls
 	}
 	return false
 }
@@ -22259,7 +22268,7 @@ const file_api_rpc_manager_proto_rawDesc = "" +
 	"\t_peer_tls\"0\n" +
 	"\x18UpdateNodeConfigResponse\x12\x14\n" +
 	"\x05error\x18\x01 \x01(\tR\x05error\"\x1a\n" +
-	"\x18GetFrontendConfigRequest\"\xeb\x03\n" +
+	"\x18GetFrontendConfigRequest\"\xfd\x03\n" +
 	"\x19GetFrontendConfigResponse\x12!\n" +
 	"\fmanager_addr\x18\x01 \x01(\tR\vmanagerAddr\x12\x1b\n" +
 	"\thttp_addr\x18\x02 \x01(\tR\bhttpAddr\x12\x1f\n" +
@@ -22268,14 +22277,15 @@ const file_api_rpc_manager_proto_rawDesc = "" +
 	"\x0emanager_tls_ca\x18\x04 \x01(\tR\fmanagerTlsCa\x125\n" +
 	"\x17manager_tls_server_name\x18\x05 \x01(\tR\x14managerTlsServerName\x12\x19\n" +
 	"\btls_cert\x18\x06 \x01(\tR\atlsCert\x12\x17\n" +
-	"\atls_key\x18\a \x01(\tR\x06tlsKey\x12\x19\n" +
-	"\bpeer_tls\x18\b \x01(\bR\apeerTls\x12\x1e\n" +
+	"\atls_key\x18\a \x01(\tR\x06tlsKey\x12\x1e\n" +
+	"\bpeer_tls\x18\b \x01(\bH\x00R\apeerTls\x88\x01\x01\x12\x1e\n" +
 	"\vpeer_tls_ca\x18\t \x01(\tR\tpeerTlsCa\x120\n" +
 	"\x14peer_hostname_suffix\x18\n" +
 	" \x01(\tR\x12peerHostnameSuffix\x12*\n" +
 	"\x11peer_manager_port\x18\v \x01(\tR\x0fpeerManagerPort\x12-\n" +
 	"\x13manager_api_key_set\x18\f \x01(\bR\x10managerApiKeySet\x12\x14\n" +
-	"\x05error\x18\r \x01(\tR\x05error\"\x83\x04\n" +
+	"\x05error\x18\r \x01(\tR\x05errorB\v\n" +
+	"\t_peer_tls\"\x95\x04\n" +
 	"\x1bUpdateFrontendConfigRequest\x12!\n" +
 	"\fmanager_addr\x18\x01 \x01(\tR\vmanagerAddr\x12\x1b\n" +
 	"\thttp_addr\x18\x02 \x01(\tR\bhttpAddr\x12\x1f\n" +
@@ -22284,14 +22294,15 @@ const file_api_rpc_manager_proto_rawDesc = "" +
 	"\x0emanager_tls_ca\x18\x04 \x01(\tR\fmanagerTlsCa\x125\n" +
 	"\x17manager_tls_server_name\x18\x05 \x01(\tR\x14managerTlsServerName\x12\x19\n" +
 	"\btls_cert\x18\x06 \x01(\tR\atlsCert\x12\x17\n" +
-	"\atls_key\x18\a \x01(\tR\x06tlsKey\x12\x19\n" +
-	"\bpeer_tls\x18\b \x01(\bR\apeerTls\x12\x1e\n" +
+	"\atls_key\x18\a \x01(\tR\x06tlsKey\x12\x1e\n" +
+	"\bpeer_tls\x18\b \x01(\bH\x00R\apeerTls\x88\x01\x01\x12\x1e\n" +
 	"\vpeer_tls_ca\x18\t \x01(\tR\tpeerTlsCa\x120\n" +
 	"\x14peer_hostname_suffix\x18\n" +
 	" \x01(\tR\x12peerHostnameSuffix\x12*\n" +
 	"\x11peer_manager_port\x18\v \x01(\tR\x0fpeerManagerPort\x12&\n" +
 	"\x0fmanager_api_key\x18\f \x01(\tR\rmanagerApiKey\x121\n" +
-	"\x15clear_manager_api_key\x18\r \x01(\bR\x12clearManagerApiKey\"R\n" +
+	"\x15clear_manager_api_key\x18\r \x01(\bR\x12clearManagerApiKeyB\v\n" +
+	"\t_peer_tls\"R\n" +
 	"\x1cUpdateFrontendConfigResponse\x12\x1c\n" +
 	"\tscheduled\x18\x01 \x01(\bR\tscheduled\x12\x14\n" +
 	"\x05error\x18\x02 \x01(\tR\x05error\"\x1b\n" +
@@ -24196,6 +24207,8 @@ func file_api_rpc_manager_proto_init() {
 	}
 	file_api_rpc_manager_proto_msgTypes[87].OneofWrappers = []any{}
 	file_api_rpc_manager_proto_msgTypes[94].OneofWrappers = []any{}
+	file_api_rpc_manager_proto_msgTypes[97].OneofWrappers = []any{}
+	file_api_rpc_manager_proto_msgTypes[98].OneofWrappers = []any{}
 	file_api_rpc_manager_proto_msgTypes[133].OneofWrappers = []any{
 		(*MutateColonyUpdateRequest_Acquire)(nil),
 		(*MutateColonyUpdateRequest_Advance)(nil),

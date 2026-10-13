@@ -676,6 +676,15 @@ type NodeConfigRecord struct {
 
 	OriginCARenewalCheckInterval string `json:"origin_ca_renewal_check_interval,omitempty"`
 
+	// AcmeAccountKeyFile is a path, same reasoning as TLSKey above: the
+	// account private key's content is the secret, never recorded here.
+	// AcmeDirectory/AcmeDirectoryURL/AcmeEmail are public settings
+	// (ADR-0133).
+	AcmeDirectory      string `json:"acme_directory,omitempty"`
+	AcmeAccountKeyFile string `json:"acme_account_key_file,omitempty"`
+	AcmeDirectoryURL   string `json:"acme_directory_url,omitempty"`
+	AcmeEmail          string `json:"acme_email,omitempty"`
+
 	// Peers is the list of known peer Comb identifiers, which is public
 	// topology rather than a credential.
 	Peers []string `json:"peers,omitempty"`
@@ -746,6 +755,11 @@ func BuildNodeConfigRecord(cfg nodeconfig.Config, peers []string) NodeConfigReco
 
 		OriginCARenewalCheckInterval: cfg.OriginCARenewalCheckInterval.String(),
 
+		AcmeDirectory:      cfg.AcmeDirectory,
+		AcmeAccountKeyFile: cfg.AcmeAccountKeyFile,
+		AcmeDirectoryURL:   cfg.AcmeDirectoryURL,
+		AcmeEmail:          cfg.AcmeEmail,
+
 		Peers: append([]string(nil), peers...),
 	}
 }
@@ -792,6 +806,9 @@ type RaftdConfigRecord struct {
 	RaftTLSCert string `json:"raft_tls_cert,omitempty"`
 	RaftTLSKey  string `json:"raft_tls_key,omitempty"`
 	RaftTLSCA   string `json:"raft_tls_ca,omitempty"`
+	// SingleNode is public topology, same class as PreferredLeaderID
+	// above (ADR-0106's loopback-raft_bind guardrail), not a credential.
+	SingleNode bool `json:"single_node,omitempty"`
 }
 
 // BuildRaftdConfigRecord projects a raftdconfig.Config, dropping
@@ -808,6 +825,7 @@ func BuildRaftdConfigRecord(cfg raftdconfig.Config) RaftdConfigRecord {
 		RaftTLSKey:        cfg.RaftTLSKey,
 		RaftTLSCA:         cfg.RaftTLSCA,
 		PreferredLeaderID: cfg.PreferredLeaderID,
+		SingleNode:        cfg.SingleNode,
 	}
 }
 
@@ -823,7 +841,7 @@ type FrontendConfigRecord struct {
 	// paths only.
 	TLSCert            string `json:"tls_cert,omitempty"`
 	TLSKey             string `json:"tls_key,omitempty"`
-	PeerTLS            bool   `json:"peer_tls,omitempty"`
+	PeerTLS            *bool  `json:"peer_tls,omitempty"`
 	PeerTLSCA          string `json:"peer_tls_ca,omitempty"`
 	PeerHostnameSuffix string `json:"peer_hostname_suffix,omitempty"`
 	PeerManagerPort    string `json:"peer_manager_port,omitempty"`

@@ -207,3 +207,26 @@ func TestPeerCAWriteStateForgetsAResolvedCondition(t *testing.T) {
 		t.Errorf("a condition returning after a clean tick was logged %d times, want 1", got)
 	}
 }
+
+func TestEffectivePeerTLS(t *testing.T) {
+	trueVal, falseVal := true, false
+	cases := []struct {
+		name            string
+		configured      *bool
+		tlsCert, tlsKey string
+		want            bool
+	}{
+		{"unset, no TLS material", nil, "", "", false},
+		{"unset, both TLS files set", nil, "/x/cert.pem", "/x/key.pem", true},
+		{"unset, only cert set", nil, "/x/cert.pem", "", false},
+		{"explicit false overrides TLS material", &falseVal, "/x/cert.pem", "/x/key.pem", false},
+		{"explicit true overrides no TLS material", &trueVal, "", "", true},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := effectivePeerTLS(c.configured, c.tlsCert, c.tlsKey); got != c.want {
+				t.Errorf("effectivePeerTLS(%v, %q, %q) = %v, want %v", c.configured, c.tlsCert, c.tlsKey, got, c.want)
+			}
+		})
+	}
+}
