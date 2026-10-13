@@ -519,6 +519,14 @@ func TestExecuteNodeRestartPlan_RefusesWhatItCannotDo(t *testing.T) {
 	client, srv := newManagerdRPCClientAndServer(t, raftdSocket, "raftd-1")
 	srv.SetRestartGuardrailToken(planHarnessToken)
 	srv.services = &fakeNodeServiceController{}
+	// The empty-Service case below actually runs the real raftd plan,
+	// including persisting its durable record - unlike every other
+	// case in this test, which is refused before reaching that point.
+	// restartplan.DefaultResultDir is a real root path
+	// (/var/db/apiary/restart-plan), not writable by this test's own
+	// user, so this needs the same test-only override
+	// coordinatorResultDir's own doc comment describes.
+	srv.planCoordinatorDir = t.TempDir()
 	ctx := tokenCtx()
 
 	resp, err := client.ExecuteNodeRestartPlan(ctx, &rpcpb.ExecuteNodeRestartPlanRequest{NodeId: "raftd-1", Service: managerdServiceName})
