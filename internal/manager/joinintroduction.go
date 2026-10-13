@@ -221,6 +221,72 @@ func readCertificateFile(name, path string) (*advertisedCertificate, error) {
 	}, nil
 }
 
+// servingCertificateChainsToRoots reports whether the certificate file at
+// path verifies as a TLS server certificate against roots, where a nil
+// roots means the system trust store.
+//
+// The WHOLE file is read, not just its first block. A public CA's
+// fullchain file carries the leaf followed by its intermediates, and
+// verification needs the intermediates; readCertificateFile keeps only
+// the leaf because a pin carries only the leaf.
+//
+// Any failure - unreadable file, unparsable block, no certificate, a chain
+// that does not verify - is "not trusted", never an error. The caller
+// uses this to decide whether pinning can be skipped, and the safe answer
+// to "could not tell" is to keep today's behavior of pinning. No hostname
+// is checked: this asks whether the chain is publicly trusted, not whether
+// the name is the one a particular peer dials.
+func servingCertificateChainsToRoots(path string, roots *x509.CertPool) bool {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return false
+	}
+	var certs []*x509.Certificate
+	for {
+		var block *pem.Block
+		block, data = pem.Decode(data)
+		if block == nil {
+			break
+		}
+		if block.Type != "CERTIFICATE" {
+			continue
+		}
+		cert, err := x509.ParseCertificate(block.Bytes)
+		if err != nil {
+			return false
+		}
+		certs = append(certs, cert)
+	}
+	if len(certs) == 0 {
+		return false
+	}
+	intermediates := x509.NewCertPool()
+	for _, c := range certs[1:] {
+		intermediates.AddCert(c)
+	}
+	_, err = certs[0].Verify(x509.VerifyOptions{
+		Roots:         roots,
+		Intermediates: intermediates,
+		KeyUsages:     []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+	})
+	return err == nil
+}
+
+// localServingCertificatePubliclyTrusted reports whether this Comb's own
+// serving certificate (tls_cert) verifies against the system trust store,
+// which is the profile docs/add-node-to-colony.md calls "every
+// certificate from a public CA".
+func (s *Server) localServingCertificatePubliclyTrusted() bool {
+	if s.nodeConfig == nil {
+		return false
+	}
+	cfg, err := s.nodeConfig.Load()
+	if err != nil || strings.TrimSpace(cfg.TLSCert) == "" {
+		return false
+	}
+	return servingCertificateChainsToRoots(cfg.TLSCert, nil)
+}
+
 // localAdvertisedFingerprints is localAdvertisedCertificates reduced to
 // the list that goes on the wire, in a stable order (serving
 // certificate first, then raft transport) so two renders of the same
@@ -428,6 +494,20 @@ func (s *Server) buildPinForRequest(requestID string, now time.Time) (*internalp
 	// target's operator believes it completed.
 	if len(pending.GetAdvertisedFingerprints()) == 0 {
 		return nil, fmt.Errorf("request_id %q advertised no certificate fingerprints, so there is nothing to pin and nothing to compare. A request with no fingerprints cannot be approved; have the joining Comb re-request with `apiaryctl join-introduce`", requestID)
+	}
+	// When this member's own serving certificate verifies against the
+	// system trust store, every Comb in this Colony is on the public-CA
+	// profile and peers verify each other through that store, so there is
+	// nothing to pin. docs/add-node-to-colony.md says the pinning
+	// material does not apply to that profile. A nil peer with a nil error
+	// is the documented "nothing to pin" answer and is a legal verify.
+	//
+	// Without this, the check below compared THIS member's certificate
+	// against the JOINER's advertised fingerprints, which can never match
+	// when each node has its own certificate, so no join to a Colony of
+	// publicly certified nodes could be verified at all.
+	if s.localServingCertificatePubliclyTrusted() {
+		return nil, nil
 	}
 	leaf, err := s.localJoinCertificateForPin()
 	if err != nil {
