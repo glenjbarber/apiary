@@ -292,6 +292,27 @@ Permission gating: unchanged throughout this section.
 
 ### Section E - Machine configuration & admin (Users, API keys, Certificates)
 
+#### Connector status on the control page
+
+The control page must show which connectors are enabled and whether each
+enabled connector is actually working. Keep configuration and runtime
+health as separate facts; an enabled connector is not automatically
+healthy.
+
+- List each connector and its configured state: enabled or disabled.
+- For enabled connectors, show the observed health: healthy, degraded,
+  not working, or unknown when Apiary cannot determine the result.
+- If the connector runs on only some Combs, show status per Comb instead
+  of implying cluster-wide availability.
+- Show a short failure reason and affected Comb when evidence provides
+  them. Do not infer a cause from a missing or stale health signal.
+- Keep this view read-only; connector configuration remains governed by
+  the existing admin controls and permissions.
+
+This is an additive requirement for the control page. It does not imply
+that Apiary supports every connector type or can probe a connector
+without an existing health signal.
+
 `machine.html` / `machine_sections.html` (the largest templates, 975 +
 461 lines) get the lightest touch of any section: their own
 `.section-nav` pill tabs already shipped in the aesthetics pass. This
