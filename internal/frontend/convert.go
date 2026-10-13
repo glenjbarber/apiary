@@ -659,6 +659,13 @@ type jailView struct {
 	// so the page says so rather than offering a form that could not
 	// take effect.
 	VNET bool
+
+	// NetworkID/IPAddress mirror vmView's own fields (ADR-0022) and are
+	// only meaningful when VNET is true - an ip4=inherit jail has
+	// neither a network of its own nor an address FSM.allocateIP could
+	// have assigned it (ADR-0117).
+	NetworkID string
+	IPAddress string
 }
 
 func fromRPCJail(j *rpcpb.JailDefinition) jailView {
@@ -675,6 +682,8 @@ func fromRPCJail(j *rpcpb.JailDefinition) jailView {
 		PhaseError:    j.GetPhaseError(),
 		ReplicaNodeID: j.GetReplicaNodeId(),
 		VNET:          j.GetVnet(),
+		NetworkID:     j.GetNetworkId(),
+		IPAddress:     j.GetIpAddress(),
 	}
 	for _, r := range j.GetFirewallRules() {
 		v.FirewallRules = append(v.FirewallRules, firewallRuleView{
