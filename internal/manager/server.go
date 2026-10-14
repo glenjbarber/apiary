@@ -4254,6 +4254,27 @@ func (s *Server) reserveRestartLeaseFenced(ctx context.Context, req *rpcpb.Reser
 		return &rpcpb.ReserveRestartLeaseResponse{Error: "not leader and no reachable leader hint for the restart-guardrail lease"}, nil
 	}
 
+	// Fail closed (issue #98): this node is about to grant a lease as
+	// the current raft leader, and the leader is also the only node that
+	// ever RECORDS a confirmation - whether presented directly by
+	// ConfirmRestartCompletedLocal (when the restarted node is itself
+	// still leader) or forwarded to it by ConfirmRestartCompleted (when
+	// it is not). Either way, a forwarded confirmation presents THIS
+	// node's restartGuardrailToken, and restartGuardrailTokenValid
+	// rejects everything when configured is empty (see its own doc
+	// comment) - so a leader with no token can grant this lease and then
+	// never be able to record a confirmation for it that arrived by
+	// forwarding. That leaves a lease with no TTL that stays held and
+	// blocks every later guarded restart of this service, exactly the
+	// failure mode issue #98 describes. Refusing the grant up front, with
+	// a clear reason naming the missing file, is strictly safer than
+	// granting a lease this Comb can never fully stand behind.
+	if s.restartGuardrailToken == "" {
+		return &rpcpb.ReserveRestartLeaseResponse{
+			Error: fmt.Sprintf("refusing to grant a guarded restart lease for %s: this Comb (the current raft leader) has no usable restart-guardrail token at %s, so a confirmation forwarded here later could never be verified and the lease would stay held forever - provision the token (apiaryctl restart-guardrail-provision, or copy the file from any other Comb) and restart managerd before retrying", req.GetService(), restartGuardrailTokenPath),
+		}, nil
+	}
+
 	// ADR-0125: a raftd restart additionally has to survive the
 	// quorum-safety evaluation, and it is checked HERE - on the leader,
 	// before the Apply - rather than in RestartNodeService, because

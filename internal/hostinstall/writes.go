@@ -124,6 +124,27 @@ func (p *Plan) planRestartGuardrailToken() {
 	}
 }
 
+// GenerateRestartGuardrailToken returns a new random ADR-0103
+// restart-guardrail token value, in the exact shape generateToken
+// below already produces for planRestartGuardrailToken's own standalone
+// case. Exported so cmd/apiaryctl's restart-guardrail-provision
+// subcommand (issue #98, requirement 4) generates the value the same
+// way a standalone install does, rather than keeping a second copy of
+// the same 32-random-bytes-base64 recipe.
+func GenerateRestartGuardrailToken() (string, error) {
+	return generateToken()
+}
+
+// WriteRestartGuardrailToken writes value to path as the restart-
+// guardrail token file, atomically and at mode 0600 - the same write
+// planRestartGuardrailToken's own standalone branch registers, exported
+// so restart-guardrail-provision uses the identical on-disk shape
+// (trailing newline, mode, atomic rename) rather than a second,
+// independently-maintained writer for the same file.
+func WriteRestartGuardrailToken(path, value string) error {
+	return writeFileAtomic(path, []byte(value+"\n"), 0o600)
+}
+
 // planInternalTokenPairing is ADR-0033's shared secret between THIS
 // Comb's own raftd and managerd: raftd.json's internal_token and
 // managerd.json's raftd_token must be the identical value, because

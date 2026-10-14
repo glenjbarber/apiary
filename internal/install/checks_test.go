@@ -609,6 +609,52 @@ func TestUplinkBridgingCheck(t *testing.T) {
 	}
 }
 
+// TestRestartGuardrailTokenCheck is the direct regression test for
+// issue #98's requirement 4: a missing or empty restart-guardrail token
+// must report as a hard failure (StatusMissing/StatusMisconfigured,
+// never StatusOK or anything silent), and this check must never attempt
+// to auto-fix it, since only apiaryctl install/restart-guardrail-provision
+// can safely generate or distribute the value.
+func TestRestartGuardrailTokenCheck(t *testing.T) {
+	ctx := context.Background()
+	orig := restartGuardrailTokenFilePath
+	defer func() { restartGuardrailTokenFilePath = orig }()
+
+	dir := t.TempDir()
+	restartGuardrailTokenFilePath = dir + "/restart-guardrail-token"
+
+	res := restartGuardrailTokenCheck.Probe(ctx, newFakeRunner(), Options{})
+	if res.Status != StatusMissing {
+		t.Fatalf("status = %v, want missing when the file does not exist at all", res.Status)
+	}
+	if res.FixHint == "" {
+		t.Error("a missing token must carry a FixHint naming how to provision one")
+	}
+
+	if err := os.WriteFile(restartGuardrailTokenFilePath, []byte("\n  \n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	res2 := restartGuardrailTokenCheck.Probe(ctx, newFakeRunner(), Options{})
+	if res2.Status != StatusMisconfigured {
+		t.Fatalf("status = %v, want misconfigured when the file exists but is blank", res2.Status)
+	}
+
+	if err := os.WriteFile(restartGuardrailTokenFilePath, []byte("a-real-token\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	res3 := restartGuardrailTokenCheck.Probe(ctx, newFakeRunner(), Options{})
+	if res3.Status != StatusOK {
+		t.Fatalf("status = %v, want ok once a non-empty token is present", res3.Status)
+	}
+
+	if restartGuardrailTokenCheck.Apply != nil {
+		t.Error("restart-guardrail-token must never have an Apply - only apiaryctl install/restart-guardrail-provision may write this file")
+	}
+	if restartGuardrailTokenCheck.Risk != RiskManualOnly {
+		t.Fatalf("restart-guardrail-token risk = %v, want manual-only", restartGuardrailTokenCheck.Risk)
+	}
+}
+
 func TestPAMServiceCheckNeverAutoFixes(t *testing.T) {
 	if pamServiceCheck.Apply != nil {
 		t.Fatal("pam-service must never have an Apply - PAM/account config is permanently manual-only")
