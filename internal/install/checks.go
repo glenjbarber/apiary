@@ -365,7 +365,7 @@ var transportEncryptionCheck = Check{
 		}
 		return Result{ID: "transport-encryption", Status: StatusInformational,
 			Detail:  "this host is running at least one inter-host transport in plaintext: " + strings.Join(plaintext, "; "),
-		FixHint: "set raft_tls_cert/raft_tls_key/raft_tls_ca in raftd.json and peer_tls: true in managerd.json once every Comb in this Colony can serve and verify real certificates - see ADR-0078 and ADR-0093/ADR-0147, and issue #97"}
+			FixHint: "set raft_tls_cert/raft_tls_key/raft_tls_ca in raftd.json and peer_tls: true in managerd.json once every Comb in this Colony can serve and verify real certificates - see ADR-0078 and ADR-0093/ADR-0147, and issue #97"}
 	},
 }
 
