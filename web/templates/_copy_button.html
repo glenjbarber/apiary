@@ -1,0 +1,22 @@
+{{/* copy_button: a small reusable "Copy" control for any value shown in
+     plain text or inside a <code> element elsewhere on the page (MAC
+     addresses today; join fingerprints or other copyable values can
+     reuse this same partial later - see issue #101).
+
+     Takes a copyButtonData{Value, Label} (built by the copyButton
+     template func - see server.go). Value is the exact text copied,
+     with no surrounding whitespace or markup. Label is the
+     aria-label, naming what is being copied (e.g. "Copy MAC address
+     for web01") so a screen reader user knows what the button does
+     without relying on visual context.
+
+     Renders nothing when Value is empty, matching the existing "not
+     assigned"/"external DHCP" treatment elsewhere on these pages -
+     there is nothing to copy, so no control is shown.
+
+     The click is handled by one delegated listener on document.body
+     (see layout.html's footer script), not an addEventListener here,
+     because vm_rows.html's rows are replaced wholesale by htmx's 3s
+     poll - a listener bound to the button itself would be garbage
+     collected with the old row on every poll. */}}
+{{define "copy_button"}}{{if .Value}}<button type="button" class="copy-btn" data-copy-value="{{.Value}}" aria-label="{{.Label}}" title="{{.Label}}">Copy<span class="copy-btn-feedback" aria-hidden="true"></span></button>{{end}}{{end}}
