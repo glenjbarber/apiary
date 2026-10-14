@@ -26,6 +26,7 @@ type installFlags struct {
 	frontendHTTP  string
 	restshimdHTTP string
 	tlsDir        string
+	restartToken  string
 }
 
 func runInstall(args []string) int {
@@ -43,12 +44,13 @@ func runInstall(args []string) int {
 	fs.StringVar(&f.frontendHTTP, "frontend-http-addr", "", "the web UI's address; defaults to 0.0.0.0:8080, which is deliberate")
 	fs.StringVar(&f.restshimdHTTP, "restshimd-http-addr", "", "the REST API's address; defaults to 127.0.0.1:8081")
 	fs.StringVar(&f.tlsDir, "tls-dir", "", "where the serving certificate and key live; defaults to /usr/local/etc/apiary-tls")
+	fs.StringVar(&f.restartToken, "restart-guardrail-token", "", "ADR-0103's restart-guardrail shared secret, copied byte-for-byte from any other Comb's own /usr/local/etc/apiary/restart-guardrail-token; required to provision the file on a --colony-member install, since an independently generated value could never match the rest of the Colony. A standalone install generates its own and does not need this")
 	fs.Usage = func() {
 		fmt.Fprint(os.Stderr, `usage: apiaryctl install [--apply] [--colony-member host:port]
                             [--zfs-base dataset] [--vlan-uplink iface] [--bhyve-bridge iface]
                             [--bhyve-bootrom path] [--nat-uplink iface] [--rpc-addr host:port]
                             [--frontend-http-addr host:port] [--restshimd-http-addr host:port]
-                            [--tls-dir dir]
+                            [--tls-dir dir] [--restart-guardrail-token token]
 
 Generates configuration, a TLS serving certificate, and this Comb's
 identity, from an installed binary and a root shell. It needs no
@@ -86,15 +88,16 @@ everything else written, so a second run finishes the job.
 	}
 
 	opts := hostinstall.Options{
-		ColonyMember:      f.colonyMember,
-		ZFSBase:           f.zfsBase,
-		Uplink:            f.uplink,
-		BhyveBridge:       f.bhyveBridge,
-		BhyveBootROM:      f.bhyveBootROM,
-		NATUplink:         f.natUplink,
-		RPCAddr:           f.rpcAddr,
-		FrontendHTTPAddr:  f.frontendHTTP,
-		RestshimdHTTPAddr: f.restshimdHTTP,
+		ColonyMember:          f.colonyMember,
+		ZFSBase:               f.zfsBase,
+		Uplink:                f.uplink,
+		BhyveBridge:           f.bhyveBridge,
+		BhyveBootROM:          f.bhyveBootROM,
+		NATUplink:             f.natUplink,
+		RPCAddr:               f.rpcAddr,
+		FrontendHTTPAddr:      f.frontendHTTP,
+		RestshimdHTTPAddr:     f.restshimdHTTP,
+		RestartGuardrailToken: f.restartToken,
 	}
 	if f.tlsDir != "" {
 		opts.Paths.TLSDir = f.tlsDir

@@ -17,6 +17,8 @@ import (
 	"sync"
 	"time"
 
+	"google.golang.org/grpc"
+
 	rpcpb "github.com/glenjbarber/apiary/api/rpc"
 	"github.com/glenjbarber/apiary/internal/colonyupdate"
 	"github.com/glenjbarber/apiary/internal/isostore"
@@ -2521,7 +2523,123 @@ func (s *Server) handleCreateAPIKey(w http.ResponseWriter, r *http.Request) {
 		s.renderAPIKeyPanelResult(w, r, resp.GetError(), "", "")
 		return
 	}
-	s.renderAPIKeyPanelResult(w, r, "", resp.GetKey().GetName(), resp.GetRawKey())
+	// Issues #75/#80: creating the first key turns on API-key auth for
+	// the whole Colony immediately and permanently (ADR-0023's
+	// auth_enabled), and nothing used to install the new key anywhere -
+	// including on THIS Comb, whose own frontend and whose own managerd
+	// (for its own forwarded calls) both need a copy to keep working at
+	// all. provisionSelfAfterFirstKey closes that for this one Comb,
+	// automatically, the moment the key is minted - see its own doc
+	// comment for exactly what it does and does not reach.
+	provisionWarning := s.provisionSelfAfterFirstKey(r, resp.GetRawKey())
+	s.renderAPIKeyPanelResult(w, r, provisionWarning, resp.GetKey().GetName(), resp.GetRawKey())
+}
+
+// bearerCredentials attaches a single API key to one gRPC call as the
+// "authorization: Bearer <key>" metadata ADR-0023's auth interceptor
+// expects - the same convention cmd/frontend's own long-lived
+// apiKeyCredentials uses for every call on the connection, narrowed
+// here to a single call via grpc.PerRPCCredentials (a CallOption,
+// RFC-experimental but stable in practice) instead of a dial option,
+// because provisionSelfAfterFirstKey needs a credential THIS CALL can
+// present before frontend.json holds one anywhere durable.
+type bearerCredentials string
+
+func (k bearerCredentials) GetRequestMetadata(context.Context, ...string) (map[string]string, error) {
+	return map[string]string{"authorization": "Bearer " + string(k)}, nil
+}
+
+func (bearerCredentials) RequireTransportSecurity() bool { return false }
+
+// provisionSelfAfterFirstKey installs a newly minted API key into THIS
+// Comb's own two local credential slots - managerd's peer_api_key
+// (nodeconfig) and frontend's own manager_api_key (frontendconfig) -
+// through the existing UpdateNodeConfig/UpdateFrontendConfig RPCs
+// (the same root-owned config writers ADR-0147 Part 3 already
+// describes managerd as providing), the instant the key exists. It
+// never writes a value that is already set - the exact same
+// preservation rule internal/hostinstall applies to every file it
+// writes - so a Comb that already has a working credential is left
+// alone.
+//
+// The credential problem this solves: the instant CreateAPIKey above
+// returned, auth_enabled flipped true (ADR-0023, permanent and
+// cluster-wide), and if THIS frontend has no manager_api_key configured
+// yet (frontCfg.ManagerAPIKeySet false - the only case the two RPC
+// calls below ever run) then its live connection to managerd carries no
+// per-RPC credential at all (cmd/frontend only attaches one when
+// cfg.ManagerAPIKey is non-empty at startup), so every call after this
+// one - including the two writes below, were they made the normal way -
+// would itself be rejected Unauthenticated. bearerCredentials above,
+// attached only to these two calls via grpc.PerRPCCredentials, supplies
+// the brand-new key as the credential for exactly this moment, without
+// waiting for a restart and without touching how any OTHER call on this
+// connection authenticates.
+//
+// Deliberately scoped to THIS Comb only - that is the explicit,
+// documented gap left here (see the PR notes for this change, and the
+// API Keys page's own pre-creation warning, which names the files an
+// operator still has to edit by hand on every OTHER Comb). Reaching any
+// other member of the Colony automatically would need either a new
+// cross-Comb RPC or extending CreateAPIKey's own handler in
+// internal/manager/server.go to fan the raw key out to every peer at
+// mint time - both are structural changes to that RPC's own forwarding
+// logic, explicitly out of scope for this change, and the second would
+// only ever run once per key besides (CreateAPIKey is never reissued
+// for a key that already exists), so it could not repair a Comb that
+// was offline at creation time either. A Comb joining later, or any
+// Comb besides this one, still needs its own peer_api_key/
+// manager_api_key installed by hand.
+func (s *Server) provisionSelfAfterFirstKey(r *http.Request, rawKey string) string {
+	if rawKey == "" {
+		return ""
+	}
+	frontCfg, frontErr := s.currentFrontendConfig(r)
+	if frontErr != "" {
+		// Cannot tell whether this frontend already holds a working
+		// credential, and guessing wrong in either direction is worse
+		// than doing nothing here - the fetch failure is already visible
+		// to the operator through the page's own error handling
+		// elsewhere, and the newly created key is still shown once,
+		// unaffected.
+		return ""
+	}
+	if frontCfg.ManagerAPIKeySet {
+		// This frontend already has a credential - it just used it (or
+		// auth was not yet enabled) to create this very key - so there
+		// is nothing locked out here, and overwriting an already-set
+		// value is exactly what this package never does.
+		return ""
+	}
+
+	selfAuth := grpc.PerRPCCredentials(bearerCredentials(rawKey))
+	var problems []string
+
+	if nodeCfg, nodeErr := s.currentNodeConfig(r); nodeErr == "" && !nodeCfg.PeerAPIKeySet {
+		nodeReq := s.nodeConfigUpdateRequest(r)
+		nodeReq.PeerApiKey = rawKey
+		nodeReq.ChangeOrigin = "automation"
+		nodeReq.ChangeRationale = "auto-provisioned: this Comb's own peer_api_key, set to the API key just created on the API Keys page (issues #75/#80)"
+		if resp, err := s.client.UpdateNodeConfig(r.Context(), nodeReq, selfAuth); err != nil {
+			problems = append(problems, "this Comb's own managerd.json peer_api_key ("+err.Error()+")")
+		} else if resp.GetError() != "" {
+			problems = append(problems, "this Comb's own managerd.json peer_api_key ("+resp.GetError()+")")
+		}
+	}
+
+	frontReq := s.frontendConfigUpdateRequest(r)
+	frontReq.ManagerApiKey = rawKey
+	if resp, err := s.client.UpdateFrontendConfig(r.Context(), frontReq, selfAuth); err != nil {
+		problems = append(problems, "this Comb's own frontend.json manager_api_key ("+err.Error()+")")
+	} else if resp.GetError() != "" {
+		problems = append(problems, "this Comb's own frontend.json manager_api_key ("+resp.GetError()+")")
+	}
+
+	if len(problems) == 0 {
+		return ""
+	}
+	return "the key was created, but could not be installed automatically for: " + strings.Join(problems, "; ") +
+		" - install it by hand in the file(s) named above and restart the affected service(s); every OTHER Comb in the Colony still needs the same by-hand treatment regardless"
 }
 
 func (s *Server) handleRevokeAPIKey(w http.ResponseWriter, r *http.Request) {
