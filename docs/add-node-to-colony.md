@@ -135,14 +135,15 @@ leaving the Comb running exactly as it was):
 - Submits the join request against the target Colony member you named,
   using this Comb's own real, current identity
 
-On success, the action displays a short **confirmation code** and the join
-request is already submitted.
+On success, the action displays a short **first code** (ADR-0147 Part 2 -
+the same value `apiaryctl join-introduce` would have printed on the manual
+path below) and the join request is already submitted.
 
 ### After the guided action completes
 
-1. Note the confirmation code shown by the action.
+1. Note the first code shown by the action.
 2. Continue to [Approve on the existing Colony](#approve-on-the-existing-colony)
-   below with that confirmation code.
+   below with that first code.
 
 > **Recovery note**: If the action fails partway and you need to understand
 > the current state by hand, see the [Manual path](#manual-path) below - it
@@ -275,14 +276,26 @@ apiaryctl join-introduce --request-id <request-id> --first-code <first-code> \
 ## Approve on the existing Colony
 
 On any existing Colony member, log in as an Apiary Admin and open the Colony
-overview. In **Pending join requests**:
+overview. In **Pending join requests**, this is a two-stage handshake
+(ADR-0147 Part 2), not a single approval:
 
 1. Confirm the requested node ID and Raft address are the intended host.
-2. Compare the confirmation code with the code visible on the joining node.
-3. Confirm the joining node is already reachable at its Raft address.
-4. Use **Check reachability**. Resolve a blocked or unknown result before
-   approving.
-5. Approve the request.
+2. **Stage 1 - verify the introduction.** In the request's own "Stage 1:
+   verify the first code and fingerprints" form (open by default while the
+   request is waiting on this step), paste the **first code** and every
+   certificate fingerprint exactly as shown on the joining Comb's own
+   screen, and submit. A mismatch on either value is a refusal and counts
+   as an attempt.
+3. Once verified, the target generates a **second PIN**, visible only on
+   the joining Comb (poll for it with `apiaryctl join-introduce ... --field
+   second-pin`, or read it off the guided action's own result if the
+   joining Comb used that path). It is never shown on this page.
+4. Confirm the joining node is already reachable at its Raft address.
+5. Use **Preflight approval** (Check reachability). Resolve a blocked or
+   unknown result before approving.
+6. **Stage 2 - approve.** In the same request's Approve form, paste the
+   second PIN read off the joining Comb's own screen, type the exact
+   confirmation phrase, and submit.
 
 The approval changes the real Raft membership. It is not merely a UI setting.
 
@@ -355,7 +368,7 @@ Stop before approving when any of the following is true:
 - the node ID is unexpected or still a placeholder
 - the Raft address is unreachable, incorrect, or not the address being shown
   by the joining host
-- the confirmation codes differ
+- the first codes or any certificate fingerprint differ
 - the new host has already self-bootstrapped and has not been reset into
   `await_join` mode
 - the existing Colony does not have a trustworthy view of its own quorum

@@ -605,18 +605,23 @@ func (s *Server) handleClusterOverviewPage(w http.ResponseWriter, r *http.Reques
 	}
 
 	joinRequests := s.currentJoinRequests(r)
+	joinRequestError := r.URL.Query().Get("join_request_error")
+	joinRequestAwaitingSecond := r.URL.Query().Get("join_request_awaiting_second")
 	s.render(w, "cluster_overview_page", s.withAuthFieldsFrom(r, pageData{
 		ClusterNodes: nodes,
 		// GuardrailHolds is 0 - see pageData.HealthCard's own comment on
 		// why this constructor has no real count to pass here yet.
-		HealthCard:                  newHealthCardViewFromNodes(nodes, 0, len(joinRequests)),
-		StateDigestColony:           digestColony,
-		JoinRequests:                joinRequests,
-		ActivePage:                  "stats",
-		JoinRequestError:            r.URL.Query().Get("join_request_error"),
-		JoinRequestPreflightID:      r.URL.Query().Get("preflight_request_id"),
-		JoinRequestPreflightVerdict: r.URL.Query().Get("preflight_verdict"),
-		JoinRequestPreflightDetail:  r.URL.Query().Get("preflight_detail"),
+		HealthCard:                             newHealthCardViewFromNodes(nodes, 0, len(joinRequests)),
+		StateDigestColony:                      digestColony,
+		JoinRequests:                           joinRequests,
+		ActivePage:                             "stats",
+		JoinRequestError:                       joinRequestError,
+		JoinRequestErrorPointsToStage1:         joinRequestErrorPointsToStage1(joinRequestError),
+		JoinRequestAwaitingSecondAuthorization: joinRequestAwaitingSecond != "",
+		JoinRequestAwaitingSecondAuthorizationMessage: joinRequestAwaitingSecond,
+		JoinRequestPreflightID:                        r.URL.Query().Get("preflight_request_id"),
+		JoinRequestPreflightVerdict:                   r.URL.Query().Get("preflight_verdict"),
+		JoinRequestPreflightDetail:                    r.URL.Query().Get("preflight_detail"),
 	}, statusResp, nil))
 }
 

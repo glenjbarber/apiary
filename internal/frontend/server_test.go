@@ -212,6 +212,14 @@ type fakeClient struct {
 	listJoinRequestsResp               *rpcpb.ListJoinRequestsResponse
 	lastApproveJoinRequestReq          *rpcpb.ApproveJoinRequestRequest
 
+	// approveJoinRequestResp, when set, is returned from
+	// ApproveJoinRequest as-is instead of this fake's own
+	// confirm_phrase-matching logic - the only way a test can make the
+	// fake return ApproveJoinRequestResponse.awaiting_second_authorization
+	// (ADR-0147 Part 3 / issue #73), which the confirm_phrase check below
+	// has no way to produce on its own.
+	approveJoinRequestResp *rpcpb.ApproveJoinRequestResponse
+
 	simulateResp             *rpcpb.SimulateNodeFailureResponse
 	simulateNodeFailureCalls int
 	simulateErr              error
@@ -885,6 +893,9 @@ func (f *fakeClient) ListJoinRequests(context.Context, *rpcpb.ListJoinRequestsRe
 // gate itself is covered by internal/manager's own RPC-level tests.
 func (f *fakeClient) ApproveJoinRequest(_ context.Context, in *rpcpb.ApproveJoinRequestRequest, _ ...grpc.CallOption) (*rpcpb.ApproveJoinRequestResponse, error) {
 	f.lastApproveJoinRequestReq = in
+	if f.approveJoinRequestResp != nil {
+		return f.approveJoinRequestResp, nil
+	}
 	const requiredPhrase = "yes-trust-new-comb"
 	if in.GetConfirmPhrase() != requiredPhrase {
 		return &rpcpb.ApproveJoinRequestResponse{Error: fmt.Sprintf(
@@ -3861,6 +3872,115 @@ func TestServer_HandleApproveJoinRequest_CorrectPhraseApproves(t *testing.T) {
 	}
 	if client.lastApproveJoinRequestReq.GetConfirmPhrase() != "yes-trust-new-comb" {
 		t.Errorf("ApproveJoinRequest confirm_phrase = %q, want yes-trust-new-comb", client.lastApproveJoinRequestReq.GetConfirmPhrase())
+	}
+}
+
+// TestServer_HandleApproveJoinRequest_AwaitingSecondAuthorization is the
+// issue #73 regression test: when ApproveJoinRequest reports
+// awaiting_second_authorization, the handler must redirect through its
+// own ?join_request_awaiting_second= parameter - carrying the message
+// naming the key and Comb that recorded the first authorization - and
+// never fall through to ?join_request_error=, which would render the
+// one-authorization-recorded state identically to a real failure.
+func TestServer_HandleApproveJoinRequest_AwaitingSecondAuthorization(t *testing.T) {
+	const msg = "authorization 1 of 2 recorded, by key \"ops-key-1\" on Comb \"node01\" - a second Approve from a DIFFERENT Comb with a DIFFERENT key is required"
+	client := &fakeClient{approveJoinRequestResp: &rpcpb.ApproveJoinRequestResponse{
+		AwaitingSecondAuthorization: true,
+		SecondAuthorizationRequired: msg,
+	}}
+	s := newTestServer(t, client)
+
+	form := url.Values{"confirm_phrase": {"yes-trust-new-comb"}, "second_pin": {"12345678"}}
+	req := httptest.NewRequest(http.MethodPost, "/join-requests/jreq-abc123/approve", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusFound {
+		t.Fatalf("status = %d, want 302; body=%s", rec.Code, rec.Body.String())
+	}
+	loc := rec.Header().Get("Location")
+	if !strings.Contains(loc, "join_request_awaiting_second=") {
+		t.Fatalf("Location = %q, want it to carry join_request_awaiting_second=", loc)
+	}
+	if strings.Contains(loc, "join_request_error=") {
+		t.Errorf("Location = %q, awaiting-second-authorization must not also be redirected as join_request_error=", loc)
+	}
+
+	// Follow the redirect, the same way a browser would, and confirm the
+	// landing page actually renders the message distinctly from an error.
+	followReq := httptest.NewRequest(http.MethodGet, loc, nil)
+	followRec := httptest.NewRecorder()
+	s.ServeHTTP(followRec, followReq)
+	body := followRec.Body.String()
+	if !strings.Contains(body, "authorization 1 of 2 recorded") {
+		t.Errorf("landing page missing the awaiting-second-authorization message, got: %s", body)
+	}
+	if !strings.Contains(body, `class="success"`) {
+		t.Errorf("landing page should render the awaiting-second-authorization message in a success banner, not as an error, got: %s", body)
+	}
+}
+
+// TestServer_ClusterOverviewPage_JoinRequestErrorPointsToStage1 is the
+// issue #71 regression test for the "the refusal for approving too
+// early points at the form" requirement: the specific stage-mismatch
+// refusal ApprovePendingJoinRequest returns must render with a link back
+// to the Pending join requests panel's Stage 1 form, and an unrelated
+// error must not.
+func TestServer_ClusterOverviewPage_JoinRequestErrorPointsToStage1(t *testing.T) {
+	const stageTooEarly = `ApprovePendingJoinRequest: request_id "jreq-abc123" is at stage JOIN_REQUEST_STAGE_INTRODUCED. The first code and fingerprints have to be verified on this Colony's page before the second PIN exists`
+
+	cases := []struct {
+		name      string
+		errMsg    string
+		wantsLink bool
+	}{
+		{name: "stage too early points at the form", errMsg: stageTooEarly, wantsLink: true},
+		{name: "unrelated error does not", errMsg: `confirm_phrase "" does not match the required confirmation phrase "yes-trust-new-comb" - nothing was done`, wantsLink: false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			s := newTestServer(t, &fakeClient{})
+			req := httptest.NewRequest(http.MethodGet, "/?join_request_error="+url.QueryEscape(tc.errMsg), nil)
+			rec := httptest.NewRecorder()
+			s.ServeHTTP(rec, req)
+
+			body := rec.Body.String()
+			gotLink := strings.Contains(body, `Jump to the Stage 1 form below`)
+			if gotLink != tc.wantsLink {
+				t.Errorf("link to Stage 1 form present = %v, want %v; body=%s", gotLink, tc.wantsLink, body)
+			}
+		})
+	}
+}
+
+// TestServer_ClusterOverviewPage_StageOneFormOpenByDefaultWhenIntroduced
+// is the other half of issue #71: the Stage 1 disclosure must render
+// already open for a request still waiting on it (stage "introduced"),
+// and must NOT be forced open once it has moved past that stage - an
+// operator who already verified the introduction does not need the form
+// re-opened under them on every page load.
+func TestServer_ClusterOverviewPage_StageOneFormOpenByDefaultWhenIntroduced(t *testing.T) {
+	client := &fakeClient{listJoinRequestsResp: &rpcpb.ListJoinRequestsResponse{Requests: []*rpcpb.PendingJoinRequest{
+		{RequestId: "jreq-intro", NodeId: "node02", RaftBindAddress: "10.62.0.5:17600", Code: "482913",
+			Stage:                  rpcpb.JoinRequestStage_JOIN_REQUEST_STAGE_INTRODUCED,
+			AdvertisedFingerprints: []string{"SHA256:AA:BB:CC"}},
+		{RequestId: "jreq-verified", NodeId: "node03", RaftBindAddress: "10.62.0.6:17600",
+			Stage:                  rpcpb.JoinRequestStage_JOIN_REQUEST_STAGE_CODE_VERIFIED,
+			AdvertisedFingerprints: []string{"SHA256:DD:EE:FF"}, SecondPinExpiresAtUnix: 9999999999},
+	}}}
+	s := newTestServer(t, client)
+
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, req)
+
+	body := rec.Body.String()
+	if !strings.Contains(body, `<details id="join-request-jreq-intro-stage1" open>`) {
+		t.Errorf("Stage 1 form for a request still at stage introduced must render open by default, got: %s", body)
+	}
+	if strings.Contains(body, `<details id="join-request-jreq-verified-stage1" open>`) {
+		t.Errorf("Stage 1 form for a request already past stage introduced must not be forced open, got: %s", body)
 	}
 }
 
