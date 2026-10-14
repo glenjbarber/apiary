@@ -45,3 +45,6 @@ go.work.sum
 
 .DS_Store
 *.swp
+
+# Claude Code agent worktrees (local scratch, not repo content)
+/.claude/
