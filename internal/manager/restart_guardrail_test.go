@@ -39,6 +39,39 @@ func TestRestartGuardrailToken_EmptyConfiguredTokenAlwaysRejects(t *testing.T) {
 	}
 }
 
+// TestReserveRestartLease_FailsClosedWithNoLocalToken is the direct
+// regression test for issue #98's priority-1 fix: RestartNodeService's
+// own in-process path (reserveRestartLease, called directly by the
+// trusted local caller - never gated by the external
+// ReserveRestartLease's token check at all) must still refuse to grant a
+// lease when this Comb, as the current raft leader, has no usable
+// restart-guardrail token of its own. Granting it anyway is exactly the
+// bug: a confirmation forwarded here later could never be verified
+// (restartGuardrailTokenValid rejects everything when configured is
+// empty), leaving a lease with no TTL that stays held forever and blocks
+// every later guarded restart.
+func TestReserveRestartLease_FailsClosedWithNoLocalToken(t *testing.T) {
+	raftdSocket := newRaftdUDSSocket(t)
+	_, srv := newManagerdRPCClientAndServer(t, raftdSocket, "raftd-1")
+	// s.restartGuardrailToken stays "" (default) - nothing provisioned.
+
+	resp, err := srv.reserveRestartLease(context.Background(), &rpcpb.ReserveRestartLeaseRequest{
+		Service: raftdServiceName, NodeId: "raftd-1", Force: true,
+	})
+	if err != nil {
+		t.Fatalf("reserveRestartLease() error: %v", err)
+	}
+	if resp.GetGranted() {
+		t.Fatal("reserveRestartLease() granted a lease with no local restart-guardrail token - this lease can never be confirmed and will stay held forever")
+	}
+	if resp.GetError() == "" {
+		t.Fatal("reserveRestartLease() refused with no error message explaining why")
+	}
+	if !strings.Contains(resp.GetError(), restartGuardrailTokenPath) {
+		t.Errorf("reserveRestartLease() error = %q, want it to name the missing token file %q", resp.GetError(), restartGuardrailTokenPath)
+	}
+}
+
 // TestRestartGuardrailToken_NoRPCPathCanProduceOrChangeIt is the direct
 // regression test for the design review finding that neither a
 // CreateAPIKey-issued credential (of any role, including Admin) nor

@@ -610,6 +610,15 @@ var authExemptMethods = map[string]bool{
 	issueManagerdRestartMethod:   true,
 }
 
+// restartGuardrailTokenPath is ADR-0103's restart-guardrail shared
+// secret file, named here (duplicating cmd/managerd's and cmd/raftd's
+// own identical constants) purely so reserveRestartLeaseFenced's
+// fail-closed refusal (issue #98) can name the file by path in its
+// error without importing either command package. Kept in sync with
+// internal/hostinstall's own restartGuardrailTokenFile() by
+// TestRestartGuardrailTokenPathMatchesHostinstall.
+const restartGuardrailTokenPath = "/usr/local/etc/apiary/restart-guardrail-token"
+
 // restartGuardrailTokenValid reports whether presented matches configured
 // exactly, in constant time - and, critically, only when configured is
 // non-empty. subtle.ConstantTimeCompare on two empty byte slices returns

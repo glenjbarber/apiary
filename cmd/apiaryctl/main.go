@@ -41,6 +41,7 @@
 //	apiaryctl join-introduce --target HOST:PORT
 //	apiaryctl force-restart
 //	apiaryctl pin-trusted-peers --target HOST:PORT --bundle FILE
+//	apiaryctl restart-guardrail-provision
 //	apiaryctl help
 package main
 
@@ -78,6 +79,13 @@ Usage:
                             Root only, run on a member of the Colony,
                             and every input is checked before the
                             first pin is sent
+  apiaryctl restart-guardrail-provision
+                            generate ADR-0103's restart-guardrail token
+                            on this Comb for a Colony that has none
+                            anywhere yet (issue #98), and print the
+                            manual steps to finish distributing it.
+                            Root only, never overwrites an existing
+                            token, never sends it over the network
   apiaryctl -version        report this binary's build identity
   apiaryctl help            this message
 
@@ -135,6 +143,8 @@ func main() {
 		os.Exit(runForceRestart(args[1:]))
 	case "pin-trusted-peers":
 		os.Exit(runPinTrustedPeers(args[1:]))
+	case "restart-guardrail-provision":
+		os.Exit(runRestartGuardrailProvision(args[1:]))
 	case "help", "-h", "--help":
 		fmt.Print(usage)
 		os.Exit(0)

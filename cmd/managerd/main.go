@@ -219,10 +219,16 @@ func run() error {
 	//     wire: cmd/raftd calls the exported ConfirmRestartCompleted, so a
 	//     raftd lease granted here can never be confirmed. The lease has
 	//     no TTL, so it stays held and blocks every later attempt.
-	//   - cmd/managerd's own restart is the exception: it calls
-	//     ConfirmRestartCompletedLocal, which skips the token check
-	//     entirely, because it is the same process confirming on its own
-	//     behalf.
+	//   - cmd/managerd's own restart calls ConfirmRestartCompletedLocal,
+	//     which skips the token check entirely - but only when this node
+	//     is STILL the raft leader at that moment. If it is not (the
+	//     common case: a restart is exactly the kind of event that can
+	//     cost a node leadership), confirming still has to forward to
+	//     whichever node is leader now, and that forward presents this
+	//     same missing token - so "unaffected" was never the whole
+	//     story, and this is deliberately NOT claimed below (issue #98):
+	//     the pending-restart-confirmation startup path below reports the
+	//     real, narrower consequence instead.
 	restartGuardrailToken := ""
 	// tokenAbsent is the operator-facing consequence, worded once and
 	// reused for "no file", "empty file" and "unreadable file", which are
@@ -233,9 +239,11 @@ func run() error {
 			"because the restarted raftd presents this token to managerd when it starts, and the lease "+
 			"has no TTL, so it stays held and blocks every later restart attempt. "+
 			"A guarded restart requested at this node also cannot be forwarded to the leader, because the "+
-			"forward presents the same token. managerd's own restart is unaffected: it confirms in-process "+
-			"with no token. The token is read ONCE at startup, so provision the file on every Comb and "+
-			"then restart this service", restartGuardrailTokenPath, cause)
+			"forward presents the same token. managerd's own restart is NOT exempt either: confirming it on "+
+			"next startup skips the token check only while this node is still raft leader at that moment, and "+
+			"otherwise needs the same missing token to forward the confirmation to whichever node is leader by "+
+			"then - see the next warning below if a pending confirmation is actually found. The token is read "+
+			"ONCE at startup, so provision the file on every Comb and then restart this service", restartGuardrailTokenPath, cause)
 	}
 	if data, err := os.ReadFile(restartGuardrailTokenPath); err == nil {
 		restartGuardrailToken = strings.TrimSpace(string(data))

@@ -139,6 +139,7 @@ var registry = []Check{
 	bhyveBridgeCheck,
 	uplinkBridgingCheck,
 	hastdEnableCheck,
+	restartGuardrailTokenCheck,
 	pamServiceCheck,
 }
 
@@ -973,6 +974,65 @@ var hastdEnableCheck = Check{
 		}
 		return Result{ID: "hastd-enable", Status: StatusManual, Detail: fmt.Sprintf("hastd_enable=%q", v),
 			FixHint: "sysrc hastd_enable=YES - and apply the hast_proto_recv_hdr source patch for FreeBSD bug 298085 before relying on hastd (see docs/adr/0022-network-management.md); Apiary does not carry or apply this patch itself"}
+	},
+}
+
+// ---- restart-guardrail token (ADR-0103, issue #98) ----
+
+// restartGuardrailTokenFilePath mirrors cmd/managerd's and cmd/raftd's
+// own restartGuardrailTokenPath constant and internal/hostinstall's
+// restartGuardrailTokenFile() - duplicated here, as those are, so this
+// package does not have to import either command or internal/hostinstall
+// just to name the one path they all already agree on. A var, not a
+// const, for the same reason pfConfPath/etcServicesPath above are: tests
+// point it at a temp file instead of a real host's own
+// /usr/local/etc/apiary.
+var restartGuardrailTokenFilePath = "/usr/local/etc/apiary/restart-guardrail-token"
+
+// restartGuardrailTokenCheck reports a missing or empty restart-guardrail
+// token as a hard FAILURE (StatusMissing), not a warning that scrolls
+// past in a log (issue #98, requirement 4) - apiaryinstall's own run()
+// already treats any non-OK/non-Informational Result as a failed run with
+// a non-zero exit, so giving this finding a real Status is what makes
+// that happen; reporting it only in a log line (as cmd/managerd already
+// does at startup) is exactly the silent-gap behaviour this check exists
+// to close.
+//
+// RiskManualOnly, like pam-service below: apiaryinstall itself never
+// writes into /usr/local/etc/apiary (that is apiaryctl install's own
+// job - see internal/hostinstall/writes.go's planRestartGuardrailToken),
+// so there is nothing for this check's own Apply to do. The FixHint
+// instead names the two supported, one-command ways to actually fix it:
+// apiaryctl install's own provisioning for a Comb with no Colony yet
+// (ADR-0103's standalone case), and apiaryctl restart-guardrail-provision
+// (issue #98, requirement 4) for an existing Colony that has no token on
+// any Comb and so has nothing to copy.
+var restartGuardrailTokenCheck = Check{
+	ID:          "restart-guardrail-token",
+	Description: restartGuardrailTokenFilePath + " exists and is non-empty (ADR-0103)",
+	Risk:        RiskManualOnly,
+	Probe: func(ctx context.Context, r Runner, opt Options) Result {
+		data, err := os.ReadFile(restartGuardrailTokenFilePath)
+		switch {
+		case os.IsNotExist(err):
+			return Result{ID: "restart-guardrail-token", Status: StatusMissing,
+				Detail: restartGuardrailTokenFilePath + " does not exist",
+				FixHint: "a Comb with no Colony yet: run apiaryctl install (it generates one for a standalone install). " +
+					"An existing Colony with no token anywhere: run `apiaryctl restart-guardrail-provision` on any one Comb, " +
+					"then restart managerd on every Comb (the token is read once at startup) - see issue #98 and ADR-0103. " +
+					"Until this is fixed, a guarded restart lease granted here can never be confirmed and stays held forever."}
+		case err != nil:
+			return Result{ID: "restart-guardrail-token", Status: StatusMissing,
+				Detail:  "reading " + restartGuardrailTokenFilePath + ": " + err.Error(),
+				FixHint: "fix the read error (likely a permissions problem - this file must be root-owned, mode 0600) and re-run this check"}
+		}
+		if strings.TrimSpace(string(data)) == "" {
+			return Result{ID: "restart-guardrail-token", Status: StatusMisconfigured,
+				Detail: restartGuardrailTokenFilePath + " exists but is empty",
+				FixHint: "an empty file is the same operational situation as a missing one - run `apiaryctl restart-guardrail-provision` " +
+					"on any Comb that already has a real token, or re-run apiaryctl install on a standalone Comb, then restart managerd everywhere"}
+		}
+		return Result{ID: "restart-guardrail-token", Status: StatusOK, Detail: restartGuardrailTokenFilePath + " present"}
 	},
 }
 
