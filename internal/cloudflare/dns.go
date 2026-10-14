@@ -23,6 +23,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"time"
 )
 
 // apiBaseURL is Cloudflare's real API base - overridable in tests via
@@ -31,6 +32,26 @@ import (
 const apiBaseURL = "https://api.cloudflare.com/client/v4"
 
 var baseURL = apiBaseURL
+
+// cloudflareHTTPClient deliberately has its own bounds rather than using
+// http.DefaultClient. The caller's context still supplies cancellation and
+// any earlier deadline; these limits protect reconciliation when a caller
+// accidentally supplies a long-lived context or an endpoint stops responding.
+var cloudflareHTTPClient = &http.Client{
+	Timeout: 15 * time.Second,
+	Transport: &http.Transport{
+		Proxy:                 http.ProxyFromEnvironment,
+		DialContext:           (&http.Transport{}).DialContext,
+		ForceAttemptHTTP2:     true,
+		MaxIdleConns:          100,
+		IdleConnTimeout:       90 * time.Second,
+		TLSHandshakeTimeout:   10 * time.Second,
+		ExpectContinueTimeout: 1 * time.Second,
+		ResponseHeaderTimeout: 10 * time.Second,
+	},
+}
+
+const maxCloudflareResponseBody = 1 << 20 // 1 MiB
 
 // SetBaseURLForTest overrides the Cloudflare API base URL for the
 // duration of a test, returning a func that restores it. It exists so
@@ -93,14 +114,24 @@ func doRequest(ctx context.Context, method, path, token string, body any) (*apiR
 	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("Content-Type", "application/json")
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := cloudflareHTTPClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("calling cloudflare API: %w", err)
 	}
 	defer resp.Body.Close()
 
+	// Read a bounded amount before decoding. This prevents a broken or
+	// compromised endpoint from making JSON decoding allocate without limit.
+	encoded, err := io.ReadAll(io.LimitReader(resp.Body, maxCloudflareResponseBody+1))
+	if err != nil {
+		return nil, fmt.Errorf("reading cloudflare API response (status %d): %w", resp.StatusCode, err)
+	}
+	if len(encoded) > maxCloudflareResponseBody {
+		return nil, fmt.Errorf("reading cloudflare API response (status %d): response body exceeds %d bytes", resp.StatusCode, maxCloudflareResponseBody)
+	}
+
 	var parsed apiResponse
-	if err := json.NewDecoder(resp.Body).Decode(&parsed); err != nil {
+	if err := json.Unmarshal(encoded, &parsed); err != nil {
 		return nil, fmt.Errorf("decoding cloudflare API response (status %d): %w", resp.StatusCode, err)
 	}
 	if !parsed.Success {
@@ -168,13 +199,6 @@ func EnsureCNAME(ctx context.Context, token, zoneID, hostname, target string) er
 // CreateTXT creates a new TXT record and returns its Cloudflare record
 // ID. Used by ACME's DNS-01 challenge (ADR-0133, internal/acme) to
 // publish a challenge value under _acme-challenge.<hostname>.
-//
-// Unlike EnsureCNAME, this always creates a new record rather than
-// checking for an existing one first: a DNS-01 challenge value is
-// short-lived and specific to one issuance attempt, so there is nothing
-// to idempotently converge toward. The caller always deletes the record
-// it created (via the returned ID) once validation finishes, whether or
-// not it succeeded.
 func CreateTXT(ctx context.Context, token, zoneID, name, value string) (string, error) {
 	path := fmt.Sprintf("/zones/%s/dns_records", url.PathEscape(zoneID))
 	resp, err := doRequest(ctx, http.MethodPost, path, token, dnsRecord{Type: "TXT", Name: name, Content: value, TTL: 60})
@@ -208,10 +232,7 @@ func DeleteTXT(ctx context.Context, token, zoneID, recordID string) error {
 	return nil
 }
 
-// DeleteCNAME idempotently removes hostname's CNAME record. A record
-// that's already gone (never created, or removed out-of-band in
-// Cloudflare's own dashboard - a disclosed, accepted v1 gap, see
-// ADR-0063) is treated as success, never an error.
+// DeleteCNAME idempotently removes hostname's CNAME record.
 func DeleteCNAME(ctx context.Context, token, zoneID, hostname string) error {
 	existing, err := findRecord(ctx, token, zoneID, hostname)
 	if err != nil {
