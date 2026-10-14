@@ -34,14 +34,15 @@
 // cmd/apiaryctl/pintrustedpeers.go, which states the four refusals it is
 // built around.
 //
-// Usage:
+// Usage (apiaryctl is not on PATH; always invoke it by its installed
+// path):
 //
-//	apiaryctl install [--apply]
-//	apiaryctl join-authorize --node-id ID --fingerprint FP
-//	apiaryctl join-introduce --target HOST:PORT
-//	apiaryctl force-restart
-//	apiaryctl pin-trusted-peers --target HOST:PORT --bundle FILE
-//	apiaryctl help
+//	/usr/local/libexec/apiary/apiaryctl install [--apply]
+//	/usr/local/libexec/apiary/apiaryctl join-authorize --node-id ID --fingerprint FP
+//	/usr/local/libexec/apiary/apiaryctl join-introduce --target HOST:PORT
+//	/usr/local/libexec/apiary/apiaryctl force-restart
+//	/usr/local/libexec/apiary/apiaryctl pin-trusted-peers --target HOST:PORT --bundle FILE
+//	/usr/local/libexec/apiary/apiaryctl help
 package main
 
 import (
@@ -53,6 +54,10 @@ import (
 )
 
 const usage = `apiaryctl - operator commands for an apiary Comb.
+
+apiaryctl is installed at /usr/local/libexec/apiary/apiaryctl and is
+NOT on PATH. Invoke it by that full path, e.g.
+/usr/local/libexec/apiary/apiaryctl help.
 
 Usage:
   apiaryctl install          generate this Comb's configuration, TLS
