@@ -1,5 +1,19 @@
 # ADR-0147: Automated install, and a two-way peer-authorized Colony join
 
+**Amended 2026-10-14 (issue #99):** the TLS directory this ADR's Part 1
+installer (`apiaryctl install`) creates moved from the sibling directory
+`/usr/local/etc/apiary-tls` to `/usr/local/etc/apiary/tls`, inside the
+config directory this same ADR already put `join-authorizations.json`
+and (via ADR-0103) `restart-guardrail-token` in, so all of a Comb's
+configuration and credential material sits in one tree. This is a
+new-install default only: every path below that still reads
+`apiary-tls` describes the layout a Comb installed before this
+amendment keeps running on unchanged, since `tls_cert`/`tls_key`/
+`manager_tls_ca` are config-file values the installer only ever fills
+when absent and never overwrites. `apiaryctl migrate-tls-dir` moves an
+existing Comb onto the new default in one command (see its own doc
+comment in `cmd/apiaryctl/migratetlsdir.go`).
+
 ## Status
 
 **Accepted** on 2026-09-28. **Implemented: Part 1 in full, and Part 4's
@@ -193,7 +207,7 @@ radii do not overlap:
 
 | | `apiaryinstall` (source-only) | `apiaryctl install` (installed) |
 | --- | --- | --- |
-| touches | `/etc/rc.conf`, PF, ZFS, kernel modules, packages, bridge topology | `/usr/local/etc/apiary/*.json`, `/usr/local/etc/apiary-tls/*` |
+| touches | `/etc/rc.conf`, PF, ZFS, kernel modules, packages, bridge topology | `/usr/local/etc/apiary/*.json`, `/usr/local/etc/apiary/tls/*` |
 | needs | a checkout, `pkg`, sometimes a compiler | a root shell |
 | runs | once, before binaries exist | any time, on a running Comb |
 

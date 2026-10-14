@@ -120,6 +120,7 @@ var registry = []Check{
 	// operator who ran the sample through verbatim is told before
 	// anything else is proposed.
 	managerdNodeIDCheck,
+	tlsDirOldLocationCheck,
 	zfsPoolCheck,
 	zfsBaseDatasetCheck,
 	vmmLoadedCheck,
@@ -274,6 +275,74 @@ var managerdNodeIDCheck = Check{
 		}
 		return Result{ID: "managerd-node-id", Status: StatusOK,
 			Detail: fmt.Sprintf("node_id is %q", peek.NodeID)}
+	},
+}
+
+// oldTLSDirPrefix is the pre-issue-#99 default TLS directory, as a
+// path prefix: a Comb whose managerd.json still names a file under it
+// has not migrated to the new default inside the config directory
+// (/usr/local/etc/apiary/tls, internal/hostinstall.DefaultPaths). A
+// var, not a const, purely so a test can point it at a fixture path
+// instead of the real /usr/local/etc/apiary-tls.
+var oldTLSDirPrefix = "/usr/local/etc/apiary-tls/"
+
+// managerdTLSCertPeek is the minimal shape of managerd.json this check
+// reads - tls_cert and nothing else - for the same reason
+// managerdNodeIDPeek above is kept narrow: no other field's value can
+// trip this check.
+type managerdTLSCertPeek struct {
+	TLSCert string `json:"tls_cert"`
+}
+
+// tlsDirOldLocationCheck is issue #99's apiaryinstall-side half: a
+// hint, not a hard failure, that this Comb's serving certificate is
+// still under the old sibling directory rather than the new default
+// inside the config directory. Nothing here is broken - the daemons
+// are entirely config-driven about where their own certificate and key
+// live (internal/hostinstall's own preservation rule never rewrites an
+// already-set tls_cert/tls_key) - so this is StatusMisconfigured in
+// the same "worth fixing, not urgent, no Apply" sense
+// managerdNodeIDCheck already uses, RiskManualOnly, and the FixHint
+// names the one-command fix rather than describing the manual steps,
+// since `apiaryctl migrate-tls-dir` exists precisely to do them
+// safely (preserving permissions, rewriting all three config files,
+// and restarting in the right order).
+//
+// A managerd.json that does not exist yet, or one whose tls_cert is
+// unset, is StatusOK: there is no old location to report on a host
+// that has not been installed yet, or on one whose certificate came
+// from somewhere apiaryctl install never touched.
+var tlsDirOldLocationCheck = Check{
+	ID:          "tls-dir-old-location",
+	Description: "this Comb's serving certificate has moved into /usr/local/etc/apiary/tls, not the older sibling directory",
+	Risk:        RiskManualOnly,
+	Applicable:  always,
+	Probe: func(ctx context.Context, r Runner, opt Options) Result {
+		body, err := os.ReadFile(managerdConfigPath)
+		if os.IsNotExist(err) {
+			return Result{ID: "tls-dir-old-location", Status: StatusOK,
+				Detail: managerdConfigPath + " does not exist yet, so there is no tls_cert to check"}
+		}
+		if err != nil {
+			return Result{ID: "tls-dir-old-location", Status: StatusUnknown, Detail: err.Error(),
+				FixHint: "make " + managerdConfigPath + " readable by this user, then re-run"}
+		}
+		var peek managerdTLSCertPeek
+		if err := json.Unmarshal(body, &peek); err != nil {
+			return Result{ID: "tls-dir-old-location", Status: StatusUnknown, Detail: err.Error(),
+				FixHint: "fix the JSON in " + managerdConfigPath + " - managerd loads the same file and will not start on it either"}
+		}
+		if peek.TLSCert == "" {
+			return Result{ID: "tls-dir-old-location", Status: StatusOK,
+				Detail: "tls_cert is not set in " + managerdConfigPath}
+		}
+		if !strings.HasPrefix(peek.TLSCert, oldTLSDirPrefix) {
+			return Result{ID: "tls-dir-old-location", Status: StatusOK,
+				Detail: fmt.Sprintf("tls_cert is %q, not under the old %s", peek.TLSCert, oldTLSDirPrefix)}
+		}
+		return Result{ID: "tls-dir-old-location", Status: StatusMisconfigured,
+			Detail:  fmt.Sprintf("tls_cert in %s is still %q, under the pre-issue-#99 default directory rather than /usr/local/etc/apiary/tls", managerdConfigPath, peek.TLSCert),
+			FixHint: "run `apiaryctl migrate-tls-dir` on this Comb (report-only first, then --apply) - it moves the certificate and key, rewrites managerd.json/frontend.json/restshimd.json, and restarts managerd and frontend in the safe order. Nothing here is broken in the meantime: Apiary reads tls_cert/tls_key from the config file, not from a fixed path"}
 	},
 }
 

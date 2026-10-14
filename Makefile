@@ -436,7 +436,7 @@ setup-pam:
 		printf 'auth required pam_unix.so no_warn\naccount required pam_unix.so\n' > /etc/pam.d/${PAM_SERVICE}
 	@echo "PAM policy at /etc/pam.d/${PAM_SERVICE} - set pam_service to ${PAM_SERVICE} in managerd.json, then restart apiary_managerd followed by apiary_frontend; the first successful login becomes Admin automatically (see docs/bootstrap.md Step 11)."
 
-NODE_TLS_DIR?=	/usr/local/etc/apiary-tls
+NODE_TLS_DIR?=	/usr/local/etc/apiary/tls
 
 # setup-tls generates a self-signed certificate for managerd's external
 # API if NODE_TLS_DIR doesn't already have one. NOT part of `setup` any

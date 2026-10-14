@@ -42,6 +42,7 @@
 //	/usr/local/libexec/apiary/apiaryctl join-introduce --target HOST:PORT
 //	/usr/local/libexec/apiary/apiaryctl force-restart
 //	/usr/local/libexec/apiary/apiaryctl pin-trusted-peers --target HOST:PORT --bundle FILE
+//	/usr/local/libexec/apiary/apiaryctl migrate-tls-dir [--apply]
 //	/usr/local/libexec/apiary/apiaryctl help
 package main
 
@@ -83,6 +84,15 @@ Usage:
                             Root only, run on a member of the Colony,
                             and every input is checked before the
                             first pin is sent
+  apiaryctl migrate-tls-dir
+                            move this Comb's serving certificate and
+                            key from the old /usr/local/etc/apiary-tls
+                            to the new default,
+                            /usr/local/etc/apiary/tls (issue #99), and
+                            update managerd.json/frontend.json/
+                            restshimd.json to match. Report only unless
+                            --apply. A Comb already on the new layout
+                            no-ops cleanly
   apiaryctl -version        report this binary's build identity
   apiaryctl help            this message
 
@@ -140,6 +150,8 @@ func main() {
 		os.Exit(runForceRestart(args[1:]))
 	case "pin-trusted-peers":
 		os.Exit(runPinTrustedPeers(args[1:]))
+	case "migrate-tls-dir":
+		os.Exit(runMigrateTLSDir(args[1:]))
 	case "help", "-h", "--help":
 		fmt.Print(usage)
 		os.Exit(0)

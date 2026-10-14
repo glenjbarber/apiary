@@ -43,7 +43,7 @@ func runInstall(args []string) int {
 	fs.StringVar(&f.rpcAddr, "rpc-addr", "", "managerd's own listening address, checked against this Comb's certificate rather than trusted")
 	fs.StringVar(&f.frontendHTTP, "frontend-http-addr", "", "the web UI's address; defaults to 0.0.0.0:8080, which is deliberate")
 	fs.StringVar(&f.restshimdHTTP, "restshimd-http-addr", "", "the REST API's address; defaults to 127.0.0.1:8081")
-	fs.StringVar(&f.tlsDir, "tls-dir", "", "where the serving certificate and key live; defaults to /usr/local/etc/apiary-tls")
+	fs.StringVar(&f.tlsDir, "tls-dir", "", "where the serving certificate and key live; defaults to /usr/local/etc/apiary/tls (issue #99; was /usr/local/etc/apiary-tls on older installs, which keep working unchanged)")
 	fs.StringVar(&f.restartToken, "restart-guardrail-token", "", "ADR-0103's restart-guardrail shared secret, copied byte-for-byte from any other Comb's own /usr/local/etc/apiary/restart-guardrail-token; required to provision the file on a --colony-member install, since an independently generated value could never match the rest of the Colony. A standalone install generates its own and does not need this")
 	fs.Usage = func() {
 		fmt.Fprint(os.Stderr, `usage: /usr/local/libexec/apiary/apiaryctl install [--apply] [--colony-member host:port]
@@ -83,7 +83,7 @@ everything else written, so a second run finishes the job.
 		return 2
 	}
 	if f.apply && os.Geteuid() != 0 {
-		fmt.Fprintf(os.Stderr, "apiaryctl install: --apply writes /usr/local/etc/apiary and /usr/local/etc/apiary-tls as root, so it needs an effective uid of 0.\nRe-run without --apply to see the plan first; it needs no privileges at all.\n")
+		fmt.Fprintf(os.Stderr, "apiaryctl install: --apply writes /usr/local/etc/apiary (including its tls/ subdirectory) as root, so it needs an effective uid of 0.\nRe-run without --apply to see the plan first; it needs no privileges at all.\n")
 		return 1
 	}
 

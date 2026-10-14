@@ -233,8 +233,8 @@ func loaders() []loader {
 				// Must match raftd.json.sample's socket exactly, or
 				// managerd cannot reach its own raft node.
 				"raftd_socket": "/var/run/apiary/raftd.sock",
-				"tls_cert":     "/usr/local/etc/apiary-tls/cert.pem",
-				"tls_key":      "/usr/local/etc/apiary-tls/key.pem",
+				"tls_cert":     "/usr/local/etc/apiary/tls/cert.pem",
+				"tls_key":      "/usr/local/etc/apiary/tls/key.pem",
 				// Tri-state fields ship as explicit false, which is a
 				// local override rather than "unset"; keep them
 				// spelled so a reader knows the sample means it.
