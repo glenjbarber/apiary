@@ -287,8 +287,8 @@ overview. In **Pending join requests**, this is a two-stage handshake
    screen, and submit. A mismatch on either value is a refusal and counts
    as an attempt.
 3. Once verified, the target generates a **second PIN**, visible only on
-   the joining Comb (poll for it with `apiaryctl join-introduce ... --field
-   second-pin`, or read it off the guided action's own result if the
+   the joining Comb (poll for it with `/usr/local/libexec/apiary/apiaryctl
+   join-introduce ... --field second-pin`, or read it off the guided action's own result if the
    joining Comb used that path). It is never shown on this page.
 4. Confirm the joining node is already reachable at its Raft address.
 5. Use **Preflight approval** (Check reachability). Resolve a blocked or

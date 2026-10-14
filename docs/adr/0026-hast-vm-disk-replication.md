@@ -9,7 +9,12 @@ Accepted
 All four project machines (`freebsd-apiary`, `freebsd-apiary2`,
 `freebsd-apiary3` - VMs, no nested-virt, can't run bhyve - and
 `apiarium` - real hardware, the only bhyve-capable node) run a patched
-`hastd` (ADR-0008/D57511) confirmed to actually replicate. This wires
+`hastd` (ADR-0008/D57511) confirmed to actually replicate. **Update:**
+as of [ADR-0152](0152-hastd-fixes-in-freebsd-15-1-release.md), that
+patch is a requirement of these machines' then-current release, not of
+HAST replication itself - FreeBSD 15.1-RELEASE and later carry the
+upstream fixes, so nodes on the documented baseline run no locally
+patched `hastd`/`hastctl`. This wires
 that into real VM disk provisioning: a `VMDefinition` can name a
 `replica_node_id`, and its disk is then HAST-replicated to that node
 for data redundancy - explicitly **not** automatic failover, since

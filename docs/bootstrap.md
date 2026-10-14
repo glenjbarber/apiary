@@ -1068,9 +1068,13 @@ repeating this workaround indefinitely.
   is unchanged; it was never the actual fix for the orphan-respawn
   problem, which this `-P` change is.
 - **HAST (`-enable-hast`)** - `apiaryinstall` can check for `hastd_enable`
-  but never configures it, and the known `hastd` source patch (ADR-0022,
-  FreeBSD bug 298085) is never applied automatically; see ADR-0026 for
-  what real setup requires.
+  but never configures it. On FreeBSD 15.1-RELEASE or later it reports
+  `ok` once `hastd_enable=YES`, since that release carries the upstream
+  hastd/hastctl fixes this project needed (ADR-0152). On an earlier
+  release it reports `manual` with an upgrade hint, or a reminder that
+  the `hast_proto_recv_hdr` source patch (ADR-0022, FreeBSD bug 298085)
+  is still needed; that patch is never applied automatically. See
+  ADR-0026 for what real setup requires.
 - **`internal_token`/raft transport TLS for a multi-node join** - step 7
   Path B covers the SSH-tunnel mechanics `join` needs across hosts and
   `internal_token`, but TLS between raft members (ADR-0078) is left to

@@ -218,8 +218,8 @@ func runJoinIntroduce(args []string) int {
 	fs.BoolVar(&plaintext, "plaintext", false, "dial --target without TLS, for a Colony whose members do not serve TLS; the default dials with TLS, trusting the system CA pool")
 	fs.StringVar(&caFile, "ca-file", "", "trust this CA file instead of the system pool when dialing --target with TLS; ignored with --plaintext")
 	fs.Usage = func() {
-		fmt.Fprint(os.Stderr, `usage: apiaryctl join-introduce --target HOST:PORT [--field FIELD]
-       apiaryctl join-introduce --request-id ID --first-code CODE [--target HOST:PORT] [--field FIELD]
+		fmt.Fprint(os.Stderr, `usage: /usr/local/libexec/apiary/apiaryctl join-introduce --target HOST:PORT [--field FIELD]
+       /usr/local/libexec/apiary/apiaryctl join-introduce --request-id ID --first-code CODE [--target HOST:PORT] [--field FIELD]
 
 Start or poll a two-way Colony join (ADR-0147 Part 2). This command PRINTS
 and never submits anything to the target on your behalf: the target's Admin

@@ -46,7 +46,7 @@ func runInstall(args []string) int {
 	fs.StringVar(&f.tlsDir, "tls-dir", "", "where the serving certificate and key live; defaults to /usr/local/etc/apiary/tls (issue #99; was /usr/local/etc/apiary-tls on older installs, which keep working unchanged)")
 	fs.StringVar(&f.restartToken, "restart-guardrail-token", "", "ADR-0103's restart-guardrail shared secret, copied byte-for-byte from any other Comb's own /usr/local/etc/apiary/restart-guardrail-token; required to provision the file on a --colony-member install, since an independently generated value could never match the rest of the Colony. A standalone install generates its own and does not need this")
 	fs.Usage = func() {
-		fmt.Fprint(os.Stderr, `usage: apiaryctl install [--apply] [--colony-member host:port]
+		fmt.Fprint(os.Stderr, `usage: /usr/local/libexec/apiary/apiaryctl install [--apply] [--colony-member host:port]
                             [--zfs-base dataset] [--vlan-uplink iface] [--bhyve-bridge iface]
                             [--bhyve-bootrom path] [--nat-uplink iface] [--rpc-addr host:port]
                             [--frontend-http-addr host:port] [--restshimd-http-addr host:port]
