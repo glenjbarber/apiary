@@ -19,6 +19,9 @@ import (
 
 	rpcpb "github.com/glenjbarber/apiary/api/rpc"
 	"github.com/glenjbarber/apiary/internal/peerca"
+
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 // PeerReporter implements internal/cluster's peerReporter interface,
@@ -292,11 +295,39 @@ func (p *PeerReporter) dialOpts(addr string, attachAPIKey bool) (*grpc.ClientCon
 	if attachAPIKey && p.APIKey != "" {
 		opts = append(opts, grpc.WithPerRPCCredentials(apiKeyCredentials(p.APIKey)))
 	}
+	if attachAPIKey {
+		// This Comb already knows - locally, from its own managerd.json,
+		// with no extra round trip - whether it even HAS a peer_api_key
+		// to attach above. When it doesn't, and the peer's response to
+		// this same call comes back Unauthenticated, that is this
+		// Comb's own missing credential, not whatever the peer's generic
+		// "missing or invalid API key" text says (see checkAuth, which
+		// can't tell "no key configured here" apart from "a key was
+		// configured but doesn't match" from the peer's side alone).
+		// Rewriting it here, rather than guessing from the peer's text,
+		// is what lets an operator go straight to the right Comb's
+		// config instead of chasing the wrong one.
+		opts = append(opts, grpc.WithUnaryInterceptor(p.missingLocalAPIKeyInterceptor))
+	}
 	conn, err := grpc.NewClient(addr, opts...)
 	if err != nil {
 		return nil, nil, fmt.Errorf("dialing peer managerd at %s: %w", addr, err)
 	}
 	return conn, rpcpb.NewManagerServiceClient(conn), nil
+}
+
+// missingLocalAPIKeyInterceptor rewrites an Unauthenticated response
+// into a message naming this Comb's own missing peer_api_key, but only
+// when p.APIKey is actually empty - any other error (including a
+// genuinely invalid-at-the-peer key, when p.APIKey is non-empty) passes
+// through unchanged. See dialOpts' doc comment above for why this
+// belongs here instead of a second round trip.
+func (p *PeerReporter) missingLocalAPIKeyInterceptor(ctx context.Context, method string, req, reply interface{}, cc *grpc.ClientConn, invoker grpc.UnaryInvoker, callOpts ...grpc.CallOption) error {
+	err := invoker(ctx, method, req, reply, cc, callOpts...)
+	if err != nil && p.APIKey == "" && status.Code(err) == codes.Unauthenticated {
+		return status.Error(codes.Unauthenticated, "this Comb has no peer_api_key configured in managerd.json")
+	}
+	return err
 }
 
 // apiKeyCredentials mirrors cmd/frontend's own type of the same name -
