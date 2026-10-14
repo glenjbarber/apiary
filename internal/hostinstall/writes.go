@@ -839,4 +839,4 @@ func writeFileAtomic(path string, body []byte, mode os.FileMode) error {
 // ErrNotRoot is returned by the command layer when --apply is asked
 // for without root. It lives here rather than in cmd/apiaryctl so the
 // rule is stated once, next to the writes it protects.
-var ErrNotRoot = errors.New("apiaryctl: --apply writes /usr/local/etc/apiary and /usr/local/etc/apiary-tls as root, so it needs an effective uid of 0")
+var ErrNotRoot = errors.New("apiaryctl: --apply writes /usr/local/etc/apiary (including its tls/ subdirectory) as root, so it needs an effective uid of 0")

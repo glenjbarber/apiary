@@ -15,11 +15,12 @@
 // other side - managerd must never restart itself - is why this cannot
 // be folded into managerd either.
 //
-// SCOPE, deliberately narrow. Five subcommands, force-restart, install,
-// join-authorize, join-introduce and pin-trusted-peers, and no socket, no
-// terminal UI, and no command group that has not been asked for: a command
-// that is present and wrong is worse than one that is absent, and the larger
-// design in ADR-0136 stays proposed until it is built.
+// SCOPE, deliberately narrow. force-restart, install, join-authorize,
+// join-introduce, pin-trusted-peers, restart-guardrail-provision and
+// migrate-tls-dir, and no socket, no terminal UI, and no command group
+// that has not been asked for: a command that is present and wrong is
+// worse than one that is absent, and the larger design in ADR-0136
+// stays proposed until it is built.
 //
 // install is the second, and it exists for the same reason force-restart
 // does: both are things an operator has to type on a Comb that has no
@@ -43,6 +44,7 @@
 //	/usr/local/libexec/apiary/apiaryctl force-restart
 //	/usr/local/libexec/apiary/apiaryctl pin-trusted-peers --target HOST:PORT --bundle FILE
 //	/usr/local/libexec/apiary/apiaryctl restart-guardrail-provision
+//	/usr/local/libexec/apiary/apiaryctl migrate-tls-dir [--apply]
 //	/usr/local/libexec/apiary/apiaryctl help
 package main
 
@@ -91,6 +93,15 @@ Usage:
                             manual steps to finish distributing it.
                             Root only, never overwrites an existing
                             token, never sends it over the network
+  apiaryctl migrate-tls-dir
+                            move this Comb's serving certificate and
+                            key from the old /usr/local/etc/apiary-tls
+                            to the new default,
+                            /usr/local/etc/apiary/tls (issue #99), and
+                            update managerd.json/frontend.json/
+                            restshimd.json to match. Report only unless
+                            --apply. A Comb already on the new layout
+                            no-ops cleanly
   apiaryctl -version        report this binary's build identity
   apiaryctl help            this message
 
@@ -150,6 +161,8 @@ func main() {
 		os.Exit(runPinTrustedPeers(args[1:]))
 	case "restart-guardrail-provision":
 		os.Exit(runRestartGuardrailProvision(args[1:]))
+	case "migrate-tls-dir":
+		os.Exit(runMigrateTLSDir(args[1:]))
 	case "help", "-h", "--help":
 		fmt.Print(usage)
 		os.Exit(0)
