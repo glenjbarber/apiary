@@ -59,7 +59,7 @@ root-readable trust bundle on the joining host:
 
 ```bash
 install -d -m 700 /usr/local/etc/apiary/peer-ca
-scp root@<existing-comb>:/usr/local/etc/apiary-tls/cert.pem \
+scp root@<existing-comb>:/usr/local/etc/apiary/tls/cert.pem \
   /usr/local/etc/apiary/peer-ca/<existing-comb>.pem
 cat /usr/local/etc/apiary/peer-ca/<existing-comb>.pem \
   > /usr/local/etc/apiary/peer-ca.pem

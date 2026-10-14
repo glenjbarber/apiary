@@ -278,7 +278,7 @@ re-runnable if you only need to redo one piece:
   clobbered by a re-run (see Step 11 for what this is for).
 - `setup-tls` - **not part of `make setup` any more.** It generates a
   self-signed RSA certificate/key pair at
-  `/usr/local/etc/apiary-tls/{cert.pem,key.pem}` (override the
+  `/usr/local/etc/apiary/tls/{cert.pem,key.pem}` (override the
   directory with `NODE_TLS_DIR`) only if that path doesn't already have
   one, and it is kept only for an operator who wants openssl's output.
   The certificate this document's Path A actually gets is issued in Go
@@ -291,7 +291,7 @@ re-runnable if you only need to redo one piece:
   CA) works the same way, without ever running `setup-tls` at all.**
   Place the certificate chain and key at `${NODE_TLS_DIR}/cert.pem` and
   `${NODE_TLS_DIR}/key.pem` (the same default
-  `/usr/local/etc/apiary-tls`, or wherever `NODE_TLS_DIR` points) before
+  `/usr/local/etc/apiary/tls`, or wherever `NODE_TLS_DIR` points) before
   running `make setup` or `make setup-quick` - `apiaryctl install` keeps
   whatever it finds there, self-signed material never enters the
   picture, and the rest of `make setup`/`setup-quick` proceeds exactly
@@ -493,8 +493,8 @@ ${EDITOR:-vi} /usr/local/etc/apiary/managerd.json
   "bhyve_bridge": "bridge0",
   "uplink": "<uplink-ifname>",
   "iso_dir": "/var/db/apiary/isos",
-  "tls_cert": "/usr/local/etc/apiary-tls/cert.pem",
-  "tls_key": "/usr/local/etc/apiary-tls/key.pem"
+  "tls_cert": "/usr/local/etc/apiary/tls/cert.pem",
+  "tls_key": "/usr/local/etc/apiary/tls/key.pem"
 }
 ```
 
@@ -544,7 +544,7 @@ it is the one field in this document that has to be read together with
 **TLS is mandatory here, not an afterthought reserved for Step 11's
 PAM login** - `tls_cert`/`tls_key` above already point at the
 certificate `apiaryctl install` issued
-(`/usr/local/etc/apiary-tls/cert.pem`/`key.pem` by default, or your
+(`/usr/local/etc/apiary/tls/cert.pem`/`key.pem` by default, or your
 own `NODE_TLS_DIR` if overridden). managerd's external RPC API is
 encrypted from this point on regardless of whether real login is ever
 turned on - even a purely loopback-only single-node Comb gets TLS on
@@ -635,9 +635,9 @@ ${EDITOR:-vi} /usr/local/etc/apiary/frontend.json
   "manager_addr": "brood.lab3.home.arpa:17700",
   "http_addr": "0.0.0.0:8080",
   "manager_tls": true,
-  "manager_tls_ca": "/usr/local/etc/apiary-tls/cert.pem",
-  "tls_cert": "/usr/local/etc/apiary-tls/cert.pem",
-  "tls_key": "/usr/local/etc/apiary-tls/key.pem"
+  "manager_tls_ca": "/usr/local/etc/apiary/tls/cert.pem",
+  "tls_cert": "/usr/local/etc/apiary/tls/cert.pem",
+  "tls_key": "/usr/local/etc/apiary/tls/key.pem"
 }
 ```
 
@@ -660,7 +660,7 @@ Serving HTTPS here does not make the certificate *trusted* - it is the
 same self-signed certificate `apiaryctl install` issued for `managerd`,
 and no browser or OS ships it as a root CA. The first visit still shows
 an untrusted-certificate warning; clicking through it is fine for a lab
-Comb, or add `/usr/local/etc/apiary-tls/cert.pem` to the operator's
+Comb, or add `/usr/local/etc/apiary/tls/cert.pem` to the operator's
 trust store (on macOS, double-click it into Keychain Access and mark it
 "Always Trust") to clear the warning for good.
 
@@ -693,9 +693,9 @@ ${EDITOR:-vi} /usr/local/etc/apiary/restshimd.json
   "manager_addr": "brood.lab3.home.arpa:17700",
   "http_addr": "127.0.0.1:8081",
   "manager_tls": true,
-  "manager_tls_ca": "/usr/local/etc/apiary-tls/cert.pem",
-  "tls_cert": "/usr/local/etc/apiary-tls/cert.pem",
-  "tls_key": "/usr/local/etc/apiary-tls/key.pem"
+  "manager_tls_ca": "/usr/local/etc/apiary/tls/cert.pem",
+  "tls_cert": "/usr/local/etc/apiary/tls/cert.pem",
+  "tls_key": "/usr/local/etc/apiary/tls/key.pem"
 }
 ```
 

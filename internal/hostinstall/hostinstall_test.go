@@ -1256,3 +1256,50 @@ func TestPlanJoinAuthorizationStore(t *testing.T) {
 		})
 	}
 }
+
+// TestDefaultPathsTLSDirIsInsideConfigDir is issue #99: a brand-new
+// install's TLS directory default moved from a sibling of the config
+// directory to a subdirectory inside it, so that every path a fresh
+// Comb's config files set lives under one tree.
+func TestDefaultPathsTLSDirIsInsideConfigDir(t *testing.T) {
+	d := DefaultPaths()
+	want := filepath.Join(d.ConfigDir, "tls")
+	if d.TLSDir != want {
+		t.Errorf("DefaultPaths().TLSDir = %q, want %q (inside ConfigDir, issue #99)", d.TLSDir, want)
+	}
+	if d.TLSDir == "/usr/local/etc/apiary-tls" {
+		t.Error("DefaultPaths().TLSDir is still the old sibling directory; issue #99 asks new installs to default inside ConfigDir instead")
+	}
+}
+
+// TestExplicitOldTLSDirStillHonored is option (a) from issue #99: an
+// existing Comb whose config (or whose --tls-dir) already names the
+// old directory keeps working, because every tls_cert/tls_key/
+// manager_tls_ca field this package writes is only ever filled when
+// the config file itself leaves it unset (see fill's own doc comment)
+// - the actual value always comes from Paths, which a caller
+// (apiaryctl install --tls-dir, or an already-written config file) is
+// free to point at the old location forever.
+func TestExplicitOldTLSDirStillHonored(t *testing.T) {
+	f := newFixture(t)
+	oldDir := filepath.Join(f.root, "etc", "apiary-tls")
+	f.opts.Paths.TLSDir = oldDir
+
+	plan, err := New(f.opts)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	if err := plan.Apply(); err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(oldDir, "cert.pem")); err != nil {
+		t.Errorf("certificate was not written to the explicitly configured old directory: %v", err)
+	}
+	cfg, err := (&nodeconfig.Manager{Path: f.opts.Paths.managerdConfig()}).Load()
+	if err != nil {
+		t.Fatalf("loading managerd.json: %v", err)
+	}
+	if !strings.HasPrefix(cfg.TLSCert, oldDir) {
+		t.Errorf("managerd.json tls_cert = %q, want it under the explicitly configured %q", cfg.TLSCert, oldDir)
+	}
+}
