@@ -377,3 +377,12 @@ available through a normal package/release rather than a manually built
 provisioning depends on every node in the cluster reliably having a
 working `hastd`, not on one hand-built binary happening to work in a
 test.
+
+## Superseded in part by ADR-0152
+
+[ADR-0152](0152-hastd-fixes-in-freebsd-15-1-release.md) supersedes the
+requirement above for a locally built hastd with D57511 or D59521:
+FreeBSD 15.1-RELEASE and later carry the upstream fix for FreeBSD bug
+292322, so a node on that baseline needs no locally built or patched
+hastd. The rest of this record, including the HAST configuration and
+lifecycle decisions, stays in force.

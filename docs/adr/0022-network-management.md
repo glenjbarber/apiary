@@ -334,3 +334,12 @@ just `/24`-or-smaller. Regression-tested for a `/16` (crossing a
 third-octet boundary, which the old single-octet math could never have
 computed correctly even with its size check removed) and the smallest
 valid case, a `/30`. No other consequence of this ADR changes.
+
+## Superseded in part by ADR-0152
+
+[ADR-0152](0152-hastd-fixes-in-freebsd-15-1-release.md) supersedes the
+requirement, in the "hastd/hastctl assertion-failure crash" follow-up
+above, to patch `hast_proto_recv_hdr` for FreeBSD bug 298085: FreeBSD
+15.1-RELEASE and later carry that fix upstream, so a node on that
+baseline needs no locally patched hastd/hastctl. The rest of this
+record, including every other decision here, stays in force.
