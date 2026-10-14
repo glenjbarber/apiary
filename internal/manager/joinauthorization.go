@@ -70,9 +70,10 @@ func (s *Server) joinAuthorizationFile() string {
 // localNodeID is this Comb's own raft identity, read from the same node
 // config every other identity check in this package uses.
 //
-// Used for two things Part 3 needs: stamping approving_node_id on the
-// way in, and naming the Comb in a refusal. Both need the value this
-// Comb states about ITSELF, never one a caller supplied.
+// Used for stamping approving_node_id on the way in - a value this Comb
+// states about ITSELF, never one a caller supplied - and as
+// authorizationRefusal's own fallback (issue #82) for the narrow case
+// where raft's own view of the current leader is unavailable.
 func (s *Server) localNodeID() string {
 	if s.nodeConfig != nil {
 		if cfg, err := s.nodeConfig.Load(); err == nil && cfg.NodeID != "" {
@@ -89,6 +90,26 @@ func (s *Server) localNodeID() string {
 	// the flag it was started with - would be a wrong diagnosis, and a
 	// wrong diagnosis is worse than a refusal.
 	return s.nodeID
+}
+
+// currentLeaderNodeID is the Colony's current leader as RAFT ITSELF
+// reports it (issue #82) - never this managerd's own identity, which is
+// correct to name only when this managerd happens to BE the leader.
+// Naming s.localNodeID() unconditionally was the actual bug: a refusal
+// for a missing authorization entry named whichever Comb HANDLED the
+// call, not the Comb the entry actually had to be created on, and a live
+// join sent an operator to the wrong Comb because of exactly this.
+// Returns "" when raft is unreachable or has not yet settled on a
+// leader, so callers can fall back rather than print an empty name.
+func (s *Server) currentLeaderNodeID(ctx context.Context) string {
+	if s.raft == nil {
+		return ""
+	}
+	status, err := s.raft.Status(ctx)
+	if err != nil {
+		return ""
+	}
+	return status.GetLeaderId()
 }
 
 // joinAuthorization is what authorizePendingJoin returns on success: the
@@ -133,7 +154,7 @@ func (s *Server) authorizePendingJoin(ctx context.Context, pending *internalpb.P
 	// Gate 1: the operator's own act, in the root-owned file.
 	entry, err := s.authorizationEntry(pending)
 	if err != nil {
-		return nil, s.authorizationRefusal(err, pending)
+		return nil, s.authorizationRefusal(ctx, err, pending)
 	}
 
 	// Gate 2: the replicated record of that entry's use.
@@ -262,12 +283,24 @@ func (e *authorizationLoadError) Unwrap() error { return e.err }
 // entry that does not exist, and a refusal that does not say so sends an
 // operator to create one that will silently never be read.
 //
-// The command is printed verbatim so it can be copied rather than
-// reconstructed, and the fingerprint is shown as the request recorded
-// it, which is the form internal/joinauth normalizes and compares.
-func (s *Server) authorizationRefusal(err error, pending *internalpb.PendingJoinRequest) error {
-	leader := s.localNodeID()
-	where := "the Comb that is currently the Colony's leader (this managerd could not read its own node_id, so it cannot name which one that is)"
+// issue #82: the Comb named here is the LEADER AS RAFT ITSELF REPORTS
+// IT (s.raft.Status(ctx).GetLeaderId()), never s.localNodeID(). This
+// code only runs once ApproveJoinRequest's own leadership check has
+// confirmed - or, in the narrow race window that check's own comment
+// describes, assumed - that this managerd IS the leader, so the two
+// would normally read the same. They are not the same CLAIM: one states
+// a fact raft agrees on, the other states which process happens to be
+// running this code, and the live incident this issue records (a
+// refusal naming "brood" while "sting" was actually the leader) is
+// exactly what asking the wrong question produces. Falling back to
+// s.localNodeID() only when raft's own view is unavailable keeps a
+// refusal naming SOMETHING rather than nothing in that narrow case.
+func (s *Server) authorizationRefusal(ctx context.Context, err error, pending *internalpb.PendingJoinRequest) error {
+	leader := s.currentLeaderNodeID(ctx)
+	if leader == "" {
+		leader = s.localNodeID()
+	}
+	where := "the Comb that is currently the Colony's leader (neither raft's own view nor this managerd's own configuration names one right now)"
 	if leader != "" {
 		where = fmt.Sprintf("the Colony's current leader (%s)", leader)
 	}

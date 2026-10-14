@@ -443,8 +443,28 @@ func (s *Server) RequestJoinColony(ctx context.Context, req *rpcpb.RequestJoinCo
 	// fingerprints can never be approved, so recording one only produces
 	// a row certain to be refused later; saying so here is at the moment
 	// the operator can still go and fix the joining Comb.
+	//
+	// issue #70: the fallback to this managerd's OWN certificates is
+	// correct ONLY on the target_address forwarding path, where this
+	// managerd is being asked by the JOINING Comb's own frontend to
+	// relay on its behalf - it genuinely IS the joiner there, so its own
+	// locally-configured certificates are the joiner's own identity.
+	// With target_address empty, this managerd may instead be an
+	// EXISTING Colony member - the actual approval target - receiving a
+	// direct dial from the joiner (apiaryctl join-introduce's own shape).
+	// Falling back to local state in that case would attribute THIS
+	// Comb's own certificate fingerprint to the JOINING node_id, the
+	// same "receiving Comb completes a missing joiner field from its own
+	// state" failure issue #70 describes for the single
+	// tls_cert_fingerprint field apiaryctl's own client fix already
+	// covers - just reached here through advertised_fingerprints
+	// instead. So a direct call that sent none is refused outright,
+	// never completed from local state.
 	advertisedFingerprints := req.GetAdvertisedFingerprints()
 	if len(advertisedFingerprints) == 0 {
+		if req.GetTargetAddress() == "" {
+			return &rpcpb.RequestJoinColonyResponse{Error: "advertised_fingerprints is required when calling this managerd directly (target_address unset). It is the SHA-256 fingerprint(s) of the certificates (tls_cert, and raft_tls_cert when configured) the JOINING Comb itself holds - run `apiaryctl join-introduce`, which reads them and sends them. This Colony does not fill them in from its own state: this managerd may not be the joiner at all, and a request with no fingerprints of its own can never be approved"}, nil
+		}
 		own, err := s.localAdvertisedFingerprints()
 		if err != nil {
 			return &rpcpb.RequestJoinColonyResponse{Error: fmt.Sprintf("refusing to record this join request: %v", err)}, nil
@@ -597,7 +617,7 @@ func (s *Server) GetJoinRequestStatus(ctx context.Context, req *rpcpb.GetJoinReq
 		// finding) - see RequestJoinColony's own identical comment above.
 		fctx, cancel := context.WithTimeout(ctx, defaultUnauthenticatedForwardTimeout)
 		defer cancel()
-		resp, err := s.peers.GetJoinRequestStatusUnauthenticated(fctx, target, req.GetRequestId())
+		resp, err := s.peers.GetJoinRequestStatusUnauthenticated(fctx, target, req.GetRequestId(), req.GetIntroductionCode())
 		if err != nil {
 			return &rpcpb.GetJoinRequestStatusResponse{Error: fmt.Sprintf("reaching %s: %v", target, err)}, nil
 		}
@@ -643,6 +663,18 @@ func (s *Server) GetJoinRequestStatus(ctx context.Context, req *rpcpb.GetJoinReq
 		return out, nil
 	}
 	if !raftnode.ConstantTimeValueEqual(hashJoinValue(req.GetIntroductionCode()), pending.GetAcceptedIntroductionCodeSha256()) || pending.GetAcceptedIntroductionCodeSha256() == "" {
+		// issue #69: a second PIN that exists but is withheld here says
+		// so, rather than returning silently empty - which looked
+		// identical to "the target hasn't verified the introduction
+		// yet," the ordinary, non-error case just above this one. The
+		// two are different situations (a PIN that will never arrive at
+		// this request_id/introduction_code pair, versus one not
+		// generated yet) and an operator polling for it needs to be able
+		// to tell them apart, especially since the most common cause of
+		// this exact branch firing is the introduction_code being
+		// dropped somewhere between the joiner and the target, not a
+		// wrong value typed by a human.
+		out.Error = "a second PIN exists for this request but was not released: the introduction_code presented with this poll does not match the one this request was verified with. Pass the exact first code `apiaryctl join-introduce` printed when this request was made"
 		return out, nil
 	}
 	out.SecondPin = pending.GetSecondPin()
@@ -752,21 +784,63 @@ func (s *Server) ApproveJoinRequest(ctx context.Context, req *rpcpb.ApproveJoinR
 	// check and the AddVoter call itself.
 
 	// forwardErr/forwardHint carry a failed forward out of the
-	// leadership check below, to the "not leader" error the local
-	// path ends on at AddVoter. The fall-through to that local
-	// path is deliberate - it is the race window described above
-	// - so a forwarding failure is reported in the text of the
-	// error the fall-through does return, not by returning early
-	// here and skipping an attempt that race still needs.
+	// leadership check below into the fallback forward after a failed
+	// AddVoter further down (the genuine race window where leadership
+	// changes between THIS check and the AddVoter call itself - see that
+	// forward's own comment). They are no longer used to annotate a
+	// fall-through to local processing: see the block immediately below
+	// for why there no longer is one.
 	var forwardErr error
 	var forwardHint string
+	// issues #77/#81/#82: once this check has confirmed THIS Comb is not
+	// the leader, it must never fall through to local processing - not
+	// "fall through and hope the forward failure gets mentioned
+	// somewhere," which is what happened before. A follower is not the
+	// node that can call AddVoter, has no business reading the operator
+	// authorization file (that read's own refusal names "the Colony's
+	// current leader," and a follower evaluating it is itself the wrong
+	// Comb answering that question), and should never evaluate any other
+	// leader-only gate below this point. So every path through this
+	// block either forwards successfully (returns the leader's own
+	// response) or returns HERE, with the forward's own failure as the
+	// error - never by falling through to whatever the next local gate
+	// happens to say, which was a true fact about the wrong question
+	// (issue #81's own example: "checking whether authorization entry...
+	// raft: this node is not the leader" - a message that names the
+	// local node while being about the leader).
 	if status, statusErr := s.raft.Status(ctx); statusErr == nil && !status.GetIsLeader() {
-		if hint := currentLeaderRaftAddress(status); hint != "" && s.peers != nil {
+		hint := currentLeaderRaftAddress(status)
+		switch {
+		case hint != "" && s.peers != nil:
 			var fwd *rpcpb.ApproveJoinRequestResponse
 			if fwd, forwardErr = s.peers.ApproveJoinRequest(ctx, s.peerManagerdAddr(hint), req); forwardErr == nil {
 				return fwd, nil
 			}
-			forwardHint = hint
+			// #77: the refusal names the leader raft itself reports
+			// (status.GetLeaderId()), never s.localNodeID() - this IS
+			// the follower that received the call, and naming itself as
+			// "the leader" here would be exactly #82's own bug.
+			return &rpcpb.ApproveJoinRequestResponse{
+				Error: augmentForwardError(fmt.Sprintf(
+					"this Comb is not the Colony's current leader (%s is, at %s); forwarding this approval there failed",
+					status.GetLeaderId(), hint), hint, forwardErr),
+				LeaderHint: hint,
+			}, nil
+		case hint != "":
+			// The leader is known, but this Comb has no way to reach it
+			// (s.peers is nil - no peer forwarding configured). #77: the
+			// refusal names the leader and the address to use, which is
+			// the exact next step an operator needs, rather than a bare
+			// refusal with nothing to act on.
+			return &rpcpb.ApproveJoinRequestResponse{Error: fmt.Sprintf(
+				"this Comb is not the Colony's current leader (%s is, at %s); no peer forwarding is configured on this Comb, so run ApproveJoinRequest directly against that address instead",
+				status.GetLeaderId(), hint), LeaderHint: hint}, nil
+		default:
+			// Status was read successfully and says this Comb is not the
+			// leader, but raft's own view does not yet name one (an
+			// election in progress). Refused with that fact rather than
+			// evaluating gates a follower cannot answer correctly.
+			return &rpcpb.ApproveJoinRequestResponse{Error: "this Comb is not the Colony's current leader, and the current leader is not known yet (an election may be in progress); retry once a leader is elected"}, nil
 		}
 	}
 

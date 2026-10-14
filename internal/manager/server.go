@@ -230,7 +230,17 @@ type PeerForwarder interface {
 	// authenticated for their own (trusted, internally-derived leader-
 	// hint) use.
 	RequestJoinColonyUnauthenticated(ctx context.Context, addr string, req *rpcpb.RequestJoinColonyRequest) (*rpcpb.RequestJoinColonyResponse, error)
-	GetJoinRequestStatusUnauthenticated(ctx context.Context, addr, requestID string) (*rpcpb.GetJoinRequestStatusResponse, error)
+	// GetJoinRequestStatusUnauthenticated carries introductionCode along
+	// with requestID (issue #69). The target's own GetJoinRequestStatus
+	// releases the second PIN only once BOTH the request_id and the
+	// requester's own first code are presented (ADR-0147 Part 2) - a
+	// forward that built the request from requestID alone silently
+	// dropped the code, so a poll relayed through this method could
+	// never release a PIN the target had already verified, with no
+	// error at all. introductionCode is empty for a caller with none yet
+	// (the request is still stage INTRODUCED), which is the normal,
+	// non-error case this always was.
+	GetJoinRequestStatusUnauthenticated(ctx context.Context, addr, requestID, introductionCode string) (*rpcpb.GetJoinRequestStatusResponse, error)
 	CancelJoinRequestUnauthenticated(ctx context.Context, addr string, req *rpcpb.CancelJoinRequestRequest) (*rpcpb.CancelJoinRequestResponse, error)
 
 	// PreflightApproveJoinRequest forwards on a leader-hint rejection,

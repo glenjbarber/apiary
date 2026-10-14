@@ -35,7 +35,8 @@ type fakeJoinColonyPeerForwarder struct {
 	lastAddr string
 	lastReq  *rpcpb.RequestJoinColonyRequest
 	lastReqID,
-	lastCancelReqID string
+	lastCancelReqID,
+	lastIntroductionCode string
 	lastCtx context.Context
 
 	requestResp *rpcpb.RequestJoinColonyResponse
@@ -51,8 +52,8 @@ func (f *fakeJoinColonyPeerForwarder) RequestJoinColonyUnauthenticated(ctx conte
 	return &rpcpb.RequestJoinColonyResponse{RequestId: "jreq-forwarded", Code: "123456"}, nil
 }
 
-func (f *fakeJoinColonyPeerForwarder) GetJoinRequestStatusUnauthenticated(ctx context.Context, addr, requestID string) (*rpcpb.GetJoinRequestStatusResponse, error) {
-	f.lastAddr, f.lastReqID, f.lastCtx = addr, requestID, ctx
+func (f *fakeJoinColonyPeerForwarder) GetJoinRequestStatusUnauthenticated(ctx context.Context, addr, requestID, introductionCode string) (*rpcpb.GetJoinRequestStatusResponse, error) {
+	f.lastAddr, f.lastReqID, f.lastIntroductionCode, f.lastCtx = addr, requestID, introductionCode, ctx
 	if f.statusResp != nil {
 		return f.statusResp, nil
 	}
@@ -250,6 +251,67 @@ func TestServer_GetJoinRequestStatus_TargetAddressForwardsToPeer(t *testing.T) {
 	}
 }
 
+// TestServer_GetJoinRequestStatus_TargetAddressForwardsIntroductionCode
+// is issue #69's own reproduction: a poll naming a target_address must
+// carry the caller's own introduction_code through to the forward, or
+// the target's second-PIN release - which requires both request_id AND
+// the first code (ADR-0147 Part 2) - can never succeed over this path.
+// The PIN stays silently withheld with no error, because that gate's
+// "not yet verified" and "code was dropped in transit" cases look
+// identical from the target's side.
+func TestServer_GetJoinRequestStatus_TargetAddressForwardsIntroductionCode(t *testing.T) {
+	peers := &fakeJoinColonyPeerForwarder{}
+	s := NewServer(nil, "node-1", nil, nil, nil, nil, peers, "", nil, nil, nil, 0, nil)
+	resp, err := s.GetJoinRequestStatus(context.Background(), &rpcpb.GetJoinRequestStatusRequest{
+		RequestId: "jreq-1", TargetAddress: "10.0.0.1:17700", IntroductionCode: "418263",
+	})
+	if err != nil {
+		t.Fatalf("GetJoinRequestStatus() error: %v", err)
+	}
+	if resp.GetError() != "" {
+		t.Fatalf("GetJoinRequestStatus() = %+v, want success", resp)
+	}
+	if peers.lastIntroductionCode != "418263" {
+		t.Errorf("forwarded introduction_code = %q, want %q (the caller's own first code, carried through to the target)", peers.lastIntroductionCode, "418263")
+	}
+}
+
+// TestIntegration_GetJoinRequestStatus_WrongIntroductionCodeWithholdsWithExplicitError
+// is issue #69's second half: once a request has reached stage
+// CODE_VERIFIED and a second PIN exists, presenting the WRONG
+// introduction_code (or none at all) must not look identical to "the
+// target hasn't verified yet" - it has to say why the PIN was withheld,
+// not return an empty, no-error result that a polling apiaryctl prints
+// as nothing at all.
+func TestIntegration_GetJoinRequestStatus_WrongIntroductionCodeWithholdsWithExplicitError(t *testing.T) {
+	raftdSocket := newRaftdUDSSocket(t)
+	client, srv := newManagerdRPCClientAndServer(t, raftdSocket, "raftd-1")
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	openColonyJoinWindowForTest(t, client)
+
+	reqResp, err := client.RequestJoinColony(ctx, withIntroduction(&rpcpb.RequestJoinColonyRequest{
+		NodeId: "node-2", RaftBindAddress: "10.0.0.2:17600",
+	}, t))
+	if err != nil || reqResp.GetError() != "" {
+		t.Fatalf("RequestJoinColony(): err=%v resp=%+v", err, reqResp)
+	}
+	completeJoinHandshakeForTest(t, srv, reqResp.GetRequestId())
+
+	statusResp, err := client.GetJoinRequestStatus(ctx, &rpcpb.GetJoinRequestStatusRequest{
+		RequestId: reqResp.GetRequestId(), IntroductionCode: "000000",
+	})
+	if err != nil {
+		t.Fatalf("GetJoinRequestStatus() error: %v", err)
+	}
+	if statusResp.GetSecondPin() != "" {
+		t.Fatalf("GetJoinRequestStatus() with a wrong introduction_code released the second PIN = %q, want withheld", statusResp.GetSecondPin())
+	}
+	if statusResp.GetError() == "" {
+		t.Error("GetJoinRequestStatus() with a wrong introduction_code returned no error at all - a withheld PIN must say why, not look identical to \"not verified yet\"")
+	}
+}
+
 func TestServer_CancelJoinRequest_TargetAddressWithNilPeersErrors(t *testing.T) {
 	s := NewServer(nil, "node-1", nil, nil, nil, nil, nil, "", nil, nil, nil, 0, nil)
 	resp, err := s.CancelJoinRequest(context.Background(), &rpcpb.CancelJoinRequestRequest{
@@ -422,6 +484,57 @@ func TestServer_RequestJoinColony_NoLocalTLSCertMeansEmptyFingerprint(t *testing
 	}
 	if got := peers.lastReq.GetTlsCertFingerprint(); got != "" {
 		t.Errorf("forwarded tls_cert_fingerprint = %q, want empty with no tls_cert configured", got)
+	}
+}
+
+// TestIntegration_RequestJoinColony_DirectCallWithNoFingerprintsNeverFabricatesFromLocalState
+// is issue #70's second failure mode, reproduced against the CURRENT
+// code (not the two already-fixed ones the issue also lists): when a
+// joiner dials an existing Colony member DIRECTLY (target_address
+// empty - the normal shape for both apiaryctl join-introduce and any
+// other direct caller) and does not carry its own advertised
+// fingerprints, this managerd must never fill the gap from its OWN
+// locally-configured tls_cert. The managerd handling this call may be
+// an existing Colony MEMBER (the actual approval target), and
+// attributing its own certificate to the JOINING node_id is exactly the
+// "target recorded its own TLS fingerprint under the joiner's node id"
+// failure #70 describes - just for advertised_fingerprints rather than
+// the single tls_cert_fingerprint field apiaryctl's own fix already
+// covers.
+func TestIntegration_RequestJoinColony_DirectCallWithNoFingerprintsNeverFabricatesFromLocalState(t *testing.T) {
+	raftdSocket := newRaftdUDSSocket(t)
+	client, srv := newManagerdRPCClientAndServer(t, raftdSocket, "raftd-1")
+	targetOwnFingerprint := attachTestCombCertificate(t, srv)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	openColonyJoinWindowForTest(t, client)
+
+	// Deliberately no AdvertisedFingerprints - the field a direct caller
+	// that predates, or simply omits, this requirement would leave unset.
+	resp, err := client.RequestJoinColony(ctx, &rpcpb.RequestJoinColonyRequest{
+		NodeId: "node-2", RaftBindAddress: "10.0.0.2:17600", IntroductionCode: testIntroductionCode,
+	})
+	if err != nil {
+		t.Fatalf("RequestJoinColony() error: %v", err)
+	}
+	if resp.GetError() == "" {
+		// The bug: this managerd's OWN fingerprint (belonging to THIS
+		// Comb, not to node-2) was silently recorded as node-2's own
+		// advertised identity.
+		statusResp, serr := client.GetJoinRequestStatus(ctx, &rpcpb.GetJoinRequestStatusRequest{RequestId: resp.GetRequestId()})
+		if serr != nil {
+			t.Fatalf("GetJoinRequestStatus() error: %v", serr)
+		}
+		for _, fp := range statusResp.GetRequest().GetAdvertisedFingerprints() {
+			if fp == targetOwnFingerprint {
+				t.Fatalf("a request with NO advertised_fingerprints of its own was recorded carrying THIS managerd's own certificate fingerprint (%s) under node_id %q - fabricated from local state instead of being refused", targetOwnFingerprint, "node-2")
+			}
+		}
+		t.Fatalf("RequestJoinColony() with no advertised_fingerprints and no target_address = success (request %+v), want a refusal: a request with no fingerprints of its own can never be approved, and the operator should be told now, not have the gap silently filled from this managerd's own state", resp)
+	}
+	if !strings.Contains(resp.GetError(), "advertised_fingerprints") {
+		t.Errorf("refusal %q does not say advertised_fingerprints is what is missing", resp.GetError())
 	}
 }
 
