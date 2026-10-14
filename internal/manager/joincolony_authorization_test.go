@@ -296,8 +296,25 @@ func TestJoinApproval_WithoutAnAuthorizationEntryIsRefusedAndAddsNoVoter(t *test
 	// the file: an entry created on any other Comb is one no approval
 	// will ever consult, and an operator who is not told that will
 	// create one and watch it be ignored.
-	if !strings.Contains(resp.GetError(), "comb-leader") {
-		t.Errorf("refusal %q does not name the Comb that must carry the entry", resp.GetError())
+	//
+	// issue #82: the name it must use is the one raft ITSELF reports as
+	// the current leader, not this test's own managerd-level nodeID
+	// ("comb-leader") - those two are deliberately different values in
+	// this harness (newRaftdUDSSocket's raftd always answers as
+	// "raftd-1", regardless of whichever managerd nodeID a test later
+	// attaches to it), which is exactly the distinction #82's own bug
+	// collapsed: the old code named s.localNodeID() (the managerd's own
+	// configured identity) unconditionally, which happened to read
+	// right only because it was asking the wrong question of a single-
+	// Comb test. Reading the real answer here, rather than hardcoding
+	// either literal, is what keeps this assertion honest about which
+	// one the fix is actually supposed to name.
+	wantLeader := leader.srv.currentLeaderNodeID(context.Background())
+	if wantLeader == "" {
+		t.Fatal("could not read this harness's own real raft leader id; the assertion below would be vacuous")
+	}
+	if !strings.Contains(resp.GetError(), wantLeader) {
+		t.Errorf("refusal %q does not name %q, the Comb raft itself reports as the current leader", resp.GetError(), wantLeader)
 	}
 	if !strings.Contains(resp.GetError(), "apiaryctl join-authorize") {
 		t.Errorf("refusal %q does not give the operator the command to run; a refusal with no next step is how an operator ends up disabling the check", resp.GetError())

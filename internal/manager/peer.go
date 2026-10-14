@@ -890,13 +890,22 @@ func (p *PeerReporter) RequestJoinColonyUnauthenticated(ctx context.Context, add
 	return client.RequestJoinColony(ctx, req)
 }
 
-func (p *PeerReporter) GetJoinRequestStatusUnauthenticated(ctx context.Context, addr, requestID string) (*rpcpb.GetJoinRequestStatusResponse, error) {
+// introductionCode (issue #69) is carried through to the target exactly
+// as the caller supplied it. Without it, a poll relayed through this
+// method built the forwarded request from request_id alone, so the
+// target's own second-PIN release - which requires the requester's own
+// first code as well as request_id (ADR-0147 Part 2) - could never
+// succeed over this path: the PIN stayed withheld with no error at all,
+// because the check that withholds it is silent by design for a caller
+// that simply has not verified yet, and a caller that HAD verified but
+// whose code was dropped in transit looked identical.
+func (p *PeerReporter) GetJoinRequestStatusUnauthenticated(ctx context.Context, addr, requestID, introductionCode string) (*rpcpb.GetJoinRequestStatusResponse, error) {
 	conn, client, err := p.dialUnauthenticated(addr)
 	if err != nil {
 		return nil, err
 	}
 	defer conn.Close()
-	return client.GetJoinRequestStatus(ctx, &rpcpb.GetJoinRequestStatusRequest{RequestId: requestID})
+	return client.GetJoinRequestStatus(ctx, &rpcpb.GetJoinRequestStatusRequest{RequestId: requestID, IntroductionCode: introductionCode})
 }
 
 func (p *PeerReporter) ApproveJoinRequest(ctx context.Context, addr string, req *rpcpb.ApproveJoinRequestRequest) (*rpcpb.ApproveJoinRequestResponse, error) {

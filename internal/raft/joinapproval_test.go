@@ -189,6 +189,88 @@ func TestRecordJoinApprovalReplacesAPairThatCouldNeverWork(t *testing.T) {
 	}
 }
 
+// TestRecordJoinApprovalRepeatingTheFirstActIsRefusedWithoutRecording is
+// issue #74's own reproduction. TestRecordJoinApprovalReplacesAPairThatCouldNeverWork
+// already proves a request recovers once a genuinely distinct third act
+// arrives - but it gets there via case4's own OVERWRITE of an already-
+// written, indistinct second slot. This test is about the step before
+// that: the SECOND call itself (the same key, presented again from the
+// same Comb) must never write into the second slot at all.
+//
+// The distinction matters because a write that will later be
+// overwritten is still a write: if an operator makes the SAME mistake
+// TWICE in a row (clicking Approve twice from one Comb, then clicking it
+// a third time from the same Comb before ever finding a second key),
+// the old behavior filled slot 2 on the second click and then hit the
+// FSM's own terminal "no arrangement... reject and recreate" branch on
+// the third - a real dead end, and exactly what issue #74 observed
+// ("every later Approve is refused... the request cannot recover").
+// Refusing to record on the second click removes that dead end
+// entirely: slot 2 stays nil no matter how many times the same mistake
+// repeats, and a genuinely distinct approval can still arrive and fill
+// it, any number of retries later.
+func TestRecordJoinApprovalRepeatingTheFirstActIsRefusedWithoutRecording(t *testing.T) {
+	f := newTestFSM(t)
+	seedRequest(t, f, "jreq-1", "comb-3", "SHA256:AA")
+
+	first := recordApproval(t, f, "jreq-1", "key-1", "comb-1")
+	if first.Error != "" {
+		t.Fatalf("first RecordJoinApproval: %s", first.Error)
+	}
+
+	// The exact same key, presented again from the exact same Comb -
+	// issue #74's own "two Approve presses on the same Comb" scenario.
+	repeat := recordApproval(t, f, "jreq-1", "key-1", "comb-1")
+	if repeat.Error == "" {
+		t.Fatal("repeating the first authorization = no error, want a refusal naming the rule it cannot satisfy")
+	}
+	if !strings.Contains(repeat.Error, "SAME API key") {
+		t.Errorf("refusal %q does not say the two authorizations used the same key", repeat.Error)
+	}
+
+	// The property issue #74 asks for by name: NOTHING was recorded.
+	// Approval_2 must still be nil - not filled with the duplicate and
+	// left to be fixed by a later overwrite, but never written at all.
+	stored, ok := f.PendingJoinRequest("jreq-1")
+	if !ok {
+		t.Fatal("the request vanished after a refused authorization")
+	}
+	if stored.GetApproval_2() != nil {
+		t.Errorf("approval_2 = %+v after a refused repeat, want nil: the refusal must happen BEFORE recording, not be corrected afterward", stored.GetApproval_2())
+	}
+	if got := stored.GetApproval_1().GetKeyId(); got != "key-1" {
+		t.Errorf("approval_1 = %q after a refused repeat, want key-1 unchanged", got)
+	}
+
+	// And because slot 2 was never touched, this is recoverable on the
+	// VERY NEXT call - no third "replace" step required, and no upper
+	// bound on how many times the same mistake can repeat first.
+	second := recordApproval(t, f, "jreq-1", "key-2", "comb-2")
+	if second.Error != "" {
+		t.Fatalf("a genuinely distinct second act right after a refused repeat: %s", second.Error)
+	}
+	if got := second.PendingJoinRequest.GetApproval_2(); got.GetKeyId() != "key-2" || got.GetNodeId() != "comb-2" {
+		t.Errorf("approval_2 = %+v, want key-2 on comb-2", got)
+	}
+
+	// The same property for the OTHER half of the rule: two keys
+	// presented to the same Comb must be refused the same way, by name.
+	f2 := newTestFSM(t)
+	seedRequest(t, f2, "jreq-2", "comb-3", "SHA256:AA")
+	recordApproval(t, f2, "jreq-2", "key-1", "comb-1")
+	sameComb := recordApproval(t, f2, "jreq-2", "key-2", "comb-1")
+	if sameComb.Error == "" {
+		t.Fatal("a different key on the SAME Comb = no error, want a refusal")
+	}
+	if !strings.Contains(sameComb.Error, "SAME Comb") || !strings.Contains(sameComb.Error, "comb-1") {
+		t.Errorf("refusal %q does not say both authorizations reached the SAME Comb (comb-1)", sameComb.Error)
+	}
+	stored2, _ := f2.PendingJoinRequest("jreq-2")
+	if stored2.GetApproval_2() != nil {
+		t.Errorf("approval_2 = %+v after a refused same-Comb repeat, want nil", stored2.GetApproval_2())
+	}
+}
+
 func TestRecordJoinApprovalIgnoresAFurtherActOnceSatisfied(t *testing.T) {
 	// Two properties in one, because they are the same decision.
 	//

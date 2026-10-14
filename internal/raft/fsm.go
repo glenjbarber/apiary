@@ -837,8 +837,43 @@ func (f *FSM) applyRecordJoinApproval(index uint64, cmd *internalpb.RecordJoinAp
 	case first == nil:
 		updated.Approval_1 = attestation
 
-	case updated.GetApproval_2() == nil:
+	case updated.GetApproval_2() == nil && AuthorizationsDistinct(first, attestation):
 		updated.Approval_2 = attestation
+
+	case updated.GetApproval_2() == nil:
+		// issue #74: an authorization that cannot possibly satisfy the
+		// two-person rule against the one already recorded - the SAME
+		// API key, or the SAME Comb - must be refused HERE, before it is
+		// written anywhere, not recorded and only caught afterward.
+		//
+		// The old shape filled this slot unconditionally the first time
+		// it was empty, then relied on a LATER distinct call to notice
+		// the pair was unusable and replace it (the case below, and
+		// AuthorizationsDistinct(first, updated.GetApproval_2())
+		// immediately after it). That worked, but only once a distinct
+		// call eventually arrived: an operator who made the identical
+		// mistake a SECOND time (clicking Approve again from the same
+		// Comb, still holding only the one key) hit both slots filled
+		// with the same act and the FSM's own terminal "no arrangement
+		// of the two slots can satisfy this" refusal below - a genuine
+		// dead end whose only way out was purging the request and
+		// having the joining Comb request again, exactly what issue #74
+		// observed.
+		//
+		// Refusing here instead means slot 2 is NEVER written unless the
+		// act arriving actually satisfies the rule. The first
+		// authorization is left exactly as it was, and the request stays
+		// recoverable no matter how many times the same mistake repeats
+		// - a correct, distinct second act can always still arrive and
+		// fill this same, still-empty slot.
+		if first.GetKeyId() == attestation.GetKeyId() {
+			return &FSMApplyResult{Index: index, Error: fmt.Sprintf(
+				"RecordJoinApproval: request_id %q already has one authorization recorded, and this call uses the SAME API key (%q), presented to %s and then to %s. Nothing was recorded - the first authorization is unchanged. Two DISTINCT keys are required, on two DISTINCT Combs, so that one credential cannot admit a Comb on its own",
+				cmd.GetRequestId(), first.GetKeyId(), first.GetNodeId(), attestation.GetNodeId())}
+		}
+		return &FSMApplyResult{Index: index, Error: fmt.Sprintf(
+			"RecordJoinApproval: request_id %q already has one authorization recorded, and this call was presented to the SAME Comb (%s), as key %q and then as key %q. Nothing was recorded - the first authorization is unchanged. Two keys on one Comb is still one Admin on one Comb; the second authorization has to be presented to a different member of the Colony",
+			cmd.GetRequestId(), first.GetNodeId(), first.GetKeyId(), attestation.GetKeyId())}
 
 	case AuthorizationsDistinct(first, updated.GetApproval_2()):
 		// The rule is already satisfied, and a further act is IGNORED

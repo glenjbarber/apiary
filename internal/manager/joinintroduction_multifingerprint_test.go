@@ -120,12 +120,22 @@ func pendingFirstCodeAttemptsForTest(t *testing.T, srv *Server, requestID string
 }
 
 // seedTwoFingerprintRequest records a request whose advertised list is
-// whatever this Comb's own certificate files say, with the first code
-// supplied and AdvertisedFingerprints deliberately LEFT EMPTY so the
-// manager derives it. Leaving it empty is the production path:
-// apiaryctl join-introduce does not have to know how a Comb's
-// certificates are configured, and neither should the test that is
-// standing in for it.
+// whatever this Comb's own certificate files say.
+//
+// AdvertisedFingerprints is filled in explicitly by READING
+// srv.localAdvertisedFingerprints() here, mirroring what the real
+// apiaryctl join-introduce client does on the joiner's own side: it
+// reads its own certificates and sends the result, rather than leaving
+// the field for the RECEIVING managerd to fill in (issue #70 - that
+// fallback only belongs on the target_address forwarding path, where
+// this managerd genuinely IS the joiner being asked to relay for
+// itself; a direct call with no target_address, which is what this
+// test makes, must never have its gaps filled from whichever Comb
+// happens to receive it). This still tests exactly what the file's own
+// header says it exists to test - production's real multi-certificate
+// derivation flowing through RequestJoinColony and out the other side -
+// just called directly here instead of relying on the handler's own
+// now-removed fallback to call it implicitly.
 //
 // It returns the recorded request_id and the two fingerprints the
 // request carried.
@@ -133,12 +143,16 @@ func seedTwoFingerprintRequest(t *testing.T, client rpcpb.ManagerServiceClient, 
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
+	fingerprints, err := srv.localAdvertisedFingerprints()
+	if err != nil {
+		t.Fatalf("reading this Comb's own advertised fingerprints: %v", err)
+	}
 	resp, err := client.RequestJoinColony(ctx, &rpcpb.RequestJoinColonyRequest{
 		NodeId:                 "comb-2",
 		RaftBindAddress:        "10.62.0.5:17600",
 		JoinerLogStateObserved: true,
 		IntroductionCode:       testIntroductionCode,
-		// AdvertisedFingerprints deliberately unset.
+		AdvertisedFingerprints: fingerprints,
 	})
 	if err != nil {
 		t.Fatalf("RequestJoinColony: %v", err)
