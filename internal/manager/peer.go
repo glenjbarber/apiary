@@ -250,6 +250,17 @@ func (p *PeerReporter) dialUnauthenticated(addr string) (*grpc.ClientConn, rpcpb
 // ReserveRestartLease/ConfirmRestartCompleted (ADR-0103), which are
 // authorized by a dedicated token check, not the normal Viewer/Admin
 // role hierarchy every other forwarded RPC uses.
+// dialRestartGuardrail deliberately does NOT apply the same
+// insecure-credential refusal dialOpts does below. RestartGuardrailToken
+// authenticates only ReserveRestartLease/ConfirmRestartCompleted/
+// StepAsideForRestart/ExecuteNodeRestartPlan (ADR-0103), a mechanism
+// that already sits outside the normal Viewer/Admin API-key hierarchy
+// and is exercised by this package's own real-dial integration tests
+// (TestPeerReporterExecuteNodeRestartPlan_PresentsTheTokenOverARealDial)
+// against plaintext loopback managerd listeners. Gating it the same
+// way as the peer API key is the same class of fix and is tracked as
+// a deliberate follow-up (see the PR this landed in) rather than done
+// here, to keep this change to the clearest, already-covered case.
 func (p *PeerReporter) dialRestartGuardrail(addr string) (*grpc.ClientConn, rpcpb.ManagerServiceClient, error) {
 	var opts []grpc.DialOption
 	if p.UseTLS {
@@ -276,7 +287,26 @@ func (p *PeerReporter) dialRestartGuardrail(addr string) (*grpc.ClientConn, rpcp
 	return conn, rpcpb.NewManagerServiceClient(conn), nil
 }
 
+// errInsecureCredentialForward is the fail-closed refusal issue #97
+// requires: a peer call that would attach a real credential (the peer
+// API key, or the restart-guardrail token) over a transport dialed
+// with insecure.NewCredentials() must refuse to forward rather than
+// send that credential in cleartext. It is deliberately NOT returned
+// just because UseTLS is false - peer_tls=false is a legitimate,
+// supported state for a single-node Colony or a test harness with no
+// credential configured at all, and those calls must keep working
+// exactly as before. The gate is "about to send a credential over an
+// unencrypted transport," checked at each call site by the caller
+// already knowing which credential (if any) it is about to attach, not
+// "peer_tls is false" alone.
+func errInsecureCredentialForward(credential string) error {
+	return fmt.Errorf("refusing to forward %s to a peer: peer_tls is false (or unset) on this node, which means the connection is unencrypted, and this node has %s configured - set peer_tls: true (and a trust anchor, see ADR-0093/ADR-0147) before forwarding, or clear the credential if this node is genuinely meant to run without one", credential, credential)
+}
+
 func (p *PeerReporter) dialOpts(addr string, attachAPIKey bool) (*grpc.ClientConn, rpcpb.ManagerServiceClient, error) {
+	if !p.UseTLS && attachAPIKey && p.APIKey != "" {
+		return nil, nil, errInsecureCredentialForward("the peer API key")
+	}
 	var opts []grpc.DialOption
 	if p.UseTLS {
 		cfg := &tls.Config{MinVersion: tls.VersionTLS12}

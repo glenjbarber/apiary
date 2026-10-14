@@ -669,12 +669,32 @@ func serveManagerd(t *testing.T, s *stubManager, apiKey string) pinBackend {
 	t.Cleanup(func() { _ = conn.Close() })
 	return storeOverride{
 		managerdBackend: &managerdBackend{
-			client:    rpcpb.NewManagerServiceClient(conn),
-			apiKey:    apiKey,
+			client: rpcpb.NewManagerServiceClient(conn),
+			apiKey: apiKey,
+			// This dial is actually plaintext (grpc.WithTransportCredentials
+			// (insecure.NewCredentials()) above), so tls stays its zero
+			// value, false. A caller that needs to send apiKey over this
+			// stub uses serveManagerdTLS below instead - see issue #97's
+			// fail-closed Pin check.
 			transport: "the test's own plaintext listener",
 		},
 		store: map[string]*internalpb.TrustedPeer{},
 	}
+}
+
+// serveManagerdTLS mirrors serveManagerd, but marks the backend as
+// actually encrypted (tls: true) without needing a real TLS listener -
+// the two things under test here (the Admin credential reaching the
+// server, and Pin's own transport check) are independent, and only
+// the latter needs a true transport.tls here, not a real handshake
+// (that is TestPeerReporter_TLSWithCAPoolTrustsSelfSignedCert's job,
+// in internal/manager).
+func serveManagerdTLS(t *testing.T, s *stubManager, apiKey string) pinBackend {
+	t.Helper()
+	backend := serveManagerd(t, s, apiKey).(storeOverride)
+	backend.managerdBackend.tls = true
+	backend.managerdBackend.transport = "TLS, the test's own stub"
+	return backend
 }
 
 // The values above are checked against a struct-copying stub. This is
@@ -753,13 +773,39 @@ func TestManagerdBackend_AdminCredentialTravelsAsMetadata(t *testing.T) {
 	brood := combCert(t, dir, "brood", "brood", "brood.lab3.home.arpa")
 
 	stub := &stubManager{answerFingerprint: "SHA256:AA:BB", refuse: map[string]string{}}
-	backend := serveManagerd(t, stub, "s3cret-admin-key")
+	backend := serveManagerdTLS(t, stub, "s3cret-admin-key")
 
 	if code, _, errOut := runPin(t, backend, pinRequest{Bundle: bundle(t, brood)}); code != 0 {
 		t.Fatalf("exit status %d; want 0\n%s", code, errOut)
 	}
 	if got := stub.authorization(); got != "Bearer s3cret-admin-key" {
 		t.Errorf("the server saw authorization %q; want the bearer token from the environment", got)
+	}
+}
+
+// TestManagerdBackend_RefusesToSendAdminCredentialOverPlaintext is
+// issue #97's own regression test for the pintrustedpeers.go fallback:
+// a backend dialled over a connection this process itself knows is
+// NOT TLS (managerdBackend.tls is false - the "this Colony has no
+// trust anchors pinned yet" case from pinDialOption) must refuse to
+// send managerAPIKeyEnv's Admin credential rather than send it in the
+// clear, exactly the class of bug internal/manager's peer calls had.
+func TestManagerdBackend_RefusesToSendAdminCredentialOverPlaintext(t *testing.T) {
+	dir := t.TempDir()
+	brood := combCert(t, dir, "brood", "brood", "brood.lab3.home.arpa")
+
+	stub := &stubManager{answerFingerprint: "SHA256:AA:BB", refuse: map[string]string{}}
+	backend := serveManagerd(t, stub, "s3cret-admin-key") // plaintext, API key set
+
+	code, out, errOut := runPin(t, backend, pinRequest{Bundle: bundle(t, brood)})
+	if code == 0 {
+		t.Fatalf("exit status 0 sending an API key over a plaintext dial; want a refusal\n%s", errOut)
+	}
+	if !strings.Contains(out, managerAPIKeyEnv) {
+		t.Errorf("the refusal does not name %s, got: %s", managerAPIKeyEnv, out)
+	}
+	if got := stub.authorization(); got != "" {
+		t.Errorf("the server saw authorization %q; the credential must never have been sent", got)
 	}
 }
 
@@ -772,7 +818,7 @@ func TestManagerdBackend_AdminCredentialTravelsAsMetadata(t *testing.T) {
 // whoever answers, which is not what asking for an anchor means.
 func TestPinDialOption_RefusesAAnchorItWasNamedThatIsNotThere(t *testing.T) {
 	missing := filepath.Join(t.TempDir(), "no-such-bundle.pem")
-	_, _, err := pinDialOption("brood.lab3.home.arpa:17700", missing, "")
+	_, _, _, err := pinDialOption("brood.lab3.home.arpa:17700", missing, "")
 	if err == nil {
 		t.Fatal("a named trust anchor that does not exist was accepted; want a refusal")
 	}
@@ -799,12 +845,15 @@ func TestPinDialOption_UsesTLSWhenAnAnchorExists(t *testing.T) {
 		t.Fatalf("writing %s: %v", anchor, err)
 	}
 
-	opt, transport, err := pinDialOption("brood.lab3.home.arpa:17700", anchor, "")
+	opt, transport, tls, err := pinDialOption("brood.lab3.home.arpa:17700", anchor, "")
 	if err != nil {
 		t.Fatalf("a real anchor was refused: %v", err)
 	}
 	if opt == nil {
 		t.Error("no dial option was produced")
+	}
+	if !tls {
+		t.Error("tls = false for a dial with a real anchor, want true")
 	}
 	if !strings.Contains(transport, "TLS") || !strings.Contains(transport, "brood.lab3.home.arpa") {
 		t.Errorf("transport description is %q; it must say what was verified against what", transport)
@@ -819,9 +868,12 @@ func TestPinDialOption_DerivedAnchorAbsentFallsBackToPlaintextAndSaysSo(t *testi
 	if _, err := os.Stat("/usr/local/etc/apiary/peer-ca.pem"); err == nil {
 		t.Skip("this machine has the derived peer CA, so the absent-anchor case cannot be exercised here")
 	}
-	_, transport, err := pinDialOption("brood.lab3.home.arpa:17700", "", "")
+	_, transport, tls, err := pinDialOption("brood.lab3.home.arpa:17700", "", "")
 	if err != nil {
 		t.Fatalf("a Colony with no derived anchor was refused: %v", err)
+	}
+	if tls {
+		t.Error("tls = true for a plaintext fallback dial, want false")
 	}
 	if !strings.Contains(transport, "plaintext") {
 		t.Errorf("transport description is %q; a run with no trust anchor must not read as a secure one", transport)
@@ -832,7 +884,7 @@ func TestPinDialOption_DerivedAnchorAbsentFallsBackToPlaintextAndSaysSo(t *testi
 // against, and guessing one would be exactly the ambiguity the rest of
 // this file refuses.
 func TestPinDialOption_RefusesATargetWithNoPort(t *testing.T) {
-	_, _, err := pinDialOption("brood.lab3.home.arpa", "", "")
+	_, _, _, err := pinDialOption("brood.lab3.home.arpa", "", "")
 	if err == nil {
 		t.Fatal("a target with no port was accepted; want a refusal")
 	}
@@ -858,7 +910,7 @@ func TestPinDialOption_PeerNameOverridesTheAddressHost(t *testing.T) {
 	if err := os.WriteFile(anchor, certPEM, 0o600); err != nil {
 		t.Fatalf("writing %s: %v", anchor, err)
 	}
-	_, transport, err := pinDialOption("10.90.0.94:17700", anchor, "brood.lab3.home.arpa")
+	_, transport, _, err := pinDialOption("10.90.0.94:17700", anchor, "brood.lab3.home.arpa")
 	if err != nil {
 		t.Fatalf("a named peer with a real anchor was refused: %v", err)
 	}

@@ -1103,3 +1103,96 @@ func TestManualOnlyChecksHaveNoApply(t *testing.T) {
 		}
 	}
 }
+
+// TestTransportEncryptionCheckReportsPlaintextRaftAndPeer is issue
+// #97's own preflight regression test: both raftd.json's missing
+// raft_tls_cert and managerd.json's peer_tls: false (the exact
+// defaults etc/apiary's samples ship) must be named, and the check
+// must stay report-only (StatusInformational, not a failure) since
+// this is pre-existing default behavior across every already-installed
+// Colony.
+func TestTransportEncryptionCheckReportsPlaintextRaftAndPeer(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	raftPath := filepath.Join(dir, "raftd.json")
+	managerPath := filepath.Join(dir, "managerd.json")
+	oldRaft, oldManager := raftdConfigPath, managerdConfigPath
+	raftdConfigPath, managerdConfigPath = raftPath, managerPath
+	defer func() { raftdConfigPath, managerdConfigPath = oldRaft, oldManager }()
+
+	if err := os.WriteFile(raftPath, []byte(`{"node_id": "node1"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(managerPath, []byte(`{"peer_tls": false}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	res := transportEncryptionCheck.Probe(ctx, newFakeRunner(), Options{})
+	if res.Status != StatusInformational {
+		t.Fatalf("status = %v, want informational (report-only, not a failure): %s", res.Status, res.Detail)
+	}
+	for _, want := range []string{"raft_tls_cert", raftPath, "peer_tls", managerPath, "ADR-0078"} {
+		if !strings.Contains(res.Detail+res.FixHint, want) {
+			t.Errorf("Detail/FixHint should mention %q, got detail=%q fixhint=%q", want, res.Detail, res.FixHint)
+		}
+	}
+	if transportEncryptionCheck.Apply != nil {
+		t.Error("transport-encryption must never auto-enable TLS: Apply must stay nil")
+	}
+}
+
+// TestTransportEncryptionCheckAcceptsEncryptedConfig confirms the
+// check stays quiet once both transports are configured for TLS.
+func TestTransportEncryptionCheckAcceptsEncryptedConfig(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	raftPath := filepath.Join(dir, "raftd.json")
+	managerPath := filepath.Join(dir, "managerd.json")
+	oldRaft, oldManager := raftdConfigPath, managerdConfigPath
+	raftdConfigPath, managerdConfigPath = raftPath, managerPath
+	defer func() { raftdConfigPath, managerdConfigPath = oldRaft, oldManager }()
+
+	if err := os.WriteFile(raftPath, []byte(`{"raft_tls_cert": "/etc/apiary/raft.crt", "raft_tls_key": "/etc/apiary/raft.key"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(managerPath, []byte(`{"peer_tls": true}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	res := transportEncryptionCheck.Probe(ctx, newFakeRunner(), Options{})
+	if res.Status != StatusOK {
+		t.Fatalf("status = %v, want ok once raft_tls_cert is set and peer_tls is true (detail: %s)", res.Status, res.Detail)
+	}
+}
+
+// TestTransportEncryptionCheckMissingFiles covers a host that has not
+// been configured yet at all - neither raftd.json nor managerd.json
+// exist - which must report ok, not a finding about files that are
+// not there yet to misconfigure.
+func TestTransportEncryptionCheckMissingFiles(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	oldRaft, oldManager := raftdConfigPath, managerdConfigPath
+	raftdConfigPath = filepath.Join(dir, "raftd.json")
+	managerdConfigPath = filepath.Join(dir, "managerd.json")
+	defer func() { raftdConfigPath, managerdConfigPath = oldRaft, oldManager }()
+
+	res := transportEncryptionCheck.Probe(ctx, newFakeRunner(), Options{})
+	if res.Status != StatusOK {
+		t.Fatalf("status = %v, want ok when neither config file exists yet (detail: %s)", res.Status, res.Detail)
+	}
+}
+
+// TestTransportEncryptionCheckRegistered pins the registration itself.
+func TestTransportEncryptionCheckRegistered(t *testing.T) {
+	found := false
+	for _, c := range All() {
+		if c.ID == "transport-encryption" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatal("transport-encryption is not in the registry: it would never run")
+	}
+}

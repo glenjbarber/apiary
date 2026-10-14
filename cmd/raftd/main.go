@@ -163,6 +163,9 @@ func run() error {
 	if w := loopbackRaftBindWarning(rcfg.RaftBind, rcfg.SingleNode); w != "" {
 		log.Print(w)
 	}
+	if w := raftTLSWarning(rcfg.RaftTLSCert); w != "" {
+		log.Print(w)
+	}
 
 	lis, err := listenUnix(rcfg.Socket)
 	if err != nil {
@@ -569,4 +572,22 @@ func loopbackRaftBindWarning(raftBind string, singleNode bool) string {
 		return ""
 	}
 	return "raftd: WARNING: raft_bind (" + raftBind + ") is a loopback address - another host can never reach this Comb at it, and the first voter added to this cluster will strand it permanently unable to win an election. Set raft_bind to a routable hostname or address before joining or being joined, or set \"single_node\": true in raftd.json if this Comb will never have peers"
+}
+
+// raftTLSWarning returns a startup warning when this Comb's raft
+// transport is running without TLS (raftTLSCert empty, the project-wide
+// default - ADR-0078), or "" when it is configured. This does not
+// change that default: issue #97 is explicit that making Raft TLS
+// mandatory is a separate migration decision for already-installed
+// Colonies. What changes is that the risk stops being a quiet
+// "raft-tls=false" field in the startup log line and becomes a
+// WARNING naming exactly what travels this transport in cleartext
+// between Combs (cluster state, credentials forwarded with a raft
+// write, and application data referenced by that state) and exactly
+// which three fields turn it on.
+func raftTLSWarning(certPath string) string {
+	if certPath != "" {
+		return ""
+	}
+	return "raftd: WARNING: raft_tls_cert is not set, so this Comb's Raft transport is running in PLAINTEXT - cluster state, forwarded credentials and the data they describe are sent unencrypted between Combs over raft_bind. Set raft_tls_cert, raft_tls_key and raft_tls_ca in raftd.json to enable it; see ADR-0078 for the migration this requires on an already-running Colony"
 }
