@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"sort"
+	"strings"
 	"testing"
 
 	rpcpb "github.com/glenjbarber/apiary/api/rpc"
@@ -102,15 +103,39 @@ func TestCheckAuth_ValidKeyWithSufficientRoleAccepted(t *testing.T) {
 
 func TestCheckAuth_MissingKeyRejectedOnceKeysExist(t *testing.T) {
 	v := &fakeAPIKeyValidator{authEnabled: true}
-	if err := checkAuth(ctxWithAuth(""), testMethod, v); err == nil {
-		t.Errorf("checkAuth() = nil error, want a rejection when a key is required but none was presented")
+	err := checkAuth(ctxWithAuth(""), testMethod, v)
+	if err == nil {
+		t.Fatalf("checkAuth() = nil error, want a rejection when a key is required but none was presented")
+	}
+	// No key was presented at all - the message must say "missing", not
+	// the generic "missing or invalid", and must not claim a key was
+	// rejected as invalid when none was ever sent.
+	if got, want := err.Error(), "missing API key"; !strings.Contains(got, want) {
+		t.Errorf("checkAuth() error = %q, want it to contain %q", got, want)
+	}
+	if strings.Contains(err.Error(), "invalid") {
+		t.Errorf("checkAuth() error = %q, should not say \"invalid\" when no key was presented", err.Error())
 	}
 }
 
 func TestCheckAuth_InvalidKeyRejected(t *testing.T) {
 	v := &fakeAPIKeyValidator{authEnabled: true, valid: false}
-	if err := checkAuth(ctxWithAuth("Bearer apk_wrong"), testMethod, v); err == nil {
-		t.Errorf("checkAuth() = nil error, want a rejection for an invalid key")
+	err := checkAuth(ctxWithAuth("Bearer apk_wrong"), testMethod, v)
+	if err == nil {
+		t.Fatalf("checkAuth() = nil error, want a rejection for an invalid key")
+	}
+	// A key WAS presented but didn't match - the message must say
+	// "invalid" and name peer_api_key/managerd.json, the config an
+	// operator needs to check, rather than the generic "missing or
+	// invalid" that can't distinguish this from no key at all.
+	if got, want := err.Error(), "invalid API key"; !strings.Contains(got, want) {
+		t.Errorf("checkAuth() error = %q, want it to contain %q", got, want)
+	}
+	if got, want := err.Error(), "peer_api_key"; !strings.Contains(got, want) {
+		t.Errorf("checkAuth() error = %q, want it to mention %q", got, want)
+	}
+	if got, want := err.Error(), "managerd.json"; !strings.Contains(got, want) {
+		t.Errorf("checkAuth() error = %q, want it to mention %q", got, want)
 	}
 }
 
