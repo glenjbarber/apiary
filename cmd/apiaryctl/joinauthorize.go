@@ -53,7 +53,7 @@ func runJoinAuthorize(args []string) int {
 	fs.StringVar(&raftdConfig, "raftd-config", "", "path to raftd.json, to find the local raftd socket; defaults to "+raftdconfig.DefaultPath)
 	fs.DurationVar(&expiresIn, "expires-in", joinauth.DefaultTTL, "how long the new entry lasts; entries are single-use, so this is a ceiling on an operator forgetting one")
 	fs.Usage = func() {
-		fmt.Fprint(os.Stderr, `usage: apiaryctl join-authorize --node-id ID --fingerprint FP [--request-id ID]
+		fmt.Fprint(os.Stderr, `usage: /usr/local/libexec/apiary/apiaryctl join-authorize --node-id ID --fingerprint FP [--request-id ID]
 
 Creates ONE single-use entry in this Colony's root-owned authorization
 store, authorizing a named Comb to join. It prints the pending join

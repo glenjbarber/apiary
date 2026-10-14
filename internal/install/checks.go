@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"regexp"
+	"strconv"
 	"strings"
 )
 
@@ -120,6 +121,7 @@ var registry = []Check{
 	// anything else is proposed.
 	managerdNodeIDCheck,
 	transportEncryptionCheck,
+	tlsDirOldLocationCheck,
 	zfsPoolCheck,
 	zfsBaseDatasetCheck,
 	vmmLoadedCheck,
@@ -140,6 +142,7 @@ var registry = []Check{
 	bhyveBridgeCheck,
 	uplinkBridgingCheck,
 	hastdEnableCheck,
+	restartGuardrailTokenCheck,
 	pamServiceCheck,
 }
 
@@ -362,7 +365,75 @@ var transportEncryptionCheck = Check{
 		}
 		return Result{ID: "transport-encryption", Status: StatusInformational,
 			Detail:  "this host is running at least one inter-host transport in plaintext: " + strings.Join(plaintext, "; "),
-			FixHint: "set raft_tls_cert/raft_tls_key/raft_tls_ca in raftd.json and peer_tls: true in managerd.json once every Comb in this Colony can serve and verify real certificates - see ADR-0078 and ADR-0093/ADR-0147, and issue #97"}
+		FixHint: "set raft_tls_cert/raft_tls_key/raft_tls_ca in raftd.json and peer_tls: true in managerd.json once every Comb in this Colony can serve and verify real certificates - see ADR-0078 and ADR-0093/ADR-0147, and issue #97"}
+	},
+}
+
+// oldTLSDirPrefix is the pre-issue-#99 default TLS directory, as a
+// path prefix: a Comb whose managerd.json still names a file under it
+// has not migrated to the new default inside the config directory
+// (/usr/local/etc/apiary/tls, internal/hostinstall.DefaultPaths). A
+// var, not a const, purely so a test can point it at a fixture path
+// instead of the real /usr/local/etc/apiary-tls.
+var oldTLSDirPrefix = "/usr/local/etc/apiary-tls/"
+
+// managerdTLSCertPeek is the minimal shape of managerd.json this check
+// reads - tls_cert and nothing else - for the same reason
+// managerdNodeIDPeek above is kept narrow: no other field's value can
+// trip this check.
+type managerdTLSCertPeek struct {
+	TLSCert string `json:"tls_cert"`
+}
+
+// tlsDirOldLocationCheck is issue #99's apiaryinstall-side half: a
+// hint, not a hard failure, that this Comb's serving certificate is
+// still under the old sibling directory rather than the new default
+// inside the config directory. Nothing here is broken - the daemons
+// are entirely config-driven about where their own certificate and key
+// live (internal/hostinstall's own preservation rule never rewrites an
+// already-set tls_cert/tls_key) - so this is StatusMisconfigured in
+// the same "worth fixing, not urgent, no Apply" sense
+// managerdNodeIDCheck already uses, RiskManualOnly, and the FixHint
+// names the one-command fix rather than describing the manual steps,
+// since `apiaryctl migrate-tls-dir` exists precisely to do them
+// safely (preserving permissions, rewriting all three config files,
+// and restarting in the right order).
+//
+// A managerd.json that does not exist yet, or one whose tls_cert is
+// unset, is StatusOK: there is no old location to report on a host
+// that has not been installed yet, or on one whose certificate came
+// from somewhere apiaryctl install never touched.
+var tlsDirOldLocationCheck = Check{
+	ID:          "tls-dir-old-location",
+	Description: "this Comb's serving certificate has moved into /usr/local/etc/apiary/tls, not the older sibling directory",
+	Risk:        RiskManualOnly,
+	Applicable:  always,
+	Probe: func(ctx context.Context, r Runner, opt Options) Result {
+		body, err := os.ReadFile(managerdConfigPath)
+		if os.IsNotExist(err) {
+			return Result{ID: "tls-dir-old-location", Status: StatusOK,
+				Detail: managerdConfigPath + " does not exist yet, so there is no tls_cert to check"}
+		}
+		if err != nil {
+			return Result{ID: "tls-dir-old-location", Status: StatusUnknown, Detail: err.Error(),
+				FixHint: "make " + managerdConfigPath + " readable by this user, then re-run"}
+		}
+		var peek managerdTLSCertPeek
+		if err := json.Unmarshal(body, &peek); err != nil {
+			return Result{ID: "tls-dir-old-location", Status: StatusUnknown, Detail: err.Error(),
+				FixHint: "fix the JSON in " + managerdConfigPath + " - managerd loads the same file and will not start on it either"}
+		}
+		if peek.TLSCert == "" {
+			return Result{ID: "tls-dir-old-location", Status: StatusOK,
+				Detail: "tls_cert is not set in " + managerdConfigPath}
+		}
+		if !strings.HasPrefix(peek.TLSCert, oldTLSDirPrefix) {
+			return Result{ID: "tls-dir-old-location", Status: StatusOK,
+				Detail: fmt.Sprintf("tls_cert is %q, not under the old %s", peek.TLSCert, oldTLSDirPrefix)}
+		}
+		return Result{ID: "tls-dir-old-location", Status: StatusMisconfigured,
+			Detail:  fmt.Sprintf("tls_cert in %s is still %q, under the pre-issue-#99 default directory rather than /usr/local/etc/apiary/tls", managerdConfigPath, peek.TLSCert),
+			FixHint: "run `apiaryctl migrate-tls-dir` on this Comb (report-only first, then --apply) - it moves the certificate and key, rewrites managerd.json/frontend.json/restshimd.json, and restarts managerd and frontend in the safe order. Nothing here is broken in the meantime: Apiary reads tls_cert/tls_key from the config file, not from a fixed path"}
 	},
 }
 
@@ -1049,7 +1120,38 @@ var uplinkBridgingCheck = Check{
 	},
 }
 
-// ---- HAST (report-only: the fix requires a source patch, ADR-0022) ----
+// ---- HAST (report-only: the baseline release carries the fix, ADR-0152) ----
+
+// freebsdReleaseRe matches the leading "<major>.<minor>" of FreeBSD's own
+// `uname -r` output (e.g. "15.1-RELEASE", "14.2-RELEASE-p3",
+// "15.1-STABLE") - everything after the minor version (patch level,
+// -RELEASE/-STABLE/-CURRENT, -pN) is irrelevant to the 15.1 baseline
+// comparison below.
+var freebsdReleaseRe = regexp.MustCompile(`^(\d+)\.(\d+)`)
+
+// freebsdReleaseAtLeast151 reports whether release (raw `uname -r`
+// output) is FreeBSD 15.1 or later - the baseline ADR-0152 sets for
+// needing no locally built or patched hastd/hastctl. An unparseable
+// release string reports false (fails closed: never silently assume the
+// upstream fixes are present).
+func freebsdReleaseAtLeast151(release string) bool {
+	m := freebsdReleaseRe.FindStringSubmatch(strings.TrimSpace(release))
+	if m == nil {
+		return false
+	}
+	major, err := strconv.Atoi(m[1])
+	if err != nil {
+		return false
+	}
+	minor, err := strconv.Atoi(m[2])
+	if err != nil {
+		return false
+	}
+	if major != 15 {
+		return major > 15
+	}
+	return minor >= 1
+}
 
 var hastdEnableCheck = Check{
 	ID:          "hastd-enable",
@@ -1058,11 +1160,82 @@ var hastdEnableCheck = Check{
 	Applicable:  func(opt Options) bool { return opt.EnableHAST },
 	Probe: func(ctx context.Context, r Runner, opt Options) Result {
 		v, _ := sysrcValue(ctx, r, "hastd_enable")
-		if strings.EqualFold(v, "YES") {
-			return Result{ID: "hastd-enable", Status: StatusOK, Detail: "hastd_enable=YES"}
+		if !strings.EqualFold(v, "YES") {
+			return Result{ID: "hastd-enable", Status: StatusManual, Detail: fmt.Sprintf("hastd_enable=%q", v),
+				FixHint: "sysrc hastd_enable=YES"}
 		}
-		return Result{ID: "hastd-enable", Status: StatusManual, Detail: fmt.Sprintf("hastd_enable=%q", v),
-			FixHint: "sysrc hastd_enable=YES - and apply the hast_proto_recv_hdr source patch for FreeBSD bug 298085 before relying on hastd (see docs/adr/0022-network-management.md); Apiary does not carry or apply this patch itself"}
+		release, releaseErrOut, releaseErr := r.Run(ctx, "uname", "-r")
+		if releaseErr != nil {
+			return Result{ID: "hastd-enable", Status: StatusManual,
+				Detail:  "hastd_enable=YES, but the running release could not be read (`uname -r`): " + firstNonEmpty(releaseErrOut, releaseErr),
+				FixHint: "confirm this host runs FreeBSD 15.1-RELEASE or later before relying on hastd (see docs/adr/0152-hastd-fixes-in-freebsd-15-1-release.md); earlier releases need the hast_proto_recv_hdr source patch for FreeBSD bug 298085, which Apiary does not carry or apply itself"}
+		}
+		release = strings.TrimSpace(release)
+		if !freebsdReleaseAtLeast151(release) {
+			return Result{ID: "hastd-enable", Status: StatusManual,
+				Detail:  fmt.Sprintf("hastd_enable=YES, running %s", release),
+				FixHint: "upgrade to FreeBSD 15.1-RELEASE or later, which carries the upstream hastd/hastctl fixes Apiary needs (see docs/adr/0152-hastd-fixes-in-freebsd-15-1-release.md); on an earlier release, apply the hast_proto_recv_hdr source patch for FreeBSD bug 298085 before relying on hastd - Apiary does not carry or apply this patch itself"}
+		}
+		return Result{ID: "hastd-enable", Status: StatusOK, Detail: fmt.Sprintf("hastd_enable=YES, running %s", release)}
+	},
+}
+
+// ---- restart-guardrail token (ADR-0103, issue #98) ----
+
+// restartGuardrailTokenFilePath mirrors cmd/managerd's and cmd/raftd's
+// own restartGuardrailTokenPath constant and internal/hostinstall's
+// restartGuardrailTokenFile() - duplicated here, as those are, so this
+// package does not have to import either command or internal/hostinstall
+// just to name the one path they all already agree on. A var, not a
+// const, for the same reason pfConfPath/etcServicesPath above are: tests
+// point it at a temp file instead of a real host's own
+// /usr/local/etc/apiary.
+var restartGuardrailTokenFilePath = "/usr/local/etc/apiary/restart-guardrail-token"
+
+// restartGuardrailTokenCheck reports a missing or empty restart-guardrail
+// token as a hard FAILURE (StatusMissing), not a warning that scrolls
+// past in a log (issue #98, requirement 4) - apiaryinstall's own run()
+// already treats any non-OK/non-Informational Result as a failed run with
+// a non-zero exit, so giving this finding a real Status is what makes
+// that happen; reporting it only in a log line (as cmd/managerd already
+// does at startup) is exactly the silent-gap behaviour this check exists
+// to close.
+//
+// RiskManualOnly, like pam-service below: apiaryinstall itself never
+// writes into /usr/local/etc/apiary (that is apiaryctl install's own
+// job - see internal/hostinstall/writes.go's planRestartGuardrailToken),
+// so there is nothing for this check's own Apply to do. The FixHint
+// instead names the two supported, one-command ways to actually fix it:
+// apiaryctl install's own provisioning for a Comb with no Colony yet
+// (ADR-0103's standalone case), and apiaryctl restart-guardrail-provision
+// (issue #98, requirement 4) for an existing Colony that has no token on
+// any Comb and so has nothing to copy.
+var restartGuardrailTokenCheck = Check{
+	ID:          "restart-guardrail-token",
+	Description: restartGuardrailTokenFilePath + " exists and is non-empty (ADR-0103)",
+	Risk:        RiskManualOnly,
+	Probe: func(ctx context.Context, r Runner, opt Options) Result {
+		data, err := os.ReadFile(restartGuardrailTokenFilePath)
+		switch {
+		case os.IsNotExist(err):
+			return Result{ID: "restart-guardrail-token", Status: StatusMissing,
+				Detail: restartGuardrailTokenFilePath + " does not exist",
+				FixHint: "a Comb with no Colony yet: run apiaryctl install (it generates one for a standalone install). " +
+					"An existing Colony with no token anywhere: run `apiaryctl restart-guardrail-provision` on any one Comb, " +
+					"then restart managerd on every Comb (the token is read once at startup) - see issue #98 and ADR-0103. " +
+					"Until this is fixed, a guarded restart lease granted here can never be confirmed and stays held forever."}
+		case err != nil:
+			return Result{ID: "restart-guardrail-token", Status: StatusMissing,
+				Detail:  "reading " + restartGuardrailTokenFilePath + ": " + err.Error(),
+				FixHint: "fix the read error (likely a permissions problem - this file must be root-owned, mode 0600) and re-run this check"}
+		}
+		if strings.TrimSpace(string(data)) == "" {
+			return Result{ID: "restart-guardrail-token", Status: StatusMisconfigured,
+				Detail: restartGuardrailTokenFilePath + " exists but is empty",
+				FixHint: "an empty file is the same operational situation as a missing one - run `apiaryctl restart-guardrail-provision` " +
+					"on any Comb that already has a real token, or re-run apiaryctl install on a standalone Comb, then restart managerd everywhere"}
+		}
+		return Result{ID: "restart-guardrail-token", Status: StatusOK, Detail: restartGuardrailTokenFilePath + " present"}
 	},
 }
 

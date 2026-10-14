@@ -240,6 +240,86 @@ func TestBhyveFirmwarePkgCheck(t *testing.T) {
 	})
 }
 
+// TestFreebsdReleaseAtLeast151 exercises the ADR-0152 baseline
+// comparison directly, including the raw forms `uname -r` actually
+// emits (a trailing `-RELEASE`/`-STABLE`/`-pN`) and unparseable input,
+// which must fail closed (never silently assume the upstream fixes are
+// present).
+func TestFreebsdReleaseAtLeast151(t *testing.T) {
+	cases := []struct {
+		release string
+		want    bool
+	}{
+		{"15.1-RELEASE", true},
+		{"15.1-RELEASE-p1", true},
+		{"15.2-RELEASE", true},
+		{"16.0-RELEASE", true},
+		{"15.1-STABLE", true},
+		{"14.2-RELEASE", false},
+		{"14.2-RELEASE-p3", false},
+		{"15.0-RELEASE", false},
+		{"", false},
+		{"not-a-release", false},
+	}
+	for _, c := range cases {
+		if got := freebsdReleaseAtLeast151(c.release); got != c.want {
+			t.Errorf("freebsdReleaseAtLeast151(%q) = %v, want %v", c.release, got, c.want)
+		}
+	}
+}
+
+// TestHastdEnableCheck is the regression test for ADR-0152: the check
+// must stop recommending the hast_proto_recv_hdr patch unconditionally
+// and instead check the installed release, staying report-only either
+// way.
+func TestHastdEnableCheck(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("manual when hastd_enable is not YES, regardless of release", func(t *testing.T) {
+		r := newFakeRunner()
+		r.on("sysrc -n hastd_enable", fakeResponse{stdout: "NO"})
+		res := hastdEnableCheck.Probe(ctx, r, Options{EnableHAST: true})
+		if res.Status != StatusManual {
+			t.Fatalf("status = %v, want manual", res.Status)
+		}
+		if r.callCount("uname -r") != 0 {
+			t.Fatalf("uname -r called %d times, want 0 (never reached when hastd_enable isn't set)", r.callCount("uname -r"))
+		}
+	})
+
+	t.Run("ok on FreeBSD 15.1-RELEASE with hastd_enable=YES", func(t *testing.T) {
+		r := newFakeRunner()
+		r.on("sysrc -n hastd_enable", fakeResponse{stdout: "YES"})
+		r.on("uname -r", fakeResponse{stdout: "15.1-RELEASE"})
+		res := hastdEnableCheck.Probe(ctx, r, Options{EnableHAST: true})
+		if res.Status != StatusOK {
+			t.Fatalf("status = %v, want ok", res.Status)
+		}
+	})
+
+	t.Run("manual with an upgrade hint on a release before 15.1", func(t *testing.T) {
+		r := newFakeRunner()
+		r.on("sysrc -n hastd_enable", fakeResponse{stdout: "YES"})
+		r.on("uname -r", fakeResponse{stdout: "14.2-RELEASE"})
+		res := hastdEnableCheck.Probe(ctx, r, Options{EnableHAST: true})
+		if res.Status != StatusManual {
+			t.Fatalf("status = %v, want manual (still report-only)", res.Status)
+		}
+		if !strings.Contains(res.FixHint, "15.1") || !strings.Contains(res.FixHint, "298085") {
+			t.Fatalf("FixHint = %q, want it to mention upgrading to 15.1 and the bug 298085 patch", res.FixHint)
+		}
+	})
+
+	t.Run("manual when the release can't be read", func(t *testing.T) {
+		r := newFakeRunner()
+		r.on("sysrc -n hastd_enable", fakeResponse{stdout: "YES"})
+		res := hastdEnableCheck.Probe(ctx, r, Options{EnableHAST: true})
+		if res.Status != StatusManual {
+			t.Fatalf("status = %v, want manual when `uname -r` fails", res.Status)
+		}
+	})
+}
+
 func TestPFEnabledCheck(t *testing.T) {
 	ctx := context.Background()
 
@@ -526,6 +606,52 @@ func TestUplinkBridgingCheck(t *testing.T) {
 	}
 	if uplinkBridgingCheck.Apply != nil {
 		t.Error("uplink-bridging must have no Apply - it never modifies anything, only warns")
+	}
+}
+
+// TestRestartGuardrailTokenCheck is the direct regression test for
+// issue #98's requirement 4: a missing or empty restart-guardrail token
+// must report as a hard failure (StatusMissing/StatusMisconfigured,
+// never StatusOK or anything silent), and this check must never attempt
+// to auto-fix it, since only apiaryctl install/restart-guardrail-provision
+// can safely generate or distribute the value.
+func TestRestartGuardrailTokenCheck(t *testing.T) {
+	ctx := context.Background()
+	orig := restartGuardrailTokenFilePath
+	defer func() { restartGuardrailTokenFilePath = orig }()
+
+	dir := t.TempDir()
+	restartGuardrailTokenFilePath = dir + "/restart-guardrail-token"
+
+	res := restartGuardrailTokenCheck.Probe(ctx, newFakeRunner(), Options{})
+	if res.Status != StatusMissing {
+		t.Fatalf("status = %v, want missing when the file does not exist at all", res.Status)
+	}
+	if res.FixHint == "" {
+		t.Error("a missing token must carry a FixHint naming how to provision one")
+	}
+
+	if err := os.WriteFile(restartGuardrailTokenFilePath, []byte("\n  \n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	res2 := restartGuardrailTokenCheck.Probe(ctx, newFakeRunner(), Options{})
+	if res2.Status != StatusMisconfigured {
+		t.Fatalf("status = %v, want misconfigured when the file exists but is blank", res2.Status)
+	}
+
+	if err := os.WriteFile(restartGuardrailTokenFilePath, []byte("a-real-token\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	res3 := restartGuardrailTokenCheck.Probe(ctx, newFakeRunner(), Options{})
+	if res3.Status != StatusOK {
+		t.Fatalf("status = %v, want ok once a non-empty token is present", res3.Status)
+	}
+
+	if restartGuardrailTokenCheck.Apply != nil {
+		t.Error("restart-guardrail-token must never have an Apply - only apiaryctl install/restart-guardrail-provision may write this file")
+	}
+	if restartGuardrailTokenCheck.Risk != RiskManualOnly {
+		t.Fatalf("restart-guardrail-token risk = %v, want manual-only", restartGuardrailTokenCheck.Risk)
 	}
 }
 

@@ -16,12 +16,15 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/metadata"
+	"google.golang.org/grpc/status"
 
 	rpcpb "github.com/glenjbarber/apiary/api/rpc"
 	"github.com/glenjbarber/apiary/internal/peerca"
@@ -43,6 +46,7 @@ type fakePeerServer struct {
 	jailPhaseReq *rpcpb.ReportJailPhaseRequest
 
 	listVMsResp      *rpcpb.ListVMsResponse
+	listVMsErr       error
 	getVMReq         *rpcpb.GetVMRequest
 	getVMResp        *rpcpb.GetVMResponse
 	listJailsResp    *rpcpb.ListJailsResponse
@@ -265,6 +269,9 @@ func (f *fakePeerServer) Status(context.Context, *rpcpb.StatusRequest) (*rpcpb.S
 }
 
 func (f *fakePeerServer) ListVMs(context.Context, *rpcpb.ListVMsRequest) (*rpcpb.ListVMsResponse, error) {
+	if f.listVMsErr != nil {
+		return nil, f.listVMsErr
+	}
 	if f.listVMsResp != nil {
 		return f.listVMsResp, nil
 	}
@@ -1145,6 +1152,56 @@ func TestPeerReporter_Status_DialsDirectlyNoForwarding(t *testing.T) {
 	}
 	if len(resp.GetMembers()) != 1 || resp.GetMembers()[0].GetNodeId() != "node-b" || resp.GetMembers()[0].GetSuffrage() != "Voter" {
 		t.Errorf("Status() = %+v, want one member node-b/Voter", resp)
+	}
+}
+
+// TestPeerReporter_Unauthenticated_NoLocalAPIKeyNamesItsOwnConfig covers
+// issue #94: a forwarding Comb with no peer_api_key configured in its
+// own managerd.json gets a peer rejection rewritten to name that local
+// cause directly, rather than the peer's own generic "missing or
+// invalid API key" text (which can't tell "this Comb sent nothing" apart
+// from "this Comb sent a key that didn't match").
+func TestPeerReporter_Unauthenticated_NoLocalAPIKeyNamesItsOwnConfig(t *testing.T) {
+	fake := &fakePeerServer{listVMsErr: status.Error(codes.Unauthenticated, "missing or invalid API key")}
+	addr := newTestPeerServer(t, fake)
+	p := NewPeerReporter("", false, nil)
+
+	_, err := p.ListVMs(context.Background(), addr)
+	if err == nil {
+		t.Fatalf("ListVMs() = nil error, want the peer's Unauthenticated rejection rewritten")
+	}
+	if got, want := err.Error(), "peer_api_key"; !strings.Contains(got, want) {
+		t.Errorf("ListVMs() error = %q, want it to name %q", got, want)
+	}
+	if got, want := err.Error(), "managerd.json"; !strings.Contains(got, want) {
+		t.Errorf("ListVMs() error = %q, want it to name %q", got, want)
+	}
+}
+
+// TestPeerReporter_Unauthenticated_WithLocalAPIKeyPassesPeerErrorThrough
+// is the complementary case: when this Comb DOES have a peer_api_key
+// configured, a peer's Unauthenticated rejection means the key itself
+// didn't match on the leader's side, not that this Comb sent nothing -
+// that text must pass through unrewritten, since it is the leader's
+// finding, not something this Comb can diagnose from its own config.
+func TestPeerReporter_Unauthenticated_WithLocalAPIKeyPassesPeerErrorThrough(t *testing.T) {
+	fake := &fakePeerServer{listVMsErr: status.Error(codes.Unauthenticated, "invalid API key (peer_api_key in managerd.json does not match any configured key)")}
+	// This test exercises the peer's response to a configured key, so use
+	// TLS: credentials must never be sent over the plaintext path.
+	addr, certPath := newTestPeerServerTLS(t, fake)
+	pool, err := LoadPeerCAPool(certPath)
+	if err != nil {
+		t.Fatalf("LoadPeerCAPool() error: %v", err)
+	}
+	p := NewPeerReporter("apk_configured", true, nil)
+	p.CAPool = pool
+
+	_, err = p.ListVMs(context.Background(), addr)
+	if err == nil {
+		t.Fatalf("ListVMs() = nil error, want the peer's Unauthenticated rejection")
+	}
+	if got, want := err.Error(), "invalid API key (peer_api_key in managerd.json does not match any configured key)"; got != status.Error(codes.Unauthenticated, want).Error() {
+		t.Errorf("ListVMs() error = %q, want the peer's own text (%q) passed through unchanged since this Comb HAS a key configured", got, want)
 	}
 }
 

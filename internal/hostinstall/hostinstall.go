@@ -71,17 +71,31 @@ import (
 // testable on the machine the tests actually run on.
 type Paths struct {
 	ConfigDir string // /usr/local/etc/apiary
-	TLSDir    string // /usr/local/etc/apiary-tls
+	TLSDir    string // /usr/local/etc/apiary/tls (issue #99; was /usr/local/etc/apiary-tls)
 	DataDir   string // /var/db/apiary/raftd
 	ISODir    string // /var/db/apiary/isos
 	RunDir    string // /var/run/apiary
 }
 
 // DefaultPaths is where a pkg-installed FreeBSD system puts all of it.
+//
+// TLSDir is /usr/local/etc/apiary/tls, inside the config directory
+// rather than a sibling of it (issue #99): managerd's peer-ca.pem and
+// the restart-guardrail token already live in ConfigDir, so the serving
+// certificate/key being elsewhere was the one piece of TLS material
+// that needed a second directory to back up and audit. This is a
+// NEW-INSTALL default only - it is never consulted for a Comb whose
+// config files already set tls_cert/tls_key/manager_tls_ca explicitly,
+// which is every existing Comb. Those paths are config-driven (see
+// planManagerdWrites/planFrontendWrites/planRestshimdWrites: a present
+// field is always kept, never overwritten with this default), so an
+// existing Comb pointed at the old /usr/local/etc/apiary-tls keeps
+// working without any change here. `apiaryctl migrate-tls-dir` is the
+// one-command way to move an existing Comb onto this default.
 func DefaultPaths() Paths {
 	return Paths{
 		ConfigDir: "/usr/local/etc/apiary",
-		TLSDir:    "/usr/local/etc/apiary-tls",
+		TLSDir:    "/usr/local/etc/apiary/tls",
 		DataDir:   "/var/db/apiary/raftd",
 		ISODir:    "/var/db/apiary/isos",
 		RunDir:    "/var/run/apiary",

@@ -203,8 +203,8 @@ func runPinTrustedPeers(args []string) int {
 	fs.StringVar(&peerCA, "peer-ca", "", "PEM file of trust anchors for the --target member's certificate; defaults to "+peerca.DefaultPath+", the file managerd derives from its own copy of the store")
 	fs.StringVar(&peerName, "peer-name", "", "the name to verify the --target member's certificate against; defaults to the host in --target, and is needed only when that is a bare IP or the certificate names something else")
 	fs.Usage = func() {
-		fmt.Fprint(os.Stderr, `usage: apiaryctl pin-trusted-peers --target HOST:PORT --bundle FILE
-       apiaryctl pin-trusted-peers --target HOST:PORT --node ID --cert FILE [--node ID --cert FILE ...]
+		fmt.Fprint(os.Stderr, `usage: /usr/local/libexec/apiary/apiaryctl pin-trusted-peers --target HOST:PORT --bundle FILE
+       /usr/local/libexec/apiary/apiaryctl pin-trusted-peers --target HOST:PORT --node ID --cert FILE [--node ID --cert FILE ...]
 
 Backfill the replicated peer trust store (ADR-0147 Part 4) on a Colony
 that predates it, by pinning each member's verified serving

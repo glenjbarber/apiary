@@ -456,8 +456,11 @@ func checkAuth(ctx context.Context, fullMethod string, v apiKeyValidator) error 
 	if !authEnabled {
 		return nil
 	}
-	if key == "" || !valid {
-		return status.Error(codes.Unauthenticated, "missing or invalid API key")
+	if key == "" {
+		return status.Error(codes.Unauthenticated, "missing API key")
+	}
+	if !valid {
+		return status.Error(codes.Unauthenticated, "invalid API key (peer_api_key in managerd.json does not match any configured key)")
 	}
 	if !role.Satisfies(requiredRoleFor(fullMethod)) {
 		return status.Errorf(codes.PermissionDenied, "this API key's role (%s) may not call %s", role, fullMethod)
@@ -610,6 +613,15 @@ var authExemptMethods = map[string]bool{
 	issueManagerdRestartMethod:   true,
 }
 
+// restartGuardrailTokenPath is ADR-0103's restart-guardrail shared
+// secret file, named here (duplicating cmd/managerd's and cmd/raftd's
+// own identical constants) purely so reserveRestartLeaseFenced's
+// fail-closed refusal (issue #98) can name the file by path in its
+// error without importing either command package. Kept in sync with
+// internal/hostinstall's own restartGuardrailTokenFile() by
+// TestRestartGuardrailTokenPathMatchesHostinstall.
+const restartGuardrailTokenPath = "/usr/local/etc/apiary/restart-guardrail-token"
+
 // restartGuardrailTokenValid reports whether presented matches configured
 // exactly, in constant time - and, critically, only when configured is
 // non-empty. subtle.ConstantTimeCompare on two empty byte slices returns
@@ -699,8 +711,11 @@ func (s *Server) authenticateAndIdentify(ctx context.Context, fullMethod string)
 	if !authEnabled {
 		return "", nil
 	}
-	if key == "" || !valid {
-		return "", status.Error(codes.Unauthenticated, "missing or invalid API key")
+	if key == "" {
+		return "", status.Error(codes.Unauthenticated, "missing API key")
+	}
+	if !valid {
+		return "", status.Error(codes.Unauthenticated, "invalid API key (peer_api_key in managerd.json does not match any configured key)")
 	}
 	if !role.Satisfies(requiredRoleFor(fullMethod)) {
 		return "", status.Errorf(codes.PermissionDenied, "this API key's role (%s) may not call %s", role, fullMethod)

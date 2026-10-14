@@ -107,7 +107,7 @@ the rc.d scripts.
 
 To use a publicly trusted certificate (Let's Encrypt or any other
 public CA) instead of a self-signed one, place its certificate chain
-and key at `NODE_TLS_DIR` (`/usr/local/etc/apiary-tls` by default)
+and key at `NODE_TLS_DIR` (`/usr/local/etc/apiary/tls` by default)
 before running `make setup` - the installer keeps whatever pair it
 finds there rather than replacing it. That profile changes several of
 the JSON fields below (`node_id`/`rpc_addr`/`manager_addr` become the
@@ -193,8 +193,8 @@ bridge, uplink, firmware, image directory, and local TLS paths:
   "bhyve_bridge": "bridge0",
   "uplink": "<uplink-ifname>",
   "iso_dir": "/var/db/apiary/isos",
-  "tls_cert": "/usr/local/etc/apiary-tls/cert.pem",
-  "tls_key": "/usr/local/etc/apiary-tls/key.pem"
+  "tls_cert": "/usr/local/etc/apiary/tls/cert.pem",
+  "tls_key": "/usr/local/etc/apiary/tls/key.pem"
 }
 ```
 
@@ -268,9 +268,9 @@ Both services must trust managerd's certificate:
   "manager_addr": "brood.lab3.home.arpa:17700",
   "http_addr": "0.0.0.0:8080",
   "manager_tls": true,
-  "manager_tls_ca": "/usr/local/etc/apiary-tls/cert.pem",
-  "tls_cert": "/usr/local/etc/apiary-tls/cert.pem",
-  "tls_key": "/usr/local/etc/apiary-tls/key.pem"
+  "manager_tls_ca": "/usr/local/etc/apiary/tls/cert.pem",
+  "tls_cert": "/usr/local/etc/apiary/tls/cert.pem",
+  "tls_key": "/usr/local/etc/apiary/tls/key.pem"
 }
 ```
 
@@ -291,9 +291,9 @@ restshimd is configured separately, and differently:
   "manager_addr": "brood.lab3.home.arpa:17700",
   "http_addr": "127.0.0.1:8081",
   "manager_tls": true,
-  "manager_tls_ca": "/usr/local/etc/apiary-tls/cert.pem",
-  "tls_cert": "/usr/local/etc/apiary-tls/cert.pem",
-  "tls_key": "/usr/local/etc/apiary-tls/key.pem"
+  "manager_tls_ca": "/usr/local/etc/apiary/tls/cert.pem",
+  "tls_cert": "/usr/local/etc/apiary/tls/cert.pem",
+  "tls_key": "/usr/local/etc/apiary/tls/key.pem"
 }
 ```
 
