@@ -426,7 +426,7 @@ func (s *Server) RequestJoinColony(ctx context.Context, req *rpcpb.RequestJoinCo
 	// and the whole two-way flow exists to stop that being what the
 	// check means.
 	if req.GetIntroductionCode() == "" {
-		return &rpcpb.RequestJoinColonyResponse{Error: "introduction_code is required. It is the 6-digit value the JOINING Comb generated for itself before dialing - run `apiaryctl join-introduce`, which prints it. This Colony does not generate it: a code both sides could read out of the same server is not the check this flow is for"}, nil
+		return &rpcpb.RequestJoinColonyResponse{Error: "introduction_code is required. It is the 6-digit value the JOINING Comb generated for itself before dialing - run `/usr/local/libexec/apiary/apiaryctl join-introduce`, which prints it. This Colony does not generate it: a code both sides could read out of the same server is not the check this flow is for"}, nil
 	}
 	// The joiner's real fingerprints, resolved ONCE, here, BEFORE any
 	// forwarding and before the local-record path is chosen.

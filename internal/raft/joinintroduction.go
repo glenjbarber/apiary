@@ -242,7 +242,7 @@ func (f *FSM) applyVerifyJoinIntroduction(index uint64, cmd *internalpb.VerifyJo
 	// approved on it anyway; this is the refusal that replaced it.
 	if len(req.GetAdvertisedFingerprints()) == 0 {
 		return &FSMApplyResult{Index: index, Error: fmt.Sprintf(
-			"VerifyJoinIntroduction: request_id %q advertised no certificate fingerprints. A request with nothing to compare cannot be verified and can never be approved - have the joining Comb re-request with `apiaryctl join-introduce`, which reads its own certificate files",
+			"VerifyJoinIntroduction: request_id %q advertised no certificate fingerprints. A request with nothing to compare cannot be verified and can never be approved - have the joining Comb re-request with `/usr/local/libexec/apiary/apiaryctl join-introduce`, which reads its own certificate files",
 			cmd.GetRequestId())}
 	}
 	updated := proto.Clone(req).(*internalpb.PendingJoinRequest)
