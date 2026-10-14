@@ -223,7 +223,6 @@ func run() error {
 	//     ConfirmRestartCompletedLocal, which skips the token check
 	//     entirely, because it is the same process confirming on its own
 	//     behalf.
-	const restartGuardrailTokenPath = "/usr/local/etc/apiary/restart-guardrail-token"
 	restartGuardrailToken := ""
 	// tokenAbsent is the operator-facing consequence, worded once and
 	// reused for "no file", "empty file" and "unreadable file", which are
@@ -605,7 +604,7 @@ func run() error {
 	go runOriginCARenewalLoop(ctx, originCARenewer, cfg.OriginCARenewalCheckInterval)
 	go runPeerHostnameRefreshLoop(ctx, peers, raftClient, peerHostnameRefreshInterval)
 	go runPeerCAWriteLoop(ctx, raftClient, peerCAWriteInterval)
-	go confirmPendingRestartOnStartup(ctx, srv, restartConfirm, id)
+	go confirmPendingRestartOnStartup(ctx, srv, restartConfirm, id, restartGuardrailToken)
 	go confirmColonyUpdateHandoffOnStartup(ctx, srv, id)
 
 	select {
@@ -855,6 +854,14 @@ func peerCAWriteOnce(ctx context.Context, raftClient *manager.RaftClient, state 
 const restartGuardrailConfirmRetries = 5
 const restartGuardrailConfirmBackoff = 3 * time.Second
 
+// restartCompleter is the minimal surface confirmPendingRestartOnStartup
+// needs from *manager.Server, narrowed to its own single method so the
+// retry/no-retry decision below is testable with a fake instead of a
+// real raft-backed server.
+type restartCompleter interface {
+	ConfirmRestartCompletedLocal(ctx context.Context, service, nodeID string, leaseID uint64) (*rpcpb.ConfirmRestartCompletedResponse, error)
+}
+
 // confirmPendingRestartOnStartup checks for a pending-restart-
 // confirmation record left by RestartNodeService (ADR-0103) before this
 // process's own predecessor restarted apiary_managerd, and calls
@@ -863,13 +870,32 @@ const restartGuardrailConfirmBackoff = 3 * time.Second
 // reliably do so: the process that requested the restart cannot
 // reliably observe its own replacement's outcome, since the restart
 // itself is what replaces it (see RestartNodeService's own doc comment).
-func confirmPendingRestartOnStartup(ctx context.Context, srv *manager.Server, store *manager.RestartConfirmStore, nodeID string) {
+//
+// restartGuardrailToken is this node's OWN copy of ADR-0103's shared
+// secret, read once at startup above - the same value already passed to
+// srv.SetRestartGuardrailToken. It is threaded through here too because
+// of issue #83: when it is empty, EVERY attempt below is guaranteed to
+// fail for the identical, already-known reason (a forwarded
+// confirmation presents this token, and a Comb with no token presents
+// nothing), so retrying serves no purpose except noise - it logs
+// restartGuardrailConfirmRetries identical failures and holds the
+// pending record for the whole backoff window before giving up anyway,
+// exactly the "retries noisily" behaviour the issue describes. Failing
+// once, clearly, and leaving the record in place (precisely as a real
+// failure already does below) gets to the same end state without the
+// noise, and a later startup - once the token is provisioned - retries
+// normally.
+func confirmPendingRestartOnStartup(ctx context.Context, srv restartCompleter, store *manager.RestartConfirmStore, nodeID, restartGuardrailToken string) {
 	pending, found, err := store.Load(restartGuardrailService)
 	if err != nil {
 		log.Printf("managerd: reading pending restart-guardrail confirmation: %v", err)
 		return
 	}
 	if !found {
+		return
+	}
+	if restartGuardrailToken == "" {
+		log.Printf("managerd: cannot confirm restart-guardrail completion for %s: this node has no restart-guardrail token provisioned (see the startup warning above), so every confirmation attempt would be rejected identically - not retrying. Provision %s (apiaryctl install, or copy it from another Comb) and restart managerd to confirm this lease", pending.Service, restartGuardrailTokenPath)
 		return
 	}
 	for attempt := 1; attempt <= restartGuardrailConfirmRetries; attempt++ {
@@ -901,6 +927,15 @@ func confirmPendingRestartOnStartup(ctx context.Context, srv *manager.Server, st
 // this project's existing convention already accepts this kind of small
 // duplication across independent binaries/packages.
 const restartGuardrailService = "apiary_managerd"
+
+// restartGuardrailTokenPath is ADR-0103's restart-guardrail shared
+// secret file, read once at startup (see run, above) and named again in
+// confirmPendingRestartOnStartup's own no-retry message (issue #83) -
+// package-level rather than a local inside run so both can name it
+// without a second, driftable copy of the path. It must match
+// internal/hostinstall's own restartGuardrailTokenFile(), which is what
+// provisions it.
+const restartGuardrailTokenPath = "/usr/local/etc/apiary/restart-guardrail-token"
 
 // confirmColonyUpdateHandoffOnStartup is ADR-0146 rules 5 and 6, and it
 // is this process's own account of a restart a PEER managerd scheduled

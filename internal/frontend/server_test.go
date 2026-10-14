@@ -2711,6 +2711,42 @@ func TestServer_APIKeysPage(t *testing.T) {
 	}
 }
 
+// Issue #75: the page warns about the lockout BEFORE the first key is
+// created, and names the files an operator has to change on every
+// other Comb.
+func TestServer_APIKeysPage_WarnsBeforeFirstKeyIsCreated(t *testing.T) {
+	client := &fakeClient{listAPIKeysResp: &rpcpb.ListAPIKeysResponse{}}
+	s := newTestServer(t, client)
+
+	req := httptest.NewRequest(http.MethodGet, "/apikeys", nil)
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, req)
+
+	body := rec.Body.String()
+	for _, want := range []string{"managerd.json", "peer_api_key", "frontend.json", "manager_api_key", "apiary_managerd", "apiary_frontend"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("the pre-creation warning does not mention %q:\n%s", want, body)
+		}
+	}
+}
+
+// Once at least one key exists, the pre-creation warning is no longer
+// shown - the moment it describes has already passed.
+func TestServer_APIKeysPage_NoPreCreationWarningOnceAKeyExists(t *testing.T) {
+	client := &fakeClient{listAPIKeysResp: &rpcpb.ListAPIKeysResponse{
+		Keys: []*rpcpb.APIKeyInfo{{Id: "key-1", Name: "terraform", Role: "operator", CreatedUnix: 1700000000}},
+	}}
+	s := newTestServer(t, client)
+
+	req := httptest.NewRequest(http.MethodGet, "/apikeys", nil)
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, req)
+
+	if strings.Contains(rec.Body.String(), "Before you create the first key") {
+		t.Errorf("the pre-creation warning is still shown once a key already exists:\n%s", rec.Body.String())
+	}
+}
+
 func TestServer_APIKeysPage_ListError(t *testing.T) {
 	client := &fakeClient{listAPIKeysResp: &rpcpb.ListAPIKeysResponse{Error: "raftd unreachable"}}
 	s := newTestServer(t, client)
@@ -2765,6 +2801,135 @@ func TestServer_CreateAPIKey_ErrorShowsInPanel(t *testing.T) {
 
 	if !strings.Contains(rec.Body.String(), "boom") {
 		t.Errorf("response missing error message, got: %s", rec.Body.String())
+	}
+}
+
+// Issues #75/#80: creating the first key must not lock out the very
+// Comb that created it. With neither credential slot already set, both
+// this Comb's own managerd.json peer_api_key and frontend.json
+// manager_api_key are provisioned automatically with the key just
+// minted.
+func TestServer_CreateAPIKey_ProvisionsSelfWhenNoKeyConfigured(t *testing.T) {
+	client := &fakeClient{
+		createAPIKeyResp: &rpcpb.CreateAPIKeyResponse{
+			Key:    &rpcpb.APIKeyInfo{Id: "key-1", Name: "terraform"},
+			RawKey: "apk_supersecretvalue",
+		},
+		// Zero-value GetNodeConfigResponse/GetFrontendConfigResponse:
+		// PeerApiKeySet and ManagerApiKeySet both false, matching a
+		// fresh Comb that has never had either configured.
+	}
+	s := newTestServer(t, client)
+
+	form := url.Values{"name": {"terraform"}, "role": {"operator"}}
+	req := httptest.NewRequest(http.MethodPost, "/apikeys", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	if client.lastUpdateNodeConfigReq == nil {
+		t.Fatal("UpdateNodeConfig was not called to provision this Comb's own peer_api_key")
+	}
+	if client.lastUpdateNodeConfigReq.GetPeerApiKey() != "apk_supersecretvalue" {
+		t.Errorf("UpdateNodeConfig peer_api_key = %q, want the key just created", client.lastUpdateNodeConfigReq.GetPeerApiKey())
+	}
+	if client.lastUpdateFrontendConfigReq == nil {
+		t.Fatal("UpdateFrontendConfig was not called to provision this Comb's own manager_api_key")
+	}
+	if client.lastUpdateFrontendConfigReq.GetManagerApiKey() != "apk_supersecretvalue" {
+		t.Errorf("UpdateFrontendConfig manager_api_key = %q, want the key just created", client.lastUpdateFrontendConfigReq.GetManagerApiKey())
+	}
+	// The one-time reveal must still happen regardless.
+	if !strings.Contains(rec.Body.String(), "apk_supersecretvalue") {
+		t.Errorf("create response missing the one-time raw key, got: %s", rec.Body.String())
+	}
+}
+
+// A frontend that already has its own manager_api_key configured is
+// left exactly alone - the same preservation rule every other secret in
+// this codebase follows. It also means NEITHER write is attempted, since
+// a configured frontend key implies this connection already has a
+// working credential and nothing here is locked out.
+func TestServer_CreateAPIKey_DoesNotOverwriteAlreadyConfiguredFrontendKey(t *testing.T) {
+	client := &fakeClient{
+		createAPIKeyResp: &rpcpb.CreateAPIKeyResponse{
+			Key:    &rpcpb.APIKeyInfo{Id: "key-2", Name: "second"},
+			RawKey: "apk_anothersecret",
+		},
+		getFrontendConfigResp: &rpcpb.GetFrontendConfigResponse{ManagerApiKeySet: true},
+	}
+	s := newTestServer(t, client)
+
+	form := url.Values{"name": {"second"}}
+	req := httptest.NewRequest(http.MethodPost, "/apikeys", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, req)
+
+	if client.lastUpdateFrontendConfigReq != nil {
+		t.Error("UpdateFrontendConfig was called despite frontend.json already having a manager_api_key")
+	}
+	if client.lastUpdateNodeConfigReq != nil {
+		t.Error("UpdateNodeConfig was called despite frontend.json already having a manager_api_key")
+	}
+	if !strings.Contains(rec.Body.String(), "apk_anothersecret") {
+		t.Errorf("create response missing the one-time raw key, got: %s", rec.Body.String())
+	}
+}
+
+// managerd's own peer_api_key is likewise left alone when it is already
+// set, independently of frontend's own key.
+func TestServer_CreateAPIKey_SkipsManagerdWhenPeerKeyAlreadySet(t *testing.T) {
+	client := &fakeClient{
+		createAPIKeyResp: &rpcpb.CreateAPIKeyResponse{
+			Key:    &rpcpb.APIKeyInfo{Id: "key-3", Name: "third"},
+			RawKey: "apk_thirdsecret",
+		},
+		getNodeConfigResp: &rpcpb.GetNodeConfigResponse{PeerApiKeySet: true},
+	}
+	s := newTestServer(t, client)
+
+	form := url.Values{"name": {"third"}}
+	req := httptest.NewRequest(http.MethodPost, "/apikeys", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, req)
+
+	if client.lastUpdateNodeConfigReq != nil {
+		t.Error("UpdateNodeConfig was called despite managerd.json already having a peer_api_key")
+	}
+	if client.lastUpdateFrontendConfigReq == nil {
+		t.Error("UpdateFrontendConfig was not called, and frontend's own key was unset")
+	}
+}
+
+// A failure provisioning either file surfaces as a warning alongside
+// the one-time key reveal, rather than silently leaving the operator to
+// discover the lockout later.
+func TestServer_CreateAPIKey_ProvisionFailureIsReportedAlongsideTheKey(t *testing.T) {
+	client := &fakeClient{
+		createAPIKeyResp: &rpcpb.CreateAPIKeyResponse{
+			Key:    &rpcpb.APIKeyInfo{Id: "key-4", Name: "fourth"},
+			RawKey: "apk_fourthsecret",
+		},
+		updateFrontendConfigResp: &rpcpb.UpdateFrontendConfigResponse{Error: "disk full"},
+	}
+	s := newTestServer(t, client)
+
+	form := url.Values{"name": {"fourth"}}
+	req := httptest.NewRequest(http.MethodPost, "/apikeys", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, req)
+
+	if !strings.Contains(rec.Body.String(), "disk full") {
+		t.Errorf("response does not surface the provisioning failure, got: %s", rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "apk_fourthsecret") {
+		t.Errorf("a provisioning failure must not swallow the one-time raw key, got: %s", rec.Body.String())
 	}
 }
 

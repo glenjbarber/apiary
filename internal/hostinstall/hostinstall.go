@@ -132,6 +132,16 @@ func (p Paths) joinAuthorizations() string {
 	return filepath.Join(p.ConfigDir, "join-authorizations.json")
 }
 
+// restartGuardrailTokenFile is ADR-0103's restart-guardrail shared
+// secret (issue #83). It is a plain text file, not a daemon config
+// field, for the same reason cmd/managerd reads it that way: the file
+// is read exactly once, at managerd startup, from a fixed path -
+// matching what cmd/managerd/main.go's own restartGuardrailTokenPath
+// constant names.
+func (p Paths) restartGuardrailTokenFile() string {
+	return filepath.Join(p.ConfigDir, "restart-guardrail-token")
+}
+
 // The default listening addresses. They are the same values the
 // Makefile's setup-quick writes, and each one is here for a stated
 // reason rather than by inheritance:
@@ -246,6 +256,19 @@ type Options struct {
 	// address into a field.
 	RPCAddr string
 
+	// RestartGuardrailToken is ADR-0103's restart-guardrail shared
+	// secret (issue #83), supplied explicitly when joining an existing
+	// Colony. Every Comb's copy must be byte-identical: a follower's
+	// forwarded ReserveRestartLease/ConfirmRestartCompleted call
+	// presents this value to the leader, which checks it against its
+	// OWN copy, so generating an independent one here would silently
+	// create a token that can never match. A standalone install needs
+	// nothing here - there is no other Comb's copy to match yet - and
+	// generates its own. Left empty on a --colony-member install, the
+	// value is reported as a NEED rather than guessed (see
+	// planRestartGuardrailToken).
+	RestartGuardrailToken string
+
 	// FrontendHTTPAddr and RestshimdHTTPAddr override the two web
 	// listeners. They default to the values the Makefile's own
 	// variables defaulted to, so `make setup-quick NODE_HTTP_ADDR=...`
@@ -309,6 +332,17 @@ type Plan struct {
 	pendingCert   []byte
 	pendingKey    []byte
 	pendingTLSDir bool
+
+	// internalToken carries the ADR-0033 raftd/managerd shared-secret
+	// decision made once, in planInternalTokenPairing, and consumed by
+	// planRaftdWrites and planManagerdWrites - both need the exact same
+	// resolved value, and deciding it independently in each would risk
+	// the two disagreeing with each other, which is the one failure
+	// this pairing exists to prevent.
+	internalToken struct {
+		raftd    string // non-empty: write into raftd.json's internal_token
+		managerd string // non-empty: write into managerd.json's raftd_token
+	}
 
 	// The derived facts a caller may want to assert on, and which the
 	// tests assert on directly rather than re-parsing files to find

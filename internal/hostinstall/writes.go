@@ -1,6 +1,8 @@
 package hostinstall
 
 import (
+	"crypto/rand"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"io"
@@ -45,11 +47,150 @@ func (p *Plan) planWrites() {
 			"created by the certificate write above; the private key lives here, and it is never re-chmodded on a later run")
 	}
 	p.planJoinAuthorizationStore()
+	p.planRestartGuardrailToken()
 	p.planCommonWrites()
+	// planInternalTokenPairing decides the ADR-0033 raftd/managerd
+	// shared secret before either file's own writer runs, because both
+	// need the same resolved value (see internalToken's own doc
+	// comment).
+	p.planInternalTokenPairing()
 	p.planRaftdWrites()
 	p.planManagerdWrites()
 	p.planFrontendWrites()
 	p.planRestshimdWrites()
+}
+
+// planRestartGuardrailToken accounts for ADR-0103's restart-guardrail
+// shared secret (issue #83): a plain text file, read once at managerd
+// startup, that gates ReserveRestartLease/ConfirmRestartCompleted.
+//
+// Unlike the raftd/managerd pairing below, this secret DOES leave the
+// host: every Comb in a Colony must hold the byte-identical value,
+// because a follower's forwarded confirmation presents it to the
+// leader, which checks it against its own copy. That is what makes a
+// standalone install and a Colony-member install different here - a
+// standalone Comb has no other Comb's copy to disagree with, so
+// generating one is always safe; a Colony member does, and guessing
+// one here would silently create a token that can never match, which
+// is exactly the silent-misconfiguration failure this whole package
+// exists to prevent. So a Colony-member install needs the value
+// supplied explicitly (--restart-guardrail-token, copied from any
+// other Comb's own copy of this file) and reports a NEED rather than
+// inventing one when it is not given.
+//
+// Preserved exactly like join-authorizations.json when it already
+// exists: not read, not re-chmodded, not rewritten even to identical
+// bytes - it is a credential, and the file holding it is not this
+// package's to second-guess once an operator (or a previous install)
+// has put one there.
+func (p *Plan) planRestartGuardrailToken() {
+	path := p.opts.Paths.restartGuardrailTokenFile()
+	info, err := os.Stat(path)
+	switch {
+	case err == nil:
+		if info.Mode().Perm() != 0o600 {
+			p.add(ActionRefuse, path, "mode", fmt.Sprintf("%04o", info.Mode().Perm()),
+				"this file holds a live credential (ADR-0103) and that is not its mode; chmod 600 it by hand. It is deliberately not chmodded here: tightening permissions on a file an operator may be reading right now is an unrequested change")
+			return
+		}
+		p.add(ActionKeep, path, "restart-guardrail token", "(not shown)",
+			"already exists; left exactly as it is")
+	case os.IsNotExist(err):
+		if value := strings.TrimSpace(p.opts.RestartGuardrailToken); value != "" {
+			p.add(ActionCreate, path, "restart-guardrail token", "(not shown)",
+				"supplied explicitly and written here so this Comb can grant, forward, and confirm a guarded restart (ADR-0103); this install cannot verify that the value matches every other Comb's own copy of this file, which is the operator's job when copying it across")
+			p.writes = append(p.writes, func() error {
+				return writeFileAtomic(path, []byte(value+"\n"), 0o600)
+			})
+			return
+		}
+		if p.standalone() {
+			token, genErr := generateToken()
+			if genErr != nil {
+				p.add(ActionNeeds, path, "restart-guardrail token", "", fmt.Sprintf("could not generate a random token: %v", genErr))
+				return
+			}
+			p.add(ActionCreate, path, "restart-guardrail token", "(not shown)",
+				"generated fresh (ADR-0103): a standalone Comb has no other Comb's copy of this file to match, so there is nothing this value could disagree with")
+			p.writes = append(p.writes, func() error {
+				return writeFileAtomic(path, []byte(token+"\n"), 0o600)
+			})
+			return
+		}
+		p.add(ActionNeeds, path, "restart-guardrail token", "",
+			"this Comb is joining an existing Colony (--colony-member), whose other Combs already share a restart-guardrail token (ADR-0103, issue #83) - generating an independent value here would silently create a token that can never match theirs, so nothing is written. Copy the exact contents of this file from any other Comb in the Colony (or pass the same value with --restart-guardrail-token) and re-run")
+	default:
+		p.add(ActionRefuse, path, "restart-guardrail token", "", err.Error())
+	}
+}
+
+// planInternalTokenPairing is ADR-0033's shared secret between THIS
+// Comb's own raftd and managerd: raftd.json's internal_token and
+// managerd.json's raftd_token must be the identical value, because
+// managerd dials raftd's internal Unix socket presenting this token
+// and raftd checks it against its own copy (issue #84's "internal_token
+// is unset by default" half). Unlike the restart-guardrail token above,
+// this one never leaves the host - raftd and managerd are always
+// co-located (see the Paths doc comment) - so there is no cross-Comb
+// value it could fail to match, and generating a brand-new one is
+// always safe here, with no "needs" fallback required.
+func (p *Plan) planInternalTokenPairing() {
+	raftdPath := p.opts.Paths.raftdConfig()
+	managerdPath := p.opts.Paths.managerdConfig()
+	if p.refused(raftdPath) || p.refused(managerdPath) {
+		// Either file already has a blocking problem of its own,
+		// reported where that problem was found; writing a paired
+		// token into a file this install has already said it will not
+		// touch would just be a second, quieter way of doing the same
+		// thing a human has already been told to fix first.
+		return
+	}
+	have, want := p.raftdOwn.InternalToken, p.managerOwn.RaftdToken
+	switch {
+	case have != "" && want != "" && have == want:
+		p.add(ActionKeep, raftdPath, "internal_token", "(not shown)",
+			"already set here, and matches managerd.json's raftd_token (ADR-0033); the local socket dial between them already works, so this is left exactly as it is")
+		p.add(ActionKeep, managerdPath, "raftd_token", "(not shown)",
+			"already set here, and matches raftd.json's internal_token; left exactly as it is")
+	case have != "" && want != "":
+		p.add(ActionRefuse, raftdPath, "internal_token", "",
+			"raftd.json's internal_token and managerd.json's raftd_token are both set and do not match (ADR-0033) - managerd's dial to raftd's own internal socket will fail every time until one is corrected by hand to match the other; left exactly as they are")
+		p.add(ActionRefuse, managerdPath, "raftd_token", "",
+			"does not match raftd.json's internal_token; see the refusal there")
+	case have != "" && want == "":
+		p.internalToken.managerd = have
+		p.add(ActionFill, managerdPath, "raftd_token", "(not shown)",
+			"raftd.json already sets internal_token (ADR-0033); copied here so managerd's dial to raftd's own internal socket presents the same value raftd will check it against")
+	case have == "" && want != "":
+		p.internalToken.raftd = want
+		p.add(ActionFill, raftdPath, "internal_token", "(not shown)",
+			"managerd.json already sets raftd_token (ADR-0033); copied here so raftd's internal socket checks callers against the same value managerd will present")
+	default:
+		token, err := generateToken()
+		if err != nil {
+			p.add(ActionNeeds, raftdPath, "internal_token", "", fmt.Sprintf("could not generate a random token: %v", err))
+			return
+		}
+		p.internalToken.raftd = token
+		p.internalToken.managerd = token
+		p.add(ActionCreate, raftdPath, "internal_token", "(not shown)",
+			"ADR-0033's internal-socket shared secret, generated fresh since neither file set one; the identical value is written into managerd.json's raftd_token in this same install, so the two can never disagree")
+		p.add(ActionCreate, managerdPath, "raftd_token", "(not shown)",
+			"the same value just generated for raftd.json's internal_token, so managerd's dial to raftd's own internal socket (ADR-0033) is authenticated from the first boot")
+	}
+}
+
+// generateToken returns a new random shared-secret value in the same
+// shape internal/manager's own generateAPIKey uses for the Colony's
+// other secrets (ADR-0023): 32 random bytes, base64.RawURLEncoding - so
+// every secret this codebase hands an operator is generated the same
+// way.
+func generateToken() (string, error) {
+	buf := make([]byte, 32)
+	if _, err := rand.Read(buf); err != nil {
+		return "", fmt.Errorf("hostinstall: generating a random token: %w", err)
+	}
+	return base64.RawURLEncoding.EncodeToString(buf), nil
 }
 
 // planDirectories accounts for the directories the daemons expect. They
@@ -224,6 +365,13 @@ func (p *Plan) planRaftdWrites() {
 		p.add(ActionKeep, path, "node_id", p.raftdOwn.NodeID,
 			"already set in this file; never changed")
 	}
+	// internal_token: resolved once, by planInternalTokenPairing, before
+	// this function ever runs - see that function and internalToken's
+	// own doc comment for why it cannot be decided here independently.
+	if p.internalToken.raftd != "" {
+		cfg.InternalToken = p.internalToken.raftd
+		changed = true
+	}
 	if !changed {
 		return
 	}
@@ -294,6 +442,31 @@ func (p *Plan) planManagerdWrites() {
 	} else {
 		p.add(ActionKeep, path, "node_id", p.managerOwn.NodeID,
 			"already set in this file; never changed")
+	}
+
+	// known_peer_addresses (ADR-0097, issue #84) is only ever filled
+	// with a Colony member this install was explicitly told about -
+	// --colony-member - and only when the file does not already set it,
+	// same preservation rule as everything else here. A standalone
+	// install leaves it unset exactly as before: ADR-0097's own
+	// unconfigured default (accept any target_address) is the correct
+	// behaviour for a Comb that is not joining anything, and forcing a
+	// value here would break bootstrap for the normal one-Comb case.
+	// Only the one address this install already knows about is seeded;
+	// it is NOT kept current as further Combs later join this Colony -
+	// that needs the join flow itself to extend it on every member,
+	// which is explicitly out of scope here (see the PR notes).
+	if p.opts.ColonyMember != "" {
+		changed = p.fill(path, "known_peer_addresses", p.managerOwn.KnownPeerAddresses, &cfg.KnownPeerAddresses, p.opts.ColonyMember,
+			"ADR-0097's allowlist for the three unauthenticated join RPCs' target_address, seeded with the one Colony member this install was told about (--colony-member); closes the SSRF-shaped gap in issue #84 for this Comb's own join, though it is not extended automatically as the Colony gains further members") || changed
+	}
+
+	// raftd_token: resolved once, by planInternalTokenPairing, before
+	// this function ever runs - see that function and internalToken's
+	// own doc comment for why it cannot be decided here independently.
+	if p.internalToken.managerd != "" {
+		cfg.RaftdToken = p.internalToken.managerd
+		changed = true
 	}
 
 	// peer_tls_hostname_map is deliberately not written. ADR-0115
