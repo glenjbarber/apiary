@@ -1425,6 +1425,36 @@ func TestServer_ImagesPage(t *testing.T) {
 	}
 }
 
+// TestServer_ImagesPage_ResetsFormAfterSuccessfulUpload is a regression
+// test for #89: the upload form's fields (hash/file/manifest) used to
+// retain their submitted values after a successful upload. The page's
+// own afterRequest handler clears them by calling form.reset() once
+// #iso-success (freshly swapped in by that same request) is non-empty -
+// see images.html. A Go test can't execute that JS, so this pins down
+// the markup contract it depends on: the handler must exist, must key
+// off #iso-success rather than HTTP status (which renderISOPanelResult
+// always returns as 200, success or failure), and must not fire on a
+// failed upload.
+func TestServer_ImagesPage_ResetsFormAfterSuccessfulUpload(t *testing.T) {
+	client := &fakeClient{statusResp: &rpcpb.StatusResponse{ManagerNodeId: "node-a"}}
+	s := newTestServer(t, client)
+
+	req := httptest.NewRequest(http.MethodGet, "/images", nil)
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, req)
+
+	body := rec.Body.String()
+	if !strings.Contains(body, `id="iso-success"`) {
+		t.Fatalf("images page missing #iso-success, got: %s", body)
+	}
+	if !strings.Contains(body, "form.reset()") {
+		t.Errorf("images page missing the afterRequest form.reset() wiring, got: %s", body)
+	}
+	if !strings.Contains(body, `getElementById('iso-success')`) {
+		t.Errorf("reset must be keyed off #iso-success, not HTTP status (which is always 200), got: %s", body)
+	}
+}
+
 // TestServer_ImagesPage_ClusterWide confirms the Images page itself
 // (not just the create-VM/create-jail pickers) shows every known
 // Comb's own copy of each image, and that Delete is only ever offered

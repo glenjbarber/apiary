@@ -40,6 +40,16 @@
     });
     form.addEventListener('htmx:afterRequest', function() {
       wrap.hidden = true;
+      // #iso-panel has just been swapped in by this same request, so
+      // #iso-success is only non-empty when the upload actually
+      // succeeded (renderISOPanelResult sets formErr/successName
+      // mutually exclusively) - reset the form then so the hash/file/
+      // manifest fields are cleared for the next upload instead of
+      // echoing back what was just submitted.
+      var success = document.getElementById('iso-success');
+      if (success && success.textContent.trim() !== '') {
+        form.reset();
+      }
     });
   })();
   </script>
