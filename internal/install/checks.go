@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"regexp"
+	"strconv"
 	"strings"
 )
 
@@ -959,7 +960,38 @@ var uplinkBridgingCheck = Check{
 	},
 }
 
-// ---- HAST (report-only: the fix requires a source patch, ADR-0022) ----
+// ---- HAST (report-only: the baseline release carries the fix, ADR-0152) ----
+
+// freebsdReleaseRe matches the leading "<major>.<minor>" of FreeBSD's own
+// `uname -r` output (e.g. "15.1-RELEASE", "14.2-RELEASE-p3",
+// "15.1-STABLE") - everything after the minor version (patch level,
+// -RELEASE/-STABLE/-CURRENT, -pN) is irrelevant to the 15.1 baseline
+// comparison below.
+var freebsdReleaseRe = regexp.MustCompile(`^(\d+)\.(\d+)`)
+
+// freebsdReleaseAtLeast151 reports whether release (raw `uname -r`
+// output) is FreeBSD 15.1 or later - the baseline ADR-0152 sets for
+// needing no locally built or patched hastd/hastctl. An unparseable
+// release string reports false (fails closed: never silently assume the
+// upstream fixes are present).
+func freebsdReleaseAtLeast151(release string) bool {
+	m := freebsdReleaseRe.FindStringSubmatch(strings.TrimSpace(release))
+	if m == nil {
+		return false
+	}
+	major, err := strconv.Atoi(m[1])
+	if err != nil {
+		return false
+	}
+	minor, err := strconv.Atoi(m[2])
+	if err != nil {
+		return false
+	}
+	if major != 15 {
+		return major > 15
+	}
+	return minor >= 1
+}
 
 var hastdEnableCheck = Check{
 	ID:          "hastd-enable",
@@ -968,11 +1000,23 @@ var hastdEnableCheck = Check{
 	Applicable:  func(opt Options) bool { return opt.EnableHAST },
 	Probe: func(ctx context.Context, r Runner, opt Options) Result {
 		v, _ := sysrcValue(ctx, r, "hastd_enable")
-		if strings.EqualFold(v, "YES") {
-			return Result{ID: "hastd-enable", Status: StatusOK, Detail: "hastd_enable=YES"}
+		if !strings.EqualFold(v, "YES") {
+			return Result{ID: "hastd-enable", Status: StatusManual, Detail: fmt.Sprintf("hastd_enable=%q", v),
+				FixHint: "sysrc hastd_enable=YES"}
 		}
-		return Result{ID: "hastd-enable", Status: StatusManual, Detail: fmt.Sprintf("hastd_enable=%q", v),
-			FixHint: "sysrc hastd_enable=YES - and apply the hast_proto_recv_hdr source patch for FreeBSD bug 298085 before relying on hastd (see docs/adr/0022-network-management.md); Apiary does not carry or apply this patch itself"}
+		release, releaseErrOut, releaseErr := r.Run(ctx, "uname", "-r")
+		if releaseErr != nil {
+			return Result{ID: "hastd-enable", Status: StatusManual,
+				Detail:  "hastd_enable=YES, but the running release could not be read (`uname -r`): " + firstNonEmpty(releaseErrOut, releaseErr),
+				FixHint: "confirm this host runs FreeBSD 15.1-RELEASE or later before relying on hastd (see docs/adr/0152-hastd-fixes-in-freebsd-15-1-release.md); earlier releases need the hast_proto_recv_hdr source patch for FreeBSD bug 298085, which Apiary does not carry or apply itself"}
+		}
+		release = strings.TrimSpace(release)
+		if !freebsdReleaseAtLeast151(release) {
+			return Result{ID: "hastd-enable", Status: StatusManual,
+				Detail:  fmt.Sprintf("hastd_enable=YES, running %s", release),
+				FixHint: "upgrade to FreeBSD 15.1-RELEASE or later, which carries the upstream hastd/hastctl fixes Apiary needs (see docs/adr/0152-hastd-fixes-in-freebsd-15-1-release.md); on an earlier release, apply the hast_proto_recv_hdr source patch for FreeBSD bug 298085 before relying on hastd - Apiary does not carry or apply this patch itself"}
+		}
+		return Result{ID: "hastd-enable", Status: StatusOK, Detail: fmt.Sprintf("hastd_enable=YES, running %s", release)}
 	},
 }
 

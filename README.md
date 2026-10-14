@@ -132,7 +132,10 @@ each design decision, in order.
   trail. Every project machine ran the patched `hastd` at the time
   (the three FreeBSD VMs among them were later decommissioned - see
   "Not yet implemented" below), and real VM disk replication is wired
-  in for real — see below.
+  in for real — see below. The upstream fixes this project needed are
+  in FreeBSD 15.1-RELEASE, so a vanilla 15.1-RELEASE-or-later install
+  needs no locally built or patched `hastd`/`hastctl` - see
+  [ADR-0152](docs/adr/0152-hastd-fixes-in-freebsd-15-1-release.md).
 - **Real HAST-backed VM disk replication** — a VM can name a
   `replica_node_id` (caller-set, like `node_id`) and its disk is then
   replicated to that node for real data redundancy - not automatic
@@ -782,9 +785,15 @@ each design decision, in order.
   gated behind its own separate, exact-phrase-confirmed flag
   (`-apply-network yes-modify-network`) rather than the general `-apply`,
   since ADR-0022 already documents a real near-miss from exactly that
-  operation over SSH. PAM/account setup, ZFS pool creation, and the known
-  `hastd` source patch are permanently report-only — this tool tells you
-  they're missing, it never attempts them. See
+  operation over SSH. PAM/account setup and ZFS pool creation are
+  permanently report-only — this tool tells you they're missing, it
+  never attempts them. HAST is report-only too: on FreeBSD
+  15.1-RELEASE or later it just confirms `hastd_enable=YES`, since the
+  release itself carries the upstream fixes
+  ([ADR-0152](docs/adr/0152-hastd-fixes-in-freebsd-15-1-release.md));
+  on an earlier release it also flags that the `hast_proto_recv_hdr`
+  source patch for FreeBSD bug 298085 is still needed before relying
+  on hastd, and never applies it. See
   [ADR-0082](docs/adr/0082-apiary-installer-preflight.md) for the design
   and the focused runbooks for [creating a standalone
   node](docs/create-node.md) or [adding a node to an existing
