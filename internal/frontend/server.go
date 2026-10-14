@@ -797,6 +797,22 @@ func hint(text string) template.HTML {
 		escaped + `" title="` + escaped + `">?</span>`)
 }
 
+// copyButtonData is the copy_button partial's argument - see
+// _copy_button.html.
+type copyButtonData struct {
+	Value string
+	Label string
+}
+
+// copyButton builds a copy_button argument. value is the exact text
+// the control copies (empty renders no control at all); label is the
+// aria-label naming what is being copied, e.g. "Copy MAC address for
+// web01" (see issue #101). html/template escapes both fields when the
+// partial renders them, so no caller-side escaping is needed here.
+func copyButton(value, label string) copyButtonData {
+	return copyButtonData{Value: value, Label: label}
+}
+
 // hostPackagesLink builds host.html's header "Packages" link.
 //
 // It exists as a Go function rather than a printf inside the template
@@ -854,6 +870,7 @@ func nodeSubtitle(nodeID string) string {
 func NewServer(client rpcpb.ManagerServiceClient, auth Authenticator, roleMap map[string]manager.Role, peers peerHostStatsClient, peerHostnameSuffix, peerManagerPort string, passwords PasswordSetter, tlsEnabled bool) (*Server, error) {
 	tmpl, err := template.New("").Funcs(template.FuncMap{
 		"hint":                     hint,
+		"copyButton":               copyButton,
 		"pageHeader":               pageHeader,
 		"vmSubtitle":               vmSubtitle,
 		"nodeSubtitle":             nodeSubtitle,
