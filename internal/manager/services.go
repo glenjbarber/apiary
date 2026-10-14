@@ -73,7 +73,7 @@ const managerdSelfRestartRefusal = "apiary_managerd cannot be restarted through 
 	"orchestrated from inside the managerd being restarted, so stopping it kills the process that was " +
 	"about to start it, and the daemon does not come back. Restart it on the node instead, from a root " +
 	"shell: `service apiary_managerd restart` is enough if you only need managerd, and " +
-	"`apiaryctl force-restart` restarts managerd and then raftd, deliberately bypassing the restart " +
+	"`/usr/local/libexec/apiary/apiaryctl force-restart` restarts managerd and then raftd, deliberately bypassing the restart " +
 	"lease and quorum preflight. Both are installed on every Comb and need only a root shell."
 
 // managerdSelfRestartRefused reports whether name is managerd itself, the

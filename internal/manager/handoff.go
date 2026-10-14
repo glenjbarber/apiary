@@ -431,7 +431,7 @@ func (s *Server) RequestManagerdRestart(ctx context.Context, req *rpcpb.RequestM
 		return &rpcpb.RequestManagerdRestartResponse{
 			TargetNodeId: target,
 			Error: fmt.Sprintf(
-				"refusing to restart %s's managerd: that Comb is the holder of controlled update %q (fence token %d), and a managerd cannot restart itself - ADR-0142's refusal, which no force setting overrides because there is no force setting here to override it with. Hand the operation to another Comb with HandoverColonyUpdate first, which is the normal way a colony-wide sweep finishes, and then ask that Comb's managerd. If you only need this Comb's managerd restarted and no update is running, do it on the host from a root shell: `service apiary_managerd restart`, or `apiaryctl force-restart` for managerd and raftd together",
+				"refusing to restart %s's managerd: that Comb is the holder of controlled update %q (fence token %d), and a managerd cannot restart itself - ADR-0142's refusal, which no force setting overrides because there is no force setting here to override it with. Hand the operation to another Comb with HandoverColonyUpdate first, which is the normal way a colony-wide sweep finishes, and then ask that Comb's managerd. If you only need this Comb's managerd restarted and no update is running, do it on the host from a root shell: `service apiary_managerd restart`, or `/usr/local/libexec/apiary/apiaryctl force-restart` for managerd and raftd together",
 				target, fence.GetOperationId(), fence.GetFenceToken()),
 		}, nil
 	}

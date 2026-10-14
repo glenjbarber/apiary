@@ -165,7 +165,7 @@ func readLocalCertificate(label, path string) (*localCertificate, error) {
 func localCertificates(configPath string) ([]*localCertificate, error) {
 	cfg, err := (&nodeconfig.Manager{Path: configPath}).Load()
 	if err != nil {
-		return nil, fmt.Errorf("reading this Comb's own configuration: %w - run `apiaryctl install --apply` first", err)
+		return nil, fmt.Errorf("reading this Comb's own configuration: %w - run `/usr/local/libexec/apiary/apiaryctl install --apply` first", err)
 	}
 	serving, err := readLocalCertificate("tls_cert", cfg.TLSCert)
 	if err != nil {
@@ -401,7 +401,7 @@ apiary_raftd is running and that raftd.json names the right socket.
 	fmt.Println("This command will not submit any of that for you. The transcription is")
 	fmt.Println("the check.")
 	fmt.Printf("\nWhen the target's Admin has verified it, poll for the second PIN:\n\n")
-	fmt.Printf("  apiaryctl join-introduce --request-id %s --first-code %s --target %s --field second-pin\n", resp.GetRequestId(), firstCode, target)
+	fmt.Printf("  /usr/local/libexec/apiary/apiaryctl join-introduce --request-id %s --first-code %s --target %s --field second-pin\n", resp.GetRequestId(), firstCode, target)
 	return 0
 }
 
@@ -437,7 +437,7 @@ func buildJoinStatusRequest(requestID, firstCode string) *rpcpb.GetJoinRequestSt
 // an empty field.
 func pollJoinIntroduction(target, requestID, firstCode, field string, plaintext bool, caFile string) int {
 	if firstCode == "" {
-		fmt.Fprintln(os.Stderr, "apiaryctl join-introduce: --first-code is required with --request-id. It is the 6-digit value `apiaryctl join-introduce` printed when the request was made; the target needs it to release the second PIN.")
+		fmt.Fprintln(os.Stderr, "apiaryctl join-introduce: --first-code is required with --request-id. It is the 6-digit value `/usr/local/libexec/apiary/apiaryctl join-introduce` printed when the request was made; the target needs it to release the second PIN.")
 		return 2
 	}
 	if target == "" {

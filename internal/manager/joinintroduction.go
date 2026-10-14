@@ -155,14 +155,14 @@ type advertisedCertificate struct {
 // certificate and advertises one.
 func (s *Server) localAdvertisedCertificates() ([]advertisedCertificate, error) {
 	if s.nodeConfig == nil {
-		return nil, fmt.Errorf("this node has no node-config file configured, so it holds no certificate to advertise; the joining Comb's managerd needs its own node-config with a tls_cert (see `apiaryctl install --apply`)")
+		return nil, fmt.Errorf("this node has no node-config file configured, so it holds no certificate to advertise; the joining Comb's managerd needs its own node-config with a tls_cert (see `/usr/local/libexec/apiary/apiaryctl install --apply`)")
 	}
 	cfg, err := s.nodeConfig.Load()
 	if err != nil {
 		return nil, fmt.Errorf("reading this node's own configuration: %w", err)
 	}
 	if strings.TrimSpace(cfg.TLSCert) == "" {
-		return nil, fmt.Errorf("this node's own configuration names no tls_cert, so it has no certificate fingerprint to advertise. A join request carrying no fingerprints cannot be approved - run `apiaryctl install --apply` on the joining Comb first")
+		return nil, fmt.Errorf("this node's own configuration names no tls_cert, so it has no certificate fingerprint to advertise. A join request carrying no fingerprints cannot be approved - run `/usr/local/libexec/apiary/apiaryctl install --apply` on the joining Comb first")
 	}
 	serving, err := readCertificateFile("tls_cert", cfg.TLSCert)
 	if err != nil {
@@ -395,7 +395,7 @@ func (s *Server) VerifyJoinIntroduction(ctx context.Context, req *rpcpb.VerifyJo
 		return &rpcpb.VerifyJoinIntroductionResponse{Error: "request_id is required"}, nil
 	}
 	if req.GetIntroductionCode() == "" {
-		return &rpcpb.VerifyJoinIntroductionResponse{Error: "the first code is required. It is the 6-digit value the REQUESTING Comb generated and shows on its own screen (`apiaryctl join-introduce --field first-code`); it is not a value this Colony generates"}, nil
+		return &rpcpb.VerifyJoinIntroductionResponse{Error: "the first code is required. It is the 6-digit value the REQUESTING Comb generated and shows on its own screen (`/usr/local/libexec/apiary/apiaryctl join-introduce --field first-code`); it is not a value this Colony generates"}, nil
 	}
 	// The fingerprints are pasted by a human off the requesting Comb's
 	// screen. An empty list is refused here rather than allowed to
@@ -403,7 +403,7 @@ func (s *Server) VerifyJoinIntroduction(ctx context.Context, req *rpcpb.VerifyJo
 	// operator pasted something that did not match" are different
 	// problems and only one of them is a failed attempt worth counting.
 	if len(req.GetFingerprints()) == 0 {
-		return &rpcpb.VerifyJoinIntroductionResponse{Error: "the joining Comb's advertised fingerprints are required. Read them off the requesting Comb's own screen (`apiaryctl join-introduce --field fingerprints`), one per line - comparing the request against nothing is exactly what this step refuses to do"}, nil
+		return &rpcpb.VerifyJoinIntroductionResponse{Error: "the joining Comb's advertised fingerprints are required. Read them off the requesting Comb's own screen (`/usr/local/libexec/apiary/apiaryctl join-introduce --field fingerprints`), one per line - comparing the request against nothing is exactly what this step refuses to do"}, nil
 	}
 	// Leadership first, and before any local work, for the same reason
 	// ApproveJoinRequest does it: the command has to be applied by the
@@ -493,7 +493,7 @@ func (s *Server) buildPinForRequest(requestID string, now time.Time) (*internalp
 	// advancing it to CODE_VERIFIED would produce a handshake the
 	// target's operator believes it completed.
 	if len(pending.GetAdvertisedFingerprints()) == 0 {
-		return nil, fmt.Errorf("request_id %q advertised no certificate fingerprints, so there is nothing to pin and nothing to compare. A request with no fingerprints cannot be approved; have the joining Comb re-request with `apiaryctl join-introduce`", requestID)
+		return nil, fmt.Errorf("request_id %q advertised no certificate fingerprints, so there is nothing to pin and nothing to compare. A request with no fingerprints cannot be approved; have the joining Comb re-request with `/usr/local/libexec/apiary/apiaryctl join-introduce`", requestID)
 	}
 	// When this member's own serving certificate verifies against the
 	// system trust store, every Comb in this Colony is on the public-CA

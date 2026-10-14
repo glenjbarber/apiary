@@ -149,7 +149,7 @@ func Load(path string) (Store, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return Store{}, fmt.Errorf("joinauth: %s does not exist - no Comb has been authorized to join on this one, and `apiaryctl install` creates this file empty", path)
+			return Store{}, fmt.Errorf("joinauth: %s does not exist - no Comb has been authorized to join on this one, and `/usr/local/libexec/apiary/apiaryctl install` creates this file empty", path)
 		}
 		return Store{}, fmt.Errorf("joinauth: reading %s: %w", path, err)
 	}
@@ -295,7 +295,7 @@ func (r *Refusal) Error() string { return r.Detail }
 // doing the right thing:
 //
 //   - no-file / unreadable / malformed: the store itself is the
-//     problem, and the answer is `apiaryctl install`.
+//     problem, and the answer is `/usr/local/libexec/apiary/apiaryctl install`.
 //   - no-entry: nothing has been authorized for this node_id at all.
 //   - fingerprint-mismatch: an entry exists for this node_id but names
 //     a different certificate - either a stale entry from an earlier

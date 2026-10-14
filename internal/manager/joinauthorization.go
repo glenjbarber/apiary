@@ -271,13 +271,13 @@ func (s *Server) authorizationRefusal(err error, pending *internalpb.PendingJoin
 	if leader != "" {
 		where = fmt.Sprintf("the Colony's current leader (%s)", leader)
 	}
-	command := fmt.Sprintf("apiaryctl join-authorize --node-id %q --fingerprint %q",
+	command := fmt.Sprintf("/usr/local/libexec/apiary/apiaryctl join-authorize --node-id %q --fingerprint %q",
 		pending.GetNodeId(), pending.GetTlsCertFingerprint())
 
 	var loadErr *authorizationLoadError
 	if errors.As(err, &loadErr) {
 		return fmt.Errorf(
-			"refusing to approve %q: the operator authorization store could not be read: %v. Until it can be, no join can be approved on this Comb - which is the intended direction of failure. `apiaryctl install` creates the file empty on every Comb; run it there, and create the entry itself on %s, in %s, as root: %s",
+			"refusing to approve %q: the operator authorization store could not be read: %v. Until it can be, no join can be approved on this Comb - which is the intended direction of failure. `/usr/local/libexec/apiary/apiaryctl install` creates the file empty on every Comb; run it there, and create the entry itself on %s, in %s, as root: %s",
 			pending.GetRequestId(), loadErr.err, where, s.joinAuthorizationFile(), command)
 	}
 	return fmt.Errorf(

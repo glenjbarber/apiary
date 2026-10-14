@@ -254,7 +254,7 @@ the joiner cannot honestly do - it would satisfy the check without a
 person ever looking at it. Run this on the joining node itself:
 
 ```bash
-apiaryctl join-introduce --target <existing-comb-managerd-address>
+/usr/local/libexec/apiary/apiaryctl join-introduce --target <existing-comb-managerd-address>
 ```
 
 Name any current member of the Colony, not only its leader. It prints the
@@ -268,7 +268,7 @@ panel's own first-code form, not into anything on the joining node.
 Afterward, poll for the target's second PIN:
 
 ```bash
-apiaryctl join-introduce --request-id <request-id> --first-code <first-code> \
+/usr/local/libexec/apiary/apiaryctl join-introduce --request-id <request-id> --first-code <first-code> \
   --target <existing-comb-managerd-address> --field second-pin
 ```
 
