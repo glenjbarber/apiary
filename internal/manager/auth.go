@@ -456,8 +456,11 @@ func checkAuth(ctx context.Context, fullMethod string, v apiKeyValidator) error 
 	if !authEnabled {
 		return nil
 	}
-	if key == "" || !valid {
-		return status.Error(codes.Unauthenticated, "missing or invalid API key")
+	if key == "" {
+		return status.Error(codes.Unauthenticated, "missing API key")
+	}
+	if !valid {
+		return status.Error(codes.Unauthenticated, "invalid API key (peer_api_key in managerd.json does not match any configured key)")
 	}
 	if !role.Satisfies(requiredRoleFor(fullMethod)) {
 		return status.Errorf(codes.PermissionDenied, "this API key's role (%s) may not call %s", role, fullMethod)
@@ -708,8 +711,11 @@ func (s *Server) authenticateAndIdentify(ctx context.Context, fullMethod string)
 	if !authEnabled {
 		return "", nil
 	}
-	if key == "" || !valid {
-		return "", status.Error(codes.Unauthenticated, "missing or invalid API key")
+	if key == "" {
+		return "", status.Error(codes.Unauthenticated, "missing API key")
+	}
+	if !valid {
+		return "", status.Error(codes.Unauthenticated, "invalid API key (peer_api_key in managerd.json does not match any configured key)")
 	}
 	if !role.Satisfies(requiredRoleFor(fullMethod)) {
 		return "", status.Errorf(codes.PermissionDenied, "this API key's role (%s) may not call %s", role, fullMethod)

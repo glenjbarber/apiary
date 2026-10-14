@@ -378,6 +378,19 @@
        keep wrapping exactly as they do now. */
     .service-table th:first-child, .service-table td:first-child { min-width:10rem; }
     .service-table td:first-child code { word-break:normal; white-space:nowrap; }
+    /* copy-btn: the shared "Copy" control (see _copy_button.html /
+       issue #101). Deliberately small and inline next to the <code>
+       value it copies, not a full-size button. copy-btn-feedback is an
+       empty inline span that briefly carries the "Copied"/"Copy
+       failed" text - see the delegated handler in the footer script -
+       kept separate from the button's own fixed "Copy" label so the
+       control's width never jumps when the feedback appears. */
+    .copy-btn { padding:.15rem .5rem; font-size:.78rem; font-weight:600; border-color:var(--muted); background:var(--panel); color:var(--ink); }
+    .copy-btn:hover { background:var(--row-hover); }
+    .copy-btn-feedback { margin-left:.4rem; font-weight:700; }
+    .copy-btn-feedback:empty { margin-left:0; }
+    .copy-btn.copy-btn-ok .copy-btn-feedback { color:var(--success); }
+    .copy-btn.copy-btn-err .copy-btn-feedback { color:var(--danger); }
     .upload-progress { display:flex; align-items:center; gap:.5rem; margin-top:.5rem; }
     #iso-upload-form { margin-bottom:1rem; }
     .upload-progress progress { flex:1; max-width:20rem; height:1rem; }
@@ -561,6 +574,64 @@
         }
       });
     }
+  }());
+</script>
+<script>
+  /* Shared "Copy" control (issue #101, _copy_button.html). One
+     delegated listener on document.body rather than a listener bound
+     to each button: vm_rows.html's rows (and any future copyable
+     row) are replaced wholesale by htmx's polling swap, which would
+     silently drop a per-element listener on every poll. document.body
+     itself is never replaced, so this keeps working across every
+     swap. */
+  (function () {
+    function fallbackCopy(text) {
+      var ta = document.createElement("textarea");
+      ta.value = text;
+      ta.setAttribute("readonly", "");
+      ta.style.position = "fixed";
+      ta.style.top = "0";
+      ta.style.left = "0";
+      ta.style.opacity = "0";
+      document.body.appendChild(ta);
+      var ok = false;
+      try {
+        ta.focus();
+        ta.select();
+        ok = document.execCommand && document.execCommand("copy");
+      } catch (_) {
+        ok = false;
+      }
+      document.body.removeChild(ta);
+      return ok;
+    }
+
+    function copyText(text) {
+      if (window.isSecureContext && navigator.clipboard && navigator.clipboard.writeText) {
+        return navigator.clipboard.writeText(text).then(
+          function () { return true; },
+          function () { return fallbackCopy(text); }
+        );
+      }
+      return Promise.resolve(fallbackCopy(text));
+    }
+
+    document.body.addEventListener("click", function (e) {
+      var btn = e.target.closest(".copy-btn");
+      if (!btn) return;
+      var value = btn.getAttribute("data-copy-value");
+      if (!value) return;
+      var feedback = btn.querySelector(".copy-btn-feedback");
+      copyText(value).then(function (ok) {
+        btn.classList.remove("copy-btn-ok", "copy-btn-err");
+        btn.classList.add(ok ? "copy-btn-ok" : "copy-btn-err");
+        if (feedback) feedback.textContent = ok ? "Copied" : "Copy failed";
+        window.setTimeout(function () {
+          btn.classList.remove("copy-btn-ok", "copy-btn-err");
+          if (feedback) feedback.textContent = "";
+        }, 1500);
+      });
+    });
   }());
 </script>
 {{end}}

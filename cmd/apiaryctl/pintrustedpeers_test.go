@@ -920,7 +920,7 @@ func TestPinTrustedPeers_IsDispatchedAndExplainsItself(t *testing.T) {
 	if strings.Contains(out, "unknown subcommand") {
 		t.Fatalf("apiaryctl pin-trusted-peers is not dispatched:\n%s", out)
 	}
-	if !strings.Contains(out, "usage: apiaryctl pin-trusted-peers") {
+	if !strings.Contains(out, "usage: /usr/local/libexec/apiary/apiaryctl pin-trusted-peers") {
 		t.Errorf("the subcommand's own usage was not printed:\n%s", out)
 	}
 	// The four refusals are what makes this command safe to hand an
