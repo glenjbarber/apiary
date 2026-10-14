@@ -119,6 +119,7 @@ var registry = []Check{
 	// operator who ran the sample through verbatim is told before
 	// anything else is proposed.
 	managerdNodeIDCheck,
+	transportEncryptionCheck,
 	zfsPoolCheck,
 	zfsBaseDatasetCheck,
 	vmmLoadedCheck,
@@ -199,6 +200,11 @@ func setRcVar(ctx context.Context, r Runner, assignment string) error {
 // a real host's own config.
 var managerdConfigPath = "/usr/local/etc/apiary/managerd.json"
 
+// raftdConfigPath is raftd's own config file - the same default
+// internal/raftdconfig.DefaultPath reads. A var for the same
+// test-isolation reason managerdConfigPath is.
+var raftdConfigPath = "/usr/local/etc/apiary/raftd.json"
+
 // placeholderNodeIDRe is the one value shape this check refuses: the
 // whole value wrapped in angle brackets, which is how every
 // placeholder etc/apiary's samples ship reads ("<this-node-id>",
@@ -273,6 +279,90 @@ var managerdNodeIDCheck = Check{
 		}
 		return Result{ID: "managerd-node-id", Status: StatusOK,
 			Detail: fmt.Sprintf("node_id is %q", peek.NodeID)}
+	},
+}
+
+// ---- transport encryption (issue #97) ----
+
+// raftdTLSPeek and managerdPeerTLSPeek are the minimal shapes this
+// check reads out of raftd.json/managerd.json - mirroring
+// managerdNodeIDPeek's own narrow-decode convention above, so a
+// placeholder or absent sibling key can never trip this check.
+type raftdTLSPeek struct {
+	RaftTLSCert string `json:"raft_tls_cert"`
+}
+
+type managerdPeerTLSPeek struct {
+	PeerTLS *bool `json:"peer_tls"`
+}
+
+// transportEncryptionCheck is issue #97's preflight slice: it reports,
+// but never fails, when this host's raftd and/or managerd are
+// configured to run their inter-host transports in plaintext - the
+// project-wide default (ADR-0078 for raft_tls_cert/_key/_ca;
+// etc/apiary/managerd.json.sample ships peer_tls: false). This is
+// deliberately StatusInformational, not StatusMisconfigured: every
+// Colony installed before this check existed is already in this
+// state, by design, and turning raft TLS on by default or forcing
+// peer_tls to true is its own migration decision this task does not
+// make (see the PR this landed in). The point here is only to make
+// the risk visible at install/upgrade time rather than buried in a
+// `raft-tls=false` log field or a config file nobody re-reads.
+var transportEncryptionCheck = Check{
+	ID:          "transport-encryption",
+	Description: "raftd and managerd inter-host transports are encrypted (issue #97)",
+	Risk:        RiskManualOnly,
+	Applicable:  always,
+	Probe: func(ctx context.Context, r Runner, opt Options) Result {
+		var plaintext []string
+
+		raftBody, err := os.ReadFile(raftdConfigPath)
+		switch {
+		case os.IsNotExist(err):
+			// Not yet configured - nothing to report, same convention
+			// as managerd-node-id above.
+		case err != nil:
+			return Result{ID: "transport-encryption", Status: StatusUnknown, Detail: err.Error(),
+				FixHint: "make " + raftdConfigPath + " readable by this user, then re-run"}
+		default:
+			var peek raftdTLSPeek
+			if jerr := json.Unmarshal(raftBody, &peek); jerr != nil {
+				return Result{ID: "transport-encryption", Status: StatusUnknown, Detail: jerr.Error(),
+					FixHint: "fix the JSON in " + raftdConfigPath + " - raftd loads the same file and will not start on it either"}
+			}
+			if peek.RaftTLSCert == "" {
+				plaintext = append(plaintext, fmt.Sprintf(
+					"raftd's Raft transport (%s: raft_tls_cert/_key/_ca unset) - cluster state, forwarded credentials and the data they describe travel in cleartext between Combs; see ADR-0078",
+					raftdConfigPath))
+			}
+		}
+
+		managerBody, err := os.ReadFile(managerdConfigPath)
+		switch {
+		case os.IsNotExist(err):
+		case err != nil:
+			return Result{ID: "transport-encryption", Status: StatusUnknown, Detail: err.Error(),
+				FixHint: "make " + managerdConfigPath + " readable by this user, then re-run"}
+		default:
+			var peek managerdPeerTLSPeek
+			if jerr := json.Unmarshal(managerBody, &peek); jerr != nil {
+				return Result{ID: "transport-encryption", Status: StatusUnknown, Detail: jerr.Error(),
+					FixHint: "fix the JSON in " + managerdConfigPath + " - managerd loads the same file and will not start on it either"}
+			}
+			if peek.PeerTLS == nil || !*peek.PeerTLS {
+				plaintext = append(plaintext, fmt.Sprintf(
+					"managerd's peer-forwarding transport (%s: peer_tls unset or false) - a peer managerd call runs over plaintext; managerd now refuses to forward a configured peer API key over it rather than send it in the clear, but unauthenticated forwarded calls still travel unencrypted",
+					managerdConfigPath))
+			}
+		}
+
+		if len(plaintext) == 0 {
+			return Result{ID: "transport-encryption", Status: StatusOK,
+				Detail: "raft_tls_cert is set and peer_tls is true: both inter-host transports this host configures are encrypted"}
+		}
+		return Result{ID: "transport-encryption", Status: StatusInformational,
+			Detail:  "this host is running at least one inter-host transport in plaintext: " + strings.Join(plaintext, "; "),
+			FixHint: "set raft_tls_cert/raft_tls_key/raft_tls_ca in raftd.json and peer_tls: true in managerd.json once every Comb in this Colony can serve and verify real certificates - see ADR-0078 and ADR-0093/ADR-0147, and issue #97"}
 	},
 }
 

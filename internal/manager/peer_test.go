@@ -387,15 +387,58 @@ func TestPeerReporter_ReportVMPhase_SendsCorrectRequest(t *testing.T) {
 }
 
 func TestPeerReporter_AttachesAPIKey(t *testing.T) {
+	// Over TLS - the only transport issue #97 allows an API key to ride
+	// on. See TestPeerReporter_RefusesToForwardAPIKeyOverPlaintext for
+	// the fail-closed behavior when peer_tls is false.
 	fake := &fakePeerServer{}
-	addr := newTestPeerServer(t, fake)
-	p := NewPeerReporter("test-key", false, nil)
+	addr, certPath := newTestPeerServerTLS(t, fake)
+	pool, err := LoadPeerCAPool(certPath)
+	if err != nil {
+		t.Fatalf("LoadPeerCAPool() error: %v", err)
+	}
+	p := NewPeerReporter("test-key", true, nil)
+	p.CAPool = pool
 
 	if err := p.ReportVMPhase(context.Background(), addr, "vm-1", "ready", ""); err != nil {
 		t.Fatalf("ReportVMPhase() error: %v", err)
 	}
 	if fake.lastAuth != "Bearer test-key" {
 		t.Errorf("received Authorization = %q, want \"Bearer test-key\"", fake.lastAuth)
+	}
+}
+
+// TestPeerReporter_RefusesToForwardAPIKeyOverPlaintext is issue #97's
+// own regression test for the fail-closed change: a node configured
+// with peer_tls=false (the default, nodeconfig/managerd.json.sample)
+// that also has a real peer API key configured must refuse to forward
+// a call rather than dial insecure.NewCredentials() and send that key
+// in the clear. The dial must never even happen - confirmed by using
+// an address nothing is listening on, so the only way this could
+// return a nil error is the call having gone out anyway.
+func TestPeerReporter_RefusesToForwardAPIKeyOverPlaintext(t *testing.T) {
+	p := NewPeerReporter("test-key", false, nil)
+
+	err := p.ReportVMPhase(context.Background(), "127.0.0.1:1", "vm-1", "ready", "")
+	if err == nil {
+		t.Fatal("ReportVMPhase() with peer_tls=false and an API key set = nil error, want a refusal to forward the key in cleartext")
+	}
+}
+
+// TestPeerReporter_NoCredentialOverPlaintextStillWorks confirms the
+// fail-closed change above is scoped to "about to send a credential,"
+// not to peer_tls=false generally: a single-node Colony or a test
+// harness that never configured a peer API key at all must keep
+// working over plaintext exactly as before.
+func TestPeerReporter_NoCredentialOverPlaintextStillWorks(t *testing.T) {
+	fake := &fakePeerServer{}
+	addr := newTestPeerServer(t, fake)
+	p := NewPeerReporter("", false, nil)
+
+	if err := p.ReportVMPhase(context.Background(), addr, "vm-1", "ready", ""); err != nil {
+		t.Fatalf("ReportVMPhase() with no API key configured, over plaintext, error: %v, want success", err)
+	}
+	if fake.lastAuth != "" {
+		t.Errorf("received Authorization = %q, want none", fake.lastAuth)
 	}
 }
 
@@ -420,8 +463,13 @@ func TestPeerReporter_NoAPIKeyAttachesNothing(t *testing.T) {
 // NeverAttachesAPIKey below is meaningful only in contrast to this.
 func TestPeerReporter_RequestJoinColony_AttachesAPIKey(t *testing.T) {
 	fake := &fakePeerServer{}
-	addr := newTestPeerServer(t, fake)
-	p := NewPeerReporter("test-key", false, nil)
+	addr, certPath := newTestPeerServerTLS(t, fake)
+	pool, err := LoadPeerCAPool(certPath)
+	if err != nil {
+		t.Fatalf("LoadPeerCAPool() error: %v", err)
+	}
+	p := NewPeerReporter("test-key", true, nil)
+	p.CAPool = pool
 
 	if _, err := p.RequestJoinColony(context.Background(), addr, &rpcpb.RequestJoinColonyRequest{NodeId: "node-2", RaftBindAddress: "10.0.0.2:17600"}); err != nil {
 		t.Fatalf("RequestJoinColony() error: %v", err)

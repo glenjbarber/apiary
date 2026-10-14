@@ -434,3 +434,15 @@ func TestLoopbackRaftBindWarning(t *testing.T) {
 		t.Errorf("an address with no port must not warn (SplitHostPort fails), got %q", w)
 	}
 }
+
+func TestRaftTLSWarning(t *testing.T) {
+	w := raftTLSWarning("")
+	for _, want := range []string{"PLAINTEXT", "raft_tls_cert", "raft_tls_key", "raft_tls_ca", "ADR-0078"} {
+		if !strings.Contains(w, want) {
+			t.Errorf("empty raft_tls_cert: warning = %q, want it to mention %q", w, want)
+		}
+	}
+	if w := raftTLSWarning("/usr/local/etc/apiary/raft.crt"); w != "" {
+		t.Errorf("a configured raft_tls_cert must not warn, got %q", w)
+	}
+}

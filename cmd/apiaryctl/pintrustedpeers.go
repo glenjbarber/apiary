@@ -665,7 +665,13 @@ type managerdBackend struct {
 	// pinDialOption for why it is worth a field rather than a log
 	// line inside the dial.
 	transport string
-	closed    func()
+	// tls records whether transport above is actually encrypted -
+	// pinDialOption's one legitimate plaintext case (a Colony with no
+	// trust anchors pinned yet) still sets transport to a descriptive
+	// string, so Pin below needs the plain bool, not a string match,
+	// to decide whether sending apiKey is safe (issue #97).
+	tls    bool
+	closed func()
 }
 
 // dialPinBackend opens both halves. target is any member of the
@@ -676,7 +682,7 @@ type managerdBackend struct {
 // "this is not a member of the Colony", and that is worth saying
 // before the certificates are read, not after.
 func dialPinBackend(ctx context.Context, target, raftdConfig, peerCA, peerName string) (*managerdBackend, error) {
-	dialOpt, transport, err := pinDialOption(target, peerCA, peerName)
+	dialOpt, transport, tls, err := pinDialOption(target, peerCA, peerName)
 	if err != nil {
 		return nil, err
 	}
@@ -694,6 +700,7 @@ func dialPinBackend(ctx context.Context, target, raftdConfig, peerCA, peerName s
 		apiKey:    os.Getenv(managerAPIKeyEnv),
 		raftCfg:   raftdConfig,
 		transport: transport,
+		tls:       tls,
 		closed:    closeFn,
 	}, nil
 }
@@ -728,11 +735,11 @@ func dialPinBackend(ctx context.Context, target, raftdConfig, peerCA, peerName s
 // and asks for nothing back. The client proves who it is by being the
 // process that can write the Colony's trust store, which is the
 // root-owned local raft socket dialed in dialPinBackend.
-func pinDialOption(target, peerCA, peerName string) (grpc.DialOption, string, error) {
+func pinDialOption(target, peerCA, peerName string) (grpc.DialOption, string, bool, error) {
 	if peerName == "" {
 		host, _, err := net.SplitHostPort(target)
 		if err != nil {
-			return nil, "", fmt.Errorf("--target %q is not HOST:PORT, so there is no name in it to verify a certificate against: %w. Give it host:port, and --peer-name if the certificate names something other than that host", target, err)
+			return nil, "", false, fmt.Errorf("--target %q is not HOST:PORT, so there is no name in it to verify a certificate against: %w. Give it host:port, and --peer-name if the certificate names something other than that host", target, err)
 		}
 		peerName = host
 	}
@@ -743,9 +750,9 @@ func pinDialOption(target, peerCA, peerName string) (grpc.DialOption, string, er
 	if _, err := os.Stat(caPath); err != nil {
 		if derived && errors.Is(err, fs.ErrNotExist) {
 			return grpc.WithTransportCredentials(insecure.NewCredentials()),
-				fmt.Sprintf("plaintext, because this Colony has no trust anchors at %s yet", caPath), nil
+				fmt.Sprintf("plaintext, because this Colony has no trust anchors at %s yet", caPath), false, nil
 		}
-		return nil, "", fmt.Errorf("reading the trust anchors %s: %w. Name a file that exists, or pass no --peer-ca at all to use the derived one", caPath, err)
+		return nil, "", false, fmt.Errorf("reading the trust anchors %s: %w. Name a file that exists, or pass no --peer-ca at all to use the derived one", caPath, err)
 	}
 	// One copy of the TLS rules, not a second one built here: the
 	// package that builds this option exists precisely so that a
@@ -753,9 +760,9 @@ func pinDialOption(target, peerCA, peerName string) (grpc.DialOption, string, er
 	// then dial it with another.
 	opt, err := tlsdial.ManagerDialOption(true, caPath, peerName)
 	if err != nil {
-		return nil, "", fmt.Errorf("trusting %s for %s: %w", caPath, peerName, err)
+		return nil, "", false, fmt.Errorf("trusting %s for %s: %w", caPath, peerName, err)
 	}
-	return opt, fmt.Sprintf("TLS, verifying %q against %s", peerName, caPath), nil
+	return opt, fmt.Sprintf("TLS, verifying %q against %s", peerName, caPath), true, nil
 }
 
 func (b *managerdBackend) Close() {
@@ -770,6 +777,17 @@ func (b *managerdBackend) ListTrustedPeers(ctx context.Context) (map[string]*int
 
 func (b *managerdBackend) Pin(ctx context.Context, peer *rpcpb.TrustedPeer) (*rpcpb.TrustedPeer, string, error) {
 	if b.apiKey != "" {
+		// issue #97: pinDialOption's one legitimate plaintext case is
+		// "this Colony has no trust anchors pinned yet" - that is a
+		// real, non-error state, but it means this dial is unencrypted,
+		// and sending managerAPIKeyEnv's own Admin-tier credential over
+		// it would leak the same way internal/manager's peer calls
+		// used to. Refuse to send it rather than send it in the clear;
+		// an operator bootstrapping trust with no key configured is
+		// unaffected.
+		if !b.tls {
+			return nil, "", fmt.Errorf("refusing to send %s over this connection: it is %s, not TLS. Pin this Colony's first certificates with no %s set (the pin RPC is unauthenticated until a key exists), or set up TLS before pinning with an API key", managerAPIKeyEnv, b.transport, managerAPIKeyEnv)
+		}
 		ctx = metadata.AppendToOutgoingContext(ctx, "authorization", "Bearer "+b.apiKey)
 	}
 	resp, err := b.client.PinPeerCertificate(ctx, &rpcpb.PinPeerCertificateRequest{Peer: peer})
