@@ -157,16 +157,6 @@ func (s *Server) authorizePendingJoin(ctx context.Context, pending *internalpb.P
 	}
 
 	// Gate 3: the two-person rule, recorded in replicated state.
-	//
-	// It cannot apply to a Colony with exactly one member. There is no
-	// second Comb to present a second authorization to, so the rule
-	// would make the first joiner of every single-node Colony
-	// unadmittable. The root-owned entry (gate 1) is still required and
-	// is the one authorization. Any failure to count the members keeps
-	// the strict rule.
-	if s.colonyHasSingleMember(ctx) {
-		return &joinAuthorization{id: entry.ID, consumedAt: time.Now().Unix()}, nil
-	}
 	keyID := callerAPIKeyID(ctx)
 	nodeID := req.GetApprovingNodeId()
 	switch {
@@ -339,14 +329,4 @@ func fromInternalJoinApproval(a *internalpb.JoinApprovalAttestation) *rpcpb.Join
 		return nil
 	}
 	return &rpcpb.JoinApprovalAttestation{KeyId: a.GetKeyId(), NodeId: a.GetNodeId(), AtUnix: a.GetAtUnix()}
-}
-
-// colonyHasSingleMember reports whether this Colony has exactly one
-// member. It answers false when the membership cannot be read.
-func (s *Server) colonyHasSingleMember(ctx context.Context) bool {
-	status, err := s.raft.Status(ctx)
-	if err != nil {
-		return false
-	}
-	return len(status.GetServers()) == 1
 }
