@@ -195,8 +195,8 @@
     {{if .ConvertJoinerResult}}
     <div class="panel">
       <p><strong>Conversion succeeded.</strong> Existing state moved to <code>{{.ConvertJoinerResult.BackupDataDir}}</code>.</p>
-      <p>Your code: <strong class="confirmation-code">{{.ConvertJoinerResult.JoinRequestCode}}</strong></p>
-      <p class="muted">Relay this code to the target Colony's Admin - they compare it against their own "Pending join requests" panel before approving. Nothing about the target Colony changes until they do.</p>
+      <p>First code: <strong class="confirmation-code">{{.ConvertJoinerResult.JoinRequestCode}}</strong></p>
+      <p class="muted">Relay this first code to the target Colony's Admin - they compare it against the one on their own "Pending join requests" panel, in that request's Stage 1 form, before approving. Nothing about the target Colony changes until they do.</p>
     </div>
     {{else}}
     <form class="inline-form" method="post" action="/machine/convert-to-joiner" hx-confirm="This stops raftd, moves this Comb's existing raft state aside to a timestamped backup, and reconfigures it to join the named Colony. There is no automatic revert. Continue?">

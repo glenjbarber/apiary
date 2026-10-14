@@ -162,6 +162,27 @@ type pageData struct {
 	// a visible error instead of silently doing nothing.
 	JoinRequestError string
 
+	// JoinRequestErrorPointsToStage1 is set when JoinRequestError is the
+	// specific refusal ApprovePendingJoinRequest returns for clicking
+	// Approve before the Stage 1 "verify the first code and
+	// fingerprints" form has been submitted (issue #71). The message
+	// alone names the stage the request is at; this flag lets the page
+	// also point at the control that actually resolves it, rather than
+	// leaving the operator to notice the (now default-open, but still
+	// easy to miss) disclosure on their own.
+	JoinRequestErrorPointsToStage1 bool
+
+	// JoinRequestAwaitingSecondAuthorization/Message surface
+	// ApproveJoinRequestResponse.awaiting_second_authorization (issue
+	// #73): the two-person rule (ADR-0147 Part 3) recorded ONE
+	// authorizing act and is deliberately withholding AddVoter until a
+	// second, distinct Comb and key approve too. This is neither
+	// JoinRequestError (nothing failed) nor silence (something
+	// happened) - it is its own banner, so the first and second Approve
+	// no longer look identical to each other or to a failure.
+	JoinRequestAwaitingSecondAuthorization        bool
+	JoinRequestAwaitingSecondAuthorizationMessage string
+
 	// JoinRequestPreflight* back the "Check reachability" preview button
 	// on each pending join request row (ADR-0103) - populated from the
 	// redirect query string after a POST /join-requests/{id}/preflight.

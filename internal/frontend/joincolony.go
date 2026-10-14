@@ -317,7 +317,46 @@ func (s *Server) handleApproveJoinRequest(w http.ResponseWriter, r *http.Request
 		ConfirmPhrase: r.FormValue("confirm_phrase"),
 		SecondPin:     strings.TrimSpace(r.FormValue("second_pin")),
 	})
+	// ADR-0147 Part 3 / issue #73: awaiting_second_authorization is
+	// neither an error nor a success (see ApproveJoinRequestResponse's
+	// own doc comment) - it is checked BEFORE resp.GetError(), which is
+	// always empty on this path anyway, so this call never falls through
+	// to redirectAfterJoinRequestAction and renders the one-authorization
+	// state as if nothing had happened.
+	if err == nil && resp.GetAwaitingSecondAuthorization() {
+		s.redirectAfterJoinRequestAwaitingSecond(w, r, resp.GetSecondAuthorizationRequired())
+		return
+	}
 	s.redirectAfterJoinRequestAction(w, r, resp.GetError(), err)
+}
+
+// redirectAfterJoinRequestAwaitingSecond carries ADR-0147 Part 3's
+// one-authorization-recorded state back to the landing page in its own
+// query parameter, distinct from ?join_request_error=, so the page can
+// render it as its own banner rather than as either a failure or
+// silence (issue #73).
+func (s *Server) redirectAfterJoinRequestAwaitingSecond(w http.ResponseWriter, r *http.Request, message string) {
+	http.Redirect(w, r, "/?join_request_awaiting_second="+url.QueryEscape(message), http.StatusFound)
+}
+
+// joinApprovalTooEarlyMarker is the distinctive substring of the
+// refusal joinRequestNotActionable (internal/manager) returns when
+// Approve is attempted before Stage 1 (the "verify the first code and
+// fingerprints" form) has been completed for this request. Matching on
+// it, rather than only rendering the raw message, lets the page point
+// the operator at the specific control that resolves it (issue #71)
+// instead of leaving them to notice a disclosure on their own.
+//
+// A substring match against the manager's own wording, not a typed
+// error or status code: the message is intentionally prose written for
+// an operator, and this is the one phrase of it that is stable across
+// every stage-mismatch refusal joinRequestNotActionable can produce.
+const joinApprovalTooEarlyMarker = "have to be verified on this Colony's page"
+
+// joinRequestErrorPointsToStage1 reports whether a JoinRequestError is
+// the stage-too-early refusal above.
+func joinRequestErrorPointsToStage1(msg string) bool {
+	return strings.Contains(msg, joinApprovalTooEarlyMarker)
 }
 
 func (s *Server) handleRejectJoinRequest(w http.ResponseWriter, r *http.Request) {
