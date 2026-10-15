@@ -373,7 +373,8 @@ type pageData struct {
 	// which replaced the separate new-VM and new-Jail pages and is
 	// served from all three of /create, /vms/new and /jails/new. Only
 	// populated for that page - see create_guided.go.
-	Guided *guidedPageView
+	Guided     *guidedPageView
+	JoinGuided *guidedJoinPageView
 
 	// NodeConfig/NodeConfigFormError back the Machine Configuration
 	// page's uplink section (ADR-0049) - GetNodeConfig's current
@@ -1220,6 +1221,8 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /colony-update/panel", s.handleColonyUpdatePanel)
 	s.mux.HandleFunc("POST /colony-update/request", s.requireRole(manager.RoleAdmin, s.handleColonyUpdateRequest))
 	s.mux.HandleFunc("GET /assumptions", s.handleAssumptionsPage)
+	s.mux.HandleFunc("GET /colony/join/guided", s.requireRole(manager.RoleOperator, s.handleJoinGuidedPage))
+	s.mux.HandleFunc("POST /colony/join/guided", s.requireRole(manager.RoleOperator, s.handleJoinGuidedPage))
 	s.mux.HandleFunc("POST /assumptions/purge-stale", s.requireRole(manager.RoleOperator, s.handlePurgeStaleAssumptionResults))
 	s.mux.HandleFunc("GET /assumption-register", s.handleAssumptionRegisterPage)
 	s.mux.HandleFunc("GET /recovery-handbook", s.handleRecoveryHandbookPage)
