@@ -189,7 +189,7 @@
         <div class="cockpit-workspace">
           <div class="page-header cockpit-header"><div class="page-header-copy"><h2>Command center</h2><p>Current state, safe next actions, and the evidence behind every answer.</p></div><span class="badge ready">Live evidence</span></div>
           <section class="panel" aria-labelledby="cluster-health-heading">
-            <div class="cockpit-panel-head"><h2 id="cluster-health-heading">Cluster health</h2><form class="health-tree-controls" id="health-tree-settings"><label for="health-tree-interval">Refresh every</label><input id="health-tree-interval" type="number" min="1" max="300" value="10" inputmode="numeric"><span>seconds</span><button type="submit" class="secondary">Apply</button></form></div>
+            <div class="cockpit-panel-head"><h2 id="cluster-health-heading">Cluster health</h2><label class="health-tree-controls" for="health-tree-interval">Refresh every <input id="health-tree-interval" type="number" min="1" max="300" value="10" inputmode="numeric"> seconds</label></div>
             <p class="muted">Health and running state, grouped by host. Observations older than 30 seconds become stale.</p>
             <div id="cluster-health-tree" aria-live="polite"><ul class="cluster-health-tree" role="tree" aria-label="Apiary cluster health">{{template "health_tree_node" .HealthTree}}</ul></div>
             <p id="cluster-health-error" class="health-tree-error" hidden></p>
@@ -209,7 +209,6 @@
       (() => {
         const root = document.getElementById("cluster-health-tree");
         const error = document.getElementById("cluster-health-error");
-        const settings = document.getElementById("health-tree-settings");
         const intervalInput = document.getElementById("health-tree-interval");
         const cacheKey = "apiary.cluster-health-tree.v1";
         const intervalKey = "apiary.cluster-health-refresh-seconds.v1";
@@ -255,6 +254,28 @@
               age.textContent = state.dataset.baseState === "STALE" ? "STALE (" + ageText(stamp, now) + ")" : ageText(stamp, now);
             }
           });
+          // A parent's badge is an aggregate of its current descendants. Recompute
+          // bottom-up every second so a child becoming stale between polls cannot
+          // leave a green cluster or host summary on screen.
+          function aggregateRows(list) {
+            const items = Array.from(list.children).filter((item) => item.matches("li[role=treeitem]"));
+            for (const item of items) {
+              const group = item.querySelector(":scope > ul[role=group]");
+              if (!group || !group.children.length) continue;
+              aggregateRows(group);
+              const state = item.querySelector(":scope > .health-tree-row .health-tree-state");
+              if (!state) continue;
+              const states = [state.dataset.baseState, ...Array.from(group.children, (child) => child.querySelector(":scope > .health-tree-row .health-tree-state")?.dataset.state || "UNKNOWN")];
+              let aggregate = "HEALTHY";
+              if (states.some((value) => value === "DOWN" || value === "DEGRADED")) aggregate = "DEGRADED";
+              else if (states.includes("STALE")) aggregate = "STALE";
+              else if (states.includes("UNKNOWN")) aggregate = "UNKNOWN";
+              state.textContent = aggregate;
+              state.dataset.state = aggregate;
+            }
+          }
+          const tree = root.querySelector(":scope > ul[role=tree]");
+          if (tree) aggregateRows(tree);
         }
 
         function readNode(item) {
@@ -270,6 +291,28 @@
             defaultExpanded: item.getAttribute("aria-expanded") === "true",
             children: group ? Array.from(group.children).map(readNode) : []
           };
+        }
+
+        // Host rows always belong directly to the cluster, even if a stale
+        // browser cache or older response placed one under another host.
+        function normalizeHostHierarchy(tree) {
+          const hosts = [];
+          function collect(node) {
+            if (node.kind === "host") {
+              hosts.push(node);
+              const resources = [];
+              for (const child of node.children || []) {
+                if (child.kind === "host") collect(child);
+                else resources.push(child);
+              }
+              node.children = resources;
+              return;
+            }
+            for (const child of node.children || []) collect(child);
+          }
+          for (const child of tree.children || []) collect(child);
+          tree.children = hosts;
+          return tree;
         }
 
         function mergeUnknown(node, old, keepMissing) {
@@ -332,6 +375,7 @@
           const list = root.querySelector(":scope > ul[role=tree]") || document.createElement("ul");
           const old = list.firstElementChild;
           if (keepOld && old) tree = mergeUnknown(tree, old, tree.inventoryComplete === false);
+          tree = normalizeHostHierarchy(tree);
           aggregate(tree);
           list.setAttribute("role", "tree"); list.setAttribute("aria-label", "Apiary cluster health");
           const rendered = renderNode(tree, old);
@@ -352,13 +396,13 @@
           }
         }
 
-        settings.addEventListener("submit", (event) => {
-          event.preventDefault();
+        function applyRefreshInterval() {
           refreshSeconds = Math.min(300, Math.max(1, Number(intervalInput.value) || 10));
           intervalInput.value = String(refreshSeconds);
           try { localStorage.setItem(intervalKey, String(refreshSeconds)); } catch (_) {}
           clearInterval(pollTimer); pollTimer = setInterval(refresh, refreshSeconds * 1000); refresh();
-        });
+        }
+        intervalInput.addEventListener("change", applyRefreshInterval);
         root.addEventListener("click", (event) => {
           const button = event.target.closest(".health-tree-toggle");
           if (!button) return;
