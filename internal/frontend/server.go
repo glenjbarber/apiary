@@ -125,6 +125,11 @@ type pageData struct {
 	// default landing page ("/").
 	ClusterNodes []clusterNodeView
 
+	// HealthTree is the operational cluster/resource hierarchy shown at
+	// the top of the Command Center. It is also refreshed in place from
+	// /cluster-health.json without replacing the user's expanded branches.
+	HealthTree healthTreeNode
+
 	// StateDigestColony is the colony-wide FSM state agreement verdict the
 	// ClusterNodes badges above sit under (ADR-0143). It is a value, not
 	// a pointer, and its BadgeClass is always set, so the panel can render
@@ -1163,6 +1168,7 @@ func (s *Server) routes() {
 
 	// Viewer: every read-only page/route.
 	s.mux.HandleFunc("GET /{$}", s.handleClusterOverviewPage)
+	s.mux.HandleFunc("GET /cluster-health.json", s.handleClusterHealthJSON)
 	s.mux.HandleFunc("GET /host/{id}", s.handleHostPage)
 	s.mux.HandleFunc("GET /host/{id}/evidence", s.handleClusterEvidencePage)
 	s.mux.HandleFunc("GET /vms", s.handleVMsPage)

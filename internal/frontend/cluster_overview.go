@@ -125,6 +125,11 @@ type clusterNodeView struct {
 	HealthStatus       health.Status
 	HealthExplanation  string
 	HealthObservations []health.Observation
+	// ReconcileSuccessUnix is the timestamp of this Comb's most recent
+	// fully successful reconciliation. The Command Center uses it as the
+	// observation time for lifecycle phases reported by this Comb; a fresh
+	// HTTP/RPC response alone is not evidence that those phases are fresh.
+	ReconcileSuccessUnix int64
 
 	// IsColonyLeader marks the node this Comb's own raftd currently reports
 	// as the Colony leader (ADR-0123). It comes from the same single anchor
@@ -504,6 +509,9 @@ func (s *Server) clusterNodeEvidence(ctx context.Context, nodeID, localNodeID st
 		stats = fromRPCStats(hostStats)
 	}
 	node := summarizeClusterNode(nodeID, stats, errMsg)
+	if observedHostStats != nil && observedHostStats.GetLastReconcileSuccessUnix() > 0 {
+		node.ReconcileSuccessUnix = observedHostStats.GetLastReconcileSuccessUnix()
+	}
 
 	signals, stateDigest, appliedIndex := s.nodeHealthSignals(ctx, nodeID, localNodeID, anchor, hostStats, hostStatsErr, now)
 	result := health.ComputeNodeHealth(signals, now)
@@ -609,6 +617,7 @@ func (s *Server) handleClusterOverviewPage(w http.ResponseWriter, r *http.Reques
 	joinRequestAwaitingSecond := r.URL.Query().Get("join_request_awaiting_second")
 	s.render(w, "cluster_overview_page", s.withAuthFieldsFrom(r, pageData{
 		ClusterNodes: nodes,
+		HealthTree:   buildHealthTree(nodes, index, now),
 		// GuardrailHolds is 0 - see pageData.HealthCard's own comment on
 		// why this constructor has no real count to pass here yet.
 		HealthCard:                             newHealthCardViewFromNodes(nodes, 0, len(joinRequests)),
