@@ -189,7 +189,7 @@
         <div class="cockpit-workspace">
           <div class="page-header cockpit-header"><div class="page-header-copy"><h2>Command center</h2><p>Current state, safe next actions, and the evidence behind every answer.</p></div><span class="badge ready">Live evidence</span></div>
           <section class="panel" aria-labelledby="cluster-health-heading">
-            <div class="cockpit-panel-head"><h2 id="cluster-health-heading">Cluster health</h2><label class="health-tree-controls" for="health-tree-interval">Refresh every <input id="health-tree-interval" type="number" min="1" max="300" value="10" inputmode="numeric"> seconds</label></div>
+            <div class="cockpit-panel-head"><h2 id="cluster-health-heading">Cluster health</h2><form class="health-tree-controls" id="health-tree-settings"><label for="health-tree-interval">Refresh every</label><input id="health-tree-interval" type="number" min="1" max="300" value="10" inputmode="numeric">
             <p class="muted">Health and running state, grouped by host. Observations older than 30 seconds become stale.</p>
             <div id="cluster-health-tree" aria-live="polite"><ul class="cluster-health-tree" role="tree" aria-label="Apiary cluster health">{{template "health_tree_node" .HealthTree}}</ul></div>
             <p id="cluster-health-error" class="health-tree-error" hidden></p>
