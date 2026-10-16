@@ -93,6 +93,7 @@ type nodeConfigView struct {
 	WatchgooseEndpointSet bool
 	WatchgooseInterval    string
 	WatchgooseTimeout     string
+	WatchgooseBadgeURL    string
 
 	Uplink                  string
 	NATUplink               string
@@ -215,6 +216,7 @@ func fromRPCNodeConfig(d *rpcpb.GetNodeConfigResponse) nodeConfigView {
 		WatchgooseEndpointSet:   d.GetWatchgooseEndpointSet(),
 		WatchgooseInterval:      d.GetWatchgooseInterval(),
 		WatchgooseTimeout:       d.GetWatchgooseTimeout(),
+		WatchgooseBadgeURL:      d.GetWatchgooseBadgeUrl(),
 		Uplink:                  d.GetUplink(),
 		NATUplink:               d.GetNatUplink(),
 		DNSServer:               d.GetDhcpDnsServer(),

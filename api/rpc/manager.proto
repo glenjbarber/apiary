@@ -2018,6 +2018,8 @@ message GetNodeConfigResponse {
   bool watchgoose_endpoint_set = 56;
   string watchgoose_interval = 57;
   string watchgoose_timeout = 58;
+  // The public, read-only Watchgoose badge URL associated with this Comb.
+  string watchgoose_badge_url = 59;
 }
 
 message ConfigChange {
@@ -2212,6 +2214,9 @@ message UpdateNodeConfigRequest {
   bool clear_watchgoose_endpoint = 57;
   string watchgoose_interval = 58;
   string watchgoose_timeout = 59;
+  // Badge URL is public/read-only and displayed on this Comb's Operations page.
+  string watchgoose_badge_url = 60;
+  bool clear_watchgoose_badge_url = 61;
 }
 
 message UpdateNodeConfigResponse {

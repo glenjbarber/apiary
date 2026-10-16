@@ -316,9 +316,11 @@ func fixtureNodeConfig(t *testing.T) (nodeconfig.Config, map[string]string) {
 	cfg.PeerAPIKey = "peer-api-key-LIVE-CREDENTIAL-8f2a1c9d4e7b"
 	cfg.RaftdToken = "raftd-token-LIVE-CREDENTIAL-3b6d0e5a1f8c"
 	cfg.WatchgooseEndpoint = "https://watchgoose.com/ping/watchgoose-key-LIVE-CREDENTIAL-5e9c2a7d/drone"
+	cfg.WatchgooseBadgeURL = "https://watchgoose.com/badge/check/badge-LIVE-CREDENTIAL-5e9c2a7d.svg"
 	values["PeerAPIKey"] = cfg.PeerAPIKey
 	values["RaftdToken"] = cfg.RaftdToken
 	values["WatchgooseEndpoint"] = cfg.WatchgooseEndpoint
+	values["WatchgooseBadgeURL"] = cfg.WatchgooseBadgeURL
 	return cfg, values
 }
 

@@ -3019,15 +3019,16 @@ func (s *Server) GetNodeConfig(_ context.Context, _ *rpcpb.GetNodeConfigRequest)
 		PeerTlsCa:          cfg.PeerTLSCA,
 		KnownPeerAddresses: cfg.KnownPeerAddresses,
 
-		// Secrets are never returned - only whether one is set. See
-		// UpdateNodeConfigRequest's own doc comment for how to set or
-		// clear one.
+		// Ping credentials are never returned - only whether one is set.
+		// The Watchgoose badge URL is a public read-only token, so the
+		// Operations page receives it to render the configured badge.
 		PeerApiKeySet:         cfg.PeerAPIKey != "",
 		RaftdTokenSet:         cfg.RaftdToken != "",
 		WatchgooseEnabled:     cfg.WatchgooseEnabled,
 		WatchgooseEndpointSet: cfg.WatchgooseEndpoint != "",
 		WatchgooseInterval:    durationString(cfg.WatchgooseInterval),
 		WatchgooseTimeout:     durationString(cfg.WatchgooseTimeout),
+		WatchgooseBadgeUrl:    cfg.WatchgooseBadgeURL,
 
 		TlsCert:    cfg.TLSCert,
 		TlsKey:     cfg.TLSKey,
@@ -3343,6 +3344,12 @@ func (s *Server) UpdateNodeConfig(_ context.Context, req *rpcpb.UpdateNodeConfig
 			return &rpcpb.UpdateNodeConfigResponse{Error: err.Error()}, nil
 		}
 	}
+	watchgooseBadgeURL := current.WatchgooseBadgeURL
+	if req.GetClearWatchgooseBadgeUrl() {
+		watchgooseBadgeURL = ""
+	} else if strings.TrimSpace(req.GetWatchgooseBadgeUrl()) != "" {
+		watchgooseBadgeURL = strings.TrimSpace(req.GetWatchgooseBadgeUrl())
+	}
 
 	cfg := nodeconfig.Config{
 		// NodeID/RPCAddr/RaftdSocket (ADR-0100) are deliberately never
@@ -3361,6 +3368,7 @@ func (s *Server) UpdateNodeConfig(_ context.Context, req *rpcpb.UpdateNodeConfig
 		WatchgooseEndpoint: watchgooseEndpoint,
 		WatchgooseInterval: watchgooseInterval,
 		WatchgooseTimeout:  watchgooseTimeout,
+		WatchgooseBadgeURL: watchgooseBadgeURL,
 
 		Uplink:        req.GetUplink(),
 		NATUplink:     req.GetNatUplink(),

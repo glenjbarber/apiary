@@ -11,8 +11,10 @@
 //
 //   - Secrets (PeerAPIKey, RaftdToken, WatchgooseEndpoint) are write-only
 //     from the caller's perspective - internal/manager.Server.GetNodeConfig
-//     never returns their value, only whether one is set. Save persists them as
-//     plain text in this file, which is why DefaultPath is now written
+//     never returns their value, only whether one is set. The Watchgoose
+//     badge URL is a separate public read-only token, returned so the UI can
+//     render the badge but redacted from history and backups. Save persists
+//     these values as plain text in this file, which is why DefaultPath is now written
 //     0600, not 0644 - this file can hold a live credential, the exact
 //     class of exposure ADR-0067 already found and fixed once for
 //     /etc/rc.conf itself.
@@ -300,6 +302,7 @@ type Config struct {
 	WatchgooseEndpoint string        `json:"watchgoose_endpoint,omitempty"`
 	WatchgooseInterval time.Duration `json:"watchgoose_interval,omitempty"`
 	WatchgooseTimeout  time.Duration `json:"watchgoose_timeout,omitempty"`
+	WatchgooseBadgeURL string        `json:"watchgoose_badge_url,omitempty"`
 
 	// RaftdToken mirrors -raftd-token - a live credential (ADR-0033),
 	// write-only, same posture as PeerAPIKey above.
@@ -607,6 +610,11 @@ func validate(cfg Config) error {
 	if err := validateDurationField("watchgoose_timeout", cfg.WatchgooseTimeout); err != nil {
 		return err
 	}
+	if cfg.WatchgooseBadgeURL != "" {
+		if err := validateWatchgooseBadgeURL(cfg.WatchgooseBadgeURL); err != nil {
+			return err
+		}
+	}
 	if cfg.WatchgooseEnabled {
 		if cfg.WatchgooseEndpoint == "" {
 			return fmt.Errorf("nodeconfig: watchgoose_endpoint must be set when watchgoose_enabled is true")
@@ -619,6 +627,30 @@ func validate(cfg Config) error {
 		}
 	}
 	return nil
+}
+
+func validateWatchgooseBadgeURL(raw string) error {
+	u, err := url.Parse(raw)
+	if err != nil || u.Scheme != "https" || u.Hostname() != "watchgoose.com" || u.Port() != "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" {
+		return fmt.Errorf("nodeconfig: watchgoose_badge_url must be an HTTPS Watchgoose badge URL without query, user info, or fragment")
+	}
+	parts := strings.Split(strings.TrimPrefix(u.EscapedPath(), "/"), "/")
+	if len(parts) != 3 || parts[0] != "badge" || !validWatchgooseBadgePathPart(parts[1]) || !strings.HasSuffix(parts[2], ".svg") || !validWatchgooseBadgePathPart(strings.TrimSuffix(parts[2], ".svg")) {
+		return fmt.Errorf("nodeconfig: watchgoose_badge_url must use the /badge/<check>/<token>.svg path")
+	}
+	return nil
+}
+
+func validWatchgooseBadgePathPart(value string) bool {
+	if value == "" {
+		return false
+	}
+	for _, r := range value {
+		if (r < 'a' || r > 'z') && (r < 'A' || r > 'Z') && (r < '0' || r > '9') && r != '-' && r != '_' {
+			return false
+		}
+	}
+	return true
 }
 
 func validateWatchgooseEndpoint(endpoint string) error {
