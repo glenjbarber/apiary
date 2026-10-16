@@ -719,11 +719,17 @@ func TestDenyListNamesTheFiveLiveCredentials(t *testing.T) {
 	}
 }
 
-func TestWatchgooseEndpointIsRedactedFromBackupBytes(t *testing.T) {
-	const endpoint = "https://watchgoose.com/ping/test-secret-key/drone"
-	sanitizer := NewSanitizer(&nodeconfig.Config{WatchgooseEndpoint: endpoint}, nil, nil)
-	if err := sanitizer.Guard("test backup", []byte(`{"watchgoose_endpoint":"`+endpoint+`"}`)); !errors.Is(err, ErrSecretExposed) {
-		t.Fatalf("Guard() error = %v, want ErrSecretExposed", err)
+func TestWatchgoosePingURLsAreRedactedFromBackupBytes(t *testing.T) {
+	for _, endpoint := range []string{
+		"https://watchgoose.com/ping/test-secret-key/drone",
+		"https://watchgoose.com/ping/00000000-0000-4000-8000-000000000001",
+	} {
+		t.Run("endpoint", func(t *testing.T) {
+			sanitizer := NewSanitizer(&nodeconfig.Config{WatchgooseEndpoint: endpoint}, nil, nil)
+			if err := sanitizer.Guard("test backup", []byte(`{"watchgoose_endpoint":"`+endpoint+`"}`)); !errors.Is(err, ErrSecretExposed) {
+				t.Fatalf("Guard() error = %v, want ErrSecretExposed", err)
+			}
+		})
 	}
 }
 

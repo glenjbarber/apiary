@@ -208,12 +208,14 @@ has real state under the old value.
   own built-in defaults.
 - `watchgoose_enabled`, `watchgoose_endpoint`, `watchgoose_interval`,
   `watchgoose_timeout` — optional per-Hive Watchgoose heartbeat. It is
-  disabled by default. Configure the endpoint as that Hive's HTTPS slug
-  ping URL (`https://watchgoose.com/ping/<ping-key>/<hive-slug>`); the URL
-  contains the Ping Key and is a credential, so keep this root-owned file
-  mode 0600 and do not include the URL in logs or backups. Create and
+  disabled by default. Configure the endpoint as that Hive's HTTPS UUID ping
+  URL (`https://watchgoose.com/ping/<check-uuid>`) or slug ping URL
+  (`https://watchgoose.com/ping/<ping-key>/<hive-slug>`). UUID and Ping Key
+  URLs both grant the ability to report check results, so treat the complete
+  URL as a credential: keep this root-owned file mode 0600 and do not include
+  the URL in logs or backups. Create and
   configure the check in Watchgoose first; set a simple schedule whose
-  period and grace account for the interval. Slugs use lowercase letters,
+  period and grace account for the interval. Slug URLs use lowercase letters,
   digits, hyphens, or underscores. The sender uses HTTPS GET success pings,
   retries transient failures up to two times, and accepts HTTP 200/201.
   Watchgoose documents a limit of five pings per minute per check, so Apiary
