@@ -15,6 +15,7 @@
 package invariant
 
 import (
+	"fmt"
 	"strings"
 	"time"
 
@@ -155,9 +156,13 @@ func quorumFactFromVoters(voters []VoterReachability, x VoterReachability) recov
 // inconsistent - Verdict is meaningless in that case, never a
 // fabricated finding (mirrors ValidQuorumFact's own guard).
 type VoterQuorumImpact struct {
-	NodeID  string
-	Verdict recovery.QuorumVerdict
-	Valid   bool
+	NodeID          string
+	Verdict         recovery.QuorumVerdict
+	Valid           bool
+	Fact            recovery.QuorumFact
+	UnknownVoterIDs []string
+	TargetIsLeader  bool
+	LeaderVantage   bool
 }
 
 // ClassifyVoterQuorumImpacts computes every voter's own hypothetical-
@@ -177,11 +182,22 @@ func ClassifyVoterQuorumImpacts(voters []VoterReachability, leaderID string, van
 	for _, v := range voters {
 		fact := quorumFactFromVoters(voters, v)
 		valid := recovery.ValidQuorumFact(fact)
+		isLeader := v.NodeID == leaderID
 		var verdict recovery.QuorumVerdict
 		if valid {
-			verdict = recovery.ClassifyQuorumFromVantage(fact, v.NodeID == leaderID, vantage)
+			verdict = recovery.ClassifyQuorumFromVantage(fact, isLeader, vantage)
 		}
-		impacts = append(impacts, VoterQuorumImpact{NodeID: v.NodeID, Verdict: verdict, Valid: valid})
+		var unknownVoters []string
+		for _, remaining := range voters {
+			if remaining.NodeID != v.NodeID && remaining.Reachability == ReachabilityUnknown {
+				unknownVoters = append(unknownVoters, remaining.NodeID)
+			}
+		}
+		impacts = append(impacts, VoterQuorumImpact{
+			NodeID: v.NodeID, Verdict: verdict, Valid: valid, Fact: fact,
+			UnknownVoterIDs: unknownVoters, TargetIsLeader: isLeader,
+			LeaderVantage: vantage != recovery.VantageFromNonLeader,
+		})
 	}
 	return impacts
 }
@@ -225,6 +241,7 @@ func EvaluateQuorumTolerance(voters []VoterReachability, leaderID string, vantag
 	if vantage == recovery.VantageFromLeader {
 		unknownWhy += ", or this voter is the current leader and reachability was only checked from the leader's own vantage point"
 	}
+	var unknownDetails []string
 
 	for _, impact := range impacts {
 		switch {
@@ -245,9 +262,17 @@ func EvaluateQuorumTolerance(voters []VoterReachability, leaderID string, vantag
 			})
 			worst = ResultFalse
 		case impact.Verdict == recovery.QuorumUnknown:
+			detail := fmt.Sprintf("Losing %s has an UNKNOWN quorum outcome: quorum needs %d of %d voters, with %d confirmed reachable after the loss", impact.NodeID, impact.Fact.QuorumSize, impact.Fact.TotalVoters, impact.Fact.RemainingReachable)
+			if len(impact.UnknownVoterIDs) > 0 {
+				detail += "; reachability is unknown for " + strings.Join(impact.UnknownVoterIDs, ", ")
+			}
+			if impact.TargetIsLeader && vantage == recovery.VantageFromLeader {
+				detail += "; the target is the current leader and these probes originated there, so they do not establish communication among the remaining voters after leader loss"
+			}
+			unknownDetails = append(unknownDetails, detail)
 			evidence = append(evidence, Evidence{
 				Source:     "raft membership + HostStats reachability for " + impact.NodeID,
-				Detail:     "Losing " + impact.NodeID + " has an UNKNOWN quorum outcome - see internal/recovery.ClassifyQuorum for why (" + unknownWhy + ").",
+				Detail:     detail + " (" + unknownWhy + ").",
 				ObservedAt: now,
 			})
 			if worst == ResultTrue {
@@ -271,7 +296,7 @@ func EvaluateQuorumTolerance(voters []VoterReachability, leaderID string, vantag
 			explanation = "The cluster does NOT tolerate losing at least one current voter - quorum would be lost."
 		}
 	case ResultUnknown:
-		explanation = "Whether the cluster tolerates losing every current voter could not be fully confirmed."
+		explanation = "Whether the cluster tolerates losing every current voter could not be fully confirmed. " + strings.Join(unknownDetails, ". ")
 	}
 
 	return Evaluation{

@@ -144,3 +144,20 @@ workaround specific to this feature.
   capability, image-source availability, and console/network
   dependencies are all explicitly out of scope for this slice, per
   `CODEX.md`'s own broader (unscoped) framing of the feature.
+
+## Post-acceptance correction: current-leader outage verdicts
+
+`SimulateNodeFailure` is answered by the current Raft leader, including
+when the request is forwarded from another managerd. Its reachability
+probes therefore show whether that leader can reach each remaining
+voter; they do not show whether the remaining voters can reach one
+another after the leader disappears. The simulator's raw count-based
+`Survives` value is insufficient evidence for a current-leader outage.
+
+The `/simulate` and `/maintenance` pages now classify a current-leader
+outage as `UNKNOWN` unless the remaining voters already fail the
+majority check by count alone, in which case the verdict remains `LOST`.
+They classify non-leader loss from the confirmed reachability evidence
+and keep unknown reachability as unknown. This follows the stricter
+leader-vantage handling already used by the Offline Recovery Handbook
+(ADR-0057); it does not change Raft election or quorum behavior.
