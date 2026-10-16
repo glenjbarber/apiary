@@ -460,6 +460,7 @@ func TestServer_RequestJoinColony_FillsTLSFingerprintFromLocalTLSCert(t *testing
 	peers := &fakeJoinColonyPeerForwarder{requestResp: &rpcpb.RequestJoinColonyResponse{RequestId: "jreq-1", Code: "482913"}}
 	nodeConfig := &fakeNodeConfigStore{cfg: nodeconfig.Config{TLSCert: certPath}}
 	s := NewServer(nil, "node-1", nil, nil, nil, nil, peers, "", nil, nodeConfig, nil, 0, nil)
+	s.SetKnownPeerAddresses([]string{"10.0.0.1:17700"})
 
 	resp, err := s.RequestJoinColony(context.Background(), withIntroduction(&rpcpb.RequestJoinColonyRequest{
 		NodeId: "node-2", RaftBindAddress: "10.0.0.2:17600", TargetAddress: "10.0.0.1:17700",
