@@ -58,7 +58,7 @@ survives the test. Record the time and current leader.
 if the coverage result is **Lost**, if the cluster already has a voter or
 workload fault, or if a required workload still runs only on Drone. An
 **Unknown** coverage result alone does not block this controlled test once the
-three-voter condition and every other preflight above are met.
+voter-count gate and every other preflight above are met.
 
 ## Controlled exercise
 
