@@ -290,7 +290,7 @@ var configFieldSpecs = []configFieldSpec{
 	{"acme_email", "Let's Encrypt contact email", "The contact address this Comb registers its ACME account with."},
 	{"peer_api_key", "Peer API key", "Authenticated peer managerd requests. Current and historical secret values are redacted."},
 	{"raftd_token", "Raftd token", "managerd authentication to this Comb's local raftd socket. Current and historical secret values are redacted."},
-	{"watchgoose_endpoint", "Watchgoose slug URL", "The write-only heartbeat URL for this Comb. The slug is a credential and current and historical values are redacted."},
+	{"watchgoose_endpoint", "Watchgoose ping URL", "The write-only heartbeat URL for this Comb. A UUID or slug ping URL is a credential, and current and historical values are redacted."},
 }
 
 func (s *Server) handleConfigProvenancePage(w http.ResponseWriter, r *http.Request) {

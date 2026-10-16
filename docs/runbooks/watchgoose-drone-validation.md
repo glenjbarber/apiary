@@ -59,9 +59,11 @@ doas touch /var/run/apiary/watchgoose.pause
 
 A successful ping confirms that `managerd` reached Watchgoose over HTTPS. It
 does not establish that Drone's guests, services, or overall Hive are healthy.
-The current sender uses a GET success ping, does not send job details or
-provision checks, retries transient server/network errors up to three times,
-and logs failures and later recovery without including the secret URL.
+The current sender uses a GET success ping and has no separate management API
+or check-creation logic. A configured slug URL with `?create=1` can still trigger
+Watchgoose's own auto-provisioning on the first ping. The sender retries
+transient server/network errors up to three times and logs failures and later
+recovery without including the secret URL.
 
 Watchgoose's ping API accepts GET for UUID and slug URLs. Slug-based URLs use a
 project Ping Key and can optionally create missing checks with `?create=1`;
