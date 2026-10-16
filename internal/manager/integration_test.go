@@ -242,6 +242,11 @@ func newManagerdRPCClientFull(t *testing.T, raftdSocket, nodeID string, vnc VNCL
 	}
 
 	srv := NewServer(raftClient, nodeID, isostore.New(t.TempDir()), vnc, serialLog, vlanMgr, nil, "", nil, nil, assumptionStoreMgr, assumptionStaleAfter, nil)
+	// Join approval now provisions a request-bound peer key from the
+	// Colony's existing restart-guardrail token. Model a provisioned Colony
+	// in the shared integration fixture; tests for a missing token clear it
+	// explicitly.
+	srv.SetRestartGuardrailToken("integration-test-restart-token")
 	// ADR-0147 Part 2: a join request now carries the joiner's real
 	// certificate fingerprints and its own first code, both required, so
 	// every managerd under test holds a real serving certificate. The
@@ -301,6 +306,7 @@ func newManagerdRPCClientAndServer(t *testing.T, raftdSocket, nodeID string) (rp
 	}
 
 	srv := NewServer(raftClient, nodeID, isostore.New(t.TempDir()), nil, nil, nil, nil, "", nil, nil, nil, 0, nil)
+	srv.SetRestartGuardrailToken("integration-test-restart-token")
 	// ADR-0147 Part 2, as in newManagerdRPCClientFull above.
 	attachTestCombCertificate(t, srv)
 	// ADR-0147 Part 3: as in newManagerdRPCClientFull above.
