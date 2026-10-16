@@ -245,8 +245,8 @@ each design decision, in order.
   VM/jail's ownership to a second node, but only when that node is
   already a synced HAST replica (any other target would silently
   destroy the VM/jail's real data - see the ADR). Verified live: a
-  real HAST-replicated jail failed over from `apiarium` to
-  `freebsd-apiary` for real, `hastctl` reaching `status: complete` on
+  real HAST-replicated jail was manually migrated from `apiarium` to
+  `freebsd-apiary`, with `hastctl` reporting `status: complete` on
   both sides before and after. This also caught a serious latent bug -
   and surfaced a real, still-open gap - in how the reconciler writes
   back to raft when a resource's owning node isn't the current raft
@@ -568,11 +568,17 @@ each design decision, in order.
   [ADR-0069](docs/adr/0069-host-config-export.md).
 - **Dependency Graph Simulator v1** - read-only "what happens if this
   node/network disappears right now" counterfactuals: raft quorum
-  impact from live reachability (not just configured membership), which
+  impact from current membership and manager reachability (not just
+  configured membership), which
   VMs/jails a node owns or backs as a HAST replica with a conservative
   recovery verdict, and which cells lose image availability. A
   mistyped or unknown target always returns an explicit error, never a
-  report that looks identical to a clean result. See
+  report that looks identical to a clean result. This is a model based
+  on a point-in-time observation, not an actual host outage test: it
+  does not stop or fence a node, and manager reachability does not prove
+  that the remaining Raft voters can communicate after the current
+  leader is lost. A leader-loss result can therefore be `unknown` even
+  when the configured voter count would permit a majority. See
   [ADR-0052](docs/adr/0052-dependency-graph-simulator.md),
   [ADR-0053](docs/adr/0053-managed-network-failure-simulation.md), and
   [ADR-0054](docs/adr/0054-image-availability-in-node-failure-simulation.md).
@@ -606,12 +612,14 @@ each design decision, in order.
   `<nav>` element) was caught and fixed on review. See
   [ADR-0059](docs/adr/0059-hierarchical-sidebar-shell.md).
 - **Operational Invariants v1** (`/invariants`) - a small, named catalog
-  of safety rules (no HAST resource has two writable primaries, a
-  cluster tolerates losing one more raft voter, a recoverable cell has
-  a synced replica and a capable destination, a managed network has a
-  working route) continuously evaluated to true/false/unknown with
-  cited evidence - a missing observation is never treated as a passed
-  check. See
+  of safety rules (no HAST resource has two writable primaries, whether
+  the cluster tolerates losing one more raft voter, whether a
+  recoverable cell has a synced replica and a capable destination, and
+  whether a managed network has a working route) continuously evaluated
+  to true/false/unknown with cited evidence - a missing observation is
+  never treated as a passed check. A `true` quorum result is based on
+  the membership and reachability evidence available at evaluation time;
+  it is not a physical outage rehearsal. See
   [ADR-0060](docs/adr/0060-operational-invariants-v1.md).
 - **Why Not Engine v1** (`/why-not`) - read-only answers to concrete
   operator questions ("why can this cell not migrate," "why is this
@@ -625,10 +633,14 @@ each design decision, in order.
   every failure scenario already computable by the mechanisms above
   (comb failure, network failure, network connectivity, cell
   recoverability, HAST dual-primary, raft quorum tolerance) and
-  classifies each by whether real evidence exists - simulated,
+  classifies each by whether an evaluation mechanism ran - simulated,
   untested, or unsafe/impossible to physically rehearse - never by
   whether the answer happens to be good news, and never rolled into a
-  percentage. See
+  percentage. `Survives` is the counterfactual result from the current
+  evidence, not proof from disconnecting that Comb; `Unknown` means the
+  evidence cannot establish the outcome, not that failure is certain.
+  The [Drone outage proof runbook](docs/runbooks/drone-offline-resilience-proof.md)
+  describes a controlled network-loss test and its limits. See
   [ADR-0062](docs/adr/0062-resilience-coverage-map-v1.md).
 - **Cloudflare Tunnel exposure v1** - the operator pre-provisions one
   Cloudflare Tunnel per Comb by hand; Apiary reconciles which Cells are
