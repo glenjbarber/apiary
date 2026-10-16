@@ -112,6 +112,7 @@ func newConvertJoinerTestServer(t *testing.T) (*Server, *fakeRaftdConversionConf
 	// certificate is refused by name - which is correct, and is why
 	// this harness gives it one.
 	attachTestCombCertificate(t, s)
+	s.SetKnownPeerAddresses([]string{"10.90.0.1:17700"})
 	s.raftdConversionConfig = cfgStore
 	s.raftdConversion = ctrl
 	s.reachabilityCheck = func(context.Context, string) error { return nil }

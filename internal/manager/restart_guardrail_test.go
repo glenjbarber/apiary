@@ -21,7 +21,7 @@ import (
 func TestRestartGuardrailToken_EmptyConfiguredTokenAlwaysRejects(t *testing.T) {
 	raftdSocket := newRaftdUDSSocket(t)
 	client, srv := newManagerdRPCClientAndServer(t, raftdSocket, "raftd-1")
-	_ = srv // s.restartGuardrailToken stays "" (default) - nothing to set
+	srv.SetRestartGuardrailToken("") // this test explicitly models a legacy node with no provisioned token
 
 	ctx := context.Background()
 
@@ -53,7 +53,7 @@ func TestRestartGuardrailToken_EmptyConfiguredTokenAlwaysRejects(t *testing.T) {
 func TestReserveRestartLease_FailsClosedWithNoLocalToken(t *testing.T) {
 	raftdSocket := newRaftdUDSSocket(t)
 	_, srv := newManagerdRPCClientAndServer(t, raftdSocket, "raftd-1")
-	// s.restartGuardrailToken stays "" (default) - nothing provisioned.
+	srv.SetRestartGuardrailToken("") // this test explicitly models a legacy node with no provisioned token
 
 	resp, err := srv.reserveRestartLease(context.Background(), &rpcpb.ReserveRestartLeaseRequest{
 		Service: raftdServiceName, NodeId: "raftd-1", Force: true,
