@@ -11,11 +11,13 @@ import (
 	"io/fs"
 	"net"
 	"os"
+	"strings"
 	"sync"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/metadata"
 
 	rpcpb "github.com/glenjbarber/apiary/api/rpc"
 	"github.com/glenjbarber/apiary/internal/peerca"
@@ -233,6 +235,26 @@ func (p *PeerReporter) dial(addr string) (*grpc.ClientConn, rpcpb.ManagerService
 	return p.dialOpts(addr, true)
 }
 
+// dialAsCaller preserves the authenticated caller's role when forwarding
+// administrative RPCs. The peer API key remains the fallback for
+// background peer operations that have no incoming user credential.
+// Forwarding credentials is safe only over the same verified TLS channel
+// required for configured peer credentials.
+func (p *PeerReporter) dialAsCaller(ctx context.Context, addr string) (*grpc.ClientConn, rpcpb.ManagerServiceClient, error) {
+	key := p.APIKey
+	localKey := true
+	if md, ok := metadata.FromIncomingContext(ctx); ok {
+		if values := md.Get("authorization"); len(values) == 1 {
+			const prefix = "Bearer "
+			if strings.HasPrefix(values[0], prefix) && strings.TrimSpace(strings.TrimPrefix(values[0], prefix)) != "" {
+				key = strings.TrimSpace(strings.TrimPrefix(values[0], prefix))
+				localKey = false
+			}
+		}
+	}
+	return p.dialOptsWithKey(addr, key, localKey)
+}
+
 // dialUnauthenticated dials addr exactly like dial (same TLS/CA-pool/
 // hostname-verification behavior) but never attaches p.APIKey - see
 // RequestJoinColonyUnauthenticated's own doc comment (ADR-0096). Used
@@ -304,7 +326,15 @@ func errInsecureCredentialForward(credential string) error {
 }
 
 func (p *PeerReporter) dialOpts(addr string, attachAPIKey bool) (*grpc.ClientConn, rpcpb.ManagerServiceClient, error) {
-	if !p.UseTLS && attachAPIKey && p.APIKey != "" {
+	key := ""
+	if attachAPIKey {
+		key = p.APIKey
+	}
+	return p.dialOptsWithKey(addr, key, true)
+}
+
+func (p *PeerReporter) dialOptsWithKey(addr, key string, localKey bool) (*grpc.ClientConn, rpcpb.ManagerServiceClient, error) {
+	if !p.UseTLS && key != "" {
 		return nil, nil, errInsecureCredentialForward("the peer API key")
 	}
 	var opts []grpc.DialOption
@@ -322,10 +352,10 @@ func (p *PeerReporter) dialOpts(addr string, attachAPIKey bool) (*grpc.ClientCon
 	} else {
 		opts = []grpc.DialOption{grpc.WithTransportCredentials(insecure.NewCredentials())}
 	}
-	if attachAPIKey && p.APIKey != "" {
-		opts = append(opts, grpc.WithPerRPCCredentials(apiKeyCredentials(p.APIKey)))
+	if key != "" {
+		opts = append(opts, grpc.WithPerRPCCredentials(apiKeyCredentials(key)))
 	}
-	if attachAPIKey {
+	if localKey {
 		// This Comb already knows - locally, from its own managerd.json,
 		// with no extra round trip - whether it even HAS a peer_api_key
 		// to attach above. When it doesn't, and the peer's response to
@@ -983,7 +1013,7 @@ func (p *PeerReporter) GetJoinRequestStatusUnauthenticatedWithRequest(ctx contex
 }
 
 func (p *PeerReporter) ApproveJoinRequest(ctx context.Context, addr string, req *rpcpb.ApproveJoinRequestRequest) (*rpcpb.ApproveJoinRequestResponse, error) {
-	conn, client, err := p.dial(addr)
+	conn, client, err := p.dialAsCaller(ctx, addr)
 	if err != nil {
 		return nil, err
 	}
@@ -1005,7 +1035,7 @@ func (p *PeerReporter) UpdateVoterAddress(ctx context.Context, addr string, req 
 // PreflightApproveJoinRequest forwards on a leader-hint rejection,
 // mirroring ApproveJoinRequest above exactly (ADR-0103).
 func (p *PeerReporter) PreflightApproveJoinRequest(ctx context.Context, addr string, req *rpcpb.PreflightApproveJoinRequestRequest) (*rpcpb.PreflightApproveJoinRequestResponse, error) {
-	conn, client, err := p.dial(addr)
+	conn, client, err := p.dialAsCaller(ctx, addr)
 	if err != nil {
 		return nil, err
 	}
@@ -1263,7 +1293,7 @@ func (p *PeerReporter) PurgeJoinRequest(ctx context.Context, addr string, req *r
 // Server.CreateAPIKey) is simply discarded on the forwarding path, so
 // no key material ever needs to cross nodes.
 func (p *PeerReporter) CreateAPIKey(ctx context.Context, addr string, req *rpcpb.CreateAPIKeyRequest) (*rpcpb.CreateAPIKeyResponse, error) {
-	conn, client, err := p.dial(addr)
+	conn, client, err := p.dialAsCaller(ctx, addr)
 	if err != nil {
 		return nil, err
 	}
@@ -1272,7 +1302,7 @@ func (p *PeerReporter) CreateAPIKey(ctx context.Context, addr string, req *rpcpb
 }
 
 func (p *PeerReporter) RevokeAPIKey(ctx context.Context, addr string, req *rpcpb.RevokeAPIKeyRequest) (*rpcpb.RevokeAPIKeyResponse, error) {
-	conn, client, err := p.dial(addr)
+	conn, client, err := p.dialAsCaller(ctx, addr)
 	if err != nil {
 		return nil, err
 	}
@@ -1286,7 +1316,7 @@ func (p *PeerReporter) RevokeAPIKey(ctx context.Context, addr string, req *rpcpb
 // follow-up closes the gap): ListAPIKeys is a read, but was never
 // included in ADR-0035's original list of forwarded reads.
 func (p *PeerReporter) ListAPIKeys(ctx context.Context, addr string) (*rpcpb.ListAPIKeysResponse, error) {
-	conn, client, err := p.dial(addr)
+	conn, client, err := p.dialAsCaller(ctx, addr)
 	if err != nil {
 		return nil, err
 	}

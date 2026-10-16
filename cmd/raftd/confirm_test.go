@@ -246,7 +246,7 @@ func TestConfirmHookGivesUpLoudlyAndKeepsTheRecord(t *testing.T) {
 	f := newHookFixture(t)
 	f.seedPending(t, 77)
 	f.conf.failFor = 100
-	f.conf.lastErr = errors.New("rpc error: code = PermissionDenied desc = invalid or missing restart-guardrail token")
+	f.conf.lastErr = status.Error(codes.PermissionDenied, "invalid or missing restart-guardrail token")
 
 	res := confirmPendingRestartOnStartup(context.Background(), f.deps)
 
@@ -262,11 +262,11 @@ func TestConfirmHookGivesUpLoudlyAndKeepsTheRecord(t *testing.T) {
 	if !restartplan.IsUnknown(res.Outcome) {
 		t.Errorf("IsUnknown = false for %q", res.Outcome)
 	}
-	if f.conf.callCount() != 5 {
-		t.Errorf("made %d attempts, want 5 (ADR-0125 §7)", f.conf.callCount())
+	if f.conf.callCount() != 1 {
+		t.Errorf("made %d attempts, want 1 because PermissionDenied cannot be fixed by retrying", f.conf.callCount())
 	}
-	if f.clock.slept() != 4 {
-		t.Errorf("slept %d times, want 4", f.clock.slept())
+	if f.clock.slept() != 0 {
+		t.Errorf("slept %d times, want 0 after a non-retryable authorization failure", f.clock.slept())
 	}
 
 	// The record must survive: it is the only thing that tells anyone a
@@ -281,8 +281,8 @@ func TestConfirmHookGivesUpLoudlyAndKeepsTheRecord(t *testing.T) {
 	if !strings.Contains(res.Detail, "neither a failed restart nor a confirmed success") {
 		t.Errorf("Detail = %q, want it to disown both positive verdicts explicitly", res.Detail)
 	}
-	if len(res.Evidence) != 5 {
-		t.Errorf("Evidence has %d entries, want one per attempt: %v", len(res.Evidence), res.Evidence)
+	if len(res.Evidence) != 1 {
+		t.Errorf("Evidence has %d entries, want the single non-retryable attempt: %v", len(res.Evidence), res.Evidence)
 	}
 	if !strings.Contains(strings.Join(res.Evidence, " "), "PermissionDenied") {
 		t.Errorf("Evidence = %v, want the RPC's own reason recorded", res.Evidence)

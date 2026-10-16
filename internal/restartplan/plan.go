@@ -6,6 +6,9 @@ import (
 	"strings"
 	"time"
 
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
+
 	"github.com/glenjbarber/apiary/internal/guardrail"
 )
 
@@ -421,6 +424,12 @@ func ConfirmWithRetry(ctx context.Context, confirmer Confirmer, pending PendingR
 		}
 		out.LastDetail = err.Error()
 		out.Evidence = append(out.Evidence, fmt.Sprintf("attempt %d/%d: %v", attempt, opts.Attempts, err))
+		// Authorization failures cannot recover by repeating the same call.
+		// Preserve the pending record, but stop early so missing or stale
+		// credentials do not create a burst of guaranteed failures.
+		if code := status.Code(err); code == codes.PermissionDenied || code == codes.Unauthenticated {
+			return out
+		}
 		if attempt == opts.Attempts {
 			break
 		}

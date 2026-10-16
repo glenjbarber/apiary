@@ -160,11 +160,34 @@ func (f *fakePeerServer) ListISOs(context.Context, *rpcpb.ListISOsRequest) (*rpc
 	return &rpcpb.ListISOsResponse{}, nil
 }
 
-func (f *fakePeerServer) ListAPIKeys(context.Context, *rpcpb.ListAPIKeysRequest) (*rpcpb.ListAPIKeysResponse, error) {
+func (f *fakePeerServer) ListAPIKeys(ctx context.Context, _ *rpcpb.ListAPIKeysRequest) (*rpcpb.ListAPIKeysResponse, error) {
+	if md, ok := metadata.FromIncomingContext(ctx); ok {
+		if vals := md.Get("authorization"); len(vals) > 0 {
+			f.lastAuth = vals[0]
+		}
+	}
 	if f.listAPIKeysResp != nil {
 		return f.listAPIKeysResp, nil
 	}
 	return &rpcpb.ListAPIKeysResponse{}, nil
+}
+
+func TestPeerReporterForwardAdminUsesCallersCredential(t *testing.T) {
+	fake := &fakePeerServer{listAPIKeysResp: &rpcpb.ListAPIKeysResponse{}}
+	addr, certPath := newTestPeerServerTLS(t, fake)
+	pool, err := LoadPeerCAPool(certPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := NewPeerReporter("operator-peer-key", true, nil)
+	p.CAPool = pool
+	ctx := metadata.NewIncomingContext(context.Background(), metadata.Pairs("authorization", "Bearer admin-caller-key"))
+	if _, err := p.ListAPIKeys(ctx, addr); err != nil {
+		t.Fatal(err)
+	}
+	if fake.lastAuth != "Bearer admin-caller-key" {
+		t.Fatalf("forwarded Authorization = %q, want caller's credential", fake.lastAuth)
+	}
 }
 
 func (f *fakePeerServer) ForcePurgeVM(_ context.Context, req *rpcpb.ForcePurgeVMRequest) (*rpcpb.ForcePurgeVMResponse, error) {
