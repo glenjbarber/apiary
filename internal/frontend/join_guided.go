@@ -2,7 +2,6 @@ package frontend
 
 import (
 	"net/http"
-
 )
 
 // This file is the HTTP half of the guided join flow: the wizard page
@@ -73,8 +72,8 @@ func (s *Server) processJoinGuidedStep(w http.ResponseWriter, r *http.Request) {
 	// Parse the form data.
 	if err := r.ParseForm(); err != nil {
 		s.renderJoinGuidedPage(w, r, &joinGuidedData{
-			Step:   "error",
-			Error:  "Failed to parse form: " + err.Error(),
+			Step:  "error",
+			Error: "Failed to parse form: " + err.Error(),
 		})
 		return
 	}
@@ -199,8 +198,8 @@ type joinGuidedData struct {
 	Error string
 
 	// Data from step 2: first code and fingerprints.
-	FirstCode     string
-	Fingerprints  string
+	FirstCode    string
+	Fingerprints string
 
 	// Data from step 4: second PIN (polled from the joining Comb).
 	SecondPin string

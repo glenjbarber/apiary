@@ -9,7 +9,6 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"github.com/glenjbarber/apiary/internal/buildinfo"
 	"log"
 	"net"
 	"os"
@@ -29,6 +28,7 @@ import (
 	"github.com/glenjbarber/apiary/internal/assumptionregister"
 	"github.com/glenjbarber/apiary/internal/assumptions"
 	"github.com/glenjbarber/apiary/internal/bhyve"
+	"github.com/glenjbarber/apiary/internal/buildinfo"
 	"github.com/glenjbarber/apiary/internal/cloudflare"
 	"github.com/glenjbarber/apiary/internal/cluster"
 	"github.com/glenjbarber/apiary/internal/deadman"
@@ -52,6 +52,7 @@ import (
 	"github.com/glenjbarber/apiary/internal/tlscache"
 	"github.com/glenjbarber/apiary/internal/ufsmount"
 	"github.com/glenjbarber/apiary/internal/vlan"
+	"github.com/glenjbarber/apiary/internal/watchgoose"
 	"github.com/glenjbarber/apiary/internal/zfs"
 )
 
@@ -612,6 +613,9 @@ func run() error {
 	go runOriginCARenewalLoop(ctx, originCARenewer, cfg.OriginCARenewalCheckInterval)
 	go runPeerHostnameRefreshLoop(ctx, peers, raftClient, peerHostnameRefreshInterval)
 	go runPeerCAWriteLoop(ctx, raftClient, peerCAWriteInterval)
+	if cfg.WatchgooseEnabled {
+		go watchgoose.Run(ctx, cfg.WatchgooseEndpoint, cfg.WatchgooseInterval, cfg.WatchgooseTimeout, id)
+	}
 	go confirmPendingRestartOnStartup(ctx, srv, restartConfirm, id, restartGuardrailToken)
 	go confirmColonyUpdateHandoffOnStartup(ctx, srv, id)
 
@@ -1192,6 +1196,12 @@ func applyManagerdDefaults(cfg *nodeconfig.Config) {
 	}
 	if cfg.OriginCARenewalCheckInterval == 0 {
 		cfg.OriginCARenewalCheckInterval = time.Hour
+	}
+	if cfg.WatchgooseInterval == 0 {
+		cfg.WatchgooseInterval = 5 * time.Minute
+	}
+	if cfg.WatchgooseTimeout == 0 {
+		cfg.WatchgooseTimeout = 10 * time.Second
 	}
 }
 
