@@ -611,7 +611,7 @@ func (s *Server) GetJoinRequestStatus(ctx context.Context, req *rpcpb.GetJoinReq
 		// finding) - see RequestJoinColony's own identical comment above.
 		fctx, cancel := context.WithTimeout(ctx, defaultUnauthenticatedForwardTimeout)
 		defer cancel()
-		resp, err := s.peers.GetJoinRequestStatusUnauthenticated(fctx, target, req.GetRequestId(), req.GetIntroductionCode())
+		resp, err := s.forwardJoinRequestStatus(fctx, target, req)
 		if err != nil {
 			return &rpcpb.GetJoinRequestStatusResponse{Error: fmt.Sprintf("reaching %s: %v", target, err)}, nil
 		}
@@ -625,6 +625,30 @@ func (s *Server) GetJoinRequestStatus(ctx context.Context, req *rpcpb.GetJoinReq
 		return &rpcpb.GetJoinRequestStatusResponse{Error: resp.GetError()}, nil
 	}
 	pending := resp.GetRequest()
+	out := &rpcpb.GetJoinRequestStatusResponse{Request: fromInternalPendingJoinRequest(pending)}
+	if pending.GetStatus() == internalpb.JoinRequestStatus_JOIN_REQUEST_STATUS_APPROVED && req.GetRecipientTlsCertificatePem() != "" {
+		envelope, leaderAddress, err := s.sealApprovedJoinCredentials(ctx, req, pending)
+		if leaderAddress != "" {
+			if s.peers == nil {
+				out.Error = "credential provisioning reached a follower but peer forwarding is not configured"
+				return out, nil
+			}
+			fctx, cancel := context.WithTimeout(ctx, defaultUnauthenticatedForwardTimeout)
+			defer cancel()
+			forwarded, ferr := s.forwardJoinRequestStatus(fctx, leaderAddress, req)
+			if ferr != nil {
+				out.Error = fmt.Sprintf("reaching the current Colony leader for join credentials: %v", ferr)
+				return out, nil
+			}
+			return forwarded, nil
+		}
+		if err != nil {
+			out.Error = err.Error()
+			return out, nil
+		}
+		out.SealedCredentials = envelope
+		return out, nil
+	}
 	// ADR-0147 Part 2: the SECOND PIN is released here and only here,
 	// and it is released on TWO values rather than the request_id alone.
 	//
@@ -643,7 +667,6 @@ func (s *Server) GetJoinRequestStatus(ctx context.Context, req *rpcpb.GetJoinReq
 	// Compared in constant time, through the same helper the FSM uses,
 	// so there is one comparison in the tree and not a second one that
 	// could be less careful.
-	out := &rpcpb.GetJoinRequestStatusResponse{Request: fromInternalPendingJoinRequest(pending)}
 	if pending.GetStage() != internalpb.JoinRequestStage_JOIN_REQUEST_STAGE_CODE_VERIFIED || pending.GetSecondPin() == "" {
 		return out, nil
 	}
@@ -674,6 +697,19 @@ func (s *Server) GetJoinRequestStatus(ctx context.Context, req *rpcpb.GetJoinReq
 	out.SecondPin = pending.GetSecondPin()
 	out.SecondPinExpiresAtUnix = pending.GetSecondPinExpiresAtUnix()
 	return out, nil
+}
+
+type joinStatusRequestForwarder interface {
+	GetJoinRequestStatusUnauthenticatedWithRequest(context.Context, string, *rpcpb.GetJoinRequestStatusRequest) (*rpcpb.GetJoinRequestStatusResponse, error)
+}
+
+func (s *Server) forwardJoinRequestStatus(ctx context.Context, address string, req *rpcpb.GetJoinRequestStatusRequest) (*rpcpb.GetJoinRequestStatusResponse, error) {
+	if forwarder, ok := s.peers.(joinStatusRequestForwarder); ok {
+		return forwarder.GetJoinRequestStatusUnauthenticatedWithRequest(ctx, address, req)
+	}
+	// Older test fakes implement the original narrow interface. Production
+	// PeerReporter preserves the complete request, including the certificate.
+	return s.peers.GetJoinRequestStatusUnauthenticated(ctx, address, req.GetRequestId(), req.GetIntroductionCode())
 }
 
 // hashJoinValue is the SHA-256 of one human-entered value, hex-encoded.
@@ -950,6 +986,24 @@ func (s *Server) ApproveJoinRequest(ctx context.Context, req *rpcpb.ApproveJoinR
 	}); report.Verdict != guardrail.Allow {
 		return &rpcpb.ApproveJoinRequestResponse{Error: fmt.Sprintf(
 			"refusing to approve: %s", report.Findings[0].Detail)}, nil
+	}
+	// Issues #80/#83: provision a request-bound Operator key before any
+	// irreversible membership change. The key table stores only its digest;
+	// the raw value is later sealed to the joining Comb's recorded TLS
+	// certificate and installed by that Comb's root apiaryctl. The shared
+	// restart token must already be loaded here so approval cannot add a voter
+	// that is unable to confirm the restart guardrail.
+	if _, leaderAddress, provisionErr := s.provisionApprovedJoinAPIKey(ctx, pending); leaderAddress != "" {
+		if s.peers == nil {
+			return &rpcpb.ApproveJoinRequestResponse{Error: fmt.Sprintf("peer-key provisioning reached a follower; the leader is at %s but peer forwarding is not configured", leaderAddress), LeaderHint: leaderAddress}, nil
+		}
+		forwarded, forwardErr := s.peers.ApproveJoinRequest(ctx, leaderAddress, req)
+		if forwardErr != nil {
+			return &rpcpb.ApproveJoinRequestResponse{Error: fmt.Sprintf("reaching current leader %s to provision join credentials: %v", leaderAddress, forwardErr), LeaderHint: leaderAddress}, nil
+		}
+		return forwarded, nil
+	} else if provisionErr != nil {
+		return &rpcpb.ApproveJoinRequestResponse{Error: provisionErr.Error()}, nil
 	}
 
 	// The PIN is SPENT here, by its own raft command, and this is the

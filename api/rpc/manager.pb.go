@@ -17572,8 +17572,11 @@ type GetJoinRequestStatusRequest struct {
 	// knowledge-is-the-credential shape CancelJoinRequest already uses,
 	// with a second factor attached, and no third concept is introduced.
 	IntroductionCode string `protobuf:"bytes,3,opt,name=introduction_code,json=introductionCode,proto3" json:"introduction_code,omitempty"`
-	unknownFields    protoimpl.UnknownFields
-	sizeCache        protoimpl.SizeCache
+	// RecipientTlsCertificatePem is the joining Comb's public serving
+	// certificate. Its fingerprint must match the pending request.
+	RecipientTlsCertificatePem string `protobuf:"bytes,4,opt,name=recipient_tls_certificate_pem,json=recipientTlsCertificatePem,proto3" json:"recipient_tls_certificate_pem,omitempty"`
+	unknownFields              protoimpl.UnknownFields
+	sizeCache                  protoimpl.SizeCache
 }
 
 func (x *GetJoinRequestStatusRequest) Reset() {
@@ -17627,6 +17630,13 @@ func (x *GetJoinRequestStatusRequest) GetIntroductionCode() string {
 	return ""
 }
 
+func (x *GetJoinRequestStatusRequest) GetRecipientTlsCertificatePem() string {
+	if x != nil {
+		return x.RecipientTlsCertificatePem
+	}
+	return ""
+}
+
 type GetJoinRequestStatusResponse struct {
 	state   protoimpl.MessageState `protogen:"open.v1"`
 	Request *PendingJoinRequest    `protobuf:"bytes,1,opt,name=request,proto3" json:"request,omitempty"`
@@ -17655,8 +17665,11 @@ type GetJoinRequestStatusResponse struct {
 	// the value that actually authorizes something and only has to
 	// survive one copy-and-paste.
 	SecondPinExpiresAtUnix int64 `protobuf:"varint,4,opt,name=second_pin_expires_at_unix,json=secondPinExpiresAtUnix,proto3" json:"second_pin_expires_at_unix,omitempty"`
-	unknownFields          protoimpl.UnknownFields
-	sizeCache              protoimpl.SizeCache
+	// SealedCredentials is ciphertext addressed to the joining Comb's
+	// certificate key. It contains no plaintext credential material.
+	SealedCredentials []byte `protobuf:"bytes,5,opt,name=sealed_credentials,json=sealedCredentials,proto3" json:"sealed_credentials,omitempty"`
+	unknownFields     protoimpl.UnknownFields
+	sizeCache         protoimpl.SizeCache
 }
 
 func (x *GetJoinRequestStatusResponse) Reset() {
@@ -17715,6 +17728,13 @@ func (x *GetJoinRequestStatusResponse) GetSecondPinExpiresAtUnix() int64 {
 		return x.SecondPinExpiresAtUnix
 	}
 	return 0
+}
+
+func (x *GetJoinRequestStatusResponse) GetSealedCredentials() []byte {
+	if x != nil {
+		return x.SealedCredentials
+	}
+	return nil
 }
 
 type ListJoinRequestsRequest struct {
@@ -21754,1815 +21774,975 @@ func (x *IssueManagerdRestartResponse) GetError() string {
 var File_api_rpc_manager_proto protoreflect.FileDescriptor
 
 const file_api_rpc_manager_proto_rawDesc = "" +
-	"\n" +
-	"\x15api/rpc/manager.proto\x12\rapiary.rpc.v1\"\xfd\x05\n" +
-	"\fVMDefinition\x12\x0e\n" +
-	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
-	"\x04name\x18\x02 \x01(\tR\x04name\x12\x14\n" +
-	"\x05vcpus\x18\x03 \x01(\rR\x05vcpus\x12\x1b\n" +
-	"\tmemory_mb\x18\x04 \x01(\x04R\bmemoryMb\x12\x17\n" +
-	"\anode_id\x18\x05 \x01(\tR\x06nodeId\x12;\n" +
-	"\rdesired_state\x18\x06 \x01(\x0e2\x16.apiary.rpc.v1.VMStateR\fdesiredState\x12,\n" +
-	"\x05phase\x18\a \x01(\x0e2\x16.apiary.rpc.v1.VMPhaseR\x05phase\x12\x1f\n" +
-	"\vphase_error\x18\b \x01(\tR\n" +
-	"phaseError\x12\x19\n" +
-	"\biso_name\x18\t \x01(\tR\aisoName\x12\x1d\n" +
-	"\n" +
-	"network_id\x18\n" +
-	" \x01(\tR\tnetworkId\x12\x1d\n" +
-	"\n" +
-	"ip_address\x18\v \x01(\tR\tipAddress\x12\x1f\n" +
-	"\vmac_address\x18\f \x01(\tR\n" +
-	"macAddress\x12B\n" +
-	"\x0efirewall_rules\x18\r \x03(\v2\x1b.apiary.rpc.v1.FirewallRuleR\rfirewallRules\x12&\n" +
-	"\x0freplica_node_id\x18\x0e \x01(\tR\rreplicaNodeId\x12&\n" +
-	"\x0fbase_image_name\x18\x0f \x01(\tR\rbaseImageName\x12'\n" +
-	"\x0ffirewall_paused\x18\x10 \x01(\bR\x0efirewallPaused\x12/\n" +
-	"\x13cloudflare_hostname\x18\x11 \x01(\tR\x12cloudflareHostname\x12'\n" +
-	"\x0fcloudflare_port\x18\x12 \x01(\rR\x0ecloudflarePort\x12.\n" +
-	"\x13clone_from_snapshot\x18\x13 \x01(\tR\x11cloneFromSnapshot\x12 \n" +
-	"\fdisk_size_mb\x18\x15 \x01(\x04R\n" +
-	"diskSizeMbJ\x04\b\x14\x10\x15R\bhostname\"\x88\x04\n" +
-	"\x0eJailDefinition\x12\x0e\n" +
-	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
-	"\x04name\x18\x02 \x01(\tR\x04name\x12\x1a\n" +
-	"\bhostname\x18\x03 \x01(\tR\bhostname\x12\x17\n" +
-	"\anode_id\x18\x04 \x01(\tR\x06nodeId\x12&\n" +
-	"\x0freplica_node_id\x18\x05 \x01(\tR\rreplicaNodeId\x12=\n" +
-	"\rdesired_state\x18\x06 \x01(\x0e2\x18.apiary.rpc.v1.JailStateR\fdesiredState\x12.\n" +
-	"\x05phase\x18\a \x01(\x0e2\x18.apiary.rpc.v1.JailPhaseR\x05phase\x12\x1f\n" +
-	"\vphase_error\x18\b \x01(\tR\n" +
-	"phaseError\x12#\n" +
-	"\rbase_template\x18\t \x01(\tR\fbaseTemplate\x12*\n" +
-	"\x11base_archive_name\x18\n" +
-	" \x01(\tR\x0fbaseArchiveName\x12\x1d\n" +
-	"\n" +
-	"network_id\x18\v \x01(\tR\tnetworkId\x12\x1d\n" +
-	"\n" +
-	"ip_address\x18\f \x01(\tR\tipAddress\x12\x12\n" +
-	"\x04vnet\x18\r \x01(\bR\x04vnet\x12B\n" +
-	"\x0efirewall_rules\x18\x1e \x03(\v2\x1b.apiary.rpc.v1.FirewallRuleR\rfirewallRules\"\x9b\x01\n" +
-	"\fFirewallRule\x12\x1c\n" +
-	"\tdirection\x18\x01 \x01(\tR\tdirection\x12\x16\n" +
-	"\x06action\x18\x02 \x01(\tR\x06action\x12\x1a\n" +
-	"\bprotocol\x18\x03 \x01(\tR\bprotocol\x12\x1d\n" +
-	"\n" +
-	"port_range\x18\x04 \x01(\tR\tportRange\x12\x1a\n" +
-	"\bpriority\x18\x05 \x01(\x05R\bpriority\"\x80\x02\n" +
-	"\x11NetworkDefinition\x12\x0e\n" +
-	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
-	"\x04name\x18\x02 \x01(\tR\x04name\x12\x17\n" +
-	"\avlan_id\x18\x03 \x01(\rR\x06vlanId\x12\x16\n" +
-	"\x06subnet\x18\x04 \x01(\tR\x06subnet\x12\x1f\n" +
-	"\vbridge_name\x18\x05 \x01(\tR\n" +
-	"bridgeName\x12#\n" +
-	"\rbridge_status\x18\x06 \x01(\tR\fbridgeStatus\x12)\n" +
-	"\x10external_gateway\x18\a \x01(\tR\x0fexternalGateway\x12%\n" +
-	"\x0euplink_bridged\x18\b \x01(\bR\ruplinkBridged\"]\n" +
-	"\x0fCreateVMRequest\x12+\n" +
-	"\x02vm\x18\x01 \x01(\v2\x1b.apiary.rpc.v1.VMDefinitionR\x02vm\x12\x1d\n" +
-	"\n" +
-	"timeout_ms\x18\x02 \x01(\rR\ttimeoutMs\"v\n" +
-	"\x10CreateVMResponse\x12+\n" +
-	"\x02vm\x18\x01 \x01(\v2\x1b.apiary.rpc.v1.VMDefinitionR\x02vm\x12\x14\n" +
-	"\x05error\x18\x02 \x01(\tR\x05error\x12\x1f\n" +
-	"\vleader_hint\x18\x03 \x01(\tR\n" +
-	"leaderHint\"]\n" +
-	"\x0fUpdateVMRequest\x12+\n" +
-	"\x02vm\x18\x01 \x01(\v2\x1b.apiary.rpc.v1.VMDefinitionR\x02vm\x12\x1d\n" +
-	"\n" +
-	"timeout_ms\x18\x02 \x01(\rR\ttimeoutMs\"v\n" +
-	"\x10UpdateVMResponse\x12+\n" +
-	"\x02vm\x18\x01 \x01(\v2\x1b.apiary.rpc.v1.VMDefinitionR\x02vm\x12\x14\n" +
-	"\x05error\x18\x02 \x01(\tR\x05error\x12\x1f\n" +
-	"\vleader_hint\x18\x03 \x01(\tR\n" +
-	"leaderHint\"@\n" +
-	"\x0fDeleteVMRequest\x12\x0e\n" +
-	"\x02id\x18\x01 \x01(\tR\x02id\x12\x1d\n" +
-	"\n" +
-	"timeout_ms\x18\x02 \x01(\rR\ttimeoutMs\"v\n" +
-	"\x10DeleteVMResponse\x12+\n" +
-	"\x02vm\x18\x01 \x01(\v2\x1b.apiary.rpc.v1.VMDefinitionR\x02vm\x12\x14\n" +
-	"\x05error\x18\x02 \x01(\tR\x05error\x12\x1f\n" +
-	"\vleader_hint\x18\x03 \x01(\tR\n" +
-	"leaderHint\"D\n" +
-	"\x13ForcePurgeVMRequest\x12\x0e\n" +
-	"\x02id\x18\x01 \x01(\tR\x02id\x12\x1d\n" +
-	"\n" +
-	"timeout_ms\x18\x02 \x01(\rR\ttimeoutMs\"z\n" +
-	"\x14ForcePurgeVMResponse\x12+\n" +
-	"\x02vm\x18\x01 \x01(\v2\x1b.apiary.rpc.v1.VMDefinitionR\x02vm\x12\x14\n" +
-	"\x05error\x18\x02 \x01(\tR\x05error\x12\x1f\n" +
-	"\vleader_hint\x18\x03 \x01(\tR\n" +
-	"leaderHint\"g\n" +
-	"\x10MigrateVMRequest\x12\x0e\n" +
-	"\x02id\x18\x01 \x01(\tR\x02id\x12$\n" +
-	"\x0etarget_node_id\x18\x02 \x01(\tR\ftargetNodeId\x12\x1d\n" +
-	"\n" +
-	"timeout_ms\x18\x03 \x01(\rR\ttimeoutMs\"w\n" +
-	"\x11MigrateVMResponse\x12+\n" +
-	"\x02vm\x18\x01 \x01(\v2\x1b.apiary.rpc.v1.VMDefinitionR\x02vm\x12\x14\n" +
-	"\x05error\x18\x02 \x01(\tR\x05error\x12\x1f\n" +
-	"\vleader_hint\x18\x03 \x01(\tR\n" +
-	"leaderHint\"c\n" +
-	"\x1aSetVMFirewallPausedRequest\x12\x0e\n" +
-	"\x02id\x18\x01 \x01(\tR\x02id\x12\x16\n" +
-	"\x06paused\x18\x02 \x01(\bR\x06paused\x12\x1d\n" +
-	"\n" +
-	"timeout_ms\x18\x03 \x01(\rR\ttimeoutMs\"\x81\x01\n" +
-	"\x1bSetVMFirewallPausedResponse\x12+\n" +
-	"\x02vm\x18\x01 \x01(\v2\x1b.apiary.rpc.v1.VMDefinitionR\x02vm\x12\x14\n" +
-	"\x05error\x18\x02 \x01(\tR\x05error\x12\x1f\n" +
-	"\vleader_hint\x18\x03 \x01(\tR\n" +
-	"leaderHint\"\x7f\n" +
-	"\x1eSetVMCloudflareExposureRequest\x12\x0e\n" +
-	"\x02id\x18\x01 \x01(\tR\x02id\x12\x1a\n" +
-	"\bhostname\x18\x02 \x01(\tR\bhostname\x12\x12\n" +
-	"\x04port\x18\x03 \x01(\rR\x04port\x12\x1d\n" +
-	"\n" +
-	"timeout_ms\x18\x04 \x01(\rR\ttimeoutMs\"\x85\x01\n" +
-	"\x1fSetVMCloudflareExposureResponse\x12+\n" +
-	"\x02vm\x18\x01 \x01(\v2\x1b.apiary.rpc.v1.VMDefinitionR\x02vm\x12\x14\n" +
-	"\x05error\x18\x02 \x01(\tR\x05error\x12\x1f\n" +
-	"\vleader_hint\x18\x03 \x01(\tR\n" +
-	"leaderHint\"\x86\x01\n" +
-	"\x18SetVMDesiredStateRequest\x12\x0e\n" +
-	"\x02id\x18\x01 \x01(\tR\x02id\x12;\n" +
-	"\rdesired_state\x18\x02 \x01(\x0e2\x16.apiary.rpc.v1.VMStateR\fdesiredState\x12\x1d\n" +
-	"\n" +
-	"timeout_ms\x18\x03 \x01(\rR\ttimeoutMs\"\x7f\n" +
-	"\x19SetVMDesiredStateResponse\x12+\n" +
-	"\x02vm\x18\x01 \x01(\v2\x1b.apiary.rpc.v1.VMDefinitionR\x02vm\x12\x14\n" +
-	"\x05error\x18\x02 \x01(\tR\x05error\x12\x1f\n" +
-	"\vleader_hint\x18\x03 \x01(\tR\n" +
-	"leaderHint\"\x8e\x01\n" +
-	"\x19SetVMFirewallRulesRequest\x12\x0e\n" +
-	"\x02id\x18\x01 \x01(\tR\x02id\x12B\n" +
-	"\x0efirewall_rules\x18\x02 \x03(\v2\x1b.apiary.rpc.v1.FirewallRuleR\rfirewallRules\x12\x1d\n" +
-	"\n" +
-	"timeout_ms\x18\x03 \x01(\rR\ttimeoutMs\"\x80\x01\n" +
-	"\x1aSetVMFirewallRulesResponse\x12+\n" +
-	"\x02vm\x18\x01 \x01(\v2\x1b.apiary.rpc.v1.VMDefinitionR\x02vm\x12\x14\n" +
-	"\x05error\x18\x02 \x01(\tR\x05error\x12\x1f\n" +
-	"\vleader_hint\x18\x03 \x01(\tR\n" +
-	"leaderHint\"\x1e\n" +
-	"\fGetVMRequest\x12\x0e\n" +
-	"\x02id\x18\x01 \x01(\tR\x02id\"\x89\x01\n" +
-	"\rGetVMResponse\x12+\n" +
-	"\x02vm\x18\x01 \x01(\v2\x1b.apiary.rpc.v1.VMDefinitionR\x02vm\x12\x14\n" +
-	"\x05found\x18\x02 \x01(\bR\x05found\x12\x14\n" +
-	"\x05error\x18\x03 \x01(\tR\x05error\x12\x1f\n" +
-	"\vleader_hint\x18\x04 \x01(\tR\n" +
-	"leaderHint\"\x10\n" +
-	"\x0eListVMsRequest\"w\n" +
-	"\x0fListVMsResponse\x12-\n" +
-	"\x03vms\x18\x01 \x03(\v2\x1b.apiary.rpc.v1.VMDefinitionR\x03vms\x12\x14\n" +
-	"\x05error\x18\x02 \x01(\tR\x05error\x12\x1f\n" +
-	"\vleader_hint\x18\x03 \x01(\tR\n" +
-	"leaderHint\"\x15\n" +
-	"\x13ListVMsLocalRequest\"[\n" +
-	"\x14ListVMsLocalResponse\x12-\n" +
-	"\x03vms\x18\x01 \x03(\v2\x1b.apiary.rpc.v1.VMDefinitionR\x03vms\x12\x14\n" +
-	"\x05error\x18\x02 \x01(\tR\x05error\"\x0f\n" +
-	"\rStatusRequest\"\xca\x04\n" +
-	"\x0eStatusResponse\x12&\n" +
-	"\x0fmanager_node_id\x18\x01 \x01(\tR\rmanagerNodeId\x12%\n" +
-	"\x0eraft_reachable\x18\x02 \x01(\bR\rraftReachable\x12\x1d\n" +
-	"\n" +
-	"raft_error\x18\x03 \x01(\tR\traftError\x12$\n" +
-	"\x0eraft_is_leader\x18\x04 \x01(\bR\fraftIsLeader\x12$\n" +
-	"\x0eraft_leader_id\x18\x05 \x01(\tR\fraftLeaderId\x12 \n" +
-	"\fraft_node_id\x18\x06 \x01(\tR\n" +
-	"raftNodeId\x12-\n" +
-	"\x13raft_last_log_index\x18\a \x01(\x04R\x10raftLastLogIndex\x12,\n" +
-	"\x12raft_applied_index\x18\b \x01(\x04R\x10raftAppliedIndex\x12\x1d\n" +
-	"\n" +
-	"raft_state\x18\t \x01(\tR\traftState\x12$\n" +
-	"\x0eknown_node_ids\x18\n" +
-	" \x03(\tR\fknownNodeIds\x123\n" +
-	"\amembers\x18\v \x03(\v2\x19.apiary.rpc.v1.RaftMemberR\amembers\x12%\n" +
-	"\x0epam_configured\x18\f \x01(\bR\rpamConfigured\x12*\n" +
-	"\x11raft_state_digest\x18\r \x01(\tR\x0fraftStateDigest\x122\n" +
-	"\x15raft_membership_error\x18\x1e \x01(\tR\x13raftMembershipError\"U\n" +
-	"\x1bAuthenticatePasswordRequest\x12\x1a\n" +
-	"\busername\x18\x01 \x01(\tR\busername\x12\x1a\n" +
-	"\bpassword\x18\x02 \x01(\tR\bpassword\"D\n" +
-	"\x1cAuthenticatePasswordResponse\x12\x0e\n" +
-	"\x02ok\x18\x01 \x01(\bR\x02ok\x12\x14\n" +
-	"\x05error\x18\x02 \x01(\tR\x05error\"\x1b\n" +
-	"\x19GetLocalNodeHealthRequest\"\xb6\x01\n" +
-	"\x11HealthObservation\x12\x16\n" +
-	"\x06source\x18\x01 \x01(\tR\x06source\x12#\n" +
-	"\robserved_unix\x18\x02 \x01(\x03R\fobservedUnix\x126\n" +
-	"\x17freshness_limit_seconds\x18\x03 \x01(\rR\x15freshnessLimitSeconds\x12\x14\n" +
-	"\x05value\x18\x04 \x01(\tR\x05value\x12\x16\n" +
-	"\x06detail\x18\x05 \x01(\tR\x06detail\"\xfe\x01\n" +
-	"\x1aGetLocalNodeHealthResponse\x12\x17\n" +
-	"\anode_id\x18\x01 \x01(\tR\x06nodeId\x12\x16\n" +
-	"\x06status\x18\x02 \x01(\tR\x06status\x12 \n" +
-	"\vexplanation\x18\x03 \x01(\tR\vexplanation\x12D\n" +
-	"\fobservations\x18\x04 \x03(\v2 .apiary.rpc.v1.HealthObservationR\fobservations\x12G\n" +
-	"\x0frelevant_claims\x18\x05 \x03(\v2\x1e.apiary.rpc.v1.AssumptionClaimR\x0erelevantClaims\"\xf2\x03\n" +
-	"\x0fAssumptionClaim\x12\x0e\n" +
-	"\x02id\x18\x01 \x01(\tR\x02id\x12\x1c\n" +
-	"\tstatement\x18\x02 \x01(\tR\tstatement\x12\x14\n" +
-	"\x05owner\x18\x03 \x01(\tR\x05owner\x12\x14\n" +
-	"\x05scope\x18\x04 \x01(\tR\x05scope\x12\x1a\n" +
-	"\bevidence\x18\x05 \x01(\tR\bevidence\x12/\n" +
-	"\x13verification_method\x18\x06 \x01(\tR\x12verificationMethod\x12&\n" +
-	"\x0fexpires_at_unix\x18\a \x01(\x03R\rexpiresAtUnix\x12&\n" +
-	"\x0fcreated_at_unix\x18\b \x01(\x03R\rcreatedAtUnix\x12&\n" +
-	"\x0fupdated_at_unix\x18\t \x01(\x03R\rupdatedAtUnix\x120\n" +
-	"\x14consequence_if_false\x18\n" +
-	" \x01(\tR\x12consequenceIfFalse\x12,\n" +
-	"\x12last_verified_unix\x18\v \x01(\x03R\x10lastVerifiedUnix\x12'\n" +
-	"\x0fevidence_status\x18\f \x01(\tR\x0eevidenceStatus\x12\x14\n" +
-	"\x05state\x18\r \x01(\tR\x05state\x12!\n" +
-	"\fstate_detail\x18\x0e \x01(\tR\vstateDetail\"\x1d\n" +
-	"\x1bListAssumptionClaimsRequest\"l\n" +
-	"\x1cListAssumptionClaimsResponse\x126\n" +
-	"\x06claims\x18\x01 \x03(\v2\x1e.apiary.rpc.v1.AssumptionClaimR\x06claims\x12\x14\n" +
-	"\x05error\x18\x02 \x01(\tR\x05error\"R\n" +
-	"\x1aSaveAssumptionClaimRequest\x124\n" +
-	"\x05claim\x18\x01 \x01(\v2\x1e.apiary.rpc.v1.AssumptionClaimR\x05claim\"3\n" +
-	"\x1bSaveAssumptionClaimResponse\x12\x14\n" +
-	"\x05error\x18\x01 \x01(\tR\x05error\".\n" +
-	"\x1cDeleteAssumptionClaimRequest\x12\x0e\n" +
-	"\x02id\x18\x01 \x01(\tR\x02id\"5\n" +
-	"\x1dDeleteAssumptionClaimResponse\x12\x14\n" +
-	"\x05error\x18\x01 \x01(\tR\x05error\"\x9a\x02\n" +
-	"\x15OriginCertificateInfo\x12\x12\n" +
-	"\x04name\x18\x01 \x01(\tR\x04name\x12\x18\n" +
-	"\aservice\x18\x02 \x01(\tR\aservice\x12\x1c\n" +
-	"\thostnames\x18\x03 \x03(\tR\thostnames\x12\x0e\n" +
-	"\x02id\x18\x04 \x01(\tR\x02id\x12&\n" +
-	"\x0fexpires_at_unix\x18\x05 \x01(\x03R\rexpiresAtUnix\x12\x1b\n" +
-	"\tcert_path\x18\x06 \x01(\tR\bcertPath\x12\x19\n" +
-	"\bkey_path\x18\a \x01(\tR\akeyPath\x12&\n" +
-	"\x0fupdated_at_unix\x18\b \x01(\x03R\rupdatedAtUnix\x12\x1d\n" +
-	"\n" +
-	"auto_renew\x18\t \x01(\bR\tautoRenew\"\x1f\n" +
-	"\x1dListOriginCertificatesRequest\"\x80\x01\n" +
-	"\x1eListOriginCertificatesResponse\x12H\n" +
-	"\fcertificates\x18\x01 \x03(\v2$.apiary.rpc.v1.OriginCertificateInfoR\fcertificates\x12\x14\n" +
-	"\x05error\x18\x02 \x01(\tR\x05error\"\x95\x01\n" +
-	"\x1dIssueOriginCertificateRequest\x12\x12\n" +
-	"\x04name\x18\x01 \x01(\tR\x04name\x12\x1c\n" +
-	"\thostnames\x18\x02 \x03(\tR\thostnames\x12#\n" +
-	"\rvalidity_days\x18\x03 \x01(\x05R\fvalidityDays\x12\x1d\n" +
-	"\n" +
-	"auto_renew\x18\x04 \x01(\bR\tautoRenew\"\xdd\x01\n" +
-	"\x1eIssueOriginCertificateResponse\x12F\n" +
-	"\vcertificate\x18\x01 \x01(\v2$.apiary.rpc.v1.OriginCertificateInfoR\vcertificate\x12\x14\n" +
-	"\x05error\x18\x02 \x01(\tR\x05error\x12+\n" +
-	"\x11restart_scheduled\x18\x03 \x01(\bR\x10restartScheduled\x120\n" +
-	"\x14restart_required_msg\x18\x04 \x01(\tR\x12restartRequiredMsg\"\x9f\x02\n" +
-	"\x1aLetsEncryptCertificateInfo\x12\x12\n" +
-	"\x04name\x18\x01 \x01(\tR\x04name\x12\x18\n" +
-	"\aservice\x18\x02 \x01(\tR\aservice\x12\x1c\n" +
-	"\thostnames\x18\x03 \x03(\tR\thostnames\x12\x0e\n" +
-	"\x02id\x18\x04 \x01(\tR\x02id\x12&\n" +
-	"\x0fexpires_at_unix\x18\x05 \x01(\x03R\rexpiresAtUnix\x12\x1b\n" +
-	"\tcert_path\x18\x06 \x01(\tR\bcertPath\x12\x19\n" +
-	"\bkey_path\x18\a \x01(\tR\akeyPath\x12&\n" +
-	"\x0fupdated_at_unix\x18\b \x01(\x03R\rupdatedAtUnix\x12\x1d\n" +
-	"\n" +
-	"auto_renew\x18\t \x01(\bR\tautoRenew\"$\n" +
-	"\"ListLetsEncryptCertificatesRequest\"\x8a\x01\n" +
-	"#ListLetsEncryptCertificatesResponse\x12M\n" +
-	"\fcertificates\x18\x01 \x03(\v2).apiary.rpc.v1.LetsEncryptCertificateInfoR\fcertificates\x12\x14\n" +
-	"\x05error\x18\x02 \x01(\tR\x05error\"u\n" +
-	"\"IssueLetsEncryptCertificateRequest\x12\x12\n" +
-	"\x04name\x18\x01 \x01(\tR\x04name\x12\x1c\n" +
-	"\thostnames\x18\x02 \x03(\tR\thostnames\x12\x1d\n" +
-	"\n" +
-	"auto_renew\x18\x03 \x01(\bR\tautoRenew\"\xe7\x01\n" +
-	"#IssueLetsEncryptCertificateResponse\x12K\n" +
-	"\vcertificate\x18\x01 \x01(\v2).apiary.rpc.v1.LetsEncryptCertificateInfoR\vcertificate\x12\x14\n" +
-	"\x05error\x18\x02 \x01(\tR\x05error\x12+\n" +
-	"\x11restart_scheduled\x18\x03 \x01(\bR\x10restartScheduled\x120\n" +
-	"\x14restart_required_msg\x18\x04 \x01(\tR\x12restartRequiredMsg\"[\n" +
-	"\n" +
-	"RaftMember\x12\x17\n" +
-	"\anode_id\x18\x01 \x01(\tR\x06nodeId\x12\x18\n" +
-	"\aaddress\x18\x02 \x01(\tR\aaddress\x12\x1a\n" +
-	"\bsuffrage\x18\x03 \x01(\tR\bsuffrage\"r\n" +
-	"\x10UploadISORequest\x12>\n" +
+	"\n\x15api/rpc/manager.proto\x12\rapiary.rpc.v1\"\xfd\x05\n\fVMDefinition\x12\x0e\n\x02id\x18\x01 " +
+	"\x01(\tR\x02id\x12\x12\n\x04name\x18\x02 \x01(\tR\x04name\x12\x14\n\x05vcpus\x18\x03 \x01(\rR\x05vcpus\x12\x1b\n\tmemory_mb\x18\x04" +
+	" \x01(\x04R\bmemoryMb\x12\x17\n\anode_id\x18\x05 \x01(\tR\x06nodeId\x12;\n\rdesired_state\x18\x06 \x01(\x0e2\x16" +
+	".apiary.rpc.v1.VMStateR\fdesiredState\x12,\n\x05phase\x18\a \x01(\x0e2\x16.apiary.rpc" +
+	".v1.VMPhaseR\x05phase\x12\x1f\n\vphase_error\x18\b \x01(\tR\nphaseError\x12\x19\n\biso_name\x18" +
+	"\t \x01(\tR\aisoName\x12\x1d\n\nnetwork_id\x18\n \x01(\tR\tnetworkId\x12\x1d\n\nip_address\x18\v \x01(" +
+	"\tR\tipAddress\x12\x1f\n\vmac_address\x18\f \x01(\tR\nmacAddress\x12B\n\x0efirewall_rules\x18" +
+	"\r \x03(\v2\x1b.apiary.rpc.v1.FirewallRuleR\rfirewallRules\x12&\n\x0freplica_nod" +
+	"e_id\x18\x0e \x01(\tR\rreplicaNodeId\x12&\n\x0fbase_image_name\x18\x0f \x01(\tR\rbaseImageNam" +
+	"e\x12'\n\x0ffirewall_paused\x18\x10 \x01(\bR\x0efirewallPaused\x12/\n\x13cloudflare_hostnam" +
+	"e\x18\x11 \x01(\tR\x12cloudflareHostname\x12'\n\x0fcloudflare_port\x18\x12 \x01(\rR\x0ecloudflare" +
+	"Port\x12.\n\x13clone_from_snapshot\x18\x13 \x01(\tR\x11cloneFromSnapshot\x12 \n\fdisk_siz" +
+	"e_mb\x18\x15 \x01(\x04R\ndiskSizeMbJ\x04\b\x14\x10\x15R\bhostname\"\x88\x04\n\x0eJailDefinition\x12\x0e\n\x02id\x18" +
+	"\x01 \x01(\tR\x02id\x12\x12\n\x04name\x18\x02 \x01(\tR\x04name\x12\x1a\n\bhostname\x18\x03 \x01(\tR\bhostname\x12\x17\n\anod" +
+	"e_id\x18\x04 \x01(\tR\x06nodeId\x12&\n\x0freplica_node_id\x18\x05 \x01(\tR\rreplicaNodeId\x12=\n\rde" +
+	"sired_state\x18\x06 \x01(\x0e2\x18.apiary.rpc.v1.JailStateR\fdesiredState\x12.\n\x05pha" +
+	"se\x18\a \x01(\x0e2\x18.apiary.rpc.v1.JailPhaseR\x05phase\x12\x1f\n\vphase_error\x18\b \x01(\tR\n" +
+	"phaseError\x12#\n\rbase_template\x18\t \x01(\tR\fbaseTemplate\x12*\n\x11base_archive_" +
+	"name\x18\n \x01(\tR\x0fbaseArchiveName\x12\x1d\n\nnetwork_id\x18\v \x01(\tR\tnetworkId\x12\x1d\n\nip" +
+	"_address\x18\f \x01(\tR\tipAddress\x12\x12\n\x04vnet\x18\r \x01(\bR\x04vnet\x12B\n\x0efirewall_rules\x18" +
+	"\x1e \x03(\v2\x1b.apiary.rpc.v1.FirewallRuleR\rfirewallRules\"\x9b\x01\n\fFirewallRu" +
+	"le\x12\x1c\n\tdirection\x18\x01 \x01(\tR\tdirection\x12\x16\n\x06action\x18\x02 \x01(\tR\x06action\x12\x1a\n\bprot" +
+	"ocol\x18\x03 \x01(\tR\bprotocol\x12\x1d\n\nport_range\x18\x04 \x01(\tR\tportRange\x12\x1a\n\bpriority\x18" +
+	"\x05 \x01(\x05R\bpriority\"\x80\x02\n\x11NetworkDefinition\x12\x0e\n\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n\x04name\x18\x02 " +
+	"\x01(\tR\x04name\x12\x17\n\avlan_id\x18\x03 \x01(\rR\x06vlanId\x12\x16\n\x06subnet\x18\x04 \x01(\tR\x06subnet\x12\x1f\n\vbr" +
+	"idge_name\x18\x05 \x01(\tR\nbridgeName\x12#\n\rbridge_status\x18\x06 \x01(\tR\fbridgeStatus" +
+	"\x12)\n\x10external_gateway\x18\a \x01(\tR\x0fexternalGateway\x12%\n\x0euplink_bridged\x18\b " +
+	"\x01(\bR\ruplinkBridged\"]\n\x0fCreateVMRequest\x12+\n\x02vm\x18\x01 \x01(\v2\x1b.apiary.rpc.v" +
+	"1.VMDefinitionR\x02vm\x12\x1d\n\ntimeout_ms\x18\x02 \x01(\rR\ttimeoutMs\"v\n\x10CreateVMRes" +
+	"ponse\x12+\n\x02vm\x18\x01 \x01(\v2\x1b.apiary.rpc.v1.VMDefinitionR\x02vm\x12\x14\n\x05error\x18\x02 \x01(" +
+	"\tR\x05error\x12\x1f\n\vleader_hint\x18\x03 \x01(\tR\nleaderHint\"]\n\x0fUpdateVMRequest\x12+\n\x02" +
+	"vm\x18\x01 \x01(\v2\x1b.apiary.rpc.v1.VMDefinitionR\x02vm\x12\x1d\n\ntimeout_ms\x18\x02 \x01(\rR\tt" +
+	"imeoutMs\"v\n\x10UpdateVMResponse\x12+\n\x02vm\x18\x01 \x01(\v2\x1b.apiary.rpc.v1.VMDefin" +
+	"itionR\x02vm\x12\x14\n\x05error\x18\x02 \x01(\tR\x05error\x12\x1f\n\vleader_hint\x18\x03 \x01(\tR\nleaderHint" +
+	"\"@\n\x0fDeleteVMRequest\x12\x0e\n\x02id\x18\x01 \x01(\tR\x02id\x12\x1d\n\ntimeout_ms\x18\x02 \x01(\rR\ttimeout" +
+	"Ms\"v\n\x10DeleteVMResponse\x12+\n\x02vm\x18\x01 \x01(\v2\x1b.apiary.rpc.v1.VMDefinitionR" +
+	"\x02vm\x12\x14\n\x05error\x18\x02 \x01(\tR\x05error\x12\x1f\n\vleader_hint\x18\x03 \x01(\tR\nleaderHint\"D\n\x13Fo" +
+	"rcePurgeVMRequest\x12\x0e\n\x02id\x18\x01 \x01(\tR\x02id\x12\x1d\n\ntimeout_ms\x18\x02 \x01(\rR\ttimeoutMs" +
+	"\"z\n\x14ForcePurgeVMResponse\x12+\n\x02vm\x18\x01 \x01(\v2\x1b.apiary.rpc.v1.VMDefinitio" +
+	"nR\x02vm\x12\x14\n\x05error\x18\x02 \x01(\tR\x05error\x12\x1f\n\vleader_hint\x18\x03 \x01(\tR\nleaderHint\"g\n\x10" +
+	"MigrateVMRequest\x12\x0e\n\x02id\x18\x01 \x01(\tR\x02id\x12$\n\x0etarget_node_id\x18\x02 \x01(\tR\ftarget" +
+	"NodeId\x12\x1d\n\ntimeout_ms\x18\x03 \x01(\rR\ttimeoutMs\"w\n\x11MigrateVMResponse\x12+\n\x02vm" +
+	"\x18\x01 \x01(\v2\x1b.apiary.rpc.v1.VMDefinitionR\x02vm\x12\x14\n\x05error\x18\x02 \x01(\tR\x05error\x12\x1f\n" +
+	"\vleader_hint\x18\x03 \x01(\tR\nleaderHint\"c\n\x1aSetVMFirewallPausedRequest\x12\x0e\n\x02" +
+	"id\x18\x01 \x01(\tR\x02id\x12\x16\n\x06paused\x18\x02 \x01(\bR\x06paused\x12\x1d\n\ntimeout_ms\x18\x03 \x01(\rR\ttimeou" +
+	"tMs\"\x81\x01\n\x1bSetVMFirewallPausedResponse\x12+\n\x02vm\x18\x01 \x01(\v2\x1b.apiary.rpc.v1." +
+	"VMDefinitionR\x02vm\x12\x14\n\x05error\x18\x02 \x01(\tR\x05error\x12\x1f\n\vleader_hint\x18\x03 \x01(\tR\nlea" +
+	"derHint\"\x7f\n\x1eSetVMCloudflareExposureRequest\x12\x0e\n\x02id\x18\x01 \x01(\tR\x02id\x12\x1a\n\bhos" +
+	"tname\x18\x02 \x01(\tR\bhostname\x12\x12\n\x04port\x18\x03 \x01(\rR\x04port\x12\x1d\n\ntimeout_ms\x18\x04 \x01(\rR\tt" +
+	"imeoutMs\"\x85\x01\n\x1fSetVMCloudflareExposureResponse\x12+\n\x02vm\x18\x01 \x01(\v2\x1b.apiar" +
+	"y.rpc.v1.VMDefinitionR\x02vm\x12\x14\n\x05error\x18\x02 \x01(\tR\x05error\x12\x1f\n\vleader_hint\x18\x03" +
+	" \x01(\tR\nleaderHint\"\x86\x01\n\x18SetVMDesiredStateRequest\x12\x0e\n\x02id\x18\x01 \x01(\tR\x02id\x12;\n" +
+	"\rdesired_state\x18\x02 \x01(\x0e2\x16.apiary.rpc.v1.VMStateR\fdesiredState\x12\x1d\n\nti" +
+	"meout_ms\x18\x03 \x01(\rR\ttimeoutMs\"\x7f\n\x19SetVMDesiredStateResponse\x12+\n\x02vm\x18\x01 \x01" +
+	"(\v2\x1b.apiary.rpc.v1.VMDefinitionR\x02vm\x12\x14\n\x05error\x18\x02 \x01(\tR\x05error\x12\x1f\n\vlea" +
+	"der_hint\x18\x03 \x01(\tR\nleaderHint\"\x8e\x01\n\x19SetVMFirewallRulesRequest\x12\x0e\n\x02id\x18\x01" +
+	" \x01(\tR\x02id\x12B\n\x0efirewall_rules\x18\x02 \x03(\v2\x1b.apiary.rpc.v1.FirewallRuleR\rf" +
+	"irewallRules\x12\x1d\n\ntimeout_ms\x18\x03 \x01(\rR\ttimeoutMs\"\x80\x01\n\x1aSetVMFirewallRul" +
+	"esResponse\x12+\n\x02vm\x18\x01 \x01(\v2\x1b.apiary.rpc.v1.VMDefinitionR\x02vm\x12\x14\n\x05error" +
+	"\x18\x02 \x01(\tR\x05error\x12\x1f\n\vleader_hint\x18\x03 \x01(\tR\nleaderHint\"\x1e\n\fGetVMRequest\x12\x0e" +
+	"\n\x02id\x18\x01 \x01(\tR\x02id\"\x89\x01\n\rGetVMResponse\x12+\n\x02vm\x18\x01 \x01(\v2\x1b.apiary.rpc.v1.VMD" +
+	"efinitionR\x02vm\x12\x14\n\x05found\x18\x02 \x01(\bR\x05found\x12\x14\n\x05error\x18\x03 \x01(\tR\x05error\x12\x1f\n\vlea" +
+	"der_hint\x18\x04 \x01(\tR\nleaderHint\"\x10\n\x0eListVMsRequest\"w\n\x0fListVMsResponse\x12" +
+	"-\n\x03vms\x18\x01 \x03(\v2\x1b.apiary.rpc.v1.VMDefinitionR\x03vms\x12\x14\n\x05error\x18\x02 \x01(\tR\x05e" +
+	"rror\x12\x1f\n\vleader_hint\x18\x03 \x01(\tR\nleaderHint\"\x15\n\x13ListVMsLocalRequest\"[\n\x14" +
+	"ListVMsLocalResponse\x12-\n\x03vms\x18\x01 \x03(\v2\x1b.apiary.rpc.v1.VMDefinitionR\x03" +
+	"vms\x12\x14\n\x05error\x18\x02 \x01(\tR\x05error\"\x0f\n\rStatusRequest\"\xca\x04\n\x0eStatusResponse\x12&\n" +
+	"\x0fmanager_node_id\x18\x01 \x01(\tR\rmanagerNodeId\x12%\n\x0eraft_reachable\x18\x02 \x01(\bR\rr" +
+	"aftReachable\x12\x1d\n\nraft_error\x18\x03 \x01(\tR\traftError\x12$\n\x0eraft_is_leader\x18\x04 " +
+	"\x01(\bR\fraftIsLeader\x12$\n\x0eraft_leader_id\x18\x05 \x01(\tR\fraftLeaderId\x12 \n\fraft_" +
+	"node_id\x18\x06 \x01(\tR\nraftNodeId\x12-\n\x13raft_last_log_index\x18\a \x01(\x04R\x10raftLast" +
+	"LogIndex\x12,\n\x12raft_applied_index\x18\b \x01(\x04R\x10raftAppliedIndex\x12\x1d\n\nraft_s" +
+	"tate\x18\t \x01(\tR\traftState\x12$\n\x0eknown_node_ids\x18\n \x03(\tR\fknownNodeIds\x123\n\am" +
+	"embers\x18\v \x03(\v2\x19.apiary.rpc.v1.RaftMemberR\amembers\x12%\n\x0epam_configur" +
+	"ed\x18\f \x01(\bR\rpamConfigured\x12*\n\x11raft_state_digest\x18\r \x01(\tR\x0fraftStateDig" +
+	"est\x122\n\x15raft_membership_error\x18\x1e \x01(\tR\x13raftMembershipError\"U\n\x1bAuthe" +
+	"nticatePasswordRequest\x12\x1a\n\busername\x18\x01 \x01(\tR\busername\x12\x1a\n\bpassword\x18\x02" +
+	" \x01(\tR\bpassword\"D\n\x1cAuthenticatePasswordResponse\x12\x0e\n\x02ok\x18\x01 \x01(\bR\x02ok\x12\x14" +
+	"\n\x05error\x18\x02 \x01(\tR\x05error\"\x1b\n\x19GetLocalNodeHealthRequest\"\xb6\x01\n\x11HealthObse" +
+	"rvation\x12\x16\n\x06source\x18\x01 \x01(\tR\x06source\x12#\n\robserved_unix\x18\x02 \x01(\x03R\fobserved" +
+	"Unix\x126\n\x17freshness_limit_seconds\x18\x03 \x01(\rR\x15freshnessLimitSeconds\x12\x14\n\x05" +
+	"value\x18\x04 \x01(\tR\x05value\x12\x16\n\x06detail\x18\x05 \x01(\tR\x06detail\"\xfe\x01\n\x1aGetLocalNodeHealt" +
+	"hResponse\x12\x17\n\anode_id\x18\x01 \x01(\tR\x06nodeId\x12\x16\n\x06status\x18\x02 \x01(\tR\x06status\x12 \n\vex" +
+	"planation\x18\x03 \x01(\tR\vexplanation\x12D\n\fobservations\x18\x04 \x03(\v2 .apiary.rpc." +
+	"v1.HealthObservationR\fobservations\x12G\n\x0frelevant_claims\x18\x05 \x03(\v2\x1e.ap" +
+	"iary.rpc.v1.AssumptionClaimR\x0erelevantClaims\"\xf2\x03\n\x0fAssumptionClaim\x12" +
+	"\x0e\n\x02id\x18\x01 \x01(\tR\x02id\x12\x1c\n\tstatement\x18\x02 \x01(\tR\tstatement\x12\x14\n\x05owner\x18\x03 \x01(\tR\x05ow" +
+	"ner\x12\x14\n\x05scope\x18\x04 \x01(\tR\x05scope\x12\x1a\n\bevidence\x18\x05 \x01(\tR\bevidence\x12/\n\x13verific" +
+	"ation_method\x18\x06 \x01(\tR\x12verificationMethod\x12&\n\x0fexpires_at_unix\x18\a \x01(\x03R" +
+	"\rexpiresAtUnix\x12&\n\x0fcreated_at_unix\x18\b \x01(\x03R\rcreatedAtUnix\x12&\n\x0fupdate" +
+	"d_at_unix\x18\t \x01(\x03R\rupdatedAtUnix\x120\n\x14consequence_if_false\x18\n \x01(\tR\x12co" +
+	"nsequenceIfFalse\x12,\n\x12last_verified_unix\x18\v \x01(\x03R\x10lastVerifiedUnix\x12'" +
+	"\n\x0fevidence_status\x18\f \x01(\tR\x0eevidenceStatus\x12\x14\n\x05state\x18\r \x01(\tR\x05state\x12!\n" +
+	"\fstate_detail\x18\x0e \x01(\tR\vstateDetail\"\x1d\n\x1bListAssumptionClaimsRequest\"" +
+	"l\n\x1cListAssumptionClaimsResponse\x126\n\x06claims\x18\x01 \x03(\v2\x1e.apiary.rpc.v1." +
+	"AssumptionClaimR\x06claims\x12\x14\n\x05error\x18\x02 \x01(\tR\x05error\"R\n\x1aSaveAssumptionC" +
+	"laimRequest\x124\n\x05claim\x18\x01 \x01(\v2\x1e.apiary.rpc.v1.AssumptionClaimR\x05clai" +
+	"m\"3\n\x1bSaveAssumptionClaimResponse\x12\x14\n\x05error\x18\x01 \x01(\tR\x05error\".\n\x1cDelete" +
+	"AssumptionClaimRequest\x12\x0e\n\x02id\x18\x01 \x01(\tR\x02id\"5\n\x1dDeleteAssumptionClaimR" +
+	"esponse\x12\x14\n\x05error\x18\x01 \x01(\tR\x05error\"\x9a\x02\n\x15OriginCertificateInfo\x12\x12\n\x04name\x18" +
+	"\x01 \x01(\tR\x04name\x12\x18\n\aservice\x18\x02 \x01(\tR\aservice\x12\x1c\n\thostnames\x18\x03 \x03(\tR\thostna" +
+	"mes\x12\x0e\n\x02id\x18\x04 \x01(\tR\x02id\x12&\n\x0fexpires_at_unix\x18\x05 \x01(\x03R\rexpiresAtUnix\x12\x1b\n\tc" +
+	"ert_path\x18\x06 \x01(\tR\bcertPath\x12\x19\n\bkey_path\x18\a \x01(\tR\akeyPath\x12&\n\x0fupdated_a" +
+	"t_unix\x18\b \x01(\x03R\rupdatedAtUnix\x12\x1d\n\nauto_renew\x18\t \x01(\bR\tautoRenew\"\x1f\n\x1dLi" +
+	"stOriginCertificatesRequest\"\x80\x01\n\x1eListOriginCertificatesResponse\x12H" +
+	"\n\fcertificates\x18\x01 \x03(\v2$.apiary.rpc.v1.OriginCertificateInfoR\fcert" +
+	"ificates\x12\x14\n\x05error\x18\x02 \x01(\tR\x05error\"\x95\x01\n\x1dIssueOriginCertificateRequest" +
+	"\x12\x12\n\x04name\x18\x01 \x01(\tR\x04name\x12\x1c\n\thostnames\x18\x02 \x03(\tR\thostnames\x12#\n\rvalidity_d" +
+	"ays\x18\x03 \x01(\x05R\fvalidityDays\x12\x1d\n\nauto_renew\x18\x04 \x01(\bR\tautoRenew\"\xdd\x01\n\x1eIssue" +
+	"OriginCertificateResponse\x12F\n\vcertificate\x18\x01 \x01(\v2$.apiary.rpc.v1.O" +
+	"riginCertificateInfoR\vcertificate\x12\x14\n\x05error\x18\x02 \x01(\tR\x05error\x12+\n\x11resta" +
+	"rt_scheduled\x18\x03 \x01(\bR\x10restartScheduled\x120\n\x14restart_required_msg\x18\x04 \x01" +
+	"(\tR\x12restartRequiredMsg\"\x9f\x02\n\x1aLetsEncryptCertificateInfo\x12\x12\n\x04name\x18\x01 " +
+	"\x01(\tR\x04name\x12\x18\n\aservice\x18\x02 \x01(\tR\aservice\x12\x1c\n\thostnames\x18\x03 \x03(\tR\thostname" +
+	"s\x12\x0e\n\x02id\x18\x04 \x01(\tR\x02id\x12&\n\x0fexpires_at_unix\x18\x05 \x01(\x03R\rexpiresAtUnix\x12\x1b\n\tcer" +
+	"t_path\x18\x06 \x01(\tR\bcertPath\x12\x19\n\bkey_path\x18\a \x01(\tR\akeyPath\x12&\n\x0fupdated_at_" +
+	"unix\x18\b \x01(\x03R\rupdatedAtUnix\x12\x1d\n\nauto_renew\x18\t \x01(\bR\tautoRenew\"$\n\"List" +
+	"LetsEncryptCertificatesRequest\"\x8a\x01\n#ListLetsEncryptCertificatesRe" +
+	"sponse\x12M\n\fcertificates\x18\x01 \x03(\v2).apiary.rpc.v1.LetsEncryptCertific" +
+	"ateInfoR\fcertificates\x12\x14\n\x05error\x18\x02 \x01(\tR\x05error\"u\n\"IssueLetsEncryptC" +
+	"ertificateRequest\x12\x12\n\x04name\x18\x01 \x01(\tR\x04name\x12\x1c\n\thostnames\x18\x02 \x03(\tR\thostna" +
+	"mes\x12\x1d\n\nauto_renew\x18\x03 \x01(\bR\tautoRenew\"\xe7\x01\n#IssueLetsEncryptCertifica" +
+	"teResponse\x12K\n\vcertificate\x18\x01 \x01(\v2).apiary.rpc.v1.LetsEncryptCerti" +
+	"ficateInfoR\vcertificate\x12\x14\n\x05error\x18\x02 \x01(\tR\x05error\x12+\n\x11restart_schedul" +
+	"ed\x18\x03 \x01(\bR\x10restartScheduled\x120\n\x14restart_required_msg\x18\x04 \x01(\tR\x12restar" +
+	"tRequiredMsg\"[\n\nRaftMember\x12\x17\n\anode_id\x18\x01 \x01(\tR\x06nodeId\x12\x18\n\aaddress\x18\x02" +
+	" \x01(\tR\aaddress\x12\x1a\n\bsuffrage\x18\x03 \x01(\tR\bsuffrage\"r\n\x10UploadISORequest\x12>\n" +
 	"\bmetadata\x18\x01 \x01(\v2 .apiary.rpc.v1.ISOUploadMetadataH\x00R\bmetadata\x12\x16\n" +
-	"\x05chunk\x18\x02 \x01(\fH\x00R\x05chunkB\x06\n" +
-	"\x04data\"P\n" +
-	"\x11ISOUploadMetadata\x12\x12\n" +
-	"\x04name\x18\x01 \x01(\tR\x04name\x12'\n" +
-	"\x0fexpected_sha256\x18\x02 \x01(\tR\x0eexpectedSha256\"t\n" +
-	"\x11UploadISOResponse\x12\x12\n" +
-	"\x04name\x18\x01 \x01(\tR\x04name\x12\x1d\n" +
-	"\n" +
-	"size_bytes\x18\x02 \x01(\x04R\tsizeBytes\x12\x16\n" +
-	"\x06sha256\x18\x03 \x01(\tR\x06sha256\x12\x14\n" +
-	"\x05error\x18\x04 \x01(\tR\x05error\"\x11\n" +
-	"\x0fListISOsRequest\"T\n" +
-	"\aISOInfo\x12\x12\n" +
-	"\x04name\x18\x01 \x01(\tR\x04name\x12\x1d\n" +
-	"\n" +
-	"size_bytes\x18\x02 \x01(\x04R\tsizeBytes\x12\x16\n" +
-	"\x06sha256\x18\x03 \x01(\tR\x06sha256\"T\n" +
-	"\x10ListISOsResponse\x12*\n" +
-	"\x04isos\x18\x01 \x03(\v2\x16.apiary.rpc.v1.ISOInfoR\x04isos\x12\x14\n" +
-	"\x05error\x18\x02 \x01(\tR\x05error\"&\n" +
-	"\x10DeleteISORequest\x12\x12\n" +
-	"\x04name\x18\x01 \x01(\tR\x04name\")\n" +
-	"\x11DeleteISOResponse\x12\x14\n" +
-	"\x05error\x18\x01 \x01(\tR\x05error\"L\n" +
-	"\x10PushISOToRequest\x12\x12\n" +
-	"\x04name\x18\x01 \x01(\tR\x04name\x12$\n" +
-	"\x0etarget_node_id\x18\x02 \x01(\tR\ftargetNodeId\")\n" +
-	"\x11PushISOToResponse\x12\x14\n" +
-	"\x05error\x18\x01 \x01(\tR\x05error\"\x1e\n" +
-	"\x1cListJailTemplateNamesRequest\"K\n" +
-	"\x1dListJailTemplateNamesResponse\x12\x14\n" +
-	"\x05names\x18\x01 \x03(\tR\x05names\x12\x14\n" +
-	"\x05error\x18\x02 \x01(\tR\x05error\"U\n" +
-	"\x19PushJailTemplateToRequest\x12\x12\n" +
-	"\x04name\x18\x01 \x01(\tR\x04name\x12$\n" +
-	"\x0etarget_node_id\x18\x02 \x01(\tR\ftargetNodeId\"2\n" +
-	"\x1aPushJailTemplateToResponse\x12\x14\n" +
-	"\x05error\x18\x01 \x01(\tR\x05error\"*\n" +
-	"\x14JailTemplateMetadata\x12\x12\n" +
-	"\x04name\x18\x01 \x01(\tR\x04name\"\x7f\n" +
-	"\x1aReceiveJailTemplateRequest\x12A\n" +
-	"\bmetadata\x18\x01 \x01(\v2#.apiary.rpc.v1.JailTemplateMetadataH\x00R\bmetadata\x12\x16\n" +
-	"\x05chunk\x18\x02 \x01(\fH\x00R\x05chunkB\x06\n" +
-	"\x04data\"G\n" +
-	"\x1bReceiveJailTemplateResponse\x12\x12\n" +
-	"\x04name\x18\x01 \x01(\tR\x04name\x12\x14\n" +
-	"\x05error\x18\x02 \x01(\tR\x05error\"\x12\n" +
-	"\x10HostStatsRequest\"|\n" +
-	"\bCPUStats\x12\x14\n" +
-	"\x05cores\x18\x01 \x01(\x05R\x05cores\x12\x1c\n" +
-	"\n" +
-	"load_avg_1\x18\x02 \x01(\x01R\bloadAvg1\x12\x1c\n" +
-	"\n" +
-	"load_avg_5\x18\x03 \x01(\x01R\bloadAvg5\x12\x1e\n" +
-	"\vload_avg_15\x18\x04 \x01(\x01R\tloadAvg15\"J\n" +
-	"\bMemStats\x12\x1f\n" +
-	"\vtotal_bytes\x18\x01 \x01(\x04R\n" +
-	"totalBytes\x12\x1d\n" +
-	"\n" +
-	"free_bytes\x18\x02 \x01(\x04R\tfreeBytes\"\xb9\x01\n" +
-	"\tPoolStats\x12\x12\n" +
-	"\x04name\x18\x01 \x01(\tR\x04name\x12\x1d\n" +
-	"\n" +
-	"size_bytes\x18\x02 \x01(\x04R\tsizeBytes\x12\x1f\n" +
-	"\valloc_bytes\x18\x03 \x01(\x04R\n" +
-	"allocBytes\x12\x1d\n" +
-	"\n" +
-	"free_bytes\x18\x04 \x01(\x04R\tfreeBytes\x12!\n" +
-	"\fcapacity_pct\x18\x05 \x01(\rR\vcapacityPct\x12\x16\n" +
-	"\x06health\x18\x06 \x01(\tR\x06health\"}\n" +
-	"\tDiskStats\x12\x12\n" +
-	"\x04name\x18\x01 \x01(\tR\x04name\x12\x14\n" +
-	"\x05model\x18\x02 \x01(\tR\x05model\x12\x16\n" +
-	"\x06serial\x18\x03 \x01(\tR\x06serial\x12\x18\n" +
-	"\ahealthy\x18\x04 \x01(\bR\ahealthy\x12\x14\n" +
-	"\x05error\x18\x05 \x01(\tR\x05error\"i\n" +
-	"\rNetIfaceStats\x12\x12\n" +
-	"\x04name\x18\x01 \x01(\tR\x04name\x12\x19\n" +
-	"\brx_bytes\x18\x02 \x01(\x04R\arxBytes\x12\x19\n" +
-	"\btx_bytes\x18\x03 \x01(\x04R\atxBytes\x12\x0e\n" +
-	"\x02up\x18\x04 \x01(\bR\x02up\"\xbd\x01\n" +
-	"\aPFStats\x12\x18\n" +
-	"\aenabled\x18\x01 \x01(\bR\aenabled\x12%\n" +
-	"\x0ecurrent_states\x18\x02 \x01(\x04R\rcurrentStates\x12\x18\n" +
-	"\amatches\x18\x03 \x01(\x04R\amatches\x12#\n" +
-	"\rhost_firewall\x18\x04 \x01(\tR\fhostFirewall\x122\n" +
-	"\x15apiary_anchor_reached\x18\x05 \x01(\tR\x13apiaryAnchorReached\"\xdb\x05\n" +
-	"\x11HostStatsResponse\x12\x17\n" +
-	"\anode_id\x18\x01 \x01(\tR\x06nodeId\x12)\n" +
-	"\x03cpu\x18\x02 \x01(\v2\x17.apiary.rpc.v1.CPUStatsR\x03cpu\x12)\n" +
-	"\x03mem\x18\x03 \x01(\v2\x17.apiary.rpc.v1.MemStatsR\x03mem\x12.\n" +
-	"\x05pools\x18\x04 \x03(\v2\x18.apiary.rpc.v1.PoolStatsR\x05pools\x12.\n" +
-	"\x05disks\x18\x05 \x03(\v2\x18.apiary.rpc.v1.DiskStatsR\x05disks\x12.\n" +
-	"\x03net\x18\x06 \x03(\v2\x1c.apiary.rpc.v1.NetIfaceStatsR\x03net\x12\x16\n" +
-	"\x06errors\x18\a \x03(\tR\x06errors\x12&\n" +
-	"\x02pf\x18\b \x01(\v2\x16.apiary.rpc.v1.PFStatsR\x02pf\x12)\n" +
-	"\x10bhyve_configured\x18\t \x01(\bR\x0fbhyveConfigured\x12=\n" +
-	"\x1blast_reconcile_success_unix\x18\n" +
-	" \x01(\x03R\x18lastReconcileSuccessUnix\x12=\n" +
-	"\x1blast_reconcile_attempt_unix\x18\v \x01(\x03R\x18lastReconcileAttemptUnix\x12<\n" +
-	"\x1areconcile_interval_seconds\x18\f \x01(\rR\x18reconcileIntervalSeconds\x123\n" +
-	"\x15cloudflare_configured\x18\r \x01(\bR\x14cloudflareConfigured\x120\n" +
-	"\x14last_reconcile_error\x18\x0e \x01(\tR\x12lastReconcileError\x129\n" +
-	"\x19last_reconcile_error_unix\x18\x0f \x01(\x03R\x16lastReconcileErrorUnix\"H\n" +
-	"!GetLocalHASTResourceStatusRequest\x12#\n" +
-	"\rresource_name\x18\x01 \x01(\tR\fresourceName\"\x9f\x02\n" +
-	"\"GetLocalHASTResourceStatusResponse\x12\x14\n" +
-	"\x05error\x18\x01 \x01(\tR\x05error\x12#\n" +
-	"\rresource_name\x18\x02 \x01(\tR\fresourceName\x12\x12\n" +
-	"\x04role\x18\x03 \x01(\tR\x04role\x12'\n" +
-	"\x0fresource_status\x18\x04 \x01(\tR\x0eresourceStatus\x12 \n" +
-	"\vreplication\x18\x05 \x01(\tR\vreplication\x12\x14\n" +
-	"\x05dirty\x18\x06 \x01(\tR\x05dirty\x12\x1f\n" +
-	"\vextent_size\x18\a \x01(\tR\n" +
-	"extentSize\x12(\n" +
-	"\x10observed_at_unix\x18\b \x01(\x03R\x0eobservedAtUnix\"%\n" +
-	"\x13GetVMConsoleRequest\x12\x0e\n" +
-	"\x02id\x18\x01 \x01(\tR\x02id\"r\n" +
-	"\x14GetVMConsoleResponse\x12\x12\n" +
-	"\x04host\x18\x01 \x01(\tR\x04host\x12\x12\n" +
-	"\x04port\x18\x02 \x01(\rR\x04port\x12\x1c\n" +
-	"\tavailable\x18\x03 \x01(\bR\tavailable\x12\x14\n" +
-	"\x05error\x18\x04 \x01(\tR\x05error\"%\n" +
-	"\x13VMConsoleTunnelOpen\x12\x0e\n" +
-	"\x02id\x18\x01 \x01(\tR\x02id\"\x89\x01\n" +
-	"\x14VMConsoleTunnelFrame\x128\n" +
-	"\x04open\x18\x01 \x01(\v2\".apiary.rpc.v1.VMConsoleTunnelOpenH\x00R\x04open\x12\x14\n" +
-	"\x04data\x18\x02 \x01(\fH\x00R\x04data\x12\x16\n" +
-	"\x05error\x18\x03 \x01(\tH\x00R\x05errorB\t\n" +
-	"\apayload\"D\n" +
-	"\x15GetVMSerialLogRequest\x12\x0e\n" +
-	"\x02id\x18\x01 \x01(\tR\x02id\x12\x1b\n" +
-	"\tmax_bytes\x18\x02 \x01(\rR\bmaxBytes\"\x84\x01\n" +
-	"\x16GetVMSerialLogResponse\x12\x18\n" +
-	"\acontent\x18\x01 \x01(\tR\acontent\x12\x1c\n" +
-	"\ttruncated\x18\x02 \x01(\bR\ttruncated\x12\x1c\n" +
-	"\tavailable\x18\x03 \x01(\bR\tavailable\x12\x14\n" +
-	"\x05error\x18\x04 \x01(\tR\x05error\"\x16\n" +
-	"\x14GetNodeConfigRequest\"" +
-	"\xe6\x12" +
-	"\n" +
-	"\x15GetNodeConfigResponse\x12\x16\n" +
-	"\x06uplink\x18\x01 \x01(\tR\x06uplink\x12\x1d\n" +
-	"\n" +
-	"nat_uplink\x18\x02 \x01(\tR\tnatUplink\x12&\n" +
-	"\x0fdhcp_dns_server\x18\x05 \x01(\tR\rdhcpDnsServer\x12&\n" +
-	"\fjail_enabled\x18\x03 \x01(\bH\x00R\vjailEnabled\x88\x01\x01\x12\x14\n" +
-	"\x05error\x18\x04 \x01(\tR\x05error\x12R\n" +
-	"\x14available_interfaces\x18\x06 \x03(\v2\x1f.apiary.rpc.v1.NetworkInterfaceR\x13availableInterfaces\x12:\n" +
-	"\x19interface_inventory_error\x18\a \x01(\tR\x17interfaceInventoryError\x12\x19\n" +
-	"\bzfs_base\x18\b \x01(\tR\azfsBase\x12!\n" +
-	"\fbhyve_prefix\x18\t \x01(\tR\vbhyvePrefix\x12\x17\n" +
-	"\aiso_dir\x18\n" +
-	" \x01(\tR\x06isoDir\x12\x1f\n" +
-	"\vjail_prefix\x18\v \x01(\tR\n" +
-	"jailPrefix\x12&\n" +
-	"\x0fjail_mount_base\x18\f \x01(\tR\rjailMountBase\x12-\n" +
-	"\x12reconcile_interval\x18\r \x01(\tR\x11reconcileInterval\x12:\n" +
-	"\x19assumption_check_interval\x18\x0e \x01(\tR\x17assumptionCheckInterval\x12B\n" +
-	"\x1dassumption_heartbeat_interval\x18\x0f \x01(\tR\x1bassumptionHeartbeatInterval\x124\n" +
-	"\x16assumption_stale_after\x18\x10 \x01(\tR\x14assumptionStaleAfter\x126\n" +
-	"\x17assumption_run_deadline\x18\x11 \x01(\tR\x15assumptionRunDeadline\x12;\n" +
-	"\x1aassumption_history_max_age\x18\x12 \x01(\tR\x17assumptionHistoryMaxAge\x128\n" +
-	"\x18assumption_history_limit\x18\x13 \x01(\x05R\x16assumptionHistoryLimit\x12#\n" +
-	"\rbhyve_bootrom\x18\x14 \x01(\tR\fbhyveBootrom\x12!\n" +
-	"\fbhyve_bridge\x18\x15 \x01(\tR\vbhyveBridge\x12 \n" +
-	"\fdisk_size_mb\x18\x16 \x01(\x04R\n" +
-	"diskSizeMb\x12)\n" +
-	"\x11jail_disk_size_mb\x18\x17 \x01(\x04R\x0ejailDiskSizeMb\x12&\n" +
-	"\fhast_enabled\x18\x18 \x01(\bH\x01R\vhastEnabled\x88\x01\x01\x12\x1e\n" +
-	"\bpeer_tls\x18\x1a \x01(\bH\x02R\apeerTls\x88\x01\x01\x12,\n" +
-	"\x12peer_managerd_port\x18\x1b \x01(\tR\x10peerManagerdPort\x121\n" +
-	"\x15peer_tls_hostname_map\x18\x1c \x01(\tR\x12peerTlsHostnameMap\x12\x1e\n" +
-	"\vpeer_tls_ca\x18+ \x01(\tR\tpeerTlsCa\x120\n" +
-	"\x14known_peer_addresses\x18, \x01(\tR\x12knownPeerAddresses\x12'\n" +
-	"\x10peer_api_key_set\x18\x1d \x01(\bR\rpeerApiKeySet\x12&\n" +
-	"\x0fraftd_token_set\x18\x1e \x01(\bR\rraftdTokenSet\x12\x19\n" +
-	"\btls_cert\x18\x1f \x01(\tR\atlsCert\x12\x17\n" +
-	"\atls_key\x18  \x01(\tR\x06tlsKey\x12\x1f\n" +
-	"\vpam_service\x18- \x01(\tR\n" +
-	"pamService\x122\n" +
-	"\x15cloudflare_token_file\x18! \x01(\tR\x13cloudflareTokenFile\x12,\n" +
-	"\x12cloudflare_zone_id\x18\" \x01(\tR\x10cloudflareZoneId\x120\n" +
-	"\x14cloudflare_tunnel_id\x18# \x01(\tR\x12cloudflareTunnelId\x12K\n" +
-	"\"cloudflare_tunnel_credentials_file\x18$ \x01(\tR\x1fcloudflareTunnelCredentialsFile\x12/\n" +
-	"\x14origin_ca_token_file\x18) \x01(\tR\x11originCaTokenFile\x12.\n" +
-	"\x13origin_ca_directory\x18* \x01(\tR\x11originCaDirectory\x12F\n" +
-	" origin_ca_renewal_check_interval\x18. \x01(\tR\x1coriginCaRenewalCheckInterval\x12\x19\n" +
-	"\brpc_addr\x18/ \x01(\tR\arpcAddr\x12B\n" +
-	"\x0econfig_changes\x180 \x03(\v2\x1b.apiary.rpc.v1.ConfigChangeR\rconfigChanges\x12%\n" +
-	"\x0eacme_directory\x183 \x01(\tR\racmeDirectory\x121\n" +
-	"\x15acme_account_key_file\x184 \x01(\tR\x12acmeAccountKeyFile\x12,\n" +
-	"\x12acme_directory_url\x185 \x01(\tR\x10acmeDirectoryUrl\x12\x1d\n" +
-	"\n" +
-	"acme_email\x186 \x01(\tR\tacmeEmail\x12-\n" +
-	"\x12watchgoose_enabled\x187 \x01(\bR\x11watchgooseEnabled\x126\n" +
-	"\x17watchgoose_endpoint_set\x188 \x01(\bR\x15watchgooseEndpointSet\x12/\n" +
-	"\x13watchgoose_interval\x189 \x01(\tR\x12watchgooseInterval\x12-\n" +
-	"\x12watchgoose_timeout\x18: \x01(\tR\x11watchgooseTimeoutB\x0f\n" +
-	"\r_jail_enabledB\x0f\n" +
-	"\r_hast_enabledB\v\n" +
-	"\t_peer_tls" +
-	"\x120\n\x14watchgoose_badge_url\x18; \x01(\tR\x12watchgooseBadgeUrl" +
-	"\"\xf0\x01\n" +
-	"\fConfigChange\x12\x14\n" +
-	"\x05field\x18\x01 \x01(\tR\x05field\x12\x1a\n" +
-	"\bprevious\x18\x02 \x01(\tR\bprevious\x12\x18\n" +
-	"\acurrent\x18\x03 \x01(\tR\acurrent\x12\x16\n" +
-	"\x06origin\x18\x04 \x01(\tR\x06origin\x12\x1c\n" +
-	"\trationale\x18\x05 \x01(\tR\trationale\x12\x1a\n" +
-	"\bevidence\x18\x06 \x01(\tR\bevidence\x12&\n" +
-	"\x0fchanged_at_unix\x18\a \x01(\x03R\rchangedAtUnix\x12\x1a\n" +
-	"\battested\x18\b \x01(\bR\battested\"\xb6\x01\n" +
-	" UpdateManagerdBindAddressRequest\x12\x19\n" +
-	"\brpc_addr\x18\x01 \x01(\tR\arpcAddr\x12#\n" +
-	"\rchange_origin\x18\x02 \x01(\tR\fchangeOrigin\x12)\n" +
-	"\x10change_rationale\x18\x03 \x01(\tR\x0fchangeRationale\x12'\n" +
-	"\x0fchange_evidence\x18\x04 \x01(\tR\x0echangeEvidence\"d\n" +
-	"!UpdateManagerdBindAddressResponse\x12)\n" +
-	"\x10restart_required\x18\x01 \x01(\bR\x0frestartRequired\x12\x14\n" +
-	"\x05error\x18\x02 \x01(\tR\x05error\"\x9e\x01\n" +
-	" ConvertStandaloneToJoinerRequest\x126\n" +
-	"\x17target_managerd_address\x18\x01 \x01(\tR\x15targetManagerdAddress\x12\x1b\n" +
-	"\traft_bind\x18\x02 \x01(\tR\braftBind\x12%\n" +
-	"\x0econfirm_phrase\x18\x03 \x01(\tR\rconfirmPhrase\"\xb5\x01\n" +
-	"!ConvertStandaloneToJoinerResponse\x12\x14\n" +
-	"\x05error\x18\x01 \x01(\tR\x05error\x12&\n" +
-	"\x0fbackup_data_dir\x18\x02 \x01(\tR\rbackupDataDir\x12&\n" +
-	"\x0fjoin_request_id\x18\x03 \x01(\tR\rjoinRequestId\x12*\n" +
-	"\x11join_request_code\x18\x04 \x01(\tR\x0fjoinRequestCode\"T\n" +
-	"\x10NetworkInterface\x12\x12\n" +
-	"\x04name\x18\x01 \x01(\tR\x04name\x12\x0e\n" +
-	"\x02up\x18\x02 \x01(\bR\x02up\x12\x1c\n" +
-	"\taddresses\x18\x03 \x03(\tR\taddresses\"" +
-	"\xdc\x13" +
-	"\n" +
-	"\x17UpdateNodeConfigRequest\x12\x16\n" +
-	"\x06uplink\x18\x01 \x01(\tR\x06uplink\x12\x1d\n" +
-	"\n" +
-	"nat_uplink\x18\x02 \x01(\tR\tnatUplink\x12&\n" +
-	"\fjail_enabled\x18\x03 \x01(\bH\x00R\vjailEnabled\x88\x01\x01\x12&\n" +
-	"\x0fdhcp_dns_server\x18\x04 \x01(\tR\rdhcpDnsServer\x12\x19\n" +
-	"\bzfs_base\x18\b \x01(\tR\azfsBase\x12!\n" +
-	"\fbhyve_prefix\x18\t \x01(\tR\vbhyvePrefix\x12\x17\n" +
-	"\aiso_dir\x18\n" +
-	" \x01(\tR\x06isoDir\x12\x1f\n" +
-	"\vjail_prefix\x18\v \x01(\tR\n" +
-	"jailPrefix\x12&\n" +
-	"\x0fjail_mount_base\x18\f \x01(\tR\rjailMountBase\x12-\n" +
-	"\x12reconcile_interval\x18\r \x01(\tR\x11reconcileInterval\x12:\n" +
-	"\x19assumption_check_interval\x18\x0e \x01(\tR\x17assumptionCheckInterval\x12B\n" +
-	"\x1dassumption_heartbeat_interval\x18\x0f \x01(\tR\x1bassumptionHeartbeatInterval\x124\n" +
-	"\x16assumption_stale_after\x18\x10 \x01(\tR\x14assumptionStaleAfter\x126\n" +
-	"\x17assumption_run_deadline\x18\x11 \x01(\tR\x15assumptionRunDeadline\x12;\n" +
-	"\x1aassumption_history_max_age\x18\x12 \x01(\tR\x17assumptionHistoryMaxAge\x128\n" +
-	"\x18assumption_history_limit\x18\x13 \x01(\x05R\x16assumptionHistoryLimit\x12#\n" +
-	"\rbhyve_bootrom\x18\x14 \x01(\tR\fbhyveBootrom\x12!\n" +
-	"\fbhyve_bridge\x18\x15 \x01(\tR\vbhyveBridge\x12 \n" +
-	"\fdisk_size_mb\x18\x16 \x01(\x04R\n" +
-	"diskSizeMb\x12)\n" +
-	"\x11jail_disk_size_mb\x18\x17 \x01(\x04R\x0ejailDiskSizeMb\x12&\n" +
-	"\fhast_enabled\x18\x18 \x01(\bH\x01R\vhastEnabled\x88\x01\x01\x12\x1e\n" +
-	"\bpeer_tls\x18\x1a \x01(\bH\x02R\apeerTls\x88\x01\x01\x12,\n" +
-	"\x12peer_managerd_port\x18\x1b \x01(\tR\x10peerManagerdPort\x121\n" +
-	"\x15peer_tls_hostname_map\x18\x1c \x01(\tR\x12peerTlsHostnameMap\x12\x1e\n" +
-	"\vpeer_tls_ca\x18+ \x01(\tR\tpeerTlsCa\x120\n" +
-	"\x14known_peer_addresses\x18, \x01(\tR\x12knownPeerAddresses\x12 \n" +
-	"\fpeer_api_key\x18% \x01(\tR\n" +
-	"peerApiKey\x12+\n" +
-	"\x12clear_peer_api_key\x18& \x01(\bR\x0fclearPeerApiKey\x12\x1f\n" +
-	"\vraftd_token\x18' \x01(\tR\n" +
-	"raftdToken\x12*\n" +
-	"\x11clear_raftd_token\x18( \x01(\bR\x0fclearRaftdToken\x12\x19\n" +
-	"\btls_cert\x18\x1f \x01(\tR\atlsCert\x12\x17\n" +
-	"\atls_key\x18  \x01(\tR\x06tlsKey\x12\x1f\n" +
-	"\vpam_service\x18- \x01(\tR\n" +
-	"pamService\x122\n" +
-	"\x15cloudflare_token_file\x18! \x01(\tR\x13cloudflareTokenFile\x12,\n" +
-	"\x12cloudflare_zone_id\x18\" \x01(\tR\x10cloudflareZoneId\x120\n" +
-	"\x14cloudflare_tunnel_id\x18# \x01(\tR\x12cloudflareTunnelId\x12K\n" +
-	"\"cloudflare_tunnel_credentials_file\x18$ \x01(\tR\x1fcloudflareTunnelCredentialsFile\x12/\n" +
-	"\x14origin_ca_token_file\x18) \x01(\tR\x11originCaTokenFile\x12.\n" +
-	"\x13origin_ca_directory\x18* \x01(\tR\x11originCaDirectory\x12F\n" +
-	" origin_ca_renewal_check_interval\x18. \x01(\tR\x1coriginCaRenewalCheckInterval\x12#\n" +
-	"\rchange_origin\x18/ \x01(\tR\fchangeOrigin\x12)\n" +
-	"\x10change_rationale\x180 \x01(\tR\x0fchangeRationale\x12'\n" +
-	"\x0fchange_evidence\x181 \x01(\tR\x0echangeEvidence\x12%\n" +
-	"\x0eannotate_field\x182 \x01(\tR\rannotateField\x12%\n" +
-	"\x0eacme_directory\x183 \x01(\tR\racmeDirectory\x121\n" +
-	"\x15acme_account_key_file\x184 \x01(\tR\x12acmeAccountKeyFile\x12,\n" +
-	"\x12acme_directory_url\x185 \x01(\tR\x10acmeDirectoryUrl\x12\x1d\n" +
-	"\n" +
-	"acme_email\x186 \x01(\tR\tacmeEmail\x122\n" +
-	"\x12watchgoose_enabled\x187 \x01(\bH\x03R\x11watchgooseEnabled\x88\x01\x01\x12/\n" +
-	"\x13watchgoose_endpoint\x188 \x01(\tR\x12watchgooseEndpoint\x12:\n" +
-	"\x19clear_watchgoose_endpoint\x189 \x01(\bR\x17clearWatchgooseEndpoint\x12/\n" +
-	"\x13watchgoose_interval\x18: \x01(\tR\x12watchgooseInterval\x12-\n" +
-	"\x12watchgoose_timeout\x18; \x01(\tR\x11watchgooseTimeoutB\x0f\n" +
-	"\r_jail_enabledB\x0f\n" +
-	"\r_hast_enabledB\v\n" +
-	"\t_peer_tlsB\x15\n" +
-	"\x13_watchgoose_enabled" +
-	"\x120\n\x14watchgoose_badge_url\x18< \x01(\tR\x12watchgooseBadgeUrl\x12;\n\x1aclear_watchgoose_badge_url" +
-	"\x18= \x01(\bR\x17clearWatchgooseBadgeUrl" +
-	"\"0\n" +
-	"\x18UpdateNodeConfigResponse\x12\x14\n" +
-	"\x05error\x18\x01 \x01(\tR\x05error\"\x1a\n" +
-	"\x18GetFrontendConfigRequest\"\xfd\x03\n" +
-	"\x19GetFrontendConfigResponse\x12!\n" +
-	"\fmanager_addr\x18\x01 \x01(\tR\vmanagerAddr\x12\x1b\n" +
-	"\thttp_addr\x18\x02 \x01(\tR\bhttpAddr\x12\x1f\n" +
-	"\vmanager_tls\x18\x03 \x01(\bR\n" +
-	"managerTls\x12$\n" +
-	"\x0emanager_tls_ca\x18\x04 \x01(\tR\fmanagerTlsCa\x125\n" +
-	"\x17manager_tls_server_name\x18\x05 \x01(\tR\x14managerTlsServerName\x12\x19\n" +
-	"\btls_cert\x18\x06 \x01(\tR\atlsCert\x12\x17\n" +
-	"\atls_key\x18\a \x01(\tR\x06tlsKey\x12\x1e\n" +
-	"\bpeer_tls\x18\b \x01(\bH\x00R\apeerTls\x88\x01\x01\x12\x1e\n" +
-	"\vpeer_tls_ca\x18\t \x01(\tR\tpeerTlsCa\x120\n" +
-	"\x14peer_hostname_suffix\x18\n" +
-	" \x01(\tR\x12peerHostnameSuffix\x12*\n" +
-	"\x11peer_manager_port\x18\v \x01(\tR\x0fpeerManagerPort\x12-\n" +
-	"\x13manager_api_key_set\x18\f \x01(\bR\x10managerApiKeySet\x12\x14\n" +
-	"\x05error\x18\r \x01(\tR\x05errorB\v\n" +
-	"\t_peer_tls\"\x95\x04\n" +
-	"\x1bUpdateFrontendConfigRequest\x12!\n" +
-	"\fmanager_addr\x18\x01 \x01(\tR\vmanagerAddr\x12\x1b\n" +
-	"\thttp_addr\x18\x02 \x01(\tR\bhttpAddr\x12\x1f\n" +
-	"\vmanager_tls\x18\x03 \x01(\bR\n" +
-	"managerTls\x12$\n" +
-	"\x0emanager_tls_ca\x18\x04 \x01(\tR\fmanagerTlsCa\x125\n" +
-	"\x17manager_tls_server_name\x18\x05 \x01(\tR\x14managerTlsServerName\x12\x19\n" +
-	"\btls_cert\x18\x06 \x01(\tR\atlsCert\x12\x17\n" +
-	"\atls_key\x18\a \x01(\tR\x06tlsKey\x12\x1e\n" +
-	"\bpeer_tls\x18\b \x01(\bH\x00R\apeerTls\x88\x01\x01\x12\x1e\n" +
-	"\vpeer_tls_ca\x18\t \x01(\tR\tpeerTlsCa\x120\n" +
-	"\x14peer_hostname_suffix\x18\n" +
-	" \x01(\tR\x12peerHostnameSuffix\x12*\n" +
-	"\x11peer_manager_port\x18\v \x01(\tR\x0fpeerManagerPort\x12&\n" +
-	"\x0fmanager_api_key\x18\f \x01(\tR\rmanagerApiKey\x121\n" +
-	"\x15clear_manager_api_key\x18\r \x01(\bR\x12clearManagerApiKeyB\v\n" +
-	"\t_peer_tls\"R\n" +
-	"\x1cUpdateFrontendConfigResponse\x12\x1c\n" +
-	"\tscheduled\x18\x01 \x01(\bR\tscheduled\x12\x14\n" +
-	"\x05error\x18\x02 \x01(\tR\x05error\"\x1b\n" +
-	"\x19GetRestshimdConfigRequest\"\xa4\x02\n" +
-	"\x1aGetRestshimdConfigResponse\x12!\n" +
-	"\fmanager_addr\x18\x01 \x01(\tR\vmanagerAddr\x12\x1b\n" +
-	"\thttp_addr\x18\x02 \x01(\tR\bhttpAddr\x12\x1f\n" +
-	"\vmanager_tls\x18\x03 \x01(\bR\n" +
-	"managerTls\x12$\n" +
-	"\x0emanager_tls_ca\x18\x04 \x01(\tR\fmanagerTlsCa\x125\n" +
-	"\x17manager_tls_server_name\x18\x05 \x01(\tR\x14managerTlsServerName\x12\x19\n" +
-	"\btls_cert\x18\x06 \x01(\tR\atlsCert\x12\x17\n" +
-	"\atls_key\x18\a \x01(\tR\x06tlsKey\x12\x14\n" +
-	"\x05error\x18\b \x01(\tR\x05error\"\x90\x02\n" +
-	"\x1cUpdateRestshimdConfigRequest\x12!\n" +
-	"\fmanager_addr\x18\x01 \x01(\tR\vmanagerAddr\x12\x1b\n" +
-	"\thttp_addr\x18\x02 \x01(\tR\bhttpAddr\x12\x1f\n" +
-	"\vmanager_tls\x18\x03 \x01(\bR\n" +
-	"managerTls\x12$\n" +
-	"\x0emanager_tls_ca\x18\x04 \x01(\tR\fmanagerTlsCa\x125\n" +
-	"\x17manager_tls_server_name\x18\x05 \x01(\tR\x14managerTlsServerName\x12\x19\n" +
-	"\btls_cert\x18\x06 \x01(\tR\atlsCert\x12\x17\n" +
-	"\atls_key\x18\a \x01(\tR\x06tlsKey\"S\n" +
-	"\x1dUpdateRestshimdConfigResponse\x12\x1c\n" +
-	"\tscheduled\x18\x01 \x01(\bR\tscheduled\x12\x14\n" +
-	"\x05error\x18\x02 \x01(\tR\x05error\"\x17\n" +
-	"\x15GetRaftdConfigRequest\"\xb3\x02\n" +
-	"\x16GetRaftdConfigResponse\x12\x19\n" +
-	"\bdata_dir\x18\x01 \x01(\tR\adataDir\x12\x16\n" +
-	"\x06socket\x18\x02 \x01(\tR\x06socket\x12\x1b\n" +
-	"\traft_bind\x18\x03 \x01(\tR\braftBind\x12\"\n" +
-	"\rraft_tls_cert\x18\x04 \x01(\tR\vraftTlsCert\x12 \n" +
-	"\fraft_tls_key\x18\x05 \x01(\tR\n" +
-	"raftTlsKey\x12\x1e\n" +
-	"\vraft_tls_ca\x18\x06 \x01(\tR\traftTlsCa\x12,\n" +
-	"\x12internal_token_set\x18\a \x01(\bR\x10internalTokenSet\x12\x1f\n" +
-	"\vsingle_node\x18\t \x01(\bR\n" +
-	"singleNode\x12\x14\n" +
-	"\x05error\x18\b \x01(\tR\x05error\"Q\n" +
-	"\x16SetDatasetQuotaRequest\x12!\n" +
-	"\fdataset_name\x18\x01 \x01(\tR\vdatasetName\x12\x14\n" +
-	"\x05quota\x18\x02 \x01(\tR\x05quota\"/\n" +
-	"\x17SetDatasetQuotaResponse\x12\x14\n" +
-	"\x05error\x18\x01 \x01(\tR\x05error\"N\n" +
-	"\x17CreateVMSnapshotRequest\x12\x0e\n" +
-	"\x02id\x18\x01 \x01(\tR\x02id\x12#\n" +
-	"\rsnapshot_name\x18\x02 \x01(\tR\fsnapshotName\"0\n" +
-	"\x18CreateVMSnapshotResponse\x12\x14\n" +
-	"\x05error\x18\x01 \x01(\tR\x05error\"(\n" +
-	"\x16ListVMSnapshotsRequest\x12\x0e\n" +
-	"\x02id\x18\x01 \x01(\tR\x02id\"V\n" +
-	"\x17ListVMSnapshotsResponse\x12%\n" +
-	"\x0esnapshot_names\x18\x01 \x03(\tR\rsnapshotNames\x12\x14\n" +
-	"\x05error\x18\x02 \x01(\tR\x05error\"O\n" +
-	"\x18RestoreVMSnapshotRequest\x12\x0e\n" +
-	"\x02id\x18\x01 \x01(\tR\x02id\x12#\n" +
-	"\rsnapshot_name\x18\x02 \x01(\tR\fsnapshotName\"1\n" +
-	"\x19RestoreVMSnapshotResponse\x12\x14\n" +
-	"\x05error\x18\x01 \x01(\tR\x05error\"N\n" +
-	"\x17DeleteVMSnapshotRequest\x12\x0e\n" +
-	"\x02id\x18\x01 \x01(\tR\x02id\x12#\n" +
-	"\rsnapshot_name\x18\x02 \x01(\tR\fsnapshotName\"0\n" +
-	"\x18DeleteVMSnapshotResponse\x12\x14\n" +
-	"\x05error\x18\x01 \x01(\tR\x05error\"\x8d\x01\n" +
-	"\vNodeService\x12\x12\n" +
-	"\x04name\x18\x01 \x01(\tR\x04name\x12\x16\n" +
-	"\x06status\x18\x02 \x01(\tR\x06status\x12\x18\n" +
-	"\aenabled\x18\x03 \x01(\bR\aenabled\x12\x16\n" +
-	"\x06detail\x18\x04 \x01(\tR\x06detail\x12 \n" +
-	"\vrestartable\x18\x05 \x01(\bR\vrestartable\"\x19\n" +
-	"\x17ListNodeServicesRequest\"h\n" +
-	"\x18ListNodeServicesResponse\x126\n" +
-	"\bservices\x18\x01 \x03(\v2\x1a.apiary.rpc.v1.NodeServiceR\bservices\x12\x14\n" +
-	"\x05error\x18\x02 \x01(\tR\x05error\"E\n" +
-	"\x19RestartNodeServiceRequest\x12\x12\n" +
-	"\x04name\x18\x01 \x01(\tR\x04name\x12\x14\n" +
-	"\x05force\x18\x02 \x01(\bR\x05force\"\x83\x01\n" +
-	"\x1aRestartNodeServiceResponse\x12\x1c\n" +
-	"\tscheduled\x18\x01 \x01(\bR\tscheduled\x12\x14\n" +
-	"\x05error\x18\x02 \x01(\tR\x05error\x121\n" +
-	"\x14guardrail_overridden\x18\x03 \x01(\bR\x13guardrailOverridden\"Z\n" +
-	"\x10GuardrailFinding\x12\x12\n" +
-	"\x04rule\x18\x01 \x01(\tR\x04rule\x12\x16\n" +
-	"\x06detail\x18\x02 \x01(\tR\x06detail\x12\x1a\n" +
-	"\bevidence\x18\x03 \x03(\tR\bevidence\"=\n" +
-	"\x0fGuardrailCaveat\x12\x12\n" +
-	"\x04rule\x18\x01 \x01(\tR\x04rule\x12\x16\n" +
-	"\x06detail\x18\x02 \x01(\tR\x06detail\"C\n" +
-	"\"PreflightApproveJoinRequestRequest\x12\x1d\n" +
-	"\n" +
-	"request_id\x18\x01 \x01(\tR\trequestId\"\xb3\x01\n" +
-	"#PreflightApproveJoinRequestResponse\x12\x18\n" +
-	"\averdict\x18\x01 \x01(\tR\averdict\x12;\n" +
-	"\bfindings\x18\x02 \x03(\v2\x1f.apiary.rpc.v1.GuardrailFindingR\bfindings\x12\x14\n" +
-	"\x05error\x18\x03 \x01(\tR\x05error\x12\x1f\n" +
-	"\vleader_hint\x18\x04 \x01(\tR\n" +
-	"leaderHint\"N\n" +
-	"\"PreflightRestartNodeServiceRequest\x12\x12\n" +
-	"\x04name\x18\x01 \x01(\tR\x04name\x12\x14\n" +
-	"\x05force\x18\x02 \x01(\bR\x05force\"\xcc\x01\n" +
-	"#PreflightRestartNodeServiceResponse\x12\x18\n" +
-	"\averdict\x18\x01 \x01(\tR\averdict\x12;\n" +
-	"\bfindings\x18\x02 \x03(\v2\x1f.apiary.rpc.v1.GuardrailFindingR\bfindings\x12\x14\n" +
-	"\x05error\x18\x03 \x01(\tR\x05error\x128\n" +
-	"\acaveats\x18\x04 \x03(\v2\x1e.apiary.rpc.v1.GuardrailCaveatR\acaveats\"e\n" +
-	"\x1aReserveRestartLeaseRequest\x12\x18\n" +
-	"\aservice\x18\x01 \x01(\tR\aservice\x12\x17\n" +
-	"\anode_id\x18\x02 \x01(\tR\x06nodeId\x12\x14\n" +
-	"\x05force\x18\x03 \x01(\bR\x05force\"\xf9\x01\n" +
-	"\x1bReserveRestartLeaseResponse\x12\x18\n" +
-	"\agranted\x18\x01 \x01(\bR\agranted\x121\n" +
-	"\x14guardrail_overridden\x18\x02 \x01(\bR\x13guardrailOverridden\x12\x19\n" +
-	"\blease_id\x18\x03 \x01(\x04R\aleaseId\x12;\n" +
-	"\bfindings\x18\x04 \x03(\v2\x1f.apiary.rpc.v1.GuardrailFindingR\bfindings\x12\x14\n" +
-	"\x05error\x18\x05 \x01(\tR\x05error\x12\x1f\n" +
-	"\vleader_hint\x18\x06 \x01(\tR\n" +
-	"leaderHint\"n\n" +
-	"\x1eConfirmRestartCompletedRequest\x12\x18\n" +
-	"\aservice\x18\x01 \x01(\tR\aservice\x12\x17\n" +
-	"\anode_id\x18\x02 \x01(\tR\x06nodeId\x12\x19\n" +
-	"\blease_id\x18\x03 \x01(\x04R\aleaseId\"X\n" +
-	"\x1fConfirmRestartCompletedResponse\x12\x14\n" +
-	"\x05error\x18\x01 \x01(\tR\x05error\x12\x1f\n" +
-	"\vleader_hint\x18\x02 \x01(\tR\n" +
-	"leaderHint\"a\n" +
-	"\x1aStepAsideForRestartRequest\x12$\n" +
-	"\x0etarget_node_id\x18\x01 \x01(\tR\ftargetNodeId\x12\x1d\n" +
-	"\n" +
-	"timeout_ms\x18\x02 \x01(\x04R\ttimeoutMs\"\xf1\x01\n" +
-	"\x1bStepAsideForRestartResponse\x12\x17\n" +
-	"\anode_id\x18\x01 \x01(\tR\x06nodeId\x12\x1d\n" +
-	"\n" +
-	"was_leader\x18\x02 \x01(\bR\twasLeader\x12 \n" +
-	"\vtransferred\x18\x03 \x01(\bR\vtransferred\x12\"\n" +
-	"\rnew_leader_id\x18\x04 \x01(\tR\vnewLeaderId\x12&\n" +
-	"\x0fsafe_to_restart\x18\x05 \x01(\bR\rsafeToRestart\x12\x16\n" +
-	"\x06detail\x18\x06 \x01(\tR\x06detail\x12\x14\n" +
-	"\x05error\x18\a \x01(\tR\x05error\"\xa4\x02\n" +
-	"\x19MutateColonyUpdateRequest\x12>\n" +
-	"\aacquire\x18\x01 \x01(\v2\".apiary.rpc.v1.AcquireColonyUpdateH\x00R\aacquire\x12>\n" +
-	"\aadvance\x18\x02 \x01(\v2\".apiary.rpc.v1.AdvanceColonyUpdateH\x00R\aadvance\x12>\n" +
-	"\arelease\x18\x03 \x01(\v2\".apiary.rpc.v1.ReleaseColonyUpdateH\x00R\arelease\x12A\n" +
-	"\bhandover\x18\x04 \x01(\v2#.apiary.rpc.v1.HandoverColonyUpdateH\x00R\bhandoverB\x04\n" +
-	"\x02op\"\x83\x01\n" +
-	"\x13AcquireColonyUpdate\x12!\n" +
-	"\foperation_id\x18\x01 \x01(\tR\voperationId\x12-\n" +
-	"\x12holder_incarnation\x18\x02 \x01(\tR\x11holderIncarnation\x12\x1a\n" +
-	"\btakeover\x18\x03 \x01(\bR\btakeover\"\xe7\x01\n" +
-	"\x13AdvanceColonyUpdate\x126\n" +
-	"\x05fence\x18\x01 \x01(\v2 .apiary.rpc.v1.ColonyUpdateFenceR\x05fence\x12\x12\n" +
-	"\x04step\x18\x02 \x01(\tR\x04step\x12$\n" +
-	"\x0etarget_node_id\x18\x03 \x01(\tR\ftargetNodeId\x12\x16\n" +
-	"\x06detail\x18\x04 \x01(\tR\x06detail\x12F\n" +
-	"\vstep_record\x18\x05 \x01(\v2%.apiary.rpc.v1.ColonyUpdateStepRecordR\n" +
-	"stepRecord\"\x7f\n" +
-	"\x13ReleaseColonyUpdate\x126\n" +
-	"\x05fence\x18\x01 \x01(\v2 .apiary.rpc.v1.ColonyUpdateFenceR\x05fence\x12\x18\n" +
-	"\aoutcome\x18\x02 \x01(\tR\aoutcome\x12\x16\n" +
-	"\x06detail\x18\x03 \x01(\tR\x06detail\"\xc1\x01\n" +
-	"\x14HandoverColonyUpdate\x12?\n" +
-	"\n" +
-	"from_fence\x18\x01 \x01(\v2 .apiary.rpc.v1.ColonyUpdateFenceR\tfromFence\x12\x1c\n" +
-	"\n" +
-	"to_node_id\x18\x02 \x01(\tR\btoNodeId\x122\n" +
-	"\x15to_holder_incarnation\x18\x03 \x01(\tR\x13toHolderIncarnation\x12\x16\n" +
-	"\x06reason\x18\x04 \x01(\tR\x06reason\"\x90\x02\n" +
-	"\x14ColonyUpdateHandover\x12 \n" +
-	"\ffrom_node_id\x18\x01 \x01(\tR\n" +
-	"fromNodeId\x12)\n" +
-	"\x10from_incarnation\x18\x02 \x01(\tR\x0ffromIncarnation\x12(\n" +
-	"\x10from_fence_token\x18\x03 \x01(\x04R\x0efromFenceToken\x12\x1c\n" +
-	"\n" +
-	"to_node_id\x18\x04 \x01(\tR\btoNodeId\x12%\n" +
-	"\x0eto_incarnation\x18\x05 \x01(\tR\rtoIncarnation\x12$\n" +
-	"\x0eto_fence_token\x18\x06 \x01(\x04R\ftoFenceToken\x12\x16\n" +
-	"\x06reason\x18\a \x01(\tR\x06reason\"\xac\x01\n" +
-	"\x11ColonyUpdateFence\x12!\n" +
-	"\foperation_id\x18\x01 \x01(\tR\voperationId\x12$\n" +
-	"\x0eholder_node_id\x18\x02 \x01(\tR\fholderNodeId\x12\x1f\n" +
-	"\vfence_token\x18\x03 \x01(\x04R\n" +
-	"fenceToken\x12-\n" +
-	"\x12holder_incarnation\x18\x04 \x01(\tR\x11holderIncarnation\"\xa9\x01\n" +
-	"\x16ColonyUpdateStepRecord\x12\x14\n" +
-	"\x05index\x18\x01 \x01(\rR\x05index\x12\x12\n" +
-	"\x04step\x18\x02 \x01(\tR\x04step\x12\x18\n" +
-	"\aoutcome\x18\x03 \x01(\tR\aoutcome\x12\x16\n" +
-	"\x06detail\x18\x04 \x01(\tR\x06detail\x12\x1a\n" +
-	"\bevidence\x18\x05 \x03(\tR\bevidence\x12\x17\n" +
-	"\anode_id\x18\x06 \x01(\tR\x06nodeId\"\xbf\x04\n" +
-	"\fColonyUpdate\x12!\n" +
-	"\foperation_id\x18\x01 \x01(\tR\voperationId\x12$\n" +
-	"\x0eholder_node_id\x18\x02 \x01(\tR\fholderNodeId\x12-\n" +
-	"\x12holder_incarnation\x18\x03 \x01(\tR\x11holderIncarnation\x12\x1f\n" +
-	"\vfence_token\x18\x04 \x01(\x04R\n" +
-	"fenceToken\x12&\n" +
-	"\x0fgranted_at_unix\x18\x05 \x01(\x03R\rgrantedAtUnix\x12$\n" +
-	"\x0etarget_node_id\x18\x06 \x01(\tR\ftargetNodeId\x12\x12\n" +
-	"\x04step\x18\a \x01(\tR\x04step\x12\x16\n" +
-	"\x06active\x18\b \x01(\bR\x06active\x12\x18\n" +
-	"\aoutcome\x18\t \x01(\tR\aoutcome\x12\x16\n" +
-	"\x06detail\x18\n" +
-	" \x01(\tR\x06detail\x12&\n" +
-	"\x0fsettled_at_unix\x18\v \x01(\x03R\rsettledAtUnix\x12\x1a\n" +
-	"\btakeover\x18\f \x01(\bR\btakeover\x12;\n" +
-	"\x05steps\x18\r \x03(\v2%.apiary.rpc.v1.ColonyUpdateStepRecordR\x05steps\x12&\n" +
-	"\x0fupdated_at_unix\x18\x0e \x01(\x03R\rupdatedAtUnix\x12A\n" +
-	"\thandovers\x18\x0f \x03(\v2#.apiary.rpc.v1.ColonyUpdateHandoverR\thandovers\"\xc0\x01\n" +
-	"\x1aMutateColonyUpdateResponse\x12\x1a\n" +
-	"\baccepted\x18\x01 \x01(\bR\baccepted\x123\n" +
-	"\x06update\x18\x02 \x01(\v2\x1b.apiary.rpc.v1.ColonyUpdateR\x06update\x12\x14\n" +
-	"\x05error\x18\x03 \x01(\tR\x05error\x12\x1f\n" +
-	"\vleader_hint\x18\x04 \x01(\tR\n" +
-	"leaderHint\x12\x1a\n" +
-	"\btakeover\x18\x05 \x01(\bR\btakeover\"q\n" +
-	"\x14CreateNetworkRequest\x12:\n" +
-	"\anetwork\x18\x01 \x01(\v2 .apiary.rpc.v1.NetworkDefinitionR\anetwork\x12\x1d\n" +
-	"\n" +
-	"timeout_ms\x18\x02 \x01(\rR\ttimeoutMs\"\x8a\x01\n" +
-	"\x15CreateNetworkResponse\x12:\n" +
-	"\anetwork\x18\x01 \x01(\v2 .apiary.rpc.v1.NetworkDefinitionR\anetwork\x12\x14\n" +
-	"\x05error\x18\x02 \x01(\tR\x05error\x12\x1f\n" +
-	"\vleader_hint\x18\x03 \x01(\tR\n" +
-	"leaderHint\"\x15\n" +
-	"\x13ListNetworksRequest\"\x8b\x01\n" +
-	"\x14ListNetworksResponse\x12<\n" +
-	"\bnetworks\x18\x01 \x03(\v2 .apiary.rpc.v1.NetworkDefinitionR\bnetworks\x12\x14\n" +
-	"\x05error\x18\x02 \x01(\tR\x05error\x12\x1f\n" +
-	"\vleader_hint\x18\x03 \x01(\tR\n" +
-	"leaderHint\"E\n" +
-	"\x14DeleteNetworkRequest\x12\x0e\n" +
-	"\x02id\x18\x01 \x01(\tR\x02id\x12\x1d\n" +
-	"\n" +
-	"timeout_ms\x18\x02 \x01(\rR\ttimeoutMs\"\x8a\x01\n" +
-	"\x15DeleteNetworkResponse\x12:\n" +
-	"\anetwork\x18\x01 \x01(\v2 .apiary.rpc.v1.NetworkDefinitionR\anetwork\x12\x14\n" +
-	"\x05error\x18\x02 \x01(\tR\x05error\x12\x1f\n" +
-	"\vleader_hint\x18\x03 \x01(\tR\n" +
-	"leaderHint\"Z\n" +
-	"\x15SetNetworkNameRequest\x12\x0e\n" +
-	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
-	"\x04name\x18\x02 \x01(\tR\x04name\x12\x1d\n" +
-	"\n" +
-	"timeout_ms\x18\x03 \x01(\rR\ttimeoutMs\"\x8b\x01\n" +
-	"\x16SetNetworkNameResponse\x12:\n" +
-	"\anetwork\x18\x01 \x01(\v2 .apiary.rpc.v1.NetworkDefinitionR\anetwork\x12\x14\n" +
-	"\x05error\x18\x02 \x01(\tR\x05error\x12\x1f\n" +
-	"\vleader_hint\x18\x03 \x01(\tR\n" +
-	"leaderHint\"e\n" +
-	"\x11CreateJailRequest\x121\n" +
-	"\x04jail\x18\x01 \x01(\v2\x1d.apiary.rpc.v1.JailDefinitionR\x04jail\x12\x1d\n" +
-	"\n" +
-	"timeout_ms\x18\x02 \x01(\rR\ttimeoutMs\"~\n" +
-	"\x12CreateJailResponse\x121\n" +
-	"\x04jail\x18\x01 \x01(\v2\x1d.apiary.rpc.v1.JailDefinitionR\x04jail\x12\x14\n" +
-	"\x05error\x18\x02 \x01(\tR\x05error\x12\x1f\n" +
-	"\vleader_hint\x18\x03 \x01(\tR\n" +
-	"leaderHint\"f\n" +
-	"\x0fResourceProfile\x12\x14\n" +
-	"\x05vcpus\x18\x01 \x01(\rR\x05vcpus\x12\x1b\n" +
-	"\tmemory_mb\x18\x02 \x01(\x04R\bmemoryMb\x12 \n" +
-	"\fdisk_size_mb\x18\x03 \x01(\x04R\n" +
-	"diskSizeMb\"\x9f\x03\n" +
-	"\x13WorkloadDescription\x12 \n" +
-	"\vdescription\x18\x01 \x01(\tR\vdescription\x120\n" +
-	"\x14needs_full_isolation\x18\x02 \x01(\bR\x12needsFullIsolation\x128\n" +
-	"\x19needs_custom_kernel_or_os\x18\x03 \x01(\bR\x15needsCustomKernelOrOs\x12'\n" +
-	"\x0festimated_vcpus\x18\x04 \x01(\rR\x0eestimatedVcpus\x12.\n" +
-	"\x13estimated_memory_mb\x18\x05 \x01(\x04R\x11estimatedMemoryMb\x12*\n" +
-	"\x11estimated_disk_mb\x18\x06 \x01(\x04R\x0festimatedDiskMb\x12J\n" +
-	"\"expects_live_migration_or_snapshot\x18\a \x01(\bR\x1eexpectsLiveMigrationOrSnapshot\x12)\n" +
-	"\x10density_priority\x18\b \x01(\bR\x0fdensityPriority\"Z\n" +
-	"\x18RecommendCellTypeRequest\x12>\n" +
-	"\bworkload\x18\x01 \x01(\v2\".apiary.rpc.v1.WorkloadDescriptionR\bworkload\"\x9c\x01\n" +
-	"\x14RecommendationReason\x12;\n" +
-	"\x06factor\x18\x01 \x01(\x0e2#.apiary.rpc.v1.RecommendationFactorR\x06factor\x12/\n" +
-	"\x06favors\x18\x02 \x01(\x0e2\x17.apiary.rpc.v1.CellTypeR\x06favors\x12\x16\n" +
-	"\x06detail\x18\x03 \x01(\tR\x06detail\"\xbd\x02\n" +
-	"\x19RecommendCellTypeResponse\x12K\n" +
-	"\x15recommended_cell_type\x18\x01 \x01(\x0e2\x17.apiary.rpc.v1.CellTypeR\x13recommendedCellType\x12G\n" +
-	"\n" +
-	"confidence\x18\x02 \x01(\x0e2'.apiary.rpc.v1.RecommendationConfidenceR\n" +
-	"confidence\x12=\n" +
-	"\areasons\x18\x03 \x03(\v2#.apiary.rpc.v1.RecommendationReasonR\areasons\x12K\n" +
-	"\x15alternative_cell_type\x18\x04 \x01(\x0e2\x17.apiary.rpc.v1.CellTypeR\x13alternativeCellType\"\xe6\x02\n" +
-	"\x11CreateCellRequest\x12\x0e\n" +
-	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
-	"\x04name\x18\x02 \x01(\tR\x04name\x12\x17\n" +
-	"\anode_id\x18\x03 \x01(\tR\x06nodeId\x12G\n" +
-	"\rworkload_hint\x18\x04 \x01(\v2\".apiary.rpc.v1.WorkloadDescriptionR\fworkloadHint\x12I\n" +
-	"\x10resource_profile\x18\x05 \x01(\v2\x1e.apiary.rpc.v1.ResourceProfileR\x0fresourceProfile\x12\x1d\n" +
-	"\n" +
-	"network_id\x18\x06 \x01(\tR\tnetworkId\x12B\n" +
-	"\x0efirewall_rules\x18\a \x03(\v2\x1b.apiary.rpc.v1.FirewallRuleR\rfirewallRules\x12\x1d\n" +
-	"\n" +
-	"timeout_ms\x18\b \x01(\rR\ttimeoutMs\"\xfa\x01\n" +
-	"\x12CreateCellResponse\x12\x17\n" +
-	"\acell_id\x18\x01 \x01(\tR\x06cellId\x124\n" +
-	"\tcell_type\x18\x02 \x01(\x0e2\x17.apiary.rpc.v1.CellTypeR\bcellType\x12+\n" +
-	"\x02vm\x18\x03 \x01(\v2\x1b.apiary.rpc.v1.VMDefinitionR\x02vm\x121\n" +
-	"\x04jail\x18\x04 \x01(\v2\x1d.apiary.rpc.v1.JailDefinitionR\x04jail\x12\x14\n" +
-	"\x05error\x18\x05 \x01(\tR\x05error\x12\x1f\n" +
-	"\vleader_hint\x18\x06 \x01(\tR\n" +
-	"leaderHint\"e\n" +
-	"\x11UpdateJailRequest\x121\n" +
-	"\x04jail\x18\x01 \x01(\v2\x1d.apiary.rpc.v1.JailDefinitionR\x04jail\x12\x1d\n" +
-	"\n" +
-	"timeout_ms\x18\x02 \x01(\rR\ttimeoutMs\"~\n" +
-	"\x12UpdateJailResponse\x121\n" +
-	"\x04jail\x18\x01 \x01(\v2\x1d.apiary.rpc.v1.JailDefinitionR\x04jail\x12\x14\n" +
-	"\x05error\x18\x02 \x01(\tR\x05error\x12\x1f\n" +
-	"\vleader_hint\x18\x03 \x01(\tR\n" +
-	"leaderHint\"B\n" +
-	"\x11DeleteJailRequest\x12\x0e\n" +
-	"\x02id\x18\x01 \x01(\tR\x02id\x12\x1d\n" +
-	"\n" +
-	"timeout_ms\x18\x02 \x01(\rR\ttimeoutMs\"~\n" +
-	"\x12DeleteJailResponse\x121\n" +
-	"\x04jail\x18\x01 \x01(\v2\x1d.apiary.rpc.v1.JailDefinitionR\x04jail\x12\x14\n" +
-	"\x05error\x18\x02 \x01(\tR\x05error\x12\x1f\n" +
-	"\vleader_hint\x18\x03 \x01(\tR\n" +
-	"leaderHint\"\x8a\x01\n" +
-	"\x1aSetJailDesiredStateRequest\x12\x0e\n" +
-	"\x02id\x18\x01 \x01(\tR\x02id\x12=\n" +
-	"\rdesired_state\x18\x02 \x01(\x0e2\x18.apiary.rpc.v1.JailStateR\fdesiredState\x12\x1d\n" +
-	"\n" +
-	"timeout_ms\x18\x03 \x01(\rR\ttimeoutMs\"\x87\x01\n" +
-	"\x1bSetJailDesiredStateResponse\x121\n" +
-	"\x04jail\x18\x01 \x01(\v2\x1d.apiary.rpc.v1.JailDefinitionR\x04jail\x12\x14\n" +
-	"\x05error\x18\x02 \x01(\tR\x05error\x12\x1f\n" +
-	"\vleader_hint\x18\x03 \x01(\tR\n" +
-	"leaderHint\"c\n" +
-	"\x16SetJailHostnameRequest\x12\x0e\n" +
-	"\x02id\x18\x01 \x01(\tR\x02id\x12\x1a\n" +
-	"\bhostname\x18\x02 \x01(\tR\bhostname\x12\x1d\n" +
-	"\n" +
-	"timeout_ms\x18\x03 \x01(\rR\ttimeoutMs\"\x83\x01\n" +
-	"\x17SetJailHostnameResponse\x121\n" +
-	"\x04jail\x18\x01 \x01(\v2\x1d.apiary.rpc.v1.JailDefinitionR\x04jail\x12\x14\n" +
-	"\x05error\x18\x02 \x01(\tR\x05error\x12\x1f\n" +
-	"\vleader_hint\x18\x03 \x01(\tR\n" +
-	"leaderHint\" \n" +
-	"\x0eGetJailRequest\x12\x0e\n" +
-	"\x02id\x18\x01 \x01(\tR\x02id\"\x91\x01\n" +
-	"\x0fGetJailResponse\x121\n" +
-	"\x04jail\x18\x01 \x01(\v2\x1d.apiary.rpc.v1.JailDefinitionR\x04jail\x12\x14\n" +
-	"\x05found\x18\x02 \x01(\bR\x05found\x12\x14\n" +
-	"\x05error\x18\x03 \x01(\tR\x05error\x12\x1f\n" +
-	"\vleader_hint\x18\x04 \x01(\tR\n" +
-	"leaderHint\"\x12\n" +
-	"\x10ListJailsRequest\"\x7f\n" +
-	"\x11ListJailsResponse\x123\n" +
-	"\x05jails\x18\x01 \x03(\v2\x1d.apiary.rpc.v1.JailDefinitionR\x05jails\x12\x14\n" +
-	"\x05error\x18\x02 \x01(\tR\x05error\x12\x1f\n" +
-	"\vleader_hint\x18\x03 \x01(\tR\n" +
-	"leaderHint\"\x17\n" +
-	"\x15ListJailsLocalRequest\"c\n" +
-	"\x16ListJailsLocalResponse\x123\n" +
-	"\x05jails\x18\x01 \x03(\v2\x1d.apiary.rpc.v1.JailDefinitionR\x05jails\x12\x14\n" +
-	"\x05error\x18\x02 \x01(\tR\x05error\"F\n" +
-	"\x15ForcePurgeJailRequest\x12\x0e\n" +
-	"\x02id\x18\x01 \x01(\tR\x02id\x12\x1d\n" +
-	"\n" +
-	"timeout_ms\x18\x02 \x01(\rR\ttimeoutMs\"\x82\x01\n" +
-	"\x16ForcePurgeJailResponse\x121\n" +
-	"\x04jail\x18\x01 \x01(\v2\x1d.apiary.rpc.v1.JailDefinitionR\x04jail\x12\x14\n" +
-	"\x05error\x18\x02 \x01(\tR\x05error\x12\x1f\n" +
-	"\vleader_hint\x18\x03 \x01(\tR\n" +
-	"leaderHint\"i\n" +
-	"\x12MigrateJailRequest\x12\x0e\n" +
-	"\x02id\x18\x01 \x01(\tR\x02id\x12$\n" +
-	"\x0etarget_node_id\x18\x02 \x01(\tR\ftargetNodeId\x12\x1d\n" +
-	"\n" +
-	"timeout_ms\x18\x03 \x01(\rR\ttimeoutMs\"\x7f\n" +
-	"\x13MigrateJailResponse\x121\n" +
-	"\x04jail\x18\x01 \x01(\v2\x1d.apiary.rpc.v1.JailDefinitionR\x04jail\x12\x14\n" +
-	"\x05error\x18\x02 \x01(\tR\x05error\x12\x1f\n" +
-	"\vleader_hint\x18\x03 \x01(\tR\n" +
-	"leaderHint\"u\n" +
-	"\x14ReportVMPhaseRequest\x12\x0e\n" +
-	"\x02id\x18\x01 \x01(\tR\x02id\x12,\n" +
-	"\x05phase\x18\x02 \x01(\x0e2\x16.apiary.rpc.v1.VMPhaseR\x05phase\x12\x1f\n" +
-	"\vphase_error\x18\x03 \x01(\tR\n" +
-	"phaseError\"N\n" +
-	"\x15ReportVMPhaseResponse\x12\x14\n" +
-	"\x05error\x18\x01 \x01(\tR\x05error\x12\x1f\n" +
-	"\vleader_hint\x18\x02 \x01(\tR\n" +
-	"leaderHint\"1\n" +
-	"\x1fReportVMTeardownCompleteRequest\x12\x0e\n" +
-	"\x02id\x18\x01 \x01(\tR\x02id\"Y\n" +
-	" ReportVMTeardownCompleteResponse\x12\x14\n" +
-	"\x05error\x18\x01 \x01(\tR\x05error\x12\x1f\n" +
-	"\vleader_hint\x18\x02 \x01(\tR\n" +
-	"leaderHint\"y\n" +
-	"\x16ReportJailPhaseRequest\x12\x0e\n" +
-	"\x02id\x18\x01 \x01(\tR\x02id\x12.\n" +
-	"\x05phase\x18\x02 \x01(\x0e2\x18.apiary.rpc.v1.JailPhaseR\x05phase\x12\x1f\n" +
-	"\vphase_error\x18\x03 \x01(\tR\n" +
-	"phaseError\"P\n" +
-	"\x17ReportJailPhaseResponse\x12\x14\n" +
-	"\x05error\x18\x01 \x01(\tR\x05error\x12\x1f\n" +
-	"\vleader_hint\x18\x02 \x01(\tR\n" +
-	"leaderHint\"3\n" +
-	"!ReportJailTeardownCompleteRequest\x12\x0e\n" +
-	"\x02id\x18\x01 \x01(\tR\x02id\"[\n" +
-	"\"ReportJailTeardownCompleteResponse\x12\x14\n" +
-	"\x05error\x18\x01 \x01(\tR\x05error\x12\x1f\n" +
-	"\vleader_hint\x18\x02 \x01(\tR\n" +
-	"leaderHint\"g\n" +
-	"\n" +
-	"APIKeyInfo\x12\x0e\n" +
-	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
-	"\x04name\x18\x02 \x01(\tR\x04name\x12!\n" +
-	"\fcreated_unix\x18\x03 \x01(\x03R\vcreatedUnix\x12\x12\n" +
-	"\x04role\x18\x04 \x01(\tR\x04role\"\\\n" +
-	"\x13CreateAPIKeyRequest\x12\x12\n" +
-	"\x04name\x18\x01 \x01(\tR\x04name\x12\x1d\n" +
-	"\n" +
-	"timeout_ms\x18\x02 \x01(\rR\ttimeoutMs\x12\x12\n" +
-	"\x04role\x18\x03 \x01(\tR\x04role\"\x93\x01\n" +
-	"\x14CreateAPIKeyResponse\x12+\n" +
-	"\x03key\x18\x01 \x01(\v2\x19.apiary.rpc.v1.APIKeyInfoR\x03key\x12\x17\n" +
-	"\araw_key\x18\x02 \x01(\tR\x06rawKey\x12\x14\n" +
-	"\x05error\x18\x03 \x01(\tR\x05error\x12\x1f\n" +
-	"\vleader_hint\x18\x04 \x01(\tR\n" +
-	"leaderHint\"\x14\n" +
-	"\x12ListAPIKeysRequest\"{\n" +
-	"\x13ListAPIKeysResponse\x12-\n" +
-	"\x04keys\x18\x01 \x03(\v2\x19.apiary.rpc.v1.APIKeyInfoR\x04keys\x12\x14\n" +
-	"\x05error\x18\x02 \x01(\tR\x05error\x12\x1f\n" +
-	"\vleader_hint\x18\x03 \x01(\tR\n" +
-	"leaderHint\"D\n" +
-	"\x13RevokeAPIKeyRequest\x12\x0e\n" +
-	"\x02id\x18\x01 \x01(\tR\x02id\x12\x1d\n" +
-	"\n" +
-	"timeout_ms\x18\x02 \x01(\rR\ttimeoutMs\"M\n" +
-	"\x14RevokeAPIKeyResponse\x12\x14\n" +
-	"\x05error\x18\x01 \x01(\tR\x05error\x12\x1f\n" +
-	"\vleader_hint\x18\x02 \x01(\tR\n" +
-	"leaderHint\"5\n" +
-	"\x1aSimulateNodeFailureRequest\x12\x17\n" +
-	"\anode_id\x18\x01 \x01(\tR\x06nodeId\"\xd4\x03\n" +
-	"\x1bSimulateNodeFailureResponse\x12\x14\n" +
-	"\x05error\x18\x01 \x01(\tR\x05error\x12\x1f\n" +
-	"\vleader_hint\x18\x02 \x01(\tR\n" +
-	"leaderHint\x123\n" +
-	"\x06quorum\x18\x03 \x01(\v2\x1b.apiary.rpc.v1.QuorumImpactR\x06quorum\x12K\n" +
-	"\x0fowned_resources\x18\x04 \x03(\v2\".apiary.rpc.v1.OwnedResourceImpactR\x0eownedResources\x12\\\n" +
-	"\x18replica_backed_resources\x18\x05 \x03(\v2\".apiary.rpc.v1.ReplicaBackedImpactR\x16replicaBackedResources\x12U\n" +
-	"\x12image_availability\x18\x06 \x03(\v2&.apiary.rpc.v1.ImageAvailabilityImpactR\x11imageAvailability\x12G\n" +
-	"\x0frelevant_claims\x18\a \x03(\v2\x1e.apiary.rpc.v1.AssumptionClaimR\x0erelevantClaims\"\x87\x03\n" +
-	"\fQuorumImpact\x12&\n" +
-	"\x0ftarget_is_voter\x18\x01 \x01(\bR\rtargetIsVoter\x12!\n" +
-	"\ftotal_voters\x18\x02 \x01(\rR\vtotalVoters\x12)\n" +
-	"\x10remaining_voters\x18\x03 \x01(\rR\x0fremainingVoters\x12<\n" +
-	"\x1aremaining_reachable_voters\x18\x04 \x01(\rR\x18remainingReachableVoters\x128\n" +
-	"\x18remaining_unknown_voters\x18\x05 \x01(\rR\x16remainingUnknownVoters\x12\x1f\n" +
-	"\vquorum_size\x18\x06 \x01(\rR\n" +
-	"quorumSize\x12\x1a\n" +
-	"\bsurvives\x18\a \x01(\bR\bsurvives\x12\x12\n" +
-	"\x04note\x18\b \x01(\tR\x04note\x128\n" +
-	"\x06voters\x18\t \x03(\v2 .apiary.rpc.v1.VoterReachabilityR\x06voters\"P\n" +
-	"\x11VoterReachability\x12\x17\n" +
-	"\anode_id\x18\x01 \x01(\tR\x06nodeId\x12\"\n" +
-	"\freachability\x18\x02 \x01(\tR\freachability\"\xc1\x01\n" +
-	"\x13ReplicaSyncEvidence\x12\x17\n" +
-	"\anode_id\x18\x01 \x01(\tR\x06nodeId\x12\x1a\n" +
-	"\bobserved\x18\x02 \x01(\bR\bobserved\x12\x12\n" +
-	"\x04role\x18\x03 \x01(\tR\x04role\x12'\n" +
-	"\x0fresource_status\x18\x04 \x01(\tR\x0eresourceStatus\x12 \n" +
-	"\vreplication\x18\x05 \x01(\tR\vreplication\x12\x16\n" +
-	"\x06detail\x18\x06 \x01(\tR\x06detail\"\xb5\x02\n" +
-	"\x13OwnedResourceImpact\x12\x0e\n" +
-	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
-	"\x04name\x18\x02 \x01(\tR\x04name\x12/\n" +
-	"\x04kind\x18\x03 \x01(\x0e2\x1b.apiary.rpc.v1.ResourceKindR\x04kind\x12&\n" +
-	"\x0freplica_node_id\x18\x04 \x01(\tR\rreplicaNodeId\x128\n" +
-	"\averdict\x18\x05 \x01(\x0e2\x1e.apiary.rpc.v1.RecoveryVerdictR\averdict\x12 \n" +
-	"\vexplanation\x18\x06 \x01(\tR\vexplanation\x12E\n" +
-	"\freplica_sync\x18\a \x01(\v2\".apiary.rpc.v1.ReplicaSyncEvidenceR\vreplicaSync\"\xb0\x01\n" +
-	"\x13ReplicaBackedImpact\x12\x0e\n" +
-	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
-	"\x04name\x18\x02 \x01(\tR\x04name\x12/\n" +
-	"\x04kind\x18\x03 \x01(\x0e2\x1b.apiary.rpc.v1.ResourceKindR\x04kind\x12\"\n" +
-	"\rowner_node_id\x18\x04 \x01(\tR\vownerNodeId\x12 \n" +
-	"\vexplanation\x18\x05 \x01(\tR\vexplanation\">\n" +
-	"\x1dSimulateNetworkFailureRequest\x12\x1d\n" +
-	"\n" +
-	"network_id\x18\x01 \x01(\tR\tnetworkId\"\xfb\x01\n" +
-	"\x1eSimulateNetworkFailureResponse\x12\x14\n" +
-	"\x05error\x18\x01 \x01(\tR\x05error\x12\x1f\n" +
-	"\vleader_hint\x18\x02 \x01(\tR\n" +
-	"leaderHint\x12:\n" +
-	"\anetwork\x18\x03 \x01(\v2 .apiary.rpc.v1.NetworkDefinitionR\anetwork\x12R\n" +
-	"\x12affected_resources\x18\x04 \x03(\v2#.apiary.rpc.v1.NetworkFailureImpactR\x11affectedResources\x12\x12\n" +
-	"\x04note\x18\x05 \x01(\tR\x04note\"\x81\x01\n" +
-	"\x14TraceCellPathRequest\x12\x17\n" +
-	"\acell_id\x18\x01 \x01(\tR\x06cellId\x12 \n" +
-	"\vdestination\x18\x02 \x01(\tR\vdestination\x12\x1a\n" +
-	"\bprotocol\x18\x03 \x01(\tR\bprotocol\x12\x12\n" +
-	"\x04port\x18\x04 \x01(\rR\x04port\"\xb5\x01\n" +
-	"\rPathTraceStep\x12\x14\n" +
-	"\x05stage\x18\x01 \x01(\tR\x05stage\x126\n" +
-	"\x06status\x18\x02 \x01(\x0e2\x1e.apiary.rpc.v1.PathTraceStatusR\x06status\x12\x18\n" +
-	"\asummary\x18\x03 \x01(\tR\asummary\x12\x1a\n" +
-	"\bevidence\x18\x04 \x01(\tR\bevidence\x12 \n" +
-	"\vexplanation\x18\x05 \x01(\tR\vexplanation\"\x83\x03\n" +
-	"\x15TraceCellPathResponse\x12\x14\n" +
-	"\x05error\x18\x01 \x01(\tR\x05error\x12\x1f\n" +
-	"\vleader_hint\x18\x02 \x01(\tR\n" +
-	"leaderHint\x12/\n" +
-	"\x04cell\x18\x03 \x01(\v2\x1b.apiary.rpc.v1.VMDefinitionR\x04cell\x12:\n" +
-	"\anetwork\x18\x04 \x01(\v2 .apiary.rpc.v1.NetworkDefinitionR\anetwork\x126\n" +
-	"\x06status\x18\x05 \x01(\x0e2\x1e.apiary.rpc.v1.PathTraceStatusR\x06status\x12\x18\n" +
-	"\asummary\x18\x06 \x01(\tR\asummary\x122\n" +
-	"\x05steps\x18\a \x03(\v2\x1c.apiary.rpc.v1.PathTraceStepR\x05steps\x12\x1d\n" +
-	"\n" +
-	"non_atomic\x18\b \x01(\bR\tnonAtomic\x12!\n" +
-	"\factive_probe\x18\t \x01(\bR\vactiveProbe\"u\n" +
-	"\x14NetworkFailureImpact\x12\x0e\n" +
-	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
-	"\x04name\x18\x02 \x01(\tR\x04name\x12\x17\n" +
-	"\anode_id\x18\x03 \x01(\tR\x06nodeId\x12 \n" +
-	"\vexplanation\x18\x04 \x01(\tR\vexplanation\"\xd9\x02\n" +
-	"\x17ImageAvailabilityImpact\x12\x1f\n" +
-	"\vresource_id\x18\x01 \x01(\tR\n" +
-	"resourceId\x12#\n" +
-	"\rresource_name\x18\x02 \x01(\tR\fresourceName\x12\x1d\n" +
-	"\n" +
-	"image_name\x18\x03 \x01(\tR\timageName\x12,\n" +
-	"\x04role\x18\x04 \x01(\x0e2\x18.apiary.rpc.v1.ImageRoleR\x04role\x12A\n" +
-	"\averdict\x18\x05 \x01(\x0e2'.apiary.rpc.v1.ImageAvailabilityVerdictR\averdict\x12!\n" +
-	"\fsource_nodes\x18\x06 \x03(\tR\vsourceNodes\x12#\n" +
-	"\runknown_nodes\x18\a \x03(\tR\funknownNodes\x12 \n" +
-	"\vexplanation\x18\b \x01(\tR\vexplanation\"C\n" +
-	"\"GetLocalNetworkBridgeStatusRequest\x12\x1d\n" +
-	"\n" +
-	"network_id\x18\x01 \x01(\tR\tnetworkId\"`\n" +
-	"#GetLocalNetworkBridgeStatusResponse\x12#\n" +
-	"\rbridge_status\x18\x01 \x01(\tR\fbridgeStatus\x12\x14\n" +
-	"\x05error\x18\x02 \x01(\tR\x05error\"\x9c\x02\n" +
-	"\rAssumptionKey\x121\n" +
-	"\x04kind\x18\x01 \x01(\x0e2\x1d.apiary.rpc.v1.AssumptionKindR\x04kind\x12G\n" +
-	"\fsubject_kind\x18\x06 \x01(\x0e2$.apiary.rpc.v1.AssumptionSubjectKindR\vsubjectKind\x12\x1d\n" +
-	"\n" +
-	"subject_id\x18\x02 \x01(\tR\tsubjectId\x12#\n" +
-	"\rdependency_id\x18\x03 \x01(\tR\fdependencyId\x12\x1c\n" +
-	"\tqualifier\x18\x04 \x01(\tR\tqualifier\x12-\n" +
-	"\x13observed_by_node_id\x18\x05 \x01(\tR\x10observedByNodeId\"\xc7\x02\n" +
-	"\x10AssumptionResult\x12.\n" +
-	"\x03key\x18\x01 \x01(\v2\x1c.apiary.rpc.v1.AssumptionKeyR\x03key\x12H\n" +
-	"\x0fobserved_status\x18\x02 \x01(\x0e2\x1f.apiary.rpc.v1.AssumptionStatusR\x0eobservedStatus\x127\n" +
-	"\x06status\x18\x03 \x01(\x0e2\x1f.apiary.rpc.v1.AssumptionStatusR\x06status\x12\x1f\n" +
-	"\vreason_code\x18\x04 \x01(\tR\n" +
-	"reasonCode\x12\x16\n" +
-	"\x06detail\x18\x05 \x01(\tR\x06detail\x121\n" +
-	"\x15last_observed_at_unix\x18\x06 \x01(\x03R\x12lastObservedAtUnix\x12\x14\n" +
-	"\x05stale\x18\a \x01(\bR\x05stale\"\xf5\x01\n" +
-	"\x16AssumptionHistoryEntry\x12.\n" +
-	"\x03key\x18\x01 \x01(\v2\x1c.apiary.rpc.v1.AssumptionKeyR\x03key\x12H\n" +
-	"\x0fobserved_status\x18\x02 \x01(\x0e2\x1f.apiary.rpc.v1.AssumptionStatusR\x0eobservedStatus\x12\x1f\n" +
-	"\vreason_code\x18\x03 \x01(\tR\n" +
-	"reasonCode\x12\x16\n" +
-	"\x06detail\x18\x04 \x01(\tR\x06detail\x12(\n" +
-	"\x10recorded_at_unix\x18\x05 \x01(\x03R\x0erecordedAtUnix\"d\n" +
-	"\x1cListAssumptionResultsRequest\x129\n" +
-	"\x06filter\x18\x01 \x01(\v2\x1c.apiary.rpc.v1.AssumptionKeyH\x00R\x06filter\x88\x01\x01B\t\n" +
-	"\a_filter\"\x92\x02\n" +
-	"\x1dListAssumptionResultsResponse\x127\n" +
-	"\x06latest\x18\x01 \x03(\v2\x1f.apiary.rpc.v1.AssumptionResultR\x06latest\x12?\n" +
-	"\ahistory\x18\x02 \x03(\v2%.apiary.rpc.v1.AssumptionHistoryEntryR\ahistory\x12\x14\n" +
-	"\x05error\x18\x03 \x01(\tR\x05error\x12)\n" +
-	"\x10storage_degraded\x18\x04 \x01(\bR\x0fstorageDegraded\x126\n" +
-	"\x17storage_degraded_detail\x18\x05 \x01(\tR\x15storageDegradedDetail\"$\n" +
-	"\"PurgeStaleAssumptionResultsRequest\"`\n" +
-	"#PurgeStaleAssumptionResultsResponse\x12#\n" +
-	"\rremoved_count\x18\x01 \x01(\rR\fremovedCount\x12\x14\n" +
-	"\x05error\x18\x02 \x01(\tR\x05error\"\"\n" +
-	" ListOrphanedHASTResourcesRequest\"\x9c\x01\n" +
-	"\x14OrphanedHASTResource\x12\x1f\n" +
-	"\vresource_id\x18\x01 \x01(\tR\n" +
-	"resourceId\x12#\n" +
-	"\rresource_type\x18\x02 \x01(\tR\fresourceType\x12!\n" +
-	"\fdataset_name\x18\x03 \x01(\tR\vdatasetName\x12\x1b\n" +
-	"\tused_size\x18\x04 \x01(\tR\busedSize\"|\n" +
-	"!ListOrphanedHASTResourcesResponse\x12A\n" +
-	"\tresources\x18\x01 \x03(\v2#.apiary.rpc.v1.OrphanedHASTResourceR\tresources\x12\x14\n" +
-	"\x05error\x18\x02 \x01(\tR\x05error\"j\n" +
-	"\"CleanupOrphanedHASTResourceRequest\x12\x1f\n" +
-	"\vresource_id\x18\x01 \x01(\tR\n" +
-	"resourceId\x12#\n" +
-	"\rresource_type\x18\x02 \x01(\tR\fresourceType\";\n" +
-	"#CleanupOrphanedHASTResourceResponse\x12\x14\n" +
-	"\x05error\x18\x01 \x01(\tR\x05error\"@\n" +
-	"\x1fGetNetworkTeardownStatusRequest\x12\x1d\n" +
-	"\n" +
-	"network_id\x18\x01 \x01(\tR\tnetworkId\"\xc7\x01\n" +
-	" GetNetworkTeardownStatusResponse\x12\x18\n" +
-	"\apresent\x18\x01 \x01(\bR\apresent\x12\x16\n" +
-	"\x06bridge\x18\x02 \x01(\tR\x06bridge\x12\x1d\n" +
-	"\n" +
-	"own_bridge\x18\x03 \x01(\bR\townBridge\x12\x19\n" +
-	"\bown_vlan\x18\x04 \x01(\bR\aownVlan\x12!\n" +
-	"\foutbound_nat\x18\x05 \x01(\bR\voutboundNat\x12\x14\n" +
-	"\x05error\x18\x06 \x01(\tR\x05error\"\x8c\b\n" +
-	"\x12PendingJoinRequest\x12\x1d\n" +
-	"\n" +
-	"request_id\x18\x01 \x01(\tR\trequestId\x12\x17\n" +
-	"\anode_id\x18\x02 \x01(\tR\x06nodeId\x12*\n" +
-	"\x11raft_bind_address\x18\x03 \x01(\tR\x0fraftBindAddress\x12\x12\n" +
-	"\x04code\x18\x04 \x01(\tR\x04code\x12*\n" +
-	"\x11requested_at_unix\x18\x05 \x01(\x03R\x0frequestedAtUnix\x12&\n" +
-	"\x0fexpires_at_unix\x18\x06 \x01(\x03R\rexpiresAtUnix\x128\n" +
-	"\x06status\x18\a \x01(\x0e2 .apiary.rpc.v1.JoinRequestStatusR\x06status\x120\n" +
-	"\x14tls_cert_fingerprint\x18\b \x01(\tR\x12tlsCertFingerprint\x129\n" +
-	"\x19joiner_log_state_observed\x18\t \x01(\bR\x16joinerLogStateObserved\x121\n" +
-	"\x15joiner_last_log_index\x18\n" +
-	" \x01(\x04R\x12joinerLastLogIndex\x121\n" +
-	"\x15window_opened_at_unix\x18\v \x01(\x03R\x12windowOpenedAtUnix\x12E\n" +
-	"\n" +
-	"approval_1\x18\f \x01(\v2&.apiary.rpc.v1.JoinApprovalAttestationR\tapproval1\x12E\n" +
-	"\n" +
-	"approval_2\x18\r \x01(\v2&.apiary.rpc.v1.JoinApprovalAttestationR\tapproval2\x12)\n" +
-	"\x10authorization_id\x18\x0e \x01(\tR\x0fauthorizationId\x12(\n" +
-	"\x10consumed_at_unix\x18\x0f \x01(\x03R\x0econsumedAtUnix\x125\n" +
-	"\x05stage\x18\x10 \x01(\x0e2\x1f.apiary.rpc.v1.JoinRequestStageR\x05stage\x127\n" +
-	"\x17advertised_fingerprints\x18\x11 \x03(\tR\x16advertisedFingerprints\x12.\n" +
-	"\x13first_code_attempts\x18\x12 \x01(\rR\x11firstCodeAttempts\x12.\n" +
-	"\x13second_pin_attempts\x18\x13 \x01(\rR\x11secondPinAttempts\x12:\n" +
-	"\x1asecond_pin_expires_at_unix\x18\x14 \x01(\x03R\x16secondPinExpiresAtUnix\x12.\n" +
-	"\x13second_pin_reissues\x18\x15 \x01(\rR\x11secondPinReissues\"\xab\x03\n" +
-	"\x18RequestJoinColonyRequest\x12\x17\n" +
-	"\anode_id\x18\x01 \x01(\tR\x06nodeId\x12*\n" +
-	"\x11raft_bind_address\x18\x02 \x01(\tR\x0fraftBindAddress\x12\x1d\n" +
-	"\n" +
-	"timeout_ms\x18\x03 \x01(\rR\ttimeoutMs\x12%\n" +
-	"\x0etarget_address\x18\x04 \x01(\tR\rtargetAddress\x120\n" +
-	"\x14tls_cert_fingerprint\x18\x05 \x01(\tR\x12tlsCertFingerprint\x129\n" +
-	"\x19joiner_log_state_observed\x18\x06 \x01(\bR\x16joinerLogStateObserved\x121\n" +
-	"\x15joiner_last_log_index\x18\a \x01(\x04R\x12joinerLastLogIndex\x12+\n" +
-	"\x11introduction_code\x18\b \x01(\tR\x10introductionCode\x127\n" +
-	"\x17advertised_fingerprints\x18\t \x03(\tR\x16advertisedFingerprints\"\x85\x01\n" +
-	"\x19RequestJoinColonyResponse\x12\x1d\n" +
-	"\n" +
-	"request_id\x18\x01 \x01(\tR\trequestId\x12\x12\n" +
-	"\x04code\x18\x02 \x01(\tR\x04code\x12\x14\n" +
-	"\x05error\x18\x03 \x01(\tR\x05error\x12\x1f\n" +
-	"\vleader_hint\x18\x04 \x01(\tR\n" +
-	"leaderHint\"\x90\x01\n" +
-	"\x1bGetJoinRequestStatusRequest\x12\x1d\n" +
-	"\n" +
-	"request_id\x18\x01 \x01(\tR\trequestId\x12%\n" +
-	"\x0etarget_address\x18\x02 \x01(\tR\rtargetAddress\x12+\n" +
-	"\x11introduction_code\x18\x03 \x01(\tR\x10introductionCode\"\xcc\x01\n" +
-	"\x1cGetJoinRequestStatusResponse\x12;\n" +
-	"\arequest\x18\x01 \x01(\v2!.apiary.rpc.v1.PendingJoinRequestR\arequest\x12\x14\n" +
-	"\x05error\x18\x02 \x01(\tR\x05error\x12\x1d\n" +
-	"\n" +
-	"second_pin\x18\x03 \x01(\tR\tsecondPin\x12:\n" +
-	"\x1asecond_pin_expires_at_unix\x18\x04 \x01(\x03R\x16secondPinExpiresAtUnix\"\x19\n" +
-	"\x17ListJoinRequestsRequest\"o\n" +
-	"\x18ListJoinRequestsResponse\x12=\n" +
-	"\brequests\x18\x01 \x03(\v2!.apiary.rpc.v1.PendingJoinRequestR\brequests\x12\x14\n" +
-	"\x05error\x18\x02 \x01(\tR\x05error\"\xcb\x01\n" +
-	"\x19ApproveJoinRequestRequest\x12\x1d\n" +
-	"\n" +
-	"request_id\x18\x01 \x01(\tR\trequestId\x12\x1d\n" +
-	"\n" +
-	"timeout_ms\x18\x02 \x01(\rR\ttimeoutMs\x12%\n" +
-	"\x0econfirm_phrase\x18\x03 \x01(\tR\rconfirmPhrase\x12*\n" +
-	"\x11approving_node_id\x18\x04 \x01(\tR\x0fapprovingNodeId\x12\x1d\n" +
-	"\n" +
-	"second_pin\x18\x05 \x01(\tR\tsecondPin\"\x98\x02\n" +
-	"\x1aApproveJoinRequestResponse\x12;\n" +
-	"\arequest\x18\x01 \x01(\v2!.apiary.rpc.v1.PendingJoinRequestR\arequest\x12\x14\n" +
-	"\x05error\x18\x02 \x01(\tR\x05error\x12\x1f\n" +
-	"\vleader_hint\x18\x03 \x01(\tR\n" +
-	"leaderHint\x12B\n" +
-	"\x1dawaiting_second_authorization\x18\x04 \x01(\bR\x1bawaitingSecondAuthorization\x12B\n" +
-	"\x1dsecond_authorization_required\x18\x05 \x01(\tR\x1bsecondAuthorizationRequired\"\x8f\x01\n" +
-	"\x1dVerifyJoinIntroductionRequest\x12\x1d\n" +
-	"\n" +
-	"request_id\x18\x01 \x01(\tR\trequestId\x12+\n" +
-	"\x11introduction_code\x18\x02 \x01(\tR\x10introductionCode\x12\"\n" +
-	"\ffingerprints\x18\x03 \x03(\tR\ffingerprints\"\xc4\x01\n" +
-	"\x1eVerifyJoinIntroductionResponse\x12;\n" +
-	"\arequest\x18\x01 \x01(\v2!.apiary.rpc.v1.PendingJoinRequestR\arequest\x12\x14\n" +
-	"\x05error\x18\x02 \x01(\tR\x05error\x12\x1f\n" +
-	"\vleader_hint\x18\x03 \x01(\tR\n" +
-	"leaderHint\x12.\n" +
-	"\x13second_pin_reissued\x18\x04 \x01(\bR\x11secondPinReissued\"<\n" +
-	"\x1bReissueJoinSecondPinRequest\x12\x1d\n" +
-	"\n" +
-	"request_id\x18\x01 \x01(\tR\trequestId\"\xc1\x01\n" +
-	"\x1cReissueJoinSecondPinResponse\x12;\n" +
-	"\arequest\x18\x01 \x01(\v2!.apiary.rpc.v1.PendingJoinRequestR\arequest\x12\x14\n" +
-	"\x05error\x18\x02 \x01(\tR\x05error\x12\x1f\n" +
-	"\vleader_hint\x18\x03 \x01(\tR\n" +
-	"leaderHint\x12-\n" +
-	"\x12reissues_remaining\x18\x04 \x01(\rR\x11reissuesRemaining\"\x84\x02\n" +
-	"\vTrustedPeer\x12\x17\n" +
-	"\anode_id\x18\x01 \x01(\tR\x06nodeId\x12\x1b\n" +
-	"\tcomb_name\x18\x02 \x01(\tR\bcombName\x12 \n" +
-	"\vfingerprint\x18\x03 \x01(\tR\vfingerprint\x12\x19\n" +
-	"\bcert_pem\x18\x04 \x01(\tR\acertPem\x12$\n" +
-	"\x0enot_after_unix\x18\x05 \x01(\x03R\fnotAfterUnix\x12$\n" +
-	"\x0epinned_at_unix\x18\x06 \x01(\x03R\fpinnedAtUnix\x12\x1b\n" +
-	"\tpinned_by\x18\a \x01(\tR\bpinnedBy\x12\x19\n" +
-	"\bis_voter\x18\b \x01(\bR\aisVoter\"K\n" +
-	"\x19PinPeerCertificateRequest\x12.\n" +
-	"\x04peer\x18\x01 \x01(\v2\x1a.apiary.rpc.v1.TrustedPeerR\x04peer\"\x83\x01\n" +
-	"\x1aPinPeerCertificateResponse\x12.\n" +
-	"\x04peer\x18\x01 \x01(\v2\x1a.apiary.rpc.v1.TrustedPeerR\x04peer\x12\x14\n" +
-	"\x05error\x18\x02 \x01(\tR\x05error\x12\x1f\n" +
-	"\vleader_hint\x18\x03 \x01(\tR\n" +
-	"leaderHint\"N\n" +
-	"\x1bUnpinPeerCertificateRequest\x12\x17\n" +
-	"\anode_id\x18\x01 \x01(\tR\x06nodeId\x12\x16\n" +
-	"\x06reason\x18\x02 \x01(\tR\x06reason\"\x85\x01\n" +
-	"\x1cUnpinPeerCertificateResponse\x12.\n" +
-	"\x04peer\x18\x01 \x01(\v2\x1a.apiary.rpc.v1.TrustedPeerR\x04peer\x12\x14\n" +
-	"\x05error\x18\x02 \x01(\tR\x05error\x12\x1f\n" +
-	"\vleader_hint\x18\x03 \x01(\tR\n" +
-	"leaderHint\"b\n" +
-	"\x17JoinApprovalAttestation\x12\x15\n" +
-	"\x06key_id\x18\x01 \x01(\tR\x05keyId\x12\x17\n" +
-	"\anode_id\x18\x02 \x01(\tR\x06nodeId\x12\x17\n" +
-	"\aat_unix\x18\x03 \x01(\x03R\x06atUnix\"\xbb\x01\n" +
-	"\x10ColonyJoinWindow\x12\x18\n" +
-	"\aenabled\x18\x01 \x01(\bR\aenabled\x12\x1b\n" +
-	"\topened_by\x18\x02 \x01(\tR\bopenedBy\x12\"\n" +
-	"\ropened_by_key\x18\x03 \x01(\tR\vopenedByKey\x12$\n" +
-	"\x0eopened_at_unix\x18\x04 \x01(\x03R\fopenedAtUnix\x12&\n" +
-	"\x0fexpires_at_unix\x18\x05 \x01(\x03R\rexpiresAtUnix\"g\n" +
-	"\x1bOpenColonyJoinWindowRequest\x12)\n" +
-	"\x10duration_seconds\x18\x01 \x01(\x03R\x0fdurationSeconds\x12\x1d\n" +
-	"\n" +
-	"timeout_ms\x18\x02 \x01(\rR\ttimeoutMs\"\xc8\x01\n" +
-	"\x1cOpenColonyJoinWindowResponse\x127\n" +
-	"\x06window\x18\x01 \x01(\v2\x1f.apiary.rpc.v1.ColonyJoinWindowR\x06window\x128\n" +
-	"\x18applied_duration_seconds\x18\x02 \x01(\x03R\x16appliedDurationSeconds\x12\x14\n" +
-	"\x05error\x18\x03 \x01(\tR\x05error\x12\x1f\n" +
-	"\vleader_hint\x18\x04 \x01(\tR\n" +
-	"leaderHint\"=\n" +
-	"\x1cCloseColonyJoinWindowRequest\x12\x1d\n" +
-	"\n" +
-	"timeout_ms\x18\x01 \x01(\rR\ttimeoutMs\"\x8f\x01\n" +
-	"\x1dCloseColonyJoinWindowResponse\x127\n" +
-	"\x06window\x18\x01 \x01(\v2\x1f.apiary.rpc.v1.ColonyJoinWindowR\x06window\x12\x14\n" +
-	"\x05error\x18\x02 \x01(\tR\x05error\x12\x1f\n" +
-	"\vleader_hint\x18\x03 \x01(\tR\n" +
-	"leaderHint\"\x80\x01\n" +
-	"\x0eColonyDiskSize\x12\x19\n" +
-	"\bfloor_mb\x18\x01 \x01(\x04R\afloorMb\x12\x15\n" +
-	"\x06set_by\x18\x02 \x01(\tR\x05setBy\x12\x1c\n" +
-	"\n" +
-	"set_by_key\x18\x03 \x01(\tR\bsetByKey\x12\x1e\n" +
-	"\vset_at_unix\x18\x04 \x01(\x03R\tsetAtUnix\"T\n" +
-	"\x18SetColonyDiskSizeRequest\x12\x19\n" +
-	"\bfloor_mb\x18\x01 \x01(\x04R\afloorMb\x12\x1d\n" +
-	"\n" +
-	"timeout_ms\x18\x02 \x01(\rR\ttimeoutMs\"\x9b\x01\n" +
-	"\x19SetColonyDiskSizeResponse\x12G\n" +
-	"\x10colony_disk_size\x18\x01 \x01(\v2\x1d.apiary.rpc.v1.ColonyDiskSizeR\x0ecolonyDiskSize\x12\x14\n" +
-	"\x05error\x18\x02 \x01(\tR\x05error\x12\x1f\n" +
-	"\vleader_hint\x18\x03 \x01(\tR\n" +
-	"leaderHint\"9\n" +
-	"\x18GetColonyDiskSizeRequest\x12\x1d\n" +
-	"\n" +
-	"timeout_ms\x18\x01 \x01(\rR\ttimeoutMs\"z\n" +
-	"\x19GetColonyDiskSizeResponse\x12G\n" +
-	"\x10colony_disk_size\x18\x01 \x01(\v2\x1d.apiary.rpc.v1.ColonyDiskSizeR\x0ecolonyDiskSize\x12\x14\n" +
-	"\x05error\x18\x02 \x01(\tR\x05error\"b\n" +
-	"\x1aGetColonyJoinWindowRequest\x12%\n" +
-	"\x0etarget_address\x18\x01 \x01(\tR\rtargetAddress\x12\x1d\n" +
-	"\n" +
-	"timeout_ms\x18\x02 \x01(\rR\ttimeoutMs\"\xbe\x03\n" +
-	"\x1bGetColonyJoinWindowResponse\x127\n" +
-	"\x06window\x18\x01 \x01(\v2\x1f.apiary.rpc.v1.ColonyJoinWindowR\x06window\x12\x1f\n" +
-	"\vcolony_name\x18\x02 \x01(\tR\n" +
-	"colonyName\x12y\n" +
-	"\x15managerd_fingerprints\x18\x03 \x03(\v2D.apiary.rpc.v1.GetColonyJoinWindowResponse.ManagerdFingerprintsEntryR\x14managerdFingerprints\x12$\n" +
-	"\x0ecolony_node_id\x18\x04 \x01(\tR\fcolonyNodeId\x12$\n" +
-	"\x0eleader_node_id\x18\x05 \x01(\tR\fleaderNodeId\x12\x14\n" +
-	"\x05error\x18\x06 \x01(\tR\x05error\x12\x1f\n" +
-	"\vleader_hint\x18\a \x01(\tR\n" +
-	"leaderHint\x1aG\n" +
-	"\x19ManagerdFingerprintsEntry\x12\x10\n" +
-	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"X\n" +
-	"\x18RejectJoinRequestRequest\x12\x1d\n" +
-	"\n" +
-	"request_id\x18\x01 \x01(\tR\trequestId\x12\x1d\n" +
-	"\n" +
-	"timeout_ms\x18\x02 \x01(\rR\ttimeoutMs\"\x8f\x01\n" +
-	"\x19RejectJoinRequestResponse\x12;\n" +
-	"\arequest\x18\x01 \x01(\v2!.apiary.rpc.v1.PendingJoinRequestR\arequest\x12\x14\n" +
-	"\x05error\x18\x02 \x01(\tR\x05error\x12\x1f\n" +
-	"\vleader_hint\x18\x03 \x01(\tR\n" +
-	"leaderHint\"\x7f\n" +
-	"\x18CancelJoinRequestRequest\x12\x1d\n" +
-	"\n" +
-	"request_id\x18\x01 \x01(\tR\trequestId\x12\x1d\n" +
-	"\n" +
-	"timeout_ms\x18\x02 \x01(\rR\ttimeoutMs\x12%\n" +
-	"\x0etarget_address\x18\x03 \x01(\tR\rtargetAddress\"\x8f\x01\n" +
-	"\x19CancelJoinRequestResponse\x12;\n" +
-	"\arequest\x18\x01 \x01(\v2!.apiary.rpc.v1.PendingJoinRequestR\arequest\x12\x14\n" +
-	"\x05error\x18\x02 \x01(\tR\x05error\x12\x1f\n" +
-	"\vleader_hint\x18\x03 \x01(\tR\n" +
-	"leaderHint\"W\n" +
-	"\x17PurgeJoinRequestRequest\x12\x1d\n" +
-	"\n" +
-	"request_id\x18\x01 \x01(\tR\trequestId\x12\x1d\n" +
-	"\n" +
-	"timeout_ms\x18\x02 \x01(\rR\ttimeoutMs\"Q\n" +
-	"\x18PurgeJoinRequestResponse\x12\x14\n" +
-	"\x05error\x18\x01 \x01(\tR\x05error\x12\x1f\n" +
-	"\vleader_hint\x18\x02 \x01(\tR\n" +
-	"leaderHint\"\x86\x01\n" +
-	"\x19UpdateVoterAddressRequest\x12\x17\n" +
-	"\anode_id\x18\x01 \x01(\tR\x06nodeId\x121\n" +
-	"\x15new_raft_bind_address\x18\x02 \x01(\tR\x12newRaftBindAddress\x12\x1d\n" +
-	"\n" +
-	"timeout_ms\x18\x03 \x01(\rR\ttimeoutMs\"S\n" +
-	"\x1aUpdateVoterAddressResponse\x12\x14\n" +
-	"\x05error\x18\x01 \x01(\tR\x05error\x12\x1f\n" +
-	"\vleader_hint\x18\x02 \x01(\tR\n" +
-	"leaderHint\"\x16\n" +
-	"\x14ClusterHealthRequest\"\x9e\x02\n" +
-	"\x11ClusterNodeHealth\x12\x17\n" +
-	"\anode_id\x18\x01 \x01(\tR\x06nodeId\x12\x16\n" +
-	"\x06status\x18\x02 \x01(\tR\x06status\x12 \n" +
-	"\vexplanation\x18\x03 \x01(\tR\vexplanation\x12D\n" +
-	"\fobservations\x18\x04 \x03(\v2 .apiary.rpc.v1.HealthObservationR\fobservations\x12\x16\n" +
-	"\x06dialed\x18\x05 \x01(\bR\x06dialed\x12*\n" +
-	"\x11raft_state_digest\x18\x06 \x01(\tR\x0fraftStateDigest\x12,\n" +
-	"\x12raft_applied_index\x18\a \x01(\x04R\x10raftAppliedIndex\"\x89\x01\n" +
-	"\x15ClusterHealthResponse\x12\x14\n" +
-	"\x05error\x18\x01 \x01(\tR\x05error\x12\"\n" +
-	"\rlocal_node_id\x18\x02 \x01(\tR\vlocalNodeId\x126\n" +
-	"\x05nodes\x18\x03 \x03(\v2 .apiary.rpc.v1.ClusterNodeHealthR\x05nodes\"\x15\n" +
-	"\x13HostPackagesRequest\"\xec\x01\n" +
-	"\x0eHostBaseSystem\x12%\n" +
-	"\x0ekernel_release\x18\x01 \x01(\tR\rkernelRelease\x12\x18\n" +
-	"\aversion\x18\x02 \x01(\tR\aversion\x12\x18\n" +
-	"\apkgbase\x18\x03 \x01(\bR\apkgbase\x12K\n" +
-	"\rupdate_status\x18\x04 \x01(\x0e2&.apiary.rpc.v1.HostPackageUpdateStatusR\fupdateStatus\x12\x1a\n" +
-	"\bobserved\x18\x05 \x01(\bR\bobserved\x12\x16\n" +
-	"\x06detail\x18\x06 \x01(\tR\x06detail\"\xcd\x01\n" +
-	"\x14HostPackageCatalogue\x12\x12\n" +
-	"\x04path\x18\x01 \x01(\tR\x04path\x12>\n" +
-	"\x05state\x18\x02 \x01(\x0e2(.apiary.rpc.v1.HostPackageCatalogueStateR\x05state\x12(\n" +
-	"\x10modified_at_unix\x18\x03 \x01(\x03R\x0emodifiedAtUnix\x12\x1f\n" +
-	"\vage_seconds\x18\x04 \x01(\x03R\n" +
-	"ageSeconds\x12\x16\n" +
-	"\x06detail\x18\x05 \x01(\tR\x06detail\"\xee\x01\n" +
-	"\x14HostInstalledPackage\x12\x12\n" +
-	"\x04name\x18\x01 \x01(\tR\x04name\x12\x18\n" +
-	"\aversion\x18\x02 \x01(\tR\aversion\x12\x16\n" +
-	"\x06origin\x18\x03 \x01(\tR\x06origin\x12K\n" +
-	"\rupdate_status\x18\x04 \x01(\x0e2&.apiary.rpc.v1.HostPackageUpdateStatusR\fupdateStatus\x12+\n" +
-	"\x11candidate_version\x18\x05 \x01(\tR\x10candidateVersion\x12\x16\n" +
-	"\x06detail\x18\x06 \x01(\tR\x06detail\"F\n" +
-	"\x12HostPackageUnknown\x12\x18\n" +
-	"\asubject\x18\x01 \x01(\tR\asubject\x12\x16\n" +
-	"\x06reason\x18\x02 \x01(\tR\x06reason\"\xf9\x02\n" +
-	"\x14HostPackagesResponse\x12\x17\n" +
-	"\anode_id\x18\x01 \x01(\tR\x06nodeId\x121\n" +
-	"\x04base\x18\x02 \x01(\v2\x1d.apiary.rpc.v1.HostBaseSystemR\x04base\x12A\n" +
-	"\tcatalogue\x18\x03 \x01(\v2#.apiary.rpc.v1.HostPackageCatalogueR\tcatalogue\x129\n" +
-	"\x05ports\x18\x04 \x03(\v2#.apiary.rpc.v1.HostInstalledPackageR\x05ports\x12;\n" +
-	"\aunknown\x18\x05 \x03(\v2!.apiary.rpc.v1.HostPackageUnknownR\aunknown\x12\x1a\n" +
-	"\bheadline\x18\x06 \x01(\tR\bheadline\x12(\n" +
-	"\x10observed_at_unix\x18\a \x01(\x03R\x0eobservedAtUnix\x12\x14\n" +
-	"\x05error\x18\b \x01(\tR\x05error\"h\n" +
-	"\x1dExecuteNodeRestartPlanRequest\x12\x17\n" +
-	"\anode_id\x18\x01 \x01(\tR\x06nodeId\x12\x18\n" +
-	"\aservice\x18\x02 \x01(\tR\aservice\x12\x14\n" +
-	"\x05force\x18\x03 \x01(\bR\x05force\"t\n" +
-	"\x1eExecuteNodeRestartPlanResponse\x12<\n" +
-	"\x06result\x18\x01 \x01(\v2$.apiary.rpc.v1.NodeRestartPlanResultR\x06result\x12\x14\n" +
-	"\x05error\x18\x02 \x01(\tR\x05error\"\xe7\x02\n" +
-	"\x15NodeRestartPlanResult\x12\x18\n" +
-	"\aservice\x18\x01 \x01(\tR\aservice\x12\x17\n" +
-	"\anode_id\x18\x02 \x01(\tR\x06nodeId\x12\x19\n" +
-	"\blease_id\x18\x03 \x01(\x04R\aleaseId\x12\x18\n" +
-	"\aattempt\x18\x04 \x01(\x05R\aattempt\x12\x18\n" +
-	"\aoutcome\x18\x05 \x01(\tR\aoutcome\x12\x16\n" +
-	"\x06detail\x18\x06 \x01(\tR\x06detail\x12\x1a\n" +
-	"\bevidence\x18\a \x03(\tR\bevidence\x12F\n" +
-	"\n" +
-	"step_aside\x18\b \x01(\v2'.apiary.rpc.v1.NodeRestartPlanStepAsideR\tstepAside\x12&\n" +
-	"\x0fstarted_at_unix\x18\t \x01(\x03R\rstartedAtUnix\x12(\n" +
-	"\x10finished_at_unix\x18\n" +
-	" \x01(\x03R\x0efinishedAtUnix\"\xdd\x01\n" +
-	"\x18NodeRestartPlanStepAside\x12\x1c\n" +
-	"\tattempted\x18\x01 \x01(\bR\tattempted\x12\x1d\n" +
-	"\n" +
-	"was_leader\x18\x02 \x01(\bR\twasLeader\x12 \n" +
-	"\vtransferred\x18\x03 \x01(\bR\vtransferred\x12\"\n" +
-	"\rnew_leader_id\x18\x04 \x01(\tR\vnewLeaderId\x12&\n" +
-	"\x0fsafe_to_restart\x18\x05 \x01(\bR\rsafeToRestart\x12\x16\n" +
-	"\x06detail\x18\x06 \x01(\tR\x06detail\"t\n" +
-	"\x17PushVMSnapshotToRequest\x12\x0e\n" +
-	"\x02id\x18\x01 \x01(\tR\x02id\x12#\n" +
-	"\rsnapshot_name\x18\x02 \x01(\tR\fsnapshotName\x12$\n" +
-	"\x0etarget_node_id\x18\x03 \x01(\tR\ftargetNodeId\"0\n" +
-	"\x18PushVMSnapshotToResponse\x12\x14\n" +
-	"\x05error\x18\x01 \x01(\tR\x05error\"I\n" +
-	"\x12VMSnapshotMetadata\x12\x0e\n" +
-	"\x02id\x18\x01 \x01(\tR\x02id\x12#\n" +
-	"\rsnapshot_name\x18\x02 \x01(\tR\fsnapshotName\"{\n" +
-	"\x18ReceiveVMSnapshotRequest\x12?\n" +
-	"\bmetadata\x18\x01 \x01(\v2!.apiary.rpc.v1.VMSnapshotMetadataH\x00R\bmetadata\x12\x16\n" +
-	"\x05chunk\x18\x02 \x01(\fH\x00R\x05chunkB\x06\n" +
-	"\x04data\"f\n" +
-	"\x19ReceiveVMSnapshotResponse\x12\x0e\n" +
-	"\x02id\x18\x01 \x01(\tR\x02id\x12#\n" +
-	"\rsnapshot_name\x18\x02 \x01(\tR\fsnapshotName\x12\x14\n" +
-	"\x05error\x18\x03 \x01(\tR\x05error\"\x91\x01\n" +
-	"\x1dRequestManagerdRestartRequest\x12$\n" +
-	"\x0etarget_node_id\x18\x01 \x01(\tR\ftargetNodeId\x126\n" +
-	"\x05fence\x18\x02 \x01(\v2 .apiary.rpc.v1.ColonyUpdateFenceR\x05fence\x12\x12\n" +
-	"\x04step\x18\x03 \x01(\tR\x04step\"\xd8\x01\n" +
-	"\x1eRequestManagerdRestartResponse\x12\x1a\n" +
-	"\baccepted\x18\x01 \x01(\bR\baccepted\x12$\n" +
-	"\x0etarget_node_id\x18\x02 \x01(\tR\ftargetNodeId\x12\x19\n" +
-	"\blease_id\x18\x03 \x01(\x04R\aleaseId\x12C\n" +
-	"\x06issued\x18\x04 \x01(\v2+.apiary.rpc.v1.IssueManagerdRestartResponseR\x06issued\x12\x14\n" +
-	"\x05error\x18\x05 \x01(\tR\x05error\"\xcf\x02\n" +
-	"\x1bIssueManagerdRestartRequest\x12$\n" +
-	"\x0etarget_node_id\x18\x01 \x01(\tR\ftargetNodeId\x12!\n" +
-	"\foperation_id\x18\x02 \x01(\tR\voperationId\x126\n" +
-	"\x05fence\x18\x03 \x01(\v2 .apiary.rpc.v1.ColonyUpdateFenceR\x05fence\x12\x12\n" +
-	"\x04step\x18\x04 \x01(\tR\x04step\x12\x19\n" +
-	"\blease_id\x18\x05 \x01(\x04R\aleaseId\x12-\n" +
-	"\x13handover_to_node_id\x18\x06 \x01(\tR\x10handoverToNodeId\x126\n" +
-	"\x17handover_to_incarnation\x18\a \x01(\tR\x15handoverToIncarnation\x12\x19\n" +
-	"\bdelay_ms\x18\b \x01(\x04R\adelayMs\"\xf8\x01\n" +
-	"\x1cIssueManagerdRestartResponse\x12\x1a\n" +
-	"\baccepted\x18\x01 \x01(\bR\baccepted\x12\x17\n" +
-	"\anode_id\x18\x02 \x01(\tR\x06nodeId\x12-\n" +
-	"\x12handover_performed\x18\x03 \x01(\bR\x11handoverPerformed\x12%\n" +
-	"\x0eexpected_build\x18\x04 \x01(\tR\rexpectedBuild\x12\x1f\n" +
-	"\vmarker_path\x18\x05 \x01(\tR\n" +
-	"markerPath\x12\x16\n" +
-	"\x06detail\x18\x06 \x01(\tR\x06detail\x12\x14\n" +
-	"\x05error\x18\a \x01(\tR\x05error*\x7f\n" +
-	"\aVMState\x12\x18\n" +
-	"\x14VM_STATE_UNSPECIFIED\x10\x00\x12\x14\n" +
-	"\x10VM_STATE_STOPPED\x10\x01\x12\x14\n" +
-	"\x10VM_STATE_RUNNING\x10\x02\x12\x15\n" +
-	"\x11VM_STATE_DELETING\x10\x03\x12\x17\n" +
-	"\x13VM_STATE_RESTARTING\x10\x04*\x8f\x01\n" +
-	"\aVMPhase\x12\x18\n" +
-	"\x14VM_PHASE_UNSPECIFIED\x10\x00\x12\x15\n" +
-	"\x11VM_PHASE_CREATING\x10\x01\x12\x12\n" +
-	"\x0eVM_PHASE_READY\x10\x02\x12\x15\n" +
-	"\x11VM_PHASE_DELETING\x10\x03\x12\x12\n" +
-	"\x0eVM_PHASE_ERROR\x10\x04\x12\x14\n" +
-	"\x10VM_PHASE_STOPPED\x10\x05*\x8b\x01\n" +
-	"\tJailState\x12\x1a\n" +
-	"\x16JAIL_STATE_UNSPECIFIED\x10\x00\x12\x16\n" +
-	"\x12JAIL_STATE_STOPPED\x10\x01\x12\x16\n" +
-	"\x12JAIL_STATE_RUNNING\x10\x02\x12\x17\n" +
-	"\x13JAIL_STATE_DELETING\x10\x03\x12\x19\n" +
-	"\x15JAIL_STATE_RESTARTING\x10\x04*\x9d\x01\n" +
-	"\tJailPhase\x12\x1a\n" +
-	"\x16JAIL_PHASE_UNSPECIFIED\x10\x00\x12\x17\n" +
-	"\x13JAIL_PHASE_CREATING\x10\x01\x12\x14\n" +
-	"\x10JAIL_PHASE_READY\x10\x02\x12\x17\n" +
-	"\x13JAIL_PHASE_DELETING\x10\x03\x12\x14\n" +
-	"\x10JAIL_PHASE_ERROR\x10\x04\x12\x16\n" +
-	"\x12JAIL_PHASE_STOPPED\x10\x05*K\n" +
-	"\bCellType\x12\x19\n" +
-	"\x15CELL_TYPE_UNSPECIFIED\x10\x00\x12\x10\n" +
-	"\fCELL_TYPE_VM\x10\x01\x12\x12\n" +
-	"\x0eCELL_TYPE_JAIL\x10\x02*\xc8\x01\n" +
-	"\x14RecommendationFactor\x12\x16\n" +
-	"\x12FACTOR_UNSPECIFIED\x10\x00\x12\x1d\n" +
-	"\x19FACTOR_ISOLATION_REQUIRED\x10\x01\x12!\n" +
-	"\x1dFACTOR_CUSTOM_KERNEL_REQUIRED\x10\x02\x12\x1c\n" +
-	"\x18FACTOR_MIGRATION_SUPPORT\x10\x03\x12\x1b\n" +
-	"\x17FACTOR_DENSITY_PRIORITY\x10\x04\x12\x1b\n" +
-	"\x17FACTOR_RESOURCE_PROFILE\x10\x05*v\n" +
-	"\x18RecommendationConfidence\x12\x1a\n" +
-	"\x16CONFIDENCE_UNSPECIFIED\x10\x00\x12\x12\n" +
-	"\x0eCONFIDENCE_LOW\x10\x01\x12\x15\n" +
-	"\x11CONFIDENCE_MEDIUM\x10\x02\x12\x13\n" +
-	"\x0fCONFIDENCE_HIGH\x10\x03*[\n" +
-	"\fResourceKind\x12\x1d\n" +
-	"\x19RESOURCE_KIND_UNSPECIFIED\x10\x00\x12\x14\n" +
-	"\x10RESOURCE_KIND_VM\x10\x01\x12\x16\n" +
-	"\x12RESOURCE_KIND_JAIL\x10\x02*\xf7\x01\n" +
-	"\x0fRecoveryVerdict\x12 \n" +
-	"\x1cRECOVERY_VERDICT_UNSPECIFIED\x10\x00\x12 \n" +
-	"\x1cRECOVERY_VERDICT_UNPROTECTED\x10\x01\x12'\n" +
-	"#RECOVERY_VERDICT_UNVERIFIED_REPLICA\x10\x02\x12$\n" +
-	" RECOVERY_VERDICT_REPLICA_IN_SYNC\x10\x03\x12(\n" +
-	"$RECOVERY_VERDICT_REPLICA_OUT_OF_SYNC\x10\x04\x12'\n" +
-	"#RECOVERY_VERDICT_REPLICA_UNOBSERVED\x10\x05*\xb5\x01\n" +
-	"\x0fPathTraceStatus\x12!\n" +
-	"\x1dPATH_TRACE_STATUS_UNSPECIFIED\x10\x00\x12\x1b\n" +
-	"\x17PATH_TRACE_STATUS_CLEAR\x10\x01\x12\x1d\n" +
-	"\x19PATH_TRACE_STATUS_BLOCKED\x10\x02\x12\x1d\n" +
-	"\x19PATH_TRACE_STATUS_UNKNOWN\x10\x03\x12$\n" +
-	" PATH_TRACE_STATUS_NOT_APPLICABLE\x10\x04*s\n" +
-	"\tImageRole\x12\x1a\n" +
-	"\x16IMAGE_ROLE_UNSPECIFIED\x10\x00\x12\x12\n" +
-	"\x0eIMAGE_ROLE_ISO\x10\x01\x12\x19\n" +
-	"\x15IMAGE_ROLE_BASE_IMAGE\x10\x02\x12\x1b\n" +
-	"\x17IMAGE_ROLE_BASE_ARCHIVE\x10\x03*\xc4\x01\n" +
-	"\x18ImageAvailabilityVerdict\x12*\n" +
-	"&IMAGE_AVAILABILITY_VERDICT_UNSPECIFIED\x10\x00\x12(\n" +
-	"$IMAGE_AVAILABILITY_VERDICT_AVAILABLE\x10\x01\x12*\n" +
-	"&IMAGE_AVAILABILITY_VERDICT_UNAVAILABLE\x10\x02\x12&\n" +
-	"\"IMAGE_AVAILABILITY_VERDICT_UNKNOWN\x10\x03*\x9d\x02\n" +
-	"\x0eAssumptionKind\x12\x1f\n" +
-	"\x1bASSUMPTION_KIND_UNSPECIFIED\x10\x00\x12.\n" +
-	"*ASSUMPTION_KIND_PEER_MANAGER_RPC_SUCCEEDED\x10\x01\x12/\n" +
-	"+ASSUMPTION_KIND_PEER_SECURITY_PATH_ACCEPTED\x10\x02\x12,\n" +
-	"(ASSUMPTION_KIND_NAT_UPLINK_DEFAULT_ROUTE\x10\x03\x12,\n" +
-	"(ASSUMPTION_KIND_REPLICA_BHYVE_CONFIGURED\x10\x04\x12-\n" +
-	")ASSUMPTION_KIND_REPLICA_NETWORK_BRIDGE_UP\x10\x05*\xb3\x01\n" +
-	"\x10AssumptionStatus\x12!\n" +
-	"\x1dASSUMPTION_STATUS_UNSPECIFIED\x10\x00\x12\x1a\n" +
-	"\x16ASSUMPTION_STATUS_TRUE\x10\x01\x12\x1b\n" +
-	"\x17ASSUMPTION_STATUS_FALSE\x10\x02\x12\x1d\n" +
-	"\x19ASSUMPTION_STATUS_UNKNOWN\x10\x03\x12$\n" +
-	" ASSUMPTION_STATUS_NOT_APPLICABLE\x10\x04*\xa4\x01\n" +
-	"\x15AssumptionSubjectKind\x12'\n" +
-	"#ASSUMPTION_SUBJECT_KIND_UNSPECIFIED\x10\x00\x12 \n" +
-	"\x1cASSUMPTION_SUBJECT_KIND_NODE\x10\x01\x12\x1e\n" +
-	"\x1aASSUMPTION_SUBJECT_KIND_VM\x10\x02\x12 \n" +
-	"\x1cASSUMPTION_SUBJECT_KIND_JAIL\x10\x03*\xe0\x01\n" +
-	"\x11JoinRequestStatus\x12#\n" +
-	"\x1fJOIN_REQUEST_STATUS_UNSPECIFIED\x10\x00\x12\x1f\n" +
-	"\x1bJOIN_REQUEST_STATUS_PENDING\x10\x01\x12 \n" +
-	"\x1cJOIN_REQUEST_STATUS_APPROVED\x10\x02\x12 \n" +
-	"\x1cJOIN_REQUEST_STATUS_REJECTED\x10\x03\x12!\n" +
-	"\x1dJOIN_REQUEST_STATUS_CANCELLED\x10\x04\x12\x1e\n" +
-	"\x1aJOIN_REQUEST_STATUS_FAILED\x10\x05*\xa2\x01\n" +
-	"\x10JoinRequestStage\x12\"\n" +
-	"\x1eJOIN_REQUEST_STAGE_UNSPECIFIED\x10\x00\x12!\n" +
-	"\x1dJOIN_REQUEST_STAGE_INTRODUCED\x10\x01\x12$\n" +
-	" JOIN_REQUEST_STAGE_CODE_VERIFIED\x10\x02\x12!\n" +
-	"\x1dJOIN_REQUEST_STAGE_AUTHORIZED\x10\x03*\x96\x01\n" +
-	"\x17HostPackageUpdateStatus\x12*\n" +
-	"&HOST_PACKAGE_UPDATE_STATUS_UNSPECIFIED\x10\x00\x12&\n" +
-	"\"HOST_PACKAGE_UPDATE_STATUS_CURRENT\x10\x01\x12'\n" +
-	"#HOST_PACKAGE_UPDATE_STATUS_OUTDATED\x10\x02*\x99\x01\n" +
-	"\x19HostPackageCatalogueState\x12,\n" +
-	"(HOST_PACKAGE_CATALOGUE_STATE_UNSPECIFIED\x10\x00\x12&\n" +
-	"\"HOST_PACKAGE_CATALOGUE_STATE_FRESH\x10\x01\x12&\n" +
-	"\"HOST_PACKAGE_CATALOGUE_STATE_STALE\x10\x022\xdeZ\n" +
-	"\x0eManagerService\x12E\n" +
-	"\x06Status\x12\x1c.apiary.rpc.v1.StatusRequest\x1a\x1d.apiary.rpc.v1.StatusResponse\x12o\n" +
-	"\x14AuthenticatePassword\x12*.apiary.rpc.v1.AuthenticatePasswordRequest\x1a+.apiary.rpc.v1.AuthenticatePasswordResponse\x12i\n" +
-	"\x12GetLocalNodeHealth\x12(.apiary.rpc.v1.GetLocalNodeHealthRequest\x1a).apiary.rpc.v1.GetLocalNodeHealthResponse\x12o\n" +
-	"\x14ListAssumptionClaims\x12*.apiary.rpc.v1.ListAssumptionClaimsRequest\x1a+.apiary.rpc.v1.ListAssumptionClaimsResponse\x12l\n" +
-	"\x13SaveAssumptionClaim\x12).apiary.rpc.v1.SaveAssumptionClaimRequest\x1a*.apiary.rpc.v1.SaveAssumptionClaimResponse\x12r\n" +
-	"\x15DeleteAssumptionClaim\x12+.apiary.rpc.v1.DeleteAssumptionClaimRequest\x1a,.apiary.rpc.v1.DeleteAssumptionClaimResponse\x12u\n" +
-	"\x16ListOriginCertificates\x12,.apiary.rpc.v1.ListOriginCertificatesRequest\x1a-.apiary.rpc.v1.ListOriginCertificatesResponse\x12u\n" +
-	"\x16IssueOriginCertificate\x12,.apiary.rpc.v1.IssueOriginCertificateRequest\x1a-.apiary.rpc.v1.IssueOriginCertificateResponse\x12\x84\x01\n" +
-	"\x1bListLetsEncryptCertificates\x121.apiary.rpc.v1.ListLetsEncryptCertificatesRequest\x1a2.apiary.rpc.v1.ListLetsEncryptCertificatesResponse\x12\x84\x01\n" +
-	"\x1bIssueLetsEncryptCertificate\x121.apiary.rpc.v1.IssueLetsEncryptCertificateRequest\x1a2.apiary.rpc.v1.IssueLetsEncryptCertificateResponse\x12K\n" +
-	"\bCreateVM\x12\x1e.apiary.rpc.v1.CreateVMRequest\x1a\x1f.apiary.rpc.v1.CreateVMResponse\x12K\n" +
-	"\bUpdateVM\x12\x1e.apiary.rpc.v1.UpdateVMRequest\x1a\x1f.apiary.rpc.v1.UpdateVMResponse\x12K\n" +
-	"\bDeleteVM\x12\x1e.apiary.rpc.v1.DeleteVMRequest\x1a\x1f.apiary.rpc.v1.DeleteVMResponse\x12W\n" +
-	"\fForcePurgeVM\x12\".apiary.rpc.v1.ForcePurgeVMRequest\x1a#.apiary.rpc.v1.ForcePurgeVMResponse\x12N\n" +
-	"\tMigrateVM\x12\x1f.apiary.rpc.v1.MigrateVMRequest\x1a .apiary.rpc.v1.MigrateVMResponse\x12l\n" +
-	"\x13SetVMFirewallPaused\x12).apiary.rpc.v1.SetVMFirewallPausedRequest\x1a*.apiary.rpc.v1.SetVMFirewallPausedResponse\x12x\n" +
-	"\x17SetVMCloudflareExposure\x12-.apiary.rpc.v1.SetVMCloudflareExposureRequest\x1a..apiary.rpc.v1.SetVMCloudflareExposureResponse\x12f\n" +
-	"\x11SetVMDesiredState\x12'.apiary.rpc.v1.SetVMDesiredStateRequest\x1a(.apiary.rpc.v1.SetVMDesiredStateResponse\x12i\n" +
-	"\x12SetVMFirewallRules\x12(.apiary.rpc.v1.SetVMFirewallRulesRequest\x1a).apiary.rpc.v1.SetVMFirewallRulesResponse\x12B\n" +
-	"\x05GetVM\x12\x1b.apiary.rpc.v1.GetVMRequest\x1a\x1c.apiary.rpc.v1.GetVMResponse\x12H\n" +
-	"\aListVMs\x12\x1d.apiary.rpc.v1.ListVMsRequest\x1a\x1e.apiary.rpc.v1.ListVMsResponse\x12W\n" +
-	"\fListVMsLocal\x12\".apiary.rpc.v1.ListVMsLocalRequest\x1a#.apiary.rpc.v1.ListVMsLocalResponse\x12P\n" +
-	"\tUploadISO\x12\x1f.apiary.rpc.v1.UploadISORequest\x1a .apiary.rpc.v1.UploadISOResponse(\x01\x12K\n" +
-	"\bListISOs\x12\x1e.apiary.rpc.v1.ListISOsRequest\x1a\x1f.apiary.rpc.v1.ListISOsResponse\x12N\n" +
-	"\tDeleteISO\x12\x1f.apiary.rpc.v1.DeleteISORequest\x1a .apiary.rpc.v1.DeleteISOResponse\x12N\n" +
-	"\tHostStats\x12\x1f.apiary.rpc.v1.HostStatsRequest\x1a .apiary.rpc.v1.HostStatsResponse\x12\x81\x01\n" +
-	"\x1aGetLocalHASTResourceStatus\x120.apiary.rpc.v1.GetLocalHASTResourceStatusRequest\x1a1.apiary.rpc.v1.GetLocalHASTResourceStatusResponse\x12Z\n" +
-	"\rClusterHealth\x12#.apiary.rpc.v1.ClusterHealthRequest\x1a$.apiary.rpc.v1.ClusterHealthResponse\x12W\n" +
-	"\fGetVMConsole\x12\".apiary.rpc.v1.GetVMConsoleRequest\x1a#.apiary.rpc.v1.GetVMConsoleResponse\x12^\n" +
-	"\x0eProxyVMConsole\x12#.apiary.rpc.v1.VMConsoleTunnelFrame\x1a#.apiary.rpc.v1.VMConsoleTunnelFrame(\x010\x01\x12]\n" +
-	"\x0eGetVMSerialLog\x12$.apiary.rpc.v1.GetVMSerialLogRequest\x1a%.apiary.rpc.v1.GetVMSerialLogResponse\x12Z\n" +
-	"\rGetNodeConfig\x12#.apiary.rpc.v1.GetNodeConfigRequest\x1a$.apiary.rpc.v1.GetNodeConfigResponse\x12c\n" +
-	"\x10UpdateNodeConfig\x12&.apiary.rpc.v1.UpdateNodeConfigRequest\x1a'.apiary.rpc.v1.UpdateNodeConfigResponse\x12~\n" +
-	"\x19UpdateManagerdBindAddress\x12/.apiary.rpc.v1.UpdateManagerdBindAddressRequest\x1a0.apiary.rpc.v1.UpdateManagerdBindAddressResponse\x12~\n" +
-	"\x19ConvertStandaloneToJoiner\x12/.apiary.rpc.v1.ConvertStandaloneToJoinerRequest\x1a0.apiary.rpc.v1.ConvertStandaloneToJoinerResponse\x12f\n" +
-	"\x11GetFrontendConfig\x12'.apiary.rpc.v1.GetFrontendConfigRequest\x1a(.apiary.rpc.v1.GetFrontendConfigResponse\x12o\n" +
-	"\x14UpdateFrontendConfig\x12*.apiary.rpc.v1.UpdateFrontendConfigRequest\x1a+.apiary.rpc.v1.UpdateFrontendConfigResponse\x12i\n" +
-	"\x12GetRestshimdConfig\x12(.apiary.rpc.v1.GetRestshimdConfigRequest\x1a).apiary.rpc.v1.GetRestshimdConfigResponse\x12r\n" +
-	"\x15UpdateRestshimdConfig\x12+.apiary.rpc.v1.UpdateRestshimdConfigRequest\x1a,.apiary.rpc.v1.UpdateRestshimdConfigResponse\x12]\n" +
-	"\x0eGetRaftdConfig\x12$.apiary.rpc.v1.GetRaftdConfigRequest\x1a%.apiary.rpc.v1.GetRaftdConfigResponse\x12`\n" +
-	"\x0fSetDatasetQuota\x12%.apiary.rpc.v1.SetDatasetQuotaRequest\x1a&.apiary.rpc.v1.SetDatasetQuotaResponse\x12c\n" +
-	"\x10CreateVMSnapshot\x12&.apiary.rpc.v1.CreateVMSnapshotRequest\x1a'.apiary.rpc.v1.CreateVMSnapshotResponse\x12`\n" +
-	"\x0fListVMSnapshots\x12%.apiary.rpc.v1.ListVMSnapshotsRequest\x1a&.apiary.rpc.v1.ListVMSnapshotsResponse\x12f\n" +
-	"\x11RestoreVMSnapshot\x12'.apiary.rpc.v1.RestoreVMSnapshotRequest\x1a(.apiary.rpc.v1.RestoreVMSnapshotResponse\x12c\n" +
-	"\x10DeleteVMSnapshot\x12&.apiary.rpc.v1.DeleteVMSnapshotRequest\x1a'.apiary.rpc.v1.DeleteVMSnapshotResponse\x12c\n" +
-	"\x10ListNodeServices\x12&.apiary.rpc.v1.ListNodeServicesRequest\x1a'.apiary.rpc.v1.ListNodeServicesResponse\x12i\n" +
-	"\x12RestartNodeService\x12(.apiary.rpc.v1.RestartNodeServiceRequest\x1a).apiary.rpc.v1.RestartNodeServiceResponse\x12\x84\x01\n" +
-	"\x1bPreflightRestartNodeService\x121.apiary.rpc.v1.PreflightRestartNodeServiceRequest\x1a2.apiary.rpc.v1.PreflightRestartNodeServiceResponse\x12l\n" +
-	"\x13ReserveRestartLease\x12).apiary.rpc.v1.ReserveRestartLeaseRequest\x1a*.apiary.rpc.v1.ReserveRestartLeaseResponse\x12x\n" +
-	"\x17ConfirmRestartCompleted\x12-.apiary.rpc.v1.ConfirmRestartCompletedRequest\x1a..apiary.rpc.v1.ConfirmRestartCompletedResponse\x12l\n" +
-	"\x13StepAsideForRestart\x12).apiary.rpc.v1.StepAsideForRestartRequest\x1a*.apiary.rpc.v1.StepAsideForRestartResponse\x12i\n" +
-	"\x12MutateColonyUpdate\x12(.apiary.rpc.v1.MutateColonyUpdateRequest\x1a).apiary.rpc.v1.MutateColonyUpdateResponse\x12u\n" +
-	"\x16ExecuteNodeRestartPlan\x12,.apiary.rpc.v1.ExecuteNodeRestartPlanRequest\x1a-.apiary.rpc.v1.ExecuteNodeRestartPlanResponse\x12u\n" +
-	"\x16RequestManagerdRestart\x12,.apiary.rpc.v1.RequestManagerdRestartRequest\x1a-.apiary.rpc.v1.RequestManagerdRestartResponse\x12o\n" +
-	"\x14IssueManagerdRestart\x12*.apiary.rpc.v1.IssueManagerdRestartRequest\x1a+.apiary.rpc.v1.IssueManagerdRestartResponse\x12Z\n" +
-	"\rCreateNetwork\x12#.apiary.rpc.v1.CreateNetworkRequest\x1a$.apiary.rpc.v1.CreateNetworkResponse\x12W\n" +
-	"\fListNetworks\x12\".apiary.rpc.v1.ListNetworksRequest\x1a#.apiary.rpc.v1.ListNetworksResponse\x12Z\n" +
-	"\rDeleteNetwork\x12#.apiary.rpc.v1.DeleteNetworkRequest\x1a$.apiary.rpc.v1.DeleteNetworkResponse\x12]\n" +
-	"\x0eSetNetworkName\x12$.apiary.rpc.v1.SetNetworkNameRequest\x1a%.apiary.rpc.v1.SetNetworkNameResponse\x12W\n" +
-	"\fCreateAPIKey\x12\".apiary.rpc.v1.CreateAPIKeyRequest\x1a#.apiary.rpc.v1.CreateAPIKeyResponse\x12T\n" +
-	"\vListAPIKeys\x12!.apiary.rpc.v1.ListAPIKeysRequest\x1a\".apiary.rpc.v1.ListAPIKeysResponse\x12W\n" +
-	"\fRevokeAPIKey\x12\".apiary.rpc.v1.RevokeAPIKeyRequest\x1a#.apiary.rpc.v1.RevokeAPIKeyResponse\x12Q\n" +
-	"\n" +
-	"CreateJail\x12 .apiary.rpc.v1.CreateJailRequest\x1a!.apiary.rpc.v1.CreateJailResponse\x12Q\n" +
-	"\n" +
-	"UpdateJail\x12 .apiary.rpc.v1.UpdateJailRequest\x1a!.apiary.rpc.v1.UpdateJailResponse\x12Q\n" +
-	"\n" +
-	"DeleteJail\x12 .apiary.rpc.v1.DeleteJailRequest\x1a!.apiary.rpc.v1.DeleteJailResponse\x12l\n" +
-	"\x13SetJailDesiredState\x12).apiary.rpc.v1.SetJailDesiredStateRequest\x1a*.apiary.rpc.v1.SetJailDesiredStateResponse\x12`\n" +
-	"\x0fSetJailHostname\x12%.apiary.rpc.v1.SetJailHostnameRequest\x1a&.apiary.rpc.v1.SetJailHostnameResponse\x12H\n" +
-	"\aGetJail\x12\x1d.apiary.rpc.v1.GetJailRequest\x1a\x1e.apiary.rpc.v1.GetJailResponse\x12N\n" +
-	"\tListJails\x12\x1f.apiary.rpc.v1.ListJailsRequest\x1a .apiary.rpc.v1.ListJailsResponse\x12]\n" +
-	"\x0eListJailsLocal\x12$.apiary.rpc.v1.ListJailsLocalRequest\x1a%.apiary.rpc.v1.ListJailsLocalResponse\x12Q\n" +
-	"\n" +
-	"CreateCell\x12 .apiary.rpc.v1.CreateCellRequest\x1a!.apiary.rpc.v1.CreateCellResponse\x12f\n" +
-	"\x11RecommendCellType\x12'.apiary.rpc.v1.RecommendCellTypeRequest\x1a(.apiary.rpc.v1.RecommendCellTypeResponse\x12]\n" +
-	"\x0eForcePurgeJail\x12$.apiary.rpc.v1.ForcePurgeJailRequest\x1a%.apiary.rpc.v1.ForcePurgeJailResponse\x12l\n" +
-	"\x13SimulateNodeFailure\x12).apiary.rpc.v1.SimulateNodeFailureRequest\x1a*.apiary.rpc.v1.SimulateNodeFailureResponse\x12u\n" +
-	"\x16SimulateNetworkFailure\x12,.apiary.rpc.v1.SimulateNetworkFailureRequest\x1a-.apiary.rpc.v1.SimulateNetworkFailureResponse\x12Z\n" +
-	"\rTraceCellPath\x12#.apiary.rpc.v1.TraceCellPathRequest\x1a$.apiary.rpc.v1.TraceCellPathResponse\x12T\n" +
-	"\vMigrateJail\x12!.apiary.rpc.v1.MigrateJailRequest\x1a\".apiary.rpc.v1.MigrateJailResponse\x12Z\n" +
-	"\rReportVMPhase\x12#.apiary.rpc.v1.ReportVMPhaseRequest\x1a$.apiary.rpc.v1.ReportVMPhaseResponse\x12{\n" +
-	"\x18ReportVMTeardownComplete\x12..apiary.rpc.v1.ReportVMTeardownCompleteRequest\x1a/.apiary.rpc.v1.ReportVMTeardownCompleteResponse\x12`\n" +
-	"\x0fReportJailPhase\x12%.apiary.rpc.v1.ReportJailPhaseRequest\x1a&.apiary.rpc.v1.ReportJailPhaseResponse\x12\x81\x01\n" +
-	"\x1aReportJailTeardownComplete\x120.apiary.rpc.v1.ReportJailTeardownCompleteRequest\x1a1.apiary.rpc.v1.ReportJailTeardownCompleteResponse\x12N\n" +
-	"\tPushISOTo\x12\x1f.apiary.rpc.v1.PushISOToRequest\x1a .apiary.rpc.v1.PushISOToResponse\x12r\n" +
-	"\x15ListJailTemplateNames\x12+.apiary.rpc.v1.ListJailTemplateNamesRequest\x1a,.apiary.rpc.v1.ListJailTemplateNamesResponse\x12i\n" +
-	"\x12PushJailTemplateTo\x12(.apiary.rpc.v1.PushJailTemplateToRequest\x1a).apiary.rpc.v1.PushJailTemplateToResponse\x12n\n" +
-	"\x13ReceiveJailTemplate\x12).apiary.rpc.v1.ReceiveJailTemplateRequest\x1a*.apiary.rpc.v1.ReceiveJailTemplateResponse(\x01\x12c\n" +
-	"\x10PushVMSnapshotTo\x12&.apiary.rpc.v1.PushVMSnapshotToRequest\x1a'.apiary.rpc.v1.PushVMSnapshotToResponse\x12h\n" +
-	"\x11ReceiveVMSnapshot\x12'.apiary.rpc.v1.ReceiveVMSnapshotRequest\x1a(.apiary.rpc.v1.ReceiveVMSnapshotResponse(\x01\x12\x84\x01\n" +
-	"\x1bGetLocalNetworkBridgeStatus\x121.apiary.rpc.v1.GetLocalNetworkBridgeStatusRequest\x1a2.apiary.rpc.v1.GetLocalNetworkBridgeStatusResponse\x12r\n" +
-	"\x15ListAssumptionResults\x12+.apiary.rpc.v1.ListAssumptionResultsRequest\x1a,.apiary.rpc.v1.ListAssumptionResultsResponse\x12\x84\x01\n" +
-	"\x1bPurgeStaleAssumptionResults\x121.apiary.rpc.v1.PurgeStaleAssumptionResultsRequest\x1a2.apiary.rpc.v1.PurgeStaleAssumptionResultsResponse\x12~\n" +
-	"\x19ListOrphanedHASTResources\x12/.apiary.rpc.v1.ListOrphanedHASTResourcesRequest\x1a0.apiary.rpc.v1.ListOrphanedHASTResourcesResponse\x12\x84\x01\n" +
-	"\x1bCleanupOrphanedHASTResource\x121.apiary.rpc.v1.CleanupOrphanedHASTResourceRequest\x1a2.apiary.rpc.v1.CleanupOrphanedHASTResourceResponse\x12{\n" +
-	"\x18GetNetworkTeardownStatus\x12..apiary.rpc.v1.GetNetworkTeardownStatusRequest\x1a/.apiary.rpc.v1.GetNetworkTeardownStatusResponse\x12f\n" +
-	"\x11RequestJoinColony\x12'.apiary.rpc.v1.RequestJoinColonyRequest\x1a(.apiary.rpc.v1.RequestJoinColonyResponse\x12o\n" +
-	"\x14GetJoinRequestStatus\x12*.apiary.rpc.v1.GetJoinRequestStatusRequest\x1a+.apiary.rpc.v1.GetJoinRequestStatusResponse\x12c\n" +
-	"\x10ListJoinRequests\x12&.apiary.rpc.v1.ListJoinRequestsRequest\x1a'.apiary.rpc.v1.ListJoinRequestsResponse\x12i\n" +
-	"\x12ApproveJoinRequest\x12(.apiary.rpc.v1.ApproveJoinRequestRequest\x1a).apiary.rpc.v1.ApproveJoinRequestResponse\x12f\n" +
-	"\x11RejectJoinRequest\x12'.apiary.rpc.v1.RejectJoinRequestRequest\x1a(.apiary.rpc.v1.RejectJoinRequestResponse\x12u\n" +
-	"\x16VerifyJoinIntroduction\x12,.apiary.rpc.v1.VerifyJoinIntroductionRequest\x1a-.apiary.rpc.v1.VerifyJoinIntroductionResponse\x12o\n" +
-	"\x14ReissueJoinSecondPin\x12*.apiary.rpc.v1.ReissueJoinSecondPinRequest\x1a+.apiary.rpc.v1.ReissueJoinSecondPinResponse\x12i\n" +
-	"\x12PinPeerCertificate\x12(.apiary.rpc.v1.PinPeerCertificateRequest\x1a).apiary.rpc.v1.PinPeerCertificateResponse\x12o\n" +
-	"\x14UnpinPeerCertificate\x12*.apiary.rpc.v1.UnpinPeerCertificateRequest\x1a+.apiary.rpc.v1.UnpinPeerCertificateResponse\x12\x84\x01\n" +
-	"\x1bPreflightApproveJoinRequest\x121.apiary.rpc.v1.PreflightApproveJoinRequestRequest\x1a2.apiary.rpc.v1.PreflightApproveJoinRequestResponse\x12f\n" +
-	"\x11CancelJoinRequest\x12'.apiary.rpc.v1.CancelJoinRequestRequest\x1a(.apiary.rpc.v1.CancelJoinRequestResponse\x12c\n" +
-	"\x10PurgeJoinRequest\x12&.apiary.rpc.v1.PurgeJoinRequestRequest\x1a'.apiary.rpc.v1.PurgeJoinRequestResponse\x12o\n" +
-	"\x14OpenColonyJoinWindow\x12*.apiary.rpc.v1.OpenColonyJoinWindowRequest\x1a+.apiary.rpc.v1.OpenColonyJoinWindowResponse\x12r\n" +
-	"\x15CloseColonyJoinWindow\x12+.apiary.rpc.v1.CloseColonyJoinWindowRequest\x1a,.apiary.rpc.v1.CloseColonyJoinWindowResponse\x12f\n" +
-	"\x11SetColonyDiskSize\x12'.apiary.rpc.v1.SetColonyDiskSizeRequest\x1a(.apiary.rpc.v1.SetColonyDiskSizeResponse\x12f\n" +
-	"\x11GetColonyDiskSize\x12'.apiary.rpc.v1.GetColonyDiskSizeRequest\x1a(.apiary.rpc.v1.GetColonyDiskSizeResponse\x12l\n" +
-	"\x13GetColonyJoinWindow\x12).apiary.rpc.v1.GetColonyJoinWindowRequest\x1a*.apiary.rpc.v1.GetColonyJoinWindowResponse\x12i\n" +
-	"\x12UpdateVoterAddress\x12(.apiary.rpc.v1.UpdateVoterAddressRequest\x1a).apiary.rpc.v1.UpdateVoterAddressResponse\x12W\n" +
-	"\fHostPackages\x12\".apiary.rpc.v1.HostPackagesRequest\x1a#.apiary.rpc.v1.HostPackagesResponseB-Z+github.com/glenjbarber/apiary/api/rpc;rpcpbb\x06proto3"
+	"\x05chunk\x18\x02 \x01(\fH\x00R\x05chunkB\x06\n\x04data\"P\n\x11ISOUploadMetadata\x12\x12\n\x04name\x18\x01 \x01(\t" +
+	"R\x04name\x12'\n\x0fexpected_sha256\x18\x02 \x01(\tR\x0eexpectedSha256\"t\n\x11UploadISOResp" +
+	"onse\x12\x12\n\x04name\x18\x01 \x01(\tR\x04name\x12\x1d\n\nsize_bytes\x18\x02 \x01(\x04R\tsizeBytes\x12\x16\n\x06sha25" +
+	"6\x18\x03 \x01(\tR\x06sha256\x12\x14\n\x05error\x18\x04 \x01(\tR\x05error\"\x11\n\x0fListISOsRequest\"T\n\aISOI" +
+	"nfo\x12\x12\n\x04name\x18\x01 \x01(\tR\x04name\x12\x1d\n\nsize_bytes\x18\x02 \x01(\x04R\tsizeBytes\x12\x16\n\x06sha256" +
+	"\x18\x03 \x01(\tR\x06sha256\"T\n\x10ListISOsResponse\x12*\n\x04isos\x18\x01 \x03(\v2\x16.apiary.rpc.v1" +
+	".ISOInfoR\x04isos\x12\x14\n\x05error\x18\x02 \x01(\tR\x05error\"&\n\x10DeleteISORequest\x12\x12\n\x04name" +
+	"\x18\x01 \x01(\tR\x04name\")\n\x11DeleteISOResponse\x12\x14\n\x05error\x18\x01 \x01(\tR\x05error\"L\n\x10PushI" +
+	"SOToRequest\x12\x12\n\x04name\x18\x01 \x01(\tR\x04name\x12$\n\x0etarget_node_id\x18\x02 \x01(\tR\ftargetN" +
+	"odeId\")\n\x11PushISOToResponse\x12\x14\n\x05error\x18\x01 \x01(\tR\x05error\"\x1e\n\x1cListJailTemp" +
+	"lateNamesRequest\"K\n\x1dListJailTemplateNamesResponse\x12\x14\n\x05names\x18\x01 \x03(\t" +
+	"R\x05names\x12\x14\n\x05error\x18\x02 \x01(\tR\x05error\"U\n\x19PushJailTemplateToRequest\x12\x12\n\x04na" +
+	"me\x18\x01 \x01(\tR\x04name\x12$\n\x0etarget_node_id\x18\x02 \x01(\tR\ftargetNodeId\"2\n\x1aPushJail" +
+	"TemplateToResponse\x12\x14\n\x05error\x18\x01 \x01(\tR\x05error\"*\n\x14JailTemplateMetadata" +
+	"\x12\x12\n\x04name\x18\x01 \x01(\tR\x04name\"\x7f\n\x1aReceiveJailTemplateRequest\x12A\n\bmetadata\x18\x01" +
+	" \x01(\v2#.apiary.rpc.v1.JailTemplateMetadataH\x00R\bmetadata\x12\x16\n\x05chunk\x18\x02" +
+	" \x01(\fH\x00R\x05chunkB\x06\n\x04data\"G\n\x1bReceiveJailTemplateResponse\x12\x12\n\x04name\x18\x01 \x01" +
+	"(\tR\x04name\x12\x14\n\x05error\x18\x02 \x01(\tR\x05error\"\x12\n\x10HostStatsRequest\"|\n\bCPUStats\x12\x14" +
+	"\n\x05cores\x18\x01 \x01(\x05R\x05cores\x12\x1c\n\nload_avg_1\x18\x02 \x01(\x01R\bloadAvg1\x12\x1c\n\nload_avg_5" +
+	"\x18\x03 \x01(\x01R\bloadAvg5\x12\x1e\n\vload_avg_15\x18\x04 \x01(\x01R\tloadAvg15\"J\n\bMemStats\x12\x1f\n\v" +
+	"total_bytes\x18\x01 \x01(\x04R\ntotalBytes\x12\x1d\n\nfree_bytes\x18\x02 \x01(\x04R\tfreeBytes\"\xb9\x01\n" +
+	"\tPoolStats\x12\x12\n\x04name\x18\x01 \x01(\tR\x04name\x12\x1d\n\nsize_bytes\x18\x02 \x01(\x04R\tsizeBytes\x12\x1f\n" +
+	"\valloc_bytes\x18\x03 \x01(\x04R\nallocBytes\x12\x1d\n\nfree_bytes\x18\x04 \x01(\x04R\tfreeBytes\x12!\n" +
+	"\fcapacity_pct\x18\x05 \x01(\rR\vcapacityPct\x12\x16\n\x06health\x18\x06 \x01(\tR\x06health\"}\n\tDisk" +
+	"Stats\x12\x12\n\x04name\x18\x01 \x01(\tR\x04name\x12\x14\n\x05model\x18\x02 \x01(\tR\x05model\x12\x16\n\x06serial\x18\x03 \x01(\tR" +
+	"\x06serial\x12\x18\n\ahealthy\x18\x04 \x01(\bR\ahealthy\x12\x14\n\x05error\x18\x05 \x01(\tR\x05error\"i\n\rNetIf" +
+	"aceStats\x12\x12\n\x04name\x18\x01 \x01(\tR\x04name\x12\x19\n\brx_bytes\x18\x02 \x01(\x04R\arxBytes\x12\x19\n\btx_by" +
+	"tes\x18\x03 \x01(\x04R\atxBytes\x12\x0e\n\x02up\x18\x04 \x01(\bR\x02up\"\xbd\x01\n\aPFStats\x12\x18\n\aenabled\x18\x01 \x01(\bR" +
+	"\aenabled\x12%\n\x0ecurrent_states\x18\x02 \x01(\x04R\rcurrentStates\x12\x18\n\amatches\x18\x03 \x01(\x04" +
+	"R\amatches\x12#\n\rhost_firewall\x18\x04 \x01(\tR\fhostFirewall\x122\n\x15apiary_anchor_" +
+	"reached\x18\x05 \x01(\tR\x13apiaryAnchorReached\"\xdb\x05\n\x11HostStatsResponse\x12\x17\n\anode" +
+	"_id\x18\x01 \x01(\tR\x06nodeId\x12)\n\x03cpu\x18\x02 \x01(\v2\x17.apiary.rpc.v1.CPUStatsR\x03cpu\x12)\n\x03" +
+	"mem\x18\x03 \x01(\v2\x17.apiary.rpc.v1.MemStatsR\x03mem\x12.\n\x05pools\x18\x04 \x03(\v2\x18.apiary." +
+	"rpc.v1.PoolStatsR\x05pools\x12.\n\x05disks\x18\x05 \x03(\v2\x18.apiary.rpc.v1.DiskStats" +
+	"R\x05disks\x12.\n\x03net\x18\x06 \x03(\v2\x1c.apiary.rpc.v1.NetIfaceStatsR\x03net\x12\x16\n\x06error" +
+	"s\x18\a \x03(\tR\x06errors\x12&\n\x02pf\x18\b \x01(\v2\x16.apiary.rpc.v1.PFStatsR\x02pf\x12)\n\x10bhyve" +
+	"_configured\x18\t \x01(\bR\x0fbhyveConfigured\x12=\n\x1blast_reconcile_success_uni" +
+	"x\x18\n \x01(\x03R\x18lastReconcileSuccessUnix\x12=\n\x1blast_reconcile_attempt_unix" +
+	"\x18\v \x01(\x03R\x18lastReconcileAttemptUnix\x12<\n\x1areconcile_interval_seconds\x18\f" +
+	" \x01(\rR\x18reconcileIntervalSeconds\x123\n\x15cloudflare_configured\x18\r \x01(\bR\x14c" +
+	"loudflareConfigured\x120\n\x14last_reconcile_error\x18\x0e \x01(\tR\x12lastReconcile" +
+	"Error\x129\n\x19last_reconcile_error_unix\x18\x0f \x01(\x03R\x16lastReconcileErrorUnix" +
+	"\"H\n!GetLocalHASTResourceStatusRequest\x12#\n\rresource_name\x18\x01 \x01(\tR\fre" +
+	"sourceName\"\x9f\x02\n\"GetLocalHASTResourceStatusResponse\x12\x14\n\x05error\x18\x01 \x01(\t" +
+	"R\x05error\x12#\n\rresource_name\x18\x02 \x01(\tR\fresourceName\x12\x12\n\x04role\x18\x03 \x01(\tR\x04role" +
+	"\x12'\n\x0fresource_status\x18\x04 \x01(\tR\x0eresourceStatus\x12 \n\vreplication\x18\x05 \x01(\tR\v" +
+	"replication\x12\x14\n\x05dirty\x18\x06 \x01(\tR\x05dirty\x12\x1f\n\vextent_size\x18\a \x01(\tR\nextentSi" +
+	"ze\x12(\n\x10observed_at_unix\x18\b \x01(\x03R\x0eobservedAtUnix\"%\n\x13GetVMConsoleRequ" +
+	"est\x12\x0e\n\x02id\x18\x01 \x01(\tR\x02id\"r\n\x14GetVMConsoleResponse\x12\x12\n\x04host\x18\x01 \x01(\tR\x04host\x12" +
+	"\x12\n\x04port\x18\x02 \x01(\rR\x04port\x12\x1c\n\tavailable\x18\x03 \x01(\bR\tavailable\x12\x14\n\x05error\x18\x04 \x01(\t" +
+	"R\x05error\"%\n\x13VMConsoleTunnelOpen\x12\x0e\n\x02id\x18\x01 \x01(\tR\x02id\"\x89\x01\n\x14VMConsoleTunn" +
+	"elFrame\x128\n\x04open\x18\x01 \x01(\v2\".apiary.rpc.v1.VMConsoleTunnelOpenH\x00R\x04ope" +
+	"n\x12\x14\n\x04data\x18\x02 \x01(\fH\x00R\x04data\x12\x16\n\x05error\x18\x03 \x01(\tH\x00R\x05errorB\t\n\apayload\"D\n\x15Ge" +
+	"tVMSerialLogRequest\x12\x0e\n\x02id\x18\x01 \x01(\tR\x02id\x12\x1b\n\tmax_bytes\x18\x02 \x01(\rR\bmaxBytes" +
+	"\"\x84\x01\n\x16GetVMSerialLogResponse\x12\x18\n\acontent\x18\x01 \x01(\tR\acontent\x12\x1c\n\ttruncat" +
+	"ed\x18\x02 \x01(\bR\ttruncated\x12\x1c\n\tavailable\x18\x03 \x01(\bR\tavailable\x12\x14\n\x05error\x18\x04 \x01(\t" +
+	"R\x05error\"\x16\n\x14GetNodeConfigRequest\"\xe6\x12\n\x15GetNodeConfigResponse\x12\x16\n\x06upl" +
+	"ink\x18\x01 \x01(\tR\x06uplink\x12\x1d\n\nnat_uplink\x18\x02 \x01(\tR\tnatUplink\x12&\n\x0fdhcp_dns_ser" +
+	"ver\x18\x05 \x01(\tR\rdhcpDnsServer\x12&\n\fjail_enabled\x18\x03 \x01(\bH\x00R\vjailEnabled\x88\x01\x01" +
+	"\x12\x14\n\x05error\x18\x04 \x01(\tR\x05error\x12R\n\x14available_interfaces\x18\x06 \x03(\v2\x1f.apiary.rp" +
+	"c.v1.NetworkInterfaceR\x13availableInterfaces\x12:\n\x19interface_inventor" +
+	"y_error\x18\a \x01(\tR\x17interfaceInventoryError\x12\x19\n\bzfs_base\x18\b \x01(\tR\azfsBas" +
+	"e\x12!\n\fbhyve_prefix\x18\t \x01(\tR\vbhyvePrefix\x12\x17\n\aiso_dir\x18\n \x01(\tR\x06isoDir\x12\x1f\n" +
+	"\vjail_prefix\x18\v \x01(\tR\njailPrefix\x12&\n\x0fjail_mount_base\x18\f \x01(\tR\rjailMou" +
+	"ntBase\x12-\n\x12reconcile_interval\x18\r \x01(\tR\x11reconcileInterval\x12:\n\x19assumpt" +
+	"ion_check_interval\x18\x0e \x01(\tR\x17assumptionCheckInterval\x12B\n\x1dassumption_" +
+	"heartbeat_interval\x18\x0f \x01(\tR\x1bassumptionHeartbeatInterval\x124\n\x16assumpt" +
+	"ion_stale_after\x18\x10 \x01(\tR\x14assumptionStaleAfter\x126\n\x17assumption_run_de" +
+	"adline\x18\x11 \x01(\tR\x15assumptionRunDeadline\x12;\n\x1aassumption_history_max_ag" +
+	"e\x18\x12 \x01(\tR\x17assumptionHistoryMaxAge\x128\n\x18assumption_history_limit\x18\x13 \x01" +
+	"(\x05R\x16assumptionHistoryLimit\x12#\n\rbhyve_bootrom\x18\x14 \x01(\tR\fbhyveBootrom\x12" +
+	"!\n\fbhyve_bridge\x18\x15 \x01(\tR\vbhyveBridge\x12 \n\fdisk_size_mb\x18\x16 \x01(\x04R\ndiskSi" +
+	"zeMb\x12)\n\x11jail_disk_size_mb\x18\x17 \x01(\x04R\x0ejailDiskSizeMb\x12&\n\fhast_enabled\x18" +
+	"\x18 \x01(\bH\x01R\vhastEnabled\x88\x01\x01\x12\x1e\n\bpeer_tls\x18\x1a \x01(\bH\x02R\apeerTls\x88\x01\x01\x12,\n\x12peer_" +
+	"managerd_port\x18\x1b \x01(\tR\x10peerManagerdPort\x121\n\x15peer_tls_hostname_map\x18\x1c" +
+	" \x01(\tR\x12peerTlsHostnameMap\x12\x1e\n\vpeer_tls_ca\x18+ \x01(\tR\tpeerTlsCa\x120\n\x14know" +
+	"n_peer_addresses\x18, \x01(\tR\x12knownPeerAddresses\x12'\n\x10peer_api_key_set\x18\x1d" +
+	" \x01(\bR\rpeerApiKeySet\x12&\n\x0fraftd_token_set\x18\x1e \x01(\bR\rraftdTokenSet\x12\x19\n\bt" +
+	"ls_cert\x18\x1f \x01(\tR\atlsCert\x12\x17\n\atls_key\x18  \x01(\tR\x06tlsKey\x12\x1f\n\vpam_service\x18-" +
+	" \x01(\tR\npamService\x122\n\x15cloudflare_token_file\x18! \x01(\tR\x13cloudflareToken" +
+	"File\x12,\n\x12cloudflare_zone_id\x18\" \x01(\tR\x10cloudflareZoneId\x120\n\x14cloudflare" +
+	"_tunnel_id\x18# \x01(\tR\x12cloudflareTunnelId\x12K\n\"cloudflare_tunnel_creden" +
+	"tials_file\x18$ \x01(\tR\x1fcloudflareTunnelCredentialsFile\x12/\n\x14origin_ca_t" +
+	"oken_file\x18) \x01(\tR\x11originCaTokenFile\x12.\n\x13origin_ca_directory\x18* \x01(\tR" +
+	"\x11originCaDirectory\x12F\n origin_ca_renewal_check_interval\x18. \x01(\tR\x1cor" +
+	"iginCaRenewalCheckInterval\x12\x19\n\brpc_addr\x18/ \x01(\tR\arpcAddr\x12B\n\x0econfig_" +
+	"changes\x180 \x03(\v2\x1b.apiary.rpc.v1.ConfigChangeR\rconfigChanges\x12%\n\x0eacm" +
+	"e_directory\x183 \x01(\tR\racmeDirectory\x121\n\x15acme_account_key_file\x184 \x01(\tR" +
+	"\x12acmeAccountKeyFile\x12,\n\x12acme_directory_url\x185 \x01(\tR\x10acmeDirectoryUr" +
+	"l\x12\x1d\n\nacme_email\x186 \x01(\tR\tacmeEmail\x12-\n\x12watchgoose_enabled\x187 \x01(\bR\x11wa" +
+	"tchgooseEnabled\x126\n\x17watchgoose_endpoint_set\x188 \x01(\bR\x15watchgooseEndp" +
+	"ointSet\x12/\n\x13watchgoose_interval\x189 \x01(\tR\x12watchgooseInterval\x12-\n\x12watc" +
+	"hgoose_timeout\x18: \x01(\tR\x11watchgooseTimeout\x120\n\x14watchgoose_badge_url\x18" +
+	"; \x01(\tR\x12watchgooseBadgeUrlB\x0f\n\r_jail_enabledB\x0f\n\r_hast_enabledB\v\n\t_" +
+	"peer_tls\"\xf0\x01\n\fConfigChange\x12\x14\n\x05field\x18\x01 \x01(\tR\x05field\x12\x1a\n\bprevious\x18\x02 \x01(" +
+	"\tR\bprevious\x12\x18\n\acurrent\x18\x03 \x01(\tR\acurrent\x12\x16\n\x06origin\x18\x04 \x01(\tR\x06origin\x12\x1c\n" +
+	"\trationale\x18\x05 \x01(\tR\trationale\x12\x1a\n\bevidence\x18\x06 \x01(\tR\bevidence\x12&\n\x0fchang" +
+	"ed_at_unix\x18\a \x01(\x03R\rchangedAtUnix\x12\x1a\n\battested\x18\b \x01(\bR\battested\"\xb6\x01\n " +
+	"UpdateManagerdBindAddressRequest\x12\x19\n\brpc_addr\x18\x01 \x01(\tR\arpcAddr\x12#\n\rc" +
+	"hange_origin\x18\x02 \x01(\tR\fchangeOrigin\x12)\n\x10change_rationale\x18\x03 \x01(\tR\x0fchan" +
+	"geRationale\x12'\n\x0fchange_evidence\x18\x04 \x01(\tR\x0echangeEvidence\"d\n!UpdateMa" +
+	"nagerdBindAddressResponse\x12)\n\x10restart_required\x18\x01 \x01(\bR\x0frestartRequ" +
+	"ired\x12\x14\n\x05error\x18\x02 \x01(\tR\x05error\"\x9e\x01\n ConvertStandaloneToJoinerRequest\x12" +
+	"6\n\x17target_managerd_address\x18\x01 \x01(\tR\x15targetManagerdAddress\x12\x1b\n\traft_" +
+	"bind\x18\x02 \x01(\tR\braftBind\x12%\n\x0econfirm_phrase\x18\x03 \x01(\tR\rconfirmPhrase\"\xb5\x01\n!" +
+	"ConvertStandaloneToJoinerResponse\x12\x14\n\x05error\x18\x01 \x01(\tR\x05error\x12&\n\x0fbacku" +
+	"p_data_dir\x18\x02 \x01(\tR\rbackupDataDir\x12&\n\x0fjoin_request_id\x18\x03 \x01(\tR\rjoinRe" +
+	"questId\x12*\n\x11join_request_code\x18\x04 \x01(\tR\x0fjoinRequestCode\"T\n\x10NetworkIn" +
+	"terface\x12\x12\n\x04name\x18\x01 \x01(\tR\x04name\x12\x0e\n\x02up\x18\x02 \x01(\bR\x02up\x12\x1c\n\taddresses\x18\x03 \x03(\tR\t" +
+	"addresses\"\xdc\x13\n\x17UpdateNodeConfigRequest\x12\x16\n\x06uplink\x18\x01 \x01(\tR\x06uplink\x12\x1d\n" +
+	"\nnat_uplink\x18\x02 \x01(\tR\tnatUplink\x12&\n\fjail_enabled\x18\x03 \x01(\bH\x00R\vjailEnable" +
+	"d\x88\x01\x01\x12&\n\x0fdhcp_dns_server\x18\x04 \x01(\tR\rdhcpDnsServer\x12\x19\n\bzfs_base\x18\b \x01(\tR\a" +
+	"zfsBase\x12!\n\fbhyve_prefix\x18\t \x01(\tR\vbhyvePrefix\x12\x17\n\aiso_dir\x18\n \x01(\tR\x06iso" +
+	"Dir\x12\x1f\n\vjail_prefix\x18\v \x01(\tR\njailPrefix\x12&\n\x0fjail_mount_base\x18\f \x01(\tR\rj" +
+	"ailMountBase\x12-\n\x12reconcile_interval\x18\r \x01(\tR\x11reconcileInterval\x12:\n\x19a" +
+	"ssumption_check_interval\x18\x0e \x01(\tR\x17assumptionCheckInterval\x12B\n\x1dassum" +
+	"ption_heartbeat_interval\x18\x0f \x01(\tR\x1bassumptionHeartbeatInterval\x124\n\x16a" +
+	"ssumption_stale_after\x18\x10 \x01(\tR\x14assumptionStaleAfter\x126\n\x17assumption_" +
+	"run_deadline\x18\x11 \x01(\tR\x15assumptionRunDeadline\x12;\n\x1aassumption_history_" +
+	"max_age\x18\x12 \x01(\tR\x17assumptionHistoryMaxAge\x128\n\x18assumption_history_lim" +
+	"it\x18\x13 \x01(\x05R\x16assumptionHistoryLimit\x12#\n\rbhyve_bootrom\x18\x14 \x01(\tR\fbhyveBo" +
+	"otrom\x12!\n\fbhyve_bridge\x18\x15 \x01(\tR\vbhyveBridge\x12 \n\fdisk_size_mb\x18\x16 \x01(\x04R\n" +
+	"diskSizeMb\x12)\n\x11jail_disk_size_mb\x18\x17 \x01(\x04R\x0ejailDiskSizeMb\x12&\n\fhast_en" +
+	"abled\x18\x18 \x01(\bH\x01R\vhastEnabled\x88\x01\x01\x12\x1e\n\bpeer_tls\x18\x1a \x01(\bH\x02R\apeerTls\x88\x01\x01\x12,\n" +
+	"\x12peer_managerd_port\x18\x1b \x01(\tR\x10peerManagerdPort\x121\n\x15peer_tls_hostname" +
+	"_map\x18\x1c \x01(\tR\x12peerTlsHostnameMap\x12\x1e\n\vpeer_tls_ca\x18+ \x01(\tR\tpeerTlsCa\x120" +
+	"\n\x14known_peer_addresses\x18, \x01(\tR\x12knownPeerAddresses\x12 \n\fpeer_api_key" +
+	"\x18% \x01(\tR\npeerApiKey\x12+\n\x12clear_peer_api_key\x18& \x01(\bR\x0fclearPeerApiKey\x12" +
+	"\x1f\n\vraftd_token\x18' \x01(\tR\nraftdToken\x12*\n\x11clear_raftd_token\x18( \x01(\bR\x0fcle" +
+	"arRaftdToken\x12\x19\n\btls_cert\x18\x1f \x01(\tR\atlsCert\x12\x17\n\atls_key\x18  \x01(\tR\x06tlsKey" +
+	"\x12\x1f\n\vpam_service\x18- \x01(\tR\npamService\x122\n\x15cloudflare_token_file\x18! \x01(\t" +
+	"R\x13cloudflareTokenFile\x12,\n\x12cloudflare_zone_id\x18\" \x01(\tR\x10cloudflareZon" +
+	"eId\x120\n\x14cloudflare_tunnel_id\x18# \x01(\tR\x12cloudflareTunnelId\x12K\n\"cloudfl" +
+	"are_tunnel_credentials_file\x18$ \x01(\tR\x1fcloudflareTunnelCredentialsFi" +
+	"le\x12/\n\x14origin_ca_token_file\x18) \x01(\tR\x11originCaTokenFile\x12.\n\x13origin_ca" +
+	"_directory\x18* \x01(\tR\x11originCaDirectory\x12F\n origin_ca_renewal_check_i" +
+	"nterval\x18. \x01(\tR\x1coriginCaRenewalCheckInterval\x12#\n\rchange_origin\x18/ \x01" +
+	"(\tR\fchangeOrigin\x12)\n\x10change_rationale\x180 \x01(\tR\x0fchangeRationale\x12'\n\x0fc" +
+	"hange_evidence\x181 \x01(\tR\x0echangeEvidence\x12%\n\x0eannotate_field\x182 \x01(\tR\ran" +
+	"notateField\x12%\n\x0eacme_directory\x183 \x01(\tR\racmeDirectory\x121\n\x15acme_accou" +
+	"nt_key_file\x184 \x01(\tR\x12acmeAccountKeyFile\x12,\n\x12acme_directory_url\x185 \x01(" +
+	"\tR\x10acmeDirectoryUrl\x12\x1d\n\nacme_email\x186 \x01(\tR\tacmeEmail\x122\n\x12watchgoose" +
+	"_enabled\x187 \x01(\bH\x03R\x11watchgooseEnabled\x88\x01\x01\x12/\n\x13watchgoose_endpoint\x188 " +
+	"\x01(\tR\x12watchgooseEndpoint\x12:\n\x19clear_watchgoose_endpoint\x189 \x01(\bR\x17clea" +
+	"rWatchgooseEndpoint\x12/\n\x13watchgoose_interval\x18: \x01(\tR\x12watchgooseInte" +
+	"rval\x12-\n\x12watchgoose_timeout\x18; \x01(\tR\x11watchgooseTimeout\x120\n\x14watchgoos" +
+	"e_badge_url\x18< \x01(\tR\x12watchgooseBadgeUrl\x12;\n\x1aclear_watchgoose_badge_" +
+	"url\x18= \x01(\bR\x17clearWatchgooseBadgeUrlB\x0f\n\r_jail_enabledB\x0f\n\r_hast_ena" +
+	"bledB\v\n\t_peer_tlsB\x15\n\x13_watchgoose_enabled\"0\n\x18UpdateNodeConfigResp" +
+	"onse\x12\x14\n\x05error\x18\x01 \x01(\tR\x05error\"\x1a\n\x18GetFrontendConfigRequest\"\xfd\x03\n\x19GetFr" +
+	"ontendConfigResponse\x12!\n\fmanager_addr\x18\x01 \x01(\tR\vmanagerAddr\x12\x1b\n\thttp_" +
+	"addr\x18\x02 \x01(\tR\bhttpAddr\x12\x1f\n\vmanager_tls\x18\x03 \x01(\bR\nmanagerTls\x12$\n\x0emanager" +
+	"_tls_ca\x18\x04 \x01(\tR\fmanagerTlsCa\x125\n\x17manager_tls_server_name\x18\x05 \x01(\tR\x14ma" +
+	"nagerTlsServerName\x12\x19\n\btls_cert\x18\x06 \x01(\tR\atlsCert\x12\x17\n\atls_key\x18\a \x01(\tR\x06" +
+	"tlsKey\x12\x1e\n\bpeer_tls\x18\b \x01(\bH\x00R\apeerTls\x88\x01\x01\x12\x1e\n\vpeer_tls_ca\x18\t \x01(\tR\tpee" +
+	"rTlsCa\x120\n\x14peer_hostname_suffix\x18\n \x01(\tR\x12peerHostnameSuffix\x12*\n\x11peer" +
+	"_manager_port\x18\v \x01(\tR\x0fpeerManagerPort\x12-\n\x13manager_api_key_set\x18\f \x01(" +
+	"\bR\x10managerApiKeySet\x12\x14\n\x05error\x18\r \x01(\tR\x05errorB\v\n\t_peer_tls\"\x95\x04\n\x1bUpdat" +
+	"eFrontendConfigRequest\x12!\n\fmanager_addr\x18\x01 \x01(\tR\vmanagerAddr\x12\x1b\n\thtt" +
+	"p_addr\x18\x02 \x01(\tR\bhttpAddr\x12\x1f\n\vmanager_tls\x18\x03 \x01(\bR\nmanagerTls\x12$\n\x0emanag" +
+	"er_tls_ca\x18\x04 \x01(\tR\fmanagerTlsCa\x125\n\x17manager_tls_server_name\x18\x05 \x01(\tR\x14" +
+	"managerTlsServerName\x12\x19\n\btls_cert\x18\x06 \x01(\tR\atlsCert\x12\x17\n\atls_key\x18\a \x01(\t" +
+	"R\x06tlsKey\x12\x1e\n\bpeer_tls\x18\b \x01(\bH\x00R\apeerTls\x88\x01\x01\x12\x1e\n\vpeer_tls_ca\x18\t \x01(\tR\tp" +
+	"eerTlsCa\x120\n\x14peer_hostname_suffix\x18\n \x01(\tR\x12peerHostnameSuffix\x12*\n\x11pe" +
+	"er_manager_port\x18\v \x01(\tR\x0fpeerManagerPort\x12&\n\x0fmanager_api_key\x18\f \x01(\tR" +
+	"\rmanagerApiKey\x121\n\x15clear_manager_api_key\x18\r \x01(\bR\x12clearManagerApiKe" +
+	"yB\v\n\t_peer_tls\"R\n\x1cUpdateFrontendConfigResponse\x12\x1c\n\tscheduled\x18\x01 \x01(" +
+	"\bR\tscheduled\x12\x14\n\x05error\x18\x02 \x01(\tR\x05error\"\x1b\n\x19GetRestshimdConfigRequest\"" +
+	"\xa4\x02\n\x1aGetRestshimdConfigResponse\x12!\n\fmanager_addr\x18\x01 \x01(\tR\vmanagerAdd" +
+	"r\x12\x1b\n\thttp_addr\x18\x02 \x01(\tR\bhttpAddr\x12\x1f\n\vmanager_tls\x18\x03 \x01(\bR\nmanagerTls\x12" +
+	"$\n\x0emanager_tls_ca\x18\x04 \x01(\tR\fmanagerTlsCa\x125\n\x17manager_tls_server_name" +
+	"\x18\x05 \x01(\tR\x14managerTlsServerName\x12\x19\n\btls_cert\x18\x06 \x01(\tR\atlsCert\x12\x17\n\atls_k" +
+	"ey\x18\a \x01(\tR\x06tlsKey\x12\x14\n\x05error\x18\b \x01(\tR\x05error\"\x90\x02\n\x1cUpdateRestshimdConfig" +
+	"Request\x12!\n\fmanager_addr\x18\x01 \x01(\tR\vmanagerAddr\x12\x1b\n\thttp_addr\x18\x02 \x01(\tR\bh" +
+	"ttpAddr\x12\x1f\n\vmanager_tls\x18\x03 \x01(\bR\nmanagerTls\x12$\n\x0emanager_tls_ca\x18\x04 \x01(\t" +
+	"R\fmanagerTlsCa\x125\n\x17manager_tls_server_name\x18\x05 \x01(\tR\x14managerTlsServe" +
+	"rName\x12\x19\n\btls_cert\x18\x06 \x01(\tR\atlsCert\x12\x17\n\atls_key\x18\a \x01(\tR\x06tlsKey\"S\n\x1dUpd" +
+	"ateRestshimdConfigResponse\x12\x1c\n\tscheduled\x18\x01 \x01(\bR\tscheduled\x12\x14\n\x05erro" +
+	"r\x18\x02 \x01(\tR\x05error\"\x17\n\x15GetRaftdConfigRequest\"\xb3\x02\n\x16GetRaftdConfigRespon" +
+	"se\x12\x19\n\bdata_dir\x18\x01 \x01(\tR\adataDir\x12\x16\n\x06socket\x18\x02 \x01(\tR\x06socket\x12\x1b\n\traft_bi" +
+	"nd\x18\x03 \x01(\tR\braftBind\x12\"\n\rraft_tls_cert\x18\x04 \x01(\tR\vraftTlsCert\x12 \n\fraft_t" +
+	"ls_key\x18\x05 \x01(\tR\nraftTlsKey\x12\x1e\n\vraft_tls_ca\x18\x06 \x01(\tR\traftTlsCa\x12,\n\x12inte" +
+	"rnal_token_set\x18\a \x01(\bR\x10internalTokenSet\x12\x1f\n\vsingle_node\x18\t \x01(\bR\nsin" +
+	"gleNode\x12\x14\n\x05error\x18\b \x01(\tR\x05error\"Q\n\x16SetDatasetQuotaRequest\x12!\n\fdatas" +
+	"et_name\x18\x01 \x01(\tR\vdatasetName\x12\x14\n\x05quota\x18\x02 \x01(\tR\x05quota\"/\n\x17SetDatasetQu" +
+	"otaResponse\x12\x14\n\x05error\x18\x01 \x01(\tR\x05error\"N\n\x17CreateVMSnapshotRequest\x12\x0e\n\x02" +
+	"id\x18\x01 \x01(\tR\x02id\x12#\n\rsnapshot_name\x18\x02 \x01(\tR\fsnapshotName\"0\n\x18CreateVMSna" +
+	"pshotResponse\x12\x14\n\x05error\x18\x01 \x01(\tR\x05error\"(\n\x16ListVMSnapshotsRequest\x12\x0e\n" +
+	"\x02id\x18\x01 \x01(\tR\x02id\"V\n\x17ListVMSnapshotsResponse\x12%\n\x0esnapshot_names\x18\x01 \x03(\t" +
+	"R\rsnapshotNames\x12\x14\n\x05error\x18\x02 \x01(\tR\x05error\"O\n\x18RestoreVMSnapshotReques" +
+	"t\x12\x0e\n\x02id\x18\x01 \x01(\tR\x02id\x12#\n\rsnapshot_name\x18\x02 \x01(\tR\fsnapshotName\"1\n\x19Restor" +
+	"eVMSnapshotResponse\x12\x14\n\x05error\x18\x01 \x01(\tR\x05error\"N\n\x17DeleteVMSnapshotReq" +
+	"uest\x12\x0e\n\x02id\x18\x01 \x01(\tR\x02id\x12#\n\rsnapshot_name\x18\x02 \x01(\tR\fsnapshotName\"0\n\x18Del" +
+	"eteVMSnapshotResponse\x12\x14\n\x05error\x18\x01 \x01(\tR\x05error\"\x8d\x01\n\vNodeService\x12\x12\n\x04n" +
+	"ame\x18\x01 \x01(\tR\x04name\x12\x16\n\x06status\x18\x02 \x01(\tR\x06status\x12\x18\n\aenabled\x18\x03 \x01(\bR\aenable" +
+	"d\x12\x16\n\x06detail\x18\x04 \x01(\tR\x06detail\x12 \n\vrestartable\x18\x05 \x01(\bR\vrestartable\"\x19\n\x17L" +
+	"istNodeServicesRequest\"h\n\x18ListNodeServicesResponse\x126\n\bservices\x18\x01" +
+	" \x03(\v2\x1a.apiary.rpc.v1.NodeServiceR\bservices\x12\x14\n\x05error\x18\x02 \x01(\tR\x05error" +
+	"\"E\n\x19RestartNodeServiceRequest\x12\x12\n\x04name\x18\x01 \x01(\tR\x04name\x12\x14\n\x05force\x18\x02 \x01(\b" +
+	"R\x05force\"\x83\x01\n\x1aRestartNodeServiceResponse\x12\x1c\n\tscheduled\x18\x01 \x01(\bR\tsched" +
+	"uled\x12\x14\n\x05error\x18\x02 \x01(\tR\x05error\x121\n\x14guardrail_overridden\x18\x03 \x01(\bR\x13guardr" +
+	"ailOverridden\"Z\n\x10GuardrailFinding\x12\x12\n\x04rule\x18\x01 \x01(\tR\x04rule\x12\x16\n\x06detail\x18" +
+	"\x02 \x01(\tR\x06detail\x12\x1a\n\bevidence\x18\x03 \x03(\tR\bevidence\"=\n\x0fGuardrailCaveat\x12\x12\n\x04" +
+	"rule\x18\x01 \x01(\tR\x04rule\x12\x16\n\x06detail\x18\x02 \x01(\tR\x06detail\"C\n\"PreflightApproveJoin" +
+	"RequestRequest\x12\x1d\n\nrequest_id\x18\x01 \x01(\tR\trequestId\"\xb3\x01\n#PreflightAppro" +
+	"veJoinRequestResponse\x12\x18\n\averdict\x18\x01 \x01(\tR\averdict\x12;\n\bfindings\x18\x02 \x03(" +
+	"\v2\x1f.apiary.rpc.v1.GuardrailFindingR\bfindings\x12\x14\n\x05error\x18\x03 \x01(\tR\x05err" +
+	"or\x12\x1f\n\vleader_hint\x18\x04 \x01(\tR\nleaderHint\"N\n\"PreflightRestartNodeServi" +
+	"ceRequest\x12\x12\n\x04name\x18\x01 \x01(\tR\x04name\x12\x14\n\x05force\x18\x02 \x01(\bR\x05force\"\xcc\x01\n#Prefligh" +
+	"tRestartNodeServiceResponse\x12\x18\n\averdict\x18\x01 \x01(\tR\averdict\x12;\n\bfinding" +
+	"s\x18\x02 \x03(\v2\x1f.apiary.rpc.v1.GuardrailFindingR\bfindings\x12\x14\n\x05error\x18\x03 \x01(" +
+	"\tR\x05error\x128\n\acaveats\x18\x04 \x03(\v2\x1e.apiary.rpc.v1.GuardrailCaveatR\acavea" +
+	"ts\"e\n\x1aReserveRestartLeaseRequest\x12\x18\n\aservice\x18\x01 \x01(\tR\aservice\x12\x17\n\ano" +
+	"de_id\x18\x02 \x01(\tR\x06nodeId\x12\x14\n\x05force\x18\x03 \x01(\bR\x05force\"\xf9\x01\n\x1bReserveRestartLeas" +
+	"eResponse\x12\x18\n\agranted\x18\x01 \x01(\bR\agranted\x121\n\x14guardrail_overridden\x18\x02 \x01(" +
+	"\bR\x13guardrailOverridden\x12\x19\n\blease_id\x18\x03 \x01(\x04R\aleaseId\x12;\n\bfindings\x18\x04 " +
+	"\x03(\v2\x1f.apiary.rpc.v1.GuardrailFindingR\bfindings\x12\x14\n\x05error\x18\x05 \x01(\tR\x05e" +
+	"rror\x12\x1f\n\vleader_hint\x18\x06 \x01(\tR\nleaderHint\"n\n\x1eConfirmRestartCompleted" +
+	"Request\x12\x18\n\aservice\x18\x01 \x01(\tR\aservice\x12\x17\n\anode_id\x18\x02 \x01(\tR\x06nodeId\x12\x19\n\ble" +
+	"ase_id\x18\x03 \x01(\x04R\aleaseId\"X\n\x1fConfirmRestartCompletedResponse\x12\x14\n\x05erro" +
+	"r\x18\x01 \x01(\tR\x05error\x12\x1f\n\vleader_hint\x18\x02 \x01(\tR\nleaderHint\"a\n\x1aStepAsideForR" +
+	"estartRequest\x12$\n\x0etarget_node_id\x18\x01 \x01(\tR\ftargetNodeId\x12\x1d\n\ntimeout_m" +
+	"s\x18\x02 \x01(\x04R\ttimeoutMs\"\xf1\x01\n\x1bStepAsideForRestartResponse\x12\x17\n\anode_id\x18\x01 " +
+	"\x01(\tR\x06nodeId\x12\x1d\n\nwas_leader\x18\x02 \x01(\bR\twasLeader\x12 \n\vtransferred\x18\x03 \x01(\bR" +
+	"\vtransferred\x12\"\n\rnew_leader_id\x18\x04 \x01(\tR\vnewLeaderId\x12&\n\x0fsafe_to_rest" +
+	"art\x18\x05 \x01(\bR\rsafeToRestart\x12\x16\n\x06detail\x18\x06 \x01(\tR\x06detail\x12\x14\n\x05error\x18\a \x01(\tR" +
+	"\x05error\"\xa4\x02\n\x19MutateColonyUpdateRequest\x12>\n\aacquire\x18\x01 \x01(\v2\".apiary.r" +
+	"pc.v1.AcquireColonyUpdateH\x00R\aacquire\x12>\n\aadvance\x18\x02 \x01(\v2\".apiary.r" +
+	"pc.v1.AdvanceColonyUpdateH\x00R\aadvance\x12>\n\arelease\x18\x03 \x01(\v2\".apiary.r" +
+	"pc.v1.ReleaseColonyUpdateH\x00R\arelease\x12A\n\bhandover\x18\x04 \x01(\v2#.apiary." +
+	"rpc.v1.HandoverColonyUpdateH\x00R\bhandoverB\x04\n\x02op\"\x83\x01\n\x13AcquireColonyU" +
+	"pdate\x12!\n\foperation_id\x18\x01 \x01(\tR\voperationId\x12-\n\x12holder_incarnation\x18\x02" +
+	" \x01(\tR\x11holderIncarnation\x12\x1a\n\btakeover\x18\x03 \x01(\bR\btakeover\"\xe7\x01\n\x13AdvanceC" +
+	"olonyUpdate\x126\n\x05fence\x18\x01 \x01(\v2 .apiary.rpc.v1.ColonyUpdateFenceR\x05fe" +
+	"nce\x12\x12\n\x04step\x18\x02 \x01(\tR\x04step\x12$\n\x0etarget_node_id\x18\x03 \x01(\tR\ftargetNodeId\x12\x16\n" +
+	"\x06detail\x18\x04 \x01(\tR\x06detail\x12F\n\vstep_record\x18\x05 \x01(\v2%.apiary.rpc.v1.Colon" +
+	"yUpdateStepRecordR\nstepRecord\"\x7f\n\x13ReleaseColonyUpdate\x126\n\x05fence\x18\x01 " +
+	"\x01(\v2 .apiary.rpc.v1.ColonyUpdateFenceR\x05fence\x12\x18\n\aoutcome\x18\x02 \x01(\tR\ao" +
+	"utcome\x12\x16\n\x06detail\x18\x03 \x01(\tR\x06detail\"\xc1\x01\n\x14HandoverColonyUpdate\x12?\n\nfrom_" +
+	"fence\x18\x01 \x01(\v2 .apiary.rpc.v1.ColonyUpdateFenceR\tfromFence\x12\x1c\n\nto_n" +
+	"ode_id\x18\x02 \x01(\tR\btoNodeId\x122\n\x15to_holder_incarnation\x18\x03 \x01(\tR\x13toHolderI" +
+	"ncarnation\x12\x16\n\x06reason\x18\x04 \x01(\tR\x06reason\"\x90\x02\n\x14ColonyUpdateHandover\x12 \n\ff" +
+	"rom_node_id\x18\x01 \x01(\tR\nfromNodeId\x12)\n\x10from_incarnation\x18\x02 \x01(\tR\x0ffromInc" +
+	"arnation\x12(\n\x10from_fence_token\x18\x03 \x01(\x04R\x0efromFenceToken\x12\x1c\n\nto_node_id" +
+	"\x18\x04 \x01(\tR\btoNodeId\x12%\n\x0eto_incarnation\x18\x05 \x01(\tR\rtoIncarnation\x12$\n\x0eto_fe" +
+	"nce_token\x18\x06 \x01(\x04R\ftoFenceToken\x12\x16\n\x06reason\x18\a \x01(\tR\x06reason\"\xac\x01\n\x11Colony" +
+	"UpdateFence\x12!\n\foperation_id\x18\x01 \x01(\tR\voperationId\x12$\n\x0eholder_node_id" +
+	"\x18\x02 \x01(\tR\fholderNodeId\x12\x1f\n\vfence_token\x18\x03 \x01(\x04R\nfenceToken\x12-\n\x12holder_" +
+	"incarnation\x18\x04 \x01(\tR\x11holderIncarnation\"\xa9\x01\n\x16ColonyUpdateStepRecord\x12" +
+	"\x14\n\x05index\x18\x01 \x01(\rR\x05index\x12\x12\n\x04step\x18\x02 \x01(\tR\x04step\x12\x18\n\aoutcome\x18\x03 \x01(\tR\aoutc" +
+	"ome\x12\x16\n\x06detail\x18\x04 \x01(\tR\x06detail\x12\x1a\n\bevidence\x18\x05 \x03(\tR\bevidence\x12\x17\n\anode_" +
+	"id\x18\x06 \x01(\tR\x06nodeId\"\xbf\x04\n\fColonyUpdate\x12!\n\foperation_id\x18\x01 \x01(\tR\voperati" +
+	"onId\x12$\n\x0eholder_node_id\x18\x02 \x01(\tR\fholderNodeId\x12-\n\x12holder_incarnation" +
+	"\x18\x03 \x01(\tR\x11holderIncarnation\x12\x1f\n\vfence_token\x18\x04 \x01(\x04R\nfenceToken\x12&\n\x0fgr" +
+	"anted_at_unix\x18\x05 \x01(\x03R\rgrantedAtUnix\x12$\n\x0etarget_node_id\x18\x06 \x01(\tR\ftarg" +
+	"etNodeId\x12\x12\n\x04step\x18\a \x01(\tR\x04step\x12\x16\n\x06active\x18\b \x01(\bR\x06active\x12\x18\n\aoutcome\x18" +
+	"\t \x01(\tR\aoutcome\x12\x16\n\x06detail\x18\n \x01(\tR\x06detail\x12&\n\x0fsettled_at_unix\x18\v \x01(\x03R" +
+	"\rsettledAtUnix\x12\x1a\n\btakeover\x18\f \x01(\bR\btakeover\x12;\n\x05steps\x18\r \x03(\v2%.apia" +
+	"ry.rpc.v1.ColonyUpdateStepRecordR\x05steps\x12&\n\x0fupdated_at_unix\x18\x0e \x01(\x03" +
+	"R\rupdatedAtUnix\x12A\n\thandovers\x18\x0f \x03(\v2#.apiary.rpc.v1.ColonyUpdateH" +
+	"andoverR\thandovers\"\xc0\x01\n\x1aMutateColonyUpdateResponse\x12\x1a\n\baccepted\x18\x01 " +
+	"\x01(\bR\baccepted\x123\n\x06update\x18\x02 \x01(\v2\x1b.apiary.rpc.v1.ColonyUpdateR\x06upda" +
+	"te\x12\x14\n\x05error\x18\x03 \x01(\tR\x05error\x12\x1f\n\vleader_hint\x18\x04 \x01(\tR\nleaderHint\x12\x1a\n\btak" +
+	"eover\x18\x05 \x01(\bR\btakeover\"q\n\x14CreateNetworkRequest\x12:\n\anetwork\x18\x01 \x01(\v2 " +
+	".apiary.rpc.v1.NetworkDefinitionR\anetwork\x12\x1d\n\ntimeout_ms\x18\x02 \x01(\rR\tt" +
+	"imeoutMs\"\x8a\x01\n\x15CreateNetworkResponse\x12:\n\anetwork\x18\x01 \x01(\v2 .apiary.rpc" +
+	".v1.NetworkDefinitionR\anetwork\x12\x14\n\x05error\x18\x02 \x01(\tR\x05error\x12\x1f\n\vleader_h" +
+	"int\x18\x03 \x01(\tR\nleaderHint\"\x15\n\x13ListNetworksRequest\"\x8b\x01\n\x14ListNetworksRes" +
+	"ponse\x12<\n\bnetworks\x18\x01 \x03(\v2 .apiary.rpc.v1.NetworkDefinitionR\bnetwo" +
+	"rks\x12\x14\n\x05error\x18\x02 \x01(\tR\x05error\x12\x1f\n\vleader_hint\x18\x03 \x01(\tR\nleaderHint\"E\n\x14De" +
+	"leteNetworkRequest\x12\x0e\n\x02id\x18\x01 \x01(\tR\x02id\x12\x1d\n\ntimeout_ms\x18\x02 \x01(\rR\ttimeoutM" +
+	"s\"\x8a\x01\n\x15DeleteNetworkResponse\x12:\n\anetwork\x18\x01 \x01(\v2 .apiary.rpc.v1.Net" +
+	"workDefinitionR\anetwork\x12\x14\n\x05error\x18\x02 \x01(\tR\x05error\x12\x1f\n\vleader_hint\x18\x03 \x01" +
+	"(\tR\nleaderHint\"Z\n\x15SetNetworkNameRequest\x12\x0e\n\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n\x04name\x18" +
+	"\x02 \x01(\tR\x04name\x12\x1d\n\ntimeout_ms\x18\x03 \x01(\rR\ttimeoutMs\"\x8b\x01\n\x16SetNetworkNameRes" +
+	"ponse\x12:\n\anetwork\x18\x01 \x01(\v2 .apiary.rpc.v1.NetworkDefinitionR\anetwor" +
+	"k\x12\x14\n\x05error\x18\x02 \x01(\tR\x05error\x12\x1f\n\vleader_hint\x18\x03 \x01(\tR\nleaderHint\"e\n\x11Crea" +
+	"teJailRequest\x121\n\x04jail\x18\x01 \x01(\v2\x1d.apiary.rpc.v1.JailDefinitionR\x04jail" +
+	"\x12\x1d\n\ntimeout_ms\x18\x02 \x01(\rR\ttimeoutMs\"~\n\x12CreateJailResponse\x121\n\x04jail\x18\x01 " +
+	"\x01(\v2\x1d.apiary.rpc.v1.JailDefinitionR\x04jail\x12\x14\n\x05error\x18\x02 \x01(\tR\x05error\x12\x1f" +
+	"\n\vleader_hint\x18\x03 \x01(\tR\nleaderHint\"f\n\x0fResourceProfile\x12\x14\n\x05vcpus\x18\x01 \x01(" +
+	"\rR\x05vcpus\x12\x1b\n\tmemory_mb\x18\x02 \x01(\x04R\bmemoryMb\x12 \n\fdisk_size_mb\x18\x03 \x01(\x04R\ndis" +
+	"kSizeMb\"\x9f\x03\n\x13WorkloadDescription\x12 \n\vdescription\x18\x01 \x01(\tR\vdescriptio" +
+	"n\x120\n\x14needs_full_isolation\x18\x02 \x01(\bR\x12needsFullIsolation\x128\n\x19needs_cus" +
+	"tom_kernel_or_os\x18\x03 \x01(\bR\x15needsCustomKernelOrOs\x12'\n\x0festimated_vcpus" +
+	"\x18\x04 \x01(\rR\x0eestimatedVcpus\x12.\n\x13estimated_memory_mb\x18\x05 \x01(\x04R\x11estimatedMe" +
+	"moryMb\x12*\n\x11estimated_disk_mb\x18\x06 \x01(\x04R\x0festimatedDiskMb\x12J\n\"expects_li" +
+	"ve_migration_or_snapshot\x18\a \x01(\bR\x1eexpectsLiveMigrationOrSnapshot\x12)" +
+	"\n\x10density_priority\x18\b \x01(\bR\x0fdensityPriority\"Z\n\x18RecommendCellTypeRe" +
+	"quest\x12>\n\bworkload\x18\x01 \x01(\v2\".apiary.rpc.v1.WorkloadDescriptionR\bwor" +
+	"kload\"\x9c\x01\n\x14RecommendationReason\x12;\n\x06factor\x18\x01 \x01(\x0e2#.apiary.rpc.v1.R" +
+	"ecommendationFactorR\x06factor\x12/\n\x06favors\x18\x02 \x01(\x0e2\x17.apiary.rpc.v1.Cell" +
+	"TypeR\x06favors\x12\x16\n\x06detail\x18\x03 \x01(\tR\x06detail\"\xbd\x02\n\x19RecommendCellTypeRespon" +
+	"se\x12K\n\x15recommended_cell_type\x18\x01 \x01(\x0e2\x17.apiary.rpc.v1.CellTypeR\x13reco" +
+	"mmendedCellType\x12G\n\nconfidence\x18\x02 \x01(\x0e2'.apiary.rpc.v1.Recommendati" +
+	"onConfidenceR\nconfidence\x12=\n\areasons\x18\x03 \x03(\v2#.apiary.rpc.v1.Recomm" +
+	"endationReasonR\areasons\x12K\n\x15alternative_cell_type\x18\x04 \x01(\x0e2\x17.apiary." +
+	"rpc.v1.CellTypeR\x13alternativeCellType\"\xe6\x02\n\x11CreateCellRequest\x12\x0e\n\x02id" +
+	"\x18\x01 \x01(\tR\x02id\x12\x12\n\x04name\x18\x02 \x01(\tR\x04name\x12\x17\n\anode_id\x18\x03 \x01(\tR\x06nodeId\x12G\n\rworkl" +
+	"oad_hint\x18\x04 \x01(\v2\".apiary.rpc.v1.WorkloadDescriptionR\fworkloadHint" +
+	"\x12I\n\x10resource_profile\x18\x05 \x01(\v2\x1e.apiary.rpc.v1.ResourceProfileR\x0freso" +
+	"urceProfile\x12\x1d\n\nnetwork_id\x18\x06 \x01(\tR\tnetworkId\x12B\n\x0efirewall_rules\x18\a \x03" +
+	"(\v2\x1b.apiary.rpc.v1.FirewallRuleR\rfirewallRules\x12\x1d\n\ntimeout_ms\x18\b \x01" +
+	"(\rR\ttimeoutMs\"\xfa\x01\n\x12CreateCellResponse\x12\x17\n\acell_id\x18\x01 \x01(\tR\x06cellId\x124\n" +
+	"\tcell_type\x18\x02 \x01(\x0e2\x17.apiary.rpc.v1.CellTypeR\bcellType\x12+\n\x02vm\x18\x03 \x01(\v2" +
+	"\x1b.apiary.rpc.v1.VMDefinitionR\x02vm\x121\n\x04jail\x18\x04 \x01(\v2\x1d.apiary.rpc.v1.J" +
+	"ailDefinitionR\x04jail\x12\x14\n\x05error\x18\x05 \x01(\tR\x05error\x12\x1f\n\vleader_hint\x18\x06 \x01(\tR\n" +
+	"leaderHint\"e\n\x11UpdateJailRequest\x121\n\x04jail\x18\x01 \x01(\v2\x1d.apiary.rpc.v1.Ja" +
+	"ilDefinitionR\x04jail\x12\x1d\n\ntimeout_ms\x18\x02 \x01(\rR\ttimeoutMs\"~\n\x12UpdateJailR" +
+	"esponse\x121\n\x04jail\x18\x01 \x01(\v2\x1d.apiary.rpc.v1.JailDefinitionR\x04jail\x12\x14\n\x05er" +
+	"ror\x18\x02 \x01(\tR\x05error\x12\x1f\n\vleader_hint\x18\x03 \x01(\tR\nleaderHint\"B\n\x11DeleteJailR" +
+	"equest\x12\x0e\n\x02id\x18\x01 \x01(\tR\x02id\x12\x1d\n\ntimeout_ms\x18\x02 \x01(\rR\ttimeoutMs\"~\n\x12DeleteJ" +
+	"ailResponse\x121\n\x04jail\x18\x01 \x01(\v2\x1d.apiary.rpc.v1.JailDefinitionR\x04jail\x12\x14" +
+	"\n\x05error\x18\x02 \x01(\tR\x05error\x12\x1f\n\vleader_hint\x18\x03 \x01(\tR\nleaderHint\"\x8a\x01\n\x1aSetJai" +
+	"lDesiredStateRequest\x12\x0e\n\x02id\x18\x01 \x01(\tR\x02id\x12=\n\rdesired_state\x18\x02 \x01(\x0e2\x18.ap" +
+	"iary.rpc.v1.JailStateR\fdesiredState\x12\x1d\n\ntimeout_ms\x18\x03 \x01(\rR\ttimeout" +
+	"Ms\"\x87\x01\n\x1bSetJailDesiredStateResponse\x121\n\x04jail\x18\x01 \x01(\v2\x1d.apiary.rpc.v1" +
+	".JailDefinitionR\x04jail\x12\x14\n\x05error\x18\x02 \x01(\tR\x05error\x12\x1f\n\vleader_hint\x18\x03 \x01(\t" +
+	"R\nleaderHint\"c\n\x16SetJailHostnameRequest\x12\x0e\n\x02id\x18\x01 \x01(\tR\x02id\x12\x1a\n\bhostna" +
+	"me\x18\x02 \x01(\tR\bhostname\x12\x1d\n\ntimeout_ms\x18\x03 \x01(\rR\ttimeoutMs\"\x83\x01\n\x17SetJailHos" +
+	"tnameResponse\x121\n\x04jail\x18\x01 \x01(\v2\x1d.apiary.rpc.v1.JailDefinitionR\x04jail" +
+	"\x12\x14\n\x05error\x18\x02 \x01(\tR\x05error\x12\x1f\n\vleader_hint\x18\x03 \x01(\tR\nleaderHint\" \n\x0eGetJa" +
+	"ilRequest\x12\x0e\n\x02id\x18\x01 \x01(\tR\x02id\"\x91\x01\n\x0fGetJailResponse\x121\n\x04jail\x18\x01 \x01(\v2\x1d.ap" +
+	"iary.rpc.v1.JailDefinitionR\x04jail\x12\x14\n\x05found\x18\x02 \x01(\bR\x05found\x12\x14\n\x05error\x18" +
+	"\x03 \x01(\tR\x05error\x12\x1f\n\vleader_hint\x18\x04 \x01(\tR\nleaderHint\"\x12\n\x10ListJailsReques" +
+	"t\"\x7f\n\x11ListJailsResponse\x123\n\x05jails\x18\x01 \x03(\v2\x1d.apiary.rpc.v1.JailDefini" +
+	"tionR\x05jails\x12\x14\n\x05error\x18\x02 \x01(\tR\x05error\x12\x1f\n\vleader_hint\x18\x03 \x01(\tR\nleaderHi" +
+	"nt\"\x17\n\x15ListJailsLocalRequest\"c\n\x16ListJailsLocalResponse\x123\n\x05jails\x18\x01" +
+	" \x03(\v2\x1d.apiary.rpc.v1.JailDefinitionR\x05jails\x12\x14\n\x05error\x18\x02 \x01(\tR\x05error" +
+	"\"F\n\x15ForcePurgeJailRequest\x12\x0e\n\x02id\x18\x01 \x01(\tR\x02id\x12\x1d\n\ntimeout_ms\x18\x02 \x01(\rR\tt" +
+	"imeoutMs\"\x82\x01\n\x16ForcePurgeJailResponse\x121\n\x04jail\x18\x01 \x01(\v2\x1d.apiary.rpc.v" +
+	"1.JailDefinitionR\x04jail\x12\x14\n\x05error\x18\x02 \x01(\tR\x05error\x12\x1f\n\vleader_hint\x18\x03 \x01(" +
+	"\tR\nleaderHint\"i\n\x12MigrateJailRequest\x12\x0e\n\x02id\x18\x01 \x01(\tR\x02id\x12$\n\x0etarget_no" +
+	"de_id\x18\x02 \x01(\tR\ftargetNodeId\x12\x1d\n\ntimeout_ms\x18\x03 \x01(\rR\ttimeoutMs\"\x7f\n\x13Migr" +
+	"ateJailResponse\x121\n\x04jail\x18\x01 \x01(\v2\x1d.apiary.rpc.v1.JailDefinitionR\x04ja" +
+	"il\x12\x14\n\x05error\x18\x02 \x01(\tR\x05error\x12\x1f\n\vleader_hint\x18\x03 \x01(\tR\nleaderHint\"u\n\x14Rep" +
+	"ortVMPhaseRequest\x12\x0e\n\x02id\x18\x01 \x01(\tR\x02id\x12,\n\x05phase\x18\x02 \x01(\x0e2\x16.apiary.rpc.v1" +
+	".VMPhaseR\x05phase\x12\x1f\n\vphase_error\x18\x03 \x01(\tR\nphaseError\"N\n\x15ReportVMPhas" +
+	"eResponse\x12\x14\n\x05error\x18\x01 \x01(\tR\x05error\x12\x1f\n\vleader_hint\x18\x02 \x01(\tR\nleaderHint" +
+	"\"1\n\x1fReportVMTeardownCompleteRequest\x12\x0e\n\x02id\x18\x01 \x01(\tR\x02id\"Y\n ReportVMT" +
+	"eardownCompleteResponse\x12\x14\n\x05error\x18\x01 \x01(\tR\x05error\x12\x1f\n\vleader_hint\x18\x02 \x01" +
+	"(\tR\nleaderHint\"y\n\x16ReportJailPhaseRequest\x12\x0e\n\x02id\x18\x01 \x01(\tR\x02id\x12.\n\x05phas" +
+	"e\x18\x02 \x01(\x0e2\x18.apiary.rpc.v1.JailPhaseR\x05phase\x12\x1f\n\vphase_error\x18\x03 \x01(\tR\np" +
+	"haseError\"P\n\x17ReportJailPhaseResponse\x12\x14\n\x05error\x18\x01 \x01(\tR\x05error\x12\x1f\n\vle" +
+	"ader_hint\x18\x02 \x01(\tR\nleaderHint\"3\n!ReportJailTeardownCompleteRequest" +
+	"\x12\x0e\n\x02id\x18\x01 \x01(\tR\x02id\"[\n\"ReportJailTeardownCompleteResponse\x12\x14\n\x05error\x18" +
+	"\x01 \x01(\tR\x05error\x12\x1f\n\vleader_hint\x18\x02 \x01(\tR\nleaderHint\"g\n\nAPIKeyInfo\x12\x0e\n\x02i" +
+	"d\x18\x01 \x01(\tR\x02id\x12\x12\n\x04name\x18\x02 \x01(\tR\x04name\x12!\n\fcreated_unix\x18\x03 \x01(\x03R\vcreatedUn" +
+	"ix\x12\x12\n\x04role\x18\x04 \x01(\tR\x04role\"\\\n\x13CreateAPIKeyRequest\x12\x12\n\x04name\x18\x01 \x01(\tR\x04nam" +
+	"e\x12\x1d\n\ntimeout_ms\x18\x02 \x01(\rR\ttimeoutMs\x12\x12\n\x04role\x18\x03 \x01(\tR\x04role\"\x93\x01\n\x14CreateA" +
+	"PIKeyResponse\x12+\n\x03key\x18\x01 \x01(\v2\x19.apiary.rpc.v1.APIKeyInfoR\x03key\x12\x17\n\ara" +
+	"w_key\x18\x02 \x01(\tR\x06rawKey\x12\x14\n\x05error\x18\x03 \x01(\tR\x05error\x12\x1f\n\vleader_hint\x18\x04 \x01(\tR\n" +
+	"leaderHint\"\x14\n\x12ListAPIKeysRequest\"{\n\x13ListAPIKeysResponse\x12-\n\x04keys\x18" +
+	"\x01 \x03(\v2\x19.apiary.rpc.v1.APIKeyInfoR\x04keys\x12\x14\n\x05error\x18\x02 \x01(\tR\x05error\x12\x1f\n\v" +
+	"leader_hint\x18\x03 \x01(\tR\nleaderHint\"D\n\x13RevokeAPIKeyRequest\x12\x0e\n\x02id\x18\x01 \x01(\t" +
+	"R\x02id\x12\x1d\n\ntimeout_ms\x18\x02 \x01(\rR\ttimeoutMs\"M\n\x14RevokeAPIKeyResponse\x12\x14\n\x05e" +
+	"rror\x18\x01 \x01(\tR\x05error\x12\x1f\n\vleader_hint\x18\x02 \x01(\tR\nleaderHint\"5\n\x1aSimulateNo" +
+	"deFailureRequest\x12\x17\n\anode_id\x18\x01 \x01(\tR\x06nodeId\"\xd4\x03\n\x1bSimulateNodeFailur" +
+	"eResponse\x12\x14\n\x05error\x18\x01 \x01(\tR\x05error\x12\x1f\n\vleader_hint\x18\x02 \x01(\tR\nleaderHint" +
+	"\x123\n\x06quorum\x18\x03 \x01(\v2\x1b.apiary.rpc.v1.QuorumImpactR\x06quorum\x12K\n\x0fowned_r" +
+	"esources\x18\x04 \x03(\v2\".apiary.rpc.v1.OwnedResourceImpactR\x0eownedResourc" +
+	"es\x12\\\n\x18replica_backed_resources\x18\x05 \x03(\v2\".apiary.rpc.v1.ReplicaBack" +
+	"edImpactR\x16replicaBackedResources\x12U\n\x12image_availability\x18\x06 \x03(\v2&.a" +
+	"piary.rpc.v1.ImageAvailabilityImpactR\x11imageAvailability\x12G\n\x0frelev" +
+	"ant_claims\x18\a \x03(\v2\x1e.apiary.rpc.v1.AssumptionClaimR\x0erelevantClaims" +
+	"\"\x87\x03\n\fQuorumImpact\x12&\n\x0ftarget_is_voter\x18\x01 \x01(\bR\rtargetIsVoter\x12!\n\ftot" +
+	"al_voters\x18\x02 \x01(\rR\vtotalVoters\x12)\n\x10remaining_voters\x18\x03 \x01(\rR\x0fremainin" +
+	"gVoters\x12<\n\x1aremaining_reachable_voters\x18\x04 \x01(\rR\x18remainingReachableV" +
+	"oters\x128\n\x18remaining_unknown_voters\x18\x05 \x01(\rR\x16remainingUnknownVoters\x12" +
+	"\x1f\n\vquorum_size\x18\x06 \x01(\rR\nquorumSize\x12\x1a\n\bsurvives\x18\a \x01(\bR\bsurvives\x12\x12\n\x04" +
+	"note\x18\b \x01(\tR\x04note\x128\n\x06voters\x18\t \x03(\v2 .apiary.rpc.v1.VoterReachabili" +
+	"tyR\x06voters\"P\n\x11VoterReachability\x12\x17\n\anode_id\x18\x01 \x01(\tR\x06nodeId\x12\"\n\freac" +
+	"hability\x18\x02 \x01(\tR\freachability\"\xc1\x01\n\x13ReplicaSyncEvidence\x12\x17\n\anode_id\x18" +
+	"\x01 \x01(\tR\x06nodeId\x12\x1a\n\bobserved\x18\x02 \x01(\bR\bobserved\x12\x12\n\x04role\x18\x03 \x01(\tR\x04role\x12'\n" +
+	"\x0fresource_status\x18\x04 \x01(\tR\x0eresourceStatus\x12 \n\vreplication\x18\x05 \x01(\tR\vrep" +
+	"lication\x12\x16\n\x06detail\x18\x06 \x01(\tR\x06detail\"\xb5\x02\n\x13OwnedResourceImpact\x12\x0e\n\x02id\x18\x01" +
+	" \x01(\tR\x02id\x12\x12\n\x04name\x18\x02 \x01(\tR\x04name\x12/\n\x04kind\x18\x03 \x01(\x0e2\x1b.apiary.rpc.v1.Resou" +
+	"rceKindR\x04kind\x12&\n\x0freplica_node_id\x18\x04 \x01(\tR\rreplicaNodeId\x128\n\averdict" +
+	"\x18\x05 \x01(\x0e2\x1e.apiary.rpc.v1.RecoveryVerdictR\averdict\x12 \n\vexplanation\x18\x06" +
+	" \x01(\tR\vexplanation\x12E\n\freplica_sync\x18\a \x01(\v2\".apiary.rpc.v1.ReplicaS" +
+	"yncEvidenceR\vreplicaSync\"\xb0\x01\n\x13ReplicaBackedImpact\x12\x0e\n\x02id\x18\x01 \x01(\tR\x02id" +
+	"\x12\x12\n\x04name\x18\x02 \x01(\tR\x04name\x12/\n\x04kind\x18\x03 \x01(\x0e2\x1b.apiary.rpc.v1.ResourceKindR" +
+	"\x04kind\x12\"\n\rowner_node_id\x18\x04 \x01(\tR\vownerNodeId\x12 \n\vexplanation\x18\x05 \x01(\tR\v" +
+	"explanation\">\n\x1dSimulateNetworkFailureRequest\x12\x1d\n\nnetwork_id\x18\x01 \x01(\t" +
+	"R\tnetworkId\"\xfb\x01\n\x1eSimulateNetworkFailureResponse\x12\x14\n\x05error\x18\x01 \x01(\tR\x05e" +
+	"rror\x12\x1f\n\vleader_hint\x18\x02 \x01(\tR\nleaderHint\x12:\n\anetwork\x18\x03 \x01(\v2 .apiary." +
+	"rpc.v1.NetworkDefinitionR\anetwork\x12R\n\x12affected_resources\x18\x04 \x03(\v2#." +
+	"apiary.rpc.v1.NetworkFailureImpactR\x11affectedResources\x12\x12\n\x04note\x18\x05 " +
+	"\x01(\tR\x04note\"\x81\x01\n\x14TraceCellPathRequest\x12\x17\n\acell_id\x18\x01 \x01(\tR\x06cellId\x12 \n\vd" +
+	"estination\x18\x02 \x01(\tR\vdestination\x12\x1a\n\bprotocol\x18\x03 \x01(\tR\bprotocol\x12\x12\n\x04por" +
+	"t\x18\x04 \x01(\rR\x04port\"\xb5\x01\n\rPathTraceStep\x12\x14\n\x05stage\x18\x01 \x01(\tR\x05stage\x126\n\x06status\x18" +
+	"\x02 \x01(\x0e2\x1e.apiary.rpc.v1.PathTraceStatusR\x06status\x12\x18\n\asummary\x18\x03 \x01(\tR\a" +
+	"summary\x12\x1a\n\bevidence\x18\x04 \x01(\tR\bevidence\x12 \n\vexplanation\x18\x05 \x01(\tR\vexplan" +
+	"ation\"\x83\x03\n\x15TraceCellPathResponse\x12\x14\n\x05error\x18\x01 \x01(\tR\x05error\x12\x1f\n\vleader_" +
+	"hint\x18\x02 \x01(\tR\nleaderHint\x12/\n\x04cell\x18\x03 \x01(\v2\x1b.apiary.rpc.v1.VMDefinitio" +
+	"nR\x04cell\x12:\n\anetwork\x18\x04 \x01(\v2 .apiary.rpc.v1.NetworkDefinitionR\anetw" +
+	"ork\x126\n\x06status\x18\x05 \x01(\x0e2\x1e.apiary.rpc.v1.PathTraceStatusR\x06status\x12\x18\n\as" +
+	"ummary\x18\x06 \x01(\tR\asummary\x122\n\x05steps\x18\a \x03(\v2\x1c.apiary.rpc.v1.PathTraceSt" +
+	"epR\x05steps\x12\x1d\n\nnon_atomic\x18\b \x01(\bR\tnonAtomic\x12!\n\factive_probe\x18\t \x01(\bR\v" +
+	"activeProbe\"u\n\x14NetworkFailureImpact\x12\x0e\n\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n\x04name\x18\x02 \x01(" +
+	"\tR\x04name\x12\x17\n\anode_id\x18\x03 \x01(\tR\x06nodeId\x12 \n\vexplanation\x18\x04 \x01(\tR\vexplanati" +
+	"on\"\xd9\x02\n\x17ImageAvailabilityImpact\x12\x1f\n\vresource_id\x18\x01 \x01(\tR\nresourceId\x12" +
+	"#\n\rresource_name\x18\x02 \x01(\tR\fresourceName\x12\x1d\n\nimage_name\x18\x03 \x01(\tR\timageN" +
+	"ame\x12,\n\x04role\x18\x04 \x01(\x0e2\x18.apiary.rpc.v1.ImageRoleR\x04role\x12A\n\averdict\x18\x05 \x01" +
+	"(\x0e2'.apiary.rpc.v1.ImageAvailabilityVerdictR\averdict\x12!\n\fsource_n" +
+	"odes\x18\x06 \x03(\tR\vsourceNodes\x12#\n\runknown_nodes\x18\a \x03(\tR\funknownNodes\x12 \n\v" +
+	"explanation\x18\b \x01(\tR\vexplanation\"C\n\"GetLocalNetworkBridgeStatusReq" +
+	"uest\x12\x1d\n\nnetwork_id\x18\x01 \x01(\tR\tnetworkId\"`\n#GetLocalNetworkBridgeStat" +
+	"usResponse\x12#\n\rbridge_status\x18\x01 \x01(\tR\fbridgeStatus\x12\x14\n\x05error\x18\x02 \x01(\tR\x05" +
+	"error\"\x9c\x02\n\rAssumptionKey\x121\n\x04kind\x18\x01 \x01(\x0e2\x1d.apiary.rpc.v1.Assumption" +
+	"KindR\x04kind\x12G\n\fsubject_kind\x18\x06 \x01(\x0e2$.apiary.rpc.v1.AssumptionSubje" +
+	"ctKindR\vsubjectKind\x12\x1d\n\nsubject_id\x18\x02 \x01(\tR\tsubjectId\x12#\n\rdependency" +
+	"_id\x18\x03 \x01(\tR\fdependencyId\x12\x1c\n\tqualifier\x18\x04 \x01(\tR\tqualifier\x12-\n\x13observe" +
+	"d_by_node_id\x18\x05 \x01(\tR\x10observedByNodeId\"\xc7\x02\n\x10AssumptionResult\x12.\n\x03key" +
+	"\x18\x01 \x01(\v2\x1c.apiary.rpc.v1.AssumptionKeyR\x03key\x12H\n\x0fobserved_status\x18\x02 \x01" +
+	"(\x0e2\x1f.apiary.rpc.v1.AssumptionStatusR\x0eobservedStatus\x127\n\x06status\x18\x03 " +
+	"\x01(\x0e2\x1f.apiary.rpc.v1.AssumptionStatusR\x06status\x12\x1f\n\vreason_code\x18\x04 \x01(" +
+	"\tR\nreasonCode\x12\x16\n\x06detail\x18\x05 \x01(\tR\x06detail\x121\n\x15last_observed_at_unix\x18\x06" +
+	" \x01(\x03R\x12lastObservedAtUnix\x12\x14\n\x05stale\x18\a \x01(\bR\x05stale\"\xf5\x01\n\x16AssumptionHis" +
+	"toryEntry\x12.\n\x03key\x18\x01 \x01(\v2\x1c.apiary.rpc.v1.AssumptionKeyR\x03key\x12H\n\x0fobs" +
+	"erved_status\x18\x02 \x01(\x0e2\x1f.apiary.rpc.v1.AssumptionStatusR\x0eobservedSta" +
+	"tus\x12\x1f\n\vreason_code\x18\x03 \x01(\tR\nreasonCode\x12\x16\n\x06detail\x18\x04 \x01(\tR\x06detail\x12(\n\x10" +
+	"recorded_at_unix\x18\x05 \x01(\x03R\x0erecordedAtUnix\"d\n\x1cListAssumptionResultsR" +
+	"equest\x129\n\x06filter\x18\x01 \x01(\v2\x1c.apiary.rpc.v1.AssumptionKeyH\x00R\x06filter\x88\x01" +
+	"\x01B\t\n\a_filter\"\x92\x02\n\x1dListAssumptionResultsResponse\x127\n\x06latest\x18\x01 \x03(\v2\x1f" +
+	".apiary.rpc.v1.AssumptionResultR\x06latest\x12?\n\ahistory\x18\x02 \x03(\v2%.apiar" +
+	"y.rpc.v1.AssumptionHistoryEntryR\ahistory\x12\x14\n\x05error\x18\x03 \x01(\tR\x05error\x12)" +
+	"\n\x10storage_degraded\x18\x04 \x01(\bR\x0fstorageDegraded\x126\n\x17storage_degraded_de" +
+	"tail\x18\x05 \x01(\tR\x15storageDegradedDetail\"$\n\"PurgeStaleAssumptionResults" +
+	"Request\"`\n#PurgeStaleAssumptionResultsResponse\x12#\n\rremoved_count\x18" +
+	"\x01 \x01(\rR\fremovedCount\x12\x14\n\x05error\x18\x02 \x01(\tR\x05error\"\"\n ListOrphanedHASTRes" +
+	"ourcesRequest\"\x9c\x01\n\x14OrphanedHASTResource\x12\x1f\n\vresource_id\x18\x01 \x01(\tR\nres" +
+	"ourceId\x12#\n\rresource_type\x18\x02 \x01(\tR\fresourceType\x12!\n\fdataset_name\x18\x03 \x01" +
+	"(\tR\vdatasetName\x12\x1b\n\tused_size\x18\x04 \x01(\tR\busedSize\"|\n!ListOrphanedHAST" +
+	"ResourcesResponse\x12A\n\tresources\x18\x01 \x03(\v2#.apiary.rpc.v1.OrphanedHAS" +
+	"TResourceR\tresources\x12\x14\n\x05error\x18\x02 \x01(\tR\x05error\"j\n\"CleanupOrphanedHAS" +
+	"TResourceRequest\x12\x1f\n\vresource_id\x18\x01 \x01(\tR\nresourceId\x12#\n\rresource_ty" +
+	"pe\x18\x02 \x01(\tR\fresourceType\";\n#CleanupOrphanedHASTResourceResponse\x12\x14\n" +
+	"\x05error\x18\x01 \x01(\tR\x05error\"@\n\x1fGetNetworkTeardownStatusRequest\x12\x1d\n\nnetwor" +
+	"k_id\x18\x01 \x01(\tR\tnetworkId\"\xc7\x01\n GetNetworkTeardownStatusResponse\x12\x18\n\apr" +
+	"esent\x18\x01 \x01(\bR\apresent\x12\x16\n\x06bridge\x18\x02 \x01(\tR\x06bridge\x12\x1d\n\nown_bridge\x18\x03 \x01(\b" +
+	"R\townBridge\x12\x19\n\bown_vlan\x18\x04 \x01(\bR\aownVlan\x12!\n\foutbound_nat\x18\x05 \x01(\bR\vou" +
+	"tboundNat\x12\x14\n\x05error\x18\x06 \x01(\tR\x05error\"\x8c\b\n\x12PendingJoinRequest\x12\x1d\n\nreques" +
+	"t_id\x18\x01 \x01(\tR\trequestId\x12\x17\n\anode_id\x18\x02 \x01(\tR\x06nodeId\x12*\n\x11raft_bind_addr" +
+	"ess\x18\x03 \x01(\tR\x0fraftBindAddress\x12\x12\n\x04code\x18\x04 \x01(\tR\x04code\x12*\n\x11requested_at_u" +
+	"nix\x18\x05 \x01(\x03R\x0frequestedAtUnix\x12&\n\x0fexpires_at_unix\x18\x06 \x01(\x03R\rexpiresAtUn" +
+	"ix\x128\n\x06status\x18\a \x01(\x0e2 .apiary.rpc.v1.JoinRequestStatusR\x06status\x120\n\x14" +
+	"tls_cert_fingerprint\x18\b \x01(\tR\x12tlsCertFingerprint\x129\n\x19joiner_log_sta" +
+	"te_observed\x18\t \x01(\bR\x16joinerLogStateObserved\x121\n\x15joiner_last_log_ind" +
+	"ex\x18\n \x01(\x04R\x12joinerLastLogIndex\x121\n\x15window_opened_at_unix\x18\v \x01(\x03R\x12win" +
+	"dowOpenedAtUnix\x12E\n\napproval_1\x18\f \x01(\v2&.apiary.rpc.v1.JoinApproval" +
+	"AttestationR\tapproval1\x12E\n\napproval_2\x18\r \x01(\v2&.apiary.rpc.v1.JoinA" +
+	"pprovalAttestationR\tapproval2\x12)\n\x10authorization_id\x18\x0e \x01(\tR\x0fauthori" +
+	"zationId\x12(\n\x10consumed_at_unix\x18\x0f \x01(\x03R\x0econsumedAtUnix\x125\n\x05stage\x18\x10 \x01(" +
+	"\x0e2\x1f.apiary.rpc.v1.JoinRequestStageR\x05stage\x127\n\x17advertised_fingerpr" +
+	"ints\x18\x11 \x03(\tR\x16advertisedFingerprints\x12.\n\x13first_code_attempts\x18\x12 \x01(\rR" +
+	"\x11firstCodeAttempts\x12.\n\x13second_pin_attempts\x18\x13 \x01(\rR\x11secondPinAttemp" +
+	"ts\x12:\n\x1asecond_pin_expires_at_unix\x18\x14 \x01(\x03R\x16secondPinExpiresAtUnix\x12." +
+	"\n\x13second_pin_reissues\x18\x15 \x01(\rR\x11secondPinReissues\"\xab\x03\n\x18RequestJoinCo" +
+	"lonyRequest\x12\x17\n\anode_id\x18\x01 \x01(\tR\x06nodeId\x12*\n\x11raft_bind_address\x18\x02 \x01(\tR" +
+	"\x0fraftBindAddress\x12\x1d\n\ntimeout_ms\x18\x03 \x01(\rR\ttimeoutMs\x12%\n\x0etarget_addres" +
+	"s\x18\x04 \x01(\tR\rtargetAddress\x120\n\x14tls_cert_fingerprint\x18\x05 \x01(\tR\x12tlsCertFin" +
+	"gerprint\x129\n\x19joiner_log_state_observed\x18\x06 \x01(\bR\x16joinerLogStateObser" +
+	"ved\x121\n\x15joiner_last_log_index\x18\a \x01(\x04R\x12joinerLastLogIndex\x12+\n\x11introd" +
+	"uction_code\x18\b \x01(\tR\x10introductionCode\x127\n\x17advertised_fingerprints\x18\t" +
+	" \x03(\tR\x16advertisedFingerprints\"\x85\x01\n\x19RequestJoinColonyResponse\x12\x1d\n\nre" +
+	"quest_id\x18\x01 \x01(\tR\trequestId\x12\x12\n\x04code\x18\x02 \x01(\tR\x04code\x12\x14\n\x05error\x18\x03 \x01(\tR\x05er" +
+	"ror\x12\x1f\n\vleader_hint\x18\x04 \x01(\tR\nleaderHint\"\xd3\x01\n\x1bGetJoinRequestStatusReq" +
+	"uest\x12\x1d\n\nrequest_id\x18\x01 \x01(\tR\trequestId\x12%\n\x0etarget_address\x18\x02 \x01(\tR\rtar" +
+	"getAddress\x12+\n\x11introduction_code\x18\x03 \x01(\tR\x10introductionCode\x12A\n\x1drecip" +
+	"ient_tls_certificate_pem\x18\x04 \x01(\tR\x1arecipientTlsCertificatePem\"\xfb\x01\n\x1cG" +
+	"etJoinRequestStatusResponse\x12;\n\arequest\x18\x01 \x01(\v2!.apiary.rpc.v1.Pen" +
+	"dingJoinRequestR\arequest\x12\x14\n\x05error\x18\x02 \x01(\tR\x05error\x12\x1d\n\nsecond_pin\x18\x03 \x01" +
+	"(\tR\tsecondPin\x12:\n\x1asecond_pin_expires_at_unix\x18\x04 \x01(\x03R\x16secondPinExpi" +
+	"resAtUnix\x12-\n\x12sealed_credentials\x18\x05 \x01(\fR\x11sealedCredentials\"\x19\n\x17List" +
+	"JoinRequestsRequest\"o\n\x18ListJoinRequestsResponse\x12=\n\brequests\x18\x01 \x03(" +
+	"\v2!.apiary.rpc.v1.PendingJoinRequestR\brequests\x12\x14\n\x05error\x18\x02 \x01(\tR\x05e" +
+	"rror\"\xcb\x01\n\x19ApproveJoinRequestRequest\x12\x1d\n\nrequest_id\x18\x01 \x01(\tR\trequestI" +
+	"d\x12\x1d\n\ntimeout_ms\x18\x02 \x01(\rR\ttimeoutMs\x12%\n\x0econfirm_phrase\x18\x03 \x01(\tR\rconfir" +
+	"mPhrase\x12*\n\x11approving_node_id\x18\x04 \x01(\tR\x0fapprovingNodeId\x12\x1d\n\nsecond_pi" +
+	"n\x18\x05 \x01(\tR\tsecondPin\"\x98\x02\n\x1aApproveJoinRequestResponse\x12;\n\arequest\x18\x01 \x01" +
+	"(\v2!.apiary.rpc.v1.PendingJoinRequestR\arequest\x12\x14\n\x05error\x18\x02 \x01(\tR\x05e" +
+	"rror\x12\x1f\n\vleader_hint\x18\x03 \x01(\tR\nleaderHint\x12B\n\x1dawaiting_second_authori" +
+	"zation\x18\x04 \x01(\bR\x1bawaitingSecondAuthorization\x12B\n\x1dsecond_authorizatio" +
+	"n_required\x18\x05 \x01(\tR\x1bsecondAuthorizationRequired\"\x8f\x01\n\x1dVerifyJoinIntr" +
+	"oductionRequest\x12\x1d\n\nrequest_id\x18\x01 \x01(\tR\trequestId\x12+\n\x11introduction_c" +
+	"ode\x18\x02 \x01(\tR\x10introductionCode\x12\"\n\ffingerprints\x18\x03 \x03(\tR\ffingerprints\"" +
+	"\xc4\x01\n\x1eVerifyJoinIntroductionResponse\x12;\n\arequest\x18\x01 \x01(\v2!.apiary.rpc" +
+	".v1.PendingJoinRequestR\arequest\x12\x14\n\x05error\x18\x02 \x01(\tR\x05error\x12\x1f\n\vleader_" +
+	"hint\x18\x03 \x01(\tR\nleaderHint\x12.\n\x13second_pin_reissued\x18\x04 \x01(\bR\x11secondPinRe" +
+	"issued\"<\n\x1bReissueJoinSecondPinRequest\x12\x1d\n\nrequest_id\x18\x01 \x01(\tR\treque" +
+	"stId\"\xc1\x01\n\x1cReissueJoinSecondPinResponse\x12;\n\arequest\x18\x01 \x01(\v2!.apiary." +
+	"rpc.v1.PendingJoinRequestR\arequest\x12\x14\n\x05error\x18\x02 \x01(\tR\x05error\x12\x1f\n\vlead" +
+	"er_hint\x18\x03 \x01(\tR\nleaderHint\x12-\n\x12reissues_remaining\x18\x04 \x01(\rR\x11reissuesR" +
+	"emaining\"\x84\x02\n\vTrustedPeer\x12\x17\n\anode_id\x18\x01 \x01(\tR\x06nodeId\x12\x1b\n\tcomb_name\x18\x02" +
+	" \x01(\tR\bcombName\x12 \n\vfingerprint\x18\x03 \x01(\tR\vfingerprint\x12\x19\n\bcert_pem\x18\x04 \x01" +
+	"(\tR\acertPem\x12$\n\x0enot_after_unix\x18\x05 \x01(\x03R\fnotAfterUnix\x12$\n\x0epinned_at_u" +
+	"nix\x18\x06 \x01(\x03R\fpinnedAtUnix\x12\x1b\n\tpinned_by\x18\a \x01(\tR\bpinnedBy\x12\x19\n\bis_voter" +
+	"\x18\b \x01(\bR\aisVoter\"K\n\x19PinPeerCertificateRequest\x12.\n\x04peer\x18\x01 \x01(\v2\x1a.api" +
+	"ary.rpc.v1.TrustedPeerR\x04peer\"\x83\x01\n\x1aPinPeerCertificateResponse\x12.\n\x04p" +
+	"eer\x18\x01 \x01(\v2\x1a.apiary.rpc.v1.TrustedPeerR\x04peer\x12\x14\n\x05error\x18\x02 \x01(\tR\x05erro" +
+	"r\x12\x1f\n\vleader_hint\x18\x03 \x01(\tR\nleaderHint\"N\n\x1bUnpinPeerCertificateReques" +
+	"t\x12\x17\n\anode_id\x18\x01 \x01(\tR\x06nodeId\x12\x16\n\x06reason\x18\x02 \x01(\tR\x06reason\"\x85\x01\n\x1cUnpinPeer" +
+	"CertificateResponse\x12.\n\x04peer\x18\x01 \x01(\v2\x1a.apiary.rpc.v1.TrustedPeerR\x04p" +
+	"eer\x12\x14\n\x05error\x18\x02 \x01(\tR\x05error\x12\x1f\n\vleader_hint\x18\x03 \x01(\tR\nleaderHint\"b\n\x17Jo" +
+	"inApprovalAttestation\x12\x15\n\x06key_id\x18\x01 \x01(\tR\x05keyId\x12\x17\n\anode_id\x18\x02 \x01(\tR\x06n" +
+	"odeId\x12\x17\n\aat_unix\x18\x03 \x01(\x03R\x06atUnix\"\xbb\x01\n\x10ColonyJoinWindow\x12\x18\n\aenabled\x18\x01" +
+	" \x01(\bR\aenabled\x12\x1b\n\topened_by\x18\x02 \x01(\tR\bopenedBy\x12\"\n\ropened_by_key\x18\x03 \x01(" +
+	"\tR\vopenedByKey\x12$\n\x0eopened_at_unix\x18\x04 \x01(\x03R\fopenedAtUnix\x12&\n\x0fexpires_" +
+	"at_unix\x18\x05 \x01(\x03R\rexpiresAtUnix\"g\n\x1bOpenColonyJoinWindowRequest\x12)\n\x10d" +
+	"uration_seconds\x18\x01 \x01(\x03R\x0fdurationSeconds\x12\x1d\n\ntimeout_ms\x18\x02 \x01(\rR\ttime" +
+	"outMs\"\xc8\x01\n\x1cOpenColonyJoinWindowResponse\x127\n\x06window\x18\x01 \x01(\v2\x1f.apiary." +
+	"rpc.v1.ColonyJoinWindowR\x06window\x128\n\x18applied_duration_seconds\x18\x02 \x01(" +
+	"\x03R\x16appliedDurationSeconds\x12\x14\n\x05error\x18\x03 \x01(\tR\x05error\x12\x1f\n\vleader_hint\x18\x04" +
+	" \x01(\tR\nleaderHint\"=\n\x1cCloseColonyJoinWindowRequest\x12\x1d\n\ntimeout_ms\x18\x01" +
+	" \x01(\rR\ttimeoutMs\"\x8f\x01\n\x1dCloseColonyJoinWindowResponse\x127\n\x06window\x18\x01 \x01(" +
+	"\v2\x1f.apiary.rpc.v1.ColonyJoinWindowR\x06window\x12\x14\n\x05error\x18\x02 \x01(\tR\x05error" +
+	"\x12\x1f\n\vleader_hint\x18\x03 \x01(\tR\nleaderHint\"\x80\x01\n\x0eColonyDiskSize\x12\x19\n\bfloor_mb" +
+	"\x18\x01 \x01(\x04R\afloorMb\x12\x15\n\x06set_by\x18\x02 \x01(\tR\x05setBy\x12\x1c\n\nset_by_key\x18\x03 \x01(\tR\bsetB" +
+	"yKey\x12\x1e\n\vset_at_unix\x18\x04 \x01(\x03R\tsetAtUnix\"T\n\x18SetColonyDiskSizeRequest" +
+	"\x12\x19\n\bfloor_mb\x18\x01 \x01(\x04R\afloorMb\x12\x1d\n\ntimeout_ms\x18\x02 \x01(\rR\ttimeoutMs\"\x9b\x01\n\x19S" +
+	"etColonyDiskSizeResponse\x12G\n\x10colony_disk_size\x18\x01 \x01(\v2\x1d.apiary.rpc." +
+	"v1.ColonyDiskSizeR\x0ecolonyDiskSize\x12\x14\n\x05error\x18\x02 \x01(\tR\x05error\x12\x1f\n\vleade" +
+	"r_hint\x18\x03 \x01(\tR\nleaderHint\"9\n\x18GetColonyDiskSizeRequest\x12\x1d\n\ntimeout_" +
+	"ms\x18\x01 \x01(\rR\ttimeoutMs\"z\n\x19GetColonyDiskSizeResponse\x12G\n\x10colony_disk_" +
+	"size\x18\x01 \x01(\v2\x1d.apiary.rpc.v1.ColonyDiskSizeR\x0ecolonyDiskSize\x12\x14\n\x05err" +
+	"or\x18\x02 \x01(\tR\x05error\"b\n\x1aGetColonyJoinWindowRequest\x12%\n\x0etarget_address\x18" +
+	"\x01 \x01(\tR\rtargetAddress\x12\x1d\n\ntimeout_ms\x18\x02 \x01(\rR\ttimeoutMs\"\xbe\x03\n\x1bGetColon" +
+	"yJoinWindowResponse\x127\n\x06window\x18\x01 \x01(\v2\x1f.apiary.rpc.v1.ColonyJoinWi" +
+	"ndowR\x06window\x12\x1f\n\vcolony_name\x18\x02 \x01(\tR\ncolonyName\x12y\n\x15managerd_finger" +
+	"prints\x18\x03 \x03(\v2D.apiary.rpc.v1.GetColonyJoinWindowResponse.Manager" +
+	"dFingerprintsEntryR\x14managerdFingerprints\x12$\n\x0ecolony_node_id\x18\x04 \x01(\t" +
+	"R\fcolonyNodeId\x12$\n\x0eleader_node_id\x18\x05 \x01(\tR\fleaderNodeId\x12\x14\n\x05error\x18\x06 " +
+	"\x01(\tR\x05error\x12\x1f\n\vleader_hint\x18\a \x01(\tR\nleaderHint\x1aG\n\x19ManagerdFingerpri" +
+	"ntsEntry\x12\x10\n\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"X\n\x18RejectJo" +
+	"inRequestRequest\x12\x1d\n\nrequest_id\x18\x01 \x01(\tR\trequestId\x12\x1d\n\ntimeout_ms\x18\x02 " +
+	"\x01(\rR\ttimeoutMs\"\x8f\x01\n\x19RejectJoinRequestResponse\x12;\n\arequest\x18\x01 \x01(\v2!." +
+	"apiary.rpc.v1.PendingJoinRequestR\arequest\x12\x14\n\x05error\x18\x02 \x01(\tR\x05error\x12" +
+	"\x1f\n\vleader_hint\x18\x03 \x01(\tR\nleaderHint\"\x7f\n\x18CancelJoinRequestRequest\x12\x1d\n\n" +
+	"request_id\x18\x01 \x01(\tR\trequestId\x12\x1d\n\ntimeout_ms\x18\x02 \x01(\rR\ttimeoutMs\x12%\n\x0eta" +
+	"rget_address\x18\x03 \x01(\tR\rtargetAddress\"\x8f\x01\n\x19CancelJoinRequestResponse\x12" +
+	";\n\arequest\x18\x01 \x01(\v2!.apiary.rpc.v1.PendingJoinRequestR\arequest\x12\x14\n\x05" +
+	"error\x18\x02 \x01(\tR\x05error\x12\x1f\n\vleader_hint\x18\x03 \x01(\tR\nleaderHint\"W\n\x17PurgeJoin" +
+	"RequestRequest\x12\x1d\n\nrequest_id\x18\x01 \x01(\tR\trequestId\x12\x1d\n\ntimeout_ms\x18\x02 \x01(" +
+	"\rR\ttimeoutMs\"Q\n\x18PurgeJoinRequestResponse\x12\x14\n\x05error\x18\x01 \x01(\tR\x05error\x12\x1f" +
+	"\n\vleader_hint\x18\x02 \x01(\tR\nleaderHint\"\x86\x01\n\x19UpdateVoterAddressRequest\x12\x17\n" +
+	"\anode_id\x18\x01 \x01(\tR\x06nodeId\x121\n\x15new_raft_bind_address\x18\x02 \x01(\tR\x12newRaftBi" +
+	"ndAddress\x12\x1d\n\ntimeout_ms\x18\x03 \x01(\rR\ttimeoutMs\"S\n\x1aUpdateVoterAddressRe" +
+	"sponse\x12\x14\n\x05error\x18\x01 \x01(\tR\x05error\x12\x1f\n\vleader_hint\x18\x02 \x01(\tR\nleaderHint\"\x16\n" +
+	"\x14ClusterHealthRequest\"\x9e\x02\n\x11ClusterNodeHealth\x12\x17\n\anode_id\x18\x01 \x01(\tR\x06no" +
+	"deId\x12\x16\n\x06status\x18\x02 \x01(\tR\x06status\x12 \n\vexplanation\x18\x03 \x01(\tR\vexplanation\x12D" +
+	"\n\fobservations\x18\x04 \x03(\v2 .apiary.rpc.v1.HealthObservationR\fobservat" +
+	"ions\x12\x16\n\x06dialed\x18\x05 \x01(\bR\x06dialed\x12*\n\x11raft_state_digest\x18\x06 \x01(\tR\x0fraftSta" +
+	"teDigest\x12,\n\x12raft_applied_index\x18\a \x01(\x04R\x10raftAppliedIndex\"\x89\x01\n\x15Clust" +
+	"erHealthResponse\x12\x14\n\x05error\x18\x01 \x01(\tR\x05error\x12\"\n\rlocal_node_id\x18\x02 \x01(\tR\vl" +
+	"ocalNodeId\x126\n\x05nodes\x18\x03 \x03(\v2 .apiary.rpc.v1.ClusterNodeHealthR\x05nod" +
+	"es\"\x15\n\x13HostPackagesRequest\"\xec\x01\n\x0eHostBaseSystem\x12%\n\x0ekernel_release\x18\x01" +
+	" \x01(\tR\rkernelRelease\x12\x18\n\aversion\x18\x02 \x01(\tR\aversion\x12\x18\n\apkgbase\x18\x03 \x01(\bR\a" +
+	"pkgbase\x12K\n\rupdate_status\x18\x04 \x01(\x0e2&.apiary.rpc.v1.HostPackageUpdate" +
+	"StatusR\fupdateStatus\x12\x1a\n\bobserved\x18\x05 \x01(\bR\bobserved\x12\x16\n\x06detail\x18\x06 \x01(\t" +
+	"R\x06detail\"\xcd\x01\n\x14HostPackageCatalogue\x12\x12\n\x04path\x18\x01 \x01(\tR\x04path\x12>\n\x05state\x18\x02" +
+	" \x01(\x0e2(.apiary.rpc.v1.HostPackageCatalogueStateR\x05state\x12(\n\x10modifie" +
+	"d_at_unix\x18\x03 \x01(\x03R\x0emodifiedAtUnix\x12\x1f\n\vage_seconds\x18\x04 \x01(\x03R\nageSeconds" +
+	"\x12\x16\n\x06detail\x18\x05 \x01(\tR\x06detail\"\xee\x01\n\x14HostInstalledPackage\x12\x12\n\x04name\x18\x01 \x01(\tR" +
+	"\x04name\x12\x18\n\aversion\x18\x02 \x01(\tR\aversion\x12\x16\n\x06origin\x18\x03 \x01(\tR\x06origin\x12K\n\rupdat" +
+	"e_status\x18\x04 \x01(\x0e2&.apiary.rpc.v1.HostPackageUpdateStatusR\fupdateSt" +
+	"atus\x12+\n\x11candidate_version\x18\x05 \x01(\tR\x10candidateVersion\x12\x16\n\x06detail\x18\x06 \x01(" +
+	"\tR\x06detail\"F\n\x12HostPackageUnknown\x12\x18\n\asubject\x18\x01 \x01(\tR\asubject\x12\x16\n\x06rea" +
+	"son\x18\x02 \x01(\tR\x06reason\"\xf9\x02\n\x14HostPackagesResponse\x12\x17\n\anode_id\x18\x01 \x01(\tR\x06nod" +
+	"eId\x121\n\x04base\x18\x02 \x01(\v2\x1d.apiary.rpc.v1.HostBaseSystemR\x04base\x12A\n\tcatalo" +
+	"gue\x18\x03 \x01(\v2#.apiary.rpc.v1.HostPackageCatalogueR\tcatalogue\x129\n\x05por" +
+	"ts\x18\x04 \x03(\v2#.apiary.rpc.v1.HostInstalledPackageR\x05ports\x12;\n\aunknown\x18" +
+	"\x05 \x03(\v2!.apiary.rpc.v1.HostPackageUnknownR\aunknown\x12\x1a\n\bheadline\x18\x06 " +
+	"\x01(\tR\bheadline\x12(\n\x10observed_at_unix\x18\a \x01(\x03R\x0eobservedAtUnix\x12\x14\n\x05error" +
+	"\x18\b \x01(\tR\x05error\"h\n\x1dExecuteNodeRestartPlanRequest\x12\x17\n\anode_id\x18\x01 \x01(\tR" +
+	"\x06nodeId\x12\x18\n\aservice\x18\x02 \x01(\tR\aservice\x12\x14\n\x05force\x18\x03 \x01(\bR\x05force\"t\n\x1eExecu" +
+	"teNodeRestartPlanResponse\x12<\n\x06result\x18\x01 \x01(\v2$.apiary.rpc.v1.NodeRe" +
+	"startPlanResultR\x06result\x12\x14\n\x05error\x18\x02 \x01(\tR\x05error\"\xe7\x02\n\x15NodeRestartPla" +
+	"nResult\x12\x18\n\aservice\x18\x01 \x01(\tR\aservice\x12\x17\n\anode_id\x18\x02 \x01(\tR\x06nodeId\x12\x19\n\ble" +
+	"ase_id\x18\x03 \x01(\x04R\aleaseId\x12\x18\n\aattempt\x18\x04 \x01(\x05R\aattempt\x12\x18\n\aoutcome\x18\x05 \x01(\t" +
+	"R\aoutcome\x12\x16\n\x06detail\x18\x06 \x01(\tR\x06detail\x12\x1a\n\bevidence\x18\a \x03(\tR\bevidence\x12F\n" +
+	"\nstep_aside\x18\b \x01(\v2'.apiary.rpc.v1.NodeRestartPlanStepAsideR\tstep" +
+	"Aside\x12&\n\x0fstarted_at_unix\x18\t \x01(\x03R\rstartedAtUnix\x12(\n\x10finished_at_uni" +
+	"x\x18\n \x01(\x03R\x0efinishedAtUnix\"\xdd\x01\n\x18NodeRestartPlanStepAside\x12\x1c\n\tattempte" +
+	"d\x18\x01 \x01(\bR\tattempted\x12\x1d\n\nwas_leader\x18\x02 \x01(\bR\twasLeader\x12 \n\vtransferred" +
+	"\x18\x03 \x01(\bR\vtransferred\x12\"\n\rnew_leader_id\x18\x04 \x01(\tR\vnewLeaderId\x12&\n\x0fsafe_" +
+	"to_restart\x18\x05 \x01(\bR\rsafeToRestart\x12\x16\n\x06detail\x18\x06 \x01(\tR\x06detail\"t\n\x17PushV" +
+	"MSnapshotToRequest\x12\x0e\n\x02id\x18\x01 \x01(\tR\x02id\x12#\n\rsnapshot_name\x18\x02 \x01(\tR\fsnaps" +
+	"hotName\x12$\n\x0etarget_node_id\x18\x03 \x01(\tR\ftargetNodeId\"0\n\x18PushVMSnapshotT" +
+	"oResponse\x12\x14\n\x05error\x18\x01 \x01(\tR\x05error\"I\n\x12VMSnapshotMetadata\x12\x0e\n\x02id\x18\x01 \x01(" +
+	"\tR\x02id\x12#\n\rsnapshot_name\x18\x02 \x01(\tR\fsnapshotName\"{\n\x18ReceiveVMSnapshotR" +
+	"equest\x12?\n\bmetadata\x18\x01 \x01(\v2!.apiary.rpc.v1.VMSnapshotMetadataH\x00R\bm" +
+	"etadata\x12\x16\n\x05chunk\x18\x02 \x01(\fH\x00R\x05chunkB\x06\n\x04data\"f\n\x19ReceiveVMSnapshotResp" +
+	"onse\x12\x0e\n\x02id\x18\x01 \x01(\tR\x02id\x12#\n\rsnapshot_name\x18\x02 \x01(\tR\fsnapshotName\x12\x14\n\x05err" +
+	"or\x18\x03 \x01(\tR\x05error\"\x91\x01\n\x1dRequestManagerdRestartRequest\x12$\n\x0etarget_node" +
+	"_id\x18\x01 \x01(\tR\ftargetNodeId\x126\n\x05fence\x18\x02 \x01(\v2 .apiary.rpc.v1.ColonyUpd" +
+	"ateFenceR\x05fence\x12\x12\n\x04step\x18\x03 \x01(\tR\x04step\"\xd8\x01\n\x1eRequestManagerdRestartRe" +
+	"sponse\x12\x1a\n\baccepted\x18\x01 \x01(\bR\baccepted\x12$\n\x0etarget_node_id\x18\x02 \x01(\tR\ftarg" +
+	"etNodeId\x12\x19\n\blease_id\x18\x03 \x01(\x04R\aleaseId\x12C\n\x06issued\x18\x04 \x01(\v2+.apiary.rpc" +
+	".v1.IssueManagerdRestartResponseR\x06issued\x12\x14\n\x05error\x18\x05 \x01(\tR\x05error\"\xcf" +
+	"\x02\n\x1bIssueManagerdRestartRequest\x12$\n\x0etarget_node_id\x18\x01 \x01(\tR\ftargetNo" +
+	"deId\x12!\n\foperation_id\x18\x02 \x01(\tR\voperationId\x126\n\x05fence\x18\x03 \x01(\v2 .apiary." +
+	"rpc.v1.ColonyUpdateFenceR\x05fence\x12\x12\n\x04step\x18\x04 \x01(\tR\x04step\x12\x19\n\blease_id\x18" +
+	"\x05 \x01(\x04R\aleaseId\x12-\n\x13handover_to_node_id\x18\x06 \x01(\tR\x10handoverToNodeId\x126\n" +
+	"\x17handover_to_incarnation\x18\a \x01(\tR\x15handoverToIncarnation\x12\x19\n\bdelay_m" +
+	"s\x18\b \x01(\x04R\adelayMs\"\xf8\x01\n\x1cIssueManagerdRestartResponse\x12\x1a\n\baccepted\x18\x01 " +
+	"\x01(\bR\baccepted\x12\x17\n\anode_id\x18\x02 \x01(\tR\x06nodeId\x12-\n\x12handover_performed\x18\x03 \x01" +
+	"(\bR\x11handoverPerformed\x12%\n\x0eexpected_build\x18\x04 \x01(\tR\rexpectedBuild\x12\x1f\n\v" +
+	"marker_path\x18\x05 \x01(\tR\nmarkerPath\x12\x16\n\x06detail\x18\x06 \x01(\tR\x06detail\x12\x14\n\x05error\x18\a" +
+	" \x01(\tR\x05error*\x7f\n\aVMState\x12\x18\n\x14VM_STATE_UNSPECIFIED\x10\x00\x12\x14\n\x10VM_STATE_STO" +
+	"PPED\x10\x01\x12\x14\n\x10VM_STATE_RUNNING\x10\x02\x12\x15\n\x11VM_STATE_DELETING\x10\x03\x12\x17\n\x13VM_STATE_" +
+	"RESTARTING\x10\x04*\x8f\x01\n\aVMPhase\x12\x18\n\x14VM_PHASE_UNSPECIFIED\x10\x00\x12\x15\n\x11VM_PHASE_C" +
+	"REATING\x10\x01\x12\x12\n\x0eVM_PHASE_READY\x10\x02\x12\x15\n\x11VM_PHASE_DELETING\x10\x03\x12\x12\n\x0eVM_PHASE" +
+	"_ERROR\x10\x04\x12\x14\n\x10VM_PHASE_STOPPED\x10\x05*\x8b\x01\n\tJailState\x12\x1a\n\x16JAIL_STATE_UNSPE" +
+	"CIFIED\x10\x00\x12\x16\n\x12JAIL_STATE_STOPPED\x10\x01\x12\x16\n\x12JAIL_STATE_RUNNING\x10\x02\x12\x17\n\x13JAIL" +
+	"_STATE_DELETING\x10\x03\x12\x19\n\x15JAIL_STATE_RESTARTING\x10\x04*\x9d\x01\n\tJailPhase\x12\x1a\n\x16JA" +
+	"IL_PHASE_UNSPECIFIED\x10\x00\x12\x17\n\x13JAIL_PHASE_CREATING\x10\x01\x12\x14\n\x10JAIL_PHASE_RE" +
+	"ADY\x10\x02\x12\x17\n\x13JAIL_PHASE_DELETING\x10\x03\x12\x14\n\x10JAIL_PHASE_ERROR\x10\x04\x12\x16\n\x12JAIL_PHA" +
+	"SE_STOPPED\x10\x05*K\n\bCellType\x12\x19\n\x15CELL_TYPE_UNSPECIFIED\x10\x00\x12\x10\n\fCELL_TYPE" +
+	"_VM\x10\x01\x12\x12\n\x0eCELL_TYPE_JAIL\x10\x02*\xc8\x01\n\x14RecommendationFactor\x12\x16\n\x12FACTOR_UNS" +
+	"PECIFIED\x10\x00\x12\x1d\n\x19FACTOR_ISOLATION_REQUIRED\x10\x01\x12!\n\x1dFACTOR_CUSTOM_KERNE" +
+	"L_REQUIRED\x10\x02\x12\x1c\n\x18FACTOR_MIGRATION_SUPPORT\x10\x03\x12\x1b\n\x17FACTOR_DENSITY_PRI" +
+	"ORITY\x10\x04\x12\x1b\n\x17FACTOR_RESOURCE_PROFILE\x10\x05*v\n\x18RecommendationConfidence" +
+	"\x12\x1a\n\x16CONFIDENCE_UNSPECIFIED\x10\x00\x12\x12\n\x0eCONFIDENCE_LOW\x10\x01\x12\x15\n\x11CONFIDENCE_M" +
+	"EDIUM\x10\x02\x12\x13\n\x0fCONFIDENCE_HIGH\x10\x03*[\n\fResourceKind\x12\x1d\n\x19RESOURCE_KIND_UN" +
+	"SPECIFIED\x10\x00\x12\x14\n\x10RESOURCE_KIND_VM\x10\x01\x12\x16\n\x12RESOURCE_KIND_JAIL\x10\x02*\xf7\x01\n\x0fRe" +
+	"coveryVerdict\x12 \n\x1cRECOVERY_VERDICT_UNSPECIFIED\x10\x00\x12 \n\x1cRECOVERY_VERD" +
+	"ICT_UNPROTECTED\x10\x01\x12'\n#RECOVERY_VERDICT_UNVERIFIED_REPLICA\x10\x02\x12$\n RE" +
+	"COVERY_VERDICT_REPLICA_IN_SYNC\x10\x03\x12(\n$RECOVERY_VERDICT_REPLICA_OUT" +
+	"_OF_SYNC\x10\x04\x12'\n#RECOVERY_VERDICT_REPLICA_UNOBSERVED\x10\x05*\xb5\x01\n\x0fPathTrac" +
+	"eStatus\x12!\n\x1dPATH_TRACE_STATUS_UNSPECIFIED\x10\x00\x12\x1b\n\x17PATH_TRACE_STATUS_" +
+	"CLEAR\x10\x01\x12\x1d\n\x19PATH_TRACE_STATUS_BLOCKED\x10\x02\x12\x1d\n\x19PATH_TRACE_STATUS_UNKN" +
+	"OWN\x10\x03\x12$\n PATH_TRACE_STATUS_NOT_APPLICABLE\x10\x04*s\n\tImageRole\x12\x1a\n\x16IMAG" +
+	"E_ROLE_UNSPECIFIED\x10\x00\x12\x12\n\x0eIMAGE_ROLE_ISO\x10\x01\x12\x19\n\x15IMAGE_ROLE_BASE_IMAG" +
+	"E\x10\x02\x12\x1b\n\x17IMAGE_ROLE_BASE_ARCHIVE\x10\x03*\xc4\x01\n\x18ImageAvailabilityVerdict\x12*\n" +
+	"&IMAGE_AVAILABILITY_VERDICT_UNSPECIFIED\x10\x00\x12(\n$IMAGE_AVAILABILITY_" +
+	"VERDICT_AVAILABLE\x10\x01\x12*\n&IMAGE_AVAILABILITY_VERDICT_UNAVAILABLE\x10\x02\x12" +
+	"&\n\"IMAGE_AVAILABILITY_VERDICT_UNKNOWN\x10\x03*\x9d\x02\n\x0eAssumptionKind\x12\x1f\n\x1bAS" +
+	"SUMPTION_KIND_UNSPECIFIED\x10\x00\x12.\n*ASSUMPTION_KIND_PEER_MANAGER_RPC_" +
+	"SUCCEEDED\x10\x01\x12/\n+ASSUMPTION_KIND_PEER_SECURITY_PATH_ACCEPTED\x10\x02\x12,\n(" +
+	"ASSUMPTION_KIND_NAT_UPLINK_DEFAULT_ROUTE\x10\x03\x12,\n(ASSUMPTION_KIND_RE" +
+	"PLICA_BHYVE_CONFIGURED\x10\x04\x12-\n)ASSUMPTION_KIND_REPLICA_NETWORK_BRID" +
+	"GE_UP\x10\x05*\xb3\x01\n\x10AssumptionStatus\x12!\n\x1dASSUMPTION_STATUS_UNSPECIFIED\x10\x00\x12" +
+	"\x1a\n\x16ASSUMPTION_STATUS_TRUE\x10\x01\x12\x1b\n\x17ASSUMPTION_STATUS_FALSE\x10\x02\x12\x1d\n\x19ASSU" +
+	"MPTION_STATUS_UNKNOWN\x10\x03\x12$\n ASSUMPTION_STATUS_NOT_APPLICABLE\x10\x04*\xa4\x01" +
+	"\n\x15AssumptionSubjectKind\x12'\n#ASSUMPTION_SUBJECT_KIND_UNSPECIFIED\x10\x00" +
+	"\x12 \n\x1cASSUMPTION_SUBJECT_KIND_NODE\x10\x01\x12\x1e\n\x1aASSUMPTION_SUBJECT_KIND_VM" +
+	"\x10\x02\x12 \n\x1cASSUMPTION_SUBJECT_KIND_JAIL\x10\x03*\xe0\x01\n\x11JoinRequestStatus\x12#\n\x1fJO" +
+	"IN_REQUEST_STATUS_UNSPECIFIED\x10\x00\x12\x1f\n\x1bJOIN_REQUEST_STATUS_PENDING\x10\x01" +
+	"\x12 \n\x1cJOIN_REQUEST_STATUS_APPROVED\x10\x02\x12 \n\x1cJOIN_REQUEST_STATUS_REJECT" +
+	"ED\x10\x03\x12!\n\x1dJOIN_REQUEST_STATUS_CANCELLED\x10\x04\x12\x1e\n\x1aJOIN_REQUEST_STATUS_F" +
+	"AILED\x10\x05*\xa2\x01\n\x10JoinRequestStage\x12\"\n\x1eJOIN_REQUEST_STAGE_UNSPECIFIED\x10\x00" +
+	"\x12!\n\x1dJOIN_REQUEST_STAGE_INTRODUCED\x10\x01\x12$\n JOIN_REQUEST_STAGE_CODE_V" +
+	"ERIFIED\x10\x02\x12!\n\x1dJOIN_REQUEST_STAGE_AUTHORIZED\x10\x03*\x96\x01\n\x17HostPackageUpda" +
+	"teStatus\x12*\n&HOST_PACKAGE_UPDATE_STATUS_UNSPECIFIED\x10\x00\x12&\n\"HOST_PAC" +
+	"KAGE_UPDATE_STATUS_CURRENT\x10\x01\x12'\n#HOST_PACKAGE_UPDATE_STATUS_OUTDA" +
+	"TED\x10\x02*\x99\x01\n\x19HostPackageCatalogueState\x12,\n(HOST_PACKAGE_CATALOGUE_ST" +
+	"ATE_UNSPECIFIED\x10\x00\x12&\n\"HOST_PACKAGE_CATALOGUE_STATE_FRESH\x10\x01\x12&\n\"HOS" +
+	"T_PACKAGE_CATALOGUE_STATE_STALE\x10\x022\xdeZ\n\x0eManagerService\x12E\n\x06Status\x12\x1c" +
+	".apiary.rpc.v1.StatusRequest\x1a\x1d.apiary.rpc.v1.StatusResponse\x12o\n\x14A" +
+	"uthenticatePassword\x12*.apiary.rpc.v1.AuthenticatePasswordRequest\x1a" +
+	"+.apiary.rpc.v1.AuthenticatePasswordResponse\x12i\n\x12GetLocalNodeHeal" +
+	"th\x12(.apiary.rpc.v1.GetLocalNodeHealthRequest\x1a).apiary.rpc.v1.Get" +
+	"LocalNodeHealthResponse\x12o\n\x14ListAssumptionClaims\x12*.apiary.rpc.v1." +
+	"ListAssumptionClaimsRequest\x1a+.apiary.rpc.v1.ListAssumptionClaims" +
+	"Response\x12l\n\x13SaveAssumptionClaim\x12).apiary.rpc.v1.SaveAssumptionCl" +
+	"aimRequest\x1a*.apiary.rpc.v1.SaveAssumptionClaimResponse\x12r\n\x15Delete" +
+	"AssumptionClaim\x12+.apiary.rpc.v1.DeleteAssumptionClaimRequest\x1a,.a" +
+	"piary.rpc.v1.DeleteAssumptionClaimResponse\x12u\n\x16ListOriginCertific" +
+	"ates\x12,.apiary.rpc.v1.ListOriginCertificatesRequest\x1a-.apiary.rpc." +
+	"v1.ListOriginCertificatesResponse\x12u\n\x16IssueOriginCertificate\x12,.ap" +
+	"iary.rpc.v1.IssueOriginCertificateRequest\x1a-.apiary.rpc.v1.IssueO" +
+	"riginCertificateResponse\x12\x84\x01\n\x1bListLetsEncryptCertificates\x121.apiar" +
+	"y.rpc.v1.ListLetsEncryptCertificatesRequest\x1a2.apiary.rpc.v1.List" +
+	"LetsEncryptCertificatesResponse\x12\x84\x01\n\x1bIssueLetsEncryptCertificate\x12" +
+	"1.apiary.rpc.v1.IssueLetsEncryptCertificateRequest\x1a2.apiary.rpc." +
+	"v1.IssueLetsEncryptCertificateResponse\x12K\n\bCreateVM\x12\x1e.apiary.rpc." +
+	"v1.CreateVMRequest\x1a\x1f.apiary.rpc.v1.CreateVMResponse\x12K\n\bUpdateVM\x12" +
+	"\x1e.apiary.rpc.v1.UpdateVMRequest\x1a\x1f.apiary.rpc.v1.UpdateVMResponse" +
+	"\x12K\n\bDeleteVM\x12\x1e.apiary.rpc.v1.DeleteVMRequest\x1a\x1f.apiary.rpc.v1.Del" +
+	"eteVMResponse\x12W\n\fForcePurgeVM\x12\".apiary.rpc.v1.ForcePurgeVMReques" +
+	"t\x1a#.apiary.rpc.v1.ForcePurgeVMResponse\x12N\n\tMigrateVM\x12\x1f.apiary.rpc" +
+	".v1.MigrateVMRequest\x1a .apiary.rpc.v1.MigrateVMResponse\x12l\n\x13SetVMF" +
+	"irewallPaused\x12).apiary.rpc.v1.SetVMFirewallPausedRequest\x1a*.apiar" +
+	"y.rpc.v1.SetVMFirewallPausedResponse\x12x\n\x17SetVMCloudflareExposure\x12" +
+	"-.apiary.rpc.v1.SetVMCloudflareExposureRequest\x1a..apiary.rpc.v1.S" +
+	"etVMCloudflareExposureResponse\x12f\n\x11SetVMDesiredState\x12'.apiary.rpc" +
+	".v1.SetVMDesiredStateRequest\x1a(.apiary.rpc.v1.SetVMDesiredStateRe" +
+	"sponse\x12i\n\x12SetVMFirewallRules\x12(.apiary.rpc.v1.SetVMFirewallRulesR" +
+	"equest\x1a).apiary.rpc.v1.SetVMFirewallRulesResponse\x12B\n\x05GetVM\x12\x1b.api" +
+	"ary.rpc.v1.GetVMRequest\x1a\x1c.apiary.rpc.v1.GetVMResponse\x12H\n\aListVMs" +
+	"\x12\x1d.apiary.rpc.v1.ListVMsRequest\x1a\x1e.apiary.rpc.v1.ListVMsResponse\x12" +
+	"W\n\fListVMsLocal\x12\".apiary.rpc.v1.ListVMsLocalRequest\x1a#.apiary.rpc" +
+	".v1.ListVMsLocalResponse\x12P\n\tUploadISO\x12\x1f.apiary.rpc.v1.UploadISOR" +
+	"equest\x1a .apiary.rpc.v1.UploadISOResponse(\x01\x12K\n\bListISOs\x12\x1e.apiary." +
+	"rpc.v1.ListISOsRequest\x1a\x1f.apiary.rpc.v1.ListISOsResponse\x12N\n\tDelet" +
+	"eISO\x12\x1f.apiary.rpc.v1.DeleteISORequest\x1a .apiary.rpc.v1.DeleteISOR" +
+	"esponse\x12N\n\tHostStats\x12\x1f.apiary.rpc.v1.HostStatsRequest\x1a .apiary.r" +
+	"pc.v1.HostStatsResponse\x12\x81\x01\n\x1aGetLocalHASTResourceStatus\x120.apiary." +
+	"rpc.v1.GetLocalHASTResourceStatusRequest\x1a1.apiary.rpc.v1.GetLoca" +
+	"lHASTResourceStatusResponse\x12Z\n\rClusterHealth\x12#.apiary.rpc.v1.Clu" +
+	"sterHealthRequest\x1a$.apiary.rpc.v1.ClusterHealthResponse\x12W\n\fGetVM" +
+	"Console\x12\".apiary.rpc.v1.GetVMConsoleRequest\x1a#.apiary.rpc.v1.GetV" +
+	"MConsoleResponse\x12^\n\x0eProxyVMConsole\x12#.apiary.rpc.v1.VMConsoleTunn" +
+	"elFrame\x1a#.apiary.rpc.v1.VMConsoleTunnelFrame(\x010\x01\x12]\n\x0eGetVMSerialL" +
+	"og\x12$.apiary.rpc.v1.GetVMSerialLogRequest\x1a%.apiary.rpc.v1.GetVMSe" +
+	"rialLogResponse\x12Z\n\rGetNodeConfig\x12#.apiary.rpc.v1.GetNodeConfigRe" +
+	"quest\x1a$.apiary.rpc.v1.GetNodeConfigResponse\x12c\n\x10UpdateNodeConfig\x12" +
+	"&.apiary.rpc.v1.UpdateNodeConfigRequest\x1a'.apiary.rpc.v1.UpdateNo" +
+	"deConfigResponse\x12~\n\x19UpdateManagerdBindAddress\x12/.apiary.rpc.v1.Up" +
+	"dateManagerdBindAddressRequest\x1a0.apiary.rpc.v1.UpdateManagerdBin" +
+	"dAddressResponse\x12~\n\x19ConvertStandaloneToJoiner\x12/.apiary.rpc.v1.Co" +
+	"nvertStandaloneToJoinerRequest\x1a0.apiary.rpc.v1.ConvertStandalone" +
+	"ToJoinerResponse\x12f\n\x11GetFrontendConfig\x12'.apiary.rpc.v1.GetFronten" +
+	"dConfigRequest\x1a(.apiary.rpc.v1.GetFrontendConfigResponse\x12o\n\x14Upda" +
+	"teFrontendConfig\x12*.apiary.rpc.v1.UpdateFrontendConfigRequest\x1a+.a" +
+	"piary.rpc.v1.UpdateFrontendConfigResponse\x12i\n\x12GetRestshimdConfig\x12" +
+	"(.apiary.rpc.v1.GetRestshimdConfigRequest\x1a).apiary.rpc.v1.GetRes" +
+	"tshimdConfigResponse\x12r\n\x15UpdateRestshimdConfig\x12+.apiary.rpc.v1.Up" +
+	"dateRestshimdConfigRequest\x1a,.apiary.rpc.v1.UpdateRestshimdConfig" +
+	"Response\x12]\n\x0eGetRaftdConfig\x12$.apiary.rpc.v1.GetRaftdConfigRequest" +
+	"\x1a%.apiary.rpc.v1.GetRaftdConfigResponse\x12`\n\x0fSetDatasetQuota\x12%.api" +
+	"ary.rpc.v1.SetDatasetQuotaRequest\x1a&.apiary.rpc.v1.SetDatasetQuot" +
+	"aResponse\x12c\n\x10CreateVMSnapshot\x12&.apiary.rpc.v1.CreateVMSnapshotRe" +
+	"quest\x1a'.apiary.rpc.v1.CreateVMSnapshotResponse\x12`\n\x0fListVMSnapshot" +
+	"s\x12%.apiary.rpc.v1.ListVMSnapshotsRequest\x1a&.apiary.rpc.v1.ListVMS" +
+	"napshotsResponse\x12f\n\x11RestoreVMSnapshot\x12'.apiary.rpc.v1.RestoreVMS" +
+	"napshotRequest\x1a(.apiary.rpc.v1.RestoreVMSnapshotResponse\x12c\n\x10Dele" +
+	"teVMSnapshot\x12&.apiary.rpc.v1.DeleteVMSnapshotRequest\x1a'.apiary.rp" +
+	"c.v1.DeleteVMSnapshotResponse\x12c\n\x10ListNodeServices\x12&.apiary.rpc.v" +
+	"1.ListNodeServicesRequest\x1a'.apiary.rpc.v1.ListNodeServicesRespon" +
+	"se\x12i\n\x12RestartNodeService\x12(.apiary.rpc.v1.RestartNodeServiceReque" +
+	"st\x1a).apiary.rpc.v1.RestartNodeServiceResponse\x12\x84\x01\n\x1bPreflightResta" +
+	"rtNodeService\x121.apiary.rpc.v1.PreflightRestartNodeServiceRequest" +
+	"\x1a2.apiary.rpc.v1.PreflightRestartNodeServiceResponse\x12l\n\x13ReserveR" +
+	"estartLease\x12).apiary.rpc.v1.ReserveRestartLeaseRequest\x1a*.apiary." +
+	"rpc.v1.ReserveRestartLeaseResponse\x12x\n\x17ConfirmRestartCompleted\x12-." +
+	"apiary.rpc.v1.ConfirmRestartCompletedRequest\x1a..apiary.rpc.v1.Con" +
+	"firmRestartCompletedResponse\x12l\n\x13StepAsideForRestart\x12).apiary.rpc" +
+	".v1.StepAsideForRestartRequest\x1a*.apiary.rpc.v1.StepAsideForResta" +
+	"rtResponse\x12i\n\x12MutateColonyUpdate\x12(.apiary.rpc.v1.MutateColonyUpd" +
+	"ateRequest\x1a).apiary.rpc.v1.MutateColonyUpdateResponse\x12u\n\x16Execute" +
+	"NodeRestartPlan\x12,.apiary.rpc.v1.ExecuteNodeRestartPlanRequest\x1a-." +
+	"apiary.rpc.v1.ExecuteNodeRestartPlanResponse\x12u\n\x16RequestManagerdR" +
+	"estart\x12,.apiary.rpc.v1.RequestManagerdRestartRequest\x1a-.apiary.rp" +
+	"c.v1.RequestManagerdRestartResponse\x12o\n\x14IssueManagerdRestart\x12*.ap" +
+	"iary.rpc.v1.IssueManagerdRestartRequest\x1a+.apiary.rpc.v1.IssueMan" +
+	"agerdRestartResponse\x12Z\n\rCreateNetwork\x12#.apiary.rpc.v1.CreateNetw" +
+	"orkRequest\x1a$.apiary.rpc.v1.CreateNetworkResponse\x12W\n\fListNetworks" +
+	"\x12\".apiary.rpc.v1.ListNetworksRequest\x1a#.apiary.rpc.v1.ListNetwork" +
+	"sResponse\x12Z\n\rDeleteNetwork\x12#.apiary.rpc.v1.DeleteNetworkRequest\x1a" +
+	"$.apiary.rpc.v1.DeleteNetworkResponse\x12]\n\x0eSetNetworkName\x12$.apiary" +
+	".rpc.v1.SetNetworkNameRequest\x1a%.apiary.rpc.v1.SetNetworkNameResp" +
+	"onse\x12W\n\fCreateAPIKey\x12\".apiary.rpc.v1.CreateAPIKeyRequest\x1a#.apiar" +
+	"y.rpc.v1.CreateAPIKeyResponse\x12T\n\vListAPIKeys\x12!.apiary.rpc.v1.Lis" +
+	"tAPIKeysRequest\x1a\".apiary.rpc.v1.ListAPIKeysResponse\x12W\n\fRevokeAPI" +
+	"Key\x12\".apiary.rpc.v1.RevokeAPIKeyRequest\x1a#.apiary.rpc.v1.RevokeAP" +
+	"IKeyResponse\x12Q\n\nCreateJail\x12 .apiary.rpc.v1.CreateJailRequest\x1a!.a" +
+	"piary.rpc.v1.CreateJailResponse\x12Q\n\nUpdateJail\x12 .apiary.rpc.v1.Up" +
+	"dateJailRequest\x1a!.apiary.rpc.v1.UpdateJailResponse\x12Q\n\nDeleteJail" +
+	"\x12 .apiary.rpc.v1.DeleteJailRequest\x1a!.apiary.rpc.v1.DeleteJailRes" +
+	"ponse\x12l\n\x13SetJailDesiredState\x12).apiary.rpc.v1.SetJailDesiredState" +
+	"Request\x1a*.apiary.rpc.v1.SetJailDesiredStateResponse\x12`\n\x0fSetJailHo" +
+	"stname\x12%.apiary.rpc.v1.SetJailHostnameRequest\x1a&.apiary.rpc.v1.Se" +
+	"tJailHostnameResponse\x12H\n\aGetJail\x12\x1d.apiary.rpc.v1.GetJailRequest\x1a" +
+	"\x1e.apiary.rpc.v1.GetJailResponse\x12N\n\tListJails\x12\x1f.apiary.rpc.v1.Lis" +
+	"tJailsRequest\x1a .apiary.rpc.v1.ListJailsResponse\x12]\n\x0eListJailsLoca" +
+	"l\x12$.apiary.rpc.v1.ListJailsLocalRequest\x1a%.apiary.rpc.v1.ListJail" +
+	"sLocalResponse\x12Q\n\nCreateCell\x12 .apiary.rpc.v1.CreateCellRequest\x1a!" +
+	".apiary.rpc.v1.CreateCellResponse\x12f\n\x11RecommendCellType\x12'.apiary." +
+	"rpc.v1.RecommendCellTypeRequest\x1a(.apiary.rpc.v1.RecommendCellTyp" +
+	"eResponse\x12]\n\x0eForcePurgeJail\x12$.apiary.rpc.v1.ForcePurgeJailReques" +
+	"t\x1a%.apiary.rpc.v1.ForcePurgeJailResponse\x12l\n\x13SimulateNodeFailure\x12" +
+	").apiary.rpc.v1.SimulateNodeFailureRequest\x1a*.apiary.rpc.v1.Simul" +
+	"ateNodeFailureResponse\x12u\n\x16SimulateNetworkFailure\x12,.apiary.rpc.v1" +
+	".SimulateNetworkFailureRequest\x1a-.apiary.rpc.v1.SimulateNetworkFa" +
+	"ilureResponse\x12Z\n\rTraceCellPath\x12#.apiary.rpc.v1.TraceCellPathRequ" +
+	"est\x1a$.apiary.rpc.v1.TraceCellPathResponse\x12T\n\vMigrateJail\x12!.apiar" +
+	"y.rpc.v1.MigrateJailRequest\x1a\".apiary.rpc.v1.MigrateJailResponse\x12" +
+	"Z\n\rReportVMPhase\x12#.apiary.rpc.v1.ReportVMPhaseRequest\x1a$.apiary.r" +
+	"pc.v1.ReportVMPhaseResponse\x12{\n\x18ReportVMTeardownComplete\x12..apiary" +
+	".rpc.v1.ReportVMTeardownCompleteRequest\x1a/.apiary.rpc.v1.ReportVM" +
+	"TeardownCompleteResponse\x12`\n\x0fReportJailPhase\x12%.apiary.rpc.v1.Repo" +
+	"rtJailPhaseRequest\x1a&.apiary.rpc.v1.ReportJailPhaseResponse\x12\x81\x01\n\x1aR" +
+	"eportJailTeardownComplete\x120.apiary.rpc.v1.ReportJailTeardownComp" +
+	"leteRequest\x1a1.apiary.rpc.v1.ReportJailTeardownCompleteResponse\x12N" +
+	"\n\tPushISOTo\x12\x1f.apiary.rpc.v1.PushISOToRequest\x1a .apiary.rpc.v1.Pus" +
+	"hISOToResponse\x12r\n\x15ListJailTemplateNames\x12+.apiary.rpc.v1.ListJail" +
+	"TemplateNamesRequest\x1a,.apiary.rpc.v1.ListJailTemplateNamesRespon" +
+	"se\x12i\n\x12PushJailTemplateTo\x12(.apiary.rpc.v1.PushJailTemplateToReque" +
+	"st\x1a).apiary.rpc.v1.PushJailTemplateToResponse\x12n\n\x13ReceiveJailTemp" +
+	"late\x12).apiary.rpc.v1.ReceiveJailTemplateRequest\x1a*.apiary.rpc.v1." +
+	"ReceiveJailTemplateResponse(\x01\x12c\n\x10PushVMSnapshotTo\x12&.apiary.rpc.v" +
+	"1.PushVMSnapshotToRequest\x1a'.apiary.rpc.v1.PushVMSnapshotToRespon" +
+	"se\x12h\n\x11ReceiveVMSnapshot\x12'.apiary.rpc.v1.ReceiveVMSnapshotRequest" +
+	"\x1a(.apiary.rpc.v1.ReceiveVMSnapshotResponse(\x01\x12\x84\x01\n\x1bGetLocalNetwork" +
+	"BridgeStatus\x121.apiary.rpc.v1.GetLocalNetworkBridgeStatusRequest\x1a" +
+	"2.apiary.rpc.v1.GetLocalNetworkBridgeStatusResponse\x12r\n\x15ListAssum" +
+	"ptionResults\x12+.apiary.rpc.v1.ListAssumptionResultsRequest\x1a,.apia" +
+	"ry.rpc.v1.ListAssumptionResultsResponse\x12\x84\x01\n\x1bPurgeStaleAssumption" +
+	"Results\x121.apiary.rpc.v1.PurgeStaleAssumptionResultsRequest\x1a2.api" +
+	"ary.rpc.v1.PurgeStaleAssumptionResultsResponse\x12~\n\x19ListOrphanedHA" +
+	"STResources\x12/.apiary.rpc.v1.ListOrphanedHASTResourcesRequest\x1a0.a" +
+	"piary.rpc.v1.ListOrphanedHASTResourcesResponse\x12\x84\x01\n\x1bCleanupOrphan" +
+	"edHASTResource\x121.apiary.rpc.v1.CleanupOrphanedHASTResourceReques" +
+	"t\x1a2.apiary.rpc.v1.CleanupOrphanedHASTResourceResponse\x12{\n\x18GetNetw" +
+	"orkTeardownStatus\x12..apiary.rpc.v1.GetNetworkTeardownStatusReques" +
+	"t\x1a/.apiary.rpc.v1.GetNetworkTeardownStatusResponse\x12f\n\x11RequestJoi" +
+	"nColony\x12'.apiary.rpc.v1.RequestJoinColonyRequest\x1a(.apiary.rpc.v1" +
+	".RequestJoinColonyResponse\x12o\n\x14GetJoinRequestStatus\x12*.apiary.rpc." +
+	"v1.GetJoinRequestStatusRequest\x1a+.apiary.rpc.v1.GetJoinRequestSta" +
+	"tusResponse\x12c\n\x10ListJoinRequests\x12&.apiary.rpc.v1.ListJoinRequests" +
+	"Request\x1a'.apiary.rpc.v1.ListJoinRequestsResponse\x12i\n\x12ApproveJoinR" +
+	"equest\x12(.apiary.rpc.v1.ApproveJoinRequestRequest\x1a).apiary.rpc.v1" +
+	".ApproveJoinRequestResponse\x12f\n\x11RejectJoinRequest\x12'.apiary.rpc.v1" +
+	".RejectJoinRequestRequest\x1a(.apiary.rpc.v1.RejectJoinRequestRespo" +
+	"nse\x12u\n\x16VerifyJoinIntroduction\x12,.apiary.rpc.v1.VerifyJoinIntroduc" +
+	"tionRequest\x1a-.apiary.rpc.v1.VerifyJoinIntroductionResponse\x12o\n\x14Re" +
+	"issueJoinSecondPin\x12*.apiary.rpc.v1.ReissueJoinSecondPinRequest\x1a+" +
+	".apiary.rpc.v1.ReissueJoinSecondPinResponse\x12i\n\x12PinPeerCertificat" +
+	"e\x12(.apiary.rpc.v1.PinPeerCertificateRequest\x1a).apiary.rpc.v1.PinP" +
+	"eerCertificateResponse\x12o\n\x14UnpinPeerCertificate\x12*.apiary.rpc.v1.U" +
+	"npinPeerCertificateRequest\x1a+.apiary.rpc.v1.UnpinPeerCertificateR" +
+	"esponse\x12\x84\x01\n\x1bPreflightApproveJoinRequest\x121.apiary.rpc.v1.Prefligh" +
+	"tApproveJoinRequestRequest\x1a2.apiary.rpc.v1.PreflightApproveJoinR" +
+	"equestResponse\x12f\n\x11CancelJoinRequest\x12'.apiary.rpc.v1.CancelJoinRe" +
+	"questRequest\x1a(.apiary.rpc.v1.CancelJoinRequestResponse\x12c\n\x10PurgeJ" +
+	"oinRequest\x12&.apiary.rpc.v1.PurgeJoinRequestRequest\x1a'.apiary.rpc." +
+	"v1.PurgeJoinRequestResponse\x12o\n\x14OpenColonyJoinWindow\x12*.apiary.rpc" +
+	".v1.OpenColonyJoinWindowRequest\x1a+.apiary.rpc.v1.OpenColonyJoinWi" +
+	"ndowResponse\x12r\n\x15CloseColonyJoinWindow\x12+.apiary.rpc.v1.CloseColon" +
+	"yJoinWindowRequest\x1a,.apiary.rpc.v1.CloseColonyJoinWindowResponse" +
+	"\x12f\n\x11SetColonyDiskSize\x12'.apiary.rpc.v1.SetColonyDiskSizeRequest\x1a(" +
+	".apiary.rpc.v1.SetColonyDiskSizeResponse\x12f\n\x11GetColonyDiskSize\x12'." +
+	"apiary.rpc.v1.GetColonyDiskSizeRequest\x1a(.apiary.rpc.v1.GetColony" +
+	"DiskSizeResponse\x12l\n\x13GetColonyJoinWindow\x12).apiary.rpc.v1.GetColon" +
+	"yJoinWindowRequest\x1a*.apiary.rpc.v1.GetColonyJoinWindowResponse\x12i" +
+	"\n\x12UpdateVoterAddress\x12(.apiary.rpc.v1.UpdateVoterAddressRequest\x1a)" +
+	".apiary.rpc.v1.UpdateVoterAddressResponse\x12W\n\fHostPackages\x12\".apia" +
+	"ry.rpc.v1.HostPackagesRequest\x1a#.apiary.rpc.v1.HostPackagesRespon" +
+	"seB-Z+github.com/glenjbarber/apiary/api/rpc;rpcpbb\x06proto3"
 
 var (
 	file_api_rpc_manager_proto_rawDescOnce sync.Once
