@@ -59,7 +59,7 @@
         <tr><th>Remaining voters (configured)</th><td>{{.SimulateQuorum.RemainingVoters}} of {{.SimulateQuorum.TotalVoters}} total (quorum needs {{.SimulateQuorum.QuorumSize}})</td></tr>
         <tr><th>Remaining voters (confirmed reachable)</th><td>{{.SimulateQuorum.Reachable}}</td></tr>
         <tr><th>Remaining voters (reachability unverified)</th><td>{{.SimulateQuorum.Unknown}}</td></tr>
-        <tr><th>Verdict</th><td>{{if .SimulateQuorum.Survives}}<span class="badge ready">quorum survives</span>{{else}}<span class="badge critical">quorum LOST</span>{{end}}</td></tr>
+        <tr><th>Verdict</th><td>{{if eq .SimulateQuorum.Verdict "survives"}}<span class="badge ready">quorum survives</span>{{else if eq .SimulateQuorum.Verdict "lost"}}<span class="badge critical">quorum LOST</span>{{else}}<span class="badge unknown">quorum status UNKNOWN</span>{{end}}</td></tr>
         <tr><th>Note</th><td>{{.SimulateQuorum.Note}}</td></tr>
       </tbody>
     </table>
