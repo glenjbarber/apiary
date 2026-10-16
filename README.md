@@ -29,6 +29,14 @@ agent rather than a bolted-on external dependency. Each physical machine
 in the cluster is a **comb**; the VMs and jails it hosts are its
 **cells**.
 
+**[Watchgoose heartbeat monitoring](https://watchgoose.com/)** is
+available per Comb. Enable it from **Machine → Operations → Watchgoose
+monitoring** and enter the full Watchgoose UUID or slug ping URL. The
+URL is stored as a secret and is never shown again; saved settings take
+effect after `managerd` restarts on that Comb. A heartbeat confirms a
+report reached Watchgoose, not the health of the Comb's VMs, jails, or
+guests.
+
 ## Vocabulary
 
 Apiary's product language draws on both the organization of the bees
