@@ -126,6 +126,19 @@ func DerivePeerAPIKey(colonyToken, requestID, nodeID string) (string, error) {
 	return "apk_" + base64.RawURLEncoding.EncodeToString(mac.Sum(nil)), nil
 }
 
+// DeriveColonyPeerAPIKey returns the shared Operator key used to backfill
+// existing members that joined before peer credentials were installed
+// automatically. It is deterministic from the Colony's shared restart token,
+// and domain-separated from request-bound join keys.
+func DeriveColonyPeerAPIKey(colonyToken string) (string, error) {
+	if colonyToken == "" {
+		return "", errors.New("joincredential: Colony restart token is required")
+	}
+	mac := hmac.New(sha256.New, []byte(colonyToken))
+	_, _ = mac.Write([]byte("apiary-colony-peer-key/v1\x00"))
+	return "apk_" + base64.RawURLEncoding.EncodeToString(mac.Sum(nil)), nil
+}
+
 // AssociatedData binds an envelope to one approved request and its exact
 // advertised serving certificate. A ciphertext copied to another request,
 // Comb identity or certificate cannot be opened successfully.

@@ -16,7 +16,7 @@
 // be folded into managerd either.
 //
 // SCOPE, deliberately narrow. force-restart, install, join-authorize,
-// join-introduce, pin-trusted-peers, restart-guardrail-provision and
+// join-introduce, pin-trusted-peers, peer-credential-backfill, restart-guardrail-provision and
 // migrate-tls-dir, and no socket, no terminal UI, and no command group
 // that has not been asked for: a command that is present and wrong is
 // worse than one that is absent, and the larger design in ADR-0136
@@ -86,6 +86,12 @@ Usage:
                             Root only, run on a member of the Colony,
                             and every input is checked before the
                             first pin is sent
+  apiaryctl peer-credential-backfill
+                            install the restart-token-derived Colony
+                            peer key on a Comb that predates automatic
+                            join credential delivery. Run on the leader
+                            first, then every other existing Comb.
+                            Root only; never prints either credential
   apiaryctl restart-guardrail-provision
                             generate ADR-0103's restart-guardrail token
                             on this Comb for a Colony that has none
@@ -159,6 +165,8 @@ func main() {
 		os.Exit(runForceRestart(args[1:]))
 	case "pin-trusted-peers":
 		os.Exit(runPinTrustedPeers(args[1:]))
+	case "peer-credential-backfill":
+		os.Exit(runPeerCredentialBackfill(args[1:]))
 	case "restart-guardrail-provision":
 		os.Exit(runRestartGuardrailProvision(args[1:]))
 	case "migrate-tls-dir":
