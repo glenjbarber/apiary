@@ -7148,6 +7148,7 @@ type GetNodeConfigResponse struct {
 	WatchgooseEndpointSet bool   `protobuf:"varint,56,opt,name=watchgoose_endpoint_set,json=watchgooseEndpointSet,proto3" json:"watchgoose_endpoint_set,omitempty"`
 	WatchgooseInterval    string `protobuf:"bytes,57,opt,name=watchgoose_interval,json=watchgooseInterval,proto3" json:"watchgoose_interval,omitempty"`
 	WatchgooseTimeout     string `protobuf:"bytes,58,opt,name=watchgoose_timeout,json=watchgooseTimeout,proto3" json:"watchgoose_timeout,omitempty"`
+	WatchgooseBadgeUrl    string `protobuf:"bytes,59,opt,name=watchgoose_badge_url,json=watchgooseBadgeUrl,proto3" json:"watchgoose_badge_url,omitempty"`
 	unknownFields         protoimpl.UnknownFields
 	sizeCache             protoimpl.SizeCache
 }
@@ -7524,6 +7525,12 @@ func (x *GetNodeConfigResponse) GetWatchgooseInterval() string {
 func (x *GetNodeConfigResponse) GetWatchgooseTimeout() string {
 	if x != nil {
 		return x.WatchgooseTimeout
+	}
+	return ""
+}
+func (x *GetNodeConfigResponse) GetWatchgooseBadgeUrl() string {
+	if x != nil {
+		return x.WatchgooseBadgeUrl
 	}
 	return ""
 }
@@ -8066,6 +8073,8 @@ type UpdateNodeConfigRequest struct {
 	ClearWatchgooseEndpoint bool   `protobuf:"varint,57,opt,name=clear_watchgoose_endpoint,json=clearWatchgooseEndpoint,proto3" json:"clear_watchgoose_endpoint,omitempty"`
 	WatchgooseInterval      string `protobuf:"bytes,58,opt,name=watchgoose_interval,json=watchgooseInterval,proto3" json:"watchgoose_interval,omitempty"`
 	WatchgooseTimeout       string `protobuf:"bytes,59,opt,name=watchgoose_timeout,json=watchgooseTimeout,proto3" json:"watchgoose_timeout,omitempty"`
+	WatchgooseBadgeUrl      string `protobuf:"bytes,60,opt,name=watchgoose_badge_url,json=watchgooseBadgeUrl,proto3" json:"watchgoose_badge_url,omitempty"`
+	ClearWatchgooseBadgeUrl bool   `protobuf:"varint,61,opt,name=clear_watchgoose_badge_url,json=clearWatchgooseBadgeUrl,proto3" json:"clear_watchgoose_badge_url,omitempty"`
 	unknownFields           protoimpl.UnknownFields
 	sizeCache               protoimpl.SizeCache
 }
@@ -8459,6 +8468,15 @@ func (x *UpdateNodeConfigRequest) GetWatchgooseTimeout() string {
 		return x.WatchgooseTimeout
 	}
 	return ""
+}
+func (x *UpdateNodeConfigRequest) GetWatchgooseBadgeUrl() string {
+	if x != nil {
+		return x.WatchgooseBadgeUrl
+	}
+	return ""
+}
+func (x *UpdateNodeConfigRequest) GetClearWatchgooseBadgeUrl() bool {
+	return x != nil && x.ClearWatchgooseBadgeUrl
 }
 
 type UpdateNodeConfigResponse struct {
@@ -22169,7 +22187,9 @@ const file_api_rpc_manager_proto_rawDesc = "" +
 	"\ttruncated\x18\x02 \x01(\bR\ttruncated\x12\x1c\n" +
 	"\tavailable\x18\x03 \x01(\bR\tavailable\x12\x14\n" +
 	"\x05error\x18\x04 \x01(\tR\x05error\"\x16\n" +
-	"\x14GetNodeConfigRequest\"\xb4\x12\n" +
+	"\x14GetNodeConfigRequest\"" +
+	"\xe6\x12" +
+	"\n" +
 	"\x15GetNodeConfigResponse\x12\x16\n" +
 	"\x06uplink\x18\x01 \x01(\tR\x06uplink\x12\x1d\n" +
 	"\n" +
@@ -22230,7 +22250,9 @@ const file_api_rpc_manager_proto_rawDesc = "" +
 	"\x12watchgoose_timeout\x18: \x01(\tR\x11watchgooseTimeoutB\x0f\n" +
 	"\r_jail_enabledB\x0f\n" +
 	"\r_hast_enabledB\v\n" +
-	"\t_peer_tls\"\xf0\x01\n" +
+	"\t_peer_tls" +
+	"\x120\n\x14watchgoose_badge_url\x18; \x01(\tR\x12watchgooseBadgeUrl" +
+	"\"\xf0\x01\n" +
 	"\fConfigChange\x12\x14\n" +
 	"\x05field\x18\x01 \x01(\tR\x05field\x12\x1a\n" +
 	"\bprevious\x18\x02 \x01(\tR\bprevious\x12\x18\n" +
@@ -22260,7 +22282,9 @@ const file_api_rpc_manager_proto_rawDesc = "" +
 	"\x10NetworkInterface\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x0e\n" +
 	"\x02up\x18\x02 \x01(\bR\x02up\x12\x1c\n" +
-	"\taddresses\x18\x03 \x03(\tR\taddresses\"\xed\x12\n" +
+	"\taddresses\x18\x03 \x03(\tR\taddresses\"" +
+	"\xdc\x13" +
+	"\n" +
 	"\x17UpdateNodeConfigRequest\x12\x16\n" +
 	"\x06uplink\x18\x01 \x01(\tR\x06uplink\x12\x1d\n" +
 	"\n" +
@@ -22326,7 +22350,10 @@ const file_api_rpc_manager_proto_rawDesc = "" +
 	"\r_jail_enabledB\x0f\n" +
 	"\r_hast_enabledB\v\n" +
 	"\t_peer_tlsB\x15\n" +
-	"\x13_watchgoose_enabled\"0\n" +
+	"\x13_watchgoose_enabled" +
+	"\x120\n\x14watchgoose_badge_url\x18< \x01(\tR\x12watchgooseBadgeUrl\x12;\n\x1aclear_watchgoose_badge_url" +
+	"\x18= \x01(\bR\x17clearWatchgooseBadgeUrl" +
+	"\"0\n" +
 	"\x18UpdateNodeConfigResponse\x12\x14\n" +
 	"\x05error\x18\x01 \x01(\tR\x05error\"\x1a\n" +
 	"\x18GetFrontendConfigRequest\"\xfd\x03\n" +

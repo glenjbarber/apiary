@@ -207,6 +207,7 @@ func TestManager_SaveValidatesWatchgooseConfig(t *testing.T) {
 		WatchgooseEndpoint: "https://watchgoose.com/ping/ping-key/hive-1?create=1",
 		WatchgooseInterval: 5 * time.Minute,
 		WatchgooseTimeout:  10 * time.Second,
+		WatchgooseBadgeURL: "https://watchgoose.com/badge/check-id/fake-token.svg",
 	}
 	if err := m.Save(valid); err != nil {
 		t.Fatalf("Save(valid Watchgoose config) error: %v", err)
@@ -232,6 +233,10 @@ func TestManager_SaveValidatesWatchgooseConfig(t *testing.T) {
 		"invalid UUID":     {WatchgooseEnabled: true, WatchgooseEndpoint: "https://watchgoose.com/ping/not-a-uuid"},
 		"short interval":   {WatchgooseEnabled: true, WatchgooseEndpoint: "https://watchgoose.com/ping/key/hive", WatchgooseInterval: 11 * time.Second},
 		"negative timeout": {WatchgooseEnabled: true, WatchgooseEndpoint: "https://watchgoose.com/ping/key/hive", WatchgooseTimeout: -time.Second},
+		"badge plain HTTP": {WatchgooseBadgeURL: "http://watchgoose.com/badge/check/token.svg"},
+		"badge wrong host": {WatchgooseBadgeURL: "https://example.com/badge/check/token.svg"},
+		"badge wrong path": {WatchgooseBadgeURL: "https://watchgoose.com/ping/check/token.svg"},
+		"badge query":      {WatchgooseBadgeURL: "https://watchgoose.com/badge/check/token.svg?x=1"},
 	}
 	for name, cfg := range cases {
 		t.Run(name, func(t *testing.T) {

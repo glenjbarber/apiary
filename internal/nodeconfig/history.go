@@ -237,7 +237,7 @@ func configValues(cfg Config) (map[string]string, error) {
 }
 
 func secretConfigField(key string) bool {
-	return key == "peer_api_key" || key == "raftd_token" || key == "watchgoose_endpoint"
+	return key == "peer_api_key" || key == "raftd_token" || key == "watchgoose_endpoint" || key == "watchgoose_badge_url"
 }
 
 func redactedConfigValue(value string) string {

@@ -291,6 +291,7 @@ var configFieldSpecs = []configFieldSpec{
 	{"peer_api_key", "Peer API key", "Authenticated peer managerd requests. Current and historical secret values are redacted."},
 	{"raftd_token", "Raftd token", "managerd authentication to this Comb's local raftd socket. Current and historical secret values are redacted."},
 	{"watchgoose_endpoint", "Watchgoose ping URL", "The write-only heartbeat URL for this Comb. A UUID or slug ping URL is a credential, and current and historical values are redacted."},
+	{"watchgoose_badge_url", "Watchgoose badge URL", "The public, read-only status badge displayed for this Comb. The URL's check token is redacted from configuration history and backups."},
 }
 
 func (s *Server) handleConfigProvenancePage(w http.ResponseWriter, r *http.Request) {
@@ -460,6 +461,12 @@ func (s *Server) handleConfigProvenanceAttest(w http.ResponseWriter, r *http.Req
 func configValueFromResponse(resp *rpcpb.GetNodeConfigResponse, field string) string {
 	if field == "watchgoose_endpoint" {
 		if resp.GetWatchgooseEndpointSet() {
+			return "(set; value redacted)"
+		}
+		return "(unset)"
+	}
+	if field == "watchgoose_badge_url" {
+		if resp.GetWatchgooseBadgeUrl() != "" {
 			return "(set; value redacted)"
 		}
 		return "(unset)"
@@ -810,6 +817,7 @@ func (s *Server) nodeConfigUpdateRequest(r *http.Request) *rpcpb.UpdateNodeConfi
 		ChangeEvidence:     strings.TrimSpace(r.FormValue("change_evidence")),
 		WatchgooseInterval: cfg.WatchgooseInterval,
 		WatchgooseTimeout:  cfg.WatchgooseTimeout,
+		WatchgooseBadgeUrl: cfg.WatchgooseBadgeURL,
 		Uplink:             cfg.Uplink,
 		NatUplink:          cfg.NATUplink,
 		DhcpDnsServer:      cfg.DNSServer,
@@ -875,6 +883,12 @@ func (s *Server) nodeConfigUpdateRequest(r *http.Request) *rpcpb.UpdateNodeConfi
 	}
 	if r.Form.Has("watchgoose_timeout") {
 		req.WatchgooseTimeout = strings.TrimSpace(r.FormValue("watchgoose_timeout"))
+	}
+	if r.Form.Has("watchgoose_badge_url") {
+		req.WatchgooseBadgeUrl = strings.TrimSpace(r.FormValue("watchgoose_badge_url"))
+	}
+	if r.FormValue("clear_watchgoose_badge_url") == "true" {
+		req.ClearWatchgooseBadgeUrl = true
 	}
 	if r.Form.Has("nat_uplink") {
 		req.NatUplink = r.FormValue("nat_uplink")

@@ -16,19 +16,20 @@ import (
 
 // # Secrets are excluded structurally, and the exclusion is tested
 //
-// Five inline live credentials exist in this codebase's local
+// Six inline live credentials exist in this codebase's local
 // configuration files, and none of them is in the raft FSM snapshot, so
 // no existing backup path covers them:
 //
 //	nodeconfig.Config.PeerAPIKey       ("a live credential", ADR-0029)
 //	nodeconfig.Config.RaftdToken       ("a live credential", ADR-0033)
 //	nodeconfig.Config.WatchgooseEndpoint (contains a Watchgoose check UUID or Ping Key)
+//	nodeconfig.Config.WatchgooseBadgeURL (public, read-only status token)
 //	frontendconfig.Config.ManagerAPIKey (the field warnIfWorldReadable exists to warn about)
 //	raftdconfig.Config.InternalToken   ("must be root-owned, mode 0600")
 //
 // A whole-file copy of those configs - the obvious implementation, and
 // the one ADR-0131's Rejected alternative 1 exists to rule out - writes
-// all five into the archive. So this package does not copy
+// all six into the archive. So this package does not copy
 // configuration files. It builds manifests from allow-listed projections
 // into types declared here, and those types have no field capable of
 // holding a secret: the exclusion is a property of the destination type,
@@ -78,6 +79,9 @@ const (
 	// SecretWatchgooseEndpoint is nodeconfig.Config.WatchgooseEndpoint,
 	// which embeds a Watchgoose check UUID or project Ping Key in its URL.
 	SecretWatchgooseEndpoint SecretKind = "nodeconfig.watchgoose_endpoint"
+	// SecretWatchgooseBadgeURL is a public badge URL whose token grants
+	// anonymous access to the check's current status.
+	SecretWatchgooseBadgeURL SecretKind = "nodeconfig.watchgoose_badge_url"
 	// SecretManagerAPIKey is frontendconfig.Config.ManagerAPIKey, the
 	// key the web frontend attaches to managerd calls.
 	SecretManagerAPIKey SecretKind = "frontendconfig.manager_api_key"
@@ -161,6 +165,16 @@ var DenyList = []SecretField{
 		Why:        "the HTTPS ping URL contains either a Watchgoose check UUID or project Ping Key and grants the ability to report check results",
 		LiveCopy:   "this node's managerd configuration file (internal/nodeconfig, mode 0600)",
 		RestoreProcedure: "create a replacement Watchgoose ping URL for this Hive and configure it locally; " +
+			"the URL is intentionally excluded from backups",
+	},
+	{
+		Kind:       SecretWatchgooseBadgeURL,
+		StructName: "nodeconfig.Config",
+		FieldName:  "WatchgooseBadgeURL",
+		JSONName:   "watchgoose_badge_url",
+		Why:        "the URL token grants anonymous read access to this Watchgoose check's current status",
+		LiveCopy:   "this node's managerd configuration file (internal/nodeconfig, mode 0600)",
+		RestoreProcedure: "obtain a fresh badge URL for the intended Watchgoose check and associate it with this Comb in Machine → Operations; " +
 			"the URL is intentionally excluded from backups",
 	},
 	{
@@ -1031,6 +1045,7 @@ func NewSanitizer(node *nodeconfig.Config, raftd *raftdconfig.Config, frontend *
 		add(string(SecretPeerAPIKey), node.PeerAPIKey)
 		add(string(SecretRaftdToken), node.RaftdToken)
 		add(string(SecretWatchgooseEndpoint), node.WatchgooseEndpoint)
+		add(string(SecretWatchgooseBadgeURL), node.WatchgooseBadgeURL)
 	}
 	if raftd != nil {
 		add(string(SecretRaftdInternalToken), raftd.InternalToken)

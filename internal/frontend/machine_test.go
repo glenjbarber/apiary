@@ -323,9 +323,10 @@ func TestServer_UpdateWatchgoose_ForwardsSlugURLWithoutEchoingIt(t *testing.T) {
 	}
 	s := newTestServer(t, client)
 	form := url.Values{
-		"watchgoose_enabled":  {"true"},
-		"watchgoose_endpoint": {"https://watchgoose.com/ping/private-slug/hive-a"},
-		"watchgoose_interval": {"5m"}, "watchgoose_timeout": {"10s"},
+		"watchgoose_enabled":   {"true"},
+		"watchgoose_endpoint":  {"https://watchgoose.com/ping/private-slug/hive-a"},
+		"watchgoose_badge_url": {"https://watchgoose.com/badge/check/badge-token.svg"},
+		"watchgoose_interval":  {"5m"}, "watchgoose_timeout": {"10s"},
 		"change_origin": {"operator"}, "change_rationale": {"Enable per-host heartbeat"},
 	}
 	req := httptest.NewRequest(http.MethodPost, "/machine/watchgoose", strings.NewReader(form.Encode()))
@@ -336,7 +337,7 @@ func TestServer_UpdateWatchgoose_ForwardsSlugURLWithoutEchoingIt(t *testing.T) {
 		t.Fatalf("status = %d, body=%s", rec.Code, rec.Body.String())
 	}
 	got := client.lastUpdateNodeConfigReq
-	if got == nil || got.WatchgooseEnabled == nil || !got.GetWatchgooseEnabled() || got.GetWatchgooseEndpoint() != form.Get("watchgoose_endpoint") || got.GetWatchgooseInterval() != "5m" || got.GetWatchgooseTimeout() != "10s" {
+	if got == nil || got.WatchgooseEnabled == nil || !got.GetWatchgooseEnabled() || got.GetWatchgooseEndpoint() != form.Get("watchgoose_endpoint") || got.GetWatchgooseInterval() != "5m" || got.GetWatchgooseTimeout() != "10s" || got.GetWatchgooseBadgeUrl() != form.Get("watchgoose_badge_url") {
 		t.Fatalf("forwarded Watchgoose request = %+v", got)
 	}
 	if strings.Contains(rec.Body.String(), "private-slug") {
@@ -957,7 +958,7 @@ func boolPtr(v bool) *bool {
 func TestServer_MachineSectionPages_EachRendersOwnSubsystemOnly(t *testing.T) {
 	client := &fakeClient{
 		statusResp:        &rpcpb.StatusResponse{ManagerNodeId: "node-a"},
-		getNodeConfigResp: &rpcpb.GetNodeConfigResponse{RpcAddr: "10.50.0.14:17700"},
+		getNodeConfigResp: &rpcpb.GetNodeConfigResponse{RpcAddr: "10.50.0.14:17700", WatchgooseBadgeUrl: "https://watchgoose.com/badge/check-id/fake-token.svg"},
 	}
 	s := newTestServer(t, client)
 
@@ -984,6 +985,9 @@ func TestServer_MachineSectionPages_EachRendersOwnSubsystemOnly(t *testing.T) {
 			body := rec.Body.String()
 			if !strings.Contains(body, ">"+tc.wantHeading+"<") {
 				t.Errorf("%s: missing heading %q in body", tc.path, tc.wantHeading)
+			}
+			if tc.path == "/machine/operations" && (!strings.Contains(body, `src="https://watchgoose.com/badge/check-id/fake-token.svg"`) || !strings.Contains(body, `alt="Watchgoose status for this Comb"`) || !strings.Contains(body, `referrerpolicy="no-referrer"`)) {
+				t.Errorf("%s: Watchgoose badge for this Comb is missing", tc.path)
 			}
 			for _, absent := range tc.wantAbsent {
 				if strings.Contains(body, absent) {

@@ -1219,6 +1219,7 @@ func TestServer_UpdateNodeConfig_PreservesIdentityFieldsAcrossUnrelatedUpdate(t 
 		WatchgooseEndpoint: "https://watchgoose.com/ping/key/apiverse",
 		WatchgooseInterval: 5 * time.Minute,
 		WatchgooseTimeout:  10 * time.Second,
+		WatchgooseBadgeURL: "https://watchgoose.com/badge/check/badge-token.svg",
 	}}
 	s := NewServer(nil, "node-1", nil, nil, nil, nil, nil, "", nil, store, nil, 0, nil)
 
@@ -1238,7 +1239,7 @@ func TestServer_UpdateNodeConfig_PreservesIdentityFieldsAcrossUnrelatedUpdate(t 
 	if store.lastSave.RaftdSocket != "/var/run/apiary/raftd.sock" {
 		t.Errorf("saved RaftdSocket = %q, want it preserved across an unrelated update", store.lastSave.RaftdSocket)
 	}
-	if !store.lastSave.WatchgooseEnabled || store.lastSave.WatchgooseEndpoint != "https://watchgoose.com/ping/key/apiverse" || store.lastSave.WatchgooseInterval != 5*time.Minute || store.lastSave.WatchgooseTimeout != 10*time.Second {
+	if !store.lastSave.WatchgooseEnabled || store.lastSave.WatchgooseEndpoint != "https://watchgoose.com/ping/key/apiverse" || store.lastSave.WatchgooseInterval != 5*time.Minute || store.lastSave.WatchgooseTimeout != 10*time.Second || store.lastSave.WatchgooseBadgeURL != "https://watchgoose.com/badge/check/badge-token.svg" {
 		t.Errorf("saved Watchgoose settings = %+v, want them preserved across an unrelated update", store.lastSave)
 	}
 	if store.lastSave.Uplink != "em0" {
@@ -1250,13 +1251,14 @@ func TestServer_GetNodeConfigReportsWatchgooseWithoutReturningSlug(t *testing.T)
 	store := &fakeNodeConfigStore{cfg: nodeconfig.Config{
 		WatchgooseEnabled: true, WatchgooseEndpoint: "https://watchgoose.com/ping/private-slug/hive",
 		WatchgooseInterval: 5 * time.Minute, WatchgooseTimeout: 10 * time.Second,
+		WatchgooseBadgeURL: "https://watchgoose.com/badge/check/badge-token.svg",
 	}}
 	s := NewServer(nil, "node-1", nil, nil, nil, nil, nil, "", nil, store, nil, 0, nil)
 	resp, err := s.GetNodeConfig(context.Background(), &rpcpb.GetNodeConfigRequest{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !resp.GetWatchgooseEnabled() || !resp.GetWatchgooseEndpointSet() || resp.GetWatchgooseInterval() != "5m0s" || resp.GetWatchgooseTimeout() != "10s" {
+	if !resp.GetWatchgooseEnabled() || !resp.GetWatchgooseEndpointSet() || resp.GetWatchgooseInterval() != "5m0s" || resp.GetWatchgooseTimeout() != "10s" || resp.GetWatchgooseBadgeUrl() != "https://watchgoose.com/badge/check/badge-token.svg" {
 		t.Fatalf("Watchgoose view = %+v", resp)
 	}
 	if strings.Contains(fmt.Sprint(resp), "private-slug") {
@@ -1270,21 +1272,21 @@ func TestServer_UpdateNodeConfigSetsAndClearsWatchgooseSlug(t *testing.T) {
 	enabled := true
 	resp, err := s.UpdateNodeConfig(context.Background(), &rpcpb.UpdateNodeConfigRequest{
 		WatchgooseEnabled: &enabled, WatchgooseEndpoint: "https://watchgoose.com/ping/new-slug/hive",
-		WatchgooseInterval: "5m", WatchgooseTimeout: "10s",
+		WatchgooseInterval: "5m", WatchgooseTimeout: "10s", WatchgooseBadgeUrl: "https://watchgoose.com/badge/check/badge-token.svg",
 	})
 	if err != nil || resp.GetError() != "" {
 		t.Fatalf("UpdateNodeConfig() = %v, %v", resp, err)
 	}
-	if !store.lastSave.WatchgooseEnabled || store.lastSave.WatchgooseEndpoint != "https://watchgoose.com/ping/new-slug/hive" {
+	if !store.lastSave.WatchgooseEnabled || store.lastSave.WatchgooseEndpoint != "https://watchgoose.com/ping/new-slug/hive" || store.lastSave.WatchgooseBadgeURL != "https://watchgoose.com/badge/check/badge-token.svg" {
 		t.Fatalf("Watchgoose save = %+v", store.lastSave)
 	}
 	disabled := false
-	resp, err = s.UpdateNodeConfig(context.Background(), &rpcpb.UpdateNodeConfigRequest{WatchgooseEnabled: &disabled, ClearWatchgooseEndpoint: true})
+	resp, err = s.UpdateNodeConfig(context.Background(), &rpcpb.UpdateNodeConfigRequest{WatchgooseEnabled: &disabled, ClearWatchgooseEndpoint: true, ClearWatchgooseBadgeUrl: true})
 	if err != nil || resp.GetError() != "" {
 		t.Fatalf("clear UpdateNodeConfig() = %v, %v", resp, err)
 	}
-	if store.lastSave.WatchgooseEndpoint != "" || store.lastSave.WatchgooseEnabled {
-		t.Fatalf("clear saved endpoint/enabled state = %+v", store.lastSave)
+	if store.lastSave.WatchgooseEndpoint != "" || store.lastSave.WatchgooseBadgeURL != "" || store.lastSave.WatchgooseEnabled {
+		t.Fatalf("clear saved endpoint/badge/enabled state = %+v", store.lastSave)
 	}
 }
 
