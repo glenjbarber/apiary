@@ -3326,9 +3326,13 @@ func (s *Server) UpdateNodeConfig(_ context.Context, req *rpcpb.UpdateNodeConfig
 		// fields - would silently zero them out, since cfg below is
 		// otherwise built fresh from req rather than merged onto
 		// current.
-		NodeID:      current.NodeID,
-		RPCAddr:     current.RPCAddr,
-		RaftdSocket: current.RaftdSocket,
+		NodeID:             current.NodeID,
+		RPCAddr:            current.RPCAddr,
+		RaftdSocket:        current.RaftdSocket,
+		WatchgooseEnabled:  current.WatchgooseEnabled,
+		WatchgooseEndpoint: current.WatchgooseEndpoint,
+		WatchgooseInterval: current.WatchgooseInterval,
+		WatchgooseTimeout:  current.WatchgooseTimeout,
 
 		Uplink:        req.GetUplink(),
 		NATUplink:     req.GetNatUplink(),

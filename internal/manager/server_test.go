@@ -1206,15 +1206,19 @@ func TestServer_GetNodeConfig_NeverExposesIdentityFields(t *testing.T) {
 // is the regression test for the ADR-0100 merge fix: UpdateNodeConfig
 // builds its Config literal fresh from the request rather than
 // merging onto current, so a field with no proto counterpart (like
-// NodeID/RPCAddr/RaftdSocket) must be explicitly carried over from
+// NodeID/RPCAddr/RaftdSocket and file-only Watchgoose settings) must be explicitly carried over from
 // current or it gets silently zeroed on every single call - including
 // one that only touches an unrelated field like Uplink here. This
 // test fails without that explicit carry-over and passes with it.
 func TestServer_UpdateNodeConfig_PreservesIdentityFieldsAcrossUnrelatedUpdate(t *testing.T) {
 	store := &fakeNodeConfigStore{cfg: nodeconfig.Config{
-		NodeID:      "apiverse",
-		RPCAddr:     "10.50.0.9:17700",
-		RaftdSocket: "/var/run/apiary/raftd.sock",
+		NodeID:             "apiverse",
+		RPCAddr:            "10.50.0.9:17700",
+		RaftdSocket:        "/var/run/apiary/raftd.sock",
+		WatchgooseEnabled:  true,
+		WatchgooseEndpoint: "https://watchgoose.com/ping/key/apiverse",
+		WatchgooseInterval: 5 * time.Minute,
+		WatchgooseTimeout:  10 * time.Second,
 	}}
 	s := NewServer(nil, "node-1", nil, nil, nil, nil, nil, "", nil, store, nil, 0, nil)
 
@@ -1233,6 +1237,9 @@ func TestServer_UpdateNodeConfig_PreservesIdentityFieldsAcrossUnrelatedUpdate(t 
 	}
 	if store.lastSave.RaftdSocket != "/var/run/apiary/raftd.sock" {
 		t.Errorf("saved RaftdSocket = %q, want it preserved across an unrelated update", store.lastSave.RaftdSocket)
+	}
+	if !store.lastSave.WatchgooseEnabled || store.lastSave.WatchgooseEndpoint != "https://watchgoose.com/ping/key/apiverse" || store.lastSave.WatchgooseInterval != 5*time.Minute || store.lastSave.WatchgooseTimeout != 10*time.Second {
+		t.Errorf("saved Watchgoose settings = %+v, want them preserved across an unrelated update", store.lastSave)
 	}
 	if store.lastSave.Uplink != "em0" {
 		t.Errorf("saved Uplink = %q, want em0 (the field this update actually intended to change)", store.lastSave.Uplink)

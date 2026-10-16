@@ -206,6 +206,32 @@ has real state under the old value.
   knobs for the assumption-checker subsystem, safe to change any time.
   JSON stores Go durations as integer nanoseconds; zero uses managerd's
   own built-in defaults.
+- `watchgoose_enabled`, `watchgoose_endpoint`, `watchgoose_interval`,
+  `watchgoose_timeout` — optional per-Hive Watchgoose heartbeat. It is
+  disabled by default. Configure the endpoint as that Hive's HTTPS slug
+  ping URL (`https://watchgoose.com/ping/<ping-key>/<hive-slug>`); the URL
+  contains the Ping Key and is a credential, so keep this root-owned file
+  mode 0600 and do not include the URL in logs or backups. Create and
+  configure the check in Watchgoose first; set a simple schedule whose
+  period and grace account for the interval. Slugs use lowercase letters,
+  digits, hyphens, or underscores. The sender uses HTTPS GET success pings,
+  retries transient failures up to two times, and accepts HTTP 200/201.
+  Watchgoose documents a limit of five pings per minute per check, so Apiary
+  refuses enabled intervals below 12 seconds. The built-in interval is five
+  minutes and timeout is ten seconds. A successful ping reports only
+  that managerd reached Watchgoose, not that guests or the Hive are healthy.
+  Restart managerd after changing these settings.
+  Watchgoose slug auto-provisioning (`?create=1`) uses a default one-day period
+  and one-hour grace; configure the check's interval and grace in Watchgoose
+  before enabling this heartbeat. See the [Pinging API](https://watchgoose.com/docs/http_api/),
+  [check schedules](https://watchgoose.com/docs/configuring_checks/), and
+  [auto-provisioning](https://watchgoose.com/docs/autoprovisioning/) docs.
+  On Drone, create `/var/run/apiary/watchgoose.pause` to suspend only the
+  sender while leaving the host network and managerd running; remove the
+  marker to resume reporting. For the alert/recovery check, verify the
+  heartbeat first, create the marker and wait for the configured grace
+  period, then remove it and confirm Watchgoose records recovery. Do not
+  run this interruption test on Sting.
 - `tls_cert` / `tls_key` — managerd's own external API TLS. Mandatory, not
   an afterthought reserved for when `pam_service` is set. Setting both here
   makes managerd's whole gRPC listener TLS-only (frontend and restshimd
