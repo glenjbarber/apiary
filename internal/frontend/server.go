@@ -374,9 +374,9 @@ type pageData struct {
 	// served from all three of /create, /vms/new and /jails/new. Only
 	// populated for that page - see create_guided.go.
 	Guided *guidedPageView
-	// JoinGuided backs the guided join wizard (join_guided.html),
-	// served from /colony/join/guided. Only populated for that page - see join_guided.go.
-	JoinGuided *guidedJoinPageView
+    // JoinGuided backs the guided join wizard (join_guided.html),
+    // served from /colony/join/guided. Only populated for that page - see join_guided.go.
+    JoinGuided *guidedJoinPageView
 
 	// NodeConfig/NodeConfigFormError back the Machine Configuration
 	// page's uplink section (ADR-0049) - GetNodeConfig's current
