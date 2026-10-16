@@ -125,10 +125,6 @@ type pageData struct {
 	// default landing page ("/").
 	ClusterNodes []clusterNodeView
 
-	// HealthTree is the operational cluster/resource hierarchy shown at
-	// the top of the Command Center. It is also refreshed in place from
-	// /cluster-health.json without replacing the user's expanded branches.
-	HealthTree healthTreeNode
 
 	// StateDigestColony is the colony-wide FSM state agreement verdict the
 	// ClusterNodes badges above sit under (ADR-0143). It is a value, not
