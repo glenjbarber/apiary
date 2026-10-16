@@ -61,7 +61,7 @@ func (s *Server) renderJoinGuidedPage(w http.ResponseWriter, r *http.Request, da
 	}
 
 	s.render(w, "join_guided_page", s.withAuthFieldsFrom(r, pageData{
-		Guided: guided,
+		JoinGuided: guided,
 	}, nil, nil))
 }
 
