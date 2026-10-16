@@ -137,12 +137,6 @@ func (s *Server) gatherHiveFailureScenarios(nodeIDs []string, voterImpacts []inv
 		valid := true
 		if isVoter {
 			verdict, valid = impact.Verdict, impact.Valid
-			// A probe initiated by the node being removed disappears with
-			// that node. Its successful outbound HostStats calls cannot prove
-			// the remaining voters can communicate after it is gone.
-			if valid && id == probeNodeID && verdict == recovery.QuorumSurvives {
-				verdict = recovery.QuorumUnknown
-			}
 		}
 
 		scenario := coverage.ClassifyHiveFailure(id, "Comb "+id+" fails", verdict, valid, owned, replicaBacked)
@@ -255,10 +249,10 @@ func (s *Server) handleCoveragePage(w http.ResponseWriter, r *http.Request) {
 		leaderID := statusResp.GetRaftLeaderId()
 		vantage := quorumVantage(statusResp, localNodeID)
 
-		quorumEval := invariant.EvaluateQuorumTolerance(voterReachability, leaderID, vantage)
+		quorumEval := invariant.EvaluateQuorumTolerance(voterReachability, leaderID, vantage, localNodeID)
 		scenarios = append(scenarios, coverage.ClassifyQuorumTolerance(quorumEval, len(voterReachability)))
 
-		voterImpacts := invariant.ClassifyVoterQuorumImpacts(voterReachability, leaderID, vantage)
+		voterImpacts := invariant.ClassifyVoterQuorumImpacts(voterReachability, leaderID, vantage, localNodeID)
 		nodeIDs := s.simulateNodeChoices(r)
 		scenarios = append(scenarios, s.gatherHiveFailureScenarios(nodeIDs, voterImpacts, vms, jails, localNodeID)...)
 	}
