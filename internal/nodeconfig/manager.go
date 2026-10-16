@@ -627,10 +627,32 @@ func validateWatchgooseEndpoint(endpoint string) error {
 		return fmt.Errorf("nodeconfig: watchgoose_endpoint must be an HTTPS ping URL without user info or fragment")
 	}
 	parts := strings.Split(strings.Trim(u.EscapedPath(), "/"), "/")
+	if len(parts) == 2 && parts[0] == "ping" && validWatchgooseUUID(parts[1]) {
+		return nil
+	}
 	if len(parts) != 3 || parts[0] != "ping" || parts[1] == "" || !validWatchgooseSlug(parts[2]) {
-		return fmt.Errorf("nodeconfig: watchgoose_endpoint must use the Watchgoose slug ping path /ping/<ping-key>/<slug>")
+		return fmt.Errorf("nodeconfig: watchgoose_endpoint must use a Watchgoose UUID or slug ping path")
 	}
 	return nil
+}
+
+func validWatchgooseUUID(id string) bool {
+	if len(id) != 36 {
+		return false
+	}
+	for i, r := range id {
+		switch i {
+		case 8, 13, 18, 23:
+			if r != '-' {
+				return false
+			}
+		default:
+			if (r < '0' || r > '9') && (r < 'a' || r > 'f') && (r < 'A' || r > 'F') {
+				return false
+			}
+		}
+	}
+	return true
 }
 
 func validWatchgooseSlug(slug string) bool {

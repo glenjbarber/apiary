@@ -22,7 +22,7 @@ import (
 //
 //	nodeconfig.Config.PeerAPIKey       ("a live credential", ADR-0029)
 //	nodeconfig.Config.RaftdToken       ("a live credential", ADR-0033)
-//	nodeconfig.Config.WatchgooseEndpoint (contains the Watchgoose Ping Key)
+//	nodeconfig.Config.WatchgooseEndpoint (contains a Watchgoose check UUID or Ping Key)
 //	frontendconfig.Config.ManagerAPIKey (the field warnIfWorldReadable exists to warn about)
 //	raftdconfig.Config.InternalToken   ("must be root-owned, mode 0600")
 //
@@ -76,7 +76,7 @@ const (
 	// credential to raftd's internal socket.
 	SecretRaftdToken SecretKind = "nodeconfig.raftd_token"
 	// SecretWatchgooseEndpoint is nodeconfig.Config.WatchgooseEndpoint,
-	// which embeds the Watchgoose project Ping Key in its URL.
+	// which embeds a Watchgoose check UUID or project Ping Key in its URL.
 	SecretWatchgooseEndpoint SecretKind = "nodeconfig.watchgoose_endpoint"
 	// SecretManagerAPIKey is frontendconfig.Config.ManagerAPIKey, the
 	// key the web frontend attaches to managerd calls.
@@ -158,7 +158,7 @@ var DenyList = []SecretField{
 		StructName: "nodeconfig.Config",
 		FieldName:  "WatchgooseEndpoint",
 		JSONName:   "watchgoose_endpoint",
-		Why:        "the HTTPS ping URL contains the Watchgoose project Ping Key and grants the ability to report check results",
+		Why:        "the HTTPS ping URL contains either a Watchgoose check UUID or project Ping Key and grants the ability to report check results",
 		LiveCopy:   "this node's managerd configuration file (internal/nodeconfig, mode 0600)",
 		RestoreProcedure: "create a replacement Watchgoose ping URL for this Hive and configure it locally; " +
 			"the URL is intentionally excluded from backups",

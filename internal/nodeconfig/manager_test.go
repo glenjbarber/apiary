@@ -216,6 +216,12 @@ func TestManager_SaveValidatesWatchgooseConfig(t *testing.T) {
 		t.Fatalf("Load() = %+v, %v; want %+v", got, err, valid)
 	}
 
+	uuidEndpoint := valid
+	uuidEndpoint.WatchgooseEndpoint = "https://watchgoose.com/ping/00000000-0000-4000-8000-000000000001"
+	if err := m.Save(uuidEndpoint); err != nil {
+		t.Fatalf("Save(valid Watchgoose UUID endpoint) error: %v", err)
+	}
+
 	cases := map[string]Config{
 		"missing endpoint": {WatchgooseEnabled: true},
 		"plain HTTP":       {WatchgooseEnabled: true, WatchgooseEndpoint: "http://watchgoose.com/ping/key/hive"},
@@ -223,6 +229,7 @@ func TestManager_SaveValidatesWatchgooseConfig(t *testing.T) {
 		"fragment":         {WatchgooseEnabled: true, WatchgooseEndpoint: "https://watchgoose.com/ping/key/hive#fragment"},
 		"wrong path":       {WatchgooseEnabled: true, WatchgooseEndpoint: "https://watchgoose.com/health/key/hive"},
 		"invalid slug":     {WatchgooseEnabled: true, WatchgooseEndpoint: "https://watchgoose.com/ping/key/Hive One"},
+		"invalid UUID":     {WatchgooseEnabled: true, WatchgooseEndpoint: "https://watchgoose.com/ping/not-a-uuid"},
 		"short interval":   {WatchgooseEnabled: true, WatchgooseEndpoint: "https://watchgoose.com/ping/key/hive", WatchgooseInterval: 11 * time.Second},
 		"negative timeout": {WatchgooseEnabled: true, WatchgooseEndpoint: "https://watchgoose.com/ping/key/hive", WatchgooseTimeout: -time.Second},
 	}
