@@ -87,8 +87,12 @@ type firewallRuleView struct {
 // local settings (ADR-0049) - see api/rpc/manager.proto's
 // GetNodeConfigResponse.
 type nodeConfigView struct {
-	RPCAddr       string
-	ConfigChanges []configChangeView
+	RPCAddr               string
+	ConfigChanges         []configChangeView
+	WatchgooseEnabled     bool
+	WatchgooseEndpointSet bool
+	WatchgooseInterval    string
+	WatchgooseTimeout     string
 
 	Uplink                  string
 	NATUplink               string
@@ -207,6 +211,10 @@ type networkInterfaceOption struct {
 func fromRPCNodeConfig(d *rpcpb.GetNodeConfigResponse) nodeConfigView {
 	view := nodeConfigView{
 		RPCAddr:                 d.GetRpcAddr(),
+		WatchgooseEnabled:       d.GetWatchgooseEnabled(),
+		WatchgooseEndpointSet:   d.GetWatchgooseEndpointSet(),
+		WatchgooseInterval:      d.GetWatchgooseInterval(),
+		WatchgooseTimeout:       d.GetWatchgooseTimeout(),
 		Uplink:                  d.GetUplink(),
 		NATUplink:               d.GetNatUplink(),
 		DNSServer:               d.GetDhcpDnsServer(),

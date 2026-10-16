@@ -1246,6 +1246,48 @@ func TestServer_UpdateNodeConfig_PreservesIdentityFieldsAcrossUnrelatedUpdate(t 
 	}
 }
 
+func TestServer_GetNodeConfigReportsWatchgooseWithoutReturningSlug(t *testing.T) {
+	store := &fakeNodeConfigStore{cfg: nodeconfig.Config{
+		WatchgooseEnabled: true, WatchgooseEndpoint: "https://watchgoose.com/ping/private-slug/hive",
+		WatchgooseInterval: 5 * time.Minute, WatchgooseTimeout: 10 * time.Second,
+	}}
+	s := NewServer(nil, "node-1", nil, nil, nil, nil, nil, "", nil, store, nil, 0, nil)
+	resp, err := s.GetNodeConfig(context.Background(), &rpcpb.GetNodeConfigRequest{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !resp.GetWatchgooseEnabled() || !resp.GetWatchgooseEndpointSet() || resp.GetWatchgooseInterval() != "5m0s" || resp.GetWatchgooseTimeout() != "10s" {
+		t.Fatalf("Watchgoose view = %+v", resp)
+	}
+	if strings.Contains(fmt.Sprint(resp), "private-slug") {
+		t.Fatalf("GetNodeConfig leaked the Watchgoose slug: %+v", resp)
+	}
+}
+
+func TestServer_UpdateNodeConfigSetsAndClearsWatchgooseSlug(t *testing.T) {
+	store := &fakeNodeConfigStore{cfg: nodeconfig.Config{WatchgooseInterval: 5 * time.Minute, WatchgooseTimeout: 10 * time.Second}}
+	s := NewServer(nil, "node-1", nil, nil, nil, nil, nil, "", nil, store, nil, 0, nil)
+	enabled := true
+	resp, err := s.UpdateNodeConfig(context.Background(), &rpcpb.UpdateNodeConfigRequest{
+		WatchgooseEnabled: &enabled, WatchgooseEndpoint: "https://watchgoose.com/ping/new-slug/hive",
+		WatchgooseInterval: "5m", WatchgooseTimeout: "10s",
+	})
+	if err != nil || resp.GetError() != "" {
+		t.Fatalf("UpdateNodeConfig() = %v, %v", resp, err)
+	}
+	if !store.lastSave.WatchgooseEnabled || store.lastSave.WatchgooseEndpoint != "https://watchgoose.com/ping/new-slug/hive" {
+		t.Fatalf("Watchgoose save = %+v", store.lastSave)
+	}
+	disabled := false
+	resp, err = s.UpdateNodeConfig(context.Background(), &rpcpb.UpdateNodeConfigRequest{WatchgooseEnabled: &disabled, ClearWatchgooseEndpoint: true})
+	if err != nil || resp.GetError() != "" {
+		t.Fatalf("clear UpdateNodeConfig() = %v, %v", resp, err)
+	}
+	if store.lastSave.WatchgooseEndpoint != "" || store.lastSave.WatchgooseEnabled {
+		t.Fatalf("clear saved endpoint/enabled state = %+v", store.lastSave)
+	}
+}
+
 func boolPtr(v bool) *bool {
 	return &v
 }

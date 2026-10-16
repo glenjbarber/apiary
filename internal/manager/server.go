@@ -3022,8 +3022,12 @@ func (s *Server) GetNodeConfig(_ context.Context, _ *rpcpb.GetNodeConfigRequest)
 		// Secrets are never returned - only whether one is set. See
 		// UpdateNodeConfigRequest's own doc comment for how to set or
 		// clear one.
-		PeerApiKeySet: cfg.PeerAPIKey != "",
-		RaftdTokenSet: cfg.RaftdToken != "",
+		PeerApiKeySet:         cfg.PeerAPIKey != "",
+		RaftdTokenSet:         cfg.RaftdToken != "",
+		WatchgooseEnabled:     cfg.WatchgooseEnabled,
+		WatchgooseEndpointSet: cfg.WatchgooseEndpoint != "",
+		WatchgooseInterval:    durationString(cfg.WatchgooseInterval),
+		WatchgooseTimeout:     durationString(cfg.WatchgooseTimeout),
 
 		TlsCert:    cfg.TLSCert,
 		TlsKey:     cfg.TLSKey,
@@ -3315,6 +3319,30 @@ func (s *Server) UpdateNodeConfig(_ context.Context, req *rpcpb.UpdateNodeConfig
 	} else if req.GetRaftdToken() != "" {
 		raftdToken = req.GetRaftdToken()
 	}
+	watchgooseEndpoint := current.WatchgooseEndpoint
+	if req.GetClearWatchgooseEndpoint() {
+		watchgooseEndpoint = ""
+	} else if req.GetWatchgooseEndpoint() != "" {
+		watchgooseEndpoint = strings.TrimSpace(req.GetWatchgooseEndpoint())
+	}
+	watchgooseEnabled := current.WatchgooseEnabled
+	if req.WatchgooseEnabled != nil {
+		watchgooseEnabled = req.GetWatchgooseEnabled()
+	}
+	watchgooseInterval := current.WatchgooseInterval
+	if strings.TrimSpace(req.GetWatchgooseInterval()) != "" {
+		watchgooseInterval, err = parseOptionalDuration("watchgoose_interval", req.GetWatchgooseInterval())
+		if err != nil {
+			return &rpcpb.UpdateNodeConfigResponse{Error: err.Error()}, nil
+		}
+	}
+	watchgooseTimeout := current.WatchgooseTimeout
+	if strings.TrimSpace(req.GetWatchgooseTimeout()) != "" {
+		watchgooseTimeout, err = parseOptionalDuration("watchgoose_timeout", req.GetWatchgooseTimeout())
+		if err != nil {
+			return &rpcpb.UpdateNodeConfigResponse{Error: err.Error()}, nil
+		}
+	}
 
 	cfg := nodeconfig.Config{
 		// NodeID/RPCAddr/RaftdSocket (ADR-0100) are deliberately never
@@ -3329,10 +3357,10 @@ func (s *Server) UpdateNodeConfig(_ context.Context, req *rpcpb.UpdateNodeConfig
 		NodeID:             current.NodeID,
 		RPCAddr:            current.RPCAddr,
 		RaftdSocket:        current.RaftdSocket,
-		WatchgooseEnabled:  current.WatchgooseEnabled,
-		WatchgooseEndpoint: current.WatchgooseEndpoint,
-		WatchgooseInterval: current.WatchgooseInterval,
-		WatchgooseTimeout:  current.WatchgooseTimeout,
+		WatchgooseEnabled:  watchgooseEnabled,
+		WatchgooseEndpoint: watchgooseEndpoint,
+		WatchgooseInterval: watchgooseInterval,
+		WatchgooseTimeout:  watchgooseTimeout,
 
 		Uplink:        req.GetUplink(),
 		NATUplink:     req.GetNatUplink(),

@@ -9,7 +9,7 @@ import (
 func TestSaveWithHistoryRecordsChangedFieldsAndRedactsSecrets(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "managerd.json")
 	m := &Manager{Path: path}
-	before := Config{Uplink: "re0", DNSServer: "10.0.0.1", PeerAPIKey: "old-secret", RaftdToken: "old-token"}
+	before := Config{Uplink: "re0", DNSServer: "10.0.0.1", PeerAPIKey: "old-secret", RaftdToken: "old-token", WatchgooseEndpoint: "https://watchgoose.com/ping/old-slug/hive"}
 	if err := m.Save(before); err != nil {
 		t.Fatal(err)
 	}
@@ -18,6 +18,7 @@ func TestSaveWithHistoryRecordsChangedFieldsAndRedactsSecrets(t *testing.T) {
 	after.DNSServer = ""
 	after.PeerAPIKey = "new-secret"
 	after.RaftdToken = "new-token"
+	after.WatchgooseEndpoint = "https://watchgoose.com/ping/new-slug/hive"
 	if err := m.SaveWithHistory(after, OriginIncident, "Restore the uplink after the switch replacement.", "INC-42"); err != nil {
 		t.Fatal(err)
 	}
@@ -25,16 +26,16 @@ func TestSaveWithHistoryRecordsChangedFieldsAndRedactsSecrets(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(changes) != 4 {
-		t.Fatalf("got %d changes, want 4: %+v", len(changes), changes)
+	if len(changes) != 5 {
+		t.Fatalf("got %d changes, want 5: %+v", len(changes), changes)
 	}
 	foundClear := false
 	for _, change := range changes {
 		if change.Origin != OriginIncident || change.Rationale == "" || change.Evidence != "INC-42" {
 			t.Errorf("metadata missing: %+v", change)
 		}
-		if change.Field == "peer_api_key" || change.Field == "raftd_token" {
-			if change.Previous == "old-secret" || change.Current == "new-secret" || change.Previous == "old-token" || change.Current == "new-token" {
+		if change.Field == "peer_api_key" || change.Field == "raftd_token" || change.Field == "watchgoose_endpoint" {
+			if change.Previous == "old-secret" || change.Current == "new-secret" || change.Previous == "old-token" || change.Current == "new-token" || change.Previous == "old-slug" || change.Current == "new-slug" {
 				t.Errorf("secret leaked into history: %+v", change)
 			}
 		}
@@ -52,7 +53,7 @@ func TestSaveWithHistoryRecordsChangedFieldsAndRedactsSecrets(t *testing.T) {
 	if string(body) == "" {
 		t.Fatal("history file is empty")
 	}
-	for _, secret := range []string{"old-secret", "new-secret", "old-token", "new-token"} {
+	for _, secret := range []string{"old-secret", "new-secret", "old-token", "new-token", "old-slug", "new-slug"} {
 		if string(body) != "" && contains(string(body), secret) {
 			t.Errorf("history file contains secret %q", secret)
 		}

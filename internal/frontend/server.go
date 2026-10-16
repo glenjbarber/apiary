@@ -1311,6 +1311,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /machine/security", s.requireRole(manager.RoleOperator, s.handleMachineSectionPage("machine_security_page", "security")))
 	s.mux.HandleFunc("GET /machine/exposure", s.requireRole(manager.RoleOperator, s.handleMachineSectionPage("machine_exposure_page", "exposure")))
 	s.mux.HandleFunc("POST /machine/uplink", s.requireRole(manager.RoleAdmin, s.handleUpdateNodeConfig))
+	s.mux.HandleFunc("POST /machine/watchgoose", s.requireRole(manager.RoleAdmin, s.handleUpdateWatchgoose))
 	s.mux.HandleFunc("POST /machine/managerd-bind", s.requireRole(manager.RoleAdmin, s.handleUpdateManagerdBindAddress))
 	s.mux.HandleFunc("POST /machine/jail-provisioning", s.requireRole(manager.RoleAdmin, s.handleUpdateJailProvisioning))
 	s.mux.HandleFunc("POST /machine/vms/{id}/firewall", s.requireRole(manager.RoleOperator, s.handleSetVMFirewallPaused))
