@@ -55,7 +55,20 @@ func (s *Server) handleMaintenancePage(w http.ResponseWriter, r *http.Request) {
 					wave.ReplicatedCount++
 				}
 			}
-			wave.Verdict, wave.Explanation, wave.Priority = classifyMaintenanceQuorum(wave.ReachableVoters, wave.UnknownVoters, wave.QuorumSize)
+			// Take the leader identity after this simulation so a recent
+			// leadership change is less likely to classify this wave from a
+			// stale vantage point. The report remains a non-atomic snapshot.
+			statusResp, statusErr := s.client.Status(r.Context(), &rpcpb.StatusRequest{})
+			leaderKnown := statusErr == nil && statusResp.GetRaftReachable() && statusResp.GetRaftError() == "" && statusResp.GetRaftMembershipError() == "" && statusResp.GetRaftLeaderId() != ""
+			quorumVerdict, explanation := assessSimulatedQuorum(q, nodeID, statusResp.GetRaftLeaderId(), leaderKnown)
+			switch quorumVerdict {
+			case "survives":
+				wave.Verdict, wave.Explanation, wave.Priority = classifyMaintenanceQuorum(wave.ReachableVoters, wave.UnknownVoters, wave.QuorumSize)
+			case "lost":
+				wave.Verdict, wave.Explanation, wave.Priority = "blocked", explanation, 3
+			default:
+				wave.Verdict, wave.Explanation, wave.Priority = "unknown", explanation, 2
+			}
 		}
 		waves = append(waves, wave)
 	}
