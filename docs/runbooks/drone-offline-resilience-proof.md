@@ -34,15 +34,14 @@ survives the test. Record the time and current leader.
    current leader, a reachability-based **Unknown** verdict means leader-local
    probes cannot predict the survivors' election; use the membership and
    controlled-test gates below to decide whether to proceed.
-3. Confirm the **current Raft membership**, counting entries whose suffrage is
-   `Voter` (the Comb rows on the coverage page are not proof of voter
-   membership). For `N` voters, quorum is `floor(N/2)+1`. Do not proceed with
-   two voters: losing either one ends quorum. Proceed with a one-Comb test only
-   when there are three current voters, so the two survivors can form a
-   majority, and you can restore Drone's network promptly if they do not.
-   A simulation based on checks initiated by the current leader does not
-   establish that the remaining voters can reach one another after that
-   leader is gone.
+3. In the Recovery Handbook's **Current raft membership** table, count only
+   entries whose suffrage is `Voter`; the Comb rows on the coverage page do not
+   prove voter membership. For `N` voters, quorum is `floor(N/2)+1`. Before
+   removing a voter, confirm that `N-1` is at least that quorum. This is true
+   for any `N >= 3`; do not proceed with only two voters. If the membership
+   table is missing or cannot be read, stop. A simulation based on checks
+   initiated by the current leader does not establish that the remaining
+   voters can reach one another after that leader is gone.
 4. Review **Maintenance** (`/maintenance`) or **Simulate** (`/simulate?node_id=drone.lab3.apiary.work`)
    as supporting evidence. These are read-only counterfactuals, not a physical
    rehearsal and not a substitute for the checks above.
