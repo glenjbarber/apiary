@@ -7088,8 +7088,8 @@ type GetNodeConfigResponse struct {
 	// known_peer_addresses (ADR-0097) mirrors -known-peer-addresses: a
 	// comma-separated host:port allowlist target_address must match on
 	// RequestJoinColony/GetJoinRequestStatus/CancelJoinRequest, which
-	// are deliberately unauthenticated. Empty preserves ADR-0092's
-	// original accept-any-target_address behavior.
+	// are deliberately unauthenticated. Empty disables target_address
+	// forwarding; direct join-introduce calls do not set that field.
 	KnownPeerAddresses string `protobuf:"bytes,44,opt,name=known_peer_addresses,json=knownPeerAddresses,proto3" json:"known_peer_addresses,omitempty"`
 	// peer_api_key_set/raftd_token_set report only whether a value is
 	// currently saved for -peer-api-key/-raftd-token - the raw value

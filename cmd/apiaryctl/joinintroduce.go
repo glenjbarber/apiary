@@ -263,26 +263,24 @@ so --field fingerprints prints digests and nothing else.
 }
 
 // buildJoinRequest assembles the request this Comb sends to the target.
+// The command has already dialed that target directly, so it leaves
+// target_address empty. Setting it would ask the receiving managerd to
+// make a second unauthenticated dial to a caller-supplied address.
 //
-// This command dials the TARGET's managerd directly, and a request that
-// names a target_address is treated there as coming from the joiner's own
-// frontend. Any field of the joiner's own state that the request leaves
-// empty is therefore filled in by the target from ITS OWN state and
-// recorded as the joiner's. That is how a joiner was refused for the
-// target's raft log index, and how a pending request came to carry the
-// target's certificate fingerprint under the joiner's node ID. So every
-// field whose true value only this Comb knows is set here, in one place,
-// and a test pins the set.
+// This command dials the TARGET's managerd directly. It includes every
+// value that only the joiner can know and leaves target_address empty,
+// so the receiving managerd records this request locally or uses its
+// Raft leader-forwarding path instead of making a caller-directed dial.
+// A test pins this request shape.
 //
 // fingerprints is localCertificates' list, serving certificate first, and
 // the serving certificate is the one tls_cert_fingerprint has always
 // meant (ADR-0113). The caller guarantees it is non-empty, since
 // localCertificates refuses a Comb with no tls_cert.
-func buildJoinRequest(identity joinIdentity, target, firstCode string, fingerprints []string, lastLogIndex uint64) *rpcpb.RequestJoinColonyRequest {
+func buildJoinRequest(identity joinIdentity, firstCode string, fingerprints []string, lastLogIndex uint64) *rpcpb.RequestJoinColonyRequest {
 	req := &rpcpb.RequestJoinColonyRequest{
 		NodeId:                 identity.nodeID,
 		RaftBindAddress:        identity.raftBind,
-		TargetAddress:          target,
 		IntroductionCode:       firstCode,
 		AdvertisedFingerprints: fingerprints,
 		JoinerLogStateObserved: true,
@@ -329,17 +327,9 @@ func startJoinIntroduction(target, field, nodeID, raftBind, nodeConfigArg string
 	// THIS Comb's own raft log state, read from its own raftd, and sent
 	// with the request.
 	//
-	// This command dials the TARGET's managerd directly, so the target is
-	// the one that receives the request. A request that names a
-	// target_address is treated by the receiving managerd as coming from
-	// the joiner's own frontend, so when it carries no log state the
-	// receiver reads ITS OWN raft status and reports that as the joiner's.
-	// Against a Colony member with a non-empty log (every real one) that
-	// produced "the joining Comb reports raft log index N" for a joiner
-	// whose log was empty, and no amount of wiping the joiner changed N.
-	// The joiner is the only machine that can say what its own log holds,
-	// so it says so here. If it cannot find out, it refuses rather than
-	// send nothing and let the receiver measure the wrong machine.
+	// The joining Comb's own raft log state, read locally and sent with the
+	// request. If it cannot be read, the command refuses rather than leaving
+	// the target to measure its own unrelated log state.
 	lctx, lcancel := context.WithTimeout(context.Background(), localraft.DefaultTimeout)
 	local, err := localraft.Query(lctx, "")
 	lcancel()
@@ -366,7 +356,7 @@ apiary_raftd is running and that raftd.json names the right socket.
 	// API key yet, by definition, and attaching a local credential to a
 	// target an operator named would send it to whatever address the
 	// operator typed.
-	resp, err := client.RequestJoinColony(ctx, buildJoinRequest(identity, target, firstCode, fingerprints, local.LastLogIndex))
+	resp, err := client.RequestJoinColony(ctx, buildJoinRequest(identity, firstCode, fingerprints, local.LastLogIndex))
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "apiaryctl join-introduce: %v\n", translateDialErr(target, plaintext, err))
 		return 1

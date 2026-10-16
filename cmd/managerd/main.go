@@ -1206,11 +1206,9 @@ func applyManagerdDefaults(cfg *nodeconfig.Config) {
 }
 
 // knownPeersWarning returns a startup warning when known_peer_addresses is
-// empty, or "" when it is set. With it empty, the unauthenticated
-// RequestJoinColony, GetJoinRequestStatus and CancelJoinRequest RPCs dial
-// whatever target_address a caller supplies and return the error text, which
-// is a limited reachability oracle. That is a documented, accepted default
-// (ADR-0096, ADR-0097), but it should never be silent.
+// empty, or "" when it is set. Empty now disables unauthenticated
+// target_address forwarding. Direct apiaryctl join-introduce calls do not
+// use target_address; Web UI join forwarding requires this list.
 // effectivePeerTLS resolves nodeconfig.Config.PeerTLS's tri-state:
 // explicit true/false always wins, and nil defaults to whether this
 // node's own tls_cert/tls_key are both set - see the field's own doc
@@ -1227,5 +1225,5 @@ func knownPeersWarning(known []string) string {
 	if len(known) > 0 {
 		return ""
 	}
-	return "managerd: WARNING: known_peer_addresses is not set, so the unauthenticated join RPCs (RequestJoinColony, GetJoinRequestStatus, CancelJoinRequest) will dial any address a caller supplies and report whether it answered; set known_peer_addresses to every Comb's managerd address to restrict them"
+	return "managerd: WARNING: known_peer_addresses is not set, so unauthenticated join RPCs will refuse target_address forwarding; set it to the allowed Colony member managerd addresses to enable Web UI join forwarding (direct apiaryctl join-introduce does not require it)"
 }

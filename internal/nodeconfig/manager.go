@@ -200,8 +200,8 @@ type Config struct {
 
 	// KnownPeerAddresses mirrors -known-peer-addresses (ADR-0097): a
 	// comma-separated host:port allowlist target_address must match on
-	// the three unauthenticated join-colony RPCs. Empty preserves
-	// ADR-0092's original accept-any-target_address behavior.
+	// the three unauthenticated join-colony RPCs. Empty disables
+	// target_address forwarding; direct join-introduce calls do not set it.
 	KnownPeerAddresses string `json:"known_peer_addresses,omitempty"`
 
 	// ColonyJoinWindowSeconds is ADR-0147 Part 4's join-window ceiling,

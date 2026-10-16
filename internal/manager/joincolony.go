@@ -64,26 +64,20 @@ const defaultJoinRequestTTL = 15 * time.Minute
 const defaultUnauthenticatedForwardTimeout = 10 * time.Second
 
 // checkTargetAddressAllowed enforces the target_address allowlist
-// (ADR-0097): when s.knownPeerAddresses is configured (non-nil, via
-// -known-peer-addresses), target_address on RequestJoinColony/
-// GetJoinRequestStatus/CancelJoinRequest must exactly match one of its
-// entries or the call is refused before ever dialing. A 2026-09-12
-// independent audit (docs/audits/2026-09-12-security-audit.md)
-// confirmed ADR-0096's dialUnauthenticated closed the credential-leak
-// half of this finding but not the underlying primitive: these three
-// RPCs are deliberately unauthenticated (a joining Comb has no Colony
-// API key yet), so target_address itself is caller-supplied and could
-// still name any host an attacker chooses, usable as a limited network-
-// reachability oracle. This allowlist is opt-in, not a default-secure
-// change: an operator's own Colony is a small, fixed, already-known set
-// of addresses (this project's own actual deployments top out at four
-// hosts), so pre-listing them is practical, but forcing it on every
-// deployment would break a fresh, never-configured join with no
-// migration path. Nil (unconfigured, the default) preserves ADR-0092's
-// original accept-any-target_address behavior exactly.
+// (ADR-0097): target_address on RequestJoinColony/GetJoinRequestStatus/
+// CancelJoinRequest must exactly match a configured entry or the call
+// is refused before ever dialing. These RPCs are deliberately
+// unauthenticated because a joining Comb has no Colony API key yet, so
+// accepting a caller-supplied target when no allowlist exists would let
+// any network caller use managerd as a reachability oracle. The direct
+// apiaryctl join-introduce path dials the named Colony member itself and
+// leaves target_address empty; only the joiner's own managerd needs an
+// allowlist when it forwards a Web UI join request.
 func (s *Server) checkTargetAddressAllowed(target string) error {
-	if s.knownPeerAddresses == nil {
-		return nil
+	s.knownPeerAddressesMu.RLock()
+	defer s.knownPeerAddressesMu.RUnlock()
+	if len(s.knownPeerAddresses) == 0 {
+		return fmt.Errorf("target_address forwarding is disabled because known_peer_addresses is not configured; set it to the Colony member managerd addresses or use apiaryctl join-introduce to connect directly")
 	}
 	if !s.knownPeerAddresses[target] {
 		return fmt.Errorf("target_address %q is not in this node's -known-peer-addresses allowlist", target)
