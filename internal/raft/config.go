@@ -52,7 +52,7 @@ type Config struct {
 
 	// FastElectionTiming shrinks raft's own heartbeat/election/leader-
 	// lease timeouts from raft.DefaultConfig's 1-second-scale defaults
-	// down to tens of milliseconds. False (the default) leaves
+	// down to a few hundred milliseconds. False (the default) leaves
 	// production timing exactly as it always was - this exists only for
 	// tests that bootstrap many short-lived single-node raft instances
 	// in one process (internal/manager's integration tests bootstrap

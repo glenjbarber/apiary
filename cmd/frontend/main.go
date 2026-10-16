@@ -76,8 +76,12 @@ type remoteAuthenticator struct {
 	client rpcpb.ManagerServiceClient
 }
 
-func (a remoteAuthenticator) Authenticate(username, password string) (bool, error) {
-	resp, err := a.client.AuthenticatePassword(context.Background(), &rpcpb.AuthenticatePasswordRequest{Username: username, Password: password})
+const passwordAuthenticationTimeout = 5 * time.Second
+
+func (a remoteAuthenticator) Authenticate(parent context.Context, username, password string) (bool, error) {
+	ctx, cancel := context.WithTimeout(parent, passwordAuthenticationTimeout)
+	defer cancel()
+	resp, err := a.client.AuthenticatePassword(ctx, &rpcpb.AuthenticatePasswordRequest{Username: username, Password: password})
 	if err != nil {
 		return false, err
 	}

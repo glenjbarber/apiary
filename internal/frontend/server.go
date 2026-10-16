@@ -38,7 +38,7 @@ import (
 // satisfies this structurally, the same way pam.PAMAuthenticator used
 // to and every test's fakeAuthenticator still does.
 type Authenticator interface {
-	Authenticate(username, password string) (bool, error)
+	Authenticate(context.Context, string, string) (bool, error)
 }
 
 // pageData is passed to every full-page and fragment render - Error is
@@ -1428,7 +1428,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ok, err := s.auth.Authenticate(user, pass)
+	ok, err := s.auth.Authenticate(r.Context(), user, pass)
 	if err != nil {
 		s.render(w, "login_page", pageData{LoginError: "authentication backend error: " + err.Error(), NextURL: next})
 		return
@@ -2807,7 +2807,7 @@ func (s *Server) handleChangePassword(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ok, err := s.auth.Authenticate(info.username, currentPassword)
+	ok, err := s.auth.Authenticate(r.Context(), info.username, currentPassword)
 	if err != nil {
 		s.renderUserPanelResult(w, r, info.username, info.role, "authentication backend error: "+err.Error())
 		return

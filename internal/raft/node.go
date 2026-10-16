@@ -111,9 +111,9 @@ func New(cfg Config) (*Node, error) {
 		// LeaderLeaseTimeout <= HeartbeatTimeout <= ElectionTimeout
 		// relationship - see Config.FastElectionTiming's own doc
 		// comment for why this exists at all.
-		raftConfig.HeartbeatTimeout = 50 * time.Millisecond
-		raftConfig.ElectionTimeout = 50 * time.Millisecond
-		raftConfig.LeaderLeaseTimeout = 25 * time.Millisecond
+		raftConfig.HeartbeatTimeout = 250 * time.Millisecond
+		raftConfig.ElectionTimeout = 250 * time.Millisecond
+		raftConfig.LeaderLeaseTimeout = 125 * time.Millisecond
 	}
 
 	boltPath := filepath.Join(cfg.DataDir, boltFileName)
