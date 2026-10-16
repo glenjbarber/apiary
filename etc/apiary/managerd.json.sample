@@ -35,6 +35,7 @@
   "watchgoose_endpoint": "",
   "watchgoose_interval": 0,
   "watchgoose_timeout": 0,
+  "watchgoose_badge_url": "",
   "tls_cert": "/usr/local/etc/apiary/tls/cert.pem",
   "tls_key": "/usr/local/etc/apiary/tls/key.pem",
   "pam_service": "",
