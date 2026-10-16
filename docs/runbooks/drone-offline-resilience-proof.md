@@ -25,19 +25,24 @@ survives the test. Record the time and current leader.
 
 1. Open **Resilience Coverage** (`/resilience-coverage`). Find the Hive-failure
    row for `drone.lab3.apiary.work` and the quorum-tolerance rows for every
-   current voter. Continue only when the `drone` failure result is **Survives**
-   and the relevant evidence is current. **Unknown**, **Lost**, stale status,
-   or missing membership data is a no-go.
+   current voter. Treat **Lost** as a no-go. **Unknown** means the page lacks
+   enough reachability evidence to predict the result; it is not a claim that
+   the cluster will fail. A controlled one-Comb test can resolve that unknown
+   when the membership and rollback conditions below are met.
 2. Open **Recovery Handbook** (`/recovery-handbook?node_id=drone.lab3.apiary.work`).
    Review the quorum verdict and every workload recovery step. If Drone is the
-   current leader, a reachability-based **Unknown** verdict is a no-go until
-   quorum is independently confirmed from the surviving voters.
-3. Confirm Raft membership and quorum size. For `N` voters, quorum is
-   `floor(N/2)+1`. A two-voter Colony cannot tolerate losing either voter. For
-   a three-voter Colony, one voter may be lost while the other two can still
-   communicate. A simulation based on checks initiated by the current leader
-   does not establish that the remaining voters can reach one another after
-   that leader is gone.
+   current leader, a reachability-based **Unknown** verdict means leader-local
+   probes cannot predict the survivors' election; use the membership and
+   controlled-test gates below to decide whether to proceed.
+3. Confirm the **current Raft membership**, counting entries whose suffrage is
+   `Voter` (the Comb rows on the coverage page are not proof of voter
+   membership). For `N` voters, quorum is `floor(N/2)+1`. Do not proceed with
+   two voters: losing either one ends quorum. Proceed with a one-Comb test only
+   when there are three current voters, so the two survivors can form a
+   majority, and you can restore Drone's network promptly if they do not.
+   A simulation based on checks initiated by the current leader does not
+   establish that the remaining voters can reach one another after that
+   leader is gone.
 4. Review **Maintenance** (`/maintenance`) or **Simulate** (`/simulate?node_id=drone.lab3.apiary.work`)
    as supporting evidence. These are read-only counterfactuals, not a physical
    rehearsal and not a substitute for the checks above.
@@ -50,9 +55,11 @@ survives the test. Record the time and current leader.
    relying on Drone. Know the Watchgoose check interval and grace period; the
    ping URL only reports that `managerd` reached Watchgoose, not guest health.
 
-**Do not disconnect Drone** if any preflight item is unknown, if losing Drone
-would leave fewer reachable voters than quorum, or if a required workload still
-runs only on Drone.
+**Do not disconnect Drone** if current voter membership cannot be confirmed,
+if the coverage result is **Lost**, if the cluster already has a voter or
+workload fault, or if a required workload still runs only on Drone. An
+**Unknown** coverage result alone does not block this controlled test once the
+three-voter condition and every other preflight above are met.
 
 ## Controlled exercise
 
