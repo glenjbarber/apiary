@@ -316,6 +316,34 @@ func TestServer_UpdateNodeConfig_ForwardsFormValues(t *testing.T) {
 	}
 }
 
+func TestServer_UpdateWatchgoose_ForwardsSlugURLWithoutEchoingIt(t *testing.T) {
+	client := &fakeClient{
+		updateNodeConfigResp: &rpcpb.UpdateNodeConfigResponse{},
+		getNodeConfigResp:    &rpcpb.GetNodeConfigResponse{},
+	}
+	s := newTestServer(t, client)
+	form := url.Values{
+		"watchgoose_enabled":  {"true"},
+		"watchgoose_endpoint": {"https://watchgoose.com/ping/private-slug/hive-a"},
+		"watchgoose_interval": {"5m"}, "watchgoose_timeout": {"10s"},
+		"change_origin": {"operator"}, "change_rationale": {"Enable per-host heartbeat"},
+	}
+	req := httptest.NewRequest(http.MethodPost, "/machine/watchgoose", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body=%s", rec.Code, rec.Body.String())
+	}
+	got := client.lastUpdateNodeConfigReq
+	if got == nil || got.WatchgooseEnabled == nil || !got.GetWatchgooseEnabled() || got.GetWatchgooseEndpoint() != form.Get("watchgoose_endpoint") || got.GetWatchgooseInterval() != "5m" || got.GetWatchgooseTimeout() != "10s" {
+		t.Fatalf("forwarded Watchgoose request = %+v", got)
+	}
+	if strings.Contains(rec.Body.String(), "private-slug") {
+		t.Fatalf("response echoed the write-only slug: %s", rec.Body.String())
+	}
+}
+
 func TestServer_ConfigProvenancePageShowsRecordedHistoryAndDependencies(t *testing.T) {
 	client := &fakeClient{
 		statusResp: &rpcpb.StatusResponse{ManagerNodeId: "node-a"},
