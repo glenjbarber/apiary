@@ -38,7 +38,7 @@ import (
 // satisfies this structurally, the same way pam.PAMAuthenticator used
 // to and every test's fakeAuthenticator still does.
 type Authenticator interface {
-	Authenticate(username, password string) (bool, error)
+	Authenticate(context.Context, string, string) (bool, error)
 }
 
 // pageData is passed to every full-page and fragment render - Error is
@@ -124,11 +124,6 @@ type pageData struct {
 	// ClusterNodes is the basic per-node summary row list for the
 	// default landing page ("/").
 	ClusterNodes []clusterNodeView
-
-	// HealthTree is the operational cluster/resource hierarchy shown at
-	// the top of the Command Center. It is also refreshed in place from
-	// /cluster-health.json without replacing the user's expanded branches.
-	HealthTree healthTreeNode
 
 	// StateDigestColony is the colony-wide FSM state agreement verdict the
 	// ClusterNodes badges above sit under (ADR-0143). It is a value, not
@@ -1316,6 +1311,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /machine/security", s.requireRole(manager.RoleOperator, s.handleMachineSectionPage("machine_security_page", "security")))
 	s.mux.HandleFunc("GET /machine/exposure", s.requireRole(manager.RoleOperator, s.handleMachineSectionPage("machine_exposure_page", "exposure")))
 	s.mux.HandleFunc("POST /machine/uplink", s.requireRole(manager.RoleAdmin, s.handleUpdateNodeConfig))
+	s.mux.HandleFunc("POST /machine/watchgoose", s.requireRole(manager.RoleAdmin, s.handleUpdateWatchgoose))
 	s.mux.HandleFunc("POST /machine/managerd-bind", s.requireRole(manager.RoleAdmin, s.handleUpdateManagerdBindAddress))
 	s.mux.HandleFunc("POST /machine/jail-provisioning", s.requireRole(manager.RoleAdmin, s.handleUpdateJailProvisioning))
 	s.mux.HandleFunc("POST /machine/vms/{id}/firewall", s.requireRole(manager.RoleOperator, s.handleSetVMFirewallPaused))
@@ -1433,7 +1429,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ok, err := s.auth.Authenticate(user, pass)
+	ok, err := s.auth.Authenticate(r.Context(), user, pass)
 	if err != nil {
 		s.render(w, "login_page", pageData{LoginError: "authentication backend error: " + err.Error(), NextURL: next})
 		return
@@ -2812,7 +2808,7 @@ func (s *Server) handleChangePassword(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ok, err := s.auth.Authenticate(info.username, currentPassword)
+	ok, err := s.auth.Authenticate(r.Context(), info.username, currentPassword)
 	if err != nil {
 		s.renderUserPanelResult(w, r, info.username, info.role, "authentication backend error: "+err.Error())
 		return

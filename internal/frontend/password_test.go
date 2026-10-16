@@ -7,7 +7,6 @@ import (
 	"testing"
 
 	"github.com/glenjbarber/apiary/internal/manager"
-	"github.com/glenjbarber/apiary/internal/pam"
 )
 
 // TestCanChangePassword verifies all nine (actor, target) pairs against
@@ -52,7 +51,7 @@ func (f *fakePasswordSetter) SetPassword(username, newPassword string) error {
 	return nil
 }
 
-func newTestServerWithRoles(t *testing.T, roleMap map[string]manager.Role, auth pam.Authenticator, passwords PasswordSetter) *Server {
+func newTestServerWithRoles(t *testing.T, roleMap map[string]manager.Role, auth Authenticator, passwords PasswordSetter) *Server {
 	t.Helper()
 	s, err := NewServer(&fakeClient{}, auth, roleMap, nil, "", "", passwords, false)
 	if err != nil {

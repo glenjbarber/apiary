@@ -7140,12 +7140,17 @@ type GetNodeConfigResponse struct {
 	// nodeconfig.Config's own doc comments for their full semantics.
 	// Neither acme_directory nor acme_account_key_file is raft-replicated
 	// or ever carries secret material itself.
-	AcmeDirectory      string `protobuf:"bytes,51,opt,name=acme_directory,json=acmeDirectory,proto3" json:"acme_directory,omitempty"`
-	AcmeAccountKeyFile string `protobuf:"bytes,52,opt,name=acme_account_key_file,json=acmeAccountKeyFile,proto3" json:"acme_account_key_file,omitempty"`
-	AcmeDirectoryUrl   string `protobuf:"bytes,53,opt,name=acme_directory_url,json=acmeDirectoryUrl,proto3" json:"acme_directory_url,omitempty"`
-	AcmeEmail          string `protobuf:"bytes,54,opt,name=acme_email,json=acmeEmail,proto3" json:"acme_email,omitempty"`
-	unknownFields      protoimpl.UnknownFields
-	sizeCache          protoimpl.SizeCache
+	AcmeDirectory         string `protobuf:"bytes,51,opt,name=acme_directory,json=acmeDirectory,proto3" json:"acme_directory,omitempty"`
+	AcmeAccountKeyFile    string `protobuf:"bytes,52,opt,name=acme_account_key_file,json=acmeAccountKeyFile,proto3" json:"acme_account_key_file,omitempty"`
+	AcmeDirectoryUrl      string `protobuf:"bytes,53,opt,name=acme_directory_url,json=acmeDirectoryUrl,proto3" json:"acme_directory_url,omitempty"`
+	AcmeEmail             string `protobuf:"bytes,54,opt,name=acme_email,json=acmeEmail,proto3" json:"acme_email,omitempty"`
+	WatchgooseEnabled     bool   `protobuf:"varint,55,opt,name=watchgoose_enabled,json=watchgooseEnabled,proto3" json:"watchgoose_enabled,omitempty"`
+	WatchgooseEndpointSet bool   `protobuf:"varint,56,opt,name=watchgoose_endpoint_set,json=watchgooseEndpointSet,proto3" json:"watchgoose_endpoint_set,omitempty"`
+	WatchgooseInterval    string `protobuf:"bytes,57,opt,name=watchgoose_interval,json=watchgooseInterval,proto3" json:"watchgoose_interval,omitempty"`
+	WatchgooseTimeout     string `protobuf:"bytes,58,opt,name=watchgoose_timeout,json=watchgooseTimeout,proto3" json:"watchgoose_timeout,omitempty"`
+	WatchgooseBadgeUrl    string `protobuf:"bytes,59,opt,name=watchgoose_badge_url,json=watchgooseBadgeUrl,proto3" json:"watchgoose_badge_url,omitempty"`
+	unknownFields         protoimpl.UnknownFields
+	sizeCache             protoimpl.SizeCache
 }
 
 func (x *GetNodeConfigResponse) Reset() {
@@ -7503,6 +7508,29 @@ func (x *GetNodeConfigResponse) GetAcmeDirectoryUrl() string {
 func (x *GetNodeConfigResponse) GetAcmeEmail() string {
 	if x != nil {
 		return x.AcmeEmail
+	}
+	return ""
+}
+
+func (x *GetNodeConfigResponse) GetWatchgooseEnabled() bool { return x != nil && x.WatchgooseEnabled }
+func (x *GetNodeConfigResponse) GetWatchgooseEndpointSet() bool {
+	return x != nil && x.WatchgooseEndpointSet
+}
+func (x *GetNodeConfigResponse) GetWatchgooseInterval() string {
+	if x != nil {
+		return x.WatchgooseInterval
+	}
+	return ""
+}
+func (x *GetNodeConfigResponse) GetWatchgooseTimeout() string {
+	if x != nil {
+		return x.WatchgooseTimeout
+	}
+	return ""
+}
+func (x *GetNodeConfigResponse) GetWatchgooseBadgeUrl() string {
+	if x != nil {
+		return x.WatchgooseBadgeUrl
 	}
 	return ""
 }
@@ -8036,12 +8064,19 @@ type UpdateNodeConfigRequest struct {
 	// acme_directory/acme_account_key_file/acme_directory_url/acme_email
 	// (ADR-0133) - see GetNodeConfigResponse's own doc comment for their
 	// full semantics.
-	AcmeDirectory      string `protobuf:"bytes,51,opt,name=acme_directory,json=acmeDirectory,proto3" json:"acme_directory,omitempty"`
-	AcmeAccountKeyFile string `protobuf:"bytes,52,opt,name=acme_account_key_file,json=acmeAccountKeyFile,proto3" json:"acme_account_key_file,omitempty"`
-	AcmeDirectoryUrl   string `protobuf:"bytes,53,opt,name=acme_directory_url,json=acmeDirectoryUrl,proto3" json:"acme_directory_url,omitempty"`
-	AcmeEmail          string `protobuf:"bytes,54,opt,name=acme_email,json=acmeEmail,proto3" json:"acme_email,omitempty"`
-	unknownFields      protoimpl.UnknownFields
-	sizeCache          protoimpl.SizeCache
+	AcmeDirectory           string `protobuf:"bytes,51,opt,name=acme_directory,json=acmeDirectory,proto3" json:"acme_directory,omitempty"`
+	AcmeAccountKeyFile      string `protobuf:"bytes,52,opt,name=acme_account_key_file,json=acmeAccountKeyFile,proto3" json:"acme_account_key_file,omitempty"`
+	AcmeDirectoryUrl        string `protobuf:"bytes,53,opt,name=acme_directory_url,json=acmeDirectoryUrl,proto3" json:"acme_directory_url,omitempty"`
+	AcmeEmail               string `protobuf:"bytes,54,opt,name=acme_email,json=acmeEmail,proto3" json:"acme_email,omitempty"`
+	WatchgooseEnabled       *bool  `protobuf:"varint,55,opt,name=watchgoose_enabled,json=watchgooseEnabled,proto3,oneof" json:"watchgoose_enabled,omitempty"`
+	WatchgooseEndpoint      string `protobuf:"bytes,56,opt,name=watchgoose_endpoint,json=watchgooseEndpoint,proto3" json:"watchgoose_endpoint,omitempty"`
+	ClearWatchgooseEndpoint bool   `protobuf:"varint,57,opt,name=clear_watchgoose_endpoint,json=clearWatchgooseEndpoint,proto3" json:"clear_watchgoose_endpoint,omitempty"`
+	WatchgooseInterval      string `protobuf:"bytes,58,opt,name=watchgoose_interval,json=watchgooseInterval,proto3" json:"watchgoose_interval,omitempty"`
+	WatchgooseTimeout       string `protobuf:"bytes,59,opt,name=watchgoose_timeout,json=watchgooseTimeout,proto3" json:"watchgoose_timeout,omitempty"`
+	WatchgooseBadgeUrl      string `protobuf:"bytes,60,opt,name=watchgoose_badge_url,json=watchgooseBadgeUrl,proto3" json:"watchgoose_badge_url,omitempty"`
+	ClearWatchgooseBadgeUrl bool   `protobuf:"varint,61,opt,name=clear_watchgoose_badge_url,json=clearWatchgooseBadgeUrl,proto3" json:"clear_watchgoose_badge_url,omitempty"`
+	unknownFields           protoimpl.UnknownFields
+	sizeCache               protoimpl.SizeCache
 }
 
 func (x *UpdateNodeConfigRequest) Reset() {
@@ -8408,6 +8443,40 @@ func (x *UpdateNodeConfigRequest) GetAcmeEmail() string {
 		return x.AcmeEmail
 	}
 	return ""
+}
+
+func (x *UpdateNodeConfigRequest) GetWatchgooseEnabled() bool {
+	return x != nil && x.WatchgooseEnabled != nil && *x.WatchgooseEnabled
+}
+func (x *UpdateNodeConfigRequest) GetWatchgooseEndpoint() string {
+	if x != nil {
+		return x.WatchgooseEndpoint
+	}
+	return ""
+}
+func (x *UpdateNodeConfigRequest) GetClearWatchgooseEndpoint() bool {
+	return x != nil && x.ClearWatchgooseEndpoint
+}
+func (x *UpdateNodeConfigRequest) GetWatchgooseInterval() string {
+	if x != nil {
+		return x.WatchgooseInterval
+	}
+	return ""
+}
+func (x *UpdateNodeConfigRequest) GetWatchgooseTimeout() string {
+	if x != nil {
+		return x.WatchgooseTimeout
+	}
+	return ""
+}
+func (x *UpdateNodeConfigRequest) GetWatchgooseBadgeUrl() string {
+	if x != nil {
+		return x.WatchgooseBadgeUrl
+	}
+	return ""
+}
+func (x *UpdateNodeConfigRequest) GetClearWatchgooseBadgeUrl() bool {
+	return x != nil && x.ClearWatchgooseBadgeUrl
 }
 
 type UpdateNodeConfigResponse struct {
@@ -22118,7 +22187,9 @@ const file_api_rpc_manager_proto_rawDesc = "" +
 	"\ttruncated\x18\x02 \x01(\bR\ttruncated\x12\x1c\n" +
 	"\tavailable\x18\x03 \x01(\bR\tavailable\x12\x14\n" +
 	"\x05error\x18\x04 \x01(\tR\x05error\"\x16\n" +
-	"\x14GetNodeConfigRequest\"\xed\x10\n" +
+	"\x14GetNodeConfigRequest\"" +
+	"\xe6\x12" +
+	"\n" +
 	"\x15GetNodeConfigResponse\x12\x16\n" +
 	"\x06uplink\x18\x01 \x01(\tR\x06uplink\x12\x1d\n" +
 	"\n" +
@@ -22172,10 +22243,16 @@ const file_api_rpc_manager_proto_rawDesc = "" +
 	"\x15acme_account_key_file\x184 \x01(\tR\x12acmeAccountKeyFile\x12,\n" +
 	"\x12acme_directory_url\x185 \x01(\tR\x10acmeDirectoryUrl\x12\x1d\n" +
 	"\n" +
-	"acme_email\x186 \x01(\tR\tacmeEmailB\x0f\n" +
+	"acme_email\x186 \x01(\tR\tacmeEmail\x12-\n" +
+	"\x12watchgoose_enabled\x187 \x01(\bR\x11watchgooseEnabled\x126\n" +
+	"\x17watchgoose_endpoint_set\x188 \x01(\bR\x15watchgooseEndpointSet\x12/\n" +
+	"\x13watchgoose_interval\x189 \x01(\tR\x12watchgooseInterval\x12-\n" +
+	"\x12watchgoose_timeout\x18: \x01(\tR\x11watchgooseTimeoutB\x0f\n" +
 	"\r_jail_enabledB\x0f\n" +
 	"\r_hast_enabledB\v\n" +
-	"\t_peer_tls\"\xf0\x01\n" +
+	"\t_peer_tls" +
+	"\x120\n\x14watchgoose_badge_url\x18; \x01(\tR\x12watchgooseBadgeUrl" +
+	"\"\xf0\x01\n" +
 	"\fConfigChange\x12\x14\n" +
 	"\x05field\x18\x01 \x01(\tR\x05field\x12\x1a\n" +
 	"\bprevious\x18\x02 \x01(\tR\bprevious\x12\x18\n" +
@@ -22205,7 +22282,9 @@ const file_api_rpc_manager_proto_rawDesc = "" +
 	"\x10NetworkInterface\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x0e\n" +
 	"\x02up\x18\x02 \x01(\bR\x02up\x12\x1c\n" +
-	"\taddresses\x18\x03 \x03(\tR\taddresses\"\xd5\x10\n" +
+	"\taddresses\x18\x03 \x03(\tR\taddresses\"" +
+	"\xdc\x13" +
+	"\n" +
 	"\x17UpdateNodeConfigRequest\x12\x16\n" +
 	"\x06uplink\x18\x01 \x01(\tR\x06uplink\x12\x1d\n" +
 	"\n" +
@@ -22262,10 +22341,19 @@ const file_api_rpc_manager_proto_rawDesc = "" +
 	"\x15acme_account_key_file\x184 \x01(\tR\x12acmeAccountKeyFile\x12,\n" +
 	"\x12acme_directory_url\x185 \x01(\tR\x10acmeDirectoryUrl\x12\x1d\n" +
 	"\n" +
-	"acme_email\x186 \x01(\tR\tacmeEmailB\x0f\n" +
+	"acme_email\x186 \x01(\tR\tacmeEmail\x122\n" +
+	"\x12watchgoose_enabled\x187 \x01(\bH\x03R\x11watchgooseEnabled\x88\x01\x01\x12/\n" +
+	"\x13watchgoose_endpoint\x188 \x01(\tR\x12watchgooseEndpoint\x12:\n" +
+	"\x19clear_watchgoose_endpoint\x189 \x01(\bR\x17clearWatchgooseEndpoint\x12/\n" +
+	"\x13watchgoose_interval\x18: \x01(\tR\x12watchgooseInterval\x12-\n" +
+	"\x12watchgoose_timeout\x18; \x01(\tR\x11watchgooseTimeoutB\x0f\n" +
 	"\r_jail_enabledB\x0f\n" +
 	"\r_hast_enabledB\v\n" +
-	"\t_peer_tls\"0\n" +
+	"\t_peer_tlsB\x15\n" +
+	"\x13_watchgoose_enabled" +
+	"\x120\n\x14watchgoose_badge_url\x18< \x01(\tR\x12watchgooseBadgeUrl\x12;\n\x1aclear_watchgoose_badge_url" +
+	"\x18= \x01(\bR\x17clearWatchgooseBadgeUrl" +
+	"\"0\n" +
 	"\x18UpdateNodeConfigResponse\x12\x14\n" +
 	"\x05error\x18\x01 \x01(\tR\x05error\"\x1a\n" +
 	"\x18GetFrontendConfigRequest\"\xfd\x03\n" +

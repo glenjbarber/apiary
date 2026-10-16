@@ -199,6 +199,54 @@ func TestManager_SaveRejectsUnsafeNewFields(t *testing.T) {
 	}
 }
 
+func TestManager_SaveValidatesWatchgooseConfig(t *testing.T) {
+	m := &Manager{Path: filepath.Join(t.TempDir(), "node-config.json")}
+
+	valid := Config{
+		WatchgooseEnabled:  true,
+		WatchgooseEndpoint: "https://watchgoose.com/ping/ping-key/hive-1?create=1",
+		WatchgooseInterval: 5 * time.Minute,
+		WatchgooseTimeout:  10 * time.Second,
+		WatchgooseBadgeURL: "https://watchgoose.com/badge/check-id/fake-token.svg",
+	}
+	if err := m.Save(valid); err != nil {
+		t.Fatalf("Save(valid Watchgoose config) error: %v", err)
+	}
+	got, err := m.Load()
+	if err != nil || got != valid {
+		t.Fatalf("Load() = %+v, %v; want %+v", got, err, valid)
+	}
+
+	uuidEndpoint := valid
+	uuidEndpoint.WatchgooseEndpoint = "https://watchgoose.com/ping/00000000-0000-4000-8000-000000000001"
+	if err := m.Save(uuidEndpoint); err != nil {
+		t.Fatalf("Save(valid Watchgoose UUID endpoint) error: %v", err)
+	}
+
+	cases := map[string]Config{
+		"missing endpoint": {WatchgooseEnabled: true},
+		"plain HTTP":       {WatchgooseEnabled: true, WatchgooseEndpoint: "http://watchgoose.com/ping/key/hive"},
+		"userinfo":         {WatchgooseEnabled: true, WatchgooseEndpoint: "https://user:pass@watchgoose.com/ping/key/hive"},
+		"fragment":         {WatchgooseEnabled: true, WatchgooseEndpoint: "https://watchgoose.com/ping/key/hive#fragment"},
+		"wrong path":       {WatchgooseEnabled: true, WatchgooseEndpoint: "https://watchgoose.com/health/key/hive"},
+		"invalid slug":     {WatchgooseEnabled: true, WatchgooseEndpoint: "https://watchgoose.com/ping/key/Hive One"},
+		"invalid UUID":     {WatchgooseEnabled: true, WatchgooseEndpoint: "https://watchgoose.com/ping/not-a-uuid"},
+		"short interval":   {WatchgooseEnabled: true, WatchgooseEndpoint: "https://watchgoose.com/ping/key/hive", WatchgooseInterval: 11 * time.Second},
+		"negative timeout": {WatchgooseEnabled: true, WatchgooseEndpoint: "https://watchgoose.com/ping/key/hive", WatchgooseTimeout: -time.Second},
+		"badge plain HTTP": {WatchgooseBadgeURL: "http://watchgoose.com/badge/check/token.svg"},
+		"badge wrong host": {WatchgooseBadgeURL: "https://example.com/badge/check/token.svg"},
+		"badge wrong path": {WatchgooseBadgeURL: "https://watchgoose.com/ping/check/token.svg"},
+		"badge query":      {WatchgooseBadgeURL: "https://watchgoose.com/badge/check/token.svg?x=1"},
+	}
+	for name, cfg := range cases {
+		t.Run(name, func(t *testing.T) {
+			if err := m.Save(cfg); err == nil {
+				t.Errorf("Save(%+v) error = nil, want validation error", cfg)
+			}
+		})
+	}
+}
+
 // TestManager_SaveEnforcesScopePathWriteOnce is the regression test for
 // the write-once resource-scope-path rule (ADR-0070): once a value is
 // saved, a *different*, non-empty value for the same field must be

@@ -99,8 +99,10 @@ func TestNodeConfigDenyListIsComplete(t *testing.T) {
 	assertEveryFieldClassified(t, "nodeconfig.Config", nodeconfig.Config{},
 		reflect.TypeOf(NodeConfigRecord{}),
 		map[string]string{
-			"PeerAPIKey": "denied",
-			"RaftdToken": "denied",
+			"PeerAPIKey":         "denied",
+			"RaftdToken":         "denied",
+			"WatchgooseEndpoint": "denied",
+			"WatchgooseBadgeURL": "denied",
 		},
 		map[string]struct{}{
 			// Recorded as paths, on the ADR's "record the path, never the
@@ -426,10 +428,10 @@ func TestSanitizerWatchesEveryLiveSecret(t *testing.T) {
 
 	s := NewSanitizer(&node, &raftd, &front)
 	if !s.Armed() {
-		t.Fatal("the byte guard is not armed for a node with all four credentials set")
+		t.Fatal("the byte guard is not armed for a node with all live credentials set")
 	}
-	if got := s.Watched(); got != 4 {
-		t.Errorf("watching %d values, want 4 - one per deny-listed inline credential", got)
+	if got := s.Watched(); got != 6 {
+		t.Errorf("watching %d values, want 6 - one per deny-listed inline credential", got)
 	}
 	if len(s.Ignored) != 0 {
 		t.Errorf("values were dropped from the watchlist: %v", s.Ignored)
@@ -683,10 +685,12 @@ func walkFiles(root string, fn func(path string, body []byte) error) error {
 
 // # The deny list itself
 
-func TestDenyListNamesTheFourLiveCredentials(t *testing.T) {
+func TestDenyListNamesTheSixLiveCredentials(t *testing.T) {
 	want := map[SecretKind]struct{ structName, field string }{
 		SecretPeerAPIKey:         {"nodeconfig.Config", "PeerAPIKey"},
 		SecretRaftdToken:         {"nodeconfig.Config", "RaftdToken"},
+		SecretWatchgooseEndpoint: {"nodeconfig.Config", "WatchgooseEndpoint"},
+		SecretWatchgooseBadgeURL: {"nodeconfig.Config", "WatchgooseBadgeURL"},
 		SecretManagerAPIKey:      {"frontendconfig.Config", "ManagerAPIKey"},
 		SecretRaftdInternalToken: {"raftdconfig.Config", "InternalToken"},
 	}
@@ -714,6 +718,28 @@ func TestDenyListNamesTheFourLiveCredentials(t *testing.T) {
 		}
 		sort.Strings(sorted)
 		t.Errorf("DenyList has %d entries, want exactly the %d known live credentials: %v", len(got), len(want), sorted)
+	}
+}
+
+func TestWatchgooseBadgeURLsAreRedactedFromBackupBytes(t *testing.T) {
+	badgeURL := "https://watchgoose.com/badge/check/badge-LIVE-CREDENTIAL-5e9c2a7d.svg"
+	sanitizer := NewSanitizer(&nodeconfig.Config{WatchgooseBadgeURL: badgeURL}, nil, nil)
+	if err := sanitizer.Guard("test backup", []byte(`{"watchgoose_badge_url":"`+badgeURL+`"}`)); !errors.Is(err, ErrSecretExposed) {
+		t.Fatalf("Guard() error = %v, want ErrSecretExposed", err)
+	}
+}
+
+func TestWatchgoosePingURLsAreRedactedFromBackupBytes(t *testing.T) {
+	for _, endpoint := range []string{
+		"https://watchgoose.com/ping/test-secret-key/drone",
+		"https://watchgoose.com/ping/00000000-0000-4000-8000-000000000001",
+	} {
+		t.Run("endpoint", func(t *testing.T) {
+			sanitizer := NewSanitizer(&nodeconfig.Config{WatchgooseEndpoint: endpoint}, nil, nil)
+			if err := sanitizer.Guard("test backup", []byte(`{"watchgoose_endpoint":"`+endpoint+`"}`)); !errors.Is(err, ErrSecretExposed) {
+				t.Fatalf("Guard() error = %v, want ErrSecretExposed", err)
+			}
+		})
 	}
 }
 

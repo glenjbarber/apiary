@@ -9,10 +9,12 @@
 // Three categories of field get non-default treatment, all enforced in
 // Save/the manager.Server RPC layer above it, not just the web UI:
 //
-//   - Secrets (PeerAPIKey, RaftdToken) are write-only from the caller's
-//     perspective - internal/manager.Server.GetNodeConfig never returns
-//     their value, only whether one is set. Save persists them as
-//     plain text in this file, which is why DefaultPath is now written
+//   - Secrets (PeerAPIKey, RaftdToken, WatchgooseEndpoint) are write-only
+//     from the caller's perspective - internal/manager.Server.GetNodeConfig
+//     never returns their value, only whether one is set. The Watchgoose
+//     badge URL is a separate public read-only token, returned so the UI can
+//     render the badge but redacted from history and backups. Save persists
+//     these values as plain text in this file, which is why DefaultPath is now written
 //     0600, not 0644 - this file can hold a live credential, the exact
 //     class of exposure ADR-0067 already found and fixed once for
 //     /etc/rc.conf itself.
@@ -38,8 +40,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
+	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -293,7 +297,12 @@ type Config struct {
 
 	// AcmeEmail is an optional contact address passed at ACME account
 	// registration. Let's Encrypt does not require one.
-	AcmeEmail string `json:"acme_email,omitempty"`
+	AcmeEmail          string        `json:"acme_email,omitempty"`
+	WatchgooseEnabled  bool          `json:"watchgoose_enabled,omitempty"`
+	WatchgooseEndpoint string        `json:"watchgoose_endpoint,omitempty"`
+	WatchgooseInterval time.Duration `json:"watchgoose_interval,omitempty"`
+	WatchgooseTimeout  time.Duration `json:"watchgoose_timeout,omitempty"`
+	WatchgooseBadgeURL string        `json:"watchgoose_badge_url,omitempty"`
 
 	// RaftdToken mirrors -raftd-token - a live credential (ADR-0033),
 	// write-only, same posture as PeerAPIKey above.
@@ -595,7 +604,99 @@ func validate(cfg Config) error {
 	if err := validatePathField("raftd_socket", cfg.RaftdSocket); err != nil {
 		return err
 	}
+	if err := validateDurationField("watchgoose_interval", cfg.WatchgooseInterval); err != nil {
+		return err
+	}
+	if err := validateDurationField("watchgoose_timeout", cfg.WatchgooseTimeout); err != nil {
+		return err
+	}
+	if cfg.WatchgooseBadgeURL != "" {
+		if err := validateWatchgooseBadgeURL(cfg.WatchgooseBadgeURL); err != nil {
+			return err
+		}
+	}
+	if cfg.WatchgooseEnabled {
+		if cfg.WatchgooseEndpoint == "" {
+			return fmt.Errorf("nodeconfig: watchgoose_endpoint must be set when watchgoose_enabled is true")
+		}
+		if err := validateWatchgooseEndpoint(cfg.WatchgooseEndpoint); err != nil {
+			return err
+		}
+		if cfg.WatchgooseInterval > 0 && cfg.WatchgooseInterval < 12*time.Second {
+			return fmt.Errorf("nodeconfig: watchgoose_interval must be at least 12s to stay within Watchgoose's ping rate limit")
+		}
+	}
 	return nil
+}
+
+func validateWatchgooseBadgeURL(raw string) error {
+	u, err := url.Parse(raw)
+	if err != nil || u.Scheme != "https" || u.Hostname() != "watchgoose.com" || u.Port() != "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" {
+		return fmt.Errorf("nodeconfig: watchgoose_badge_url must be an HTTPS Watchgoose badge URL without query, user info, or fragment")
+	}
+	parts := strings.Split(strings.TrimPrefix(u.EscapedPath(), "/"), "/")
+	if len(parts) != 3 || parts[0] != "badge" || !validWatchgooseBadgePathPart(parts[1]) || !strings.HasSuffix(parts[2], ".svg") || !validWatchgooseBadgePathPart(strings.TrimSuffix(parts[2], ".svg")) {
+		return fmt.Errorf("nodeconfig: watchgoose_badge_url must use the /badge/<check>/<token>.svg path")
+	}
+	return nil
+}
+
+func validWatchgooseBadgePathPart(value string) bool {
+	if value == "" {
+		return false
+	}
+	for _, r := range value {
+		if (r < 'a' || r > 'z') && (r < 'A' || r > 'Z') && (r < '0' || r > '9') && r != '-' && r != '_' {
+			return false
+		}
+	}
+	return true
+}
+
+func validateWatchgooseEndpoint(endpoint string) error {
+	u, err := url.Parse(endpoint)
+	if err != nil || u.Scheme != "https" || u.Host == "" || u.User != nil || u.Fragment != "" {
+		return fmt.Errorf("nodeconfig: watchgoose_endpoint must be an HTTPS ping URL without user info or fragment")
+	}
+	parts := strings.Split(strings.Trim(u.EscapedPath(), "/"), "/")
+	if len(parts) == 2 && parts[0] == "ping" && validWatchgooseUUID(parts[1]) {
+		return nil
+	}
+	if len(parts) != 3 || parts[0] != "ping" || parts[1] == "" || !validWatchgooseSlug(parts[2]) {
+		return fmt.Errorf("nodeconfig: watchgoose_endpoint must use a Watchgoose UUID or slug ping path")
+	}
+	return nil
+}
+
+func validWatchgooseUUID(id string) bool {
+	if len(id) != 36 {
+		return false
+	}
+	for i, r := range id {
+		switch i {
+		case 8, 13, 18, 23:
+			if r != '-' {
+				return false
+			}
+		default:
+			if (r < '0' || r > '9') && (r < 'a' || r > 'f') && (r < 'A' || r > 'F') {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+func validWatchgooseSlug(slug string) bool {
+	if slug == "" {
+		return false
+	}
+	for _, r := range slug {
+		if (r < 'a' || r > 'z') && (r < '0' || r > '9') && r != '-' && r != '_' {
+			return false
+		}
+	}
+	return true
 }
 
 // validateDurationField rejects a negative duration - Go's own

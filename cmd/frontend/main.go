@@ -6,10 +6,12 @@ package main
 import (
 	"context"
 	"crypto/tls"
+	"errors"
 	"flag"
 	"fmt"
 	"github.com/glenjbarber/apiary/internal/buildinfo"
 	"log"
+	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
@@ -76,8 +78,12 @@ type remoteAuthenticator struct {
 	client rpcpb.ManagerServiceClient
 }
 
-func (a remoteAuthenticator) Authenticate(username, password string) (bool, error) {
-	resp, err := a.client.AuthenticatePassword(context.Background(), &rpcpb.AuthenticatePasswordRequest{Username: username, Password: password})
+const passwordAuthenticationTimeout = 5 * time.Second
+
+func (a remoteAuthenticator) Authenticate(parent context.Context, username, password string) (bool, error) {
+	ctx, cancel := context.WithTimeout(parent, passwordAuthenticationTimeout)
+	defer cancel()
+	resp, err := a.client.AuthenticatePassword(ctx, &rpcpb.AuthenticatePasswordRequest{Username: username, Password: password})
 	if err != nil {
 		return false, err
 	}
@@ -292,9 +298,42 @@ func run() error {
 			return fmt.Errorf("loading TLS cert/key: %w", err)
 		}
 		httpSrv.TLSConfig = &tls.Config{GetCertificate: certs.GetCertificate, MinVersion: tls.VersionTLS12}
-		return httpSrv.ListenAndServeTLS("", "")
+		return serveHTTP(ctx, httpSrv, func() error { return httpSrv.ListenAndServeTLS("", "") })
 	}
-	return httpSrv.ListenAndServe()
+	return serveHTTP(ctx, httpSrv, httpSrv.ListenAndServe)
+}
+
+// serveHTTP stops accepting requests when the process receives SIGTERM or
+// SIGINT. signal.NotifyContext consumes those signals, so without this
+// shutdown path ListenAndServe would continue running and rc.d restart/stop
+// would wait forever for the frontend process to exit.
+func serveHTTP(ctx context.Context, srv *http.Server, serve func() error) error {
+	serveErr := make(chan error, 1)
+	go func() { serveErr <- serve() }()
+
+	select {
+	case err := <-serveErr:
+		if errors.Is(err, http.ErrServerClosed) {
+			return nil
+		}
+		return err
+	case <-ctx.Done():
+	}
+
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err := srv.Shutdown(shutdownCtx); err != nil {
+		// Shutdown can time out when a handler is stuck. Close all remaining
+		// connections so service stop still has a firm upper bound.
+		_ = srv.Close()
+		return fmt.Errorf("shutting down frontend HTTP server: %w", err)
+	}
+
+	err := <-serveErr
+	if errors.Is(err, http.ErrServerClosed) {
+		return nil
+	}
+	return err
 }
 
 // peerHostRefreshInterval controls how often runPeerHostRefreshLoop

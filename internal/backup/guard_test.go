@@ -267,8 +267,8 @@ func TestACaptureWithAnArmedGuardCatchesASmuggledConfigEndToEnd(t *testing.T) {
 	if err := san.AddSecret("origincert.key", originCertKeyPEM); err != nil {
 		t.Fatal(err)
 	}
-	if san.Watched() != 5 {
-		t.Fatalf("watching %d values, want 5", san.Watched())
+	if san.Watched() != 7 {
+		t.Fatalf("watching %d values, want 7", san.Watched())
 	}
 
 	store, root := newTestStore(t, WithSanitizer(san))

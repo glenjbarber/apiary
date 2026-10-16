@@ -1094,7 +1094,7 @@ type fakeAuthenticator struct {
 	user, pass string
 }
 
-func (f fakeAuthenticator) Authenticate(username, password string) (bool, error) {
+func (f fakeAuthenticator) Authenticate(_ context.Context, username, password string) (bool, error) {
 	return username == f.user && password == f.pass, nil
 }
 

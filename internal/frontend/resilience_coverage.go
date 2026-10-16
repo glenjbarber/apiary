@@ -2,7 +2,9 @@ package frontend
 
 import (
 	"context"
+	"fmt"
 	"net/http"
+	"strings"
 	"sync"
 
 	rpcpb "github.com/glenjbarber/apiary/api/rpc"
@@ -104,7 +106,7 @@ type coverageStatusCountView struct {
 // for cell-recoverability - never a per-node SimulateNodeFailure call,
 // which would cost O(candidateNodes x clusterServers) RPCs on the
 // leader for what boils down to two counts and one verdict per node.
-func (s *Server) gatherHiveFailureScenarios(nodeIDs []string, voterImpacts []invariant.VoterQuorumImpact, vms []vmView, jails []jailView) []coverage.Scenario {
+func (s *Server) gatherHiveFailureScenarios(nodeIDs []string, voterImpacts []invariant.VoterQuorumImpact, vms []vmView, jails []jailView, probeNodeID string) []coverage.Scenario {
 	impactByNode := make(map[string]invariant.VoterQuorumImpact, len(voterImpacts))
 	for _, impact := range voterImpacts {
 		impactByNode[impact.NodeID] = impact
@@ -137,9 +139,35 @@ func (s *Server) gatherHiveFailureScenarios(nodeIDs []string, voterImpacts []inv
 			verdict, valid = impact.Verdict, impact.Valid
 		}
 
-		scenarios = append(scenarios, coverage.ClassifyHiveFailure(id, "Comb "+id+" fails", verdict, valid, owned, replicaBacked))
+		scenario := coverage.ClassifyHiveFailure(id, "Comb "+id+" fails", verdict, valid, owned, replicaBacked)
+		if isVoter && (!valid || verdict == recovery.QuorumUnknown) {
+			scenario.Explanation += " " + quorumImpactExplanation(impact, probeNodeID)
+		}
+		scenarios = append(scenarios, scenario)
 	}
 	return scenarios
+}
+
+// quorumImpactExplanation retains the raw evidence that led to an
+// unknown per-voter outage verdict, including which voter probes did
+// not confirm and whether the probe source itself is being removed.
+func quorumImpactExplanation(impact invariant.VoterQuorumImpact, probeNodeID string) string {
+	if !impact.Valid {
+		return "Quorum is unknown because the voter counts are internally inconsistent; refresh Raft membership and reachability evidence."
+	}
+	f := impact.Fact
+	parts := []string{fmt.Sprintf("Quorum needs %d of %d voters after this loss; %d are confirmed reachable", f.QuorumSize, f.TotalVoters, f.RemainingReachable)}
+	if len(impact.UnknownVoterIDs) > 0 {
+		parts = append(parts, "reachability is unknown for "+strings.Join(impact.UnknownVoterIDs, ", "))
+	}
+	if impact.TargetIsLeader && impact.LeaderVantage {
+		parts = append(parts, "this is the current leader and the probes came from that leader, so they do not establish that the remaining voters can communicate without it")
+	}
+	if impact.NodeID == probeNodeID {
+		parts = append(parts, "the probes came from the Comb being removed, so its successful checks disappear with it")
+	}
+	parts = append(parts, "to clear Unknown, evaluate from a surviving Comb and confirm the remaining voters can reach one another")
+	return "Quorum evidence: " + strings.Join(parts, "; ") + "."
 }
 
 // gatherNetworkFailureScenarios calls SimulateNetworkFailure once per
@@ -221,12 +249,12 @@ func (s *Server) handleCoveragePage(w http.ResponseWriter, r *http.Request) {
 		leaderID := statusResp.GetRaftLeaderId()
 		vantage := quorumVantage(statusResp, localNodeID)
 
-		quorumEval := invariant.EvaluateQuorumTolerance(voterReachability, leaderID, vantage)
+		quorumEval := invariant.EvaluateQuorumTolerance(voterReachability, leaderID, vantage, localNodeID)
 		scenarios = append(scenarios, coverage.ClassifyQuorumTolerance(quorumEval, len(voterReachability)))
 
-		voterImpacts := invariant.ClassifyVoterQuorumImpacts(voterReachability, leaderID, vantage)
+		voterImpacts := invariant.ClassifyVoterQuorumImpacts(voterReachability, leaderID, vantage, localNodeID)
 		nodeIDs := s.simulateNodeChoices(r)
-		scenarios = append(scenarios, s.gatherHiveFailureScenarios(nodeIDs, voterImpacts, vms, jails)...)
+		scenarios = append(scenarios, s.gatherHiveFailureScenarios(nodeIDs, voterImpacts, vms, jails, localNodeID)...)
 	}
 
 	if netErr == "" {

@@ -290,6 +290,8 @@ var configFieldSpecs = []configFieldSpec{
 	{"acme_email", "Let's Encrypt contact email", "The contact address this Comb registers its ACME account with."},
 	{"peer_api_key", "Peer API key", "Authenticated peer managerd requests. Current and historical secret values are redacted."},
 	{"raftd_token", "Raftd token", "managerd authentication to this Comb's local raftd socket. Current and historical secret values are redacted."},
+	{"watchgoose_endpoint", "Watchgoose ping URL", "The write-only heartbeat URL for this Comb. A UUID or slug ping URL is a credential, and current and historical values are redacted."},
+	{"watchgoose_badge_url", "Watchgoose badge URL", "The public, read-only status badge displayed for this Comb. The URL's check token is redacted from configuration history and backups."},
 }
 
 func (s *Server) handleConfigProvenancePage(w http.ResponseWriter, r *http.Request) {
@@ -457,6 +459,18 @@ func (s *Server) handleConfigProvenanceAttest(w http.ResponseWriter, r *http.Req
 }
 
 func configValueFromResponse(resp *rpcpb.GetNodeConfigResponse, field string) string {
+	if field == "watchgoose_endpoint" {
+		if resp.GetWatchgooseEndpointSet() {
+			return "(set; value redacted)"
+		}
+		return "(unset)"
+	}
+	if field == "watchgoose_badge_url" {
+		if resp.GetWatchgooseBadgeUrl() != "" {
+			return "(set; value redacted)"
+		}
+		return "(unset)"
+	}
 	if field == "peer_api_key" {
 		if resp.GetPeerApiKeySet() {
 			return "(set; value redacted)"
@@ -755,6 +769,10 @@ func (s *Server) handleUpdateJailProvisioning(w http.ResponseWriter, r *http.Req
 	s.handleUpdateMachineConfig(w, r, "jail_provisioning_panel")
 }
 
+func (s *Server) handleUpdateWatchgoose(w http.ResponseWriter, r *http.Request) {
+	s.handleUpdateMachineConfig(w, r, "watchgoose_panel")
+}
+
 func (s *Server) handleUpdateMachineConfig(w http.ResponseWriter, r *http.Request, panel string) {
 	if err := r.ParseForm(); err != nil {
 		s.renderMachineConfigPanel(w, r, panel, "invalid form: "+err.Error())
@@ -794,13 +812,16 @@ func (s *Server) handleUpdateMachineConfig(w http.ResponseWriter, r *http.Reques
 func (s *Server) nodeConfigUpdateRequest(r *http.Request) *rpcpb.UpdateNodeConfigRequest {
 	cfg, _ := s.currentNodeConfig(r)
 	req := &rpcpb.UpdateNodeConfigRequest{
-		ChangeOrigin:    r.FormValue("change_origin"),
-		ChangeRationale: strings.TrimSpace(r.FormValue("change_rationale")),
-		ChangeEvidence:  strings.TrimSpace(r.FormValue("change_evidence")),
-		Uplink:          cfg.Uplink,
-		NatUplink:       cfg.NATUplink,
-		DhcpDnsServer:   cfg.DNSServer,
-		JailEnabled:     jailEnabledFromForm(cfg.JailEnabledMode),
+		ChangeOrigin:       r.FormValue("change_origin"),
+		ChangeRationale:    strings.TrimSpace(r.FormValue("change_rationale")),
+		ChangeEvidence:     strings.TrimSpace(r.FormValue("change_evidence")),
+		WatchgooseInterval: cfg.WatchgooseInterval,
+		WatchgooseTimeout:  cfg.WatchgooseTimeout,
+		WatchgooseBadgeUrl: cfg.WatchgooseBadgeURL,
+		Uplink:             cfg.Uplink,
+		NatUplink:          cfg.NATUplink,
+		DhcpDnsServer:      cfg.DNSServer,
+		JailEnabled:        jailEnabledFromForm(cfg.JailEnabledMode),
 
 		ZfsBase:       cfg.ZFSBase,
 		BhyvePrefix:   cfg.BhyvePrefix,
@@ -846,6 +867,28 @@ func (s *Server) nodeConfigUpdateRequest(r *http.Request) *rpcpb.UpdateNodeConfi
 	}
 	if r.Form.Has("uplink") {
 		req.Uplink = r.FormValue("uplink")
+	}
+	if r.Form.Has("watchgoose_enabled") {
+		enabled := r.FormValue("watchgoose_enabled") == "true"
+		req.WatchgooseEnabled = &enabled
+	}
+	if r.Form.Has("watchgoose_endpoint") {
+		req.WatchgooseEndpoint = strings.TrimSpace(r.FormValue("watchgoose_endpoint"))
+	}
+	if r.FormValue("clear_watchgoose_endpoint") == "true" {
+		req.ClearWatchgooseEndpoint = true
+	}
+	if r.Form.Has("watchgoose_interval") {
+		req.WatchgooseInterval = strings.TrimSpace(r.FormValue("watchgoose_interval"))
+	}
+	if r.Form.Has("watchgoose_timeout") {
+		req.WatchgooseTimeout = strings.TrimSpace(r.FormValue("watchgoose_timeout"))
+	}
+	if r.Form.Has("watchgoose_badge_url") {
+		req.WatchgooseBadgeUrl = strings.TrimSpace(r.FormValue("watchgoose_badge_url"))
+	}
+	if r.FormValue("clear_watchgoose_badge_url") == "true" {
+		req.ClearWatchgooseBadgeUrl = true
 	}
 	if r.Form.Has("nat_uplink") {
 		req.NatUplink = r.FormValue("nat_uplink")
