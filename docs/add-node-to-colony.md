@@ -38,6 +38,14 @@ Do not start a normal standalone `raftd` cluster on a node intended to join.
 A fresh raftd without `await_join` immediately creates an independent Raft
 cluster.
 
+Before approving a join, verify that the current Colony members have the same
+root-owned `/usr/local/etc/apiary/restart-guardrail-token` installed and loaded
+by `managerd`. A leader without this token refuses approval before changing
+Raft membership: the joining Comb must receive the Colony's actual token to
+confirm guarded restarts. For an older Colony that has never provisioned it,
+seed the same random token on every existing member and restart `managerd`
+before proceeding. Keep the token out of shell history and logs.
+
 ## Establish trust before requesting the join
 
 The joining managerd must be able to verify the target Colony member's
@@ -298,6 +306,30 @@ overview. In **Pending join requests**, this is a two-stage handshake
    confirmation phrase, and submit.
 
 The approval changes the real Raft membership. It is not merely a UI setting.
+
+After approval, install the sealed credentials on the joining Comb itself.
+Run the command printed by the join flow as root, adding
+`--install-credentials` if it is not already present:
+
+```bash
+/usr/local/libexec/apiary/apiaryctl join-introduce \
+  --request-id <request-id> --first-code <first-code> \
+  --target <existing-comb-managerd-address> --install-credentials
+```
+
+This step requires a TLS connection and the joining Comb's local certificate
+private key. It decrypts the response locally, writes the per-node Operator
+key and shared restart token to their local configuration files, then restarts
+`managerd` and `frontend`. Do not run it from an existing member: the
+credentials are encrypted for the joining Comb's serving certificate. The
+joiner also needs the normal peer TLS trust settings from this runbook so it
+can authenticate the target Colony member.
+
+This automated handoff covers newly joining Combs. Existing Colonies with
+members predating per-node peer-key provisioning still need their existing
+members' peer keys configured and their `managerd`/`frontend` peer settings
+completed under **Complete peer trust after the join** below. The join flow
+does not distribute a secret to already-running members.
 
 ## Complete peer trust after the join
 

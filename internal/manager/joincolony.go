@@ -64,26 +64,20 @@ const defaultJoinRequestTTL = 15 * time.Minute
 const defaultUnauthenticatedForwardTimeout = 10 * time.Second
 
 // checkTargetAddressAllowed enforces the target_address allowlist
-// (ADR-0097): when s.knownPeerAddresses is configured (non-nil, via
-// -known-peer-addresses), target_address on RequestJoinColony/
-// GetJoinRequestStatus/CancelJoinRequest must exactly match one of its
-// entries or the call is refused before ever dialing. A 2026-09-12
-// independent audit (docs/audits/2026-09-12-security-audit.md)
-// confirmed ADR-0096's dialUnauthenticated closed the credential-leak
-// half of this finding but not the underlying primitive: these three
-// RPCs are deliberately unauthenticated (a joining Comb has no Colony
-// API key yet), so target_address itself is caller-supplied and could
-// still name any host an attacker chooses, usable as a limited network-
-// reachability oracle. This allowlist is opt-in, not a default-secure
-// change: an operator's own Colony is a small, fixed, already-known set
-// of addresses (this project's own actual deployments top out at four
-// hosts), so pre-listing them is practical, but forcing it on every
-// deployment would break a fresh, never-configured join with no
-// migration path. Nil (unconfigured, the default) preserves ADR-0092's
-// original accept-any-target_address behavior exactly.
+// (ADR-0097): target_address on RequestJoinColony/GetJoinRequestStatus/
+// CancelJoinRequest must exactly match a configured entry or the call
+// is refused before ever dialing. These RPCs are deliberately
+// unauthenticated because a joining Comb has no Colony API key yet, so
+// accepting a caller-supplied target when no allowlist exists would let
+// any network caller use managerd as a reachability oracle. The direct
+// apiaryctl join-introduce path dials the named Colony member itself and
+// leaves target_address empty; only the joiner's own managerd needs an
+// allowlist when it forwards a Web UI join request.
 func (s *Server) checkTargetAddressAllowed(target string) error {
-	if s.knownPeerAddresses == nil {
-		return nil
+	s.knownPeerAddressesMu.RLock()
+	defer s.knownPeerAddressesMu.RUnlock()
+	if len(s.knownPeerAddresses) == 0 {
+		return fmt.Errorf("target_address forwarding is disabled because known_peer_addresses is not configured; set it to the Colony member managerd addresses or use apiaryctl join-introduce to connect directly")
 	}
 	if !s.knownPeerAddresses[target] {
 		return fmt.Errorf("target_address %q is not in this node's -known-peer-addresses allowlist", target)
@@ -617,7 +611,7 @@ func (s *Server) GetJoinRequestStatus(ctx context.Context, req *rpcpb.GetJoinReq
 		// finding) - see RequestJoinColony's own identical comment above.
 		fctx, cancel := context.WithTimeout(ctx, defaultUnauthenticatedForwardTimeout)
 		defer cancel()
-		resp, err := s.peers.GetJoinRequestStatusUnauthenticated(fctx, target, req.GetRequestId(), req.GetIntroductionCode())
+		resp, err := s.forwardJoinRequestStatus(fctx, target, req)
 		if err != nil {
 			return &rpcpb.GetJoinRequestStatusResponse{Error: fmt.Sprintf("reaching %s: %v", target, err)}, nil
 		}
@@ -631,6 +625,30 @@ func (s *Server) GetJoinRequestStatus(ctx context.Context, req *rpcpb.GetJoinReq
 		return &rpcpb.GetJoinRequestStatusResponse{Error: resp.GetError()}, nil
 	}
 	pending := resp.GetRequest()
+	out := &rpcpb.GetJoinRequestStatusResponse{Request: fromInternalPendingJoinRequest(pending)}
+	if pending.GetStatus() == internalpb.JoinRequestStatus_JOIN_REQUEST_STATUS_APPROVED && req.GetRecipientTlsCertificatePem() != "" {
+		envelope, leaderAddress, err := s.sealApprovedJoinCredentials(ctx, req, pending)
+		if leaderAddress != "" {
+			if s.peers == nil {
+				out.Error = "credential provisioning reached a follower but peer forwarding is not configured"
+				return out, nil
+			}
+			fctx, cancel := context.WithTimeout(ctx, defaultUnauthenticatedForwardTimeout)
+			defer cancel()
+			forwarded, ferr := s.forwardJoinRequestStatus(fctx, leaderAddress, req)
+			if ferr != nil {
+				out.Error = fmt.Sprintf("reaching the current Colony leader for join credentials: %v", ferr)
+				return out, nil
+			}
+			return forwarded, nil
+		}
+		if err != nil {
+			out.Error = err.Error()
+			return out, nil
+		}
+		out.SealedCredentials = envelope
+		return out, nil
+	}
 	// ADR-0147 Part 2: the SECOND PIN is released here and only here,
 	// and it is released on TWO values rather than the request_id alone.
 	//
@@ -649,7 +667,6 @@ func (s *Server) GetJoinRequestStatus(ctx context.Context, req *rpcpb.GetJoinReq
 	// Compared in constant time, through the same helper the FSM uses,
 	// so there is one comparison in the tree and not a second one that
 	// could be less careful.
-	out := &rpcpb.GetJoinRequestStatusResponse{Request: fromInternalPendingJoinRequest(pending)}
 	if pending.GetStage() != internalpb.JoinRequestStage_JOIN_REQUEST_STAGE_CODE_VERIFIED || pending.GetSecondPin() == "" {
 		return out, nil
 	}
@@ -680,6 +697,19 @@ func (s *Server) GetJoinRequestStatus(ctx context.Context, req *rpcpb.GetJoinReq
 	out.SecondPin = pending.GetSecondPin()
 	out.SecondPinExpiresAtUnix = pending.GetSecondPinExpiresAtUnix()
 	return out, nil
+}
+
+type joinStatusRequestForwarder interface {
+	GetJoinRequestStatusUnauthenticatedWithRequest(context.Context, string, *rpcpb.GetJoinRequestStatusRequest) (*rpcpb.GetJoinRequestStatusResponse, error)
+}
+
+func (s *Server) forwardJoinRequestStatus(ctx context.Context, address string, req *rpcpb.GetJoinRequestStatusRequest) (*rpcpb.GetJoinRequestStatusResponse, error) {
+	if forwarder, ok := s.peers.(joinStatusRequestForwarder); ok {
+		return forwarder.GetJoinRequestStatusUnauthenticatedWithRequest(ctx, address, req)
+	}
+	// Older test fakes implement the original narrow interface. Production
+	// PeerReporter preserves the complete request, including the certificate.
+	return s.peers.GetJoinRequestStatusUnauthenticated(ctx, address, req.GetRequestId(), req.GetIntroductionCode())
 }
 
 // hashJoinValue is the SHA-256 of one human-entered value, hex-encoded.
@@ -956,6 +986,24 @@ func (s *Server) ApproveJoinRequest(ctx context.Context, req *rpcpb.ApproveJoinR
 	}); report.Verdict != guardrail.Allow {
 		return &rpcpb.ApproveJoinRequestResponse{Error: fmt.Sprintf(
 			"refusing to approve: %s", report.Findings[0].Detail)}, nil
+	}
+	// Issues #80/#83: provision a request-bound Operator key before any
+	// irreversible membership change. The key table stores only its digest;
+	// the raw value is later sealed to the joining Comb's recorded TLS
+	// certificate and installed by that Comb's root apiaryctl. The shared
+	// restart token must already be loaded here so approval cannot add a voter
+	// that is unable to confirm the restart guardrail.
+	if _, leaderAddress, provisionErr := s.provisionApprovedJoinAPIKey(ctx, pending); leaderAddress != "" {
+		if s.peers == nil {
+			return &rpcpb.ApproveJoinRequestResponse{Error: fmt.Sprintf("peer-key provisioning reached a follower; the leader is at %s but peer forwarding is not configured", leaderAddress), LeaderHint: leaderAddress}, nil
+		}
+		forwarded, forwardErr := s.peers.ApproveJoinRequest(ctx, leaderAddress, req)
+		if forwardErr != nil {
+			return &rpcpb.ApproveJoinRequestResponse{Error: fmt.Sprintf("reaching current leader %s to provision join credentials: %v", leaderAddress, forwardErr), LeaderHint: leaderAddress}, nil
+		}
+		return forwarded, nil
+	} else if provisionErr != nil {
+		return &rpcpb.ApproveJoinRequestResponse{Error: provisionErr.Error()}, nil
 	}
 
 	// The PIN is SPENT here, by its own raft command, and this is the

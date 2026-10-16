@@ -94,6 +94,7 @@ func TestServer_RequestJoinColony_TargetAddressWithNilPeersErrors(t *testing.T) 
 func TestServer_RequestJoinColony_TargetAddressForwardsToPeer(t *testing.T) {
 	peers := &fakeJoinColonyPeerForwarder{requestResp: &rpcpb.RequestJoinColonyResponse{RequestId: "jreq-1", Code: "482913"}}
 	s := NewServer(nil, "node-1", nil, nil, nil, nil, peers, "", nil, nil, nil, 0, nil)
+	s.SetKnownPeerAddresses([]string{"10.0.0.1:17700"})
 	resp, err := s.RequestJoinColony(context.Background(), withIntroduction(&rpcpb.RequestJoinColonyRequest{
 		NodeId: "node-2", RaftBindAddress: "10.0.0.2:17600", TargetAddress: "10.0.0.1:17700",
 	}, t))
@@ -160,11 +161,9 @@ func TestServer_RequestJoinColony_TargetAddressAllowedWhenAllowlisted(t *testing
 	}
 }
 
-// TestServer_SetKnownPeerAddresses_EmptyClearsAllowlist confirms
-// passing an empty/nil slice restores ADR-0092's original accept-any
-// behavior, not an empty (deny-everything) allowlist - the difference
-// between "unconfigured" and "configured but empty" matters here.
-func TestServer_SetKnownPeerAddresses_EmptyClearsAllowlist(t *testing.T) {
+// TestServer_SetKnownPeerAddresses_EmptyDisablesForwarding confirms
+// an empty/nil allowlist never restores accept-any dialing.
+func TestServer_SetKnownPeerAddresses_EmptyDisablesForwarding(t *testing.T) {
 	peers := &fakeJoinColonyPeerForwarder{}
 	s := NewServer(nil, "node-1", nil, nil, nil, nil, peers, "", nil, nil, nil, 0, nil)
 	s.SetKnownPeerAddresses([]string{"10.0.0.9:17700"})
@@ -176,8 +175,11 @@ func TestServer_SetKnownPeerAddresses_EmptyClearsAllowlist(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RequestJoinColony() error: %v", err)
 	}
-	if resp.GetError() != "" {
-		t.Errorf("response = %+v, want an unconfigured allowlist to accept any target_address", resp)
+	if !strings.Contains(resp.GetError(), "known_peer_addresses is not configured") {
+		t.Errorf("Error = %q, want an explicit refusal when the allowlist is unset", resp.GetError())
+	}
+	if peers.lastAddr != "" {
+		t.Errorf("lastAddr = %q, want no dial when the allowlist is unset", peers.lastAddr)
 	}
 }
 
@@ -237,6 +239,7 @@ func TestServer_GetJoinRequestStatus_TargetAddressForwardsToPeer(t *testing.T) {
 		Request: &rpcpb.PendingJoinRequest{RequestId: "jreq-1", Status: rpcpb.JoinRequestStatus_JOIN_REQUEST_STATUS_PENDING},
 	}}
 	s := NewServer(nil, "node-1", nil, nil, nil, nil, peers, "", nil, nil, nil, 0, nil)
+	s.SetKnownPeerAddresses([]string{"10.0.0.1:17700"})
 	resp, err := s.GetJoinRequestStatus(context.Background(), &rpcpb.GetJoinRequestStatusRequest{
 		RequestId: "jreq-1", TargetAddress: "10.0.0.1:17700",
 	})
@@ -262,6 +265,7 @@ func TestServer_GetJoinRequestStatus_TargetAddressForwardsToPeer(t *testing.T) {
 func TestServer_GetJoinRequestStatus_TargetAddressForwardsIntroductionCode(t *testing.T) {
 	peers := &fakeJoinColonyPeerForwarder{}
 	s := NewServer(nil, "node-1", nil, nil, nil, nil, peers, "", nil, nil, nil, 0, nil)
+	s.SetKnownPeerAddresses([]string{"10.0.0.1:17700"})
 	resp, err := s.GetJoinRequestStatus(context.Background(), &rpcpb.GetJoinRequestStatusRequest{
 		RequestId: "jreq-1", TargetAddress: "10.0.0.1:17700", IntroductionCode: "418263",
 	})
@@ -328,6 +332,7 @@ func TestServer_CancelJoinRequest_TargetAddressWithNilPeersErrors(t *testing.T) 
 func TestServer_CancelJoinRequest_TargetAddressForwardsToPeer(t *testing.T) {
 	peers := &fakeJoinColonyPeerForwarder{}
 	s := NewServer(nil, "node-1", nil, nil, nil, nil, peers, "", nil, nil, nil, 0, nil)
+	s.SetKnownPeerAddresses([]string{"10.0.0.1:17700"})
 	resp, err := s.CancelJoinRequest(context.Background(), &rpcpb.CancelJoinRequestRequest{
 		RequestId: "jreq-1", TargetAddress: "10.0.0.1:17700",
 	})
@@ -368,6 +373,7 @@ func assertBoundedForwardDeadline(t *testing.T, ctx context.Context) {
 func TestServer_RequestJoinColony_TargetAddressForwardIsBounded(t *testing.T) {
 	peers := &fakeJoinColonyPeerForwarder{}
 	s := NewServer(nil, "node-1", nil, nil, nil, nil, peers, "", nil, nil, nil, 0, nil)
+	s.SetKnownPeerAddresses([]string{"10.0.0.1:17700"})
 	if _, err := s.RequestJoinColony(context.Background(), withIntroduction(&rpcpb.RequestJoinColonyRequest{
 		NodeId: "node-2", RaftBindAddress: "10.0.0.2:17600", TargetAddress: "10.0.0.1:17700",
 	}, t)); err != nil {
@@ -379,6 +385,7 @@ func TestServer_RequestJoinColony_TargetAddressForwardIsBounded(t *testing.T) {
 func TestServer_GetJoinRequestStatus_TargetAddressForwardIsBounded(t *testing.T) {
 	peers := &fakeJoinColonyPeerForwarder{}
 	s := NewServer(nil, "node-1", nil, nil, nil, nil, peers, "", nil, nil, nil, 0, nil)
+	s.SetKnownPeerAddresses([]string{"10.0.0.1:17700"})
 	if _, err := s.GetJoinRequestStatus(context.Background(), &rpcpb.GetJoinRequestStatusRequest{
 		RequestId: "jreq-1", TargetAddress: "10.0.0.1:17700",
 	}); err != nil {
@@ -390,6 +397,7 @@ func TestServer_GetJoinRequestStatus_TargetAddressForwardIsBounded(t *testing.T)
 func TestServer_CancelJoinRequest_TargetAddressForwardIsBounded(t *testing.T) {
 	peers := &fakeJoinColonyPeerForwarder{}
 	s := NewServer(nil, "node-1", nil, nil, nil, nil, peers, "", nil, nil, nil, 0, nil)
+	s.SetKnownPeerAddresses([]string{"10.0.0.1:17700"})
 	if _, err := s.CancelJoinRequest(context.Background(), &rpcpb.CancelJoinRequestRequest{
 		RequestId: "jreq-1", TargetAddress: "10.0.0.1:17700",
 	}); err != nil {

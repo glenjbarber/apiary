@@ -211,10 +211,13 @@ func hasAnySuffix(s string, suffixes []string) bool {
 // option's own label, why is the full sentence shown in the error
 // banner when a POST carries that combination anyway.
 type guidedImageRole struct {
-	label   string
-	allowed []imageKind
-	cue     map[imageKind]string
-	why     map[imageKind]string
+	label          string
+	allowed        []imageKind
+	cue            map[imageKind]string
+	why            map[imageKind]string
+	denyCompressed bool
+	compressedCue  string
+	compressedWhy  string
 }
 
 var (
@@ -225,10 +228,14 @@ var (
 	// (reconciler.go's "most likely a FreeBSD memstick image" branch) -
 	// which is precisely the supported way to install from a .raw. Only
 	// an archive is nonsense in this slot: bhyve has no way to boot or
-	// attach a .txz userland tarball.
+	// attach a .txz userland tarball. Compressed streams are refused in
+	// this role and expanded only when used to seed a base disk.
 	guidedRoleBootMedia = guidedImageRole{
-		label:   "Installer image",
-		allowed: []imageKind{imageKindInstaller, imageKindDisk, imageKindUnknown},
+		label:          "Installer image",
+		allowed:        []imageKind{imageKindInstaller, imageKindDisk, imageKindUnknown},
+		denyCompressed: true,
+		compressedCue:  "compressed media cannot be attached as installer media",
+		compressedWhy:  "%[1]s is compressed. Compressed images can seed a VM's Base image, but installer media must be uploaded uncompressed",
 		cue: map[imageKind]string{
 			imageKindArchive: "a jail userland archive, not boot media",
 		},
@@ -239,9 +246,9 @@ var (
 
 	// guidedRoleBaseImage is the VM's "Base image" picker, copied into
 	// this VM's own starting disk (ADR-0031). An installer is excluded
-	// because ensureDiskImage copies the file verbatim into the disk
-	// slot: the VM would be handed a CD-ROM filesystem where a
-	// bootable disk is expected, with no check that would catch it.
+	// because ensureDiskImage copies or decompresses it into the disk
+	// slot: the VM would be handed a CD-ROM filesystem where a bootable
+	// disk is expected, with no check that would catch it.
 	guidedRoleBaseImage = guidedImageRole{
 		label:   "Base image",
 		allowed: []imageKind{imageKindDisk, imageKindUnknown},
@@ -286,6 +293,9 @@ func (r guidedImageRole) accepts(kind imageKind) bool {
 // verdict reports whether name can fill this role and, when it cannot,
 // the reason to show. An unrecognised kind is always accepted.
 func (r guidedImageRole) verdict(name string) (bool, string) {
+	if r.denyCompressed && hasCompressionSuffix(name) {
+		return false, fmt.Sprintf(r.compressedWhy, name)
+	}
 	kind := classifyImageName(name)
 	if r.accepts(kind) {
 		return true, ""
@@ -329,10 +339,23 @@ func guidedImageOptions(rows []isoRowView, role guidedImageRole) []guidedImageOp
 // cueFor is the short, label-sized form of the same verdict - the long
 // sentence is for the error banner, where there is room to read it.
 func cueFor(name string, role guidedImageRole) string {
+	if role.denyCompressed && hasCompressionSuffix(name) {
+		return role.compressedCue
+	}
 	if cue, ok := role.cue[classifyImageName(name)]; ok {
 		return cue
 	}
 	return "wrong type for this field"
+}
+
+func hasCompressionSuffix(name string) bool {
+	lower := strings.ToLower(strings.TrimSpace(name))
+	for _, suffix := range imageCompressionSuffixes {
+		if strings.HasSuffix(lower, suffix) && len(lower) > len(suffix) {
+			return true
+		}
+	}
+	return false
 }
 
 // resourceIDMaxLen mirrors validResourceID's own 64-character ceiling
@@ -479,8 +502,8 @@ func (f vmCreateForm) validateVMCreateForm() error {
 
 	// ensureVM picks the VM's disk from ReplicaNodeID first: a
 	// replicated VM's disk is the HAST device path, and the
-	// BaseImageName seed (a verbatim copy of the image over the disk
-	// file) only runs on the other, non-replicated branch. Nothing
+	// BaseImageName seed (a copy or decompression of the image into the
+	// disk file) only runs on the other, non-replicated branch. Nothing
 	// rejects this pairing - the base image is stored, shown on the VM
 	// page, and never applied. That is the exact failure the flow
 	// exists to prevent, so it is rejected here with the reason.

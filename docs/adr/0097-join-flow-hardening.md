@@ -39,51 +39,40 @@ rather than defer further.
 
 ## Decision
 
-### 1. `-known-peer-addresses`: an opt-in allowlist for `target_address`
+### 1. `-known-peer-addresses`: a fail-closed allowlist for forwarded `target_address`
 
-A new `Server.knownPeerAddresses map[string]bool` (nil by default),
-set via `SetKnownPeerAddresses([]string)` from a new
+`Server.knownPeerAddresses map[string]bool`, set via
+`SetKnownPeerAddresses([]string)` from the persisted node config or the
 `cmd/managerd -known-peer-addresses` flag (comma-separated `host:port`,
 parsed with the existing `splitCommaList` helper). A new
 `checkTargetAddressAllowed(target string) error` method is called at
 the top of all three `target_address` branches
 (`RequestJoinColony`/`GetJoinRequestStatus`/`CancelJoinRequest`,
-`internal/manager/joincolony.go`): when `knownPeerAddresses` is nil (the
-default, unconfigured), every `target_address` is accepted exactly as
-before (ADR-0092's original behavior, unchanged); when configured,
-`target_address` must exactly match an entry or the call is refused
-before ever dialing - `s.peers.*Unauthenticated` is never reached for a
-disallowed target.
+`internal/manager/joincolony.go`): when `knownPeerAddresses` is empty or
+unset, forwarded `target_address` requests are refused before any dial;
+when configured, `target_address` must exactly match an entry or the
+call is refused. This replaces the previous accept-any default, which
+left an unauthenticated reachability oracle on every unconfigured Comb.
 
-**Deliberately opt-in, not a forced default.** This project's own real
-deployments are a small, fixed set of hosts (four, as of this writing) -
-pre-listing them is practical and the natural, low-friction fix for
-someone who already knows their Colony's membership. But this RPC's
-whole purpose is bootstrapping a node that, by definition, doesn't yet
-have a way to know its peers are trustworthy in advance; forcing every
-fresh, never-configured deployment to pre-populate this flag before a
-first join could ever succeed would break bootstrap with no migration
-path. An unconfigured node keeps today's accepted-and-disclosed
-posture exactly as ADR-0096 left it.
+The Web UI forwarding path on a joining Comb requires
+`known_peer_addresses` to include the selected Colony member. The
+installer seeds that address when run with
+`apiaryctl install --colony-member HOST:PORT`; operators can extend the
+list as needed. Direct `apiaryctl join-introduce` already dials its
+selected Colony member, so it leaves `target_address` empty. The target
+records the request locally or forwards it through the existing Raft
+leader path and makes no second unauthenticated dial. Direct status
+polling is also performed against the named member without forwarding.
+Single-Comb bootstrap and direct CLI enrollment therefore do not need
+an allowlist.
 
-**Deliberately not the audit's "separately-authenticated enrollment
-record" alternative.** That would mean real new plumbing - an
-out-of-band token/pairing exchange, closer to how `kubeadm join`
-tokens work - genuinely new infrastructure, not a hardening pass over
-existing RPCs. The allowlist gets most of the same practical benefit
-(closing the SSRF for anyone who configures it) at a fraction of the
-implementation and operational cost, and fits this project's own
-existing "opt-in hardening flag" pattern (`-peer-tls-ca`,
-`-internal-token`) rather than introducing a new one.
-
-**Deliberately CLI-flag-only, not also nodeconfig/UI-editable.** Several
-sibling peer flags (`-peer-tls-ca`, `-peer-tls-hostname-map`) are also
-persisted via `nodeconfig.Config` and editable from the Machine
-Configuration page. Adding that here would mean a proto field, a
-`GetNodeConfig`/`UpdateNodeConfig` round trip, and a new UI form field -
-real, additional surface area not required to close the actual security
-finding. Left as a natural, separately-scoped follow-up if it turns out
-to matter in practice, not built speculatively now.
+**2026-10-16 update: fail closed and apply config changes live.** The
+original opt-in default left the audited reachability oracle available
+on every Comb without an allowlist, so #84 makes the empty configuration
+deny forwarded targets. `known_peer_addresses` was already persisted in
+`nodeconfig.Config` and editable on the Machine page; successful config
+updates now refresh the in-memory allowlist immediately. Startup flag
+configuration remains supported.
 
 ### 2. Pre-approval reachability check
 
@@ -125,9 +114,8 @@ separate job.
 1. `internal/manager/joincolony_test.go` - allowlist unit tests: a
    disallowed `target_address` is refused with the peer never dialed
    (`lastAddr` stays empty) for all three RPCs; an allowlisted one still
-   forwards normally; `SetKnownPeerAddresses(nil)` restores the
-   original unconfigured (accept-any) behavior after having been
-   configured.
+   forwards normally; `SetKnownPeerAddresses(nil)` keeps forwarding
+   disabled.
 2. `internal/manager/integration_test.go` - a new
    `newManagerdRPCClientAndServer` harness variant (mirrors
    `newManagerdRPCClientFull`, also returns the `*Server` so a test can
@@ -139,7 +127,16 @@ separate job.
    still approves normally through the same harness.
 3. `go build ./...`, `go vet ./...`, `go test ./...`, `gofmt -l .` all
    clean.
-4. Live, if convenient: confirm an unconfigured node still joins exactly
-   as before (no regression for the default case), then configure
-   `-known-peer-addresses` on a real Hive and confirm an out-of-list
-   `target_address` is refused.
+4. Live, if convenient: confirm direct CLI enrollment works with no
+   allowlist, an unconfigured forwarding request is refused, and an
+   out-of-list target is refused when an allowlist is configured.
+
+For the 2026-10-16 fail-closed update, focused validation passed:
+`go test ./internal/manager` filtered to the three forwarding RPC tests,
+the empty-allowlist case, live config refresh, and direct join request;
+`go test ./cmd/apiaryctl` filtered to join request construction;
+`go test ./cmd/managerd -run TestKnownPeersWarning`; and
+`go test ./internal/hostinstall -run 'Test.*KnownPeer'`. The same focused
+manager tests passed with `-race`. The full manager package run was
+stopped after 87 seconds of verbose Raft integration output without a
+reported test failure.

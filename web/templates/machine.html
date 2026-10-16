@@ -116,7 +116,7 @@
   </div>
 
   {{if .CanAdmin}}
-  <div class="panel">
+  <div class="panel" id="join-colony">
     <h3>Join a Colony</h3>
     <div class="panel">
       <h3>Join window {{hint "This Colony refuses join requests while its window is closed, and that is the normal state - open it when you are about to add hardware, and it closes on its own. A window the operator cannot see the end of is a window they will not remember to close (ADR-0147 Part 4). You may open one on any member; it applies to the whole Colony and it forwards to the leader for you."}}</h3>
@@ -162,7 +162,6 @@
       target's Admin reads it off that Comb's own screen. Nothing changes
       about this Comb's own cluster membership until they approve it.
     </p>
-    <p class="muted">Or use the <a href="/colony/join/guided">guided join wizard</a> for a step-by-step flow.</p>
     {{if .JoinColonyFormError}}<div class="banner-error">{{.JoinColonyFormError}}</div>{{end}}
     {{if .JoinColonyResult}}
       {{if .JoinColonyResult.Error}}

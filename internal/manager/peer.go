@@ -961,12 +961,25 @@ func (p *PeerReporter) RequestJoinColonyUnauthenticated(ctx context.Context, add
 // that simply has not verified yet, and a caller that HAD verified but
 // whose code was dropped in transit looked identical.
 func (p *PeerReporter) GetJoinRequestStatusUnauthenticated(ctx context.Context, addr, requestID, introductionCode string) (*rpcpb.GetJoinRequestStatusResponse, error) {
+	return p.GetJoinRequestStatusUnauthenticatedWithRequest(ctx, addr, &rpcpb.GetJoinRequestStatusRequest{
+		RequestId: requestID, IntroductionCode: introductionCode,
+	})
+}
+
+// GetJoinRequestStatusUnauthenticatedWithRequest forwards the complete
+// bounded status request, including the joiner's public recipient
+// certificate. The response may contain an application-encrypted
+// credential envelope, never plaintext secret material.
+func (p *PeerReporter) GetJoinRequestStatusUnauthenticatedWithRequest(ctx context.Context, addr string, req *rpcpb.GetJoinRequestStatusRequest) (*rpcpb.GetJoinRequestStatusResponse, error) {
 	conn, client, err := p.dialUnauthenticated(addr)
 	if err != nil {
 		return nil, err
 	}
 	defer conn.Close()
-	return client.GetJoinRequestStatus(ctx, &rpcpb.GetJoinRequestStatusRequest{RequestId: requestID, IntroductionCode: introductionCode})
+	return client.GetJoinRequestStatus(ctx, &rpcpb.GetJoinRequestStatusRequest{
+		RequestId: req.GetRequestId(), IntroductionCode: req.GetIntroductionCode(),
+		RecipientTlsCertificatePem: req.GetRecipientTlsCertificatePem(),
+	})
 }
 
 func (p *PeerReporter) ApproveJoinRequest(ctx context.Context, addr string, req *rpcpb.ApproveJoinRequestRequest) (*rpcpb.ApproveJoinRequestResponse, error) {

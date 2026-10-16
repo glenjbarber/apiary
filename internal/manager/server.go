@@ -527,14 +527,12 @@ type Server struct {
 	// space") - always initialized, mirroring pamLockouts above.
 	isoUploads *isoUploadLimiter
 
-	// knownPeerAddresses (ADR-0097), when non-empty, is the sole
-	// allowlist RequestJoinColony/GetJoinRequestStatus/CancelJoinRequest
-	// check target_address against before dialing it - see
-	// checkTargetAddressAllowed's own doc comment (joincolony.go). Nil
-	// (the default, no -known-peer-addresses configured) preserves
-	// ADR-0092's original behavior: any caller-supplied target_address
-	// is dialed, the accepted-as-of-ADR-0096 residual risk.
-	knownPeerAddresses map[string]bool
+	// knownPeerAddresses (ADR-0097) is the allowlist the unauthenticated
+	// join RPCs check before dialing target_address. An empty map disables
+	// forwarding. The mutex lets an Admin's node-config update take effect
+	// without restarting managerd.
+	knownPeerAddressesMu sync.RWMutex
+	knownPeerAddresses   map[string]bool
 
 	// reachabilityCheck is swappable in tests (real TCP dials aren't
 	// deterministic/fast enough for unit tests) - production always uses
@@ -664,19 +662,21 @@ type Server struct {
 func (s *Server) SetPAMAuthenticator(auth pamAuthenticator) { s.authPAM = auth }
 
 // SetKnownPeerAddresses configures the target_address allowlist
-// (ADR-0097) from cmd/managerd's own -known-peer-addresses flag - a
-// nil/empty slice clears it back to ADR-0092's original
-// accept-any-target_address behavior.
+// (ADR-0097) from managerd's startup configuration or a live node-config
+// update. A nil/empty slice leaves target_address forwarding disabled.
 func (s *Server) SetKnownPeerAddresses(addrs []string) {
-	if len(addrs) == 0 {
-		s.knownPeerAddresses = nil
-		return
-	}
 	m := make(map[string]bool, len(addrs))
 	for _, a := range addrs {
-		m[a] = true
+		if a = strings.TrimSpace(a); a != "" {
+			m[a] = true
+		}
 	}
+	if len(m) == 0 {
+		m = nil
+	}
+	s.knownPeerAddressesMu.Lock()
 	s.knownPeerAddresses = m
+	s.knownPeerAddressesMu.Unlock()
 }
 
 // quotaSetter is the subset of *zfs.Manager SetDatasetQuota and the
@@ -3455,6 +3455,7 @@ func (s *Server) UpdateNodeConfig(_ context.Context, req *rpcpb.UpdateNodeConfig
 	} else if err := s.nodeConfig.Save(cfg); err != nil {
 		return &rpcpb.UpdateNodeConfigResponse{Error: err.Error()}, nil
 	}
+	s.SetKnownPeerAddresses(strings.Split(cfg.KnownPeerAddresses, ","))
 	return &rpcpb.UpdateNodeConfigResponse{}, nil
 }
 

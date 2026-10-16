@@ -15,13 +15,13 @@ func TestBuildJoinRequest_CarriesEveryFieldOnlyTheJoinerKnows(t *testing.T) {
 	raftTransport := "SHA256:CC:DD"
 	identity := joinIdentity{nodeID: "brood.example.test", raftBind: "brood.example.test:17600"}
 
-	got := buildJoinRequest(identity, "sting.example.test:17700", "123456", []string{serving, raftTransport}, 0)
+	got := buildJoinRequest(identity, "123456", []string{serving, raftTransport}, 0)
 
 	if got.GetNodeId() != identity.nodeID || got.GetRaftBindAddress() != identity.raftBind {
 		t.Errorf("identity = (%q, %q), want (%q, %q)", got.GetNodeId(), got.GetRaftBindAddress(), identity.nodeID, identity.raftBind)
 	}
-	if got.GetTargetAddress() != "sting.example.test:17700" {
-		t.Errorf("TargetAddress = %q, want the named target", got.GetTargetAddress())
+	if got.GetTargetAddress() != "" {
+		t.Errorf("TargetAddress = %q, want empty because join-introduce already dialed the target", got.GetTargetAddress())
 	}
 	if got.GetIntroductionCode() != "123456" {
 		t.Errorf("IntroductionCode = %q, want the first code", got.GetIntroductionCode())
@@ -44,7 +44,7 @@ func TestBuildJoinRequest_CarriesEveryFieldOnlyTheJoinerKnows(t *testing.T) {
 }
 
 func TestBuildJoinRequest_ReportsTheJoinersLogIndex(t *testing.T) {
-	got := buildJoinRequest(joinIdentity{nodeID: "n", raftBind: "n:17600"}, "t:17700", "000001", []string{"SHA256:AA"}, 7)
+	got := buildJoinRequest(joinIdentity{nodeID: "n", raftBind: "n:17600"}, "000001", []string{"SHA256:AA"}, 7)
 	if !got.GetJoinerLogStateObserved() || got.GetJoinerLastLogIndex() != 7 {
 		t.Errorf("log state = (observed %v, index %d), want (true, 7)", got.GetJoinerLogStateObserved(), got.GetJoinerLastLogIndex())
 	}
@@ -54,7 +54,7 @@ func TestBuildJoinRequest_ReportsTheJoinersLogIndex(t *testing.T) {
 // happen from the command. The helper must still not panic on it, and must
 // not invent a fingerprint.
 func TestBuildJoinRequest_NoFingerprintsLeavesTheFieldEmpty(t *testing.T) {
-	got := buildJoinRequest(joinIdentity{nodeID: "n", raftBind: "n:17600"}, "t:17700", "000001", nil, 0)
+	got := buildJoinRequest(joinIdentity{nodeID: "n", raftBind: "n:17600"}, "000001", nil, 0)
 	if got.GetTlsCertFingerprint() != "" {
 		t.Errorf("TlsCertFingerprint = %q, want empty", got.GetTlsCertFingerprint())
 	}

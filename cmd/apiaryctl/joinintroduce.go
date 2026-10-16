@@ -198,15 +198,16 @@ func runJoinIntroduce(args []string) int {
 	fs := flag.NewFlagSet("apiaryctl join-introduce", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
 	var (
-		target        string
-		requestID     string
-		firstCode     string
-		field         string
-		nodeID        string
-		raftBind      string
-		nodeConfigArg string
-		plaintext     bool
-		caFile        string
+		target             string
+		requestID          string
+		firstCode          string
+		field              string
+		nodeID             string
+		raftBind           string
+		nodeConfigArg      string
+		plaintext          bool
+		caFile             string
+		installCredentials bool
 	)
 	fs.StringVar(&target, "target", "", "host:port of ANY member of the Colony being joined, not only its leader (required to start a request)")
 	fs.StringVar(&requestID, "request-id", "", "poll an existing request for its second PIN instead of starting a new one")
@@ -217,6 +218,7 @@ func runJoinIntroduce(args []string) int {
 	fs.StringVar(&nodeConfigArg, "node-config", "", "path to managerd.json; defaults to "+nodeconfig.DefaultPath)
 	fs.BoolVar(&plaintext, "plaintext", false, "dial --target without TLS, for a Colony whose members do not serve TLS; the default dials with TLS, trusting the system CA pool")
 	fs.StringVar(&caFile, "ca-file", "", "trust this CA file instead of the system pool when dialing --target with TLS; ignored with --plaintext")
+	fs.BoolVar(&installCredentials, "install-credentials", false, "after approval, decrypt and install this Comb's per-node API key and Colony restart-guardrail token (root only; TLS required)")
 	fs.Usage = func() {
 		fmt.Fprint(os.Stderr, `usage: /usr/local/libexec/apiary/apiaryctl join-introduce --target HOST:PORT [--field FIELD]
        /usr/local/libexec/apiary/apiaryctl join-introduce --request-id ID --first-code CODE [--target HOST:PORT] [--field FIELD]
@@ -235,6 +237,7 @@ that transcription is the check.
                          target         the --target value, to paste
   --request-id ID      poll that request instead of starting a new one
   --first-code CODE    the first code, required with --request-id
+  --install-credentials after approval, install credentials on THIS Comb
   --plaintext          dial --target without TLS (only for a Colony that
                         does not serve TLS); default dials with TLS
   --ca-file FILE       trust this CA instead of the system pool; ignored
@@ -257,32 +260,34 @@ so --field fingerprints prints digests and nothing else.
 	}
 
 	if requestID != "" {
-		return pollJoinIntroduction(target, requestID, firstCode, field, plaintext, caFile)
+		if installCredentials && field != "" {
+			fmt.Fprintln(os.Stderr, "apiaryctl join-introduce: --install-credentials cannot be combined with --field")
+			return 2
+		}
+		return pollJoinIntroduction(target, requestID, firstCode, field, plaintext, caFile, nodeConfigArg, installCredentials)
 	}
 	return startJoinIntroduction(target, field, nodeID, raftBind, nodeConfigArg, plaintext, caFile)
 }
 
 // buildJoinRequest assembles the request this Comb sends to the target.
+// The command has already dialed that target directly, so it leaves
+// target_address empty. Setting it would ask the receiving managerd to
+// make a second unauthenticated dial to a caller-supplied address.
 //
-// This command dials the TARGET's managerd directly, and a request that
-// names a target_address is treated there as coming from the joiner's own
-// frontend. Any field of the joiner's own state that the request leaves
-// empty is therefore filled in by the target from ITS OWN state and
-// recorded as the joiner's. That is how a joiner was refused for the
-// target's raft log index, and how a pending request came to carry the
-// target's certificate fingerprint under the joiner's node ID. So every
-// field whose true value only this Comb knows is set here, in one place,
-// and a test pins the set.
+// This command dials the TARGET's managerd directly. It includes every
+// value that only the joiner can know and leaves target_address empty,
+// so the receiving managerd records this request locally or uses its
+// Raft leader-forwarding path instead of making a caller-directed dial.
+// A test pins this request shape.
 //
 // fingerprints is localCertificates' list, serving certificate first, and
 // the serving certificate is the one tls_cert_fingerprint has always
 // meant (ADR-0113). The caller guarantees it is non-empty, since
 // localCertificates refuses a Comb with no tls_cert.
-func buildJoinRequest(identity joinIdentity, target, firstCode string, fingerprints []string, lastLogIndex uint64) *rpcpb.RequestJoinColonyRequest {
+func buildJoinRequest(identity joinIdentity, firstCode string, fingerprints []string, lastLogIndex uint64) *rpcpb.RequestJoinColonyRequest {
 	req := &rpcpb.RequestJoinColonyRequest{
 		NodeId:                 identity.nodeID,
 		RaftBindAddress:        identity.raftBind,
-		TargetAddress:          target,
 		IntroductionCode:       firstCode,
 		AdvertisedFingerprints: fingerprints,
 		JoinerLogStateObserved: true,
@@ -329,17 +334,9 @@ func startJoinIntroduction(target, field, nodeID, raftBind, nodeConfigArg string
 	// THIS Comb's own raft log state, read from its own raftd, and sent
 	// with the request.
 	//
-	// This command dials the TARGET's managerd directly, so the target is
-	// the one that receives the request. A request that names a
-	// target_address is treated by the receiving managerd as coming from
-	// the joiner's own frontend, so when it carries no log state the
-	// receiver reads ITS OWN raft status and reports that as the joiner's.
-	// Against a Colony member with a non-empty log (every real one) that
-	// produced "the joining Comb reports raft log index N" for a joiner
-	// whose log was empty, and no amount of wiping the joiner changed N.
-	// The joiner is the only machine that can say what its own log holds,
-	// so it says so here. If it cannot find out, it refuses rather than
-	// send nothing and let the receiver measure the wrong machine.
+	// The joining Comb's own raft log state, read locally and sent with the
+	// request. If it cannot be read, the command refuses rather than leaving
+	// the target to measure its own unrelated log state.
 	lctx, lcancel := context.WithTimeout(context.Background(), localraft.DefaultTimeout)
 	local, err := localraft.Query(lctx, "")
 	lcancel()
@@ -366,7 +363,7 @@ apiary_raftd is running and that raftd.json names the right socket.
 	// API key yet, by definition, and attaching a local credential to a
 	// target an operator named would send it to whatever address the
 	// operator typed.
-	resp, err := client.RequestJoinColony(ctx, buildJoinRequest(identity, target, firstCode, fingerprints, local.LastLogIndex))
+	resp, err := client.RequestJoinColony(ctx, buildJoinRequest(identity, firstCode, fingerprints, local.LastLogIndex))
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "apiaryctl join-introduce: %v\n", translateDialErr(target, plaintext, err))
 		return 1
@@ -401,7 +398,7 @@ apiary_raftd is running and that raftd.json names the right socket.
 	fmt.Println("This command will not submit any of that for you. The transcription is")
 	fmt.Println("the check.")
 	fmt.Printf("\nWhen the target's Admin has verified it, poll for the second PIN:\n\n")
-	fmt.Printf("  /usr/local/libexec/apiary/apiaryctl join-introduce --request-id %s --first-code %s --target %s --field second-pin\n", resp.GetRequestId(), firstCode, target)
+	fmt.Printf("  /usr/local/libexec/apiary/apiaryctl join-introduce --request-id %s --first-code %s --target %s --install-credentials\n", resp.GetRequestId(), firstCode, target)
 	return 0
 }
 
@@ -416,11 +413,15 @@ apiary_raftd is running and that raftd.json names the right socket.
 // then sees an empty first code, refuses to release the second PIN, and
 // returns a response with no PIN and no error. The poll looked like
 // "no PIN yet" for a request that was already in CODE_VERIFIED.
-func buildJoinStatusRequest(requestID, firstCode string) *rpcpb.GetJoinRequestStatusRequest {
-	return &rpcpb.GetJoinRequestStatusRequest{
+func buildJoinStatusRequest(requestID, firstCode string, certificatePEM ...string) *rpcpb.GetJoinRequestStatusRequest {
+	req := &rpcpb.GetJoinRequestStatusRequest{
 		RequestId:        requestID,
 		IntroductionCode: firstCode,
 	}
+	if len(certificatePEM) > 0 {
+		req.RecipientTlsCertificatePem = certificatePEM[0]
+	}
+	return req
 }
 
 // pollJoinIntroduction reads this Comb's own request back from the
@@ -435,7 +436,7 @@ func buildJoinStatusRequest(requestID, firstCode string) *rpcpb.GetJoinRequestSt
 // target after acceptance and the operator already has it - this
 // command cannot recover it, and saying so is more useful than printing
 // an empty field.
-func pollJoinIntroduction(target, requestID, firstCode, field string, plaintext bool, caFile string) int {
+func pollJoinIntroduction(target, requestID, firstCode, field string, plaintext bool, caFile, nodeConfigPath string, installCredentials bool) int {
 	if firstCode == "" {
 		fmt.Fprintln(os.Stderr, "apiaryctl join-introduce: --first-code is required with --request-id. It is the 6-digit value `/usr/local/libexec/apiary/apiaryctl join-introduce` printed when the request was made; the target needs it to release the second PIN.")
 		return 2
@@ -443,6 +444,11 @@ func pollJoinIntroduction(target, requestID, firstCode, field string, plaintext 
 	if target == "" {
 		fmt.Fprintln(os.Stderr, "apiaryctl join-introduce: --target is required with --request-id, and it must be the same member the request was recorded on.")
 		return 2
+	}
+	certificates, err := localCertificates(nodeConfigPath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "apiaryctl join-introduce: %v\n", err)
+		return 1
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
@@ -452,7 +458,7 @@ func pollJoinIntroduction(target, requestID, firstCode, field string, plaintext 
 		return 1
 	}
 	defer closeFn()
-	resp, err := client.GetJoinRequestStatus(ctx, buildJoinStatusRequest(requestID, firstCode))
+	resp, err := client.GetJoinRequestStatus(ctx, buildJoinStatusRequest(requestID, firstCode, certificates[0].pem))
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "apiaryctl join-introduce: %v\n", translateDialErr(target, plaintext, err))
 		return 1
@@ -476,6 +482,14 @@ func pollJoinIntroduction(target, requestID, firstCode, field string, plaintext 
 		return 1
 	}
 	req := resp.GetRequest()
+	if installCredentials && req.GetStatus() == rpcpb.JoinRequestStatus_JOIN_REQUEST_STATUS_APPROVED {
+		if err := installApprovedJoinCredentials(resp.GetSealedCredentials(), certificates[0], requestID, nodeConfigPath); err != nil {
+			fmt.Fprintf(os.Stderr, "apiaryctl join-introduce: %v\n", err)
+			return 1
+		}
+		fmt.Println("join credentials were installed locally. managerd and frontend were restarted.")
+		return 0
+	}
 	fmt.Printf("request %s\n", requestID)
 	fmt.Printf("  status       %s\n", req.GetStatus())
 	fmt.Printf("  stage        %s\n", req.GetStage())
@@ -492,7 +506,7 @@ func pollJoinIntroduction(target, requestID, firstCode, field string, plaintext 
 	case req.GetStage() == rpcpb.JoinRequestStage_JOIN_REQUEST_STAGE_INTRODUCED:
 		fmt.Printf("\n  no second PIN yet. The target's Admin has not verified the first code\n  and fingerprints yet. Keep polling; nothing has failed.\n")
 	case req.GetStatus() == rpcpb.JoinRequestStatus_JOIN_REQUEST_STATUS_APPROVED:
-		fmt.Printf("\n  this request has been approved.\n")
+		fmt.Printf("\n  this request has been approved. Run this command with --install-credentials as root to install the encrypted credentials on this Comb.\n")
 	case req.GetStatus() == rpcpb.JoinRequestStatus_JOIN_REQUEST_STATUS_FAILED:
 		fmt.Printf("\n  this request is FAILED. It used all its attempts at a stage. The\n  target's Admin has to purge it and this Comb has to request again.\n")
 	}

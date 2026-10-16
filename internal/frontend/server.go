@@ -369,10 +369,6 @@ type pageData struct {
 	// served from all three of /create, /vms/new and /jails/new. Only
 	// populated for that page - see create_guided.go.
 	Guided *guidedPageView
-	// JoinGuided backs the guided join wizard (join_guided.html),
-	// served from /colony/join/guided. Only populated for that page - see join_guided.go.
-	JoinGuided *guidedJoinPageView
-
 	// NodeConfig/NodeConfigFormError back the Machine Configuration
 	// page's uplink section (ADR-0049) - GetNodeConfig's current
 	// snapshot and any Update error, rendered the same way
@@ -1218,8 +1214,8 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /colony-update/panel", s.handleColonyUpdatePanel)
 	s.mux.HandleFunc("POST /colony-update/request", s.requireRole(manager.RoleAdmin, s.handleColonyUpdateRequest))
 	s.mux.HandleFunc("GET /assumptions", s.handleAssumptionsPage)
+	// Preserve the old wizard URL as a redirect to the real join procedure.
 	s.mux.HandleFunc("GET /colony/join/guided", s.requireRole(manager.RoleOperator, s.handleJoinGuidedPage))
-	s.mux.HandleFunc("POST /colony/join/guided", s.requireRole(manager.RoleOperator, s.handleJoinGuidedPage))
 	s.mux.HandleFunc("POST /assumptions/purge-stale", s.requireRole(manager.RoleOperator, s.handlePurgeStaleAssumptionResults))
 	s.mux.HandleFunc("GET /assumption-register", s.handleAssumptionRegisterPage)
 	s.mux.HandleFunc("GET /recovery-handbook", s.handleRecoveryHandbookPage)

@@ -975,6 +975,28 @@ func TestServer_UpdateNodeConfig(t *testing.T) {
 	}
 }
 
+func TestServer_UpdateNodeConfig_RefreshesJoinTargetAllowlist(t *testing.T) {
+	store := &fakeNodeConfigStore{cfg: nodeconfig.Config{KnownPeerAddresses: "old.example.test:17700"}}
+	s := NewServer(nil, "node-1", nil, nil, nil, nil, nil, "", nil, store, nil, 0, nil)
+	s.SetKnownPeerAddresses([]string{"old.example.test:17700"})
+
+	resp, err := s.UpdateNodeConfig(context.Background(), &rpcpb.UpdateNodeConfigRequest{
+		KnownPeerAddresses: "new.example.test:17700, second.example.test:17700",
+	})
+	if err != nil {
+		t.Fatalf("UpdateNodeConfig() error: %v", err)
+	}
+	if resp.GetError() != "" {
+		t.Fatalf("UpdateNodeConfig() error field = %q", resp.GetError())
+	}
+	if err := s.checkTargetAddressAllowed("new.example.test:17700"); err != nil {
+		t.Errorf("new configured target refused immediately after save: %v", err)
+	}
+	if err := s.checkTargetAddressAllowed("old.example.test:17700"); err == nil {
+		t.Error("old target remained allowed after config update")
+	}
+}
+
 // TestServer_GetNodeConfig_NeverReturnsSecrets is the regression test
 // for ADR-0070's write-only secret design: PeerAPIKey/RaftdToken must
 // never appear anywhere in a GetNodeConfig response, only whether one

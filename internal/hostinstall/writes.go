@@ -469,10 +469,9 @@ func (p *Plan) planManagerdWrites() {
 	// with a Colony member this install was explicitly told about -
 	// --colony-member - and only when the file does not already set it,
 	// same preservation rule as everything else here. A standalone
-	// install leaves it unset exactly as before: ADR-0097's own
-	// unconfigured default (accept any target_address) is the correct
-	// behaviour for a Comb that is not joining anything, and forcing a
-	// value here would break bootstrap for the normal one-Comb case.
+	// install leaves it unset, which disables target_address forwarding;
+	// direct apiaryctl join-introduce enrollment dials the target itself
+	// and does not need forwarding.
 	// Only the one address this install already knows about is seeded;
 	// it is NOT kept current as further Combs later join this Colony -
 	// that needs the join flow itself to extend it on every member,

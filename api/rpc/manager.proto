@@ -1947,8 +1947,8 @@ message GetNodeConfigResponse {
   // known_peer_addresses (ADR-0097) mirrors -known-peer-addresses: a
   // comma-separated host:port allowlist target_address must match on
   // RequestJoinColony/GetJoinRequestStatus/CancelJoinRequest, which
-  // are deliberately unauthenticated. Empty preserves ADR-0092's
-  // original accept-any-target_address behavior.
+  // are deliberately unauthenticated. Empty disables target_address
+  // forwarding; direct join-introduce calls do not set that field.
   string known_peer_addresses = 44;
 
   // peer_api_key_set/raftd_token_set report only whether a value is
@@ -3954,6 +3954,12 @@ message GetJoinRequestStatusRequest {
   // knowledge-is-the-credential shape CancelJoinRequest already uses,
   // with a second factor attached, and no third concept is introduced.
   string introduction_code = 3;
+
+  // recipient_tls_certificate_pem is the joining Comb's own serving
+  // certificate. It is accepted only when its fingerprint matches the
+  // certificate recorded on this request. The target seals approved join
+  // credentials to this key; this field is public material, not a secret.
+  string recipient_tls_certificate_pem = 4;
 }
 
 message GetJoinRequestStatusResponse {
@@ -3985,6 +3991,13 @@ message GetJoinRequestStatusResponse {
   // the value that actually authorizes something and only has to
   // survive one copy-and-paste.
   int64 second_pin_expires_at_unix = 4;
+
+  // sealed_credentials is present only for an approved request and only
+  // after the recipient certificate above matches the request's recorded
+  // fingerprint. It contains an application-encrypted envelope; raw API
+  // keys and restart-guardrail tokens are never carried in this response or
+  // in replicated state.
+  bytes sealed_credentials = 5;
 }
 
 message ListJoinRequestsRequest {}

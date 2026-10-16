@@ -575,14 +575,16 @@ visibility, which no longer applies once nothing is passed via argv at
 all.
 
 Add `peer_tls`/`peer_tls_hostname_map` too if the other Combs'
-`managerd` instances serve TLS. Optionally, add `known_peer_addresses`
-(ADR-0097) listing every Comb's `host:port` in this Colony, comma-
-separated - once set, the join-colony RPCs refuse a `target_address`
-outside that list, closing off the residual risk that an unauthenticated
-caller could otherwise point this managerd at an arbitrary host. Leave
-it unset on a Comb's very first bootstrap (before any peer addresses are
-even known yet); it's safe to add once the Colony's membership is
-settled.
+`managerd` instances serve TLS. Set `known_peer_addresses` (ADR-0097)
+to the allowed Colony member `host:port` addresses, comma-separated.
+Unauthenticated join RPCs refuse forwarded `target_address` values
+unless they match this list. `apiaryctl install --colony-member HOST:PORT`
+seeds the selected member for the Web UI's join forwarding path; add
+other members if you want that path to use them too. Direct
+`apiaryctl join-introduce --target HOST:PORT` dials the selected member
+itself and works without `known_peer_addresses`. Leave the field empty
+when forwarding is not needed; an empty list disables forwarding rather
+than allowing arbitrary targets.
 
 Verify:
 
