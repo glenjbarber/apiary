@@ -576,9 +576,10 @@ each design decision, in order.
   report that looks identical to a clean result. This is a model based
   on a point-in-time observation, not an actual host outage test: it
   does not stop or fence a node, and manager reachability does not prove
-  that the remaining Raft voters can communicate after the current
-  leader is lost. A leader-loss result can therefore be `unknown` even
-  when the configured voter count would permit a majority. See
+  that the remaining Raft voters can communicate after the leader or
+  the probe source is lost. The corresponding result can therefore be
+  `unknown` even when the configured voter count would permit a
+  majority. See
   [ADR-0052](docs/adr/0052-dependency-graph-simulator.md),
   [ADR-0053](docs/adr/0053-managed-network-failure-simulation.md), and
   [ADR-0054](docs/adr/0054-image-availability-in-node-failure-simulation.md).
