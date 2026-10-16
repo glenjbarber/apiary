@@ -262,7 +262,7 @@ func EvaluateQuorumTolerance(voters []VoterReachability, leaderID string, vantag
 			})
 			worst = ResultFalse
 		case impact.Verdict == recovery.QuorumUnknown:
-			detail := fmt.Sprintf("Losing %s is UNKNOWN: quorum needs %d of %d voters, with %d confirmed reachable after the loss", impact.NodeID, impact.Fact.QuorumSize, impact.Fact.TotalVoters, impact.Fact.RemainingReachable)
+			detail := fmt.Sprintf("Losing %s has an UNKNOWN quorum outcome: quorum needs %d of %d voters, with %d confirmed reachable after the loss", impact.NodeID, impact.Fact.QuorumSize, impact.Fact.TotalVoters, impact.Fact.RemainingReachable)
 			if len(impact.UnknownVoterIDs) > 0 {
 				detail += "; reachability is unknown for " + strings.Join(impact.UnknownVoterIDs, ", ")
 			}
