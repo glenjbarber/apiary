@@ -90,7 +90,7 @@ func quorumVantage(statusResp *rpcpb.StatusResponse, localNodeID string) recover
 // hypothetical loss locally from that one shared snapshot.
 func (s *Server) gatherQuorumTolerance(ctx context.Context, statusResp *rpcpb.StatusResponse, localNodeID string) invariant.Evaluation {
 	voters := s.gatherVoterReachability(ctx, statusResp, localNodeID)
-	return invariant.EvaluateQuorumTolerance(voters, statusResp.GetRaftLeaderId(), quorumVantage(statusResp, localNodeID))
+	return invariant.EvaluateQuorumTolerance(voters, statusResp.GetRaftLeaderId(), quorumVantage(statusResp, localNodeID), localNodeID)
 }
 
 // gatherVoterReachability builds the one shared []invariant.VoterReachability
