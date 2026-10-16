@@ -78,17 +78,20 @@ func TestGuidedImageRoleAvailability(t *testing.T) {
 	}{
 		// Boot media: ensureVM sniffs ISOName for a real ISO9660
 		// filesystem and attaches anything else (a FreeBSD memstick
-		// .raw) as a raw install disk, so BOTH shapes are supported
-		// here. Only a userland archive is meaningless to bhyve.
+		// .raw) as a raw install disk. Compressed streams cannot be
+		// attached directly and are refused here.
 		{"FreeBSD.iso", "installer", true},
 		{"memstick.raw", "installer", true},
+		{"FreeBSD.iso.xz", "installer", false},
+		{"memstick.raw.xz", "installer", false},
 		{"base.txz", "installer", false},
 		{"memstick", "installer", true},
 
-		// Base image: copied verbatim into the VM's disk file, so it
-		// has to be a disk image. An ISO would leave the VM holding a
-		// CD-ROM filesystem where a bootable disk is expected.
+		// Base image: raw images seed the VM disk; recognized compressed
+		// formats are expanded while streaming. An ISO would leave the VM
+		// holding a CD-ROM filesystem where a bootable disk is expected.
 		{"freebsd.raw", "base image", true},
+		{"FreeBSD-15.1-zfs.raw.xz", "base image", true},
 		{"FreeBSD.iso", "base image", false},
 		{"base.txz", "base image", false},
 		{"cloud-image", "base image", true},

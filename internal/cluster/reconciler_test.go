@@ -1222,7 +1222,7 @@ func TestReconciler_RunOnce_CloneFromSnapshotNeverReClonesExistingDataset(t *tes
 
 func TestReconciler_EnsureDiskImageCreatesUsableSizedDisk(t *testing.T) {
 	r := &Reconciler{DiskSizeMB: 8}
-	path, err := r.ensureDiskImage(t.TempDir(), "")
+	path, err := r.ensureDiskImage(context.Background(), t.TempDir(), "")
 	if err != nil {
 		t.Fatalf("ensureDiskImage() error: %v", err)
 	}
@@ -1255,7 +1255,7 @@ func TestReconciler_EnsureDiskImageCreatesUsableSizedDisk(t *testing.T) {
 // deliberate, not an accidental one-line slip.
 func TestReconciler_EnsureDiskImage_DefaultsToTwentyGiBWhenUnset(t *testing.T) {
 	r := &Reconciler{}
-	path, err := r.ensureDiskImage(t.TempDir(), "")
+	path, err := r.ensureDiskImage(context.Background(), t.TempDir(), "")
 	if err != nil {
 		t.Fatalf("ensureDiskImage() error: %v", err)
 	}

@@ -1286,6 +1286,39 @@ func (r *Reconciler) ensureVM(ctx context.Context, vm VMPlacement, networks map[
 		return nil
 	}
 
+	// Resolve and validate installer media before creating any VM disk
+	// artifacts. Compressed media is supported as a base disk below, but
+	// bhyve cannot boot a compressed stream as either a CD image or a raw
+	// install disk.
+	var isoPath, installDiskPath string
+	if vm.ISOName != "" {
+		if r.ISOs == nil {
+			return fmt.Errorf("VM names ISO %q but no ISO store is configured on this node", vm.ISOName)
+		}
+		path, err := r.resolveLocalImagePath(ctx, vm.ISOName)
+		if err != nil {
+			return fmt.Errorf("resolving ISO %q: %w", vm.ISOName, err)
+		}
+		if _, statErr := os.Stat(path); statErr == nil {
+			if err := validateInstallerImage(vm.ISOName, path); err != nil {
+				return fmt.Errorf("checking installer image %q: %w", vm.ISOName, err)
+			}
+		}
+		isGenuineISO, err := r.ISOs.IsISO9660(vm.ISOName)
+		if err != nil {
+			return fmt.Errorf("checking image format of %q: %w", vm.ISOName, err)
+		}
+		if isGenuineISO {
+			isoPath = path
+		} else {
+			// Not a real ISO9660 filesystem - most likely a FreeBSD
+			// memstick image, which is a raw bootable disk. Attaching it
+			// via ahci-cd (like a real ISO) leaves firmware with no
+			// ISO9660 filesystem to find, so it never boots.
+			installDiskPath = path
+		}
+	}
+
 	var diskPath string
 	if vm.ReplicaNodeID != "" {
 		path, ok := hastDevicePaths[vmHASTResourceName(vm.ID)]
@@ -1309,7 +1342,7 @@ func (r *Reconciler) ensureVM(ctx context.Context, vm VMPlacement, networks map[
 			}
 			baseImagePath = path
 		}
-		diskPath, err = r.ensureDiskImage(mountpoint, baseImagePath)
+		diskPath, err = r.ensureDiskImage(ctx, mountpoint, baseImagePath)
 		if err != nil {
 			return fmt.Errorf("preparing disk image: %w", err)
 		}
@@ -1322,30 +1355,6 @@ func (r *Reconciler) ensureVM(ctx context.Context, vm VMPlacement, networks map[
 	memoryMB := vm.MemoryMB
 	if memoryMB == 0 {
 		memoryMB = defaultMemoryMB
-	}
-
-	var isoPath, installDiskPath string
-	if vm.ISOName != "" {
-		if r.ISOs == nil {
-			return fmt.Errorf("VM names ISO %q but no ISO store is configured on this node", vm.ISOName)
-		}
-		path, err := r.resolveLocalImagePath(ctx, vm.ISOName)
-		if err != nil {
-			return fmt.Errorf("resolving ISO %q: %w", vm.ISOName, err)
-		}
-		isGenuineISO, err := r.ISOs.IsISO9660(vm.ISOName)
-		if err != nil {
-			return fmt.Errorf("checking image format of %q: %w", vm.ISOName, err)
-		}
-		if isGenuineISO {
-			isoPath = path
-		} else {
-			// Not a real ISO9660 filesystem - most likely a FreeBSD
-			// memstick image, which is a raw bootable disk. Attaching it
-			// via ahci-cd (like a real ISO) leaves firmware with no
-			// ISO9660 filesystem to find, so it never boots.
-			installDiskPath = path
-		}
 	}
 
 	if err := r.Bhyve.CreateVM(ctx, vm.ID, bhyve.Config{
@@ -1848,11 +1857,12 @@ func (r *Reconciler) diskSizeMB() uint64 {
 
 // ensureDiskImage ensures the VM's disk file exists at mountpoint,
 // creating it the first time. baseImagePath, if non-empty, seeds a
-// freshly created file by copying that image's contents instead of
-// creating a blank, truncated file - see ADR-0031. An already-existing
+// freshly created file by copying that image's contents, expanding a
+// recognized compressed stream, instead of creating a blank, truncated
+// file - see ADR-0031. An already-existing
 // disk file is never reseeded, matching every other "only act on
 // create" resource in this reconciler (datasets, bhyve VMs).
-func (r *Reconciler) ensureDiskImage(mountpoint, baseImagePath string) (string, error) {
+func (r *Reconciler) ensureDiskImage(ctx context.Context, mountpoint, baseImagePath string) (string, error) {
 	path := filepath.Join(mountpoint, diskImageName)
 	if _, err := os.Stat(path); err == nil {
 		return path, nil
@@ -1861,7 +1871,7 @@ func (r *Reconciler) ensureDiskImage(mountpoint, baseImagePath string) (string, 
 	}
 
 	if baseImagePath != "" {
-		if err := copyFile(path, baseImagePath); err != nil {
+		if err := copyDiskImage(ctx, path, baseImagePath); err != nil {
 			return "", fmt.Errorf("seeding disk from base image: %w", err)
 		}
 		return path, nil
