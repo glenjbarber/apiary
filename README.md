@@ -19,6 +19,8 @@
 [![Latest Release](https://img.shields.io/github/v/release/glenjbarber/apiary)](https://github.com/glenjbarber/apiary/releases)
 -->
 
+[![Book a consultation on Every Expert](https://img.shields.io/badge/Every%20Expert-Book%20a%20consultation-222222?style=for-the-badge)](https://www.everyexpert.com/glenjbarber)
+
 A FreeBSD-native virtualization management platform for cluster
 management, VM and container orchestration, storage replication, and a
 web frontend.
