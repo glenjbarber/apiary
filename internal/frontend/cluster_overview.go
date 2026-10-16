@@ -617,7 +617,6 @@ func (s *Server) handleClusterOverviewPage(w http.ResponseWriter, r *http.Reques
 	joinRequestAwaitingSecond := r.URL.Query().Get("join_request_awaiting_second")
 	s.render(w, "cluster_overview_page", s.withAuthFieldsFrom(r, pageData{
 		ClusterNodes: nodes,
-		HealthTree:   buildHealthTree(nodes, index, now),
 		// GuardrailHolds is 0 - see pageData.HealthCard's own comment on
 		// why this constructor has no real count to pass here yet.
 		HealthCard:                             newHealthCardViewFromNodes(nodes, 0, len(joinRequests)),
