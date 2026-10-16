@@ -2205,7 +2205,7 @@ message UpdateNodeConfigRequest {
   string acme_email            = 54;
 
   // Watchgoose is configured per Comb and takes effect after its next
-  // managerd restart. The endpoint contains a secret slug and is
+  // managerd restart. The endpoint contains a secret UUID or slug and is
   // write-only: empty means keep it, clear_watchgoose_endpoint clears it.
   optional bool watchgoose_enabled = 55;
   string watchgoose_endpoint = 56;

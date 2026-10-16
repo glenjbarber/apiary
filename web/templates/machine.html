@@ -487,17 +487,17 @@
   <table class="settings-table">
     <tbody>
       <tr><th>Monitoring</th><td><select name="watchgoose_enabled" aria-label="Watchgoose monitoring enabled"><option value="false" {{if not .NodeConfig.WatchgooseEnabled}}selected{{end}}>Disabled</option><option value="true" {{if .NodeConfig.WatchgooseEnabled}}selected{{end}}>Enabled</option></select></td></tr>
-      <tr><th>Slug URL</th><td><input type="url" name="watchgoose_endpoint" placeholder="https://watchgoose.com/ping/&lt;ping-key&gt;/&lt;hive-slug&gt;" autocomplete="new-password" spellcheck="false" aria-label="Watchgoose slug URL"><span class="field-help">{{if .NodeConfig.WatchgooseEndpointSet}}A slug URL is saved; its value is hidden. Enter a new URL to replace it.{{else}}Paste the full Watchgoose slug URL. It is stored as a secret and never shown again.{{end}}</span></td></tr>
+      <tr><th>Ping URL</th><td><input type="url" name="watchgoose_endpoint" placeholder="https://watchgoose.com/ping/&lt;UUID&gt; or /ping/&lt;key&gt;/&lt;slug&gt;" autocomplete="new-password" spellcheck="false" aria-label="Watchgoose ping URL"><span class="field-help">{{if .NodeConfig.WatchgooseEndpointSet}}A ping URL is saved; its value is hidden. Enter a new URL to replace it.{{else}}Paste the full Watchgoose UUID URL or slug URL. It is stored as a secret and never shown again.{{end}}</span></td></tr>
       <tr><th>Ping interval</th><td><input type="text" name="watchgoose_interval" value="{{.NodeConfig.WatchgooseInterval}}" placeholder="5m" aria-label="Watchgoose ping interval"><span class="field-help">At least 12s to stay within Watchgoose's rate limit.</span></td></tr>
       <tr><th>Request timeout</th><td><input type="text" name="watchgoose_timeout" value="{{.NodeConfig.WatchgooseTimeout}}" placeholder="10s" aria-label="Watchgoose request timeout"></td></tr>
     </tbody>
   </table>
-  {{if .NodeConfig.WatchgooseEndpointSet}}<label><input type="checkbox" name="clear_watchgoose_endpoint" value="true"> Clear saved slug URL</label>{{end}}
-  <p class="field-help">These settings apply only to this Comb. Saving takes effect after <code>managerd</code> restarts on this host. Enabling monitoring requires a valid slug URL.</p>
+  {{if .NodeConfig.WatchgooseEndpointSet}}<label><input type="checkbox" name="clear_watchgoose_endpoint" value="true"> Clear saved ping URL</label>{{end}}
+  <p class="field-help">These settings apply only to this Comb. Saving takes effect after <code>managerd</code> restarts on this host. Enabling monitoring requires a valid Watchgoose UUID or slug ping URL.</p>
   <div class="form-actions"><button type="submit">Save Watchgoose settings</button></div>
 </form>
 {{else}}
-<table><tbody><tr><th>Monitoring</th><td>{{if .NodeConfig.WatchgooseEnabled}}Enabled{{else}}Disabled{{end}}</td></tr><tr><th>Slug URL</th><td>{{if .NodeConfig.WatchgooseEndpointSet}}Configured (value hidden){{else}}Not configured{{end}}</td></tr><tr><th>Ping interval</th><td>{{if .NodeConfig.WatchgooseInterval}}{{.NodeConfig.WatchgooseInterval}}{{else}}(default){{end}}</td></tr><tr><th>Request timeout</th><td>{{if .NodeConfig.WatchgooseTimeout}}{{.NodeConfig.WatchgooseTimeout}}{{else}}(default){{end}}</td></tr></tbody></table>
+<table><tbody><tr><th>Monitoring</th><td>{{if .NodeConfig.WatchgooseEnabled}}Enabled{{else}}Disabled{{end}}</td></tr><tr><th>Ping URL</th><td>{{if .NodeConfig.WatchgooseEndpointSet}}Configured (value hidden){{else}}Not configured{{end}}</td></tr><tr><th>Ping interval</th><td>{{if .NodeConfig.WatchgooseInterval}}{{.NodeConfig.WatchgooseInterval}}{{else}}(default){{end}}</td></tr><tr><th>Request timeout</th><td>{{if .NodeConfig.WatchgooseTimeout}}{{.NodeConfig.WatchgooseTimeout}}{{else}}(default){{end}}</td></tr></tbody></table>
 <p class="field-help">These settings apply only to this Comb and take effect after its <code>managerd</code> restarts.</p>
 {{end}}
 {{end}}
