@@ -5,6 +5,7 @@ import (
 	"sort"
 
 	rpcpb "github.com/glenjbarber/apiary/api/rpc"
+	"github.com/glenjbarber/apiary/internal/recovery"
 )
 
 // quorumImpactView/resourceImpactView/replicaBackedImpactView are the
@@ -20,6 +21,7 @@ type quorumImpactView struct {
 	Unknown         uint32
 	QuorumSize      uint32
 	Survives        bool
+	Verdict         string
 	Note            string
 }
 
@@ -124,6 +126,10 @@ func fromRPCRecoveryVerdict(v rpcpb.RecoveryVerdict) string {
 }
 
 func fromRPCQuorumImpact(q *rpcpb.QuorumImpact) quorumImpactView {
+	verdict := "lost"
+	if q.GetSurvives() {
+		verdict = "survives"
+	}
 	return quorumImpactView{
 		TargetIsVoter:   q.GetTargetIsVoter(),
 		TotalVoters:     q.GetTotalVoters(),
@@ -132,7 +138,44 @@ func fromRPCQuorumImpact(q *rpcpb.QuorumImpact) quorumImpactView {
 		Unknown:         q.GetRemainingUnknownVoters(),
 		QuorumSize:      q.GetQuorumSize(),
 		Survives:        q.GetSurvives(),
+		Verdict:         verdict,
 		Note:            q.GetNote(),
+	}
+}
+
+// assessSimulatedQuorum qualifies the failure simulator's count-based
+// quorum result with the vantage that produced its reachability checks.
+// SimulateNodeFailure always runs on the Raft leader, so losing that
+// leader cannot be called survivable based only on the leader reaching
+// the other voters; the remaining voters must be able to reach one
+// another to elect a replacement.
+func assessSimulatedQuorum(q *rpcpb.QuorumImpact, targetNodeID, currentLeaderID string, leaderKnown bool) (string, string) {
+	if q == nil {
+		return "unknown", "Raft quorum evidence is unavailable."
+	}
+	fact := fromRPCQuorumFact(q)
+	if !recovery.ValidQuorumFact(fact) {
+		return "unknown", "Raft quorum evidence is empty or internally inconsistent."
+	}
+
+	if fact.RemainingReachable+fact.RemainingUnknown < fact.QuorumSize {
+		return "lost", "Even crediting every voter with unknown reachability, the remaining voters cannot form a majority."
+	}
+	if !leaderKnown {
+		return "unknown", "The current Raft leader could not be confirmed, so the reachability evidence cannot establish a safe outage verdict."
+	}
+	if targetNodeID == currentLeaderID {
+		return "unknown", "The simulated node is the current leader. Its reachability checks do not prove that the remaining voters can reach one another to elect a replacement."
+	}
+
+	verdict := recovery.ClassifyQuorumFromVantage(fact, false, recovery.VantageFromLeader)
+	switch verdict {
+	case recovery.QuorumSurvives:
+		return "survives", "Confirmed-reachable remaining voters meet the Raft majority."
+	case recovery.QuorumLost:
+		return "lost", "Even crediting every voter with unknown reachability, the remaining voters cannot form a majority."
+	default:
+		return "unknown", "The confirmed-reachable voters do not meet the majority; unverified reachability could change the result."
 	}
 }
 
@@ -242,6 +285,12 @@ func (s *Server) handleSimulatePage(w http.ResponseWriter, r *http.Request) {
 			simErr = resp.GetError()
 		default:
 			quorum = fromRPCQuorumImpact(resp.GetQuorum())
+			// Read the leader after the simulation so a recent leadership
+			// change is less likely to make us classify the report using an
+			// old leader identity. The report is still a non-atomic snapshot.
+			statusResp, statusErr := s.client.Status(r.Context(), &rpcpb.StatusRequest{})
+			leaderKnown := statusErr == nil && statusResp.GetRaftReachable() && statusResp.GetRaftError() == "" && statusResp.GetRaftMembershipError() == "" && statusResp.GetRaftLeaderId() != ""
+			quorum.Verdict, quorum.Note = assessSimulatedQuorum(resp.GetQuorum(), nodeID, statusResp.GetRaftLeaderId(), leaderKnown)
 			for _, res := range resp.GetOwnedResources() {
 				owned = append(owned, fromRPCOwnedResourceImpact(res))
 			}
