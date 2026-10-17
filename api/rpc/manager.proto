@@ -768,6 +768,11 @@ service ManagerService {
   // this managerd's own local raftd.
   rpc RequestJoinColony(RequestJoinColonyRequest) returns (RequestJoinColonyResponse);
   rpc GetJoinRequestStatus(GetJoinRequestStatusRequest) returns (GetJoinRequestStatusResponse);
+  // Returns the shared restart-guardrail token only inside an envelope
+  // encrypted to a certificate already pinned for a current Raft voter.
+  // This lets pre-credential members complete the root-only backfill without
+  // copying plaintext token files between hosts.
+  rpc GetMemberRestartGuardrailCredential(GetMemberRestartGuardrailCredentialRequest) returns (GetMemberRestartGuardrailCredentialResponse);
   rpc ListJoinRequests(ListJoinRequestsRequest) returns (ListJoinRequestsResponse);
   rpc ApproveJoinRequest(ApproveJoinRequestRequest) returns (ApproveJoinRequestResponse);
   rpc RejectJoinRequest(RejectJoinRequestRequest) returns (RejectJoinRequestResponse);
@@ -3998,6 +4003,18 @@ message GetJoinRequestStatusResponse {
   // keys and restart-guardrail tokens are never carried in this response or
   // in replicated state.
   bytes sealed_credentials = 5;
+}
+
+message GetMemberRestartGuardrailCredentialRequest {
+  string node_id = 1;
+  string recipient_tls_certificate_pem = 2;
+  string challenge = 3;
+}
+
+message GetMemberRestartGuardrailCredentialResponse {
+  bytes sealed_credential = 1;
+  string error = 2;
+  string leader_hint = 3;
 }
 
 message ListJoinRequestsRequest {}
