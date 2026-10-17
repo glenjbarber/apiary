@@ -695,6 +695,10 @@ func (f *fakeClient) IssueManagerdRestart(context.Context, *rpcpb.IssueManagerdR
 	return &rpcpb.IssueManagerdRestartResponse{}, nil
 }
 
+func (f *fakeClient) GetMemberRestartGuardrailCredential(context.Context, *rpcpb.GetMemberRestartGuardrailCredentialRequest, ...grpc.CallOption) (*rpcpb.GetMemberRestartGuardrailCredentialResponse, error) {
+	return &rpcpb.GetMemberRestartGuardrailCredentialResponse{}, nil
+}
+
 var _ rpcpb.ManagerServiceClient = (*fakeClient)(nil)
 
 func doRequest(t *testing.T, s *Server, method, path string, body interface{}) *httptest.ResponseRecorder {

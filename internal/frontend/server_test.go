@@ -1084,6 +1084,10 @@ func (f *fakeClient) IssueManagerdRestart(context.Context, *rpcpb.IssueManagerdR
 	return &rpcpb.IssueManagerdRestartResponse{}, nil
 }
 
+func (f *fakeClient) GetMemberRestartGuardrailCredential(context.Context, *rpcpb.GetMemberRestartGuardrailCredentialRequest, ...grpc.CallOption) (*rpcpb.GetMemberRestartGuardrailCredentialResponse, error) {
+	return &rpcpb.GetMemberRestartGuardrailCredentialResponse{}, nil
+}
+
 var _ rpcpb.ManagerServiceClient = (*fakeClient)(nil)
 
 // fakeAuthenticator implements pam.Authenticator with a single fixed
