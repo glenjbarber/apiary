@@ -97,6 +97,18 @@ The next pass confirmed these concrete coupling points:
 
 The initial classification is therefore validated across reconciler, HAST, snapshot transfer, and the internal/public data models. Remaining before coding: finish searching all direct ID use sites, especially snapshot create/restore/delete, PF rule application, recovery/orphan cleanup, and API/UI lookup assumptions; then decide whether the persisted field should be named `resource_id` or another term consistent with existing model conventions. This is still a source audit only, not an implementation or test result.
 
+## Additional audit findings: snapshot and orphan semantics
+
+The next search pass found additional concrete dependencies:
+
+- `internal/manager/server.go` implements Create/List/Restore/Delete VM snapshot RPCs against local ZFS storage. These are local physical-storage operations, not Raft-replicated VM record changes.
+- `internal/manager/vmsnapshotsend.go` constructs snapshot references as `<id>@<snapshot>` and uses the ID as the receive destination dataset. A logical-ID migration needs an explicit mapping rule for existing snapshots and transfer destinations.
+- `internal/frontend/vm_snapshots.go` resolves the VM owner from the logical ID and sends snapshot operations to that node. Preserve this logical lookup while resolving the stable physical dataset name at the owning node.
+- `ListOrphanedHASTResources` and `CleanupOrphanedHASTResources` scan and remove local provider datasets using HAST physical resource names. Cleanup must compare stable physical identity and cannot infer that an old-name resource is orphaned just because the logical VM ID changed.
+- `vmAnchor(id)` is used when flushing PF state. Audit the matching PF rule-application path and make sure rule application and flush use the same identity policy during and after migration.
+
+These findings confirm the migration has both a logical lookup plane (API/UI and owner resolution) and a local physical-storage plane (datasets, snapshots, HAST provider resources, PF anchors). The implementation must keep them distinct and define resolution at the owning node; a blanket replacement of ID uses is unsafe.
+
 ## Validation
 
 Required tests include:
