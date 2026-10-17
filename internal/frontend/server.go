@@ -125,6 +125,10 @@ type pageData struct {
 	// default landing page ("/").
 	ClusterNodes []clusterNodeView
 
+	// TopologyMap is the read-only network map, projected from the same
+	// network, VM, jail, and membership reads used by their existing pages.
+	TopologyMap topologyMapView
+
 	// StateDigestColony is the colony-wide FSM state agreement verdict the
 	// ClusterNodes badges above sit under (ADR-0143). It is a value, not
 	// a pointer, and its BadgeClass is always set, so the panel can render
@@ -1193,6 +1197,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /vms/{id}/serial", s.handleSerialLogPage)
 	s.mux.HandleFunc("GET /vms/{id}/serial/content", s.handleSerialLogContent)
 	s.mux.HandleFunc("GET /networks", s.handleNetworksPage)
+	s.mux.HandleFunc("GET /topology", s.handleTopologyPage)
 	s.mux.HandleFunc("GET /jails", s.handleJailsPage)
 	s.mux.HandleFunc("GET /jails/panel", s.handleJailPanel)
 	s.mux.HandleFunc("GET /jails/{id}", s.handleJailPage)

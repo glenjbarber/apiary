@@ -1,0 +1,105 @@
+{{define "topology_page"}}
+<!DOCTYPE html>
+<html lang="en">
+{{template "head" .}}
+<body class="app-layout">
+  {{template "nav" .}}
+  <main class="content topology-page" id="main-content">
+    {{template "page_header" (pageHeader "Network Map" "Colony → Combs → Cells, arranged by their configured network.")}}
+    {{if .TopologyMap.LoadError}}<div class="banner-error" role="alert">Some topology data could not be loaded: {{.TopologyMap.LoadError}}</div>{{end}}
+    <div class="topology-summary" aria-label="Map summary">
+      <span><strong>{{len .TopologyMap.Networks}}</strong> managed networks</span>
+      <span><strong>{{.TopologyMap.CombCount}}</strong> Combs</span>
+      <span><strong>{{.TopologyMap.CellCount}}</strong> Cells</span>
+      <span class="topology-legend"><span class="topology-health healthy">Ready / up</span><span class="topology-health warn">In progress</span><span class="topology-health error">Error / down</span><span class="topology-health unknown">Unknown</span></span>
+    </div>
+
+    <section class="topology-canvas" aria-label="Network topology">
+      <div class="topology-root"><span class="topology-root-mark" aria-hidden="true">A</span><div><strong>Apiary Colony</strong><small>{{.TopologyMap.CombCount}} known Combs</small></div></div>
+      {{range .TopologyMap.Networks}}
+      <section class="topology-network" aria-labelledby="network-{{.ID}}">
+        <header class="topology-network-head">
+          <div><span class="topology-kicker">NETWORK</span><h2 id="network-{{.ID}}">{{.Name}}</h2><code>{{.ID}}</code></div>
+          <div class="topology-network-meta"><span>{{.Subnet}}</span><span>{{.VLAN}}</span>{{if .Bridge}}<span>Bridge {{.Bridge}}</span>{{end}}</div>
+          <span class="topology-count">{{.CellCount}} attached Cell{{if ne .CellCount 1}}s{{end}}</span>
+        </header>
+        {{if .Combs}}
+        <div class="topology-combs">
+          {{range .Combs}}
+          <section class="topology-comb" aria-label="Comb {{.NodeID}}">
+            <header class="topology-comb-head"><a href="/host/{{.NodeID}}"><span class="topology-comb-mark" aria-hidden="true"></span><strong>{{.NodeID}}</strong></a><span class="topology-health {{.BridgeClass}}" title="{{.BridgeDetail}}">{{.BridgeLabel}}</span></header>
+            {{if .Cells}}<div class="topology-cells">
+              {{range .Cells}}
+              <a class="topology-cell" href="{{.DetailURL}}" title="{{.Kind}} {{.ID}} on {{.NodeID}}">
+                <span class="topology-cell-kind">{{.Kind}}</span><strong>{{.Name}}</strong>
+                <span class="topology-health {{.PhaseClass}}">{{if .Phase}}{{.Phase}}{{else}}State unknown{{end}}</span>
+                {{if .Address}}<code>{{.Address}}</code>{{end}}
+              </a>
+              {{end}}
+            </div>{{else}}<p class="topology-empty">No Cells on this network and Comb.</p>{{end}}
+          </section>
+          {{end}}
+        </div>
+        {{else}}<p class="topology-empty">No Comb bridge observations are available.</p>{{end}}
+      </section>
+      {{else}}<section class="topology-empty-state"><h2>No managed networks</h2><p>Create a network to see network attachments here. Cells on the default host bridge are listed below.</p><a class="button secondary" href="/networks">Open Networks</a></section>{{end}}
+
+      {{if .TopologyMap.Unassigned}}
+      <section class="topology-side-group"><header><div><span class="topology-kicker">DEFAULT BRIDGE</span><h2>Cells without a managed network</h2></div><span class="topology-count">{{len .TopologyMap.Unassigned}}</span></header><div class="topology-cells">
+        {{range .TopologyMap.Unassigned}}<div class="topology-cell"><span class="topology-cell-kind">{{.Kind}} · <a href="/host/{{.NodeID}}">{{.NodeID}}</a></span><a class="topology-cell-resource" href="{{.DetailURL}}"><strong>{{.Name}}</strong></a><span class="topology-health {{.PhaseClass}}">{{if .Phase}}{{.Phase}}{{else}}State unknown{{end}}</span>{{if .Address}}<code>{{.Address}}</code>{{end}}</div>{{end}}
+      </div></section>
+      {{end}}
+      {{if .TopologyMap.Unmapped}}
+      <section class="topology-side-group"><header><div><span class="topology-kicker">UNRESOLVED LINK</span><h2>Cells with unavailable network records</h2></div><span class="topology-count">{{len .TopologyMap.Unmapped}}</span></header><div class="topology-cells">
+        {{range .TopologyMap.Unmapped}}<a class="topology-cell" href="{{.DetailURL}}"><span class="topology-cell-kind">{{.Kind}} · {{.NodeID}}</span><strong>{{.Name}}</strong><span class="topology-health unknown">Network record unavailable</span></a>{{end}}
+      </div></section>
+      {{end}}
+    </section>
+    <style>
+      .topology-page { max-width:none; }
+      .topology-summary { display:flex; align-items:center; flex-wrap:wrap; gap:.65rem 1.2rem; padding:.7rem 1rem; border:1px solid var(--line); border-radius:8px; background:var(--panel); color:var(--muted); font-size:.82rem; }
+      .topology-summary strong { color:var(--ink); }
+      .topology-legend { display:flex; flex-wrap:wrap; gap:.4rem; margin-left:auto; }
+      .topology-canvas { min-height:calc(100vh - 16rem); margin-top:1rem; padding:clamp(.8rem,2vw,1.5rem); border:1px solid var(--line); border-radius:10px; background:var(--field); overflow:auto; }
+      .topology-root { display:flex; align-items:center; gap:.7rem; width:max-content; min-width:14rem; margin:0 auto 1.5rem; padding:.7rem 1rem; border:1px solid var(--line); border-radius:999px; background:var(--panel); box-shadow:var(--shadow); }
+      .topology-root-mark { display:grid; place-items:center; width:2rem; height:2rem; border-radius:50%; color:var(--wash); background:var(--ink); font-weight:800; }
+      .topology-root small { display:block; margin-top:.12rem; color:var(--muted); }
+      .topology-network, .topology-side-group, .topology-empty-state { position:relative; margin:0 auto 1rem; padding:1rem; border:1px solid var(--line); border-radius:10px; background:var(--panel); box-shadow:var(--shadow); }
+      .topology-network::before, .topology-side-group::before { content:""; position:absolute; left:50%; top:-1.55rem; height:1.55rem; border-left:2px solid var(--line); }
+      .topology-network-head, .topology-side-group > header { display:flex; align-items:center; flex-wrap:wrap; gap:.7rem 1.2rem; padding-bottom:.8rem; border-bottom:1px solid var(--line); }
+      .topology-kicker { color:var(--muted); font-size:.66rem; font-weight:800; letter-spacing:.14em; }
+      .topology-network h2, .topology-side-group h2 { margin:.12rem 0; font-size:1.05rem; }
+      .topology-network-head code { color:var(--muted); font-size:.76rem; }
+      .topology-network-meta { display:flex; flex-wrap:wrap; gap:.4rem; margin-left:auto; }
+      .topology-network-meta span, .topology-count { padding:.24rem .55rem; border:1px solid var(--line); border-radius:999px; color:var(--muted); background:var(--field); font-size:.72rem; }
+      .topology-combs { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(100%,17rem),1fr)); gap:.75rem; padding-top:.8rem; }
+      .topology-comb { min-width:0; padding:.75rem; border:1px solid var(--line); border-radius:8px; background:var(--field); }
+      .topology-comb-head { display:flex; align-items:center; justify-content:space-between; gap:.5rem; padding-bottom:.6rem; border-bottom:1px solid var(--line); }
+      .topology-comb-head a { display:flex; align-items:center; gap:.5rem; min-width:0; color:var(--ink); text-decoration:none; }
+      .topology-comb-head a:hover { text-decoration:underline; }
+      .topology-comb-mark { flex:none; width:.7rem; height:.7rem; border:2px solid var(--muted); border-radius:50%; }
+      .topology-cells { display:grid; grid-template-columns:repeat(auto-fit,minmax(9.5rem,1fr)); gap:.55rem; padding-top:.65rem; }
+      .topology-cell { display:flex; flex-direction:column; align-items:flex-start; gap:.32rem; min-width:0; padding:.65rem; border:1px solid var(--line); border-radius:8px; color:var(--ink); background:var(--panel); text-decoration:none; }
+      .topology-cell:hover { border-color:var(--success); background:var(--row-hover); }
+      .topology-cell-resource { color:var(--ink); text-decoration:none; }
+      .topology-cell-resource:hover { text-decoration:underline; }
+      .topology-cell strong { max-width:100%; overflow-wrap:anywhere; }
+      .topology-cell-kind { color:var(--muted); font-size:.7rem; }
+      .topology-cell code { max-width:100%; overflow-wrap:anywhere; color:var(--muted); font-size:.72rem; }
+      .topology-health { display:inline-flex; align-items:center; gap:.35rem; padding:.18rem .5rem; border:1px solid currentColor; border-radius:999px; font-size:.68rem; line-height:1.35; white-space:nowrap; }
+      .topology-health::before { content:""; width:.42rem; height:.42rem; flex:none; border-radius:50%; background:currentColor; }
+      .topology-health.healthy { color:var(--status-ok); }
+      .topology-health.warn { color:var(--status-warn); }
+      .topology-health.error { color:var(--danger); }
+      .topology-health.unknown { color:var(--muted); }
+      .topology-empty { margin:.7rem 0 0; color:var(--muted); font-size:.82rem; }
+      .topology-empty-state { text-align:center; }
+      .topology-empty-state h2 { margin:0; font-size:1rem; }
+      .topology-empty-state p { color:var(--muted); }
+      @media(max-width:700px) { .topology-network-meta { margin-left:0; } .topology-count { margin-left:auto; } .topology-legend { margin-left:0; } }
+    </style>
+  </main>
+  {{template "footer" .}}
+</body>
+</html>
+{{end}}
