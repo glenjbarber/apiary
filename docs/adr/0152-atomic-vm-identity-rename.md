@@ -64,6 +64,27 @@ The physical-identity split also affects more than ZFS and bhyve. The initial ca
 
 This is a design recommendation requiring a complete call-site audit, not implemented behavior. Before coding, classify every use of `VMDefinition.id` and `VMPlacement.ID` as logical identity, stable physical identity, or a derived identifier that needs an explicit migration rule. In particular, HAST and PF naming must not silently diverge between manager-side operations and reconciler-side operations. Do not assume the initial search is exhaustive.
 
+## Call-site audit: initial classification
+
+The initial repository-wide search identifies these classes of ID use. This is a classification baseline, not a claim that every call site has been exhaustively reviewed.
+
+| Area | Current ID use | Migration rule |
+|---|---|---|
+| Raft/API record and REST conversion | `VMDefinition.id`, manager conversion, REST DTO ID | Logical identity; changes to UID ID only through the explicit migration. |
+| UI routes, resource lists, health tree | VM ID in routes and displayed resource identity | Continue to use logical ID. Ensure any route-to-resource lookup resolves to the same record during migration. |
+| ZFS dataset and bhyve VM | Direct ID for existence, create, destroy, disk image | Stable physical identity; existing resources must keep their current names. |
+| HAST resource names and cleanup | `vmHASTResourceName(id)`, mirrored manager-side HAST naming, replica/reclaim/recovery paths | Derive from stable physical identity consistently on owner and replica. Verify recovery and orphan cleanup APIs. |
+| PF firewall anchor | `vmAnchor(id)` | Decide explicitly whether firewall state follows logical identity or stable resource identity; flush/reapply must not leave stale anchors or touch another VM. |
+| Snapshots and disk clone/restore | Dataset name and `<source_vm_id>@<snapshot_name>` references | Snapshot storage follows stable physical identity; user-facing references need a logical-to-physical resolution rule. |
+| Placement and stale reclaim | `VMPlacement.ID` feeds `Plan`, `PlanReclaim`, replica planning, and resource teardown | Split logical identity from physical resource key; never reclaim solely because a logical ID changed. |
+| Derived indexes and diagnostics | HAST sync lookup keys and invariant facts include VM ID | Determine whether each key is an external/logical label or a physical HAST name; keep both sides consistent. |
+
+### Implementation boundary
+
+The protobuf/model change is cross-cutting: adding a persisted physical ID to `VMDefinition` alone is insufficient. The manager RPC DTO, REST conversion, VM placement type, ZFS/bhyve paths, HAST naming and manager-side cleanup, PF anchors, snapshots, recovery/invariants, and tests must all be reviewed together.
+
+For legacy records, an absent physical ID must resolve to the current logical ID so existing datasets and bhyve VMs remain discoverable. New records must establish physical identity once. The logical rename operation must preserve that physical identity. No caller may fall back to provisioning a second physical resource merely because migration is incomplete.
+
 ## Validation
 
 Required tests include:
