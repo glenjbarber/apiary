@@ -34,7 +34,15 @@ The external managerd RPC must follow existing leader-forwarding and authorizati
 
 ## Reconciler and physical-resource compatibility
 
-A logical record rename is not sufficient by itself. Before enabling the caller, trace every physical resource name and reconciliation key derived from VM ID, including dataset and bhyve-related paths. The implementation must either preserve stable physical identity across the logical rename or provide an explicit, recoverable transition that cannot create a second VM or tear down the original.
+Source tracing confirms the resource-name coupling is real, not hypothetical:
+
+- `internal/cluster/reconciler.go` converts each Raft VM record into a `VMPlacement` whose `ID` is exactly `VMDefinition.id`.
+- The reconciler passes that ID to ZFS dataset existence/create/destroy operations and to the bhyve manager's existence/create/destroy operations.
+- `teardownVM` destroys the bhyve VM and ZFS dataset using `vm.ID`; `reclaimStaleVM` likewise removes local resources under the ID it receives.
+
+Therefore a bare Raft-key rename from legacy ID to UID ID is **not safe**: the next reconcile can treat the destination as a new placement and provision resources under the new ID, while the existing physical resources remain under the legacy ID. Depending on placement/reclaim flow, the legacy resources may also later be considered stale. The atomic state-record move alone cannot satisfy the migration.
+
+Before implementation is enabled, choose and test an explicit resource-identity strategy. Preferred direction: separate stable physical resource identity from the externally visible/logical VM ID, or add a migration protocol that safely transfers the existing resource identity while fencing reconciliation on both IDs. Do not rename/destroy host resources implicitly as a side effect of a generic Raft record move. The operation must coordinate with the owning node's reconciler and survive retries/restarts without provisioning a second VM or reclaiming the original.
 
 Do not infer that physical resources have been renamed merely because the Raft record has.
 
