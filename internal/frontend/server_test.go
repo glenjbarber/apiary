@@ -2745,9 +2745,9 @@ func TestServer_APIKeysPage(t *testing.T) {
 	}
 }
 
-// Issue #75: the page warns about the lockout BEFORE the first key is
-// created, and names the files an operator has to change on every
-// other Comb.
+// Issue #75: the page warns about cluster-wide authentication before the
+// first key is created and names the supported peer-credential setup for
+// legacy members.
 func TestServer_APIKeysPage_WarnsBeforeFirstKeyIsCreated(t *testing.T) {
 	client := &fakeClient{listAPIKeysResp: &rpcpb.ListAPIKeysResponse{}}
 	s := newTestServer(t, client)
@@ -2757,9 +2757,14 @@ func TestServer_APIKeysPage_WarnsBeforeFirstKeyIsCreated(t *testing.T) {
 	s.ServeHTTP(rec, req)
 
 	body := rec.Body.String()
-	for _, want := range []string{"managerd.json", "peer_api_key", "frontend.json", "manager_api_key", "apiary_managerd", "apiary_frontend"} {
+	for _, want := range []string{"managerd.json", "peer_api_key", "frontend.json", "manager_api_key", "verified peer TLS", "peer-credential-backfill", "approved join flow", "restart-guardrail token"} {
 		if !strings.Contains(body, want) {
 			t.Errorf("the pre-creation warning does not mention %q:\n%s", want, body)
+		}
+	}
+	for _, stale := range []string{"cannot forward writes to the leader", "by hand"} {
+		if strings.Contains(body, stale) {
+			t.Errorf("the pre-creation warning still contains stale guidance %q:\n%s", stale, body)
 		}
 	}
 }

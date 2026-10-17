@@ -2617,20 +2617,13 @@ func (bearerCredentials) RequireTransportSecurity() bool { return false }
 // waiting for a restart and without touching how any OTHER call on this
 // connection authenticates.
 //
-// Deliberately scoped to THIS Comb only - that is the explicit,
-// documented gap left here (see the PR notes for this change, and the
-// API Keys page's own pre-creation warning, which names the files an
-// operator still has to edit by hand on every OTHER Comb). Reaching any
-// other member of the Colony automatically would need either a new
-// cross-Comb RPC or extending CreateAPIKey's own handler in
-// internal/manager/server.go to fan the raw key out to every peer at
-// mint time - both are structural changes to that RPC's own forwarding
-// logic, explicitly out of scope for this change, and the second would
-// only ever run once per key besides (CreateAPIKey is never reissued
-// for a key that already exists), so it could not repair a Comb that
-// was offline at creation time either. A Comb joining later, or any
-// Comb besides this one, still needs its own peer_api_key/
-// manager_api_key installed by hand.
+// Deliberately scoped to THIS Comb only: it installs the credential this
+// frontend just created for its own managerd and frontend. The join flow
+// provisions new Combs with a per-node Operator key, and
+// apiaryctl peer-credential-backfill provisions existing members. User
+// actions forwarded from a follower carry the caller's own API key over
+// verified peer TLS; this handler does not distribute the newly created
+// user key to other members.
 func (s *Server) provisionSelfAfterFirstKey(r *http.Request, rawKey string) string {
 	if rawKey == "" {
 		return ""
@@ -2680,7 +2673,7 @@ func (s *Server) provisionSelfAfterFirstKey(r *http.Request, rawKey string) stri
 		return ""
 	}
 	return "the key was created, but could not be installed automatically for: " + strings.Join(problems, "; ") +
-		" - install it by hand in the file(s) named above and restart the affected service(s); every OTHER Comb in the Colony still needs the same by-hand treatment regardless"
+		" - install it in the file(s) named above and restart the affected service(s); existing members may still need the root-only apiaryctl peer-credential-backfill command"
 }
 
 func (s *Server) handleRevokeAPIKey(w http.ResponseWriter, r *http.Request) {

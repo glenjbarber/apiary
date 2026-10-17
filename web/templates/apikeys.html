@@ -17,25 +17,24 @@
   <div class="banner-warning">
     <p><strong>Before you create the first key, read this (issues #75/#80):</strong></p>
     <p>
-      The moment the first key exists, every unauthenticated call across
-      the whole Colony starts failing, including calls a follower
-      forwards to the leader. <strong>This Comb</strong> - the one
-      serving this page - is provisioned for you automatically: its own
+      The moment the first key exists, API-key authentication is enabled
+      across the Colony. <strong>This Comb</strong> - the one serving
+      this page - is provisioned for you automatically: its own
       <code>managerd.json</code> <code>peer_api_key</code> and
       <code>frontend.json</code> <code>manager_api_key</code> are set to
       the key you are about to create, with no extra step.
     </p>
     <p>
-      <strong>Every OTHER Comb in the Colony is not.</strong> On each one,
-      by hand, before you rely on it: set <code>peer_api_key</code> in
-      <code>/usr/local/etc/apiary/managerd.json</code> and
-      <code>manager_api_key</code> in
-      <code>/usr/local/etc/apiary/frontend.json</code> to the exact same
-      key (or mint a separate key per Comb and set each file to its own),
-      then restart <code>apiary_managerd</code> and
-      <code>apiary_frontend</code> on that Comb. Until that is done, that
-      Comb's frontend shows Unauthenticated and its managerd cannot
-      forward writes to the leader.
+      User actions from a follower are forwarded to the leader with the
+      caller's authenticated API key over verified peer TLS; do not copy
+      this key to other Combs. Existing Combs that predate automatic peer
+      credential setup need a one-time root-run
+      <code>apiaryctl peer-credential-backfill</code> on the leader and
+      each existing member. It installs a limited Operator peer key for
+      background peer operations and restarts the services. Newly joined
+      Combs receive their own peer key during the approved join flow. If
+      the Colony has no restart-guardrail token yet, provision one on the
+      leader first.
     </p>
   </div>
   {{end}}
