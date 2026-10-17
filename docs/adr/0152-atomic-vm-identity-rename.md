@@ -109,6 +109,14 @@ The next search pass found additional concrete dependencies:
 
 These findings confirm the migration has both a logical lookup plane (API/UI and owner resolution) and a local physical-storage plane (datasets, snapshots, HAST provider resources, PF anchors). The implementation must keep them distinct and define resolution at the owning node; a blanket replacement of ID uses is unsafe.
 
+## PF and recovery lookup checks
+
+The matching PF rule-application path is now confirmed: `ensureVM` applies rules with `vmAnchor(vm.ID)`, and `stopVM`, `teardownVM`, and stale reclaim flush anchors derived from the same ID. Once logical and physical IDs are split, these paths must use one deliberately chosen anchor identity; applying under one ID and flushing under another would leave stale rules.
+
+The recovery/orphan-cleanup path needs particular care. Manager-side orphan HAST cleanup builds its active-resource set from VM logical IDs, while the orphan resources it scans are physical HAST dataset names. After identity separation, the active set must be derived using the same stable physical identity and HAST naming function as the reconciler and manager-side replication code. Otherwise a valid legacy-named provider dataset could be misclassified as orphaned.
+
+Local console and serial-log paths also use the VM ID to find host resources. These should be checked as physical-resource lookups at the owning node, while API selection and owner resolution remain logical-ID lookups.
+
 ## Validation
 
 Required tests include:
