@@ -117,6 +117,17 @@ The recovery/orphan-cleanup path needs particular care. Manager-side orphan HAST
 
 Local console and serial-log paths also use the VM ID to find host resources. These should be checked as physical-resource lookups at the owning node, while API selection and owner resolution remain logical-ID lookups.
 
+## Console, serial-log, and recovery lookup findings
+
+The remaining host lookup pass confirms:
+
+- `GetVMConsole` uses the requested VM ID to query the local VNC port. This is a physical-resource lookup and must resolve the stable host-side identity after logical-ID migration.
+- `GetVMSerialLog` passes the requested VM ID to `SerialLogPath`, so serial-log file naming has the same dependency.
+- HAST orphan-resource discovery parses physical dataset names (for example, `vm-<id>`) and cleanup checks active resources against Raft VM records. Once IDs are split, that check must compare stable physical identity, not just the logical record ID.
+- Recovery/invariant facts and user-facing resource identifiers currently use VM IDs as stable labels. Keep external logical IDs stable for those surfaces where appropriate, while any checks against physical HAST datasets use the physical identity explicitly.
+
+This closes the identified console/serial-log and HAST orphan lookup questions at the source level. The broader call-site audit is still not proven exhaustive; the implementation must include repository-wide review and tests. The code change must not proceed as a one-field model edit without updating every physical-resource consumer.
+
 ## Validation
 
 Required tests include:
