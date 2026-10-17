@@ -37,14 +37,24 @@ The external managerd RPC must follow existing leader-forwarding and authorizati
 Source tracing confirms the resource-name coupling is real, not hypothetical:
 
 - `internal/cluster/reconciler.go` converts each Raft VM record into a `VMPlacement` whose `ID` is exactly `VMDefinition.id`.
-- The reconciler passes that ID to ZFS dataset existence/create/destroy operations and to the bhyve manager's existence/create/destroy operations.
-- `teardownVM` destroys the bhyve VM and ZFS dataset using `vm.ID`; `reclaimStaleVM` likewise removes local resources under the ID it receives.
+- ZFS dataset and bhyve existence/create/destroy operations use that ID.
+- `teardownVM` destroys resources using `vm.ID`; `reclaimStaleVM` also removes local resources under the ID it receives.
 
-Therefore a bare Raft-key rename from legacy ID to UID ID is **not safe**: the next reconcile can treat the destination as a new placement and provision resources under the new ID, while the existing physical resources remain under the legacy ID. Depending on placement/reclaim flow, the legacy resources may also later be considered stale. The atomic state-record move alone cannot satisfy the migration.
+A bare Raft-key rename is unsafe: the next reconcile can treat the destination as a new placement and provision resources under the new ID while the existing resources remain under the legacy ID. A later reclaim pass could also treat the old resources as stale.
 
-Before implementation is enabled, choose and test an explicit resource-identity strategy. Preferred direction: separate stable physical resource identity from the externally visible/logical VM ID, or add a migration protocol that safely transfers the existing resource identity while fencing reconciliation on both IDs. Do not rename/destroy host resources implicitly as a side effect of a generic Raft record move. The operation must coordinate with the owning node's reconciler and survive retries/restarts without provisioning a second VM or reclaiming the original.
+### Preferred design: stable physical resource identity
 
-Do not infer that physical resources have been renamed merely because the Raft record has.
+Add a separate, persisted `resource_id` (name subject to repository conventions) to the VM definition and placement model. The logical/API `id` can then change from the legacy namespace/name value to the UID-scoped value while `resource_id` remains stable for host operations.
+
+Compatibility requirements:
+
+- Existing records with no `resource_id` must resolve to their current `id` for physical operations. This preserves the names of existing datasets and bhyve VMs.
+- New records initialize `resource_id` once and never silently derive a new physical identity from a later logical-ID change.
+- Create, existence-check, stop, teardown, stale reclaim, HAST resource naming, and any other host-resource paths must use the stable physical identity consistently. API lookup and Kubernetes ownership continue to use the logical ID.
+- The migration must atomically assign/preserve the stable physical identity before changing the logical ID. It must be retry-safe and fenced so concurrent reconciliation cannot provision under both identities.
+- Never destroy or rename host resources merely because the logical ID changed. If any physical-resource rename is ultimately required, that is a separate explicit migration with its own recovery protocol.
+
+This is a design recommendation requiring full call-site audit, not an implemented behavior. Before coding, enumerate every use of `VMDefinition.id` and `VMPlacement.ID` and classify it as logical identity versus physical resource identity. Do not assume the listed reconciler paths are exhaustive.
 
 ## Validation
 
