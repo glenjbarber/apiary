@@ -54,7 +54,15 @@ Compatibility requirements:
 - The migration must atomically assign/preserve the stable physical identity before changing the logical ID. It must be retry-safe and fenced so concurrent reconciliation cannot provision under both identities.
 - Never destroy or rename host resources merely because the logical ID changed. If any physical-resource rename is ultimately required, that is a separate explicit migration with its own recovery protocol.
 
-This is a design recommendation requiring full call-site audit, not an implemented behavior. Before coding, enumerate every use of `VMDefinition.id` and `VMPlacement.ID` and classify it as logical identity versus physical resource identity. Do not assume the listed reconciler paths are exhaustive.
+The physical-identity split also affects more than ZFS and bhyve. The initial call-site search found VM-ID-derived identifiers for:
+
+- HAST resource names (owner, replica, reclaim, and recovery/cleanup paths).
+- PF firewall anchors.
+- Snapshot operations and disk paths, which address the VM's dataset.
+- Frontend routes and displayed resource identity, which should generally continue to use the logical ID.
+- Reconciler placement and stale-resource planning, which need a deliberate choice of logical versus physical identity.
+
+This is a design recommendation requiring a complete call-site audit, not implemented behavior. Before coding, classify every use of `VMDefinition.id` and `VMPlacement.ID` as logical identity, stable physical identity, or a derived identifier that needs an explicit migration rule. In particular, HAST and PF naming must not silently diverge between manager-side operations and reconciler-side operations. Do not assume the initial search is exhaustive.
 
 ## Validation
 
