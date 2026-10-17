@@ -85,6 +85,18 @@ The protobuf/model change is cross-cutting: adding a persisted physical ID to `V
 
 For legacy records, an absent physical ID must resolve to the current logical ID so existing datasets and bhyve VMs remain discoverable. New records must establish physical identity once. The logical rename operation must preserve that physical identity. No caller may fall back to provisioning a second physical resource merely because migration is incomplete.
 
+## Additional source-trace results
+
+The next pass confirmed these concrete coupling points:
+
+- `internal/cluster/reconciler.go`: `ListVMsLocal` maps `VMDefinition.id` directly to `VMPlacement.ID`. `ensureVM`, stop, teardown, stale reclaim, HAST role construction, and PF flushing all consume that placement ID.
+- `internal/cluster/hast.go` and `internal/manager/server.go`: HAST naming/cleanup conventions are mirrored across packages. Any physical-ID split must update both sides together, including replica and orphan-resource cleanup.
+- `internal/manager/vmsnapshotsend.go`: snapshot transfer uses the requested VM ID as the ZFS dataset name and as the destination dataset name. A logical ID change therefore needs an explicit snapshot lookup/transfer compatibility rule.
+- `internal/manager/convert.go` and `api/rpc/manager.proto`: public RPC VM definitions currently carry `id` but no separate physical resource identity; conversion code maps the ID directly into the internal record.
+- `api/internalpb/state.proto`: the Raft `VMDefinition` likewise has no physical resource identity field today.
+
+The initial classification is therefore validated across reconciler, HAST, snapshot transfer, and the internal/public data models. Remaining before coding: finish searching all direct ID use sites, especially snapshot create/restore/delete, PF rule application, recovery/orphan cleanup, and API/UI lookup assumptions; then decide whether the persisted field should be named `resource_id` or another term consistent with existing model conventions. This is still a source audit only, not an implementation or test result.
+
 ## Validation
 
 Required tests include:
