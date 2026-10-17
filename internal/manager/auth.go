@@ -487,6 +487,13 @@ const statusMethod = "/apiary.rpc.v1.ManagerService/Status"
 const requestJoinColonyMethod = "/apiary.rpc.v1.ManagerService/RequestJoinColony"
 const getJoinRequestStatusMethod = "/apiary.rpc.v1.ManagerService/GetJoinRequestStatus"
 
+// getMemberRestartGuardrailCredentialMethod is unauthenticated because an
+// existing member may not yet have a peer API key. It returns only an
+// application-encrypted envelope to a certificate already pinned to that
+// current Raft voter; caller-supplied certificates that are not pinned are
+// refused, and the plaintext token never leaves managerd.
+const getMemberRestartGuardrailCredentialMethod = "/apiary.rpc.v1.ManagerService/GetMemberRestartGuardrailCredential"
+
 // cancelJoinRequestMethod (ADR-0083) is exempted for the identical
 // reason as requestJoinColonyMethod/getJoinRequestStatusMethod above:
 // the caller is that same joining Comb, withdrawing its own request,
@@ -596,16 +603,17 @@ const issueManagerdRestartMethod = "/apiary.rpc.v1.ManagerService/IssueManagerdR
 // CoversEveryRPC treats these as the only RPCs allowed to have no entry in
 // requiredRole.
 var authExemptMethods = map[string]bool{
-	statusMethod:                  true,
-	requestJoinColonyMethod:       true,
-	getJoinRequestStatusMethod:    true,
-	cancelJoinRequestMethod:       true,
-	authenticatePasswordMethod:    true,
-	reserveRestartLeaseMethod:     true,
-	confirmRestartCompletedMethod: true,
-	stepAsideForRestartMethod:     true,
-	mutateColonyUpdateMethod:      true,
-	getColonyJoinWindowMethod:     true,
+	statusMethod:                              true,
+	requestJoinColonyMethod:                   true,
+	getJoinRequestStatusMethod:                true,
+	getMemberRestartGuardrailCredentialMethod: true,
+	cancelJoinRequestMethod:                   true,
+	authenticatePasswordMethod:                true,
+	reserveRestartLeaseMethod:                 true,
+	confirmRestartCompletedMethod:             true,
+	stepAsideForRestartMethod:                 true,
+	mutateColonyUpdateMethod:                  true,
+	getColonyJoinWindowMethod:                 true,
 
 	executeNodeRestartPlanMethod: true,
 

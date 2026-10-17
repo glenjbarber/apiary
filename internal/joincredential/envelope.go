@@ -146,6 +146,12 @@ func AssociatedData(requestID, nodeID, fingerprint string) []byte {
 	return []byte("apiary-join-credentials/v1\x00" + requestID + "\x00" + nodeID + "\x00" + fingerprint)
 }
 
+// MemberTokenAssociatedData binds an existing-member token envelope to its
+// Raft node identity, pinned serving certificate, and one-time challenge.
+func MemberTokenAssociatedData(nodeID, fingerprint, challenge string) []byte {
+	return []byte("apiary-member-restart-token/v1\x00" + nodeID + "\x00" + fingerprint + "\x00" + challenge)
+}
+
 // Open decrypts an envelope using the PEM certificate and private key held
 // by the receiving Comb. The private key must correspond to the certificate;
 // this is checked before attempting to decrypt.

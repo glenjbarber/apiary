@@ -328,21 +328,22 @@ can authenticate the target Colony member.
 This automated handoff covers newly joining Combs. Existing Colonies with
 members predating per-node peer-key provisioning still need their existing
 members' peer keys configured and their `managerd`/`frontend` peer settings
-completed under **Complete peer trust after the join** below. The join flow
-does not distribute a secret to already-running members.
+completed under **Complete peer trust after the join** below. The existing
+member backfill uses its own certificate-bound handoff described below.
 
 ## Complete peer trust after the join
 
 ### Backfill an existing Colony before adding another member
 
 For a Colony whose Combs were installed before automatic join credential
-delivery, first make sure every current member has the exact same
-`/usr/local/etc/apiary/restart-guardrail-token` file, mode `0600`. If no member
-has one, run `apiaryctl restart-guardrail-provision` on one member, copy that
-file byte-for-byte to every other member over your trusted management
-channel, and restart `managerd` on all of them. If tokens already exist but
-may differ, compare and reconcile them before continuing; do not generate a
-replacement over an existing file.
+delivery, ensure the current leader has the
+`/usr/local/etc/apiary/restart-guardrail-token` file with mode `0600` and
+restart `managerd` there. If no member has a token, run
+`apiaryctl restart-guardrail-provision` on the leader. Existing members can
+then retrieve the token encrypted to their already pinned manager TLS
+certificate; no manual plaintext copy is needed. If tokens already exist on
+multiple members and may differ, reconcile them before continuing; do not
+generate a replacement over an existing file.
 
 Then run the following on the Colony leader first, followed by every other
 existing Comb:
@@ -351,13 +352,14 @@ existing Comb:
 /usr/local/libexec/apiary/apiaryctl peer-credential-backfill
 ```
 
-The command checks local Raft identity and the token file, records only the
-hash of a shared Operator peer key in Raft, derives that key locally, writes
-it to this Comb's `managerd.json` and `frontend.json`, and restarts
-`managerd` and `frontend`. It refuses to overwrite a different configured
-key. On a follower, the leader must have completed the first run and the
-replicated key must have arrived before the command can proceed. It never
-prints either credential.
+The command checks local Raft identity and the token file (or retrieves the
+token from the current leader in a certificate-bound encrypted envelope).
+It records only the hash of a shared Operator peer key in Raft, derives that
+key locally, writes it to this Comb's `managerd.json` and `frontend.json`,
+and restarts `managerd` and `frontend`. It refuses to overwrite a different
+configured key. On a follower, the leader must have completed the first run
+and the replicated key must have arrived before the command can proceed. It
+never prints either credential.
 
 Forwarded user actions keep the caller's existing API-key role: the
 authenticated key is sent to the leader over verified peer TLS for API-key

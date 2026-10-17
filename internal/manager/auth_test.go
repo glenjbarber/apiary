@@ -422,6 +422,18 @@ func TestAuthUnaryInterceptor_JoinRequestExemptionsBypassCheckAuth(t *testing.T)
 	}
 }
 
+func TestAuthUnaryInterceptor_MemberCredentialHandoffBypassesAPIKeyAuth(t *testing.T) {
+	s := &Server{raft: nil}
+	handlerCalled := false
+	_, err := s.AuthUnaryInterceptor(context.Background(), nil, &grpc.UnaryServerInfo{FullMethod: getMemberRestartGuardrailCredentialMethod}, func(context.Context, interface{}) (interface{}, error) {
+		handlerCalled = true
+		return nil, nil
+	})
+	if err != nil || !handlerCalled {
+		t.Fatalf("AuthUnaryInterceptor(member credential handoff) = (%v, called=%v), want the pinned-certificate handler to run without an API key", err, handlerCalled)
+	}
+}
+
 // TestAuthUnaryInterceptor_AuthenticatePasswordBypassesCheckAuth is the
 // direct regression test for AuthenticatePassword's exemption (ADR-
 // 0087): a caller proving their identity here has no Colony API key

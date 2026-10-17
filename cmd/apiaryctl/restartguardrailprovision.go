@@ -14,35 +14,11 @@
 // credential and the file holding it is not this command's to
 // second-guess once something has put one there.
 //
-// It does NOT push the token to any other Comb over the network. The
-// restart-guardrail token is deliberately the one secret in this
-// codebase that never crosses an RPC in either direction (see
-// internal/manager/auth.go's own reserveRestartLeaseMethod doc
-// comment: two earlier designs that tried to make a credential like
-// this one RPC-mintable both turned out not to actually close off an
-// ordinary Admin API key's path to it). Building a new wire path that
-// carries this value - even once, even over TLS - is exactly the kind
-// of change that doc comment warns deserves real design scrutiny, not
-// a mechanical addition under this issue's own time box. So this
-// command prints the exact, safe way to finish the job by hand: copy
-// the file it just created, byte-for-byte, to every other Comb's own
-// /usr/local/etc/apiary/restart-guardrail-token over a channel the
-// operator already trusts (scp over the Colony's own management
-// network, or hand-typed from this terminal), then restart managerd on
-// every Comb - the token is read once at startup (see
-// cmd/managerd/main.go), so nothing short of a restart picks it up.
-//
-// Full join-channel provisioning (issue #98's requirement 2 - a joiner
-// receiving this token automatically, over the encrypted join RPC, the
-// same way #80's peer_api_key is meant to work) is the right place for
-// automatic cross-Comb distribution to eventually live, once that
-// channel exists for a secret of this kind. It does not exist yet
-// today for ANY secret in this codebase - #80's own peer_api_key is
-// also hand-configured, not pushed over any join RPC - so there is no
-// existing mechanism for this command to reuse, and inventing the
-// first one as a side effect of a provisioning command would be
-// backwards: the channel's own design should be reviewed on its own
-// issue, not introduced here as plumbing for a different command.
+// It does NOT push the token to already-running Combs. The join flow
+// delivers it to a newly approved Comb in an application-encrypted
+// envelope, and peer-credential-backfill uses the same certificate-bound
+// handoff for existing pinned members. This command remains local-only;
+// restart managerd here, then run the backfill command on each member.
 package main
 
 import (
@@ -72,21 +48,18 @@ writes nothing, if `+restartGuardrailProvisionPath+` already exists here -
 this is a live credential, and a file an operator or a previous install
 already put there is not this command's to second-guess.
 
-Generating the value is the easy half. The hard half - and the part
-this command does NOT do - is getting the byte-identical value onto
-every OTHER Comb: every Comb in a Colony must hold the exact same
-token, because a follower's forwarded confirmation presents it to the
-leader, which checks it against its own copy. This command prints the
-value's path (never the value itself) and the exact next step:
+Generating the value is the easy half. The backfill command delivers it
+to existing members in encrypted envelopes addressed to their pinned
+manager TLS certificates. This command prints the value's path (never
+the value itself) and the exact next step:
 
-  1. Copy `+restartGuardrailProvisionPath+` from this Comb to the identical
-     path on every other Comb in the Colony, byte-for-byte, over a
-     channel you already trust (scp over the management network is
-     the usual choice).
-  2. Restart managerd on every Comb, including this one. The token is
+  1. Restart managerd on this Comb. The token is
      read exactly once, at managerd startup (see cmd/managerd/main.go),
      so nothing short of a restart picks up a value written after the
      process was already running.
+  2. Run apiaryctl peer-credential-backfill on each existing Comb.
+     Followers without a token file retrieve it securely from the
+     current leader.
 
 Root only: the file this writes is root-owned, mode 0600.
 `)
@@ -118,7 +91,7 @@ func restartGuardrailProvision(path string, out, errOut *os.File) int {
 	if info, err := os.Stat(path); err == nil {
 		fmt.Fprintf(errOut, "apiaryctl restart-guardrail-provision: %s already exists (mode %04o) - refusing to touch it.\n", path, info.Mode().Perm())
 		fmt.Fprintln(errOut, "This is a live credential; a file already there is not this command's to second-guess.")
-		fmt.Fprintln(errOut, "If this Colony's other Combs do not already match it, copy THIS file to them instead of generating a new one.")
+		fmt.Fprintln(errOut, "If another Comb has a different token, do not replace this one. Reconcile the existing token values before running the backfill.")
 		return 1
 	} else if !os.IsNotExist(err) {
 		fmt.Fprintf(errOut, "apiaryctl restart-guardrail-provision: checking %s: %v\n", path, err)
@@ -136,9 +109,9 @@ func restartGuardrailProvision(path string, out, errOut *os.File) int {
 	}
 
 	fmt.Fprintf(out, "apiaryctl restart-guardrail-provision: generated a new restart-guardrail token at %s (mode 0600). The value is never printed.\n\n", path)
-	fmt.Fprintln(out, "This Comb is not done yet. Two steps remain, on every Comb in the Colony:")
-	fmt.Fprintf(out, "  1. Copy %s from THIS Comb, byte-for-byte, onto every other Comb at the identical path, over a channel you already trust (e.g. scp).\n", path)
-	fmt.Fprintln(out, "  2. Restart managerd on every Comb, including this one - the token is read once at startup and a running managerd will not notice a file that appears after it started.")
-	fmt.Fprintln(out, "\nNothing was sent over the network by this command. See `apiaryctl help` and issue #98 for why.")
+	fmt.Fprintln(out, "Next steps:")
+	fmt.Fprintln(out, "  1. Restart managerd on this Comb so the leader loads the new token.")
+	fmt.Fprintln(out, "  2. Run apiaryctl peer-credential-backfill on every existing member; followers retrieve the token in an envelope encrypted to their pinned TLS certificate.")
+	fmt.Fprintln(out, "\nNothing was sent over the network by this command.")
 	return 0
 }
