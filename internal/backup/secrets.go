@@ -906,6 +906,7 @@ type FrontendConfigRecord struct {
 	// paths only.
 	TLSCert            string `json:"tls_cert,omitempty"`
 	TLSKey             string `json:"tls_key,omitempty"`
+	APIProxyEnabled    bool   `json:"api_proxy_enabled,omitempty"`
 	PeerTLS            *bool  `json:"peer_tls,omitempty"`
 	PeerTLSCA          string `json:"peer_tls_ca,omitempty"`
 	PeerHostnameSuffix string `json:"peer_hostname_suffix,omitempty"`
@@ -923,6 +924,7 @@ func BuildFrontendConfigRecord(cfg frontendconfig.Config) FrontendConfigRecord {
 		ManagerTLSServerName: cfg.ManagerTLSServerName,
 		TLSCert:              cfg.TLSCert,
 		TLSKey:               cfg.TLSKey,
+		APIProxyEnabled:      cfg.APIProxyEnabled,
 		PeerTLS:              cfg.PeerTLS,
 		PeerTLSCA:            cfg.PeerTLSCA,
 		PeerHostnameSuffix:   cfg.PeerHostnameSuffix,

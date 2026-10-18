@@ -143,6 +143,10 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("reading %s: %w", frontendconfig.DefaultPath, err)
 	}
+	tlsEnabled, err := validateFrontendTransportConfig(cfg)
+	if err != nil {
+		return err
+	}
 
 	managerCreds, err := tlsdial.ManagerDialOption(cfg.ManagerTLS, cfg.ManagerTLSCA, cfg.ManagerTLSServerName)
 	if err != nil {
@@ -246,14 +250,12 @@ func run() error {
 	// never wrong for a moment: a cookie issued as non-Secure at
 	// construction time could later cross a plaintext channel even if
 	// serving is fixed to reject a mismatched cert/key pair afterward.
-	tlsEnabled := cfg.TLSCert != "" || cfg.TLSKey != ""
-	if tlsEnabled && (cfg.TLSCert == "" || cfg.TLSKey == "") {
-		return fmt.Errorf("both tls_cert and tls_key must be set together")
-	}
-
 	srv, err := frontend.NewServer(managerClient, auth, roleMap, peers, cfg.PeerHostnameSuffix, cfg.PeerManagerPort, frontend.UnixPasswordSetter{}, tlsEnabled)
 	if err != nil {
 		return fmt.Errorf("creating frontend server: %w", err)
+	}
+	if cfg.APIProxyEnabled {
+		srv.SetAPIProxy(frontend.NewAPIProxy())
 	}
 	srv.SetRoleMapStore(roleMapMgr)
 	// The host package page reads each Comb's inventory from that Comb's
@@ -292,6 +294,20 @@ func run() error {
 		return serveHTTP(ctx, httpSrv, func() error { return httpSrv.ListenAndServeTLS("", "") })
 	}
 	return serveHTTP(ctx, httpSrv, httpSrv.ListenAndServe)
+}
+
+func validateFrontendTransportConfig(cfg frontendconfig.Config) (bool, error) {
+	tlsEnabled := cfg.TLSCert != "" || cfg.TLSKey != ""
+	if tlsEnabled && (cfg.TLSCert == "" || cfg.TLSKey == "") {
+		return false, fmt.Errorf("both tls_cert and tls_key must be set together")
+	}
+	if cfg.APIProxyEnabled && !tlsEnabled {
+		return false, fmt.Errorf("api_proxy_enabled requires tls_cert and tls_key; bearer keys must not cross the network over plain HTTP")
+	}
+	if cfg.APIProxyEnabled && cfg.ManagerAPIKey == "" {
+		return false, fmt.Errorf("api_proxy_enabled requires manager_api_key so managerd API-key authentication is enabled")
+	}
+	return tlsEnabled, nil
 }
 
 // serveHTTP stops accepting requests when the process receives SIGTERM or

@@ -727,16 +727,20 @@ secure in general":
   no API key configured yet the header is decorative and the port is
   open to anyone who can reach it.
 - **Loopback is where its clients already are, or can cheaply be.**
-  Reach it remotely through an SSH local forward:
+  Keep `restshimd` bound to loopback. Remote clients can use an SSH local
+  forward:
 
   ```bash
   ssh -L 8081:127.0.0.1:8081 brood.lab3.home.arpa
   ```
 
   then `curl` against `127.0.0.1:8081` locally, with the real API key
-  attached. Only consider a LAN bind for `8081` once `managerd` API
-  keys are genuinely configured and the keys are real credentials -
-  not placeholder text.
+  attached. Alternatively, enable frontend's HTTPS `/api/v1/` proxy by
+  setting `api_proxy_enabled` in `frontend.json`; callers use the same
+  bearer key at `https://<comb>:8080/api/v1/...`, and frontend strips the
+  `/api` prefix before forwarding to loopback restshimd (ADR-0154). The
+  proxy requires frontend TLS and configured managerd API-key
+  authentication. Do not bind restshimd to a LAN address.
 
 Contrast `frontend` on `8080` immediately above: that one is meant to be
 LAN-exposed, because it is the browser UI a human actually uses. Same
