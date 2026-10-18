@@ -352,6 +352,15 @@ func requiredRoleFor(fullMethod string) Role {
 	return RoleAdmin
 }
 
+// HasExplicitRoleRequirement reports whether fullMethod has an entry in
+// the explicit role table. Callers that expose a subset of RPCs can use it
+// to ensure those RPCs have reviewed authorization instead of inheriting
+// the fail-closed Admin default accidentally.
+func HasExplicitRoleRequirement(fullMethod string) bool {
+	_, ok := requiredRole[fullMethod]
+	return ok
+}
+
 // apiKeyValidator is the subset of *RaftClient the auth interceptor
 // needs, defined locally so its core logic can be unit-tested with a
 // fake, the same reasoning isoManager/VNCLookup/VLANStatus already

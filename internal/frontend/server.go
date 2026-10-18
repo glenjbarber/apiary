@@ -750,6 +750,11 @@ type Server struct {
 	// had no Secure flag at all even when TLS was configured, so it
 	// could be replayed over a plaintext connection to the same host.
 	tlsEnabled bool
+
+	// apiProxy is installed only when api_proxy_enabled is true. The
+	// handler accepts explicit bearer credentials only and forwards the
+	// allow-listed REST routes to loopback restshimd.
+	apiProxy http.Handler
 }
 
 // pageHeaderData is the argument type the "page_header" template (see
@@ -947,15 +952,31 @@ func (s *Server) SetColonyUpdateController(controller colonyupdate.Controller) {
 	s.colonyUpdate = controller
 }
 
-// ServeHTTP gates every request behind a valid session when login is
-// enabled, except /login itself and /static/ assets (the login page
-// needs its own CSS, and obviously can't require a session to reach).
+// ServeHTTP gates UI requests behind a valid session when login is
+// enabled, except /login itself and /static/ assets. The /api/ path has
+// its own bearer-key boundary and is handled before the UI session gate.
 // An htmx request that hits this gate gets HX-Redirect rather than a
 // bare 302, matching the pattern already used for the create-VM form's
 // own success redirect - a plain Location header on an XHR/fetch
 // response doesn't reliably drive the *browser's* navigation the way a
 // real page load does.
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	// The REST API has its own bearer-key authentication boundary. In
+	// particular, a frontend session cookie is never sufficient here:
+	// accepting it would make cross-site writes possible without CSRF
+	// protection. Strip the cookie in the proxy before forwarding too.
+	if strings.HasPrefix(r.URL.Path, "/api/") {
+		if s.apiProxy == nil {
+			http.NotFound(w, r)
+			return
+		}
+		if !hasBearerAuthorization(r.Header.Get("Authorization")) {
+			http.Error(w, "a bearer authorization header is required", http.StatusUnauthorized)
+			return
+		}
+		s.apiProxy.ServeHTTP(w, r)
+		return
+	}
 	if s.auth != nil && r.URL.Path != "/login" && !strings.HasPrefix(r.URL.Path, "/static/") {
 		if _, ok := s.currentSession(r); !ok {
 			s.redirectToLogin(w, r)
@@ -963,6 +984,12 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	s.mux.ServeHTTP(w, r)
+}
+
+// SetAPIProxy installs the optional restshimd proxy. Passing nil disables
+// the /api/ path; cmd/frontend does this only when api_proxy_enabled is set.
+func (s *Server) SetAPIProxy(proxy http.Handler) {
+	s.apiProxy = proxy
 }
 
 // currentSession returns the requesting session's identity, if any.

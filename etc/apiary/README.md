@@ -327,6 +327,14 @@ current, safe flow uses `await_join` — see `docs/add-node-to-colony.md`.
   against, if different from `manager_addr`'s own host.
 - `tls_cert` / `tls_key` — serve the web UI over HTTPS, using Step 6's
   `make setup`/`setup-tls` output by default.
+- `api_proxy_enabled` — optionally expose the allow-listed restshimd REST
+  routes through frontend at `/api/v1/`. When enabled, frontend forwards
+  requests to loopback restshimd at `127.0.0.1:8081`, requires an explicit
+  bearer header, strips browser cookies, and refuses to start unless both
+  frontend TLS files and `manager_api_key` are configured. This ensures
+  managerd API-key authentication is enabled. The caller's bearer key is
+  forwarded to managerd for its per-key role check. The setting defaults
+  to `false`.
 - `peer_tls` — tri-state, same convention as managerd.json's own
   `peer_tls` above: dial other cluster nodes' managerd over TLS when
   fetching their host stats for the cluster overview page. Omit the key
@@ -360,17 +368,18 @@ current, safe flow uses `await_join` — see `docs/add-node-to-colony.md`.
   `0.0.0.0`, and that matches `internal/restshimdconfig`'s own built-in
   default. Nothing inside the Colony ever dials restshimd — the web UI has
   its own conversion path, and raftd, managerd and `apiaryinstall` never
-  call it — so its only intended clients are external tooling: curl, CI, a
-  future provider. Remote callers use an SSH local forward:
+  call it — so its clients are external tooling: curl, CI, a future
+  provider. Remote callers can use an SSH local forward:
 
   ```bash
   ssh -L 8081:127.0.0.1:8081 <comb>
   ```
 
-  Exposing this on the LAN is only worth considering once real managerd
-  API keys exist; before then the `Authorization` header is decorative and
-  the port is an unauthenticated control surface. The port is fixed
-  (ADR-0108).
+  Keep this listener loopback-only. Remote clients can alternatively use
+  frontend's optional HTTPS `/api/v1/` proxy when `api_proxy_enabled` is
+  true in `frontend.json` (ADR-0154), with a caller bearer key. This does
+  not expose port 8081. The proxy requires frontend TLS and managerd
+  API-key authentication. The port is fixed (ADR-0108).
 - `manager_tls` — dial managerd over TLS instead of plaintext. managerd
   always serves TLS by default now (see `managerd.json.sample`'s own
   `tls_cert`/`tls_key`); leave this true unless managerd was specifically
