@@ -138,15 +138,15 @@ each design decision, in order.
   Cross-node replication was originally blocked by an upstream FreeBSD
   `hastd` bug; we diagnosed it, found it was
   [already reported](https://bugs.freebsd.org/bugzilla/show_bug.cgi?id=292322)
-  with a fix ([D57511](https://reviews.freebsd.org/D57511)) awaiting
-  review, and independently confirmed the fix works. See
+  with a fix ([D57511](https://reviews.freebsd.org/D57511)), which is now
+  in upstream FreeBSD, and independently confirmed the fix works. See
   [ADR-0008](docs/adr/0008-hast-config-and-lifecycle.md) for the full
   trail. Every project machine ran the patched `hastd` at the time
   (the three FreeBSD VMs among them were later decommissioned - see
   "Not yet implemented" below), and real VM disk replication is wired
   in for real — see below. The upstream fixes this project needed are
-  in FreeBSD 15.1-RELEASE, so a vanilla 15.1-RELEASE-or-later install
-  needs no locally built or patched `hastd`/`hastctl` - see
+  in every supported FreeBSD release, so a stock install needs no locally
+  built or patched `hastd`/`hastctl` - see
   [ADR-0152](docs/adr/0152-hastd-fixes-in-freebsd-15-1-release.md).
 - **Real HAST-backed VM disk replication** — a VM can name a
   `replica_node_id` (caller-set, like `node_id`) and its disk is then
@@ -757,10 +757,9 @@ each design decision, in order.
   remaining machines, `apiarium`/`apiverse` (both patched - see above;
   the three FreeBSD VMs this was originally verified on were later
   decommissioned when their host hypervisor was retired), but the
-  underlying fix still isn't merged upstream, so it isn't something a
-  stock FreeBSD install elsewhere could rely on yet. Automatic failover
-  of a replicated VM also isn't implemented - this is data redundancy,
-  not HA. A replica's dataset also isn't cleaned up once its VM's (or
+  underlying fix is now upstream and in every supported FreeBSD release, so
+  a stock install needs no local patch. Automatic failover of a
+  replicated VM also isn't implemented - this is data redundancy, not HA. A replica's dataset also isn't cleaned up once its VM's (or
   jail's)
   record is fully purged (a deliberate consequence of never inferring
   teardown from an absent record - see ADR-0026/ADR-0027)
@@ -812,13 +811,11 @@ each design decision, in order.
   since ADR-0022 already documents a real near-miss from exactly that
   operation over SSH. PAM/account setup and ZFS pool creation are
   permanently report-only — this tool tells you they're missing, it
-  never attempts them. HAST is report-only too: on FreeBSD
-  15.1-RELEASE or later it just confirms `hastd_enable=YES`, since the
-  release itself carries the upstream fixes
-  ([ADR-0152](docs/adr/0152-hastd-fixes-in-freebsd-15-1-release.md));
-  on an earlier release it also flags that the `hast_proto_recv_hdr`
-  source patch for FreeBSD bug 298085 is still needed before relying
-  on hastd, and never applies it. See
+  never attempts them. HAST is report-only too: on FreeBSD 15.1-RELEASE or
+  later, Apiary's supported floor, it just confirms `hastd_enable=YES`,
+  since that release carries the upstream fixes
+  ([ADR-0152](docs/adr/0152-hastd-fixes-in-freebsd-15-1-release.md)); on an
+  earlier release it reports manual with an upgrade hint. See
   [ADR-0082](docs/adr/0082-apiary-installer-preflight.md) for the design
   and the focused runbooks for [creating a standalone
   node](docs/create-node.md) or [adding a node to an existing

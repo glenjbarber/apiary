@@ -13,6 +13,11 @@ cleaner fix for the same root cause) has also been independently built
 and confirmed working on the current production pair — see the
 2026-09-14 update below. Same "manual source build" caveat applies.
 
+**Update 2026-10-19:** the upstream fix is now in FreeBSD and in every
+supported release, so the "not yet merged/released upstream" and manual
+source build caveats above no longer apply. See
+[ADR-0152](0152-hastd-fixes-in-freebsd-15-1-release.md).
+
 ## Context
 
 `internal/hast` is the third FreeBSD-specific package. Unlike

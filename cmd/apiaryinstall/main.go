@@ -44,7 +44,7 @@ func run() error {
 	vlanUplink := flag.String("vlan-uplink", "", "this node's real uplink NIC (e.g. em0) - required for the vlan-uplink and bhyve-bridge checks to run at all")
 	bhyveBridge := flag.String("bhyve-bridge", "", "bridge interface name bhyve VM taps should attach to (e.g. bridge0) - requires -vlan-uplink too")
 	enableNAT := flag.Bool("enable-nat", false, "also check gateway_enable/IP forwarding, for self-hosted outbound NAT (ADR-0048)")
-	enableHAST := flag.Bool("enable-hast", false, "also check hastd_enable, for HAST-replicated disks (ADR-0026) - report-only; FreeBSD 15.1-RELEASE or later needs no patch (ADR-0152), earlier releases need the hast_proto_recv_hdr source patch for FreeBSD bug 298085, which Apiary never applies automatically")
+	enableHAST := flag.Bool("enable-hast", false, "also check hastd_enable, for HAST-replicated disks (ADR-0026) - report-only; FreeBSD 15.1-RELEASE, Apiary's supported floor, carries the upstream hastd/hastctl fixes (ADR-0152), so no patch is needed")
 	pamService := flag.String("pam-service", "", "PAM service name cmd/frontend will use (ADR-0030) - report-only, Apiary never generates PAM/account configuration itself")
 	allowUplinkBridging := flag.String("allow-uplink-bridging", "", "report-only: check this node's -bhyve-bridge/-vlan-uplink are ready for managerd's own allow_uplink_bridging config setting (ADR-0101) - pass the same confirmation phrase managerd expects, or anything non-empty; Apiary never sets managerd's config itself")
 	jsonOutput := flag.Bool("json", false, "emit results as JSON instead of a table")

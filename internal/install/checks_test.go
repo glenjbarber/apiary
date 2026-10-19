@@ -240,11 +240,10 @@ func TestBhyveFirmwarePkgCheck(t *testing.T) {
 	})
 }
 
-// TestFreebsdReleaseAtLeast151 exercises the ADR-0152 baseline
-// comparison directly, including the raw forms `uname -r` actually
-// emits (a trailing `-RELEASE`/`-STABLE`/`-pN`) and unparseable input,
-// which must fail closed (never silently assume the upstream fixes are
-// present).
+// TestFreebsdReleaseAtLeast151 exercises the ADR-0152 floor comparison
+// directly, including the raw forms `uname -r` actually emits (a trailing
+// `-RELEASE`/`-STABLE`/`-pN`) and unparseable input, which must fail
+// closed (never silently assume the upstream fixes are present).
 func TestFreebsdReleaseAtLeast151(t *testing.T) {
 	cases := []struct {
 		release string
@@ -300,13 +299,23 @@ func TestHastdEnableCheck(t *testing.T) {
 	t.Run("manual with an upgrade hint on a release before 15.1", func(t *testing.T) {
 		r := newFakeRunner()
 		r.on("sysrc -n hastd_enable", fakeResponse{stdout: "YES"})
-		r.on("uname -r", fakeResponse{stdout: "14.2-RELEASE"})
+		r.on("uname -r", fakeResponse{stdout: "14.2-RELEASE-p3"})
 		res := hastdEnableCheck.Probe(ctx, r, Options{EnableHAST: true})
 		if res.Status != StatusManual {
 			t.Fatalf("status = %v, want manual (still report-only)", res.Status)
 		}
-		if !strings.Contains(res.FixHint, "15.1") || !strings.Contains(res.FixHint, "298085") {
-			t.Fatalf("FixHint = %q, want it to mention upgrading to 15.1 and the bug 298085 patch", res.FixHint)
+		if !strings.Contains(res.FixHint, "15.1") {
+			t.Fatalf("FixHint = %q, want it to mention upgrading to 15.1", res.FixHint)
+		}
+	})
+
+	t.Run("manual when the release string is unparseable", func(t *testing.T) {
+		r := newFakeRunner()
+		r.on("sysrc -n hastd_enable", fakeResponse{stdout: "YES"})
+		r.on("uname -r", fakeResponse{stdout: "not-a-release"})
+		res := hastdEnableCheck.Probe(ctx, r, Options{EnableHAST: true})
+		if res.Status != StatusManual {
+			t.Fatalf("status = %v, want manual (fails closed)", res.Status)
 		}
 	})
 
