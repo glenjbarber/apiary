@@ -30,9 +30,10 @@ type Config struct {
 	// TLSCert, TLSKey, and TLSCA configure mutual TLS on the raft
 	// transport itself (ADR-0078) - this node's own certificate/key and
 	// the CA used to verify every peer. All three must be set together,
-	// or all left empty for today's plain-TCP behavior (see
-	// withDefaults). Opt-in, off by default, matching every other TLS
-	// capability in this codebase.
+	// or all left empty for plain-TCP (see withDefaults). This package
+	// does not decide the policy: cmd/raftd requires all three unless
+	// raft_tls_enabled is explicitly false (issue #97), and only an
+	// empty set reaches the plaintext transport built here.
 	TLSCert string
 	TLSKey  string
 	TLSCA   string
