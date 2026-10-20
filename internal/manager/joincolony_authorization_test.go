@@ -577,6 +577,51 @@ func TestJoinApproval_TwoKeysOnTwoCombsAreRequired(t *testing.T) {
 		}
 	})
 
+	// issue #74: the refused repeat must not strand the request. The first
+	// authorization stays in place, the second slot stays empty, and a
+	// correct second act from a different key on a different Comb still
+	// completes the join.
+	t.Run("a repeated key is refused and the request still completes with a distinct key", func(t *testing.T) {
+		socket := newRaftdUDSSocket(t)
+		leader := newAuthzComb(t, socket, "comb-leader")
+		leader.openWindow(t)
+		keyOne, idOne := leader.key(t, "", "admin-1")
+		leader.seedRequestWithRealJoiner(t, "jreq-1", "comb-3", authzTestFingerprint)
+		entryID := leader.authorize(t, "comb-3", authzTestFingerprint)
+
+		other := newAuthzComb(t, socket, "comb-other")
+		copyStoreFile(t, leader.storePath, other.storePath)
+		keyTwo, idTwo := other.key(t, keyOne, "admin-2")
+
+		if resp := leader.approve(t, "jreq-1", keyOne); !resp.GetAwaitingSecondAuthorization() {
+			t.Fatalf("first approval = %+v, want awaiting a second authorization", resp)
+		}
+		if resp := leader.approve(t, "jreq-1", keyOne); resp.GetError() == "" || !strings.Contains(resp.GetError(), "SAME API key") {
+			t.Fatalf("repeated approval = (error %q), want a refusal naming the SAME API key", resp.GetError())
+		}
+		if isRaftMember(t, leader.srv, "comb-3") {
+			t.Fatal("comb-3 became a voter from a repeated single key")
+		}
+
+		final := other.approve(t, "jreq-1", keyTwo)
+		if final.GetError() != "" {
+			t.Fatalf("the distinct second approval was refused after a repeated first one: %s", final.GetError())
+		}
+		if !isRaftMember(t, other.srv, "comb-3") {
+			t.Fatal("comb-3 is not a voter after a distinct second approval")
+		}
+		req := final.GetRequest()
+		if req.GetApproval_1().GetKeyId() != idOne || req.GetApproval_1().GetNodeId() != "comb-leader" {
+			t.Errorf("approval_1 = (%q, %q), want the original (%q, comb-leader) untouched by the refused repeat", req.GetApproval_1().GetKeyId(), req.GetApproval_1().GetNodeId(), idOne)
+		}
+		if req.GetApproval_2().GetKeyId() != idTwo {
+			t.Errorf("approval_2 key = %q, want %q", req.GetApproval_2().GetKeyId(), idTwo)
+		}
+		if req.GetAuthorizationId() != entryID {
+			t.Errorf("authorization_id = %q, want %q", req.GetAuthorizationId(), entryID)
+		}
+	})
+
 	t.Run("two keys on one Comb are refused and names the Comb", func(t *testing.T) {
 		socket := newRaftdUDSSocket(t)
 		leader := newAuthzComb(t, socket, "comb-leader")
