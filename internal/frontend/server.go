@@ -545,6 +545,19 @@ type pageData struct {
 	// not the unrelated Public exposure panel.
 	VMFirewallFormError string
 
+	// VMConfigFormError and VMConfigNotice carry the Edit configuration
+	// panel's outcome (issue #111): an error that keeps the operator's
+	// rejected values visible, or a confirmation saying the change is
+	// restart-required. Rendered next to that panel only.
+	VMConfigFormError string
+	VMConfigNotice    string
+
+	// VMConfigDraftVCPUs/VMConfigDraftMemoryMB hold the operator's own
+	// rejected input, so a refused edit re-renders with what was typed
+	// rather than silently reverting to the stored values.
+	VMConfigDraftVCPUs    string
+	VMConfigDraftMemoryMB string
+
 	// VMSnapshots/VMSnapshotFormError back the VM detail page's own
 	// Snapshots panel (ADR-0090) - the current list of this VM's ZFS
 	// snapshot names, and a failed create/restore/delete form's own
@@ -1175,6 +1188,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /vms/{id}/lifecycle", s.requireRole(manager.RoleOperator, s.handleSetVMDesiredState))
 	s.mux.HandleFunc("POST /vms/{id}/cloudflare-exposure", s.requireRole(manager.RoleOperator, s.handleSetVMCloudflareExposure))
 	s.mux.HandleFunc("POST /vms/{id}/firewall-rules", s.requireRole(manager.RoleOperator, s.handleSetVMFirewallRules))
+	s.mux.HandleFunc("POST /vms/{id}/config", s.requireRole(manager.RoleOperator, s.handleSetVMConfig))
 	// Snapshot create/restore/delete (ADR-0090) all use plain POST forms
 	// with a full VM-detail-page reload afterward, matching this page's
 	// own existing Cloudflare-exposure/firewall-rules forms exactly -
@@ -1658,6 +1672,26 @@ func (s *Server) handleSetVMDesiredState(w http.ResponseWriter, r *http.Request)
 // so a failed form submission still shows the rest of the page's own
 // current state, not just a bare error.
 func (s *Server) renderVMPage(w http.ResponseWriter, r *http.Request, id, cloudflareErr, firewallErr, snapshotErr string) {
+	s.renderVMPageWith(w, r, id, vmPageForms{Cloudflare: cloudflareErr, Firewall: firewallErr, Snapshot: snapshotErr})
+}
+
+// vmPageForms is the set of per-form outcomes renderVMPageWith can show
+// on the VM detail page. Each field belongs to exactly one panel.
+type vmPageForms struct {
+	Cloudflare   string
+	Firewall     string
+	Snapshot     string
+	Config       string
+	ConfigNotice string
+
+	DraftVCPUs    string
+	DraftMemoryMB string
+}
+
+// renderVMPageWith is renderVMPage with the config panel's outcome too.
+// Kept separate so the existing 23 call sites keep their signature.
+func (s *Server) renderVMPageWith(w http.ResponseWriter, r *http.Request, id string, forms vmPageForms) {
+	cloudflareErr, firewallErr, snapshotErr := forms.Cloudflare, forms.Firewall, forms.Snapshot
 	resp, err := s.client.GetVM(r.Context(), &rpcpb.GetVMRequest{Id: id})
 	if err != nil {
 		s.render(w, "vm_page", s.withAuthFields(r, pageData{Error: err.Error(), ActivePage: "vms"}))
@@ -1702,6 +1736,8 @@ func (s *Server) renderVMPage(w http.ResponseWriter, r *http.Request, id, cloudf
 
 	s.render(w, "vm_page", s.withAuthFields(r, pageData{
 		VM: vm, VMCloudflareFormError: cloudflareErr, VMFirewallFormError: firewallErr,
+		VMConfigFormError: forms.Config, VMConfigNotice: forms.ConfigNotice,
+		VMConfigDraftVCPUs: forms.DraftVCPUs, VMConfigDraftMemoryMB: forms.DraftMemoryMB,
 		CloudflareConfigured: cloudflareConfigured, VMSnapshots: snapshots, VMSnapshotFormError: snapshotErr,
 		ReplicaFreshness: s.replicaFreshness(r.Context(), "vm", vm.ID, vm.NodeID, vm.ReplicaNodeID),
 		ActivePage:       "vms",
