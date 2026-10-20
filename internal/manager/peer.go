@@ -1368,6 +1368,15 @@ func (p *PeerReporter) SetVMFirewallRules(ctx context.Context, addr string, req 
 	return client.SetVMFirewallRules(ctx, req)
 }
 
+func (p *PeerReporter) SetVMConfig(ctx context.Context, addr string, req *rpcpb.SetVMConfigRequest) (*rpcpb.SetVMConfigResponse, error) {
+	conn, client, err := p.dial(addr)
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close()
+	return client.SetVMConfig(ctx, req)
+}
+
 func (p *PeerReporter) SetVMCloudflareExposure(ctx context.Context, addr string, req *rpcpb.SetVMCloudflareExposureRequest) (*rpcpb.SetVMCloudflareExposureResponse, error) {
 	conn, client, err := p.dial(addr)
 	if err != nil {
