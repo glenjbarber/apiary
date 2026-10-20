@@ -1120,7 +1120,7 @@ func TestTransportEncryptionCheckReportsPlaintextRaftAndPeer(t *testing.T) {
 	raftdConfigPath, managerdConfigPath = raftPath, managerPath
 	defer func() { raftdConfigPath, managerdConfigPath = oldRaft, oldManager }()
 
-	if err := os.WriteFile(raftPath, []byte(`{"node_id": "node1"}`), 0o600); err != nil {
+	if err := os.WriteFile(raftPath, []byte(`{"node_id": "node1", "raft_tls_enabled": false}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(managerPath, []byte(`{"peer_tls": false}`), 0o600); err != nil {
@@ -1129,9 +1129,9 @@ func TestTransportEncryptionCheckReportsPlaintextRaftAndPeer(t *testing.T) {
 
 	res := transportEncryptionCheck.Probe(ctx, newFakeRunner(), Options{})
 	if res.Status != StatusInformational {
-		t.Fatalf("status = %v, want informational (report-only, not a failure): %s", res.Status, res.Detail)
+		t.Fatalf("status = %v, want informational (explicit opt-out is report-only, not a failure): %s", res.Status, res.Detail)
 	}
-	for _, want := range []string{"raft_tls_cert", raftPath, "peer_tls", managerPath, "ADR-0078"} {
+	for _, want := range []string{"raft_tls_enabled", raftPath, "peer_tls", managerPath, "ADR-0078"} {
 		if !strings.Contains(res.Detail+res.FixHint, want) {
 			t.Errorf("Detail/FixHint should mention %q, got detail=%q fixhint=%q", want, res.Detail, res.FixHint)
 		}
@@ -1152,7 +1152,7 @@ func TestTransportEncryptionCheckAcceptsEncryptedConfig(t *testing.T) {
 	raftdConfigPath, managerdConfigPath = raftPath, managerPath
 	defer func() { raftdConfigPath, managerdConfigPath = oldRaft, oldManager }()
 
-	if err := os.WriteFile(raftPath, []byte(`{"raft_tls_cert": "/etc/apiary/raft.crt", "raft_tls_key": "/etc/apiary/raft.key"}`), 0o600); err != nil {
+	if err := os.WriteFile(raftPath, []byte(`{"raft_tls_cert": "/etc/apiary/raft.crt", "raft_tls_key": "/etc/apiary/raft.key", "raft_tls_ca": "/etc/apiary/ca.pem"}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(managerPath, []byte(`{"peer_tls": true}`), 0o600); err != nil {
@@ -1161,7 +1161,58 @@ func TestTransportEncryptionCheckAcceptsEncryptedConfig(t *testing.T) {
 
 	res := transportEncryptionCheck.Probe(ctx, newFakeRunner(), Options{})
 	if res.Status != StatusOK {
-		t.Fatalf("status = %v, want ok once raft_tls_cert is set and peer_tls is true (detail: %s)", res.Status, res.Detail)
+		t.Fatalf("status = %v, want ok once the trio is set and peer_tls is true (detail: %s)", res.Status, res.Detail)
+	}
+}
+
+// TestTransportEncryptionCheckDefaultsAreEncrypted confirms that an
+// absent raft_tls_enabled and an absent peer_tls both mean encrypted:
+// with the trio present and no switches at all, the check is quiet.
+func TestTransportEncryptionCheckDefaultsAreEncrypted(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	raftPath := filepath.Join(dir, "raftd.json")
+	managerPath := filepath.Join(dir, "managerd.json")
+	oldRaft, oldManager := raftdConfigPath, managerdConfigPath
+	raftdConfigPath, managerdConfigPath = raftPath, managerPath
+	defer func() { raftdConfigPath, managerdConfigPath = oldRaft, oldManager }()
+
+	if err := os.WriteFile(raftPath, []byte(`{"raft_tls_cert": "/c", "raft_tls_key": "/k", "raft_tls_ca": "/ca"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(managerPath, []byte(`{}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	res := transportEncryptionCheck.Probe(ctx, newFakeRunner(), Options{})
+	if res.Status != StatusOK {
+		t.Fatalf("status = %v, want ok: absent switches default to encrypted (detail: %s)", res.Status, res.Detail)
+	}
+}
+
+// TestTransportEncryptionCheckFlagsRaftdThatWillNotStart confirms that
+// raft TLS on by default with no trio is reported as a misconfiguration:
+// raftd refuses to start, so the operator must fix it or opt out.
+func TestTransportEncryptionCheckFlagsRaftdThatWillNotStart(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	raftPath := filepath.Join(dir, "raftd.json")
+	oldRaft, oldManager := raftdConfigPath, managerdConfigPath
+	raftdConfigPath, managerdConfigPath = raftPath, filepath.Join(dir, "managerd.json")
+	defer func() { raftdConfigPath, managerdConfigPath = oldRaft, oldManager }()
+
+	if err := os.WriteFile(raftPath, []byte(`{"node_id": "node1", "raft_tls_cert": "/c"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	res := transportEncryptionCheck.Probe(ctx, newFakeRunner(), Options{})
+	if res.Status != StatusMisconfigured {
+		t.Fatalf("status = %v, want misconfigured for a partial trio with TLS on: %s", res.Status, res.Detail)
+	}
+	for _, want := range []string{"will refuse to start", "raft_tls_enabled", raftPath} {
+		if !strings.Contains(res.Detail+res.FixHint, want) {
+			t.Errorf("Detail/FixHint should mention %q, got detail=%q fixhint=%q", want, res.Detail, res.FixHint)
+		}
 	}
 }
 

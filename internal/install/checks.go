@@ -292,32 +292,36 @@ var managerdNodeIDCheck = Check{
 // managerdNodeIDPeek's own narrow-decode convention above, so a
 // placeholder or absent sibling key can never trip this check.
 type raftdTLSPeek struct {
-	RaftTLSCert string `json:"raft_tls_cert"`
+	RaftTLSEnabled *bool  `json:"raft_tls_enabled"`
+	RaftTLSCert    string `json:"raft_tls_cert"`
+	RaftTLSKey     string `json:"raft_tls_key"`
+	RaftTLSCA      string `json:"raft_tls_ca"`
 }
 
 type managerdPeerTLSPeek struct {
 	PeerTLS *bool `json:"peer_tls"`
 }
 
-// transportEncryptionCheck is issue #97's preflight slice: it reports,
-// but never fails, when this host's raftd and/or managerd are
-// configured to run their inter-host transports in plaintext - the
-// project-wide default (ADR-0078 for raft_tls_cert/_key/_ca;
-// etc/apiary/managerd.json.sample ships peer_tls: false). This is
-// deliberately StatusInformational, not StatusMisconfigured: every
-// Colony installed before this check existed is already in this
-// state, by design, and turning raft TLS on by default or forcing
-// peer_tls to true is its own migration decision this task does not
-// make (see the PR this landed in). The point here is only to make
-// the risk visible at install/upgrade time rather than buried in a
-// `raft-tls=false` log field or a config file nobody re-reads.
+// transportEncryptionCheck is issue #97's preflight slice. Inter-host
+// transports are encrypted by default, so the check reads two things:
+//
+//   - raftd.json: with raft_tls_enabled absent or true, raftd needs the
+//     raft_tls_cert/_key/_ca trio and refuses to start without it. That
+//     is a misconfiguration to fix, reported as StatusMisconfigured.
+//   - managerd.json: peer_tls absent or true means peer calls are
+//     encrypted. Only an explicit peer_tls: false is plaintext.
+//
+// Plaintext chosen explicitly (raft_tls_enabled: false, or peer_tls:
+// false) is reported as StatusInformational and never fails: the
+// operator opted out on purpose, and the point is to keep that visible.
+// The check never auto-enables anything, so Apply stays nil.
 var transportEncryptionCheck = Check{
 	ID:          "transport-encryption",
 	Description: "raftd and managerd inter-host transports are encrypted (issue #97)",
 	Risk:        RiskManualOnly,
 	Applicable:  always,
 	Probe: func(ctx context.Context, r Runner, opt Options) Result {
-		var plaintext []string
+		var plaintext, refuse []string
 
 		raftBody, err := os.ReadFile(raftdConfigPath)
 		switch {
@@ -333,9 +337,14 @@ var transportEncryptionCheck = Check{
 				return Result{ID: "transport-encryption", Status: StatusUnknown, Detail: jerr.Error(),
 					FixHint: "fix the JSON in " + raftdConfigPath + " - raftd loads the same file and will not start on it either"}
 			}
-			if peek.RaftTLSCert == "" {
+			switch {
+			case peek.RaftTLSEnabled != nil && !*peek.RaftTLSEnabled:
 				plaintext = append(plaintext, fmt.Sprintf(
-					"raftd's Raft transport (%s: raft_tls_cert/_key/_ca unset) - cluster state, forwarded credentials and the data they describe travel in cleartext between Combs; see ADR-0078",
+					"raftd's Raft transport (%s: raft_tls_enabled is false) - cluster state, forwarded credentials and the data they describe travel in cleartext between Combs; see ADR-0078",
+					raftdConfigPath))
+			case peek.RaftTLSCert == "" || peek.RaftTLSKey == "" || peek.RaftTLSCA == "":
+				refuse = append(refuse, fmt.Sprintf(
+					"raftd will refuse to start (%s: raft_tls_enabled is on by default, and raft_tls_cert, raft_tls_key and raft_tls_ca are not all set)",
 					raftdConfigPath))
 			}
 		}
@@ -352,20 +361,25 @@ var transportEncryptionCheck = Check{
 				return Result{ID: "transport-encryption", Status: StatusUnknown, Detail: jerr.Error(),
 					FixHint: "fix the JSON in " + managerdConfigPath + " - managerd loads the same file and will not start on it either"}
 			}
-			if peek.PeerTLS == nil || !*peek.PeerTLS {
+			if peek.PeerTLS != nil && !*peek.PeerTLS {
 				plaintext = append(plaintext, fmt.Sprintf(
-					"managerd's peer-forwarding transport (%s: peer_tls unset or false) - a peer managerd call runs over plaintext; managerd now refuses to forward a configured peer API key over it rather than send it in the clear, but unauthenticated forwarded calls still travel unencrypted",
+					"managerd's peer-forwarding transport (%s: peer_tls is false) - peer managerd calls run over plaintext; managerd refuses to forward any call carrying an API key or restart-guardrail token over it, but other forwarded calls travel unencrypted",
 					managerdConfigPath))
 			}
 		}
 
-		if len(plaintext) == 0 {
-			return Result{ID: "transport-encryption", Status: StatusOK,
-				Detail: "raft_tls_cert is set and peer_tls is true: both inter-host transports this host configures are encrypted"}
+		if len(refuse) > 0 {
+			return Result{ID: "transport-encryption", Status: StatusMisconfigured,
+				Detail:  strings.Join(refuse, "; "),
+				FixHint: "set raft_tls_cert, raft_tls_key and raft_tls_ca in raftd.json, or set raft_tls_enabled to false to opt out explicitly - see ADR-0078 and issue #97"}
 		}
-		return Result{ID: "transport-encryption", Status: StatusInformational,
-			Detail:  "this host is running at least one inter-host transport in plaintext: " + strings.Join(plaintext, "; "),
-			FixHint: "set raft_tls_cert/raft_tls_key/raft_tls_ca in raftd.json and peer_tls: true in managerd.json once every Comb in this Colony can serve and verify real certificates - see ADR-0078 and ADR-0093/ADR-0147, and issue #97"}
+		if len(plaintext) > 0 {
+			return Result{ID: "transport-encryption", Status: StatusInformational,
+				Detail:  "this host has an inter-host transport turned off explicitly: " + strings.Join(plaintext, "; "),
+				FixHint: "remove the explicit false to encrypt that transport once every Comb in this Colony can serve and verify certificates - see ADR-0078, ADR-0093/ADR-0147, and issue #97"}
+		}
+		return Result{ID: "transport-encryption", Status: StatusOK,
+			Detail: "raft TLS is on and peer TLS is on: both inter-host transports this host configures are encrypted"}
 	},
 }
 
