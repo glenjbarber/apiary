@@ -481,10 +481,12 @@ func TestJoinAuthorizationStoreIs0600AfterInstallAddAndConsume(t *testing.T) {
 // ------------------------------------------------------------------------
 
 func TestJoinApproval_ASpentEntryIsRefusedOnTheReplicatedRecordNotTheFile(t *testing.T) {
-	// The leadership-change case, made concrete. The local file on this
-	// Comb still lists the entry as available - and is deliberately left
-	// that way, because a real stale copy on a new leader looks exactly
-	// like this. What refuses the second spend is the replicated record.
+	// The leadership-change case, made concrete. A real stale copy of the
+	// store on a new leader still lists the entry as available. The
+	// leader's own approval now prunes its copy (issue #85), so the stale
+	// copy is put back by hand after the join completes. What refuses the
+	// second spend is then the replicated record, which is the point of
+	// this test: the file is not the authority.
 	socket := newRaftdUDSSocket(t)
 	leader := newAuthzComb(t, socket, "comb-leader")
 	leader.openWindow(t)
@@ -495,6 +497,8 @@ func TestJoinApproval_ASpentEntryIsRefusedOnTheReplicatedRecordNotTheFile(t *tes
 	other := newAuthzComb(t, socket, "comb-other")
 	copyStoreFile(t, leader.storePath, other.storePath)
 	keyTwo, _ := other.key(t, keyOne, "admin-2")
+	staleCopy := filepath.Join(t.TempDir(), "stale-join-authorizations.json")
+	copyStoreFile(t, leader.storePath, staleCopy)
 
 	if resp := leader.approve(t, "jreq-1", keyOne); !resp.GetAwaitingSecondAuthorization() {
 		t.Fatalf("first approval = %+v, want awaiting a second authorization", resp)
@@ -502,6 +506,7 @@ func TestJoinApproval_ASpentEntryIsRefusedOnTheReplicatedRecordNotTheFile(t *tes
 	if resp := other.approve(t, "jreq-1", keyTwo); resp.GetError() != "" {
 		t.Fatalf("completing approval: %s", resp.GetError())
 	}
+	copyStoreFile(t, staleCopy, leader.storePath)
 
 	// A SECOND request for the SAME joining identity, presenting the same
 	// entry, on a Comb whose local file still lists it as available. The

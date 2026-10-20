@@ -367,3 +367,26 @@ func NormalizeFingerprint(s string) string {
 	}
 	return "SHA256:" + strings.ToUpper(s[7:])
 }
+
+// Without returns a copy of s with every entry whose ID is in drop
+// removed, and the IDs it actually removed, in store order. An ID in
+// drop that the store does not hold is not an error and is not
+// reported: the post-condition, "no entry with this ID remains", already
+// holds for it.
+//
+// Removal is the only change the store ever makes to itself. Nothing in
+// this package adds an entry on behalf of a caller, which is what keeps
+// "only root creates an authorization" true when managerd itself prunes
+// the file (see internal/manager's PruneSpentJoinAuthorizations).
+func (s Store) Without(drop map[string]bool) (Store, []string) {
+	kept := make([]Entry, 0, len(s.Authorizations))
+	var removed []string
+	for _, e := range s.Authorizations {
+		if drop[e.ID] {
+			removed = append(removed, e.ID)
+			continue
+		}
+		kept = append(kept, e)
+	}
+	return Store{Authorizations: kept}, removed
+}

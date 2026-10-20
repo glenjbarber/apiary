@@ -613,6 +613,7 @@ func run() error {
 	go runOriginCARenewalLoop(ctx, originCARenewer, cfg.OriginCARenewalCheckInterval)
 	go runPeerHostnameRefreshLoop(ctx, peers, raftClient, peerHostnameRefreshInterval)
 	go runPeerCAWriteLoop(ctx, raftClient, peerCAWriteInterval)
+	go runJoinAuthorizationPruneLoop(ctx, srv, joinAuthorizationPruneInterval)
 	if cfg.WatchgooseEnabled {
 		go watchgoose.Run(ctx, cfg.WatchgooseEndpoint, cfg.WatchgooseInterval, cfg.WatchgooseTimeout, id)
 	}
@@ -654,6 +655,42 @@ func runReconcileLoop(ctx context.Context, reconciler *cluster.Reconciler, inter
 func reconcileOnce(ctx context.Context, reconciler *cluster.Reconciler) {
 	if err := reconciler.RunOnce(ctx); err != nil {
 		log.Printf("managerd: reconcile: %v", err)
+	}
+}
+
+// joinAuthorizationPruneInterval is how often every Comb drops, from its
+// own copy of the join-authorization store, entries the replicated record
+// shows as spent (issue #85). The leader also prunes right after each
+// approval; this sweep is what brings the Combs that did not approve in
+// line, so a spent entry does not outlive the join by more than this.
+const joinAuthorizationPruneInterval = time.Minute
+
+// runJoinAuthorizationPruneLoop mirrors runReconcileLoop's own shape: an
+// immediate first run, then one per tick until ctx is done. Errors are
+// logged and retried on the next tick, not fatal.
+func runJoinAuthorizationPruneLoop(ctx context.Context, srv *manager.Server, interval time.Duration) {
+	joinAuthorizationPruneOnce(ctx, srv)
+
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			joinAuthorizationPruneOnce(ctx, srv)
+		}
+	}
+}
+
+func joinAuthorizationPruneOnce(ctx context.Context, srv *manager.Server) {
+	removed, err := srv.PruneSpentJoinAuthorizations(ctx)
+	if err != nil {
+		log.Printf("managerd: pruning spent join authorizations: %v", err)
+		return
+	}
+	if len(removed) > 0 {
+		log.Printf("managerd: removed %d spent join authorization entries: %v", len(removed), removed)
 	}
 }
 

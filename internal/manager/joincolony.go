@@ -1081,6 +1081,9 @@ func (s *Server) ApproveJoinRequest(ctx context.Context, req *rpcpb.ApproveJoinR
 	if appErr != "" {
 		return &rpcpb.ApproveJoinRequestResponse{Error: augmentForwardError(appErr, leaderHint, ferr), LeaderHint: leaderHint}, nil
 	}
+	// issue #85: the spend is now replicated, so this Comb's own copy of
+	// the entry is dead weight. Drop it now rather than at the next sweep.
+	s.pruneSpentJoinAuthorizationsAfterApproval(ctx)
 	return &rpcpb.ApproveJoinRequestResponse{Request: fromInternalPendingJoinRequest(result)}, nil
 }
 

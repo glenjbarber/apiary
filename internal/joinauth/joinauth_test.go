@@ -371,3 +371,24 @@ func TestStoreRoundTripsThroughJSONWithoutLoss(t *testing.T) {
 		}
 	}
 }
+
+// TestStoreWithoutRemovesOnlyNamedEntries pins issue #85's removal
+// primitive: spent IDs go, every other entry stays in its original
+// order, and an ID the store never held is not reported as removed.
+func TestStoreWithoutRemovesOnlyNamedEntries(t *testing.T) {
+	store := Store{Authorizations: []Entry{
+		{ID: "auth-1", NodeID: "comb-1"},
+		{ID: "auth-2", NodeID: "comb-2"},
+		{ID: "auth-3", NodeID: "comb-3"},
+	}}
+	got, removed := store.Without(map[string]bool{"auth-2": true, "auth-9": true})
+	if len(removed) != 1 || removed[0] != "auth-2" {
+		t.Errorf("removed = %v, want [auth-2]", removed)
+	}
+	if len(got.Authorizations) != 2 || got.Authorizations[0].ID != "auth-1" || got.Authorizations[1].ID != "auth-3" {
+		t.Errorf("kept = %+v, want auth-1 then auth-3", got.Authorizations)
+	}
+	if len(store.Authorizations) != 3 {
+		t.Errorf("the receiver was modified: %+v", store.Authorizations)
+	}
+}
