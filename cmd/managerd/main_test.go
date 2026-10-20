@@ -148,6 +148,11 @@ func TestKnownPeersWarning(t *testing.T) {
 	if w := knownPeersWarning([]string{}); w == "" {
 		t.Errorf("an empty (non-nil) allowlist must also warn")
 	}
+	// The warning is the only place an operator learns the fix, so it has
+	// to name the setup step and the RPCs it affects, not just the option.
+	if w := knownPeersWarning(nil); !strings.Contains(w, "--colony-member") || !strings.Contains(w, "GetColonyJoinWindow") {
+		t.Errorf("warning = %q, want it to name the --colony-member setup step and the affected RPCs", w)
+	}
 	if w := knownPeersWarning([]string{"brood.lab3.home.arpa:17700"}); w != "" {
 		t.Errorf("a configured allowlist must not warn, got %q", w)
 	}

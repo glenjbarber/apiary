@@ -33,6 +33,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
+	"os"
+	"sync"
 	"time"
 
 	internalpb "github.com/glenjbarber/apiary/api/internalpb"
@@ -362,4 +365,95 @@ func fromInternalJoinApproval(a *internalpb.JoinApprovalAttestation) *rpcpb.Join
 		return nil
 	}
 	return &rpcpb.JoinApprovalAttestation{KeyId: a.GetKeyId(), NodeId: a.GetNodeId(), AtUnix: a.GetAtUnix()}
+}
+
+// joinAuthorizationPruneMu serialises every write this package makes to
+// the authorization store. Only the prune writes it, but two prunes can
+// overlap (the periodic sweep and the one run after an approval), and
+// each is a read-modify-write of the whole file.
+var joinAuthorizationPruneMu sync.Mutex
+
+// PruneSpentJoinAuthorizations removes, from THIS Comb's copy of the
+// authorization store, every entry the replicated record says has
+// already been spent, and returns the IDs it removed (issue #85).
+//
+// Why this exists. An entry is created by an operator, on the Comb that
+// is the leader at the time, and a join that spends it leaves the spend
+// in replicated state, which is what stops a second spend (gate 2 of
+// authorizePendingJoin). But the file is per-Comb, and nothing else
+// removed the spent entry from the other Combs' copies, so each one kept
+// it until its 24-hour expiry. Removing it on every Comb once the spend
+// is replicated is what makes "consumed everywhere" true, rather than
+// relying on the replicated check to keep refusing a copy that should
+// not exist.
+//
+// Removal is safe to repeat and safe to race. A removed entry was
+// already unusable: gate 2 refuses any entry the replicated record names
+// as spent, so deleting it cannot make a join possible that was not
+// already refused. An entry the replicated record does not name is kept,
+// including one whose request has since been purged - the file is not
+// pruned by age here, only by spend.
+//
+// A store that does not exist is not an error: a Comb that was never
+// installed has nothing to prune. A store that exists but cannot be read
+// is an error, and nothing is written.
+func (s *Server) PruneSpentJoinAuthorizations(ctx context.Context) ([]string, error) {
+	path := s.joinAuthorizationFile()
+	if _, err := os.Stat(path); os.IsNotExist(err) {
+		return nil, nil
+	}
+	if s.raft == nil {
+		return nil, nil
+	}
+
+	joinAuthorizationPruneMu.Lock()
+	defer joinAuthorizationPruneMu.Unlock()
+
+	store, err := joinauth.Load(path)
+	if err != nil {
+		return nil, err
+	}
+	spent := make(map[string]bool)
+	for _, e := range store.Authorizations {
+		_, _, found, err := s.raft.GetAuthorizationUse(ctx, e.ID)
+		if err != nil {
+			// Any unanswered question means nothing is removed this
+			// round. Partial pruning would still be correct, but an
+			// error here is more likely raftd being unreachable than
+			// one entry being unusual, and the next round retries all
+			// of them anyway.
+			return nil, fmt.Errorf("checking whether authorization entry %q was spent: %w", e.ID, err)
+		}
+		if found {
+			spent[e.ID] = true
+		}
+	}
+	if len(spent) == 0 {
+		return nil, nil
+	}
+	pruned, removed := store.Without(spent)
+	if len(removed) == 0 {
+		return nil, nil
+	}
+	if err := pruned.Save(path); err != nil {
+		return nil, err
+	}
+	return removed, nil
+}
+
+// pruneSpentJoinAuthorizationsAfterApproval is the leader's own
+// immediate prune, run right after an approval's replicated command
+// succeeds, so the Comb that spent an entry drops it at once rather than
+// at the next periodic sweep. Failure is logged and does not change the
+// approval's own answer: the join has already happened, and the periodic
+// sweep retries.
+func (s *Server) pruneSpentJoinAuthorizationsAfterApproval(ctx context.Context) {
+	removed, err := s.PruneSpentJoinAuthorizations(ctx)
+	if err != nil {
+		log.Printf("managerd: pruning spent join authorizations after an approval: %v", err)
+		return
+	}
+	if len(removed) > 0 {
+		log.Printf("managerd: removed %d spent join authorization entries from %s: %v", len(removed), s.joinAuthorizationFile(), removed)
+	}
 }

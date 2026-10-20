@@ -547,7 +547,7 @@ func internalTokenWarning(token, socket string) string {
 	if token != "" {
 		return ""
 	}
-	return "raftd: WARNING: internal_token is not set, so the internal RPC on " + socket + " accepts any caller that can open the socket and is protected only by filesystem permissions; set the same internal_token in raftd.json and managerd.json to require a shared secret"
+	return "raftd: WARNING: internal_token is not set, so the internal RPC on " + socket + " accepts any caller that can open the socket and is protected only by filesystem permissions. Re-run /usr/local/libexec/apiary/apiaryctl install --apply, which generates internal_token in raftd.json and writes the same value as raftd_token in managerd.json (ADR-0033). Or set both by hand to the same value"
 }
 
 // loopbackRaftBindWarning returns a startup warning when raftBind's host
