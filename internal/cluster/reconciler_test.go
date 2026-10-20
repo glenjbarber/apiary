@@ -2767,7 +2767,7 @@ func TestReconciler_ReconcileNetworkArtifacts_RemovesDeletedOwnedNetwork(t *test
 	vlan := newFakeVLANManager()
 	pfMgr := newFakePFManager()
 	r := &Reconciler{VLAN: vlan, PF: pfMgr, NetworkStatePath: path}
-	if err := r.reconcileNetworkArtifacts(context.Background(), nil, map[string]*internalpb.NetworkDefinition{}); err != nil {
+	if err := r.reconcileNetworkArtifacts(context.Background(), nil, nil, map[string]*internalpb.NetworkDefinition{}); err != nil {
 		t.Fatalf("reconcileNetworkArtifacts() error: %v", err)
 	}
 	if got := vlan.destroyedBridges; len(got) != 1 || got[0] != "apnet-deadbeef" {
@@ -2785,6 +2785,103 @@ func TestReconciler_ReconcileNetworkArtifacts_RemovesDeletedOwnedNetwork(t *test
 	}
 	if len(state.Networks) != 0 {
 		t.Errorf("remaining artifacts = %v, want none", state.Networks)
+	}
+}
+
+// A network that only a VNET jail uses must have its bridge recorded as
+// owned, or deleting the network leaves that bridge on the host. ADR-0117
+// deferred this: the cleanup pass was fed VM placements only.
+func TestReconciler_ReconcileNetworkArtifacts_RecordsVNETJailNetwork(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "network-artifacts.json")
+	vlan := newFakeVLANManager()
+	r := &Reconciler{VLAN: vlan, Uplink: "bridge0", NetworkStatePath: path}
+	networks := map[string]*internalpb.NetworkDefinition{
+		"net-1": {Id: "net-1", VlanId: 110, Subnet: "10.60.0.0/24"},
+	}
+	jails := []JailPlacement{{ID: "jail-1", VNET: true, NetworkID: "net-1"}}
+
+	if err := r.reconcileNetworkArtifacts(context.Background(), nil, jails, networks); err != nil {
+		t.Fatalf("reconcileNetworkArtifacts() error: %v", err)
+	}
+	state, err := loadNetworkArtifactState(path)
+	if err != nil {
+		t.Fatalf("loadNetworkArtifactState() error: %v", err)
+	}
+	artifact, ok := state.Networks["net-1"]
+	if !ok {
+		t.Fatalf("no artifact recorded for net-1, which only a VNET jail uses")
+	}
+	if !artifact.OwnBridge {
+		t.Errorf("OwnBridge = false, want true: this pass created the bridge")
+	}
+
+	// Once the network is gone, the recorded bridge is the one destroyed.
+	if err := r.reconcileNetworkArtifacts(context.Background(), nil, nil, map[string]*internalpb.NetworkDefinition{}); err != nil {
+		t.Fatalf("reconcileNetworkArtifacts() after delete error: %v", err)
+	}
+	if got := vlan.destroyedBridges; len(got) != 1 || got[0] != artifact.Bridge {
+		t.Errorf("destroyed bridges = %v, want [%s]", got, artifact.Bridge)
+	}
+}
+
+// A VM and a VNET jail on the same network share one bridge. The network
+// must be processed once per pass: a second ensureNetwork call sees the
+// bridge already there and reports it as not created, which would clear
+// OwnBridge if the duplicate were recorded last.
+// reportExistingBridgeVLAN reports a bridge as created only the first time
+// it is asked for, as the real EnsureBridge does: a second call on the same
+// bridge in one pass finds it already present.
+type reportExistingBridgeVLAN struct {
+	*fakeVLANManager
+}
+
+func (f *reportExistingBridgeVLAN) EnsureBridge(ctx context.Context, name string) (bool, error) {
+	for _, b := range f.ensuredBridges {
+		if b == name {
+			return false, nil
+		}
+	}
+	return f.fakeVLANManager.EnsureBridge(ctx, name)
+}
+
+func TestReconciler_ReconcileNetworkArtifacts_SharedVMAndVNETJailKeepsOwnership(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "network-artifacts.json")
+	vlan := &reportExistingBridgeVLAN{fakeVLANManager: newFakeVLANManager()}
+	r := &Reconciler{VLAN: vlan, Uplink: "bridge0", NetworkStatePath: path}
+	networks := map[string]*internalpb.NetworkDefinition{
+		"net-1": {Id: "net-1", VlanId: 110, Subnet: "10.60.0.0/24"},
+	}
+	vms := []VMPlacement{{ID: "vm-1", NetworkID: "net-1"}}
+	jails := []JailPlacement{{ID: "jail-1", VNET: true, NetworkID: "net-1"}}
+
+	if err := r.reconcileNetworkArtifacts(context.Background(), vms, jails, networks); err != nil {
+		t.Fatalf("reconcileNetworkArtifacts() error: %v", err)
+	}
+	state, err := loadNetworkArtifactState(path)
+	if err != nil {
+		t.Fatalf("loadNetworkArtifactState() error: %v", err)
+	}
+	if !state.Networks["net-1"].OwnBridge {
+		t.Errorf("OwnBridge = false, want true: the shared network was processed twice and lost ownership")
+	}
+}
+
+// A jail that is not VNET never attaches to a bridge, so it must not
+// make Apiary claim one.
+func TestReconciler_ReconcileNetworkArtifacts_IgnoresNonVNETJail(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "network-artifacts.json")
+	vlan := newFakeVLANManager()
+	r := &Reconciler{VLAN: vlan, Uplink: "bridge0", NetworkStatePath: path}
+	networks := map[string]*internalpb.NetworkDefinition{
+		"net-1": {Id: "net-1", VlanId: 110, Subnet: "10.60.0.0/24"},
+	}
+	jails := []JailPlacement{{ID: "jail-1", VNET: false, NetworkID: "net-1"}}
+
+	if err := r.reconcileNetworkArtifacts(context.Background(), nil, jails, networks); err != nil {
+		t.Fatalf("reconcileNetworkArtifacts() error: %v", err)
+	}
+	if len(vlan.ensuredBridges) != 0 {
+		t.Errorf("ensured bridges = %v, want none for a non-VNET jail", vlan.ensuredBridges)
 	}
 }
 
@@ -2808,7 +2905,7 @@ func TestReconciler_ReconcileNetworkArtifacts_NeverDestroysUplinkBridge(t *testi
 	vlan := newFakeVLANManager()
 	pfMgr := newFakePFManager()
 	r := &Reconciler{VLAN: vlan, PF: pfMgr, NetworkStatePath: path}
-	if err := r.reconcileNetworkArtifacts(context.Background(), nil, map[string]*internalpb.NetworkDefinition{}); err != nil {
+	if err := r.reconcileNetworkArtifacts(context.Background(), nil, nil, map[string]*internalpb.NetworkDefinition{}); err != nil {
 		t.Fatalf("reconcileNetworkArtifacts() error: %v", err)
 	}
 	if len(vlan.destroyedBridges) != 0 {
@@ -2882,7 +2979,7 @@ func TestReconciler_ReconcileNetworkArtifacts_PreservesDefinedUnusedNetwork(t *t
 	pfMgr := newFakePFManager()
 	r := &Reconciler{VLAN: vlan, PF: pfMgr, NetworkStatePath: path}
 	networks := map[string]*internalpb.NetworkDefinition{"live": {Id: "live", VlanId: 120, Subnet: "10.120.0.0/24"}}
-	if err := r.reconcileNetworkArtifacts(context.Background(), nil, networks); err != nil {
+	if err := r.reconcileNetworkArtifacts(context.Background(), nil, nil, networks); err != nil {
 		t.Fatalf("reconcileNetworkArtifacts() error: %v", err)
 	}
 	if len(vlan.destroyedBridges) != 0 || len(vlan.destroyedVLANs) != 0 || len(pfMgr.flushed) != 0 {
@@ -2969,7 +3066,7 @@ func TestReconciler_ReconcileNetworkArtifacts_ExistingEmptyStateFileSelfHeals(t 
 	vlan := newFakeVLANManager()
 	pfMgr := newFakePFManager()
 	r := &Reconciler{VLAN: vlan, PF: pfMgr, NetworkStatePath: path}
-	if err := r.reconcileNetworkArtifacts(context.Background(), nil, map[string]*internalpb.NetworkDefinition{}); err != nil {
+	if err := r.reconcileNetworkArtifacts(context.Background(), nil, nil, map[string]*internalpb.NetworkDefinition{}); err != nil {
 		t.Fatalf("reconcileNetworkArtifacts() error: %v, want the empty state file recovered rather than blocking every future tick", err)
 	}
 
