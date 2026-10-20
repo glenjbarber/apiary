@@ -219,13 +219,16 @@ func toInternalJail(j *rpcpb.JailDefinition) *internalpb.JailDefinition {
 		BaseTemplate:    j.GetBaseTemplate(),
 		BaseArchiveName: j.GetBaseArchiveName(),
 		NetworkId:       j.GetNetworkId(),
-		Vnet:            j.GetVnet(),
-		FirewallRules:   toInternalFirewallRules(j.GetFirewallRules()),
+		// RequestedIpAddress is the one address input a caller may give
+		// (see JailDefinition's own comment). IpAddress is deliberately
+		// not copied: it is the FSM's resolved value, and UpdateJail
+		// carries the stored one forward in applyUpdateJail.
+		RequestedIpAddress: j.GetRequestedIpAddress(),
+		Vnet:               j.GetVnet(),
+		FirewallRules:      toInternalFirewallRules(j.GetFirewallRules()),
 		// Phase/PhaseError are the reconciler's own observed state, never
 		// set by an external caller - CreateJail/UpdateJail requests
-		// never carry them through. IpAddress is likewise never set by
-		// the caller - it's assigned by applyCreateJail when NetworkId
-		// is set, mirroring VMDefinition.ip_address exactly.
+		// never carry them through.
 	}
 }
 
