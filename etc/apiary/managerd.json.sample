@@ -20,7 +20,7 @@
   "jail_disk_size_mb": 0,
   "peer_api_key": "",
   "peer_managerd_port": "17700",
-  "peer_tls": false,
+  "peer_tls": true,
   "peer_tls_hostname_map": "",
   "peer_tls_ca": "",
   "known_peer_addresses": "",

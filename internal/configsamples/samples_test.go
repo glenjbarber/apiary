@@ -235,10 +235,10 @@ func loaders() []loader {
 				"raftd_socket": "/var/run/apiary/raftd.sock",
 				"tls_cert":     "/usr/local/etc/apiary/tls/cert.pem",
 				"tls_key":      "/usr/local/etc/apiary/tls/key.pem",
-				// Tri-state fields ship as explicit false, which is a
-				// local override rather than "unset"; keep them
-				// spelled so a reader knows the sample means it.
-				"peer_tls":     false,
+				// Tri-state fields ship spelled out: peer_tls is true,
+				// the encrypted default (issue #97). Setting it to
+				// false is the explicit opt-out.
+				"peer_tls":     true,
 				"hast_enabled": false,
 				"bhyve_prefix": "",
 			},

@@ -210,9 +210,11 @@ is available from the "Correct a stale voter address" form in the
 Machine Configuration page's raftd panel (Admin only), or can still be
 called directly via the manager RPC.
 
-**If Raft transport mutual TLS (`raft_tls_cert`/`raft_tls_key`/
-`raft_tls_ca`, ADR-0078) is used anywhere in this Colony, every voter must
-have all three set identically in kind - all set, or all left empty.** A
+**Raft transport mutual TLS (`raft_tls_cert`/`raft_tls_key`/`raft_tls_ca`,
+ADR-0078) is on by default (issue #97): every voter needs all three set, or
+must set `raft_tls_enabled` to `false` explicitly. A voter with a partial
+trio, or with TLS on and no trio, refuses to start. Mixing encrypted and
+plaintext voters is not possible.** A
 partial mismatch (one voter with Raft TLS configured, another without) is
 a real, confirmed failure mode, not a hypothetical: the TLS-configured
 side's `raftd.log` shows `tls: first record does not look like a TLS
@@ -380,11 +382,11 @@ managerd-to-managerd RPC forwarding (reconciliation writes/reads, ADR-0029).
 plus `peer_manager_port`) cover the Colony overview page's own direct
 host-stats fetch from every other Comb's managerd.
 
-As of ADR-0113's follow-up, leaving `peer_tls` unset on either file is no
-longer the same as setting it to `false`: `managerd.json`'s `peer_tls`
-defaults to on when that Comb's own `tls_cert`/`tls_key` are both set, and
-`frontend.json`'s `peer_tls` defaults to whatever its own `manager_tls` is
-set to. Joining two nodes that both use publicly trusted (or otherwise
+Leaving `peer_tls` unset on either file means on (issue #97). Only an
+explicit `"peer_tls": false` turns peer TLS off, and `managerd` then refuses
+to forward any call carrying an API key or restart-guardrail token rather
+than send it in the clear. `frontend.json`'s `peer_tls` defaults to whatever
+its own `manager_tls` is set to. Joining two nodes that both use publicly trusted (or otherwise
 properly configured) TLS certificates needs no manual `peer_tls` edits at
 all any more - explicit `"peer_tls": true`/`false` in either file still
 overrides its own default. The historical failure mode below can now only

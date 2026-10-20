@@ -391,3 +391,27 @@ caller presents its own bearer key, which every REST handler forwards
 each request's own `Authorization` header. restshimd's entire security
 boundary is therefore managerd's per-key auth — which is the other half of
 why it stays on loopback.
+
+## Inter-host transport encryption (issue #97)
+
+Everything that crosses the wire between Combs is encrypted by default, and
+the only way to turn that off is an explicit `false` in the config file.
+
+| File | Key | Default | Turns encryption off |
+| --- | --- | --- | --- |
+| `raftd.json` | `raft_tls_enabled` | on | `"raft_tls_enabled": false` |
+| `managerd.json` | `peer_tls` | on | `"peer_tls": false` |
+
+With `raft_tls_enabled` on, raftd also needs `raft_tls_cert`, `raft_tls_key`
+and `raft_tls_ca` (ADR-0078). Without all three, raftd refuses to start and
+says so. Setting `raft_tls_enabled` to `false` while a certificate field is
+still set is also refused, so a leftover certificate is never silently
+ignored.
+
+With `peer_tls` off, managerd refuses to forward any call that carries an
+API key or restart-guardrail token. Other forwarded calls can still go over
+plaintext, so that setting is a deliberate, visible downgrade.
+
+`apiaryinstall`'s preflight reports both settings: a raftd that will refuse
+to start is a misconfiguration, and an explicit `false` is reported as an
+informational finding.

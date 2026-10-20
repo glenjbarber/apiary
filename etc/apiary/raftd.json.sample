@@ -6,6 +6,7 @@
   "join": "",
   "await_join": false,
   "internal_token": "",
+  "raft_tls_enabled": true,
   "raft_tls_cert": "",
   "raft_tls_key": "",
   "raft_tls_ca": "",
