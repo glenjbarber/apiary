@@ -174,6 +174,8 @@ type fakeClient struct {
 
 	setVMFirewallRulesResp    *rpcpb.SetVMFirewallRulesResponse
 	lastSetVMFirewallRulesReq *rpcpb.SetVMFirewallRulesRequest
+	setVMConfigResp           *rpcpb.SetVMConfigResponse
+	lastSetVMConfigReq        *rpcpb.SetVMConfigRequest
 
 	listOriginCertificatesResp    *rpcpb.ListOriginCertificatesResponse
 	issueOriginCertificateResp    *rpcpb.IssueOriginCertificateResponse
@@ -324,6 +326,14 @@ func (f *fakeClient) SetVMFirewallRules(_ context.Context, in *rpcpb.SetVMFirewa
 		return f.setVMFirewallRulesResp, nil
 	}
 	return &rpcpb.SetVMFirewallRulesResponse{}, nil
+}
+
+func (f *fakeClient) SetVMConfig(_ context.Context, in *rpcpb.SetVMConfigRequest, _ ...grpc.CallOption) (*rpcpb.SetVMConfigResponse, error) {
+	f.lastSetVMConfigReq = in
+	if f.setVMConfigResp != nil {
+		return f.setVMConfigResp, nil
+	}
+	return &rpcpb.SetVMConfigResponse{}, nil
 }
 
 func (f *fakeClient) SetVMCloudflareExposure(_ context.Context, in *rpcpb.SetVMCloudflareExposureRequest, _ ...grpc.CallOption) (*rpcpb.SetVMCloudflareExposureResponse, error) {

@@ -202,6 +202,10 @@ func (f *fakeClient) SetVMFirewallPaused(context.Context, *rpcpb.SetVMFirewallPa
 	return &rpcpb.SetVMFirewallPausedResponse{}, nil
 }
 
+func (f *fakeClient) SetVMConfig(context.Context, *rpcpb.SetVMConfigRequest, ...grpc.CallOption) (*rpcpb.SetVMConfigResponse, error) {
+	return &rpcpb.SetVMConfigResponse{}, nil
+}
+
 func (f *fakeClient) SetVMFirewallRules(context.Context, *rpcpb.SetVMFirewallRulesRequest, ...grpc.CallOption) (*rpcpb.SetVMFirewallRulesResponse, error) {
 	return &rpcpb.SetVMFirewallRulesResponse{}, nil
 }

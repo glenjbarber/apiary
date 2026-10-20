@@ -38,6 +38,7 @@ const (
 	ManagerService_SetVMCloudflareExposure_FullMethodName             = "/apiary.rpc.v1.ManagerService/SetVMCloudflareExposure"
 	ManagerService_SetVMDesiredState_FullMethodName                   = "/apiary.rpc.v1.ManagerService/SetVMDesiredState"
 	ManagerService_SetVMFirewallRules_FullMethodName                  = "/apiary.rpc.v1.ManagerService/SetVMFirewallRules"
+	ManagerService_SetVMConfig_FullMethodName                         = "/apiary.rpc.v1.ManagerService/SetVMConfig"
 	ManagerService_GetVM_FullMethodName                               = "/apiary.rpc.v1.ManagerService/GetVM"
 	ManagerService_ListVMs_FullMethodName                             = "/apiary.rpc.v1.ManagerService/ListVMs"
 	ManagerService_ListVMsLocal_FullMethodName                        = "/apiary.rpc.v1.ManagerService/ListVMsLocal"
@@ -240,6 +241,11 @@ type ManagerServiceClient interface {
 	// CreateVM time. Deliberately not folded into UpdateVM, the exact
 	// same reasoning as SetVMFirewallPaused above.
 	SetVMFirewallRules(ctx context.Context, in *SetVMFirewallRulesRequest, opts ...grpc.CallOption) (*SetVMFirewallRulesResponse, error)
+	// SetVMConfig changes an existing VM's vcpus and memory_mb only. It is
+	// never a live resize: the change applies on the next launch of the VM.
+	// Operator tier. The manager checks host capacity on the owning node
+	// before submitting; see SetVMConfigRequest.
+	SetVMConfig(ctx context.Context, in *SetVMConfigRequest, opts ...grpc.CallOption) (*SetVMConfigResponse, error)
 	// GetVM and ListVMs only succeed against the current leader - see
 	// api/internalpb/raftd.proto's GetVM/ListVMs doc comments for why v1's
 	// read consistency model is deliberately as simple as its write model.
@@ -1195,6 +1201,16 @@ func (c *managerServiceClient) SetVMFirewallRules(ctx context.Context, in *SetVM
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(SetVMFirewallRulesResponse)
 	err := c.cc.Invoke(ctx, ManagerService_SetVMFirewallRules_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *managerServiceClient) SetVMConfig(ctx context.Context, in *SetVMConfigRequest, opts ...grpc.CallOption) (*SetVMConfigResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(SetVMConfigResponse)
+	err := c.cc.Invoke(ctx, ManagerService_SetVMConfig_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -2259,6 +2275,11 @@ type ManagerServiceServer interface {
 	// CreateVM time. Deliberately not folded into UpdateVM, the exact
 	// same reasoning as SetVMFirewallPaused above.
 	SetVMFirewallRules(context.Context, *SetVMFirewallRulesRequest) (*SetVMFirewallRulesResponse, error)
+	// SetVMConfig changes an existing VM's vcpus and memory_mb only. It is
+	// never a live resize: the change applies on the next launch of the VM.
+	// Operator tier. The manager checks host capacity on the owning node
+	// before submitting; see SetVMConfigRequest.
+	SetVMConfig(context.Context, *SetVMConfigRequest) (*SetVMConfigResponse, error)
 	// GetVM and ListVMs only succeed against the current leader - see
 	// api/internalpb/raftd.proto's GetVM/ListVMs doc comments for why v1's
 	// read consistency model is deliberately as simple as its write model.
@@ -3087,6 +3108,9 @@ func (UnimplementedManagerServiceServer) SetVMDesiredState(context.Context, *Set
 func (UnimplementedManagerServiceServer) SetVMFirewallRules(context.Context, *SetVMFirewallRulesRequest) (*SetVMFirewallRulesResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method SetVMFirewallRules not implemented")
 }
+func (UnimplementedManagerServiceServer) SetVMConfig(context.Context, *SetVMConfigRequest) (*SetVMConfigResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method SetVMConfig not implemented")
+}
 func (UnimplementedManagerServiceServer) GetVM(context.Context, *GetVMRequest) (*GetVMResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetVM not implemented")
 }
@@ -3728,6 +3752,24 @@ func _ManagerService_SetVMFirewallRules_Handler(srv interface{}, ctx context.Con
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(ManagerServiceServer).SetVMFirewallRules(ctx, req.(*SetVMFirewallRulesRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ManagerService_SetVMConfig_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SetVMConfigRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ManagerServiceServer).SetVMConfig(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ManagerService_SetVMConfig_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ManagerServiceServer).SetVMConfig(ctx, req.(*SetVMConfigRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -5462,6 +5504,10 @@ var ManagerService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "SetVMFirewallRules",
 			Handler:    _ManagerService_SetVMFirewallRules_Handler,
+		},
+		{
+			MethodName: "SetVMConfig",
+			Handler:    _ManagerService_SetVMConfig_Handler,
 		},
 		{
 			MethodName: "GetVM",
