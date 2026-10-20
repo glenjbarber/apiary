@@ -343,6 +343,28 @@ func (f *FSM) applyCreateVM(index uint64, vm *internalpb.VMDefinition) *FSMApply
 	return &FSMApplyResult{Index: index, VM: vm}
 }
 
+// usedIPsOnNetwork maps every IPv4 address already held on networkID by
+// a VM or a jail to a human-readable owner ("vm <id>" or "jail <id>").
+// Both kinds of resource draw from one address pool per network, so
+// both allocateIP and checkRequestedIP must consult this same set.
+func (f *FSM) usedIPsOnNetwork(networkID string) map[string]string {
+	used := make(map[string]string)
+	for _, vm := range f.vms {
+		if vm.GetNetworkId() == networkID && vm.GetIpAddress() != "" {
+			used[vm.GetIpAddress()] = "vm " + vm.GetId()
+		}
+	}
+	// A jail (ADR-0117) can name the same NetworkDefinition a VM does,
+	// so its allocated addresses must be excluded here too - otherwise
+	// a jail and a VM on the same network could collide on IP.
+	for _, jail := range f.jails {
+		if jail.GetNetworkId() == networkID && jail.GetIpAddress() != "" {
+			used[jail.GetIpAddress()] = "jail " + jail.GetId()
+		}
+	}
+	return used
+}
+
 // allocateIP picks the lowest host address in network's subnet not
 // already assigned to another VM on this network, skipping the network
 // address, the broadcast address, and ".1" (reserved as the bridge's
@@ -356,20 +378,7 @@ func (f *FSM) allocateIP(network *internalpb.NetworkDefinition) (string, error) 
 		return "", fmt.Errorf("network %q has an invalid subnet %q: %w", network.GetId(), network.GetSubnet(), err)
 	}
 
-	used := make(map[string]bool)
-	for _, vm := range f.vms {
-		if vm.GetNetworkId() == network.GetId() && vm.GetIpAddress() != "" {
-			used[vm.GetIpAddress()] = true
-		}
-	}
-	// A jail (ADR-0117) can name the same NetworkDefinition a VM does,
-	// so its allocated addresses must be excluded here too - otherwise
-	// a jail and a VM on the same network could collide on IP.
-	for _, jail := range f.jails {
-		if jail.GetNetworkId() == network.GetId() && jail.GetIpAddress() != "" {
-			used[jail.GetIpAddress()] = true
-		}
-	}
+	used := f.usedIPsOnNetwork(network.GetId())
 
 	base := ipnet.IP.To4()
 	if base == nil {
@@ -387,11 +396,51 @@ func (f *FSM) allocateIP(network *internalpb.NetworkDefinition) (string, error) 
 		var candidate [4]byte
 		binary.BigEndian.PutUint32(candidate[:], baseInt+host)
 		ip := net.IP(candidate[:]).String()
-		if !used[ip] {
+		if _, taken := used[ip]; !taken {
 			return ip, nil
 		}
 	}
 	return "", fmt.Errorf("network %q (%s) has no free addresses", network.GetId(), network.GetSubnet())
+}
+
+// checkRequestedIP validates an operator-requested IPv4 address for a
+// new jail on network and returns its canonical form. The address must
+// be an IPv4 address inside network's subnet, must not be the network
+// address, the broadcast address, or ".1" (the bridge's own gateway,
+// see allocateIP), and must not already be held by a VM or jail on the
+// same network. Like allocateIP this reads only committed FSM state, so
+// a requested address and a later allocation can never both win the
+// same host.
+func (f *FSM) checkRequestedIP(network *internalpb.NetworkDefinition, requested string) (string, error) {
+	ip := net.ParseIP(requested).To4()
+	if ip == nil {
+		return "", fmt.Errorf("invalid ip_address %q: must be an IPv4 address", requested)
+	}
+	_, ipnet, err := net.ParseCIDR(network.GetSubnet())
+	if err != nil {
+		return "", fmt.Errorf("network %q has an invalid subnet %q: %w", network.GetId(), network.GetSubnet(), err)
+	}
+	if ipnet.IP.To4() == nil {
+		return "", fmt.Errorf("network %q's subnet %q is not IPv4", network.GetId(), network.GetSubnet())
+	}
+	if !ipnet.Contains(ip) {
+		return "", fmt.Errorf("ip_address %s is outside network %q's subnet %s", ip, network.GetId(), network.GetSubnet())
+	}
+	ones, bits := ipnet.Mask.Size()
+	numAddrs := uint64(1) << uint(bits-ones)
+	offset := uint64(binary.BigEndian.Uint32(ip) - binary.BigEndian.Uint32(ipnet.IP.To4()))
+	switch {
+	case offset == 0:
+		return "", fmt.Errorf("ip_address %s is the network address of %s and cannot be assigned", ip, network.GetSubnet())
+	case offset == numAddrs-1:
+		return "", fmt.Errorf("ip_address %s is the broadcast address of %s and cannot be assigned", ip, network.GetSubnet())
+	case offset == 1:
+		return "", fmt.Errorf("ip_address %s is reserved as the gateway of network %q and cannot be assigned", ip, network.GetId())
+	}
+	if owner, taken := f.usedIPsOnNetwork(network.GetId())[ip.String()]; taken {
+		return "", fmt.Errorf("ip_address %s is already used by %s on network %q", ip, owner, network.GetId())
+	}
+	return ip.String(), nil
 }
 
 // deriveMAC computes a stable, locally-administered unicast MAC address
@@ -605,8 +654,17 @@ func (f *FSM) applyCreateJail(index uint64, jail *internalpb.JailDefinition) *FS
 	if jail.GetVnet() && jail.GetNetworkId() == "" {
 		return &FSMApplyResult{Index: index, Error: "CreateJail: vnet requires network_id to be set"}
 	}
+	if jail.GetRequestedIpAddress() != "" && jail.GetNetworkId() == "" {
+		return &FSMApplyResult{Index: index, Error: fmt.Sprintf("CreateJail: ip_address %q requires network_id to be set", jail.GetRequestedIpAddress())}
+	}
 
 	jail = proto.Clone(jail).(*internalpb.JailDefinition)
+	// ip_address is FSM-written only (see JailDefinition's own comment):
+	// whatever the caller put there is discarded, and the request is
+	// consumed here so the stored record holds only the resolved value.
+	requested := jail.GetRequestedIpAddress()
+	jail.RequestedIpAddress = ""
+	jail.IpAddress = ""
 	if jail.GetNetworkId() != "" {
 		network, ok := f.networks[jail.GetNetworkId()]
 		if !ok {
@@ -614,8 +672,19 @@ func (f *FSM) applyCreateJail(index uint64, jail *internalpb.JailDefinition) *FS
 		}
 		// Mirrors applyCreateVM: an uplink_bridged network is served by
 		// the physical LAN's own DHCP, not Apiary's, so there is nothing
-		// for the FSM itself to allocate here.
-		if !network.GetUplinkBridged() {
+		// for the FSM itself to allocate here - and nothing it could
+		// check a requested address against either.
+		switch {
+		case network.GetUplinkBridged() && requested != "":
+			return &FSMApplyResult{Index: index, Error: fmt.Sprintf("CreateJail: network %q is uplink_bridged, so its addresses come from the physical LAN's DHCP and ip_address %q cannot be set; leave it blank", network.GetId(), requested)}
+		case network.GetUplinkBridged():
+		case requested != "":
+			ip, err := f.checkRequestedIP(network, requested)
+			if err != nil {
+				return &FSMApplyResult{Index: index, Error: fmt.Sprintf("CreateJail: %v", err)}
+			}
+			jail.IpAddress = ip
+		default:
 			ip, err := f.allocateIP(network)
 			if err != nil {
 				return &FSMApplyResult{Index: index, Error: fmt.Sprintf("CreateJail: %v", err)}
@@ -628,15 +697,35 @@ func (f *FSM) applyCreateJail(index uint64, jail *internalpb.JailDefinition) *FS
 	return &FSMApplyResult{Index: index, Jail: jail}
 }
 
+// applyUpdateJail replaces a jail's definition, but never its resolved
+// address: ip_address is fixed at CreateJail (ADR-0117). A caller that
+// round-trips the record (for example the firewall-rules form, which
+// reads a jail and writes it back whole) carries the current address
+// forward unchanged; a requested address that differs from it, or a
+// change of network_id while an address is held, is refused rather
+// than silently dropped, since either would leave the stored address
+// on the wrong network or lose it.
 func (f *FSM) applyUpdateJail(index uint64, jail *internalpb.JailDefinition) *FSMApplyResult {
-	if _, exists := f.jails[jail.GetId()]; !exists {
+	existing, exists := f.jails[jail.GetId()]
+	if !exists {
 		return &FSMApplyResult{Index: index, Error: fmt.Sprintf("UpdateJail: id %q does not exist", jail.GetId())}
 	}
 	if jail.GetBaseTemplate() != "" && !validResourceID(jail.GetBaseTemplate()) {
 		return &FSMApplyResult{Index: index, Error: fmt.Sprintf("UpdateJail: invalid base_template %q: only alphanumerics, '-', and '_' are allowed (max 64 chars)", jail.GetBaseTemplate())}
 	}
-	f.jails[jail.GetId()] = jail
-	return &FSMApplyResult{Index: index, Jail: jail}
+	if req := jail.GetRequestedIpAddress(); req != "" {
+		if ip := net.ParseIP(req).To4(); ip == nil || ip.String() != existing.GetIpAddress() {
+			return &FSMApplyResult{Index: index, Error: fmt.Sprintf("UpdateJail: ip_address cannot be changed after creation: jail %q holds %q", jail.GetId(), existing.GetIpAddress())}
+		}
+	}
+	if existing.GetIpAddress() != "" && jail.GetNetworkId() != existing.GetNetworkId() {
+		return &FSMApplyResult{Index: index, Error: fmt.Sprintf("UpdateJail: network_id cannot be changed while jail %q holds address %s on network %q", jail.GetId(), existing.GetIpAddress(), existing.GetNetworkId())}
+	}
+	updated := proto.Clone(jail).(*internalpb.JailDefinition)
+	updated.IpAddress = existing.GetIpAddress()
+	updated.RequestedIpAddress = ""
+	f.jails[jail.GetId()] = updated
+	return &FSMApplyResult{Index: index, Jail: updated}
 }
 
 // applyDeleteJail mirrors applyDeleteVM exactly: soft-delete
