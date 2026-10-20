@@ -1225,5 +1225,5 @@ func knownPeersWarning(known []string) string {
 	if len(known) > 0 {
 		return ""
 	}
-	return "managerd: WARNING: known_peer_addresses is not set, so unauthenticated join RPCs will refuse target_address forwarding; set it to the allowed Colony member managerd addresses to enable Web UI join forwarding (direct apiaryctl join-introduce does not require it)"
+	return "managerd: WARNING: known_peer_addresses is not set, so the unauthenticated join RPCs (RequestJoinColony, GetJoinRequestStatus, CancelJoinRequest, GetColonyJoinWindow) refuse every target_address and dial nothing. This is the safe default for a standalone Comb. A Comb that joins a Colony through the Web UI needs it: set known_peer_addresses in managerd.json to a Colony member's managerd host:port, or re-run /usr/local/libexec/apiary/apiaryctl install --apply --colony-member <host:port>, which fills the field only when it is unset. Direct apiaryctl join-introduce does not need it."
 }

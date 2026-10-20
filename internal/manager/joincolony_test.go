@@ -688,3 +688,50 @@ func TestIntegration_ResolveExpiredJoinRequest_RefusedBeforeSubmitting(t *testin
 		t.Errorf("an expired request must be left Pending, got err=%v status=%v", err, got.GetRequest().GetStatus())
 	}
 }
+
+// TestServer_UnauthenticatedJoinRPCs_FailClosedWhenPeersUnset is issue
+// #84's regression: with known_peer_addresses unset (the default), every
+// unauthenticated join RPC that accepts a caller-supplied target_address
+// must refuse before dialing, and must never report on whether the
+// address answered. Each RPC's forwarding peer records any dial, so a
+// non-empty lastAddr is the failure.
+func TestUnauthenticatedJoinRPCs_FailClosedWhenPeersUnset(t *testing.T) {
+	const target = "10.0.0.1:17700"
+	calls := map[string]func(*Server) (string, error){
+		"GetJoinRequestStatus": func(s *Server) (string, error) {
+			resp, err := s.GetJoinRequestStatus(context.Background(), &rpcpb.GetJoinRequestStatusRequest{RequestId: "jreq-1", TargetAddress: target})
+			return resp.GetError(), err
+		},
+		"CancelJoinRequest": func(s *Server) (string, error) {
+			resp, err := s.CancelJoinRequest(context.Background(), &rpcpb.CancelJoinRequestRequest{RequestId: "jreq-1", TargetAddress: target})
+			return resp.GetError(), err
+		},
+		"GetColonyJoinWindow": func(s *Server) (string, error) {
+			resp, err := s.GetColonyJoinWindow(context.Background(), &rpcpb.GetColonyJoinWindowRequest{TargetAddress: target})
+			return resp.GetError(), err
+		},
+		"RequestJoinColony": func(s *Server) (string, error) {
+			resp, err := s.RequestJoinColony(context.Background(), withIntroduction(&rpcpb.RequestJoinColonyRequest{
+				NodeId: "node-2", RaftBindAddress: "10.0.0.2:17600", TargetAddress: target,
+			}, t))
+			return resp.GetError(), err
+		},
+	}
+	for name, call := range calls {
+		t.Run(name, func(t *testing.T) {
+			peers := &fakeJoinColonyPeerForwarder{}
+			s := NewServer(nil, "node-1", nil, nil, nil, nil, peers, "", nil, nil, nil, 0, nil)
+			// Deliberately no SetKnownPeerAddresses call: this is the default.
+			msg, err := call(s)
+			if err != nil {
+				t.Fatalf("%s() error: %v", name, err)
+			}
+			if !strings.Contains(msg, "known_peer_addresses is not configured") {
+				t.Errorf("%s() error = %q, want an explicit refusal naming the unset option", name, msg)
+			}
+			if peers.lastAddr != "" {
+				t.Errorf("%s() dialed %q; a join RPC must not dial a caller-supplied address while the allowlist is unset", name, peers.lastAddr)
+			}
+		})
+	}
+}
