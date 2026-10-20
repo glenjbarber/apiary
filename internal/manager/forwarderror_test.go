@@ -163,22 +163,14 @@ func (f *fakeFailingApproveJoinPeerForwarder) ApproveJoinRequest(context.Context
 	return nil, f.err
 }
 
-// TestIntegration_ApproveJoinRequest_ForwardingFailureSurfacedInError is
-// issues #77/#81's own reproduction: ApproveJoinRequest's leadership
-// check (ADR-0103) forwards a follower's call to the leader - but when
-// that forward itself fails, the OLD code fell through to local
-// processing anyway, which then failed at the NEXT gate for an unrelated
-// reason (here: the request_id does not exist locally, since this
-// follower never recorded one - the FSM read that failure comes from is
-// a completely different, unrelated fact from "the forward to the
-// leader failed"). The operator was shown that unrelated failure and
-// never learned the forward itself was the real problem.
-//
-// Two genuine raft nodes, so the LeaderHint and the leadership check
-// under test are exactly what a real Colony reports - mirroring this
-// file's own CreateJail/RequestJoinColony regression tests for the same
-// class of bug.
-func TestIntegration_ApproveJoinRequest_ForwardingFailureSurfacedInError(t *testing.T) {
+// newFollowerAtCodeVerifiedForTest builds a two-voter Colony in which the
+// second Comb is a genuine follower, seeds one pending join request
+// replicated to both, and completes Stage 1 on the leader so the request is
+// at CODE_VERIFIED with a real second PIN. It returns the leader's managerd,
+// the follower's managerd, the request id, and that second PIN: exactly the
+// state a request reaches right before a real Approve.
+func newFollowerAtCodeVerifiedForTest(t *testing.T) (*Server, *Server, string, string) {
+	t.Helper()
 	leaderSocket := newRaftdUDSSocket(t)
 	leaderClient, leaderSrv := newManagerdRPCClientAndServer(t, leaderSocket, "manager-1")
 	openColonyJoinWindowForTest(t, leaderClient)
@@ -266,6 +258,27 @@ func TestIntegration_ApproveJoinRequest_ForwardingFailureSurfacedInError(t *test
 		return gerr == nil && got.GetRequest().GetStage() == internalpb.JoinRequestStage_JOIN_REQUEST_STAGE_CODE_VERIFIED
 	})
 
+	return leaderSrv, followerSrv, reqResp.GetRequestId(), secondPin
+}
+
+// TestIntegration_ApproveJoinRequest_ForwardingFailureSurfacedInError is
+// issues #77/#81's own reproduction: ApproveJoinRequest's leadership
+// check (ADR-0103) forwards a follower's call to the leader - but when
+// that forward itself fails, the OLD code fell through to local
+// processing anyway, which then failed at the NEXT gate for an unrelated
+// reason (here: the request_id does not exist locally, since this
+// follower never recorded one - the FSM read that failure comes from is
+// a completely different, unrelated fact from "the forward to the
+// leader failed"). The operator was shown that unrelated failure and
+// never learned the forward itself was the real problem.
+//
+// Two genuine raft nodes, so the LeaderHint and the leadership check
+// under test are exactly what a real Colony reports - mirroring this
+// file's own CreateJail/RequestJoinColony regression tests for the same
+// class of bug.
+func TestIntegration_ApproveJoinRequest_ForwardingFailureSurfacedInError(t *testing.T) {
+	leaderSrv, followerSrv, requestID, secondPin := newFollowerAtCodeVerifiedForTest(t)
+
 	simulatedErr := errors.New(`tls: failed to verify certificate: x509: certificate is valid for 127.0.0.1, not 10.90.0.94`)
 	followerSrv.peers = &fakeFailingApproveJoinPeerForwarder{err: simulatedErr}
 
@@ -292,7 +305,7 @@ func TestIntegration_ApproveJoinRequest_ForwardingFailureSurfacedInError(t *test
 	// get that far: a follower whose forward fails reports THAT failure
 	// and stops, before reading anything else past the window check.
 	resp, err := followerSrv.ApproveJoinRequest(ctx, &rpcpb.ApproveJoinRequestRequest{
-		RequestId: reqResp.GetRequestId(), ConfirmPhrase: approveJoinRequestConfirmPhrase, SecondPin: secondPin,
+		RequestId: requestID, ConfirmPhrase: approveJoinRequestConfirmPhrase, SecondPin: secondPin,
 	})
 	if authReadCalls != 0 {
 		t.Errorf("this follower's own authorization store was read %d time(s); a follower that forwards (or fails to) must never consult its own copy at all (issue #85)", authReadCalls)
@@ -305,6 +318,61 @@ func TestIntegration_ApproveJoinRequest_ForwardingFailureSurfacedInError(t *test
 	}
 	if !strings.Contains(resp.GetError(), "certificate is valid for 127.0.0.1") {
 		t.Errorf("Error = %q, want the real forwarding failure reason surfaced, not silently swallowed by a fall-through to local processing", resp.GetError())
+	}
+	// issue #77: the refusal also says WHICH Comb is the leader right now,
+	// so an operator who must create an authorization entry knows where.
+	// Compared against the leader's own raft identity, not the follower's
+	// view of it, so the assertion cannot pass by reading the same value
+	// it is checking.
+	leaderStatus, statusErr := leaderSrv.raft.Status(context.Background())
+	if statusErr != nil || leaderStatus.GetNodeId() == "" {
+		t.Fatalf("leader raft Status() = (%v, %v), want a node id", leaderStatus, statusErr)
+	}
+	if !strings.Contains(resp.GetError(), leaderStatus.GetNodeId()) {
+		t.Errorf("Error = %q, want it to name the current leader %q (issue #77)", resp.GetError(), leaderStatus.GetNodeId())
+	}
+	if resp.GetLeaderHint() == "" {
+		t.Errorf("LeaderHint is empty; the refusal should carry the leader's address for the operator")
+	}
+}
+
+// TestIntegration_ApproveJoinRequest_FollowerWithNoForwardingNamesTheLeader
+// covers the other non-leader branch: a follower that knows the leader but
+// has no peer forwarding configured. It must refuse by naming the leader and
+// its address, and must not evaluate any leader-only gate (issues #77, #81).
+func TestIntegration_ApproveJoinRequest_FollowerWithNoForwardingNamesTheLeader(t *testing.T) {
+	leaderSrv, followerSrv, requestID, secondPin := newFollowerAtCodeVerifiedForTest(t)
+	followerSrv.peers = nil
+
+	authReadCalls := 0
+	followerSrv.joinAuthorizationRead = func() (joinauth.Store, error) {
+		authReadCalls++
+		return joinauth.Store{}, nil
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	resp, err := followerSrv.ApproveJoinRequest(ctx, &rpcpb.ApproveJoinRequestRequest{
+		RequestId: requestID, ConfirmPhrase: approveJoinRequestConfirmPhrase, SecondPin: secondPin,
+	})
+	if err != nil {
+		t.Fatalf("ApproveJoinRequest() error: %v", err)
+	}
+	leaderStatus, statusErr := leaderSrv.raft.Status(ctx)
+	if statusErr != nil || leaderStatus.GetNodeId() == "" {
+		t.Fatalf("leader raft Status() = (%v, %v), want a node id", leaderStatus, statusErr)
+	}
+	if !strings.Contains(resp.GetError(), leaderStatus.GetNodeId()) || !strings.Contains(resp.GetError(), "no peer forwarding is configured") {
+		t.Errorf("Error = %q, want it to name the leader %q and say no peer forwarding is configured", resp.GetError(), leaderStatus.GetNodeId())
+	}
+	if resp.GetLeaderHint() == "" {
+		t.Errorf("LeaderHint is empty; want the leader's address")
+	}
+	if strings.Contains(resp.GetError(), "authorization entry") {
+		t.Errorf("Error = %q, reports the authorization gate; a follower must refuse on leadership before reaching it", resp.GetError())
+	}
+	if authReadCalls != 0 {
+		t.Errorf("follower read its authorization store %d time(s); a non-leader must stop before any leader-only gate", authReadCalls)
 	}
 }
 
