@@ -1868,9 +1868,10 @@ func (f *FSM) jailHostnameConflict(hostname, excludeID string) string {
 // applyDeleteNetwork removes a NetworkDefinition outright - no soft-
 // delete tombstone, unlike DeleteVM, since a network has no physical
 // resources of its own to reconcile away first (see NetworkDefinition's
-// doc comment). Rejected if any VM still references it, or if it
+// doc comment). Rejected if any VM or jail still references it, or if it
 // doesn't exist - no cascade/orphan-reclaim, matching the same caution
-// already accepted for VM deletion (ADR-0016).
+// already accepted for VM deletion (ADR-0016). A jail counts whether or
+// not it is VNET: it holds an address on the network either way (ADR-0117).
 func (f *FSM) applyDeleteNetwork(index uint64, id string) *FSMApplyResult {
 	network, exists := f.networks[id]
 	if !exists {
@@ -1879,6 +1880,11 @@ func (f *FSM) applyDeleteNetwork(index uint64, id string) *FSMApplyResult {
 	for _, vm := range f.vms {
 		if vm.GetNetworkId() == id {
 			return &FSMApplyResult{Index: index, Error: fmt.Sprintf("DeleteNetwork: still referenced by VM %q", vm.GetId())}
+		}
+	}
+	for _, jail := range f.jails {
+		if jail.GetNetworkId() == id {
+			return &FSMApplyResult{Index: index, Error: fmt.Sprintf("DeleteNetwork: still referenced by jail %q", jail.GetId())}
 		}
 	}
 	delete(f.networks, id)

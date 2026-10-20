@@ -736,6 +736,25 @@ func TestFSM_Apply_DeleteNetworkStillReferencedIsRejected(t *testing.T) {
 	}
 }
 
+// A jail holds an address on its network (ADR-0117) whether or not it is
+// VNET, so deleting the network out from under it must be refused exactly
+// like a VM reference is.
+func TestFSM_Apply_DeleteNetworkStillReferencedByJailIsRejected(t *testing.T) {
+	fsm := NewFSM()
+	fsm.Apply(&raft.Log{Index: 1, Data: mustMarshalCommand(t, createNetworkCmd("net-1", "prod", "10.60.0.0/24"))})
+	fsm.Apply(&raft.Log{Index: 2, Data: mustMarshalCommand(t, createJailOnNetworkCmd("jail-1", "net-1", true))})
+
+	deleteCmd := &internalpb.Command{Op: &internalpb.Command_DeleteNetwork{DeleteNetwork: &internalpb.DeleteNetwork{Id: "net-1"}}}
+	result := fsm.Apply(&raft.Log{Index: 3, Data: mustMarshalCommand(t, deleteCmd)})
+
+	if result.(*FSMApplyResult).Error == "" {
+		t.Fatalf("Error = empty, want a still-referenced rejection")
+	}
+	if _, ok := fsm.Network("net-1"); !ok {
+		t.Errorf("Network(net-1) removed despite the rejected delete")
+	}
+}
+
 func TestFSM_Apply_CreateVMOnNetworkAssignsIPAndMAC(t *testing.T) {
 	fsm := NewFSM()
 	fsm.Apply(&raft.Log{Index: 1, Data: mustMarshalCommand(t, createNetworkCmd("net-1", "prod", "10.60.0.0/24"))})

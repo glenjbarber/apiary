@@ -674,7 +674,7 @@ func (r *Reconciler) RunOnce(ctx context.Context) (err error) {
 		}
 	}
 
-	if err := r.reconcileNetworkArtifacts(ctx, planned, networks); err != nil && firstErr == nil {
+	if err := r.reconcileNetworkArtifacts(ctx, planned, plannedJails, networks); err != nil && firstErr == nil {
 		firstErr = fmt.Errorf("cluster: reconciling managed network cleanup: %w", err)
 	}
 
@@ -1545,7 +1545,7 @@ func (r *Reconciler) ensureUplinkBridgedNetwork(ctx context.Context, network *in
 // reconcileNetworkArtifacts persists only positive ownership observations and
 // cleans up only after the corresponding replicated network definition has
 // disappeared. A defined but unused network is deliberately retained.
-func (r *Reconciler) reconcileNetworkArtifacts(ctx context.Context, planned []VMPlacement, networks map[string]*internalpb.NetworkDefinition) error {
+func (r *Reconciler) reconcileNetworkArtifacts(ctx context.Context, planned []VMPlacement, plannedJails []JailPlacement, networks map[string]*internalpb.NetworkDefinition) error {
 	if r.VLAN == nil || r.NetworkStatePath == "" {
 		return nil
 	}
@@ -1559,19 +1559,38 @@ func (r *Reconciler) reconcileNetworkArtifacts(ctx context.Context, planned []VM
 			next[id] = artifact
 		}
 	}
-	for _, vm := range planned {
-		if vm.Deleting || vm.NetworkID == "" {
-			continue
+	// Only a VNET jail attaches to a bridge (ADR-0117); a plain jail shares
+	// the host's stack and claims no artifact. Each network is processed
+	// once: a second ensureNetwork on the same bridge reports it as already
+	// present, and recording that copy would clear the OwnBridge it earned.
+	var inUse []string
+	seen := make(map[string]bool)
+	use := func(networkID string) {
+		if networkID != "" && !seen[networkID] {
+			seen[networkID] = true
+			inUse = append(inUse, networkID)
 		}
-		network, ok := networks[vm.NetworkID]
+	}
+	for _, vm := range planned {
+		if !vm.Deleting {
+			use(vm.NetworkID)
+		}
+	}
+	for _, j := range plannedJails {
+		if !j.Deleting && j.VNET {
+			use(j.NetworkID)
+		}
+	}
+	for _, networkID := range inUse {
+		network, ok := networks[networkID]
 		if !ok {
-			continue // reconcileVM reports the inconsistent intent.
+			continue // reconcileVM and reconcileJail report the inconsistent intent.
 		}
 		artifact, err := r.ensureNetwork(ctx, network)
 		if err != nil {
-			return fmt.Errorf("ensuring network %q before cleanup: %w", vm.NetworkID, err)
+			return fmt.Errorf("ensuring network %q before cleanup: %w", networkID, err)
 		}
-		if old, exists := state.Networks[vm.NetworkID]; exists {
+		if old, exists := state.Networks[networkID]; exists {
 			if old.Bridge == artifact.Bridge {
 				artifact.OwnBridge = artifact.OwnBridge || old.OwnBridge
 			}
@@ -1579,7 +1598,7 @@ func (r *Reconciler) reconcileNetworkArtifacts(ctx context.Context, planned []VM
 				artifact.OwnVLAN = artifact.OwnVLAN || old.OwnVLAN
 			}
 		}
-		next[vm.NetworkID] = artifact
+		next[networkID] = artifact
 	}
 
 	for id, old := range state.Networks {

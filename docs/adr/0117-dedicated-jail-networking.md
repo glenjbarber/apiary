@@ -2,9 +2,10 @@
 
 ## Status
 
-Accepted (design). The first increment described in "Stage 1" below is
-implemented. Stages 2+ are explicitly NOT implemented - see "What is
-NOT in this increment."
+Accepted (design). Stage 1 below is implemented. The deferred items in
+"What is NOT in this increment" are resolved as noted there, except the
+two marked open: jail isolation policy beyond firewall rules, and
+migration/live-move, which has no jail equivalent to build on yet.
 
 ## Context
 
@@ -251,31 +252,30 @@ no epair, no IP, no new reconciler work. When set:
 
 ### NOT in this increment (explicitly deferred to later stages)
 
-- **PF/firewall integration** for jails (`jailAnchor`/
-  `JailDefinition.firewall_rules`, reusing `internal/pf.RenderRules`
-  exactly as VMs already do). A VNET jail from this increment is
-  unfiltered, same as an unfiltered VM today.
-- **Isolation policy UI/config** beyond "which `NetworkDefinition`" -
-  no per-jail allow/deny beyond what a future firewall-rules field
-  would bring, no isolation levels, no jail-to-jail policy distinct
+- **PF/firewall integration** - resolved. `JailDefinition.firewall_rules`
+  reuses the `FirewallRule` message and `internal/pf.RenderRules`, applied
+  to the jail's own anchor (commit b5bdf60). A plain (`ip4=inherit`) jail
+  has no interface for pf to filter, so its rules are reported as
+  unapplied rather than silently accepted.
+- **Isolation policy UI/config** - OPEN. No per-jail allow/deny beyond
+  firewall rules, no isolation levels, no jail-to-jail policy distinct
   from VM-to-VM policy on the same network.
-- **Full network-artifact-style epair tracking** integrated into
-  `reconcileNetworkArtifacts`'s existing bridge/VLAN
-  cleanup-on-network-deletion pass - this increment's epair state file
-  is deliberately separate and only ever touched by
-  `ensureJail`/`teardownJail`/`reclaimStaleJail`, mirroring how a VM's
-  tap device is *also* not tracked in that same artifact file today
-  (it's tracked by `bhyve.Manager`'s own `tapfile` instead) - this is
-  parity with the existing VM pattern, not a shortcut.
-- **DHCP-inside-the-jail / `uplink_bridged`-style "skip Apiary's own
-  allocation"** option for VNET jails - `uplink_bridged` VMs already
-  get this by skipping `allocateIP`; the same carve-out is already
-  present in `applyCreateJail` (an `uplink_bridged` network skips
-  allocation for a jail exactly like it does for a VM) but nothing in
-  the jail itself would configure a DHCP client on its vnet interface
-  yet, so the field exists but isn't independently useful for jails
-  until a later stage adds that.
-- **Migration/live-move safety** for a VNET jail (e.g. if the owning
+- **Epair tracking in the network cleanup pass** - resolved differently
+  than first sketched. The epair pair stays in its own per-jail state
+  file, torn down by `teardownJail`/`reclaimStaleJail`. What this pass
+  does need is the bridge: a network used only by VNET jails is now
+  recorded as owned by `reconcileNetworkArtifacts`, and
+  `DeleteNetwork` refuses while any jail still references the network.
+  Together those mean a network cannot be deleted under a live jail's
+  epair, so the cleanup pass never has to reach an epair itself.
+- **DHCP-inside-the-jail / `uplink_bridged`-style allocation skip** -
+  resolved (commit 2692531). `internal/jail/dhcp.go` provides the in-jail
+  client, and `internal/jailnet`'s `reconcileDHCP` starts it on a jail
+  with no assigned address. The client is started by the reconciler on a
+  later tick, not at creation: `ensureJail` does not set `cfg.DHCP`, so a
+  new uplink-bridged jail gets its address one reconcile pass after it is
+  created.
+- **Migration/live-move safety** - OPEN, for a VNET jail (e.g. if the owning
   node reassignment machinery is ever extended to jails at all - there
   is no such machinery for jails today, replicated or not, so this is
   out of scope regardless of networking mode).
