@@ -1,0 +1,22 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "apiary-mcp-connector",
+  "version": "0.1.0",
+  "description": "Read-only inventory and cluster health tools for Apiary, backed by Viewer authorization.",
+  "author": {
+    "name": "Apiary"
+  },
+  "extensions": {
+    "com.openai": {
+      "interface": {
+        "displayName": "Apiary MCP Connector",
+        "shortDescription": "Read-only Apiary inventory",
+        "longDescription": "Inspect Apiary VM and jail inventory and summarized cluster health. This connector exposes no mutation tools and requires an Apiary Viewer API key.",
+        "developerName": "Apiary",
+        "category": "Developer Tools",
+        "capabilities": [],
+        "defaultPrompt": "Show me the current Apiary inventory and cluster health."
+      }
+    }
+  }
+}
