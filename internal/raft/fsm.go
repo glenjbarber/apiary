@@ -176,6 +176,8 @@ func (f *FSM) Apply(log *raft.Log) interface{} {
 		return f.applySetVMDesiredState(log.Index, op.SetVmDesiredState)
 	case *internalpb.Command_SetVmFirewallRules:
 		return f.applySetVMFirewallRules(log.Index, op.SetVmFirewallRules)
+	case *internalpb.Command_SetVmConfig:
+		return f.applySetVMConfig(log.Index, op.SetVmConfig)
 	case *internalpb.Command_CreateNetwork:
 		return f.applyCreateNetwork(log.Index, op.CreateNetwork.GetNetwork())
 	case *internalpb.Command_DeleteNetwork:

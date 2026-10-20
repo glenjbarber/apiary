@@ -463,6 +463,13 @@ message Command {
     // question would technically be safe to carry through UpdateVM).
     SetVMFirewallRules set_vm_firewall_rules = 19;
 
+    // SetVMConfig changes only VMDefinition.vcpus and memory_mb on an
+    // existing VM - the narrow, deliberately-not-UpdateVM shape used by
+    // every other frontend-initiated VM edit (see ADR-0049). The new
+    // values take effect only when the reconciler next launches the VM's
+    // bhyve process; a running VM is never resized in place.
+    SetVMConfig set_vm_config = 46;
+
     // SetNetworkName renames a NetworkDefinition - deliberately the
     // only mutable field on an existing network (ADR-0071 rejected a
     // general UpdateNetwork for subnet/vlan/bridge/gateway, since
@@ -783,6 +790,17 @@ message SetVMDesiredState {
 message SetVMFirewallRules {
   string id = 1;
   repeated FirewallRule firewall_rules = 2;
+}
+
+// SetVMConfig replaces VMDefinition.vcpus and VMDefinition.memory_mb on an
+// existing VM and nothing else. Both values are always carried, so a caller
+// that wants to change only one must send the other's current value. Range
+// limits are enforced by the FSM; host capacity is checked by the manager
+// before submission (see internal/manager). Fails if the id doesn't exist.
+message SetVMConfig {
+  string id = 1;
+  uint32 vcpus = 2;
+  uint64 memory_mb = 3;
 }
 
 // SetNetworkName changes only NetworkDefinition.name. Fails if the id

@@ -46,6 +46,26 @@
       <div class="actions"><a class="button" href="/vms/{{.VM.ID}}/console">Console</a><a class="button secondary" href="/vms/{{.VM.ID}}/serial">Serial log and evidence</a></div>
     </section>
 
+    {{if .VMConfigNotice}}<div class="banner-success">{{.VMConfigNotice}}</div>{{end}}
+    <section class="panel" id="vm-config">
+      <h3>Configuration</h3>
+      <p class="muted">Configured now: {{if .VM.VCPUs}}{{.VM.VCPUs}}{{else}}1 (default){{end}} vCPU, {{if .VM.MemoryMB}}{{.VM.MemoryMB}}{{else}}512 (default){{end}} MB memory. Changes to vCPUs or memory are <strong>restart-required</strong>: they apply the next time this VM starts, and are never applied live.</p>
+      {{if .VMConfigFormError}}<div class="banner-error">{{.VMConfigFormError}}</div>{{end}}
+      {{if and .CanOperate (ne .VM.DesiredState "deleting")}}
+      <details{{if .VMConfigFormError}} open{{end}}>
+        <summary>Edit configuration</summary>
+        <form method="post" action="/vms/{{.VM.ID}}/config" id="vm-config-form">
+          <label>vCPUs <input type="number" name="vcpus" min="1" max="16" step="1" required data-label="vCPUs" data-current="{{if .VM.VCPUs}}{{.VM.VCPUs}}{{else}}1{{end}}" value="{{if .VMConfigDraftVCPUs}}{{.VMConfigDraftVCPUs}}{{else}}{{if .VM.VCPUs}}{{.VM.VCPUs}}{{else}}1{{end}}{{end}}"></label>
+          <label>Memory (MB) <input type="number" name="memory_mb" min="128" step="1" required data-label="Memory" data-unit=" MB" data-current="{{if .VM.MemoryMB}}{{.VM.MemoryMB}}{{else}}512{{end}}" value="{{if .VMConfigDraftMemoryMB}}{{.VMConfigDraftMemoryMB}}{{else}}{{if .VM.MemoryMB}}{{.VM.MemoryMB}}{{else}}512{{end}}{{end}}"></label>
+          <p id="vm-config-pending" class="muted" aria-live="polite">No pending changes.</p>
+          <p class="muted">Restart required: a running VM keeps its current vCPUs and memory until it is stopped and started, or restarted. Valid vCPUs are 1 to 16. Memory must be at least 128 MB and fit in the owner node's physical memory alongside its other VMs.</p>
+          <p class="muted">Not editable here: VM ID, name, owner node, disks and disk size, base image or snapshot clone, installer image, network, IP and MAC address, replica node, lifecycle state. Firewall rules and public exposure have their own panels below.</p>
+          <div class="actions"><button type="submit">Save configuration</button></div>
+        </form>
+      </details>
+      {{end}}
+    </section>
+
     {{if and .CanOperate (ne .VM.DesiredState "deleting")}}
     <section class="panel vm-controls">
       <div><h3>Lifecycle</h3><p class="muted">Stop preserves this VM's storage and definition. Restart waits for the owning Comb to stop it before starting it again.</p></div>
@@ -230,6 +250,28 @@
     {{end}}
   {{end}}
   </main>
+  <script>
+  (function () {
+    var form = document.getElementById('vm-config-form');
+    var out = document.getElementById('vm-config-pending');
+    if (!form || !out) { return; }
+    function refresh() {
+      var parts = [];
+      form.querySelectorAll('input[data-current]').forEach(function (input) {
+        var current = input.getAttribute('data-current');
+        var next = input.value.trim();
+        if (next !== '' && next !== current) {
+          parts.push(input.getAttribute('data-label') + ' ' + current + ' to ' + next + (input.getAttribute('data-unit') || ''));
+        }
+      });
+      out.textContent = parts.length === 0
+        ? 'No pending changes.'
+        : 'Pending: ' + parts.join(', ') + '. Restart required: applies the next time this VM starts.';
+    }
+    form.addEventListener('input', refresh);
+    refresh();
+  })();
+  </script>
   {{template "footer" .}}
 </body>
 </html>

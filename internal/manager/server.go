@@ -131,6 +131,7 @@ type PeerForwarder interface {
 	MigrateVM(ctx context.Context, addr string, req *rpcpb.MigrateVMRequest) (*rpcpb.MigrateVMResponse, error)
 	SetVMFirewallPaused(ctx context.Context, addr string, req *rpcpb.SetVMFirewallPausedRequest) (*rpcpb.SetVMFirewallPausedResponse, error)
 	SetVMFirewallRules(ctx context.Context, addr string, req *rpcpb.SetVMFirewallRulesRequest) (*rpcpb.SetVMFirewallRulesResponse, error)
+	SetVMConfig(ctx context.Context, addr string, req *rpcpb.SetVMConfigRequest) (*rpcpb.SetVMConfigResponse, error)
 	SetVMCloudflareExposure(ctx context.Context, addr string, req *rpcpb.SetVMCloudflareExposureRequest) (*rpcpb.SetVMCloudflareExposureResponse, error)
 	SetVMDesiredState(ctx context.Context, addr string, req *rpcpb.SetVMDesiredStateRequest) (*rpcpb.SetVMDesiredStateResponse, error)
 	ForcePurgeJail(ctx context.Context, addr string, req *rpcpb.ForcePurgeJailRequest) (*rpcpb.ForcePurgeJailResponse, error)
