@@ -436,13 +436,69 @@ func TestLoopbackRaftBindWarning(t *testing.T) {
 }
 
 func TestRaftTLSWarning(t *testing.T) {
-	w := raftTLSWarning("")
-	for _, want := range []string{"PLAINTEXT", "raft_tls_cert", "raft_tls_key", "raft_tls_ca", "ADR-0078"} {
+	off := false
+	on := true
+	if w := raftTLSWarning(nil); w != "" {
+		t.Errorf("absent raft_tls_enabled warned %q, want no warning (encryption is the default)", w)
+	}
+	if w := raftTLSWarning(&on); w != "" {
+		t.Errorf("raft_tls_enabled: true warned %q, want no warning", w)
+	}
+	w := raftTLSWarning(&off)
+	for _, want := range []string{"WARNING", "PLAINTEXT", "raft_tls_enabled", "raft_tls_cert", "raft_tls_key", "raft_tls_ca", "cluster state", "forwarded credentials", "ADR-0078"} {
 		if !strings.Contains(w, want) {
-			t.Errorf("empty raft_tls_cert: warning = %q, want it to mention %q", w, want)
+			t.Errorf("raft_tls_enabled: false warning = %q, want it to mention %q", w, want)
 		}
 	}
-	if w := raftTLSWarning("/usr/local/etc/apiary/raft.crt"); w != "" {
-		t.Errorf("a configured raft_tls_cert must not warn, got %q", w)
+}
+
+// TestResolveRaftTLS covers issue #97's startup gate: raftd must refuse
+// to start with no TLS fields and no raft_tls_enabled, must start with
+// the full trio, and must start in plaintext only on an explicit false.
+func TestResolveRaftTLS(t *testing.T) {
+	cases := []struct {
+		name            string
+		on              bool
+		explicit        bool
+		cert, key, ca   string
+		wantErr         bool
+		wantCert, wantK string
+		wantCA          string
+	}{
+		{name: "absent, no fields: refused", on: true, explicit: false, wantErr: true},
+		{name: "absent, partial fields: refused", on: true, cert: "/c", key: "/k", wantErr: true},
+		{name: "true, no fields: refused", on: true, explicit: true, wantErr: true},
+		{name: "absent, full trio: TLS", on: true, cert: "/c", key: "/k", ca: "/ca", wantCert: "/c", wantK: "/k", wantCA: "/ca"},
+		{name: "true, full trio: TLS", on: true, explicit: true, cert: "/c", key: "/k", ca: "/ca", wantCert: "/c", wantK: "/k", wantCA: "/ca"},
+		{name: "false, no fields: plaintext", on: false, explicit: true},
+		{name: "false, fields still set: refused", on: false, explicit: true, cert: "/c", key: "/k", ca: "/ca", wantErr: true},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			cert, key, ca, err := resolveRaftTLS(c.on, c.cert, c.key, c.ca, c.explicit)
+			if (err != nil) != c.wantErr {
+				t.Fatalf("resolveRaftTLS() error = %v, wantErr %v", err, c.wantErr)
+			}
+			if err != nil {
+				if !c.on {
+					return
+				}
+				for _, want := range []string{"raft_tls_cert", "raft_tls_key", "raft_tls_ca"} {
+					if !strings.Contains(err.Error(), want) {
+						t.Errorf("error %q does not name %s", err, want)
+					}
+				}
+				if !strings.Contains(err.Error(), `"raft_tls_enabled": false`) {
+					t.Errorf("error %q does not say raft_tls_enabled: false turns encryption off", err)
+				}
+				return
+			}
+			if cert != c.wantCert || key != c.wantK || ca != c.wantCA {
+				t.Errorf("resolveRaftTLS() = %q,%q,%q, want %q,%q,%q", cert, key, ca, c.wantCert, c.wantK, c.wantCA)
+			}
+			if !c.on && (cert != "" || key != "" || ca != "") {
+				t.Errorf("plaintext mode returned TLS material %q,%q,%q", cert, key, ca)
+			}
+		})
 	}
 }

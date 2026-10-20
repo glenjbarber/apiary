@@ -842,6 +842,10 @@ type RaftdConfigRecord struct {
 	RaftTLSCert string `json:"raft_tls_cert,omitempty"`
 	RaftTLSKey  string `json:"raft_tls_key,omitempty"`
 	RaftTLSCA   string `json:"raft_tls_ca,omitempty"`
+	// RaftTLSEnabled is the explicit on/off switch (issue #97). Not a
+	// credential; recorded so a restored file keeps the operator's
+	// explicit opt-out rather than silently defaulting back to on.
+	RaftTLSEnabled *bool `json:"raft_tls_enabled,omitempty"`
 	// SingleNode is public topology, same class as PreferredLeaderID
 	// above (ADR-0106's loopback-raft_bind guardrail), not a credential.
 	SingleNode bool `json:"single_node,omitempty"`
@@ -860,6 +864,7 @@ func BuildRaftdConfigRecord(cfg raftdconfig.Config) RaftdConfigRecord {
 		RaftTLSCert:       cfg.RaftTLSCert,
 		RaftTLSKey:        cfg.RaftTLSKey,
 		RaftTLSCA:         cfg.RaftTLSCA,
+		RaftTLSEnabled:    cfg.RaftTLSEnabled,
 		PreferredLeaderID: cfg.PreferredLeaderID,
 		SingleNode:        cfg.SingleNode,
 	}

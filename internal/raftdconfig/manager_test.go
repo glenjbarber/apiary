@@ -296,3 +296,34 @@ func TestManager_LoadCleanFileUnchanged(t *testing.T) {
 		t.Errorf("Load() = %+v, want %+v", got, want)
 	}
 }
+
+// TestRaftTLSOnDefaultsToTrueAndOnlyFalseTurnsItOff pins issue #97's
+// config semantics: an absent raft_tls_enabled and an explicit true both
+// mean mutual TLS, and only an explicit false turns it off.
+func TestRaftTLSOnDefaultsToTrueAndOnlyFalseTurnsItOff(t *testing.T) {
+	cases := []struct {
+		name string
+		body string
+		want bool
+	}{
+		{"absent", `{"node_id": "node1"}`, true},
+		{"explicit true", `{"raft_tls_enabled": true}`, true},
+		{"explicit false", `{"raft_tls_enabled": false}`, false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			dir := t.TempDir()
+			path := filepath.Join(dir, "raftd.json")
+			if err := os.WriteFile(path, []byte(c.body), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			cfg, err := (&Manager{Path: path}).Load()
+			if err != nil {
+				t.Fatalf("Load() error: %v", err)
+			}
+			if got := cfg.RaftTLSOn(); got != c.want {
+				t.Errorf("RaftTLSOn() = %v, want %v", got, c.want)
+			}
+		})
+	}
+}

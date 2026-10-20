@@ -73,6 +73,7 @@ func run() error {
 	restoreFile := flag.String("restore-file", "", "path to a -export archive to load for -restore")
 	restoreDryRun := flag.String("restore-dry-run", "", "validate the archive at the given path (format version, checksum) and print a summary of what it contains, then exit - makes no changes at all, needs no confirmation phrase, and does not touch the data directory")
 	statusJSON := flag.Bool("status", false, "read this node's own persisted raft state (current term, log bounds, membership) straight from its data directory and exit - starts no server, takes no vote, contacts no peer, and writes nothing. Requires raftd to be stopped, since it holds an exclusive lock on the log; add -status-json for machine-readable output")
+	raftTLSEnabledFlag := flag.Bool("raft-tls-enabled", true, "override raft_tls_enabled in raftd.json (issue #97): true (the default) requires the Raft transport's certificate, key and CA; false runs the Raft transport in PLAINTEXT, which sends cluster state, forwarded credentials and the data they reference unencrypted between Combs")
 	statusAsJSON := flag.Bool("status-json", false, "same read-only offline read as -status, rendered as a single JSON object for scripting. Implies -status")
 	buildinfo.RegisterVersionFlag(flag.CommandLine)
 	flag.Parse()
@@ -103,6 +104,15 @@ func run() error {
 		log.Printf("raftd: reading %s: %v - falling back to defaults for this one-shot command", raftdconfig.DefaultPath, err)
 		rcfg = raftdconfig.Defaults()
 	}
+	// -raft-tls-enabled only overrides the file when given on the
+	// command line; flag.Visit is how an absent flag is told apart from
+	// an explicit true/false.
+	flag.Visit(func(f *flag.Flag) {
+		if f.Name == "raft-tls-enabled" {
+			v := *raftTLSEnabledFlag
+			rcfg.RaftTLSEnabled = &v
+		}
+	})
 
 	if *reset != "" {
 		return resetDataDir(*reset, rcfg.DataDir)
@@ -124,9 +134,6 @@ func run() error {
 		NodeID:            rcfg.NodeID,
 		DataDir:           rcfg.DataDir,
 		BindAddr:          rcfg.RaftBind,
-		TLSCert:           rcfg.RaftTLSCert,
-		TLSKey:            rcfg.RaftTLSKey,
-		TLSCA:             rcfg.RaftTLSCA,
 		PreferredLeaderID: rcfg.PreferredLeaderID,
 	}
 
@@ -138,6 +145,19 @@ func run() error {
 	}
 	if *restorePhrase != "" {
 		return restoreDataDir(*restorePhrase, *restoreFile, cfg)
+	}
+
+	// Issue #97: the Raft transport is encrypted unless raft_tls_enabled
+	// is explicitly false. This is the only place that decides it, and
+	// it runs before any raft state is touched.
+	tlsCert, tlsKey, tlsCA, err := resolveRaftTLS(rcfg.RaftTLSOn(), rcfg.RaftTLSCert, rcfg.RaftTLSKey, rcfg.RaftTLSCA, rcfg.RaftTLSEnabled != nil)
+	if err != nil {
+		return err
+	}
+	cfg.TLSCert, cfg.TLSKey, cfg.TLSCA = tlsCert, tlsKey, tlsCA
+	raftTLSMode := "mutual-tls"
+	if !rcfg.RaftTLSOn() {
+		raftTLSMode = "plaintext"
 	}
 
 	hadState, err := raftnode.HasExistingState(cfg)
@@ -163,7 +183,7 @@ func run() error {
 	if w := loopbackRaftBindWarning(rcfg.RaftBind, rcfg.SingleNode); w != "" {
 		log.Print(w)
 	}
-	if w := raftTLSWarning(rcfg.RaftTLSCert); w != "" {
+	if w := raftTLSWarning(rcfg.RaftTLSEnabled); w != "" {
 		log.Print(w)
 	}
 
@@ -183,9 +203,9 @@ func run() error {
 		serveErrCh <- grpcServer.Serve(lis)
 	}()
 
-	log.Printf("raftd: %s listening on %s (node-id=%s, raft-bind=%s, data-dir=%s, raft-tls=%v)",
+	log.Printf("raftd: %s listening on %s (node-id=%s, raft-bind=%s, data-dir=%s, raft-tls=%s)",
 		buildinfo.String(),
-		rcfg.Socket, resolvedNodeID, rcfg.RaftBind, rcfg.DataDir, rcfg.RaftTLSCert != "")
+		rcfg.Socket, resolvedNodeID, rcfg.RaftBind, rcfg.DataDir, raftTLSMode)
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -574,20 +594,40 @@ func loopbackRaftBindWarning(raftBind string, singleNode bool) string {
 	return "raftd: WARNING: raft_bind (" + raftBind + ") is a loopback address - another host can never reach this Comb at it, and the first voter added to this cluster will strand it permanently unable to win an election. Set raft_bind to a routable hostname or address before joining or being joined, or set \"single_node\": true in raftd.json if this Comb will never have peers"
 }
 
-// raftTLSWarning returns a startup warning when this Comb's raft
-// transport is running without TLS (raftTLSCert empty, the project-wide
-// default - ADR-0078), or "" when it is configured. This does not
-// change that default: issue #97 is explicit that making Raft TLS
-// mandatory is a separate migration decision for already-installed
-// Colonies. What changes is that the risk stops being a quiet
-// "raft-tls=false" field in the startup log line and becomes a
-// WARNING naming exactly what travels this transport in cleartext
-// between Combs (cluster state, credentials forwarded with a raft
-// write, and application data referenced by that state) and exactly
-// which three fields turn it on.
-func raftTLSWarning(certPath string) string {
-	if certPath != "" {
+// resolveRaftTLS turns raft_tls_enabled and the three certificate
+// fields into the transport settings raftd starts with (issue #97).
+// Absent or true means mutual TLS (ADR-0078), which needs all three
+// fields; a partial set or an empty set is refused here with an error
+// that names the fields and the explicit opt-out. Only an explicit
+// false runs the transport in plaintext, and then no certificate field
+// may be set, so a leftover certificate is never silently ignored.
+// explicit reports whether raft_tls_enabled was given at all, which
+// only changes the wording of the error.
+func resolveRaftTLS(on bool, cert, key, ca string, explicit bool) (string, string, string, error) {
+	set := cert != "" || key != "" || ca != ""
+	if !on {
+		if set {
+			return "", "", "", fmt.Errorf("raftd: raft_tls_enabled is false, but raft_tls_cert, raft_tls_key or raft_tls_ca is also set in %s. Remove the certificate fields to run plaintext, or set raft_tls_enabled to true (or remove it) to use TLS", raftdconfig.DefaultPath)
+		}
+		return "", "", "", nil
+	}
+	if cert == "" || key == "" || ca == "" {
+		src := "absent or true"
+		if explicit {
+			src = "true"
+		}
+		return "", "", "", fmt.Errorf("raftd: the Raft transport uses mutual TLS (raft_tls_enabled is %s), but raft_tls_cert, raft_tls_key and raft_tls_ca must all be set in %s (set: cert=%t key=%t ca=%t). Provision all three, or set \"raft_tls_enabled\": false in %s to run the Raft transport in plaintext on purpose - that turns encryption off explicitly", src, raftdconfig.DefaultPath, cert != "", key != "", ca != "", raftdconfig.DefaultPath)
+	}
+	return cert, key, ca, nil
+}
+
+// raftTLSWarning returns the startup warning shown only when
+// raft_tls_enabled is explicitly false (issue #97), or "" otherwise.
+// Encryption is the default, so the warning names exactly what the
+// explicit opt-out sends in cleartext.
+func raftTLSWarning(enabled *bool) string {
+	if enabled == nil || *enabled {
 		return ""
 	}
-	return "raftd: WARNING: raft_tls_cert is not set, so this Comb's Raft transport is running in PLAINTEXT - cluster state, forwarded credentials and the data they describe are sent unencrypted between Combs over raft_bind. Set raft_tls_cert, raft_tls_key and raft_tls_ca in raftd.json to enable it; see ADR-0078 for the migration this requires on an already-running Colony"
+	return "raftd: WARNING: raft_tls_enabled is false, so this Comb's Raft transport is running in PLAINTEXT - cluster state, forwarded credentials and the data they reference are sent unencrypted between Combs over raft_bind. Set raft_tls_enabled to true (or remove it) and provide raft_tls_cert, raft_tls_key and raft_tls_ca in raftd.json to encrypt it; see ADR-0078"
 }

@@ -82,11 +82,18 @@ type Config struct {
 	// warnIfWorldReadable; it does not refuse to start).
 	InternalToken string `json:"internal_token,omitempty"`
 
+	// RaftTLSEnabled mirrors -raft-tls-enabled (issue #97). Absent (nil)
+	// or true means the Raft transport uses mutual TLS (ADR-0078), which
+	// needs RaftTLSCert, RaftTLSKey and RaftTLSCA all set; raftd refuses
+	// to start otherwise. Only an explicit false runs the transport in
+	// plaintext, and then the three certificate fields must be empty.
+	// Use RaftTLSOn rather than reading this pointer directly.
+	RaftTLSEnabled *bool `json:"raft_tls_enabled,omitempty"`
+
 	// RaftTLSCert/RaftTLSKey/RaftTLSCA mirror -raft-tls-cert/
 	// -raft-tls-key/-raft-tls-ca (ADR-0078): this node's own
 	// certificate/key and the CA bundle used to verify every peer on
-	// the raft transport. Leave all three empty for plain-TCP
-	// behavior.
+	// the raft transport. Required while RaftTLSOn is true.
 	RaftTLSCert string `json:"raft_tls_cert,omitempty"`
 	RaftTLSKey  string `json:"raft_tls_key,omitempty"`
 	RaftTLSCA   string `json:"raft_tls_ca,omitempty"`
@@ -112,6 +119,13 @@ type Config struct {
 	// voter added to it, unreachable by any other host (see
 	// docs/add-node-to-colony.md's own account of exactly that).
 	SingleNode bool `json:"single_node,omitempty"`
+}
+
+// RaftTLSOn reports whether the Raft transport must use mutual TLS:
+// true when raft_tls_enabled is absent or true, false only when it is
+// explicitly false (issue #97).
+func (c Config) RaftTLSOn() bool {
+	return c.RaftTLSEnabled == nil || *c.RaftTLSEnabled
 }
 
 // Defaults matches every flag's own former default value exactly, so
