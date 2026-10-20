@@ -2137,3 +2137,52 @@ func TestFSM_SnapshotRestore_PreservesRestartLeaseAndRecordState(t *testing.T) {
 		t.Errorf("restored record = %+v, want node02's restshimd restart preserved across snapshot/restore", record)
 	}
 }
+
+// An UpdateVM that omits the FSM-assigned addresses (as the manager's
+// toInternalVM always does) must keep the VM's MAC and IP, not clear them.
+func TestFSM_Apply_UpdateVMKeepsAssignedAddresses(t *testing.T) {
+	fsm := NewFSM()
+	fsm.Apply(&raft.Log{Index: 1, Data: mustMarshalCommand(t, createNetworkCmd("net-1", "prod", "10.60.0.0/24"))})
+	created := fsm.Apply(&raft.Log{Index: 2, Data: mustMarshalCommand(t, createVMOnNetworkCmd("vm-1", "net-1"))}).(*FSMApplyResult).VM
+	mac, ip := created.GetMacAddress(), created.GetIpAddress()
+	if mac == "" || ip == "" {
+		t.Fatalf("precondition: CreateVM assigned mac=%q ip=%q, want both set", mac, ip)
+	}
+
+	update := &internalpb.Command{Op: &internalpb.Command_UpdateVm{UpdateVm: &internalpb.UpdateVM{
+		Vm: &internalpb.VMDefinition{Id: "vm-1", Vcpus: 4, MemoryMb: 2048, NetworkId: "net-1"},
+	}}}
+	fsm.Apply(&raft.Log{Index: 3, Data: mustMarshalCommand(t, update)})
+
+	got, ok := fsm.VM("vm-1")
+	if !ok {
+		t.Fatalf("vm-1 missing after UpdateVM")
+	}
+	if got.GetMacAddress() != mac {
+		t.Errorf("MacAddress = %q after UpdateVM, want %q preserved", got.GetMacAddress(), mac)
+	}
+	if got.GetIpAddress() != ip {
+		t.Errorf("IpAddress = %q after UpdateVM, want %q preserved", got.GetIpAddress(), ip)
+	}
+}
+
+// Moving a VM to another network while it holds an address is refused: the
+// address was allocated from its old network.
+func TestFSM_Apply_UpdateVMRefusesNetworkChangeWhileAddressHeld(t *testing.T) {
+	fsm := NewFSM()
+	fsm.Apply(&raft.Log{Index: 1, Data: mustMarshalCommand(t, createNetworkCmd("net-1", "prod", "10.60.0.0/24"))})
+	fsm.Apply(&raft.Log{Index: 2, Data: mustMarshalCommand(t, createNetworkCmd("net-2", "lab", "10.70.0.0/24"))})
+	fsm.Apply(&raft.Log{Index: 3, Data: mustMarshalCommand(t, createVMOnNetworkCmd("vm-1", "net-1"))})
+
+	update := &internalpb.Command{Op: &internalpb.Command_UpdateVm{UpdateVm: &internalpb.UpdateVM{
+		Vm: &internalpb.VMDefinition{Id: "vm-1", NetworkId: "net-2"},
+	}}}
+	result := fsm.Apply(&raft.Log{Index: 4, Data: mustMarshalCommand(t, update)})
+	if result.(*FSMApplyResult).Error == "" {
+		t.Fatalf("Error = empty, want a refusal for a network change while an address is held")
+	}
+	got, _ := fsm.VM("vm-1")
+	if got.GetNetworkId() != "net-1" {
+		t.Errorf("NetworkId = %q after refused update, want net-1", got.GetNetworkId())
+	}
+}

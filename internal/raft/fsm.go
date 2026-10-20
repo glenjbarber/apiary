@@ -477,6 +477,18 @@ func (f *FSM) applyUpdateVM(index uint64, vm *internalpb.VMDefinition) *FSMApply
 	if res := f.checkPerVMDiskSize("UpdateVM", vm.GetId(), vm.GetDiskSizeMb(), f.vms[vm.GetId()].GetDiskSizeMb()); res != nil {
 		return &FSMApplyResult{Index: index, Error: res.Error}
 	}
+	// MacAddress and IpAddress are assigned by the FSM and never set by a
+	// caller, and the manager's toInternalVM never copies them. Without
+	// this, every UpdateVM cleared both. The address belongs to the
+	// network it was allocated from, so moving the VM to another network
+	// while it holds one is refused rather than carried over.
+	existing := f.vms[vm.GetId()]
+	if existing.GetIpAddress() != "" && vm.GetNetworkId() != existing.GetNetworkId() {
+		return &FSMApplyResult{Index: index, Error: fmt.Sprintf("UpdateVM: cannot change network_id of %q while it holds address %s", vm.GetId(), existing.GetIpAddress())}
+	}
+	vm = proto.Clone(vm).(*internalpb.VMDefinition)
+	vm.MacAddress = existing.GetMacAddress()
+	vm.IpAddress = existing.GetIpAddress()
 	f.vms[vm.GetId()] = vm
 	return &FSMApplyResult{Index: index, VM: vm}
 }
