@@ -218,6 +218,9 @@
           </select>
             </label>
             <label id="vnet-label"{{if $vm}} hidden{{end}}><input type="checkbox" name="vnet" id="vnet-input" value="1"{{if $vm}} disabled{{end}} title="Give this jail its own network stack (vnet;) wired to the network selected above via a dedicated epair(4) pair, instead of sharing the owning Comb's own stack. Requires a network to be selected."> VNET (dedicated network stack)</label>
+            <label id="jail-ip-label"{{if $vm}} hidden{{end}}>IPv4 address <span class="field-help" id="jail-ip-why">Pick a network above to set an address on it.</span>
+              <input type="text" name="ip_address" id="jail-ip-input" placeholder="Auto-allocate" autocomplete="off" spellcheck="false"{{if $vm}} disabled{{end}} title="An IPv4 address inside the selected network's subnet. Not the network, broadcast or .1 gateway address, and not already used by a VM or jail on that network. Cannot be changed after creation.">
+            </label>
           </div>
           <p class="field-help" id="vnet-cue" aria-live="polite"{{if $vm}} hidden{{end}}>VNET is a jail option: a VM always gets its own tap interface on the selected network, so there is nothing for it to opt in to.</p>
           <div id="block-vm-network">
@@ -310,6 +313,9 @@
     var vnetCue = document.getElementById('vnet-cue');
     var networkWhy = document.getElementById('network-why');
     var vnetLabel = document.getElementById('vnet-label');
+    var jailIPInput = document.getElementById('jail-ip-input');
+    var jailIPLabel = document.getElementById('jail-ip-label');
+    var jailIPWhy = document.getElementById('jail-ip-why');
     var initialStateLabel = document.getElementById('initial-state-label');
     var initialStateNote = document.getElementById('initial-state-unavailable');
 
@@ -827,6 +833,16 @@
     function refreshNetwork() {
       var jail = !isVM();
       var hasNetwork = !!selectedValue(networkPicker);
+      // The address field is only submitted when enabled (a disabled
+      // input is not posted), so it is disabled for a VM and until a
+      // network is named: an address means nothing without a subnet.
+      if (jailIPLabel) jailIPLabel.hidden = !jail;
+      if (jailIPInput) {
+        setControlAvailable(jailIPInput, jail && hasNetwork, 'An IPv4 address needs a managed network to be allocated from, so a network has to be named first.');
+        if (jailIPWhy) setText(jailIPWhy, hasNetwork
+          ? 'Optional. Leave blank and Apiary allocates the lowest free address on this network.'
+          : 'Pick a network above to set an address on it.');
+      }
       if (vnetInput) {
         if (!jail) {
           setControlAvailable(vnetInput, false, 'VNET is a jail option: a VM always gets its own tap interface on the selected network.');

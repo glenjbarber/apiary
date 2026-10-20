@@ -795,15 +795,31 @@ type JailDefinition struct {
 	// what opts a jail into dedicated VNET networking; it is never
 	// implied by any other field.
 	NetworkId string `protobuf:"bytes,11,opt,name=network_id,json=networkId,proto3" json:"network_id,omitempty"`
-	// ip_address is assigned by the FSM itself when CreateJail runs (see
-	// applyCreateJail) if network_id is set - never by the caller, and
-	// never mutated afterward. Mirrors VMDefinition.ip_address exactly.
+	// ip_address is the jail's resolved IPv4 address on network_id. It is
+	// always written by the FSM, never taken from the caller's record: at
+	// CreateJail it is either requested_ip_address (when the operator set
+	// one) or the lowest free address the FSM allocates (see
+	// applyCreateJail). It is then immutable - UpdateJail carries it
+	// forward unchanged (see applyUpdateJail). Empty when network_id is
+	// empty, or on an uplink_bridged network (ADR-0101), where the
+	// physical LAN's DHCP owns addressing. Mirrors VMDefinition.ip_address
+	// in what it is, but not in its creation rules: a VM takes no
+	// requested address (ADR-0117).
 	IpAddress string `protobuf:"bytes,12,opt,name=ip_address,json=ipAddress,proto3" json:"ip_address,omitempty"`
 	// vnet, if true, gives this jail its own network stack (jail(8)'s
 	// "vnet;" parameter) wired to network_id's bridge via a dedicated
 	// epair(4) pair, instead of sharing the host's stack via
 	// ip4=inherit. Requires network_id to be set. See ADR-0117.
 	Vnet bool `protobuf:"varint,13,opt,name=vnet,proto3" json:"vnet,omitempty"`
+	// requested_ip_address is the IPv4 address an operator asked for at
+	// CreateJail (the one caller-set address field on a jail). It is
+	// validated by the FSM against network_id's subnet and against every
+	// VM and jail already on that network, then becomes ip_address, and
+	// is cleared on the stored record. Empty means auto-allocate. It is
+	// only accepted by CreateJail; UpdateJail rejects any value that
+	// differs from the jail's existing ip_address, so an address cannot
+	// be changed after creation. Requires network_id. See ADR-0117.
+	RequestedIpAddress string `protobuf:"bytes,31,opt,name=requested_ip_address,json=requestedIpAddress,proto3" json:"requested_ip_address,omitempty"`
 	// migration_fenced mirrors VMDefinition.migration_fenced exactly -
 	// see that field's own comment for why the default is false.
 	MigrationFenced bool `protobuf:"varint,14,opt,name=migration_fenced,json=migrationFenced,proto3" json:"migration_fenced,omitempty"`
@@ -941,6 +957,13 @@ func (x *JailDefinition) GetVnet() bool {
 		return x.Vnet
 	}
 	return false
+}
+
+func (x *JailDefinition) GetRequestedIpAddress() string {
+	if x != nil {
+		return x.RequestedIpAddress
+	}
+	return ""
 }
 
 func (x *JailDefinition) GetMigrationFenced() bool {
@@ -7674,7 +7697,7 @@ const file_api_internalpb_state_proto_rawDesc = "" +
 	"\x13clone_from_snapshot\x18\x13 \x01(\tR\x11cloneFromSnapshot\x12)\n" +
 	"\x10migration_fenced\x18\x15 \x01(\bR\x0fmigrationFenced\x12 \n" +
 	"\fdisk_size_mb\x18\x16 \x01(\x04R\n" +
-	"diskSizeMbJ\x04\b\x14\x10\x15R\bhostname\"\xc2\x04\n" +
+	"diskSizeMbJ\x04\b\x14\x10\x15R\bhostname\"\xf4\x04\n" +
 	"\x0eJailDefinition\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x1a\n" +
@@ -7692,7 +7715,8 @@ const file_api_internalpb_state_proto_rawDesc = "" +
 	"network_id\x18\v \x01(\tR\tnetworkId\x12\x1d\n" +
 	"\n" +
 	"ip_address\x18\f \x01(\tR\tipAddress\x12\x12\n" +
-	"\x04vnet\x18\r \x01(\bR\x04vnet\x12)\n" +
+	"\x04vnet\x18\r \x01(\bR\x04vnet\x120\n" +
+	"\x14requested_ip_address\x18\x1f \x01(\tR\x12requestedIpAddress\x12)\n" +
 	"\x10migration_fenced\x18\x0e \x01(\bR\x0fmigrationFenced\x12G\n" +
 	"\x0efirewall_rules\x18\x1e \x03(\v2 .apiary.internal.v1.FirewallRuleR\rfirewallRules\"\x9b\x01\n" +
 	"\fFirewallRule\x12\x1c\n" +

@@ -1092,10 +1092,19 @@ message JailDefinition {
   string base_archive_name = 10;
 
   // network_id/ip_address/vnet mirror api/internalpb's JailDefinition
-  // fields of the same names - see ADR-0117.
+  // fields of the same names - see ADR-0117. ip_address is output only:
+  // it is the address the FSM resolved, never a caller's input (use
+  // requested_ip_address below to ask for one at CreateJail).
   string network_id = 11;
   string ip_address = 12;
   bool vnet = 13;
+
+  // requested_ip_address mirrors api/internalpb's JailDefinition field
+  // of the same name: an operator's IPv4 request, honored only by
+  // CreateJail. Empty means auto-allocate. UpdateJail rejects a value
+  // that differs from the jail's current ip_address - addresses are
+  // not editable after creation (ADR-0117).
+  string requested_ip_address = 31;
 
   // firewall_rules mirrors api/internalpb's JailDefinition field of the
   // same name, reusing this file's own FirewallRule exactly as

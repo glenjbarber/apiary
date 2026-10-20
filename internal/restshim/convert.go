@@ -113,8 +113,15 @@ type jail struct {
 	BaseTemplate    string `json:"base_template,omitempty"`
 	BaseArchiveName string `json:"base_archive_name,omitempty"`
 	NetworkID       string `json:"network_id,omitempty"`
-	IPAddress       string `json:"ip_address,omitempty"`
-	VNET            bool   `json:"vnet,omitempty"`
+	// IPAddress is output only: the address the FSM resolved (see
+	// JailDefinition.ip_address). To ask for one at creation, send
+	// RequestedIPAddress - the two are distinct on purpose (ADR-0117).
+	IPAddress string `json:"ip_address,omitempty"`
+	// RequestedIPAddress is an operator's IPv4 request, honored only on
+	// create. Empty means auto-allocate. It may not be changed after
+	// creation.
+	RequestedIPAddress string `json:"requested_ip_address,omitempty"`
+	VNET               bool   `json:"vnet,omitempty"`
 }
 
 // jailStateToRPC/jailStateFromRPC mirror stateToRPC/stateFromRPC, for
@@ -143,16 +150,17 @@ func jailStateFromRPC(s rpcpb.JailState) string {
 
 func toRPCJail(j jail) *rpcpb.JailDefinition {
 	return &rpcpb.JailDefinition{
-		Id:              j.ID,
-		Name:            j.Name,
-		Hostname:        j.Hostname,
-		NodeId:          j.NodeID,
-		ReplicaNodeId:   j.ReplicaNodeID,
-		DesiredState:    jailStateToRPC(j.DesiredState),
-		BaseTemplate:    j.BaseTemplate,
-		BaseArchiveName: j.BaseArchiveName,
-		NetworkId:       j.NetworkID,
-		Vnet:            j.VNET,
+		Id:                 j.ID,
+		Name:               j.Name,
+		Hostname:           j.Hostname,
+		NodeId:             j.NodeID,
+		ReplicaNodeId:      j.ReplicaNodeID,
+		DesiredState:       jailStateToRPC(j.DesiredState),
+		BaseTemplate:       j.BaseTemplate,
+		BaseArchiveName:    j.BaseArchiveName,
+		NetworkId:          j.NetworkID,
+		RequestedIpAddress: j.RequestedIPAddress,
+		Vnet:               j.VNET,
 	}
 }
 
