@@ -2,6 +2,8 @@ package manager
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"fmt"
 	"net"
 	"strings"
@@ -11,6 +13,7 @@ import (
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 
@@ -909,13 +912,20 @@ func (s *tokenObservingManagerServer) snapshot() (presented string, calls int, t
 // rejected at the far end - which is why this stands up a real gRPC
 // server and looks at what arrived, rather than asserting on a field.
 func TestPeerReporterStepAsideForRestartAuthenticatesWithTheGuardrailToken(t *testing.T) {
+	certPEM, keyPEM := genSelfSignedCert(t)
+	tlsCert, err := tls.X509KeyPair(certPEM, keyPEM)
+	if err != nil {
+		t.Fatalf("X509KeyPair(): %v", err)
+	}
+	pool := x509.NewCertPool()
+	pool.AppendCertsFromPEM(certPEM)
 	lis, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatalf("listen: %v", err)
 	}
 	defer lis.Close()
 
-	srv := grpc.NewServer(grpc.UnaryInterceptor(
+	srv := grpc.NewServer(grpc.Creds(credentials.NewServerTLSFromCert(&tlsCert)), grpc.UnaryInterceptor(
 		func(ctx context.Context, req interface{}, _ *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
 			md, _ := metadata.FromIncomingContext(ctx)
 			v := md.Get("authorization")
@@ -933,7 +943,7 @@ func TestPeerReporterStepAsideForRestartAuthenticatesWithTheGuardrailToken(t *te
 	go func() { _ = srv.Serve(lis) }()
 	defer srv.Stop()
 
-	p := &PeerReporter{APIKey: "colony-api-key", RestartGuardrailToken: "guardrail-token"}
+	p := &PeerReporter{APIKey: "colony-api-key", RestartGuardrailToken: "guardrail-token", UseTLS: true, CAPool: pool}
 	resp, err := p.StepAsideForRestart(context.Background(), lis.Addr().String(), &rpcpb.StepAsideForRestartRequest{TargetNodeId: "drone"})
 	if err != nil {
 		t.Fatalf("StepAsideForRestart: %v", err)
@@ -961,13 +971,20 @@ func TestPeerReporterStepAsideForRestartAuthenticatesWithTheGuardrailToken(t *te
 // operationally: a colony with no guardrail token provisioned must get
 // a refusal, not a step-aside performed under a weaker credential.
 func TestPeerReporterStepAsideForRestartIsRefusedWithoutTheGuardrailToken(t *testing.T) {
+	certPEM, keyPEM := genSelfSignedCert(t)
+	tlsCert, err := tls.X509KeyPair(certPEM, keyPEM)
+	if err != nil {
+		t.Fatalf("X509KeyPair(): %v", err)
+	}
+	pool := x509.NewCertPool()
+	pool.AppendCertsFromPEM(certPEM)
 	lis, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatalf("listen: %v", err)
 	}
 	defer lis.Close()
 
-	srv := grpc.NewServer(grpc.UnaryInterceptor(
+	srv := grpc.NewServer(grpc.Creds(credentials.NewServerTLSFromCert(&tlsCert)), grpc.UnaryInterceptor(
 		func(ctx context.Context, req interface{}, _ *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
 			md, _ := metadata.FromIncomingContext(ctx)
 			v := md.Get("authorization")
@@ -981,7 +998,7 @@ func TestPeerReporterStepAsideForRestartIsRefusedWithoutTheGuardrailToken(t *tes
 	go func() { _ = srv.Serve(lis) }()
 	defer srv.Stop()
 
-	p := &PeerReporter{APIKey: "colony-api-key"}
+	p := &PeerReporter{APIKey: "colony-api-key", UseTLS: true, CAPool: pool}
 	if _, err := p.StepAsideForRestart(context.Background(), lis.Addr().String(), &rpcpb.StepAsideForRestartRequest{TargetNodeId: "drone"}); err == nil {
 		t.Fatal("err = nil, want PermissionDenied: a step-aside with only an API key must not be accepted")
 	}
@@ -1151,5 +1168,32 @@ func TestStepAsiderStopsARealEngineBeforeAnythingElse(t *testing.T) {
 	}
 	if !strings.Contains(res.Detail, "could not be confirmed") {
 		t.Errorf("Detail = %q, want it to say the node could not be confirmed out of leadership", res.Detail)
+	}
+}
+
+// TestPeerReporterGuardrailTokenIsRefusedOverPlaintext pins the rule that
+// the restart-guardrail token never leaves over an unencrypted connection,
+// even to a server that would accept it. With peer_tls off the reporter
+// must refuse before dialing, so the far end's handler never runs.
+func TestPeerReporterGuardrailTokenIsRefusedOverPlaintext(t *testing.T) {
+	lis, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	defer lis.Close()
+
+	srv := grpc.NewServer()
+	peer := &tokenObservingManagerServer{}
+	rpcpb.RegisterManagerServiceServer(srv, peer)
+	go func() { _ = srv.Serve(lis) }()
+	defer srv.Stop()
+
+	p := &PeerReporter{APIKey: "colony-api-key", RestartGuardrailToken: "guardrail-token"}
+	_, err = p.StepAsideForRestart(context.Background(), lis.Addr().String(), &rpcpb.StepAsideForRestartRequest{TargetNodeId: "drone"})
+	if err == nil || !strings.Contains(err.Error(), "peer_tls is false") {
+		t.Fatalf("err = %v, want a refusal naming peer_tls", err)
+	}
+	if _, calls, _ := peer.snapshot(); calls != 0 {
+		t.Errorf("the far end handled %d call(s); the token must not be sent over plaintext", calls)
 	}
 }

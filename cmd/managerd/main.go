@@ -180,7 +180,7 @@ func run() error {
 		}
 	}
 
-	peerTLS := effectivePeerTLS(cfg.PeerTLS, cfg.TLSCert, cfg.TLSKey)
+	peerTLS := effectivePeerTLS(cfg.PeerTLS)
 
 	// Shared between the reconciler's own write-forwarding (ADR-0029)
 	// and the server's read-forwarding (ADR-0035) - both are forwarding
@@ -1246,16 +1246,12 @@ func applyManagerdDefaults(cfg *nodeconfig.Config) {
 // empty, or "" when it is set. Empty now disables unauthenticated
 // target_address forwarding. Direct apiaryctl join-introduce calls do not
 // use target_address; Web UI join forwarding requires this list.
-// effectivePeerTLS resolves nodeconfig.Config.PeerTLS's tri-state:
-// explicit true/false always wins, and nil defaults to whether this
-// node's own tls_cert/tls_key are both set - see the field's own doc
-// comment in internal/nodeconfig/manager.go for why a TLS-only managerd
-// must not silently default to a plaintext peer client.
-func effectivePeerTLS(configured *bool, tlsCert, tlsKey string) bool {
-	if configured != nil {
-		return *configured
-	}
-	return tlsCert != "" && tlsKey != ""
+// effectivePeerTLS resolves nodeconfig.Config.PeerTLS's tri-state
+// (issue #97): an absent peer_tls and an explicit true both mean TLS,
+// and only an explicit false turns peer TLS off. Peer calls never fall
+// back to plaintext on their own.
+func effectivePeerTLS(configured *bool) bool {
+	return configured == nil || *configured
 }
 
 func knownPeersWarning(known []string) string {

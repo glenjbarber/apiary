@@ -213,24 +213,24 @@ func TestPeerCAWriteStateForgetsAResolvedCondition(t *testing.T) {
 	}
 }
 
+// TestEffectivePeerTLS pins issue #97's peer_tls semantics: absent
+// means TLS, explicit true means TLS, and only explicit false means
+// plaintext - regardless of whether any TLS material is configured.
 func TestEffectivePeerTLS(t *testing.T) {
 	trueVal, falseVal := true, false
 	cases := []struct {
-		name            string
-		configured      *bool
-		tlsCert, tlsKey string
-		want            bool
+		name       string
+		configured *bool
+		want       bool
 	}{
-		{"unset, no TLS material", nil, "", "", false},
-		{"unset, both TLS files set", nil, "/x/cert.pem", "/x/key.pem", true},
-		{"unset, only cert set", nil, "/x/cert.pem", "", false},
-		{"explicit false overrides TLS material", &falseVal, "/x/cert.pem", "/x/key.pem", false},
-		{"explicit true overrides no TLS material", &trueVal, "", "", true},
+		{"absent defaults to TLS", nil, true},
+		{"explicit true", &trueVal, true},
+		{"explicit false turns it off", &falseVal, false},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			if got := effectivePeerTLS(c.configured, c.tlsCert, c.tlsKey); got != c.want {
-				t.Errorf("effectivePeerTLS(%v, %q, %q) = %v, want %v", c.configured, c.tlsCert, c.tlsKey, got, c.want)
+			if got := effectivePeerTLS(c.configured); got != c.want {
+				t.Errorf("effectivePeerTLS(%v) = %v, want %v", c.configured, got, c.want)
 			}
 		})
 	}

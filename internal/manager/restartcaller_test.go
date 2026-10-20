@@ -2,6 +2,8 @@ package manager
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"fmt"
 	"net"
 	"os"
@@ -13,6 +15,7 @@ import (
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
@@ -83,7 +86,13 @@ type planHarness struct {
 	nodes   []*raftnode.Node
 	servers []*Server
 	// addrs[i] is where nodes[i]'s managerd gRPC server is listening.
-	addrs   []string
+	addrs []string
+	// tlsAddrs[i] serves the same managerd as addrs[i] over mutual TLS.
+	// Only the restart-guardrail dials use it: the token is refused over
+	// plaintext, so those tests must reach a TLS listener.
+	tlsAddrs []string
+	// caPool trusts every certificate behind tlsAddrs.
+	caPool  *x509.CertPool
 	clients []rpcpb.ManagerServiceClient
 	// controllers[i] is the rc.d stand-in on nodes[i].
 	controllers []*planRestartSimulator
@@ -267,7 +276,7 @@ func (f *planHarnessForwarder) ExecuteNodeRestartPlan(ctx context.Context, _ str
 // having checked it.
 func newPlanHarness(t *testing.T, n int) *planHarness {
 	t.Helper()
-	h := &planHarness{t: t}
+	h := &planHarness{t: t, caPool: x509.NewCertPool()}
 
 	ids := make([]string, n)
 	nodes := make([]*raftnode.Node, n)
@@ -345,6 +354,25 @@ func newPlanHarness(t *testing.T, n int) *planHarness {
 		go mdGRPC.Serve(mdLis)
 		t.Cleanup(mdGRPC.GracefulStop)
 
+		certPEM, keyPEM := genSelfSignedCert(t)
+		tlsCert, err := tls.X509KeyPair(certPEM, keyPEM)
+		if err != nil {
+			t.Fatalf("X509KeyPair(): %v", err)
+		}
+		h.caPool.AppendCertsFromPEM(certPEM)
+		tlsLis, err := net.Listen("tcp", "127.0.0.1:0")
+		if err != nil {
+			t.Fatalf("Listen(tcp, tls): %v", err)
+		}
+		tlsGRPC := grpc.NewServer(
+			grpc.Creds(credentials.NewServerTLSFromCert(&tlsCert)),
+			grpc.UnaryInterceptor(srv.AuthUnaryInterceptor),
+			grpc.StreamInterceptor(srv.AuthStreamInterceptor),
+		)
+		rpcpb.RegisterManagerServiceServer(tlsGRPC, srv)
+		go tlsGRPC.Serve(tlsLis)
+		t.Cleanup(tlsGRPC.GracefulStop)
+
 		conn, err := grpc.NewClient(mdLis.Addr().String(), grpc.WithTransportCredentials(insecure.NewCredentials()))
 		if err != nil {
 			t.Fatalf("grpc.NewClient(): %v", err)
@@ -355,6 +383,7 @@ func newPlanHarness(t *testing.T, n int) *planHarness {
 		h.nodes = append(h.nodes, nodes[i])
 		h.servers = append(h.servers, srv)
 		h.addrs = append(h.addrs, mdLis.Addr().String())
+		h.tlsAddrs = append(h.tlsAddrs, tlsLis.Addr().String())
 		h.clients = append(h.clients, rpcpb.NewManagerServiceClient(conn))
 		h.controllers = append(h.controllers, sim)
 	}
@@ -1240,8 +1269,9 @@ func TestPeerReporterExecuteNodeRestartPlan_PresentsTheTokenOverARealDial(t *tes
 	// An ordinary Colony credential, and no guardrail token: the far end
 	// must refuse both. This is the same class of bug - a reporter
 	// dialling with the wrong credential - and it must fail here.
-	ordinary := NewPeerReporter("an-ordinary-peer-api-key", false, nil)
-	_, err := ordinary.ExecuteNodeRestartPlan(context.Background(), h.addrs[0], planRequest(target, false))
+	ordinary := NewPeerReporter("an-ordinary-peer-api-key", true, nil)
+	ordinary.CAPool = h.caPool
+	_, err := ordinary.ExecuteNodeRestartPlan(context.Background(), h.tlsAddrs[0], planRequest(target, false))
 	if err == nil {
 		t.Fatal("a reporter with no guardrail token got no error from ExecuteNodeRestartPlan; the token is not on the wire")
 	}
@@ -1253,9 +1283,10 @@ func TestPeerReporterExecuteNodeRestartPlan_PresentsTheTokenOverARealDial(t *tes
 	// single-voter cluster makes the plan refuse at the step-aside, and
 	// that refusal is the proof the call was served rather than
 	// refused at the gate.
-	reporter := NewPeerReporter("an-ordinary-peer-api-key", false, nil)
+	reporter := NewPeerReporter("an-ordinary-peer-api-key", true, nil)
+	reporter.CAPool = h.caPool
 	reporter.RestartGuardrailToken = planHarnessToken
-	resp, err := reporter.ExecuteNodeRestartPlan(context.Background(), h.addrs[0], planRequest(target, false))
+	resp, err := reporter.ExecuteNodeRestartPlan(context.Background(), h.tlsAddrs[0], planRequest(target, false))
 	if err != nil {
 		t.Fatalf("a reporter carrying the guardrail token was refused by the far end: %v", err)
 	}
