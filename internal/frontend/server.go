@@ -2445,6 +2445,10 @@ func (s *Server) handleCreateJail(w http.ResponseWriter, r *http.Request) {
 			BaseTemplate:    r.FormValue("base_template"),
 			BaseArchiveName: r.FormValue("base_archive_name"),
 			NetworkId:       r.FormValue("network_id"),
+			// An operator's address request (ADR-0117). Blank means the
+			// FSM allocates one; the field is only enabled in the wizard
+			// once a network is named.
+			RequestedIpAddress: strings.TrimSpace(r.FormValue("ip_address")),
 			// vnet is opt-in (ADR-0117): only true when both the network
 			// picker names a real network AND the checkbox is checked -
 			// naming a network alone (e.g. leaving vnet unchecked) does
