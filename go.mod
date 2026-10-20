@@ -7,7 +7,7 @@ require (
 	github.com/hashicorp/go-msgpack/v2 v2.1.5
 	github.com/hashicorp/raft v1.8.0
 	github.com/hashicorp/raft-boltdb/v2 v2.4.2
-	github.com/modelcontextprotocol/go-sdk v1.7.0
+	github.com/modelcontextprotocol/go-sdk v1.8.0
 	github.com/msteinert/pam/v2 v2.1.0
 	go.etcd.io/bbolt v1.5.0
 	golang.org/x/crypto v0.58.0
