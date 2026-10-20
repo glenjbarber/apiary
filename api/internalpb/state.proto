@@ -295,9 +295,16 @@ message JailDefinition {
   // implied by any other field.
   string network_id = 11;
 
-  // ip_address is assigned by the FSM itself when CreateJail runs (see
-  // applyCreateJail) if network_id is set - never by the caller, and
-  // never mutated afterward. Mirrors VMDefinition.ip_address exactly.
+  // ip_address is the jail's resolved IPv4 address on network_id. It is
+  // always written by the FSM, never taken from the caller's record: at
+  // CreateJail it is either requested_ip_address (when the operator set
+  // one) or the lowest free address the FSM allocates (see
+  // applyCreateJail). It is then immutable - UpdateJail carries it
+  // forward unchanged (see applyUpdateJail). Empty when network_id is
+  // empty, or on an uplink_bridged network (ADR-0101), where the
+  // physical LAN's DHCP owns addressing. Mirrors VMDefinition.ip_address
+  // in what it is, but not in its creation rules: a VM takes no
+  // requested address (ADR-0117).
   string ip_address = 12;
 
   // vnet, if true, gives this jail its own network stack (jail(8)'s
@@ -305,6 +312,16 @@ message JailDefinition {
   // epair(4) pair, instead of sharing the host's stack via
   // ip4=inherit. Requires network_id to be set. See ADR-0117.
   bool vnet = 13;
+
+  // requested_ip_address is the IPv4 address an operator asked for at
+  // CreateJail (the one caller-set address field on a jail). It is
+  // validated by the FSM against network_id's subnet and against every
+  // VM and jail already on that network, then becomes ip_address, and
+  // is cleared on the stored record. Empty means auto-allocate. It is
+  // only accepted by CreateJail; UpdateJail rejects any value that
+  // differs from the jail's existing ip_address, so an address cannot
+  // be changed after creation. Requires network_id. See ADR-0117.
+  string requested_ip_address = 31;
 
   // migration_fenced mirrors VMDefinition.migration_fenced exactly -
   // see that field's own comment for why the default is false.
