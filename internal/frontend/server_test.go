@@ -4220,3 +4220,50 @@ func TestServer_MachinePage_JoinResultCancelled(t *testing.T) {
 		t.Errorf("machine page missing cancelled-state copy, got: %s", rec.Body.String())
 	}
 }
+
+// TestServer_CreateJail_ForwardsRequestedIPAddress confirms the wizard's
+// ip_address field reaches CreateJail as requested_ip_address, trimmed,
+// and never as the resolved ip_address.
+func TestServer_CreateJail_ForwardsRequestedIPAddress(t *testing.T) {
+	client := &fakeClient{
+		createJailResp: &rpcpb.CreateJailResponse{Jail: &rpcpb.JailDefinition{Id: "jail-1"}},
+	}
+	s := newTestServer(t, client)
+
+	form := url.Values{"id": {"jail-1"}, "network_id": {"net-1"}, "ip_address": {"  10.60.0.50 "}}
+	rec := postCreate(t, s, "/jails", form)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	got := client.lastCreateJailReq.GetJail()
+	if got.GetRequestedIpAddress() != "10.60.0.50" {
+		t.Errorf("RequestedIpAddress = %q, want 10.60.0.50 (trimmed)", got.GetRequestedIpAddress())
+	}
+	if got.GetIpAddress() != "" {
+		t.Errorf("IpAddress = %q, want empty: the form must never set the resolved address", got.GetIpAddress())
+	}
+}
+
+// TestServer_JailsPage_ShowsNetworkAndAddress confirms the jail list
+// shows each jail's network and its resolved address, and that an
+// ip4=inherit jail is labelled as such rather than given an address.
+func TestServer_JailsPage_ShowsNetworkAndAddress(t *testing.T) {
+	client := &fakeClient{listJailsResp: &rpcpb.ListJailsResponse{Jails: []*rpcpb.JailDefinition{
+		{Id: "jail-vnet", NetworkId: "net-1", IpAddress: "10.60.0.50", Vnet: true},
+		{Id: "jail-inherit"},
+	}}}
+	s := newTestServer(t, client)
+
+	req := httptest.NewRequest(http.MethodGet, "/jails/panel", nil)
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, req)
+
+	body := rec.Body.String()
+	if !strings.Contains(body, "10.60.0.50") {
+		t.Errorf("jail list missing the resolved address, got: %s", body)
+	}
+	if !strings.Contains(body, "ip4=inherit") {
+		t.Errorf("jail list missing the ip4=inherit label for a jail with no network, got: %s", body)
+	}
+}

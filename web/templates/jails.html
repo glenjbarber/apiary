@@ -26,7 +26,7 @@
 <div class="table-scroll" role="region" aria-label="Jails table" tabindex="0">
 <table class="resource-table">
   <thead>
-    <tr><th>Jail</th><th>Placement</th><th>State</th><th></th></tr>
+    <tr><th>Jail</th><th>Placement</th><th>Network and address</th><th>State</th><th></th></tr>
   </thead>
   <tbody id="jail-rows">
     {{template "jail_rows" .}}
@@ -40,6 +40,7 @@
 <tr>
   <td><a href="/jails/{{.ID}}"><strong>{{.ID}}</strong></a>{{if and .Name (ne .Name .ID)}}<div class="muted">{{.Name}}</div>{{end}}{{if and .Hostname (ne .Hostname .ID) (ne .Hostname .Name)}}<div class="muted">{{.Hostname}}</div>{{end}}</td>
   <td{{if and $.LocalNodeID (ne .NodeID $.LocalNodeID)}} class="remote-node" title="Owned by a different Comb than the one currently answering this page"{{end}}>{{.NodeID}}{{if .ReplicaNodeID}}<div class="muted">replica: {{.ReplicaNodeID}}</div>{{end}}</td>
+  <td>{{if .NetworkID}}{{.NetworkID}}{{if .IPAddress}}<div><code>{{.IPAddress}}</code></div>{{else}}<div class="muted">no address</div>{{end}}{{else}}<span class="muted">ip4=inherit (host's stack)</span>{{end}}</td>
   <td>{{.DesiredState}} <span class="badge {{.Phase}}"{{if .PhaseError}} title="{{.PhaseError}}"{{end}}>{{.Phase}}</span>{{if .PhaseError}}<div class="error">{{.PhaseError}}</div>{{end}}</td>
   <td>
     {{if $.CanOperate}}
@@ -59,6 +60,6 @@
   </td>
 </tr>
 {{else}}
-<tr><td colspan="4"><em>No jails</em></td></tr>
+<tr><td colspan="5"><em>No jails</em></td></tr>
 {{end}}
 {{end}}

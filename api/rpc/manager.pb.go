@@ -1425,10 +1425,18 @@ type JailDefinition struct {
 	// ADR-0083, Mutually-authorized Colony join).
 	BaseArchiveName string `protobuf:"bytes,10,opt,name=base_archive_name,json=baseArchiveName,proto3" json:"base_archive_name,omitempty"`
 	// network_id/ip_address/vnet mirror api/internalpb's JailDefinition
-	// fields of the same names - see ADR-0117.
+	// fields of the same names - see ADR-0117. ip_address is output only:
+	// it is the address the FSM resolved, never a caller's input (use
+	// requested_ip_address below to ask for one at CreateJail).
 	NetworkId string `protobuf:"bytes,11,opt,name=network_id,json=networkId,proto3" json:"network_id,omitempty"`
 	IpAddress string `protobuf:"bytes,12,opt,name=ip_address,json=ipAddress,proto3" json:"ip_address,omitempty"`
 	Vnet      bool   `protobuf:"varint,13,opt,name=vnet,proto3" json:"vnet,omitempty"`
+	// requested_ip_address mirrors api/internalpb's JailDefinition field
+	// of the same name: an operator's IPv4 request, honored only by
+	// CreateJail. Empty means auto-allocate. UpdateJail rejects a value
+	// that differs from the jail's current ip_address - addresses are
+	// not editable after creation (ADR-0117).
+	RequestedIpAddress string `protobuf:"bytes,31,opt,name=requested_ip_address,json=requestedIpAddress,proto3" json:"requested_ip_address,omitempty"`
 	// firewall_rules mirrors api/internalpb's JailDefinition field of the
 	// same name, reusing this file's own FirewallRule exactly as
 	// VMDefinition does - see ADR-0117.
@@ -1556,6 +1564,13 @@ func (x *JailDefinition) GetVnet() bool {
 		return x.Vnet
 	}
 	return false
+}
+
+func (x *JailDefinition) GetRequestedIpAddress() string {
+	if x != nil {
+		return x.RequestedIpAddress
+	}
+	return ""
 }
 
 func (x *JailDefinition) GetFirewallRules() []*FirewallRule {
@@ -22089,7 +22104,7 @@ const file_api_rpc_manager_proto_rawDesc = "" +
 	"\x0fcloudflare_port\x18\x12 \x01(\rR\x0ecloudflarePort\x12.\n" +
 	"\x13clone_from_snapshot\x18\x13 \x01(\tR\x11cloneFromSnapshot\x12 \n" +
 	"\fdisk_size_mb\x18\x15 \x01(\x04R\n" +
-	"diskSizeMbJ\x04\b\x14\x10\x15R\bhostname\"\x88\x04\n" +
+	"diskSizeMbJ\x04\b\x14\x10\x15R\bhostname\"\xba\x04\n" +
 	"\x0eJailDefinition\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x1a\n" +
@@ -22107,7 +22122,8 @@ const file_api_rpc_manager_proto_rawDesc = "" +
 	"network_id\x18\v \x01(\tR\tnetworkId\x12\x1d\n" +
 	"\n" +
 	"ip_address\x18\f \x01(\tR\tipAddress\x12\x12\n" +
-	"\x04vnet\x18\r \x01(\bR\x04vnet\x12B\n" +
+	"\x04vnet\x18\r \x01(\bR\x04vnet\x120\n" +
+	"\x14requested_ip_address\x18\x1f \x01(\tR\x12requestedIpAddress\x12B\n" +
 	"\x0efirewall_rules\x18\x1e \x03(\v2\x1b.apiary.rpc.v1.FirewallRuleR\rfirewallRules\"\x9b\x01\n" +
 	"\fFirewallRule\x12\x1c\n" +
 	"\tdirection\x18\x01 \x01(\tR\tdirection\x12\x16\n" +
