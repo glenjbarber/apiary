@@ -306,3 +306,29 @@ no epair, no IP, no new reconciler work. When set:
   purely to `internal/jail`/`internal/cluster`.
 - The "Networking" section on the create-jail form is purely additive;
   a jail created without touching it behaves exactly as before.
+
+## Addendum: IPv4 at jail creation (issue #31)
+
+This revises the "FSM-assigned, never caller-set" rule above for jails
+only. A VM still takes no requested address.
+
+- **Modes.** A jail's address is either auto-allocated (`requested_ip_address`
+  blank: the lowest free host, as before) or operator-requested at
+  CreateJail. The FSM validates a request against the named network: it
+  must be IPv4 and inside the subnet, must not be the network, broadcast,
+  or `.1` gateway address, and must not be held by a VM or jail on that
+  network. A request on an `uplink_bridged` network is refused, since the
+  physical LAN's DHCP owns that address space and Apiary cannot check it.
+  A request with no `network_id` is refused.
+- **Editability.** Not editable after creation. `UpdateJail` keeps the
+  stored `ip_address` even when the caller's record omits it (the
+  firewall-rules form round-trips the whole jail), refuses a requested
+  address that differs from it, and refuses a `network_id` change while an
+  address is held. Editing would need a re-validation and a reconcile step
+  for the epair and gateway route, and was out of scope.
+- **Collision.** A requested address is recorded as the jail's
+  `ip_address`, so the shared allocator (`usedIPsOnNetwork`) skips it for
+  every later VM or jail on the same network.
+- **Schema.** `JailDefinition.requested_ip_address` (field 31, both
+  schemas) is the only caller-set address input. `ip_address` is always
+  the resolved value.
