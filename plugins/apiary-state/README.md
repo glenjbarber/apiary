@@ -18,7 +18,7 @@ ManagerService and nothing else.
 
    | Variable | Value |
    | --- | --- |
-   | `APIARY_MANAGER_ADDR` | ManagerService `host:port`, e.g. `brood.lab3.apiary.work:17700` |
+   | `APIARY_MANAGER_ADDR` | ManagerService `host:port`, e.g. `<manager-host>:17700` |
    | `APIARY_API_KEY` | The Viewer key from step 2 |
 
 4. Install this plugin directory in Claude Code.
