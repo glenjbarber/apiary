@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "apiary": {
+      "type": "stdio",
+      "command": "apiary-mcp",
+      "args": [],
+      "env": {
+        "APIARY_MANAGER_ADDR": "${APIARY_MANAGER_ADDR}",
+        "APIARY_API_KEY": "${APIARY_API_KEY}"
+      }
+    }
+  }
+}
