@@ -45,6 +45,8 @@
 //	/usr/local/libexec/apiary/apiaryctl pin-trusted-peers --target HOST:PORT --bundle FILE
 //	/usr/local/libexec/apiary/apiaryctl restart-guardrail-provision
 //	/usr/local/libexec/apiary/apiaryctl migrate-tls-dir [--apply]
+//	/usr/local/libexec/apiary/apiaryctl colony-ca init [--dir DIR]
+//	/usr/local/libexec/apiary/apiaryctl colony-ca issue-raft --name HOST [--ip IP]...
 //	/usr/local/libexec/apiary/apiaryctl help
 package main
 
@@ -108,6 +110,13 @@ Usage:
                             restshimd.json to match. Report only unless
                             --apply. A Comb already on the new layout
                             no-ops cleanly
+  apiaryctl colony-ca init  create the Colony CA (ca.pem, ca.key) on the
+                            first Comb of a Colony, issue #97. Refuses
+                            if a CA exists. Root only, changes no config
+  apiaryctl colony-ca issue-raft
+                            sign this Comb's raft certificate with the
+                            Colony CA: raft.pem and raft.key. Refuses to
+                            overwrite. Root only, changes no config
   apiaryctl -version        report this binary's build identity
   apiaryctl help            this message
 
@@ -171,6 +180,8 @@ func main() {
 		os.Exit(runRestartGuardrailProvision(args[1:]))
 	case "migrate-tls-dir":
 		os.Exit(runMigrateTLSDir(args[1:]))
+	case "colony-ca":
+		os.Exit(runColonyCA(args[1:]))
 	case "help", "-h", "--help":
 		fmt.Print(usage)
 		os.Exit(0)

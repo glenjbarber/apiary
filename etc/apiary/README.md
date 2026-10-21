@@ -415,3 +415,35 @@ plaintext, so that setting is a deliberate, visible downgrade.
 `apiaryinstall`'s preflight reports both settings: a raftd that will refuse
 to start is a misconfiguration, and an explicit `false` is reported as an
 informational finding.
+
+## Colony CA and raft certificates (issue #97, ADR-0155)
+
+Two commands create the Colony CA and issue a raft certificate from it.
+Both are root-only and neither restarts a daemon or edits a config file.
+
+```sh
+# First Comb of a new Colony only. Refuses if a CA exists.
+/usr/local/libexec/apiary/apiaryctl colony-ca init
+# Each Comb, once. Give every name and IP peers dial it by.
+/usr/local/libexec/apiary/apiaryctl colony-ca issue-raft --name HOST --ip IP
+```
+
+`init` writes `/usr/local/etc/apiary/ca/ca.pem` (0644) and `ca.key` (0600).
+`issue-raft` reads them and writes `/usr/local/etc/apiary/raft.pem` (0644)
+and `raft.key` (0600). It refuses to overwrite either. Both commands print
+the SHA-256 fingerprint and, for `issue-raft`, the expiry.
+
+Point these `raftd.json` fields at the output. The defaults are the paths
+shown above, so no edit is needed beyond the field values:
+
+| `raftd.json` field | Value |
+| --- | --- |
+| `raft_tls_cert` | `/usr/local/etc/apiary/raft.pem` |
+| `raft_tls_key` | `/usr/local/etc/apiary/raft.key` |
+| `raft_tls_ca` | `/usr/local/etc/apiary/ca/ca.pem` |
+
+Do not set these fields on a Comb whose `raft_tls_enabled` is still `false`:
+raftd refuses to start when a certificate field is set while TLS is off.
+Set them in the same change as the coordinated `raft_tls_enabled` step.
+Run `init` only once per Colony, and never copy `ca.key` off the Comb that
+created it.
