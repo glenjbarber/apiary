@@ -991,12 +991,18 @@ each design decision, in order.
   [ADR-0096](docs/adr/0096-security-audit-follow-up.md).
 - **Join-flow hardening: target-address allowlist and a pre-approval
   reachability check** — closes the reachability-oracle finding
-  ADR-0096 left open, and a real, separately-hit incident: a new opt-in
+  ADR-0096 left open, and a real, separately-hit incident: the
   `-known-peer-addresses` flag restricts `target_address` on the three
   unauthenticated join-colony RPCs to an operator-listed set of
-  `host:port` values (unconfigured, the default, keeps ADR-0092's
-  original accept-any behavior - forcing this on every deployment would
-  break a fresh bootstrap with no migration path). Separately,
+  `host:port` values. This allowlist is fail-closed: with it unset, a
+  forwarded `target_address` request is refused before any dial, and
+  with it set, the target must exactly match an entry or the call is
+  refused. That replaces ADR-0092's original accept-any default, which
+  left an unauthenticated reachability oracle on every unconfigured
+  Comb. A joining Comb reaches its target directly with
+  `apiaryctl join-introduce`, and `apiaryctl install --colony-member
+  HOST:PORT` seeds the allowlist for the Web UI forwarding path.
+  Separately,
   `ApproveJoinRequest` now dials the pending request's own
   `raft_bind_address` before ever calling `AddVoter` and refuses to
   approve an unreachable one - approving before a joiner is actually up

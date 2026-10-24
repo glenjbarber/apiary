@@ -1096,3 +1096,36 @@ func TestServer_IssueOriginCertificate_ForwardsAcceptedValidity(t *testing.T) {
 		}
 	}
 }
+
+// TestServer_MachinePage_KnownPeerAddressesHelpIsFailClosed pins the
+// Machine page's help text for the known_peer_addresses allowlist.
+//
+// ADR-0097 records that the allowlist is fail-closed: an empty
+// configuration refuses every forwarded target_address before any dial,
+// and a configured one admits only an exact match. The help text said the
+// opposite for months after the behaviour changed, telling an operator
+// that leaving the field blank accepts any target. That text is what an
+// operator reads before deciding whether to configure the field, so it
+// has to describe the behaviour that actually runs.
+func TestServer_MachinePage_KnownPeerAddressesHelpIsFailClosed(t *testing.T) {
+	client := &fakeClient{
+		statusResp: &rpcpb.StatusResponse{ManagerNodeId: "node-a"},
+	}
+	s := newTestServer(t, client)
+
+	req := httptest.NewRequest(http.MethodGet, "/machine", nil)
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	body := rec.Body.String()
+
+	if !strings.Contains(body, "Fail-closed") {
+		t.Errorf("machine page missing the fail-closed statement for the known peer addresses allowlist, got: %s", body)
+	}
+	if strings.Contains(body, "accept any target_address") {
+		t.Errorf("machine page still says a blank allowlist accepts any target_address, which the fail-closed check contradicts: %s", body)
+	}
+}
