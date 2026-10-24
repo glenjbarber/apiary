@@ -67,12 +67,24 @@ func (m *Manager) path(name string) (string, error) {
 }
 
 // CreateDataset creates a new dataset at Base/name.
+//
+// The -p flag is what makes nested names work: `zfs create` without it
+// refuses to create a dataset whose parent does not exist ("parent does
+// not exist"), so "templates/freebsd-14" fails on a node that has no
+// "templates" dataset yet. That is exactly the shape ADR-0089's
+// cross-node template fetch and the jail base-image layout use, so the
+// parent is created implicitly here.
+//
+// -p is idempotent: creating a dataset that already exists succeeds
+// and leaves its properties untouched, so this is safe to call on a
+// dataset that may already be there. Callers that need to know whether
+// they created anything still use DatasetExists first.
 func (m *Manager) CreateDataset(ctx context.Context, name string) error {
 	full, err := m.path(name)
 	if err != nil {
 		return err
 	}
-	_, err = runZFS(ctx, "create", full)
+	_, err = runZFS(ctx, "create", "-p", full)
 	return err
 }
 
@@ -264,6 +276,9 @@ func (m *Manager) Receive(ctx context.Context, destName string, r io.Reader) err
 	if err != nil {
 		return err
 	}
+	if err := m.ensureParentDataset(ctx, full); err != nil {
+		return err
+	}
 	cmd := exec.CommandContext(ctx, "zfs", "receive", full)
 	cmd.Stdin = r
 	var stderr bytes.Buffer
@@ -298,6 +313,9 @@ func (m *Manager) Receive(ctx context.Context, destName string, r io.Reader) err
 func (m *Manager) ReceiveForce(ctx context.Context, destName string, r io.Reader) error {
 	full, err := m.path(destName)
 	if err != nil {
+		return err
+	}
+	if err := m.ensureParentDataset(ctx, full); err != nil {
 		return err
 	}
 	cmd := exec.CommandContext(ctx, "zfs", "receive", "-F", full)
@@ -421,4 +439,43 @@ func (m *Manager) ListTemplateNames(ctx context.Context) ([]string, error) {
 		names = append(names, strings.TrimSuffix(strings.TrimPrefix(line, prefix), suffix))
 	}
 	return names, nil
+}
+
+// ensureParentDataset creates the parent of a nested dataset path if it
+// does not exist yet.
+//
+// `zfs receive` cannot create a missing parent: it fails with
+// "cannot open '.../templates': dataset does not exist". That breaks
+// ADR-0089's cross-node jail-template fetch on any node that has not
+// already had a "templates" dataset created on it by hand, which is
+// most nodes right after install.
+//
+// Only the immediate parent is created, and only when the destination
+// actually has one (a flat name like "vm-1" has no parent beyond
+// Base, which the base dataset itself already provides). The parent is
+// created with -p so a shared prefix like "templates" is created
+// implicitly too.
+func (m *Manager) ensureParentDataset(ctx context.Context, full string) error {
+	base := m.Base
+	if base == "" {
+		return fmt.Errorf("zfs: base dataset must not be empty")
+	}
+	rest, ok := strings.CutPrefix(full, base+"/")
+	if !ok {
+		// The destination is not under Base, which path() should have
+		// prevented; refuse rather than guess at a parent.
+		return fmt.Errorf("zfs: %s is not under base dataset %s", full, base)
+	}
+	idx := strings.LastIndex(rest, "/")
+	if idx < 0 {
+		// A flat name: Base itself is the parent and it already
+		// exists (the manager would not have been constructed without
+		// it), so there is nothing to create.
+		return nil
+	}
+	parent := base + "/" + rest[:idx]
+	if _, err := runZFS(ctx, "create", "-p", parent); err != nil {
+		return fmt.Errorf("zfs create -p %s: %w", parent, err)
+	}
+	return nil
 }

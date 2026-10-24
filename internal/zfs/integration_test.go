@@ -293,3 +293,138 @@ func TestPath_RejectsEscapeAttempts(t *testing.T) {
 		}
 	}
 }
+
+// TestIntegration_CreateDatasetCreatesMissingParents covers the
+// nested-name case: `zfs create` without -p refuses to create a
+// dataset whose parent does not exist ("parent does not exist"), which
+// is exactly the shape the jail base-image layout ("templates/
+// freebsd-14") and ADR-0089's cross-node template fetch use.
+//
+// The parent must be created implicitly, and creating the same
+// dataset again must be a harmless no-op rather than an error.
+func TestIntegration_CreateDatasetCreatesMissingParents(t *testing.T) {
+	m := testManager(t)
+	ctx := context.Background()
+
+	if err := m.CreateDataset(ctx, "templates/freebsd-14"); err != nil {
+		t.Fatalf("CreateDataset(templates/freebsd-14) error: %v", err)
+	}
+
+	// The parent was created implicitly.
+	parentExists, err := m.DatasetExists(ctx, "templates")
+	if err != nil {
+		t.Fatalf("DatasetExists(templates) error: %v", err)
+	}
+	if !parentExists {
+		t.Fatalf("DatasetExists(templates) = false after creating templates/freebsd-14")
+	}
+
+	childExists, err := m.DatasetExists(ctx, "templates/freebsd-14")
+	if err != nil {
+		t.Fatalf("DatasetExists(templates/freebsd-14) error: %v", err)
+	}
+	if !childExists {
+		t.Fatalf("DatasetExists(templates/freebsd-14) = false after creation")
+	}
+
+	// Creating it again is idempotent: -p makes an existing dataset a
+	// success, so a caller that races or retries does not have to
+	// treat "already there" as a failure.
+	if err := m.CreateDataset(ctx, "templates/freebsd-14"); err != nil {
+		t.Fatalf("CreateDataset(templates/freebsd-14) (2nd call) error: %v", err)
+	}
+}
+
+// TestIntegration_CreateDatasetDoesNotClobberExistingProperties guards
+// the idempotence above against being idempotent by overwriting: -p
+// on a dataset that already exists must leave its properties alone.
+func TestIntegration_CreateDatasetDoesNotClobberExistingProperties(t *testing.T) {
+	m := testManager(t)
+	ctx := context.Background()
+
+	if err := m.CreateDataset(ctx, "vm-1"); err != nil {
+		t.Fatalf("CreateDataset(vm-1) error: %v", err)
+	}
+	if _, err := runZFS(ctx, "set", "compression=lz4", m.Base+"/vm-1"); err != nil {
+		t.Fatalf("setting compression on vm-1: %v", err)
+	}
+
+	if err := m.CreateDataset(ctx, "vm-1"); err != nil {
+		t.Fatalf("CreateDataset(vm-1) (2nd call) error: %v", err)
+	}
+
+	got, err := m.GetProperty(ctx, "vm-1", "compression")
+	if err != nil {
+		t.Fatalf("GetProperty(compression) error: %v", err)
+	}
+	if got != "lz4" {
+		t.Errorf("compression = %q after a repeat create, want %q", got, "lz4")
+	}
+}
+
+// TestIntegration_ReceiveCreatesMissingParent covers ADR-0089's
+// cross-node jail-template fetch: `zfs receive` cannot create a
+// missing parent ("cannot open '.../templates': dataset does not
+// exist"), so receiving into a nested path on a node that has no
+// "templates" dataset must create that parent first.
+//
+// The receive is exercised for real: a template dataset is snapshotted
+// on the sending side and the stream is received here, which also
+// proves the parent guard did not corrupt the received dataset.
+func TestIntegration_ReceiveCreatesMissingParent(t *testing.T) {
+	m := testManager(t)
+	ctx := context.Background()
+
+	// A source dataset to send from, and a snapshot of it. The source
+	// pool dataset is created with runZFS directly so this test's own
+	// setup does not depend on the behaviour under test.
+	src := New(m.Base + "-src")
+	if _, err := runZFS(ctx, "create", "-p", src.Base); err != nil {
+		t.Fatalf("creating source base dataset %s: %v", src.Base, err)
+	}
+	if err := src.CreateDataset(ctx, "freebsd-14"); err != nil {
+		t.Fatalf("CreateDataset(freebsd-14) error: %v", err)
+	}
+	t.Cleanup(func() {
+		runZFS(context.Background(), "destroy", "-r", src.Base)
+	})
+	if err := src.CreateSnapshot(ctx, "freebsd-14@apiary-template"); err != nil {
+		t.Fatalf("CreateSnapshot() error: %v", err)
+	}
+
+	stream, err := src.Send(ctx, "freebsd-14@apiary-template")
+	if err != nil {
+		t.Fatalf("Send() error: %v", err)
+	}
+	defer stream.Close()
+
+	// The destination's "templates" parent does not exist yet - that
+	// is the point of the test.
+	parentExists, err := m.DatasetExists(ctx, "templates")
+	if err != nil {
+		t.Fatalf("DatasetExists(templates) error: %v", err)
+	}
+	if parentExists {
+		t.Fatalf("DatasetExists(templates) = true before the receive; the test's premise is gone")
+	}
+
+	if err := m.Receive(ctx, "templates/freebsd-14", stream); err != nil {
+		t.Fatalf("Receive(templates/freebsd-14) error: %v", err)
+	}
+
+	parentExists, err = m.DatasetExists(ctx, "templates")
+	if err != nil {
+		t.Fatalf("DatasetExists(templates) error: %v", err)
+	}
+	if !parentExists {
+		t.Fatalf("DatasetExists(templates) = false after a receive that created it implicitly")
+	}
+
+	received, err := m.DatasetExists(ctx, "templates/freebsd-14")
+	if err != nil {
+		t.Fatalf("DatasetExists(templates/freebsd-14) error: %v", err)
+	}
+	if !received {
+		t.Fatalf("DatasetExists(templates/freebsd-14) = false after Receive()")
+	}
+}

@@ -367,11 +367,16 @@ func summarizeClusterNode(nodeID string, stats statsView, fetchErr string) clust
 		MemUsedPct: stats.MemUsedPct,
 		PoolsOK:    poolsOK,
 		PFEnabled:  stats.PF.Enabled,
-		CPUGauge:   gaugeFromLoadAverage("CPU", stats.LoadAvg1, stats.Cores, fmt.Sprintf("%.2f load, %d cores", stats.LoadAvg1, stats.Cores)),
-		// "Memory %" rather than "Memory": this gauge reads a percentage
-		// and its CPU neighbour reads a load average, so two adjacent
-		// labels reading "CPU" and "Memory" gave no hint which number was
-		// a percentage. The unit belongs in the label.
+		// "CPU %" rather than "CPU": this gauge draws the load average
+		// as a percentage of the node's core count, which is what the
+		// dial's filled arc and its accessible name already report.
+		// The unit belongs in the label, so the card says what the
+		// number means rather than leaving the reader to infer it from
+		// the neighbouring "Memory %".
+		CPUGauge: gaugeFromLoadAverage("CPU %", stats.LoadAvg1, stats.Cores, fmt.Sprintf("%.2f load, %d cores", stats.LoadAvg1, stats.Cores)),
+		// "Memory %" rather than "Memory": this gauge reads a percentage,
+		// and two adjacent bare labels gave no hint which number was a
+		// percentage. The unit belongs in the label.
 		MemGauge: gaugeFromPercent("Memory %", stats.MemUsedPct, stats.MemFree+" free"),
 	}
 }

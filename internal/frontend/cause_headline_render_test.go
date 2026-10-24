@@ -360,20 +360,22 @@ func TestCauseLineCarriesNoSourceIdentifier(t *testing.T) {
 }
 
 // TestMemoryGaugeLabelNamesItsUnit guards the other half of this change.
-// The CPU gauge beside it reads a load average and the memory gauge reads a
-// percentage, but both used to be labelled with a bare noun, so the number
-// in the middle of the memory dial had no unit attached to it anywhere on
-// the card. The label is the only place the unit appears, so the unit goes
-// in the label.
+// The CPU gauge beside it draws load as a percentage of the node's cores
+// and the memory gauge reads a percentage, but both used to be labelled
+// with a bare noun, so the number in the middle of each dial had no unit
+// attached to it anywhere on the card. The label is the only place the
+// unit appears, so the unit goes in the label.
 func TestMemoryGaugeLabelNamesItsUnit(t *testing.T) {
 	if got := gaugeFromPercent("Memory %", 42, "1.2G free").Label; got != "Memory %" {
 		t.Errorf("gauge label = %q, want %q", got, "Memory %")
 	}
-	// The CPU gauge is a load average, not a percentage, so it must NOT
-	// acquire a "%" as a side effect of this. Load average is not a
-	// percentage and labelling it one would be a new false statement.
-	if got := gaugeFromLoadAverage("CPU", 0.5, 8, "0.50 load, 8 cores").Label; got != "CPU" {
-		t.Errorf("CPU gauge label = %q, want %q - a load average is not a percentage", got, "CPU")
+	// The CPU gauge is load average as a percentage of cores, so its label
+	// carries the "%" the same way Memory's does. The gauge partial
+	// already announces "{{.Percent}} percent" in the dial's accessible
+	// name, so "CPU %" is a labelling fix and not a new claim about what
+	// the number is.
+	if got := gaugeFromLoadAverage("CPU %", 0.5, 8, "0.50 load, 8 cores").Label; got != "CPU %" {
+		t.Errorf("CPU gauge label = %q, want %q - the gauge shows load as a percentage of cores", got, "CPU %")
 	}
 
 	// End to end: the label has to survive the template, not just the
