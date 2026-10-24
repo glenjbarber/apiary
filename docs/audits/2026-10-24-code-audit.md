@@ -31,8 +31,8 @@ All fixes are on this branch. Nothing is merged or pushed.
 
 | ID | Status | Commit | Notes |
 |----|--------|--------|-------|
-| B1 | Fixed | `fix-validity` | The requested lifetime is parsed as a 64-bit integer and checked against `internal/cloudflare.ValidOriginCAValidity` before the `int32` narrowing. An out-of-set value is rejected in the UI and never forwarded to managerd. |
-| B2 | Fixed | `fix-docs` | Header corrected to `ADR-0150`. The filename and header now agree, and the collision with `0120-config-rationale-history.md` is gone. |
+| B1 | Fixed | `c03ee4b` | The requested lifetime is parsed as a 64-bit integer and checked against `internal/cloudflare.ValidOriginCAValidity` before the `int32` narrowing. An out-of-set value is rejected in the UI and never forwarded to managerd. |
+| B2 | Fixed | `d7ad9f7` | Header corrected to `ADR-0150`. The filename and header now agree, and the collision with `0120-config-rationale-history.md` is gone. |
 | B3 | Documented, not changed | (none) | Removing the route and the tree builder is a judgment call about the public surface of the frontend, so it is reported rather than done. Issue #112 is still open. |
 | B4 | Documented, not changed | (none) | `docs/adr/MIGRATION.md` says global number allocation is "Pending Glen allocation", so the numbers were not reassigned autonomously. |
 | B5 | Documented, not changed | (none) | Same reason as B4. |
