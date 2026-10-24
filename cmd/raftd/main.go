@@ -173,7 +173,7 @@ func run() error {
 	// not reflect; read the resolved value back for logging/joining.
 	resolvedNodeID := node.Status().NodeID
 
-	if err := startupJoinOrBootstrap(node, hadState, rcfg.Join, resolvedNodeID, rcfg.RaftBind, rcfg.InternalToken, rcfg.AwaitJoin); err != nil {
+	if err := startupJoinOrBootstrap(node, hadState, rcfg.Join, resolvedNodeID, rcfg.RaftBind, rcfg.InternalToken, rcfg.AwaitJoin, cfg.DataDir); err != nil {
 		return err
 	}
 
@@ -476,7 +476,7 @@ func validateAwaitJoinFlags(awaitJoin bool, joinSocket string) error {
 // self-forms anything - it only starts node's transport (already done by
 // raftnode.New before this is called) and returns, mirroring
 // internal/raft/multinode_test.go's newUnbootstrappedNode.
-func startupJoinOrBootstrap(node *raftnode.Node, hadState bool, joinSocket, resolvedNodeID, bindAddr, internalToken string, awaitJoin bool) error {
+func startupJoinOrBootstrap(node *raftnode.Node, hadState bool, joinSocket, resolvedNodeID, bindAddr, internalToken string, awaitJoin bool, dataDir string) error {
 	switch {
 	case hadState:
 		log.Printf("raftd: resuming existing raft state")
@@ -488,6 +488,23 @@ func startupJoinOrBootstrap(node *raftnode.Node, hadState bool, joinSocket, reso
 	case awaitJoin:
 		log.Printf("raftd: -await-join set - not bootstrapping; waiting to be added as a voter by an existing Colony's leader")
 	default:
+		// ADR-0156 Stage 1: refuse to self-bootstrap over a data
+		// directory that already belonged to a Colony.
+		//
+		// This is checked ONLY on the self-bootstrap path. A node
+		// resuming existing state is already a member of whatever
+		// Colony its log says it is, and a node joining an existing
+		// member is explicitly being brought INTO a Colony - neither
+		// forms a new one, so neither is a case where a second
+		// Colony could appear.
+		//
+		// The guard reads the sidecar, which the reset path carries
+		// aside WITH the data directory. So a deliberate -reset moves
+		// the whole directory - data and sidecar together - and the
+		// next start is a clean, legitimate new Colony.
+		if err := raftnode.GuardSelfBootstrap(dataDir); err != nil {
+			return fmt.Errorf("refusing to bootstrap a new single-node cluster: %w", err)
+		}
 		if err := node.Bootstrap(); err != nil {
 			return fmt.Errorf("bootstrapping single-node cluster: %w", err)
 		}

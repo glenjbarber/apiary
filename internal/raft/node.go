@@ -3,12 +3,15 @@ package raft
 import (
 	"errors"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 
 	"github.com/hashicorp/raft"
 	raftboltdb "github.com/hashicorp/raft-boltdb/v2"
+	"google.golang.org/protobuf/proto"
 
 	internalpb "github.com/glenjbarber/apiary/api/internalpb"
 )
@@ -23,6 +26,12 @@ const snapshotRetain = 2
 // ErrNotLeader is returned by Node.Apply when this node is not the current
 // raft leader.
 var ErrNotLeader = errors.New("raft: this node is not the leader")
+
+// colonyIdentityCommitTimeout bounds the commit of this Colony's
+// identity record. It is generous because the very first commit after
+// an election can wait on the log to be replicated, and the operation
+// is a single log entry.
+const colonyIdentityCommitTimeout = 30 * time.Second
 
 // Status is a snapshot of a Node's current raft state, used to answer the
 // internal Status RPC.
@@ -67,6 +76,24 @@ type Status struct {
 	// know each node's configuration to tell whether LeaderID matches
 	// the Colony's declared preference.
 	PreferredLeaderID string
+
+	// ColonyID is the Colony this node belongs to (ADR-0156 Stage 1),
+	// read from the node's REPLICATED state rather than from its
+	// configuration.
+	//
+	// The distinction is the whole point. Two independently bootstrapped
+	// raftd instances each form their own single-node cluster, and each
+	// would answer from its own config file with a different value -
+	// which is precisely the condition ADR-0156 records as verified and
+	// undetectable. Read from replicated state, every voter of ONE
+	// Colony answers with the SAME value, and two voters of DIFFERENT
+	// colonies answer with different values, so the difference becomes
+	// visible instead of silent.
+	//
+	// Empty means this node has no Colony identity yet - either it has
+	// applied no SetColonyIdentity, or it was restored from a snapshot
+	// predating ADR-0156. That is a real state, not an error.
+	ColonyID string
 }
 
 // ServerInfo describes one member of the cluster configuration.
@@ -87,6 +114,16 @@ type Node struct {
 	// preferredLeader is PreferredLeaderTransfer's own cooldown
 	// bookkeeping. Zero value is ready to use.
 	preferredLeader preferredLeaderState
+
+	// shutdownCh is closed by Shutdown, telling the leadership watcher
+	// to stop. It is closed exactly once, by Shutdown.
+	shutdownCh   chan struct{}
+	shutdownOnce sync.Once
+
+	// logf writes this package's own messages. It is a field rather
+	// than a direct log.Printf call so a test can capture the
+	// watcher's output, and so a caller can redirect it if it wants.
+	logf func(format string, args ...any)
 }
 
 // New constructs a Node backed by BoltDB log/stable stores and a file
@@ -137,7 +174,113 @@ func New(cfg Config) (*Node, error) {
 		return nil, fmt.Errorf("raft: creating raft instance: %w", err)
 	}
 
-	return &Node{raft: r, fsm: fsm, config: cfg, store: boltStore}, nil
+	node := &Node{
+		raft:       r,
+		fsm:        fsm,
+		config:     cfg,
+		store:      boltStore,
+		shutdownCh: make(chan struct{}),
+		logf:       log.Printf,
+	}
+
+	// ADR-0156 Stage 1: watch for leadership and establish the Colony
+	// identity when this node becomes the leader.
+	//
+	// WHY A WATCHER RATHER THAN A ONE-SHOT AT STARTUP: the identity has
+	// to be committed by the LEADER, and leadership is not fixed at
+	// startup. A node that starts as a follower cannot commit one; a
+	// node that later wins an election must; and a node that restarts
+	// into an existing Colony must not need a second one. A watcher
+	// that acts on every leadership acquisition satisfies all three
+	// with one mechanism, and the "already set" refusal in the FSM's
+	// apply function makes every repetition of it harmless.
+	//
+	// The watcher is best-effort: a failure to establish the identity
+	// is reported through the node's own error channel rather than
+	// taken as fatal, because the node's PRIMARY job - serving raft
+	// state - must not be brought down by a bookkeeping step. The
+	// identity is retried on the next leadership acquisition.
+	go node.watchLeadership()
+
+	return node, nil
+}
+
+// watchLeadership establishes the Colony identity whenever this node
+// becomes the leader.
+//
+// It watches raft's leadership channel rather than polling Status(),
+// so it reacts promptly to an election instead of on a timer.
+//
+// Every failure path is non-fatal and logged. The reason is that the
+// identity is a SAFETY property layered on top of raft, not a
+// prerequisite for it: a node that cannot record its own Colony
+// identity can still serve every other function perfectly well, and the
+// next leadership acquisition retries. The one thing that MUST be
+// fatal - a node that cannot commit because it is not the leader - is
+// handled by EnsureColonyIdentity itself.
+func (n *Node) watchLeadership() {
+	// LeaderCh is raft's own leadership notification channel. It holds
+	// the LATEST leadership state rather than every transition: raft's
+	// overrideNotifyBool replaces a pending value rather than queueing
+	// one, so a node that gains and loses leadership between two reads
+	// is reported as whatever it is now. That is exactly what this
+	// watcher needs - it acts on the CURRENT state, and a missed
+	// intermediate transition is not something it would have acted on
+	// differently.
+	leadershipCh := n.raft.LeaderCh()
+	if leadershipCh == nil {
+		return
+	}
+
+	for {
+		select {
+		case isLeader := <-leadershipCh:
+			if !isLeader {
+				continue
+			}
+
+			// Re-check the actual raft state rather than trusting the
+			// notification alone. The channel says leadership was
+			// acquired; by the time this goroutine runs, the node may
+			// have lost it again, and committing then would fail with
+			// a confusing error instead of a clear one.
+			if n.raft.State() != raft.Leader {
+				continue
+			}
+
+			colonyID, err := n.EnsureColonyIdentity(colonyIdentityCommitTimeout)
+			if err != nil {
+				// A shutdown is not a failure worth reporting: the
+				// node is going away, and a commit that fails
+				// because raft has shut down is the expected
+				// outcome of stopping mid-operation.
+				select {
+				case <-n.shutdownCh:
+					return
+				default:
+				}
+				// Reported, not fatal. The next leadership
+				// acquisition retries, and a node that never
+				// manages it has no Colony identity - which
+				// is visible to an operator through Status,
+				// rather than being silently wrong.
+				n.logf("could not establish the Colony identity: %v", err)
+				continue
+			}
+			n.logf("Colony identity is %s", colonyID)
+			if err := WriteColonySidecar(n.config.DataDir, colonyID, n.config.NodeID); err != nil {
+				// The sidecar is a guard's HINT, not the
+				// authority on identity, so failing to write
+				// it is worth saying out loud - it means the
+				// self-bootstrap guard will not fire for this
+				// node - but it is not a reason to refuse to
+				// serve.
+				n.logf("WARNING: could not record the Colony identity sidecar: %v", err)
+			}
+		case <-n.shutdownCh:
+			return
+		}
+	}
 }
 
 // HasExistingState reports whether cfg.DataDir already contains raft state
@@ -186,6 +329,96 @@ func (n *Node) Bootstrap() error {
 	return n.raft.BootstrapCluster(cfg).Error()
 }
 
+// EnsureColonyIdentity makes sure this Colony has an identity, and is the
+// only way one is ever established.
+//
+// The ID is a random UUIDv4, generated HERE, on the node that is
+// bootstrapping the Colony, and committed through the replicated log.
+//
+// WHY GENERATED RATHER THAN DERIVED: ADR-0156's default is that the
+// Colony ID is independent of the Colony CA fingerprint. Keeping the two
+// anchors separate is what lets the Colony CA be rotated without the
+// Colony's identity changing, and it stops a certificate from silently
+// becoming the Colony's name. A fingerprint-derived ID would couple the
+// Colony's identity to the very value ADR-0156's CA-rotation problem
+// wants to be able to change.
+//
+// WHY IT IS COMMITTED RATHER THAN WRITTEN LOCALLY: a value held in one
+// process's memory is a value two Combs can disagree about, and two
+// Combs disagreeing about which Colony they are in is the exact
+// condition this whole feature exists to make impossible. Committed
+// through the log, every voter derives the same answer from the same
+// bytes.
+//
+// WHY IT IS SAFE TO CALL THIS ON EVERY STARTUP: the "already set"
+// decision lives in the FSM's apply function, not here. A Colony that
+// already has an identity has that second SetColonyIdentity REFUSED by
+// the apply function, and the refusal is the expected outcome, not an
+// error. This method is therefore idempotent from the caller's point of
+// view: it returns the Colony's identity, which is the pre-existing one
+// in that case.
+//
+// The one case where this cannot apply is a node that is not the
+// leader - it cannot commit anything, and it has no identity to report
+// because it has not been told one yet. That is reported as an error
+// rather than a silent empty string, because a caller that wanted an
+// identity and got none must be able to tell "there is none" from "I
+// could not find out".
+func (n *Node) EnsureColonyIdentity(timeout time.Duration) (string, error) {
+	// An existing identity is reported as-is. This is the common case
+	// on every restart of a Colony that is already running.
+	if existing := n.fsm.ColonyID(); existing != "" {
+		return existing, nil
+	}
+
+	if n.raft.State() != raft.Leader {
+		return "", fmt.Errorf("raft: cannot establish a Colony identity: this node is %s, not the leader, and only the leader can commit one", n.raft.State().String())
+	}
+
+	colonyID, err := newColonyID()
+	if err != nil {
+		return "", fmt.Errorf("generating a Colony identity: %w", err)
+	}
+
+	cmd := &internalpb.Command{
+		Op: &internalpb.Command_SetColonyIdentity{
+			SetColonyIdentity: &internalpb.SetColonyIdentity{
+				ColonyId:    colonyID,
+				SetBy:       n.config.NodeID,
+				CreatedUnix: time.Now().Unix(),
+			},
+		},
+	}
+	payload, err := proto.Marshal(cmd)
+	if err != nil {
+		return "", fmt.Errorf("marshaling the Colony identity command: %w", err)
+	}
+
+	result, err := n.Apply(payload, timeout)
+	if err != nil {
+		return "", fmt.Errorf("committing the Colony identity: %w", err)
+	}
+	if result.Error != "" {
+		// A refusal because the Colony ALREADY has an identity is not a
+		// failure - it is a race we lost. Two leadership acquisitions
+		// can both reach here before either has committed: each
+		// generates a candidate, each tries to commit, and the FSM's
+		// apply function keeps the first and refuses the second. The
+		// right answer to "I lost the race" is the identity that WON,
+		// not an error.
+		//
+		// Reading the identity back from the FSM is what makes this
+		// correct: the winner's value is the committed one, so
+		// reading it after the refusal returns exactly the value
+		// every other voter will also hold.
+		if existing := n.fsm.ColonyID(); existing != "" {
+			return existing, nil
+		}
+		return "", fmt.Errorf("committing the Colony identity: %s", result.Error)
+	}
+	return result.GetColonyIdentity().GetColonyId(), nil
+}
+
 // Apply submits payload to the raft log and waits up to timeout for it to
 // be committed and applied. It only succeeds when this node is the leader.
 func (n *Node) Apply(payload []byte, timeout time.Duration) (*FSMApplyResult, error) {
@@ -225,6 +458,7 @@ func (n *Node) Status() Status {
 		MembershipError:   membershipErr,
 		StateDigest:       n.fsm.StateDigest(),
 		PreferredLeaderID: n.config.PreferredLeaderID,
+		ColonyID:          n.fsm.ColonyID(),
 	}
 }
 
@@ -540,6 +774,7 @@ func translateMembershipErr(err error) error {
 // BoltDB store, so the data directory can be safely reopened afterward
 // (e.g. by a subsequent Node against the same DataDir).
 func (n *Node) Shutdown() error {
+	n.shutdownOnce.Do(func() { close(n.shutdownCh) })
 	if err := n.raft.Shutdown().Error(); err != nil {
 		return err
 	}

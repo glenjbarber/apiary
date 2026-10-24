@@ -153,6 +153,11 @@ func (s *Server) Status(_ context.Context, _ *internalpb.StatusRequest) (*intern
 		Servers:         servers,
 		MembershipError: status.MembershipError,
 		StateDigest:     status.StateDigest,
+		// ADR-0156 Stage 1: the Colony this node belongs to, served
+		// from replicated state. Empty when the node has no identity
+		// yet, which is a real state rather than an error - see
+		// Status.ColonyID's own doc comment.
+		ColonyId: status.ColonyID,
 	}, nil
 }
 

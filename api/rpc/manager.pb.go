@@ -3381,8 +3381,13 @@ type StatusResponse struct {
 	// this proto concurrently, and 30 keeps this one clear of the lower
 	// block being filled in by them.
 	RaftMembershipError string `protobuf:"bytes,30,opt,name=raft_membership_error,json=raftMembershipError,proto3" json:"raft_membership_error,omitempty"`
-	unknownFields       protoimpl.UnknownFields
-	sizeCache           protoimpl.SizeCache
+	// raft_colony_id is the Colony this Comb belongs to, passed through
+	// from raftd's internal Status (ADR-0156 Stage 1). Empty when
+	// raft_reachable is false, or when the node has no Colony identity
+	// yet - which is a real state, not an error.
+	RaftColonyId  string `protobuf:"bytes,31,opt,name=raft_colony_id,json=raftColonyId,proto3" json:"raft_colony_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *StatusResponse) Reset() {
@@ -3509,6 +3514,13 @@ func (x *StatusResponse) GetRaftStateDigest() string {
 func (x *StatusResponse) GetRaftMembershipError() string {
 	if x != nil {
 		return x.RaftMembershipError
+	}
+	return ""
+}
+
+func (x *StatusResponse) GetRaftColonyId() string {
+	if x != nil {
+		return x.RaftColonyId
 	}
 	return ""
 }
@@ -17295,8 +17307,12 @@ type PendingJoinRequest struct {
 	// collapses a two-party flow into one.
 	SecondPinExpiresAtUnix int64  `protobuf:"varint,20,opt,name=second_pin_expires_at_unix,json=secondPinExpiresAtUnix,proto3" json:"second_pin_expires_at_unix,omitempty"`
 	SecondPinReissues      uint32 `protobuf:"varint,21,opt,name=second_pin_reissues,json=secondPinReissues,proto3" json:"second_pin_reissues,omitempty"`
-	unknownFields          protoimpl.UnknownFields
-	sizeCache              protoimpl.SizeCache
+	// colony_id (ADR-0156 Stage 1) is the Colony the joining node claims
+	// to belong to. It mirrors internalpb.PendingJoinRequest's own field
+	// of the same name - see there for the full reasoning.
+	ColonyId      string `protobuf:"bytes,22,opt,name=colony_id,json=colonyId,proto3" json:"colony_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *PendingJoinRequest) Reset() {
@@ -17476,6 +17492,13 @@ func (x *PendingJoinRequest) GetSecondPinReissues() uint32 {
 	return 0
 }
 
+func (x *PendingJoinRequest) GetColonyId() string {
+	if x != nil {
+		return x.ColonyId
+	}
+	return ""
+}
+
 type RequestJoinColonyRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// node_id/raft_bind_address are the JOINING Comb's own identity - the
@@ -17553,8 +17576,23 @@ type RequestJoinColonyRequest struct {
 	// at the moment the operator can still act on it is the whole point
 	// of failing closed here.
 	AdvertisedFingerprints []string `protobuf:"bytes,9,rep,name=advertised_fingerprints,json=advertisedFingerprints,proto3" json:"advertised_fingerprints,omitempty"`
-	unknownFields          protoimpl.UnknownFields
-	sizeCache              protoimpl.SizeCache
+	// colony_id (ADR-0156 Stage 1) is the Colony the JOINING node claims
+	// to belong to, if it claims one.
+	//
+	// A joining node that has been told which Colony it is joining -
+	// by an operator, or by its own previous membership in that Colony -
+	// states that identity here, and the receiving member compares it
+	// against the Colony's own replicated identity. A MISMATCH is a
+	// request to join a Colony that is not this one, and it is refused
+	// rather than quietly accepted into the wrong Colony.
+	//
+	// EMPTY means the joining node claims no Colony. That is what every
+	// node built before ADR-0156 sends, and it is accepted exactly as
+	// it was before - the member then inherits the Colony's identity
+	// from the Colony rather than asserting one of its own.
+	ColonyId      string `protobuf:"bytes,10,opt,name=colony_id,json=colonyId,proto3" json:"colony_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *RequestJoinColonyRequest) Reset() {
@@ -17648,6 +17686,13 @@ func (x *RequestJoinColonyRequest) GetAdvertisedFingerprints() []string {
 		return x.AdvertisedFingerprints
 	}
 	return nil
+}
+
+func (x *RequestJoinColonyRequest) GetColonyId() string {
+	if x != nil {
+		return x.ColonyId
+	}
+	return ""
 }
 
 type RequestJoinColonyResponse struct {
@@ -22258,7 +22303,7 @@ const file_api_rpc_manager_proto_rawDesc = "" +
 	"\x14ListVMsLocalResponse\x12-\n" +
 	"\x03vms\x18\x01 \x03(\v2\x1b.apiary.rpc.v1.VMDefinitionR\x03vms\x12\x14\n" +
 	"\x05error\x18\x02 \x01(\tR\x05error\"\x0f\n" +
-	"\rStatusRequest\"\xca\x04\n" +
+	"\rStatusRequest\"\xf0\x04\n" +
 	"\x0eStatusResponse\x12&\n" +
 	"\x0fmanager_node_id\x18\x01 \x01(\tR\rmanagerNodeId\x12%\n" +
 	"\x0eraft_reachable\x18\x02 \x01(\bR\rraftReachable\x12\x1d\n" +
@@ -22277,7 +22322,8 @@ const file_api_rpc_manager_proto_rawDesc = "" +
 	"\amembers\x18\v \x03(\v2\x19.apiary.rpc.v1.RaftMemberR\amembers\x12%\n" +
 	"\x0epam_configured\x18\f \x01(\bR\rpamConfigured\x12*\n" +
 	"\x11raft_state_digest\x18\r \x01(\tR\x0fraftStateDigest\x122\n" +
-	"\x15raft_membership_error\x18\x1e \x01(\tR\x13raftMembershipError\"U\n" +
+	"\x15raft_membership_error\x18\x1e \x01(\tR\x13raftMembershipError\x12$\n" +
+	"\x0eraft_colony_id\x18\x1f \x01(\tR\fraftColonyId\"U\n" +
 	"\x1bAuthenticatePasswordRequest\x12\x1a\n" +
 	"\busername\x18\x01 \x01(\tR\busername\x12\x1a\n" +
 	"\bpassword\x18\x02 \x01(\tR\bpassword\"D\n" +
@@ -23322,7 +23368,7 @@ const file_api_rpc_manager_proto_rawDesc = "" +
 	"own_bridge\x18\x03 \x01(\bR\townBridge\x12\x19\n" +
 	"\bown_vlan\x18\x04 \x01(\bR\aownVlan\x12!\n" +
 	"\foutbound_nat\x18\x05 \x01(\bR\voutboundNat\x12\x14\n" +
-	"\x05error\x18\x06 \x01(\tR\x05error\"\x8c\b\n" +
+	"\x05error\x18\x06 \x01(\tR\x05error\"\xa9\b\n" +
 	"\x12PendingJoinRequest\x12\x1d\n" +
 	"\n" +
 	"request_id\x18\x01 \x01(\tR\trequestId\x12\x17\n" +
@@ -23348,7 +23394,8 @@ const file_api_rpc_manager_proto_rawDesc = "" +
 	"\x13first_code_attempts\x18\x12 \x01(\rR\x11firstCodeAttempts\x12.\n" +
 	"\x13second_pin_attempts\x18\x13 \x01(\rR\x11secondPinAttempts\x12:\n" +
 	"\x1asecond_pin_expires_at_unix\x18\x14 \x01(\x03R\x16secondPinExpiresAtUnix\x12.\n" +
-	"\x13second_pin_reissues\x18\x15 \x01(\rR\x11secondPinReissues\"\xab\x03\n" +
+	"\x13second_pin_reissues\x18\x15 \x01(\rR\x11secondPinReissues\x12\x1b\n" +
+	"\tcolony_id\x18\x16 \x01(\tR\bcolonyId\"\xc8\x03\n" +
 	"\x18RequestJoinColonyRequest\x12\x17\n" +
 	"\anode_id\x18\x01 \x01(\tR\x06nodeId\x12*\n" +
 	"\x11raft_bind_address\x18\x02 \x01(\tR\x0fraftBindAddress\x12\x1d\n" +
@@ -23359,7 +23406,9 @@ const file_api_rpc_manager_proto_rawDesc = "" +
 	"\x19joiner_log_state_observed\x18\x06 \x01(\bR\x16joinerLogStateObserved\x121\n" +
 	"\x15joiner_last_log_index\x18\a \x01(\x04R\x12joinerLastLogIndex\x12+\n" +
 	"\x11introduction_code\x18\b \x01(\tR\x10introductionCode\x127\n" +
-	"\x17advertised_fingerprints\x18\t \x03(\tR\x16advertisedFingerprints\"\x85\x01\n" +
+	"\x17advertised_fingerprints\x18\t \x03(\tR\x16advertisedFingerprints\x12\x1b\n" +
+	"\tcolony_id\x18\n" +
+	" \x01(\tR\bcolonyId\"\x85\x01\n" +
 	"\x19RequestJoinColonyResponse\x12\x1d\n" +
 	"\n" +
 	"request_id\x18\x01 \x01(\tR\trequestId\x12\x12\n" +

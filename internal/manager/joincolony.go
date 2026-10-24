@@ -502,11 +502,46 @@ func (s *Server) RequestJoinColony(ctx context.Context, req *rpcpb.RequestJoinCo
 			// paste against them.
 			IntroductionCode:       req.GetIntroductionCode(),
 			AdvertisedFingerprints: advertisedFingerprints,
+			// ADR-0156 Stage 1: the joiner's Colony claim travels with
+			// the forward, so the member that actually records the
+			// request compares it against its own identity rather than
+			// recording a request that says nothing about which Colony
+			// the joiner meant.
+			ColonyId: req.GetColonyId(),
 		})
 		if err != nil {
 			return &rpcpb.RequestJoinColonyResponse{Error: fmt.Sprintf("reaching %s: %v", target, err)}, nil
 		}
 		return resp, nil
+	}
+	// ADR-0156 Stage 1: compare the JOINING node's claimed Colony
+	// identity against this Colony's own REPLICATED identity.
+	//
+	// This is the check that makes "join THIS Colony" a decidable
+	// question rather than an assumption. Without it, a node that
+	// believes it is joining Colony A can be admitted into Colony B
+	// and nothing would ever notice, because Colony B's identity is
+	// not something either side would be comparing.
+	//
+	// The check is on the local-recording path only, because that is
+	// the path where this managerd IS the Colony member recording the
+	// request on its own raft. A request carrying target_address is
+	// relayed, and the member that actually records it runs this same
+	// check on its own authoritative view - gating here as well would
+	// mean a follower could refuse on a stale identity while the
+	// leader would have accepted.
+	//
+	// An EMPTY claim is accepted. Every node built before ADR-0156
+	// sends no claim, and refusing those would break every existing
+	// join for no safety gain: a member that makes no claim inherits
+	// the Colony's identity from the Colony rather than asserting one
+	// of its own.
+	if req.GetColonyId() != "" {
+		if claimed := req.GetColonyId(); claimed != s.localColonyID(ctx) {
+			return &rpcpb.RequestJoinColonyResponse{Error: fmt.Sprintf(
+				"refusing to record this join request: the joining node claims Colony %q but this Colony's identity is %q; a node claiming a different Colony is not joining this one, and admitting it would put two colonies' identities in one raft log",
+				claimed, s.localColonyID(ctx))}, nil
+		}
 	}
 	requestID, err := generateJoinRequestID()
 	if err != nil {
@@ -565,6 +600,11 @@ func (s *Server) RequestJoinColony(ctx context.Context, req *rpcpb.RequestJoinCo
 					TlsCertFingerprint:     req.GetTlsCertFingerprint(),
 					JoinerLogStateObserved: logState.Observed,
 					JoinerLastLogIndex:     logState.LastLogIndex,
+					// ADR-0156 Stage 1: the joining node's claimed Colony
+					// identity, recorded on the replicated request so
+					// the audit trail shows which Colony the joiner
+					// said it was joining.
+					ColonyId: req.GetColonyId(),
 					// ADR-0147 Part 4: the window's epoch, recorded at
 					// creation so a later reopen cannot finish this
 					// request. The live-window check above guarantees

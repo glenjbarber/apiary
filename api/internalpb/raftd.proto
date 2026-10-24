@@ -297,6 +297,25 @@ message StatusResponse {
   // jumping ahead leaves room for a future membership-shaped addition
   // without renumbering anything already on the wire.
   string membership_error = 20;
+
+  // colony_id (ADR-0156 Stage 1) is the Colony this node belongs to.
+  //
+  // It is served from the node's REPLICATED state, not from its local
+  // configuration, because the whole point is that every voter of a
+  // Colony can state the same identity without consulting anyone else.
+  // A node answering this from its own config file would be answering
+  // a different question - "what did this process believe when it
+  // started" - which is exactly the question that two independently
+  // bootstrapped nodes would answer differently, and differently is
+  // the failure mode this field exists to expose.
+  //
+  // EMPTY means this node has no Colony identity yet: either it has
+  // applied no SetColonyIdentity, or it was restored from a snapshot
+  // that predates ADR-0156. That is a real, reportable state - "I do
+  // not know which Colony I am in" - and is deliberately NOT reported
+  // as an error, because a node that has genuinely not been told yet
+  // is still able to answer every other question on this response.
+  string colony_id = 21;
 }
 
 message ServerInfo {

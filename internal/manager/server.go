@@ -1195,6 +1195,13 @@ func (s *Server) Status(ctx context.Context, _ *rpcpb.StatusRequest) (*rpcpb.Sta
 	// keeps an empty Members list from reading as "this node believes the
 	// Colony has no members" - see the proto field's own doc comment.
 	resp.RaftMembershipError = raftStatus.GetMembershipError()
+	// ADR-0156 Stage 1: this Colony's identity, passed through from
+	// raftd's REPLICATED state. Passing it through rather than
+	// computing it here is the point: a managerd that answered from
+	// its own configuration could disagree with raftd, and two Combs
+	// disagreeing about which Colony they are in is the condition
+	// this feature exists to make impossible.
+	resp.RaftColonyId = raftStatus.GetColonyId()
 	for _, server := range raftStatus.GetServers() {
 		resp.KnownNodeIds = append(resp.KnownNodeIds, server.GetId())
 		resp.Members = append(resp.Members, &rpcpb.RaftMember{
