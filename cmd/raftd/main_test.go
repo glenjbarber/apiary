@@ -298,7 +298,7 @@ func TestStartupJoinOrBootstrap_AwaitJoinDoesNotBootstrap(t *testing.T) {
 	}
 	t.Cleanup(func() { node.Shutdown() })
 
-	if err := startupJoinOrBootstrap(node, false, "", cfg.NodeID, cfg.BindAddr, "", true); err != nil {
+	if err := startupJoinOrBootstrap(node, false, "", cfg.NodeID, cfg.BindAddr, "", true, cfg.DataDir); err != nil {
 		t.Fatalf("startupJoinOrBootstrap(awaitJoin=true) error: %v", err)
 	}
 
@@ -350,7 +350,7 @@ func TestStartupJoinOrBootstrap_AwaitJoinThenAddVoterFormsCluster(t *testing.T) 
 	// This is exactly what raftd's run() does when -await-join is set on
 	// a fresh data dir: start the node's transport, then do nothing else
 	// - no Bootstrap, no -join dial.
-	if err := startupJoinOrBootstrap(joiner, false, "", joinerCfg.NodeID, joinerCfg.BindAddr, "", true); err != nil {
+	if err := startupJoinOrBootstrap(joiner, false, "", joinerCfg.NodeID, joinerCfg.BindAddr, "", true, joinerCfg.DataDir); err != nil {
 		t.Fatalf("startupJoinOrBootstrap(awaitJoin=true) error: %v", err)
 	}
 
@@ -402,7 +402,7 @@ func TestStartupJoinOrBootstrap_HadStateTakesPriorityOverAwaitJoin(t *testing.T)
 	// awaitJoin=true is passed here exactly as run() would pass it on a
 	// restart with -await-join left set in rc.conf - hadState must win,
 	// resuming normally rather than sitting passively.
-	if err := startupJoinOrBootstrap(resumed, hadState, "", cfg.NodeID, cfg.BindAddr, "", true); err != nil {
+	if err := startupJoinOrBootstrap(resumed, hadState, "", cfg.NodeID, cfg.BindAddr, "", true, cfg.DataDir); err != nil {
 		t.Fatalf("startupJoinOrBootstrap() error: %v", err)
 	}
 

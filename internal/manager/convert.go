@@ -187,6 +187,10 @@ func fromInternalPendingJoinRequest(r *internalpb.PendingJoinRequest) *rpcpb.Pen
 		SecondPinAttempts:      r.GetSecondPinAttempts(),
 		SecondPinExpiresAtUnix: r.GetSecondPinExpiresAtUnix(),
 		SecondPinReissues:      r.GetSecondPinReissues(),
+		// ADR-0156 Stage 1: the Colony the joiner claimed, carried
+		// through so the operator reviewing the request can see which
+		// Colony the joiner said it was joining.
+		ColonyId: r.GetColonyId(),
 	}
 }
 

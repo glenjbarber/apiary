@@ -224,8 +224,26 @@ type StatusResponse struct {
 	// jumping ahead leaves room for a future membership-shaped addition
 	// without renumbering anything already on the wire.
 	MembershipError string `protobuf:"bytes,20,opt,name=membership_error,json=membershipError,proto3" json:"membership_error,omitempty"`
-	unknownFields   protoimpl.UnknownFields
-	sizeCache       protoimpl.SizeCache
+	// colony_id (ADR-0156 Stage 1) is the Colony this node belongs to.
+	//
+	// It is served from the node's REPLICATED state, not from its local
+	// configuration, because the whole point is that every voter of a
+	// Colony can state the same identity without consulting anyone else.
+	// A node answering this from its own config file would be answering
+	// a different question - "what did this process believe when it
+	// started" - which is exactly the question that two independently
+	// bootstrapped nodes would answer differently, and differently is
+	// the failure mode this field exists to expose.
+	//
+	// EMPTY means this node has no Colony identity yet: either it has
+	// applied no SetColonyIdentity, or it was restored from a snapshot
+	// that predates ADR-0156. That is a real, reportable state - "I do
+	// not know which Colony I am in" - and is deliberately NOT reported
+	// as an error, because a node that has genuinely not been told yet
+	// is still able to answer every other question on this response.
+	ColonyId      string `protobuf:"bytes,21,opt,name=colony_id,json=colonyId,proto3" json:"colony_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *StatusResponse) Reset() {
@@ -317,6 +335,13 @@ func (x *StatusResponse) GetStateDigest() string {
 func (x *StatusResponse) GetMembershipError() string {
 	if x != nil {
 		return x.MembershipError
+	}
+	return ""
+}
+
+func (x *StatusResponse) GetColonyId() string {
+	if x != nil {
+		return x.ColonyId
 	}
 	return ""
 }
@@ -2599,7 +2624,7 @@ const file_api_internalpb_raftd_proto_rawDesc = "" +
 	"\x05error\x18\x02 \x01(\tR\x05error\x12\x1f\n" +
 	"\vleader_hint\x18\x03 \x01(\tR\n" +
 	"leaderHint\"\x0f\n" +
-	"\rStatusRequest\"\xd5\x02\n" +
+	"\rStatusRequest\"\xf2\x02\n" +
 	"\x0eStatusResponse\x12\x1b\n" +
 	"\tis_leader\x18\x01 \x01(\bR\bisLeader\x12\x1b\n" +
 	"\tleader_id\x18\x02 \x01(\tR\bleaderId\x12\x17\n" +
@@ -2610,7 +2635,8 @@ const file_api_internalpb_raftd_proto_rawDesc = "" +
 	"raft_state\x18\x06 \x01(\tR\traftState\x128\n" +
 	"\aservers\x18\a \x03(\v2\x1e.apiary.internal.v1.ServerInfoR\aservers\x12!\n" +
 	"\fstate_digest\x18\b \x01(\tR\vstateDigest\x12)\n" +
-	"\x10membership_error\x18\x14 \x01(\tR\x0fmembershipError\"R\n" +
+	"\x10membership_error\x18\x14 \x01(\tR\x0fmembershipError\x12\x1b\n" +
+	"\tcolony_id\x18\x15 \x01(\tR\bcolonyId\"R\n" +
 	"\n" +
 	"ServerInfo\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x18\n" +

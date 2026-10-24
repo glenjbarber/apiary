@@ -38,7 +38,20 @@ type FSMApplyResult struct {
 	ColonyJoinWindow   *internalpb.ColonyJoinWindow
 	TrustedPeer        *internalpb.TrustedPeer
 	ColonyDiskSize     *internalpb.ColonyDiskSize
+	ColonyIdentity     *internalpb.ColonyIdentity
 	Error              string
+}
+
+// GetColonyIdentity returns the Colony identity this apply produced, or
+// nil if it produced none. A getter rather than a field read because
+// every other caller of an apply result reads it through one of these,
+// and because a nil field on a struct with an Error set is the common
+// case - a refused command carries no value.
+func (r *FSMApplyResult) GetColonyIdentity() *internalpb.ColonyIdentity {
+	if r == nil {
+		return nil
+	}
+	return r.ColonyIdentity
 }
 
 // FSM applies typed Command messages (see api/internalpb/state.proto)
@@ -85,6 +98,15 @@ type FSM struct {
 	// rather than reading it as unset. See
 	// internal/raft/colonydisksize.go.
 	colonyDiskSize *internalpb.ColonyDiskSize
+
+	// colonyIdentity is ADR-0156 Stage 1's Colony identity record: the
+	// one stable identifier that names "which Colony this is". nil until
+	// the first SetColonyIdentity is applied, which is the same thing as
+	// "no identity recorded" to every caller - the ABSENCE of any
+	// SetColonyIdentity entry in the log, not a record holding an empty
+	// string. See internal/raft/colonyidentity.go for why it is
+	// replicated rather than configured, and why it is written once.
+	colonyIdentity *internalpb.ColonyIdentity
 
 	// trustedPeers is ADR-0147 Part 4's replicated peer trust store,
 	// keyed by TrustedPeer.node_id. Replicated for the same reason
@@ -248,6 +270,12 @@ func (f *FSM) Apply(log *raft.Log) interface{} {
 		// "never reduced" from the same committed log rather than
 		// being told - see internal/raft/colonydisksize.go.
 		return f.applySetColonyDiskSize(log.Index, op.SetColonyDiskSize)
+	case *internalpb.Command_SetColonyIdentity:
+		// ADR-0156 Stage 1. The "already set" refusal is inside the
+		// apply function, not in any handler, so every replica
+		// decides "written once" from the same committed log rather
+		// than being told - see internal/raft/colonyidentity.go.
+		return f.applySetColonyIdentity(log.Index, op.SetColonyIdentity)
 	default:
 		return &FSMApplyResult{Index: log.Index, Error: "command has no op set"}
 	}
@@ -2227,6 +2255,12 @@ func (f *FSM) snapshotStateLocked() *internalpb.FSMSnapshotState {
 		// so a restore cannot silently drop it and re-open this Colony
 		// to a lower default on whichever voter restored last.
 		ColonyDiskSize: cloneColonyDiskSize(f.colonyDiskSize),
+		// ADR-0156 Stage 1: the Colony identity rides inside
+		// FSMSnapshotState so it is inside the ADR-0143 digest with no
+		// second list to forget, and so a restore cannot silently drop
+		// it and leave a restored node believing it belongs to no
+		// Colony at all.
+		ColonyIdentity: cloneColonyIdentity(f.colonyIdentity),
 	}
 	for id, vm := range f.vms {
 		state.Vms[id] = vm
@@ -2311,6 +2345,11 @@ func (f *FSM) Restore(rc io.ReadCloser) error {
 	// the floor, which is the only honest reading: absence is the sole
 	// representation of "unset", so this does not invent a zero floor.
 	f.colonyDiskSize = cloneColonyDiskSize(state.GetColonyDiskSize())
+	// ADR-0156 Stage 1. A nil here means the snapshot being restored
+	// predates the Colony identity, which is the only honest reading:
+	// absence is the sole representation of "no identity recorded", so
+	// this does not invent one.
+	f.colonyIdentity = cloneColonyIdentity(state.GetColonyIdentity())
 	f.trustedPeers = state.GetTrustedPeers()
 	if f.trustedPeers == nil {
 		f.trustedPeers = make(map[string]*internalpb.TrustedPeer)

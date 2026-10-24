@@ -1403,6 +1403,12 @@ message StatusResponse {
   // this proto concurrently, and 30 keeps this one clear of the lower
   // block being filled in by them.
   string raft_membership_error = 30;
+
+  // raft_colony_id is the Colony this Comb belongs to, passed through
+  // from raftd's internal Status (ADR-0156 Stage 1). Empty when
+  // raft_reachable is false, or when the node has no Colony identity
+  // yet - which is a real state, not an error.
+  string raft_colony_id = 31;
 }
 
 message AuthenticatePasswordRequest {
@@ -3863,6 +3869,11 @@ message PendingJoinRequest {
   // collapses a two-party flow into one.
   int64 second_pin_expires_at_unix = 20;
   uint32 second_pin_reissues = 21;
+
+  // colony_id (ADR-0156 Stage 1) is the Colony the joining node claims
+  // to belong to. It mirrors internalpb.PendingJoinRequest's own field
+  // of the same name - see there for the full reasoning.
+  string colony_id = 22;
 }
 
 message RequestJoinColonyRequest {
@@ -3946,6 +3957,22 @@ message RequestJoinColonyRequest {
   // at the moment the operator can still act on it is the whole point
   // of failing closed here.
   repeated string advertised_fingerprints = 9;
+
+  // colony_id (ADR-0156 Stage 1) is the Colony the JOINING node claims
+  // to belong to, if it claims one.
+  //
+  // A joining node that has been told which Colony it is joining -
+  // by an operator, or by its own previous membership in that Colony -
+  // states that identity here, and the receiving member compares it
+  // against the Colony's own replicated identity. A MISMATCH is a
+  // request to join a Colony that is not this one, and it is refused
+  // rather than quietly accepted into the wrong Colony.
+  //
+  // EMPTY means the joining node claims no Colony. That is what every
+  // node built before ADR-0156 sends, and it is accepted exactly as
+  // it was before - the member then inherits the Colony's identity
+  // from the Colony rather than asserting one of its own.
+  string colony_id = 10;
 }
 
 message RequestJoinColonyResponse {
