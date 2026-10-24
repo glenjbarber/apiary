@@ -967,7 +967,7 @@ template dataset once and snapshot it with the fixed name Apiary looks
 for:
 
 ```bash
-zfs create zroot/apiary/templates/freebsd-14
+zfs create -p zroot/apiary/templates/freebsd-14
 mount -t zfs zroot/apiary/templates/freebsd-14 /mnt
 tar -xf base.txz -C /mnt
 umount /mnt

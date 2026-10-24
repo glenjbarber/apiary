@@ -37,7 +37,7 @@ template convention, no existing UI catalog to mirror).
   then snapshotted with a fixed, Apiary-recognized name:
   `<name>@apiary-template`. For example:
   ```
-  zfs create zroot/apiary/templates/freebsd-14
+  zfs create -p zroot/apiary/templates/freebsd-14
   mount -t zfs zroot/apiary/templates/freebsd-14 /mnt/tmpl
   tar -xf base.txz -C /mnt/tmpl
   umount /mnt/tmpl

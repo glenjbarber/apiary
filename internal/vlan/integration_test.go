@@ -19,6 +19,13 @@ import (
 // to the uplink interface name (e.g. "re0", "em0" - confirmed to differ
 // per node in this project's own fleet).
 //
+// FreeBSD caps an interface name at IFNAMSIZ (16) bytes, of which the
+// last is the NUL terminator, so a usable name is at most 15
+// characters. The disposable bridge names in this file are all kept
+// within that limit; a longer one is refused by the kernel with
+// "ifconfig: ioctl SIOCSIFNAME (set name): File name too long",
+// which is a kernel limit, not a bug in this package.
+//
 // requireFreeBSDRoot is the first gate for all of them and is a hard
 // GOOS check, not just a root check: macOS also has an ifconfig(8), and
 // a developer running this suite as root there would otherwise be
@@ -155,7 +162,7 @@ func TestIntegration_EnsureMemberAndBridgeAddress(t *testing.T) {
 func TestIntegration_BridgeSVIIsRefusedByTheKernelAndByEnsureVLAN(t *testing.T) {
 	requireFreeBSDRoot(t)
 	ctx := context.Background()
-	parent := "apiary-it-svi-par"
+	parent := "apiary-it-svi-p"
 	const vlanID = 4093
 
 	probe := &Manager{} // no runner, no bridges: raw ifconfig, as the kernel sees it
@@ -178,7 +185,7 @@ func TestIntegration_BridgeSVIIsRefusedByTheKernelAndByEnsureVLAN(t *testing.T) 
 	}
 
 	// ... and refuses to add it to a second bridge, by name.
-	other := "apiary-it-svi-other"
+	other := "apiary-it-svi-o"
 	if _, err := probe.EnsureBridge(ctx, other); err != nil {
 		t.Fatalf("creating the second disposable bridge: %v", err)
 	}
@@ -203,7 +210,7 @@ func TestIntegration_BridgeSVIIsRefusedByTheKernelAndByEnsureVLAN(t *testing.T) 
 func TestIntegration_EpairIsStillAddedToABridgeOnABridgeUplinkNode(t *testing.T) {
 	requireFreeBSDRoot(t)
 	ctx := context.Background()
-	bridge := "apiary-it-epair-br"
+	bridge := "apiary-it-ep-br"
 	probe := &Manager{}
 	if _, err := probe.EnsureBridge(ctx, bridge); err != nil {
 		t.Fatalf("creating the disposable bridge: %v", err)
@@ -237,7 +244,7 @@ func TestIntegration_PlainNICUplinkStillAddsTheVLAN(t *testing.T) {
 	uplink := testUplink(t)
 	ctx := context.Background()
 	const vlanID = 4092
-	bridge := "apiary-it-nic-br"
+	bridge := "apiary-it-nic-b"
 
 	probe := &Manager{}
 	t.Cleanup(func() {

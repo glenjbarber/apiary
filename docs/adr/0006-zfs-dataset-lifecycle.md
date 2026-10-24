@@ -27,6 +27,27 @@ structurally impossible for a bug elsewhere in Apiary to construct a path
 that escapes `Base` and destroys something unrelated — this is enforced
 in `Manager.path`, which every method routes through.
 
+### `CreateDataset` creates missing parents (`zfs create -p`)
+
+`CreateDataset` runs `zfs create -p <Base/name>`, so a nested name
+whose parent does not exist yet is created implicitly. Plain `zfs
+create` refuses this ("parent does not exist"), which broke the two
+places that use nested names: the jail base-image layout
+(`templates/freebsd-14`, ADR-0084) and ADR-0089's cross-node template
+fetch, where the receiving node has no `templates` dataset until the
+first template arrives.
+
+`-p` is idempotent: creating a dataset that already exists succeeds
+and leaves its properties untouched, so `CreateDataset` is safe to call
+on a dataset that may already be there. Callers that need to know
+whether they created anything still check `DatasetExists` first.
+
+`Receive` and `ReceiveForce` create the destination's immediate parent
+the same way, because `zfs receive` cannot create a missing parent
+either — it fails with "cannot open '.../templates': dataset does not
+exist". Without that guard, ADR-0089's template fetch only worked on a
+node where an operator had already created `templates` by hand.
+
 ### `DestroyDataset` has no recursive option
 
 It fails naturally (matching plain `zfs destroy`'s own default) if the
@@ -70,6 +91,10 @@ step for now, not part of any CI this project has (none exists yet).
   `userprop`-doesn't-cover-native-properties gotcha; check delegated
   permissions (`zfs allow <pool>`) before assuming a `SetProperty` call
   will work in tests.
+- A `CreateDataset` call now succeeds on a dataset that already exists,
+  so any caller that treats "it already existed" as an error (or that
+  creates a dataset it does not own) must check `DatasetExists` first
+  if it needs to distinguish the two.
 - `internal/bhyve`/`internal/jail`, once implemented, will likely depend
   on `internal/zfs.Manager` for their backing datasets — the `Base`
   scoping means each can be given (or share) a `Manager` pointed at an
