@@ -234,7 +234,22 @@ var showVersion bool
 // prints usage - which is exactly the failure this split exists to
 // prevent.
 func RegisterVersionFlag(fs *flag.FlagSet) {
-	fs.BoolVar(&showVersion, "version", false,
+	RegisterVersionFlagTo(fs, &showVersion)
+}
+
+// RegisterVersionFlagTo adds -version to fs, binding it to target rather
+// than to this package's own package-level variable.
+//
+// It exists for callers that may run more than once in a single process -
+// a command under test, for instance. The package-level form would leave
+// "was -version passed?" true for every later call in that process, so one
+// test would silently change the behaviour of the next. Binding to a
+// caller-owned variable keeps each invocation's answer its own.
+//
+// The flag's meaning and help text are identical either way; only the
+// destination of the boolean differs.
+func RegisterVersionFlagTo(fs *flag.FlagSet, target *bool) {
+	fs.BoolVar(target, "version", false,
 		"print build identity (build id, commit, build time, Go toolchain) "+
 			"and exit without starting any service")
 }
