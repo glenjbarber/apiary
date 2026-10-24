@@ -4135,6 +4135,27 @@ func TestServer_HandleApproveJoinRequest_AwaitingSecondAuthorization(t *testing.
 	}
 }
 
+func TestServer_HandleApproveJoinRequest_EarlyRefusalKeepsRequestAnchor(t *testing.T) {
+	const stageTooEarly = `ApprovePendingJoinRequest: request_id "jreq-abc123" is at stage JOIN_REQUEST_STAGE_INTRODUCED. The first code and fingerprints have to be verified on this Colony's page before the second PIN exists`
+	client := &fakeClient{approveJoinRequestResp: &rpcpb.ApproveJoinRequestResponse{Error: stageTooEarly}}
+	s := newTestServer(t, client)
+	form := url.Values{"confirm_phrase": {"yes-trust-new-comb"}}
+	req := httptest.NewRequest(http.MethodPost, "/join-requests/jreq-abc123/approve", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, req)
+	loc := rec.Header().Get("Location")
+	if !strings.Contains(loc, "join_request_stage1_request_id=jreq-abc123") {
+		t.Fatalf("redirect location = %q, want refused request ID", loc)
+	}
+	follow := httptest.NewRequest(http.MethodGet, loc, nil)
+	followRec := httptest.NewRecorder()
+	s.ServeHTTP(followRec, follow)
+	if !strings.Contains(followRec.Body.String(), `href="#join-request-jreq-abc123-stage1"`) {
+		t.Errorf("follow-up page did not link to refused request's Stage 1 form: %s", followRec.Body.String())
+	}
+}
+
 // TestServer_ClusterOverviewPage_JoinRequestErrorPointsToStage1 is the
 // issue #71 regression test for the "the refusal for approving too
 // early points at the form" requirement: the specific stage-mismatch
@@ -4147,22 +4168,30 @@ func TestServer_ClusterOverviewPage_JoinRequestErrorPointsToStage1(t *testing.T)
 	cases := []struct {
 		name      string
 		errMsg    string
-		wantsLink bool
+		requestID string
+		wantHref  string
 	}{
-		{name: "stage too early points at the form", errMsg: stageTooEarly, wantsLink: true},
-		{name: "unrelated error does not", errMsg: `confirm_phrase "" does not match the required confirmation phrase "yes-trust-new-comb" - nothing was done`, wantsLink: false},
+		{name: "stage too early points at this request", errMsg: stageTooEarly, requestID: "jreq-abc123", wantHref: `href="#join-request-jreq-abc123-stage1"`},
+		{name: "unidentified stage error falls back to section", errMsg: stageTooEarly, wantHref: `href="#pending-join-requests"`},
+		{name: "unrelated error has no stage link", errMsg: `confirm_phrase "" does not match the required confirmation phrase "yes-trust-new-comb" - nothing was done`},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			s := newTestServer(t, &fakeClient{})
-			req := httptest.NewRequest(http.MethodGet, "/?join_request_error="+url.QueryEscape(tc.errMsg), nil)
+			query := url.Values{"join_request_error": []string{tc.errMsg}}
+			if tc.requestID != "" {
+				query.Set("join_request_stage1_request_id", tc.requestID)
+			}
+			req := httptest.NewRequest(http.MethodGet, "/?"+query.Encode(), nil)
 			rec := httptest.NewRecorder()
 			s.ServeHTTP(rec, req)
 
 			body := rec.Body.String()
-			gotLink := strings.Contains(body, `Jump to the Stage 1 form below`)
-			if gotLink != tc.wantsLink {
-				t.Errorf("link to Stage 1 form present = %v, want %v; body=%s", gotLink, tc.wantsLink, body)
+			if tc.wantHref != "" && !strings.Contains(body, tc.wantHref) {
+				t.Errorf("body missing %s; body=%s", tc.wantHref, body)
+			}
+			if tc.wantHref == "" && strings.Contains(body, `href="#join-request-`) {
+				t.Errorf("unrelated error rendered a Stage 1 link; body=%s", body)
 			}
 		})
 	}

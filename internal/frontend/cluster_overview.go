@@ -619,6 +619,12 @@ func (s *Server) handleClusterOverviewPage(w http.ResponseWriter, r *http.Reques
 
 	joinRequests := s.currentJoinRequests(r)
 	joinRequestError := r.URL.Query().Get("join_request_error")
+	joinRequestErrorStage1Anchor := ""
+	if joinRequestErrorPointsToStage1(joinRequestError) {
+		if requestID := r.URL.Query().Get("join_request_stage1_request_id"); requestID != "" {
+			joinRequestErrorStage1Anchor = "join-request-" + requestID + "-stage1"
+		}
+	}
 	joinRequestAwaitingSecond := r.URL.Query().Get("join_request_awaiting_second")
 	s.render(w, "cluster_overview_page", s.withAuthFieldsFrom(r, pageData{
 		ClusterNodes: nodes,
@@ -630,6 +636,7 @@ func (s *Server) handleClusterOverviewPage(w http.ResponseWriter, r *http.Reques
 		ActivePage:                             "stats",
 		JoinRequestError:                       joinRequestError,
 		JoinRequestErrorPointsToStage1:         joinRequestErrorPointsToStage1(joinRequestError),
+		JoinRequestErrorStage1Anchor:           joinRequestErrorStage1Anchor,
 		JoinRequestAwaitingSecondAuthorization: joinRequestAwaitingSecond != "",
 		JoinRequestAwaitingSecondAuthorizationMessage: joinRequestAwaitingSecond,
 		JoinRequestPreflightID:                        r.URL.Query().Get("preflight_request_id"),
