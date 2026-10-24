@@ -472,10 +472,13 @@ func (p *Plan) planManagerdWrites() {
 	// install leaves it unset, which disables target_address forwarding;
 	// direct apiaryctl join-introduce enrollment dials the target itself
 	// and does not need forwarding.
-	// Only the one address this install already knows about is seeded;
-	// it is NOT kept current as further Combs later join this Colony -
-	// that needs the join flow itself to extend it on every member,
-	// which is explicitly out of scope here (see the PR notes).
+	// Only the one address this install already knows about is seeded.
+	// Since ADR-0164, the allowlist is ALSO derived from raft membership
+	// at runtime, so further Combs joining the Colony are added to every
+	// member's allowlist automatically. This seeded value is the
+	// operator's explicit override layer: it survives derivation, and it is
+	// what makes this Comb's own join work before it has joined and
+	// therefore before it has any membership to derive from.
 	if p.opts.ColonyMember != "" {
 		changed = p.fill(path, "known_peer_addresses", p.managerOwn.KnownPeerAddresses, &cfg.KnownPeerAddresses, p.opts.ColonyMember,
 			"ADR-0097's allowlist for the three unauthenticated join RPCs' target_address, seeded with the one Colony member this install was told about (--colony-member); closes the SSRF-shaped gap in issue #84 for this Comb's own join, though it is not extended automatically as the Colony gains further members") || changed

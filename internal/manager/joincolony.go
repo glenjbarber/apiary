@@ -76,13 +76,21 @@ const defaultUnauthenticatedForwardTimeout = 10 * time.Second
 func (s *Server) checkTargetAddressAllowed(target string) error {
 	s.knownPeerAddressesMu.RLock()
 	defer s.knownPeerAddressesMu.RUnlock()
-	if len(s.knownPeerAddresses) == 0 {
+	// The CONFIGURED layer (ADR-0097) and the DERIVED layer (ADR-0164) are
+	// consulted together. The configured layer is checked first so an
+	// operator's explicit entry keeps working even if derivation has
+	// not run yet or could not reach raft - and derivation can only ever
+	// WIDEN the set, never narrow it.
+	if s.knownPeerAddresses[target] {
+		return nil
+	}
+	if s.derivedPeerAddresses[target] {
+		return nil
+	}
+	if len(s.knownPeerAddresses) == 0 && len(s.derivedPeerAddresses) == 0 {
 		return fmt.Errorf("target_address forwarding is disabled because known_peer_addresses is not configured; set it to the Colony member managerd addresses or use apiaryctl join-introduce to connect directly")
 	}
-	if !s.knownPeerAddresses[target] {
-		return fmt.Errorf("target_address %q is not in this node's -known-peer-addresses allowlist", target)
-	}
-	return nil
+	return fmt.Errorf("target_address %q is not in this node's -known-peer-addresses allowlist", target)
 }
 
 // dialReachable is the production reachabilityCheck (Server field) -
