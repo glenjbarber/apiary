@@ -1,15 +1,15 @@
 # ADR-0150: Native system-statistics and cluster-monitoring API
 
-Status: Superseded by ADR-0157 for the monitoring API design; historical proposal retained
+Status: Superseded by ADR-0160 for the monitoring API design; historical proposal retained
 Supersedes: "Todo: Integrate bsnmpd with raftd to reduce state tracking" (Notion Todo, Apiary project - not an apiary-local ADR, so there is nothing in `docs/adr/` to mark superseded; this document records the supersession relationship on this side only. Resolving or re-numbering the Notion page is Glen's to do, not this document's.)
-Superseded by: ADR-0157 (monitoring API design)
+Superseded by: ADR-0160 (monitoring API design)
 Affected projects: Apiary
 Legacy identifier: ADR-0150 (Apiary)
 Loreloom identifier: Pending allocation by Glen - if this design is ever registered cross-project, allocating that number is Glen's to do, not this agent's. This document deliberately does not invent one.
 
 ## Status qualifications
 
-**HISTORICAL PROPOSAL.** ADR-0157 supersedes this document for monitoring API decisions. The analysis below records the earlier design state and does not override ADR-0157.
+**HISTORICAL PROPOSAL.** ADR-0160 supersedes this document for monitoring API decisions. The analysis below records the earlier design state and does not override ADR-0160.
 
 This ADR is a proposal, written in response to a Notion Todo ("Design
 native Apiary system-statistics and cluster-monitoring capability,
@@ -429,7 +429,7 @@ Reasoning:
 
 ## Open questions
 
-These questions record what the original proposal could not resolve. ADR-0157 now records the current monitoring API decisions; the list below is retained as historical context and is not a current implementation gate by itself:
+These questions record what the original proposal could not resolve. ADR-0160 now records the current monitoring API decisions; the list below is retained as historical context and is not a current implementation gate by itself:
 
 1. **Push vs. pull, precisely.** Is "the leader monitors followers"
    satisfied by every node submitting a replicated self-report that

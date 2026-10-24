@@ -1,4 +1,4 @@
-# ADR-0159: Apiary read-only MCP server and guarded actions
+# ADR-0162: Apiary read-only MCP server and guarded actions
 
 ## Status
 
@@ -34,4 +34,4 @@ Orcli owns client transport and interaction behavior. Apiary owns the MCP server
 - Apiary remains a resource server. Orcli remains the client/host, with independent work in the orcli repository.
 - The basic read-only external-client product boundary, remote user identity model, session behavior, and any licensing decision remain open for the owner.
 - Guarded writes stay out of scope until per-operation role mapping, explicit user approval, and auditable outcomes are specified and implemented.
-- ADR numbers 0157, 0158 and 0159 are verified free in the current origin/main tree, but central ADR number allocation still requires owner confirmation.
+- ADR numbers 0160, 0161 and 0162 are verified free in the current origin/main tree, but central ADR number allocation still requires owner confirmation.
