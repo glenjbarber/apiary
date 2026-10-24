@@ -691,6 +691,22 @@ func (p *PeerReporter) CreateVMSnapshot(ctx context.Context, addr, id, snapshotN
 	return client.CreateVMSnapshot(ctx, &rpcpb.CreateVMSnapshotRequest{Id: id, SnapshotName: snapshotName})
 }
 
+// CreateVMSnapshotFor is CreateVMSnapshot with the VM's PHYSICAL
+// identity supplied (ADR-0152): the asking node already resolved the
+// logical id to the physical dataset name, and the node doing the ZFS
+// work should not have to resolve it again (it may hold no raft view
+// at all). It is a separate method rather than an extra argument on
+// CreateVMSnapshot because the plain method is what every other caller
+// uses, and a physical_id field defaults to "resolve it yourself".
+func (p *PeerReporter) CreateVMSnapshotFor(ctx context.Context, addr, id, physicalID, snapshotName string) (*rpcpb.CreateVMSnapshotResponse, error) {
+	conn, client, err := p.dial(addr)
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close()
+	return client.CreateVMSnapshot(ctx, &rpcpb.CreateVMSnapshotRequest{Id: id, SnapshotName: snapshotName, PhysicalId: physicalID})
+}
+
 func (p *PeerReporter) ListVMSnapshots(ctx context.Context, addr, id string) (*rpcpb.ListVMSnapshotsResponse, error) {
 	conn, client, err := p.dial(addr)
 	if err != nil {
@@ -698,6 +714,18 @@ func (p *PeerReporter) ListVMSnapshots(ctx context.Context, addr, id string) (*r
 	}
 	defer conn.Close()
 	return client.ListVMSnapshots(ctx, &rpcpb.ListVMSnapshotsRequest{Id: id})
+}
+
+// ListVMSnapshotsFor is ListVMSnapshots with the VM's PHYSICAL identity
+// supplied (ADR-0152) - see CreateVMSnapshotFor's own doc comment for
+// why the physical name is carried rather than re-resolved.
+func (p *PeerReporter) ListVMSnapshotsFor(ctx context.Context, addr, id, physicalID string) (*rpcpb.ListVMSnapshotsResponse, error) {
+	conn, client, err := p.dial(addr)
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close()
+	return client.ListVMSnapshots(ctx, &rpcpb.ListVMSnapshotsRequest{Id: id, PhysicalId: physicalID})
 }
 
 func (p *PeerReporter) RestoreVMSnapshot(ctx context.Context, addr, id, snapshotName string) (*rpcpb.RestoreVMSnapshotResponse, error) {
@@ -864,6 +892,22 @@ func (p *PeerReporter) DeleteVM(ctx context.Context, addr string, req *rpcpb.Del
 	}
 	defer conn.Close()
 	return client.DeleteVM(ctx, req)
+}
+
+// RenameVMIdentity forwards ADR-0152's identity-rename request to the
+// leader node's own managerd, unchanged, and returns the leader's
+// actual response - the same shape as every other write RPC above, and
+// for the same reason: the response carries the resulting authoritative
+// VM record and the rename outcome, so returning the leader's real
+// answer (rather than a bare success/failure) is what lets the caller
+// implement the retry contract.
+func (p *PeerReporter) RenameVMIdentity(ctx context.Context, addr string, req *rpcpb.RenameVMIdentityRequest) (*rpcpb.RenameVMIdentityResponse, error) {
+	conn, client, err := p.dial(addr)
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close()
+	return client.RenameVMIdentity(ctx, req)
 }
 
 func (p *PeerReporter) CreateJail(ctx context.Context, addr string, req *rpcpb.CreateJailRequest) (*rpcpb.CreateJailResponse, error) {
@@ -1642,7 +1686,13 @@ func (p *PeerReporter) ListJailTemplateNames(ctx context.Context, addr string) (
 // ReceiveVMSnapshot re-validates both with the same helpers
 // PushVMSnapshotTo applied before Send, because either end of a
 // node-to-node transfer can be the wrong or hostile one.
-func (p *PeerReporter) PushVMSnapshot(ctx context.Context, addr, vmID, snapshotName string, r io.Reader) error {
+// PushVMSnapshot opens a ReceiveVMSnapshot stream to addr and pipes r
+// into it. physicalID is the VM's PHYSICAL identity (ADR-0152) - the
+// dataset the bytes belong to - and travels in the stream's metadata so
+// the receiving node lands the receive in the right dataset even if
+// the VM's logical id was renamed. An empty physicalID means "use the
+// logical id".
+func (p *PeerReporter) PushVMSnapshot(ctx context.Context, addr, vmID, physicalID, snapshotName string, r io.Reader) error {
 	conn, client, err := p.dial(addr)
 	if err != nil {
 		return err
@@ -1655,7 +1705,7 @@ func (p *PeerReporter) PushVMSnapshot(ctx context.Context, addr, vmID, snapshotN
 	}
 	if err := stream.Send(&rpcpb.ReceiveVMSnapshotRequest{
 		Data: &rpcpb.ReceiveVMSnapshotRequest_Metadata{
-			Metadata: &rpcpb.VMSnapshotMetadata{Id: vmID, SnapshotName: snapshotName},
+			Metadata: &rpcpb.VMSnapshotMetadata{Id: vmID, PhysicalId: physicalID, SnapshotName: snapshotName},
 		},
 	}); err != nil {
 		return fmt.Errorf("sending VM-snapshot metadata to %s: %w", addr, err)
@@ -1696,12 +1746,22 @@ func (p *PeerReporter) PushVMSnapshot(ctx context.Context, addr, vmID, snapshotN
 // exactly. Peer-only in the same way those two are: it is never aimed
 // at a leader on a caller's behalf, only asked for by a peer.
 func (p *PeerReporter) RequestVMSnapshotPush(ctx context.Context, addr, vmID, snapshotName, targetNodeID string) error {
+	return p.RequestVMSnapshotPushFor(ctx, addr, vmID, "", snapshotName, targetNodeID)
+}
+
+// RequestVMSnapshotPushFor is RequestVMSnapshotPush with the VM's
+// PHYSICAL identity supplied (ADR-0152): the sending node reads the
+// snapshot from the physical dataset, and only the asking node knows
+// what that physical name is after a rename. An empty physicalID means
+// "use the logical id", which is correct for a VM that has not been
+// renamed.
+func (p *PeerReporter) RequestVMSnapshotPushFor(ctx context.Context, addr, vmID, physicalID, snapshotName, targetNodeID string) error {
 	conn, client, err := p.dial(addr)
 	if err != nil {
 		return err
 	}
 	defer conn.Close()
-	resp, err := client.PushVMSnapshotTo(ctx, &rpcpb.PushVMSnapshotToRequest{Id: vmID, SnapshotName: snapshotName, TargetNodeId: targetNodeID})
+	resp, err := client.PushVMSnapshotTo(ctx, &rpcpb.PushVMSnapshotToRequest{Id: vmID, SnapshotName: snapshotName, TargetNodeId: targetNodeID, PhysicalId: physicalID})
 	if err != nil {
 		return err
 	}
@@ -1709,6 +1769,24 @@ func (p *PeerReporter) RequestVMSnapshotPush(ctx context.Context, addr, vmID, sn
 		return fmt.Errorf("%s", resp.GetError())
 	}
 	return nil
+}
+
+// ListVMSnapshotNamesFor is ListVMSnapshotNames with the VM's PHYSICAL
+// identity supplied (ADR-0152): the snapshots live under the physical
+// dataset, which survives a logical rename, and the asking node is the
+// only one that knows the current record's resource_id. An empty
+// physicalID means "use the logical id".
+func (p *PeerReporter) ListVMSnapshotNamesFor(ctx context.Context, addr, vmID, physicalID string) ([]string, error) {
+	resp, err := p.ListVMSnapshotsFor(ctx, addr, vmID, physicalID)
+	if err != nil {
+		return nil, err
+	}
+	if resp.GetError() != "" {
+		return nil, fmt.Errorf("%s", resp.GetError())
+	}
+	names := make([]string, 0, len(resp.GetSnapshotNames()))
+	names = append(names, resp.GetSnapshotNames()...)
+	return names, nil
 }
 
 // ListVMSnapshotNames reports the snapshot names addr holds for one

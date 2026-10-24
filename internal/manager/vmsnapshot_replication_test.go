@@ -26,15 +26,19 @@ type fakeVMSnapshotPeerForwarder struct {
 
 	mu sync.Mutex
 
-	pushCalls []struct{ addr, vmID, snapshotName string }
+	pushCalls []struct{ addr, vmID, physicalID, snapshotName string }
 	pushErr   error
 }
 
-func (f *fakeVMSnapshotPeerForwarder) PushVMSnapshot(_ context.Context, addr, vmID, snapshotName string, r io.Reader) error {
+// PushVMSnapshot carries the VM's PHYSICAL identity as well as its
+// logical one (ADR-0152): the receiving node lands the stream in the
+// physical dataset, which is where the snapshot actually lives even
+// after a logical rename.
+func (f *fakeVMSnapshotPeerForwarder) PushVMSnapshot(_ context.Context, addr, vmID, physicalID, snapshotName string, r io.Reader) error {
 	io.Copy(io.Discard, r)
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.pushCalls = append(f.pushCalls, struct{ addr, vmID, snapshotName string }{addr, vmID, snapshotName})
+	f.pushCalls = append(f.pushCalls, struct{ addr, vmID, physicalID, snapshotName string }{addr, vmID, physicalID, snapshotName})
 	return f.pushErr
 }
 
@@ -286,7 +290,7 @@ func TestIntegration_PushVMSnapshot_RealClientStreamReachesReceive(t *testing.T)
 	seedVMDefinition(t, targetClient, "vm-1", "node-b")
 
 	reporter := NewPeerReporter("", false, nil)
-	if err := reporter.PushVMSnapshot(context.Background(), targetAddr, "vm-1", "nightly", strings.NewReader(payload)); err != nil {
+	if err := reporter.PushVMSnapshot(context.Background(), targetAddr, "vm-1", "", "nightly", strings.NewReader(payload)); err != nil {
 		t.Fatalf("PushVMSnapshot() error: %v", err)
 	}
 
@@ -310,7 +314,7 @@ func TestIntegration_PushVMSnapshot_RejectsMetadataIsNotChunked(t *testing.T) {
 	seedVMDefinition(t, targetClient, "vm-1", "node-b")
 
 	reporter := NewPeerReporter("", false, nil)
-	if err := reporter.PushVMSnapshot(context.Background(), targetAddr, "vm-1", "nightly", strings.NewReader("tiny")); err != nil {
+	if err := reporter.PushVMSnapshot(context.Background(), targetAddr, "vm-1", "", "nightly", strings.NewReader("tiny")); err != nil {
 		t.Fatalf("PushVMSnapshot() error: %v", err)
 	}
 	if got := targetZFS.forceReceivedInto["vm-1"]; got != "tiny" {
@@ -329,7 +333,7 @@ func TestIntegration_PushVMSnapshot_TargetRefusalIsAnError(t *testing.T) {
 	seedVMDefinition(t, targetClient, "vm-1", "node-b")
 
 	reporter := NewPeerReporter("", false, nil)
-	err := reporter.PushVMSnapshot(context.Background(), targetAddr, "vm-1", "nightly", strings.NewReader("bytes"))
+	err := reporter.PushVMSnapshot(context.Background(), targetAddr, "vm-1", "", "nightly", strings.NewReader("bytes"))
 	if err == nil {
 		t.Fatal("PushVMSnapshot() = nil error, want the target's refusal surfaced")
 	}
@@ -354,7 +358,7 @@ func TestIntegration_RequestVMSnapshotPush_CallsTheTargetsOwnRPC(t *testing.T) {
 	}
 
 	peers.mu.Lock()
-	gotPushes := append([]struct{ addr, vmID, snapshotName string }{}, peers.pushCalls...)
+	gotPushes := append([]struct{ addr, vmID, physicalID, snapshotName string }{}, peers.pushCalls...)
 	peers.mu.Unlock()
 	if len(gotPushes) != 1 || gotPushes[0].vmID != "vm-1" || gotPushes[0].snapshotName != "nightly" {
 		t.Errorf("PushVMSnapshot calls = %+v, want exactly one for vm-1/nightly", gotPushes)
@@ -410,7 +414,7 @@ func TestIntegration_PushVMSnapshot_UnknownVMIsRefused(t *testing.T) {
 	// Deliberately no CreateVM: vm-1 is defined nowhere in this raft.
 
 	reporter := NewPeerReporter("", false, nil)
-	err := reporter.PushVMSnapshot(context.Background(), targetAddr, "vm-1", "nightly", strings.NewReader("bytes"))
+	err := reporter.PushVMSnapshot(context.Background(), targetAddr, "vm-1", "", "nightly", strings.NewReader("bytes"))
 	if err == nil {
 		t.Fatal("PushVMSnapshot() = nil error, want a refusal for a VM this node has no definition of")
 	}
@@ -440,7 +444,7 @@ func TestIntegration_PushVMSnapshot_RunningVMWithALocalDatasetIsRefused(t *testi
 	seedVMWithState(t, targetClient, "vm-1", "node-b", rpcpb.VMState_VM_STATE_RUNNING)
 
 	reporter := NewPeerReporter("", false, nil)
-	err := reporter.PushVMSnapshot(context.Background(), targetAddr, "vm-1", "nightly", strings.NewReader("bytes"))
+	err := reporter.PushVMSnapshot(context.Background(), targetAddr, "vm-1", "", "nightly", strings.NewReader("bytes"))
 	if err == nil {
 		t.Fatal("PushVMSnapshot() = nil error, want a refusal while this node still holds the running VM's dataset")
 	}
@@ -471,7 +475,7 @@ func TestIntegration_PushVMSnapshot_RunningVMOnAnotherCombIsAccepted(t *testing.
 	seedVMWithState(t, targetClient, "vm-1", "node-b", rpcpb.VMState_VM_STATE_RUNNING)
 
 	reporter := NewPeerReporter("", false, nil)
-	if err := reporter.PushVMSnapshot(context.Background(), targetAddr, "vm-1", "nightly", strings.NewReader("bytes")); err != nil {
+	if err := reporter.PushVMSnapshot(context.Background(), targetAddr, "vm-1", "", "nightly", strings.NewReader("bytes")); err != nil {
 		t.Fatalf("PushVMSnapshot() error: %v, want the transfer to go through for a VM this node holds no dataset for", err)
 	}
 	if got := targetZFS.forceReceivedInto["vm-1"]; got != "bytes" {

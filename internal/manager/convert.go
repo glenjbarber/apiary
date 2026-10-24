@@ -114,6 +114,14 @@ func fromInternalVM(vm *internalpb.VMDefinition) *rpcpb.VMDefinition {
 		// dedicated command may set them (ADR-0063).
 		CloudflareHostname: vm.GetCloudflareHostname(),
 		CloudflarePort:     vm.GetCloudflarePort(),
+		// ResourceId (ADR-0152) is the VM's PERSISTED PHYSICAL identity,
+		// and it IS carried back out: a caller (notably the Cluster API
+		// provider) needs to know the physical name the VM's host
+		// resources carry, because that name does NOT change when the
+		// logical id is renamed. It is read-only in the OTHER direction
+		// - toInternalVM never copies it in, so a caller cannot set a
+		// VM's physical identity through CreateVM/UpdateVM.
+		ResourceId: vm.GetResourceId(),
 	}
 }
 

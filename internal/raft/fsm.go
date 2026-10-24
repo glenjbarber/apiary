@@ -39,7 +39,19 @@ type FSMApplyResult struct {
 	TrustedPeer        *internalpb.TrustedPeer
 	ColonyDiskSize     *internalpb.ColonyDiskSize
 	ColonyIdentity     *internalpb.ColonyIdentity
-	Error              string
+
+	// RenameResult is set only by applyRenameVMIdentity. It carries
+	// BOTH the resulting authoritative VM record and the outcome that
+	// distinguishes a rename applied by THIS apply from one that had
+	// already been applied and was proven to be the same rename:
+	// "renamed" versus "already_renamed". They travel together
+	// because a caller needs both, and because the outcome alone
+	// without the record (or the record alone without the outcome)
+	// would each lose half of what the caller asked for - see
+	// ADR-0152.
+	RenameResult *internalpb.RenameVMIdentityResult
+
+	Error string
 }
 
 // GetColonyIdentity returns the Colony identity this apply produced, or
@@ -276,6 +288,12 @@ func (f *FSM) Apply(log *raft.Log) interface{} {
 		// decides "written once" from the same committed log rather
 		// than being told - see internal/raft/colonyidentity.go.
 		return f.applySetColonyIdentity(log.Index, op.SetColonyIdentity)
+	case *internalpb.Command_RenameVmIdentity:
+		// ADR-0152. The collision, ownership, preservation and
+		// idempotency rules all live inside the apply function, not
+		// in any handler, so every replica decides them identically
+		// from the same committed log - see internal/raft/vmrename.go.
+		return f.applyRenameVMIdentity(log.Index, op.RenameVmIdentity)
 	default:
 		return &FSMApplyResult{Index: log.Index, Error: "command has no op set"}
 	}
@@ -331,6 +349,20 @@ func (f *FSM) applyCreateVM(index uint64, vm *internalpb.VMDefinition) *FSMApply
 	if _, exists := f.vms[vm.GetId()]; exists {
 		return &FSMApplyResult{Index: index, Error: fmt.Sprintf("CreateVM: id %q already exists", vm.GetId())}
 	}
+	// ADR-0152: a new VM's physical identity is its own id, and that
+	// name must not already be in use by ANOTHER VM's physical
+	// identity. The logical-key check above cannot see this case: a VM
+	// that was renamed away from "old-id" no longer holds the logical
+	// key "old-id", but its host resources (dataset, bhyve VM, HAST
+	// resource, pf anchor) still carry that name. Creating a second VM
+	// under "old-id" would give it the same resource_id, and the two
+	// would then address - and eventually destroy - each other's
+	// resources. Refusing here is the only place that can see both
+	// halves, because it is the only place that sees the whole map.
+	if f.physicalIDTakenBy(vm.GetId(), "") {
+		return &FSMApplyResult{Index: index, Error: fmt.Sprintf(
+			"CreateVM: id %q is already in use as another VM's physical identity; a renamed VM keeps the host resources named for its original id, so that name cannot be reused until that VM is deleted", vm.GetId())}
+	}
 	if vm.GetCloneFromSnapshot() != "" && !validSnapshotRef(vm.GetCloneFromSnapshot()) {
 		return &FSMApplyResult{Index: index, Error: fmt.Sprintf("CreateVM: invalid clone_from_snapshot %q: must be \"sourceid@snapshotname\" using only alphanumerics, '-', and '_'", vm.GetCloneFromSnapshot())}
 	}
@@ -350,6 +382,17 @@ func (f *FSM) applyCreateVM(index uint64, vm *internalpb.VMDefinition) *FSMApply
 	// pure function of the VM's own id, so this costs nothing and is
 	// always safe to compute regardless of networking mode.
 	vm.MacAddress = deriveMAC(vm.GetId())
+
+	// ADR-0152: the physical identity is assigned here, by the FSM,
+	// to the VM's own initial logical id. It is assigned rather than
+	// accepted from the caller for the same reason MacAddress and
+	// IpAddress are: two Combs reconciling the same log entry must
+	// derive the same physical identity, and only the state machine
+	// can guarantee that. A caller-supplied resource_id is ignored
+	// (the field is not even carried across the external boundary).
+	if vm.GetResourceId() == "" {
+		vm.ResourceId = vm.GetId()
+	}
 
 	if vm.GetNetworkId() != "" {
 		network, ok := f.networks[vm.GetNetworkId()]
@@ -517,6 +560,16 @@ func (f *FSM) applyUpdateVM(index uint64, vm *internalpb.VMDefinition) *FSMApply
 	vm = proto.Clone(vm).(*internalpb.VMDefinition)
 	vm.MacAddress = existing.GetMacAddress()
 	vm.IpAddress = existing.GetIpAddress()
+	// ADR-0152: resource_id is IMMUTABLE through an ordinary update.
+	// UpdateVM is a full-record replace, so without this a caller
+	// could silently repoint every host resource of this VM at a
+	// different physical name - which would strand the existing
+	// bhyve VM, dataset, HAST resource and pf anchor, and make the
+	// reconciler provision a second set under the new name. The
+	// stored value is carried forward verbatim; a legacy record with
+	// an empty value is materialized here rather than left empty
+	// forever.
+	vm.ResourceId = effectiveResourceID(existing)
 	f.vms[vm.GetId()] = vm
 	return &FSMApplyResult{Index: index, VM: vm}
 }

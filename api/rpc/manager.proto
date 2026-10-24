@@ -52,6 +52,21 @@ service ManagerService {
   rpc UpdateVM(UpdateVMRequest) returns (UpdateVMResponse);
   rpc DeleteVM(DeleteVMRequest) returns (DeleteVMResponse);
 
+  // RenameVMIdentity is ADR-0152's atomic logical-identity rename: it
+  // moves a VM's record to a new logical id, changing ONLY that id,
+  // with no deletion tombstone and no physical teardown. Its host
+  // resources keep the names their physical identity already gave
+  // them. This is a dedicated operation rather than a combination of
+  // the existing ones because UpdateVM cannot move a map key, DeleteVM
+  // would enter the soft-delete lifecycle, and MigrateVM is a
+  // node-ownership transfer rather than a logical rename.
+  //
+  // Retries are safe: a repeat of an already-applied rename for the
+  // same source/destination pair returns outcome "already_renamed"
+  // rather than an error, provided the destination record actually
+  // proves that relationship.
+  rpc RenameVMIdentity(RenameVMIdentityRequest) returns (RenameVMIdentityResponse);
+
   // ForcePurgeVM is an escape hatch for a VM tombstoned by DeleteVM
   // whose owning node will never reconcile it away (permanently
   // offline/decommissioned) - see CLAUDE.md's "What's not implemented
@@ -1046,6 +1061,20 @@ message VMDefinition {
   // MiB: zero means "no override", and a non-zero value below the
   // Colony floor is refused rather than clamped.
   uint64 disk_size_mb = 21;
+
+  // resource_id (ADR-0152) mirrors api/internalpb's own VMDefinition
+  // field of the same name - see its doc comment for the full
+  // semantics. It is the VM's PERSISTED PHYSICAL identity: the name
+  // its host resources (bhyve VM, ZFS dataset, HAST resource, pf
+  // anchor, disk image file) actually carry. `id` above is the LOGICAL
+  // identity callers use, and is the only thing a rename changes.
+  //
+  // Read-only from this direction: no request carries it in, and the
+  // FSM assigns it itself on create (to the VM's own id) and
+  // materializes the legacy fallback during a rename. A caller that
+  // tries to set it through CreateVM/UpdateVM has it ignored, exactly
+  // as ip_address/mac_address are.
+  string resource_id = 22;
 }
 
 // JailState mirrors api/internalpb's JailState.
@@ -1190,6 +1219,48 @@ message UpdateVMResponse {
   VMDefinition vm = 1;
   string error = 2;
   string leader_hint = 3;
+}
+
+// RenameVMIdentityRequest is ADR-0152's atomic logical-identity rename
+// request. See api/internalpb's RenameVMIdentity for the authoritative
+// semantics; this is the same request at the external boundary.
+message RenameVMIdentityRequest {
+  // source_id is the VM's current logical id.
+  string source_id = 1;
+
+  // destination_id is the logical id it should carry afterward.
+  string destination_id = 2;
+
+  // expected_node_id/expected_replica_node_id/expected_resource_id are
+  // the caller's ownership evidence. They are advisory at this
+  // boundary and re-checked by the FSM, which is the only place the
+  // check happens identically on every replica.
+  string expected_node_id = 3;
+  string expected_replica_node_id = 4;
+  string expected_resource_id = 5;
+
+  uint32 timeout_ms = 6;
+}
+
+// RenameVMIdentityResponse carries the FSM's authoritative outcome.
+message RenameVMIdentityResponse {
+  // vm is the resulting authoritative VM record - the renamed record
+  // after a successful rename, or the already-renamed destination
+  // after an idempotent retry. Nil on a refusal.
+  VMDefinition vm = 1;
+
+  string error = 2;
+
+  // leader_hint is set when the local raftd reported that this node is
+  // not the leader, so a caller can re-resolve and retry the same
+  // source/destination pair.
+  string leader_hint = 3;
+
+  // outcome is "renamed" for a rename applied by this call, and
+  // "already_renamed" when the requested rename had already been
+  // applied and this call proved it. The two are distinct so a caller
+  // can tell a completed retry from a fresh rename - see ADR-0152.
+  string outcome = 4;
 }
 
 message DeleteVMRequest {
@@ -2443,6 +2514,7 @@ message SetDatasetQuotaResponse {
 message CreateVMSnapshotRequest {
   string id = 1;
   string snapshot_name = 2;
+  string physical_id = 3;
 }
 
 message CreateVMSnapshotResponse {
@@ -2451,6 +2523,7 @@ message CreateVMSnapshotResponse {
 
 message ListVMSnapshotsRequest {
   string id = 1;
+  string physical_id = 2;
 }
 
 message ListVMSnapshotsResponse {
@@ -2461,15 +2534,29 @@ message ListVMSnapshotsResponse {
 message RestoreVMSnapshotRequest {
   string id = 1;
   string snapshot_name = 2;
+  string physical_id = 3;
 }
 
 message RestoreVMSnapshotResponse {
   string error = 1;
 }
 
+// The four VM-snapshot RPCs below take the VM's LOGICAL id, because
+// that is the identity a caller knows it by, and resolve it to the
+// PHYSICAL dataset name through the current VM record before touching
+// ZFS (ADR-0152). A renamed VM's snapshots live under the name its
+// physical identity always carried.
+//
+// physical_id is an OPTIONAL, purely internal carry-through: it lets
+// the node that resolved the logical id hand the physical name
+// straight to the node that does the ZFS work, so the receiving end
+// never has to re-resolve it (and never has to hold a raft view to do
+// so). It is not a caller-facing input.
+
 message DeleteVMSnapshotRequest {
   string id = 1;
   string snapshot_name = 2;
+  string physical_id = 3;
 }
 
 message DeleteVMSnapshotResponse {
@@ -4825,9 +4912,18 @@ message NodeRestartPlanStepAside {
 // four of them mid-file would renumber every message after them for no
 // wire-level reason.
 message PushVMSnapshotToRequest {
+  // id is the VM's LOGICAL id - the one callers know it by.
   string id = 1;
   string snapshot_name = 2;
   string target_node_id = 3;
+
+  // physical_id is the VM's PHYSICAL identity (ADR-0152): the name its
+  // dataset actually carries, which is where the snapshot lives. It is
+  // supplied by the asking node because only that node knows the
+  // current record's resource_id after any rename. Empty means "use
+  // the logical id", which is correct for every VM that has not been
+  // renamed.
+  string physical_id = 4;
 }
 
 message PushVMSnapshotToResponse {
@@ -4841,8 +4937,14 @@ message PushVMSnapshotToResponse {
 // the sender is not trusted to have checked, since either end can be
 // the one that is wrong or malicious.
 message VMSnapshotMetadata {
+  // id is the VM's LOGICAL id.
   string id = 1;
   string snapshot_name = 2;
+
+  // physical_id is the VM's PHYSICAL identity (ADR-0152) - the dataset
+  // name the stream's bytes actually belong to. Empty means "use the
+  // logical id".
+  string physical_id = 3;
 }
 
 message ReceiveVMSnapshotRequest {

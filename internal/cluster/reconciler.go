@@ -538,6 +538,14 @@ func (r *Reconciler) RunOnce(ctx context.Context) (err error) {
 	}
 
 	desired := make([]VMPlacement, 0, len(resp.GetVms()))
+	// physicalByLogical maps each VM's LOGICAL id to its PHYSICAL
+	// identity, for this tick only. It is what lets a LOGICAL
+	// reference (a clone_from_snapshot's source VM id, a snapshot RPC's
+	// VM id) be resolved to the physical dataset the snapshot actually
+	// lives under, after a rename (ADR-0152). It is rebuilt from the
+	// fresh list on every tick, so it can never go stale across a
+	// rename.
+	physicalByLogical := make(map[string]string, len(resp.GetVms()))
 	for _, vm := range resp.GetVms() {
 		rules := make([]FirewallRule, 0, len(vm.GetFirewallRules()))
 		for _, rule := range vm.GetFirewallRules() {
@@ -549,8 +557,15 @@ func (r *Reconciler) RunOnce(ctx context.Context) (err error) {
 				Priority:  rule.GetPriority(),
 			})
 		}
+		physicalID := vm.GetResourceId()
+		if physicalID == "" {
+			physicalID = vm.GetId()
+		}
+		physicalByLogical[vm.GetId()] = physicalID
+
 		desired = append(desired, VMPlacement{
 			ID:                 vm.GetId(),
+			ResourceID:         vm.GetResourceId(),
 			NodeID:             vm.GetNodeId(),
 			Vcpus:              vm.GetVcpus(),
 			MemoryMB:           vm.GetMemoryMb(),
@@ -651,11 +666,11 @@ func (r *Reconciler) RunOnce(ctx context.Context) (err error) {
 			// anyway (caught live: a 20GiB sparse file got created on
 			// disk for a VM that RunOnce went on to reject outright).
 			if vm.ReplicaNodeID != "" && !vm.Deleting && vm.CloneFromSnapshot == "" {
-				roles = append(roles, hastRole{resourceName: vmHASTResourceName(vm.ID), peerNodeID: vm.ReplicaNodeID, sizeMB: r.diskSizeMB(), isPrimary: true})
+				roles = append(roles, hastRole{resourceName: vmHASTResourceName(vm.PhysicalID()), peerNodeID: vm.ReplicaNodeID, sizeMB: r.diskSizeMB(), isPrimary: true})
 			}
 		}
 		for _, vm := range replicas {
-			roles = append(roles, hastRole{resourceName: vmHASTResourceName(vm.ID), peerNodeID: vm.NodeID, sizeMB: r.diskSizeMB(), isPrimary: false})
+			roles = append(roles, hastRole{resourceName: vmHASTResourceName(vm.PhysicalID()), peerNodeID: vm.NodeID, sizeMB: r.diskSizeMB(), isPrimary: false})
 		}
 		for _, j := range plannedJails {
 			if r.Jail != nil && !r.JailProvisioningDisabled && j.ReplicaNodeID != "" && !j.Deleting {
@@ -679,7 +694,7 @@ func (r *Reconciler) RunOnce(ctx context.Context) (err error) {
 	}
 
 	for _, vm := range planned {
-		if err := r.reconcileVM(ctx, vm, networks, hastDevicePaths); err != nil && firstErr == nil {
+		if err := r.reconcileVM(ctx, vm, networks, hastDevicePaths, physicalByLogical); err != nil && firstErr == nil {
 			firstErr = fmt.Errorf("cluster: reconciling VM %s: %w", vm.ID, err)
 		}
 	}
@@ -706,7 +721,7 @@ func (r *Reconciler) RunOnce(ctx context.Context) (err error) {
 	// own doc comment describes (see ADR-0026).
 	replicaIDs := make(map[string]bool, len(replicas))
 	for _, vm := range replicas {
-		replicaIDs[vm.ID] = true
+		replicaIDs[vm.PhysicalID()] = true
 	}
 	for _, id := range PlanReclaim(desired, r.LocalNodeID) {
 		if err := r.reclaimStaleVM(ctx, id, replicaIDs[id]); err != nil && firstErr == nil {
@@ -826,7 +841,7 @@ func (r *Reconciler) fetchNetworks(ctx context.Context) (map[string]*internalpb.
 // if it doesn't. These are best-effort writes - see applyPhase - so a
 // phase-update failure never masks or replaces the underlying
 // provisioning error.
-func (r *Reconciler) reconcileVM(ctx context.Context, vm VMPlacement, networks map[string]*internalpb.NetworkDefinition, hastDevicePaths map[string]string) error {
+func (r *Reconciler) reconcileVM(ctx context.Context, vm VMPlacement, networks map[string]*internalpb.NetworkDefinition, hastDevicePaths map[string]string, physicalByLogical map[string]string) error {
 	if vm.Deleting {
 		return r.teardownVM(ctx, vm)
 	}
@@ -847,7 +862,7 @@ func (r *Reconciler) reconcileVM(ctx context.Context, vm VMPlacement, networks m
 	if vm.Phase != PhaseReady && vm.Phase != PhaseCreating {
 		r.applyPhase(ctx, vm.ID, PhaseCreating, "")
 	}
-	if err := r.ensureVM(ctx, vm, networks, hastDevicePaths); err != nil {
+	if err := r.ensureVM(ctx, vm, networks, hastDevicePaths, physicalByLogical); err != nil {
 		r.applyPhase(ctx, vm.ID, PhaseError, err.Error())
 		return err
 	}
@@ -863,17 +878,22 @@ func (r *Reconciler) stopVM(ctx context.Context, vm VMPlacement) error {
 	if r.Bhyve == nil {
 		return fmt.Errorf("cannot stop VM %q: no bhyve lifecycle driver is configured on the owning node", vm.ID)
 	}
-	running, err := r.Bhyve.VMExists(ctx, vm.ID)
+	// The bhyve VM and the pf anchor are PHYSICAL resources: they carry
+	// the VM's physical identity, which does not change when the
+	// logical id is renamed (ADR-0152). The logical id below is used
+	// only for the raft-side phase update.
+	physicalID := vm.PhysicalID()
+	running, err := r.Bhyve.VMExists(ctx, physicalID)
 	if err != nil {
 		return fmt.Errorf("checking bhyve VM: %w", err)
 	}
 	if running {
-		if err := r.Bhyve.DestroyVM(ctx, vm.ID); err != nil {
+		if err := r.Bhyve.DestroyVM(ctx, physicalID); err != nil {
 			return fmt.Errorf("stopping bhyve VM: %w", err)
 		}
 	}
 	if r.PF != nil {
-		if err := r.PF.Flush(ctx, vmAnchor(vm.ID)); err != nil {
+		if err := r.PF.Flush(ctx, vmAnchor(physicalID)); err != nil {
 			return fmt.Errorf("flushing firewall rules: %w", err)
 		}
 	}
@@ -911,36 +931,44 @@ func (r *Reconciler) teardownVM(ctx context.Context, vm VMPlacement) error {
 		r.applyPhase(ctx, vm.ID, PhaseDeleting, "")
 	}
 
+	// Every resource destroyed here is PHYSICAL and carries the VM's
+	// physical identity, not its logical one (ADR-0152). A renamed VM
+	// is torn down through exactly the same names it was provisioned
+	// under, so a rename never leaves an orphan behind and never
+	// destroys something that belongs to a different VM. The purge
+	// below is the only step that uses the LOGICAL id, because it
+	// addresses the raft record.
+	physicalID := vm.PhysicalID()
 	if r.Bhyve != nil {
-		running, err := r.Bhyve.VMExists(ctx, vm.ID)
+		running, err := r.Bhyve.VMExists(ctx, physicalID)
 		if err != nil {
 			return fmt.Errorf("checking bhyve VM: %w", err)
 		}
 		if running {
-			if err := r.Bhyve.DestroyVM(ctx, vm.ID); err != nil {
+			if err := r.Bhyve.DestroyVM(ctx, physicalID); err != nil {
 				return fmt.Errorf("destroying bhyve VM: %w", err)
 			}
 		}
 	}
 
 	if vm.ReplicaNodeID != "" {
-		if err := r.reclaimHASTRole(ctx, vmHASTResourceName(vm.ID)); err != nil {
+		if err := r.reclaimHASTRole(ctx, vmHASTResourceName(physicalID)); err != nil {
 			return fmt.Errorf("reclaiming HAST resource: %w", err)
 		}
 	} else {
-		exists, err := r.ZFS.DatasetExists(ctx, vm.ID)
+		exists, err := r.ZFS.DatasetExists(ctx, physicalID)
 		if err != nil {
 			return fmt.Errorf("checking dataset: %w", err)
 		}
 		if exists {
-			if err := r.ZFS.DestroyDataset(ctx, vm.ID); err != nil {
+			if err := r.ZFS.DestroyDataset(ctx, physicalID); err != nil {
 				return fmt.Errorf("destroying dataset: %w", err)
 			}
 		}
 	}
 
 	if r.PF != nil {
-		if err := r.PF.Flush(ctx, vmAnchor(vm.ID)); err != nil {
+		if err := r.PF.Flush(ctx, vmAnchor(physicalID)); err != nil {
 			return fmt.Errorf("flushing firewall rules: %w", err)
 		}
 	}
@@ -988,6 +1016,20 @@ func (r *Reconciler) teardownVM(ctx context.Context, vm VMPlacement) error {
 // which is the common case: most VMs in a cluster never touched this
 // node in the first place, so every tick's reclaim pass is a cheap
 // existence-check no-op for them.
+// reclaimStaleVM tears down any local dataset/bhyve VM left over under
+// id from before it was reassigned to a different node (see
+// PlanReclaim). The id it takes is already the PHYSICAL identity
+// (PlanReclaim resolves it through VMPlacement.PhysicalID), because
+// every resource it destroys is a physical one.
+//
+// A logical rename alone is NOT proof that a physical identity is
+// stale: the old logical key is absent from the plan, but the physical
+// resource named for the old id is still the LIVE resource of a VM that
+// now answers to a new logical id. That is exactly why the reclaim
+// candidate set is computed from PHYSICAL ids: the renamed VM's own
+// physical id still matches its own placement, so it is not a reclaim
+// candidate at all, and its legacy-named host resources are the
+// EXPECTED resources rather than orphans.
 func (r *Reconciler) reclaimStaleVM(ctx context.Context, id string, isCurrentReplica bool) error {
 	if r.Bhyve != nil {
 		exists, err := r.Bhyve.VMExists(ctx, id)
@@ -1161,10 +1203,18 @@ func splitSnapshotRef(ref string) (vmID, snapshotName string, err error) {
 // re-checks: "the RPC said it worked" is not evidence that the
 // snapshot is here, and a clone against a snapshot that did not land
 // would fail anyway with a far less actionable message.
-func (r *Reconciler) resolveCloneSourceSnapshot(ctx context.Context, ref string) error {
-	exists, err := r.ZFS.SnapshotExists(ctx, ref)
+func (r *Reconciler) resolveCloneSourceSnapshot(ctx context.Context, ref string, physicalByLogical map[string]string) error {
+	// The reference's VM half is a LOGICAL id (the public, caller-facing
+	// one), while the snapshot physically lives under that VM's
+	// PHYSICAL identity (ADR-0152). Resolve the logical id through the
+	// current VM record before touching ZFS.
+	physicalRef, err := resolveSnapshotRefToPhysical(ref, physicalByLogical)
 	if err != nil {
-		return fmt.Errorf("checking source snapshot %q: %w", ref, err)
+		return err
+	}
+	exists, err := r.ZFS.SnapshotExists(ctx, physicalRef)
+	if err != nil {
+		return fmt.Errorf("checking source snapshot %q: %w", physicalRef, err)
 	}
 	if exists {
 		return nil
@@ -1173,17 +1223,50 @@ func (r *Reconciler) resolveCloneSourceSnapshot(ctx context.Context, ref string)
 	if err != nil {
 		return err
 	}
-	if err := r.fetchVMSnapshotFromPeer(ctx, vmID, snapshotName); err != nil {
+	// The peer that holds the source snapshot holds it under the
+	// source VM's PHYSICAL dataset name, which survives a rename
+	// (ADR-0152). Carry that name to the peer so it reads the right
+	// dataset.
+	sourcePhysical := physicalByLogical[vmID]
+	if err := r.fetchVMSnapshotFromPeerFor(ctx, vmID, sourcePhysical, snapshotName); err != nil {
 		return err
 	}
-	exists, err = r.ZFS.SnapshotExists(ctx, ref)
+	exists, err = r.ZFS.SnapshotExists(ctx, physicalRef)
 	if err != nil {
-		return fmt.Errorf("checking source snapshot %q after fetch: %w", ref, err)
+		return fmt.Errorf("checking source snapshot %q after fetch: %w", physicalRef, err)
 	}
 	if !exists {
-		return fmt.Errorf("source snapshot %q still not found locally after a reported-successful fetch from a peer", ref)
+		return fmt.Errorf("source snapshot %q still not found locally after a reported-successful fetch from a peer", physicalRef)
 	}
 	return nil
+}
+
+// resolveSnapshotRefToPhysical rewrites a snapshot reference's LOGICAL
+// VM half into the PHYSICAL identity its dataset actually carries
+// (ADR-0152).
+//
+// A clone_from_snapshot value names a VM the way a caller sees it -
+// by its logical id - but the snapshot lives under that VM's physical
+// dataset name, which does not change when the logical id is renamed.
+// Resolving through the current VM record is what makes a clone from a
+// renamed source VM work at all.
+//
+// A reference whose VM half is NOT a known logical id is left alone: it
+// may name a VM this node has never seen (a source that lives entirely
+// on another Comb), and in that case the physical id IS the logical id,
+// because the rename has not happened - or happened elsewhere and the
+// record simply is not in this node's view. Guessing a different name
+// in that case would be worse than trying the name as given.
+func resolveSnapshotRefToPhysical(ref string, physicalByLogical map[string]string) (string, error) {
+	vmID, snapshotName, err := splitSnapshotRef(ref)
+	if err != nil {
+		return "", err
+	}
+	physicalID, ok := physicalByLogical[vmID]
+	if !ok || physicalID == "" {
+		return ref, nil
+	}
+	return physicalID + "@" + snapshotName, nil
 }
 
 // ensureVM ensures vm's disk exists - a plain dataset-backed file, or,
@@ -1191,7 +1274,7 @@ func (r *Reconciler) resolveCloneSourceSnapshot(ctx context.Context, ref string)
 // hastDevicePaths/ADR-0026; no dataset is created in that case, there's
 // nothing useful for it to hold) - then, if Bhyve is configured, that
 // its bhyve VM exists too.
-func (r *Reconciler) ensureVM(ctx context.Context, vm VMPlacement, networks map[string]*internalpb.NetworkDefinition, hastDevicePaths map[string]string) error {
+func (r *Reconciler) ensureVM(ctx context.Context, vm VMPlacement, networks map[string]*internalpb.NetworkDefinition, hastDevicePaths map[string]string, physicalByLogical map[string]string) error {
 	if vm.CloneFromSnapshot != "" {
 		if vm.ReplicaNodeID != "" {
 			return fmt.Errorf("VM %q: clone_from_snapshot is not supported together with replica_node_id - a HAST-replicated VM's disk is a raw device, not a cloneable ZFS dataset", vm.ID)
@@ -1201,20 +1284,36 @@ func (r *Reconciler) ensureVM(ctx context.Context, vm VMPlacement, networks map[
 		}
 	}
 
+	// The dataset, and everything inside it, is PHYSICAL: it carries
+	// the VM's physical identity, which does not change when the
+	// logical id is renamed (ADR-0152). A renamed VM's dataset keeps
+	// the name it was created under, so the rename does not provision
+	// a second dataset and does not strand the first.
+	physicalID := vm.PhysicalID()
 	if vm.ReplicaNodeID == "" {
-		exists, err := r.ZFS.DatasetExists(ctx, vm.ID)
+		exists, err := r.ZFS.DatasetExists(ctx, physicalID)
 		if err != nil {
 			return fmt.Errorf("checking dataset: %w", err)
 		}
 		if !exists {
 			if vm.CloneFromSnapshot != "" {
-				if err := r.resolveCloneSourceSnapshot(ctx, vm.CloneFromSnapshot); err != nil {
+				if err := r.resolveCloneSourceSnapshot(ctx, vm.CloneFromSnapshot, physicalByLogical); err != nil {
 					return fmt.Errorf("VM %q: %w", vm.ID, err)
 				}
-				if err := r.ZFS.Clone(ctx, vm.CloneFromSnapshot, vm.ID); err != nil {
+				// The clone SOURCE is the source VM's PHYSICAL
+				// dataset, not its logical id (ADR-0152): the snapshot
+				// lives under the physical name the source VM was
+				// provisioned under, and that name survives a rename
+				// of the source. The DESTINATION is this VM's own
+				// physical name.
+				sourceRef, err := resolveSnapshotRefToPhysical(vm.CloneFromSnapshot, physicalByLogical)
+				if err != nil {
+					return fmt.Errorf("VM %q: %w", vm.ID, err)
+				}
+				if err := r.ZFS.Clone(ctx, sourceRef, physicalID); err != nil {
 					return fmt.Errorf("cloning source snapshot %q: %w", vm.CloneFromSnapshot, err)
 				}
-			} else if err := r.ZFS.CreateDataset(ctx, vm.ID); err != nil {
+			} else if err := r.ZFS.CreateDataset(ctx, physicalID); err != nil {
 				return fmt.Errorf("creating dataset: %w", err)
 			}
 		}
@@ -1254,7 +1353,7 @@ func (r *Reconciler) ensureVM(ctx context.Context, vm VMPlacement, networks map[
 		bridge = networkArtifact.Bridge
 	}
 
-	running, err := r.Bhyve.VMExists(ctx, vm.ID)
+	running, err := r.Bhyve.VMExists(ctx, physicalID)
 	if err != nil {
 		return fmt.Errorf("checking bhyve VM: %w", err)
 	}
@@ -1264,7 +1363,7 @@ func (r *Reconciler) ensureVM(ctx context.Context, vm VMPlacement, networks map[
 		// bhyve device - they can (and should) be kept in sync on every
 		// tick even for an already-running VM.
 		if r.PF != nil {
-			if err := r.PF.Apply(ctx, vmAnchor(vm.ID), effectivePFRules(vm)); err != nil {
+			if err := r.PF.Apply(ctx, vmAnchor(physicalID), effectivePFRules(vm)); err != nil {
 				return fmt.Errorf("applying firewall rules: %w", err)
 			}
 		}
@@ -1277,7 +1376,7 @@ func (r *Reconciler) ensureVM(ctx context.Context, vm VMPlacement, networks map[
 		// management bridge before anyone confirms otherwise. A no-op if
 		// nothing is armed for this tap.
 		if uplinkBridged && r.DeadMan != nil {
-			if tap, ok, err := r.Bhyve.TapName(vm.ID); err == nil && ok {
+			if tap, ok, err := r.Bhyve.TapName(physicalID); err == nil && ok {
 				if err := r.DeadMan.ConfirmBridgeHealthy(ctx, bridge, tap); err != nil {
 					return fmt.Errorf("confirming uplink bridge healthy for %q: %w", vm.ID, err)
 				}
@@ -1321,13 +1420,13 @@ func (r *Reconciler) ensureVM(ctx context.Context, vm VMPlacement, networks map[
 
 	var diskPath string
 	if vm.ReplicaNodeID != "" {
-		path, ok := hastDevicePaths[vmHASTResourceName(vm.ID)]
+		path, ok := hastDevicePaths[vmHASTResourceName(physicalID)]
 		if !ok {
 			return fmt.Errorf("HAST device for replicated VM %q was not provisioned this tick", vm.ID)
 		}
 		diskPath = path
 	} else {
-		mountpoint, err := r.ZFS.GetProperty(ctx, vm.ID, "mountpoint")
+		mountpoint, err := r.ZFS.GetProperty(ctx, physicalID, "mountpoint")
 		if err != nil {
 			return fmt.Errorf("getting dataset mountpoint: %w", err)
 		}
@@ -1357,7 +1456,7 @@ func (r *Reconciler) ensureVM(ctx context.Context, vm VMPlacement, networks map[
 		memoryMB = defaultMemoryMB
 	}
 
-	if err := r.Bhyve.CreateVM(ctx, vm.ID, bhyve.Config{
+	if err := r.Bhyve.CreateVM(ctx, physicalID, bhyve.Config{
 		CPUs:            cpus,
 		MemoryMB:        memoryMB,
 		BootROM:         r.BootROM,
@@ -1387,7 +1486,7 @@ func (r *Reconciler) ensureVM(ctx context.Context, vm VMPlacement, networks map[
 	// confirms it healthy once a full tick (including reaching raft)
 	// completes without error.
 	if uplinkBridged && r.DeadMan != nil {
-		tap, ok, err := r.Bhyve.TapName(vm.ID)
+		tap, ok, err := r.Bhyve.TapName(physicalID)
 		if err != nil {
 			return fmt.Errorf("looking up tap device for %q: %w", vm.ID, err)
 		}
@@ -1399,7 +1498,7 @@ func (r *Reconciler) ensureVM(ctx context.Context, vm VMPlacement, networks map[
 	}
 
 	if r.PF != nil {
-		if err := r.PF.Apply(ctx, vmAnchor(vm.ID), effectivePFRules(vm)); err != nil {
+		if err := r.PF.Apply(ctx, vmAnchor(physicalID), effectivePFRules(vm)); err != nil {
 			return fmt.Errorf("applying firewall rules: %w", err)
 		}
 	}
@@ -1729,6 +1828,12 @@ func networkBridgeName(network *internalpb.NetworkDefinition) string {
 }
 
 // vmAnchor returns the pf(8) anchor name for a VM's own firewall rules.
+//
+// The id it takes is the VM's PHYSICAL identity (ADR-0152), because the
+// anchor is a host resource: it must keep the name it was created
+// under, so a logical rename leaves the existing rules attached to the
+// VM instead of stranding them on an anchor nothing loads any more (or
+// double-loading a second one).
 func vmAnchor(id string) string {
 	return "apiary/vm-" + id
 }

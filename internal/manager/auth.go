@@ -146,10 +146,16 @@ var requiredRole = map[string]Role{
 	// node forwarding its own already-authorized write needs at least
 	// Operator, not Admin, to keep -peer-api-key's required role the
 	// same tier as the writes it's relaying.
-	"/apiary.rpc.v1.ManagerService/CreateVM":                    RoleOperator,
-	"/apiary.rpc.v1.ManagerService/UpdateVM":                    RoleOperator,
-	"/apiary.rpc.v1.ManagerService/DeleteVM":                    RoleOperator,
-	"/apiary.rpc.v1.ManagerService/MigrateVM":                   RoleOperator,
+	"/apiary.rpc.v1.ManagerService/CreateVM":  RoleOperator,
+	"/apiary.rpc.v1.ManagerService/UpdateVM":  RoleOperator,
+	"/apiary.rpc.v1.ManagerService/DeleteVM":  RoleOperator,
+	"/apiary.rpc.v1.ManagerService/MigrateVM": RoleOperator,
+	// RenameVMIdentity (ADR-0152) is Operator-tier, matching
+	// UpdateVM/DeleteVM/MigrateVM exactly: it changes a VM's identity,
+	// which is the same class of lifecycle change those three are. It is
+	// deliberately NOT Admin: it does not touch raft membership, the
+	// Colony's trust store, or any Colony-wide setting.
+	"/apiary.rpc.v1.ManagerService/RenameVMIdentity":            RoleOperator,
 	"/apiary.rpc.v1.ManagerService/SetVMFirewallPaused":         RoleOperator,
 	"/apiary.rpc.v1.ManagerService/SetVMCloudflareExposure":     RoleOperator,
 	"/apiary.rpc.v1.ManagerService/SetVMDesiredState":           RoleOperator,
