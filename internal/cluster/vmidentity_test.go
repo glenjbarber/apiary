@@ -35,6 +35,7 @@ func TestReconciler_RunOnce_UsesThePhysicalIdentityForHostResources(t *testing.T
 		}},
 	}
 	zfs := newFakeDatasetManager()
+	zfs.mountpointFor["legacy-id"] = t.TempDir()
 	vms := newFakeVMManager()
 	pf := newFakePFManager()
 
@@ -175,6 +176,8 @@ func TestReconciler_RunOnce_HASTResourcesUseThePhysicalIdentity(t *testing.T) {
 		}},
 	}
 	zfs := newFakeDatasetManager()
+	zfs.mountpointFor["legacy-id"] = t.TempDir()
+	zfs.mountpointFor["hast-vm-legacy-id"] = t.TempDir()
 	hast := newFakeHASTManager()
 
 	r := &Reconciler{Raft: raft, ZFS: zfs, HAST: hast, Cloudflare: &fakeCloudflareManager{}, LocalNodeID: "node-a", BootROM: "/fw/UEFI.fd"}
