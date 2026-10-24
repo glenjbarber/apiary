@@ -1034,12 +1034,25 @@ func TestServer_MachinePage_LinksToFocusedSubpages(t *testing.T) {
 }
 
 // A validity lifetime outside the set Cloudflare's Origin CA accepts is a
-// bad request, and it must be rejected before the int32 narrowing. A value
-// such as 4294967331 truncates to 365 when narrowed to int32, so an
-// unchecked conversion would silently issue a one-year certificate for a
-// request that asked for something else entirely.
+// bad request, and it must be rejected before the int32 narrowing. Narrowing
+// is modulo 2^32, so a value like 4294967661 (2^32 + 365) truncates to 365
+// when narrowed to int32, and an unchecked conversion would silently issue a
+// one-year certificate for a request that asked for something else entirely.
+// The out-of-range cases below include every value that lands on an accepted
+// lifetime, so the truncation path itself is covered and not just the
+// rejected-range path.
 func TestServer_IssueOriginCertificate_RejectsValidityOutsideAcceptedSet(t *testing.T) {
-	for _, days := range []string{"0", "-1", "1", "31", "3651", "4294967331", "2147483800"} {
+	// The values that truncate onto an accepted lifetime are 2^32 plus each
+	// accepted value: 4294967303, 4294967326, 4294967386, 4294967661,
+	// 4294968026, 4294968391 and 4294972771. Those are the ones that made the
+	// original bug exploitable, so they are covered explicitly. 4294967331
+	// (2^32 + 35) and 2147483800 are kept as out-of-range controls.
+	for _, days := range []string{
+		"0", "-1", "1", "31", "3651",
+		"4294967303", "4294967326", "4294967386", "4294967661",
+		"4294968026", "4294968391", "4294972771",
+		"4294967331", "2147483800",
+	} {
 		client := &fakeClient{issueOriginCertificateResp: &rpcpb.IssueOriginCertificateResponse{RestartScheduled: true}}
 		s := newTestServer(t, client)
 

@@ -613,8 +613,9 @@ func (s *Server) handleIssueOriginCertificate(w http.ResponseWriter, r *http.Req
 	//
 	// 1. A value that does not fit in int32 would be truncated by the
 	//    conversion, and a truncated value can land on a lifetime the
-	//    issuer does accept (2147483800 truncates to -8, but e.g.
-	//    4294967331 truncates to 365) - so an out-of-range request could
+	//    issuer does accept: narrowing is modulo 2^32, so 4294967661
+	//    (2^32 + 365) truncates to 365, and 4294967331 (2^32 + 35)
+	//    truncates to 35. An out-of-range request could therefore
 	//    silently become a different certificate lifetime than the one
 	//    that was asked for.
 	// 2. The set of valid lifetimes is small and closed
