@@ -10,6 +10,7 @@ import (
 	"time"
 
 	rpcpb "github.com/glenjbarber/apiary/api/rpc"
+	"github.com/glenjbarber/apiary/internal/cloudflare"
 	"github.com/glenjbarber/apiary/internal/origincert"
 )
 
@@ -601,9 +602,27 @@ func (s *Server) handleIssueOriginCertificate(w http.ResponseWriter, r *http.Req
 		s.renderOriginCAPanel(w, r, err.Error(), "")
 		return
 	}
-	days, err := strconv.Atoi(r.FormValue("validity_days"))
+	days, err := strconv.ParseInt(r.FormValue("validity_days"), 10, 64)
 	if err != nil {
 		s.renderOriginCAPanel(w, r, "validity must be a whole number of days", "")
+		return
+	}
+	// Check the requested lifetime against the set Cloudflare's Origin CA
+	// actually accepts before narrowing it to int32. Two reasons, in
+	// order of importance:
+	//
+	// 1. A value that does not fit in int32 would be truncated by the
+	//    conversion, and a truncated value can land on a lifetime the
+	//    issuer does accept (2147483800 truncates to -8, but e.g.
+	//    4294967331 truncates to 365) - so an out-of-range request could
+	//    silently become a different certificate lifetime than the one
+	//    that was asked for.
+	// 2. The set of valid lifetimes is small and closed
+	//    (internal/cloudflare.ValidOriginCAValidity), so anything outside
+	//    it is a bad request, not something to forward and let the
+	//    issuer reject after the fact.
+	if !cloudflare.ValidOriginCAValidity(int(days)) {
+		s.renderOriginCAPanel(w, r, "validity must be one of 7, 30, 90, 365, 730, 1095, or 5475 days", "")
 		return
 	}
 	var hostnames []string
