@@ -27,7 +27,8 @@ reviewed below and are noise, guarded, or accepted. `go vet ./...` is clean.
 
 ## Fix status
 
-All fixes are on this branch. Nothing is merged or pushed.
+B1 and B2 are fixed and merged to `main` (PR #158, merge `82ed88e`). B3 through
+B7 are documented but not changed; see the table for the reason in each case.
 
 | ID | Status | Commit | Notes |
 |----|--------|--------|-------|
@@ -50,9 +51,12 @@ All fixes are on this branch. Nothing is merged or pushed.
 Two consequences, in order of importance:
 
 1. A value that does not fit in `int32` truncates, and a truncated value can
-   land on a lifetime Cloudflare's Origin CA does accept. `4294967331`
-   truncates to `365`, so a request for a nonsense lifetime would have been
-   silently served as a one-year certificate.
+   land on a lifetime Cloudflare's Origin CA does accept. The narrowing is
+   modulo 2^32, so `4294967661` (2^32 + 365) truncates to `365`, and a
+   request for a nonsense lifetime would have been silently served as a
+   one-year certificate. The same holds for every accepted value: 2^32 plus
+   7, 30, 90, 365, 730, 1095, or 5475 all truncate onto an accepted
+   lifetime.
 2. The set of accepted lifetimes is small and closed: 7, 30, 90, 365, 730,
    1095, and 5475 days (`internal/cloudflare.ValidOriginCAValidity`). The
    package comment already notes that the check belongs at the UI boundary too,
@@ -69,8 +73,11 @@ message that names the accepted set. The check now runs before any RPC is
 forwarded, so an invalid value never leaves the frontend.
 
 Tests: `TestServer_IssueOriginCertificate_RejectsValidityOutsideAcceptedSet`
-covers `0`, `-1`, `1`, `31`, `3651`, `4294967331`, and `2147483800`, and
-asserts that no RPC is forwarded.
+covers `0`, `-1`, `1`, `31`, `3651`, and the seven values that truncate onto
+an accepted lifetime (`4294967303`, `4294967326`, `4294967386`,
+`4294967661`, `4294968026`, `4294968391`, `4294972771`), plus `4294967331`
+and `2147483800` as out-of-range controls, and asserts that no RPC is
+forwarded.
 `TestServer_IssueOriginCertificate_ForwardsAcceptedValidity` covers the seven
 accepted values and asserts the forwarded `ValidityDays`.
 
