@@ -1097,8 +1097,11 @@ func (s *Server) gatherCombCauseIndex(ctx context.Context) *combCauseIndex {
 	} else if resp.GetError() != "" {
 		index.VMError = resp.GetError()
 	} else {
+		observedAt := time.Now().Unix()
 		for _, vm := range resp.GetVms() {
-			index.VMs = append(index.VMs, fromRPCVM(vm))
+			view := fromRPCVM(vm)
+			view.ObservedAtUnix = observedAt
+			index.VMs = append(index.VMs, view)
 		}
 	}
 
@@ -1107,8 +1110,11 @@ func (s *Server) gatherCombCauseIndex(ctx context.Context) *combCauseIndex {
 	} else if resp.GetError() != "" {
 		index.JailError = resp.GetError()
 	} else {
+		observedAt := time.Now().Unix()
 		for _, j := range resp.GetJails() {
-			index.Jails = append(index.Jails, fromRPCJail(j))
+			view := fromRPCJail(j)
+			view.ObservedAtUnix = observedAt
+			index.Jails = append(index.Jails, view)
 		}
 	}
 

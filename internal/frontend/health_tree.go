@@ -18,8 +18,11 @@ type healthTreeNode struct {
 	Key               string           `json:"key"`
 	Label             string           `json:"label"`
 	Kind              string           `json:"kind"`
+	Level             int              `json:"level"`
 	State             string           `json:"state"`
+	Leaf              bool             `json:"leaf"`
 	ObservedAtUnix    int64            `json:"observedAtUnix"`
+	AgeSeconds        int64            `json:"ageSeconds"`
 	DefaultExpanded   bool             `json:"defaultExpanded,omitempty"`
 	InventoryComplete bool             `json:"inventoryComplete"`
 	Children          []healthTreeNode `json:"children,omitempty"`
@@ -83,17 +86,23 @@ func buildHealthTree(nodes []clusterNodeView, index *combCauseIndex, now time.Ti
 		}
 		hostNode := healthTreeNode{
 			Key: "host:" + host.NodeID, Label: relativeHostName(host.NodeID), Kind: "host",
-			State: state, ObservedAtUnix: host.ReconcileSuccessUnix,
+			Level: 1, State: state, ObservedAtUnix: host.ReconcileSuccessUnix,
+		}
+		if host.ReconcileSuccessUnix > 0 {
+			age := now.Sub(time.Unix(host.ReconcileSuccessUnix, 0))
+			if age >= 0 {
+				hostNode.AgeSeconds = int64(age / time.Second)
+			}
 		}
 		if index != nil {
 			for _, vm := range index.VMs {
 				if sameTreeHost(vm.NodeID, host.NodeID) {
-					hostNode.Children = append(hostNode.Children, resourceTreeNode("vm", vm.ID, vm.Name, vm.DesiredState, vm.Phase, host, now))
+					hostNode.Children = append(hostNode.Children, resourceTreeNode("vm", vm.ID, vm.Name, vm.DesiredState, vm.Phase, vm.ObservedAtUnix, host, now))
 				}
 			}
 			for _, jail := range index.Jails {
 				if sameTreeHost(jail.NodeID, host.NodeID) {
-					hostNode.Children = append(hostNode.Children, resourceTreeNode("jail", jail.ID, jail.Name, jail.DesiredState, jail.Phase, host, now))
+					hostNode.Children = append(hostNode.Children, resourceTreeNode("jail", jail.ID, jail.Name, jail.DesiredState, jail.Phase, jail.ObservedAtUnix, host, now))
 				}
 			}
 		}
@@ -103,14 +112,32 @@ func buildHealthTree(nodes []clusterNodeView, index *combCauseIndex, now time.Ti
 			}
 			return hostNode.Children[i].Label < hostNode.Children[j].Label
 		})
+		hostNode.Leaf = len(hostNode.Children) == 0
 		hostNode.State = aggregateHealthState(hostNode.State, hostNode.Children)
 		children = append(children, hostNode)
 	}
-	return healthTreeNode{
+	root := healthTreeNode{
 		Key: "cluster:lab3.apiary.work", Label: "lab3.apiary.work", Kind: "cluster",
-		State: aggregateHealthState("HEALTHY", children), DefaultExpanded: true,
-		InventoryComplete: !inventoryUnknown, Children: children,
+		Level: 0, State: aggregateHealthState("HEALTHY", children), DefaultExpanded: true,
+		Leaf: len(children) == 0, InventoryComplete: !inventoryUnknown, Children: children,
 	}
+	for _, child := range children {
+		if child.ObservedAtUnix > root.ObservedAtUnix {
+			root.ObservedAtUnix = child.ObservedAtUnix
+		}
+		for _, guest := range child.Children {
+			if guest.ObservedAtUnix > root.ObservedAtUnix {
+				root.ObservedAtUnix = guest.ObservedAtUnix
+			}
+		}
+	}
+	if root.ObservedAtUnix > 0 {
+		age := now.Sub(time.Unix(root.ObservedAtUnix, 0))
+		if age >= 0 {
+			root.AgeSeconds = int64(age / time.Second)
+		}
+	}
+	return root
 }
 
 func resourceHostIDs(index *combCauseIndex) []string {
@@ -159,13 +186,13 @@ func hostTreeState(host clusterNodeView, now time.Time) string {
 	}
 }
 
-func resourceTreeNode(kind, id, name, desired, phase string, host clusterNodeView, now time.Time) healthTreeNode {
+func resourceTreeNode(kind, id, name, desired, phase string, observedAt int64, host clusterNodeView, now time.Time) healthTreeNode {
 	if strings.TrimSpace(name) == "" {
 		name = id
 	}
 	state := "UNKNOWN"
-	if host.Reachable && host.ReconcileSuccessUnix > 0 {
-		age := now.Sub(time.Unix(host.ReconcileSuccessUnix, 0))
+	if observedAt > 0 && host.Reachable {
+		age := now.Sub(time.Unix(observedAt, 0))
 		if age >= 0 {
 			switch {
 			case phase == "error":
@@ -184,7 +211,14 @@ func resourceTreeNode(kind, id, name, desired, phase string, host clusterNodeVie
 			}
 		}
 	}
-	return healthTreeNode{Key: kind + ":" + id, Label: name, Kind: kind, State: state, ObservedAtUnix: host.ReconcileSuccessUnix}
+	ageSeconds := int64(0)
+	if observedAt > 0 {
+		age := now.Sub(time.Unix(observedAt, 0))
+		if age >= 0 {
+			ageSeconds = int64(age / time.Second)
+		}
+	}
+	return healthTreeNode{Key: kind + ":" + id, Label: name, Kind: kind, Level: 2, State: state, Leaf: true, ObservedAtUnix: observedAt, AgeSeconds: ageSeconds}
 }
 
 func aggregateHealthState(own string, children []healthTreeNode) string {

@@ -13,14 +13,14 @@ func TestBuildHealthTreeReportsFreshnessAndAggregatesBottomUp(t *testing.T) {
 	staleStamp := now.Add(-32 * time.Second).Unix()
 	index := &combCauseIndex{
 		VMs: []vmView{
-			{ID: "vm-running", Name: "web", NodeID: "brood", DesiredState: "running", Phase: "ready"},
-			{ID: "vm-down", Name: "db", NodeID: "brood", DesiredState: "running", Phase: "stopped"},
-			{ID: "vm-stale", Name: "cache", NodeID: "drone", DesiredState: "running", Phase: "ready"},
-			{ID: "vm-stopped", Name: "backup", NodeID: "sting", DesiredState: "stopped", Phase: "stopped"},
+			{ID: "vm-running", Name: "web", NodeID: "brood", DesiredState: "running", Phase: "ready", ObservedAtUnix: stamp},
+			{ID: "vm-down", Name: "db", NodeID: "brood", DesiredState: "running", Phase: "stopped", ObservedAtUnix: stamp},
+			{ID: "vm-stale", Name: "cache", NodeID: "drone", DesiredState: "running", Phase: "ready", ObservedAtUnix: staleStamp},
+			{ID: "vm-stopped", Name: "backup", NodeID: "sting", DesiredState: "stopped", Phase: "stopped", ObservedAtUnix: stamp},
 			{ID: "vm-unknown", Name: "unobserved", NodeID: "unreachable", DesiredState: "running", Phase: "ready"},
 		},
 		Jails: []jailView{
-			{ID: "jail-error", Name: "worker", NodeID: "brood", DesiredState: "running", Phase: "error"},
+			{ID: "jail-error", Name: "worker", NodeID: "brood", DesiredState: "running", Phase: "error", ObservedAtUnix: stamp},
 		},
 	}
 	nodes := []clusterNodeView{
@@ -44,8 +44,11 @@ func TestBuildHealthTreeReportsFreshnessAndAggregatesBottomUp(t *testing.T) {
 	if hosts["brood"].State != "DEGRADED" {
 		t.Errorf("brood state = %q, want DEGRADED", hosts["brood"].State)
 	}
-	if hosts["drone"].State != "STALE" || hosts["drone"].Children[0].State != "STALE" || hosts["drone"].Children[0].ObservedAtUnix != staleStamp {
+	if hosts["drone"].State != "STALE" || hosts["drone"].Children[0].State != "STALE" || hosts["drone"].Children[0].ObservedAtUnix != staleStamp || hosts["drone"].Children[0].AgeSeconds != 32 {
 		t.Errorf("stale host/resource = %+v / %+v", hosts["drone"], hosts["drone"].Children)
+	}
+	if hosts["brood"].Children[0].Level != 2 || !hosts["brood"].Children[0].Leaf || hosts["brood"].Children[0].Label != "db" {
+		t.Errorf("resource metadata = %+v, want relative leaf metadata", hosts["brood"].Children[0])
 	}
 	if hosts["sting"].Children[0].State != "STOPPED" {
 		t.Errorf("intentionally stopped VM state = %q, want STOPPED", hosts["sting"].Children[0].State)
@@ -74,7 +77,7 @@ func TestRelativeHostNameOnlyRemovesApiaryClusterSuffix(t *testing.T) {
 func TestResourceTreeDoesNotMarkStoppedDesiredGuestDown(t *testing.T) {
 	now := time.Unix(1_800_000_000, 0)
 	host := clusterNodeView{Reachable: true, HealthStatus: health.StatusHealthy, ReconcileSuccessUnix: now.Unix()}
-	got := resourceTreeNode("vm", "stopped", "stopped", "stopped", "stopped", host, now)
+	got := resourceTreeNode("vm", "stopped", "stopped", "stopped", "stopped", now.Unix(), host, now)
 	if got.State != "STOPPED" {
 		t.Fatalf("stopped VM state = %q, want STOPPED", got.State)
 	}

@@ -39,8 +39,9 @@ type vmView struct {
 	// table's State column shows, since desired_state alone (what a
 	// caller asked for) never reflected whether that had actually
 	// happened yet.
-	Phase      string
-	PhaseError string
+	Phase          string
+	PhaseError     string
+	ObservedAtUnix int64
 
 	// ISOName is the installer image (if any) this VM was created with -
 	// empty means it booted from its disk alone.
@@ -694,8 +695,9 @@ type jailView struct {
 
 	// Phase is the reconciler's own observed progress, mirroring
 	// vmView.Phase exactly.
-	Phase      string
-	PhaseError string
+	Phase          string
+	PhaseError     string
+	ObservedAtUnix int64
 
 	// ReplicaNodeID, if set, names the node this jail's root filesystem
 	// is HAST-replicated to (ADR-0026) - data redundancy, not failover.
