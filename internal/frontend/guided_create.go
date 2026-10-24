@@ -336,6 +336,7 @@ type guidedImageOption struct {
 	Label     string
 	Available bool
 	Reason    string
+	Comment   string
 }
 
 // guidedImageOptions builds one picker's options from the cluster-wide
@@ -348,10 +349,13 @@ func guidedImageOptions(rows []isoRowView, role guidedImageRole) []guidedImageOp
 	for _, row := range rows {
 		ok, reason := role.verdict(row.Name)
 		label := row.Name
+		if row.Comment != "" {
+			label += " - " + row.Comment
+		}
 		if !ok {
 			label += " — unavailable: " + cueFor(row.Name, role)
 		}
-		opts = append(opts, guidedImageOption{Value: row.Name, Label: label, Available: ok, Reason: reason})
+		opts = append(opts, guidedImageOption{Value: row.Name, Label: label, Available: ok, Reason: reason, Comment: row.Comment})
 	}
 	return opts
 }

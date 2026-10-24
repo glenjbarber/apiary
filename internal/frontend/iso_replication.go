@@ -25,6 +25,7 @@ import (
 // canonical owner the way VM/jail listing already is (ADR-0106).
 type isoRowView struct {
 	Name        string
+	Comment     string
 	SizeBytes   uint64
 	Size        string
 	SHA256      string
@@ -95,7 +96,7 @@ func (s *Server) currentClusterISOs(r *http.Request) ([]isoRowView, string) {
 			row, ok := rows[k]
 			if !ok {
 				row = &isoRowView{
-					Name: info.GetName(), SizeBytes: info.GetSizeBytes(), Size: formatBytes(info.GetSizeBytes()),
+					Name: info.GetName(), Comment: info.GetComment(), SizeBytes: info.GetSizeBytes(), Size: formatBytes(info.GetSizeBytes()),
 					SHA256: info.GetSha256(), SHA256Short: shortHash(info.GetSha256()),
 					Kind: classifyImageName(info.GetName()).String(),
 				}

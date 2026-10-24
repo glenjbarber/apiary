@@ -31,7 +31,7 @@ type fakeISOPeerForwarder struct {
 	uploadErr   error
 }
 
-func (f *fakeISOPeerForwarder) UploadISO(_ context.Context, addr, name, expectedSHA256 string, _ io.Reader) error {
+func (f *fakeISOPeerForwarder) UploadISO(_ context.Context, addr, name, expectedSHA256 string, _ io.Reader, _ ...string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.uploadCalls = append(f.uploadCalls, struct{ addr, name, sha256 string }{addr, name, expectedSHA256})

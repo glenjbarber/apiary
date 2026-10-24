@@ -117,13 +117,13 @@ type gateISOManager struct {
 	saveMu sync.Mutex
 }
 
-func (g *gateISOManager) Save(name string, r io.Reader, expectedSHA256 string) (*isostore.Info, error) {
+func (g *gateISOManager) Save(name string, r io.Reader, expectedSHA256 string, comments ...string) (*isostore.Info, error) {
 	g.entered.Add(1)
 	<-g.gate
 	// The embedded fake records into shared fields, so serialize it.
 	g.saveMu.Lock()
 	defer g.saveMu.Unlock()
-	return g.fakeISOManager.Save(name, r, expectedSHA256)
+	return g.fakeISOManager.Save(name, r, expectedSHA256, comments...)
 }
 
 // waitForUploadsInFlight blocks until n uploads have reached Save, or

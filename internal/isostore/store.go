@@ -63,6 +63,7 @@ type Info struct {
 	Name      string
 	SizeBytes int64
 	SHA256    string
+	Comment   string
 	ModTime   time.Time
 }
 
@@ -211,7 +212,7 @@ func (w *limitedWriter) Write(p []byte) (int, error) {
 // UI's own upload flow (see ADR-0017). expectedSHA256 must not be
 // empty: an unverified upload is exactly the failure mode this package
 // exists to prevent.
-func (m *Manager) Save(name string, r io.Reader, expectedSHA256 string) (*Info, error) {
+func (m *Manager) Save(name string, r io.Reader, expectedSHA256 string, comments ...string) (*Info, error) {
 	if err := validateName(name); err != nil {
 		return nil, err
 	}
@@ -266,11 +267,19 @@ func (m *Manager) Save(name string, r io.Reader, expectedSHA256 string) (*Info, 
 		return nil, fmt.Errorf("isostore: recording hash: %w", err)
 	}
 
+	comment := ""
+	if len(comments) > 0 {
+		comment = comments[0]
+	}
+	if err := m.writeComment(name, comment); err != nil {
+		return nil, fmt.Errorf("isostore: recording comment: %w", err)
+	}
+
 	info, err := os.Stat(dest)
 	if err != nil {
 		return nil, fmt.Errorf("isostore: stat after save: %w", err)
 	}
-	return &Info{Name: name, SizeBytes: size, SHA256: got, ModTime: info.ModTime()}, nil
+	return &Info{Name: name, SizeBytes: size, SHA256: got, Comment: comment, ModTime: info.ModTime()}, nil
 }
 
 // ParseManifest parses a FreeBSD release MANIFEST file's contents -
@@ -307,8 +316,43 @@ func ParseManifest(r io.Reader) (map[string]string, error) {
 	return sums, nil
 }
 
-func (m *Manager) hashSidecarPath(name string) string {
-	return m.path(name) + ".sha256"
+func (m *Manager) hashSidecarPath(name string) string { return m.path(name) + ".sha256" }
+
+// Comments use UTF-8 text in the hidden .comments/<name> directory. The
+// existing .sha256 sidecar remains exclusively the file digest.
+func (m *Manager) commentSidecarPath(name string) string {
+	return filepath.Join(m.Dir, ".comments", name)
+}
+func (m *Manager) writeComment(name, comment string) error {
+	dir := filepath.Join(m.Dir, ".comments")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return err
+	}
+	tmp, err := os.CreateTemp(dir, ".comment-*")
+	if err != nil {
+		return err
+	}
+	tmpPath := tmp.Name()
+	defer os.Remove(tmpPath)
+	if _, err := io.WriteString(tmp, comment); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	return os.Rename(tmpPath, m.commentSidecarPath(name))
+}
+
+// UpdateComment replaces the durable operator comment for an existing image.
+func (m *Manager) UpdateComment(name, comment string) error {
+	if err := validateName(name); err != nil {
+		return err
+	}
+	if _, err := os.Stat(m.path(name)); err != nil {
+		return fmt.Errorf("isostore: image %q: %w", name, err)
+	}
+	return m.writeComment(name, comment)
 }
 
 // sha256Equal compares two hex-encoded SHA-256 digests case-
@@ -403,6 +447,7 @@ func (m *Manager) Delete(name string) error {
 		return fmt.Errorf("isostore: deleting %s: %w", name, err)
 	}
 	os.Remove(m.hashSidecarPath(name))
+	os.Remove(m.commentSidecarPath(name))
 	return nil
 }
 
@@ -433,7 +478,8 @@ func (m *Manager) List() ([]Info, error) {
 			continue
 		}
 		sum, _ := os.ReadFile(m.hashSidecarPath(name))
-		infos = append(infos, Info{Name: name, SizeBytes: fi.Size(), SHA256: string(sum), ModTime: fi.ModTime()})
+		comment, _ := os.ReadFile(m.commentSidecarPath(name))
+		infos = append(infos, Info{Name: name, SizeBytes: fi.Size(), SHA256: string(sum), Comment: string(comment), ModTime: fi.ModTime()})
 	}
 	sort.Slice(infos, func(i, j int) bool { return infos[i].Name < infos[j].Name })
 	return infos, nil

@@ -149,6 +149,7 @@ service ManagerService {
   rpc UploadISO(stream UploadISORequest) returns (UploadISOResponse);
   rpc ListISOs(ListISOsRequest) returns (ListISOsResponse);
   rpc DeleteISO(DeleteISORequest) returns (DeleteISOResponse);
+  rpc UpdateISOComment(UpdateISOCommentRequest) returns (UpdateISOCommentResponse);
 
   // HostStats reports a point-in-time snapshot of *this* node's own
   // resource usage and hardware health - physical, per-node data like
@@ -1569,6 +1570,7 @@ message ISOUploadMetadata {
   // to verify against is exactly the failure mode this API exists to
   // prevent.
   string expected_sha256 = 2;
+  string comment = 3;
 }
 
 message UploadISOResponse {
@@ -1579,6 +1581,7 @@ message UploadISOResponse {
   // error is set (with name/size_bytes/sha256 left at zero values) if
   // the upload was rejected - most commonly a hash mismatch.
   string error = 4;
+  string comment = 5;
 }
 
 message ListISOsRequest {}
@@ -1587,6 +1590,7 @@ message ISOInfo {
   string name = 1;
   uint64 size_bytes = 2;
   string sha256 = 3;
+  optional string comment = 4;
 }
 
 message ListISOsResponse {
@@ -1599,6 +1603,15 @@ message DeleteISORequest {
 }
 
 message DeleteISOResponse {
+  string error = 1;
+}
+
+message UpdateISOCommentRequest {
+  string name = 1;
+  string comment = 2;
+}
+
+message UpdateISOCommentResponse {
   string error = 1;
 }
 

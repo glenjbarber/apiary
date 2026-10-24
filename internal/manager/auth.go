@@ -183,6 +183,7 @@ var requiredRole = map[string]Role{
 	"/apiary.rpc.v1.ManagerService/SetNetworkName":             RoleOperator,
 	"/apiary.rpc.v1.ManagerService/UploadISO":                  RoleOperator,
 	"/apiary.rpc.v1.ManagerService/DeleteISO":                  RoleOperator,
+	"/apiary.rpc.v1.ManagerService/UpdateISOComment":           RoleOperator,
 	"/apiary.rpc.v1.ManagerService/ReportVMPhase":              RoleOperator,
 	"/apiary.rpc.v1.ManagerService/ReportVMTeardownComplete":   RoleOperator,
 	"/apiary.rpc.v1.ManagerService/ReportJailPhase":            RoleOperator,

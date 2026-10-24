@@ -531,7 +531,8 @@ func (s *Server) handleListNetworks(w http.ResponseWriter, r *http.Request) {
 // isoUploadResult is the REST-facing JSON shape for a successful
 // UploadISO call.
 type isoUploadResult struct {
-	Name string `json:"name"`
+	Name    string `json:"name"`
+	Comment string `json:"comment,omitempty"`
 }
 
 // maxExpectedSHA256FieldBytes bounds the small metadata field before it is
@@ -554,6 +555,7 @@ func (s *Server) handleUploadISO(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var expectedHash string
+	var comment string
 	var result *rpcpb.UploadISOResponse
 	var uploadErr error
 	var formErr error
@@ -580,8 +582,19 @@ func (s *Server) handleUploadISO(w http.ResponseWriter, r *http.Request) {
 				break
 			}
 			expectedHash = strings.TrimSpace(string(data))
+		case "comment":
+			data, readErr := io.ReadAll(io.LimitReader(part, 4097))
+			if readErr != nil {
+				uploadErr = fmt.Errorf("reading comment: %w", readErr)
+				break
+			}
+			if len(data) > 4096 {
+				uploadErr = fmt.Errorf("comment exceeds 4096 bytes")
+				break
+			}
+			comment = strings.TrimSpace(string(data))
 		case "file":
-			result, uploadErr = s.uploadISOStream(r, part, expectedHash)
+			result, uploadErr = s.uploadISOStream(r, part, expectedHash, comment)
 		}
 		part.Close()
 		if uploadErr != nil || formErr != nil {
@@ -605,21 +618,21 @@ func (s *Server) handleUploadISO(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, errorBody{Error: result.GetError()})
 		return
 	}
-	writeJSON(w, http.StatusCreated, isoUploadResult{Name: result.GetName()})
+	writeJSON(w, http.StatusCreated, isoUploadResult{Name: result.GetName(), Comment: result.GetComment()})
 }
 
 // uploadISOStream opens managerd's UploadISO client stream, sends the
 // required Metadata message (the file's own name, plus expectedHash
 // gathered from the earlier form field), then relays part's bytes as a
 // sequence of Chunk messages - see internal/frontend's identical helper.
-func (s *Server) uploadISOStream(r *http.Request, part *multipart.Part, expectedHash string) (*rpcpb.UploadISOResponse, error) {
+func (s *Server) uploadISOStream(r *http.Request, part *multipart.Part, expectedHash, comment string) (*rpcpb.UploadISOResponse, error) {
 	stream, err := s.client.UploadISO(authContext(r))
 	if err != nil {
 		return nil, fmt.Errorf("opening upload stream: %w", err)
 	}
 	if err := stream.Send(&rpcpb.UploadISORequest{
 		Data: &rpcpb.UploadISORequest_Metadata{
-			Metadata: &rpcpb.ISOUploadMetadata{Name: part.FileName(), ExpectedSha256: expectedHash},
+			Metadata: &rpcpb.ISOUploadMetadata{Name: part.FileName(), ExpectedSha256: expectedHash, Comment: comment},
 		},
 	}); err != nil {
 		return nil, fmt.Errorf("sending upload metadata: %w", err)

@@ -161,11 +161,15 @@ func TestGuidedImageRoleAvailability(t *testing.T) {
 // cannot pick it here.
 func TestGuidedImageOptionsKeepUnavailableImagesVisible(t *testing.T) {
 	rows := []isoRowView{{Name: "freebsd.raw"}, {Name: "FreeBSD.iso"}}
+	rows[0].Comment = "Approved base from vendor"
 	opts := guidedImageOptions(rows, guidedRoleBaseImage)
 	if len(opts) != 2 {
 		t.Fatalf("guidedImageOptions returned %d options, want 2 (every image listed): %+v", len(opts), opts)
 	}
-	if !opts[0].Available || opts[0].Label != "freebsd.raw" {
+	if !strings.Contains(opts[0].Label, "Approved base from vendor") {
+		t.Errorf("picker label = %q, want comment", opts[0].Label)
+	}
+	if !opts[0].Available || !strings.HasPrefix(opts[0].Label, "freebsd.raw - ") {
 		t.Errorf("freebsd.raw should be listed and available as a base image, got %+v", opts[0])
 	}
 	if opts[1].Available {
