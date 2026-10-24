@@ -34,7 +34,7 @@ B7 are documented but not changed; see the table for the reason in each case.
 |----|--------|--------|-------|
 | B1 | Fixed | `c03ee4b` | The requested lifetime is parsed as a 64-bit integer and checked against `internal/cloudflare.ValidOriginCAValidity` before the `int32` narrowing. An out-of-set value is rejected in the UI and never forwarded to managerd. |
 | B2 | Fixed | `d7ad9f7` | Header corrected to `ADR-0150`. The filename and header now agree, and the collision with `0120-config-rationale-history.md` is gone. |
-| B3 | Documented, not changed | (none) | Removing the route and the tree builder is a judgment call about the public surface of the frontend, so it is reported rather than done. Issue #112 is still open. |
+| B3 | Documented, not changed | (none) | Removing the route and the tree builder is a judgment call about the public surface of the frontend, so it is reported rather than done. Issue #112 is still open, and is the owner-facing tracker for the decision (see the correction in the B3 section). |
 | B4 | Documented, not changed | (none) | `docs/adr/MIGRATION.md` says global number allocation is "Pending Glen allocation", so the numbers were not reassigned autonomously. |
 | B5 | Documented, not changed | (none) | Same reason as B4. |
 | B6 | Documented, not changed | (none) | These are environmental failures, not code defects. |
@@ -115,9 +115,22 @@ behind the same authentication as the rest of the frontend.
 
 Recommendation: decide whether the endpoint is a public API surface that
 should be documented and kept, or an internal implementation detail that
-should be removed along with the tree builder. Issue #112 tracks the broader
-cluster health question and is still open, so this is left for the owner
+should be removed along with the tree builder. This is left for the owner
 rather than removed unilaterally.
+
+Correction (2026-10-24): an earlier version of this finding pointed at
+issue #112 as the tracker for that decision. That cross-reference was
+wrong. Issue #112 is titled "Feature: Command Center hierarchical cluster
+health view" and asks to *implement* the tree, citing the Notion design
+page "Apiary Command Center - Hierarchical Cluster Health Design" and
+listing eight acceptance criteria (multi-tier brood/drone/sting hierarchy,
+relative names, root expanded and hosts collapsed by default, 10-second
+polling, a 30-second stale threshold showing total observation age,
+explicit UNKNOWN versus DOWN, and expansion state preserved across
+refreshes). `internal/frontend/health_tree.go` is therefore the only
+existing implementation of that design, not dead code awaiting deletion.
+The two readings point in opposite directions, so the decision belongs to
+the owner and is tracked by issue #112 itself.
 
 ### B4. ADR numbers are not unique (Low)
 
