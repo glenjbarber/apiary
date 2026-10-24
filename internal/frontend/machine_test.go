@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -1028,6 +1029,57 @@ func TestServer_MachinePage_LinksToFocusedSubpages(t *testing.T) {
 	for _, section := range machineSections {
 		if !strings.Contains(body, `href="/machine/`+section.Slug+`"`) {
 			t.Errorf("full page missing link to /machine/%s", section.Slug)
+		}
+	}
+}
+
+// A validity lifetime outside the set Cloudflare's Origin CA accepts is a
+// bad request, and it must be rejected before the int32 narrowing. A value
+// such as 4294967331 truncates to 365 when narrowed to int32, so an
+// unchecked conversion would silently issue a one-year certificate for a
+// request that asked for something else entirely.
+func TestServer_IssueOriginCertificate_RejectsValidityOutsideAcceptedSet(t *testing.T) {
+	for _, days := range []string{"0", "-1", "1", "31", "3651", "4294967331", "2147483800"} {
+		client := &fakeClient{issueOriginCertificateResp: &rpcpb.IssueOriginCertificateResponse{RestartScheduled: true}}
+		s := newTestServer(t, client)
+
+		form := url.Values{"name": {"managerd"}, "hostnames": {"api.example.com"}, "validity_days": {days}}
+		req := httptest.NewRequest(http.MethodPost, "/machine/origin-ca", strings.NewReader(form.Encode()))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		rec := httptest.NewRecorder()
+		s.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusOK {
+			t.Fatalf("validity_days=%s: status = %d, want 200; body=%s", days, rec.Code, rec.Body.String())
+		}
+		if client.lastIssueOriginCertificateReq != nil {
+			t.Errorf("validity_days=%s: forwarded request = %+v, want no RPC call", days, client.lastIssueOriginCertificateReq)
+		}
+		if body := rec.Body.String(); !strings.Contains(body, "validity must be one of") {
+			t.Errorf("validity_days=%s: body = %q, want the validity error", days, body)
+		}
+	}
+}
+
+func TestServer_IssueOriginCertificate_ForwardsAcceptedValidity(t *testing.T) {
+	for _, days := range []int32{7, 30, 90, 365, 730, 1095, 5475} {
+		client := &fakeClient{issueOriginCertificateResp: &rpcpb.IssueOriginCertificateResponse{RestartScheduled: true}}
+		s := newTestServer(t, client)
+
+		form := url.Values{"name": {"managerd"}, "hostnames": {"api.example.com"}, "validity_days": {strconv.Itoa(int(days))}}
+		req := httptest.NewRequest(http.MethodPost, "/machine/origin-ca", strings.NewReader(form.Encode()))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		rec := httptest.NewRecorder()
+		s.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusOK {
+			t.Fatalf("validity_days=%d: status = %d, want 200; body=%s", days, rec.Code, rec.Body.String())
+		}
+		if client.lastIssueOriginCertificateReq == nil {
+			t.Fatalf("validity_days=%d: no RPC call forwarded", days)
+		}
+		if got := client.lastIssueOriginCertificateReq.GetValidityDays(); got != days {
+			t.Errorf("validity_days=%d: forwarded ValidityDays = %d, want %d", days, got, days)
 		}
 	}
 }
