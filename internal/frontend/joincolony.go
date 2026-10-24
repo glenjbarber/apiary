@@ -422,12 +422,19 @@ func (s *Server) handleCancelJoinRequest(w http.ResponseWriter, r *http.Request)
 }
 
 func (s *Server) redirectAfterJoinRequestAction(w http.ResponseWriter, r *http.Request, rpcErr string, err error) {
+	redirectWithError := func(message string) {
+		query := url.Values{"join_request_error": []string{message}}
+		if joinRequestErrorPointsToStage1(message) && r.PathValue("id") != "" {
+			query.Set("join_request_stage1_request_id", r.PathValue("id"))
+		}
+		http.Redirect(w, r, "/?"+query.Encode(), http.StatusFound)
+	}
 	if err != nil {
-		http.Redirect(w, r, "/?join_request_error="+url.QueryEscape(err.Error()), http.StatusFound)
+		redirectWithError(err.Error())
 		return
 	}
 	if rpcErr != "" {
-		http.Redirect(w, r, "/?join_request_error="+url.QueryEscape(rpcErr), http.StatusFound)
+		redirectWithError(rpcErr)
 		return
 	}
 	http.Redirect(w, r, "/", http.StatusFound)

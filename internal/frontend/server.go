@@ -177,6 +177,9 @@ type pageData struct {
 	// leaving the operator to notice the (now default-open, but still
 	// easy to miss) disclosure on their own.
 	JoinRequestErrorPointsToStage1 bool
+	// JoinRequestErrorStage1Anchor identifies the refused request's Stage 1
+	// disclosure. Empty when the request cannot be identified.
+	JoinRequestErrorStage1Anchor string
 
 	// JoinRequestAwaitingSecondAuthorization/Message surface
 	// ApproveJoinRequestResponse.awaiting_second_authorization (issue
