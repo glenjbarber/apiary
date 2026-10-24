@@ -140,3 +140,86 @@ the empty-allowlist case, live config refresh, and direct join request;
 manager tests passed with `-race`. The full manager package run was
 stopped after 87 seconds of verbose Raft integration output without a
 reported test failure.
+
+## Addendum: membership address configuration and local transport token (#84)
+
+### Status
+
+**Proposed**. `Supersedes: None`. `Superseded by: None`. `Tracking issue: #84`.
+This proposal refines the accepted fail-closed allowlist decision above; it
+does not reverse it.
+
+### Context
+
+An empty `known_peer_addresses` must refuse forwarded unauthenticated join
+requests before dialing. The current installer seeds an explicitly supplied
+`--colony-member` address only when the field is unset, and current member
+configuration updates refresh managerd's in-memory allowlist. The list is
+persisted in node configuration, but membership changes do not currently
+extend it. A joining Web UI therefore needs a safe initial target path that
+does not rely on forwarding through an empty allowlist.
+
+`internal_token` has a different scope. Install pairs one host's managerd
+with that same host's raftd. It is not a Colony membership credential. The
+Colony-wide peer credential is `peer_api_key`, provisioned during join.
+
+### Decision
+
+Keep `known_peer_addresses` as persisted per-Comb node configuration and
+make that configuration the source of truth. Do not derive the outbound
+forwarding allowlist implicitly from Raft membership: the current policy
+allows only explicitly trusted target managerd addresses, and using a dynamic
+membership view would introduce a second interpretation of that policy and
+require careful handling during bootstrap and stale membership observations.
+
+A joining Comb's Web UI obtains its initial trusted target from the
+operator-selected Colony member address and dials that member directly for
+introduction, status, and cancellation. It leaves `target_address` empty;
+therefore it does not invoke the unauthenticated forwarding allowlist. Do not
+allow an empty allowlist to mean any address. For flows that must forward,
+require an explicit configured address and fail closed otherwise.
+
+After a successful membership change, the join workflow must update the
+persisted `known_peer_addresses` value on each member to the canonical set of
+current Colony managerd addresses. Write through the existing node-config
+persistence path so the configuration survives restart; the existing live
+refresh after successful node-config update keeps the running allowlist in
+sync. Removing a member removes its address from the canonical set. If any
+member cannot be updated, report that member and the incomplete configuration
+state prominently and retry reconciliation; do not represent address
+convergence as complete. The owner must decide whether membership change is
+blocked until all config writes succeed or is allowed with a visible
+reconciliation failure. An implementation must define normalization and
+address-change handling before claiming convergence.
+
+Keep `internal_token` host-local: it pairs that host's managerd with that
+same host's raftd and is not distributed as a Colony credential. Do not
+create or rotate a Colony-wide `internal_token`. Use `peer_api_key` for
+Colony-wide peer API authentication, with the existing per-Comb join
+credential handoff and backfill mechanisms.
+
+Correct the Machine page's Known peer addresses help text. It must say that
+blank disables forwarded `target_address` requests and does not accept any
+target. It must explain that directly dialing the selected member from the
+joining Comb is the enrollment path when the local allowlist is empty.
+
+### Consequences
+
+The allowlist has an auditable persisted source of truth and restart behavior;
+initial Web UI enrollment remains possible without weakening the fail-closed
+check. Membership changes require coordinated persisted config updates and
+visible partial-failure handling. Open owner questions: approve persisted
+configuration rather than Raft-derived allowlist membership; decide whether
+a join may complete while some members have stale lists; and define canonical
+address normalization and reconciliation policy. The Command Center's
+reachability symptom is not explained by this allowlist proposal.
+
+### Verified implementation references
+
+`internal/hostinstall/writes.go` seeds the supplied `--colony-member` address
+only when unset; `internal/manager/joincolony.go` refuses forwarding when the
+allowlist is empty; `internal/manager/server.go` persists node config and
+refreshes the in-memory list after successful updates; and
+`web/templates/machine.html` currently contains the stale accept-any help
+text. `internal/hostinstall/writes.go` also documents the host-local token
+pairing, while the join credential install handles peer API credentials.

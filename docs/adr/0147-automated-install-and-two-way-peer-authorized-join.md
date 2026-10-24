@@ -2145,3 +2145,118 @@ made it always dial loopback is killed by a test. The invariant worth
 keeping is the general one, not the number: **every field that DIALS
 managerd locally must name the address managerd is actually LISTENING
 on**, and a bind address is not automatically the answer.
+
+## Addendum: guided Web UI join (#79)
+
+### Status
+
+**Proposed**. `Supersedes: None`. `Superseded by: None`. `Tracking issue: #79`.
+This addendum is a design proposal; the owner has not accepted the UI or
+workflow choices below.
+
+### Context
+
+The registered `/colony/join/guided` handler redirects to
+`/machine#join-colony` (`internal/frontend/join_guided.go`). The current
+Machine page tells the operator to run `apiaryctl join-introduce`, carry the
+first code and certificate fingerprints to the target, and perform raft
+preparation by hand (`web/templates/machine.html`, join-colony panel). The
+join request itself and its stage are already replicated state; wizard
+progress must not pretend that advancing a browser step performed a join.
+
+### Decision
+
+Replace the redirect target experience deliberately with a guided join flow.
+Keep `/colony/join/guided` as a compatibility entry point into the real flow;
+retire the former client-step wizard, which advanced submitted step names
+without executing join operations. The authoritative progress is the existing
+Raft-replicated `PendingJoinRequest` and its request ID, status, stage, expiry,
+and member identity. The browser may keep temporary presentation state such
+as the selected target and last viewed panel, but it is not a second durable
+join record. On reload or failover, reload the request by ID and derive the
+step from the server response. A browser that has lost its URL can resume by
+listing this Comb's requests and selecting the named request.
+
+The sequence labels the acting Comb on every action and result:
+
+1. **Joining Comb:** select any existing Colony member and begin introduction.
+   The UI contacts that selected manager directly, so an empty
+   `known_peer_addresses` does not require unsafe forwarding. Display the
+   target Comb's node ID and address as the destination. The joining Comb
+   generates the first code and advertises its own certificate fingerprints.
+2. **Both sides:** show the first code and joining Comb fingerprints only on
+   the joining Comb. On the target Colony member's pending-request panel, show
+   the requester's node ID, address, first code entry, and advertised
+   fingerprints for comparison. The target-side operator verifies the code
+   and certificate fingerprints there. The UI carries request ID and verified
+   values across its own requests; it must not ask the operator to transcribe
+   them between pages.
+3. **Colony member:** before approval, display the required local preparation
+   checklist for the joining Comb and block approval until reachability
+   preflight succeeds. The Colony cannot remotely write the joiner's
+   root-owned config files, reset its raft state, or restart its raftd with
+   `-await-join`. The operator must perform those actions locally on the
+   joining Comb, or use a future explicitly installed host agent. The UI must
+   say this is a local action and name the joining Comb; no Colony RPC may
+   claim to have done it remotely.
+4. **Colony member:** evaluate the local authorization entry and the distinct
+   API-key authorization required by this ADR's Part 3, then explicitly
+   approve. Authorization entries remain root-owned local configuration
+   written by `apiaryctl join-authorize`; the Web UI may report whether the
+   selected target has a matching entry but must not create one remotely.
+   Approval provisions the new member's per-Comb peer Operator credential as
+   described by the existing join credential handoff.
+5. **Joining Comb:** poll status using the retained request ID. Display the
+   second PIN received from that poll on the joining Comb only. The operator
+   carries it to the target member's approval panel, where the target-side
+   operator enters it. This preserves the two-way handshake: first code and
+   fingerprints travel joining Comb to Colony; second PIN travels Colony to
+   joining Comb and is entered back on the Colony side.
+6. **Both sides:** report the replicated outcome and next local action. After
+   voter approval, show whether the joining Comb's raftd joined and whether
+   its frontend/API credential setup completed. Never equate an approved
+   request with successful local raftd restart or credential installation.
+
+Show the join window's current state and absolute expiry before introduction;
+show controls to open or close it to an authorized Colony operator. Show the
+request's 15-minute expiry as a live countdown on both sides. At expiry, offer
+an explicit restart of the introduction. Show the second PIN's separate
+5-minute countdown on the joining Comb. When it expires, provide a visible
+Reissue PIN action on the Colony side, subject to the existing limit of two
+reissues. Do not silently renew either timer. The Colony join window expiry
+is separate from both request and PIN expiries and must be displayed as such.
+
+Leadership changes do not restart the handshake: request state and stage are
+replicated, the UI reloads the same request ID from any reachable member, and
+writes forward to the current leader. Approval consumes the second PIN before
+`AddVoter`; if voter addition fails, the PIN is not restored. In that case,
+show an explicit failure explaining that the PIN was consumed and require the
+operator to select **Reissue second PIN** before retrying approval. Never retry
+approval invisibly with a spent PIN.
+
+Every message, timer, control, and refusal identifies its subject and actor
+using the request's node ID and address, for example "joining Comb X" and
+"Colony member Y". Error formatting must use the identity from the request
+being handled, not the local receiver's identity or a guessed leader. This
+prevents refusals from blaming the wrong Comb when forwarding or leadership
+changes occur.
+
+### Consequences
+
+The durable join record remains the Raft state machine; no parallel wizard
+record can drift from it. The two-person code exchange remains explicit while
+values already known to the system are carried automatically. Local root and
+raft operations remain visible operator tasks until a separately designed
+host-local agent exists. Open owner questions: approve this UI proposal;
+decide whether local host preparation can be automated through a future
+installed agent; and decide whether selecting a request by ID is sufficient
+for browser recovery when no URL remains.
+
+### Verified implementation references
+
+`internal/frontend/join_guided.go` contains the redirect; `web/templates/machine.html`
+contains the current CLI and manual raft preparation text;
+`internal/manager/joincolony.go` defines the 15-minute request TTL and direct
+join behavior; `internal/manager/joinintroduction.go` implements PIN expiry
+and reissue; this ADR's Part 3 documents authorization entries and Part 4
+documents the Colony join window.

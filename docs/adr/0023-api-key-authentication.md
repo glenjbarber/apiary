@@ -187,3 +187,82 @@ exceptions later.
   deliberately.
 - `raftd`'s internal socket, `restshim`, real user/role separation, and
   raft's own transport remain explicitly out of scope, as listed above.
+
+## Addendum: frontend credential provisioning (#75)
+
+### Status
+
+**Proposed**. `Supersedes: None`. `Superseded by: None`. `Tracking issue: #75`.
+This proposal is not yet an owner-approved change to the accepted API-key
+model above.
+
+### Context
+
+The first API key permanently enables authentication across managerd. A
+frontend without `manager_api_key` is then locked out. The current
+`provisionSelfAfterFirstKey` helper configures only the Comb serving the page;
+it does not distribute the newly minted user key. The join flow provisions a
+separate per-Comb Operator peer key, and `apiaryctl peer-credential-backfill`
+provisions existing members. The user key's role is selected on creation and
+may have broader rights than background peer operations.
+
+### Decision
+
+Use a dedicated per-Comb frontend key with the Operator role, minted as part
+of first-key provisioning and installed only on that Comb. Never copy the
+newly created user's key to other frontends: its role belongs to that user,
+and copying it would make every frontend inherit that user's permissions and
+would make a user's revocation disable unrelated frontend service identity.
+A per-Comb key can be revoked independently when that Comb is retired or
+reprovisioned. The design must retain the frontend's existing ability to
+forward an authenticated user action with the user's credential, so service
+identity does not replace user authorization. This matches the scope of the
+per-Comb Operator key already used by the join handoff and backfill command.
+
+Provision all current Colony members as a coordinated workflow after the
+first user key is created, before declaring setup complete. Each Comb's
+managerd key record and local `frontend.json` `manager_api_key` are updated
+through authenticated configuration operations, without returning secrets in
+status responses. A member already configured with a valid dedicated key is
+left unchanged. The initiating Comb's one-time user key remains available to
+the page only long enough to make the first authenticated setup calls.
+
+If a Comb cannot be reached or its configuration update fails, do not report
+successful Colony-wide provisioning. Show the affected Comb ID/address, the
+specific files that need attention (`/usr/local/etc/apiary/managerd.json` and
+`/usr/local/etc/apiary/frontend.json`), which service needs restart, and a
+retry action. Keep the first-key warning visible and include the recovery
+path: restore connectivity and retry, or run the root-only
+`apiaryctl peer-credential-backfill` procedure on the leader and each existing
+member. Do not claim that the command installs the newly minted user key; it
+sets up the limited peer Operator credential. If partial provisioning has
+occurred, list completed and failed members and do not silently mint duplicate
+keys on retry.
+
+Before creating the first key, the page must warn that every managerd in the
+Colony will require authentication, so any frontend without its own
+`manager_api_key` will fail, including this page if local provisioning fails.
+It must state that a dedicated key is configured per Comb, name the two
+configuration files on each Comb, explain that frontends may require restart,
+and give the recovery procedure above. The page must distinguish an
+unreachable member from an authentication or file-write failure and identify
+the member by node ID and address.
+
+The Command Center symptom that another Comb appears unreachable or gives
+contradictory status is not established by this credential design. Treat it
+as out of scope pending reproduction with per-member managerd/frontend logs,
+RPC status and reachability, and the exact credentials configured on each
+Comb. If those observations show a credential propagation or reporting defect,
+track and design that separately.
+
+### Consequences
+
+Frontends have least-privilege identities independent of users, and revoking a
+user key cannot revoke a frontend's service identity. A member outage becomes
+a surfaced partial provisioning state instead of silent success. Open owner
+questions: approve the dedicated per-Comb key model and Operator role; decide
+whether the join-created Operator key can also serve the local frontend or
+must remain a distinct credential; and choose the atomicity/retry behavior
+when a Colony-wide setup reaches only some members. The dedicated key choice
+is a proposal because key role semantics and revocation policy have not been
+approved.
