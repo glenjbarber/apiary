@@ -19,7 +19,7 @@ One factual disagreement between records is recorded here rather than reconciled
 
 ### The consensus engine underneath Apiary is HashiCorp Raft, and it is fine at being that
 
-Apiary's replicated state runs on `github.com/hashicorp/raft`. `internal/raft/` is about 15,857 lines of Go, and `internal/raft/fsm.go` alone is 2,348 lines with 43 command arms spanning `internal/raft/fsm.go:161` through `internal/raft/fsm.go:245`. `FSM.Apply` is at `internal/raft/fsm.go:142`, the digest recompute is deferred inside it at `internal/raft/fsm.go:151`, and `f.lastIndex = log.Index` is at `internal/raft/fsm.go:153`.
+Apiary's replicated state runs on `github.com/hashicorp/raft`. `internal/raft/` is about 6,098 lines of production Go (15,857 lines including the 9,759 lines of test code across 27 `_test.go` files), and `internal/raft/fsm.go` alone is 2,348 lines with 43 command arms spanning `internal/raft/fsm.go:161` through `internal/raft/fsm.go:245`. `FSM.Apply` is at `internal/raft/fsm.go:142`, the digest recompute is deferred inside it at `internal/raft/fsm.go:151`, and `f.lastIndex = log.Index` is at `internal/raft/fsm.go:153`.
 
 That engine provides the things a replicated log must provide: log replication, leader election with pre-vote on by default for the TCP transport (`~/go/pkg/mod/github.com/hashicorp/raft@v1.8.0/api.go:584`), a stable store, snapshots, and leadership transfer.
 
@@ -156,7 +156,7 @@ That last point is the reason the protocol's design includes a sidecar. A colony
 
 ### Side note on ADR housekeeping
 
-`docs/adr/` held 157 numbered ADRs plus `MIGRATION.md`, 158 Markdown files in total, before this one was added. The highest prefix was 0155, with gaps at 0126 and 0153. The prefix 0150 is used by four files (`0150-ai-agent-cell-api.md`, `0150-dedicated-vlan90-switch.md`, `0150-native-system-statistics-and-cluster-monitoring.md`, `0150-preferred-leader-bias.md`) and 0152 by two. `docs/adr/0150-dedicated-vlan90-switch.md` carries the title identifier `ADR-0120`, which collides with `0120-config-rationale-history.md`. None of that is fixed here, because fixing it is not this ADR's business, but this ADR is a proposal, and a proposal that lands into a numbering scheme with four 0150s should say so.
+`docs/adr/` held 157 numbered ADRs plus `MIGRATION.md`, 158 Markdown files in total, before this one was added. The highest prefix was 0155, with gaps at 0126 and 0153. The prefix 0150 is used by four files (`0150-ai-agent-cell-api.md`, `0150-dedicated-vlan90-switch.md`, `0150-native-system-statistics-and-cluster-monitoring.md`, `0150-preferred-leader-bias.md`) and 0152 by two. `docs/adr/0150-dedicated-vlan90-switch.md` carried the title identifier `ADR-0120` at the time this ADR was written, which collided with `0120-config-rationale-history.md`; that header was corrected to `ADR-0150` in commit `d7ad9f7`, so the filename prefix collision with `0120-config-rationale-history.md` remains but the title identifier no longer does. None of that is fixed here, because fixing it is not this ADR's business, but this ADR is a proposal, and a proposal that lands into a numbering scheme with four 0150s should say so.
 
 ## Decision
 
@@ -526,7 +526,7 @@ Each stage is independently shippable and independently valuable. Stage 1 is the
 - **Clock skew.** The protocol does not detect a stale clock and does not treat one as identity evidence. A from-scratch engine would have the same problem unless it stated a clock-synchronisation assumption up front.
 - **Implementing the work queue.** ADR-0149 is Unconfirmed and has no code. The constraints above are recorded so that a future implementation inherits them; nothing is being built.
 - **Fixing ADR-0147's status text.** The discrepancy is recorded in "Status qualifications" and left alone.
-- **Fixing ADR numbering.** The four 0150 files, the two 0152 files, the gaps at 0126 and 0153, and the `ADR-0120` title collision in `docs/adr/0150-dedicated-vlan90-switch.md` are recorded as a side note and left alone.
+- **Fixing ADR numbering.** The four 0150 files, the two 0152 files, the gaps at 0126 and 0153, and the filename prefix collision between `docs/adr/0150-dedicated-vlan90-switch.md` and `0120-config-rationale-history.md` are recorded as a side note and left alone. The `ADR-0120` title identifier that previously collided in that file was corrected to `ADR-0150` in commit `d7ad9f7`; the filename prefix collision remains.
 - **Implementing `GetColonyDiskSizeLocal`.** It is declared (`api/internalpb/raftd.proto:147`) and unimplemented, returning `codes.Unimplemented` through the embedded `internalpb.UnimplementedRaftInternalServer` (`internal/raft/server.go:21`). The Colony Protocol will need a status surface, and this RPC is a candidate for it, but that is implementation work in the staged plan, not part of this ADR.
 
 ## Decisions for Glen
