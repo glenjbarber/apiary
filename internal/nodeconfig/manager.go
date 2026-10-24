@@ -200,6 +200,12 @@ type Config struct {
 	// comma-separated host:port allowlist target_address must match on
 	// the three unauthenticated join-colony RPCs. Empty disables
 	// target_address forwarding; direct join-introduce calls do not set it.
+	//
+	// Since ADR-0164 this is the operator's EXPLICIT OVERRIDE layer:
+	// Colony members are added to the allowlist automatically from raft
+	// membership at runtime, so entries here are only needed for a member
+	// not yet in the membership, a nonstandard managerd port, or a
+	// debugging entry.
 	KnownPeerAddresses string `json:"known_peer_addresses,omitempty"`
 
 	// ColonyJoinWindowSeconds is ADR-0147 Part 4's join-window ceiling,

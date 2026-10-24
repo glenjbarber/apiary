@@ -612,6 +612,7 @@ func run() error {
 	go runAssumptionCheckLoop(ctx, assumptionChecker, cfg.AssumptionCheckInterval)
 	go runOriginCARenewalLoop(ctx, originCARenewer, cfg.OriginCARenewalCheckInterval)
 	go runPeerHostnameRefreshLoop(ctx, peers, raftClient, peerHostnameRefreshInterval)
+	go runPeerAllowlistRefreshLoop(ctx, srv, raftClient, peerAllowlistRefreshInterval)
 	go runPeerCAWriteLoop(ctx, raftClient, peerCAWriteInterval)
 	go runJoinAuthorizationPruneLoop(ctx, srv, joinAuthorizationPruneInterval)
 	if cfg.WatchgooseEnabled {
@@ -782,6 +783,55 @@ func peerHostnameRefreshOnce(ctx context.Context, peers *manager.PeerReporter, r
 		servers = append(servers, manager.KnownRaftServer{Address: s.GetAddress()})
 	}
 	peers.RefreshDerivedHostnames(servers)
+}
+
+// peerAllowlistRefreshInterval controls how often runPeerAllowlistRefreshLoop
+// re-derives the target_address allowlist's DERIVED layer from raft's own
+// committed configuration (ADR-0164). It matches ADR-0115's own interval
+// deliberately: a membership change (a new Comb joining, an existing one's
+// address changing) is rare and operator-driven, so a fixed interval this
+// short is already generous rather than a value anyone needs to tune per
+// deployment.
+const peerAllowlistRefreshInterval = 30 * time.Second
+
+// runPeerAllowlistRefreshLoop keeps the target_address allowlist's derived
+// layer current as Colony membership changes (ADR-0164). It mirrors
+// runPeerHostnameRefreshLoop's shape exactly: an immediate first run,
+// then one per tick, until ctx is done, with failures logged and not fatal.
+func runPeerAllowlistRefreshLoop(ctx context.Context, srv *manager.Server, raftClient *manager.RaftClient, interval time.Duration) {
+	peerAllowlistRefreshOnce(ctx, srv, raftClient)
+
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			peerAllowlistRefreshOnce(ctx, srv, raftClient)
+		}
+	}
+}
+
+// peerAllowlistRefreshOnce reads raft's membership and rebuilds the
+// allowlist's derived layer from it.
+//
+// A raftClient.Status failure leaves the previously-derived set in place: a
+// transient raft query failure must not silently disable join-flow forwarding
+// for every member. The next successful tick replaces it.
+func peerAllowlistRefreshOnce(ctx context.Context, srv *manager.Server, raftClient *manager.RaftClient) {
+	statusCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	status, err := raftClient.Status(statusCtx)
+	if err != nil {
+		log.Printf("managerd: peer allowlist refresh: querying raftd status: %v", err)
+		return
+	}
+	servers := make([]manager.KnownRaftServer, 0, len(status.GetServers()))
+	for _, s := range status.GetServers() {
+		servers = append(servers, manager.KnownRaftServer{Address: s.GetAddress()})
+	}
+	srv.RefreshDerivedPeerAddresses(servers)
 }
 
 func originCARenewalOnce(ctx context.Context, renewer *origincert.Renewer) {
@@ -1243,9 +1293,18 @@ func applyManagerdDefaults(cfg *nodeconfig.Config) {
 }
 
 // knownPeersWarning returns a startup warning when known_peer_addresses is
-// empty, or "" when it is set. Empty now disables unauthenticated
-// target_address forwarding. Direct apiaryctl join-introduce calls do not
-// use target_address; Web UI join forwarding requires this list.
+// empty, or "" when it is set.
+//
+// Since ADR-0164 this warning is narrower than it used to be. The empty
+// CONFIGURED list no longer disables forwarding on a Comb that has joined a
+// Colony: the allowlist's derived layer, rebuilt from raft membership, supplies
+// every member's managerd address. The warning is still worth printing on a
+// Comb with no membership at all, because that is the case where the
+// derived layer is empty too and forwarding really is off - typically a
+// Comb that is about to join, which needs the list to reach its first
+// member.
+//
+// Direct apiaryctl join-introduce calls do not use target_address at all.
 // effectivePeerTLS resolves nodeconfig.Config.PeerTLS's tri-state
 // (issue #97): an absent peer_tls and an explicit true both mean TLS,
 // and only an explicit false turns peer TLS off. Peer calls never fall
@@ -1258,5 +1317,5 @@ func knownPeersWarning(known []string) string {
 	if len(known) > 0 {
 		return ""
 	}
-	return "managerd: WARNING: known_peer_addresses is not set, so the unauthenticated join RPCs (RequestJoinColony, GetJoinRequestStatus, CancelJoinRequest, GetColonyJoinWindow) refuse every target_address and dial nothing. This is the safe default for a standalone Comb. A Comb that joins a Colony through the Web UI needs it: set known_peer_addresses in managerd.json to a Colony member's managerd host:port, or re-run /usr/local/libexec/apiary/apiaryctl install --apply --colony-member <host:port>, which fills the field only when it is unset. Direct apiaryctl join-introduce does not need it."
+	return "managerd: WARNING: known_peer_addresses is not set. Once this Comb has joined a Colony, the unauthenticated join RPCs (RequestJoinColony, GetJoinRequestStatus, CancelJoinRequest, GetColonyJoinWindow) get their target_address allowlist from raft membership instead (ADR-0164), so this warning is expected and harmless. Before joining, though, there is no membership to derive from and those RPCs refuse every target_address and dial nothing: a Comb joining a Colony through the Web UI needs this set to reach its first member. Set known_peer_addresses in managerd.json to a Colony member's managerd host:port, or re-run /usr/local/libexec/apiary/apiaryctl install --apply --colony-member <host:port>, which fills the field only when it is unset. Direct apiaryctl join-introduce does not need it."
 }

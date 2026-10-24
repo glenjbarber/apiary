@@ -534,8 +534,17 @@ type Server struct {
 	// join RPCs check before dialing target_address. An empty map disables
 	// forwarding. The mutex lets an Admin's node-config update take effect
 	// without restarting managerd.
+	//
+	// ADR-0164 splits this into two layers. knownPeerAddresses is the
+	// OPERATOR's configured list, refreshed by SetKnownPeerAddresses
+	// whenever the node config changes and never rewritten by derivation.
+	// derivedPeerAddresses is the DERIVED list, rebuilt from raft membership
+	// on each refresh. A target is allowed if it matches either layer, so
+	// derivation can only widen the set - it can never narrow a choice the
+	// operator made explicitly.
 	knownPeerAddressesMu sync.RWMutex
 	knownPeerAddresses   map[string]bool
+	derivedPeerAddresses map[string]bool
 
 	// reachabilityCheck is swappable in tests (real TCP dials aren't
 	// deterministic/fast enough for unit tests) - production always uses
@@ -666,7 +675,15 @@ func (s *Server) SetPAMAuthenticator(auth pamAuthenticator) { s.authPAM = auth }
 
 // SetKnownPeerAddresses configures the target_address allowlist
 // (ADR-0097) from managerd's startup configuration or a live node-config
-// update. A nil/empty slice leaves target_address forwarding disabled.
+// update. A nil/empty slice leaves the CONFIGURED layer of the allowlist
+// empty - but see ADR-0164: the derived layer, rebuilt from raft
+// membership, can still allow a member's managerd address. A Comb with
+// neither layer configured still fails closed, exactly as ADR-0097 requires.
+//
+// This replaces the configured layer wholesale. It never touches the
+// derived layer: derivation is a runtime view of membership, not a config
+// edit, and a node-config update must not silently discard what raft says
+// about the current membership.
 func (s *Server) SetKnownPeerAddresses(addrs []string) {
 	m := make(map[string]bool, len(addrs))
 	for _, a := range addrs {
@@ -679,6 +696,35 @@ func (s *Server) SetKnownPeerAddresses(addrs []string) {
 	}
 	s.knownPeerAddressesMu.Lock()
 	s.knownPeerAddresses = m
+	s.knownPeerAddressesMu.Unlock()
+}
+
+// RefreshDerivedPeerAddresses rebuilds the DERIVED layer of the
+// target_address allowlist from servers, raft's own committed
+// configuration (ADR-0164).
+//
+// Each member's raft-bind address is transformed into its managerd address
+// by peerManagerdAddrOf - the SAME function the leader-hint path already
+// uses, so the two can never disagree about what a member's managerd
+// address is. The configured layer is left untouched: derivation can only
+// widen the allowlist, never narrow an operator's explicit entry.
+//
+// The derived set is rebuilt in full on every refresh rather than appended
+// to, so a member removed from raft's configuration stops being a valid
+// forward target on the very next refresh instead of leaking a stale entry.
+func (s *Server) RefreshDerivedPeerAddresses(servers []KnownRaftServer) {
+	derived := make(map[string]bool, len(servers))
+	for _, srv := range servers {
+		if srv.Address == "" {
+			continue
+		}
+		derived[s.peerManagerdAddr(srv.Address)] = true
+	}
+	if len(derived) == 0 {
+		derived = nil
+	}
+	s.knownPeerAddressesMu.Lock()
+	s.derivedPeerAddresses = derived
 	s.knownPeerAddressesMu.Unlock()
 }
 
