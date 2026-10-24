@@ -2,7 +2,7 @@
 
 ## Status
 
-Proposed. This design has not been approved by the owner and is not implemented.
+Accepted. Implemented in the tree by PR #174 (merge 65c0349). The allowlist's derived layer, rebuilt from raft membership, is implemented and covered by tests. The owner's acceptance of this design is recorded here; the implementation is in the tree.
 
 Supersedes: None
 Superseded by: None

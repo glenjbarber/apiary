@@ -2,7 +2,7 @@
 
 ## Status
 
-Proposed. This design has not been approved by the owner and is not implemented; do not enable UID-based identity migration until the acceptance criteria below are met.
+Accepted. Implemented in the tree by PR #173 (merge 93d3420). The acceptance criteria below are met: the dedicated FSM command, the managerd RPC with leader forwarding, the logical/physical identity split, and the reconciler conversion are all implemented and covered by tests. Cluster API PR #5 remains the caller's responsibility - it must still retain the legacy identity on any unresolved migration result, as described under "Cluster API PR #5 coordination" below.
 
 Supersedes: None
 Superseded by: None
