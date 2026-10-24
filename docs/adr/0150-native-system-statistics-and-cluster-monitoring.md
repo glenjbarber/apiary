@@ -1,15 +1,15 @@
 # ADR-0150: Native system-statistics and cluster-monitoring API
 
-Status: Unconfirmed
-Supersedes: "Todo: Integrate bsnmpd with raftd to reduce state tracking" (Notion Todo, Apiary project — not an apiary-local ADR, so there is nothing in `docs/adr/` to mark superseded; this document records the supersession relationship on this side only. Resolving or re-numbering the Notion page is Glen's to do, not this document's.)
-Superseded by: None
+Status: Superseded by ADR-0160 for the monitoring API design; historical proposal retained
+Supersedes: "Todo: Integrate bsnmpd with raftd to reduce state tracking" (Notion Todo, Apiary project - not an apiary-local ADR, so there is nothing in `docs/adr/` to mark superseded; this document records the supersession relationship on this side only. Resolving or re-numbering the Notion page is Glen's to do, not this document's.)
+Superseded by: ADR-0160 (monitoring API design)
 Affected projects: Apiary
 Legacy identifier: ADR-0150 (Apiary)
-Loreloom identifier: Pending allocation by Glen — if this design is ever registered cross-project, allocating that number is Glen's to do, not this agent's. This document deliberately does not invent one.
+Loreloom identifier: Pending allocation by Glen - if this design is ever registered cross-project, allocating that number is Glen's to do, not this agent's. This document deliberately does not invent one.
 
 ## Status qualifications
 
-**UNCONFIRMED. Not accepted, not implemented, not reviewed.**
+**HISTORICAL PROPOSAL.** ADR-0160 supersedes this document for monitoring API decisions. The analysis below records the earlier design state and does not override ADR-0160.
 
 This ADR is a proposal, written in response to a Notion Todo ("Design
 native Apiary system-statistics and cluster-monitoring capability,
@@ -50,7 +50,7 @@ listing `FreeBSD-bsnmp`, `FreeBSD-libbegemot`, `FreeBSD-libbsdstat`, and
 build. There is no bsnmpd integration code, no SNMP MIB, no `net-snmp`
 client, and no prior design document anywhere in this tree. The
 cancelled Todo's own "prior investigation", if any happened, left no
-trace in the repository — this ADR treats that investigation as
+trace in the repository - this ADR treats that investigation as
 effectively absent and starts from the current architecture instead.
 
 ### How raft currently tracks and transmits state (`internal/raft`)
@@ -59,19 +59,19 @@ Apiary's replicated state is a log of *decisions* applied by `FSM.Apply`
 on every voter (`internal/raft/fsm.go`), via a typed `Command` oneof
 carried in `ApplyRequest.payload` (`api/internalpb/raftd.proto`,
 `api/internalpb/state.proto`). Every replica computes identical results
-from the identical committed log — that property is load-bearing
+from the identical committed log - that property is load-bearing
 throughout the FSM (IP/MAC allocation in `applyCreateVM`, the
 never-decreases rule in `applySetColonyDiskSize`, etc.), and ADR-0149's
 "what already replicates, and what does not" section draws the same
 line this proposal has to respect: ephemeral, small, JSON-shaped
 coordination facts go through raft; physical, per-node, potentially
-large or high-churn data (ZFS datasets, HAST-replicated bytes, and —
-by the same reasoning — raw CPU/memory/disk counters) does not.
+large or high-churn data (ZFS datasets, HAST-replicated bytes, and -
+by the same reasoning - raw CPU/memory/disk counters) does not.
 
 `Node.Status()` (`internal/raft/node.go`) already reports a
 *monitoring-shaped* fact about raft itself: `IsLeader`, `LeaderID`,
 `NodeID`, `LastLogIndex`, `AppliedIndex`, `RaftState`, `Servers`
-(voter/nonvoter list), `MembershipError`, and — since ADR-0143 — a
+(voter/nonvoter list), `MembershipError`, and - since ADR-0143 - a
 canonical `StateDigest` (a lowercase hex SHA-256 of FSM state,
 recomputed on every `Apply`, deliberately *not* folding in
 `AppliedIndex` so that a snapshot taken mid-replication isn't
@@ -79,13 +79,13 @@ misread as divergence). This is the one piece of "cluster health"
 state that already flows leader-to-follower-and-back implicitly: every
 node computes its own `StateDigest` from its own locally-replayed log,
 and a consumer (today, `ClusterHealth`) compares digests across nodes
-collected by separate, sequential, non-atomic RPCs — there is no
+collected by separate, sequential, non-atomic RPCs - there is no
 raft-native push of one node's digest to another.
 
 Crucially, raft's own heartbeat/AppendEntries traffic (hashicorp/raft,
 via `raft.DefaultConfig()` in `Node.New`) is **not surfaced** anywhere
 in this codebase today, and hashicorp/raft does not expose an
-application-level payload hook on its heartbeats — a leader's
+application-level payload hook on its heartbeats - a leader's
 heartbeat to a follower carries no room for Apiary-defined fields
 without forking the library or layering a second transport. This
 matters directly for "whether raft's own mechanism can carry it" in
@@ -116,19 +116,19 @@ foundation to extend rather than replace:
   is the one RPC that already answers "the whole cluster's state" in
   one call. It computes, server-side (ADR-0122, moved out of the web
   UI per ADR-0056's original design), an Evidence-Aware Health verdict
-  per Comb (`ClusterNodeHealth`: `status` ∈
+  per Comb (`ClusterNodeHealth`: `status` in
   {healthy, degraded, unknown, stale, contradictory}, `explanation`,
   `observations`, `dialed`, `raft_state_digest`,
   `raft_applied_index`). It is explicitly documented as *not* an
   atomic snapshot: each node's `HostStats`/`Status` are gathered by
   separate, sequential reads, so different rows can reflect slightly
-  different moments. There is no leader concept for this RPC — "it
+  different moments. There is no leader concept for this RPC - "it
   answers for whoever receives it", and every node's evidence is
   gathered independently (i.e., answering-node-fans-out-itself, not a
   leader-mediated push).
 - **`GetLocalNodeHealth`** is `ClusterHealth`'s single-node,
   no-fan-out sibling, combined with the node-local, non-replicated
-  Assumption Register (`internal/assumecheck`, ADR-0055) — a periodic
+  Assumption Register (`internal/assumecheck`, ADR-0055) - a periodic
   per-node pass producing `Result`s for continuously re-evaluated,
   system-observed checks (bridge membership, default-route presence,
   uplink/NAT consistency, peer HostStats reachability), persisted
@@ -138,8 +138,8 @@ None of this is "two-way" in the sense the cancelled bsnmpd Todo meant:
 every existing read is *pull*, not *push*. A caller (the web UI, or a
 future monitoring client) asks each node in turn; no node today
 proactively reports its own state to a leader or to any other node
-without being asked. That gap — no leader-initiated poll of followers,
-no follower-initiated push to a leader — is exactly what this proposal
+without being asked. That gap - no leader-initiated poll of followers,
+no follower-initiated push to a leader - is exactly what this proposal
 has to fill in without inventing a second consensus mechanism to do
 it.
 
@@ -153,7 +153,7 @@ view. `internal/frontend/why_not.go` and `invariants_hast_test.go`
 back the "why can't I do X" and HAST-replica-freshness invariant pages
 (`internal/invariant`, `internal/whynot`), which translate evidence
 ("last observed at", "never observed") into operator-facing blockers
-and remedies — the same evidence vocabulary (`Evidence.Source`,
+and remedies - the same evidence vocabulary (`Evidence.Source`,
 `.Detail`, `.ObservedAt`, with `ObservedAt.IsZero()` meaning "never
 observed" rather than "observed as empty") that `ClusterHealth` and
 `HostStats` already use. This is the UI-side proof that "system
@@ -163,26 +163,26 @@ client-side into a cluster-wide picture, never assumed atomic.
 
 ### Authorization model (`internal/manager/auth.go`, `internal/assumecheck/checker.go`)
 
-Apiary's external API auth is a three-tier role hierarchy — Viewer <
-Operator < Admin (ADR-0030) — checked by `checkAuth`
+Apiary's external API auth is a three-tier role hierarchy - Viewer <
+Operator < Admin (ADR-0030) - checked by `checkAuth`
 (`AuthUnaryInterceptor`) against a `requiredRole` map keyed by full
 gRPC method name, with every RPC *absent* from the map defaulting to
 Admin-only rather than open (a deliberate fail-closed default enforced
 by `TestRequiredRole_CoversEveryRPC`). `HostStats`, `ClusterHealth`,
 `GetLocalNodeHealth`, `ListAssumptionResults`,
 `GetLocalNetworkBridgeStatus`, `ListNodeServices`, and `HostPackages`
-are all already mapped to `RoleViewer` — i.e., Apiary's existing
+are all already mapped to `RoleViewer` - i.e., Apiary's existing
 answer to "who may poll statistics across multiple machines" is
 already "any Viewer-tier API key, checked per-RPC, same as every other
 read". Credentials are `ApiKey` records (`hashed_key`: SHA-256 hex,
-raft-replicated so every node validates identically — see
+raft-replicated so every node validates identically - see
 `Node.ValidateAPIKeyHash`'s own doc comment, explicitly *not*
 leader-restricted, for the same reason monitoring reads need to work
 on any node) with the raw key shown exactly once at creation
 (`CreateAPIKey`). Transport security is TLS end-to-end: managerd's
 external gRPC listener, raftd's internal `RaftInternal` Unix-socket
 RPC (not network-exposed at all, per `api/internalpb/raftd.proto`),
-and — separately — raft's own peer-to-peer transport, which can be
+and - separately - raft's own peer-to-peer transport, which can be
 configured with its own TLS (`internal/raft/tls_transport.go`,
 `internal/raft/auth.go`) and a replicated peer-trust store
 (`TrustedPeer`, ADR-0147 Part 4) feeding a derived `peer-ca.pem` on
@@ -196,41 +196,41 @@ Viewer/Operator/Admin hierarchy entirely and gated instead by a
 separate root-owned local token, specifically because no
 `CreateAPIKey`-issued credential, however privileged, should be able
 to orchestrate a cluster-wide restart. Monitoring/statistics reads are
-not in that category — there is nothing in this design that argues for
+not in that category - there is nothing in this design that argues for
 anything stronger than the existing Viewer-tier API-key model, and the
 rest of this document assumes that is also the right answer for the
 new surface (see Decision, "What 'secure channel' means here").
 
-## Decision — proposed, not yet accepted
+## Decision - proposed, not yet accepted
 
 ### 1. API surface: extend `ManagerService`, do not create a parallel one
 
 Add a `ClusterStatistics`-shaped read next to `ClusterHealth`, not a
-new service. Concretely (illustrative field shapes — the exact proto
+new service. Concretely (illustrative field shapes - the exact proto
 is explicitly **not** fixed by this ADR; see Open questions):
 
-- `rpc GetNodeMonitoringReport(GetNodeMonitoringReportRequest) returns (NodeMonitoringReport)` —
+- `rpc GetNodeMonitoringReport(GetNodeMonitoringReportRequest) returns (NodeMonitoringReport)` -
   the single-node, no-fan-out report: a superset of what `HostStats`
   already carries (CPU/mem/disk/net/pf/pool) *plus* the two new
   signals this ADR is actually about: (a) this node's own view of
-  every *other* node's last-observed state (see §2), and (b) the
+  every *other* node's last-observed state (see section 2), and (b) the
   reporting node's own raft role/term/digest, reusing
   `internal/raft.Node.Status()` verbatim rather than re-deriving it.
-  Viewer-tier, node-local, never leader-forwarded — same posture as
+  Viewer-tier, node-local, never leader-forwarded - same posture as
   `HostStats`/`GetLocalNodeHealth` today.
-- `rpc GetClusterMonitoringReport(GetClusterMonitoringReportRequest) returns (ClusterMonitoringReport)` —
+- `rpc GetClusterMonitoringReport(GetClusterMonitoringReportRequest) returns (ClusterMonitoringReport)` -
   the fan-out convenience RPC, structurally identical to
   `ClusterHealth` today (same non-atomic, sequential-per-node,
   "answers for whoever receives it" posture), but returning the richer
   per-node report instead of only the health verdict. This is very
   likely just `ClusterHealth` with its `ClusterNodeHealth` message
   extended to embed `NodeMonitoringReport`, rather than a genuinely new
-  RPC — see Open questions on whether to extend `ClusterHealth` in
+  RPC - see Open questions on whether to extend `ClusterHealth` in
   place (versioned additively) or add a sibling RPC.
 
 Both reuse the existing Viewer role gate and the existing API-key auth
 model unchanged (`requiredRole` map entries at `RoleViewer`, same as
-`HostStats`/`ClusterHealth` today — see §4 below for why no new auth
+`HostStats`/`ClusterHealth` today - see section 4 below for why no new auth
 primitive is proposed).
 
 This explicitly rejects building a standalone monitoring daemon,
@@ -257,7 +257,7 @@ Reasoning:
 
 - hashicorp/raft's heartbeat/AppendEntries RPC carries no
   application-level payload slot (confirmed against the version this
-  tree vendors — see Context above), so "piggyback on raft's existing
+  tree vendors - see Context above), so "piggyback on raft's existing
   heartbeat" is not actually available without forking the dependency.
   That rules out the most literal reading of "reuses raft's existing
   heartbeat/state-replication machinery" directly on the heartbeat
@@ -270,19 +270,19 @@ Reasoning:
   through the existing `Apply` path, landing in the same replicated
   FSM map every other ephemeral-state command does. That *is* "raft's
   own state-replication machinery" in every sense that matters for
-  this codebase — the log, the apply-identically-everywhere guarantee,
-  the survive-a-restart guarantee — even though it does not literally
+  this codebase - the log, the apply-identically-everywhere guarantee,
+  the survive-a-restart guarantee - even though it does not literally
   ride the heartbeat wire format.
 - A proposed `ReportNodeVitals` command, submitted periodically by each
   node's own managerd against its own raftd's `Apply` (not against the
-  leader directly — `Apply` already only succeeds against the current
+  leader directly - `Apply` already only succeeds against the current
   leader and returns a `leader_hint` otherwise, exactly like every
   other write), carrying a **small, bounded, summary-shaped** payload:
   node_id, observed_at_unix, a coarse health enum (reusing
   `internal/health`'s existing five-state vocabulary:
-  healthy/degraded/unknown/stale/contradictory — never inventing a
+  healthy/degraded/unknown/stale/contradictory - never inventing a
   second one), and a short fixed set of scalar gauges (load average,
-  memory free %, worst pool capacity %, worst disk health) — explicitly
+  memory free %, worst pool capacity %, worst disk health) - explicitly
   **not** the full `HostStatsResponse` (SMART details, per-interface
   counters, pf state counts), which stays a pull-only, non-replicated,
   per-node read exactly as it is today.
@@ -290,7 +290,7 @@ Reasoning:
   first carried-forward goal: the summary is small and bounded, one
   entry per node, replacing the previous entry each time (last-write
   wins by node_id, mirroring how `ColonyDiskSize`/`ColonyJoinWindow`
-  each hold exactly one current value) — not an unbounded append-only
+  each hold exactly one current value) - not an unbounded append-only
   journal of every poll.
 - "The leader monitors followers, and followers report state back to
   the leader" becomes, concretely: every node (leader included, for
@@ -301,7 +301,7 @@ Reasoning:
   no-leader-restriction pattern `ListVMsLocal`/`ColonyUpdateStateLocal`
   already establish for "already-replicated, so any node can answer
   for itself". There is no literal "leader polls follower" RPC in this
-  shape — the leader does not need to reach out, because every node's
+  shape - the leader does not need to reach out, because every node's
   self-report already lands in replicated state that the leader (like
   everyone else) can read locally. If Glen's intent is specifically a
   leader-initiated pull (not merely a replicated self-report every node
@@ -317,7 +317,7 @@ Reasoning:
   shows up as stale from every other node's point of view within one
   interval, with no additional detection logic.
 
-This is explicitly **not** a final data model — only a shape argued to
+This is explicitly **not** a final data model - only a shape argued to
 be consistent with the project's existing replication conventions. The
 exact field list, submission interval, and whether `ReportNodeVitals`
 should instead be unreplicated-and-gossiped (peer-to-peer, HostStats-
@@ -326,10 +326,10 @@ below.
 
 ### 3. What "secure channel" means here
 
-**Recommendation: reuse the existing model unchanged — no new auth
+**Recommendation: reuse the existing model unchanged - no new auth
 primitive.** Concretely:
 
-- External API access (the two new RPCs in §1): the existing
+- External API access (the two new RPCs in section 1): the existing
   Viewer-tier, `CreateAPIKey`-issued, SHA-256-hashed, raft-replicated
   API key model (ADR-0023/ADR-0030), checked by the existing
   `checkAuth`/`requiredRole` map, over the existing TLS-terminated
@@ -339,7 +339,7 @@ primitive.** Concretely:
   `HostPackages`); nothing about monitoring is more or less sensitive
   than those, so nothing argues for a different tier or a separate
   credential type. It is explicitly **not** in the restart-guardrail
-  token's threat category (§ Context, Authorization model) — reading
+  token's threat category (section  Context, Authorization model) - reading
   statistics cannot orchestrate a restart, so the dedicated root-owned
   token model that family uses would be the wrong fit, over-restrictive
   for an ordinary Viewer-tier read.
@@ -361,7 +361,7 @@ primitive.** Concretely:
 ### 4. The SNMP-external question
 
 **Recommendation: go fully internal/proprietary. Do not keep
-bsnmpd-compatible external polling, not even as an optional adapter —
+bsnmpd-compatible external polling, not even as an optional adapter -
 at least not in this pass, and only reconsider it if a concrete
 external consumer (e.g., an existing Nagios/Zabbix/Prometheus
 deployment Glen already runs) is named.**
@@ -369,7 +369,7 @@ deployment Glen already runs) is named.**
 Reasoning:
 
 - There is no existing SNMP code in this tree to build on (Context,
-  above) — the cancelled Todo's own framing ("replacing bsnmpd") was
+  above) - the cancelled Todo's own framing ("replacing bsnmpd") was
   never implemented, so "keep bsnmpd-compatible" would mean building a
   SNMP agent and a MIB from scratch, not preserving anything that
   exists today.
@@ -383,8 +383,8 @@ Reasoning:
   the monitoring surface would make monitoring the one feature with a
   parallel, SNMP-flavored security and data model next to everything
   else's gRPC-flavored one.
-- A bsnmpd *adapter* — translating gRPC responses into MIB objects for
-  an existing external NMS — is a real, legitimate future option, and
+- A bsnmpd *adapter* - translating gRPC responses into MIB objects for
+  an existing external NMS - is a real, legitimate future option, and
   nothing in this recommendation forecloses it permanently. But it is
   additive scope on top of a design that does not exist yet, best
   evaluated once there is a concrete external consumer naming specific
@@ -394,7 +394,7 @@ Reasoning:
   posture in `MigrateVM`'s own doc comment, ADR-0049's rejection of
   convenience fields that risk silent data loss) consistently favors a
   smaller, explicit, internally-consistent surface over a
-  compatibility shim with an older ecosystem tool — the same instinct
+  compatibility shim with an older ecosystem tool - the same instinct
   applies here.
 
 ## Consequences
@@ -405,7 +405,7 @@ Reasoning:
   follow-up ADR (or a revision of this one) that actually fixes the
   wire format, answering the open questions below, before any
   `Command` variant, RPC, or FSM apply function is written.
-- Accepting the §4 recommendation means no SNMP compatibility work is
+- Accepting the section 4 recommendation means no SNMP compatibility work is
   scheduled; a future request for SNMP-external polling would need its
   own justification (a named external consumer) rather than reopening
   this ADR's recommendation by default.
@@ -413,29 +413,27 @@ Reasoning:
 ## What this does not claim
 
 - This document does not claim raft's heartbeat can carry an
-  application payload — it explicitly cannot, with this tree's vendored
+  application payload - it explicitly cannot, with this tree's vendored
   hashicorp/raft, and the recommendation routes around that rather than
   assuming otherwise.
 - This document does not claim "leader monitors followers" is fully
-  satisfied by a replicated self-report every node can read locally —
+  satisfied by a replicated self-report every node can read locally -
   that is this document's best-effort translation of the requirement
   into mechanisms Apiary already has, not a confirmed match to what
   Glen meant by "the leader monitors followers". See Open questions.
 - This document does not claim Viewer-tier API-key auth is definitely
   sufficient for whatever Glen intends "authorized users" to mean here
-  — only that nothing in the existing codebase's own precedent argues
+  - only that nothing in the existing codebase's own precedent argues
   for anything stronger, and that the restart-guardrail token model
   is visibly the wrong fit for a read.
 
 ## Open questions
 
-These are the questions this document could not resolve on its own,
-and they should block any implementation, not just this ADR's
-acceptance:
+These questions record what the original proposal could not resolve. ADR-0160 now records the current monitoring API decisions; the list below is retained as historical context and is not a current implementation gate by itself:
 
 1. **Push vs. pull, precisely.** Is "the leader monitors followers"
    satisfied by every node submitting a replicated self-report that
-   anyone (leader included) can read locally (§2's recommendation), or
+   anyone (leader included) can read locally (section 2's recommendation), or
    does Glen specifically want the leader to actively dial each
    follower (mirroring `ClusterHealth`'s existing fan-out, but
    leader-only and periodic rather than caller-triggered)? These are
@@ -447,25 +445,25 @@ acceptance:
 2. **Should `ReportNodeVitals` go through raft `Apply` at all, or
    should node-vitals exchange be a new, unreplicated peer-to-peer RPC
    (HostStats-style pull, fanned out by whoever asks, never touching
-   the raft log)?** §2 recommends the raft-replicated route for
+   the raft log)?** section 2 recommends the raft-replicated route for
    symmetry with ADR-0103/0145/0147's precedent, but that imposes
    write-throughput cost on the raft log (even a small, bounded,
    last-write-wins entry still has to go through consensus on every
    submission) that a pure pull-only model (like `HostStats` today)
    would avoid entirely. Which failure mode and which cost Glen
    prefers is not something this document can decide.
-3. **What exactly belongs in the small summary payload?** §2 proposes
+3. **What exactly belongs in the small summary payload?** section 2 proposes
    a short fixed list (coarse health enum + four scalar gauges). The
-   actual field list — and whether it should be versioned/extensible
-   from day one rather than fixed — is undecided.
+   actual field list - and whether it should be versioned/extensible
+   from day one rather than fixed - is undecided.
 4. **Submission/poll interval**, and whether it should be configurable
    per-Colony (like `reconcile_interval_seconds` already is per-node)
    or fixed.
-5. **Extend `ClusterHealth` in place, or add a sibling RPC?** §1
+5. **Extend `ClusterHealth` in place, or add a sibling RPC?** section 1
    suggests extending `ClusterNodeHealth`/`ClusterHealthResponse`
    additively might be simpler than a new RPC, but that changes an
    existing, already-shipped wire contract rather than adding a new
-   one — which carries its own compatibility considerations this
+   one - which carries its own compatibility considerations this
    document has not worked through.
 6. **Retention of history.** `HostStats`/`ClusterHealth` are
    point-in-time only today; the cancelled Todo's "Nagios-like" framing
@@ -480,7 +478,7 @@ acceptance:
    Nagios implies thresholds and alerts, not just a readable snapshot.
    Whether that is in scope for this capability at all, or is
    explicitly deferred to a separate future design, is undecided.
-8. **The bsnmpd-adapter door left open in §4** — if Glen already has,
+8. **The bsnmpd-adapter door left open in section 4** - if Glen already has,
    or plans to have, an external NMS that expects SNMP, that changes
    the recommendation; this document assumes no such consumer exists
    today because none is named in the Notion task.
