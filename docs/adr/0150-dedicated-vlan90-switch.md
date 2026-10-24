@@ -1,4 +1,4 @@
-# ADR-0120: Dedicated VLAN 90 switch for cluster nodes
+# ADR-0150: Dedicated VLAN 90 switch for cluster nodes
 
 Date: 2026-09-28
 
