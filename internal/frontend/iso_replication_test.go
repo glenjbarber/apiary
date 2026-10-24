@@ -207,7 +207,7 @@ func TestCurrentClusterISOs_ClassifiesKindFromName(t *testing.T) {
 	}
 	want := map[string]string{
 		"FreeBSD-15.1-amd64-disc1.iso": "installer image",
-		"freebsd-15.1-zfs.raw.xz":      "raw disk image",
+		"freebsd-15.1-zfs.raw.xz":      "prepared VM disk image",
 		"base.txz":                     "userland archive",
 		"mystery-file":                 "image of unrecognised type",
 	}

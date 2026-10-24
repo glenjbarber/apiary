@@ -118,6 +118,7 @@ const (
 	imageKindInstaller
 	imageKindDisk
 	imageKindArchive
+	imageKindVMImage
 )
 
 // String names a kind for the page's own prose.
@@ -127,6 +128,8 @@ func (k imageKind) String() string {
 		return "installer image"
 	case imageKindDisk:
 		return "raw disk image"
+	case imageKindVMImage:
+		return "prepared VM disk image"
 	case imageKindArchive:
 		return "userland archive"
 	default:
@@ -144,6 +147,17 @@ var installerImageExtensions = []string{".iso"}
 // guidedRoleBootMedia - also a raw bootable image bhyve attaches as
 // install media.
 var diskImageExtensions = []string{".raw", ".qcow2", ".vmdk", ".vdi", ".vhd"}
+
+// isFreeBSDVMImage reports whether lower (already lowercased, with any
+// compression suffix stripped) names one of FreeBSD's prepared VM disk
+// images, such as FreeBSD-15.1-RELEASE-amd64-zfs.raw from the freebsdimg
+// catalogue. These already contain an installed system, so they are a
+// base image, never install media: attaching one would boot it in place.
+// A memstick .raw does not match and stays an installer.
+func isFreeBSDVMImage(lower string) bool {
+	return strings.HasPrefix(lower, "freebsd-") &&
+		(strings.HasSuffix(lower, "-zfs.raw") || strings.HasSuffix(lower, "-ufs.raw"))
+}
 
 // archiveImageExtensions names a compressed userland archive, the
 // shape ADR-0098's jail base.txz takes. ".tar" rather than
@@ -180,6 +194,8 @@ func classifyImageName(name string) imageKind {
 	switch {
 	case hasAnySuffix(lower, installerImageExtensions):
 		return imageKindInstaller
+	case isFreeBSDVMImage(lower):
+		return imageKindVMImage
 	case hasAnySuffix(lower, diskImageExtensions):
 		return imageKindDisk
 	case hasAnySuffix(lower, archiveImageExtensions):
@@ -238,9 +254,11 @@ var (
 		compressedWhy:  "%[1]s is compressed. Compressed images can seed a VM's Base image, but installer media must be uploaded uncompressed",
 		cue: map[imageKind]string{
 			imageKindArchive: "a jail userland archive, not boot media",
+			imageKindVMImage: "a prepared VM disk, not boot media",
 		},
 		why: map[imageKind]string{
 			imageKindArchive: "%[1]s is a compressed userland archive (.txz-style): that is extracted into a jail's root filesystem, and bhyve has no way to boot or attach one. Use it as the base archive on a jail instead",
+			imageKindVMImage: "%[1]s is a prepared VM disk image that already contains an installed system; attaching it as install media would boot it in place rather than install. Use it as a VM's base image instead",
 		},
 	}
 
@@ -251,7 +269,7 @@ var (
 	// disk is expected, with no check that would catch it.
 	guidedRoleBaseImage = guidedImageRole{
 		label:   "Base image",
-		allowed: []imageKind{imageKindDisk, imageKindUnknown},
+		allowed: []imageKind{imageKindDisk, imageKindVMImage, imageKindUnknown},
 		cue: map[imageKind]string{
 			imageKindInstaller: "boot media, not a starting disk",
 			imageKindArchive:   "a jail userland archive, not a disk",
@@ -272,10 +290,12 @@ var (
 		cue: map[imageKind]string{
 			imageKindInstaller: "installer media, not a userland archive",
 			imageKindDisk:      "a VM disk image, not a userland archive",
+			imageKindVMImage:   "a VM disk image, not a userland archive",
 		},
 		why: map[imageKind]string{
 			imageKindInstaller: "%[1]s is a bootable installer image. A jail's root is populated by extracting a userland archive into it, never by attaching install media. Use %[1]s as a VM's installer image instead",
 			imageKindDisk:      "%[1]s is a raw disk image. A jail's root is a directory tree, not a block device, so there is nothing to copy it into. Use %[1]s as a VM's base image instead",
+			imageKindVMImage:   "%[1]s is a prepared VM disk image. A jail's root is a directory tree, not a block device, so there is nothing to copy it into. Use %[1]s as a VM's base image instead",
 		},
 	}
 )
