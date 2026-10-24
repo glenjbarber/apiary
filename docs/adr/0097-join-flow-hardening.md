@@ -219,7 +219,10 @@ reachability symptom is not explained by this allowlist proposal.
 `internal/hostinstall/writes.go` seeds the supplied `--colony-member` address
 only when unset; `internal/manager/joincolony.go` refuses forwarding when the
 allowlist is empty; `internal/manager/server.go` persists node config and
-refreshes the in-memory list after successful updates; and
-`web/templates/machine.html` currently contains the stale accept-any help
-text. `internal/hostinstall/writes.go` also documents the host-local token
+refreshes the in-memory list after successful updates. The stale accept-any
+help text this ADR called out has been corrected: `web/templates/machine.html`
+now says the allowlist is fail-closed (blank refuses every forwarded
+`target_address` before any dial), and `README.md` no longer describes the
+pre-2026-10-16 accept-any default as current behavior.
+`internal/hostinstall/writes.go` also documents the host-local token
 pairing, while the join credential install handles peer API credentials.
