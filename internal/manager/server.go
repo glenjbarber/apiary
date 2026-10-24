@@ -60,7 +60,8 @@ const defaultApplyTimeout = 6 * time.Second
 // defined locally so tests can supply a fake - the same reasoning
 // internal/cluster's own local interfaces follow.
 type isoManager interface {
-	Save(name string, r io.Reader, expectedSHA256 string) (*isostore.Info, error)
+	Save(name string, r io.Reader, expectedSHA256 string, comments ...string) (*isostore.Info, error)
+	UpdateComment(name, comment string) error
 	List() ([]isostore.Info, error)
 	Delete(name string) error
 
@@ -143,7 +144,7 @@ type PeerForwarder interface {
 	// by PushISOTo (the source node's side of on-demand image fetching,
 	// ADR-0041) to push a file this node already has to whichever peer
 	// asked for it.
-	UploadISO(ctx context.Context, addr, name, expectedSHA256 string, r io.Reader) error
+	UploadISO(ctx context.Context, addr, name, expectedSHA256 string, r io.Reader, comments ...string) error
 
 	// PushJailTemplate streams a local `zfs send` to addr's own
 	// ReceiveJailTemplate RPC - the jail base-template equivalent of
@@ -2463,7 +2464,7 @@ func (s *Server) UploadISO(stream rpcpb.ManagerService_UploadISOServer) error {
 	}
 	saveDone := make(chan result, 1)
 	go func() {
-		info, err := s.isos.Save(meta.GetName(), pr, meta.GetExpectedSha256())
+		info, err := s.isos.Save(meta.GetName(), pr, meta.GetExpectedSha256(), meta.GetComment())
 		pr.CloseWithError(err)
 		saveDone <- result{info, err}
 	}()
@@ -2492,6 +2493,7 @@ func (s *Server) UploadISO(stream rpcpb.ManagerService_UploadISOServer) error {
 		Name:      res.info.Name,
 		SizeBytes: uint64(res.info.SizeBytes),
 		Sha256:    res.info.SHA256,
+		Comment:   res.info.Comment,
 	})
 }
 
@@ -2503,9 +2505,17 @@ func (s *Server) ListISOs(_ context.Context, _ *rpcpb.ListISOsRequest) (*rpcpb.L
 	}
 	isos := make([]*rpcpb.ISOInfo, 0, len(infos))
 	for _, info := range infos {
-		isos = append(isos, &rpcpb.ISOInfo{Name: info.Name, SizeBytes: uint64(info.SizeBytes), Sha256: info.SHA256})
+		isos = append(isos, &rpcpb.ISOInfo{Name: info.Name, SizeBytes: uint64(info.SizeBytes), Sha256: info.SHA256, Comment: &info.Comment})
 	}
 	return &rpcpb.ListISOsResponse{Isos: isos}, nil
+}
+
+// UpdateISOComment implements rpcpb.ManagerServiceServer.
+func (s *Server) UpdateISOComment(_ context.Context, req *rpcpb.UpdateISOCommentRequest) (*rpcpb.UpdateISOCommentResponse, error) {
+	if err := s.isos.UpdateComment(req.GetName(), req.GetComment()); err != nil {
+		return &rpcpb.UpdateISOCommentResponse{Error: err.Error()}, nil
+	}
+	return &rpcpb.UpdateISOCommentResponse{}, nil
 }
 
 // DeleteISO implements rpcpb.ManagerServiceServer.
@@ -2555,11 +2565,12 @@ func (s *Server) PushISOTo(ctx context.Context, req *rpcpb.PushISOToRequest) (*r
 	if err != nil {
 		return &rpcpb.PushISOToResponse{Error: fmt.Sprintf("listing local ISOs: %v", err)}, nil
 	}
-	var sha256Hash string
+	var sha256Hash, imageComment string
 	found := false
 	for _, info := range infos {
 		if info.Name == req.GetName() {
 			sha256Hash = info.SHA256
+			imageComment = info.Comment
 			found = true
 			break
 		}
@@ -2586,7 +2597,7 @@ func (s *Server) PushISOTo(ctx context.Context, req *rpcpb.PushISOToRequest) (*r
 		return &rpcpb.PushISOToResponse{Error: err.Error()}, nil
 	}
 
-	if err := s.peers.UploadISO(ctx, targetAddr, req.GetName(), sha256Hash, file); err != nil {
+	if err := s.peers.UploadISO(ctx, targetAddr, req.GetName(), sha256Hash, file, imageComment); err != nil {
 		return &rpcpb.PushISOToResponse{Error: fmt.Sprintf("pushing to %q: %v", req.GetTargetNodeId(), err)}, nil
 	}
 	return &rpcpb.PushISOToResponse{}, nil

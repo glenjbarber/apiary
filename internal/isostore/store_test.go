@@ -353,3 +353,38 @@ func TestParseManifest_UsedAsExpectedSHA256(t *testing.T) {
 		t.Fatal("expected Save to reject contents that don't match the manifest's checksum")
 	}
 }
+
+func TestSaveAndList_PersistCommentWithoutChangingHashSidecar(t *testing.T) {
+	dir := t.TempDir()
+	m := New(dir)
+	data := "image bytes"
+	info, err := m.Save("ubuntu.raw", strings.NewReader(data), sha256Hex(data), "Ubuntu cloud image from vendor")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Comment != "Ubuntu cloud image from vendor" {
+		t.Fatalf("Save comment = %q", info.Comment)
+	}
+	commentFile, err := os.ReadFile(filepath.Join(dir, ".comments", "ubuntu.raw"))
+	if err != nil || string(commentFile) != "Ubuntu cloud image from vendor" {
+		t.Fatalf("comment metadata = %q, %v", commentFile, err)
+	}
+	raw, err := os.ReadFile(filepath.Join(dir, "ubuntu.raw.sha256"))
+	if err != nil || string(raw) != sha256Hex(data) {
+		t.Fatalf("hash sidecar = %q, %v", raw, err)
+	}
+	listed, err := m.List()
+	if err != nil || len(listed) != 1 {
+		t.Fatalf("List = %+v, %v", listed, err)
+	}
+	if listed[0].Comment != info.Comment || listed[0].SHA256 != sha256Hex(data) {
+		t.Fatalf("List info = %+v", listed[0])
+	}
+	if err := m.UpdateComment("ubuntu.raw", "approved base disk"); err != nil {
+		t.Fatal(err)
+	}
+	listed, err = m.List()
+	if err != nil || listed[0].Comment != "approved base disk" {
+		t.Fatalf("updated List = %+v, %v", listed, err)
+	}
+}

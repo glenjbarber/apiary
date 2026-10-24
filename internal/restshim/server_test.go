@@ -365,6 +365,10 @@ func (f *fakeClient) ListISOs(context.Context, *rpcpb.ListISOsRequest, ...grpc.C
 	return &rpcpb.ListISOsResponse{}, nil
 }
 
+func (f *fakeClient) UpdateISOComment(context.Context, *rpcpb.UpdateISOCommentRequest, ...grpc.CallOption) (*rpcpb.UpdateISOCommentResponse, error) {
+	return &rpcpb.UpdateISOCommentResponse{}, nil
+}
+
 func (f *fakeClient) DeleteISO(context.Context, *rpcpb.DeleteISORequest, ...grpc.CallOption) (*rpcpb.DeleteISOResponse, error) {
 	return &rpcpb.DeleteISOResponse{}, nil
 }
@@ -1254,12 +1258,17 @@ func TestServer_MigrateVM_InvalidJSON(t *testing.T) {
 // handleUploadISO requires, since it streams parts as they arrive
 // rather than buffering the whole form first. Mirrors
 // internal/frontend's identical test helper.
-func buildUploadRequest(t *testing.T, hash, filename, contents string) *http.Request {
+func buildUploadRequest(t *testing.T, hash, filename, contents string, comments ...string) *http.Request {
 	t.Helper()
 	var buf bytes.Buffer
 	mw := multipart.NewWriter(&buf)
 	if err := mw.WriteField("expected_sha256", hash); err != nil {
 		t.Fatalf("WriteField: %v", err)
+	}
+	if len(comments) > 0 {
+		if err := mw.WriteField("comment", comments[0]); err != nil {
+			t.Fatalf("WriteField comment: %v", err)
+		}
 	}
 	fw, err := mw.CreateFormFile("file", filename)
 	if err != nil {
@@ -1279,11 +1288,11 @@ func buildUploadRequest(t *testing.T, hash, filename, contents string) *http.Req
 
 func TestServer_UploadISO_StreamsMetadataThenChunksInOrder(t *testing.T) {
 	client := &fakeClient{uploadStream: &fakeUploadClientStream{
-		resp: &rpcpb.UploadISOResponse{Name: "base.raw", SizeBytes: 4},
+		resp: &rpcpb.UploadISOResponse{Name: "base.raw", SizeBytes: 4, Comment: "golden base disk"},
 	}}
 	s := NewServer(client)
 
-	req := buildUploadRequest(t, "deadbeef", "base.raw", "data")
+	req := buildUploadRequest(t, "deadbeef", "base.raw", "data", "golden base disk")
 	rec := httptest.NewRecorder()
 	s.ServeHTTP(rec, req)
 
@@ -1299,7 +1308,7 @@ func TestServer_UploadISO_StreamsMetadataThenChunksInOrder(t *testing.T) {
 	if meta == nil {
 		t.Fatalf("first message = %+v, want metadata", sent[0])
 	}
-	if meta.GetName() != "base.raw" || meta.GetExpectedSha256() != "deadbeef" {
+	if meta.GetName() != "base.raw" || meta.GetExpectedSha256() != "deadbeef" || meta.GetComment() != "golden base disk" {
 		t.Errorf("metadata = %+v, want name=base.raw hash=deadbeef", meta)
 	}
 	var gotData []byte
@@ -1316,6 +1325,9 @@ func TestServer_UploadISO_StreamsMetadataThenChunksInOrder(t *testing.T) {
 	}
 	if body.Name != "base.raw" {
 		t.Errorf("response name = %q, want base.raw", body.Name)
+	}
+	if body.Comment != "golden base disk" {
+		t.Errorf("response comment = %q, want golden base disk", body.Comment)
 	}
 }
 

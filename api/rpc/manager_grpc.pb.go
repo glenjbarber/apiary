@@ -45,6 +45,7 @@ const (
 	ManagerService_UploadISO_FullMethodName                           = "/apiary.rpc.v1.ManagerService/UploadISO"
 	ManagerService_ListISOs_FullMethodName                            = "/apiary.rpc.v1.ManagerService/ListISOs"
 	ManagerService_DeleteISO_FullMethodName                           = "/apiary.rpc.v1.ManagerService/DeleteISO"
+	ManagerService_UpdateISOComment_FullMethodName                    = "/apiary.rpc.v1.ManagerService/UpdateISOComment"
 	ManagerService_HostStats_FullMethodName                           = "/apiary.rpc.v1.ManagerService/HostStats"
 	ManagerService_GetLocalHASTResourceStatus_FullMethodName          = "/apiary.rpc.v1.ManagerService/GetLocalHASTResourceStatus"
 	ManagerService_ClusterHealth_FullMethodName                       = "/apiary.rpc.v1.ManagerService/ClusterHealth"
@@ -268,6 +269,7 @@ type ManagerServiceClient interface {
 	UploadISO(ctx context.Context, opts ...grpc.CallOption) (grpc.ClientStreamingClient[UploadISORequest, UploadISOResponse], error)
 	ListISOs(ctx context.Context, in *ListISOsRequest, opts ...grpc.CallOption) (*ListISOsResponse, error)
 	DeleteISO(ctx context.Context, in *DeleteISORequest, opts ...grpc.CallOption) (*DeleteISOResponse, error)
+	UpdateISOComment(ctx context.Context, in *UpdateISOCommentRequest, opts ...grpc.CallOption) (*UpdateISOCommentResponse, error)
 	// HostStats reports a point-in-time snapshot of *this* node's own
 	// resource usage and hardware health - physical, per-node data like
 	// ISOs above, gathered locally by managerd (see internal/hoststats),
@@ -1274,6 +1276,16 @@ func (c *managerServiceClient) DeleteISO(ctx context.Context, in *DeleteISOReque
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(DeleteISOResponse)
 	err := c.cc.Invoke(ctx, ManagerService_DeleteISO_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *managerServiceClient) UpdateISOComment(ctx context.Context, in *UpdateISOCommentRequest, opts ...grpc.CallOption) (*UpdateISOCommentResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(UpdateISOCommentResponse)
+	err := c.cc.Invoke(ctx, ManagerService_UpdateISOComment_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -2302,6 +2314,7 @@ type ManagerServiceServer interface {
 	UploadISO(grpc.ClientStreamingServer[UploadISORequest, UploadISOResponse]) error
 	ListISOs(context.Context, *ListISOsRequest) (*ListISOsResponse, error)
 	DeleteISO(context.Context, *DeleteISORequest) (*DeleteISOResponse, error)
+	UpdateISOComment(context.Context, *UpdateISOCommentRequest) (*UpdateISOCommentResponse, error)
 	// HostStats reports a point-in-time snapshot of *this* node's own
 	// resource usage and hardware health - physical, per-node data like
 	// ISOs above, gathered locally by managerd (see internal/hoststats),
@@ -3129,6 +3142,9 @@ func (UnimplementedManagerServiceServer) ListISOs(context.Context, *ListISOsRequ
 func (UnimplementedManagerServiceServer) DeleteISO(context.Context, *DeleteISORequest) (*DeleteISOResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method DeleteISO not implemented")
 }
+func (UnimplementedManagerServiceServer) UpdateISOComment(context.Context, *UpdateISOCommentRequest) (*UpdateISOCommentResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method UpdateISOComment not implemented")
+}
 func (UnimplementedManagerServiceServer) HostStats(context.Context, *HostStatsRequest) (*HostStatsResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method HostStats not implemented")
 }
@@ -3867,6 +3883,24 @@ func _ManagerService_DeleteISO_Handler(srv interface{}, ctx context.Context, dec
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(ManagerServiceServer).DeleteISO(ctx, req.(*DeleteISORequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ManagerService_UpdateISOComment_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(UpdateISOCommentRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ManagerServiceServer).UpdateISOComment(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ManagerService_UpdateISOComment_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ManagerServiceServer).UpdateISOComment(ctx, req.(*UpdateISOCommentRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -5528,6 +5562,10 @@ var ManagerService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "DeleteISO",
 			Handler:    _ManagerService_DeleteISO_Handler,
+		},
+		{
+			MethodName: "UpdateISOComment",
+			Handler:    _ManagerService_UpdateISOComment_Handler,
 		},
 		{
 			MethodName: "HostStats",

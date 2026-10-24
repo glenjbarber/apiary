@@ -21,6 +21,8 @@ import (
 	"github.com/glenjbarber/apiary/internal/manager"
 )
 
+func stringPtr(s string) *string { return &s }
+
 // fakeClient implements rpcpb.ManagerServiceClient with canned responses,
 // mirroring internal/restshim's test fake.
 type fakeClient struct {
@@ -90,9 +92,10 @@ type fakeClient struct {
 	lastCreateReq *rpcpb.CreateVMRequest
 	lastDeleteReq *rpcpb.DeleteVMRequest
 
-	listISOsResp     *rpcpb.ListISOsResponse
-	deleteISOResp    *rpcpb.DeleteISOResponse
-	lastDeleteISOReq *rpcpb.DeleteISORequest
+	listISOsResp            *rpcpb.ListISOsResponse
+	deleteISOResp           *rpcpb.DeleteISOResponse
+	lastDeleteISOReq        *rpcpb.DeleteISORequest
+	lastUpdateISOCommentReq *rpcpb.UpdateISOCommentRequest
 
 	hostStatsResp *rpcpb.HostStatsResponse
 	hostPkgsResp  *rpcpb.HostPackagesResponse
@@ -519,6 +522,11 @@ func (f *fakeClient) ListISOs(context.Context, *rpcpb.ListISOsRequest, ...grpc.C
 		return f.listISOsResp, nil
 	}
 	return &rpcpb.ListISOsResponse{}, nil
+}
+
+func (f *fakeClient) UpdateISOComment(_ context.Context, in *rpcpb.UpdateISOCommentRequest, _ ...grpc.CallOption) (*rpcpb.UpdateISOCommentResponse, error) {
+	f.lastUpdateISOCommentReq = in
+	return &rpcpb.UpdateISOCommentResponse{}, nil
 }
 
 func (f *fakeClient) DeleteISO(_ context.Context, in *rpcpb.DeleteISORequest, _ ...grpc.CallOption) (*rpcpb.DeleteISOResponse, error) {
@@ -3072,7 +3080,7 @@ func TestServer_ListISOs_ShowsStoredImages(t *testing.T) {
 	client := &fakeClient{
 		statusResp: &rpcpb.StatusResponse{ManagerNodeId: "node-a", KnownNodeIds: []string{"node-a"}},
 		listISOsResp: &rpcpb.ListISOsResponse{
-			Isos: []*rpcpb.ISOInfo{{Name: "debian.iso", SizeBytes: 12345, Sha256: "abc123"}},
+			Isos: []*rpcpb.ISOInfo{{Name: "debian.iso", SizeBytes: 12345, Sha256: "abc123", Comment: stringPtr("Verified Debian installer")}},
 		},
 	}
 	s := newTestServer(t, client)
@@ -3082,7 +3090,7 @@ func TestServer_ListISOs_ShowsStoredImages(t *testing.T) {
 	s.ServeHTTP(rec, req)
 
 	body := rec.Body.String()
-	if !strings.Contains(body, "debian.iso") || !strings.Contains(body, "abc123") {
+	if !strings.Contains(body, "debian.iso") || !strings.Contains(body, "abc123") || !strings.Contains(body, "Verified Debian installer") {
 		t.Errorf("response missing expected ISO data, got: %s", body)
 	}
 }
@@ -3091,12 +3099,17 @@ func TestServer_ListISOs_ShowsStoredImages(t *testing.T) {
 // with expected_sha256 encoded before file - the order handleUploadISO
 // requires, since it streams parts as they arrive rather than buffering
 // the whole form first.
-func buildUploadRequest(t *testing.T, hash, filename, contents string) *http.Request {
+func buildUploadRequest(t *testing.T, hash, filename, contents string, comments ...string) *http.Request {
 	t.Helper()
 	var buf bytes.Buffer
 	mw := multipart.NewWriter(&buf)
 	if err := mw.WriteField("expected_sha256", hash); err != nil {
 		t.Fatalf("WriteField: %v", err)
+	}
+	if len(comments) > 0 {
+		if err := mw.WriteField("comment", comments[0]); err != nil {
+			t.Fatalf("WriteField comment: %v", err)
+		}
 	}
 	fw, err := mw.CreateFormFile("file", filename)
 	if err != nil {
@@ -3120,7 +3133,7 @@ func TestServer_UploadISO_StreamsMetadataThenChunksInOrder(t *testing.T) {
 	}}
 	s := newTestServer(t, client)
 
-	req := buildUploadRequest(t, "deadbeef", "test.iso", "data")
+	req := buildUploadRequest(t, "deadbeef", "test.iso", "data", "Test installer from mirror")
 	rec := httptest.NewRecorder()
 	s.ServeHTTP(rec, req)
 
@@ -3132,7 +3145,7 @@ func TestServer_UploadISO_StreamsMetadataThenChunksInOrder(t *testing.T) {
 	if meta == nil {
 		t.Fatalf("first message = %+v, want metadata", sent[0])
 	}
-	if meta.GetName() != "test.iso" || meta.GetExpectedSha256() != "deadbeef" {
+	if meta.GetName() != "test.iso" || meta.GetExpectedSha256() != "deadbeef" || meta.GetComment() != "Test installer from mirror" {
 		t.Errorf("metadata = %+v, want name=test.iso hash=deadbeef", meta)
 	}
 	var gotData []byte
@@ -3169,6 +3182,18 @@ func TestServer_UploadISO_HashMismatchShowsErrorNotInline(t *testing.T) {
 	}
 	if strings.Contains(body, "Uploaded") {
 		t.Errorf("a failed upload should not show a success confirmation, got: %s", body)
+	}
+}
+
+func TestServer_UpdateISOComment(t *testing.T) {
+	client := &fakeClient{listISOsResp: &rpcpb.ListISOsResponse{Isos: []*rpcpb.ISOInfo{{Name: "ubuntu.iso", Sha256: "abc", Comment: stringPtr("old")}}}}
+	s := newTestServer(t, client)
+	req := httptest.NewRequest(http.MethodPost, "/isos/ubuntu.iso/comment", strings.NewReader("comment=approved+image"))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK || client.lastUpdateISOCommentReq == nil || client.lastUpdateISOCommentReq.GetName() != "ubuntu.iso" || client.lastUpdateISOCommentReq.GetComment() != "approved image" {
+		t.Fatalf("status=%d request=%+v body=%s", rec.Code, client.lastUpdateISOCommentReq, rec.Body.String())
 	}
 }
 

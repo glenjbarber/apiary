@@ -1448,7 +1448,7 @@ func (p *PeerReporter) ReportJailTeardownComplete(ctx context.Context, addr, id 
 // CloseAndRecv) - the same client-streaming shape a browser upload
 // already uses, just with this managerd acting as the client instead
 // (the PushISOTo handler is the caller).
-func (p *PeerReporter) UploadISO(ctx context.Context, addr, name, expectedSHA256 string, r io.Reader) error {
+func (p *PeerReporter) UploadISO(ctx context.Context, addr, name, expectedSHA256 string, r io.Reader, comments ...string) error {
 	conn, client, err := p.dial(addr)
 	if err != nil {
 		return err
@@ -1459,9 +1459,13 @@ func (p *PeerReporter) UploadISO(ctx context.Context, addr, name, expectedSHA256
 	if err != nil {
 		return fmt.Errorf("opening upload stream to %s: %w", addr, err)
 	}
+	comment := ""
+	if len(comments) > 0 {
+		comment = comments[0]
+	}
 	if err := stream.Send(&rpcpb.UploadISORequest{
 		Data: &rpcpb.UploadISORequest_Metadata{
-			Metadata: &rpcpb.ISOUploadMetadata{Name: name, ExpectedSha256: expectedSHA256},
+			Metadata: &rpcpb.ISOUploadMetadata{Name: name, ExpectedSha256: expectedSHA256, Comment: comment},
 		},
 	}); err != nil {
 		return fmt.Errorf("sending upload metadata to %s: %w", addr, err)

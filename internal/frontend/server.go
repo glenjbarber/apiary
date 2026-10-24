@@ -1266,6 +1266,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /vms", s.requireRole(manager.RoleOperator, s.handleCreateVM))
 	s.mux.HandleFunc("DELETE /vms/{id}", s.requireRole(manager.RoleOperator, s.handleDeleteVM))
 	s.mux.HandleFunc("POST /isos", s.requireRole(manager.RoleOperator, s.handleUploadISO))
+	s.mux.HandleFunc("POST /isos/{name}/comment", s.requireRole(manager.RoleOperator, s.handleUpdateISOComment))
 	s.mux.HandleFunc("DELETE /isos/{name}", s.requireRole(manager.RoleOperator, s.handleDeleteISO))
 
 	// Copy-on-demand ISO replication (ADR-0040) - same RoleOperator gate
@@ -2062,6 +2063,7 @@ func (s *Server) handleUploadISO(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var expectedHash string
+	var comment string
 	var manifestSums map[string]string
 	var result *rpcpb.UploadISOResponse
 	var uploadErr error
@@ -2080,6 +2082,17 @@ func (s *Server) handleUploadISO(w http.ResponseWriter, r *http.Request) {
 		case "expected_sha256":
 			data, _ := io.ReadAll(part)
 			expectedHash = strings.TrimSpace(string(data))
+		case "comment":
+			data, readErr := io.ReadAll(io.LimitReader(part, 4097))
+			if readErr != nil {
+				uploadErr = fmt.Errorf("reading comment: %w", readErr)
+				break
+			}
+			if len(data) > 4096 {
+				uploadErr = fmt.Errorf("comment exceeds 4096 bytes")
+				break
+			}
+			comment = strings.TrimSpace(string(data))
 		case "manifest":
 			data, _ := io.ReadAll(part)
 			if strings.TrimSpace(string(data)) != "" {
@@ -2098,7 +2111,7 @@ func (s *Server) handleUploadISO(w http.ResponseWriter, r *http.Request) {
 				uploadErr = fmt.Errorf("either expected_sha256 or a MANIFEST containing %q must be provided", part.FileName())
 				break
 			}
-			result, uploadErr = s.uploadISOStream(r, part, expectedHash)
+			result, uploadErr = s.uploadISOStream(r, part, expectedHash, comment)
 		}
 		part.Close()
 		if uploadErr != nil {
@@ -2125,14 +2138,14 @@ func (s *Server) handleUploadISO(w http.ResponseWriter, r *http.Request) {
 // required Metadata message (the file's own name, plus expectedHash
 // gathered from an earlier form field), then relays part's bytes as a
 // sequence of Chunk messages.
-func (s *Server) uploadISOStream(r *http.Request, part *multipart.Part, expectedHash string) (*rpcpb.UploadISOResponse, error) {
+func (s *Server) uploadISOStream(r *http.Request, part *multipart.Part, expectedHash, comment string) (*rpcpb.UploadISOResponse, error) {
 	stream, err := s.client.UploadISO(r.Context())
 	if err != nil {
 		return nil, fmt.Errorf("opening upload stream: %w", err)
 	}
 	if err := stream.Send(&rpcpb.UploadISORequest{
 		Data: &rpcpb.UploadISORequest_Metadata{
-			Metadata: &rpcpb.ISOUploadMetadata{Name: part.FileName(), ExpectedSha256: expectedHash},
+			Metadata: &rpcpb.ISOUploadMetadata{Name: part.FileName(), ExpectedSha256: expectedHash, Comment: comment},
 		},
 	}); err != nil {
 		return nil, fmt.Errorf("sending upload metadata: %w", err)
@@ -2200,6 +2213,24 @@ func (s *Server) renderISOPanelResult(w http.ResponseWriter, r *http.Request, fo
 	s.render(w, "iso_panel", s.withAuthFieldsForFragment(r, pageData{
 		ISOFormError: formErr, ISOFormSuccess: success, ClusterISOs: isos, LocalNodeID: s.localNodeID(r),
 	}))
+}
+
+func (s *Server) handleUpdateISOComment(w http.ResponseWriter, r *http.Request) {
+	if err := r.ParseForm(); err != nil {
+		s.renderISOPanelResult(w, r, "invalid comment: "+err.Error(), "")
+		return
+	}
+	comment := strings.TrimSpace(r.FormValue("comment"))
+	if len(comment) > 4096 {
+		s.renderISOPanelResult(w, r, "comment exceeds 4096 bytes", "")
+		return
+	}
+	resp, err := s.client.UpdateISOComment(r.Context(), &rpcpb.UpdateISOCommentRequest{Name: r.PathValue("name"), Comment: comment})
+	if err != nil {
+		s.renderISOPanelResult(w, r, err.Error(), "")
+		return
+	}
+	s.renderISOPanelResult(w, r, resp.GetError(), "")
 }
 
 func (s *Server) handleDeleteISO(w http.ResponseWriter, r *http.Request) {

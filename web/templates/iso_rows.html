@@ -1,11 +1,12 @@
 {{define "iso_rows"}}
-{{if .Error}}<tr><td colspan="6" class="error">{{.Error}}</td></tr>{{end}}
+{{if .Error}}<tr><td colspan="7" class="error">{{.Error}}</td></tr>{{end}}
 {{range .ClusterISOs}}
 <tr>
   <td>{{.Name}}</td>
   <td>{{.Kind}}</td>
   <td>{{.Size}}</td>
   <td><code title="{{.SHA256}}">{{.SHA256Short}}</code> <button type="button" class="icon-button" data-copy="{{.SHA256}}" title="Copy full SHA-256" aria-label="Copy full SHA-256 for {{.Name}}">Copy</button></td>
+  <td>{{.Comment}}{{if and $.CanOperate .PresentLocally}}<form class="inline-form" hx-post="/isos/{{.Name}}/comment" hx-target="#iso-panel" hx-swap="innerHTML"><input type="text" name="comment" value="{{.Comment}}" maxlength="4096" aria-label="Comment for {{.Name}}"><button type="submit">Save</button></form>{{end}}</td>
   <td>
     {{range $i, $node := .PresentNodes}}{{if $i}}, {{end}}{{$node}}{{end}}
     {{if .MissingNodes}}<div class="muted">missing on {{range $i, $node := .MissingNodes}}{{if $i}}, {{end}}{{$node}}{{end}}</div>{{end}}
@@ -15,6 +16,6 @@
   </td>
 </tr>
 {{else}}
-  {{if not .Error}}<tr><td colspan="6"><em>No images</em></td></tr>{{end}}
+  {{if not .Error}}<tr><td colspan="7"><em>No images</em></td></tr>{{end}}
 {{end}}
 {{end}}

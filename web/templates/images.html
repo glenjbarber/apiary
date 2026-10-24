@@ -11,6 +11,7 @@
     <label>Expected SHA-256
       <input type="text" id="iso-expected-sha256" name="expected_sha256" pattern="[0-9a-fA-F]{64}" title="64 hex characters. Checked against the file as it streams to disk - the upload is refused outright if the hash does not match, so an unverified image never lands in storage. Leave blank if pasting a MANIFEST below instead." size="64">
     </label>
+    <label>Comment (optional) <input type="text" name="comment" maxlength="4096" placeholder="FreeBSD 14.3 installer, from release mirror"></label>
     <label>File <input type="file" id="iso-file" name="file" required title="The installer ISO, raw disk image, or base.txz-style archive to upload. Verified against the SHA-256 (typed or looked up from the MANIFEST) before it is kept."></label>
     <label class="full">MANIFEST (optional) <span class="field-help">Paste a FreeBSD release MANIFEST file's contents to look up the checksum by filename instead of typing it in - the same file FreeBSD publishes next to base.txz on every mirror. Used only when Expected SHA-256 above is left blank.</span>
       <textarea id="iso-manifest" name="manifest" rows="3" placeholder="base.txz&#9;&lt;sha256&gt;&#9;&lt;size&gt;&#9;&quot;Base distribution&quot;"></textarea>
@@ -85,7 +86,7 @@
 <div id="iso-success" class="banner-success">{{.ISOFormSuccess}}</div>
 <table>
   <thead>
-    <tr><th>Name</th><th>Kind</th><th>Size</th><th>SHA-256</th><th>Present on</th><th></th></tr>
+    <tr><th>Name</th><th>Kind</th><th>Size</th><th>SHA-256</th><th>Comment</th><th>Present on</th><th></th></tr>
   </thead>
   <tbody id="iso-rows">
     {{template "iso_rows" .}}

@@ -34,10 +34,11 @@ import (
 // fakeISOManager is a fake isoManager for testing Server's ISO RPCs
 // without any real file I/O.
 type fakeISOManager struct {
-	savedName string
-	savedData []byte
-	savedHash string
-	saveErr   error
+	savedName    string
+	savedData    []byte
+	savedHash    string
+	savedComment string
+	saveErr      error
 
 	listInfos []isostore.Info
 	listErr   error
@@ -49,7 +50,7 @@ type fakeISOManager struct {
 	pathErr error
 }
 
-func (f *fakeISOManager) Save(name string, r io.Reader, expectedSHA256 string) (*isostore.Info, error) {
+func (f *fakeISOManager) Save(name string, r io.Reader, expectedSHA256 string, comments ...string) (*isostore.Info, error) {
 	if f.saveErr != nil {
 		return nil, f.saveErr
 	}
@@ -60,7 +61,22 @@ func (f *fakeISOManager) Save(name string, r io.Reader, expectedSHA256 string) (
 	f.savedName = name
 	f.savedData = data
 	f.savedHash = expectedSHA256
-	return &isostore.Info{Name: name, SizeBytes: int64(len(data)), SHA256: expectedSHA256}, nil
+	comment := ""
+	if len(comments) > 0 {
+		comment = comments[0]
+	}
+	f.savedComment = comment
+	return &isostore.Info{Name: name, SizeBytes: int64(len(data)), SHA256: expectedSHA256, Comment: comment}, nil
+}
+
+func (f *fakeISOManager) UpdateComment(name, comment string) error {
+	for i := range f.listInfos {
+		if f.listInfos[i].Name == name {
+			f.listInfos[i].Comment = comment
+			return nil
+		}
+	}
+	return nil
 }
 
 func (f *fakeISOManager) List() ([]isostore.Info, error) {
@@ -116,10 +132,12 @@ func (f *fakeUploadStream) Context() context.Context {
 	return context.Background()
 }
 
-func metadataMsg(name, hash string) *rpcpb.UploadISORequest {
-	return &rpcpb.UploadISORequest{Data: &rpcpb.UploadISORequest_Metadata{
-		Metadata: &rpcpb.ISOUploadMetadata{Name: name, ExpectedSha256: hash},
-	}}
+func metadataMsg(name, hash string, comments ...string) *rpcpb.UploadISORequest {
+	comment := ""
+	if len(comments) > 0 {
+		comment = comments[0]
+	}
+	return &rpcpb.UploadISORequest{Data: &rpcpb.UploadISORequest_Metadata{Metadata: &rpcpb.ISOUploadMetadata{Name: name, ExpectedSha256: hash, Comment: comment}}}
 }
 
 func chunkMsg(data string) *rpcpb.UploadISORequest {
@@ -151,7 +169,7 @@ func TestServer_UploadISO_StreamsChunksIntoStore(t *testing.T) {
 	s := NewServer(nil, "node-1", isos, nil, nil, nil, nil, "", nil, nil, nil, 0, nil)
 
 	stream := &fakeUploadStream{reqs: []*rpcpb.UploadISORequest{
-		metadataMsg("test.iso", "deadbeef"),
+		metadataMsg("test.iso", "deadbeef", "installer from mirror"),
 		chunkMsg("hello "),
 		chunkMsg("world"),
 	}}
@@ -161,6 +179,9 @@ func TestServer_UploadISO_StreamsChunksIntoStore(t *testing.T) {
 	}
 	if string(isos.savedData) != "hello world" {
 		t.Errorf("saved data = %q, want %q", isos.savedData, "hello world")
+	}
+	if isos.savedComment != "installer from mirror" || stream.resp.GetComment() != "installer from mirror" {
+		t.Errorf("comment storage/response = %q/%q", isos.savedComment, stream.resp.GetComment())
 	}
 	if isos.savedName != "test.iso" || isos.savedHash != "deadbeef" {
 		t.Errorf("saved name/hash = %q/%q, want test.iso/deadbeef", isos.savedName, isos.savedHash)
@@ -332,9 +353,22 @@ func TestServer_ListJailTemplateNames_NotConfiguredReturnsEmpty(t *testing.T) {
 	}
 }
 
+func TestServer_UpdateISOComment(t *testing.T) {
+	isos := &fakeISOManager{listInfos: []isostore.Info{{Name: "a.iso", Comment: "old"}}}
+	s := NewServer(nil, "node-1", isos, nil, nil, nil, nil, "", nil, nil, nil, 0, nil)
+	resp, err := s.UpdateISOComment(context.Background(), &rpcpb.UpdateISOCommentRequest{Name: "a.iso", Comment: "updated"})
+	if err != nil || resp.GetError() != "" {
+		t.Fatalf("UpdateISOComment = %+v, %v", resp, err)
+	}
+	listed, err := s.ListISOs(context.Background(), &rpcpb.ListISOsRequest{})
+	if err != nil || listed.GetIsos()[0].GetComment() != "updated" {
+		t.Fatalf("ListISOs after update = %+v, %v", listed, err)
+	}
+}
+
 func TestServer_ListISOs(t *testing.T) {
 	isos := &fakeISOManager{listInfos: []isostore.Info{
-		{Name: "a.iso", SizeBytes: 100, SHA256: "aaa"},
+		{Name: "a.iso", SizeBytes: 100, SHA256: "aaa", Comment: "installer"},
 		{Name: "b.iso", SizeBytes: 200, SHA256: "bbb"},
 	}}
 	s := NewServer(nil, "node-1", isos, nil, nil, nil, nil, "", nil, nil, nil, 0, nil)
