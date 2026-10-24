@@ -69,10 +69,8 @@ func (t *tlsStreamLayer) Dial(address raft.ServerAddress, timeout time.Duration)
 	return tls.DialWithDialer(dialer, "tcp", string(address), t.tlsConfig)
 }
 
-// newTransport builds cfg's raft.Transport: a plain raft.NewTCPTransport
-// when TLSCert/TLSKey/TLSCA are all empty (today's only behavior, and
-// still the default), or a mutually authenticated TLS transport when all
-// three are set - cfg.withDefaults already rejects any partial set.
+// newTransport builds cfg's raft.Transport. TLS is the default; raftd
+// validates that all three files are configured before reaching here.
 func newTransport(cfg Config) (raft.Transport, error) {
 	if cfg.TLSCert == "" && cfg.TLSKey == "" && cfg.TLSCA == "" {
 		addr, err := net.ResolveTCPAddr("tcp", cfg.BindAddr)

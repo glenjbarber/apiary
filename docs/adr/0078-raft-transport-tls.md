@@ -143,3 +143,34 @@ complete `go test ./...` suite, and the FreeBSD cross-compile for
 as part of this change - the in-process two-node test above is the
 verification bar for this ADR, matching how deeply hashicorp/raft's
 own transport layer is exercised without touching production.
+
+## Issue #97 follow-up: default and provisioning
+
+TLS is enabled by default. `raftd` refuses to start when the enabled
+transport lacks its certificate, key, or CA; plaintext requires the
+explicit `raft_tls_enabled: false` setting. The installer must provision
+stable host-local leaf material and preserve it on reruns. When a Colony
+CA is available, issue the leaf from it; otherwise use the installer's
+per-Comb certificate generation and expose its CA for distribution. A
+working certificate must never be silently rotated: leaf renewal and CA
+rotation require a coordinated workflow across voters and an explicit
+restart plan. Existing clusters need a compatibility migration that
+installs and distributes trust material to all members before enabling
+TLS; turning TLS on for only part of a live cluster can partition Raft.
+
+The absolute policy question remains for the owner: whether explicit
+plaintext opt-outs are temporary compatibility controls or prohibited
+configurations. Recommendation: retain them only as a loud, time-limited
+migration escape hatch, then remove them after supported clusters have
+migrated. HAST's independent TCP protocol is not covered by this ADR's
+Raft TLS; the owner must choose between disabling HAST replication until
+it can be secured, placing it on a separately secured network, or
+adopting a protocol with authenticated encryption. Recommendation: do
+not claim cluster-wide encryption while HAST remains unprotected.
+
+The pin-trusted-peers bootstrap fallback is a narrow unauthenticated RPC
+that pins a presented identity and is authorized locally through the
+root-owned Raft socket. It carries no API key and refuses to forward a
+key over plaintext. Recommendation: retain only for bootstrap, emit a
+clear warning, and replace it with authenticated TLS before broadening
+that RPC's effects.

@@ -22,7 +22,7 @@
   "peer_managerd_port": "17700",
   "peer_tls": true,
   "peer_tls_hostname_map": "",
-  "peer_tls_ca": "",
+  "peer_tls_ca": "/usr/local/etc/apiary/tls/peer-ca.pem",
   "known_peer_addresses": "",
   "colony_join_window_seconds": 900,
   "assumption_check_interval": 0,

@@ -67,3 +67,19 @@ The fingerprint is the lowercase hex SHA-256 of the certificate's DER bytes, wit
 
 - `internal/colonyca/colonyca_test.go` covers: a leaf verifies against the CA for ServerAuth and for ClientAuth; a leaf from a different CA does not verify; `GenerateCA` refuses when either file exists and leaves both byte-identical; the key file is 0600 and the certificate file is 0644; `IssueLeaf` refuses an empty request, a non-CA certificate, an expired CA, and a lifetime longer than the CA; the CA is CA:true with MaxPathLen 0; and the fingerprint is pinned to the value of a fixed fixture, checked independently with openssl.
 - `gofmt -l .` is empty, `go vet ./...` is clean, and `make test` passes apart from known host-specific integration failures.
+
+## Issue #97 follow-up: installer wiring and lifecycle
+
+The install path now treats Raft mutual TLS material as required output
+for a default-on Raft transport. It should reuse an existing Colony CA
+(the `ca.pem` and `ca.key` pair that `apiaryctl colony-ca` writes into
+its CA directory, which is operator-supplied rather than a fixed
+default) to issue the host leaf; existing leaf files are preserved on
+rerun. A standalone fallback may use per-Comb generated trust
+material, but a multi-host Colony must
+converge on the same CA before peers can authenticate one another.
+Rotation is deliberately coordinated work: replace neither a working
+leaf nor a CA silently, because mixed trust during voter restarts can
+isolate a voter or lose quorum. The installer reports missing or
+invalid material with remediation steps and must not save a config that
+points at files it failed to publish.

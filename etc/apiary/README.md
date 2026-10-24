@@ -293,7 +293,7 @@ current, safe flow uses `await_join` — see `docs/add-node-to-colony.md`.
   caller (ADR-0033). A real credential if set, so this file must then be
   root-owned, mode 0600 (already the default from `make setup`).
 - `raft_tls_cert`, `raft_tls_key`, `raft_tls_ca` — Raft transport mutual
-  TLS (ADR-0078). Leave all three empty for plain TCP, the common case.
+  TLS (ADR-0078). TLS is enabled by default and raftd refuses to start without all three files. Plain TCP requires an explicit opt-out with raft_tls_enabled=false.
 - `single_node` — set `true` only on a Comb that will never join or be
   joined, to confirm a loopback `raft_bind` is deliberate rather than the
   unset-default mistake (ADR-0106). Leave `false` on every node bound for
