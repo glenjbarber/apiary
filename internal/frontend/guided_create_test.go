@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	rpcpb "github.com/glenjbarber/apiary/api/rpc"
+	"github.com/glenjbarber/apiary/internal/freebsdimg"
 	"github.com/glenjbarber/apiary/web"
 )
 
@@ -36,6 +37,35 @@ func postCreate(t *testing.T, s *Server, path string, form url.Values) *httptest
 // Image classification and the per-role availability rules
 // ---------------------------------------------------------------------------
 
+// TestOfficialFreeBSDImagesArePreparedVMDisks pins the classifier to the
+// real freebsdimg catalogue rather than to hand-written example names.
+// Every image Apiary can download is a prepared VM disk: it already
+// contains an installed system, so it is a base image and never install
+// media. A future FreeBSD release that changes the naming pattern would
+// silently fall back to imageKindDisk here and start being offered as
+// boot media, which is exactly the confusion this kind exists to prevent.
+func TestOfficialFreeBSDImagesArePreparedVMDisks(t *testing.T) {
+	images := freebsdimg.KnownImages()
+	if len(images) == 0 {
+		t.Fatal("freebsdimg.KnownImages() is empty; the catalogue is expected to list the official VM images")
+	}
+	for _, img := range images {
+		if got := classifyImageName(img.Name); got != imageKindVMImage {
+			t.Errorf("classifyImageName(%q) = %v, want %v (a prepared VM disk image)",
+				img.Name, got, imageKindVMImage)
+		}
+		if !guidedRoleBaseImage.accepts(imageKindVMImage) {
+			t.Errorf("a prepared VM disk image must be allowed as a base image")
+		}
+		if guidedRoleBootMedia.accepts(imageKindVMImage) {
+			t.Errorf("a prepared VM disk image must not be allowed as installer media")
+		}
+		if guidedRoleBaseArchive.accepts(imageKindVMImage) {
+			t.Errorf("a prepared VM disk image must not be allowed as a jail base archive")
+		}
+	}
+}
+
 func TestClassifyImageName(t *testing.T) {
 	for _, tc := range []struct {
 		name string
@@ -44,7 +74,10 @@ func TestClassifyImageName(t *testing.T) {
 		{"FreeBSD-15.1-amd64.iso", imageKindInstaller},
 		{"FreeBSD-15.1-amd64.iso.xz", imageKindInstaller},
 		{"freebsd.raw", imageKindDisk},
-		{"FreeBSD-15.1-amd64-zfs.raw.xz", imageKindDisk},
+		{"FreeBSD-15.1-amd64-zfs.raw.xz", imageKindVMImage},
+		{"FreeBSD-16.0-CURRENT-amd64-zfs.raw", imageKindVMImage},
+		{"FreeBSD-15.1-RELEASE-amd64-ufs.raw", imageKindVMImage},
+		{"memstick.raw", imageKindDisk},
 		{"disk.qcow2", imageKindDisk},
 		{"base.txz", imageKindArchive},
 		{"base.tar.gz", imageKindArchive},
@@ -82,6 +115,9 @@ func TestGuidedImageRoleAvailability(t *testing.T) {
 		// attached directly and are refused here.
 		{"FreeBSD.iso", "installer", true},
 		{"memstick.raw", "installer", true},
+		// A prepared FreeBSD VM disk already holds an installed system:
+		// it is a base image, not install media.
+		{"FreeBSD-16.0-CURRENT-amd64-zfs.raw", "installer", false},
 		{"FreeBSD.iso.xz", "installer", false},
 		{"memstick.raw.xz", "installer", false},
 		{"base.txz", "installer", false},
@@ -92,6 +128,7 @@ func TestGuidedImageRoleAvailability(t *testing.T) {
 		// holding a CD-ROM filesystem where a bootable disk is expected.
 		{"freebsd.raw", "base image", true},
 		{"FreeBSD-15.1-zfs.raw.xz", "base image", true},
+		{"FreeBSD-16.0-CURRENT-amd64-zfs.raw", "base image", true},
 		{"FreeBSD.iso", "base image", false},
 		{"base.txz", "base image", false},
 		{"cloud-image", "base image", true},
@@ -100,6 +137,7 @@ func TestGuidedImageRoleAvailability(t *testing.T) {
 		// A raw disk has nowhere to go there.
 		{"base.txz", "base archive", true},
 		{"freebsd.raw", "base archive", false},
+		{"FreeBSD-16.0-CURRENT-amd64-zfs.raw", "base archive", false},
 		{"FreeBSD.iso", "base archive", false},
 		{"anything-else", "base archive", true},
 	} {
