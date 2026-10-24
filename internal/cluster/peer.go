@@ -61,6 +61,15 @@ type peerReporter interface {
 	// id as well as by peer because a VM's checkpoints are per-dataset.
 	ListVMSnapshotNames(ctx context.Context, addr, vmID string) ([]string, error)
 	RequestVMSnapshotPush(ctx context.Context, addr, vmID, snapshotName, targetNodeID string) error
+
+	// ListVMSnapshotNamesFor/RequestVMSnapshotPushFor are the physical-
+	// identity-aware variants of the two above (ADR-0152): a VM's
+	// snapshots live under its PHYSICAL dataset name, which survives a
+	// logical rename, and only this node knows the current record's
+	// resource_id. A peer that has not been renamed can use the plain
+	// methods above.
+	ListVMSnapshotNamesFor(ctx context.Context, addr, vmID, physicalID string) ([]string, error)
+	RequestVMSnapshotPushFor(ctx context.Context, addr, vmID, physicalID, snapshotName, targetNodeID string) error
 }
 
 // defaultPeerManagerdPort is used when Reconciler.PeerManagerdPort is
@@ -185,6 +194,18 @@ func (r *Reconciler) fetchTemplateFromPeer(ctx context.Context, name string) err
 // this asks about one named VM's dataset on that peer, so a peer that
 // does not host the VM simply reports nothing and is skipped.
 func (r *Reconciler) fetchVMSnapshotFromPeer(ctx context.Context, vmID, snapshotName string) error {
+	return r.fetchVMSnapshotFromPeerFor(ctx, vmID, "", snapshotName)
+}
+
+// fetchVMSnapshotFromPeerFor mirrors fetchVMSnapshotFromPeer, with the
+// source VM's PHYSICAL identity supplied (ADR-0152): the snapshot lives
+// under the source's physical dataset, which does not change when the
+// source's logical id is renamed, and only this node knows that name
+// from the current record.
+//
+// An empty physicalID means "use the logical id", which is correct
+// for a source VM that has not been renamed.
+func (r *Reconciler) fetchVMSnapshotFromPeerFor(ctx context.Context, vmID, physicalID, snapshotName string) error {
 	if r.Peers == nil {
 		return fmt.Errorf("VM snapshot %q of VM %q does not exist locally, and no peer forwarding is configured on this node to look elsewhere (expected on a single-node deployment - take the snapshot on the node that will host the clone, or configure peer forwarding so it can be fetched)", snapshotName, vmID)
 	}
@@ -198,7 +219,7 @@ func (r *Reconciler) fetchVMSnapshotFromPeer(ctx context.Context, vmID, snapshot
 			continue
 		}
 		addr := net.JoinHostPort(host, port)
-		names, err := r.Peers.ListVMSnapshotNames(ctx, addr, vmID)
+		names, err := r.Peers.ListVMSnapshotNamesFor(ctx, addr, vmID, physicalID)
 		if err != nil {
 			continue
 		}
@@ -206,7 +227,7 @@ func (r *Reconciler) fetchVMSnapshotFromPeer(ctx context.Context, vmID, snapshot
 			if n != snapshotName {
 				continue
 			}
-			if err := r.Peers.RequestVMSnapshotPush(ctx, addr, vmID, snapshotName, r.LocalNodeID); err != nil {
+			if err := r.Peers.RequestVMSnapshotPushFor(ctx, addr, vmID, physicalID, snapshotName, r.LocalNodeID); err != nil {
 				return fmt.Errorf("fetching VM snapshot %q from %s: %w", snapshotName, nodeID, err)
 			}
 			return nil

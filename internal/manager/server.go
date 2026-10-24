@@ -118,6 +118,7 @@ type PeerForwarder interface {
 	CreateVM(ctx context.Context, addr string, req *rpcpb.CreateVMRequest) (*rpcpb.CreateVMResponse, error)
 	UpdateVM(ctx context.Context, addr string, req *rpcpb.UpdateVMRequest) (*rpcpb.UpdateVMResponse, error)
 	DeleteVM(ctx context.Context, addr string, req *rpcpb.DeleteVMRequest) (*rpcpb.DeleteVMResponse, error)
+	RenameVMIdentity(ctx context.Context, addr string, req *rpcpb.RenameVMIdentityRequest) (*rpcpb.RenameVMIdentityResponse, error)
 	CreateJail(ctx context.Context, addr string, req *rpcpb.CreateJailRequest) (*rpcpb.CreateJailResponse, error)
 	UpdateJail(ctx context.Context, addr string, req *rpcpb.UpdateJailRequest) (*rpcpb.UpdateJailResponse, error)
 	DeleteJail(ctx context.Context, addr string, req *rpcpb.DeleteJailRequest) (*rpcpb.DeleteJailResponse, error)
@@ -158,7 +159,7 @@ type PeerForwarder interface {
 	// The id and snapshot name travel as the stream's metadata message
 	// and are re-validated on the receiving end, because the sender is
 	// not trusted to have checked them.
-	PushVMSnapshot(ctx context.Context, addr, vmID, snapshotName string, r io.Reader) error
+	PushVMSnapshot(ctx context.Context, addr, vmID, physicalID, snapshotName string, r io.Reader) error
 
 	// SimulateNodeFailure forwards the entire original request to addr's
 	// own SimulateNodeFailure RPC - see ADR-0052, and this file's own
@@ -2095,6 +2096,82 @@ func (s *Server) DeleteVM(ctx context.Context, req *rpcpb.DeleteVMRequest) (*rpc
 	return &rpcpb.DeleteVMResponse{Vm: fromInternalVM(vm), Error: augmentForwardError(appErr, leaderHint, ferr), LeaderHint: leaderHint}, nil
 }
 
+// RenameVMIdentity implements rpcpb.ManagerServiceServer (ADR-0152) -
+// the atomic logical-identity rename.
+//
+// It submits ONLY the dedicated RenameVMIdentity command to the local
+// raft apply path. It deliberately does not read the VM, clone it, and
+// resubmit it through UpdateVM: that shape cannot move a map key
+// atomically, and it would race a concurrent update of some other field
+// in between. The dedicated command is applied inside the FSM's own
+// single Apply call, where the collision, ownership, preservation and
+// idempotency rules all hold identically on every replica.
+//
+// If the local raftd reports a leader hint, the SAME request is
+// forwarded to the leader's managerd through the established
+// peer-forwarding pattern (see CreateNetwork's doc comment for the
+// pattern's rationale). The leader repeats this handler's own
+// validation and relies on the FSM for authority. A forwarding failure
+// is returned as an actionable error carrying the leader hint, so the
+// caller can re-resolve leadership and retry the same source and
+// destination pair - which is safe, because the FSM's idempotency rule
+// turns a retry of an already-applied rename into a distinct
+// "already_renamed" success rather than a second rename.
+//
+// The response carries the FSM's authoritative VM record and the
+// outcome ("renamed" or "already_renamed"), so a caller can tell a
+// rename this call applied from one that had already been applied.
+func (s *Server) RenameVMIdentity(ctx context.Context, req *rpcpb.RenameVMIdentityRequest) (*rpcpb.RenameVMIdentityResponse, error) {
+	if req.GetSourceId() == "" {
+		return &rpcpb.RenameVMIdentityResponse{Error: "source_id must be set"}, nil
+	}
+	if req.GetDestinationId() == "" {
+		return &rpcpb.RenameVMIdentityResponse{Error: "destination_id must be set"}, nil
+	}
+	if req.GetSourceId() == req.GetDestinationId() {
+		return &rpcpb.RenameVMIdentityResponse{Error: fmt.Sprintf("source_id and destination_id are both %q; a rename must change the logical identity", req.GetSourceId())}, nil
+	}
+
+	cmd := &internalpb.Command{
+		Op: &internalpb.Command_RenameVmIdentity{RenameVmIdentity: &internalpb.RenameVMIdentity{
+			SourceId:              req.GetSourceId(),
+			DestinationId:         req.GetDestinationId(),
+			ExpectedNodeId:        req.GetExpectedNodeId(),
+			ExpectedReplicaNodeId: req.GetExpectedReplicaNodeId(),
+			ExpectedResourceId:    req.GetExpectedResourceId(),
+		}},
+	}
+
+	timeout := defaultApplyTimeout
+	if req.GetTimeoutMs() > 0 {
+		timeout = time.Duration(req.GetTimeoutMs()) * time.Millisecond
+	}
+	payload, err := proto.Marshal(cmd)
+	if err != nil {
+		return &rpcpb.RenameVMIdentityResponse{Error: err.Error()}, nil
+	}
+	resp, err := s.raft.Apply(ctx, payload, timeout)
+	if err != nil {
+		return &rpcpb.RenameVMIdentityResponse{Error: err.Error()}, nil
+	}
+	if resp.GetError() != "" {
+		var ferr error
+		if resp.GetLeaderHint() != "" && s.peers != nil {
+			var fwd *rpcpb.RenameVMIdentityResponse
+			if fwd, ferr = s.peers.RenameVMIdentity(ctx, s.peerManagerdAddr(resp.GetLeaderHint()), req); ferr == nil {
+				return fwd, nil
+			}
+		}
+		return &rpcpb.RenameVMIdentityResponse{Error: augmentForwardError(resp.GetError(), resp.GetLeaderHint(), ferr), LeaderHint: resp.GetLeaderHint()}, nil
+	}
+
+	result := &internalpb.RenameVMIdentityResult{}
+	if err := proto.Unmarshal(resp.GetResult(), result); err != nil {
+		return &rpcpb.RenameVMIdentityResponse{Error: err.Error()}, nil
+	}
+	return &rpcpb.RenameVMIdentityResponse{Vm: fromInternalVM(result.GetVm()), Outcome: result.GetOutcome()}, nil
+}
+
 // SetVMFirewallPaused implements rpcpb.ManagerServiceServer. See
 // CreateNetwork's own doc comment for the general
 // apply-then-forward-on-leader-hint pattern every write RPC here
@@ -3683,6 +3760,44 @@ func (s *Server) SetDatasetQuota(ctx context.Context, req *rpcpb.SetDatasetQuota
 	return &rpcpb.SetDatasetQuotaResponse{}, nil
 }
 
+// resolveVMPhysicalID resolves a VM's LOGICAL id to the PHYSICAL
+// identity its dataset carries (ADR-0152).
+//
+// The snapshot RPCs take a logical id, because that is what a caller
+// knows the VM by, but the snapshot physically lives under the VM's
+// physical dataset name - which does NOT change when the logical id is
+// renamed. Resolving through the current record is what makes a
+// renamed VM's snapshots still reachable.
+//
+// The resolution is BEST EFFORT, and deliberately so: when the record
+// cannot be read (no raft client, a failed read, a leader-forwarded
+// read), the logical id is used as given. That is correct for every VM
+// that has not been renamed, and it fails in the safe direction for a
+// renamed one - the ZFS call then fails to find the dataset, rather
+// than touching a DIFFERENT dataset that happens to be named after the
+// logical id.
+//
+// The supplied physical_id, when the caller already resolved it, wins
+// over both: it is the value the asking node computed from the current
+// record, and it travels so the node doing the ZFS work never has to
+// hold a raft view to resolve it.
+func (s *Server) resolveVMPhysicalID(ctx context.Context, logicalID, suppliedPhysical string) string {
+	if suppliedPhysical != "" {
+		return suppliedPhysical
+	}
+	if s.raft == nil || logicalID == "" {
+		return logicalID
+	}
+	resp, err := s.raft.GetVM(ctx, logicalID)
+	if err != nil || resp.GetError() != "" || !resp.GetFound() {
+		return logicalID
+	}
+	if physical := resp.GetVm().GetResourceId(); physical != "" {
+		return physical
+	}
+	return logicalID
+}
+
 // CreateVMSnapshot implements rpcpb.ManagerServiceServer (ADR-0090) -
 // takes a ZFS snapshot of a VM's own dataset (which holds its
 // disk.img), the same "physical, per-node, never routed through raft"
@@ -3694,7 +3809,10 @@ func (s *Server) CreateVMSnapshot(ctx context.Context, req *rpcpb.CreateVMSnapsh
 	if req.GetSnapshotName() == "" {
 		return &rpcpb.CreateVMSnapshotResponse{Error: "snapshot_name must be set"}, nil
 	}
-	if err := s.zfs.CreateSnapshot(ctx, req.GetId()+"@"+req.GetSnapshotName()); err != nil {
+	// The snapshot is taken under the VM's PHYSICAL dataset name, which
+	// survives a logical rename (ADR-0152).
+	dataset := s.resolveVMPhysicalID(ctx, req.GetId(), req.GetPhysicalId())
+	if err := s.zfs.CreateSnapshot(ctx, dataset+"@"+req.GetSnapshotName()); err != nil {
 		return &rpcpb.CreateVMSnapshotResponse{Error: err.Error()}, nil
 	}
 	return &rpcpb.CreateVMSnapshotResponse{}, nil
@@ -3705,7 +3823,8 @@ func (s *Server) ListVMSnapshots(ctx context.Context, req *rpcpb.ListVMSnapshots
 	if s.zfs == nil {
 		return &rpcpb.ListVMSnapshotsResponse{}, nil
 	}
-	names, err := s.zfs.ListSnapshots(ctx, req.GetId())
+	dataset := s.resolveVMPhysicalID(ctx, req.GetId(), req.GetPhysicalId())
+	names, err := s.zfs.ListSnapshots(ctx, dataset)
 	if err != nil {
 		return &rpcpb.ListVMSnapshotsResponse{Error: err.Error()}, nil
 	}
@@ -3731,7 +3850,8 @@ func (s *Server) RestoreVMSnapshot(ctx context.Context, req *rpcpb.RestoreVMSnap
 			return &rpcpb.RestoreVMSnapshotResponse{Error: fmt.Sprintf("VM %q must be stopped before restoring a snapshot", req.GetId())}, nil
 		}
 	}
-	if err := s.zfs.RollbackSnapshot(ctx, req.GetId()+"@"+req.GetSnapshotName()); err != nil {
+	dataset := s.resolveVMPhysicalID(ctx, req.GetId(), req.GetPhysicalId())
+	if err := s.zfs.RollbackSnapshot(ctx, dataset+"@"+req.GetSnapshotName()); err != nil {
 		return &rpcpb.RestoreVMSnapshotResponse{Error: err.Error()}, nil
 	}
 	return &rpcpb.RestoreVMSnapshotResponse{}, nil
@@ -3742,7 +3862,8 @@ func (s *Server) DeleteVMSnapshot(ctx context.Context, req *rpcpb.DeleteVMSnapsh
 	if s.zfs == nil {
 		return &rpcpb.DeleteVMSnapshotResponse{Error: "this node has no ZFS support configured"}, nil
 	}
-	if err := s.zfs.DestroySnapshot(ctx, req.GetId()+"@"+req.GetSnapshotName()); err != nil {
+	dataset := s.resolveVMPhysicalID(ctx, req.GetId(), req.GetPhysicalId())
+	if err := s.zfs.DestroySnapshot(ctx, dataset+"@"+req.GetSnapshotName()); err != nil {
 		return &rpcpb.DeleteVMSnapshotResponse{Error: err.Error()}, nil
 	}
 	return &rpcpb.DeleteVMSnapshotResponse{}, nil
@@ -3763,6 +3884,22 @@ func hastOrphanResourceType(datasetName string) (kind, id string, ok bool) {
 	default:
 		return "", "", false
 	}
+}
+
+// vmPhysicalID returns a VM's PHYSICAL identity: its persisted
+// resource_id when it has one, and its own logical id otherwise
+// (ADR-0152's legacy fallback).
+//
+// It is the same rule internal/cluster's VMPlacement.PhysicalID
+// applies, duplicated rather than imported so this package does not
+// pull in internal/cluster's much heavier dependency graph for one
+// two-line pure function - the same posture resolveBridgeName above
+// takes.
+func vmPhysicalID(vm *internalpb.VMDefinition) string {
+	if physical := vm.GetResourceId(); physical != "" {
+		return physical
+	}
+	return vm.GetId()
 }
 
 // hastOrphanDatasetName is hastOrphanResourceType's inverse. Validates id
@@ -3808,7 +3945,13 @@ func (s *Server) hastResourceActiveOnThisNode(ctx context.Context, kind, id stri
 			return false, err
 		}
 		for _, vm := range resp.GetVms() {
-			if vm.GetId() == id && (vm.GetNodeId() == s.nodeID || vm.GetReplicaNodeId() == s.nodeID) {
+			// The HAST provider dataset is named for the VM's PHYSICAL
+			// identity, which does not change when its logical id is
+			// renamed (ADR-0152). Matching on the physical id is what
+			// keeps a renamed VM's own HAST resource from being
+			// reported as orphaned and then destroyed out from under
+			// it.
+			if vmPhysicalID(vm) == id && (vm.GetNodeId() == s.nodeID || vm.GetReplicaNodeId() == s.nodeID) {
 				return true, nil
 			}
 		}
@@ -3851,10 +3994,15 @@ func (s *Server) ListOrphanedHASTResources(ctx context.Context, _ *rpcpb.ListOrp
 	if err != nil {
 		return &rpcpb.ListOrphanedHASTResourcesResponse{Error: err.Error()}, nil
 	}
+	// The active set is keyed by PHYSICAL identity: the HAST provider
+	// dataset a VM holds is named for its resource_id, which survives a
+	// logical rename (ADR-0152). A renamed VM's own HAST resource is
+	// therefore still recognized as active, rather than being listed
+	// as an orphan and destroyed.
 	activeVM := make(map[string]bool, len(vmResp.GetVms()))
 	for _, vm := range vmResp.GetVms() {
 		if vm.GetNodeId() == s.nodeID || vm.GetReplicaNodeId() == s.nodeID {
-			activeVM[vm.GetId()] = true
+			activeVM[vmPhysicalID(vm)] = true
 		}
 	}
 	activeJail := make(map[string]bool, len(jailResp.GetJails()))

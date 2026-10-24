@@ -32,6 +32,7 @@ const (
 	ManagerService_CreateVM_FullMethodName                            = "/apiary.rpc.v1.ManagerService/CreateVM"
 	ManagerService_UpdateVM_FullMethodName                            = "/apiary.rpc.v1.ManagerService/UpdateVM"
 	ManagerService_DeleteVM_FullMethodName                            = "/apiary.rpc.v1.ManagerService/DeleteVM"
+	ManagerService_RenameVMIdentity_FullMethodName                    = "/apiary.rpc.v1.ManagerService/RenameVMIdentity"
 	ManagerService_ForcePurgeVM_FullMethodName                        = "/apiary.rpc.v1.ManagerService/ForcePurgeVM"
 	ManagerService_MigrateVM_FullMethodName                           = "/apiary.rpc.v1.ManagerService/MigrateVM"
 	ManagerService_SetVMFirewallPaused_FullMethodName                 = "/apiary.rpc.v1.ManagerService/SetVMFirewallPaused"
@@ -181,6 +182,20 @@ type ManagerServiceClient interface {
 	CreateVM(ctx context.Context, in *CreateVMRequest, opts ...grpc.CallOption) (*CreateVMResponse, error)
 	UpdateVM(ctx context.Context, in *UpdateVMRequest, opts ...grpc.CallOption) (*UpdateVMResponse, error)
 	DeleteVM(ctx context.Context, in *DeleteVMRequest, opts ...grpc.CallOption) (*DeleteVMResponse, error)
+	// RenameVMIdentity is ADR-0152's atomic logical-identity rename: it
+	// moves a VM's record to a new logical id, changing ONLY that id,
+	// with no deletion tombstone and no physical teardown. Its host
+	// resources keep the names their physical identity already gave
+	// them. This is a dedicated operation rather than a combination of
+	// the existing ones because UpdateVM cannot move a map key, DeleteVM
+	// would enter the soft-delete lifecycle, and MigrateVM is a
+	// node-ownership transfer rather than a logical rename.
+	//
+	// Retries are safe: a repeat of an already-applied rename for the
+	// same source/destination pair returns outcome "already_renamed"
+	// rather than an error, provided the destination record actually
+	// proves that relationship.
+	RenameVMIdentity(ctx context.Context, in *RenameVMIdentityRequest, opts ...grpc.CallOption) (*RenameVMIdentityResponse, error)
 	// ForcePurgeVM is an escape hatch for a VM tombstoned by DeleteVM
 	// whose owning node will never reconcile it away (permanently
 	// offline/decommissioned) - see CLAUDE.md's "What's not implemented
@@ -1143,6 +1158,16 @@ func (c *managerServiceClient) DeleteVM(ctx context.Context, in *DeleteVMRequest
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(DeleteVMResponse)
 	err := c.cc.Invoke(ctx, ManagerService_DeleteVM_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *managerServiceClient) RenameVMIdentity(ctx context.Context, in *RenameVMIdentityRequest, opts ...grpc.CallOption) (*RenameVMIdentityResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(RenameVMIdentityResponse)
+	err := c.cc.Invoke(ctx, ManagerService_RenameVMIdentity_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -2226,6 +2251,20 @@ type ManagerServiceServer interface {
 	CreateVM(context.Context, *CreateVMRequest) (*CreateVMResponse, error)
 	UpdateVM(context.Context, *UpdateVMRequest) (*UpdateVMResponse, error)
 	DeleteVM(context.Context, *DeleteVMRequest) (*DeleteVMResponse, error)
+	// RenameVMIdentity is ADR-0152's atomic logical-identity rename: it
+	// moves a VM's record to a new logical id, changing ONLY that id,
+	// with no deletion tombstone and no physical teardown. Its host
+	// resources keep the names their physical identity already gave
+	// them. This is a dedicated operation rather than a combination of
+	// the existing ones because UpdateVM cannot move a map key, DeleteVM
+	// would enter the soft-delete lifecycle, and MigrateVM is a
+	// node-ownership transfer rather than a logical rename.
+	//
+	// Retries are safe: a repeat of an already-applied rename for the
+	// same source/destination pair returns outcome "already_renamed"
+	// rather than an error, provided the destination record actually
+	// proves that relationship.
+	RenameVMIdentity(context.Context, *RenameVMIdentityRequest) (*RenameVMIdentityResponse, error)
 	// ForcePurgeVM is an escape hatch for a VM tombstoned by DeleteVM
 	// whose owning node will never reconcile it away (permanently
 	// offline/decommissioned) - see CLAUDE.md's "What's not implemented
@@ -3103,6 +3142,9 @@ func (UnimplementedManagerServiceServer) UpdateVM(context.Context, *UpdateVMRequ
 func (UnimplementedManagerServiceServer) DeleteVM(context.Context, *DeleteVMRequest) (*DeleteVMResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method DeleteVM not implemented")
 }
+func (UnimplementedManagerServiceServer) RenameVMIdentity(context.Context, *RenameVMIdentityRequest) (*RenameVMIdentityResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method RenameVMIdentity not implemented")
+}
 func (UnimplementedManagerServiceServer) ForcePurgeVM(context.Context, *ForcePurgeVMRequest) (*ForcePurgeVMResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ForcePurgeVM not implemented")
 }
@@ -3660,6 +3702,24 @@ func _ManagerService_DeleteVM_Handler(srv interface{}, ctx context.Context, dec 
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(ManagerServiceServer).DeleteVM(ctx, req.(*DeleteVMRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ManagerService_RenameVMIdentity_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(RenameVMIdentityRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ManagerServiceServer).RenameVMIdentity(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ManagerService_RenameVMIdentity_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ManagerServiceServer).RenameVMIdentity(ctx, req.(*RenameVMIdentityRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -5514,6 +5574,10 @@ var ManagerService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "DeleteVM",
 			Handler:    _ManagerService_DeleteVM_Handler,
+		},
+		{
+			MethodName: "RenameVMIdentity",
+			Handler:    _ManagerService_RenameVMIdentity_Handler,
 		},
 		{
 			MethodName: "ForcePurgeVM",

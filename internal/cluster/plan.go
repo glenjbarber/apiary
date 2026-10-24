@@ -25,7 +25,27 @@ import "sort"
 // this package's core logic independent of the wire schema's evolution -
 // reconciler.go does the translation.
 type VMPlacement struct {
-	ID       string
+	// ID is the VM's LOGICAL identity: the map key in raft, the id
+	// callers use, and the name Cluster API associates with its
+	// resource. It is what an identity rename (ADR-0152) changes.
+	ID string
+
+	// ResourceID is the VM's PERSISTED PHYSICAL identity: the name its
+	// host resources actually carry - the bhyve VM name, the ZFS
+	// dataset, the HAST resource, the pf(8) anchor, and the disk image
+	// file inside that dataset.
+	//
+	// It is a SEPARATE field from ID precisely because the two can
+	// differ: a VM whose logical id was renamed keeps the host
+	// resources its physical id already named, and must never have a
+	// second set provisioned under the new logical id. Every
+	// physical-resource call site uses THIS field; every
+	// API-facing one uses ID.
+	//
+	// An empty ResourceID is a legacy record written before the field
+	// existed, and resolves to the VM's own ID - see ADR-0152.
+	ResourceID string
+
 	NodeID   string
 	Vcpus    uint32
 	MemoryMB uint64
@@ -97,6 +117,25 @@ type VMPlacement struct {
 	// never via UpdateVM. See ADR-0063.
 	CloudflareHostname string
 	CloudflarePort     uint32
+}
+
+// PhysicalID returns the VM's physical identity: its persisted
+// resource_id when it has one, and its own logical id otherwise.
+//
+// The fallback is ADR-0152's legacy compatibility rule: a VM record
+// written before the resource_id field existed had its host resources
+// named for its id, so resolving the empty value to the id preserves
+// every one of those names exactly. Nothing has to be renamed on disk
+// and nothing has to be re-provisioned.
+//
+// Every PHYSICAL-resource call site in this package goes through this
+// accessor rather than reading ResourceID directly, so the fallback
+// cannot be forgotten at one call site and applied at another.
+func (p VMPlacement) PhysicalID() string {
+	if p.ResourceID != "" {
+		return p.ResourceID
+	}
+	return p.ID
 }
 
 // JailPlacement mirrors VMPlacement, deliberately minimal like
@@ -267,7 +306,7 @@ func PlanReclaim(desired []VMPlacement, localNodeID string) []string {
 	var ids []string
 	for _, vm := range desired {
 		if vm.NodeID != localNodeID {
-			ids = append(ids, vm.ID)
+			ids = append(ids, vm.PhysicalID())
 		}
 	}
 	sort.Strings(ids)
@@ -314,7 +353,7 @@ func PlanReplicaReclaim(desired []VMPlacement, localNodeID string) []string {
 			continue
 		}
 		if vm.ReplicaNodeID != localNodeID || vm.Deleting {
-			ids = append(ids, vm.ID)
+			ids = append(ids, vm.PhysicalID())
 		}
 	}
 	sort.Strings(ids)

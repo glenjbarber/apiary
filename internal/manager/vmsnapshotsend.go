@@ -42,7 +42,7 @@ import (
 // cloning from it (ADR-0095's disclosed node-local limitation, closed
 // the same way ADR-0089 closed the identical one for jail templates).
 type vmSnapshotTransfer interface {
-	PushVMSnapshot(ctx context.Context, addr, vmID, snapshotName string, r io.Reader) error
+	PushVMSnapshot(ctx context.Context, addr, vmID, physicalID, snapshotName string, r io.Reader) error
 }
 
 // vmSnapshotStore is the *zfs.Manager surface this pair needs beyond
@@ -124,7 +124,12 @@ func (s *Server) PushVMSnapshotTo(ctx context.Context, req *rpcpb.PushVMSnapshot
 		return &rpcpb.PushVMSnapshotToResponse{Error: "this node's peer forwarder cannot push a VM snapshot (PeerForwarder.PushVMSnapshot is not implemented)"}, nil
 	}
 
-	rc, err := s.zfs.Send(ctx, req.GetId()+"@"+req.GetSnapshotName())
+	// The snapshot is read from the VM's PHYSICAL dataset, which
+	// survives a logical rename (ADR-0152). The asking node supplies
+	// the physical name when it knows it; otherwise this node resolves
+	// the logical id through its own record.
+	dataset := s.resolveVMPhysicalID(ctx, req.GetId(), req.GetPhysicalId())
+	rc, err := s.zfs.Send(ctx, dataset+"@"+req.GetSnapshotName())
 	if err != nil {
 		return &rpcpb.PushVMSnapshotToResponse{Error: fmt.Sprintf("reading local snapshot %q of VM %q: %v", req.GetSnapshotName(), req.GetId(), err)}, nil
 	}
@@ -135,7 +140,7 @@ func (s *Server) PushVMSnapshotTo(ctx context.Context, req *rpcpb.PushVMSnapshot
 		return &rpcpb.PushVMSnapshotToResponse{Error: err.Error()}, nil
 	}
 
-	if err := pusher.PushVMSnapshot(ctx, targetAddr, req.GetId(), req.GetSnapshotName(), rc); err != nil {
+	if err := pusher.PushVMSnapshot(ctx, targetAddr, req.GetId(), dataset, req.GetSnapshotName(), rc); err != nil {
 		return &rpcpb.PushVMSnapshotToResponse{Error: fmt.Sprintf("pushing to %q: %v", req.GetTargetNodeId(), err)}, nil
 	}
 	return &rpcpb.PushVMSnapshotToResponse{}, nil
@@ -200,12 +205,19 @@ func (s *Server) ReceiveVMSnapshot(stream rpcpb.ManagerService_ReceiveVMSnapshot
 	if !ok {
 		return stream.SendAndClose(&rpcpb.ReceiveVMSnapshotResponse{Error: "this node's ZFS store cannot receive a VM snapshot (zfs.Manager.ReceiveForce is not available)"})
 	}
-	if err := s.vmsnapshotReceivePreconditions(stream.Context(), meta); err != nil {
+	// The received stream lands in the VM's PHYSICAL dataset, which
+	// survives a logical rename (ADR-0152). The metadata carries the
+	// physical name from the sending node, which is the node that
+	// actually read the snapshot.
+	dest := meta.GetPhysicalId()
+	if dest == "" {
+		dest = meta.GetId()
+	}
+	if err := s.vmsnapshotReceivePreconditions(stream.Context(), meta, dest); err != nil {
 		return stream.SendAndClose(&rpcpb.ReceiveVMSnapshotResponse{Error: err.Error()})
 	}
 
 	ctx := stream.Context()
-	dest := meta.GetId()
 	snap := dest + "@" + meta.GetSnapshotName()
 
 	pr, pw := io.Pipe()
@@ -261,7 +273,7 @@ func (s *Server) ReceiveVMSnapshot(stream rpcpb.ManagerService_ReceiveVMSnapshot
 // this node's own ZFS and a failure there means the receive is refused,
 // because proceeding would mean overwriting a checkpoint the caller
 // never said they were replacing.
-func (s *Server) vmsnapshotReceivePreconditions(ctx context.Context, meta *rpcpb.VMSnapshotMetadata) error {
+func (s *Server) vmsnapshotReceivePreconditions(ctx context.Context, meta *rpcpb.VMSnapshotMetadata, physicalID string) error {
 	if s.raft != nil {
 		vmResp, err := s.GetVM(ctx, &rpcpb.GetVMRequest{Id: meta.GetId()})
 		if err == nil && !vmResp.GetFound() {
@@ -282,7 +294,7 @@ func (s *Server) vmsnapshotReceivePreconditions(ctx context.Context, meta *rpcpb
 		// where this node's raft view has already moved the VM
 		// elsewhere but its bhyve process and dataset are still here.
 		if err == nil && vmResp.GetVm().GetDesiredState() == rpcpb.VMState_VM_STATE_RUNNING {
-			held, heldErr := s.zfs.DatasetExists(ctx, meta.GetId())
+			held, heldErr := s.zfs.DatasetExists(ctx, physicalID)
 			if heldErr == nil && held {
 				return fmt.Errorf("VM %q must be stopped before receiving a snapshot for it: this node still holds its dataset", meta.GetId())
 			}
@@ -292,7 +304,7 @@ func (s *Server) vmsnapshotReceivePreconditions(ctx context.Context, meta *rpcpb
 	if !ok {
 		return fmt.Errorf("this node's ZFS store cannot receive a VM snapshot")
 	}
-	exists, err := store.SnapshotExists(ctx, meta.GetId()+"@"+meta.GetSnapshotName())
+	exists, err := store.SnapshotExists(ctx, physicalID+"@"+meta.GetSnapshotName())
 	if err != nil {
 		return fmt.Errorf("checking for an existing local snapshot of VM %q: %w", meta.GetId(), err)
 	}

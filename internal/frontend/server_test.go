@@ -477,6 +477,10 @@ func (f *fakeClient) MigrateVM(context.Context, *rpcpb.MigrateVMRequest, ...grpc
 	return &rpcpb.MigrateVMResponse{}, nil
 }
 
+func (f *fakeClient) RenameVMIdentity(context.Context, *rpcpb.RenameVMIdentityRequest, ...grpc.CallOption) (*rpcpb.RenameVMIdentityResponse, error) {
+	return &rpcpb.RenameVMIdentityResponse{}, nil
+}
+
 func (f *fakeClient) ReportVMPhase(context.Context, *rpcpb.ReportVMPhaseRequest, ...grpc.CallOption) (*rpcpb.ReportVMPhaseResponse, error) {
 	return &rpcpb.ReportVMPhaseResponse{}, nil
 }

@@ -98,6 +98,15 @@ func (s *Server) Apply(_ context.Context, req *internalpb.ApplyRequest) (*intern
 	if result.ColonyJoinWindow != nil {
 		payload = result.ColonyJoinWindow
 	}
+	// RenameVMIdentityResult carries BOTH the resulting VM and the
+	// outcome that distinguishes a rename applied by this apply from one
+	// that had already been applied and was proven to be the same
+	// rename (ADR-0152). It is checked BEFORE result.VM, because both
+	// are set for a rename: the VM alone would lose the outcome, and
+	// the outcome alone would lose the authoritative record.
+	if result.RenameResult != nil {
+		payload = result.RenameResult
+	}
 	resultBytes, err := proto.Marshal(payload)
 	if err != nil {
 		return &internalpb.ApplyResponse{Error: fmt.Sprintf("encoding result: %v", err)}, nil

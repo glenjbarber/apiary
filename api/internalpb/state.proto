@@ -194,6 +194,28 @@ message VMDefinition {
   // the Colony floor does not make every older VM un-updatable for an
   // unrelated reason. See applyUpdateVM's own comment.
   uint64 disk_size_mb = 22;
+
+  // resource_id is ADR-0152's PERSISTED PHYSICAL identity for this VM:
+  // the name its host resources actually carry - the bhyve VM name, the
+  // ZFS dataset, the HAST resource, the pf(8) anchor, and the disk
+  // image file inside that dataset. The VM's `id` above is its LOGICAL
+  // identity: the stable identifier callers use, that Cluster API
+  // associates with its resource, and that a rename may change.
+  //
+  // The two are separate because a logical identity can migrate (from a
+  // namespace/name-derived id to a Kubernetes-resource-UID-derived one)
+  // while the host resources already named for the old id must keep
+  // working, keep their names, and never be provisioned a second time
+  // under the new one.
+  //
+  // The FSM assigns this to `id` on creation when it is absent, so a new
+  // VM's physical identity is its own initial logical id. A record with
+  // an EMPTY resource_id is a legacy record written before this field
+  // existed: it resolves to the record's own `id` on every read, which
+  // preserves every existing host resource name exactly. Once populated,
+  // it is IMMUTABLE through ordinary VM updates and through the identity
+  // rename itself - a rename changes only `id` and the map key.
+  string resource_id = 23;
 }
 
 // JailState is the desired run state of a jail, mirroring VMState.
@@ -659,6 +681,23 @@ message Command {
     // through the log, every voter derives the same answer from the
     // same bytes.
     SetColonyIdentity set_colony_identity = 47;
+
+    // RenameVMIdentity is ADR-0152's dedicated logical-identity rename:
+    // it moves a VM's record from one map key to another, changing
+    // ONLY VMDefinition.id, in a single atomic FSM apply.
+    //
+    // It exists because no other command can express it. UpdateVM is a
+    // full-record replace keyed by the SAME id (it cannot move a key),
+    // DeleteVM enters the soft-delete lifecycle (it can cause physical
+    // teardown), and MigrateVM transfers node ownership (it is not a
+    // logical rename at all). A sequence of UpdateVM and DeleteVM is
+    // neither atomic nor safe, and would tear down the very host
+    // resources the rename is supposed to preserve.
+    //
+    // It is a command rather than a managerd-side key move so every
+    // replica decides the same collision, ownership, preservation and
+    // idempotency rules from the same committed log.
+    RenameVMIdentity rename_vm_identity = 48;
   }
 }
 
@@ -846,6 +885,65 @@ message UpdateVMPhase {
   string id = 1;
   VMPhase phase = 2;
   string phase_error = 3;
+}
+
+// RenameVMIdentity is ADR-0152's atomic logical-identity rename request.
+//
+// It names the source VM's CURRENT logical id and the destination
+// logical id it should carry from now on, plus the ownership evidence
+// the caller believes holds. The FSM re-checks that evidence itself
+// rather than trusting it: the FSM apply is the only place that runs in
+// the same order on every replica, so a rule decided there is a rule
+// every replica applies identically.
+//
+// A retry of an already-applied rename is safe and is reported
+// distinctly (outcome "already_renamed"), so a caller whose first
+// attempt timed out can tell "already done" apart from "never done"
+// without re-reading anything.
+// RenameVMIdentityResult is what the FSM returns for a RenameVMIdentity
+// command: the resulting authoritative VM record, plus the outcome that
+// distinguishes a rename applied by THIS apply from one that had
+// already been applied and was proven to be the same rename.
+//
+// It is a distinct message rather than a bare VMDefinition because the
+// outcome is part of the result, not part of the VM: the same VM record
+// is the answer either way, and a caller that cannot tell "I renamed
+// it" from "it was already renamed" cannot implement ADR-0152's retry
+// contract.
+message RenameVMIdentityResult {
+  VMDefinition vm = 1;
+  string outcome = 2;
+}
+
+message RenameVMIdentity {
+  // source_id is the VM's current LOGICAL id. It must exist (or the
+  // request must match an already-completed rename of it - see the
+  // idempotency rules in the FSM's apply function).
+  string source_id = 1;
+
+  // destination_id is the LOGICAL id the VM should carry afterward. It
+  // must not already be occupied by another VM record: a collision is
+  // refused, never overwritten.
+  string destination_id = 2;
+
+  // expected_node_id is the owner the caller believes this VM has.
+  // Empty means "no ownership expectation was stated", which skips
+  // only that one check - it never skips the destination-collision
+  // check, the id validation, or the idempotency rules.
+  string expected_node_id = 3;
+
+  // expected_replica_node_id is the replica assignment the caller
+  // believes this VM has. Empty means "no replica expectation was
+  // stated" (and also matches a VM that genuinely has no replica).
+  string expected_replica_node_id = 4;
+
+  // expected_resource_id is the physical identity the caller believes
+  // this VM carries. It is the strongest available proof that the
+  // destination record IS the completed result of renaming THIS source
+  // (rather than an unrelated VM that happens to share the
+  // destination's name), so it is what the idempotency check requires
+  // when the source key is already gone. Empty means "not stated".
+  string expected_resource_id = 5;
 }
 
 // SetVMFirewallPaused toggles VMDefinition.firewall_paused on an

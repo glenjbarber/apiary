@@ -608,6 +608,10 @@ type fakePeerReporter struct {
 	requestVMSnapshotPushCalls []string // "addr vmID snapshotName targetNodeID"
 	requestVMSnapshotPushErr   error
 	onRequestVMSnapshotPush    func(vmID, snapshotName string)
+
+	// requestVMSnapshotPushPhysicalIDs records the physical identity
+	// each push carried - see RequestVMSnapshotPushFor's own comment.
+	requestVMSnapshotPushPhysicalIDs []string
 }
 
 func (f *fakePeerReporter) ReportVMPhase(_ context.Context, addr, id, phase, phaseError string) error {
@@ -667,8 +671,26 @@ func (f *fakePeerReporter) ListVMSnapshotNames(_ context.Context, addr, vmID str
 	return f.vmSnapshotNamesByAddr[addr+" "+vmID], nil
 }
 
-func (f *fakePeerReporter) RequestVMSnapshotPush(_ context.Context, addr, vmID, snapshotName, targetNodeID string) error {
+// ListVMSnapshotNamesFor is the ADR-0152 physical-identity-aware
+// variant the reconciler actually calls. It reports the same names as
+// ListVMSnapshotNames above - the fake's table is keyed by the LOGICAL
+// id, and a test that cares about the physical distinction uses
+// requestVMSnapshotPushPhysicalIDs below to observe what was carried.
+func (f *fakePeerReporter) ListVMSnapshotNamesFor(_ context.Context, addr, vmID, physicalID string) ([]string, error) {
+	return f.vmSnapshotNamesByAddr[addr+" "+vmID], nil
+}
+
+func (f *fakePeerReporter) RequestVMSnapshotPush(ctx context.Context, addr, vmID, snapshotName, targetNodeID string) error {
+	return f.RequestVMSnapshotPushFor(ctx, addr, vmID, "", snapshotName, targetNodeID)
+}
+
+// requestVMSnapshotPushPhysicalIDs records the PHYSICAL identity each
+// push carried, so a test can assert that ADR-0152's rename-safe
+// lookup actually handed the peer the physical name rather than the
+// logical one.
+func (f *fakePeerReporter) RequestVMSnapshotPushFor(_ context.Context, addr, vmID, physicalID, snapshotName, targetNodeID string) error {
 	f.requestVMSnapshotPushCalls = append(f.requestVMSnapshotPushCalls, fmt.Sprintf("%s %s %s %s", addr, vmID, snapshotName, targetNodeID))
+	f.requestVMSnapshotPushPhysicalIDs = append(f.requestVMSnapshotPushPhysicalIDs, physicalID)
 	if f.requestVMSnapshotPushErr != nil {
 		return f.requestVMSnapshotPushErr
 	}
