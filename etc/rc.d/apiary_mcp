@@ -22,6 +22,19 @@
 # whatever secret management the host already uses, never written here
 # and never committed.
 #
+# They are read from a FILE, not from the environment:
+#
+#   /usr/local/etc/apiary/mcp-secrets   (mode 0600, root-owned)
+#
+#   APIARY_API_KEY=...
+#   APIARY_MCP_TOKEN=...
+#
+# They are NOT read from the inherited environment, and that is not an
+# oversight - `service` runs an rc.d script with an empty environment,
+# so an inherited variable would arrive as "" and the connector would
+# refuse to start naming a variable the operator can plainly see in
+# their own shell.
+#
 # WHY HTTP IS THE DEFAULT TRANSPORT HERE, AND NOT stdio:
 #
 # stdio is the transport a LOCAL MCP client uses - it launches the
@@ -58,6 +71,39 @@ load_rc_config "$name"
 # The manager address defaults to this Comb's own managerd, which is the
 # only sensible default for a connector that runs beside it.
 : ${apiary_mcp_manager_addr:="127.0.0.1:17700"}
+# The two secrets. See the note on command_args below for why they are
+# named here rather than inherited from the environment.
+#
+# They are read from a FILE, not from the environment, and that is not
+# a stylistic choice. `service` runs an rc.d script with an EMPTY
+# environment - the operator's exported variables do not reach it - so
+# an inherited APIARY_API_KEY would arrive as "" and the connector would
+# refuse to start with a message naming a variable the operator can
+# plainly see in their own shell. That is a confusing failure, so the
+# script does not depend on the environment at all.
+#
+# The file is a KEY=VALUE file, one per line, mode 0600, root-owned:
+#
+#   /usr/local/etc/apiary/mcp-secrets
+#
+#   APIARY_API_KEY=...
+#   APIARY_MCP_TOKEN=...
+#
+# It is read with a plain read loop rather than `source`, because
+# sourcing a file into the rc script would let it set anything at all -
+# including the command the script runs.
+: ${apiary_mcp_secrets:="/usr/local/etc/apiary/mcp-secrets"}
+
+apiary_mcp_api_key=""
+apiary_mcp_token=""
+if [ -r "${apiary_mcp_secrets}" ]; then
+	while IFS='=' read -r _k _v ; do
+		case "$_k" in
+		APIARY_API_KEY) apiary_mcp_api_key="$_v" ;;
+		APIARY_MCP_TOKEN) apiary_mcp_token="$_v" ;;
+		esac
+	done < "${apiary_mcp_secrets}"
+fi
 
 rc_flags=""
 mcp_bin="/usr/local/libexec/apiary/apiary-mcp"
@@ -65,14 +111,40 @@ procname="/usr/sbin/daemon"
 pidfile="/var/run/${name}.pid"
 command="/usr/sbin/daemon"
 
-# daemon(8) has no flag for setting an environment, so the environment
-# is applied with env(1) around the binary. APIARY_API_KEY and
-# APIARY_MCP_TOKEN are deliberately NOT defaulted here: a connector
+# THE ENVIRONMENT, and why the variables are named on the command line.
+#
+# The connector reads its whole configuration from the environment, and
+# this script has to get four variables to it: the manager address, the
+# transport, the listen address, and the two secrets.
+#
+# Two of those are secrets, and they come from a FILE rather than from
+# the inherited environment. That is not a stylistic choice:
+#
+#   - `service` runs an rc.d script with an EMPTY environment. An
+#     operator who exports APIARY_API_KEY and runs `service apiary_mcp
+#     start` gets a connector that refuses to start naming a variable
+#     that is plainly set in the shell they just used. That is a
+#     confusing failure, so the script does not depend on the inherited
+#     environment at all.
+#
+#   - daemon(8) has no flag for setting an environment, so the
+#     variables are applied with env(1) around the binary. The two
+#     secrets are NAMED on that command line rather than inherited,
+#     because rc.subr applies its own apiary_mcp_env mechanism BEFORE
+#     "limits -C daemon" installs the login class - and the login class
+#     resets the environment again. Anything named inside command_args
+#     is set by the env(1) that runs last, and nothing resets it after
+#     that.
+#
+# The three non-secret settings ARE defaulted here, because they are
+# settings rather than secrets and an operator should not have to name
+# them to get a working service.
+#
+# The two secrets are deliberately NOT given defaults. A connector
 # started without a key would fail every call, which is a worse
 # operator experience than one that refuses to start and names what is
-# missing. They are expected to be present in the rc.conf environment
-# or exported by whatever provisions this service.
-command_args="-f -r -R 5 -C 24 -o ${apiary_mcp_logfile} -P ${pidfile} env APIARY_MANAGER_ADDR=${apiary_mcp_manager_addr} APIARY_MCP_TRANSPORT=${apiary_mcp_transport} APIARY_MCP_LISTEN=${apiary_mcp_listen} ${mcp_bin} ${apiary_mcp_args}"
+# missing.
+command_args="-f -r -R 5 -C 24 -o ${apiary_mcp_logfile} -P ${pidfile} env APIARY_MANAGER_ADDR=${apiary_mcp_manager_addr} APIARY_MCP_TRANSPORT=${apiary_mcp_transport} APIARY_MCP_LISTEN=${apiary_mcp_listen}${apiary_mcp_api_key:+ APIARY_API_KEY=${apiary_mcp_api_key}}${apiary_mcp_token:+ APIARY_MCP_TOKEN=${apiary_mcp_token}} ${mcp_bin} ${apiary_mcp_args}"
 
 # See apiary_restshimd's own copy of this hook for why it's needed - the
 # same daemon(8)/rc.subr pidfile race applies identically here.

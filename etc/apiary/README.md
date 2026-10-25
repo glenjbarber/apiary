@@ -395,22 +395,43 @@ not use the service at all — it launches the binary itself.
 | `APIARY_MCP_LISTEN` | The HTTP listen address. **Loopback only.** |
 | `APIARY_MCP_TOKEN` | The HTTP bearer token. **Required in http mode**, and at least 32 characters. |
 
-`APIARY_API_KEY` and `APIARY_MCP_TOKEN` are **secrets**. They are
-expected to come from whatever secret management the host already uses,
-and they must never be written into a file that is committed, or into
-`rc.conf` on a shared host.
+`APIARY_API_KEY` and `APIARY_MCP_TOKEN` are **secrets**. For the
+service they come from `/usr/local/etc/apiary/mcp-secrets` (see above);
+for a client launching the binary directly they come from the
+environment. Either way they must never be written into a file that is
+committed, or into `rc.conf` on a shared host.
 
 ### Enabling it
 
+The service reads its two secrets from a file, not from the environment:
+
 ```bash
-# In /etc/rc.conf, with the two secrets in the environment:
+# The secrets file. Root-owned, mode 0600, one KEY=VALUE per line.
+umask 077
+cat > /usr/local/etc/apiary/mcp-secrets <<'EOF'
+APIARY_API_KEY=...        # a Viewer key
+APIARY_MCP_TOKEN=...      # at least 32 characters
+EOF
+chmod 600 /usr/local/etc/apiary/mcp-secrets
+
+# In /etc/rc.conf:
 apiary_mcp_enable="YES"
-export APIARY_API_KEY=...        # a Viewer key
-export APIARY_MCP_TOKEN=...      # at least 32 characters
 
 # Then, on this host:
 service apiary_mcp start
 ```
+
+**Why a file and not the environment.** `service` runs an rc.d script
+with an **empty environment** — the operator's exported variables do not
+reach it. A service that read `APIARY_API_KEY` from the inherited
+environment would therefore start, find nothing, and refuse with a
+message naming a variable that is plainly set in the shell that invoked
+it. That is a confusing failure, so the script does not depend on the
+inherited environment at all.
+
+The file is read with a plain read loop rather than `source`d, because
+sourcing it into the rc script would let it set anything at all —
+including the command the script runs.
 
 The service binds to `127.0.0.1:8787` by default and the connector
 **refuses to start** on a non-loopback address. Exposing it to another
