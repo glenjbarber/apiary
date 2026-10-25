@@ -351,6 +351,106 @@ current, safe flow uses `await_join` — see `docs/add-node-to-colony.md`.
   auth enabled (ADR-0023). A real credential if set, so this file must
   then be root-owned, mode 0600.
 
+## The MCP connector (`apiary-mcp`)
+
+`apiary-mcp` is a read-only Model Context Protocol view of this Colony,
+for an external AI client. Orcli is the reference client. It is the only
+part of Apiary that is **not** a daemon with a config file here: it has
+no configuration file of its own, so there is no `apiary-mcp.json.sample`
+in this directory, and it reads its whole configuration from the
+environment.
+
+It is installed at `/usr/local/libexec/apiary/apiary-mcp` and it is
+**off by default**. `make setup` does not enable it, and the reason is
+ADR-0162's: the connector is a deployment decision an operator makes for
+a **control host**, not something every Comb should expose. A Comb that
+is a target for VMs has no reason to answer an AI client at all.
+
+### The two transports, and which one the service uses
+
+`apiary-mcp` speaks either of two MCP transports.
+
+**stdio** is for a **local** client. The client launches
+`/usr/local/libexec/apiary/apiary-mcp` as a subprocess and speaks MCP
+over that subprocess's stdin and stdout. Nothing is installed, no service
+runs, and no port is open.
+
+**http** is for a **remote** client. The connector listens on
+`APIARY_MCP_LISTEN`, serves MCP at `/mcp`, and requires a bearer token.
+
+The `apiary_mcp` rc.d service uses **http**, because a daemonized
+service has no client on its stdin: a stdio connector started as a
+service would read EOF and exit. A local client that wants stdio does
+not use the service at all — it launches the binary itself.
+
+### The environment it reads
+
+| Variable | Meaning |
+| --- | --- |
+| `APIARY_MANAGER_ADDR` | The managerd to read. Defaults to `127.0.0.1:17700` in the service, which is the only sensible default for a connector running beside it. |
+| `APIARY_API_KEY` | The API key every call carries. **Required.** It should be a **Viewer** key — the connector only ever calls read RPCs, and managerd's own role map decides what that key may do. |
+| `APIARY_MANAGER_CA` | The CA to verify managerd's certificate against. Empty means the system pool. |
+| `APIARY_MANAGER_SERVER_NAME` | The name to verify managerd's certificate against, when it is not the host part of the address. |
+| `APIARY_MCP_TRANSPORT` | `stdio` or `http`. |
+| `APIARY_MCP_LISTEN` | The HTTP listen address. **Loopback only.** |
+| `APIARY_MCP_TOKEN` | The HTTP bearer token. **Required in http mode**, and at least 32 characters. |
+
+`APIARY_API_KEY` and `APIARY_MCP_TOKEN` are **secrets**. They are
+expected to come from whatever secret management the host already uses,
+and they must never be written into a file that is committed, or into
+`rc.conf` on a shared host.
+
+### Enabling it
+
+```bash
+# In /etc/rc.conf, with the two secrets in the environment:
+apiary_mcp_enable="YES"
+export APIARY_API_KEY=...        # a Viewer key
+export APIARY_MCP_TOKEN=...      # at least 32 characters
+
+# Then, on this host:
+service apiary_mcp start
+```
+
+The service binds to `127.0.0.1:8787` by default and the connector
+**refuses to start** on a non-loopback address. Exposing it to another
+host is therefore an explicit operator act: put a TLS reverse proxy or a
+private tunnel in front of it. That restriction is in the code, not a
+convention in the rc script.
+
+To use it from another host:
+
+```bash
+curl -H "Authorization: Bearer $APIARY_MCP_TOKEN" \
+     -H "Content-Type: application/json" \
+     -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}' \
+     http://127.0.0.1:8787/mcp
+```
+
+### What it exposes
+
+Three read-only tools, over an explicit allowlist of five read RPCs
+(`ListVMs`, `ListJails`, `GetVM`, `GetJail`, `ClusterHealth`):
+
+- `list_cells` — every VM and jail, as identity and lifecycle summaries.
+- `get_cell` — one VM or jail by `(type, id)`.
+- `get_cluster_health` — every Comb's health verdict.
+
+No write tool exists, and none will until a per-operation
+authorization, approval and audit policy exists (ADR-0162, ADR-0166).
+
+Every tool is annotated read-only, so a client — or a host that gates
+tool use — knows that without reading prose. The tool descriptions carry
+their own semantics, and the server sends instructions with the
+conventions the tools share, so the surface does not assume anything
+about which model is behind the client.
+
+### Checking what is running
+
+```bash
+/usr/local/libexec/apiary/apiary-mcp -version
+```
+
 ## `restshimd.json.sample`
 
 - `manager_addr` — TCP address of managerd's external RPC API. Must match

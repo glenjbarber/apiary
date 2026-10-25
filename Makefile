@@ -15,7 +15,8 @@ SRCS=		apiaryinstall \
 			raftd \
 			managerd \
 			frontend \
-			restshimd
+			restshimd \
+			apiary-mcp
 
 # versioncheck is in SRCS and is NOT in INSTALL_SRCS: it is a tool an
 # operator runs FROM this checkout and never leaves on the Comb. It is
@@ -258,7 +259,8 @@ INSTALL_SRCS=	raftd \
 		frontend \
 		restshimd \
 		apiaryctl \
-		apiaryinstall
+		apiaryinstall \
+		apiary-mcp
 
 # Every installed binary except apiaryctl and apiaryinstall, because
 # neither has configuration of its own: apiaryctl reads the daemons' own

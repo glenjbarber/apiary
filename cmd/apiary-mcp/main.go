@@ -26,6 +26,7 @@ import (
 	"time"
 
 	rpcpb "github.com/glenjbarber/apiary/api/rpc"
+	"github.com/glenjbarber/apiary/internal/buildinfo"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -53,7 +54,19 @@ type config struct {
 
 func main() {
 	transport := flag.String("transport", env("APIARY_MCP_TRANSPORT", "stdio"), "MCP transport: stdio or http")
+	buildinfo.RegisterVersionFlag(flag.CommandLine)
 	flag.Parse()
+
+	// Checked before ANY other work, so `-version` answers on a machine
+	// with no config, no API key and no privileges. That is the whole
+	// point: you want to ask a deployed binary what it is when it is
+	// the only thing left to ask. It is also what lets this binary
+	// carry the same build stamp as every other installed Apiary
+	// binary, which is what `make check-stamped` verifies.
+	if buildinfo.VersionRequested() {
+		fmt.Print(buildinfo.Report("apiary-mcp"))
+		return
+	}
 
 	cfg, err := loadConfig(*transport)
 	if err != nil {
