@@ -208,6 +208,15 @@ type pageData struct {
 	JoinColonyFormError string
 	JoinColonyResult    *joinRequestView
 
+	// JoinLedger is ADR-0163's guided join ledger: the two-column,
+	// read-only view of the two-way join handshake, rendered at
+	// GET /machine/join.
+	//
+	// It is its own field rather than more JoinRequests because it is a
+	// DIFFERENT shape: not a list of requests but one ledger's two
+	// columns of steps, each step carrying which Comb it happens on.
+	JoinLedger joinLedgerView
+
 	// ConvertJoinerFormError/ConvertJoinerResult back the Machine page's
 	// "Convert this Comb to a joiner" action (ADR-0105) - distinct from
 	// JoinColonyFormError/JoinColonyResult above, which is for a
@@ -1320,6 +1329,18 @@ func (s *Server) routes() {
 	// viewer via .CanAdmin, the same defense-in-depth pattern the Users
 	// page already uses for its per-row password action.
 	s.mux.HandleFunc("GET /machine", s.requireRole(manager.RoleOperator, s.handleMachinePage))
+	// ADR-0163's guided join ledger: a two-column, READ-ONLY view of the
+	// two-way join handshake.
+	//
+	// Admin-tier, and deliberately so. It renders the Colony's pending
+	// join requests and the fingerprints a joining Comb advertised, and
+	// it is served by a Comb a hostile Admin controls - the same
+	// reasoning ADR-0147 Part 3 applies to the pending-requests panel.
+	//
+	// It is a GET that takes no parameters and mutates nothing: every
+	// value it shows comes from already-replicated state, which is what
+	// lets it survive a leadership change and a page reload unchanged.
+	s.mux.HandleFunc("GET /machine/join", s.requireRole(manager.RoleAdmin, s.handleJoinLedger))
 	s.mux.HandleFunc("GET /machine/why-is-this-set", s.requireRole(manager.RoleOperator, s.handleConfigProvenancePage))
 	s.mux.HandleFunc("POST /machine/why-is-this-set", s.requireRole(manager.RoleAdmin, s.handleConfigProvenanceAttest))
 	// Focused per-subsystem Machine pages (SHARED.md's 2026-09-17 12:34
