@@ -51,6 +51,8 @@ const (
 	ManagerService_HostStats_FullMethodName                           = "/apiary.rpc.v1.ManagerService/HostStats"
 	ManagerService_GetLocalHASTResourceStatus_FullMethodName          = "/apiary.rpc.v1.ManagerService/GetLocalHASTResourceStatus"
 	ManagerService_ClusterHealth_FullMethodName                       = "/apiary.rpc.v1.ManagerService/ClusterHealth"
+	ManagerService_GetMonitoringCluster_FullMethodName                = "/apiary.rpc.v1.ManagerService/GetMonitoringCluster"
+	ManagerService_GetMonitoringNodes_FullMethodName                  = "/apiary.rpc.v1.ManagerService/GetMonitoringNodes"
 	ManagerService_GetVMConsole_FullMethodName                        = "/apiary.rpc.v1.ManagerService/GetVMConsole"
 	ManagerService_ProxyVMConsole_FullMethodName                      = "/apiary.rpc.v1.ManagerService/ProxyVMConsole"
 	ManagerService_GetVMSerialLog_FullMethodName                      = "/apiary.rpc.v1.ManagerService/GetVMSerialLog"
@@ -327,6 +329,24 @@ type ManagerServiceClient interface {
 	// reads, so one node's verdict can reflect a slightly earlier moment
 	// than another's.
 	ClusterHealth(ctx context.Context, in *ClusterHealthRequest, opts ...grpc.CallOption) (*ClusterHealthResponse, error)
+	// GetMonitoringCluster and GetMonitoringNodes are ADR-0160's
+	// monitoring report RPCs. They are SIBLINGS of ClusterHealth rather
+	// than an extension of it: ClusterHealth keeps its focused evidence
+	// verdict contract, and a monitoring report carries measurements and
+	// timestamps instead. Expanding ClusterHealth would change the
+	// meaning and payload of an established health API that several
+	// consumers already read for unrelated reasons.
+	//
+	// Both are PULL: a caller asks for current observations when it wants
+	// them, and Apiary never pushes reports to a leader or an external
+	// service. Monitoring observations are NOT raft-replicated - each
+	// node's physical observations stay local - so a cluster report fans
+	// out to peers the way ClusterHealth does, with per-node timestamps
+	// and explicit unavailable, stale, or unknown states.
+	//
+	// Viewer-authorized, the same tier as HostStats and ClusterHealth.
+	GetMonitoringCluster(ctx context.Context, in *GetMonitoringClusterRequest, opts ...grpc.CallOption) (*GetMonitoringClusterResponse, error)
+	GetMonitoringNodes(ctx context.Context, in *GetMonitoringNodesRequest, opts ...grpc.CallOption) (*GetMonitoringNodesResponse, error)
 	// GetVMConsole reports how to reach a running VM's VNC framebuffer,
 	// for the web UI's noVNC-based console page (ADR-0020). Like HostStats,
 	// this only answers for a VM actually running on *this* node - see
@@ -1363,6 +1383,26 @@ func (c *managerServiceClient) ClusterHealth(ctx context.Context, in *ClusterHea
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(ClusterHealthResponse)
 	err := c.cc.Invoke(ctx, ManagerService_ClusterHealth_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *managerServiceClient) GetMonitoringCluster(ctx context.Context, in *GetMonitoringClusterRequest, opts ...grpc.CallOption) (*GetMonitoringClusterResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetMonitoringClusterResponse)
+	err := c.cc.Invoke(ctx, ManagerService_GetMonitoringCluster_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *managerServiceClient) GetMonitoringNodes(ctx context.Context, in *GetMonitoringNodesRequest, opts ...grpc.CallOption) (*GetMonitoringNodesResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetMonitoringNodesResponse)
+	err := c.cc.Invoke(ctx, ManagerService_GetMonitoringNodes_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -2417,6 +2457,24 @@ type ManagerServiceServer interface {
 	// reads, so one node's verdict can reflect a slightly earlier moment
 	// than another's.
 	ClusterHealth(context.Context, *ClusterHealthRequest) (*ClusterHealthResponse, error)
+	// GetMonitoringCluster and GetMonitoringNodes are ADR-0160's
+	// monitoring report RPCs. They are SIBLINGS of ClusterHealth rather
+	// than an extension of it: ClusterHealth keeps its focused evidence
+	// verdict contract, and a monitoring report carries measurements and
+	// timestamps instead. Expanding ClusterHealth would change the
+	// meaning and payload of an established health API that several
+	// consumers already read for unrelated reasons.
+	//
+	// Both are PULL: a caller asks for current observations when it wants
+	// them, and Apiary never pushes reports to a leader or an external
+	// service. Monitoring observations are NOT raft-replicated - each
+	// node's physical observations stay local - so a cluster report fans
+	// out to peers the way ClusterHealth does, with per-node timestamps
+	// and explicit unavailable, stale, or unknown states.
+	//
+	// Viewer-authorized, the same tier as HostStats and ClusterHealth.
+	GetMonitoringCluster(context.Context, *GetMonitoringClusterRequest) (*GetMonitoringClusterResponse, error)
+	GetMonitoringNodes(context.Context, *GetMonitoringNodesRequest) (*GetMonitoringNodesResponse, error)
 	// GetVMConsole reports how to reach a running VM's VNC framebuffer,
 	// for the web UI's noVNC-based console page (ADR-0020). Like HostStats,
 	// this only answers for a VM actually running on *this* node - see
@@ -3231,6 +3289,12 @@ func (UnimplementedManagerServiceServer) GetLocalHASTResourceStatus(context.Cont
 }
 func (UnimplementedManagerServiceServer) ClusterHealth(context.Context, *ClusterHealthRequest) (*ClusterHealthResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ClusterHealth not implemented")
+}
+func (UnimplementedManagerServiceServer) GetMonitoringCluster(context.Context, *GetMonitoringClusterRequest) (*GetMonitoringClusterResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetMonitoringCluster not implemented")
+}
+func (UnimplementedManagerServiceServer) GetMonitoringNodes(context.Context, *GetMonitoringNodesRequest) (*GetMonitoringNodesResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetMonitoringNodes not implemented")
 }
 func (UnimplementedManagerServiceServer) GetVMConsole(context.Context, *GetVMConsoleRequest) (*GetVMConsoleResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetVMConsole not implemented")
@@ -4069,6 +4133,42 @@ func _ManagerService_ClusterHealth_Handler(srv interface{}, ctx context.Context,
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(ManagerServiceServer).ClusterHealth(ctx, req.(*ClusterHealthRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ManagerService_GetMonitoringCluster_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetMonitoringClusterRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ManagerServiceServer).GetMonitoringCluster(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ManagerService_GetMonitoringCluster_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ManagerServiceServer).GetMonitoringCluster(ctx, req.(*GetMonitoringClusterRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ManagerService_GetMonitoringNodes_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetMonitoringNodesRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ManagerServiceServer).GetMonitoringNodes(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ManagerService_GetMonitoringNodes_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ManagerServiceServer).GetMonitoringNodes(ctx, req.(*GetMonitoringNodesRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -5700,6 +5800,14 @@ var ManagerService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ClusterHealth",
 			Handler:    _ManagerService_ClusterHealth_Handler,
+		},
+		{
+			MethodName: "GetMonitoringCluster",
+			Handler:    _ManagerService_GetMonitoringCluster_Handler,
+		},
+		{
+			MethodName: "GetMonitoringNodes",
+			Handler:    _ManagerService_GetMonitoringNodes_Handler,
 		},
 		{
 			MethodName: "GetVMConsole",

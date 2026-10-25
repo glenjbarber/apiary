@@ -221,27 +221,57 @@ func resourceTreeNode(kind, id, name, desired, phase string, observedAt int64, h
 	return healthTreeNode{Key: kind + ":" + id, Label: name, Kind: kind, Level: 2, State: state, Leaf: true, ObservedAtUnix: observedAt, AgeSeconds: ageSeconds}
 }
 
+// aggregateHealthState reduces a node's own state and its children's to
+// one state.
+//
+// It calls internal/health's AggregateStatus, which is the same
+// implementation ADR-0160's monitoring report uses. That is the point:
+// a monitoring report and the health tree must not disagree about the
+// Colony, and two implementations of the same aggregation would
+// eventually drift.
+//
+// The tree's vocabulary is UPPERCASE and its states include DOWN, where
+// internal/health's are lowercase and do not - the tree is a UI
+// concern with its own rendering. So the states are translated here, in
+// one place, rather than the two vocabularies being mixed.
+//
+// DOWN is folded into DEGRADED, because a Comb that is down is a Comb
+// that is not healthy, and the tree has no separate "the whole Colony
+// is down" badge.
 func aggregateHealthState(own string, children []healthTreeNode) string {
-	unknown, stale, degraded := own == "UNKNOWN", own == "STALE", own == "DEGRADED"
+	statuses := make([]health.Status, 0, len(children)+1)
+	statuses = append(statuses, treeStateToHealthStatus(own))
 	for _, child := range children {
-		switch child.State {
-		case "DOWN", "DEGRADED":
-			degraded = true
-		case "STALE":
-			stale = true
-		case "UNKNOWN":
-			unknown = true
-		}
+		statuses = append(statuses, treeStateToHealthStatus(child.State))
 	}
-	switch {
-	case degraded:
+	switch health.AggregateStatus(statuses) {
+	case health.StatusDegraded:
 		return "DEGRADED"
-	case stale:
+	case health.StatusStale:
 		return "STALE"
-	case unknown:
+	case health.StatusUnknown:
 		return "UNKNOWN"
 	default:
 		return "HEALTHY"
+	}
+}
+
+// treeStateToHealthStatus translates one of the health tree's UPPERCASE
+// states into internal/health's own vocabulary.
+//
+// DOWN becomes degraded: the tree distinguishes a Comb that is down from
+// one that is merely degraded, but the aggregation only needs to know
+// that neither is healthy.
+func treeStateToHealthStatus(state string) health.Status {
+	switch state {
+	case "HEALTHY":
+		return health.StatusHealthy
+	case "DEGRADED", "DOWN":
+		return health.StatusDegraded
+	case "STALE":
+		return health.StatusStale
+	default:
+		return health.StatusUnknown
 	}
 }
 

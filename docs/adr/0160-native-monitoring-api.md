@@ -4,6 +4,16 @@
 
 Proposed. The prior ADR-0150 proposal is superseded for the monitoring API decisions recorded here; its historical analysis and unaccepted details remain preserved below.
 
+**Implemented 2026-10-25 (issue #25).** The native half is now built: `ManagerService.GetMonitoringCluster` and `GetMonitoringNodes` return per-node measurement reports and the Colony's verdict, and the REST shim exposes them at `GET /v1/monitoring/health` and `GET /v1/monitoring/nodes`. Both are Viewer-tier, both are pull-only, and neither retains history.
+
+Two decisions in the body needed sharpening during the implementation, and both are now recorded in the code:
+
+  - **The aggregation rule lives in ONE place.** The verdict of a Colony from its nodes' verdicts was implemented twice - once in the Command Center's health tree, once in the monitoring report - and two implementations of it would eventually drift. It now lives in `internal/health`'s `AggregateStatus`, which both call. The health tree's UPPERCASE vocabulary (which includes DOWN, where internal/health's does not) is translated in the one place that needs it.
+
+  - **A measurement that was not taken is ABSENT, and that needed work to arrange.** `HostStats` always populates its memory figure, so a memory reading that failed to be taken arrives as zeros - indistinguishable, to a reader of `HostStats`, from a machine with no memory. The monitoring report uses `HostStats.errors`, which names each failed subsystem, to omit the measurement that was not taken. Without that, a monitoring system would read "memory available: 0" during an outage and page an operator about a healthy machine.
+
+The REST half is now what ADR-0161's Zabbix template consumes, so #24 is unblocked.
+
 Supersedes: ADR-0150 monitoring proposal sections on API shape and unresolved monitoring choices
 Superseded by: None
 Tracking issue: #25

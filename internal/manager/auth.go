@@ -93,11 +93,16 @@ var requiredRole = map[string]Role{
 	// are read-only reports of the same kind as HostStats and
 	// GetLocalNodeHealth. TestRequiredRole_CoversEveryRPC now fails if an
 	// RPC is added without a deliberate role.
-	"/apiary.rpc.v1.ManagerService/ListVMsLocal":     RoleViewer,
-	"/apiary.rpc.v1.ManagerService/ListJailsLocal":   RoleViewer,
-	"/apiary.rpc.v1.ManagerService/ClusterHealth":    RoleViewer,
-	"/apiary.rpc.v1.ManagerService/HostPackages":     RoleViewer,
-	"/apiary.rpc.v1.ManagerService/ListNodeServices": RoleViewer,
+	"/apiary.rpc.v1.ManagerService/ListVMsLocal":   RoleViewer,
+	"/apiary.rpc.v1.ManagerService/ListJailsLocal": RoleViewer,
+	"/apiary.rpc.v1.ManagerService/ClusterHealth":  RoleViewer,
+	// ADR-0160's monitoring reports are READS, at the same Viewer tier
+	// as HostStats and ClusterHealth above - they carry measurements,
+	// not verdicts about anything an operator can change.
+	"/apiary.rpc.v1.ManagerService/GetMonitoringCluster": RoleViewer,
+	"/apiary.rpc.v1.ManagerService/GetMonitoringNodes":   RoleViewer,
+	"/apiary.rpc.v1.ManagerService/HostPackages":         RoleViewer,
+	"/apiary.rpc.v1.ManagerService/ListNodeServices":     RoleViewer,
 
 	// The Dependency Graph Simulator RPCs are read-only reports - Viewer,
 	// the same tier as every other plain read

@@ -54,6 +54,14 @@ type fakeClient struct {
 	clusterHealthErr     error
 	lastClusterHealthCtx context.Context
 
+	// ADR-0160's monitoring reports.
+	monitoringClusterResp    *rpcpb.GetMonitoringClusterResponse
+	monitoringClusterErr     error
+	lastMonitoringClusterCtx context.Context
+	monitoringNodesResp      *rpcpb.GetMonitoringNodesResponse
+	monitoringNodesErr       error
+	lastMonitoringNodesCtx   context.Context
+
 	createJailResp *rpcpb.CreateJailResponse
 	updateJailResp *rpcpb.UpdateJailResponse
 	deleteJailResp *rpcpb.DeleteJailResponse
@@ -142,6 +150,18 @@ func (f *fakeClient) GetLocalNodeHealth(context.Context, *rpcpb.GetLocalNodeHeal
 func (f *fakeClient) ClusterHealth(ctx context.Context, _ *rpcpb.ClusterHealthRequest, _ ...grpc.CallOption) (*rpcpb.ClusterHealthResponse, error) {
 	f.lastClusterHealthCtx = ctx
 	return f.clusterHealthResp, f.clusterHealthErr
+}
+
+// ADR-0160's monitoring reports, backing the REST shim's
+// /v1/monitoring/... endpoints.
+func (f *fakeClient) GetMonitoringCluster(ctx context.Context, _ *rpcpb.GetMonitoringClusterRequest, _ ...grpc.CallOption) (*rpcpb.GetMonitoringClusterResponse, error) {
+	f.lastMonitoringClusterCtx = ctx
+	return f.monitoringClusterResp, f.monitoringClusterErr
+}
+
+func (f *fakeClient) GetMonitoringNodes(ctx context.Context, _ *rpcpb.GetMonitoringNodesRequest, _ ...grpc.CallOption) (*rpcpb.GetMonitoringNodesResponse, error) {
+	f.lastMonitoringNodesCtx = ctx
+	return f.monitoringNodesResp, f.monitoringNodesErr
 }
 
 func (f *fakeClient) ListAssumptionClaims(context.Context, *rpcpb.ListAssumptionClaimsRequest, ...grpc.CallOption) (*rpcpb.ListAssumptionClaimsResponse, error) {
