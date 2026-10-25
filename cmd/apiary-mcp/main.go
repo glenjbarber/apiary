@@ -184,9 +184,21 @@ type cellSummary struct {
 	Phase        string `json:"phase,omitempty"`
 }
 
+// getCellInput is get_cell's input.
+//
+// The jsonschema tags are the schema's DOCUMENTATION, and a model reads
+// them to decide what to pass. They say what each argument identifies
+// and what happens when it is wrong, which is more than a field name
+// can. The SDK infers the schema's shape from the Go type, so these
+// tags are the only place the guidance can live.
 type getCellInput struct {
-	ID   string `json:"id" jsonschema:"Apiary cell ID"`
-	Type string `json:"type" jsonschema:"Cell type: vm or jail"`
+	// ID identifies the cell. A cell's ID is unique only WITHIN its
+	// type, so Type is needed alongside it to identify one. Get it
+	// from list_cells.
+	ID string `json:"id" jsonschema:"The ID of the cell to read, as returned by list_cells."`
+	// Type says which kind of cell the ID names. It must be exactly
+	// "vm" or "jail"; a jail's ID with type "vm" finds nothing.
+	Type string `json:"type" jsonschema:"Which kind of cell the ID names: exactly 'vm' or 'jail'."`
 }
 
 type healthInput struct{}
@@ -194,17 +206,57 @@ type healthOutput struct {
 	LocalNodeID string             `json:"local_node_id,omitempty"`
 	Unavailable bool               `json:"unavailable"`
 	Nodes       []healthNodeResult `json:"nodes"`
+	// Truncated says the node list was cut off. Without it, a
+	// truncated list is indistinguishable from a complete one.
+	Truncated bool `json:"truncated"`
 }
+
+// healthNodeResult is one Comb's health verdict.
+//
+// Unknown is the field that matters most here, and it is NOT the same
+// as "the status string is literally unknown". api/rpc/manager.proto
+// says of this status field:
+//
+//	status is one of "healthy", "degraded", "unknown", "stale", or
+//	"contradictory" - or any other string if a newer managerd computes
+//	a state this consumer has never heard of. Treat an unrecognized
+//	status as unknown, never as healthy: that is the whole failure mode
+//	Evidence-Aware Health exists to prevent, and the string contract
+//	cannot enforce it on the consumer's behalf.
+//
+// The contract cannot be enforced on the CONSUMER's behalf, which means
+// it has to be enforced HERE - this connector IS the consumer, and a
+// model reading this JSON cannot be asked to know which strings are
+// new. So an unrecognized status is reported as unknown, and the raw
+// string is still carried in Status so a caller that knows about it can
+// see it.
 type healthNodeResult struct {
-	NodeID  string `json:"node_id"`
-	Status  string `json:"status"`
-	Dialed  bool   `json:"dialed"`
-	Unknown bool   `json:"unknown"`
+	NodeID string `json:"node_id"`
+	// Status is the raw verdict string from managerd.
+	Status string `json:"status"`
+	// Dialed is whether the Comb answered at all.
+	Dialed bool `json:"dialed"`
+	// Unknown is true when the verdict is ABSENT rather than good:
+	// either managerd said "unknown", or it said something this
+	// connector does not recognise. It is never true for a verdict
+	// this connector does recognise.
+	Unknown bool `json:"unknown"`
 }
 
 func newMCPServer(cfg config) *mcp.Server {
-	s := mcp.NewServer(&mcp.Implementation{Name: "apiary-mcp", Version: "0.1.0"}, nil)
-	mcp.AddTool(s, &mcp.Tool{Name: "list_cells", Description: "List Apiary VMs and jails. Returns only identity and lifecycle summary fields."}, audited("list_cells", func(ctx context.Context, _ *mcp.CallToolRequest, _ listCellsInput) (*mcp.CallToolResult, listCellsOutput, error) {
+	// The server-level instructions are the model-agnostic part: they
+	// carry the conventions every tool depends on, so the tool
+	// descriptions themselves can stay short and factual. See
+	// modelagnostic.go for what "model agnostic" means here.
+	s := mcp.NewServer(&mcp.Implementation{Name: "apiary-mcp", Version: "0.1.0"}, &mcp.ServerOptions{
+		Instructions: serverInstructions,
+	})
+	mcp.AddTool(s, &mcp.Tool{
+		Name:        "list_cells",
+		Title:       "List cells",
+		Description: listCellsDescription,
+		Annotations: readOnlyAnnotations("List cells"),
+	}, audited("list_cells", func(ctx context.Context, _ *mcp.CallToolRequest, _ listCellsInput) (*mcp.CallToolResult, listCellsOutput, error) {
 		ctx, cancel := context.WithTimeout(ctx, requestTimeout)
 		defer cancel()
 		vmResp, err := cfg.client.ListVMs(authContext(ctx, cfg.apiKey), &rpcpb.ListVMsRequest{})
@@ -238,7 +290,12 @@ func newMCPServer(cfg config) *mcp.Server {
 		}
 		return nil, out, nil
 	}))
-	mcp.AddTool(s, &mcp.Tool{Name: "get_cell", Description: "Read one Apiary VM or jail by ID. Returns only identity and lifecycle summary fields."}, audited("get_cell", func(ctx context.Context, _ *mcp.CallToolRequest, in getCellInput) (*mcp.CallToolResult, cellSummary, error) {
+	mcp.AddTool(s, &mcp.Tool{
+		Name:        "get_cell",
+		Title:       "Get cell",
+		Description: getCellDescription,
+		Annotations: readOnlyAnnotations("Get cell"),
+	}, audited("get_cell", func(ctx context.Context, _ *mcp.CallToolRequest, in getCellInput) (*mcp.CallToolResult, cellSummary, error) {
 		if in.ID == "" || len(in.ID) > 256 || (in.Type != "vm" && in.Type != "jail") {
 			return nil, cellSummary{}, errors.New("type must be vm or jail and id must be between 1 and 256 characters")
 		}
@@ -271,7 +328,12 @@ func newMCPServer(cfg config) *mcp.Server {
 		}
 		return nil, cellSummary{ID: jail.GetId(), Name: jail.GetName(), Type: "jail", NodeID: jail.GetNodeId(), DesiredState: jail.GetDesiredState().String(), Phase: jail.GetPhase().String()}, nil
 	}))
-	mcp.AddTool(s, &mcp.Tool{Name: "get_cluster_health", Description: "Read Apiary cluster health. Returns node IDs and verdicts; detailed diagnostic text is omitted."}, audited("get_cluster_health", func(ctx context.Context, _ *mcp.CallToolRequest, _ healthInput) (*mcp.CallToolResult, healthOutput, error) {
+	mcp.AddTool(s, &mcp.Tool{
+		Name:        "get_cluster_health",
+		Title:       "Get cluster health",
+		Description: getClusterHealthDescription,
+		Annotations: readOnlyAnnotations("Get cluster health"),
+	}, audited("get_cluster_health", func(ctx context.Context, _ *mcp.CallToolRequest, _ healthInput) (*mcp.CallToolResult, healthOutput, error) {
 		ctx, cancel := context.WithTimeout(ctx, requestTimeout)
 		defer cancel()
 		resp, err := cfg.client.ClusterHealth(authContext(ctx, cfg.apiKey), &rpcpb.ClusterHealthRequest{})
@@ -281,11 +343,12 @@ func newMCPServer(cfg config) *mcp.Server {
 		out := healthOutput{LocalNodeID: resp.GetLocalNodeId(), Unavailable: resp.GetError() != "", Nodes: make([]healthNodeResult, 0, len(resp.GetNodes()))}
 		for _, node := range resp.GetNodes() {
 			if node != nil {
-				out.Nodes = append(out.Nodes, healthNodeResult{NodeID: node.GetNodeId(), Status: node.GetStatus(), Dialed: node.GetDialed(), Unknown: node.GetStatus() == "unknown"})
+				out.Nodes = append(out.Nodes, healthNodeResult{NodeID: node.GetNodeId(), Status: node.GetStatus(), Dialed: node.GetDialed(), Unknown: !recognizedHealthStatus(node.GetStatus())})
 			}
 		}
 		if len(out.Nodes) > 100 {
 			out.Nodes = out.Nodes[:100]
+			out.Truncated = true
 		}
 		return nil, out, nil
 	}))

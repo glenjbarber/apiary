@@ -7,6 +7,10 @@ Proposed. This record documents the current implementation and proposes the prod
 Supersedes: None
 Superseded by: None
 Tracking issue: #26
+Amended by ADR-0166 (the model-agnostic property of the tool surface:
+its annotations, its descriptions as contracts, its server instructions,
+and its self-describing results - including the rule that an
+unrecognized health verdict is reported as unknown).
 
 ## Context
 
