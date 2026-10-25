@@ -2,7 +2,9 @@
 
 ## Status
 
-Proposed. This record documents the current implementation and proposes the product and security boundary for issue #26. Deployment and client interoperability are not verified.
+Proposed. This record documents the current implementation and proposes the product and security boundary for issue #26.
+
+**Interoperability verified 2026-10-25; deployment not.** The "not verified" this status line used to carry for interoperability is now settled: `scripts/check-mcp-interop.sh` starts a stub managerd, starts the real `apiary-mcp` against it, and drives it with **orcli's real MCP client** over both transports - stdio (a local client) and Streamable HTTP (a remote client). Both pass: the server answers initialize, orcli can list the tools, the tool set is the three read-only ones, and every tool arrives annotated read-only. What is still not verified is **deployment** - the connector's own record of where it is installed and how an operator enables it was only made real by the change that followed this one, and its use in a production Colony has not been exercised.
 
 Supersedes: None
 Superseded by: None
@@ -34,7 +36,7 @@ Orcli owns client transport and interaction behavior. Apiary owns the MCP server
 
 ## Consequences
 
-- The present read-only server is recorded as the baseline; no claim is made that deployment or client interoperability has been verified.
+- The present read-only server is recorded as the baseline. Client interoperability is verified against orcli's real client over both transports, by `scripts/check-mcp-interop.sh`; deployment in a production Colony is not.
 - Apiary remains a resource server. Orcli remains the client/host, with independent work in the orcli repository.
 - The basic read-only external-client product boundary, remote user identity model, session behavior, and any licensing decision remain open for the owner.
 - Guarded writes stay out of scope until per-operation role mapping, explicit user approval, and auditable outcomes are specified and implemented.

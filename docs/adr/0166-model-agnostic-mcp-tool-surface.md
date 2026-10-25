@@ -21,7 +21,9 @@ enforced by managerd's own role map, bounded output summaries, and no
 guarded writes until a per-operation authorization and approval policy
 exists. It also recorded that the boundary for basic read-only
 external-client access "remains unresolved", and that deployment and
-client interoperability are not verified.
+client interoperability are now verified against orcli's real MCP
+client over both transports - see ADR-0162's status line and
+`scripts/check-mcp-interop.sh`.
 
 Glen's requirement for issue #26 is that the MCP integration be **model
 agnostic**. That word needs a precise meaning before it can be
@@ -177,8 +179,10 @@ anything, so it is reported as unknown as well.
 - It does not change the allowlist, the transport, the authorization
   model, or the deployment story. Those are ADR-0162's, and they are
   untouched.
-- It does not claim deployment or client interoperability has been
-  verified. ADR-0162's record of that remains true.
+- It does not claim deployment in a production Colony has been
+  exercised. Client interoperability IS verified: ADR-0162's status line
+  records the check, and `scripts/check-mcp-interop.sh` is the thing
+  that performs it.
 
 ## Consequences
 
