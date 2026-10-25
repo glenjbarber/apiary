@@ -55,21 +55,6 @@ type verifier interface {
 	Verify(ctx context.Context, grace time.Duration) error
 }
 
-// apiKeyCredentials attaches an API key to every outgoing managerd call
-// as gRPC metadata, matching the "authorization: Bearer <key>"
-// convention internal/manager's auth interceptor expects (ADR-0023).
-// RequireTransportSecurity is false to match this project's existing
-// insecure local-network transport (see grpc.WithTransportCredentials
-// below) - the key travels in plaintext the same way everything else
-// on this connection already does.
-type apiKeyCredentials string
-
-func (k apiKeyCredentials) GetRequestMetadata(context.Context, ...string) (map[string]string, error) {
-	return map[string]string{"authorization": "Bearer " + string(k)}, nil
-}
-
-func (apiKeyCredentials) RequireTransportSecurity() bool { return false }
-
 // remoteAuthenticator satisfies frontend.Authenticator by asking
 // managerd's own AuthenticatePassword RPC (ADR-0087) - the raw PAM
 // check now happens there, not in this process, so cmd/frontend
@@ -173,9 +158,15 @@ func run() error {
 	// frontend forwards whatever the logged-in user's role permits -
 	// a frontend whose own key is only Viewer would reject every
 	// Operator/Admin action downstream regardless of the UI session.
-	if cfg.ManagerAPIKey != "" {
-		dialOpts = append(dialOpts, grpc.WithPerRPCCredentials(apiKeyCredentials(cfg.ManagerAPIKey)))
-	}
+	//
+	// The credential is LIVE (issue #75): it resolves the key from
+	// frontend.json at call time rather than capturing it here. That is
+	// what stops the first-API-key lockout - see liveKey's own doc
+	// comment for the whole of it. The key is attached whether or not
+	// one is configured yet: an unset key presents no credential at
+	// all, which is exactly the state this frontend was in before the
+	// first key existed.
+	dialOpts = append(dialOpts, grpc.WithPerRPCCredentials(newLiveKey(frontendconfig.DefaultPath)))
 	conn, err := grpc.NewClient(cfg.ManagerAddr, dialOpts...)
 	if err != nil {
 		return fmt.Errorf("dialing managerd at %s: %w", cfg.ManagerAddr, err)

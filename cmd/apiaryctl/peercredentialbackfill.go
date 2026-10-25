@@ -173,7 +173,9 @@ restart-guardrail token and has restarted managerd, then run on each existing
 Comb. A follower without a local token retrieves it in an envelope encrypted
 to its pinned TLS certificate. The command stores only the API key hash in
 Raft, derives the same key locally from the token, writes managerd.json and
-frontend.json on this Comb, then restarts managerd and frontend.
+frontend.json on this Comb, then restarts managerd. The frontend is not
+restarted: it reads its manager_api_key live, so the key written above is
+already in effect (issue #75).
 
 Root only. The key and restart token are never printed. If this Comb is not
 the leader and the shared key is not yet in Raft, run the command on the
@@ -263,10 +265,21 @@ func backfillPeerCredential(managerPath, frontendPath, raftdPath, tokenPath stri
 	if err := saveLocalPeerCredential(nodeManager, frontManager, nodeCfg, frontCfg, key); err != nil {
 		return err
 	}
-	for _, service := range []string{"apiary_managerd", "apiary_frontend"} {
-		if output, err := exec.Command("service", service, "restart").CombinedOutput(); err != nil {
-			return fmt.Errorf("credentials were written but restarting %s failed: %v: %s", service, err, strings.TrimSpace(string(output)))
-		}
+	// Only managerd is restarted.
+	//
+	// managerd reads its peer_api_key once, at startup, so it needs the
+	// restart to pick the new one up. The FRONTEND does not: its
+	// manager_api_key is resolved live from frontend.json on every call
+	// (cmd/frontend's liveKey, issue #75), so the key written just
+	// above is already in effect and a restart would be a needless
+	// interruption of a service that is working.
+	//
+	// Restarting the frontend here used to be necessary, and it was
+	// part of what made the backfill feel heavier than it needed to
+	// be - it took the operator's UI down on every member of a
+	// multi-Comb Colony.
+	if output, err := exec.Command("service", "apiary_managerd", "restart").CombinedOutput(); err != nil {
+		return fmt.Errorf("credentials were written but restarting apiary_managerd failed: %v: %s", err, strings.TrimSpace(string(output)))
 	}
 	return nil
 }

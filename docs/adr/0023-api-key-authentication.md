@@ -243,8 +243,18 @@ Before creating the first key, the page must warn that every managerd in the
 Colony will require authentication, so any frontend without its own
 `manager_api_key` will fail, including this page if local provisioning fails.
 It must state that a dedicated key is configured per Comb, name the two
-configuration files on each Comb, explain that frontends may require restart,
-and give the recovery procedure above. The page must distinguish an
+configuration files on each Comb, and give the recovery procedure above.
+
+**Amended 2026-10-25 (issue #75, ADR-0167):** this paragraph used to require
+the page to "explain that frontends may require restart", and a frontend
+really did need one - its `manager_api_key` was captured once, at startup,
+so the key the page wrote into `frontend.json` was not the credential the
+running frontend was using, and every call after the first key was created
+failed `Unauthenticated` until an operator restarted it by hand. ADR-0167
+makes the frontend resolve the key live, from the file, on every call, so
+the key takes effect with no restart and the page no longer needs to
+explain one. The two configuration files are still named, and ADR-0167
+requires them by PATH as well as by name. The page must distinguish an
 unreachable member from an authentication or file-write failure and identify
 the member by node ID and address.
 

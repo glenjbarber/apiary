@@ -2806,6 +2806,14 @@ func TestServer_APIKeysPage_WarnsBeforeFirstKeyIsCreated(t *testing.T) {
 			t.Errorf("the pre-creation warning does not mention %q:\n%s", want, body)
 		}
 	}
+	// Issue #75's own words: the warning "says which files to change".
+	// A warning that names the fields but not the paths leaves the
+	// operator guessing where the files are.
+	for _, want := range []string{"/usr/local/etc/apiary/managerd.json", "/usr/local/etc/apiary/frontend.json"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("the pre-creation warning does not name the path %q, so it does not say which files to change:\n%s", want, body)
+		}
+	}
 	for _, stale := range []string{"cannot forward writes to the leader", "by hand"} {
 		if strings.Contains(body, stale) {
 			t.Errorf("the pre-creation warning still contains stale guidance %q:\n%s", stale, body)
