@@ -297,6 +297,16 @@ func (f *fakeClient) ClusterHealth(context.Context, *rpcpb.ClusterHealthRequest,
 	return &rpcpb.ClusterHealthResponse{}, nil
 }
 
+// ADR-0160's monitoring reports. The fake returns empty responses by
+// default, so a test that needs rows sets them.
+func (f *fakeClient) GetMonitoringCluster(context.Context, *rpcpb.GetMonitoringClusterRequest, ...grpc.CallOption) (*rpcpb.GetMonitoringClusterResponse, error) {
+	return &rpcpb.GetMonitoringClusterResponse{}, nil
+}
+
+func (f *fakeClient) GetMonitoringNodes(context.Context, *rpcpb.GetMonitoringNodesRequest, ...grpc.CallOption) (*rpcpb.GetMonitoringNodesResponse, error) {
+	return &rpcpb.GetMonitoringNodesResponse{}, nil
+}
+
 func (f *fakeClient) CreateVM(_ context.Context, in *rpcpb.CreateVMRequest, _ ...grpc.CallOption) (*rpcpb.CreateVMResponse, error) {
 	f.lastCreateReq = in
 	return f.createResp, f.createErr

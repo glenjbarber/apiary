@@ -116,6 +116,16 @@ func (s *Server) routes() {
 	// automated against.
 	s.mux.HandleFunc("GET /v1/health", s.handleClusterHealth)
 
+	// ADR-0160's monitoring scrape endpoints: the REST representation
+	// of the same observations the ManagerService monitoring RPCs
+	// carry, for an external monitoring system to poll. ADR-0161's
+	// Zabbix template consumes these.
+	//
+	// They are Viewer-authorized, the same tier as the RPCs behind
+	// them, so a monitoring system's key must be a Viewer key.
+	s.mux.HandleFunc("GET /v1/monitoring/health", s.handleMonitoringCluster)
+	s.mux.HandleFunc("GET /v1/monitoring/nodes", s.handleMonitoringNodes)
+
 	s.mux.HandleFunc("POST /v1/vms", s.handleCreateVM)
 	s.mux.HandleFunc("GET /v1/vms", s.handleListVMs)
 	s.mux.HandleFunc("GET /v1/vms/{id}", s.handleGetVM)

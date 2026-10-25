@@ -210,6 +210,25 @@ service ManagerService {
   // than another's.
   rpc ClusterHealth(ClusterHealthRequest) returns (ClusterHealthResponse);
 
+  // GetMonitoringCluster and GetMonitoringNodes are ADR-0160's
+  // monitoring report RPCs. They are SIBLINGS of ClusterHealth rather
+  // than an extension of it: ClusterHealth keeps its focused evidence
+  // verdict contract, and a monitoring report carries measurements and
+  // timestamps instead. Expanding ClusterHealth would change the
+  // meaning and payload of an established health API that several
+  // consumers already read for unrelated reasons.
+  //
+  // Both are PULL: a caller asks for current observations when it wants
+  // them, and Apiary never pushes reports to a leader or an external
+  // service. Monitoring observations are NOT raft-replicated - each
+  // node's physical observations stay local - so a cluster report fans
+  // out to peers the way ClusterHealth does, with per-node timestamps
+  // and explicit unavailable, stale, or unknown states.
+  //
+  // Viewer-authorized, the same tier as HostStats and ClusterHealth.
+  rpc GetMonitoringCluster(GetMonitoringClusterRequest) returns (GetMonitoringClusterResponse);
+  rpc GetMonitoringNodes(GetMonitoringNodesRequest) returns (GetMonitoringNodesResponse);
+
   // GetVMConsole reports how to reach a running VM's VNC framebuffer,
   // for the web UI's noVNC-based console page (ADR-0020). Like HostStats,
   // this only answers for a VM actually running on *this* node - see
@@ -4584,6 +4603,143 @@ message UpdateVoterAddressResponse {
 // whatever the answering node itself considers known, exactly as
 // StatusResponse.known_node_ids already defines it.
 message ClusterHealthRequest {}
+
+// GetMonitoringClusterRequest asks for the CLUSTER-WIDE monitoring
+// view: one verdict for the Colony, plus the per-node rows it was
+// computed from.
+//
+// It takes no parameters. The set of nodes is read from raft
+// membership, never from the caller, so a caller cannot ask about a
+// node that is not a member - and cannot ask to be told about a
+// subset that would present a partial Colony as the whole of it.
+message GetMonitoringClusterRequest {}
+
+// GetMonitoringNodesRequest asks for the PER-NODE monitoring summaries.
+message GetMonitoringNodesRequest {}
+
+// MonitoringHealthStatus is the five-state health vocabulary, in the
+// SAME terms internal/health uses and ClusterHealth already reports:
+// healthy, degraded, unknown, stale, contradictory.
+//
+// It is a string rather than an enum for the reason
+// ClusterNodeHealth.status is: a newer managerd may compute a state an
+// older consumer has never heard of, and the string contract cannot
+// enforce anything on the consumer's behalf. A consumer that does not
+// recognise a value must treat it as unknown, never as healthy.
+//
+// The same rule applies to the REST representation below, and it is the
+// reason ADR-0161's Zabbix template maps the value through rather than
+// interpreting it.
+//
+// MONITORING_VALUE_UNAVAILABLE is the marker for "this observation
+// could not be taken", as distinct from "this observation was taken and
+// its value is zero". A missing observation is never coerced to zero
+// and never to a healthy value.
+message MonitoringHealthStatus {
+  // status is the health verdict, or "" when none was computed.
+  string status = 1;
+
+  // observed_unix is when the underlying observation was taken, in unix
+  // seconds. It is 0 when no observation was taken at all, which is
+  // what tells a consumer the row is stale rather than merely old.
+  //
+  // A consumer must not read the age of a row as its freshness without
+  // checking this: a row whose observation is an hour old carries the
+  // hour-old timestamp, and a consumer that compares against its own
+  // clock rather than this field will get the right answer.
+  int64 observed_unix = 2;
+
+  // available is false when the observation could not be taken at all.
+  // It is the explicit "unavailable" state ADR-0160 requires, and it
+  // is deliberately separate from status: an unavailable row has no
+  // verdict, where an unknown row has a verdict that says nothing is
+  // known.
+  bool available = 3;
+
+  // detail explains an unavailable or unknown row in one sentence, for
+  // a human reading the response. It never contains credentials.
+  string detail = 4;
+}
+
+// MonitoringNodeReport is one Comb's monitoring summary.
+//
+// Every measurement is OPTIONAL: a source that could not be read is
+// absent, not zero. A consumer that reads a present field is reading a
+// real observation; a consumer that reads an absent one knows the
+// answer is not known, which is a different thing from an answer of
+// zero.
+message MonitoringNodeReport {
+  // node_id identifies the Comb.
+  string node_id = 1;
+
+  // health is the Comb's health verdict, in the five-state
+  // vocabulary above.
+  MonitoringHealthStatus health = 2;
+
+  // cpu carries the load averages and core count.
+  CPUStats cpu = 3;
+
+  // mem carries physical memory totals and availability.
+  MemStats mem = 4;
+
+  // pools carries per-pool capacity and health.
+  repeated PoolStats pools = 5;
+
+  // disks carries per-disk health.
+  repeated DiskStats disks = 6;
+
+  // net carries per-interface byte counters and link state.
+  repeated NetIfaceStats net = 7;
+
+  // raft_role is this Comb's raft role, and raft_applied_index the
+  // index it has applied. Both are empty or zero when they could not
+  // be read.
+  string raft_role = 8;
+  uint64 raft_applied_index = 9;
+
+  // unavailable lists the subsystems this node could not report, the
+  // same shape as HostStatsResponse.errors. The rest of the report is
+  // still populated on a best-effort basis.
+  repeated string unavailable = 10;
+}
+
+// GetMonitoringClusterResponse is the cluster-wide monitoring view.
+//
+// It carries the per-node rows AND the cluster's own verdict, so a
+// consumer that only wants the cluster verdict does not have to
+// compute one from the rows - which would mean reimplementing
+// internal/health's aggregation, which is exactly the thing ADR-0160
+// says must not happen on the consumer's side.
+message GetMonitoringClusterResponse {
+  // local_node_id is the Comb this response was produced by.
+  string local_node_id = 1;
+
+  // health is the Colony's verdict.
+  MonitoringHealthStatus health = 2;
+
+  // nodes carries one row per Comb, sorted by node ID.
+  repeated MonitoringNodeReport nodes = 3;
+
+  // error is set when the cluster verdict could not be computed at
+  // all - for example when raft membership could not be read, which
+  // caps every node's verdict at unknown. It is a reason, not a
+  // verdict, and it never contains credentials.
+  string error = 4;
+}
+
+// GetMonitoringNodesResponse carries the per-node monitoring summaries
+// without the cluster verdict, for a consumer that polls the nodes and
+// computes its own view of the Colony.
+message GetMonitoringNodesResponse {
+  // local_node_id is the Comb this response was produced by.
+  string local_node_id = 1;
+
+  // nodes carries one row per Comb, sorted by node ID.
+  repeated MonitoringNodeReport nodes = 2;
+
+  // error is set when the node set could not be read at all.
+  string error = 3;
+}
 
 // ClusterNodeHealth is one Comb's verdict as seen from a cluster-wide
 // read. It deliberately mirrors GetLocalNodeHealthResponse field for
