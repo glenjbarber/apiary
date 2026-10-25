@@ -162,6 +162,12 @@
       screen by the target's Admin. Nothing changes
       about this Comb's own cluster membership until they approve it.
     </p>
+    <p class="muted">
+      <a href="/machine/join">Open the guided join flow</a> (ADR-0163): one
+      screen showing both sides of the handshake, which Comb each action
+      happens on, what has already been recorded, and what to do next. It is
+      read-only, and it submits nothing on your behalf.
+    </p>
     {{if .JoinColonyFormError}}<div class="banner-error">{{.JoinColonyFormError}}</div>{{end}}
     {{if .JoinColonyResult}}
       {{if .JoinColonyResult.Error}}

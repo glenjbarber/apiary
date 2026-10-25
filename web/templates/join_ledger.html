@@ -1,0 +1,173 @@
+{{define "join_ledger_page"}}
+<!DOCTYPE html>
+<html lang="en">
+{{template "head" .}}
+<body class="app-layout">
+  {{template "nav" .}}
+  <main class="content" id="main-content">
+  {{template "page_header" (pageHeader "Guided Colony join" "One screen showing both sides of the two-way join handshake: which Comb each action happens on, what has already been recorded, and what to do next. Every value here is read from the Colony's own replicated state, so this page survives a leadership change and a reload unchanged. It never submits anything on your behalf - the first code and the second PIN are the two things a person has to read off the joining Comb's own screen and carry across, and a page that did that for you would satisfy the check that matters without you.")}}
+
+  {{$L := .JoinLedger}}
+
+  {{if not $L.Request}}
+  <div class="banner-warning">
+    <p><strong>No join request yet.</strong></p>
+    <p>
+      The handshake starts when the JOINING Comb's operator runs
+      <code>apiaryctl join-introduce --target HOST:PORT</code> on it. That
+      command generates the joining Comb's own first code and reads its own
+      certificate fingerprints, and submits nothing to this Colony - it only
+      creates the request this page then tracks.
+    </p>
+    <p class="muted">
+      The steps below are the same either way; they are simply not yet
+      anchored to a request.
+    </p>
+  </div>
+  {{end}}
+
+  {{if $L.WindowReadFailed}}
+  <div class="banner-error">
+    <p><strong>This page could not read the join window's state.</strong></p>
+    <p>{{$L.WindowError}}</p>
+    <p class="muted">
+      That is not the same as the window being closed. Opening a window while
+      this page cannot see one would be acting on no information, so the
+      window step below says so rather than offering a fix that may not be
+      needed.
+    </p>
+  </div>
+  {{else if $L.WindowError}}
+  <div class="banner-error"><p>{{$L.WindowError}}</p></div>
+  {{end}}
+
+  {{if $L.Request}}
+  <div class="panel">
+    <h3>This join request</h3>
+    <table>
+      <tbody>
+        <tr><th>Request</th><td><code>{{$L.Request.RequestID}}</code></td></tr>
+        <tr><th>Joining Comb</th><td>{{$L.Request.NodeID}} at <code>{{$L.Request.RaftBindAddress}}</code></td></tr>
+        <tr><th>Stage</th><td>{{$L.Stage}}</td></tr>
+        <tr><th>Status</th><td>{{$L.Status}}</td></tr>
+        {{if $L.AttemptsMax}}
+        <tr><th>First-code attempts</th><td>{{$L.FirstCodeAttempts}} of {{$L.AttemptsMax}} used</td></tr>
+        {{end}}
+        {{if $L.SecondPinExpires}}
+        <tr><th>Second PIN</th><td>expires {{$L.SecondPinExpires}}, reissued {{$L.SecondPinReissues}} of 2 times</td></tr>
+        {{end}}
+      </tbody>
+    </table>
+    {{if $L.Request.Fingerprints}}
+    <h4>The fingerprints the JOINING Comb advertised</h4>
+    <p class="muted">
+      These are the JOINING Comb's own certificate digests, and they are what
+      this Colony's Stage 1 form compares a paste against. Read them off the
+      JOINING Comb's own screen - they are never generated here.
+    </p>
+    <ul>
+      {{range $L.Request.Fingerprints}}<li><code>{{.}}</code></li>{{end}}
+    </ul>
+    {{else}}
+    <div class="banner-error">
+      <p>
+        <strong>This request advertised no certificate fingerprints.</strong>
+      </p>
+      <p>
+        It cannot be approved, and never could be: with nothing to compare,
+        the fingerprint check - the only thing binding the request to a
+        machine - would be vacuous. Have the joining Comb re-request with
+        <code>apiaryctl join-introduce</code>, which reads its own
+        certificate files.
+      </p>
+    </div>
+    {{end}}
+  </div>
+  {{end}}
+
+  <div class="panel">
+    <h3>The two sides of the handshake</h3>
+    <p class="muted">
+      Each step says which Comb it happens on. A step marked
+      <span class="badge ready">done</span> means the value it produces or
+      consumes is recorded in this Colony's own replicated state;
+      <span class="badge blocked">blocked</span> means a precondition is
+      unmet; <span class="badge pending">waiting</span> means it is next;
+      and <span class="badge unknown">unknown</span> means this page cannot
+      tell.
+    </p>
+
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;align-items:start">
+      <section>
+        <h4>On the JOINING Comb</h4>
+        <p class="muted">Read by the operator at the joining Comb, over SSH. Those steps are not on this page, because the joining Comb is a headless server with no browser - and because the values they carry are the two a person has to carry across by hand.</p>
+        <table>
+          <thead><tr><th>Step</th><th>State</th></tr></thead>
+          <tbody>
+            {{range $L.Joining}}
+            <tr>
+              <td>
+                <strong>{{.Action}}</strong>
+                <p class="muted">on {{.Comb}}</p>
+                {{if .Detail}}<p><code>{{.Detail}}</code></p>{{end}}
+                {{if .Note}}<p class="muted">{{.Note}}</p>{{end}}
+              </td>
+              <td>
+                {{if eq .State "done"}}<span class="badge ready">done</span>
+                {{else if eq .State "blocked"}}<span class="badge blocked">blocked</span>
+                {{else if eq .State "unknown"}}<span class="badge unknown">unknown</span>
+                {{else}}<span class="badge pending">waiting</span>{{end}}
+              </td>
+            </tr>
+            {{end}}
+          </tbody>
+        </table>
+      </section>
+
+      <section>
+        <h4>On this Colony</h4>
+        <p class="muted">The steps you perform here, on the Colony being joined.</p>
+        <table>
+          <thead><tr><th>Step</th><th>State</th></tr></thead>
+          <tbody>
+            {{range $L.Target}}
+            <tr>
+              <td>
+                <strong>{{.Action}}</strong>
+                <p class="muted">on {{.Comb}}</p>
+                {{if .Detail}}<p class="muted">{{.Detail}}</p>{{end}}
+                {{if .Note}}<p class="muted">{{.Note}}</p>{{end}}
+              </td>
+              <td>
+                {{if eq .State "done"}}<span class="badge ready">done</span>
+                {{else if eq .State "blocked"}}<span class="badge blocked">blocked</span>
+                {{else if eq .State "unknown"}}<span class="badge unknown">unknown</span>
+                {{else}}<span class="badge pending">waiting</span>{{end}}
+              </td>
+            </tr>
+            {{end}}
+          </tbody>
+        </table>
+      </section>
+    </div>
+  </div>
+
+  <div class="panel">
+    <h3>Where to act</h3>
+    <p class="muted">
+      The Stage 1 and Approve forms are on this Colony's
+      <a href="/#pending-join-requests">Pending join requests</a> panel. This
+      page shows the order of operations and what has been recorded; it does
+      not replace those forms, because those forms are where the comparison
+      a human is required to make actually happens.
+    </p>
+    <p class="muted">
+      <a href="/machine">Back to the Machine page</a>
+    </p>
+  </div>
+
+  </main>
+  {{template "footer" .}}
+</body>
+</html>
+{{end}}
