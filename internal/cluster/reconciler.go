@@ -17,8 +17,10 @@ import (
 
 	internalpb "github.com/glenjbarber/apiary/api/internalpb"
 	"github.com/glenjbarber/apiary/internal/bhyve"
+	"github.com/glenjbarber/apiary/internal/capacity"
 	"github.com/glenjbarber/apiary/internal/cloudflare"
 	"github.com/glenjbarber/apiary/internal/dhcpd"
+	"github.com/glenjbarber/apiary/internal/isostore"
 	"github.com/glenjbarber/apiary/internal/pf"
 	"github.com/glenjbarber/apiary/internal/vlan"
 )
@@ -97,6 +99,13 @@ type raftClient interface {
 	// Reconciler.resolvePeerAddresses, which reuses raft's own cluster
 	// membership addresses as hast.conf's Node.Remote.
 	Status(ctx context.Context) (*internalpb.StatusResponse, error)
+
+	// GetColonyDiskSizeLocal reads ADR-0148's Colony-wide disk-size
+	// floor from this node's own replicated copy. It is not
+	// leader-restricted, and the reconciler reads it on every Comb:
+	// two Combs sizing the SAME VMDefinition's disk differently is
+	// the one thing this architecture forbids outright.
+	GetColonyDiskSizeLocal(ctx context.Context) (*internalpb.GetColonyDiskSizeResponse, error)
 }
 
 // datasetManager is the subset of *zfs.Manager the reconciler needs, for
@@ -136,6 +145,18 @@ type isoResolver interface {
 	// from anything else, most notably a FreeBSD memstick image (attach
 	// via ahci-hd instead) - see bhyve.Config.InstallDiskPath.
 	IsISO9660(name string) (bool, error)
+
+	// VirtualSize reports an image's measured VIRTUAL disk size, in
+	// bytes, and the format of its decompressed payload (ADR-0153).
+	//
+	// A zero size means UNKNOWN: the image was stored before ADR-0153,
+	// and must be measured before it can be selected for VM creation.
+	// It is never treated as a zero-byte disk.
+	VirtualSize(name string) (sizeBytes int64, format string, err error)
+
+	// DefaultSizeMB reports an image's PER-IMAGE default disk size, in
+	// MiB, and whether one was recorded (ADR-0153).
+	DefaultSizeMB(name string) (sizeMB uint64, ok bool, err error)
 }
 
 // vlanManager is the subset of *vlan.Manager the reconciler needs, for
@@ -208,6 +229,28 @@ type Reconciler struct {
 	// DiskSizeMB sizes the sparse disk image created for each VM's boot
 	// disk. Defaults to 20480 (20GiB) if zero.
 	DiskSizeMB uint64
+
+	// Capacity is the node-wide capacity coordinator (ADR-0153). It
+	// serializes disk-growth claims against a storage domain, so two
+	// concurrent provisions cannot each spend the same observed
+	// headroom, and it keeps a ledger of the thin disks this node has
+	// already committed logical space to.
+	//
+	// nil disables the accounting entirely: a node without one is a
+	// node whose operator has not opted into it, and every disk it
+	// provisions proceeds exactly as it did before.
+	Capacity *capacity.Coordinator
+
+	// CapacityDomain names the storage domain the coordinator accounts
+	// against - normally the filesystem or ZFS pool the VM's dataset
+	// lives on.
+	CapacityDomain capacity.Domain
+
+	// CapacityFreeSpace reports the currently available physical
+	// capacity on a storage domain. nil means "cannot ask", which
+	// refuses the provision rather than guessing - the same posture
+	// internal/isostore's own free-space preflight takes.
+	CapacityFreeSpace func(domain string) (int64, error)
 
 	// Bridge, if set, is passed through to every VM Bhyve creates,
 	// attaching it to this existing bridge(4) interface. Empty disables
@@ -597,6 +640,7 @@ func (r *Reconciler) RunOnce(ctx context.Context) (err error) {
 			FirewallPaused:     vm.GetFirewallPaused(),
 			CloudflareHostname: vm.GetCloudflareHostname(),
 			CloudflarePort:     vm.GetCloudflarePort(),
+			DiskSizeMB:         vm.GetDiskSizeMb(),
 		})
 	}
 
@@ -1444,6 +1488,12 @@ func (r *Reconciler) ensureVM(ctx context.Context, vm VMPlacement, networks map[
 			return fmt.Errorf("getting dataset mountpoint: %w", err)
 		}
 		var baseImagePath string
+		var sourceVirtualBytes int64
+		var sourceFormat string
+		targetSizeMB, err := r.effectiveDiskSizeMB(ctx, vm)
+		if err != nil {
+			return err
+		}
 		if vm.BaseImageName != "" {
 			if r.ISOs == nil {
 				return fmt.Errorf("VM names base image %q but no ISO store is configured on this node", vm.BaseImageName)
@@ -1453,8 +1503,44 @@ func (r *Reconciler) ensureVM(ctx context.Context, vm VMPlacement, networks map[
 				return fmt.Errorf("resolving base image %q: %w", vm.BaseImageName, err)
 			}
 			baseImagePath = path
+
+			// The image's VIRTUAL size and format (ADR-0153). The
+			// virtual size is what the expansion's arithmetic is
+			// based on, and it is measured on the DECOMPRESSED
+			// payload - never inferred from the stored upload's length.
+			sourceVirtualBytes, sourceFormat, err = r.ISOs.VirtualSize(vm.BaseImageName)
+			if err != nil {
+				return fmt.Errorf("reading the virtual size of base image %q: %w", vm.BaseImageName, err)
+			}
+			if sourceVirtualBytes <= 0 {
+				// UNKNOWN. It is never treated as a zero-byte disk:
+				// the image has to be measured before it can be used
+				// to size a VM.
+				return fmt.Errorf("the virtual size of base image %q is unknown, so it cannot be used to size a VM's disk; re-upload the image so it can be measured", vm.BaseImageName)
+			}
+
+			// The per-image default is the size this VM starts at,
+			// unless the operator asked for more. It is the SAME
+			// maximum the floor participates in, so the Colony floor
+			// still wins when it is higher.
+			defaultMB, ok, err := r.ISOs.DefaultSizeMB(vm.BaseImageName)
+			if err != nil {
+				return fmt.Errorf("reading the default disk size of base image %q: %w", vm.BaseImageName, err)
+			}
+			if ok && defaultMB > targetSizeMB {
+				targetSizeMB = defaultMB
+			}
+			// The requested size may never be smaller than the
+			// image's own virtual size.
+			imageMinMB, err := isostore.BytesToMibRoundedUp(sourceVirtualBytes)
+			if err != nil {
+				return fmt.Errorf("base image %q: %w", vm.BaseImageName, err)
+			}
+			if targetSizeMB < imageMinMB {
+				targetSizeMB = imageMinMB
+			}
 		}
-		diskPath, err = r.ensureDiskImage(ctx, mountpoint, baseImagePath)
+		diskPath, err = r.ensureDiskImage(ctx, mountpoint, baseImagePath, targetSizeMB, sourceVirtualBytes, sourceFormat)
 		if err != nil {
 			return fmt.Errorf("preparing disk image: %w", err)
 		}
@@ -1999,7 +2085,13 @@ func (r *Reconciler) diskSizeMB() uint64 {
 // file - see ADR-0031. An already-existing
 // disk file is never reseeded, matching every other "only act on
 // create" resource in this reconciler (datasets, bhyve VMs).
-func (r *Reconciler) ensureDiskImage(ctx context.Context, mountpoint, baseImagePath string) (string, error) {
+//
+// targetSizeMB, when non-zero, is the size the disk should end up at
+// (ADR-0153). A SEEDED disk is expanded to it; a BLANK disk is created
+// at it directly. The expansion happens only after the copy has fully
+// completed, and only against this VM's OWN copy - the uploaded image
+// is never opened for writing and never resized.
+func (r *Reconciler) ensureDiskImage(ctx context.Context, mountpoint, baseImagePath string, targetSizeMB uint64, sourceVirtualBytes int64, sourceFormat string) (string, error) {
 	path := filepath.Join(mountpoint, diskImageName)
 	if _, err := os.Stat(path); err == nil {
 		return path, nil
@@ -2008,13 +2100,31 @@ func (r *Reconciler) ensureDiskImage(ctx context.Context, mountpoint, baseImageP
 	}
 
 	if baseImagePath != "" {
+		// The copy runs to completion FIRST. Only once the destination
+		// holds the whole image may it be expanded - expanding a
+		// partially-copied disk would produce a disk whose contents
+		// are a truncated image with a bigger declared size.
 		if err := copyDiskImage(ctx, path, baseImagePath); err != nil {
 			return "", fmt.Errorf("seeding disk from base image: %w", err)
+		}
+		if targetSizeMB == 0 {
+			return path, nil
+		}
+		if err := r.expandDiskImage(ctx, path, targetSizeMB, sourceVirtualBytes, sourceFormat); err != nil {
+			// The disk was copied but never expanded (or expanded but
+			// not verified). It must not survive: the next reconcile
+			// tick would find it, treat it as "already created", and
+			// hand a broken disk to bhyve.
+			removeIncompleteDisk(path)
+			return "", err
 		}
 		return path, nil
 	}
 
 	sizeMB := r.diskSizeMB()
+	if targetSizeMB != 0 {
+		sizeMB = targetSizeMB
+	}
 
 	f, err := os.Create(path)
 	if err != nil {

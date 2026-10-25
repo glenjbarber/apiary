@@ -50,7 +50,7 @@ func TestEnsureDiskImageStreamsCompressedBaseImage(t *testing.T) {
 	if err := os.WriteFile(src, []byte{0xfd, '7', 'z', 'X', 'Z', 0, 'x'}, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	path, err := (&Reconciler{}).ensureDiskImage(context.Background(), t.TempDir(), src)
+	path, err := (&Reconciler{}).ensureDiskImage(context.Background(), t.TempDir(), src, 0, 0, "")
 	if err != nil {
 		t.Fatalf("ensureDiskImage() error: %v", err)
 	}

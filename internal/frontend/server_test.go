@@ -40,6 +40,10 @@ type fakeClient struct {
 	// can assert what the page asked for, and overridable so a test can
 	// drive a floor that is actually set rather than always unset.
 	getColonyDiskSizeResp    *rpcpb.GetColonyDiskSizeResponse
+	lastRenameReq            *rpcpb.RenameVMIdentityRequest
+	renameResp               *rpcpb.RenameVMIdentityResponse
+	lastSetISODefaultReq     *rpcpb.SetISODefaultSizeMBRequest
+	setISODefaultResp        *rpcpb.SetISODefaultSizeMBResponse
 	lastGetColonyDiskSizeReq *rpcpb.GetColonyDiskSizeRequest
 
 	// The Admin-tier write. Overridable so a test can drive the
@@ -307,6 +311,28 @@ func (f *fakeClient) DeleteVM(_ context.Context, in *rpcpb.DeleteVMRequest, _ ..
 	return f.deleteResp, nil
 }
 
+// RenameVMIdentity is ADR-0152's identity rename. The fake records
+// the request and answers with the configured response, so a test can
+// exercise the frontend's own handling of a rename without a real
+// managerd behind it.
+func (f *fakeClient) RenameVMIdentity(_ context.Context, in *rpcpb.RenameVMIdentityRequest, _ ...grpc.CallOption) (*rpcpb.RenameVMIdentityResponse, error) {
+	f.lastRenameReq = in
+	if f.renameResp != nil {
+		return f.renameResp, nil
+	}
+	return &rpcpb.RenameVMIdentityResponse{}, nil
+}
+
+// SetISODefaultSizeMB is ADR-0153's per-image default disk size. The
+// fake records the request and answers with the configured response.
+func (f *fakeClient) SetISODefaultSizeMB(_ context.Context, in *rpcpb.SetISODefaultSizeMBRequest, _ ...grpc.CallOption) (*rpcpb.SetISODefaultSizeMBResponse, error) {
+	f.lastSetISODefaultReq = in
+	if f.setISODefaultResp != nil {
+		return f.setISODefaultResp, nil
+	}
+	return &rpcpb.SetISODefaultSizeMBResponse{}, nil
+}
+
 func (f *fakeClient) ForcePurgeVM(context.Context, *rpcpb.ForcePurgeVMRequest, ...grpc.CallOption) (*rpcpb.ForcePurgeVMResponse, error) {
 	return &rpcpb.ForcePurgeVMResponse{}, nil
 }
@@ -475,10 +501,6 @@ func (f *fakeClient) RestartNodeService(_ context.Context, in *rpcpb.RestartNode
 
 func (f *fakeClient) MigrateVM(context.Context, *rpcpb.MigrateVMRequest, ...grpc.CallOption) (*rpcpb.MigrateVMResponse, error) {
 	return &rpcpb.MigrateVMResponse{}, nil
-}
-
-func (f *fakeClient) RenameVMIdentity(context.Context, *rpcpb.RenameVMIdentityRequest, ...grpc.CallOption) (*rpcpb.RenameVMIdentityResponse, error) {
-	return &rpcpb.RenameVMIdentityResponse{}, nil
 }
 
 func (f *fakeClient) ReportVMPhase(context.Context, *rpcpb.ReportVMPhaseRequest, ...grpc.CallOption) (*rpcpb.ReportVMPhaseResponse, error) {

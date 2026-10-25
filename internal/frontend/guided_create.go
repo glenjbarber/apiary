@@ -337,6 +337,15 @@ type guidedImageOption struct {
 	Available bool
 	Reason    string
 	Comment   string
+
+	// DefaultSizeMB is the image's PER-IMAGE default disk size, in MiB
+	// (ADR-0153). Zero means "no default recorded".
+	//
+	// It travels with the option so the creation form's JS can
+	// pre-fill the disk-size field from the SELECTED image, which is
+	// the whole point of the per-image default: the operator picks an
+	// image and gets the size that image wants.
+	DefaultSizeMB uint64
 }
 
 // guidedImageOptions builds one picker's options from the cluster-wide
@@ -355,7 +364,14 @@ func guidedImageOptions(rows []isoRowView, role guidedImageRole) []guidedImageOp
 		if !ok {
 			label += " — unavailable: " + cueFor(row.Name, role)
 		}
-		opts = append(opts, guidedImageOption{Value: row.Name, Label: label, Available: ok, Reason: reason, Comment: row.Comment})
+		opts = append(opts, guidedImageOption{
+			Value:         row.Name,
+			Label:         label,
+			Available:     ok,
+			Reason:        reason,
+			Comment:       row.Comment,
+			DefaultSizeMB: row.DefaultSizeMB,
+		})
 	}
 	return opts
 }

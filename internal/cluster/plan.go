@@ -117,6 +117,15 @@ type VMPlacement struct {
 	// never via UpdateVM. See ADR-0063.
 	CloudflareHostname string
 	CloudflarePort     uint32
+
+	// DiskSizeMB is ADR-0148's per-VM override of the Colony-wide
+	// disk-size floor, in MiB. Zero means "no override": the VM takes
+	// the Colony floor.
+	//
+	// It is resolved at CREATION time only, exactly as ADR-0148
+	// specifies: a raised floor never resizes a disk that already
+	// exists.
+	DiskSizeMB uint64
 }
 
 // PhysicalID returns the VM's physical identity: its persisted

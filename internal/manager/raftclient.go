@@ -162,6 +162,17 @@ func (c *RaftClient) GetRestartLeaseStateLocal(ctx context.Context, service stri
 	return c.client.GetRestartLeaseStateLocal(ctx, &internalpb.GetRestartLeaseStateRequest{Service: service})
 }
 
+// GetColonyDiskSizeLocal reads ADR-0148's Colony-wide disk-size floor
+// from this node's own replicated copy.
+//
+// Deliberately local and never forwarded: the floor is replicated state
+// and the reconciler reads it on every Comb, so a Comb must answer
+// for itself rather than asking the leader - which is also what keeps
+// two Combs from sizing the SAME VMDefinition's disk differently.
+func (c *RaftClient) GetColonyDiskSizeLocal(ctx context.Context) (*internalpb.GetColonyDiskSizeResponse, error) {
+	return c.client.GetColonyDiskSizeLocal(ctx, &internalpb.GetColonyDiskSizeRequest{})
+}
+
 // GetColonyJoinWindowLocal backs GetColonyJoinWindow and
 // requireLiveColonyJoinWindow (ADR-0147 Part 4) - a plain read of this
 // node's own FSM copy, mirroring GetRestartLeaseStateLocal above.

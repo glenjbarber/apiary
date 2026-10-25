@@ -372,6 +372,16 @@ func (s *Server) GetColonyJoinWindowLocal(_ context.Context, _ *internalpb.GetCo
 	return &internalpb.GetColonyJoinWindowResponse{Window: window, Live: live}, nil
 }
 
+// GetColonyDiskSizeLocal implements RaftInternal - ADR-0148's read side.
+//
+// Deliberately NOT leader-only, mirroring GetColonyJoinWindowLocal
+// above: the floor is replicated state, and the reconciler reads it on
+// every Comb, so a follower that could not answer for itself would size
+// its disks differently from the leader's.
+func (s *Server) GetColonyDiskSizeLocal(_ context.Context, _ *internalpb.GetColonyDiskSizeRequest) (*internalpb.GetColonyDiskSizeResponse, error) {
+	return &internalpb.GetColonyDiskSizeResponse{ColonyDiskSize: s.node.ColonyDiskSizeLocal()}, nil
+}
+
 // GetRestartLeaseStateLocal implements internalpb.RaftInternalServer
 // (ADR-0103).
 func (s *Server) GetRestartLeaseStateLocal(_ context.Context, req *internalpb.GetRestartLeaseStateRequest) (*internalpb.GetRestartLeaseStateResponse, error) {

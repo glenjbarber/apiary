@@ -70,6 +70,10 @@ type isoManager interface {
 	// another node - already exists on *isostore.Manager, just not
 	// exposed through this local interface until now.
 	Path(name string) (path string, ok bool, err error)
+
+	// SetDefaultSizeMB sets an image's per-image default disk size, in
+	// MiB (ADR-0153).
+	SetDefaultSizeMB(name string, sizeMB uint64) error
 }
 
 // VNCLookup is the subset of *bhyve.Manager the server needs for
@@ -119,6 +123,7 @@ type PeerForwarder interface {
 	UpdateVM(ctx context.Context, addr string, req *rpcpb.UpdateVMRequest) (*rpcpb.UpdateVMResponse, error)
 	DeleteVM(ctx context.Context, addr string, req *rpcpb.DeleteVMRequest) (*rpcpb.DeleteVMResponse, error)
 	RenameVMIdentity(ctx context.Context, addr string, req *rpcpb.RenameVMIdentityRequest) (*rpcpb.RenameVMIdentityResponse, error)
+	SetColonyDiskSize(ctx context.Context, addr string, req *rpcpb.SetColonyDiskSizeRequest) (*rpcpb.SetColonyDiskSizeResponse, error)
 	CreateJail(ctx context.Context, addr string, req *rpcpb.CreateJailRequest) (*rpcpb.CreateJailResponse, error)
 	UpdateJail(ctx context.Context, addr string, req *rpcpb.UpdateJailRequest) (*rpcpb.UpdateJailResponse, error)
 	DeleteJail(ctx context.Context, addr string, req *rpcpb.DeleteJailRequest) (*rpcpb.DeleteJailResponse, error)
@@ -2613,10 +2618,13 @@ func (s *Server) UploadISO(stream rpcpb.ManagerService_UploadISOServer) error {
 		return stream.SendAndClose(&rpcpb.UploadISOResponse{Error: res.err.Error()})
 	}
 	return stream.SendAndClose(&rpcpb.UploadISOResponse{
-		Name:      res.info.Name,
-		SizeBytes: uint64(res.info.SizeBytes),
-		Sha256:    res.info.SHA256,
-		Comment:   res.info.Comment,
+		Name:             res.info.Name,
+		SizeBytes:        uint64(res.info.SizeBytes),
+		Sha256:           res.info.SHA256,
+		Comment:          res.info.Comment,
+		VirtualSizeBytes: uint64(res.info.VirtualSizeBytes),
+		DefaultSizeMb:    res.info.DefaultSizeMB,
+		DiskFormat:       res.info.DiskFormat,
 	})
 }
 
@@ -2628,9 +2636,36 @@ func (s *Server) ListISOs(_ context.Context, _ *rpcpb.ListISOsRequest) (*rpcpb.L
 	}
 	isos := make([]*rpcpb.ISOInfo, 0, len(infos))
 	for _, info := range infos {
-		isos = append(isos, &rpcpb.ISOInfo{Name: info.Name, SizeBytes: uint64(info.SizeBytes), Sha256: info.SHA256, Comment: &info.Comment})
+		isos = append(isos, &rpcpb.ISOInfo{
+			Name:             info.Name,
+			SizeBytes:        uint64(info.SizeBytes),
+			Sha256:           info.SHA256,
+			Comment:          &info.Comment,
+			VirtualSizeBytes: uint64(info.VirtualSizeBytes),
+			DefaultSizeMb:    info.DefaultSizeMB,
+			DiskFormat:       info.DiskFormat,
+		})
 	}
 	return &rpcpb.ListISOsResponse{Isos: isos}, nil
+}
+
+// SetISODefaultSizeMB implements rpcpb.ManagerServiceServer (ADR-0153)
+// - sets an image's per-image default disk size, in MiB.
+//
+// The value is physical, per-node state (it lives beside the image on
+// this node), exactly like the image itself, so it is never routed
+// through raft and never forwarded to a leader.
+func (s *Server) SetISODefaultSizeMB(_ context.Context, req *rpcpb.SetISODefaultSizeMBRequest) (*rpcpb.SetISODefaultSizeMBResponse, error) {
+	if req.GetName() == "" {
+		return &rpcpb.SetISODefaultSizeMBResponse{Error: "name must be set"}, nil
+	}
+	if req.GetDefaultSizeMb() == 0 {
+		return &rpcpb.SetISODefaultSizeMBResponse{Error: "default_size_mb must be greater than zero; a value of zero is not a usable disk size"}, nil
+	}
+	if err := s.isos.SetDefaultSizeMB(req.GetName(), req.GetDefaultSizeMb()); err != nil {
+		return &rpcpb.SetISODefaultSizeMBResponse{Error: err.Error()}, nil
+	}
+	return &rpcpb.SetISODefaultSizeMBResponse{DefaultSizeMb: req.GetDefaultSizeMb()}, nil
 }
 
 // UpdateISOComment implements rpcpb.ManagerServiceServer.

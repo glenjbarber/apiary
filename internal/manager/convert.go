@@ -60,6 +60,10 @@ func toInternalVM(vm *rpcpb.VMDefinition) *internalpb.VMDefinition {
 		ReplicaNodeId:     vm.GetReplicaNodeId(),
 		BaseImageName:     vm.GetBaseImageName(),
 		CloneFromSnapshot: vm.GetCloneFromSnapshot(),
+		// DiskSizeMb (ADR-0148) is the per-VM override of the
+		// Colony-wide floor, in MiB. Zero means "no override", and the
+		// FSM refuses a non-zero value below the floor.
+		DiskSizeMb: vm.GetDiskSizeMb(),
 		// IpAddress/MacAddress are assigned by the FSM itself, never set
 		// by an external caller.
 		FirewallRules: rules,
@@ -114,6 +118,8 @@ func fromInternalVM(vm *internalpb.VMDefinition) *rpcpb.VMDefinition {
 		// dedicated command may set them (ADR-0063).
 		CloudflareHostname: vm.GetCloudflareHostname(),
 		CloudflarePort:     vm.GetCloudflarePort(),
+		// DiskSizeMb (ADR-0148) mirrors the internal field.
+		DiskSizeMb: vm.GetDiskSizeMb(),
 		// ResourceId (ADR-0152) is the VM's PERSISTED PHYSICAL identity,
 		// and it IS carried back out: a caller (notably the Cluster API
 		// provider) needs to know the physical name the VM's host

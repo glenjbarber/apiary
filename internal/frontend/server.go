@@ -1267,6 +1267,9 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("DELETE /vms/{id}", s.requireRole(manager.RoleOperator, s.handleDeleteVM))
 	s.mux.HandleFunc("POST /isos", s.requireRole(manager.RoleOperator, s.handleUploadISO))
 	s.mux.HandleFunc("POST /isos/{name}/comment", s.requireRole(manager.RoleOperator, s.handleUpdateISOComment))
+	// ADR-0153: an image's PER-IMAGE default disk size. Same
+	// RoleOperator gate as the other image-management writes.
+	s.mux.HandleFunc("POST /isos/{name}/default-size", s.requireRole(manager.RoleOperator, s.handleSetISODefaultSize))
 	s.mux.HandleFunc("DELETE /isos/{name}", s.requireRole(manager.RoleOperator, s.handleDeleteISO))
 
 	// Copy-on-demand ISO replication (ADR-0040) - same RoleOperator gate
@@ -1915,6 +1918,12 @@ func (s *Server) handleCreateVM(w http.ResponseWriter, r *http.Request) {
 		cloneFromSnapshot = sourceVMID + "@" + snapshotName
 	}
 
+	// ADR-0153: the per-VM disk size override, in MiB. Zero means
+	// "no override", which is what a blank form field means: the VM
+	// then takes the Colony-wide floor (and, for a seeded disk, the
+	// base image's own per-image default).
+	diskSizeMB, _ := strconv.ParseUint(r.FormValue("disk_size_mb"), 10, 64)
+
 	resp, err := s.client.CreateVM(r.Context(), &rpcpb.CreateVMRequest{
 		Vm: &rpcpb.VMDefinition{
 			Id:                r.FormValue("id"),
@@ -1929,6 +1938,7 @@ func (s *Server) handleCreateVM(w http.ResponseWriter, r *http.Request) {
 			NetworkId:         r.FormValue("network_id"),
 			ReplicaNodeId:     r.FormValue("replica_node_id"),
 			FirewallRules:     parseFirewallRuleRows(r),
+			DiskSizeMb:        diskSizeMB,
 		},
 	})
 	if err != nil {
@@ -2064,6 +2074,7 @@ func (s *Server) handleUploadISO(w http.ResponseWriter, r *http.Request) {
 
 	var expectedHash string
 	var comment string
+	var defaultSizeMB uint64
 	var manifestSums map[string]string
 	var result *rpcpb.UploadISOResponse
 	var uploadErr error
@@ -2093,6 +2104,28 @@ func (s *Server) handleUploadISO(w http.ResponseWriter, r *http.Request) {
 				break
 			}
 			comment = strings.TrimSpace(string(data))
+		case "default_size_mb":
+			// ADR-0153: the per-image default disk size, in MiB. It
+			// is OPTIONAL: a blank field means "no default recorded",
+			// which resolves to the Colony-wide floor. It is applied
+			// AFTER the upload succeeds, because the store refuses a
+			// default smaller than the image's own virtual size, and
+			// that size is only known once the image has been
+			// measured.
+			data, readErr := io.ReadAll(io.LimitReader(part, 64))
+			if readErr != nil {
+				uploadErr = fmt.Errorf("reading the default disk size: %w", readErr)
+				break
+			}
+			raw := strings.TrimSpace(string(data))
+			if raw != "" {
+				parsed, parseErr := strconv.ParseUint(raw, 10, 64)
+				if parseErr != nil {
+					uploadErr = fmt.Errorf("the default disk size %q is not a whole number of megabytes", raw)
+					break
+				}
+				defaultSizeMB = parsed
+			}
 		case "manifest":
 			data, _ := io.ReadAll(part)
 			if strings.TrimSpace(string(data)) != "" {
@@ -2130,6 +2163,23 @@ func (s *Server) handleUploadISO(w http.ResponseWriter, r *http.Request) {
 	if uploadErr != nil {
 		s.renderISOPanelResult(w, r, uploadErr.Error(), "")
 		return
+	}
+	// The per-image default is applied only once the image is safely
+	// stored, so a rejected default never costs the operator the
+	// upload itself.
+	if defaultSizeMB > 0 {
+		setResp, setErr := s.client.SetISODefaultSizeMB(r.Context(), &rpcpb.SetISODefaultSizeMBRequest{
+			Name:          result.GetName(),
+			DefaultSizeMb: defaultSizeMB,
+		})
+		if setErr != nil {
+			s.renderISOPanelResult(w, r, fmt.Sprintf("the image was uploaded, but its default disk size could not be set: %v", setErr), "")
+			return
+		}
+		if setResp.GetError() != "" {
+			s.renderISOPanelResult(w, r, fmt.Sprintf("the image was uploaded, but its default disk size could not be set: %s", setResp.GetError()), "")
+			return
+		}
 	}
 	s.renderISOPanelResult(w, r, "", result.GetName())
 }
@@ -2226,6 +2276,38 @@ func (s *Server) handleUpdateISOComment(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	resp, err := s.client.UpdateISOComment(r.Context(), &rpcpb.UpdateISOCommentRequest{Name: r.PathValue("name"), Comment: comment})
+	if err != nil {
+		s.renderISOPanelResult(w, r, err.Error(), "")
+		return
+	}
+	s.renderISOPanelResult(w, r, resp.GetError(), "")
+}
+
+// handleSetISODefaultSize sets an image's per-image default disk size,
+// in MiB (ADR-0153).
+//
+// The value may not be smaller than the image's own virtual size; that
+// check lives in the store, so the refusal an operator sees is the same
+// one the API would give, and it names the image's actual size.
+func (s *Server) handleSetISODefaultSize(w http.ResponseWriter, r *http.Request) {
+	if err := r.ParseForm(); err != nil {
+		s.renderISOPanelResult(w, r, "invalid default size: "+err.Error(), "")
+		return
+	}
+	raw := strings.TrimSpace(r.FormValue("default_size_mb"))
+	sizeMB, err := strconv.ParseUint(raw, 10, 64)
+	if err != nil {
+		s.renderISOPanelResult(w, r, fmt.Sprintf("default size %q is not a whole number of megabytes", raw), "")
+		return
+	}
+	if sizeMB == 0 {
+		s.renderISOPanelResult(w, r, "the default disk size must be greater than zero", "")
+		return
+	}
+	resp, err := s.client.SetISODefaultSizeMB(r.Context(), &rpcpb.SetISODefaultSizeMBRequest{
+		Name:          r.PathValue("name"),
+		DefaultSizeMb: sizeMB,
+	})
 	if err != nil {
 		s.renderISOPanelResult(w, r, err.Error(), "")
 		return

@@ -31,6 +31,31 @@ type isoRowView struct {
 	SHA256      string
 	SHA256Short string
 
+	// VirtualSizeBytes is the disk's VIRTUAL size (ADR-0153): how
+	// large the disk the image contains is, as opposed to SizeBytes,
+	// which is the stored upload's byte length.
+	//
+	// A ZERO value means UNKNOWN - the image was stored before
+	// ADR-0153 and has to be measured before it can be used to size a
+	// VM. It is never rendered as a zero-byte disk.
+	VirtualSizeBytes uint64
+
+	// VirtualSize is VirtualSizeBytes, formatted for display. Empty
+	// when the size is unknown.
+	VirtualSize string
+
+	// DefaultSizeMB is the image's PER-IMAGE default disk size, in
+	// MiB (ADR-0153) - what a VM created from it starts at unless the
+	// operator asks for more.
+	//
+	// Zero means "no default recorded", which resolves to the Colony's
+	// own disk-size floor (ADR-0148).
+	DefaultSizeMB uint64
+
+	// DiskFormat is the format of the image's decompressed payload:
+	// "raw" or "qcow2".
+	DiskFormat string
+
 	// Kind is Name's imageKind classification, in the same prose
 	// classifyImageName already produces for the guided creation wizard
 	// (guided_create.go) - reused rather than a second classifier, so an
@@ -95,10 +120,18 @@ func (s *Server) currentClusterISOs(r *http.Request) ([]isoRowView, string) {
 			k := key{info.GetName(), info.GetSha256()}
 			row, ok := rows[k]
 			if !ok {
+				virtualSize := ""
+				if info.GetVirtualSizeBytes() > 0 {
+					virtualSize = formatBytes(info.GetVirtualSizeBytes())
+				}
 				row = &isoRowView{
 					Name: info.GetName(), Comment: info.GetComment(), SizeBytes: info.GetSizeBytes(), Size: formatBytes(info.GetSizeBytes()),
 					SHA256: info.GetSha256(), SHA256Short: shortHash(info.GetSha256()),
-					Kind: classifyImageName(info.GetName()).String(),
+					Kind:             classifyImageName(info.GetName()).String(),
+					VirtualSizeBytes: info.GetVirtualSizeBytes(),
+					VirtualSize:      virtualSize,
+					DefaultSizeMB:    info.GetDefaultSizeMb(),
+					DiskFormat:       info.GetDiskFormat(),
 				}
 				rows[k] = row
 			}
