@@ -25,16 +25,38 @@
       the key you are about to create, with no extra step.
     </p>
     <p>
+      <strong>Every OTHER Comb in the Colony needs its own credential
+      too</strong>, and the ones that predate automatic peer credential
+      setup need a one-time root-run
+      <code>apiaryctl peer-credential-backfill</code> on the leader and
+      then on each existing member. It installs a limited Operator peer
+      key for background peer operations and restarts managerd; the
+      frontend picks its key up without a restart.
+    </p>
+    <p>
+      If you install one yourself instead, these are the two files and
+      the two fields:
+    </p>
+    <ul>
+      <li>
+        <code>/usr/local/etc/apiary/managerd.json</code> &mdash; the
+        <code>peer_api_key</code> field, for this Comb's managerd to call
+        its peers.
+      </li>
+      <li>
+        <code>/usr/local/etc/apiary/frontend.json</code> &mdash; the
+        <code>manager_api_key</code> field, for this Comb's frontend to
+        call its own managerd.
+      </li>
+    </ul>
+    <p class="muted">
       User actions from a follower are forwarded to the leader with the
       caller's authenticated API key over verified peer TLS; do not copy
-      this key to other Combs. Existing Combs that predate automatic peer
-      credential setup need a one-time root-run
-      <code>apiaryctl peer-credential-backfill</code> on the leader and
-      each existing member. It installs a limited Operator peer key for
-      background peer operations and restarts the services. Newly joined
-      Combs receive their own peer key during the approved join flow. If
-      the Colony has no restart-guardrail token yet, provision one on the
-      leader first.
+      this key to other Combs - each Comb needs a credential of its own,
+      and the backfill command installs a shared Colony peer key rather
+      than a copy of yours. Newly joined Combs receive their own peer key
+      during the approved join flow. If the Colony has no
+      restart-guardrail token yet, provision one on the leader first.
     </p>
   </div>
   {{end}}
