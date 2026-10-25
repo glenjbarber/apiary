@@ -212,11 +212,33 @@ func (r *Reconciler) reconcileHASTRoles(ctx context.Context, roles []hastRole) (
 		if !ok {
 			return nil, fmt.Errorf("resolving this node's own address (%q) in raft cluster membership", localName)
 		}
+		// ADR-0158: the address each side is told to dial is the
+		// peer's TUNNEL address when the encrypted transport is
+		// enabled, and the LAN address otherwise - byte for byte as
+		// before when it is disabled.
+		//
+		// Both ends resolve the same way, because each end needs the
+		// other's tunnel address: the local node's own entry is
+		// resolved through exactly the same call as the peer's.
+		//
+		// There is deliberately NO fallback from the tunnel address to
+		// the LAN address. A fallback would mean replication working in
+		// plaintext whenever the tunnel is down, which is the exact
+		// state this change exists to make impossible. A peer with no
+		// tunnel address is an error instead.
+		peerRemote, err := r.HASTTunnel.resolveHASTPeerAddr(rl.peerNodeID, peerAddr)
+		if err != nil {
+			return nil, fmt.Errorf("resolving HAST address for peer node %q (resource %s): %w", rl.peerNodeID, rl.resourceName, err)
+		}
+		localRemote, err := r.HASTTunnel.resolveHASTPeerAddr(localName, localAddr)
+		if err != nil {
+			return nil, fmt.Errorf("resolving this node's HAST tunnel address: %w", err)
+		}
 		resources = append(resources, hast.Resource{
 			Name: rl.resourceName,
 			Nodes: []hast.Node{
-				{Name: localName, Local: localPaths[rl.resourceName], Remote: peerAddr},
-				{Name: rl.peerNodeID, Local: localPaths[rl.resourceName], Remote: localAddr},
+				{Name: localName, Local: localPaths[rl.resourceName], Remote: peerRemote},
+				{Name: rl.peerNodeID, Local: localPaths[rl.resourceName], Remote: localRemote},
 			},
 		})
 	}

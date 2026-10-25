@@ -142,6 +142,7 @@ var registry = []Check{
 	bhyveBridgeCheck,
 	uplinkBridgingCheck,
 	hastdEnableCheck,
+	hastTunnelInterfaceCheck,
 	restartGuardrailTokenCheck,
 	pamServiceCheck,
 }
@@ -1191,6 +1192,33 @@ var hastdEnableCheck = Check{
 				FixHint: "upgrade to FreeBSD 15.1-RELEASE or later, which carries the upstream hastd/hastctl fixes Apiary needs (see docs/adr/0152-hastd-fixes-in-freebsd-15-1-release.md); on an earlier release, apply the hast_proto_recv_hdr source patch for FreeBSD bug 298085 before relying on hastd - Apiary does not carry or apply this patch itself"}
 		}
 		return Result{ID: "hastd-enable", Status: StatusOK, Detail: fmt.Sprintf("hastd_enable=YES, running %s", release)}
+	},
+}
+
+// hastTunnelInterfaceCheck verifies that the interface carrying the
+// encrypted HAST replication transport exists on this host.
+//
+// It is a report-only manual check, like hastd_enable itself: the
+// tunnel is host network state that Apiary cannot provision, and the
+// operator owns the WireGuard configuration. What Apiary CAN do is
+// say plainly that the interface is missing, rather than letting the
+// reconciler discover it later as a resource that will not replicate.
+//
+// The check only applies when the operator names an interface, so a
+// host that does not use the encrypted transport is unaffected.
+var hastTunnelInterfaceCheck = Check{
+	ID:          "hast-tunnel-interface",
+	Description: "the host interface carrying the encrypted HAST replication transport exists (ADR-0158)",
+	Risk:        RiskManualOnly,
+	Applicable:  func(opt Options) bool { return opt.HASTTunnelInterface != "" },
+	Probe: func(ctx context.Context, r Runner, opt Options) Result {
+		if _, stderr, err := r.Run(ctx, "ifconfig", opt.HASTTunnelInterface); err != nil {
+			return Result{ID: "hast-tunnel-interface", Status: StatusMissing,
+				Detail:  firstNonEmpty(stderr, err),
+				FixHint: fmt.Sprintf("no interface named %q on this host - Apiary does not create or configure the WireGuard tunnel itself (ADR-0158); provision it on every Comb in the HAST pair, then re-run this check", opt.HASTTunnelInterface)}
+		}
+		return Result{ID: "hast-tunnel-interface", Status: StatusOK,
+			Detail: fmt.Sprintf("interface %q exists", opt.HASTTunnelInterface)}
 	},
 }
 

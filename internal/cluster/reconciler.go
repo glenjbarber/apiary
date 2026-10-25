@@ -308,6 +308,19 @@ type Reconciler struct {
 	// no ReplicaNodeID is completely unaffected by whether HAST is set.
 	HAST hastManager
 
+	// HASTTunnel gates the encrypted HAST transport (ADR-0158). When it
+	// is not enabled, hast.conf's Node.Remote keeps naming the peer's LAN
+	// address, exactly as it does today. When it is enabled, Node.Remote
+	// names the peer's tunnel address instead, and a peer with no
+	// tunnel address is a hard error rather than a silent fallback to
+	// plaintext.
+	//
+	// See internal/cluster/hasttunnel.go for why the tunnel has to be a
+	// layer-3 link rather than a userspace proxy: hastd authenticates the
+	// connecting peer by source IP, so anything that terminates the
+	// connection locally breaks replication outright.
+	HASTTunnel HASTTunnelConfig
+
 	// HASTRestartSettleDelay overrides how long reconcileHASTRoles waits
 	// after a real hastd restart before attempting a role change
 	// (defaults to defaultHASTRestartSettleDelay if zero). Tests set

@@ -191,6 +191,30 @@ type Config struct {
 	// PeerTLSHostnameMap mirrors -peer-tls-hostname-map.
 	PeerTLSHostnameMap string `json:"peer_tls_hostname_map,omitempty"`
 
+	// HASTTunnelEnabled gates the encrypted HAST replication transport
+	// (ADR-0158). Absent or false means hast.conf keeps naming each
+	// peer's LAN address, exactly as it does today. True means the
+	// encrypted transport is in use and the reconciler resolves each
+	// peer's address from HASTTunnelAddresses instead.
+	//
+	// This is a plain boolean rather than a tri-state because there is
+	// no meaningful third state: absent and false both mean "the
+	// transport is not encrypted", and enabling it is a deliberate,
+	// coordinated act.
+	HASTTunnelEnabled bool `json:"hast_tunnel_enabled,omitempty"`
+
+	// HASTTunnelAddresses is the tunnel address plan: a comma-separated
+	// "nodeid=host:port" list giving each Comb's address on the
+	// encrypted transport (ADR-0158). It is read from the operator's own
+	// configuration rather than a replicated record, because it
+	// describes host network state the reconciler cannot itself own -
+	// the same precedent as peer_tls_hostname_map above.
+	//
+	// Every Comb in a HAST resource's pair must appear here, on BOTH
+	// nodes: each side needs the other's tunnel address. A missing
+	// entry is a refusal, never a fallback to the LAN address.
+	HASTTunnelAddresses string `json:"hast_tunnel_addresses,omitempty"`
+
 	// PeerTLSCA mirrors -peer-tls-ca (ADR-0093): a PEM file trusted
 	// instead of the system certificate pool when dialing a peer over
 	// TLS - needed when peers present self-signed certificates.
@@ -567,6 +591,9 @@ func validate(cfg Config) error {
 	if err := validatePeerTLSHostnameMap(cfg.PeerTLSHostnameMap); err != nil {
 		return err
 	}
+	if err := validateHASTTunnelAddresses(cfg.HASTTunnelAddresses); err != nil {
+		return err
+	}
 	if cfg.PeerManagerdPort != "" {
 		if _, err := parsePort(cfg.PeerManagerdPort); err != nil {
 			return fmt.Errorf("nodeconfig: invalid peer_managerd_port %q: %w", cfg.PeerManagerdPort, err)
@@ -774,6 +801,34 @@ func validatePeerTLSHostnameMap(value string) error {
 	return nil
 }
 
+// validateHASTTunnelAddresses checks the "nodeid=host:port" format
+// ADR-0158's HASTTunnelAddresses field expects, so a malformed plan
+// fails loudly here rather than silently leaving a Comb whose
+// replication cannot be encrypted.
+//
+// The format check mirrors the plan parser in internal/cluster, but it
+// lives here too: nodeconfig is validated independently of the
+// reconciler, and a config that parses in one place but not the other
+// is a bug waiting to happen.
+func validateHASTTunnelAddresses(value string) error {
+	if value == "" {
+		return nil
+	}
+	for _, pair := range splitComma(value) {
+		pair = strings.TrimSpace(pair)
+		if pair == "" {
+			continue
+		}
+		nodeID, addr, ok := cutOnce(pair, '=')
+		if !ok || strings.TrimSpace(nodeID) == "" || strings.TrimSpace(addr) == "" {
+			return fmt.Errorf("nodeconfig: invalid hast_tunnel_addresses entry %q: want \"nodeid=host:port\"", pair)
+		}
+		if _, _, err := net.SplitHostPort(strings.TrimSpace(addr)); err != nil {
+			return fmt.Errorf("nodeconfig: invalid hast_tunnel_addresses entry %q: %q is not host:port: %w", pair, addr, err)
+		}
+	}
+	return nil
+}
 func splitComma(s string) []string {
 	var out []string
 	start := 0
