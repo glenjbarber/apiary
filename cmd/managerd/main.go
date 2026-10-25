@@ -296,6 +296,21 @@ func run() error {
 	if cfg.HASTEnabled != nil && *cfg.HASTEnabled {
 		hastMgr = hast.New()
 		reconciler.HAST = hastMgr
+		// ADR-0158: the encrypted HAST transport. The tunnel address
+		// plan is parsed here, at startup, so a malformed plan is a
+		// startup error naming the offending entry rather than a
+		// per-tick reconciliation failure.
+		//
+		// A malformed plan is fatal even though the reconciler could
+		// in principle refuse per-resource: a plan that does not parse
+		// is a configuration error the operator needs to see
+		// immediately, not one that only shows up as a resource that
+		// will not replicate.
+		tunnel, err := cluster.HASTTunnelConfigFromPlan(cfg.HASTTunnelEnabled, cfg.HASTTunnelAddresses)
+		if err != nil {
+			return fmt.Errorf("parsing the HAST tunnel address plan: %w", err)
+		}
+		reconciler.HASTTunnel = tunnel
 	}
 	// Keep lifecycle inspection/teardown available even when provisioning
 	// is disabled, otherwise an explicit DeleteJail tombstone is stranded.

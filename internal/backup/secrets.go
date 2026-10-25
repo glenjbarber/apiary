@@ -646,6 +646,16 @@ type NodeConfigRecord struct {
 	HASTEnabled *bool `json:"hast_enabled,omitempty"`
 	JailEnabled *bool `json:"jail_enabled,omitempty"`
 
+	// HASTTunnelEnabled and HASTTunnelAddresses are ADR-0158's
+	// encrypted HAST transport settings. They are ordinary host
+	// configuration, not credentials: the tunnel address plan is a
+	// list of addresses, and the private half of the tunnel lives in
+	// the WireGuard configuration on the host, not here. A rebuilt Comb
+	// needs both recorded so it can address its peers' tunnel
+	// endpoints rather than falling back to plaintext.
+	HASTTunnelEnabled   bool   `json:"hast_tunnel_enabled,omitempty"`
+	HASTTunnelAddresses string `json:"hast_tunnel_addresses,omitempty"`
+
 	JailPrefix     string `json:"jail_prefix,omitempty"`
 	JailMountBase  string `json:"jail_mount_base,omitempty"`
 	JailDiskSizeMB string `json:"jail_disk_size_mb,omitempty"`
@@ -753,6 +763,9 @@ func BuildNodeConfigRecord(cfg nodeconfig.Config, peers []string) NodeConfigReco
 
 		HASTEnabled: cfg.HASTEnabled,
 		JailEnabled: cfg.JailEnabled,
+
+		HASTTunnelEnabled:   cfg.HASTTunnelEnabled,
+		HASTTunnelAddresses: cfg.HASTTunnelAddresses,
 
 		JailPrefix:     cfg.JailPrefix,
 		JailMountBase:  cfg.JailMountBase,

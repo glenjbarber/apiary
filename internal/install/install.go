@@ -72,13 +72,18 @@ const (
 // option (e.g. bhyve-bridge needs VLANUplink) report StatusManual with a
 // FixHint naming the missing flag rather than guessing.
 type Options struct {
-	ZFSPool             string
-	ZFSBase             string
-	BhyveFirmwarePkg    string
-	VLANUplink          string
-	BhyveBridge         string
-	EnableNAT           bool
-	EnableHAST          bool
+	ZFSPool          string
+	ZFSBase          string
+	BhyveFirmwarePkg string
+	VLANUplink       string
+	BhyveBridge      string
+	EnableNAT        bool
+	EnableHAST       bool
+	// HASTTunnelInterface names the host interface carrying the
+	// encrypted HAST replication transport (ADR-0158). Empty means the
+	// encrypted transport is not in use on this host, which is the
+	// default until the operator provisions the tunnel.
+	HASTTunnelInterface string
 	PAMService          string
 	AllowUplinkBridging string
 }
