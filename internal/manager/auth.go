@@ -177,19 +177,24 @@ var requiredRole = map[string]Role{
 	// RecommendCellType is Viewer-tier, matching every other read-only
 	// advisory RPC (e.g. ClusterHealth) - it mutates nothing and
 	// consults no cluster state.
-	"/apiary.rpc.v1.ManagerService/CreateCell":                 RoleOperator,
-	"/apiary.rpc.v1.ManagerService/RecommendCellType":          RoleViewer,
-	"/apiary.rpc.v1.ManagerService/UpdateJail":                 RoleOperator,
-	"/apiary.rpc.v1.ManagerService/DeleteJail":                 RoleOperator,
-	"/apiary.rpc.v1.ManagerService/MigrateJail":                RoleOperator,
-	"/apiary.rpc.v1.ManagerService/SetJailDesiredState":        RoleOperator,
-	"/apiary.rpc.v1.ManagerService/SetJailHostname":            RoleOperator,
-	"/apiary.rpc.v1.ManagerService/CreateNetwork":              RoleOperator,
-	"/apiary.rpc.v1.ManagerService/DeleteNetwork":              RoleOperator,
-	"/apiary.rpc.v1.ManagerService/SetNetworkName":             RoleOperator,
-	"/apiary.rpc.v1.ManagerService/UploadISO":                  RoleOperator,
-	"/apiary.rpc.v1.ManagerService/DeleteISO":                  RoleOperator,
-	"/apiary.rpc.v1.ManagerService/UpdateISOComment":           RoleOperator,
+	"/apiary.rpc.v1.ManagerService/CreateCell":          RoleOperator,
+	"/apiary.rpc.v1.ManagerService/RecommendCellType":   RoleViewer,
+	"/apiary.rpc.v1.ManagerService/UpdateJail":          RoleOperator,
+	"/apiary.rpc.v1.ManagerService/DeleteJail":          RoleOperator,
+	"/apiary.rpc.v1.ManagerService/MigrateJail":         RoleOperator,
+	"/apiary.rpc.v1.ManagerService/SetJailDesiredState": RoleOperator,
+	"/apiary.rpc.v1.ManagerService/SetJailHostname":     RoleOperator,
+	"/apiary.rpc.v1.ManagerService/CreateNetwork":       RoleOperator,
+	"/apiary.rpc.v1.ManagerService/DeleteNetwork":       RoleOperator,
+	"/apiary.rpc.v1.ManagerService/SetNetworkName":      RoleOperator,
+	"/apiary.rpc.v1.ManagerService/UploadISO":           RoleOperator,
+	"/apiary.rpc.v1.ManagerService/DeleteISO":           RoleOperator,
+	"/apiary.rpc.v1.ManagerService/UpdateISOComment":    RoleOperator,
+	// SetISODefaultSizeMB (ADR-0153) sets an image's per-image default
+	// disk size. Operator-tier, matching UpdateISOComment and the
+	// other image-management writes: it is per-node physical state
+	// beside the image, not a replicated Colony setting.
+	"/apiary.rpc.v1.ManagerService/SetISODefaultSizeMB":        RoleOperator,
 	"/apiary.rpc.v1.ManagerService/ReportVMPhase":              RoleOperator,
 	"/apiary.rpc.v1.ManagerService/ReportVMTeardownComplete":   RoleOperator,
 	"/apiary.rpc.v1.ManagerService/ReportJailPhase":            RoleOperator,

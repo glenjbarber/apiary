@@ -45,6 +45,11 @@ type fakeRaftClient struct {
 	// applyErr, which simulates the transport itself failing.
 	applyRespErr        string
 	applyRespLeaderHint string
+
+	// colonyDiskSize is this node's own copy of ADR-0148's Colony-wide
+	// disk-size floor. nil means "no floor recorded".
+	colonyDiskSize *internalpb.ColonyDiskSize
+	diskSizeErr    error
 }
 
 func (f *fakeRaftClient) Status(context.Context) (*internalpb.StatusResponse, error) {
@@ -56,6 +61,16 @@ func (f *fakeRaftClient) Status(context.Context) (*internalpb.StatusResponse, er
 
 func (f *fakeRaftClient) ListVMsLocal(context.Context) (*internalpb.ListVMsResponse, error) {
 	return f.resp, f.err
+}
+
+// GetColonyDiskSizeLocal returns this node's own copy of ADR-0148's
+// Colony-wide floor. A nil response means "no floor recorded", which is
+// the state of every Colony that has never had one set.
+func (f *fakeRaftClient) GetColonyDiskSizeLocal(context.Context) (*internalpb.GetColonyDiskSizeResponse, error) {
+	if f.diskSizeErr != nil {
+		return nil, f.diskSizeErr
+	}
+	return &internalpb.GetColonyDiskSizeResponse{ColonyDiskSize: f.colonyDiskSize}, nil
 }
 
 func (f *fakeRaftClient) ListNetworksLocal(context.Context) (*internalpb.ListNetworksResponse, error) {
@@ -776,6 +791,20 @@ type fakeISOResolver struct {
 	// test's expectations.
 	rawDisk map[string]bool
 	isoErr  error
+
+	// virtualSizes maps an image name to its measured VIRTUAL size, in
+	// bytes (ADR-0153). A name that is not in the map reports an
+	// UNKNOWN size (zero), which is the state of an image stored
+	// before ADR-0153.
+	virtualSizes map[string]int64
+
+	// formats maps an image name to its decompressed payload's format
+	// ("raw" or "qcow2"). Empty means raw.
+	formats map[string]string
+
+	// defaultSizes maps an image name to its per-image default disk
+	// size, in MiB. A name that is not in the map has no default.
+	defaultSizes map[string]uint64
 }
 
 func (f *fakeISOResolver) Path(name string) (string, bool, error) {
@@ -791,6 +820,26 @@ func (f *fakeISOResolver) IsISO9660(name string) (bool, error) {
 		return false, f.isoErr
 	}
 	return !f.rawDisk[name], nil
+}
+
+// VirtualSize reports an image's measured virtual size and format
+// (ADR-0153). An image that is not in the fake's table reports an
+// UNKNOWN size, which is the honest representation of "we do not
+// know" and is never a zero-byte disk.
+func (f *fakeISOResolver) VirtualSize(name string) (int64, string, error) {
+	size := f.virtualSizes[name]
+	format := f.formats[name]
+	if format == "" {
+		format = "raw"
+	}
+	return size, format, nil
+}
+
+// DefaultSizeMB reports an image's per-image default disk size
+// (ADR-0153).
+func (f *fakeISOResolver) DefaultSizeMB(name string) (uint64, bool, error) {
+	size, ok := f.defaultSizes[name]
+	return size, ok, nil
 }
 
 // TestReconciler_RunOnce_FlatBridgeVMStillGetsMACAddress confirms a
@@ -1011,7 +1060,12 @@ func TestReconciler_RunOnce_BaseImageSeedsNewDiskFile(t *testing.T) {
 	}
 
 	vms := newFakeVMManager()
-	isos := &fakeISOResolver{paths: map[string]string{"ubuntu-cloud.raw": imagePath}}
+	// The image's VIRTUAL size must be known (ADR-0153): a disk can
+	// only be sized from a measured image, never from an inferred one.
+	isos := &fakeISOResolver{
+		paths:        map[string]string{"ubuntu-cloud.raw": imagePath},
+		virtualSizes: map[string]int64{"ubuntu-cloud.raw": int64(len(imageContents))},
+	}
 
 	r := &Reconciler{Raft: raft, ZFS: zfs, Bhyve: vms, ISOs: isos, LocalNodeID: "node-a", BootROM: "/fw/UEFI.fd"}
 	if err := r.RunOnce(context.Background()); err != nil {
@@ -1023,8 +1077,13 @@ func TestReconciler_RunOnce_BaseImageSeedsNewDiskFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReadFile(disk image) error: %v", err)
 	}
-	if string(got) != imageContents {
-		t.Errorf("disk image contents = %q, want %q (seeded from base image)", got, imageContents)
+	// The disk is seeded from the base image, so it BEGINS with the
+	// image's contents. It is then expanded to the disk size, so the
+	// file is LONGER than the image and the tail is the expansion's
+	// padding - which is why the contents are compared as a prefix,
+	// not for exact equality.
+	if !strings.HasPrefix(string(got), imageContents) {
+		t.Errorf("disk image contents = %q, want it to begin with %q (seeded from base image)", got, imageContents)
 	}
 
 	cfg := vms.lastCfg["vm-1"]
@@ -1244,7 +1303,7 @@ func TestReconciler_RunOnce_CloneFromSnapshotNeverReClonesExistingDataset(t *tes
 
 func TestReconciler_EnsureDiskImageCreatesUsableSizedDisk(t *testing.T) {
 	r := &Reconciler{DiskSizeMB: 8}
-	path, err := r.ensureDiskImage(context.Background(), t.TempDir(), "")
+	path, err := r.ensureDiskImage(context.Background(), t.TempDir(), "", 0, 0, "")
 	if err != nil {
 		t.Fatalf("ensureDiskImage() error: %v", err)
 	}
@@ -1277,7 +1336,7 @@ func TestReconciler_EnsureDiskImageCreatesUsableSizedDisk(t *testing.T) {
 // deliberate, not an accidental one-line slip.
 func TestReconciler_EnsureDiskImage_DefaultsToTwentyGiBWhenUnset(t *testing.T) {
 	r := &Reconciler{}
-	path, err := r.ensureDiskImage(context.Background(), t.TempDir(), "")
+	path, err := r.ensureDiskImage(context.Background(), t.TempDir(), "", 0, 0, "")
 	if err != nil {
 		t.Fatalf("ensureDiskImage() error: %v", err)
 	}
@@ -1305,7 +1364,12 @@ func TestReconciler_RunOnce_BaseImageNeverReseedsExistingDisk(t *testing.T) {
 	}
 
 	vms := newFakeVMManager()
-	isos := &fakeISOResolver{paths: map[string]string{"ubuntu-cloud.raw": "/images/ubuntu-cloud.raw"}}
+	// The image's VIRTUAL size must be known (ADR-0153), even though
+	// this disk already exists and is never re-seeded from the image.
+	isos := &fakeISOResolver{
+		paths:        map[string]string{"ubuntu-cloud.raw": "/images/ubuntu-cloud.raw"},
+		virtualSizes: map[string]int64{"ubuntu-cloud.raw": 4096},
+	}
 
 	r := &Reconciler{Raft: raft, ZFS: zfs, Bhyve: vms, ISOs: isos, LocalNodeID: "node-a", BootROM: "/fw/UEFI.fd"}
 	if err := r.RunOnce(context.Background()); err != nil {

@@ -65,6 +65,40 @@ type Info struct {
 	SHA256    string
 	Comment   string
 	ModTime   time.Time
+
+	// VirtualSizeBytes is the disk's VIRTUAL size: how large the disk
+	// the image contains is, as opposed to how many bytes the stored
+	// upload occupies (SizeBytes).
+	//
+	// For an uncompressed raw image the two are equal. For a COMPRESSED
+	// upload they are not: the stored file is the compressed stream,
+	// and the virtual size is the length of the decompressed payload. For
+	// a qcow2 image they are never equal, because the file is a
+	// container whose declared size lives inside it.
+	//
+	// A ZERO value means UNKNOWN, not "a zero-byte disk": it is what an
+	// image stored before this field existed carries, and such an image
+	// must be measured before it can be selected for VM creation. It is
+	// never treated as a zero-byte disk.
+	VirtualSizeBytes int64
+
+	// DefaultSizeMB is this image's PER-IMAGE default disk size, in
+	// MiB: what a VM created from this image gets unless the operator
+	// asks for more.
+	//
+	// It is per-image rather than per-node or Colony-wide because the
+	// useful default is tied to a specific image's footprint and
+	// intended use - see ADR-0153.
+	//
+	// A ZERO value means "no default recorded", which resolves to the
+	// Colony's own disk-size floor (ADR-0148) rather than to a
+	// zero-byte disk.
+	DefaultSizeMB uint64
+
+	// DiskFormat is the format of the image's decompressed payload:
+	// "raw" or "qcow2". It is empty for an image whose format was
+	// never recorded.
+	DiskFormat string
 }
 
 // Manager stores ISOs as files directly under Dir - no further
@@ -255,6 +289,22 @@ func (m *Manager) Save(name string, r io.Reader, expectedSHA256 string, comments
 		return nil, fmt.Errorf("isostore: sha256 mismatch: got %s, want %s", got, expectedSHA256)
 	}
 
+	// ADR-0153: measure the image's VIRTUAL size before publishing it.
+	//
+	// The measurement happens on the DECOMPRESSED payload, so a
+	// compressed upload's stored length is never mistaken for the
+	// disk's size. The stored file stays the original upload byte
+	// stream: this step only reads.
+	//
+	// A measurement failure REJECTS the upload: the image's size is
+	// unknown, and an image of unknown size cannot be sized for a VM.
+	// The staging files are removed on every failure path, so a
+	// rejected upload leaves nothing behind.
+	meta, err := m.measureStagedUpload(tmpPath, name)
+	if err != nil {
+		return nil, err
+	}
+
 	dest := m.path(name)
 	if err := os.Rename(tmpPath, dest); err != nil {
 		return nil, fmt.Errorf("isostore: finalizing upload: %w", err)
@@ -275,11 +325,23 @@ func (m *Manager) Save(name string, r io.Reader, expectedSHA256 string, comments
 		return nil, fmt.Errorf("isostore: recording comment: %w", err)
 	}
 
+	if err := m.writeMetadata(name, meta); err != nil {
+		return nil, fmt.Errorf("isostore: recording disk metadata: %w", err)
+	}
+
 	info, err := os.Stat(dest)
 	if err != nil {
 		return nil, fmt.Errorf("isostore: stat after save: %w", err)
 	}
-	return &Info{Name: name, SizeBytes: size, SHA256: got, Comment: comment, ModTime: info.ModTime()}, nil
+	return &Info{
+		Name:             name,
+		SizeBytes:        size,
+		SHA256:           got,
+		Comment:          comment,
+		ModTime:          info.ModTime(),
+		VirtualSizeBytes: meta.VirtualSizeBytes,
+		DiskFormat:       meta.DiskFormat,
+	}, nil
 }
 
 // ParseManifest parses a FreeBSD release MANIFEST file's contents -
@@ -479,7 +541,24 @@ func (m *Manager) List() ([]Info, error) {
 		}
 		sum, _ := os.ReadFile(m.hashSidecarPath(name))
 		comment, _ := os.ReadFile(m.commentSidecarPath(name))
-		infos = append(infos, Info{Name: name, SizeBytes: fi.Size(), SHA256: string(sum), Comment: string(comment), ModTime: fi.ModTime()})
+		// A metadata sidecar that cannot be read is not fatal here: the
+		// image itself is still listed, with an UNKNOWN virtual size,
+		// which is the honest representation of "we do not know". It is
+		// never reported as a zero-byte disk.
+		meta, metaErr := m.readMetadata(name)
+		if metaErr != nil {
+			meta = imageMetadata{}
+		}
+		infos = append(infos, Info{
+			Name:             name,
+			SizeBytes:        fi.Size(),
+			SHA256:           string(sum),
+			Comment:          string(comment),
+			ModTime:          fi.ModTime(),
+			VirtualSizeBytes: meta.VirtualSizeBytes,
+			DefaultSizeMB:    meta.DefaultSizeMB,
+			DiskFormat:       meta.DiskFormat,
+		})
 	}
 	sort.Slice(infos, func(i, j int) bool { return infos[i].Name < infos[j].Name })
 	return infos, nil

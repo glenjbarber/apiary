@@ -199,10 +199,10 @@ func New(ratio float64) (*Coordinator, error) {
 		return nil, fmt.Errorf("capacity: an overcommit ratio of %v would be a strict physical reservation, not thin provisioning; use 1 or greater", ratio)
 	}
 	return &Coordinator{
-		ledgers:     map[string]*Ledger{},
-		ratio:       ratio,
+		ledgers:      map[string]*Ledger{},
+		ratio:        ratio,
 		reserveBytes: MinFreeSpaceReserveBytes,
-		now:         time.Now,
+		now:          time.Now,
 	}, nil
 }
 
@@ -412,12 +412,12 @@ func (c *Coordinator) Snapshot(domain Domain) Snapshot {
 	}
 
 	return Snapshot{
-		Domain:       domain,
-		ActiveBytes:  activeBytes,
+		Domain:        domain,
+		ActiveBytes:   activeBytes,
 		InFlightBytes: inflightBytes,
-		LimitBytes:   int64(float64(domain.CapacityBytes) * c.ratio),
-		Ratio:        c.ratio,
-		ReserveBytes: c.reserveBytes,
-		ActiveKeys:   keys,
+		LimitBytes:    int64(float64(domain.CapacityBytes) * c.ratio),
+		Ratio:         c.ratio,
+		ReserveBytes:  c.reserveBytes,
+		ActiveKeys:    keys,
 	}
 }

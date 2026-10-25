@@ -166,6 +166,18 @@ service ManagerService {
   rpc DeleteISO(DeleteISORequest) returns (DeleteISOResponse);
   rpc UpdateISOComment(UpdateISOCommentRequest) returns (UpdateISOCommentResponse);
 
+  // SetISODefaultSizeMB sets an image's PER-IMAGE default disk size, in
+  // MiB (ADR-0153). It is the value the VM creation form pre-fills for
+  // this image, and it may not be smaller than the image's own virtual
+  // size.
+  //
+  // The value is per-image rather than per-node or Colony-wide because
+  // the useful default is tied to a specific image's footprint and
+  // intended use. ADR-0148's Colony-wide floor remains separate and
+  // authoritative: it is a MINIMUM, and this default can never lower
+  // it.
+  rpc SetISODefaultSizeMB(SetISODefaultSizeMBRequest) returns (SetISODefaultSizeMBResponse);
+
   // HostStats reports a point-in-time snapshot of *this* node's own
   // resource usage and hardware health - physical, per-node data like
   // ISOs above, gathered locally by managerd (see internal/hoststats),
@@ -1659,6 +1671,27 @@ message UploadISOResponse {
   // the upload was rejected - most commonly a hash mismatch.
   string error = 4;
   string comment = 5;
+
+  // virtual_size_bytes (ADR-0153) is the disk's VIRTUAL size: how
+  // large the disk the uploaded image contains is, as opposed to
+  // size_bytes, which is the stored upload's byte length. The two
+  // differ for a compressed upload, and never coincide for a qcow2
+  // image.
+  //
+  // A ZERO value means UNKNOWN, not "a zero-byte disk": it is what an
+  // image stored before this field existed carries, and such an image
+  // must be measured before it can be selected for VM creation.
+  uint64 virtual_size_bytes = 6;
+
+  // default_size_mb is this image's PER-IMAGE default disk size, in
+  // MiB - what a VM created from it gets unless the operator asks for
+  // more. Zero means "no default recorded", which resolves to the
+  // Colony's own disk-size floor (ADR-0148).
+  uint64 default_size_mb = 7;
+
+  // disk_format is the format of the decompressed payload: "raw" or
+  // "qcow2".
+  string disk_format = 8;
 }
 
 message ListISOsRequest {}
@@ -1668,6 +1701,12 @@ message ISOInfo {
   uint64 size_bytes = 2;
   string sha256 = 3;
   optional string comment = 4;
+
+  // virtual_size_bytes/default_size_mb/disk_format mirror
+  // UploadISOResponse's own fields of the same names - see ADR-0153.
+  uint64 virtual_size_bytes = 5;
+  uint64 default_size_mb = 6;
+  string disk_format = 7;
 }
 
 message ListISOsResponse {
@@ -1690,6 +1729,26 @@ message UpdateISOCommentRequest {
 
 message UpdateISOCommentResponse {
   string error = 1;
+}
+
+// SetISODefaultSizeMBRequest sets one image's per-image default disk
+// size, in MiB.
+message SetISODefaultSizeMBRequest {
+  string name = 1;
+
+  // default_size_mb is the default, in MiB. It may not be less than the
+  // image's virtual size, and it may not be zero: "no default recorded"
+  // is the ABSENCE of this value, not a zero.
+  uint64 default_size_mb = 2;
+}
+
+// SetISODefaultSizeMBResponse reports the outcome.
+message SetISODefaultSizeMBResponse {
+  string error = 1;
+
+  // default_size_mb is the value now recorded, echoed back for
+  // confirmation.
+  uint64 default_size_mb = 2;
 }
 
 message PushISOToRequest {

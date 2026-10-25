@@ -48,6 +48,25 @@ type fakeISOManager struct {
 
 	pathFor map[string]string
 	pathErr error
+
+	// defaultSizes records every SetDefaultSizeMB call, so a test can
+	// assert both the value and the image it was set on (ADR-0153).
+	defaultSizes []string
+	defaultErr   error
+}
+
+// SetDefaultSizeMB records the requested per-image default disk size.
+func (f *fakeISOManager) SetDefaultSizeMB(name string, sizeMB uint64) error {
+	if f.defaultErr != nil {
+		return f.defaultErr
+	}
+	f.defaultSizes = append(f.defaultSizes, fmt.Sprintf("%s %d", name, sizeMB))
+	for i := range f.listInfos {
+		if f.listInfos[i].Name == name {
+			f.listInfos[i].DefaultSizeMB = sizeMB
+		}
+	}
+	return nil
 }
 
 func (f *fakeISOManager) Save(name string, r io.Reader, expectedSHA256 string, comments ...string) (*isostore.Info, error) {

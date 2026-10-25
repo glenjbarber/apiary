@@ -894,6 +894,19 @@ func (p *PeerReporter) DeleteVM(ctx context.Context, addr string, req *rpcpb.Del
 	return client.DeleteVM(ctx, req)
 }
 
+// SetColonyDiskSize forwards ADR-0148's Colony-wide disk-size floor
+// raise to the leader node's own managerd, unchanged, and returns the
+// leader's actual response - the same shape as every other write RPC
+// here.
+func (p *PeerReporter) SetColonyDiskSize(ctx context.Context, addr string, req *rpcpb.SetColonyDiskSizeRequest) (*rpcpb.SetColonyDiskSizeResponse, error) {
+	conn, client, err := p.dial(addr)
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close()
+	return client.SetColonyDiskSize(ctx, req)
+}
+
 // RenameVMIdentity forwards ADR-0152's identity-rename request to the
 // leader node's own managerd, unchanged, and returns the leader's
 // actual response - the same shape as every other write RPC above, and

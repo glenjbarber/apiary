@@ -47,6 +47,7 @@ const (
 	ManagerService_ListISOs_FullMethodName                            = "/apiary.rpc.v1.ManagerService/ListISOs"
 	ManagerService_DeleteISO_FullMethodName                           = "/apiary.rpc.v1.ManagerService/DeleteISO"
 	ManagerService_UpdateISOComment_FullMethodName                    = "/apiary.rpc.v1.ManagerService/UpdateISOComment"
+	ManagerService_SetISODefaultSizeMB_FullMethodName                 = "/apiary.rpc.v1.ManagerService/SetISODefaultSizeMB"
 	ManagerService_HostStats_FullMethodName                           = "/apiary.rpc.v1.ManagerService/HostStats"
 	ManagerService_GetLocalHASTResourceStatus_FullMethodName          = "/apiary.rpc.v1.ManagerService/GetLocalHASTResourceStatus"
 	ManagerService_ClusterHealth_FullMethodName                       = "/apiary.rpc.v1.ManagerService/ClusterHealth"
@@ -285,6 +286,17 @@ type ManagerServiceClient interface {
 	ListISOs(ctx context.Context, in *ListISOsRequest, opts ...grpc.CallOption) (*ListISOsResponse, error)
 	DeleteISO(ctx context.Context, in *DeleteISORequest, opts ...grpc.CallOption) (*DeleteISOResponse, error)
 	UpdateISOComment(ctx context.Context, in *UpdateISOCommentRequest, opts ...grpc.CallOption) (*UpdateISOCommentResponse, error)
+	// SetISODefaultSizeMB sets an image's PER-IMAGE default disk size, in
+	// MiB (ADR-0153). It is the value the VM creation form pre-fills for
+	// this image, and it may not be smaller than the image's own virtual
+	// size.
+	//
+	// The value is per-image rather than per-node or Colony-wide because
+	// the useful default is tied to a specific image's footprint and
+	// intended use. ADR-0148's Colony-wide floor remains separate and
+	// authoritative: it is a MINIMUM, and this default can never lower
+	// it.
+	SetISODefaultSizeMB(ctx context.Context, in *SetISODefaultSizeMBRequest, opts ...grpc.CallOption) (*SetISODefaultSizeMBResponse, error)
 	// HostStats reports a point-in-time snapshot of *this* node's own
 	// resource usage and hardware health - physical, per-node data like
 	// ISOs above, gathered locally by managerd (see internal/hoststats),
@@ -1311,6 +1323,16 @@ func (c *managerServiceClient) UpdateISOComment(ctx context.Context, in *UpdateI
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(UpdateISOCommentResponse)
 	err := c.cc.Invoke(ctx, ManagerService_UpdateISOComment_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *managerServiceClient) SetISODefaultSizeMB(ctx context.Context, in *SetISODefaultSizeMBRequest, opts ...grpc.CallOption) (*SetISODefaultSizeMBResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(SetISODefaultSizeMBResponse)
+	err := c.cc.Invoke(ctx, ManagerService_SetISODefaultSizeMB_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -2354,6 +2376,17 @@ type ManagerServiceServer interface {
 	ListISOs(context.Context, *ListISOsRequest) (*ListISOsResponse, error)
 	DeleteISO(context.Context, *DeleteISORequest) (*DeleteISOResponse, error)
 	UpdateISOComment(context.Context, *UpdateISOCommentRequest) (*UpdateISOCommentResponse, error)
+	// SetISODefaultSizeMB sets an image's PER-IMAGE default disk size, in
+	// MiB (ADR-0153). It is the value the VM creation form pre-fills for
+	// this image, and it may not be smaller than the image's own virtual
+	// size.
+	//
+	// The value is per-image rather than per-node or Colony-wide because
+	// the useful default is tied to a specific image's footprint and
+	// intended use. ADR-0148's Colony-wide floor remains separate and
+	// authoritative: it is a MINIMUM, and this default can never lower
+	// it.
+	SetISODefaultSizeMB(context.Context, *SetISODefaultSizeMBRequest) (*SetISODefaultSizeMBResponse, error)
 	// HostStats reports a point-in-time snapshot of *this* node's own
 	// resource usage and hardware health - physical, per-node data like
 	// ISOs above, gathered locally by managerd (see internal/hoststats),
@@ -3187,6 +3220,9 @@ func (UnimplementedManagerServiceServer) DeleteISO(context.Context, *DeleteISORe
 func (UnimplementedManagerServiceServer) UpdateISOComment(context.Context, *UpdateISOCommentRequest) (*UpdateISOCommentResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method UpdateISOComment not implemented")
 }
+func (UnimplementedManagerServiceServer) SetISODefaultSizeMB(context.Context, *SetISODefaultSizeMBRequest) (*SetISODefaultSizeMBResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method SetISODefaultSizeMB not implemented")
+}
 func (UnimplementedManagerServiceServer) HostStats(context.Context, *HostStatsRequest) (*HostStatsResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method HostStats not implemented")
 }
@@ -3961,6 +3997,24 @@ func _ManagerService_UpdateISOComment_Handler(srv interface{}, ctx context.Conte
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(ManagerServiceServer).UpdateISOComment(ctx, req.(*UpdateISOCommentRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ManagerService_SetISODefaultSizeMB_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SetISODefaultSizeMBRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ManagerServiceServer).SetISODefaultSizeMB(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ManagerService_SetISODefaultSizeMB_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ManagerServiceServer).SetISODefaultSizeMB(ctx, req.(*SetISODefaultSizeMBRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -5630,6 +5684,10 @@ var ManagerService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "UpdateISOComment",
 			Handler:    _ManagerService_UpdateISOComment_Handler,
+		},
+		{
+			MethodName: "SetISODefaultSizeMB",
+			Handler:    _ManagerService_SetISODefaultSizeMB_Handler,
 		},
 		{
 			MethodName: "HostStats",

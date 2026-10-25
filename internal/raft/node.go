@@ -635,6 +635,18 @@ func (n *Node) ColonyJoinWindowLocal() (*internalpb.ColonyJoinWindow, bool) {
 	return w, ColonyJoinWindowLive(w, time.Now().Unix())
 }
 
+// ColonyDiskSizeLocal backs GetColonyDiskSizeLocal (ADR-0148) - the
+// same "any node can answer from its own FSM copy" posture as
+// ColonyJoinWindowLocal above.
+//
+// It is deliberately NOT leader-only: the floor is replicated state and
+// the reconciler reads it on EVERY Comb, so a follower that could not
+// answer for itself would size its disks differently from the leader's,
+// which is exactly the divergence ADR-0148 exists to prevent.
+func (n *Node) ColonyDiskSizeLocal() *internalpb.ColonyDiskSize {
+	return n.fsm.ColonyDiskSizeState()
+}
+
 // ListTrustedPeersLocal backs ListTrustedPeersLocal's RPC
 // (ADR-0147 Part 4) - the same "any node can answer from its own FSM
 // copy" posture as ColonyJoinWindowLocal above, and for the same

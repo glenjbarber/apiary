@@ -161,8 +161,11 @@
               <label>Base image <span class="field-help" id="base-image-why">A pre-built bootable disk (a cloud image, for instance), copied in as this VM's starting disk. Mutually exclusive with a clone source, and with a replica node: a HAST-replicated disk is the replicated device itself, and the base image is only ever copied onto a local one.</span>
                 <select name="base_image_name" id="base-image-picker" class="image-picker"{{if $jail}} disabled{{end}} title="Copied in as this VM's starting disk contents. Leave as None to start from an empty disk.">
                   <option value="">None</option>
-                  {{range .Guided.BaseImages}}<option value="{{.Value}}"{{if not .Available}} disabled{{end}}>{{.Label}}</option>{{end}}
+                  {{range .Guided.BaseImages}}<option value="{{.Value}}" data-default-size-mb="{{.DefaultSizeMB}}"{{if not .Available}} disabled{{end}}>{{.Label}}</option>{{end}}
                 </select>
+              </label>
+              <label>Disk size (MB) <span class="field-help" id="disk-size-why">The size this VM's disk is created at. Pre-filled from the selected base image's own default, and raised to the Colony-wide floor if that is larger. You may increase it; a disk is never shrunk, and the size can never be smaller than the image itself or than the Colony's floor.</span>
+                <input type="number" name="disk_size_mb" id="disk-size-mb" min="0" step="1" placeholder="Colony floor"{{if $jail}} disabled{{end}} title="The size, in megabytes, this VM's disk is created at. Leave blank to take the Colony-wide floor.">
               </label>
             </div>
             <div class="form-grid">
@@ -300,6 +303,7 @@
     var replicaNode = document.getElementById('replica-node');
     var isoPicker = document.getElementById('iso-picker');
     var baseImagePicker = document.getElementById('base-image-picker');
+    var diskSizeInput = document.getElementById('disk-size-mb');
     var sourceSelect = document.getElementById('clone-source-vm');
     var snapshotSelect = document.getElementById('clone-source-snapshot');
     var baseTemplate = document.getElementById('base-template');
@@ -733,6 +737,30 @@
       setText(storageCue, notes.join(' '));
     }
 
+    // ADR-0153: pre-fill the disk size from the SELECTED base image's
+    // own per-image default.
+    //
+    // It only ever FILLS an empty field, and only ever RAISES it: an
+    // operator who has already typed a larger size keeps it, and a
+    // size smaller than the image's default is corrected upward
+    // because the image cannot be used at a size smaller than itself.
+    //
+    // The server is still the authority - the FSM refuses a
+    // disk_size_mb below the Colony floor, and the reconciler refuses
+    // to shrink a disk - but the point of the pre-fill is that the
+    // operator should not have to know the image's size to get it.
+    function refreshDiskSize() {
+      if (!diskSizeInput || !baseImagePicker) return;
+      var option = baseImagePicker.options[baseImagePicker.selectedIndex];
+      if (!option) return;
+      var imageDefault = parseInt(option.getAttribute('data-default-size-mb') || '0', 10);
+      if (!imageDefault || imageDefault <= 0) return;
+      var current = parseInt(diskSizeInput.value || '0', 10);
+      if (!current || current < imageDefault) {
+        diskSizeInput.value = String(imageDefault);
+      }
+    }
+
     // The cascading snapshot dropdown, plus the cross-node fetch cue:
     // a source VM on another Comb does not block the choice - its
     // checkpoint is `zfs send`ed here by the Comb that holds it and
@@ -862,11 +890,14 @@
       refreshRootfs();
       refreshNetwork();
       refreshImageCue();
+      refreshDiskSize();
     }
 
     [ownerNode, replicaNode, sourceSelect, baseTemplate, baseArchive, networkPicker].forEach(function(el) {
       if (el) el.addEventListener('change', refreshAll);
     });
+    // The disk size follows the SELECTED base image (ADR-0153).
+    if (baseImagePicker) baseImagePicker.addEventListener('change', refreshDiskSize);
     if (vnetInput) vnetInput.addEventListener('change', refreshAll);
 
     // ---- Firewall rule rows (ported from the old create-VM page) ----

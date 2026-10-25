@@ -42,8 +42,8 @@ func (s *Server) SetColonyDiskSize(ctx context.Context, req *rpcpb.SetColonyDisk
 	cmd := &internalpb.Command{
 		Op: &internalpb.Command_SetColonyDiskSize{
 			SetColonyDiskSize: &internalpb.SetColonyDiskSize{
-				FloorMb:   req.GetFloorMb(),
-				SetBy:     s.nodeID,
+				FloorMb:  req.GetFloorMb(),
+				SetBy:    s.nodeID,
 				SetByKey: s.callerAPIKeyID(ctx),
 				NowUnix:  time.Now().Unix(),
 			},
