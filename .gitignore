@@ -29,6 +29,12 @@ profile.cov
 /apiaryctl
 /versioncheck
 
+# cmd/apiary-mcp is not in the Makefile's SRCS - it is a separate
+# connector, built on demand rather than by `make build` - but a
+# `go build ./...` in the repo root drops its binary here, exactly as
+# it does for the ones above.
+/apiary-mcp
+
 # Dependency directories (remove the comment below to include it)
 # vendor/
 
