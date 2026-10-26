@@ -37,8 +37,13 @@ type FSMApplyResult struct {
 	ColonyUpdate       *internalpb.ColonyUpdate
 	ColonyJoinWindow   *internalpb.ColonyJoinWindow
 	TrustedPeer        *internalpb.TrustedPeer
-	ColonyDiskSize     *internalpb.ColonyDiskSize
-	ColonyIdentity     *internalpb.ColonyIdentity
+	// CertificateReservation is ADR-0171's reservation result. It is
+	// carried alongside TrustedPeer because the two stores are
+	// separate: a reservation is a pending intent and a pin is a
+	// trust anchor, and neither is a substitute for the other.
+	CertificateReservation *internalpb.CertificateReservation
+	ColonyDiskSize         *internalpb.ColonyDiskSize
+	ColonyIdentity         *internalpb.ColonyIdentity
 
 	// RenameResult is set only by applyRenameVMIdentity. It carries
 	// BOTH the resulting authoritative VM record and the outcome that
@@ -130,6 +135,23 @@ type FSM struct {
 	// membership.
 	trustedPeers map[string]*internalpb.TrustedPeer
 
+	// certificateReservations is ADR-0171's prepared-certificate
+	// reservations, keyed by reservation_id.
+	//
+	// Replicated for the same reason trustedPeers above is: the
+	// BINDING of a reservation to a joining Comb must survive a
+	// leadership change. A reservation bound in one managerd's memory
+	// would be lost if that managerd stepped aside, and the joining
+	// Comb would be left holding a reservation it could never
+	// collect - a join that cannot complete, with the operator given
+	// nothing to act on.
+	//
+	// It holds METADATA only. The prepared certificate and its
+	// private key stay in the preparing Comb's protected store and
+	// are sealed to the joining Comb at delivery time; nothing here
+	// is key material.
+	certificateReservations map[string]*internalpb.CertificateReservation
+
 	// authEnabled is set permanently, forever, the first time any
 	// CreateAPIKey command ever succeeds - it never reverts to false
 	// even if every key is later revoked. See AuthEnabled's own doc
@@ -151,15 +173,16 @@ var _ raft.FSM = (*FSM)(nil)
 // NewFSM returns an empty FSM.
 func NewFSM() *FSM {
 	f := &FSM{
-		vms:                 make(map[string]*internalpb.VMDefinition),
-		networks:            make(map[string]*internalpb.NetworkDefinition),
-		apiKeys:             make(map[string]*internalpb.ApiKey),
-		jails:               make(map[string]*internalpb.JailDefinition),
-		pendingJoinRequests: make(map[string]*internalpb.PendingJoinRequest),
-		restartLeases:       make(map[string]*internalpb.RestartLease),
-		restartRecords:      make(map[string]*internalpb.RestartRecord),
-		colonyUpdates:       make(map[string]*internalpb.ColonyUpdate),
-		trustedPeers:        make(map[string]*internalpb.TrustedPeer),
+		vms:                     make(map[string]*internalpb.VMDefinition),
+		networks:                make(map[string]*internalpb.NetworkDefinition),
+		apiKeys:                 make(map[string]*internalpb.ApiKey),
+		jails:                   make(map[string]*internalpb.JailDefinition),
+		pendingJoinRequests:     make(map[string]*internalpb.PendingJoinRequest),
+		restartLeases:           make(map[string]*internalpb.RestartLease),
+		restartRecords:          make(map[string]*internalpb.RestartRecord),
+		colonyUpdates:           make(map[string]*internalpb.ColonyUpdate),
+		trustedPeers:            make(map[string]*internalpb.TrustedPeer),
+		certificateReservations: make(map[string]*internalpb.CertificateReservation),
 	}
 	// Seed the digest of the empty state. No lock is taken because the
 	// FSM has not been handed to anyone yet; recomputeStateDigestLocked
@@ -285,6 +308,14 @@ func (f *FSM) Apply(log *raft.Log) interface{} {
 		return f.applyActivateTrustedPeerTransition(log.Index, op.ActivateTrustedPeerTransition)
 	case *internalpb.Command_AbandonTrustedPeerTransition:
 		return f.applyAbandonTrustedPeerTransition(log.Index, op.AbandonTrustedPeerTransition)
+	case *internalpb.Command_CreateCertificateReservation:
+		return f.applyCreateCertificateReservation(log.Index, op.CreateCertificateReservation)
+	case *internalpb.Command_BindCertificateReservation:
+		return f.applyBindCertificateReservation(log.Index, op.BindCertificateReservation)
+	case *internalpb.Command_DeliverCertificateReservation:
+		return f.applyDeliverCertificateReservation(log.Index, op.DeliverCertificateReservation)
+	case *internalpb.Command_DropCertificateReservation:
+		return f.applyDropCertificateReservation(log.Index, op.DropCertificateReservation)
 	case *internalpb.Command_SetColonyDiskSize:
 		// ADR-0148. The monotonicity check is inside the apply
 		// function, not in any handler, so every replica decides
@@ -1142,7 +1173,7 @@ func AuthorizationsDistinct(a, b *internalpb.JoinApprovalAttestation) bool {
 // failure the replicated record exists to prevent.
 func (f *FSM) applyApprovePendingJoinRequest(index uint64, cmd *internalpb.ApprovePendingJoinRequest) *FSMApplyResult {
 	return f.applyResolvePendingJoinRequest(index, cmd.GetRequestId(), internalpb.JoinRequestStatus_JOIN_REQUEST_STATUS_APPROVED, "ApprovePendingJoinRequest",
-		func(updated *internalpb.PendingJoinRequest) {
+		func(updated *internalpb.PendingJoinRequest) string {
 			updated.AuthorizationId = cmd.GetAuthorizationId()
 			updated.ConsumedAtUnix = cmd.GetConsumedAtUnix()
 			// ADR-0147 Part 2: APPROVED is the only transition that
@@ -1152,6 +1183,28 @@ func (f *FSM) applyApprovePendingJoinRequest(index uint64, cmd *internalpb.Appro
 			// AddVoter, so "authorized" here means the membership change
 			// happened, not merely that a value was typed correctly.
 			updated.Stage = internalpb.JoinRequestStage_JOIN_REQUEST_STAGE_AUTHORIZED
+			// ADR-0171: the prepared certificate's reservation is
+			// bound to this request and this Comb by the very command
+			// that approves the join.
+			//
+			// It rides here rather than being a separate command for
+			// the same reason the pin promotion below rides here: the
+			// approval is the moment the Colony decides which Comb is
+			// joining, and a reservation bound by an earlier command
+			// could have been bound to a request that was later
+			// rejected. One log entry means "approved" and "the
+			// preparation belongs to this Comb" are one replicated
+			// fact.
+			if id := cmd.GetPreparedCertificateReservationId(); id != "" {
+				if reason := f.bindCertificateReservationForApproval(id, updated.GetNodeId(), updated.GetRequestId(), cmd.GetPreparedCertificateBoundAtUnix()); reason != "" {
+					// The approval is REFUSED rather than accepted
+					// without the binding, because a reservation
+					// that stays unbound is a preparation nobody
+					// can collect and nobody can clear.
+					return reason
+				}
+			}
+			return ""
 		})
 }
 
@@ -1173,7 +1226,7 @@ func (f *FSM) applyCancelPendingJoinRequest(index uint64, requestID string) *FSM
 // stamp is how the approve path adds ADR-0147 Part 3's record of use to
 // the same atomic state change that flips the status; nil for the three
 // resolutions that carry nothing extra.
-func (f *FSM) applyResolvePendingJoinRequest(index uint64, requestID string, status internalpb.JoinRequestStatus, opName string, stamp func(*internalpb.PendingJoinRequest)) *FSMApplyResult {
+func (f *FSM) applyResolvePendingJoinRequest(index uint64, requestID string, status internalpb.JoinRequestStatus, opName string, stamp func(*internalpb.PendingJoinRequest) string) *FSMApplyResult {
 	req, exists := f.pendingJoinRequests[requestID]
 	if !exists {
 		return &FSMApplyResult{Index: index, Error: fmt.Sprintf("%s: request_id %q does not exist", opName, requestID)}
@@ -1190,7 +1243,15 @@ func (f *FSM) applyResolvePendingJoinRequest(index uint64, requestID string, sta
 	updated := proto.Clone(req).(*internalpb.PendingJoinRequest)
 	updated.Status = status
 	if stamp != nil {
-		stamp(updated)
+		// A refusal from the stamp REFUSES the whole command, and
+		// the request is left exactly as it was. The stamp is where
+		// ADR-0171's prepared-certificate binding happens, and a
+		// binding that could not be made must not leave an approval
+		// behind that claims a preparation belongs to this Comb when
+		// it does not.
+		if reason := stamp(updated); reason != "" {
+			return &FSMApplyResult{Index: index, Error: fmt.Sprintf("%s: %s", opName, reason)}
+		}
 	}
 	f.pendingJoinRequests[requestID] = updated
 	// ADR-0147 Part 4's pin lifecycle, inside the same log entry that
@@ -2300,18 +2361,19 @@ func (f *FSM) SnapshotState() *internalpb.FSMSnapshotState {
 // Persist, and both happen under this lock.
 func (f *FSM) snapshotStateLocked() *internalpb.FSMSnapshotState {
 	state := &internalpb.FSMSnapshotState{
-		LastIndex:           f.lastIndex,
-		Vms:                 make(map[string]*internalpb.VMDefinition, len(f.vms)),
-		Networks:            make(map[string]*internalpb.NetworkDefinition, len(f.networks)),
-		ApiKeys:             make(map[string]*internalpb.ApiKey, len(f.apiKeys)),
-		Jails:               make(map[string]*internalpb.JailDefinition, len(f.jails)),
-		PendingJoinRequests: make(map[string]*internalpb.PendingJoinRequest, len(f.pendingJoinRequests)),
-		RestartLeases:       make(map[string]*internalpb.RestartLease, len(f.restartLeases)),
-		RestartRecords:      make(map[string]*internalpb.RestartRecord, len(f.restartRecords)),
-		ColonyUpdates:       make(map[string]*internalpb.ColonyUpdate, len(f.colonyUpdates)),
-		ColonyJoinWindow:    cloneColonyJoinWindow(f.colonyJoinWindow),
-		AuthEnabled:         f.authEnabled,
-		TrustedPeers:        make(map[string]*internalpb.TrustedPeer, len(f.trustedPeers)),
+		LastIndex:               f.lastIndex,
+		Vms:                     make(map[string]*internalpb.VMDefinition, len(f.vms)),
+		Networks:                make(map[string]*internalpb.NetworkDefinition, len(f.networks)),
+		ApiKeys:                 make(map[string]*internalpb.ApiKey, len(f.apiKeys)),
+		Jails:                   make(map[string]*internalpb.JailDefinition, len(f.jails)),
+		PendingJoinRequests:     make(map[string]*internalpb.PendingJoinRequest, len(f.pendingJoinRequests)),
+		RestartLeases:           make(map[string]*internalpb.RestartLease, len(f.restartLeases)),
+		RestartRecords:          make(map[string]*internalpb.RestartRecord, len(f.restartRecords)),
+		ColonyUpdates:           make(map[string]*internalpb.ColonyUpdate, len(f.colonyUpdates)),
+		ColonyJoinWindow:        cloneColonyJoinWindow(f.colonyJoinWindow),
+		AuthEnabled:             f.authEnabled,
+		TrustedPeers:            make(map[string]*internalpb.TrustedPeer, len(f.trustedPeers)),
+		CertificateReservations: make(map[string]*internalpb.CertificateReservation, len(f.certificateReservations)),
 		// ADR-0148: the floor rides inside FSMSnapshotState so it is
 		// inside the ADR-0143 digest with no second list to forget, and
 		// so a restore cannot silently drop it and re-open this Colony
@@ -2350,6 +2412,9 @@ func (f *FSM) snapshotStateLocked() *internalpb.FSMSnapshotState {
 	}
 	for id, peer := range f.trustedPeers {
 		state.TrustedPeers[id] = peer
+	}
+	for id, res := range f.certificateReservations {
+		state.CertificateReservations[id] = res
 	}
 	return state
 }
@@ -2415,6 +2480,14 @@ func (f *FSM) Restore(rc io.ReadCloser) error {
 	f.trustedPeers = state.GetTrustedPeers()
 	if f.trustedPeers == nil {
 		f.trustedPeers = make(map[string]*internalpb.TrustedPeer)
+	}
+	// A nil here means the snapshot being restored predates ADR-0171's
+	// reservations, which is the only honest reading: absence is the
+	// sole representation of "no reservations", so this does not
+	// invent any.
+	f.certificateReservations = state.GetCertificateReservations()
+	if f.certificateReservations == nil {
+		f.certificateReservations = make(map[string]*internalpb.CertificateReservation)
 	}
 	f.authEnabled = state.GetAuthEnabled()
 	// Recompute under the same lock: a Status call arriving after this

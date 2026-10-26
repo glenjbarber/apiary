@@ -662,6 +662,16 @@ func (n *Node) ListTrustedPeersLocal() []*internalpb.TrustedPeer {
 	return n.fsm.ListTrustedPeers()
 }
 
+// ListCertificateReservationsLocal returns ADR-0171's prepared-
+// certificate reservations from this node's own replicated copy.
+//
+// A local read, for the same reason ListTrustedPeersLocal is one: the
+// reservations are raft-replicated, so a follower answers from the same
+// committed state the leader would.
+func (n *Node) ListCertificateReservationsLocal() []*internalpb.CertificateReservation {
+	return n.fsm.ListCertificateReservations()
+}
+
 // TrustedPeerLocal reports whether a pin exists for nodeID. Used by
 // the RemoveServer hook below to ask whether there is anything to drop
 // before it drops it. Read-then-unpin rather than

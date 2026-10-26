@@ -192,6 +192,17 @@ func (c *RaftClient) ListTrustedPeersLocal(ctx context.Context) (*internalpb.Lis
 	return c.client.ListTrustedPeersLocal(ctx, &internalpb.ListTrustedPeersRequest{})
 }
 
+// ListCertificateReservationsLocal is the read side of ADR-0171's
+// prepared-certificate reservations, reached over this node's own
+// raftd socket.
+//
+// Local, for the same reason ListTrustedPeersLocal is: the
+// reservations are raft-replicated, so a follower answers from the same
+// committed state the leader would.
+func (c *RaftClient) ListCertificateReservationsLocal(ctx context.Context) (*internalpb.ListCertificateReservationsResponse, error) {
+	return c.client.ListCertificateReservationsLocal(ctx, &internalpb.ListCertificateReservationsRequest{})
+}
+
 // GetColonyUpdateStateLocal is the read side of ADR-0145's durable
 // controlled-update state, reached over this node's own raftd socket.
 //

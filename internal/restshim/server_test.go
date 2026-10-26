@@ -751,6 +751,21 @@ func (f *fakeClient) AbandonPeerCertificateTransition(context.Context, *rpcpb.Ab
 	return &rpcpb.AbandonPeerCertificateTransitionResponse{}, nil
 }
 
+// The three ADR-0171 reservation calls. The frontend and the REST shim
+// do not expose them - they are managerd acts with no route - so the
+// fake answers with an empty response.
+func (f *fakeClient) PrepareCertificateReservation(context.Context, *rpcpb.PrepareCertificateReservationRequest, ...grpc.CallOption) (*rpcpb.PrepareCertificateReservationResponse, error) {
+	return &rpcpb.PrepareCertificateReservationResponse{}, nil
+}
+
+func (f *fakeClient) ListCertificateReservations(context.Context, *rpcpb.ListCertificateReservationsRequest, ...grpc.CallOption) (*rpcpb.ListCertificateReservationsResponse, error) {
+	return &rpcpb.ListCertificateReservationsResponse{}, nil
+}
+
+func (f *fakeClient) DropCertificateReservation(context.Context, *rpcpb.DropCertificateReservationRequest, ...grpc.CallOption) (*rpcpb.DropCertificateReservationResponse, error) {
+	return &rpcpb.DropCertificateReservationResponse{}, nil
+}
+
 // RequestManagerdRestart and IssueManagerdRestart are ADR-0146's
 // managerd self-restart handoff. Nothing in this package's request path
 // calls either - there is deliberately no UI control and no REST route

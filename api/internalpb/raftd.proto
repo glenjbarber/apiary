@@ -163,6 +163,19 @@ service RaftInternal {
   // hosts.
   rpc ListTrustedPeersLocal(ListTrustedPeersRequest) returns (ListTrustedPeersResponse);
 
+  // ListCertificateReservationsLocal is the read side of ADR-0171's
+  // prepared-certificate reservations.
+  //
+  // Deliberately NOT leader-only, for the same
+  // ListTrustedPeersLocal reason: the reservations are already
+  // raft-replicated, so any node can answer for itself. A follower
+  // answering from its own copy is the same copy the leader would
+  // have answered from, because both are the committed state.
+  //
+  // Sorted by reservation ID, so two Combs listing the same
+  // reservations list them in the same order.
+  rpc ListCertificateReservationsLocal(ListCertificateReservationsRequest) returns (ListCertificateReservationsResponse);
+
   // GetAuthorizationUse reports which request, if any, has already
   // SPENT a given root-owned authorization entry (ADR-0147 Part 3).
   //
@@ -610,6 +623,20 @@ message GetColonyDiskSizeResponse {
 // ever pinned, which is a small number bounded by the size of the
 // Colony itself.
 message ListTrustedPeersRequest {}
+
+// ListCertificateReservationsRequest asks for ADR-0171's prepared-
+// certificate reservations.
+message ListCertificateReservationsRequest {}
+
+// ListCertificateReservationsResponse carries the reservations.
+//
+// The reservations repeat the FSM's own message rather than
+// flattening it, for the same reason ListTrustedPeersResponse does: the
+// raft-side schema and the one api/internalpb/state.proto owns cannot
+// drift apart.
+message ListCertificateReservationsResponse {
+  repeated CertificateReservation reservations = 1;
+}
 
 message ListTrustedPeersResponse {
   // peers repeats the FSM's own message rather than flattening it, so

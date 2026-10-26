@@ -18,6 +18,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"strings"
 	"time"
 
 	"google.golang.org/protobuf/proto"
@@ -695,6 +696,31 @@ func (s *Server) GetJoinRequestStatus(ctx context.Context, req *rpcpb.GetJoinReq
 			return out, nil
 		}
 		out.SealedCredentials = envelope
+
+		// ADR-0171: the prepared certificate rides this same poll,
+		// because this is where the joining Comb's certificate is
+		// already presented and where the Colony already releases a
+		// sealed bundle. A separate channel would have meant a second
+		// place for the joiner's identity to be checked.
+		//
+		// A joiner that presented no reservation gets nothing here,
+		// and that is NOT an error: most joins have no preparation.
+		prepared, reservationID, _, prepErr := s.sealPreparedCertificateForJoiner(ctx, req, pending)
+		if prepErr != nil {
+			out.Error = prepErr.Error()
+			return out, nil
+		}
+		if len(prepared) > 0 {
+			out.SealedPreparedCertificate = prepared
+			out.PreparedCertificateReservationId = reservationID
+			// The reservation is marked delivered AFTER the envelope
+			// exists, so a failed mark never destroys what the joiner
+			// needs. A second collection is refused by the FSM.
+			if err := s.markPreparedCertificateDelivered(ctx, reservationID); err != nil {
+				out.Error = err.Error()
+				return out, nil
+			}
+		}
 		return out, nil
 	}
 	// ADR-0147 Part 2: the SECOND PIN is released here and only here,
@@ -1115,6 +1141,11 @@ func (s *Server) ApproveJoinRequest(ctx context.Context, req *rpcpb.ApproveJoinR
 				RequestId:       req.GetRequestId(),
 				AuthorizationId: authorization.id,
 				ConsumedAtUnix:  authorization.consumedAt,
+				// ADR-0171: the prepared certificate's reservation is
+				// bound by the approval itself, in the same log entry
+				// that settles the request.
+				PreparedCertificateReservationId: strings.TrimSpace(req.GetPreparedCertificateReservationId()),
+				PreparedCertificateBoundAtUnix:   time.Now().UTC().Unix(),
 			},
 		},
 	}
